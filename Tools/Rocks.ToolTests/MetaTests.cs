@@ -48,6 +48,11 @@ internal static class MetaTests
             Verify.That(Regex.IsMatch(File.ReadAllText(probe.Output), @"schema\s*\{\s*Id\(\)\s*,\s*3\s*,",
                 RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)), "Clang evaluated schema version was not emitted");
         });
+        suite.Add("Meta.GeneratedHeaderDirectoryControlsIncludeBinding", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            await probe.OutputDirectoryBindingAsync();
+        });
         suite.Add("Meta.SymlinkedParentsAndShadowedHeaders", async () =>
         {
             using Probe probe = new(options, actualEnvironment, generator, compiler);
@@ -91,7 +96,7 @@ internal static class MetaTests
         suite.Add("Meta.DiagnosticsAndResponseOverridesRejected", async () =>
         {
             using Probe probe = new(options, actualEnvironment, generator, compiler);
-            foreach (string argument in new[] { "-Wno-error", "/clang:-Wno-error", "-w", "/W0", "@hidden.rsp" })
+            foreach (string argument in new[] { "-Wno-error", "/clang:-Wno-error", "-w", "/W0", "@hidden.rsp", "-I", "-Ihidden", "/Ihidden", "-iquote", "-iquotehidden", "-isystem", "-isystemhidden", "-idirafter", "-idirafterhidden", "-include", "-includehidden", "-imacros", "-imacroshidden", "-F", "-Fhidden", "-iframeworkhidden", "/FIhidden", "/external:Ihidden", "-Wp,-Ihidden", "-ivfsoverlay=hidden", "--config=hidden", "/clang:-Ihidden" })
             {
                 await probe.GenerateAsync(Declaration(), extra: ["--clang-arg=" + argument], expectedCode: "RMC1000", reason: "override");
                 Verify.That(!File.Exists(probe.Output), "rejected CLI wrote output");
@@ -173,6 +178,48 @@ internal static class MetaTests
             }
         }
 
+        public async Task OutputDirectoryBindingAsync()
+        {
+            string sourceDirectory = temporary.FilePath("Source");
+            string generatedDirectory = temporary.FilePath("Generated");
+            Directory.CreateDirectory(sourceDirectory);
+            Directory.CreateDirectory(generatedDirectory);
+            string author = Path.Combine(sourceDirectory, "Probe.h");
+            string shadow = Path.Combine(generatedDirectory, "Probe.h");
+            string output = Path.Combine(generatedDirectory, "Probe.generated.h");
+            File.WriteAllText(author, Declaration());
+            File.WriteAllText(shadow, Declaration(version: "9"));
+            File.WriteAllText(output, "previous accepted output\n");
+            async Task<ProcessResult> Run()
+            {
+                List<string> arguments = [];
+                string executable = generator;
+                if (generator.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+                { executable = options.Optional("dotnet") ?? "dotnet"; arguments.Add(generator); }
+                arguments.AddRange(["--input", author, "--include", "Probe.h", "--output", output, "--compiler", compiler]);
+                foreach (string include in new[] { sourceDirectory }.Concat(Directory.GetDirectories(Path.Combine(options.Root, "Engine"))
+                    .Select(module => Path.Combine(module, "Public")).Where(Directory.Exists)))
+                    arguments.AddRange(["--include-dir", include]);
+                foreach (string argument in options.ClangArguments) arguments.Add("--clang-arg=" + argument);
+                return await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: TimeSpan.FromSeconds(60)));
+            }
+            var rejected = await Run();
+            Verify.That(rejected.ExitCode != 0, "output-directory shadow header accepted");
+            Verify.Contains("RMC1000", rejected.StdErr, "output shadow error code");
+            Verify.Contains(shadow, rejected.StdErr, "actual output-directory shadow path");
+            Verify.Equal("previous accepted output\n", File.ReadAllText(output), "shadow failure changed accepted output");
+            File.Delete(shadow);
+            var accepted = await Run();
+            Verify.Equal(0, accepted.ExitCode, "original header not selected after shadow removal: " + accepted.StdErr);
+            Verify.That(!Directory.EnumerateFiles(generatedDirectory, ".rocks-meta-validation-*").Any(), "successful validation temporary file leaked");
+            string validOutput = File.ReadAllText(output);
+            File.WriteAllText(author, Preamble + $"struct ROCKS_CLASS(\"{TypeId}\", 1) Value : public rocks::Object {{ Value() {{}} }};\n}}\n");
+            var invalid = await Run();
+            Verify.That(invalid.ExitCode != 0, "invalid generated contract accepted");
+            Verify.Contains("RMC3000", invalid.StdErr, "generated contract rejection code");
+            Verify.Equal(validOutput, File.ReadAllText(output), "failed validation published output");
+            Verify.That(!Directory.EnumerateFiles(generatedDirectory, ".rocks-meta-validation-*").Any(), "failed validation temporary file leaked");
+        }
         public async Task SymlinkLocationsAsync()
         {
             string real = temporary.FilePath("real");

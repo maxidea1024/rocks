@@ -29,13 +29,14 @@ internal static class CompilerDriver
             includes = engineModules.Select(path => Path.Combine(path, "Public")).Where(Directory.Exists)
                 .Order(StringComparer.Ordinal).Append(root).Append(Path.GetDirectoryName(input)!).ToList();
         }
-        ValidateIncludeBinding(input, options.Include, root, includes);
+        ValidateCompilerArguments(options.ClangArguments);
+        string outputDirectory = Path.GetDirectoryName(Path.GetFullPath(options.Output))!;
+        ValidateIncludeBinding(input, options.Include, outputDirectory, includes);
         foreach (string path in includes)
         {
             if (clangCl) arguments.Add("/I" + path);
             else { arguments.Add("-I"); arguments.Add(path); }
         }
-        ValidateCompilerArguments(options.ClangArguments);
         arguments.AddRange(options.ClangArguments);
         arguments.Add("-");
         ProcessResult compiled = await ProcessRunner.RunAsync(new(compiler, arguments, root, environment,
@@ -56,8 +57,22 @@ internal static class CompilerDriver
         List<string> validationArguments = [.. arguments];
         validationArguments.Remove(clangCl ? "/clang:-Xclang" : "-Xclang");
         validationArguments.Remove(clangCl ? "/clang:-ast-dump=json" : "-ast-dump=json");
-        ProcessResult validated = await ProcessRunner.RunAsync(new(compiler, validationArguments, root, environment,
-            generated.Replace("#pragma once\n", "", StringComparison.Ordinal), TimeSpan.FromMinutes(2)));
+        // 생성 헤더의 quoted include는 헤더가 놓일 디렉터리부터 검색된다. 같은 위치의 임시
+        // translation unit으로 검증하여 stdin/cwd와 실제 소비자의 검색 순서가 달라지지 않게 한다.
+        Directory.CreateDirectory(outputDirectory);
+        string temporarySource = Path.Combine(outputDirectory, ".rocks-meta-validation-" + Guid.NewGuid().ToString("N") + ".cpp");
+        ProcessResult validated;
+        try
+        {
+            File.WriteAllText(temporarySource, generated.Replace("#pragma once\n", "", StringComparison.Ordinal), new UTF8Encoding(false, true));
+            validationArguments[^1] = temporarySource;
+            validated = await ProcessRunner.RunAsync(new(compiler, validationArguments, root, environment,
+                Timeout: TimeSpan.FromMinutes(2)));
+        }
+        finally
+        {
+            if (File.Exists(temporarySource)) File.Delete(temporarySource);
+        }
         if (validated.ExitCode != 0 || validated.StdErr.Contains("warning:", StringComparison.OrdinalIgnoreCase))
             throw new MetadataException("generated metadata contract rejected by Clang:\n" + validated.StdErr + SourceNotes(schema, validated.StdErr), "RMC3000",
                 "Fix constructor/destructor noexcept, CLASS/PROPERTY access and GENERATED_BODY friendship; every generated typed operation must compile before output is accepted.");
@@ -91,14 +106,31 @@ internal static class CompilerDriver
                 native.StartsWith("/external:W", StringComparison.OrdinalIgnoreCase) ||
                 native.Contains("_CRT_SECURE_NO_WARNINGS", StringComparison.Ordinal) ||
                 native.Contains("_SCL_SECURE_NO_WARNINGS", StringComparison.Ordinal);
-            if (reduced) throw new MetadataException("unsupported compiler diagnostics/response-file override: " + argument,
-                "RMC1000", "Remove warning suppression, reduced warning levels and response files; provide explicit target defines/includes.");
+            // 검색 순서와 forced include는 --include-dir에서만 선언한다. 임의 compiler 인자로
+            // 별도 검색 경로를 추가하면 원본 검증과 실제 generated header가 다른 파일을 볼 수 있다.
+            bool searchOverride = native.StartsWith("-I", StringComparison.Ordinal) ||
+                native.StartsWith("/I", StringComparison.OrdinalIgnoreCase) ||
+                native.StartsWith("/FI", StringComparison.OrdinalIgnoreCase) ||
+                native.StartsWith("/external:I", StringComparison.OrdinalIgnoreCase) ||
+                native.StartsWith("-iquote", StringComparison.Ordinal) ||
+                native.StartsWith("-isystem", StringComparison.Ordinal) ||
+                native.StartsWith("-idirafter", StringComparison.Ordinal) ||
+                native.StartsWith("-include", StringComparison.Ordinal) ||
+                native.StartsWith("-imacros", StringComparison.Ordinal) ||
+                native.StartsWith("-F", StringComparison.Ordinal) ||
+                native.StartsWith("-iframework", StringComparison.Ordinal) ||
+                native.StartsWith("-ivfsoverlay", StringComparison.Ordinal) ||
+                native.StartsWith("-fmodule-map-file", StringComparison.Ordinal) ||
+                native.StartsWith("-Wp,", StringComparison.Ordinal) ||
+                native.StartsWith("--config", StringComparison.Ordinal);
+            if (reduced || searchOverride) throw new MetadataException("unsupported compiler diagnostics/include/response-file override: " + argument,
+                "RMC1000", "Remove warning suppression, forced includes and hidden search paths; supply explicit --include-dir entries in target order.");
         }
     }
 
-    private static void ValidateIncludeBinding(string input, string include, string workingDirectory, IEnumerable<string> directories)
+    private static void ValidateIncludeBinding(string input, string include, string outputDirectory, IEnumerable<string> directories)
     {
-        string? target = directories.Prepend(workingDirectory).Select(directory => Path.GetFullPath(Path.Combine(directory, include)))
+        string? target = directories.Prepend(outputDirectory).Select(directory => Path.GetFullPath(Path.Combine(directory, include)))
             .FirstOrDefault(File.Exists);
         string canonicalInput = CanonicalPath.Resolve(input);
         string? canonicalTarget = target is null ? null : CanonicalPath.Resolve(target);

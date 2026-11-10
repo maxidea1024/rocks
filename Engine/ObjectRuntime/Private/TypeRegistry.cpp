@@ -40,6 +40,46 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
     if (actual->valueKind != valueKind_ || value.kind != valueKind_) {
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
+    if (valueKind_ == ValueKind::ObjectReference) {
+        // 등록 시점에 자기 참조나 별칭이 아직 미등록일 수 있으므로 호출 시 각 레지스트리에서
+        // 참조 타입을 확인한다. 서로 다른 GUID라도 같은 native 타입인 별칭은 허용한다.
+        TypeLease sourceExpected;
+        TypeLease targetExpected;
+        if (referencedType_ != TypeId{}) {
+            auto expected = registry_->Acquire(referencedType_);
+            if (!expected) {
+                return Result<void>::Failure(expected.Error());
+            }
+            sourceExpected = Move(expected.Value());
+        }
+        if (actual->referencedType != TypeId{}) {
+            auto expected = registry.AcquireRegisteredType(access, actual->referencedType);
+            if (!expected) {
+                return Result<void>::Failure(expected.Error());
+            }
+            targetExpected = Move(expected.Value());
+        }
+        const void* sourceKey =
+            sourceExpected.IsValid() ? sourceExpected.Ops().nativeType : nullptr;
+        const void* targetKey =
+            targetExpected.IsValid() ? targetExpected.Ops().nativeType : nullptr;
+        if (sourceKey && targetKey && sourceKey != targetKey) {
+            return Result<void>::Failure(ErrorCode::TypeMismatch);
+        }
+        if (value.reference != ObjectHandle{}) {
+            if (value.reference.IsNull()) {
+                return Result<void>::Failure(ErrorCode::StaleHandle);
+            }
+            auto referenced = registry.AcquireType(access, value.reference);
+            if (!referenced) {
+                return Result<void>::Failure(referenced.Error());
+            }
+            const void* actualKey = referenced.Value().Ops().nativeType;
+            if ((sourceKey && actualKey != sourceKey) || (targetKey && actualKey != targetKey)) {
+                return Result<void>::Failure(ErrorCode::TypeMismatch);
+            }
+        }
+    }
     if (readOnly_ || HasFlag(actual->flags, FieldFlags::ReadOnly)) {
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
@@ -341,8 +381,9 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
             if (fields[fieldIndex].id == fieldOps[index].fieldId) {
                 // 원본 입력 함수표는 변경하지 않는다. 등록된 복사본에만 정책을 결합한다.
-                fieldOps[index].write.Bind(ops.nativeType, fields[fieldIndex].id,
+                fieldOps[index].write.Bind(*this, ops.nativeType, fields[fieldIndex].id,
                                            fields[fieldIndex].valueKind,
+                                           fields[fieldIndex].referencedType,
                                            HasFlag(fields[fieldIndex].flags, FieldFlags::ReadOnly));
                 break;
             }

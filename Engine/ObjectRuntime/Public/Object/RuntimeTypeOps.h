@@ -73,15 +73,20 @@ public:
 private:
     friend class TypeRegistry;
 
-    void Bind(const void* nativeType, Guid fieldId, ValueKind valueKind, bool readOnly) noexcept {
+    void Bind(TypeRegistry& registry, const void* nativeType, Guid fieldId, ValueKind valueKind,
+              TypeId referencedType, bool readOnly) noexcept {
+        registry_ = &registry;
         nativeType_ = nativeType;
         fieldId_ = fieldId;
+        referencedType_ = referencedType;
         valueKind_ = valueKind;
         readOnly_ = readOnly;
         bound_ = true;
     }
 
     Callback callback_ = nullptr;
+    TypeRegistry* registry_ = nullptr;
+    TypeId referencedType_{};
     const void* nativeType_ = nullptr;
     Guid fieldId_{};
     ValueKind valueKind_ = ValueKind::Opaque;
