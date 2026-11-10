@@ -1,0 +1,170 @@
+{
+  "status": "PASS",
+  "documents": [
+    {
+      "document": "261110_Rocks_Engine_Implementation_Plan_KO_v1_3",
+      "pages": 100,
+      "chapters": 34,
+      "tables": 58,
+      "toc": "PASS",
+      "layout": "PASS"
+    },
+    {
+      "document": "261110_Rocks_Core_Object_Input_Detailed_Plan_KO_v1_1",
+      "pages": 46,
+      "chapters": 26,
+      "tables": 27,
+      "toc": "PASS",
+      "layout": "PASS"
+    }
+  ],
+  "tasks": 52,
+  "plannedFiles": 297,
+  "taskDAG": "PASS",
+  "fileMapCsvParity": "PASS",
+  "reviewRounds": 4,
+  "reviewers": 3,
+  "resolvedFindings": 24,
+  "reviewScope": "문서 계약·계획 데이터; 검토 범위의 미해결 지적 0건",
+  "formatter": {
+    "formatter": "clang-format version 21.1.6",
+    "blocks": 37,
+    "formatIdempotence": "PASS",
+    "tabCharacters": 0,
+    "negativeControl": "PASS"
+  },
+  "engineImplementationTests": "NOT RUN — design artifacts only",
+  "mathBenchmarks": "NOT RUN — backend undecided",
+  "files": [
+    {
+      "name": "261110_Rocks_Engine_Implementation_Plan_KO_v1_3.pdf",
+      "bytes": 1990477,
+      "sha256": "991887a9cd3e1147860b63f28a4b6625e4c9857d84e3d53eb47d18b19d504724"
+    },
+    {
+      "name": "261110_Rocks_Engine_Implementation_Plan_KO_v1_3.html",
+      "bytes": 2741950,
+      "sha256": "bc41d15763ffb01427dc3f1d5194d76339ab6a4c17df53207f8ecbc3e11f6f59"
+    },
+    {
+      "name": "261110_Rocks_Core_Object_Input_Detailed_Plan_KO_v1_1.pdf",
+      "bytes": 978586,
+      "sha256": "d332eb7197cd8533d5d654db58a834358bbb014ec35a148622d432edcaf78aea"
+    },
+    {
+      "name": "261110_Rocks_Core_Object_Input_Detailed_Plan_KO_v1_1.html",
+      "bytes": 2501361,
+      "sha256": "73156a9caf7f8ec7fef3eddc49bde13b88ac68ec714547fe92781a0b950a769a"
+    },
+    {
+      "name": "261110_Rocks_Core_Object_Input_Task_Backlog_KO_v1_1.csv",
+      "bytes": 34663,
+      "sha256": "1dc7bfd86507157485e73ee0f95bc8fd221949bf9b4460b2825be45e59c5c037"
+    },
+    {
+      "name": "261110_Rocks_Core_Object_Input_File_Map_KO_v1_1.csv",
+      "bytes": 41982,
+      "sha256": "9e3cfbbdfacd4adaf640443159a23628582a9ff8d4a6cefafe44bc2b1f8c5d6b"
+    },
+    {
+      "name": "261110_Rocks_Design_Review_KO_v1_3.html",
+      "bytes": 2341240,
+      "sha256": "a63bb42c994f7c3ea9a46e26b4ae0d309896cf7b8786809c3cf8f2393d08fff4"
+    },
+    {
+      "name": "261110_Rocks_Design_Review_KO_v1_3.pdf",
+      "bytes": 153657,
+      "sha256": "188ce1cca7224e5e41690354cd710e611aecccb019e874c0d7c063ede8d918c7"
+    },
+    {
+      "name": "Rocks_CodeStyle/.editorconfig",
+      "bytes": 161,
+      "sha256": "5b18be27efd817fb5019d513b68e43494f748b50eeaf4eb81fa4f624a721cecb"
+    },
+    {
+      "name": "Rocks_CodeStyle/.clang-format",
+      "bytes": 531,
+      "sha256": "cdcd4681450534acc95adb8edcc327a0bfdae1ba2dcaa66f3a737b9574523ea1"
+    },
+    {
+      "name": "Rocks_Review_Evidence/rocks_final_core_review.md",
+      "bytes": 16064,
+      "sha256": "1879ba0936867bf6b811ac1cc519af5d361a4440377071285ae45546ea5f212f"
+    },
+    {
+      "name": "Rocks_Review_Evidence/rocks_final_render_review.md",
+      "bytes": 19159,
+      "sha256": "8e6d69a077eb69646e32f8b9765b10977a9a779856910b3a7146b9ddcab9163e"
+    },
+    {
+      "name": "Rocks_Review_Evidence/rocks_final_build_review.md",
+      "bytes": 16724,
+      "sha256": "2f668032d6f97df5149e72a8c479d017f926639e8a2f17824c232de91e5af54d"
+    },
+    {
+      "name": "Rocks_Review_Evidence/rocks_round2_core_cross.md",
+      "bytes": 14895,
+      "sha256": "a7121142312dbb4aa6222e4aaab2b10303bcedbeabd2d3bbe7a03d45c363ecad"
+    },
+    {
+      "name": "Rocks_Review_Evidence/rocks_round2_render_cross.md",
+      "bytes": 19469,
+      "sha256": "f36c28e0f0589c70e19a40f8a07addece08d7531c54d00923a8f94a1effa864b"
+    },
+    {
+      "name": "Rocks_Review_Evidence/rocks_round2_build_cross.md",
+      "bytes": 11381,
+      "sha256": "7562d2fde8db53bcf8d05506586462bae8d88d99a9ce032d2b25e7e4ae56f67e"
+    },
+    {
+      "name": "Rocks_Review_Evidence/rocks_round3_core_closure.md",
+      "bytes": 11004,
+      "sha256": "ee7de24990748445230348ae99f7bbead140248fc2386b045de9812155b2aa5e"
+    },
+    {
+      "name": "Rocks_Review_Evidence/rocks_round3_render_closure.md",
+      "bytes": 11723,
+      "sha256": "06c8f17514fe4d8813efe5ad7c0294904560af0c01e2ed69c16e671c6c9fabe0"
+    },
+    {
+      "name": "Rocks_Review_Evidence/rocks_round3_build_closure.md",
+      "bytes": 6443,
+      "sha256": "159174db51e14bfa1eae95cb081a31120052726160d4b3c6ac67fbbb82841f85"
+    },
+    {
+      "name": "Rocks_Review_Evidence/rocks_round4_core_final.md",
+      "bytes": 9122,
+      "sha256": "1e26859d15a40d28037aee85df0cc2d8959c1ffff50c3dd64dc424ef195889c1"
+    },
+    {
+      "name": "Rocks_Review_Evidence/rocks_round4_render_final.md",
+      "bytes": 8173,
+      "sha256": "3d4ed8a8dd4eb742243ad9668f6416b522bffff268319d4b28aa101d57176350"
+    },
+    {
+      "name": "Rocks_Review_Evidence/rocks_round4_build_final.md",
+      "bytes": 7318,
+      "sha256": "dce3766a43e5467ea6d8da59c66bf5155997841094a487c377e3d8066d14f904"
+    },
+    {
+      "name": "Rocks_Source/engine_plan.md",
+      "bytes": 361760,
+      "sha256": "835fb748b60aa9a334db07010eb25289efe0a517ce90b52cd26e68968316fa35"
+    },
+    {
+      "name": "Rocks_Source/detailed_plan.md",
+      "bytes": 142050,
+      "sha256": "f7aa255d2d8135d2563a378c668c52a1dd319fb2eda0dc4473274e066258c10e"
+    },
+    {
+      "name": "Rocks_Source/detailed_task_data.json",
+      "bytes": 144392,
+      "sha256": "0b2257ff4c9b6ca41446ef88f8106d7b859e3cf74422469d1b63b54234db6b23"
+    },
+    {
+      "name": "Rocks_Source/rocks_final_review.md",
+      "bytes": 10921,
+      "sha256": "edee92ba0bf09c83f5560497d9902ba206666ca04c23c679659542b61f0bb382"
+    }
+  ]
+}

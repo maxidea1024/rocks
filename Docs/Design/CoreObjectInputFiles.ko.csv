@@ -1,0 +1,298 @@
+﻿경로,모듈,공개범위,작업ID,역할,검증,상태
+CMakeLists.txt,Build,Tool/Test/Data,C00,target·정책·독립 header 검사,CT01;TT01,계획
+CMakePresets.json,Build,Tool/Test/Data,C00,target·정책·독립 header 검사,CT01;TT01,계획
+.editorconfig,Build,Tool/Test/Data,C00,target·정책·독립 header 검사,CT01;TT01,계획
+.clang-format,Build,Tool/Test/Data,C00,target·정책·독립 header 검사,CT01;TT01,계획
+Docs/CodingStyle.md,Build,Tool/Test/Data,C00,target·정책·독립 header 검사,CT01;TT01,계획
+Build/Policies/FormatAudit.py,Build,Tool/Test/Data,C00,target·정책·독립 header 검사,CT01;TT01,계획
+Build/Manifests/Modules.json,Build,Tool/Test/Data,C00,target·정책·독립 header 검사,CT01;TT01,계획
+Build/Policies/RuntimePolicy.cmake,Build,Tool/Test/Data,C00,target·정책·독립 header 검사,CT01;TT01,계획
+Build/Policies/IncludeAudit.py,Build,Tool/Test/Data,C00,target·정책·독립 header 검사,CT01;TT01,계획
+Tests/Foundation/HeaderCompile.cmake,Build,Tool/Test/Data,C00,target·정책·독립 header 검사,CT01;TT01,계획
+Build/Toolchains/Windows.cmake,Build,Tool/Test/Data,C00,target·정책·독립 header 검사,CT01;TT01,계획
+Build/Toolchains/Mac.cmake,Build,Tool/Test/Data,C00,target·정책·독립 header 검사,CT01;TT01,계획
+Build/Manifests/DevelopmentPlatforms.json,Build,Tool/Test/Data,C00,target·정책·독립 header 검사,CT01;TT01,계획
+Tools/Scaffold/Main.py,Build,Tool/Test/Data,C00,target·정책·독립 header 검사,CT01;TT01,계획
+Templates/CoreModule/template.json,Build,Tool/Test/Data,C00,target·정책·독립 header 검사,CT01;TT01,계획
+Templates/CoreModule/Module.cpp.in,Build,Tool/Test/Data,C00,target·정책·독립 header 검사,CT01;TT01,계획
+Templates/CoreTest/Test.cpp.in,Build,Tool/Test/Data,C00,target·정책·독립 header 검사,CT01;TT01,계획
+Tests/Integration/ScaffoldTests.py,Build,Tool/Test/Data,C00,target·정책·독립 header 검사,CT01;TT01,계획
+Engine/Base/Public/Base/Types.h,EngineBase,Public,C01,최소 POD·ABI·언어 타입,CT01;CT02,계획
+Engine/Base/Public/Base/Compiler.h,EngineBase,Public,C01,최소 POD·ABI·언어 타입,CT01;CT02,계획
+Engine/Base/Public/Base/PlatformAbi.h,EngineBase,Public,C01,최소 POD·ABI·언어 타입,CT01;CT02,계획
+Engine/Base/Public/Base/Guid.h,EngineBase,Public,C01,최소 POD·ABI·언어 타입,CT01;CT02,계획
+Engine/PlatformBase/Public/Platform/Memory.h,PlatformBase,Public,C02,OS primitive·불투명 저장소,CT02;CT07,계획
+Engine/PlatformBase/Public/Platform/Sync.h,PlatformBase,Public,C02,OS primitive·불투명 저장소,CT02;CT07,계획
+Engine/PlatformBase/Public/Platform/Atomics.h,PlatformBase,Public,C02,OS primitive·불투명 저장소,CT02;CT07,계획
+Engine/PlatformBase/Public/Platform/Clock.h,PlatformBase,Public,C02,OS primitive·불투명 저장소,CT02;CT07,계획
+Engine/PlatformBase/Private/Win64/Memory.cpp,PlatformBase,Private,C02,OS primitive·불투명 저장소,CT02;CT07,계획
+Engine/PlatformBase/Private/Win64/Atomics.cpp,PlatformBase,Private,C02,OS primitive·불투명 저장소,CT02;CT07,계획
+Engine/PlatformBase/Private/Win64/Clock.cpp,PlatformBase,Private,C02,OS primitive·불투명 저장소,CT02;CT07,계획
+Engine/PlatformBase/Private/Mac/Memory.cpp,PlatformBase,Private,C02,OS primitive·불투명 저장소,CT02;CT07,계획
+Engine/PlatformBase/Private/Mac/Atomics.cpp,PlatformBase,Private,C02,OS primitive·불투명 저장소,CT02;CT07,계획
+Engine/PlatformBase/Private/Mac/Clock.cpp,PlatformBase,Private,C02,OS primitive·불투명 저장소,CT02;CT07,계획
+Engine/PlatformBase/Private/Win64/Sync.cpp,PlatformBase,Private,C02,OS primitive·불투명 저장소,CT02;CT07,계획
+Engine/PlatformBase/Private/Mac/Sync.cpp,PlatformBase,Private,C02,OS primitive·불투명 저장소,CT02;CT07,계획
+Tests/Platform/PlatformPrimitiveTests.cpp,PlatformBase,Tool/Test/Data,C02,OS primitive·불투명 저장소,CT02;CT07,계획
+Engine/Core/Public/Core/Result.h,Core,Public,C03,실패·move·수명 보조,CT02;CT04,계획
+Engine/Core/Public/Core/Error.h,Core,Public,C03,실패·move·수명 보조,CT02;CT04,계획
+Engine/Core/Public/Core/Traits.h,Core,Public,C03,실패·move·수명 보조,CT02;CT04,계획
+Engine/Core/Public/Core/Move.h,Core,Public,C03,실패·move·수명 보조,CT02;CT04,계획
+Engine/Core/Public/Core/Memory/Allocator.h,Core,Public,C04,allocation 계약·실패 주입·ledger,CT02;CT03,계획
+Engine/Core/Public/Core/Memory/PageAllocator.h,Core,Public,C04,allocation 계약·실패 주입·ledger,CT02;CT03,계획
+Engine/Core/Public/Core/Memory/AllocationTag.h,Core,Public,C04,allocation 계약·실패 주입·ledger,CT02;CT03,계획
+Engine/Core/Private/Memory/SystemAllocator.cpp,Core,Private,C04,allocation 계약·실패 주입·ledger,CT02;CT03,계획
+Engine/Core/Private/Memory/TrackingAllocator.cpp,Core,Private,C04,allocation 계약·실패 주입·ledger,CT02;CT03,계획
+Tests/Core/AllocatorTests.cpp,Core,Tool/Test/Data,C04,allocation 계약·실패 주입·ledger,CT02;CT03,계획
+Engine/Core/Public/Core/Containers/Array.h,Core,Public,C05,일반 container·view·self-alias,CT04,계획
+Engine/Core/Public/Core/Containers/Span.h,Core,Public,C05,일반 container·view·self-alias,CT04,계획
+Tests/Core/ArrayTests.cpp,Core,Tool/Test/Data,C05,일반 container·view·self-alias,CT04,계획
+Engine/Core/Public/Core/Assert.h,Foundation,Public,C06,CPU runner·진단·최소 scheduler 계약,CT01;CT08(동기);CT24(R0);HT01–06(R0),계획
+Engine/Core/Public/Core/Function.h,Foundation,Public,C06,CPU runner·진단·최소 scheduler 계약,CT01;CT08(동기);CT24(R0);HT01–06(R0),계획
+Engine/Core/Public/Core/Lifetime/ModuleLease.h,Foundation,Public,C06,CPU runner·진단·최소 scheduler 계약,CT01;CT08(동기);CT24(R0);HT01–06(R0),계획
+Engine/Core/Private/Diagnostics.cpp,Foundation,Private,C06,CPU runner·진단·최소 scheduler 계약,CT01;CT08(동기);CT24(R0);HT01–06(R0),계획
+Engine/Task/Public/Task/TaskScheduler.h,Foundation,Public,C06,CPU runner·진단·최소 scheduler 계약,CT01;CT08(동기);CT24(R0);HT01–06(R0),계획
+Tests/Foundation/Main.cpp,Foundation,Tool/Test/Data,C06,CPU runner·진단·최소 scheduler 계약,CT01;CT08(동기);CT24(R0);HT01–06(R0),계획
+Tests/Foundation/TestInlineExecutor.cpp,Foundation,Tool/Test/Data,C06,CPU runner·진단·최소 scheduler 계약,CT01;CT08(동기);CT24(R0);HT01–06(R0),계획
+Engine/Core/Public/Core/Diagnostics/LogRecord.h,Foundation,Public,C06,CPU runner·진단·최소 scheduler 계약,CT01;CT08(동기);CT24(R0);HT01–06(R0),계획
+Engine/Core/Public/Core/Diagnostics/LogSink.h,Foundation,Public,C06,CPU runner·진단·최소 scheduler 계약,CT01;CT08(동기);CT24(R0);HT01–06(R0),계획
+Engine/Core/Public/Core/Diagnostics/ProfileScope.h,Foundation,Public,C06,CPU runner·진단·최소 scheduler 계약,CT01;CT08(동기);CT24(R0);HT01–06(R0),계획
+Engine/Core/Private/Diagnostics/BootstrapLog.cpp,Foundation,Private,C06,CPU runner·진단·최소 scheduler 계약,CT01;CT08(동기);CT24(R0);HT01–06(R0),계획
+Engine/Core/Private/Diagnostics/ProfileScope.cpp,Foundation,Private,C06,CPU runner·진단·최소 scheduler 계약,CT01;CT08(동기);CT24(R0);HT01–06(R0),계획
+Tests/Support/TestClock.h,Foundation,Tool/Test/Data,C06,CPU runner·진단·최소 scheduler 계약,CT01;CT08(동기);CT24(R0);HT01–06(R0),계획
+Tests/Support/NFailAllocator.h,Foundation,Tool/Test/Data,C06,CPU runner·진단·최소 scheduler 계약,CT01;CT08(동기);CT24(R0);HT01–06(R0),계획
+Tests/Support/DeterministicExecutor.h,Foundation,Tool/Test/Data,C06,CPU runner·진단·최소 scheduler 계약,CT01;CT08(동기);CT24(R0);HT01–06(R0),계획
+Tests/Support/GoldenFixture.h,Foundation,Tool/Test/Data,C06,CPU runner·진단·최소 scheduler 계약,CT01;CT08(동기);CT24(R0);HT01–06(R0),계획
+Tests/Foundation/HarnessSelfTests.cpp,Foundation,Tool/Test/Data,C06,CPU runner·진단·최소 scheduler 계약,CT01;CT08(동기);CT24(R0);HT01–06(R0),계획
+Tests/Core/BootstrapLogTests.cpp,Foundation,Tool/Test/Data,C06,CPU runner·진단·최소 scheduler 계약,CT01;CT08(동기);CT24(R0);HT01–06(R0),계획
+Engine/MetaSchema/Public/Meta/TypeSchema.h,MetaSchema/ObjectRuntime,Public,C07,schema와 native ops 분리·등록,CT10(수동);CT24(R1),계획
+Engine/MetaSchema/Public/Meta/StableId.h,MetaSchema/ObjectRuntime,Public,C07,schema와 native ops 분리·등록,CT10(수동);CT24(R1),계획
+Engine/ObjectRuntime/Public/Object/RuntimeTypeOps.h,MetaSchema/ObjectRuntime,Public,C07,schema와 native ops 분리·등록,CT10(수동);CT24(R1),계획
+Engine/ObjectRuntime/Private/TypeRegistry.cpp,MetaSchema/ObjectRuntime,Private,C07,schema와 native ops 분리·등록,CT10(수동);CT24(R1),계획
+Tests/Object/ManualTypes.cpp,MetaSchema/ObjectRuntime,Tool/Test/Data,C07,schema와 native ops 분리·등록,CT10(수동);CT24(R1),계획
+Engine/ObjectRuntime/Public/Object/ObjectHandle.h,ObjectRuntime,Public,C08,identity·publication·gate 조회,CT13;CT24(R1),계획
+Engine/ObjectRuntime/Public/Object/Object.h,ObjectRuntime,Public,C08,identity·publication·gate 조회,CT13;CT24(R1),계획
+Engine/ObjectRuntime/Public/Object/ObjectRegistry.h,ObjectRuntime,Public,C08,identity·publication·gate 조회,CT13;CT24(R1),계획
+Engine/ObjectRuntime/Private/RegistryChunks.cpp,ObjectRuntime,Private,C08,identity·publication·gate 조회,CT13;CT24(R1),계획
+Tests/Object/RegistryTests.cpp,ObjectRuntime,Tool/Test/Data,C08,identity·publication·gate 조회,CT13;CT24(R1),계획
+Engine/ObjectRuntime/Public/Object/ObjectDiagnostics.h,ObjectRuntime,Public,C08,identity·publication·gate 조회,CT13;CT24(R1),계획
+Engine/ObjectRuntime/Private/ObjectDiagnostics.cpp,ObjectRuntime,Private,C08,identity·publication·gate 조회,CT13;CT24(R1),계획
+Engine/ObjectRuntime/Public/Object/ObjectRefs.h,ObjectRuntime,Public,C09,root/weak/borrow·scan 수명,CT14;CT24(R1),계획
+Engine/ObjectRuntime/Public/Object/ObjectAccessContext.h,ObjectRuntime,Public,C09,root/weak/borrow·scan 수명,CT14;CT24(R1),계획
+Engine/ObjectRuntime/Private/RootRegistry.cpp,ObjectRuntime,Private,C09,root/weak/borrow·scan 수명,CT14;CT24(R1),계획
+Tests/Object/ReferenceTests.cpp,ObjectRuntime,Tool/Test/Data,C09,root/weak/borrow·scan 수명,CT14;CT24(R1),계획
+Engine/ObjectRuntime/Public/Object/ConstructionContext.h,ObjectRuntime,Public,C10,private graph·commit·rollback,CT15;NL01,계획
+Engine/ObjectRuntime/Private/ObjectFactory.cpp,ObjectRuntime,Private,C10,private graph·commit·rollback,CT15;NL01,계획
+Engine/ObjectRuntime/Private/ConstructionContext.cpp,ObjectRuntime,Private,C10,private graph·commit·rollback,CT15;NL01,계획
+Tests/Object/ConstructionTests.cpp,ObjectRuntime,Tool/Test/Data,C10,private graph·commit·rollback,CT15;NL01,계획
+Engine/ObjectRuntime/Private/GcFullCollector.cpp,ObjectRuntime,Private,C11,full GC·safepoint·독립 oracle,CT17;CT24(R1);NL02,계획
+Engine/ObjectRuntime/Private/GcCoordinator.cpp,ObjectRuntime,Private,C11,full GC·safepoint·독립 oracle,CT17;CT24(R1);NL02,계획
+Tests/Object/GraphOracle.cpp,ObjectRuntime,Tool/Test/Data,C11,full GC·safepoint·독립 oracle,CT17;CT24(R1);NL02,계획
+Tests/Object/FullGcTests.cpp,ObjectRuntime,Tool/Test/Data,C11,full GC·safepoint·독립 oracle,CT17;CT24(R1);NL02,계획
+Engine/ObjectRuntime/Private/RetireQueue.cpp,ObjectRuntime,Private,C12,논리 종료·물리 회수·종료,CT20;CT21;CT22;NL01–03;NL06,계획
+Engine/ObjectRuntime/Private/ObjectLifecycle.cpp,ObjectRuntime,Private,C12,논리 종료·물리 회수·종료,CT20;CT21;CT22;NL01–03;NL06,계획
+Tests/Object/DestroyTests.cpp,ObjectRuntime,Tool/Test/Data,C12,논리 종료·물리 회수·종료,CT20;CT21;CT22;NL01–03;NL06,계획
+Tests/Foundation/ShutdownTests.cpp,ObjectRuntime,Tool/Test/Data,C12,논리 종료·물리 회수·종료,CT20;CT21;CT22;NL01–03;NL06,계획
+Tests/Object/LifetimeLedgerTests.cpp,ObjectRuntime,Tool/Test/Data,C12,논리 종료·물리 회수·종료,CT20;CT21;CT22;NL01–03;NL06,계획
+Tests/Foundation/LeakClosureTests.cpp,ObjectRuntime,Tool/Test/Data,C12,논리 종료·물리 회수·종료,CT20;CT21;CT22;NL01–03;NL06,계획
+Engine/Core/Public/Core/Text/String.h,Core,Public,C13,문자열·session/persistent ID·hash,CT06,계획
+Engine/Core/Public/Core/Text/StringView.h,Core,Public,C13,문자열·session/persistent ID·hash,CT06,계획
+Engine/Core/Public/Core/Text/Name.h,Core,Public,C13,문자열·session/persistent ID·hash,CT06,계획
+Engine/Core/Public/Core/Guid.h,Core,Public,C13,문자열·session/persistent ID·hash,CT06,계획
+Engine/Core/Public/Core/Hash.h,Core,Public,C13,문자열·session/persistent ID·hash,CT06,계획
+Engine/Core/Private/Text/NameTable.cpp,Core,Private,C13,문자열·session/persistent ID·hash,CT06,계획
+Tests/Core/TextIdTests.cpp,Core,Tool/Test/Data,C13,문자열·session/persistent ID·hash,CT06,계획
+Engine/Core/Public/Core/Containers/InlineArray.h,Core,Public,C14,보조 container·callable·native ownership,CT05,계획
+Engine/Core/Public/Core/Containers/HashMap.h,Core,Public,C14,보조 container·callable·native ownership,CT05,계획
+Engine/Core/Public/Core/Containers/BitArray.h,Core,Public,C14,보조 container·callable·native ownership,CT05,계획
+Engine/Core/Public/Core/Containers/SlotMap.h,Core,Public,C14,보조 container·callable·native ownership,CT05,계획
+Engine/Core/Public/Core/UniquePtr.h,Core,Public,C14,보조 container·callable·native ownership,CT05,계획
+Engine/Core/Public/Core/SharedPtr.h,Core,Public,C14,보조 container·callable·native ownership,CT05,계획
+Tests/Core/ContainerTests.cpp,Core,Tool/Test/Data,C14,보조 container·callable·native ownership,CT05,계획
+Engine/Core/Public/Core/Math/Vec3.h,Core,Public,C15,검증된 math backend의 좌표/오류/ABI adapter·SIMD x86/ARM64·Core 시간 4개 파일,CT06;MX01–08;TK01–04,계획
+Engine/Core/Public/Core/Math/Quat.h,Core,Public,C15,검증된 math backend의 좌표/오류/ABI adapter·SIMD x86/ARM64·Core 시간 4개 파일,CT06;MX01–08;TK01–04,계획
+Engine/Core/Public/Core/Math/Mat4.h,Core,Public,C15,검증된 math backend의 좌표/오류/ABI adapter·SIMD x86/ARM64·Core 시간 4개 파일,CT06;MX01–08;TK01–04,계획
+Engine/Core/Public/Core/Math/Transform.h,Core,Public,C15,검증된 math backend의 좌표/오류/ABI adapter·SIMD x86/ARM64·Core 시간 4개 파일,CT06;MX01–08;TK01–04,계획
+Engine/Core/Private/Math/MathBackendAdapter.cpp,Core,Private,C15,검증된 math backend의 좌표/오류/ABI adapter·SIMD x86/ARM64·Core 시간 4개 파일,CT06;MX01–08;TK01–04,계획
+Engine/Core/Private/Math/TransformAdapter.cpp,Core,Private,C15,검증된 math backend의 좌표/오류/ABI adapter·SIMD x86/ARM64·Core 시간 4개 파일,CT06;MX01–08;TK01–04,계획
+Build/Manifests/MathBackendCandidates.json,Core,Tool/Test/Data,C15,검증된 math backend의 좌표/오류/ABI adapter·SIMD x86/ARM64·Core 시간 4개 파일,CT06;MX01–08;TK01–04,계획
+Docs/ADR/MathBackendSelection.md,Core,Tool/Test/Data,C15,검증된 math backend의 좌표/오류/ABI adapter·SIMD x86/ARM64·Core 시간 4개 파일,CT06;MX01–08;TK01–04,계획
+Tests/Core/MathBackendConformance.cpp,Core,Tool/Test/Data,C15,검증된 math backend의 좌표/오류/ABI adapter·SIMD x86/ARM64·Core 시간 4개 파일,CT06;MX01–08;TK01–04,계획
+Tests/Core/MathTests.cpp,Core,Tool/Test/Data,C15,검증된 math backend의 좌표/오류/ABI adapter·SIMD x86/ARM64·Core 시간 4개 파일,CT06;MX01–08;TK01–04,계획
+Engine/Core/Public/Core/Time/ClockService.h,Core,Public,C15,검증된 math backend의 좌표/오류/ABI adapter·SIMD x86/ARM64·Core 시간 4개 파일,CT06;MX01–08;TK01–04,계획
+Engine/Core/Public/Core/Time/StepPlanner.h,Core,Public,C15,검증된 math backend의 좌표/오류/ABI adapter·SIMD x86/ARM64·Core 시간 4개 파일,CT06;MX01–08;TK01–04,계획
+Engine/Core/Private/Time/ClockService.cpp,Core,Private,C15,검증된 math backend의 좌표/오류/ABI adapter·SIMD x86/ARM64·Core 시간 4개 파일,CT06;MX01–08;TK01–04,계획
+Engine/Core/Private/Time/StepPlanner.cpp,Core,Private,C15,검증된 math backend의 좌표/오류/ABI adapter·SIMD x86/ARM64·Core 시간 4개 파일,CT06;MX01–08;TK01–04,계획
+Tests/Core/TimeStepTests.cpp,Core,Tool/Test/Data,C15,검증된 math backend의 좌표/오류/ABI adapter·SIMD x86/ARM64·Core 시간 4개 파일,CT06;MX01–08;TK01–04,계획
+Engine/PlatformBase/Public/Platform/Thread.h,PlatformBase,Public,C16,thread·wait·memory ordering,CT07,계획
+Engine/PlatformBase/Private/Win64/Thread.cpp,PlatformBase,Private,C16,thread·wait·memory ordering,CT07,계획
+Engine/PlatformBase/Private/Mac/Thread.cpp,PlatformBase,Private,C16,thread·wait·memory ordering,CT07,계획
+Tests/Core/ConcurrencyTests.cpp,PlatformBase,Tool/Test/Data,C16,thread·wait·memory ordering,CT07,계획
+Tests/Platform/MacThreadTests.cpp,PlatformBase,Tool/Test/Data,C16,thread·wait·memory ordering,CT07,계획
+Engine/Task/Private/TaskGraph.cpp,Task,Private,C17,작업 DAG·worker·취소·종료,CT08;TK05–06,계획
+Engine/Task/Private/WorkerPool.cpp,Task,Private,C17,작업 DAG·worker·취소·종료,CT08;TK05–06,계획
+Engine/Task/Private/TaskShutdown.cpp,Task,Private,C17,작업 DAG·worker·취소·종료,CT08;TK05–06,계획
+Tests/Core/TaskTests.cpp,Task,Tool/Test/Data,C17,작업 DAG·worker·취소·종료,CT08;TK05–06,계획
+Tests/Core/TaskInterleavingTests.cpp,Task,Tool/Test/Data,C17,작업 DAG·worker·취소·종료,CT08;TK05–06,계획
+Engine/PlatformBase/Public/Platform/File.h,IO/Trace/TraceAnalysis/Inspection/RocksLens,Public,C18,필수 IO·수집/분석·상태 조회·읽을 수 있는 CPU offline viewer/report,CT09;CT24;OB01–06(CPU),계획
+Engine/IO/Public/IO/AsyncFile.h,IO/Trace/TraceAnalysis/Inspection/RocksLens,Public,C18,필수 IO·수집/분석·상태 조회·읽을 수 있는 CPU offline viewer/report,CT09;CT24;OB01–06(CPU),계획
+Engine/IO/Private/AsyncFile.cpp,IO/Trace/TraceAnalysis/Inspection/RocksLens,Private,C18,필수 IO·수집/분석·상태 조회·읽을 수 있는 CPU offline viewer/report,CT09;CT24;OB01–06(CPU),계획
+Engine/Trace/Public/Trace/TraceSession.h,IO/Trace/TraceAnalysis/Inspection/RocksLens,Public,C18,필수 IO·수집/분석·상태 조회·읽을 수 있는 CPU offline viewer/report,CT09;CT24;OB01–06(CPU),계획
+Engine/Trace/Private/TraceBuffer.cpp,IO/Trace/TraceAnalysis/Inspection/RocksLens,Private,C18,필수 IO·수집/분석·상태 조회·읽을 수 있는 CPU offline viewer/report,CT09;CT24;OB01–06(CPU),계획
+Tests/Core/IoTraceTests.cpp,IO/Trace/TraceAnalysis/Inspection/RocksLens,Tool/Test/Data,C18,필수 IO·수집/분석·상태 조회·읽을 수 있는 CPU offline viewer/report,CT09;CT24;OB01–06(CPU),계획
+Engine/PlatformBase/Private/Win64/File.cpp,IO/Trace/TraceAnalysis/Inspection/RocksLens,Private,C18,필수 IO·수집/분석·상태 조회·읽을 수 있는 CPU offline viewer/report,CT09;CT24;OB01–06(CPU),계획
+Engine/PlatformBase/Private/Mac/File.cpp,IO/Trace/TraceAnalysis/Inspection/RocksLens,Private,C18,필수 IO·수집/분석·상태 조회·읽을 수 있는 CPU offline viewer/report,CT09;CT24;OB01–06(CPU),계획
+Engine/Trace/Public/Trace/TraceMetadata.h,IO/Trace/TraceAnalysis/Inspection/RocksLens,Public,C18,필수 IO·수집/분석·상태 조회·읽을 수 있는 CPU offline viewer/report,CT09;CT24;OB01–06(CPU),계획
+Engine/Trace/Private/TraceWriter.cpp,IO/Trace/TraceAnalysis/Inspection/RocksLens,Private,C18,필수 IO·수집/분석·상태 조회·읽을 수 있는 CPU offline viewer/report,CT09;CT24;OB01–06(CPU),계획
+Engine/TraceAnalysis/Public/TraceAnalysis/TraceReader.h,IO/Trace/TraceAnalysis/Inspection/RocksLens,Public,C18,필수 IO·수집/분석·상태 조회·읽을 수 있는 CPU offline viewer/report,CT09;CT24;OB01–06(CPU),계획
+Engine/TraceAnalysis/Private/TraceReader.cpp,IO/Trace/TraceAnalysis/Inspection/RocksLens,Private,C18,필수 IO·수집/분석·상태 조회·읽을 수 있는 CPU offline viewer/report,CT09;CT24;OB01–06(CPU),계획
+Engine/TraceAnalysis/Private/TimelineModel.cpp,IO/Trace/TraceAnalysis/Inspection/RocksLens,Private,C18,필수 IO·수집/분석·상태 조회·읽을 수 있는 CPU offline viewer/report,CT09;CT24;OB01–06(CPU),계획
+Engine/Inspection/Public/Inspection/InspectionSnapshot.h,IO/Trace/TraceAnalysis/Inspection/RocksLens,Public,C18,필수 IO·수집/분석·상태 조회·읽을 수 있는 CPU offline viewer/report,CT09;CT24;OB01–06(CPU),계획
+Engine/Inspection/Private/InspectionService.cpp,IO/Trace/TraceAnalysis/Inspection/RocksLens,Private,C18,필수 IO·수집/분석·상태 조회·읽을 수 있는 CPU offline viewer/report,CT09;CT24;OB01–06(CPU),계획
+Tools/RocksLens/Main.cpp,IO/Trace/TraceAnalysis/Inspection/RocksLens,Tool/Test/Data,C18,필수 IO·수집/분석·상태 조회·읽을 수 있는 CPU offline viewer/report,CT09;CT24;OB01–06(CPU),계획
+Tools/RocksLens/ReportWriter.cpp,IO/Trace/TraceAnalysis/Inspection/RocksLens,Tool/Test/Data,C18,필수 IO·수집/분석·상태 조회·읽을 수 있는 CPU offline viewer/report,CT09;CT24;OB01–06(CPU),계획
+Tools/RocksLens/OfflineViewer.html,IO/Trace/TraceAnalysis/Inspection/RocksLens,Tool/Test/Data,C18,필수 IO·수집/분석·상태 조회·읽을 수 있는 CPU offline viewer/report,CT09;CT24;OB01–06(CPU),계획
+Tools/RocksLens/OfflineViewer.js,IO/Trace/TraceAnalysis/Inspection/RocksLens,Tool/Test/Data,C18,필수 IO·수집/분석·상태 조회·읽을 수 있는 CPU offline viewer/report,CT09;CT24;OB01–06(CPU),계획
+Tests/Support/ScriptedIo.h,IO/Trace/TraceAnalysis/Inspection/RocksLens,Tool/Test/Data,C18,필수 IO·수집/분석·상태 조회·읽을 수 있는 CPU offline viewer/report,CT09;CT24;OB01–06(CPU),계획
+Tests/Core/TraceLossTests.cpp,IO/Trace/TraceAnalysis/Inspection/RocksLens,Tool/Test/Data,C18,필수 IO·수집/분석·상태 조회·읽을 수 있는 CPU offline viewer/report,CT09;CT24;OB01–06(CPU),계획
+Tests/Integration/OfflineViewerTests.cpp,IO/Trace/TraceAnalysis/Inspection/RocksLens,Tool/Test/Data,C18,필수 IO·수집/분석·상태 조회·읽을 수 있는 CPU offline viewer/report,CT09;CT24;OB01–06(CPU),계획
+Engine/Serialization/Public/Serialization/Archive.h,Serialization,Public,C19,bounded TLV·상위 resolver 주입,CT11,계획
+Engine/Serialization/Public/Serialization/ObjectReferenceResolver.h,Serialization,Public,C19,bounded TLV·상위 resolver 주입,CT11,계획
+Engine/Serialization/Private/BinaryArchive.cpp,Serialization,Private,C19,bounded TLV·상위 resolver 주입,CT11,계획
+Tests/Core/ArchiveTests.cpp,Serialization,Tool/Test/Data,C19,bounded TLV·상위 resolver 주입,CT11,계획
+Tools/MetaCompiler/Main.cpp,MetaCompiler,Tool/Test/Data,C20,Clang 수집·생성·진단 fixture,CT10;CT12,계획
+Tools/MetaCompiler/AstCollector.cpp,MetaCompiler,Tool/Test/Data,C20,Clang 수집·생성·진단 fixture,CT10;CT12,계획
+Tools/MetaCompiler/SchemaEmitter.cpp,MetaCompiler,Tool/Test/Data,C20,Clang 수집·생성·진단 fixture,CT10;CT12,계획
+Tools/MetaCompiler/TraceEmitter.cpp,MetaCompiler,Tool/Test/Data,C20,Clang 수집·생성·진단 fixture,CT10;CT12,계획
+Tests/Integration/MetaCompilerTests.py,MetaCompiler,Tool/Test/Data,C20,Clang 수집·생성·진단 fixture,CT10;CT12,계획
+Engine/ObjectRuntime/Public/Object/GcArray.h,ObjectRuntime,Public,C21,owner-aware field·cursor version,CT18,계획
+Engine/ObjectRuntime/Private/GcWriteBarrier.cpp,ObjectRuntime,Private,C21,owner-aware field·cursor version,CT18,계획
+Tests/Object/ManagedContainerTests.cpp,ObjectRuntime,Tool/Test/Data,C21,owner-aware field·cursor version,CT18,계획
+Engine/ObjectRuntime/Private/GcMarker.cpp,ObjectRuntime,Private,C22,점진 phase·cutoff·epoch 분류,CT18;CT19,계획
+Engine/ObjectRuntime/Private/GcEpoch.cpp,ObjectRuntime,Private,C22,점진 phase·cutoff·epoch 분류,CT18;CT19,계획
+Tests/Object/IncrementalGcTests.cpp,ObjectRuntime,Tool/Test/Data,C22,점진 phase·cutoff·epoch 분류,CT18;CT19,계획
+Engine/ObjectRuntime/Public/Object/ClassDefaults.h,ObjectRuntime,Public,C23,archetype·instancing·remap,CT16,계획
+Engine/ObjectRuntime/Private/ClassDefaults.cpp,ObjectRuntime,Private,C23,archetype·instancing·remap,CT16,계획
+Engine/ObjectRuntime/Private/ObjectClone.cpp,ObjectRuntime,Private,C23,archetype·instancing·remap,CT16,계획
+Engine/ObjectSerialization/Public/ObjectSerialization/ObjectArchive.h,ObjectRuntime,Public,C23,archetype·instancing·remap,CT16,계획
+Engine/ObjectSerialization/Private/ObjectArchive.cpp,ObjectRuntime,Private,C23,archetype·instancing·remap,CT16,계획
+Tests/Object/CloneTests.cpp,ObjectRuntime,Tool/Test/Data,C23,archetype·instancing·remap,CT16,계획
+Engine/ObjectRuntime/Private/ObjectTaskBridge.cpp,ObjectRuntime,Private,C24,native task/backend 완료·재진입,CT20;CT21;CT22;NL03;NL06–08,계획
+Tests/Object/BackendLeaseTests.cpp,ObjectRuntime,Tool/Test/Data,C24,native task/backend 완료·재진입,CT20;CT21;CT22;NL03;NL06–08,계획
+Tests/Object/ReentrancyTests.cpp,ObjectRuntime,Tool/Test/Data,C24,native task/backend 완료·재진입,CT20;CT21;CT22;NL03;NL06–08,계획
+Tests/Support/FakeBackendCompletion.h,ObjectRuntime,Tool/Test/Data,C24,native task/backend 완료·재진입,CT20;CT21;CT22;NL03;NL06–08,계획
+Tests/Object/TaskLifetimeInterleaving.cpp,ObjectRuntime,Tool/Test/Data,C24,native task/backend 완료·재진입,CT20;CT21;CT22;NL03;NL06–08,계획
+Engine/Serialization/Public/Serialization/Migration.h,Serialization,Public,C25,schema 변환·golden fixture,CT11;CT16,계획
+Engine/Serialization/Private/MigrationRegistry.cpp,Serialization,Private,C25,schema 변환·golden fixture,CT11;CT16,계획
+Schemas/MigrationFixtures/ObjectV1.fixture,Serialization,Tool/Test/Data,C25,schema 변환·golden fixture,CT11;CT16,계획
+Tests/Object/MigrationTests.cpp,Serialization,Tool/Test/Data,C25,schema 변환·golden fixture,CT11;CT16,계획
+Tests/Foundation/FoundationGate.cpp,Foundation,Tool/Test/Data,C26,CF01–12·확장성·stress,CT01–24;MX01–08;TK01–06;NL01–03/06–08(CPU);HT01–06;OB01–06(CPU),계획
+Tests/Foundation/TestAllocatorModule.cpp,Foundation,Tool/Test/Data,C26,CF01–12·확장성·stress,CT01–24;MX01–08;TK01–06;NL01–03/06–08(CPU);HT01–06;OB01–06(CPU),계획
+Tests/Foundation/TestObjectModule.cpp,Foundation,Tool/Test/Data,C26,CF01–12·확장성·stress,CT01–24;MX01–08;TK01–06;NL01–03/06–08(CPU);HT01–06;OB01–06(CPU),계획
+Tests/Object/GcStress.cpp,Foundation,Tool/Test/Data,C26,CF01–12·확장성·stress,CT01–24;MX01–08;TK01–06;NL01–03/06–08(CPU);HT01–06;OB01–06(CPU),계획
+Build/Manifests/TestMatrix.json,Foundation,Tool/Test/Data,C26,CF01–12·확장성·stress,CT01–24;MX01–08;TK01–06;NL01–03/06–08(CPU);HT01–06;OB01–06(CPU),계획
+Build/Manifests/WindowsTestMatrix.json,Foundation,Tool/Test/Data,C26,CF01–12·확장성·stress,CT01–24;MX01–08;TK01–06;NL01–03/06–08(CPU);HT01–06;OB01–06(CPU),계획
+Build/Manifests/MacTestMatrix.json,Foundation,Tool/Test/Data,C26,CF01–12·확장성·stress,CT01–24;MX01–08;TK01–06;NL01–03/06–08(CPU);HT01–06;OB01–06(CPU),계획
+Tests/Foundation/DiagnosticsGate.cpp,Foundation,Tool/Test/Data,C26,CF01–12·확장성·stress,CT01–24;MX01–08;TK01–06;NL01–03/06–08(CPU);HT01–06;OB01–06(CPU),계획
+Tests/Foundation/NegativeControls.cpp,Foundation,Tool/Test/Data,C26,CF01–12·확장성·stress,CT01–24;MX01–08;TK01–06;NL01–03/06–08(CPU);HT01–06;OB01–06(CPU),계획
+Tests/Integration/CrossPlatformArchiveTests.cpp,Foundation,Tool/Test/Data,C26,CF01–12·확장성·stress,CT01–24;MX01–08;TK01–06;NL01–03/06–08(CPU);HT01–06;OB01–06(CPU),계획
+Engine/Host/Public/Host/ExtensionRegistry.h,EngineHost,Public,C27,조립 계층의 선택 loader·ABI·lease,CT22;CT23,선택 후속
+Engine/Host/Private/ExtensionRegistry.cpp,EngineHost,Private,C27,조립 계층의 선택 loader·ABI·lease,CT22;CT23,선택 후속
+Engine/Host/Private/ModuleLoader.cpp,EngineHost,Private,C27,조립 계층의 선택 loader·ABI·lease,CT22;CT23,선택 후속
+Tests/Integration/ExtensionTests.cpp,EngineHost,Tool/Test/Data,C27,조립 계층의 선택 loader·ABI·lease,CT22;CT23,선택 후속
+Engine/Core/Public/Core/Memory/Arena.h,Core,Public,C28,선택 allocator·bounded remote free,CT02;CT03,선택 후속
+Engine/Core/Public/Core/Memory/Pool.h,Core,Public,C28,선택 allocator·bounded remote free,CT02;CT03,선택 후속
+Engine/Core/Private/Memory/SlabAllocator.cpp,Core,Private,C28,선택 allocator·bounded remote free,CT02;CT03,선택 후속
+Engine/Core/Private/Memory/RemoteFree.cpp,Core,Private,C28,선택 allocator·bounded remote free,CT02;CT03,선택 후속
+Engine/ObjectRuntime/Private/GcParallelWork.cpp,ObjectRuntime,Private,C29,선택 병렬 mark·진척 보장,CT17;CT18;CT19,선택 후속
+Tests/Object/ParallelGcTests.cpp,ObjectRuntime,Tool/Test/Data,C29,선택 병렬 mark·진척 보장,CT17;CT18;CT19,선택 후속
+Tools/FoundationBench/TraceOverheadBench.cpp,Foundation,Tool/Test/Data,C30,기본 관측은 C06/C18/C26 필수·선택 비용/압축/탐색 최적화만,CT24;NL08,선택 후속
+Tools/FoundationBench/TraceQueryBench.cpp,Foundation,Tool/Test/Data,C30,기본 관측은 C06/C18/C26 필수·선택 비용/압축/탐색 최적화만,CT24;NL08,선택 후속
+Tests/Integration/TraceOptimizationTests.cpp,Foundation,Tool/Test/Data,C30,기본 관측은 C06/C18/C26 필수·선택 비용/압축/탐색 최적화만,CT24;NL08,선택 후속
+Tools/EngineBuild/ActionManifest.cpp,BuildTools,Tool/Test/Data,C31,후속 Rocks Build·분산 executor 경계,CT01;CT12,선택 후속
+Tools/EngineBuild/CacheKey.cpp,BuildTools,Tool/Test/Data,C31,후속 Rocks Build·분산 executor 경계,CT01;CT12,선택 후속
+Tools/EngineBuild/Executors/IncredibuildAdapter.cpp,BuildTools,Tool/Test/Data,C31,후속 Rocks Build·분산 executor 경계,CT01;CT12,선택 후속
+Tests/Integration/BuildCacheTests.py,BuildTools,Tool/Test/Data,C31,후속 Rocks Build·분산 executor 경계,CT01;CT12,선택 후속
+Engine/InputCore/Public/Input/Device.h,InputCore,Public,I00,입력 계약·capability·schema,IT01;IT23,계획
+Engine/InputCore/Public/Input/Control.h,InputCore,Public,I00,입력 계약·capability·schema,IT01;IT23,계획
+Engine/InputCore/Public/Input/Event.h,InputCore,Public,I00,입력 계약·capability·schema,IT01;IT23,계획
+Engine/InputCore/Public/Input/Backend.h,InputCore,Public,I00,입력 계약·capability·schema,IT01;IT23,계획
+Engine/InputCore/Public/Input/InputSystem.h,InputCore,Public,I00,입력 계약·capability·schema,IT01;IT23,계획
+Schemas/Input/InputProfile.schema,InputCore,Tool/Test/Data,I00,입력 계약·capability·schema,IT01;IT23,계획
+Engine/InputBackends/Synthetic/Private/SyntheticBackend.cpp,InputBackend.Synthetic,Private,I01,주입 clock·가짜 장치 fixture,IT01;IT02,계획
+Tests/Input/SyntheticFixtures.cpp,InputBackend.Synthetic,Tool/Test/Data,I01,주입 clock·가짜 장치 fixture,IT01;IT02,계획
+Engine/InputCore/Private/EventQueue.cpp,InputCore,Private,I02,event ownership·정렬·resync,IT02;IT04,계획
+Engine/InputCore/Private/InputClock.cpp,InputCore,Private,I02,event ownership·정렬·resync,IT02;IT04,계획
+Tests/Input/EventQueueTests.cpp,InputCore,Tool/Test/Data,I02,event ownership·정렬·resync,IT02;IT04,계획
+Engine/InputCore/Private/DeviceRegistry.cpp,InputCore,Private,I03,device generation·user/route 계약,IT05;IT06;IT12,계획
+Engine/InputCore/Public/Input/PlayerInput.h,InputCore,Public,I03,device generation·user/route 계약,IT05;IT06;IT12,계획
+Tests/Input/DeviceLifecycleTests.cpp,InputCore,Tool/Test/Data,I03,device generation·user/route 계약,IT05;IT06;IT12,계획
+Engine/InputCore/Private/TickAssembler.cpp,InputCore,Private,I04,고정 tick·snapshot·edge 1회,IT03,계획
+Tests/Input/TickTests.cpp,InputCore,Tool/Test/Data,I04,고정 tick·snapshot·edge 1회,IT03,계획
+Engine/InputCore/Public/Input/Action.h,InputCore,Public,I05,typed action·processor registry,IT13;IT23,계획
+Engine/InputCore/Public/Input/Binding.h,InputCore,Public,I05,typed action·processor registry,IT13;IT23,계획
+Engine/InputCore/Public/Input/Processor.h,InputCore,Public,I05,typed action·processor registry,IT13;IT23,계획
+Engine/InputCore/Private/ActionEvaluator.cpp,InputCore,Private,I05,typed action·processor registry,IT13;IT23,계획
+Tests/Input/ActionTests.cpp,InputCore,Tool/Test/Data,I05,typed action·processor registry,IT13;IT23,계획
+Engine/InputCore/Public/Input/Context.h,InputCore,Public,I06,context·FSM·consumption,IT06;IT13;IT14,계획
+Engine/InputCore/Private/ContextRouter.cpp,InputCore,Private,I06,context·FSM·consumption,IT06;IT13;IT14,계획
+Engine/InputCore/Private/TriggerState.cpp,InputCore,Private,I06,context·FSM·consumption,IT06;IT13;IT14,계획
+Tests/Input/TriggerContextTests.cpp,InputCore,Tool/Test/Data,I06,context·FSM·consumption,IT06;IT13;IT14,계획
+Engine/InputCore/Public/Input/RebindSession.h,InputCore,Public,I07,profile compile·migration·교체,IT15;IT16,계획
+Engine/InputCore/Public/Input/InputProfile.h,InputCore,Public,I07,profile compile·migration·교체,IT15;IT16,계획
+Engine/InputCore/Private/ProfileCompiler.cpp,InputCore,Private,I07,profile compile·migration·교체,IT15;IT16,계획
+Engine/InputCore/Private/RebindSession.cpp,InputCore,Private,I07,profile compile·migration·교체,IT15;IT16,계획
+Tests/Input/RebindTests.cpp,InputCore,Tool/Test/Data,I07,profile compile·migration·교체,IT15;IT16,계획
+Engine/InputCore/Public/Input/Replay.h,InputCore,Public,I08,진단 replay·semantic command·headless,IT21;IT22,계획
+Engine/InputCore/Private/Replay.cpp,InputCore,Private,I08,진단 replay·semantic command·headless,IT21;IT22,계획
+Engine/InputCore/Private/CommandCodec.cpp,InputCore,Private,I08,진단 replay·semantic command·headless,IT21;IT22,계획
+Tests/Input/ReplayTests.cpp,InputCore,Tool/Test/Data,I08,진단 replay·semantic command·headless,IT21;IT22,계획
+Engine/InputBackends/Windows/Private/GameInputBackend.cpp,InputBackend.Windows/InputBackend.Mac,Private,I09,두 필수 OS adapter·channel별 provider 선택·SDK callback 수명,IT07;IT18;IT24,계획
+Engine/InputBackends/Windows/Private/RawInputBackend.cpp,InputBackend.Windows/InputBackend.Mac,Private,I09,두 필수 OS adapter·channel별 provider 선택·SDK callback 수명,IT07;IT18;IT24,계획
+Engine/InputBackends/Windows/Private/BackendArbiter.cpp,InputBackend.Windows/InputBackend.Mac,Private,I09,두 필수 OS adapter·channel별 provider 선택·SDK callback 수명,IT07;IT18;IT24,계획
+Tests/Input/WindowsBackendTests.cpp,InputBackend.Windows/InputBackend.Mac,Tool/Test/Data,I09,두 필수 OS adapter·channel별 provider 선택·SDK callback 수명,IT07;IT18;IT24,계획
+Engine/InputBackends/Mac/Private/AppKitInputBackend.mm,InputBackend.Windows/InputBackend.Mac,Private,I09,두 필수 OS adapter·channel별 provider 선택·SDK callback 수명,IT07;IT18;IT24,계획
+Engine/InputBackends/Mac/Private/GameControllerBackend.mm,InputBackend.Windows/InputBackend.Mac,Private,I09,두 필수 OS adapter·channel별 provider 선택·SDK callback 수명,IT07;IT18;IT24,계획
+Engine/InputBackends/Mac/Private/BackendArbiter.cpp,InputBackend.Windows/InputBackend.Mac,Private,I09,두 필수 OS adapter·channel별 provider 선택·SDK callback 수명,IT07;IT18;IT24,계획
+Tests/Input/MacBackendTests.mm,InputBackend.Windows/InputBackend.Mac,Tool/Test/Data,I09,두 필수 OS adapter·channel별 provider 선택·SDK callback 수명,IT07;IT18;IT24,계획
+Engine/PlatformWindow/Public/Window/WindowInput.h,PlatformWindow,Public,I10,focus·DPI·capture·상대 이동,IT06;IT09,계획
+Engine/PlatformWindow/Private/Win64/WindowEvents.cpp,PlatformWindow,Private,I10,focus·DPI·capture·상대 이동,IT06;IT09,계획
+Engine/PlatformWindow/Private/Win64/CursorCapture.cpp,PlatformWindow,Private,I10,focus·DPI·capture·상대 이동,IT06;IT09,계획
+Tests/Input/WindowFocusTests.cpp,PlatformWindow,Tool/Test/Data,I10,focus·DPI·capture·상대 이동,IT06;IT09,계획
+Engine/PlatformWindow/Private/Mac/WindowEvents.mm,PlatformWindow,Private,I10,focus·DPI·capture·상대 이동,IT06;IT09,계획
+Engine/PlatformWindow/Private/Mac/CursorCapture.mm,PlatformWindow,Private,I10,focus·DPI·capture·상대 이동,IT06;IT09,계획
+Tests/Input/MacWindowFocusTests.mm,PlatformWindow,Tool/Test/Data,I10,focus·DPI·capture·상대 이동,IT06;IT09,계획
+Engine/InputCore/Private/GamepadCalibration.cpp,InputCore,Private,I11,정규화·origin·user pairing,IT05;IT10;IT11;IT12,계획
+Engine/InputCore/Private/GlyphResolver.cpp,InputCore,Private,I11,정규화·origin·user pairing,IT05;IT10;IT11;IT12,계획
+Tests/Input/GamepadTests.cpp,InputCore,Tool/Test/Data,I11,정규화·origin·user pairing,IT05;IT10;IT11;IT12,계획
+Tools/InputDeviceProbe/Main.cpp,InputDeviceProbe,Tool/Test/Data,I12,실물 장치·transport·SDK 결과,IT24,계획
+Tools/InputDeviceProbe/DeviceReport.cpp,InputDeviceProbe,Tool/Test/Data,I12,실물 장치·transport·SDK 결과,IT24,계획
+Tests/Input/HardwareMatrix.json,InputDeviceProbe,Tool/Test/Data,I12,실물 장치·transport·SDK 결과,IT24,계획
+Tests/Input/WindowsHardwareMatrix.json,InputDeviceProbe,Tool/Test/Data,I12,실물 장치·transport·SDK 결과,IT24,계획
+Tests/Input/MacHardwareMatrix.json,InputDeviceProbe,Tool/Test/Data,I12,실물 장치·transport·SDK 결과,IT24,계획
+Engine/PlatformWindow/Public/Window/TextInput.h,PlatformWindow/InputIntegration,Public,I13,Windows TSF·macOS NSTextInputClient·동일 text session/route 계약,IT08;IT19(standalone/Studio subset 구분),계획
+Engine/PlatformWindow/Private/Win64/TextInputTsf.cpp,PlatformWindow/InputIntegration,Private,I13,Windows TSF·macOS NSTextInputClient·동일 text session/route 계약,IT08;IT19(standalone/Studio subset 구분),계획
+Engine/InputIntegration/Private/UiInputRouter.cpp,PlatformWindow/InputIntegration,Private,I13,Windows TSF·macOS NSTextInputClient·동일 text session/route 계약,IT08;IT19(standalone/Studio subset 구분),계획
+Tests/Input/TextFocusTests.cpp,PlatformWindow/InputIntegration,Tool/Test/Data,I13,Windows TSF·macOS NSTextInputClient·동일 text session/route 계약,IT08;IT19(standalone/Studio subset 구분),계획
+Engine/PlatformWindow/Private/Mac/TextInputClient.mm,PlatformWindow/InputIntegration,Private,I13,Windows TSF·macOS NSTextInputClient·동일 text session/route 계약,IT08;IT19(standalone/Studio subset 구분),계획
+Tests/Input/MacTextInputTests.mm,PlatformWindow/InputIntegration,Tool/Test/Data,I13,Windows TSF·macOS NSTextInputClient·동일 text session/route 계약,IT08;IT19(standalone/Studio subset 구분),계획
+Tests/Input/TextRouteInterleavingTests.cpp,PlatformWindow/InputIntegration,Tool/Test/Data,I13,Windows TSF·macOS NSTextInputClient·동일 text session/route 계약,IT08;IT19(standalone/Studio subset 구분),계획
+Engine/InputCore/Public/Input/Haptics.h,InputCore,Public,I14,output ticket·TTL·stop generation,IT17,계획
+Engine/InputCore/Private/HapticMixer.cpp,InputCore,Private,I14,output ticket·TTL·stop generation,IT17,계획
+Engine/InputCore/Private/OutputTickets.cpp,InputCore,Private,I14,output ticket·TTL·stop generation,IT17,계획
+Tests/Input/HapticTests.cpp,InputCore,Tool/Test/Data,I14,output ticket·TTL·stop generation,IT17,계획
+Engine/InputIntegration/Private/ObjectActionBinding.cpp,InputIntegration,Private,I15,약한 owner·언어·control token,IT19;IT20;IT22,계획
+Engine/InputIntegration/Private/ScriptInputBinding.cpp,InputIntegration,Private,I15,약한 owner·언어·control token,IT19;IT20;IT22,계획
+Engine/InputIntegration/Private/CutsceneInputBridge.cpp,InputIntegration,Private,I15,약한 owner·언어·control token,IT19;IT20;IT22,계획
+Tests/Integration/InputBridgeTests.cpp,InputIntegration,Tool/Test/Data,I15,약한 owner·언어·control token,IT19;IT20;IT22,계획
+Editor/InputProfile/ProfileEditorModel.cpp,Editor.Input,Tool/Test/Data,I16,I2 입력 profile 편집 UI·transaction·preview,IT15;IT16;IT19,계획
+Editor/InputProfile/ProfilePreviewBridge.cpp,Editor.Input,Tool/Test/Data,I16,I2 입력 profile 편집 UI·transaction·preview,IT15;IT16;IT19,계획
+Editor/Web/InputProfileEditor.tsx,Editor.Input,Tool/Test/Data,I16,I2 입력 profile 편집 UI·transaction·preview,IT15;IT16;IT19,계획
+Tests/Integration/InputProfileEditorTests.cpp,Editor.Input,Tool/Test/Data,I16,I2 입력 profile 편집 UI·transaction·preview,IT15;IT16;IT19,계획
+Engine/InputBackends/SDL/Private/SdlInputBackend.cpp,InputBackend.SDL,Private,I17,선택 플랫폼 adapter,IT01;IT23;IT24,선택 후속
+Tests/Input/SdlBackendTests.cpp,InputBackend.SDL,Tool/Test/Data,I17,선택 플랫폼 adapter,IT01;IT23;IT24,선택 후속
+Engine/InputBackends/Steam/Private/SteamSemanticBackend.cpp,InputBackend.Steam,Private,I18,semantic action·origin·중복 방지,IT18;IT24,선택 후속
+Tests/Input/SemanticProviderTests.cpp,InputBackend.Steam,Tool/Test/Data,I18,semantic action·origin·중복 방지,IT18;IT24,선택 후속
+Engine/InputBackends/Console/ConsoleBackendContract.h,InputBackend.Console,Tool/Test/Data,I19,계약/mock만 우선·vendor private 구현은 SDK 확보 후,IT05;IT06;IT11;IT12;IT17;IT24,선택 후속
+Build/Manifests/ConsoleBackendTargets.json,InputBackend.Console,Tool/Test/Data,I19,계약/mock만 우선·vendor private 구현은 SDK 확보 후,IT05;IT06;IT11;IT12;IT17;IT24,선택 후속
+Tests/Input/ConsoleConformance.cpp,InputBackend.Console,Tool/Test/Data,I19,계약/mock만 우선·vendor private 구현은 SDK 확보 후,IT05;IT06;IT11;IT12;IT17;IT24,선택 후속

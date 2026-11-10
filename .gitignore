@@ -1,0 +1,26 @@
+# Generated build and local state
+/Build/Artifacts/
+/Build/Cache/
+/Binaries/
+/Intermediate/
+/Saved/
+/DerivedDataCache/
+/out/
+/build/
+/.vs/
+/.idea/
+*.user
+*.suo
+*.VC.db
+*.VC.VC.opendb
+.DS_Store
+Thumbs.db
+
+# Local secrets and credentials
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+*.pem
+*.key
