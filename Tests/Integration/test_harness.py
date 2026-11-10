@@ -19,6 +19,11 @@ with tempfile.TemporaryDirectory() as directory:
     report = json.loads(output.read_text())
     assert report["seed"] == 914 and report["repeat"] == 3 and report["failures"] == 0
     assert len(report["tests"]) == 1 and report["tests"][0]["status"] == "PASS"
+    # 디렉터리는 보고서 파일로 열 수 없다. 결과 파일 생성 실패를 성공으로 감추지 않는다.
+    unavailable = subprocess.run([binary, "--filter", "Harness_SeedIsAccessible", "--json", directory], text=True, capture_output=True, timeout=10)
+    assert unavailable.returncode == 2, (unavailable.returncode, unavailable.stdout, unavailable.stderr)
+    assert "Cannot open JSON report" in unavailable.stderr
+    assert "[PASS]" not in unavailable.stdout
 print("Harness failure controls, CLI and JSON report passed")
 
 parallel = subprocess.run([binary, "--negative-control", "parallel"], text=True, capture_output=True, timeout=10)

@@ -111,7 +111,7 @@ macOS는 native host에서 `macos-clang-debug`, `macos-clang-asan` preset을 사
 - 생성 비공개성·역순 rollback·일괄 publication·OOM 복구.
 - 별도 인접 배열/DFS 기준 그래프와 GC 결과 비교, 2,048-node 깊은 그래프, scratch OOM에서 잘못된 sweep 금지.
 - logical destroy, root/강한 간선 보존, weak pin 거부, borrow Busy, backend 지연·종료 재시도, 소멸자 재진입.
-- 잘못된 CLI·불일치 filter·보고서 쓰기 실패·assert 종료·잠긴 stderr·worker 실패 집계를 실제 자식 프로세스로 검사.
+- 잘못된 CLI·불일치 filter·보고서 파일 생성 실패·assert 종료·잠긴 stderr·worker 실패 집계를 실제 자식 프로세스로 검사. 보고서 출력 중 디스크 용량 소진·close 실패의 전용 주입 시험은 아직 실행하지 않았다.
 - ASan preset에서는 의도적인 해제 후 접근이 실제 sanitizer 진단과 함께 실패하는 음성 대조군을 추가한다.
 
 Windows ASan은 LeakSanitizer가 아니며, 소유권 ledger와 종료 검사를 대체하지 않는다. 모든 실행 환경에서 메모리 누수가 절대 없다는 주장은 하지 않는다. 알려진 raw pointer 주소 재사용 한계, 수동 Trace의 완전성, wrapper보다 오래 살아야 하는 Registry 계약을 명시하고 회귀 테스트를 확대한다.
