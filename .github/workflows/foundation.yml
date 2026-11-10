@@ -39,6 +39,20 @@ jobs:
         run: dotnet run --project Tools/Rocks.Build.IntegrationTests -- --root .
       - name: AddressSanitizer
         run: dotnet msbuild Rocks.proj /t:Test /p:Configuration=Asan /p:RocksTarget=Foundation /v:minimal
+      - name: Capture Apple Clang AST for diagnosis
+        if: failure() && runner.os == 'macOS'
+        run: |
+          $clangArgs = @('-x', 'c++', '-std=c++23', '-fsyntax-only', '-Xclang', '-ast-dump=json', '-I.')
+          Get-ChildItem Engine -Directory | ForEach-Object { if (Test-Path (Join-Path $_.FullName 'Public')) { $clangArgs += '-I' + (Join-Path $_.FullName 'Public') } }
+          $clangArgs += 'Tests/Reflection/ReflectionFixture.h'
+          & clang++ @clangArgs > out/apple-clang-ast.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Preserve Apple Clang AST
+        if: failure() && runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-clang-ast
+          path: out/apple-clang-ast.json
       - name: Preserve reports
         if: always()
         uses: actions/upload-artifact@v4
