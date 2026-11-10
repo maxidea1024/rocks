@@ -42,3 +42,7 @@
 ## 후속 통합 실행 확인
 
 위 기록 이후 최종 소스 `a321125b22a4ca628f5bbc15b3bb0f74b9ab1bfda003e46bb33ffa015e75b27a`로 Windows Debug·Release·ASan 전체 179개와 CTest 10/10/11개가 통과하였다. 이 보고서의 새 독립 회귀도 실제 실행 목록과 PASS에 포함된다. 같은 소스의 Release 100회 반복 17,900회는 실패 0이다. 원기록의 실행 대기는 검토 당시 상태이며, 최종 로컬 실행 근거는 [5차 검증 기록](ImplementationRound5.FoundationValidation.ko.md)을 따른다. macOS 결과는 별도 native CI 증거로 확정한다.
+
+## 후속 native CI 확인
+
+구현 커밋 `a310ba5dcd5f19eff4e8bf43a3d35d468a067e20`의 [CI 42775786556](https://github.com/maxidea1024/rocks/actions/runs/42775786556)에서 Windows Debug 및 macOS 15 ARM64 Debug·ASan이 모두 전체 179개를 통과하였다. CTest는 각각 10/10/11개이며 이 보고서의 독립 회귀도 실행 목록에 포함된다. 내려받은 artifact는 clean HEAD, 소스 digest, 실제 report 해시와 일치한다. 상세 근거와 미검증 범위는 [5차 검증 기록](ImplementationRound5.FoundationValidation.ko.md)을 따른다.

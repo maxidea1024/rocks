@@ -1,6 +1,6 @@
 # Reflection과 Clang 메타 컴파일러 구현
 
-이 문서는 현재 구현한 Reflection 범위와 사용 계약을 정리한다. 엔진 런타임은 자체 타입·컨테이너를 사용하고, 메타 컴파일러는 호스트 Python과 네이티브 Clang을 사용한다. 전체 엔진 메타 빌드 시스템, 에디터 프로퍼티 UI, 스키마 마이그레이션은 아직 구현 범위에 포함하지 않는다.
+이 문서는 현재 구현한 Reflection 범위와 사용 계약을 정리한다. 엔진 런타임은 자체 타입·컨테이너를 사용하고, 메타 컴파일러는 호스트 Python과 네이티브 Clang을 사용한다. 전체 엔진 메타 빌드 시스템, 에디터 프로퍼티 UI, 자동 스키마 마이그레이션 생성은 아직 구현 범위에 포함하지 않는다. ObjectGraph의 명시 migration callback과 그 출력 검증은 별도 Serialization 계층에서 제공한다.
 
 ## 선언과 지원 형식
 
@@ -78,4 +78,4 @@ CMake는 객체 런타임을 포함하는 구성에서 fixture 생성, 생성 �
 
 Python 하네스는 실제 Clang을 호출하여 정상 상수 평가, 음수·범위 밖 버전, ID 오류·중복, 빠진 annotation, 미지원 필드·상속·Trace, 컴파일 오류와 경고 강등 옵션을 검사한다. 오류가 기존 출력 파일을 훼손하지 않는지, 같은 입력의 바이트·timestamp가 유지되는지, `--check`가 변경 없이 stale 출력을 거부하는지도 검사한다.
 
-Windows 통합 실행과 독립 리뷰의 최종 수치·산출물 hash는 별도 빌드 증거에 기록한다. 이 문서 자체는 모든 플랫폼의 실행 성공을 뜻하지 않는다. macOS 네이티브 실행과 TSan 검증은 해당 환경의 실행 증거가 확보될 때까지 미검증으로 유지한다.
+Windows 로컬 Debug·Release·ASan과 [Windows/macOS native CI](https://github.com/maxidea1024/rocks/actions/runs/42775786556)에서 생성 코드 및 실제 Clang 회귀 실행을 확인하였다. 최종 수치·산출물 hash는 [5차 검증 기록](../Reviews/ImplementationRound5.FoundationValidation.ko.md)을 따른다. macOS는 ARM64 Debug·ASan 범위이며 Intel Mac과 TSan은 미검증이다.

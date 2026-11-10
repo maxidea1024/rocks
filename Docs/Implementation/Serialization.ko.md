@@ -1,6 +1,6 @@
 # Rocks 직렬화 구현 계약
 
-기준일: 2026-11-10. Core의 binary archive와 GUID 기반 record, ObjectRuntime의 단일 strong graph 저장·복원을 구현하였다. 구현 대상은 아래 API와 시험 fixture로 한정한다. 이번 변경의 최종 Windows/macOS 실행 결과는 통합 검증 후 별도 보고서에 기록한다. 이전 Foundation 실행 횟수를 새 codec 검증 결과로 사용하지 않는다.
+기준일: 2026-11-10. Core의 binary archive와 GUID 기반 record, ObjectRuntime의 단일 strong graph 저장·복원을 구현하였다. 구현 대상은 아래 API와 시험 fixture로 한정한다. 이번 변경의 최종 Windows/macOS 실행 결과는 [5차 검증 기록](../Reviews/ImplementationRound5.FoundationValidation.ko.md)에 기록하였다. 이전 Foundation 실행 횟수를 새 codec 검증 결과로 사용하지 않는다.
 
 ## 모듈과 공개 API
 

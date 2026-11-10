@@ -45,6 +45,21 @@ Clang 21.1.6, seed 7351로 다음 구성을 실제 실행하였다. 기존 110�
 
 독립 회귀에는 중첩 scheduler Submit의 바깥 Shutdown 교착 방지, 부분 marker 제출 OOM 후 drain, generated metadata 기반 cycle의 저장·복원 및 scratch 파괴 후 접근, native 참조 불일치의 생성 전 거부, 같은 native 타입의 별명 TypeId 보존이 포함된다. 이 검증 기록에 수정 근거와 범위 제한을 기록하였다.
 
+## 최종 Windows/macOS CI
+
+구현 커밋 `a310ba5dcd5f19eff4e8bf43a3d35d468a067e20`의 [CI 실행 42775786556](https://github.com/maxidea1024/rocks/actions/runs/42775786556)에서 Windows 및 macOS job이 모두 성공하였다. 원본 artifact의 report, build-evidence, CTest 로그를 내려받아 실행 목록·결과·해시를 직접 대조하였다.
+
+| CI 구성 | 실제 compiler·architecture | Foundation | CTest | 결과 |
+|---|---|---:|---:|---|
+| Windows Debug | clang version 20.1.8 · x64 | 179개 | 10개 | PASS |
+| macOS 15 Debug | Apple clang version 17.0.0 · arm64 | 179개 | 10개 | PASS |
+| macOS 15 ASan | Apple clang version 17.0.0 · arm64 | 179개 | 11개 | PASS |
+
+
+세 구성 모두 위 HEAD, dirty=false, sourceStableDuringRun=true, runnerReportCurrent=true다. source digest `a321125b22a4ca628f5bbc15b3bb0f74b9ab1bfda003e46bb33ffa015e75b27a`와 147개 입력 파일은 로컬 네 구성 및 17,900회 반복과 동일하다. 실제 report SHA-256도 각각 evidence와 일치한다. 새 독립 회귀를 포함한 179개 이름의 집합, seed 7351, 메타 컴파일러 15개 그룹, 경고 오류·플랫폼/STL 감사의 실행 성공을 확인하였다. macOS ASan은 실제 UAF 음성 대조를 포함한다.
+
+artifact는 `out/ci-42775786556`에 보관한다. 별도의 검토자가 로컬 결과와 CI 원본 산출물을 독립 대조하여 같은 커밋·소스·실행 목록·보고서 해시 및 실제 음성 대조군 성공을 확인하였다. 불일치는 없었다. 문서만 갱신한 후속 커밋은 이 C++/빌드 입력 digest를 변경하지 않는다. 이는 CPU Foundation subset의 native 실행 결과이며 전체 엔진·Intel Mac·콘솔·TSan 검증으로 확대하지 않는다.
+
 ## 검증 범위의 제한
 
 allocator ledger, 객체·lease 계수, ASan과 실패 주입은 이번 fixture의 오류 검출 수단이다. 모든 실행에서 누수가 절대 발생하지 않는다는 증명이나 Windows LeakSanitizer 결과로 해석하지 않는다. TSan, 임의 스케줄 전체 탐색, 장시간 제품 workload, native OS API의 모든 실패 지점, Intel Mac·Linux·콘솔 실행은 별도 과제다.
