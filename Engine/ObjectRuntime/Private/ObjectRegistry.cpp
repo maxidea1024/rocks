@@ -206,6 +206,12 @@ Result<void*> AccessBorrow(ObjectRegistry* registry, ObjectHandle handle,
     if (platform::CurrentThreadId() != registry->ownerThread_) {
         return Result<void*>::Failure(ErrorCode::WrongThread);
     }
+    // 명시된 문맥이 있으면 다른 World의 Borrow에서 포인터를 얻을 수 없다.
+    // 문맥이 없을 때의 일반 조회와 다른 스레드의 Borrow 반환은 그대로 허용한다.
+    auto current = ObjectAccessScope::Current();
+    if (current && !(current.Value().context == registry->context_)) {
+        return Result<void*>::Failure(ErrorCode::WrongContext);
+    }
     platform::LockGuard lock(registry->gate_);
     auto* slot = registry->FindSlot(handle);
     auto valid = registry->CheckLive(slot, nativeType);
@@ -305,7 +311,17 @@ Result<ObjectAccessContext> ObjectRegistry::ScopedAccess() const noexcept {
     if (platform::CurrentThreadId() != ownerThread_) {
         return Result<ObjectAccessContext>::Failure(ErrorCode::WrongThread);
     }
-    return ObjectAccessScope::Current();
+    auto current = ObjectAccessScope::Current();
+    if (current) {
+        // 명시된 실행 문맥은 항상 우선한다. 다른 World라면 CheckAccess가 거부한다.
+        return current;
+    }
+    // 실행 문맥이 없으면 객체가 속한 Registry를 사용한다. 이때 호출자의 World는 식별하지
+    // 못한다. 등록된 Borrow·슬롯·스레드 검사는 이후에도 그대로 수행한다.
+    if (current.Error() == ErrorCode::WrongContext && !options_.requireLifecycleScope) {
+        return Result<ObjectAccessContext>::Success(OwnerAccess());
+    }
+    return current;
 }
 
 Result<void> ObjectRegistry::DestroySelf(ObjectHandle handle, const Object* object) noexcept {

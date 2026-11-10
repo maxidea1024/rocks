@@ -1,10 +1,8 @@
 # 객체 생명주기와 실행 문맥
 
-Rocks 객체의 식별자와 생명주기 상태는 `ObjectRegistry`가 소유한다. `Object`는 소유하지 않는 레지스트리 연결을 이용하여 파생 클래스에서 `Destroy()`, `IsDestroyRequested()`, `InspectLifecycle()`을 사용할 수 있다. 호출할 때마다 레지스트리를 넘기지 않도록 World·PIE 등 실행 경계에서 `ObjectAccessScope`를 한 번 설정한다.
+Rocks 객체의 식별자와 생명주기 상태는 `ObjectRegistry`가 소유한다. `Object`는 소유하지 않는 레지스트리 연결을 이용하여 파생 클래스에서 `Destroy()`, `IsDestroyRequested()`, `InspectLifecycle()`을 사용할 수 있다. 기본 설정에서는 별도의 `ObjectAccessScope`를 만들지 않아도 객체가 속한 Registry 문맥을 사용한다.
 
 ```cpp
-rocks::ObjectAccessScope scope(worldAccess);
-
 // root와 registry는 이 코드보다 오래 살아야 한다.
 auto borrowed = registry.Resolve<MyObject>(worldAccess, root.Handle());
 if (!borrowed) {
@@ -20,6 +18,9 @@ auto before = object.Value()->IsDestroyRequested();
 if (!before) {
     return before.Error();
 }
+if (before.Value()) {
+    return rocks::ErrorCode::Destroyed;
+}
 
 auto requested = object.Value()->Destroy();
 if (!requested) {
@@ -33,7 +34,11 @@ if (!state) {
 }
 ```
 
-위 예시는 `ErrorCode`를 반환할 수 있는 함수 내부에서 실행한다. `ObjectAccessScope`는 비복사·비이동이며 생성한 스레드에서 역순으로 파괴해야 한다. 중첩 scope가 끝나면 이전 문맥을 복원한다. 현재 Foundation에는 자동 World dispatch나 task/worker 문맥 전파가 없으므로 호출자가 실행 경계에서 명시적으로 scope를 만들어야 한다. scope가 없으면 `WrongContext`, 다른 World의 scope는 `WrongContext`, 다른 스레드는 `WrongThread`다. 이 검사는 호출자 실수를 막기 위한 문맥 검사이며 보안 인증이 아니다.
+위 예시는 `ErrorCode`를 반환할 수 있는 함수 내부에서 실행한다. `IsDestroyRequested()`는 `Result<bool>`을 반환한다. `if (before)`는 **조회 성공 여부**를 확인하며, 실제 파괴 요청 상태는 성공을 확인한 뒤 `before.Value()`로 읽는다.
+
+기본 설정에서 scope가 없으면 객체 또는 Borrow가 속한 Registry의 문맥을 사용한다. 이 경로는 thread-local scope를 만들거나 task로 전파하지 않는다. 이때 호출자가 실제로 어느 World에서 실행 중인지는 알 수 없어, 다른 World에서 scope 없이 전달받은 포인터의 오용을 구분할 수 없다. 명시적인 `ObjectAccessScope`가 있으면 그 문맥을 우선 적용하며 다른 World의 객체는 `WrongContext`로 거부한다. 다른 스레드는 항상 `WrongThread`다. 이 검사는 호출자 실수를 막기 위한 문맥 검사이며 보안 인증이 아니다.
+
+World·PIE dispatcher가 항상 실행 문맥을 설정하는 구성은 `RegistryOptions::requireLifecycleScope = true`를 지정할 수 있다. 이 경우 `Object` 및 `Borrow`의 무인자 생명주기 API는 scope가 없으면 `WrongContext`다. 이 옵션은 명시적 `ObjectAccessContext`를 받는 Registry API에 적용되지 않는다. 현재 World dispatch와 task/worker 문맥 자동 전파는 아직 없으므로 엄격 모드 사용자는 진입 경계에서 scope를 설정해야 한다. `ObjectAccessScope`는 비복사·비이동이며 생성한 스레드에서 역순으로 파괴한다. 중첩 scope가 끝나면 이전 문맥을 복원한다.
 
 scope 객체의 주소를 범위 밖에 보관하거나 `longjmp` 등으로 소멸자를 건너뛰는 사용은 지원하지 않는다. 생성 스레드가 아닌 곳에서 파괴하거나 역순을 어기면 현재 thread-local 문맥이 손상될 수 있으므로 즉시 Fatal로 중단한다.
 
@@ -45,4 +50,4 @@ scope 객체의 주소를 범위 밖에 보관하거나 `longjmp` 등으로 소�
 
 외부에서 핸들의 상태를 확인할 때는 `registry.InspectLifecycle(access, handle)`을 사용한다. `RequestDestroy`는 기존 `DestroyRequested` 또는 `Retired` 슬롯에 다시 요청하면 성공한다. 이미 파괴 요청된 객체가 cutoff에 걸려 `Unreachable`로 조회되어도 이 재요청은 성공한다. 반면 파괴를 요청하지 않았던 cutoff white 객체에 새 파괴 요청은 `Destroyed`다.
 
-객체 생성자가 실행되는 동안 registry 연결은 아직 없어 무인자 API가 `StaleHandle`을 반환한다. 생성자는 반환한 뒤 Registry에 연결되지만 `ConstructionContext`의 미공개 슬롯도 일반 수명 조회 및 파괴 요청을 허용하지 않는다. 생성자 실행 중에는 앞서 설명한 `StaleHandle`이며, 그 외 소유 스레드에서 유효한 scope를 유지한 채 Registry의 생성 처리·trace·소멸 callback에 재진입하면 `Busy`, shutdown 시작 이후에는 `ShuttingDown`이다. scope가 없으면 먼저 `WrongContext`가 반환된다. 병렬 trace worker에서는 재진입 상태보다 소유 스레드 검사가 먼저이므로 `WrongThread`다. 정상 종료 전에 모든 root·borrow·backend lease를 반환하고 Registry가 그보다 오래 살아야 한다.
+객체 생성자가 실행되는 동안 registry 연결은 아직 없어 무인자 API가 `StaleHandle`을 반환한다. 생성자는 반환한 뒤 Registry에 연결되지만 `ConstructionContext`의 미공개 슬롯도 일반 수명 조회 및 파괴 요청을 허용하지 않는다. 생성자 실행 중에는 앞서 설명한 `StaleHandle`이며, 그 외 소유 스레드에서 유효한 scope를 유지한 채 Registry의 생성 처리·trace·소멸 callback에 재진입하면 `Busy`, shutdown 시작 이후에는 `ShuttingDown`이다. 기본 설정에서는 scope가 없어도 같은 소유 스레드와 Registry 문맥으로 검사한다. 엄격 모드에서는 scope가 없으면 먼저 `WrongContext`가 반환된다. 병렬 trace worker에서는 재진입 상태보다 소유 스레드 검사가 먼저이므로 `WrongThread`다. 정상 종료 전에 모든 root·borrow·backend lease를 반환하고 Registry가 그보다 오래 살아야 한다.

@@ -47,6 +47,14 @@ struct LifecycleProbe final : Object {
         }
     }
 
+    // 파생 클래스 사용자는 실행 scope를 직접 만들지 않고 같은 멤버 API를 호출한다.
+    Result<void> DestroyFromMember() noexcept {
+        return Destroy();
+    }
+
+    Result<bool> DestructionRequestedFromMember() const noexcept {
+        return IsDestroyRequested();
+    }
     void Trace(TraceVisitor&) const noexcept {
         if (callbackRegistry && inspectTrace) {
             traceQuery = InspectLifecycle().Error();
@@ -59,7 +67,10 @@ struct ForeignQuery {
     ObjectAccessContext access;
     ObjectHandle handle;
     const Borrow<LifecycleProbe>* borrow;
+    LifecycleProbe* object;
     ErrorCode result = ErrorCode::None;
+    ErrorCode objectResult = ErrorCode::None;
+    ErrorCode objectDestroy = ErrorCode::None;
     ErrorCode borrowResult = ErrorCode::None;
     ErrorCode scopedBorrowResult = ErrorCode::None;
     ErrorCode scopeResult = ErrorCode::None;
@@ -69,6 +80,8 @@ void QueryOnForeignThread(void* raw) noexcept {
     auto& query = *static_cast<ForeignQuery*>(raw);
     query.result = query.registry->InspectLifecycle(query.access, query.handle).Error();
     query.borrowResult = query.borrow->InspectLifecycle().Error();
+    query.objectResult = query.object->InspectLifecycle().Error();
+    query.objectDestroy = query.object->Destroy().Error();
     query.scopeResult = ObjectAccessScope::Current().Error();
     {
         ObjectAccessScope foreignScope(query.access);
@@ -148,16 +161,30 @@ TEST(ObjectLifecycleAccessDestroyLeasesAndGeneration) {
         REQUIRE(borrow && backend);
         auto object = borrow.Value().Get();
         REQUIRE(object);
-        CHECK(object.Value()->InspectLifecycle().Error() == ErrorCode::WrongContext);
-        CHECK(object.Value()->IsDestroyRequested().Error() == ErrorCode::WrongContext);
-        CHECK(object.Value()->Destroy().Error() == ErrorCode::WrongContext);
-        CHECK(borrow.Value().InspectLifecycle().Error() == ErrorCode::WrongContext);
+        auto automatic = object.Value()->InspectLifecycle();
+        REQUIRE(automatic);
+        CHECK(automatic.Value() == ObjectLifecycle::Alive);
+        auto automaticRequested = object.Value()->IsDestroyRequested();
+        REQUIRE(automaticRequested);
+        CHECK(!automaticRequested.Value());
+        auto automaticBorrow = borrow.Value().InspectLifecycle();
+        REQUIRE(automaticBorrow);
+        CHECK(automaticBorrow.Value() == ObjectLifecycle::Alive);
+        // root가 저장소를 유지하는 음성 대조에서만 Borrow 없이 원시 포인터를 시험한다.
+        LifecycleProbe* automaticWithoutBorrow = object.Value();
+        borrow.Value().Reset();
+        CHECK(automaticWithoutBorrow->InspectLifecycle().Error() == ErrorCode::InvalidArgument);
+        CHECK(automaticWithoutBorrow->Destroy().Error() == ErrorCode::InvalidArgument);
+        borrow = registry.Resolve<LifecycleProbe>(access, handle);
+        REQUIRE(borrow);
+        object = borrow.Value().Get();
+        REQUIRE(object);
         CHECK(other.RequestDestroy(access, handle).Error() == ErrorCode::StaleHandle);
         CHECK(registry.InspectLifecycle(wrong, handle).Error() == ErrorCode::WrongContext);
         CHECK(other.InspectLifecycle(access, handle).Error() == ErrorCode::StaleHandle);
         CHECK(registry.InspectLifecycle(access, {}).Error() == ErrorCode::StaleHandle);
 
-        ForeignQuery query{&registry, access, handle, &borrow.Value()};
+        ForeignQuery query{&registry, access, handle, &borrow.Value(), object.Value()};
         platform::Thread worker;
         if (worker.Start(QueryOnForeignThread, &query) != platform::ThreadStatus::Success ||
             worker.WaitForCompletion(10000) != platform::WaitResult::Signaled ||
@@ -166,6 +193,8 @@ TEST(ObjectLifecycleAccessDestroyLeasesAndGeneration) {
         }
         CHECK(query.result == ErrorCode::WrongThread);
         CHECK(query.borrowResult == ErrorCode::WrongThread);
+        CHECK(query.objectResult == ErrorCode::WrongThread);
+        CHECK(query.objectDestroy == ErrorCode::WrongThread);
         CHECK(query.scopedBorrowResult == ErrorCode::WrongThread);
         CHECK(query.scopeResult == ErrorCode::WrongContext);
 
@@ -247,6 +276,143 @@ TEST(ObjectLifecycleAccessDestroyLeasesAndGeneration) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+TEST(ObjectLifecycleAutomaticContextAndStrictPolicy) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(types.Register({LifecycleType, 1, {}, {}}, MakeRuntimeTypeOps<LifecycleProbe>()));
+        ObjectRegistry first(allocator, types, {306, 1});
+        ObjectRegistry second(allocator, types, {306, 2});
+        ObjectRegistry strict(allocator, types, {306, 3}, {8, 0xffffffffu, true});
+        const auto firstAccess = first.OwnerAccess();
+        const auto secondAccess = second.OwnerAccess();
+        const auto strictAccess = strict.OwnerAccess();
+        auto firstRoot = first.NewObject<LifecycleProbe>(firstAccess, LifecycleType);
+        auto secondRoot = second.NewObject<LifecycleProbe>(secondAccess, LifecycleType);
+        auto strictRoot = strict.NewObject<LifecycleProbe>(strictAccess, LifecycleType);
+        REQUIRE(firstRoot && secondRoot && strictRoot);
+        auto firstBorrow = first.Resolve<LifecycleProbe>(firstAccess, firstRoot.Value().Handle());
+        auto secondBorrow =
+            second.Resolve<LifecycleProbe>(secondAccess, secondRoot.Value().Handle());
+        auto strictBorrow =
+            strict.Resolve<LifecycleProbe>(strictAccess, strictRoot.Value().Handle());
+        REQUIRE(firstBorrow && secondBorrow && strictBorrow);
+        auto firstObject = firstBorrow.Value().Get();
+        auto secondObject = secondBorrow.Value().Get();
+        auto strictObject = strictBorrow.Value().Get();
+        REQUIRE(firstObject && secondObject && strictObject);
+
+        // 자동 경로는 thread-local scope를 만들지 않는다. 성공 여부와 실제 bool 값도 분리한다.
+        CHECK(ObjectAccessScope::Current().Error() == ErrorCode::WrongContext);
+        auto before = firstObject.Value()->DestructionRequestedFromMember();
+        REQUIRE(before);
+        CHECK(static_cast<bool>(before));
+        CHECK(!before.Value());
+        auto secondState = secondBorrow.Value().InspectLifecycle();
+        REQUIRE(secondState);
+        CHECK(secondState.Value() == ObjectLifecycle::Alive);
+        CHECK(strictObject.Value()->InspectLifecycle().Error() == ErrorCode::WrongContext);
+        CHECK(strictObject.Value()->Destroy().Error() == ErrorCode::WrongContext);
+        CHECK(strictBorrow.Value().InspectLifecycle().Error() == ErrorCode::WrongContext);
+        // 엄격 옵션은 무인자 API에 한정되며, 별도 명시 문맥을 받는 조회는 정상 작동한다.
+        auto explicitState = strict.InspectLifecycle(strictAccess, strictRoot.Value().Handle());
+        REQUIRE(explicitState);
+        CHECK(explicitState.Value() == ObjectLifecycle::Alive);
+
+        {
+            ObjectAccessScope strictScope(strictAccess);
+            CHECK(firstObject.Value()->Destroy().Error() == ErrorCode::WrongContext);
+            CHECK(firstBorrow.Value().InspectLifecycle().Error() == ErrorCode::WrongContext);
+            CHECK(firstBorrow.Value().Get().Error() == ErrorCode::WrongContext);
+            REQUIRE(strictBorrow.Value().Get());
+            auto strictAlive = strictObject.Value()->InspectLifecycle();
+            REQUIRE(strictAlive);
+            CHECK(strictAlive.Value() == ObjectLifecycle::Alive);
+            {
+                ObjectAccessScope firstScope(firstAccess);
+                auto firstAlive = firstObject.Value()->InspectLifecycle();
+                REQUIRE(firstAlive);
+                CHECK(firstAlive.Value() == ObjectLifecycle::Alive);
+                CHECK(strictObject.Value()->InspectLifecycle().Error() == ErrorCode::WrongContext);
+                CHECK(strictBorrow.Value().Get().Error() == ErrorCode::WrongContext);
+                REQUIRE(firstBorrow.Value().Get());
+                CHECK(secondObject.Value()->Destroy().Error() == ErrorCode::WrongContext);
+            }
+            auto restored = strictObject.Value()->InspectLifecycle();
+            REQUIRE(restored);
+            CHECK(restored.Value() == ObjectLifecycle::Alive);
+            REQUIRE(strictBorrow.Value().Get());
+            CHECK(firstBorrow.Value().Get().Error() == ErrorCode::WrongContext);
+        }
+        CHECK(ObjectAccessScope::Current().Error() == ErrorCode::WrongContext);
+        REQUIRE(firstObject.Value()->DestroyFromMember());
+        auto after = firstObject.Value()->DestructionRequestedFromMember();
+        REQUIRE(after);
+        CHECK(static_cast<bool>(after));
+        CHECK(after.Value());
+        REQUIRE(firstObject.Value()->DestroyFromMember());
+        auto requested = firstBorrow.Value().InspectLifecycle();
+        REQUIRE(requested);
+        CHECK(requested.Value() == ObjectLifecycle::DestroyRequested);
+        CHECK(firstBorrow.Value().Get().Error() == ErrorCode::Destroyed);
+        auto unaffected = secondObject.Value()->DestructionRequestedFromMember();
+        REQUIRE(unaffected);
+        CHECK(!unaffected.Value());
+        {
+            ObjectAccessScope strictScope(strictAccess);
+            REQUIRE(strictObject.Value()->DestroyFromMember());
+        }
+        CHECK(strictBorrow.Value().InspectLifecycle().Error() == ErrorCode::WrongContext);
+        CHECK(ObjectAccessScope::Current().Error() == ErrorCode::WrongContext);
+
+        firstBorrow.Value().Reset();
+        secondBorrow.Value().Reset();
+        strictBorrow.Value().Reset();
+        firstRoot.Value().Reset();
+        secondRoot.Value().Reset();
+        strictRoot.Value().Reset();
+        REQUIRE(first.Collect(firstAccess));
+        REQUIRE(second.Collect(secondAccess));
+        REQUIRE(strict.Collect(strictAccess));
+        REQUIRE(first.Shutdown(firstAccess));
+        REQUIRE(second.Shutdown(secondAccess));
+        REQUIRE(strict.Shutdown(strictAccess));
+        REQUIRE(types.Shutdown());
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+TEST(ObjectLifecycleAutomaticContextPreservesShutdownErrors) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(types.Register({LifecycleType, 1, {}, {}}, MakeRuntimeTypeOps<LifecycleProbe>()));
+        ObjectRegistry registry(allocator, types, {307, 1});
+        const auto access = registry.OwnerAccess();
+        auto root = registry.NewObject<LifecycleProbe>(access, LifecycleType);
+        REQUIRE(root);
+        auto borrow = registry.Resolve<LifecycleProbe>(access, root.Value().Handle());
+        REQUIRE(borrow);
+        auto object = borrow.Value().Get();
+        REQUIRE(object);
+        auto before = object.Value()->IsDestroyRequested();
+        REQUIRE(before);
+        CHECK(!before.Value());
+
+        // Shutdown은 등록된 Borrow 때문에 Busy지만 닫힌 상태를 유지한다.
+        CHECK(registry.Shutdown(access).Error() == ErrorCode::Busy);
+        CHECK(object.Value()->InspectLifecycle().Error() == ErrorCode::ShuttingDown);
+        CHECK(object.Value()->IsDestroyRequested().Error() == ErrorCode::ShuttingDown);
+        CHECK(object.Value()->Destroy().Error() == ErrorCode::ShuttingDown);
+        CHECK(borrow.Value().InspectLifecycle().Error() == ErrorCode::ShuttingDown);
+        borrow.Value().Reset();
+        root.Value().Reset();
+        REQUIRE(registry.Shutdown(access));
+        REQUIRE(types.Shutdown());
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
 TEST(ObjectLifecycleConstructionAndCallbackReentry) {
     SystemAllocator allocator;
     {
@@ -254,7 +420,6 @@ TEST(ObjectLifecycleConstructionAndCallbackReentry) {
         REQUIRE(types.Register({LifecycleType, 1, {}, {}}, MakeRuntimeTypeOps<LifecycleProbe>()));
         ObjectRegistry registry(allocator, types, {302, 1});
         const auto access = registry.OwnerAccess();
-        ObjectAccessScope scope(access);
         callbackRegistry = &registry;
         ResetCallbacks reset;
         destructions = 0;

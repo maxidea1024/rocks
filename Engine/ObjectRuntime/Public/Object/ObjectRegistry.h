@@ -29,6 +29,10 @@ struct GcBudget {
 struct RegistryOptions {
     uint32 maxSlots = 1048576;
     uint32 maxGeneration = 0xffffffffu;
+    // 기본값은 scope 없는 객체 자체 호출에 Registry의 문맥을 사용한다. World/PIE dispatcher가
+    // 실행 문맥을 설정하는 구성은 true로 하여 무인자 생명주기 API의 scope 누락을 거부한다.
+    // 명시적 ObjectAccessContext를 받는 Registry API의 검증에는 영향을 주지 않는다.
+    bool requireLifecycleScope = false;
 };
 
 struct ObjectStats {

@@ -33,14 +33,18 @@ public:
         return handle_;
     }
 
-    // 현재 스레드의 ObjectAccessScope와 이 객체의 활성 Borrow가 필요하다. 객체 생성자 안과
-    // 미공개 상태는 실패한다. 같은 Borrow 안에서 이미 요청된 파괴의 재요청은 성공한다.
+    // 소유 스레드와 이 객체의 활성 Borrow가 필요하다. 실행 scope가 있으면 해당 문맥을 검사하고,
+    // 없으면 기본 설정에서는 이 객체의 Registry 문맥을 사용한다. Registry가 엄격 모드라면 scope
+    // 누락은 실패한다. scope가 없을 때 호출자의 World는 검증할 수 없다. 생성자 안과 미공개
+    // 상태는 실패한다. 같은 Borrow 안에서 이미 요청된 파괴의 재요청은 성공한다.
     Result<void> Destroy() noexcept;
 
     // snapshot은 수명이나 접근권을 보존하지 않는다. 논리 파괴 이후에도 같은 Borrow가 살아 있는
     // 동안 이 함수와 IsDestroyRequested/중복 Destroy만 사용할 수 있다. 다른 객체 접근은 금지다.
     Result<ObjectLifecycle> InspectLifecycle() const noexcept;
     // cutoff/retired에서는 명시 요청 여부를 보존하지 않으므로 false로 추측하지 않고 실패한다.
+    // Result 자체의 bool 변환은 조회 성공 여부다. 실제 파괴 요청 여부는 성공 확인 후 Value()로
+    // 읽는다.
     Result<bool> IsDestroyRequested() const noexcept;
 
 protected:
