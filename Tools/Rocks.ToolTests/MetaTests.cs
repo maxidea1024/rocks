@@ -48,6 +48,16 @@ internal static class MetaTests
             Verify.That(Regex.IsMatch(File.ReadAllText(probe.Output), @"schema\s*\{\s*Id\(\)\s*,\s*3\s*,",
                 RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)), "Clang evaluated schema version was not emitted");
         });
+        suite.Add("Meta.SymlinkedParentsAndShadowedHeaders", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            await probe.SymlinkLocationsAsync();
+        });
+        suite.Add("Meta.ClangSourceNotesDoNotMisidentifyNames", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            await probe.SourceNotesAsync();
+        });
         suite.Add("Meta.IncludedHeaderDiagnosticUsesOriginalFileAndLine", async () =>
         {
             using Probe probe = new(options, actualEnvironment, generator, compiler);
@@ -163,6 +173,72 @@ internal static class MetaTests
             }
         }
 
+        public async Task SymlinkLocationsAsync()
+        {
+            string real = temporary.FilePath("real");
+            string alias = temporary.FilePath("alias");
+            string shadow = temporary.FilePath("shadow");
+            Directory.CreateDirectory(real);
+            Directory.CreateDirectory(shadow);
+            try { Directory.CreateSymbolicLink(alias, real); }
+            catch (Exception error) when (OperatingSystem.IsWindows() && error is UnauthorizedAccessException or IOException)
+            {
+                Console.WriteLine("[SKIP] Meta symlink fixture: Windows account cannot create symbolic links: " + error.Message);
+                return;
+            }
+            string original = Declaration();
+            string actualInput = Path.Combine(real, "Probe.h");
+            string aliasInput = Path.Combine(alias, "Probe.h");
+            File.WriteAllText(actualInput, original);
+            File.WriteAllText(Path.Combine(shadow, "Probe.h"), Declaration(version: "9"));
+            async Task<ProcessResult> Run(string input, string output, params string[] includeDirs)
+            {
+                List<string> arguments = [];
+                string executable = generator;
+                if (generator.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+                { executable = options.Optional("dotnet") ?? "dotnet"; arguments.Add(generator); }
+                arguments.AddRange(["--input", input, "--include", "Probe.h", "--output", output, "--compiler", compiler]);
+                foreach (string include in includeDirs.Concat(Directory.GetDirectories(Path.Combine(options.Root, "Engine"))
+                    .Select(module => Path.Combine(module, "Public")).Where(Directory.Exists)))
+                    arguments.AddRange(["--include-dir", include]);
+                foreach (string argument in options.ClangArguments) arguments.Add("--clang-arg=" + argument);
+                return await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: TimeSpan.FromSeconds(60)));
+            }
+            var valid = await Run(aliasInput, Output, real);
+            Verify.Equal(0, valid.ExitCode, "same file through symlinked parent rejected: " + valid.StdErr);
+            var shadowed = await Run(aliasInput, Output, shadow, real);
+            Verify.That(shadowed.ExitCode != 0, "different shadow header accepted");
+            Verify.Contains("resolved input=", shadowed.StdErr, "resolved input path missing");
+            Verify.Contains("resolved target=", shadowed.StdErr, "resolved shadow target missing");
+            Verify.Contains(Path.Combine(shadow, "Probe.h"), shadowed.StdErr, "shadow header path missing");
+            var sameOutput = await Run(actualInput, aliasInput, real);
+            Verify.That(sameOutput.ExitCode != 0, "input/output symlink alias was accepted");
+            Verify.Contains("RMC1000", sameOutput.StdErr, "same input/output rejection code");
+            Verify.Equal(original, File.ReadAllText(actualInput), "source header changed after rejected output alias");
+        }
+        public async Task SourceNotesAsync()
+        {
+            string input = temporary.FilePath("Probe.h");
+            string source = "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n" +
+                "namespace a { struct ROCKS_CLASS(\"b1000000000000000000000000000031\", 1) Thing : public rocks::Object { Thing() {} }; }\n" +
+                "namespace b { struct ROCKS_CLASS(\"b1000000000000000000000000000032\", 1) Thing : public rocks::Object {}; }\n" +
+                "namespace a { struct ROCKS_CLASS(\"b1000000000000000000000000000033\", 1) ThingExtended : public rocks::Object {}; }\n";
+            File.WriteAllText(input, source);
+            List<string> arguments = [];
+            string executable = generator;
+            if (generator.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+            { executable = options.Optional("dotnet") ?? "dotnet"; arguments.Add(generator); }
+            arguments.AddRange(["--input", input, "--include", "Probe.h", "--output", Output, "--compiler", compiler]);
+            foreach (string argument in options.ClangArguments) arguments.Add("--clang-arg=" + argument);
+            var result = await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: TimeSpan.FromSeconds(60)));
+            Verify.That(result.ExitCode != 0, "throwing constructor was accepted");
+            Verify.Contains("RMC3000", result.StdErr, "generated contract failure");
+            Verify.Contains("diagnostic references CLASS a::Thing", result.StdErr, "qualified class reference");
+            Verify.That(!result.StdErr.Contains("note: diagnostic references CLASS b::Thing", StringComparison.Ordinal),
+                "unrelated namespaced class was falsely identified");
+            Verify.That(!result.StdErr.Contains("note: diagnostic references CLASS a::ThingExtended", StringComparison.Ordinal),
+                "prefix name was falsely identified");
+        }
         public async Task NestedLocationAsync()
         {
             string main = temporary.FilePath("Main.h");

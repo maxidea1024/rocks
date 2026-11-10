@@ -42,6 +42,46 @@ private:
     Allocator* allocator_;
 };
 
+class TypeRegistry;
+
+// 등록된 필드의 실제 대상 schema, 타입과 값 형식을 검사한다. callback 코드 수명은 TypeLease가
+// 보유하는 ModuleLease에 종속되므로 이 값을 lease보다 오래 보관하거나 호출하지 않는다.
+class FieldWriteOperation {
+public:
+    using Callback = Result<void> (*)(ObjectRegistry&, const ObjectAccessContext&, ObjectHandle,
+                                      const FieldValue&) noexcept;
+
+    constexpr FieldWriteOperation() noexcept = default;
+
+    constexpr FieldWriteOperation(Callback callback) noexcept : callback_(callback) {
+    }
+
+    explicit constexpr operator bool() const noexcept {
+        return callback_ != nullptr;
+    }
+
+    Result<void> operator()(ObjectRegistry& registry, const ObjectAccessContext& access,
+                            ObjectHandle handle, const FieldValue& value) const noexcept;
+
+private:
+    friend class TypeRegistry;
+
+    void Bind(const void* nativeType, Guid fieldId, ValueKind valueKind, bool readOnly) noexcept {
+        nativeType_ = nativeType;
+        fieldId_ = fieldId;
+        valueKind_ = valueKind;
+        readOnly_ = readOnly;
+        bound_ = true;
+    }
+
+    Callback callback_ = nullptr;
+    const void* nativeType_ = nullptr;
+    Guid fieldId_{};
+    ValueKind valueKind_ = ValueKind::Opaque;
+    bool readOnly_ = false;
+    bool bound_ = false;
+};
+
 // 함수는 owner context/handle을 검사하는 generated thunk다. offset이나 raw field 주소를 공개하지
 // 않는다. read 실패는 out 불변, write 실패는 해당 필드에 새 값을 게시하지 않는다.
 // String commit 뒤 이전 buffer 반환 callback의 논리 파괴는 이미 완료된 성공을 되돌리지 않는다.
@@ -49,8 +89,7 @@ struct RuntimeFieldOps {
     Guid fieldId{};
     Result<void> (*read)(ObjectRegistry&, const ObjectAccessContext&, ObjectHandle,
                          FieldValue&) noexcept = nullptr;
-    Result<void> (*write)(ObjectRegistry&, const ObjectAccessContext&, ObjectHandle,
-                          const FieldValue&) noexcept = nullptr;
+    FieldWriteOperation write;
     Result<void> (*writeStaged)(ConstructionContext&, ObjectHandle,
                                 const FieldValue&) noexcept = nullptr;
 };

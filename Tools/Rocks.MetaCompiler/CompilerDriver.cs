@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Rocks.Tooling.Common;
 
 namespace Rocks.MetaCompiler;
@@ -97,24 +98,34 @@ internal static class CompilerDriver
 
     private static void ValidateIncludeBinding(string input, string include, string workingDirectory, IEnumerable<string> directories)
     {
-        string Identity(string path) => new FileInfo(path).ResolveLinkTarget(true)?.FullName ?? Path.GetFullPath(path);
         string? target = directories.Prepend(workingDirectory).Select(directory => Path.GetFullPath(Path.Combine(directory, include)))
             .FirstOrDefault(File.Exists);
-        if (target is null || !string.Equals(Identity(input), Identity(target), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
-            throw new MetadataException("--include resolves to a different header than --input", "RMC1000",
+        string canonicalInput = CanonicalPath.Resolve(input);
+        string? canonicalTarget = target is null ? null : CanonicalPath.Resolve(target);
+        if (canonicalTarget is null || !string.Equals(canonicalInput, canonicalTarget,
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            throw new MetadataException($"--include resolves to a different header than --input; input={input}; resolved input={canonicalInput}; " +
+                $"include target={target ?? "<not found>"}; resolved target={canonicalTarget ?? "<not found>"}", "RMC1000",
                 "Pass the same author header through the target's explicit include search order; remove shadowing include directories.");
     }
     private static string SourceNotes(SchemaModel schema, string diagnostic)
     {
+        // 이름의 일부 문자열은 별도 타입과 혼동된다. 완전한 qualified 이름만 확정 참조로
+        // 표시하고, 짧은 이름만 나온 경우에는 원인이라고 단정하지 않고 후보로 구분한다.
+        bool Token(string value) => Regex.IsMatch(diagnostic,
+            @"(?<![\p{L}\p{Nd}_:])(?:::)?" + Regex.Escape(value) + @"(?![\p{L}\p{Nd}_])",
+            RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
         StringBuilder notes = new();
-        foreach (ClassModel type in schema.Ordered) {
+        foreach (ClassModel type in schema.Ordered)
+        {
+            bool qualified = type.Name.Contains("::", StringComparison.Ordinal) && Token(type.Name);
             string shortName = type.Name.Split("::")[^1];
-            if (!diagnostic.Contains(shortName, StringComparison.Ordinal)) continue;
-            notes.AppendLine($"{type.Site.File}:{type.Site.Line}: note: source CLASS {type.Name}");
-            foreach (FieldModel field in type.Fields) {
-                if (diagnostic.Contains(field.Name, StringComparison.Ordinal))
-                    notes.AppendLine($"{field.Site.File}:{field.Site.Line}: note: source PROPERTY {field.Owner}::{field.Name}");
-            }
+            if (!qualified && !Token(shortName)) continue;
+            string description = qualified ? "diagnostic references CLASS" : "candidate CLASS";
+            notes.AppendLine($"{type.Site.File}:{type.Site.Line}: note: {description} {type.Name}");
+            foreach (FieldModel field in type.Fields)
+                if (Token(field.Name))
+                    notes.AppendLine($"{field.Site.File}:{field.Site.Line}: note: candidate PROPERTY {field.Owner}::{field.Name}");
         }
         return notes.ToString();
     }

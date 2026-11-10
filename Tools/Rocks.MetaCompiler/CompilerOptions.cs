@@ -36,8 +36,8 @@ internal sealed class CompilerOptions
                 throw new MetadataException($"required option missing: {key}", "RMC1000", "Supply all three input/include/output options.");
         string input = Path.GetFullPath(single["--input"]);
         string output = Path.GetFullPath(single["--output"]);
-        string Identity(string path) => File.Exists(path) ? new FileInfo(path).ResolveLinkTarget(true)?.FullName ?? path : path;
-        if (string.Equals(Identity(input), Identity(output), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+        if (CanonicalPath.Equals(input, output))
+
             throw new MetadataException("input and output must be different files", "RMC1000", "Use a separate generated header path; never overwrite an author header.");
         if (Directory.Exists(output)) throw new MetadataException("output path is a directory", "RMC1000", "Specify a generated file path.");
         string include = single["--include"];

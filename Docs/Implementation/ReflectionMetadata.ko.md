@@ -50,8 +50,9 @@ Shutdown은 새 Acquire/Clone을 닫고 외부 lease가 있으면 `Busy`를 반�
 - 정수 폭 축소는 범위를 확인하고 `Overflow`를 반환한다. 타입이 다르면 `TypeMismatch`이며 필드는 변경하지 않는다.
 - ObjectRef write는 `ObjectRegistry::SetReference` 또는 `ConstructionContext::SetReference`를 통과한다. owner/target 검증, typed target 규칙, GC barrier를 raw store로 우회하지 않는다.
 
-`ReadOnly`는 등록된 `TypeLease::Ops()`의 일반 write에 적용되는 편집 정책이다. 등록 시 함수표를 복사하면서 해당 write를 공통 거부 callback으로 교체하므로, 입력 schema가 ReadOnly인데 제공된 callback이 쓰기를 수행하는 경우에도 등록된 함수표는 쓰기를 거부한다. owner thread·context와 handle의 생존 여부를 검사하며, 정상 객체에 대해서는 `Unsupported`를 반환한다. 공통 callback의 서명에는 선언 타입 식별자가 없어 다른 유효 native 타입 객체를 전달해도 `TypeMismatch`가 아니라 `Unsupported`를 반환한다. 미게시 객체에 대한 `writeStaged`는 초기화와 복원을 위해 허용한다.
+등록된 `TypeLease::Ops()`의 모든 일반 write는 실제 대상 객체의 타입 lease를 조회하고 native 타입, 필드 ID와 값 형식을 검증한다. 대상 타입에 필드가 없으면 `NotFound`, native 타입·필드 형식·전달 값 형식이 다르면 `TypeMismatch`를 반환한다. 오류 우선순위는 context·수명, 타입·필드, 전달 값, 읽기 전용 정책 순서다. 따라서 같은 native 타입의 다른 TypeId 별명이나 별도 TypeRegistry의 객체도 실제 대상 schema의 필드 정책을 검사한다.
 
+`ReadOnly`는 등록된 함수표의 일반 write에 적용되는 편집 정책이다. 원본 또는 대상 schema 중 하나라도 해당 필드를 ReadOnly로 선언하면 `Unsupported`를 반환한다. 미게시 객체에 대한 `writeStaged`는 초기화와 복원을 위해 허용한다. 등록된 write마다 타입 lease 조회와 필드 검색 비용이 발생하며, 안전한 정책 확인을 우선한다. `write`는 callable 값이며 기존 `.write(...)` 호출 구문을 유지한다. 이 값의 callback 코드 수명은 `TypeLease`가 보유하는 `ModuleLease`에 종속된다.
 이 정책은 C++ 멤버에 대한 직접 접근이나 등록 전 `GeneratedType<T>::Ops()`의 원본 callback 호출을 차단하는 보안 경계가 아니다. 수동 코드 제공자는 원본 callback과 필드 접근의 사용 범위를 관리해야 한다.
 `String::Swap`은 allocator와 storage 소유권도 함께 교환한다. 양쪽 allocator가 각 저장소의 최종 반환보다 오래 살아야 한다. 같은 String의 변경 재진입은 기존 String 계약대로 금지한다.
 

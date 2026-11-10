@@ -7,6 +7,45 @@
 
 namespace rocks {
 
+Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
+                                             const ObjectAccessContext& access, ObjectHandle handle,
+                                             const FieldValue& value) const noexcept {
+    if (!callback_) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+    if (!bound_) {
+        // 등록 전 원본 함수표는 기존 저수준 callback 계약을 유지한다.
+        return callback_(registry, access, handle, value);
+    }
+    // 다른 TypeRegistry 또는 같은 native 타입의 별명 스키마도 대상 객체 기준으로 확인한다.
+    // callback을 호출할 때는 registry 잠금을 보유하지 않으며 대상 타입 lease는 종료까지 유지한다.
+    auto type = registry.AcquireType(access, handle);
+    if (!type) {
+        return Result<void>::Failure(type.Error());
+    }
+    if (type.Value().Ops().nativeType != nativeType_) {
+        return Result<void>::Failure(ErrorCode::TypeMismatch);
+    }
+    const FieldSchema* actual = nullptr;
+    const auto fields = type.Value().Schema().fields;
+    for (usize index = 0; index < fields.Size(); ++index) {
+        if (fields[index].id == fieldId_) {
+            actual = &fields[index];
+            break;
+        }
+    }
+    if (!actual) {
+        return Result<void>::Failure(ErrorCode::NotFound);
+    }
+    if (actual->valueKind != valueKind_ || value.kind != valueKind_) {
+        return Result<void>::Failure(ErrorCode::TypeMismatch);
+    }
+    if (readOnly_ || HasFlag(actual->flags, FieldFlags::ReadOnly)) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+    return callback_(registry, access, handle, value);
+}
+
 namespace detail {
 
 uint64 NextRegistryDomain() noexcept {
@@ -32,21 +71,6 @@ struct TypeRegistry::Record {
 };
 
 namespace {
-
-// 등록된 schema가 읽기 전용이면 공급된 callback의 구현과 무관하게 쓰기를 거부한다.
-// 함수표 서명에는 선언 타입이 없으므로 여기서 구체 native type까지 판별하지는 못한다.
-Result<void> RejectReadOnlyWrite(ObjectRegistry& registry, const ObjectAccessContext& access,
-                                 ObjectHandle handle, const FieldValue&) noexcept {
-    auto borrowed = registry.Resolve<Object>(access, handle);
-    if (!borrowed) {
-        return Result<void>::Failure(borrowed.Error());
-    }
-    auto valid = borrowed.Value().Get();
-    if (!valid) {
-        return Result<void>::Failure(valid.Error());
-    }
-    return Result<void>::Failure(ErrorCode::Unsupported);
-}
 
 bool AddBytes(usize& total, usize count) noexcept {
     if (count > ~usize(0) - total) {
@@ -315,10 +339,11 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     for (usize index = 0; index < ops.fields.Size(); ++index) {
         ::new (fieldOps + index) RuntimeFieldOps(ops.fields[index]);
         for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
-            if (fields[fieldIndex].id == fieldOps[index].fieldId &&
-                HasFlag(fields[fieldIndex].flags, FieldFlags::ReadOnly)) {
-                // 원본 입력 함수표는 수정하지 않는다. 복사된 공개 함수표만 정책을 강제한다.
-                fieldOps[index].write = &RejectReadOnlyWrite;
+            if (fields[fieldIndex].id == fieldOps[index].fieldId) {
+                // 원본 입력 함수표는 변경하지 않는다. 등록된 복사본에만 정책을 결합한다.
+                fieldOps[index].write.Bind(ops.nativeType, fields[fieldIndex].id,
+                                           fields[fieldIndex].valueKind,
+                                           HasFlag(fields[fieldIndex].flags, FieldFlags::ReadOnly));
                 break;
             }
         }
