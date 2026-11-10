@@ -72,7 +72,11 @@
 
 SystemAllocator는 live allocation·byte 계수를 제공한다. ObjectRegistry의 Stats는 상태와 보유 계수를, CaptureDiagnostics는 호출자가 준 버퍼에 객체별 스냅샷을 제공한다. 캡처는 할당하지 않으며 용량 부족 시 부분 기록하지 않는다. LastGcReport는 마지막 성공 GC의 검사·표식·retire·회수 개수와 ns 시간을 보존한다.
 
-LogBuffer와 ProfileScope는 초기 고정 용량 진단이며 손실·잘림을 표시한다. 전문 profiler viewer·백그라운드 writer·crash 수집을 완료하였다고 간주하지 않는다.
+LogBuffer와 ProfileScope는 초기 고정 용량 진단이며 손실·잘림을 표시한다. 별도로 Logger가 여러 RuntimeLogSink에 기록을 전달한다. sink별 수준·카테고리 필터와 등록·제거, 동기 동시 접근과 오류 전파를 제공하며 TextLogSink와 stderr 출력이 첫 구현이다. Logger는 sink를 소유하지 않고, sink callback은 Logger에 재진입하지 않는다. 느리거나 중단된 동기 sink는 해당 Logger의 다른 기록·등록·제거도 지연시킨다. 파일 출력·회전·비동기 큐·포맷 API·전역 로거·전문 profiler viewer·crash 수집은 아직 구현되지 않았다. stderr 출력의 Windows 콘솔 표시와 POSIX 닫힌 pipe의 SIGPIPE 동작은 프로세스 환경·정책에 따른다.
+
+Commandlet은 CPU-only 독립 실행 진입점과 명령 등록·목록·도움말을 제공한다. 현재 core-check 외의 에셋·cook·패키징·엔진 부트 명령은 구현되지 않았다. 상세 실행법과 인수·수명 계약은 Programs/Commandlet/README.ko.md를 따른다.
+
+빌드 도구의 프로세스 정리는 제한 시간과 정리 작업 수 상한을 두지만, 운영체제 수준의 모든 분리 자손 격리나 실제 회수를 보장하지 않는다. stdout/stderr 수집 크기 제한은 아직 없으므로 과도한 출력이 메모리를 소모할 수 있다. 정리 완료를 확인하지 못한 빌드 임시 경로는 삭제하지 않고 실패로 보고한다.
 
 Windows 재현 명령은 저장소 루트에서 실행한다. 사전에 .NET 10 SDK, Clang C++ 도구 체인과 `clang-format` 21.1.6이 필요하다. 컴파일러 자동 발견이 불가능하면 각 명령에 `/p:Compiler=<clang-cl 실행 파일 경로>`를 추가한다.
 

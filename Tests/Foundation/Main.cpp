@@ -8,6 +8,7 @@
 #include <errno.h>
 
 namespace rocks::test {
+int RunLoggerFailureProbe() noexcept;
 static TestCase* first = nullptr;
 static uint64 failures = 0;
 static platform::Mutex failureMutex;
@@ -57,7 +58,9 @@ int main(int argc, char** argv) {
     uint64 repeat = 1;
     bool list = false;
     for (int i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "--list") == 0) {
+        if (strcmp(argv[i], "--logger-failure-probe") == 0 && argc == 2) {
+            return test::RunLoggerFailureProbe();
+        } else if (strcmp(argv[i], "--list") == 0) {
             list = true;
         } else if (strcmp(argv[i], "--filter") == 0 && i + 1 < argc) {
             filter = argv[++i];

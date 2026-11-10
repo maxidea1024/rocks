@@ -19,6 +19,13 @@ jobs:
         run: ./Build/InstallFormatter.ps1
       - name: Build and test Foundation through MSBuild
         run: dotnet msbuild Rocks.proj /t:Test /p:Configuration=Debug /p:RocksTarget=Foundation /v:minimal
+      - name: Build and test headless commandlet
+        run: |
+          dotnet msbuild Rocks.proj /t:Build /p:Configuration=Debug /p:RocksTarget=Commandlet /p:NativeOutput=out/ci-commandlet /v:minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $executable = if ($IsWindows) { 'out/ci-commandlet/bin/RocksCommandlet.exe' } else { 'out/ci-commandlet/bin/RocksCommandlet' }
+          dotnet run --project Tools/Rocks.Commandlet.Tests -- --executable $executable
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify pinned native formatting
         run: dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll format --root .
       - name: Verify native action graph and incremental failures

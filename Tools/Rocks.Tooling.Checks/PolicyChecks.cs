@@ -32,16 +32,16 @@ public static class PolicyChecks
         "\\bpython(?:3(?:\\.[0-9]+)?)?(?:\\.exe)?\\b|setup-python\\b|[^\\s\"']+\\.py(?:[\\s\"']|$)");
 
     public static IReadOnlyList<CheckFailure> Runtime(string root) =>
-        Scan(root, ["Engine"], BannedRuntime, "runtime-stl", "forbidden runtime STL use");
+        Scan(root, ["Engine", "Programs"], BannedRuntime, "runtime-stl", "forbidden runtime STL use");
 
     public static IReadOnlyList<CheckFailure> SourceWarnings(string root) =>
-        Scan(root, ["Engine", "Tests", "Tools", "Templates"], BannedSuppression,
+        Scan(root, ["Engine", "Programs", "Tests", "Tools", "Templates"], BannedSuppression,
             "warning-source", "owned source suppresses warnings");
 
     public static IReadOnlyList<CheckFailure> PlatformBoundary(string root)
     {
         List<CheckFailure> failures = [];
-        foreach (string path in NativeSources(root, ["Engine", "Tests", "Templates"]))
+        foreach (string path in NativeSources(root, ["Engine", "Programs", "Tests", "Templates"]))
         {
             string relative = Relative(root, path);
             if (IsNativeBackend(relative))
@@ -57,9 +57,11 @@ public static class PolicyChecks
     {
         string[] parts = relative.Replace('\\', '/').Split('/');
         return parts.Length >= 5 &&
-            ((parts[0] == "Engine" && parts[1] == "PlatformBase" && parts[2] == "Private") ||
-             (parts[0] == "Tests" && parts[1] == "Support" && parts[2] == "Private")) &&
-            parts[3] is "Win64" or "Mac";
+            (((parts[0] == "Engine" && parts[1] == "PlatformBase" && parts[2] == "Private") ||
+              (parts[0] == "Tests" && parts[1] == "Support" && parts[2] == "Private")) &&
+             parts[3] is "Win64" or "Mac" ||
+             (parts[0] == "Programs" && parts[1] == "Commandlet" && parts[2] == "Private" &&
+              parts[3] == "Win64"));
     }
 
     /// <summary>shell 문자열을 실행하지 않는다. flags 검증에는 가능한 한 실제 ArgumentList를 전달한다.</summary>
@@ -141,7 +143,7 @@ public static class PolicyChecks
     }
 
     public static IReadOnlyList<string> NativeSources(string root, IReadOnlyList<string>? folders = null) =>
-        Files(root, folders ?? ["Engine", "Tests", "Templates"]).Where(path =>
+        Files(root, folders ?? ["Engine", "Programs", "Tests", "Templates"]).Where(path =>
             Path.GetExtension(path).ToLowerInvariant() is ".h" or ".cpp" or ".mm").ToArray();
 
     internal static IEnumerable<string> Files(string root, IReadOnlyList<string> folders)

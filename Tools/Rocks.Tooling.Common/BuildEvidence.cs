@@ -13,7 +13,7 @@ public sealed record SourceSnapshot(string Algorithm, string Digest, int FileCou
         root = Path.GetFullPath(root);
         if (!Directory.Exists(root)) throw new DirectoryNotFoundException(root);
         List<string> files = [];
-        foreach (string directory in new[] { "Engine", "Tests", "Build", "Tools", "Templates", ".github" })
+        foreach (string directory in new[] { "Engine", "Programs", "Tests", "Build", "Tools", "Templates", ".github" })
             if (Directory.Exists(Path.Combine(root, directory))) Visit(Path.Combine(root, directory));
         foreach (string name in new[] { "CMakeLists.txt", "CMakePresets.json", ".clang-format", ".editorconfig",
             "global.json", "NuGet.Config", "NuGet.config", "Rocks.slnx", "Rocks.proj", "Directory.Build.props", "Directory.Build.targets", "Directory.Build.rsp" })

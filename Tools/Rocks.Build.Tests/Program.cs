@@ -61,6 +61,25 @@ try
     }
     void Pass(string name) { ++passed; Console.WriteLine("PASS " + name); }
 
+    await ExecutorCleanupTests.RunAsync(request, root);
+    Pass("cleanup failures preserve diagnostics, cancellation, and cache safety");
+
+    foreach (int invalidJobs in new[] { 0, ProcessRunner.MaximumConcurrentProcesses + 1 })
+    {
+        string invalidOutput = Path.Combine(root, "invalid-jobs-" + invalidJobs);
+        try
+        {
+            await builder.BuildAsync(request with { MaxParallelism = invalidJobs, OutputDirectory = invalidOutput });
+            throw new InvalidOperationException("Invalid parallelism accepted.");
+        }
+        catch (ArgumentOutOfRangeException error)
+        {
+            Check(error.ParamName == "MaxParallelism" && !Directory.Exists(invalidOutput),
+                "Invalid parallelism must fail before creating build output.");
+        }
+    }
+    Pass("invalid process parallelism rejected before output creation");
+
     var cold = await Build();
     Check(cold.ExecutedActions == 4 && !cold.ModuleOutputs.ContainsKey("Headers"), "Cold build/header-only count");
     var run = await ProcessRunner.RunAsync(new(cold.ModuleOutputs["Game"], [], root, toolchain.Environment));

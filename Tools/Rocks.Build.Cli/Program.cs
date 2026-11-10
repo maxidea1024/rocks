@@ -187,8 +187,9 @@ namespace Rocks.Build.Cli
             Enum.TryParse<NativeConfiguration>(options.GetValueOrDefault("configuration", "Debug"), true, out var value) && Enum.IsDefined(value)
                 ? value : throw new ArgumentException("Configuration must be Debug, Release, or Asan.");
         internal static int Jobs(Dictionary<string, string> options) =>
-            int.TryParse(options.GetValueOrDefault("jobs", Math.Min(8, Environment.ProcessorCount).ToString()), out var value) && value is > 0 and <= 1024
-                ? value : throw new ArgumentException("jobs must be between 1 and 1024.");
+            int.TryParse(options.GetValueOrDefault("jobs", Math.Min(8, Environment.ProcessorCount).ToString()), out var value) &&
+            value > 0 && value <= ProcessRunner.MaximumConcurrentProcesses
+                ? value : throw new ArgumentException($"jobs must be between 1 and {ProcessRunner.MaximumConcurrentProcesses}.");
 
         internal static Dictionary<string, string> Parse(string[] args)
         {

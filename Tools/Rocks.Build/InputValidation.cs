@@ -1,9 +1,14 @@
+using Rocks.Tooling.Common;
+
 namespace Rocks.Build;
 
 internal static class InputValidation
 {
     public static void Validate(NativeBuildRequest request)
     {
+        if (request.MaxParallelism < 1 || request.MaxParallelism > ProcessRunner.MaximumConcurrentProcesses)
+            throw new ArgumentOutOfRangeException(nameof(request.MaxParallelism),
+                $"MaxParallelism must be between 1 and {ProcessRunner.MaximumConcurrentProcesses}.");
         if (!Enum.IsDefined(request.Configuration)) throw new ArgumentException($"Configuration: unsupported value {request.Configuration}.");
         if (!Enum.IsDefined(request.Toolchain.Platform)) throw new ArgumentException($"Toolchain.Platform: unsupported value {request.Toolchain.Platform}.");
         bool windows = request.Toolchain.Platform == NativePlatform.Windows;

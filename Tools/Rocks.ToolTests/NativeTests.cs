@@ -8,6 +8,7 @@ internal static class NativeTests
 {
     public static void Register(TestSuite suite, Options options, IReadOnlyDictionary<string, string?> environment)
     {
+        LoggerOutputTests.Register(suite, options, environment);
         string executable = Path.GetFullPath(options.Required("native-executable"));
         if (!File.Exists(executable)) throw new FileNotFoundException("Native test executable missing", executable);
         Task<ProcessResult> Run(params string[] args) => ProcessRunner.RunAsync(new(executable, args, options.Root,

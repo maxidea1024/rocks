@@ -73,6 +73,8 @@ internal static class Program
     // 도구 자체 실행/timeout/pipe 음성대조 전용 child다. shell과 Python을 사용하지 않는다.
     private static async Task<int> ChildAsync(string[] args)
     {
+        int? hard = await ProcessHardTimeoutReviewTests.TryRunChildAsync(args);
+        if (hard.HasValue) return hard.Value;
         int? reviewed = await ProcessReviewTests.TryRunChildAsync(args);
         if (reviewed.HasValue) return reviewed.Value;
         if (args.SequenceEqual(new[] { "--hang" })) { Console.WriteLine("ready"); await Task.Delay(Timeout.InfiniteTimeSpan); }

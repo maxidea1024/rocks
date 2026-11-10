@@ -12,7 +12,9 @@ internal static class SelfTests
     private static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     public static void Register(TestSuite suite, Options options)
     {
+        ProgramsPolicyReviewTests.Register(suite);
         ProcessReviewTests.Register(suite, options);
+        ProcessHardTimeoutReviewTests.Register(suite, options);
         suite.Add("MetaPrefix.CommentLineSpliceIsRejectedDirectly", () =>
         {
             void CheckGap(string gap, bool allowed)
