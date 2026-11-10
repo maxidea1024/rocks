@@ -71,10 +71,31 @@ try
     Check(warm.ExecutedActions == 0 && warm.SkippedActions == 4, "No-op must execute zero actions");
     Pass("no-op output validation");
 
-    File.AppendAllText(gameSource, "// game-only change\n");
+    using var compileCommands = JsonDocument.Parse(File.ReadAllText(cold.CompilationDatabasePath));
+    string gameObject = compileCommands.RootElement.EnumerateArray()
+        .First(value => value.GetProperty("file").GetString() == gameSource).GetProperty("output").GetString()!;
+    string objectBeforeComment = Hashing.Sha256File(gameObject);
+    File.AppendAllText(gameSource, "// game-only comment\n");
+    var commentChanged = await Build();
+    bool objectChanged = Hashing.Sha256File(gameObject) != objectBeforeComment;
+    var commentCompile = commentChanged.Actions.Single(action => action.Module == "Game" && action.Kind == "Compile");
+    var commentLink = commentChanged.Actions.Single(action => action.Module == "Game" && action.Kind == "Link");
+    Check(commentCompile.Executed && commentLink.Executed == objectChanged &&
+        commentChanged.Actions.All(action => action.Module != "Engine" || !action.Executed),
+        $"Comment edit must compile Game, skip Engine, and link iff object bytes changed; objectChanged={objectChanged}, " +
+        string.Join(", ", commentChanged.Actions.Select(action => $"{action.Id}:executed={action.Executed}")));
+    Pass($"comment edit objectChanged={objectChanged}, linkExecuted={commentLink.Executed}");
+
+    string objectBeforeCode = Hashing.Sha256File(gameObject);
+    File.AppendAllText(gameSource, "int RocksBuildGameMarker() noexcept { return 123; }\n");
     var gameChanged = await Build();
+    Check(Hashing.Sha256File(gameObject) != objectBeforeCode, "Semantic game edit did not change object contents");
     Check(gameChanged.Actions.All(action => action.Module != "Engine" || !action.Executed), "Game change rebuilt Engine");
-    Check(gameChanged.ExecutedActions == 2, "Game change should compile/link only Game");
+    Check(gameChanged.ExecutedActions == 2 &&
+        gameChanged.Actions.Any(action => action.Module == "Game" && action.Kind == "Compile" && action.Executed) &&
+        gameChanged.Actions.Any(action => action.Module == "Game" && action.Kind == "Link" && action.Executed),
+        "Semantic game change should compile/link only Game; " +
+        string.Join(", ", gameChanged.Actions.Select(action => $"{action.Id}:executed={action.Executed}")));
     Pass("game changes execute zero engine actions");
 
     File.AppendAllText(privateHeader, "// private header changed\n");

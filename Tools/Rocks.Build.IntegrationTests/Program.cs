@@ -86,7 +86,7 @@ try
     Pass("game-no-op", timer.Elapsed);
 
     timer.Restart();
-    File.AppendAllText(Path.Combine(game, "Source/Main.cpp"), "\n// 독립 게임 소스만 수정한다.\n");
+    File.AppendAllText(Path.Combine(game, "Source/Main.cpp"), "\nint RocksBuildGameMarker() noexcept { return 123; }\n");
     Require((await Game()).ExitCode == 0, "Game source edit build failed");
     var edited = ReadActionReport();
     Require(edited.ExecutedActions == 2 && edited.Actions.Where(action => action.Executed).All(action => action.Module == "SampleGame"),
