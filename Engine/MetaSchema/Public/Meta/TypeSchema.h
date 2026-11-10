@@ -8,6 +8,25 @@ namespace rocks {
 using TypeId = Guid;
 using ContextId = Guid;
 
+// flags는 저장 형식과 별개인 메타데이터 정책이다. 알 수 없는 비트는 등록 단계에서 거부한다.
+enum class TypeFlags : uint32 {
+    None = 0,
+    Abstract = 1
+};
+enum class FieldFlags : uint32 {
+    None = 0,
+    Transient = 1,
+    ReadOnly = 2
+};
+
+constexpr bool HasFlag(uint32 flags, TypeFlags flag) noexcept {
+    return (flags & static_cast<uint32>(flag)) != 0;
+}
+
+constexpr bool HasFlag(uint32 flags, FieldFlags flag) noexcept {
+    return (flags & static_cast<uint32>(flag)) != 0;
+}
+
 enum class FieldKind : uint8 {
     Value,
     ObjectReference
@@ -43,6 +62,9 @@ struct FieldSchema {
     ValueKind valueKind = ValueKind::Opaque;
     // ObjectReference의 대상 schema다. 0은 기반 Object를 뜻하며 다른 kind에서는 0이어야 한다.
     TypeId referencedType{};
+    // 표시 문자열도 등록 시 깊게 복사한다. category는 그룹, displayName은 표시용이며 ID가 아니다.
+    Span<const char> category{};
+    Span<const char> displayName{};
 };
 
 // 안정적인 타입 식별자인 id와 스키마 version을 실행 중 native type key와 구분한다.
@@ -54,6 +76,7 @@ struct TypeSchema {
     Span<const char> name;
     // 선언된 단일 base schema의 ID다. 0은 reflected base가 없는 타입(Object 직접 파생)이다.
     TypeId baseType{};
+    uint32 flags = 0;
 };
 
 } // namespace rocks

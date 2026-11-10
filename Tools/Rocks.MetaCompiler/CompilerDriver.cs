@@ -1,0 +1,128 @@
+using System.Text;
+using System.Text.Json;
+using Rocks.Tooling.Common;
+
+namespace Rocks.MetaCompiler;
+
+internal static class CompilerDriver
+{
+    public static async Task RunAsync(CompilerOptions options)
+    {
+        string? repository = FindRoot();
+        string root = repository ?? Directory.GetCurrentDirectory();
+        string input = Path.GetFullPath(options.Input);
+        if (!File.Exists(input)) throw new MetadataException($"input header not found: {input}", "RMC1000", "Pass an existing input header.");
+        if (input.IndexOfAny(['\r', '\n', '"']) >= 0) throw new MetadataException("unsupported input path spelling", "RMC1000");
+        Dictionary<string, string?> environment = await NativeEnvironment.CreateAsync(options.Compiler);
+        string compiler = NativeEnvironment.FindExecutable(options.Compiler ?? (OperatingSystem.IsWindows() ? "clang-cl" : "clang++"), environment);
+        bool clangCl = Path.GetFileNameWithoutExtension(compiler).Contains("clang-cl", StringComparison.OrdinalIgnoreCase);
+        List<string> arguments = clangCl
+            ? ["/nologo", "/TP", "/utf-8", "/clang:-std=c++23", "/W4", "/WX", "/GR-", "/EHs-c-", "/Zc:__cplusplus", "/clang:-fsyntax-only", "/clang:-Xclang", "/clang:-ast-dump=json"]
+            : ["-x", "c++", "-std=c++23", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-fno-exceptions", "-fno-rtti", "-fsyntax-only", "-Xclang", "-ast-dump=json"];
+        // 실제 빌드가 include 문맥을 제공하면 그 순서를 그대로 사용한다. 저장소 전체 헤더를 몰래
+        // 추가하여 선언되지 않은 모듈 의존성을 통과시키지 않는다. 자동 탐색은 standalone fallback뿐이다.
+        List<string> includes;
+        if (options.IncludeDirectories.Count != 0) includes = options.IncludeDirectories.Select(Path.GetFullPath).ToList();
+        else {
+            IEnumerable<string> engineModules = repository is null ? [] : Directory.EnumerateDirectories(Path.Combine(repository, "Engine"));
+            includes = engineModules.Select(path => Path.Combine(path, "Public")).Where(Directory.Exists)
+                .Order(StringComparer.Ordinal).Append(root).Append(Path.GetDirectoryName(input)!).ToList();
+        }
+        ValidateIncludeBinding(input, options.Include, root, includes);
+        foreach (string path in includes)
+        {
+            if (clangCl) arguments.Add("/I" + path);
+            else { arguments.Add("-I"); arguments.Add(path); }
+        }
+        ValidateCompilerArguments(options.ClangArguments);
+        arguments.AddRange(options.ClangArguments);
+        arguments.Add("-");
+        ProcessResult compiled = await ProcessRunner.RunAsync(new(compiler, arguments, root, environment,
+            $"#include \"{input.Replace('\\', '/')}\"\n", TimeSpan.FromMinutes(2)));
+        if (compiled.ExitCode != 0 || compiled.StdErr.Contains("warning:", StringComparison.OrdinalIgnoreCase))
+            throw new MetadataException("Clang rejected reflection input:\n" + compiled.StdErr, "RMC3000",
+                "Fix the Clang diagnostic at the reported source location; do not suppress or downgrade warnings.");
+        SchemaModel schema;
+        try { schema = new ClangAstParser(input).Parse(compiled.StdOut); }
+        catch (Exception error) when (error is JsonException or KeyNotFoundException or InvalidOperationException or FormatException)
+        {
+            throw new MetadataException("unsupported Clang AST shape: " + error.Message, "RMC2001",
+                "Use the supported Clang/toolchain and metadata subset; add a reviewed parser case before accepting a new AST shape.");
+        }
+        string generated = CppEmitter.Emit(schema, options.Include);
+        // C++ 생성/소멸·noexcept·private friend·typed accessor의 실제 제약을 출력 게시 전에 검사한다.
+        // AST의 defaultCtor 요약을 보고 생성 가능성을 추측하지 않는다.
+        List<string> validationArguments = [.. arguments];
+        validationArguments.Remove(clangCl ? "/clang:-Xclang" : "-Xclang");
+        validationArguments.Remove(clangCl ? "/clang:-ast-dump=json" : "-ast-dump=json");
+        ProcessResult validated = await ProcessRunner.RunAsync(new(compiler, validationArguments, root, environment,
+            generated.Replace("#pragma once\n", "", StringComparison.Ordinal), TimeSpan.FromMinutes(2)));
+        if (validated.ExitCode != 0 || validated.StdErr.Contains("warning:", StringComparison.OrdinalIgnoreCase))
+            throw new MetadataException("generated metadata contract rejected by Clang:\n" + validated.StdErr + SourceNotes(schema, validated.StdErr), "RMC3000",
+                "Fix constructor/destructor noexcept, CLASS/PROPERTY access and GENERATED_BODY friendship; every generated typed operation must compile before output is accepted.");
+        string formatter = NativeEnvironment.FindExecutable(Environment.GetEnvironmentVariable("ROCKS_CLANG_FORMAT") ?? "clang-format", environment);
+        ProcessResult version = await ProcessRunner.RunAsync(new(formatter, ["--version"], root, environment, Timeout: TimeSpan.FromSeconds(20)));
+        if (version.ExitCode != 0 || !version.StdOut.Contains("version 21.1.6", StringComparison.Ordinal))
+            throw new MetadataException("Rocks requires clang-format 21.1.6", "RMC3100", "Set ROCKS_CLANG_FORMAT to the pinned formatter executable.");
+        ProcessResult formatted = await ProcessRunner.RunAsync(new(formatter,
+            ["--style=file:" + Path.Combine(AppContext.BaseDirectory, ".clang-format"), "--assume-filename=Metadata.h"], root, environment, generated, TimeSpan.FromSeconds(30)));
+        if (formatted.ExitCode != 0 || formatted.StdErr.Contains("warning:", StringComparison.OrdinalIgnoreCase))
+            throw new MetadataException("clang-format failed: " + formatted.StdErr, "RMC3100", "Fix the formatter/style error without suppressing diagnostics.");
+        byte[] bytes = new UTF8Encoding(false, true).GetBytes(formatted.StdOut.Replace("\r\n", "\n", StringComparison.Ordinal));
+        if (options.Check)
+        {
+            if (!File.Exists(options.Output) || !File.ReadAllBytes(options.Output).AsSpan().SequenceEqual(bytes))
+                throw new MetadataException($"generated output is stale: {options.Output}", "RMC4000", "Regenerate with the same command without --check, then rebuild.");
+        }
+        else AtomicFile.WriteIfChanged(options.Output, bytes);
+        Console.WriteLine($"Rocks metadata: {schema.Ordered.Count} types; {(options.Check ? "checked" : "generated")}");
+    }
+
+    private static void ValidateCompilerArguments(IEnumerable<string> arguments)
+    {
+        foreach (string argument in arguments)
+        {
+            string native = argument.StartsWith("/clang:", StringComparison.Ordinal) ? argument[7..] : argument;
+            bool reduced = native is "-Xclang" or "-Xpreprocessor" || native == "-w" || native.StartsWith("-Wno-", StringComparison.Ordinal) ||
+                native.StartsWith('@') || native.Equals("/WX-", StringComparison.OrdinalIgnoreCase) ||
+                native is "/W0" or "/W1" or "/W2" or "/W3" or "/w" ||
+                native.StartsWith("/wd", StringComparison.OrdinalIgnoreCase) ||
+                native.StartsWith("/external:W", StringComparison.OrdinalIgnoreCase) ||
+                native.Contains("_CRT_SECURE_NO_WARNINGS", StringComparison.Ordinal) ||
+                native.Contains("_SCL_SECURE_NO_WARNINGS", StringComparison.Ordinal);
+            if (reduced) throw new MetadataException("unsupported compiler diagnostics/response-file override: " + argument,
+                "RMC1000", "Remove warning suppression, reduced warning levels and response files; provide explicit target defines/includes.");
+        }
+    }
+
+    private static void ValidateIncludeBinding(string input, string include, string workingDirectory, IEnumerable<string> directories)
+    {
+        string Identity(string path) => new FileInfo(path).ResolveLinkTarget(true)?.FullName ?? Path.GetFullPath(path);
+        string? target = directories.Prepend(workingDirectory).Select(directory => Path.GetFullPath(Path.Combine(directory, include)))
+            .FirstOrDefault(File.Exists);
+        if (target is null || !string.Equals(Identity(input), Identity(target), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            throw new MetadataException("--include resolves to a different header than --input", "RMC1000",
+                "Pass the same author header through the target's explicit include search order; remove shadowing include directories.");
+    }
+    private static string SourceNotes(SchemaModel schema, string diagnostic)
+    {
+        StringBuilder notes = new();
+        foreach (ClassModel type in schema.Ordered) {
+            string shortName = type.Name.Split("::")[^1];
+            if (!diagnostic.Contains(shortName, StringComparison.Ordinal)) continue;
+            notes.AppendLine($"{type.Site.File}:{type.Site.Line}: note: source CLASS {type.Name}");
+            foreach (FieldModel field in type.Fields) {
+                if (diagnostic.Contains(field.Name, StringComparison.Ordinal))
+                    notes.AppendLine($"{field.Site.File}:{field.Site.Line}: note: source PROPERTY {field.Owner}::{field.Name}");
+            }
+        }
+        return notes.ToString();
+    }
+    private static string? FindRoot()
+    {
+        for (DirectoryInfo? directory = new(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+            if (Directory.Exists(Path.Combine(directory.FullName, "Engine")) && Directory.Exists(Path.Combine(directory.FullName, "Tools")))
+                return directory.FullName;
+        return null; // SDK 배포에서는 명시 include 경로와 함께 저장소 밖에서도 실행할 수 있다.
+    }
+}

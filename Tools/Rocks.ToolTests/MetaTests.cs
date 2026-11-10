@@ -1,0 +1,172 @@
+using System.Text;
+using System.Text.RegularExpressions;
+using Rocks.Tooling.Common;
+
+namespace Rocks.ToolTests;
+
+internal static class MetaTests
+{
+    private const string TypeId = "b1000000000000000000000000000001";
+    private const string FieldId = "b1000000000000000000000000000011";
+    private const string Preamble = "#include <Meta/Annotations.h>\n#include <Object/ObjectRefs.h>\n#include <Object/Object.h>\n#include <Core/Text/String.h>\nnamespace probe {\n";
+
+    private static string Declaration(string? field = null, string version = "1",
+        string bases = "public rocks::Object", string extra = "") =>
+        Preamble + $"struct ROCKS_REFLECT_TYPE(\"{TypeId}\", {version}) Value : {bases} {{\n" +
+        (field ?? $"ROCKS_REFLECT_FIELD(\"{FieldId}\") rocks::int32 count = 0;") + "\n" + extra + "\n};\n}\n";
+
+    public static void Register(TestSuite suite, Options options, IReadOnlyDictionary<string, string?> environment)
+    {
+        string compiler = options.Required("compiler");
+        string generator = Path.GetFullPath(options.Required("metacompiler"));
+        if (!File.Exists(generator)) throw new FileNotFoundException("MetaCompiler executable missing", generator);
+        Dictionary<string, string?> actualEnvironment = new(environment, OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        if (options.Optional("formatter") is string formatter) actualEnvironment["ROCKS_CLANG_FORMAT"] = formatter;
+
+        suite.Add("Meta.FixtureDeterminismTimestampAndStaleCheck", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            await probe.GenerateAsync(fixture: true);
+            byte[] expected = File.ReadAllBytes(probe.Output);
+            Verify.That(!expected.Contains((byte)'\r'), "generated output must use LF");
+            Verify.Contains("rocks::reflection_fixture::Node", Encoding.UTF8.GetString(expected), "fixture generated type");
+            File.SetLastWriteTimeUtc(probe.Output, DateTime.UnixEpoch.AddSeconds(1_000_000_000));
+            DateTime timestamp = File.GetLastWriteTimeUtc(probe.Output);
+            await probe.GenerateAsync(fixture: true);
+            Verify.That(File.ReadAllBytes(probe.Output).AsSpan().SequenceEqual(expected), "generator output changed for identical source");
+            Verify.Equal(timestamp, File.GetLastWriteTimeUtc(probe.Output), "unchanged output was rewritten");
+            await probe.GenerateAsync(fixture: true, extra: ["--check"]);
+            Verify.Equal(timestamp, File.GetLastWriteTimeUtc(probe.Output), "check changed output timestamp");
+            File.WriteAllText(probe.Output, "stale\n");
+            await probe.GenerateAsync(fixture: true, extra: ["--check"], expectedCode: "RMC4000", reason: "stale");
+            Verify.Equal("stale\n", File.ReadAllText(probe.Output), "stale check overwrote output");
+        });
+        suite.Add("Meta.EvaluatedConstantVersion", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            await probe.GenerateAsync(Declaration(version: "1 + 2"));
+            Verify.That(Regex.IsMatch(File.ReadAllText(probe.Output), @"schema\s*\{\s*Id\(\)\s*,\s*3\s*,",
+                RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)), "Clang evaluated schema version was not emitted");
+        });
+        suite.Add("Meta.ClassDiagnosticPointsToDeclaration", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            await probe.GenerateAsync(Declaration(version: "0"), expectedCode: "RMC2000", reason: ":6: error RMC2000");
+        });
+        AddRejectGroup("Meta.InvalidVersion", new[] { "-1", "0", "4294967296ull" }.Select(value => Declaration(version: value)), "RMC2000", "version");
+        AddRejectGroup("Meta.MissingFieldAnnotation", [Declaration("rocks::int32 count = 0;")], "RMC2000", "field");
+        AddRejectGroup("Meta.DuplicateStableId", [Declaration($"ROCKS_REFLECT_FIELD(\"{TypeId}\") rocks::int32 count = 0;")], "RMC2000", "duplicate");
+        AddRejectGroup("Meta.InvalidAndZeroGuid", new[] { "not-a-guid", "00000000000000000000000000000000" }
+            .Select(id => Declaration($"ROCKS_REFLECT_FIELD(\"{id}\") rocks::int32 count = 0;")), "RMC2000", "GUID");
+        AddRejectGroup("Meta.PointerAndCvFields", new[] { "rocks::int32* count = nullptr", "const rocks::int32 count = 0" }
+            .Select(field => Declaration($"ROCKS_REFLECT_FIELD(\"{FieldId}\") {field};")), "RMC2000", "type");
+        AddRejectGroup("Meta.PrivateWithoutGeneratedBody", [Declaration($"private: ROCKS_REFLECT_FIELD(\"{FieldId}\") rocks::int32 count = 0;",
+            extra: "public: rocks::int32 Read() const noexcept { return count; }")], "RMC2000", "GENERATED_BODY");
+        AddRejectGroup("Meta.Bitfields", [Declaration($"ROCKS_REFLECT_FIELD(\"{FieldId}\") unsigned int count : 1;")], "RMC2000", "bitfield");
+        AddRejectGroup("Meta.StaticAnnotatedField", [Declaration($"ROCKS_REFLECT_FIELD(\"{FieldId}\") static inline rocks::int32 count = 0;")], "RMC200", "nonstatic");
+        AddRejectGroup("Meta.ManualTraceConflict", [Declaration(extra: "void Trace() noexcept {}")], "RMC2000", "Trace");
+        AddRejectGroup("Meta.VirtualAndMultipleInheritance", [Declaration(bases: "public virtual rocks::Object"),
+            Declaration(bases: "public rocks::Object, public Other").Replace("namespace probe {", "namespace probe { struct Other {};", StringComparison.Ordinal)], "RMC2000", "nonvirtual");
+        AddRejectGroup("Meta.UnreflectedBaseAndReference", [
+            Declaration(bases: "public Hidden").Replace("namespace probe {", "namespace probe { struct Hidden : rocks::Object {};", StringComparison.Ordinal),
+            Declaration($"ROCKS_REFLECT_FIELD(\"{FieldId}\") rocks::ObjectRef<Hidden> next;")
+                .Replace("namespace probe {", "namespace probe { struct Hidden : rocks::Object {};", StringComparison.Ordinal)], "RMC2000", "reflected");
+        AddRejectGroup("Meta.ClangSyntaxFailurePreservesOutput", [Declaration("this is not valid cxx;")], "RMC3000", "Clang");
+        AddRejectGroup("Meta.IdMustBeLiteralNotPointerExpression", [Declaration($"ROCKS_REFLECT_FIELD(&\"x{FieldId}\"[1]) rocks::int32 count = 0;")], "RMC2000", "literal");
+        suite.Add("Meta.DiagnosticsAndResponseOverridesRejected", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            foreach (string argument in new[] { "-Wno-error", "/clang:-Wno-error", "-w", "/W0", "@hidden.rsp" })
+            {
+                await probe.GenerateAsync(Declaration(), extra: ["--clang-arg=" + argument], expectedCode: "RMC1000", reason: "override");
+                Verify.That(!File.Exists(probe.Output), "rejected CLI wrote output");
+            }
+        });
+        suite.Add("Meta.PrivateGeneratedBodyAndUnicodeSpecifiers", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            string source = Preamble + $"class ROCKS_CLASS(\"{TypeId}\", 1) Value : public rocks::Object {{\n" +
+                "ROCKS_GENERATED_BODY()\n" + $"ROCKS_PROPERTY(\"{FieldId}\", ReadOnly, Category=\"능력\", DisplayName=\"체력🎮\") rocks::int32 count = 0;\n" +
+                "public: rocks::int32 Read() const noexcept { return count; }\n};\n}\n";
+            await probe.GenerateAsync(source);
+            string generated = File.ReadAllText(probe.Output);
+            string bytes = string.Concat(Encoding.UTF8.GetBytes("체력🎮").Select(value => $"\\x{value:X2}"));
+            Verify.Contains(bytes, generated, "Unicode display name UTF-8 bytes");
+            Verify.Contains("ErrorCode::Unsupported", generated, "ReadOnly public setter policy");
+            Verify.Contains("WriteGeneratedStagedField", generated, "ReadOnly staged initialization remains available");
+        });
+        suite.Add("Meta.AbstractClassHasExplicitMetadata", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            string source = Preamble + $"class ROCKS_CLASS(\"{TypeId}\", 1, Abstract) Value : public rocks::Object {{ public:\n" +
+                $"ROCKS_PROPERTY(\"{FieldId}\") rocks::int32 count=0; virtual void Tick() noexcept=0;\n}};\n}}\n";
+            await probe.GenerateAsync(source);
+            Verify.Contains("MakeRuntimeTypeOps<::probe::Value, true>", File.ReadAllText(probe.Output), "abstract generated runtime ops");
+        });
+        AddRejectGroup("Meta.UnknownDuplicateAndWrongValueSpecifiers", new[] { "UnknownFlag", "ReadOnly, ReadOnly", "ReadOnly=\"yes\"", "Category=12", "DisplayName" }
+            .Select(spec => Declaration($"ROCKS_PROPERTY(\"{FieldId}\", {spec}) rocks::int32 count=0;")), "RMC2000", "specifier");
+        AddRejectGroup("Meta.UnannotatedOwnerAndParameterMisuse", [
+            Preamble + $"struct Plain {{ ROCKS_PROPERTY(\"{FieldId}\") rocks::int32 count=0; }};\n}}\n",
+            Preamble + $"void F(ROCKS_PROPERTY(\"{FieldId}\") rocks::int32 value);\n}}\n"], "RMC200", "PROPERTY");
+        AddRejectGroup("Meta.UnknownTypeSpecifier", [Declaration().Replace($"ROCKS_REFLECT_TYPE(\"{TypeId}\", 1)",
+            $"ROCKS_CLASS(\"{TypeId}\", 1, UnknownClassFlag)", StringComparison.Ordinal)], "RMC2000", "specifier");
+
+        void AddRejectGroup(string name, IEnumerable<string> sources, string code, string reason)
+        {
+            string[] fixedSources = sources.ToArray();
+            suite.Add(name, async () =>
+            {
+                using Probe probe = new(options, actualEnvironment, generator, compiler);
+                foreach (string source in fixedSources) await probe.RejectAsync(source, code, reason);
+            });
+        }
+    }
+
+    private sealed class Probe : IDisposable
+    {
+        private readonly TemporaryDirectory temporary = new();
+        private readonly Options options;
+        private readonly IReadOnlyDictionary<string, string?> environment;
+        private readonly string generator;
+        private readonly string compiler;
+        public Probe(Options options, IReadOnlyDictionary<string, string?> environment, string generator, string compiler)
+        { this.options = options; this.environment = environment; this.generator = generator; this.compiler = compiler; }
+        public string Output => temporary.FilePath("Probe.generated.h");
+
+        public async Task GenerateAsync(string? source = null, bool fixture = false, IReadOnlyList<string>? extra = null,
+            string? expectedCode = null, string? reason = null)
+        {
+            string input = fixture ? Path.Combine(options.Root, "Tests", "Reflection", "ReflectionFixture.h") : temporary.FilePath("Probe.h");
+            if (source is not null) File.WriteAllText(input, source, new UTF8Encoding(false, true));
+            List<string> arguments = [];
+            string executable = generator;
+            if (generator.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+            { executable = options.Optional("dotnet") ?? "dotnet"; arguments.Add(generator); }
+            arguments.AddRange(["--input", input, "--include", fixture ? "Tests/Reflection/ReflectionFixture.h" : "Probe.h",
+                "--output", Output, "--compiler", compiler]);
+            foreach (string argument in options.ClangArguments) arguments.Add("--clang-arg=" + argument);
+            if (extra is not null) arguments.AddRange(extra);
+            var result = await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: TimeSpan.FromSeconds(60)));
+            if (expectedCode is null) Verify.Equal(0, result.ExitCode, result.StdErr);
+            else
+            {
+                Verify.That(result.ExitCode != 0, "invalid reflection input accepted");
+                Verify.Contains(expectedCode, result.StdErr, "stable diagnostic code");
+                Verify.Contains("hint:", result.StdErr.ToLowerInvariant(), "actionable diagnostic hint");
+                Verify.That(Regex.IsMatch(result.StdErr, @":\d+:.*RMC", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)), "file/line diagnostic missing:\n" + result.StdErr);
+                if (reason is not null) Verify.That(result.StdErr.Contains(reason, StringComparison.OrdinalIgnoreCase), "diagnostic reason missing: " + reason + "\n" + result.StdErr);
+            }
+        }
+
+        public async Task RejectAsync(string source, string code, string reason)
+        {
+            byte[] previous = Encoding.UTF8.GetBytes("previous accepted output\n");
+            File.WriteAllBytes(Output, previous);
+            await GenerateAsync(source, expectedCode: code, reason: reason);
+            Verify.That(File.ReadAllBytes(Output).AsSpan().SequenceEqual(previous), "rejected input changed previous accepted output");
+            Verify.That(!Directory.EnumerateFiles(temporary.Root, "*.tmp*").Any(), "temporary generated output leaked");
+        }
+
+        public void Dispose() => temporary.Dispose();
+    }
+}

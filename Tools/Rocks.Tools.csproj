@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="Rocks.Build.Cli/Rocks.Build.Cli.csproj" />
+    <ProjectReference Include="Rocks.MetaCompiler/Rocks.MetaCompiler.csproj" />
+    <ProjectReference Include="Rocks.ToolTests/Rocks.ToolTests.csproj" />
+    <ProjectReference Include="../Build/Rules/Rocks.Engine.Rules.csproj" />
+  </ItemGroup>
+</Project>

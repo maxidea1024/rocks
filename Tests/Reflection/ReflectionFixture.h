@@ -36,4 +36,54 @@ struct ROCKS_REFLECT_TYPE("ad100000000000000000000000000002", 3) Node final : Ba
     ROCKS_REFLECT_FIELD("ad10000000000000000000000000002a") double precision = 0;
 };
 
+// CLASS/PROPERTY fixture는 private 상속 필드와 저장 정책을 실제 generated 접근기로 검증한다.
+class ROCKS_CLASS("ad100000000000000000000000000003", 1, Abstract) AbstractBase : public Object {
+    ROCKS_GENERATED_BODY()
+
+public:
+    static inline uint32 constructions = 0;
+
+    AbstractBase() noexcept {
+        ++constructions;
+    }
+
+    virtual ~AbstractBase() noexcept = default;
+    virtual int32 ClassValue() const noexcept = 0;
+
+private:
+    ROCKS_PROPERTY("ad100000000000000000000000000031", ReadOnly, Category = "Stats",
+                   DisplayName = "체력")
+    int32 baseValue = 17;
+};
+
+class ROCKS_CLASS("ad100000000000000000000000000004", 1) PropertyNode final : public AbstractBase {
+    ROCKS_GENERATED_BODY()
+
+public:
+    explicit PropertyNode(Allocator& allocator) noexcept : label(allocator) {
+    }
+
+    int32 ClassValue() const noexcept override {
+        return 21;
+    }
+
+private:
+    ROCKS_PROPERTY("ad100000000000000000000000000041", Transient)
+    ObjectRef<PropertyNode> transientChild;
+    ROCKS_PROPERTY("ad100000000000000000000000000042", ReadOnly, Category = "Text",
+                   DisplayName = "표시 이름")
+    String label;
+    ROCKS_PROPERTY("ad100000000000000000000000000043", Transient)
+    int32 runtimeCache = 73;
+};
+
+// C++ concrete 타입도 선언 정책 Abstract이면 생성할 수 없다.
+struct ROCKS_CLASS("ad100000000000000000000000000005", 1, Abstract) AbstractByPolicy : Object {
+    static inline uint32 constructions = 0;
+
+    AbstractByPolicy() noexcept {
+        ++constructions;
+    }
+};
+
 } // namespace rocks::reflection_fixture

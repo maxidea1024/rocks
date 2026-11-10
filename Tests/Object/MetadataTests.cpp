@@ -40,7 +40,8 @@ TEST(ObjectMetadataOwnsNestedSourceDataAndPreservesReaderLease) {
         char typeName[] = "OriginalType";
         char fieldName[] = "OriginalField";
         uint8 attributes[] = {17, 23, 41};
-        FieldSchema fields[] = {{Guid{101, 1}, FieldKind::Value, 7,
+        FieldSchema fields[] = {{Guid{101, 1}, FieldKind::Value,
+                                 static_cast<uint32>(FieldFlags::ReadOnly),
                                  Span<const char>(fieldName, sizeof(fieldName) - 1),
                                  Span<const uint8>(attributes, sizeof(attributes))}};
         TypeSchema source{MetadataType, 3, Span<const FieldSchema>(fields, 1),
@@ -62,7 +63,7 @@ TEST(ObjectMetadataOwnsNestedSourceDataAndPreservesReaderLease) {
         CHECK(saved.name[0] == 'O');
         REQUIRE(saved.fields.Size() == 1);
         CHECK(saved.fields.Data() != fields);
-        CHECK(saved.fields[0].flags == 7);
+        CHECK(saved.fields[0].flags == static_cast<uint32>(FieldFlags::ReadOnly));
         CHECK(saved.fields[0].name.Data() != fieldName);
         CHECK(saved.fields[0].name[0] == 'O');
         REQUIRE(saved.fields[0].attributes.Size() == 3);
@@ -119,7 +120,8 @@ TEST(ObjectMetadataRegistrationAllocationFailureIsAtomicAndRetryable) {
     const char typeName[] = "AllocationProbe";
     const char fieldName[] = "Value";
     const uint8 attributes[] = {1, 2, 3, 4};
-    const FieldSchema field{Guid{102, 1}, FieldKind::Value, 11,
+    const FieldSchema field{Guid{102, 1}, FieldKind::Value,
+                            static_cast<uint32>(FieldFlags::Transient),
                             Span<const char>(fieldName, sizeof(fieldName) - 1),
                             Span<const uint8>(attributes, sizeof(attributes))};
     const TypeSchema schema{MetadataType, 1, Span<const FieldSchema>(&field, 1),

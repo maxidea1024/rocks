@@ -1,25 +1,45 @@
-# First Foundation build
+# Rocks 빌드 및 검증
 
-Run `python Build/build.py` on Windows x64 or macOS with native C++ tools, CMake, Ninja and Python. Windows discovers Visual Studio C++ tools/SDK and Ninja using vswhere; clang-cl must be on PATH. The local baseline is clang-cl 21.1.6. macOS uses clang++ and its native SDK. `CMakePresets.json` contains Debug/Release Windows and Debug/ASan macOS presets. Actual macOS results remain NOT RUN until native CI executes.
+## 요구 사항
 
-The build creates separate Base, Platform, Core, metadata, Task and Object targets, a CPU-only FoundationTests executable, and one translation unit per public header. Exceptions and RTTI are disabled. `ctest` runs Foundation, harness failure controls, the owned-source lexical STL guard and the module scaffold transaction. The STL guard is not a proof about external SDK internals or linked binaries.
+- .NET 10 SDK `10.0.302` (`global.json`, 최신 패치 롤포워드), Windows/macOS의 Clang C++23 도구 체인.
+- `clang-format` 21.1.6. `ROCKS_CLANG_FORMAT`에 실행 파일 경로를 지정한다. `pwsh Build/InstallFormatter.ps1`은 고정 SHA-256을 확인한 후 네이티브 바이너리를 설치한다.
+- Windows는 Visual Studio C++ 도구와 Windows SDK가 필요하다. macOS는 Xcode 도구와 macOS SDK가 필요하며 기본 배포 대상은 macOS 13.0이다.
+- C++ 컴파일러와 C# 컴파일러의 경고, MSBuild 경고는 오류로 취급한다. 경고 비활성화나 단계 축소는 허용하지 않는다.
 
-`FoundationTests --list`, `--filter text`, `--seed N`, `--repeat N`, and `--json file` are supported. No matching tests, invalid arguments, test failures and report write failures return nonzero. CHECK records and continues; REQUIRE returns from the current void test function. Test names are globally unique. The seed is exposed to deterministic fixtures; the runner does not pretend to randomize test order.
+## 엔진 빌드
 
-`python Build/format.py --check` requires clang-format 21.1.6. Set ROCKS_CLANG_FORMAT to the pinned executable if necessary. Without --check it formats engine/test sources.
+```text
+dotnet msbuild Rocks.proj /t:Test /p:Configuration=Debug /p:RocksTarget=Foundation
+dotnet msbuild Rocks.proj /t:Test /p:Configuration=Asan /p:RocksTarget=Foundation
+dotnet msbuild Rocks.proj /t:Build /p:Configuration=Release /p:RocksTarget=Engine
+```
 
-The C06 Task implementation is a single-owner synchronous executor. Submit reserves its completion observer record before consuming a caller's function. Cleanup runs directly outside locks and requires no second allocation or task submission; completion handles retain only the result. Handles and their allocator are confined to the creation thread, and the allocator must outlive every handle. Worker queues, dependencies, deferred lanes and cancellation are not implemented. This is the declared C06 subset, not the C17 scheduler.
+`Compiler`, `Jobs`, `NativeOutput` 속성으로 컴파일러 경로, 병렬 작업 수, 출력 위치를 지정할 수 있다. `RocksTarget=Core`는 오브젝트 모듈을 제외한 기반 테스트를 선택한다. 출력과 증거는 기본적으로 `out/` 아래에 기록한다.
 
-Function is move-only and allocator-owned with one heap allocation; SBO is deferred. ModuleLease is loader-independent and protects only the lifetime of owner-provided code. LogBuffer is a fixed-capacity, single-owner bootstrap diagnostic capture with loss/truncation counts and ProfileScope records. It has no background writer or viewer. Assert failure uses bounded stack formatting and the native Platform fatal sink, bypassing C stdio locks. Native fatal termination is not certified as async-signal-safe. A child-process test holds the C stderr lock while another thread asserts.
+MSBuild는 .NET 도구와 C# 규칙을 빌드하고 단계를 조직한다. `Rocks.Build`가 네이티브 작업 그래프, 입력·출력 해시, 증분 여부, 실패 복구를 담당한다. `Build/Rules/*.Build.cs`는 모듈을, `*.Target.cs`는 실행 대상을 정의한다. 규칙은 신뢰된 프로젝트 코드이며 동적으로 읽는 외부 입력은 명시해야 한다.
 
-The C00 scaffold supports only an ordinary module: `python Tools/Scaffold/rocks.py template plan module Example --output path --plan plan.json`, then `template apply --plan plan.json` and `template validate --plan plan.json`. The plan fixes the generated module ID and file digests; apply stages a new directory and rejects an existing target. No shell hooks run. Build integration is explicit. Full project/component/prefab/UI/material templates, linked updates, durable recovery journals and user catalogs remain planned.
+## 설치 SDK와 게임 빌드
 
-The GitHub Actions workflow is configured for Windows/macOS and uploads test reports. A committed workflow is not evidence that hosted CI has run. First implementation does not claim Foundation completion, parallel GC, real asset loading, GPU/Studio integration or production build caching/distribution.
+```text
+dotnet msbuild Rocks.proj /t:InstalledSdk /p:SdkDestination=C:/work/rocks-sdk/debug /p:Configuration=Debug
+dotnet msbuild Rocks.proj /t:Game /p:SdkDirectory=C:/work/rocks-sdk/debug /p:GameDirectory=C:/work/my-game /p:Configuration=Debug
+```
 
-Core-only: `python Build/build.py --preset windows-clang-core` sets ROCKS_BUILD_OBJECT=OFF. Windows AddressSanitizer: `python Build/build.py --preset windows-clang-asan`; the launcher locates the matching compiler resource DLL for child tests. Windows ASan does not replace the explicit allocation/owner ledger or establish LeakSanitizer coverage.
+SDK 대상 디렉터리는 새 경로여야 한다. SDK의 파일 목록과 내용, 플랫폼·아키텍처·컴파일러 및 SDK ABI·구성이 일치하지 않으면 게임 빌드를 중단한다. 게임 소스와 출력은 SDK 밖에 둔다. `Templates/Game/Foundation`은 C# 모듈·타깃 규칙과 생성된 CLASS/PROPERTY를 사용하는 예제다. 현재 SDK 내보내기는 외부 라이브러리와 임의 컴파일·링크 옵션이 있는 모듈을 지원하지 않으며 해당 선언을 오류로 거부한다.
 
-## Mandatory compiler diagnostics and platform boundary
+## 메타 선언
 
-Every owned C++ target, including tests, generated code and standalone public headers, must treat warnings as errors: `/W4 /WX` for the MSVC driver family; `-Wall -Wextra -Wpedantic -Werror` for Clang/Apple Clang. Warning suppression or downgrading is prohibited. See `Docs/Design/CompilerDiagnostics.ko.md` for the normative policy. CTest `warning_policy` audits actual compile commands and proves both a clean compiler control and rejection of an intentional warning. The generated probe targets are excluded from the default build.
+`ROCKS_CLASS("GUID", 버전, Abstract)`와 `ROCKS_PROPERTY("GUID", Transient, ReadOnly, Category="...", DisplayName="...")`를 사용한다. 지정자는 필요한 것만 선택한다. 비공개 필드에는 `ROCKS_GENERATED_BODY()`가 필요하다. GUID는 영이 아닌 고유 값이어야 하며, 미지원 타입·상속·선언 위치·지정자와 모호한 선언은 생성 전에 오류로 처리한다. 생성된 C++도 같은 Clang 구성으로 검사한 후에만 게시한다.
 
-`rocks_localization` depends on Core, while Core/Object do not depend on Localization. Platform Thread/Mutex/CV/Event/Semaphore have common APIs; CMake selects native Windows/macOS implementation files. `platform_boundary_audit` and its negative controls reject known OS leakage into common code. Neither lexical audit proves arbitrary preprocessor expansion. Current native execution evidence is in `Docs/Implementation/FoundationStatus.ko.md`; historical totals do not cover newly edited source.
+Transient 필드는 GC 참조 추적에는 참여하지만 저장 그래프에 포함되지 않는다. ReadOnly 필드는 일반 쓰기를 거부하고 복원 트랜잭션의 쓰기는 허용한다. Abstract 타입은 등록할 수 있으나 생성할 수 없다. 현재 지원 범위는 단일 공개 비가상 상속과 기본 스칼라·Guid·String·ObjectRef로 제한된다.
+
+## 별도 회귀 검사
+
+```text
+dotnet run --project Tools/Rocks.Build.Tests
+dotnet run --project Tools/Rocks.Build.IntegrationTests -- --root .
+dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll format --root .
+```
+
+기존 CMake/Python 경로는 이전 구현의 참고 자료다. 새 기능과 검증의 기준은 C#/.NET 경로다. 구현된 기능과 후속 과제는 실제 검증 범위와 구분하여 관리한다.

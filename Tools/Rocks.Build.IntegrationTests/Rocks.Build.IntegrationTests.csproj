@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../Rocks.Build.Cli/Rocks.Build.Cli.csproj" /></ItemGroup>
+</Project>

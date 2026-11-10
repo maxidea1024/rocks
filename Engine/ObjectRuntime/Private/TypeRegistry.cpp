@@ -141,9 +141,10 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     }
     if (schema.id == Guid{} || schema.version == 0 || schema.fields.Size() > 4096 ||
         ops.fields.Size() > schema.fields.Size() || schema.baseType == schema.id ||
-        !ops.construct || !ops.destroy || !ops.trace || !ops.nativeType ||
-        ops.size < sizeof(Object) || ops.alignment < alignof(Object) ||
-        (ops.alignment & (ops.alignment - 1)) != 0 ||
+        (schema.flags & ~static_cast<uint32>(TypeFlags::Abstract)) != 0 ||
+        (HasFlag(schema.flags, TypeFlags::Abstract) != (ops.construct == nullptr)) ||
+        !ops.destroy || !ops.trace || !ops.nativeType || ops.size < sizeof(Object) ||
+        ops.alignment < alignof(Object) || (ops.alignment & (ops.alignment - 1)) != 0 ||
         !StringView(schema.name.Data(), schema.name.Size()).ValidateUtf8()) {
         return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
     }
@@ -151,9 +152,13 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     for (usize index = 0; index < schema.fields.Size(); ++index) {
         const auto& field = schema.fields[index];
         if (field.id == Guid{} ||
+            (field.flags & ~(static_cast<uint32>(FieldFlags::Transient) |
+                             static_cast<uint32>(FieldFlags::ReadOnly))) != 0 ||
             (field.kind != FieldKind::Value && field.kind != FieldKind::ObjectReference) ||
             static_cast<uint8>(field.valueKind) > static_cast<uint8>(ValueKind::ObjectReference) ||
-            !StringView(field.name.Data(), field.name.Size()).ValidateUtf8()) {
+            !StringView(field.name.Data(), field.name.Size()).ValidateUtf8() ||
+            !StringView(field.category.Data(), field.category.Size()).ValidateUtf8() ||
+            !StringView(field.displayName.Data(), field.displayName.Size()).ValidateUtf8()) {
             return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
         }
         if (field.valueKind != ValueKind::Opaque) {
@@ -208,7 +213,8 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     }
     for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
         const auto& field = schema.fields[fieldIndex];
-        if (!AddBytes(bytes, field.name.Size()) || !AddBytes(bytes, field.attributes.Size())) {
+        if (!AddBytes(bytes, field.name.Size()) || !AddBytes(bytes, field.attributes.Size()) ||
+            !AddBytes(bytes, field.category.Size()) || !AddBytes(bytes, field.displayName.Size())) {
             return Result<TypeRegistrationToken>::Failure(ErrorCode::Overflow);
         }
     }
@@ -246,7 +252,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
                 for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
                     const auto& field = schema.fields[fieldIndex];
                     if (field.id == inherited.id && field.kind == inherited.kind &&
-                        field.valueKind == inherited.valueKind &&
+                        field.valueKind == inherited.valueKind && field.flags == inherited.flags &&
                         field.referencedType == inherited.referencedType) {
                         matched = true;
                         break;
@@ -280,12 +286,15 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     record->schema.id = schema.id;
     record->schema.version = schema.version;
     record->schema.baseType = schema.baseType;
+    record->schema.flags = schema.flags;
     record->schema.name = CopyBytes(schema.name, cursor);
     record->schema.fields = {fields, schema.fields.Size()};
     for (usize index = 0; index < schema.fields.Size(); ++index) {
         ::new (fields + index) FieldSchema(schema.fields[index]);
         fields[index].name = CopyBytes(schema.fields[index].name, cursor);
         fields[index].attributes = CopyBytes(schema.fields[index].attributes, cursor);
+        fields[index].category = CopyBytes(schema.fields[index].category, cursor);
+        fields[index].displayName = CopyBytes(schema.fields[index].displayName, cursor);
     }
     for (usize index = 0; index < ops.fields.Size(); ++index) {
         ::new (fieldOps + index) RuntimeFieldOps(ops.fields[index]);

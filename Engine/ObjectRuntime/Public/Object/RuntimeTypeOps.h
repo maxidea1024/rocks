@@ -101,27 +101,31 @@ struct RuntimeTypeOps {
 };
 
 // noexcept T(Allocator&)가 있으면 registry allocator를 주입하고, 없으면 noexcept T()를 사용한다.
+// Abstract 메타데이터는 생성 callback 없이 등록하고 생성 시도는 Unsupported로 거부한다.
 // 실패 가능한 초기화는 생성자 밖의 ConstructionContext 단계에서 처리한다.
 // Trace가 없는 타입은 강한 간선이 없는 것으로 취급한다. 메타데이터 자동 추적은 없다.
-template <class T>
+template <class T, bool Abstract = __is_abstract(T)>
 RuntimeTypeOps MakeRuntimeTypeOps(ModuleLease module = {}) noexcept {
     static_assert(__is_base_of(Object, T));
-    static_assert(__is_nothrow_constructible(T, Allocator&) || __is_nothrow_constructible(T));
+    static_assert(Abstract || __is_nothrow_constructible(T, Allocator&) ||
+                  __is_nothrow_constructible(T));
     static_assert(__is_nothrow_destructible(T));
 
     RuntimeTypeOps ops;
     ops.size = sizeof(T);
     ops.alignment = alignof(T);
     ops.nativeType = NativeTypeKey<T>();
-    ops.construct = [](void* memory, Allocator& allocator) noexcept -> Object* {
-        if constexpr (__is_constructible(T, Allocator&)) {
-            static_assert(__is_nothrow_constructible(T, Allocator&));
-            return ::new (memory) T(allocator);
-        } else {
-            return ::new (memory) T();
-        }
-    };
-    ops.destroy = [](Object* object) noexcept { static_cast<T*>(object)->~T(); };
+    if constexpr (!Abstract) {
+        ops.construct = [](void* memory, Allocator& allocator) noexcept -> Object* {
+            if constexpr (__is_constructible(T, Allocator&)) {
+                static_assert(__is_nothrow_constructible(T, Allocator&));
+                return ::new (memory) T(allocator);
+            } else {
+                return ::new (memory) T();
+            }
+        };
+    }
+    ops.destroy = [](Object* object) noexcept { static_cast<T*>(object)->T::~T(); };
     ops.trace = [](const Object& object, TraceVisitor& visitor) noexcept {
         if constexpr (requires(const T& value) { value.Trace(visitor); }) {
             static_assert(noexcept(static_cast<const T&>(object).Trace(visitor)));

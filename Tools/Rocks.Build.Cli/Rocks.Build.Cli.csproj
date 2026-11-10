@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Rocks.Build.Abstractions/Rocks.Build.Abstractions.csproj" />
+  </ItemGroup>
+</Project>

@@ -408,6 +408,13 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
         return Result<ObjectHandle>::Failure(ErrorCode::TypeMismatch);
     }
     const auto& ops = typeLease.Value().Ops();
+    // Abstract 선언은 C++가 생성 가능한 타입이어도 직접 생성할 수 없다.
+    // 슬롯/메모리를 예약하기 전에 검사하여 실패가 관찰 가능한 부작용을 남기지 않는다.
+    if (HasFlag(typeLease.Value().Schema().flags, TypeFlags::Abstract) ||
+        ops.construct == nullptr) {
+        finish();
+        return Result<ObjectHandle>::Failure(ErrorCode::Unsupported);
+    }
     if (gcPhase_ == GcPhase::Marking) {
         // mutator가 새 객체를 만드는 지점에서만 작업 큐를 확장한다. gate/Trace 안의 barrier는
         // 할당하지 않는다. Marking 동안 공개된 객체는 회수하지 않아 슬롯 수가 큐 상한이 된다.
