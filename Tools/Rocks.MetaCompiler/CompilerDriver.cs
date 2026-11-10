@@ -126,11 +126,7 @@ internal static class CompilerDriver
 
     private static byte[] ReadIdentitySnapshot(string path)
     {
-        const long limit = 16 * 1024 * 1024;
-        if (new FileInfo(path).Length > limit) throw new InvalidDataException("Stable ID manifest exceeds size limit");
-        byte[] bytes = File.ReadAllBytes(path);
-        if (bytes.Length > limit) throw new InvalidDataException("Stable ID manifest exceeds size limit");
-        return bytes;
+        return BoundedFile.Read(path, BoundedFile.MaximumIdentityBytes);
     }
 
     private static void VerifyIdentitySnapshot(string? path, byte[]? original)

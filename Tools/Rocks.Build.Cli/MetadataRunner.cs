@@ -79,12 +79,15 @@ public static class MetadataRunner
                 (!Path.IsPathRooted(outputRelative) && !outputRelative.Split('/', '\\').Any(part => part == "..")))
                 throw new ArgumentException($"Identity manifest '{target.IdentityManifest}' must resolve inside the project source and outside the output directory.");
         }
-        byte[]? manifestSnapshot = identityManifest is null ? null : File.ReadAllBytes(identityManifest);
+        byte[]? manifestSnapshot = null;
+        if (identityManifest is not null)
+            manifestSnapshot = BoundedFile.Read(identityManifest, BoundedFile.MaximumIdentityBytes);
         var outputs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var stagedOutputs = new List<(string Staged, string Final)>();
         var inventories = new List<string>();
         string tag = Guid.NewGuid().ToString("N");
         bool cleanupSafe = true;
+        bool commandFailed = false;
         Exception? pendingError = null;
         try
         {
@@ -145,7 +148,7 @@ public static class MetadataRunner
                     toolchain.Environment, Timeout: TimeSpan.FromMinutes(3)), cancellationToken);
                 Console.Write(generated.StdOut);
                 Console.Error.Write(generated.StdErr);
-                if (generated.ExitCode != 0) return generated.ExitCode;
+                if (generated.ExitCode != 0) { commandFailed = true; return generated.ExitCode; }
             }
             if (identityManifest is not null)
             {
@@ -155,7 +158,7 @@ public static class MetadataRunner
                     toolchain.Environment, Timeout: TimeSpan.FromMinutes(2)), cancellationToken);
                 Console.Write(result.StdOut);
                 Console.Error.Write(result.StdErr);
-                if (result.ExitCode != 0) return result.ExitCode;
+                if (result.ExitCode != 0) { commandFailed = true; return result.ExitCode; }
                 // 모든 단위를 검증한 뒤 게시한다. 중간 실패 시 기존 결과를 복구한다.
                 MetadataOutputTransaction.Publish(stagedOutputs, identityManifest, manifestSnapshot!, cancellationToken);
             }
@@ -172,19 +175,8 @@ public static class MetadataRunner
         {
             if (cleanupSafe)
             {
-                List<string> failures = [];
-                foreach (string path in stagedOutputs.Select(value => value.Staged).Concat(inventories))
-                {
-                    try { if (File.Exists(path)) File.Delete(path); }
-                    catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-                    { failures.Add(path + ": " + error.Message); }
-                }
-                if (failures.Count != 0)
-                {
-                    string diagnostic = "Metadata temporary cleanup failed: " + string.Join("; ", failures);
-                    if (pendingError is null) throw new IOException(diagnostic);
-                    Console.Error.WriteLine(diagnostic); // 원래 예외와 rollback 복구 경로를 덮지 않는다.
-                }
+                MetadataTemporaryCleanup.Finish(stagedOutputs.Select(value => value.Staged).Concat(inventories),
+                    pendingError is not null || commandFailed);
             }
         }
     }

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Rocks.Tooling.Common;
 
 namespace Rocks.MetaCompiler;
 
@@ -13,10 +14,7 @@ internal static class IdentityInventory
         int total = 0;
         foreach (string path in paths)
         {
-            var info = new FileInfo(path);
-            if (!info.Exists || info.Length > 16 * 1024 * 1024) throw new InvalidDataException("Missing or oversized identity inventory: " + path);
-            byte[] bytes = File.ReadAllBytes(path);
-            if (bytes.Length > 16 * 1024 * 1024) throw new InvalidDataException("Oversized identity inventory: " + path);
+            byte[] bytes = BoundedFile.Read(path, BoundedFile.MaximumIdentityBytes);
             using var document = JsonDocument.Parse(bytes, new JsonDocumentOptions { MaxDepth = 8 });
             var root = Fields(document.RootElement, ["schema", "declarations"]);
             if (root["schema"].ValueKind != JsonValueKind.Number || !root["schema"].TryGetInt32(out int schema) || schema != 1 ||

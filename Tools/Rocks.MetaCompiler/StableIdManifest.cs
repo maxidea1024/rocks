@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Rocks.Tooling.Common;
 
 namespace Rocks.MetaCompiler;
 
@@ -9,7 +10,7 @@ internal sealed record StableIdEntry(string Kind, string Name, string Id,
 
 internal sealed class StableIdManifest
 {
-    private const int MaximumBytes = 16 * 1024 * 1024;
+    private const int MaximumBytes = BoundedFile.MaximumIdentityBytes;
     private const int MaximumEntries = 100000;
     private static readonly UTF8Encoding Utf8 = new(false, true);
     private readonly List<StableIdEntry> entries;
@@ -27,9 +28,7 @@ internal sealed class StableIdManifest
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         string full = Path.GetFullPath(path);
         if (IsLink(full)) throw new InvalidDataException("Stable ID manifest cannot be a link: " + full);
-        if (new FileInfo(full).Length > MaximumBytes) throw new InvalidDataException("Stable ID manifest exceeds size limit");
-        byte[] bytes = File.ReadAllBytes(full);
-        if (bytes.Length > MaximumBytes) throw new InvalidDataException("Stable ID manifest exceeds size limit");
+        byte[] bytes = BoundedFile.Read(full, MaximumBytes);
         // 잘못된 UTF-8은 대체 문자로 복구하지 않는다.
         string json = Utf8.GetString(bytes);
         JsonDocument parsed;
@@ -79,7 +78,7 @@ internal sealed class StableIdManifest
             bool exists = File.Exists(full);
             if (IsLink(full)) throw new InvalidDataException("Stable ID manifest cannot be a link");
             if (!exists && !create) throw new FileNotFoundException("Stable ID manifest does not exist", full);
-            byte[]? before = exists ? File.ReadAllBytes(full) : null;
+            byte[]? before = exists ? BoundedFile.Read(full, MaximumBytes) : null;
             StableIdManifest manifest = exists ? Load(full) : new([]);
             byte[] originalState = manifest.Serialize();
             T result = mutation(manifest);
@@ -87,7 +86,7 @@ internal sealed class StableIdManifest
             byte[] after = manifest.Serialize();
             if (after.Length > MaximumBytes)
                 throw new InvalidDataException("Updated stable ID manifest exceeds size limit");
-            if (before is null ? File.Exists(full) : !File.Exists(full) || !File.ReadAllBytes(full).AsSpan().SequenceEqual(before))
+            if (before is null ? File.Exists(full) : !File.Exists(full) || !BoundedFile.Read(full, MaximumBytes).AsSpan().SequenceEqual(before))
                 throw new IOException("Stable ID manifest changed during update; retry after resolving concurrent edits");
             if (before is not null && originalState.AsSpan().SequenceEqual(after)) return result;
             string temporary = full + "." + Guid.NewGuid().ToString("N") + ".tmp";

@@ -14,7 +14,7 @@ try
 }
 catch (OperationCanceledException)
 {
-    Console.Error.WriteLine("ROCKS-BUILD-CANCELLED: Build cancelled; no successful state was published.");
+    Console.Error.WriteLine("ROCKS-BUILD-CANCELLED: Build cancelled before successful completion.");
     return 130;
 }
 catch (Exception error)

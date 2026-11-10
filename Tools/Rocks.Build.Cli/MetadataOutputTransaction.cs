@@ -30,6 +30,7 @@ internal interface IMetadataOutputFiles
 {
     bool Exists(string path);
     byte[] Read(string path);
+    byte[] ReadBounded(string path, int maximumBytes);
     void CreateBackup(string path, byte[] bytes);
     void WriteAtomic(string path, byte[] bytes);
     void Delete(string path);
@@ -40,6 +41,7 @@ internal sealed class MetadataOutputFiles : IMetadataOutputFiles
     public static MetadataOutputFiles Instance { get; } = new();
     public bool Exists(string path) => File.Exists(path);
     public byte[] Read(string path) => File.ReadAllBytes(path);
+    public byte[] ReadBounded(string path, int maximumBytes) => BoundedFile.Read(path, maximumBytes);
     public void CreateBackup(string path, byte[] bytes)
     {
         bool created = false;
@@ -76,6 +78,8 @@ internal static class MetadataOutputTransaction
         ArgumentNullException.ThrowIfNull(outputs);
         ArgumentException.ThrowIfNullOrWhiteSpace(manifestPath);
         ArgumentNullException.ThrowIfNull(manifestSnapshot);
+        if (manifestSnapshot.Length > BoundedFile.MaximumIdentityBytes)
+            throw new InvalidDataException("Identity manifest snapshot exceeds size limit.");
         files ??= MetadataOutputFiles.Instance;
         string manifest = Path.GetFullPath(manifestPath);
         byte[] expectedManifest = manifestSnapshot.ToArray();
@@ -98,7 +102,7 @@ internal static class MetadataOutputTransaction
         void CheckManifest()
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!files.Exists(manifest) || !files.Read(manifest).AsSpan().SequenceEqual(expectedManifest))
+            if (!files.Exists(manifest) || !files.ReadBounded(manifest, BoundedFile.MaximumIdentityBytes).AsSpan().SequenceEqual(expectedManifest))
                 throw new IOException("Identity manifest changed during metadata publication.");
         }
         try

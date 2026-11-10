@@ -29,6 +29,7 @@ try
     var timer = Stopwatch.StartNew();
     await OutputInvocationLockTests.RunAsync();
     MetadataOutputTransactionTests.Run();
+    MetadataTemporaryCleanupTests.Run();
     Pass("output-invocation-lock", timer.Elapsed);
     timer.Restart();
     var exported = await Cli("sdk", "--root", root, "--target", "Engine", "--configuration", "Debug", "--destination", sdk);

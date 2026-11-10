@@ -33,7 +33,7 @@
 
 빌드 도구는 .NET 10과 MSBuild로 호스트 도구 및 규칙을 구성하고, `Rocks.Build`가 C++ 컴파일·정적 라이브러리·실행 파일의 의존성과 로컬 증분 판단을 수행한다. 설치 SDK에는 헤더·빌드된 라이브러리·호스트 도구와 호환성 manifest가 포함되며 외부 게임은 별도 경로에서 빌드한다. 현재 SDK 내보내기는 임의 컴파일·링크 옵션이나 외부 사전 빌드 라이브러리가 있는 모듈을 지원하지 않고 명시적으로 거부한다. CMake/Python 파일은 이전 구현의 참고 경로이며 새 빌드·검증의 기준은 .NET 경로다.
 
-메타컴파일러는 각 타깃의 `TargetRules.Metadata`에 수동 등록한 헤더 단위로 Clang AST를 분석하고, 허용된 대상 컴파일 조건을 사용해 생성 C++도 검사한다. 등록된 unit의 소유 모듈·중복 입력과 생성 출력 등을 검사하지만 미등록 헤더의 선언 자동 발견, 서로 다른 unit 전체의 GUID 충돌 검사, 각 unit에 포함된 타입의 전역 단일 소유권 확인은 제공하지 않는다. 따라서 호출 측은 unit 소유와 타입 ID를 관리해야 한다. 사용자 정의 전체 컴파일 옵션·완전한 compilation database 재구성·생성 캐시도 아직 제공하지 않는다.
+메타컴파일러는 각 타깃의 `TargetRules.Metadata`에 수동 등록한 헤더 단위로 Clang AST를 분석하고, 허용된 대상 컴파일 조건을 사용해 생성 C++도 검사한다. 등록된 unit의 소유 모듈·중복 입력과 생성 출력, 타깃의 단일 ID 명세 및 여러 unit의 활성 선언 누락·중복을 검사한다. 같은 reflected 선언을 여러 unit에서 사용하는 구성은 현재 거부한다. 미등록 헤더 자동 발견과 서로 다른 타깃·명세를 통합한 전역 ID 검사는 아직 제공하지 않는다. 사용자 정의 전체 컴파일 옵션·완전한 compilation database 재구성·생성 캐시도 아직 제공하지 않는다.
 
 별도 `Localization → Core` 모듈에서 Text 불변 이력·catalog snapshot·named format을 구현하였다. 지역별 plural/날짜/통화·추출·쿠킹·UI는 후속이다. [Name·Text 구현 계약](NameTextImplementation.ko.md), [플랫폼 독립 동시성](PlatformConcurrency.ko.md), [컴파일러 경고 정책](../Design/CompilerDiagnostics.ko.md)을 함께 따른다.
 

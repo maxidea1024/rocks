@@ -1,4 +1,5 @@
 using Rocks.Build.Cli;
+using Rocks.Tooling.Common;
 
 namespace Rocks.Build.IntegrationTests;
 
@@ -10,10 +11,11 @@ internal static class MetadataOutputTransactionTests
         StagedFailurePublishesNothing();
         PartialWriteFailureRollsBack();
         CancellationAndManifestMutationRollBack();
+        GrowingManifestRollsBack();
         RollbackFailureRetainsRecoveryBackups();
         BackupNameCollisionDoesNotDeleteForeignFile();
         DuplicateAndAliasedOutputsAreRejected();
-        Console.WriteLine("PASS metadata publication transaction: 7 groups");
+        Console.WriteLine("PASS metadata publication transaction: 8 groups");
     }
 
     private static void SuccessAndNoOp()
@@ -115,6 +117,28 @@ internal static class MetadataOutputTransactionTests
         Require(File.ReadAllText(fixture.B) == "partial replacement", "failure injection did not mutate output");
     }
 
+    private static void GrowingManifestRollsBack()
+    {
+        using var fixture = new Fixture();
+        fixture.Prepare();
+        var files = new InjectFiles();
+        int calls = 0;
+        files.Write = (path, bytes) =>
+        {
+            MetadataOutputFiles.Instance.WriteAtomic(path, bytes);
+            if (++calls == 1)
+            {
+                using var manifest = new FileStream(fixture.Manifest, FileMode.Open, FileAccess.Write, FileShare.None);
+                manifest.SetLength((long)BoundedFile.MaximumIdentityBytes + 1);
+            }
+        };
+        Expect<InvalidDataException>(() => fixture.Publish(files));
+        Require(File.ReadAllText(fixture.A) == "old-a" && File.ReadAllText(fixture.B) == "old-b",
+            "growing manifest did not roll back outputs");
+        Require(new FileInfo(fixture.Manifest).Length == (long)BoundedFile.MaximumIdentityBytes + 1,
+            "external manifest mutation was overwritten");
+    }
+
     private static void DuplicateAndAliasedOutputsAreRejected()
     {
         using var fixture = new Fixture();
@@ -158,6 +182,7 @@ internal static class MetadataOutputTransactionTests
         public Action<string, byte[]>? Backup { get; set; }
         public bool Exists(string path) => MetadataOutputFiles.Instance.Exists(path);
         public byte[] Read(string path) => MetadataOutputFiles.Instance.Read(path);
+        public byte[] ReadBounded(string path, int maximumBytes) => MetadataOutputFiles.Instance.ReadBounded(path, maximumBytes);
         public void CreateBackup(string path, byte[] bytes) => (Backup ?? MetadataOutputFiles.Instance.CreateBackup)(path, bytes);
         public void WriteAtomic(string path, byte[] bytes) => (Write ?? MetadataOutputFiles.Instance.WriteAtomic)(path, bytes);
         public void Delete(string path) => MetadataOutputFiles.Instance.Delete(path);
