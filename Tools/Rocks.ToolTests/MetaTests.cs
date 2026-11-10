@@ -96,12 +96,26 @@ internal static class MetaTests
         suite.Add("Meta.DiagnosticsAndResponseOverridesRejected", async () =>
         {
             using Probe probe = new(options, actualEnvironment, generator, compiler);
-            foreach (string argument in new[] { "-Wno-error", "/clang:-Wno-error", "-w", "/W0", "@hidden.rsp", "-I", "-Ihidden", "/Ihidden", "-iquote", "-iquotehidden", "-isystem", "-isystemhidden", "-idirafter", "-idirafterhidden", "-include", "-includehidden", "-imacros", "-imacroshidden", "-F", "-Fhidden", "-iframeworkhidden", "/FIhidden", "/external:Ihidden", "-Wp,-Ihidden", "-ivfsoverlay=hidden", "--config=hidden", "/clang:-Ihidden" })
+            var arguments = new List<string> { "-Wno-error", "-w", "@hidden.rsp", "-I", "-Ihidden", "-iquote", "-iquotehidden", "-isystem", "-isystemhidden", "-idirafter", "-idirafterhidden", "-include", "-includehidden", "-imacros", "-imacroshidden", "-F", "-Fhidden", "-iframeworkhidden", "-Wp,-Ihidden", "-ivfsoverlay=hidden", "--config=hidden" };
+            if (OperatingSystem.IsWindows())
+                arguments.AddRange(["/clang:-Wno-error", "/W0", "/I", "/Ihidden", "/FI", "/FIhidden", "/external:Ihidden", "/clang:-Ihidden"]);
+            foreach (string argument in arguments)
             {
                 await probe.GenerateAsync(Declaration(), extra: ["--clang-arg=" + argument], expectedCode: "RMC1000", reason: "override");
                 Verify.That(!File.Exists(probe.Output), "rejected CLI wrote output");
             }
         });
+        if (OperatingSystem.IsMacOS())
+        {
+            suite.Add("Meta.MacAbsolutePathsAreNotWindowsSwitches", async () =>
+            {
+                using Probe probe = new(options, actualEnvironment, generator, compiler);
+                // 경로가 없으므로 Clang은 입력을 거부하지만, Rocks 옵션 검사에서 /I·/FI로 오인하면 안 된다.
+                foreach (string path in new[] { "/Install/RocksMissingSdk", "/Files/RocksMissingSdk" })
+                    await probe.GenerateAsync(Declaration(), extra: ["--clang-arg=-isysroot", "--clang-arg=" + path],
+                        expectedCode: "RMC3000", reason: "Clang");
+            });
+        }
         suite.Add("Meta.PrivateGeneratedBodyAndUnicodeSpecifiers", async () =>
         {
             using Probe probe = new(options, actualEnvironment, generator, compiler);

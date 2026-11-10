@@ -29,7 +29,7 @@ internal static class CompilerDriver
             includes = engineModules.Select(path => Path.Combine(path, "Public")).Where(Directory.Exists)
                 .Order(StringComparer.Ordinal).Append(root).Append(Path.GetDirectoryName(input)!).ToList();
         }
-        ValidateCompilerArguments(options.ClangArguments);
+        ValidateCompilerArguments(options.ClangArguments, clangCl);
         string outputDirectory = Path.GetDirectoryName(Path.GetFullPath(options.Output))!;
         ValidateIncludeBinding(input, options.Include, outputDirectory, includes);
         foreach (string path in includes)
@@ -94,24 +94,24 @@ internal static class CompilerDriver
         Console.WriteLine($"Rocks metadata: {schema.Ordered.Count} types; {(options.Check ? "checked" : "generated")}");
     }
 
-    private static void ValidateCompilerArguments(IEnumerable<string> arguments)
+    private static void ValidateCompilerArguments(IEnumerable<string> arguments, bool clangCl)
     {
         foreach (string argument in arguments)
         {
-            string native = argument.StartsWith("/clang:", StringComparison.Ordinal) ? argument[7..] : argument;
+            string native = clangCl && argument.StartsWith("/clang:", StringComparison.OrdinalIgnoreCase) ? argument[7..] : argument;
             bool reduced = native is "-Xclang" or "-Xpreprocessor" || native == "-w" || native.StartsWith("-Wno-", StringComparison.Ordinal) ||
-                native.StartsWith('@') || native.Equals("/WX-", StringComparison.OrdinalIgnoreCase) ||
+                native.StartsWith('@') || (clangCl && (native.Equals("/WX-", StringComparison.OrdinalIgnoreCase) ||
                 native is "/W0" or "/W1" or "/W2" or "/W3" or "/w" ||
                 native.StartsWith("/wd", StringComparison.OrdinalIgnoreCase) ||
-                native.StartsWith("/external:W", StringComparison.OrdinalIgnoreCase) ||
+                native.StartsWith("/external:W", StringComparison.OrdinalIgnoreCase))) ||
                 native.Contains("_CRT_SECURE_NO_WARNINGS", StringComparison.Ordinal) ||
                 native.Contains("_SCL_SECURE_NO_WARNINGS", StringComparison.Ordinal);
             // 검색 순서와 forced include는 --include-dir에서만 선언한다. 임의 compiler 인자로
             // 별도 검색 경로를 추가하면 원본 검증과 실제 generated header가 다른 파일을 볼 수 있다.
             bool searchOverride = native.StartsWith("-I", StringComparison.Ordinal) ||
-                native.StartsWith("/I", StringComparison.OrdinalIgnoreCase) ||
+                (clangCl && (native.StartsWith("/I", StringComparison.OrdinalIgnoreCase) ||
                 native.StartsWith("/FI", StringComparison.OrdinalIgnoreCase) ||
-                native.StartsWith("/external:I", StringComparison.OrdinalIgnoreCase) ||
+                native.StartsWith("/external:I", StringComparison.OrdinalIgnoreCase))) ||
                 native.StartsWith("-iquote", StringComparison.Ordinal) ||
                 native.StartsWith("-isystem", StringComparison.Ordinal) ||
                 native.StartsWith("-idirafter", StringComparison.Ordinal) ||

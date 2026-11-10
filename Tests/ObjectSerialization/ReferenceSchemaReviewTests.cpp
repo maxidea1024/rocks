@@ -41,6 +41,27 @@ const RuntimeFieldOps* Next(const TypeLease& lease) noexcept {
     }
     return nullptr;
 }
+
+struct CallbackUnregistrationProbe {
+    TypeRegistry* source;
+    TypeRegistry* target;
+    TypeRegistrationToken sourceToken;
+    TypeRegistrationToken targetToken;
+    ErrorCode sourceResult = ErrorCode::None;
+    ErrorCode targetResult = ErrorCode::None;
+};
+
+CallbackUnregistrationProbe* activeProbe = nullptr;
+
+Result<void> ProbeReferenceTypeLifetimes(ObjectRegistry&, const ObjectAccessContext&, ObjectHandle,
+                                         const FieldValue&) noexcept {
+    if (!activeProbe) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+    activeProbe->sourceResult = activeProbe->source->Unregister(activeProbe->sourceToken).Error();
+    activeProbe->targetResult = activeProbe->target->Unregister(activeProbe->targetToken).Error();
+    return Result<void>::Success();
+}
 } // namespace
 
 TEST(ReferenceWriteChecksBothSchemasAcrossRegistriesAndNativeAliases) {
@@ -140,6 +161,64 @@ TEST(ReferenceWriteDoesNotTreatSameTypeIdAcrossRegistriesAsSameNativeType) {
         FieldValue output(allocator);
         REQUIRE(writer->read(target, target.OwnerAccess(), owner.Value().Handle(), output));
         CHECK(output.reference == ObjectHandle{});
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+TEST(ReferenceWriteKeepsBothDeclaredTypeLeasesUntilCallbackCompletes) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry sourceTypes(allocator);
+        TypeRegistry targetTypes(allocator);
+        REQUIRE(GeneratedType<Base>::Register(sourceTypes));
+        REQUIRE(GeneratedType<Base>::Register(targetTypes));
+        const TypeId sourceReference{0xc0dec0de, 0x201};
+        const TypeId targetReference{0xc0dec0de, 0x202};
+        const TypeId targetOwner{0xc0dec0de, 0x203};
+        auto sourceToken = RegisterNodeAlias(sourceTypes, sourceReference, {});
+        auto targetToken = RegisterNodeAlias(targetTypes, targetReference, {});
+        REQUIRE(sourceToken && targetToken);
+
+        // 각 참조 alias에는 실제 객체가 없으므로 Busy는 owner의 lease가 아닌 검사 lease가 보장한다.
+        auto sourceSchema = GeneratedType<Node>::Schema();
+        FieldSchema fields[32];
+        RuntimeFieldOps accessors[32];
+        auto sourceOps = GeneratedType<Node>::Ops();
+        REQUIRE(sourceSchema.fields.Size() <= 32 &&
+                sourceOps.fields.Size() == sourceSchema.fields.Size());
+        for (usize index = 0; index < sourceSchema.fields.Size(); ++index) {
+            fields[index] = sourceSchema.fields[index];
+            accessors[index] = sourceOps.fields[index];
+            if (fields[index].id == NextId) {
+                fields[index].referencedType = sourceReference;
+            }
+            if (accessors[index].fieldId == NextId) {
+                accessors[index].write = &ProbeReferenceTypeLifetimes;
+            }
+        }
+        sourceSchema.fields = {fields, sourceSchema.fields.Size()};
+        sourceOps.fields = {accessors, sourceOps.fields.Size()};
+        REQUIRE(sourceTypes.Register(sourceSchema, Move(sourceOps)));
+        REQUIRE(RegisterNodeAlias(targetTypes, targetOwner, targetReference));
+        ObjectRegistry target(allocator, targetTypes, {723, 1});
+        auto owner = target.NewObject<Node>(target.OwnerAccess(), targetOwner);
+        auto sourceLease = sourceTypes.Acquire(sourceSchema.id);
+        REQUIRE(owner && sourceLease);
+        const auto* writer = Next(sourceLease.Value());
+        REQUIRE(writer);
+        FieldValue input(allocator);
+        input.kind = ValueKind::ObjectReference;
+        CallbackUnregistrationProbe probe{&sourceTypes, &targetTypes, sourceToken.Value(),
+                                          targetToken.Value()};
+        activeProbe = &probe;
+        auto result = writer->write(target, target.OwnerAccess(), owner.Value().Handle(), input);
+        activeProbe = nullptr;
+        REQUIRE(result);
+        CHECK(probe.sourceResult == ErrorCode::Busy);
+        CHECK(probe.targetResult == ErrorCode::Busy);
+        // callback이 반환한 직후에는 두 참조 타입 lease가 해제되어 등록 해제가 가능하다.
+        REQUIRE(sourceTypes.Unregister(sourceToken.Value()));
+        REQUIRE(targetTypes.Unregister(targetToken.Value()));
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }

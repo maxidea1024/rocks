@@ -40,11 +40,13 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
     if (actual->valueKind != valueKind_ || value.kind != valueKind_) {
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
+    // 검증한 참조 타입은 callback 완료까지 유지한다. 그 전에 해제하면 callback 재진입에서
+    // 같은 ID의 타입을 unregister/재등록해 검증과 실제 필드 게시의 기준이 달라질 수 있다.
+    TypeLease sourceExpected;
+    TypeLease targetExpected;
     if (valueKind_ == ValueKind::ObjectReference) {
         // 등록 시점에 자기 참조나 별칭이 아직 미등록일 수 있으므로 호출 시 각 레지스트리에서
         // 참조 타입을 확인한다. 서로 다른 GUID라도 같은 native 타입인 별칭은 허용한다.
-        TypeLease sourceExpected;
-        TypeLease targetExpected;
         if (referencedType_ != TypeId{}) {
             auto expected = registry_->Acquire(referencedType_);
             if (!expected) {
