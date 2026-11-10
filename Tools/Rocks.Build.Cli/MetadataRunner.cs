@@ -10,6 +10,42 @@ public static class MetadataRunner
         CancellationToken cancellationToken)
     {
         var byName = modules.ToDictionary(module => module.Name, StringComparer.OrdinalIgnoreCase);
+        var reachable = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        void Reach(string name)
+        {
+            if (!byName.TryGetValue(name, out var module))
+                throw new ArgumentException($"Target '{target.Name}': unknown module '{name}'.");
+            if (reachable.TryGetValue(name, out bool complete))
+            {
+                if (!complete) throw new ArgumentException($"Target '{target.Name}': dependency cycle at '{name}'.");
+                return;
+            }
+            reachable.Add(name, false);
+            foreach (var dependency in module.Dependencies) Reach(dependency);
+            reachable[name] = true;
+        }
+        foreach (var name in target.Modules) Reach(name);
+
+        // 전체 unit의 소유권을 먼저 확인한다. 뒤 unit이 잘못되었을 때 앞 unit만 게시하지 않는다.
+        var inputOwners = new Dictionary<string, MetadataUnit>(OperatingSystem.IsWindows()
+            ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        foreach (var unit in target.Metadata)
+        {
+            if (!byName.ContainsKey(unit.Module))
+                throw new ArgumentException($"Metadata '{unit.Input}': unknown owner module '{unit.Module}'.");
+            if (!reachable.ContainsKey(unit.Module))
+                throw new ArgumentException($"Metadata '{unit.Input}': owner module '{unit.Module}' is not reachable from target '{target.Name}'.");
+            var input = context.PathInRoot(unit.Input);
+            var relative = Path.GetRelativePath(context.RootDirectory, input);
+            if (!File.Exists(input) || Path.IsPathRooted(relative) || relative.Split('/', '\\').Any(part => part == ".."))
+                throw new ArgumentException($"Metadata '{unit.Input}': input must exist inside the project root.");
+            var canonical = CanonicalInput(input);
+            if (!inputOwners.TryAdd(canonical, unit))
+            {
+                var first = inputOwners[canonical];
+                throw new ArgumentException($"Metadata '{unit.Input}': duplicate input ownership; '{first.Module}/{first.Output}' and '{unit.Module}/{unit.Output}' resolve to '{canonical}'.");
+            }
+        }
         var outputs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var unit in target.Metadata)
         {
@@ -61,5 +97,25 @@ public static class MetadataRunner
             if (generated.ExitCode != 0) return generated.ExitCode;
         }
         return 0;
+    }
+
+    // 중간 디렉터리의 symlink도 해소하여 별칭으로 같은 헤더를 두 번 등록하는 실수를 감지한다.
+    // 서로 다른 hard link의 동일 파일 ID 판정은 현재 지원 범위가 아니다.
+    private static string CanonicalInput(string path, int depth = 0)
+    {
+        if (depth > 40) throw new IOException("Too many symbolic links: " + path);
+        var full = Path.GetFullPath(path);
+        var root = Path.GetPathRoot(full) ?? throw new IOException("Input path has no filesystem root: " + full);
+        var current = root;
+        foreach (var component in full[root.Length..].Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
+        {
+            var candidate = Path.Combine(current, component);
+            FileSystemInfo? entry = Directory.Exists(candidate) ? new DirectoryInfo(candidate) :
+                File.Exists(candidate) ? new FileInfo(candidate) : null;
+            var target = entry?.ResolveLinkTarget(returnFinalTarget: true);
+            current = target is null ? candidate : CanonicalInput(target.FullName, depth + 1);
+        }
+        return Path.GetFullPath(current);
     }
 }

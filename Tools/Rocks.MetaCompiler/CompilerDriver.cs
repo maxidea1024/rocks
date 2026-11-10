@@ -29,7 +29,7 @@ internal static class CompilerDriver
             includes = engineModules.Select(path => Path.Combine(path, "Public")).Where(Directory.Exists)
                 .Order(StringComparer.Ordinal).Append(root).Append(Path.GetDirectoryName(input)!).ToList();
         }
-        ValidateCompilerArguments(options.ClangArguments, clangCl);
+        await ValidateCompilerArgumentsAsync(options.ClangArguments, clangCl, root, environment);
         string outputDirectory = Path.GetDirectoryName(Path.GetFullPath(options.Output))!;
         ValidateIncludeBinding(input, options.Include, outputDirectory, includes);
         foreach (string path in includes)
@@ -43,7 +43,7 @@ internal static class CompilerDriver
             $"#include \"{input.Replace('\\', '/')}\"\n", TimeSpan.FromMinutes(2)));
         if (compiled.ExitCode != 0 || compiled.StdErr.Contains("warning:", StringComparison.OrdinalIgnoreCase))
             throw new MetadataException("Clang rejected reflection input:\n" + compiled.StdErr, "RMC3000",
-                "Fix the Clang diagnostic at the reported source location; do not suppress or downgrade warnings.");
+                "Fix the Clang diagnostic at the reported source location. Place ROCKS_CLASS before class or struct; do not suppress or downgrade warnings.");
         SchemaModel schema;
         try { schema = new ClangAstParser(input).Parse(compiled.StdOut); }
         catch (Exception error) when (error is JsonException or KeyNotFoundException or InvalidOperationException or FormatException)
@@ -94,40 +94,104 @@ internal static class CompilerDriver
         Console.WriteLine($"Rocks metadata: {schema.Ordered.Count} types; {(options.Check ? "checked" : "generated")}");
     }
 
-    private static void ValidateCompilerArguments(IEnumerable<string> arguments, bool clangCl)
+    private static async Task ValidateCompilerArgumentsAsync(IReadOnlyList<string> arguments, bool clangCl,
+        string root, IReadOnlyDictionary<string, string?> environment)
     {
-        foreach (string argument in arguments)
+        // 허용된 프로필의 의미를 추측해 우회 인자 목록을 계속 추가하지 않는다. 프로필 확장은
+        // native compile과 AST의 동등성·회귀 테스트를 함께 검토한 뒤 이 계약에 명시한다.
+        var windows = new HashSet<string>(StringComparer.Ordinal)
         {
-            string native = clangCl && argument.StartsWith("/clang:", StringComparison.OrdinalIgnoreCase) ? argument[7..] : argument;
-            bool reduced = native is "-Xclang" or "-Xpreprocessor" || native == "-w" || native.StartsWith("-Wno-", StringComparison.Ordinal) ||
-                native.StartsWith('@') || (clangCl && (native.Equals("/WX-", StringComparison.OrdinalIgnoreCase) ||
-                native is "/W0" or "/W1" or "/W2" or "/W3" or "/w" ||
-                native.StartsWith("/wd", StringComparison.OrdinalIgnoreCase) ||
-                native.StartsWith("/external:W", StringComparison.OrdinalIgnoreCase))) ||
-                native.Contains("_CRT_SECURE_NO_WARNINGS", StringComparison.Ordinal) ||
-                native.Contains("_SCL_SECURE_NO_WARNINGS", StringComparison.Ordinal);
-            // 검색 순서와 forced include는 --include-dir에서만 선언한다. 임의 compiler 인자로
-            // 별도 검색 경로를 추가하면 원본 검증과 실제 generated header가 다른 파일을 볼 수 있다.
-            bool searchOverride = native.StartsWith("-I", StringComparison.Ordinal) ||
-                (clangCl && (native.StartsWith("/I", StringComparison.OrdinalIgnoreCase) ||
-                native.StartsWith("/FI", StringComparison.OrdinalIgnoreCase) ||
-                native.StartsWith("/external:I", StringComparison.OrdinalIgnoreCase))) ||
-                native.StartsWith("-iquote", StringComparison.Ordinal) ||
-                native.StartsWith("-isystem", StringComparison.Ordinal) ||
-                native.StartsWith("-idirafter", StringComparison.Ordinal) ||
-                native.StartsWith("-include", StringComparison.Ordinal) ||
-                native.StartsWith("-imacros", StringComparison.Ordinal) ||
-                native.StartsWith("-F", StringComparison.Ordinal) ||
-                native.StartsWith("-iframework", StringComparison.Ordinal) ||
-                native.StartsWith("-ivfsoverlay", StringComparison.Ordinal) ||
-                native.StartsWith("-fmodule-map-file", StringComparison.Ordinal) ||
-                native.StartsWith("-Wp,", StringComparison.Ordinal) ||
-                native.StartsWith("--config", StringComparison.Ordinal);
-            if (reduced || searchOverride) throw new MetadataException("unsupported compiler diagnostics/include/response-file override: " + argument,
-                "RMC1000", "Remove warning suppression, forced includes and hidden search paths; supply explicit --include-dir entries in target order.");
+            "/nologo", "/utf-8", "/W4", "/WX", "/GR-", "/EHs-c-", "/Zc:__cplusplus",
+            "/clang:-std=c++23", "/MD", "/MDd", "/O2", "/Od", "/Z7", "/fsanitize=address"
+        };
+        var unix = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "-std=c++23", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-fno-rtti",
+            "-fno-exceptions", "-O2", "-O0", "-g", "-fsanitize=address", "-fno-omit-frame-pointer"
+        };
+        string? sdk = null;
+        var groups = new Dictionary<string, string>(StringComparer.Ordinal);
+        void Remember(string group, string argument)
+        {
+            if (!groups.TryAdd(group, argument))
+                throw new MetadataException($"conflicting or duplicate compiler options: {groups[group]} and {argument}",
+                    "RMC1000", "Specify each native profile setting and macro once; remove the conflicting option.");
+        }
+        for (int index = 0; index < arguments.Count; ++index)
+        {
+            string argument = arguments[index];
+            if ((clangCl ? windows : unix).Contains(argument))
+            {
+                string group = argument switch
+                {
+                    "/MD" or "/MDd" => "windows-runtime",
+                    "/O2" or "/Od" => "windows-optimization",
+                    "-O2" or "-O0" => "mac-optimization",
+                    _ => "flag:" + argument
+                };
+                Remember(group, argument);
+                continue;
+            }
+            if (!clangCl && argument == "-isysroot")
+            {
+                Remember("mac-sysroot", argument);
+                if (++index >= arguments.Count) throw InvalidArgument(argument);
+                string path = arguments[index];
+                if (!Path.IsPathFullyQualified(path) || !Directory.Exists(path) || path.IndexOfAny(['\0', '\r', '\n']) >= 0)
+                    throw new MetadataException("invalid macOS SDK sysroot: " + path, "RMC1000",
+                        "Pass the existing absolute SDK directory selected by xcrun --show-sdk-path.");
+                sdk = CanonicalPath.Resolve(path);
+                continue;
+            }
+            if (!clangCl && argument.StartsWith("-mmacosx-version-min=", StringComparison.Ordinal))
+            {
+                string version = argument["-mmacosx-version-min=".Length..];
+                if (Version.TryParse(version, out var minimum) && minimum.Major >= 13 &&
+                    version.All(value => char.IsAsciiDigit(value) || value == '.'))
+                {
+                    Remember("mac-deployment", argument);
+                    continue;
+                }
+                throw InvalidArgument(argument);
+            }
+            int prefix = argument.StartsWith("-D", StringComparison.Ordinal) ||
+                (clangCl && argument.StartsWith("/D", StringComparison.Ordinal)) ? 2 : 0;
+            if (prefix != 0)
+            {
+                string define = argument[prefix..];
+                int equals = define.IndexOf('=');
+                string name = equals < 0 ? define : define[..equals];
+                if (name.Length != 0 && (char.IsAsciiLetter(name[0]) || name[0] == '_') &&
+                    name.All(value => char.IsAsciiLetterOrDigit(value) || value == '_') &&
+                    name is not ("_CRT_SECURE_NO_WARNINGS" or "_SCL_SECURE_NO_WARNINGS") &&
+                    define.IndexOfAny(['\0', '\r', '\n']) < 0)
+                {
+                    Remember("define:" + name, argument);
+                    continue;
+                }
+            }
+            throw InvalidArgument(argument);
+        }
+        if (groups.ContainsKey("flag:/fsanitize=address") &&
+            groups.TryGetValue("windows-runtime", out string? runtime) && runtime == "/MDd")
+            throw new MetadataException("conflicting compiler options: /fsanitize=address and /MDd", "RMC1000",
+                "Use the address-sanitizer native profile with /MD instead of /MDd.");
+        if (sdk is not null)
+        {
+            if (!OperatingSystem.IsMacOS()) throw InvalidArgument("-isysroot");
+            string xcrun = NativeEnvironment.FindExecutable("xcrun", environment);
+            ProcessResult selected = await ProcessRunner.RunAsync(new(xcrun, ["--show-sdk-path"], root, environment,
+                Timeout: TimeSpan.FromSeconds(30)));
+            if (selected.ExitCode != 0 || !Directory.Exists(selected.StdOut.Trim()) ||
+                !CanonicalPath.Equals(sdk, selected.StdOut.Trim()))
+                throw new MetadataException("SDK sysroot does not match the selected macOS SDK: " + sdk,
+                    "RMC1000", "Pass the SDK selected by xcrun --show-sdk-path or change the selected Xcode SDK.");
         }
     }
 
+    private static MetadataException InvalidArgument(string argument) => new(
+        "unsupported compiler option override: " + argument, "RMC1000",
+        "Use the documented native profile, explicit -D or /D definitions, and --include-dir; unsupported flags require a reviewed profile extension.");
     private static void ValidateIncludeBinding(string input, string include, string outputDirectory, IEnumerable<string> directories)
     {
         string? target = directories.Prepend(outputDirectory).Select(directory => Path.GetFullPath(Path.Combine(directory, include)))

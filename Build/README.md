@@ -30,7 +30,11 @@ SDK 대상 디렉터리는 새 경로여야 한다. SDK의 파일 목록과 내�
 
 ## 메타 선언
 
-`ROCKS_CLASS("GUID", 버전, Abstract)`와 `ROCKS_PROPERTY("GUID", Transient, ReadOnly, Category="...", DisplayName="...")`를 사용한다. 지정자는 필요한 것만 선택한다. 비공개 필드에는 `ROCKS_GENERATED_BODY()`가 필요하다. GUID는 영이 아닌 고유 값이어야 하며, 미지원 타입·상속·선언 위치·지정자와 모호한 선언은 생성 전에 오류로 처리한다. 생성된 C++도 같은 Clang 구성으로 검사한 후에만 게시한다.
+`ROCKS_CLASS("GUID", 버전, Abstract)`와 `ROCKS_PROPERTY("GUID", Transient, ReadOnly, Category="...", DisplayName="...")`를 사용한다. `ROCKS_CLASS`는 `class`/`struct` 바로 앞에 두며 둘 사이에는 공백·주석만 허용한다. 마커와 클래스가 조건부이면 같은 `#if` 블록에 넣는다. 반영할 헤더는 각 대상의 `TargetRules.Metadata`에 반드시 등록한다. 현재 미등록 선언을 일반 C++ 빌드가 자동으로 감지하지는 않는다. 지정자는 필요한 것만 선택한다. 비공개 필드에는 `ROCKS_GENERATED_BODY()`가 필요하다. GUID는 영이 아닌 고유 값이어야 하며, 미지원 타입·상속·선언 위치·지정자와 모호한 선언은 생성 전에 오류로 처리한다. 생성된 C++도 같은 Clang 구성으로 검사한 후에만 게시한다.
+
+`Category`와 `DisplayName`은 길이를 별도로 보관하는 UTF-8 바이트 문자열이다. 중간 NUL도 보존하므로 C 문자열 종료 문자로 길이를 추정하지 않는다. 생성 코드는 한글처럼 읽을 수 있는 문자를 그대로 표시하고, 제어 문자는 안전한 escape로 표현한다.
+
+메타컴파일러의 `--clang-arg`는 현재 네이티브 Debug/Release/ASan 프로필과 붙임형 매크로 정의(`-DNAME=value`, clang-cl의 `/DNAME=value`), macOS의 xcrun 선택 sysroot 및 최소 버전만 허용한다. include 디렉터리는 `--include-dir`에 실제 컴파일 순서대로 지정한다. 미지원 옵션을 추가하려면 네이티브 컴파일과 AST의 동등성을 검토하고 회귀 검사를 먼저 추가해야 한다. 오류는 코드·위치·원인·수정 안내와 함께 출력한다.
 
 Transient 필드는 GC 참조 추적에는 참여하지만 저장 그래프에 포함되지 않는다. ReadOnly 필드는 일반 쓰기를 거부하고 복원 트랜잭션의 쓰기는 허용한다. Abstract 타입은 등록할 수 있으나 생성할 수 없다. 현재 지원 범위는 단일 공개 비가상 상속과 기본 스칼라·Guid·String·ObjectRef로 제한된다.
 

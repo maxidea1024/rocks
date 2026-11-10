@@ -91,6 +91,29 @@ TEST(ReflectionClassPropertiesPrivateInheritanceAndReadOnlyStagedPolicy) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+TEST(ReflectionDisplayNamePreservesUtf8ControlsAndEmbeddedNull) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterProperties(types));
+        auto lease = types.Acquire(GeneratedType<PropertyNode>::Id());
+        REQUIRE(lease);
+        const FieldSchema* found = nullptr;
+        for (usize index = 0; index < lease.Value().Schema().fields.Size(); ++index) {
+            const auto& field = lease.Value().Schema().fields[index];
+            if (field.id == PropertyId(0x43)) {
+                found = &field;
+            }
+        }
+        REQUIRE(found);
+        const char expected[] = "한글\"\\\n\0007";
+        CHECK(found->displayName.Size() == sizeof(expected) - 1);
+        CHECK(StringView(found->displayName.Data(), found->displayName.Size()) ==
+              StringView(expected, sizeof(expected) - 1));
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
 TEST(ReflectionTransientReferenceTracesButIsNotSavedAndDefaultsSurviveLoad) {
     SystemAllocator allocator;
     {

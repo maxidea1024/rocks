@@ -37,7 +37,8 @@ struct ROCKS_REFLECT_TYPE("ad100000000000000000000000000002", 3) Node final : Ba
 };
 
 // CLASS/PROPERTY fixture는 private 상속 필드와 저장 정책을 실제 generated 접근기로 검증한다.
-class ROCKS_CLASS("ad100000000000000000000000000003", 1, Abstract) AbstractBase : public Object {
+ROCKS_CLASS("ad100000000000000000000000000003", 1, Abstract)
+class AbstractBase : public Object {
     ROCKS_GENERATED_BODY()
 
 public:
@@ -56,7 +57,8 @@ private:
     int32 baseValue = 17;
 };
 
-class ROCKS_CLASS("ad100000000000000000000000000004", 1) PropertyNode final : public AbstractBase {
+ROCKS_CLASS("ad100000000000000000000000000004", 1)
+class PropertyNode final : public AbstractBase {
     ROCKS_GENERATED_BODY()
 
 public:
@@ -73,12 +75,14 @@ private:
     ROCKS_PROPERTY("ad100000000000000000000000000042", ReadOnly, Category = "Text",
                    DisplayName = "표시 이름")
     String label;
-    ROCKS_PROPERTY("ad100000000000000000000000000043", Transient)
+    // UTF-8·인용부호·역슬래시·개행·NUL 뒤 숫자를 등록 metadata에서 바이트 단위로 검증한다.
+    ROCKS_PROPERTY("ad100000000000000000000000000043", Transient, DisplayName = "한글\"\\\n\u00007")
     int32 runtimeCache = 73;
 };
 
 // C++ concrete 타입도 선언 정책 Abstract이면 생성할 수 없다.
-struct ROCKS_CLASS("ad100000000000000000000000000005", 1, Abstract) AbstractByPolicy : Object {
+ROCKS_CLASS("ad100000000000000000000000000005", 1, Abstract)
+struct AbstractByPolicy : Object {
     static inline uint32 constructions = 0;
 
     AbstractByPolicy() noexcept {

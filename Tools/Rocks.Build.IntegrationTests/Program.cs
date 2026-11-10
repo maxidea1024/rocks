@@ -95,6 +95,37 @@ try
     Pass("game-edit-engine-reuse", timer.Elapsed);
 
     timer.Restart();
+    var targetRulesPath = Path.Combine(game, "Game.Target.cs");
+    var validTargetRules = File.ReadAllText(targetRulesPath);
+    var generatedHeader = Path.Combine(output, "Generated/GameObject.generated.h");
+    var validGeneratedHash = Hashing.Sha256File(generatedHeader);
+    try
+    {
+        var wrongOwner = validTargetRules.Replace("[\"SampleGame\"]", "[\"Core\"]", StringComparison.Ordinal);
+        Require(wrongOwner != validTargetRules, "Target rule fixture no longer matches");
+        File.WriteAllText(targetRulesPath, wrongOwner);
+        var rejected = await Game();
+        Require(rejected.ExitCode != 0 && rejected.StdErr.Contains("not reachable from target", StringComparison.Ordinal),
+            "Metadata unit with unreachable owner was not rejected with a clear diagnostic");
+        Require(Hashing.Sha256File(generatedHeader) == validGeneratedHash, "Unreachable owner modified previously generated output");
+
+        var duplicateInput = validTargetRules.Replace(
+            "new(\"SampleGame\", \"Source/GameObject.h\", \"Source/GameObject.h\", \"GameObject.generated.h\")",
+            "new(\"SampleGame\", \"Source/GameObject.h\", \"Source/GameObject.h\", \"GameObject.generated.h\"), " +
+            "new(\"SampleGame\", \"Source/./GameObject.h\", \"Source/GameObject.h\", \"Other.generated.h\")", StringComparison.Ordinal);
+        Require(duplicateInput != validTargetRules, "Metadata unit fixture no longer matches");
+        File.WriteAllText(targetRulesPath, duplicateInput);
+        rejected = await Game();
+        Require(rejected.ExitCode != 0 && rejected.StdErr.Contains("duplicate input ownership", StringComparison.Ordinal),
+            "Duplicate metadata input with different output was not rejected");
+        Require(Hashing.Sha256File(generatedHeader) == validGeneratedHash &&
+            !File.Exists(Path.Combine(output, "Generated/Other.generated.h")), "Invalid units published metadata before rejection");
+    }
+    finally { File.WriteAllText(targetRulesPath, validTargetRules); }
+    Require((await Game()).ExitCode == 0, "Game did not recover after correcting metadata unit ownership");
+    Pass("metadata-unit-target-and-input-ownership", timer.Elapsed);
+
+    timer.Restart();
     var incompatible = await Cli("game", "--sdk", sdk, "--project", game, "--configuration", "Release");
     Require(incompatible.ExitCode != 0 && incompatible.StdErr.Contains("mismatch", StringComparison.OrdinalIgnoreCase),
         "Incompatible SDK configuration was silently accepted");

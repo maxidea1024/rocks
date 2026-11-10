@@ -4,7 +4,7 @@
 
 ## 선언과 지원 형식
 
-`ROCKS_CLASS("안정 GUID", 버전, 지정자...)`로 객체 타입을, `ROCKS_PROPERTY("안정 GUID", 지정자...)`로 필드를 선언한다. 기존 `ROCKS_REFLECT_TYPE`과 `ROCKS_REFLECT_FIELD`도 호환된다. GUID는 0이 아닌 128비트 값이며 해당 입력 번역 단위에서 타입·필드 ID의 중복을 거부한다. 이름 변경과 무관하게 같은 의미의 필드는 같은 ID를 유지해야 한다. 버전은 Clang이 평가한 정수 상수의 값이 1부터 `UINT32_MAX` 사이여야 한다. ID는 좁은 문자열 리터럴만 허용하며 문자열 포인터 연산을 ID로 해석하지 않는다.
+`ROCKS_CLASS("안정 GUID", 버전, 지정자...)`로 객체 타입을, `ROCKS_PROPERTY("안정 GUID", 지정자...)`로 필드를 선언한다. 기존 `ROCKS_REFLECT_TYPE`과 `ROCKS_REFLECT_FIELD`도 호환된다. `ROCKS_CLASS`는 `class` 또는 `struct` 바로 앞 줄에 작성한다. 매크로와 타입 사이에는 공백과 주석만 허용하고 전처리 지시문·별도 선언·wrapper 매크로는 거부한다. 조건부 선언은 마커와 클래스를 같은 `#if` 블록 안에 둔다. GUID는 0이 아닌 128비트 값이며 해당 입력 번역 단위에서 타입·필드 ID의 중복을 거부한다. 이름 변경과 무관하게 같은 의미의 필드는 같은 ID를 유지해야 한다. 버전은 Clang이 평가한 정수 상수의 값이 1부터 `UINT32_MAX` 사이여야 한다. ID는 좁은 문자열 리터럴만 허용하며 문자열 포인터 연산을 ID로 해석하지 않는다.
 
 | 필드 형식 | 런타임 표현 |
 | --- | --- |
@@ -19,6 +19,24 @@
 현재 생성 대상은 이름 있는 비템플릿 타입이며, 모든 비정적 필드에 annotation이 필요하다. private/protected 필드는 해당 클래스에 `ROCKS_GENERATED_BODY()`를 선언해야 한다. raw pointer, 배열·컨테이너, enum, const/volatile 필드, bitfield와 annotation을 붙인 static 필드는 거부한다. static 보조 데이터는 annotation 없이 둘 수 있다. 수동 `Trace`와 자동 추적을 섞어 완전한 필드 레이아웃으로 오인하지 않도록, 생성 대상의 직접 선언된 `Trace`는 거부한다.
 
 단일 public 비가상 상속만 지원한다. 기반 타입은 `Object` 또는 같은 입력 번역 단위에서 확인된 reflected 타입이어야 한다. 파생 스키마는 상속 필드를 안정 ID 순서로 펼치며, 상속을 포함한 필드 수는 최대 4,096개다. 생성 접근기는 멤버 포인터를 사용한다. 객체 레이아웃에서 offset을 추정하거나 raw 필드 주소를 반환하지 않는다.
+
+### 속성 지정자와 표시 문자열
+
+```cpp
+ROCKS_CLASS("ad100000000000000000000000000001", 1)
+class Character : public rocks::Object {
+    ROCKS_GENERATED_BODY()
+
+public:
+    ROCKS_PROPERTY("ad100000000000000000000000000011", ReadOnly,
+                   Category = "능력", DisplayName = "체력")
+    rocks::int32 health = 100;
+};
+```
+
+CLASS는 선택적 `Abstract`를, PROPERTY는 `Transient`, `ReadOnly`, `Category="..."`, `DisplayName="..."`를 지원한다. 중복·알 수 없는 지정자, 값이 필요한 지정자의 값 누락과 잘못된 형식은 거부한다. 지정자 값의 escape는 JSON 문자열 표기를 사용한다. `Transient` 참조는 GC에서 추적하지만 저장 그래프에서는 제외한다. `ReadOnly`의 일반 write는 거부하고 생성·복원을 위한 staged write는 허용한다. `Abstract` 타입은 등록할 수 있으나 생성할 수 없다.
+
+`Category`와 `DisplayName`은 바이트 길이를 가진 UTF-8 데이터이며 중간 NUL(`\u0000`)도 유효하다. `Span<const char>`의 길이를 사용해야 하며 NUL 종료 문자열 함수로 읽으면 값이 잘린다. 등록 시 이 바이트를 깊게 복사한다. 생성 C++은 한글 등 읽을 수 있는 문자를 유지하고 인용부호·역슬래시·제어 문자를 escape한다. 제어 바이트는 정확히 세 자리 8진수로 표현하므로 뒤에 숫자가 와도 서로 합쳐지지 않는다.
 
 ## 생성물과 등록
 
@@ -67,13 +85,21 @@ dotnet build Tools/Rocks.Tools.csproj
 dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll --input Tests/Reflection/ReflectionFixture.h --include Tests/Reflection/ReflectionFixture.h --output out/Generated/ReflectionFixture.generated.h --compiler clang-cl
 dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll meta --root . --compiler clang-cl --metacompiler out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll
 ```
-컴파일러는 C++23, 예외·RTTI 비활성화와 저장소의 경고 오류 정책을 적용한다. Windows SDK 환경은 공통 NativeEnvironment가 준비한다. 추가 `--include-dir`, 반복 가능한 `--clang-arg`를 받을 수 있으며, 경고 강등·억제와 response file 우회는 허용하지 않는다. annotation은 Clang 기능이다. 지원하지 않는 컴파일러에서 annotation을 빈 매크로로 바꾸는 fallback은 없다.
+컴파일러는 C++23, 예외·RTTI 비활성화와 경고 오류 정책을 적용한다. Windows SDK 환경은 공통 NativeEnvironment가 준비한다. macOS에서 위 예시의 `clang-cl`은 `clang++`로 바꾼다. annotation은 Clang 기능이며 지원하지 않는 컴파일러에서 빈 매크로로 대체하지 않는다.
+
+`--include-dir`을 지정하면 전달한 순서만 사용한다. 지정하지 않은 단독 호출에서는 저장소의 공개 헤더 경로를 탐색한다. 생성 헤더와 같은 디렉터리의 quote include가 먼저 선택되며, 실제 선택된 헤더가 `--input`과 다르면 오류다. 다른 파일을 가리키는 shadow 경로는 허용하지 않는다.
+
+반복 가능한 `--clang-arg`는 현재 네이티브 Debug/Release/ASan 프로필, 붙임형 `-DNAME=value` 및 clang-cl의 `/DNAME=value`, macOS에서 xcrun이 선택한 `-isysroot` 경로와 최소 버전만 허용한다. 경고 억제, 임의 검색 경로, 강제 include, response file과 그 밖의 미지원 인자는 거부한다. 옵션 확장은 네이티브 컴파일과 AST에 적용되는 조건이 같은지 검토하고 양성·음성 회귀를 추가한 후 수행한다.
 
 C++ 구문은 원문 정규식이 아닌 실제 Clang JSON AST에서 읽는다. 선언의 annotation 인자, 접근 지정, 기반 관계와 컴파일러가 확정한 필드 타입을 사용한다. `--include`는 출력 헤더에 넣을 논리 경로이며 절대 입력 경로는 생성물에 포함하지 않는다.
 
-생성 형식은 `ROCKS_CLANG_FORMAT` 환경변수를 우선 사용하고 clang-format 21.1.6을 요구한다. 같은 입력·타깃 문맥이면 같은 UTF-8/LF 바이트를 생성한다. 기존 출력과 같으면 다시 쓰지 않아 timestamp를 보존한다. 변경된 결과는 같은 디렉터리의 고유 임시 파일에 완성한 뒤 교체한다. `--check`는 비교만 하며 stale 결과를 수정하지 않는다. 서로 다른 생성 설정이 같은 출력을 공유하는 빌드 그래프는 금지하며, 고유 임시 파일 사용이 그런 논리 충돌을 해결하는 것은 아니다.
+생성 형식은 `ROCKS_CLANG_FORMAT` 환경변수를 우선 사용하고 clang-format 21.1.6을 요구한다. 같은 입력·타깃 문맥이면 같은 UTF-8/LF 바이트를 생성한다. 출력 디렉터리의 고유 임시 C++ 파일에서 생성물을 실제 Clang으로 검사한 뒤 게시하며 정상 종료와 관리된 실패에서 임시 파일을 정리한다. 기존 출력과 같으면 다시 쓰지 않아 timestamp를 보존한다. 변경된 결과는 같은 디렉터리의 고유 임시 파일에 완성한 뒤 교체한다. `--check`는 생성물과 기존 출력을 비교하며 stale 출력을 수정하지 않는다. 서로 다른 생성 설정이 같은 출력을 공유하는 빌드 그래프는 금지하며, 고유 임시 파일 사용이 그런 논리 충돌을 해결하는 것은 아니다.
 
 MSBuild와 C# 빌드 도구는 객체 런타임을 포함하는 구성에서 fixture 생성, 생성 헤더 단독 컴파일과 ReflectionTests를 연결한다. Core-only 구성은 이 생성 작업을 요구하지 않는다. 실제 생성 헤더도 일반 엔진 코드와 같은 경고 오류 기준으로 컴파일한다.
+
+## 진단과 수정
+
+진단은 가능한 원본 파일과 줄, 오류 코드, 원인, `hint`를 함께 출력한다. 예를 들어 지원하지 않는 `PROPERTY` 지정자는 `RMC2000`으로 거부한다. `RMC1000`은 잘못된 명령·경로·지원하지 않는 컴파일 옵션, `RMC2001`은 처리할 수 없는 Clang AST 형태, `RMC3000`은 Clang 입력 또는 생성 코드의 계약 오류, `RMC3100`은 포매터 오류, `RMC4000`은 `--check`의 stale 출력을 나타낸다. 실패 시 기존 생성물은 유지하며 빌드는 실패로 판정한다.
 
 ## 현재 한계와 검증 범위
 
@@ -84,3 +110,7 @@ MSBuild와 C# 빌드 도구는 객체 런타임을 포함하는 구성에서 fix
 C# 하네스는 실제 Clang을 호출하여 정상 상수 평가, 음수·범위 밖 버전, ID 오류·중복, 빠진 annotation, 미지원 필드·상속·Trace, 컴파일 오류와 경고 강등 옵션을 검사한다. 오류가 기존 출력 파일을 훼손하지 않는지, 같은 입력의 바이트·timestamp가 유지되는지, `--check`가 변경 없이 stale 출력을 거부하는지도 검사한다.
 
 이전 구현은 Windows 로컬 Debug·Release·ASan과 [Windows/macOS native CI](https://github.com/maxidea1024/rocks/actions/runs/42775786556)에서 생성 코드 및 실제 Clang 회귀 실행을 확인하였다. 최종 수치·산출물 hash는 [5차 검증 기록](../Reviews/ImplementationRound5.FoundationValidation.ko.md)을 따른다. macOS는 ARM64 Debug·ASan 범위이며 Intel Mac과 TSan은 미검증이다.
+
+## 메타 단위 등록의 현재 제한
+
+현재 빌드에서는 반영할 각 헤더를 대상의 `TargetRules.Metadata`에 명시해야 한다. 등록하지 않은 헤더의 `ROCKS_CLASS` 선언은 일반 C++ 컴파일만으로 검증 누락이 탐지된다고 보장하지 않는다. 컴파일 단위와 생성 선언의 coverage를 강제하는 기능은 후속 구현 항목이다.

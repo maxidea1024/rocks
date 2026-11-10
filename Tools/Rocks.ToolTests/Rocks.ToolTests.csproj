@@ -8,5 +8,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Rocks.Tooling.Checks/Rocks.Tooling.Checks.csproj" />
+    <ProjectReference Include="../Rocks.Build/Rocks.Build.csproj" />
+    <ProjectReference Include="../Rocks.MetaCompiler/Rocks.MetaCompiler.csproj" />
   </ItemGroup>
 </Project>

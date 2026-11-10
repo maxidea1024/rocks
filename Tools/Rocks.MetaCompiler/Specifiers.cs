@@ -66,7 +66,7 @@ internal static class Specifiers
                 if (!closed) throw new MetadataException($"{symbol}: unterminated specifier value");
                 try { value = JsonSerializer.Deserialize<string>(text[start..cursor]); }
                 catch (JsonException) { throw new MetadataException($"{symbol}: specifier escape must use JSON string spelling"); }
-                if (value is null || value.Contains('\0'))
+                if (value is null)
                     throw new MetadataException($"{symbol}: invalid specifier text");
                 Space();
             }

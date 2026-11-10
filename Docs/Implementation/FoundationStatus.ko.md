@@ -2,7 +2,7 @@
 
 기준일: 2026-11-10. 이 문서는 **Core·Object의 첫 실행 가능한 구현 범위**를 기록한다. C00–C13 전체 완료, Foundation Gate 통과, 제품용 엔진 완성을 뜻하지 않는다. 설계 PDF와 작업 CSV는 목표 기준이며 실제 진척은 이 문서와 실행 증거를 함께 확인한다.
 
-현재 구현은 Name·Text·플랫폼 기반 위에 worker 실행기, 점진·병렬 GC, Clang 생성 리플렉션과 객체 그래프 직렬화를 포함한다. 실제 실행 결과는 이 문서의 최신 검증 절과 [5차 검증 기록](../Reviews/ImplementationRound5.FoundationValidation.ko.md)을 따른다. 아래 이전 단계 기록은 당시 수치를 보존한다.
+현재 소스는 Name·Text·플랫폼 기반 위에 worker 실행기, 점진·병렬 GC, Clang 생성 리플렉션과 객체 그래프 직렬화, C#/.NET 기반 빌드 도구를 포함한다. 아래 실행 기록과 [5차 검증 기록](../Reviews/ImplementationRound5.FoundationValidation.ko.md)은 각각 해당 당시 소스에 대한 결과다. 새 빌드·메타 경로의 최종 플랫폼별 결과는 검증 증거가 확정된 뒤 별도로 기록하며, 과거 CI를 현재 소스의 통과 근거로 사용하지 않는다.
 
 ## 1. 현재 동작하는 경로
 
@@ -14,20 +14,26 @@
 
 | 작업 | 현재 구현 | 아직 구현하지 않은 범위 |
 |---|---|---|
-| C00 | CMake 분리 target, Windows/macOS preset, 빌드 진입점, 서식·STL 검사, 단독 헤더 검사, 테스트 호스트, 모듈 템플릿 plan/apply/validate, CI 정의 | 전체 프로젝트·컴포넌트·프리팹 템플릿, 복구 저널, RocksBuild, 캐시·분산 빌드 |
+| C00 | .NET 10 SDK 고정, C# `*.Build.cs`/`*.Target.cs` 모듈·타깃 규칙, MSBuild 진입점, 네이티브 작업 그래프·로컬 증분 검사, 설치 SDK·외부 게임 빌드, C# 검사 하네스·서식/STL/경고 검사, 단독 헤더 검사, 모듈 템플릿 plan/apply/validate, CI 정의 | 분산 빌드·공유 artifact 캐시, PCH·unity·공유 라이브러리, 완전한 SDK 패키징, 전체 프로젝트·컴포넌트·프리팹 템플릿, 복구 저널 |
 | C01 | Base 정수 타입, Guid POD, checked arithmetic | 전체 ABI·compiler 추상화 |
 | C02 | 정렬 할당, 단조 시계, 스레드 식별, Thread/Mutex/CV/Event/Semaphore, 최소 fatal sink | 가상 메모리 page, atomics/RWLock, thread 설정·취소 |
 | C03 | Result/Error, Move/Forward, 제한된 traits | 전체 범용 utility 집합 |
 | C04 | SystemAllocator 소유권 ledger·통계, 실패 주입 테스트 | page/arena/pool, 주소 검색 최적화, OS 내부 실패 전용 hook |
 | C05 | Array, Span, 실패 시 상태 유지, 비소유 뷰 규약 | hash map, set, queue 등 후속 컨테이너 |
 | C06 | Function, ModuleLease, InlineExecutor와 WorkerScheduler, 의존성·취소·drain, 고정 용량 로그·프로파일 scope, assert, 음성 대조군 | priority/lane/work-stealing/fiber scheduler, 비동기 로그 writer·viewer |
-| C07 | Clang AST 메타 생성, typed 필드 접근·자동 Trace, 상속 metadata IsA, 깊은 복사·revision/module lease, Archive/Record·객체 그래프 직렬화 | 범용 native 상속 cast, method/enum/container reflection, compile DB/생성 캐시·외부 에셋 참조 |
+| C07 | C# Clang AST 메타 생성·선언 검증, CLASS/PROPERTY·typed 필드 접근·자동 Trace, 상속 metadata IsA, 깊은 복사·revision/module lease, Archive/Record·객체 그래프 직렬화 | 자동 메타 unit 발견·프로젝트 전역 ID 검증, 범용 native 상속 cast, method/enum/container reflection, compile DB 입력 재구성·생성 캐시·외부 에셋 참조 |
 | C08 | 비이동 64-slot chunk, registry domain·generation, 고갈 슬롯 격리, 진단 캡처 | 빠른 인덱스 조회, 대규모 벤치마크 |
 | C09 | RootRef/WeakRef/ObjectRef/Borrow/BackendLease, 문맥·스레드 검사 | root owner chain, 전체 safepoint 시스템 |
 | C10 | 비공개 생성 트랜잭션, 간선 검증 후 일괄 공개, 역순 롤백 | ClassDefaults·instancing, 트랜잭션 활성 중 GC, 전체 lifecycle hook |
 | C11 | full STW와 점진 mark/sweep, 삽입 장벽·cutoff, 선택적 병렬 mark, soft 시간·작업량 예산, OOM 시 sweep 금지·독립 oracle | 다중 mutator·동시 필드 스캔, hard deadline, 병렬 sweep·cluster·대규모 성능 검증 |
 | C12 | logical destroy·retire·실제 회수 분리, Busy 종료·재시도, 모의 backend lease | 실제 GPU/IO/audio 연동, 장시간 시스템 스트레스 |
 | C13 subset | 자체 UTF-8 String/StringView, NamePool/NameLease intern, 명시 수명·예산·경합 검증 | Guid 생성/parse, 일반 hash 정책, Path·플랫폼 변환 |
+
+플랫폼의 단조 시계와 WorkerScheduler는 시간 측정 및 작업 실행 기반이다. 게임·엔진의 가변 틱, 고정 틱, 시간 배율, 틱 그룹과 멀티스레드 틱은 아직 구현하지 않았다. Component의 생성·부착·소유·수명 시스템과 프리팹, 에디터·PIE도 미구현이다. `Templates/Game/Foundation`은 현재 Object/CLASS 예제이며 Component 예제는 실제 시스템 구현 이후 추가한다.
+
+빌드 도구는 .NET 10과 MSBuild로 호스트 도구 및 규칙을 구성하고, `Rocks.Build`가 C++ 컴파일·정적 라이브러리·실행 파일의 의존성과 로컬 증분 판단을 수행한다. 설치 SDK에는 헤더·빌드된 라이브러리·호스트 도구와 호환성 manifest가 포함되며 외부 게임은 별도 경로에서 빌드한다. 현재 SDK 내보내기는 임의 컴파일·링크 옵션이나 외부 사전 빌드 라이브러리가 있는 모듈을 지원하지 않고 명시적으로 거부한다. CMake/Python 파일은 이전 구현의 참고 경로이며 새 빌드·검증의 기준은 .NET 경로다.
+
+메타컴파일러는 각 타깃의 `TargetRules.Metadata`에 수동 등록한 헤더 단위로 Clang AST를 분석하고, 허용된 대상 컴파일 조건을 사용해 생성 C++도 검사한다. 등록된 unit의 소유 모듈·중복 입력과 생성 출력 등을 검사하지만 미등록 헤더의 선언 자동 발견, 서로 다른 unit 전체의 GUID 충돌 검사, 각 unit에 포함된 타입의 전역 단일 소유권 확인은 제공하지 않는다. 따라서 호출 측은 unit 소유와 타입 ID를 관리해야 한다. 사용자 정의 전체 컴파일 옵션·완전한 compilation database 재구성·생성 캐시도 아직 제공하지 않는다.
 
 별도 `Localization → Core` 모듈에서 Text 불변 이력·catalog snapshot·named format을 구현하였다. 지역별 plural/날짜/통화·추출·쿠킹·UI는 후속이다. [Name·Text 구현 계약](NameTextImplementation.ko.md), [플랫폼 독립 동시성](PlatformConcurrency.ko.md), [컴파일러 경고 정책](../Design/CompilerDiagnostics.ko.md)을 함께 따른다.
 
@@ -40,7 +46,8 @@
 - `Engine/ObjectRuntime/Public/Object`: 타입 등록·핸들·참조·생성·GC 공개 API.
 - `Engine/ObjectRuntime/Private`: 스키마 저장소, 비이동 Registry와 수집·회수 구현.
 - `Tests/Core`, `Tests/Platform`, `Tests/Object`, `Tests/Foundation`, `Tests/Integration`: 단위·통합·장애·음성 대조군.
-- `Build/build.py`, `Build/format.py`, `Build/audit_runtime.py`: 빌드와 검증 진입점.
+- `Rocks.proj`, `Build/Rules`, `Tools/Rocks.Build*`: MSBuild 진입점과 C# 규칙·네이티브 빌드·SDK 도구.
+- `Tools/Rocks.MetaCompiler`, `Tools/Rocks.ToolTests`: C# 메타컴파일러와 검사·회귀 하네스.
 
 ## 3. 반드시 지켜야 할 수명·동시성 계약
 
@@ -67,21 +74,25 @@ SystemAllocator는 live allocation·byte 계수를 제공한다. ObjectRegistry�
 
 LogBuffer와 ProfileScope는 초기 고정 용량 진단이며 손실·잘림을 표시한다. 전문 profiler viewer·백그라운드 writer·crash 수집을 완료하였다고 간주하지 않는다.
 
-Windows 재현 명령:
+Windows 재현 명령은 저장소 루트에서 실행한다. 사전에 .NET 10 SDK, Clang C++ 도구 체인과 `clang-format` 21.1.6이 필요하다. 컴파일러 자동 발견이 불가능하면 각 명령에 `/p:Compiler=<clang-cl 실행 파일 경로>`를 추가한다.
 
 ```text
-python Build/build.py --preset windows-clang-core
-python Build/build.py --preset windows-clang-debug
-python Build/build.py --preset windows-clang-release
-python Build/build.py --preset windows-clang-asan
-python Build/format.py --check
-out/windows-clang-debug/FoundationTests.exe --list
-out/windows-clang-debug/FoundationTests.exe --filter Object --seed 7351 --repeat 100
+dotnet msbuild Rocks.proj /t:Test /p:Configuration=Debug /p:RocksTarget=Core
+dotnet msbuild Rocks.proj /t:Test /p:Configuration=Debug /p:RocksTarget=Foundation
+dotnet msbuild Rocks.proj /t:Test /p:Configuration=Release /p:RocksTarget=Foundation
+dotnet msbuild Rocks.proj /t:Test /p:Configuration=Asan /p:RocksTarget=Foundation
+dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll format --root .
+out/dotnet-windows-foundation-debug/bin/FoundationTests.exe --list
+out/dotnet-windows-foundation-debug/bin/FoundationTests.exe --filter Object --seed 7351 --repeat 100
 ```
 
-macOS는 native host에서 `macos-clang-debug`, `macos-clang-asan` preset을 사용한다. preset과 CI 정의가 있는 것과 해당 OS에서 실제 성공한 것은 구분한다.
+macOS native host에서도 동일한 `dotnet msbuild` 타깃을 사용한다. OS별 빌드 정의와 실제 실행 성공은 구분한다. 별도 네이티브 빌드 및 설치 SDK·게임 통합 하네스의 실행법은 [빌드 안내](../../Build/README.md)를 따른다.
 
-실행마다 `out/<preset>/foundation-report.json`, `build-evidence.json`, `Testing/Temporary/LastTest.log`를 남긴다. 빌드 증거에는 소스 digest 전후, Git HEAD/dirty, compiler, seed, 단계 결과와 report 유효성을 기록한다. dirty 작업 트리 시험을 clean commit 시험으로 표기하지 않는다. 최종 실행 수치는 아래 확정 기록과 별도 검토 보고서에서 확인한다.
+새 빌드 경로는 구성별 `out/dotnet-<플랫폼>-<타깃>-<구성>/`에 `foundation-report.json`, `build-evidence.json`, `action-report.json`과 도구 검사 보고서를 기록한다. 증거에는 소스 digest 전후, Git HEAD/dirty, compiler, seed, 단계 결과와 보고서 유효성을 기록한다. dirty 작업 트리의 검증을 clean commit 검증으로 표시하지 않는다.
+
+### 이전 단계 실행 기록의 범위
+
+다음 하위 절의 CTest·CMake/Python 결과와 테스트 수치는 각각 명시된 이전 소스와 해당 시점의 도구 경로에 한정된다. 현재 .NET 경로 또는 현재 변경분의 최종 Windows/macOS 결과가 아니다.
 
 ### 이전 String/Object 단계의 실행 기록
 
@@ -202,10 +213,10 @@ Windows ASan은 LeakSanitizer가 아니며, 소유권 ledger와 종료 검사를
 - assertion 경로의 CRT stderr lock 의존, 테스트 실패 집계의 worker 경합, profile 이름 잘림 정보 유실을 수정하였다.
 - 주석 검토에서는 Shutdown 닫기 전 실패, callback 재진입 예외, 타입 식별자 표현, wrapper 동시 사용 제한을 보완하였다.
 
-근거는 `Docs/Reviews/ImplementationRound*.ko.md`와 각 회귀 테스트에 둔다. 과거 회차 보고서는 당시 실행 범위를 보존하며 최신 결과는 5차 Foundation 확장 검증 기록으로 구분한다.
+근거는 `Docs/Reviews/ImplementationRound*.ko.md`와 각 회귀 테스트에 둔다. 과거 회차 보고서는 당시 실행 범위를 보존하며 5차 Foundation 확장 검증 기록 역시 해당 소스의 결과로 구분한다.
 
 ## 7. 이번 범위와 이후 작업
 
-이번 작업은 사용자가 먼저 요청한 GC·Reflection·Serialization의 남은 실행 경로와 그에 필요한 Task worker를 닫는 범위다. 실패 주입·동시성·native 실행 검증과 문서 정리를 함께 수행한다. 수학·기본 충돌 라이브러리 또는 상위 엔진 기능으로 자동 확장하지 않는다. 다음 작업은 이번 결과를 확인한 뒤 정한다.
+현재 범위는 Core·Object의 실행 경로와 C#/.NET 기반 빌드·메타 도구의 초기 구현이다. 각 경로의 구현과 검증 결과를 전체 Core 또는 엔진 기능의 완료로 확대하지 않는다.
 
-전체 Foundation에는 page/arena/pool, hash map/set/queue, Path·파일 IO, atomics/RWLock, root owner 진단, 정확한 빌드 문맥·생성 캐시, 장시간 스트레스·대규모 pause 성능 검증 등이 남아 있다. 상위 에디터·PIE·입력·렌더러 통합과 전체 C00–C26/Foundation Gate도 별도 미완료 항목이다. 초기 선형 탐색과 고정 상한을 제품 성능 충족으로 간주하지 않는다.
+전체 Foundation에는 page/arena/pool, hash map/set/queue, Path·파일 IO, atomics/RWLock, root owner 진단, 정밀한 빌드 의존 추적과 메타 unit 자동 발견, 장시간 스트레스·대규모 pause 성능 검증 등이 남아 있다. 수학·기본 충돌 라이브러리, 엔진 틱, Component와 상위 에디터·PIE·입력·렌더러 통합도 별도 후속 작업이다. 전체 C00–C26/Foundation Gate는 미완료이며 초기 선형 탐색과 고정 상한을 제품 성능 충족으로 간주하지 않는다.

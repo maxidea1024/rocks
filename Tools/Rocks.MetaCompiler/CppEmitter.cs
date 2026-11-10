@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 
 namespace Rocks.MetaCompiler;
@@ -5,9 +6,32 @@ namespace Rocks.MetaCompiler;
 internal static class CppEmitter
 {
     private static string GuidValue(string? id) => id is null ? "Guid{}" : $"Guid{{0x{id[..16]}ull, 0x{id[16..]}ull}}";
-    // 모든 label을 UTF-8 바이트 escape로 출력하여 host 실행 문자셋에 의존하지 않는다.
-    private static string Label(string text) => "\"" + string.Concat(Encoding.UTF8.GetBytes(text).Select(value => $"\\x{value:X2}")) + "\"";
-    private static string View(string text) => $"Span<const char>({Label(text)}, {Encoding.UTF8.GetByteCount(text)})";
+    private static readonly UTF8Encoding Utf8 = new(false, true);
+
+    // 읽을 수 있는 UTF-8은 그대로 남긴다. 제어 바이트는 정확히 세 자리 8진수로 출력하여
+    // 뒤 문자가 숫자·16진수여도 escape에 흡수되지 않게 한다. Span 길이는 항상 UTF-8 바이트다.
+    private static string Label(string text)
+    {
+        _ = Utf8.GetBytes(text); // 잘못된 surrogate를 대체 문자로 바꾸지 않고 거부한다.
+        StringBuilder result = new("\"");
+        foreach (Rune rune in text.EnumerateRunes())
+        {
+            if (rune.Value == '"') result.Append("\\\"");
+            else if (rune.Value == '\\') result.Append("\\\\");
+            else if (rune.Value == '\n') result.Append("\\n");
+            else if (rune.Value == '\r') result.Append("\\r");
+            else if (rune.Value == '\t') result.Append("\\t");
+            else if (Rune.GetUnicodeCategory(rune) is UnicodeCategory.Control or UnicodeCategory.Format or
+                     UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator)
+            {
+                foreach (byte value in Utf8.GetBytes(rune.ToString()))
+                    result.Append('\\').Append(Convert.ToString(value, 8).PadLeft(3, '0'));
+            }
+            else result.Append(rune.ToString());
+        }
+        return result.Append('"').ToString();
+    }
+    private static string View(string text) => $"Span<const char>({Label(text)}, {Utf8.GetByteCount(text)})";
 
     public static string Emit(SchemaModel schema, string include)
     {

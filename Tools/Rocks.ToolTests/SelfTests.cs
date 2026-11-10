@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Rocks.Tooling.Checks;
 using Rocks.Tooling.Common;
+using Rocks.MetaCompiler;
 
 namespace Rocks.ToolTests;
 
@@ -12,6 +13,24 @@ internal static class SelfTests
     public static void Register(TestSuite suite, Options options)
     {
         ProcessReviewTests.Register(suite, options);
+        suite.Add("MetaPrefix.CommentLineSpliceIsRejectedDirectly", () =>
+        {
+            void CheckGap(string gap, bool allowed)
+            {
+                string source = "ROCKS_CLASS(\"b1000000000000000000000000000001\", 1)" + gap + "class Object {};";
+                byte[] bytes = Encoding.UTF8.GetBytes(source);
+                int end = Encoding.UTF8.GetByteCount(source[..source.IndexOf("class Object", StringComparison.Ordinal)]);
+                if (allowed) PrefixSourceVerifier.Verify(bytes, 0, end);
+                else Verify.Throws<MetadataException>(() => PrefixSourceVerifier.Verify(bytes, 0, end));
+            }
+            CheckGap("\n// ordinary \\ path #if\n", true);
+            CheckGap("\n/* ordinary \\ path #include */\n", true);
+            CheckGap("\n// line splice \\\n", false);
+            CheckGap("\n// line splice \\\r\n", false);
+            CheckGap("\n/* block splice \\\n continuation */\n", false);
+            CheckGap("\n/* block splice \\\r\n continuation */\n", false);
+            CheckGap("\n/* split terminator *\\\n/ #if 0\n class hidden {};\n#endif\n/* */\n", false);
+        });
         suite.Add("Process.LargeUnicodePipesDrainWithoutDeadlock", async () =>
         {
             var result = await ProcessRunner.RunAsync(SelfProcess.Command(["child", "--large-output"], options.Root));

@@ -5,7 +5,8 @@
 
 namespace sample {
 
-class ROCKS_CLASS("da100000000000000000000000000001", 1) GameObject final : public rocks::Object {
+ROCKS_CLASS("da100000000000000000000000000001", 1)
+class GameObject final : public rocks::Object {
     ROCKS_GENERATED_BODY()
 
 public:

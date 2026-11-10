@@ -7,6 +7,7 @@ namespace Rocks.MetaCompiler;
 internal sealed class ClangAstParser(string inputFile)
 {
     private readonly Dictionary<string, ClassModel> classes = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, object?[]> prefixClasses = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> identifiers = new(StringComparer.Ordinal);
 
     private SourceSite currentSite = new(inputFile, 1);
@@ -19,7 +20,7 @@ internal sealed class ClangAstParser(string inputFile)
     {
         using JsonDocument document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 2048 });
         IndexLocations(document.RootElement);
-        try { ValidateAnnotationPlacement(document.RootElement, false); currentSite = UnknownSite(); Visit(document.RootElement, [], false, false); }
+        try { BindPrefixMarkers(document.RootElement); ValidateAnnotationPlacement(document.RootElement, false); currentSite = UnknownSite(); Visit(document.RootElement, [], false, false); }
         catch (MetadataException error) { throw error.At(currentSite); }
         if (classes.Count == 0) throw new MetadataException("no ROCKS_CLASS/ROCKS_REFLECT_TYPE definitions found in the translation unit");
         return SchemaValidator.Validate(classes);
@@ -94,6 +95,7 @@ internal sealed class ClangAstParser(string inputFile)
             string name = Text(node, "name");
             string qualified = string.Join("::", scope.Append(name));
             object?[]? mark = Annotation(node, "rocks.type");
+            if (prefixClasses.TryGetValue(Text(node, "id"), out object?[]? prefix)) mark = prefix;
             if (mark is not null)
             {
                 UpdateSite(node);
@@ -144,11 +146,71 @@ internal sealed class ClangAstParser(string inputFile)
         foreach (JsonElement child in Children(node)) Visit(child, scope, anonymous, templated);
     }
 
+    // 마커는 바로 뒤의 완전한 class/struct에만 결합한다. lexical scope·실제 파일과
+    // 비활성 전처리 영역을 확인하지 않은 채 AST 이웃만 믿으면 다른 타입을 반영할 수 있다.
+    private void BindPrefixMarkers(JsonElement parent)
+    {
+        JsonElement[] children = Children(parent).ToArray();
+        for (int index = 0; index < children.Length; ++index)
+        {
+            JsonElement marker = children[index];
+            if (Text(marker, "kind") == "EnumDecl")
+            {
+                JsonElement[] marked = Children(marker).Where(child =>
+                    Annotation(child, "rocks.class.marker") is not null).ToArray();
+                if (marked.Length != 0)
+                {
+                    UpdateSite(marked[0]);
+                    string parentKind = Text(parent, "kind");
+                    if (marked.Length != 1 || Text(marker, "name").Length != 0 ||
+                        parentKind is not ("TranslationUnitDecl" or "NamespaceDecl" or "CXXRecordDecl"))
+                        throw new MetadataException("ROCKS_CLASS marker must be a standalone declaration in a namespace or class scope");
+                    if (index + 1 >= children.Length || Text(children[index + 1], "kind") != "CXXRecordDecl" ||
+                        !Flag(children[index + 1], "completeDefinition") ||
+                        Text(children[index + 1], "tagUsed") is not ("class" or "struct"))
+                        throw new MetadataException("ROCKS_CLASS must be immediately followed by a complete class or struct definition",
+                            hint: "Place ROCKS_CLASS immediately before its class definition; put both inside the same #if block.");
+                    JsonElement target = children[index + 1];
+                    if (Annotation(target, "rocks.type") is not null)
+                        throw new MetadataException("ROCKS_CLASS and ROCKS_REFLECT_TYPE cannot both annotate the same class");
+                    VerifyPrefixSource(marked[0], target);
+                    if (!prefixClasses.TryAdd(Text(target, "id"), Annotation(marked[0], "rocks.class.marker")!))
+                        throw new MetadataException("duplicate ROCKS_CLASS marker for the same class");
+                }
+            }
+            // 다른 AST 항목도 재귀 검사한다. 함수/지역 class의 마커는 무시하지 않고 거부한다.
+            BindPrefixMarkers(marker);
+        }
+    }
+
+    private void VerifyPrefixSource(JsonElement marker, JsonElement target)
+    {
+        if (!locations.TryGetValue(Text(marker, "id"), out var markLocation) ||
+            !locations.TryGetValue(Text(target, "id"), out var targetLocation) ||
+            markLocation.File is null || targetLocation.File is null ||
+            !File.Exists(markLocation.File) || !File.Exists(targetLocation.File) ||
+            !CanonicalPath.Equals(markLocation.File, targetLocation.File))
+            throw new MetadataException("ROCKS_CLASS and class must have the same known physical source file",
+                hint: "Place the marker and class directly in one source file; macro-generated or ambiguous locations are unsupported.");
+        if (!target.TryGetProperty("range", out JsonElement range) ||
+            !range.TryGetProperty("begin", out JsonElement begin) ||
+            begin.TryGetProperty("expansionLoc", out _) ||
+            !begin.TryGetProperty("offset", out JsonElement classOffset) || !classOffset.TryGetInt32(out int end))
+            throw new MetadataException("ROCKS_CLASS target location is macro-generated or ambiguous",
+                hint: "Write the class keyword directly after ROCKS_CLASS; wrapper macros are unsupported.");
+        if (!sourceBytes.TryGetValue(markLocation.File, out byte[]? bytes))
+        {
+            bytes = File.ReadAllBytes(markLocation.File);
+            sourceBytes.Add(markLocation.File, bytes);
+        }
+        PrefixSourceVerifier.Verify(bytes, markLocation.Offset, end);
+    }
+
     private void ValidateAnnotationPlacement(JsonElement node, bool reflectedOwner)
     {
         string kind = Text(node, "kind");
         UpdateSite(node);
-        bool classAnnotation = Annotation(node, "rocks.type") is not null;
+        bool classAnnotation = Annotation(node, "rocks.type") is not null || prefixClasses.ContainsKey(Text(node, "id"));
         bool fieldAnnotation = Annotation(node, "rocks.field") is not null;
         if (classAnnotation && (kind != "CXXRecordDecl" || !Flag(node, "completeDefinition")))
             throw new MetadataException("ROCKS_CLASS must annotate a complete class definition");
