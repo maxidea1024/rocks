@@ -53,7 +53,14 @@ public:
 
     constexpr FieldWriteOperation() noexcept = default;
 
-    constexpr FieldWriteOperation(Callback callback) noexcept : callback_(callback) {
+    // noexcept 함수 포인터로의 예외 없는 변환만 허용한다. 이 생성자로 직접 변환하여
+    // 기존 함수표 aggregate 초기화에 두 번의 암묵적 사용자 정의 변환이 필요하지 않게 한다.
+    template <class Callable>
+        requires requires(Callable value) {
+            { static_cast<Callback>(value) } noexcept;
+        }
+    constexpr FieldWriteOperation(Callable value) noexcept
+        : callback_(static_cast<Callback>(value)) {
     }
 
     explicit constexpr operator bool() const noexcept {

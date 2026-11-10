@@ -205,3 +205,49 @@ TEST(RegisteredFieldWriteUsesActualObjectSchemaAcrossRegistriesAndAliases) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+
+TEST(FieldWriteOperationAcceptsCapturelessNoexceptLambdaAggregate) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        ObjectRegistry objects(allocator, types, {716, 1});
+        FieldValue value(allocator);
+        auto valid = [](ObjectRegistry&, const ObjectAccessContext&, ObjectHandle,
+                        const FieldValue&) noexcept -> Result<void> {
+            return Result<void>::Failure(ErrorCode::Unsupported);
+        };
+        auto throwing = [](ObjectRegistry&, const ObjectAccessContext&, ObjectHandle,
+                           const FieldValue&) -> Result<void> {
+            return Result<void>::Failure(ErrorCode::Unsupported);
+        };
+        int captured = 1;
+        auto closure = [captured](ObjectRegistry&, const ObjectAccessContext&, ObjectHandle,
+                                  const FieldValue&) noexcept -> Result<void> {
+            return Result<void>::Failure(captured ? ErrorCode::Unsupported
+                                                  : ErrorCode::InvalidArgument);
+        };
+
+        struct MayThrowConversion {
+            operator FieldWriteOperation::Callback() const {
+                return nullptr;
+            }
+        };
+
+        static_assert(!__is_constructible(FieldWriteOperation, MayThrowConversion));
+        static_assert(__is_constructible(FieldWriteOperation, decltype(nullptr)));
+        static_assert(__is_constructible(FieldWriteOperation, FieldWriteOperation::Callback));
+        static_assert(__is_constructible(FieldWriteOperation, decltype(valid)));
+        static_assert(!__is_constructible(FieldWriteOperation, decltype(throwing)));
+        static_assert(!__is_constructible(FieldWriteOperation, decltype(closure)));
+        // 명시적인 unary + 없이 기존의 수동 함수표 aggregate 선언을 사용할 수 있어야 한다.
+        FieldWriteOperation nullWrite(nullptr);
+        CHECK(!nullWrite);
+        FieldWriteOperation pointerWrite(static_cast<FieldWriteOperation::Callback>(valid));
+        CHECK(pointerWrite(objects, objects.OwnerAccess(), {}, value).Error() ==
+              ErrorCode::Unsupported);
+        RuntimeFieldOps ops{{}, nullptr, valid, nullptr};
+        CHECK(ops.write(objects, objects.OwnerAccess(), {}, value).Error() ==
+              ErrorCode::Unsupported);
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
