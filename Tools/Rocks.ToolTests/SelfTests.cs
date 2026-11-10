@@ -12,6 +12,7 @@ internal static class SelfTests
     private static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     public static void Register(TestSuite suite, Options options)
     {
+        ApplePropertyLocationTests.Register(suite);
         IdentityInventoryTests.Register(suite);
         StableIdManifestTests.Register(suite);
         StableIdMergeTests.Register(suite);

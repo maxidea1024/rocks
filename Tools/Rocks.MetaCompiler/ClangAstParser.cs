@@ -279,17 +279,44 @@ internal sealed class ClangAstParser(string inputFile, StableIdManifest? manifes
     {
         if (!locations.TryGetValue(Text(field, "id"), out var declaration) ||
             declaration.File is null || !File.Exists(declaration.File) || declaration.Offset < 0 ||
-            !field.TryGetProperty("loc", out JsonElement location) || location.TryGetProperty("expansionLoc", out _) ||
-            !TryExpansion(field, out string? fieldFile, out int begin))
+            !field.TryGetProperty("loc", out JsonElement location) || location.TryGetProperty("expansionLoc", out _))
             throw InvalidPropertySource();
         JsonElement attribute = Children(field).FirstOrDefault(child => Text(child, "kind") == "AnnotateAttr" &&
             Children(child).Select(Constant).FirstOrDefault() is string marker && marker == "rocks.field.arguments");
         if (attribute.ValueKind == JsonValueKind.Undefined ||
-            !TryExpansion(attribute, out string? attrFile, out int attributeBegin) ||
-            fieldFile is null || attrFile is null || begin != attributeBegin ||
-            !CanonicalPath.Equals(fieldFile, attrFile) || !CanonicalPath.Equals(fieldFile, declaration.File) ||
+            !TryExpansion(attribute, out string? attrFile, out int begin) || attrFile is null ||
+            !CanonicalPath.Equals(attrFile, declaration.File) ||
             begin < 0 || begin >= declaration.Offset)
             throw InvalidPropertySource();
+
+        // LLVM Clang은 필드 범위 시작을 매크로 확장으로, Apple Clang은 매크로 바로 뒤
+        // 타입의 직접 위치로 기록한다. 후자의 경우 실제 확장 위치는 attribute에 명시된
+        // 동일 파일이어야 하며, 필드의 이름과 타입 시작은 같은 include 문맥에 있어야 한다.
+        int directFieldBegin = -1;
+        if (TryExpansion(field, out string? fieldFile, out int fieldExpansion))
+        {
+            if (fieldFile is null || !CanonicalPath.Equals(fieldFile, declaration.File) || fieldExpansion != begin)
+                throw InvalidPropertySource();
+        }
+        else
+        {
+            if (!field.TryGetProperty("range", out JsonElement range) ||
+                !range.TryGetProperty("begin", out JsonElement direct) ||
+                direct.TryGetProperty("expansionLoc", out _) || direct.TryGetProperty("spellingLoc", out _) ||
+                !direct.TryGetProperty("offset", out JsonElement offset) || !offset.TryGetInt32(out directFieldBegin) ||
+                directFieldBegin <= begin || directFieldBegin > declaration.Offset)
+                throw InvalidPropertySource();
+            string directFile = Text(direct, "file");
+            if (directFile.Length != 0 && (!File.Exists(directFile) || !CanonicalPath.Equals(directFile, declaration.File)))
+                throw InvalidPropertySource();
+            string locationParent = location.TryGetProperty("includedFrom", out JsonElement locationInclude)
+                ? Text(locationInclude, "file") : "";
+            string directParent = direct.TryGetProperty("includedFrom", out JsonElement directInclude)
+                ? Text(directInclude, "file") : "";
+            if (!string.Equals(locationParent.Replace('\\', '/'), directParent.Replace('\\', '/'),
+                    OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                throw InvalidPropertySource();
+        }
         if (!sourceBytes.TryGetValue(declaration.File, out byte[]? bytes))
         {
             bytes = File.ReadAllBytes(declaration.File);
@@ -327,6 +354,13 @@ internal sealed class ClangAstParser(string inputFile, StableIdManifest? manifes
             else if (value is (byte)'#' or (byte)'\\') throw InvalidPropertySource();
         }
         if (depth != 0) throw InvalidPropertySource();
+        if (directFieldBegin >= 0)
+        {
+            // 직접 타입 위치인 경우 매크로에서 타입까지는 공백/주석만 있어야 한다.
+            // 다른 매크로·attribute·#include를 중간에 끼워 넣어 출처를 위조하지 못한다.
+            SkipTrivia();
+            if (cursor != directFieldBegin) throw InvalidPropertySource();
+        }
         // 전처리 지시문은 CLASS marker처럼 매크로와 선언 사이에 넣지 않는다.
         // 타입의 모든 구문은 Clang이 판단하고, 이 경계는 토큰 출처만 보수적으로 점검한다.
         while (cursor < declaration.Offset)
@@ -412,6 +446,13 @@ internal sealed class ClangAstParser(string inputFile, StableIdManifest? manifes
     private static MetadataException InvalidPropertySource() => new(
         "ROCKS_PROPERTY must be a direct prefix on one field in the same source file",
         hint: "Write ROCKS_PROPERTY(...) immediately before the field declaration, with no wrapper macro or intervening preprocessor directive.");
+
+    // 두 Clang 계열이 실제로 출력하는 location 변형과 위조 사례를 프로세스에 독립적으로 검증한다.
+    internal void VerifyPropertySourceForTest(JsonElement field)
+    {
+        IndexLocations(field);
+        VerifyPropertySource(field);
+    }
 
     private void VerifyGeneratedBodySource(JsonElement node, string? ownerFile)
     {
