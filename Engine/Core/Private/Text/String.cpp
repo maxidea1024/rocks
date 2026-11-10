@@ -233,6 +233,25 @@ void String::Clear() noexcept {
     }
 }
 
+void String::Swap(String& other) noexcept {
+    Allocator* allocator = allocator_;
+    char* data = data_;
+    const usize bytes = bytes_;
+    const usize capacity = capacity_;
+    allocator_ = other.allocator_;
+    data_ = other.data_;
+    bytes_ = other.bytes_;
+    capacity_ = other.capacity_;
+    other.allocator_ = allocator;
+    other.data_ = data;
+    other.bytes_ = bytes;
+    other.capacity_ = capacity;
+}
+
+Allocator& String::GetAllocator() const noexcept {
+    return *allocator_;
+}
+
 const char* String::Data() const noexcept {
     return CStr();
 }

@@ -1,6 +1,7 @@
 #include <Object/ObjectRegistry.h>
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
+#include <Task/WorkerScheduler.h>
 #include "RegistryIdentity.h"
 #include <new>
 
@@ -51,7 +52,8 @@ struct ObjectRegistry::MarkState {
 ObjectRegistry::ObjectRegistry(Allocator& allocator, TypeRegistry& types, ContextId context,
                                RegistryOptions options) noexcept
     : allocator_(allocator), types_(types), context_(context), options_(options),
-      domain_(detail::NextRegistryDomain()), ownerThread_(platform::CurrentThreadId()) {
+      domain_(detail::NextRegistryDomain()), ownerThread_(platform::CurrentThreadId()),
+      gcWork_(allocator) {
 }
 
 ObjectRegistry::~ObjectRegistry() {
@@ -103,7 +105,7 @@ Result<void> ObjectRegistry::CheckLive(Slot* slot, const void* nativeType) const
         slot->state == SlotState::Reserved) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
-    if (slot->state != SlotState::Alive) {
+    if (slot->state != SlotState::Alive || IsCutoff(slot)) {
         return Result<void>::Failure(ErrorCode::Destroyed);
     }
     if (nativeType && slot->type.Ops().nativeType != nativeType) {
@@ -129,6 +131,10 @@ Result<void> ObjectRegistry::AddRoot(const ObjectAccessContext& access, ObjectHa
     }
     if (slot->roots == 0xffffffffu) {
         return Result<void>::Failure(ErrorCode::Overflow);
+    }
+    const ErrorCode shaded = ShadeLocked(handle);
+    if (shaded != ErrorCode::None) {
+        return Result<void>::Failure(shaded);
     }
     ++slot->roots;
     return Result<void>::Success();
@@ -174,6 +180,10 @@ Result<void> RetainRoot(ObjectRegistry* registry, ObjectHandle handle) noexcept 
     }
     if (slot->roots == 0xffffffffu) {
         return Result<void>::Failure(ErrorCode::Overflow);
+    }
+    const ErrorCode shaded = registry->ShadeLocked(handle);
+    if (shaded != ErrorCode::None) {
+        return Result<void>::Failure(shaded);
     }
     ++slot->roots;
     return Result<void>::Success();
@@ -241,7 +251,7 @@ Result<void> ObjectRegistry::SetEdge(const ObjectAccessContext& access, ObjectHa
         return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
     }
     Slot* source = FindSlot(owner);
-    if (!source || !source->object ||
+    if (!source || !source->object || IsCutoff(source) ||
         (transaction ? source->state != SlotState::Reserved || source->transaction != transaction
                      : source->state != SlotState::Alive)) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
@@ -254,13 +264,21 @@ Result<void> ObjectRegistry::SetEdge(const ObjectAccessContext& access, ObjectHa
     }
     if (!target.IsNull()) {
         Slot* destination = FindSlot(target);
-        if (!destination || !(destination->state == SlotState::Alive ||
-                              (transaction && destination->state == SlotState::Reserved &&
-                               destination->transaction == transaction))) {
+        if (!destination || IsCutoff(destination) ||
+            !(destination->state == SlotState::Alive ||
+              (transaction && destination->state == SlotState::Reserved &&
+               destination->transaction == transaction))) {
             return Result<void>::Failure(ErrorCode::StaleHandle);
         }
         if (nativeType && destination->type.Ops().nativeType != nativeType) {
             return Result<void>::Failure(ErrorCode::TypeMismatch);
+        }
+        // staged 내부 간선은 Commit에서 전체 게시·shade한다. 이미 게시된 대상은 즉시 보존한다.
+        if (destination->state == SlotState::Alive) {
+            const ErrorCode shaded = ShadeLocked(target);
+            if (shaded != ErrorCode::None) {
+                return Result<void>::Failure(shaded);
+            }
         }
     }
     field = target;
@@ -311,6 +329,37 @@ Result<BackendLease> ObjectRegistry::AcquireBackendLease(const ObjectAccessConte
     return Result<BackendLease>::Success(BackendLease(this, handle));
 }
 
+Result<TypeLease> ObjectRegistry::AcquireType(const ObjectAccessContext& access,
+                                              ObjectHandle handle) noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return Result<TypeLease>::Failure(valid.Error());
+    }
+    platform::LockGuard lock(gate_);
+    if (closed_ || processing_) {
+        return Result<TypeLease>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
+    }
+    Slot* slot = FindSlot(handle);
+    auto live = CheckLive(slot, nullptr);
+    if (!live) {
+        return Result<TypeLease>::Failure(live.Error());
+    }
+    return slot->type.Clone();
+}
+
+Result<TypeLease> ObjectRegistry::AcquireRegisteredType(const ObjectAccessContext& access,
+                                                        TypeId type) noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return Result<TypeLease>::Failure(valid.Error());
+    }
+    platform::LockGuard lock(gate_);
+    if (closed_ || processing_) {
+        return Result<TypeLease>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
+    }
+    return types_.Acquire(type);
+}
+
 Result<uint64> ObjectRegistry::BeginConstruction(const ObjectAccessContext& access) noexcept {
     auto valid = CheckAccess(access);
     if (!valid) {
@@ -359,6 +408,19 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
         return Result<ObjectHandle>::Failure(ErrorCode::TypeMismatch);
     }
     const auto& ops = typeLease.Value().Ops();
+    if (gcPhase_ == GcPhase::Marking) {
+        // mutator가 새 객체를 만드는 지점에서만 작업 큐를 확장한다. gate/Trace 안의 barrier는
+        // 할당하지 않는다. Marking 동안 공개된 객체는 회수하지 않아 슬롯 수가 큐 상한이 된다.
+        uint64 capacity = (uint64(chunkCount_) + 1) * SlotsPerChunk;
+        if (capacity > options_.maxSlots) {
+            capacity = options_.maxSlots;
+        }
+        auto reserve = gcWork_.TryReserve(static_cast<usize>(capacity));
+        if (!reserve) {
+            finish();
+            return Result<ObjectHandle>::Failure(reserve.Error());
+        }
+    }
     auto memory = allocator_.Allocate(ops.size, ops.alignment, 0x4f424a45u);
     if (!memory) {
         finish();
@@ -421,7 +483,7 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
         freeSlot->stableType = type;
         freeSlot->type = Move(typeLease.Value());
     }
-    Object* object = freeSlot->type.Ops().construct(memory.Value());
+    Object* object = freeSlot->type.Ops().construct(memory.Value(), allocator_);
     if (!object) {
         platform::Fatal("A noexcept object constructor must return its object");
     }
@@ -459,8 +521,9 @@ void ObjectRegistry::ValidateStagedEdge(void* pointer, ObjectHandle handle) noex
     }
     platform::LockGuard lock(state.registry->gate_);
     Slot* slot = state.registry->FindSlot(handle);
-    if (!slot || !(slot->state == SlotState::Alive || (slot->state == SlotState::Reserved &&
-                                                       slot->transaction == state.transaction))) {
+    if (!slot || state.registry->IsCutoff(slot) ||
+        !(slot->state == SlotState::Alive ||
+          (slot->state == SlotState::Reserved && slot->transaction == state.transaction))) {
         state.error = ErrorCode::StaleHandle;
     }
 }
@@ -503,6 +566,16 @@ Result<RootRef<Object>> ObjectRegistry::Commit(const ObjectAccessContext& access
         Slot* slot = FindSlot(staged[index]);
         slot->state = SlotState::Alive;
         slot->transaction = 0;
+        if (gcPhase_ == GcPhase::Marking) {
+            if (ShadeLocked(staged[index]) != ErrorCode::None) {
+                platform::Fatal("Preallocated newborn mark queue exhausted");
+            }
+            ++cycleGc_.examined;
+        } else if (gcPhase_ == GcPhase::Sweeping) {
+            // cutoff 이후 태어난 객체는 이전 cohort의 white 후보가 아니다. Commit 검증이
+            // 기존 white 대상 연결을 거부하므로 새 객체를 이번 cycle에서 trace할 필요가 없다.
+            slot->mark = markEpoch_;
+        }
     }
     ++FindSlot(staged[0])->roots;
     --constructions_;
@@ -542,10 +615,13 @@ void ObjectRegistry::Rollback(uint64 transaction, Span<const ObjectHandle> stage
 
 void ObjectRegistry::MarkEdge(void* pointer, ObjectHandle handle) noexcept {
     auto& state = *static_cast<MarkState*>(pointer);
-    if (handle.IsNull() || state.error != ErrorCode::None) {
+    if (handle.IsNull()) {
         return;
     }
     platform::LockGuard lock(state.registry->gate_);
+    if (state.error != ErrorCode::None) {
+        return;
+    }
     Slot* slot = state.registry->FindSlot(handle);
     if (!slot || !(slot->state == SlotState::Alive || slot->state == SlotState::DestroyRequested)) {
         state.error = ErrorCode::StaleHandle;
@@ -562,6 +638,285 @@ void ObjectRegistry::MarkEdge(void* pointer, ObjectHandle handle) noexcept {
     slot->mark = state.registry->markEpoch_;
 }
 
+bool ObjectRegistry::IsCutoff(const Slot* slot) const noexcept {
+    return slot && gcPhase_ == GcPhase::Sweeping &&
+           (slot->state == SlotState::Alive || slot->state == SlotState::DestroyRequested) &&
+           slot->mark != markEpoch_;
+}
+
+ErrorCode ObjectRegistry::ShadeLocked(ObjectHandle handle) noexcept {
+    if (gcPhase_ != GcPhase::Marking || handle.IsNull()) {
+        return ErrorCode::None;
+    }
+    Slot* slot = FindSlot(handle);
+    if (!slot || !(slot->state == SlotState::Alive || slot->state == SlotState::DestroyRequested)) {
+        return ErrorCode::StaleHandle;
+    }
+    if (slot->mark == markEpoch_) {
+        return ErrorCode::None;
+    }
+    // Reserve는 Begin/CreatePending에서 gate 밖에 수행한다. barrier가 allocator 콜백을 실행하지
+    // 않도록 capacity를 먼저 검사하며 불변식 위반은 실패로 반환한다.
+    if (gcWork_.Size() == gcWork_.Capacity()) {
+        return ErrorCode::CapacityExceeded;
+    }
+    auto pushed = gcWork_.TryPushBack(handle);
+    if (!pushed) {
+        return pushed.Error();
+    }
+    slot->mark = markEpoch_;
+    return ErrorCode::None;
+}
+
+GcPhase ObjectRegistry::CollectionPhase() const noexcept {
+    platform::LockGuard lock(gate_);
+    return gcPhase_;
+}
+
+Result<void> ObjectRegistry::BeginCollection(const ObjectAccessContext& access) noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return valid;
+    }
+    const uint64 started = platform::MonotonicNanoseconds();
+    usize capacity;
+    {
+        platform::LockGuard lock(gate_);
+        if (processing_ || constructions_ || totalBorrows_ || gcPhase_ != GcPhase::Idle) {
+            return Result<void>::Failure(ErrorCode::Busy);
+        }
+        processing_ = true;
+        capacity = static_cast<usize>(uint64(chunkCount_) * SlotsPerChunk);
+    }
+    gcWork_.Clear();
+    auto reserved = gcWork_.TryReserve(capacity);
+    platform::LockGuard lock(gate_);
+    processing_ = false;
+    if (!reserved) {
+        return reserved;
+    }
+    if (++markEpoch_ == 0) {
+        markEpoch_ = 1;
+        for (Chunk* chunk = chunks_; chunk; chunk = chunk->next) {
+            for (auto& slot : chunk->slots) {
+                slot.mark = 0;
+            }
+        }
+    }
+    gcPhase_ = GcPhase::Marking;
+    gcCursor_ = 0;
+    cycleGc_ = {};
+    sweepChunk_ = nullptr;
+    sweepOffset_ = 0;
+    for (Chunk* chunk = chunks_; chunk; chunk = chunk->next) {
+        for (auto& slot : chunk->slots) {
+            if (slot.state == SlotState::Alive || slot.state == SlotState::DestroyRequested) {
+                ++cycleGc_.examined;
+                if (slot.roots != 0 &&
+                    ShadeLocked({domain_, slot.index, slot.generation}) != ErrorCode::None) {
+                    platform::Fatal("Preallocated root snapshot queue exhausted");
+                }
+            }
+        }
+    }
+    cycleGc_.durationNanoseconds = platform::MonotonicNanoseconds() - started;
+    return Result<void>::Success();
+}
+
+Result<void> ObjectRegistry::CancelCollection(const ObjectAccessContext& access) noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return valid;
+    }
+    platform::LockGuard lock(gate_);
+    if (processing_ || gcPhase_ == GcPhase::Sweeping || gcPhase_ == GcPhase::Reclaiming) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+    gcPhase_ = GcPhase::Idle;
+    gcWork_.Clear();
+    gcCursor_ = 0;
+    return Result<void>::Success();
+}
+
+bool ObjectRegistry::HasReclaimableLocked() const noexcept {
+    for (Chunk* chunk = chunks_; chunk; chunk = chunk->next) {
+        for (const auto& slot : chunk->slots) {
+            if (slot.state == SlotState::Retired && slot.roots == 0 && slot.borrows == 0 &&
+                slot.backendHolds == 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& access,
+                                                  GcBudget budget,
+                                                  WorkerScheduler* scheduler) noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return Result<GcProgress>::Failure(valid.Error());
+    }
+    if (budget.maxObjects == 0) {
+        return Result<GcProgress>::Failure(ErrorCode::InvalidArgument);
+    }
+    if (scheduler && scheduler->IsCurrentWorker()) {
+        return Result<GcProgress>::Failure(ErrorCode::WrongThread);
+    }
+    const uint64 started = platform::MonotonicNanoseconds();
+    uint64 deadline = 0;
+    if (budget.maxNanoseconds != 0) {
+        const uint64 maximum = static_cast<uint64>(-1);
+        deadline =
+            budget.maxNanoseconds > maximum - started ? maximum : started + budget.maxNanoseconds;
+    }
+    auto inBudget = [deadline]() noexcept {
+        return deadline == 0 || platform::MonotonicNanoseconds() < deadline;
+    };
+    {
+        platform::LockGuard lock(gate_);
+        if (processing_ || constructions_ || totalBorrows_) {
+            return Result<GcProgress>::Failure(ErrorCode::Busy);
+        }
+        if (gcPhase_ == GcPhase::Idle) {
+            return Result<GcProgress>::Failure(ErrorCode::InvalidArgument);
+        }
+        processing_ = true;
+    }
+
+    uint32 processed = 0;
+    MarkState state{this, &gcWork_};
+    auto setError = [this, &state](ErrorCode error) noexcept {
+        platform::LockGuard lock(gate_);
+        if (state.error == ErrorCode::None) {
+            state.error = error;
+        }
+    };
+    auto hasError = [this, &state]() noexcept {
+        platform::LockGuard lock(gate_);
+        return state.error != ErrorCode::None;
+    };
+    while (gcPhase_ == GcPhase::Marking && processed < budget.maxObjects && inBudget() &&
+           !hasError()) {
+        ObjectHandle next;
+        bool parallel = false;
+        {
+            platform::LockGuard lock(gate_);
+            if (gcCursor_ == gcWork_.Size()) {
+                // 모든 barrier가 같은 gate에서 게시되므로 빈 큐 판정과 cutoff는 하나의 선형화다.
+                // 아직 slot을 Retired로 바꾸기 전에도 white 객체의 Resolve/Pin/연결을 차단한다.
+                cycleGc_.marked = static_cast<uint32>(gcWork_.Size());
+                gcPhase_ = GcPhase::Sweeping;
+                sweepChunk_ = chunks_;
+                sweepOffset_ = 0;
+                break;
+            }
+            next = gcWork_[gcCursor_];
+            parallel = scheduler && FindSlot(next)->type.Ops().parallelTraceSafe;
+        }
+        if (!parallel) {
+            ++gcCursor_;
+            TraceVisitor visitor(&state, &ObjectRegistry::MarkEdge);
+            Slot* slot = FindSlot(next);
+            slot->type.Ops().trace(*slot->object, visitor);
+            ++processed;
+            continue;
+        }
+
+        // 한 batch는 최대 64개다. 각 task의 완료는 capture 정리 뒤 관측하고 모두 회수한 뒤에만
+        // stack state/visitor를 없앤다. 미선언 Trace는 이 batch와 겹쳐 실행하지 않는다.
+        WorkerTaskHandle tasks[64];
+        uint32 submitted = 0;
+        while (submitted < 64 && processed < budget.maxObjects && inBudget() && !hasError()) {
+            ObjectHandle handle;
+            {
+                platform::LockGuard lock(gate_);
+                if (gcCursor_ == gcWork_.Size()) {
+                    break;
+                }
+                handle = gcWork_[gcCursor_];
+                if (!FindSlot(handle)->type.Ops().parallelTraceSafe) {
+                    break;
+                }
+                ++gcCursor_;
+            }
+            auto body = Function<void(WorkerTaskContext&)>::TryCreate(
+                allocator_, [this, &state, handle](WorkerTaskContext&) noexcept {
+                    TraceVisitor visitor(&state, &ObjectRegistry::MarkEdge);
+                    Slot* slot = FindSlot(handle);
+                    slot->type.Ops().trace(*slot->object, visitor);
+                });
+            if (!body) {
+                setError(body.Error());
+                break;
+            }
+            auto accepted = scheduler->Submit(Move(body.Value()));
+            if (!accepted) {
+                setError(accepted.Error());
+                break;
+            }
+            tasks[submitted++] = Move(accepted.Value());
+            ++processed;
+        }
+        for (uint32 index = 0; index < submitted; ++index) {
+            auto waited = tasks[index].Wait();
+            if (!waited || waited.Value() != platform::WaitResult::Signaled) {
+                // stack에 남은 trace context를 사용하는 worker를 버리고 복귀할 수 없다.
+                platform::Fatal("Cannot drain a GC marker task");
+            }
+            auto status = tasks[index].Status();
+            if (!status) {
+                setError(status.Error());
+            } else if (status.Value().state != WorkerTaskState::Succeeded) {
+                setError(status.Value().error == ErrorCode::None ? ErrorCode::DependencyFailed
+                                                                 : status.Value().error);
+            }
+        }
+    }
+    if (hasError()) {
+        platform::LockGuard lock(gate_);
+        gcPhase_ = GcPhase::Idle;
+        gcWork_.Clear();
+        gcCursor_ = 0;
+        processing_ = false;
+        return Result<GcProgress>::Failure(state.error);
+    }
+
+    while (gcPhase_ == GcPhase::Sweeping && processed < budget.maxObjects && inBudget()) {
+        platform::LockGuard lock(gate_);
+        if (!sweepChunk_) {
+            gcPhase_ = GcPhase::Reclaiming;
+            break;
+        }
+        Slot& slot = sweepChunk_->slots[sweepOffset_++];
+        if ((slot.state == SlotState::Alive || slot.state == SlotState::DestroyRequested) &&
+            slot.mark != markEpoch_) {
+            slot.state = SlotState::Retired;
+            ++cycleGc_.retired;
+        }
+        if (sweepOffset_ == SlotsPerChunk) {
+            sweepChunk_ = sweepChunk_->next;
+            sweepOffset_ = 0;
+        }
+        ++processed;
+    }
+    if (gcPhase_ == GcPhase::Reclaiming && processed < budget.maxObjects && inBudget()) {
+        const uint32 reclaimed = ReclaimEligible(budget.maxObjects - processed, deadline);
+        cycleGc_.reclaimed += reclaimed;
+        processed += reclaimed;
+    }
+    platform::LockGuard lock(gate_);
+    cycleGc_.durationNanoseconds += platform::MonotonicNanoseconds() - started;
+    if (gcPhase_ == GcPhase::Reclaiming && !HasReclaimableLocked()) {
+        gcPhase_ = GcPhase::Idle;
+        lastGc_ = cycleGc_;
+        gcWork_.Clear();
+        gcCursor_ = 0;
+    }
+    processing_ = false;
+    return Result<GcProgress>::Success({gcPhase_, processed, cycleGc_});
+}
+
 Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access) noexcept {
     auto valid = CheckAccess(access);
     if (!valid) {
@@ -571,7 +926,7 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access) noex
     GcReport report;
     {
         platform::LockGuard lock(gate_);
-        if (processing_ || constructions_ || totalBorrows_) {
+        if (processing_ || constructions_ || totalBorrows_ || gcPhase_ != GcPhase::Idle) {
             return Result<GcReport>::Failure(ErrorCode::Busy);
         }
         processing_ = true;
@@ -651,9 +1006,9 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access) noex
     return Result<GcReport>::Success(report);
 }
 
-uint32 ObjectRegistry::ReclaimEligible() noexcept {
+uint32 ObjectRegistry::ReclaimEligible(uint32 maximum, uint64 deadline) noexcept {
     uint32 reclaimed = 0;
-    for (;;) {
+    while (reclaimed < maximum && (deadline == 0 || platform::MonotonicNanoseconds() < deadline)) {
         Slot* selected = nullptr;
         TypeLease type;
         Object* object = nullptr;
@@ -739,6 +1094,13 @@ Result<void> ObjectRegistry::Shutdown(const ObjectAccessContext& access) noexcep
             return Result<void>::Failure(ErrorCode::Busy);
         }
         closed_ = true;
+    }
+    // cutoff를 게시한 cycle은 끝까지 분류해야 한다. 중간 취소로 white 객체를 다시 노출하지 않는다.
+    while (CollectionPhase() != GcPhase::Idle) {
+        auto advanced = StepCollection(access, {0xffffffffu, 0});
+        if (!advanced) {
+            return Result<void>::Failure(advanced.Error());
+        }
     }
     auto collected = Collect(access);
     if (!collected) {

@@ -2,7 +2,7 @@
 
 C++23 기반 멀티플랫폼 3D 게임 엔진 프로젝트.
 
-현재 **Core 기반 라이브러리와 Object 시스템의 첫 구현**을 진행하고 있다. 할당기·컨테이너·참조·타입 등록·생성 트랜잭션·full STW GC를 CPU 전용 테스트 호스트에서 실행한다. 전체 Foundation 및 제품용 엔진의 완료와는 구분한다. 실제 범위·검증·후속 작업은 [구현 상태](Docs/Implementation/FoundationStatus.ko.md)를 따른다.
+현재 **Core 기반 라이브러리와 Object 시스템의 첫 구현**을 진행하고 있다. 자체 할당기·컨테이너·String/Name/Text, worker 작업, 생성 리플렉션, 생성 트랜잭션, 객체 그래프 직렬화, 비이동 점진·병렬 GC를 CPU 전용 테스트 호스트에서 실행한다. 전체 Foundation 및 제품용 엔진의 완료와는 구분한다. 실제 범위·검증·후속 작업은 [구현 상태](Docs/Implementation/FoundationStatus.ko.md)를 따른다.
 
 ## 구현 원칙
 
@@ -30,6 +30,10 @@ python Build/format.py --check
 
 - [현재 구현 상태·수명 계약·테스트](Docs/Implementation/FoundationStatus.ko.md)
 - [String·StringView·Name·Text 역할](Docs/Implementation/StringAndText.ko.md)
+- [점진·병렬 GC 계약](Docs/Implementation/IncrementalGarbageCollection.ko.md)
+- [Clang 생성 Reflection](Docs/Implementation/ReflectionMetadata.ko.md)
+- [Archive·Record·객체 그래프 직렬화](Docs/Implementation/Serialization.ko.md)
+- [WorkerScheduler 수명·종료 계약](Docs/Implementation/WorkerScheduler.ko.md)
 - [전체 구현 계획](Docs/Design/EngineImplementationPlan.ko.md)
 - [Core·Object·Input 상세 구현 계획](Docs/Design/CoreObjectInputDetailedPlan.ko.md)
 - [작업 목록](Docs/Design/CoreObjectInputTasks.ko.csv)

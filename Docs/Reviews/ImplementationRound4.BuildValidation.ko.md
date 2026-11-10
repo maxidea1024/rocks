@@ -54,3 +54,20 @@ warning policy는 실제 컴파일 명령의 `/W4 /WX` 적용과 경고 억제 �
 각 구성의 `out/<preset>/foundation-report.json`, `build-evidence.json`, `Testing/Temporary/LastTest.log`를 근거로 사용하였다. 반복 실행은 `out/windows-clang-release/repeat-report.json`, `repeat-evidence.json`, `repeat-output.log`에 별도 저장하였다. 반복 증거에는 실행 명령, 11,000회·실패 0, 실행 전후 소스 digest, 실행 바이너리와 보고서 해시를 기록하였다. 기본 foundation 보고서는 덮어쓰지 않았다.
 
 이번 검증은 Windows의 CPU Foundation 구현 범위이다. 이번 변경의 macOS native 컴파일·실행은 이 보고서 작성 시점에 미실행이며 후속 CI 결과로 별도 판정해야 한다. ASan 통과와 자체 allocator 잔여 할당 0을 프로세스 전체의 모든 native/CRT 자원 또는 모든 경합 상태에 대한 완전 증명으로 확대하지 않는다. 렌더러·Studio 등 후속 엔진 기능의 완료를 의미하지 않는다.
+
+
+## 후속 네이티브 CI 독립 대조
+
+로컬 검증 이후 커밋 `b38c9437b32dcd41837b5df7b8ab2a1dbc622272`의 CI 실행 `42771207691` 원본 artifact를 독립적으로 확인하였다. 앞 절의 macOS 미실행 상태는 아래 실행 결과로 갱신한다.
+
+| 네이티브 구성 | 컴파일러 | 테스트 / CTest | 결과 |
+|---|---|---:|---|
+| Windows x64 Debug | Clang 20.1.8 | 110 / 8 | 전부 PASS |
+| macOS ARM64 Debug | Apple Clang 17.0.0 | 110 / 8 | 전부 PASS |
+| macOS ARM64 ASan | Apple Clang 17.0.0 | 110 / 9 | 전부 PASS |
+
+세 artifact의 `build-evidence.json`, `foundation-report.json`, `Testing/Temporary/LastTest.log`를 각각 읽고 대조하였다. 실행 전후 HEAD는 모두 위 커밋과 일치하고, 작업 트리는 모두 `dirty=false`이다. 소스 116개 파일의 digest는 로컬 최종 검증과 같은 `e4b9e381004fda7b8c5252c241783496fe5a14a000a8d6d631ab7e27f57d02ed`이며, 모든 구성에서 `sourceStableDuringRun=true`를 확인하였다. 보고서 파일 해시와 `runnerReportCurrent`도 일치한다. 세 구성의 테스트 이름 집합은 로컬 전체 110개 집합과 동일하다.
+
+macOS ASan 로그에서 TLS 정리와 entry 완료의 구분, 동시 Join·완료 대기, 번역 snapshot 재진입·언어 전환, 양수 작업량 경계 사례의 개별 PASS를 확인하였다. ASan 음성 대조군은 의도적인 child-process use-after-free 검출을 확인하였고, 경고 probe는 실제 `-Wall -Wextra -Wpedantic -Werror` 명령으로 unused-variable 오류를 발생시켰다. 세 구성 모두 플랫폼 경계 검사·음성 대조군 및 warning policy 통과 로그가 존재한다.
+
+원본 증거 위치는 `out/ci-42771207691/foundation-Windows/windows-clang-debug/`, `out/ci-42771207691/foundation-macOS/macos-clang-debug/`, `out/ci-42771207691/foundation-macOS/macos-clang-asan/`이다. 이 후속 검토에서 실행 소스는 변경하지 않았으며, macOS Release 및 macOS 100회 반복 결과로 범위를 확대하지 않는다.

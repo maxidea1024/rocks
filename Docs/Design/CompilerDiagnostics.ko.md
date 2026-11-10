@@ -33,3 +33,7 @@
 5. 빌드 성공, 경고 정책 검사 성공, 서식 검사 성공, 관련 단위·장애·수명 시험 성공을 모두 요구한다. warning-as-error 실패를 해결하려고 테스트를 삭제하거나 경고 수준을 낮추지 않는다.
 
 소스 검사는 `.h`/`.cpp`/`.mm` 대상 lexical guard이며 전처리 확장 전체의 형식 검증은 아니다. 블록 주석에 쓴 pragma 예제도 탐지할 수 있으므로 긴 예시는 설계 문서에 둔다. `_Pragma` 같은 우회와 새 build script·새 compiler driver를 통한 설정 변경도 코드 리뷰에서 금지한다. 신규 도구 체계 지원 시 실제 compiler invocation에 대한 감사와 음성 fixture를 확장해야 한다. 컴파일 경고 규약은 로깅의 Warning 등급이나 에셋 검증 경고를 자동으로 금지하는 규칙과는 구분한다.
+
+## 현재 검증 증거
+
+[CI 실행 42771207691](https://github.com/maxidea1024/rocks/actions/runs/42771207691)의 Windows x64 Clang 20.1.8, macOS ARM64 Apple Clang 17.0.0 Debug/ASan에서 필수 프로필·정상 컴파일·의도적 경고의 오류 거부를 모두 확인했다. 로컬 Clang 21.1.6 Core-only/Debug/Release/ASan에서도 통과했다. 상세 수치와 source digest는 [Foundation 검증 기록](../Implementation/FoundationStatus.ko.md)을 따른다. 경고 정책을 문서 선언만으로 완료 처리하지 않는다.

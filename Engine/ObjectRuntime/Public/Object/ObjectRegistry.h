@@ -7,6 +7,24 @@
 
 namespace rocks {
 
+class WorkerScheduler;
+
+enum class GcPhase : uint8 {
+    Idle,
+    Marking,
+    Sweeping,
+    Reclaiming
+};
+
+// 시간 예산은 soft deadline이다. Trace/소멸자 한 번을 중간에 중단하지 않는다.
+// Begin의 root scan·잠금 획득·회수 후보 탐색도 hard deadline으로 제한하지 않는다.
+// maxObjects는 trace·slot 분류·실제 회수의 합이며 0은 잘못된 설정이다.
+// maxNanoseconds=0은 시간 한도를 끄되 객체 작업량 한도는 유지한다.
+struct GcBudget {
+    uint32 maxObjects = 64;
+    uint64 maxNanoseconds = 1000000;
+};
+
 // 한도는 생성 시 고정한다. maxGeneration을 낮추면 슬롯 고갈 회귀 시험을 할 수 있다.
 struct RegistryOptions {
     uint32 maxSlots = 1048576;
@@ -24,13 +42,23 @@ struct ObjectStats {
     uint32 chunks = 0;
 };
 
-// 성공한 한 번의 full STW GC 결과다. 시간 단위는 ns이며 이후 drain 결과는 포함하지 않는다.
+// 성공한 한 cycle의 결과다. 시간은 실제 collector slice의 합(ns)이며 mutator 시간은 제외한다.
 struct GcReport {
     uint32 examined = 0;
     uint32 marked = 0;
     uint32 retired = 0;
     uint32 reclaimed = 0;
     uint64 durationNanoseconds = 0;
+};
+
+struct GcProgress {
+    GcPhase phase = GcPhase::Idle;
+    uint32 processed = 0;
+    GcReport report;
+
+    bool IsComplete() const noexcept {
+        return phase == GcPhase::Idle;
+    }
 };
 
 // 비이동 객체 저장소와 GC를 소유한다. Allocator/TypeRegistry가 먼저 생성되고 나중에 파괴되어야
@@ -46,6 +74,12 @@ public:
 
     ObjectAccessContext OwnerAccess() const noexcept {
         return {context_};
+    }
+
+    // 로더가 검사한 schema/code lease와 실제 생성에 쓰는 registry가 같은지 확인한다.
+    // 타입 ID가 우연히 같다는 이유로 서로 다른 등록 저장소의 callback을 혼합하지 않는다.
+    bool UsesTypeRegistry(const TypeRegistry& registry) const noexcept {
+        return &types_ == &registry;
     }
 
     // 기본 생성과 공개를 한 트랜잭션으로 실행한다. 실패 가능한 별도 초기화에는 ConstructionContext
@@ -81,8 +115,7 @@ public:
     }
 
     // owner 저장소 안에 직접 포함된 field만 허용한다. 대상 타입/문맥/생존 검증 실패 시 field는
-    // 불변이다. 현재 full STW 구현의 간선 변경 경계이며, 점진 GC의 write barrier는 아직 구현하지
-    // 않았다.
+    // 불변이다. Marking 동안 대상 shade와 field 게시를 같은 gate 안에서 수행한다.
     template <class T>
     Result<void> SetReference(const ObjectAccessContext& access, ObjectHandle owner,
                               ObjectRef<T>& field, ObjectHandle target) noexcept {
@@ -93,9 +126,27 @@ public:
     // 저장소 파괴는 도달성 및 모든 보유 계수 해소 뒤 Collect/DrainRetired에서 수행한다.
     Result<void> RequestDestroy(const ObjectAccessContext&, ObjectHandle) noexcept;
     Result<BackendLease> AcquireBackendLease(const ObjectAccessContext&, ObjectHandle) noexcept;
+    // 읽기용 불변 metadata/code lease를 복제한다. 객체 수명이나 접근권은 따로 보존해야 한다.
+    // cutoff·논리 파괴 뒤에는 새 조회를 거부하며 호출자의 context/owner thread를 검사한다.
+    Result<TypeLease> AcquireType(const ObjectAccessContext&, ObjectHandle) noexcept;
+    // 참조 필드의 선언 타입을 이 저장소의 등록 타입에서 조회한다. 객체를 생성하거나 pin하지 않는다.
+    // owner/context/종료/재진입 규약은 AcquireType과 같고 미등록 ID는 NotFound다.
+    Result<TypeLease> AcquireRegisteredType(const ObjectAccessContext&, TypeId) noexcept;
     // 소유 스레드 full STW 수집. Borrow/생성 트랜잭션/재진입 중에는 Busy다.
     // 작업 큐 할당이나 Trace 간선 검증 실패 시 부분 표식으로 sweep하지 않는다.
     Result<GcReport> Collect(const ObjectAccessContext&) noexcept;
+    // Begin/Step은 Borrow=0·활성 생성=0인 소유 스레드 safepoint에서만 진행한다.
+    // slice 사이에는 mutator를 재개하며 root/간선/신규 게시가 삽입 장벽을 거친다.
+    Result<void> BeginCollection(const ObjectAccessContext&) noexcept;
+    // scheduler를 지정하면 parallelTraceSafe 타입만 worker에서 추적한다. 미선언 타입은 owner에서
+    // 실행한다. allocator는 worker의 capture 정리를 지원해야 한다. 각 slice는 worker를 모두 drain한
+    // 뒤 반환하므로 mutator와 field scan을 동시에 실행하지 않는다.
+    Result<GcProgress> StepCollection(const ObjectAccessContext&, GcBudget = {},
+                                      WorkerScheduler* scheduler = nullptr) noexcept;
+    // 아직 cutoff를 게시하지 않은 Marking만 취소한다. cutoff 이후 중단으로 죽은 간선을 부활시키지
+    // 않도록 Sweeping/Reclaiming 취소는 Busy다. 마지막 성공 보고서는 바꾸지 않는다.
+    Result<void> CancelCollection(const ObjectAccessContext&) noexcept;
+    GcPhase CollectionPhase() const noexcept;
     Result<uint32> DrainRetired(const ObjectAccessContext&) noexcept;
     // 신규 객체/루트/접근권을 닫은 후 회수를 시도한다. Busy면 보유권을 반환하고 재시도한다.
     // 접근 검증/재진입 거부는 닫기 전에 반환한다. 닫은 뒤의 회수 실패는 닫힌 상태를 유지한다.
@@ -138,7 +189,10 @@ private:
     Result<RootRef<Object>> Commit(const ObjectAccessContext&, uint64,
                                    Span<const ObjectHandle>) noexcept;
     void Rollback(uint64, Span<const ObjectHandle>) noexcept;
-    uint32 ReclaimEligible() noexcept;
+    ErrorCode ShadeLocked(ObjectHandle) noexcept;
+    bool IsCutoff(const Slot*) const noexcept;
+    bool HasReclaimableLocked() const noexcept;
+    uint32 ReclaimEligible(uint32 maximum = 0xffffffffu, uint64 deadline = 0) noexcept;
 
     Allocator& allocator_;
     TypeRegistry& types_;
@@ -154,8 +208,14 @@ private:
     uint64 nextTransaction_ = 1;
     uint64 markEpoch_ = 0;
     GcReport lastGc_;
+    Array<ObjectHandle> gcWork_;
+    usize gcCursor_ = 0;
+    GcPhase gcPhase_ = GcPhase::Idle;
+    GcReport cycleGc_;
+    Chunk* sweepChunk_ = nullptr;
+    uint32 sweepOffset_ = 0;
     // 잠금을 풀고 사용자 코드를 호출하는 구간에도 변경 재진입을 차단하는 상태다.
-    // 별도 worker를 실행하거나 병렬 GC 진행을 표시하는 플래그가 아니다.
+    // worker trace 실행 구간도 포함한다. phase 자체와 달리 slice 사이에는 false다.
     bool processing_ = false;
     bool closed_ = false;
 };

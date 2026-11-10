@@ -56,6 +56,8 @@ file(GLOB_RECURSE ROCKS_PLATFORM_SOURCES CONFIGURE_DEPENDS
 file(GLOB_RECURSE ROCKS_CORE_SOURCES CONFIGURE_DEPENDS Engine/Core/Private/*.cpp)
 file(GLOB_RECURSE ROCKS_TASK_SOURCES CONFIGURE_DEPENDS Engine/Task/Private/*.cpp)
 file(GLOB_RECURSE ROCKS_LOCALIZATION_SOURCES CONFIGURE_DEPENDS Engine/Localization/Private/*.cpp)
+file(GLOB_RECURSE ROCKS_SERIALIZATION_SOURCES CONFIGURE_DEPENDS Engine/Serialization/Private/*.cpp)
+file(GLOB_RECURSE ROCKS_OBJECT_SERIALIZATION_SOURCES CONFIGURE_DEPENDS Engine/ObjectSerialization/Private/*.cpp)
 file(GLOB_RECURSE ROCKS_OBJECT_SOURCES CONFIGURE_DEPENDS Engine/ObjectRuntime/Private/*.cpp)
 
 add_library(rocks_platform STATIC ${ROCKS_PLATFORM_SOURCES})
@@ -71,6 +73,10 @@ add_library(rocks_localization STATIC ${ROCKS_LOCALIZATION_SOURCES})
 target_include_directories(rocks_localization PUBLIC Engine/Localization/Public)
 target_link_libraries(rocks_localization PUBLIC rocks_core)
 
+add_library(rocks_serialization STATIC ${ROCKS_SERIALIZATION_SOURCES})
+target_include_directories(rocks_serialization PUBLIC Engine/Serialization/Public)
+target_link_libraries(rocks_serialization PUBLIC rocks_core)
+
 add_library(rocks_meta INTERFACE)
 target_include_directories(rocks_meta INTERFACE Engine/MetaSchema/Public)
 target_link_libraries(rocks_meta INTERFACE rocks_core)
@@ -84,6 +90,11 @@ add_library(rocks_object STATIC ${ROCKS_OBJECT_SOURCES})
 target_include_directories(rocks_object PUBLIC Engine/ObjectRuntime/Public)
 target_link_libraries(rocks_object PUBLIC rocks_meta rocks_task)
 
+add_library(rocks_object_serialization STATIC ${ROCKS_OBJECT_SERIALIZATION_SOURCES})
+target_include_directories(rocks_object_serialization PUBLIC Engine/ObjectSerialization/Public)
+target_link_libraries(rocks_object_serialization PUBLIC rocks_object rocks_serialization)
+
+
 endif()
 
 file(GLOB_RECURSE ROCKS_HOST_TEST_SOURCES CONFIGURE_DEPENDS
@@ -95,20 +106,20 @@ else()
 endif()
 
 file(GLOB_RECURSE ROCKS_BOOTSTRAP_TEST_SOURCES CONFIGURE_DEPENDS
-    Tests/Foundation/*.cpp Tests/Core/*.cpp Tests/Platform/*.cpp Tests/Localization/*.cpp)
+    Tests/Foundation/*.cpp Tests/Core/*.cpp Tests/Platform/*.cpp Tests/Localization/*.cpp Tests/Serialization/*.cpp)
 add_executable(CoreFoundationTests ${ROCKS_BOOTSTRAP_TEST_SOURCES} ${ROCKS_HOST_TEST_SOURCES})
 target_include_directories(CoreFoundationTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} Tests/Support)
 target_compile_definitions(CoreFoundationTests PRIVATE ROCKS_TESTING=1)
-target_link_libraries(CoreFoundationTests PRIVATE rocks_task rocks_localization)
+target_link_libraries(CoreFoundationTests PRIVATE rocks_task rocks_localization rocks_serialization)
 set(ROCKS_TEST_EXECUTABLE CoreFoundationTests)
 
 if(ROCKS_BUILD_OBJECT)
 file(GLOB_RECURSE ROCKS_TEST_SOURCES CONFIGURE_DEPENDS
-    Tests/Foundation/*.cpp Tests/Core/*.cpp Tests/Platform/*.cpp Tests/Object/*.cpp Tests/Localization/*.cpp)
+    Tests/Foundation/*.cpp Tests/Core/*.cpp Tests/Platform/*.cpp Tests/Object/*.cpp Tests/Localization/*.cpp Tests/Serialization/*.cpp Tests/Reflection/*.cpp Tests/ObjectSerialization/*.cpp)
 add_executable(FoundationTests ${ROCKS_TEST_SOURCES} ${ROCKS_HOST_TEST_SOURCES})
 target_include_directories(FoundationTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} Tests/Support)
 target_compile_definitions(FoundationTests PRIVATE ROCKS_TESTING=1)
-target_link_libraries(FoundationTests PRIVATE rocks_object rocks_localization)
+target_link_libraries(FoundationTests PRIVATE rocks_object_serialization rocks_localization)
 
 set(ROCKS_TEST_EXECUTABLE FoundationTests)
 endif()
@@ -117,7 +128,7 @@ endif()
 file(GLOB_RECURSE ROCKS_PUBLIC_HEADERS CONFIGURE_DEPENDS Engine/*/Public/*.h)
 set(ROCKS_HEADER_SOURCES)
 foreach(header IN LISTS ROCKS_PUBLIC_HEADERS)
-    if(NOT ROCKS_BUILD_OBJECT AND header MATCHES "/(ObjectRuntime|MetaSchema)/")
+    if(NOT ROCKS_BUILD_OBJECT AND header MATCHES "/(ObjectRuntime|ObjectSerialization|MetaSchema)/")
         continue()
     endif()
     string(REGEX REPLACE ".*/Public/" "" include_path "${header}")
@@ -128,13 +139,68 @@ foreach(header IN LISTS ROCKS_PUBLIC_HEADERS)
 endforeach()
 add_library(rocks_header_checks OBJECT ${ROCKS_HEADER_SOURCES})
 if(ROCKS_BUILD_OBJECT)
-    target_link_libraries(rocks_header_checks PRIVATE rocks_object rocks_localization)
+    target_link_libraries(rocks_header_checks PRIVATE rocks_object_serialization rocks_localization)
 else()
-    target_link_libraries(rocks_header_checks PRIVATE rocks_task rocks_localization)
+    target_link_libraries(rocks_header_checks PRIVATE rocks_task rocks_localization rocks_serialization)
 endif()
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 enable_testing()
+
+if(ROCKS_BUILD_OBJECT)
+    set(ROCKS_GENERATED_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Generated")
+    set(ROCKS_REFLECTION_FIXTURE "${ROCKS_GENERATED_DIRECTORY}/ReflectionFixture.generated.h")
+    if(DEFINED ENV{ROCKS_CLANG_FORMAT})
+        set(ROCKS_META_FORMATTER "$ENV{ROCKS_CLANG_FORMAT}")
+    else()
+        find_program(ROCKS_META_FORMATTER NAMES clang-format REQUIRED)
+    endif()
+    set(ROCKS_META_FLAGS --clang-arg=-DROCKS_TESTING=1)
+    if(WIN32)
+        list(APPEND ROCKS_META_FLAGS --clang-arg=-DROCKS_PLATFORM_WINDOWS=1
+            --clang-arg=-DNOMINMAX --clang-arg=-DWIN32_LEAN_AND_MEAN)
+    else()
+        list(APPEND ROCKS_META_FLAGS --clang-arg=-DROCKS_PLATFORM_MAC=1)
+    endif()
+    if(ROCKS_ASAN)
+        if(MSVC)
+            list(APPEND ROCKS_META_FLAGS --clang-arg=/fsanitize=address)
+        else()
+            list(APPEND ROCKS_META_FLAGS --clang-arg=-fsanitize=address)
+        endif()
+    endif()
+    set(ROCKS_META_COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/Tools/MetaCompiler/metacompiler.py
+        --input ${CMAKE_CURRENT_SOURCE_DIR}/Tests/Reflection/ReflectionFixture.h
+        --include Tests/Reflection/ReflectionFixture.h
+        --output ${ROCKS_REFLECTION_FIXTURE}
+        --compiler ${CMAKE_CXX_COMPILER} ${ROCKS_META_FLAGS})
+    add_custom_command(OUTPUT ${ROCKS_REFLECTION_FIXTURE}
+        COMMAND ${ROCKS_META_COMMAND}
+        DEPENDS Tools/MetaCompiler/metacompiler.py Build/audit_warning_policy.py Build/build.py
+            Tests/Reflection/ReflectionFixture.h ${ROCKS_PUBLIC_HEADERS}
+            .clang-format .editorconfig "${ROCKS_META_FORMATTER}"
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Generating Clang-validated Rocks reflection metadata"
+        VERBATIM)
+    add_custom_target(rocks_generated_metadata DEPENDS ${ROCKS_REFLECTION_FIXTURE})
+    add_dependencies(FoundationTests rocks_generated_metadata)
+    add_dependencies(rocks_header_checks rocks_generated_metadata)
+    target_include_directories(FoundationTests PRIVATE ${ROCKS_GENERATED_DIRECTORY})
+    target_include_directories(rocks_header_checks PRIVATE
+        ${ROCKS_GENERATED_DIRECTORY} ${CMAKE_CURRENT_SOURCE_DIR})
+    file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/HeaderChecks/generated_reflection.cpp"
+        CONTENT "#include <ReflectionFixture.generated.h>\n")
+    target_sources(rocks_header_checks PRIVATE
+        "${CMAKE_CURRENT_BINARY_DIR}/HeaderChecks/generated_reflection.cpp")
+    add_test(NAME generated_metadata_current COMMAND ${ROCKS_META_COMMAND} --check)
+    set_tests_properties(generated_metadata_current PROPERTIES TIMEOUT 120)
+    add_test(NAME metacompiler_negative_controls
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/Tests/Reflection/test_metacompiler.py
+            --compiler ${CMAKE_CXX_COMPILER} ${ROCKS_META_FLAGS})
+    set_tests_properties(metacompiler_negative_controls PROPERTIES TIMEOUT 180)
+endif()
+
 add_test(NAME foundation COMMAND ${ROCKS_TEST_EXECUTABLE} --seed 7351 --json ${CMAKE_CURRENT_BINARY_DIR}/foundation-report.json)
 add_test(NAME harness_negative_controls
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/Tests/Integration/test_harness.py $<TARGET_FILE:${ROCKS_TEST_EXECUTABLE}>)

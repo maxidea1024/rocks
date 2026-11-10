@@ -34,6 +34,11 @@ public:
     // payload를 비우고 종단 NUL을 복원한다. buffer는 재사용하며 기존 내용 view는 무효다.
     void Clear() noexcept;
 
+    // storage와 allocator를 함께 교환한다. 할당/해제 callback 없이 commit할 때 사용한다.
+    // 기존 pointer는 원래 storage를 계속 가리키지만 소유 String이 서로 바뀐다.
+    void Swap(String& other) noexcept;
+    Allocator& GetAllocator() const noexcept;
+
     const char* Data() const noexcept;
     usize ByteCount() const noexcept;
     usize ByteCapacity() const noexcept;

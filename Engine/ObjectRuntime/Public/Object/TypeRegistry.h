@@ -37,6 +37,8 @@ public:
     // 빈 lease의 Schema/Ops 접근은 프로그래머 오류로 즉시 종료한다.
     const TypeSchema& Schema() const noexcept;
     const RuntimeTypeOps& Ops() const noexcept;
+    // immutable schema ancestry 조회다. native pointer 변환이나 Borrow<base> 허용을 뜻하지 않는다.
+    bool IsA(TypeId expected) const noexcept;
 
     bool IsValid() const noexcept {
         return record_ != nullptr;
@@ -68,6 +70,7 @@ public:
     // ops는 값으로 소유권을 넘기므로 등록 실패 시에도 그 ModuleLease는 정리된다.
     Result<TypeRegistrationToken> Register(const TypeSchema&, RuntimeTypeOps) noexcept;
     Result<TypeLease> Acquire(TypeId) noexcept;
+    Result<bool> IsA(TypeId actual, TypeId expected) noexcept;
     Result<void> Unregister(TypeRegistrationToken) noexcept;
     // 신규 Acquire/Clone을 닫는다. lease가 남으면 Busy이며, 반환 후 다시 호출한다.
     // Busy를 무시한 Registry 파괴는 강제 해제 대신 즉시 종료한다.

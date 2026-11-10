@@ -40,3 +40,5 @@ Windows는 CRT 정리가 있는 `_beginthreadex`와 handle 회수를 사용한�
 단위 fixture는 thread start/재시작/self-join, 완료 timeout, CV predicate·notify, 이벤트 유지·reset, semaphore 상한·생산자/소비자, TLS 소멸자가 막힌 동안의 entry 완료와 Join 완료 분리를 검증한다. 미회수 Thread 파괴는 자식 프로세스에서 Fatal 진단을 확인한다. Name·Text·Object의 동시성 fixture도 이 공통 계층을 사용한다.
 
 원자 연산 추상화, RWLock, thread name/priority/affinity/stack 설정, 취소 토큰, worker pool·dependency scheduler는 후속이다. native 스레드 생성·join의 OS 실패 강제 주입과 모든 스케줄 interleaving의 증명은 현재 범위가 아니다. 실제 실행 구성·개수·source digest는 Foundation 상태 문서에서 확인한다.
+
+현재 구현은 동일 source digest로 Windows x64 Debug/Release/ASan과 macOS ARM64 Debug/ASan 실행을 통과했다. 동시 Join/Wait fixture 2개와 TLS 종료 분리도 전체 110개에 포함된다. 최종 clean commit 근거는 [CI 실행 42771207691](https://github.com/maxidea1024/rocks/actions/runs/42771207691)이며 전체 실행·미완료 범위는 [Foundation 상태](FoundationStatus.ko.md)를 따른다.
