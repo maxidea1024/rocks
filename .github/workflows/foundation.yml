@@ -1,0 +1,32 @@
+name: Foundation
+on: [push, pull_request]
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned formatter and build tools
+        run: python -m pip install clang-format==21.1.6 ninja cmake
+      - name: Format
+        run: python Build/format.py --check
+      - name: Native configure, compile and test
+        run: python Build/build.py
+      - name: macOS AddressSanitizer
+        if: runner.os == 'macOS'
+        run: python Build/build.py --preset macos-clang-asan
+      - name: Preserve reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-${{ runner.os }}
+          path: |
+            out/**/foundation-report.json
+            out/**/build-evidence.json
+            out/**/Testing/Temporary/LastTest.log

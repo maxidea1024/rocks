@@ -1,0 +1,5 @@
+#pragma once
+
+namespace rocks::modules::@NAME@ {
+const char* Name() noexcept;
+}
