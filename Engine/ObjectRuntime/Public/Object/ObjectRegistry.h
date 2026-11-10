@@ -125,6 +125,12 @@ public:
     // 논리적 접근을 즉시 닫는다. 기존 루트/간선은 GC에서 추적되어 보관된 자식도 보존한다.
     // 저장소 파괴는 도달성 및 모든 보유 계수 해소 뒤 Collect/DrainRetired에서 수행한다.
     Result<void> RequestDestroy(const ObjectAccessContext&, ObjectHandle) noexcept;
+    // 조회는 수명을 연장하지 않으며 반환 후에도 상태가 바뀔 수 있다. 미공개 생성 슬롯,
+    // 무효 handle·다른 registry·회수 후 generation은 StaleHandle이다. GC cutoff white는
+    // Unreachable이다. 소유 스레드에서 콜백/GC 재진입은 Busy, 종료 시작 후에는 ShuttingDown이다.
+    // 다른 스레드의 호출은 콜백 중에도 먼저 WrongThread로 거부한다.
+    Result<ObjectLifecycle> InspectLifecycle(const ObjectAccessContext&,
+                                             ObjectHandle) const noexcept;
     Result<BackendLease> AcquireBackendLease(const ObjectAccessContext&, ObjectHandle) noexcept;
     // 읽기용 불변 metadata/code lease를 복제한다. 객체 수명이나 접근권은 따로 보존해야 한다.
     // cutoff·논리 파괴 뒤에는 새 조회를 거부하며 호출자의 context/owner thread를 검사한다.
@@ -161,9 +167,11 @@ public:
 
 private:
     friend class ConstructionContext;
+    friend class Object;
     friend Result<void> detail::RetainRoot(ObjectRegistry*, ObjectHandle) noexcept;
     friend void detail::ReleaseRoot(ObjectRegistry*, ObjectHandle) noexcept;
     friend Result<void*> detail::AccessBorrow(ObjectRegistry*, ObjectHandle, const void*) noexcept;
+    friend Result<ObjectLifecycle> detail::InspectBorrow(ObjectRegistry*, ObjectHandle) noexcept;
     friend void detail::ReleaseBorrow(ObjectRegistry*, ObjectHandle) noexcept;
     friend void detail::ReleaseBackend(ObjectRegistry*, ObjectHandle) noexcept;
 
@@ -176,6 +184,13 @@ private:
     Slot* SlotAt(uint32) const noexcept;
     Result<void> CheckAccess(const ObjectAccessContext&) const noexcept;
     Result<void> CheckLive(Slot*, const void*) const noexcept;
+    Result<ObjectAccessContext> ScopedAccess() const noexcept;
+    Result<ObjectLifecycle> InspectChecked(const ObjectAccessContext&, ObjectHandle, const Object*,
+                                           bool requireBorrow) const noexcept;
+    Result<void> RequestDestroyChecked(const ObjectAccessContext&, ObjectHandle, const Object*,
+                                       bool requireBorrow) noexcept;
+    Result<ObjectLifecycle> InspectSelf(ObjectHandle, const Object*) const noexcept;
+    Result<void> DestroySelf(ObjectHandle, const Object*) noexcept;
     Result<void> AddRoot(const ObjectAccessContext&, ObjectHandle, const void*) noexcept;
     Result<void> AddBorrow(const ObjectAccessContext&, ObjectHandle, const void*) noexcept;
     Result<void> SetEdge(const ObjectAccessContext&, ObjectHandle, ObjectHandle&, ObjectHandle,

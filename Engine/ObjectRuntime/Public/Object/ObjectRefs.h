@@ -13,6 +13,7 @@ namespace detail {
 Result<void> RetainRoot(ObjectRegistry*, ObjectHandle) noexcept;
 void ReleaseRoot(ObjectRegistry*, ObjectHandle) noexcept;
 Result<void*> AccessBorrow(ObjectRegistry*, ObjectHandle, const void*) noexcept;
+Result<ObjectLifecycle> InspectBorrow(ObjectRegistry*, ObjectHandle) noexcept;
 void ReleaseBorrow(ObjectRegistry*, ObjectHandle) noexcept;
 void ReleaseBackend(ObjectRegistry*, ObjectHandle) noexcept;
 } // namespace detail
@@ -120,13 +121,20 @@ public:
     }
 
     // 매 호출에서 타입·스레드·논리 생존 상태를 확인한다. 파괴 요청 후에는 접근 실패한다.
-    // 이미 꺼낸 raw pointer는 자동 회수되지 않으므로 파괴 요청 이후 사용하지 않는다.
+    // 이미 꺼낸 포인터는 이 Borrow가 살아 있는 동안 Object의 수명 상태 조회와 멱등 Destroy에만
+    // 사용할 수 있다. 다른 객체 접근과 Borrow 종료 뒤의 포인터 사용은 금지다.
     Result<T*> Get() const noexcept {
         auto result = detail::AccessBorrow(registry_, handle_, NativeTypeKey<T>());
         if (!result) {
             return Result<T*>::Failure(result.Error());
         }
         return Result<T*>::Success(static_cast<T*>(result.Value()));
+    }
+
+    // 파괴 요청 후에도 이미 보유한 Borrow로 상태만 조회한다. scope·스레드·슬롯을 확인하며
+    // 새 포인터를 제공하지 않는다. 같은 래퍼의 동시 변경은 금지다.
+    Result<ObjectLifecycle> InspectLifecycle() const noexcept {
+        return detail::InspectBorrow(registry_, handle_);
     }
 
     void Reset() noexcept {

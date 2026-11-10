@@ -65,6 +65,14 @@ internal static class NativeTests
                 Verify.Contains(diagnostic, result.StdErr, "fatal diagnostic");
                 if (control == "thread-unjoined") Verify.Contains("join", result.StdErr.ToLowerInvariant(), "unjoined diagnostic");
             });
+        if (string.Equals(Path.GetFileNameWithoutExtension(executable), "FoundationTests", StringComparison.OrdinalIgnoreCase))
+            foreach (string control in new[] { "object-scope-lifo", "object-scope-thread" })
+                suite.Add("Native.Fatal." + control, async () =>
+                {
+                    var result = await Run("--negative-control", control);
+                    Verify.That(result.ExitCode != 0, "invalid scope lifetime did not fail");
+                    Verify.Contains("ObjectAccessScope must close", result.StdErr, "scope fatal diagnostic");
+                });
         if (options.Asan)
             suite.Add("Native.AsanDetectsActualUseAfterFree", async () =>
             {

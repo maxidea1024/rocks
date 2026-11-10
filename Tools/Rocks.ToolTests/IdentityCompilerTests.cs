@@ -74,8 +74,8 @@ internal static class IdentityCompilerTests
             Verify.Equal("probe::Value::count", field.GetProperty("name").GetString(), "field inventory name");
             Verify.Equal(FieldId, field.GetProperty("id").GetString(), "field inventory ID");
             Verify.Equal(6, field.GetProperty("line").GetInt32(), "field definition location");
-            Verify.Equal(Path.GetFullPath(probe.Input), Path.GetFullPath(type.GetProperty("file").GetString()!), "type physical file");
-            Verify.Equal(Path.GetFullPath(probe.Input), Path.GetFullPath(field.GetProperty("file").GetString()!), "field physical file");
+            Verify.Equal(CanonicalPath.Resolve(probe.Input), CanonicalPath.Resolve(type.GetProperty("file").GetString()!), "type physical file");
+            Verify.Equal(CanonicalPath.Resolve(probe.Input), CanonicalPath.Resolve(field.GetProperty("file").GetString()!), "field physical file");
             byte[] previous = File.ReadAllBytes(probe.InventoryPath);
             probe.Source(Source("ROCKS_CLASS(Invalid)", "ROCKS_PROPERTY()"));
             await probe.Failure("specifier", "--identity-manifest", probe.ManifestPath, "--identity-inventory", probe.InventoryPath);

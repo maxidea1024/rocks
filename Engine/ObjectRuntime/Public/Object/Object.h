@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Result.h>
 #include <Object/ObjectHandle.h>
 
 namespace rocks {
@@ -7,6 +8,16 @@ namespace rocks {
 class ObjectRegistry;
 class ConstructionContext;
 class TraceVisitor;
+
+// 레지스트리에서 관찰한 한 시점의 논리 상태다. 값은 객체 수명이나 접근권을 보존하지 않는다.
+// Unreachable은 증분 GC cutoff에서 아직 Retired로 분류되지 않은 white 객체다.
+// Retired는 명시 파괴와 GC 회수 중 어느 경로인지 구별하지 않는다.
+enum class ObjectLifecycle : uint8 {
+    Alive,
+    DestroyRequested,
+    Unreachable,
+    Retired
+};
 
 // Registry가 식별자와 저장소를 소유하는 기반 타입. 직접 delete하지 않는다.
 // 복사·이동은 객체 정체성과 ObjectRef 소유자 검사를 우회하므로 금지한다.
@@ -22,12 +33,24 @@ public:
         return handle_;
     }
 
+    // 현재 스레드의 ObjectAccessScope와 이 객체의 활성 Borrow가 필요하다. 객체 생성자 안과
+    // 미공개 상태는 실패한다. 같은 Borrow 안에서 이미 요청된 파괴의 재요청은 성공한다.
+    Result<void> Destroy() noexcept;
+
+    // snapshot은 수명이나 접근권을 보존하지 않는다. 논리 파괴 이후에도 같은 Borrow가 살아 있는
+    // 동안 이 함수와 IsDestroyRequested/중복 Destroy만 사용할 수 있다. 다른 객체 접근은 금지다.
+    Result<ObjectLifecycle> InspectLifecycle() const noexcept;
+    // cutoff/retired에서는 명시 요청 여부를 보존하지 않으므로 false로 추측하지 않고 실패한다.
+    Result<bool> IsDestroyRequested() const noexcept;
+
 protected:
     Object() noexcept = default;
     ~Object() = default;
 
 private:
     friend class ObjectRegistry;
+    // 생성자 반환 후 설정하며 물리 소멸까지 변경하지 않는다. Registry가 객체보다 오래 산다.
+    ObjectRegistry* registry_ = nullptr;
     ObjectHandle handle_;
 };
 

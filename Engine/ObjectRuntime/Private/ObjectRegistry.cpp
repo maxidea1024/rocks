@@ -218,6 +218,17 @@ Result<void*> AccessBorrow(ObjectRegistry* registry, ObjectHandle handle,
     return Result<void*>::Success(nativeType ? slot->storage : static_cast<void*>(slot->object));
 }
 
+Result<ObjectLifecycle> InspectBorrow(ObjectRegistry* registry, ObjectHandle handle) noexcept {
+    if (!registry) {
+        return Result<ObjectLifecycle>::Failure(ErrorCode::InvalidArgument);
+    }
+    auto access = registry->ScopedAccess();
+    if (!access) {
+        return Result<ObjectLifecycle>::Failure(access.Error());
+    }
+    return registry->InspectChecked(access.Value(), handle, nullptr, true);
+}
+
 void ReleaseBorrow(ObjectRegistry* registry, ObjectHandle handle) noexcept {
     platform::LockGuard lock(registry->gate_);
     auto* slot = registry->FindSlot(handle);
@@ -287,15 +298,45 @@ Result<void> ObjectRegistry::SetEdge(const ObjectAccessContext& access, ObjectHa
 
 Result<void> ObjectRegistry::RequestDestroy(const ObjectAccessContext& access,
                                             ObjectHandle handle) noexcept {
+    return RequestDestroyChecked(access, handle, nullptr, false);
+}
+
+Result<ObjectAccessContext> ObjectRegistry::ScopedAccess() const noexcept {
+    if (platform::CurrentThreadId() != ownerThread_) {
+        return Result<ObjectAccessContext>::Failure(ErrorCode::WrongThread);
+    }
+    return ObjectAccessScope::Current();
+}
+
+Result<void> ObjectRegistry::DestroySelf(ObjectHandle handle, const Object* object) noexcept {
+    auto access = ScopedAccess();
+    if (!access) {
+        return Result<void>::Failure(access.Error());
+    }
+    return RequestDestroyChecked(access.Value(), handle, object, true);
+}
+
+Result<void> ObjectRegistry::RequestDestroyChecked(const ObjectAccessContext& access,
+                                                   ObjectHandle handle, const Object* object,
+                                                   bool requireBorrow) noexcept {
     auto valid = CheckAccess(access);
     if (!valid) {
         return valid;
     }
     platform::LockGuard lock(gate_);
-    if (processing_) {
-        return Result<void>::Failure(ErrorCode::Busy);
+    if (closed_ || processing_) {
+        return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
     }
     Slot* slot = FindSlot(handle);
+    if (requireBorrow) {
+        if (!slot || slot->state == SlotState::Reserved || slot->state == SlotState::Free ||
+            slot->state == SlotState::Exhausted || (object && slot->object != object)) {
+            return Result<void>::Failure(ErrorCode::StaleHandle);
+        }
+        if (slot->borrows == 0) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
     if (slot && (slot->state == SlotState::DestroyRequested || slot->state == SlotState::Retired)) {
         return Result<void>::Success();
     }
@@ -305,6 +346,60 @@ Result<void> ObjectRegistry::RequestDestroy(const ObjectAccessContext& access,
     }
     slot->state = SlotState::DestroyRequested;
     return Result<void>::Success();
+}
+
+Result<ObjectLifecycle> ObjectRegistry::InspectLifecycle(const ObjectAccessContext& access,
+                                                         ObjectHandle handle) const noexcept {
+    return InspectChecked(access, handle, nullptr, false);
+}
+
+Result<ObjectLifecycle> ObjectRegistry::InspectSelf(ObjectHandle handle,
+                                                    const Object* object) const noexcept {
+    auto access = ScopedAccess();
+    if (!access) {
+        return Result<ObjectLifecycle>::Failure(access.Error());
+    }
+    return InspectChecked(access.Value(), handle, object, true);
+}
+
+Result<ObjectLifecycle> ObjectRegistry::InspectChecked(const ObjectAccessContext& access,
+                                                       ObjectHandle handle, const Object* object,
+                                                       bool requireBorrow) const noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return Result<ObjectLifecycle>::Failure(valid.Error());
+    }
+    platform::LockGuard lock(gate_);
+    if (closed_ || processing_) {
+        return Result<ObjectLifecycle>::Failure(closed_ ? ErrorCode::ShuttingDown
+                                                        : ErrorCode::Busy);
+    }
+    Slot* slot = FindSlot(handle);
+    if (!slot || slot->state == SlotState::Free || slot->state == SlotState::Reserved ||
+        slot->state == SlotState::Exhausted) {
+        return Result<ObjectLifecycle>::Failure(ErrorCode::StaleHandle);
+    }
+    if (object && slot->object != object) {
+        return Result<ObjectLifecycle>::Failure(ErrorCode::StaleHandle);
+    }
+    if (requireBorrow && slot->borrows == 0) {
+        return Result<ObjectLifecycle>::Failure(ErrorCode::InvalidArgument);
+    }
+    if (IsCutoff(slot)) {
+        return Result<ObjectLifecycle>::Success(ObjectLifecycle::Unreachable);
+    }
+    switch (slot->state) {
+    case SlotState::Alive:
+        return Result<ObjectLifecycle>::Success(ObjectLifecycle::Alive);
+    case SlotState::DestroyRequested:
+        return Result<ObjectLifecycle>::Success(ObjectLifecycle::DestroyRequested);
+    case SlotState::Retired:
+        return Result<ObjectLifecycle>::Success(ObjectLifecycle::Retired);
+    case SlotState::Reclaiming:
+        return Result<ObjectLifecycle>::Failure(ErrorCode::Busy);
+    default:
+        return Result<ObjectLifecycle>::Failure(ErrorCode::StaleHandle);
+    }
 }
 
 Result<BackendLease> ObjectRegistry::AcquireBackendLease(const ObjectAccessContext& access,
@@ -494,6 +589,7 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
     if (!object) {
         platform::Fatal("A noexcept object constructor must return its object");
     }
+    object->registry_ = this;
     object->handle_ = handle;
     {
         platform::LockGuard lock(gate_);

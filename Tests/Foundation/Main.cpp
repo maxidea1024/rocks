@@ -13,6 +13,12 @@ static TestCase* first = nullptr;
 static uint64 failures = 0;
 static platform::Mutex failureMutex;
 static uint64 seed = 1;
+static int (*objectScopeNegativeControl)(bool) noexcept = nullptr;
+
+// Object 테스트가 포함된 타깃만 음성 대조 callback을 등록한다. Core-only는 링크 의존이 없다.
+void RegisterObjectScopeNegativeControl(int (*function)(bool) noexcept) noexcept {
+    objectScopeNegativeControl = function;
+}
 
 Registration::Registration(const char* name, void (*function)()) noexcept
     : test_{name, function, first} {
@@ -90,6 +96,13 @@ int main(int argc, char** argv) {
                 return test::RunUnjoinedThreadNegativeControl();
             } else if (strcmp(control, "name-live-lease") == 0) {
                 return test::RunOutstandingNameLeaseNegativeControl();
+            } else if (strcmp(control, "object-scope-lifo") == 0 ||
+                       strcmp(control, "object-scope-thread") == 0) {
+                if (test::objectScopeNegativeControl == nullptr) {
+                    return 2;
+                }
+                return test::objectScopeNegativeControl(strcmp(control, "object-scope-thread") ==
+                                                        0);
             } else if (strcmp(control, "asan-uaf") == 0) {
                 return test::RunAsanNegativeControl();
             } else if (strcmp(control, "assert-stderr-lock") == 0) {
