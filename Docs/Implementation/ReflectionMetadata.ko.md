@@ -4,7 +4,11 @@
 
 ## 선언과 지원 형식
 
-`ROCKS_CLASS("안정 GUID", 버전, 지정자...)`로 객체 타입을, `ROCKS_PROPERTY("안정 GUID", 지정자...)`로 필드를 선언한다. `ROCKS_REFLECT_TYPE`은 두 인자 형식의 타입 마커 별칭이며 `ROCKS_REFLECT_FIELD`는 필드 마커 별칭이다. 두 타입 마커는 모두 `class` 또는 `struct` 바로 앞 줄에 작성한다. 이전의 `class ROCKS_REFLECT_TYPE(...)` 후치 형식은 더 이상 지원하지 않는다. 매크로와 타입 사이에는 공백과 주석만 허용하고 전처리 지시문·별도 선언·wrapper 매크로는 거부한다. 조건부 선언은 마커와 클래스를 같은 `#if` 블록 안에 둔다. GUID는 0이 아닌 128비트 값이며 해당 입력 번역 단위에서 타입·필드 ID의 중복을 거부한다. 이름 변경과 무관하게 같은 의미의 필드는 같은 ID를 유지해야 한다. 버전은 Clang이 평가한 정수 상수의 값이 1부터 `UINT32_MAX` 사이여야 한다. ID는 좁은 문자열 리터럴만 허용하며 문자열 포인터 연산을 ID로 해석하지 않는다.
+`ROCKS_CLASS()` 또는 `ROCKS_CLASS(Abstract)`를 `class`/`struct` 앞에, `ROCKS_PROPERTY(...)`를 필드 앞에 직접 작성한다. 선언에 안정 ID와 스키마 버전을 넣지 않는다. 매크로와 타입 사이에는 공백과 주석만 허용하고 전처리 지시문·별도 선언·wrapper 매크로는 거부한다. 조건부 선언은 마커와 클래스를 같은 `#if` 블록 안에 둔다.
+
+타깃이 지정한 `.rocksids.json`이 타입과 필드의 무작위 안정 ID, 이전 이름과 폐기 이력을 보관한다. 새로운 선언의 ID 발급과 이름 변경·폐기는 `ids add`, `ids rename`, `ids retire`를 사용하는 명시적인 저작 작업이다. 일반 빌드는 명세를 읽기만 하고 누락 또는 중복을 거부한다. 각 타깃의 모든 메타 입력을 합산하여 활성 명세의 누락과 메타 단위 간 중복 선언을 검사한 다음 생성 헤더를 게시한다. 같은 reflected 헤더를 여러 메타 단위가 포함하는 구성은 현재 정의 동등성을 보장할 수 없어 거부한다. 서로 다른 타깃이 별도 명세를 쓰는 경우의 전역 ID 검증, 미등록 헤더의 자동 탐색은 아직 없다.
+
+저장 레코드에는 내부 스키마 버전이 있으며 현재 생성된 타입의 버전은 1이다. 이 값은 클래스 선언에 노출하지 않는다. 사용자 정의 스키마 변경의 자동 판정과 마이그레이션 생성은 아직 구현되지 않았다. 이름 변경 시 명세의 `ids rename`으로 ID를 유지하며, 다른 ID를 새로 발급해 이전 필드를 대체하면 활성 이전 선언이 누락되어 빌드가 실패한다.
 
 | 필드 형식 | 런타임 표현 |
 | --- | --- |
@@ -23,12 +27,12 @@
 ### 속성 지정자와 표시 문자열
 
 ```cpp
-ROCKS_CLASS("ad100000000000000000000000000001", 1)
+ROCKS_CLASS()
 class Character : public rocks::Object {
     ROCKS_GENERATED_BODY()
 
 public:
-    ROCKS_PROPERTY("ad100000000000000000000000000011", ReadOnly,
+    ROCKS_PROPERTY(ReadOnly,
                    Category = "능력", DisplayName = "체력")
     rocks::int32 health = 100;
 };
@@ -103,11 +107,11 @@ MSBuild와 C# 빌드 도구는 객체 런타임을 포함하는 구성에서 fix
 
 ## 현재 한계와 검증 범위
 
-현재 입력은 단일 umbrella 헤더의 번역 단위다. 포함된 reflected 타입을 모두 수집하므로 여러 생성 헤더가 같은 타입의 specialization을 중복 소유하지 않도록 빌드 입력을 구성해야 한다. 모듈별 타입 소유 manifest, compile_commands 기반 정확한 타깃 문맥 복원, 원격·로컬 생성 캐시, depfile 기반 최소 재생성은 아직 지원하지 않는다. 여러 타깃의 define·include 차이는 호출 측에서 정확히 전달해야 한다. 컴파일러나 타깃 문맥이 달라져도 항상 같은 산출물을 보장한다는 의미는 아니다.
+각 메타 입력은 별도 번역 단위로 처리한다. 포함된 reflected 타입을 모두 수집하므로 여러 생성 헤더가 같은 타입의 specialization을 중복 소유하지 않도록 빌드 입력을 구성해야 한다. 모듈별 타입 소유 manifest, compile_commands 기반 정확한 타깃 문맥 복원, 원격·로컬 생성 캐시, depfile 기반 최소 재생성은 아직 지원하지 않는다. 여러 타깃의 define·include 차이는 호출 측에서 정확히 전달해야 한다. 컴파일러나 타깃 문맥이 달라져도 항상 같은 산출물을 보장한다는 의미는 아니다.
 
 런타임 회귀는 scalar/Guid/UTF-8 소유 값, 상속 관계와 native cast 분리, 잘못된 context·thread, staged write와 참조 barrier, typed target 거부, descriptor 함수표의 깊은 복사, String OOM·논리 파괴 재진입, Swap의 allocator 소유권, 등록 OOM 후 기반 의존성 원복을 검사한다. 계수·allocator ledger가 종료 후 0으로 돌아오는지도 확인한다.
 
-C# 하네스는 실제 Clang을 호출하여 정상 상수 평가, 음수·범위 밖 버전, ID 오류·중복, 빠진 annotation, 미지원 필드·상속·Trace, 컴파일 오류와 경고 강등 옵션을 검사한다. 오류가 기존 출력 파일을 훼손하지 않는지, 같은 입력의 바이트·timestamp가 유지되는지, `--check`가 변경 없이 stale 출력을 거부하는지도 검사한다.
+C# 하네스는 실제 Clang을 호출하여 자동 ID, 잘못된 명세·중복·누락, 빠진 annotation, 미지원 필드·상속·Trace, 컴파일 오류와 경고 강등 옵션을 검사한다. 오류가 기존 출력 파일을 훼손하지 않는지, 같은 입력의 바이트·timestamp가 유지되는지, `--check`가 변경 없이 stale 출력을 거부하는지도 검사한다.
 
 이전 구현은 Windows 로컬 Debug·Release·ASan과 [Windows/macOS native CI](https://github.com/maxidea1024/rocks/actions/runs/42775786556)에서 생성 코드 및 실제 Clang 회귀 실행을 확인하였다. 최종 수치·산출물 hash는 [5차 검증 기록](../Reviews/ImplementationRound5.FoundationValidation.ko.md)을 따른다. macOS는 ARM64 Debug·ASan 범위이며 Intel Mac과 TSan은 미검증이다.
 

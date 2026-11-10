@@ -11,8 +11,10 @@ public sealed class FoundationTarget : TargetRules
 {
     public override string Name => "Foundation";
     public override IReadOnlyList<string> Modules => ["FoundationTests"];
+    public override string? IdentityManifest => "Tests/Reflection/Foundation.rocksids.json";
     public override IReadOnlyList<MetadataUnit> Metadata =>
-        [new("FoundationTests", "Tests/Reflection/ReflectionFixture.h", "Tests/Reflection/ReflectionFixture.h", "ReflectionFixture.generated.h")];
+        [new("FoundationTests", "Tests/Reflection/ReflectionFixture.h", "Tests/Reflection/ReflectionFixture.h", "ReflectionFixture.generated.h"),
+         new("FoundationTests", "Tests/Reflection/AutoIdentityFixture.h", "Tests/Reflection/AutoIdentityFixture.h", "AutoIdentityFixture.generated.h")];
     public override bool CheckPublicHeaders => true;
     public override string TestExecutable => "FoundationTests";
 }

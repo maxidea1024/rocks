@@ -30,7 +30,16 @@ SDK 대상 디렉터리는 새 경로여야 한다. SDK의 파일 목록과 내�
 
 ## 메타 선언
 
-`ROCKS_CLASS("GUID", 버전, Abstract)`와 `ROCKS_PROPERTY("GUID", Transient, ReadOnly, Category="...", DisplayName="...")`를 사용한다. `ROCKS_CLASS`와 두 인자 별칭 `ROCKS_REFLECT_TYPE`은 모두 `class`/`struct` 바로 앞에 두며 둘 사이에는 공백·주석만 허용한다. 이전 후치 형식은 지원하지 않는다. 마커와 클래스가 조건부이면 같은 `#if` 블록에 넣는다. 반영할 헤더는 각 대상의 `TargetRules.Metadata`에 반드시 등록한다. 현재 미등록 선언을 일반 C++ 빌드가 자동으로 감지하지는 않는다. 지정자는 필요한 것만 선택한다. 비공개 필드에는 `ROCKS_GENERATED_BODY()`가 필요하다. GUID는 영이 아닌 고유 값이어야 하며, 미지원 타입·상속·선언 위치·지정자와 모호한 선언은 생성 전에 오류로 처리한다. 생성된 C++도 같은 Clang 구성으로 검사한 후에만 게시한다.
+`ROCKS_CLASS()` 또는 `ROCKS_CLASS(Abstract)`를 `class`/`struct` 바로 앞에 두고, 반영할 필드에 `ROCKS_PROPERTY(...)`를 붙인다. 선언에 ID나 스키마 버전 숫자를 넣지 않는다. 비공개 필드에는 `ROCKS_GENERATED_BODY()`가 필요하다. 타입 마커와 클래스 사이에는 공백·주석만 허용한다. 조건부 선언은 마커와 클래스를 같은 조건 블록에 둔다. 미지원 타입·상속·선언 위치·지정자와 모호한 선언은 오류다.
+
+각 타깃은 `TargetRules.Metadata`와 `TargetRules.IdentityManifest`를 설정한다. 식별자는 소스 관리되는 `.rocksids.json`에 보관하며 일반 빌드는 파일을 수정하거나 누락된 ID를 자동 발급하지 않는다. 새 선언은 메타컴파일러의 명시적인 저작 명령으로 등록하고, 이름을 바꿀 때는 새 ID를 만들지 말고 `ids rename`을 사용한다. 삭제할 선언은 `ids retire`로 폐기한다. 타깃 전체에서 활성 명세 항목이 소스에 없으면 빌드가 실패한다.
+
+```text
+dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll ids add --manifest Game.rocksids.json --type sample::Character --field sample::Character::health
+dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll ids rename --manifest Game.rocksids.json --kind field --old sample::Character::health --new sample::Character::hitPoints
+```
+
+명세와 코드 변경은 함께 버전 관리한다. CI PR 검사는 실제 공통 조상·양쪽 부모·병합 결과를 비교해 이름/ID 충돌, 이력 손실 및 서로 다른 이름 변경을 거부한다. 직접 push, 강제 push 또는 이 검사가 필수로 설정되지 않은 저장소는 자동으로 보호되지 않는다. 동일 선언에 두 ID가 이미 발급된 경우 자동으로 하나를 선택하지 않으며 데이터 마이그레이션 도구도 아직 없다. 소스에서 빠진 전체 메타 입력은 자동 탐색하지 않으므로 모든 반영 헤더를 타깃에 등록해야 한다.
 
 `Category`와 `DisplayName`은 길이를 별도로 보관하는 UTF-8 바이트 문자열이다. 중간 NUL도 보존하므로 C 문자열 종료 문자로 길이를 추정하지 않는다. 생성 코드는 한글처럼 읽을 수 있는 문자를 그대로 표시하고, 제어 문자는 안전한 escape로 표현한다.
 

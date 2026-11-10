@@ -6,6 +6,7 @@
 
 - `Game.Build.cs`는 `SampleGame` 실행 모듈과 `ObjectRuntime` 의존성을 선언한다.
 - `Game.Target.cs`는 `Game` 타깃과 메타컴파일러가 처리할 `GameObject.h`를 지정한다.
+- `Game.rocksids.json`은 이 예제 타깃의 타입·필드 식별자를 보관한다. 소스의 매크로에는 식별자나 버전 숫자를 적지 않는다.
 - `Source/GameObject.h`는 자체 `rocks::Object` 기반 클래스와 `ROCKS_CLASS`, 읽기 전용 `ROCKS_PROPERTY`를 선언한다.
 - `Source/Main.cpp`는 생성된 타입을 등록하고 객체를 만든 뒤 핸들로 조회하여 기본 체력 값이 100인지 검사한다. 성공 시 종료 코드는 0이다.
 

@@ -2,7 +2,10 @@ using System.Diagnostics;
 using System.Text.Json;
 using Rocks.Build;
 using Rocks.Build.Cli;
+using Rocks.Build.IntegrationTests;
 using Rocks.Tooling.Common;
+
+if (args.Length != 0 && args[0] == "--output-lock-child") return await OutputInvocationLockTests.ChildAsync(args);
 
 var options = new Dictionary<string, string>(StringComparer.Ordinal);
 for (var index = 0; index < args.Length; index += 2)
@@ -24,6 +27,10 @@ bool success = false;
 try
 {
     var timer = Stopwatch.StartNew();
+    await OutputInvocationLockTests.RunAsync();
+    MetadataOutputTransactionTests.Run();
+    Pass("output-invocation-lock", timer.Elapsed);
+    timer.Restart();
     var exported = await Cli("sdk", "--root", root, "--target", "Engine", "--configuration", "Debug", "--destination", sdk);
     Require(exported.ExitCode == 0, "SDK export failed: " + exported.StdErr);
     Require(File.Exists(Path.Combine(sdk, "rocks-sdk.json")), "SDK manifest missing");
@@ -43,6 +50,58 @@ try
     var run = await ProcessRunner.RunAsync(new(initial.ModuleOutputs["SampleGame"], [], game, toolchain.Environment));
     Require(run.ExitCode == 0, "External game's generated CLASS/PROPERTY runtime failed");
     Pass("read-only-sdk-external-game-reflection", timer.Elapsed);
+
+    // 잘못된 새 ID 발급은 이름 변경을 대체하지 못한다. 실패 시 기존 생성물을 보존한다.
+    timer.Restart();
+    string gameHeader = Path.Combine(game, "Source/GameObject.h");
+    string gameMain = Path.Combine(game, "Source/Main.cpp");
+    string gameIdentity = Path.Combine(game, "Game.rocksids.json");
+    string generatedIdentityHeader = Path.Combine(output, "Generated/GameObject.generated.h");
+    string identityOriginalHeader = File.ReadAllText(gameHeader);
+    string originalMain = File.ReadAllText(gameMain);
+    byte[] originalIdentity = File.ReadAllBytes(gameIdentity);
+    string generatedBefore = Hashing.Sha256File(generatedIdentityHeader);
+    string metadataTool = Path.Combine(root, "out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll");
+    async Task<ProcessResult> Ids(params string[] arguments) => await ProcessRunner.RunAsync(new("dotnet",
+        new[] { metadataTool, "ids" }.Concat(arguments).ToArray(), root, toolchain.Environment));
+    try
+    {
+        File.WriteAllText(gameHeader, identityOriginalHeader.Replace("health", "armor", StringComparison.Ordinal));
+        var added = await Ids("add", "--manifest", gameIdentity, "--field", "sample::GameObject::armor");
+        Require(added.ExitCode == 0, "Could not prepare accidental replacement fixture: " + added.StdErr);
+        var rejected = await Game();
+        Require(rejected.ExitCode != 0 && rejected.StdErr.Contains("missing from target sources", StringComparison.Ordinal),
+            "An unretired field disappeared after an unrelated ID was issued: " + rejected.StdErr);
+        Require(Hashing.Sha256File(generatedIdentityHeader) == generatedBefore,
+            "Failed identity validation published generated metadata.");
+        File.WriteAllBytes(gameIdentity, originalIdentity);
+        File.WriteAllText(gameHeader, identityOriginalHeader);
+        Require((await Game()).ExitCode == 0, "Game did not recover after rejected identity change");
+
+        var renamed = await Ids("rename", "--manifest", gameIdentity, "--kind", "field", "--old",
+            "sample::GameObject::health", "--new", "sample::GameObject::hitPoints");
+        Require(renamed.ExitCode == 0, "Could not rename identity: " + renamed.StdErr);
+        File.WriteAllText(gameHeader, identityOriginalHeader.Replace("health", "hitPoints", StringComparison.Ordinal));
+        File.WriteAllText(gameMain, originalMain.Replace("health", "hitPoints", StringComparison.Ordinal));
+        var renamedBuild = await Game();
+        Require(renamedBuild.ExitCode == 0, "Game failed after explicit identity rename: " + renamedBuild.StdErr);
+        var renamedResult = ReadActionReport();
+        var renamedRun = await ProcessRunner.RunAsync(new(renamedResult.ModuleOutputs["SampleGame"], [], game, toolchain.Environment));
+        Require(renamedRun.ExitCode == 0, "Renamed game failed at runtime");
+        using var identityJson = JsonDocument.Parse(File.ReadAllBytes(gameIdentity));
+        var entry = identityJson.RootElement.GetProperty("entries").EnumerateArray()
+            .Single(value => value.GetProperty("name").GetString() == "sample::GameObject::hitPoints");
+        Require(entry.GetProperty("id").GetString() == "da100000000000000000000000000002",
+            "Explicit field rename changed its stable ID");
+    }
+    finally
+    {
+        File.WriteAllText(gameHeader, identityOriginalHeader);
+        File.WriteAllText(gameMain, originalMain);
+        File.WriteAllBytes(gameIdentity, originalIdentity);
+    }
+    Require((await Game()).ExitCode == 0, "Game did not recover after identity integration test");
+    Pass("identity-rename-and-orphan-rejection", timer.Elapsed);
 
     timer.Restart();
     var evidencePath = Path.Combine(output, "game-build-evidence.json");

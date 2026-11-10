@@ -4,12 +4,14 @@ using System.Text.Json;
 
 namespace Rocks.MetaCompiler;
 
-internal sealed class ClangAstParser(string inputFile)
+internal sealed class ClangAstParser(string inputFile, StableIdManifest? manifest = null)
 {
     private readonly Dictionary<string, ClassModel> classes = new(StringComparer.Ordinal);
     private sealed record PrefixBinding(object?[] Arguments, SourceSite Site);
     private readonly Dictionary<string, PrefixBinding> prefixClasses = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> identifiers = new(StringComparer.Ordinal);
+    private readonly HashSet<string> propertyMarkers = new(OperatingSystem.IsWindows()
+        ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
 
     private SourceSite currentSite = new(inputFile, 1);
     private readonly Dictionary<string, byte[]> sourceBytes = new(StringComparer.Ordinal);
@@ -23,7 +25,7 @@ internal sealed class ClangAstParser(string inputFile)
         IndexLocations(document.RootElement);
         try { BindPrefixMarkers(document.RootElement); ValidateAnnotationPlacement(document.RootElement, false); currentSite = UnknownSite(); Visit(document.RootElement, [], false, false); }
         catch (MetadataException error) { throw error.At(currentSite); }
-        if (classes.Count == 0) throw new MetadataException("no ROCKS_CLASS/ROCKS_REFLECT_TYPE definitions found in the translation unit");
+        if (classes.Count == 0) throw new MetadataException("no ROCKS_CLASS definitions found in the translation unit");
         return SchemaValidator.Validate(classes);
     }
 
@@ -69,17 +71,33 @@ internal sealed class ClangAstParser(string inputFile)
         return result;
     }
 
-    private string Identifier(object? value, string symbol)
+    private string Identity(string kind, string symbol)
     {
-        if (value is not string literal) throw new MetadataException($"{symbol}: stable ID must be a GUID string literal");
-        if (!Guid.TryParse(literal, out Guid guid) || guid == Guid.Empty)
-            throw new MetadataException($"{symbol}: invalid or zero stable GUID {literal}");
-        string id = guid.ToString("N", CultureInfo.InvariantCulture);
+        if (manifest is null)
+            throw new MetadataException($"{symbol}: stable identity requires an identity manifest", "RMC2100",
+                "Pass --identity-manifest and register this declaration with the identity authoring tool.");
+        string id;
+        try { id = manifest.Resolve(kind, symbol); }
+        catch (InvalidDataException error)
+        {
+            throw new MetadataException($"{symbol}: stable identity unavailable: {error.Message}", "RMC2100",
+                "Use the identity authoring tool to register or explicitly rename the declaration; ordinary builds never modify the manifest.");
+        }
         if (!identifiers.TryAdd(id, symbol))
             throw new MetadataException($"{symbol}: duplicate stable ID already used by {identifiers[id]}");
         return id;
     }
 
+    private static string FieldArguments(JsonElement member, string symbol)
+    {
+        object?[]? modern = Annotation(member, "rocks.field.arguments");
+        if (modern is null || modern.Length != 1 || modern[0] is not string raw)
+            throw new MetadataException($"{symbol}: every nonstatic field requires a PROPERTY annotation");
+        return raw;
+    }
+
+    private static bool HasFieldAnnotation(JsonElement node) =>
+        Annotation(node, "rocks.field.arguments") is not null;
     private void Visit(JsonElement node, string[] scope, bool anonymous, bool templated)
     {
         string kind = Text(node, "kind");
@@ -95,27 +113,26 @@ internal sealed class ClangAstParser(string inputFile)
         {
             string name = Text(node, "name");
             string qualified = string.Join("::", scope.Append(name));
-            object?[]? mark = Annotation(node, "rocks.type");
             prefixClasses.TryGetValue(Text(node, "id"), out PrefixBinding? prefix);
-            if (prefix is not null) mark = prefix.Arguments;
+            object?[]? mark = prefix?.Arguments;
             if (mark is not null)
             {
                 UpdateSite(node);
                 SourceSite classSite = currentSite;
                 if (prefix is not null) currentSite = prefix.Site;
-                if (anonymous || templated || name.Length == 0 || mark.Length is < 2 or > 3)
+                if (anonymous || templated || name.Length == 0)
                     throw new MetadataException($"{qualified}: anonymous/template/invalid reflected type is unsupported");
-                string id = Identifier(mark[0], qualified);
-                if (mark[1] is not BigInteger version || version < 1 || version > uint.MaxValue)
-                    throw new MetadataException($"{qualified}: schema version must be 1..UINT32_MAX");
-                bool explicitAbstract = Specifiers.Class(Payload(mark, 2, qualified), qualified);
+                if (mark.Length != 1 || mark[0] is not string classSpecifiers)
+                    throw new MetadataException($"{qualified}: invalid CLASS annotation arguments");
+                bool explicitAbstract = Specifiers.Class(classSpecifiers, qualified);
+                string id = Identity("type", qualified);
                 currentSite = classSite;
                 JsonElement[] bases = node.TryGetProperty("bases", out JsonElement baseArray) ? baseArray.EnumerateArray().ToArray() : [];
                 if (bases.Length != 1 || Text(bases[0], "access") != "public" || Flag(bases[0], "isVirtual"))
                     throw new MetadataException($"{qualified}: exactly one public nonvirtual Object/reflected base is required");
                 bool abstractType = node.TryGetProperty("definitionData", out JsonElement definition) && Flag(definition, "isAbstract");
 
-                ClassModel model = new() { Name = qualified, Id = id, Site = currentSite, Version = (uint)version,
+                ClassModel model = new() { Name = qualified, Id = id, Site = currentSite, Version = 1,
                     Base = TypeSpelling(bases[0]), Abstract = abstractType || explicitAbstract };
                 JsonElement[] members = Children(node).ToArray();
                 bool generatedBody = members.Any(member => Annotation(member, "rocks.generated") is not null);
@@ -128,19 +145,17 @@ internal sealed class ClangAstParser(string inputFile)
                     if (memberKind == "AccessSpecDecl") access = Text(member, "access");
                     if (memberKind == "CXXMethodDecl" && memberName == "Trace")
                         throw new MetadataException($"{qualified}: manual Trace conflicts with complete generated field tracing");
-                    if (memberKind == "VarDecl" && Annotation(member, "rocks.field") is not null)
+                    if (memberKind == "VarDecl" && HasFieldAnnotation(member))
                         throw new MetadataException($"{qualified}: static fields cannot carry reflected field annotations");
                     if (memberKind != "FieldDecl") continue;
                     string symbol = qualified + "::" + memberName;
-                    object?[]? fieldMark = Annotation(member, "rocks.field");
-                    if (fieldMark is null || fieldMark.Length is < 1 or > 2)
-                        throw new MetadataException($"{symbol}: every nonstatic field requires a stable field annotation");
+                    string fieldSpecifiers = FieldArguments(member, symbol);
                     if (memberName.Length == 0 || Flag(member, "isBitfield"))
                         throw new MetadataException($"{symbol}: only named non-bitfield members are supported");
                     if (access != "public" && !generatedBody)
                         throw new MetadataException($"{symbol}: private/protected PROPERTY requires ROCKS_GENERATED_BODY");
-                    model.OwnFields.Add(new FieldModel { Id = Identifier(fieldMark[0], symbol), Site = currentSite, Name = memberName,
-                        Owner = qualified, NativeSpelling = TypeSpelling(member), Spec = Specifiers.Property(Payload(fieldMark, 1, symbol), symbol) });
+                    model.OwnFields.Add(new FieldModel { Id = Identity("field", symbol), Site = currentSite, Name = memberName,
+                        Owner = qualified, NativeSpelling = TypeSpelling(member), Spec = Specifiers.Property(fieldSpecifiers, symbol) });
                 }
                 classes.Add(qualified, model);
             }
@@ -170,19 +185,19 @@ internal sealed class ClangAstParser(string inputFile)
                     string parentKind = Text(parent, "kind");
                     if (marked.Length != 1 || Text(marker, "name").Length != 0 ||
                         parentKind is not ("TranslationUnitDecl" or "NamespaceDecl" or "CXXRecordDecl"))
-                        throw new MetadataException("ROCKS_CLASS/ROCKS_REFLECT_TYPE marker must be a standalone declaration in a namespace or class scope");
+                        throw new MetadataException("ROCKS_CLASS marker must be a standalone declaration in a namespace or class scope");
                     if (index + 1 >= children.Length || Text(children[index + 1], "kind") != "CXXRecordDecl" ||
                         !Flag(children[index + 1], "completeDefinition") ||
                         Text(children[index + 1], "tagUsed") is not ("class" or "struct"))
-                        throw new MetadataException("ROCKS_CLASS/ROCKS_REFLECT_TYPE must be immediately followed by a complete class or struct definition",
-                            hint: "Place ROCKS_CLASS or ROCKS_REFLECT_TYPE immediately before its class definition; put both inside the same #if block.");
+                        throw new MetadataException("ROCKS_CLASS must be immediately followed by a complete class or struct definition",
+                            hint: "Place ROCKS_CLASS immediately before its class definition; put both inside the same #if block.");
                     JsonElement target = children[index + 1];
                     if (Annotation(target, "rocks.type") is not null)
-                        throw new MetadataException("ROCKS_CLASS/ROCKS_REFLECT_TYPE prefix marker and direct rocks.type annotation cannot both annotate the same class");
+                        throw new MetadataException("ROCKS_CLASS prefix marker and direct rocks.type annotation cannot both annotate the same class");
                     SourceSite markerSite = currentSite;
                     VerifyPrefixSource(marked[0], target);
                     if (!prefixClasses.TryAdd(Text(target, "id"), new PrefixBinding(Annotation(marked[0], "rocks.class.marker")!, markerSite)))
-                        throw new MetadataException("duplicate ROCKS_CLASS/ROCKS_REFLECT_TYPE marker for the same class");
+                        throw new MetadataException("duplicate ROCKS_CLASS marker for the same class");
                 }
             }
             // 다른 AST 항목도 재귀 검사한다. 함수/지역 class의 마커는 무시하지 않고 거부한다.
@@ -197,14 +212,14 @@ internal sealed class ClangAstParser(string inputFile)
             markLocation.File is null || targetLocation.File is null ||
             !File.Exists(markLocation.File) || !File.Exists(targetLocation.File) ||
             !CanonicalPath.Equals(markLocation.File, targetLocation.File))
-            throw new MetadataException("ROCKS_CLASS/ROCKS_REFLECT_TYPE and class must have the same known physical source file",
+            throw new MetadataException("ROCKS_CLASS and class must have the same known physical source file",
                 hint: "Place the marker and class directly in one source file; macro-generated or ambiguous locations are unsupported.");
         if (!target.TryGetProperty("range", out JsonElement range) ||
             !range.TryGetProperty("begin", out JsonElement begin) ||
             begin.TryGetProperty("expansionLoc", out _) ||
             !begin.TryGetProperty("offset", out JsonElement classOffset) || !classOffset.TryGetInt32(out int end))
-            throw new MetadataException("ROCKS_CLASS/ROCKS_REFLECT_TYPE target location is macro-generated or ambiguous",
-                hint: "Write the class keyword directly after ROCKS_CLASS or ROCKS_REFLECT_TYPE; wrapper macros are unsupported.");
+            throw new MetadataException("ROCKS_CLASS target location is macro-generated or ambiguous",
+                hint: "Write the class keyword directly after ROCKS_CLASS; wrapper macros are unsupported.");
         if (!sourceBytes.TryGetValue(markLocation.File, out byte[]? bytes))
         {
             bytes = File.ReadAllBytes(markLocation.File);
@@ -218,13 +233,16 @@ internal sealed class ClangAstParser(string inputFile)
     {
         string kind = Text(node, "kind");
         UpdateSite(node);
-        bool classAnnotation = Annotation(node, "rocks.type") is not null || prefixClasses.ContainsKey(Text(node, "id"));
-        bool fieldAnnotation = Annotation(node, "rocks.field") is not null;
+        if (Annotation(node, "rocks.type") is not null || Annotation(node, "rocks.field") is not null)
+            throw new MetadataException("legacy direct reflection annotations are unsupported; use ROCKS_CLASS/ROCKS_PROPERTY");
+        bool classAnnotation = prefixClasses.ContainsKey(Text(node, "id"));
+        bool fieldAnnotation = HasFieldAnnotation(node);
         object?[]? generated = Annotation(node, "rocks.generated");
         if (classAnnotation && (kind != "CXXRecordDecl" || !Flag(node, "completeDefinition")))
-            throw new MetadataException("ROCKS_CLASS/ROCKS_REFLECT_TYPE must annotate a complete class definition");
+            throw new MetadataException("ROCKS_CLASS must annotate a complete class definition");
         if (fieldAnnotation && (kind != "FieldDecl" || !reflectedOwner))
             throw new MetadataException("ROCKS_PROPERTY must annotate a nonstatic data field owned by a reflected CLASS");
+        if (fieldAnnotation) VerifyPropertySource(node);
         if (generated is not null)
         {
             string signature = node.TryGetProperty("type", out JsonElement type) ? Text(type, "qualType") : "";
@@ -254,6 +272,146 @@ internal sealed class ClangAstParser(string inputFile)
             ? ownerLocation.File : null;
         foreach (JsonElement child in children) ValidateAnnotationPlacement(child, childOwner, directMember, ownerFile);
     }
+
+    // attribute의 expansion과 필드 시작이 직접 작성된 동일 매크로에서 시작하는지 확인한다.
+    // 불분명한 위치를 추측하지 않고 거부하며, 하나의 매크로로 여러 필드를 선언하지 않는다.
+    private void VerifyPropertySource(JsonElement field)
+    {
+        if (!locations.TryGetValue(Text(field, "id"), out var declaration) ||
+            declaration.File is null || !File.Exists(declaration.File) || declaration.Offset < 0 ||
+            !field.TryGetProperty("loc", out JsonElement location) || location.TryGetProperty("expansionLoc", out _) ||
+            !TryExpansion(field, out string? fieldFile, out int begin))
+            throw InvalidPropertySource();
+        JsonElement attribute = Children(field).FirstOrDefault(child => Text(child, "kind") == "AnnotateAttr" &&
+            Children(child).Select(Constant).FirstOrDefault() is string marker && marker == "rocks.field.arguments");
+        if (attribute.ValueKind == JsonValueKind.Undefined ||
+            !TryExpansion(attribute, out string? attrFile, out int attributeBegin) ||
+            fieldFile is null || attrFile is null || begin != attributeBegin ||
+            !CanonicalPath.Equals(fieldFile, attrFile) || !CanonicalPath.Equals(fieldFile, declaration.File) ||
+            begin < 0 || begin >= declaration.Offset)
+            throw InvalidPropertySource();
+        if (!sourceBytes.TryGetValue(declaration.File, out byte[]? bytes))
+        {
+            bytes = File.ReadAllBytes(declaration.File);
+            sourceBytes.Add(declaration.File, bytes);
+        }
+        if (declaration.Offset >= bytes.Length) throw InvalidPropertySource();
+        int markerLine = 1;
+        for (int index = 0; index < begin; ++index)
+            if (bytes[index] == (byte)'\n') ++markerLine;
+        currentSite = new(declaration.File, markerLine);
+        string key = CanonicalPath.Resolve(declaration.File) + "\0" + begin.ToString(CultureInfo.InvariantCulture);
+        if (!propertyMarkers.Add(key))
+            throw new MetadataException("each PROPERTY must directly annotate exactly one field",
+                hint: "Declare each field separately with its own ROCKS_PROPERTY macro.");
+
+        ReadOnlySpan<byte> macro = "ROCKS_PROPERTY"u8;
+        int cursor = begin;
+        if (cursor > bytes.Length - macro.Length || !bytes.AsSpan(cursor, macro.Length).SequenceEqual(macro))
+            throw InvalidPropertySource();
+        cursor += macro.Length;
+        SkipTrivia();
+        if (cursor >= declaration.Offset || bytes[cursor++] != (byte)'(') throw InvalidPropertySource();
+        int depth = 1;
+        while (cursor < declaration.Offset && depth != 0)
+        {
+            byte value = bytes[cursor++];
+            if (value == (byte)'(') ++depth;
+            else if (value == (byte)')') --depth;
+            else if (value is (byte)'"' or (byte)'\'') SkipQuoted(value);
+            else if (value == (byte)'/' && cursor < declaration.Offset && bytes[cursor] is (byte)'/' or (byte)'*')
+            {
+                --cursor;
+                SkipTrivia();
+            }
+            else if (value is (byte)'#' or (byte)'\\') throw InvalidPropertySource();
+        }
+        if (depth != 0) throw InvalidPropertySource();
+        // 전처리 지시문은 CLASS marker처럼 매크로와 선언 사이에 넣지 않는다.
+        // 타입의 모든 구문은 Clang이 판단하고, 이 경계는 토큰 출처만 보수적으로 점검한다.
+        while (cursor < declaration.Offset)
+        {
+            byte value = bytes[cursor++];
+            if (value is (byte)'"' or (byte)'\'') SkipQuoted(value);
+            else if (value == (byte)'/' && cursor < declaration.Offset && bytes[cursor] is (byte)'/' or (byte)'*')
+            {
+                --cursor;
+                SkipTrivia();
+            }
+            else if (value == (byte)'#' || (value == (byte)'\\' && cursor < declaration.Offset &&
+                     bytes[cursor] is (byte)'\r' or (byte)'\n')) throw InvalidPropertySource();
+        }
+
+        void SkipQuoted(byte quote)
+        {
+            if (quote == (byte)'"' && cursor >= 2 && bytes[cursor - 2] == (byte)'R') throw InvalidPropertySource();
+            while (cursor < declaration.Offset)
+            {
+                byte next = bytes[cursor++];
+                if (next == quote) return;
+                if (next == (byte)'\\')
+                {
+                    if (cursor >= declaration.Offset || bytes[cursor] is (byte)'\r' or (byte)'\n') throw InvalidPropertySource();
+                    ++cursor;
+                }
+                else if (next is (byte)'\r' or (byte)'\n') throw InvalidPropertySource();
+            }
+            throw InvalidPropertySource();
+        }
+        void SkipTrivia()
+        {
+            while (cursor < declaration.Offset)
+            {
+                byte value = bytes[cursor];
+                if (value is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n' or (byte)'\f' or (byte)'\v') { ++cursor; continue; }
+                if (value != (byte)'/' || cursor + 1 >= declaration.Offset) return;
+                if (bytes[cursor + 1] == (byte)'/')
+                {
+                    cursor += 2;
+                    while (cursor < declaration.Offset && bytes[cursor] is not ((byte)'\r' or (byte)'\n'))
+                    {
+                        RejectSplice();
+                        ++cursor;
+                    }
+                }
+                else if (bytes[cursor + 1] == (byte)'*')
+                {
+                    cursor += 2;
+                    while (cursor + 1 < declaration.Offset && !(bytes[cursor] == (byte)'*' && bytes[cursor + 1] == (byte)'/'))
+                    {
+                        RejectSplice();
+                        ++cursor;
+                    }
+                    if (cursor + 1 >= declaration.Offset) throw InvalidPropertySource();
+                    cursor += 2;
+                }
+                else return;
+            }
+        }
+        void RejectSplice()
+        {
+            if (bytes[cursor] == (byte)'\\' && cursor + 1 < declaration.Offset &&
+                bytes[cursor + 1] is (byte)'\r' or (byte)'\n') throw InvalidPropertySource();
+        }
+    }
+
+    private static bool TryExpansion(JsonElement node, out string? file, out int offset)
+    {
+        file = null;
+        offset = -1;
+        if (!node.TryGetProperty("range", out JsonElement range) ||
+            !range.TryGetProperty("begin", out JsonElement begin) ||
+            !begin.TryGetProperty("expansionLoc", out JsonElement expansion) ||
+            !expansion.TryGetProperty("offset", out JsonElement value) || !value.TryGetInt32(out offset)) return false;
+        string path = Text(expansion, "file");
+        if (path.Length == 0 || !File.Exists(path)) return false;
+        file = path;
+        return true;
+    }
+
+    private static MetadataException InvalidPropertySource() => new(
+        "ROCKS_PROPERTY must be a direct prefix on one field in the same source file",
+        hint: "Write ROCKS_PROPERTY(...) immediately before the field declaration, with no wrapper macro or intervening preprocessor directive.");
 
     private void VerifyGeneratedBodySource(JsonElement node, string? ownerFile)
     {
@@ -377,10 +535,5 @@ internal sealed class ClangAstParser(string inputFile)
         for (int index = 0; index < location.Offset; ++index)
             if (bytes[index] == (byte)'\n') ++line;
         currentSite = new(location.File, line);
-    }
-    private static string Payload(object?[] mark, int index, string symbol)
-    {
-        if (mark.Length <= index) return ""; // 기존 annotation 인자 형식도 허용한다.
-        return mark[index] as string ?? throw new MetadataException($"{symbol}: specifier payload must be a string");
     }
 }

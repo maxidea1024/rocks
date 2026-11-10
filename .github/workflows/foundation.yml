@@ -12,6 +12,8 @@ jobs:
         shell: pwsh
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
@@ -19,6 +21,9 @@ jobs:
         run: ./Build/InstallFormatter.ps1
       - name: Build and test Foundation through MSBuild
         run: dotnet msbuild Rocks.proj /t:Test /p:Configuration=Debug /p:RocksTarget=Foundation /v:minimal
+      - name: Verify stable identity merge history
+        if: github.event_name == 'pull_request'
+        run: ./Build/CheckIdentityMerges.ps1 -MetaCompiler out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll
       - name: Build and test headless commandlet
         run: |
           dotnet msbuild Rocks.proj /t:Build /p:Configuration=Debug /p:RocksTarget=Commandlet /p:NativeOutput=out/ci-commandlet /v:minimal

@@ -26,6 +26,8 @@ public abstract class TargetRules
     public abstract string Name { get; }
     public abstract IReadOnlyList<string> Modules { get; }
     public virtual IReadOnlyList<MetadataUnit> Metadata => [];
+    // 모든 메타 입력이 공유하는 소스 관리 identity 명세다. 일반 빌드는 읽기만 한다.
+    public virtual string? IdentityManifest => null;
     public virtual bool CheckPublicHeaders => false;
     public virtual string? TestExecutable => null;
 }

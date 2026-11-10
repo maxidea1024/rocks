@@ -12,6 +12,10 @@ internal static class SelfTests
     private static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     public static void Register(TestSuite suite, Options options)
     {
+        IdentityInventoryTests.Register(suite);
+        StableIdManifestTests.Register(suite);
+        StableIdMergeTests.Register(suite);
+        IdentityGitMergeTests.Register(suite, options);
         ProgramsPolicyReviewTests.Register(suite);
         ProcessReviewTests.Register(suite, options);
         ProcessHardTimeoutReviewTests.Register(suite, options);
@@ -19,9 +23,9 @@ internal static class SelfTests
         {
             void CheckGap(string gap, bool allowed)
             {
-                foreach (string name in new[] { "ROCKS_CLASS", "ROCKS_REFLECT_TYPE" })
+                foreach (string name in new[] { "ROCKS_CLASS" })
                 {
-                    string source = name + "(\"b1000000000000000000000000000001\", 1)" + gap + "class Object {};";
+                    string source = name + "()" + gap + "class Object {};";
                     byte[] bytes = Encoding.UTF8.GetBytes(source);
                     int end = Encoding.UTF8.GetByteCount(source[..source.IndexOf("class Object", StringComparison.Ordinal)]);
                     if (allowed) PrefixSourceVerifier.Verify(bytes, 0, end);

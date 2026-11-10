@@ -2,19 +2,18 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Rocks.Tooling.Common;
 using Rocks.Build;
+using Rocks.MetaCompiler;
 
 namespace Rocks.ToolTests;
 
 internal static class MetaTests
 {
-    private const string TypeId = "b1000000000000000000000000000001";
-    private const string FieldId = "b1000000000000000000000000000011";
     private const string Preamble = "#include <Meta/Annotations.h>\n#include <Object/ObjectRefs.h>\n#include <Object/Object.h>\n#include <Core/Text/String.h>\nnamespace probe {\n";
 
-    private static string Declaration(string? field = null, string version = "1",
+    private static string Declaration(string? field = null,
         string bases = "public rocks::Object", string extra = "") =>
-        Preamble + $"ROCKS_REFLECT_TYPE(\"{TypeId}\", {version})\nstruct Value : {bases} {{\n" +
-        (field ?? $"ROCKS_REFLECT_FIELD(\"{FieldId}\") rocks::int32 count = 0;") + "\n" + extra + "\n};\n}\n";
+        Preamble + $"ROCKS_CLASS()\nstruct Value : {bases} {{\n" +
+        (field ?? "ROCKS_PROPERTY() rocks::int32 count = 0;") + "\n" + extra + "\n};\n}\n";
 
     public static void Register(TestSuite suite, Options options, IReadOnlyDictionary<string, string?> environment)
     {
@@ -24,6 +23,8 @@ internal static class MetaTests
         Dictionary<string, string?> actualEnvironment = new(environment, OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
         if (options.Optional("formatter") is string formatter) actualEnvironment["ROCKS_CLANG_FORMAT"] = formatter;
         GeneratedBodyReviewTests.Register(suite, options, actualEnvironment);
+        IdentityCompilerTests.Register(suite, options, actualEnvironment);
+        IdentityCliReviewTests.Register(suite, options, actualEnvironment);
 
         suite.Add("Meta.FixtureDeterminismTimestampAndStaleCheck", async () =>
         {
@@ -42,13 +43,6 @@ internal static class MetaTests
             File.WriteAllText(probe.Output, "stale\n");
             await probe.GenerateAsync(fixture: true, extra: ["--check"], expectedCode: "RMC4000", reason: "stale");
             Verify.Equal("stale\n", File.ReadAllText(probe.Output), "stale check overwrote output");
-        });
-        suite.Add("Meta.EvaluatedConstantVersion", async () =>
-        {
-            using Probe probe = new(options, actualEnvironment, generator, compiler);
-            await probe.GenerateAsync(Declaration(version: "1 + 2"));
-            Verify.That(Regex.IsMatch(File.ReadAllText(probe.Output), @"schema\s*\{\s*Id\(\)\s*,\s*3\s*,",
-                RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)), "Clang evaluated schema version was not emitted");
         });
         suite.Add("Meta.GeneratedHeaderDirectoryControlsIncludeBinding", async () =>
         {
@@ -70,31 +64,21 @@ internal static class MetaTests
             using Probe probe = new(options, actualEnvironment, generator, compiler);
             await probe.NestedLocationAsync();
         });
-        suite.Add("Meta.ClassDiagnosticPointsToDeclaration", async () =>
-        {
-            using Probe probe = new(options, actualEnvironment, generator, compiler);
-            await probe.GenerateAsync(Declaration(version: "0"), expectedCode: "RMC2000", reason: ":6: error RMC2000");
-        });
-        AddRejectGroup("Meta.InvalidVersion", new[] { "-1", "0", "4294967296ull" }.Select(value => Declaration(version: value)), "RMC2000", "version");
         AddRejectGroup("Meta.MissingFieldAnnotation", [Declaration("rocks::int32 count = 0;")], "RMC2000", "field");
-        AddRejectGroup("Meta.DuplicateStableId", [Declaration($"ROCKS_REFLECT_FIELD(\"{TypeId}\") rocks::int32 count = 0;")], "RMC2000", "duplicate");
-        AddRejectGroup("Meta.InvalidAndZeroGuid", new[] { "not-a-guid", "00000000000000000000000000000000" }
-            .Select(id => Declaration($"ROCKS_REFLECT_FIELD(\"{id}\") rocks::int32 count = 0;")), "RMC2000", "GUID");
         AddRejectGroup("Meta.PointerAndCvFields", new[] { "rocks::int32* count = nullptr", "const rocks::int32 count = 0" }
-            .Select(field => Declaration($"ROCKS_REFLECT_FIELD(\"{FieldId}\") {field};")), "RMC2000", "type");
-        AddRejectGroup("Meta.PrivateWithoutGeneratedBody", [Declaration($"private: ROCKS_REFLECT_FIELD(\"{FieldId}\") rocks::int32 count = 0;",
+            .Select(field => Declaration($"ROCKS_PROPERTY() {field};")), "RMC2000", "type");
+        AddRejectGroup("Meta.PrivateWithoutGeneratedBody", [Declaration("private: ROCKS_PROPERTY() rocks::int32 count = 0;",
             extra: "public: rocks::int32 Read() const noexcept { return count; }")], "RMC2000", "GENERATED_BODY");
-        AddRejectGroup("Meta.Bitfields", [Declaration($"ROCKS_REFLECT_FIELD(\"{FieldId}\") unsigned int count : 1;")], "RMC2000", "bitfield");
-        AddRejectGroup("Meta.StaticAnnotatedField", [Declaration($"ROCKS_REFLECT_FIELD(\"{FieldId}\") static inline rocks::int32 count = 0;")], "RMC200", "nonstatic");
+        AddRejectGroup("Meta.Bitfields", [Declaration("ROCKS_PROPERTY() unsigned int count : 1;")], "RMC2000", "bitfield");
+        AddRejectGroup("Meta.StaticAnnotatedField", [Declaration("ROCKS_PROPERTY() static inline rocks::int32 count = 0;")], "RMC200", "nonstatic");
         AddRejectGroup("Meta.ManualTraceConflict", [Declaration(extra: "void Trace() noexcept {}")], "RMC2000", "Trace");
         AddRejectGroup("Meta.VirtualAndMultipleInheritance", [Declaration(bases: "public virtual rocks::Object"),
             Declaration(bases: "public rocks::Object, public Other").Replace("namespace probe {", "namespace probe { struct Other {};", StringComparison.Ordinal)], "RMC2000", "nonvirtual");
         AddRejectGroup("Meta.UnreflectedBaseAndReference", [
             Declaration(bases: "public Hidden").Replace("namespace probe {", "namespace probe { struct Hidden : rocks::Object {};", StringComparison.Ordinal),
-            Declaration($"ROCKS_REFLECT_FIELD(\"{FieldId}\") rocks::ObjectRef<Hidden> next;")
+            Declaration("ROCKS_PROPERTY() rocks::ObjectRef<Hidden> next;")
                 .Replace("namespace probe {", "namespace probe { struct Hidden : rocks::Object {};", StringComparison.Ordinal)], "RMC2000", "reflected");
         AddRejectGroup("Meta.ClangSyntaxFailurePreservesOutput", [Declaration("this is not valid cxx;")], "RMC3000", "Clang");
-        AddRejectGroup("Meta.IdMustBeLiteralNotPointerExpression", [Declaration($"ROCKS_REFLECT_FIELD(&\"x{FieldId}\"[1]) rocks::int32 count = 0;")], "RMC2000", "literal");
         suite.Add("Meta.DiagnosticsAndResponseOverridesRejected", async () =>
         {
             using Probe probe = new(options, actualEnvironment, generator, compiler);
@@ -156,7 +140,7 @@ internal static class MetaTests
         suite.Add("Meta.PrefixClassSupportsNestedScopesCommentsAndConditionalBlock", async () =>
         {
             using Probe probe = new(options, actualEnvironment, generator, compiler);
-            string marker = $"ROCKS_CLASS(\"{TypeId}\", 1)";
+            string marker = "ROCKS_CLASS()";
             string valid = Preamble + "struct Outer { public:\n#if 1\n" + marker +
                 "\n// #if 0 is only a comment\n/* #include <ignored> */\n" +
                 "class Inner : public rocks::Object { public: Inner() noexcept = default; };\n#endif\n};\n}\n";
@@ -166,48 +150,28 @@ internal static class MetaTests
         suite.Add("Meta.PrefixClassNeverBindsAcrossTokensOrPreprocessing", async () =>
         {
             using Probe probe = new(options, actualEnvironment, generator, compiler);
-            string marker = $"ROCKS_CLASS(\"{TypeId}\", 1)";
+            string marker = "ROCKS_CLASS()";
             string definition = "struct Value : public rocks::Object {};\n";
             string[] invalid =
             [
                 marker + "\nint intervening;\n" + definition,
                 marker + ";\n" + definition,
                 marker + "\n" + marker + "\n" + definition,
-                marker + $"\nstruct [[clang::annotate(\"rocks\", \"rocks.type\", \"{TypeId}\", 1)]] Value : public rocks::Object {{}};\n",
-                marker + $"\nROCKS_REFLECT_TYPE(\"{TypeId}\", 1)\n" + definition,
+                marker + "\nstruct [[clang::annotate(\"rocks\", \"rocks.type\")]] Value : public rocks::Object {};\n",
                 marker + "\n#if 0\nstruct Intended : public rocks::Object {};\n#endif\n" + definition,
                 marker + "\n#include <Meta/Annotations.h>\n" + definition,
                 marker + "\ntemplate <class T> struct Value : public rocks::Object {};\n",
                 marker + "\nstruct Value;\n",
                 marker + "\nnamespace other {}\n" + definition,
                 "#define CLASS_WRAP(...) ROCKS_CLASS(__VA_ARGS__)\n" +
-                    $"CLASS_WRAP(\"{TypeId}\", 1)\n" + definition,
+                    "CLASS_WRAP()\n" + definition,
                 "#define CLASS_BODY struct Value : public rocks::Object {}\n" + marker + "\nCLASS_BODY;\n",
                 "void Test() {\n" + marker + "\n" + definition + "}\n",
-                $"struct ROCKS_CLASS(\"{TypeId}\", 1) Value : public rocks::Object {{}};\n",
-                $"ROCKS_CLASS(R\"({TypeId})\", 1)\n" + definition,
+                "struct ROCKS_CLASS() Value : public rocks::Object {};\n",
                 marker + "\n#line 100 \"nonexistent_virtual_source.hpp\"\n" + definition
             ];
             foreach (string body in invalid)
                 await probe.RejectAsync(Preamble + body + "}\n", "RMC", "ROCKS_CLASS");
-        });
-        suite.Add("Meta.ReflectTypeUsesSamePrefixRules", async () =>
-        {
-            using Probe probe = new(options, actualEnvironment, generator, compiler);
-            await probe.GenerateAsync(Declaration());
-            string marker = $"ROCKS_REFLECT_TYPE(\"{TypeId}\", 1)";
-            string definition = "struct Value : public rocks::Object {};\n";
-            foreach (string body in new[]
-            {
-                marker + "\nint intervening;\n" + definition,
-                marker + ";\n" + definition,
-                marker + "\n#if 0\nstruct Intended : public rocks::Object {};\n#endif\n" + definition,
-                marker + "\n" + marker + "\n" + definition,
-                "#define USER_TYPE(...) ROCKS_REFLECT_TYPE(__VA_ARGS__)\n" +
-                    $"USER_TYPE(\"{TypeId}\", 1)\n" + definition,
-                $"struct ROCKS_REFLECT_TYPE(\"{TypeId}\", 1) Value : public rocks::Object {{}};\n"
-            })
-                await probe.RejectAsync(Preamble + body + "}\n", "RMC", "ROCKS_REFLECT_TYPE");
         });
         suite.Add("Meta.PrefixClassCannotBindAcrossIncludeFiles", async () =>
         {
@@ -217,8 +181,8 @@ internal static class MetaTests
         suite.Add("Meta.PrivateGeneratedBodyAndUnicodeSpecifiers", async () =>
         {
             using Probe probe = new(options, actualEnvironment, generator, compiler);
-            string source = Preamble + $"ROCKS_CLASS(\"{TypeId}\", 1)\nclass Value : public rocks::Object {{\n" +
-                "ROCKS_GENERATED_BODY()\n" + $"ROCKS_PROPERTY(\"{FieldId}\", ReadOnly, Category=\"능력\", DisplayName=\"체력🎮\") rocks::int32 count = 0;\n" +
+            string source = Preamble + "ROCKS_CLASS()\nclass Value : public rocks::Object {\n" +
+                "ROCKS_GENERATED_BODY()\n" + "ROCKS_PROPERTY(ReadOnly, Category=\"능력\", DisplayName=\"체력🎮\") rocks::int32 count = 0;\n" +
                 "public: rocks::int32 Read() const noexcept { return count; }\n};\n}\n";
             await probe.GenerateAsync(source);
             string generated = File.ReadAllText(probe.Output);
@@ -229,18 +193,18 @@ internal static class MetaTests
         suite.Add("Meta.AbstractClassHasExplicitMetadata", async () =>
         {
             using Probe probe = new(options, actualEnvironment, generator, compiler);
-            string source = Preamble + $"ROCKS_CLASS(\"{TypeId}\", 1, Abstract)\nclass Value : public rocks::Object {{ public:\n" +
-                $"ROCKS_PROPERTY(\"{FieldId}\") rocks::int32 count=0; virtual void Tick() noexcept=0;\n}};\n}}\n";
+            string source = Preamble + "ROCKS_CLASS(Abstract)\nclass Value : public rocks::Object { public:\n" +
+                "ROCKS_PROPERTY() rocks::int32 count=0; virtual void Tick() noexcept=0;\n};\n}\n";
             await probe.GenerateAsync(source);
             Verify.Contains("MakeRuntimeTypeOps<::probe::Value, true>", File.ReadAllText(probe.Output), "abstract generated runtime ops");
         });
         AddRejectGroup("Meta.UnknownDuplicateAndWrongValueSpecifiers", new[] { "UnknownFlag", "ReadOnly, ReadOnly", "ReadOnly=\"yes\"", "Category=12", "DisplayName" }
-            .Select(spec => Declaration($"ROCKS_PROPERTY(\"{FieldId}\", {spec}) rocks::int32 count=0;")), "RMC2000", "specifier");
+            .Select(spec => Declaration($"ROCKS_PROPERTY({spec}) rocks::int32 count=0;")), "RMC2000", "specifier");
         AddRejectGroup("Meta.UnannotatedOwnerAndParameterMisuse", [
-            Preamble + $"struct Plain {{ ROCKS_PROPERTY(\"{FieldId}\") rocks::int32 count=0; }};\n}}\n",
-            Preamble + $"void F(ROCKS_PROPERTY(\"{FieldId}\") rocks::int32 value);\n}}\n"], "RMC200", "PROPERTY");
-        AddRejectGroup("Meta.UnknownTypeSpecifier", [Declaration().Replace($"ROCKS_REFLECT_TYPE(\"{TypeId}\", 1)",
-            $"ROCKS_CLASS(\"{TypeId}\", 1, UnknownClassFlag)", StringComparison.Ordinal)], "RMC2000", "specifier");
+            Preamble + "struct Plain { ROCKS_PROPERTY() rocks::int32 count=0; };\n}\n",
+            Preamble + "void F(ROCKS_PROPERTY() rocks::int32 value);\n}\n"], "RMC200", "PROPERTY");
+        AddRejectGroup("Meta.UnknownTypeSpecifier", [Declaration().Replace("ROCKS_CLASS()",
+            "ROCKS_CLASS(UnknownClassFlag)", StringComparison.Ordinal)], "RMC2000", "specifier");
 
         void AddRejectGroup(string name, IEnumerable<string> sources, string code, string reason)
         {
@@ -261,8 +225,15 @@ internal static class MetaTests
         private readonly string generator;
         private readonly string compiler;
         public Probe(Options options, IReadOnlyDictionary<string, string?> environment, string generator, string compiler)
-        { this.options = options; this.environment = environment; this.generator = generator; this.compiler = compiler; }
+        {
+            this.options = options;
+            this.environment = environment;
+            this.generator = generator;
+            this.compiler = compiler;
+            MetaProbeIdentity.Create(IdentityPath);
+        }
         public string Output => temporary.FilePath("Probe.generated.h");
+        private string IdentityPath => temporary.FilePath("probe.rocksids.json");
 
         public async Task GenerateAsync(string? source = null, bool fixture = false, IReadOnlyList<string>? extra = null,
             string? expectedCode = null, string? reason = null)
@@ -275,6 +246,9 @@ internal static class MetaTests
             { executable = options.Optional("dotnet") ?? "dotnet"; arguments.Add(generator); }
             arguments.AddRange(["--input", input, "--include", fixture ? "Tests/Reflection/ReflectionFixture.h" : "Probe.h",
                 "--output", Output, "--compiler", compiler]);
+            AddDefaultIncludes(arguments);
+            arguments.AddRange(["--identity-manifest", fixture
+                ? Path.Combine(options.Root, "Tests", "Reflection", "Foundation.rocksids.json") : IdentityPath]);
             foreach (string argument in options.ClangArguments) arguments.Add("--clang-arg=" + argument);
             if (extra is not null) arguments.AddRange(extra);
             var result = await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: TimeSpan.FromSeconds(60)));
@@ -291,7 +265,7 @@ internal static class MetaTests
 
         public async Task PrefixDifferentFileAsync()
         {
-            string source = Preamble + $"ROCKS_CLASS(\"{TypeId}\", 1)\n#include <Other.h>\n}}\n";
+            string source = Preamble + "ROCKS_CLASS()\n#include <Other.h>\n}\n";
             File.WriteAllText(temporary.FilePath("Other.h"), "struct Value : public rocks::Object {};\n");
             await RejectAsync(source, "RMC2000", "ROCKS_CLASS");
         }
@@ -305,7 +279,7 @@ internal static class MetaTests
             string shadow = Path.Combine(generatedDirectory, "Probe.h");
             string output = Path.Combine(generatedDirectory, "Probe.generated.h");
             File.WriteAllText(author, Declaration());
-            File.WriteAllText(shadow, Declaration(version: "9"));
+            File.WriteAllText(shadow, Declaration(extra: "void Shadow() noexcept {}"));
             File.WriteAllText(output, "previous accepted output\n");
             async Task<ProcessResult> Run()
             {
@@ -317,6 +291,7 @@ internal static class MetaTests
                 foreach (string include in new[] { sourceDirectory }.Concat(Directory.GetDirectories(Path.Combine(options.Root, "Engine"))
                     .Select(module => Path.Combine(module, "Public")).Where(Directory.Exists)))
                     arguments.AddRange(["--include-dir", include]);
+                arguments.AddRange(["--identity-manifest", IdentityPath]);
                 foreach (string argument in options.ClangArguments) arguments.Add("--clang-arg=" + argument);
                 return await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: TimeSpan.FromSeconds(60)));
             }
@@ -330,7 +305,7 @@ internal static class MetaTests
             Verify.Equal(0, accepted.ExitCode, "original header not selected after shadow removal: " + accepted.StdErr);
             Verify.That(!Directory.EnumerateFiles(generatedDirectory, ".rocks-meta-validation-*").Any(), "successful validation temporary file leaked");
             string validOutput = File.ReadAllText(output);
-            File.WriteAllText(author, Preamble + $"ROCKS_CLASS(\"{TypeId}\", 1)\nstruct Value : public rocks::Object {{ Value() {{}} }};\n}}\n");
+            File.WriteAllText(author, Preamble + "ROCKS_CLASS()\nstruct Value : public rocks::Object { Value() {} };\n}\n");
             var invalid = await Run();
             Verify.That(invalid.ExitCode != 0, "invalid generated contract accepted");
             Verify.Contains("RMC3000", invalid.StdErr, "generated contract rejection code");
@@ -354,7 +329,7 @@ internal static class MetaTests
             string actualInput = Path.Combine(real, "Probe.h");
             string aliasInput = Path.Combine(alias, "Probe.h");
             File.WriteAllText(actualInput, original);
-            File.WriteAllText(Path.Combine(shadow, "Probe.h"), Declaration(version: "9"));
+            File.WriteAllText(Path.Combine(shadow, "Probe.h"), Declaration(extra: "void Shadow() noexcept {}"));
             async Task<ProcessResult> Run(string input, string output, params string[] includeDirs)
             {
                 List<string> arguments = [];
@@ -365,6 +340,7 @@ internal static class MetaTests
                 foreach (string include in includeDirs.Concat(Directory.GetDirectories(Path.Combine(options.Root, "Engine"))
                     .Select(module => Path.Combine(module, "Public")).Where(Directory.Exists)))
                     arguments.AddRange(["--include-dir", include]);
+                arguments.AddRange(["--identity-manifest", IdentityPath]);
                 foreach (string argument in options.ClangArguments) arguments.Add("--clang-arg=" + argument);
                 return await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: TimeSpan.FromSeconds(60)));
             }
@@ -384,15 +360,17 @@ internal static class MetaTests
         {
             string input = temporary.FilePath("Probe.h");
             string source = "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n" +
-                "namespace a { ROCKS_CLASS(\"b1000000000000000000000000000031\", 1)\nstruct Thing : public rocks::Object { Thing() {} }; }\n" +
-                "namespace b { ROCKS_CLASS(\"b1000000000000000000000000000032\", 1)\nstruct Thing : public rocks::Object {}; }\n" +
-                "namespace a { ROCKS_CLASS(\"b1000000000000000000000000000033\", 1)\nstruct ThingExtended : public rocks::Object {}; }\n";
+                "namespace a { ROCKS_CLASS()\nstruct Thing : public rocks::Object { Thing() {} }; }\n" +
+                "namespace b { ROCKS_CLASS()\nstruct Thing : public rocks::Object {}; }\n" +
+                "namespace a { ROCKS_CLASS()\nstruct ThingExtended : public rocks::Object {}; }\n";
             File.WriteAllText(input, source);
             List<string> arguments = [];
             string executable = generator;
             if (generator.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
             { executable = options.Optional("dotnet") ?? "dotnet"; arguments.Add(generator); }
             arguments.AddRange(["--input", input, "--include", "Probe.h", "--output", Output, "--compiler", compiler]);
+            AddDefaultIncludes(arguments);
+            arguments.AddRange(["--identity-manifest", IdentityPath]);
             foreach (string argument in options.ClangArguments) arguments.Add("--clang-arg=" + argument);
             var result = await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: TimeSpan.FromSeconds(60)));
             Verify.That(result.ExitCode != 0, "throwing constructor was accepted");
@@ -411,16 +389,16 @@ internal static class MetaTests
             string bad = temporary.FilePath("Deep.h");
             File.WriteAllText(main, "#pragma once\n#include <First.h>\n#include <Middle.h>\n");
             File.WriteAllText(a, "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n" +
-                "namespace first { ROCKS_CLASS(\"b1000000000000000000000000000021\", 1)\nstruct Good : public rocks::Object {}; }\n");
+                "namespace first { ROCKS_CLASS()\nstruct Good : public rocks::Object {}; }\n");
             File.WriteAllText(middle, "#pragma once\n#include <Deep.h>\n");
             var fixtures = new[]
             {
                 ("#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n\n\nnamespace example {\n" +
-                    "ROCKS_CLASS(\"b1000000000000000000000000000022\", 0)\nstruct Invalid : public rocks::Object {};\n}\n", 7),
+                    "ROCKS_CLASS(UnknownClassFlag)\nstruct Invalid : public rocks::Object {};\n}\n", 7),
                 ("#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n\nnamespace example {\n" +
-                    "ROCKS_CLASS(\"b1000000000000000000000000000022\", 1)\nstruct Invalid : public rocks::Object {\n" +
-                    "ROCKS_PROPERTY(\"b1000000000000000000000000000023\") int valid;\n\n" +
-                    "ROCKS_PROPERTY(\"b1000000000000000000000000000024\", ReadOnyl) int bad;\n};\n}\n", 10)
+                    "ROCKS_CLASS()\nstruct Invalid : public rocks::Object {\n" +
+                    "ROCKS_PROPERTY() int valid;\n\n" +
+                    "ROCKS_PROPERTY(ReadOnyl) int bad;\n};\n}\n", 10)
             };
             foreach (var (source, line) in fixtures)
             {
@@ -430,6 +408,8 @@ internal static class MetaTests
                 if (generator.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
                 { executable = options.Optional("dotnet") ?? "dotnet"; arguments.Add(generator); }
                 arguments.AddRange(["--input", main, "--include", "Main.h", "--output", Output, "--compiler", compiler]);
+                AddDefaultIncludes(arguments);
+                arguments.AddRange(["--identity-manifest", IdentityPath]);
                 foreach (string argument in options.ClangArguments) arguments.Add("--clang-arg=" + argument);
                 var result = await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: TimeSpan.FromSeconds(60)));
                 Verify.That(result.ExitCode != 0, "invalid nested declaration was accepted");
@@ -446,6 +426,33 @@ internal static class MetaTests
             Verify.That(!Directory.EnumerateFiles(temporary.Root, "*.tmp*").Any(), "temporary generated output leaked");
         }
 
+        private void AddDefaultIncludes(List<string> arguments)
+        {
+            foreach (string directory in Directory.GetDirectories(Path.Combine(options.Root, "Engine"))
+                .Select(module => Path.Combine(module, "Public")).Where(Directory.Exists).Order(StringComparer.Ordinal)
+                .Concat([options.Root, temporary.Root]))
+                arguments.AddRange(["--include-dir", directory]);
+        }
+
         public void Dispose() => temporary.Dispose();
+    }
+}
+
+// 각 테스트는 실제 도구와 동일한 읽기 전용 명세를 제공한다. 테스트 데이터의 ID는
+// 저작 API가 한 번 발급하며 선언 본문에 GUID를 직접 넣지 않는다.
+internal static class MetaProbeIdentity
+{
+    public static void Create(string path)
+    {
+        StableIdManifest.Update(path, true, manifest =>
+        {
+            foreach (string name in new[] { "probe::Value", "probe::Outer::Inner", "probe::Object", "probe::Parent",
+                "first::Good", "example::Invalid", "a::Thing", "b::Thing", "a::ThingExtended" })
+                manifest.Register("type", name);
+            foreach (string name in new[] { "probe::Value::count", "probe::Value::next", "probe::Object::value",
+                "example::Invalid::valid", "example::Invalid::bad" })
+                manifest.Register("field", name);
+            return 0;
+        });
     }
 }

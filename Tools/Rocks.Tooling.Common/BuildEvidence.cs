@@ -18,6 +18,8 @@ public sealed record SourceSnapshot(string Algorithm, string Digest, int FileCou
         foreach (string name in new[] { "CMakeLists.txt", "CMakePresets.json", ".clang-format", ".editorconfig",
             "global.json", "NuGet.Config", "NuGet.config", "Rocks.slnx", "Rocks.proj", "Directory.Build.props", "Directory.Build.targets", "Directory.Build.rsp" })
             if (File.Exists(Path.Combine(root, name))) files.Add(Path.Combine(root, name));
+        // 일반 소스 목록 밖의 프로젝트 하위 디렉터리에 둔 identity 명세도 감시한다.
+        VisitIdentities(root);
         files = files.Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
             .OrderBy(path => Relative(path), StringComparer.Ordinal).ToList();
         using IncrementalHash digest = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -29,6 +31,28 @@ public sealed record SourceSnapshot(string Algorithm, string Digest, int FileCou
         }
         return new("sha256(path-NUL-sha256(file))", Convert.ToHexStringLower(digest.GetHashAndReset()), files.Count);
 
+        void VisitIdentities(string directory)
+        {
+            foreach (string entry in Directory.EnumerateFileSystemEntries(directory))
+            {
+                FileAttributes attributes = File.GetAttributes(entry);
+                bool isDirectory = (attributes & FileAttributes.Directory) != 0;
+                string name = Path.GetFileName(entry);
+                if ((attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    if (!isDirectory && name.EndsWith(".rocksids.json", StringComparison.Ordinal))
+                        throw new InvalidDataException("Source snapshot does not follow linked identity manifests: " + entry);
+                    continue;
+                }
+                if (isDirectory)
+                {
+                    if (name is ".git" or "out" or "bin" or "obj" or "__pycache__") continue;
+                    if (Relative(entry) is "Build/Artifacts" or "Build/Cache") continue;
+                    VisitIdentities(entry);
+                }
+                else if (name.EndsWith(".rocksids.json", StringComparison.Ordinal)) files.Add(entry);
+            }
+        }
         string Relative(string path) => Path.GetRelativePath(root, path).Replace('\\', '/');
         void Visit(string directory)
         {

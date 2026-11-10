@@ -58,6 +58,7 @@ namespace Rocks.Build.Cli
             var rulesPath = options.GetValueOrDefault("rules", HostTool(root, "Rocks.Engine.Rules"));
             var rules = RuleLoader.Load(rulesPath, targetName, context);
             Directory.CreateDirectory(output);
+            await using var invocationLock = await OutputInvocationLock.AcquireAsync(output, cancellationToken);
             Directory.CreateDirectory(Path.Combine(output, "Generated"));
 
             var evidence = await BuildEvidence.StartAsync(root, Path.GetRelativePath(Path.Combine(root, "out"), output), toolchain.Environment);

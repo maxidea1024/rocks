@@ -78,6 +78,7 @@ public static class InstalledSdk
         if (Inside(sdk, output) || Inside(sdk, project) || Inside(output, project) || Inside(output, sdk))
             throw new ArgumentException("Game output cannot overlap or contain the project or installed SDK.");
         Directory.CreateDirectory(output);
+        await using var invocationLock = await OutputInvocationLock.AcquireAsync(output, cancellationToken);
         var started = BeginGameEvidence(output, sdk, project);
         // 앞 실행의 PASS 보고서가 이번 실패를 성공으로 보이게 하지 않는다. 네이티브 출력 자체는 보존한다.
         AtomicFile.WriteIfChanged(Path.Combine(output, "action-report.json"), JsonSerializer.Serialize(new NativeBuildResult

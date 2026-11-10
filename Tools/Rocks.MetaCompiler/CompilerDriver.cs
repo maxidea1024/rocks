@@ -7,7 +7,9 @@ namespace Rocks.MetaCompiler;
 
 internal static class CompilerDriver
 {
-    public static async Task RunAsync(CompilerOptions options)
+    // 테스트 주입점은 명세 변경 시점을 결정적으로 검증하기 위한 내부 경계다.
+    internal static async Task RunAsync(CompilerOptions options, Action? afterManifestRead = null,
+        Action? beforeManifestVerification = null)
     {
         string? repository = FindRoot();
         string root = repository ?? Directory.GetCurrentDirectory();
@@ -43,9 +45,14 @@ internal static class CompilerDriver
             $"#include \"{input.Replace('\\', '/')}\"\n", TimeSpan.FromMinutes(2)));
         if (compiled.ExitCode != 0 || compiled.StdErr.Contains("warning:", StringComparison.OrdinalIgnoreCase))
             throw new MetadataException("Clang rejected reflection input:\n" + compiled.StdErr, "RMC3000",
-                "Fix the Clang diagnostic at the reported source location. Place ROCKS_CLASS or ROCKS_REFLECT_TYPE before class or struct; do not suppress or downgrade warnings.");
+                "Fix the Clang diagnostic at the reported source location. Place ROCKS_CLASS before class or struct; do not suppress or downgrade warnings.");
+        byte[]? identitySnapshot = options.IdentityManifest is null ? null : ReadIdentitySnapshot(options.IdentityManifest);
+        afterManifestRead?.Invoke();
+        StableIdManifest? manifest = options.IdentityManifest is null ? null : StableIdManifest.Load(options.IdentityManifest);
+        VerifyIdentitySnapshot(options.IdentityManifest, identitySnapshot);
+        var parser = new ClangAstParser(input, manifest);
         SchemaModel schema;
-        try { schema = new ClangAstParser(input).Parse(compiled.StdOut); }
+        try { schema = parser.Parse(compiled.StdOut); }
         catch (Exception error) when (error is JsonException or KeyNotFoundException or InvalidOperationException or FormatException)
         {
             throw new MetadataException("unsupported Clang AST shape: " + error.Message, "RMC2001",
@@ -85,13 +92,53 @@ internal static class CompilerDriver
         if (formatted.ExitCode != 0 || formatted.StdErr.Contains("warning:", StringComparison.OrdinalIgnoreCase))
             throw new MetadataException("clang-format failed: " + formatted.StdErr, "RMC3100", "Fix the formatter/style error without suppressing diagnostics.");
         byte[] bytes = new UTF8Encoding(false, true).GetBytes(formatted.StdOut.Replace("\r\n", "\n", StringComparison.Ordinal));
+        beforeManifestVerification?.Invoke();
+        // 외부 편집은 파일 잠금을 따르지 않을 수 있다. 이 비교는 확인 시점의 변경을 감지하지만
+        // 검사 이후 게시 사이에 다른 프로세스가 바꾸는 것까지 OS 원자 CAS로 막지는 않는다.
+        VerifyIdentitySnapshot(options.IdentityManifest, identitySnapshot);
         if (options.Check)
         {
             if (!File.Exists(options.Output) || !File.ReadAllBytes(options.Output).AsSpan().SequenceEqual(bytes))
                 throw new MetadataException($"generated output is stale: {options.Output}", "RMC4000", "Regenerate with the same command without --check, then rebuild.");
         }
-        else AtomicFile.WriteIfChanged(options.Output, bytes);
+        if (options.IdentityInventory is not null)
+        {
+            static object Declaration(string kind, string name, string id, SourceSite site)
+            {
+                if (site.Line < 1 || !File.Exists(site.File))
+                    throw new MetadataException($"{name}: identity inventory source location is unknown", "RMC2100",
+                        "Declare the type and property directly in a known source file.").At(site);
+                return new { kind, name, id, file = CanonicalPath.Resolve(site.File), line = site.Line };
+            }
+            var declarations = schema.Ordered.SelectMany(type =>
+                new[] { Declaration("type", type.Name, type.Id, type.Site) }
+                    .Concat(type.OwnFields.Select(field => Declaration("field", field.Owner + "::" + field.Name, field.Id, field.Site))))
+                .ToArray();
+            string json = JsonSerializer.Serialize(new { schema = 1, declarations }, new JsonSerializerOptions { WriteIndented = true }) + "\n";
+            AtomicFile.WriteIfChanged(options.IdentityInventory, new UTF8Encoding(false, true).GetBytes(json));
+            // inventory는 임시 결과다. 두 파일 간 게시 경쟁도 다시 검사하되 전체 파일 트랜잭션은
+            // 빌드 호출자가 담당한다. 실패한 실행의 inventory를 성공 결과로 사용하지 않는다.
+            VerifyIdentitySnapshot(options.IdentityManifest, identitySnapshot);
+        }
+        if (!options.Check) AtomicFile.WriteIfChanged(options.Output, bytes);
         Console.WriteLine($"Rocks metadata: {schema.Ordered.Count} types; {(options.Check ? "checked" : "generated")}");
+    }
+
+    private static byte[] ReadIdentitySnapshot(string path)
+    {
+        const long limit = 16 * 1024 * 1024;
+        if (new FileInfo(path).Length > limit) throw new InvalidDataException("Stable ID manifest exceeds size limit");
+        byte[] bytes = File.ReadAllBytes(path);
+        if (bytes.Length > limit) throw new InvalidDataException("Stable ID manifest exceeds size limit");
+        return bytes;
+    }
+
+    private static void VerifyIdentitySnapshot(string? path, byte[]? original)
+    {
+        if (path is null || original is null) return;
+        if (!original.AsSpan().SequenceEqual(ReadIdentitySnapshot(path)))
+            throw new MetadataException($"identity manifest changed during metadata generation: {path}", "RMC2100",
+                "Stop concurrent manifest edits and rebuild; no generated output was published.");
     }
 
     private static async Task ValidateCompilerArgumentsAsync(IReadOnlyList<string> arguments, bool clangCl,

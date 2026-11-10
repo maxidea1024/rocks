@@ -6,13 +6,13 @@
 
 namespace rocks::reflection_fixture {
 
-ROCKS_REFLECT_TYPE("ad100000000000000000000000000001", 1)
+ROCKS_CLASS()
 struct Base : Object {
-    ROCKS_REFLECT_FIELD("ad100000000000000000000000000011") Guid key {};
-    ROCKS_REFLECT_FIELD("ad100000000000000000000000000012") int32 count = 0;
+    ROCKS_PROPERTY() Guid key {};
+    ROCKS_PROPERTY() int32 count = 0;
 };
 
-ROCKS_REFLECT_TYPE("ad100000000000000000000000000002", 3)
+ROCKS_CLASS()
 struct Node final : Base {
     explicit Node(Allocator& allocator) noexcept : label(allocator) {
     }
@@ -26,20 +26,20 @@ struct Node final : Base {
         destroyedWithNewLabel = label.View() == StringView("new");
     }
 
-    ROCKS_REFLECT_FIELD("ad100000000000000000000000000021") String label;
-    ROCKS_REFLECT_FIELD("ad100000000000000000000000000022") ObjectRef<Node> next;
-    ROCKS_REFLECT_FIELD("ad100000000000000000000000000023") bool enabled = false;
-    ROCKS_REFLECT_FIELD("ad100000000000000000000000000024") uint8 small = 0;
-    ROCKS_REFLECT_FIELD("ad100000000000000000000000000025") uint16 medium = 0;
-    ROCKS_REFLECT_FIELD("ad100000000000000000000000000026") uint32 flags = 0;
-    ROCKS_REFLECT_FIELD("ad100000000000000000000000000027") uint64 wide = 0;
-    ROCKS_REFLECT_FIELD("ad100000000000000000000000000028") int64 signedWide = 0;
-    ROCKS_REFLECT_FIELD("ad100000000000000000000000000029") float weight = 0;
-    ROCKS_REFLECT_FIELD("ad10000000000000000000000000002a") double precision = 0;
+    ROCKS_PROPERTY() String label;
+    ROCKS_PROPERTY() ObjectRef<Node> next;
+    ROCKS_PROPERTY() bool enabled = false;
+    ROCKS_PROPERTY() uint8 small = 0;
+    ROCKS_PROPERTY() uint16 medium = 0;
+    ROCKS_PROPERTY() uint32 flags = 0;
+    ROCKS_PROPERTY() uint64 wide = 0;
+    ROCKS_PROPERTY() int64 signedWide = 0;
+    ROCKS_PROPERTY() float weight = 0;
+    ROCKS_PROPERTY() double precision = 0;
 };
 
 // CLASS/PROPERTY fixture는 private 상속 필드와 저장 정책을 실제 generated 접근기로 검증한다.
-ROCKS_CLASS("ad100000000000000000000000000003", 1, Abstract)
+ROCKS_CLASS()
 class AbstractBase : public Object {
     ROCKS_GENERATED_BODY()
 
@@ -54,12 +54,11 @@ public:
     virtual int32 ClassValue() const noexcept = 0;
 
 private:
-    ROCKS_PROPERTY("ad100000000000000000000000000031", ReadOnly, Category = "Stats",
-                   DisplayName = "체력")
+    ROCKS_PROPERTY(ReadOnly, Category = "Stats", DisplayName = "체력")
     int32 baseValue = 17;
 };
 
-ROCKS_CLASS("ad100000000000000000000000000004", 1)
+ROCKS_CLASS()
 class PropertyNode final : public AbstractBase {
     ROCKS_GENERATED_BODY()
 
@@ -72,18 +71,17 @@ public:
     }
 
 private:
-    ROCKS_PROPERTY("ad100000000000000000000000000041", Transient)
+    ROCKS_PROPERTY(Transient)
     ObjectRef<PropertyNode> transientChild;
-    ROCKS_PROPERTY("ad100000000000000000000000000042", ReadOnly, Category = "Text",
-                   DisplayName = "표시 이름")
+    ROCKS_PROPERTY(ReadOnly, Category = "Text", DisplayName = "표시 이름")
     String label;
     // UTF-8·인용부호·역슬래시·개행·NUL 뒤 숫자를 등록 metadata에서 바이트 단위로 검증한다.
-    ROCKS_PROPERTY("ad100000000000000000000000000043", Transient, DisplayName = "한글\"\\\n\u00007")
+    ROCKS_PROPERTY(Transient, DisplayName = "한글\"\\\n\u00007")
     int32 runtimeCache = 73;
 };
 
 // C++ concrete 타입도 선언 정책 Abstract이면 생성할 수 없다.
-ROCKS_CLASS("ad100000000000000000000000000005", 1, Abstract)
+ROCKS_CLASS(Abstract)
 struct AbstractByPolicy : Object {
     static inline uint32 constructions = 0;
 
@@ -92,12 +90,12 @@ struct AbstractByPolicy : Object {
     }
 };
 
-// 이전 타입 별칭도 같은 전치 규칙과 private 필드 접근을 사용한다.
-ROCKS_REFLECT_TYPE("ad100000000000000000000000000006", 1)
+// 자동 ID 선언도 같은 전치 규칙과 private 필드 접근을 사용한다.
+ROCKS_CLASS()
 class AliasPrivate final : public Object {
     ROCKS_GENERATED_BODY()
 
-    ROCKS_REFLECT_FIELD("ad100000000000000000000000000051") int32 value = 41;
+    ROCKS_PROPERTY() int32 value = 41;
 
 public:
     int32 Read() const noexcept {

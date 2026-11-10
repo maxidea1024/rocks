@@ -51,7 +51,9 @@ public static class GameInputSnapshot
     public static string[] DeclaredInputs(BuildContext context, IEnumerable<NativeModuleInput> modules, TargetRules target) =>
         modules.SelectMany(module => module.Sources.Concat(module.PublicIncludeDirectories)
             .Concat(module.PrivateIncludeDirectories).Concat(module.AdditionalInputs).Concat(module.PrebuiltLibraries))
-            .Concat(target.Metadata.Select(unit => unit.Input)).Select(context.PathInRoot).Distinct().ToArray();
+            .Concat(target.Metadata.Select(unit => unit.Input))
+            .Concat(target.IdentityManifest is null ? [] : [target.IdentityManifest])
+            .Select(context.PathInRoot).Distinct().ToArray();
 
     private static bool Inside(string root, string path)
     {

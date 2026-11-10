@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "entries": [
+    { "kind": "field", "name": "sample::GameObject::health", "id": "da100000000000000000000000000002", "aliases": [], "retired": false },
+    { "kind": "type", "name": "sample::GameObject", "id": "da100000000000000000000000000001", "aliases": [], "retired": false }
+  ]
+}

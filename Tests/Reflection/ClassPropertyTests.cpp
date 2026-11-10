@@ -256,7 +256,7 @@ TEST(ReflectionPropertyDisplayMetadataIsDeepCopiedAndUnknownFlagsAreRejected) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
-TEST(ReflectionPrefixAliasProvidesPrivateFieldOperations) {
+TEST(ReflectionAutomaticIdentityProvidesPrivateFieldOperations) {
     SystemAllocator allocator;
     {
         TypeRegistry types(allocator);

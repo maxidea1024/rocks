@@ -6,10 +6,10 @@ namespace Rocks.ToolTests;
 internal static class GeneratedBodyReviewTests
 {
     private const string Preamble = "#include <Meta/Annotations.h>\n#include <Object/Object.h>\nnamespace probe {\n";
-    private const string ValidClass = "ROCKS_CLASS(\"a7100000000000000000000000000001\", 1)\n" +
+    private const string ValidClass = "ROCKS_CLASS()\n" +
         "class Object : public rocks::Object {\n" +
         "    ROCKS_GENERATED_BODY()\n" +
-        "    ROCKS_PROPERTY(\"a7100000000000000000000000000002\") int value = 7;\n" +
+        "    ROCKS_PROPERTY() int value = 7;\n" +
         "public: int Read() const noexcept { return value; }\n};\n";
 
     public static void Register(TestSuite suite, Options options, IReadOnlyDictionary<string, string?> environment)
@@ -22,16 +22,6 @@ internal static class GeneratedBodyReviewTests
             Verify.That(File.Exists(probe.Output), "valid generated body did not publish output");
         });
 
-        suite.Add("Meta.GeneratedBodyWorksWithReflectTypeAlias", async () =>
-        {
-            using Probe probe = new(options, environment);
-            string source = Preamble + ValidClass.Replace("ROCKS_CLASS", "ROCKS_REFLECT_TYPE", StringComparison.Ordinal)
-                .Replace("ROCKS_PROPERTY", "ROCKS_REFLECT_FIELD", StringComparison.Ordinal) + "}\n";
-            ProcessResult result = await probe.Run(source);
-            Verify.Equal(0, result.ExitCode, "prefix alias with private field rejected: " + result.StdErr);
-            Verify.Contains("probe::Object", File.ReadAllText(probe.Output), "alias metadata missing");
-        });
-
         suite.Add("Meta.GeneratedBodyOnUnreflectedClassIsRejected", async () =>
         {
             using Probe probe = new(options, environment);
@@ -42,7 +32,7 @@ internal static class GeneratedBodyReviewTests
         suite.Add("Meta.GeneratedBodyOnUnreflectedNestedClassIsRejected", async () =>
         {
             using Probe probe = new(options, environment);
-            string source = Preamble + "ROCKS_CLASS(\"a7100000000000000000000000000001\", 1)\n" +
+            string source = Preamble + "ROCKS_CLASS()\n" +
                 "class Parent : public rocks::Object {\npublic:\n" +
                 "    struct Child {\n        ROCKS_GENERATED_BODY()\n    };\n};\n}\n";
             await probe.Reject(source, "Probe.h:8:", "ROCKS_GENERATED_BODY");
@@ -51,13 +41,13 @@ internal static class GeneratedBodyReviewTests
         suite.Add("Meta.GeneratedBodyRejectsForgedAndWrappedMarkers", async () =>
         {
             using Probe probe = new(options, environment);
-            string prefix = Preamble + "ROCKS_CLASS(\"a7100000000000000000000000000001\", 1)\n" +
+            string prefix = Preamble + "ROCKS_CLASS()\n" +
                 "struct Object : rocks::Object {\n";
             string forged = prefix + "    [[clang::annotate(\"rocks\", \"rocks.generated\")]] " +
                 "static void rocksGeneratedAccessMarker() noexcept;\n};\n}\n";
             await probe.Reject(forged, "Probe.h:6:", "ROCKS_GENERATED_BODY");
             string wrapper = Preamble + "#define MY_BODY() ROCKS_GENERATED_BODY()\n" +
-                "ROCKS_CLASS(\"a7100000000000000000000000000001\", 1)\n" +
+                "ROCKS_CLASS()\n" +
                 "struct Object : rocks::Object {\n    MY_BODY()\n};\n}\n";
             await probe.Reject(wrapper, "Probe.h:7:", "ROCKS_GENERATED_BODY");
         });
@@ -78,7 +68,7 @@ internal static class GeneratedBodyReviewTests
             ];
             for (int index = 0; index < markers.Length; ++index)
             {
-                string source = Preamble + "ROCKS_CLASS(\"a7100000000000000000000000000001\", 1)\n" +
+                string source = Preamble + "ROCKS_CLASS()\n" +
                     "struct Object : rocks::Object {\n    " + markers[index] + "\n};\n}\n";
                 string expectedLocation = index == markers.Length - 1 ? "Probe.h:7:" : "Probe.h:6:";
                 await probe.Reject(source, expectedLocation, "ROCKS_GENERATED_BODY");
@@ -94,6 +84,8 @@ internal static class GeneratedBodyReviewTests
         public async Task<ProcessResult> Run(string source)
         {
             temporary.Write("Probe.h", source);
+            string identity = temporary.FilePath("probe.rocksids.json");
+            if (!File.Exists(identity)) MetaProbeIdentity.Create(identity);
             string generator = Path.GetFullPath(options.Required("metacompiler"));
             string executable = generator;
             List<string> arguments = [];
@@ -103,7 +95,11 @@ internal static class GeneratedBodyReviewTests
                 arguments.Add(generator);
             }
             arguments.AddRange(["--input", temporary.FilePath("Probe.h"), "--include", "Probe.h",
-                "--output", Output, "--compiler", options.Required("compiler")]);
+                "--output", Output, "--compiler", options.Required("compiler"), "--identity-manifest", identity]);
+            foreach (string directory in Directory.GetDirectories(Path.Combine(options.Root, "Engine"))
+                .Select(module => Path.Combine(module, "Public")).Where(Directory.Exists).Order(StringComparer.Ordinal)
+                .Concat([options.Root, temporary.Root]))
+                arguments.AddRange(["--include-dir", directory]);
             foreach (string argument in options.ClangArguments)
                 arguments.Add("--clang-arg=" + argument);
             return await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment,
