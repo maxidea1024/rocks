@@ -7,7 +7,8 @@ namespace Rocks.MetaCompiler;
 internal sealed class ClangAstParser(string inputFile)
 {
     private readonly Dictionary<string, ClassModel> classes = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, object?[]> prefixClasses = new(StringComparer.Ordinal);
+    private sealed record PrefixBinding(object?[] Arguments, SourceSite Site);
+    private readonly Dictionary<string, PrefixBinding> prefixClasses = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> identifiers = new(StringComparer.Ordinal);
 
     private SourceSite currentSite = new(inputFile, 1);
@@ -95,20 +96,25 @@ internal sealed class ClangAstParser(string inputFile)
             string name = Text(node, "name");
             string qualified = string.Join("::", scope.Append(name));
             object?[]? mark = Annotation(node, "rocks.type");
-            if (prefixClasses.TryGetValue(Text(node, "id"), out object?[]? prefix)) mark = prefix;
+            prefixClasses.TryGetValue(Text(node, "id"), out PrefixBinding? prefix);
+            if (prefix is not null) mark = prefix.Arguments;
             if (mark is not null)
             {
                 UpdateSite(node);
+                SourceSite classSite = currentSite;
+                if (prefix is not null) currentSite = prefix.Site;
                 if (anonymous || templated || name.Length == 0 || mark.Length is < 2 or > 3)
                     throw new MetadataException($"{qualified}: anonymous/template/invalid reflected type is unsupported");
                 string id = Identifier(mark[0], qualified);
                 if (mark[1] is not BigInteger version || version < 1 || version > uint.MaxValue)
                     throw new MetadataException($"{qualified}: schema version must be 1..UINT32_MAX");
+                bool explicitAbstract = Specifiers.Class(Payload(mark, 2, qualified), qualified);
+                currentSite = classSite;
                 JsonElement[] bases = node.TryGetProperty("bases", out JsonElement baseArray) ? baseArray.EnumerateArray().ToArray() : [];
                 if (bases.Length != 1 || Text(bases[0], "access") != "public" || Flag(bases[0], "isVirtual"))
                     throw new MetadataException($"{qualified}: exactly one public nonvirtual Object/reflected base is required");
                 bool abstractType = node.TryGetProperty("definitionData", out JsonElement definition) && Flag(definition, "isAbstract");
-                bool explicitAbstract = Specifiers.Class(Payload(mark, 2, qualified), qualified);
+
                 ClassModel model = new() { Name = qualified, Id = id, Site = currentSite, Version = (uint)version,
                     Base = TypeSpelling(bases[0]), Abstract = abstractType || explicitAbstract };
                 JsonElement[] members = Children(node).ToArray();
@@ -164,18 +170,19 @@ internal sealed class ClangAstParser(string inputFile)
                     string parentKind = Text(parent, "kind");
                     if (marked.Length != 1 || Text(marker, "name").Length != 0 ||
                         parentKind is not ("TranslationUnitDecl" or "NamespaceDecl" or "CXXRecordDecl"))
-                        throw new MetadataException("ROCKS_CLASS marker must be a standalone declaration in a namespace or class scope");
+                        throw new MetadataException("ROCKS_CLASS/ROCKS_REFLECT_TYPE marker must be a standalone declaration in a namespace or class scope");
                     if (index + 1 >= children.Length || Text(children[index + 1], "kind") != "CXXRecordDecl" ||
                         !Flag(children[index + 1], "completeDefinition") ||
                         Text(children[index + 1], "tagUsed") is not ("class" or "struct"))
-                        throw new MetadataException("ROCKS_CLASS must be immediately followed by a complete class or struct definition",
-                            hint: "Place ROCKS_CLASS immediately before its class definition; put both inside the same #if block.");
+                        throw new MetadataException("ROCKS_CLASS/ROCKS_REFLECT_TYPE must be immediately followed by a complete class or struct definition",
+                            hint: "Place ROCKS_CLASS or ROCKS_REFLECT_TYPE immediately before its class definition; put both inside the same #if block.");
                     JsonElement target = children[index + 1];
                     if (Annotation(target, "rocks.type") is not null)
-                        throw new MetadataException("ROCKS_CLASS and ROCKS_REFLECT_TYPE cannot both annotate the same class");
+                        throw new MetadataException("ROCKS_CLASS/ROCKS_REFLECT_TYPE prefix marker and direct rocks.type annotation cannot both annotate the same class");
+                    SourceSite markerSite = currentSite;
                     VerifyPrefixSource(marked[0], target);
-                    if (!prefixClasses.TryAdd(Text(target, "id"), Annotation(marked[0], "rocks.class.marker")!))
-                        throw new MetadataException("duplicate ROCKS_CLASS marker for the same class");
+                    if (!prefixClasses.TryAdd(Text(target, "id"), new PrefixBinding(Annotation(marked[0], "rocks.class.marker")!, markerSite)))
+                        throw new MetadataException("duplicate ROCKS_CLASS/ROCKS_REFLECT_TYPE marker for the same class");
                 }
             }
             // 다른 AST 항목도 재귀 검사한다. 함수/지역 class의 마커는 무시하지 않고 거부한다.
@@ -190,14 +197,14 @@ internal sealed class ClangAstParser(string inputFile)
             markLocation.File is null || targetLocation.File is null ||
             !File.Exists(markLocation.File) || !File.Exists(targetLocation.File) ||
             !CanonicalPath.Equals(markLocation.File, targetLocation.File))
-            throw new MetadataException("ROCKS_CLASS and class must have the same known physical source file",
+            throw new MetadataException("ROCKS_CLASS/ROCKS_REFLECT_TYPE and class must have the same known physical source file",
                 hint: "Place the marker and class directly in one source file; macro-generated or ambiguous locations are unsupported.");
         if (!target.TryGetProperty("range", out JsonElement range) ||
             !range.TryGetProperty("begin", out JsonElement begin) ||
             begin.TryGetProperty("expansionLoc", out _) ||
             !begin.TryGetProperty("offset", out JsonElement classOffset) || !classOffset.TryGetInt32(out int end))
-            throw new MetadataException("ROCKS_CLASS target location is macro-generated or ambiguous",
-                hint: "Write the class keyword directly after ROCKS_CLASS; wrapper macros are unsupported.");
+            throw new MetadataException("ROCKS_CLASS/ROCKS_REFLECT_TYPE target location is macro-generated or ambiguous",
+                hint: "Write the class keyword directly after ROCKS_CLASS or ROCKS_REFLECT_TYPE; wrapper macros are unsupported.");
         if (!sourceBytes.TryGetValue(markLocation.File, out byte[]? bytes))
         {
             bytes = File.ReadAllBytes(markLocation.File);
@@ -206,20 +213,78 @@ internal sealed class ClangAstParser(string inputFile)
         PrefixSourceVerifier.Verify(bytes, markLocation.Offset, end);
     }
 
-    private void ValidateAnnotationPlacement(JsonElement node, bool reflectedOwner)
+    private void ValidateAnnotationPlacement(JsonElement node, bool reflectedOwner,
+        bool directReflectedMember = false, string? directOwnerFile = null)
     {
         string kind = Text(node, "kind");
         UpdateSite(node);
         bool classAnnotation = Annotation(node, "rocks.type") is not null || prefixClasses.ContainsKey(Text(node, "id"));
         bool fieldAnnotation = Annotation(node, "rocks.field") is not null;
+        object?[]? generated = Annotation(node, "rocks.generated");
         if (classAnnotation && (kind != "CXXRecordDecl" || !Flag(node, "completeDefinition")))
-            throw new MetadataException("ROCKS_CLASS must annotate a complete class definition");
+            throw new MetadataException("ROCKS_CLASS/ROCKS_REFLECT_TYPE must annotate a complete class definition");
         if (fieldAnnotation && (kind != "FieldDecl" || !reflectedOwner))
             throw new MetadataException("ROCKS_PROPERTY must annotate a nonstatic data field owned by a reflected CLASS");
-        // method/parameter/local 선언까지 검사한다. 생성에 필요 없는 AST라도 잘못 붙인 annotation을 버리지 않는다.
+        if (generated is not null)
+        {
+            string signature = node.TryGetProperty("type", out JsonElement type) ? Text(type, "qualType") : "";
+            if (kind != "CXXMethodDecl" || !directReflectedMember ||
+                Text(node, "name") != "rocksGeneratedAccessMarker" ||
+                Text(node, "storageClass") != "static" || signature != "void () noexcept" || generated.Length != 0)
+                throw new MetadataException("ROCKS_GENERATED_BODY marker must be a static noexcept marker directly owned by a reflected CLASS",
+                    hint: "Place exactly one ROCKS_GENERATED_BODY() directly inside a reflected class; do not hand-write or attach its annotation elsewhere.");
+            VerifyGeneratedBodySource(node, directOwnerFile);
+        }
+        JsonElement[] children = Children(node).ToArray();
+        if (kind == "CXXRecordDecl")
+        {
+            JsonElement[] markers = children.Where(child => Annotation(child, "rocks.generated") is not null).ToArray();
+            if (markers.Length > 1)
+            {
+                UpdateSite(markers[1]);
+                throw new MetadataException("duplicate ROCKS_GENERATED_BODY marker in the same class",
+                    hint: "Remove the duplicate and leave one ROCKS_GENERATED_BODY() in the reflected class.");
+            }
+        }
+        // 직접 소유자가 반영 클래스인 경우에만 generated marker를 허용한다. 중첩 클래스나
+        // method-local 선언에 조상 클래스의 권한이 전파되지 않도록 별도로 구분한다.
         bool childOwner = kind == "CXXRecordDecl" ? classAnnotation : reflectedOwner;
-        foreach (JsonElement child in Children(node)) ValidateAnnotationPlacement(child, childOwner);
+        bool directMember = kind == "CXXRecordDecl" && classAnnotation && Flag(node, "completeDefinition");
+        string? ownerFile = directMember && locations.TryGetValue(Text(node, "id"), out var ownerLocation)
+            ? ownerLocation.File : null;
+        foreach (JsonElement child in children) ValidateAnnotationPlacement(child, childOwner, directMember, ownerFile);
     }
+
+    private void VerifyGeneratedBodySource(JsonElement node, string? ownerFile)
+    {
+        // Clang의 expansion location과 실제 원문을 모두 확인하여 사용자가 수동으로 붙인
+        // annotation이나 다른 매크로의 우회 확장을 GENERATED_BODY로 오인하지 않는다.
+        if (ownerFile is null || !File.Exists(ownerFile) ||
+            !node.TryGetProperty("loc", out JsonElement location) ||
+            !location.TryGetProperty("expansionLoc", out _) ||
+            !locations.TryGetValue(Text(node, "id"), out var marker) || marker.File is null ||
+            !File.Exists(marker.File) || !CanonicalPath.Equals(ownerFile, marker.File))
+            throw InvalidGeneratedBodySource();
+        if (!sourceBytes.TryGetValue(marker.File, out byte[]? bytes))
+        {
+            bytes = File.ReadAllBytes(marker.File);
+            sourceBytes.Add(marker.File, bytes);
+        }
+        ReadOnlySpan<byte> keyword = "ROCKS_GENERATED_BODY"u8;
+        int cursor = marker.Offset;
+        if (cursor < 0 || cursor > bytes.Length - keyword.Length ||
+            !bytes.AsSpan(cursor, keyword.Length).SequenceEqual(keyword))
+            throw InvalidGeneratedBodySource();
+        cursor += keyword.Length;
+        while (cursor < bytes.Length && bytes[cursor] is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n') ++cursor;
+        if (cursor >= bytes.Length || bytes[cursor++] != (byte)'(') throw InvalidGeneratedBodySource();
+        while (cursor < bytes.Length && bytes[cursor] is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n') ++cursor;
+        if (cursor >= bytes.Length || bytes[cursor] != (byte)')') throw InvalidGeneratedBodySource();
+    }
+
+    private static MetadataException InvalidGeneratedBodySource() => new(
+        "ROCKS_GENERATED_BODY must be a direct invocation in the same source file as its class",
+        hint: "Write ROCKS_GENERATED_BODY() directly inside the reflected class; hand-written annotations and wrapper macros are unsupported.");
     // Clang JSON은 연속 위치의 file을 생략한다. AST parent의 파일이 아니라 JSON 직렬화 순서의
     // 마지막 명시 파일을 사용한다. includedFrom은 호출자이므로 원본 파일로 취급하지 않는다.
     private void IndexLocations(JsonElement element)

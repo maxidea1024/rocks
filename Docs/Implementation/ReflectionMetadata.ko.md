@@ -4,7 +4,7 @@
 
 ## 선언과 지원 형식
 
-`ROCKS_CLASS("안정 GUID", 버전, 지정자...)`로 객체 타입을, `ROCKS_PROPERTY("안정 GUID", 지정자...)`로 필드를 선언한다. 기존 `ROCKS_REFLECT_TYPE`과 `ROCKS_REFLECT_FIELD`도 호환된다. `ROCKS_CLASS`는 `class` 또는 `struct` 바로 앞 줄에 작성한다. 매크로와 타입 사이에는 공백과 주석만 허용하고 전처리 지시문·별도 선언·wrapper 매크로는 거부한다. 조건부 선언은 마커와 클래스를 같은 `#if` 블록 안에 둔다. GUID는 0이 아닌 128비트 값이며 해당 입력 번역 단위에서 타입·필드 ID의 중복을 거부한다. 이름 변경과 무관하게 같은 의미의 필드는 같은 ID를 유지해야 한다. 버전은 Clang이 평가한 정수 상수의 값이 1부터 `UINT32_MAX` 사이여야 한다. ID는 좁은 문자열 리터럴만 허용하며 문자열 포인터 연산을 ID로 해석하지 않는다.
+`ROCKS_CLASS("안정 GUID", 버전, 지정자...)`로 객체 타입을, `ROCKS_PROPERTY("안정 GUID", 지정자...)`로 필드를 선언한다. `ROCKS_REFLECT_TYPE`은 두 인자 형식의 타입 마커 별칭이며 `ROCKS_REFLECT_FIELD`는 필드 마커 별칭이다. 두 타입 마커는 모두 `class` 또는 `struct` 바로 앞 줄에 작성한다. 이전의 `class ROCKS_REFLECT_TYPE(...)` 후치 형식은 더 이상 지원하지 않는다. 매크로와 타입 사이에는 공백과 주석만 허용하고 전처리 지시문·별도 선언·wrapper 매크로는 거부한다. 조건부 선언은 마커와 클래스를 같은 `#if` 블록 안에 둔다. GUID는 0이 아닌 128비트 값이며 해당 입력 번역 단위에서 타입·필드 ID의 중복을 거부한다. 이름 변경과 무관하게 같은 의미의 필드는 같은 ID를 유지해야 한다. 버전은 Clang이 평가한 정수 상수의 값이 1부터 `UINT32_MAX` 사이여야 한다. ID는 좁은 문자열 리터럴만 허용하며 문자열 포인터 연산을 ID로 해석하지 않는다.
 
 | 필드 형식 | 런타임 표현 |
 | --- | --- |
@@ -16,7 +16,7 @@
 | `String` | 소유한 유효 UTF-8 문자열; 길이는 바이트 수 |
 | `ObjectRef<T>` | `ObjectHandle`을 담은 참조 값; 실제 변경은 Registry barrier 경유 |
 
-현재 생성 대상은 이름 있는 비템플릿 타입이며, 모든 비정적 필드에 annotation이 필요하다. private/protected 필드는 해당 클래스에 `ROCKS_GENERATED_BODY()`를 선언해야 한다. raw pointer, 배열·컨테이너, enum, const/volatile 필드, bitfield와 annotation을 붙인 static 필드는 거부한다. static 보조 데이터는 annotation 없이 둘 수 있다. 수동 `Trace`와 자동 추적을 섞어 완전한 필드 레이아웃으로 오인하지 않도록, 생성 대상의 직접 선언된 `Trace`는 거부한다.
+현재 생성 대상은 이름 있는 비템플릿 타입이며, 모든 비정적 필드에 annotation이 필요하다. private/protected 필드는 해당 반영 클래스 안에 `ROCKS_GENERATED_BODY()`를 직접 한 번 선언해야 한다. 반영되지 않은 클래스, 다른 매크로로 감싼 호출, 수동 작성한 내부 annotation과 중복 선언은 거부한다. raw pointer, 배열·컨테이너, enum, const/volatile 필드, bitfield와 annotation을 붙인 static 필드는 거부한다. static 보조 데이터는 annotation 없이 둘 수 있다. 수동 `Trace`와 자동 추적을 섞어 완전한 필드 레이아웃으로 오인하지 않도록, 생성 대상의 직접 선언된 `Trace`는 거부한다.
 
 단일 public 비가상 상속만 지원한다. 기반 타입은 `Object` 또는 같은 입력 번역 단위에서 확인된 reflected 타입이어야 한다. 파생 스키마는 상속 필드를 안정 ID 순서로 펼치며, 상속을 포함한 필드 수는 최대 4,096개다. 생성 접근기는 멤버 포인터를 사용한다. 객체 레이아웃에서 offset을 추정하거나 raw 필드 주소를 반환하지 않는다.
 

@@ -30,7 +30,7 @@ SDK 대상 디렉터리는 새 경로여야 한다. SDK의 파일 목록과 내�
 
 ## 메타 선언
 
-`ROCKS_CLASS("GUID", 버전, Abstract)`와 `ROCKS_PROPERTY("GUID", Transient, ReadOnly, Category="...", DisplayName="...")`를 사용한다. `ROCKS_CLASS`는 `class`/`struct` 바로 앞에 두며 둘 사이에는 공백·주석만 허용한다. 마커와 클래스가 조건부이면 같은 `#if` 블록에 넣는다. 반영할 헤더는 각 대상의 `TargetRules.Metadata`에 반드시 등록한다. 현재 미등록 선언을 일반 C++ 빌드가 자동으로 감지하지는 않는다. 지정자는 필요한 것만 선택한다. 비공개 필드에는 `ROCKS_GENERATED_BODY()`가 필요하다. GUID는 영이 아닌 고유 값이어야 하며, 미지원 타입·상속·선언 위치·지정자와 모호한 선언은 생성 전에 오류로 처리한다. 생성된 C++도 같은 Clang 구성으로 검사한 후에만 게시한다.
+`ROCKS_CLASS("GUID", 버전, Abstract)`와 `ROCKS_PROPERTY("GUID", Transient, ReadOnly, Category="...", DisplayName="...")`를 사용한다. `ROCKS_CLASS`와 두 인자 별칭 `ROCKS_REFLECT_TYPE`은 모두 `class`/`struct` 바로 앞에 두며 둘 사이에는 공백·주석만 허용한다. 이전 후치 형식은 지원하지 않는다. 마커와 클래스가 조건부이면 같은 `#if` 블록에 넣는다. 반영할 헤더는 각 대상의 `TargetRules.Metadata`에 반드시 등록한다. 현재 미등록 선언을 일반 C++ 빌드가 자동으로 감지하지는 않는다. 지정자는 필요한 것만 선택한다. 비공개 필드에는 `ROCKS_GENERATED_BODY()`가 필요하다. GUID는 영이 아닌 고유 값이어야 하며, 미지원 타입·상속·선언 위치·지정자와 모호한 선언은 생성 전에 오류로 처리한다. 생성된 C++도 같은 Clang 구성으로 검사한 후에만 게시한다.
 
 `Category`와 `DisplayName`은 길이를 별도로 보관하는 UTF-8 바이트 문자열이다. 중간 NUL도 보존하므로 C 문자열 종료 문자로 길이를 추정하지 않는다. 생성 코드는 한글처럼 읽을 수 있는 문자를 그대로 표시하고, 제어 문자는 안전한 escape로 표현한다.
 

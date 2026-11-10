@@ -26,6 +26,6 @@
     [[clang::annotate("rocks", "rocks.generated")]] static void                                    \
     rocksGeneratedAccessMarker() noexcept;
 
-#define ROCKS_REFLECT_TYPE(stableId, version)                                                      \
-    [[clang::annotate("rocks", "rocks.type", stableId, version)]]
+// 두 이름 모두 class/struct 앞에 둔다. 두 인자만 쓰는 기존 이름은 동일한 마커의 별칭이다.
+#define ROCKS_REFLECT_TYPE(stableId, version) ROCKS_CLASS(stableId, version)
 #define ROCKS_REFLECT_FIELD(stableId) ROCKS_PROPERTY(stableId)

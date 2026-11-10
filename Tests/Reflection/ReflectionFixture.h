@@ -6,12 +6,14 @@
 
 namespace rocks::reflection_fixture {
 
-struct ROCKS_REFLECT_TYPE("ad100000000000000000000000000001", 1) Base : Object {
+ROCKS_REFLECT_TYPE("ad100000000000000000000000000001", 1)
+struct Base : Object {
     ROCKS_REFLECT_FIELD("ad100000000000000000000000000011") Guid key {};
     ROCKS_REFLECT_FIELD("ad100000000000000000000000000012") int32 count = 0;
 };
 
-struct ROCKS_REFLECT_TYPE("ad100000000000000000000000000002", 3) Node final : Base {
+ROCKS_REFLECT_TYPE("ad100000000000000000000000000002", 3)
+struct Node final : Base {
     explicit Node(Allocator& allocator) noexcept : label(allocator) {
     }
 
@@ -87,6 +89,19 @@ struct AbstractByPolicy : Object {
 
     AbstractByPolicy() noexcept {
         ++constructions;
+    }
+};
+
+// 이전 타입 별칭도 같은 전치 규칙과 private 필드 접근을 사용한다.
+ROCKS_REFLECT_TYPE("ad100000000000000000000000000006", 1)
+class AliasPrivate final : public Object {
+    ROCKS_GENERATED_BODY()
+
+    ROCKS_REFLECT_FIELD("ad100000000000000000000000000051") int32 value = 41;
+
+public:
+    int32 Read() const noexcept {
+        return value;
     }
 };
 

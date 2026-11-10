@@ -1,3 +1,4 @@
+# Historical fixture only: the maintained metadata compiler and tests are C#/.NET.
 """Run real Clang AST diagnostics and deterministic-output regressions."""
 from pathlib import Path
 import argparse
@@ -25,7 +26,7 @@ namespace probe {
 def declaration(field=None, version="1", bases="public rocks::Object", extra=""):
     if field is None:
         field = f'ROCKS_REFLECT_FIELD("{FIELD_ID}") rocks::int32 count = 0;'
-    return (PREAMBLE + f'struct ROCKS_REFLECT_TYPE("{TYPE_ID}", {version}) Value : {bases} {{\n'
+    return (PREAMBLE + f'ROCKS_REFLECT_TYPE("{TYPE_ID}", {version})\nstruct Value : {bases} {{\n'
             + field + "\n" + extra + "\n};\n}\n")
 
 

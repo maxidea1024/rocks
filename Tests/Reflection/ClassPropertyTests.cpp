@@ -255,3 +255,32 @@ TEST(ReflectionPropertyDisplayMetadataIsDeepCopiedAndUnknownFlagsAreRejected) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+
+TEST(ReflectionPrefixAliasProvidesPrivateFieldOperations) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(GeneratedType<reflection_fixture::AliasPrivate>::Register(types));
+        ObjectRegistry objects(allocator, types, {714, 2});
+        auto created = objects.NewObject<reflection_fixture::AliasPrivate>(
+            objects.OwnerAccess(), GeneratedType<reflection_fixture::AliasPrivate>::Id());
+        REQUIRE(created);
+        auto lease = types.Acquire(GeneratedType<reflection_fixture::AliasPrivate>::Id());
+        REQUIRE(lease);
+        FieldValue value(allocator);
+        REQUIRE(Property(lease.Value(), 0x51)
+                    .read(objects, objects.OwnerAccess(), created.Value().Handle(), value));
+        CHECK(value.kind == ValueKind::Int32);
+        CHECK(value.signedInteger == 41);
+        value.signedInteger = 92;
+        REQUIRE(Property(lease.Value(), 0x51)
+                    .write(objects, objects.OwnerAccess(), created.Value().Handle(), value));
+        auto borrowed = objects.Resolve<reflection_fixture::AliasPrivate>(objects.OwnerAccess(),
+                                                                          created.Value().Handle());
+        REQUIRE(borrowed);
+        auto object = borrowed.Value().Get();
+        REQUIRE(object);
+        CHECK(object.Value()->Read() == 92);
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}

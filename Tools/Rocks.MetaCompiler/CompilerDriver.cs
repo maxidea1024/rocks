@@ -43,7 +43,7 @@ internal static class CompilerDriver
             $"#include \"{input.Replace('\\', '/')}\"\n", TimeSpan.FromMinutes(2)));
         if (compiled.ExitCode != 0 || compiled.StdErr.Contains("warning:", StringComparison.OrdinalIgnoreCase))
             throw new MetadataException("Clang rejected reflection input:\n" + compiled.StdErr, "RMC3000",
-                "Fix the Clang diagnostic at the reported source location. Place ROCKS_CLASS before class or struct; do not suppress or downgrade warnings.");
+                "Fix the Clang diagnostic at the reported source location. Place ROCKS_CLASS or ROCKS_REFLECT_TYPE before class or struct; do not suppress or downgrade warnings.");
         SchemaModel schema;
         try { schema = new ClangAstParser(input).Parse(compiled.StdOut); }
         catch (Exception error) when (error is JsonException or KeyNotFoundException or InvalidOperationException or FormatException)

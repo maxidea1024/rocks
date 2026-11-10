@@ -6,12 +6,16 @@ internal static class PrefixSourceVerifier
     internal static void Verify(byte[] bytes, int start, int end)
     {
         int cursor = start;
-        byte[] keyword = "ROCKS_CLASS"u8.ToArray();
-        if (cursor < 0 || end <= cursor || end > bytes.Length || cursor + keyword.Length > end ||
-            !bytes.AsSpan(cursor, keyword.Length).SequenceEqual(keyword))
-            throw new MetadataException("ROCKS_CLASS marker location is macro-generated or ambiguous",
-                hint: "Write ROCKS_CLASS directly in the source; do not wrap it in another macro.");
-        cursor += keyword.Length;
+        if (cursor < 0 || end <= cursor || end > bytes.Length)
+            throw new MetadataException("Class marker location is unknown or ambiguous",
+                hint: "Write ROCKS_CLASS or ROCKS_REFLECT_TYPE directly in the source.");
+        ReadOnlySpan<byte> remainder = bytes.AsSpan(cursor, end - cursor);
+        string macro;
+        if (remainder.StartsWith("ROCKS_CLASS"u8)) macro = "ROCKS_CLASS";
+        else if (remainder.StartsWith("ROCKS_REFLECT_TYPE"u8)) macro = "ROCKS_REFLECT_TYPE";
+        else throw new MetadataException("ROCKS_CLASS/ROCKS_REFLECT_TYPE marker is macro-generated or ambiguous",
+            hint: "Write the class macro directly in the source; do not wrap it in another macro.");
+        cursor += macro.Length;
         SkipTrivia();
         if (cursor >= end || bytes[cursor++] != (byte)'(') throw InvalidGap();
         int depth = 1;
@@ -87,7 +91,7 @@ internal static class PrefixSourceVerifier
                 bytes[cursor + 1] is (byte)'\n' or (byte)'\r')
                 throw InvalidGap();
         }
-        static MetadataException InvalidGap() => new("ROCKS_CLASS is not immediately before its class in source",
-            hint: "Keep only whitespace and comments between ROCKS_CLASS and class; put both inside the same conditional block. Wrapper macros, raw strings and line splices are unsupported.");
+        MetadataException InvalidGap() => new($"{macro} is not immediately before its class in source",
+            hint: "Keep only whitespace and comments between the class macro and class; put both inside the same conditional block. Wrapper macros, raw strings and line splices are unsupported.");
     }
 }

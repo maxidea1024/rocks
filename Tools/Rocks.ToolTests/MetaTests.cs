@@ -13,7 +13,7 @@ internal static class MetaTests
 
     private static string Declaration(string? field = null, string version = "1",
         string bases = "public rocks::Object", string extra = "") =>
-        Preamble + $"struct ROCKS_REFLECT_TYPE(\"{TypeId}\", {version}) Value : {bases} {{\n" +
+        Preamble + $"ROCKS_REFLECT_TYPE(\"{TypeId}\", {version})\nstruct Value : {bases} {{\n" +
         (field ?? $"ROCKS_REFLECT_FIELD(\"{FieldId}\") rocks::int32 count = 0;") + "\n" + extra + "\n};\n}\n";
 
     public static void Register(TestSuite suite, Options options, IReadOnlyDictionary<string, string?> environment)
@@ -23,6 +23,7 @@ internal static class MetaTests
         if (!File.Exists(generator)) throw new FileNotFoundException("MetaCompiler executable missing", generator);
         Dictionary<string, string?> actualEnvironment = new(environment, OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
         if (options.Optional("formatter") is string formatter) actualEnvironment["ROCKS_CLANG_FORMAT"] = formatter;
+        GeneratedBodyReviewTests.Register(suite, options, actualEnvironment);
 
         suite.Add("Meta.FixtureDeterminismTimestampAndStaleCheck", async () =>
         {
@@ -172,7 +173,8 @@ internal static class MetaTests
                 marker + "\nint intervening;\n" + definition,
                 marker + ";\n" + definition,
                 marker + "\n" + marker + "\n" + definition,
-                marker + $"\nstruct ROCKS_REFLECT_TYPE(\"{TypeId}\", 1) Value : public rocks::Object {{}};\n",
+                marker + $"\nstruct [[clang::annotate(\"rocks\", \"rocks.type\", \"{TypeId}\", 1)]] Value : public rocks::Object {{}};\n",
+                marker + $"\nROCKS_REFLECT_TYPE(\"{TypeId}\", 1)\n" + definition,
                 marker + "\n#if 0\nstruct Intended : public rocks::Object {};\n#endif\n" + definition,
                 marker + "\n#include <Meta/Annotations.h>\n" + definition,
                 marker + "\ntemplate <class T> struct Value : public rocks::Object {};\n",
@@ -188,6 +190,24 @@ internal static class MetaTests
             ];
             foreach (string body in invalid)
                 await probe.RejectAsync(Preamble + body + "}\n", "RMC", "ROCKS_CLASS");
+        });
+        suite.Add("Meta.ReflectTypeUsesSamePrefixRules", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            await probe.GenerateAsync(Declaration());
+            string marker = $"ROCKS_REFLECT_TYPE(\"{TypeId}\", 1)";
+            string definition = "struct Value : public rocks::Object {};\n";
+            foreach (string body in new[]
+            {
+                marker + "\nint intervening;\n" + definition,
+                marker + ";\n" + definition,
+                marker + "\n#if 0\nstruct Intended : public rocks::Object {};\n#endif\n" + definition,
+                marker + "\n" + marker + "\n" + definition,
+                "#define USER_TYPE(...) ROCKS_REFLECT_TYPE(__VA_ARGS__)\n" +
+                    $"USER_TYPE(\"{TypeId}\", 1)\n" + definition,
+                $"struct ROCKS_REFLECT_TYPE(\"{TypeId}\", 1) Value : public rocks::Object {{}};\n"
+            })
+                await probe.RejectAsync(Preamble + body + "}\n", "RMC", "ROCKS_REFLECT_TYPE");
         });
         suite.Add("Meta.PrefixClassCannotBindAcrossIncludeFiles", async () =>
         {
@@ -219,8 +239,8 @@ internal static class MetaTests
         AddRejectGroup("Meta.UnannotatedOwnerAndParameterMisuse", [
             Preamble + $"struct Plain {{ ROCKS_PROPERTY(\"{FieldId}\") rocks::int32 count=0; }};\n}}\n",
             Preamble + $"void F(ROCKS_PROPERTY(\"{FieldId}\") rocks::int32 value);\n}}\n"], "RMC200", "PROPERTY");
-        AddRejectGroup("Meta.UnknownTypeSpecifier", [Declaration().Replace($"struct ROCKS_REFLECT_TYPE(\"{TypeId}\", 1)",
-            $"ROCKS_CLASS(\"{TypeId}\", 1, UnknownClassFlag)\nstruct", StringComparison.Ordinal)], "RMC2000", "specifier");
+        AddRejectGroup("Meta.UnknownTypeSpecifier", [Declaration().Replace($"ROCKS_REFLECT_TYPE(\"{TypeId}\", 1)",
+            $"ROCKS_CLASS(\"{TypeId}\", 1, UnknownClassFlag)", StringComparison.Ordinal)], "RMC2000", "specifier");
 
         void AddRejectGroup(string name, IEnumerable<string> sources, string code, string reason)
         {
@@ -396,7 +416,7 @@ internal static class MetaTests
             var fixtures = new[]
             {
                 ("#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n\n\nnamespace example {\n" +
-                    "ROCKS_CLASS(\"b1000000000000000000000000000022\", 0)\nstruct Invalid : public rocks::Object {};\n}\n", 8),
+                    "ROCKS_CLASS(\"b1000000000000000000000000000022\", 0)\nstruct Invalid : public rocks::Object {};\n}\n", 7),
                 ("#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n\nnamespace example {\n" +
                     "ROCKS_CLASS(\"b1000000000000000000000000000022\", 1)\nstruct Invalid : public rocks::Object {\n" +
                     "ROCKS_PROPERTY(\"b1000000000000000000000000000023\") int valid;\n\n" +
