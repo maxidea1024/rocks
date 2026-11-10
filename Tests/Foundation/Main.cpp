@@ -1,4 +1,5 @@
 #include "Tests/Support/Test.h"
+#include <Tests/Support/HostFailure.h>
 #include <Platform/Clock.h>
 #include <Platform/Sync.h>
 #include <stdio.h>
@@ -82,6 +83,10 @@ int main(int argc, char** argv) {
             } else if (strcmp(control, "parallel") == 0) {
                 test::RunParallelNegativeControl();
                 return test::failures == 200 ? 1 : 3;
+            } else if (strcmp(control, "thread-unjoined") == 0) {
+                return test::RunUnjoinedThreadNegativeControl();
+            } else if (strcmp(control, "name-live-lease") == 0) {
+                return test::RunOutstandingNameLeaseNegativeControl();
             } else if (strcmp(control, "asan-uaf") == 0) {
                 return test::RunAsanNegativeControl();
             } else if (strcmp(control, "assert-stderr-lock") == 0) {
@@ -132,7 +137,7 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    FILE* json = jsonPath == nullptr ? nullptr : fopen(jsonPath, "wb");
+    FILE* json = jsonPath == nullptr ? nullptr : test::OpenReportFile(jsonPath);
     if (jsonPath != nullptr && json == nullptr) {
         fprintf(stderr, "Cannot open JSON report\n");
         return 2;

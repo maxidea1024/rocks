@@ -1,6 +1,6 @@
 # Rocks 문자열·식별자·지역화 경계
 
-기준일: 2026-11-10. 기존 C13 계획에서 String/StringView 부분을 우선 구현한다. `FString`/`FText`와 같은 역할 분리는 필요하되 이름과 구현은 Rocks의 소유권·오류 규약을 따른다. 엔진 소유 Runtime과 공개 API에 STL 문자열을 사용하지 않는다.
+기준일: 2026-11-10. C13의 String/StringView·Name intern과 별도 Localization의 Text 기반을 구현했다. `FString`/`FText`와 같은 역할 분리는 필요하되 이름과 구현은 Rocks의 소유권·오류 규약을 따른다. 엔진 소유 Runtime과 공개 API에 STL 문자열을 사용하지 않는다.
 
 ## 역할과 의존성
 
@@ -8,8 +8,8 @@
 |---|---|---|---|
 | `rocks::StringView` | 길이 기반 UTF-8 바이트 열 참조 | 원본을 소유하지 않음, 비동기 보관 시 소유 복사 필요 | Core 구현 범위 |
 | `rocks::String` | 유효 UTF-8 소유 문자열 | 명시 Allocator, 실패 가능한 복사·변경은 Result, byte 수와 마지막 NUL 분리 | Core 구현 범위 |
-| `rocks::Name` | 자주 비교하는 이름의 intern 식별자 | 명시 pool 수명, 저장/전송에는 원문 또는 stable ID | 후속 C13 |
-| `rocks::Text` | 번역·서식 이력을 유지하는 사용자 표시 문구 | 안정 ID·불변 원문/인자 소유, 언어/catalog snapshot과 함께 resolve | 후속 Localization 모듈 |
+| `rocks::Name` | 자주 비교하는 이름의 intern 식별자 | 명시 pool 수명, 저장/전송에는 원문 또는 stable ID | NamePool/NameLease 구현 |
+| `rocks::Text` | 번역·서식 이력을 유지하는 사용자 표시 문구 | 안정 ID·불변 원문/인자 소유, 언어/catalog snapshot과 함께 resolve | 별도 Localization 구현 |
 | `Path`/플랫폼 adapter | OS 경로 및 외부 API 변환 | Windows UTF-16, macOS 경로 정책을 명시 변환 | 후속 PlatformFile |
 | UI text layout | grapheme, BiDi, 글꼴 fallback, shaping | 검증된 외부 text 라이브러리를 adapter로 격리 | 후속 UI |
 
@@ -27,9 +27,9 @@
 - 동시에 읽으려면 내용과 저장소 수명을 고정한다. 같은 문자열의 읽기/변경을 동기화 없이 병행하지 않는다. 다른 스레드로 소유권을 넘길 때 Allocator도 해당 사용을 지원해야 한다.
 - 일반 byte slice와 UTF-8 문자 경계 slice를 구분한다. 문자 경계를 보존해도 grapheme 경계를 보장하지는 않는다.
 
-## Text 후속 설계
+## Text 설계와 현재 구현 경계
 
-`Text`를 `using Text = String`으로 시작하면 번역 키와 서식 이력을 잃기 쉽다. 아래 계약을 확정하고 별도 모듈에서 구현한다. 아직 존재하지 않는 API를 완료 상태로 선언하지 않는다.
+`Text`를 `using Text = String`으로 시작하면 번역 키와 서식 이력을 잃기 쉽다. 아래 장기 계약을 유지하고 별도 모듈에서 기본 불변 이력·catalog snapshot·named substitution을 구현했다. 정확한 API·수명·기본 한도는 [Name·Text 구현 계약](NameTextImplementation.ko.md)을 따른다. plural/select·날짜·통화·cook/loader·UI는 후속이며 완료 상태로 선언하지 않는다.
 
 1. **안정 ID:** namespace+key 또는 관리된 Guid를 source manifest에 저장한다. 원문 변경과 타입/에셋 rename으로 번역 정체성을 임의 변경하지 않는다. source revision을 함께 기록해 오래된 번역을 찾는다.
 2. **문구 종류:** localized key+source fallback, 언어 독립 invariant literal, 이름 있는 인자의 format expression을 구분한다. 일반 String에서 Text로의 암묵 변환은 제공하지 않는다.
@@ -44,4 +44,4 @@
 
 String/StringView는 한글·ASCII·4-byte code point·결합 문자·빈 값·내부 NUL, 잘못된 UTF-8 분류별 golden bytes, allocator N-fail, 자기 alias, overflow, move/clone, 반복 생성·종료와 마지막 live allocation 0을 검사한다. OS의 locale이나 폰트 설치 여부에 의존하지 않는다. UTF-8 golden은 구현의 분기를 그대로 복사한 oracle을 쓰지 않는다.
 
-Text 구현 착수 시 누락/오래된 키, named argument 불일치, plural/select 언어별 golden, culture 변경과 reader 유지, catalog OOM·취소·reload, cook 재현성, RTL 및 UI integration의 gate를 별도로 둔다. String 테스트 통과를 Text/IME/shaping 완료로 합산하지 않는다.
+현재 Text는 누락/오래된 키, named argument 불일치, culture 교체와 reader 유지, catalog OOM·재진입·병행 읽기를 시험한다. plural/select 언어별 golden, 비동기 취소·reload, cook 재현성, RTL 및 UI integration은 후속 gate로 구분한다. String 테스트 통과를 Text/IME/shaping 완료로 합산하지 않는다.

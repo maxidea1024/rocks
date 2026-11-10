@@ -14,7 +14,7 @@
 |---|---|---|
 | C00 | CMake 분리 target, Windows/macOS preset, 빌드 진입점, 서식·STL 검사, 단독 헤더 검사, 테스트 호스트, 모듈 템플릿 plan/apply/validate, CI 정의 | 전체 프로젝트·컴포넌트·프리팹 템플릿, 복구 저널, RocksBuild, 캐시·분산 빌드 |
 | C01 | Base 정수 타입, Guid POD, checked arithmetic | 전체 ABI·compiler 추상화 |
-| C02 | 정렬 할당, 단조 시계, 스레드 식별, mutex, 최소 fatal sink | 가상 메모리 page, 일반 thread/atomic 서비스 |
+| C02 | 정렬 할당, 단조 시계, 스레드 식별, Thread/Mutex/CV/Event/Semaphore, 최소 fatal sink | 가상 메모리 page, atomics/RWLock, thread 설정·취소 |
 | C03 | Result/Error, Move/Forward, 제한된 traits | 전체 범용 utility 집합 |
 | C04 | SystemAllocator 소유권 ledger·통계, 실패 주입 테스트 | page/arena/pool, 주소 검색 최적화, OS 내부 실패 전용 hook |
 | C05 | Array, Span, 실패 시 상태 유지, 비소유 뷰 규약 | hash map, set, queue 등 후속 컨테이너 |
@@ -25,7 +25,9 @@
 | C10 | 비공개 생성 트랜잭션, 간선 검증 후 일괄 공개, 역순 롤백 | ClassDefaults·instancing, 트랜잭션 활성 중 GC, 전체 lifecycle hook |
 | C11 | 반복형 full STW mark/sweep, scratch OOM 시 sweep 금지, 독립 그래프 oracle | 점진·병렬 GC, 시간 예산·write barrier |
 | C12 | logical destroy·retire·실제 회수 분리, Busy 종료·재시도, 모의 backend lease | 실제 GPU/IO/audio 연동, 장시간 시스템 스트레스 |
-| C13 subset | 자체 UTF-8 String/StringView, 명시 allocator·move/clone·UTF 검증·alias/OOM 회귀 13개 | Name intern, Guid 생성/parse, hash 정책, 플랫폼 변환, 지역화 Text |
+| C13 subset | 자체 UTF-8 String/StringView, NamePool/NameLease intern, 명시 수명·예산·경합 검증 | Guid 생성/parse, 일반 hash 정책, Path·플랫폼 변환 |
+
+별도 `Localization → Core` 모듈에서 Text 불변 이력·catalog snapshot·named format을 구현했다. 지역별 plural/날짜/통화·추출·쿠킹·UI는 후속이다. [Name·Text 구현 계약](NameTextImplementation.ko.md), [플랫폼 독립 동시성](PlatformConcurrency.ko.md), [컴파일러 경고 정책](../Design/CompilerDiagnostics.ko.md)을 함께 따른다.
 
 주요 파일 위치는 다음과 같다.
 
@@ -53,7 +55,7 @@
 
 `std::string`이나 `std::wstring`을 도입하지 않는다. `String`은 Allocator 기반 UTF-8 소유 값, `StringView`는 길이 기반 비소유 뷰다. 길이 API는 byte 단위이며 문자·grapheme 수와 혼용하지 않는다. 정규화, 대소문자 언어 규칙, BiDi와 글꼴 shaping은 별도 계층이다.
 
-`Text`는 String의 별명으로 만들지 않는다. 지역화 ID·원문·언어 변경·형식 인자·카탈로그 revision의 수명을 갖는 표시 문구 계층으로 계획한다. `Name`도 별도 intern 식별자다. 기능·의존성·검증 기준은 [문자열과 지역화 경계](StringAndText.ko.md)를 따른다.
+`Text`는 String의 별명이 아니라 지역화 ID·원문·형식 인자·카탈로그 revision의 수명을 갖는 불변 표시 문구 계층으로 구현했다. `Name`은 pool domain을 구별하는 별도 intern 식별자다. 기능·의존성·검증 기준은 [문자열과 지역화 경계](StringAndText.ko.md)를 따른다.
 
 ## 5. 진단과 검증
 
@@ -77,7 +79,7 @@ macOS는 native host에서 `macos-clang-debug`, `macos-clang-asan` preset을 사
 
 실행마다 `out/<preset>/foundation-report.json`, `build-evidence.json`, `Testing/Temporary/LastTest.log`를 남긴다. 빌드 증거에는 소스 digest 전후, Git HEAD/dirty, compiler, seed, 단계 결과와 report 유효성을 기록한다. dirty 작업 트리 시험을 clean commit 시험으로 표기하지 않는다. 최종 실행 수치는 아래 확정 기록과 별도 검토 보고서에서 확인한다.
 
-### 최종 실행 기록
+### 이전 String/Object 단계의 실행 기록
 
 문자열 회귀 13개와 주석·LF 정리를 포함한 동일 소스로 다음 native 실행을 확인했다. 로컬 compiler는 Clang 21.1.6이며 seed는 7351이다.
 
@@ -104,6 +106,28 @@ macOS는 native host에서 `macos-clang-debug`, `macos-clang-asan` preset을 사
 
 최종 문서 대조에서 보고서 쓰기 실패 시험의 범위가 과장된 것을 발견하여, 파일 생성 실패를 검증하는 자식 프로세스 회귀를 추가했다. `556e5a28c9127d4929ae782350ae8a9dce112ec2`의 [최종 CI 실행 42767199402](https://github.com/maxidea1024/rocks/actions/runs/42767199402)에서 Windows Debug와 macOS Debug/ASan이 다시 각각 65개 테스트, CTest 5/5/6개를 통과했다. 세 결과 모두 dirty=false·stable/currentReport=true이며 최종 소스 digest는 `8843d7f11f521d648b2b442a36c980a37a1117f52f3564f2a835f3608bb29a83`다. 이 후속 변경은 Python 회귀와 문서이며 엔진 C++ 코드는 바꾸지 않았다.
 
+
+### Name·Text·플랫폼 확장: 최신 로컬 검증
+
+이전 65개 단계에 Name 10개, Localization 24개, Platform 추가 11개를 더한 현재 전체는 **110개**다. 플랫폼 API 이관과 경고 규약까지 포함한 동일 소스로 다음 실행을 확인했다. compiler는 Clang 21.1.6, seed는 7351이다.
+
+| 구성 | Foundation fixture | CTest | 결과 |
+|---|---:|---:|---|
+| Windows Core-only Debug | 83개 | 8개 | PASS |
+| Windows 전체 Debug | 110개 | 8개 | PASS |
+| Windows 전체 Release | 110개 | 8개 | PASS |
+| Windows 전체 ASan | 110개 | 9개 | PASS |
+
+모든 evidence가 sourceStableDuringRun=true, runnerReportCurrent=true, testsStatus=PASS다. 입력 116개 digest는 `e4b9e381004fda7b8c5252c241783496fe5a14a000a8d6d631ab7e27f57d02ed`다. Git HEAD `fce27b519e944db4229adb68f4fb46a7b5f031bc` 위 dirty 작업 트리 실행이며 clean commit 검증으로 표시하지 않는다.
+
+CTest에는 실제 컴파일 경고의 오류 처리, 경고 옵션·pragma 강등 음성 대조, 공용 코드의 OS 의존 유입 감사·음성 대조가 포함된다. 소유 Thread의 Join 누락과 활성 NameLease를 남긴 pool 파괴도 자식 프로세스에서 Fatal을 확인한다. ASan 구성은 실제 UAF 대조군이 sanitizer 진단으로 실패해야 통과한다.
+
+같은 Release 소스를 100회 반복하여 **110 × 100 = 11,000회** 모두 통과했다. `out/windows-clang-release/repeat-report.json`과 `repeat-evidence.json`을 기본 보고서와 별도로 보관했다. 종료 시 임시 소유권·allocator ledger 검사도 각 fixture의 규약대로 반복한다. 이 결과를 장시간 제품 워크로드나 모든 스케줄의 검증으로 확대하지 않는다.
+
+교차 검토는 Name·Text 구현/테스트 분리, 플랫폼 수명·동시 제어, 빌드 정책의 독립 재검토로 진행했다. 중복 Text 인자의 오류 코드 불일치, Windows SDK 매크로와 Yield 이름 충돌, 경고 감사의 플래그 누락·강등 누락을 수정하고 양의 work/depth 경계·catalog 정리 재진입·동시 Join/Wait 시험을 보강했다. 상세 기록은 `ImplementationRound4.*.ko.md`를 따른다.
+
+네이티브 Thread 생성/Join 실패 강제 주입, TSan, 임의 스케줄 전체 탐색, Linux/콘솔 backend는 미완료다. Null renderer·에디터·PIE의 실제 실행을 이 CPU 헤드리스 fixture 통과와 합산하지 않는다.
+
 ### 테스트 범위
 
 - 할당기 정렬·실패·소유권·스레드 계수, Array 성장·자기 alias·소멸 수, Span stride 검증.
@@ -127,7 +151,7 @@ Windows ASan은 LeakSanitizer가 아니며, 소유권 ledger와 종료 검사를
 - assertion 경로의 CRT stderr lock 의존, 테스트 실패 집계의 worker 경합, profile 이름 잘림 정보 유실을 수정했다.
 - 주석 검토에서는 Shutdown 닫기 전 실패, 콜백 재진입 예외, 타입 식별자 표현, wrapper 동시 사용 제한을 보완했다.
 
-근거는 `Docs/Reviews/ImplementationRound*.ko.md`와 각 회귀 테스트에 둔다. 과거 회차 보고서는 당시 실행 범위를 보존하며 최신 결과는 이 문서의 최종 기록으로 구분한다.
+근거는 `Docs/Reviews/ImplementationRound*.ko.md`와 각 회귀 테스트에 둔다. 과거 회차 보고서는 당시 실행 범위를 보존하며 최신 결과는 Name·Text·플랫폼 확장 검증 기록으로 구분한다.
 
 ## 7. 다음 구현 순서
 

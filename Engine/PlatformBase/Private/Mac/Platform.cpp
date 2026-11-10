@@ -1,5 +1,3 @@
-#if defined(__APPLE__)
-
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
@@ -98,5 +96,3 @@ uint64 CurrentThreadId() noexcept {
 }
 
 } // namespace rocks::platform
-
-#endif

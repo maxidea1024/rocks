@@ -16,9 +16,9 @@ add_library(rocks_options INTERFACE)
 if(MSVC)
     string(REPLACE "/EHsc" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
     target_compile_options(rocks_options INTERFACE /W4 /WX /GR- /EHs-c- /Zc:__cplusplus)
-    target_compile_definitions(rocks_options INTERFACE _CRT_SECURE_NO_WARNINGS NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_compile_definitions(rocks_options INTERFACE NOMINMAX WIN32_LEAN_AND_MEAN)
 else()
-    target_compile_options(rocks_options INTERFACE -Wall -Wextra -Werror -fno-exceptions -fno-rtti)
+    target_compile_options(rocks_options INTERFACE -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
 endif()
 if(WIN32)
     set(ROCKS_PLATFORM_DIRECTORY Win64)
@@ -51,9 +51,11 @@ target_include_directories(rocks_base INTERFACE Engine/Base/Public)
 target_link_libraries(rocks_base INTERFACE rocks_options)
 
 file(GLOB_RECURSE ROCKS_PLATFORM_SOURCES CONFIGURE_DEPENDS
-    Engine/PlatformBase/Private/${ROCKS_PLATFORM_DIRECTORY}/*.cpp)
+    Engine/PlatformBase/Private/${ROCKS_PLATFORM_DIRECTORY}/*.cpp
+    Engine/PlatformBase/Private/Common/*.cpp)
 file(GLOB_RECURSE ROCKS_CORE_SOURCES CONFIGURE_DEPENDS Engine/Core/Private/*.cpp)
 file(GLOB_RECURSE ROCKS_TASK_SOURCES CONFIGURE_DEPENDS Engine/Task/Private/*.cpp)
+file(GLOB_RECURSE ROCKS_LOCALIZATION_SOURCES CONFIGURE_DEPENDS Engine/Localization/Private/*.cpp)
 file(GLOB_RECURSE ROCKS_OBJECT_SOURCES CONFIGURE_DEPENDS Engine/ObjectRuntime/Private/*.cpp)
 
 add_library(rocks_platform STATIC ${ROCKS_PLATFORM_SOURCES})
@@ -63,6 +65,11 @@ target_link_libraries(rocks_platform PUBLIC rocks_base)
 add_library(rocks_core STATIC ${ROCKS_CORE_SOURCES})
 target_include_directories(rocks_core PUBLIC Engine/Core/Public)
 target_link_libraries(rocks_core PUBLIC rocks_platform)
+
+# Localization is a Core consumer; Core and Object do not depend on display text.
+add_library(rocks_localization STATIC ${ROCKS_LOCALIZATION_SOURCES})
+target_include_directories(rocks_localization PUBLIC Engine/Localization/Public)
+target_link_libraries(rocks_localization PUBLIC rocks_core)
 
 add_library(rocks_meta INTERFACE)
 target_include_directories(rocks_meta INTERFACE Engine/MetaSchema/Public)
@@ -79,21 +86,29 @@ target_link_libraries(rocks_object PUBLIC rocks_meta rocks_task)
 
 endif()
 
+file(GLOB_RECURSE ROCKS_HOST_TEST_SOURCES CONFIGURE_DEPENDS
+    Tests/Support/Private/${ROCKS_PLATFORM_DIRECTORY}/*.cpp)
+if(ROCKS_ASAN)
+    list(APPEND ROCKS_HOST_TEST_SOURCES Tests/Support/Private/Asan/Enabled.cpp)
+else()
+    list(APPEND ROCKS_HOST_TEST_SOURCES Tests/Support/Private/Asan/Disabled.cpp)
+endif()
+
 file(GLOB_RECURSE ROCKS_BOOTSTRAP_TEST_SOURCES CONFIGURE_DEPENDS
-    Tests/Foundation/*.cpp Tests/Core/*.cpp Tests/Platform/*.cpp)
-add_executable(CoreFoundationTests ${ROCKS_BOOTSTRAP_TEST_SOURCES})
+    Tests/Foundation/*.cpp Tests/Core/*.cpp Tests/Platform/*.cpp Tests/Localization/*.cpp)
+add_executable(CoreFoundationTests ${ROCKS_BOOTSTRAP_TEST_SOURCES} ${ROCKS_HOST_TEST_SOURCES})
 target_include_directories(CoreFoundationTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} Tests/Support)
 target_compile_definitions(CoreFoundationTests PRIVATE ROCKS_TESTING=1)
-target_link_libraries(CoreFoundationTests PRIVATE rocks_task)
+target_link_libraries(CoreFoundationTests PRIVATE rocks_task rocks_localization)
 set(ROCKS_TEST_EXECUTABLE CoreFoundationTests)
 
 if(ROCKS_BUILD_OBJECT)
 file(GLOB_RECURSE ROCKS_TEST_SOURCES CONFIGURE_DEPENDS
-    Tests/Foundation/*.cpp Tests/Core/*.cpp Tests/Platform/*.cpp Tests/Object/*.cpp)
-add_executable(FoundationTests ${ROCKS_TEST_SOURCES})
+    Tests/Foundation/*.cpp Tests/Core/*.cpp Tests/Platform/*.cpp Tests/Object/*.cpp Tests/Localization/*.cpp)
+add_executable(FoundationTests ${ROCKS_TEST_SOURCES} ${ROCKS_HOST_TEST_SOURCES})
 target_include_directories(FoundationTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} Tests/Support)
 target_compile_definitions(FoundationTests PRIVATE ROCKS_TESTING=1)
-target_link_libraries(FoundationTests PRIVATE rocks_object)
+target_link_libraries(FoundationTests PRIVATE rocks_object rocks_localization)
 
 set(ROCKS_TEST_EXECUTABLE FoundationTests)
 endif()
@@ -113,9 +128,9 @@ foreach(header IN LISTS ROCKS_PUBLIC_HEADERS)
 endforeach()
 add_library(rocks_header_checks OBJECT ${ROCKS_HEADER_SOURCES})
 if(ROCKS_BUILD_OBJECT)
-    target_link_libraries(rocks_header_checks PRIVATE rocks_object)
+    target_link_libraries(rocks_header_checks PRIVATE rocks_object rocks_localization)
 else()
-    target_link_libraries(rocks_header_checks PRIVATE rocks_task)
+    target_link_libraries(rocks_header_checks PRIVATE rocks_task rocks_localization)
 endif()
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
@@ -138,3 +153,31 @@ if(ROCKS_ASAN)
     add_test(NAME asan_negative_control
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/Tests/Integration/test_asan_probe.py $<TARGET_FILE:${ROCKS_TEST_EXECUTABLE}>)
 endif()
+
+# A deadlock in a lifetime/concurrency fixture must fail the job instead of hanging CI.
+set_tests_properties(foundation harness_negative_controls PROPERTIES TIMEOUT 120)
+if(ROCKS_ASAN)
+    set_tests_properties(asan_negative_control PROPERTIES TIMEOUT 30)
+endif()
+
+add_test(NAME platform_boundary_audit
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/Build/audit_platform_boundary.py ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME platform_boundary_negative_controls
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/Tests/Integration/test_platform_boundary.py)
+
+# These probes inherit the production warning profile but never enter the default build.
+# CTest proves that clean code compiles and an intentional warning is rejected.
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/WarningChecks/clean.cpp"
+    CONTENT "int RocksWarningProbe() noexcept { return 0; }\n")
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/WarningChecks/warning.cpp"
+    CONTENT "int RocksWarningProbe() noexcept { int unusedWarningProbe = 7; return 0; }\n")
+add_library(rocks_warning_clean_probe OBJECT EXCLUDE_FROM_ALL
+    "${CMAKE_CURRENT_BINARY_DIR}/WarningChecks/clean.cpp")
+add_library(rocks_warning_reject_probe OBJECT EXCLUDE_FROM_ALL
+    "${CMAKE_CURRENT_BINARY_DIR}/WarningChecks/warning.cpp")
+target_link_libraries(rocks_warning_clean_probe PRIVATE rocks_options)
+target_link_libraries(rocks_warning_reject_probe PRIVATE rocks_options)
+add_test(NAME warning_policy
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/Tests/Integration/test_warning_policy.py
+        ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_COMMAND})
+set_tests_properties(warning_policy PROPERTIES TIMEOUT 120)

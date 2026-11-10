@@ -4,17 +4,7 @@
 #include <Platform/Sync.h>
 #include <Core/Memory/SystemAllocator.h>
 
-#if defined(_WIN32)
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <Windows.h>
-#elif defined(__APPLE__)
-#include <pthread.h>
-#endif
+#include <Platform/Thread.h>
 
 using namespace rocks;
 
@@ -67,65 +57,31 @@ void RunWorker(WorkerContext& context) noexcept {
     }
 }
 
-#if defined(_WIN32)
-DWORD WINAPI WorkerEntry(void* raw) {
+void WorkerEntry(void* raw) noexcept {
     RunWorker(*static_cast<WorkerContext*>(raw));
-    return 0;
 }
 
 bool RunAllWorkers(WorkerContext* contexts) {
-    HANDLE threads[WorkerCount]{};
+    platform::Thread threads[WorkerCount];
     bool success = true;
     contexts[0].mutex->Lock();
     for (usize index = 0; index < WorkerCount; ++index) {
-        threads[index] = CreateThread(nullptr, 0, WorkerEntry, &contexts[index], 0, nullptr);
-        if (threads[index] == nullptr) {
-            success = false;
-        }
+        const auto started = threads[index].Start(WorkerEntry, &contexts[index]);
+        success = success && started == platform::ThreadStatus::Success;
     }
 
     contexts[0].mutex->Unlock();
-
-    for (usize index = 0; index < WorkerCount; ++index) {
-        if (threads[index] != nullptr) {
-            if (WaitForSingleObject(threads[index], INFINITE) != WAIT_OBJECT_0) {
+    for (auto& thread : threads) {
+        if (thread.IsJoinable()) {
+            // entry 완료의 시간 제한과 native 종료 회수를 분리한다. context는 Join 뒤에 해제한다.
+            if (thread.WaitForCompletion(10000) != platform::WaitResult::Signaled ||
+                thread.Join() != platform::ThreadStatus::Success) {
                 platform::Fatal("Failed to join a platform test thread");
             }
-
-            CloseHandle(threads[index]);
         }
     }
-
     return success;
 }
-#elif defined(__APPLE__)
-void* WorkerEntry(void* raw) {
-    RunWorker(*static_cast<WorkerContext*>(raw));
-    return nullptr;
-}
-
-bool RunAllWorkers(WorkerContext* contexts) {
-    pthread_t threads[WorkerCount]{};
-    bool started[WorkerCount]{};
-    bool success = true;
-    contexts[0].mutex->Lock();
-    for (usize index = 0; index < WorkerCount; ++index) {
-        started[index] =
-            pthread_create(&threads[index], nullptr, WorkerEntry, &contexts[index]) == 0;
-        success = success && started[index];
-    }
-
-    contexts[0].mutex->Unlock();
-
-    for (usize index = 0; index < WorkerCount; ++index) {
-        if (started[index] && pthread_join(threads[index], nullptr) != 0) {
-            platform::Fatal("Failed to join a platform test thread");
-        }
-    }
-
-    return success;
-}
-#endif
 
 } // namespace
 

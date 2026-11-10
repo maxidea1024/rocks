@@ -1,111 +1,81 @@
 #include "Tests/Support/Test.h"
+#include "Tests/Support/HostFailure.h"
 #include <Core/Assert.h>
-#include <stdio.h>
-#include <stdlib.h>
-
-#if defined(_WIN32)
-#include <Windows.h>
-#elif defined(__APPLE__)
-#include <pthread.h>
-#endif
+#include <Core/Memory/SystemAllocator.h>
+#include <Core/Text/NamePool.h>
+#include <Platform/Thread.h>
 
 namespace rocks::test {
 namespace {
 
-void CheckWorker() noexcept {
+void ParallelEntry(void*) noexcept {
     for (int i = 0; i < 50; ++i) {
         RecordFailure("parallel-negative-control", __FILE__, __LINE__);
     }
 }
 
-#if defined(_WIN32)
-DWORD WINAPI ParallelEntry(void*) {
-    CheckWorker();
-    return 0;
+void AssertEntry(void*) noexcept {
+    ROCKS_ASSERT(false);
 }
 
-DWORD WINAPI AssertEntry(void*) {
-    ROCKS_ASSERT(false);
-    return 0;
-}
-#else
-void* ParallelEntry(void*) {
-    CheckWorker();
-    return nullptr;
-}
-
-void* AssertEntry(void*) {
-    ROCKS_ASSERT(false);
-    return nullptr;
-}
-#endif
 } // namespace
 
 void RunParallelNegativeControl() noexcept {
-#if defined(_WIN32)
-    HANDLE workers[4]{};
+    platform::Thread workers[4];
     for (auto& worker : workers) {
-        worker = CreateThread(nullptr, 0, ParallelEntry, nullptr, 0, nullptr);
-        ROCKS_ASSERT(worker != nullptr);
+        ROCKS_ASSERT(worker.Start(ParallelEntry, nullptr) == platform::ThreadStatus::Success);
     }
-    for (auto worker : workers) {
-        ROCKS_ASSERT(WaitForSingleObject(worker, INFINITE) == WAIT_OBJECT_0);
-        CloseHandle(worker);
-    }
-#else
-    pthread_t workers[4]{};
     for (auto& worker : workers) {
-        ROCKS_ASSERT(pthread_create(&worker, nullptr, ParallelEntry, nullptr) == 0);
+        ROCKS_ASSERT(worker.WaitForCompletion(10000) == platform::WaitResult::Signaled);
+        ROCKS_ASSERT(worker.Join() == platform::ThreadStatus::Success);
     }
-    for (auto worker : workers) {
-        ROCKS_ASSERT(pthread_join(worker, nullptr) == 0);
-    }
-#endif
 }
 
 int RunAssertWithLockedStderr() noexcept {
-#if defined(_WIN32)
-    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
-    _lock_file(stderr);
-    HANDLE worker = CreateThread(nullptr, 0, AssertEntry, nullptr, 0, nullptr);
-    if (worker == nullptr) {
-        _unlock_file(stderr);
+    PrepareFatalTestProcess();
+    LockStandardErrorForTest();
+    platform::Thread worker;
+    if (worker.Start(AssertEntry, nullptr) != platform::ThreadStatus::Success) {
+        UnlockStandardErrorForTest();
         return 2;
     }
-    WaitForSingleObject(worker, INFINITE);
-    CloseHandle(worker);
-    _unlock_file(stderr);
-#else
-    flockfile(stderr);
-    pthread_t worker{};
-    if (pthread_create(&worker, nullptr, AssertEntry, nullptr) != 0) {
-        funlockfile(stderr);
-        return 2;
+    // 정상 경로는 worker의 assert가 프로세스를 종료한다. 교착을 성공으로 넘기지 않는다.
+    if (worker.WaitForCompletion(5000) != platform::WaitResult::Signaled) {
+        platform::Fatal("Assertion worker did not terminate under the stream lock");
     }
-    pthread_join(worker, nullptr);
-    funlockfile(stderr);
-#endif
-    return 0;
+    const auto joined = worker.Join();
+    UnlockStandardErrorForTest();
+    return joined == platform::ThreadStatus::Success ? 0 : 2;
 }
-} // namespace rocks::test
 
-namespace rocks::test {
-int RunAsanNegativeControl() noexcept {
-#if defined(__has_feature)
-#if __has_feature(address_sanitizer)
-    auto* memory = static_cast<unsigned char*>(malloc(32));
-    if (memory == nullptr) {
-        return 2;
+int RunUnjoinedThreadNegativeControl() noexcept {
+    PrepareFatalTestProcess();
+    {
+        platform::Thread thread;
+        if (thread.Start([](void*) noexcept {}) != platform::ThreadStatus::Success ||
+            thread.WaitForCompletion(10000) != platform::WaitResult::Signaled) {
+            return 2;
+        }
+        // entry 완료와 native 소유권 회수는 다르다. Join 누락을 조용히 허용하면 안 된다.
     }
-    memory[0] = 17;
-    volatile unsigned char* dangling = memory;
-    free(memory);
-    // Deliberate child-process negative control, never part of normal tests.
-    const volatile unsigned char read = *dangling;
-    (void)read;
     return 0;
-#endif
-#endif
-    return 2;
 }
+
+int RunOutstandingNameLeaseNegativeControl() noexcept {
+    PrepareFatalTestProcess();
+    SystemAllocator allocator;
+    NameLease reader;
+    {
+        NamePool pool(allocator);
+        ROCKS_ASSERT(pool.Initialize());
+        auto name = pool.TryIntern("still-owned");
+        ROCKS_ASSERT(name);
+        auto lease = pool.Acquire(name.Value());
+        ROCKS_ASSERT(lease);
+        reader = Move(lease.Value());
+        // 살아 있는 reader를 남기고 pool을 먼저 파괴하는 계약 위반 반례다.
+    }
+    return 0;
+}
+
 } // namespace rocks::test

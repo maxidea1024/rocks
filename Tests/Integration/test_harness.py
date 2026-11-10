@@ -33,3 +33,9 @@ fatal = subprocess.run([binary, "--negative-control", "assert-stderr-lock"], tex
 assert fatal.returncode != 0, fatal.returncode
 assert "Rocks invariant failed:" in fatal.stderr
 print("Concurrent failure counting and native assert under locked stderr passed")
+
+unjoined = subprocess.run([binary, "--negative-control", "thread-unjoined"], text=True, capture_output=True, timeout=15)
+assert unjoined.returncode != 0 and "Thread" in unjoined.stderr and "join" in unjoined.stderr.lower(), (unjoined.returncode, unjoined.stderr)
+live_name = subprocess.run([binary, "--negative-control", "name-live-lease"], text=True, capture_output=True, timeout=10)
+assert live_name.returncode != 0 and "NamePool destroyed with active operations or leases" in live_name.stderr, (live_name.returncode, live_name.stderr)
+print("Unjoined thread and outstanding name lease destruction were rejected")

@@ -3,17 +3,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Object/ConstructionContext.h>
 
-#if defined(_WIN32)
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <Windows.h>
-#else
-#include <pthread.h>
-#endif
+#include <Platform/Thread.h>
 
 namespace {
 
@@ -47,39 +37,22 @@ void VisitFromForeignThread(ForeignAccess& state) noexcept {
     state.backend->Reset();
 }
 
-#if defined(_WIN32)
-DWORD WINAPI ThreadEntry(void* context) {
+void ThreadEntry(void* context) noexcept {
     VisitFromForeignThread(*static_cast<ForeignAccess*>(context));
-    return 0;
 }
 
 bool RunForeignThread(ForeignAccess& state) noexcept {
-    HANDLE thread = CreateThread(nullptr, 0, ThreadEntry, &state, 0, nullptr);
-
-    if (thread == nullptr) {
+    platform::Thread thread;
+    if (thread.Start(ThreadEntry, &state) != platform::ThreadStatus::Success) {
         return false;
     }
-
-    const DWORD result = WaitForSingleObject(thread, INFINITE);
-    CloseHandle(thread);
-    return result == WAIT_OBJECT_0;
-}
-#else
-void* ThreadEntry(void* context) {
-    VisitFromForeignThread(*static_cast<ForeignAccess*>(context));
-    return nullptr;
-}
-
-bool RunForeignThread(ForeignAccess& state) noexcept {
-    pthread_t thread{};
-
-    if (pthread_create(&thread, nullptr, ThreadEntry, &state) != 0) {
-        return false;
+    // 실패한 join을 성공처럼 취급하거나 진행 중 worker의 stack context를 먼저 파괴하지 않는다.
+    if (thread.WaitForCompletion(10000) != platform::WaitResult::Signaled ||
+        thread.Join() != platform::ThreadStatus::Success) {
+        platform::Fatal("Object owner test worker failed to join");
     }
-
-    return pthread_join(thread, nullptr) == 0;
+    return true;
 }
-#endif
 
 } // namespace
 

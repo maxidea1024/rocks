@@ -188,6 +188,7 @@ ExtensionRegistry와 실제 DLL loader는 EngineHost 조립 계층에 둔다. Co
 
 등록은 Validate → Stage → Commit의 원자적인 transaction이다. 실패 시 이미 등록한 항목을 역순 해제한다. 해제는 신규 요청 차단 → subscription/task 취소 → callback drain → instance/metadata/backend lease 종료 → table 제거 순서다. 남은 사용자가 있으면 Busy를 반환하고 실제 DLL unload를 보류한다. native layout 갱신은 기본 재시작 경로를 사용한다.
 
+
 ### 4.3 코드 서식·clang-format 표준
 
 **사람이 알아보기 좋은 코드 스타일 유지**를 코드 작성과 리뷰의 명시적 원칙으로 적용한다. 읽기 쉬운 이름·적절한 빈 줄·짧고 명확한 함수 구조를 요구하며 formatter 통과만으로 가독성 검토를 대체하지 않는다.
@@ -199,6 +200,12 @@ ExtensionRegistry와 실제 DLL loader는 EngineHost 조립 계층에 둔다. Co
 첫 C00 산출물에 `.editorconfig`, `.clang-format`, `Docs/CodingStyle.md`를 포함한다. CT01에는 설정 파싱, 실제 tab 부재, 같은 입력의 포맷 재실행 동일성, 의도적으로 서식을 깨뜨린 fixture의 실패를 추가한다. PR에서는 `clang-format --dry-run --Werror`에 해당하는 검사를 수행하고 generated 파일은 생성 단계부터 같은 설정으로 출력한다. formatter 버전 변경은 별도 변경과 diff 검토로 처리한다. 외부 vendor 원본은 기본적으로 재포맷하지 않고 엔진 소유 adapter에 Rocks 규칙을 적용한다.
 
 `SeparateDefinitionBlocks: Always`와 짧은 함수/블록/조건/반복문의 한 줄 압축 금지 설정으로 정의 사이의 간격을 유지한다. 자동 도구가 처리 단계의 의미를 판단하지는 못하므로 함수 내부의 논리적 빈 줄·책임 분리는 리뷰 항목으로 남긴다. 문서의 C++ API 예제에도 같은 formatter를 적용하되, 서식 통과를 API 컴파일·엔진 구현 테스트의 통과로 해석하지 않는다. [clang-format 공식 설정](https://clang.llvm.org/docs/ClangFormatStyleOptions.html)
+
+### 4.4 컴파일러 경고 무허용 규약
+
+**컴파일러 경고는 한 건도 허용하지 않으며 반드시 오류로 취급한다.** 엔진·플랫폼 backend·테스트·C++ 도구·생성 코드·단독 공개 헤더에 적용한다. Debug/Release/ASan/Core-only/헤드리스 및 향후 Editor/Shipping에서 로컬과 CI의 기준을 동일하게 유지한다. MSVC/clang-cl은 `/W4 /WX`, Clang/Apple Clang/GCC 계열은 `-Wall -Wextra -Wpedantic -Werror`를 필수 프로필로 한다.
+
+경고 억제·강등 옵션과 pragma, `_CRT_SECURE_NO_WARNINGS` 같은 전역 억제로 통과시키지 않는다. 실제 compile command 감사와 의도적 경고 fixture의 컴파일 실패를 수용 기준에 포함한다. 적용 범위·외부 의존성 경계·검증 한계의 정확한 규범은 [컴파일러 경고 정책](CompilerDiagnostics.ko.md)을 따른다.
 
 ## 5. Base와 Platform primitive
 

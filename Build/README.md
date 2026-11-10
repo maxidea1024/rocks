@@ -17,3 +17,9 @@ The C00 scaffold supports only an ordinary module: `python Tools/Scaffold/rocks.
 The GitHub Actions workflow is configured for Windows/macOS and uploads test reports. A committed workflow is not evidence that hosted CI has run. First implementation does not claim Foundation completion, parallel GC, real asset loading, GPU/Studio integration or production build caching/distribution.
 
 Core-only: `python Build/build.py --preset windows-clang-core` sets ROCKS_BUILD_OBJECT=OFF. Windows AddressSanitizer: `python Build/build.py --preset windows-clang-asan`; the launcher locates the matching compiler resource DLL for child tests. Windows ASan does not replace the explicit allocation/owner ledger or establish LeakSanitizer coverage.
+
+## Mandatory compiler diagnostics and platform boundary
+
+Every owned C++ target, including tests, generated code and standalone public headers, must treat warnings as errors: `/W4 /WX` for the MSVC driver family; `-Wall -Wextra -Wpedantic -Werror` for Clang/Apple Clang. Warning suppression or downgrading is prohibited. See `Docs/Design/CompilerDiagnostics.ko.md` for the normative policy. CTest `warning_policy` audits actual compile commands and proves both a clean compiler control and rejection of an intentional warning. The generated probe targets are excluded from the default build.
+
+`rocks_localization` depends on Core, while Core/Object do not depend on Localization. Platform Thread/Mutex/CV/Event/Semaphore have common APIs; CMake selects native Windows/macOS implementation files. `platform_boundary_audit` and its negative controls reject known OS leakage into common code. Neither lexical audit proves arbitrary preprocessor expansion. Current native execution evidence is in `Docs/Implementation/FoundationStatus.ko.md`; historical totals do not cover newly edited source.

@@ -1,17 +1,9 @@
-#if defined(_WIN32)
-
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
 #include <Platform/Sync.h>
 #include <Base/Checked.h>
 
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
 #include <Windows.h>
 #include <malloc.h>
 #include <stdlib.h>
@@ -91,5 +83,3 @@ uint64 CurrentThreadId() noexcept {
 }
 
 } // namespace rocks::platform
-
-#endif

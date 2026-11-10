@@ -302,6 +302,13 @@ ARM64는 NEON backend를 검증하며 macOS ARM64를 별도 CI/실기기 항목�
 
 `SeparateDefinitionBlocks: Always`와 짧은 함수/블록/조건/반복문의 한 줄 압축 금지 설정으로 정의 사이의 간격을 유지한다. 자동 도구가 처리 단계의 의미를 판단하지는 못하므로 함수 내부의 논리적 빈 줄·책임 분리는 리뷰 항목으로 남긴다. 문서의 C++ API 예제에도 같은 formatter를 적용하되, 서식 통과를 API 컴파일·엔진 구현 테스트의 통과로 해석하지 않는다. [clang-format 공식 설정](https://clang.llvm.org/docs/ClangFormatStyleOptions.html)
 
+
+### 3.5 컴파일러 경고 무허용 규약
+
+**컴파일러 경고는 한 건도 허용하지 않으며 반드시 오류로 취급한다.** 엔진·플랫폼 backend·테스트·C++ 도구·생성 코드·단독 공개 헤더에 적용한다. Debug/Release/ASan/Core-only/헤드리스 및 향후 Editor/Shipping에서 로컬과 CI의 기준을 동일하게 유지한다. MSVC/clang-cl은 `/W4 /WX`, Clang/Apple Clang/GCC 계열은 `-Wall -Wextra -Wpedantic -Werror`를 필수 프로필로 한다.
+
+경고 억제·강등 옵션과 pragma, `_CRT_SECURE_NO_WARNINGS` 같은 전역 억제로 통과시키지 않는다. 실제 compile command 감사와 의도적 경고 fixture의 컴파일 실패를 수용 기준에 포함한다. 적용 범위·외부 의존성 경계·검증 한계의 정확한 규범은 [컴파일러 경고 정책](CompilerDiagnostics.ko.md)을 따른다.
+
 ## 4. Core 컨테이너와 메모리
 
 ### 4.1 할당기 구성
