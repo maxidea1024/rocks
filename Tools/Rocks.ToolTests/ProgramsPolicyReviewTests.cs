@@ -12,7 +12,8 @@ internal static class ProgramsPolicyReviewTests
             using TemporaryDirectory temporary = new();
             const string path = "Programs/Sample/Source/Main.cpp";
             temporary.Write(path, "int main() { return 0; }\n");
-            Verify.That(PolicyChecks.NativeSources(temporary.Root).Contains(temporary.FilePath(path)),
+            Verify.That(PolicyChecks.NativeSources(temporary.Root).Any(source =>
+                Path.GetRelativePath(temporary.Root, source).Replace('\\', '/') == path),
                 "formatter source enumeration skipped Programs");
             Verify.Equal(0, PolicyChecks.Runtime(temporary.Root).Count, "clean program rejected");
             Verify.Equal(0, PolicyChecks.SourceWarnings(temporary.Root).Count, "clean program warning rejected");
