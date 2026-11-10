@@ -102,6 +102,8 @@ macOS는 native host에서 `macos-clang-debug`, `macos-clang-asan` preset을 사
 
 세 구성 모두 정확한 HEAD `ea0537cd6b9ac0947300eabc92eb889e05b83bde`, Git dirty=false, sourceStableDuringRun=true, runnerReportCurrent=true이며, 소스 입력 80개의 digest는 `11c67a2cf4e1724942fd0895f2f9a99be73c9d5cef2e5cb576bbb13498e1ecbb`로 일치한다. 앞선 로컬 digest와의 차이는 runner label 변경이다. 실제 Windows/macOS native 검증 완료는 이 Foundation subset에 한하며 Mac 에디터·입력·렌더러나 Intel Mac 실행까지 검증한 것은 아니다.
 
+최종 문서 대조에서 보고서 쓰기 실패 시험의 범위가 과장된 것을 발견하여, 파일 생성 실패를 검증하는 자식 프로세스 회귀를 추가했다. `556e5a28c9127d4929ae782350ae8a9dce112ec2`의 [최종 CI 실행 42767199402](https://github.com/maxidea1024/rocks/actions/runs/42767199402)에서 Windows Debug와 macOS Debug/ASan이 다시 각각 65개 테스트, CTest 5/5/6개를 통과했다. 세 결과 모두 dirty=false·stable/currentReport=true이며 최종 소스 digest는 `8843d7f11f521d648b2b442a36c980a37a1117f52f3564f2a835f3608bb29a83`다. 이 후속 변경은 Python 회귀와 문서이며 엔진 C++ 코드는 바꾸지 않았다.
+
 ### 테스트 범위
 
 - 할당기 정렬·실패·소유권·스레드 계수, Array 성장·자기 alias·소멸 수, Span stride 검증.
