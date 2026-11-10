@@ -88,11 +88,19 @@ macOS는 native host에서 `macos-clang-debug`, `macos-clang-asan` preset을 사
 | Windows 전체 Release | 65개 | 5개 | PASS |
 | Windows 전체 AddressSanitizer | 65개 | 6개 | PASS — 실제 sanitizer UAF 음성 대조 포함 |
 
-각 구성의 build-evidence는 sourceStableDuringRun=true, runnerReportCurrent=true를 기록한다. 소스 입력 80개의 digest는 `62cfbadfab18902669f767aae452a0a7a901be8eea67554cd14a02aa55b7b3c4`다. 로컬 검증 시점은 최초 설계 커밋 위의 dirty 작업 트리이며 clean commit 실행으로 표시하지 않는다.
+각 구성의 build-evidence는 sourceStableDuringRun=true, runnerReportCurrent=true를 기록한다. 로컬 검증 당시 소스 입력 80개의 digest는 `62cfbadfab18902669f767aae452a0a7a901be8eea67554cd14a02aa55b7b3c4`다. 로컬 검증 시점은 최초 설계 커밋 위의 dirty 작업 트리이며 clean commit 실행으로 표시하지 않는다.
 
 같은 소스의 Release 전체 100회 반복, **65 × 100 = 6,500회 실행**도 실패 0으로 통과했다. `out/windows-clang-release/repeat-report.json`과 `repeat-evidence.json`에 별도 보관하여 기본 실행 보고서를 덮어쓰지 않았다. 이는 해당 fixture 반복이며 전체 엔진의 장시간 실사용·플랫폼 통합 시험을 대체하지 않는다.
 
-GitHub Windows/macOS native 실행은 구현 브랜치 게시 후 별도 기록으로 구분한다. 현재 표는 로컬 Windows 실행 결과이며 macOS 성공을 주장하지 않는다.
+이후 구현을 `927f37f`에 커밋하고, CI의 macOS runner label만 지원되는 macOS 15로 바꾼 `ea0537c`에서 [Windows/macOS native CI](https://github.com/maxidea1024/rocks/actions/runs/42766665330)가 모두 통과했다. 결과 artifact의 JSON·CTest 로그·build-evidence를 내려받아 직접 확인했다.
+
+| CI 구성 | 실제 호스트·컴파일러 | Foundation 테스트 | CTest | 결과 |
+|---|---|---:|---:|---|
+| Windows Debug | x64 · Clang 20.1.8 | 65개 | 5개 | PASS |
+| macOS 15 Debug | ARM64 · Apple Clang 17.0.0 | 65개 | 5개 | PASS |
+| macOS 15 ASan | ARM64 · Apple Clang 17.0.0 | 65개 | 6개 | PASS |
+
+세 구성 모두 정확한 HEAD `ea0537cd6b9ac0947300eabc92eb889e05b83bde`, Git dirty=false, sourceStableDuringRun=true, runnerReportCurrent=true이며, 소스 입력 80개의 digest는 `11c67a2cf4e1724942fd0895f2f9a99be73c9d5cef2e5cb576bbb13498e1ecbb`로 일치한다. 앞선 로컬 digest와의 차이는 runner label 변경이다. 실제 Windows/macOS native 검증 완료는 이 Foundation subset에 한하며 Mac 에디터·입력·렌더러나 Intel Mac 실행까지 검증한 것은 아니다.
 
 ### 테스트 범위
 
@@ -123,4 +131,4 @@ Windows ASan은 LeakSanitizer가 아니며, 소유권 ledger와 종료 검사를
 
 첫 범위의 빈칸을 닫으며 API/테스트 계약을 안정화한다. 메모리 서비스·기본 컨테이너·문자열/식별자·파일/직렬화·Task worker·Clang 메타 생성기를 의존 순서대로 확장한다. `Text`는 문자열 기반 위에서 localization catalog와 formatting adapter를 분리하고, 입력/IME·UI는 그 상위 소비자로 연결한다.
 
-macOS native 검증, 반복 종료, 긴 수명 스트레스와 실제 모듈/비동기 작업 drain을 확인한 뒤 점진·병렬 GC를 진행한다. 초기 계수·고정 버퍼와 선형 lookup이 제품용 성능 목표를 달성했다고 가정하지 않는다. 전체 C00–C26 및 Foundation Gate의 미실행 항목은 계속 미완료로 유지한다.
+이번 Windows/macOS Foundation 검증을 기반으로 실제 모듈/비동기 작업 drain, 긴 수명 스트레스와 에디터·입력 통합을 확장한 뒤 점진·병렬 GC를 진행한다. 초기 계수·고정 버퍼와 선형 lookup이 제품용 성능 목표를 달성했다고 가정하지 않는다. 전체 C00–C26 및 Foundation Gate의 미실행 항목은 계속 미완료로 유지한다.
