@@ -75,16 +75,16 @@ public static class InstalledSdk
         var sdk = Path.GetFullPath(options["sdk"]);
         var project = Path.GetFullPath(options["project"]);
         var output = Path.GetFullPath(options.GetValueOrDefault("output", Path.Combine(project, "out", BuildCommand.Configuration(options).ToString())));
-        if (Inside(sdk, output) || Inside(sdk, project))
-            throw new ArgumentException("Game source/output must be outside the immutable SDK.");
+        if (Inside(sdk, output) || Inside(sdk, project) || Inside(output, project) || Inside(output, sdk))
+            throw new ArgumentException("Game output cannot overlap or contain the project or installed SDK.");
         Directory.CreateDirectory(output);
+        var started = BeginGameEvidence(output, sdk, project);
         // 앞 실행의 PASS 보고서가 이번 실패를 성공으로 보이게 하지 않는다. 네이티브 출력 자체는 보존한다.
         AtomicFile.WriteIfChanged(Path.Combine(output, "action-report.json"), JsonSerializer.Serialize(new NativeBuildResult
         {
             Succeeded = false, ExecutedActions = 0, SkippedActions = 0, Actions = [],
             ModuleOutputs = new Dictionary<string, string>(), CompilationDatabasePath = "", Failure = "Current game build has not completed."
         }, BuildCommand.JsonOptions));
-        var started = DateTime.UtcNow;
         var status = "FAIL";
         string? failure = null;
         try
@@ -107,18 +107,29 @@ public static class InstalledSdk
         }
     }
 
+    public static DateTime BeginGameEvidence(string output, string sdk, string project)
+    {
+        var started = DateTime.UtcNow;
+        AtomicFile.WriteIfChanged(Path.Combine(output, "game-build-evidence.json"), JsonSerializer.Serialize(new
+        {
+            status = "RUNNING", startedUtc = started, finishedUtc = (DateTime?)null, sdk, project, error = (string?)null
+        }, BuildCommand.JsonOptions));
+        return started;
+    }
+
     private static async Task<int> BuildGameCoreAsync(Dictionary<string, string> options, CancellationToken cancellationToken)
     {
         var sdk = Path.GetFullPath(options["sdk"]);
         var project = Path.GetFullPath(options["project"]);
         var configuration = BuildCommand.Configuration(options);
         var output = Path.GetFullPath(options.GetValueOrDefault("output", Path.Combine(project, "out", configuration.ToString())));
-        if (Inside(sdk, output) || Inside(sdk, project))
-            throw new ArgumentException("Game source/output must be outside the immutable SDK.");
+        if (Inside(sdk, output) || Inside(sdk, project) || Inside(output, project) || Inside(output, sdk))
+            throw new ArgumentException("Game output cannot overlap or contain the project or installed SDK.");
         var toolchain = await NativeToolchains.DiscoverAsync(options.GetValueOrDefault("compiler"), cancellationToken);
         var manifest = Verify(sdk, configuration, toolchain);
         Directory.CreateDirectory(output);
         Directory.CreateDirectory(Path.Combine(output, "Generated"));
+        var initialProject = GameInputSnapshot.Capture(project, output, sdk, []);
         var rulesFiles = Directory.GetFiles(project, "*.cs", SearchOption.AllDirectories)
             .Where(file => !Inside(output, file) && (file.EndsWith(".Build.cs", StringComparison.Ordinal) || file.EndsWith(".Target.cs", StringComparison.Ordinal)))
             .Order(StringComparer.Ordinal).ToArray();
@@ -153,6 +164,8 @@ public static class InstalledSdk
             Dependencies = module.Dependencies,
             PrebuiltLibraries = module.Libraries.Select(path => SafePath(sdk, path)).ToArray()
         }).Concat(rules.Modules).ToArray();
+        var declaredInputs = GameInputSnapshot.DeclaredInputs(context, modules, rules.Target);
+        var initialDeclared = GameInputSnapshot.Capture(project, output, sdk, declaredInputs);
         var metadata = await MetadataRunner.GenerateAsync(context, toolchain, modules, rules.Target,
             Path.Combine(sdk, "Tools/Rocks.MetaCompiler/Rocks.MetaCompiler.dll"), cancellationToken);
         if (metadata != 0) return 1;
@@ -164,10 +177,21 @@ public static class InstalledSdk
             MaxParallelism = BuildCommand.Jobs(options)
         }, cancellationToken);
         BuildCommand.Print(result);
-        AtomicFile.WriteIfChanged(Path.Combine(output, "action-report.json"), JsonSerializer.Serialize(result, BuildCommand.JsonOptions));
-        // 실행 중 SDK 변경도 성공으로 인정하지 않는다.
-        Verify(sdk, configuration, toolchain);
+        // 최종 검사 전 성공 보고서를 게시하면 SDK/입력 변경에 따른 실패가 PASS로 보일 수 있다.
+        PublishVerifiedGameResult(sdk, configuration, toolchain, project, output, initialProject,
+            initialDeclared, declaredInputs, result);
         return result.Succeeded ? 0 : 1;
+    }
+
+    public static void PublishVerifiedGameResult(string sdk, NativeConfiguration configuration, NativeToolchain toolchain,
+        string project, string output, string initialProject, string initialDeclared,
+        IReadOnlyList<string> declaredInputs, NativeBuildResult result)
+    {
+        Verify(sdk, configuration, toolchain);
+        if (GameInputSnapshot.Capture(project, output, sdk, []) != initialProject ||
+            GameInputSnapshot.Capture(project, output, sdk, declaredInputs) != initialDeclared)
+            throw new InvalidOperationException("Game inputs changed during rule evaluation, metadata generation, or native build. Retry the build.");
+        AtomicFile.WriteIfChanged(Path.Combine(output, "action-report.json"), JsonSerializer.Serialize(result, BuildCommand.JsonOptions));
     }
 
     public static SdkManifest Verify(string sdk, NativeConfiguration configuration, NativeToolchain toolchain)

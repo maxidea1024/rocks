@@ -48,6 +48,11 @@ internal static class MetaTests
             Verify.That(Regex.IsMatch(File.ReadAllText(probe.Output), @"schema\s*\{\s*Id\(\)\s*,\s*3\s*,",
                 RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)), "Clang evaluated schema version was not emitted");
         });
+        suite.Add("Meta.IncludedHeaderDiagnosticUsesOriginalFileAndLine", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            await probe.NestedLocationAsync();
+        });
         suite.Add("Meta.ClassDiagnosticPointsToDeclaration", async () =>
         {
             using Probe probe = new(options, actualEnvironment, generator, compiler);
@@ -158,6 +163,40 @@ internal static class MetaTests
             }
         }
 
+        public async Task NestedLocationAsync()
+        {
+            string main = temporary.FilePath("Main.h");
+            string a = temporary.FilePath("First.h");
+            string middle = temporary.FilePath("Middle.h");
+            string bad = temporary.FilePath("Deep.h");
+            File.WriteAllText(main, "#pragma once\n#include <First.h>\n#include <Middle.h>\n");
+            File.WriteAllText(a, "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n" +
+                "namespace first { struct ROCKS_CLASS(\"b1000000000000000000000000000021\", 1) Good : public rocks::Object {}; }\n");
+            File.WriteAllText(middle, "#pragma once\n#include <Deep.h>\n");
+            var fixtures = new[]
+            {
+                ("#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n\n\nnamespace example {\n" +
+                    "struct ROCKS_CLASS(\"b1000000000000000000000000000022\", 0) Invalid : public rocks::Object {};\n}\n", 7),
+                ("#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n\nnamespace example {\n" +
+                    "struct ROCKS_CLASS(\"b1000000000000000000000000000022\", 1) Invalid : public rocks::Object {\n" +
+                    "ROCKS_PROPERTY(\"b1000000000000000000000000000023\") int valid;\n\n" +
+                    "ROCKS_PROPERTY(\"b1000000000000000000000000000024\", ReadOnyl) int bad;\n};\n}\n", 9)
+            };
+            foreach (var (source, line) in fixtures)
+            {
+                File.WriteAllText(bad, source);
+                List<string> arguments = [];
+                string executable = generator;
+                if (generator.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+                { executable = options.Optional("dotnet") ?? "dotnet"; arguments.Add(generator); }
+                arguments.AddRange(["--input", main, "--include", "Main.h", "--output", Output, "--compiler", compiler]);
+                foreach (string argument in options.ClangArguments) arguments.Add("--clang-arg=" + argument);
+                var result = await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: TimeSpan.FromSeconds(60)));
+                Verify.That(result.ExitCode != 0, "invalid nested declaration was accepted");
+                Verify.Contains($"{bad}:{line}: error RMC2000", result.StdErr, "nested source file and physical line");
+                Verify.Contains("hint:", result.StdErr, "nested declaration correction guidance");
+            }
+        }
         public async Task RejectAsync(string source, string code, string reason)
         {
             byte[] previous = Encoding.UTF8.GetBytes("previous accepted output\n");

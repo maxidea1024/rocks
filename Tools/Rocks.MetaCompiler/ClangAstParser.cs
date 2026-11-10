@@ -11,11 +11,15 @@ internal sealed class ClangAstParser(string inputFile)
 
     private SourceSite currentSite = new(inputFile, 1);
     private readonly Dictionary<string, byte[]> sourceBytes = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (string? File, int Offset)> locations = new(StringComparer.Ordinal);
+    private string? serializedFile;
+    private string? serializedParent;
 
     public SchemaModel Parse(string json)
     {
         using JsonDocument document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 2048 });
-        try { ValidateAnnotationPlacement(document.RootElement, false); currentSite = new(inputFile, 1); Visit(document.RootElement, [], false, false); }
+        IndexLocations(document.RootElement);
+        try { ValidateAnnotationPlacement(document.RootElement, false); currentSite = UnknownSite(); Visit(document.RootElement, [], false, false); }
         catch (MetadataException error) { throw error.At(currentSite); }
         if (classes.Count == 0) throw new MetadataException("no ROCKS_CLASS/ROCKS_REFLECT_TYPE definitions found in the translation unit");
         return SchemaValidator.Validate(classes);
@@ -92,7 +96,7 @@ internal sealed class ClangAstParser(string inputFile)
             object?[]? mark = Annotation(node, "rocks.type");
             if (mark is not null)
             {
-                UpdateSite(node, new SourceSite(inputFile, 1));
+                UpdateSite(node);
                 if (anonymous || templated || name.Length == 0 || mark.Length is < 2 or > 3)
                     throw new MetadataException($"{qualified}: anonymous/template/invalid reflected type is unsupported");
                 string id = Identifier(mark[0], qualified);
@@ -110,7 +114,7 @@ internal sealed class ClangAstParser(string inputFile)
                 string access = Text(node, "tagUsed") == "class" ? "private" : "public";
                 foreach (JsonElement member in members)
                 {
-                    UpdateSite(member, model.Site);
+                    UpdateSite(member);
                     string memberKind = Text(member, "kind");
                     string memberName = Text(member, "name");
                     if (memberKind == "AccessSpecDecl") access = Text(member, "access");
@@ -154,23 +158,98 @@ internal sealed class ClangAstParser(string inputFile)
         bool childOwner = kind == "CXXRecordDecl" ? classAnnotation : reflectedOwner;
         foreach (JsonElement child in Children(node)) ValidateAnnotationPlacement(child, childOwner);
     }
-    private void UpdateSite(JsonElement node, SourceSite? owner = null)
+    // Clang JSON은 연속 위치의 file을 생략한다. AST parent의 파일이 아니라 JSON 직렬화 순서의
+    // 마지막 명시 파일을 사용한다. includedFrom은 호출자이므로 원본 파일로 취급하지 않는다.
+    private void IndexLocations(JsonElement element)
     {
-        if (!node.TryGetProperty("loc", out JsonElement location)) return;
-        if (location.TryGetProperty("expansionLoc", out JsonElement expansion)) location = expansion;
-        else if (location.TryGetProperty("spellingLoc", out JsonElement spelling)) location = spelling;
-        string file = Text(location, "file");
-        if (file.Length == 0) file = owner?.File ?? currentSite.File;
-        int line = owner?.Line ?? currentSite.Line;
-        if (location.TryGetProperty("line", out JsonElement number)) line = number.GetInt32();
-        else if (location.TryGetProperty("offset", out JsonElement offset) && File.Exists(file)) {
-            // Clang은 반복되는 line을 생략할 수 있다. UTF-8 바이트 offset으로 줄을 복원하며 C++를 파싱하지 않는다.
-            if (!sourceBytes.TryGetValue(file, out byte[]? bytes)) { bytes = File.ReadAllBytes(file); sourceBytes.Add(file, bytes); }
-            int limit = Math.Min(bytes.Length, offset.GetInt32());
-            line = 1;
-            for (int index = 0; index < limit; ++index) if (bytes[index] == (byte)'\n') ++line;
+        if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement child in element.EnumerateArray()) IndexLocations(child);
+            return;
         }
-        currentSite = new(file, line);
+        if (element.ValueKind != JsonValueKind.Object) return;
+        string id = Text(element, "id");
+        foreach (JsonProperty property in element.EnumerateObject())
+        {
+            if (property.Name == "includedFrom") continue;
+            if (property.Name == "loc" && id.Length != 0)
+            {
+                var site = IndexLocation(property.Value);
+                locations[id] = site;
+            }
+            else if (property.Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
+            {
+                IndexLocations(property.Value);
+            }
+        }
+        // range begin/end와 macro spelling/expansion도 파일 생략 상태를 갱신한다.
+        if (element.TryGetProperty("offset", out _)) UpdateSerializedFile(element);
+    }
+
+    private (string? File, int Offset) IndexLocation(JsonElement location)
+    {
+        if (location.ValueKind != JsonValueKind.Object) return (null, -1);
+        (string? File, int Offset) site = (null, -1);
+        foreach (JsonProperty property in location.EnumerateObject())
+        {
+            if (property.Name is "spellingLoc" or "expansionLoc")
+            {
+                var nested = IndexLocation(property.Value);
+                if (property.Name == "expansionLoc" || site.Offset < 0) site = nested;
+            }
+        }
+        if (location.TryGetProperty("offset", out JsonElement offset) && offset.TryGetInt32(out int value))
+        {
+            UpdateSerializedFile(location);
+            site = (serializedFile, value);
+        }
+        return site;
+    }
+
+    private void UpdateSerializedFile(JsonElement location)
+    {
+        string file = Text(location, "file");
+        string? parent = location.TryGetProperty("includedFrom", out JsonElement included)
+            ? Text(included, "file") : null;
+        if (file.Length != 0)
+        {
+            serializedFile = file;
+            serializedParent = parent;
+        }
+        else if (!string.Equals(serializedParent?.Replace('\\', '/'), parent?.Replace('\\', '/'),
+                     OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+        {
+            // 다른 include 문맥에서 파일명이 생략되면 임의로 이전 파일을 지목하지 않는다.
+            serializedFile = null;
+            serializedParent = null;
+        }
+    }
+
+    private static SourceSite UnknownSite() => new("<unknown-location>", 1);
+
+    private void UpdateSite(JsonElement node)
+    {
+        string id = Text(node, "id");
+        if (!locations.TryGetValue(id, out var location) || location.File is null ||
+            !File.Exists(location.File) || location.Offset < 0)
+        {
+            currentSite = UnknownSite();
+            return;
+        }
+        if (!sourceBytes.TryGetValue(location.File, out byte[]? bytes))
+        {
+            bytes = File.ReadAllBytes(location.File);
+            sourceBytes.Add(location.File, bytes);
+        }
+        if (location.Offset >= bytes.Length)
+        {
+            currentSite = UnknownSite();
+            return;
+        }
+        int line = 1;
+        for (int index = 0; index < location.Offset; ++index)
+            if (bytes[index] == (byte)'\n') ++line;
+        currentSite = new(location.File, line);
     }
     private static string Payload(object?[] mark, int index, string symbol)
     {

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Rocks.Build;
+using Rocks.Build.Cli;
 using Rocks.Tooling.Common;
 
 var options = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -44,6 +45,42 @@ try
     Pass("read-only-sdk-external-game-reflection", timer.Elapsed);
 
     timer.Restart();
+    var evidencePath = Path.Combine(output, "game-build-evidence.json");
+    InstalledSdk.BeginGameEvidence(output, sdk, game);
+    using (var running = JsonDocument.Parse(File.ReadAllText(evidencePath)))
+        Require(running.RootElement.GetProperty("status").GetString() == "RUNNING", "Old game PASS remained when new execution began");
+    Require((await Game()).ExitCode == 0, "Game did not finish after interrupted marker");
+    using (var completed = JsonDocument.Parse(File.ReadAllText(evidencePath)))
+        Require(completed.RootElement.GetProperty("status").GetString() == "PASS", "Game completion did not replace RUNNING marker");
+    Pass("game-running-evidence-and-completion", timer.Elapsed);
+
+    timer.Restart();
+    var invalidOutput = await Cli("game", "--sdk", sdk, "--project", game, "--configuration", "Debug", "--output", game);
+    Require(invalidOutput.ExitCode != 0 && !File.Exists(Path.Combine(game, "action-report.json")),
+        "Output overlapping project was accepted or wrote into the source root");
+    Pass("game-source-output-overlap", timer.Elapsed);
+
+    timer.Restart();
+    var gameSnapshot = GameInputSnapshot.Capture(game, output, sdk, []);
+    var reportPath = Path.Combine(output, "action-report.json");
+    AtomicFile.WriteIfChanged(reportPath, JsonSerializer.Serialize(initial with { Succeeded = false, Failure = "current run pending" }));
+    var changedSource = Path.Combine(game, "Source/GameObject.h");
+    var oldSource = File.ReadAllText(changedSource);
+    try
+    {
+        File.WriteAllText(changedSource, oldSource.Replace("체력", "변경된 이름", StringComparison.Ordinal));
+        try
+        {
+            InstalledSdk.PublishVerifiedGameResult(sdk, NativeConfiguration.Debug, toolchain, game, output,
+                gameSnapshot, gameSnapshot, [], initial);
+            throw new InvalidOperationException("Changed metadata input was accepted");
+        }
+        catch (InvalidOperationException error) when (error.Message.Contains("Game inputs changed", StringComparison.Ordinal)) { }
+        Require(!ReadActionReport().Succeeded, "Input mutation published a successful action report");
+    }
+    finally { File.WriteAllText(changedSource, oldSource); }
+    Pass("game-input-mutation-does-not-publish-success", timer.Elapsed);
+    timer.Restart();
     Require((await Game()).ExitCode == 0, "No-op game build failed");
     Require(ReadActionReport().ExecutedActions == 0, "No-op game recompiled/relinked native actions");
     Pass("game-no-op", timer.Elapsed);
@@ -72,6 +109,16 @@ try
         var mutated = (byte[])original.Clone();
         mutated[0] ^= 0xff;
         File.WriteAllBytes(library, mutated);
+        var corruptSnapshot = GameInputSnapshot.Capture(game, output, sdk, []);
+        AtomicFile.WriteIfChanged(reportPath, JsonSerializer.Serialize(initial with { Succeeded = false, Failure = "current run pending" }));
+        try
+        {
+            InstalledSdk.PublishVerifiedGameResult(sdk, NativeConfiguration.Debug, toolchain, game, output,
+                corruptSnapshot, corruptSnapshot, [], initial);
+            throw new InvalidOperationException("Changed SDK was accepted by publication");
+        }
+        catch (InvalidDataException error) when (error.Message.Contains("changed or missing", StringComparison.Ordinal)) { }
+        Require(!ReadActionReport().Succeeded, "SDK mutation published a successful action report");
         var corrupt = await Game();
         Require(corrupt.ExitCode != 0 && corrupt.StdErr.Contains("changed or missing", StringComparison.Ordinal), "SDK library corruption not rejected");
     }

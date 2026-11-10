@@ -226,11 +226,28 @@ internal static class SelfTests
                 if (mode is "missing" or "stale" or "malformed") Verify.That(!report.RunnerReportCurrent, "invalid report current");
             }
         });
+        suite.Add("Evidence.SnapshotFailureDoesNotKeepOldPass", async () =>
+        {
+            using TemporaryDirectory temporary = new();
+            temporary.Write("Engine/source.h", "input\n");
+            string evidencePath = temporary.FilePath("out/current/build-evidence.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(evidencePath)!);
+            File.WriteAllText(evidencePath, "{\"status\":\"PASS\"}");
+            using (var locked = new FileStream(temporary.FilePath("Engine/source.h"), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                await Verify.ThrowsAsync<IOException>(async () => { await BuildEvidence.StartAsync(temporary.Root, "current"); });
+            using var evidence = JsonDocument.Parse(File.ReadAllText(evidencePath));
+            Verify.Equal("RUNNING", evidence.RootElement.GetProperty("status").GetString(), "snapshot failure left old PASS");
+        });
         suite.Add("Evidence.CurrentPassingReportAndLifecycleGuards", async () =>
         {
             using TemporaryDirectory temporary = new();
             temporary.Write("Engine/source.h", "input\n");
+            string evidencePath = temporary.FilePath("out/current/build-evidence.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(evidencePath)!);
+            File.WriteAllText(evidencePath, "{\"status\":\"PASS\"}");
             var evidence = await BuildEvidence.StartAsync(temporary.Root, "current");
+            using (var running = JsonDocument.Parse(File.ReadAllText(evidencePath)))
+                Verify.Equal("RUNNING", running.RootElement.GetProperty("status").GetString(), "previous PASS retained on start");
             evidence.SetConfiguration("Debug", "FoundationTests", null, "test-compiler", "fixture-version");
             Directory.CreateDirectory(evidence.OutputDirectory);
             string reportPath = Path.Combine(evidence.OutputDirectory, "foundation-report.json");
@@ -241,6 +258,8 @@ internal static class SelfTests
             evidence.RecordStep("tests", ["native"], 0, TimeSpan.FromMilliseconds(1), tests: true);
             var report = await evidence.FinishAsync();
             Verify.That(report.Status == "PASS" && report.RunnerReportCurrent && report.RunnerReportSha256?.Length == 64, "valid current report did not pass");
+            using (var completed = JsonDocument.Parse(File.ReadAllText(evidencePath)))
+                Verify.Equal("PASS", completed.RootElement.GetProperty("status").GetString(), "final evidence was not published");
             Verify.Throws<InvalidOperationException>(() => evidence.RecordStep("late", [], 0, TimeSpan.Zero));
             Verify.Throws<InvalidOperationException>(() => evidence.BeginTests());
             await Verify.ThrowsAsync<InvalidOperationException>(async () => { await evidence.FinishAsync(); });

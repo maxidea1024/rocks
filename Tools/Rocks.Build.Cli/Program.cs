@@ -94,13 +94,13 @@ namespace Rocks.Build.Cli
                         {
                             var include = Path.GetRelativePath(includeDirectory, header).Replace('\\', '/');
                             var path = Path.Combine(output, "HeaderChecks", Hashing.Sha256Text(include) + ".cpp");
-                            AtomicFile.WriteIfChanged(path, $"#include <{include}>\n");
+                            AtomicFile.WriteIfChanged(path, $"#include <{include}>\nint RocksHeaderCheck_{Hashing.Sha256Text(include)}() noexcept {{ return 0; }}\n");
                             sources.Add(path);
                         }
                     foreach (var unit in rules.Target.Metadata)
                     {
                         var path = Path.Combine(output, "HeaderChecks/" + Hashing.Sha256Text(unit.Output) + ".cpp");
-                        AtomicFile.WriteIfChanged(path, $"#include <{unit.Output}>\n");
+                        AtomicFile.WriteIfChanged(path, $"#include <{unit.Output}>\nint RocksGeneratedHeaderCheck_{Hashing.Sha256Text(unit.Output)}() noexcept {{ return 0; }}\n");
                         sources.Add(path);
                     }
                     modules.Add(new()

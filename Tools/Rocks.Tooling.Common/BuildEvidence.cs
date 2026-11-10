@@ -121,7 +121,21 @@ public sealed class BuildEvidence
             throw new ArgumentException("Preset must be a safe path relative to root/out", nameof(preset));
         preset = preset.Replace('\\', '/');
         root = Path.GetFullPath(root);
+        if (!Directory.Exists(root)) throw new DirectoryNotFoundException(root);
+        // 입력 읽기 자체가 실패하거나 프로세스가 종료되어도 직전 PASS가 남으면 안 된다.
+        // out은 입력 스냅샷에서 제외되므로 먼저 증거를 게시해도 소스에는 영향을 주지 않는다.
+        string output = Path.Combine(root, "out", preset);
+        Directory.CreateDirectory(output);
+        long started = UnixNanoseconds(DateTime.UtcNow);
+        AtomicFile.WriteIfChanged(Path.Combine(output, "build-evidence.json"), JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            schema = 2, preset, status = "RUNNING", testsStatus = "NOT RUN", startedUnixNs = started
+        }, Json));
         SourceSnapshot source = SourceSnapshot.Capture(root);
+        AtomicFile.WriteIfChanged(Path.Combine(output, "build-evidence.json"), JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            schema = 2, preset, status = "RUNNING", testsStatus = "NOT RUN", sourceBefore = source, startedUnixNs = started
+        }, Json));
         GitSnapshot git = await CaptureGitAsync(root, environment, cancellationToken);
         return new(root, preset, environment, source, git);
     }

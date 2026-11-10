@@ -1,4 +1,5 @@
 #include <Object/TypeRegistry.h>
+#include <Object/ObjectRegistry.h>
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
 #include "RegistryIdentity.h"
@@ -31,6 +32,21 @@ struct TypeRegistry::Record {
 };
 
 namespace {
+
+// 등록된 schema가 읽기 전용이면 공급된 callback의 구현과 무관하게 쓰기를 거부한다.
+// 함수표 서명에는 선언 타입이 없으므로 여기서 구체 native type까지 판별하지는 못한다.
+Result<void> RejectReadOnlyWrite(ObjectRegistry& registry, const ObjectAccessContext& access,
+                                 ObjectHandle handle, const FieldValue&) noexcept {
+    auto borrowed = registry.Resolve<Object>(access, handle);
+    if (!borrowed) {
+        return Result<void>::Failure(borrowed.Error());
+    }
+    auto valid = borrowed.Value().Get();
+    if (!valid) {
+        return Result<void>::Failure(valid.Error());
+    }
+    return Result<void>::Failure(ErrorCode::Unsupported);
+}
 
 bool AddBytes(usize& total, usize count) noexcept {
     if (count > ~usize(0) - total) {
@@ -298,6 +314,14 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     }
     for (usize index = 0; index < ops.fields.Size(); ++index) {
         ::new (fieldOps + index) RuntimeFieldOps(ops.fields[index]);
+        for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
+            if (fields[fieldIndex].id == fieldOps[index].fieldId &&
+                HasFlag(fields[fieldIndex].flags, FieldFlags::ReadOnly)) {
+                // 원본 입력 함수표는 수정하지 않는다. 복사된 공개 함수표만 정책을 강제한다.
+                fieldOps[index].write = &RejectReadOnlyWrite;
+                break;
+            }
+        }
     }
     record->ops = Move(ops);
     record->ops.fields = {fieldOps, record->ops.fields.Size()};
