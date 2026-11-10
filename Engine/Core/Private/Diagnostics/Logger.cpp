@@ -124,16 +124,18 @@ Result<void> TextLogSink::Write(const LogMessage& message) noexcept {
 
 namespace {
 Result<void> WriteStderr(void*, StringView bytes) noexcept {
-    if (bytes.ByteCount() != 0 &&
-        fwrite(bytes.Data(), 1, bytes.ByteCount(), stderr) != bytes.ByteCount()) {
+    if ((bytes.ByteCount() != 0 &&
+         fwrite(bytes.Data(), 1, bytes.ByteCount(), stderr) != bytes.ByteCount()) ||
+        ferror(stderr) != 0) {
         return Result<void>::Failure(ErrorCode::DependencyFailed);
     }
     return Result<void>::Success();
 }
 
 Result<void> FlushStderr(void*) noexcept {
-    return fflush(stderr) == 0 ? Result<void>::Success()
-                               : Result<void>::Failure(ErrorCode::DependencyFailed);
+    return fflush(stderr) == 0 && ferror(stderr) == 0
+               ? Result<void>::Success()
+               : Result<void>::Failure(ErrorCode::DependencyFailed);
 }
 } // namespace
 

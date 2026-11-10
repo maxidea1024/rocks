@@ -92,6 +92,8 @@ private:
 // stderr로 UTF-8 byte를 출력하고 즉시 flush한다. Windows console의 실제 글자 표시는
 // console code page/환경에 의존한다. CRT의 text mode는 줄바꿈을 변환할 수 있다.
 // 다른 stderr 사용자와의 원자성은 보장하지 않는다.
+// stderr의 기존 error flag도 실패로 보고하며 clearerr는 호출하지 않는다. 복구와 오류 상태
+// 초기화는 다른 stderr 사용자와의 동기화를 포함하여 호스트가 책임진다.
 // Unix에서 읽는 쪽이 닫힌 pipe는 기본 SIGPIPE 설정이면 프로세스를 종료할 수 있다.
 // 엔진은 전역 signal 처리를 바꾸지 않으며, 오류 반환을 원하면 호스트가 정책을 설정해야 한다.
 class StderrLogSink final : public RuntimeLogSink {
