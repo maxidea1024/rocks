@@ -72,7 +72,7 @@ public static class MetadataRunner
             var canonicalRoot = CanonicalInput(context.RootDirectory);
             var resolvedRelative = Path.GetRelativePath(canonicalRoot, canonicalManifest);
             var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-            if (!string.Equals(Path.GetFullPath(identityManifest), canonicalManifest, comparison))
+            if (!string.Equals(Path.GetFullPath(identityRelative, canonicalRoot), canonicalManifest, comparison))
                 throw new ArgumentException($"Identity manifest '{target.IdentityManifest}' cannot use symbolic link paths.");
             var outputRelative = Path.GetRelativePath(Path.GetFullPath(context.OutputDirectory), identityManifest);
             if (Path.IsPathRooted(resolvedRelative) || resolvedRelative.Split('/', '\\').Any(part => part == "..") ||
