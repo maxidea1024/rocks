@@ -1,5 +1,5 @@
 #include <Core/Memory/SystemAllocator.h>
-#include <Core/Path/Path.h>
+#include <Core/Text/Path.h>
 #include <Tests/Support/Test.h>
 
 using namespace rocks;

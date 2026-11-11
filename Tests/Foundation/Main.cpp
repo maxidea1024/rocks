@@ -16,6 +16,12 @@ int RunMemoryAllocatorNegativeControl(uint32 operation) noexcept;
 int RunBinnedAllocatorNegativeControl(uint32 operation) noexcept;
 int RunBitArrayInvalidIndexControl() noexcept;
 int RunFileNegativeControl(uint32 operation) noexcept;
+int RunMathNegativeControl(uint32 operation) noexcept;
+int RunOptionalEmptyValueControl() noexcept;
+int RunUniquePtrEmptyControl() noexcept;
+int RunHashMapIteratorAfterInsertControl() noexcept;
+int RunSharedPtrEmptyControl() noexcept;
+int RunRandomStreamPreconditionControl(uint32 operation) noexcept;
 int RunExternalAllocatorNegativeControl(uint32 operation) noexcept;
 int RunDebugAllocatorNegativeControl(uint32 operation) noexcept;
 int RunVirtualMemoryAccessProbe(uint32 state, bool write) noexcept;
@@ -198,6 +204,21 @@ int main(int argc, char** argv) {
             } else if (strncmp(control, "platform-file-invalid-", 22) == 0 && control[22] >= '0' &&
                        control[22] <= '7' && control[23] == '\0') {
                 return test::RunFileNegativeControl(static_cast<uint32>(control[22] - '0'));
+            } else if (strncmp(control, "math-invalid-", 13) == 0 && control[13] >= '0' &&
+                       control[13] <= '7' && control[14] == '\0') {
+                return test::RunMathNegativeControl(static_cast<uint32>(control[13] - '0'));
+            } else if (strcmp(control, "optional-empty-value") == 0) {
+                return test::RunOptionalEmptyValueControl();
+            } else if (strcmp(control, "unique-ptr-empty") == 0) {
+                return test::RunUniquePtrEmptyControl();
+            } else if (strcmp(control, "hash-map-iterator-modified") == 0) {
+                return test::RunHashMapIteratorAfterInsertControl();
+            } else if (strcmp(control, "shared-ptr-empty") == 0) {
+                return test::RunSharedPtrEmptyControl();
+            } else if (strncmp(control, "random-invalid-", 15) == 0 && control[15] >= '0' &&
+                       control[15] <= '2' && control[16] == '\0') {
+                return test::RunRandomStreamPreconditionControl(
+                    static_cast<uint32>(control[15] - '0'));
             } else if (strcmp(control, "allocator-stack-live") == 0 ||
                        strcmp(control, "allocator-stack-wrong-thread") == 0 ||
                        strcmp(control, "allocator-stack-array-growth") == 0) {

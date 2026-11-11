@@ -436,6 +436,46 @@ public:
         return Span<const T>(data_, size_);
     }
 
+    // ---- STL 호환 별칭과 반복자 ----
+    // 반복자는 원시 포인터다. range-for, STL 알고리즘과 ranges 라이브러리에서 contiguous iterator로
+    // 동작한다(예: 사용자 코드의 STL sort(values.begin(), values.end())).
+    // 재할당(추가·삽입·Reserve·Shrink), 삽입·삭제에 따른 원소 이동, Reset·소멸은 반복자를
+    // 무효화한다. range-for 도중 같은 Array에 원소를 추가·삭제하지 않는다. 반복자로 원소를 바꿀
+    // 수는 있지만 원소 수는 바꿀 수 없다.
+    using value_type = T;
+    using size_type = usize;
+    using difference_type = isize;
+    using pointer = T*;
+    using const_pointer = const T*;
+    using reference = T&;
+    using const_reference = const T&;
+    using iterator = T*;
+    using const_iterator = const T*;
+
+    T* begin() noexcept {
+        return data_;
+    }
+
+    T* end() noexcept {
+        return data_ + size_;
+    }
+
+    const T* begin() const noexcept {
+        return data_;
+    }
+
+    const T* end() const noexcept {
+        return data_ + size_;
+    }
+
+    const T* cbegin() const noexcept {
+        return data_;
+    }
+
+    const T* cend() const noexcept {
+        return data_ + size_;
+    }
+
     // 원소를 역순 소멸시키고 capacity는 유지한다. 원소 참조는 무효지만 다음 추가에 buffer를
     // 재사용한다.
     void Clear() noexcept {

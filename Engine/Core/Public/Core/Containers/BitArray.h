@@ -115,6 +115,126 @@ public:
         return Read(index);
     }
 
+    // ---- STL 호환 읽기 반복자 ----
+    // 각 bit를 bool 값으로 읽는 random-access 반복자다(range-for: for (bool bit : bits)). bit를
+    // 바꾸려면 operator[]의 BitReference를 사용한다. 원소 수 변경·재할당·소멸은 반복자를
+    // 무효화하며, 무효 위치의 역참조는 BitArray의 범위 검사로 Fatal이다.
+    class ConstIterator {
+    public:
+        using value_type = bool;
+        using difference_type = isize;
+        using reference = bool;
+
+        ConstIterator() noexcept = default;
+
+        bool operator*() const noexcept {
+            return (*bits_)[index_];
+        }
+
+        bool operator[](difference_type offset) const noexcept {
+            return *(*this + offset);
+        }
+
+        ConstIterator& operator++() noexcept {
+            ++index_;
+            return *this;
+        }
+
+        ConstIterator operator++(int) noexcept {
+            ConstIterator previous = *this;
+            ++index_;
+            return previous;
+        }
+
+        ConstIterator& operator--() noexcept {
+            --index_;
+            return *this;
+        }
+
+        ConstIterator operator--(int) noexcept {
+            ConstIterator previous = *this;
+            --index_;
+            return previous;
+        }
+
+        ConstIterator& operator+=(difference_type offset) noexcept {
+            index_ = static_cast<usize>(static_cast<difference_type>(index_) + offset);
+            return *this;
+        }
+
+        ConstIterator& operator-=(difference_type offset) noexcept {
+            return *this += -offset;
+        }
+
+        friend ConstIterator operator+(ConstIterator iterator, difference_type offset) noexcept {
+            return iterator += offset;
+        }
+
+        friend ConstIterator operator+(difference_type offset, ConstIterator iterator) noexcept {
+            return iterator += offset;
+        }
+
+        friend ConstIterator operator-(ConstIterator iterator, difference_type offset) noexcept {
+            return iterator -= offset;
+        }
+
+        friend difference_type operator-(const ConstIterator& left,
+                                         const ConstIterator& right) noexcept {
+            return static_cast<difference_type>(left.index_) -
+                   static_cast<difference_type>(right.index_);
+        }
+
+        friend bool operator==(const ConstIterator& left, const ConstIterator& right) noexcept {
+            return left.bits_ == right.bits_ && left.index_ == right.index_;
+        }
+
+        friend bool operator<(const ConstIterator& left, const ConstIterator& right) noexcept {
+            return left.index_ < right.index_;
+        }
+
+        friend bool operator>(const ConstIterator& left, const ConstIterator& right) noexcept {
+            return right < left;
+        }
+
+        friend bool operator<=(const ConstIterator& left, const ConstIterator& right) noexcept {
+            return !(right < left);
+        }
+
+        friend bool operator>=(const ConstIterator& left, const ConstIterator& right) noexcept {
+            return !(left < right);
+        }
+
+    private:
+        friend class BitArray;
+
+        ConstIterator(const BitArray* bits, usize index) noexcept : bits_(bits), index_(index) {
+        }
+
+        const BitArray* bits_ = nullptr;
+        usize index_ = 0;
+    };
+
+    using value_type = bool;
+    using size_type = usize;
+    using difference_type = isize;
+    using const_iterator = ConstIterator;
+
+    ConstIterator begin() const noexcept {
+        return ConstIterator(this, 0);
+    }
+
+    ConstIterator end() const noexcept {
+        return ConstIterator(this, size_);
+    }
+
+    ConstIterator cbegin() const noexcept {
+        return begin();
+    }
+
+    ConstIterator cend() const noexcept {
+        return end();
+    }
+
     Result<bool> TryGet(usize index) const noexcept {
         if (index >= size_) {
             return Result<bool>::Failure(ErrorCode::InvalidArgument);

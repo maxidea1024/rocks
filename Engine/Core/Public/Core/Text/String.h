@@ -66,6 +66,20 @@ public:
         return View().TryMidBytes(start, count);
     }
 
+    // 문자(code point) 단위 조회다. 계약은 StringView의 같은 함수와 같고 결과는 이 String을 빌린다.
+    Result<usize> TryCountCodePoints() const noexcept {
+        return View().TryCountCodePoints();
+    }
+    Result<StringView> TryLeftCodePoints(usize count) const noexcept {
+        return View().TryLeftCodePoints(count);
+    }
+    Result<StringView> TryRightCodePoints(usize count) const noexcept {
+        return View().TryRightCodePoints(count);
+    }
+    Result<StringView> TryMidCodePoints(usize start, usize count = MaxSize) const noexcept {
+        return View().TryMidCodePoints(start, count);
+    }
+
     // ASCII 공백만 제거하거나 ASCII 대소문자만 제자리 변환한다. 저장소를 새로 할당하지
     // 않으며 Unicode 공백/대소문자는 변경하지 않는다. 기존 내용 view는 변경 후 다시 얻는다.
     void TrimAsciiStart() noexcept;
@@ -98,6 +112,33 @@ public:
 
     const char* Data() const noexcept;
     usize ByteCount() const noexcept;
+
+    // ---- STL 호환 별칭과 byte 반복자 ----
+    // UTF-8 불변식을 지키기 위해 읽기 전용 byte 반복자(const char*)만 제공한다. 문자(code point)
+    // 단위 순회는 View().CodePoints()를 사용한다. 내용 변경·재할당은 반복자를 무효화한다.
+    using value_type = char;
+    using size_type = usize;
+    using difference_type = isize;
+    using const_pointer = const char*;
+    using const_reference = const char&;
+    using const_iterator = const char*;
+    using iterator = const char*;
+
+    const char* begin() const noexcept {
+        return Data();
+    }
+
+    const char* end() const noexcept {
+        return Data() + ByteCount();
+    }
+
+    const char* cbegin() const noexcept {
+        return begin();
+    }
+
+    const char* cend() const noexcept {
+        return end();
+    }
     usize ByteCapacity() const noexcept;
     bool IsEmpty() const noexcept;
     StringView View() const noexcept;

@@ -1,4 +1,4 @@
-#include <Core/Path/Path.h>
+#include <Core/Text/Path.h>
 
 #include <Core/Containers/Array.h>
 #include <Core/Move.h>

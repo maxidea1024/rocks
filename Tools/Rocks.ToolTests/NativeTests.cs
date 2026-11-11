@@ -265,6 +265,40 @@ internal static class NativeTests
                 });
         if (string.Equals(Path.GetFileNameWithoutExtension(executable), "FoundationTests", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(Path.GetFileNameWithoutExtension(executable), "CoreFoundationTests", StringComparison.OrdinalIgnoreCase))
+            foreach ((int operation, string diagnostic) in new[] {
+                (0, "PlatformMath int32 conversion is NaN or out of range"),
+                (1, "PlatformMath int32 conversion is NaN or out of range"),
+                (2, "IntVector addition overflow"),
+                (3, "Math batch input/output sizes differ"),
+                (4, "Math batch input/output ranges partially overlap"),
+                (5, "Matrix4 index out of range"),
+                (6, "Rocks invariant failed: unitAxis.IsNormalized"),
+                (7, "Rocks invariant failed: minimum <= maximum") })
+                suite.Add("Native.Fatal.math-invalid-" + operation, async () =>
+                {
+                    // 계약 위반 값을 반환하며 정상 종료하면 안 된다. 진단 문구로 위반 종류를 구분한다.
+                    var result = await Run("--negative-control", "math-invalid-" + operation);
+                    Verify.That(result.ExitCode != 0, "math contract violation did not fail");
+                    Verify.Contains(diagnostic, result.StdErr, "math fatal diagnostic");
+                });
+        if (string.Equals(Path.GetFileNameWithoutExtension(executable), "FoundationTests", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(Path.GetFileNameWithoutExtension(executable), "CoreFoundationTests", StringComparison.OrdinalIgnoreCase))
+            foreach ((string control, string diagnostic) in new[] {
+                ("optional-empty-value", "Optional::Value called on an empty Optional"),
+                ("unique-ptr-empty", "UniquePtr dereferenced while empty"),
+                ("hash-map-iterator-modified", "HashMap iterator used after structural modification"),
+                ("shared-ptr-empty", "SharedPtr dereferenced while empty"),
+                ("random-invalid-0", "RandomStream::NextUInt32Below requires bound > 0"),
+                ("random-invalid-1", "RandomStream::NextInt32InRange requires minimum <= maximum"),
+                ("random-invalid-2", "RandomStream::NextFloatInRange requires finite minimum < maximum") })
+                suite.Add("Native.Fatal." + control, async () =>
+                {
+                    var result = await Run("--negative-control", control);
+                    Verify.That(result.ExitCode != 0, "empty value access did not fail");
+                    Verify.Contains(diagnostic, result.StdErr, "empty value fatal diagnostic");
+                });
+        if (string.Equals(Path.GetFileNameWithoutExtension(executable), "FoundationTests", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(Path.GetFileNameWithoutExtension(executable), "CoreFoundationTests", StringComparison.OrdinalIgnoreCase))
             suite.Add("Native.Fatal.bit-array-invalid-index", async () =>
             {
                 var result = await Run("--negative-control", "bit-array-invalid-index");

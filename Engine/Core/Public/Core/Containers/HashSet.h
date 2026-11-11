@@ -173,6 +173,74 @@ public:
         map_.ForEach([&](const K& key, const Marker&) noexcept { visitor(key); });
     }
 
+    // ---- STL 호환 반복자 ----
+    // 원소를 const K&로 방문하는 전방 반복자다. 순서는 정해지지 않는다. 무효화와 구조 변경 탐지
+    // 규약은 HashMap 반복자와 같다(구조 변경 후 역참조·증가는 Fatal).
+    class ConstIterator {
+    public:
+        using value_type = K;
+        using reference = const K&;
+        using pointer = const K*;
+        using difference_type = isize;
+
+        ConstIterator() noexcept = default;
+
+        const K& operator*() const noexcept {
+            return (*inner_).key;
+        }
+
+        const K* operator->() const noexcept {
+            return &(*inner_).key;
+        }
+
+        ConstIterator& operator++() noexcept {
+            ++inner_;
+            return *this;
+        }
+
+        ConstIterator operator++(int) noexcept {
+            ConstIterator previous = *this;
+            ++inner_;
+            return previous;
+        }
+
+        friend bool operator==(const ConstIterator& left, const ConstIterator& right) noexcept {
+            return left.inner_ == right.inner_;
+        }
+
+    private:
+        friend class HashSet;
+        using Inner = typename HashMap<K, Marker, Hasher, KeyEqual>::const_iterator;
+
+        explicit ConstIterator(Inner inner) noexcept : inner_(inner) {
+        }
+
+        Inner inner_;
+    };
+
+    using key_type = K;
+    using value_type = K;
+    using size_type = usize;
+    using difference_type = isize;
+    using iterator = ConstIterator;
+    using const_iterator = ConstIterator;
+
+    ConstIterator begin() const noexcept {
+        return ConstIterator(map_.begin());
+    }
+
+    ConstIterator end() const noexcept {
+        return ConstIterator(map_.end());
+    }
+
+    ConstIterator cbegin() const noexcept {
+        return begin();
+    }
+
+    ConstIterator cend() const noexcept {
+        return end();
+    }
+
 private:
     HashMap<K, Marker, Hasher, KeyEqual> map_;
 };

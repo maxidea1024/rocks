@@ -88,6 +88,7 @@ public:
         other.slotCount_ = 0;
         other.size_ = 0;
         other.deleted_ = 0;
+        ++other.revision_;
     }
 
     HashMap& operator=(HashMap&& other) noexcept {
@@ -106,6 +107,8 @@ public:
             other.slotCount_ = 0;
             other.size_ = 0;
             other.deleted_ = 0;
+            ++other.revision_;
+            ++revision_;
         }
         return *this;
     }
@@ -288,6 +291,7 @@ public:
         DestroyAt(slot.Key());
         slot.state = State::Deleted;
         --size_;
+        ++revision_;
         ++deleted_;
         if (size_ == 0) {
             ClearSlots();
@@ -321,6 +325,7 @@ public:
             // 소멸 중에는 이 항목을 조회할 수 없게 먼저 논리적으로 제거한다.
             slot.state = State::Deleted;
             --size_;
+            ++revision_;
             ++deleted_;
             ++removed;
             DestroyAt(slot.Value());
@@ -378,7 +383,127 @@ public:
         --iterationDepth_;
     }
 
+    // ---- STL 호환 반복자 ----
+    // 원소를 {key, value} 참조 쌍으로 방문하는 전방 반복자다. 순서는 정해지지 않는다.
+    //   for (auto [key, value] : map) { value += 1; }
+    //   사용자 코드의 STL find_if(map.begin(), map.end(), predicate)도 그대로 쓸 수 있다.
+    // 역참조 결과는 값으로 반환되는 참조 쌍(KeyValue)이므로 auto 또는 const auto&로 받는다
+    // (auto&는 컴파일되지 않는다). key는 바꿀 수 없고 value는 비 const 순회에서 바꿀 수 있다.
+    // 삽입·삭제·Clear·Reserve·Compact·Reset·이동처럼 원소 집합이나 저장소가 바뀌면 기존 반복자의
+    // 역참조·증가가 Fatal이다(실패한 삽입도 재해시가 일어났을 수 있어 같게 취급한다).
+    // 같은 키의 값 교체(InsertOrAssign)는 반복자를 무효화하지 않지만 이전 값 참조는 무효다.
+    // ForEach와 달리 순회 중 구조 변경을 막지 않고 사후에 탐지한다. 컨테이너 소멸 후 사용은
+    // 탐지하지 못한다. 동시 사용 규약은 컨테이너와 같다.
+    template <typename ValueType>
+    struct KeyValue {
+        const K& key;
+        ValueType& value;
+    };
+
+    template <typename MapType, typename ValueType>
+    class BasicIterator {
+    public:
+        using value_type = KeyValue<ValueType>;
+        using reference = KeyValue<ValueType>;
+        using difference_type = isize;
+
+        // -> 연산을 위해 값으로 반환한 참조 쌍을 보관한다.
+        struct Arrow {
+            KeyValue<ValueType> pair;
+            const KeyValue<ValueType>* operator->() const noexcept {
+                return &pair;
+            }
+        };
+
+        BasicIterator() noexcept = default;
+
+        KeyValue<ValueType> operator*() const noexcept {
+            auto& slot = CheckedSlot();
+            return KeyValue<ValueType>{*slot.Key(), *slot.Value()};
+        }
+
+        Arrow operator->() const noexcept {
+            return Arrow{**this};
+        }
+
+        BasicIterator& operator++() noexcept {
+            CheckedSlot();
+            index_ = map_->NextOccupied(index_ + 1);
+            return *this;
+        }
+
+        BasicIterator operator++(int) noexcept {
+            BasicIterator previous = *this;
+            ++*this;
+            return previous;
+        }
+
+        friend bool operator==(const BasicIterator& left, const BasicIterator& right) noexcept {
+            return left.map_ == right.map_ && left.index_ == right.index_;
+        }
+
+    private:
+        friend class HashMap;
+
+        BasicIterator(MapType* map, usize index) noexcept
+            : map_(map), index_(index), revision_(map->revision_) {
+        }
+
+        decltype(auto) CheckedSlot() const noexcept {
+            if (map_ == nullptr || map_->revision_ != revision_) {
+                platform::Fatal("HashMap iterator used after structural modification");
+            }
+            if (index_ >= map_->slotCount_ || map_->slots_[index_].state != State::Occupied) {
+                platform::Fatal("HashMap iterator is not dereferenceable");
+            }
+            return (map_->slots_[index_]);
+        }
+
+        MapType* map_ = nullptr;
+        usize index_ = 0;
+        uint64 revision_ = 0;
+    };
+
+    using key_type = K;
+    using mapped_type = V;
+    using size_type = usize;
+    using difference_type = isize;
+    using iterator = BasicIterator<HashMap, V>;
+    using const_iterator = BasicIterator<const HashMap, const V>;
+    using value_type = KeyValue<V>;
+
+    iterator begin() noexcept {
+        return iterator(this, NextOccupied(0));
+    }
+
+    iterator end() noexcept {
+        return iterator(this, slotCount_);
+    }
+
+    const_iterator begin() const noexcept {
+        return const_iterator(this, NextOccupied(0));
+    }
+
+    const_iterator end() const noexcept {
+        return const_iterator(this, slotCount_);
+    }
+
+    const_iterator cbegin() const noexcept {
+        return begin();
+    }
+
+    const_iterator cend() const noexcept {
+        return end();
+    }
+
 private:
+    usize NextOccupied(usize index) const noexcept {
+        while (index < slotCount_ && slots_[index].state != State::Occupied) {
+            ++index;
+        }
+        return index;
+    }
+
     struct IterationGuard {
         explicit IterationGuard(const HashMap& map) noexcept : map_(map) {
             map_.EnterIteration();
@@ -547,6 +672,7 @@ private:
         target.hash = hash;
         target.state = State::Occupied;
         ++size_;
+        ++revision_;
         if (resultValue != nullptr) {
             *resultValue = target.Value();
         }
@@ -593,6 +719,7 @@ private:
         slots_ = replacement;
         slotCount_ = count;
         deleted_ = 0;
+        ++revision_;
         return Result<void>::Success();
     }
 
@@ -607,6 +734,7 @@ private:
         }
         size_ = 0;
         deleted_ = 0;
+        ++revision_;
     }
 
     void FreeSlots(Slot* slots, usize count) noexcept {
@@ -642,6 +770,8 @@ private:
     usize size_ = 0;
     usize deleted_ = 0;
     mutable usize iterationDepth_ = 0;
+    // 원소 집합·저장소 배치가 바뀔 때마다 증가한다. STL식 반복자가 구조 변경 후 사용을 탐지한다.
+    uint64 revision_ = 0;
 };
 
 } // namespace rocks

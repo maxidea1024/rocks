@@ -14,11 +14,14 @@ using int64 = long long;
 // 둘 다 실행 대상의 포인터 폭을 따르므로 파일·네트워크의 고정 폭 필드로 쓰지 않는다.
 using usize = decltype(sizeof(0));
 using uptr = usize;
+// 포인터 차이·반복자 거리(STL difference_type)에 쓰는 부호 있는 크기다. usize와 같은 폭이다.
+using isize = decltype(static_cast<char*>(nullptr) - static_cast<char*>(nullptr));
 
 static_assert(sizeof(uint8) == 1 && sizeof(uint16) == 2);
 static_assert(sizeof(uint32) == 4 && sizeof(uint64) == 8);
 static_assert(sizeof(int32) == 4 && sizeof(int64) == 8);
 static_assert(sizeof(uptr) == sizeof(void*));
+static_assert(sizeof(isize) == sizeof(usize) && static_cast<isize>(-1) < 0);
 
 inline constexpr usize MaxSize = static_cast<usize>(-1);
 

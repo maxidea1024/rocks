@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Base/Types.h>
+#include <Core/Traits.h>
 #include <Platform/Fatal.h>
 
 namespace rocks {
@@ -54,6 +55,37 @@ public:
         }
 
         return data_[index];
+    }
+
+    // ---- STL 호환 별칭과 반복자 ----
+    // 반복자는 원시 포인터이므로 range-for, STL 알고리즘(sort 등)과 ranges 라이브러리에서
+    // contiguous iterator로 동작한다. Span은 원소를 소유하지 않으므로 원본의 수명·재할당 규약을
+    // 그대로 따른다. const Span<T>도 T가 mutable이면 begin()으로 원소를 바꿀 수 있다.
+    using element_type = T;
+    using value_type = RemoveConstT<T>;
+    using size_type = usize;
+    using difference_type = isize;
+    using pointer = T*;
+    using const_pointer = const T*;
+    using reference = T&;
+    using const_reference = const T&;
+    using iterator = T*;
+    using const_iterator = const T*;
+
+    constexpr T* begin() const noexcept {
+        return data_;
+    }
+
+    constexpr T* end() const noexcept {
+        return data_ + count_;
+    }
+
+    constexpr const T* cbegin() const noexcept {
+        return data_;
+    }
+
+    constexpr const T* cend() const noexcept {
+        return data_ + count_;
     }
 
 private:
