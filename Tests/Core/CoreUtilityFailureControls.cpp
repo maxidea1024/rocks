@@ -4,6 +4,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Optional.h>
+#include <Core/Variant.h>
 #include <Tests/Support/HostFailure.h>
 
 // 범용 값·소유권 타입의 계약 위반이 쓰레기 값으로 진행되지 않고 Fatal로 끝나는지 자식 프로세스에서
@@ -45,6 +46,12 @@ int RunSharedPtrEmptyControl() noexcept {
     PrepareFatalTestProcess();
     SharedPtr<int> empty;
     return *empty;
+}
+
+int RunVariantWrongAlternativeControl() noexcept {
+    PrepareFatalTestProcess();
+    Variant<int, float> value = 1.0f;
+    return value.Get<int>();
 }
 
 int RunSharedRefFromEmptyControl() noexcept {

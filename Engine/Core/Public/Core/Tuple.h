@@ -13,23 +13,6 @@
 
 namespace rocks {
 
-// 컴파일 시간 정수 열이다(index pack 전개용).
-template <typename T, T... Values>
-struct IntegerSequence {
-    static constexpr usize Size = sizeof...(Values);
-};
-
-template <usize... Indices>
-using IndexSequence = IntegerSequence<usize, Indices...>;
-
-// IndexSequence<0, 1, ..., Count - 1>이다. Clang 내장 생성기를 쓴다.
-template <usize Count>
-using MakeIndexSequence = __make_integer_seq<IntegerSequence, usize, Count>;
-
-// 타입 목록의 Index번째 타입이다. 범위 밖이면 컴파일 오류다.
-template <usize Index, typename... Types>
-using TypePackElement = __type_pack_element<Index, Types...>;
-
 template <typename... Types>
 class Tuple;
 

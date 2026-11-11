@@ -22,6 +22,7 @@ int RunUniquePtrEmptyControl() noexcept;
 int RunHashMapIteratorAfterInsertControl() noexcept;
 int RunSharedPtrEmptyControl() noexcept;
 int RunSharedRefFromEmptyControl() noexcept;
+int RunVariantWrongAlternativeControl() noexcept;
 int RunRandomStreamPreconditionControl(uint32 operation) noexcept;
 int RunExternalAllocatorNegativeControl(uint32 operation) noexcept;
 int RunDebugAllocatorNegativeControl(uint32 operation) noexcept;
@@ -218,6 +219,8 @@ int main(int argc, char** argv) {
                 return test::RunSharedPtrEmptyControl();
             } else if (strcmp(control, "shared-ref-from-empty") == 0) {
                 return test::RunSharedRefFromEmptyControl();
+            } else if (strcmp(control, "variant-wrong-alternative") == 0) {
+                return test::RunVariantWrongAlternativeControl();
             } else if (strncmp(control, "random-invalid-", 15) == 0 && control[15] >= '0' &&
                        control[15] <= '2' && control[16] == '\0') {
                 return test::RunRandomStreamPreconditionControl(
