@@ -8,5 +8,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Rocks.Build/Rocks.Build.csproj" />
+    <ProjectReference Include="../Rocks.Build.Abstractions/Rocks.Build.Abstractions.csproj" />
   </ItemGroup>
 </Project>

@@ -14,6 +14,8 @@ int RunHashOperationsNegativeControl(uint32 operation) noexcept;
 int RunStackAllocatorNegativeControl(uint32 operation) noexcept;
 int RunMemoryAllocatorNegativeControl(uint32 operation) noexcept;
 int RunBinnedAllocatorNegativeControl(uint32 operation) noexcept;
+int RunBitArrayInvalidIndexControl() noexcept;
+int RunFileNegativeControl(uint32 operation) noexcept;
 int RunExternalAllocatorNegativeControl(uint32 operation) noexcept;
 int RunDebugAllocatorNegativeControl(uint32 operation) noexcept;
 int RunVirtualMemoryAccessProbe(uint32 state, bool write) noexcept;
@@ -112,6 +114,10 @@ int main(int argc, char** argv) {
                 return test::failures == 200 ? 1 : 3;
             } else if (strcmp(control, "thread-unjoined") == 0) {
                 return test::RunUnjoinedThreadNegativeControl();
+            } else if (strcmp(control, "thread-unjoined-start-failure") == 0) {
+                return test::RunUnjoinedThreadNegativeControl(1);
+            } else if (strcmp(control, "thread-unjoined-wait-failure") == 0) {
+                return test::RunUnjoinedThreadNegativeControl(2);
             } else if (strcmp(control, "name-live-lease") == 0) {
                 return test::RunOutstandingNameLeaseNegativeControl();
             } else if (strcmp(control, "object-scope-lifo") == 0 ||
@@ -183,10 +189,15 @@ int main(int argc, char** argv) {
                                          : strcmp(control, "allocator-debug-after-free") == 0 ? 2u
                                                                                               : 3u;
                 return test::RunDebugAllocatorNegativeControl(operation);
+            } else if (strcmp(control, "bit-array-invalid-index") == 0) {
+                return test::RunBitArrayInvalidIndexControl();
             } else if (strncmp(control, "allocator-binned-invalid-", 25) == 0 &&
                        control[25] >= '0' && control[25] <= '6' && control[26] == '\0') {
                 return test::RunBinnedAllocatorNegativeControl(
                     static_cast<uint32>(control[25] - '0'));
+            } else if (strncmp(control, "platform-file-invalid-", 22) == 0 && control[22] >= '0' &&
+                       control[22] <= '7' && control[23] == '\0') {
+                return test::RunFileNegativeControl(static_cast<uint32>(control[22] - '0'));
             } else if (strcmp(control, "allocator-stack-live") == 0 ||
                        strcmp(control, "allocator-stack-wrong-thread") == 0 ||
                        strcmp(control, "allocator-stack-array-growth") == 0) {

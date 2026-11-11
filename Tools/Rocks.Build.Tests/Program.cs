@@ -61,6 +61,9 @@ try
     }
     void Pass(string name) { ++passed; Console.WriteLine("PASS " + name); }
 
+    await PlatformSelectionTests.RunAsync(request, root);
+    Pass("platform routing rejects unknown and mismatched targets");
+
     await ExecutorCleanupTests.RunAsync(request, root);
     Pass("cleanup failures preserve diagnostics, cancellation, and cache safety");
 

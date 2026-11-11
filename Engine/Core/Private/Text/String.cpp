@@ -208,6 +208,19 @@ Result<void> String::TryAppend(StringView source) noexcept {
     return Result<void>::Success();
 }
 
+void String::AppendPathInPlace(StringView suffix, bool separator) noexcept {
+    const usize offset = bytes_ + (separator ? 1 : 0);
+    if (!suffix.IsEmpty()) {
+        // separator를 먼저 쓰면 겹친 suffix가 손상될 수 있다. memmove로 원본부터 보존한다.
+        memmove(data_ + offset, suffix.Data(), suffix.ByteCount());
+    }
+    if (separator) {
+        data_[bytes_] = '/';
+    }
+    bytes_ = offset + suffix.ByteCount();
+    data_[bytes_] = '\0';
+}
+
 Result<void> String::TryReserve(usize byteCapacity) noexcept {
     if (byteCapacity <= capacity_) {
         return Result<void>::Success();

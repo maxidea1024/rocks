@@ -6,6 +6,19 @@ using Rocks.Build.IntegrationTests;
 using Rocks.Tooling.Common;
 
 if (args.Length != 0 && args[0] == "--output-lock-child") return await OutputInvocationLockTests.ChildAsync(args);
+if (args.Length == 1 && args[0] == "--platform-path-header")
+{
+    var native = await NativeToolchains.DiscoverAsync();
+    var temporary = Path.Combine(Path.GetTempPath(), "Rocks platform header " + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(temporary);
+    try
+    {
+        await PlatformPrivateHeaderTests.RunAsync(native, temporary);
+        Console.WriteLine("[PASS] platform-private-header-incremental");
+        return 0;
+    }
+    finally { Directory.Delete(temporary, recursive: true); }
+}
 
 var options = new Dictionary<string, string>(StringComparer.Ordinal);
 for (var index = 0; index < args.Length; index += 2)
@@ -30,7 +43,8 @@ try
     await OutputInvocationLockTests.RunAsync();
     MetadataOutputTransactionTests.Run();
     MetadataTemporaryCleanupTests.Run();
-    Pass("output-invocation-lock", timer.Elapsed);
+    await PlatformPrivateHeaderTests.RunAsync(toolchain, Path.Combine(fixture, "platform-header"));
+    Pass("output-invocation-lock-and-platform-header-incremental", timer.Elapsed);
     timer.Restart();
     var exported = await Cli("sdk", "--root", root, "--target", "Engine", "--configuration", "Debug", "--destination", sdk);
     Require(exported.ExitCode == 0, "SDK export failed: " + exported.StdErr);

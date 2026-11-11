@@ -207,7 +207,7 @@ Result<void> RunNameLifecycle(Allocator& allocator) noexcept {
             return Result<void>::Failure(lease.Error());
         }
         auto clone = lease.Value().TryClone();
-        if (!clone || clone.Value().View() != text) {
+        if (!clone || clone.Value().View() != (text.IsEmpty() ? StringView("None") : text)) {
             return Result<void>::Failure(ErrorCode::DependencyFailed);
         }
     }
@@ -216,7 +216,7 @@ Result<void> RunNameLifecycle(Allocator& allocator) noexcept {
 
 } // namespace
 
-TEST(NameEmptyIsDistinctFromMissingAndInternOwnsBytes) {
+TEST(NameEmptyIsNoneAndInternOwnsOtherBytes) {
     static_assert(__is_trivially_copyable(Name));
     static_assert(!__is_constructible(NameLease, const NameLease&));
     SystemAllocator allocator;
@@ -229,7 +229,8 @@ TEST(NameEmptyIsDistinctFromMissingAndInternOwnsBytes) {
         auto empty = pool.TryIntern(StringView(nullptr));
         REQUIRE(empty);
         CHECK(empty.Value().IsValid());
-        CHECK(empty.Value() != Name{});
+        CHECK(empty.Value().IsNone());
+        CHECK(empty.Value() == Name{});
         auto sameEmpty = pool.TryIntern("");
         REQUIRE(sameEmpty);
         CHECK(sameEmpty.Value() == empty.Value());
@@ -241,7 +242,11 @@ TEST(NameEmptyIsDistinctFromMissingAndInternOwnsBytes) {
         auto lease = pool.Acquire(token.Value());
         REQUIRE(lease);
         CHECK(lease.Value().View() == StringView("owned"));
-        CHECK(pool.Stats().entryCount == 2);
+        CHECK(pool.Stats().entryCount == 1);
+        auto noneLease = pool.Acquire(empty.Value());
+        REQUIRE(noneLease);
+        CHECK(noneLease.Value().View() == StringView("None"));
+        noneLease.Value().Reset();
         lease.Value().Reset();
         REQUIRE(pool.Shutdown());
         CHECK(pool.Stats().storageBytes == 0);
@@ -250,7 +255,7 @@ TEST(NameEmptyIsDistinctFromMissingAndInternOwnsBytes) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
-TEST(NameForcedHashCollisionsUseExactUtf8Bytes) {
+TEST(NameForcedHashCollisionsPreserveExactDisplayBytes) {
     SystemAllocator allocator;
     {
         NamePool pool(allocator);
@@ -266,7 +271,11 @@ TEST(NameForcedHashCollisionsUseExactUtf8Bytes) {
             REQUIRE(name);
             tokens[index] = name.Value();
             for (usize previous = 0; previous < index; ++previous) {
-                CHECK(tokens[previous] != tokens[index]);
+                if (previous == 0 && index == 1) {
+                    CHECK(tokens[previous] == tokens[index]);
+                } else {
+                    CHECK(tokens[previous] != tokens[index]);
+                }
             }
         }
         const uint64 allocations = allocator.Stats().totalAllocations;
@@ -276,12 +285,12 @@ TEST(NameForcedHashCollisionsUseExactUtf8Bytes) {
             CHECK(name.Value() == tokens[index]);
             auto lease = pool.Acquire(tokens[index]);
             REQUIRE(lease);
-            CHECK(lease.Value().View() == inputs[index]);
+            CHECK(lease.Value().View() == (index == 2 ? StringView("None") : inputs[index]));
         }
         CHECK(allocator.Stats().totalAllocations == allocations);
-        CHECK(pool.Stats().entryCount == 6);
+        CHECK(pool.Stats().entryCount == 5);
         CHECK(pool.TryIntern("\xED\xA0\x80").Error() == ErrorCode::InvalidArgument);
-        CHECK(pool.Stats().entryCount == 6);
+        CHECK(pool.Stats().entryCount == 5);
         CHECK(pool.Stats().activeOperations == 0);
     }
     CHECK(allocator.Stats().liveAllocations == 0);
@@ -300,7 +309,10 @@ TEST(NameDomainsRejectForeignAndPreviousSessionTokens) {
         REQUIRE(secondName);
         CHECK(firstName.Value() != secondName.Value());
         CHECK(first.Acquire(secondName.Value()).Error() == ErrorCode::StaleHandle);
-        CHECK(first.Acquire(Name{}).Error() == ErrorCode::StaleHandle);
+        auto none = first.Acquire(Name{});
+        REQUIRE(none);
+        CHECK(none.Value().View() == StringView("None"));
+        none.Value().Reset();
         Name forged = firstName.Value();
         forged.id += 64;
         CHECK(first.Acquire(forged).Error() == ErrorCode::StaleHandle);
@@ -392,7 +404,9 @@ TEST(NameEntryAndStorageLimitsAreAtomic) {
         config.maxEntries = 0;
         config.maxStorageBytes = MaxSize;
         REQUIRE(pool.Initialize(config));
-        CHECK(pool.TryIntern("").Error() == ErrorCode::CapacityExceeded);
+        auto none = pool.TryIntern("");
+        REQUIRE(none);
+        CHECK(none.Value().IsNone());
         CHECK(pool.Stats().storageBytes == 0);
     }
     CHECK(allocator.Stats().liveAllocations == 0);
@@ -552,7 +566,7 @@ TEST(NameAllAllocationFailuresAndRepeatedSessionsLeaveNoLeaks) {
     test::NFailAllocator faults(allocator);
     REQUIRE(RunNameLifecycle(faults));
     const uint64 allocationCount = faults.Attempts();
-    CHECK(allocationCount == 3);
+    CHECK(allocationCount == 2);
     CHECK(allocator.Stats().liveAllocations == 0);
     for (uint64 attempt = 1; attempt <= allocationCount; ++attempt) {
         faults.FailOnAttempt(attempt);

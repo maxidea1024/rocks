@@ -89,7 +89,7 @@ TEST(NameTextRepeatedHeadlessSessionTeardownLeavesNoOwners) {
             REQUIRE(names.Initialize());
             auto current = names.TryIntern("score.caption");
             REQUIRE(current);
-            if (previous.IsValid()) {
+            if (!previous.IsNone()) {
                 auto stale = names.Acquire(previous);
                 CHECK(!stale && stale.Error() == ErrorCode::StaleHandle);
             }

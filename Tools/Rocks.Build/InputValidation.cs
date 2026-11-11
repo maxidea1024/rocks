@@ -10,9 +10,14 @@ internal static class InputValidation
             throw new ArgumentOutOfRangeException(nameof(request.MaxParallelism),
                 $"MaxParallelism must be between 1 and {ProcessRunner.MaximumConcurrentProcesses}.");
         if (!Enum.IsDefined(request.Configuration)) throw new ArgumentException($"Configuration: unsupported value {request.Configuration}.");
-        if (!Enum.IsDefined(request.Toolchain.Platform)) throw new ArgumentException($"Toolchain.Platform: unsupported value {request.Toolchain.Platform}.");
-        bool windows = request.Toolchain.Platform == NativePlatform.Windows;
-        if ((windows && !OperatingSystem.IsWindows()) || (!windows && !OperatingSystem.IsMacOS()))
+        // enum 멤버가 추가돼도 실제 타깃 지원을 검토하기 전에는 통과시키지 않는다.
+        bool hostMatches = request.Toolchain.Platform switch
+        {
+            NativePlatform.Windows => OperatingSystem.IsWindows(),
+            NativePlatform.MacOS => OperatingSystem.IsMacOS(),
+            _ => throw new ArgumentException($"Toolchain.Platform: unsupported value {request.Toolchain.Platform}.")
+        };
+        if (!hostMatches)
             throw new PlatformNotSupportedException($"Toolchain.Platform {request.Toolchain.Platform}: this native host is not supported for that target.");
         if (NativeToolchains.PathComparer.Equals(request.RootDirectory, request.OutputDirectory) ||
             Fingerprints.IsUnder(request.RootDirectory, request.OutputDirectory))

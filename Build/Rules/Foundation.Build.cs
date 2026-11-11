@@ -17,6 +17,10 @@ public sealed class PlatformBase : ModuleRules
         Name = "PlatformBase",
         Sources = context.Sources($"Engine/PlatformBase/Private/{context.PlatformDirectory}", "Engine/PlatformBase/Private/Common"),
         PublicIncludeDirectories = [context.PathInRoot("Engine/PlatformBase/Public")],
+        // Mac 소스가 sibling Apple 공통 헤더를 사용하므로 증분 빌드의 입력에도 포함한다.
+        PrivateIncludeDirectories = context.Platform == NativePlatform.MacOS
+            ? [context.PathInRoot("Engine/PlatformBase/Private/Apple")]
+            : [],
         Dependencies = ["Base"]
     };
 }

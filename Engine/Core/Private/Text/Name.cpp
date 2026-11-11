@@ -22,14 +22,69 @@ Result<uint64> TakeDomain() noexcept {
     return Result<uint64>::Success(source.next++);
 }
 
-uint64 HashBytes(StringView value) noexcept {
+uint8 FoldAscii(uint8 value) noexcept {
+    return value >= 'A' && value <= 'Z' ? static_cast<uint8>(value + ('a' - 'A')) : value;
+}
+
+struct ParsedName {
+    usize baseBytes;
+    // 번호가 없으면 0이고, 번호가 있으면 외부 번호 + 1이다.
+    uint32 number;
+};
+
+ParsedName ParseName(StringView source) noexcept {
+    const usize size = source.ByteCount();
+    usize firstDigit = size;
+    while (firstDigit != 0) {
+        const char value = source.Data()[firstDigit - 1];
+        if (value < '0' || value > '9') {
+            break;
+        }
+        --firstDigit;
+    }
+
+    const usize digits = size - firstDigit;
+    if (digits == 0 || digits > 10 || firstDigit == 0 || source.Data()[firstDigit - 1] != '_' ||
+        (digits > 1 && source.Data()[firstDigit] == '0')) {
+        return {size, 0};
+    }
+
+    uint64 value = 0;
+    for (usize index = firstDigit; index < size; ++index) {
+        value = value * 10 + static_cast<uint64>(source.Data()[index] - '0');
+    }
+    // UE5.6은 MAX_int32 미만의 외부 번호만 접미사로 해석한다.
+    if (value >= 2147483647ull) {
+        return {size, 0};
+    }
+    return {firstDigit - 1, static_cast<uint32>(value + 1)};
+}
+
+bool IsNoneBase(StringView source, usize baseBytes) noexcept {
+    return baseBytes == 4 && FoldAscii(static_cast<uint8>(source.Data()[0])) == 'n' &&
+           FoldAscii(static_cast<uint8>(source.Data()[1])) == 'o' &&
+           FoldAscii(static_cast<uint8>(source.Data()[2])) == 'n' &&
+           FoldAscii(static_cast<uint8>(source.Data()[3])) == 'e';
+}
+
+uint64 HashBytes(StringView value, usize baseBytes) noexcept {
     uint64 hash = 14695981039346656037ull;
-    for (usize index = 0; index < value.ByteCount(); ++index) {
-        hash ^= static_cast<uint8>(value.Data()[index]);
+    for (usize index = 0; index < baseBytes; ++index) {
+        hash ^= FoldAscii(static_cast<uint8>(value.Data()[index]));
         hash *= 1099511628211ull;
     }
 
     return hash;
+}
+
+bool EqualBase(StringView left, StringView right, usize baseBytes) noexcept {
+    for (usize index = 0; index < baseBytes; ++index) {
+        if (FoldAscii(static_cast<uint8>(left.Data()[index])) !=
+            FoldAscii(static_cast<uint8>(right.Data()[index]))) {
+            return false;
+        }
+    }
+    return true;
 }
 
 } // namespace
@@ -38,6 +93,9 @@ struct NamePool::Entry {
     Entry* next = nullptr;
     uint64 hash = 0;
     uint64 id = 0;
+    uint64 comparisonId = 0;
+    uint32 number = 0;
+    usize baseBytes = 0;
     usize bytes = 0;
 
     char* Data() noexcept {
@@ -88,6 +146,22 @@ Name NameLease::Identifier() const noexcept {
 
 StringView NameLease::View() const noexcept {
     return view_;
+}
+
+StringView NameLease::BaseView() const noexcept {
+    if (!name_.HasNumber()) {
+        return view_;
+    }
+
+    // Acquire가 표시 entry와 번호를 함께 검증한다. lease 수명은 원문 저장소를 보호한다.
+    usize firstDigit = view_.ByteCount();
+    while (firstDigit != 0 && view_.Data()[firstDigit - 1] >= '0' &&
+           view_.Data()[firstDigit - 1] <= '9') {
+        --firstDigit;
+    }
+    return firstDigit != 0 && view_.Data()[firstDigit - 1] == '_'
+               ? StringView(view_.Data(), firstDigit - 1)
+               : view_;
 }
 
 Result<NameLease> NameLease::TryClone() const noexcept {
@@ -184,7 +258,11 @@ Result<Name> NamePool::TryIntern(StringView source) noexcept {
         return Result<Name>::Failure(valid.Error());
     }
 
-    const uint64 hash = HashBytes(source) & config_.hashMask;
+    const ParsedName parsed = ParseName(source);
+    const bool noneBase = IsNoneBase(source, parsed.baseBytes);
+    const bool canonicalNone = source.IsEmpty() || (parsed.number != 0 && parsed.baseBytes == 0) ||
+                               (source == StringView("None"));
+    const uint64 hash = HashBytes(source, parsed.baseBytes) & config_.hashMask;
     {
         platform::LockGuard lock(gate_);
         if (state_ != State::Running) {
@@ -192,9 +270,17 @@ Result<Name> NamePool::TryIntern(StringView source) noexcept {
             return Result<Name>::Failure(ErrorCode::ShuttingDown);
         }
 
+        // 기본 None은 별도 entry가 필요 없고 닫힌 pool에서 새 이름을 발급하지 않는다.
+        if (canonicalNone) {
+            --stats_.activeOperations;
+            return Result<Name>::Success(Name{});
+        }
+
         if (Entry* found = FindBytes(source, hash)) {
             --stats_.activeOperations;
-            return Result<Name>::Success(Name{stats_.domain, found->id});
+            return Result<Name>::Success(
+                Name{stats_.domain, found->comparisonId, found->id, found->number,
+                     found->comparisonId == 0 ? NameKind::NoneDisplay : NameKind::Normal});
         }
 
         if (nextSerial_ > maximumSerial) {
@@ -226,6 +312,8 @@ Result<Name> NamePool::TryIntern(StringView source) noexcept {
 
     Entry* candidate = ConstructAt<Entry>(allocation.Value());
     candidate->hash = hash;
+    candidate->number = parsed.number;
+    candidate->baseBytes = parsed.baseBytes;
     candidate->bytes = source.ByteCount();
     if (!source.IsEmpty()) {
         memcpy(candidate->Data(), source.Data(), source.ByteCount());
@@ -239,12 +327,16 @@ Result<Name> NamePool::TryIntern(StringView source) noexcept {
         if (state_ != State::Running) {
             error = ErrorCode::ShuttingDown;
         } else if (Entry* found = FindBytes(source, hash)) {
-            result = Name{stats_.domain, found->id};
+            result = Name{stats_.domain, found->comparisonId, found->id, found->number,
+                          found->comparisonId == 0 ? NameKind::NoneDisplay : NameKind::Normal};
         } else if (nextSerial_ > maximumSerial) {
             error = ErrorCode::Overflow;
         } else {
             const usize bucket = static_cast<usize>(hash & (BucketCount - 1));
             candidate->id = (nextSerial_++ << BucketBits) | bucket;
+            Entry* comparison = FindComparison(source, parsed.baseBytes, hash);
+            candidate->comparisonId =
+                noneBase ? 0 : (comparison != nullptr ? comparison->comparisonId : candidate->id);
             candidate->next = buckets_[bucket];
             buckets_[bucket] = candidate;
             ++stats_.entryCount;
@@ -252,7 +344,9 @@ Result<Name> NamePool::TryIntern(StringView source) noexcept {
             --stats_.pendingEntries;
             stats_.pendingStorageBytes -= allocationBytes;
             --stats_.activeOperations;
-            return Result<Name>::Success(Name{stats_.domain, candidate->id});
+            return Result<Name>::Success(
+                Name{stats_.domain, candidate->comparisonId, candidate->id, candidate->number,
+                     candidate->comparisonId == 0 ? NameKind::NoneDisplay : NameKind::Normal});
         }
     }
 
@@ -278,19 +372,44 @@ NamePool::Entry* NamePool::FindBytes(StringView source, uint64 hash) const noexc
     return nullptr;
 }
 
+NamePool::Entry* NamePool::FindComparison(StringView source, usize baseBytes,
+                                          uint64 hash) const noexcept {
+    const usize bucket = static_cast<usize>(hash & (BucketCount - 1));
+    for (Entry* entry = buckets_[bucket]; entry != nullptr; entry = entry->next) {
+        if (entry->hash == hash && entry->baseBytes == baseBytes &&
+            EqualBase(entry->View(), source, baseBytes)) {
+            return entry;
+        }
+    }
+    return nullptr;
+}
+
 Result<NameLease> NamePool::Acquire(Name name) noexcept {
     platform::LockGuard lock(gate_);
     if (state_ != State::Running) {
         return Result<NameLease>::Failure(ErrorCode::ShuttingDown);
     }
 
-    if (!name.IsValid() || name.domain != stats_.domain) {
+    if (!name.IsValid()) {
+        return Result<NameLease>::Failure(ErrorCode::StaleHandle);
+    }
+    // 기본 None은 pool 저장소를 사용하지 않지만 lease 수명·shutdown 규약은 동일하다.
+    if (name.kind == NameKind::None) {
+        if (stats_.activeLeases == static_cast<uint64>(-1)) {
+            return Result<NameLease>::Failure(ErrorCode::Overflow);
+        }
+        ++stats_.activeLeases;
+        return Result<NameLease>::Success(NameLease(*this, name, StringView("None")));
+    }
+    if (name.domain != stats_.domain) {
         return Result<NameLease>::Failure(ErrorCode::StaleHandle);
     }
 
-    const usize bucket = static_cast<usize>(name.id & (BucketCount - 1));
+    const uint64 displayId = name.displayId;
+    const usize bucket = static_cast<usize>(displayId & (BucketCount - 1));
     for (Entry* entry = buckets_[bucket]; entry != nullptr; entry = entry->next) {
-        if (entry->id != name.id) {
+        if (entry->id != displayId || entry->comparisonId != name.id ||
+            entry->number != name.number) {
             continue;
         }
 

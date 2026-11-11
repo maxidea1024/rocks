@@ -9,6 +9,7 @@ internal static class NativeTests
     public static void Register(TestSuite suite, Options options, IReadOnlyDictionary<string, string?> environment)
     {
         LoggerOutputTests.Register(suite, options, environment);
+        AlgorithmsCompilerTests.Register(suite, options, environment);
         string executable = Path.GetFullPath(options.Required("native-executable"));
         if (!File.Exists(executable)) throw new FileNotFoundException("Native test executable missing", executable);
         Task<ProcessResult> Run(params string[] args) => ProcessRunner.RunAsync(new(executable, args, options.Root,
@@ -96,7 +97,30 @@ internal static class NativeTests
                 var result = await Run("--negative-control", control);
                 Verify.That(result.ExitCode != 0, "fatal negative control succeeded");
                 Verify.Contains(diagnostic, result.StdErr, "fatal diagnostic");
-                if (control == "thread-unjoined") Verify.Contains("join", result.StdErr.ToLowerInvariant(), "unjoined diagnostic");
+                if (control == "thread-unjoined")
+                {
+                    Verify.Contains("THREAD_UNJOINED_READY", result.StdErr, "thread completion marker");
+                    const string ready = "THREAD_UNJOINED_READY";
+                    const string fatal = "Thread destroyed without a successful Join";
+                    Verify.Contains(fatal, result.StdErr, "unjoined diagnostic");
+                    Verify.That(result.StdErr.IndexOf(ready, StringComparison.Ordinal) < result.StdErr.IndexOf(fatal, StringComparison.Ordinal), "completion marker must precede destructor diagnostic");
+                    Verify.Equal(1, result.StdErr.Split(ready, StringSplitOptions.None).Length - 1, "completion marker count");
+                    Verify.Equal(1, result.StdErr.Split(fatal, StringSplitOptions.None).Length - 1, "destructor diagnostic count");
+                    Verify.That(!result.StdErr.Contains("THREAD_SETUP_", StringComparison.Ordinal), "thread setup failed");
+                }
+            });
+        foreach ((string control, string diagnostic) in new[]
+        {
+            ("thread-unjoined-start-failure", "THREAD_SETUP_START_FAILED"),
+            ("thread-unjoined-wait-failure", "THREAD_SETUP_WAIT_FAILED")
+        })
+            suite.Add("Native.Fatal." + control, async () =>
+            {
+                var result = await Run("--negative-control", control);
+                Verify.That(result.ExitCode != 0, "thread setup control succeeded");
+                Verify.Contains(diagnostic, result.StdErr, "thread setup diagnostic");
+                Verify.That(!result.StdErr.Contains("THREAD_UNJOINED_READY", StringComparison.Ordinal), "setup failure appeared ready");
+                Verify.That(!result.StdErr.Contains("Thread destroyed without a successful Join", StringComparison.Ordinal), "setup failure appeared as unjoined destructor");
             });
         if (string.Equals(Path.GetFileNameWithoutExtension(executable), "FoundationTests", StringComparison.OrdinalIgnoreCase))
             foreach (string control in new[] { "object-scope-lifo", "object-scope-thread" })
@@ -222,6 +246,31 @@ internal static class NativeTests
                     Verify.That(result.ExitCode != 0, "invalid backing allocation did not fail");
                     Verify.Contains(diagnostic, result.StdErr, "binned backing fatal diagnostic");
                 });
+        if (string.Equals(Path.GetFileNameWithoutExtension(executable), "FoundationTests", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(Path.GetFileNameWithoutExtension(executable), "CoreFoundationTests", StringComparison.OrdinalIgnoreCase))
+            foreach ((int operation, string diagnostic) in new[] {
+                (0, "FileSystem Open violated handle ownership contract"),
+                (1, "FileSystem Open violated handle ownership contract"),
+                (2, "FileHandle reported more bytes than requested"),
+                (3, "File close failed during destruction"),
+                (4, "File queried during reentrant callback"),
+                (5, "FileHandle reported more bytes than requested"),
+                (6, "FileHandle reported more bytes than requested"),
+                (7, "FileHandle reported more bytes than requested") })
+                suite.Add("Native.Fatal.platform-file-invalid-" + operation, async () =>
+                {
+                    var result = await Run("--negative-control", "platform-file-invalid-" + operation);
+                    Verify.That(result.ExitCode != 0, "invalid file backend did not fail");
+                    Verify.Contains(diagnostic, result.StdErr, "file backend fatal diagnostic");
+                });
+        if (string.Equals(Path.GetFileNameWithoutExtension(executable), "FoundationTests", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(Path.GetFileNameWithoutExtension(executable), "CoreFoundationTests", StringComparison.OrdinalIgnoreCase))
+            suite.Add("Native.Fatal.bit-array-invalid-index", async () =>
+            {
+                var result = await Run("--negative-control", "bit-array-invalid-index");
+                Verify.That(result.ExitCode != 0, "out-of-range bit access did not fail");
+                Verify.Contains("BitArray index is out of range", result.StdErr, "bit array fatal diagnostic");
+            });
         if (options.Asan)
             suite.Add("Native.AsanDetectsActualUseAfterFree", async () =>
             {

@@ -23,7 +23,7 @@ uint64 CurrentSeed() noexcept;
 void RunParallelNegativeControl() noexcept;
 int RunAssertWithLockedStderr() noexcept;
 int RunAsanNegativeControl() noexcept;
-int RunUnjoinedThreadNegativeControl() noexcept;
+int RunUnjoinedThreadNegativeControl(uint32 scenario = 0) noexcept;
 int RunOutstandingNameLeaseNegativeControl() noexcept;
 } // namespace rocks::test
 

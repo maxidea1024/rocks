@@ -73,7 +73,14 @@ struct Equal<String> {
 template <>
 struct Hash<Name> {
     uint64 operator()(Name value) const noexcept {
-        return MixHash(value.domain ^ MixHash(value.id));
+        if (value.IsValid() && value.kind != NameKind::Normal) {
+            return MixHash(value.number);
+        }
+        if (!value.IsValid()) {
+            return MixHash(value.domain ^ MixHash(value.id) ^ MixHash(value.displayId) ^
+                           MixHash(value.number) ^ MixHash(static_cast<uint8>(value.kind)));
+        }
+        return MixHash(value.domain ^ MixHash(value.id) ^ MixHash(value.number));
     }
 };
 

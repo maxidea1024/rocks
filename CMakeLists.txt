@@ -1,5 +1,25 @@
 cmake_minimum_required(VERSION 3.25)
+
+# APPLE에는 iOS 등도 포함되므로 대상 OS 이름으로 지원 범위를 명시한다.
+function(rocks_select_platform)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        set(ROCKS_PLATFORM_DIRECTORY Win64 PARENT_SCOPE)
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+        set(ROCKS_PLATFORM_DIRECTORY Mac PARENT_SCOPE)
+    else()
+        message(FATAL_ERROR "Unsupported target system '${CMAKE_SYSTEM_NAME}': Rocks Foundation supports Windows and macOS only")
+    endif()
+endfunction()
+
+# 명령행 대상은 컴파일러 탐색보다 먼저 거부한다. toolchain 파일이 project() 중에
+# 설정하는 대상도 project() 이후 다시 검사한다.
+if(DEFINED CMAKE_SYSTEM_NAME AND NOT CMAKE_SYSTEM_NAME STREQUAL "")
+    rocks_select_platform()
+endif()
+
 project(RocksFoundation VERSION 0.1.0 LANGUAGES CXX)
+rocks_select_platform()
+message(STATUS "Rocks target system: ${CMAKE_SYSTEM_NAME} (${ROCKS_PLATFORM_DIRECTORY})")
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -7,10 +27,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(ROCKS_BUILD_OBJECT "Build Object integration after Core" ON)
 option(ROCKS_ASAN "Enable AddressSanitizer for the CPU Foundation" OFF)
-
-if(NOT WIN32 AND NOT APPLE)
-    message(FATAL_ERROR "This first Foundation implements Windows/macOS only; Linux is not yet implemented")
-endif()
 
 add_library(rocks_options INTERFACE)
 if(MSVC)
@@ -20,11 +36,9 @@ if(MSVC)
 else()
     target_compile_options(rocks_options INTERFACE -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
 endif()
-if(WIN32)
-    set(ROCKS_PLATFORM_DIRECTORY Win64)
+if(ROCKS_PLATFORM_DIRECTORY STREQUAL "Win64")
     target_compile_definitions(rocks_options INTERFACE ROCKS_PLATFORM_WINDOWS=1)
 else()
-    set(ROCKS_PLATFORM_DIRECTORY Mac)
     target_compile_definitions(rocks_options INTERFACE ROCKS_PLATFORM_MAC=1)
 endif()
 if(ROCKS_ASAN)

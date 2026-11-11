@@ -6,7 +6,13 @@ namespace Rocks.Build.Rules;
 public sealed record BuildContext(string RootDirectory, string OutputDirectory,
     NativePlatform Platform, NativeConfiguration Configuration, string? SdkDirectory = null)
 {
-    public string PlatformDirectory => Platform == NativePlatform.Windows ? "Win64" : "Mac";
+    // 새로운 타깃은 명시적으로 추가해야 하며 알 수 없는 값을 다른 플랫폼으로 취급하지 않는다.
+    public string PlatformDirectory => Platform switch
+    {
+        NativePlatform.Windows => "Win64",
+        NativePlatform.MacOS => "Mac",
+        _ => throw new ArgumentOutOfRangeException(nameof(Platform), Platform, "Unsupported native platform.")
+    };
     public string PathInRoot(string path) => Path.GetFullPath(path, RootDirectory);
 
     public IReadOnlyList<string> Sources(params string[] directories) => directories

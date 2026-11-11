@@ -1,12 +1,18 @@
 # Rocks Foundation 최초 구현 상태
 
-기준일: 2026-11-10. 이 문서는 **Core·Object의 첫 실행 가능한 구현 범위**를 기록한다. C00–C13 전체 완료, Foundation Gate 통과, 제품용 엔진 완성을 뜻하지 않는다. 설계 PDF와 작업 CSV는 목표 기준이며 실제 진척은 이 문서와 실행 증거를 함께 확인한다.
+기준일: 2026-11-11. 이 문서는 **Core·Object의 첫 실행 가능한 구현 범위**를 기록한다. C00–C13 전체 완료, Foundation Gate 통과, 제품용 엔진 완성을 뜻하지 않는다. 설계 PDF와 작업 CSV는 목표 기준이며 실제 진척은 이 문서와 실행 증거를 함께 확인한다.
 
-현재 소스는 Name·Text·플랫폼 기반 위에 worker 실행기, 점진·병렬 GC, Clang 생성 리플렉션과 객체 그래프 직렬화, C#/.NET 기반 빌드 도구를 포함한다. 아래 실행 기록과 [5차 검증 기록](../Reviews/ImplementationRound5.FoundationValidation.ko.md)은 각각 해당 당시 소스에 대한 결과다. 현재 Windows 검증은 아래에 별도로 기록하며, 과거 CI를 현재 소스나 macOS의 통과 근거로 사용하지 않는다.
+현재 소스는 Name·Text·플랫폼 기반 위에 worker 실행기, 점진·병렬 GC, Clang 생성 리플렉션과 객체 그래프 직렬화, C#/.NET 기반 빌드 도구를 포함한다. 아래 실행 기록과 [5차 검증 기록](../Reviews/ImplementationRound5.FoundationValidation.ko.md)은 각각 해당 당시 소스에 대한 결과다. Windows 검증은 아래에 각각 해당 소스 시점으로 기록하며, 과거 CI를 현재 소스나 macOS의 통과 근거로 사용하지 않는다.
 
-신규 Stack·Binned·가상 메모리 코드는 테스트와 하네스를 포함한다. 이번 변경분의 Windows Core Debug·Release 및 Foundation Debug·ASan 검증은 통과하였으며, macOS 빌드·실행은 미검증이다. 가상 메모리의 OS 실패·부분 변경 fault injection은 보강해야 한다. Windows에서 mimalloc v3.6.1을 별도 scratch probe로 연결한 결과는 통과하였으나 제품 빌드·배포 통합이나 macOS 검증은 아니다. jemalloc·TCMalloc의 실제 제품 연결 및 성능은 미검증이다.
+신규 Stack·Binned·가상 메모리 코드는 테스트와 하네스를 포함한다. 할당기 추가 당시 소스의 Windows Core Debug·Release 및 Foundation Debug·ASan 검증은 통과하였으며, 이후 변경된 소스와 macOS 빌드·실행의 통과 근거는 아니다. 가상 메모리의 OS 실패·부분 변경 fault injection은 보강해야 한다. Windows에서 mimalloc v3.6.1을 별도 scratch probe로 연결한 결과는 통과하였으나 제품 빌드·배포 통합이나 macOS 검증은 아니다. jemalloc·TCMalloc의 실제 제품 연결 및 성능은 미검증이다.
 
-이번 Windows 검증에서 Core Debug·Release는 각각 PASS였고, Core Release는 native 211건과 harness 50건을 실행하였다. Foundation Debug는 native 298건·harness 57건·meta 41건, Foundation ASan은 native 298건·harness 58건·meta 41건이 PASS였다. build evidence는 실행 중 source가 안정적이고 runner report가 현재 소스에 해당함을 기록한다. 이 결과는 제품 성능, 외부 공급자 제품 통합 또는 macOS 실행을 보증하지 않는다.
+할당기 추가 당시 Windows 검증에서 Core Debug·Release는 각각 PASS였고, Core Release는 native 211건과 harness 50건을 실행하였다. Foundation Debug는 native 298건·harness 57건·meta 41건, Foundation ASan은 native 298건·harness 58건·meta 41건이 PASS였다. build evidence는 실행 중 source가 안정적이고 runner report가 당시 실행한 소스에 해당함을 기록한다. 이 결과는 제품 성능, 외부 공급자 제품 통합 또는 macOS 실행을 보증하지 않는다.
+
+이전 경로·파일 I/O 변경의 Windows Foundation 검증에서 Debug는 native 354건·harness 65건·meta 41건, ASan은 native 354건·harness 66건·meta 41건이 PASS였다. 두 실행의 build evidence는 `sourceStableDuringRun=true`, `runnerReportCurrent=true`를 기록한다. 전체 `clang-format` 검사도 PASS였으며, 별도 빌드 도구 회귀는 해당 실행 시점에 18개 그룹 PASS였다. 결과는 각각 `out/final-platform-foundation-debug/`, `out/final-platform-foundation-asan/`과 `out/path-build-tests.log`에 기록되어 있다.
+
+두 Foundation 실행에서 파일 symlink fixture는 호스트 권한 또는 파일시스템 제약으로, 메타컴파일러 symlink fixture는 Windows 계정 권한 제약으로 생성이 건너뛰어졌다. 당시 전체 PASS에 포함된 해당 테스트는 링크 동작의 실제 검증으로 간주하지 않았다. 이후 Windows 개발자 모드를 활성화하고 별도로 재검증한 결과는 아래에 기록한다. 현재 변경분의 macOS 실기기 빌드·실행, 실제 OS close 실패 강제 주입은 미검증이다. 전체 stat, 디렉터리 생성·열거, 복사·이동, flush·truncate, 비동기 I/O·mapping·watch와 wrapper chain 관리자는 후속 범위다.
+
+이전 Core 공용 기능 확장의 Windows 검증은 Foundation Debug native 407건·harness 66건·meta 41건, Foundation ASan native 407건·harness 67건·meta 41건, Core Release native 320건·harness 59건이 각각 PASS였다. 세 빌드 evidence 모두 `sourceStableDuringRun=true`, `runnerReportCurrent=true`이며 `clang-format`도 PASS다. 당시 파일 및 메타컴파일러 symlink fixture는 권한 제약으로 SKIP되었다. 이후 별도 재검증에서 두 fixture가 실제 실행되어 통과했다. 현재 변경의 macOS 실기기 빌드와 테스트는 미검증이다.
 
 ## 1. 현재 동작하는 경로
 
@@ -28,10 +34,10 @@
 |---|---|---|
 | C00 | .NET 10 SDK 고정, C# `*.Build.cs`/`*.Target.cs` 모듈·타깃 규칙, MSBuild 진입점, 네이티브 작업 그래프·로컬 증분 검사, 설치 SDK·외부 게임 빌드, C# 검사 하네스·서식/STL/경고 검사, 단독 헤더 검사, 모듈 템플릿 plan/apply/validate, CI 정의 | 분산 빌드·공유 artifact 캐시, PCH·unity·공유 라이브러리, 완전한 SDK 패키징, 전체 프로젝트·컴포넌트·프리팹 템플릿, 복구 저널 |
 | C01 | Base 정수 타입, Guid POD, checked arithmetic | 전체 ABI·compiler 추상화 |
-| C02 | 정렬 할당, 가상 메모리 예약·commit·decommit·release, 단조 시계, 스레드 식별, Thread/Mutex/CV/Event/Semaphore, 최소 fatal sink | 가상 메모리 OS 실패·부분 변경 fault injection과 macOS 실행 검증, atomics/RWLock, thread 설정·취소 |
+| C02 | 정렬 할당, 가상 메모리 예약·commit·decommit·release, 단조 시계, 스레드 식별, Thread/Mutex/CV/Event/Semaphore, 최소 fatal sink, 플랫폼 경로 선택과 초기 동기 파일 I/O | 가상 메모리 OS 실패·부분 변경 fault injection, 파일 기능의 OS close 실패 강제 주입과 macOS 실행 검증, atomics/RWLock, thread 설정·취소 |
 | C03 | Result/Error, Move/Forward, 제한된 traits | 전체 범용 utility 집합 |
 | C04 | SystemAllocator·ArenaAllocator·StackAllocator·PoolAllocator·BinnedAllocator·BudgetAllocator·DebugAllocator, 외부 backend와 벤더 함수 바인딩, 소유권 ledger·통계 | frame 수명 관리·자동 일괄 해제 stack·thread cache·page guard, 실제 공급자 제품 통합·플랫폼 검증, 주소 검색 최적화·성능 측정 |
-| C05 | Array, Span, HashMap, HashSet, 찾거나 추가·조건부 삭제·집합 연산, 실패 시 상태 유지, 비소유 뷰 규약 | queue, inline·bit·stable-slot 컨테이너, 범위 연산, 내부 콜백 재진입 완전 진단 및 장시간 성능 검증 |
+| C05 | Array·Span·BitArray·HashMap·HashSet의 부분 구현, 배열 삽입·삭제·크기 조절·추가·검색, 비트 단위 검색·집합 연산 및 실패 시 상태 유지 | queue·inline·sparse/stable-slot, 범용 알고리즘·추가 범위 연산, Map/Set 정책, 내부 콜백 재진입 완전 진단 및 장시간 성능 검증 |
 | C06 | Function, ModuleLease, InlineExecutor와 WorkerScheduler, 의존성·취소·drain, 고정 용량 로그·프로파일 scope, assert, 음성 대조군 | priority/lane/work-stealing/fiber scheduler, 비동기 로그 writer·viewer |
 | C07 | C# Clang AST 메타 생성·선언 검증, CLASS/PROPERTY·typed 필드 접근·자동 Trace, 상속 metadata IsA, 깊은 복사·revision/module lease, Archive/Record·객체 그래프 직렬화 | 자동 메타 unit 발견·프로젝트 전역 ID 검증, 범용 native 상속 cast, method/enum/container reflection, compile DB 입력 재구성·생성 캐시·외부 에셋 참조 |
 | C08 | 비이동 64-slot chunk, registry domain·generation, 고갈 슬롯 격리, 진단 캡처 | 빠른 인덱스 조회, 대규모 벤치마크 |
@@ -39,7 +45,15 @@
 | C10 | 비공개 생성 트랜잭션, 간선 검증 후 일괄 공개, 역순 롤백 | ClassDefaults·instancing, 트랜잭션 활성 중 GC, 전체 lifecycle hook |
 | C11 | full STW와 점진 mark/sweep, 삽입 장벽·cutoff, 선택적 병렬 mark, soft 시간·작업량 예산, OOM 시 sweep 금지·독립 oracle | 다중 mutator·동시 필드 스캔, hard deadline, 병렬 sweep·cluster·대규모 성능 검증 |
 | C12 | logical destroy·retire·실제 회수 분리, Busy 종료·재시도, 모의 backend lease | 실제 GPU/IO/audio 연동, 장시간 시스템 스트레스 |
-| C13 subset | 자체 UTF-8 String/StringView, NamePool/NameLease intern, 명시 수명·예산·경합 검증 | Guid 생성/parse, 암호학적·영속 hash 정책, 직관적인 자체 Path 값·플랫폼 변환 |
+| C13 subset | 자체 UTF-8 String/StringView 검색·분리·치환 일부, Name의 ASCII 비교·표기·None·번호와 pool/lease 수명, Path 문자열 처리와 String `/`·`/=` | Unicode case folding·정규화·format 등 전체 문자열 기능, 영속 Name identity, Guid 생성/parse, 암호학적·영속 hash 정책, 플랫폼 경로 보정·기본 디렉터리 조회 |
+
+### 경로와 파일 I/O의 초기 구현
+
+`Core/Path/Path.h`는 Windows·POSIX 문법을 선택해 루트·정규화·결합·절대/상대 변환·포함 판정, 파일명·디렉터리·부모·확장자 분리와 설정을 제공한다. `Directory`는 마지막 구분자 기준 분리이고 `Parent`는 루트 보존을 우선한다. `Split(".")`의 이름은 빈 값, `Split("..")`의 이름은 `..`이며, `BaseFileName("..")`은 `.`이다. `ChangeExtension`은 구분점 없는 이름을 유지하고 `SetExtension`은 추가한다. `NormalizeFilename`은 역슬래시를 슬래시로 바꾸며 별도의 `CollapseRelativeDirectories`는 UE5.6 스타일 축약을 수행한다. OS별 `NormalizePath` 보정 hook은 아직 연결되지 않았다.
+
+`String`의 `/`와 `/=`는 `Path::Combine`·`Append`에 연결되며 원문을 결합하고 `Result`로 실패를 전달한다. `/=`는 실제 변경이 없거나 capacity가 충분하면 기존 저장소를 재사용하며 입력 별칭을 처리한다. 재할당이 필요한 연산에는 기존 `String`과 할당기의 반환 순서 계약이 적용된다. 정규화·포함 판정은 문자열 연산일 뿐 실제 파일 접근 가능성, 링크 해석이나 보안 경계를 보장하지 않는다.
+
+`Platform/File.h`는 `FileSystem`·`FileHandle` 경계, 물리 Windows/macOS backend와 소유형 `File`을 제공한다. 열기·존재·삭제, read/write, 반복 전송 `ReadExact`·`WriteAll`, seek·size·close와 오류 코드를 포함한다. wrapper는 자체 구현해 주입할 수 있으나 Unreal식 wrapper chain 관리자나 실제 제품 wrapper가 구현됐다는 뜻은 아니다. 단위 테스트는 경로 입력, 짧은 전송·실패, EOF, 잘못된 소유·재진입과 동시성 일부를 다룬다. 파일 stat 전체·디렉터리 생성/열거, 복사·이동, flush·truncate, 비동기·mapping·watch, OS close 오류 강제 주입, macOS 실기기와 링크 경로 검증은 후속이다. close 오류는 terminal이며 OS 자원 회수 성공을 보장하지 않는다.
 
 플랫폼의 단조 시계와 WorkerScheduler는 시간 측정 및 작업 실행 기반이다. 게임·엔진의 가변 틱, 고정 틱, 시간 배율, 틱 그룹과 멀티스레드 틱은 아직 구현하지 않았다. Component의 생성·부착·소유·수명 시스템과 프리팹, 에디터·PIE도 미구현이다. `Templates/Game/Foundation`은 현재 Object/CLASS 예제이며 Component 예제는 실제 시스템 구현 이후 추가한다.
 
@@ -79,6 +93,15 @@
 `std::string`이나 `std::wstring`을 도입하지 않는다. `String`은 Allocator 기반 UTF-8 소유 값, `StringView`는 길이 기반 비소유 뷰다. 길이 API는 byte 단위이며 문자·grapheme 수와 혼용하지 않는다. 정규화, 대소문자 언어 규칙, BiDi와 글꼴 shaping은 별도 계층이다.
 
 `Text`는 String의 별명이 아니라 지역화 ID·원문·형식 인자·카탈로그 revision의 수명을 갖는 불변 표시 문구 계층으로 구현하였다. `Name`은 pool domain을 구별하는 별도 intern 식별자다. 기능·의존성·검증 기준은 [문자열과 지역화 경계](StringAndText.ko.md)를 따른다.
+
+### Core 공용 문자열·이름과 컨테이너
+
+- `String`과 `StringView`는 앞/뒤 `Find`, `Contains`, `StartsWith`, `EndsWith`, `Split`, byte 범위 부분 문자열, ASCII 공백 제거와 대소문자 변환을 제공한다. `String::TryReplace`는 겹치지 않는 일치를 치환한다. 검색 기본값은 ASCII 대소문자 무시이며 비ASCII는 바이트를 그대로 비교한다. 결과 인덱스는 UTF-8 byte 단위로 UE의 `TCHAR` 단위와 다르다. byte 부분 문자열 API는 UTF-8 코드 포인트 경계를 검사한다. `StringView` 검색과 분리는 비소유 byte view에 대한 연산이므로 호출자가 유효한 UTF-8과 원본 수명을 관리한다. 치환은 자기 별칭과 할당 실패를 고려하며 실패 시 기존 문자열을 보존한다. format, Unicode folding·정규화 등 전체 UE 문자열 기능은 아직 미구현이다.
+- `Name{}`은 유효한 None이며 빈 문자열 및 ASCII 대소문자와 무관한 `None`도 None과 비교된다. 정상 이름은 ASCII case-insensitive 비교 ID와 원래 표기의 표시 ID를 분리하고 숫자 접미사를 지원한다. 번호가 있는 `None_N`은 None이 아니다. `GetNumber()`는 외부 표기의 N을 반환하고 번호가 없으면 -1을 반환한다. 이는 UE의 내부 번호 표현과 다르다. 보통 이름은 pool domain이 다르면 동일하지 않으며 발급 token과 view의 실제 유효성은 해당 pool의 `Acquire`와 `NameLease`로 확인한다. token은 영속·네트워크 식별자가 아니다. 비ASCII case folding은 제공하지 않는다.
+- `Array`는 단일 원소 삽입·emplace, span/배열 append, resize, 순서 보존/교환 삭제, pop, 앞/뒤 검색, reset·empty·shrink를 제공한다. 이동 전용 원소, 자기 별칭과 할당 실패 시 원상 보존을 고려한다. 재할당·삽입·삭제 시 포인터와 view의 무효화 및 할당기의 반환 순서 계약을 따라야 한다. 정렬·heap과 추가 범위 API는 후속이다.
+- `BitArray`는 bit 단위 크기 조절·삽입·삭제·검색·설정·개수 및 AND/OR/XOR 조합을 제공한다. 자동 크기 증가는 기하 성장하고 명시적 reserve는 워드 경계로 반올림한다. 실패하면 기존 내용과 저장소를 보존한다. UE5.6과 같이 겹치는 구간의 교환 삭제는 `Array`와 `BitArray`가 서로 다른 원본 구간에서 채울 수 있으므로 두 연산의 결과를 동일하다고 가정하지 않는다. 동시 변경에는 외부 동기화가 필요하다.
+
+관련 테스트는 `Tests/Core`의 `StringOperationsTests`, `NameNoneTests`·`NameTokenReviewTests`·`NameEqualityPropertyTests`, `ArrayFeatureTests`·`ArrayGrowthReviewTests`·`ArrayStackReviewTests`, `BitArrayTests`·`BitArrayBoundaryTests`·`BitArrayGrowthTests` 및 실패 대조군에 있다. 존재하는 테스트와 해당 소스의 실제 플랫폼별 실행 결과는 별도로 구분한다.
 
 ## 5. 진단과 검증
 
@@ -235,4 +258,16 @@ Windows ASan은 LeakSanitizer가 아니며, 소유권 ledger와 종료 검사를
 
 현재 범위는 Core·Object의 실행 경로와 C#/.NET 기반 빌드·메타 도구의 초기 구현이다. 각 경로의 구현과 검증 결과를 전체 Core 또는 엔진 기능의 완료로 확대하지 않는다.
 
-전체 Foundation에는 frame 수명 관리·자동 일괄 해제 stack·thread cache 등 후속 할당기, 가상 메모리 오류 주입 검증, queue 및 기타 후속 컨테이너, Path·파일 IO, atomics/RWLock, root owner 진단, 정밀한 빌드 의존 추적과 메타 unit 자동 발견, 장시간 스트레스·대규모 pause 성능 검증 등이 남아 있다. 수학·기본 충돌 라이브러리, 엔진 틱, Component와 상위 에디터·PIE·입력·렌더러 통합도 별도 후속 작업이다. 전체 C00–C26/Foundation Gate는 미완료이며 초기 선형 탐색과 고정 상한을 제품 성능 충족으로 간주하지 않는다.
+전체 Foundation에는 frame 수명 관리·자동 일괄 해제 stack·thread cache 등 후속 할당기, 가상 메모리 오류 주입 검증, queue 및 기타 후속 컨테이너, 미완성 경로 유틸·파일 I/O와 플랫폼 검증, atomics/RWLock, root owner 진단, 정밀한 빌드 의존 추적과 메타 unit 자동 발견, 장시간 스트레스·대규모 pause 성능 검증 등이 남아 있다. 수학·기본 충돌 라이브러리, 엔진 틱, Component와 상위 에디터·PIE·입력·렌더러 통합도 별도 후속 작업이다. 전체 C00–C26/Foundation Gate는 미완료이며 초기 선형 탐색과 고정 상한을 제품 성능 충족으로 간주하지 않는다.
+
+## 2026-11-11 Windows 심볼릭 링크 재검증
+
+Windows 개발자 모드를 활성화한 뒤 기존 빌드의 파일 링크 fixture를 별도로 실행하여 유효한 링크와 대상이 삭제된 링크의 존재 판정이 통과했다. 메타컴파일러 전체 41건도 재실행하여 모두 통과했고, 디렉터리 링크를 통한 경로 동일성·충돌 검사 fixture도 실제 실행되었다. 두 fixture 모두 SKIP되지 않았다. 결과는 `out/symlink-recheck/file.log`, `file.json`, `meta.log`, `meta.json`에 기록했다. 이는 별도 재검증이며 기존 Foundation 전체 Debug·ASan 또는 Core Release 테스트를 다시 실행했다는 의미는 아니다.
+
+## 2026-11-11 Core 정렬·검색 구현과 검증
+
+`Core/Algorithms.h`에 할당 없는 비안정 정렬, lower/upper bound와 이진 탐색을 추가하고 `Array::Sort()`와 비교기 오버로드를 제공한다. 상세 계약과 사용 예는 [정렬·이진 탐색](Algorithms.ko.md)을 따른다. UE 5.6 `TArray` 정렬 기능과 비교하되 포인터 자동 역참조 정책은 다르며, UE 5.6 별도 `Algo` 헤더 전수 대조는 아직 하지 않았다.
+
+Windows Foundation Debug는 native 415건, harness 67건, meta 41건이 통과했다. 이후 C# 하네스에 양방향 이종 키 컴파일 음성 대조와 컴파일러 미지정 시 생략 표시를 보강했으며, 동일한 Debug native 바이너리로 보강된 harness 67건을 다시 실행해 통과했다. 컴파일러 미지정 직접 실행에서는 `[SKIP]` 표시를 확인했다. Debug 전체 실행 결과는 `out/core-algorithms-debug.log`, 보강 후 harness는 `out/core-algorithms-debug-harness-recheck.log`에 있다.
+
+Windows Foundation ASan 최초 실행에서는 native 415건이 통과했으나 기존 `Native.Fatal.thread-unjoined` 음성 테스트가 제한 시간을 초과했다. 해당 실행은 성공으로 간주하지 않으며 원인은 확인되지 않았다. 별도 출력 경로에서 재시도한 전체 ASan 실행은 native 415건, harness 68건, meta 41건이 통과했고 `sourceStableDuringRun=true`, `runnerReportCurrent=true`다. 같은 음성 테스트를 별도로 5회 실행하여 각각 예상 종료와 진단을 확인했으나 간헐적 시간 초과의 원인 해결을 입증하지는 않는다. 결과는 `out/core-algorithms-retry-asan.log`, 최초 실패 하네스 보고서는 `out/core-algorithms-foundation-asan/tool-native-report.json`이다. macOS 실기기 빌드·실행은 이번에 수행하지 않았다.

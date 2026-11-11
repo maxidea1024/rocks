@@ -48,13 +48,32 @@ int RunAssertWithLockedStderr() noexcept {
     return joined == platform::ThreadStatus::Success ? 0 : 2;
 }
 
-int RunUnjoinedThreadNegativeControl() noexcept {
+int RunUnjoinedThreadNegativeControl(uint32 scenario) noexcept {
     PrepareFatalTestProcess();
+    platform::ManualResetEvent blocked;
     {
         platform::Thread thread;
-        if (thread.Start([](void*) noexcept {}) != platform::ThreadStatus::Success ||
-            thread.WaitForCompletion(10000) != platform::WaitResult::Signaled) {
-            return 2;
+        const auto entry = [](void* context) noexcept {
+            if (context != nullptr) {
+                static_cast<platform::ManualResetEvent*>(context)->Wait();
+            }
+        };
+        const auto started =
+            thread.Start(scenario == 1 ? nullptr : entry, scenario == 2 ? &blocked : nullptr);
+        if (started != platform::ThreadStatus::Success) {
+            // 소유권이 생기지 않은 실패와 의도한 미조인 소멸을 구분한다.
+            platform::Fatal("THREAD_SETUP_START_FAILED");
+        }
+        const auto completed = thread.WaitForCompletion(scenario == 2 ? 0 : 10000);
+        if (scenario == 2 && completed != platform::WaitResult::TimedOut) {
+            platform::Fatal("THREAD_TIMEOUT_CONTROL_BROKEN");
+        }
+        if (completed != platform::WaitResult::Signaled) {
+            // joinable 상태의 return은 소멸자 Fatal로 잘못 성공 판정될 수 있다.
+            platform::Fatal("THREAD_SETUP_WAIT_FAILED");
+        }
+        if (fputs("THREAD_UNJOINED_READY\n", stderr) < 0 || fflush(stderr) != 0) {
+            platform::Fatal("THREAD_SETUP_REPORT_FAILED");
         }
         // entry 완료와 native 소유권 회수는 다르다. Join 누락을 조용히 허용하면 안 된다.
     }
