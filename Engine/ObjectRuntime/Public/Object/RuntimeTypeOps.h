@@ -42,6 +42,58 @@ private:
     Allocator* allocator_;
 };
 
+class TypeRegistry;
+
+// 등록된 필드의 실제 대상 schema, 타입과 값 형식을 검사한다. callback 코드 수명은 TypeLease가
+// 보유하는 ModuleLease에 종속되므로 이 값을 lease보다 오래 보관하거나 호출하지 않는다.
+class FieldWriteOperation {
+public:
+    using Callback = Result<void> (*)(ObjectRegistry&, const ObjectAccessContext&, ObjectHandle,
+                                      const FieldValue&) noexcept;
+
+    constexpr FieldWriteOperation() noexcept = default;
+
+    // noexcept 함수 포인터로의 예외 없는 변환만 허용한다. 이 생성자로 직접 변환하여
+    // 기존 함수표 aggregate 초기화에 두 번의 암묵적 사용자 정의 변환이 필요하지 않게 한다.
+    template <class Callable>
+        requires requires(Callable value) {
+            { static_cast<Callback>(value) } noexcept;
+        }
+    constexpr FieldWriteOperation(Callable value) noexcept
+        : callback_(static_cast<Callback>(value)) {
+    }
+
+    explicit constexpr operator bool() const noexcept {
+        return callback_ != nullptr;
+    }
+
+    Result<void> operator()(ObjectRegistry& registry, const ObjectAccessContext& access,
+                            ObjectHandle handle, const FieldValue& value) const noexcept;
+
+private:
+    friend class TypeRegistry;
+
+    void Bind(TypeRegistry& registry, const void* nativeType, Guid fieldId, ValueKind valueKind,
+              TypeId referencedType, bool readOnly) noexcept {
+        registry_ = &registry;
+        nativeType_ = nativeType;
+        fieldId_ = fieldId;
+        referencedType_ = referencedType;
+        valueKind_ = valueKind;
+        readOnly_ = readOnly;
+        bound_ = true;
+    }
+
+    Callback callback_ = nullptr;
+    TypeRegistry* registry_ = nullptr;
+    TypeId referencedType_{};
+    const void* nativeType_ = nullptr;
+    Guid fieldId_{};
+    ValueKind valueKind_ = ValueKind::Opaque;
+    bool readOnly_ = false;
+    bool bound_ = false;
+};
+
 // 함수는 owner context/handle을 검사하는 generated thunk다. offset이나 raw field 주소를 공개하지
 // 않는다. read 실패는 out 불변, write 실패는 해당 필드에 새 값을 게시하지 않는다.
 // String commit 뒤 이전 buffer 반환 callback의 논리 파괴는 이미 완료된 성공을 되돌리지 않는다.
@@ -49,8 +101,7 @@ struct RuntimeFieldOps {
     Guid fieldId{};
     Result<void> (*read)(ObjectRegistry&, const ObjectAccessContext&, ObjectHandle,
                          FieldValue&) noexcept = nullptr;
-    Result<void> (*write)(ObjectRegistry&, const ObjectAccessContext&, ObjectHandle,
-                          const FieldValue&) noexcept = nullptr;
+    FieldWriteOperation write;
     Result<void> (*writeStaged)(ConstructionContext&, ObjectHandle,
                                 const FieldValue&) noexcept = nullptr;
 };
@@ -101,27 +152,31 @@ struct RuntimeTypeOps {
 };
 
 // noexcept T(Allocator&)가 있으면 registry allocator를 주입하고, 없으면 noexcept T()를 사용한다.
+// Abstract 메타데이터는 생성 callback 없이 등록하고 생성 시도는 Unsupported로 거부한다.
 // 실패 가능한 초기화는 생성자 밖의 ConstructionContext 단계에서 처리한다.
 // Trace가 없는 타입은 강한 간선이 없는 것으로 취급한다. 메타데이터 자동 추적은 없다.
-template <class T>
+template <class T, bool Abstract = __is_abstract(T)>
 RuntimeTypeOps MakeRuntimeTypeOps(ModuleLease module = {}) noexcept {
     static_assert(__is_base_of(Object, T));
-    static_assert(__is_nothrow_constructible(T, Allocator&) || __is_nothrow_constructible(T));
+    static_assert(Abstract || __is_nothrow_constructible(T, Allocator&) ||
+                  __is_nothrow_constructible(T));
     static_assert(__is_nothrow_destructible(T));
 
     RuntimeTypeOps ops;
     ops.size = sizeof(T);
     ops.alignment = alignof(T);
     ops.nativeType = NativeTypeKey<T>();
-    ops.construct = [](void* memory, Allocator& allocator) noexcept -> Object* {
-        if constexpr (__is_constructible(T, Allocator&)) {
-            static_assert(__is_nothrow_constructible(T, Allocator&));
-            return ::new (memory) T(allocator);
-        } else {
-            return ::new (memory) T();
-        }
-    };
-    ops.destroy = [](Object* object) noexcept { static_cast<T*>(object)->~T(); };
+    if constexpr (!Abstract) {
+        ops.construct = [](void* memory, Allocator& allocator) noexcept -> Object* {
+            if constexpr (__is_constructible(T, Allocator&)) {
+                static_assert(__is_nothrow_constructible(T, Allocator&));
+                return ::new (memory) T(allocator);
+            } else {
+                return ::new (memory) T();
+            }
+        };
+    }
+    ops.destroy = [](Object* object) noexcept { static_cast<T*>(object)->T::~T(); };
     ops.trace = [](const Object& object, TraceVisitor& visitor) noexcept {
         if constexpr (requires(const T& value) { value.Trace(visitor); }) {
             static_assert(noexcept(static_cast<const T&>(object).Trace(visitor)));

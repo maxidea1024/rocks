@@ -25,6 +25,18 @@ Rocks 전체 구현 계획의 Core/Object Foundation과 입력 영역을 실제 
 
 새 확장이 공통 의미 자체를 바꾸면 ADR로 Core 변경을 허용한다. ‘Core 변경 0건’은 예정한 확장 사례에 대한 기준이며 모든 미래 요구에 대한 절대 약속이 아니다. 범용 ServiceLocator·전역 singleton·`void*` 메시지 버스를 모듈 결합의 기본 수단으로 사용하지 않는다.
 
+### Unreal Core 기능 대응 요구
+
+Unreal Core의 개별 기능에 대해 Rocks에서도 가능한지 묻는다면 최종적으로 모두 지원한다고 답할 수 있어야 한다. 이름과 구현 방식은 Rocks에 맞게 정하며 Blueprint 시각 스크립트는 사용자 지시에 따라 제외하고 자체 언어를 사용한다. 실제 근거가 없는 기능을 지원 완료로 표시하지 않는다. 기준 엔진 버전·플랫폼별 공개 헤더와 문서의 기능을 대조하고, 기능별 Rocks 대응 모듈·현재 상태·사용 예·실패 조건·테스트·우선순위와 미확인 사유를 추적한다. 기능 목록에 없는 항목도 임의로 범위에서 제외하지 않는다.
+
+1차 범주별 조사와 전수 대조 방법은 [Unreal Core 기능 감사표](UnrealCoreFeatureAudit.ko.md)에 기록한다. 공개 문서나 다른 버전의 소스만으로 모든 기능을 확인했다고 단정하지 않으며, 기준 버전의 누락 검토와 플랫폼별 검증이 완료 게이트다.
+
+### 직관적 공개 API와 안전성
+
+예측 가능한 이름과 동작이 드러나는 최소 절차를 우선한다. 겉모양을 위한 추상화, 무분별한 설계 패턴과 타입 분류 접두사를 추가하지 않는다. 내부 Registry·scope를 매번 조합하는 상용구는 기본 경로에서 최소화하되 안전성 검사와 오류 원인은 숨기지 않는다. API는 사용자가 해결할 작업을 기준으로 설계한다. 대표 사용 예제에서 내부 Registry·scope·식별자 조립이 반복되면 기본 경로의 책임 배치를 재검토한다. 타입·상태·생명주기·컨테이너·할당기 조회 및 변경은 일관된 이름과 최소 단계로 제공하고, 정적 선언 정보와 객체의 동적 등록 정보를 혼동하지 않도록 구분한다. 코드 주석은 호출법, 소유권, 실패와 사용 시 주의사항을 중심으로 작성한다.
+
+실행 문맥을 자동으로 알아낼 수 없는 호출에서는 World를 추정하지 않는다. 다중 World·PIE와 독립 Registry를 지원하고, 객체는 유효한 Borrow를 유지하며 메타데이터는 Registry·모듈 수명을 보호하는 lease를 사용한다. 편의 API는 기존 수명·스레드·문맥 검증을 우회하지 않는다. 복구 가능한 오류와 불변식 위반을 구분하며, `Result<bool>`의 성공 여부를 실제 상태처럼 해석할 수 있는 API는 사용하지 않는다. 제시한 편의 명칭은 컴파일·실행 테스트 전까지 구현 완료를 뜻하지 않는다.
+
 ### 1.2 구현 수준의 구분
 
 | 수준 | 이번 계획의 완료 의미 | 후속으로 남겨도 되는 항목 |
@@ -442,6 +454,18 @@ RegisterObjectType은 TypeSchema와 중첩 field/name/attribute 배열·문자�
 
 최초 R1은 수동 등록 테이블로 완성한다. 최소 contract가 고정된 뒤 Clang MetaCompiler가 동일 형식의 table과 accessor를 생성한다. 수동·generated visitor가 같은 graph를 열거하는지 대조한다. non-standard-layout 클래스에는 offsetof를 일반 적용하지 않고 typed accessor를 생성한다.
 
+### 타입 접근 API의 사용 흐름
+
+정적 타입 조회는 생성된 타입 식별자·스키마와 등록된 런타임 정보를 구분한다. 객체 타입 조회는 실제 슬롯의 등록 타입을 이용하고 유효한 Borrow·객체 주소·generation·논리 생존, 소유 스레드와 실행 문맥을 검사한다. 등록된 타입·모듈의 수명은 `TypeLease` 또는 동등한 소유 래퍼로 유지한다. 임시 lease에서 얻은 스키마 참조가 lease보다 오래 유지되지 않도록 API와 예제에 명시한다.
+
+일반 사용자는 내부 레지스트리 조회와 수동 scope 조합을 반복하지 않도록 정적·동적 편의 API를 제공하는 것이 목표다. 클래스의 정적 조회는 `T::StaticType()`처럼 직접 사용하는 형태를 지향한다. 일부 reflected 타입에는 현재 생성 본문 매크로가 없고, 접근 지정자 변경·생성 헤더 순환 및 파생 타입의 기반 정적 함수 상속을 검증해야 하므로 아직 지원으로 간주하지 않는다. 현재 제공하는 `TypeOf<T>()`·`TypeIdOf<T>()`는 정적 생성 schema·ID를 조회하며, 등록된 runtime `TypeLease`와 구분한다. 생성 매크로가 있는 class와 없는 struct, 상속, 다중 번역 단위, 생성 헤더 누락·중복 및 동적 모듈 경계를 검증한 뒤 확정한다. 미등록, 잘못된 World/스레드, 파괴·종료·GC 처리 중 오류는 명시적으로 전파하거나 편의 API에서 원인을 진단한다. 생성 중이거나 수명이 종료된 객체의 접근은 보장하지 않는다.
+
+### 런타임 클래스 참조와 메타데이터의 확장
+
+클래스를 데이터로 선택·보관하고 인스턴스를 만들 수 있는 런타임 메타클래스는 필수 후속 범위다. Core 선행 설계에서는 `TypeSchema`의 불변 선언 데이터, Registry별 등록 레코드와 lease, 영속 `TypeId`, ABI/module revision을 구분한다. 타입 제한 클래스 참조, 안전한 인스턴스 생성, 클래스 기본값·서브오브젝트와 반영 필드·함수는 상위 기능의 요구를 충족하도록 확장한다. 구체 이름 및 공개 API는 생성기·World 통합과 교차 검증 후 확정한다.
+
+등록된 `TypeId`에 대한 `ObjectRegistry::NewObject<Object>(access, typeId)`의 현재 낮은 수준 생성 경로와 편의 클래스 참조·클래스 기본값 기능을 구분한다. 생성 경로는 등록된 타입의 생성 가능성·context·트랜잭션을 검사해야 하며, 생성 실패는 부분 객체·등록 참조를 남기지 않는다. 직렬화된 타입 참조는 이름이나 원시 주소가 아니라 안정 식별자를 사용하고, 모듈 reload·PIE 종료 뒤의 오래된 revision은 명시적으로 거부한다. 상세 정책과 단계는 [런타임 클래스 메타데이터 설계](RuntimeClassMetadata.ko.md)를 따른다.
+
 ### 9.2 Archive 계약
 
 Archive는 FieldId·wire type·length payload를 사용하고 byte order·길이·깊이·압축 해제 상한을 검사한다. reader/writer에는 ByteReader/ByteWriter와 ObjectReferenceResolver를 전달한다. ObjectHandle은 영속 저장하지 않는다. Foundation fixture의 local ObjectId와 후속 package ExportId/AssetId·network ID는 resolver adapter가 변환한다.
@@ -734,6 +758,12 @@ CF 항목은 이번 상세안의 검증 묶음이다. 전체 계획의 Core Gate
 | CF12 | 통합 | Windows/macOS에서 CT01–24의 필수 subset·지원 sanitizer·TK01–06, CT22 반복 shutdown·모든 owner/lease closure |
 
 전체안 1.2절의 CF ID·의미를 그대로 사용한다. CT는 구체 fixture 식별자이며 별도 gate 의미로 CF 번호를 재정의하지 않는다. Linux CPU suite는 M3 필수 후속, Linux 서버 통합은 M5 gate로 관리한다.
+
+#### API 사용성 검증
+
+CF02·CF06·CF10의 실사용 fixture는 클래스 정적 타입, 객체 실제 타입, 객체의 생성·파괴·상태, 컨테이너 및 할당기 기본 경로를 공개 API만으로 작성한다. 동일한 작업에서 내부 Registry나 문맥 설정이 반복되면 API 설계를 재검토한다. 정상 코드와 함께 생성 선언 누락·상속 오류, 다른 World·PIE·스레드, 만료된 객체, Registry 종료·모듈 해제, 생성기 오류와 `Result` 성공/상태 혼동을 검사한다.
+
+각 fixture에는 실제 컴파일·실행 및 실패 원인에 대한 독립 oracle을 둔다. 주석·문서의 사용법과 실제 선언, 수명·오류 규약의 일치 여부를 담당 외 검토자가 교차 확인한다. 구현되지 않은 편의 API나 미실행 플랫폼 테스트는 완료로 표시하지 않는다.
 
 ### 16.2 테스트 fixture 상세
 

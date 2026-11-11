@@ -1,0 +1,32 @@
+<Project DefaultTargets="Build">
+  <PropertyGroup>
+    <RocksRoot>$(MSBuildThisFileDirectory)</RocksRoot>
+    <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
+    <RocksTarget Condition="'$(RocksTarget)' == ''">Foundation</RocksTarget>
+    <SdkTarget Condition="'$(SdkTarget)' == ''">Engine</SdkTarget>
+    <GameTarget Condition="'$(GameTarget)' == ''">Game</GameTarget>
+    <Jobs Condition="'$(Jobs)' == ''">8</Jobs>
+    <CompilerArgument Condition="'$(Compiler)' != ''">--compiler &quot;$(Compiler)&quot;</CompilerArgument>
+    <OutputArgument Condition="'$(NativeOutput)' != ''">--output &quot;$(NativeOutput)&quot;</OutputArgument>
+    <Tool>dotnet &quot;$(RocksRoot)out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks.Build.Cli.dll&quot;</Tool>
+    <CommonArguments>--root &quot;$(RocksRoot).&quot; --configuration $(Configuration) --jobs $(Jobs) $(CompilerArgument) $(OutputArgument)</CommonArguments>
+  </PropertyGroup>
+  <!-- MSBuild는 호스트 도구/규칙/단계를 조직한다. C++ 최신성 판단은 매 호출 Rocks.Build가 담당한다. -->
+  <Target Name="BootstrapTools">
+    <Exec Command="dotnet build &quot;$(RocksRoot)Tools/Rocks.Tools.csproj&quot; --nologo" />
+  </Target>
+  <Target Name="Build" DependsOnTargets="BootstrapTools">
+    <Exec Command="$(Tool) build $(CommonArguments) --target $(RocksTarget)" />
+  </Target>
+  <Target Name="Test" DependsOnTargets="BootstrapTools">
+    <Exec Command="$(Tool) test $(CommonArguments) --target $(RocksTarget)" />
+  </Target>
+  <Target Name="InstalledSdk" DependsOnTargets="BootstrapTools">
+    <Error Condition="'$(SdkDestination)' == ''" Text="SdkDestination is required; use a new versioned directory." />
+    <Exec Command="$(Tool) sdk $(CommonArguments) --target $(SdkTarget) --destination &quot;$(SdkDestination)&quot;" />
+  </Target>
+  <Target Name="Game" DependsOnTargets="BootstrapTools">
+    <Error Condition="'$(SdkDirectory)' == '' Or '$(GameDirectory)' == ''" Text="SdkDirectory and GameDirectory are required." />
+    <Exec Command="$(Tool) game --target $(GameTarget) --sdk &quot;$(SdkDirectory)&quot; --project &quot;$(GameDirectory)&quot; --configuration $(Configuration) --jobs $(Jobs) $(CompilerArgument) $(OutputArgument)" />
+  </Target>
+</Project>

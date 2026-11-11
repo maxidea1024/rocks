@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../../Tools/Rocks.Build.Abstractions/Rocks.Build.Abstractions.csproj" />
+  </ItemGroup>
+</Project>

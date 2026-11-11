@@ -96,6 +96,10 @@ Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
     usize payloadBytes = 0;
     for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
         const auto& field = schema.fields[fieldIndex];
+        // Transient 참조는 GC 수명에는 참여하지만 저장 그래프의 도달 가능성에는 참여하지 않는다.
+        if (HasFlag(field.flags, FieldFlags::Transient)) {
+            continue;
+        }
         auto accessor = FindOps(type.Value(), field.id, budget);
         if (!accessor) {
             return Result<void>::Failure(accessor.Error());

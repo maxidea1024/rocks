@@ -7,20 +7,38 @@ jobs:
       matrix:
         os: [windows-latest, macos-15]
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: pwsh
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-      - name: Install pinned formatter and build tools
-        run: python -m pip install clang-format==21.1.6 ninja cmake
-      - name: Format
-        run: python Build/format.py --check
-      - name: Native configure, compile and test
-        run: python Build/build.py
-      - name: macOS AddressSanitizer
-        if: runner.os == 'macOS'
-        run: python Build/build.py --preset macos-clang-asan
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Install verified native formatter
+        run: ./Build/InstallFormatter.ps1
+      - name: Build and test Foundation through MSBuild
+        run: dotnet msbuild Rocks.proj /t:Test /p:Configuration=Debug /p:RocksTarget=Foundation /v:minimal
+      - name: Verify stable identity merge history
+        if: github.event_name == 'pull_request'
+        run: ./Build/CheckIdentityMerges.ps1 -MetaCompiler out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll
+      - name: Build and test headless commandlet
+        run: |
+          dotnet msbuild Rocks.proj /t:Build /p:Configuration=Debug /p:RocksTarget=Commandlet /p:NativeOutput=out/ci-commandlet /v:minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $executable = if ($IsWindows) { 'out/ci-commandlet/bin/RocksCommandlet.exe' } else { 'out/ci-commandlet/bin/RocksCommandlet' }
+          dotnet run --project Tools/Rocks.Commandlet.Tests -- --executable $executable
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify pinned native formatting
+        run: dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll format --root .
+      - name: Verify native action graph and incremental failures
+        run: dotnet run --project Tools/Rocks.Build.Tests -- --root .
+      - name: Verify installed SDK and external game
+        run: dotnet run --project Tools/Rocks.Build.IntegrationTests -- --root .
+      - name: AddressSanitizer
+        run: dotnet msbuild Rocks.proj /t:Test /p:Configuration=Asan /p:RocksTarget=Foundation /v:minimal
       - name: Preserve reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -29,4 +47,5 @@ jobs:
           path: |
             out/**/foundation-report.json
             out/**/build-evidence.json
-            out/**/Testing/Temporary/LastTest.log
+            out/**/*report.json
+            out/**/*.log

@@ -1,0 +1,185 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "identity_fixture::RenamedActor::hitPoints",
+      "id": "c0100000000000000000000000000002",
+      "aliases": [
+        "identity_fixture::OriginalActor::health",
+        "identity_fixture::RenamedActor::health"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::AbstractBase::baseValue",
+      "id": "ad100000000000000000000000000031",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::AliasPrivate::value",
+      "id": "ad100000000000000000000000000051",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::Base::count",
+      "id": "ad100000000000000000000000000012",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::Base::key",
+      "id": "ad100000000000000000000000000011",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::Node::enabled",
+      "id": "ad100000000000000000000000000023",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::Node::flags",
+      "id": "ad100000000000000000000000000026",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::Node::label",
+      "id": "ad100000000000000000000000000021",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::Node::medium",
+      "id": "ad100000000000000000000000000025",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::Node::next",
+      "id": "ad100000000000000000000000000022",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::Node::precision",
+      "id": "ad10000000000000000000000000002a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::Node::signedWide",
+      "id": "ad100000000000000000000000000028",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::Node::small",
+      "id": "ad100000000000000000000000000024",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::Node::weight",
+      "id": "ad100000000000000000000000000029",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::Node::wide",
+      "id": "ad100000000000000000000000000027",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::PropertyNode::label",
+      "id": "ad100000000000000000000000000042",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::PropertyNode::runtimeCache",
+      "id": "ad100000000000000000000000000043",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::PropertyNode::transientChild",
+      "id": "ad100000000000000000000000000041",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "identity_fixture::RenamedActor",
+      "id": "c0100000000000000000000000000001",
+      "aliases": [
+        "identity_fixture::OriginalActor"
+      ],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::AbstractBase",
+      "id": "ad100000000000000000000000000003",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::AbstractByPolicy",
+      "id": "ad100000000000000000000000000005",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::AliasPrivate",
+      "id": "ad100000000000000000000000000006",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::Base",
+      "id": "ad100000000000000000000000000001",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::Node",
+      "id": "ad100000000000000000000000000002",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::PropertyNode",
+      "id": "ad100000000000000000000000000004",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

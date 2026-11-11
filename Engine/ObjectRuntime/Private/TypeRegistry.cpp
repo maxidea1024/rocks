@@ -1,10 +1,92 @@
 #include <Object/TypeRegistry.h>
+#include <Object/ObjectRegistry.h>
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
 #include "RegistryIdentity.h"
 #include <new>
 
 namespace rocks {
+
+Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
+                                             const ObjectAccessContext& access, ObjectHandle handle,
+                                             const FieldValue& value) const noexcept {
+    if (!callback_) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+    if (!bound_) {
+        // 등록 전 원본 함수표는 기존 저수준 callback 계약을 유지한다.
+        return callback_(registry, access, handle, value);
+    }
+    // 다른 TypeRegistry 또는 같은 native 타입의 별명 스키마도 대상 객체 기준으로 확인한다.
+    // callback을 호출할 때는 registry 잠금을 보유하지 않으며 대상 타입 lease는 종료까지 유지한다.
+    auto type = registry.AcquireType(access, handle);
+    if (!type) {
+        return Result<void>::Failure(type.Error());
+    }
+    if (type.Value().Ops().nativeType != nativeType_) {
+        return Result<void>::Failure(ErrorCode::TypeMismatch);
+    }
+    const FieldSchema* actual = nullptr;
+    const auto fields = type.Value().Schema().fields;
+    for (usize index = 0; index < fields.Size(); ++index) {
+        if (fields[index].id == fieldId_) {
+            actual = &fields[index];
+            break;
+        }
+    }
+    if (!actual) {
+        return Result<void>::Failure(ErrorCode::NotFound);
+    }
+    if (actual->valueKind != valueKind_ || value.kind != valueKind_) {
+        return Result<void>::Failure(ErrorCode::TypeMismatch);
+    }
+    // 검증한 참조 타입은 callback 완료까지 유지한다. 그 전에 해제하면 callback 재진입에서
+    // 같은 ID의 타입을 unregister/재등록해 검증과 실제 필드 게시의 기준이 달라질 수 있다.
+    TypeLease sourceExpected;
+    TypeLease targetExpected;
+    if (valueKind_ == ValueKind::ObjectReference) {
+        // 등록 시점에 자기 참조나 별칭이 아직 미등록일 수 있으므로 호출 시 각 레지스트리에서
+        // 참조 타입을 확인한다. 서로 다른 GUID라도 같은 native 타입인 별칭은 허용한다.
+        if (referencedType_ != TypeId{}) {
+            auto expected = registry_->Acquire(referencedType_);
+            if (!expected) {
+                return Result<void>::Failure(expected.Error());
+            }
+            sourceExpected = Move(expected.Value());
+        }
+        if (actual->referencedType != TypeId{}) {
+            auto expected = registry.AcquireRegisteredType(access, actual->referencedType);
+            if (!expected) {
+                return Result<void>::Failure(expected.Error());
+            }
+            targetExpected = Move(expected.Value());
+        }
+        const void* sourceKey =
+            sourceExpected.IsValid() ? sourceExpected.Ops().nativeType : nullptr;
+        const void* targetKey =
+            targetExpected.IsValid() ? targetExpected.Ops().nativeType : nullptr;
+        if (sourceKey && targetKey && sourceKey != targetKey) {
+            return Result<void>::Failure(ErrorCode::TypeMismatch);
+        }
+        if (value.reference != ObjectHandle{}) {
+            if (value.reference.IsNull()) {
+                return Result<void>::Failure(ErrorCode::StaleHandle);
+            }
+            auto referenced = registry.AcquireType(access, value.reference);
+            if (!referenced) {
+                return Result<void>::Failure(referenced.Error());
+            }
+            const void* actualKey = referenced.Value().Ops().nativeType;
+            if ((sourceKey && actualKey != sourceKey) || (targetKey && actualKey != targetKey)) {
+                return Result<void>::Failure(ErrorCode::TypeMismatch);
+            }
+        }
+    }
+    if (readOnly_ || HasFlag(actual->flags, FieldFlags::ReadOnly)) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+    return callback_(registry, access, handle, value);
+}
 
 namespace detail {
 
@@ -99,14 +181,23 @@ Result<TypeLease> TypeLease::Clone() const noexcept {
     return owner_->Clone(record_);
 }
 
-const TypeSchema& TypeLease::Schema() const noexcept {
+const TypeSchema& TypeLease::Schema() const& noexcept {
     if (!record_) {
         platform::Fatal("Access to an empty TypeLease");
     }
     return static_cast<TypeRegistry::Record*>(record_)->schema;
 }
 
-const RuntimeTypeOps& TypeLease::Ops() const noexcept {
+TypeId TypeLease::Id() const noexcept {
+    return Schema().id;
+}
+
+StringView TypeLease::Name() const& noexcept {
+    const auto& name = Schema().name;
+    return StringView(name.Data(), name.Size());
+}
+
+const RuntimeTypeOps& TypeLease::Ops() const& noexcept {
     if (!record_) {
         platform::Fatal("Access to an empty TypeLease");
     }
@@ -114,6 +205,10 @@ const RuntimeTypeOps& TypeLease::Ops() const noexcept {
 }
 
 bool TypeLease::IsA(TypeId expected) const noexcept {
+    if (!record_) {
+        platform::Fatal("TypeLease::IsA called on empty lease");
+    }
+
     for (auto* record = static_cast<TypeRegistry::Record*>(record_); record;
          record = record->base) {
         if (record->schema.id == expected) {
@@ -141,9 +236,10 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     }
     if (schema.id == Guid{} || schema.version == 0 || schema.fields.Size() > 4096 ||
         ops.fields.Size() > schema.fields.Size() || schema.baseType == schema.id ||
-        !ops.construct || !ops.destroy || !ops.trace || !ops.nativeType ||
-        ops.size < sizeof(Object) || ops.alignment < alignof(Object) ||
-        (ops.alignment & (ops.alignment - 1)) != 0 ||
+        (schema.flags & ~static_cast<uint32>(TypeFlags::Abstract)) != 0 ||
+        (HasFlag(schema.flags, TypeFlags::Abstract) != (ops.construct == nullptr)) ||
+        !ops.destroy || !ops.trace || !ops.nativeType || ops.size < sizeof(Object) ||
+        ops.alignment < alignof(Object) || (ops.alignment & (ops.alignment - 1)) != 0 ||
         !StringView(schema.name.Data(), schema.name.Size()).ValidateUtf8()) {
         return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
     }
@@ -151,9 +247,13 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     for (usize index = 0; index < schema.fields.Size(); ++index) {
         const auto& field = schema.fields[index];
         if (field.id == Guid{} ||
+            (field.flags & ~(static_cast<uint32>(FieldFlags::Transient) |
+                             static_cast<uint32>(FieldFlags::ReadOnly))) != 0 ||
             (field.kind != FieldKind::Value && field.kind != FieldKind::ObjectReference) ||
             static_cast<uint8>(field.valueKind) > static_cast<uint8>(ValueKind::ObjectReference) ||
-            !StringView(field.name.Data(), field.name.Size()).ValidateUtf8()) {
+            !StringView(field.name.Data(), field.name.Size()).ValidateUtf8() ||
+            !StringView(field.category.Data(), field.category.Size()).ValidateUtf8() ||
+            !StringView(field.displayName.Data(), field.displayName.Size()).ValidateUtf8()) {
             return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
         }
         if (field.valueKind != ValueKind::Opaque) {
@@ -208,7 +308,8 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     }
     for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
         const auto& field = schema.fields[fieldIndex];
-        if (!AddBytes(bytes, field.name.Size()) || !AddBytes(bytes, field.attributes.Size())) {
+        if (!AddBytes(bytes, field.name.Size()) || !AddBytes(bytes, field.attributes.Size()) ||
+            !AddBytes(bytes, field.category.Size()) || !AddBytes(bytes, field.displayName.Size())) {
             return Result<TypeRegistrationToken>::Failure(ErrorCode::Overflow);
         }
     }
@@ -246,7 +347,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
                 for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
                     const auto& field = schema.fields[fieldIndex];
                     if (field.id == inherited.id && field.kind == inherited.kind &&
-                        field.valueKind == inherited.valueKind &&
+                        field.valueKind == inherited.valueKind && field.flags == inherited.flags &&
                         field.referencedType == inherited.referencedType) {
                         matched = true;
                         break;
@@ -280,15 +381,28 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     record->schema.id = schema.id;
     record->schema.version = schema.version;
     record->schema.baseType = schema.baseType;
+    record->schema.flags = schema.flags;
     record->schema.name = CopyBytes(schema.name, cursor);
     record->schema.fields = {fields, schema.fields.Size()};
     for (usize index = 0; index < schema.fields.Size(); ++index) {
         ::new (fields + index) FieldSchema(schema.fields[index]);
         fields[index].name = CopyBytes(schema.fields[index].name, cursor);
         fields[index].attributes = CopyBytes(schema.fields[index].attributes, cursor);
+        fields[index].category = CopyBytes(schema.fields[index].category, cursor);
+        fields[index].displayName = CopyBytes(schema.fields[index].displayName, cursor);
     }
     for (usize index = 0; index < ops.fields.Size(); ++index) {
         ::new (fieldOps + index) RuntimeFieldOps(ops.fields[index]);
+        for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
+            if (fields[fieldIndex].id == fieldOps[index].fieldId) {
+                // 원본 입력 함수표는 변경하지 않는다. 등록된 복사본에만 정책을 결합한다.
+                fieldOps[index].write.Bind(*this, ops.nativeType, fields[fieldIndex].id,
+                                           fields[fieldIndex].valueKind,
+                                           fields[fieldIndex].referencedType,
+                                           HasFlag(fields[fieldIndex].flags, FieldFlags::ReadOnly));
+                break;
+            }
+        }
     }
     record->ops = Move(ops);
     record->ops.fields = {fieldOps, record->ops.fields.Size()};

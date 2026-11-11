@@ -10,7 +10,7 @@ AllowShortFunctionsOnASingleLine: None
 AllowShortBlocksOnASingleLine: Never
 AllowShortIfStatementsOnASingleLine: Never
 AllowShortLoopsOnASingleLine: false
-SeparateDefinitionBlocks: Always
+SeparateDefinitionBlocks: Leave
 MaxEmptyLinesToKeep: 1
 SortIncludes: Never
 AllowShortEnumsOnASingleLine: false

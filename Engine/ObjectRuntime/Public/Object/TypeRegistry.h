@@ -3,6 +3,7 @@
 #include <Core/Memory/Allocator.h>
 #include <Meta/TypeSchema.h>
 #include <Object/RuntimeTypeOps.h>
+#include <Object/TypeLease.h>
 #include <Platform/Sync.h>
 
 namespace rocks {
@@ -18,42 +19,6 @@ struct TypeRegistrationToken {
 struct TypeStats {
     uint32 registeredTypes = 0;
     uint32 leases = 0;
-};
-
-// 불변 스키마와 콜백 코드의 수명을 유지한다. lease가 있으면 Unregister는 Busy다.
-// Registry와 그 Allocator가 모든 lease보다 오래 살아야 한다.
-// 서로 다른 lease의 Clone/Reset은 동시 호출 가능하나 같은 래퍼의 동시 변경은 금지한다.
-class TypeLease {
-public:
-    TypeLease() noexcept = default;
-    TypeLease(TypeLease&& other) noexcept;
-    TypeLease& operator=(TypeLease&& other) noexcept;
-    TypeLease(const TypeLease&) = delete;
-    TypeLease& operator=(const TypeLease&) = delete;
-    ~TypeLease();
-
-    Result<TypeLease> Clone() const noexcept;
-    // 반환 참조는 이 lease 또는 같은 레코드를 지키는 다른 lease가 살아 있는 동안 유효하다.
-    // 빈 lease의 Schema/Ops 접근은 프로그래머 오류로 즉시 종료한다.
-    const TypeSchema& Schema() const noexcept;
-    const RuntimeTypeOps& Ops() const noexcept;
-    // immutable schema ancestry 조회다. native pointer 변환이나 Borrow<base> 허용을 뜻하지 않는다.
-    bool IsA(TypeId expected) const noexcept;
-
-    bool IsValid() const noexcept {
-        return record_ != nullptr;
-    }
-
-    void Reset() noexcept;
-
-private:
-    friend class TypeRegistry;
-
-    TypeLease(TypeRegistry* owner, void* record) noexcept : owner_(owner), record_(record) {
-    }
-
-    TypeRegistry* owner_ = nullptr;
-    void* record_ = nullptr;
 };
 
 // 등록·해제·Shutdown은 생성 스레드 전용이다. Acquire/Stats/lease 계수는 잠금으로 보호한다.

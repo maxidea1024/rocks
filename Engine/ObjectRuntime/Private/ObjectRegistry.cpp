@@ -206,6 +206,12 @@ Result<void*> AccessBorrow(ObjectRegistry* registry, ObjectHandle handle,
     if (platform::CurrentThreadId() != registry->ownerThread_) {
         return Result<void*>::Failure(ErrorCode::WrongThread);
     }
+    // 명시된 문맥이 있으면 다른 World의 Borrow에서 포인터를 얻을 수 없다.
+    // 문맥이 없을 때의 일반 조회와 다른 스레드의 Borrow 반환은 그대로 허용한다.
+    auto current = ObjectAccessScope::Current();
+    if (current && !(current.Value().context == registry->context_)) {
+        return Result<void*>::Failure(ErrorCode::WrongContext);
+    }
     platform::LockGuard lock(registry->gate_);
     auto* slot = registry->FindSlot(handle);
     auto valid = registry->CheckLive(slot, nativeType);
@@ -216,6 +222,17 @@ Result<void*> AccessBorrow(ObjectRegistry* registry, ObjectHandle handle,
         return Result<void*>::Failure(ErrorCode::StaleHandle);
     }
     return Result<void*>::Success(nativeType ? slot->storage : static_cast<void*>(slot->object));
+}
+
+Result<ObjectLifecycle> InspectBorrow(ObjectRegistry* registry, ObjectHandle handle) noexcept {
+    if (!registry) {
+        return Result<ObjectLifecycle>::Failure(ErrorCode::InvalidArgument);
+    }
+    auto access = registry->ScopedAccess();
+    if (!access) {
+        return Result<ObjectLifecycle>::Failure(access.Error());
+    }
+    return registry->InspectChecked(access.Value(), handle, nullptr, true);
 }
 
 void ReleaseBorrow(ObjectRegistry* registry, ObjectHandle handle) noexcept {
@@ -287,15 +304,55 @@ Result<void> ObjectRegistry::SetEdge(const ObjectAccessContext& access, ObjectHa
 
 Result<void> ObjectRegistry::RequestDestroy(const ObjectAccessContext& access,
                                             ObjectHandle handle) noexcept {
+    return RequestDestroyChecked(access, handle, nullptr, false);
+}
+
+Result<ObjectAccessContext> ObjectRegistry::ScopedAccess() const noexcept {
+    if (platform::CurrentThreadId() != ownerThread_) {
+        return Result<ObjectAccessContext>::Failure(ErrorCode::WrongThread);
+    }
+    auto current = ObjectAccessScope::Current();
+    if (current) {
+        // 명시된 실행 문맥은 항상 우선한다. 다른 World라면 CheckAccess가 거부한다.
+        return current;
+    }
+    // 실행 문맥이 없으면 객체가 속한 Registry를 사용한다. 이때 호출자의 World는 식별하지
+    // 못한다. 등록된 Borrow·슬롯·스레드 검사는 이후에도 그대로 수행한다.
+    if (current.Error() == ErrorCode::WrongContext && !options_.requireLifecycleScope) {
+        return Result<ObjectAccessContext>::Success(OwnerAccess());
+    }
+    return current;
+}
+
+Result<void> ObjectRegistry::DestroySelf(ObjectHandle handle, const Object* object) noexcept {
+    auto access = ScopedAccess();
+    if (!access) {
+        return Result<void>::Failure(access.Error());
+    }
+    return RequestDestroyChecked(access.Value(), handle, object, true);
+}
+
+Result<void> ObjectRegistry::RequestDestroyChecked(const ObjectAccessContext& access,
+                                                   ObjectHandle handle, const Object* object,
+                                                   bool requireBorrow) noexcept {
     auto valid = CheckAccess(access);
     if (!valid) {
         return valid;
     }
     platform::LockGuard lock(gate_);
-    if (processing_) {
-        return Result<void>::Failure(ErrorCode::Busy);
+    if (closed_ || processing_) {
+        return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
     }
     Slot* slot = FindSlot(handle);
+    if (requireBorrow) {
+        if (!slot || slot->state == SlotState::Reserved || slot->state == SlotState::Free ||
+            slot->state == SlotState::Exhausted || (object && slot->object != object)) {
+            return Result<void>::Failure(ErrorCode::StaleHandle);
+        }
+        if (slot->borrows == 0) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
     if (slot && (slot->state == SlotState::DestroyRequested || slot->state == SlotState::Retired)) {
         return Result<void>::Success();
     }
@@ -305,6 +362,60 @@ Result<void> ObjectRegistry::RequestDestroy(const ObjectAccessContext& access,
     }
     slot->state = SlotState::DestroyRequested;
     return Result<void>::Success();
+}
+
+Result<ObjectLifecycle> ObjectRegistry::InspectLifecycle(const ObjectAccessContext& access,
+                                                         ObjectHandle handle) const noexcept {
+    return InspectChecked(access, handle, nullptr, false);
+}
+
+Result<ObjectLifecycle> ObjectRegistry::InspectSelf(ObjectHandle handle,
+                                                    const Object* object) const noexcept {
+    auto access = ScopedAccess();
+    if (!access) {
+        return Result<ObjectLifecycle>::Failure(access.Error());
+    }
+    return InspectChecked(access.Value(), handle, object, true);
+}
+
+Result<ObjectLifecycle> ObjectRegistry::InspectChecked(const ObjectAccessContext& access,
+                                                       ObjectHandle handle, const Object* object,
+                                                       bool requireBorrow) const noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return Result<ObjectLifecycle>::Failure(valid.Error());
+    }
+    platform::LockGuard lock(gate_);
+    if (closed_ || processing_) {
+        return Result<ObjectLifecycle>::Failure(closed_ ? ErrorCode::ShuttingDown
+                                                        : ErrorCode::Busy);
+    }
+    Slot* slot = FindSlot(handle);
+    if (!slot || slot->state == SlotState::Free || slot->state == SlotState::Reserved ||
+        slot->state == SlotState::Exhausted) {
+        return Result<ObjectLifecycle>::Failure(ErrorCode::StaleHandle);
+    }
+    if (object && slot->object != object) {
+        return Result<ObjectLifecycle>::Failure(ErrorCode::StaleHandle);
+    }
+    if (requireBorrow && slot->borrows == 0) {
+        return Result<ObjectLifecycle>::Failure(ErrorCode::InvalidArgument);
+    }
+    if (IsCutoff(slot)) {
+        return Result<ObjectLifecycle>::Success(ObjectLifecycle::Unreachable);
+    }
+    switch (slot->state) {
+    case SlotState::Alive:
+        return Result<ObjectLifecycle>::Success(ObjectLifecycle::Alive);
+    case SlotState::DestroyRequested:
+        return Result<ObjectLifecycle>::Success(ObjectLifecycle::DestroyRequested);
+    case SlotState::Retired:
+        return Result<ObjectLifecycle>::Success(ObjectLifecycle::Retired);
+    case SlotState::Reclaiming:
+        return Result<ObjectLifecycle>::Failure(ErrorCode::Busy);
+    default:
+        return Result<ObjectLifecycle>::Failure(ErrorCode::StaleHandle);
+    }
 }
 
 Result<BackendLease> ObjectRegistry::AcquireBackendLease(const ObjectAccessContext& access,
@@ -327,6 +438,39 @@ Result<BackendLease> ObjectRegistry::AcquireBackendLease(const ObjectAccessConte
     }
     ++slot->backendHolds;
     return Result<BackendLease>::Success(BackendLease(this, handle));
+}
+
+Result<TypeLease> ObjectRegistry::AcquireTypeSelf(ObjectHandle handle,
+                                                  const Object* object) noexcept {
+    auto access = ScopedAccess();
+    if (!access) {
+        return Result<TypeLease>::Failure(access.Error());
+    }
+
+    auto valid = CheckAccess(access.Value());
+    if (!valid) {
+        return Result<TypeLease>::Failure(valid.Error());
+    }
+
+    platform::LockGuard lock(gate_);
+    if (closed_ || processing_) {
+        return Result<TypeLease>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
+    }
+
+    Slot* slot = FindSlot(handle);
+    if (!slot || slot->state == SlotState::Free || slot->state == SlotState::Reserved ||
+        slot->state == SlotState::Exhausted || slot->object != object) {
+        return Result<TypeLease>::Failure(ErrorCode::StaleHandle);
+    }
+    if (slot->borrows == 0) {
+        return Result<TypeLease>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto live = CheckLive(slot, nullptr);
+    if (!live) {
+        return Result<TypeLease>::Failure(live.Error());
+    }
+    return slot->type.Clone();
 }
 
 Result<TypeLease> ObjectRegistry::AcquireType(const ObjectAccessContext& access,
@@ -408,6 +552,13 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
         return Result<ObjectHandle>::Failure(ErrorCode::TypeMismatch);
     }
     const auto& ops = typeLease.Value().Ops();
+    // Abstract 선언은 C++가 생성 가능한 타입이어도 직접 생성할 수 없다.
+    // 슬롯/메모리를 예약하기 전에 검사하여 실패가 관찰 가능한 부작용을 남기지 않는다.
+    if (HasFlag(typeLease.Value().Schema().flags, TypeFlags::Abstract) ||
+        ops.construct == nullptr) {
+        finish();
+        return Result<ObjectHandle>::Failure(ErrorCode::Unsupported);
+    }
     if (gcPhase_ == GcPhase::Marking) {
         // mutator가 새 객체를 만드는 지점에서만 작업 큐를 확장한다. gate/Trace 안의 barrier는
         // 할당하지 않는다. Marking 동안 공개된 객체는 회수하지 않아 슬롯 수가 큐 상한이 된다.
@@ -487,6 +638,7 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
     if (!object) {
         platform::Fatal("A noexcept object constructor must return its object");
     }
+    object->registry_ = this;
     object->handle_ = handle;
     {
         platform::LockGuard lock(gate_);

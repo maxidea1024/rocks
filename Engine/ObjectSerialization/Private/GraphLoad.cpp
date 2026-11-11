@@ -167,6 +167,11 @@ Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& nod
         return Result<void>::Failure(type.Error());
     }
     node.lease = Move(type.Value());
+    // 모든 노드를 생성하기 전에 검사한다. 잘못된 파일이 일부 생성자를 실행하면 안 된다.
+    if (HasFlag(node.lease.Schema().flags, TypeFlags::Abstract) ||
+        node.lease.Ops().construct == nullptr) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
     auto layout = ValidateLayout(node.lease, budget);
     if (!layout) {
         return layout;
@@ -208,6 +213,9 @@ Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& nod
         if (schemaIndex == schema.fields.Size()) {
             continue;
         } // unknown은 해석하지 않고 skip한다.
+        if (HasFlag(schema.fields[schemaIndex].flags, FieldFlags::Transient)) {
+            return Result<void>::Failure(ErrorCode::Unsupported);
+        }
         DecodedField decoded(allocator);
         decoded.schemaIndex = schemaIndex;
         auto value = DecodeValue(allocator, schema.fields[schemaIndex], field.Value(), budget,
@@ -223,7 +231,13 @@ Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& nod
             platform::Fatal("Object graph decoded field reservation failed");
         }
     }
-    if (!options.allowMissingFields && node.values.Size() != schema.fields.Size()) {
+    usize persistentFields = 0;
+    for (usize index = 0; index < schema.fields.Size(); ++index) {
+        if (!HasFlag(schema.fields[index].flags, FieldFlags::Transient)) {
+            ++persistentFields;
+        }
+    }
+    if (!options.allowMissingFields && node.values.Size() != persistentFields) {
         return Result<void>::Failure(ErrorCode::NotFound);
     }
     return Result<void>::Success();

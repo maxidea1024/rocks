@@ -8,10 +8,35 @@
 #include <errno.h>
 
 namespace rocks::test {
+int RunLoggerFailureProbe() noexcept;
+int RunHashTraversalNegativeControl(bool useSet, uint32 operation) noexcept;
+int RunHashOperationsNegativeControl(uint32 operation) noexcept;
+int RunStackAllocatorNegativeControl(uint32 operation) noexcept;
+int RunMemoryAllocatorNegativeControl(uint32 operation) noexcept;
+int RunBinnedAllocatorNegativeControl(uint32 operation) noexcept;
+int RunExternalAllocatorNegativeControl(uint32 operation) noexcept;
+int RunDebugAllocatorNegativeControl(uint32 operation) noexcept;
+int RunVirtualMemoryAccessProbe(uint32 state, bool write) noexcept;
 static TestCase* first = nullptr;
 static uint64 failures = 0;
 static platform::Mutex failureMutex;
 static uint64 seed = 1;
+static int (*objectScopeNegativeControl)(bool) noexcept = nullptr;
+static int (*destroyRequestedNegativeControl)(bool) noexcept = nullptr;
+static int (*typeConvenienceNegativeControl)(uint32) noexcept = nullptr;
+
+// Object 테스트가 포함된 타깃만 음성 대조 callback을 등록한다. Core-only는 링크 의존이 없다.
+void RegisterObjectScopeNegativeControl(int (*function)(bool) noexcept) noexcept {
+    objectScopeNegativeControl = function;
+}
+
+void RegisterDestroyRequestedNegativeControl(int (*function)(bool) noexcept) noexcept {
+    destroyRequestedNegativeControl = function;
+}
+
+void RegisterTypeConvenienceNegativeControl(int (*function)(uint32) noexcept) noexcept {
+    typeConvenienceNegativeControl = function;
+}
 
 Registration::Registration(const char* name, void (*function)()) noexcept
     : test_{name, function, first} {
@@ -57,7 +82,9 @@ int main(int argc, char** argv) {
     uint64 repeat = 1;
     bool list = false;
     for (int i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "--list") == 0) {
+        if (strcmp(argv[i], "--logger-failure-probe") == 0 && argc == 2) {
+            return test::RunLoggerFailureProbe();
+        } else if (strcmp(argv[i], "--list") == 0) {
             list = true;
         } else if (strcmp(argv[i], "--filter") == 0 && i + 1 < argc) {
             filter = argv[++i];
@@ -87,6 +114,98 @@ int main(int argc, char** argv) {
                 return test::RunUnjoinedThreadNegativeControl();
             } else if (strcmp(control, "name-live-lease") == 0) {
                 return test::RunOutstandingNameLeaseNegativeControl();
+            } else if (strcmp(control, "object-scope-lifo") == 0 ||
+                       strcmp(control, "object-scope-thread") == 0) {
+                if (test::objectScopeNegativeControl == nullptr) {
+                    return 2;
+                }
+                return test::objectScopeNegativeControl(strcmp(control, "object-scope-thread") ==
+                                                        0);
+            } else if (strcmp(control, "object-status-stale") == 0 ||
+                       strcmp(control, "object-status-context") == 0) {
+                if (test::destroyRequestedNegativeControl == nullptr) {
+                    return 2;
+                }
+                return test::destroyRequestedNegativeControl(
+                    strcmp(control, "object-status-context") == 0);
+            } else if (strcmp(control, "object-type-stale") == 0 ||
+                       strcmp(control, "object-type-context") == 0 ||
+                       strcmp(control, "empty-type-isa") == 0) {
+                if (test::typeConvenienceNegativeControl == nullptr) {
+                    return 2;
+                }
+                const uint32 operation = strcmp(control, "object-type-stale") == 0     ? 0u
+                                         : strcmp(control, "object-type-context") == 0 ? 1u
+                                                                                       : 2u;
+                return test::typeConvenienceNegativeControl(operation);
+            } else if (strcmp(control, "hash-map-foreach-erase") == 0 ||
+                       strcmp(control, "hash-map-foreach-clear") == 0 ||
+                       strcmp(control, "hash-map-foreach-reset") == 0 ||
+                       strcmp(control, "hash-set-foreach-erase") == 0 ||
+                       strcmp(control, "hash-set-foreach-clear") == 0 ||
+                       strcmp(control, "hash-set-foreach-reset") == 0) {
+                const bool useSet = strncmp(control, "hash-set-", 9) == 0;
+                const uint32 operation = strstr(control, "-erase") != nullptr   ? 0u
+                                         : strstr(control, "-clear") != nullptr ? 1u
+                                                                                : 2u;
+                return test::RunHashTraversalNegativeControl(useSet, operation);
+            } else if (strcmp(control, "hash-map-eraseif-clear") == 0 ||
+                       strcmp(control, "hash-set-eraseif-clear") == 0 ||
+                       strcmp(control, "hash-map-factory-clear") == 0 ||
+                       strcmp(control, "hash-set-union-erase") == 0) {
+                const uint32 operation = strcmp(control, "hash-map-eraseif-clear") == 0   ? 0u
+                                         : strcmp(control, "hash-set-eraseif-clear") == 0 ? 1u
+                                         : strcmp(control, "hash-map-factory-clear") == 0 ? 2u
+                                                                                          : 3u;
+                return test::RunHashOperationsNegativeControl(operation);
+            } else if (strcmp(control, "allocator-arena-live") == 0 ||
+                       strcmp(control, "allocator-pool-live") == 0 ||
+                       strcmp(control, "allocator-budget-live") == 0) {
+                const uint32 operation = strcmp(control, "allocator-arena-live") == 0  ? 0u
+                                         : strcmp(control, "allocator-pool-live") == 0 ? 1u
+                                                                                       : 2u;
+                return test::RunMemoryAllocatorNegativeControl(operation);
+            } else if (strcmp(control, "allocator-external-overlap") == 0 ||
+                       strcmp(control, "allocator-external-overflow") == 0 ||
+                       strcmp(control, "allocator-external-metadata") == 0 ||
+                       strcmp(control, "allocator-external-live") == 0) {
+                const uint32 operation = strcmp(control, "allocator-external-overlap") == 0    ? 0u
+                                         : strcmp(control, "allocator-external-overflow") == 0 ? 1u
+                                         : strcmp(control, "allocator-external-metadata") == 0 ? 2u
+                                                                                               : 3u;
+                return test::RunExternalAllocatorNegativeControl(operation);
+            } else if (strcmp(control, "allocator-debug-front") == 0 ||
+                       strcmp(control, "allocator-debug-back") == 0 ||
+                       strcmp(control, "allocator-debug-after-free") == 0 ||
+                       strcmp(control, "allocator-debug-live") == 0) {
+                const uint32 operation = strcmp(control, "allocator-debug-front") == 0        ? 0u
+                                         : strcmp(control, "allocator-debug-back") == 0       ? 1u
+                                         : strcmp(control, "allocator-debug-after-free") == 0 ? 2u
+                                                                                              : 3u;
+                return test::RunDebugAllocatorNegativeControl(operation);
+            } else if (strncmp(control, "allocator-binned-invalid-", 25) == 0 &&
+                       control[25] >= '0' && control[25] <= '6' && control[26] == '\0') {
+                return test::RunBinnedAllocatorNegativeControl(
+                    static_cast<uint32>(control[25] - '0'));
+            } else if (strcmp(control, "allocator-stack-live") == 0 ||
+                       strcmp(control, "allocator-stack-wrong-thread") == 0 ||
+                       strcmp(control, "allocator-stack-array-growth") == 0) {
+                const uint32 operation = strcmp(control, "allocator-stack-live") == 0 ? 0u
+                                         : strcmp(control, "allocator-stack-wrong-thread") == 0
+                                             ? 1u
+                                             : 2u;
+                return test::RunStackAllocatorNegativeControl(operation);
+            } else if (strcmp(control, "vm-reserved-read") == 0 ||
+                       strcmp(control, "vm-reserved-write") == 0 ||
+                       strcmp(control, "vm-decommitted-read") == 0 ||
+                       strcmp(control, "vm-decommitted-write") == 0 ||
+                       strcmp(control, "vm-committed-read") == 0 ||
+                       strcmp(control, "vm-committed-write") == 0) {
+                const uint32 state = strncmp(control, "vm-reserved-", 12) == 0      ? 0u
+                                     : strncmp(control, "vm-decommitted-", 15) == 0 ? 1u
+                                                                                    : 2u;
+                return test::RunVirtualMemoryAccessProbe(state,
+                                                         strstr(control, "-write") != nullptr);
             } else if (strcmp(control, "asan-uaf") == 0) {
                 return test::RunAsanNegativeControl();
             } else if (strcmp(control, "assert-stderr-lock") == 0) {

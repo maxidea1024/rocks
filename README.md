@@ -17,14 +17,13 @@ C++23 기반 멀티플랫폼 3D 게임 엔진 프로젝트.
 
 ## 빌드·검증
 
-Windows/macOS native C++ 도구, CMake, Ninja, Python 환경에서 다음 진입점을 사용한다. 자세한 요구사항과 옵션은 [빌드 안내](Build/README.md)를 참고한다.
+Windows/macOS의 .NET 10 SDK와 Clang 도구 체인을 사용한다. 명령과 설치 SDK·게임 빌드 옵션은 [빌드 안내](Build/README.md)를 참고한다.
 
 ```text
-python Build/build.py
-python Build/format.py --check
+dotnet msbuild Rocks.proj /t:Test /p:Configuration=Debug /p:RocksTarget=Foundation
 ```
 
-기본 빌드는 해당 호스트의 Debug preset이다. Release/ASan/Core-only 옵션과 실제 플랫폼별 성공 여부는 구현 상태에 기록한다. CI 설정이 존재한다는 사실만으로 모든 플랫폼 검증 완료를 의미하지 않는다.
+기본 구성은 Debug이며 Release·ASan과 Core 전용 대상을 선택할 수 있다. CI 설정과 실제 플랫폼별 실행 결과를 구분한다.
 
 ## 설계와 구현 문서
 
