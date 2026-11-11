@@ -455,6 +455,15 @@ ObjectHandle의 index 0 또는 별도 예약값은 null이다. generation wrap �
 
 NewObject가 반환하는 RootRef는 첫 소유자의 추적 가능한 필드에 연결될 때까지 수명을 유지한다. Outer는 이름·패키지 계층이며 GC 소유권을 자동 의미하지 않는다. Entity가 Component를 유지하려면 명시적 ObjectRef/GcArray edge가 있어야 한다. 패키지 로더, 월드, editor selection, native subsystem도 root token을 등록한다.
 
+**Outer와 객체 경로(2026-11-11 결정, 미구현).** Outer는 에셋·패키지 계층(AssetRuntime·ObjectSerialization)을 구현할 때 아래의 좁은 의미로 도입한다. 현재 ObjectRuntime에는 Outer가 없다.
+
+- 역할은 객체 경로(이름 계층)와 패키지 소속 두 가지뿐이다. 소유·수명 관리는 Outer로 표현하지 않는다.
+- 패키지에 저장되는 객체에는 필수이고 런타임 임시 객체는 null이다. UE의 transient package 같은 가짜 Outer는 두지 않는다.
+- inner → outer는 GC가 추적하는 강한 edge다. inner가 살아 있으면 outer도 살아 있지만, outer가 inner를 암묵적으로 살리지는 않는다. inner를 유지하려면 소유자가 명시적 `ObjectRef`/`GcArray` edge나 패키지 export table로 붙잡는다.
+- 같은 Outer 안에서 이름은 유일하다. Outer 변경(Rename/이동)은 Game lane에서 순환(자기 자신·자손을 outer로 지정), 패키지 간 이동, 이름 충돌을 검증한 뒤에만 허용하며 실패하면 아무것도 바꾸지 않는다.
+- 게임플레이 소유(Entity → Component 등)는 Outer가 아니라 명시적 `ObjectRef` edge로 표현한다. default subobject의 안정 식별은 SubobjectGuid가 맡는다(§5.3).
+- 근거: UE의 Outer는 경로·패키지 소속·GC 효과를 한 필드에 섞어 "outer가 inner를 소유한다"는 오해와 rename 시 경로 변경 버그를 낳는다. 이 설명은 UE 일반 동작 기준이며 5.6 소스(`UObjectBase::OuterPrivate`, GC 참조 수집)로 대조하지 않았다.
+
 RequestDestroy는 논리적 사용 종료이며 즉시 delete가 아니다. owner Game lane에서 DestroyRequested 전이와 신규 사용·일반 task/activation admission 차단을 먼저 선형화한다. 그 뒤 기존 소유자의 짧은 teardown 전용 권한으로 EndPlay/Deactivate 등 필요한 종료 hook을 수행한다. 일반 Resolve/TryPin은 계속 실패하며 hook은 no-yield/no-safepoint이며 재진입 RequestDestroy는 idempotent다. 다른 lane의 요청은 Game lane commit 전까지 취소 요청 상태이며 즉시 파괴 완료로 보고하지 않는다.
 
 BeginDestroy는 정확히 1회 실행하여 추적 edge를 정리하고 render/physics/audio의 독립 자원 token 해제를 요청한다. GC가 발견한 unreachable graph에도 적용되므로 managed 이웃의 생존·호출에 의존하지 않는다. cleanup의 필드 변경 자체도 기존 Borrow/GC-aware reader가 끝난 owner-lane 경계에서 수행한다. 후속 비동기 cleanup은 POD·backend token만 사용하며 Object graph를 역참조하지 않는다.
@@ -714,6 +723,15 @@ Core C02/C15에서 clock/step 값을, C17/C26에서 Task·replay fixture를 검�
 ### 9.1 식별자와 파생 데이터
 
 AssetId는 위치와 독립된 128-bit GUID로 부여한다. source asset, importer setting, stable type schema, platform profile, toolchain version의 관계를 AssetRegistry에 기록한다. 파일 rename·move는 ID를 보존하고, 복제는 새 ID를 부여한다. package manifest에는 hard dependency와 soft reference를 구분한다.
+
+**rename·move와 redirect(2026-11-11 결정, 미구현).** 에셋 참조를 경로가 아닌 AssetId로 저장하므로 UE의 ObjectRedirector 같은 에셋별 redirector 패키지를 두지 않는다.
+
+- 배경(UE 일반 동작, 5.6 소스 미대조): UE는 패키지 안 참조를 경로 문자열로 저장하므로 rename·move 때 옛 경로에 redirector 패키지를 남기고 나중에 "Fix Up Redirectors"로 참조자를 다시 저장한다. 이 방식은 redirector 파일 누적, fixup 시 참조 에셋이 한꺼번에 바뀌어 생기는 소스 관리 충돌, fixup 전 redirector 삭제로 인한 참조 깨짐, 폴더 rename 때의 대량 생성 문제를 낳는다.
+- Rocks: AssetId(128-bit GUID)를 각 에셋 파일 헤더에 저장하고 AssetRegistry는 ID → 현재 경로 색인이다. registry는 콘텐츠를 다시 스캔하면 복원되는 캐시로 취급한다. rename·move는 해당 에셋 파일과 registry만 바꾸며 참조하는 에셋은 다시 저장하지 않는다.
+- 사람이 쓴 텍스트 경로(config, 스크립트 문자열, 명령행)는 registry 안의 "옛 경로 → AssetId" 별칭 표로 해석한다. 별칭으로 해석될 때마다 경고하고, 텍스트 참조를 일괄 수정한 뒤 별칭을 지우는 명령을 제공한다. 별칭은 콘텐츠 트리의 파일이 아니다.
+- 타입·클래스·필드 이름 변경(UE CoreRedirects에 해당)은 경로가 아니라 TypeGuid·FieldId 고정 ID, rename alias와 삭제 필드 tombstone으로 처리한다(§7.1·§7.2).
+- 에디터 밖에서 파일을 복사해 같은 AssetId가 둘 이상이 되면 registry 스캔이 충돌로 보고하고, 사용자가 고른 쪽에 새 ID를 부여한다. 자동으로 한쪽을 버리지 않는다.
+- 대가: 원본 데이터만으로는 참조 대상 경로를 읽을 수 없으므로 진단·diff 도구는 registry로 ID를 경로로 풀어 보여 준다. 마지막으로 알려진 경로를 디버그 힌트로 함께 저장할 수 있으나 해석에는 쓰지 않는다.
 
 <!-- FIGURE:asset -->
 
