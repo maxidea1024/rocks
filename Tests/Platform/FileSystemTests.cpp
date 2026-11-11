@@ -319,6 +319,43 @@ TEST(FileSystem_DeleteTreeDoesNotFollowDirectoryLinks) {
     char slashed[256];
     snprintf(slashed, sizeof(slashed), "%s%c%c", link, NativePathSeparator(),
              NativePathSeparator());
+    // 마지막 구성 요소가 "."·".."이면 플랫폼마다 해석이 달라지므로 아무것도 지우지 않고 거부한다.
+    const char* dotted[] = {"%s/.", "%s/./", "%s/..", "%s/../"};
+    for (const char* format : dotted) {
+        char path[256];
+        snprintf(path, sizeof(path), format, link);
+        CHECK(DeleteDirectoryTree(system, path, Length(path)).code == FileCode::InvalidArgument);
+        snprintf(path, sizeof(path), format, outside.path);
+        CHECK(DeleteDirectoryTree(system, path, Length(path)).code == FileCode::InvalidArgument);
+    }
+    CHECK(system.Stat(kept, Length(kept), info) && info.type == FileType::File);
+    CHECK(system.Stat(link, Length(link), info) && info.isLink);
+
+    // link는 대상과 무관하게 디렉터리가 아니므로 디렉터리를 link 위로 옮기면 WrongType이다.
+    char movable[256];
+    tree.Child("movable", movable, sizeof(movable));
+    REQUIRE(system.MakeDirectory(movable, Length(movable)));
+    CHECK(system.Move(movable, Length(movable), link, Length(link), true).code ==
+          FileCode::WrongType);
+    REQUIRE(system.DeleteDirectory(movable, Length(movable)));
+
+    // link를 거쳐 같은 파일로 복사하면 원본을 비우지 않고 거부한다.
+    char fileLink[256];
+    tree.Child("file-link", fileLink, sizeof(fileLink));
+    char fileTarget[256];
+    snprintf(fileTarget, sizeof(fileTarget), "..%c%s%ckeep.txt", NativePathSeparator(),
+             outside.path, NativePathSeparator());
+    REQUIRE(test::CreateFileLink(fileLink, fileTarget) == test::FileLinkResult::Created);
+    CHECK(system.Copy(kept, Length(kept), fileLink, Length(fileLink), true).code ==
+          FileCode::InvalidArgument);
+    CHECK(system.Copy(fileLink, Length(fileLink), kept, Length(kept), true).code ==
+          FileCode::InvalidArgument);
+    char content[16];
+    usize contentBytes = 0;
+    REQUIRE(ReadFile(kept, content, sizeof(content), contentBytes));
+    CHECK(contentBytes == 4 && memcmp(content, "keep", 4) == 0);
+    REQUIRE(system.Delete(fileLink, Length(fileLink)));
+
     REQUIRE(DeleteDirectoryTree(system, slashed, Length(slashed)));
     CHECK(system.Stat(kept, Length(kept), info) && info.type == FileType::File);
     Listing afterSlash;
@@ -360,11 +397,14 @@ TEST(FileSystem_WindowsDriveRelativePathIsNotDriveRoot) {
     // "C:"는 그 드라이브의 현재 디렉터리다. 작업 디렉터리에 만든 고유 디렉터리가 보여야 하며
     // 드라이브 루트를 열거하면 안 된다.
     FileSystem& system = PhysicalFileSystem();
-    char working[1024];
+    char working[4096];
     usize workingBytes = 0;
-    REQUIRE(
-        GetStandardDirectory(StandardDirectory::Working, working, sizeof(working), workingBytes));
-    REQUIRE(workingBytes >= 2 && working[1] == ':');
+    if (!GetStandardDirectory(StandardDirectory::Working, working, sizeof(working), workingBytes) ||
+        workingBytes <= 3 || working[1] != ':') {
+        // UNC·드라이브 루트 작업 디렉터리에서는 루트와 현재 디렉터리를 구별할 수 없다.
+        printf("[SKIP] working directory is not a drive subdirectory\n");
+        return;
+    }
     Scratch marker;
     REQUIRE(marker.Make("drive"));
     REQUIRE(system.MakeDirectory(marker.path, marker.length));

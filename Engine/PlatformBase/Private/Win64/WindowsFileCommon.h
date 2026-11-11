@@ -129,24 +129,43 @@ inline bool PathIsLink(const wchar_t* path) noexcept {
     return queried && IsLinkReparse(tag.FileAttributes, tag.ReparseTag);
 }
 
-// 두 경로가 같은 파일 객체(같은 volume·file id)를 가리키는지 link를 따라가지 않고 확인한다.
-// 어느 한쪽이라도 열 수 없으면 false다.
-inline bool SameFileObject(const wchar_t* first, const wchar_t* second) noexcept {
+// 두 경로가 같은 파일 객체(같은 volume·file id)를 가리키는지 확인한다. followLinks가 false면 link
+// 자체를 비교한다. ReFS는 64-bit file index가 유일하지 않을 수 있으므로 128-bit FILE_ID_INFO를
+// 비교하고, 지원하지 않는 파일 시스템(FAT 등)에서만 64-bit index로 비교한다. 어느 한쪽이라도 열 수
+// 없으면 false다.
+inline bool SameFileObject(const wchar_t* first, const wchar_t* second,
+                           bool followLinks = false) noexcept {
+    FILE_ID_INFO wide[2]{};
     BY_HANDLE_FILE_INFORMATION identity[2]{};
+    bool hasWide = true;
     const wchar_t* paths[2] = {first, second};
+    const DWORD flags =
+        FILE_FLAG_BACKUP_SEMANTICS | (followLinks ? 0 : FILE_FLAG_OPEN_REPARSE_POINT);
     for (int i = 0; i < 2; ++i) {
-        HANDLE handle = CreateFileW(
-            paths[i], FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
-            nullptr);
+        HANDLE handle = CreateFileW(paths[i], FILE_READ_ATTRIBUTES,
+                                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                                    OPEN_EXISTING, flags, nullptr);
         if (handle == INVALID_HANDLE_VALUE) {
             return false;
         }
+        hasWide = hasWide &&
+                  GetFileInformationByHandleEx(handle, FileIdInfo, &wide[i], sizeof(wide[i])) != 0;
         const bool queried = GetFileInformationByHandle(handle, &identity[i]) != 0;
         CloseHandle(handle);
         if (!queried) {
             return false;
         }
+    }
+    if (hasWide) {
+        if (wide[0].VolumeSerialNumber != wide[1].VolumeSerialNumber) {
+            return false;
+        }
+        for (usize i = 0; i < sizeof(wide[0].FileId.Identifier); ++i) {
+            if (wide[0].FileId.Identifier[i] != wide[1].FileId.Identifier[i]) {
+                return false;
+            }
+        }
+        return true;
     }
     return identity[0].dwVolumeSerialNumber == identity[1].dwVolumeSerialNumber &&
            identity[0].nFileIndexHigh == identity[1].nFileIndexHigh &&

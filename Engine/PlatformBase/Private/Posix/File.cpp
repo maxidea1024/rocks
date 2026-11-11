@@ -370,16 +370,19 @@ public:
             return valid;
         }
         // 플랫폼 간 결과를 맞춘다: 디렉터리는 기존 대상을 덮어쓰지 않고(AlreadyExists), 파일과
-        // 디렉터리가 섞이면 WrongType이다.
+        // 디렉터리가 섞이면 WrongType이다. link는 대상과 무관하게 link 자체(디렉터리 아님)로 본다.
         struct stat sourceState{};
         if (lstat(source.Value(), &sourceState) != 0) {
             return NativeError(errno);
         }
-        // 대상이 원본과 같은 파일이면(대소문자만 바꾸는 이름 변경 등) OS에 맡긴다.
+        // 대상이 원본과 같은 파일 객체면(대소문자만 바꾸는 이름 변경, hard link) 검사 없이 OS에
+        // 맡긴다. 대소문자를 구분하지 않는 volume에서 no-replace 이동은 대상이 "있다"고 실패하므로
+        // 일반 rename을 쓴다.
         struct stat targetState{};
-        if (lstat(target.Value(), &targetState) == 0 &&
-            (targetState.st_dev != sourceState.st_dev ||
-             targetState.st_ino != sourceState.st_ino)) {
+        const bool targetExists = lstat(target.Value(), &targetState) == 0;
+        const bool sameObject = targetExists && targetState.st_dev == sourceState.st_dev &&
+                                targetState.st_ino == sourceState.st_ino;
+        if (targetExists && !sameObject) {
             const bool sourceDirectory = S_ISDIR(sourceState.st_mode);
             const bool targetDirectory = S_ISDIR(targetState.st_mode);
             if (sourceDirectory != targetDirectory) {
@@ -390,7 +393,7 @@ public:
             }
         }
         // 덮어쓰지 않는 이동은 대상이 있으면 원자적으로 실패한다(PosixRenameNoReplace).
-        const int result = replaceExisting
+        const int result = replaceExisting || sameObject
                                ? rename(source.Value(), target.Value())
                                : detail::PosixRenameNoReplace(source.Value(), target.Value());
         if (result != 0) {

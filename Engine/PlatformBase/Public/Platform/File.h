@@ -134,8 +134,8 @@ public:
     // 겹치지 않게 정했다.
 
     // 경로 정보를 채운다. 없으면(대상이 없는 link 포함) NotFound이며 info는 바뀌지 않는다. 끝
-    // 구분자가 있으면 OS 규칙대로 해석한다(POSIX "link/"는 대상 디렉터리, "file/"은 실패). 파일
-    // 시각이 0001-01-01–9999-12-31 범위 밖이면 modifiedTicks는 0이다.
+    // 구분자가 있으면 OS 규칙대로 해석한다("file/"은 실패, "link/"의 isLink는 POSIX false·Windows
+    // true). 파일 시각이 0001-01-01–9999-12-31 범위 밖이면 modifiedTicks는 0이다.
     virtual FileStatus Stat(const char* path, usize pathBytes, FileInfo& info) noexcept;
     // 디렉터리 하나를 만든다(부모는 있어야 한다). 이미 있으면(파일이어도) AlreadyExists다.
     virtual FileStatus MakeDirectory(const char* path, usize pathBytes) noexcept;
@@ -147,10 +147,12 @@ public:
                                           DirectoryVisitor visitor, void* context) noexcept;
     // 같은 volume 안에서 이름을 바꾸거나 옮긴다(파일·디렉터리). replaceExisting이 false면 대상이
     // 있을 때 AlreadyExists다. 디렉터리는 replaceExisting이어도 기존 대상을 덮어쓰지 않고
-    // (AlreadyExists), 파일과 디렉터리가 섞이면 WrongType이다. 대상이 원본과 같은
-    // 파일이면(대소문자만 바꾸는 이름 변경) OS에 맡긴다. 다른 volume 사이 이동은 Unsupported다(복사
-    // 후 삭제는 호출자가 한다). 검사와 이동 사이에 다른 프로세스가 대상을 만들면 결과는 OS 규칙을
-    // 따른다.
+    // (AlreadyExists), 파일과 디렉터리가 섞이면 WrongType이다. link는 가리키는 대상과 무관하게 link
+    // 자체(디렉터리 아님)로 본다. 대상이 원본과 같은 파일 객체면 검사 없이 OS에 맡긴다: 대소문자만
+    // 바꾸는 이름 변경은 모든 플랫폼에서 되지만, 같은 파일의 hard link 사이 이동은 Windows는 원본
+    // 이름을 지우고 POSIX는 아무것도 바꾸지 않고 성공한다. 다른 volume 사이 이동은 Unsupported다
+    // (복사 후 삭제는 호출자가 한다). 검사와 이동 사이에 다른 프로세스가 대상을 만들면 결과는 OS
+    // 규칙을 따른다.
     virtual FileStatus Move(const char* from, usize fromBytes, const char* to, usize toBytes,
                             bool replaceExisting) noexcept;
     // 일반 파일 하나를 복사한다(디렉터리는 WrongType). replaceExisting이 false면 대상이 있을 때
@@ -166,9 +168,10 @@ public:
 //   파일이 있으면 WrongType이다.
 // - DeleteDirectoryTree: 디렉터리와 그 안의 모든 항목을 지운다. link는 따라가지 않고 link 자체만
 //   지운다(link 너머의 파일은 남는다). 경로 자체가 link면 끝 구분자가 있어도 link만 지우며, 대상이
-//   없는 link도 지운다. Windows에서 디렉터리를 가리키는 파일 link처럼 OS가 따라갈 수 없는 link를
-//   루트로 넘기면 Stat 오류를 그대로 반환한다(아무것도 지우지 않는다). 중간 실패는 그 상태로
-//   멈추고 실패 원인을 반환한다(이미 지운 항목은 복구하지 않는다).
+//   없는 link도 지운다. 순환 link나 Windows에서 디렉터리를 가리키는 파일 link처럼 OS가 따라갈 수
+//   없는 link를 루트로 넘기면 Stat 오류를 그대로 반환한다(아무것도 지우지 않는다). 마지막 구성
+//   요소가 "."·".."이면 InvalidArgument다. 중간 실패는 그 상태로 멈추고 실패 원인을 반환한다(이미
+//   지운 항목은 복구하지 않는다).
 FileStatus MakeDirectoryTree(FileSystem& system, const char* path, usize pathBytes) noexcept;
 FileStatus DeleteDirectoryTree(FileSystem& system, const char* path, usize pathBytes) noexcept;
 

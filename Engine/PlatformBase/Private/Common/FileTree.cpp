@@ -255,6 +255,17 @@ FileStatus DeleteDirectoryTree(FileSystem& system, const char* path, usize pathB
     while (pathBytes > root && pathBytes > 1 && IsSeparator(path[pathBytes - 1])) {
         --pathBytes;
     }
+    // 마지막 구성 요소가 "."·".."이면 거부한다. POSIX는 "link/."·"link/.."를 link 대상(또는 그
+    // 부모) 기준으로 해석하고 Windows는 문자열로 정규화하므로, 지울 대상이 플랫폼마다 달라진다.
+    usize nameStart = pathBytes;
+    while (nameStart > root && !IsSeparator(path[nameStart - 1])) {
+        --nameStart;
+    }
+    const usize nameBytes = pathBytes - nameStart;
+    if ((nameBytes == 1 && path[nameStart] == '.') ||
+        (nameBytes == 2 && path[nameStart] == '.' && path[nameStart + 1] == '.')) {
+        return {FileCode::InvalidArgument, 0};
+    }
     FileInfo info;
     auto status = system.Stat(path, pathBytes, info);
     if (status.code == FileCode::NotFound) {

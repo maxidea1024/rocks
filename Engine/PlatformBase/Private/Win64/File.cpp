@@ -415,8 +415,11 @@ public:
         const DWORD targetAttributes = GetFileAttributesW(target.Value());
         if (targetAttributes != INVALID_FILE_ATTRIBUTES &&
             !detail::SameFileObject(source.Value(), target.Value())) {
-            const bool sourceDirectory = (sourceAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-            const bool targetDirectory = (targetAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+            // link는 POSIX lstat처럼 link 자체(디렉터리 아님)로 본다.
+            const bool sourceDirectory = (sourceAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 &&
+                                         !detail::PathIsLink(source.Value());
+            const bool targetDirectory = (targetAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 &&
+                                         !detail::PathIsLink(target.Value());
             if (sourceDirectory != targetDirectory) {
                 return {FileCode::WrongType, 0};
             }
@@ -453,7 +456,7 @@ public:
             return {FileCode::WrongType, 0};
         }
         // 같은 파일 객체(hard link 등)로의 복사는 원본을 지키기 위해 거부한다(POSIX와 같은 결과).
-        if (replaceExisting && detail::SameFileObject(source.Value(), target.Value())) {
+        if (replaceExisting && detail::SameFileObject(source.Value(), target.Value(), true)) {
             return {FileCode::InvalidArgument, 0};
         }
         // CopyFileW는 실패하면 만들던 대상 파일을 지운다.
