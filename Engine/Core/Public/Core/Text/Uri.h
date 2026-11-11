@@ -15,7 +15,8 @@ namespace rocks {
 struct UriView {
     StringView scheme; // 비어 있으면 상대 참조다. 대소문자는 원문 그대로다.
     bool hasAuthority = false;
-    StringView userInfo; // '@' 앞부분. hasUserInfo로 빈 userinfo와 부재를 구분한다.
+    StringView authority; // "//" 뒤 authority 원문 전체(userinfo@host:port). 재조합에 쓴다.
+    StringView userInfo;  // '@' 앞부분. hasUserInfo로 빈 userinfo와 부재를 구분한다.
     bool hasUserInfo = false;
     StringView host; // IP literal은 대괄호를 뺀 내용이다(isIpLiteral). 빈 host도 유효하다.
     bool isIpLiteral = false;
@@ -61,5 +62,28 @@ Result<usize> PercentEncodedSize(StringView text) noexcept;
 // 파라미터의 원문 값을 찾는다. "flag"처럼 '='가 없으면 빈 값으로 찾은 것으로 본다. 값 view는
 // query를 빌린다.
 bool FindQueryParameter(StringView query, StringView name, StringView& value) noexcept;
+
+// TryResolveUriReference가 요구하는 출력 크기(base + reference + 2 byte)다. 결과는 이보다 짧을 수
+// 있다. 오류: 길이 계산 overflow는 Overflow.
+Result<usize> ResolvedUriMaxSize(StringView base, StringView reference) noexcept;
+
+// reference를 base 기준으로 해석한 대상 URI를 output에 쓰고 길이를 반환한다(NUL 없음). RFC 3986
+// §5.2.2(strict: reference에 scheme이 있으면 base와 같은 scheme이어도 절대 URI로 본다), §5.2.3
+// merge, §5.2.4 dot segment 제거, §5.3 재조합을 따른다.
+// - base는 scheme이 있는 URI여야 하며 base의 fragment는 무시한다.
+// - percent-encoding 해제·대소문자·기본 포트 같은 정규화는 하지 않는다.
+// - authority 없는 결과 path가 "//"로 시작하면 다시 파싱할 때 authority로 오인되므로 "/."를 앞에
+//   붙인다(RFC 3986에는 규정이 없고 WHATWG URL serializer와 같은 처리).
+// - output.Size()는 결과 길이가 아니라 ResolvedUriMaxSize 이상이어야 한다. 실패하면 output을
+//   바꾸지 않는다.
+// 오류: base·reference 문법 오류와 scheme 없는 base는 InvalidArgument, output 부족은
+// CapacityExceeded, 크기 overflow는 Overflow.
+//
+// 사용 예:
+//   char buffer[256];
+//   auto resolved = TryResolveUriReference("http://a/b/c/d;p?q", "../g", Span<char>(buffer));
+//   // resolved.Value() == 9, buffer = "http://a/g"
+Result<usize> TryResolveUriReference(StringView base, StringView reference,
+                                     Span<char> output) noexcept;
 
 } // namespace rocks

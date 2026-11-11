@@ -301,6 +301,7 @@ Result<UriView> TryParseUri(StringView text) noexcept {
                data[authorityEnd] != '#') {
             ++authorityEnd;
         }
+        uri.authority = StringView(data + authorityBegin, authorityEnd - authorityBegin);
         if (!ParseAuthority(data, authorityBegin, authorityEnd, uri)) {
             return Result<UriView>::Failure(ErrorCode::InvalidArgument);
         }
@@ -419,6 +420,181 @@ Result<usize> TryPercentEncode(StringView text, Span<char> output) noexcept {
         }
     }
     return Result<usize>::Success(written);
+}
+
+namespace {
+
+// 용량을 미리 확인한 output에 순서대로 쓴다.
+struct UriWriter {
+    char* data;
+    usize size = 0;
+
+    void Append(const char* source, usize count) noexcept {
+        for (usize index = 0; index < count; ++index) {
+            data[size + index] = source[index];
+        }
+        size += count;
+    }
+
+    void Append(StringView text) noexcept {
+        Append(text.Data(), text.ByteCount());
+    }
+
+    void Append(char c) noexcept {
+        data[size++] = c;
+    }
+};
+
+bool StartsWith(const char* data, usize begin, usize end, const char* prefix) noexcept {
+    usize index = 0;
+    for (; prefix[index] != '\0'; ++index) {
+        if (begin + index >= end || data[begin + index] != prefix[index]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// RFC 3986 §5.2.4 remove_dot_segments를 data[begin, end)에서 제자리로 수행하고 새 끝을 반환한다.
+// 출력 커서(write)는 항상 입력 커서(read) 이하이므로 앞으로 복사해도 아직 읽지 않은 입력을
+// 덮어쓰지 않는다. "/."·"/.."가 입력 끝이면 RFC의 "'/'로 바꾸기"를 마지막 byte를 '/'로 바꿔
+// 표현한다.
+usize RemoveDotSegments(char* data, usize begin, usize end) noexcept {
+    usize read = begin;
+    usize write = begin;
+    while (read < end) {
+        if (StartsWith(data, read, end, "../")) {
+            read += 3; // A
+        } else if (StartsWith(data, read, end, "./")) {
+            read += 2; // A
+        } else if (StartsWith(data, read, end, "/./")) {
+            read += 2; // B: 입력이 '/'로 시작하게 된다.
+        } else if (end - read == 2 && StartsWith(data, read, end, "/.")) {
+            read += 1; // B: 입력 끝의 "/." → "/"
+            data[read] = '/';
+        } else if (StartsWith(data, read, end, "/../") ||
+                   (end - read == 3 && StartsWith(data, read, end, "/.."))) {
+            // C: 출력의 마지막 segment와 그 앞 '/'를 지운다.
+            if (end - read == 3) {
+                read += 2;
+                data[read] = '/';
+            } else {
+                read += 3;
+            }
+            while (write > begin && data[write - 1] != '/') {
+                --write;
+            }
+            if (write > begin) {
+                --write;
+            }
+        } else if ((end - read == 1 && data[read] == '.') ||
+                   (end - read == 2 && data[read] == '.' && data[read + 1] == '.')) {
+            read = end; // D
+        } else {
+            // E: 첫 segment(앞 '/' 포함, 다음 '/' 전까지)를 출력으로 옮긴다.
+            if (data[read] == '/') {
+                data[write++] = data[read++];
+            }
+            while (read < end && data[read] != '/') {
+                data[write++] = data[read++];
+            }
+        }
+    }
+    return write;
+}
+
+} // namespace
+
+Result<usize> ResolvedUriMaxSize(StringView base, StringView reference) noexcept {
+    usize size = 0;
+    if (!TryAdd(base.ByteCount(), reference.ByteCount(), size) || !TryAdd(size, 2, size)) {
+        return Result<usize>::Failure(ErrorCode::Overflow);
+    }
+    return Result<usize>::Success(size);
+}
+
+Result<usize> TryResolveUriReference(StringView base, StringView reference,
+                                     Span<char> output) noexcept {
+    auto parsedBase = TryParseUri(base);
+    auto parsedReference = TryParseUri(reference);
+    if (!parsedBase || !parsedReference || parsedBase.Value().scheme.IsEmpty()) {
+        return Result<usize>::Failure(ErrorCode::InvalidArgument);
+    }
+    auto required = ResolvedUriMaxSize(base, reference);
+    if (!required) {
+        return Result<usize>::Failure(required.Error());
+    }
+    if (output.Size() < required.Value()) {
+        return Result<usize>::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    const UriView& b = parsedBase.Value();
+    const UriView& r = parsedReference.Value();
+    UriWriter writer{output.Data()};
+
+    // §5.2.2: 대상의 scheme·authority·query를 고른다. path는 아래에서 output에 직접 만든다.
+    const bool referenceAbsolute = !r.scheme.IsEmpty();
+    const bool useReferenceAuthority = referenceAbsolute || r.hasAuthority;
+    const bool hasAuthority = useReferenceAuthority ? r.hasAuthority : b.hasAuthority;
+    writer.Append(referenceAbsolute ? r.scheme : b.scheme);
+    writer.Append(':');
+    if (hasAuthority) {
+        writer.Append("//", 2);
+        writer.Append(useReferenceAuthority ? r.authority : b.authority);
+    }
+
+    const usize pathBegin = writer.size;
+    bool hasQuery = r.hasQuery;
+    StringView query = r.query;
+    if (useReferenceAuthority) {
+        writer.Append(r.path);
+    } else if (r.path.IsEmpty()) {
+        writer.Append(b.path);
+        if (!r.hasQuery) {
+            hasQuery = b.hasQuery;
+            query = b.query;
+        }
+    } else if (r.path.Data()[0] == '/') {
+        writer.Append(r.path);
+    } else {
+        // §5.2.3 merge: base에 authority가 있고 path가 비면 "/" + reference path, 아니면 base
+        // path의 마지막 '/'까지(없으면 빈 값) 뒤에 reference path를 붙인다.
+        if (b.hasAuthority && b.path.IsEmpty()) {
+            writer.Append('/');
+        } else {
+            usize keep = b.path.ByteCount();
+            while (keep > 0 && b.path.Data()[keep - 1] != '/') {
+                --keep;
+            }
+            writer.Append(b.path.Data(), keep);
+        }
+        writer.Append(r.path);
+    }
+    // base path를 그대로 쓰는 경우(reference path가 빈 경우)도 RFC는 dot segment를 제거하지 않는다.
+    const bool removeDots = useReferenceAuthority || !r.path.IsEmpty();
+    if (removeDots) {
+        writer.size = RemoveDotSegments(writer.data, pathBegin, writer.size);
+    }
+    if (!hasAuthority && writer.size - pathBegin >= 2 && writer.data[pathBegin] == '/' &&
+        writer.data[pathBegin + 1] == '/') {
+        // "/."를 끼우려면 path를 2 byte 뒤로 민다(뒤에서부터 복사).
+        for (usize index = writer.size; index > pathBegin; --index) {
+            writer.data[index + 1] = writer.data[index - 1];
+        }
+        writer.data[pathBegin] = '/';
+        writer.data[pathBegin + 1] = '.';
+        writer.size += 2;
+    }
+
+    if (hasQuery) {
+        writer.Append('?');
+        writer.Append(query);
+    }
+    if (r.hasFragment) {
+        writer.Append('#');
+        writer.Append(r.fragment);
+    }
+    return Result<usize>::Success(writer.size);
 }
 
 bool FindQueryParameter(StringView query, StringView name, StringView& value) noexcept {

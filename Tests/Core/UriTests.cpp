@@ -169,4 +169,114 @@ TEST(Uri_FindQueryParameter) {
     CHECK(FindQueryParameter("=v", "", value) && Is(value, "v"));
 }
 
+TEST(Uri_ResolvesRfc3986ReferenceExamples) {
+    // RFC 3986 §5.4.1(정상)·§5.4.2(비정상) 예제 전체. base = "http://a/b/c/d;p?q".
+    struct Case {
+        const char* reference;
+        const char* expected;
+    };
+    const Case cases[] = {
+        {"g:h", "g:h"},
+        {"g", "http://a/b/c/g"},
+        {"./g", "http://a/b/c/g"},
+        {"g/", "http://a/b/c/g/"},
+        {"/g", "http://a/g"},
+        {"//g", "http://g"},
+        {"?y", "http://a/b/c/d;p?y"},
+        {"g?y", "http://a/b/c/g?y"},
+        {"#s", "http://a/b/c/d;p?q#s"},
+        {"g#s", "http://a/b/c/g#s"},
+        {"g?y#s", "http://a/b/c/g?y#s"},
+        {";x", "http://a/b/c/;x"},
+        {"g;x", "http://a/b/c/g;x"},
+        {"g;x?y#s", "http://a/b/c/g;x?y#s"},
+        {"", "http://a/b/c/d;p?q"},
+        {".", "http://a/b/c/"},
+        {"./", "http://a/b/c/"},
+        {"..", "http://a/b/"},
+        {"../", "http://a/b/"},
+        {"../g", "http://a/b/g"},
+        {"../..", "http://a/"},
+        {"../../", "http://a/"},
+        {"../../g", "http://a/g"},
+        {"../../../g", "http://a/g"},
+        {"../../../../g", "http://a/g"},
+        {"/./g", "http://a/g"},
+        {"/../g", "http://a/g"},
+        {"g.", "http://a/b/c/g."},
+        {".g", "http://a/b/c/.g"},
+        {"g..", "http://a/b/c/g.."},
+        {"..g", "http://a/b/c/..g"},
+        {"./../g", "http://a/b/g"},
+        {"./g/.", "http://a/b/c/g/"},
+        {"g/./h", "http://a/b/c/g/h"},
+        {"g/../h", "http://a/b/c/h"},
+        {"g;x=1/./y", "http://a/b/c/g;x=1/y"},
+        {"g;x=1/../y", "http://a/b/c/y"},
+        {"g?y/./x", "http://a/b/c/g?y/./x"},
+        {"g?y/../x", "http://a/b/c/g?y/../x"},
+        {"g#s/./x", "http://a/b/c/g#s/./x"},
+        {"g#s/../x", "http://a/b/c/g#s/../x"},
+        {"http:g", "http:g"}, // strict 해석
+    };
+    for (const Case& item : cases) {
+        char buffer[96];
+        auto resolved =
+            TryResolveUriReference("http://a/b/c/d;p?q", item.reference, Span<char>(buffer));
+        REQUIRE(resolved);
+        CHECK(StringView(buffer, resolved.Value()) == StringView(item.expected));
+    }
+}
+
+TEST(Uri_ResolveEdgeCasesAndFailures) {
+    char buffer[64];
+    auto Resolve = [&](const char* base, const char* reference) -> StringView {
+        auto resolved = TryResolveUriReference(base, reference, Span<char>(buffer));
+        CHECK(resolved);
+        return resolved ? StringView(buffer, resolved.Value()) : StringView("<failed>");
+    };
+    // base fragment는 무시하고, authority만 있는 base는 "/"를 붙여 merge한다.
+    CHECK(Resolve("http://a/b#frag", "c") == StringView("http://a/c"));
+    CHECK(Resolve("http://a", "g") == StringView("http://a/g"));
+    CHECK(Resolve("http://a?q", "") == StringView("http://a?q"));
+    CHECK(Resolve("http://user@[::1]:080/x", "y") == StringView("http://user@[::1]:080/y"));
+    // authority 없는 base: '/' 없는 path는 reference로 바뀐다.
+    CHECK(Resolve("mailto:a@b", "c") == StringView("mailto:c"));
+    CHECK(Resolve("urn:x:y", "#f") == StringView("urn:x:y#f"));
+    // authority 없는 결과 path가 "//"로 시작하면 "/."를 붙여 다시 파싱해도 같은 path가 된다.
+    const StringView odd = Resolve("foo:/x/y", "..//z");
+    CHECK(odd == StringView("foo:/.//z"));
+    auto reparsed = TryParseUri(odd);
+    REQUIRE(reparsed);
+    CHECK(!reparsed.Value().hasAuthority && reparsed.Value().path == StringView("/.//z"));
+    CHECK(Resolve("foo:/.//z", ".") == StringView("foo:/.//"));
+
+    // 실패: scheme 없는 base, 문법 오류, 출력 부족(output 보존).
+    CHECK(TryResolveUriReference("/relative", "g", Span<char>(buffer)).Error() ==
+          ErrorCode::InvalidArgument);
+    CHECK(TryResolveUriReference("http://a/b", "a b", Span<char>(buffer)).Error() ==
+          ErrorCode::InvalidArgument);
+    CHECK(TryResolveUriReference("http://a b/", "g", Span<char>(buffer)).Error() ==
+          ErrorCode::InvalidArgument);
+    char small[12];
+    for (char& c : small) {
+        c = '*';
+    }
+    // "http://a/b" + "g" + 2 = 13 > 12. 결과("http://a/g", 10)가 들어가도 상한 미만이면 실패한다.
+    CHECK(TryResolveUriReference("http://a/b", "g", Span<char>(small)).Error() ==
+          ErrorCode::CapacityExceeded);
+    bool untouched = true;
+    for (char c : small) {
+        untouched = untouched && c == '*';
+    }
+    CHECK(untouched);
+    auto size = ResolvedUriMaxSize("http://a/b", "g");
+    REQUIRE(size);
+    CHECK(size.Value() == 13);
+    char exact[13];
+    auto fits = TryResolveUriReference("http://a/b", "g", Span<char>(exact));
+    REQUIRE(fits);
+    CHECK(StringView(exact, fits.Value()) == StringView("http://a/g"));
+}
+
 } // namespace rocks::test
