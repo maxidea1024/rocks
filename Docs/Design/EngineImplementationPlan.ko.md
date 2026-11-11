@@ -2,7 +2,7 @@
 
 STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-driven 렌더러
 
-**설계 기준일 2026.11.11 · 개정 1.5 · 상태: 구현 제안 / 성능 미측정**
+**설계 기준일 2026.11.11 · 개정 1.6 · 상태: 구현 제안 / 성능 미측정**
 
 **추가 요구 반영:** Deferred·Forward 정식 지원, 업스케일링, 태깅·컴포넌트·프리팹, Unreal 참고 체계 확대, 컷씬 제작 핵심화, Blueprint 제외·자체 언어 채택, 하이엔드 포스트이펙트 전체 기능군, UBT 계열 자체 빌드 도구·분산 빌드·반복 개발 최적화, 정식 헤드리스 모드, 필수 노드 기반 머티리얼 에디터.
 
@@ -14,11 +14,13 @@ STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-d
 
 **1.5 공간 인덱스:** World의 런타임 공간 인덱스를 Unreal의 분담 방식으로 정의한다. 렌더 판정은 평면 SoA와 SceneCulling 유사 계층 공간 해시, 충돌 질의는 물리 scene query, 비충돌 게임플레이 질의는 2D 계층 공간 해시로 구분한다. 10.4절에 규약과 수용 시험 SI01–SI10을, 33.10절에 교차 검증 결과와 개정 범위를 기록한다.
 
+**1.6 물리 middleware:** Jolt 기본안을 PhysX 5로 전환한다. 모든 대상 플랫폼에서 O3DE 관리 fork의 플랫폼 patch를 기반으로 동일 commit의 PhysX 5를 source 빌드하며, UE 5.6 Chaos는 통합 구조의 참고로만 사용한다. 16.4·16.5절에 버전·빌드·결정성 범위·큰 월드 규약과 수용 시험 PC01–PC08을, 33.11절에 교차 검증 결과와 개정 범위를 기록한다.
+
 ## 1. 목표와 실행 전략
 
 **최우선 첫 작업은 Core 공통 라이브러리와 오브젝트 시스템이다.** 기반의 정확성·수명·검증 체계를 먼저 완성한 뒤 에셋 임포트·에디터 편집·쿠킹·독립 실행 게임의 첫 제품 목표로 확장한다. UE5급 기능 범위는 장기 목표로 유지하되, 가상화 지오메트리와 동적 전역 조명은 기본 제작 과정이 검증된 이후 독립적인 연구 단계로 확장한다.
 
-참조 대화 「3D 엔진 설계」에서 조회 가능한 5개 사용자 요청과 응답을 반영하였다. 최근의 ‘STL 미사용’ 요구를 이전의 ‘STL/PMR 사용’ 제안보다 우선한다. C++23·자체 Core·청크 레지스트리·Nonmoving 병렬·점진 GC·Clang 메타 방향을 계승한다. 참조 대화의 웹 UI/네이티브 뷰포트 에디터 방향은 개정 1.4에서 게임 UI와 같은 UI 툴킷의 네이티브 에디터로 대체하였다. 추가 요청에 따라 자체 Object 모델과 D3D11/D3D12/Vulkan/Metal/OpenGL 지원, Windows/macOS 개발 환경으로 범위를 갱신한다. Jolt는 어댑터 뒤의 물리 후보로 유지한다. 아래의 구체적인 API, 수치, 인력, 일정, 셀 크기와 제한값은 실행 가능한 계획을 위한 **추가 설계 제안**이며 기존 합의나 실측 결과가 아니다.
+참조 대화 「3D 엔진 설계」에서 조회 가능한 5개 사용자 요청과 응답을 반영하였다. 최근의 ‘STL 미사용’ 요구를 이전의 ‘STL/PMR 사용’ 제안보다 우선한다. C++23·자체 Core·청크 레지스트리·Nonmoving 병렬·점진 GC·Clang 메타 방향을 계승한다. 참조 대화의 웹 UI/네이티브 뷰포트 에디터 방향은 개정 1.4에서 게임 UI와 같은 UI 툴킷의 네이티브 에디터로 대체하였다. 추가 요청에 따라 자체 Object 모델과 D3D11/D3D12/Vulkan/Metal/OpenGL 지원, Windows/macOS 개발 환경으로 범위를 갱신한다. 물리 middleware는 개정 1.6에서 모든 플랫폼 단일 버전의 PhysX 5로 정한다(16.4절). 아래의 구체적인 API, 수치, 인력, 일정, 셀 크기와 제한값은 실행 가능한 계획을 위한 **추가 설계 제안**이며 기존 합의나 실측 결과가 아니다.
 
 | 구분 | 제품 목표 | 완료 판정 |
 |---|---|---|
@@ -103,7 +105,7 @@ CF01–CF12의 ID와 의미는 이 표를 정본으로 사용한다. 상세안 1
 | Host 도구 | LLVM/Clang, DXC, 임포터 및 빌드 도구 내부 STL 허용. 게임 배포물과 분리 | Host/Target 빌드 그래프 분리 |
 | ThirdParty 런타임 | 내부 STL은 허용하되 엔진 어댑터 밖으로 타입·예외·소유권을 노출하지 않음 | 버전별 헤더·심볼·할당 검토 |
 
-이 정책은 ‘엔진 작성 코드와 API의 STL 비사용’을 의미한다. ThirdParty 내부 사용까지 포함한 ‘배포 바이너리 전체 STL 0’은 별도 요구 수준이다. 그 수준을 적용하면 Jolt 등의 의존성을 다시 검토하고, 교체·포크 비용을 일정에 반영해야 한다. C ABI로 감싸는 것만으로 내부 STL 의존성이 제거되지는 않는다. 플랫폼 Atomics는 검증된 표준 메모리 모델을 우선하며, intrinsic 대체는 별도 검증 후 적용한다.
+이 정책은 ‘엔진 작성 코드와 API의 STL 비사용’을 의미한다. ThirdParty 내부 사용까지 포함한 ‘배포 바이너리 전체 STL 0’은 별도 요구 수준이다. 그 수준을 적용하면 ThirdParty 의존성을 다시 검토하고, 교체·포크 비용을 일정에 반영해야 한다. PhysX 5의 공개 header는 표준 라이브러리 중 `<new>`·`<typeinfo>`·`<cmath>`만 포함하고 자체 container를 사용하므로 엔진 API 경계 정책과 정합한다. Extensions·Cooking·디버그 연결 계층은 채택 전 header·symbol을 감사한다. C ABI로 감싸는 것만으로 내부 STL 의존성이 제거되지는 않는다. 플랫폼 Atomics는 검증된 표준 메모리 모델을 우선하며, intrinsic 대체는 별도 검증 후 적용한다.
 
 엔진 Runtime은 예외와 C++ RTTI를 사용하지 않는 기본안으로 구성한다. Object Reflection은 자체 TypeInfo를 사용한다. ThirdParty의 예외·RTTI 옵션은 별도 빌드하며 예외가 엔진 경계를 통과하지 않게 변환한다. 일반 실패는 Result/Error, 손상된 불변식은 assert/fatal, 회복 불가능한 전체 메모리 부족은 진단 후 종료로 처리한다. 스트리밍처럼 예산 부족이 정상인 경로에는 TryAllocate를 제공한다.
 
@@ -117,7 +119,7 @@ CF01–CF12의 ID와 의미는 이 표를 정본으로 사용한다. 상세안 1
 | 좌표 | 오른손, +Z Up, +X Forward, 미터·라디안·초. 임포터에서 변환 |
 | 행렬 | column vector, p′=M×p, local-to-world=parent×local. HLSL 저장 규약과 전치 지점을 고정 |
 | 깊이 | reversed-Z, depth [0,1]. 투영·컬링·피킹·속도 버퍼의 동일 규약 검증 |
-| 큰 월드 | 월드 위치 double, 회전·스케일 float, 렌더링은 카메라 상대 float. 물리는 지역 원점/구역 변환 |
+| 큰 월드 | 월드 위치 double, 회전·스케일 float, 렌더링은 카메라 상대 float. 물리는 float 전용 PhysX의 PhysicsRegion 지역 원점 변환(16.5절) |
 | 시간 | 시뮬레이션 기본 60Hz, 단조 증가 64-bit Tick. 렌더 보간과 오디오 sample clock 분리 |
 | 직렬화 | 명시적인 byte order, 고정 폭 정수, 길이 상한·체크섬. 구조체 메모리를 그대로 저장하지 않음 |
 | 문자열 | UTF-8 String/StringView, UI 입력·검색의 Unicode 정규화 정책 명시 |
@@ -226,7 +228,7 @@ Apple은 Windows용 Metal 제작 도구와 macOS/Windows용 Metal Shader Convert
 | RHI | Core, Task, graphics SDK adapter | device·offscreen은 Window 불필요, interactive swapchain만 Window 사용. World·Object 없음 |
 | RenderGraph / Renderer | RHI, Task, Core, RenderData, SpatialIndex | pass·GPU Scene·조명·메시·visibility 판정 인덱스. World 순회 없음 |
 | MaterialSchema / Compiler / Runtime | Core·Schema / Host ShaderWorker / RenderData·RHI | graph 계약·host 컴파일·cooked 실행 분리; 14.6절 세부 의존 |
-| Physics / Audio / Navigation | Core, Task, 각 vendor adapter | 독립 네이티브 runtime. Entity/Renderer 내부 주소 없음 |
+| Physics / Audio / Navigation | Core, Task, 각 vendor adapter | 독립 네이티브 runtime. Entity/Renderer 내부 주소 없음. PhysX 타입은 Physics adapter 내부에 한정 |
 | Animation / VFX | Core, Task, Asset 데이터 및 해당 backend | 데이터 처리·실행. World 연결은 통합 계층에서 수행 |
 | UI / TextLayout | ObjectRuntime, MetaSchema, Task, TextLayout / Core, shaping·폰트 adapter | widget 트리·레이아웃·테마·입력 라우팅·UiDrawList 기록 / shaping·줄바꿈·BiDi. RHI·World·PlatformWindow 직접 의존 금지 |
 | UiRender | UI의 UiDrawList 계약, RHI, Task | 배칭·클립·glyph atlas. widget Object 순회 금지 |
@@ -952,9 +954,9 @@ UE 5.4 runtime hash의 Loose Hierarchical Grid는 actor extent로 streaming cell
 - level instance의 offset은 최상위 level 한 변의 정수배를 요구하거나 load 시 key를 재계산한다.
 - 공통 해시·평면 판정 코드는 Renderer에 의존하지 않는 SpatialIndex 모듈(3.1절)에 둔다. DedicatedServer profile은 렌더 인덱스를 링크하지 않는다.
 
-#### 물리 middleware와의 경계
+#### 물리 scene query 연동
 
-본 절의 계약은 물리 middleware에 의존하지 않으며, 충돌 질의는 adapter 뒤의 middleware 내부 구조를 사용한다. Jolt는 broadphase layer별 quad AABB tree를 사용하며 이동 body의 상위 node box를 확장한 뒤 step 중 background에서 재구성한다. [S82](https://github.com/jrouwe/JoltPhysics/blob/master/Docs/Architecture.md) PhysX 5의 scene query는 static·dynamic pruner 모두 dynamic AABB tree가 기본값이며 사전 계산 구조(`PxPruningStructure`)의 일괄 추가를 지원한다. [S83](https://nvidia-omniverse.github.io/PhysX/physx/5.6.1/docs/SceneQueries.html) WP cell collision은 middleware의 일괄 추가 경로로 등록한다.
+충돌 질의는 16절 PhysX 5 adapter의 scene query 구조를 사용한다. PhysX 5의 scene query는 static·dynamic pruner 모두 dynamic AABB tree가 기본값이며 사전 계산 구조(`PxPruningStructure`)의 일괄 추가를 지원한다. [S83](https://nvidia-omniverse.github.io/PhysX/physx/5.6.1/docs/SceneQueries.html) WP cell collision은 cook 시 생성한 pruning structure로 일괄 등록한다.
 
 #### 수용 시험
 
@@ -1408,7 +1410,7 @@ M6의 basic rig·morph/facial editor → M7의 retarget·full-body IK·동작 �
 
 ### 16.1 통합 구조
 
-물리 기본안은 Jolt adapter와 자체 PhysicsWorld·CharacterMovement 통합이다. Jolt는 멀티코어 rigid-body·collision 라이브러리이며 게임 객체와 별도 native 수명으로 관리한다. [S10](https://github.com/jrouwe/JoltPhysics)
+물리 middleware는 모든 대상 플랫폼에서 단일 버전의 PhysX 5를 사용하고 자체 PhysicsWorld·CharacterMovement와 통합한다. [S87](https://github.com/NVIDIA-Omniverse/PhysX) PhysX는 게임 객체와 별도 native 수명으로 관리하며 vendor 타입을 adapter 밖으로 노출하지 않는다. UE 5.6 Chaos의 통합 구조(game·physics 데이터 전달, 질의 전용 acceleration structure, 서버 권한 보정)는 참고로만 사용하고 Chaos 고유 기능은 재현 대상에 포함하지 않는다. 버전·플랫폼·빌드·결정성 범위는 16.4절, 큰 월드는 16.5절에 둔다.
 
 Collision은 raycast·sweep·overlap·trigger·filter, Dynamics는 rigid body·constraint·sleep·CCD를 담당한다. query-only collider를 지원한다. Sphere·Capsule·Box·Convex·Compound·TriangleMesh·Heightfield를 우선하며 dynamic body는 convex/compound를 기본으로 한다. 고밀도 virtual geometry와 collision mesh·nav geometry는 별도 cook 산출물이다.
 
@@ -1433,7 +1435,7 @@ public:
 };
 ~~~
 
-Step은 60Hz, 최대 substep 4를 초기 제안값으로 사용한다. 싱글플레이의 누적 지연 처리와 서버의 authoritative tick을 구분한다. 서버는 tick/input을 묵시적으로 건너뛰지 않고 admission·부하 제한·명시적 simulation-rate 정책으로 대응하며 변경을 protocol/replay에 기록한다. Jolt 내부 job adapter는 공통 Task Graph와 연결하되 같은 worker를 이중 점유하는 별도 무제한 pool을 생성하지 않는다. physics lock을 보유한 callback에서 게임 코드를 실행하지 않는다.
+Step은 60Hz, 최대 substep 4를 초기 제안값으로 사용한다. 싱글플레이의 누적 지연 처리와 서버의 authoritative tick을 구분한다. 서버는 tick/input을 묵시적으로 건너뛰지 않고 admission·부하 제한·명시적 simulation-rate 정책으로 대응하며 변경을 protocol/replay에 기록한다. PhysX의 `PxCpuDispatcher`는 공통 Task Graph의 worker에 task를 제출하며 같은 worker를 이중 점유하는 별도 무제한 pool을 생성하지 않는다. dispatcher가 보고하는 worker 수는 Game·Render·IO 예약분을 제외한 physics 예산이다. `submitTask`는 실패를 반환할 수 없으므로 사전 예약한 node pool을 사용하고, 포화 시 task를 폐기하지 않고 제출 thread에서 즉시 실행한다. PhysX task는 취소할 수 없으므로 종료 절차는 실행 중 task의 완료를 기다린다. physics lock을 보유한 callback에서 게임 코드를 실행하지 않는다.
 
 ### 16.2 소유권과 event
 
@@ -1443,17 +1445,57 @@ Step은 60Hz, 최대 substep 4를 초기 제안값으로 사용한다. 싱글플
 | Dynamic / Ragdoll | Physics | step 완료 snapshot을 World에 반영 |
 | Character | CharacterMovement | capsule sweep·step·slide 결과를 이동 상태로 확정 |
 
-접촉·trigger event는 tick, body handles, event type, pair ID를 값으로 복사한다. Game lane에서 generation과 owner weak handle을 재검증한 뒤 callback을 호출한다. callback 중 body 추가·삭제는 다음 command batch로 이월한다. body 삭제는 해당 step·query reader 완료 후 수행하며 삭제 이벤트 중복·역순 정책을 테스트한다.
+PhysX의 `PxSimulationEventCallback`은 `fetchResults` 안에서 호출되므로 값 복사만 수행한다. 접촉·trigger event는 tick, body handles, event type, pair ID를 값으로 복사한다. Game lane에서 generation과 owner weak handle을 재검증한 뒤 callback을 호출한다. callback 중 body 추가·삭제는 다음 command batch로 이월한다. body 삭제는 해당 step·query reader 완료 후 수행하며 삭제 이벤트 중복·역순 정책을 테스트한다.
 
-CharacterMovement는 경사·계단·ground snap·jump·moving platform·crouch·sweep depenetration을 독립 상태 머신으로 구현한다. 네트워크 예측 상태는 입력 sequence, 위치·속도·mode, base platform ID를 포함한다. 일반 rigid-body 시뮬레이션의 완전한 cross-platform 결정성을 전제로 하지 않는다.
+CharacterMovement는 경사·계단·ground snap·jump·moving platform·crouch·sweep depenetration을 독립 상태 머신으로 구현한다. 네트워크 예측 상태는 입력 sequence, 위치·속도·mode, base platform ID를 포함한다. PhysX `PxController`는 내부 cache 상태를 되감을 수 없으므로 사용하지 않고, CharacterMovement는 adapter의 sweep·`computePenetration`으로 구현한다. 일반 rigid-body 시뮬레이션의 완전한 cross-platform 결정성을 전제로 하지 않는다(16.4절).
 
 검증 장면은 stack stability, fast bullet CCD, sliding slope, moving platform, ragdoll transition, streaming collider 제거다. 고정 seed 반복성·penetration·에너지 이상 증가·이벤트 중복을 측정한다. 파괴·vehicle·cloth/soft body·rope·buoyancy·physics field는 기본 이동과 joint 안정화 이후 개별 모듈로 추가한다.
 
 ### 16.3 Query·필터·물리 재질
 
-QueryReadScope는 해당 physics world가 step·구조 변경을 수행하지 않는 읽기 phase의 gate다. 외부 worker는 gate 안에서만 live broadphase를 조회하고 scope를 저장·yield하지 않는다. step과 겹쳐야 하는 async query는 step 경계에 batch 실행하여 값 결과를 전달한다. immutable QuerySnapshot이라는 이름만으로 vendor broadphase가 복제되어 있다고 가정하지 않는다. 독립 snapshot broadphase는 필요 시 별도 메모리·정합 비용을 검증한다.
+QueryReadScope는 해당 physics world가 step·구조 변경을 수행하지 않는 읽기 phase의 gate다. 외부 worker는 gate 안에서만 live broadphase를 조회하고 scope를 저장·yield하지 않는다. step과 겹쳐야 하는 async query는 step 경계에 batch 실행하여 값 결과를 전달한다. PhysX에서 QueryReadScope는 `fetchResults`와 `flushQueryUpdates` 이후 열리고 다음 command 적용·`simulate`·`shiftOrigin` 전에 닫힌다. 쓰기는 Physics lane의 command 단계에서만 수행하며 debug build는 `eREQUIRE_RW_LOCK`으로 위반을 검출한다. UE 5.6 Chaos는 game thread 질의를 위한 별도 acceleration structure를 frame 끝에 physics 결과로 갱신한다. [S92](https://github.com/EpicGames/UnrealEngine/tree/5.6.1-release) immutable QuerySnapshot이라는 이름만으로 vendor broadphase가 복제되어 있다고 가정하지 않는다. 독립 snapshot broadphase는 필요 시 별도 메모리·정합 비용을 검증한다.
 
-collision channel·object type·query filter·trigger·ignore pair·physical material/surface·friction combine·complex/simple collision을 data schema로 제공한다. body mass/inertia·COM·constraint editor·physics asset·debug recorder를 포함한다. fracture·vehicle·cloth·rope·buoyancy는 adapter별 지원표와 sample을 갖고 rigid-body 지원으로 완료 처리하지 않는다.
+collision channel·object type·query filter·trigger·ignore pair·physical material/surface·friction combine·complex/simple collision을 data schema로 제공한다. body mass/inertia·COM·constraint editor·physics asset·debug recorder를 포함한다. fracture·vehicle·cloth·rope·buoyancy는 지원표와 sample을 갖고 rigid-body 지원으로 완료 처리하지 않는다. PhysX 5의 cloth·deformable·particle은 CUDA 전용이므로 선택 capability로 두고, vehicle은 PhysX 5 vehicle SDK(CPU)를 gameplay 계층 뒤에 둔다. fracture 구현 방식은 별도 모듈 단계에서 결정한다.
+
+### 16.4 PhysX 버전·빌드·결정성 범위
+
+**단일 버전.** Windows x64, Linux x64/aarch64, macOS x64/ARM64, iOS ARM64, Android ARM64/x86_64는 모두 동일 commit의 PhysX 5를 source에서 빌드한다. NVIDIA upstream은 Windows·Linux만 공식 지원하며 플랫폼 build 설정 PR을 받지 않는다. [S88](https://github.com/NVIDIA-Omniverse/PhysX/discussions/58) Rocks는 O3DE 관리 fork의 macOS·iOS·Android patch를 기반으로 자체 fork commit을 고정한다. [S89](https://github.com/o3de/PhysX) 초기 후보는 O3DE fork에 병합된 5.6.1이며 5.12 port의 안정화 시 재평가한다. PhysX 4.1은 cook 형식·API·마찰 기본값·질의 동작이 달라 어느 플랫폼에서도 혼용하지 않는다.
+
+**version manifest.** target별로 version·commit·patch 목록·build flag·scene 기본 설정·cook parameter·license와 NOTICE를 기록하며, gameplay에 영향을 주는 항목은 모든 target에서 같은 값이어야 한다. prebuilt binary와 build 시 package 자동 다운로드는 사용하지 않는다.
+
+**빌드 설정 통일.** PhysX는 Rocks Build로 빌드하고 Core와 같은 `-ffp-contract=off`를 적용한다. upstream Windows 기본값인 `/fp:fast`(`PX_FLOAT_POINT_PRECISE_MATH` OFF)는 사용하지 않는다. 예외·RTTI는 끄고, gameplay 기준 경로는 CUDA를 비활성화한 CPU build(`DISABLE_CUDA_PHYSX`)다. solver·friction(`eIMPROVED_PATCH_FRICTION` 명시)·PCM·enhanced determinism·broadphase(PABP)·CCD 설정은 manifest에 고정하여 SDK 기본값 변경에 의존하지 않는다.
+
+**cook.** 같은 SDK 버전에서는 endianness가 같아 하나의 cook 결과를 모든 플랫폼에서 사용한다. DDC key에 PhysX version·commit·cook parameter·adapter cook schema를 포함하고, blob header 불일치는 load 시 거부한다. 플랫폼 tag와 version GUID의 완전 일치를 요구하는 `PxSerialization` binary는 asset에 사용하지 않고 cooked mesh stream을 사용한다. runtime cooking은 editor·개발 build에 한정한다. navigation은 PhysX blob이 아니라 중립 collision source에서 생성한다.
+
+**결과 차이의 범위.** NVIDIA는 같은 release·같은 platform에서만 결과 반복을 보장한다. [S90](https://nvidia-omniverse.github.io/PhysX/physx/5.6.1/docs/RigidBodyDynamics.html) PhysX의 NEON 경로는 나눗셈·제곱근을 추정 명령과 Newton 반복으로 계산하므로, 같은 버전·같은 설정에서도 x64와 ARM64의 결과는 bit 단위로 일치하지 않는다. 결정성 범위는 동일 binary·동일 platform·동일 command 순서로 한정하며 로컬 replay와 회귀 시험에 사용한다. 플랫폼 간 결과 정합은 서버 권한과 field별 보정(17.2절)으로 확보한다. UE 5.6 Chaos도 플랫폼 간 결정성을 명시하지 않으며, 오차가 임계값을 넘을 때 보정하고 표시 상태를 보간한다. [S91](https://dev.epicgames.com/documentation/en-us/unreal-engine/networked-physics-overview?application_version=5.6)
+
+**차이 축소 검토(PXD).** Rocks fork에서 NEON 추정 경로를 정확 연산으로 대체한 build와 원본 build의 플랫폼 간 상태 hash를 비교하여 차이 축소 효과와 성능 비용을 측정한다. 측정 전에는 플랫폼 간 결정성으로 표기하지 않는다.
+
+**수명·callback.** process당 `PxFoundation`과 `PxPhysics`를 1개씩 두어 World·PIE session이 공유하고, `PxScene`은 session마다 분리한다. 종료는 `fetchResults` 완료 → scene 해제 → asset lease 종료 후 공유 mesh 해제 → `PxPhysics` → `PxFoundation` 순서다. `PxAllocatorCallback`은 Physics tag와 16-byte 정렬로 Rocks allocator에 연결하고 메모리 부족은 진단 후 fatal로 처리한다. `PxErrorCallback`은 구조화 로그에 연결하며 invalid parameter·internal error는 시험 실패로 판정한다. 두 callback에서 lock 획득과 게임 코드 실행을 금지한다.
+
+**GPU·라이선스.** CUDA 기능은 NVIDIA 장치의 선택 capability이며 replicated·predicted gameplay에 영향을 주지 않는다. DedicatedServer는 CPU 전용이다. 5.10 이하는 BSD-3, 5.11 이상의 `physx/`는 Apache 2.0이므로 target별 license 고지와 수정 파일 표기를 manifest에서 관리한다.
+
+| ID | 수용 시험 | 판정 기준(제안) |
+|---|---|---|
+| PC01 | 전 target 빌드·실행: Windows x64, Linux x64/aarch64, macOS x64/ARM64, iOS 장치·simulator, Android ARM64/x86_64 | 동일 commit·manifest로 빌드, conformance suite 실행 |
+| PC02 | 질의 적합성: ray·sweep·overlap·filter를 x64 결과와 비교 | filter 100% 일치, hit 여부 99.9% 이상(불일치는 grazing contact 한정), 거리 차 1 mm + 1e-5·d 이하, 모서리 밖 normal 차 1° 이내 |
+| PC03 | 동일 platform 반복성: 같은 binary·command 순서, worker 수 변경 | 상태 hash 일치 |
+| PC04 | 플랫폼 간 차이 계측: 고정 scene 장시간 시뮬레이션, x64 대 ARM64 | 차이 증가 곡선 기록. PXD 판정 근거로 사용하며 결정성으로 표기하지 않음 |
+| PC05 | 단일 cook blob의 전 target load, version·schema 불일치 | load 성공과 불일치 거부 100% |
+| PC06 | 수명·dispatcher: node pool 포화, PIE 2 session, 종료 중 실행 task | 누수 0건, task 유실 0건, 종료 정지 0건 |
+| PC07 | 큰 월드: region 경계 이동, `shiftOrigin`, 서버 다중 scene handoff | 정밀도 허용 오차 충족, epoch 위반 0건, handoff 중 접촉 누락 0건 |
+| PC08 | 혼합 플랫폼 네트워크: Linux 서버와 Windows·macOS·iOS·Android client, B6 network profile | client별 correction 빈도 기록, ARM64 client의 보정 빈도가 x64 client의 1.5배 이하 |
+
+M4 물리 착수 전 gate(PXG)는 PC01·PC02·PC05·PC06 통과와 manifest·license 고지·fork 관리 책임자 지정이다.
+
+### 16.5 큰 월드와 PhysicsRegion
+
+PhysX simulation은 float 전용이다. UE 5.6 Chaos는 `FReal`을 double로 정의하고 constraint solver는 float로 계산한다. [S92](https://github.com/EpicGames/UnrealEngine/tree/5.6.1-release) Rocks는 double 월드 좌표(2.2절)를 PhysicsRegion 지역 원점으로 변환한다.
+
+- region은 고정 grid이며 한 변 R은 World Partition cell 한 변의 2의 거듭제곱 배다(제안 8,192 m).
+- client는 단일 scene을 사용하고 region 원점으로만 `shiftOrigin`을 수행한다. 전환은 hysteresis를 두고 tick 경계에서 수행하며, 전환마다 physicsOriginEpoch를 증가시켜 world epoch(10.2절)에 포함한다. 이전 epoch의 질의·event·command는 거부한다.
+- 서버는 `shiftOrigin`을 사용하지 않고 활성 region마다 `PxScene`을 둔다. 인접 region 사이에는 최대 상호작용 거리 이상의 overlap band를 두어 body를 이관하며, band에 걸친 질의 결과는 (거리, stable ID) 순으로 병합한다.
+- client와 서버는 같은 region 원점을 사용하여 같은 지역 좌표에서 계산한다.
 
 ## 17. 네트워크·Replication·Prediction
 
@@ -1486,9 +1528,9 @@ delivery는 unreliable sequenced snapshot, 제한된 reliable control/RPC, 우�
 
 interest는 World Partition cell, 거리, team/owner, gameplay tag, relevancy rule을 조합한다. bandwidth budget을 넘으면 중요도·변경 빈도에 따라 상태 갱신을 조절한다. dormancy·wake·entity migration을 명시한다. 에셋 미상주 시 NetObject와 render-ready 상태를 구분하고 spawn resource prefetch·placeholder 정책을 적용한다.
 
-캐릭터는 client input sequence → local prediction → server authoritative simulation → ACK와 correction → 미확인 입력 replay로 구성한다. remote actor는 buffered interpolation을 사용한다. moving platform·root motion·teleport는 prediction state에 포함한다. 일반 physics body는 state replication과 correction을 기본으로 한다. lag compensation은 서버의 제한된 hitbox history로 구현하고 full World rollback을 초기 범위에서 제외한다.
+캐릭터는 client input sequence → local prediction → server authoritative simulation → ACK와 correction → 미확인 입력 replay로 구성한다. remote actor는 buffered interpolation을 사용한다. moving platform·root motion·teleport는 prediction state에 포함한다. 일반 physics body는 state replication과 correction을 기본으로 한다. client와 서버의 physics 결과는 CPU 구조에 따라 bit 단위로 다를 수 있으므로(16.4절) correction 임계값과 smoothing을 field별로 선언한다(제안: 위치 2 cm). 일반 physics body의 예측 재시뮬레이션은 초기 범위에서 제외한다. lag compensation은 서버의 제한된 hitbox history로 구현하고 full World rollback을 초기 범위에서 제외한다.
 
-Replay는 input, authoritative event, RNG seed, schema/asset manifest, periodic snapshot을 기록한다. 결정적인 게임 로직과 비결정적인 physics/render를 구분한다. 영상 재생과 네트워크 디버그를 위한 상태 replay를 제공하고 모든 플랫폼의 bitwise physics 재현을 약속하지 않는다.
+Replay는 input, authoritative event, RNG seed, schema/asset manifest, periodic snapshot을 기록한다. 결정적인 게임 로직과 비결정적인 physics/render를 구분한다. 영상 재생과 네트워크 디버그를 위한 상태 replay를 제공하고 모든 플랫폼의 bitwise physics 재현을 약속하지 않는다. physics replay는 PhysX version·build hash를 기록하며 다른 build·platform에서는 상태 snapshot 재생으로 전환한다.
 
 시험 profile은 RTT 0/50/100/200 ms, jitter 0/20 ms, loss 0/1/5%, reorder·duplicate·disconnect다. 서버 60Hz tick, per-client bandwidth·RPC queue·correction 거리·stale packet을 계측한다. 강제 despawn/respawn과 cell 이동 중 ID alias·use-after-free·권한 위반 0건을 필수 기준으로 한다.
 
@@ -2245,7 +2287,7 @@ PR은 Core/Object·메타·언어·헤드리스 sample·schema·증분 cook·금
 | Profile | 필요한 기능 | 포함하지 않는 기본 의존성 |
 |---|---|---|
 | CoreTest | Core·Task·Object·최소 schema/GC harness | World·GPU·window·UI·audio device |
-| DedicatedServer | World·script·physics/nav·network·game data | Renderer/RHI backend·window·게임 UI·audio device |
+| DedicatedServer | World·script·physics(CPU 전용 PhysX)/nav·network·game data | Renderer/RHI backend·window·게임 UI·audio device |
 | Commandlet | 작업별 asset/schema/cook/build·선택 World | 기본 window·GPU·audio. 필요 capability는 명시 요청 |
 | Simulation/Replay | fixed clock·gameplay/AI/physics·state snapshot | presentation device, 선택 network |
 | EditorBackend | asset·transaction·prefab/script schema·자동화 API | Studio UI·native window. renderer는 별도 선택 |
@@ -2483,6 +2525,9 @@ RHI·UI 툴킷·언어·전문 빌드 도구의 본격 구현은 Foundation Gate
 | R19 · P1 | NullRHI로 영상/UI 성공을 오판 | CPU-only/GPU offscreen profile·capability 실패·실제 image 비교 |
 | R20 · P1 | UI designer/runtime 차이·binding root 누수 | 동일 evaluator/layout·typed binding·preview/cooked/headless 통합 |
 | R21 · P1 | 공간 인덱스의 bounds·key·HZB 경로 결함에 의한 가시 객체 누락, 다중 view 판정 비용 증가 | 단일 loose 상수·외향 반올림·block 계층·SI06 fuzz·SI03/SI04 예산. GPU-driven 판정 착수 전 SI06 통과 |
+| R22 · P1 | upstream 미지원 플랫폼(macOS·iOS·Android) PhysX patch의 toolchain 변화·보안 수정 부담 | O3DE fork 기반 고정 commit·Rocks fork 관리 책임자·PC01 CI. cooked blob은 서명·checksum 검증 package에서만 load |
+| R23 · P1 | x64·ARM64 간 physics 결과 차이에 의한 client 보정 증가·replay 불일치 | 동일 commit·빌드 설정·cook, 서버 권한과 field별 보정, PC04/PC08 계측, PXD 차이 축소 검토 |
+| R24 · P2 | float 전용 PhysX의 큰 월드 정밀도 저하·서버 다중 scene 비용 | PhysicsRegion·origin epoch·overlap band 이관·PC07 |
 
 기능 계획의 P0는 안정성 선행 조건, P1은 제작·실행 필수, P2는 규모·품질 확장, P3는 연구·특수 기능이다. 위 위험표의 우선순위는 대응 시급성으로 별도 사용한다. 후속 전문 기능을 P3로 분류하여도 제품 범위에서 삭제한 것으로 해석하지 않는다. 다만 첫 실용 버전과 장기 전체 범위의 완료 시점을 구분한다.
 
@@ -2581,7 +2626,7 @@ RHI·UI 툴킷·언어·전문 빌드 도구의 본격 구현은 Foundation Gate
 | VirtualGeometry·GI·VSM·VT·RT | 대체 경로·page/representation·memory·capture 지원표 | 필수 장기 M8–M9 연구 gate |
 | 전체 post·upscale·HDR | 26절 catalog·두 경로·FSR/DLSS/XeSS·volume/shot·history | 필수 M4–M9 |
 | Skeletal·animation·rig·retarget·morph | blend/montage/sync/socket·IK/warp·pose search·skin/velocity | 필수 M4–M8, 고급 cloth/groom P3 |
-| Physics·collision·query·nav | channel/material·constraint·character·async query·tile snapshot | 필수 M4–M7; 파괴/softbody/vehicle 개별 P3 |
+| Physics·collision·query·nav | PhysX 5 단일 버전·channel/material·constraint·character·async query·tile snapshot. Chaos 고유 기능은 참고 | 필수 M4–M7(M4 전 PXG gate); 파괴/softbody/vehicle 개별 P3 |
 | World 공간 인덱스·visibility 판정 | 평면 SoA·SceneCulling 유사 계층 공간 해시·physics scene query·2D gameplay 해시 분담, 보수성·결정성 규약 | 필수 M3 CPU 경로, M4–M5 GPU-driven·WP 연동(제안); 10.4절 SI gate |
 | AI·EQS·State/Behavior·SmartObject·Mass | task budget·script predicate·예약·SoA/Entity bridge | 필수 M4–M7 |
 | Gameplay Ability·effect·cue | 태그·속성·stack·cost·duration·prediction·취소 | 필수 M5–M6 |
@@ -2725,13 +2770,34 @@ Godot 코드는 이식하지 않고 구조와 동작 계약을 재구현하며, 
 | 256 m 최상위 level에서 장대 객체의 상위 level 집중 | 최상위 16,384 m, spline·landscape cook 분할, 초과 대상 평면 경로 |
 | 렌더 전용 공통 코드의 서버 링크 | SpatialIndex 모듈 분리, SI10 link 검사 |
 
-물리 middleware 선택은 본 개정 범위가 아니다. 사실 확인에서 PhysX 5.x의 공식 runtime 지원이 Windows·Linux로 한정되고 macOS·iOS·Android는 O3DE fork에서만 제공되며, 5.11부터 Apache 2.0 라이선스임을 확인하였다. 2.2절의 macOS 개발·Android/iOS 클라이언트 요구와 관련되므로, 16.1절의 Jolt 기본안을 변경할 경우 별도 개정으로 처리한다.
+물리 middleware 선택은 본 개정 범위가 아니다. 사실 확인에서 PhysX 5.x의 공식 runtime 지원이 Windows·Linux로 한정되고 macOS·iOS·Android는 O3DE fork에서만 제공되며, 5.11부터 Apache 2.0 라이선스임을 확인하였다. 2.2절의 macOS 개발·Android/iOS 클라이언트 요구와 관련되므로, 16.1절의 Jolt 기본안을 변경할 경우 별도 개정으로 처리한다. 이 변경은 개정 1.6(33.11절)에서 수행하였다.
 
 개정 범위는 표지·3.1·10.3·10.4·31(R21)·33.2·33.10·34절이다. 본 개정은 문서 계약의 변경이며 구현·측정 결과가 아니다.
 
+### 33.11 개정 1.6의 PhysX 5 전환
+
+물리 middleware를 모든 플랫폼 단일 버전의 PhysX 5로 정한다. 검토 초기에는 플랫폼별 허용 최신 버전(Windows·Linux는 PhysX 5, macOS·iOS·Android는 PhysX 4.1)을 전제로 하였다. 사실 확인에서 O3DE 관리 fork가 macOS(x64·ARM64)·iOS·Android에 PhysX 5를 제공하고(5.6.1 병합, 5.12 port 진행), O3DE가 2026-05에 PhysX 4를 제거하였음을 확인하였다. 4.1과 5는 cook 형식(5.x는 4.1 convex를 거부)·API·마찰 기본값·질의 동작이 달라 혼용 시 플랫폼 간 결과 차이가 확대되므로 단일 버전으로 결정하였다.
+
+서브에이전트 2개가 공개 자료 사실 확인(1차 출처·2차 출처·미확인 구분)과 스펙 영향 반례 검토를 수행하였다. Unreal 비교 기준은 UE 5.6이며 Chaos 고유 기능은 참고로만 사용한다.
+
+| 지적 | 조치 |
+|---|---|
+| 4.1·5 혼용의 cook·API·동작 차이 | 단일 버전·단일 cook(16.4절) |
+| 같은 버전에서도 x64·ARM64 결과의 bit 불일치(NEON 추정 명령, upstream Windows `/fp:fast` 기본값) | 빌드 설정 통일, 결정성 범위 한정, 서버 권한 보정(17.2절), PXD 측정 |
+| float 전용 simulation(UE 5.6 Chaos는 `FReal` double) | PhysicsRegion·origin epoch·서버 다중 scene(16.5절) |
+| `PxCpuDispatcher`의 제출 실패 표현 불가·task 취소 불가 | 예약 node pool·포화 시 즉시 실행·종료 시 완료 대기 |
+| `PxController` 상태 되감기 불가 | 자체 CharacterMovement |
+| `PxSerialization` binary의 플랫폼 tag 일치 요구 | cooked mesh stream 사용 |
+| cloth·deformable·particle의 CUDA 전용 | 선택 capability, gameplay 비영향 |
+| upstream의 플랫폼 PR 미수용 | Rocks fork·관리 책임자·PC01(R22) |
+
+Jolt는 `CROSS_PLATFORM_DETERMINISTIC` build에서 x64·ARM64를 포함한 플랫폼 간 결정성을 문서화하고 CI hash로 검사한다(약 8% 비용, Android·iOS hash 미검사). [S82](https://github.com/jrouwe/JoltPhysics/blob/master/Docs/Architecture.md) PhysX 5 전환으로 이 성질과 double 정밀도 build, MIT 라이선스를 포기한다. 플랫폼 간 bit 일치가 제품 요구로 확정되면 PXD 결과와 함께 재검토한다.
+
+확인하지 못한 항목은 O3DE 5.12 port(PR #18)의 build·시험 통과, x64·ARM64 간 실제 차이의 크기, PhysX의 플랫폼 간 차이 측정 공개 자료다. 개정 범위는 표지·1·2.1·2.2·3.1·10.4·16·17.2·28.1·31(R22–R24)·33.2·33.10·33.11·34절이다. 본 개정은 문서 계약의 변경이며 구현·측정 결과가 아니다.
+
 ## 34. 참고 자료와 설계 근거
 
-이전 대화는 사용자 제공 참조 「3D 엔진 설계」와 현재 대화의 추가 요구를 기준으로 한다. 아래 공식 문서는 기술 개념과 API 경계를 확인하기 위한 자료다. 일정·API·예산·구현 단계는 이 계획의 제안이며 참고 자료의 성능 보증이 아니다. 온라인 문서는 변경될 수 있으므로 실제 구현 착수 시 선택 SDK 버전의 문서·commit을 build manifest에 고정한다. 조회일은 2026.11.10이며 S75–S86은 2026.11.11이다.
+이전 대화는 사용자 제공 참조 「3D 엔진 설계」와 현재 대화의 추가 요구를 기준으로 한다. 아래 공식 문서는 기술 개념과 API 경계를 확인하기 위한 자료다. 일정·API·예산·구현 단계는 이 계획의 제안이며 참고 자료의 성능 보증이 아니다. 온라인 문서는 변경될 수 있으므로 실제 구현 착수 시 선택 SDK 버전의 문서·commit을 build manifest에 고정한다. 조회일은 2026.11.10이며 S75–S92는 2026.11.11이다.
 
 | ID | 1차 자료 | 적용 범위 |
 |---|---|---|
@@ -2744,7 +2810,7 @@ Godot 코드는 이식하지 않고 구조와 동작 계약을 재구현하며, 
 | S7 | [SIGGRAPH 2021 · Nanite 발표](https://advances.realtimerendering.com/s2021/index.html) | 가상화 geometry 공개 발표 |
 | S8 | [Epic · Lumen Technical Details](https://dev.epicgames.com/documentation/en-us/unreal-engine/lumen-technical-details-in-unreal-engine) | trace·surface cache 개념 |
 | S9 | [ACL · 공식 저장소](https://github.com/nfrechette/acl) | animation compression 후보 |
-| S10 | [Jolt · 공식 저장소](https://github.com/jrouwe/JoltPhysics) | physics integration 후보 |
+| S10 | [Jolt · 공식 저장소](https://github.com/jrouwe/JoltPhysics) | physics integration 후보. 개정 1.6의 PhysX 5 전환으로 본문 인용 없음 |
 | S11 | [miniaudio · Manual](https://miniaud.io/docs/manual/index.html) | audio backend 후보 |
 | S12 | [Recast/Detour · 공식 저장소](https://github.com/recastnavigation/recastnavigation) | tiled nav build·query |
 | S13 | [Microsoft · WebView2 Security](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/security) | host message·navigation 경계. 개정 1.4의 웹 에디터 미채택으로 본문 인용 없음 |
@@ -2816,8 +2882,14 @@ Godot 코드는 이식하지 않고 구조와 동작 계약을 재구현하며, 
 | S79 | [Epic · TLocation API](https://dev.epicgames.com/documentation/unreal-engine/API/Runtime/Engine/TLocation) | 렌더 spatial hash의 좌표·level 표현 |
 | S80 | [Epic 포럼 · Nanite pass 설명(Epic 직원)](https://forums.unrealengine.com/t/how-some-nanite-passes-work/2667840) | GPU hierarchy cell 판정 순서 |
 | S81 | [Epic 포럼 · Chaos TAABBTree(Epic DevRel)](https://forums.unrealengine.com/t/chaos-taabbtree-memory-consumption-and-weird-flat-structure/2589987) | scene query static/dynamic 트리 |
-| S82 | [Jolt · Architecture](https://github.com/jrouwe/JoltPhysics/blob/master/Docs/Architecture.md) | broadphase quad tree·이동 body 갱신 |
+| S82 | [Jolt · Architecture](https://github.com/jrouwe/JoltPhysics/blob/master/Docs/Architecture.md) | 플랫폼 간 결정성 build 비교(33.11절) |
 | S83 | [NVIDIA · PhysX 5.6.1 Scene Queries](https://nvidia-omniverse.github.io/PhysX/physx/5.6.1/docs/SceneQueries.html) | pruner 기본값·PxPruningStructure |
 | S84 | [T. Ulrich · Spatial partitioning](https://tulrich.com/geekstuff/partitioning.html) | loose octree 원 설계 |
 | S85 | [Epic · World Partition](https://dev.epicgames.com/documentation/en-us/unreal-engine/world-partition-in-unreal-engine) | runtime grid·cell 크기·loading range |
 | S86 | [UE 5.4.4 cvar 정리(2차 출처)](https://indxzero.github.io/ue544cvarwiki) | r.SceneCulling 계열 기본값. 1차 출처 미확인 |
+| S87 | [NVIDIA · PhysX 저장소](https://github.com/NVIDIA-Omniverse/PhysX) | PhysX 5 source·CHANGELOG·공식 지원 플랫폼·license |
+| S88 | [NVIDIA · PhysX discussion #58](https://github.com/NVIDIA-Omniverse/PhysX/discussions/58) | 플랫폼 build 설정 PR 미수용 |
+| S89 | [O3DE · PhysX fork](https://github.com/o3de/PhysX) | macOS·iOS·Android용 PhysX 5 patch |
+| S90 | [NVIDIA · PhysX 5.6.1 Rigid Body Dynamics](https://nvidia-omniverse.github.io/PhysX/physx/5.6.1/docs/RigidBodyDynamics.html) | 결정성 보장 범위 |
+| S91 | [Epic · Networked Physics Overview (5.6)](https://dev.epicgames.com/documentation/en-us/unreal-engine/networked-physics-overview?application_version=5.6) | 서버 권한 보정·재시뮬레이션 참고 |
+| S92 | [Epic · UE 5.6.1-release 소스](https://github.com/EpicGames/UnrealEngine/tree/5.6.1-release) | Chaos `FReal`·질의 acceleration structure 참고. Epic 계정 연결 필요 |
