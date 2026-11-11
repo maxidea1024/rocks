@@ -3,6 +3,7 @@
 #include <Platform/Memory.h>
 #include "../Common/FileInternal.h"
 #include "FileType.h"
+#include "WindowsFileCommon.h"
 #include "WindowsPathGuard.h"
 #include <Windows.h>
 #include <new>
@@ -10,35 +11,8 @@
 namespace rocks::platform {
 namespace {
 
-FileStatus NativeError(DWORD error) noexcept {
-    FileCode code = FileCode::SystemError;
-    switch (error) {
-    case ERROR_FILE_NOT_FOUND:
-    case ERROR_PATH_NOT_FOUND:
-        code = FileCode::NotFound;
-        break;
-    case ERROR_FILE_EXISTS:
-    case ERROR_ALREADY_EXISTS:
-        code = FileCode::AlreadyExists;
-        break;
-    case ERROR_ACCESS_DENIED:
-    case ERROR_SHARING_VIOLATION:
-        code = FileCode::AccessDenied;
-        break;
-    case ERROR_INVALID_NAME:
-    case ERROR_INVALID_PARAMETER:
-        code = FileCode::InvalidArgument;
-        break;
-    case ERROR_NOT_ENOUGH_MEMORY:
-    case ERROR_OUTOFMEMORY:
-        code = FileCode::OutOfMemory;
-        break;
-    case ERROR_NOT_SUPPORTED:
-        code = FileCode::Unsupported;
-        break;
-    }
-    return {code, static_cast<uint32>(error)};
-}
+using detail::NativeError;
+using detail::WidePath;
 
 void ClearFileTypeError() noexcept {
     SetLastError(ERROR_SUCCESS);
@@ -55,50 +29,6 @@ uint32 ReadFileTypeError() noexcept {
 constexpr detail::FileTypeOperations fileTypeOps{ClearFileTypeError, ReadFileType,
                                                  ReadFileTypeError};
 static_assert(FILE_TYPE_UNKNOWN == 0 && ERROR_SUCCESS == 0);
-
-class WidePath {
-public:
-    ~WidePath() noexcept {
-        AlignedFree(value_);
-    }
-    FileStatus Initialize(const char* path, usize bytes) noexcept {
-        if (!detail::ValidFilePath(path, bytes)) {
-            return {FileCode::InvalidArgument, 0};
-        }
-        // 일반 파일 인터페이스에서 device namespace나 레거시 DOS 장치를 열지 않는다.
-        if (detail::IsWindowsDevicePath(path, bytes)) {
-            return {FileCode::Unsupported, 0};
-        }
-        if (bytes > 0x7fffffffU) {
-            return {FileCode::Overflow, 0};
-        }
-        const int required = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path,
-                                                 static_cast<int>(bytes), nullptr, 0);
-        if (required == 0) {
-            return NativeError(GetLastError());
-        }
-        const usize units = static_cast<usize>(required) + 1;
-        if (units > MaxSize / sizeof(wchar_t)) {
-            return {FileCode::Overflow, 0};
-        }
-        value_ = static_cast<wchar_t*>(AlignedAllocate(units * sizeof(wchar_t), alignof(wchar_t)));
-        if (!value_) {
-            return {FileCode::OutOfMemory, 0};
-        }
-        if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, static_cast<int>(bytes),
-                                value_, required) != required) {
-            return NativeError(GetLastError());
-        }
-        value_[required] = L'\0';
-        return {};
-    }
-    const wchar_t* Value() const noexcept {
-        return value_;
-    }
-
-private:
-    wchar_t* value_ = nullptr;
-};
 
 class WindowsFileHandle final : public FileHandle {
 public:

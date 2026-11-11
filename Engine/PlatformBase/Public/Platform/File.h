@@ -19,7 +19,9 @@ enum class FileCode {
     OutOfMemory,
     Overflow,
     Unsupported,
-    SystemError
+    SystemError,
+    // 비동기 요청이 취소되어 데이터가 유효하지 않다(AsyncReadResult). 동기 API는 반환하지 않는다.
+    Cancelled
 };
 
 struct [[nodiscard]] FileStatus {
