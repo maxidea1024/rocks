@@ -91,7 +91,7 @@ Base → PlatformBase → Core → Task / Localization / Serialization / MetaSch
 |---|---|---|
 | P01 P0 | generic/platform file interface, 물리 file open/read/write/seek/size/delete·wrapper 주입 **부분** | 소유권·close 오류·부분 I/O·EOF·Unicode·권한·symlink·atomic 저장, 실제 Windows/macOS 실행. 구현은 Generic+platform private 경계 유지. |
 | P02 P0 | 디렉터리 생성/삭제/열거·stat·copy/move·timestamp·기본 경로 **후속/확인 필요** | 파일·디렉터리/symlink 의미, recursive 경계·실패 rollback·권한·race/TOCTOU, 정렬 없는 열거와 cancellation, 경로·자원 수명·실 OS. |
-| P03 P1 | flush/truncate/read-at·async I/O·memory mapping·watch·wrapper chain·I/O cache — 비동기 offset 읽기(`Platform/AsyncFile.h`, Windows Native/WorkerPool 검증) **부분**, 나머지 **후속** | 부분 완료·취소·늦은 callback·종료·ordering·rescan/overflow·backpressure·예산과 소유권. 백엔드별 미지원은 명시적 결과. |
+| P03 P1 | flush/truncate/read-at·async I/O·memory mapping·watch·wrapper chain·I/O cache — 비동기 offset 읽기·쓰기와 동기 Flush(`Platform/AsyncFile.h`, Windows Native/WorkerPool 검증) **부분**, 나머지 **후속** | 부분 완료·취소·늦은 callback·종료·ordering·rescan/overflow·backpressure·예산과 소유권. 백엔드별 미지원은 명시적 결과. |
 | P04 P0 | thread/Mutex/CV/event/semaphore·clock **부분** | start/join/timeout/자기 join·동시 wait·shutdown·timeout 음성대조, 재귀 여부, primitive 생성/소멸과 memory ordering. 프로세스 fatal 테스트의 실제 setup 성공을 독립적으로 검증하고 partial stderr 및 timeout 단계를 보존한다. |
 | P05 P1 | atomic/TLS/RW lock·thread name/priority/affinity·CPU·stack 옵션·wait groups **후속/확인 필요** | supported capability, atomic order·ABA·lost wakeup·writer starvation·over-subscription·OS 실패. 동기화 없는 잘못된 사용은 암묵적 성공으로 감추지 않는다. |
 | P06 P1 | process spawn/wait/exit·pipe/IPC·환경·CLI·동적 라이브러리 **후속/부분** | argument quoting, pipe concurrent drain과 bounded output, 제한시간·child cleanup·분리 자손/OS job 한계, 재시도·재진입·Unicode, Windows/macOS와 headless. |

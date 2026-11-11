@@ -41,8 +41,8 @@ bool IsInFlight(const AsyncRequestState& request) noexcept {
     return request.phase == AsyncPhase::Queued || request.phase == AsyncPhase::Running;
 }
 
-// worker는 큐에서 요청을 꺼내 위치 지정 동기 읽기를 수행한다. 취소 표시된 대기 요청은 읽지 않고
-// 취소로 완료한다. 실행 중인 읽기는 OS 호출이 끝날 때까지 취소할 수 없다.
+// worker는 큐에서 요청을 꺼내 위치 지정 동기 읽기·쓰기를 수행한다. 취소 표시된 대기 요청은 읽지
+// 않고 취소로 완료한다. 실행 중인 읽기는 OS 호출이 끝날 때까지 취소할 수 없다.
 void WorkerEntry(void* raw) noexcept {
     auto& context = *static_cast<AsyncContextState*>(raw);
     for (;;) {
@@ -67,9 +67,12 @@ void WorkerEntry(void* raw) noexcept {
             cancelled = request->cancelRequested;
             request->phase = AsyncPhase::Running;
         }
-        AsyncReadResult result{};
+        AsyncIoResult result{};
         if (cancelled) {
             result.status = {FileCode::Cancelled, 0};
+        } else if (request->write) {
+            result.status = AsyncPositionalWrite(request->file->handle, request->offset,
+                                                 request->source, request->bytes, result.bytes);
         } else {
             result.status = AsyncPositionalRead(request->file->handle, request->offset,
                                                 request->destination, request->bytes, result.bytes);
@@ -99,9 +102,9 @@ void StopWorkers(AsyncContextState& context, uint32 started) noexcept {
 
 } // namespace
 
-void CompleteAsyncRequest(AsyncRequestState& request, const AsyncReadResult& result) noexcept {
+void CompleteAsyncRequest(AsyncRequestState& request, const AsyncIoResult& result) noexcept {
     AsyncContextState& context = *request.context;
-    AsyncReadCallback callback = nullptr;
+    AsyncIoCallback callback = nullptr;
     void* callbackContext = nullptr;
     {
         LockGuard lock(context.mutex);
@@ -112,7 +115,7 @@ void CompleteAsyncRequest(AsyncRequestState& request, const AsyncReadResult& res
             }
         }
         if (request.phase == AsyncPhase::Completed || request.phase == AsyncPhase::Idle) {
-            Fatal("AsyncReadRequest completed more than once");
+            Fatal("AsyncIoRequest completed more than once");
         }
         callback = request.callback;
         callbackContext = request.callbackContext;
@@ -153,7 +156,7 @@ AsyncIoContext::~AsyncIoContext() noexcept {
         {
             LockGuard lock(context.mutex);
             if (context.openFiles != 0) {
-                Fatal("AsyncIoContext destroyed while AsyncReadFile objects are open");
+                Fatal("AsyncIoContext destroyed while async files are open");
             }
         }
         if (!Shutdown()) {
@@ -241,66 +244,27 @@ AsyncIoBackend AsyncIoContext::Backend() const noexcept {
     return detail::ContextOf(storage_).backend;
 }
 
-// ---- AsyncReadFile ----
+// ---- 파일 공용 ----
 
-AsyncReadFile::AsyncReadFile() noexcept {
-    static_assert(sizeof(AsyncFileState) <= sizeof(storage_));
-    static_assert(alignof(AsyncFileState) <= 16);
-    ::new (storage_) AsyncFileState{};
-}
+namespace detail {
+namespace {
 
-AsyncReadFile::~AsyncReadFile() noexcept {
-    AsyncFileState& file = detail::FileOf(storage_);
-    if (file.open) {
-        AsyncContextState& context = *file.context;
-        {
-            // 진행 중 요청을 취소하고 OS가 완료를 알릴 때까지 기다린다. 버퍼를 먼저 놓으면 안 된다.
-            LockGuard lock(context.mutex);
-            if (file.pending != 0) {
-                if (context.backend == AsyncIoBackend::Native) {
-                    detail::AsyncNativeCancelFile(file);
-                } else {
-                    for (auto* queued = context.queueHead; queued != nullptr;
-                         queued = queued->nextQueued) {
-                        if (queued->file == &file) {
-                            queued->cancelRequested = true;
-                        }
-                    }
-                }
-            }
-            while (file.pending != 0) {
-                if (context.changed.Wait(context.mutex) == WaitResult::Failed) {
-                    Fatal("AsyncReadFile destruction wait failed");
-                }
-            }
-        }
-        if (!Close()) {
-            Fatal("AsyncReadFile close failed during destruction");
-        }
-    }
-    file.~AsyncFileState();
-}
+// 진행 중 요청을 취소하고 OS가 완료를 알릴 때까지 기다린 뒤 닫는다. 버퍼를 먼저 놓으면 안 된다.
+void DestroyFileState(AsyncFileState& file, const char* closeFailure) noexcept;
+FileStatus CloseFileState(AsyncFileState& file) noexcept;
 
-FileStatus AsyncReadFile::Open(AsyncIoContext& context, const char* path) noexcept {
-    usize bytes = 0;
-    if (path != nullptr) {
-        while (path[bytes] != '\0') {
-            ++bytes;
-        }
-    }
-    return Open(context, path, bytes);
-}
-
-FileStatus AsyncReadFile::Open(AsyncIoContext& contextObject, const char* path,
-                               usize pathBytes) noexcept {
-    AsyncFileState& file = detail::FileOf(storage_);
+FileStatus OpenFileState(AsyncFileState& file, AsyncContextState& context, const char* path,
+                         usize pathBytes, bool write, FileOpenMode mode) noexcept {
     if (file.open) {
         return {FileCode::AlreadyOpen, 0};
     }
-    if (path == nullptr || !detail::ValidFilePath(path, pathBytes)) {
+    if (path == nullptr || !ValidFilePath(path, pathBytes)) {
         return {FileCode::InvalidArgument, 0};
     }
-    AsyncContextState& context = detail::ContextOf(contextObject.storage_);
+    if (write && mode != FileOpenMode::ReadWriteExisting && mode != FileOpenMode::CreateNew &&
+        mode != FileOpenMode::CreateAlways) {
+        return {FileCode::InvalidArgument, 0};
+    }
     {
         // 열린 파일 수를 먼저 예약해 Shutdown과 경합하지 않게 한다.
         LockGuard lock(context.mutex);
@@ -313,9 +277,10 @@ FileStatus AsyncReadFile::Open(AsyncIoContext& contextObject, const char* path,
         LockGuard lock(context.mutex);
         --context.openFiles;
     };
+    const bool overlapped = context.backend == AsyncIoBackend::Native;
     uptr handle = 0;
-    auto opened =
-        detail::AsyncOpenNative(path, pathBytes, context.backend == AsyncIoBackend::Native, handle);
+    auto opened = write ? AsyncOpenWriteNative(path, pathBytes, overlapped, mode, handle)
+                        : AsyncOpenNative(path, pathBytes, overlapped, handle);
     if (!opened) {
         release();
         return opened;
@@ -323,14 +288,16 @@ FileStatus AsyncReadFile::Open(AsyncIoContext& contextObject, const char* path,
     file.context = &context;
     file.handle = handle;
     file.pending = 0;
-    if (context.backend == AsyncIoBackend::Native) {
-        auto attached = detail::AsyncNativeAttach(context, file);
+    file.writable = write;
+    if (overlapped) {
+        auto attached = AsyncNativeAttach(context, file);
         if (!attached) {
-            if (!detail::AsyncCloseNative(handle)) {
-                Fatal("AsyncReadFile open rollback failed");
+            if (!AsyncCloseNative(handle)) {
+                Fatal("Async file open rollback failed");
             }
             file.context = nullptr;
             file.handle = 0;
+            file.writable = false;
             release();
             return attached;
         }
@@ -339,8 +306,7 @@ FileStatus AsyncReadFile::Open(AsyncIoContext& contextObject, const char* path,
     return {};
 }
 
-FileStatus AsyncReadFile::Close() noexcept {
-    AsyncFileState& file = detail::FileOf(storage_);
+FileStatus CloseFileState(AsyncFileState& file) noexcept {
     if (!file.open) {
         return {FileCode::NotOpen, 0};
     }
@@ -356,41 +322,66 @@ FileStatus AsyncReadFile::Close() noexcept {
     const uptr handle = file.handle;
     file.handle = 0;
     file.context = nullptr;
+    file.writable = false;
     // close 실패는 terminal이다. 같은 handle로 재시도하지 않는다.
-    return detail::AsyncCloseNative(handle);
+    return AsyncCloseNative(handle);
 }
 
-bool AsyncReadFile::IsOpen() const noexcept {
-    return detail::FileOf(storage_).open;
+void DestroyFileState(AsyncFileState& file, const char* closeFailure) noexcept {
+    if (file.open) {
+        AsyncContextState& context = *file.context;
+        {
+            LockGuard lock(context.mutex);
+            if (file.pending != 0) {
+                if (context.backend == AsyncIoBackend::Native) {
+                    AsyncNativeCancelFile(file);
+                } else {
+                    for (auto* queued = context.queueHead; queued != nullptr;
+                         queued = queued->nextQueued) {
+                        if (queued->file == &file) {
+                            queued->cancelRequested = true;
+                        }
+                    }
+                }
+            }
+            while (file.pending != 0) {
+                if (context.changed.Wait(context.mutex) == WaitResult::Failed) {
+                    Fatal("Async file destruction wait failed");
+                }
+            }
+        }
+        if (!CloseFileState(file)) {
+            Fatal(closeFailure);
+        }
+    }
+    file.~AsyncFileState();
 }
 
-FileStatus AsyncReadFile::Size(uint64& bytes) const noexcept {
-    const AsyncFileState& file = detail::FileOf(storage_);
+FileStatus SizeFileState(const AsyncFileState& file, uint64& bytes) noexcept {
     if (!file.open) {
         return {FileCode::NotOpen, 0};
     }
-    return detail::AsyncSizeNative(file.handle, bytes);
+    return AsyncSizeNative(file.handle, bytes);
 }
 
-FileStatus AsyncReadFile::SubmitRead(AsyncReadRequest& requestObject, uint64 offset,
-                                     void* destination, usize bytes, AsyncReadCallback callback,
-                                     void* callbackContext) noexcept {
-    AsyncFileState& file = detail::FileOf(storage_);
+FileStatus SubmitFileRequest(AsyncFileState& file, AsyncRequestState& request, uint64 offset,
+                             void* destination, const void* source, usize bytes, bool write,
+                             AsyncIoCallback callback, void* callbackContext) noexcept {
     if (!file.open) {
         return {FileCode::NotOpen, 0};
     }
-    if ((bytes != 0 && destination == nullptr) || bytes > 0xffffffffu ||
+    const void* buffer = write ? source : destination;
+    if ((bytes != 0 && buffer == nullptr) || bytes > 0xffffffffu ||
         offset > static_cast<uint64>(-1) - bytes) {
         return {FileCode::InvalidArgument, 0};
     }
     AsyncContextState& context = *file.context;
-    AsyncRequestState& request = detail::RequestOf(requestObject.storage_);
     {
         LockGuard lock(context.mutex);
         if (context.stopping) {
             return {FileCode::Busy, 0};
         }
-        if (detail::IsInFlight(request)) {
+        if (IsInFlight(request)) {
             return {FileCode::Busy, 0};
         }
         if (request.context != nullptr && request.context != &context) {
@@ -400,8 +391,10 @@ FileStatus AsyncReadFile::SubmitRead(AsyncReadRequest& requestObject, uint64 off
         request.context = &context;
         request.file = &file;
         request.offset = offset;
-        request.destination = destination;
+        request.destination = write ? nullptr : destination;
+        request.source = write ? source : nullptr;
         request.bytes = bytes;
+        request.write = write;
         request.callback = callback;
         request.callbackContext = callbackContext;
         request.result = {};
@@ -426,30 +419,144 @@ FileStatus AsyncReadFile::SubmitRead(AsyncReadRequest& requestObject, uint64 off
         context.changed.NotifyAll();
         return {};
     }
-    detail::AsyncNativeIssue(context, request);
-    bool cancel = false;
+    AsyncNativeIssue(context, request);
     {
         LockGuard lock(context.mutex);
         request.submitting = false;
-        cancel = request.cancelRequested;
-        if (cancel) {
+        if (request.cancelRequested) {
             // 발행 전에 들어온 취소 요청을 이제 OS에 전달한다.
-            detail::AsyncNativeCancel(request);
+            AsyncNativeCancel(request);
         }
     }
     context.changed.NotifyAll();
     return {};
 }
 
-// ---- AsyncReadRequest ----
+usize PathLength(const char* path) noexcept {
+    usize bytes = 0;
+    if (path != nullptr) {
+        while (path[bytes] != '\0') {
+            ++bytes;
+        }
+    }
+    return bytes;
+}
 
-AsyncReadRequest::AsyncReadRequest() noexcept {
+} // namespace
+} // namespace detail
+
+// ---- AsyncReadFile ----
+
+AsyncReadFile::AsyncReadFile() noexcept {
+    static_assert(sizeof(AsyncFileState) <= sizeof(storage_));
+    static_assert(alignof(AsyncFileState) <= 16);
+    ::new (storage_) AsyncFileState{};
+}
+
+AsyncReadFile::~AsyncReadFile() noexcept {
+    detail::DestroyFileState(detail::FileOf(storage_),
+                             "AsyncReadFile close failed during destruction");
+}
+
+FileStatus AsyncReadFile::Open(AsyncIoContext& context, const char* path) noexcept {
+    return Open(context, path, detail::PathLength(path));
+}
+
+FileStatus AsyncReadFile::Open(AsyncIoContext& contextObject, const char* path,
+                               usize pathBytes) noexcept {
+    return detail::OpenFileState(detail::FileOf(storage_),
+                                 detail::ContextOf(contextObject.storage_), path, pathBytes, false,
+                                 FileOpenMode::ReadExisting);
+}
+
+FileStatus AsyncReadFile::Close() noexcept {
+    return detail::CloseFileState(detail::FileOf(storage_));
+}
+
+bool AsyncReadFile::IsOpen() const noexcept {
+    return detail::FileOf(storage_).open;
+}
+
+FileStatus AsyncReadFile::Size(uint64& bytes) const noexcept {
+    return detail::SizeFileState(detail::FileOf(storage_), bytes);
+}
+
+FileStatus AsyncReadFile::SubmitRead(AsyncIoRequest& requestObject, uint64 offset,
+                                     void* destination, usize bytes, AsyncIoCallback callback,
+                                     void* callbackContext) noexcept {
+    return detail::SubmitFileRequest(detail::FileOf(storage_),
+                                     detail::RequestOf(requestObject.storage_), offset, destination,
+                                     nullptr, bytes, false, callback, callbackContext);
+}
+
+// ---- AsyncWriteFile ----
+
+AsyncWriteFile::AsyncWriteFile() noexcept {
+    static_assert(sizeof(AsyncFileState) <= sizeof(storage_));
+    static_assert(alignof(AsyncFileState) <= 16);
+    ::new (storage_) AsyncFileState{};
+}
+
+AsyncWriteFile::~AsyncWriteFile() noexcept {
+    detail::DestroyFileState(detail::FileOf(storage_),
+                             "AsyncWriteFile close failed during destruction");
+}
+
+FileStatus AsyncWriteFile::Open(AsyncIoContext& context, const char* path,
+                                FileOpenMode mode) noexcept {
+    return Open(context, path, detail::PathLength(path), mode);
+}
+
+FileStatus AsyncWriteFile::Open(AsyncIoContext& contextObject, const char* path, usize pathBytes,
+                                FileOpenMode mode) noexcept {
+    return detail::OpenFileState(detail::FileOf(storage_),
+                                 detail::ContextOf(contextObject.storage_), path, pathBytes, true,
+                                 mode);
+}
+
+FileStatus AsyncWriteFile::Close() noexcept {
+    return detail::CloseFileState(detail::FileOf(storage_));
+}
+
+bool AsyncWriteFile::IsOpen() const noexcept {
+    return detail::FileOf(storage_).open;
+}
+
+FileStatus AsyncWriteFile::Size(uint64& bytes) const noexcept {
+    return detail::SizeFileState(detail::FileOf(storage_), bytes);
+}
+
+FileStatus AsyncWriteFile::Flush() noexcept {
+    AsyncFileState& file = detail::FileOf(storage_);
+    if (!file.open) {
+        return {FileCode::NotOpen, 0};
+    }
+    {
+        LockGuard lock(file.context->mutex);
+        if (file.pending != 0) {
+            return {FileCode::Busy, 0};
+        }
+    }
+    return detail::AsyncFlushNative(file.handle);
+}
+
+FileStatus AsyncWriteFile::SubmitWrite(AsyncIoRequest& requestObject, uint64 offset,
+                                       const void* source, usize bytes, AsyncIoCallback callback,
+                                       void* callbackContext) noexcept {
+    return detail::SubmitFileRequest(detail::FileOf(storage_),
+                                     detail::RequestOf(requestObject.storage_), offset, nullptr,
+                                     source, bytes, true, callback, callbackContext);
+}
+
+// ---- AsyncIoRequest ----
+
+AsyncIoRequest::AsyncIoRequest() noexcept {
     static_assert(sizeof(AsyncRequestState) <= sizeof(storage_));
     static_assert(alignof(AsyncRequestState) <= 16);
     ::new (storage_) AsyncRequestState{};
 }
 
-AsyncReadRequest::~AsyncReadRequest() noexcept {
+AsyncIoRequest::~AsyncIoRequest() noexcept {
     AsyncRequestState& request = detail::RequestOf(storage_);
     if (request.context != nullptr) {
         bool inFlight = false;
@@ -460,14 +567,14 @@ AsyncReadRequest::~AsyncReadRequest() noexcept {
         if (inFlight) {
             Cancel();
             if (Wait() != WaitResult::Signaled) {
-                Fatal("AsyncReadRequest destruction wait failed");
+                Fatal("AsyncIoRequest destruction wait failed");
             }
         }
     }
     request.~AsyncRequestState();
 }
 
-bool AsyncReadRequest::IsComplete() const noexcept {
+bool AsyncIoRequest::IsComplete() const noexcept {
     const AsyncRequestState& request = detail::RequestOf(storage_);
     if (request.context == nullptr) {
         return false;
@@ -476,7 +583,7 @@ bool AsyncReadRequest::IsComplete() const noexcept {
     return request.phase == AsyncPhase::Completed;
 }
 
-WaitResult AsyncReadRequest::Wait(uint32 timeoutMs) noexcept {
+WaitResult AsyncIoRequest::Wait(uint32 timeoutMs) noexcept {
     AsyncRequestState& request = detail::RequestOf(storage_);
     if (request.context == nullptr) {
         return WaitResult::Failed;
@@ -496,7 +603,7 @@ WaitResult AsyncReadRequest::Wait(uint32 timeoutMs) noexcept {
     return WaitResult::Signaled;
 }
 
-void AsyncReadRequest::Cancel() noexcept {
+void AsyncIoRequest::Cancel() noexcept {
     AsyncRequestState& request = detail::RequestOf(storage_);
     if (request.context == nullptr) {
         return;
@@ -510,17 +617,17 @@ void AsyncReadRequest::Cancel() noexcept {
     if (context.backend == AsyncIoBackend::Native && !request.submitting) {
         detail::AsyncNativeCancel(request);
     }
-    // WorkerPool의 대기 요청은 worker가 꺼낼 때 취소로 완료한다. 실행 중 읽기는 그대로 끝난다.
+    // WorkerPool의 대기 요청은 worker가 꺼낼 때 취소로 완료한다. 실행 중 I/O는 그대로 끝난다.
 }
 
-AsyncReadResult AsyncReadRequest::Result() const noexcept {
+AsyncIoResult AsyncIoRequest::Result() const noexcept {
     const AsyncRequestState& request = detail::RequestOf(storage_);
     if (request.context == nullptr) {
-        Fatal("AsyncReadRequest::Result called before completion");
+        Fatal("AsyncIoRequest::Result called before completion");
     }
     LockGuard lock(request.context->mutex);
     if (request.phase != AsyncPhase::Completed) {
-        Fatal("AsyncReadRequest::Result called before completion");
+        Fatal("AsyncIoRequest::Result called before completion");
     }
     return request.result;
 }

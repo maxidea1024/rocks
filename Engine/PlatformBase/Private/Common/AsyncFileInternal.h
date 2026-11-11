@@ -24,11 +24,13 @@ struct AsyncRequestState {
     AsyncContextState* context = nullptr;
     AsyncFileState* file = nullptr;
     uint64 offset = 0;
-    void* destination = nullptr;
+    void* destination = nullptr;  // 읽기
+    const void* source = nullptr; // 쓰기
     usize bytes = 0;
-    AsyncReadCallback callback = nullptr;
+    bool write = false;
+    AsyncIoCallback callback = nullptr;
     void* callbackContext = nullptr;
-    AsyncReadResult result{};
+    AsyncIoResult result{};
     AsyncPhase phase = AsyncPhase::Idle;
     bool cancelRequested = false;
     // Native: 제출 스레드가 OS 호출을 끝내기 전에는 완료를 게시하지 않는다. 제출 스레드가 OS 호출
@@ -45,6 +47,7 @@ struct AsyncFileState {
     uptr handle = 0; // Windows HANDLE 또는 POSIX file descriptor
     uint64 pending = 0;
     bool open = false;
+    bool writable = false;
 };
 
 struct AsyncContextState {
@@ -67,7 +70,7 @@ struct AsyncContextState {
 
 // ---- 공용 코드가 제공 ----
 // 완료 스레드에서 호출한다. mutex를 잡지 않은 상태에서 호출하며, 게시 후 callback을 실행한다.
-void CompleteAsyncRequest(AsyncRequestState& request, const AsyncReadResult& result) noexcept;
+void CompleteAsyncRequest(AsyncRequestState& request, const AsyncIoResult& result) noexcept;
 
 // ---- 플랫폼 hook ----
 AsyncIoBackend PlatformDefaultAsyncIoBackend() noexcept;
@@ -75,12 +78,21 @@ AsyncIoBackend PlatformDefaultAsyncIoBackend() noexcept;
 // Unsupported.
 FileStatus AsyncOpenNative(const char* path, usize pathBytes, bool overlapped,
                            uptr& handle) noexcept;
+// 쓰기용으로 연다. mode는 ReadWriteExisting·CreateNew·CreateAlways만 온다(공용 코드가 검사).
+FileStatus AsyncOpenWriteNative(const char* path, usize pathBytes, bool overlapped,
+                                FileOpenMode mode, uptr& handle) noexcept;
 FileStatus AsyncCloseNative(uptr handle) noexcept;
+// 이미 완료된 쓰기를 저장 장치까지 내린다.
+FileStatus AsyncFlushNative(uptr handle) noexcept;
 FileStatus AsyncSizeNative(uptr handle, uint64& bytes) noexcept;
 // WorkerPool용 위치 지정 동기 읽기다. 짧은 읽기·EINTR을 반복하며 EOF에서 멈춘다. 실패해도
 // transferred는 실패 전까지 읽은 byte 수다.
 FileStatus AsyncPositionalRead(uptr handle, uint64 offset, void* destination, usize bytes,
                                usize& transferred) noexcept;
+// WorkerPool용 위치 지정 동기 쓰기다. 짧은 쓰기·EINTR을 반복해 모두 쓰거나 실패한다. 진행 없는
+// 0 byte 쓰기는 NoProgress다. 실패해도 transferred는 실패 전까지 쓴 byte 수다.
+FileStatus AsyncPositionalWrite(uptr handle, uint64 offset, const void* source, usize bytes,
+                                usize& transferred) noexcept;
 // Native backend. 지원하지 않는 플랫폼은 Supported가 false이고 나머지는 호출되지 않는다.
 bool AsyncNativeSupported() noexcept;
 FileStatus AsyncNativeStart(AsyncContextState& context) noexcept;

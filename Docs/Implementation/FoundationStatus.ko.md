@@ -54,7 +54,7 @@
 
 `String`의 `/`와 `/=`는 `Path::Combine`·`Append`에 연결되며 원문을 결합하고 `Result`로 실패를 전달한다. `/=`는 실제 변경이 없거나 capacity가 충분하면 기존 저장소를 재사용하며 입력 별칭을 처리한다. 재할당이 필요한 연산에는 기존 `String`과 할당기의 반환 순서 계약이 적용된다. 정규화·포함 판정은 문자열 연산일 뿐 실제 파일 접근 가능성, 링크 해석이나 보안 경계를 보장하지 않는다.
 
-`Platform/File.h`는 `FileSystem`·`FileHandle` 경계, 물리 Windows/macOS backend와 소유형 `File`을 제공한다. 열기·존재·삭제, read/write, 반복 전송 `ReadExact`·`WriteAll`, seek·size·close와 오류 코드를 포함한다. wrapper는 자체 구현해 주입할 수 있으나 Unreal식 wrapper chain 관리자나 실제 제품 wrapper가 구현됐다는 뜻은 아니다. 단위 테스트는 경로 입력, 짧은 전송·실패, EOF, 잘못된 소유·재진입과 동시성 일부를 다룬다. 파일 stat 전체·디렉터리 생성/열거, 복사·이동, flush·truncate, 비동기 쓰기·mapping·watch, OS close 오류 강제 주입, macOS 실기기와 링크 경로 검증은 후속이다. 비동기 읽기는 `Platform/AsyncFile.h`(Windows IOCP Native·공용 WorkerPool, macOS는 WorkerPool만이며 미빌드)가 담당한다. close 오류는 terminal이며 OS 자원 회수 성공을 보장하지 않는다.
+`Platform/File.h`는 `FileSystem`·`FileHandle` 경계, 물리 Windows/macOS backend와 소유형 `File`을 제공한다. 열기·존재·삭제, read/write, 반복 전송 `ReadExact`·`WriteAll`, seek·size·close와 오류 코드를 포함한다. wrapper는 자체 구현해 주입할 수 있으나 Unreal식 wrapper chain 관리자나 실제 제품 wrapper가 구현됐다는 뜻은 아니다. 단위 테스트는 경로 입력, 짧은 전송·실패, EOF, 잘못된 소유·재진입과 동시성 일부를 다룬다. 파일 stat 전체·디렉터리 생성/열거, 복사·이동, flush·truncate, 비동기 쓰기·mapping·watch, OS close 오류 강제 주입, macOS 실기기와 링크 경로 검증은 후속이다. 비동기 읽기·쓰기는 `Platform/AsyncFile.h`(`AsyncReadFile`·`AsyncWriteFile`·공용 `AsyncIoRequest`, Windows IOCP Native·공용 WorkerPool, macOS는 WorkerPool만이며 미빌드)가 담당한다. close 오류는 terminal이며 OS 자원 회수 성공을 보장하지 않는다.
 
 플랫폼의 단조 시계와 WorkerScheduler는 시간 측정 및 작업 실행 기반이다. 게임·엔진의 가변 틱, 고정 틱, 시간 배율, 틱 그룹과 멀티스레드 틱은 아직 구현하지 않았다. Component의 생성·부착·소유·수명 시스템과 프리팹, 에디터·PIE도 미구현이다. `Templates/Game/Foundation`은 현재 Object/CLASS 예제이며 Component 예제는 실제 시스템 구현 이후 추가한다.
 

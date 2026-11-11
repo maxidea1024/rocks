@@ -7,8 +7,8 @@
 
 // Windows backend다. Native는 FILE_FLAG_OVERLAPPED 핸들과 IO completion port, 전용 완료 스레드를
 // 사용한다. 모든 결과(즉시 실패 포함)는 completion packet으로 완료 스레드에 전달하여 callback 실행
-// 스레드를 하나로 고정한다. WorkerPool은 동기 핸들에 OVERLAPPED offset을 지정한 위치 지정 읽기를
-// 쓴다.
+// 스레드를 하나로 고정한다. WorkerPool은 동기 핸들에 OVERLAPPED offset을 지정한 위치 지정
+// 읽기·쓰기를 쓴다.
 //
 // OVERLAPPED는 요청 레코드 안에 있으며 OS가 completion packet을 큐에 넣고 완료 스레드가 꺼낼 때까지
 // 주소와 수명이 유지되어야 한다. CancelIoEx는 취소를 요청할 뿐이며 완료 packet은 여전히 도착한다.
@@ -45,8 +45,8 @@ HANDLE HandleOf(uptr handle) noexcept {
 }
 
 // 완료 결과를 Rocks 결과로 바꾼다. EOF는 0 byte 성공, 취소는 Cancelled다.
-AsyncReadResult ToResult(DWORD error, DWORD transferred) noexcept {
-    AsyncReadResult result{};
+AsyncIoResult ToResult(DWORD error, DWORD transferred) noexcept {
+    AsyncIoResult result{};
     result.bytes = transferred;
     if (error == ERROR_SUCCESS || error == ERROR_HANDLE_EOF) {
         return result;
@@ -79,7 +79,13 @@ void CompletionEntry(void* raw) noexcept {
         auto* native = reinterpret_cast<NativeRequest*>(overlapped);
         AsyncRequestState& request = *native->owner;
         const DWORD finalError = native->presetError != 0 ? native->presetError : error;
-        CompleteAsyncRequest(request, ToResult(finalError, transferred));
+        AsyncIoResult result = ToResult(finalError, transferred);
+        // 쓰기는 짧은 성공을 허용하지 않는다. overlapped 파일 쓰기는 보통 전부 끝나거나 오류지만,
+        // 일부만 끝난 성공이 오면 실패로 드러낸다.
+        if (request.write && result.status && result.bytes != request.bytes) {
+            result.status = {result.bytes == 0 ? FileCode::NoProgress : FileCode::SystemError, 0};
+        }
+        CompleteAsyncRequest(request, result);
     }
 }
 
@@ -115,6 +121,55 @@ FileStatus AsyncOpenNative(const char* path, usize pathBytes, bool overlapped,
                                           : FileStatus{FileCode::Unsupported, 0};
     }
     handle = reinterpret_cast<uptr>(file);
+    return {};
+}
+
+FileStatus AsyncOpenWriteNative(const char* path, usize pathBytes, bool overlapped,
+                                FileOpenMode mode, uptr& handle) noexcept {
+    DWORD disposition = OPEN_EXISTING;
+    switch (mode) {
+    case FileOpenMode::ReadWriteExisting:
+        break;
+    case FileOpenMode::CreateNew:
+        disposition = CREATE_NEW;
+        break;
+    case FileOpenMode::CreateAlways:
+        disposition = CREATE_ALWAYS;
+        break;
+    default:
+        return {FileCode::InvalidArgument, 0};
+    }
+    WidePath native;
+    auto valid = native.Initialize(path, pathBytes);
+    if (!valid) {
+        return valid;
+    }
+    // 동기 File과 같은 공유 모드다. Size를 위해 읽기 권한도 함께 연다.
+    const DWORD flags = FILE_ATTRIBUTE_NORMAL | (overlapped ? FILE_FLAG_OVERLAPPED : 0);
+    HANDLE file = CreateFileW(native.Value(), GENERIC_READ | GENERIC_WRITE,
+                              FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                              disposition, flags, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        return NativeError(GetLastError());
+    }
+    SetLastError(ERROR_SUCCESS);
+    const DWORD type = GetFileType(file);
+    const DWORD typeError = GetLastError();
+    if (type != FILE_TYPE_DISK) {
+        if (!CloseHandle(file)) {
+            Fatal("AsyncWriteFile open rollback failed");
+        }
+        return typeError != ERROR_SUCCESS ? NativeError(typeError)
+                                          : FileStatus{FileCode::Unsupported, 0};
+    }
+    handle = reinterpret_cast<uptr>(file);
+    return {};
+}
+
+FileStatus AsyncFlushNative(uptr handle) noexcept {
+    if (!FlushFileBuffers(HandleOf(handle))) {
+        return NativeError(GetLastError());
+    }
     return {};
 }
 
@@ -157,6 +212,29 @@ FileStatus AsyncPositionalRead(uptr handle, uint64 offset, void* destination, us
             return {}; // EOF
         }
         transferred += read;
+    }
+    return {};
+}
+
+FileStatus AsyncPositionalWrite(uptr handle, uint64 offset, const void* source, usize bytes,
+                                usize& transferred) noexcept {
+    transferred = 0;
+    const auto* input = static_cast<const unsigned char*>(source);
+    while (transferred < bytes) {
+        const usize remaining = bytes - transferred;
+        const DWORD chunk = remaining > 0x7ffff000u ? 0x7ffff000u : static_cast<DWORD>(remaining);
+        const uint64 position = offset + transferred;
+        OVERLAPPED overlapped{};
+        overlapped.Offset = static_cast<DWORD>(position);
+        overlapped.OffsetHigh = static_cast<DWORD>(position >> 32);
+        DWORD written = 0;
+        if (!WriteFile(HandleOf(handle), input + transferred, chunk, &written, &overlapped)) {
+            return NativeError(GetLastError());
+        }
+        if (written == 0) {
+            return {FileCode::NoProgress, 0};
+        }
+        transferred += written;
     }
     return {};
 }
@@ -207,15 +285,19 @@ void AsyncNativeIssue(AsyncContextState& context, AsyncRequestState& request) no
     native.overlapped.Offset = static_cast<DWORD>(request.offset);
     native.overlapped.OffsetHigh = static_cast<DWORD>(request.offset >> 32);
     if (request.bytes == 0) {
-        // 0 byte 읽기는 OS에 보내지 않고 같은 완료 경로로 성공을 통지한다.
+        // 0 byte 읽기·쓰기는 OS에 보내지 않고 같은 완료 경로로 성공을 통지한다.
         native.presetError = 0;
         if (!PostQueuedCompletionStatus(NativeOf(context).port, 0, 0, &native.overlapped)) {
             Fatal("AsyncReadFile completion packet post failed");
         }
         return;
     }
-    if (ReadFile(HandleOf(request.file->handle), request.destination,
-                 static_cast<DWORD>(request.bytes), nullptr, &native.overlapped)) {
+    const BOOL issued =
+        request.write ? WriteFile(HandleOf(request.file->handle), request.source,
+                                  static_cast<DWORD>(request.bytes), nullptr, &native.overlapped)
+                      : ReadFile(HandleOf(request.file->handle), request.destination,
+                                 static_cast<DWORD>(request.bytes), nullptr, &native.overlapped);
+    if (issued) {
         return; // 동기 완료도 completion packet이 큐에 들어간다.
     }
     const DWORD error = GetLastError();

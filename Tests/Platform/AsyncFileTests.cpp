@@ -307,3 +307,173 @@ TEST(AsyncFile_DestructorsWaitForInFlightRequests) {
         REQUIRE(context.Start(context.Backend(), 2));
     });
 }
+
+// ---- 비동기 쓰기 ----
+namespace {
+
+// 쓰기 테스트용 경로다. 소멸 시 남아 있으면 삭제한다.
+struct TempPath {
+    char path[160]{};
+    usize length = 0;
+
+    bool Make(const char* tag) noexcept {
+        static int counter = 0;
+        const int count = snprintf(path, sizeof(path), "rocks-async-%s-%llu-%d.tmp", tag,
+                                   static_cast<unsigned long long>(MonotonicNanoseconds()),
+                                   __atomic_add_fetch(&counter, 1, __ATOMIC_RELAXED));
+        if (count <= 0 || static_cast<usize>(count) >= sizeof(path)) {
+            return false;
+        }
+        length = static_cast<usize>(count);
+        return true;
+    }
+
+    ~TempPath() noexcept {
+        if (length != 0) {
+            (void)PhysicalFileSystem().Delete(path, length);
+        }
+    }
+};
+
+// 같은 context에서 파일 전체를 읽어 확인한다.
+bool ReadBack(AsyncIoContext& context, const TempPath& target, uint8* buffer, usize capacity,
+              usize& bytes) noexcept {
+    AsyncReadFile reader;
+    if (!reader.Open(context, target.path, target.length)) {
+        return false;
+    }
+    AsyncIoRequest request;
+    if (!reader.SubmitRead(request, 0, buffer, capacity) ||
+        request.Wait(30000) != WaitResult::Signaled || !request.Result().status) {
+        return false;
+    }
+    bytes = request.Result().bytes;
+    return static_cast<bool>(reader.Close());
+}
+
+} // namespace
+
+TEST(AsyncFile_ConcurrentWritesReadBackExactly) {
+    ForEachBackend([&](AsyncIoContext& context) {
+        TempPath target;
+        REQUIRE(target.Make("write"));
+        constexpr int Count = 8;
+        constexpr usize Chunk = 64 * 1024;
+        static uint8 source[Count * Chunk];
+        for (usize index = 0; index < sizeof(source); ++index) {
+            source[index] = PatternByte(index);
+        }
+        AsyncWriteFile file;
+        REQUIRE(file.Open(context, target.path, target.length, FileOpenMode::CreateNew));
+        AsyncIoRequest requests[Count];
+        CallbackLog log;
+        // 역순으로 제출해도 각 요청은 자기 offset에 쓴다.
+        for (int index = Count - 1; index >= 0; --index) {
+            const usize offset = static_cast<usize>(index) * Chunk;
+            REQUIRE(file.SubmitWrite(requests[index], offset, source + offset, Chunk,
+                                     CountingCallback, &log));
+        }
+        bool allWritten = true;
+        for (AsyncIoRequest& request : requests) {
+            REQUIRE(request.Wait(30000) == WaitResult::Signaled);
+            const AsyncIoResult result = request.Result();
+            allWritten = allWritten && result.status && result.bytes == Chunk;
+        }
+        CHECK(allWritten);
+        CHECK(WaitForCallbacks(log, Count));
+        CHECK(file.Flush());
+        uint64 size = 0;
+        REQUIRE(file.Size(size));
+        CHECK(size == sizeof(source));
+        CHECK(file.Close());
+        static uint8 readBack[Count * Chunk + 16];
+        usize bytes = 0;
+        REQUIRE(ReadBack(context, target, readBack, sizeof(readBack), bytes));
+        CHECK(bytes == sizeof(source) && MatchesPattern(readBack, 0, bytes));
+    });
+}
+
+TEST(AsyncFile_WriteOpenModesAndExtension) {
+    ForEachBackend([&](AsyncIoContext& context) {
+        TempPath target;
+        REQUIRE(target.Make("modes"));
+        AsyncWriteFile file;
+        // 읽기 전용 모드는 쓰기 파일에 쓸 수 없다. 없는 파일을 기존 모드로 열면 NotFound다.
+        CHECK(file.Open(context, target.path, target.length, FileOpenMode::ReadExisting).code ==
+              FileCode::InvalidArgument);
+        CHECK(
+            file.Open(context, target.path, target.length, FileOpenMode::ReadWriteExisting).code ==
+            FileCode::NotFound);
+        REQUIRE(file.Open(context, target.path, target.length, FileOpenMode::CreateNew));
+        // 파일 끝 너머에 쓰면 늘어나고 사이는 0이다.
+        const uint8 tail[4] = {1, 2, 3, 4};
+        AsyncIoRequest request;
+        REQUIRE(file.SubmitWrite(request, 100, tail, sizeof(tail)));
+        REQUIRE(request.Wait(30000) == WaitResult::Signaled);
+        CHECK(request.Result().status && request.Result().bytes == 4);
+        // 0 byte 쓰기는 성공이며 크기를 바꾸지 않는다.
+        REQUIRE(file.SubmitWrite(request, 500, nullptr, 0));
+        REQUIRE(request.Wait(30000) == WaitResult::Signaled);
+        CHECK(request.Result().status && request.Result().bytes == 0);
+        uint64 size = 0;
+        REQUIRE(file.Size(size));
+        CHECK(size == 104);
+        // 잘못된 제출은 요청을 바꾸지 않는다.
+        CHECK(file.SubmitWrite(request, 0, nullptr, 1).code == FileCode::InvalidArgument);
+        CHECK(file.SubmitWrite(request, ~0ull, tail, 4).code == FileCode::InvalidArgument);
+        CHECK(file.Close());
+        CHECK(file.Flush().code == FileCode::NotOpen);
+        uint8 buffer[128]{};
+        usize bytes = 0;
+        REQUIRE(ReadBack(context, target, buffer, sizeof(buffer), bytes));
+        bool zeros = true;
+        for (usize index = 0; index < 100; ++index) {
+            zeros = zeros && buffer[index] == 0;
+        }
+        CHECK(bytes == 104 && zeros && buffer[100] == 1 && buffer[103] == 4);
+
+        // 이미 있으면 CreateNew는 AlreadyExists, ReadWriteExisting은 내용을 유지하며 덮어쓴다.
+        CHECK(file.Open(context, target.path, target.length, FileOpenMode::CreateNew).code ==
+              FileCode::AlreadyExists);
+        REQUIRE(file.Open(context, target.path, target.length, FileOpenMode::ReadWriteExisting));
+        const uint8 patch[2] = {9, 9};
+        REQUIRE(file.SubmitWrite(request, 101, patch, sizeof(patch)));
+        REQUIRE(request.Wait(30000) == WaitResult::Signaled);
+        CHECK(request.Result().status);
+        CHECK(file.Close());
+        REQUIRE(ReadBack(context, target, buffer, sizeof(buffer), bytes));
+        CHECK(bytes == 104 && buffer[100] == 1 && buffer[101] == 9 && buffer[102] == 9 &&
+              buffer[103] == 4);
+
+        // CreateAlways는 기존 내용을 비운다.
+        REQUIRE(file.Open(context, target.path, target.length, FileOpenMode::CreateAlways));
+        REQUIRE(file.Size(size));
+        CHECK(size == 0);
+        CHECK(file.Close());
+    });
+}
+
+TEST(AsyncFile_WriteDestructorsWaitForInFlightWrites) {
+    ForEachBackend([&](AsyncIoContext& context) {
+        TempPath target;
+        REQUIRE(target.Make("dtor"));
+        constexpr usize Bytes = 4 * 1024 * 1024;
+        static uint8 source[Bytes];
+        for (usize index = 0; index < Bytes; index += 4096) {
+            source[index] = static_cast<uint8>(index >> 12);
+        }
+        CallbackLog log;
+        {
+            AsyncWriteFile file;
+            REQUIRE(file.Open(context, target.path, target.length, FileOpenMode::CreateNew));
+            AsyncIoRequest first;
+            AsyncIoRequest second;
+            REQUIRE(file.SubmitWrite(first, 0, source, Bytes, CountingCallback, &log));
+            REQUIRE(file.SubmitWrite(second, Bytes, source, Bytes, CountingCallback, &log));
+            // 기다리지 않고 블록을 벗어난다. 요청 소멸자(second, first 순)가 취소 후 완료를
+            // 기다리고 그 뒤 파일 소멸자가 닫는다. 각 요청은 완료 또는 취소로 정확히 한 번
+            // 통지된다.
+        }
+        CHECK(WaitForCallbacks(log, 2));
+    });
+}
