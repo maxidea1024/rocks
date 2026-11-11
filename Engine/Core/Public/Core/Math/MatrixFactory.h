@@ -149,12 +149,16 @@ Result<Matrix4<T>> TryMakeOrthographic(T width, T height, T nearDistance, T farD
 // 투영 행렬의 near 평면을 view 공간 평면으로 바꾼 oblique clip 투영이다(UE ClipProjection 대응,
 // Lengyel의 oblique near-plane 방법). planeNormal·planeDistance는 view 공간에서
 // Dot(normal, p) = distance를 만족하는 평면이고, 카메라는 평면의 음수 쪽(보이는 쪽은 양수)에
-// 있어야 한다. depth는 projection을 만들 때 쓴 DepthRange와 같아야 한다(행렬만으로는 구분할 수
-// 없으므로 기본값 없이 명시한다). 원근 투영을 대상으로 검증했다.
+// 있어야 한다. depth는 projection을 만들 때 쓴 DepthRange와 같아야 하며 기본값 없이 명시한다.
+// projection은 Rocks view 공간(+X 전방)의 원근 투영이어야 한다.
 // - Standard: near(z/w = 0)를 평면으로 바꾸고 far 평면(z = w)이 반대쪽 frustum 모서리를 지나게
-// 한다.
+//   한다.
 // - Reversed: near(z/w = 1, 즉 w - z = 0)를 평면으로 바꾸고 far 평면(z = 0)이 모서리를 지나게 한다.
-// 실패: projection 비유한·역행렬 없음, 평면 비유한·영 법선, 카메라가 평면 위/양수 쪽.
+// 실패(InvalidArgument): projection 비유한·역행렬 없음, 평면 비유한·영 법선, 카메라가 평면 위/양수
+// 쪽, 평면이 반대쪽 frustum 모서리보다 멀어 보이는 영역이 없음(far 평면 너머 평면), depth와
+// 행렬의 깊이 계수 부호 불일치(Standard는 view 깊이 계수 > 0, Reversed는 <= 0).
+// 실패(Unsupported): 직교 등 w가 view 깊이에 의존하지 않는 투영(이 방법으로는 일부 평면에서 잘못
+// 자른다).
 template <typename T>
 Result<Matrix4<T>> TryMakeObliqueClipProjection(const Matrix4<T>& projection,
                                                 const Vector3<T>& planeNormal, T planeDistance,
@@ -170,20 +174,32 @@ Result<Matrix4<T>> TryMakeObliqueClipProjection(const Matrix4<T>& projection,
     if (!(clipPlane.w < static_cast<T>(0))) {
         return Result<Matrix4<T>>::Failure(ErrorCode::InvalidArgument);
     }
+    const T zero = static_cast<T>(0);
+    if (projection.At(3, 0) == zero && projection.At(3, 1) == zero && projection.At(3, 2) == zero) {
+        return Result<Matrix4<T>>::Failure(ErrorCode::Unsupported);
+    }
+    // Rocks 원근 투영의 clip z는 view 깊이(x)에 대해 Standard면 증가(계수 > 0), Reversed면
+    // 감소하거나 무한 원거리에서 상수(계수 <= 0)다. 잘못된 depth를 넘기면 보이는 쪽이 뒤집힌 행렬이
+    // 되므로 거부한다.
+    const bool reversed = depth == DepthRange::Reversed;
+    if (reversed ? !(projection.At(2, 0) <= zero) : !(projection.At(2, 0) > zero)) {
+        return Result<Matrix4<T>>::Failure(ErrorCode::InvalidArgument);
+    }
     auto inverse = projection.TryInverse();
     if (!inverse) {
         return Result<Matrix4<T>>::Failure(inverse.Error());
     }
     // clip 공간의 반대쪽 frustum 모서리 q = M⁻¹ (sgn(c'.x), sgn(c'.y), far z, 1).
     // far z는 Standard에서 1, Reversed에서 0이다.
-    const bool reversed = depth == DepthRange::Reversed;
     const Matrix4<T> inverseTranspose = inverse.Value().Transposed();
     const Vector4<T> clipSpacePlane = inverseTranspose * clipPlane;
     const Vector4<T> corner(math::Sign(clipSpacePlane.x), math::Sign(clipSpacePlane.y),
                             reversed ? static_cast<T>(0) : static_cast<T>(1), static_cast<T>(1));
     const Vector4<T> q = inverse.Value() * corner;
+    // 반대쪽 모서리가 평면의 보이는 쪽(양수)에 있어야 새 frustum이 비지 않는다. 평면이 far 평면
+    // 너머에 있으면 음수가 되어 보이는 쪽이 뒤집힌 행렬이 나오므로 거부한다.
     const T denominator = Dot(clipPlane, q);
-    if (!(math::Abs(denominator) > static_cast<T>(0))) {
+    if (!(denominator > zero)) {
         return Result<Matrix4<T>>::Failure(ErrorCode::InvalidArgument);
     }
     // a = (row4 · q) / (c · q).
@@ -221,7 +237,14 @@ Result<Matrix4<T>> TryMakeLookTo(const Vector3<T>& eye, const Vector3<T>& forwar
         return Result<Matrix4<T>>::Failure(ErrorCode::InvalidArgument);
     }
     // 두 단위 벡터의 외적 길이는 sin이다.
-    auto axisY = Cross(unitUp.Value(), axisX.Value()).TryNormalize(LookToMinimumSine<T>);
+    auto roughY = Cross(unitUp.Value(), axisX.Value()).TryNormalize(LookToMinimumSine<T>);
+    if (!roughY) {
+        return Result<Matrix4<T>>::Failure(ErrorCode::InvalidArgument);
+    }
+    // 거의 평행한 입력에서 외적의 반올림 오차(약 eps / sin)가 X 방향 성분으로 남으므로 Gram-Schmidt
+    // 한 번으로 X에 직교화한다.
+    auto axisY =
+        (roughY.Value() - axisX.Value() * Dot(axisX.Value(), roughY.Value())).TryNormalize();
     if (!axisY) {
         return Result<Matrix4<T>>::Failure(ErrorCode::InvalidArgument);
     }

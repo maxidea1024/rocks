@@ -289,3 +289,9 @@ Windows x64(clang-cl 21.1.6) 결과:
 - 리뷰어 재현 프로그램(도형 20개, 수학 probe)을 수정된 소스로 다시 실행해 실패 0을 확인했다.
 
 C# self-test는 이번에 다시 실행하지 않았다. 직전 실행에서 IdentityGit 4건이 PowerShell 7(`pwsh`) 미설치로 실패한 상태이며 환경 문제로 분류했다. macOS·iOS·Android 빌드·실행은 수행하지 않았다.
+
+### 수정분 재검토와 후속 추가(같은 날)
+
+수정분을 별도 subagent가 다시 검토해 회귀 1건(회전된 삼각형의 공면 선분이 t = 1 Hit), 테스트 공백 1건, `AngularDistance`의 π 초과, 기존 문제 4건을 찾았고 모두 수정했다(내용은 [수학 구현](Math.ko.md) 5절). 같은 날 URI 상대 참조 해석, `SharedRef`, `Tuple`(구조적 바인딩)을 추가했다([Core 범용 유틸리티](CoreUtilities.ko.md)).
+
+마지막 소스 기준 Windows x64(clang-cl 21.1.6) 결과: Foundation Debug native 639건·harness 85건(`shared-ref-from-empty` 포함), ASan native 639건(AddressSanitizer 오류 0), Release native 639건, policy·format 통과. self-test는 65건 중 IdentityGit 4건만 `pwsh` 미설치로 실패했다. ASan harness, macOS·iOS·Android(libc++ 포함) 빌드·실행은 수행하지 않았다.

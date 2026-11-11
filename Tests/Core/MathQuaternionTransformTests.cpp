@@ -273,4 +273,37 @@ TEST(Quaternion_SlerpPropagatesNonFiniteInput) {
     CHECK(Slerp(a, a, 0.5f).IsNormalized(1.0e-6f));
 }
 
+TEST(Quaternion_AngularDistanceStaysWithinPi) {
+    // 재검토 재현 입력: atan2 식이 pi를 1 ulp 넘었다.
+    const Quat a(-0x1.2723a6p-1f, -0x1.81c81ap-5f, -0x1.65e428p-1f, 0x1.aeabb8p-2f);
+    const Quat b(-0x1.3f7cecp-1f, 0x1.b126fcp-2f, 0x1.3cdc2ep-1f, 0x1.c3f1f4p-3f);
+    CHECK(AngularDistance(a, b) <= math::Pi<float>);
+    MathRandom random(0xa11a5ull ^ CurrentSeed());
+    for (int index = 0; index < 20000; ++index) {
+        auto first = Quatd(random.Range(-1.0, 1.0), random.Range(-1.0, 1.0),
+                           random.Range(-1.0, 1.0), random.Range(-1.0, 1.0))
+                         .TryNormalize();
+        auto second = Quatd(random.Range(-1.0, 1.0), random.Range(-1.0, 1.0),
+                            random.Range(-1.0, 1.0), random.Range(-1.0, 1.0))
+                          .TryNormalize();
+        if (!first || !second) {
+            continue;
+        }
+        // 거의 직교(각 ≈ pi)인 쌍을 만든다.
+        const Quatd p = first.Value();
+        const double along = Dot(p, second.Value());
+        auto orthogonal = Quatd(second.Value().x - p.x * along, second.Value().y - p.y * along,
+                                second.Value().z - p.z * along, second.Value().w - p.w * along)
+                              .TryNormalize();
+        if (!orthogonal) {
+            continue;
+        }
+        const double distance = AngularDistance(p, orthogonal.Value());
+        CHECK(distance >= 0.0 && distance <= math::Pi<double>);
+        const float single = AngularDistance(Quat(p), Quat(orthogonal.Value()));
+        CHECK(single >= 0.0f && single <= math::Pi<float>);
+    }
+    CHECK(math::IsNaN(AngularDistance(Quat(__builtin_nanf(""), 0.0f, 0.0f, 1.0f), a)));
+}
+
 } // namespace rocks::test

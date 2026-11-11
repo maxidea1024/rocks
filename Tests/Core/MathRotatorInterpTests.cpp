@@ -98,6 +98,23 @@ TEST(MathInterp_GridSnapWrapAndDeltaAngle) {
     CHECK(Near(math::FindDeltaAngleRadians(-3.0, 3.0), 6.0 - 2.0 * math::Pi<double>, 1.0e-12));
 }
 
+TEST(Rotator_FromQuaternionHalfOpenRegressions) {
+    // 재검토 재현 입력: 수정 전에는 roll·yaw가 -pi였다(정규화 전 비단위 입력 포함).
+    auto roll = Rotator<double>::TryFromQuaternion(Quatd(-1.0, -1.0, -0.5, 0.5));
+    REQUIRE(roll);
+    CHECK(roll.Value().roll > -math::Pi<double> && roll.Value().yaw > -math::Pi<double>);
+    auto gimbal = Rotator<double>::TryFromQuaternion(Quatd(-1.0, -0.0, -1.0, -0.0));
+    REQUIRE(gimbal);
+    CHECK(gimbal.Value().yaw > -math::Pi<double> && gimbal.Value().roll > -math::Pi<double>);
+    auto single =
+        Rotator<float>::TryFromQuaternion(Quat(-1.0f, -1.0f, 0x1.6a09e6p-1f, -0x1.6a09e6p-1f));
+    REQUIRE(single);
+    CHECK(single.Value().roll > -math::Pi<float> && single.Value().yaw > -math::Pi<float>);
+    // 같은 회전을 유지한다.
+    CHECK(AngularDistance(roll.Value().ToQuaternion(),
+                          Quatd(-1.0, -1.0, -0.5, 0.5).TryNormalize().Value()) < 1.0e-12);
+}
+
 TEST(Rotator_FromQuaternionUsesHalfOpenRange) {
     // yaw = ±pi는 (-pi, pi] 구간의 +pi로 나온다(atan2(-0, -1) = -pi 보정).
     const Quatd turns[] = {Quatd(0.0, 0.0, 1.0, 0.0), Quatd(0.0, 0.0, -1.0, 0.0),
@@ -123,6 +140,10 @@ TEST(Interp_PropagatesNaNInsteadOfReturningTarget) {
     CHECK(math::IsNaN(math::InterpConstantTo(0.0, nan, 1.0, 1.0)));
     CHECK(math::IsNaN(math::InterpConstantTo(0.0, -nan, 1.0, 1.0)));
     CHECK(math::IsNaN(math::InterpConstantTo(nan, 1.0, 1.0, 1.0)));
+    // 같은 무한대는 이미 도달한 상태다(차가 NaN이어도 NaN으로 바꾸지 않는다).
+    const double infinity = __builtin_huge_val();
+    CHECK(math::InterpConstantTo(infinity, infinity, 1.0, 1.0) == infinity);
+    CHECK(math::InterpConstantTo(-infinity, -infinity, 1.0, 1.0) == -infinity);
     // 유효 입력의 기존 의미는 유지된다.
     CHECK(math::InterpTo(0.0, 1.0, 0.1, 0.0) == 1.0);
     CHECK(math::InterpConstantTo(0.0, 1.0, 1.0, 5.0) == 1.0);

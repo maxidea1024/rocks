@@ -1972,3 +1972,61 @@ TEST(IntersectionReviewBoxExpandKeepsNaN) {
     REQUIRE(valid.IsValid());
     CHECK(valid.min == Vec3d(0.0, -2.0, 0.0) && valid.max == Vec3d(1.0, 0.0, 3.0));
 }
+
+TEST(IntersectionRereviewTriangleStartContact) {
+    // 재검토 재현 입력 1(float): 회전된 삼각형 위의 공면 segment. 수정 전에는 t = 1 Hit였다.
+    const Triangle<float> rotated(Vec3(0x1.f4b976p-1f, -0x1.2c7d54p-1f, 0x1.1041a8p-4f),
+                                  Vec3(0x1.8450e6p-1f, 0x1.19a924p-2f, 0x1.d64ae2p-4f),
+                                  Vec3(-0x1.749292p-2f, -0x1.1e5e02p-1f, 0x1.dd9ba6p-2f));
+    const Vec3 onA(0x1.66850ep-1f, 0x1.a4a22cp-3f, 0x1.11904cp-3f);
+    const Vec3 onB(-0x1.ea15ep-3f, -0x1.fd4ec4p-2f, 0x1.b6479cp-2f);
+    REQUIRE(detail::PointOnTriangle(rotated, onA) && detail::PointOnTriangle(rotated, onB));
+    // 시작점이 삼각형 위면 방향과 무관하게 t = 0 접촉이다(0 길이 segment와 같은 규칙).
+    const SegmentHit<float> forward = SegmentCast(Segment<float>(onA, onB), rotated);
+    REQUIRE(forward.IsHit());
+    CHECK(forward.t == 0.0f && forward.point == onA);
+    const SegmentHit<float> backward = SegmentCast(Segment<float>(onB, onA), rotated);
+    REQUIRE(backward.IsHit());
+    CHECK(backward.t == 0.0f && backward.point == onB);
+
+    // 재검토 재현 입력 4(float): 시작점이 회전된 삼각형 위인데 scaledT가 음수로 반올림되어 놓쳤다.
+    const Triangle<float> small(Vec3(-0x1.eb09bep-4f, -0x1.db5ap-14f, 0x1.b50922p-4f),
+                                Vec3(0x1.110528p-6f, -0x1.d4c564p-8f, 0x1.8bc744p-6f),
+                                Vec3(-0x1.76d1c2p-5f, -0x1.3a6e08p-4f, 0x1.5513bap-4f));
+    const Vec3 start(-0x1.6c046cp-5f, -0x1.01b4e6p-4f, 0x1.41139ap-4f);
+    const Vec3 end(-0x1.8a5c6p-6f, -0x1.9acbd4p-5f, 0x1.124bc6p-4f);
+    REQUIRE(detail::PointOnTriangle(small, start));
+    const SegmentHit<float> fromStart = SegmentCast(Segment<float>(start, end), small);
+    REQUIRE(fromStart.IsHit());
+    CHECK(fromStart.t == 0.0f && fromStart.point == start);
+    CHECK(SegmentCast(Segment<float>(end, start), small).IsHit());
+    // Raycast도 같은 시작 접촉 규칙이다.
+    auto direction = (end - start).TryNormalize();
+    REQUIRE(direction);
+    const RayHit<float> ray = Raycast(Ray<float>(start, direction.Value()), small);
+    REQUIRE(ray.IsHit());
+    CHECK(ray.distance == 0.0f && !ray.startedInside);
+    const RayHit<float> away = Raycast(Ray<float>(start, -direction.Value()), small);
+    REQUIRE(away.IsHit());
+    CHECK(away.distance == 0.0f);
+    // 시작 접촉의 normal은 진행 방향의 반대쪽 면이다.
+    CHECK(Dot(ray.normal, direction.Value()) <= 0.0f);
+    CHECK(Dot(away.normal, -direction.Value()) <= 0.0f);
+
+    // 축 정렬 삼각형: 평면 위 시작점이 삼각형 밖이면 공면 ray는 여전히 Miss다.
+    const Triangle<double> flat(Vec3d(0.0, 0.0, 0.0), Vec3d(1.0, 0.0, 0.0), Vec3d(0.0, 1.0, 0.0));
+    CHECK(Raycast(Ray<double>(Vec3d(-1.0, 0.25, 0.0), Vec3d::Forward()), flat).result ==
+          QueryResult::Miss);
+    // 삼각형 위에서 공면으로 출발하면 거리 0 Hit, normal은 앞면이다.
+    const RayHit<double> coplanar =
+        Raycast(Ray<double>(Vec3d(0.25, 0.25, 0.0), Vec3d::Forward()), flat);
+    REQUIRE(coplanar.IsHit());
+    CHECK(coplanar.distance == 0.0 && coplanar.normal == Vec3d::Up());
+    // FrontOnly는 앞면 진입일 때만 시작 접촉을 Hit로 본다.
+    CHECK(Raycast(Ray<double>(Vec3d(0.25, 0.25, 0.0), Vec3d::Down()), flat,
+                  detail::GeometryInfinity<double>(), TriangleSides::FrontOnly)
+              .IsHit());
+    CHECK(!Raycast(Ray<double>(Vec3d(0.25, 0.25, 0.0), Vec3d::Up()), flat,
+                   detail::GeometryInfinity<double>(), TriangleSides::FrontOnly)
+               .IsHit());
+}

@@ -422,6 +422,9 @@ template <typename T>
     requires IsFloatingPointV<T>
 T InterpConstantTo(T current, T target, T deltaSeconds, T speed) noexcept {
     ROCKS_ASSERT(deltaSeconds >= static_cast<T>(0) && speed >= static_cast<T>(0));
+    if (current == target) {
+        return target; // 같은 무한대끼리는 차가 NaN이므로 먼저 처리한다.
+    }
     const T step = deltaSeconds * speed;
     const T distance = target - current;
     if (IsNaN(distance)) {

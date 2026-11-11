@@ -299,7 +299,9 @@ T AngularDistance(const Quaternion<T>& a, const Quaternion<T>& b) noexcept {
     const Quaternion<T> difference(a.x - sign * b.x, a.y - sign * b.y, a.z - sign * b.z,
                                    a.w - sign * b.w);
     const Quaternion<T> sum(a.x + sign * b.x, a.y + sign * b.y, a.z + sign * b.z, a.w + sign * b.w);
-    return static_cast<T>(4) * math::Atan2(difference.Length(), sum.Length());
+    // 반올림으로 pi를 1–4 ulp 넘을 수 있어 [0, pi]로 자른다(NaN은 그대로 전파).
+    return math::MinPropagateNaN(static_cast<T>(4) * math::Atan2(difference.Length(), sum.Length()),
+                                 math::Pi<T>);
 }
 
 // 단위 quaternion 사이의 최단 경로 구면 보간이다. t=0이면 a, t=1이면 b와 같은 회전을 반환하며

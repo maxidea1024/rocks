@@ -575,7 +575,8 @@ CastResult<T> CastBox(const Vector3<T>& origin, const Vector3<T>& delta, T tMax,
 // Möller–Trumbore 판정이다. 무게중심 좌표를 det로 나누기 전에 [0, det] 범위로 비교하여 나눗셈
 // 반올림이 경계 판정을 바꾸지 않게 한다. det = -Dot(delta, 앞면 normal)이므로 det > 0이면 앞면에서
 // 들어온다. 경계(변·꼭짓점) 위 hit은 포함하지만 반올림 때문에 변을 공유하는 두 삼각형이 모두 Miss일
-// 수 있다 (watertight 판정은 보장하지 않는다). 퇴화 삼각형과 det == 0(평행·공면)은 Miss다. det가
+// 수 있다 (watertight 판정은 보장하지 않는다). origin이 삼각형 위(정확 판정)면 방향과 무관하게 거리
+// 0 Hit다(FrontOnly는 앞면 진입일 때만). 그 밖의 퇴화 삼각형과 det == 0(평행·공면)은 Miss다. det가
 // 정확히 0이 되지 않는 회전된 공면 ray는 반올림에 따라 Hit일 수 있다.
 template <typename T>
 CastResult<T> CastTriangle(const Vector3<T>& origin, const Vector3<T>& delta, T tMax,
@@ -590,11 +591,28 @@ CastResult<T> CastTriangle(const Vector3<T>& origin, const Vector3<T>& delta, T 
 
     const Vector3<T> p = Cross(delta, edge2);
     T det = Dot(edge1, p);
+    const bool frontFace = det > zero;
+
+    // 시작 접촉: origin이 삼각형 위(평면 위 정확 판정, 경계 포함)면 닫힌 집합 규칙대로 방향과
+    // 무관하게 거리 0 Hit다(평면 시작과 같다). 회전된 삼각형에서는 아래 scaledT가 반올림으로 작은
+    // 음수가 되어 이 접촉을 놓칠 수 있으므로 먼저 판정한다. 평면 판정이 0이 아니면 추가 비용은 내적
+    // 하나다.
+    if (Dot(faceNormal, origin - triangle.a) == zero && PointOnTriangle(triangle, origin)) {
+        if (sides == TriangleSides::FrontOnly && !frontFace) {
+            return {};
+        }
+        auto unitNormal = faceNormal.TryNormalize();
+        if (!unitNormal) {
+            return {};
+        }
+        // 공면(det == 0)이면 앞면 normal 그대로다.
+        const Vector3<T> normal = det < zero ? -unitNormal.Value() : unitNormal.Value();
+        return CastHit(zero, origin, normal);
+    }
+
     if (det == zero) {
         return {};
     }
-
-    const bool frontFace = det > zero;
     if (sides == TriangleSides::FrontOnly && !frontFace) {
         return {};
     }
@@ -1006,9 +1024,10 @@ SegmentHit<T> SegmentCast(const Segment<T>& segment, const Box<T>& box) noexcept
         detail::CastBox(segment.start, segment.Delta(), static_cast<T>(1), box.min, box.max));
 }
 
-// 0 길이 segment는 점이 삼각형 위(평면 위 정확 판정, 경계 포함)이면 t = 0 Hit이며 normal은 앞면
-// normal이다. end가 삼각형 위(같은 정확 판정)인데 반올림한 t가 1을 넘어 놓치면 t = 1 Hit로
-// 보정한다(끝점 접촉 보존, 공면 segment는 Raycast와 같이 Miss). UE SegmentTriangleIntersection과
+// start가 삼각형 위(평면 위 정확 판정, 경계 포함)면 방향과 무관하게 t = 0 Hit다(0 길이·공면
+// segment 포함, normal은 Raycast 규칙). end가 삼각형 위(같은 정확 판정)인데 반올림한 t가 1을 넘어
+// 놓치면 t = 1 Hit로 보정한다(끝점 접촉 보존). start가 삼각형 밖인 공면 segment는 Raycast와 같이
+// Miss다. UE SegmentTriangleIntersection과
 // 달리 평면 매개변수에 숨은 허용 오차가 없다.
 template <typename T>
 SegmentHit<T> SegmentCast(const Segment<T>& segment, const Triangle<T>& triangle,
@@ -1037,18 +1056,20 @@ SegmentHit<T> SegmentCast(const Segment<T>& segment, const Triangle<T>& triangle
         return detail::ToSegmentHit(cast);
     }
 
-    // CastTriangle의 det = -Dot(delta, faceNormal)이므로 approach < 0이 앞면 진입이다.
+    // end는 평면 위(정확 판정)이므로 들어오는 면은 start가 있는 쪽이다. 회전된 삼각형에서는
+    // Dot(delta, faceNormal)이 반올림으로 0이 아닐 수 있어 같은 정확 판정으로 start 쪽을 구한다.
+    // start도 평면 위면 공면 segment이며 start가 삼각형 밖이므로(안이면 위에서 t = 0 Hit) Miss다.
     const T zero = static_cast<T>(0);
     const Vector3<T> faceNormal = Cross(triangle.b - triangle.a, triangle.c - triangle.a);
-    const T approach = Dot(delta, faceNormal);
-    if (approach == zero || (sides == TriangleSides::FrontOnly && approach > zero)) {
+    const T startSide = Dot(faceNormal, segment.start - triangle.a);
+    if (startSide == zero || (sides == TriangleSides::FrontOnly && startSide < zero)) {
         return {};
     }
     auto unitNormal = faceNormal.TryNormalize();
     if (!unitNormal) {
         return {};
     }
-    const Vector3<T> normal = approach < zero ? unitNormal.Value() : -unitNormal.Value();
+    const Vector3<T> normal = startSide > zero ? unitNormal.Value() : -unitNormal.Value();
     return detail::ToSegmentHit(detail::CastHit(one, segment.end, normal));
 }
 
@@ -1325,12 +1346,13 @@ Result<Vector3<T>> TryClosestPoint(const OrientedBox<T>& box, const Vector3<T>& 
         return Result<Vector3<T>>::Failure(ErrorCode::InvalidArgument);
     }
 
-    const Vector3<T> local = box.ToLocal(point);
+    const Quaternion<T> rotation = box.UnitRotation();
+    const Vector3<T> local = rotation.UnrotateVector(point - box.center);
     if (detail::BoxContains(-box.halfExtents, box.halfExtents, local)) {
         return Result<Vector3<T>>::Success(point);
     }
-    return Result<Vector3<T>>::Success(
-        box.ToWorld(detail::ClampToBox(-box.halfExtents, box.halfExtents, local)));
+    return Result<Vector3<T>>::Success(box.center + rotation.RotateVector(detail::ClampToBox(
+                                                        -box.halfExtents, box.halfExtents, local)));
 }
 
 // local 좌표에서 계산하므로 world로 되돌리는 반올림이 거리에 섞이지 않는다.

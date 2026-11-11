@@ -356,6 +356,50 @@ TEST(MatrixFactory_ObliqueClipSupportsReversedDepth) {
     }
 }
 
+TEST(MatrixFactory_ObliqueClipRejectsUnsupportedInputs) {
+    auto standard = TryMakePerspective(1.2, 1.0, 0.1, 100.0, DepthRange::Standard);
+    auto reversed = TryMakePerspective(1.2, 1.0, 0.1, 100.0, DepthRange::Reversed);
+    REQUIRE(standard && reversed);
+    // 행렬과 다른 depth 플래그는 보이는 쪽을 뒤집으므로 거부한다.
+    CHECK(TryMakeObliqueClipProjection(standard.Value(), Vec3d::UnitX(), 5.0, DepthRange::Reversed)
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(TryMakeObliqueClipProjection(reversed.Value(), Vec3d::UnitX(), 5.0, DepthRange::Standard)
+              .Error() == ErrorCode::InvalidArgument);
+    // far 평면 너머의 평면(재검토 재현: distance 200 > far 100)은 보이는 영역이 없다.
+    CHECK(
+        TryMakeObliqueClipProjection(standard.Value(), Vec3d::UnitX(), 200.0, DepthRange::Standard)
+            .Error() == ErrorCode::InvalidArgument);
+    CHECK(
+        TryMakeObliqueClipProjection(reversed.Value(), Vec3d::UnitX(), 200.0, DepthRange::Reversed)
+            .Error() == ErrorCode::InvalidArgument);
+    // 무한 원거리 Reversed 투영은 지원한다.
+    auto infinite = TryMakePerspective(1.2, 1.0, 0.1, static_cast<double>(__builtin_huge_val()));
+    REQUIRE(infinite);
+    CHECK(TryMakeObliqueClipProjection(infinite.Value(), Vec3d::UnitX(), 200.0,
+                                       DepthRange::Reversed));
+    // 직교 투영은 지원하지 않는다.
+    auto ortho = TryMakeOrthographic(10.0, 10.0, 0.0, 100.0, DepthRange::Standard);
+    REQUIRE(ortho);
+    CHECK(TryMakeObliqueClipProjection(ortho.Value(), Vec3d::UnitX(), 5.0, DepthRange::Standard)
+              .Error() == ErrorCode::Unsupported);
+}
+
+TEST(MatrixFactory_LookToStaysOrthonormalNearThreshold) {
+    // 재검토 재현 입력(float): 기준 바로 위의 각에서 X·Y가 0.0043이었다.
+    const Vec3 forward(-0x1.ce63dp-2f, -0x1.290d8p-1f, 0x1.5b1012p-1f);
+    const Vec3 up(-0x1.ce640ep-2f, -0x1.290c7ap-1f, 0x1.5b10dep-1f);
+    auto view = TryMakeLookTo(Vec3::Zero(), forward, up);
+    REQUIRE(view);
+    const Mat4& m = view.Value();
+    const Vec3 x(m.At(0, 0), m.At(0, 1), m.At(0, 2));
+    const Vec3 y(m.At(1, 0), m.At(1, 1), m.At(1, 2));
+    const Vec3 z(m.At(2, 0), m.At(2, 1), m.At(2, 2));
+    CHECK(math::Abs(Dot(x, y)) <= 1.0e-6f && math::Abs(Dot(x, z)) <= 1.0e-6f &&
+          math::Abs(Dot(y, z)) <= 1.0e-6f);
+    CHECK(x.IsNormalized(1.0e-6f) && y.IsNormalized(1.0e-6f) && z.IsNormalized(1.0e-6f));
+    CHECK(Dot(z, up) > 0.0f); // 위쪽 방향은 유지한다.
+}
+
 TEST(MatrixFactory_PerspectiveAcceptsHugeFarPlane) {
     // n * f가 float 범위를 넘어도 n * (f / (f - n))은 유한하다.
     auto projection = TryMakePerspective(1.0f, 1.0f, 10.0f, 1.0e38f);
