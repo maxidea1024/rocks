@@ -30,7 +30,12 @@ if (auto locked = observer.Lock()) { Use(*locked); }
 - `SharedPtr<T>`/`WeakPtr<T>`(UE `TSharedPtr`/`TWeakPtr` ThreadSafe 모드): 객체와 제어 블록을 한 번에 할당한다. 계수는 원자적이며(증가 relaxed, 감소 acq_rel), `WeakPtr::Lock`은 strong이 0이 아닐 때만 증가해 소멸 중 객체를 되살리지 않는다. 파생→기반 변환은 원래 타입 소멸 함수를 유지하므로 기반에 가상 소멸자가 없어도 된다. 강한 순환은 회수되지 않는다.
 - `EnableSharedFromThis<T>`(UE `TSharedFromThis`): 객체는 weak 토큰만 보유한다. `SharedPtr::TryMake`로 만든 객체에서만 연결되며, 그 밖·생성자·소멸자 안에서는 빈 포인터를 반환한다(UE는 check 실패).
 - `SharedRef<T>`(UE `TSharedRef` ThreadSafe 모드): 기본 생성이 없는 null 불가 공유 소유권이다. `TryMake`, `TryFrom(SharedPtr)`(빈 포인터는 InvalidArgument), `SharedPtr::ToSharedRef()`(빈 포인터는 Fatal, UE의 check 대응)로 만든다. UE와 같이 이동도 복사라 원본이 비지 않는다. `SharedPtr`로 암묵 변환되고 `WeakPtr`를 바로 만들 수 있으며 파생→기반 변환을 지원한다. 음성 대조 `shared-ref-from-empty`가 Fatal 진단을 확인한다.
-- 후속: 사용자 deleter, aliasing 생성, `SharedFromThis`의 SharedRef 반환 변형.
+- 사용자 deleter(UE `TUniquePtr<T, Deleter>`·`MakeShareable(ptr, deleter)` 대응):
+  - `UniquePtr<T, Deleter>`는 기본 deleter `AllocatorDeleter`(TryMake, 크기 24 byte 유지) 외에 `UniquePtr(object, deleter)`로 외부 자원을 맡기며 `Release`·`GetDeleter`를 제공한다. 함수 포인터 deleter가 nullptr이면 Fatal(음성 대조 `unique-ptr-null-deleter`)이고, 사용자 deleter는 타입 변환을 지원하지 않는다.
+  - `SharedPtr<T>::TryAdopt(allocator, object, deleter)`는 제어 블록과 deleter를 한 번 할당하고 마지막 strong 해제 때 deleter를 한 번 호출한다. 할당이 실패하면 소유권은 호출자에게 남는다. `EnableSharedFromThis` 객체는 deleter 호출 전에 연결을 끊어, deleter가 객체를 파괴하지 않아도 제어 블록이 남지 않는다.
+- aliasing 생성 `SharedPtr<T>(owner, member)`: owner와 계수를 공유하면서 멤버 등을 가리킨다. owner가 비었거나 object가 nullptr이면 소유하지 않는 빈 포인터다.
+- 테스트 프로세스는 시작 시 Debug CRT abort·assert 대화상자와 WER 대화상자를 끄고 stderr로 보낸다(`PrepareAutomatedTestProcess`). 실패한 테스트가 대화상자에서 멈추지 않는다.
+- 후속: `SharedFromThis`의 SharedRef 반환 변형.
 
 ## 3. STL 호환 반복자
 
