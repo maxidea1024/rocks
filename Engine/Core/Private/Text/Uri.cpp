@@ -597,6 +597,155 @@ Result<usize> TryResolveUriReference(StringView base, StringView reference,
     return Result<usize>::Success(writer.size);
 }
 
+namespace {
+
+char ToLowerAscii(char c) noexcept {
+    return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+}
+
+// %hh를 정규화해 쓴다. unreserved 문자를 나타내면 해제하고, 아니면 16진 숫자를 대문자로 바꾼다.
+// lowercase면 결과 글자(해제된 글자 포함)를 소문자로 쓴다(host). 입력은 TryParseUri로 검증되어
+// %hh가 항상 완전하다.
+void AppendPercentNormalized(UriWriter& writer, StringView text, bool lowercase) noexcept {
+    constexpr char Digits[] = "0123456789ABCDEF";
+    const char* data = text.Data();
+    const usize length = text.ByteCount();
+    for (usize index = 0; index < length;) {
+        const char c = data[index];
+        if (c == '%' && length - index >= 3) {
+            const int32 value = (HexValue(data[index + 1]) << 4) | HexValue(data[index + 2]);
+            const char decoded = static_cast<char>(value);
+            if (value < 0x80 && IsUnreserved(decoded)) {
+                writer.Append(lowercase ? ToLowerAscii(decoded) : decoded);
+            } else {
+                writer.Append('%');
+                writer.Append(Digits[value >> 4]);
+                writer.Append(Digits[value & 0x0f]);
+            }
+            index += 3;
+        } else {
+            writer.Append(lowercase ? ToLowerAscii(c) : c);
+            ++index;
+        }
+    }
+}
+
+bool EqualsIgnoreCase(StringView text, const char* expected) noexcept {
+    usize index = 0;
+    for (; expected[index] != '\0'; ++index) {
+        if (index >= text.ByteCount() || ToLowerAscii(text.Data()[index]) != expected[index]) {
+            return false;
+        }
+    }
+    return index == text.ByteCount();
+}
+
+// §6.2.3 scheme 기반 정규화를 적용하는 scheme의 기본 포트다. 해당 없으면 0이다.
+uint32 DefaultPortOf(StringView scheme) noexcept {
+    if (EqualsIgnoreCase(scheme, "http") || EqualsIgnoreCase(scheme, "ws")) {
+        return 80;
+    }
+    if (EqualsIgnoreCase(scheme, "https") || EqualsIgnoreCase(scheme, "wss")) {
+        return 443;
+    }
+    return 0;
+}
+
+void AppendDecimal(UriWriter& writer, uint32 value) noexcept {
+    char digits[10];
+    usize count = 0;
+    do {
+        digits[count++] = static_cast<char>('0' + value % 10);
+        value /= 10;
+    } while (value != 0);
+    while (count > 0) {
+        writer.Append(digits[--count]);
+    }
+}
+
+} // namespace
+
+Result<usize> NormalizedUriMaxSize(StringView text) noexcept {
+    usize size = 0;
+    if (!TryAdd(text.ByteCount(), 2, size)) {
+        return Result<usize>::Failure(ErrorCode::Overflow);
+    }
+    return Result<usize>::Success(size);
+}
+
+Result<usize> TryNormalizeUri(StringView text, Span<char> output) noexcept {
+    auto parsed = TryParseUri(text);
+    if (!parsed) {
+        return Result<usize>::Failure(ErrorCode::InvalidArgument);
+    }
+    auto required = NormalizedUriMaxSize(text);
+    if (!required) {
+        return Result<usize>::Failure(required.Error());
+    }
+    if (output.Size() < required.Value()) {
+        return Result<usize>::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    const UriView& uri = parsed.Value();
+    UriWriter writer{output.Data()};
+    const bool hasScheme = !uri.scheme.IsEmpty();
+    if (hasScheme) {
+        for (usize index = 0; index < uri.scheme.ByteCount(); ++index) {
+            writer.Append(ToLowerAscii(uri.scheme.Data()[index]));
+        }
+        writer.Append(':');
+    }
+    const uint32 defaultPort = hasScheme ? DefaultPortOf(uri.scheme) : 0;
+    if (uri.hasAuthority) {
+        writer.Append("//", 2);
+        if (uri.hasUserInfo) {
+            AppendPercentNormalized(writer, uri.userInfo, false);
+            writer.Append('@');
+        }
+        if (uri.isIpLiteral) {
+            writer.Append('[');
+            AppendPercentNormalized(writer, uri.host, true);
+            writer.Append(']');
+        } else {
+            AppendPercentNormalized(writer, uri.host, true);
+        }
+        // "host:"처럼 숫자가 없는 포트와 scheme 기본 포트는 생략한다.
+        const bool emptyPort = uri.hasPort && uri.authority.ByteCount() > 0 &&
+                               uri.authority.Data()[uri.authority.ByteCount() - 1] == ':';
+        if (uri.hasPort && !emptyPort && !(defaultPort != 0 && uri.port == defaultPort)) {
+            writer.Append(':');
+            AppendDecimal(writer, uri.port);
+        }
+    }
+
+    const usize pathBegin = writer.size;
+    AppendPercentNormalized(writer, uri.path, false);
+    if (hasScheme) {
+        writer.size = RemoveDotSegments(writer.data, pathBegin, writer.size);
+    }
+    if (uri.hasAuthority && writer.size == pathBegin && defaultPort != 0) {
+        writer.Append('/');
+    }
+    if (!uri.hasAuthority && writer.size - pathBegin >= 2 && writer.data[pathBegin] == '/' &&
+        writer.data[pathBegin + 1] == '/') {
+        for (usize index = writer.size; index > pathBegin; --index) {
+            writer.data[index + 1] = writer.data[index - 1];
+        }
+        writer.data[pathBegin] = '/';
+        writer.data[pathBegin + 1] = '.';
+        writer.size += 2;
+    }
+    if (uri.hasQuery) {
+        writer.Append('?');
+        AppendPercentNormalized(writer, uri.query, false);
+    }
+    if (uri.hasFragment) {
+        writer.Append('#');
+        AppendPercentNormalized(writer, uri.fragment, false);
+    }
+    return Result<usize>::Success(writer.size);
+}
+
 bool FindQueryParameter(StringView query, StringView name, StringView& value) noexcept {
     const char* data = query.Data();
     const usize length = query.ByteCount();

@@ -78,7 +78,9 @@ auto points = name.TryCodePoints();          // for (char32_t point : points.Val
 
 검증(URI 해석): RFC 3986 §5.4.1·§5.4.2 예제 43개 전체, 경계·실패 사례, 그리고 RFC §5.2 의사코드를 그대로 옮긴 Python 참조 구현과 무작위 8,000쌍(절반 이상이 dot segment 포함) 차등 비교에서 불일치 0.
 
-후속: URI 정규화(§6 대소문자·percent·기본 포트), URL-safe Base64, 압축·streaming.
+정규화(`TryNormalizeUri`, `NormalizedUriMaxSize`=원문+2): RFC 3986 §6.2.2 문법 기반(scheme·host 소문자, `%hh` 대문자, unreserved 해제, scheme 있는 URI의 dot segment 제거; 상대 참조의 `..`는 유지)과 http·https·ws·wss의 §6.2.3 scheme 기반(기본 포트 제거, 빈 path → `/`), 모든 scheme의 빈 포트 제거·포트 앞자리 0 제거. userinfo·path·query·fragment 대소문자와 예약 문자 `%hh`는 유지. RFC §6.2.2 예제·멱등성·실패 시 출력 불변을 테스트한다.
+
+후속: IDN(국제화 도메인)·IRI 변환, URL-safe Base64, 압축·streaming.
 
 ## 6. 파일 위치 변경
 

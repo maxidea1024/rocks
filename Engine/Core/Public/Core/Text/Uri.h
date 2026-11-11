@@ -86,4 +86,26 @@ Result<usize> ResolvedUriMaxSize(StringView base, StringView reference) noexcept
 Result<usize> TryResolveUriReference(StringView base, StringView reference,
                                      Span<char> output) noexcept;
 
+// TryNormalizeUri가 요구하는 출력 크기(text + 2 byte)다. 오류: 길이 계산 overflow는 Overflow.
+Result<usize> NormalizedUriMaxSize(StringView text) noexcept;
+
+// URI 참조를 정규화해 output에 쓰고 길이를 반환한다(NUL 없음). 같은 자원을 가리키는 표기를 하나로
+// 모아 비교·캐시 키로 쓰기 위한 것이다.
+// - RFC 3986 §6.2.2 문법 기반: scheme·host 소문자화, %hh의 16진 숫자 대문자화, unreserved 문자
+//   (A–Z a–z 0–9 - . _ ~)를 나타내는 %hh 해제, scheme이 있는 URI의 dot segment 제거. scheme 없는
+//   상대 참조는 ".."가 의미를 가지므로 dot segment를 남긴다.
+// - §6.2.3 scheme 기반(http·https·ws·wss만): 기본 포트(80·443) 제거, authority가 있는 빈 path는
+// "/".
+//   모든 scheme에서 숫자 없는 빈 포트(":")를 제거하고 포트의 앞자리 0을 없앤다.
+// - userinfo·path·query·fragment의 대소문자와 예약 문자의 %hh(예: %2F)는 의미가 있으므로 유지한다.
+// - authority 없는 결과 path가 "//"로 시작하면 TryResolveUriReference와 같이 "/."를 붙인다.
+// - output.Size()는 NormalizedUriMaxSize 이상이어야 하며 실패하면 output을 바꾸지 않는다.
+// 오류: 문법 오류는 InvalidArgument, output 부족은 CapacityExceeded, 크기 overflow는 Overflow.
+//
+// 사용 예:
+//   char buffer[64];
+//   auto normalized = TryNormalizeUri("HTTP://Example.COM:80/a/./%7euser", Span<char>(buffer));
+//   // buffer = "http://example.com/a/~user"
+Result<usize> TryNormalizeUri(StringView text, Span<char> output) noexcept;
+
 } // namespace rocks

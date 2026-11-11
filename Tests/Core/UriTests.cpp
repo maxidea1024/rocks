@@ -279,4 +279,65 @@ TEST(Uri_ResolveEdgeCasesAndFailures) {
     CHECK(StringView(exact, fits.Value()) == StringView("http://a/g"));
 }
 
+TEST(Uri_NormalizeRfc3986Equivalence) {
+    char buffer[128];
+    auto Normalize = [&](const char* text) -> StringView {
+        auto normalized = TryNormalizeUri(text, Span<char>(buffer));
+        CHECK(normalized);
+        return normalized ? StringView(buffer, normalized.Value()) : StringView("<failed>");
+    };
+    // RFC 3986 §6.2.2 예: 같은 자원을 가리키는 표기가 하나로 모인다.
+    CHECK(Normalize("example://a/b/c/%7Bfoo%7D") == StringView("example://a/b/c/%7Bfoo%7D"));
+    CHECK(Normalize("eXAMPLE://a/./b/../b/%63/%7bfoo%7d") ==
+          StringView("example://a/b/c/%7Bfoo%7D"));
+    // §6.2.2.1 대소문자, §6.2.2.2 percent, §6.2.3 scheme 기반.
+    CHECK(Normalize("HTTP://www.EXAMPLE.com/") == StringView("http://www.example.com/"));
+    CHECK(Normalize("http://example.com") == StringView("http://example.com/"));
+    CHECK(Normalize("http://example.com:/") == StringView("http://example.com/"));
+    CHECK(Normalize("http://example.com:80/") == StringView("http://example.com/"));
+    CHECK(Normalize("https://example.com:443") == StringView("https://example.com/"));
+    CHECK(Normalize("https://example.com:080/") == StringView("https://example.com:80/"));
+    CHECK(Normalize("http://%45xample.com/%7euser/%2fa%2F") ==
+          StringView("http://example.com/~user/%2Fa%2F")); // 예약 문자 %2F는 해제하지 않는다
+    CHECK(Normalize("http://User:Pass@Host.com/Path?Q=%5a#F%5A") ==
+          StringView("http://User:Pass@host.com/Path?Q=Z#FZ"));
+    CHECK(Normalize("http://[2001:DB8::A]:8080/x") == StringView("http://[2001:db8::a]:8080/x"));
+    // 기본 포트 규칙은 http·https·ws·wss에만 적용한다. 빈 포트는 모든 scheme에서 지운다.
+    CHECK(Normalize("ftp://host:21/") == StringView("ftp://host:21/"));
+    CHECK(Normalize("foo://host:") == StringView("foo://host"));
+    CHECK(Normalize("foo://host") == StringView("foo://host"));
+    // scheme 없는 상대 참조는 dot segment를 남긴다.
+    CHECK(Normalize("../a/./b") == StringView("../a/./b"));
+    CHECK(Normalize("//HOST/%7e") == StringView("//host/~"));
+    // authority 없는 결과 path가 "//"로 시작하면 "/."를 붙인다.
+    CHECK(Normalize("foo:/a/..//b") == StringView("foo:/.//b"));
+    // 멱등: 정규화 결과를 다시 정규화해도 같다.
+    const char* samples[] = {"eXAMPLE://a/./b/../b/%63/%7bfoo%7d", "HTTP://h:80", "foo:/a/..//b",
+                             "http://[::1]:/a/../%41", "mailto:A@B.com"};
+    for (const char* sample : samples) {
+        char first[128];
+        char second[128];
+        auto once = TryNormalizeUri(sample, Span<char>(first));
+        REQUIRE(once);
+        auto twice = TryNormalizeUri(StringView(first, once.Value()), Span<char>(second));
+        REQUIRE(twice);
+        CHECK(StringView(first, once.Value()) == StringView(second, twice.Value()));
+    }
+    // 실패: 문법 오류, 출력 부족(상한 미만이면 결과가 짧아도 실패하고 출력은 그대로).
+    CHECK(TryNormalizeUri("http://a b/", Span<char>(buffer)).Error() == ErrorCode::InvalidArgument);
+    char small[8];
+    for (char& c : small) {
+        c = '*';
+    }
+    CHECK(TryNormalizeUri("http://a", Span<char>(small)).Error() == ErrorCode::CapacityExceeded);
+    bool untouched = true;
+    for (char c : small) {
+        untouched = untouched && c == '*';
+    }
+    CHECK(untouched);
+    auto bound = NormalizedUriMaxSize("http://a");
+    REQUIRE(bound);
+    CHECK(bound.Value() == 10);
+}
+
 } // namespace rocks::test
