@@ -2,11 +2,13 @@
 
 안정성 우선 C++23 기반 라이브러리 · 객체 수명 · Windows/macOS 입력
 
-**기준일 2026.11.10 · Rocks 상세안 1.1 · 상태: 구현 계획 / 미구현·성능 미측정**
+**기준일 2026.11.11 · Rocks 상세안 1.2 · 상태: 구현 계획 / 미구현·성능 미측정**
 
 Rocks 전체 구현 계획의 Core/Object Foundation과 입력 영역을 실제 작업 단위로 구체화한다. **우선순위는 안정성·수명 정확성, 확장성, 성능**이며 첫 구현은 Core 기반 라이브러리와 오브젝트 시스템이다. Windows와 macOS 개발·입력은 필수이며, 선언하지 않은 선택 장치·플랫폼·최적화는 후속으로 남길 수 있다. 지원 범위, 확장 지점, 미지원 결과, 추가 시 회귀 기준을 명확히 구분한다.
 
 문서의 경로·타입·API·작업 ID는 신규 엔진 저장소를 위한 제안이다. 엔진 소스가 이미 구현되었거나 예시 API가 컴파일·실행 검증되었다는 의미가 아니다. 기존 전체 기능 목표와 Blueprint 제외·커스텀 언어 정책을 유지한다. 함께 제공하는 작업 목록 52개와 파일 목록 297개는 본문과 같은 데이터로 관리한다.
+
+상세안 1.2는 전체 계획 개정 1.4의 UI 방향 전환(웹 에디터 미채택, 게임 UI와 에디터의 단일 UI 툴킷)에 맞춰 text owner·focus 규약과 InputProfileEditor 파일 경로를 정리하고, UI·에디터가 의존하는 리플렉션 계약 CU1–CU8을 [UI 툴킷 설계](UiToolkit.ko.md)에 연결한다.
 
 ## 1. 안정성·확장성 원칙과 첫 완료 지점
 
@@ -70,7 +72,7 @@ R0/R1은 첫 4주의 prototype 목표이며 production Foundation 완료 선언�
 | PlatformBase | EngineBase·OS | page·thread·clock·file·atomic primitive. Core 금지 |
 | Core | EngineBase·PlatformBase·선정 math private adapter | Result·allocator·container·text·math·ClockService/StepPlanner. Object/Window 금지 |
 | Task / IO / Trace | Core | 각각 독립. producer는 sink만 사용; Task가 viewer/IO를 필수 링크하지 않음 |
-| TraceAnalysis / RocksLens | Core·trace format schema | capture 분석·offline timeline/report. runtime/웹 editor 비의존 |
+| TraceAnalysis / RocksLens | Core·trace format schema | capture 분석·offline timeline/report. runtime/editor UI 비의존 |
 | Inspection | Core·주입된 snapshot provider 계약 | headless 상태 조회. Object 진단은 Host가 provider로 연결 |
 | MetaSchema / Serialization | Core | schema와 binary archive. ObjectRuntime 없음 |
 | ObjectRuntime | Core·Task·MetaSchema | registry·참조·GC·생성·수명. World/Asset/VM 없음 |
@@ -172,7 +174,7 @@ CMake/Ninja, C++23, Windows clang-cl 및 macOS Apple Clang을 필수 고정 mani
 
 STL 금지는 엔진 작성 Runtime·공개 API에 적용한다. cstddef/cstdint/new 등 언어 지원 화이트리스트와 Platform private의 atomic 구현 예외를 유지한다. Host 도구와 ThirdParty 내부 사용은 허용하되 std 타입·예외·해제 책임을 엔진 경계에 노출하지 않는다. 비선택 backend를 찾기 위한 SDK 탐색조차 CoreTest configure의 필수 작업으로 만들지 않는다.
 
-C00은 Python host의 최소 scaffold로 module/test target·manifest를 생성한다. source/SDK/Runtime VM/웹 editor를 선행 요구하지 않는다. plan 단계의 경로 이탈·충돌·필수 매개변수 검증, staging·journal·실패 rollback, 같은 출력의 timestamp 유지, 재시도 시 중복 ID/파일 방지를 TT01과 CT01로 검증한다. 사용자 파일의 변경을 발견하면 충돌로 반환한다. 전체 카탈로그·사용자 템플릿 저장·Linked 갱신은 26절의 후속 기능이다.
+C00은 Python host의 최소 scaffold로 module/test target·manifest를 생성한다. source/SDK/Runtime VM/editor를 선행 요구하지 않는다. plan 단계의 경로 이탈·충돌·필수 매개변수 검증, staging·journal·실패 rollback, 같은 출력의 timestamp 유지, 재시도 시 중복 ID/파일 방지를 TT01과 CT01로 검증한다. 사용자 파일의 변경을 발견하면 충돌로 반환한다. 전체 카탈로그·사용자 템플릿 저장·Linked 갱신은 26절의 후속 기능이다.
 
 ### 4.2 내부 확장과 외부 plugin ABI
 
@@ -465,6 +467,8 @@ RegisterObjectType은 TypeSchema와 중첩 field/name/attribute 배열·문자�
 클래스를 데이터로 선택·보관하고 인스턴스를 만들 수 있는 런타임 메타클래스는 필수 후속 범위다. Core 선행 설계에서는 `TypeSchema`의 불변 선언 데이터, Registry별 등록 레코드와 lease, 영속 `TypeId`, ABI/module revision을 구분한다. 타입 제한 클래스 참조, 안전한 인스턴스 생성, 클래스 기본값·서브오브젝트와 반영 필드·함수는 상위 기능의 요구를 충족하도록 확장한다. 구체 이름 및 공개 API는 생성기·World 통합과 교차 검증 후 확정한다.
 
 등록된 `TypeId`에 대한 `ObjectRegistry::NewObject<Object>(access, typeId)`의 현재 낮은 수준 생성 경로와 편의 클래스 참조·클래스 기본값 기능을 구분한다. 생성 경로는 등록된 타입의 생성 가능성·context·트랜잭션을 검사해야 하며, 생성 실패는 부분 객체·등록 참조를 남기지 않는다. 직렬화된 타입 참조는 이름이나 원시 주소가 아니라 안정 식별자를 사용하고, 모듈 reload·PIE 종료 뒤의 오래된 revision은 명시적으로 거부한다. 상세 정책과 단계는 [런타임 클래스 메타데이터 설계](RuntimeClassMetadata.ko.md)를 따른다.
+
+UI·에디터가 의존하는 리플렉션 확장(편집 메타데이터 어휘·함수·이벤트·속성 경로·변경 통지·동적 속성·텍스트 위치 변환·필드 형식 확장)은 [UI 툴킷 설계](UiToolkit.ko.md) §7의 CU1–CU8로 정의한다. 구현 시점은 항목별로 조정할 수 있으나 형식은 Foundation Gate 전에 Object·Archive 계약과 함께 확정한다. 필드 형식 확장(CU8)은 enum·구조체·배열 필드를 다루므로 9.3절의 초기 지원 범위와 함께 검토한다.
 
 ### 9.2 Archive 계약
 
@@ -973,7 +977,7 @@ macOS는 AppKit window event의 keyboard/mouse와 GameController의 검증된 co
 
 텍스트를 key code→문자로 직접 변환하지 않는다. Windows text service는 PlatformWindow의 TSF adapter로 분리하고 composition start/update/end, commit, selection, caret rectangle을 계약으로 둔다. 한국어·일본어·중국어 조합, dead key, surrogate/emoji, 조합 취소를 검증한다. OS API의 UTF-16 위치와 엔진 UTF-8 byte 위치를 명시 변환하며 UI cursor는 grapheme 경계를 사용한다. grapheme·BiDi·shaping은 별도 text library adapter 책임이다. [D8](https://learn.microsoft.com/en-us/windows/win32/tsf/text-services-framework)
 
-macOS text service는 NSTextInputClient를 구현한 native view adapter로 composition/marked text·선택 범위·replacement·commit·caret rectangle을 연결한다. Windows TSF와 같은 TextSessionId/route generation·정확히 한 번 commit·취소 계약을 따르되 vendor API를 통합 enum으로 흉내 내지 않는다. UTF-16 range와 UTF-8 byte/grapheme 위치를 명시 변환한다. 한 route에는 native 또는 웹 text owner 하나만 두고, IME 조합 중 focus/PIE 교체·늦은 commit·dead key·한국어/일본어/중국어·emoji를 두 OS에서 실물 시험한다. [D15](https://developer.apple.com/documentation/appkit/nstextinputclient)
+macOS text service는 NSTextInputClient를 구현한 native view adapter로 composition/marked text·선택 범위·replacement·commit·caret rectangle을 연결한다. Windows TSF와 같은 TextSessionId/route generation·정확히 한 번 commit·취소 계약을 따르되 vendor API를 통합 enum으로 흉내 내지 않는다. UTF-16 range와 UTF-8 byte/grapheme 위치를 명시 변환한다. 한 route에는 text owner(UI 툴킷에서 focus를 가진 편집 widget) 하나만 두고, IME 조합 중 focus/PIE 교체·늦은 commit·dead key·한국어/일본어/중국어·emoji를 두 OS에서 실물 시험한다. [D15](https://developer.apple.com/documentation/appkit/nstextinputclient)
 
 ### 19.3 마우스와 pointer
 
@@ -1095,9 +1099,9 @@ RebindSession은 대상 user/action, 허용 device class, axis threshold, modifi
 
 ### 22.1 focus와 입력 전달 순서
 
-Platform system reserved 동작 → 활성 window/사용자 → text/IME와 modal UI → 일반 UI → native viewport → gameplay context 순으로 전달 자격을 판정한다. 실제 소비 우선순위는 route policy로 설정하되 하나의 event를 web UI와 native gameplay 양쪽에서 독립 소비하지 않게 한다. UI와 gameplay 모두 필요한 action은 Shared로 명시한다.
+Platform system reserved 동작 → 활성 window/사용자 → text/IME와 modal UI → 일반 UI → native viewport → gameplay context 순으로 전달 자격을 판정한다. 실제 소비 우선순위는 route policy로 설정하되 하나의 event를 UI와 gameplay 양쪽에서 독립 소비하지 않게 한다. UI와 gameplay 모두 필요한 action은 Shared로 명시한다.
 
-웹 기반 에디터의 DOM text focus는 webview가 소유한다. 같은 창의 native TSF가 동일 commit을 다시 전달하지 않는다. native viewport focus token과 webview focus token은 Host가 관리하며, focus 요청에는 WindowEpoch·PIE session·LocalPlayer를 포함한다. viewport 첫 클릭은 기본적으로 focus 획득만 수행하고 gameplay 전달 여부는 명시 옵션이다.
+에디터와 게임 UI는 같은 UI 툴킷의 focus 하나로 text focus를 관리한다. TSF·NSTextInputClient의 composition/commit은 focus를 가진 text widget에 한 번만 전달한다. viewport(SubViewport widget)와 UI widget의 focus는 같은 focus tree의 token으로 Host가 관리하며, focus 요청에는 WindowEpoch·PIE session·LocalPlayer를 포함한다. viewport 첫 클릭은 기본적으로 focus 획득만 수행하고 gameplay 전달 여부는 명시 옵션이다.
 
 modal을 열면 기존 gameplay action을 취소한다. 닫은 후에는 require-release 규칙을 적용한다. split-screen의 UI focus는 LocalUser별로 관리하며 OS의 foreground window 상태와 분리한다. gamepad navigation은 focusable tree·direction policy·repeat 설정을 사용하고 pointer 좌표가 없다는 이유로 임의 mouse 위치를 생성하지 않는다.
 
@@ -1105,7 +1109,7 @@ modal을 열면 기존 gameplay action을 취소한다. 닫은 후에는 require
 
 InputProfileEditor는 Action/Binding/Context 목록, processor parameter property panel, conflict report, 실제 장치 입력 표시, 현재 effective binding/glyph 미리보기를 제공하는 후속 도구다. runtime과 같은 schema·validator·CompileInputProfile을 호출한다. undo/redo는 profile transaction 단위이며 preview 실패가 저장된 profile을 훼손하지 않는다. 첫 I0/I1은 CLI probe와 fixture 파일로 충분하다.
 
-UMG 유사 인게임 UI의 입력 연결은 WidgetFocus/Navigation/TextSession 계약으로 정의한다. designer preview는 synthetic input과 real input을 선택하고 preview route epoch로 실제 게임 세션과 격리한다. UI layout/render/designer 자체는 전체 계획의 UI 모듈 후속 작업이며 InputCore 선행 조건이 아니다.
+인게임 UI와 에디터 UI의 입력 연결은 WidgetFocus/Navigation/TextSession 계약으로 정의한다. designer preview는 synthetic input과 real input을 선택하고 preview route epoch로 실제 게임 세션과 격리한다. UI layout/render/designer 자체는 [UI 툴킷 설계](UiToolkit.ko.md)의 후속 작업이며 InputCore 선행 조건이 아니다.
 
 ### 22.3 컷씬·개발자 콘솔·언어
 
@@ -1192,7 +1196,7 @@ callback 수신→Input lane drain→action publish→simulation 소비의 p50/p
 초기 성능 예산은 4 local user·16 device·1,000 compiled binding에서 action 평가 0.2 ms p95, InputCore heap의 frame 중 allocation 0회를 탐색 목표로 둔다. 기준 CPU·build·tick·profile을 고정한 뒤 실측하여 확정한다. 목표 미달이면 profiler 기반으로 최적화하며 입력 손실이나 critical section 생략으로 개선하지 않는다.
 
 
-I13은 standalone composition/route-token 시험과 실제 Studio/PIE 시험을 분리한다. standalone 성공 시 실제 IT19는 NOT RUN으로 남길 수 있으며 I13 전체 완료를 뜻하지 않는다. 실제 subset에는 양OS WebView2/WKWebView·native viewport·UI/text focus·PIE fixture가 필요하다. I15/I16은 이 외부 조건에 World/VM/cutscene 조건을 누적한다. Foundation/I0의 시작을 상위 Studio 완료에 의존시키지 않는다.
+I13은 standalone composition/route-token 시험과 실제 Studio/PIE 시험을 분리한다. standalone 성공 시 실제 IT19는 NOT RUN으로 남길 수 있으며 I13 전체 완료를 뜻하지 않는다. 실제 subset에는 양OS Studio(UI 툴킷)·viewport·UI/text focus·PIE fixture가 필요하다. I15/I16은 이 외부 조건에 World/VM/cutscene 조건을 누적한다. Foundation/I0의 시작을 상위 Studio 완료에 의존시키지 않는다.
 
 
 ### 24.4 입력 작업별 선행 관계
@@ -1266,14 +1270,14 @@ fully concurrent GC, lock-free registry, moving/compacting heap, runtime native 
 
 ### 26.1 기존 요구의 유지
 
-이 상세안은 Rocks 전체 계획을 대체하는 축소 사양이 아니다. tags·component·prefab·asset/cook/DDC·WorldPartition·네트워크·오디오·AI/nav·physics·animation·VFX·UMG 유사 UI·컷씬·웹 에디터·native viewport는 Object/Schema/Task의 후속 소비자다. Deferred/Forward·upscaling·GPU-driven geometry/GI·high-end post effect는 renderer 계획에 유지한다. Blueprint 제외·커스텀 언어 정책도 유지한다.
+이 상세안은 Rocks 전체 계획을 대체하는 축소 사양이 아니다. tags·component·prefab·asset/cook/DDC·WorldPartition·네트워크·오디오·AI/nav·physics·animation·VFX·UI 툴킷(게임 UI·에디터)·컷씬·viewport는 Object/Schema/Task의 후속 소비자다. Deferred/Forward·upscaling·GPU-driven geometry/GI·high-end post effect는 renderer 계획에 유지한다. Blueprint 제외·커스텀 언어 정책도 유지한다.
 
 | 후속 시스템 | 이번에 확보할 연결점 | 지금 구현하지 않아도 되는 부분 |
 |---|---|---|
 | Entity/Component/Tags/Prefab | Type/Field/Subobject ID·owner edge·clone/default | World lifecycle·tag editor·prefab importer |
 | Asset/Async/Cook/DDC | Archive·stable ID·IO lease·Task·schema version | asset database·cook farm·package format 전체 |
 | Renderer/Audio/Physics | immutable snapshot·backend completion token | 실제 GPU/audio/physics resource manager |
-| WebEditor/UMG/Cutscene | schema property·transaction·input focus/context | 편집 화면·widget render·timeline |
+| UI 툴킷·Editor·Cutscene | schema property·CU1–CU8 리플렉션 계약·transaction·input focus/context | widget layout/render·편집 화면·timeline |
 | Material Editor·Compiler | stable ID·schema·Task·snapshot·module lease | 필수 M3/M4 그래프·preview·instance/function; M5/M6 layer |
 | Custom Language | TypeSchema·typed binding·root provider·weak subscription | VM/compiler/debugger |
 | Net/AI/Navigation | quantized command·scheduler·context epoch | replication/prediction·AI runtime·nav query |
@@ -1293,7 +1297,7 @@ Core 단계에서는 stable Guid·versioned schema·Archive·Task 취소/termina
 | material·lightmap bake·probe 조명 | schema/Task/IO·math adapter·revision·cancel/publish | material M3/M4, lightmap/probe M4 이후; CPU 기준/실제 renderer 검증 |
 | texture streaming·기본 콘텐츠 | allocation budget·lease·IO/decode·stable ID | 최소 mip residency/손상·취소, built-in lifetime/baseline을 실제 asset/renderer Gate에서 검증 |
 | 5개 graphics API·Deferred/Forward·upscale·고급 post | immutable snapshot·backend completion·capability·시간 history ID | D3D11/D3D12/Vulkan/OpenGL/Metal 각각 지원표·실장비 conformance; 기능별 일정은 전체 계획 |
-| 웹 editor/native viewport·인게임 UI 편집·컷씬 | Win/Mac focus/IME·transaction·schema·clock·PIE scope | UMG 계열 designer/runtime·native preview·sequence authoring/capture 필수; 자체 언어 이벤트 |
+| UI 툴킷 Studio·viewport·인게임 UI 편집·컷씬 | Win/Mac focus/IME·transaction·schema·CU1–CU8·clock·PIE scope | 단일 UI 툴킷의 designer/runtime·Godot 오라클 GO1–GO6·sequence authoring/capture 필수; 자체 언어 이벤트 |
 | Build/Cook/DDC·분산/반복 최적화 | C00 manifest·C20 내용 동일 유지·C31 action/cache 계약 | Rocks Build·분산 executor·로컬 fallback·compile/link/cook 측정; headless 필수 |
 | 전체 gameplay/AI/VFX/network/audio/nav/physics | Object/Schema/Task/context·ownership·테스트 하네스 | 각 subsystem 최초 구현부터 unit/contract/fault/concurrency·관측·누수 Gate |
 

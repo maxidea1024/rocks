@@ -1,8 +1,8 @@
 # Rocks · C++23 멀티플랫폼 3D 게임 엔진 구현 계획
 
-STL 비사용 Core · Object와 점진 GC · 웹 에디터 · GPU-driven 렌더러
+STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-driven 렌더러
 
-**설계 기준일 2026.11.10 · 개정 1.3 · 상태: 구현 제안 / 성능 미측정**
+**설계 기준일 2026.11.11 · 개정 1.4 · 상태: 구현 제안 / 성능 미측정**
 
 **추가 요구 반영:** Deferred·Forward 정식 지원, 업스케일링, 태깅·컴포넌트·프리팹, Unreal 참고 체계 확대, 컷씬 제작 핵심화, Blueprint 제외·자체 언어 채택, 하이엔드 포스트이펙트 전체 기능군, UBT 계열 자체 빌드 도구·분산 빌드·반복 개발 최적화, 정식 헤드리스 모드, 필수 노드 기반 머티리얼 에디터.
 
@@ -10,11 +10,13 @@ STL 비사용 Core · Object와 점진 GC · 웹 에디터 · GPU-driven 렌더�
 
 **1.3 추가 요구:** Rocks 자체 명명, Windows/macOS 개발 환경, 5종 RHI, 머티리얼 에디터·템플릿·PIE, 가변/고정 tick·time dilation, texture streaming·내장 리소스, lightmap/probe, 필수 로그·프로파일러·장애 하네스를 반영한다. 수학은 검증된 구현의 어댑터와 SIMD 활용으로 구성하고 자체 알고리즘 재작성은 제외한다. 안정성·정확성, 확장성, 성능 순으로 판단하며 Core/Object가 첫 작업이다. 상세 모듈·API·작업은 별첨 1.1에 연결한다.
 
+**1.4 UI 방향 전환:** 웹 에디터(WebView2·WKWebView·TypeScript/React)를 채택하지 않고, 게임 UI와 에디터를 Godot 4.x 수준의 단일 UI 툴킷으로 구성한다. Core는 Unreal 체계를 유지한다. 21·22절과 웹 에디터를 전제로 한 문장을 개정하고, 툴킷의 구조·계약·Core 선행 항목·검증 방식은 [UI 툴킷 설계](UiToolkit.ko.md)에 둔다. 33.9절에 개정 범위를 기록한다. 상세안은 1.2로 함께 개정한다.
+
 ## 1. 목표와 실행 전략
 
-**최우선 첫 작업은 Core 공통 라이브러리와 오브젝트 시스템이다.** 기반의 정확성·수명·검증 체계를 먼저 완성한 뒤 에셋 임포트·웹 편집·쿠킹·독립 실행 게임의 첫 제품 목표로 확장한다. UE5급 기능 범위는 장기 목표로 유지하되, 가상화 지오메트리와 동적 전역 조명은 기본 제작 과정이 검증된 이후 독립적인 연구 단계로 확장한다.
+**최우선 첫 작업은 Core 공통 라이브러리와 오브젝트 시스템이다.** 기반의 정확성·수명·검증 체계를 먼저 완성한 뒤 에셋 임포트·에디터 편집·쿠킹·독립 실행 게임의 첫 제품 목표로 확장한다. UE5급 기능 범위는 장기 목표로 유지하되, 가상화 지오메트리와 동적 전역 조명은 기본 제작 과정이 검증된 이후 독립적인 연구 단계로 확장한다.
 
-참조 대화 「3D 엔진 설계」에서 조회 가능한 5개 사용자 요청과 응답을 반영하였다. 최근의 ‘STL 미사용’ 요구를 이전의 ‘STL/PMR 사용’ 제안보다 우선한다. C++23·자체 Core·청크 레지스트리·Nonmoving 병렬·점진 GC·Clang 메타와 웹 UI/네이티브 뷰포트 방향을 계승한다. 추가 요청에 따라 자체 Object 모델과 D3D11/D3D12/Vulkan/Metal/OpenGL 지원, Windows/macOS 개발 환경으로 범위를 갱신한다. Jolt는 어댑터 뒤의 물리 후보로 유지한다. 아래의 구체적인 API, 수치, 인력, 일정, 셀 크기와 제한값은 실행 가능한 계획을 위한 **추가 설계 제안**이며 기존 합의나 실측 결과가 아니다.
+참조 대화 「3D 엔진 설계」에서 조회 가능한 5개 사용자 요청과 응답을 반영하였다. 최근의 ‘STL 미사용’ 요구를 이전의 ‘STL/PMR 사용’ 제안보다 우선한다. C++23·자체 Core·청크 레지스트리·Nonmoving 병렬·점진 GC·Clang 메타 방향을 계승한다. 참조 대화의 웹 UI/네이티브 뷰포트 에디터 방향은 개정 1.4에서 게임 UI와 같은 UI 툴킷의 네이티브 에디터로 대체하였다. 추가 요청에 따라 자체 Object 모델과 D3D11/D3D12/Vulkan/Metal/OpenGL 지원, Windows/macOS 개발 환경으로 범위를 갱신한다. Jolt는 어댑터 뒤의 물리 후보로 유지한다. 아래의 구체적인 API, 수치, 인력, 일정, 셀 크기와 제한값은 실행 가능한 계획을 위한 **추가 설계 제안**이며 기존 합의나 실측 결과가 아니다.
 
 | 구분 | 제품 목표 | 완료 판정 |
 |---|---|---|
@@ -47,7 +49,7 @@ Unreal Core의 개별 기능에 대해 Rocks에서도 가능한지 묻는다면 
 
 **첫 번째 구현 작업은 Core다. Core는 공통 library와 ObjectRuntime을 포함하는 기반 시스템 범위로 정의하며 최우선 인력·검증 예산을 배정한다.** 렌더러·에디터·자체 언어·전문 빌드 최적화보다 먼저 이 계약을 완성한다. ObjectRuntime은 별도 모듈이지만 작업 우선순위상 Core Foundation에 포함한다.
 
-첫 작업의 최소 build/test bootstrap, CPU-only test runner, trace·compiler timing은 Core 검증에 필요한 도구로 함께 준비한다. 이 단계에서 웹 viewport·GPU renderer·분산 빌드 engine·게임플레이 VM을 구현의 임계 경로로 편입하지 않는다. 최소 TypeInfo/visitor는 수동 등록으로 객체 테스트를 먼저 시작하고, 안정된 계약에 Clang 생성기를 연결한다.
+첫 작업의 최소 build/test bootstrap, CPU-only test runner, trace·compiler timing은 Core 검증에 필요한 도구로 함께 준비한다. 이 단계에서 UI 툴킷·에디터 viewport·GPU renderer·분산 빌드 engine·게임플레이 VM을 구현의 임계 경로로 편입하지 않는다. UI·에디터가 의존하는 리플렉션 확장은 계약만 이 단계에서 확정한다([UI 툴킷 설계](UiToolkit.ko.md) CU1–CU8). 최소 TypeInfo/visitor는 수동 등록으로 객체 테스트를 먼저 시작하고, 안정된 계약에 Clang 생성기를 연결한다.
 
 | Foundation 책임 묶음 | 최종 구현 결과 | 검증 책임 |
 |---|---|---|
@@ -67,7 +69,7 @@ F0–F6는 Foundation 책임 묶음이며 번호순으로 전체 기능을 완�
 
 | Gate | 필수 증거 |
 |---|---|
-| CF01 · 독립성 | Core/Object target이 World·Asset loader·Renderer·WebView·Script VM 없이 빌드·CPU-only 실행 |
+| CF01 · 독립성 | Core/Object target이 World·Asset loader·Renderer·UI·Script VM 없이 빌드·CPU-only 실행 |
 | CF02 · 정책 | 공개 헤더 독립 compile·금지 std 의존 0건, 예외/RTTI/allocator 경계 검사 |
 | CF03 · 메모리 | alignment·overflow·failure injection·교차 스레드 free·leak/double-free fixture 통과 |
 | CF04 · 컨테이너 | nontrivial 타입·iterator·relocation·hash collision·Transform shear/특이행렬 fixture |
@@ -107,7 +109,7 @@ CF01–CF12의 ID와 의미는 이 표를 정본으로 사용한다. 상세안 1
 
 | 항목 | 기본안 |
 |---|---|
-| 플랫폼 | Windows x64·macOS ARM64 개발/에디터·클라이언트, Linux x64 서버·기반 테스트. 추가 아키텍처는 개별 지원 manifest로 관리 |
+| 플랫폼 | Windows x64·macOS ARM64 개발/에디터·클라이언트, **Android(ARM64·x86_64)·iOS(ARM64) 클라이언트**(2026-11-11 요구 추가, 콘솔은 후속), Linux x64 서버·기반 테스트. 추가 아키텍처는 개별 지원 manifest로 관리. 모바일 Core 요구는 [Core 상세 명세](CoreDetailedSpec.ko.md) §3.5.1 |
 | 도구 | 자체 BuildDriver(Rocks Build)이 target/module/action graph를 소유한다. CMake는 bootstrap·외부 도구, Ninja는 선택 local executor다. clang-cl 우선·MSVC 호환, SDK 버전 고정 |
 | 그래픽 | D3D11/D3D12/Vulkan/Metal/OpenGL. 공통 material IR과 backend별 shader toolchain; 고급 capability는 독립 profile |
 | 좌표 | 오른손, +Z Up, +X Forward, 미터·라디안·초. 임포터에서 변환 |
@@ -149,30 +151,30 @@ C ABI는 fixed-width POD·opaque handle·status code·명시 release 함수를 �
 
 정책 확정 Gate는 C++ public header·C harness·커스텀 언어 prototype의 생성/호출/파괴, 동명 외부 SDK symbol과의 link, 두 plugin 공존, symbol export 목록, 오류 stack/source map, rename 후 과거 asset 호환을 포함한다. 작은 API에서 namespace 중심·경계 prefix·함수 테이블을 비교하고 생성 코드량·개발자 탐색·호출 비용을 기록한다. 아직 구현하지 않은 glue의 편의성을 사실로 가정하여 전 타입을 일괄 개명하지 않는다.
 
-도구 표시는 Rocks Studio(웹 에디터·native viewport), Rocks Build(build driver), Rocks Meta(메타 생성기), Rocks Lens(로그·프로파일러·상태 분석)로 통일한다. 명령은 `rocks build`, `rocks meta`, `rocks cook`, `rocks inspect`처럼 제품 이름 아래에 배치한다. 도구 브랜드의 Rocks 표시는 C++ 타입 분류 접두사와 별개다.
+도구 표시는 Rocks Studio(UI 툴킷 기반 네이티브 에디터), Rocks Build(build driver), Rocks Meta(메타 생성기), Rocks Lens(로그·프로파일러·상태 분석)로 통일한다. 명령은 `rocks build`, `rocks meta`, `rocks cook`, `rocks inspect`처럼 제품 이름 아래에 배치한다. 도구 브랜드의 Rocks 표시는 C++ 타입 분류 접두사와 별개다.
 
 ### 2.5 Windows·macOS 개발 환경의 동등 지원
 
-Windows와 macOS는 모두 **정식 개발 플랫폼**이다. 두 OS에 전체 Rocks Studio, 웹 제작 화면과 네이티브 3D viewport, 프로젝트 생성, 빌드·메타 컴파일러·셰이더 cook·DDC·에셋 편집·PIE·테스트·headless를 제공한다. macOS를 Metal runtime 시험 전용으로 한정하지 않는다. Linux의 runtime·DedicatedServer·headless baseline은 별도 지원표로 관리하며, Linux 전체 Studio는 이 요구에서 자동 확정하지 않는다.
+Windows와 macOS는 모두 **정식 개발 플랫폼**이다. 두 OS에 전체 Rocks Studio(UI 툴킷 제작 화면과 3D viewport), 프로젝트 생성, 빌드·메타 컴파일러·셰이더 cook·DDC·에셋 편집·PIE·테스트·headless를 제공한다. macOS를 Metal runtime 시험 전용으로 한정하지 않는다. Linux의 runtime·DedicatedServer·headless baseline은 별도 지원표로 관리하며, Linux 전체 Studio는 이 요구에서 자동 확정하지 않는다.
 
-공통 Studio 기능과 데이터 계약은 유지하고 OS 통합부만 교체한다. Windows shell은 WebView2와 네이티브 viewport surface, macOS shell은 WKWebView와 AppKit/Metal surface를 사용한다. 웹 화면은 동일 명령·transaction·selection·undo 스키마를 사용하며 플랫폼마다 다른 frontend를 별도로 제작하지 않는다. WebView2는 Windows 앱 내 웹 콘텐츠 통합을, WKWebView는 AppKit 앱의 웹 view 통합을 제공한다. [Microsoft WebView2](https://learn.microsoft.com/en-us/microsoft-edge/webview2/), [Apple WebKit for AppKit](https://developer.apple.com/documentation/webkit/webkit-for-appkit-and-uikit)
+공통 Studio 기능과 데이터 계약은 유지하고 OS 통합부만 교체한다. Studio 화면은 게임 UI와 같은 UI 툴킷으로 구성하며 두 OS가 같은 widget·명령·transaction·selection·undo 스키마를 사용한다. OS별 차이는 PlatformWindow adapter(Windows는 Win32 창·TSF, macOS는 AppKit 창·NSTextInputClient)에 한정하고 플랫폼마다 다른 frontend를 별도로 제작하지 않는다. 툴킷의 구조와 계약은 [UI 툴킷 설계](UiToolkit.ko.md)를 따른다.
 
-Native viewport는 web canvas에 영상만 전송하는 대체품이 아니라 해당 OS의 실제 graphics surface다. focus·IME·단축키·clipboard·drag/drop·gamepad·고해상도 배율·다중 monitor·window 재배치·PIE input capture를 공통 acceptance로 검증한다. JS↔host 메시지는 versioned value/handle만 전달하고 raw pointer·native 객체 소유권을 전달하지 않는다. web process 재시작·viewport close·PIE 종료 시 session/generation을 검사하여 늦은 요청을 폐기한다. OS UI thread와 Render owner lane의 경계를 유지한다.
+3D viewport는 UI 트리 안의 SubViewport widget이며 해당 OS의 실제 graphics surface에 렌더링한 결과를 표시한다. focus·IME·단축키·clipboard·drag/drop·gamepad·고해상도 배율·다중 monitor·window 재배치·PIE input capture를 공통 acceptance로 검증한다. 외부 자동화·원격 도구와의 메시지는 versioned value/handle만 전달하고 raw pointer·native 객체 소유권을 전달하지 않는다. viewport close·PIE 종료 시 session/generation을 검사하여 늦은 요청을 폐기한다. OS UI thread와 Render owner lane의 경계를 유지한다.
 
 | 개발 영역 | Windows·macOS 공통 필수 계약 | 플랫폼별 실행·배포 규약 |
 |---|---|---|
 | Core·Object·Task | 동일 소스의 CPU-only build/test, allocator·handle·GC·shutdown 검증 | 각 OS의 native compiler·sanitizer/진단 도구로 시험하고 미지원 검사를 NOT RUN으로 기록 |
 | Build·MetaCompiler | 같은 manifest/action graph·진단 스키마·증분 무효화 규약 | Windows SDK와 Apple SDK를 독립 toolchain으로 고정; host 실행 파일과 target 산출물 분리 |
 | Asset·Shader·DDC | 같은 import/cook API·content identity·원자적 게시·취소·복구 | target compiler worker를 명시 선택; host 간 결과 동등성은 시험한 artifact만 공유 |
-| Studio·PIE | World/Session 분리, material/UI/cutscene/prefab 등 완성된 편집 기능의 양OS 제공 | WebView2/WKWebView 차이를 adapter에 한정; macOS Metal viewport와 Windows native RHI 각각 검증 |
-| Headless·CI | `rocks build`, `rocks cook`, `rocks test` 등 동일 CLI 계약, exit code·JSON·timeout·graceful shutdown | CPU-only는 window/GPU/WebView가 없는 환경에서 수행; offscreen GPU suite는 별도 실행 |
+| Studio·PIE | World/Session 분리, material/UI/cutscene/prefab 등 완성된 편집 기능의 양OS 제공 | 창·text service 차이를 PlatformWindow adapter에 한정; macOS Metal viewport와 Windows native RHI 각각 검증 |
+| Headless·CI | `rocks build`, `rocks cook`, `rocks test` 등 동일 CLI 계약, exit code·JSON·timeout·graceful shutdown | CPU-only는 window/GPU가 없는 환경에서 수행; offscreen GPU suite는 별도 실행 |
 | 배포·디버깅 | version·symbol·crash artifact·지원 manifest 일치 | Windows 서명·설치 검증과 macOS app bundle·서명·notarization 검증을 각각 native CI에서 수행 |
 
 Toolhost와 target ABI는 `OS × CPU(x64/ARM64) × compiler/SDK × configuration × contract version`으로 식별한다. x64와 ARM64의 executable·library·PCH/BMI·object·symbol을 교환하지 않는다. 각 지원 조합은 빌드 가능·실행 검증·배포 검증 상태를 별도 기록하며, 에뮬레이션 실행을 native 검증으로 대체하지 않는다. 프로세스/worker 경계에는 크기·정렬·endianness를 정의한 직렬화 메시지 또는 검증된 C ABI만 사용한다. C++ 객체 layout·예외·CRT allocator를 compiler/architecture가 다른 모듈 사이의 ABI로 노출하지 않는다. native plugin은 같은 target ABI로 별도 빌드한다. 이 규약은 초기 정적 모듈 구성에도 적용하며 동적 loader를 Foundation 선행 조건으로 만들지 않는다.
 
 경로의 대소문자 충돌·Unicode 정규화·separator·symlink·긴 경로·파일 잠금·원자적 교체 차이를 Platform/FileSystem에서 검증한다. 공통 에셋 ID는 절대 경로에 의존하지 않으며 저장소에는 대소문자로만 구분되는 경로를 허용하지 않는다. 코드 생성은 target ABI·define을 명시 입력으로 받고 native host 구조체의 offset을 타 target의 값으로 재사용하지 않는다. DDC/action key에는 target·compiler/translator digest·SDK·옵션·binding/layout·schema 및 실제 입력 closure를 포함한다. host가 다르면 우선 분리하고, 정규화한 artifact의 byte 동일성을 검증한 변환만 공용 cache namespace를 사용한다. 영상의 허용 오차 비교를 cache 산출물의 동일성으로 대체하지 않는다.
 
-**셰이더 target과 compiler host의 구분.** 5개 RHI의 첫 정식 renderer gate는 모두 필수지만, 모든 API를 모든 OS에서 실행한다는 의미는 아니다. Core/Foundation은 GPU·WebView·shader SDK에 의존하지 않는다. Studio 양OS 동등 지원은 제작 작업과 데이터의 동등 지원이며 hardware capability 차이의 은폐가 아니다.
+**셰이더 target과 compiler host의 구분.** 5개 RHI의 첫 정식 renderer gate는 모두 필수지만, 모든 API를 모든 OS에서 실행한다는 의미는 아니다. Core/Foundation은 GPU·window·shader SDK에 의존하지 않는다. Studio 양OS 동등 지원은 제작 작업과 데이터의 동등 지원이며 hardware capability 차이의 은폐가 아니다.
 
 | target | 산출물·기준 compiler 경로 | Windows·macOS host 처리 | 필수 target 검증 |
 |---|---|---|---|
@@ -188,10 +190,10 @@ Apple은 Windows용 Metal 제작 도구와 macOS/Windows용 Metal Shader Convert
 
 | Gate | 필수 수용 기준 |
 |---|---|
-| PL01 · C00–Foundation | Windows·macOS native CPU-only Core/Object suite; 실패 주입·잔존 allocation/lease·thread 종료, GPU/WebView link dependency 0건 |
+| PL01 · C00–Foundation | Windows·macOS native CPU-only Core/Object suite; 실패 주입·잔존 allocation/lease·thread 종료, GPU/window link dependency 0건 |
 | PL02 · M3 도구 | 양OS clean checkout→project→build/meta/cook/test, 공백·Unicode·대소문자 충돌 fixture, cold/warm DDC와 취소/재시작 |
 | PL03 · M3/M4 renderer | 5개 backend의 §11.5 기본 profile·Deferred/Forward·offscreen·실장비 검증; SDK/장비 미확보는 미완료 |
-| PL04 · M3/M4 Studio | 양OS 웹+native viewport, asset 편집/undo·기본 material·PIE·저장/재개·input/IME/DPI·프로세스 실패 복구 |
+| PL04 · M3/M4 Studio | 양OS UI 툴킷 Studio·viewport, asset 편집/undo·기본 material·PIE·저장/재개·input/IME/DPI·프로세스 실패 복구 |
 | PL05 · 해당 기능 첫 정식 단계 | UI Designer·컷씬 등 후속 편집기의 같은 기능을 양OS에서 검증; Windows만 통과한 결과로 공통 기능 완료 선언 금지 |
 | PL06 · 배포 | 양OS native CI의 CPU/headless/GPU 결과 구분, 서명된 패키지의 깨끗한 장비 실행, symbol 복원·crash 수집·종료 후 자원 누수 0건 |
 
@@ -202,6 +204,8 @@ Apple은 Windows용 Metal 제작 도구와 macOS/Windows용 Metal Shader Convert
 ### 3.1 계층 구조
 
 <!-- FIGURE:layers -->
+
+그림 최상단 Editor 층의 「웹 UI」 표기는 개정 1.4에서 게임 UI와 같은 UI 툴킷으로 대체한다. 그림 원본은 저장소 밖에 있으며 다음 배포본에서 갱신한다.
 
 그림의 아래쪽 모듈은 위쪽 모듈을 참조하지 않는다. 시스템 간 데이터 전달은 공통 계약 타입과 WorldIntegration의 조합으로 구현한다. Registry·GC·Reflection의 밀접한 내부 결합은 ObjectRuntime이라는 하나의 라이브러리 안에서 관리한다.
 
@@ -220,13 +224,15 @@ Apple은 Windows용 Metal 제작 도구와 macOS/Windows용 Metal Shader Convert
 | RenderGraph / Renderer | RHI, Task, Core, RenderData | pass·GPU Scene·조명·메시. World 순회 없음 |
 | MaterialSchema / Compiler / Runtime | Core·Schema / Host ShaderWorker / RenderData·RHI | graph 계약·host 컴파일·cooked 실행 분리; 14.6절 세부 의존 |
 | Physics / Audio / Navigation | Core, Task, 각 vendor adapter | 독립 네이티브 runtime. Entity/Renderer 내부 주소 없음 |
-| Animation / VFX / UI | Core, Task, Asset 데이터 및 해당 backend | 데이터 처리·실행. World 연결은 통합 계층에서 수행 |
+| Animation / VFX | Core, Task, Asset 데이터 및 해당 backend | 데이터 처리·실행. World 연결은 통합 계층에서 수행 |
+| UI / TextLayout | ObjectRuntime, MetaSchema, Task, TextLayout / Core, shaping·폰트 adapter | widget 트리·레이아웃·테마·입력 라우팅·UiDrawList 기록 / shaping·줄바꿈·BiDi. RHI·World·PlatformWindow 직접 의존 금지 |
+| UiRender | UI의 UiDrawList 계약, RHI, Task | 배칭·클립·glyph atlas. widget Object 순회 금지 |
 | NetCore / Replication | Core, IO / ObjectRuntime, MetaSchema | transport와 객체 replication 분리. Renderer 없음 |
 | ScriptRuntime | ObjectRuntime, MetaSchema, Task | bytecode VM·root provider·native binding. World·Renderer 의존 금지 |
 | Gameplay / WorldIntegration | World, ScriptRuntime 및 필요한 시스템 | component binding·render/physics/audio command 변환 |
 | BuildDriver / BuildAgent | Host Core, manifest·toolchain·artifact store | action DAG·캐시·local/remote executor. Shipping 링크 금지 |
 | EditorBackend | WorldIntegration, Asset 도구, Transaction | 편집 명령·PIE·검증. Runtime이 이 모듈을 참조하지 않음 |
-| EditorWeb / HostTools | RPC schema / Clang·DXC·임포터 | 프런트엔드·메타 생성·쿠킹. Shipping 링크 금지 |
+| EditorFramework / HostTools | UI, EditorBackend / Clang·DXC·임포터 | 에디터 셸·Inspector·확장점 / 메타 생성·쿠킹. Shipping 링크 금지 |
 
 RenderData, PhysicsData, AudioData는 안정적인 ID와 평범한 데이터 구조만 포함한다. World의 MeshComponent가 Renderer를 직접 소유하는 대신 WorldIntegration이 자원 핸들과 RenderInstanceId를 연결한다. 공유 계약 라이브러리로 상향 의존을 대체하되 모든 모듈이 참조하는 범용 서비스 모음으로 확대하지 않는다.
 
@@ -238,9 +244,9 @@ Engine/ObjectRuntime/{Registry,Reflection,GC}  ObjectSerialization
 Engine/AssetRuntime  World  WorldIntegration  Gameplay
 Engine/RHI/{Null,D3D11,D3D12,Vulkan,Metal,OpenGL}  RenderGraph  Renderer
 Engine/MaterialSchema  MaterialRuntime  MaterialAssetBridge
-Tools/MaterialCompiler  MaterialCook  Editor/Material  Editor/Web/Material
-Engine/Physics  Animation  Audio  Navigation  Network  AI  VFX  UI  ScriptRuntime
-Editor/Backend  Editor/Web  Tools/{BuildDriver,BuildAgent,MetaCompiler,ScriptCompiler,Cooker,ShaderWorker,Packager}
+Tools/MaterialCompiler  MaterialCook  Editor/Material
+Engine/Physics  Animation  Audio  Navigation  Network  AI  VFX  UI  TextLayout  UiRender  ScriptRuntime
+Editor/Backend  Editor/Framework  Tools/{BuildDriver,BuildAgent,MetaCompiler,ScriptCompiler,Cooker,ShaderWorker,Packager}
 ThirdParty/Adapters  Tests/{Unit,Stress,Integration,Render,Network}
 Samples/VerticalSlice  Benchmarks  Build  Schemas
 ~~~
@@ -250,6 +256,8 @@ Samples/VerticalSlice  Benchmarks  Build  Schemas
 ### 3.3 수학 라이브러리·SIMD·정밀도 정책
 
 **Rocks의 수학은 검증된 라이브러리를 채택하고, 공개 API와 데이터 규약을 자체 코드 스타일로 제공한다.** 벡터·행렬·쿼터니언 연산, 역행렬, 분해, 보간, 초월함수와 SIMD 근사 알고리즘을 처음부터 작성하지 않는다. 저장형 wrapper, 좌표·행렬 규약 변환, 오류 정책, 선택 라이브러리 호출 adapter와 batch 실행 구성은 자체 구현 범위다. 기능이 부족하면 검증된 추가 라이브러리를 평가하며 임시 자체 수학 구현으로 보충하지 않는다.
+
+> **2026-11-11 개정 메모:** 사용자 지시에 따라 Core 수학 기반을 외부 라이브러리 선정 전에 자체 구현으로 먼저 제공한다. 구조는 UE의 `GenericPlatformMath` → CPU별(SSE2·NEON) 구현 → 벡터 레지스터 계층을 따라 플랫폼별로 최적화된 함수를 선택하고, 같은 연산 순서의 scalar 기준 구현을 항상 함께 두어 차등 검증한다. 공개 구현(UE 5.6 고정 커밋 등)은 의미 대조에만 사용하고 코드를 복제하지 않으며, 행렬 역·분해·교차 판정은 Laplace 전개·Shepperd 방식·slab 검사처럼 교과서적 알고리즘으로 작성한다. 아래 외부 backend 후보 평가와 batch kernel 채택 기준(MX01–MX08)은 유지하며, 측정 결과로 특정 연산을 외부 구현으로 교체할 수 있다. 실제 구현 범위와 검증 상태는 [수학 구현](../Implementation/Math.ko.md)에 기록한다.
 
 라이브러리의 품질·성능 평가와 공개 API의 명명·코드 스타일은 별도 기준으로 관리한다. 공개 API는 `rocks::Vec3`, `rocks::Quat`, `rocks::Mat4`, `rocks::WorldPosition`처럼 의미가 명확한 이름을 사용한다. `XMVECTOR`·`XMVector…`와 vendor 호출 규약을 게임 코드에 노출하지 않는다. RTM도 C 스타일 API를 사용하므로 원형을 그대로 공개하지 않는다. 코드 가독성·일관성·디버깅·유지보수 비용을 성능과 함께 선정 기준에 포함한다.
 
@@ -596,7 +604,7 @@ struct TypeInfo {
 };
 ~~~
 
-비표준 layout Object에 offsetof를 무조건 적용하지 않는다. 생성된 typed accessor와 friend 함수를 사용한다. offset 최적화는 지원 ABI에서 검증된 경우에만 내부적으로 적용한다. 메타 정보는 native vtable 주소나 웹에 전달할 raw pointer를 포함하지 않는다.
+비표준 layout Object에 offsetof를 무조건 적용하지 않는다. 생성된 typed accessor와 friend 함수를 사용한다. offset 최적화는 지원 ABI에서 검증된 경우에만 내부적으로 적용한다. 메타 정보는 native vtable 주소나 외부 도구에 전달할 raw pointer를 포함하지 않는다.
 
 Archive는 FieldId, wire type, payload length 기반으로 구성하며 unknown field를 건너뛴다. 패키지 내 객체 참조는 export/import ID, 외부 에셋은 AssetId, 네트워크 객체는 NetObjectId로 저장한다. ObjectHandle은 프로세스 로컬이므로 파일·네트워크에 기록하지 않는다. container 길이·재귀 깊이·압축 해제 크기·문자열 길이를 제한한다. 저장 중에는 snapshot 또는 편집 transaction boundary를 고정한다.
 
@@ -751,7 +759,7 @@ NL03/NL04·PI05의 asset 통합 부속 사례는 성공 직후 마지막 ticket 
 
 Package는 header/version, export/import table, dependency manifest, chunk table, codec, checksum, bulk payload를 갖는다. mmap 가능한 불변 데이터와 고정·변환이 필요한 데이터를 분리한다. atomic rename으로 cook output을 publish하고 중단된 임시 파일은 유효 산출물로 인식하지 않는다. compression·IO block 크기는 SSD 접근 패턴과 임계 메모리로 측정한다.
 
-배포 manifest는 콘텐츠 hash와 명시 버전을 사용한다. 패치는 변경 chunk만 교체하고 구 manifest로 rollback할 수 있어야 한다. 잘린 파일, checksum 오류, 해제 크기 폭증, dependency 누락을 오류 주입으로 검증한다. 최종 패키지는 editor, importer, LLVM, 웹 개발 서버, 원본 source asset 없이 실행할 수 있어야 한다.
+배포 manifest는 콘텐츠 hash와 명시 버전을 사용한다. 패치는 변경 chunk만 교체하고 구 manifest로 rollback할 수 있어야 한다. 잘린 파일, checksum 오류, 해제 크기 폭증, dependency 누락을 오류 주입으로 검증한다. 최종 패키지는 editor, importer, LLVM, 원본 source asset 없이 실행할 수 있어야 한다.
 
 ### 9.4 Virtual Asset·원본 bulk·재임포트
 
@@ -1145,15 +1153,15 @@ Unreal의 문서는 live update·node preview·platform stats·generated shader 
 
 | 모듈·예정 파일 | 의존·책임 | 금지 의존·수명 |
 |---|---|---|
-| MaterialSchema: Public/Material/GraphSchema.h, NodeDescriptor.h, ParameterSchema.h | Core·MetaSchema·Serialization; stable NodeId/PinId/ParameterId·schema version·domain | RHI·World·웹·Object 포인터 없음 |
-| MaterialCompiler: GraphValidator.cpp, MaterialIR.cpp, HlslEmitter.cpp, SourceMap.cpp | Host Core·MaterialSchema·ShaderWorker; typed DAG 검증·IR·HLSL·diagnostic | EditorWeb 없이 headless 실행; host DXC/STL은 Runtime에 유입 금지 |
+| MaterialSchema: Public/Material/GraphSchema.h, NodeDescriptor.h, ParameterSchema.h | Core·MetaSchema·Serialization; stable NodeId/PinId/ParameterId·schema version·domain | RHI·World·에디터 UI·Object 포인터 없음 |
+| MaterialCompiler: GraphValidator.cpp, MaterialIR.cpp, HlslEmitter.cpp, SourceMap.cpp | Host Core·MaterialSchema·ShaderWorker; typed DAG 검증·IR·HLSL·diagnostic | EditorFramework 없이 headless 실행; host DXC/STL은 Runtime에 유입 금지 |
 | MaterialRuntime: MaterialHandle.h, MaterialInstance.h, MaterialBinding.cpp | Core·RenderData·RHI 계약; cooked shader set·parameter layout·frame snapshot | graph UI·Clang·DXC·원본 node 구현 없음 |
 | MaterialAssetBridge: MaterialAsset.cpp | AssetRuntime·ObjectRuntime·MaterialSchema/Runtime; 원본·의존 asset·cooked artifact 연결 | Renderer가 Object graph를 순회하지 않음 |
 | MaterialCook: MaterialCook.cpp | Host-only target; Asset 도구·MaterialSchema·MaterialCompiler·cooked format 계약 | Shipping 링크 제외; Compiler/DXC 의존은 이 target에서만 사용 |
-| EditorMaterial: GraphCommands.cpp, PreviewSession.cpp, CompileCoordinator.cpp | EditorBackend transaction·asset bridge·compiler service·renderer preview | async callback에 raw Object/WebView 주소 캡처 금지 |
-| Editor/Web/Material: MaterialGraph.tsx, InstancePanel.tsx, DiagnosticsPanel.tsx | versioned RPC schema; 그래프·속성·인스턴스·오류 UI | 브라우저에서 별도 shader 의미/validator 구현 금지 |
+| EditorMaterial: GraphCommands.cpp, PreviewSession.cpp, CompileCoordinator.cpp | EditorBackend transaction·asset bridge·compiler service·renderer preview | async callback에 raw Object/widget 주소 캡처 금지 |
+| EditorMaterial 화면: MaterialGraphView.cpp, InstancePanel.cpp, DiagnosticsPanel.cpp | EditorFramework·UI 툴킷 그래프 편집 widget; 그래프·속성·인스턴스·오류 화면 | 화면 코드에서 별도 shader 의미/validator 구현 금지 |
 
-경로는 모듈 내부 Public/Private 상대 경로 제안이다. MaterialSchema/MaterialRuntime은 Runtime STL 비사용 정책을 따른다. 그래프 canvas widget은 필요하면 다른 전문 도구에서 재사용할 수 있으나 node 의미·VM·execution flow를 통합한 범용 Blueprint 시스템으로 확대하지 않는다. EditorWeb와 native viewport는 동일한 preview session/route epoch를 사용한다.
+경로는 모듈 내부 Public/Private 상대 경로 제안이다. MaterialSchema/MaterialRuntime은 Runtime STL 비사용 정책을 따른다. 그래프 canvas widget은 필요하면 다른 전문 도구에서 재사용할 수 있으나 node 의미·VM·execution flow를 통합한 범용 Blueprint 시스템으로 확대하지 않는다. 그래프 화면과 preview viewport는 동일한 preview session/route epoch를 사용한다.
 
 ~~~cpp
 struct MaterialNodeDescriptor {
@@ -1205,7 +1213,7 @@ CompileCoordinator는 연속 편집을 debounce/coalesce하고 foreground materi
 
 compile 실패 시 preview는 이전 검증 shader를 유지하되 ‘현재 graph와 다른 마지막 성공 버전’ 상태와 오류 위치를 표시한다. 성공 shader set·parameter layout·resource binding은 호환성을 검사하여 frame 경계에서 한 묶음으로 교체한다. parameter 갱신과 texture 교체도 frame별 immutable snapshot을 사용한다. 구 PSO·shader·texture·descriptor는 recording lease와 실제 마지막 GPU fence가 모두 종료된 뒤 회수한다. node/graph를 닫았다는 이유로 진행 중 GPU 자원을 해제하지 않는다.
 
-성능 검증은 dynamic parameter-only 변경의 compile job 0개, graph UI layout-only 편집의 semantic hash 불변, 변경된 function의 역의존 closure만 재컴파일하는지를 우선 판정한다. warm/cold compile p50/p95, worker queue, DDC hit, foreground preview 도달 시간, VRAM을 계측한 뒤 시간 목표를 확정한다. 웹 편집·CPU headless compiler와 GPU offscreen preview의 검증 결과를 구분한다.
+성능 검증은 dynamic parameter-only 변경의 compile job 0개, graph UI layout-only 편집의 semantic hash 불변, 변경된 function의 역의존 closure만 재컴파일하는지를 우선 판정한다. warm/cold compile p50/p95, worker queue, DDC hit, foreground preview 도달 시간, VRAM을 계측한 뒤 시간 목표를 확정한다. 에디터 편집·CPU headless compiler와 GPU offscreen preview의 검증 결과를 구분한다.
 
 ### 14.9 필수 마일스톤과 수용 시험
 
@@ -1226,7 +1234,7 @@ compile 실패 시 preview는 이전 검증 shader를 유지하되 ‘현재 gra
 | MT05 | 빠른 edit·undo·cancel·session close·compile 결과 역순 도착 | 현재 hash/profile만 적용, stale publish·UAF 0건 |
 | MT06 | function/layer 반복 사용·parent chain·dependency 변경 | 순환 거부, instance별 override 분리, 영향 closure만 invalidation |
 | MT07 | compiler 실패·DDC 손상·worker 종료·cook 누락 variant | 이전 preview 상태 표시·재시도 한도·현재 source cook 실패 |
-| MT08 | 웹 editor 없는 CPU headless compile/cook·GPU offscreen 비교 | 동일 toolchain/profile의 canonical artifact hash, GPU 실행은 별도 지원 장비에서 확인 |
+| MT08 | 에디터 없는 CPU headless compile/cook·GPU offscreen 비교 | 동일 toolchain/profile의 canonical artifact hash, GPU 실행은 별도 지원 장비에서 확인 |
 | MT09 | shader/texture 교체 중 late GPU submit·preview 반복 종료 | recording/fence 전 free 0건, 완료 후 resource/lease 회수 |
 | MT10 | plugin node 추가·비활성 target·저장 충돌·draft recovery | Core 변경 없이 확장, unsupported 구분, source 보존 |
 
@@ -1555,7 +1563,7 @@ VFX는 System/Emitter/Module/Parameter로 구성하고 CPU 입자 baseline 이�
 
 VFX Graph는 typed module IR에서 CPU bytecode·GPU shader를 생성한다. parameter snapshot과 per-emitter state를 분리하고 async compute 결과의 queue dependency를 RenderGraph에 선언한다. particle motion vector·reactive mask·bounds를 제공하여 Deferred·Forward·temporal upscaling에서 ghosting·잘림을 검증한다. simulation budget, scalability LOD, warmup, pooling, preview scrubber를 포함한다.
 
-게임 UI는 웹 에디터 UI와 독립된 runtime UI다. retained widget tree, layout·style·input routing, focus·accessibility, text shaping, glyph atlas, image·vector primitive, clip·batch를 제공한다. 한국어 IME·Unicode·fallback font·localization·DPI scale을 지원한다. HarfBuzz/FreeType 계열은 adapter 후보로 검토하고 engine API에 해당 라이브러리 타입을 노출하지 않는다.
+게임 UI와 에디터(Rocks Studio)는 같은 UI 툴킷을 사용한다. 목표 수준은 Godot 4.x의 UI 체계이며 retained widget tree, anchor·container layout, theme·StyleBox, input routing, focus·accessibility, text shaping, glyph atlas, image·vector primitive, clip·batch를 제공한다. 한국어 IME·Unicode·fallback font·localization·DPI scale을 지원한다. HarfBuzz/FreeType 계열은 adapter 후보로 검토하고 engine API에 해당 라이브러리 타입을 노출하지 않는다. 툴킷의 구조·계약·Core 선행 항목·Godot 대비 검증 방식은 [UI 툴킷 설계](UiToolkit.ko.md)를 따른다.
 
 UI render는 출력 해상도에서 업스케일 이후 실행한다. widget Object와 render draw list를 분리하고 atlas page는 GPU fence 후 회수한다. large list virtualization·dirty layout·draw invalidation을 계측한다. native HUD·world-space UI·editor overlay의 hit test 경로를 구분한다.
 
@@ -1571,19 +1579,19 @@ WidgetAsset은 hierarchy·layout/style·animation·typed binding을 저장하고
 
 VFX는 ribbon/mesh/decal renderer·event·data interface·GPU readback latency·simulation cache를 명시한다. audio는 sound cue/variation·concurrency·dialogue/subtitle·submix/send·sample-clock scheduler·offline mixer를 추가한다. 유체·sparse volume cache·spatial audio의 지원은 별도 asset/decoder profile로 기록한다.
 
-### 21.2 UMG 계열 인게임 UI의 정식 범위
+### 21.2 인게임 UI의 정식 범위
 
-**인게임 UI runtime과 전용 UI Designer는 모두 P1 필수 기능이다.** 엔진 배포물은 WebView 없이 HUD·menu·inventory·dialogue·settings UI를 실행한다. WidgetAsset에 hierarchy·layout·style·animation·binding을 저장하고, 동작은 C++ 또는 자체 언어의 WidgetController로 구현한다. Widget Blueprint·event graph·별도 visual scripting VM은 제공하지 않는다. 작업 흐름의 참고 자료는 UMG Designer다. [S50](https://dev.epicgames.com/documentation/en-us/unreal-engine/umg-editor-reference-for-unreal-engine)
+**인게임 UI runtime과 전용 UI Designer는 모두 P1 필수 기능이다.** 엔진 배포물은 에디터 모듈 없이 HUD·menu·inventory·dialogue·settings UI를 실행한다. WidgetAsset에 hierarchy·layout·style·animation·binding을 저장하고, 동작은 C++ 또는 자체 언어의 WidgetController로 구현한다. Widget Blueprint·event graph·별도 visual scripting VM은 제공하지 않는다. UI runtime의 구조와 동작 수준은 Godot 4.x Control 체계를, Designer 작업 흐름은 UMG Designer를 참고한다. [S75](https://docs.godotengine.org/en/4.5/tutorials/ui/size_and_anchors.html), [S50](https://dev.epicgames.com/documentation/en-us/unreal-engine/umg-editor-reference-for-unreal-engine)
 
-기본 widget는 Canvas/Overlay/Horizontal·Vertical Box/Grid/Wrap/Scroll/VirtualList, Text/RichText/Image/Button/Toggle/Slider/Progress/EditableText/Dropdown을 포함한다. slot별 anchor·alignment·padding·size rule·min/max·aspect·safe area·DPI·clipping·z-order를 정의한다. user widget 재사용·nested template·theme/style asset·named slot·default/instance override를 지원한다.
+기본 배치는 anchor·offset과 Box·Grid·Margin·Center·Panel·Scroll·Split·Tab·Flow·AspectRatio container, VirtualList이며, 기본 widget는 Text/RichText/Image/Button/Toggle/Slider/Progress/EditableText/Dropdown을 포함한다. 자식 widget의 anchor·offset·grow·size flags·stretch ratio·min size·aspect·safe area·DPI·clipping·z-order를 정의한다. 배치 속성은 slot 객체가 아니라 자식 widget에 두는 것을 기준안으로 하며 UI 툴킷 설계의 UD2에서 확정한다. user widget 재사용·nested template·theme asset(type variation·widget override)·StyleBox·named slot·default/instance override를 지원한다.
 
 widget instance는 UI World/LocalPlayer scope의 owner를 갖고, dynamic 생성·attach·visibility·enabled·remove·destroy를 명확히 구분한다. controller delegate·animation·async asset lease는 owner 해제 시 취소한다. root widget이 사라져도 이벤트 연결 때문에 인게임 World 전체가 잔존하지 않게 검사한다.
 
 ### 21.3 전용 UI Designer와 preview
 
-웹 UI Designer는 widget palette·hierarchy·drag/drop canvas·선택/정렬/분배·anchor/constraint gizmo·property Inspector·style/theme·binding panel·animation timeline·미리보기 장치를 제공한다. Undo/Redo·복제·reparent·다중 선택·copy/paste·asset reference·수정 충돌을 공통 Transaction에 연결한다.
+UI Designer는 Studio의 UI 툴킷 화면으로 구현하며 widget palette·hierarchy·drag/drop canvas·선택/정렬/분배·anchor gizmo·property Inspector(에디터 공통 Inspector 재사용)·theme·binding panel·animation timeline·미리보기 장치를 제공한다. Undo/Redo·복제·reparent·다중 선택·copy/paste·asset reference·수정 충돌을 공통 Transaction에 연결한다.
 
-미리보기는 editor DOM으로 비슷하게 재현하는 데서 종료하지 않고 실제 runtime layout/shaping/render 결과를 native preview에 표시한다. viewport 좌표·DPI 변환을 고정하여 drag/hit test가 동일 widget을 선택해야 한다. design-time sample ViewModel·상태·해상도·언어·gamepad focus를 바꿔 preview한다. 동작 이벤트는 binding된 자체 언어 source/함수로 이동한다.
+Designer canvas는 게임과 같은 UI runtime이 직접 계산한 layout/shaping/render 결과이며 별도의 근사 미리보기를 두지 않는다. viewport 좌표·DPI 변환을 고정하여 drag/hit test가 동일 widget을 선택해야 한다. design-time sample ViewModel·상태·해상도·언어·gamepad focus를 바꿔 preview한다. 동작 이벤트는 binding된 자체 언어 source/함수로 이동한다.
 
 UI animation은 opacity·색·render transform·선택 layout property를 keyframe·curve·clip으로 편집한다. gameplay clock·real clock·cutscene clock을 명시하고 pause/time dilation 영향을 선택한다. 공유 curve/evaluator 기반을 사용할 수 있으나 UI timeline의 local time과 world sequence의 timebase를 혼동하지 않는다.
 
@@ -1591,23 +1599,23 @@ UI animation은 opacity·색·render transform·선택 layout property를 keyfra
 
 ViewModel은 reflected field·typed command·property-changed event를 제공한다. 매 frame 모든 getter를 호출하는 polling을 기본으로 하지 않는다. binding은 stable FieldId/type으로 cook 검증하며 null·collection diff·model 교체·구독 해제·thread dispatch를 처리한다. worker 결과는 Game/UI lane command로 적용한다. MVVM 계열 개념은 공식 자료와 대조하고 자체 언어에 연결한다. [S51](https://dev.epicgames.com/documentation/en-us/unreal-engine/umg-viewmodel-for-unreal-engine)
 
-입력은 hit-test grid·tunnel/bubble·mouse capture·keyboard/gamepad focus·tab/navigation·modal stack·drag/drop·tooltip·touch를 포함한다. LocalPlayer별 focus와 device routing을 분리하고 컷씬/PIE/editor focus를 control layer로 전환한다. EditableText는 IME composition·clipboard·grapheme 단위 cursor/selection·RTL/BiDi·password·validation을 지원한다. UTF-8 byte offset을 사용자 글자 index로 사용하지 않는다.
+입력은 Godot과 같은 전파 순서(전역 input → widget gui input의 mouse_filter 기반 부모 전파 → shortcut → unhandled)를 따르며 hit-test grid·mouse capture·keyboard/gamepad focus·tab/navigation·modal stack·drag/drop·tooltip·touch를 포함한다. [S76](https://docs.godotengine.org/en/4.5/tutorials/inputs/inputevent.html) LocalPlayer별 focus와 device routing을 분리하고 컷씬/PIE/editor focus를 control layer로 전환한다. EditableText는 IME composition·clipboard·grapheme 단위 cursor/selection·RTL/BiDi·password·validation을 지원한다. UTF-8 byte offset을 사용자 글자 index로 사용하지 않는다.
 
 layout/paint invalidation·retainer target·virtual list·batch·clip·atlas budget을 profiler에서 표시한다. UI material은 별도 material domain과 입력 capability를 가진다. screen UI는 upscaling 이후 output 해상도에서, world-space UI는 scene geometry/texture와 hit test 정책으로 처리한다. HDR UI luminance는 OutputSurface 규약에 맞게 합성하고 TAA/DOF/blur에 HUD가 무단 포함되지 않게 한다.
 
 ### 21.5 UI milestone과 검증
 
-Core Foundation 뒤 M3에 WidgetAsset·hierarchy·basic canvas·runtime preview를 구현한다. M4에 HUD/menu·기본 controls·input·자체 언어 callback·Undo/저장/cook을 완료한다. M5에 typed binding·virtual list·gamepad focus·UI animation, M6에 world widget·HDR·복잡한 localization/IME·전문 Designer를 완성한다.
+UI 코어(UI 툴킷 설계의 UT1)는 창·GPU 없이 시험할 수 있으므로 Foundation Gate 직후 착수한다. M3에 출력·에디터용 widget·에디터 프레임워크(UT2–UT4)와 WidgetAsset·hierarchy·basic canvas·runtime preview를 구현한다. M4에 HUD/menu·기본 controls·input·자체 언어 callback·Undo/저장/cook을 완료한다. M5에 typed binding·virtual list·gamepad focus·UI animation, M6에 world widget·HDR·복잡한 localization/IME·전문 Designer를 완성한다.
 
-필수 sample은 gameplay HUD, inventory virtual list, gamepad settings menu, dialogue/subtitle, editable chat input이다. editor preview와 packaged game의 layout·hit test·image를 같은 WidgetAsset로 비교한다. 500개 visible widget·100개/초 model update fixture에서 UI CPU p95 ≤1 ms·GPU p95 ≤0.75 ms를 초기 미측정 목표로 두고, virtual list는 전체 item 수보다 visible 수에 비례하는 비용을 검증한다. CPU-only layout/바인딩 검사와 offscreen GPU 픽셀 검사를 모두 제공한다.
+필수 sample은 gameplay HUD, inventory virtual list, gamepad settings menu, dialogue/subtitle, editable chat input이다. editor preview와 packaged game의 layout·hit test·image를 같은 WidgetAsset로 비교한다. 500개 visible widget·100개/초 model update fixture에서 UI CPU p95 ≤1 ms·GPU p95 ≤0.75 ms를 초기 미측정 목표로 두고, virtual list는 전체 item 수보다 visible 수에 비례하는 비용을 검증한다. CPU-only layout/바인딩 검사와 offscreen GPU 픽셀 검사를 모두 제공한다. layout·입력 전파·focus·테마 해석·텍스트·최소 크기는 같은 장면의 Godot 실행 결과와 비교한다(GO1–GO6).
 
-## 22. 웹 에디터와 네이티브 뷰포트
+## 22. 네이티브 에디터와 뷰포트
 
-### 22.1 프로세스와 메시지 경계
+### 22.1 에디터 구성과 명령 경계
 
-Windows host는 WebView2, macOS host는 WKWebView 어댑터로 공통 TypeScript/React UI와 native RHI viewport를 배치한다. 웹 canvas에서 네이티브 화면을 매 프레임 video로 복사하는 구성을 기본으로 하지 않는다. 네이티브 viewport의 위치·크기·DPI·focus를 host가 조정한다. 투명 overlay와 창 겹침의 제약은 M3 prototype에서 검증한다. 두 host는 같은 editor RPC·transaction·focus 계약을 구현하며 플랫폼별 child window/view·DPI·IME·접근성을 독립 검증한다.
+Rocks Studio는 게임과 같은 UI 툴킷으로 구성한 프로세스 내 네이티브 에디터다. 셸·독·Inspector·Asset Browser·전문 편집기는 EditorFramework 모듈의 widget이며, 3D viewport는 UI 트리 안의 SubViewport widget으로 RHI 출력을 직접 표시한다. 별도 웹 프로세스·child window 겹침·영상 복사 구성을 사용하지 않는다. 하위 창은 내장 창과 OS 창을 모두 지원하는 것을 기준안으로 하며(UI 툴킷 설계 UD4), 두 OS의 차이는 PlatformWindow adapter에 한정한다. 창 위치·크기·DPI·focus·IME·접근성은 플랫폼별로 독립 검증한다.
 
-Web UI ↔ Editor RPC ↔ EditorBackend ↔ World/Asset/Transaction 구조를 사용한다. JSON schema 기반 메시지로 시작하고 대형 thumbnail·trace는 blob/shared memory handle로 전달한다. 메시지에는 protocol version, request ID, document/world ID, expected revision, object stable ID가 있다. raw pointer·임의 native function name·임의 파일 경로 실행은 제공하지 않는다.
+Studio 화면 ↔ EditorBackend ↔ World/Asset/Transaction 구조를 사용한다. 화면은 backend 명령을 typed 호출로 사용하고 객체 상태를 직접 변경하지 않는다. 명령에는 document/world ID, expected revision, object stable ID, 속성 경로(UI 툴킷 설계 CU4)가 있다. 같은 명령 schema를 외부 자동화·원격 도구용 RPC로 노출할 수 있으며, 이 경우 JSON schema 메시지·protocol version·request ID를 사용하고 대형 thumbnail·trace는 blob/shared memory handle로 전달한다. raw pointer·임의 native function name·임의 파일 경로 실행은 제공하지 않는다.
 
 ~~~text
 SetProperty(requestId, worldId, actorGuid, componentGuid,
@@ -1615,11 +1623,11 @@ SetProperty(requestId, worldId, actorGuid, componentGuid,
 → Success(newRevision) | Conflict(currentValue) | ValidationError
 ~~~
 
-backend는 thread affinity·권한·field type·range·대상 세대·revision을 검증한다. mouse drag는 preview update를 병합하고 release 시 하나의 undo command로 commit한다. 구조 변경과 저장은 원자적인 transaction boundary를 갖는다. WebView content의 origin·navigation·host message를 검증하고 native host surface를 제한한다. [S13](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/security)
+backend는 thread affinity·권한·field type·range·대상 세대·revision을 검증한다. mouse drag는 preview update를 병합하고 release 시 하나의 undo command로 commit한다. 구조 변경과 저장은 원자적인 transaction boundary를 갖는다. 외부 RPC는 연결 출처와 허용 명령을 검증하고 에디터 화면과 같은 validator를 거친다.
 
 ### 22.2 제작 기능과 transaction
 
-M3는 Outliner, Inspector, Asset Browser, native viewport, transform gizmo, log, save/load, undo/redo를 제공한다. M4/M5는 component tree·tag picker·prefab hierarchy/override·play/stop·multi-object edit·asset dependency/ref finder를 완료한다. 머티리얼 에디터는 같은 command·selection·transaction 체계 위의 필수 전문 도구다. M3/M4에 14.5–14.9절 MAT0–MAT2를 완료하며 compiler만 구현한 상태를 완료로 인정하지 않는다. Animation, VFX, Audio, Terrain, Sequencer, profiler 전문 편집기도 이 편집 계약으로 확장한다.
+M3는 UI 툴킷 위의 Outliner, Inspector, Asset Browser, 3D viewport, transform gizmo, log, save/load, undo/redo를 제공한다. M4/M5는 component tree·tag picker·prefab hierarchy/override·play/stop·multi-object edit·asset dependency/ref finder를 완료한다. 머티리얼 에디터는 같은 command·selection·transaction 체계 위의 필수 전문 도구다. M3/M4에 14.5–14.9절 MAT0–MAT2를 완료하며 compiler만 구현한 상태를 완료로 인정하지 않는다. Animation, VFX, Audio, Terrain, Sequencer, profiler 전문 편집기도 이 편집 계약으로 확장한다.
 
 Script Editor는 자체 언어의 문법 강조·자동 완성·정의 이동·진단·breakpoint·call stack·watch를 제공한다. 범용 node graph로 게임 로직을 작성하는 기능은 구현하지 않는다. 컷씬 편집기는 25절의 독립 핵심 제작 도구로 개발한다.
 
@@ -1661,9 +1669,9 @@ manifest는 매개변수·기본값·조건·출력 경로·소유권·capabilit
 
 ### 22.5 헤드리스·도입 순서·완료 기준
 
-예정 CLI는 `rocks template plan`, `rocks template apply`, `rocks template validate`를 제공한다. plan은 고정 template revision·매개변수·대상 base revision으로 변경 manifest를 출력하고, apply는 동일 plan을 재검증한 뒤 적용한다. 대화형 응답이 없는 경우 충돌을 오류와 JSON 보고서로 반환한다. validate는 schema·참조·코드 생성 규약과 선택된 빌드/에셋 검사를 수행한다. CLI와 에디터는 같은 planner·validator·applier를 사용하며 headless에서 window·GPU·WebView를 요구하지 않는다.
+예정 CLI는 `rocks template plan`, `rocks template apply`, `rocks template validate`를 제공한다. plan은 고정 template revision·매개변수·대상 base revision으로 변경 manifest를 출력하고, apply는 동일 plan을 재검증한 뒤 적용한다. 대화형 응답이 없는 경우 충돌을 오류와 JSON 보고서로 반환한다. validate는 schema·참조·코드 생성 규약과 선택된 빌드/에셋 검사를 수행한다. CLI와 에디터는 같은 planner·validator·applier를 사용하며 headless에서 window·GPU를 요구하지 않는다.
 
-첫 Core 작업 C00에는 Python host 기반 최소 scaffold만 둔다. Core target·테스트 runner·모듈 manifest의 반복 입력을 줄이는 제한된 생성기이며 Rocks 런타임·VM·웹 에디터에 의존하지 않는다. R0/R1에 전체 템플릿 서비스를 요구하지 않는다. Foundation 이후 M3에 project/module/test·카탈로그·CLI와 기본 material template, M4에 material 편집 통합·component/prefab/UI/input/import·transaction, M5에 고급 material/cutscene/build preset·사용자 저장·Linked 업데이트를 완성한다. 기본 material template을 M5까지 유예하지 않는다. 전문 편집 기능의 실제 완성 시점은 해당 시스템의 gate를 따른다.
+첫 Core 작업 C00에는 Python host 기반 최소 scaffold만 둔다. Core target·테스트 runner·모듈 manifest의 반복 입력을 줄이는 제한된 생성기이며 Rocks 런타임·VM·에디터에 의존하지 않는다. R0/R1에 전체 템플릿 서비스를 요구하지 않는다. Foundation 이후 M3에 project/module/test·카탈로그·CLI와 기본 material template, M4에 material 편집 통합·component/prefab/UI/input/import·transaction, M5에 고급 material/cutscene/build preset·사용자 저장·Linked 업데이트를 완성한다. 기본 material template을 M5까지 유예하지 않는다. 전문 편집 기능의 실제 완성 시점은 해당 시스템의 gate를 따른다.
 
 게임 배포물에는 생성·cook된 코드와 데이터만 포함한다. 카탈로그·planner·journal·Python·transformer를 런타임 필수 의존성으로 만들지 않는다. 템플릿은 제작 도구이며 런타임 기능 구현을 대신하지 않는다.
 
@@ -1754,7 +1762,7 @@ script reload는 함수 본문 교체부터 지원한다. 실행 중 frame은 �
 
 ### 23.3 제작 경험과 검증
 
-웹 Script Editor는 compiler와 동일 parser/type schema를 사용하는 language service를 연결한다. completion·rename·find references·hover·diagnostic·source map을 제공한다. debugger는 breakpoint·step·call stack·watch·native boundary 표시를 지원하고 멀티플레이에서 어느 process/world를 제어하는지 표시한다. 중단 시 physics/audio/Render와의 pause 정책을 명시한다.
+Studio의 Script Editor(UI 툴킷 코드 편집 widget)는 compiler와 동일 parser/type schema를 사용하는 language service를 연결한다. completion·rename·find references·hover·diagnostic·source map을 제공한다. debugger는 breakpoint·step·call stack·watch·native boundary 표시를 지원하고 멀티플레이에서 어느 process/world를 제어하는지 표시한다. 중단 시 physics/audio/Render와의 pause 정책을 명시한다.
 
 conformance corpus는 정상 코드뿐 아니라 잘못된 타입·미초기화·순환 import·잘못된 bytecode·GC 경합·reload·취소를 포함한다. AST/bytecode fuzzer와 C++ oracle fixture를 사용한다. allocation·native call·GC barrier·task 대기 비용을 profiler에 표시한다. 라이브러리 API 문서와 script binding 문서는 같은 TypeInfo에서 생성한다.
 
@@ -1871,9 +1879,9 @@ SequencePlayer는 필요한 asset bundle·World cell·animation·audio·VFX를 p
 
 멀티플레이 컷씬은 서버가 sequence asset/revision, binding, start tick, skip rule을 승인한다. client는 동기화된 timeline의 시각·음향을 평가하고 gameplay event는 서버만 확정한다. 늦은 참여는 현재 state로 seek하며 이미 실행된 reward/damage를 재발행하지 않는다. 개인 컷씬과 전체 플레이어 컷씬을 별도 정책으로 정의한다.
 
-### 25.3 웹 제작 UI와 협업 데이터
+### 25.3 타임라인 제작 UI와 협업 데이터
 
-타임라인은 track tree, clip section·trim·split·ripple 선택, keyframe, curve editor, snap, marker, zoom, frame-accurate playhead, shot thumbnail, waveform을 제공한다. viewport camera piloting, auto-key·manual-key, property key 생성, animation drag/drop, multi-track selection을 지원한다. 모든 편집은 stable track/key ID와 transaction을 사용하여 Undo/Redo·저장·충돌 검출에 연결한다.
+타임라인은 UI 툴킷의 타임라인 widget으로 구현하며 track tree, clip section·trim·split·ripple 선택, keyframe, curve editor, snap, marker, zoom, frame-accurate playhead, shot thumbnail, waveform을 제공한다. viewport camera piloting, auto-key·manual-key, property key 생성, animation drag/drop, multi-track selection을 지원한다. 모든 편집은 stable track/key ID와 transaction을 사용하여 Undo/Redo·저장·충돌 검출에 연결한다.
 
 dialogue는 localization key와 언어별 audio/subtitle timing을 분리한다. facial morph·viseme·look-at·gesture track을 지원하고 자동 lip sync는 선택적인 오프라인 도구로 후속 추가한다. take recorder는 입력·transform·pose·camera·event를 실제 timestamp로 기록한 뒤 sequence key로 bake한다. 외부 DCC camera/animation import·export는 동일 좌표·timebase 규약을 사용한다.
 
@@ -2120,7 +2128,7 @@ CI는 no-op·부분 수정·header 변경·full clean·cache restore·cache pois
 
 ### 27.10 패키징·플러그인·출시
 
-plugin은 compatible compiler/CRT로 시작하고 binary 경계는 versioned C function table·opaque handle·명시 allocator/destroy를 사용한다. task·callback·script/native metadata lease 종료 전 unload하지 않는다. Target별 shipping/editor-only dependency closure를 검사하여 Server/Cooker/Client에 불필요한 renderer·WebView·LLVM이 링크되지 않게 한다.
+plugin은 compatible compiler/CRT로 시작하고 binary 경계는 versioned C function table·opaque handle·명시 allocator/destroy를 사용한다. task·callback·script/native metadata lease 종료 전 unload하지 않는다. Target별 shipping/editor-only dependency closure를 검사하여 Server/Cooker/Client에 불필요한 renderer·EditorFramework·LLVM이 링크되지 않게 한다.
 
 PR은 Core/Object·메타·언어·헤드리스 sample·schema·증분 cook·금지 의존성 검사다. nightly는 sanitizer·GC/task/loader stress·network·UI·render/capture 회귀와 build scenario를 수행한다. Windows ASan과 지원 Linux ASan/UBSan/TSan을 구분한다. [S18](https://clang.llvm.org/docs/ThreadSanitizer.html)
 
@@ -2136,14 +2144,14 @@ PR은 Core/Object·메타·언어·헤드리스 sample·schema·증분 cook·금
 
 | Profile | 필요한 기능 | 포함하지 않는 기본 의존성 |
 |---|---|---|
-| CoreTest | Core·Task·Object·최소 schema/GC harness | World·GPU·window·WebView·audio device |
+| CoreTest | Core·Task·Object·최소 schema/GC harness | World·GPU·window·UI·audio device |
 | DedicatedServer | World·script·physics/nav·network·game data | Renderer/RHI backend·window·게임 UI·audio device |
-| Commandlet | 작업별 asset/schema/cook/build·선택 World | 기본 window·WebView·GPU·audio. 필요 capability는 명시 요청 |
+| Commandlet | 작업별 asset/schema/cook/build·선택 World | 기본 window·GPU·audio. 필요 capability는 명시 요청 |
 | Simulation/Replay | fixed clock·gameplay/AI/physics·state snapshot | presentation device, 선택 network |
-| EditorBackend | asset·transaction·prefab/script schema·자동화 API | WebView·native window. renderer는 별도 선택 |
+| EditorBackend | asset·transaction·prefab/script schema·자동화 API | Studio UI·native window. renderer는 별도 선택 |
 | OffscreenRender | Renderer·GPU·texture target·readback·offline audio | visible window·swapchain present·physical audio device |
 
-DedicatedServer는 PlatformBase와 필요한 library만 링크한다. PlatformWindow·Renderer·WebView를 한 공통 DLL의 강제 import로 포함하지 않는다. NullRHI는 resource/state validation 또는 renderer smoke test를 위한 선택 backend이며 CPU-only target의 필수 dependency가 아니다. Asset 요청·World activation mask도 해당 profile에 맞게 검사한다.
+DedicatedServer는 PlatformBase와 필요한 library만 링크한다. PlatformWindow·Renderer·UI를 한 공통 DLL의 강제 import로 포함하지 않는다. NullRHI는 resource/state validation 또는 renderer smoke test를 위한 선택 backend이며 CPU-only target의 필수 dependency가 아니다. Asset 요청·World activation mask도 해당 profile에 맞게 검사한다.
 
 ### 28.2 공통 BootServices와 CLI
 
@@ -2183,7 +2191,7 @@ exit code 계약은 0 성공, 2 입력/설정, 3 asset/schema, 4 실행/검증 �
 
 | 검증 묶음 | 필수 기준 |
 |---|---|
-| CPU dependency | GPU/WebView/audio device 없이 boot. Linux display 환경 변수·window server 없이 실행. GUI device 초기화 0건 |
+| CPU dependency | GPU/audio device 없이 boot. Linux display 환경 변수·window server 없이 실행. GUI device 초기화 0건 |
 | Foundation | Core/Object 정지형 GC·수명·동시성 stress를 CPU-only에서 재현하고 정확히 종료 |
 | Cook/Validate | metadata·script·prefab·UI·sequence·package 검사와 invalid fixture 오류 코드 검증 |
 | Server/Simulation | 16 client·60Hz·travel/reconnect·fixed tick·shutdown·soak, old World root 정리 |
@@ -2220,7 +2228,7 @@ ring buffer는 bounded이며 event loss count를 기록한다. profiling 자체�
 | B9 · High-end | dense static city·실내외 GI·night emissive·streaming | VG crack/누락 0건, GI artifact threshold·카탈로그 기능별 image 승인 |
 | B10 · Build/Iteration | I0–I6·branch/toolchain/cache/executor 변형 | stale hit·잘못된 증분 결과 0건, end-to-end latency·link 분리 측정 |
 | B11 · Headless | 28절 profile·cancel/device/missing fixture | capability·exit/report 정합·GPU 영상 job의 허위 성공 0건 |
-| B12 · UMG | Designer/game/CPU-layout/GPU-pixel 동일 WidgetAsset | binding·IME/focus·DPI/HDR·cook·수명과 21.5절 budget |
+| B12 · UI | Designer/game/CPU-layout/GPU-pixel 동일 WidgetAsset, Godot 오라클 GO1–GO6 | binding·IME/focus·DPI/HDR·cook·수명과 21.5절 budget |
 
 B2/B3의 CPU·GPU 시간은 overlap되는 각각의 critical path이며 합산값이 frame time은 아니다. B2의 2,000만 source triangle은 모든 삼각형의 동시 raster 비용을 뜻하지 않는다. visible triangle·shaded pixel·overdraw·material complexity·output resolution을 함께 기록한다. B1의 root snapshot·final remark·sweep cutoff도 시간 측정에서 제외하지 않는다. 대규모 root·거대 참조 배열·긴 VM frame은 별도 B1 확장 fixture에서 최대 정지와 backlog를 측정하며 기본 1천-root 목표를 그대로 일반화하지 않는다.
 
@@ -2250,7 +2258,7 @@ IO 지연·부분 read·DDC 손상·shader compile 실패·GPU memory budget 초
 
 로그는 category별 rate limit·중복 집계와 compile/runtime level을 제공한다. error/fatal도 bounded storage·별도 emergency 경로를 사용하며 저장 무한 보장을 선언하지 않는다. 로그나 trace를 위해 AudioRT/allocator/GC의 임계 구간에서 file IO·heap allocation·일반 lock wait를 수행하지 않는다. 중요 사건은 사전 확보 breadcrumb에 남기고 손실 수·구간·원인을 viewer에서 표시한다. 로그와 trace의 공통 correlation ID는 유지하되 모든 문자열 로그를 고율 trace로 복제하지 않는다.
 
-TraceCapture/TraceAnalysis/LensViewer를 분리하고 수집과 분석이 웹 UI에 의존하지 않게 한다. channel manifest·event schema/version·build ID·module symbol ID·clock quality·buffer high-water·loss 범위를 capture에 포함한다. session-owned metadata를 복사/보존하여 module unload 이후 분석할 수 있게 한다. allocation 추적은 예약 storage와 재귀 guard를 사용하고 callstack symbolization은 offline 또는 별도 worker에서 처리한다. 상세 memory channel을 중간에 시작한 경우 이전 할당은 snapshot baseline으로 구분하며 완전한 lifetime 기록으로 표시하지 않는다.
+TraceCapture/TraceAnalysis/LensViewer를 분리하고 수집과 분석이 에디터 UI에 의존하지 않게 한다. channel manifest·event schema/version·build ID·module symbol ID·clock quality·buffer high-water·loss 범위를 capture에 포함한다. session-owned metadata를 복사/보존하여 module unload 이후 분석할 수 있게 한다. allocation 추적은 예약 storage와 재귀 guard를 사용하고 callstack symbolization은 offline 또는 별도 worker에서 처리한다. 상세 memory channel을 중간에 시작한 경우 이전 할당은 snapshot baseline으로 구분하며 완전한 lifetime 기록으로 표시하지 않는다.
 
 Rocks Lens는 frame 선택→CPU/Task/GC/GPU/IO 구간 상관→관련 로그/asset/object 조회→capture 비교의 흐름을 지원한다. built-in diagnostic command는 typed registry에 등록하고 read-only snapshot을 기본으로 한다. 파괴적인 runtime 변경은 개발 모드 capability를 요구하며 shipping에는 필요한 최소 상태·crash breadcrumb만 포함한다. session 연결은 기본 local이며 외부 연결은 명시 endpoint·인증·권한 설정을 따른다. 비밀번호·token·사용자 입력 전문을 기본 로그 항목으로 수집하지 않는다.
 
@@ -2329,13 +2337,13 @@ line coverage는 누락 후보 탐색 수단이며 안정성 증명이 아니다
 
 | 단계·기준 기간 | 선행 조건 | 핵심 산출물 | 통과 gate |
 |---|---|---|---|
-| M0 · 1개월 | 착수 | Core bootstrap·PlatformBase·allocator·Array/Span·assert/trace·CPU runner, 최소 객체 계약 | F0–F2 초기 fixture, GPU/웹/언어 VM 의존 0 |
+| M0 · 1개월 | 착수 | Core bootstrap·PlatformBase·allocator·Array/Span·assert/trace·CPU runner, 최소 객체 계약 | F0–F2 초기 fixture, GPU/UI/언어 VM 의존 0 |
 | M1 · 2–3개월 | M0 | Core library·thread/task/IO·Registry·handle/reference·manual TypeInfo·Object 생성/파괴 | F1–F4 정확성·stress·no-op baseline |
-| M2 · 4–6개월 | M1 | ClassDefaults/instancing·full GC·barrier API·Archive·Clang 최소 생성기·Foundation 통합 | CF01–CF12·B0/B1 정확성 통과, 후속 착수 gate |
-| M3 · 기존 7–9개월 참고 | Foundation Gate | Rocks Build/local cache·asset/DDC·5종 RHI/RG 기본 개발·Deferred/Forward·texture/builtin·Material MAT0/MAT1·웹/UMG 기초·script L0/L1·spatial upscale | import→edit→save→cook→run, Win/Mac Studio·CPU headless·기본 PIE·iteration trace |
-| M4 · 기존 10–12개월 참고 | M3 | 5종 RHI 기본 Gate·lightmap/probe·정식 PIE·템플릿·애니메이션·물리/audio/input/AI·UMG runtime/Designer·Material MAT2·ScriptComponent·TAAU·기본 nested 컷씬·post, Incredibuild/분산 worker | gameplay+2분 컷씬, 두 렌더 경로·API/TX/BR/PI 전체 기본 profile 및 LT/TT/MT의 단계별 필수 subset·offscreen·UI callback·build adapter |
-| M5 · 13–16개월 | M4 | replication/subobject·travel·nested prefab·능력 기초·script debugger/async·FSR·UMG binding/animation·Material layer MAT3·adaptive probe/scenario·고급 post | B3/B5/B6/B8·I0–I6, GC 병렬/점진 최적화·agent 장애·headless server |
-| M6 · 17–20개월 | M5 | 컷씬/capture·EXR/AOV·HDR/post·DLSS/XeSS·ability/feature·UMG 전문 Designer·Material MAT3·기본 고급 재질 | B7·UMG/headless GPU 회귀·script reload·feature teardown·link profile |
+| M2 · 4–6개월 | M1 | ClassDefaults/instancing·full GC·barrier API·Archive·Clang 최소 생성기·UI용 리플렉션 계약 CU1–CU8·Foundation 통합 | CF01–CF12·B0/B1 정확성 통과, 후속 착수 gate |
+| M3 · 기존 7–9개월 참고 | Foundation Gate | Rocks Build/local cache·asset/DDC·5종 RHI/RG 기본 개발·Deferred/Forward·texture/builtin·Material MAT0/MAT1·UI 툴킷 UT1–UT4(Studio 기초)·script L0/L1·spatial upscale | import→edit→save→cook→run, Win/Mac Studio·CPU headless·기본 PIE·UI 오라클 GO1–GO6·iteration trace |
+| M4 · 기존 10–12개월 참고 | M3 | 5종 RHI 기본 Gate·lightmap/probe·정식 PIE·템플릿·애니메이션·물리/audio/input/AI·게임 UI runtime/Designer·Material MAT2·ScriptComponent·TAAU·기본 nested 컷씬·post, Incredibuild/분산 worker | gameplay+2분 컷씬, 두 렌더 경로·API/TX/BR/PI 전체 기본 profile 및 LT/TT/MT의 단계별 필수 subset·offscreen·UI callback·build adapter |
+| M5 · 13–16개월 | M4 | replication/subobject·travel·nested prefab·능력 기초·script debugger/async·FSR·UI binding/animation·Material layer MAT3·adaptive probe/scenario·고급 post | B3/B5/B6/B8·I0–I6, GC 병렬/점진 최적화·agent 장애·headless server |
+| M6 · 17–20개월 | M5 | 컷씬/capture·EXR/AOV·HDR/post·DLSS/XeSS·ability/feature·UI 전문 Designer·Material MAT3·기본 고급 재질 | B7·UI/headless GPU 회귀·script reload·feature teardown·link profile |
 | M7 · 21–24개월 | M6 | World Partition·HLOD·대량 AI·rig/retarget·terrain·PCG·audio graph, GPU-driven 정식화 | B4, long traversal·teleport·producer 경험·SoA budget |
 | M8 · 25–36개월 | M7 | VirtualGeometry·virtual shadow/texture 연구, advanced lens/post·denoiser | page fault fallback·crack·memory·두 경로 호환, 효과 catalog 중간 승인 |
 | M9 · 37–48개월 | M8 및 GI 사전 연구 | DynamicGI 고도화·reflection/RT·high-end post catalog·품질/출시 안정화 | B9, 전체 기능 traceability, production sample·장시간 QA |
@@ -2344,9 +2352,9 @@ M8/M9의 고급 기능은 M3부터 별도 prototype scene으로 타당성을 평
 
 ### 30.2 임계 의존성과 병행 경로
 
-**임계 의존성:** Core library·기반 Task → 최소 TypeInfo·객체·참조·정확한 GC → Foundation Gate → 메타/언어·Rocks Build·asset/prefab → UMG/에디터·샘플 게임/컷씬 → 규모·속도 최적화 → 고급 renderer. M2는 Object/GC/native schema 계약을 고정하며 완전한 VM·에디터를 Foundation 선행 조건으로 요구하지 않는다.
+**임계 의존성:** Core library·기반 Task → 최소 TypeInfo·객체·참조·정확한 GC → Foundation Gate → 메타/언어·Rocks Build·asset/prefab → UI 툴킷/에디터·샘플 게임/컷씬 → 규모·속도 최적화 → 고급 renderer. M2는 Object/GC/native schema 계약을 고정하며 완전한 VM·에디터를 Foundation 선행 조건으로 요구하지 않는다.
 
-RHI·웹·언어·전문 빌드 도구의 본격 구현은 Foundation Gate 뒤에 착수한다. 이후 animation/physics/audio adapter는 POD fixture로 World 완성 전 검증할 수 있다. 웹 timeline·Inspector·UI Designer·Material graph는 mock schema로 준비할 수 있으나 실제 native edit·undo·preview gate를 별도로 통과한다. GPU 연구 prototype은 독립 benchmark로 관리하고 stable renderer에 통합할 때 두 경로·upscaler·post·cutscene 회귀를 모두 수행한다.
+RHI·UI 툴킷·언어·전문 빌드 도구의 본격 구현은 Foundation Gate 뒤에 착수한다. UI 코어(UT1)는 창·GPU 없이 시험할 수 있으므로 Foundation Gate 직후 RHI와 병행 착수한다. 이후 animation/physics/audio adapter는 POD fixture로 World 완성 전 검증할 수 있다. timeline·Inspector·UI Designer·Material graph 화면은 UI 툴킷의 에디터용 widget(UT3) 이후 구현하며, schema·명령은 그 전에 headless로 준비할 수 있다. 실제 edit·undo·preview gate는 별도로 통과한다. GPU 연구 prototype은 독립 benchmark로 관리하고 stable renderer에 통합할 때 두 경로·upscaler·post·cutscene 회귀를 모두 수행한다.
 
 각 gate의 완료는 ‘API가 존재함’이 아니라 실행 artifact·재현 scene·성능 trace·test report·지원 제한·샘플 제작 과정을 포함한다. 담당자는 미완료 항목과 다음 단계로 이월할 근거를 기록하며 기능 이름만 체크하지 않는다.
 
@@ -2361,7 +2369,7 @@ RHI·웹·언어·전문 빌드 도구의 본격 구현은 Foundation Gate 뒤�
 | R05 · P0 | task capture·module unload·cancel 완료 누락 | owning capture·root token·drain gate·exactly-once terminal stress |
 | R06 · P1 | Deferred/Forward 기능 차이·shader permutation 증가 | 공통 IR·기능 manifest·cooker 오류·pairwise/full 주요 matrix. M3부터 회귀 |
 | R07 · P1 | temporal upscale·DOF·motion blur·렌즈 효과 ghosting | motion 규약·보조 buffer·cut reset·temporal 시퀀스. M4부터 영상 검토 |
-| R08 · P1 | native viewport와 웹 UI의 focus/DPI·레이어 문제 | Foundation 이후 M3 초기 spike·다중 monitor 검증·host ownership. 필요 시 dock 구조 조정 |
+| R08 · P1 | UI 툴킷이 에디터 일정의 임계 경로에 포함되어 Studio 기능이 지연 | UT1을 CPU-only로 RHI 이전에 착수·UT3 widget을 M3 기능 순서로 구현·Godot 오라클 회귀. M3 초기 진척으로 범위·인력 재산정 |
 | R09 · P1 | 컷씬 seek/skip의 side effect·상태 복원 누락 | pure evaluation·event ledger·control token·prefetch. M4 필수 데모 |
 | R10 · P1 | 오디오 deadline·physics/nav lock 경합 | RT 무할당·audio mailbox·physics read gate·nav context 격리·callback 지연 추적. B3 장시간 테스트 |
 | R11 · P1 | streaming·GC·render·audio의 해제 순서 불일치 | lease/root/epoch/fence를 각 도메인별로 완료 확인. 강제 unload stress |
@@ -2373,7 +2381,7 @@ RHI·웹·언어·전문 빌드 도구의 본격 구현은 Foundation Gate 뒤�
 | R17 · P0 | compile/DDC cache stale hit·원격 늦은 output 오염 | 완전한 key·원자 artifact set·session ID·local/clean 대조 |
 | R18 · P1 | 원격 compile만 개선하고 link/restart가 병목 유지 | I0–I6 전체 시간·module link/PDB·실행 복구·비 native 반복 경로 |
 | R19 · P1 | NullRHI로 영상/UI 성공을 오판 | CPU-only/GPU offscreen profile·capability 실패·실제 image 비교 |
-| R20 · P1 | UMG designer/runtime 차이·binding root 누수 | 동일 evaluator/layout·typed binding·preview/cooked/headless 통합 |
+| R20 · P1 | UI designer/runtime 차이·binding root 누수 | 동일 evaluator/layout·typed binding·preview/cooked/headless 통합 |
 
 기능 계획의 P0는 안정성 선행 조건, P1은 제작·실행 필수, P2는 규모·품질 확장, P3는 연구·특수 기능이다. 위 위험표의 우선순위는 대응 시급성으로 별도 사용한다. 후속 전문 기능을 P3로 분류하여도 제품 범위에서 삭제한 것으로 해석하지 않는다. 다만 첫 실용 버전과 장기 전체 범위의 완료 시점을 구분한다.
 
@@ -2388,7 +2396,7 @@ RHI·웹·언어·전문 빌드 도구의 본격 구현은 Foundation Gate 뒤�
 | 3주 | Atomic/queue/Task 최소형·청크 Registry·generation·NewObject/Destroy | task terminal·publish·stale handle·반복 생성/삭제 |
 | 4주 | Root/Object/Weak·manual TypeInfo·ClassDefaults/visitor·full GC prototype | root/순환 참조/약한 pin·instancing·종료 테스트, CF backlog 확정 |
 
-4주 항목은 첫 Core 작업의 prototype이며 production Foundation 완료는 CF01–CF12로 판정한다. 이 4주에 언어 VM·renderer·viewport·UI Designer·분산 build를 추가하지 않는다. 결과는 설계 결정 기록(ADR), 실행 sample, test report로 보존한다. 최우선 ADR은 STL/예외·allocator·참조/GC·Registry publication·Task shutdown·TypeId/FieldId·instancing 계약이다. renderer·언어·웹/UMG·컷씬·build executor ADR은 해당 Foundation 계약을 입력으로 후속 작성한다.
+4주 항목은 첫 Core 작업의 prototype이며 production Foundation 완료는 CF01–CF12로 판정한다. 이 4주에 언어 VM·renderer·viewport·UI Designer·분산 build를 추가하지 않는다. 결과는 설계 결정 기록(ADR), 실행 sample, test report로 보존한다. 최우선 ADR은 STL/예외·allocator·참조/GC·Registry publication·Task shutdown·TypeId/FieldId·instancing 계약이다. renderer·언어·UI 툴킷·컷씬·build executor ADR은 해당 Foundation 계약을 입력으로 후속 작성한다.
 
 ### 32.2 요구사항 추적표
 
@@ -2415,7 +2423,7 @@ RHI·웹·언어·전문 빌드 도구의 본격 구현은 Foundation Gate 뒤�
 | 하이엔드 post 전체 기능군 | 26 | M4–M9 catalog / B7·B9 |
 | 빌드·반복 개발 최적화 | 27 | Foundation 후 M3–M5 / I0–I6·B10 |
 | 헤드리스·server·offscreen | 28 | CoreTest부터 / B11 |
-| UMG runtime·UI Designer | 21.2–21.5 | M3–M6 / B12 |
+| UI 툴킷·게임 UI runtime·UI Designer | 21–22, [UI 툴킷 설계](UiToolkit.ko.md) | M2 CU1–CU8, M3–M6 / B12·GO1–GO6 |
 | 테스트·프로파일링·위험 | 29–31 | 전 milestone / 재현 artifact |
 | 첫 작업 Core/Object | 1.1–1.2·4–7·32.1 | M0–M2 / CF01–CF12 |
 
@@ -2477,7 +2485,7 @@ RHI·웹·언어·전문 빌드 도구의 본격 구현은 Foundation Gate 뒤�
 | Gameplay Ability·effect·cue | 태그·속성·stack·cost·duration·prediction·취소 | 필수 M5–M6 |
 | Network·subobject·replay·online | authority/conditions·spawn/fixup·travel/reconnect·provider | 필수 M5–M7, 서비스 운영 통합 별도 gate |
 | Audio·DSP·dialogue·clock | voice/bus·concurrency·graph·sample scheduler·offline mix | 필수 M4–M7 |
-| UMG 계열 runtime/Designer | widget hierarchy·canvas·binding·animation·IME·focus·cook | 필수 M3–M6, Blueprint 제외 |
+| UMG 계열 runtime/Designer | Godot 4.x 수준 단일 UI 툴킷의 widget hierarchy·canvas·binding·animation·IME·focus·cook | 필수 M3–M6, Blueprint 제외 |
 | VFX·simulation cache | CPU/GPU·ribbon/mesh·data interface·reaction/motion·scrub | 필수 M4–M8, 고급 fluid/sparse volume 후속 |
 | Landscape·spline·foliage·PCG·환경 | edit layer·terrain/collision/nav·stable generated IDs·water/cloud | 필수 M7–M8 |
 | 모델링·DCC·geometry cache | blockout/UV/collision·geometry API·glTF/FBX·선택 USD/Alembic | 필수 기본 도구 M6–M7, 고급 interchange M8+ |
@@ -2589,9 +2597,17 @@ Snowdrop, IW 관련 Call of Duty 기술, RAGE의 공개 개발 자료를 비교�
 
 모든 상태는 문서 계약 반영·구현 검증 대기다. 이번 배포에서 실제 수행한 검사는 문서의 구조·배치·참조·작업/파일 데이터와 C++ 예제의 clang-format 서식 검사다. 엔진 unit/stress/sanitizer·실제 장치·누수·영상·성능 시험은 수행하지 않았다. ‘사람이 알아보기 좋은 코드 스타일 유지’ 원칙과 스페이스 4칸·탭 금지·빈 줄·버전 고정 formatter를 3.4절 및 상세안 4.3절에 명시하였다.
 
+### 33.9 개정 1.4의 UI 툴킷 전환
+
+웹 에디터(WebView2·WKWebView·TypeScript/React)를 검토한 결과 채택하지 않고, 게임 UI와 에디터를 Godot 4.x 수준의 단일 UI 툴킷으로 구성한다. 툴킷 2개·IME 경로 2개·별도 네이티브 Designer 미리보기·child window focus 문제가 함께 제거되는 대신 UI 툴킷이 에디터 일정의 임계 경로에 포함된다(R08). Core의 Unreal 체계와 Blueprint 제외·자체 언어 정책은 유지한다.
+
+Godot 코드는 이식하지 않고 구조와 동작 계약을 재구현하며, 같은 장면의 Godot 실행 결과와 비교 시험한다(GO1–GO6). Godot의 속성 정의 방식(문자열 바인딩·hint 문자열·setter 안의 효과 호출·이름 비교 기반 표시 조건)은 따르지 않고 필드 지정자에서 생성한다. [S77](https://github.com/godotengine/godot/tree/4.5-stable/scene/gui) UI와 에디터가 의존하는 리플렉션 확장 CU1–CU8은 Foundation Gate 전에 계약을 확정한다. 세부와 결정 대기 항목 UD1–UD8은 [UI 툴킷 설계](UiToolkit.ko.md)에 둔다.
+
+개정 범위는 표지·1·1.1·1.2(CF01)·2.4·2.5(PL01·PL04)·3.1·3.2·7.2·9.3·14.6·14.8·14.9(MT08)·21·22·23.3·25.3·27.10·28.1·28.5·29.2(B12)·29.4·30·31(R08·R20)·32·33.2·34절이다. 3.1절 계층 그림은 원본이 저장소 밖에 있어 그림 자체는 개정하지 않았다. 본 개정은 문서 계약의 변경이며 구현·실행 검증 결과가 아니다.
+
 ## 34. 참고 자료와 설계 근거
 
-이전 대화는 사용자 제공 참조 「3D 엔진 설계」와 현재 대화의 추가 요구를 기준으로 한다. 아래 공식 문서는 기술 개념과 API 경계를 확인하기 위한 자료다. 일정·API·예산·구현 단계는 이 계획의 제안이며 참고 자료의 성능 보증이 아니다. 온라인 문서는 변경될 수 있으므로 실제 구현 착수 시 선택 SDK 버전의 문서·commit을 build manifest에 고정한다. 조회일은 2026.11.10이다.
+이전 대화는 사용자 제공 참조 「3D 엔진 설계」와 현재 대화의 추가 요구를 기준으로 한다. 아래 공식 문서는 기술 개념과 API 경계를 확인하기 위한 자료다. 일정·API·예산·구현 단계는 이 계획의 제안이며 참고 자료의 성능 보증이 아니다. 온라인 문서는 변경될 수 있으므로 실제 구현 착수 시 선택 SDK 버전의 문서·commit을 build manifest에 고정한다. 조회일은 2026.11.10이며 S75–S77은 2026.11.11이다.
 
 | ID | 1차 자료 | 적용 범위 |
 |---|---|---|
@@ -2607,7 +2623,7 @@ Snowdrop, IW 관련 Call of Duty 기술, RAGE의 공개 개발 자료를 비교�
 | S10 | [Jolt · 공식 저장소](https://github.com/jrouwe/JoltPhysics) | physics integration 후보 |
 | S11 | [miniaudio · Manual](https://miniaud.io/docs/manual/index.html) | audio backend 후보 |
 | S12 | [Recast/Detour · 공식 저장소](https://github.com/recastnavigation/recastnavigation) | tiled nav build·query |
-| S13 | [Microsoft · WebView2 Security](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/security) | host message·navigation 경계 |
+| S13 | [Microsoft · WebView2 Security](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/security) | host message·navigation 경계. 개정 1.4의 웹 에디터 미채택으로 본문 인용 없음 |
 | S14 | [Epic · Gameplay Ability System](https://dev.epicgames.com/documentation/en-us/unreal-engine/gameplay-ability-system-for-unreal-engine) | ability·attribute·effect |
 | S15 | [Epic · Asset Management](https://dev.epicgames.com/documentation/en-us/unreal-engine/asset-management-in-unreal-engine) | primary asset·bundle·audit |
 | S16 | [Epic · Game Features](https://dev.epicgames.com/documentation/en-us/unreal-engine/game-features-and-modular-gameplay-in-unreal-engine) | 독립 feature lifecycle |
@@ -2669,3 +2685,6 @@ Snowdrop, IW 관련 Call of Duty 기술, RAGE의 공개 개발 자료를 비교�
 | S72 | [Apple · Shader precompile](https://developer.apple.com/documentation/metal/building-a-shader-library-by-precompiling-source-files) | Metal offline library |
 | S73 | [Microsoft · D3D11 devices](https://learn.microsoft.com/en-us/windows/win32/direct3d11/overviews-direct3d-11-devices-intro) | context thread 계약 |
 | S74 | [Unity · APV runtime lighting](https://docs.unity3d.com/6000.0/Documentation/Manual/urp/probevolumes-understand-changing-lighting-at-runtime.html) | baked scenario·runtime 변화 구분 |
+| S75 | [Godot · Size and anchors](https://docs.godotengine.org/en/4.5/tutorials/ui/size_and_anchors.html) | Control 배치·container 기준 |
+| S76 | [Godot · Using InputEvent](https://docs.godotengine.org/en/4.5/tutorials/inputs/inputevent.html) | UI 입력 전파 순서 |
+| S77 | [Godot · 4.5-stable scene/gui 소스](https://github.com/godotengine/godot/tree/4.5-stable/scene/gui) | UI 툴킷 동작·속성 정의 비교 |

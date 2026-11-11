@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 500" width="820" height="500" role="img">
+<title>Godot 계층과 Rocks 모듈의 대응</title>
+<style>
+  .bg { fill: #ffffff; }
+  .box { fill: #f5f7fa; stroke: #b9c2cc; stroke-width: 1.2; }
+  .rk { fill: #eaf3f5; stroke: #5f8f9c; stroke-width: 1.4; }
+  .grp { fill: none; stroke: #b9c2cc; stroke-width: 1.2; stroke-dasharray: 5 4; }
+  .ln { stroke: #8c98a4; stroke-width: 1.6; fill: none; }
+  .ah { fill: #8c98a4; }
+  text { font-family: Pretendard, 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; fill: #1f2933; }
+  .col { font-size: 12px; font-weight: 700; letter-spacing: 1.2px; fill: #52606d; }
+  .t { font-size: 15px; font-weight: 700; }
+  .ts { font-size: 13px; font-weight: 700; }
+  .s { font-size: 12.5px; fill: #3e4c59; }
+  .ss { font-size: 11.5px; fill: #3e4c59; }
+  .m { font-family: Consolas, 'SF Mono', Menlo, monospace; }
+  .lab { font-size: 11.5px; fill: #52606d; }
+  .badge { fill: #ffffff; stroke: #8c98a4; stroke-width: 1; }
+  .bt { font-size: 10.5px; font-weight: 700; fill: #3e4c59; }
+</style>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker></defs>
+<rect class="bg" x="0" y="0" width="820" height="500"/>
+<text x="20" y="28" class="col">GODOT 4.X</text>
+<text x="450" y="28" class="col">ROCKS</text>
+<rect x="20" y="46" width="290" height="84" rx="4" class="box"/>
+<text x="36" y="73" class="t">에디터</text>
+<text x="36" y="95" class="s m">EditorNode · EditorInspector</text>
+<text x="36" y="113" class="s m">EditorPlugin · EditorUndoRedoManager</text>
+<rect x="450" y="46" width="350" height="84" rx="4" class="rk"/>
+<text x="466" y="73" class="t">EditorFramework</text>
+<text x="466" y="95" class="s">셸 · 독 · Inspector · 확장점 · 에디터 테마</text>
+<text x="466" y="113" class="s">EditorBackend · Transaction 은 계획서 §22.2</text>
+<rect x="748" y="56" width="40" height="18" rx="9" class="badge"/><text x="768" y="69" text-anchor="middle" class="bt">CPU</text>
+<line x1="312" y1="88" x2="446" y2="88" class="ln" marker-end="url(#a)"/>
+<text x="379" y="80" text-anchor="middle" class="lab">구조 재현</text>
+<rect x="20" y="150" width="290" height="84" rx="4" class="box"/>
+<text x="36" y="177" class="t">Scene UI</text>
+<text x="36" y="199" class="s m">Control · Container · Window</text>
+<text x="36" y="217" class="s m">Theme · StyleBox · Font</text>
+<rect x="450" y="150" width="350" height="84" rx="4" class="rk"/>
+<text x="466" y="177" class="t">UI</text>
+<text x="466" y="199" class="s">Widget · Container · Window · Theme · StyleBox</text>
+<text x="466" y="217" class="s">입력 라우팅 · 포커스 · UiDrawList 기록</text>
+<rect x="748" y="160" width="40" height="18" rx="9" class="badge"/><text x="768" y="173" text-anchor="middle" class="bt">CPU</text>
+<line x1="312" y1="192" x2="446" y2="192" class="ln" marker-end="url(#a)"/>
+<text x="379" y="184" text-anchor="middle" class="lab">구조 재현</text>
+<rect x="20" y="358" width="290" height="84" rx="4" class="box"/>
+<text x="36" y="385" class="t">Core</text>
+<text x="36" y="407" class="s m">Object · ClassDB · Variant</text>
+<text x="36" y="425" class="s m">Signal · RefCounted · Resource</text>
+<rect x="450" y="358" width="350" height="84" rx="4" class="rk"/>
+<text x="466" y="385" class="t">ObjectRuntime · MetaSchema</text>
+<text x="466" y="407" class="s">Object · TypeRegistry · ROCKS_PROPERTY · GC</text>
+<text x="466" y="425" class="s">Unreal 체계 Core — 구현 중</text>
+<rect x="748" y="368" width="40" height="18" rx="9" class="badge"/><text x="768" y="381" text-anchor="middle" class="bt">CPU</text>
+<line x1="312" y1="400" x2="446" y2="400" class="ln" marker-end="url(#a)"/>
+<text x="379" y="392" text-anchor="middle" class="lab">대체</text>
+<rect x="20" y="254" width="290" height="84" rx="4" class="box"/>
+<text x="36" y="281" class="t">Servers</text>
+<text x="36" y="303" class="s m">RenderingServer(canvas) · TextServer</text>
+<text x="36" y="321" class="s m">DisplayServer</text>
+<rect x="450" y="254" width="112" height="84" rx="4" class="rk"/>
+<text x="506" y="279" text-anchor="middle" class="ts" style="font-size:12.5px">UiRender</text>
+<text x="506" y="299" text-anchor="middle" class="ss">RHI · 배칭 · 클립</text>
+<rect x="486" y="310" width="40" height="18" rx="9" class="badge"/><text x="506" y="323" text-anchor="middle" class="bt">GPU</text>
+<rect x="569" y="254" width="112" height="84" rx="4" class="rk"/>
+<text x="625" y="279" text-anchor="middle" class="ts" style="font-size:12.5px">TextLayout</text>
+<text x="625" y="299" text-anchor="middle" class="ss">shaping 어댑터</text>
+<rect x="605" y="310" width="40" height="18" rx="9" class="badge"/><text x="625" y="323" text-anchor="middle" class="bt">CPU</text>
+<rect x="688" y="254" width="112" height="84" rx="4" class="rk"/>
+<text x="744" y="279" text-anchor="middle" class="ts" style="font-size:12.5px">PlatformWindow</text>
+<text x="744" y="299" text-anchor="middle" class="ss">창 · IME · 클립보드</text>
+<rect x="724" y="310" width="40" height="18" rx="9" class="badge"/><text x="744" y="323" text-anchor="middle" class="bt">OS</text>
+<line x1="312" y1="296" x2="446" y2="296" class="ln" marker-end="url(#a)"/>
+<text x="379" y="288" text-anchor="middle" class="lab">재구현 · 어댑터</text>
+<rect x="20" y="466" width="40" height="18" rx="9" class="badge"/><text x="40" y="479" text-anchor="middle" class="bt">CPU</text>
+<text x="68" y="479" class="ss">창 · GPU 없이 시험 가능</text>
+<rect x="230" y="466" width="40" height="18" rx="9" class="badge"/><text x="250" y="479" text-anchor="middle" class="bt">GPU</text>
+<text x="278" y="479" class="ss">RHI 필요(오프스크린 가능)</text>
+<rect x="460" y="466" width="40" height="18" rx="9" class="badge"/><text x="480" y="479" text-anchor="middle" class="bt">OS</text>
+<text x="508" y="479" class="ss">플랫폼 창 · 텍스트 서비스 필요</text>
+</svg>
