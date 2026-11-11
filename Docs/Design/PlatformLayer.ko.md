@@ -75,6 +75,23 @@ Engine / Tools / Game         프로젝트·설치 구성과 상위 시스템
 - 두 native 테스트 실행에서 실제 Windows 심볼릭 링크 생성은 권한 또는 파일 시스템 제한으로 `SKIP`되었다. 집계된 테스트 수에 해당 항목이 포함되어도 링크 대상 판정의 실제 Windows 동작을 검증한 것으로 간주하지 않는다. macOS 빌드·실행과 실제 OS close 실패 주입은 이번에 수행하지 않았다. OS close 실패는 자원 회수 여부가 불확정인 한계를 유지한다.
 - 빌드 규칙 테스트는 Windows·macOS 디렉터리 선택, 정의되지 않은 플랫폼의 오류 및 현재 미지원인 호스트/타깃 교차 빌드 거부를 확인한다. 별도의 Apple 플랫폼 private 헤더 증분 fixture는 Windows 호스트에서 Mac 형태의 의존성 규칙을 평가해 헤더 변경 시 재컴파일·재링크와 무변경 시 no-op을 검증한다. 이 fixture는 macOS SDK 컴파일이나 macOS 실행 검증이 아니다.
 
+## 비동기 파일 읽기 (2026-11-11 1차 구현)
+
+`Platform/AsyncFile.h`는 텍스처·메시 스트리밍처럼 많은 offset 지정 읽기를 동시에 띄우고 완료를 비동기로 받는 저수준 API다(UE `IAsyncReadFileHandle::ReadRequest`·`IAsyncReadRequest` 계층 대응, UE의 IoDispatcher·패키지 로더는 상위 계층). 공용 수명·동기화 규칙은 `Private/Common/AsyncFile.cpp`, OS 호출은 `Private/<플랫폼>/AsyncFile.cpp`의 hook이 담당한다.
+
+| backend | 플랫폼 | 방식 | 취소 |
+|---|---|---|---|
+| Native | Windows | `FILE_FLAG_OVERLAPPED` + IO completion port + 완료 스레드 1개. 즉시 실패·0 byte 요청도 completion packet으로 같은 스레드에 통지 | `CancelIoEx` 요청, 완료와 경합하면 실제 결과 보고 |
+| WorkerPool | 모든 플랫폼(macOS 기본, 향후 iOS·Android) | worker 스레드가 위치 지정 동기 읽기(Windows `ReadFile`+OVERLAPPED offset, POSIX `pread`) | 대기열의 요청만 취소, 실행 중 읽기는 그대로 완료 |
+
+수명 규칙: 요청 레코드(OVERLAPPED 포함)와 버퍼는 최종 완료까지 유지된다. 진행 중 요청의 소멸자는 취소 후 완료를 기다리고, 파일 소멸자는 그 파일의 모든 요청을 취소·대기한 뒤 닫는다. `Close`는 진행 중 요청이 있으면 Busy, context `Shutdown`은 열린 파일이 있으면 Busy, 열린 파일을 남긴 context 소멸은 Fatal이다. 완료 스레드는 mutex 안에서 결과를 게시한 뒤 요청·파일에 다시 접근하지 않으며, callback은 게시 뒤 요청 대신 사용자 context만 받는다.
+
+검증: Windows x64에서 두 backend로 동시 32개 읽기·EOF·짧은 읽기·0 byte·잘못된 제출·Busy·대량 취소 경합·소멸자 대기를 실제 파일로 확인했다. macOS backend는 빌드·실행하지 않았다. 쓰기, scatter/gather, 우선순위·deadline, dispatch I/O 평가, 결정적 fake backend interleaving, Android asset·iOS 번들 경로는 후속이다.
+
+## 모바일 플랫폼 계획
+
+Android·iOS는 정식 대상이다. 목표 구조는 `Private/Posix`(Mac·iOS·Android 공통 POSIX 구현), `Private/Apple`(Mac·iOS 공통), `Private/IOS`, `Private/Android`이며, 기존 Mac 구현의 POSIX 부분을 공통 계층으로 옮겨 재사용한다. 빌드 도구의 교차 빌드 거부를 대상별 허용 목록으로 바꾸기 전까지 모바일 대상은 빌드되지 않는다. 상세 항목과 완료 조건은 [Core 상세 명세](CoreDetailedSpec.ko.md) §3.5.1을 따른다.
+
 ## 플랫폼 선택과 실패 정책
 
 - 지원 대상, 호스트, 타깃, 아키텍처 및 필수 구현 목록을 빌드 규칙에서 명시한다. 알 수 없는 플랫폼은 타 플랫폼으로 대체하지 않고 진단과 함께 빌드를 중단한다. cross-compilation 지원 전에는 지원된다고 가정하지 않는다.

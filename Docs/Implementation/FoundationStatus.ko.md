@@ -35,9 +35,9 @@
 | C00 | .NET 10 SDK 고정, C# `*.Build.cs`/`*.Target.cs` 모듈·타깃 규칙, MSBuild 진입점, 네이티브 작업 그래프·로컬 증분 검사, 설치 SDK·외부 게임 빌드, C# 검사 하네스·서식/STL/경고 검사, 단독 헤더 검사, 모듈 템플릿 plan/apply/validate, CI 정의 | 분산 빌드·공유 artifact 캐시, PCH·unity·공유 라이브러리, 완전한 SDK 패키징, 전체 프로젝트·컴포넌트·프리팹 템플릿, 복구 저널 |
 | C01 | Base 정수 타입, Guid POD, checked arithmetic | 전체 ABI·compiler 추상화 |
 | C02 | 정렬 할당, 가상 메모리 예약·commit·decommit·release, 단조 시계, 스레드 식별, Thread/Mutex/CV/Event/Semaphore, 최소 fatal sink, 플랫폼 경로 선택과 초기 동기 파일 I/O | 가상 메모리 OS 실패·부분 변경 fault injection, 파일 기능의 OS close 실패 강제 주입과 macOS 실행 검증, atomics/RWLock, thread 설정·취소 |
-| C03 | Result/Error, Move/Forward, 제한된 traits | 전체 범용 utility 집합 |
+| C03 | Result/Error, Move/Forward, 제한된 traits, `Optional`, `ScopeExit`, `UniquePtr`, `SharedPtr`/`WeakPtr`/`EnableSharedFromThis`, CRC-32·Base64, RFC 3986 URI 분해·percent encoding | Variant·Tuple·delegate, `SharedRef`·사용자 deleter, 압축·URI 상대 참조 해석 |
 | C04 | SystemAllocator·ArenaAllocator·StackAllocator·PoolAllocator·BinnedAllocator·BudgetAllocator·DebugAllocator, 외부 backend와 벤더 함수 바인딩, 소유권 ledger·통계 | frame 수명 관리·자동 일괄 해제 stack·thread cache·page guard, 실제 공급자 제품 통합·플랫폼 검증, 주소 검색 최적화·성능 측정 |
-| C05 | Array·Span·BitArray·HashMap·HashSet의 부분 구현, 배열 삽입·삭제·크기 조절·추가·검색, 비트 단위 검색·집합 연산 및 실패 시 상태 유지 | queue·inline·sparse/stable-slot, 범용 알고리즘·추가 범위 연산, Map/Set 정책, 내부 콜백 재진입 완전 진단 및 장시간 성능 검증 |
+| C05 | Array·Span·BitArray·HashMap·HashSet의 부분 구현과 STL 호환 반복자(contiguous·random-access·forward, HashMap 구조 변경 후 반복자 사용은 Fatal), 배열 삽입·삭제·크기 조절·추가·검색, 비트 단위 검색·집합 연산 및 실패 시 상태 유지 | queue·inline·sparse/stable-slot, 범용 알고리즘·추가 범위 연산, Map/Set 정책, 내부 콜백 재진입 완전 진단 및 장시간 성능 검증 |
 | C06 | Function, ModuleLease, InlineExecutor와 WorkerScheduler, 의존성·취소·drain, 고정 용량 로그·프로파일 scope, assert, 음성 대조군 | priority/lane/work-stealing/fiber scheduler, 비동기 로그 writer·viewer |
 | C07 | C# Clang AST 메타 생성·선언 검증, CLASS/PROPERTY·typed 필드 접근·자동 Trace, 상속 metadata IsA, 깊은 복사·revision/module lease, Archive/Record·객체 그래프 직렬화 | 자동 메타 unit 발견·프로젝트 전역 ID 검증, 범용 native 상속 cast, method/enum/container reflection, compile DB 입력 재구성·생성 캐시·외부 에셋 참조 |
 | C08 | 비이동 64-slot chunk, registry domain·generation, 고갈 슬롯 격리, 진단 캡처 | 빠른 인덱스 조회, 대규모 벤치마크 |
@@ -45,11 +45,12 @@
 | C10 | 비공개 생성 트랜잭션, 간선 검증 후 일괄 공개, 역순 롤백 | ClassDefaults·instancing, 트랜잭션 활성 중 GC, 전체 lifecycle hook |
 | C11 | full STW와 점진 mark/sweep, 삽입 장벽·cutoff, 선택적 병렬 mark, soft 시간·작업량 예산, OOM 시 sweep 금지·독립 oracle | 다중 mutator·동시 필드 스캔, hard deadline, 병렬 sweep·cluster·대규모 성능 검증 |
 | C12 | logical destroy·retire·실제 회수 분리, Busy 종료·재시도, 모의 backend lease | 실제 GPU/IO/audio 연동, 장시간 시스템 스트레스 |
-| C13 subset | 자체 UTF-8 String/StringView 검색·분리·치환 일부, Name의 ASCII 비교·표기·None·번호와 pool/lease 수명, Path 문자열 처리와 String `/`·`/=` | Unicode case folding·정규화·format 등 전체 문자열 기능, 영속 Name identity, Guid 생성/parse, 암호학적·영속 hash 정책, 플랫폼 경로 보정·기본 디렉터리 조회 |
+| C13 subset | 자체 UTF-8 String/StringView 검색·분리·치환 일부와 code point 단위 Left/Right/Mid·개수·순회, Name의 ASCII 비교·표기·None·번호와 pool/lease 수명, Path 문자열 처리와 String `/`·`/=` | Unicode case folding·정규화·format 등 전체 문자열 기능, 영속 Name identity, Guid 생성/parse, 암호학적·영속 hash 정책, 플랫폼 경로 보정·기본 디렉터리 조회 |
+| Core Math | CPU별 `PlatformMath`(Generic→Clang→SSE2/NEON)·4-lane 레지스터, 벡터·정수 벡터·행렬·투영/뷰 행렬 생성·quaternion·Rotator·Transform·Box2/IntRect·Interval·Float16·보간·허용 오차 상수, 기본 도형 8종과 광선·선분·겹침·최근접 판정, Color/LinearColor, PCG32 RandomStream | frustum·swept shape·접촉 정보, AVX2/FMA dispatch·double 레지스터·SoA batch, Float16 색·noise·BoxSphereBounds, macOS·ARM64 실행 검증 |
 
 ### 경로와 파일 I/O의 초기 구현
 
-`Core/Path/Path.h`는 Windows·POSIX 문법을 선택해 루트·정규화·결합·절대/상대 변환·포함 판정, 파일명·디렉터리·부모·확장자 분리와 설정을 제공한다. `Directory`는 마지막 구분자 기준 분리이고 `Parent`는 루트 보존을 우선한다. `Split(".")`의 이름은 빈 값, `Split("..")`의 이름은 `..`이며, `BaseFileName("..")`은 `.`이다. `ChangeExtension`은 구분점 없는 이름을 유지하고 `SetExtension`은 추가한다. `NormalizeFilename`은 역슬래시를 슬래시로 바꾸며 별도의 `CollapseRelativeDirectories`는 UE5.6 스타일 축약을 수행한다. OS별 `NormalizePath` 보정 hook은 아직 연결되지 않았다.
+`Core/Text/Path.h`는 Windows·POSIX 문법을 선택해 루트·정규화·결합·절대/상대 변환·포함 판정, 파일명·디렉터리·부모·확장자 분리와 설정을 제공한다. `Directory`는 마지막 구분자 기준 분리이고 `Parent`는 루트 보존을 우선한다. `Split(".")`의 이름은 빈 값, `Split("..")`의 이름은 `..`이며, `BaseFileName("..")`은 `.`이다. `ChangeExtension`은 구분점 없는 이름을 유지하고 `SetExtension`은 추가한다. `NormalizeFilename`은 역슬래시를 슬래시로 바꾸며 별도의 `CollapseRelativeDirectories`는 UE5.6 스타일 축약을 수행한다. OS별 `NormalizePath` 보정 hook은 아직 연결되지 않았다.
 
 `String`의 `/`와 `/=`는 `Path::Combine`·`Append`에 연결되며 원문을 결합하고 `Result`로 실패를 전달한다. `/=`는 실제 변경이 없거나 capacity가 충분하면 기존 저장소를 재사용하며 입력 별칭을 처리한다. 재할당이 필요한 연산에는 기존 `String`과 할당기의 반환 순서 계약이 적용된다. 정규화·포함 판정은 문자열 연산일 뿐 실제 파일 접근 가능성, 링크 해석이나 보안 경계를 보장하지 않는다.
 

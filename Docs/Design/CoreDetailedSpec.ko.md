@@ -38,7 +38,7 @@ Base → PlatformBase → Core → Task / Localization / Serialization / MetaSch
 | M02 P0 | 가상 메모리 reserve/commit/decommit/protect/release, page size **부분** | OS 오류, 페이지 경계·부분 변경·cleanup 재시도, fault injection, 실제 Windows/macOS. 보호·page guard 등 미구현 세부 사항은 별도 판정한다. |
 | M03 P1 | frame/scratch, stack mark/rewind, slab, per-thread cache/trim, 큰 할당 **후속** | reset 이후 포인터·destructor·스레드 소유권, nested mark, OOM·회수·통계, 엄격 LIFO allocator와 growing container의 비호환을 진단한다. |
 | M04 P1 | canary/poison/quarantine, tag/stack trace, live allocation, leak/failure injection, 외부 allocator **부분** | 이중 반환·오소유·guard 훼손·정렬·동시성, 계측 메모리 예산, 오류 보고의 재귀·OOM, 실제 jemalloc/TCMalloc 등은 라이선스·배포·플랫폼 지원 후 통합. |
-| M05 P1 | unique/shared/weak native 소유권과 deleter, scope guard **후속** | 원자성/메모리 순서·deleter·제어블록 allocator 수명·weak lock 경합·cycle·동적 모듈 종료. GC root/weak object reference와 혼동하지 않는다. |
+| M05 P1 | unique/shared/weak native 소유권과 deleter, scope guard — `Core/Memory/UniquePtr.h`(할당기 기반 단독 소유, 기반 타입 이동 시 원래 할당 주소 보존, 해제 실패 Fatal), `Core/Memory/SharedPtr.h`의 `SharedPtr`/`WeakPtr`(UE ThreadSafe TSharedPtr/TWeakPtr 대응: 객체·제어 블록 단일 할당, 원자 계수, 0이 아닐 때만 증가하는 Lock, 원래 타입 소멸 함수 보존)와 `EnableSharedFromThis`(UE TSharedFromThis 대응, weak 토큰만 보유), `Core/ScopeExit.h` **부분**. SharedRef·사용자 deleter·aliasing 생성은 **후속** | 원자성/메모리 순서·deleter·제어블록 allocator 수명·weak lock 경합·cycle·동적 모듈 종료. GC root/weak object reference와 혼동하지 않는다. |
 
 ### 3.2 컨테이너·알고리즘·일반 utility
 
@@ -49,8 +49,8 @@ Base → PlatformBase → Core → Task / Localization / Serialization / MetaSch
 | C03 P0 | `BitArray` **부분**, `SparseArray`/stable slot 및 generation **후속** | word 경계·tail bit masking·self alias·remove swap 차이, slot free-list·stale handle·generation wrap·OOM, 메모리 사용량과 반복 순서. |
 | C04 P1 | queue/deque/ring·heap/priority queue·multi-map/set·tree **후속** | 소유권·용량·순서·포인터 무효화·overflow·OOM. 단일 스레드 queue와 동시 queue는 별도 계약이며 SPSC/MPSC/MPMC, bounded/unbounded, blocking/close를 명확히 구분한다. |
 | C05 P0 | 범용 sort/lower/upper/binary search와 `Array::Sort` **부분** | 비안정/안정 정렬 구분, comparator 엄격 약순서·noexcept·이종 키 양방향, 포인터 자동 역참조 정책, move-only 수명·대조 oracle·최악 복잡도. stable sort·projection·filter·transform·heap 등은 **후속**. |
-| C06 P0 | traits/concepts, `Move`, `Result`, `Function` **부분**; Optional/Variant/Pair/Tuple, callable/delegate/event **후속** | 빈 상태, move-only, 비복사성·noexcept, compile-negative, in-flight callback의 해제/재진입/모듈 수명. `Result<bool>` 성공과 값의 혼동을 편의 API에 노출하지 않는다. |
-| C07 P1 | range/view·iterator·hash·비트·enum flag·scope exit·version **부분/후속** | dangling view, 잘못된 비트/shift·부호·정렬·overflow, endian·hash golden, 범용 비암호 hash와 보안 hash의 구분, cleanup 실패 진단. |
+| C06 P0 | traits/concepts, `Move`, `Result`, `Function`, `Optional`(`Core/Optional.h`, UE TOptional 대응: 빈 접근 Fatal, 자기 별칭 Emplace 안전) **부분**; Variant/Pair/Tuple, callable/delegate/event **후속** | 빈 상태, move-only, 비복사성·noexcept, compile-negative, in-flight callback의 해제/재진입/모듈 수명. `Result<bool>` 성공과 값의 혼동을 편의 API에 노출하지 않는다. |
+| C07 P1 | range/view·iterator·hash·비트·enum flag·scope exit·version — `ScopeExit`/`ROCKS_ON_SCOPE_EXIT`(UE ON_SCOPE_EXIT 대응, noexcept 정리·Dismiss) 구현, 나머지 **부분/후속** | dangling view, 잘못된 비트/shift·부호·정렬·overflow, endian·hash golden, 범용 비암호 hash와 보안 hash의 구분, cleanup 실패 진단. |
 
 ### 3.3 문자열·국제화·경로
 
@@ -64,18 +64,18 @@ Base → PlatformBase → Core → Task / Localization / Serialization / MetaSch
 
 ### 3.4 수학·기본 충돌·SIMD
 
-현재 전용 수학/기하 공개 모듈은 소스 인벤토리에서 확인되지 않았다. 다음은 **Rocks 목표**이며 항목별 UE5.6 실 소스와 의미 대조는 별도로 한다. 사용자 요구에 따라 수학 알고리즘은 검증된 상용 엔진에서 공개된 기존 구현을 라이선스 검토 후 참고하거나 사용 가능한 라이브러리를 얇은 어댑터로 연결한다. 검증된 소스의 라이선스·배포 권한을 보장하기 전 임의로 복제하거나, 사소한 수학 구현을 근거 없이 새로 작성하지 않는다. 후보의 유지보수·정밀도·성능·코드 스타일·의존성·Windows/macOS x64/ARM64 SIMD·STL/예외 정책을 비교하고 결정 이유와 버전을 기록한다.
+2026-11-11 기준 `PlatformBase/Public/Platform/Math`(Generic→Clang→SSE2/NEON 상속, 4-lane scalar/SSE2/NEON 레지스터)와 `Core/Public/Core/Math`(벡터·행렬·투영·quaternion·Rotator·Transform·Rect·색·난수·일괄 변환)를 구현했다. 상세 계약·UE 5.6 차이·검증 범위는 [수학 구현](../Implementation/Math.ko.md)을 따른다. 사용자 지시에 따라 UE처럼 CPU별 최적화 함수를 선택하는 자체 구현을 먼저 두고, 공개 구현(UE 5.6 고정 커밋)은 의미 대조에만 쓰며 코드를 복제하지 않는다. 외부 backend 후보 평가는 batch·고급 kernel의 측정 기반 교체 기준으로 유지한다. 아래 표의 상태는 구현 범위이며 macOS·ARM64 실행과 성능은 미검증이다.
 
 | ID/우선 | 기능 | 계약·검증 |
 |---|---|---|
-| G01 P0 | scalar: clamp/min/max/lerp, degree/radian, 절대·상대 오차, 유한성, floor/ceil/round, remainder, safe divide/sqrt, 근삿값 | NaN/Inf/서명된 0·subnormal·오버플로·도메인 오류와 반올림은 함수별로 정한다. 잘못된 입력을 조용히 0으로 바꾸지 않는다. double precision 기준 및 golden vector. |
-| G02 P0 | `Vector2/3/4`, 정수 벡터·점, 크기·내적·외적·거리·정규화·투영·보간 | float/double 타입과 정렬, 0 벡터 및 실패 의미, point/direction 구분, 점곱/외적·정규화 불변식, scalar/SIMD differential. |
-| G03 P0 | quaternion, rotation, matrix3/4, affine `Transform`, inversion·composition·방향/위치 변환 | 기존 설계의 오른손·+Z 위·+X 전방·미터·라디안·초와 column vector·`world=parent×local`, reversed-Z [0,1]을 유지하고 예제로 고정한다. 행렬 메모리 배치와 회전 세부 순서는 별도로 결정한다. 퇴화·비가역·음수/비균일 scale·오차 누적을 검사한다. |
-| G04 P1 | plane, ray, line/segment, sphere, AABB, oriented box, capsule, triangle, frustum, 2D rect·bounds | 유한값/음수 반경/역전 min-max 등 생성 검증, 빈·퇴화 shape, 경계 접촉 포함/제외, 축 및 좌표 공간 계약. |
-| G05 P0 | 기본 교차·포함·거리·최근접점, ray/segment 대 plane/sphere/AABB/triangle, sphere-sphere·sphere-AABB·AABB-AABB | 순수 함수, 단위 방향 요구 여부·매개변수 범위·hit point/normal/distance 의미, 시작점 내부·접선·평행·0 길이·뒤쪽·퇴화·epsilon. 대칭성과 double reference·무작위 property·경계 golden 검증. 처음에는 모든 조합을 구현했다고 표시하지 않는다. |
-| G06 P1 | OBB/capsule/frustum 교차, 삼각형·mesh 기초, swept shape·접촉 정보 | 지원 쌍·양방향·normal 방향·접촉 깊이·불변식, broadphase/physical response는 별도 물리 계층에 남긴다. 정확한 불변식과 비지원 조합 명시. |
-| G07 P0 | 색, linear/sRGB 변환, packed 정규화, 랜덤/시드 | 채널 범위·alpha·전달 함수·rounding·NaN·정확한 golden. 결정적 PRNG 알고리즘/seed, 품질·상태 크기·스레드 정책과 보안용 금지를 문서화한다. |
-| G08 P0/P1 | SIMD(x64 SSE/AVX, ARM64 NEON 가능성) 추상화·scalar fallback·기능 감지/dispatch | 코드 경계 내 intrinsic, OS 상태까지 확인한 안전한 dispatch, 미지원 CPU fallback, 정렬/alias, SIMD vs scalar 허용 오차·특수값·실 CPU 매트릭스. 부동소수점 결과의 플랫폼 간 비트 단위 결정성은 보장 여부를 따로 정한다. |
+| G01 P0 | scalar: clamp/min/max/lerp, degree/radian, 절대·상대 오차, 유한성, floor/ceil/round, remainder, safe divide/sqrt, 근삿값 — `MathUtility.h`·`PlatformMath` **부분**(보간·Wrap·GridSnap·정수 변환·Estimate 포함, safe divide·상대 오차 helper는 후속) | NaN/Inf/서명된 0·subnormal·오버플로·도메인 오류와 반올림은 함수별로 정한다. 잘못된 입력을 조용히 0으로 바꾸지 않는다. double precision 기준 및 golden vector. |
+| G02 P0 | `Vector2/3/4`, 정수 벡터·점, 크기·내적·외적·거리·정규화·투영·보간 — `Vec2/3/4(d)`, `IntVec2/3` **부분**(IntVector4·unsigned 변형 후속) | float/double 타입과 정렬, 0 벡터 및 실패 의미, point/direction 구분, 점곱/외적·정규화 불변식, scalar/SIMD differential. |
+| G03 P0 | quaternion, rotation, matrix3/4, affine `Transform`, inversion·composition·방향/위치 변환 — `Quat(d)`, `Rotator`, `Mat4(d)`, `MatrixFactory`, `Transform` **부분**(Matrix3·dual quaternion 후속, 열 우선 저장·(x,y,z,w) 순서 결정) | 기존 설계의 오른손·+Z 위·+X 전방·미터·라디안·초와 column vector·`world=parent×local`, reversed-Z [0,1]을 유지하고 예제로 고정한다. 행렬 메모리 배치와 회전 세부 순서는 별도로 결정한다. 퇴화·비가역·음수/비균일 scale·오차 누적을 검사한다. |
+| G04 P1 | plane, ray, line/segment, sphere, AABB, oriented box, capsule, triangle, frustum, 2D rect·bounds — `Shapes.h`(frustum 제외 8종), `Rect.h`(`Box2`, `IntRect`), `Interval.h` **부분**, frustum·BoxSphereBounds **후속** | 유한값/음수 반경/역전 min-max 등 생성 검증, 빈·퇴화 shape, 경계 접촉 포함/제외, 축 및 좌표 공간 계약. |
+| G05 P0 | 기본 교차·포함·거리·최근접점, ray/segment 대 plane/sphere/AABB/triangle, sphere-sphere·sphere-AABB·AABB-AABB — `Intersection.h` **구현**(Windows x64 실행 검증, 지원 조합은 [수학 구현](../Implementation/Math.ko.md) §2.1) | 순수 함수, 단위 방향 요구 여부·매개변수 범위·hit point/normal/distance 의미, 시작점 내부·접선·평행·0 길이·뒤쪽·퇴화·epsilon. 대칭성과 double reference·무작위 property·경계 golden 검증. 처음에는 모든 조합을 구현했다고 표시하지 않는다. |
+| G06 P1 | OBB/capsule/frustum 교차, 삼각형·mesh 기초, swept shape·접촉 정보 — OBB–OBB·Capsule–Sphere/Capsule·광선 대 Capsule/OBB **부분**, frustum·swept·접촉 정보 **후속** | 지원 쌍·양방향·normal 방향·접촉 깊이·불변식, broadphase/physical response는 별도 물리 계층에 남긴다. 정확한 불변식과 비지원 조합 명시. |
+| G07 P0 | 색, linear/sRGB 변환, packed 정규화, 랜덤/시드 — `Color`·`LinearColor`·`RandomStream`(PCG32) **부분**(Float16 색·이름 색 목록·noise 후속) | 채널 범위·alpha·전달 함수·rounding·NaN·정확한 golden. 결정적 PRNG 알고리즘/seed, 품질·상태 크기·스레드 정책과 보안용 금지를 문서화한다. |
+| G08 P0/P1 | SIMD(x64 SSE/AVX, ARM64 NEON 가능성) 추상화·scalar fallback·기능 감지/dispatch — SSE2/NEON/scalar 4-lane 레지스터와 CPU별 PlatformMath **부분**(AVX2/FMA dispatch·double 레지스터·SoA batch 후속, NEON 실행 미검증) | 코드 경계 내 intrinsic, OS 상태까지 확인한 안전한 dispatch, 미지원 CPU fallback, 정렬/alias, SIMD vs scalar 허용 오차·특수값·실 CPU 매트릭스. 부동소수점 결과의 플랫폼 간 비트 단위 결정성은 보장 여부를 따로 정한다. |
 
 #### 수학·충돌 설계의 선행 결정과 검증 순서
 
@@ -91,7 +91,7 @@ Base → PlatformBase → Core → Task / Localization / Serialization / MetaSch
 |---|---|---|
 | P01 P0 | generic/platform file interface, 물리 file open/read/write/seek/size/delete·wrapper 주입 **부분** | 소유권·close 오류·부분 I/O·EOF·Unicode·권한·symlink·atomic 저장, 실제 Windows/macOS 실행. 구현은 Generic+platform private 경계 유지. |
 | P02 P0 | 디렉터리 생성/삭제/열거·stat·copy/move·timestamp·기본 경로 **후속/확인 필요** | 파일·디렉터리/symlink 의미, recursive 경계·실패 rollback·권한·race/TOCTOU, 정렬 없는 열거와 cancellation, 경로·자원 수명·실 OS. |
-| P03 P1 | flush/truncate/read-at·async I/O·memory mapping·watch·wrapper chain·I/O cache **후속** | 부분 완료·취소·늦은 callback·종료·ordering·rescan/overflow·backpressure·예산과 소유권. 백엔드별 미지원은 명시적 결과. |
+| P03 P1 | flush/truncate/read-at·async I/O·memory mapping·watch·wrapper chain·I/O cache — 비동기 offset 읽기(`Platform/AsyncFile.h`, Windows Native/WorkerPool 검증) **부분**, 나머지 **후속** | 부분 완료·취소·늦은 callback·종료·ordering·rescan/overflow·backpressure·예산과 소유권. 백엔드별 미지원은 명시적 결과. |
 | P04 P0 | thread/Mutex/CV/event/semaphore·clock **부분** | start/join/timeout/자기 join·동시 wait·shutdown·timeout 음성대조, 재귀 여부, primitive 생성/소멸과 memory ordering. 프로세스 fatal 테스트의 실제 setup 성공을 독립적으로 검증하고 partial stderr 및 timeout 단계를 보존한다. |
 | P05 P1 | atomic/TLS/RW lock·thread name/priority/affinity·CPU·stack 옵션·wait groups **후속/확인 필요** | supported capability, atomic order·ABA·lost wakeup·writer starvation·over-subscription·OS 실패. 동기화 없는 잘못된 사용은 암묵적 성공으로 감추지 않는다. |
 | P06 P1 | process spawn/wait/exit·pipe/IPC·환경·CLI·동적 라이브러리 **후속/부분** | argument quoting, pipe concurrent drain과 bounded output, 제한시간·child cleanup·분리 자손/OS job 한계, 재시도·재진입·Unicode, Windows/macOS와 headless. |
@@ -99,13 +99,25 @@ Base → PlatformBase → Core → Task / Localization / Serialization / MetaSch
 
 ### 플랫폼 비동기 파일 I/O 상세 계약과 단계
 
-현재 동기 파일 API는 비동기 파일 I/O의 구현 증거가 아니다. 아래는 Core/PlatformBase 선행 목표이며 아직 **미구현**이다. OS별 기능 차이는 `GenericPlatform` 공통 계약과 private backend에서 처리하고 호출자가 운영체제 전처리 분기를 작성하지 않게 한다. 에셋 로더나 Task Graph와 결합하더라도 Core 레이어만으로 headless 테스트가 가능해야 한다.
+2026-11-11에 1차 구현을 추가했다: `Platform/AsyncFile.h`의 `AsyncIoContext`·`AsyncReadFile`·`AsyncReadRequest`(offset 지정 읽기, 호출자 소유 요청, 완료 통지 1회, 취소 경합 결과 보고, 소멸 시 취소 후 완료 대기), Windows Native(overlapped + IO completion port)와 모든 플랫폼 공용 WorkerPool(위치 지정 동기 읽기) backend, macOS WorkerPool(`pread`) hook. Windows x64에서 두 backend를 실제 OS 파일로 검증했다. macOS는 빌드·실행하지 않았고, 쓰기·scatter/gather·우선순위·deadline·dispatch I/O 평가·fake backend 결정적 interleaving 테스트는 아래 목표로 남는다. 아래 계약은 남은 범위를 포함한 목표다. OS별 기능 차이는 `GenericPlatform` 공통 계약과 private backend에서 처리하고 호출자가 운영체제 전처리 분기를 작성하지 않게 한다. 에셋 로더나 Task Graph와 결합하더라도 Core 레이어만으로 headless 테스트가 가능해야 한다.
 
 1. **공통 API:** 파일 핸들에서 명시적 offset과 길이를 받는 비동기 read/write를 우선한다. 요청은 소유형 완료 핸들로 관리하며 상태, 실제 전송 바이트, OS 오류, 취소 요청과 최종 완료 결과를 구분한다. `Submit`의 즉시 실패, 즉시 완료, 보류 완료가 같은 계약으로 관찰되고 완료 통지는 정확히 한 번이어야 한다. 대기 외 callback/Task 연결은 실행 스레드·재진입·동기 완료 시점을 문서화한다. scatter/gather, flush, 우선순위와 deadline은 capability에 따라 후속 확장한다.
 2. **소유권과 취소:** 읽기 대상·쓰기 원본 버퍼, 요청 레코드, 핸들 및 callback 데이터는 OS가 실제로 사용을 마친 최종 완료까지 유지한다. 빌린 버퍼와 소유형 버퍼의 책임을 타입/함수로 구분한다. `Cancel`은 취소 요청이며 즉시 완료나 버퍼 회수를 뜻하지 않는다. 완료와 경합하면 정상 완료·취소·다른 오류 중 하나를 결과로 보고, 부분 전송도 숨기지 않는다. 파일 닫기/dispatcher 종료는 신규 제출을 막고 진행 중 요청을 완료 또는 취소 후 회수한다. 취소 불가능하거나 정지한 장치에 무조건 짧은 종료 시간을 약속하지 않는다.
 3. **Windows:** `FILE_FLAG_OVERLAPPED` 핸들과 `OVERLAPPED`, IO completion port 또는 동등한 Windows thread-pool I/O 경로를 backend 후보로 구현·측정한다. 호출 즉시 완료와 pending, completion packet 발생 정책·실패·중복 회수를 명확히 한다. 요청 단위 `CancelIoEx`는 취소를 보장하거나 완료까지 기다리지 않으므로 OS의 최종 완료 관찰 전 OVERLAPPED와 버퍼를 재사용하지 않는다. 동기 핸들 대체 경로 및 네트워크·특수 파일의 지원 여부는 별도로 검증한다. 근거: Microsoft [비동기 I/O](https://learn.microsoft.com/en-us/windows/win32/fileio/synchronous-and-asynchronous-i-o), [취소](https://learn.microsoft.com/windows/win32/api/ioapiset/nf-ioapiset-cancelioex), [완료 포트](https://learn.microsoft.com/en-us/windows/win32/fileio/i-o-completion-ports).
 4. **macOS:** dispatch I/O, POSIX 비동기 I/O 및 제한된 worker 기반 positional I/O를 후보로 평가한다. 일반 파일에 대한 실제 가용성·offset·순서·취소·완료·성능을 실기기에서 확인하고 지원하지 못하는 기능은 capability와 결과로 드러낸다. 단순 `dispatch_read`는 제출 뒤 취소할 수 없으므로 요청별 OS 취소를 보장한다고 가정하지 않는다. worker fallback은 동기 시스템 호출을 worker에 위임한 것임을 명시하고 동시 실행 수, 큐 예산, backpressure 및 shutdown 경합을 검증한다. 근거: Apple [dispatch_read](https://developer.apple.com/documentation/dispatch/dispatch_read?changes=__5). 콘솔과 다른 OS의 native backend는 플랫폼 SDK 접근·라이선스 및 capability 감사 후 추가한다.
 5. **필수 검증:** 빈/대형 파일, UTF-8 경로, offset/overflow/EOF·partial transfer, 즉시/지연 완료, 동시 겹침, cancel-before-submit·pending·completion 경합, 반복 취소, 파일 close·dispatcher shutdown·callback 재진입과 late completion을 결정적 fake backend와 실제 OS 양쪽에서 검사한다. submit/할당/OS 실패를 주입해 누수·중복 callback·버퍼 조기 해제가 없는지 추적한다. 1/다수 생산자·완료자 stress, 큐 포화·우선순위·시간 초과 및 ASan/race 도구를 포함한다. Windows x64, macOS x64/ARM64 실 실행을 각각 기록하며 미실행 플랫폼은 통과로 표시하지 않는다.
+
+### 3.5.1 모바일(iOS·Android) 지원 — 2026-11-11 요구 반영
+
+사용자 요구에 따라 Android와 iOS를 Core·PlatformBase의 정식 대상으로 둔다(콘솔은 후속). 현재 저장소에는 모바일 backend·빌드 대상이 없고 이 개발 환경에는 iOS SDK(Xcode)와 Android NDK가 없어 **미구현·미검증**이다. 이미 구현한 것 중 모바일에 직접 쓰이는 부분은 ARM64 NEON 수학 경로(ARM64 대상 컴파일만 확인)와 POSIX `pread` 기반 비동기 읽기 WorkerPool hook이다.
+
+| ID/우선 | 항목 | 완료 조건과 검증 |
+|---|---|---|
+| MB01 P0 | 빌드 대상: iOS ARM64(device·simulator), Android ARM64·x86_64(API level 고정), 교차 컴파일 toolchain·SDK 버전 고정 | 현재 Rocks.Build의 교차 빌드 거부를 대상별 허용 목록으로 바꾸고 미지원 조합은 계속 거부. 대상별 경고 오류·단독 헤더 컴파일, CI에서 최소 빌드 |
+| MB02 P0 | PlatformBase backend: `Private/Posix`(Mac·iOS·Android 공통 thread·sync·clock·file·pread), `Private/Apple`(Mac·iOS 공통), `Private/IOS`, `Private/Android` | 기능별로 정확히 하나의 구현 선택, Fatal·VirtualMemory(mmap/mprotect)·TLS·thread 이름, 실기기 정상·실패·종료 테스트 |
+| MB03 P0 | 파일·경로: 앱 샌드박스(iOS Documents/Library/Caches, Android internal/external files), Android APK/AAB asset(AAssetManager)·asset pack, 읽기 전용 번들 | 경로 문법과 저장소 종류 분리, 비동기 읽기에서 압축 해제 없이 offset 읽기 가능한 asset만 직접 지원, 미지원은 Unsupported |
+| MB04 P1 | 수명·자원: 백그라운드 전환 시 I/O·worker 정지/재개, 메모리 경고(iOS didReceiveMemoryWarning, Android onTrimMemory)와 allocator 예산 연동 | 진행 중 요청의 완료·취소 규약 유지, 앱 일시정지 중 callback 지연 허용, 강제 종료 시 부분 쓰기 정책 |
+| MB05 P1 | 성능·SIMD: ARM64 NEON 실행 검증, FMA 축약 고정(`-ffp-contract`), thermal throttling 하의 측정 | `ScalarSimdBitExact` 판정을 실기기 결과로 갱신, 미실행 플랫폼은 통과로 표시하지 않음 |
 
 ### 3.6 로깅·프로파일링·설정·자원 변환
 
@@ -114,7 +126,7 @@ Base → PlatformBase → Core → Task / Localization / Serialization / MetaSch
 | D01 P0 | logger → sink·level/category, assert/check/ensure, fatal, 재진입/OOM fallback **부분** | 여러 sink, 동기화·필터·순서·failure propagation, stdout/stderr 잠김·종료·경로 실패; Fatal 음성 대조가 실패 상황을 가짜 PASS로 만들지 않음. |
 | D02 P1 | structured log, file rotation/async sink, trace·CPU/GPU profiler, counters, dropped event, memory/task/I/O/GC 측정 **부분/후속** | 비활성 비용·overflow/drop·종료/동시 capture·시간 상관·headless viewer 연계. GPU는 Renderer 계층. |
 | D03 P1 | config 계층·platform/target override, 환경·commandline, reload/change listeners, runtime console variables **후속** | 우선순위·잘못된 구문/진단·원자 snapshot·동시 갱신·민감값 처리·headless. 기존 Commandlet은 console variable 관리 구현을 뜻하지 않는다. |
-| D04 P1 | CRC/checksum·비암호 hash·Base64·compression 인터페이스·streaming **부분/후속** | 공식 golden, 빈 입력·overflow·partial chunk·악성/절단 데이터·출력 제한·OOM rollback, 안전하지 않은 형식의 오용 방지. 암호/보안은 검증된 라이브러리와 키·무결성 정책을 별도로 선택한다. |
+| D04 P1 | CRC/checksum·비암호 hash·Base64·compression 인터페이스·streaming — `Core/Encoding/Crc32.h`(zlib 호환 CRC-32, 분할 계산)와 `Base64.h`(RFC 4648 엄격 디코딩, 실패 시 출력 불변) **부분**, compression·streaming·URL-safe 변형 **후속** | 공식 golden, 빈 입력·overflow·partial chunk·악성/절단 데이터·출력 제한·OOM rollback, 안전하지 않은 형식의 오용 방지. 암호/보안은 검증된 라이브러리와 키·무결성 정책을 별도로 선택한다. |
 | D05 P1 | parser·토큰화·wildcard·glob·버전·progress/cancellation **후속/확인 필요** | 입력 제한·정확한 위치·Unicode·escape·malformed·reentrancy·headless 취소·작업 연동. 정규식 엔진 등 고비용 의존성은 별도 검토. |
 
 ### 3.7 작업·모듈·객체 경계
@@ -139,11 +151,11 @@ Base → PlatformBase → Core → Task / Localization / Serialization / MetaSch
 
 | 단계 | 선행 조건과 구현 범위 | 종료 게이트 |
 |---|---|---|
-| 0 · 실패 원인/시험 신뢰성 | ASan 스레드 종료 시간 초과의 단계별 증거 수집, 거짓 PASS 차단, setup 실패·timeout·stderr 수거 음성대조 | 재현 방법과 원인/한계를 분리 기록. 정상·음성·반복 및 기존 harness 회귀. 단순 재시도 성공만으로 원인 해결 판정 금지. |
+| 0 · 실패 원인/시험 신뢰성 | ASan 스레드 종료 시간 초과의 단계별 증거 수집, 거짓 PASS 차단, setup 실패·timeout·stderr 수거 음성대조. **2026-11-11 사용자 지시로 누락 구현보다 후순위로 보류**(확보 증거는 §7-5) | 재현 방법과 원인/한계를 분리 기록. 정상·음성·반복 및 기존 harness 회귀. 단순 재시도 성공만으로 원인 해결 판정 금지. |
 | 1 · 기준·기반 보호 | UE5.6 공개 헤더/공개 API 인벤토리와 Rocks 담당 모듈 자동 대조, uncommitted 변경 보존, Base·allocator·수명·플랫폼 계약 | 각 심볼/기능의 버전·출처·상태·예외·테스트를 기록. 허위 완료 0, 라이선스 검토, CI 경고 오류·header 단독 컴파일. |
 | 2 · 범용 자료구조·공용 유틸 | Array/Span/Map/Set/BitArray 미완과 sparse/queue, traits·optional·scope guard, 문자열·Name/Unicode 및 경로. 운영체제 디렉터리·stat과 함께 사용 시나리오 우선 | API 사용 예, alias/move-only/OOM/property/negative harness, 플랫폼 접근 가능 범위 기록. 상호 의존 재진입·allocator/LIFO 실패 검증. |
-| 3 · 수학·기본 충돌 | 검증된 상용 엔진 공개 구현/외부 라이브러리 후보 선정과 권리 확인 → 좌표/정밀도/타입 계약 → scalar·vector·matrix·quaternion·transform → 기본 shape 및 교차 → SIMD adapter | double/golden oracle, 경계/NaN/degenerate/property, 실제 x64/ARM64와 scalar/SIMD 대조. 각 shape pair 지원 여부와 실패 계약을 열거. 전체 물리 엔진 완료로 표기하지 않는다. |
-| 4 · 플랫폼·동시성·진단 | platform file/dirs/wrappers·async 기반, thread 옵션·atomic·task 연동, structured logging·tracing·config | Windows/macOS 각 실제 OS·권한·IO 오류·동시성·shutdown. ASan/가능한 race detector와 장시간 stress. 미지원 capability의 음성 테스트. |
+| 3 · 수학·기본 충돌 | 좌표/정밀도/타입 계약 → CPU별 PlatformMath·4-lane 레지스터 → scalar·vector·matrix·투영·quaternion·Rotator·transform·색·난수 → 기본 shape 및 교차 → batch/추가 ISA. 외부 backend는 측정 기반 교체 후보로 유지. **진행 중**(구현 범위는 [수학 구현](../Implementation/Math.ko.md)) | double/golden oracle, 경계/NaN/degenerate/property, 실제 x64/ARM64와 scalar/SIMD 대조. 각 shape pair 지원 여부와 실패 계약을 열거. 전체 물리 엔진 완료로 표기하지 않는다. |
+| 4 · 플랫폼·동시성·진단 | 파일: ① 디렉터리·stat·`ReadAt`/`WriteAt`·flush·truncate(동기 positional I/O) → ② **비동기 파일 I/O**: 결정적 fake backend로 공통 계약(제출·완료 1회·취소 경합·버퍼/핸들 수명·종료) 고정 → Windows overlapped+IOCP backend → macOS worker 기반 positional I/O와 dispatch I/O 평가 → ③ wrapper chain·mapping·watch. 이후 thread 옵션·atomic·task 연동, structured logging·tracing·config | Windows/macOS 각 실제 OS·권한·IO 오류·동시성·shutdown. ASan/가능한 race detector와 장시간 stress. 미지원 capability의 음성 테스트. |
 | 5 · 완성·확장 | 수학 고급 shape, native smart pointer, shared cache·프로파일러, compression·통계·외부 allocator, 직렬화/GC/상위 Engine 연결 | 지표·예산·API 안정성·라이선스·플랫폼별 실행 증거를 만족한 항목만 완료로 변경. UE5.6 Core 차이·미지원 목록과 이유 유지. |
 
 단계 간 가능한 병렬 작업은 허용하되 기반 수명·오류 계약과 기준 구현을 우회하지 않는다. 사용자가 Core 안정화 전 상위 기능 진행을 요청하지 않았으므로 Renderer·Editor·Gameplay는 이 명세의 구현 대상이 아니다.
@@ -159,8 +171,8 @@ Base → PlatformBase → Core → Task / Localization / Serialization / MetaSch
 
 ## 7. 확인되지 않은 결정 사항
 
-1. 수학 공급자와 그 라이선스, `float`/`double`별 저장 표현·정렬, 내부 SIMD dispatch, constexpr 보장·부동소수점 결정성 정책은 아직 선정되지 않았다.
-2. 기존 [전체 구현 계획](EngineImplementationPlan.ko.md)의 기본 좌표 규약은 오른손·+Z 위·+X 전방·미터·라디안·초, column vector와 `world=parent×local`, reversed-Z 깊이 [0,1], 월드 위치 double/렌더 상대 float다. UE의 좌표·단위와는 가져오기/내보내기 경계에서 변환한다. matrix 메모리 배치·quaternion 순서·기본 collision 접촉 기준과 함수별 epsilon은 연동 전에 추가로 결정해야 한다.
+1. 수학: 자체 구현과 CPU별 PlatformMath(SSE2/NEON)를 채택했고 float/double 저장은 padding 없는 성분 순서, 행렬은 열 우선, quaternion은 (x,y,z,w)로 결정했다(2026-11-11). 외부 backend 교체 여부, AVX2/FMA 등 선택 ISA의 runtime dispatch, ARM64 FMA 축약(`-ffp-contract`) 고정, 플랫폼 간 부동소수점 결정성 범위는 아직 결정하지 않았다.
+2. 기존 [전체 구현 계획](EngineImplementationPlan.ko.md)의 기본 좌표 규약은 오른손·+Z 위·+X 전방·미터·라디안·초, column vector와 `world=parent×local`, reversed-Z 깊이 [0,1], 월드 위치 double/렌더 상대 float다. UE의 좌표·단위와는 가져오기/내보내기 경계에서 변환한다. matrix 메모리 배치(열 우선)·quaternion 순서((x,y,z,w))·Rocks view 공간(카메라 +X 전방)과 NDC 규약은 결정했다. 기본 collision 접촉 기준(닫힌 집합)과 함수별 epsilon은 도형 구현 문서에 함수별로 기록한다.
 3. UE5.6 공개 Core 전체 원본/심볼을 아직 기계적으로 대조하지 않았다. 공개되지 않은 내부 기능과 상위 모듈을 Core와 혼동하지 않으며, 5.8 참고 사례는 5.6 증거로 취급하지 않는다.
 4. 실제 macOS x64/ARM64, 다른 OS/콘솔, 실제 외부 allocator 제품 배포 및 성능 동등성은 실행 증거가 없다. 계측 가능한 목표와 대상 하드웨어를 별도로 정한다.
-5. ASan thread-unjoined timeout은 최초 실행에서 관찰됐으나 기록된 timeout만으로 정확한 교착 원인은 확정되지 않았다. 실제 수정과 반복·교차 검증 결과를 보고서에 별도로 반영한다.
+5. ASan thread-unjoined timeout은 최초 실행에서 관찰됐으나 기록된 timeout만으로 정확한 교착 원인은 확정되지 않았다. 2026-11-11 현재 소스(준비 마커 포함)의 ASan 빌드를 2초 정지 감지 하네스로 반복하자 22회 중 3회 정지했고, 두 사례는 65초 이상 지속된 **영구 정지**였다. 유일하게 남은 메인 스레드의 스택은 `Fatal → abort → ExitProcess → LdrShutdownProcess → ASan 런타임 DLL_PROCESS_DETACH의 onexit 표 해제 → ASan 할당기 → WaitOnAddress`였다. 테스트의 `_set_abort_behavior`가 `_CALL_REPORTFAULT`를 끄므로 abort가 `__fastfail` 대신 `_exit(3)`→`ExitProcess`로 진행하고, `ExitProcess`가 종료 중이던 worker를 강제 종료한 뒤 DLL 분리 코드가 고아가 된 ASan 내부 잠금을 기다린다는 해석이 증거와 일치한다(Microsoft ExitProcess 문서의 교착 경고와 같은 형태). 정확한 ASan 잠금 이름은 런타임 PDB가 없어 미확정이며, 원래 20초 실패가 같은 원인인지도 당시 증거가 없어 확정하지 않는다. 종료 코드가 이미 설정된 이 상태의 프로세스는 외부 TerminateProcess로 제거되지 않아 `ProcessRunner`의 timeout 정리도 끝나지 않는다. 제안 수정(Windows `Fatal`이 진단 출력 후 `TerminateProcess`로 종료, EXE TLS callback 기반 결정적 회귀, ProcessRunner의 부분 출력·종료 상태 보존)은 사용자 지시로 보류했고 아직 적용하지 않았다.
