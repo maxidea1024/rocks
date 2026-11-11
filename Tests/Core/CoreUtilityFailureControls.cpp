@@ -1,4 +1,5 @@
 #include <Core/Containers/HashMap.h>
+#include <Core/Delegate.h>
 #include <Core/Math/RandomStream.h>
 #include <Core/Memory/SharedPtr.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -46,6 +47,22 @@ int RunSharedPtrEmptyControl() noexcept {
     PrepareFatalTestProcess();
     SharedPtr<int> empty;
     return *empty;
+}
+
+int RunDelegateExecuteUnboundControl() noexcept {
+    PrepareFatalTestProcess();
+    Delegate<int()> empty;
+    return empty.Execute();
+}
+
+// 실행 중인 delegate를 그 호출 안에서 다른 대상으로 바꾸면 실행 중 저장소가 깨지므로 Fatal이다.
+int RunDelegateRebindDuringExecutionControl() noexcept {
+    PrepareFatalTestProcess();
+    Delegate<void()> self;
+    self = Delegate<void()>::CreateLambda(
+        [&self]() noexcept { self = Delegate<void()>::CreateLambda([]() noexcept {}); });
+    self.Execute();
+    return 0;
 }
 
 int RunVariantWrongAlternativeControl() noexcept {

@@ -23,6 +23,8 @@ int RunHashMapIteratorAfterInsertControl() noexcept;
 int RunSharedPtrEmptyControl() noexcept;
 int RunSharedRefFromEmptyControl() noexcept;
 int RunVariantWrongAlternativeControl() noexcept;
+int RunDelegateExecuteUnboundControl() noexcept;
+int RunDelegateRebindDuringExecutionControl() noexcept;
 int RunRandomStreamPreconditionControl(uint32 operation) noexcept;
 int RunExternalAllocatorNegativeControl(uint32 operation) noexcept;
 int RunDebugAllocatorNegativeControl(uint32 operation) noexcept;
@@ -221,6 +223,10 @@ int main(int argc, char** argv) {
                 return test::RunSharedRefFromEmptyControl();
             } else if (strcmp(control, "variant-wrong-alternative") == 0) {
                 return test::RunVariantWrongAlternativeControl();
+            } else if (strcmp(control, "delegate-execute-unbound") == 0) {
+                return test::RunDelegateExecuteUnboundControl();
+            } else if (strcmp(control, "delegate-rebind-during-execution") == 0) {
+                return test::RunDelegateRebindDuringExecutionControl();
             } else if (strncmp(control, "random-invalid-", 15) == 0 && control[15] >= '0' &&
                        control[15] <= '2' && control[16] == '\0') {
                 return test::RunRandomStreamPreconditionControl(

@@ -38,12 +38,6 @@ inline constexpr bool IsTupleV = false;
 template <typename... Types>
 inline constexpr bool IsTupleV<Tuple<Types...>> = true;
 
-template <typename T>
-inline constexpr bool IsRvalueReferenceV = false;
-
-template <typename T>
-inline constexpr bool IsRvalueReferenceV<T&&> = true;
-
 struct TupleConstructTag {};
 
 // 원소 하나를 담는다. 같은 타입 원소가 여러 개여도 Index로 구분된다.
@@ -99,7 +93,7 @@ struct TupleStorage<IndexSequence<Indices...>, Types...> : TupleLeaf<Indices, Ty
 //   std::tuple_element 특수화로 동작한다. 엔진 코드에서는 Get<I>를 쓴다.
 template <typename... Types>
 class Tuple : private detail::TupleStorage<MakeIndexSequence<sizeof...(Types)>, Types...> {
-    static_assert((!detail::IsRvalueReferenceV<Types> && ...),
+    static_assert((!IsRvalueReferenceV<Types> && ...),
                   "Tuple does not support rvalue reference elements");
     static_assert((IsNothrowDestructibleV<Types> && ...),
                   "Tuple elements need noexcept destruction");

@@ -49,6 +49,12 @@ inline constexpr bool IsLvalueReferenceV = false;
 template <typename T>
 inline constexpr bool IsLvalueReferenceV<T&> = true;
 
+template <typename T>
+inline constexpr bool IsRvalueReferenceV = false;
+
+template <typename T>
+inline constexpr bool IsRvalueReferenceV<T&&> = true;
+
 // 컨테이너가 재배치 이후 실패 복구를 요구하지 않도록 생성·소멸의 noexcept 전제를 검사한다.
 // compiler intrinsic 사용은 지원하는 Clang 계열 toolchain의 경계 안에 둔다.
 template <typename T>
