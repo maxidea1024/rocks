@@ -1,5 +1,7 @@
 #include "../Common/AsyncFileInternal.h"
 #include "../Common/FileInternal.h"
+#include "PosixFileError.h"
+#include "PosixPlatform.h"
 
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
@@ -9,43 +11,15 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-// macOS backend다. 커널 비동기 I/O(dispatch I/O·POSIX AIO)는 일반 파일에서 요청별 취소·순서·성능을
-// 실기기로 검증하기 전까지 사용하지 않고, 공용 WorkerPool이 pread/pwrite로 위치 지정 읽기·쓰기를
-// 수행한다.
-// 이 파일의 POSIX 호출(open/fstat/pread/close)은 iOS·Android backend에서도 같은 의미로 재사용할
-// 수 있도록 Apple 전용 API를 쓰지 않는다. 오류 변환과 경로 복사는 Mac/File.cpp와 같은 규칙이며,
-// POSIX 공용 계층을 도입할 때 하나로 합친다.
-// 주의: 이 backend는 macOS 실기기에서 아직 빌드·실행하지 않았다.
+// POSIX 공통 backend다(macOS·Android). 커널 비동기 I/O(dispatch I/O·POSIX AIO·io_uring)는 일반
+// 파일에서 요청별 취소·순서·성능을 실기기로 검증하기 전까지 사용하지 않고, 공용 WorkerPool이
+// pread/pwrite로 위치 지정 읽기·쓰기를 수행한다. OS별 차이는 PosixPlatform.h hook으로만 처리한다.
+// 오류 변환과 경로 복사는 Posix/File.cpp와 같은 규칙이다.
 namespace rocks::platform::detail {
 namespace {
 
 FileStatus PosixError(int error) noexcept {
-    FileCode code = FileCode::SystemError;
-    switch (error) {
-    case ENOENT:
-    case ENOTDIR:
-        code = FileCode::NotFound;
-        break;
-    case EACCES:
-    case EPERM:
-        code = FileCode::AccessDenied;
-        break;
-    case EINVAL:
-        code = FileCode::InvalidArgument;
-        break;
-    case ENOMEM:
-        code = FileCode::OutOfMemory;
-        break;
-    case EOVERFLOW:
-        code = FileCode::Overflow;
-        break;
-    case ENOTSUP:
-        code = FileCode::Unsupported;
-        break;
-    default:
-        break;
-    }
-    return {code, static_cast<uint32>(error)};
+    return PosixFileError(error);
 }
 
 int DescriptorOf(uptr handle) noexcept {
@@ -87,13 +61,13 @@ FileStatus AsyncOpenNative(const char* path, usize pathBytes, bool overlapped,
     if (fstat(descriptor, &state) != 0) {
         const int statError = errno;
         if (close(descriptor) != 0) {
-            Fatal("macOS async file open rollback failed");
+            Fatal("POSIX async file open rollback failed");
         }
         return PosixError(statError);
     }
     if (!S_ISREG(state.st_mode)) {
         if (close(descriptor) != 0) {
-            Fatal("macOS async file open rollback failed");
+            Fatal("POSIX async file open rollback failed");
         }
         return {FileCode::Unsupported, 0};
     }
@@ -144,13 +118,13 @@ FileStatus AsyncOpenWriteNative(const char* path, usize pathBytes, bool overlapp
     if (fstat(descriptor, &state) != 0) {
         const int statError = errno;
         if (close(descriptor) != 0) {
-            Fatal("macOS async write file open rollback failed");
+            Fatal("POSIX async write file open rollback failed");
         }
         return PosixError(statError);
     }
     if (!S_ISREG(state.st_mode)) {
         if (close(descriptor) != 0) {
-            Fatal("macOS async write file open rollback failed");
+            Fatal("POSIX async write file open rollback failed");
         }
         return {FileCode::Unsupported, 0};
     }
@@ -158,15 +132,8 @@ FileStatus AsyncOpenWriteNative(const char* path, usize pathBytes, bool overlapp
     return {};
 }
 
-// F_FULLFSYNC는 장치 캐시까지 내린다. 지원하지 않는 파일 시스템이면 fsync로 대신한다.
 FileStatus AsyncFlushNative(uptr handle) noexcept {
-    if (fcntl(DescriptorOf(handle), F_FULLFSYNC) == 0) {
-        return {};
-    }
-    if (errno != ENOTSUP && errno != EINVAL) {
-        return PosixError(errno);
-    }
-    if (fsync(DescriptorOf(handle)) != 0) {
+    if (PosixFullSync(DescriptorOf(handle)) != 0) {
         return PosixError(errno);
     }
     return {};
@@ -262,7 +229,7 @@ FileStatus AsyncNativeAttach(AsyncContextState&, AsyncFileState&) noexcept {
 }
 
 void AsyncNativeIssue(AsyncContextState&, AsyncRequestState&) noexcept {
-    Fatal("macOS native async I/O is not supported");
+    Fatal("POSIX native async I/O is not supported");
 }
 
 void AsyncNativeCancel(AsyncRequestState&) noexcept {

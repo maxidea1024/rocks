@@ -120,9 +120,9 @@ TEST(Matrix4_FloatSimdMatchesDoubleReference) {
                    Near(static_cast<double>(product.m[index]), expected.m[index], 1.0e-4, 1.0e-5);
         }
         CHECK(near);
-        const Vec4 v(static_cast<float>(random.Range(-5.0, 5.0)),
+        const Vec4 v{static_cast<float>(random.Range(-5.0, 5.0)),
                      static_cast<float>(random.Range(-5.0, 5.0)),
-                     static_cast<float>(random.Range(-5.0, 5.0)), 1.0f);
+                     static_cast<float>(random.Range(-5.0, 5.0)), 1.0f};
         const Vec4 transformed = af * v;
         const Vec4d expectedVector = reference * Vec4d(v);
         CHECK(Near(static_cast<double>(transformed.x), expectedVector.x, 1.0e-4, 1.0e-5));
@@ -346,7 +346,7 @@ TEST(MatrixFactory_ObliqueClipSupportsReversedDepth) {
     for (int index = 0; index < 2000; ++index) {
         const double x = random.Range(0.2, 99.0);
         const double extent = x * 0.6;
-        const Vec3d point(x, random.Range(-extent, extent), random.Range(-extent, extent));
+        const Vec3d point{x, random.Range(-extent, extent), random.Range(-extent, extent)};
         const double depth = depthAt(point);
         if (x > 5.0 + 1.0e-9) {
             CHECK(depth <= 1.0 + 1.0e-12);
@@ -417,9 +417,9 @@ TEST(MathBatch_TransformPointsMatchesPerElement) {
         Vec3 input[17];
         Vec3 output[17];
         for (usize index = 0; index < count; ++index) {
-            input[index] = Vec3(static_cast<float>(random.Range(-9.0, 9.0)),
+            input[index] = Vec3{static_cast<float>(random.Range(-9.0, 9.0)),
                                 static_cast<float>(random.Range(-9.0, 9.0)),
-                                static_cast<float>(random.Range(-9.0, 9.0)));
+                                static_cast<float>(random.Range(-9.0, 9.0))};
         }
         math::TransformPoints(matrix, Span<const Vec3>(input, count), Span<Vec3>(output, count));
         bool same = true;

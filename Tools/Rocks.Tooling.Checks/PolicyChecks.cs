@@ -83,7 +83,7 @@ public static class PolicyChecks
         return parts.Length >= 5 &&
             (((parts[0] == "Engine" && parts[1] == "PlatformBase" && parts[2] == "Private") ||
               (parts[0] == "Tests" && parts[1] == "Support" && parts[2] == "Private")) &&
-             parts[3] is "Win64" or "Mac" ||
+             parts[3] is "Win64" or "Mac" or "Posix" or "Apple" or "Android" ||
              (parts[0] == "Programs" && parts[1] == "Commandlet" && parts[2] == "Private" &&
               parts[3] == "Win64"));
     }

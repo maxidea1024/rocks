@@ -2,6 +2,8 @@
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
 #include "../Common/FileInternal.h"
+#include "PosixFileError.h"
+#include "PosixPlatform.h"
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -15,40 +17,7 @@ namespace rocks::platform {
 namespace {
 
 FileStatus NativeError(int error) noexcept {
-    FileCode code = FileCode::SystemError;
-    switch (error) {
-    case ENOENT:
-    case ENOTDIR:
-        code = FileCode::NotFound;
-        break;
-    case EEXIST:
-        code = FileCode::AlreadyExists;
-        break;
-    case EACCES:
-    case EPERM:
-        code = FileCode::AccessDenied;
-        break;
-    case EINVAL:
-        code = FileCode::InvalidArgument;
-        break;
-    case ENOMEM:
-        code = FileCode::OutOfMemory;
-        break;
-    case EOVERFLOW:
-        code = FileCode::Overflow;
-        break;
-    case ENOTSUP:
-    case EXDEV:
-        code = FileCode::Unsupported;
-        break;
-    case ENOTEMPTY:
-        code = FileCode::DirectoryNotEmpty;
-        break;
-    case EISDIR:
-        code = FileCode::WrongType;
-        break;
-    }
-    return {code, static_cast<uint32>(error)};
+    return detail::PosixFileError(error);
 }
 
 class NativePath {
@@ -81,13 +50,6 @@ private:
     char* value_ = nullptr;
 };
 
-// stat의 시각(1970-01-01 UTC 기준)을 FileInfo tick(0001-01-01 UTC 기준 100ns)으로 바꾼다.
-// 0001-01-01부터 1970-01-01까지는 719162일이다.
-int64 TimespecToTicks(const struct timespec& time) noexcept {
-    constexpr int64 Offset = 719162ll * 864000000000ll;
-    return static_cast<int64>(time.tv_sec) * 10000000ll + time.tv_nsec / 100 + Offset;
-}
-
 FileInfo InfoFromStat(const struct stat& state, bool isLink) noexcept {
     FileInfo info;
     info.type = S_ISREG(state.st_mode)   ? FileType::File
@@ -97,13 +59,13 @@ FileInfo InfoFromStat(const struct stat& state, bool isLink) noexcept {
     info.readOnly = (state.st_mode & S_IWUSR) == 0;
     info.size =
         info.type == FileType::File && state.st_size > 0 ? static_cast<uint64>(state.st_size) : 0;
-    info.modifiedTicks = TimespecToTicks(state.st_mtimespec);
+    info.modifiedTicks = detail::PosixModifiedTicks(state);
     return info;
 }
 
-class MacFileHandle final : public FileHandle {
+class PosixFileHandle final : public FileHandle {
 public:
-    explicit MacFileHandle(int handle) noexcept : handle_(handle) {
+    explicit PosixFileHandle(int handle) noexcept : handle_(handle) {
     }
     FileTransfer Read(void* destination, usize bytes) noexcept override {
         if (bytes == 0) {
@@ -173,7 +135,7 @@ public:
         return {};
     }
     void Destroy() noexcept override {
-        this->~MacFileHandle();
+        this->~PosixFileHandle();
         AlignedFree(this);
     }
 
@@ -181,7 +143,7 @@ private:
     int handle_;
 };
 
-class MacFileSystem final : public FileSystem {
+class PosixFileSystem final : public FileSystem {
 public:
     FileStatus Open(const char* path, usize bytes, FileOpenMode mode,
                     FileHandle*& out) noexcept override {
@@ -210,7 +172,7 @@ public:
         if (!valid) {
             return valid;
         }
-        void* storage = AlignedAllocate(sizeof(MacFileHandle), alignof(MacFileHandle));
+        void* storage = AlignedAllocate(sizeof(PosixFileHandle), alignof(PosixFileHandle));
         if (!storage) {
             return {FileCode::OutOfMemory, 0};
         }
@@ -227,19 +189,19 @@ public:
         if (fstat(handle, &state) != 0) {
             const auto failure = NativeError(errno);
             if (close(handle) != 0) {
-                Fatal("macOS file open rollback failed");
+                Fatal("POSIX file open rollback failed");
             }
             AlignedFree(storage);
             return failure;
         }
         if (!S_ISREG(state.st_mode)) {
             if (close(handle) != 0) {
-                Fatal("macOS file open rollback failed");
+                Fatal("POSIX file open rollback failed");
             }
             AlignedFree(storage);
             return {FileCode::Unsupported, 0};
         }
-        out = ::new (storage) MacFileHandle(handle);
+        out = ::new (storage) PosixFileHandle(handle);
         return {};
     }
     FileStatus Exists(const char* path, usize bytes, bool& exists) noexcept override {
@@ -268,7 +230,8 @@ public:
         }
         if (unlink(native.Value()) != 0) {
             const int error = errno;
-            // macOS의 unlink는 디렉터리에 EPERM을 낸다. 실제 디렉터리면 WrongType으로 알린다.
+            // unlink는 디렉터리에 EPERM(macOS) 또는 EISDIR(Linux)을 낸다. 실제 디렉터리면
+            // WrongType으로 알린다.
             struct stat state{};
             if ((error == EPERM || error == EISDIR) && lstat(native.Value(), &state) == 0 &&
                 S_ISDIR(state.st_mode)) {
@@ -405,10 +368,10 @@ public:
         if (!valid) {
             return valid;
         }
-        // RENAME_EXCL은 대상이 있으면 원자적으로 실패한다(검사 후 rename 경합 없음).
+        // 덮어쓰지 않는 이동은 대상이 있으면 원자적으로 실패한다(PosixRenameNoReplace).
         const int result = replaceExisting
                                ? rename(source.Value(), target.Value())
-                               : renamex_np(source.Value(), target.Value(), RENAME_EXCL);
+                               : detail::PosixRenameNoReplace(source.Value(), target.Value());
         if (result != 0) {
             return NativeError(errno);
         }
@@ -500,7 +463,7 @@ public:
 } // namespace
 
 FileSystem& PhysicalFileSystem() noexcept {
-    static MacFileSystem system;
+    static PosixFileSystem system;
     return system;
 }
 } // namespace rocks::platform

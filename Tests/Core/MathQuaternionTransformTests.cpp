@@ -8,8 +8,8 @@ namespace {
 
 Quatd RandomRotation(MathRandom& random) {
     for (;;) {
-        const Quatd candidate(random.Range(-1.0, 1.0), random.Range(-1.0, 1.0),
-                              random.Range(-1.0, 1.0), random.Range(-1.0, 1.0));
+        const Quatd candidate{random.Range(-1.0, 1.0), random.Range(-1.0, 1.0),
+                              random.Range(-1.0, 1.0), random.Range(-1.0, 1.0)};
         if (candidate.LengthSquared() > 0.01 && candidate.LengthSquared() <= 1.0) {
             return candidate.TryNormalize().Value();
         }
@@ -17,8 +17,8 @@ Quatd RandomRotation(MathRandom& random) {
 }
 
 Vec3d RandomVector(MathRandom& random, double range) {
-    return Vec3d(random.Range(-range, range), random.Range(-range, range),
-                 random.Range(-range, range));
+    return Vec3d{random.Range(-range, range), random.Range(-range, range),
+                 random.Range(-range, range)};
 }
 
 } // namespace
@@ -176,10 +176,10 @@ TEST(Transform_ComposeMatchesAffineProductWhenRepresentable) {
         const float parentScale = static_cast<float>(random.Range(0.25, 4.0));
         const Transform parent(RandomVector(random, 100.0), Quat(RandomRotation(random)),
                                Vec3(parentScale, parentScale, parentScale));
-        const Transform local(RandomVector(random, 10.0), Quat(RandomRotation(random)),
-                              Vec3(static_cast<float>(random.Range(0.5, 2.0)),
+        const Transform local{RandomVector(random, 10.0), Quat(RandomRotation(random)),
+                              Vec3{static_cast<float>(random.Range(0.5, 2.0)),
                                    static_cast<float>(random.Range(0.5, 2.0)),
-                                   static_cast<float>(random.Range(0.5, 2.0))));
+                                   static_cast<float>(random.Range(0.5, 2.0))}};
         auto composed = Transform::TryCompose(parent, local);
         REQUIRE(composed);
         const Vec3d p = RandomVector(random, 5.0);
@@ -280,11 +280,11 @@ TEST(Quaternion_AngularDistanceStaysWithinPi) {
     CHECK(AngularDistance(a, b) <= math::Pi<float>);
     MathRandom random(0xa11a5ull ^ CurrentSeed());
     for (int index = 0; index < 20000; ++index) {
-        auto first = Quatd(random.Range(-1.0, 1.0), random.Range(-1.0, 1.0),
-                           random.Range(-1.0, 1.0), random.Range(-1.0, 1.0))
+        auto first = Quatd{random.Range(-1.0, 1.0), random.Range(-1.0, 1.0),
+                           random.Range(-1.0, 1.0), random.Range(-1.0, 1.0)}
                          .TryNormalize();
-        auto second = Quatd(random.Range(-1.0, 1.0), random.Range(-1.0, 1.0),
-                            random.Range(-1.0, 1.0), random.Range(-1.0, 1.0))
+        auto second = Quatd{random.Range(-1.0, 1.0), random.Range(-1.0, 1.0),
+                            random.Range(-1.0, 1.0), random.Range(-1.0, 1.0)}
                           .TryNormalize();
         if (!first || !second) {
             continue;

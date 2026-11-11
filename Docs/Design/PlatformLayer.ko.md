@@ -109,9 +109,24 @@ Engine / Tools / Game         프로젝트·설치 구성과 상위 시스템
 
 검증: Windows x64에서 두 backend로 동시 32개 읽기·EOF·짧은 읽기·0 byte·잘못된 제출·Busy·대량 취소 경합·소멸자 대기, 그리고 동시 쓰기 8개의 역순 제출 후 읽기 대조·열기 모드 3종·끝 너머 확장의 0 채움·0 byte 쓰기·소멸자 대기를 실제 파일로 확인했다(비동기 파일 테스트 10건 100회 반복 실패 0). macOS backend(pwrite·`F_FULLFSYNC` 포함)는 빌드·실행하지 않았다. 디스크 가득 참 같은 쓰기 실패 주입, scatter/gather, 우선순위·deadline, dispatch I/O 평가, 결정적 fake backend interleaving, Android asset·iOS 번들 경로는 후속이다.
 
-## 모바일 플랫폼 계획
+## 모바일 플랫폼 (2026-11-11: desktop + mobile은 우선 Android)
 
-Android·iOS는 정식 대상이다. 목표 구조는 `Private/Posix`(Mac·iOS·Android 공통 POSIX 구현), `Private/Apple`(Mac·iOS 공통), `Private/IOS`, `Private/Android`이며, 기존 Mac 구현의 POSIX 부분을 공통 계층으로 옮겨 재사용한다. 빌드 도구의 교차 빌드 거부를 대상별 허용 목록으로 바꾸기 전까지 모바일 대상은 빌드되지 않는다. 상세 항목과 완료 조건은 [Core 상세 명세](CoreDetailedSpec.ko.md) §3.5.1을 따른다.
+사용자 결정으로 mobile은 Android에 먼저 집중하고 iOS는 보류한다. PlatformBase는 다음 구조다.
+
+| 디렉터리 | 내용 | 빌드 대상 |
+|---|---|---|
+| `Private/Common` | OS 호출 없는 공용 수명·동기화 규칙 | 모든 대상 |
+| `Private/Win64` | Windows backend | Windows |
+| `Private/Posix` | thread·mutex·조건 변수·clock·동기/비동기 파일·디렉터리·virtual memory의 POSIX 공통 구현, errno 변환(`PosixFileError.h`) | macOS·Android |
+| `Private/Apple` | `PosixPlatform.h` hook의 Apple 구현(`st_mtimespec`, `renamex_np`, `F_FULLFSYNC`, `pthread_threadid_np`, 상대 시간 조건 변수 대기, `MADV_FREE`) | macOS |
+| `Private/Mac` | 기본 경로(`_NSGetExecutablePath`·`~/Library`) | macOS |
+| `Private/Android` | hook의 Android 구현(`st_mtim`, `renameat2(RENAME_NOREPLACE)` system call과 미지원 시 검사 후 rename, `fsync`, `gettid`, `CLOCK_MONOTONIC` 조건 변수, `MADV_DONTNEED`)과 경로(`/proc/self/exe`, 앱 등록 디렉터리) | Android |
+
+POSIX 공통 코드는 hook 밖의 OS 전용 API를 직접 쓰지 않는다. policy 검사는 `Posix`·`Apple`·`Android`를 native backend 디렉터리로 인정한다. 테스트 지원 코드도 `Tests/Support/Private/Posix`로 합쳤다.
+
+Android 앱 전용 저장소 경로는 Java 쪽 Context에서만 알 수 있으므로 앱이 시작 시 `RegisterApplicationDirectories(data, cache)`로 넘긴다. 등록 전에는 `UserData`·`UserCache`가 NotFound이며, `Temporary`는 등록된 cache 또는 `TMPDIR`·`/data/local/tmp`, `Home`은 등록된 data 또는 `HOME`이다. desktop에서 등록은 Unsupported다.
+
+검증(2026-11-11): NDK r29 clang(`--target=x86_64-linux-android26`, `aarch64-linux-android26`, `-Wall -Wextra -Wpedantic -Werror`)으로 Foundation 전체 166개 단위를 두 ABI에서 컴파일·링크했다. x86_64 바이너리를 Android 15(API 35) 에뮬레이터에서 실행해 662건 전부 통과했다(seed 4종, 비동기 파일 30회 반복 포함). 처음 실행에서 드러난 문제: POSIX 비동기 파일 오류 변환의 `EEXIST` 누락(macOS도 같은 코드라 같은 결함, 수정), 테스트 난수의 함수 인자 평가 순서가 ABI마다 달라 seed가 같아도 사례가 갈리던 테스트 결정성 결함(중괄호 초기화로 순서 고정), 기본 경로 테스트의 루트 경로·앱 등록 가정. arm64는 교차 컴파일만 했고 실기기 실행은 하지 않았다. 빌드는 아직 임시 스크립트(compile database 변환)이며 Rocks.Build 정식 대상 통합(MB01)이 남았다. macOS는 이번 재구성 후에도 빌드하지 않았다.
 
 ## 플랫폼 선택과 실패 정책
 

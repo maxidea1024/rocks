@@ -3,6 +3,7 @@
 #include <Platform/Memory.h>
 #include <Platform/Sync.h>
 #include <Base/Checked.h>
+#include "PosixPlatform.h"
 #include <pthread.h>
 #include <stdlib.h>
 #include <time.h>
@@ -71,12 +72,7 @@ uint64 MonotonicNanoseconds() noexcept {
 }
 
 uint64 CurrentThreadId() noexcept {
-    uint64_t identifier = 0;
-    if (pthread_threadid_np(nullptr, &identifier) != 0) {
-        Fatal("pthread_threadid_np failed");
-    }
-
-    return static_cast<uint64>(identifier);
+    return detail::PosixThreadId();
 }
 
 [[noreturn]] void Fatal(const char* message) noexcept {

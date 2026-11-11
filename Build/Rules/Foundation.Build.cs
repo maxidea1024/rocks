@@ -15,7 +15,11 @@ public sealed class PlatformBase : ModuleRules
     public override NativeModuleInput Configure(BuildContext context) => new()
     {
         Name = "PlatformBase",
-        Sources = context.Sources($"Engine/PlatformBase/Private/{context.PlatformDirectory}", "Engine/PlatformBase/Private/Common"),
+        // POSIX 플랫폼은 공통 Posix 구현과 OS hook(Apple·Android)을 함께 빌드한다.
+        Sources = context.Platform == NativePlatform.MacOS
+            ? context.Sources("Engine/PlatformBase/Private/Mac", "Engine/PlatformBase/Private/Apple",
+                "Engine/PlatformBase/Private/Posix", "Engine/PlatformBase/Private/Common")
+            : context.Sources($"Engine/PlatformBase/Private/{context.PlatformDirectory}", "Engine/PlatformBase/Private/Common"),
         PublicIncludeDirectories = [context.PathInRoot("Engine/PlatformBase/Public")],
         // Mac 소스가 sibling Apple 공통 헤더를 사용하므로 증분 빌드의 입력에도 포함한다.
         PrivateIncludeDirectories = context.Platform == NativePlatform.MacOS
@@ -92,7 +96,9 @@ public abstract class TestsModule : ModuleRules
     public override NativeModuleInput Configure(BuildContext context)
     {
         var directories = new List<string> { "Tests/Foundation", "Tests/Core", "Tests/Platform",
-            "Tests/Localization", "Tests/Serialization", $"Tests/Support/Private/{context.PlatformDirectory}" };
+            "Tests/Localization", "Tests/Serialization",
+            // POSIX 플랫폼은 공통 테스트 지원 구현을 쓴다.
+            context.Platform == NativePlatform.Windows ? "Tests/Support/Private/Win64" : "Tests/Support/Private/Posix" };
         if (Objects)
             directories.AddRange(["Tests/Object", "Tests/Reflection", "Tests/ObjectSerialization"]);
         var sources = context.Sources(directories.ToArray()).ToList();

@@ -257,25 +257,78 @@ TEST(FileSystem_DeleteTreeDoesNotFollowDirectoryLinks) {
     CHECK(system.Stat(kept, Length(kept), info) && info.type == FileType::File);
 }
 
+namespace {
+
+// 루트(POSIX "/", Windows "C:\")만 끝 구분자를 가질 수 있다.
+bool IsRootPath(const char* path, usize bytes) noexcept {
+    return (bytes == 1 && path[0] == '/') ||
+           (bytes == 3 && path[1] == ':' && (path[2] == '\\' || path[2] == '/'));
+}
+
+void CheckStandardDirectory(StandardDirectory kind) noexcept {
+    char buffer[1024];
+    usize bytes = 0;
+    REQUIRE(GetStandardDirectory(kind, buffer, sizeof(buffer), bytes));
+    CHECK(bytes > 0 && buffer[bytes] == '\0' && Length(buffer) == bytes);
+    CHECK(IsRootPath(buffer, bytes) || (buffer[bytes - 1] != '/' && buffer[bytes - 1] != '\\'));
+    FileInfo info;
+    REQUIRE(PhysicalFileSystem().Stat(buffer, bytes, info));
+    CHECK(info.type == FileType::Directory);
+    // 버퍼가 부족하면 Overflow와 필요한 길이(NUL 제외)를 돌려준다.
+    char small[1];
+    usize required = 0;
+    const auto status = GetStandardDirectory(kind, small, sizeof(small), required);
+    CHECK(status.code == FileCode::Overflow && required == bytes);
+}
+
+} // namespace
+
 TEST(FileSystem_StandardDirectories) {
-    const StandardDirectory kinds[] = {StandardDirectory::Executable, StandardDirectory::Working,
-                                       StandardDirectory::Temporary,  StandardDirectory::Home,
-                                       StandardDirectory::UserData,   StandardDirectory::UserCache};
-    for (StandardDirectory kind : kinds) {
-        char buffer[1024];
-        usize bytes = 0;
-        REQUIRE(GetStandardDirectory(kind, buffer, sizeof(buffer), bytes));
-        CHECK(bytes > 0 && buffer[bytes] == '\0' && Length(buffer) == bytes);
-        CHECK(buffer[bytes - 1] != '/' && buffer[bytes - 1] != '\\');
-        FileInfo info;
-        REQUIRE(PhysicalFileSystem().Stat(buffer, bytes, info));
-        CHECK(info.type == FileType::Directory);
-        // 버퍼가 부족하면 Overflow와 필요한 길이를 돌려준다.
-        char small[2];
-        usize required = 0;
-        const auto status = GetStandardDirectory(kind, small, sizeof(small), required);
-        CHECK(status.code == FileCode::Overflow && required == bytes);
+    const StandardDirectory common[] = {StandardDirectory::Executable, StandardDirectory::Working,
+                                        StandardDirectory::Temporary, StandardDirectory::Home};
+    for (StandardDirectory kind : common) {
+        CheckStandardDirectory(kind);
     }
+    // desktop은 OS 기본 디렉터리를 쓰므로 등록이 Unsupported이고 사용자 디렉터리가 바로 있다.
+    // 모바일(Android)은 앱이 등록하기 전에는 NotFound이고, 등록한 뒤에는 그 경로를 돌려준다.
+    const auto registerProbe = RegisterApplicationDirectories(nullptr, nullptr);
+    char buffer[1024];
+    usize bytes = 0;
+    if (GetStandardDirectory(StandardDirectory::UserData, buffer, sizeof(buffer), bytes)) {
+        CHECK(registerProbe.code == FileCode::Unsupported);
+        CheckStandardDirectory(StandardDirectory::UserData);
+        CheckStandardDirectory(StandardDirectory::UserCache);
+        return;
+    }
+    CHECK(registerProbe.code == FileCode::InvalidArgument);
+    CHECK(GetStandardDirectory(StandardDirectory::UserCache, buffer, sizeof(buffer), bytes).code ==
+          FileCode::NotFound);
+    // 상대 경로는 등록할 수 없다.
+    CHECK(RegisterApplicationDirectories("files", "cache").code == FileCode::InvalidArgument);
+    // 작업 디렉터리 아래에 앱 디렉터리를 만들어 등록한다(실제 앱은 OS가 준 경로를 넘긴다).
+    char working[512];
+    usize workingBytes = 0;
+    REQUIRE(
+        GetStandardDirectory(StandardDirectory::Working, working, sizeof(working), workingBytes));
+    Scratch data;
+    Scratch cache;
+    REQUIRE(data.Make("appdata") && cache.Make("appcache"));
+    REQUIRE(PhysicalFileSystem().MakeDirectory(data.path, data.length));
+    REQUIRE(PhysicalFileSystem().MakeDirectory(cache.path, cache.length));
+    char dataPath[768];
+    char cachePath[768];
+    snprintf(dataPath, sizeof(dataPath), "%s/%s", working, data.path);
+    snprintf(cachePath, sizeof(cachePath), "%s/%s", working, cache.path);
+    REQUIRE(RegisterApplicationDirectories(dataPath, cachePath));
+    REQUIRE(GetStandardDirectory(StandardDirectory::UserData, buffer, sizeof(buffer), bytes));
+    CHECK(bytes == Length(dataPath) && memcmp(buffer, dataPath, bytes) == 0);
+    REQUIRE(GetStandardDirectory(StandardDirectory::UserCache, buffer, sizeof(buffer), bytes));
+    CHECK(bytes == Length(cachePath) && memcmp(buffer, cachePath, bytes) == 0);
+    CheckStandardDirectory(StandardDirectory::UserData);
+    CheckStandardDirectory(StandardDirectory::UserCache);
+    // 등록 뒤 Temporary는 cache, Home은 data를 가리킨다.
+    REQUIRE(GetStandardDirectory(StandardDirectory::Temporary, buffer, sizeof(buffer), bytes));
+    CHECK(bytes == Length(cachePath) && memcmp(buffer, cachePath, bytes) == 0);
 }
 
 TEST(FileSystem_WrapperDefaultsAreUnsupported) {

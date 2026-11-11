@@ -85,6 +85,10 @@ char NativePathSeparator() noexcept {
     return ApplePlatformPath::NativeSeparator();
 }
 
+FileStatus RegisterApplicationDirectories(const char*, const char*) noexcept {
+    return {FileCode::Unsupported, 0};
+}
+
 FileStatus GetStandardDirectory(StandardDirectory kind, char* buffer, usize capacity,
                                 usize& bytes) noexcept {
     if (buffer == nullptr && capacity != 0) {

@@ -177,10 +177,10 @@ TEST(Vector3_LerpEndpointsAreExact) {
 TEST(Vector3_RandomizedDotCrossProperties) {
     MathRandom random(0x51ed270b2c8f4a11ull ^ CurrentSeed());
     for (int iteration = 0; iteration < 20000; ++iteration) {
-        const Vec3d a(random.Range(-100.0, 100.0), random.Range(-100.0, 100.0),
-                      random.Range(-100.0, 100.0));
-        const Vec3d b(random.Range(-100.0, 100.0), random.Range(-100.0, 100.0),
-                      random.Range(-100.0, 100.0));
+        const Vec3d a{random.Range(-100.0, 100.0), random.Range(-100.0, 100.0),
+                      random.Range(-100.0, 100.0)};
+        const Vec3d b{random.Range(-100.0, 100.0), random.Range(-100.0, 100.0),
+                      random.Range(-100.0, 100.0)};
         const Vec3d cross = Cross(a, b);
         // |a × b|² + (a·b)² = |a|²|b|² (Lagrange 항등식)
         const double lhs = cross.LengthSquared() + Dot(a, b) * Dot(a, b);

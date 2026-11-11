@@ -1,4 +1,5 @@
 #include "../Common/VirtualMemoryBackend.h"
+#include "PosixPlatform.h"
 
 #include <Platform/Fatal.h>
 #include <errno.h>
@@ -57,8 +58,9 @@ VirtualMemoryResult DecommitVirtualMemory(void* address, usize bytes) noexcept {
     if (mprotect(address, bytes, PROT_NONE) != 0) {
         return OsFailure();
     }
-    // MADV_FREE는 반환 힌트다. 실패하면 이미 접근이 차단되었으므로 상위 영역을 격리한다.
-    if (madvise(address, bytes, MADV_FREE) != 0) {
+    // 반환 힌트다(OS별 값은 PosixDecommitAdvice). 실패하면 이미 접근이 차단되었으므로 상위 영역을
+    // 격리한다.
+    if (madvise(address, bytes, detail::PosixDecommitAdvice()) != 0) {
         return OsFailure();
     }
     return Success();

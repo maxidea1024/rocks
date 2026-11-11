@@ -71,6 +71,9 @@ T Loose() noexcept {
 }
 
 // ---- 결정적 난수(xorshift64*, 고정 seed) ----
+// 주의: 한 식 안에서 여러 번 호출하면 함수 인자·연산자 피연산자의 평가 순서가 정해져 있지 않아
+// 플랫폼(ABI)마다 다른 사례가 만들어진다. 여러 호출은 중괄호 초기화(왼쪽부터 평가 보장)나 지역
+// 변수로 순서를 고정한다.
 struct Random {
     uint64 state;
 
@@ -94,7 +97,7 @@ struct Random {
     }
 
     Vec3d Point(double extent) noexcept {
-        return Vec3d(Range(-extent, extent), Range(-extent, extent), Range(-extent, extent));
+        return Vec3d{Range(-extent, extent), Range(-extent, extent), Range(-extent, extent)};
     }
 
     Vec3d UnitVector() noexcept {
@@ -109,7 +112,7 @@ struct Random {
 
     Quatd Rotation() noexcept {
         for (;;) {
-            const Quatd candidate(Range(-1, 1), Range(-1, 1), Range(-1, 1), Range(-1, 1));
+            const Quatd candidate{Range(-1, 1), Range(-1, 1), Range(-1, 1), Range(-1, 1)};
             const double lengthSquared = candidate.LengthSquared();
             if (lengthSquared > 1.0e-4 && lengthSquared <= 1.0) {
                 const double inverse = 1.0 / math::Sqrt(lengthSquared);
@@ -1214,7 +1217,7 @@ void PropertyClosestPointOnBox() {
     const double tolerance = IsSameV<T, float> ? 1.0e-4 : 1.0e-10;
     for (int iteration = 0; iteration < 300; ++iteration) {
         const Vec3d cornerA = random.Point(5.0);
-        const Vec3d extent(random.Range(0, 3), random.Range(0, 3), random.Range(0, 3));
+        const Vec3d extent{random.Range(0, 3), random.Range(0, 3), random.Range(0, 3)};
         const Box<T> box(Narrow<T>(cornerA), Narrow<T>(cornerA + extent));
         if (!box.IsValid()) {
             continue;
@@ -1257,7 +1260,10 @@ void PropertyClosestPointOnTriangle() {
         const int kind = iteration % 4;
         if (kind == 1) {
             // 거의 일직선인 sliver.
-            c = a + (b - a) * random.Range(-0.5, 1.5) + random.Point(1.0e-5);
+            // 난수 호출 순서를 플랫폼과 무관하게 고정한다(연산자 피연산자 평가 순서는 미지정).
+            const double along = random.Range(-0.5, 1.5);
+            const Vec3d jitter = random.Point(1.0e-5);
+            c = a + (b - a) * along + jitter;
         } else if (kind == 2) {
             // 정확히 일직선(가운데 또는 바깥 꼭짓점).
             c = a + (b - a) * (iteration % 8 == 2 ? 0.5 : 2.0);
@@ -1354,10 +1360,10 @@ void PropertySphereOverlaps() {
     const double margin = IsSameV<T, float> ? 1.0e-3 : 1.0e-8;
     for (int iteration = 0; iteration < 500; ++iteration) {
         const Vec3d corner = random.Point(4.0);
-        const Box<T> box(
+        const Box<T> box{
             Narrow<T>(corner),
-            Narrow<T>(corner + Vec3d(random.Range(0, 3), random.Range(0, 3), random.Range(0, 3))));
-        const Sphere<T> sphere(Narrow<T>(random.Point(7.0)), static_cast<T>(random.Range(0, 3)));
+            Narrow<T>(corner + Vec3d{random.Range(0, 3), random.Range(0, 3), random.Range(0, 3)})};
+        const Sphere<T> sphere{Narrow<T>(random.Point(7.0)), static_cast<T>(random.Range(0, 3))};
         if (!box.IsValid()) {
             continue;
         }
@@ -1372,7 +1378,7 @@ void PropertySphereOverlaps() {
             CHECK(sphereBox == QueryResult::Hit);
         }
 
-        const Sphere<T> other(Narrow<T>(random.Point(7.0)), static_cast<T>(random.Range(0, 3)));
+        const Sphere<T> other{Narrow<T>(random.Point(7.0)), static_cast<T>(random.Range(0, 3))};
         CHECK(Overlap(sphere, other) == Overlap(other, sphere));
 
         const Box<T> otherBox(sphere.center - Vector3<T>::Splat(other.radius),
@@ -1385,8 +1391,8 @@ void PropertySphereOverlaps() {
         CHECK(Overlap(box, plane.Value()) == Overlap(plane.Value(), box));
         CHECK(Overlap(sphere, plane.Value()) == Overlap(plane.Value(), sphere));
 
-        const Capsule<T> capsule(Narrow<T>(random.Point(5.0)), Narrow<T>(random.Point(5.0)),
-                                 static_cast<T>(random.Range(0, 1.5)));
+        const Capsule<T> capsule{Narrow<T>(random.Point(5.0)), Narrow<T>(random.Point(5.0)),
+                                 static_cast<T>(random.Range(0, 1.5))};
         const QueryResult capsuleSphere = Overlap(capsule, sphere);
         CHECK(capsuleSphere == Overlap(sphere, capsule));
         const double capsuleDistance = math::Sqrt(OracleSegmentPointDistanceSquared(
@@ -1399,8 +1405,8 @@ void PropertySphereOverlaps() {
             CHECK(capsuleSphere == QueryResult::Hit);
         }
 
-        const Triangle<T> triangle(Narrow<T>(random.Point(4.0)), Narrow<T>(random.Point(4.0)),
-                                   Narrow<T>(random.Point(4.0)));
+        const Triangle<T> triangle{Narrow<T>(random.Point(4.0)), Narrow<T>(random.Point(4.0)),
+                                   Narrow<T>(random.Point(4.0))};
         const QueryResult sphereTriangle = Overlap(sphere, triangle);
         CHECK(sphereTriangle == Overlap(triangle, sphere));
         const double triangleDistance = math::Sqrt(OracleTriangleDistanceSquared(
@@ -1418,7 +1424,7 @@ void PropertyRaySphere() {
     Random random(PropertySeed + 59 * sizeof(T));
     const double tolerance = IsSameV<T, float> ? 1.0e-3 : 1.0e-8;
     for (int iteration = 0; iteration < 500; ++iteration) {
-        const Sphere<T> sphere(Narrow<T>(random.Point(5.0)), static_cast<T>(random.Range(0, 3)));
+        const Sphere<T> sphere{Narrow<T>(random.Point(5.0)), static_cast<T>(random.Range(0, 3))};
         const Vec3d origin = random.Point(15.0);
         const Vec3d target = Widen(sphere.center) + random.Point(4.0);
         auto ray = Ray<T>::TryMake(Narrow<T>(origin), Narrow<T>(target - origin));
@@ -1462,15 +1468,16 @@ void PropertyRayConvexShapes() {
     const double margin = IsSameV<T, float> ? 1.0e-3 : 1.0e-7;
     const double tolerance = IsSameV<T, float> ? 2.0e-3 : 1.0e-6;
     int compared = 0;
-    for (int iteration = 0; iteration < 300; ++iteration) {
+    // 판정 가능한 Hit 비교가 기준(200)을 여유 있게 넘도록 400회를 돈다.
+    for (int iteration = 0; iteration < 400; ++iteration) {
         const Vec3d origin = random.Point(12.0);
 
         // AABB
         {
             const Vec3d corner = random.Point(4.0);
-            const Box<T> box(Narrow<T>(corner),
-                             Narrow<T>(corner + Vec3d(random.Range(0, 3), random.Range(0, 3),
-                                                      random.Range(0, 3))));
+            const Box<T> box{Narrow<T>(corner),
+                             Narrow<T>(corner + Vec3d{random.Range(0, 3), random.Range(0, 3),
+                                                      random.Range(0, 3)})};
             const Vec3d center = (Widen(box.min) + Widen(box.max)) * 0.5;
             const Vec3d half = (Widen(box.max) - Widen(box.min)) * 0.5;
             const Vec3d target = center + random.Point(3.0);
@@ -1530,9 +1537,9 @@ void PropertyRayConvexShapes() {
         // OrientedBox
         {
             const Quatd rotationD = random.Rotation();
-            const OrientedBox<T> box(
+            const OrientedBox<T> box{
                 Narrow<T>(random.Point(4.0)), NarrowRotation<T>(rotationD),
-                Narrow<T>(Vec3d(random.Range(0, 2), random.Range(0, 2), random.Range(0, 2))));
+                Narrow<T>(Vec3d{random.Range(0, 2), random.Range(0, 2), random.Range(0, 2)})};
             Vec3d axes[3];
             const Quatd wideRotation(box.rotation.x, box.rotation.y, box.rotation.z,
                                      box.rotation.w);
@@ -1574,8 +1581,8 @@ void PropertyRayTriangle() {
     int hits = 0;
     int misses = 0;
     for (int iteration = 0; iteration < 600; ++iteration) {
-        const Triangle<T> triangle(Narrow<T>(random.Point(4.0)), Narrow<T>(random.Point(4.0)),
-                                   Narrow<T>(random.Point(4.0)));
+        const Triangle<T> triangle{Narrow<T>(random.Point(4.0)), Narrow<T>(random.Point(4.0)),
+                                   Narrow<T>(random.Point(4.0))};
         const Vec3d a = Widen(triangle.a);
         const Vec3d b = Widen(triangle.b);
         const Vec3d c = Widen(triangle.c);
@@ -1643,12 +1650,12 @@ void PropertyOrientedBoxOverlap() {
             rotationB = rotationA * quarter;
         }
 
-        const OrientedBox<T> a(
+        const OrientedBox<T> a{
             Narrow<T>(random.Point(2.0)), NarrowRotation<T>(rotationA),
-            Narrow<T>(Vec3d(random.Range(0.1, 2), random.Range(0.1, 2), random.Range(0.1, 2))));
-        const OrientedBox<T> b(
+            Narrow<T>(Vec3d{random.Range(0.1, 2), random.Range(0.1, 2), random.Range(0.1, 2)})};
+        const OrientedBox<T> b{
             Narrow<T>(random.Point(2.5)), NarrowRotation<T>(rotationB),
-            Narrow<T>(Vec3d(random.Range(0, 2), random.Range(0, 2), random.Range(0, 2))));
+            Narrow<T>(Vec3d{random.Range(0, 2), random.Range(0, 2), random.Range(0, 2)})};
         const Quatd wideA(a.rotation.x, a.rotation.y, a.rotation.z, a.rotation.w);
         const Quatd wideB(b.rotation.x, b.rotation.y, b.rotation.z, b.rotation.w);
         const double gap = OracleObbGap(Widen(a.center), wideA, Widen(a.halfExtents),
@@ -1673,7 +1680,7 @@ void PropertySegmentSphereEndInside() {
     Random random(PropertySeed + 101 * sizeof(T));
     int checked = 0;
     for (int iteration = 0; iteration < 2000; ++iteration) {
-        const Sphere<T> sphere(Narrow<T>(random.Point(3.0)), static_cast<T>(random.Range(0.1, 3)));
+        const Sphere<T> sphere{Narrow<T>(random.Point(3.0)), static_cast<T>(random.Range(0.1, 3))};
         const Vec3d direction = random.UnitVector();
         const Vector3<T> end =
             Narrow<T>(Widen(sphere.center) + direction * (sphere.radius * random.Range(0.999, 1)));

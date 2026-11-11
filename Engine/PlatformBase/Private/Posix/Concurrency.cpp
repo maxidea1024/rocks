@@ -1,6 +1,7 @@
 #include <Platform/Thread.h>
 #include <Platform/Fatal.h>
 #include "../Common/ThreadInternal.h"
+#include "PosixPlatform.h"
 #include <pthread.h>
 #include <errno.h>
 #include <sched.h>
@@ -12,9 +13,7 @@ namespace rocks::platform {
 ConditionVariable::ConditionVariable() noexcept {
     static_assert(sizeof(pthread_cond_t) <= sizeof(storage_));
     static_assert(alignof(pthread_cond_t) <= alignof(ConditionVariable));
-    if (pthread_cond_init(reinterpret_cast<pthread_cond_t*>(storage_), nullptr) != 0) {
-        Fatal("pthread_cond_init failed");
-    }
+    detail::PosixInitializeCondition(reinterpret_cast<pthread_cond_t*>(storage_));
 }
 
 ConditionVariable::~ConditionVariable() noexcept {
@@ -30,10 +29,8 @@ WaitResult ConditionVariable::Wait(Mutex& mutex, uint32 timeoutMs) noexcept {
     if (timeoutMs == InfiniteTimeout) {
         result = pthread_cond_wait(condition, nativeMutex);
     } else {
-        // Apple의 relative variant를 사용하여 CLOCK_REALTIME 변경의 영향을 피한다.
-        const timespec relative{static_cast<time_t>(timeoutMs / 1000),
-                                static_cast<long>(timeoutMs % 1000) * 1000000};
-        result = pthread_cond_timedwait_relative_np(condition, nativeMutex, &relative);
+        // 시스템 시각(CLOCK_REALTIME) 변경의 영향을 받지 않는 OS별 시한 대기를 쓴다.
+        result = detail::PosixTimedWait(condition, nativeMutex, timeoutMs);
     }
     if (result == 0) {
         return WaitResult::Signaled;

@@ -113,9 +113,9 @@ Base → PlatformBase → Core → Task / Localization / Serialization / MetaSch
 
 | ID/우선 | 항목 | 완료 조건과 검증 |
 |---|---|---|
-| MB01 P0 | 빌드 대상: iOS ARM64(device·simulator), Android ARM64·x86_64(API level 고정), 교차 컴파일 toolchain·SDK 버전 고정 | 현재 Rocks.Build의 교차 빌드 거부를 대상별 허용 목록으로 바꾸고 미지원 조합은 계속 거부. 대상별 경고 오류·단독 헤더 컴파일, CI에서 최소 빌드 |
-| MB02 P0 | PlatformBase backend: `Private/Posix`(Mac·iOS·Android 공통 thread·sync·clock·file·pread), `Private/Apple`(Mac·iOS 공통), `Private/IOS`, `Private/Android` | 기능별로 정확히 하나의 구현 선택, Fatal·VirtualMemory(mmap/mprotect)·TLS·thread 이름, 실기기 정상·실패·종료 테스트 |
-| MB03 P0 | 파일·경로: 앱 샌드박스(iOS Documents/Library/Caches, Android internal/external files), Android APK/AAB asset(AAssetManager)·asset pack, 읽기 전용 번들 | 경로 문법과 저장소 종류 분리, 비동기 읽기에서 압축 해제 없이 offset 읽기 가능한 asset만 직접 지원, 미지원은 Unsupported |
+| MB01 P0 | 빌드 대상: Android ARM64·x86_64(최소 API 26, NDK r29 clang), 교차 컴파일 toolchain·SDK 버전 고정. iOS는 보류 — 현재는 compile database를 NDK 명령으로 바꾸는 임시 스크립트로 Foundation 전체(166 단위)를 두 ABI로 빌드·링크했고, Rocks.Build 정식 대상 통합은 **진행 중** | Rocks.Build의 교차 빌드 거부를 대상별 허용 목록으로 바꾸고 미지원 조합은 계속 거부, 메타컴파일러 인자 허용 목록·toolchain 탐지·실행 도구(adb) 연결 |
+| MB02 P0 | PlatformBase backend: `Private/Posix`(macOS·Android 공통 thread·sync·clock·file·async·virtual memory), OS 차이만 담은 hook `Posix/PosixPlatform.h`(수정 시각·덮어쓰지 않는 rename·장치 flush·thread id·monotonic 조건 변수·decommit 힌트)를 `Private/Apple`(macOS)·`Private/Android`가 구현 **부분**(Android x86_64 에뮬레이터 실행 검증, arm64 교차 컴파일만, macOS 미빌드). iOS backend는 사용자 결정으로 보류(2026-11-11: desktop + mobile은 우선 Android) | 기능별로 정확히 하나의 구현 선택, Fatal·VirtualMemory(mmap/mprotect)·thread·file의 실기기 검증, 미실행 플랫폼은 통과로 표시하지 않음 |
+| MB03 P0 | 파일·경로: Android 앱 전용 저장소는 `RegisterApplicationDirectories`(Context.getFilesDir/getCacheDir를 앱이 전달)로 받아 `GetStandardDirectory`의 UserData·UserCache·Temporary·Home에 쓴다 **부분**. APK/AAB asset(AAssetManager)·asset pack·외부 저장소는 **후속** | 경로 문법과 저장소 종류 분리, 비동기 읽기에서 압축 asset 처리, 권한·생명주기 |
 | MB04 P1 | 수명·자원: 백그라운드 전환 시 I/O·worker 정지/재개, 메모리 경고(iOS didReceiveMemoryWarning, Android onTrimMemory)와 allocator 예산 연동 | 진행 중 요청의 완료·취소 규약 유지, 앱 일시정지 중 callback 지연 허용, 강제 종료 시 부분 쓰기 정책 |
 | MB05 P1 | 성능·SIMD: ARM64 NEON 실행 검증, FMA 축약 금지(`-ffp-contract=off`, 빌드 적용·codegen 확인 완료)의 실기기 결과 확인, thermal throttling 하의 측정 | `ScalarSimdBitExact` 판정을 실기기 결과로 갱신, 미실행 플랫폼은 통과로 표시하지 않음 |
 

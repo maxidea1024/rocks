@@ -28,8 +28,8 @@ TEST(Rotator_AxisMeaningsInRocksConvention) {
 TEST(Rotator_QuaternionRoundTripIncludingGimbalLock) {
     MathRandom random(0x0f1e2d3c4b5a6978ull ^ CurrentSeed());
     for (int iteration = 0; iteration < 5000; ++iteration) {
-        const Rotator<double> source(random.Range(-3.1, 3.1), random.Range(-1.5, 1.5),
-                                     random.Range(-3.1, 3.1));
+        const Rotator<double> source{random.Range(-3.1, 3.1), random.Range(-1.5, 1.5),
+                                     random.Range(-3.1, 3.1)};
         auto recovered = Rotator<double>::TryFromQuaternion(source.ToQuaternion());
         REQUIRE(recovered);
         // 일반 자세에서는 같은 각, 항상 같은 회전이다.
