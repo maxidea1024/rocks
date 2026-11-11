@@ -290,6 +290,7 @@ internal static class NativeTests
                 ("shared-ptr-empty", "SharedPtr dereferenced while empty"),
                 ("shared-ref-from-empty", "SharedPtr::ToSharedRef called on an empty pointer"),
                 ("variant-wrong-alternative", "Variant::Get called with a different alternative"),
+                ("delegate-rebind-during-target-destruction", "Delegate rebound while its target is being destroyed"),
                 ("unique-ptr-null-deleter", "UniquePtr adopted an object with a null deleter"),
                 ("delegate-execute-unbound", "Delegate::Execute called on an unbound delegate"),
                 ("delegate-rebind-during-execution", "Delegate rebound during its own execution"),

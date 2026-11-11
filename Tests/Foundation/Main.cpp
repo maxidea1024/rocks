@@ -23,6 +23,7 @@ int RunHashMapIteratorAfterInsertControl() noexcept;
 int RunSharedPtrEmptyControl() noexcept;
 int RunSharedRefFromEmptyControl() noexcept;
 int RunVariantWrongAlternativeControl() noexcept;
+int RunDelegateRebindDuringTargetDestructionControl() noexcept;
 int RunUniquePtrNullDeleterControl() noexcept;
 int RunDelegateExecuteUnboundControl() noexcept;
 int RunDelegateRebindDuringExecutionControl() noexcept;
@@ -225,6 +226,8 @@ int main(int argc, char** argv) {
                 return test::RunSharedRefFromEmptyControl();
             } else if (strcmp(control, "variant-wrong-alternative") == 0) {
                 return test::RunVariantWrongAlternativeControl();
+            } else if (strcmp(control, "delegate-rebind-during-target-destruction") == 0) {
+                return test::RunDelegateRebindDuringTargetDestructionControl();
             } else if (strcmp(control, "unique-ptr-null-deleter") == 0) {
                 return test::RunUniquePtrNullDeleterControl();
             } else if (strcmp(control, "delegate-execute-unbound") == 0) {

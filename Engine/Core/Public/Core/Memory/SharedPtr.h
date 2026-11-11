@@ -572,6 +572,13 @@ public:
         return pointer_;
     }
 
+    // 기반 타입 SharedPtr로의 변환이다(SharedPtr<Base> p = SharedRef<Derived>).
+    template <typename U>
+        requires(!IsSameV<U, T> && __is_convertible_to(T*, U*))
+    operator SharedPtr<U>() const noexcept {
+        return SharedPtr<U>(pointer_);
+    }
+
     // 진단용 순간 값이다. 항상 1 이상이다.
     uint64 UseCount() const noexcept {
         return pointer_.UseCount();

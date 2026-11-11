@@ -98,6 +98,7 @@ public:
     Delegate& operator=(Delegate&& other) noexcept {
         if (this != &other) {
             CheckNotExecuting("Delegate rebound during its own execution");
+            CheckNotDestroyingTarget();
             other.CheckNotExecuting("Delegate moved during its own execution");
             // 기존 대상 소멸자가 재진입하더라도 새 대상이 먼저 자리를 잡게 임시로 옮긴다.
             Delegate previous;
@@ -111,6 +112,9 @@ public:
         CheckNotExecuting("Delegate destroyed during its own execution");
         DestroyBinding();
     }
+
+    // 대상 소멸자 안에서 같은 delegate에 새 대상을 넣으면 아직 소멸 중인 저장소를 덮어쓰게 된다.
+    // 안전하게 처리할 방법이 없으므로 Fatal이다(Unbind·IsBound 같은 조회·해제는 허용).
 
     // ---- 생성 ----
 
@@ -170,6 +174,8 @@ public:
     }
 
     // owner가 살아 있는 동안만 lambda를 호출한다(UE CreateSPLambda). owner는 호출 동안 유지된다.
+    // owner 추적에 24 byte를 쓰므로 lambda 캡처는 DelegateInlineBytes - 24(= 24 byte)까지다. 더 큰
+    // 상태는 SharedPtr 등으로 묶어 캡처한다.
     template <typename Class, typename Callable>
     static Delegate CreateWeakLambda(const SharedPtr<Class>& owner, Callable&& callable) noexcept {
         using Stored = RemoveConstT<RemoveReferenceT<Callable>>;
@@ -486,13 +492,22 @@ private:
         }
     }
 
-    // 대상 소멸자가 재진입해 이 delegate를 다시 바꾸더라도 이중 소멸하지 않게 먼저 비운다.
+    // 대상 소멸자가 재진입해도 이중 소멸하지 않게 먼저 비운다. 소멸 중 재바인드는
+    // CheckNotDestroyingTarget이 Fatal로 막는다.
     void DestroyBinding() const noexcept {
         const Ops* ops = ops_;
         ops_ = nullptr;
         unbindPending_ = false;
         if (ops != nullptr) {
+            destroyingTarget_ = true;
             ops->destroy(storage_);
+            destroyingTarget_ = false;
+        }
+    }
+
+    void CheckNotDestroyingTarget() const noexcept {
+        if (destroyingTarget_) {
+            platform::Fatal("Delegate rebound while its target is being destroyed");
         }
     }
 
@@ -523,6 +538,7 @@ private:
     mutable const Ops* ops_ = nullptr;
     mutable uint32 executing_ = 0;
     mutable bool unbindPending_ = false;
+    mutable bool destroyingTarget_ = false;
 };
 
 // 여러 대상을 등록해 한 번에 호출하는 delegate다(UE TMulticastDelegate 대응). 반환값은 없다.
@@ -559,17 +575,25 @@ public:
 
     MulticastDelegate(MulticastDelegate&& other) noexcept
         : allocator_(other.allocator_), entries_(*other.allocator_), nextId_(other.nextId_) {
-        other.CheckNotBroadcasting("MulticastDelegate moved during Broadcast");
+        other.CheckIdle("MulticastDelegate moved during Broadcast or removal");
         entries_ = Move(other.entries_);
     }
 
     MulticastDelegate& operator=(MulticastDelegate&&) = delete;
 
+    // 남은 항목을 뒤에서부터 배열에서 떼어 낸 뒤 해제한다. 대상 소멸자가 이 객체를 조회해도 이미
+    // 해제된 항목을 보지 않는다.
     ~MulticastDelegate() noexcept {
-        CheckNotBroadcasting("MulticastDelegate destroyed during Broadcast");
-        for (Entry* entry : entries_) {
+        CheckIdle("MulticastDelegate destroyed during Broadcast or removal");
+        ++mutating_;
+        while (entries_.Size() != 0) {
+            Entry* entry = entries_[entries_.Size() - 1];
+            if (!entries_.TryRemoveAt(entries_.Size() - 1)) {
+                platform::Fatal("MulticastDelegate teardown failed");
+            }
             FreeEntry(entry);
         }
+        --mutating_;
     }
 
     // delegate를 등록한다. 실패: 바인딩 없는 delegate는 InvalidArgument, 할당 실패는 그 오류
@@ -620,18 +644,28 @@ public:
     }
 
     // handle의 항목을 제거한다. 이미 없거나 무효면 false다.
+    //
+    // 제거·정리 중 재진입: 대상 소멸자(lambda 캡처 소멸 등)는 제거 도중 실행된다. 그 안에서 같은
+    // MulticastDelegate를 Remove·Clear·RemoveAll·IsBound·TryAdd·Broadcast해도 안전하다. 재진입한
+    // 제거는 표시만 하고, 항목 반환은 가장 바깥 호출이 끝난 뒤 배열에서 떼어 낸 다음에 한다. 모든
+    // 순회는 index로 배열을 다시 읽으므로 재진입한 TryAdd가 배열을 키워도 된다.
     bool Remove(DelegateHandle handle) noexcept {
         if (!handle.IsValid()) {
             return false;
         }
-        for (Entry* entry : entries_) {
+        bool removed = false;
+        ++mutating_;
+        for (usize index = 0; index < entries_.Size(); ++index) {
+            Entry* entry = entries_[index];
             if (entry->id == handle.id_) {
                 Retire(*entry);
-                CompactIfIdle();
-                return true;
+                removed = true;
+                break;
             }
         }
-        return false;
+        --mutating_;
+        CompactIfIdle();
+        return removed;
     }
 
     // Raw·Weak 바인딩 대상이 object인 항목을 모두 제거하고 제거 수를 반환한다(UE RemoveAll).
@@ -640,28 +674,35 @@ public:
             return 0;
         }
         usize removed = 0;
-        for (Entry* entry : entries_) {
+        ++mutating_;
+        for (usize index = 0; index < entries_.Size(); ++index) {
+            Entry* entry = entries_[index];
             if (entry->id != 0 && entry->delegate.BoundObject() == object) {
                 Retire(*entry);
                 ++removed;
             }
         }
+        --mutating_;
         CompactIfIdle();
         return removed;
     }
 
     void Clear() noexcept {
-        for (Entry* entry : entries_) {
+        ++mutating_;
+        for (usize index = 0; index < entries_.Size(); ++index) {
+            Entry* entry = entries_[index];
             if (entry->id != 0) {
                 Retire(*entry);
             }
         }
+        --mutating_;
         CompactIfIdle();
     }
 
     // 호출될 항목(제거되지 않았고 약한 대상이 살아 있음)이 하나라도 있으면 true다.
     bool IsBound() const noexcept {
-        for (const Entry* entry : entries_) {
+        for (usize index = 0; index < entries_.Size(); ++index) {
+            const Entry* entry = entries_[index];
             if (entry->id != 0 && entry->delegate.IsBound()) {
                 return true;
             }
@@ -679,9 +720,8 @@ public:
                 entry->delegate.ExecuteIfBound(args...);
             }
         }
-        if (--broadcasting_ == 0) {
-            Compact();
-        }
+        --broadcasting_;
+        CompactIfIdle();
     }
 
 private:
@@ -693,32 +733,38 @@ private:
         }
     };
 
-    void Retire(Entry& entry) noexcept {
+    // id를 먼저 0으로 해 대상 소멸자가 같은 handle을 다시 제거해도 찾지 못하게 한다. 항목 메모리는
+    // 정리 전까지 유지된다. 실행 중이면 그 실행이 끝난 뒤 대상이 해제된다.
+    void Retire(Entry& entry) const noexcept {
         entry.id = 0;
-        entry.delegate.Unbind(); // 실행 중이면 그 실행이 끝난 뒤 해제된다.
+        entry.delegate.Unbind();
     }
 
     void CompactIfIdle() const noexcept {
-        if (broadcasting_ == 0) {
+        if (broadcasting_ == 0 && mutating_ == 0) {
             Compact();
         }
     }
 
-    // 제거된 항목과 약한 대상이 사라진 항목을 반환한다. 할당하지 않는다.
+    // 제거된 항목과 약한 대상이 사라진 항목을 반환한다. 할당하지 않는다. 항목을 배열에서 먼저
+    // 떼어 낸 뒤 해제하므로, 해제 중 실행되는 대상 소멸자가 이 객체를 다시 호출해도 해제된 항목을
+    // 보지 않는다. 재진입 호출이 다른 항목을 제거로 표시할 수 있으므로 끝까지 다시 확인한다.
     void Compact() const noexcept {
-        usize kept = 0;
-        const usize size = entries_.Size();
-        for (usize index = 0; index < size; ++index) {
+        ++mutating_;
+        usize index = 0;
+        while (index < entries_.Size()) {
             Entry* entry = entries_[index];
             if (entry->id != 0 && entry->delegate.IsBound()) {
-                entries_[kept++] = entry;
-            } else {
-                FreeEntry(entry);
+                ++index;
+                continue;
             }
+            if (!entries_.TryRemoveAt(index)) {
+                platform::Fatal("MulticastDelegate compaction failed");
+            }
+            FreeEntry(entry);
+            index = 0; // 재진입이 앞쪽 항목을 제거로 표시했을 수 있다.
         }
-        if (!entries_.TryRemoveAt(kept, size - kept)) {
-            platform::Fatal("MulticastDelegate compaction failed");
-        }
+        --mutating_;
     }
 
     void FreeEntry(Entry* entry) const noexcept {
@@ -728,8 +774,8 @@ private:
         }
     }
 
-    void CheckNotBroadcasting(const char* message) const noexcept {
-        if (broadcasting_ != 0) {
+    void CheckIdle(const char* message) const noexcept {
+        if (broadcasting_ != 0 || mutating_ != 0) {
             platform::Fatal(message);
         }
     }
@@ -739,6 +785,7 @@ private:
     mutable Array<Entry*> entries_;
     uint64 nextId_ = 1;
     mutable uint32 broadcasting_ = 0;
+    mutable uint32 mutating_ = 0; // Remove·Clear·RemoveAll·정리·소멸 중 깊이
 };
 
 } // namespace rocks

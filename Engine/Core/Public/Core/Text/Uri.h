@@ -82,7 +82,7 @@ Result<usize> ResolvedUriMaxSize(StringView base, StringView reference) noexcept
 // 사용 예:
 //   char buffer[256];
 //   auto resolved = TryResolveUriReference("http://a/b/c/d;p?q", "../g", Span<char>(buffer));
-//   // resolved.Value() == 9, buffer = "http://a/g"
+//   // resolved.Value() == 12, buffer = "http://a/b/g"
 Result<usize> TryResolveUriReference(StringView base, StringView reference,
                                      Span<char> output) noexcept;
 

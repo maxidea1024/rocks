@@ -292,4 +292,86 @@ TEST(MulticastDelegate_WeakTargetsAndAllocationFailure) {
     CHECK(system.Stats().liveAllocations == 0);
 }
 
+namespace {
+
+// 소멸될 때 같은 MulticastDelegate를 다시 호출한다(재검토 재현: UI 해제 중 구독 해제 패턴).
+struct RemoveOnDestroy {
+    MulticastDelegate<void()>* event;
+    DelegateHandle* other;
+    int* removed;
+
+    RemoveOnDestroy(MulticastDelegate<void()>* target, DelegateHandle* handle, int* count) noexcept
+        : event(target), other(handle), removed(count) {
+    }
+
+    RemoveOnDestroy(RemoveOnDestroy&& source) noexcept
+        : event(source.event), other(source.other), removed(source.removed) {
+        source.event = nullptr;
+    }
+
+    ~RemoveOnDestroy() noexcept {
+        if (event != nullptr) {
+            *removed += event->Remove(*other) ? 1 : 0;
+            (void)event->IsBound();
+        }
+    }
+};
+
+struct OwnerObject {
+    int value = 0;
+};
+
+} // namespace
+
+TEST(MulticastDelegate_TargetDestructorMayReenter) {
+    SystemAllocator allocator;
+    {
+        // Remove(A) 중 A의 캡처 소멸자가 B를 제거한다.
+        MulticastDelegate<void()> event(allocator);
+        DelegateHandle a;
+        DelegateHandle b;
+        int removed = 0;
+        auto first =
+            event.TryAddLambda([guard = RemoveOnDestroy(&event, &b, &removed)]() noexcept {});
+        auto second = event.TryAddLambda([]() noexcept {});
+        REQUIRE(first && second);
+        a = first.Value();
+        b = second.Value();
+        CHECK(event.Remove(a));
+        CHECK(removed == 1 && !event.IsBound());
+
+        // Clear 중 소멸자가 아직 남은 다른 항목을 제거한다.
+        DelegateHandle c;
+        removed = 0;
+        auto x = event.TryAddLambda([guard = RemoveOnDestroy(&event, &c, &removed)]() noexcept {});
+        auto y = event.TryAddLambda([]() noexcept {});
+        auto z = event.TryAddLambda([]() noexcept {});
+        REQUIRE(x && y && z);
+        c = z.Value();
+        event.Clear();
+        CHECK(!event.IsBound());
+        event.Broadcast();
+
+        // 약한 대상이 사라진 항목의 정리 중 자기 handle을 제거한다(정리는 Broadcast 끝에서
+        // 일어난다).
+        DelegateHandle self;
+        removed = 0;
+        auto owner = SharedPtr<OwnerObject>::TryMake(allocator);
+        REQUIRE(owner);
+        auto weak = event.TryAddWeakLambda(
+            owner.Value(), [guard = RemoveOnDestroy(&event, &self, &removed)]() noexcept {});
+        REQUIRE(weak);
+        self = weak.Value();
+        owner.Value().Reset();
+        event.Broadcast();
+        CHECK(removed == 0 && !event.IsBound()); // 정리 중이라 이미 목록에서 빠진 뒤다
+        int calls = 0;
+        auto after = event.TryAddLambda([&calls]() noexcept { ++calls; });
+        REQUIRE(after);
+        event.Broadcast();
+        CHECK(calls == 1);
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
 } // namespace rocks::test

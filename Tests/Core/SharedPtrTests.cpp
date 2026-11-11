@@ -498,4 +498,16 @@ TEST(SharedPtr_AliasingSharesOwnership) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+TEST(SharedRef_ConvertsToBaseSharedPtr) {
+    SystemAllocator allocator;
+    DerivedFromPlain::destroyed = 0;
+    {
+        auto derived = SharedRef<DerivedFromPlain>::TryMake(allocator);
+        REQUIRE(derived);
+        SharedPtr<PlainBase> base = derived.Value();
+        CHECK(base && base->baseValue == 5 && base.UseCount() == 2);
+    }
+    CHECK(DerivedFromPlain::destroyed == 1 && allocator.Stats().liveAllocations == 0);
+}
+
 } // namespace rocks::test

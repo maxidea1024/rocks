@@ -72,6 +72,31 @@ int RunUniquePtrNullDeleterControl() noexcept {
     return owned ? 0 : 2;
 }
 
+// 대상 소멸자 안에서 같은 delegate에 새 대상을 넣으면 소멸 중인 저장소를 덮어쓰므로 Fatal이다.
+int RunDelegateRebindDuringTargetDestructionControl() noexcept {
+    PrepareFatalTestProcess();
+    struct Rebinder {
+        Delegate<int()>* target;
+
+        explicit Rebinder(Delegate<int()>* delegate) noexcept : target(delegate) {
+        }
+
+        Rebinder(Rebinder&& other) noexcept : target(other.target) {
+            other.target = nullptr;
+        }
+
+        ~Rebinder() noexcept {
+            if (target != nullptr) {
+                *target = Delegate<int()>::CreateLambda([]() noexcept { return 42; });
+            }
+        }
+    };
+    Delegate<int()> self;
+    self = Delegate<int()>::CreateLambda([rebinder = Rebinder(&self)]() noexcept { return 1; });
+    self.Unbind();
+    return 0;
+}
+
 int RunVariantWrongAlternativeControl() noexcept {
     PrepareFatalTestProcess();
     Variant<int, float> value = 1.0f;
