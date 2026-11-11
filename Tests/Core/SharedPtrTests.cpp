@@ -398,4 +398,104 @@ TEST(SharedRef_FailuresAndDerivedToBase) {
     CHECK(system.Stats().liveAllocations == 0);
 }
 
+namespace {
+
+struct Adopted {
+    static inline int destroyed = 0;
+    int value = 0;
+
+    ~Adopted() noexcept {
+        ++destroyed;
+    }
+};
+
+struct AdoptedNode : EnableSharedFromThis<AdoptedNode> {
+    int value = 6;
+};
+
+struct Composite {
+    int header = 1;
+    Counted member{11};
+};
+
+} // namespace
+
+TEST(SharedPtr_TryAdoptRunsDeleterOnce) {
+    SystemAllocator allocator;
+    Adopted::destroyed = 0;
+    Adopted external;
+    int deleted = 0;
+    auto deleter = [&deleted](Adopted* object) noexcept {
+        ++deleted;
+        object->value = -1;
+    };
+    {
+        auto adopted = SharedPtr<Adopted>::TryAdopt(allocator, &external, deleter);
+        REQUIRE(adopted);
+        SharedPtr<Adopted> first = adopted.Value();
+        adopted.Value().Reset();
+        CHECK(first.Get() == &external && first.UseCount() == 1);
+        WeakPtr<Adopted> weak = first;
+        SharedPtr<Adopted> second = first;
+        first.Reset();
+        CHECK(deleted == 0 && !weak.IsExpired());
+        second.Reset();
+        CHECK(deleted == 1 && external.value == -1 && weak.IsExpired());
+        CHECK(allocator.Stats().liveAllocations == 1); // 제어 블록은 weak가 붙잡는다
+    }
+    CHECK(deleted == 1 && allocator.Stats().liveAllocations == 0);
+    CHECK(Adopted::destroyed == 0); // deleter가 소멸자를 부르지 않았다
+
+    // nullptr는 빈 포인터이고 deleter를 호출하지 않는다.
+    auto empty = SharedPtr<Adopted>::TryAdopt(allocator, static_cast<Adopted*>(nullptr), deleter);
+    REQUIRE(empty);
+    CHECK(!empty.Value() && deleted == 1 && allocator.Stats().liveAllocations == 0);
+
+    // 제어 블록 할당 실패: 소유권은 호출자에게 남고 deleter는 호출되지 않는다.
+    NFailAllocator failing(allocator);
+    failing.FailOnAttempt(1);
+    auto failed = SharedPtr<Adopted>::TryAdopt(failing, &external, deleter);
+    CHECK(!failed && failed.Error() == ErrorCode::OutOfMemory && deleted == 1);
+
+    // 함수 포인터 deleter와 EnableSharedFromThis 연결.
+    static AdoptedNode node;
+    static int nodeDeleted = 0;
+    nodeDeleted = 0;
+    {
+        auto adoptedNode = SharedPtr<AdoptedNode>::TryAdopt(
+            allocator, &node, +[](AdoptedNode*) noexcept { ++nodeDeleted; });
+        REQUIRE(adoptedNode);
+        SharedPtr<AdoptedNode> fromThis = node.SharedFromThis();
+        CHECK(fromThis == adoptedNode.Value() && fromThis.UseCount() == 2);
+    }
+    CHECK(nodeDeleted == 1 && !node.SharedFromThis());
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+TEST(SharedPtr_AliasingSharesOwnership) {
+    SystemAllocator allocator;
+    Counted::alive = 0;
+    Counted::destroyed = 0;
+    {
+        SharedPtr<Counted> member;
+        {
+            auto owner = SharedPtr<Composite>::TryMake(allocator);
+            REQUIRE(owner);
+            member = SharedPtr<Counted>(owner.Value(), &owner.Value()->member);
+            CHECK(member->value == 11 && member.UseCount() == 2);
+            WeakPtr<Counted> weakMember = member;
+            CHECK(weakMember.Lock() == member);
+        }
+        // owner의 마지막 SharedPtr가 사라져도 aliasing 포인터가 Composite를 붙잡는다.
+        CHECK(Counted::alive == 1 && member->value == 11 && member.UseCount() == 1);
+        // 빈 owner나 nullptr object는 소유하지 않는 빈 포인터다.
+        SharedPtr<Counted> fromEmpty(SharedPtr<Composite>(), member.Get());
+        CHECK(!fromEmpty && fromEmpty.UseCount() == 0);
+        SharedPtr<int> nullObject(member, static_cast<int*>(nullptr));
+        CHECK(!nullObject && member.UseCount() == 1);
+    }
+    CHECK(Counted::alive == 0 && Counted::destroyed == 1);
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
 } // namespace rocks::test

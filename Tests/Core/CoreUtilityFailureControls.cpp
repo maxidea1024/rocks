@@ -65,6 +65,13 @@ int RunDelegateRebindDuringExecutionControl() noexcept {
     return 0;
 }
 
+int RunUniquePtrNullDeleterControl() noexcept {
+    PrepareFatalTestProcess();
+    static int resource = 0;
+    UniquePtr<int, void (*)(int*) noexcept> owned(&resource, nullptr);
+    return owned ? 0 : 2;
+}
+
 int RunVariantWrongAlternativeControl() noexcept {
     PrepareFatalTestProcess();
     Variant<int, float> value = 1.0f;

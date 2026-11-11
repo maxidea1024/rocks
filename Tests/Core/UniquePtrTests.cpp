@@ -130,4 +130,79 @@ TEST(UniquePtr_AssignFromOwnedMemberKeepsSourceAlive) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+namespace {
+
+// 외부 라이브러리 자원을 흉내 낸다. Open/Close 쌍의 횟수로 해제를 확인한다.
+struct ExternalResource {
+    int id;
+};
+
+int externalClosed = 0;
+ExternalResource externalPool[4];
+
+ExternalResource* OpenExternal(int id) noexcept {
+    externalPool[id].id = id;
+    return &externalPool[id];
+}
+
+void CloseExternal(ExternalResource* resource) noexcept {
+    externalClosed += resource->id + 1;
+}
+
+struct CountingDeleter {
+    int* calls;
+
+    void operator()(ExternalResource* resource) noexcept {
+        *calls += 1;
+        resource->id = -1;
+    }
+};
+
+static_assert(sizeof(UniquePtr<int>) == 24); // 기본 deleter: 포인터 + 할당 주소 + allocator
+static_assert(!__is_constructible(UniquePtr<int>, int*, AllocatorDeleter));
+static_assert(
+    __is_constructible(UniquePtr<ExternalResource, void (*)(ExternalResource*) noexcept>));
+
+} // namespace
+
+TEST(UniquePtr_CustomDeleters) {
+    using Handle = UniquePtr<ExternalResource, void (*)(ExternalResource*) noexcept>;
+    externalClosed = 0;
+    {
+        Handle first(OpenExternal(1), &CloseExternal);
+        CHECK(first && first->id == 1 && first.GetDeleter() == &CloseExternal);
+        Handle second = Move(first);
+        CHECK(!first && second->id == 1 && externalClosed == 0);
+        second = Handle(OpenExternal(2), &CloseExternal); // 이전 자원(1)을 해제한다
+        CHECK(externalClosed == 2 && second->id == 2);
+        Handle empty;
+        CHECK(!empty);
+        empty = Move(second);
+        CHECK(empty->id == 2);
+    }
+    CHECK(externalClosed == 2 + 3);
+
+    // 상태가 있는 deleter, Release.
+    int calls = 0;
+    {
+        UniquePtr<ExternalResource, CountingDeleter> owned(OpenExternal(3),
+                                                           CountingDeleter{&calls});
+        CHECK(owned->id == 3);
+        ExternalResource* released = owned.Release();
+        CHECK(!owned && released == &externalPool[3] && calls == 0);
+        UniquePtr<ExternalResource, CountingDeleter> again(released, CountingDeleter{&calls});
+        again.Reset();
+        CHECK(calls == 1 && externalPool[3].id == -1 && !again);
+        again.Reset(); // 빈 Reset은 아무것도 하지 않는다
+        CHECK(calls == 1);
+    }
+    CHECK(calls == 1);
+    // 빈 객체를 맡기면 deleter를 호출하지 않는다.
+    {
+        UniquePtr<ExternalResource, CountingDeleter> none(nullptr, CountingDeleter{&calls});
+        CHECK(!none);
+    }
+    CHECK(calls == 1);
+}
+
 } // namespace rocks::test

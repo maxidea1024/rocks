@@ -10,6 +10,10 @@ FILE* OpenReportFile(const char* path) noexcept {
     return fopen(path, "wb");
 }
 
+void PrepareAutomatedTestProcess() noexcept {
+    // macOS는 abort·assert가 대화상자를 띄우지 않는다. crash reporter는 시스템 설정을 따른다.
+}
+
 void PrepareFatalTestProcess() noexcept {
 }
 

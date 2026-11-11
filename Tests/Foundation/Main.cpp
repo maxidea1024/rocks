@@ -23,6 +23,7 @@ int RunHashMapIteratorAfterInsertControl() noexcept;
 int RunSharedPtrEmptyControl() noexcept;
 int RunSharedRefFromEmptyControl() noexcept;
 int RunVariantWrongAlternativeControl() noexcept;
+int RunUniquePtrNullDeleterControl() noexcept;
 int RunDelegateExecuteUnboundControl() noexcept;
 int RunDelegateRebindDuringExecutionControl() noexcept;
 int RunRandomStreamPreconditionControl(uint32 operation) noexcept;
@@ -89,6 +90,7 @@ static void RequireNegativeControl() {
 
 int main(int argc, char** argv) {
     using namespace rocks;
+    test::PrepareAutomatedTestProcess();
     const char* filter = "";
     const char* jsonPath = nullptr;
     uint64 repeat = 1;
@@ -223,6 +225,8 @@ int main(int argc, char** argv) {
                 return test::RunSharedRefFromEmptyControl();
             } else if (strcmp(control, "variant-wrong-alternative") == 0) {
                 return test::RunVariantWrongAlternativeControl();
+            } else if (strcmp(control, "unique-ptr-null-deleter") == 0) {
+                return test::RunUniquePtrNullDeleterControl();
             } else if (strcmp(control, "delegate-execute-unbound") == 0) {
                 return test::RunDelegateExecuteUnboundControl();
             } else if (strcmp(control, "delegate-rebind-during-execution") == 0) {

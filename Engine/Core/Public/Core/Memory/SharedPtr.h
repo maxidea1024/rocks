@@ -20,7 +20,8 @@ class EnableSharedFromThis;
 
 namespace detail {
 
-// SharedPtr/WeakPtr가 공유하는 제어 블록이다. 객체 저장소와 같은 할당에 있다.
+// SharedPtr/WeakPtr가 공유하는 제어 블록이다. TryMake는 객체 저장소와 같은 할당에, TryAdopt는
+// deleter와 같은 할당에 둔다. destroyObject는 제어 블록을 받아 객체(와 deleter)를 정리한다.
 // - strong: 살아 있는 SharedPtr 수. 0이 되면 객체를 소멸한다.
 // - weak: 살아 있는 WeakPtr 수 + (strong > 0이면 1). 0이 되면 할당 전체를 allocator에 반환한다.
 // 계수는 compiler 원자 builtin으로 갱신한다. 일반 증가는 relaxed, WeakPtr::Lock의 조건부
@@ -31,7 +32,7 @@ struct SharedControlBlock {
     uint64 weak;
     Allocator* allocator;
     void* object;
-    void (*destroyObject)(void* object) noexcept;
+    void (*destroyObject)(SharedControlBlock* control) noexcept;
 
     void AddStrong() noexcept {
         __atomic_fetch_add(&strong, 1, __ATOMIC_RELAXED);
@@ -58,7 +59,7 @@ struct SharedControlBlock {
         if (__atomic_fetch_sub(&strong, 1, __ATOMIC_ACQ_REL) == 1) {
             // 객체 소멸자가 같은 객체의 WeakPtr를 해제해도 strong 그룹의 weak 토큰이 남아 있어
             // 저장소는 아직 유효하다. 소멸이 끝난 뒤 그 토큰을 반환한다.
-            destroyObject(object);
+            destroyObject(this);
             ReleaseWeak();
         }
     }
@@ -82,9 +83,23 @@ struct SharedStorage {
     SharedControlBlock control;
     alignas(T) unsigned char object[sizeof(T)];
 
-    static void Destroy(void* object) noexcept {
-        DestroyAt(static_cast<T*>(object));
+    static void Destroy(SharedControlBlock* control) noexcept {
+        DestroyAt(static_cast<T*>(control->object));
     }
+};
+
+// TryAdopt의 제어 블록이다. 제어 블록이 기반이므로 할당 시작 주소와 같다(TryAdopt가 확인).
+// 마지막 strong 해제 때 deleter로 객체를 해제한 뒤 deleter 자신도 소멸한다. 저장소 반환은 마지막
+// weak 해제 때 SharedControlBlock::ReleaseWeak가 한다.
+template <typename T, typename Deleter>
+struct SharedAdoptedStorage : SharedControlBlock {
+    Deleter deleter;
+
+    explicit SharedAdoptedStorage(Deleter&& value) noexcept
+        : SharedControlBlock{}, deleter(Move(value)) {
+    }
+
+    static void Destroy(SharedControlBlock* control) noexcept;
 };
 
 // EnableSharedFromThis의 비템플릿 기반이다. SharedPtr::TryMake가 생성 직후 제어 블록을 연결한다.
@@ -113,13 +128,37 @@ private:
     template <typename>
     friend class rocks::SharedPtr;
 
+    template <typename, typename>
+    friend struct SharedAdoptedStorage;
+
     void AttachSharedControl(SharedControlBlock* control) noexcept {
         if (control_ == nullptr) {
             control_ = control;
             control->AddWeak();
         }
     }
+
+    // TryAdopt 객체의 마지막 strong 해제 때 deleter보다 먼저 호출한다. deleter가 객체를 파괴하지
+    // 않아도(외부 소유 객체) 객체가 쥔 weak 토큰 때문에 제어 블록이 남지 않게 한다. strong 그룹의
+    // weak 토큰이 아직 있으므로 여기서 저장소가 반환되지는 않는다.
+    void DetachSharedControl(SharedControlBlock* control) noexcept {
+        if (control_ == control) {
+            control_ = nullptr;
+            control->ReleaseWeak();
+        }
+    }
 };
+
+template <typename T, typename Deleter>
+void SharedAdoptedStorage<T, Deleter>::Destroy(SharedControlBlock* control) noexcept {
+    auto* storage = static_cast<SharedAdoptedStorage*>(control);
+    T* object = static_cast<T*>(control->object);
+    if constexpr (__is_base_of(SharedFromThisAnchor, T)) {
+        object->DetachSharedControl(control);
+    }
+    storage->deleter(object);
+    DestroyAt(&storage->deleter);
+}
 
 } // namespace detail
 
@@ -168,6 +207,60 @@ public:
             object->AttachSharedControl(&storage->control);
         }
         return Result<SharedPtr>::Success(SharedPtr(object, &storage->control));
+    }
+
+    // 외부에서 만든 object의 소유를 넘겨받아 마지막 SharedPtr가 사라질 때 deleter(object)로
+    // 해제한다(UE MakeShareable(object, deleter) 대응). 제어 블록과 deleter를 allocator에 한 번
+    // 할당한다. object가 nullptr이면 빈 SharedPtr이며 deleter는 호출하지 않는다.
+    // 실패: Allocate 오류. 이때 소유권은 호출자에게 남고 deleter는 호출되지 않는다.
+    // deleter(T*)는 noexcept 호출 가능해야 하며 deleter의 이동·소멸도 noexcept여야 한다.
+    template <typename Deleter>
+    static Result<SharedPtr> TryAdopt(Allocator& allocator, T* object, Deleter deleter) noexcept {
+        static_assert(IsNothrowMoveConstructibleV<Deleter>,
+                      "SharedPtr deleter needs noexcept move");
+        static_assert(IsNothrowDestructibleV<Deleter>,
+                      "SharedPtr deleter needs noexcept destruction");
+        static_assert(noexcept(DeclVal<Deleter&>()(static_cast<T*>(nullptr))),
+                      "SharedPtr deleter must be noexcept callable with T*");
+        if (object == nullptr) {
+            return Result<SharedPtr>::Success(SharedPtr());
+        }
+        if constexpr (__is_pointer(Deleter)) {
+            if (deleter == nullptr) {
+                platform::Fatal("SharedPtr adopted an object with a null deleter");
+            }
+        }
+        using Storage = detail::SharedAdoptedStorage<T, Deleter>;
+        auto memory = allocator.Allocate(sizeof(Storage), alignof(Storage));
+        if (!memory) {
+            return Result<SharedPtr>::Failure(memory.Error());
+        }
+        Storage* storage = ConstructAt<Storage>(memory.Value(), Move(deleter));
+        detail::SharedControlBlock* control = storage;
+        if (static_cast<void*>(control) != memory.Value()) {
+            platform::Fatal("SharedPtr adopted control block is not at the allocation start");
+        }
+        control->strong = 1;
+        control->weak = 1;
+        control->allocator = &allocator;
+        control->object = object;
+        control->destroyObject = &Storage::Destroy;
+        if constexpr (__is_base_of(detail::SharedFromThisAnchor, T)) {
+            object->AttachSharedControl(control);
+        }
+        return Result<SharedPtr>::Success(SharedPtr(object, control));
+    }
+
+    // aliasing 생성이다(UE TSharedPtr 대응). owner와 소유(계수)를 공유하면서 object를 가리킨다.
+    // object는 보통 owner 객체의 멤버이며 owner 객체가 사는 동안 유효해야 한다. owner가 비었거나
+    // object가 nullptr이면 소유하지 않는 빈 포인터다.
+    template <typename U>
+    SharedPtr(const SharedPtr<U>& owner, T* object) noexcept {
+        if (owner.control_ != nullptr && object != nullptr) {
+            object_ = object;
+            control_ = owner.control_;
+            control_->AddStrong();
+        }
     }
 
     SharedPtr(const SharedPtr& other) noexcept : object_(other.object_), control_(other.control_) {
