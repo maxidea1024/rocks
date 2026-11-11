@@ -288,6 +288,7 @@ internal static class NativeTests
                 ("unique-ptr-empty", "UniquePtr dereferenced while empty"),
                 ("hash-map-iterator-modified", "HashMap iterator used after structural modification"),
                 ("shared-ptr-empty", "SharedPtr dereferenced while empty"),
+                ("shared-ref-from-empty", "SharedPtr::ToSharedRef called on an empty pointer"),
                 ("random-invalid-0", "RandomStream::NextUInt32Below requires bound > 0"),
                 ("random-invalid-1", "RandomStream::NextInt32InRange requires minimum <= maximum"),
                 ("random-invalid-2", "RandomStream::NextFloatInRange requires finite minimum < maximum") })

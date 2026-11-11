@@ -327,4 +327,75 @@ TEST(SharedPtr_AssignFromOwnedMemberKeepsSourceAlive) {
     CHECK(!head && allocator.Stats().liveAllocations == 0);
 }
 
+TEST(SharedRef_NeverEmptyAndSharesOwnership) {
+    SystemAllocator allocator;
+    Counted::alive = 0;
+    Counted::destroyed = 0;
+    {
+        auto created = SharedRef<Counted>::TryMake(allocator, 7);
+        REQUIRE(created);
+        SharedRef<Counted> first = created.Value();
+        CHECK(first->value == 7 && (*first).value == 7 && first.Get().value == 7);
+        CHECK(first.UseCount() == 2);
+        // 이동은 복사다: 원본도 여전히 같은 객체를 가리킨다.
+        SharedRef<Counted> moved = Move(first);
+        CHECK(first.UseCount() == 3 && moved == first && first->value == 7);
+        // SharedPtr·WeakPtr 상호 변환.
+        SharedPtr<Counted> pointer = moved;
+        CHECK(pointer && pointer == moved && moved == pointer);
+        WeakPtr<Counted> weak = moved;
+        CHECK(!weak.IsExpired());
+        auto back = SharedRef<Counted>::TryFrom(pointer);
+        REQUIRE(back);
+        CHECK(back.Value() == moved);
+        auto viaPointer = pointer.ToSharedRef();
+        CHECK(viaPointer == moved);
+        CHECK(&moved.AsSharedPtr() != &pointer && moved.AsSharedPtr() == pointer);
+        // 대입(자기 대입 포함)과 다른 객체로의 재지정.
+        auto other = SharedRef<Counted>::TryMake(allocator, 9);
+        REQUIRE(other);
+        SharedRef<Counted> target = other.Value();
+        SharedRef<Counted>& alias = target;
+        target = alias;
+        CHECK(target->value == 9);
+        target = moved;
+        CHECK(target->value == 7 && Counted::alive == 2);
+        other.Value() = moved; // 9를 가진 마지막 소유가 사라진다.
+        CHECK(Counted::alive == 1 && Counted::destroyed == 1);
+        created.Value() = moved;
+        pointer.Reset();
+        back.Value() = moved;
+        CHECK(!weak.IsExpired() && Counted::alive == 1);
+    }
+    CHECK(Counted::alive == 0 && Counted::destroyed == 2);
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+TEST(SharedRef_FailuresAndDerivedToBase) {
+    SystemAllocator system;
+    // 빈 SharedPtr는 SharedRef가 될 수 없다.
+    SharedPtr<Counted> empty;
+    auto fromEmpty = SharedRef<Counted>::TryFrom(empty);
+    CHECK(!fromEmpty && fromEmpty.Error() == ErrorCode::InvalidArgument);
+    // 할당 실패는 그대로 전파한다.
+    NFailAllocator failing(system);
+    failing.FailOnAttempt(1);
+    auto failed = SharedRef<Counted>::TryMake(failing, 1);
+    CHECK(!failed && failed.Error() == ErrorCode::OutOfMemory);
+    CHECK(system.Stats().liveAllocations == 0);
+    // 파생 → 기반 변환은 원래 타입의 소멸을 유지한다.
+    DerivedFromPlain::destroyed = 0;
+    {
+        auto derived = SharedRef<DerivedFromPlain>::TryMake(system);
+        REQUIRE(derived);
+        SharedRef<PlainBase> base = derived.Value();
+        CHECK(base->baseValue == 5 && base.UseCount() == 2);
+        auto fromDerivedPointer = SharedRef<PlainBase>::TryFrom(derived.Value().AsSharedPtr());
+        REQUIRE(fromDerivedPointer);
+        CHECK(fromDerivedPointer.Value() == base);
+    }
+    CHECK(DerivedFromPlain::destroyed == 1);
+    CHECK(system.Stats().liveAllocations == 0);
+}
+
 } // namespace rocks::test

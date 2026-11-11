@@ -47,6 +47,13 @@ int RunSharedPtrEmptyControl() noexcept {
     return *empty;
 }
 
+int RunSharedRefFromEmptyControl() noexcept {
+    PrepareFatalTestProcess();
+    SharedPtr<int> empty;
+    SharedRef<int> reference = empty.ToSharedRef();
+    return *reference;
+}
+
 // RandomStream의 전제 조건 위반(경계 0, 뒤집힌 범위, 잘못된 실수 범위)은 값으로 숨기지 않는다.
 int RunRandomStreamPreconditionControl(uint32 operation) noexcept {
     PrepareFatalTestProcess();

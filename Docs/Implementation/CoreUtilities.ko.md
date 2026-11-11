@@ -24,7 +24,8 @@ if (auto locked = observer.Lock()) { Use(*locked); }
 - `UniquePtr<T>`(UE `TUniquePtr`): `TryMake(allocator, args...)`, 이동 전용, 가상 소멸자가 있는 기반 타입으로 이동 가능하며 원래 할당 주소를 보존해 다중 상속에서도 올바른 주소로 반환한다.
 - `SharedPtr<T>`/`WeakPtr<T>`(UE `TSharedPtr`/`TWeakPtr` ThreadSafe 모드): 객체와 제어 블록을 한 번에 할당한다. 계수는 원자적이며(증가 relaxed, 감소 acq_rel), `WeakPtr::Lock`은 strong이 0이 아닐 때만 증가해 소멸 중 객체를 되살리지 않는다. 파생→기반 변환은 원래 타입 소멸 함수를 유지하므로 기반에 가상 소멸자가 없어도 된다. 강한 순환은 회수되지 않는다.
 - `EnableSharedFromThis<T>`(UE `TSharedFromThis`): 객체는 weak 토큰만 보유한다. `SharedPtr::TryMake`로 만든 객체에서만 연결되며, 그 밖·생성자·소멸자 안에서는 빈 포인터를 반환한다(UE는 check 실패).
-- 후속: `SharedRef`(non-null), 사용자 deleter, aliasing 생성.
+- `SharedRef<T>`(UE `TSharedRef` ThreadSafe 모드): 기본 생성이 없는 null 불가 공유 소유권이다. `TryMake`, `TryFrom(SharedPtr)`(빈 포인터는 InvalidArgument), `SharedPtr::ToSharedRef()`(빈 포인터는 Fatal, UE의 check 대응)로 만든다. UE와 같이 이동도 복사라 원본이 비지 않는다. `SharedPtr`로 암묵 변환되고 `WeakPtr`를 바로 만들 수 있으며 파생→기반 변환을 지원한다. 음성 대조 `shared-ref-from-empty`가 Fatal 진단을 확인한다.
+- 후속: 사용자 deleter, aliasing 생성, `SharedFromThis`의 SharedRef 반환 변형.
 
 ## 3. STL 호환 반복자
 

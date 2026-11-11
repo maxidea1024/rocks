@@ -13,6 +13,9 @@ template <typename T>
 class WeakPtr;
 
 template <typename T>
+class SharedRef;
+
+template <typename T>
 class EnableSharedFromThis;
 
 namespace detail {
@@ -245,6 +248,10 @@ public:
         return control_ != nullptr ? control_->StrongCount() : 0;
     }
 
+    // null이 될 수 없는 SharedRef로 바꾼다(UE TSharedPtr::ToSharedRef 대응). 빈 포인터면 Fatal이다.
+    // 비어 있을 수 있는 값은 SharedRef<T>::TryFrom으로 실패를 값으로 받는다.
+    SharedRef<T> ToSharedRef() const noexcept;
+
     friend bool operator==(const SharedPtr& left, const SharedPtr& right) noexcept {
         return left.object_ == right.object_;
     }
@@ -305,6 +312,11 @@ public:
         if (control_ != nullptr) {
             control_->AddWeak();
         }
+    }
+
+    template <typename U>
+        requires(IsSameV<U, T> || __is_convertible_to(U*, T*))
+    WeakPtr(const SharedRef<U>& shared) noexcept : WeakPtr(shared.AsSharedPtr()) {
     }
 
     WeakPtr(const WeakPtr& other) noexcept : object_(other.object_), control_(other.control_) {
@@ -379,6 +391,125 @@ private:
     T* object_ = nullptr;
     detail::SharedControlBlock* control_ = nullptr;
 };
+
+// null이 될 수 없는 공유 소유권이다(UE TSharedRef<T, ESPMode::ThreadSafe> 대응). 계수·스레드·
+// 수명 계약은 SharedPtr와 같다.
+// 사용 예:
+//   auto created = SharedRef<Texture>::TryMake(allocator, width, height);
+//   if (!created) { return created.Error(); }
+//   SharedRef<Texture> texture = created.Value();
+//   Upload(*texture);                        // 빈 검사 없이 역참조
+//   SharedPtr<Texture> maybe = texture;      // SharedPtr로는 암묵 변환
+//   auto again = SharedRef<Texture>::TryFrom(maybe);  // 빈 SharedPtr면 InvalidArgument
+//
+// 계약:
+// - 기본 생성이 없다. 만드는 방법은 TryMake, TryFrom, SharedPtr::ToSharedRef(빈 포인터는 Fatal)다.
+// - 이동도 복사와 같다(UE와 같다). 이동 후에도 원본은 같은 객체를 가리키므로 "이동한 뒤 비어
+//   있음"을 가정하지 않는다. 소유를 놓으려면 SharedRef를 담은 범위를 끝내거나 SharedPtr로 바꾼다.
+// - null이 아니라는 것은 소유권만 보장한다. 같은 인스턴스를 여러 스레드에서 동시에 대입하는 것과
+//   객체 자체의 동기화는 SharedPtr와 같이 호출자 책임이다.
+template <typename T>
+class SharedRef {
+public:
+    SharedRef() = delete;
+
+    // 객체와 제어 블록을 한 번에 할당한다(SharedPtr::TryMake와 같다).
+    template <typename... Args>
+    static Result<SharedRef> TryMake(Allocator& allocator, Args&&... args) noexcept {
+        auto created = SharedPtr<T>::TryMake(allocator, Forward<Args>(args)...);
+        if (!created) {
+            return Result<SharedRef>::Failure(created.Error());
+        }
+        return Result<SharedRef>::Success(SharedRef(Move(created.Value())));
+    }
+
+    // 빈 SharedPtr는 InvalidArgument다.
+    template <typename U>
+        requires(IsSameV<U, T> || __is_convertible_to(U*, T*))
+    static Result<SharedRef> TryFrom(const SharedPtr<U>& pointer) noexcept {
+        if (!pointer) {
+            return Result<SharedRef>::Failure(ErrorCode::InvalidArgument);
+        }
+        return Result<SharedRef>::Success(SharedRef(SharedPtr<T>(pointer)));
+    }
+
+    SharedRef(const SharedRef& other) noexcept : pointer_(other.pointer_) {
+    }
+
+    // 이동은 복사다. 원본을 비우면 null 불가 불변식이 깨진다.
+    SharedRef(SharedRef&& other) noexcept : pointer_(other.pointer_) {
+    }
+
+    template <typename U>
+        requires(!IsSameV<U, T> && __is_convertible_to(U*, T*))
+    SharedRef(const SharedRef<U>& other) noexcept : pointer_(other.AsSharedPtr()) {
+    }
+
+    // SharedPtr의 복사 후 교환 대입을 쓰므로 자기 대입과 기존 객체 소멸 중 재진입에도 안전하다.
+    SharedRef& operator=(const SharedRef& other) noexcept {
+        pointer_ = other.pointer_;
+        return *this;
+    }
+
+    SharedRef& operator=(SharedRef&& other) noexcept {
+        pointer_ = other.pointer_;
+        return *this;
+    }
+
+    ~SharedRef() noexcept = default;
+
+    T& Get() const noexcept {
+        return *pointer_.Get();
+    }
+
+    T& operator*() const noexcept {
+        return *pointer_.Get();
+    }
+
+    T* operator->() const noexcept {
+        return pointer_.Get();
+    }
+
+    // 내부 SharedPtr(항상 비어 있지 않음)를 빌린다. WeakPtr 생성 등에 복사 없이 쓴다.
+    const SharedPtr<T>& AsSharedPtr() const noexcept {
+        return pointer_;
+    }
+
+    operator SharedPtr<T>() const noexcept {
+        return pointer_;
+    }
+
+    // 진단용 순간 값이다. 항상 1 이상이다.
+    uint64 UseCount() const noexcept {
+        return pointer_.UseCount();
+    }
+
+    friend bool operator==(const SharedRef& left, const SharedRef& right) noexcept {
+        return left.pointer_ == right.pointer_;
+    }
+
+    friend bool operator==(const SharedRef& left, const SharedPtr<T>& right) noexcept {
+        return left.pointer_ == right;
+    }
+
+private:
+    template <typename>
+    friend class SharedPtr;
+
+    // pointer는 비어 있지 않아야 한다(호출자가 확인).
+    explicit SharedRef(SharedPtr<T>&& pointer) noexcept : pointer_(Move(pointer)) {
+    }
+
+    SharedPtr<T> pointer_;
+};
+
+template <typename T>
+SharedRef<T> SharedPtr<T>::ToSharedRef() const noexcept {
+    if (object_ == nullptr) {
+        platform::Fatal("SharedPtr::ToSharedRef called on an empty pointer");
+    }
+    return SharedRef<T>(SharedPtr(*this));
+}
 
 // 객체가 자신을 가리키는 SharedPtr/WeakPtr를 얻게 한다(UE TSharedFromThis 대응).
 // 사용 예: class Actor : public EnableSharedFromThis<Actor> { ... SharedFromThis() ... };
