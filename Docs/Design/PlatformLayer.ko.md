@@ -53,7 +53,7 @@ Engine / Tools / Game         프로젝트·설치 구성과 상위 시스템
 
 현재 물리 구현은 UTF-8 범위의 유효성과 embedded NUL을 확인하고 Windows에서 UTF-16으로 변환한다. Windows 장치 namespace·확장 경로 및 레거시 DOS 장치 이름은 거부하지만 `FILE_TYPE_DISK` 검사만으로 모든 링크·재분석 대상이 일반 파일임을 보장하지 않는다. macOS 구현은 열린 대상의 일반 파일 여부를 검사한다. `Exists`의 결과는 이후 접근까지 유지되거나 보안 경계를 제공하지 않는다. `CreateAlways`는 이후 오류가 반환되어도 기존 파일이 잘렸을 수 있다. `Close` 실패 시 이전 native 핸들로 재시도하지 않으며 OS의 실제 자원 회수는 보장하지 않는다.
 
-파일 시스템의 인터페이스는 wrapper 구현을 허용하지만, wrapper 체인 관리자와 디렉터리 순회·`ReadAt`·`Flush`·`Truncate`·비동기/메모리 매핑 파일 기능은 아직 구현되지 않았다. wrapper의 구성·교체·동시 호출·종료, 부분 I/O와 OS 권한·오류의 규약을 후속 단계에서 검증한다. 기존 Windows 독립 테스트에서는 실제 심볼릭 링크 생성이 **SKIP**되었다. 이후 개발자 모드를 활성화하고 별도 재검증하여 유효한 파일 링크와 대상이 삭제된 링크의 판정을 확인했다. macOS 실기기와 실제 OS close 실패 주입도 미검증이다.
+파일 시스템의 인터페이스는 wrapper 구현을 허용하지만, wrapper 체인 관리자와 `ReadAt`·`Flush`·`Truncate`·메모리 매핑 파일 기능은 아직 구현되지 않았다. 디렉터리·Stat·Copy/Move와 기본 경로는 아래 "디렉터리·파일 정보·기본 경로" 절을 따른다. wrapper의 구성·교체·동시 호출·종료, 부분 I/O와 OS 권한·오류의 규약을 후속 단계에서 검증한다. 기존 Windows 독립 테스트에서는 실제 심볼릭 링크 생성이 **SKIP**되었다. 이후 개발자 모드를 활성화하고 별도 재검증하여 유효한 파일 링크와 대상이 삭제된 링크의 판정을 확인했다. macOS 실기기와 실제 OS close 실패 주입도 미검증이다.
 
 실행 파일·사용자·임시·캐시 디렉터리는 OS 플랫폼 backend가 조회하고, 엔진·프로젝트·콘텐츠·로그 경로는 명시적인 엔진/프로젝트 초기화 정보로 구성한다. OS 경로 조회와 파일 생성·접근 가능 여부 확인은 별도 연산이다. Windows UTF-16과 Core UTF-8 변환에는 유효성·길이·종단 문자·변환 실패를 명시한다. strict UTF-8로 표현할 수 없는 네이티브 이름에 대한 처리 정책은 후속 설계다. macOS sandbox 및 Windows 경로 namespace에 대한 검증도 필요하다.
 
@@ -62,7 +62,7 @@ Engine / Tools / Game         프로젝트·설치 구성과 상위 시스템
 | 영역 | 현재 확인된 구현 | 한계와 전환 시 확인 |
 |---|---|---|
 | 경로 | `PathStyle::{Windows, Posix, Unsupported}`와 `GenericPlatformPath`의 미지원 기본값, `WindowsPlatformPath`·`ApplePlatformPath`의 선택, Core의 경로 문자열 처리 | 두 문법은 호스트와 독립적으로 선택한다. OS 환경에 의존하는 경로 보정·절대 형식 판정 hook 및 OS 디렉터리 조회는 후속이다. |
-| 파일 | `FileSystem`·`FileHandle`·소유형 `File`, Windows/macOS 물리 backend와 부분/정확 전송의 초기 구현 | wrapper 관리자·디렉터리 순회·`ReadAt`·`Flush`·`Truncate`·async/mapped는 후속이다. Windows 링크 실검사 SKIP, macOS 및 실제 OS close 오류 주입은 미검증이다. |
+| 파일 | `FileSystem`·`FileHandle`·소유형 `File`, Windows/macOS 물리 backend와 부분/정확 전송의 초기 구현, 디렉터리·Stat·Copy/Move·재귀 helper·기본 경로(2026-11-11) | wrapper 관리자·`ReadAt`·`Truncate`·mapped·파일 감시는 후속이다. Windows 링크 실검사 SKIP, macOS 및 실제 OS close 오류 주입은 미검증이다. |
 | 스레드 | `Private/Common/Thread.cpp`의 공통 수명·join 상태기계, 플랫폼별 `Concurrency.cpp`의 native thread 생성·join | 종료·TLS·자기 join·실패·동시 제어를 유지하고 각 OS에서 실행 검증한다. |
 | 동기화 | `Private/Common/Sync.cpp`의 event·semaphore와 플랫폼별 mutex·condition variable | timeout·spurious wake·소유권·파괴 조건을 보존한다. RWLock 등은 별도 후속 항목이다. |
 | 일반 메모리·시계·Fatal | 플랫폼별 `Platform.cpp`의 할당·mutex·시계·thread ID·치명 오류 경로 | 기능별 분리와 Generic/플랫폼 경계를 검토한다. OS 동작이 필요한 부분을 임의 Generic 성공으로 대체하지 않는다. |
@@ -74,6 +74,25 @@ Engine / Tools / Game         프로젝트·설치 구성과 상위 시스템
 - Foundation Debug는 native 354개, 도구의 native/자식 프로세스 하네스 65개, 메타컴파일러 하네스 41개에서 실패가 없었다. Foundation AddressSanitizer는 native 354개, native/자식 하네스 66개, 메타컴파일러 하네스 41개에서 실패가 없었다. 각 실행의 build evidence에서 소스가 실행 중 변경되지 않았고 해당 runner 보고서가 최신임을 확인하였다. 실행 증거는 각각 `out/final-platform-foundation-debug/`와 `out/final-platform-foundation-asan/`이다.
 - 두 native 테스트 실행에서 실제 Windows 심볼릭 링크 생성은 권한 또는 파일 시스템 제한으로 `SKIP`되었다. 집계된 테스트 수에 해당 항목이 포함되어도 링크 대상 판정의 실제 Windows 동작을 검증한 것으로 간주하지 않는다. macOS 빌드·실행과 실제 OS close 실패 주입은 이번에 수행하지 않았다. OS close 실패는 자원 회수 여부가 불확정인 한계를 유지한다.
 - 빌드 규칙 테스트는 Windows·macOS 디렉터리 선택, 정의되지 않은 플랫폼의 오류 및 현재 미지원인 호스트/타깃 교차 빌드 거부를 확인한다. 별도의 Apple 플랫폼 private 헤더 증분 fixture는 Windows 호스트에서 Mac 형태의 의존성 규칙을 평가해 헤더 변경 시 재컴파일·재링크와 무변경 시 no-op을 검증한다. 이 fixture는 macOS SDK 컴파일이나 macOS 실행 검증이 아니다.
+
+## 디렉터리·파일 정보·기본 경로 (2026-11-11 1차 구현)
+
+`FileSystem`에 `Stat`·`MakeDirectory`·`DeleteDirectory`·`EnumerateDirectory`·`Move`·`Copy`를 가상 함수로 추가했다. 기본 구현은 `Unsupported`이므로 기존 wrapper는 그대로 컴파일되고 지원하는 연산만 재정의한다. 이름은 Windows SDK 매크로(`CreateDirectory`·`RemoveDirectory`·`CopyFile`·`MoveFile`)와 겹치지 않게 정했다(UE는 매크로를 숨기는 방식을 쓴다).
+
+| 연산 | 계약 | Windows | macOS(미빌드) |
+|---|---|---|---|
+| `Stat` | link를 따라간 대상의 종류·크기·수정 시각, `isLink`는 경로 자체가 link인지. 시각은 0001-01-01 UTC 기준 100ns tick | `FindFirstFileExW`(reparse tag로 link 판정) + backup semantics handle의 `GetFileInformationByHandle` | `lstat` + `stat`, `st_mtimespec` |
+| `MakeDirectory` | 한 단계, 이미 있으면 AlreadyExists | `CreateDirectoryW` | `mkdir(0700)` |
+| `DeleteDirectory` | 빈 디렉터리만, 비었지 않으면 DirectoryNotEmpty, 파일이면 WrongType, 디렉터리 link는 link만 | `RemoveDirectoryW` | `lstat` 후 `unlink`/`rmdir` |
+| `EnumerateDirectory` | 직접 자식, "."·".." 제외, 순서 없음, link를 따라가지 않은 항목 정보, visitor가 false면 중단 | `FindFirstFileExW`(large fetch) | `opendir`/`readdir` + `fstatat(AT_SYMLINK_NOFOLLOW)` |
+| `Move` | 같은 volume 안 rename, replace 여부 선택, 다른 volume은 Unsupported | `MoveFileExW`(COPY_ALLOWED 없음) | `rename` / `renamex_np(RENAME_EXCL)` |
+| `Copy` | 일반 파일 하나, replace 여부 선택, 실패 시 대상 제거 | `CopyFileW` | read/write 반복, 실패 시 `unlink` |
+
+`Delete`는 파일과 link 자체를 지우며 실제 디렉터리는 WrongType이다. 공용 helper `MakeDirectoryTree`는 루트·드라이브·UNC 공유 이름을 건너뛰고 부모부터 만들며 중간에 파일이 있으면 WrongType이다. `DeleteDirectoryTree`는 디렉터리마다 자식 목록을 먼저 모은 뒤 지우고, link는 따라가지 않고 link만 지운다. 중간 실패는 그 상태로 멈춘다.
+
+`GetStandardDirectory`(`Platform/Path.h`)는 실행 파일·작업·임시·홈·사용자 데이터·캐시 디렉터리를 UTF-8로 돌려준다. Windows는 `GetModuleFileNameW`·`GetCurrentDirectoryW`·`GetTempPathW`·`SHGetKnownFolderPath`(Profile·RoamingAppData·LocalAppData), macOS는 `_NSGetExecutablePath`+`realpath`·`getcwd`·`confstr(_CS_DARWIN_USER_TEMP_DIR)`·`HOME`(없으면 사용자 DB)·`~/Library/Application Support`·`~/Library/Caches`다. 버퍼가 부족하면 Overflow와 필요한 길이를 돌려준다.
+
+검증: Windows x64에서 생성·중복·Stat 크기와 시각 범위·열거와 조기 중단·종류 오류·비어 있지 않은 디렉터리·Copy/Move 덮어쓰기 규칙·재귀 생성/삭제·디렉터리 symbolic link를 따라가지 않는 재귀 삭제(개발자 모드에서 실제 link 생성)·기본 경로 6종과 버퍼 부족·wrapper 기본값을 확인했다. macOS 구현은 빌드·실행하지 않았다. 읽기 전용 파일이 있는 트리의 강제 삭제, 시각·권한 변경, 파일 감시, 다른 volume 이동의 복사 fallback, iOS·Android 샌드박스 경로는 후속이다.
 
 ## 비동기 파일 읽기·쓰기 (2026-11-11 1차 구현)
 

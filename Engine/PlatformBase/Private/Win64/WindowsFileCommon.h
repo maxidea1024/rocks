@@ -34,7 +34,14 @@ inline FileStatus NativeError(DWORD error) noexcept {
         code = FileCode::OutOfMemory;
         break;
     case ERROR_NOT_SUPPORTED:
+    case ERROR_NOT_SAME_DEVICE:
         code = FileCode::Unsupported;
+        break;
+    case ERROR_DIR_NOT_EMPTY:
+        code = FileCode::DirectoryNotEmpty;
+        break;
+    case ERROR_DIRECTORY:
+        code = FileCode::WrongType;
         break;
     }
     return {code, static_cast<uint32>(error)};
@@ -85,5 +92,49 @@ public:
 private:
     wchar_t* value_ = nullptr;
 };
+
+// FILETIME(1601-01-01 UTC부터의 100ns)을 FileInfo tick(0001-01-01 UTC부터의 100ns)으로 바꾼다.
+// 0001-01-01부터 1601-01-01까지는 584388일이다.
+inline int64 FileTimeToTicks(const FILETIME& time) noexcept {
+    constexpr int64 Offset = 584388ll * 864000000000ll;
+    const uint64 value = (static_cast<uint64>(time.dwHighDateTime) << 32) | time.dwLowDateTime;
+    if (value == 0) {
+        return 0;
+    }
+    return static_cast<int64>(value) + Offset;
+}
+
+// symbolic link·junction처럼 이름을 다른 경로로 대신하는 reparse point인지다. OneDrive placeholder·
+// dedup 같은 다른 reparse point는 link가 아니다.
+inline bool IsLinkReparse(DWORD attributes, DWORD reparseTag) noexcept {
+    return (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0 &&
+           IsReparseTagNameSurrogate(reparseTag);
+}
+
+// UTF-16을 UTF-8로 바꿔 buffer에 쓴다(NUL 포함). 실패하면 false다.
+inline bool WideToUtf8(const wchar_t* text, int units, char* buffer, usize capacity,
+                       usize& bytes) noexcept {
+    if (units == 0) {
+        if (capacity == 0) {
+            return false;
+        }
+        buffer[0] = '\0';
+        bytes = 0;
+        return true;
+    }
+    const int required = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text, units, nullptr, 0,
+                                             nullptr, nullptr);
+    if (required <= 0 || static_cast<usize>(required) >= capacity) {
+        bytes = required > 0 ? static_cast<usize>(required) : 0;
+        return false;
+    }
+    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text, units, buffer, required, nullptr,
+                            nullptr) != required) {
+        return false;
+    }
+    buffer[required] = '\0';
+    bytes = static_cast<usize>(required);
+    return true;
+}
 
 } // namespace rocks::platform::detail

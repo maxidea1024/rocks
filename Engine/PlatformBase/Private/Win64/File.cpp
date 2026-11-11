@@ -207,7 +207,238 @@ public:
         if (!valid) {
             return valid;
         }
-        if (!DeleteFileW(native.Value())) {
+        if (DeleteFileW(native.Value())) {
+            return {};
+        }
+        const DWORD error = GetLastError();
+        // 디렉터리 link는 RemoveDirectoryW로 link 자체를 지운다. 실제 디렉터리는 WrongType이다.
+        const DWORD attributes = GetFileAttributesW(native.Value());
+        if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+            if ((attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+                if (!RemoveDirectoryW(native.Value())) {
+                    return NativeError(GetLastError());
+                }
+                return {};
+            }
+            return {FileCode::WrongType, static_cast<uint32>(error)};
+        }
+        return NativeError(error);
+    }
+
+    FileStatus Stat(const char* path, usize bytes, FileInfo& info) noexcept override {
+        WidePath native;
+        auto valid = native.Initialize(path, bytes);
+        if (!valid) {
+            return valid;
+        }
+        // 경로 자체(link를 따라가지 않음)의 속성으로 link 여부를 정한다.
+        WIN32_FIND_DATAW self{};
+        HANDLE find = FindFirstFileExW(native.Value(), FindExInfoBasic, &self,
+                                       FindExSearchNameMatch, nullptr, 0);
+        bool isLink = false;
+        if (find != INVALID_HANDLE_VALUE) {
+            isLink = detail::IsLinkReparse(self.dwFileAttributes, self.dwReserved0);
+            if (!FindClose(find)) {
+                return NativeError(GetLastError());
+            }
+        }
+        // 대상 정보는 link를 따라가 연 handle에서 읽는다. 디렉터리도 열 수 있게 backup semantics를
+        // 쓴다.
+        HANDLE handle = CreateFileW(native.Value(), FILE_READ_ATTRIBUTES,
+                                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                                    OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+        if (handle == INVALID_HANDLE_VALUE) {
+            return NativeError(GetLastError());
+        }
+        BY_HANDLE_FILE_INFORMATION data{};
+        FileStatus result{};
+        FileInfo filled;
+        if (!GetFileInformationByHandle(handle, &data)) {
+            result = NativeError(GetLastError());
+        } else {
+            const bool directory = (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+            if (directory) {
+                filled.type = FileType::Directory;
+            } else {
+                const auto type = detail::QueryFileType(handle, fileTypeOps);
+                filled.type = type.type == FILE_TYPE_DISK ? FileType::File : FileType::Other;
+                if (filled.type == FileType::File) {
+                    filled.size =
+                        (static_cast<uint64>(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
+                }
+            }
+            filled.isLink = isLink;
+            filled.readOnly = (data.dwFileAttributes & FILE_ATTRIBUTE_READONLY) != 0;
+            filled.modifiedTicks = detail::FileTimeToTicks(data.ftLastWriteTime);
+        }
+        if (!CloseHandle(handle)) {
+            return NativeError(GetLastError());
+        }
+        if (result) {
+            info = filled;
+        }
+        return result;
+    }
+
+    FileStatus MakeDirectory(const char* path, usize bytes) noexcept override {
+        WidePath native;
+        auto valid = native.Initialize(path, bytes);
+        if (!valid) {
+            return valid;
+        }
+        if (!CreateDirectoryW(native.Value(), nullptr)) {
+            return NativeError(GetLastError());
+        }
+        return {};
+    }
+
+    FileStatus DeleteDirectory(const char* path, usize bytes) noexcept override {
+        WidePath native;
+        auto valid = native.Initialize(path, bytes);
+        if (!valid) {
+            return valid;
+        }
+        if (!RemoveDirectoryW(native.Value())) {
+            return NativeError(GetLastError());
+        }
+        return {};
+    }
+
+    FileStatus EnumerateDirectory(const char* path, usize bytes, DirectoryVisitor visitor,
+                                  void* context) noexcept override {
+        if (visitor == nullptr) {
+            return {FileCode::InvalidArgument, 0};
+        }
+        WidePath native;
+        auto valid = native.Initialize(path, bytes);
+        if (!valid) {
+            return valid;
+        }
+        const DWORD attributes = GetFileAttributesW(native.Value());
+        if (attributes == INVALID_FILE_ATTRIBUTES) {
+            return NativeError(GetLastError());
+        }
+        if ((attributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
+            return {FileCode::WrongType, 0};
+        }
+        // "<path>\*" 패턴을 만든다.
+        usize units = 0;
+        while (native.Value()[units] != L'\0') {
+            ++units;
+        }
+        const bool hasSeparator =
+            units != 0 && (native.Value()[units - 1] == L'\\' || native.Value()[units - 1] == L'/');
+        const usize patternUnits = units + (hasSeparator ? 1 : 2);
+        auto* pattern = static_cast<wchar_t*>(
+            AlignedAllocate((patternUnits + 1) * sizeof(wchar_t), alignof(wchar_t)));
+        if (pattern == nullptr) {
+            return {FileCode::OutOfMemory, 0};
+        }
+        for (usize index = 0; index < units; ++index) {
+            pattern[index] = native.Value()[index];
+        }
+        usize cursor = units;
+        if (!hasSeparator) {
+            pattern[cursor++] = L'\\';
+        }
+        pattern[cursor++] = L'*';
+        pattern[cursor] = L'\0';
+        WIN32_FIND_DATAW data{};
+        HANDLE find = FindFirstFileExW(pattern, FindExInfoBasic, &data, FindExSearchNameMatch,
+                                       nullptr, FIND_FIRST_EX_LARGE_FETCH);
+        AlignedFree(pattern);
+        if (find == INVALID_HANDLE_VALUE) {
+            const DWORD error = GetLastError();
+            return error == ERROR_FILE_NOT_FOUND ? FileStatus{} : NativeError(error);
+        }
+        FileStatus result{};
+        for (;;) {
+            const wchar_t* name = data.cFileName;
+            const bool dot =
+                name[0] == L'.' && (name[1] == L'\0' || (name[1] == L'.' && name[2] == L'\0'));
+            if (!dot) {
+                int nameUnits = 0;
+                while (name[nameUnits] != L'\0') {
+                    ++nameUnits;
+                }
+                char utf8[MAX_PATH * 3 + 1];
+                DirectoryEntry entry;
+                usize nameBytes = 0;
+                if (!detail::WideToUtf8(name, nameUnits, utf8, sizeof(utf8), nameBytes)) {
+                    result = {FileCode::SystemError, ERROR_NO_UNICODE_TRANSLATION};
+                    break;
+                }
+                entry.name = utf8;
+                entry.nameBytes = nameBytes;
+                const bool directory = (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+                entry.info.type = directory ? FileType::Directory : FileType::File;
+                entry.info.isLink = detail::IsLinkReparse(data.dwFileAttributes, data.dwReserved0);
+                entry.info.readOnly = (data.dwFileAttributes & FILE_ATTRIBUTE_READONLY) != 0;
+                if (!directory && !entry.info.isLink) {
+                    entry.info.size =
+                        (static_cast<uint64>(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
+                }
+                entry.info.modifiedTicks = detail::FileTimeToTicks(data.ftLastWriteTime);
+                if (!visitor(entry, context)) {
+                    break;
+                }
+            }
+            if (!FindNextFileW(find, &data)) {
+                const DWORD error = GetLastError();
+                if (error != ERROR_NO_MORE_FILES) {
+                    result = NativeError(error);
+                }
+                break;
+            }
+        }
+        if (!FindClose(find)) {
+            return NativeError(GetLastError());
+        }
+        return result;
+    }
+
+    FileStatus Move(const char* from, usize fromBytes, const char* to, usize toBytes,
+                    bool replaceExisting) noexcept override {
+        WidePath source;
+        auto valid = source.Initialize(from, fromBytes);
+        if (!valid) {
+            return valid;
+        }
+        WidePath target;
+        valid = target.Initialize(to, toBytes);
+        if (!valid) {
+            return valid;
+        }
+        // MOVEFILE_COPY_ALLOWED를 쓰지 않으므로 다른 volume이면
+        // ERROR_NOT_SAME_DEVICE(Unsupported)다.
+        if (!MoveFileExW(source.Value(), target.Value(),
+                         replaceExisting ? MOVEFILE_REPLACE_EXISTING : 0)) {
+            return NativeError(GetLastError());
+        }
+        return {};
+    }
+
+    FileStatus Copy(const char* from, usize fromBytes, const char* to, usize toBytes,
+                    bool replaceExisting) noexcept override {
+        WidePath source;
+        auto valid = source.Initialize(from, fromBytes);
+        if (!valid) {
+            return valid;
+        }
+        WidePath target;
+        valid = target.Initialize(to, toBytes);
+        if (!valid) {
+            return valid;
+        }
+        const DWORD attributes = GetFileAttributesW(source.Value());
+        if (attributes == INVALID_FILE_ATTRIBUTES) {
+            return NativeError(GetLastError());
+        }
+        if ((attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+            return {FileCode::WrongType, 0};
+        }
+        // CopyFileW는 실패하면 만들던 대상 파일을 지운다.
+        if (!CopyFileW(source.Value(), target.Value(), replaceExisting ? FALSE : TRUE)) {
             return NativeError(GetLastError());
         }
         return {};

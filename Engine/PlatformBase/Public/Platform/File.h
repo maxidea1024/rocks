@@ -21,7 +21,11 @@ enum class FileCode {
     Unsupported,
     SystemError,
     // 비동기 요청이 취소되어 데이터가 유효하지 않다(AsyncReadResult). 동기 API는 반환하지 않는다.
-    Cancelled
+    Cancelled,
+    // 비어 있지 않은 디렉터리를 DeleteDirectory로 지우려 했다.
+    DirectoryNotEmpty,
+    // 파일 연산을 디렉터리에, 디렉터리 연산을 파일에 적용했다.
+    WrongType
 };
 
 struct [[nodiscard]] FileStatus {
@@ -71,6 +75,44 @@ protected:
     virtual ~FileHandle() = default;
 };
 
+// 파일 시스템 항목의 종류다. Other는 장치·FIFO·socket 등이다.
+enum class FileType : uint8 {
+    File,
+    Directory,
+    Other
+};
+
+// 파일 시각의 단위다. 시각은 0001-01-01T00:00:00 UTC부터의 100ns tick이며(UE FDateTime tick과
+// 같은 기준) 0은 알 수 없음이다. 운영체제·파일 시스템마다 실제 해상도가 다르다(FAT 2초 등).
+inline constexpr int64 FileTicksPerSecond = 10000000;
+
+// Stat·EnumerateDirectory가 채우는 항목 정보다.
+// - Stat: link를 따라간 대상의 type·size·시각이며, isLink는 경로 자체가 link인지다.
+// - EnumerateDirectory: link를 따라가지 않은 항목 자체의 정보다. link면 isLink이고 type은 OS가
+//   보고하는 link의 종류(Windows 디렉터리 link·junction은 Directory, POSIX symlink는 Other)다.
+// - size는 일반 파일의 byte 수이며 그 밖에는 0이다.
+// - readOnly는 Windows 읽기 전용 속성 또는 POSIX에서 소유자 쓰기 권한이 없음을 뜻한다(접근 가능
+//   여부를 보장하지 않는다).
+struct FileInfo {
+    FileType type = FileType::Other;
+    bool isLink = false;
+    bool readOnly = false;
+    uint64 size = 0;
+    int64 modifiedTicks = 0;
+};
+
+// EnumerateDirectory가 항목마다 넘기는 값이다. name은 "."·".."를 제외한 UTF-8 이름(경로 아님)이며
+// NUL로 끝나고 callback 동안만 유효하다.
+struct DirectoryEntry {
+    const char* name = nullptr;
+    usize nameBytes = 0;
+    FileInfo info;
+};
+
+// false를 반환하면 열거를 멈춘다(결과는 성공). callback 안에서 같은 디렉터리를 바꾸면 이후 항목의
+// 포함 여부는 OS 의미를 따른다.
+using DirectoryVisitor = bool (*)(const DirectoryEntry& entry, void* context) noexcept;
+
 // 경로는 유효한 UTF-8 byte 범위이며 embedded NUL이나 빈 경로는 허용하지 않는다.
 // Open의 out은 처음에 nullptr여야 한다. 성공은 non-null handle 하나를 이전하고 실패는 out을
 // 수정하지 않는다. 파일 시스템과 모든 wrapper는 자신이 반환한 handle이 Destroy될 때까지 살아 있어야
@@ -83,8 +125,41 @@ public:
     virtual FileStatus Open(const char* path, usize pathBytes, FileOpenMode mode,
                             FileHandle*& out) noexcept = 0;
     virtual FileStatus Exists(const char* path, usize pathBytes, bool& exists) noexcept = 0;
+    // 파일 또는 link(대상이 아니라 link 자체)를 지운다. 실제 디렉터리는 WrongType이다.
     virtual FileStatus Delete(const char* path, usize pathBytes) noexcept = 0;
+
+    // 아래 연산의 기본 구현은 Unsupported다. wrapper는 지원하는 것만 재정의한다. 물리 파일 시스템은
+    // 모두 구현한다. 이름은 Windows SDK 매크로(CreateDirectory·RemoveDirectory·CopyFile·MoveFile)와
+    // 겹치지 않게 정했다.
+
+    // 경로 정보를 채운다. 없으면 NotFound이며 info는 바뀌지 않는다.
+    virtual FileStatus Stat(const char* path, usize pathBytes, FileInfo& info) noexcept;
+    // 디렉터리 하나를 만든다(부모는 있어야 한다). 이미 있으면(파일이어도) AlreadyExists다.
+    virtual FileStatus MakeDirectory(const char* path, usize pathBytes) noexcept;
+    // 빈 디렉터리를 지운다. 비어 있지 않으면 DirectoryNotEmpty, 파일이면 WrongType이다. 디렉터리
+    // link는 link 자체를 지운다.
+    virtual FileStatus DeleteDirectory(const char* path, usize pathBytes) noexcept;
+    // 디렉터리의 직접 자식을 순서 보장 없이 visitor에 넘긴다. 하위 디렉터리로 내려가지 않는다.
+    virtual FileStatus EnumerateDirectory(const char* path, usize pathBytes,
+                                          DirectoryVisitor visitor, void* context) noexcept;
+    // 같은 volume 안에서 이름을 바꾸거나 옮긴다(파일·디렉터리). replaceExisting이 false면 대상이
+    // 있을 때 AlreadyExists다. 다른 volume 사이 이동은 Unsupported다(복사 후 삭제는 호출자가 한다).
+    virtual FileStatus Move(const char* from, usize fromBytes, const char* to, usize toBytes,
+                            bool replaceExisting) noexcept;
+    // 일반 파일 하나를 복사한다(디렉터리는 WrongType). replaceExisting이 false면 대상이 있을 때
+    // AlreadyExists다. 실패하면 새로 만든 대상 파일은 남기지 않는다.
+    virtual FileStatus Copy(const char* from, usize fromBytes, const char* to, usize toBytes,
+                            bool replaceExisting) noexcept;
 };
+
+// FileSystem 기본 연산 위의 공용 helper다.
+// - MakeDirectoryTree: 없는 부모까지 차례로 만든다. 이미 있는 디렉터리는 성공이며, 경로 중간에
+//   파일이 있으면 WrongType이다.
+// - DeleteDirectoryTree: 디렉터리와 그 안의 모든 항목을 지운다. link는 따라가지 않고 link 자체만
+//   지운다(link 너머의 파일은 남는다). 경로 자체가 link면 link만 지운다. 중간 실패는 그 상태로
+//   멈추고 실패 원인을 반환한다(이미 지운 항목은 복구하지 않는다).
+FileStatus MakeDirectoryTree(FileSystem& system, const char* path, usize pathBytes) noexcept;
+FileStatus DeleteDirectoryTree(FileSystem& system, const char* path, usize pathBytes) noexcept;
 
 // 실제 OS 파일 시스템. 객체는 상태가 없고 동시 호출이 가능하다. macOS는 일반 파일을 검사한다.
 // Windows는 device namespace를 거부하고 FILE_TYPE_DISK를 검사하지만 링크·재분석 지점으로

@@ -12,4 +12,8 @@ FileLinkResult CreateFileLink(const char* link, const char* target) noexcept {
     }
     return FileLinkResult::Failed;
 }
+
+FileLinkResult CreateDirectoryLink(const char* link, const char* target) noexcept {
+    return CreateFileLink(link, target);
+}
 } // namespace rocks::test

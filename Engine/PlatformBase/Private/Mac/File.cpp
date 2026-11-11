@@ -2,9 +2,11 @@
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
 #include "../Common/FileInternal.h"
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <stdio.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <new>
@@ -36,7 +38,14 @@ FileStatus NativeError(int error) noexcept {
         code = FileCode::Overflow;
         break;
     case ENOTSUP:
+    case EXDEV:
         code = FileCode::Unsupported;
+        break;
+    case ENOTEMPTY:
+        code = FileCode::DirectoryNotEmpty;
+        break;
+    case EISDIR:
+        code = FileCode::WrongType;
         break;
     }
     return {code, static_cast<uint32>(error)};
@@ -71,6 +80,26 @@ public:
 private:
     char* value_ = nullptr;
 };
+
+// stat의 시각(1970-01-01 UTC 기준)을 FileInfo tick(0001-01-01 UTC 기준 100ns)으로 바꾼다.
+// 0001-01-01부터 1970-01-01까지는 719162일이다.
+int64 TimespecToTicks(const struct timespec& time) noexcept {
+    constexpr int64 Offset = 719162ll * 864000000000ll;
+    return static_cast<int64>(time.tv_sec) * 10000000ll + time.tv_nsec / 100 + Offset;
+}
+
+FileInfo InfoFromStat(const struct stat& state, bool isLink) noexcept {
+    FileInfo info;
+    info.type = S_ISREG(state.st_mode)   ? FileType::File
+                : S_ISDIR(state.st_mode) ? FileType::Directory
+                                         : FileType::Other;
+    info.isLink = isLink;
+    info.readOnly = (state.st_mode & S_IWUSR) == 0;
+    info.size =
+        info.type == FileType::File && state.st_size > 0 ? static_cast<uint64>(state.st_size) : 0;
+    info.modifiedTicks = TimespecToTicks(state.st_mtimespec);
+    return info;
+}
 
 class MacFileHandle final : public FileHandle {
 public:
@@ -238,9 +267,234 @@ public:
             return valid;
         }
         if (unlink(native.Value()) != 0) {
+            const int error = errno;
+            // macOS의 unlink는 디렉터리에 EPERM을 낸다. 실제 디렉터리면 WrongType으로 알린다.
+            struct stat state{};
+            if ((error == EPERM || error == EISDIR) && lstat(native.Value(), &state) == 0 &&
+                S_ISDIR(state.st_mode)) {
+                return {FileCode::WrongType, static_cast<uint32>(error)};
+            }
+            return NativeError(error);
+        }
+        return {};
+    }
+
+    FileStatus Stat(const char* path, usize bytes, FileInfo& info) noexcept override {
+        NativePath native;
+        auto valid = native.Initialize(path, bytes);
+        if (!valid) {
+            return valid;
+        }
+        struct stat self{};
+        if (lstat(native.Value(), &self) != 0) {
+            return NativeError(errno);
+        }
+        struct stat target{};
+        if (stat(native.Value(), &target) != 0) {
+            return NativeError(errno); // 대상이 없는 link는 NotFound다.
+        }
+        info = InfoFromStat(target, S_ISLNK(self.st_mode));
+        return {};
+    }
+
+    FileStatus MakeDirectory(const char* path, usize bytes) noexcept override {
+        NativePath native;
+        auto valid = native.Initialize(path, bytes);
+        if (!valid) {
+            return valid;
+        }
+        // 파일과 같이 소유자 전용 권한이다(파일 0600, 디렉터리 0700).
+        if (mkdir(native.Value(), 0700) != 0) {
             return NativeError(errno);
         }
         return {};
+    }
+
+    FileStatus DeleteDirectory(const char* path, usize bytes) noexcept override {
+        NativePath native;
+        auto valid = native.Initialize(path, bytes);
+        if (!valid) {
+            return valid;
+        }
+        struct stat self{};
+        if (lstat(native.Value(), &self) != 0) {
+            return NativeError(errno);
+        }
+        if (S_ISLNK(self.st_mode)) {
+            if (unlink(native.Value()) != 0) {
+                return NativeError(errno);
+            }
+            return {};
+        }
+        if (!S_ISDIR(self.st_mode)) {
+            return {FileCode::WrongType, 0};
+        }
+        if (rmdir(native.Value()) != 0) {
+            const int error = errno;
+            return error == EEXIST ? FileStatus{FileCode::DirectoryNotEmpty, ENOTEMPTY}
+                                   : NativeError(error);
+        }
+        return {};
+    }
+
+    FileStatus EnumerateDirectory(const char* path, usize bytes, DirectoryVisitor visitor,
+                                  void* context) noexcept override {
+        if (visitor == nullptr) {
+            return {FileCode::InvalidArgument, 0};
+        }
+        NativePath native;
+        auto valid = native.Initialize(path, bytes);
+        if (!valid) {
+            return valid;
+        }
+        DIR* directory = opendir(native.Value());
+        if (directory == nullptr) {
+            const int error = errno;
+            return error == ENOTDIR ? FileStatus{FileCode::WrongType, ENOTDIR} : NativeError(error);
+        }
+        FileStatus result{};
+        for (;;) {
+            errno = 0;
+            const struct dirent* item = readdir(directory);
+            if (item == nullptr) {
+                if (errno != 0) {
+                    result = NativeError(errno);
+                }
+                break;
+            }
+            const char* name = item->d_name;
+            if (name[0] == '.' && (name[1] == '\0' || (name[1] == '.' && name[2] == '\0'))) {
+                continue;
+            }
+            struct stat state{};
+            if (fstatat(dirfd(directory), name, &state, AT_SYMLINK_NOFOLLOW) != 0) {
+                const int error = errno;
+                if (error == ENOENT) {
+                    continue; // 열거 중 사라진 항목
+                }
+                result = NativeError(error);
+                break;
+            }
+            DirectoryEntry entry;
+            entry.name = name;
+            usize nameBytes = 0;
+            while (name[nameBytes] != '\0') {
+                ++nameBytes;
+            }
+            entry.nameBytes = nameBytes;
+            entry.info = InfoFromStat(state, S_ISLNK(state.st_mode));
+            if (!visitor(entry, context)) {
+                break;
+            }
+        }
+        if (closedir(directory) != 0 && result) {
+            result = NativeError(errno);
+        }
+        return result;
+    }
+
+    FileStatus Move(const char* from, usize fromBytes, const char* to, usize toBytes,
+                    bool replaceExisting) noexcept override {
+        NativePath source;
+        auto valid = source.Initialize(from, fromBytes);
+        if (!valid) {
+            return valid;
+        }
+        NativePath target;
+        valid = target.Initialize(to, toBytes);
+        if (!valid) {
+            return valid;
+        }
+        // RENAME_EXCL은 대상이 있으면 원자적으로 실패한다(검사 후 rename 경합 없음).
+        const int result = replaceExisting
+                               ? rename(source.Value(), target.Value())
+                               : renamex_np(source.Value(), target.Value(), RENAME_EXCL);
+        if (result != 0) {
+            return NativeError(errno);
+        }
+        return {};
+    }
+
+    FileStatus Copy(const char* from, usize fromBytes, const char* to, usize toBytes,
+                    bool replaceExisting) noexcept override {
+        NativePath source;
+        auto valid = source.Initialize(from, fromBytes);
+        if (!valid) {
+            return valid;
+        }
+        NativePath target;
+        valid = target.Initialize(to, toBytes);
+        if (!valid) {
+            return valid;
+        }
+        int input;
+        do {
+            input = open(source.Value(), O_RDONLY | O_CLOEXEC);
+        } while (input < 0 && errno == EINTR);
+        if (input < 0) {
+            return NativeError(errno);
+        }
+        struct stat state{};
+        if (fstat(input, &state) != 0 || !S_ISREG(state.st_mode)) {
+            const FileStatus failure = S_ISDIR(state.st_mode) ? FileStatus{FileCode::WrongType, 0}
+                                       : state.st_mode == 0   ? NativeError(errno)
+                                                            : FileStatus{FileCode::Unsupported, 0};
+            close(input);
+            return failure;
+        }
+        const int flags = O_WRONLY | O_CREAT | O_CLOEXEC | (replaceExisting ? O_TRUNC : O_EXCL);
+        int output;
+        do {
+            output = open(target.Value(), flags, 0600);
+        } while (output < 0 && errno == EINTR);
+        if (output < 0) {
+            const FileStatus failure = NativeError(errno);
+            close(input);
+            return failure;
+        }
+        FileStatus result{};
+        char chunk[64 * 1024];
+        for (;;) {
+            const ssize_t read = ::read(input, chunk, sizeof(chunk));
+            if (read < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                result = NativeError(errno);
+                break;
+            }
+            if (read == 0) {
+                break;
+            }
+            ssize_t done = 0;
+            while (done < read) {
+                const ssize_t written =
+                    ::write(output, chunk + done, static_cast<usize>(read - done));
+                if (written < 0) {
+                    if (errno == EINTR) {
+                        continue;
+                    }
+                    result = NativeError(errno);
+                    break;
+                }
+                if (written == 0) {
+                    result = {FileCode::NoProgress, 0};
+                    break;
+                }
+                done += written;
+            }
+            if (!result) {
+                break;
+            }
+        }
+        if (close(output) != 0 && result) {
+            result = NativeError(errno);
+        }
+        close(input);
+        if (!result) {
+            unlink(target.Value()); // 실패한 복사본을 남기지 않는다.
+        }
+        return result;
     }
 };
 } // namespace
