@@ -223,4 +223,54 @@ TEST(Transform_FromMatrixHandlesMirrorAndRejectsProjective) {
     CHECK(!Transform::TryFromMatrix(Mat4d::Scale(Vec3d(1.0, 0.0, 1.0))));
 }
 
+TEST(Quaternion_AngularDistanceResolvesSmallAngles) {
+    // 리뷰 재현 입력: 2·acos 방식은 같은 회전에서 9.77e-4 rad를 냈다.
+    const Quat q(-0x1.9cee62p-1f, 0x1.448548p-2f, 0x1.cf8c7ap-2f, -0x1.ae845ap-3f);
+    REQUIRE(q.IsNormalized(1.0e-6f));
+    CHECK(AngularDistance(q, q) == 0.0f);
+    CHECK(AngularDistance(q, Quat(-q.x, -q.y, -q.z, -q.w)) == 0.0f);
+    // 작은 각 분해능: double 1e-9 rad, float 1e-4 rad.
+    const Quatd base = Quatd::FromUnitAxisAngle(Vec3d(0.0, 0.6, 0.8), 0.7);
+    const Quatd nudged = base * Quatd::FromUnitAxisAngle(Vec3d::UnitX(), 1.0e-9);
+    CHECK(Near(AngularDistance(base, nudged), 1.0e-9, 1.0e-12));
+    const Quat baseFloat = Quat::FromUnitAxisAngle(Vec3(0.0f, 0.6f, 0.8f), 0.7f);
+    const Quat nudgedFloat = baseFloat * Quat::FromUnitAxisAngle(Vec3::UnitX(), 1.0e-4f);
+    CHECK(Near(static_cast<double>(AngularDistance(baseFloat, nudgedFloat)), 1.0e-4, 2.0e-6));
+    // 큰 각과 반구 경계.
+    CHECK(Near(AngularDistance(Quatd(), Quatd::FromUnitAxisAngle(Vec3d::UnitZ(), 3.0)), 3.0,
+               1.0e-12));
+    CHECK(Near(AngularDistance(Quatd(), Quatd(0.0, 0.0, 1.0, 0.0)), math::Pi<double>, 1.0e-12));
+    CHECK(Near(AngularDistance(Quatd(), Quatd::FromUnitAxisAngle(Vec3d::UnitZ(), 4.0)),
+               2.0 * math::Pi<double> - 4.0, 1.0e-12));
+}
+
+TEST(Quaternion_TryInverseHandlesExtremeMagnitudes) {
+    // 제곱 길이가 underflow/overflow해도 역원이 표현 가능하면 성공한다.
+    auto tiny = Quat(1.0e-30f, 0.0f, 0.0f, 0.0f).TryInverse();
+    REQUIRE(tiny);
+    CHECK(Near(static_cast<double>(tiny.Value().x), -1.0e30, 1.0e24));
+    auto huge = Quat(0.0f, 0.0f, 0.0f, 1.0e20f).TryInverse();
+    REQUIRE(huge);
+    CHECK(Near(static_cast<double>(huge.Value().w), 1.0e-20, 1.0e-26));
+    // 일반 값: q * q⁻¹ = 항등.
+    const Quatd general(0.3, -1.2, 2.5, 0.7);
+    auto inverse = general.TryInverse();
+    REQUIRE(inverse);
+    CHECK((general * inverse.Value()).Equals(Quatd(), 1.0e-15));
+    // 실패: 영, 비유한, 역원이 float 범위를 넘음(1/1e-40 > FLT_MAX).
+    CHECK(Quat(0.0f, 0.0f, 0.0f, 0.0f).TryInverse().Error() == ErrorCode::InvalidArgument);
+    CHECK(!Quat(__builtin_nanf(""), 0.0f, 0.0f, 1.0f).TryInverse());
+    CHECK(!Quat(1.0e-40f, 0.0f, 0.0f, 0.0f).TryInverse());
+}
+
+TEST(Quaternion_SlerpPropagatesNonFiniteInput) {
+    const Quat a = Quat::FromUnitAxisAngle(Vec3::UnitZ(), 0.3f);
+    const Quat bad(__builtin_nanf(""), 0.0f, 0.0f, 1.0f);
+    CHECK(!Slerp(a, bad, 0.5f).IsFinite());
+    CHECK(!Slerp(bad, a, 0.5f).IsFinite());
+    CHECK(!Slerp(a, Quat::FromUnitAxisAngle(Vec3::UnitX(), 0.2f), __builtin_nanf("")).IsFinite());
+    // 유한 입력은 그대로 정규화된 결과다.
+    CHECK(Slerp(a, a, 0.5f).IsNormalized(1.0e-6f));
+}
+
 } // namespace rocks::test

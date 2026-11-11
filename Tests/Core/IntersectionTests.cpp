@@ -1831,3 +1831,144 @@ TEST(IntersectionPropertySegmentSphereEndInside) {
     PropertySegmentSphereEndInside<float>();
     PropertySegmentSphereEndInside<double>();
 }
+
+// ---- 리뷰 회귀(2026-11-11) ----
+namespace {
+
+// IsValid가 허용하는 길이 오차(|q|² = 1 + 1.8e-5) 안의 비단위 회전도 단위 회전과 같은 box로
+// 취급해야 한다. 180도 Z 회전은 정규화하면 정확히 (0,0,1,0)이므로 경계 판정이 정확하다.
+template <typename T>
+void CheckOrientedBoxNonUnitRotation() {
+    const T one = static_cast<T>(1);
+    const Quaternion<T> rotation(static_cast<T>(0), static_cast<T>(0), one + static_cast<T>(9.0e-6),
+                                 static_cast<T>(0));
+    const OrientedBox<T> box(Vector3<T>::Zero(), rotation, Vector3<T>::Splat(static_cast<T>(100)));
+    REQUIRE(box.IsValid());
+    CHECK(box.UnitRotation() == Quaternion<T>(0, 0, 1, 0));
+    CHECK(box.AxisX() == Vector3<T>(-1, 0, 0));
+
+    // 면 위의 점(world x = -100)은 포함이다. 정규화 전에는 local x가 100.0036으로 늘어나 Miss였다.
+    CHECK(ContainsPoint(box, Vector3<T>(-100, 0, 0)) == QueryResult::Hit);
+    CHECK(ContainsPoint(box, Vector3<T>(-100, 0, 0) - Vector3<T>(static_cast<T>(0.01), 0, 0)) ==
+          QueryResult::Miss);
+
+    const RayHit<T> hit = Raycast(Ray<T>(Vector3<T>(-300, 0, 0), Vector3<T>(1, 0, 0)), box);
+    REQUIRE(hit.IsHit());
+    CHECK(hit.distance == static_cast<T>(200));
+    CHECK(hit.point == Vector3<T>(-100, 0, 0));
+    CHECK(hit.normal == Vector3<T>(-1, 0, 0));
+
+    // x = 100에서 면 접촉하는 identity box와 겹침이다.
+    const OrientedBox<T> touching(Vector3<T>(150, 0, 0), Quaternion<T>(),
+                                  Vector3<T>::Splat(static_cast<T>(50)));
+    CHECK(Overlap(box, touching) == QueryResult::Hit);
+    CHECK(Overlap(touching, box) == QueryResult::Hit);
+    const OrientedBox<T> apart(Vector3<T>(static_cast<T>(150.5), 0, 0), Quaternion<T>(),
+                               Vector3<T>::Splat(static_cast<T>(50)));
+    CHECK(Overlap(box, apart) == QueryResult::Miss);
+
+    auto closest = TryClosestPoint(box, Vector3<T>(-150, 0, 0));
+    REQUIRE(closest);
+    CHECK(closest.Value() == Vector3<T>(-100, 0, 0));
+    auto distanceSquared = TryDistanceSquared(box, Vector3<T>(-150, 0, 0));
+    REQUIRE(distanceSquared);
+    CHECK(distanceSquared.Value() == static_cast<T>(2500));
+}
+
+} // namespace
+
+TEST(IntersectionReviewOrientedBoxNonUnitRotation) {
+    CheckOrientedBoxNonUnitRotation<float>();
+    CheckOrientedBoxNonUnitRotation<double>();
+}
+
+TEST(IntersectionReviewCapsuleStartOnSideSurface) {
+    // 리뷰 재현 입력: origin이 옆면 위(선분 거리 판정은 밖, 수직 성분 판정은 안)였다.
+    const Capsule<double> capsule(
+        Vec3d(1.8938331700276845, -0.99557382955938856, -1.4237027711157406),
+        Vec3d(-5.4929955063443963, 0.88585323315807618, 0.085849490307394527), 1.2556979115178017);
+    const Ray<double> ray(Vec3d(-2.1603267803619088, -1.2141742229034214, -0.98928748735074445),
+                          Vec3d(0.28728694130541987, 0.9232426956109735, 0.25512573048667503));
+    REQUIRE(ray.IsValid());
+    REQUIRE(capsule.IsValid());
+    const RayHit<double> hit = Raycast(ray, capsule);
+    REQUIRE(hit.IsHit());
+    CHECK(hit.distance == 0.0);
+    CHECK(hit.startedInside);
+
+    // 축 방향으로 정확히 표현되는 옆면 시작점: 바깥으로 나가는 방향도 거리 0 Hit다.
+    const Capsule<double> axisAligned(Vec3d(0.0, 0.0, -2.0), Vec3d(0.0, 0.0, 2.0), 1.0);
+    const RayHit<double> outward =
+        Raycast(Ray<double>(Vec3d(1.0, 0.0, 0.5), Vec3d(1.0, 0.0, 0.0)), axisAligned);
+    REQUIRE(outward.IsHit());
+    CHECK(outward.distance == 0.0);
+    // 축 범위 밖의 무한 원기둥 안에서 출발하면 끝 구가 첫 진입이다.
+    const RayHit<double> beyond =
+        Raycast(Ray<double>(Vec3d(0.5, 0.0, 5.0), Vec3d(0.0, 0.0, -1.0)), axisAligned);
+    REQUIRE(beyond.IsHit());
+    CHECK(!beyond.startedInside);
+    CHECK(math::Abs(beyond.distance - (5.0 - 2.0 - math::Sqrt(0.75))) <= 1.0e-12);
+}
+
+TEST(IntersectionReviewSegmentEndOnTriangle) {
+    // 리뷰 재현 입력(float): end가 z = c 평면의 삼각형 내부에 정확히 있지만 계산된 t가 1을 넘었다.
+    const float c = -0x1.e03f9ep-1f;
+    const Triangle<float> triangle(Vec3(-0x1.c24e62p+1f, -0x1.4d920cp+0f, c),
+                                   Vec3(0x1.e27fcap+1f, -0x1.edd632p+0f, c),
+                                   Vec3(-0x1.c6ffe0p-2f, 0x1.855cfap+0f, c));
+    const Vec3 start(-0x1.de849cp+1f, 0x1.045576p+1f, 0x1.22cce8p+2f);
+    const Vec3 end(0x1.502454p-1f, -0x1.8f859cp-1f, c);
+    const SegmentHit<float> hit = SegmentCast(Segment<float>(start, end), triangle);
+    REQUIRE(hit.IsHit());
+    CHECK(hit.t <= 1.0f);
+    CHECK(hit.normal.z > 0.0f); // start는 z > c(앞면 normal +Z 쪽)에 있다.
+    // FrontOnly: 앞면 쪽에서 오므로 Hit, 반대 순서(뒤에서 시작하는 경우)는 아래에서 확인한다.
+    CHECK(SegmentCast(Segment<float>(start, end), triangle, TriangleSides::FrontOnly).IsHit());
+    const Vec3 below(start.x, start.y, c - 3.0f);
+    const SegmentHit<float> back = SegmentCast(Segment<float>(below, end), triangle);
+    if (!back.IsHit()) {
+        CHECK(back.IsHit());
+    } else {
+        CHECK(back.normal.z < 0.0f);
+    }
+    CHECK(!SegmentCast(Segment<float>(below, end), triangle, TriangleSides::FrontOnly).IsHit());
+    // 반대 방향(시작이 삼각형 위)은 t = 0 Hit다.
+    const SegmentHit<float> reversed = SegmentCast(Segment<float>(end, start), triangle);
+    REQUIRE(reversed.IsHit());
+    CHECK(reversed.t == 0.0f && !platform::PlatformMath::SignBit(reversed.t));
+    // 공면 segment는 Raycast와 같이 Miss다.
+    const Vec3 coplanarStart(start.x, start.y, c);
+    CHECK(!SegmentCast(Segment<float>(coplanarStart, end), triangle).IsHit());
+}
+
+TEST(IntersectionReviewRayPlaneOverflowIsMiss) {
+    // 거의 평행한 ray는 거리 계산이 overflow한다. Inf 거리·NaN 점을 Hit로 내지 않는다.
+    const RayHit<float> overflow =
+        Raycast(Ray<float>(Vec3(0.0f, 0.0f, 1.0e9f), Vec3(1.0f, 0.0f, -1.0e-30f)), Plane<float>());
+    CHECK(overflow.result == QueryResult::Miss);
+    const RayHit<float> subnormal =
+        Raycast(Ray<float>(Vec3(0.0f, 0.0f, 1.0f), Vec3(1.0f, 0.0f, -1.0e-40f)), Plane<float>());
+    CHECK(subnormal.result == QueryResult::Miss);
+    const RayHit<double> subnormalDouble =
+        Raycast(Ray<double>(Vec3d(0.0, 0.0, 1.0), Vec3d(1.0, 0.0, -1.0e-310)), Plane<double>());
+    CHECK(subnormalDouble.result == QueryResult::Miss);
+    // 유한한 거리는 그대로 Hit다.
+    const RayHit<float> shallow =
+        Raycast(Ray<float>(Vec3(0.0f, 0.0f, 1.0f), Vec3(1.0f, 0.0f, -1.0e-3f)), Plane<float>());
+    REQUIRE(shallow.IsHit());
+    CHECK(math::IsFinite(shallow.distance) && shallow.point.IsFinite());
+}
+
+TEST(IntersectionReviewBoxExpandKeepsNaN) {
+    const float nan = __builtin_nanf("");
+    Box<float> box = Box<float>::Empty().ExpandedToInclude(Vec3(nan, 0.0f, 0.0f));
+    CHECK(!box.IsValid());
+    box = box.ExpandedToInclude(Vec3(1.0f, 1.0f, 1.0f));
+    CHECK(!box.IsValid()); // 뒤이은 확장에서도 NaN이 사라지지 않는다.
+    CHECK(math::IsNaN(box.min.x) && math::IsNaN(box.max.x));
+    const Box<double> valid = Box<double>::Empty()
+                                  .ExpandedToInclude(Vec3d(1.0, -2.0, 3.0))
+                                  .ExpandedToInclude(Vec3d::Zero());
+    REQUIRE(valid.IsValid());
+    CHECK(valid.min == Vec3d(0.0, -2.0, 0.0) && valid.max == Vec3d(1.0, 0.0, 3.0));
+}

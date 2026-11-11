@@ -98,4 +98,42 @@ TEST(MathInterp_GridSnapWrapAndDeltaAngle) {
     CHECK(Near(math::FindDeltaAngleRadians(-3.0, 3.0), 6.0 - 2.0 * math::Pi<double>, 1.0e-12));
 }
 
+TEST(Rotator_FromQuaternionUsesHalfOpenRange) {
+    // yaw = ±pi는 (-pi, pi] 구간의 +pi로 나온다(atan2(-0, -1) = -pi 보정).
+    const Quatd turns[] = {Quatd(0.0, 0.0, 1.0, 0.0), Quatd(0.0, 0.0, -1.0, 0.0),
+                           Quatd(1.0, 0.0, 0.0, 0.0), Quatd(-1.0, 0.0, 0.0, 0.0)};
+    for (const Quatd& turn : turns) {
+        auto rotator = Rotator<double>::TryFromQuaternion(turn);
+        REQUIRE(rotator);
+        CHECK(rotator.Value().yaw > -math::Pi<double>);
+        CHECK(rotator.Value().roll > -math::Pi<double>);
+        CHECK(rotator.Value().Normalized().yaw == rotator.Value().yaw);
+        auto single = Rotator<float>::TryFromQuaternion(Quat(turn));
+        REQUIRE(single);
+        CHECK(single.Value().yaw > -math::Pi<float>);
+        CHECK(single.Value().roll > -math::Pi<float>);
+    }
+}
+
+TEST(Interp_PropagatesNaNInsteadOfReturningTarget) {
+    const double nan = __builtin_nan("");
+    CHECK(math::IsNaN(math::InterpTo(0.0, 1.0, 0.1, nan)));
+    CHECK(math::IsNaN(math::InterpTo(nan, 1.0, 0.1, 100.0)));
+    CHECK(math::IsNaN(math::InterpTo(0.0, nan, 0.1, 0.0)));
+    CHECK(math::IsNaN(math::InterpConstantTo(0.0, nan, 1.0, 1.0)));
+    CHECK(math::IsNaN(math::InterpConstantTo(0.0, -nan, 1.0, 1.0)));
+    CHECK(math::IsNaN(math::InterpConstantTo(nan, 1.0, 1.0, 1.0)));
+    // 유효 입력의 기존 의미는 유지된다.
+    CHECK(math::InterpTo(0.0, 1.0, 0.1, 0.0) == 1.0);
+    CHECK(math::InterpConstantTo(0.0, 1.0, 1.0, 5.0) == 1.0);
+}
+
+TEST(GridSnap_TieDirectionIgnoresGridSign) {
+    CHECK(math::GridSnap(7.5, 5.0) == 10.0);
+    CHECK(math::GridSnap(7.5, -5.0) == 10.0);
+    CHECK(math::GridSnap(-7.5, -5.0) == -5.0);
+    CHECK(math::GridSnap(-7.5, 5.0) == -5.0);
+    CHECK(math::GridSnap(3.2, 0.0) == 3.2);
+}
+
 } // namespace rocks::test

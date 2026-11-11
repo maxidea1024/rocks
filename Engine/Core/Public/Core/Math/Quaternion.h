@@ -157,16 +157,27 @@ struct Quaternion {
         return Quaternion(-x, -y, -z, w);
     }
 
-    // 길이와 무관한 역원이다. 실패(InvalidArgument): 유한하지 않음·영 quaternion.
+    // 길이와 무관한 역원 conj(q) / |q|²이다. 가장 큰 성분 m으로 먼저 나눠 |q/m|² ∈ [1, 4]에서
+    // 계산하므로 제곱 길이가 overflow/underflow하는 입력도 처리한다.
+    // 실패(InvalidArgument): 유한하지 않음·영 quaternion·역원이 표현 범위를 넘음(예: 1e-40f 크기).
     Result<Quaternion> TryInverse() const noexcept {
-        const T lengthSquared = LengthSquared();
-        if (!IsFinite() || !(lengthSquared > static_cast<T>(0)) || !math::IsFinite(lengthSquared)) {
+        if (!IsFinite()) {
             return Result<Quaternion>::Failure(ErrorCode::InvalidArgument);
         }
-        const Quaternion conjugate = Conjugate();
-        return Result<Quaternion>::Success(
-            Quaternion(conjugate.x / lengthSquared, conjugate.y / lengthSquared,
-                       conjugate.z / lengthSquared, conjugate.w / lengthSquared));
+        const T largest =
+            math::Max(math::Max(math::Abs(x), math::Abs(y)), math::Max(math::Abs(z), math::Abs(w)));
+        if (largest == static_cast<T>(0)) {
+            return Result<Quaternion>::Failure(ErrorCode::InvalidArgument);
+        }
+        const Quaternion scaled(x / largest, y / largest, z / largest, w / largest);
+        const T scaledLengthSquared = scaled.LengthSquared();
+        const Quaternion inverse(
+            -scaled.x / scaledLengthSquared / largest, -scaled.y / scaledLengthSquared / largest,
+            -scaled.z / scaledLengthSquared / largest, scaled.w / scaledLengthSquared / largest);
+        if (!inverse.IsFinite()) {
+            return Result<Quaternion>::Failure(ErrorCode::InvalidArgument);
+        }
+        return Result<Quaternion>::Success(inverse);
     }
 
     // Hamilton 곱 this * other. other를 먼저 적용한다. float은 platform::simd 경로를 사용한다.
@@ -279,11 +290,16 @@ constexpr T Dot(const Quaternion<T>& a, const Quaternion<T>& b) noexcept {
     return low + high;
 }
 
-// 두 단위 quaternion이 나타내는 회전 사이의 최소 각(라디안, [0, pi])이다. q와 -q는 0이다.
+// 두 단위 quaternion이 나타내는 회전 사이의 최소 각(라디안, [0, pi])이다. q와 -q는 정확히 0이다.
+// 2·acos(|dot|)는 |dot| ≈ 1 근처에서 조건수가 나빠(float에서 약 1e-3 rad 오차) 작은 각을 구분하지
+// 못하므로, 같은 반구로 맞춘 뒤 4·atan2(|a - b|, |a + b|)로 계산한다. 단위 quaternion 전제다.
 template <typename T>
 T AngularDistance(const Quaternion<T>& a, const Quaternion<T>& b) noexcept {
-    const T cosine = math::Min(math::Abs(Dot(a, b)), static_cast<T>(1));
-    return static_cast<T>(2) * math::Acos(cosine);
+    const T sign = Dot(a, b) < static_cast<T>(0) ? static_cast<T>(-1) : static_cast<T>(1);
+    const Quaternion<T> difference(a.x - sign * b.x, a.y - sign * b.y, a.z - sign * b.z,
+                                   a.w - sign * b.w);
+    const Quaternion<T> sum(a.x + sign * b.x, a.y + sign * b.y, a.z + sign * b.z, a.w + sign * b.w);
+    return static_cast<T>(4) * math::Atan2(difference.Length(), sum.Length());
 }
 
 // 단위 quaternion 사이의 최단 경로 구면 보간이다. t=0이면 a, t=1이면 b와 같은 회전을 반환하며
@@ -308,7 +324,12 @@ Quaternion<T> Slerp(const Quaternion<T>& a, const Quaternion<T>& b, T t) noexcep
         a.x * weightA + target.x * weightB, a.y * weightA + target.y * weightB,
         a.z * weightA + target.z * weightB, a.w * weightA + target.w * weightB);
     auto normalized = blended.TryNormalize();
-    return normalized ? normalized.Value() : a;
+    if (normalized) {
+        return normalized.Value();
+    }
+    // 비유한 입력(NaN·Inf 성분, NaN t)은 결과에도 비유한 성분을 남긴다(a로 바꾸지 않는다).
+    // 유한한데 정규화할 수 없는 경우(단위가 아닌 영에 가까운 입력)만 a를 반환한다.
+    return blended.IsFinite() ? a : blended;
 }
 
 // 회전 행렬과 이동으로 affine 행렬 T * R을 만든다.

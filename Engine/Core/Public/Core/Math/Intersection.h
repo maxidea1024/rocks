@@ -614,7 +614,8 @@ CastResult<T> CastTriangle(const Vector3<T>& origin, const Vector3<T>& delta, T 
         return {};
     }
 
-    const T t = scaledT / det;
+    // 뒷면 부호 반전으로 scaledT가 -0이 될 수 있다. 시작 접촉 거리는 +0으로 낸다.
+    const T t = scaledT == zero ? zero : scaledT / det;
     if (t > tMax) {
         return {};
     }
@@ -660,9 +661,18 @@ CastResult<T> CastCapsule(const Vector3<T>& origin, const Vector3<T>& delta, T t
     const T a = Dot(deltaPerpendicular, deltaPerpendicular);
     const T b = Dot(offsetPerpendicular, deltaPerpendicular);
     const T startGap = Dot(offsetPerpendicular, offsetPerpendicular) - radiusSquared;
-    if (!(a > zero) || b >= zero || startGap <= zero) {
-        // 축과 평행하거나, 축에서 멀어지거나, 이미 무한 원기둥 안(축 범위 밖)이면 끝 구가 첫
-        // 진입이다.
+    if (startGap <= zero) {
+        // 무한 원기둥 안(표면 포함)에서 출발한다. 축 범위 안이면 capsule 안이다. 위의 선분 거리
+        // 판정과 이 수직 성분 판정은 반올림이 달라 옆면 위의 점에서 결과가 엇갈릴 수 있으므로
+        // 여기서도 시작 접촉으로 처리한다. 축 범위 밖이면 끝 구가 첫 진입이다.
+        const T alongStart = Dot(offset, axis);
+        if (alongStart >= zero && alongStart <= axisLengthSquared) {
+            return CastInside(origin);
+        }
+        return best;
+    }
+    if (!(a > zero) || b >= zero) {
+        // 축과 평행하거나 축에서 멀어지면 옆면 진입이 없고 끝 구가 첫 진입이다.
         return best;
     }
 
@@ -686,12 +696,13 @@ CastResult<T> CastCapsule(const Vector3<T>& origin, const Vector3<T>& delta, T t
     return CastHit(t, point, normal);
 }
 
-// box local 좌표로 바꿔 slab 판정을 한다. 회전은 길이를 보존하므로 t는 world 거리와 같다.
+// box local 좌표로 바꿔 slab 판정을 한다. 정규화한 회전은 길이를 보존하므로 t는 world 거리와 같다.
 template <typename T>
 CastResult<T> CastOrientedBox(const Vector3<T>& origin, const Vector3<T>& delta, T tMax,
                               const OrientedBox<T>& box) noexcept {
-    const Vector3<T> localOrigin = box.ToLocal(origin);
-    const Vector3<T> localDelta = box.rotation.UnrotateVector(delta);
+    const Quaternion<T> rotation = box.UnitRotation();
+    const Vector3<T> localOrigin = rotation.UnrotateVector(origin - box.center);
+    const Vector3<T> localDelta = rotation.UnrotateVector(delta);
     CastResult<T> cast = CastBox(localOrigin, localDelta, tMax, -box.halfExtents, box.halfExtents);
     if (cast.result != QueryResult::Hit) {
         return cast;
@@ -700,8 +711,8 @@ CastResult<T> CastOrientedBox(const Vector3<T>& origin, const Vector3<T>& delta,
         return CastInside(origin);
     }
 
-    cast.point = box.ToWorld(cast.point);
-    cast.normal = box.rotation.RotateVector(cast.normal);
+    cast.point = box.center + rotation.RotateVector(cast.point);
+    cast.normal = rotation.RotateVector(cast.normal);
     return cast;
 }
 
@@ -762,8 +773,15 @@ constexpr bool OrientedBoxOrderedBefore(const OrientedBox<T>& left,
 template <typename T>
 bool OrientedBoxesSeparated(const OrientedBox<T>& first, const OrientedBox<T>& second,
                             T parallelEpsilon) noexcept {
-    const Vector3<T> axesA[3] = {first.AxisX(), first.AxisY(), first.AxisZ()};
-    const Vector3<T> axesB[3] = {second.AxisX(), second.AxisY(), second.AxisZ()};
+    // IsValid는 길이 오차를 허용하므로 축은 정규화한 회전에서 구한다(OrientedBox::UnitRotation).
+    const Quaternion<T> rotationA = first.UnitRotation();
+    const Quaternion<T> rotationB = second.UnitRotation();
+    const Vector3<T> axesA[3] = {rotationA.RotateVector(Vector3<T>::UnitX()),
+                                 rotationA.RotateVector(Vector3<T>::UnitY()),
+                                 rotationA.RotateVector(Vector3<T>::UnitZ())};
+    const Vector3<T> axesB[3] = {rotationB.RotateVector(Vector3<T>::UnitX()),
+                                 rotationB.RotateVector(Vector3<T>::UnitY()),
+                                 rotationB.RotateVector(Vector3<T>::UnitZ())};
     const T extentA[3] = {first.halfExtents.x, first.halfExtents.y, first.halfExtents.z};
     const T extentB[3] = {second.halfExtents.x, second.halfExtents.y, second.halfExtents.z};
 
@@ -823,6 +841,9 @@ bool OrientedBoxesSeparated(const OrientedBox<T>& first, const OrientedBox<T>& s
 // ===== Ray 질의 =====
 // 모든 Raycast는 ray.IsValid(), shape.IsValid(), maxDistance >= 0(NaN 제외, +Inf 허용)을 요구하며
 // 위반이면 InvalidInput이다. 접촉 거리는 [0, maxDistance]다.
+// 주의: maxDistance는 T로 변환된 뒤 검사한다(추론 제외 인자). float shape에 double 값을 넘기면
+// float으로 반올림되므로 -1e-50 같은 아주 작은 음수는 -0(= 0으로 유효), float 범위를 넘는 값은
+// +Inf가 된다. 음수 판정이 중요하면 호출 쪽에서 T로 바꾸기 전에 검사한다.
 
 // 평면은 두께 없는 면이다. origin이 평면 위(SignedDistance == 0 정확)면 방향과 무관하게 거리 0
 // Hit다. 평행한 ray는 origin이 평면 위가 아니면 Miss다. 뒤쪽 교차(거리 < 0)는 Miss다. normal은
@@ -847,13 +868,19 @@ RayHit<T> Raycast(const Ray<T>& ray, const Plane<T>& plane,
         return {};
     }
 
+    // 거의 평행한 ray는 나눗셈이 overflow해 distance가 +Inf가 될 수 있다. 유한한 교차점이 없으므로
+    // maxDistance가 +Inf여도 Miss다(Inf 거리·NaN 점을 Hit로 내지 않는다).
     const T distance = -startDistance / rate;
-    if (distance < zero || distance > maxDistance) {
+    if (!math::IsFinite(distance) || distance < zero || distance > maxDistance) {
+        return {};
+    }
+    const Vector3<T> point = ray.PointAt(distance);
+    if (!point.IsFinite()) {
         return {};
     }
 
     const Vector3<T> normal = startDistance > zero ? plane.normal : -plane.normal;
-    return detail::ToRayHit(detail::CastHit(distance, ray.PointAt(distance), normal));
+    return detail::ToRayHit(detail::CastHit(distance, point, normal));
 }
 
 // 반지름 0 sphere는 점이다. 점을 정확히 지나는 ray만 Hit이며 normal은 -direction이다.
@@ -980,7 +1007,9 @@ SegmentHit<T> SegmentCast(const Segment<T>& segment, const Box<T>& box) noexcept
 }
 
 // 0 길이 segment는 점이 삼각형 위(평면 위 정확 판정, 경계 포함)이면 t = 0 Hit이며 normal은 앞면
-// normal이다. UE SegmentTriangleIntersection과 달리 평면 매개변수에 숨은 허용 오차가 없다.
+// normal이다. end가 삼각형 위(같은 정확 판정)인데 반올림한 t가 1을 넘어 놓치면 t = 1 Hit로
+// 보정한다(끝점 접촉 보존, 공면 segment는 Raycast와 같이 Miss). UE SegmentTriangleIntersection과
+// 달리 평면 매개변수에 숨은 허용 오차가 없다.
 template <typename T>
 SegmentHit<T> SegmentCast(const Segment<T>& segment, const Triangle<T>& triangle,
                           TriangleSides sides = TriangleSides::TwoSided) noexcept {
@@ -1000,8 +1029,27 @@ SegmentHit<T> SegmentCast(const Segment<T>& segment, const Triangle<T>& triangle
         return detail::ToSegmentHit(
             detail::CastHit(static_cast<T>(0), segment.start, normal.Value()));
     }
-    return detail::ToSegmentHit(
-        detail::CastTriangle(segment.start, delta, static_cast<T>(1), triangle, sides));
+
+    const T one = static_cast<T>(1);
+    const detail::CastResult<T> cast =
+        detail::CastTriangle(segment.start, delta, one, triangle, sides);
+    if (cast.result == QueryResult::Hit || !detail::PointOnTriangle(triangle, segment.end)) {
+        return detail::ToSegmentHit(cast);
+    }
+
+    // CastTriangle의 det = -Dot(delta, faceNormal)이므로 approach < 0이 앞면 진입이다.
+    const T zero = static_cast<T>(0);
+    const Vector3<T> faceNormal = Cross(triangle.b - triangle.a, triangle.c - triangle.a);
+    const T approach = Dot(delta, faceNormal);
+    if (approach == zero || (sides == TriangleSides::FrontOnly && approach > zero)) {
+        return {};
+    }
+    auto unitNormal = faceNormal.TryNormalize();
+    if (!unitNormal) {
+        return {};
+    }
+    const Vector3<T> normal = approach < zero ? unitNormal.Value() : -unitNormal.Value();
+    return detail::ToSegmentHit(detail::CastHit(one, segment.end, normal));
 }
 
 // ===== 점 포함 =====

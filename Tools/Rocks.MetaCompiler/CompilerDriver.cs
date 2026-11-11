@@ -145,12 +145,14 @@ internal static class CompilerDriver
         var windows = new HashSet<string>(StringComparer.Ordinal)
         {
             "/nologo", "/utf-8", "/W4", "/WX", "/GR-", "/EHs-c-", "/Zc:__cplusplus",
-            "/clang:-std=c++23", "/MD", "/MDd", "/O2", "/Od", "/Z7", "/fsanitize=address"
+            "/clang:-std=c++23", "/clang:-ffp-contract=off", "/MD", "/MDd", "/O2", "/Od", "/Z7",
+            "/fsanitize=address"
         };
         var unix = new HashSet<string>(StringComparer.Ordinal)
         {
             "-std=c++23", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-fno-rtti",
-            "-fno-exceptions", "-O2", "-O0", "-g", "-fsanitize=address", "-fno-omit-frame-pointer"
+            "-fno-exceptions", "-ffp-contract=off", "-O2", "-O0", "-g", "-fsanitize=address",
+            "-fno-omit-frame-pointer"
         };
         string? sdk = null;
         var groups = new Dictionary<string, string>(StringComparer.Ordinal);

@@ -18,9 +18,10 @@ namespace rocks::platform {
 //
 // - PlatformMath: scalar 함수 모음. 사용 예: PlatformMath::Sqrt(x), PlatformMath::FloorToInt32(x)
 // - simd:: 선택된 Register4f 연산. scalar::는 모든 CPU의 기준 구현으로 항상 존재한다.
-// - ScalarSimdBitExact: 같은 입력에서 simd::와 scalar:: 결과가 bit 단위로 같은지 여부다.
-//   x64 baseline에는 FMA 명령이 없어 항상 true다. ARM64는 compiler의 scalar FMA 축약 정책을
-//   빌드에서 고정하고 실기기로 확인하기 전까지 false로 두며 허용 오차로 비교한다.
+// - ScalarSimdBitExact: 같은 입력에서 simd::와 scalar:: 결과가 bit 단위로 같은지 여부다(NaN은
+//   NaN 여부만 같고 부호·payload는 다를 수 있다). x64 baseline에는 FMA 명령이 없어 true다.
+//   빌드는 -ffp-contract=off로 compiler의 FMA 축약을 금지하지만, ARM64는 실기기로 확인하기
+//   전까지 false로 두며 허용 오차로 비교한다.
 #if defined(_M_X64) || defined(__x86_64__)
 using PlatformMath = SsePlatformMath<ClangPlatformMath>;
 namespace simd = sse;

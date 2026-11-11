@@ -105,7 +105,8 @@ struct GenericPlatformMath {
         return ::sqrt(value);
     }
 
-    // 1/sqrt(x)를 두 번의 정확 반올림으로 계산한다. 0은 +Inf, +Inf는 +0이다.
+    // 1/sqrt(x)를 두 번의 정확 반올림으로 계산한다. +0은 +Inf, -0은 -Inf(sqrt(-0) = -0), +Inf는 +0,
+    // 음수는 NaN이다.
     static float InvSqrt(float value) noexcept {
         return 1.0f / Sqrt(value);
     }

@@ -289,6 +289,13 @@ TEST(MatrixFactory_LookAtBuildsRocksViewSpace) {
     // 실패: eye == target, up이 전방과 평행, 비유한 입력.
     CHECK(!TryMakeLookAt(Vec3d::One(), Vec3d::One(), Vec3d::Up()));
     CHECK(!TryMakeLookTo(Vec3d::Zero(), Vec3d::Up(), Vec3d::Up()));
+    // 외적이 정확히 0이 아닌 평행 입력(리뷰 재현: |up × forward| ≈ 4.4e-16)도 실패한다.
+    CHECK(!TryMakeLookTo(Vec3d::Zero(), Vec3d(3.0, -7.0, 11.0), Vec3d(3.0, -7.0, 11.0)));
+    CHECK(!TryMakeLookTo(Vec3d::Zero(), Vec3d(3.0, -7.0, 11.0), Vec3d(-6.0, 14.0, -22.0)));
+    CHECK(!TryMakeLookTo(Vec3::Zero(), Vec3(3.0f, -7.0f, 11.0f), Vec3(0.3f, -0.7f, 1.1f)));
+    CHECK(!TryMakeLookTo(Vec3d::Zero(), Vec3d::Forward(), Vec3d::Zero()));
+    // 거의 평행하지만 기준보다 큰 각은 성공한다.
+    CHECK(TryMakeLookTo(Vec3d::Zero(), Vec3d::Up(), Vec3d(1.0e-6, 0.0, 1.0)));
     CHECK(!TryMakeLookTo(Vec3d::Zero(), Vec3d::Forward(), Vec3d(0.0, 0.0, __builtin_nan(""))));
 }
 
@@ -296,7 +303,8 @@ TEST(MatrixFactory_ObliqueClipPlaneBecomesNearPlane) {
     auto projection = TryMakePerspective(1.2, 1.0, 0.1, 100.0, DepthRange::Standard);
     REQUIRE(projection);
     // view x = 5 평면(법선 +X, 거리 5)보다 앞쪽만 보이게 한다.
-    auto oblique = TryMakeObliqueClipProjection(projection.Value(), Vec3d(2.0, 0.0, 0.0), 10.0);
+    auto oblique = TryMakeObliqueClipProjection(projection.Value(), Vec3d(2.0, 0.0, 0.0), 10.0,
+                                                DepthRange::Standard);
     REQUIRE(oblique);
     auto depthAt = [&](const Vec3d& view) {
         const Vec4d clip = oblique.Value() * Vec4d::Point(view);
@@ -308,8 +316,52 @@ TEST(MatrixFactory_ObliqueClipPlaneBecomesNearPlane) {
     const double inside = depthAt(Vec3d(20.0, 1.0, 1.0));
     CHECK(inside > 0.0 && inside <= 1.0);
     // 카메라가 보이는 쪽에 있으면 실패한다.
-    CHECK(!TryMakeObliqueClipProjection(projection.Value(), Vec3d(1.0, 0.0, 0.0), -1.0));
-    CHECK(!TryMakeObliqueClipProjection(projection.Value(), Vec3d::Zero(), 1.0));
+    CHECK(!TryMakeObliqueClipProjection(projection.Value(), Vec3d(1.0, 0.0, 0.0), -1.0,
+                                        DepthRange::Standard));
+    CHECK(!TryMakeObliqueClipProjection(projection.Value(), Vec3d::Zero(), 1.0,
+                                        DepthRange::Standard));
+}
+
+TEST(MatrixFactory_ObliqueClipSupportsReversedDepth) {
+    // 기본 Reversed 투영에 Standard 공식을 쓰면 보이는 쪽이 뒤집힌다(리뷰 재현 입력).
+    auto projection = TryMakePerspective(1.2, 1.0, 0.1, 100.0);
+    REQUIRE(projection);
+    auto oblique = TryMakeObliqueClipProjection(projection.Value(), Vec3d(1.0, 0.0, 0.0), 5.0,
+                                                DepthRange::Reversed);
+    REQUIRE(oblique);
+    auto depthAt = [&](const Vec3d& view) {
+        const Vec4d clip = oblique.Value() * Vec4d::Point(view);
+        return clip.z / clip.w;
+    };
+    // Reversed: 새 near(평면 위)는 z/w = 1, 잘리는 쪽은 1보다 크고 보이는 쪽은 [0, 1)이다.
+    CHECK(Near(depthAt(Vec3d(5.0, 0.0, 0.0)), 1.0, 1.0e-12));
+    CHECK(Near(depthAt(Vec3d(5.0, 0.3, -0.2)), 1.0, 1.0e-12));
+    CHECK(depthAt(Vec3d(4.0, 0.0, 0.0)) > 1.0);
+    const double inside = depthAt(Vec3d(20.0, 1.0, 1.0));
+    CHECK(inside >= 0.0 && inside < 1.0);
+    const double far = depthAt(Vec3d(100.0, 0.0, 0.0));
+    CHECK(far >= -1.0e-12 && far < 1.0);
+    // 무작위 frustum 점: 평면 앞쪽은 [0, 1], 뒤쪽은 1 초과다.
+    MathRandom random(0x0b11c0e5ull ^ CurrentSeed());
+    for (int index = 0; index < 2000; ++index) {
+        const double x = random.Range(0.2, 99.0);
+        const double extent = x * 0.6;
+        const Vec3d point(x, random.Range(-extent, extent), random.Range(-extent, extent));
+        const double depth = depthAt(point);
+        if (x > 5.0 + 1.0e-9) {
+            CHECK(depth <= 1.0 + 1.0e-12);
+        } else if (x < 5.0 - 1.0e-9) {
+            CHECK(depth > 1.0);
+        }
+    }
+}
+
+TEST(MatrixFactory_PerspectiveAcceptsHugeFarPlane) {
+    // n * f가 float 범위를 넘어도 n * (f / (f - n))은 유한하다.
+    auto projection = TryMakePerspective(1.0f, 1.0f, 10.0f, 1.0e38f);
+    REQUIRE(projection);
+    auto standard = TryMakePerspective(1.0f, 1.0f, 10.0f, 1.0e38f, DepthRange::Standard);
+    REQUIRE(standard);
 }
 
 TEST(MathBatch_TransformPointsMatchesPerElement) {

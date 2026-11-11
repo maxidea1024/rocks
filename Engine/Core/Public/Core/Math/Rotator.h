@@ -88,8 +88,14 @@ struct Rotator {
             // roll = 0이면 왼쪽 축은 (-sin yaw, cos yaw, 0)이다.
             yawValue = math::Atan2(-left.x, left.y);
         }
-        return Result<Rotator>::Success(Rotator(
-            static_cast<T>(yawValue), static_cast<T>(pitchValue), static_cast<T>(rollValue)));
+        // atan2(-0, 음수)는 -pi이고 -pi 근처 double을 float으로 바꾸면 -Pi<float>가 될 수 있다. T로
+        // 바꾼 뒤 문서의 반열린 구간 (-pi, pi]에 맞춰 +pi로 바꾼다.
+        const auto halfOpen = [](double radians) noexcept {
+            const T value = static_cast<T>(radians);
+            return value <= -math::Pi<T> ? math::Pi<T> : value;
+        };
+        return Result<Rotator>::Success(
+            Rotator(halfOpen(yawValue), static_cast<T>(pitchValue), halfOpen(rollValue)));
     }
 };
 

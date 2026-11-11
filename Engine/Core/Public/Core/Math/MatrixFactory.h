@@ -26,18 +26,18 @@ enum class DepthRange : uint8 {
 namespace detail {
 
 // view 깊이 d(= view x)에 대한 clip z = scale * d + offset 계수다. 원근 투영은 w = d다.
+// n * f / (f - n)은 n * f가 먼저 overflow할 수 있으므로 n * (f / (f - n))으로 계산한다.
 template <typename T>
 inline void PerspectiveDepth(T nearDistance, T farDistance, DepthRange depth, T& scale,
                              T& offset) noexcept {
     const bool infinite = !math::IsFinite(farDistance);
+    const T farRatio = infinite ? static_cast<T>(1) : farDistance / (farDistance - nearDistance);
     if (depth == DepthRange::Reversed) {
         scale = infinite ? static_cast<T>(0) : nearDistance / (nearDistance - farDistance);
-        offset =
-            infinite ? nearDistance : nearDistance * farDistance / (farDistance - nearDistance);
+        offset = nearDistance * farRatio;
     } else {
-        scale = infinite ? static_cast<T>(1) : farDistance / (farDistance - nearDistance);
-        offset =
-            infinite ? -nearDistance : -nearDistance * farDistance / (farDistance - nearDistance);
+        scale = farRatio;
+        offset = -nearDistance * farRatio;
     }
 }
 
@@ -149,12 +149,16 @@ Result<Matrix4<T>> TryMakeOrthographic(T width, T height, T nearDistance, T farD
 // 투영 행렬의 near 평면을 view 공간 평면으로 바꾼 oblique clip 투영이다(UE ClipProjection 대응,
 // Lengyel의 oblique near-plane 방법). planeNormal·planeDistance는 view 공간에서
 // Dot(normal, p) = distance를 만족하는 평면이고, 카메라는 평면의 음수 쪽(보이는 쪽은 양수)에
-// 있어야 한다. Standard 깊이의 원근 투영에만 지원한다.
-// 실패: projection 비유한, 평면 비유한·영 법선, 카메라가 평면 위/양수 쪽.
+// 있어야 한다. depth는 projection을 만들 때 쓴 DepthRange와 같아야 한다(행렬만으로는 구분할 수
+// 없으므로 기본값 없이 명시한다). 원근 투영을 대상으로 검증했다.
+// - Standard: near(z/w = 0)를 평면으로 바꾸고 far 평면(z = w)이 반대쪽 frustum 모서리를 지나게
+// 한다.
+// - Reversed: near(z/w = 1, 즉 w - z = 0)를 평면으로 바꾸고 far 평면(z = 0)이 모서리를 지나게 한다.
+// 실패: projection 비유한·역행렬 없음, 평면 비유한·영 법선, 카메라가 평면 위/양수 쪽.
 template <typename T>
 Result<Matrix4<T>> TryMakeObliqueClipProjection(const Matrix4<T>& projection,
-                                                const Vector3<T>& planeNormal,
-                                                T planeDistance) noexcept {
+                                                const Vector3<T>& planeNormal, T planeDistance,
+                                                DepthRange depth) noexcept {
     auto normal = planeNormal.TryNormalize();
     if (!projection.IsFinite() || !normal || !math::IsFinite(planeDistance)) {
         return Result<Matrix4<T>>::Failure(ErrorCode::InvalidArgument);
@@ -170,39 +174,54 @@ Result<Matrix4<T>> TryMakeObliqueClipProjection(const Matrix4<T>& projection,
     if (!inverse) {
         return Result<Matrix4<T>>::Failure(inverse.Error());
     }
-    // clip 공간의 반대쪽 frustum 모서리 q = M⁻¹ (sgn(c'.x), sgn(c'.y), 1, 1).
+    // clip 공간의 반대쪽 frustum 모서리 q = M⁻¹ (sgn(c'.x), sgn(c'.y), far z, 1).
+    // far z는 Standard에서 1, Reversed에서 0이다.
+    const bool reversed = depth == DepthRange::Reversed;
     const Matrix4<T> inverseTranspose = inverse.Value().Transposed();
     const Vector4<T> clipSpacePlane = inverseTranspose * clipPlane;
     const Vector4<T> corner(math::Sign(clipSpacePlane.x), math::Sign(clipSpacePlane.y),
-                            static_cast<T>(1), static_cast<T>(1));
+                            reversed ? static_cast<T>(0) : static_cast<T>(1), static_cast<T>(1));
     const Vector4<T> q = inverse.Value() * corner;
     const T denominator = Dot(clipPlane, q);
     if (!(math::Abs(denominator) > static_cast<T>(0))) {
         return Result<Matrix4<T>>::Failure(ErrorCode::InvalidArgument);
     }
-    // 새 세 번째 행 = c * (row4 · q) / (c · q) — Standard 깊이(z/w ∈ [0,1]) 기준.
-    const Vector4<T> row3 = projection.Row(3);
-    const Vector4<T> scaled = clipPlane * (Dot(row3, q) / denominator);
+    // a = (row4 · q) / (c · q).
+    // Standard: 새 세 번째 행 = a * c (near z = 0이 평면 c, far z = w가 q를 지난다).
+    // Reversed: 새 세 번째 행 = row4 - a * c (near w - z = a * c, far z = 0이 q를 지난다).
+    const Vector4<T> row4 = projection.Row(3);
+    const Vector4<T> scaled = clipPlane * (Dot(row4, q) / denominator);
+    const Vector4<T> row3 = reversed ? row4 - scaled : scaled;
     Matrix4<T> result = projection;
-    result.At(2, 0) = scaled.x;
-    result.At(2, 1) = scaled.y;
-    result.At(2, 2) = scaled.z;
-    result.At(2, 3) = scaled.w;
+    result.At(2, 0) = row3.x;
+    result.At(2, 1) = row3.y;
+    result.At(2, 2) = row3.z;
+    result.At(2, 3) = row3.w;
     return detail::FiniteOrInvalid(result);
 }
 
 // ---- view ----
 
+// LookTo가 up과 forward 사이 각의 sin으로 요구하는 최솟값이다. 두 단위 벡터의 외적은 반올림으로
+// 약 수 ULP의 길이를 가지므로 정확히 0인지로는 평행을 판정할 수 없다. 64 * MachineEpsilon은
+// float에서 약 7.6e-6 rad(0.0004도), double에서 약 1.4e-14 rad이다.
+template <typename T>
+    requires math::IsFloatingPointV<T>
+inline constexpr T LookToMinimumSine = static_cast<T>(64) * math::MachineEpsilon<T>;
+
 // eye에서 forward 방향을 보는 world → view 행렬이다(UE LookFrom 대응). up은 대략적인 위 방향이며
-// forward와 평행하면 실패한다. view 축: +X = forward, +Y = up × forward(왼쪽), +Z = 정확한 위.
+// forward와 (거의) 평행하면(sin < LookToMinimumSine) 실패한다. view 축: +X = forward,
+// +Y = up × forward(왼쪽), +Z = 정확한 위. UE LookFromMatrix는 평행 판정이 없다.
 template <typename T>
 Result<Matrix4<T>> TryMakeLookTo(const Vector3<T>& eye, const Vector3<T>& forward,
                                  const Vector3<T>& up) noexcept {
     auto axisX = forward.TryNormalize();
-    if (!eye.IsFinite() || !axisX || !up.IsFinite()) {
+    auto unitUp = up.TryNormalize();
+    if (!eye.IsFinite() || !axisX || !unitUp) {
         return Result<Matrix4<T>>::Failure(ErrorCode::InvalidArgument);
     }
-    auto axisY = Cross(up, axisX.Value()).TryNormalize();
+    // 두 단위 벡터의 외적 길이는 sin이다.
+    auto axisY = Cross(unitUp.Value(), axisX.Value()).TryNormalize(LookToMinimumSine<T>);
     if (!axisY) {
         return Result<Matrix4<T>>::Failure(ErrorCode::InvalidArgument);
     }

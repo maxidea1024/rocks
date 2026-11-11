@@ -389,10 +389,14 @@ struct Box {
         return max - min;
     }
 
-    // point를 포함하도록 넓힌 box다. point에 NaN이 있으면 결과도 NaN을 포함해 IsValid가 false가
-    // 된다.
+    // point를 포함하도록 넓힌 box다. point나 box에 NaN이 있으면 결과도 그 성분이 NaN이 되어
+    // IsValid가 false다(뒤이은 확장에서도 NaN이 사라지지 않는다).
     constexpr Box ExpandedToInclude(const Vector3<T>& point) const noexcept {
-        return Box(ComponentMin(min, point), ComponentMax(max, point));
+        return Box(
+            Vector3<T>(math::MinPropagateNaN(min.x, point.x), math::MinPropagateNaN(min.y, point.y),
+                       math::MinPropagateNaN(min.z, point.z)),
+            Vector3<T>(math::MaxPropagateNaN(max.x, point.x), math::MaxPropagateNaN(max.y, point.y),
+                       math::MaxPropagateNaN(max.z, point.z)));
     }
 };
 
@@ -543,26 +547,35 @@ struct OrientedBox {
                detail::IsShapeUnitQuaternion(rotation);
     }
 
+    // 계산용 회전이다. IsValid는 길이 오차 ShapeUnitTolerance까지 허용하지만 RotateVector는 정확한
+    // 단위 quaternion을 전제하므로(길이 1 + e이면 벡터가 약 2e 비율로 늘어난다) 축·좌표 변환은 모두
+    // 이 정규화 결과를 쓴다. 정규화할 수 없는(유한하지 않음·영) 회전이면 저장값을 그대로 돌려주며
+    // 이때 box는 IsValid가 false이므로 결과에 의미가 없다. 반복 질의에서는 한 번 구해 재사용한다.
+    Quaternion<T> UnitRotation() const noexcept {
+        auto unit = rotation.TryNormalize();
+        return unit ? unit.Value() : rotation;
+    }
+
     // world 좌표의 box local 축(단위 벡터, 반올림 수준)이다.
     Vector3<T> AxisX() const noexcept {
-        return rotation.RotateVector(Vector3<T>::UnitX());
+        return UnitRotation().RotateVector(Vector3<T>::UnitX());
     }
 
     Vector3<T> AxisY() const noexcept {
-        return rotation.RotateVector(Vector3<T>::UnitY());
+        return UnitRotation().RotateVector(Vector3<T>::UnitY());
     }
 
     Vector3<T> AxisZ() const noexcept {
-        return rotation.RotateVector(Vector3<T>::UnitZ());
+        return UnitRotation().RotateVector(Vector3<T>::UnitZ());
     }
 
     // world 점을 center 기준 local 좌표로 바꾼다.
     Vector3<T> ToLocal(const Vector3<T>& worldPoint) const noexcept {
-        return rotation.UnrotateVector(worldPoint - center);
+        return UnitRotation().UnrotateVector(worldPoint - center);
     }
 
     Vector3<T> ToWorld(const Vector3<T>& localPoint) const noexcept {
-        return center + rotation.RotateVector(localPoint);
+        return center + UnitRotation().RotateVector(localPoint);
     }
 
     // index의 bit 0/1/2가 1이면 해당 local 축(x/y/z)의 + 쪽 꼭짓점이다. index >= 8이면 Fatal이다.

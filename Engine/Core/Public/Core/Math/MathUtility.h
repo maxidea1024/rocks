@@ -396,11 +396,15 @@ constexpr T CubicInterp(T p0, T t0, T p1, T t1, T alpha) noexcept {
 // 매 프레임 호출하는 거리 비례 접근이다: current + (target - current) * clamp(dt * speed, 0, 1).
 // speed <= 0이거나 dt * speed >= 1이면 target을 정확히 반환한다(UE FInterpTo와 같은 의미).
 // UE와 달리 "충분히 가까우면 target"으로 바꾸는 숨은 거리 기준이 없으므로 점근적으로 접근한다.
-// 도달 판정 거리가 필요하면 호출자가 IsNearlyEqual로 명시한다. dt는 초 단위이며 음수면 Fatal이다.
+// 도달 판정 거리가 필요하면 호출자가 IsNearlyEqual로 명시한다. dt는 초 단위이며 음수·NaN이면
+// Fatal이다. current·target·speed 중 NaN이 있으면 NaN을 반환한다(유효해 보이는 값으로 바꾸지 않음).
 template <typename T>
     requires IsFloatingPointV<T>
 T InterpTo(T current, T target, T deltaSeconds, T speed) noexcept {
     ROCKS_ASSERT(deltaSeconds >= static_cast<T>(0));
+    if (IsNaN(current) || IsNaN(target) || IsNaN(speed)) {
+        return current + target + speed;
+    }
     if (!(speed > static_cast<T>(0))) {
         return target;
     }
@@ -412,28 +416,34 @@ T InterpTo(T current, T target, T deltaSeconds, T speed) noexcept {
 }
 
 // 매 프레임 최대 speed * dt만큼 일정 속도로 접근한다. 남은 거리가 그 이하이면 target을 정확히
-// 반환한다(UE FInterpConstantTo 대응, 숨은 거리 기준 없음). dt 음수·speed 음수는 Fatal이다.
+// 반환한다(UE FInterpConstantTo 대응, 숨은 거리 기준 없음). dt·speed가 음수·NaN이면 Fatal이다.
+// current나 target이 NaN이면(남은 거리가 NaN) NaN을 반환한다.
 template <typename T>
     requires IsFloatingPointV<T>
 T InterpConstantTo(T current, T target, T deltaSeconds, T speed) noexcept {
     ROCKS_ASSERT(deltaSeconds >= static_cast<T>(0) && speed >= static_cast<T>(0));
     const T step = deltaSeconds * speed;
     const T distance = target - current;
+    if (IsNaN(distance)) {
+        return distance;
+    }
     if (Abs(distance) <= step) {
         return target;
     }
     return current + CopySign(step, distance);
 }
 
-// 가장 가까운 grid 배수로 맞춘다. 0.5 경계는 +무한대 방향이다(UE GridSnap과 같다).
-// grid가 0이면 location을 그대로 반환한다.
+// 가장 가까운 grid 배수로 맞춘다. 0.5 경계는 grid 부호와 무관하게 +무한대 방향이다(|grid|를
+// 쓴다). UE GridSnap은 음수 grid에서 경계 방향이 -무한대로 바뀐다. grid가 0이면 location을 그대로
+// 반환한다.
 template <typename T>
     requires IsFloatingPointV<T>
 T GridSnap(T location, T grid) noexcept {
     if (grid == static_cast<T>(0)) {
         return location;
     }
-    return Floor((location + grid / static_cast<T>(2)) / grid) * grid;
+    const T size = Abs(grid);
+    return Floor((location + size / static_cast<T>(2)) / size) * size;
 }
 
 // value를 반열린 구간 [minimum, maximum)으로 주기적으로 감는다. minimum < maximum이 전제다

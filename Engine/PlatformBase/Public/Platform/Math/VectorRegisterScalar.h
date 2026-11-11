@@ -11,8 +11,10 @@ namespace rocks::platform::scalar {
 // - MultiplyAdd(a, b, c)는 a*b를 먼저 반올림한 뒤 c를 더한다. FMA를 사용하지 않는다.
 // - Dot3 = (p0 + p1) + p2, Dot4 = (p0 + p1) + (p2 + p3)이며 pi = ai * bi다.
 // - 행렬 곱과 변환은 열 순서대로 ((c0*s0 + c1*s1) + c2*s2) + c3*s3를 누적한다.
-// 같은 순서이므로 FMA 축약이 없는 x64에서는 scalar와 SIMD 결과가 bit 단위로 같다.
-// compiler의 부동소수점 축약을 막기 위해 곱과 합을 별도 문장으로 계산한다.
+// 같은 순서이므로 FMA 축약이 없는 x64에서는 scalar와 SIMD 결과가 bit 단위로 같다. 단 NaN은
+// 값(NaN 여부)만 같고 부호·payload bit는 backend마다 다를 수 있다(SSE는 첫 피연산자 NaN을 전파).
+// compiler의 부동소수점 축약을 막기 위해 곱과 합을 별도 문장으로 계산하고, 빌드도
+// -ffp-contract=off로 축약을 금지한다.
 struct Register4f {
     float lane[4];
 };

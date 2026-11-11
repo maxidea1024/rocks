@@ -226,6 +226,9 @@ internal static class ActionGraph
         {
             yield return "/nologo"; yield return "/utf-8"; yield return "/W4"; yield return "/WX"; yield return "/GR-";
             yield return "/EHs-c-"; yield return "/Zc:__cplusplus"; yield return "/clang:-std=c++23";
+            // 부동소수점 축약(FMA) 금지: ARM64처럼 FMA가 항상 있는 CPU에서만 a*b+c가 fused되어
+            // 플랫폼별 결과·판정(예: 행렬 역행렬 성공 여부)이 달라지는 것을 막는다.
+            yield return "/clang:-ffp-contract=off";
             yield return "/DWIN32"; yield return "/D_WINDOWS"; yield return "/DNOMINMAX";
             yield return "/DWIN32_LEAN_AND_MEAN"; yield return "/DROCKS_PLATFORM_WINDOWS=1";
             yield return release || asan ? "/MD" : "/MDd";
@@ -236,7 +239,7 @@ internal static class ActionGraph
         }
         else
         {
-            foreach (string flag in new[] { "-std=c++23", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-fno-rtti", "-fno-exceptions", "-DROCKS_PLATFORM_MAC=1" }) yield return flag;
+            foreach (string flag in new[] { "-std=c++23", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-fno-rtti", "-fno-exceptions", "-ffp-contract=off", "-DROCKS_PLATFORM_MAC=1" }) yield return flag;
             yield return release ? "-O2" : "-O0";
             yield return release ? "-DNDEBUG" : "-g";
             if (asan) { yield return "-fsanitize=address"; yield return "-fno-omit-frame-pointer"; }
