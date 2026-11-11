@@ -98,6 +98,14 @@ static_assert(__is_constructible(Tuple<ExplicitOnly>, int));
 static_assert(!__is_constructible(Tuple<int&>));          // 참조 원소는 기본 생성 없음
 static_assert(!__is_constructible(Tuple<int, int>, int)); // 개수 불일치
 static_assert(!__is_assignable(Tuple<MoveOnly>&, const Tuple<MoveOnly>&));
+// 원소별 변환 생성: 모든 원소가 암묵 변환되면 암묵, 하나라도 명시 생성이면 명시다.
+static_assert(__is_convertible_to(Tuple<int, float>, Tuple<long, double>));
+static_assert(!__is_convertible_to(Tuple<int>, Tuple<ExplicitOnly>));
+static_assert(__is_constructible(Tuple<ExplicitOnly>, Tuple<int>));
+static_assert(!__is_constructible(Tuple<int, int>, Tuple<int>)); // 개수 불일치
+static_assert(!__is_constructible(Tuple<MoveOnly>, const Tuple<MoveOnly>&));
+static_assert(__is_constructible(Tuple<const int&>, Tuple<int&>));
+static_assert(!__is_constructible(Tuple<long&>, Tuple<int&>)); // 다른 타입 참조로는 묶지 않는다
 static_assert(__is_assignable(Tuple<MoveOnly>&, Tuple<MoveOnly>&&));
 static_assert(Get<1>(MakeTuple(1, 2, 3)) == 2);
 static_assert(MakeTuple(1, 2) == MakeTuple(1, 2));
@@ -214,6 +222,33 @@ TEST(Tuple_ApplyForwardsElements) {
         Apply([](MoveOnly&& value) noexcept { return MoveOnly(Move(value)).value; }, Move(owner));
     CHECK(taken == 8 && Get<0>(owner).value == 0);
     CHECK(Apply([]() noexcept { return 42; }, Tuple<>()) == 42);
+}
+
+TEST(Tuple_ConvertingConstruction) {
+    const Tuple<int, float> narrow(3, 0.5f);
+    Tuple<long, double> wide = narrow;
+    CHECK(Get<0>(wide) == 3 && Get<1>(wide) == 0.5);
+    Tuple<ExplicitOnly, long> explicitWide(Tuple<int, int>(7, 8));
+    CHECK(Get<0>(explicitWide).value == 7 && Get<1>(explicitWide) == 8);
+    // rvalue 변환은 원소를 이동한다.
+    Tracked::Reset();
+    {
+        Tuple<Tracked, int> source(Tracked(4), 1);
+        Tuple<Tracked, long> moved(Move(source));
+        CHECK(Get<0>(moved).value == 4 && Get<0>(source).value == -1 && Get<1>(moved) == 1);
+        CHECK(Tracked::copies == 0);
+        Tuple<Tracked, long> copied(static_cast<const Tuple<Tracked, int>&>(source));
+        CHECK(Tracked::copies == 1);
+    }
+    CHECK(Tracked::alive == 0);
+    // 참조 원소: 같은 대상에 묶인다.
+    int value = 5;
+    Tuple<int&> reference(value);
+    Tuple<const int&> view = reference;
+    value = 6;
+    CHECK(Get<0>(view) == 6 && &Get<0>(view) == &value);
+    Tuple<const int&> fromRvalue = Tuple<int&>(value);
+    CHECK(&Get<0>(fromRvalue) == &value);
 }
 
 } // namespace rocks::test

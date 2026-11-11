@@ -40,6 +40,8 @@ inline constexpr bool IsTupleV<Tuple<Types...>> = true;
 
 struct TupleConstructTag {};
 
+struct TupleConvertTag {};
+
 // 원소 하나를 담는다. 같은 타입 원소가 여러 개여도 Index로 구분된다.
 template <usize Index, typename T>
 struct TupleLeaf {
@@ -87,8 +89,7 @@ struct TupleStorage<IndexSequence<Indices...>, Types...> : TupleLeaf<Indices, Ty
 // - 참조 원소의 대입은 참조 대상에 대입한다(표준 tuple과 같다). 참조 원소가 있으면 기본 생성이
 //   없다.
 // - 기본 생성은 모든 원소를 값 초기화한다(int는 0).
-// - 같은 개수의 Tuple끼리만 원소별 비교·대입한다. 서로 다른 원소 타입 사이의 변환 생성은 아직
-//   제공하지 않는다.
+// - 같은 개수의 Tuple끼리만 원소별 변환 생성·대입한다. 비교(==)는 같은 타입 Tuple끼리만이다.
 // - 구조적 바인딩은 rocks::get(소문자, 언어의 tuple protocol이 찾는 이름)과 std::tuple_size·
 //   std::tuple_element 특수화로 동작한다. 엔진 코드에서는 Get<I>를 쓴다.
 template <typename... Types>
@@ -116,6 +117,27 @@ public:
     constexpr explicit(!(__is_convertible_to(Args&&, Types) && ...))
         Tuple(Args&&... arguments) noexcept
         : Storage(detail::TupleConstructTag{}, Forward<Args>(arguments)...) {
+    }
+
+    // 원소 수가 같은 다른 원소 타입 Tuple에서 원소별로 복사 생성한다(예: Tuple<long, double>을
+    // Tuple<int, float>에서). 모든 원소가 암묵 변환 가능할 때만 암묵 생성이다.
+    template <typename... Others>
+        requires(sizeof...(Others) == sizeof...(Types) && sizeof...(Types) > 0 &&
+                 !IsSameV<Tuple<Others...>, Tuple> &&
+                 (__is_nothrow_constructible(Types, const Others&) && ...))
+    constexpr explicit(!(__is_convertible_to(const Others&, Types) && ...))
+        Tuple(const Tuple<Others...>& other) noexcept
+        : Tuple(detail::TupleConvertTag{}, other, MakeIndexSequence<Size>{}) {
+    }
+
+    // 원소별 이동 생성이다. 값 원소는 이동되고 참조 원소는 참조 대상 lvalue로 전달된다.
+    template <typename... Others>
+        requires(sizeof...(Others) == sizeof...(Types) && sizeof...(Types) > 0 &&
+                 !IsSameV<Tuple<Others...>, Tuple> &&
+                 (__is_nothrow_constructible(Types, Others &&) && ...))
+    constexpr explicit(!(__is_convertible_to(Others&&, Types) && ...))
+        Tuple(Tuple<Others...>&& other) noexcept
+        : Tuple(detail::TupleConvertTag{}, Move(other), MakeIndexSequence<Size>{}) {
     }
 
     constexpr Tuple(const Tuple&) noexcept = default;
@@ -177,6 +199,18 @@ public:
 private:
     template <typename...>
     friend class Tuple;
+
+    template <typename... Others, usize... Indices>
+    constexpr Tuple(detail::TupleConvertTag, const Tuple<Others...>& other,
+                    IndexSequence<Indices...>) noexcept
+        : Storage(detail::TupleConstructTag{}, other.template Get<Indices>()...) {
+    }
+
+    template <typename... Others, usize... Indices>
+    constexpr Tuple(detail::TupleConvertTag, Tuple<Others...>&& other,
+                    IndexSequence<Indices...>) noexcept
+        : Storage(detail::TupleConstructTag{}, Move(other).template Get<Indices>()...) {
+    }
 
     template <usize Index>
     constexpr detail::TupleLeaf<Index, TypePackElement<Index, Types...>>& Leaf() noexcept {
