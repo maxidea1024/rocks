@@ -22,6 +22,8 @@ int RunUniquePtrEmptyControl() noexcept;
 int RunHashMapIteratorAfterInsertControl() noexcept;
 int RunSharedPtrEmptyControl() noexcept;
 int RunSharedRefFromEmptyControl() noexcept;
+int RunSparseArrayFreeIndexControl() noexcept;
+int RunSlotArrayStaleHandleControl() noexcept;
 int RunVariantWrongAlternativeControl() noexcept;
 int RunDelegateRebindDuringTargetDestructionControl() noexcept;
 int RunUniquePtrNullDeleterControl() noexcept;
@@ -224,6 +226,10 @@ int main(int argc, char** argv) {
                 return test::RunSharedPtrEmptyControl();
             } else if (strcmp(control, "shared-ref-from-empty") == 0) {
                 return test::RunSharedRefFromEmptyControl();
+            } else if (strcmp(control, "sparse-array-free-index") == 0) {
+                return test::RunSparseArrayFreeIndexControl();
+            } else if (strcmp(control, "slot-array-stale-handle") == 0) {
+                return test::RunSlotArrayStaleHandleControl();
             } else if (strcmp(control, "variant-wrong-alternative") == 0) {
                 return test::RunVariantWrongAlternativeControl();
             } else if (strcmp(control, "delegate-rebind-during-target-destruction") == 0) {

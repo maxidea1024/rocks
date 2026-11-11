@@ -1,4 +1,6 @@
 #include <Core/Containers/HashMap.h>
+#include <Core/Containers/SlotArray.h>
+#include <Core/Containers/SparseArray.h>
 #include <Core/Delegate.h>
 #include <Core/Math/RandomStream.h>
 #include <Core/Memory/SharedPtr.h>
@@ -101,6 +103,28 @@ int RunVariantWrongAlternativeControl() noexcept {
     PrepareFatalTestProcess();
     Variant<int, float> value = 1.0f;
     return value.Get<int>();
+}
+
+// 빈 slot의 원소 접근은 free list link를 값으로 읽지 않고 Fatal이다.
+int RunSparseArrayFreeIndexControl() noexcept {
+    PrepareFatalTestProcess();
+    SystemAllocator allocator;
+    SparseArray<int> array(allocator);
+    (void)array.TryAdd(1);
+    (void)array.TryAdd(2);
+    (void)array.TryRemoveAt(0);
+    return array[0];
+}
+
+// 지운 원소의 handle은 slot이 재사용된 뒤에도 새 원소에 닿지 않고 Fatal이다.
+int RunSlotArrayStaleHandleControl() noexcept {
+    PrepareFatalTestProcess();
+    SystemAllocator allocator;
+    SlotArray<int> slots(allocator);
+    auto first = slots.TryAdd(1);
+    (void)slots.TryRemove(first.Value());
+    (void)slots.TryAdd(2);
+    return slots[first.Value()];
 }
 
 int RunSharedRefFromEmptyControl() noexcept {

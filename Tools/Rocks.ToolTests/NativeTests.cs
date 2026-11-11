@@ -289,6 +289,8 @@ internal static class NativeTests
                 ("hash-map-iterator-modified", "HashMap iterator used after structural modification"),
                 ("shared-ptr-empty", "SharedPtr dereferenced while empty"),
                 ("shared-ref-from-empty", "SharedPtr::ToSharedRef called on an empty pointer"),
+                ("sparse-array-free-index", "SparseArray index is not allocated"),
+                ("slot-array-stale-handle", "SlotArray handle is stale or invalid"),
                 ("variant-wrong-alternative", "Variant::Get called with a different alternative"),
                 ("delegate-rebind-during-target-destruction", "Delegate rebound while its target is being destroyed"),
                 ("unique-ptr-null-deleter", "UniquePtr adopted an object with a null deleter"),

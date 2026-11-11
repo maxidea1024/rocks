@@ -11,6 +11,8 @@
 #include <Core/Containers/BitArray.h>
 #include <Core/Containers/HashMap.h>
 #include <Core/Containers/HashSet.h>
+#include <Core/Containers/SlotArray.h>
+#include <Core/Containers/SparseArray.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/StringView.h>
 
@@ -34,6 +36,12 @@ static_assert(std::forward_iterator<HashMap<int, int>::const_iterator>);
 static_assert(std::forward_iterator<HashSet<int>::const_iterator>);
 static_assert(std::ranges::forward_range<HashMap<int, int>>);
 static_assert(std::ranges::forward_range<HashSet<int>>);
+static_assert(std::forward_iterator<SparseArray<int>::iterator>);
+static_assert(std::forward_iterator<SparseArray<int>::const_iterator>);
+static_assert(std::ranges::forward_range<const SparseArray<int>>);
+static_assert(std::forward_iterator<SlotArray<int>::iterator>);
+static_assert(std::forward_iterator<SlotArray<int>::const_iterator>);
+static_assert(std::ranges::forward_range<const SlotArray<int>>);
 
 TEST(StlCompatibility_ArrayWithAlgorithms) {
     SystemAllocator allocator;
@@ -85,6 +93,30 @@ TEST(StlCompatibility_HashContainersWithAlgorithms) {
     }
     CHECK(std::ranges::count_if(set, [](int key) { return key >= 10; }) == 10);
     CHECK(std::accumulate(set.begin(), set.end(), 0) == 190);
+}
+
+TEST(StlCompatibility_SparseAndSlotArraysWithAlgorithms) {
+    SystemAllocator allocator;
+    SparseArray<int> sparse(allocator);
+    for (int value = 0; value < 10; ++value) {
+        REQUIRE(sparse.TryAdd(value));
+    }
+    REQUIRE(sparse.TryRemoveAt(3));
+    REQUIRE(sparse.TryRemoveAt(7));
+    CHECK(std::accumulate(sparse.begin(), sparse.end(), 0) == 45 - 3 - 7);
+    const auto found = std::find(sparse.begin(), sparse.end(), 8);
+    REQUIRE(found != sparse.end());
+    CHECK(found.Index() == 8);
+    CHECK(std::ranges::count_if(sparse, [](int value) { return value % 2 == 0; }) == 5);
+
+    SlotArray<int> slots(allocator);
+    for (int value = 1; value <= 5; ++value) {
+        REQUIRE(slots.TryAdd(value));
+    }
+    CHECK(std::ranges::count_if(slots, [](int value) { return value > 2; }) == 3);
+    const auto largest = std::ranges::max_element(slots);
+    REQUIRE(largest != slots.end());
+    CHECK(*largest == 5 && largest.Handle() == (SlotHandle{4, 1}));
 }
 
 } // namespace rocks::test

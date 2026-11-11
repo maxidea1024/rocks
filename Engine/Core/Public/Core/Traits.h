@@ -37,6 +37,20 @@ struct RemoveConst<const T> {
 template <typename T>
 using RemoveConstT = typename RemoveConst<T>::Type;
 
+// 조건이 참이면 IfTrue, 거짓이면 IfFalse 타입이다(STL conditional 대응).
+template <bool Condition, typename IfTrue, typename IfFalse>
+struct Conditional {
+    using Type = IfTrue;
+};
+
+template <typename IfTrue, typename IfFalse>
+struct Conditional<false, IfTrue, IfFalse> {
+    using Type = IfFalse;
+};
+
+template <bool Condition, typename IfTrue, typename IfFalse>
+using ConditionalT = typename Conditional<Condition, IfTrue, IfFalse>::Type;
+
 template <typename A, typename B>
 inline constexpr bool IsSameV = false;
 
