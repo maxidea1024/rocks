@@ -11,6 +11,7 @@ public sealed record BuildContext(string RootDirectory, string OutputDirectory,
     {
         NativePlatform.Windows => "Win64",
         NativePlatform.MacOS => "Mac",
+        NativePlatform.Android => "Android",
         _ => throw new ArgumentOutOfRangeException(nameof(Platform), Platform, "Unsupported native platform.")
     };
     public string PathInRoot(string path) => Path.GetFullPath(path, RootDirectory);

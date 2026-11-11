@@ -239,7 +239,14 @@ internal static class ActionGraph
         }
         else
         {
-            foreach (string flag in new[] { "-std=c++23", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-fno-rtti", "-fno-exceptions", "-ffp-contract=off", "-DROCKS_PLATFORM_MAC=1" }) yield return flag;
+            foreach (string flag in new[] { "-std=c++23", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-fno-rtti", "-fno-exceptions", "-ffp-contract=off" }) yield return flag;
+            if (toolchain.Platform == NativePlatform.Android)
+            {
+                // Android 실행 파일·공유 라이브러리는 PIE/PIC가 필수다.
+                yield return "-fPIC";
+                yield return "-DROCKS_PLATFORM_ANDROID=1";
+            }
+            else yield return "-DROCKS_PLATFORM_MAC=1";
             yield return release ? "-O2" : "-O0";
             yield return release ? "-DNDEBUG" : "-g";
             if (asan) { yield return "-fsanitize=address"; yield return "-fno-omit-frame-pointer"; }

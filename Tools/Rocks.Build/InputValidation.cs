@@ -15,10 +15,14 @@ internal static class InputValidation
         {
             NativePlatform.Windows => OperatingSystem.IsWindows(),
             NativePlatform.MacOS => OperatingSystem.IsMacOS(),
+            // NDK는 Windows·macOS host를 지원한다.
+            NativePlatform.Android => OperatingSystem.IsWindows() || OperatingSystem.IsMacOS(),
             _ => throw new ArgumentException($"Toolchain.Platform: unsupported value {request.Toolchain.Platform}.")
         };
         if (!hostMatches)
             throw new PlatformNotSupportedException($"Toolchain.Platform {request.Toolchain.Platform}: this native host is not supported for that target.");
+        if (request.Toolchain.Platform == NativePlatform.Android && request.Configuration == NativeConfiguration.Asan)
+            throw new ArgumentException("Toolchain.Platform Android: the Asan configuration is not supported yet (use Debug or Release).");
         if (NativeToolchains.PathComparer.Equals(request.RootDirectory, request.OutputDirectory) ||
             Fingerprints.IsUnder(request.RootDirectory, request.OutputDirectory))
             throw new ArgumentException($"OutputDirectory must not be the source root or its ancestor: {request.OutputDirectory}");

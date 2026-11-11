@@ -1,6 +1,7 @@
 namespace Rocks.Build;
 
-public enum NativePlatform { Windows, MacOS }
+// Android는 Windows·macOS host에서 NDK로 교차 빌드한다(그 밖의 host/target 조합은 거부).
+public enum NativePlatform { Windows, MacOS, Android }
 public enum NativeConfiguration { Debug, Release, Asan }
 public enum NativeModuleKind { StaticLibrary, Executable }
 

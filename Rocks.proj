@@ -9,7 +9,13 @@
     <CompilerArgument Condition="'$(Compiler)' != ''">--compiler &quot;$(Compiler)&quot;</CompilerArgument>
     <OutputArgument Condition="'$(NativeOutput)' != ''">--output &quot;$(NativeOutput)&quot;</OutputArgument>
     <Tool>dotnet &quot;$(RocksRoot)out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks.Build.Cli.dll&quot;</Tool>
-    <CommonArguments>--root &quot;$(RocksRoot).&quot; --configuration $(Configuration) --jobs $(Jobs) $(CompilerArgument) $(OutputArgument)</CommonArguments>
+    <!-- Android 교차 빌드: -p:RocksPlatform=android [-p:AndroidAbi=arm64|x86_64] [-p:AndroidApi=26] [-p:AndroidNdk=경로] [-p:Adb=경로] -->
+    <PlatformArgument Condition="'$(RocksPlatform)' != ''">--platform $(RocksPlatform)</PlatformArgument>
+    <PlatformArgument Condition="'$(AndroidAbi)' != ''">$(PlatformArgument) --android-abi $(AndroidAbi)</PlatformArgument>
+    <PlatformArgument Condition="'$(AndroidApi)' != ''">$(PlatformArgument) --android-api $(AndroidApi)</PlatformArgument>
+    <PlatformArgument Condition="'$(AndroidNdk)' != ''">$(PlatformArgument) --android-ndk &quot;$(AndroidNdk)&quot;</PlatformArgument>
+    <PlatformArgument Condition="'$(Adb)' != ''">$(PlatformArgument) --adb &quot;$(Adb)&quot;</PlatformArgument>
+    <CommonArguments>--root &quot;$(RocksRoot).&quot; --configuration $(Configuration) --jobs $(Jobs) $(CompilerArgument) $(OutputArgument) $(PlatformArgument)</CommonArguments>
   </PropertyGroup>
   <!-- MSBuild는 호스트 도구/규칙/단계를 조직한다. C++ 최신성 판단은 매 호출 Rocks.Build가 담당한다. -->
   <Target Name="BootstrapTools">

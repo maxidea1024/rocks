@@ -106,6 +106,79 @@ public static class NativeToolchains
         };
     }
 
+    /// <summary>
+    /// Android NDK clang으로 교차 빌드하는 toolchain을 찾는다. abi는 "arm64" 또는 "x86_64",
+    /// apiLevel은 최소 Android API(26 이상 39 이하)다. ndk가 없으면 ANDROID_NDK_HOME·ANDROID_NDK_ROOT,
+    /// 그다음 SDK 기본 위치(Windows %LOCALAPPDATA%/Android/Sdk/ndk, macOS ~/Library/Android/sdk/ndk)의
+    /// 가장 높은 버전을 쓴다. 증분 빌드 신원에는 NDK 버전(source.properties)과 compiler 버전을 넣는다.
+    /// </summary>
+    public static async Task<NativeToolchain> DiscoverAndroidAsync(string abi, int apiLevel, string? ndk = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!OperatingSystem.IsWindows() && !OperatingSystem.IsMacOS())
+            throw new PlatformNotSupportedException("Android builds require a Windows or macOS host.");
+        string triple = abi switch
+        {
+            "arm64" => "aarch64-linux-android",
+            "x86_64" => "x86_64-linux-android",
+            _ => throw new ArgumentException("android-abi must be arm64 or x86_64.")
+        };
+        if (apiLevel < 26 || apiLevel > 39)
+            throw new ArgumentException("android-api must be between 26 and 39.");
+        string root = ndk ?? Environment.GetEnvironmentVariable("ANDROID_NDK_HOME")
+            ?? Environment.GetEnvironmentVariable("ANDROID_NDK_ROOT") ?? FindDefaultNdk()
+            ?? throw new FileNotFoundException("Android NDK not found. Pass --android-ndk or set ANDROID_NDK_HOME.");
+        root = Path.GetFullPath(root);
+        string properties = Path.Combine(root, "source.properties");
+        if (!File.Exists(properties))
+            throw new FileNotFoundException("Not an Android NDK directory (source.properties missing).", properties);
+        string revision = File.ReadAllLines(properties).Select(line => line.Trim())
+            .FirstOrDefault(line => line.StartsWith("Pkg.Revision", StringComparison.Ordinal))?.Split('=', 2)[1].Trim()
+            ?? throw new InvalidOperationException("Cannot read Pkg.Revision from " + properties);
+        string host = OperatingSystem.IsWindows() ? "windows-x86_64" : "darwin-x86_64";
+        string bin = Path.Combine(root, "toolchains", "llvm", "prebuilt", host, "bin");
+        string executable = OperatingSystem.IsWindows() ? ".exe" : "";
+        string compiler = Path.Combine(bin, "clang++" + executable);
+        string archiver = Path.Combine(bin, "llvm-ar" + executable);
+        foreach (string tool in new[] { compiler, archiver })
+            if (!File.Exists(tool)) throw new FileNotFoundException("Android NDK tool is missing.", tool);
+        var environment = Environment.GetEnvironmentVariables().Cast<System.Collections.DictionaryEntry>()
+            .ToDictionary(entry => (string)entry.Key, entry => (string?)entry.Value,
+                OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        var version = await ProcessRunner.RunAsync(new ProcessSpec(compiler, ["--version"],
+            Directory.GetCurrentDirectory(), environment), cancellationToken);
+        if (version.ExitCode != 0 || !version.StdOut.Contains("clang", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The Android NDK clang does not run: " + compiler);
+        string target = "--target=" + triple + apiLevel;
+        var abiIdentity = new List<string> { "rocks-native-abi-v1", "Android", abi, "api=" + apiLevel, "ndk=" + revision };
+        abiIdentity.AddRange(version.StdOut.Split('\n').Select(value => value.Trim())
+            .Where(value => value.Length != 0 && !value.StartsWith("InstalledDir:", StringComparison.OrdinalIgnoreCase)));
+        return new NativeToolchain
+        {
+            Platform = NativePlatform.Android,
+            CompilerPath = compiler, ArchiverPath = archiver, LinkerPath = null,
+            Identity = version.StdOut.Trim() + "\n" + target + "\nndk=" + revision, Environment = environment,
+            AbiIdentity = Fingerprints.Strings(abiIdentity),
+            // 엔진은 STL을 쓰지 않지만 compiler runtime(예: 정적 지역 변수 guard)을 위해 libc++를 정적으로 묶는다.
+            CompileArguments = [target], LinkArguments = [target, "-static-libstdc++"],
+            FingerprintPaths = [properties], RuntimeFiles = []
+        };
+    }
+
+    private static string? FindDefaultNdk()
+    {
+        string sdk = OperatingSystem.IsWindows()
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Android", "Sdk")
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "Android", "sdk");
+        sdk = Environment.GetEnvironmentVariable("ANDROID_HOME") ?? Environment.GetEnvironmentVariable("ANDROID_SDK_ROOT") ?? sdk;
+        string ndkRoot = Path.Combine(sdk, "ndk");
+        if (!Directory.Exists(ndkRoot)) return null;
+        return Directory.EnumerateDirectories(ndkRoot)
+            .Select(path => (path, version: Version.TryParse(Path.GetFileName(path), out var parsed) ? parsed : null))
+            .Where(item => item.version != null && File.Exists(Path.Combine(item.path, "source.properties")))
+            .OrderByDescending(item => item.version).Select(item => item.path).FirstOrDefault();
+    }
+
     internal static StringComparer PathComparer => OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
     private static string FindFirst(IReadOnlyDictionary<string, string?> environment, string[] candidates)

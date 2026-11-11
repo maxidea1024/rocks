@@ -16,10 +16,14 @@ public sealed class PlatformBase : ModuleRules
     {
         Name = "PlatformBase",
         // POSIX 플랫폼은 공통 Posix 구현과 OS hook(Apple·Android)을 함께 빌드한다.
-        Sources = context.Platform == NativePlatform.MacOS
-            ? context.Sources("Engine/PlatformBase/Private/Mac", "Engine/PlatformBase/Private/Apple",
-                "Engine/PlatformBase/Private/Posix", "Engine/PlatformBase/Private/Common")
-            : context.Sources($"Engine/PlatformBase/Private/{context.PlatformDirectory}", "Engine/PlatformBase/Private/Common"),
+        Sources = context.Platform switch
+        {
+            NativePlatform.MacOS => context.Sources("Engine/PlatformBase/Private/Mac", "Engine/PlatformBase/Private/Apple",
+                "Engine/PlatformBase/Private/Posix", "Engine/PlatformBase/Private/Common"),
+            NativePlatform.Android => context.Sources("Engine/PlatformBase/Private/Android",
+                "Engine/PlatformBase/Private/Posix", "Engine/PlatformBase/Private/Common"),
+            _ => context.Sources($"Engine/PlatformBase/Private/{context.PlatformDirectory}", "Engine/PlatformBase/Private/Common")
+        },
         PublicIncludeDirectories = [context.PathInRoot("Engine/PlatformBase/Public")],
         // Mac 소스가 sibling Apple 공통 헤더를 사용하므로 증분 빌드의 입력에도 포함한다.
         PrivateIncludeDirectories = context.Platform == NativePlatform.MacOS

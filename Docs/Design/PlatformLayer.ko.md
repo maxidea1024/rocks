@@ -126,7 +126,16 @@ POSIX 공통 코드는 hook 밖의 OS 전용 API를 직접 쓰지 않는다. pol
 
 Android 앱 전용 저장소 경로는 Java 쪽 Context에서만 알 수 있으므로 앱이 시작 시 `RegisterApplicationDirectories(data, cache)`로 넘긴다. 등록 전에는 `UserData`·`UserCache`가 NotFound이며, `Temporary`는 등록된 cache 또는 `TMPDIR`·`/data/local/tmp`, `Home`은 등록된 data 또는 `HOME`이다. desktop에서 등록은 Unsupported다.
 
-검증(2026-11-11): NDK r29 clang(`--target=x86_64-linux-android26`, `aarch64-linux-android26`, `-Wall -Wextra -Wpedantic -Werror`)으로 Foundation 전체 166개 단위를 두 ABI에서 컴파일·링크했다. x86_64 바이너리를 Android 15(API 35) 에뮬레이터에서 실행해 662건 전부 통과했다(seed 4종, 비동기 파일 30회 반복 포함). 처음 실행에서 드러난 문제: POSIX 비동기 파일 오류 변환의 `EEXIST` 누락(macOS도 같은 코드라 같은 결함, 수정), 테스트 난수의 함수 인자 평가 순서가 ABI마다 달라 seed가 같아도 사례가 갈리던 테스트 결정성 결함(중괄호 초기화로 순서 고정), 기본 경로 테스트의 루트 경로·앱 등록 가정. arm64는 교차 컴파일만 했고 실기기 실행은 하지 않았다. 빌드는 아직 임시 스크립트(compile database 변환)이며 Rocks.Build 정식 대상 통합(MB01)이 남았다. macOS는 이번 재구성 후에도 빌드하지 않았다.
+검증(2026-11-11): NDK r29 clang(`--target=x86_64-linux-android26`, `aarch64-linux-android26`, `-Wall -Wextra -Wpedantic -Werror`)으로 Foundation 전체 166개 단위를 두 ABI에서 컴파일·링크했다. x86_64 바이너리를 Android 15(API 35) 에뮬레이터에서 실행해 662건 전부 통과했다(seed 4종, 비동기 파일 30회 반복 포함). 처음 실행에서 드러난 문제: POSIX 비동기 파일 오류 변환의 `EEXIST` 누락(macOS도 같은 코드라 같은 결함, 수정), 테스트 난수의 함수 인자 평가 순서가 ABI마다 달라 seed가 같아도 사례가 갈리던 테스트 결정성 결함(중괄호 초기화로 순서 고정), 기본 경로 테스트의 루트 경로·앱 등록 가정. arm64는 교차 컴파일만 했고 실기기 실행은 하지 않았다. 빌드는 Rocks.Build 정식 대상으로 통합했다(MB01).
+
+```
+# 빌드(Windows·macOS host, NDK는 --android-ndk 또는 ANDROID_NDK_HOME·SDK 기본 위치에서 찾음)
+dotnet msbuild Rocks.proj -t:Build -p:RocksPlatform=android -p:AndroidAbi=arm64 -p:AndroidApi=26
+# 기기·에뮬레이터에서 테스트(adb는 --adb 또는 ANDROID_HOME·SDK 기본 위치)
+dotnet msbuild Rocks.proj -t:Test -p:RocksPlatform=android -p:AndroidAbi=x86_64
+```
+
+컴파일 인자는 desktop과 같은 경고·언어 규칙에 `--target=<abi>-linux-android<api>`·`-fPIC`·`-DROCKS_PLATFORM_ANDROID=1`을 더하고, 링크는 `-static-libstdc++`다(엔진은 STL을 쓰지 않지만 compiler runtime이 필요). 메타컴파일러는 같은 NDK clang으로 AST를 만들며 검토한 대상 인자만 허용한다. `test`는 실행 파일을 `/data/local/tmp/rocks-test`에 올려 실행하고 보고서를 회수하며, host에서 자식 프로세스를 띄우는 harness(Fatal 음성 대조)·self·meta 검사는 Android에서 아직 실행하지 않는다. Android ASan과 Installed SDK 내보내기는 거부한다. Windows host에서 x86_64는 빌드·에뮬레이터 테스트 662건 통과, arm64는 Release 빌드만 확인했다. macOS host 교차 빌드와 macOS 자체 빌드는 하지 않았다.
 
 ## 플랫폼 선택과 실패 정책
 

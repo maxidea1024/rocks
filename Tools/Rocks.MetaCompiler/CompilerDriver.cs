@@ -152,7 +152,7 @@ internal static class CompilerDriver
         {
             "-std=c++23", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-fno-rtti",
             "-fno-exceptions", "-ffp-contract=off", "-O2", "-O0", "-g", "-fsanitize=address",
-            "-fno-omit-frame-pointer"
+            "-fno-omit-frame-pointer", "-fPIC"
         };
         string? sdk = null;
         var groups = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -175,6 +175,15 @@ internal static class CompilerDriver
                     _ => "flag:" + argument
                 };
                 Remember(group, argument);
+                continue;
+            }
+            // Android 교차 빌드 대상(NDK clang)은 검토한 ABI와 API level만 받는다.
+            if (!clangCl && argument.StartsWith("--target=", StringComparison.Ordinal))
+            {
+                if (!System.Text.RegularExpressions.Regex.IsMatch(argument,
+                        "^--target=(aarch64|x86_64)-linux-android(2[6-9]|3[0-9])$"))
+                    throw InvalidArgument(argument);
+                Remember("target", argument);
                 continue;
             }
             if (!clangCl && argument == "-isysroot")

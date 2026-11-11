@@ -36,7 +36,7 @@ namespace Rocks.Build.Cli
             {
                 "game" => new HashSet<string>(["sdk", "project", "target", "configuration", "output", "compiler", "jobs"], StringComparer.Ordinal),
                 "sdk" => new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination"], StringComparer.Ordinal),
-                "build" or "test" => new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs"], StringComparer.Ordinal),
+                "build" or "test" => new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "platform", "android-abi", "android-api", "android-ndk", "adb"], StringComparer.Ordinal),
                 _ => throw new ArgumentException($"Unknown command: {args[0]}")
             };
             foreach (var name in options.Keys)
@@ -51,9 +51,26 @@ namespace Rocks.Build.Cli
             var root = Path.GetFullPath(options.GetValueOrDefault("root", Directory.GetCurrentDirectory()));
             var configuration = Configuration(options);
             var targetName = options.GetValueOrDefault("target", args[0] == "sdk" ? "Engine" : "Foundation");
+            // --platform android면 NDK로 교차 빌드한다(--android-abi arm64|x86_64, --android-api, --android-ndk).
+            var platform = options.GetValueOrDefault("platform", "host");
+            if (platform is not ("host" or "android"))
+                throw new ArgumentException("platform must be host or android.");
+            bool android = platform == "android";
+            if (!android && options.Keys.Any(key => key.StartsWith("android-", StringComparison.Ordinal) || key == "adb"))
+                throw new ArgumentException("--android-* and --adb options require --platform android.");
+            if (android && options.ContainsKey("compiler"))
+                throw new ArgumentException("--compiler is not used for --platform android; pass --android-ndk instead.");
+            if (android && args[0] == "sdk")
+                throw new ArgumentException("Installed SDK export does not support --platform android yet.");
+            string androidAbi = options.GetValueOrDefault("android-abi", "arm64");
+            int androidApi = int.TryParse(options.GetValueOrDefault("android-api", "26"), out var api) ? api
+                : throw new ArgumentException("android-api must be an integer.");
+            string platformName = android ? "android-" + androidAbi : OperatingSystem.IsWindows() ? "windows" : "macos";
             var output = Path.GetFullPath(options.GetValueOrDefault("output",
-                Path.Combine(root, "out", $"dotnet-{(OperatingSystem.IsWindows() ? "windows" : "macos")}-{targetName.ToLowerInvariant()}-{configuration.ToString().ToLowerInvariant()}")));
-            var toolchain = await NativeToolchains.DiscoverAsync(options.GetValueOrDefault("compiler"), cancellationToken);
+                Path.Combine(root, "out", $"dotnet-{platformName}-{targetName.ToLowerInvariant()}-{configuration.ToString().ToLowerInvariant()}")));
+            var toolchain = android
+                ? await NativeToolchains.DiscoverAndroidAsync(androidAbi, androidApi, options.GetValueOrDefault("android-ndk"), cancellationToken)
+                : await NativeToolchains.DiscoverAsync(options.GetValueOrDefault("compiler"), cancellationToken);
             var context = new BuildContext(root, output, toolchain.Platform, configuration);
             var rulesPath = options.GetValueOrDefault("rules", HostTool(root, "Rocks.Engine.Rules"));
             var rules = RuleLoader.Load(rulesPath, targetName, context);
@@ -139,6 +156,25 @@ namespace Rocks.Build.Cli
                     var report = Path.Combine(output, "foundation-report.json");
                     evidence.BeginTests(report);
                     var executable = result.ModuleOutputs[rules.Target.TestExecutable];
+                    if (android)
+                    {
+                        // 기기·에뮬레이터에서 native 테스트를 실행하고 보고서를 회수한다. host에서 자식
+                        // 프로세스를 띄우는 harness(Fatal 음성 대조 등)와 self·meta 검사는 Android에서 아직
+                        // 실행하지 않는다.
+                        var deviceStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                        int deviceExit = await AndroidDevice.RunTestsAsync(executable, report, options.GetValueOrDefault("adb"),
+                            toolchain.Environment, cancellationToken);
+                        evidence.RecordStep("foundation-android", [executable, "--seed", "7351", "--json", report], deviceExit,
+                            System.Diagnostics.Stopwatch.GetElapsedTime(deviceStart), tests: true);
+                        Console.WriteLine("Android: device tests only; host harness, self, and meta checks were not run.");
+                        if (deviceExit != 0)
+                        {
+                            await evidence.FinishAsync("Android device tests failed.");
+                            return 1;
+                        }
+                        var androidCompleted = await evidence.FinishAsync();
+                        return androidCompleted.Status == "PASS" ? 0 : 1;
+                    }
                     var testStart = System.Diagnostics.Stopwatch.GetTimestamp();
                     var native = await ProcessRunner.RunAsync(new(executable, ["--seed", "7351", "--json", report], root, toolchain.Environment), cancellationToken);
                     Console.Write(native.StdOut);
@@ -194,7 +230,7 @@ namespace Rocks.Build.Cli
 
         internal static Dictionary<string, string> Parse(string[] args)
         {
-            var allowed = new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", "sdk", "project"], StringComparer.Ordinal);
+            var allowed = new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", "sdk", "project", "platform", "android-abi", "android-api", "android-ndk", "adb"], StringComparer.Ordinal);
             var values = new Dictionary<string, string>(StringComparer.Ordinal);
             for (var index = 0; index < args.Length; index += 2)
             {

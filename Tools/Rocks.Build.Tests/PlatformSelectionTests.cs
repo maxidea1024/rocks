@@ -10,9 +10,11 @@ internal static class PlatformSelectionTests
         Check(context.PlatformDirectory == "Win64", "Windows must select Win64 sources.");
         Check((context with { Platform = NativePlatform.MacOS }).PlatformDirectory == "Mac",
             "macOS must select Mac sources.");
+        Check((context with { Platform = NativePlatform.Android }).PlatformDirectory == "Android",
+            "Android must select Android sources.");
 
         var builder = new NativeBuildEngine();
-        foreach (NativePlatform invalid in new[] { (NativePlatform)(-1), (NativePlatform)2,
+        foreach (NativePlatform invalid in new[] { (NativePlatform)(-1), (NativePlatform)3,
                      (NativePlatform)int.MaxValue })
         {
             try
