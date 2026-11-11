@@ -2,7 +2,7 @@
 
 STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-driven 렌더러
 
-**설계 기준일 2026.11.11 · 개정 1.4 · 상태: 구현 제안 / 성능 미측정**
+**설계 기준일 2026.11.11 · 개정 1.5 · 상태: 구현 제안 / 성능 미측정**
 
 **추가 요구 반영:** Deferred·Forward 정식 지원, 업스케일링, 태깅·컴포넌트·프리팹, Unreal 참고 체계 확대, 컷씬 제작 핵심화, Blueprint 제외·자체 언어 채택, 하이엔드 포스트이펙트 전체 기능군, UBT 계열 자체 빌드 도구·분산 빌드·반복 개발 최적화, 정식 헤드리스 모드, 필수 노드 기반 머티리얼 에디터.
 
@@ -11,6 +11,8 @@ STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-d
 **1.3 추가 요구:** Rocks 자체 명명, Windows/macOS 개발 환경, 5종 RHI, 머티리얼 에디터·템플릿·PIE, 가변/고정 tick·time dilation, texture streaming·내장 리소스, lightmap/probe, 필수 로그·프로파일러·장애 하네스를 반영한다. 수학은 검증된 구현의 어댑터와 SIMD 활용으로 구성하고 자체 알고리즘 재작성은 제외한다. 안정성·정확성, 확장성, 성능 순으로 판단하며 Core/Object가 첫 작업이다. 상세 모듈·API·작업은 별첨 1.1에 연결한다.
 
 **1.4 UI 방향 전환:** 웹 에디터(WebView2·WKWebView·TypeScript/React)를 채택하지 않고, 게임 UI와 에디터를 Godot 4.x 수준의 단일 UI 툴킷으로 구성한다. Core는 Unreal 체계를 유지한다. 21·22절과 웹 에디터를 전제로 한 문장을 개정하고, 툴킷의 구조·계약·Core 선행 항목·검증 방식은 [UI 툴킷 설계](UiToolkit.ko.md)에 둔다. 33.9절에 개정 범위를 기록한다. 상세안은 1.2로 함께 개정한다.
+
+**1.5 공간 인덱스:** World의 런타임 공간 인덱스를 Unreal의 분담 방식으로 정의한다. 렌더 판정은 평면 SoA와 SceneCulling 유사 계층 공간 해시, 충돌 질의는 물리 scene query, 비충돌 게임플레이 질의는 2D 계층 공간 해시로 구분한다. 10.4절에 규약과 수용 시험 SI01–SI10을, 33.10절에 교차 검증 결과와 개정 범위를 기록한다.
 
 ## 1. 목표와 실행 전략
 
@@ -215,13 +217,14 @@ Apple은 Windows용 Metal 제작 도구와 macOS/Windows용 Metal Shader Convert
 | PlatformBase / PlatformWindow | EngineBase·OS kernel / Core·PlatformBase·window SDK | Base는 메모리·파일·스레드·clock, Window는 창·입력. CPU-only는 Window 제외 |
 | Core | EngineBase·PlatformBase | 컨테이너·할당기·문자열·수학·진단·Atomic. Window 의존 금지 |
 | Task / IO / Trace | Core | 작업 DAG, 비동기 IO, 계측. 서로의 높은 계층에 의존하지 않음 |
+| SpatialIndex | Core, Task | 계층 공간 해시·평면 SoA 판정의 공통 코드(10.4절). World·RHI·Object 의존 금지 |
 | MetaSchema / Serialization | Core | TypeId·FieldId·Archive 계약, 버전 규칙. Object 없음 |
 | ObjectRuntime | Core, Task, MetaSchema | Object, Registry, GC, Reflection 실행. Asset 의존 금지 |
 | ObjectSerialization | ObjectRuntime, Serialization | R2 객체 Archive bridge. ObjectRuntime의 역참조 금지 |
 | AssetRuntime | IO, Task, ObjectRuntime, Serialization, ObjectSerialization | Package, LoadTicket, AssetId, DDC reader |
-| World | AssetRuntime, ObjectRuntime, Task | Entity/Component, Scene Graph, Cell, 시스템 실행 순서 |
+| World | AssetRuntime, ObjectRuntime, Task, SpatialIndex | Entity/Component, Scene Graph, Cell, SpatialQueryService, 시스템 실행 순서 |
 | RHI | Core, Task, graphics SDK adapter | device·offscreen은 Window 불필요, interactive swapchain만 Window 사용. World·Object 없음 |
-| RenderGraph / Renderer | RHI, Task, Core, RenderData | pass·GPU Scene·조명·메시. World 순회 없음 |
+| RenderGraph / Renderer | RHI, Task, Core, RenderData, SpatialIndex | pass·GPU Scene·조명·메시·visibility 판정 인덱스. World 순회 없음 |
 | MaterialSchema / Compiler / Runtime | Core·Schema / Host ShaderWorker / RenderData·RHI | graph 계약·host 컴파일·cooked 실행 분리; 14.6절 세부 의존 |
 | Physics / Audio / Navigation | Core, Task, 각 vendor adapter | 독립 네이티브 runtime. Entity/Renderer 내부 주소 없음 |
 | Animation / VFX | Core, Task, Asset 데이터 및 해당 backend | 데이터 처리·실행. World 연결은 통합 계층에서 수행 |
@@ -887,9 +890,88 @@ World travel은 PrepareDestination → Prefetch → QuiesceOldWorld → Transfer
 
 SaveGame은 map manifest·stable actor/prefab IDs·spawn/despawn tombstone·script schema·game state를 snapshot으로 저장한다. 읽을 때 전부 instantiate → remap → state apply → register 순서를 수행한다. async save·incremental save·save slot·version migration·충돌 복구를 지원하며 network replay와 파일 포맷을 분리한다.
 
-공통 spatial query는 overlap/trigger volume·zone·team/tag query·significance를 제공한다. render BVH·physics broadphase·nav index를 하나의 구조로 강제하지 않고 각 결과를 WorldId·tick/version으로 정합한다. multi-camera·spectator·split-screen의 streaming source와 listener는 LocalPlayer별로 관리한다.
+공통 spatial query는 zone·team/tag query·significance를 제공하고, 충돌 형상의 overlap·trigger는 16.3절의 물리 scene query로 처리한다. 렌더 판정 인덱스·physics broadphase·nav index를 하나의 구조로 강제하지 않고 각 결과를 WorldId·tick/version으로 정합한다. 소비자별 구조와 규약은 10.4절에 둔다. multi-camera·spectator·split-screen의 streaming source와 listener는 LocalPlayer별로 관리한다.
 
 AAA01/AAA02의 지속 월드 상태·PCG provenance와 AAA08의 이동 환경 snapshot은 이 World/partition 규약을 확장한다. 구체 revision·실패·하네스 기준은 33.6절을 적용한다.
+
+### 10.4 런타임 공간 인덱스
+
+공간 인덱스는 Unreal의 분담 방식을 따른다. 단일 월드 octree를 두지 않고 소비자별로 질의 형태에 맞는 구조를 소유한다. 모든 인덱스는 World 또는 RenderScene 단위 인스턴스이며 전역 singleton을 사용하지 않는다. 입력은 transform commit(8.4·10.1절)에서 각 소비자의 command·packet으로 전달하고, entry는 generation handle로 식별하며, 결과는 WorldId·tick·origin epoch로 정합한다.
+
+| 소비자 | 구조·소유 | 규약 |
+|---|---|---|
+| 이동 primitive·skeletal mesh·광원·decal·capture·최상위 level 초과 대상의 렌더 판정 | RenderScene의 평면 SoA bounds | view별 병렬 SIMD frustum·거리·LOD 판정. 계층에 등록하지 않으므로 이동에 따른 cell 변경이 없다. CPU 판정 장치의 기본 경로 |
+| 정적 mesh·instanced·foliage의 렌더 판정 | RenderScene의 계층 공간 해시(HierarchicalSpatialHash) | WP cell 단위로 cook한 cell·chunk를 활성화 시 연결. GPU-driven 장치는 GPU에서, 그 밖의 장치는 worker가 block→cell→chunk 순으로 판정 |
+| 충돌 형상 trace·sweep·overlap·trigger | 16절 물리 adapter의 scene query | collision channel·query filter·QueryReadScope(16.3절). 별도 인덱스 없음 |
+| 비충돌 게임플레이 질의: 지점 주변·team/tag·zone·network interest | World의 SpatialQueryService(2D 계층 공간 해시) | trigger event 미생성. 결과를 결정적 순서로 반환 |
+| significance | 인덱스 없음 | viewpoint별 SoA 순회 |
+| 에디터 선택 | viewport GPU ID buffer readback. 비가시 대상 포함 선택과 headless는 EditorBackend 해시와 double 정밀 ray/triangle 판정 | WPO·skinning·masked 재질의 화면 결과와 일치 |
+| streaming | 10.2절 World Partition grid | 아래 World Partition 연동 |
+| navigation | 19절 tile index. nav 관련 geometry는 tile 정렬 2D grid | dirty tile은 이전·현재 footprint의 합집합 |
+
+UE 5.4는 계층 instance culling(`r.SceneCulling`)을 기본 활성화하고, cook 시 사전 계산한 spatial hash·static/dynamic primitive 분리·실제 instance bounds 기반 cell bounds를 도입하였다. [S78](https://dev.epicgames.com/documentation/unreal-engine/unreal-engine-5.4-release-notes?application_version=5.4) hash 위치는 정수 좌표와 크기의 FloorLog2로 산정한 level의 쌍이며 [S79](https://dev.epicgames.com/documentation/unreal-engine/API/Runtime/Engine/TLocation), GPU는 hierarchy cell 판정 후 계층 밖 대상을 추가 판정한다. [S80](https://forums.unrealengine.com/t/how-some-nanite-passes-work/2667840) 동적 instanced primitive는 계층에 등록하지 않고 GPU에서 전수 판정하는 설정이 기본값이다(UE 5.4.4 cvar, 2차 출처 [S86](https://indxzero.github.io/ue544cvarwiki)). 충돌 질의는 Chaos scene query의 static 트리(변경 시 전체 재구성)와 dynamic 트리를 사용한다. [S81](https://forums.unrealengine.com/t/chaos-taabbtree-memory-consumption-and-weird-flat-structure/2589987) Rocks는 이 분담을 따르되 CPU 판정 장치(mobile·D3D11·OpenGL)를 정식 경로로 포함한다.
+
+#### 계층 공간 해시 규약
+
+1. **cell key.** level ℓ의 cell 한 변은 L_ℓ = L_min·r^ℓ이며, level 비율 r은 인스턴스별 2의 거듭제곱 설정값이다(렌더 해시 2, SpatialQueryService 4). key는 (ℓ, ix, iy, iz)이며 ix = floor(x / L_ℓ)를 double로 계산한다. 축 좌표는 int32로 저장하고 부모 좌표는 산술 shift로 산출한다. 0 방향 절삭 변환은 음수 좌표에서 −1 cell과 0 cell을 병합하므로 금지한다. 64-bit 압축 key는 범위 검사를 통과한 값에만 사용한다. 비유한 위치와 선언된 월드 범위 밖 위치는 격리 목록에 등록하여 항상 판정 대상에 포함하고 오류를 보고한다.
+2. **level 선택.** 정적 대상은 AABB 최대 축 길이 e에 대해 L_ℓ ≥ e를 만족하는 최소 level에 배치한다. 회전 대상은 asset이 선언한 최대 반경의 지름을 e로 사용하여 회전에 의한 level 변경을 방지한다. 크기 변화에는 hysteresis를 적용한다. 상향은 e > L_ℓ, 하향은 e가 한 단계 아래 level 한 변의 0.8배 미만일 때 수행한다. L_min 미만 대상은 0 level에 배치한다.
+3. **loose 범위.** cell의 loose 범위는 tight cell을 각 축으로 L_ℓ/2씩 확장한 한 변 2L_ℓ의 입방체다(k = 2). 삽입·CPU 질의 확장·GPU cell 판정은 단일 상수 (k−1)·L_ℓ/2에서 파생한다. 렌더 판정의 cell bounds는 loose 범위가 아니라 소속 chunk bounds의 합집합을 사용한다.
+4. **배치와 이동.** 대상은 중심이 속한 tight cell에 배치한다. loose 구조의 이점은 경계에 걸친 대상을 상위 level로 승격하지 않고 단일 cell에 O(1)로 배치하는 데 있으며, 직선 이동의 cell 변경 빈도는 같은 크기의 균일 grid와 같다. loose octree 원 설계도 반경으로 level을 결정하고 이동 시 cell 재배치 여부만 검사한다. [S84](https://tulrich.com/geekstuff/partitioning.html) 「현재 cell의 loose 범위 안이면 유지」하는 위치 hysteresis의 여유는 L_ℓ/2 − h(h는 최대 축 반길이)이며 level 경계 크기의 대상은 0이다. 이 규칙은 경계 부근 왕복 이동에 의한 변경만 제거한다. 렌더 해시에는 이동 대상을 등록하지 않으므로 위치 hysteresis는 SpatialQueryService에 한정하고 SI05 측정 결과로 채택을 판정한다.
+5. **block과 chunk.** cell을 8³ 단위 block으로 묶고 block별 점유 bitmask를 둔다. cell 안의 instance는 같은 primitive 기준 최대 64개 chunk로 묶는다. 판정은 block → cell → chunk → instance 순이다. 큰 질의는 점유 block 목록을 선형 판정하고, 작은 질의는 level별로 key를 열거하되 열거 수가 해당 level의 점유 cell 수를 넘으면 선형 판정으로 전환한다.
+6. **초기 매개변수(제안).** L_min 32 m, 최상위 16,384 m(10 level), block 8³ cell, chunk 64 instance로 시작한다. UE의 최소 cell 크기 기본값 4096 cm와 유사한 규모다(2차 출처 [S86](https://indxzero.github.io/ue544cvarwiki)). World Partition cell 한 변은 L_min의 2의 거듭제곱 배로 유지한다(초기 256 m). 장대 spline·landscape는 cook 시 분할하여 상위 level 집중을 방지하고, 최상위 level을 넘는 대상은 평면 SoA 경로에 등록하며 개수 상한 초과를 경고한다. 모든 값은 SI02 측정 후 확정한다.
+7. **정밀도.** bounds는 cell 정수 원점 기준 상대 float로 저장하고 외향 반올림한다. view frustum 평면은 block 원점 기준으로 double에서 이동한 뒤 float로 판정한다. 평면 SoA 경로는 2,048 m tile 단위 page에 tile 상대 float bounds를 저장한다. origin epoch가 변경되어도 저장된 bounds를 재계산하지 않는다.
+8. **갱신과 동시성.** 등록·해제는 commit 또는 RenderScene update에서 cell key 순으로 정렬하여 일괄 적용한다. cell 내부는 swap-remove와 append로 갱신하며 entry의 역참조는 포인터가 아닌 index·key로 저장한다(재해시 시 값 주소 무효화). Core `HashMap`은 쓰기 단계에서만 사용한다. const 반복도 내부 반복 깊이를 변경하므로 worker 동시 읽기에 사용하지 않는다. 읽기 phase에는 key 순으로 정렬한 immutable block·cell·chunk 배열을 게시한다. stream-in 시 cell manifest 기준으로 용량을 예약하고 unload 후 compact한다.
+9. **정적 데이터 변경.** cook된 static chunk는 (offset, count) 범위로 연결하며 runtime에 재배열하지 않는다. 파괴·숨김·PIE 편집은 session별 hidden-instance bitmask와 별도 dynamic span으로 처리한다.
+
+#### 가시성 보수성
+
+13.1절의 V_ref ⊆ V_submit을 다음 규약으로 보장한다.
+
+- 등록 bounds는 이전·현재 pose bounds의 합집합에 material이 선언한 최대 WPO 변위를 더한 값이다. skinning·cloth는 asset이 선언한 최대 bounds를 사용한다. 렌더 보간 구간에서 이전 pose가 cell 밖에 위치하여 누락되는 경우를 방지한다.
+- bounds가 소속 cell 범위를 벗어난 entry는 같은 commit 안에서 재배치한 뒤 snapshot을 게시한다.
+- 2단계 HZB(11.4절)에서 이전 HZB로 탈락한 block·cell·chunk를 현재 HZB로 재판정한다. instance 단위 재판정만으로 복구를 완료하지 않는다.
+- shadow·capture view는 caster volume(광원 방향으로 확장한 cascade frustum, cone, sphere)으로 판정한다.
+- 다중 view는 GPU에서 view bitmask 단일 pass로 판정한다. CPU 경로는 level별 화면 크기와 cell 최대 draw distance로 level 단위 생략을 적용한다.
+
+#### 광원·decal·capture
+
+광원·decal·reflection capture는 평면 SoA 경로로 view 판정한 뒤 GPU cluster binning에 전달한다. 이동 primitive와 local light의 상호작용(그림자 cache 무효화), forward·mobile 경로의 reflection capture·probe 선택은 같은 해시 코드의 별도 light 인스턴스로 질의한다.
+
+#### 게임플레이 질의와 결정성
+
+overlap·trigger는 물리 sensor와 scene query로만 처리하며 SpatialQueryService는 trigger event를 생성하지 않는다. SpatialQueryService는 2D 계층 공간 해시(level 한 변 8·32·128·512 m, 비율 4)를 사용하고, entry에 double 중심·float extent·Z 범위·category mask·team·EntityHandle을 저장한다. Game lane이 commit에서 일괄 갱신하고 worker는 read phase에서 commit된 version을 조회한다. 결과는 (거리, stable EntityId) 순으로 정렬하며 해시 반복 순서에 의존하지 않는다. 고속·순간 이동 대상과 측정 cell 변경률이 frame당 0.25를 넘는 대상은 별도 목록에서 전수 판정한다.
+
+#### World Partition 연동
+
+UE 5.4 runtime hash의 Loose Hierarchical Grid는 actor extent로 streaming cell 범위를 조정하여 상위 level 승격을 줄인다. [S78](https://dev.epicgames.com/documentation/unreal-engine/unreal-engine-5.4-release-notes?application_version=5.4) grid별 cell 크기와 loading range는 독립 설정이다. [S85](https://dev.epicgames.com/documentation/en-us/unreal-engine/world-partition-in-unreal-engine) Rocks의 10.2절 grid도 중심 기준 배치와 extent 기반 cell 범위 확장을 사용한다. 렌더 해시의 정적 chunk는 WP cell 단위로 cook하고, cell 활성화 mask(10.2절)에 render 등록 완료를 포함한다. runtime에 이동한 배치 actor의 cell 재귀속은 수행하지 않는다. 소속 cell 밖으로 이동하는 actor는 cell unload 시 함께 해제되므로 persistent layer 또는 runtime 영속 승격 정책을 선언한다.
+
+#### 수명·격리
+
+- cell unload 시 cull job·GPU indirect argument가 참조하는 cell 배열은 frame slot lease와 fence 완료 후 해제한다(11.2절).
+- PIE session마다 World·RenderScene 인스턴스를 분리하며, cook된 immutable cell 데이터는 revision lease로 공유한다.
+- level instance의 offset은 최상위 level 한 변의 정수배를 요구하거나 load 시 key를 재계산한다.
+- 공통 해시·평면 판정 코드는 Renderer에 의존하지 않는 SpatialIndex 모듈(3.1절)에 둔다. DedicatedServer profile은 렌더 인덱스를 링크하지 않는다.
+
+#### 물리 middleware와의 경계
+
+본 절의 계약은 물리 middleware에 의존하지 않으며, 충돌 질의는 adapter 뒤의 middleware 내부 구조를 사용한다. Jolt는 broadphase layer별 quad AABB tree를 사용하며 이동 body의 상위 node box를 확장한 뒤 step 중 background에서 재구성한다. [S82](https://github.com/jrouwe/JoltPhysics/blob/master/Docs/Architecture.md) PhysX 5의 scene query는 static·dynamic pruner 모두 dynamic AABB tree가 기본값이며 사전 계산 구조(`PxPruningStructure`)의 일괄 추가를 지원한다. [S83](https://nvidia-omniverse.github.io/PhysX/physx/5.6.1/docs/SceneQueries.html) WP cell collision은 middleware의 일괄 추가 경로로 등록한다.
+
+#### 수용 시험
+
+| ID | 시험 | 판정 기준(제안) |
+|---|---|---|
+| SI01 | 평면 SoA 판정: primitive 10k–1M × view, x64·Apple·Android big/little core | view당 primitive 판정 desktop 1.5 ns·mobile big core 4 ns 이하, 8 worker 확장 효율 0.7 이상 |
+| SI02 | 매개변수 sweep: L_min 8·16·32·64 m, chunk 32·64·128, block 4³·8³, 고밀도 foliage | chunk 점유율 50% 이상, instance 단위 정확 판정 대비 초과 제출 20% 이하, instance당 CPU 메모리 48 B 이하, 재해시 peak 기록 |
+| SI03 | GPU 판정: instance 2M, main view·cascade 4·local light 32 | 기준 desktop GPU에서 0.5 ms 이하 |
+| SI04 | CPU 경로: instance 200k, main view·cascade 2, 중급 Android | worker CPU 합계 1.0 ms 이하 |
+| SI05 | cell 변경률: 기록 replay에서 중심 배치와 위치 hysteresis 비교 | 변경 30% 이상 감소·질의 비용 증가 10% 이하일 때만 hysteresis 채택. 이동 대상 1만 개 갱신 0.2 ms 이하 |
+| SI06 | 보수성 fuzz: 경계 왕복·음수 좌표·key 한계·원점에서 10⁷ m·NaN·origin epoch·WPO·보간·2단계 HZB | V_ref ⊆ V_submit 위반 0건 |
+| SI07 | WP cell 활성화: instance 100k와 collision, 활성화 중 unload·PIE 2 session | lane당 frame 1 ms 이하, Activated 이전 누락 0건, lease 위반·누수 0건 |
+| SI08 | 충돌 질의 adapter 적합성: frame당 ray 10k·sweep 1k, channel·filter 조합 | filter 판정이 schema oracle과 100% 일치, hit가 허용 오차 내 일치 |
+| SI09 | 게임플레이 질의 결정성: entry 20k에 반경 질의 1k | 0.5 ms 이하, worker 0·1·N에서 결과와 순서 동일 |
+| SI10 | DedicatedServer link 검사 | 렌더 인덱스 미포함, SpatialIndex·SpatialQueryService만 포함 |
+
+판정 기준의 수치는 측정 전 제안값이며 SI01–SI05 결과로 재산정한다. 매개변수 확정 전에는 기능 정확성 시험 SI06–SI10을 우선 통과한다.
 
 ## 11. 렌더러 기반과 Deferred·Forward 정식 지원
 
@@ -2400,6 +2482,7 @@ RHI·UI 툴킷·언어·전문 빌드 도구의 본격 구현은 Foundation Gate
 | R18 · P1 | 원격 compile만 개선하고 link/restart가 병목 유지 | I0–I6 전체 시간·module link/PDB·실행 복구·비 native 반복 경로 |
 | R19 · P1 | NullRHI로 영상/UI 성공을 오판 | CPU-only/GPU offscreen profile·capability 실패·실제 image 비교 |
 | R20 · P1 | UI designer/runtime 차이·binding root 누수 | 동일 evaluator/layout·typed binding·preview/cooked/headless 통합 |
+| R21 · P1 | 공간 인덱스의 bounds·key·HZB 경로 결함에 의한 가시 객체 누락, 다중 view 판정 비용 증가 | 단일 loose 상수·외향 반올림·block 계층·SI06 fuzz·SI03/SI04 예산. GPU-driven 판정 착수 전 SI06 통과 |
 
 기능 계획의 P0는 안정성 선행 조건, P1은 제작·실행 필수, P2는 규모·품질 확장, P3는 연구·특수 기능이다. 위 위험표의 우선순위는 대응 시급성으로 별도 사용한다. 후속 전문 기능을 P3로 분류하여도 제품 범위에서 삭제한 것으로 해석하지 않는다. 다만 첫 실용 버전과 장기 전체 범위의 완료 시점을 구분한다.
 
@@ -2499,6 +2582,7 @@ RHI·UI 툴킷·언어·전문 빌드 도구의 본격 구현은 Foundation Gate
 | 전체 post·upscale·HDR | 26절 catalog·두 경로·FSR/DLSS/XeSS·volume/shot·history | 필수 M4–M9 |
 | Skeletal·animation·rig·retarget·morph | blend/montage/sync/socket·IK/warp·pose search·skin/velocity | 필수 M4–M8, 고급 cloth/groom P3 |
 | Physics·collision·query·nav | channel/material·constraint·character·async query·tile snapshot | 필수 M4–M7; 파괴/softbody/vehicle 개별 P3 |
+| World 공간 인덱스·visibility 판정 | 평면 SoA·SceneCulling 유사 계층 공간 해시·physics scene query·2D gameplay 해시 분담, 보수성·결정성 규약 | 필수 M3 CPU 경로, M4–M5 GPU-driven·WP 연동(제안); 10.4절 SI gate |
 | AI·EQS·State/Behavior·SmartObject·Mass | task budget·script predicate·예약·SoA/Entity bridge | 필수 M4–M7 |
 | Gameplay Ability·effect·cue | 태그·속성·stack·cost·duration·prediction·취소 | 필수 M5–M6 |
 | Network·subobject·replay·online | authority/conditions·spawn/fixup·travel/reconnect·provider | 필수 M5–M7, 서비스 운영 통합 별도 gate |
@@ -2623,9 +2707,31 @@ Godot 코드는 이식하지 않고 구조와 동작 계약을 재구현하며, 
 
 개정 범위는 표지·1·1.1·1.2(CF01)·2.4·2.5(PL01·PL04)·3.1·3.2·7.2·9.3·14.6·14.8·14.9(MT08)·21·22·23.3·25.3·27.10·28.1·28.5·29.2(B12)·29.4·30·31(R08·R20)·32·33.2·34절이다. 3.1절 계층 그림은 원본이 저장소 밖에 있어 그림 자체는 개정하지 않았다. 본 개정은 문서 계약의 변경이며 구현·실행 검증 결과가 아니다.
 
+### 33.10 개정 1.5의 런타임 공간 인덱스
+
+검토 입력은 사용자 초안(loose octree, 이동 시 cell 변경 완화)과 Unreal 분담 방식의 추종 요구다. 서브에이전트 3개가 초안을 제공받지 않은 독립 설계, 초안의 반례 검토, 공개 자료의 사실 확인을 각각 수행하였다. 사실 확인은 1차 출처·2차 출처·미확인을 구분하였다. SceneCulling cell의 loose 여부·level 산정식·도입 버전과 World Partition의 level 선택식은 확인되지 않아 근거로 사용하지 않았다.
+
+두 설계 검토는 loose 확장만으로 직선 이동의 cell 변경이 감소하지 않는다는 결론에 독립적으로 도달하였다. 이에 따라 이동 대상을 렌더 계층에서 제외하는 UE 방식을 채택하고, 위치 hysteresis는 SpatialQueryService에 한정하여 SI05 측정으로 판정한다.
+
+| 지적 | 10.4절 조치 |
+|---|---|
+| cell 상위 계층 부재로 다중 view·광원 질의 비용 증가 | 8³ block·점유 bitmask, level 생략, key 열거·선형 판정 전환 |
+| 보간·WPO, loose 상수 불일치, cell 단위 HZB 탈락에 의한 가시 누락 | 합집합 bounds·WPO 확장, 단일 상수, block·cell·chunk 재판정 |
+| `HashMap` 반복 순서의 비결정성과 const 반복의 내부 상태 변경 | 정렬된 immutable 배열 게시, (거리, stable EntityId) 결과 정렬 |
+| 0 방향 절삭·비유한 값·압축 key overflow | floor·int32 축 좌표·격리 목록 |
+| foliage per-instance entry의 메모리, 정적 데이터 편집과 cook 고정의 충돌 | 64-instance chunk, hidden-instance bitmask·dynamic span |
+| 광원 상호작용 인덱스 누락 | 같은 해시 코드의 light 인스턴스 |
+| overlap·trigger의 물리·게임플레이 이중 처리 | trigger를 물리 sensor로 한정 |
+| 256 m 최상위 level에서 장대 객체의 상위 level 집중 | 최상위 16,384 m, spline·landscape cook 분할, 초과 대상 평면 경로 |
+| 렌더 전용 공통 코드의 서버 링크 | SpatialIndex 모듈 분리, SI10 link 검사 |
+
+물리 middleware 선택은 본 개정 범위가 아니다. 사실 확인에서 PhysX 5.x의 공식 runtime 지원이 Windows·Linux로 한정되고 macOS·iOS·Android는 O3DE fork에서만 제공되며, 5.11부터 Apache 2.0 라이선스임을 확인하였다. 2.2절의 macOS 개발·Android/iOS 클라이언트 요구와 관련되므로, 16.1절의 Jolt 기본안을 변경할 경우 별도 개정으로 처리한다.
+
+개정 범위는 표지·3.1·10.3·10.4·31(R21)·33.2·33.10·34절이다. 본 개정은 문서 계약의 변경이며 구현·측정 결과가 아니다.
+
 ## 34. 참고 자료와 설계 근거
 
-이전 대화는 사용자 제공 참조 「3D 엔진 설계」와 현재 대화의 추가 요구를 기준으로 한다. 아래 공식 문서는 기술 개념과 API 경계를 확인하기 위한 자료다. 일정·API·예산·구현 단계는 이 계획의 제안이며 참고 자료의 성능 보증이 아니다. 온라인 문서는 변경될 수 있으므로 실제 구현 착수 시 선택 SDK 버전의 문서·commit을 build manifest에 고정한다. 조회일은 2026.11.10이며 S75–S77은 2026.11.11이다.
+이전 대화는 사용자 제공 참조 「3D 엔진 설계」와 현재 대화의 추가 요구를 기준으로 한다. 아래 공식 문서는 기술 개념과 API 경계를 확인하기 위한 자료다. 일정·API·예산·구현 단계는 이 계획의 제안이며 참고 자료의 성능 보증이 아니다. 온라인 문서는 변경될 수 있으므로 실제 구현 착수 시 선택 SDK 버전의 문서·commit을 build manifest에 고정한다. 조회일은 2026.11.10이며 S75–S86은 2026.11.11이다.
 
 | ID | 1차 자료 | 적용 범위 |
 |---|---|---|
@@ -2706,3 +2812,12 @@ Godot 코드는 이식하지 않고 구조와 동작 계약을 재구현하며, 
 | S75 | [Godot · Size and anchors](https://docs.godotengine.org/en/4.5/tutorials/ui/size_and_anchors.html) | Control 배치·container 기준 |
 | S76 | [Godot · Using InputEvent](https://docs.godotengine.org/en/4.5/tutorials/inputs/inputevent.html) | UI 입력 전파 순서 |
 | S77 | [Godot · 4.5-stable scene/gui 소스](https://github.com/godotengine/godot/tree/4.5-stable/scene/gui) | UI 툴킷 동작·속성 정의 비교 |
+| S78 | [Epic · UE 5.4 Release Notes](https://dev.epicgames.com/documentation/unreal-engine/unreal-engine-5.4-release-notes?application_version=5.4) | 계층 instance culling·사전 계산 hash·Loose Hierarchical Grid |
+| S79 | [Epic · TLocation API](https://dev.epicgames.com/documentation/unreal-engine/API/Runtime/Engine/TLocation) | 렌더 spatial hash의 좌표·level 표현 |
+| S80 | [Epic 포럼 · Nanite pass 설명(Epic 직원)](https://forums.unrealengine.com/t/how-some-nanite-passes-work/2667840) | GPU hierarchy cell 판정 순서 |
+| S81 | [Epic 포럼 · Chaos TAABBTree(Epic DevRel)](https://forums.unrealengine.com/t/chaos-taabbtree-memory-consumption-and-weird-flat-structure/2589987) | scene query static/dynamic 트리 |
+| S82 | [Jolt · Architecture](https://github.com/jrouwe/JoltPhysics/blob/master/Docs/Architecture.md) | broadphase quad tree·이동 body 갱신 |
+| S83 | [NVIDIA · PhysX 5.6.1 Scene Queries](https://nvidia-omniverse.github.io/PhysX/physx/5.6.1/docs/SceneQueries.html) | pruner 기본값·PxPruningStructure |
+| S84 | [T. Ulrich · Spatial partitioning](https://tulrich.com/geekstuff/partitioning.html) | loose octree 원 설계 |
+| S85 | [Epic · World Partition](https://dev.epicgames.com/documentation/en-us/unreal-engine/world-partition-in-unreal-engine) | runtime grid·cell 크기·loading range |
+| S86 | [UE 5.4.4 cvar 정리(2차 출처)](https://indxzero.github.io/ue544cvarwiki) | r.SceneCulling 계열 기본값. 1차 출처 미확인 |
