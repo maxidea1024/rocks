@@ -371,8 +371,10 @@ FileStatus SubmitFileRequest(AsyncFileState& file, AsyncRequestState& request, u
         return {FileCode::NotOpen, 0};
     }
     const void* buffer = write ? source : destination;
-    if ((bytes != 0 && buffer == nullptr) || bytes > 0xffffffffu ||
-        offset > static_cast<uint64>(-1) - bytes) {
+    // 끝 위치는 부호 있는 64-bit 파일 offset 안이어야 한다. Windows는 ByteOffset -1·-2를 "현재
+    // 위치"·"파일 끝" 같은 특수 값으로 해석하므로 2^63 이상을 그대로 넘기면 엉뚱한 곳을 읽고 쓴다.
+    constexpr uint64 MaxOffset = 0x7fffffffffffffffull;
+    if ((bytes != 0 && buffer == nullptr) || bytes > 0xffffffffu || offset > MaxOffset - bytes) {
         return {FileCode::InvalidArgument, 0};
     }
     AsyncContextState& context = *file.context;

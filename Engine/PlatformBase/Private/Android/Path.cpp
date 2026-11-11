@@ -135,12 +135,14 @@ FileStatus GetStandardDirectory(StandardDirectory kind, char* buffer, usize capa
         return Write(path, end, buffer, capacity, bytes);
     }
     case StandardDirectory::Working: {
-        char path[PATH_MAX];
-        if (getcwd(path, sizeof(path)) == nullptr) {
-            return {errno == ERANGE ? FileCode::Overflow : FileCode::SystemError,
-                    static_cast<uint32>(errno)};
+        // getcwd(nullptr, 0)은 필요한 크기로 할당한다(bionic 지원).
+        char* path = getcwd(nullptr, 0);
+        if (path == nullptr) {
+            return {FileCode::SystemError, static_cast<uint32>(errno)};
         }
-        return Write(path, Length(path), buffer, capacity, bytes);
+        auto status = Write(path, Length(path), buffer, capacity, bytes);
+        free(path);
+        return status;
     }
     case StandardDirectory::Temporary: {
         // 앱이면 등록된 cache 디렉터리, 셸 실행이면 TMPDIR 또는 /data/local/tmp다.

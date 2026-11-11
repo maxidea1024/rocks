@@ -142,7 +142,11 @@ FileStatus DeleteTreeContents(FileSystem& system, const char* path, usize bytes)
 // path + 구분자 + name을 새 버퍼에 만든다. 실패하면 nullptr이다.
 char* JoinChild(const char* path, usize bytes, const char* name, usize nameBytes,
                 usize& joinedBytes) noexcept {
-    const bool needSeparator = bytes != 0 && !IsSeparator(path[bytes - 1]);
+    // Windows 드라이브 상대 경로("C:")는 그 드라이브의 현재 디렉터리를 뜻하므로 구분자를 넣으면
+    // 드라이브 루트("C:\\name")가 된다. 구분자 없이 붙인다("C:name").
+    const bool driveRelative = HostPathStyle() == PathStyle::Windows && bytes == 2 &&
+                               IsAsciiLetter(path[0]) && path[1] == ':';
+    const bool needSeparator = bytes != 0 && !IsSeparator(path[bytes - 1]) && !driveRelative;
     if (nameBytes > MaxSize - bytes - 2) {
         return nullptr;
     }
@@ -246,15 +250,25 @@ FileStatus DeleteDirectoryTree(FileSystem& system, const char* path, usize pathB
     if (path == nullptr || !detail::ValidFilePath(path, pathBytes)) {
         return {FileCode::InvalidArgument, 0};
     }
+    // 끝 구분자가 있으면 OS가 link를 따라가 해석하므로("link/") 루트가 아닌 한 떼어낸다.
+    const usize root = RootLength(path, pathBytes);
+    while (pathBytes > root && pathBytes > 1 && IsSeparator(path[pathBytes - 1])) {
+        --pathBytes;
+    }
     FileInfo info;
     auto status = system.Stat(path, pathBytes, info);
+    if (status.code == FileCode::NotFound) {
+        // 대상이 없는 link는 Stat이 NotFound다. link 자체가 있으면 지운다(없으면 그대로 NotFound).
+        auto removed = system.Delete(path, pathBytes);
+        return removed.code == FileCode::NotFound ? status : removed;
+    }
     if (!status) {
         return status;
     }
     if (info.isLink) {
-        // 경로 자체가 link면 대상 디렉터리를 비우지 않고 link만 지운다.
-        return info.type == FileType::Directory ? system.DeleteDirectory(path, pathBytes)
-                                                : system.Delete(path, pathBytes);
+        // 경로 자체가 link면 대상을 비우지 않고 link만 지운다. Delete는 파일·디렉터리 link를 모두
+        // 지운다(대상 종류와 link 종류가 어긋난 Windows link 포함).
+        return system.Delete(path, pathBytes);
     }
     if (info.type != FileType::Directory) {
         return {FileCode::WrongType, 0};

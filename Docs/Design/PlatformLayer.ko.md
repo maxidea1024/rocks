@@ -79,20 +79,20 @@ Engine / Tools / Game         프로젝트·설치 구성과 상위 시스템
 
 `FileSystem`에 `Stat`·`MakeDirectory`·`DeleteDirectory`·`EnumerateDirectory`·`Move`·`Copy`를 가상 함수로 추가했다. 기본 구현은 `Unsupported`이므로 기존 wrapper는 그대로 컴파일되고 지원하는 연산만 재정의한다. 이름은 Windows SDK 매크로(`CreateDirectory`·`RemoveDirectory`·`CopyFile`·`MoveFile`)와 겹치지 않게 정했다(UE는 매크로를 숨기는 방식을 쓴다).
 
-| 연산 | 계약 | Windows | macOS(미빌드) |
+| 연산 | 계약 | Windows | POSIX(macOS 미빌드·Android) |
 |---|---|---|---|
-| `Stat` | link를 따라간 대상의 종류·크기·수정 시각, `isLink`는 경로 자체가 link인지. 시각은 0001-01-01 UTC 기준 100ns tick | `FindFirstFileExW`(reparse tag로 link 판정) + backup semantics handle의 `GetFileInformationByHandle` | `lstat` + `stat`, `st_mtimespec` |
+| `Stat` | link를 따라간 대상의 종류·크기·수정 시각, `isLink`는 경로 자체가 link인지. 시각은 0001-01-01 UTC 기준 100ns tick이며 9999-12-31 이후·0001-01-01 이전은 0. 대상 없는 link는 NotFound, 끝 구분자는 OS 규칙 | `OPEN_REPARSE_POINT` handle의 `FileAttributeTagInfo`(이름 대체 reparse tag만 link) + backup semantics handle의 `GetFileInformationByHandle` | `lstat` + `stat`, `st_mtimespec`/`st_mtim` |
 | `MakeDirectory` | 한 단계, 이미 있으면 AlreadyExists | `CreateDirectoryW` | `mkdir(0700)` |
 | `DeleteDirectory` | 빈 디렉터리만, 비었지 않으면 DirectoryNotEmpty, 파일이면 WrongType, 디렉터리 link는 link만 | `RemoveDirectoryW` | `lstat` 후 `unlink`/`rmdir` |
 | `EnumerateDirectory` | 직접 자식, "."·".." 제외, 순서 없음, link를 따라가지 않은 항목 정보, visitor가 false면 중단 | `FindFirstFileExW`(large fetch) | `opendir`/`readdir` + `fstatat(AT_SYMLINK_NOFOLLOW)` |
-| `Move` | 같은 volume 안 rename, replace 여부 선택, 다른 volume은 Unsupported | `MoveFileExW`(COPY_ALLOWED 없음) | `rename` / `renamex_np(RENAME_EXCL)` |
-| `Copy` | 일반 파일 하나, replace 여부 선택, 실패 시 대상 제거 | `CopyFileW` | read/write 반복, 실패 시 `unlink` |
+| `Move` | 같은 volume 안 rename, replace 여부 선택, 디렉터리는 기존 대상을 덮어쓰지 않음(AlreadyExists), 파일·디렉터리 혼합은 WrongType, 같은 파일 객체(대소문자만 변경)는 OS에 맡김, 다른 volume은 Unsupported | 속성·file id 사전 검사 + `MoveFileExW`(COPY_ALLOWED 없음) | `lstat`(dev·ino) 사전 검사 + `rename` / `renamex_np(RENAME_EXCL)`·`renameat2(RENAME_NOREPLACE)` |
+| `Copy` | 일반 파일 하나, replace 여부 선택, 실패 시 대상 제거(replace로 덮어쓰던 기존 대상도 없어짐), 같은 파일 객체로의 복사는 거부 | file id 비교 + `CopyFileW` | dev·ino 비교 + read/write 반복, 실패 시 `unlink` |
 
-`Delete`는 파일과 link 자체를 지우며 실제 디렉터리는 WrongType이다. 공용 helper `MakeDirectoryTree`는 루트·드라이브·UNC 공유 이름을 건너뛰고 부모부터 만들며 중간에 파일이 있으면 WrongType이다. `DeleteDirectoryTree`는 디렉터리마다 자식 목록을 먼저 모은 뒤 지우고, link는 따라가지 않고 link만 지운다. 중간 실패는 그 상태로 멈춘다.
+`Delete`는 파일과 link 자체(대상이 없어도)를 지우며 실제 디렉터리는 WrongType이다. Windows에서 link가 아닌 reparse point(OneDrive placeholder 등)가 붙은 디렉터리도 WrongType이다. 공용 helper `MakeDirectoryTree`는 루트·드라이브·UNC 공유 이름을 건너뛰고 부모부터 만들며 중간에 파일이 있으면 WrongType이다. `DeleteDirectoryTree`는 디렉터리마다 자식 목록을 먼저 모은 뒤 지우고, link는 따라가지 않고 link만 지운다. 루트로 넘긴 경로의 끝 구분자는 떼어내므로 `link/`도 link만 지우며, 대상 없는 link 루트도 지운다. Windows에서 디렉터리를 가리키는 파일 link처럼 OS가 따라갈 수 없는 link를 루트로 넘기면 Stat 오류를 그대로 돌려주고 아무것도 지우지 않는다(트리 안에 있으면 link만 지운다). 중간 실패는 그 상태로 멈춘다. Windows 드라이브 상대 경로(`C:`)는 그 드라이브의 현재 디렉터리로 다룬다(열거 패턴 `C:*`, 자식 경로 `C:name`).
 
 `GetStandardDirectory`(`Platform/Path.h`)는 실행 파일·작업·임시·홈·사용자 데이터·캐시 디렉터리를 UTF-8로 돌려준다. Windows는 `GetModuleFileNameW`·`GetCurrentDirectoryW`·`GetTempPathW`·`SHGetKnownFolderPath`(Profile·RoamingAppData·LocalAppData), macOS는 `_NSGetExecutablePath`+`realpath`·`getcwd`·`confstr(_CS_DARWIN_USER_TEMP_DIR)`·`HOME`(없으면 사용자 DB)·`~/Library/Application Support`·`~/Library/Caches`다. 버퍼가 부족하면 Overflow와 필요한 길이를 돌려준다.
 
-검증: Windows x64에서 생성·중복·Stat 크기와 시각 범위·열거와 조기 중단·종류 오류·비어 있지 않은 디렉터리·Copy/Move 덮어쓰기 규칙·재귀 생성/삭제·디렉터리 symbolic link를 따라가지 않는 재귀 삭제(개발자 모드에서 실제 link 생성)·기본 경로 6종과 버퍼 부족·wrapper 기본값을 확인했다. macOS 구현은 빌드·실행하지 않았다. 읽기 전용 파일이 있는 트리의 강제 삭제, 시각·권한 변경, 파일 감시, 다른 volume 이동의 복사 fallback, iOS·Android 샌드박스 경로는 후속이다.
+검증: Windows x64와 Android x86_64 에뮬레이터에서 생성·중복·Stat 크기와 시각 범위·열거와 조기 중단·종류 오류·비어 있지 않은 디렉터리·Copy/Move 덮어쓰기 규칙(자기 자신 복사, 디렉터리 덮어쓰기 거부, 파일·디렉터리 혼합, 대소문자만 바꾸는 이름 변경)·재귀 생성/삭제·디렉터리 symbolic link를 따라가지 않는 재귀 삭제(끝 구분자 붙은 link 루트, 대상 없는 link 루트, 디렉터리를 가리키는 파일 link 포함, Windows는 개발자 모드에서 실제 link 생성)·Windows `C:` 열거·기본 경로 6종과 버퍼 부족·wrapper 기본값을 확인했다. macOS 구현은 빌드·실행하지 않았다. 읽기 전용 파일이 있는 트리의 강제 삭제, 시각·권한 변경, 파일 감시, 다른 volume 이동의 복사 fallback, iOS·Android 샌드박스 경로는 후속이다.
 
 ## 비동기 파일 읽기·쓰기 (2026-11-11 1차 구현)
 

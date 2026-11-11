@@ -214,7 +214,9 @@ public:
         // 디렉터리 link는 RemoveDirectoryW로 link 자체를 지운다. 실제 디렉터리는 WrongType이다.
         const DWORD attributes = GetFileAttributesW(native.Value());
         if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-            if ((attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+            // link(이름 대체 reparse point)만 지운다. 다른 reparse point가 붙은 실제 디렉터리는
+            // WrongType이다.
+            if (detail::PathIsLink(native.Value())) {
                 if (!RemoveDirectoryW(native.Value())) {
                     return NativeError(GetLastError());
                 }
@@ -231,17 +233,8 @@ public:
         if (!valid) {
             return valid;
         }
-        // 경로 자체(link를 따라가지 않음)의 속성으로 link 여부를 정한다.
-        WIN32_FIND_DATAW self{};
-        HANDLE find = FindFirstFileExW(native.Value(), FindExInfoBasic, &self,
-                                       FindExSearchNameMatch, nullptr, 0);
-        bool isLink = false;
-        if (find != INVALID_HANDLE_VALUE) {
-            isLink = detail::IsLinkReparse(self.dwFileAttributes, self.dwReserved0);
-            if (!FindClose(find)) {
-                return NativeError(GetLastError());
-            }
-        }
+        // 경로 자체(link를 따라가지 않음)로 link 여부를 정한다.
+        const bool isLink = detail::PathIsLink(native.Value());
         // 대상 정보는 link를 따라가 연 handle에서 읽는다. 디렉터리도 열 수 있게 backup semantics를
         // 쓴다.
         HANDLE handle = CreateFileW(native.Value(), FILE_READ_ATTRIBUTES,
@@ -326,8 +319,11 @@ public:
         while (native.Value()[units] != L'\0') {
             ++units;
         }
+        // "C:"(드라이브 상대)는 "C:*"로 그 드라이브의 현재 디렉터리를 연다.
+        const bool driveRelative = units == 2 && native.Value()[1] == L':';
         const bool hasSeparator =
-            units != 0 && (native.Value()[units - 1] == L'\\' || native.Value()[units - 1] == L'/');
+            driveRelative || (units != 0 && (native.Value()[units - 1] == L'\\' ||
+                                             native.Value()[units - 1] == L'/'));
         const usize patternUnits = units + (hasSeparator ? 1 : 2);
         auto* pattern = static_cast<wchar_t*>(
             AlignedAllocate((patternUnits + 1) * sizeof(wchar_t), alignof(wchar_t)));
@@ -409,6 +405,25 @@ public:
         if (!valid) {
             return valid;
         }
+        // 플랫폼 간 결과를 맞춘다: 디렉터리는 기존 대상을 덮어쓰지 않고(AlreadyExists), 파일과
+        // 디렉터리가 섞이면 WrongType이다. 대상이 원본과 같은 파일이면(대소문자만 바꾸는 이름
+        // 변경 등) OS에 맡긴다.
+        const DWORD sourceAttributes = GetFileAttributesW(source.Value());
+        if (sourceAttributes == INVALID_FILE_ATTRIBUTES) {
+            return NativeError(GetLastError());
+        }
+        const DWORD targetAttributes = GetFileAttributesW(target.Value());
+        if (targetAttributes != INVALID_FILE_ATTRIBUTES &&
+            !detail::SameFileObject(source.Value(), target.Value())) {
+            const bool sourceDirectory = (sourceAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+            const bool targetDirectory = (targetAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+            if (sourceDirectory != targetDirectory) {
+                return {FileCode::WrongType, 0};
+            }
+            if (sourceDirectory || !replaceExisting) {
+                return {FileCode::AlreadyExists, ERROR_ALREADY_EXISTS};
+            }
+        }
         // MOVEFILE_COPY_ALLOWED를 쓰지 않으므로 다른 volume이면
         // ERROR_NOT_SAME_DEVICE(Unsupported)다.
         if (!MoveFileExW(source.Value(), target.Value(),
@@ -436,6 +451,10 @@ public:
         }
         if ((attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
             return {FileCode::WrongType, 0};
+        }
+        // 같은 파일 객체(hard link 등)로의 복사는 원본을 지키기 위해 거부한다(POSIX와 같은 결과).
+        if (replaceExisting && detail::SameFileObject(source.Value(), target.Value())) {
+            return {FileCode::InvalidArgument, 0};
         }
         // CopyFileW는 실패하면 만들던 대상 파일을 지운다.
         if (!CopyFileW(source.Value(), target.Value(), replaceExisting ? FALSE : TRUE)) {

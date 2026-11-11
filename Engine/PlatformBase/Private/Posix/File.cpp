@@ -248,6 +248,7 @@ public:
         if (!valid) {
             return valid;
         }
+        // 끝 '/'가 있으면 OS 규칙대로 link를 따라간다("link/"는 대상 디렉터리, "file/"은 실패).
         struct stat self{};
         if (lstat(native.Value(), &self) != 0) {
             return NativeError(errno);
@@ -368,6 +369,26 @@ public:
         if (!valid) {
             return valid;
         }
+        // 플랫폼 간 결과를 맞춘다: 디렉터리는 기존 대상을 덮어쓰지 않고(AlreadyExists), 파일과
+        // 디렉터리가 섞이면 WrongType이다.
+        struct stat sourceState{};
+        if (lstat(source.Value(), &sourceState) != 0) {
+            return NativeError(errno);
+        }
+        // 대상이 원본과 같은 파일이면(대소문자만 바꾸는 이름 변경 등) OS에 맡긴다.
+        struct stat targetState{};
+        if (lstat(target.Value(), &targetState) == 0 &&
+            (targetState.st_dev != sourceState.st_dev ||
+             targetState.st_ino != sourceState.st_ino)) {
+            const bool sourceDirectory = S_ISDIR(sourceState.st_mode);
+            const bool targetDirectory = S_ISDIR(targetState.st_mode);
+            if (sourceDirectory != targetDirectory) {
+                return {FileCode::WrongType, 0};
+            }
+            if (sourceDirectory || !replaceExisting) {
+                return {FileCode::AlreadyExists, EEXIST};
+            }
+        }
         // 덮어쓰지 않는 이동은 대상이 있으면 원자적으로 실패한다(PosixRenameNoReplace).
         const int result = replaceExisting
                                ? rename(source.Value(), target.Value())
@@ -404,6 +425,14 @@ public:
                                                             : FileStatus{FileCode::Unsupported, 0};
             close(input);
             return failure;
+        }
+        // 대상이 원본과 같은 파일(같은 이름·hard link·대소문자만 다른 이름)이면 O_TRUNC가 원본을
+        // 비우므로 거부한다.
+        struct stat existing{};
+        if (replaceExisting && stat(target.Value(), &existing) == 0 &&
+            existing.st_dev == state.st_dev && existing.st_ino == state.st_ino) {
+            close(input);
+            return {FileCode::InvalidArgument, 0};
         }
         const int flags = O_WRONLY | O_CREAT | O_CLOEXEC | (replaceExisting ? O_TRUNC : O_EXCL);
         int output;

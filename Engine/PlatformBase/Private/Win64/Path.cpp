@@ -72,8 +72,10 @@ FileStatus GetStandardDirectory(StandardDirectory kind, char* buffer, usize capa
     }
     switch (kind) {
     case StandardDirectory::Executable: {
-        // 긴 경로를 위해 버퍼를 키워 가며 실행 파일 경로를 읽고 파일 이름을 뗀다.
-        for (DWORD size = MAX_PATH; size <= 32768; size *= 2) {
+        // 긴 경로를 위해 버퍼를 키워 가며 실행 파일 경로를 읽고 파일 이름을 뗀다. 마지막 시도는
+        // Windows 경로 최대 길이(32767 + NUL)다.
+        constexpr DWORD MaxUnits = 32768;
+        for (DWORD size = MAX_PATH;; size = size > MaxUnits / 2 ? MaxUnits : size * 2) {
             auto* path =
                 static_cast<wchar_t*>(AlignedAllocate(size * sizeof(wchar_t), alignof(wchar_t)));
             if (path == nullptr) {
@@ -95,28 +97,39 @@ FileStatus GetStandardDirectory(StandardDirectory kind, char* buffer, usize capa
                 return status;
             }
             AlignedFree(path);
+            if (size == MaxUnits) {
+                break;
+            }
         }
-        return {FileCode::Overflow, 0};
+        return {FileCode::SystemError, ERROR_INSUFFICIENT_BUFFER};
     }
     case StandardDirectory::Working: {
-        const DWORD required = GetCurrentDirectoryW(0, nullptr);
-        if (required == 0) {
-            return detail::NativeError(GetLastError());
-        }
-        auto* path =
-            static_cast<wchar_t*>(AlignedAllocate(required * sizeof(wchar_t), alignof(wchar_t)));
-        if (path == nullptr) {
-            return {FileCode::OutOfMemory, 0};
-        }
-        const DWORD length = GetCurrentDirectoryW(required, path);
-        if (length == 0 || length >= required) {
-            const DWORD error = GetLastError();
+        // 다른 스레드가 작업 디렉터리를 바꾸면 길이 조회와 읽기 사이에 커질 수 있으므로 다시
+        // 시도한다.
+        for (int attempt = 0; attempt < 8; ++attempt) {
+            const DWORD required = GetCurrentDirectoryW(0, nullptr);
+            if (required == 0) {
+                return detail::NativeError(GetLastError());
+            }
+            auto* path = static_cast<wchar_t*>(
+                AlignedAllocate(required * sizeof(wchar_t), alignof(wchar_t)));
+            if (path == nullptr) {
+                return {FileCode::OutOfMemory, 0};
+            }
+            const DWORD length = GetCurrentDirectoryW(required, path);
+            if (length == 0) {
+                const DWORD error = GetLastError();
+                AlignedFree(path);
+                return detail::NativeError(error);
+            }
+            if (length < required) {
+                auto status = WriteDirectory(path, length, buffer, capacity, bytes);
+                AlignedFree(path);
+                return status;
+            }
             AlignedFree(path);
-            return length == 0 ? detail::NativeError(error) : FileStatus{FileCode::Busy, 0};
         }
-        auto status = WriteDirectory(path, length, buffer, capacity, bytes);
-        AlignedFree(path);
-        return status;
+        return {FileCode::Busy, 0};
     }
     case StandardDirectory::Temporary: {
         wchar_t path[MAX_PATH + 2];

@@ -97,8 +97,10 @@ private:
 // 0001-01-01부터 1601-01-01까지는 584388일이다.
 inline int64 FileTimeToTicks(const FILETIME& time) noexcept {
     constexpr int64 Offset = 584388ll * 864000000000ll;
+    // 9999-12-31 이후(UE FDateTime 범위 밖)는 알 수 없음(0)으로 둔다. overflow도 막는다.
+    constexpr uint64 MaxTicks = 3155378975999999999ull;
     const uint64 value = (static_cast<uint64>(time.dwHighDateTime) << 32) | time.dwLowDateTime;
-    if (value == 0) {
+    if (value == 0 || value > MaxTicks - static_cast<uint64>(Offset)) {
         return 0;
     }
     return static_cast<int64>(value) + Offset;
@@ -109,6 +111,46 @@ inline int64 FileTimeToTicks(const FILETIME& time) noexcept {
 inline bool IsLinkReparse(DWORD attributes, DWORD reparseTag) noexcept {
     return (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0 &&
            IsReparseTagNameSurrogate(reparseTag);
+}
+
+// 경로 자체가 link(이름 대체 reparse point)인지 link를 따라가지 않고 handle로 확인한다(부모
+// 디렉터리 목록 권한이 필요 없다). 열 수 없으면 false다.
+inline bool PathIsLink(const wchar_t* path) noexcept {
+    HANDLE handle = CreateFileW(
+        path, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    FILE_ATTRIBUTE_TAG_INFO tag{};
+    const bool queried =
+        GetFileInformationByHandleEx(handle, FileAttributeTagInfo, &tag, sizeof(tag)) != 0;
+    CloseHandle(handle);
+    return queried && IsLinkReparse(tag.FileAttributes, tag.ReparseTag);
+}
+
+// 두 경로가 같은 파일 객체(같은 volume·file id)를 가리키는지 link를 따라가지 않고 확인한다.
+// 어느 한쪽이라도 열 수 없으면 false다.
+inline bool SameFileObject(const wchar_t* first, const wchar_t* second) noexcept {
+    BY_HANDLE_FILE_INFORMATION identity[2]{};
+    const wchar_t* paths[2] = {first, second};
+    for (int i = 0; i < 2; ++i) {
+        HANDLE handle = CreateFileW(
+            paths[i], FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            nullptr);
+        if (handle == INVALID_HANDLE_VALUE) {
+            return false;
+        }
+        const bool queried = GetFileInformationByHandle(handle, &identity[i]) != 0;
+        CloseHandle(handle);
+        if (!queried) {
+            return false;
+        }
+    }
+    return identity[0].dwVolumeSerialNumber == identity[1].dwVolumeSerialNumber &&
+           identity[0].nFileIndexHigh == identity[1].nFileIndexHigh &&
+           identity[0].nFileIndexLow == identity[1].nFileIndexLow;
 }
 
 // UTF-16을 UTF-8로 바꿔 buffer에 쓴다(NUL 포함). 실패하면 false다.

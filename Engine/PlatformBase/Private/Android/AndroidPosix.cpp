@@ -15,10 +15,15 @@
 namespace rocks::platform::detail {
 
 int64 PosixModifiedTicks(const struct stat& state) noexcept {
-    // 0001-01-01부터 1970-01-01까지는 719162일이다.
+    // 0001-01-01부터 1970-01-01까지는 719162일이다. 0001-01-01 이전·9999-12-31 이후(UE FDateTime
+    // 범위 밖)는 알 수 없음(0)으로 둔다.
     constexpr int64 Offset = 719162ll * 864000000000ll;
-    return static_cast<int64>(state.st_mtim.tv_sec) * 10000000ll + state.st_mtim.tv_nsec / 100 +
-           Offset;
+    constexpr int64 MaxTicks = 3155378975999999999ll;
+    const int64 seconds = static_cast<int64>(state.st_mtim.tv_sec);
+    if (seconds < -Offset / 10000000ll || seconds > (MaxTicks - Offset) / 10000000ll) {
+        return 0;
+    }
+    return seconds * 10000000ll + state.st_mtim.tv_nsec / 100 + Offset;
 }
 
 // renameat2(RENAME_NOREPLACE)는 대상이 있으면 원자적으로 실패한다. bionic의 renameat2 wrapper는 API

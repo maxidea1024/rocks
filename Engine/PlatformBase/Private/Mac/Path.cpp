@@ -56,11 +56,15 @@ const char* HomeDirectory(char* scratch, usize capacity) noexcept {
 FileStatus HomeChild(const char* suffix, char* buffer, usize capacity, usize& bytes) noexcept {
     char scratch[4096];
     const char* home = HomeDirectory(scratch, sizeof(scratch));
-    if (home == nullptr) {
+    if (home == nullptr || home[0] == '\0') {
         return {FileCode::NotFound, 0};
     }
-    const usize homeLength = Length(home);
+    usize homeLength = Length(home);
     const usize suffixLength = Length(suffix);
+    // 끝 '/'를 뗀다(HOME=/Users/x/). 루트("/")는 suffix가 없을 때만 그대로 둔다.
+    while (homeLength > (suffixLength == 0 ? 1u : 0u) && home[homeLength - 1] == '/') {
+        --homeLength;
+    }
     bytes = homeLength + suffixLength;
     if (bytes >= capacity) {
         return {FileCode::Overflow, 0};
@@ -117,12 +121,14 @@ FileStatus GetStandardDirectory(StandardDirectory kind, char* buffer, usize capa
         return status;
     }
     case StandardDirectory::Working: {
-        char path[PATH_MAX];
-        if (getcwd(path, sizeof(path)) == nullptr) {
-            return {errno == ERANGE ? FileCode::Overflow : FileCode::SystemError,
-                    static_cast<uint32>(errno)};
+        // getcwd(nullptr, 0)은 필요한 크기로 할당한다(macOS·bionic 지원).
+        char* path = getcwd(nullptr, 0);
+        if (path == nullptr) {
+            return {FileCode::SystemError, static_cast<uint32>(errno)};
         }
-        return Write(path, Length(path), buffer, capacity, bytes);
+        auto status = Write(path, Length(path), buffer, capacity, bytes);
+        free(path);
+        return status;
     }
     case StandardDirectory::Temporary: {
         char path[PATH_MAX];

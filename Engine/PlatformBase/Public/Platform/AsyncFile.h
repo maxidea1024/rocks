@@ -12,8 +12,9 @@ class AsyncIoRequest;
 
 // 비동기 파일 읽기의 완료 방식이다.
 // - Native: 플랫폼의 커널 비동기 I/O. Windows는 overlapped I/O + IO completion port다. 이를
-// 지원하지
-//   않는 플랫폼(현재 macOS)에서는 Start가 Unsupported를 반환한다.
+//   지원하지 않는 플랫폼(현재 macOS·Android)에서는 Start가 Unsupported를 반환한다. Windows는
+//   파일을 늘리는 쓰기(파일 끝 너머)와 압축·암호화 파일 접근 등을 제출 호출 안에서 동기로 처리할
+//   수 있으므로 SubmitWrite가 그만큼 막힐 수 있다(완료 통지 계약은 같다).
 // - WorkerPool: worker 스레드가 위치 지정 동기 읽기(Windows ReadFile+OVERLAPPED offset, POSIX
 //   pread)를 수행한다. 모든 플랫폼에서 같은 계약으로 동작하며 macOS·향후 모바일의 기본 경로다.
 //   OS 비동기 I/O가 아니라 동기 호출을 worker에 위임한 것이므로 동시 진행 수는 worker 수다.
@@ -109,7 +110,7 @@ public:
     // destination의 [0, bytes) 영역에 offset부터 읽는다. request와 destination은 완료(Wait 반환
     // 또는 callback 시작)까지 살아 있고 다른 용도로 쓰지 않아야 한다.
     // 즉시 반환 오류(요청 상태 변경 없음): 파일이 열려 있지 않음 NotOpen, request가 진행 중 Busy,
-    // destination null(bytes>0)·bytes > 0xFFFFFFFF·offset+bytes overflow InvalidArgument,
+    // destination null(bytes>0)·bytes > 0xFFFFFFFF·offset+bytes > 2^63-1 InvalidArgument,
     // context 종료 중 Busy. 그 밖의 OS 실패는 요청 결과로 통지한다.
     FileStatus SubmitRead(AsyncIoRequest& request, uint64 offset, void* destination, usize bytes,
                           AsyncIoCallback callback = nullptr,
@@ -131,8 +132,8 @@ private:
 //   cache.Flush(); cache.Close();
 // 계약:
 // - Open의 mode는 FileOpenMode의 ReadWriteExisting(기존 파일, 없으면 NotFound), CreateNew(이미
-// 있으면
-//   AlreadyExists), CreateAlways(있으면 비우고 만든다)만 받는다. ReadExisting은 InvalidArgument다.
+//   있으면 AlreadyExists), CreateAlways(있으면 비우고 만든다)만 받는다. ReadExisting은
+//   InvalidArgument다.
 //   경로 규약은 FileSystem::Open과 같다. 새 파일의 권한은 동기 File과 같다.
 // - 파일 끝을 넘는 offset에 쓰면 파일이 늘어나며 그 사이는 0으로 채워진다(OS 의미).
 // - Flush는 이미 완료된 쓰기를 저장 장치까지 내리는 동기 호출이다(Windows FlushFileBuffers, macOS
@@ -155,8 +156,8 @@ public:
     FileStatus Flush() noexcept;
 
     // source의 [0, bytes) 영역을 offset부터 쓴다. request와 source는 완료까지 살아 있고 바뀌지
-    // 않아야 한다. 즉시 반환 오류는 SubmitRead와 같다(source null·bytes 범위·overflow는
-    // InvalidArgument).
+    // 않아야 한다. 즉시 반환 오류는 SubmitRead와 같다(source null·bytes 범위·offset+bytes >
+    // 2^63-1은 InvalidArgument).
     FileStatus SubmitWrite(AsyncIoRequest& request, uint64 offset, const void* source, usize bytes,
                            AsyncIoCallback callback = nullptr,
                            void* callbackContext = nullptr) noexcept;

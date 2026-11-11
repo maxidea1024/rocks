@@ -99,6 +99,23 @@ bool Collect(const DirectoryEntry& entry, void* raw) noexcept {
     return listing.visits < listing.stopAfter;
 }
 
+struct NameProbe {
+    const char* name = nullptr;
+    bool found = false;
+    int visits = 0;
+};
+
+// 대소문자까지 같은 이름이 있는지 본다.
+bool FindName(const DirectoryEntry& entry, void* raw) noexcept {
+    auto& probe = *static_cast<NameProbe*>(raw);
+    ++probe.visits;
+    if (entry.nameBytes == Length(probe.name) &&
+        memcmp(entry.name, probe.name, entry.nameBytes) == 0) {
+        probe.found = true;
+    }
+    return true;
+}
+
 // 순수 가상 함수만 구현한 wrapper다. 확장 연산은 기본 구현(Unsupported)을 쓴다.
 class MinimalFileSystem final : public FileSystem {
 public:
@@ -220,6 +237,46 @@ TEST(FileSystem_CopyAndMoveReplaceRules) {
     REQUIRE(system.Move(dir, Length(dir), moved, Length(moved), false));
     CHECK(system.Stat(moved, Length(moved), info) && info.type == FileType::Directory);
     CHECK(system.Stat(dir, Length(dir), info).code == FileCode::NotFound);
+
+    // 자기 자신으로의 복사는 원본을 비우지 않고 실패한다.
+    CHECK(!system.Copy(a, Length(a), a, Length(a), true));
+    CHECK(system.Copy(a, Length(a), a, Length(a), false).code == FileCode::AlreadyExists);
+    REQUIRE(ReadFile(a, buffer, sizeof(buffer), bytes));
+    CHECK(bytes == 5 && memcmp(buffer, "alpha", 5) == 0);
+
+    // 디렉터리는 replace여도 기존 대상을 덮어쓰지 않는다. 파일·디렉터리가 섞이면 WrongType이다.
+    char other[256];
+    root.Child("other", other, sizeof(other));
+    REQUIRE(system.MakeDirectory(other, Length(other)));
+    CHECK(system.Move(moved, Length(moved), other, Length(other), true).code ==
+          FileCode::AlreadyExists);
+    CHECK(system.Move(a, Length(a), other, Length(other), true).code == FileCode::WrongType);
+    CHECK(system.Move(other, Length(other), a, Length(a), true).code == FileCode::WrongType);
+    CHECK(system.Stat(moved, Length(moved), info) && info.type == FileType::Directory);
+    CHECK(system.Stat(other, Length(other), info) && info.type == FileType::Directory);
+    REQUIRE(ReadFile(a, buffer, sizeof(buffer), bytes));
+    CHECK(bytes == 5 && memcmp(buffer, "alpha", 5) == 0);
+
+    // 대소문자만 바꾸는 이름 변경은 대소문자를 구분하지 않는 volume에서도 된다.
+    char upper[256];
+    root.Child("Renamed", upper, sizeof(upper));
+    REQUIRE(system.Move(moved, Length(moved), upper, Length(upper), false));
+    NameProbe probe;
+    probe.name = "Renamed";
+    REQUIRE(system.EnumerateDirectory(root.path, root.length, FindName, &probe));
+    CHECK(probe.found);
+    char upperFile[256];
+    root.Child("A.txt", upperFile, sizeof(upperFile));
+    REQUIRE(system.Move(a, Length(a), upperFile, Length(upperFile), false));
+    probe = {};
+    probe.name = "A.txt";
+    REQUIRE(system.EnumerateDirectory(root.path, root.length, FindName, &probe));
+    CHECK(probe.found);
+
+    // 파일 경로 끝에 구분자를 붙이면 Stat은 실패한다.
+    char slashed[256];
+    snprintf(slashed, sizeof(slashed), "%s/", upperFile);
+    CHECK(!system.Stat(slashed, Length(slashed), info));
 }
 
 TEST(FileSystem_DeleteTreeDoesNotFollowDirectoryLinks) {
@@ -255,6 +312,67 @@ TEST(FileSystem_DeleteTreeDoesNotFollowDirectoryLinks) {
     REQUIRE(DeleteDirectoryTree(system, tree.path, tree.length));
     CHECK(system.Stat(tree.path, tree.length, info).code == FileCode::NotFound);
     CHECK(system.Stat(kept, Length(kept), info) && info.type == FileType::File);
+
+    // link를 루트로 넘기면 끝 구분자가 있어도 link만 지운다.
+    REQUIRE(system.MakeDirectory(tree.path, tree.length));
+    REQUIRE(test::CreateDirectoryLink(link, target) == test::FileLinkResult::Created);
+    char slashed[256];
+    snprintf(slashed, sizeof(slashed), "%s%c%c", link, NativePathSeparator(),
+             NativePathSeparator());
+    REQUIRE(DeleteDirectoryTree(system, slashed, Length(slashed)));
+    CHECK(system.Stat(kept, Length(kept), info) && info.type == FileType::File);
+    Listing afterSlash;
+    REQUIRE(system.EnumerateDirectory(tree.path, tree.length, Collect, &afterSlash));
+    CHECK(afterSlash.visits == 0);
+
+    // 대상이 없는 link는 Stat이 NotFound지만 루트로 넘기면 link를 지운다.
+    char dangling[256];
+    tree.Child("dangling", dangling, sizeof(dangling));
+    char nowhere[256];
+    snprintf(nowhere, sizeof(nowhere), "..%c%s-missing", NativePathSeparator(), outside.path);
+    REQUIRE(test::CreateDirectoryLink(dangling, nowhere) == test::FileLinkResult::Created);
+    CHECK(system.Stat(dangling, Length(dangling), info).code == FileCode::NotFound);
+    REQUIRE(DeleteDirectoryTree(system, dangling, Length(dangling)));
+    Listing afterDangling;
+    REQUIRE(system.EnumerateDirectory(tree.path, tree.length, Collect, &afterDangling));
+    CHECK(afterDangling.visits == 0);
+    CHECK(DeleteDirectoryTree(system, dangling, Length(dangling)).code == FileCode::NotFound);
+
+    // 파일 link가 디렉터리를 가리켜도(Windows에서는 따라갈 수 없는 종류 불일치 link) 재귀 삭제는
+    // link만 지운다. 루트로 직접 넘기면 Windows는 Stat이 실패하므로 아무것도 지우지 않고 실패한다.
+    char mismatched[256];
+    tree.Child("mismatched", mismatched, sizeof(mismatched));
+    REQUIRE(test::CreateFileLink(mismatched, target) == test::FileLinkResult::Created);
+    if (!DeleteDirectoryTree(system, mismatched, Length(mismatched))) {
+        CHECK(HostPathStyle() == PathStyle::Windows);
+    }
+    CHECK(system.Stat(kept, Length(kept), info) && info.type == FileType::File);
+    (void)test::CreateFileLink(mismatched, target); // 지워졌으면 다시 만든다
+    REQUIRE(DeleteDirectoryTree(system, tree.path, tree.length));
+    CHECK(system.Stat(tree.path, tree.length, info).code == FileCode::NotFound);
+    CHECK(system.Stat(kept, Length(kept), info) && info.type == FileType::File);
+}
+
+TEST(FileSystem_WindowsDriveRelativePathIsNotDriveRoot) {
+    if (HostPathStyle() != PathStyle::Windows) {
+        return;
+    }
+    // "C:"는 그 드라이브의 현재 디렉터리다. 작업 디렉터리에 만든 고유 디렉터리가 보여야 하며
+    // 드라이브 루트를 열거하면 안 된다.
+    FileSystem& system = PhysicalFileSystem();
+    char working[1024];
+    usize workingBytes = 0;
+    REQUIRE(
+        GetStandardDirectory(StandardDirectory::Working, working, sizeof(working), workingBytes));
+    REQUIRE(workingBytes >= 2 && working[1] == ':');
+    Scratch marker;
+    REQUIRE(marker.Make("drive"));
+    REQUIRE(system.MakeDirectory(marker.path, marker.length));
+    const char drive[2] = {working[0], ':'};
+    NameProbe probe;
+    probe.name = marker.path;
+    REQUIRE(system.EnumerateDirectory(drive, 2, FindName, &probe));
+    CHECK(probe.found);
 }
 
 namespace {

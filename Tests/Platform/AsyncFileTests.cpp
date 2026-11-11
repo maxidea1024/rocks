@@ -177,6 +177,10 @@ TEST(AsyncFile_EndOfFileAndShortReads) {
         REQUIRE(file.SubmitRead(request, 1ull << 40, buffer, sizeof(buffer)));
         REQUIRE(request.Wait(30000) == WaitResult::Signaled);
         CHECK(request.Result().status && request.Result().bytes == 0);
+        // 끝 위치가 부호 있는 64-bit offset 최대값까지는 받는다(파일 끝 너머이므로 0 byte).
+        REQUIRE(file.SubmitRead(request, 0x7fffffffffffffffull - 8, buffer, 8));
+        REQUIRE(request.Wait(30000) == WaitResult::Signaled);
+        CHECK(request.Result().status && request.Result().bytes == 0);
         // 0 byte 요청도 같은 완료 경로로 통지된다.
         REQUIRE(file.SubmitRead(request, 0, nullptr, 0));
         REQUIRE(request.Wait(30000) == WaitResult::Signaled);
@@ -198,6 +202,10 @@ TEST(AsyncFile_InvalidSubmissionsLeaveRequestUntouched) {
         CHECK(file.Open(context, pattern.path, pattern.length).code == FileCode::AlreadyOpen);
         CHECK(file.SubmitRead(request, 0, nullptr, 8).code == FileCode::InvalidArgument);
         CHECK(file.SubmitRead(request, ~0ull - 3, buffer, 8).code == FileCode::InvalidArgument);
+        // 2^63 이상은 OS가 특수 값(현재 위치·파일 끝)으로 해석할 수 있으므로 거부한다.
+        CHECK(file.SubmitRead(request, 1ull << 63, buffer, 8).code == FileCode::InvalidArgument);
+        CHECK(file.SubmitRead(request, 0x7fffffffffffffffull - 7, buffer, 8).code ==
+              FileCode::InvalidArgument);
         CHECK(!request.IsComplete());
         CHECK(file.Close());
         CHECK(file.Close().code == FileCode::NotOpen);
@@ -421,6 +429,8 @@ TEST(AsyncFile_WriteOpenModesAndExtension) {
         // 잘못된 제출은 요청을 바꾸지 않는다.
         CHECK(file.SubmitWrite(request, 0, nullptr, 1).code == FileCode::InvalidArgument);
         CHECK(file.SubmitWrite(request, ~0ull, tail, 4).code == FileCode::InvalidArgument);
+        CHECK(file.SubmitWrite(request, ~0ull - 1, tail, 1).code == FileCode::InvalidArgument);
+        CHECK(file.SubmitWrite(request, 1ull << 63, tail, 4).code == FileCode::InvalidArgument);
         CHECK(file.Close());
         CHECK(file.Flush().code == FileCode::NotOpen);
         uint8 buffer[128]{};
