@@ -18,7 +18,15 @@ public static class PolicyChecks
         RegexOptions.CultureInvariant | RegexOptions.Compiled, TimeSpan.FromSeconds(1));
 
     private static readonly Regex BannedRuntime = Pattern(
-        "#\\s*include\\s*[<\"](?:vector|string|array|deque|list|map|set|unordered_map|unordered_set|memory|functional|thread|mutex|future|iostream|fstream|sstream|algorithm|ranges|span|filesystem)[>\"]|\\bstd\\s*::");
+        "#\\s*include\\s*[<\"](?:vector|string|array|deque|list|map|set|unordered_map|unordered_set|memory|functional|thread|mutex|future|iostream|fstream|sstream|algorithm|ranges|span|filesystem|utility|tuple|type_traits)[>\"]|\\bstd\\s*::");
+    // 언어 규칙이 std 이름을 직접 요구하는 지점만 파일·이름 단위로 허용한다. 구조적 바인딩의 tuple
+    // protocol은 std::tuple_size/std::tuple_element 특수화를 찾으므로 Tuple.h만 그 두 이름과 기본
+    // 템플릿 선언용 <utility>를 쓸 수 있다. 같은 줄에 다른 std 사용이 있으면 여전히 위반이다.
+    private static readonly Dictionary<string, Regex> RuntimeStdAllowances = new(StringComparer.Ordinal)
+    {
+        ["Engine/Core/Public/Core/Tuple.h"] = Pattern(
+            "#\\s*include\\s*<utility>|\\bstd\\s*::\\s*(?:tuple_size|tuple_element)\\b"),
+    };
     private static readonly Regex BannedPlatform = Pattern(
         "#\\s*(?:if|ifdef|ifndef|elif)\\b[^\\n]*(?:_WIN32|_WIN64|__APPLE__|__linux__|ROCKS_PLATFORM_)" +
         "|#\\s*include\\s*[<\"](?:[Ww]indows|windowsx|synchapi|processthreadsapi|pthread|semaphore|unistd|mach/[^>\"]+)\\.h[>\"]" +
@@ -31,8 +39,24 @@ public static class PolicyChecks
     private static readonly Regex PythonInvocation = Pattern(
         "\\bpython(?:3(?:\\.[0-9]+)?)?(?:\\.exe)?\\b|setup-python\\b|[^\\s\"']+\\.py(?:[\\s\"']|$)");
 
-    public static IReadOnlyList<CheckFailure> Runtime(string root) =>
-        Scan(root, ["Engine", "Programs"], BannedRuntime, "runtime-stl", "forbidden runtime STL use");
+    public static IReadOnlyList<CheckFailure> Runtime(string root)
+    {
+        List<CheckFailure> failures = [];
+        foreach (string path in NativeSources(root, ["Engine", "Programs"]))
+        {
+            string relative = Relative(root, path);
+            RuntimeStdAllowances.TryGetValue(relative, out Regex? allowance);
+            int line = 0;
+            foreach (string text in File.ReadLines(path, StrictUtf8))
+            {
+                ++line;
+                string checkedText = allowance is null ? text : allowance.Replace(text, " ");
+                if (BannedRuntime.IsMatch(checkedText))
+                    failures.Add(new(relative, line, "runtime-stl", "forbidden runtime STL use"));
+            }
+        }
+        return failures;
+    }
 
     public static IReadOnlyList<CheckFailure> SourceWarnings(string root) =>
         Scan(root, ["Engine", "Programs", "Tests", "Tools", "Templates"], BannedSuppression,

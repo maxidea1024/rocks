@@ -74,6 +74,26 @@ internal static class SelfTests
                 Verify.Equal(2, failures[0].Line, "diagnostic line");
             }
         });
+        suite.Add("Policy.RuntimeTupleProtocolAllowanceIsNarrow", () =>
+        {
+            using TemporaryDirectory temporary = new();
+            const string tuple = "Engine/Core/Public/Core/Tuple.h";
+            temporary.Write(tuple, "#pragma once\n#include <utility>\n" +
+                "template <typename... T> struct std::tuple_size<rocks::Tuple<T...>> {};\n" +
+                "template <decltype(sizeof(0)) I, typename... T> struct std :: tuple_element<I, rocks::Tuple<T...>> {};\n");
+            NoFailures(PolicyChecks.Runtime(temporary.Root));
+            // 같은 파일이라도 다른 std 사용·다른 STL 헤더는 위반이다.
+            foreach (string banned in new[] { "std::vector<int> value;", "#include <tuple>",
+                "struct std::tuple_size<X> : std::integral_constant<int, 1> {};" })
+            {
+                temporary.Write(tuple, "#pragma once\n" + banned + "\n");
+                Verify.Equal(1, PolicyChecks.Runtime(temporary.Root).Count, "tuple allowance too wide: " + banned);
+            }
+            // 다른 파일에서는 tuple protocol 이름과 <utility>도 위반이다.
+            temporary.Write(tuple, "#pragma once\n");
+            temporary.Write("Engine/Core/Public/Core/Other.h", "#include <utility>\nstruct std::tuple_size<int>;\n");
+            Verify.Equal(2, PolicyChecks.Runtime(temporary.Root).Count, "tuple allowance leaked to other file");
+        });
         suite.Add("Policy.PlatformPreciseBackendBoundary", () =>
         {
             using TemporaryDirectory temporary = new();
