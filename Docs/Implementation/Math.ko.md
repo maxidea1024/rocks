@@ -21,7 +21,8 @@ Core/Public/Core/Math        Vec·Quat·Mat4·Transform·Rotator·Rect·Color·R
 - Windows x64·Intel macOS는 SSE2, Apple Silicon은 NEON 경로를 쓴다. 지원 toolchain이 모두 Clang이므로 현재 OS별 재정의는 없다. OS별 차이가 생기면 같은 상속 단계를 추가한다. 알 수 없는 CPU는 같은 계약의 Generic/scalar를 쓴다.
 - x64 baseline은 SSE2만 사용한다. SSE4.1·AVX·FMA는 CPU·OS 기능 확인 없이 실행하지 않는다.
 - 정확 함수(sqrt, 1/sqrt, 정수 변환, 사칙·min/max)는 Generic과 bit 단위로 같은 결과를 계약한다. 근사는 `InvSqrtEstimate`처럼 이름으로 구분하고 상대 오차 4e-7 이하(양의 정규 유한 float)만 약속한다. `rsqrtss`/`frsqrte` 근사 bit는 CPU 세대마다 다를 수 있다.
-- 4-lane 레지스터는 합산 순서(`Dot3=(p0+p1)+p2`, `Dot4=(p0+p1)+(p2+p3)`, 행렬은 열 순서 누적)와 FMA 미사용을 계약으로 고정한다. x64에서는 scalar와 SIMD가 bit 단위로 같다(`ScalarSimdBitExact=true`). ARM64는 compiler의 scalar FMA 축약 정책을 빌드에서 고정하고 실기기로 확인하기 전까지 `false`로 두고 허용 오차로 비교한다.
+- 4-lane 레지스터는 합산 순서(`Dot3=(p0+p1)+p2`, `Dot4=(p0+p1)+(p2+p3)`, 행렬은 열 순서 누적)와 FMA 미사용을 계약으로 고정한다. x64에서는 scalar와 SIMD가 bit 단위로 같다(`ScalarSimdBitExact=true`). 단 NaN은 NaN 여부만 같고 부호·payload bit는 backend마다 다를 수 있다.
+- 빌드는 모든 native 대상에 `-ffp-contract=off`(clang-cl `/clang:-ffp-contract=off`)를 준다(2026-11-11 결정). clang 기본값(`on`)은 FMA 명령이 항상 있는 ARM64에서만 `a*b+c`를 fused 연산으로 바꿔, 같은 소스의 결과와 판정이 플랫폼마다 달라진다. 리뷰에서 확인한 예: 정확히 특이한 행렬 `(0.1,0.3)/(0.2,0.6)`은 x64에서 행렬식 0으로 `TryInverse`가 실패하지만, FMA 축약 시 행렬식 3.3e-18로 성공해 1.8e17 크기 원소를 냈다. `aarch64-pc-windows-msvc` 대상 codegen에서 fused 명령이 `on` 28개 → `off` 0개로 바뀌는 것을 확인했다. ARM64 실행은 아직 하지 않았으므로 `ScalarSimdBitExact`는 실기기 확인 전까지 `false`로 둔다.
 
 ### UE와 의도적으로 다른 플랫폼 수학 규약
 
@@ -42,13 +43,13 @@ Core/Public/Core/Math        Vec·Quat·Mat4·Transform·Rotator·Rect·Color·R
 
 | 헤더 | 내용 | 주요 계약 |
 |---|---|---|
-| `MathUtility.h` | `math::` 상수·각도 변환, Clamp·Lerp·Sign, 분류, 초월 함수, 정수 변환, `UnwindRadians`·`FindDeltaAngleRadians`, `SmoothStep`·`CubicInterp`·`InterpTo`·`InterpConstantTo`·`GridSnap`·`Wrap` | Clamp는 NaN을 전파하고 min>max는 Fatal. Lerp는 t=0/1에서 끝점 정확. InterpTo/ConstantTo는 UE와 달리 숨은 "충분히 가까움" 기준이 없고, 도달 조건에서는 target을 정확히 반환. `Wrap`은 반열린 구간 |
+| `MathUtility.h` | `math::` 상수·각도 변환, Clamp·Lerp·Sign, 분류, 초월 함수, 정수 변환, `UnwindRadians`·`FindDeltaAngleRadians`, `SmoothStep`·`CubicInterp`·`InterpTo`·`InterpConstantTo`·`GridSnap`·`Wrap` | Clamp는 NaN을 전파하고 min>max는 Fatal. Lerp는 t=0/1에서 끝점 정확. InterpTo/ConstantTo는 UE와 달리 숨은 "충분히 가까움" 기준이 없고, 도달 조건에서는 target을 정확히 반환. 입력 NaN은 target으로 바꾸지 않고 NaN으로 전파. `GridSnap`의 0.5 경계는 grid 부호와 무관하게 +∞ 방향(UE는 음수 grid에서 반대). `Wrap`은 반열린 구간 |
 | `Vector2/3/4.h` | `Vec2/3/4`(float), `Vec2d/3d/4d`(double) | `TryNormalize(minimumLength)`는 길이 단위(제곱 아님) 기준, 가장 큰 성분으로 먼저 나눠 overflow/subnormal 입력도 정규화. 영·비유한은 InvalidArgument. Vector2/3 같은 계약(UE는 2D/3D 정규화 실패 동작이 다름) |
 | `IntVector.h` | `IntVec2`, `IntVec3` | overflow·0 나눗셈·INT32_MIN/-1은 Fatal(UE는 정의되지 않은 동작) |
 | `Matrix4.h` | `Mat4`, `Mat4d` | 열 우선 저장 `m[column*4+row]`, 이동은 `m[12..14]`, 기본값 단위 행렬. float 곱·변환은 `platform::simd`. `TryInverse`는 double Laplace 전개, 행렬식 0·비유한·결과가 T로 비유한이면 실패 |
-| `MatrixFactory.h` | 원근(대칭·비대칭·무한 원거리), 직교(대칭·비대칭), `DepthRange{Standard, Reversed}`, oblique clip(UE ClipProjection), LookAt/LookTo, 축 회전·quaternion 회전·역회전, 이동·scale·TR·TRS, RotationAboutPoint, Mirror | Rocks view 공간(카메라 +X 전방, +Y 왼쪽, +Z 위) → NDC(x 오른쪽, y 위, z [0,1]). 기본 깊이는 Reversed(near→1). API별 y 반전은 RHI 경계에서 한 번 적용 |
-| `Quaternion.h` | `Quat`, `Quatd` | 성분 (x,y,z,w), 오른손 회전, `a*b`는 b 먼저. 회전 함수는 단위 전제. 행렬→quaternion은 대각합 분기 방식, w>=0 정규화. `Slerp`는 최단 경로 |
-| `Rotator.h` | `Rotator<T>`(UE FRotator 대응) | 라디안, yaw(+Z, 양수=왼쪽), pitch(-Y축, 양수=기수 위), roll(+X, 양수=왼쪽 위). 적용 roll→pitch→yaw. gimbal lock에서는 roll=0으로 합침. UE는 도·왼손이라 값 교환 불가 |
+| `MatrixFactory.h` | 원근(대칭·비대칭·무한 원거리), 직교(대칭·비대칭), `DepthRange{Standard, Reversed}`, oblique clip(UE ClipProjection), LookAt/LookTo, 축 회전·quaternion 회전·역회전, 이동·scale·TR·TRS, RotationAboutPoint, Mirror | Rocks view 공간(카메라 +X 전방, +Y 왼쪽, +Z 위) → NDC(x 오른쪽, y 위, z [0,1]). 기본 깊이는 Reversed(near→1). API별 y 반전은 RHI 경계에서 한 번 적용. oblique clip은 `DepthRange`를 기본값 없이 받아 두 깊이 규약을 모두 지원(Reversed는 near를 `w - z = a·c`로 바꾼다). LookTo는 up과 forward 사이 sin이 `LookToMinimumSine`(64·machine epsilon) 미만이면 실패(외적 정확 0 판정만으로는 평행 입력이 임의 방향으로 성공했다). 원근 깊이 계수는 `n·(f/(f−n))`로 계산해 큰 far에서 overflow하지 않음 |
+| `Quaternion.h` | `Quat`, `Quatd` | 성분 (x,y,z,w), 오른손 회전, `a*b`는 b 먼저. 회전 함수는 단위 전제. 행렬→quaternion은 대각합 분기 방식, w>=0 정규화. `Slerp`는 최단 경로이며 비유한 입력은 비유한 결과로 드러낸다. `AngularDistance`는 `4·atan2(|a−b|, |a+b|)`(같은 반구로 맞춘 뒤)로 계산해 q와 −q는 정확히 0이고 작은 각도 구분한다(2·acos 방식은 float 같은 회전에서 9.8e-4 rad를 냈다). `TryInverse`는 가장 큰 성분으로 먼저 나눠 제곱 길이 overflow/underflow 입력도 처리 |
+| `Rotator.h` | `Rotator<T>`(UE FRotator 대응) | 라디안, yaw(+Z, 양수=왼쪽), pitch(-Y축, 양수=기수 위), roll(+X, 양수=왼쪽 위). 적용 roll→pitch→yaw. gimbal lock에서는 roll=0으로 합침. quaternion 분해 결과의 yaw·roll은 (−π, π](−π는 +π로). UE는 도·왼손이라 값 교환 불가 |
 | `Transform.h` | TRS(이동 double, 회전 float quaternion, scale float) | 점 변환 scale→rotation→translation. 계산은 double이며 회전은 double로 확장 후 재정규화. 비균일 scale+회전 합성의 shear는 근사하지 않고 `Unsupported`. 0 scale 역변환은 InvalidArgument. 반사는 x scale 부호 |
 | `Rect.h` | `Box2<T>`(UE FBox2D), `IntRect`(UE FIntRect) | Box2는 닫힌 집합(`Contains`=UE IsInsideOrOn, `ContainsStrictly`=IsInside), 무효 플래그 대신 `TryMake`/`TryFromPoints`. IntRect는 반열린 픽셀 구간, 넓이 int64 |
 | `Interval.h` | `Interval<T>`(UE TInterval) | 닫힌 구간, 무효 상태 대신 `TryMake`. 교집합이 없으면 NotFound, NaN을 포함하면 무효로 드러남 |
@@ -69,11 +70,11 @@ Core/Public/Core/Math        Vec·Quat·Mat4·Transform·Rotator·Rect·Color·R
 | 평면 분류 | `ClassifyPlaneSide` → `Front/Back/Intersecting/InvalidInput` | Box, Sphere |
 | 포함·최근접 | `ContainsPoint`, `TryClosestPoint`, `TryDistanceSquared`, `TrySignedDistance`, `TryClosestPoints(segment, segment)` | Box·Sphere·Capsule·OrientedBox 포함, Plane·Segment·Box·Triangle·OrientedBox 최근접 |
 
-계약: 모든 도형은 닫힌 집합이며 경계 접촉은 Hit이다. 겹침 판정에 숨은 epsilon이 없고, 유일한 허용치는 OrientedBox 분리축의 평행 축 보정 `ObbParallelEpsilon`(float 1e-6, double 1e-12, 인자로 변경 가능)이다. 비유한 값·음수 반지름·뒤집힌 box·비단위 방향/회전·NaN 또는 음수 `maxDistance`는 Miss/Hit로 숨기지 않고 `InvalidInput`이다. 광선 방향은 단위 벡터가 전제(`Ray::TryMake`가 정규화)이며 거리는 실제 거리다. 고체 안에서 시작한 광선은 거리 0, `startedInside=true`, 법선 0 벡터다. 퇴화 삼각형은 mesh에 흔하므로 광선·선분에서 Miss로 처리하고 최근접·구 겹침에서는 선분·점으로 다룬다. 공유 변을 가진 삼각형 집합의 watertight 판정은 보장하지 않는다.
+계약: 모든 도형은 닫힌 집합이며 경계 접촉은 Hit이다. `OrientedBox`는 `IsValid`가 회전 길이 오차(`ShapeUnitTolerance`)를 허용하므로 축·좌표 변환과 모든 판정이 `UnitRotation()`(정규화한 회전)을 쓴다. 평면 광선 판정은 거의 평행해 거리가 overflow하면 Miss다. 선분 끝점이 삼각형 위(정확 판정)면 계산된 t가 1을 넘어도 t = 1 Hit, capsule 옆면 위에서 출발한 광선은 거리 0 Hit다. 시작 접촉 거리는 +0이다. `maxDistance`는 T로 변환된 뒤 검사한다(float 도형에 double을 넘기면 −1e-50은 −0으로, float 범위 밖은 +Inf로 바뀜). 겹침 판정에 숨은 epsilon이 없고, 유일한 허용치는 OrientedBox 분리축의 평행 축 보정 `ObbParallelEpsilon`(float 1e-6, double 1e-12, 인자로 변경 가능)이다. 비유한 값·음수 반지름·뒤집힌 box·비단위 방향/회전·NaN 또는 음수 `maxDistance`는 Miss/Hit로 숨기지 않고 `InvalidInput`이다. 광선 방향은 단위 벡터가 전제(`Ray::TryMake`가 정규화)이며 거리는 실제 거리다. 고체 안에서 시작한 광선은 거리 0, `startedInside=true`, 법선 0 벡터다. 퇴화 삼각형은 mesh에 흔하므로 광선·선분에서 Miss로 처리하고 최근접·구 겹침에서는 선분·점으로 다룬다. 공유 변을 가진 삼각형 집합의 watertight 판정은 보장하지 않는다.
 
 UE 5.6 원본과의 차이(원본 확인): `TSphere::Intersects/IsInside`와 `FCapsuleShape::IsInside`는 기본 1e-4 허용치를, `LineBoxIntersection`·`LineExtentBoxIntersection`은 `BOX_SIDE_THRESHOLD=0.1`을, `SegmentPlaneIntersection`은 ±1e-4 t 허용치를, `SegmentDistToSegment*`는 절대 1e-4 임계값을 쓴다. UE `TPlane(A,B,C)`는 일직선 점에서 영 법선 평면을 만들지만 Rocks `TryFromPoints`는 실패한다. UE `TRay` 기본 방향은 +Z, Rocks는 +X다. UE `FOrientedBox`에는 교차 함수가 없다.
 
-검증: 13개 도형 테스트와 28개 판정 테스트가 고정 seed 무작위 사례를 독립 double oracle(축별 최소화·황금분할 탐색·조밀 표본·해석해·SDF 근 찾기·독립 15축 분리축)과 비교하고 모든 겹침 쌍의 대칭을 확인한다. 미구현: frustum, swept shape, 접촉 깊이·manifold, Segment–Capsule/OBB, OBB–Sphere/Box, Capsule–Box/Triangle.
+검증: 13개 도형 테스트와 33개 판정 테스트(리뷰 회귀 5개 포함)가 고정 seed 무작위 사례를 독립 double oracle(축별 최소화·황금분할 탐색·조밀 표본·해석해·SDF 근 찾기·독립 15축 분리축)과 비교하고 모든 겹침 쌍의 대칭을 확인한다. 미구현: frustum, swept shape, 접촉 깊이·manifold, Segment–Capsule/OBB, OBB–Sphere/Box, Capsule–Box/Triangle.
 
 ## 3. 색
 
@@ -90,6 +91,7 @@ UE 5.6 `Color.h`/`Color.cpp`와의 차이(원본 확인): UE sRGB 디코딩은 �
 - 단위 테스트: `Tests/Platform/PlatformMathTests.cpp`(Generic↔CPU 구현 bit 대조, 정수 변환 경계·무작위 30만 건, InvSqrtEstimate 오차, scalar↔SIMD 레지스터 bit 대조 5만 건×2), `Tests/Core/Math*Tests.cpp`(벡터·행렬·투영·quaternion·Transform·Rotator·보간·Rect·Float16, 독립 Gauss-Jordan 역행렬 oracle·Python 정수 행렬식·half 65,536개 전수 왕복과 이진 탐색 oracle 등), `ColorTests.cpp`, `RandomStreamTests.cpp`.
 - 음성 대조(자식 프로세스): `math-invalid-0..7` — NaN·범위 밖 정수 변환, IntVector overflow, 일괄 변환 크기 불일치·부분 겹침, 행렬 인덱스, 비단위 축, Clamp 범위 위반이 각각 정상 종료하지 않고 지정 진단으로 끝나는지 확인한다.
 - ARM64는 `--target=aarch64-pc-windows-msvc`로 NEON 경로의 **컴파일만** 확인했다. 실행 결과는 아래 미검증이다.
+- 독립 리뷰(2026-11-11, 수학·도형 각 1개 subagent): 수학 쪽은 SSE↔Generic 정수 변환(double 1.6억 건, float 전체 2^32), InvSqrtEstimate(양의 정규 float 전수, ARM FRSQRTE 에뮬레이션 포함), half 변환(F16C 하드웨어와 전수 일치), scalar↔SSE 레지스터(300만 세트)에서 불일치 0을 확인했고, 위 표의 LookTo 평행 판정·Reversed oblique·AngularDistance·quaternion 역원·NaN 전파·FMA 축약·큰 far overflow를 찾아 수정했다. 도형 쪽은 비단위 OBB 회전, capsule 옆면 시작, 삼각형 끝점, 평면 Inf 거리, Box NaN 소실을 찾아 수정했고 수정 후 리뷰어 재현 프로그램 전부(OBB 무작위 70만 쌍 등)에서 실패 0이다. 재현 입력은 회귀 테스트로 옮겼다.
 
 ## 6. 미검증·후속
 

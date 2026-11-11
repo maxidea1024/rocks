@@ -117,7 +117,7 @@ Base → PlatformBase → Core → Task / Localization / Serialization / MetaSch
 | MB02 P0 | PlatformBase backend: `Private/Posix`(Mac·iOS·Android 공통 thread·sync·clock·file·pread), `Private/Apple`(Mac·iOS 공통), `Private/IOS`, `Private/Android` | 기능별로 정확히 하나의 구현 선택, Fatal·VirtualMemory(mmap/mprotect)·TLS·thread 이름, 실기기 정상·실패·종료 테스트 |
 | MB03 P0 | 파일·경로: 앱 샌드박스(iOS Documents/Library/Caches, Android internal/external files), Android APK/AAB asset(AAssetManager)·asset pack, 읽기 전용 번들 | 경로 문법과 저장소 종류 분리, 비동기 읽기에서 압축 해제 없이 offset 읽기 가능한 asset만 직접 지원, 미지원은 Unsupported |
 | MB04 P1 | 수명·자원: 백그라운드 전환 시 I/O·worker 정지/재개, 메모리 경고(iOS didReceiveMemoryWarning, Android onTrimMemory)와 allocator 예산 연동 | 진행 중 요청의 완료·취소 규약 유지, 앱 일시정지 중 callback 지연 허용, 강제 종료 시 부분 쓰기 정책 |
-| MB05 P1 | 성능·SIMD: ARM64 NEON 실행 검증, FMA 축약 고정(`-ffp-contract`), thermal throttling 하의 측정 | `ScalarSimdBitExact` 판정을 실기기 결과로 갱신, 미실행 플랫폼은 통과로 표시하지 않음 |
+| MB05 P1 | 성능·SIMD: ARM64 NEON 실행 검증, FMA 축약 금지(`-ffp-contract=off`, 빌드 적용·codegen 확인 완료)의 실기기 결과 확인, thermal throttling 하의 측정 | `ScalarSimdBitExact` 판정을 실기기 결과로 갱신, 미실행 플랫폼은 통과로 표시하지 않음 |
 
 ### 3.6 로깅·프로파일링·설정·자원 변환
 
@@ -171,7 +171,7 @@ Base → PlatformBase → Core → Task / Localization / Serialization / MetaSch
 
 ## 7. 확인되지 않은 결정 사항
 
-1. 수학: 자체 구현과 CPU별 PlatformMath(SSE2/NEON)를 채택했고 float/double 저장은 padding 없는 성분 순서, 행렬은 열 우선, quaternion은 (x,y,z,w)로 결정했다(2026-11-11). 외부 backend 교체 여부, AVX2/FMA 등 선택 ISA의 runtime dispatch, ARM64 FMA 축약(`-ffp-contract`) 고정, 플랫폼 간 부동소수점 결정성 범위는 아직 결정하지 않았다.
+1. 수학: 자체 구현과 CPU별 PlatformMath(SSE2/NEON)를 채택했고 float/double 저장은 padding 없는 성분 순서, 행렬은 열 우선, quaternion은 (x,y,z,w)로 결정했다(2026-11-11). 컴파일러의 FMA 축약은 모든 native 대상에서 금지(`-ffp-contract=off`)하기로 결정했다(2026-11-11, 근거: 축약이 ARM64에서만 일어나 같은 소스의 행렬 역행렬 성공 여부까지 달라지는 것을 리뷰가 재현). 외부 backend 교체 여부, AVX2/FMA 등 선택 ISA의 runtime dispatch(명시적 FMA kernel 포함), 플랫폼 간 부동소수점 결정성 범위(libm 초월 함수 차이 포함)는 아직 결정하지 않았다.
 2. 기존 [전체 구현 계획](EngineImplementationPlan.ko.md)의 기본 좌표 규약은 오른손·+Z 위·+X 전방·미터·라디안·초, column vector와 `world=parent×local`, reversed-Z 깊이 [0,1], 월드 위치 double/렌더 상대 float다. UE의 좌표·단위와는 가져오기/내보내기 경계에서 변환한다. matrix 메모리 배치(열 우선)·quaternion 순서((x,y,z,w))·Rocks view 공간(카메라 +X 전방)과 NDC 규약은 결정했다. 기본 collision 접촉 기준(닫힌 집합)과 함수별 epsilon은 도형 구현 문서에 함수별로 기록한다.
 3. UE5.6 공개 Core 전체 원본/심볼을 아직 기계적으로 대조하지 않았다. 공개되지 않은 내부 기능과 상위 모듈을 Core와 혼동하지 않으며, 5.8 참고 사례는 5.6 증거로 취급하지 않는다.
 4. 실제 macOS x64/ARM64, 다른 OS/콘솔, 실제 외부 allocator 제품 배포 및 성능 동등성은 실행 증거가 없다. 계측 가능한 목표와 대상 하드웨어를 별도로 정한다.

@@ -10,7 +10,7 @@
 
 이전 경로·파일 I/O 변경의 Windows Foundation 검증에서 Debug는 native 354건·harness 65건·meta 41건, ASan은 native 354건·harness 66건·meta 41건이 PASS였다. 두 실행의 build evidence는 `sourceStableDuringRun=true`, `runnerReportCurrent=true`를 기록한다. 전체 `clang-format` 검사도 PASS였으며, 별도 빌드 도구 회귀는 해당 실행 시점에 18개 그룹 PASS였다. 결과는 각각 `out/final-platform-foundation-debug/`, `out/final-platform-foundation-asan/`과 `out/path-build-tests.log`에 기록되어 있다.
 
-두 Foundation 실행에서 파일 symlink fixture는 호스트 권한 또는 파일시스템 제약으로, 메타컴파일러 symlink fixture는 Windows 계정 권한 제약으로 생성이 건너뛰어졌다. 당시 전체 PASS에 포함된 해당 테스트는 링크 동작의 실제 검증으로 간주하지 않았다. 이후 Windows 개발자 모드를 활성화하고 별도로 재검증한 결과는 아래에 기록한다. 현재 변경분의 macOS 실기기 빌드·실행, 실제 OS close 실패 강제 주입은 미검증이다. 전체 stat, 디렉터리 생성·열거, 복사·이동, flush·truncate, 비동기 I/O·mapping·watch와 wrapper chain 관리자는 후속 범위다.
+두 Foundation 실행에서 파일 symlink fixture는 호스트 권한 또는 파일시스템 제약으로, 메타컴파일러 symlink fixture는 Windows 계정 권한 제약으로 생성이 건너뛰어졌다. 당시 전체 PASS에 포함된 해당 테스트는 링크 동작의 실제 검증으로 간주하지 않았다. 이후 Windows 개발자 모드를 활성화하고 별도로 재검증한 결과는 아래에 기록한다. 현재 변경분의 macOS 실기기 빌드·실행, 실제 OS close 실패 강제 주입은 미검증이다. 전체 stat, 디렉터리 생성·열거, 복사·이동, flush·truncate, 비동기 쓰기·scatter/gather·우선순위, mapping·watch와 wrapper chain 관리자는 후속 범위다. 비동기 위치 지정 읽기(`Platform/AsyncFile.h`)는 아래 2026-11-11 절에 기록한다.
 
 이전 Core 공용 기능 확장의 Windows 검증은 Foundation Debug native 407건·harness 66건·meta 41건, Foundation ASan native 407건·harness 67건·meta 41건, Core Release native 320건·harness 59건이 각각 PASS였다. 세 빌드 evidence 모두 `sourceStableDuringRun=true`, `runnerReportCurrent=true`이며 `clang-format`도 PASS다. 당시 파일 및 메타컴파일러 symlink fixture는 권한 제약으로 SKIP되었다. 이후 별도 재검증에서 두 fixture가 실제 실행되어 통과했다. 현재 변경의 macOS 실기기 빌드와 테스트는 미검증이다.
 
@@ -54,7 +54,7 @@
 
 `String`의 `/`와 `/=`는 `Path::Combine`·`Append`에 연결되며 원문을 결합하고 `Result`로 실패를 전달한다. `/=`는 실제 변경이 없거나 capacity가 충분하면 기존 저장소를 재사용하며 입력 별칭을 처리한다. 재할당이 필요한 연산에는 기존 `String`과 할당기의 반환 순서 계약이 적용된다. 정규화·포함 판정은 문자열 연산일 뿐 실제 파일 접근 가능성, 링크 해석이나 보안 경계를 보장하지 않는다.
 
-`Platform/File.h`는 `FileSystem`·`FileHandle` 경계, 물리 Windows/macOS backend와 소유형 `File`을 제공한다. 열기·존재·삭제, read/write, 반복 전송 `ReadExact`·`WriteAll`, seek·size·close와 오류 코드를 포함한다. wrapper는 자체 구현해 주입할 수 있으나 Unreal식 wrapper chain 관리자나 실제 제품 wrapper가 구현됐다는 뜻은 아니다. 단위 테스트는 경로 입력, 짧은 전송·실패, EOF, 잘못된 소유·재진입과 동시성 일부를 다룬다. 파일 stat 전체·디렉터리 생성/열거, 복사·이동, flush·truncate, 비동기·mapping·watch, OS close 오류 강제 주입, macOS 실기기와 링크 경로 검증은 후속이다. close 오류는 terminal이며 OS 자원 회수 성공을 보장하지 않는다.
+`Platform/File.h`는 `FileSystem`·`FileHandle` 경계, 물리 Windows/macOS backend와 소유형 `File`을 제공한다. 열기·존재·삭제, read/write, 반복 전송 `ReadExact`·`WriteAll`, seek·size·close와 오류 코드를 포함한다. wrapper는 자체 구현해 주입할 수 있으나 Unreal식 wrapper chain 관리자나 실제 제품 wrapper가 구현됐다는 뜻은 아니다. 단위 테스트는 경로 입력, 짧은 전송·실패, EOF, 잘못된 소유·재진입과 동시성 일부를 다룬다. 파일 stat 전체·디렉터리 생성/열거, 복사·이동, flush·truncate, 비동기 쓰기·mapping·watch, OS close 오류 강제 주입, macOS 실기기와 링크 경로 검증은 후속이다. 비동기 읽기는 `Platform/AsyncFile.h`(Windows IOCP Native·공용 WorkerPool, macOS는 WorkerPool만이며 미빌드)가 담당한다. close 오류는 terminal이며 OS 자원 회수 성공을 보장하지 않는다.
 
 플랫폼의 단조 시계와 WorkerScheduler는 시간 측정 및 작업 실행 기반이다. 게임·엔진의 가변 틱, 고정 틱, 시간 배율, 틱 그룹과 멀티스레드 틱은 아직 구현하지 않았다. Component의 생성·부착·소유·수명 시스템과 프리팹, 에디터·PIE도 미구현이다. `Templates/Game/Foundation`은 현재 Object/CLASS 예제이며 Component 예제는 실제 시스템 구현 이후 추가한다.
 
@@ -259,7 +259,7 @@ Windows ASan은 LeakSanitizer가 아니며, 소유권 ledger와 종료 검사를
 
 현재 범위는 Core·Object의 실행 경로와 C#/.NET 기반 빌드·메타 도구의 초기 구현이다. 각 경로의 구현과 검증 결과를 전체 Core 또는 엔진 기능의 완료로 확대하지 않는다.
 
-전체 Foundation에는 frame 수명 관리·자동 일괄 해제 stack·thread cache 등 후속 할당기, 가상 메모리 오류 주입 검증, queue 및 기타 후속 컨테이너, 미완성 경로 유틸·파일 I/O와 플랫폼 검증, atomics/RWLock, root owner 진단, 정밀한 빌드 의존 추적과 메타 unit 자동 발견, 장시간 스트레스·대규모 pause 성능 검증 등이 남아 있다. 수학·기본 충돌 라이브러리, 엔진 틱, Component와 상위 에디터·PIE·입력·렌더러 통합도 별도 후속 작업이다. 전체 C00–C26/Foundation Gate는 미완료이며 초기 선형 탐색과 고정 상한을 제품 성능 충족으로 간주하지 않는다.
+전체 Foundation에는 frame 수명 관리·자동 일괄 해제 stack·thread cache 등 후속 할당기, 가상 메모리 오류 주입 검증, queue 및 기타 후속 컨테이너, 미완성 경로 유틸·파일 I/O와 플랫폼 검증, atomics/RWLock, root owner 진단, 정밀한 빌드 의존 추적과 메타 unit 자동 발견, 장시간 스트레스·대규모 pause 성능 검증 등이 남아 있다. 수학·기본 충돌 라이브러리는 첫 구현이 들어갔으나 frustum·swept shape·접촉 정보와 macOS·ARM64 실행 검증이 남아 있다([수학 구현](Math.ko.md)). 엔진 틱, Component와 상위 에디터·PIE·입력·렌더러 통합은 별도 후속 작업이다. 전체 C00–C26/Foundation Gate는 미완료이며 초기 선형 탐색과 고정 상한을 제품 성능 충족으로 간주하지 않는다.
 
 ## 2026-11-11 Windows 심볼릭 링크 재검증
 
@@ -272,3 +272,20 @@ Windows 개발자 모드를 활성화한 뒤 기존 빌드의 파일 링크 fixt
 Windows Foundation Debug는 native 415건, harness 67건, meta 41건이 통과했다. 이후 C# 하네스에 양방향 이종 키 컴파일 음성 대조와 컴파일러 미지정 시 생략 표시를 보강했으며, 동일한 Debug native 바이너리로 보강된 harness 67건을 다시 실행해 통과했다. 컴파일러 미지정 직접 실행에서는 `[SKIP]` 표시를 확인했다. Debug 전체 실행 결과는 `out/core-algorithms-debug.log`, 보강 후 harness는 `out/core-algorithms-debug-harness-recheck.log`에 있다.
 
 Windows Foundation ASan 최초 실행에서는 native 415건이 통과했으나 기존 `Native.Fatal.thread-unjoined` 음성 테스트가 제한 시간을 초과했다. 해당 실행은 성공으로 간주하지 않으며 원인은 확인되지 않았다. 별도 출력 경로에서 재시도한 전체 ASan 실행은 native 415건, harness 68건, meta 41건이 통과했고 `sourceStableDuringRun=true`, `runnerReportCurrent=true`다. 같은 음성 테스트를 별도로 5회 실행하여 각각 예상 종료와 진단을 확인했으나 간헐적 시간 초과의 원인 해결을 입증하지는 않는다. 결과는 `out/core-algorithms-retry-asan.log`, 최초 실패 하네스 보고서는 `out/core-algorithms-foundation-asan/tool-native-report.json`이다. macOS 실기기 빌드·실행은 이번에 수행하지 않았다.
+
+## 2026-11-11 Core 수학·도형 독립 리뷰 수정과 검증
+
+수학 계층과 기본 도형 판정을 각각 독립 subagent가 검토했다. 확인된 결함을 수정하고 재현 입력을 회귀 테스트로 옮겼다. 계약 변경은 [수학 구현](Math.ko.md)에 기록한다.
+
+- 도형: 허용 오차 안의 비단위 회전을 가진 OrientedBox 판정 누락, capsule 옆면 위에서 출발한 광선 누락, 끝점이 삼각형 위인 선분 누락, 거의 평행한 평면 광선의 Inf 거리·NaN 점 Hit, `Box::ExpandedToInclude`의 NaN 소실을 고쳤다. 뒷면 삼각형 시작 접촉의 -0 거리도 +0으로 맞췄다.
+- 수학: LookTo 평행 판정(외적 정확 0 → sin 하한), Reversed 깊이에서 뒤집히던 oblique clip(`DepthRange` 필수 인자), `AngularDistance` 정밀도, 극단 크기 quaternion 역원, 보간·Slerp의 NaN 소실, 큰 far plane overflow, Rotator −π, 음수 grid의 `GridSnap` 경계, `InvSqrt(-0)` 문서를 고쳤다.
+- 빌드: 모든 native 대상에 `-ffp-contract=off`를 추가했다(메타컴파일러 허용 인자 포함). ARM64 대상 codegen에서 fused 연산 28개 → 0개를 확인했다. ARM64 실행은 하지 않았다.
+
+Windows x64(clang-cl 21.1.6) 결과:
+
+- Foundation Debug native 625건, harness 84건(`shared-ptr-empty`, `random-invalid-0..2` 음성 대조 포함), meta 41건, policy·format 통과. Debug native 마지막 실행은 clang-format 적용(공백만 변경) 직전 소스다.
+- Foundation ASan native 625건 통과, AddressSanitizer 오류 0. ASan harness는 이번에 실행하지 않았다(`Native.Fatal.thread-unjoined` 간헐 시간 초과 원인 수정은 미적용, Core 상세 명세 §7-5).
+- Foundation Release native 625건 통과.
+- 리뷰어 재현 프로그램(도형 20개, 수학 probe)을 수정된 소스로 다시 실행해 실패 0을 확인했다.
+
+C# self-test는 이번에 다시 실행하지 않았다. 직전 실행에서 IdentityGit 4건이 PowerShell 7(`pwsh`) 미설치로 실패한 상태이며 환경 문제로 분류했다. macOS·iOS·Android 빌드·실행은 수행하지 않았다.
