@@ -6,12 +6,18 @@ using Rocks.Tooling.Common;
 
 namespace Rocks.Build.Cli;
 
-public sealed record SdkModule(string Name, string[] Includes, string[] Defines, string[] Dependencies, string[] Libraries);
+// SystemLibraries·Frameworks는 정적 라이브러리가 요구하는 플랫폼 링크 의존이다. 외부 게임의 최종 링크가 같은 선언을
+// 받아야 하므로 SDK에 함께 담는다(NativeModuleInput과 같은 의미·검증).
+public sealed record SdkModule(string Name, string[] Includes, string[] Defines, string[] Dependencies, string[] Libraries,
+    string[] SystemLibraries, string[] Frameworks);
 public sealed record SdkManifest(int Version, string Configuration, string Platform, string Architecture,
     string CompilerIdentity, string SdkIdentity, SdkModule[] Modules, Dictionary<string, string> Files);
 
 public static class InstalledSdk
 {
+    // 2: SdkModule에 SystemLibraries·Frameworks 추가.
+    private const int ManifestVersion = 2;
+
     /// <summary>
     /// SDK 타깃에서 도달하는 모듈만 고른다. 규칙 로더는 모든 모듈 규칙을 읽으므로 타깃이 쓰지 않는(빌드되지 않은)
     /// 모듈까지 내보내려 하면 "built for this SDK target" 오류가 난다.
@@ -46,6 +52,8 @@ public static class InstalledSdk
             var packaged = new List<SdkModule>();
             foreach (var module in modules.Where(module => module.Kind == NativeModuleKind.StaticLibrary))
             {
+                // 원시 compile·link 인자와 외부 prebuilt 라이브러리는 ABI·배포 규칙이 정해지지 않아 거부한다.
+                // 플랫폼 시스템 라이브러리·framework는 구조화된 선언이라 SDK manifest로 전달한다.
                 if (module.PrebuiltLibraries.Count != 0 || module.AdditionalLinkArguments.Count != 0 || module.AdditionalCompileArguments.Count != 0)
                     throw new NotSupportedException($"SDK module '{module.Name}' declares external libraries/custom compile or link flags. Add an explicit SDK packaging/ABI rule before exporting this module.");
                 var includes = new List<string>();
@@ -66,7 +74,8 @@ public static class InstalledSdk
                 else if (module.Sources.Count != 0)
                     throw new InvalidOperationException($"Module {module.Name} was not built for this SDK target.");
                 packaged.Add(new(module.Name, includes.ToArray(), module.PublicDefines.ToArray(),
-                    module.Dependencies.ToArray(), libraries.ToArray()));
+                    module.Dependencies.ToArray(), libraries.ToArray(), module.SystemLibraries.ToArray(),
+                    module.Frameworks.ToArray()));
             }
             // 고정 버전 외부 라이브러리의 라이선스 원문을 함께 배포한다(BSD 계열은 바이너리 배포 시 고지 의무가 있다).
             foreach (var module in packaged)
@@ -79,6 +88,24 @@ public static class InstalledSdk
                 Directory.CreateDirectory(Path.GetDirectoryName(license)!);
                 File.Copy(Path.Combine(library, thirdParty.License.File), license);
             }
+            // 데이터 전용 라이브러리(예: Unicode UCD)는 모듈이 아니므로, 파생물이 들어간 모듈(embeddedIn)을 SDK가 담을 때
+            // 라이선스를 배포한다. 시험 전용 데이터(embeddedIn 없음)는 배포하지 않는다.
+            string thirdPartyRoot = Path.Combine(root, ThirdPartyManifest.ThirdPartyRoot);
+            if (Directory.Exists(thirdPartyRoot))
+            {
+                foreach (string library in Directory.EnumerateDirectories(thirdPartyRoot).Order(StringComparer.Ordinal))
+                {
+                    if (!File.Exists(Path.Combine(library, ThirdPartyManifest.FileName)))
+                        continue;
+                    var data = ThirdPartyManifest.Read(library);
+                    if (data.Kind != ThirdPartyKind.Data ||
+                        !data.EmbeddedIn.Any(name => packaged.Any(module => string.Equals(module.Name, name, StringComparison.Ordinal))))
+                        continue;
+                    string license = Path.Combine(stage, "Licenses", Path.GetFileName(library), Path.GetFileName(data.License.File));
+                    Directory.CreateDirectory(Path.GetDirectoryName(license)!);
+                    File.Copy(Path.Combine(library, data.License.File), license);
+                }
+            }
             // SDK 자체의 도구만으로 외부 게임 규칙을 빌드할 수 있어야 한다.
             foreach (var tool in new[] { "Rocks.Build.Cli", "Rocks.MetaCompiler" })
                 CopyTree(Path.GetDirectoryName(BuildCommand.HostTool(root, tool))!, Path.Combine(stage, "Tools", tool));
@@ -86,7 +113,7 @@ public static class InstalledSdk
             File.Copy(Path.Combine(root, ".clang-format"), Path.Combine(stage, ".clang-format"));
             var hashes = Directory.GetFiles(stage, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal)
                 .ToDictionary(file => Path.GetRelativePath(stage, file).Replace('\\', '/'), Hashing.Sha256File, StringComparer.Ordinal);
-            var manifest = new SdkManifest(1, configuration.ToString(), toolchain.Platform.ToString(),
+            var manifest = new SdkManifest(ManifestVersion, configuration.ToString(), toolchain.Platform.ToString(),
                 System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(), toolchain.AbiIdentity,
                 toolchain.AbiIdentity, packaged.ToArray(), hashes);
             AtomicFile.WriteIfChanged(Path.Combine(stage, "rocks-sdk.json"), JsonSerializer.Serialize(manifest, BuildCommand.JsonOptions));
@@ -205,7 +232,9 @@ public static class InstalledSdk
             PublicIncludeDirectories = module.Includes.Select(path => SafePath(sdk, path)).ToArray(),
             PublicDefines = module.Defines,
             Dependencies = module.Dependencies,
-            PrebuiltLibraries = module.Libraries.Select(path => SafePath(sdk, path)).ToArray()
+            PrebuiltLibraries = module.Libraries.Select(path => SafePath(sdk, path)).ToArray(),
+            SystemLibraries = module.SystemLibraries,
+            Frameworks = module.Frameworks
         }).Concat(projectModules).ToArray();
         var declaredInputs = GameInputSnapshot.DeclaredInputs(context, modules, rules.Target);
         var initialDeclared = GameInputSnapshot.Capture(project, output, sdk, declaredInputs);
@@ -244,7 +273,7 @@ public static class InstalledSdk
     {
         var manifest = JsonSerializer.Deserialize<SdkManifest>(File.ReadAllText(Path.Combine(sdk, "rocks-sdk.json")), new JsonSerializerOptions { UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow })
             ?? throw new InvalidDataException("Empty SDK manifest.");
-        if (manifest.Version != 1 || manifest.Configuration != configuration.ToString() ||
+        if (manifest.Version != ManifestVersion || manifest.Configuration != configuration.ToString() ||
             manifest.Platform != toolchain.Platform.ToString() || manifest.CompilerIdentity != toolchain.AbiIdentity ||
             manifest.SdkIdentity != toolchain.AbiIdentity ||
             manifest.Architecture != System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString())
@@ -273,7 +302,8 @@ public static class InstalledSdk
                 throw new InvalidDataException($"SDK file changed or missing: {pair.Key}");
         foreach (var module in manifest.Modules)
         {
-            if (module.Includes is null || module.Libraries is null || module.Dependencies is null || module.Defines is null)
+            if (module.Includes is null || module.Libraries is null || module.Dependencies is null || module.Defines is null ||
+                module.SystemLibraries is null || module.Frameworks is null)
                 throw new InvalidDataException($"SDK module '{module.Name}' has incomplete declarations.");
             foreach (var include in module.Includes)
                 if (!Directory.Exists(SafePath(sdk, include))) throw new InvalidDataException($"Missing SDK include directory: {include}");

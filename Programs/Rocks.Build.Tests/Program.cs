@@ -218,6 +218,9 @@ try
     await CLanguageTests.RunAsync(request, root);
     Pass("C17 translation units: C++ flag golden, C profile, real build, included .c invalidation");
 
+    SystemLibraryTests.Run(request);
+    Pass("system libraries and Apple frameworks: platform link form, propagation, validation");
+
     string marker = Path.Combine(root, "child.pid");
     string dotnet = NativeEnvironment.FindExecutable("dotnet", toolchain.Environment);
     var fakeToolchain = toolchain with { CompilerPath = dotnet, CompileArguments = [Assembly.GetExecutingAssembly().Location, "--fake-compiler", marker] };

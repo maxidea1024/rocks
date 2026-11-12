@@ -28,9 +28,7 @@ public sealed class PlatformBase : CoreModuleRules
                 : [],
             Dependencies = RequiredModules,
             // macOS 디렉터리 감시(FSEvents)는 CoreServices framework를 쓴다.
-            AdditionalLinkArguments = context.Platform == NativePlatform.MacOS
-                ? ["-framework", "CoreServices"]
-                : []
+            Frameworks = context.Platform == NativePlatform.MacOS ? ["CoreServices"] : []
         };
     }
 }

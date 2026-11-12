@@ -18,7 +18,8 @@ public static partial class PolicyChecks
     /// 고정 버전 외부 라이브러리(<c>Core/Source/ThirdParty/&lt;Lib&gt;/</c>)를 검사한다(rule id <c>third-party</c>).
     /// <list type="bullet">
     /// <item>폴더마다 엄격한 <c>ThirdParty.json</c>과 <c>&lt;Lib&gt;.Build.cs</c>가 있어야 한다. 그 밖의 파일은 manifest의
-    /// 번역 단위로 등록한 Rocks 글루(.c)뿐이다.</item>
+    /// 번역 단위로 등록한 Rocks 글루(.c)뿐이다. 데이터 전용 라이브러리(<c>"kind": "data"</c>)는 모듈 규칙이 없어야 하고
+    /// 지시문 검사를 하지 않는다(파일 집합·SHA-256·라이선스 검사는 같다).</item>
     /// <item>원본 디렉터리의 실제 파일 집합이 manifest <c>files</c>와 정확히 같고 SHA-256(byte 기준)이 일치한다.
     /// 링크는 거부하고 따라 들어가지 않는다. 라이선스 원문이 있어야 한다.</item>
     /// <item>번역 단위·include 경로·adapter 헤더가 존재하고 허용 위치에 있다.</item>
@@ -83,8 +84,12 @@ public static partial class PolicyChecks
         // 라이브러리 폴더 바로 아래: manifest·규칙·등록한 글루·원본 디렉터리만 허용한다.
         var glue = manifest.TranslationUnits.Where(unit => !unit.StartsWith(manifest.UpstreamDirectory + "/", StringComparison.Ordinal))
             .ToHashSet(StringComparer.Ordinal);
-        if (!File.Exists(Path.Combine(library, name + ".Build.cs")))
+        bool data = manifest.Kind == ThirdPartyKind.Data;
+        bool hasRule = File.Exists(Path.Combine(library, name + ".Build.cs"));
+        if (!data && !hasRule)
             Fail(relativeLibrary, 0, $"missing module rule {name}.Build.cs");
+        if (data && hasRule)
+            Fail($"{relativeLibrary}/{name}.Build.cs", 0, "data library must not have a module rule (it is not built)");
         foreach (string entry in Directory.EnumerateFileSystemEntries(library).Order(StringComparer.Ordinal))
         {
             string child = Path.GetFileName(entry);
@@ -151,9 +156,12 @@ public static partial class PolicyChecks
                 !Directory.Exists(Path.Combine(library, directory)))
                 Fail($"{relativeLibrary}/{directory}", 0, "include directory must exist inside the upstream directory");
 
-        // 컴파일러 지시문 목록은 정확히 같아야 한다(파일·논리 줄 시작·원문).
+        // 컴파일러 지시문 목록은 정확히 같아야 한다(파일·논리 줄 시작·원문). 데이터는 컴파일하지 않으므로 검사하지 않는다
+        // (manifest의 목록은 리더가 비어 있음을 강제한다).
         var expected = manifest.PragmaDirectives.ToHashSet();
-        var found = actual.SelectMany(file => ThirdPartyManifest.ScanPragmaDirectives(file.Key, file.Value)).ToHashSet();
+        HashSet<ThirdPartyPragma> found = data
+            ? []
+            : actual.SelectMany(file => ThirdPartyManifest.ScanPragmaDirectives(file.Key, file.Value)).ToHashSet();
         foreach (var item in found.Where(item => !expected.Contains(item)).OrderBy(item => item.File, StringComparer.Ordinal).ThenBy(item => item.Line))
             Fail($"{relativeUpstream}/{item.File}", item.Line, "compiler directive is not recorded in manifest pragmaDirectives");
         foreach (var item in expected.Where(item => !found.Contains(item)).OrderBy(item => item.File, StringComparer.Ordinal).ThenBy(item => item.Line))

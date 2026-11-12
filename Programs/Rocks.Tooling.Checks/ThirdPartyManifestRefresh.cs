@@ -41,8 +41,10 @@ public static class ThirdPartyManifestRefresh
             {
                 byte[] bytes = File.ReadAllBytes(Path.Combine(upstream, file));
                 files[file] = Convert.ToHexStringLower(SHA256.HashData(bytes));
-                foreach (ThirdPartyPragma pragma in ThirdPartyManifest.ScanPragmaDirectives(file, bytes))
-                    pragmas.Add(new JsonObject { ["file"] = pragma.File, ["line"] = pragma.Line, ["text"] = pragma.Text });
+                // 데이터 전용 라이브러리는 컴파일하지 않으므로 지시문을 기록하지 않는다(목록은 비어 있어야 한다).
+                if (manifest.Kind == ThirdPartyKind.Code)
+                    foreach (ThirdPartyPragma pragma in ThirdPartyManifest.ScanPragmaDirectives(file, bytes))
+                        pragmas.Add(new JsonObject { ["file"] = pragma.File, ["line"] = pragma.Line, ["text"] = pragma.Text });
             }
             document["files"] = files;
             document["pragmaDirectives"] = pragmas;

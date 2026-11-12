@@ -18,7 +18,7 @@ public sealed class OpenGLGraphics : EngineModuleRules
             PublicIncludeDirectories = [context.PathInRoot($"{ModuleDirectory}/Public")],
             Dependencies = RequiredModules,
             // GL 1.1 진입점과 WGL은 opengl32에서, 나머지는 wglGetProcAddress로 실행 시 얻는다.
-            AdditionalLinkArguments = windows ? ["opengl32.lib", "gdi32.lib", "user32.lib"] : []
+            SystemLibraries = windows ? ["opengl32", "gdi32", "user32"] : []
         };
     }
 }

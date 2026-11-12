@@ -56,6 +56,13 @@ internal static class InputValidation
                 ValidateArgument(module.Name, "AdditionalCompileArguments", argument, true);
             foreach (string argument in module.AdditionalLinkArguments)
                 ValidateArgument(module.Name, "AdditionalLinkArguments", argument, false);
+            foreach (string library in module.SystemLibraries)
+                ValidateLinkName(module.Name, "SystemLibraries", library);
+            foreach (string framework in module.Frameworks)
+                ValidateLinkName(module.Name, "Frameworks", framework);
+            if (module.Frameworks.Count != 0 && request.Toolchain.Platform != NativePlatform.MacOS)
+                throw new ArgumentException($"Module {module.Name}: Frameworks are Apple-only, but the toolchain targets " +
+                    $"{request.Toolchain.Platform}. Declare them only when BuildContext.Platform is MacOS.");
             foreach (string define in module.PublicDefines.Concat(module.PrivateDefines))
             {
                 string name = define.Split('=')[0];
@@ -107,6 +114,21 @@ internal static class InputValidation
                 lower.StartsWith("-wl,-lto", StringComparison.Ordinal) || lower.StartsWith("--lto", StringComparison.Ordinal);
         }
         if (invalid) throw new ArgumentException($"Module {module}, {field}: argument '{argument}' overrides owned output/policy or hides inputs; use structured settings.");
+    }
+
+    // 시스템 라이브러리·framework 이름은 toolchain이 플랫폼 형식으로 바꾸므로 이름만 받는다. 경로·플래그·확장자는
+    // 플랫폼 중립성을 깨고 링크 인자 정책을 우회하므로 거부한다.
+    private static void ValidateLinkName(string module, string field, string name)
+    {
+        bool valid = name.Length is > 0 and <= 128 && (char.IsAsciiLetterOrDigit(name[0]) || name[0] == '_') &&
+            name.All(value => char.IsAsciiLetterOrDigit(value) || value is '_' or '.' or '+' or '-');
+        string lower = name.ToLowerInvariant();
+        bool extension = lower.EndsWith(".lib", StringComparison.Ordinal) || lower.EndsWith(".a", StringComparison.Ordinal) ||
+            lower.EndsWith(".so", StringComparison.Ordinal) || lower.EndsWith(".dylib", StringComparison.Ordinal) ||
+            lower.EndsWith(".framework", StringComparison.Ordinal) || lower.EndsWith(".tbd", StringComparison.Ordinal);
+        if (!valid || extension)
+            throw new ArgumentException($"Module {module}, {field}: '{name}' must be a bare library or framework name " +
+                "(no path, flag prefix, or file extension).");
     }
 
     // 최적화 수준 인자다(대소문자 구분). clang: -O, -O0~3, -Os, -Oz, -Og, -Ofast, --optimize[=N].

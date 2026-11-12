@@ -18,7 +18,7 @@ public sealed class D3D12Graphics : EngineModuleRules
             PublicIncludeDirectories = [context.PathInRoot($"{ModuleDirectory}/Public")],
             Dependencies = RequiredModules,
             // 셰이더는 실행 시 D3DCompile(d3dcompiler_47, 시스템 DLL)로 컴파일한다. 오프라인 DXC 쿠킹은 후속이다.
-            AdditionalLinkArguments = windows ? ["d3d12.lib", "dxgi.lib", "d3dcompiler.lib", "user32.lib"] : []
+            SystemLibraries = windows ? ["d3d12", "dxgi", "d3dcompiler", "user32"] : []
         };
     }
 }

@@ -20,7 +20,7 @@ public sealed class PlatformWindow : EngineModuleRules
             PublicIncludeDirectories = [context.PathInRoot($"{ModuleDirectory}/Public")],
             Dependencies = RequiredModules,
             // XInput은 실행 시 동적 로드한다(SDK의 xinput.lib는 lld-link에서 DllMain 가져오기 경고를 낸다).
-            AdditionalLinkArguments = windows ? ["user32.lib"] : []
+            SystemLibraries = windows ? ["user32"] : []
         };
     }
 }

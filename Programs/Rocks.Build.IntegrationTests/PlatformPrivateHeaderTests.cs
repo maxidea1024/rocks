@@ -36,6 +36,12 @@ internal static class PlatformPrivateHeaderTests
         NativeModuleInput baseModule = new global::Base().Configure(context);
         Require(platform.PrivateIncludeDirectories.Contains(Path.GetFullPath(apple), StringComparer.OrdinalIgnoreCase),
             "Mac PlatformBase rule does not declare the Apple private header directory.");
+        Require(platform.Frameworks.SequenceEqual(["CoreServices"]),
+            "Mac PlatformBase rule must declare the CoreServices framework (FSEvents directory watcher).");
+        // framework는 Apple toolchain에서만 링크할 수 있다. 이 시험은 헤더 의존 추적만 보며 고정 원본은 OS API를 쓰지
+        // 않으므로, 다른 호스트에서는 규칙 결과에서 framework만 뺀다(빼지 않으면 입력 검증이 거부한다).
+        if (toolchain.Platform != NativePlatform.MacOS)
+            platform = platform with { Frameworks = [] };
         var application = new NativeModuleInput
         {
             Name = "PathHeaderFixture",

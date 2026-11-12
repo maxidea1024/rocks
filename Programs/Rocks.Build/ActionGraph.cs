@@ -173,6 +173,13 @@ internal static class ActionGraph
                 }
                 finalArguments.AddRange(new[] { module }.Concat(dependencies.Reverse())
                     .SelectMany(value => value.AdditionalLinkArguments));
+                // 시스템 라이브러리·framework는 이 모듈과 모든 의존 모듈의 선언을 모아 한 번씩 넣는다.
+                finalArguments.AddRange(new[] { module }.Concat(dependencies.Reverse())
+                    .SelectMany(value => value.SystemLibraries).Distinct(StringComparer.Ordinal)
+                    .Select(name => windows ? name + ".lib" : "-l" + name));
+                foreach (string framework in new[] { module }.Concat(dependencies.Reverse())
+                    .SelectMany(value => value.Frameworks).Distinct(StringComparer.Ordinal))
+                    finalArguments.AddRange(["-framework", framework]);
                 if (windows)
                 {
                     string? asanThunk = null;

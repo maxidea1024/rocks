@@ -10,6 +10,15 @@ public sealed record ThirdPartySource(string Url, string Sha256, string Verifica
 /// <summary>선택한 라이선스와 원문 위치다. <see cref="File"/>은 라이브러리 폴더 기준 경로다.</summary>
 public sealed record ThirdPartyLicense(string Spdx, string UpstreamExpression, string File, bool BinaryNoticeRequired);
 
+/// <summary>
+/// 외부 라이브러리의 종류다. Code는 C 번역 단위를 빌드하는 라이브러리이고, Data는 생성기·시험이 읽는 데이터 파일
+/// 묶음(예: Unicode UCD, JSON 시험 사례)이다. Data는 번역 단위·include·정의·adapter·지시문이 없고 모듈 규칙도 없다.
+/// </summary>
+public enum ThirdPartyKind { Code, Data }
+
+/// <summary>원본 archive 밖에서 받은 파일(예: 따로 배포되는 라이선스 원문)의 출처 URL과 SHA-256이다.</summary>
+public sealed record ThirdPartyFileSource(string Url, string Sha256);
+
 /// <summary>원본에 있는 컴파일러 지시문 한 줄이다. <see cref="File"/>은 원본 디렉터리 기준, Line은 1부터다.</summary>
 public sealed record ThirdPartyPragma(string File, int Line, string Text);
 
@@ -41,6 +50,22 @@ public sealed record ThirdPartyManifest(
     IReadOnlyList<string> Notes)
 {
     public const string FileName = "ThirdParty.json";
+
+    /// <summary>라이브러리 종류다(manifest <c>kind</c>, 생략하면 code).</summary>
+    public ThirdPartyKind Kind { get; init; } = ThirdPartyKind.Code;
+
+    /// <summary>
+    /// data 종류의 파생물(생성 표 등)이 들어가는 모듈 이름이다(manifest <c>embeddedIn</c>). SDK 내보내기가 이 가운데 하나라도
+    /// 담으면 라이선스 원문을 함께 배포한다. 비어 있으면 배포물에 들어가지 않는 데이터(시험 전용)다. code 종류는 모듈
+    /// 자신이 라이브러리이므로 쓰지 않는다.
+    /// </summary>
+    public IReadOnlyList<string> EmbeddedIn { get; init; } = [];
+
+    /// <summary>
+    /// 라이선스 원문이 원본 archive 밖에서 왔을 때의 출처다(manifest <c>licenseSource</c>). 파일 자체는 원본 디렉터리에 두고
+    /// <see cref="Files"/>에 등록한다(라이선스 파일은 등록된 원본 파일이라는 규칙은 같다).
+    /// </summary>
+    public ThirdPartyFileSource? LicenseSource { get; init; }
 
     /// <summary>외부 라이브러리 폴더의 부모다(저장소 루트 기준).</summary>
     public const string ThirdPartyRoot = "Core/Source/ThirdParty";
@@ -99,6 +124,10 @@ public sealed record ThirdPartyManifest(
         "defines", "platformDefines", "consumerDefines", "adapterHeaders", "files", "pragmaDirectives", "notes"
     ];
 
+    // 생략할 수 있는 최상위 필드다(기존 code manifest는 쓰지 않는다).
+    private static readonly string[] OptionalTopLevel = ["kind", "embeddedIn", "licenseSource"];
+    private static readonly Regex ModuleName = new("^[A-Za-z][A-Za-z0-9_]*$", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+
     /// <summary>
     /// 라이브러리 폴더의 manifest를 읽는다. 플랫폼별 정의는 <see cref="DefinesFor"/>로 합친다.
     /// </summary>
@@ -145,9 +174,18 @@ public sealed record ThirdPartyManifest(
 
     private static ThirdPartyManifest Parse(JsonElement root)
     {
-        Dictionary<string, JsonElement> fields = Object(root, "manifest", TopLevel);
+        Dictionary<string, JsonElement> fields = Object(root, "manifest", TopLevel, optionalFields: OptionalTopLevel);
         if (Integer(fields["schema"], "schema") != 1)
             throw new FormatException("schema: unsupported version (expected 1)");
+        ThirdPartyKind kind = ThirdPartyKind.Code;
+        if (fields.TryGetValue("kind", out JsonElement kindElement))
+            kind = Text(kindElement, "kind") switch
+            {
+                "code" => ThirdPartyKind.Code,
+                "data" => ThirdPartyKind.Data,
+                _ => throw new FormatException("kind: must be \"code\" or \"data\"")
+            };
+        bool data = kind == ThirdPartyKind.Data;
 
         Dictionary<string, JsonElement> source = Object(fields["source"], "source", ["url", "sha256", "verification"]);
         string sourceUrl = Text(source["url"], "source.url");
@@ -196,13 +234,54 @@ public sealed record ThirdPartyManifest(
         if (!Sha256Text.IsMatch(sha256))
             throw new FormatException("source.sha256: must be 64 lowercase hex digits");
 
-        IReadOnlyList<string> translationUnits = Paths(fields["translationUnits"], "translationUnits", nonEmpty: true);
+        IReadOnlyList<string> translationUnits = Paths(fields["translationUnits"], "translationUnits", nonEmpty: !data);
         foreach (string unit in translationUnits)
             if (!unit.EndsWith(".c", StringComparison.Ordinal))
                 throw new FormatException($"translationUnits: '{unit}' must be a .c file (third-party sources build as C17)");
 
         IReadOnlyList<string> defines = DefineList(fields["defines"], "defines");
         IReadOnlyList<string> consumerDefines = DefineList(fields["consumerDefines"], "consumerDefines");
+        IReadOnlyList<string> includeDirectories = Paths(fields["includeDirectories"], "includeDirectories", nonEmpty: false);
+        IReadOnlyList<string> adapterHeaders = Paths(fields["adapterHeaders"], "adapterHeaders", nonEmpty: !data);
+        if (data)
+        {
+            // 데이터는 빌드하지 않으므로 빌드 입력이 있으면 계약 위반이다(빈 목록을 명시해 같은 schema를 유지한다).
+            foreach ((string field, int count) in new[]
+                     {
+                         ("translationUnits", translationUnits.Count), ("includeDirectories", includeDirectories.Count),
+                         ("defines", defines.Count), ("platformDefines", platformDefines.Count),
+                         ("consumerDefines", consumerDefines.Count), ("adapterHeaders", adapterHeaders.Count),
+                         ("pragmaDirectives", pragmas.Count)
+                     })
+                if (count != 0)
+                    throw new FormatException($"{field}: must be empty for a data library");
+        }
+
+        IReadOnlyList<string> embeddedIn = [];
+        if (fields.TryGetValue("embeddedIn", out JsonElement embeddedElement))
+        {
+            if (!data)
+                throw new FormatException("embeddedIn: only data libraries declare embedding modules (a code library is its own module)");
+            embeddedIn = Strings(embeddedElement, "embeddedIn");
+            foreach (string module in embeddedIn)
+                if (!ModuleName.IsMatch(module))
+                    throw new FormatException($"embeddedIn: invalid module name '{module}'");
+            if (embeddedIn.Distinct(StringComparer.OrdinalIgnoreCase).Count() != embeddedIn.Count)
+                throw new FormatException("embeddedIn: duplicate entry");
+        }
+
+        ThirdPartyFileSource? licenseSource = null;
+        if (fields.TryGetValue("licenseSource", out JsonElement licenseSourceElement))
+        {
+            Dictionary<string, JsonElement> origin = Object(licenseSourceElement, "licenseSource", ["url", "sha256"]);
+            string url = Text(origin["url"], "licenseSource.url");
+            if (!url.StartsWith("https://", StringComparison.Ordinal))
+                throw new FormatException("licenseSource.url: must be an https URL");
+            string hash = Text(origin["sha256"], "licenseSource.sha256");
+            if (!Sha256Text.IsMatch(hash))
+                throw new FormatException("licenseSource.sha256: must be 64 lowercase hex digits");
+            licenseSource = new(url, hash);
+        }
         var libraryValues = defines.ToDictionary(DefineNameOf, define => define, StringComparer.Ordinal);
         foreach ((string platform, IReadOnlyList<string> extra) in platformDefines)
             foreach (string define in extra)
@@ -221,25 +300,32 @@ public sealed record ThirdPartyManifest(
                 RelativePath(Text(license["file"], "license.file"), "license.file"),
                 Boolean(license["binaryNoticeRequired"], "license.binaryNoticeRequired")),
             translationUnits,
-            Paths(fields["includeDirectories"], "includeDirectories", nonEmpty: false),
+            includeDirectories,
             defines,
             platformDefines,
             consumerDefines,
-            Paths(fields["adapterHeaders"], "adapterHeaders", nonEmpty: true),
+            adapterHeaders,
             files,
             pragmas,
-            Strings(fields["notes"], "notes"));
+            Strings(fields["notes"], "notes"))
+        {
+            Kind = kind,
+            EmbeddedIn = embeddedIn,
+            LicenseSource = licenseSource
+        };
     }
 
+    // allowed는 필수 필드(optional이면 모두 선택), optionalFields는 있어도 되고 없어도 되는 필드다. 그 밖은 오류다.
     private static Dictionary<string, JsonElement> Object(JsonElement element, string name, IReadOnlyList<string>? allowed,
-        bool optional = false)
+        bool optional = false, IReadOnlyList<string>? optionalFields = null)
     {
         if (element.ValueKind != JsonValueKind.Object)
             throw new FormatException($"{name}: must be an object");
         var result = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
         foreach (JsonProperty property in element.EnumerateObject())
         {
-            if (allowed != null && !allowed.Contains(property.Name, StringComparer.Ordinal))
+            if (allowed != null && !allowed.Contains(property.Name, StringComparer.Ordinal) &&
+                (optionalFields == null || !optionalFields.Contains(property.Name, StringComparer.Ordinal)))
                 throw new FormatException($"{name}: unknown field '{property.Name}'");
             if (!result.TryAdd(property.Name, property.Value))
                 throw new FormatException($"{name}: duplicate field '{property.Name}'");

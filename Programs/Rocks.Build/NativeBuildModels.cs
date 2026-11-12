@@ -68,6 +68,13 @@ public sealed record NativeModuleInput
     public IReadOnlyList<string> Dependencies { get; init; } = [];
     public IReadOnlyList<string> AdditionalCompileArguments { get; init; } = [];
     public IReadOnlyList<string> AdditionalLinkArguments { get; init; } = [];
+    // 링크할 플랫폼 시스템 라이브러리 이름이다(UE PublicSystemLibraries 대응). 접두사·확장자 없이 쓴다
+    // (예: "user32", "d3d12", "log"). 최종 링크에서 Windows는 "<이름>.lib", 그 밖은 "-l<이름>"이 되며,
+    // 의존하는 실행 파일의 링크로 전파된다. 플랫폼마다 다르면 규칙이 BuildContext.Platform으로 고른다.
+    public IReadOnlyList<string> SystemLibraries { get; init; } = [];
+    // 링크할 Apple framework 이름이다(UE PublicFrameworks 대응, 예: "CoreServices"). Apple toolchain에서만
+    // "-framework <이름>"이 되며 다른 toolchain으로 빌드하는 요청에 있으면 입력 오류다. 전파는 SystemLibraries와 같다.
+    public IReadOnlyList<string> Frameworks { get; init; } = [];
     public IReadOnlyList<string> PrebuiltLibraries { get; init; } = [];
     // include 디렉터리 밖의 forced include/생성 입력 등은 명시적으로 추가한다.
     public IReadOnlyList<string> AdditionalInputs { get; init; } = [];

@@ -158,6 +158,41 @@ internal static class ThirdPartyPolicyTests
                 Verify.That(PolicyChecks.SourceWarnings(fixture.Root).Count != 0, "broken manifest still excluded upstream sources");
             }
         });
+        suite.Add("Policy.ThirdPartyDataLibrary", () =>
+        {
+            // 데이터 전용 라이브러리: 모듈 규칙·번역 단위·지시문 없이 파일 집합·SHA-256·라이선스만 검사한다.
+            using (TemporaryDirectory fixture = new())
+            {
+                WriteDataFixture(fixture, manifest => manifest);
+                NoFailures(PolicyChecks.ThirdParty(fixture.Root));
+                var manifest = ThirdPartyManifest.Read(fixture.FilePath(DataLibrary));
+                Verify.That(manifest.Kind == ThirdPartyKind.Data && manifest.EmbeddedIn.SequenceEqual(["Core"]) &&
+                            manifest.LicenseSource?.Url == "https://example.invalid/license.txt",
+                    "data manifest fields were not read");
+                // 데이터 파일 안의 '#pragma' 글자는 지시문 검사 대상이 아니고, 갱신 도구도 지시문을 기록하지 않는다.
+                fixture.Write(DataUpstream + "/table.txt", "#pragma warning(disable : 4100)\n0041;LATIN CAPITAL LETTER A\n");
+                WriteDataFixture(fixture, manifest => manifest);
+                NoFailures(PolicyChecks.ThirdParty(fixture.Root));
+                Verify.Equal(0, ThirdPartyManifestRefresh.Run(fixture.Root, write: false).Count,
+                    "refresh must keep a data manifest unchanged (no pragma records)");
+            }
+            ExpectDataFailure("module rule in data library", fixture => fixture.Write(DataLibrary + "/FakeData.Build.cs", "// rule\n"));
+            ExpectDataFailure("data file changed", fixture => File.AppendAllText(fixture.FilePath(DataUpstream + "/table.txt"), "x"));
+            ExpectDataFailure("unlisted data file", fixture => fixture.Write(DataUpstream + "/extra.txt", "x\n"));
+            foreach ((string label, string from, string to) in new[]
+                     {
+                         ("translation unit in data library", "\"translationUnits\": []", "\"translationUnits\": [ \"fakedata-1.0/table.txt\" ]"),
+                         ("define in data library", "\"defines\": []", "\"defines\": [ \"X=1\" ]"),
+                         ("unknown kind", "\"kind\": \"data\"", "\"kind\": \"binary\""),
+                         ("invalid embedding module", "\"Core\"", "\"Core Module\""),
+                         ("licenseSource without https", "https://example.invalid/license.txt", "http://example.invalid/license.txt"),
+                         ("licenseSource uppercase hash", "\"sha256\": \"" + new string('a', 64) + "\"", "\"sha256\": \"" + new string('A', 64) + "\"")
+                     })
+                ExpectDataFailure(label, fixture => WriteDataFixture(fixture, manifest => Replace(manifest, from, to)));
+            // code 라이브러리는 embeddedIn을 쓰지 않는다(모듈 자신이 라이브러리다).
+            ExpectFailure("embeddedIn in code library", fixture =>
+                WriteManifest(fixture, manifest => Replace(manifest, "\"schema\": 1,", "\"schema\": 1, \"embeddedIn\": [ \"Core\" ],")));
+        });
         suite.Add("Policy.LanguageArgumentControls", () =>
         {
             string cFile = "/repo/Core/Source/ThirdParty/Zlib/zlib-1.4/inflate.c";
@@ -266,6 +301,59 @@ internal static class ThirdPartyPolicyTests
         };
         string json = JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true });
         fixture.Write(Library + "/ThirdParty.json", change(json));
+    }
+
+    private const string DataLibrary = "Core/Source/ThirdParty/FakeData";
+    private const string DataUpstream = DataLibrary + "/fakedata-1.0";
+
+    // 데이터 전용 라이브러리 fixture: 원본 파일 두 개(라이선스 포함)와 kind·embeddedIn·licenseSource가 있는 manifest.
+    private static void WriteDataFixture(TemporaryDirectory fixture, Func<string, string> change)
+    {
+        if (!File.Exists(fixture.FilePath(DataUpstream + "/license.txt")))
+        {
+            fixture.Write(DataUpstream + "/license.txt", "Fake data license\n");
+            fixture.Write(DataUpstream + "/table.txt", "0041;LATIN CAPITAL LETTER A\n");
+        }
+        string upstream = fixture.FilePath(DataUpstream);
+        var files = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (string path in Directory.EnumerateFiles(upstream, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
+            files.Add(Path.GetRelativePath(upstream, path).Replace('\\', '/'), Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path))));
+        var manifest = new Dictionary<string, object>
+        {
+            ["schema"] = 1,
+            ["kind"] = "data",
+            ["name"] = "FakeData",
+            ["version"] = "1.0",
+            ["upstreamDirectory"] = "fakedata-1.0",
+            ["source"] = new { url = "https://example.invalid/fakedata-1.0.zip", sha256 = new string('0', 64), verification = "fixture" },
+            ["license"] = new { spdx = "Unicode-3.0", upstreamExpression = "Unicode-3.0", file = "fakedata-1.0/license.txt", binaryNoticeRequired = true },
+            ["licenseSource"] = new { url = "https://example.invalid/license.txt", sha256 = new string('a', 64) },
+            ["embeddedIn"] = new[] { "Core" },
+            ["translationUnits"] = Array.Empty<string>(),
+            ["includeDirectories"] = Array.Empty<string>(),
+            ["defines"] = Array.Empty<string>(),
+            ["platformDefines"] = new Dictionary<string, string[]>(),
+            ["consumerDefines"] = Array.Empty<string>(),
+            ["adapterHeaders"] = Array.Empty<string>(),
+            ["files"] = files,
+            ["pragmaDirectives"] = Array.Empty<object>(),
+            ["notes"] = Array.Empty<string>()
+        };
+        // 갱신 도구(ThirdPartyManifestRefresh)와 같은 서식으로 써서 갱신이 바꾸지 않는지 볼 수 있게 한다.
+        string json = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(manifest))!.ToJsonString(new JsonSerializerOptions
+        {
+            WriteIndented = true, NewLine = "\n", Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        }) + "\n";
+        fixture.Write(DataLibrary + "/ThirdParty.json", change(json));
+    }
+
+    private static void ExpectDataFailure(string label, Action<TemporaryDirectory> inject)
+    {
+        using TemporaryDirectory fixture = new();
+        WriteDataFixture(fixture, manifest => manifest);
+        NoFailures(PolicyChecks.ThirdParty(fixture.Root));
+        inject(fixture);
+        Verify.That(PolicyChecks.ThirdParty(fixture.Root).Count != 0, "third-party data defect escaped audit: " + label);
     }
 
     private static void ExpectFailure(string label, Action<TemporaryDirectory> inject)
