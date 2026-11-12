@@ -1,0 +1,9 @@
+{
+  "fileVersion": 1,
+  "engineVersion": "0.1",
+  "description": "Rocks Foundation 게임 템플릿: Object·Reflection을 쓰는 최소 실행 파일",
+  "modules": [
+    { "name": "SampleGame", "type": "Runtime", "loadingPhase": "Default" }
+  ],
+  "targetPlatforms": ["Windows", "MacOS"]
+}

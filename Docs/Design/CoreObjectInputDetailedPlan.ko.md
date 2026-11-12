@@ -2,11 +2,13 @@
 
 안정성 우선 C++23 기반 라이브러리 · 객체 수명 · Windows/macOS 입력
 
-**기준일 2026.11.10 · Rocks 상세안 1.1 · 상태: 구현 계획 / 미구현·성능 미측정**
+**기준일 2026.11.11 · Rocks 상세안 1.2 · 상태: 구현 계획 / 미구현·성능 미측정**
 
 Rocks 전체 구현 계획의 Core/Object Foundation과 입력 영역을 실제 작업 단위로 구체화한다. **우선순위는 안정성·수명 정확성, 확장성, 성능**이며 첫 구현은 Core 기반 라이브러리와 오브젝트 시스템이다. Windows와 macOS 개발·입력은 필수이며, 선언하지 않은 선택 장치·플랫폼·최적화는 후속으로 남길 수 있다. 지원 범위, 확장 지점, 미지원 결과, 추가 시 회귀 기준을 명확히 구분한다.
 
 문서의 경로·타입·API·작업 ID는 신규 엔진 저장소를 위한 제안이다. 엔진 소스가 이미 구현되었거나 예시 API가 컴파일·실행 검증되었다는 의미가 아니다. 기존 전체 기능 목표와 Blueprint 제외·커스텀 언어 정책을 유지한다. 함께 제공하는 작업 목록 52개와 파일 목록 297개는 본문과 같은 데이터로 관리한다.
+
+상세안 1.2는 전체 계획 개정 1.4의 UI 방향 전환(웹 에디터 미채택, 게임 UI와 에디터의 단일 UI 툴킷)에 맞춰 text owner·focus 규약과 InputProfileEditor 파일 경로를 정리하고, UI·에디터가 의존하는 리플렉션 계약 CU1–CU8을 [UI 툴킷 설계](UiToolkit.ko.md)에 연결한다.
 
 ## 1. 안정성·확장성 원칙과 첫 완료 지점
 
@@ -24,6 +26,18 @@ Rocks 전체 구현 계획의 Core/Object Foundation과 입력 영역을 실제 
 | 작은 초기 범위 | optional capability는 Unsupported로 반환 | 필수 기능 실패와 선택 기능 미지원 구분 |
 
 새 확장이 공통 의미 자체를 바꾸면 ADR로 Core 변경을 허용한다. ‘Core 변경 0건’은 예정한 확장 사례에 대한 기준이며 모든 미래 요구에 대한 절대 약속이 아니다. 범용 ServiceLocator·전역 singleton·`void*` 메시지 버스를 모듈 결합의 기본 수단으로 사용하지 않는다.
+
+### Unreal Core 기능 대응 요구
+
+Unreal Core의 개별 기능에 대해 Rocks에서도 가능한지 묻는다면 최종적으로 모두 지원한다고 답할 수 있어야 한다. 이름과 구현 방식은 Rocks에 맞게 정하며 Blueprint 시각 스크립트는 사용자 지시에 따라 제외하고 자체 언어를 사용한다. 실제 근거가 없는 기능을 지원 완료로 표시하지 않는다. 기준 엔진 버전·플랫폼별 공개 헤더와 문서의 기능을 대조하고, 기능별 Rocks 대응 모듈·현재 상태·사용 예·실패 조건·테스트·우선순위와 미확인 사유를 추적한다. 기능 목록에 없는 항목도 임의로 범위에서 제외하지 않는다.
+
+1차 범주별 조사와 전수 대조 방법은 [Unreal Core 기능 감사표](UnrealCoreFeatureAudit.ko.md)에 기록한다. 공개 문서나 다른 버전의 소스만으로 모든 기능을 확인했다고 단정하지 않으며, 기준 버전의 누락 검토와 플랫폼별 검증이 완료 게이트다.
+
+### 직관적 공개 API와 안전성
+
+예측 가능한 이름과 동작이 드러나는 최소 절차를 우선한다. 겉모양을 위한 추상화, 무분별한 설계 패턴과 타입 분류 접두사를 추가하지 않는다. 내부 Registry·scope를 매번 조합하는 상용구는 기본 경로에서 최소화하되 안전성 검사와 오류 원인은 숨기지 않는다. API는 사용자가 해결할 작업을 기준으로 설계한다. 대표 사용 예제에서 내부 Registry·scope·식별자 조립이 반복되면 기본 경로의 책임 배치를 재검토한다. 타입·상태·생명주기·컨테이너·할당기 조회 및 변경은 일관된 이름과 최소 단계로 제공하고, 정적 선언 정보와 객체의 동적 등록 정보를 혼동하지 않도록 구분한다. 코드 주석은 호출법, 소유권, 실패와 사용 시 주의사항을 중심으로 작성한다.
+
+실행 문맥을 자동으로 알아낼 수 없는 호출에서는 World를 추정하지 않는다. 다중 World·PIE와 독립 Registry를 지원하고, 객체는 유효한 Borrow를 유지하며 메타데이터는 Registry·모듈 수명을 보호하는 lease를 사용한다. 편의 API는 기존 수명·스레드·문맥 검증을 우회하지 않는다. 복구 가능한 오류와 불변식 위반을 구분하며, `Result<bool>`의 성공 여부를 실제 상태처럼 해석할 수 있는 API는 사용하지 않는다. 제시한 편의 명칭은 컴파일·실행 테스트 전까지 구현 완료를 뜻하지 않는다.
 
 ### 1.2 구현 수준의 구분
 
@@ -58,7 +72,7 @@ R0/R1은 첫 4주의 prototype 목표이며 production Foundation 완료 선언�
 | PlatformBase | EngineBase·OS | page·thread·clock·file·atomic primitive. Core 금지 |
 | Core | EngineBase·PlatformBase·선정 math private adapter | Result·allocator·container·text·math·ClockService/StepPlanner. Object/Window 금지 |
 | Task / IO / Trace | Core | 각각 독립. producer는 sink만 사용; Task가 viewer/IO를 필수 링크하지 않음 |
-| TraceAnalysis / RocksLens | Core·trace format schema | capture 분석·offline timeline/report. runtime/웹 editor 비의존 |
+| TraceAnalysis / RocksLens | Core·trace format schema | capture 분석·offline timeline/report. runtime/editor UI 비의존 |
 | Inspection | Core·주입된 snapshot provider 계약 | headless 상태 조회. Object 진단은 Host가 provider로 연결 |
 | MetaSchema / Serialization | Core | schema와 binary archive. ObjectRuntime 없음 |
 | ObjectRuntime | Core·Task·MetaSchema | registry·참조·GC·생성·수명. World/Asset/VM 없음 |
@@ -160,7 +174,7 @@ CMake/Ninja, C++23, Windows clang-cl 및 macOS Apple Clang을 필수 고정 mani
 
 STL 금지는 엔진 작성 Runtime·공개 API에 적용한다. cstddef/cstdint/new 등 언어 지원 화이트리스트와 Platform private의 atomic 구현 예외를 유지한다. Host 도구와 ThirdParty 내부 사용은 허용하되 std 타입·예외·해제 책임을 엔진 경계에 노출하지 않는다. 비선택 backend를 찾기 위한 SDK 탐색조차 CoreTest configure의 필수 작업으로 만들지 않는다.
 
-C00은 Python host의 최소 scaffold로 module/test target·manifest를 생성한다. source/SDK/Runtime VM/웹 editor를 선행 요구하지 않는다. plan 단계의 경로 이탈·충돌·필수 매개변수 검증, staging·journal·실패 rollback, 같은 출력의 timestamp 유지, 재시도 시 중복 ID/파일 방지를 TT01과 CT01로 검증한다. 사용자 파일의 변경을 발견하면 충돌로 반환한다. 전체 카탈로그·사용자 템플릿 저장·Linked 갱신은 26절의 후속 기능이다.
+C00은 Python host의 최소 scaffold로 module/test target·manifest를 생성한다. source/SDK/Runtime VM/editor를 선행 요구하지 않는다. plan 단계의 경로 이탈·충돌·필수 매개변수 검증, staging·journal·실패 rollback, 같은 출력의 timestamp 유지, 재시도 시 중복 ID/파일 방지를 TT01과 CT01로 검증한다. 사용자 파일의 변경을 발견하면 충돌로 반환한다. 전체 카탈로그·사용자 템플릿 저장·Linked 갱신은 26절의 후속 기능이다.
 
 ### 4.2 내부 확장과 외부 plugin ABI
 
@@ -188,6 +202,7 @@ ExtensionRegistry와 실제 DLL loader는 EngineHost 조립 계층에 둔다. Co
 
 등록은 Validate → Stage → Commit의 원자적인 transaction이다. 실패 시 이미 등록한 항목을 역순 해제한다. 해제는 신규 요청 차단 → subscription/task 취소 → callback drain → instance/metadata/backend lease 종료 → table 제거 순서다. 남은 사용자가 있으면 Busy를 반환하고 실제 DLL unload를 보류한다. native layout 갱신은 기본 재시작 경로를 사용한다.
 
+
 ### 4.3 코드 서식·clang-format 표준
 
 **사람이 알아보기 좋은 코드 스타일 유지**를 코드 작성과 리뷰의 명시적 원칙으로 적용한다. 읽기 쉬운 이름·적절한 빈 줄·짧고 명확한 함수 구조를 요구하며 formatter 통과만으로 가독성 검토를 대체하지 않는다.
@@ -199,6 +214,12 @@ ExtensionRegistry와 실제 DLL loader는 EngineHost 조립 계층에 둔다. Co
 첫 C00 산출물에 `.editorconfig`, `.clang-format`, `Docs/CodingStyle.md`를 포함한다. CT01에는 설정 파싱, 실제 tab 부재, 같은 입력의 포맷 재실행 동일성, 의도적으로 서식을 깨뜨린 fixture의 실패를 추가한다. PR에서는 `clang-format --dry-run --Werror`에 해당하는 검사를 수행하고 generated 파일은 생성 단계부터 같은 설정으로 출력한다. formatter 버전 변경은 별도 변경과 diff 검토로 처리한다. 외부 vendor 원본은 기본적으로 재포맷하지 않고 엔진 소유 adapter에 Rocks 규칙을 적용한다.
 
 `SeparateDefinitionBlocks: Always`와 짧은 함수/블록/조건/반복문의 한 줄 압축 금지 설정으로 정의 사이의 간격을 유지한다. 자동 도구가 처리 단계의 의미를 판단하지는 못하므로 함수 내부의 논리적 빈 줄·책임 분리는 리뷰 항목으로 남긴다. 문서의 C++ API 예제에도 같은 formatter를 적용하되, 서식 통과를 API 컴파일·엔진 구현 테스트의 통과로 해석하지 않는다. [clang-format 공식 설정](https://clang.llvm.org/docs/ClangFormatStyleOptions.html)
+
+### 4.4 컴파일러 경고 무허용 규약
+
+**컴파일러 경고는 한 건도 허용하지 않으며 반드시 오류로 취급한다.** 엔진·플랫폼 backend·테스트·C++ 도구·생성 코드·단독 공개 헤더에 적용한다. Debug/Release/ASan/Core-only/헤드리스 및 향후 Editor/Shipping에서 로컬과 CI의 기준을 동일하게 유지한다. MSVC/clang-cl은 `/W4 /WX`, Clang/Apple Clang/GCC 계열은 `-Wall -Wextra -Wpedantic -Werror`를 필수 프로필로 한다.
+
+경고 억제·강등 옵션과 pragma, `_CRT_SECURE_NO_WARNINGS` 같은 전역 억제로 통과시키지 않는다. 실제 compile command 감사와 의도적 경고 fixture의 컴파일 실패를 수용 기준에 포함한다. 적용 범위·외부 의존성 경계·검증 한계의 정확한 규범은 [컴파일러 경고 정책](CompilerDiagnostics.ko.md)을 따른다.
 
 ## 5. Base와 Platform primitive
 
@@ -434,6 +455,20 @@ Result<void> ValidateTypeGraph(TypeId);
 RegisterObjectType은 TypeSchema와 중첩 field/name/attribute 배열·문자열·속성 payload를 검증하여 registration 소유의 불변 snapshot으로 깊은 복사한다. 전달한 const 참조·Span·scratch arena를 함수 반환 후 보관하지 않는다. R1 C07은 고정 Guid/POD 배열과 Core의 소유 byte buffer로 필요한 subset을 복사하여 C13 String/Name 도입을 기다리지 않는다. 검증·복사 실패는 등록 전부를 rollback하고 완성된 revision만 원자 게시한다. generated static table도 첫 구현은 같은 복사 경로를 사용한다. 코드 ModuleLease는 metadata 저장소 소유권의 대체물이 아니다. Object·visitor·Archive reader·비동기 schema 소비자는 해당 registration revision lease를 유지하고, 마지막 소비자와 destructor 종료 전 그 revision의 ops/code/data를 회수하지 않는다. 초기 구현은 active TypeId의 비호환 재등록과 제자리 table 교체를 거부하며 unregister는 소비자가 남으면 Busy를 반환한다. native layout 변경은 process restart 기본값을 유지한다.
 
 최초 R1은 수동 등록 테이블로 완성한다. 최소 contract가 고정된 뒤 Clang MetaCompiler가 동일 형식의 table과 accessor를 생성한다. 수동·generated visitor가 같은 graph를 열거하는지 대조한다. non-standard-layout 클래스에는 offsetof를 일반 적용하지 않고 typed accessor를 생성한다.
+
+### 타입 접근 API의 사용 흐름
+
+정적 타입 조회는 생성된 타입 식별자·스키마와 등록된 런타임 정보를 구분한다. 객체 타입 조회는 실제 슬롯의 등록 타입을 이용하고 유효한 Borrow·객체 주소·generation·논리 생존, 소유 스레드와 실행 문맥을 검사한다. 등록된 타입·모듈의 수명은 `TypeLease` 또는 동등한 소유 래퍼로 유지한다. 임시 lease에서 얻은 스키마 참조가 lease보다 오래 유지되지 않도록 API와 예제에 명시한다.
+
+일반 사용자는 내부 레지스트리 조회와 수동 scope 조합을 반복하지 않도록 정적·동적 편의 API를 제공하는 것이 목표다. 클래스의 정적 조회는 `T::StaticType()`처럼 직접 사용하는 형태를 지향한다. 일부 reflected 타입에는 현재 생성 본문 매크로가 없고, 접근 지정자 변경·생성 헤더 순환 및 파생 타입의 기반 정적 함수 상속을 검증해야 하므로 아직 지원으로 간주하지 않는다. 현재 제공하는 `TypeOf<T>()`·`TypeIdOf<T>()`는 정적 생성 schema·ID를 조회하며, 등록된 runtime `TypeLease`와 구분한다. 생성 매크로가 있는 class와 없는 struct, 상속, 다중 번역 단위, 생성 헤더 누락·중복 및 동적 모듈 경계를 검증한 뒤 확정한다. 미등록, 잘못된 World/스레드, 파괴·종료·GC 처리 중 오류는 명시적으로 전파하거나 편의 API에서 원인을 진단한다. 생성 중이거나 수명이 종료된 객체의 접근은 보장하지 않는다.
+
+### 런타임 클래스 참조와 메타데이터의 확장
+
+클래스를 데이터로 선택·보관하고 인스턴스를 만들 수 있는 런타임 메타클래스는 필수 후속 범위다. Core 선행 설계에서는 `TypeSchema`의 불변 선언 데이터, Registry별 등록 레코드와 lease, 영속 `TypeId`, ABI/module revision을 구분한다. 타입 제한 클래스 참조, 안전한 인스턴스 생성, 클래스 기본값·서브오브젝트와 반영 필드·함수는 상위 기능의 요구를 충족하도록 확장한다. 구체 이름 및 공개 API는 생성기·World 통합과 교차 검증 후 확정한다.
+
+등록된 `TypeId`에 대한 `ObjectRegistry::NewObject<Object>(access, typeId)`의 현재 낮은 수준 생성 경로와 편의 클래스 참조·클래스 기본값 기능을 구분한다. 생성 경로는 등록된 타입의 생성 가능성·context·트랜잭션을 검사해야 하며, 생성 실패는 부분 객체·등록 참조를 남기지 않는다. 직렬화된 타입 참조는 이름이나 원시 주소가 아니라 안정 식별자를 사용하고, 모듈 reload·PIE 종료 뒤의 오래된 revision은 명시적으로 거부한다. 상세 정책과 단계는 [런타임 클래스 메타데이터 설계](RuntimeClassMetadata.ko.md)를 따른다.
+
+UI·에디터가 의존하는 리플렉션 확장(편집 메타데이터 어휘·함수·이벤트·속성 경로·변경 통지·동적 속성·텍스트 위치 변환·필드 형식 확장)은 [UI 툴킷 설계](UiToolkit.ko.md) §7의 CU1–CU8로 정의한다. 구현 시점은 항목별로 조정할 수 있으나 형식은 Foundation Gate 전에 Object·Archive 계약과 함께 확정한다. 필드 형식 확장(CU8)은 enum·구조체·배열 필드를 다루므로 9.3절의 초기 지원 범위와 함께 검토한다.
 
 ### 9.2 Archive 계약
 
@@ -728,6 +763,12 @@ CF 항목은 이번 상세안의 검증 묶음이다. 전체 계획의 Core Gate
 
 전체안 1.2절의 CF ID·의미를 그대로 사용한다. CT는 구체 fixture 식별자이며 별도 gate 의미로 CF 번호를 재정의하지 않는다. Linux CPU suite는 M3 필수 후속, Linux 서버 통합은 M5 gate로 관리한다.
 
+#### API 사용성 검증
+
+CF02·CF06·CF10의 실사용 fixture는 클래스 정적 타입, 객체 실제 타입, 객체의 생성·파괴·상태, 컨테이너 및 할당기 기본 경로를 공개 API만으로 작성한다. 동일한 작업에서 내부 Registry나 문맥 설정이 반복되면 API 설계를 재검토한다. 정상 코드와 함께 생성 선언 누락·상속 오류, 다른 World·PIE·스레드, 만료된 객체, Registry 종료·모듈 해제, 생성기 오류와 `Result` 성공/상태 혼동을 검사한다.
+
+각 fixture에는 실제 컴파일·실행 및 실패 원인에 대한 독립 oracle을 둔다. 주석·문서의 사용법과 실제 선언, 수명·오류 규약의 일치 여부를 담당 외 검토자가 교차 확인한다. 구현되지 않은 편의 API나 미실행 플랫폼 테스트는 완료로 표시하지 않는다.
+
 ### 16.2 테스트 fixture 상세
 
 | ID | 입력·실행 방법 | 검증 oracle |
@@ -936,7 +977,7 @@ macOS는 AppKit window event의 keyboard/mouse와 GameController의 검증된 co
 
 텍스트를 key code→문자로 직접 변환하지 않는다. Windows text service는 PlatformWindow의 TSF adapter로 분리하고 composition start/update/end, commit, selection, caret rectangle을 계약으로 둔다. 한국어·일본어·중국어 조합, dead key, surrogate/emoji, 조합 취소를 검증한다. OS API의 UTF-16 위치와 엔진 UTF-8 byte 위치를 명시 변환하며 UI cursor는 grapheme 경계를 사용한다. grapheme·BiDi·shaping은 별도 text library adapter 책임이다. [D8](https://learn.microsoft.com/en-us/windows/win32/tsf/text-services-framework)
 
-macOS text service는 NSTextInputClient를 구현한 native view adapter로 composition/marked text·선택 범위·replacement·commit·caret rectangle을 연결한다. Windows TSF와 같은 TextSessionId/route generation·정확히 한 번 commit·취소 계약을 따르되 vendor API를 통합 enum으로 흉내 내지 않는다. UTF-16 range와 UTF-8 byte/grapheme 위치를 명시 변환한다. 한 route에는 native 또는 웹 text owner 하나만 두고, IME 조합 중 focus/PIE 교체·늦은 commit·dead key·한국어/일본어/중국어·emoji를 두 OS에서 실물 시험한다. [D15](https://developer.apple.com/documentation/appkit/nstextinputclient)
+macOS text service는 NSTextInputClient를 구현한 native view adapter로 composition/marked text·선택 범위·replacement·commit·caret rectangle을 연결한다. Windows TSF와 같은 TextSessionId/route generation·정확히 한 번 commit·취소 계약을 따르되 vendor API를 통합 enum으로 흉내 내지 않는다. UTF-16 range와 UTF-8 byte/grapheme 위치를 명시 변환한다. 한 route에는 text owner(UI 툴킷에서 focus를 가진 편집 widget) 하나만 두고, IME 조합 중 focus/PIE 교체·늦은 commit·dead key·한국어/일본어/중국어·emoji를 두 OS에서 실물 시험한다. [D15](https://developer.apple.com/documentation/appkit/nstextinputclient)
 
 ### 19.3 마우스와 pointer
 
@@ -1058,9 +1099,9 @@ RebindSession은 대상 user/action, 허용 device class, axis threshold, modifi
 
 ### 22.1 focus와 입력 전달 순서
 
-Platform system reserved 동작 → 활성 window/사용자 → text/IME와 modal UI → 일반 UI → native viewport → gameplay context 순으로 전달 자격을 판정한다. 실제 소비 우선순위는 route policy로 설정하되 하나의 event를 web UI와 native gameplay 양쪽에서 독립 소비하지 않게 한다. UI와 gameplay 모두 필요한 action은 Shared로 명시한다.
+Platform system reserved 동작 → 활성 window/사용자 → text/IME와 modal UI → 일반 UI → native viewport → gameplay context 순으로 전달 자격을 판정한다. 실제 소비 우선순위는 route policy로 설정하되 하나의 event를 UI와 gameplay 양쪽에서 독립 소비하지 않게 한다. UI와 gameplay 모두 필요한 action은 Shared로 명시한다.
 
-웹 기반 에디터의 DOM text focus는 webview가 소유한다. 같은 창의 native TSF가 동일 commit을 다시 전달하지 않는다. native viewport focus token과 webview focus token은 Host가 관리하며, focus 요청에는 WindowEpoch·PIE session·LocalPlayer를 포함한다. viewport 첫 클릭은 기본적으로 focus 획득만 수행하고 gameplay 전달 여부는 명시 옵션이다.
+에디터와 게임 UI는 같은 UI 툴킷의 focus 하나로 text focus를 관리한다. TSF·NSTextInputClient의 composition/commit은 focus를 가진 text widget에 한 번만 전달한다. viewport(SubViewport widget)와 UI widget의 focus는 같은 focus tree의 token으로 Host가 관리하며, focus 요청에는 WindowEpoch·PIE session·LocalPlayer를 포함한다. viewport 첫 클릭은 기본적으로 focus 획득만 수행하고 gameplay 전달 여부는 명시 옵션이다.
 
 modal을 열면 기존 gameplay action을 취소한다. 닫은 후에는 require-release 규칙을 적용한다. split-screen의 UI focus는 LocalUser별로 관리하며 OS의 foreground window 상태와 분리한다. gamepad navigation은 focusable tree·direction policy·repeat 설정을 사용하고 pointer 좌표가 없다는 이유로 임의 mouse 위치를 생성하지 않는다.
 
@@ -1068,7 +1109,7 @@ modal을 열면 기존 gameplay action을 취소한다. 닫은 후에는 require
 
 InputProfileEditor는 Action/Binding/Context 목록, processor parameter property panel, conflict report, 실제 장치 입력 표시, 현재 effective binding/glyph 미리보기를 제공하는 후속 도구다. runtime과 같은 schema·validator·CompileInputProfile을 호출한다. undo/redo는 profile transaction 단위이며 preview 실패가 저장된 profile을 훼손하지 않는다. 첫 I0/I1은 CLI probe와 fixture 파일로 충분하다.
 
-UMG 유사 인게임 UI의 입력 연결은 WidgetFocus/Navigation/TextSession 계약으로 정의한다. designer preview는 synthetic input과 real input을 선택하고 preview route epoch로 실제 게임 세션과 격리한다. UI layout/render/designer 자체는 전체 계획의 UI 모듈 후속 작업이며 InputCore 선행 조건이 아니다.
+인게임 UI와 에디터 UI의 입력 연결은 WidgetFocus/Navigation/TextSession 계약으로 정의한다. designer preview는 synthetic input과 real input을 선택하고 preview route epoch로 실제 게임 세션과 격리한다. UI layout/render/designer 자체는 [UI 툴킷 설계](UiToolkit.ko.md)의 후속 작업이며 InputCore 선행 조건이 아니다.
 
 ### 22.3 컷씬·개발자 콘솔·언어
 
@@ -1076,7 +1117,7 @@ UMG 유사 인게임 UI의 입력 연결은 WidgetFocus/Navigation/TextSession �
 
 개발자 명령 콘솔은 text consumer와 command dispatcher다. 게임 console hardware backend와 별개다. shipping build에서는 명시적으로 허용한 명령만 노출하며 text focus 중 이동·발사 action이 발생하지 않아야 한다.
 
-커스텀 언어에는 ActionId 조회, action event 구독, context token, rebinding/profile API를 typed binding으로 제공한다. Blueprint와 시각적 gameplay script graph는 지원하지 않는다. subscription은 WeakObjectRef owner와 module/script lease를 보유하고 owner destroy·VM reload·World 종료 때 해제한다. callback은 Input lane에서 바로 VM에 진입하지 않고 지정된 gameplay phase에 event batch를 전달한다. root로 subscription owner를 영구 보존하는 cycle을 만들지 않는다.
+자체 언어 Sparks(전체 계획 23절, [Sparks 언어 설계](SparksLanguage.ko.md))에는 InputAction 필드(`Action("…")`)와 선언형 연결(`on Jump.Pressed()`), action 값 조회, 유지 자원으로서의 input context, rebinding/profile API를 typed binding으로 제공한다. Blueprint와 시각적 gameplay script graph는 지원하지 않는다. 연결 항목은 session 연결 표의 key와 handler ID만 보유하고 revision lease를 보유하지 않는다. 연결은 구독자 Detach·World 종료·`on` 선언이 바뀌는 reload에서 해제되고 함수 본문 reload에서는 유지된다. action 연결은 session의 InputConsumerScope 안의 action instance에 생성한다. callback은 Input lane에서 바로 VM에 진입하지 않고 gameplay 단계의 event batch로 전달한다. root로 연결 owner를 영구 보존하는 cycle을 만들지 않는다.
 
 ## 23. 재생·네트워크·헤드리스 검증
 
@@ -1155,7 +1196,7 @@ callback 수신→Input lane drain→action publish→simulation 소비의 p50/p
 초기 성능 예산은 4 local user·16 device·1,000 compiled binding에서 action 평가 0.2 ms p95, InputCore heap의 frame 중 allocation 0회를 탐색 목표로 둔다. 기준 CPU·build·tick·profile을 고정한 뒤 실측하여 확정한다. 목표 미달이면 profiler 기반으로 최적화하며 입력 손실이나 critical section 생략으로 개선하지 않는다.
 
 
-I13은 standalone composition/route-token 시험과 실제 Studio/PIE 시험을 분리한다. standalone 성공 시 실제 IT19는 NOT RUN으로 남길 수 있으며 I13 전체 완료를 뜻하지 않는다. 실제 subset에는 양OS WebView2/WKWebView·native viewport·UI/text focus·PIE fixture가 필요하다. I15/I16은 이 외부 조건에 World/VM/cutscene 조건을 누적한다. Foundation/I0의 시작을 상위 Studio 완료에 의존시키지 않는다.
+I13은 standalone composition/route-token 시험과 실제 Studio/PIE 시험을 분리한다. standalone 성공 시 실제 IT19는 NOT RUN으로 남길 수 있으며 I13 전체 완료를 뜻하지 않는다. 실제 subset에는 양OS Studio(UI 툴킷)·viewport·UI/text focus·PIE fixture가 필요하다. I15/I16은 이 외부 조건에 World/VM/cutscene 조건을 누적한다. Foundation/I0의 시작을 상위 Studio 완료에 의존시키지 않는다.
 
 
 ### 24.4 입력 작업별 선행 관계
@@ -1229,14 +1270,14 @@ fully concurrent GC, lock-free registry, moving/compacting heap, runtime native 
 
 ### 26.1 기존 요구의 유지
 
-이 상세안은 Rocks 전체 계획을 대체하는 축소 사양이 아니다. tags·component·prefab·asset/cook/DDC·WorldPartition·네트워크·오디오·AI/nav·physics·animation·VFX·UMG 유사 UI·컷씬·웹 에디터·native viewport는 Object/Schema/Task의 후속 소비자다. Deferred/Forward·upscaling·GPU-driven geometry/GI·high-end post effect는 renderer 계획에 유지한다. Blueprint 제외·커스텀 언어 정책도 유지한다.
+이 상세안은 Rocks 전체 계획을 대체하는 축소 사양이 아니다. tags·component·prefab·asset/cook/DDC·WorldPartition·네트워크·오디오·AI/nav·physics·animation·VFX·UI 툴킷(게임 UI·에디터)·컷씬·viewport는 Object/Schema/Task의 후속 소비자다. Deferred/Forward·upscaling·GPU-driven geometry/GI·high-end post effect는 renderer 계획에 유지한다. Blueprint 제외·커스텀 언어 정책도 유지한다.
 
 | 후속 시스템 | 이번에 확보할 연결점 | 지금 구현하지 않아도 되는 부분 |
 |---|---|---|
 | Entity/Component/Tags/Prefab | Type/Field/Subobject ID·owner edge·clone/default | World lifecycle·tag editor·prefab importer |
 | Asset/Async/Cook/DDC | Archive·stable ID·IO lease·Task·schema version | asset database·cook farm·package format 전체 |
 | Renderer/Audio/Physics | immutable snapshot·backend completion token | 실제 GPU/audio/physics resource manager |
-| WebEditor/UMG/Cutscene | schema property·transaction·input focus/context | 편집 화면·widget render·timeline |
+| UI 툴킷·Editor·Cutscene | schema property·CU1–CU8 리플렉션 계약·transaction·input focus/context | widget layout/render·편집 화면·timeline |
 | Material Editor·Compiler | stable ID·schema·Task·snapshot·module lease | 필수 M3/M4 그래프·preview·instance/function; M5/M6 layer |
 | Custom Language | TypeSchema·typed binding·root provider·weak subscription | VM/compiler/debugger |
 | Net/AI/Navigation | quantized command·scheduler·context epoch | replication/prediction·AI runtime·nav query |
@@ -1256,7 +1297,7 @@ Core 단계에서는 stable Guid·versioned schema·Archive·Task 취소/termina
 | material·lightmap bake·probe 조명 | schema/Task/IO·math adapter·revision·cancel/publish | material M3/M4, lightmap/probe M4 이후; CPU 기준/실제 renderer 검증 |
 | texture streaming·기본 콘텐츠 | allocation budget·lease·IO/decode·stable ID | 최소 mip residency/손상·취소, built-in lifetime/baseline을 실제 asset/renderer Gate에서 검증 |
 | 5개 graphics API·Deferred/Forward·upscale·고급 post | immutable snapshot·backend completion·capability·시간 history ID | D3D11/D3D12/Vulkan/OpenGL/Metal 각각 지원표·실장비 conformance; 기능별 일정은 전체 계획 |
-| 웹 editor/native viewport·인게임 UI 편집·컷씬 | Win/Mac focus/IME·transaction·schema·clock·PIE scope | UMG 계열 designer/runtime·native preview·sequence authoring/capture 필수; 자체 언어 이벤트 |
+| UI 툴킷 Studio·viewport·인게임 UI 편집·컷씬 | Win/Mac focus/IME·transaction·schema·CU1–CU8·clock·PIE scope | 단일 UI 툴킷의 designer/runtime·Godot 오라클 GO1–GO6·sequence authoring/capture 필수; 자체 언어 이벤트 |
 | Build/Cook/DDC·분산/반복 최적화 | C00 manifest·C20 내용 동일 유지·C31 action/cache 계약 | Rocks Build·분산 executor·로컬 fallback·compile/link/cook 측정; headless 필수 |
 | 전체 gameplay/AI/VFX/network/audio/nav/physics | Object/Schema/Task/context·ownership·테스트 하네스 | 각 subsystem 최초 구현부터 unit/contract/fault/concurrency·관측·누수 Gate |
 

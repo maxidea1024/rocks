@@ -1,0 +1,106 @@
+#pragma once
+
+#include <Core/Text/String.h>
+#include <Meta/Annotations.h>
+#include <Object/ObjectRefs.h>
+
+namespace rocks::reflection_fixture {
+
+ROCKS_CLASS()
+struct Base : Object {
+    ROCKS_PROPERTY() Guid key {};
+    ROCKS_PROPERTY() int32 count = 0;
+};
+
+ROCKS_CLASS()
+struct Node final : Base {
+    explicit Node(Allocator& allocator) noexcept : label(allocator) {
+    }
+
+    // logical destroy 이후 필드를 다시 역참조하지 않고 destructor에서 commit 결과를 관찰한다.
+    static inline bool destroyedWithOldLabel = false;
+    static inline bool destroyedWithNewLabel = false;
+
+    ~Node() noexcept {
+        destroyedWithOldLabel = label.View() == StringView("old");
+        destroyedWithNewLabel = label.View() == StringView("new");
+    }
+
+    ROCKS_PROPERTY() String label;
+    ROCKS_PROPERTY() ObjectRef<Node> next;
+    ROCKS_PROPERTY() bool enabled = false;
+    ROCKS_PROPERTY() uint8 small = 0;
+    ROCKS_PROPERTY() uint16 medium = 0;
+    ROCKS_PROPERTY() uint32 flags = 0;
+    ROCKS_PROPERTY() uint64 wide = 0;
+    ROCKS_PROPERTY() int64 signedWide = 0;
+    ROCKS_PROPERTY() float weight = 0;
+    ROCKS_PROPERTY() double precision = 0;
+};
+
+// CLASS/PROPERTY fixture는 private 상속 필드와 저장 정책을 실제 generated 접근기로 검증한다.
+ROCKS_CLASS()
+class AbstractBase : public Object {
+    ROCKS_GENERATED_BODY()
+
+public:
+    static inline uint32 constructions = 0;
+
+    AbstractBase() noexcept {
+        ++constructions;
+    }
+
+    virtual ~AbstractBase() noexcept = default;
+    virtual int32 ClassValue() const noexcept = 0;
+
+private:
+    ROCKS_PROPERTY(ReadOnly, Category = "Stats", DisplayName = "체력")
+    int32 baseValue = 17;
+};
+
+ROCKS_CLASS()
+class PropertyNode final : public AbstractBase {
+    ROCKS_GENERATED_BODY()
+
+public:
+    explicit PropertyNode(Allocator& allocator) noexcept : label(allocator) {
+    }
+
+    int32 ClassValue() const noexcept override {
+        return 21;
+    }
+
+private:
+    ROCKS_PROPERTY(Transient)
+    ObjectRef<PropertyNode> transientChild;
+    ROCKS_PROPERTY(ReadOnly, Category = "Text", DisplayName = "표시 이름")
+    String label;
+    // UTF-8·인용부호·역슬래시·개행·NUL 뒤 숫자를 등록 metadata에서 바이트 단위로 검증한다.
+    ROCKS_PROPERTY(Transient, DisplayName = "한글\"\\\n\u00007")
+    int32 runtimeCache = 73;
+};
+
+// C++ concrete 타입도 선언 정책 Abstract이면 생성할 수 없다.
+ROCKS_CLASS(Abstract)
+struct AbstractByPolicy : Object {
+    static inline uint32 constructions = 0;
+
+    AbstractByPolicy() noexcept {
+        ++constructions;
+    }
+};
+
+// 자동 ID 선언도 같은 전치 규칙과 private 필드 접근을 사용한다.
+ROCKS_CLASS()
+class AliasPrivate final : public Object {
+    ROCKS_GENERATED_BODY()
+
+    ROCKS_PROPERTY() int32 value = 41;
+
+public:
+    int32 Read() const noexcept {
+        return value;
+    }
+};
+
+} // namespace rocks::reflection_fixture

@@ -1,0 +1,7 @@
+#include "@NAME@.h"
+
+namespace rocks::modules::@NAME@ {
+const char* Name() noexcept {
+    return "@NAME@";
+}
+}

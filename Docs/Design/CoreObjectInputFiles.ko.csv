@@ -287,7 +287,7 @@ Engine/InputIntegration/Private/CutsceneInputBridge.cpp,InputIntegration,Private
 Tests/Integration/InputBridgeTests.cpp,InputIntegration,Tool/Test/Data,I15,약한 owner·언어·control token,IT19;IT20;IT22,계획
 Editor/InputProfile/ProfileEditorModel.cpp,Editor.Input,Tool/Test/Data,I16,I2 입력 profile 편집 UI·transaction·preview,IT15;IT16;IT19,계획
 Editor/InputProfile/ProfilePreviewBridge.cpp,Editor.Input,Tool/Test/Data,I16,I2 입력 profile 편집 UI·transaction·preview,IT15;IT16;IT19,계획
-Editor/Web/InputProfileEditor.tsx,Editor.Input,Tool/Test/Data,I16,I2 입력 profile 편집 UI·transaction·preview,IT15;IT16;IT19,계획
+Editor/InputProfile/ProfileEditorView.cpp,Editor.Input,Tool/Test/Data,I16,I2 입력 profile 편집 UI·transaction·preview,IT15;IT16;IT19,계획
 Tests/Integration/InputProfileEditorTests.cpp,Editor.Input,Tool/Test/Data,I16,I2 입력 profile 편집 UI·transaction·preview,IT15;IT16;IT19,계획
 Engine/InputBackends/SDL/Private/SdlInputBackend.cpp,InputBackend.SDL,Private,I17,선택 플랫폼 adapter,IT01;IT23;IT24,선택 후속
 Tests/Input/SdlBackendTests.cpp,InputBackend.SDL,Tool/Test/Data,I17,선택 플랫폼 adapter,IT01;IT23;IT24,선택 후속

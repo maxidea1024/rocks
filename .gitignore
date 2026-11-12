@@ -6,7 +6,6 @@
 /Saved/
 /DerivedDataCache/
 /out/
-/build/
 /.vs/
 /.idea/
 *.user
@@ -24,3 +23,7 @@ Thumbs.db
 *.p12
 *.pem
 *.key
+
+# Python tool caches
+__pycache__/
+*.py[cod]

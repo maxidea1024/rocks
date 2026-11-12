@@ -10,7 +10,7 @@ AllowShortFunctionsOnASingleLine: None
 AllowShortBlocksOnASingleLine: Never
 AllowShortIfStatementsOnASingleLine: Never
 AllowShortLoopsOnASingleLine: false
-SeparateDefinitionBlocks: Always
+SeparateDefinitionBlocks: Leave
 MaxEmptyLinesToKeep: 1
 SortIncludes: Never
 AllowShortEnumsOnASingleLine: false
@@ -18,3 +18,4 @@ BreakTemplateDeclarations: Yes
 DerivePointerAlignment: false
 PointerAlignment: Left
 ReferenceAlignment: Left
+LineEnding: LF

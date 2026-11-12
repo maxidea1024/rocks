@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="../../.clang-format" Link=".clang-format" CopyToOutputDirectory="PreserveNewest" />
+    <ProjectReference Include="../Rocks.Tooling.Common/Rocks.Tooling.Common.csproj" />
+  </ItemGroup>
+</Project>
