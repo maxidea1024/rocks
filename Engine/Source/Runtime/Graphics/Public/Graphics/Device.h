@@ -2,7 +2,7 @@
 
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Result.h>
-#include <Graphics/GraphicsTypes.h>
+#include <Graphics/DeviceTypes.h>
 
 namespace rocks::graphics {
 
@@ -26,24 +26,28 @@ protected:
 // 그래픽 장치 계약이다. backend 모듈의 생성 함수(CreateD3D12Device·CreateOpenGLDevice 등)로 만든다.
 //
 // 사용 예:
-//   auto device = graphics::CreateD3D12Device(allocator, {.enableValidation = true});
-//   auto swapChain = device.Value()->CreateSwapChain({.surface = surface, .width = w, .height =
-//   h}); auto vertices = device.Value()->CreateBuffer({.size = sizeof(data)}, bytes); auto pipeline
-//   = device.Value()->CreatePipeline(pipelineDesc); auto frame =
-//   device.Value()->BeginFrame(swapChain.Value(), {0.1f, 0.1f, 0.1f, 1.0f}); if (frame) {
+//   auto created = graphics::CreateD3D12Device(allocator, {.enableValidation = true});
+//   graphics::Device& device = *created.Value();
+//   auto swapChain = device.CreateSwapChain({.surface = surface, .width = w, .height = h});
+//   auto vertices = device.CreateBuffer({.size = sizeof(data)}, bytes);
+//   auto pipeline = device.CreatePipeline(pipelineDesc);
+//   auto frame = device.BeginFrame(swapChain.Value(), {0.1f, 0.1f, 0.1f, 1.0f});
+//   if (frame) {
 //       frame.Value()->SetPipeline(pipeline.Value());
 //       frame.Value()->SetVertexBuffer(vertices.Value());
 //       frame.Value()->Draw(3);
-//       auto presented = device.Value()->EndFrame();
+//       auto presented = device.EndFrame();
 //   }
 //
 // 계약:
 // - 생성한 스레드에서만 사용한다(D3D12 큐·OpenGL context 소유 스레드).
 // - 프레임은 한 번에 하나만 기록한다. BeginFrame/BeginOffscreen 뒤 EndFrame 전의 다른 Begin은
-// Busy다.
-// - Destroy는 GPU 사용이 끝난 뒤 실제로 해제한다(D3D12는 프레임 fence 완료 후, OpenGL은 즉시 —
-// 드라이버가
-//   수명을 관리한다). 파괴한 handle은 stale이며 이후 사용은 무시하거나 StaleHandle이다.
+//   Busy다.
+// - Destroy는 GPU 사용이 끝난 뒤 실제로 해제한다(D3D12는 마지막으로 쓴 프레임의 fence 완료 후,
+//   OpenGL은 즉시 — 드라이버가 수명을 관리한다). 기록 중에도 파괴할 수 있으며 이미 기록한 명령은
+//   그 자원으로 실행된다(기록 중인 스왑체인을 파괴하면 그 프레임의 present만 생략한다). 파괴한
+//   handle은 stale이며 이후 사용은 무시하거나 StaleHandle이다.
+// - 기록 중에도 자원을 만들 수 있다(텍스처 업로드는 동기 완료된다).
 // - 장치 소멸 전에 WaitIdle을 기다리고 모든 자원을 해제한다(소멸자가 대신한다).
 class Device {
 public:
@@ -92,7 +96,8 @@ public:
     virtual void Destroy(PipelineHandle pipeline) noexcept = 0;
     virtual void Destroy(SwapChainHandle swapChain) noexcept = 0;
 
-    // 제출한 모든 GPU 작업이 끝날 때까지 기다리고 지연 해제를 처리한다.
+    // 제출한 모든 GPU 작업이 끝날 때까지 기다리고 지연 해제를 처리한다. 기록 중이면 아직 제출하지
+    // 않은 그 프레임은 기다리지 않으며 그 프레임이 쓸 수 있는 자원도 해제하지 않는다.
     virtual Result<void> WaitIdle() noexcept = 0;
 
     // 마지막 실패의 진단 문자열(셰이더 컴파일 로그 등)이다. 다음 실패까지 유효하다.
@@ -101,8 +106,9 @@ public:
     // 지금까지 무시된 그리기 수(파이프라인·버퍼 미설정, stale handle)다.
     virtual uint64 IgnoredDraws() const noexcept = 0;
 
-    // 검증 계층이 보고한 오류 수다(D3D12 debug layer의 ERROR·CORRUPTION, GL debug output의 ERROR).
-    // 검증이 꺼져 있으면 0이다. 시험이 "검증 오류 0"을 확인할 때 쓴다.
+    // 장치를 만든 뒤 검증 계층이 보고한 오류의 누적 수다(D3D12 debug layer·DXGI debug의
+    // ERROR·CORRUPTION, GL debug output의 ERROR·UNDEFINED_BEHAVIOR). 검증이 꺼져 있으면 0이다.
+    // 시험이 "검증 오류 0"을 확인할 때 쓴다.
     virtual uint64 ValidationErrorCount() const noexcept = 0;
 };
 

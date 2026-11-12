@@ -1,4 +1,4 @@
-#include <Graphics/GraphicsTypes.h>
+#include <Graphics/DeviceTypes.h>
 
 namespace rocks::graphics {
 
@@ -15,18 +15,6 @@ const char* BackendName(Backend backend) noexcept {
     }
 
     return "Unknown";
-}
-
-uint32 BytesPerPixel(Format format) noexcept {
-    switch (format) {
-    case Format::RGBA8Unorm:
-    case Format::RGBA8UnormSrgb:
-        return 4;
-    case Format::Unknown:
-        break;
-    }
-
-    return 0;
 }
 
 uint32 VertexFormatSize(VertexFormat format) noexcept {

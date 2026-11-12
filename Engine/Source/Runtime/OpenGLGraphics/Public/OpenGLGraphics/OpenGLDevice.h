@@ -10,9 +10,17 @@ namespace rocks::graphics {
 // DependencyFailed, Windows가 아니면 Unsupported다.
 //
 // 구현 규약:
-// - glClipControl(GL_LOWER_LEFT, GL_ZERO_TO_ONE)로 D3D와 같은 [0, 1] 깊이 범위를 쓴다.
+// - glClipControl(…, GL_ZERO_TO_ONE)로 D3D와 같은 [0, 1] 깊이 범위를 쓴다. 원점은 창(기본
+//   framebuffer)에 그릴 때 GL_LOWER_LEFT, RenderTarget 텍스처에 그릴 때 GL_UPPER_LEFT다. 그래서
+//   RenderTarget의 저장소 첫 행이 이미지 위쪽이 되어 그 텍스처를 샘플링하거나 ReadPixels로 읽어도
+//   D3D12와 같은 배치다(뒤집기 없음).
 // - 텍스처는 첫 행이 위인 배치로 올리며 UV (0,0)이 좌상단이다(D3D12와 같은 결과).
-// - ReadPixels는 행 순서를 뒤집어 D3D12와 같은 위→아래 순서로 돌려준다.
+// - 샘플러(TextureDesc::sampler)는 텍스처 객체의 매개변수로 둔다. Anisotropic은 GL 4.6 또는
+//   ARB/EXT_texture_filter_anisotropic이 있을 때 적용하고(배율은 장치 한계로 줄인다), 없으면
+//   Trilinear로 대신한다.
+// - 스왑체인 창의 클래스는 CS_OWNDC여야 한다(아니면 InvalidArgument). vsync는
+// WGL_EXT_swap_control이
+//   있을 때 창마다 적용한다.
 // - 셰이더는 GLSL 4.50이다. 정점 속성은 layout(location = N), 상수는 uniform mat4 uTransform과
 //   uniform vec4 uColor, 텍스처는 layout(binding = 0) uniform sampler2D uTexture다.
 Result<UniquePtr<Device>> CreateOpenGLDevice(Allocator& allocator, const DeviceDesc& desc) noexcept;

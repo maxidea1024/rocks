@@ -29,12 +29,20 @@ constexpr GLenum GL_COLOR_ATTACHMENT0_VALUE = 0x8CE0;
 constexpr GLenum GL_FRAMEBUFFER_COMPLETE_VALUE = 0x8CD5;
 constexpr GLenum GL_FRAMEBUFFER_SRGB_VALUE = 0x8DB9;
 constexpr GLenum GL_LOWER_LEFT_VALUE = 0x8CA1;
+constexpr GLenum GL_UPPER_LEFT_VALUE = 0x8CA2;
 constexpr GLenum GL_ZERO_TO_ONE_VALUE = 0x935F;
 constexpr GLenum GL_DEBUG_OUTPUT_VALUE = 0x92E0;
 constexpr GLenum GL_DEBUG_OUTPUT_SYNCHRONOUS_VALUE = 0x8242;
 constexpr GLenum GL_DEBUG_TYPE_ERROR_VALUE = 0x824C;
+constexpr GLenum GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR_VALUE = 0x824E;
 constexpr GLenum GL_MAJOR_VERSION_VALUE = 0x821B;
 constexpr GLenum GL_MINOR_VERSION_VALUE = 0x821C;
+constexpr GLenum GL_NUM_EXTENSIONS_VALUE = 0x821D;
+constexpr GLenum GL_MIRRORED_REPEAT_VALUE = 0x8370;
+constexpr GLenum GL_CLAMP_TO_BORDER_VALUE = 0x812D;
+// GL 4.6 core·ARB_texture_filter_anisotropic·EXT_texture_filter_anisotropic 공통 값이다.
+constexpr GLenum GL_TEXTURE_MAX_ANISOTROPY_VALUE = 0x84FE;
+constexpr GLenum GL_MAX_TEXTURE_MAX_ANISOTROPY_VALUE = 0x84FF;
 
 constexpr int WGL_DRAW_TO_WINDOW_ARB = 0x2001;
 constexpr int WGL_ACCELERATION_ARB = 0x2003;
@@ -58,6 +66,30 @@ constexpr int WGL_CONTEXT_DEBUG_BIT_ARB = 0x0001;
 using WglChoosePixelFormat = BOOL(WINAPI*)(HDC, const int*, const FLOAT*, UINT, int*, UINT*);
 using WglCreateContextAttribs = HGLRC(WINAPI*)(HDC, HGLRC, const int*);
 using WglSwapInterval = BOOL(WINAPI*)(int);
+using WglGetExtensionsString = const char*(WINAPI*)(HDC);
+
+// 공백으로 나뉜 확장 목록에 name이 온전한 토큰으로 있는지다.
+bool HasExtension(const char* list, const char* name) noexcept {
+    if (list == nullptr) {
+        return false;
+    }
+    const usize nameBytes = __builtin_strlen(name);
+    for (const char* cursor = list; *cursor != '\0';) {
+        while (*cursor == ' ') {
+            ++cursor;
+        }
+        const char* end = cursor;
+        while (*end != '\0' && *end != ' ') {
+            ++end;
+        }
+        if (static_cast<usize>(end - cursor) == nameBytes &&
+            __builtin_memcmp(cursor, name, nameBytes) == 0) {
+            return true;
+        }
+        cursor = end;
+    }
+    return false;
+}
 
 // 실행 시 얻는 GL 1.2+ 함수 표다.
 struct GlFunctions {
@@ -94,6 +126,9 @@ struct GlFunctions {
     void(APIENTRY* TextureSubImage2D)(GLuint, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLenum,
                                       const void*) = nullptr;
     void(APIENTRY* TextureParameteri)(GLuint, GLenum, GLint) = nullptr;
+    void(APIENTRY* TextureParameterf)(GLuint, GLenum, GLfloat) = nullptr;
+    void(APIENTRY* TextureParameterfv)(GLuint, GLenum, const GLfloat*) = nullptr;
+    const GLubyte*(APIENTRY* GetStringi)(GLenum, GLuint) = nullptr;
     void(APIENTRY* BindTextureUnit)(GLuint, GLuint) = nullptr;
     void(APIENTRY* CreateFramebuffers)(GLsizei, GLuint*) = nullptr;
     void(APIENTRY* DeleteFramebuffers)(GLsizei, const GLuint*) = nullptr;
@@ -147,7 +182,9 @@ bool LoadFunctions(GlFunctions& gl) noexcept {
            Bind(gl.TextureStorage2D, "glTextureStorage2D") &&
            Bind(gl.TextureSubImage2D, "glTextureSubImage2D") &&
            Bind(gl.TextureParameteri, "glTextureParameteri") &&
-           Bind(gl.BindTextureUnit, "glBindTextureUnit") &&
+           Bind(gl.TextureParameterf, "glTextureParameterf") &&
+           Bind(gl.TextureParameterfv, "glTextureParameterfv") &&
+           Bind(gl.GetStringi, "glGetStringi") && Bind(gl.BindTextureUnit, "glBindTextureUnit") &&
            Bind(gl.CreateFramebuffers, "glCreateFramebuffers") &&
            Bind(gl.DeleteFramebuffers, "glDeleteFramebuffers") &&
            Bind(gl.NamedFramebufferTexture, "glNamedFramebufferTexture") &&
@@ -168,6 +205,33 @@ GLint ComponentCount(VertexFormat format) noexcept {
         return 4;
     }
     return 0;
+}
+
+GLint MinFilter(Filter filter) noexcept {
+    switch (filter) {
+    case Filter::Nearest:
+        return GL_NEAREST_MIPMAP_NEAREST;
+    case Filter::Bilinear:
+        return GL_LINEAR_MIPMAP_NEAREST;
+    case Filter::Trilinear:
+    case Filter::Anisotropic:
+        return GL_LINEAR_MIPMAP_LINEAR;
+    }
+    return GL_LINEAR_MIPMAP_LINEAR;
+}
+
+GLint WrapMode(AddressMode mode) noexcept {
+    switch (mode) {
+    case AddressMode::Wrap:
+        return GL_REPEAT;
+    case AddressMode::Clamp:
+        return static_cast<GLint>(GL_CLAMP_TO_EDGE_VALUE);
+    case AddressMode::Mirror:
+        return static_cast<GLint>(GL_MIRRORED_REPEAT_VALUE);
+    case AddressMode::Border:
+        return static_cast<GLint>(GL_CLAMP_TO_BORDER_VALUE);
+    }
+    return GL_REPEAT;
 }
 
 GLenum InternalFormat(Format format) noexcept {
@@ -225,6 +289,8 @@ struct SwapChainRecord {
     uint32 width = 0;
     uint32 height = 0;
     bool vsync = true;
+    // 이 창에 마지막으로 적용한 swap interval이다(WGL swap interval은 창마다 따로다). -1은 미적용.
+    int appliedInterval = -1;
 };
 
 class OpenGLDevice final : public Device, private CommandContext {
@@ -235,8 +301,7 @@ public:
     }
 
     ~OpenGLDevice() override {
-        if (context_ != nullptr) {
-            MakeCurrent(deviceDc_);
+        if (context_ != nullptr && MakeCurrent(deviceDc_)) {
             glFinish();
             for (const BufferRecord& record : buffers_) {
                 gl_.DeleteBuffers(1, &record.buffer);
@@ -248,7 +313,11 @@ public:
                 gl_.DeleteProgram(record.program);
                 gl_.DeleteVertexArrays(1, &record.vertexArray);
             }
-            wglMakeCurrent(nullptr, nullptr);
+        }
+        if (context_ != nullptr) {
+            if (wglGetCurrentContext() == context_) {
+                wglMakeCurrent(nullptr, nullptr);
+            }
             wglDeleteContext(context_);
         }
         for (const SwapChainRecord& record : swapChains_) {
@@ -287,7 +356,6 @@ public:
                     reinterpret_cast<WglChoosePixelFormat>(LoadGl("wglChoosePixelFormatARB"));
                 createContext =
                     reinterpret_cast<WglCreateContextAttribs>(LoadGl("wglCreateContextAttribsARB"));
-                swapInterval_ = reinterpret_cast<WglSwapInterval>(LoadGl("wglSwapIntervalEXT"));
                 wglMakeCurrent(nullptr, nullptr);
             }
             if (legacy != nullptr) {
@@ -307,27 +375,12 @@ public:
             return Fail("OpenGL device window creation failed");
         }
         deviceDc_ = GetDC(deviceWindow_);
-        const int attributes[] = {WGL_DRAW_TO_WINDOW_ARB,
-                                  TRUE,
-                                  WGL_SUPPORT_OPENGL_ARB,
-                                  TRUE,
-                                  WGL_DOUBLE_BUFFER_ARB,
-                                  TRUE,
-                                  WGL_ACCELERATION_ARB,
-                                  WGL_FULL_ACCELERATION_ARB,
-                                  WGL_PIXEL_TYPE_ARB,
-                                  WGL_TYPE_RGBA_ARB,
-                                  WGL_COLOR_BITS_ARB,
-                                  32,
-                                  WGL_ALPHA_BITS_ARB,
-                                  8,
-                                  WGL_DEPTH_BITS_ARB,
-                                  0,
-                                  WGL_STENCIL_BITS_ARB,
-                                  0,
-                                  WGL_FRAMEBUFFER_SRGB_CAPABLE_ARB,
-                                  TRUE,
-                                  0};
+        const int attributes[] = {
+            WGL_DRAW_TO_WINDOW_ARB, TRUE, WGL_SUPPORT_OPENGL_ARB, TRUE, WGL_DOUBLE_BUFFER_ARB, TRUE,
+            WGL_ACCELERATION_ARB, WGL_FULL_ACCELERATION_ARB, WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB,
+            // 알파를 뺀 색 비트 수다(WGL_ARB_pixel_format).
+            WGL_COLOR_BITS_ARB, 24, WGL_ALPHA_BITS_ARB, 8, WGL_DEPTH_BITS_ARB, 0,
+            WGL_STENCIL_BITS_ARB, 0, WGL_FRAMEBUFFER_SRGB_CAPABLE_ARB, TRUE, 0};
         UINT count = 0;
         if (!choosePixelFormat(deviceDc_, attributes, nullptr, 1, &pixelFormat_, &count) ||
             count == 0) {
@@ -353,6 +406,12 @@ public:
         if (!LoadFunctions(gl_)) {
             return Fail("required OpenGL 4.5 functions are missing");
         }
+        // 확장 함수 주소는 픽셀 형식·context마다 다를 수 있으므로 실제 context에서 얻는다.
+        const auto extensions =
+            reinterpret_cast<WglGetExtensionsString>(LoadGl("wglGetExtensionsStringARB"));
+        if (extensions != nullptr && HasExtension(extensions(deviceDc_), "WGL_EXT_swap_control")) {
+            swapInterval_ = reinterpret_cast<WglSwapInterval>(LoadGl("wglSwapIntervalEXT"));
+        }
 
         GLint major = 0;
         GLint minor = 0;
@@ -360,6 +419,20 @@ public:
         glGetIntegerv(GL_MINOR_VERSION_VALUE, &minor);
         if (major < 4 || (major == 4 && minor < 5)) {
             return Fail("OpenGL 4.5 is required");
+        }
+        // 이방성 필터: GL 4.6 core이거나 ARB/EXT 확장이 있으면 쓴다(없으면 Trilinear로 대신한다).
+        bool anisotropic = major > 4 || (major == 4 && minor >= 6);
+        GLint extensionCount = 0;
+        glGetIntegerv(GL_NUM_EXTENSIONS_VALUE, &extensionCount);
+        for (GLint index = 0; index < extensionCount && !anisotropic; ++index) {
+            const auto* name = reinterpret_cast<const char*>(
+                gl_.GetStringi(GL_EXTENSIONS, static_cast<GLuint>(index)));
+            anisotropic = name != nullptr &&
+                          (__builtin_strcmp(name, "GL_ARB_texture_filter_anisotropic") == 0 ||
+                           __builtin_strcmp(name, "GL_EXT_texture_filter_anisotropic") == 0);
+        }
+        if (anisotropic) {
+            glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_VALUE, &maxAnisotropy_);
         }
         const auto* renderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
         if (renderer != nullptr) {
@@ -374,9 +447,11 @@ public:
             gl_.DebugMessageCallback(&OpenGLDevice::DebugMessage, this);
             validation_ = true;
         }
-        gl_.ClipControl(GL_LOWER_LEFT_VALUE, GL_ZERO_TO_ONE_VALUE);
+        SetClipOrigin(GL_LOWER_LEFT_VALUE);
         glDisable(GL_DEPTH_TEST);
         glDisable(GL_CULL_FACE);
+        // RGBA8에서도 dither가 허용되므로 backend 간 결과가 ±1 달라지지 않게 끈다.
+        glDisable(GL_DITHER);
 
         const uint8 white[4] = {255, 255, 255, 255};
         TextureDesc whiteDesc;
@@ -406,7 +481,16 @@ public:
 
         SwapChainRecord record;
         record.window = static_cast<HWND>(desc.surface.window);
+        // DC를 스왑체인 수명 동안 쥐므로 공용 DC가 아니라 창 전용 DC(CS_OWNDC)여야 한다.
+        if ((GetClassLongPtrW(record.window, GCL_STYLE) & CS_OWNDC) == 0) {
+            auto failed = Fail("swap chain window class must use CS_OWNDC");
+            (void)failed;
+            return Result<SwapChainHandle>::Failure(ErrorCode::InvalidArgument);
+        }
         record.dc = GetDC(record.window);
+        if (record.dc == nullptr) {
+            return FailWith<SwapChainHandle>("GetDC failed on the swap chain window");
+        }
         record.width = desc.width;
         record.height = desc.height;
         record.vsync = desc.vsync;
@@ -436,7 +520,7 @@ public:
         if (width == 0 || height == 0 || recording_) {
             return Result<void>::Failure(recording_ ? ErrorCode::Busy : ErrorCode::InvalidArgument);
         }
-        // 기본 framebuffer는 창 크기를 따른다. 뷰포트 크기만 갱신한다.
+        // 기본 framebuffer는 창 크기를 따른다. 크기만 기록한다(BeginFrame은 실제 창 크기를 쓴다).
         record->width = width;
         record->height = height;
         return Result<void>::Success();
@@ -447,7 +531,9 @@ public:
         if (desc.size == 0 || initial.Size() != desc.size) {
             return Result<BufferHandle>::Failure(ErrorCode::InvalidArgument);
         }
-        MakeCurrentForResources();
+        if (!MakeCurrentForResources()) {
+            return FailWith<BufferHandle>("wglMakeCurrent failed");
+        }
         BufferRecord record;
         gl_.CreateBuffers(1, &record.buffer);
         gl_.NamedBufferStorage(record.buffer, static_cast<GLsizeiptr>(desc.size), initial.Data(),
@@ -464,30 +550,51 @@ public:
                                         Span<const uint8> pixels) noexcept override {
         const uint32 bytesPerPixel = BytesPerPixel(desc.format);
         const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
-        const usize size = static_cast<usize>(desc.width) * desc.height * bytesPerPixel;
-        if (desc.width == 0 || desc.height == 0 || desc.width > 16384 || desc.height > 16384 ||
-            bytesPerPixel == 0 || (renderTarget ? pixels.Size() != 0 : pixels.Size() != size)) {
+        const uint64 size = MipChainBytes(desc.width, desc.height, desc.mipLevels, desc.format);
+        if (desc.width > 16384 || desc.height > 16384 || size == 0 ||
+            !IsValidSamplerDesc(desc.sampler) ||
+            (renderTarget ? (pixels.Size() != 0 || desc.mipLevels != 1) : pixels.Size() != size)) {
             return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
         }
 
-        MakeCurrentForResources();
+        if (!MakeCurrentForResources()) {
+            return FailWith<TextureHandle>("wglMakeCurrent failed");
+        }
         TextureRecord record;
         record.width = desc.width;
         record.height = desc.height;
         record.format = desc.format;
         gl_.CreateTextures(GL_TEXTURE_2D, 1, &record.texture);
-        gl_.TextureStorage2D(record.texture, 1, InternalFormat(desc.format),
-                             static_cast<GLsizei>(desc.width), static_cast<GLsizei>(desc.height));
-        gl_.TextureParameteri(record.texture, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        gl_.TextureParameteri(record.texture, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        gl_.TextureParameteri(record.texture, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE_VALUE);
-        gl_.TextureParameteri(record.texture, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE_VALUE);
+        gl_.TextureStorage2D(record.texture, static_cast<GLsizei>(desc.mipLevels),
+                             InternalFormat(desc.format), static_cast<GLsizei>(desc.width),
+                             static_cast<GLsizei>(desc.height));
+        // 샘플러 상태는 텍스처 객체에 둔다(텍스처마다 하나의 SamplerDesc).
+        gl_.TextureParameteri(record.texture, GL_TEXTURE_MIN_FILTER,
+                              MinFilter(desc.sampler.filter));
+        gl_.TextureParameteri(record.texture, GL_TEXTURE_MAG_FILTER,
+                              desc.sampler.filter == Filter::Nearest ? GL_NEAREST : GL_LINEAR);
+        gl_.TextureParameteri(record.texture, GL_TEXTURE_WRAP_S, WrapMode(desc.sampler.addressU));
+        gl_.TextureParameteri(record.texture, GL_TEXTURE_WRAP_T, WrapMode(desc.sampler.addressV));
+        float border[4];
+        BorderColorValue(desc.sampler.borderColor, border);
+        gl_.TextureParameterfv(record.texture, GL_TEXTURE_BORDER_COLOR, border);
+        if (desc.sampler.filter == Filter::Anisotropic && maxAnisotropy_ >= 1.0f) {
+            const float requested = static_cast<float>(desc.sampler.maxAnisotropy);
+            gl_.TextureParameterf(record.texture, GL_TEXTURE_MAX_ANISOTROPY_VALUE,
+                                  requested < maxAnisotropy_ ? requested : maxAnisotropy_);
+        }
         if (!renderTarget) {
             // 첫 행을 v = 0에 둔다. UV (0,0)이 이미지 좌상단이 되어 D3D12와 결과가 같다.
             glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-            gl_.TextureSubImage2D(record.texture, 0, 0, 0, static_cast<GLsizei>(desc.width),
-                                  static_cast<GLsizei>(desc.height), GL_RGBA, GL_UNSIGNED_BYTE,
-                                  pixels.Data());
+            usize offset = 0;
+            for (uint32 level = 0; level < desc.mipLevels; ++level) {
+                const uint32 width = MipExtent(desc.width, level);
+                const uint32 height = MipExtent(desc.height, level);
+                gl_.TextureSubImage2D(record.texture, static_cast<GLint>(level), 0, 0,
+                                      static_cast<GLsizei>(width), static_cast<GLsizei>(height),
+                                      GL_RGBA, GL_UNSIGNED_BYTE, pixels.Data() + offset);
+                offset += static_cast<usize>(width) * height * bytesPerPixel;
+            }
         } else {
             gl_.CreateFramebuffers(1, &record.framebuffer);
             gl_.NamedFramebufferTexture(record.framebuffer, GL_COLOR_ATTACHMENT0_VALUE,
@@ -514,7 +621,9 @@ public:
             return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
         }
 
-        MakeCurrentForResources();
+        if (!MakeCurrentForResources()) {
+            return FailWith<PipelineHandle>("wglMakeCurrent failed");
+        }
         auto vertex = CompileShader(GL_VERTEX_SHADER_VALUE, desc.vertex.glsl);
         if (!vertex) {
             return Result<PipelineHandle>::Failure(vertex.Error());
@@ -574,13 +683,26 @@ public:
         if (!MakeCurrent(record->dc)) {
             return FailWith<CommandContext*>("wglMakeCurrent failed on the swap chain window");
         }
-        if (swapInterval_ != nullptr && appliedInterval_ != (record->vsync ? 1 : 0)) {
-            appliedInterval_ = record->vsync ? 1 : 0;
-            swapInterval_(appliedInterval_);
+        const int interval = record->vsync ? 1 : 0;
+        if (swapInterval_ != nullptr && record->appliedInterval != interval &&
+            swapInterval_(interval)) {
+            record->appliedInterval = interval;
         }
         gl_.BindFramebuffer(GL_FRAMEBUFFER_VALUE, 0);
+        // 기본 framebuffer는 창 아래쪽이 원점이다.
+        SetClipOrigin(GL_LOWER_LEFT_VALUE);
         presentTarget_ = handle;
-        StartPass(record->width, record->height, clear);
+        // 기본 framebuffer는 창 크기를 즉시 따르므로 ResizeSwapChain 전 프레임도 실제 크기로
+        // 그린다.
+        uint32 width = record->width;
+        uint32 height = record->height;
+        RECT client = {};
+        if (GetClientRect(record->window, &client) && client.right > client.left &&
+            client.bottom > client.top) {
+            width = static_cast<uint32>(client.right - client.left);
+            height = static_cast<uint32>(client.bottom - client.top);
+        }
+        StartPass(width, height, clear);
         return Result<CommandContext*>::Success(this);
     }
 
@@ -594,8 +716,13 @@ public:
         if (recording_) {
             return Result<CommandContext*>::Failure(ErrorCode::Busy);
         }
-        MakeCurrentForResources();
+        if (!MakeCurrentForResources()) {
+            return FailWith<CommandContext*>("wglMakeCurrent failed");
+        }
         gl_.BindFramebuffer(GL_FRAMEBUFFER_VALUE, record->framebuffer);
+        // FBO 텍스처의 첫 행(t = 0)을 화면 위(clip y = +1)에 두어 D3D12와 같은 배치로 만든다. 그
+        // 결과 이 텍스처를 UV (0,0) = 좌상단으로 샘플링해도, 첫 행부터 읽어도 D3D12와 같다.
+        SetClipOrigin(GL_UPPER_LEFT_VALUE);
         presentTarget_ = {};
         StartPass(record->width, record->height, clear);
         return Result<CommandContext*>::Success(this);
@@ -627,22 +754,15 @@ public:
         if (record->framebuffer == 0 || out.Size() != rowBytes * record->height || recording_) {
             return Result<void>::Failure(recording_ ? ErrorCode::Busy : ErrorCode::InvalidArgument);
         }
-        MakeCurrentForResources();
+        if (!MakeCurrentForResources()) {
+            return Fail("wglMakeCurrent failed");
+        }
         gl_.BindFramebuffer(GL_FRAMEBUFFER_VALUE, record->framebuffer);
         glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        // offscreen 패스는 위쪽 원점(GL_UPPER_LEFT)으로 그렸으므로 저장소 첫 행이 이미지 위쪽이다.
         glReadPixels(0, 0, static_cast<GLsizei>(record->width),
                      static_cast<GLsizei>(record->height), GL_RGBA, GL_UNSIGNED_BYTE, out.Data());
         gl_.BindFramebuffer(GL_FRAMEBUFFER_VALUE, 0);
-        // GL은 아래 행부터 준다. D3D12와 같은 위→아래 순서로 제자리에서 뒤집는다.
-        for (uint32 row = 0; row < record->height / 2; ++row) {
-            uint8* top = out.Data() + static_cast<usize>(row) * rowBytes;
-            uint8* bottom = out.Data() + static_cast<usize>(record->height - 1 - row) * rowBytes;
-            for (usize index = 0; index < rowBytes; ++index) {
-                const uint8 swap = top[index];
-                top[index] = bottom[index];
-                bottom[index] = swap;
-            }
-        }
         return Result<void>::Success();
     }
 
@@ -651,7 +771,9 @@ public:
         if (record == nullptr) {
             return;
         }
-        MakeCurrentForResources();
+        if (!MakeCurrentForResources()) {
+            return;
+        }
         gl_.DeleteBuffers(1, &record->buffer);
         auto removed = buffers_.TryRemove(handle.slot);
         (void)removed;
@@ -662,7 +784,9 @@ public:
         if (record == nullptr || handle == white_) {
             return;
         }
-        MakeCurrentForResources();
+        if (!MakeCurrentForResources()) {
+            return;
+        }
         ReleaseTexture(*record);
         auto removed = textures_.TryRemove(handle.slot);
         (void)removed;
@@ -673,7 +797,9 @@ public:
         if (record == nullptr) {
             return;
         }
-        MakeCurrentForResources();
+        if (!MakeCurrentForResources()) {
+            return;
+        }
         gl_.DeleteProgram(record->program);
         gl_.DeleteVertexArrays(1, &record->vertexArray);
         auto removed = pipelines_.TryRemove(handle.slot);
@@ -686,8 +812,9 @@ public:
             return;
         }
         // 이 창 DC에 context가 붙어 있으면 장치 창으로 옮긴 뒤 DC를 놓는다.
-        if (currentDc_ == record->dc) {
-            MakeCurrent(deviceDc_);
+        if (wglGetCurrentContext() == context_ && wglGetCurrentDC() == record->dc &&
+            !MakeCurrent(deviceDc_)) {
+            wglMakeCurrent(nullptr, nullptr);
         }
         ReleaseDC(record->window, record->dc);
         auto removed = swapChains_.TryRemove(handle.slot);
@@ -715,7 +842,7 @@ private:
     static void APIENTRY DebugMessage(GLenum, GLenum type, GLuint, GLenum, GLsizei length,
                                       const GLchar* message, const void* user) {
         auto* self = static_cast<OpenGLDevice*>(const_cast<void*>(user));
-        if (type == GL_DEBUG_TYPE_ERROR_VALUE) {
+        if (type == GL_DEBUG_TYPE_ERROR_VALUE || type == GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR_VALUE) {
             ++self->validationErrors_;
             if (message != nullptr && length > 0) {
                 auto assigned =
@@ -738,22 +865,28 @@ private:
         return Result<T>::Failure(ErrorCode::DependencyFailed);
     }
 
+    // 캐시 대신 실제 current 상태를 확인한다. 같은 스레드의 다른 장치·GL 라이브러리가 context를
+    // 바꿨을 수 있고, wglMakeCurrent가 실패하면 기존 context가 풀린다.
     bool MakeCurrent(HDC dc) noexcept {
-        if (currentDc_ == dc) {
+        if (wglGetCurrentContext() == context_ && wglGetCurrentDC() == dc) {
             return true;
         }
-        if (!wglMakeCurrent(dc, context_)) {
-            return false;
-        }
-        currentDc_ = dc;
-        return true;
+        return wglMakeCurrent(dc, context_) != FALSE;
     }
 
-    // 자원 생성·파괴는 어느 DC에 붙어 있든 같은 context면 된다. 붙어 있지 않을 때만 장치 창에
-    // 붙인다.
-    void MakeCurrentForResources() noexcept {
-        if (currentDc_ == nullptr) {
-            MakeCurrent(deviceDc_);
+    // 자원 생성·파괴는 어느 DC에 붙어 있든 이 context면 된다. 다른 context가 current이거나 아무것도
+    // 없을 때만 장치 창에 붙인다.
+    bool MakeCurrentForResources() noexcept {
+        if (wglGetCurrentContext() == context_) {
+            return true;
+        }
+        return MakeCurrent(deviceDc_);
+    }
+
+    void SetClipOrigin(GLenum origin) noexcept {
+        if (clipOrigin_ != origin) {
+            gl_.ClipControl(origin, GL_ZERO_TO_ONE_VALUE);
+            clipOrigin_ = origin;
         }
     }
 
@@ -894,11 +1027,12 @@ private:
     WglSwapInterval swapInterval_ = nullptr;
     HWND deviceWindow_ = nullptr;
     HDC deviceDc_ = nullptr;
-    HDC currentDc_ = nullptr;
     HGLRC context_ = nullptr;
     int pixelFormat_ = 0;
     PIXELFORMATDESCRIPTOR pixelDescriptor_ = {};
-    int appliedInterval_ = -1;
+    GLenum clipOrigin_ = 0;
+    // 이방성 필터 최대 배율이다. 지원하지 않으면 0이다.
+    GLfloat maxAnisotropy_ = 0.0f;
     TextureHandle white_;
     SwapChainHandle presentTarget_;
     PipelineHandle boundPipeline_;

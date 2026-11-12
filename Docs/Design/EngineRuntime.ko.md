@@ -32,7 +32,8 @@ S4·S5는 S2·S3과 독립이다. 이번 범위에서 macOS는 창·Metal 구현
 |---|---|---|---|
 | `Input` | Core | 장치 독립 입력 이벤트·프레임 입력 상태(키·마우스·게임패드), edge 판정 | 창·OS SDK 참조 |
 | `PlatformWindow` | Input | 창 생성·이벤트 펌프·네이티브 핸들 노출, 입력 backend(Win32 메시지 키보드·마우스, XInput 게임패드) | Graphics·World 참조 |
-| `Graphics` | Core | 장치·스왑체인·버퍼·텍스처·파이프라인·명령 기록 계약, backend 열거 | World·Object·창 모듈 참조 |
+| `GraphicsTypes` | Core | 그래픽 값 타입: 픽셀 형식·mip 크기 계산(`PixelFormat.h`), 필터·주소 모드·테두리 색·`SamplerDesc`(`Sampler.h`). 장치 계약·에셋·도구가 함께 쓴다 | 장치·창·World 참조 |
+| `Graphics` | GraphicsTypes | 장치·스왑체인·버퍼·텍스처(mip·텍스처별 샘플러)·파이프라인·명령 기록 계약, backend 열거 | World·Object·창 모듈 참조 |
 | `D3D12Graphics` | Graphics | D3D12 구현(Windows) | 다른 backend 참조 |
 | `OpenGLGraphics` | Graphics | OpenGL 4.5 core 구현(Windows WGL) | 〃 |
 | `VulkanGraphics`·`MetalGraphics` | Graphics | 자리만 둔다. 장치 생성은 `Unsupported`를 반환한다 | 동작하는 척하는 가짜 구현 |
@@ -204,7 +205,7 @@ class Device {
 - 자원은 slot+generation 핸들이다. `Destroy`는 마지막으로 사용한 프레임의 GPU 완료(D3D12 fence) 이후에 실제 해제한다. OpenGL은 드라이버가 수명을 관리하므로 즉시 삭제한다.
 - 셰이더는 backend별 원문을 `PipelineDesc`에 담는다(D3D12: HLSL을 런타임 `D3DCompile` SM 5.1, OpenGL: GLSL 4.50). 오프라인 셰이더 쿠킹과 DXC는 후속이다.
 - 그리기 상수는 64바이트 행렬 + 16바이트 색으로 제한한다(D3D12 root constants, OpenGL uniform).
-- 좌표 규약: 행렬은 열 우선 column vector이며 HLSL·GLSL 모두 열 우선으로 업로드한다. OpenGL은 `glClipControl(GL_LOWER_LEFT, GL_ZERO_TO_ONE)`으로 D3D와 같은 [0,1] 깊이를 쓴다. 텍스처는 첫 행이 위인 배치로 올리고 UV (0,0)이 좌상단이다.
+- 좌표 규약: 행렬은 열 우선 column vector이며 HLSL·GLSL 모두 열 우선으로 업로드한다. OpenGL은 `glClipControl`의 `GL_ZERO_TO_ONE`으로 D3D와 같은 [0,1] 깊이를 쓰고, 원점은 창에 그릴 때 `GL_LOWER_LEFT`, RenderTarget 텍스처에 그릴 때 `GL_UPPER_LEFT`로 바꿔 RenderTarget의 첫 행이 이미지 위쪽이 되게 한다(샘플링·readback 모두 D3D12와 같은 배치). 텍스처는 첫 행이 위인 배치로 올리고 UV (0,0)이 좌상단이다.
 - D3D12는 프레임 2개를 동시에 진행하고 프레임 slot 재사용은 해당 fence 완료로 판정한다. 디버그 구성은 디버그 레이어를 켠다.
 
 ### 10.2 범위 밖

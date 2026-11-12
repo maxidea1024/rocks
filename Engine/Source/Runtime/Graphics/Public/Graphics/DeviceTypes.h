@@ -2,9 +2,13 @@
 
 #include <Core/Containers/SlotArray.h>
 #include <Core/Containers/Span.h>
+#include <Core/Result.h>
 #include <Core/Text/StringView.h>
+#include <GraphicsTypes/PixelFormat.h>
+#include <GraphicsTypes/Sampler.h>
 
-// 그래픽 장치 계약의 값 타입이다. backend와 무관하며 API 객체를 담지 않는다.
+// 그래픽 장치 계약의 값 타입(handle·장치·자원 설정)이다. backend와 무관하며 API 객체를 담지
+// 않는다. 픽셀 형식·샘플러는 GraphicsTypes 모듈에 있다.
 namespace rocks::graphics {
 
 // 그래픽 backend다. D3D12·OpenGL은 구현 모듈(D3D12Graphics·OpenGLGraphics)이 있고, Vulkan·Metal은
@@ -18,18 +22,6 @@ enum class Backend : uint8 {
 
 // "D3D12" 같은 이름이다. 범위 밖이면 "Unknown"이다.
 const char* BackendName(Backend backend) noexcept;
-
-// 텍스처·렌더 타깃 픽셀 형식이다. 모두 픽셀당 4바이트, 채널 순서는 이름 그대로다(RGBA8은 R가 첫
-// 바이트). Srgb 형식은 저장값이 sRGB 인코딩이며 샘플링은 선형으로 디코딩하고 렌더 타깃 쓰기는
-// 인코딩한다.
-enum class Format : uint8 {
-    Unknown,
-    RGBA8Unorm,
-    RGBA8UnormSrgb
-};
-
-// 픽셀당 바이트 수다. Unknown은 0이다.
-uint32 BytesPerPixel(Format format) noexcept;
 
 // 정점 속성 형식이다.
 enum class VertexFormat : uint8 {
@@ -120,11 +112,19 @@ enum class TextureUsage : uint8 {
     RenderTarget
 };
 
+// 텍스처 설정이다.
+//
+// 초기 픽셀 배치(Sampled): mip 0부터 mipLevels개를 빈틈 없이 잇는다. 각 mip은 MipExtent(width,
+// level) × MipExtent(height, level) 픽셀, 첫 행이 위, 행 사이 padding이 없다(MipChainBytes 크기).
 struct TextureDesc {
     uint32 width = 0;
     uint32 height = 0;
     Format format = Format::RGBA8UnormSrgb;
     TextureUsage usage = TextureUsage::Sampled;
+    // 1–FullMipCount(width, height)다. RenderTarget은 1이어야 한다.
+    uint32 mipLevels = 1;
+    // 이 텍스처를 묶을 때 쓰는 샘플러다.
+    SamplerDesc sampler;
 };
 
 // 정점 속성 하나다. location은 GLSL의 layout(location), HLSL에서는 TEXCOORD{location} 의미 체계로
@@ -144,7 +144,8 @@ struct ShaderSource {
 
 // 그리기 파이프라인 설정이다. 모든 파이프라인은 같은 고정 자원 배치를 쓴다: 그리기 상수
 // (DrawConstants, HLSL b0 / GLSL uniform uTransform·uColor)와 텍스처 하나(HLSL t0·s0 /
-// GLSL binding 0 uTexture, 선형 필터·가장자리 고정). 깊이·컬링은 쓰지 않는다.
+// GLSL binding 0 uTexture). 샘플러는 묶은 텍스처의 TextureDesc::sampler를 따른다. 깊이·컬링은
+// 쓰지 않는다.
 struct PipelineDesc {
     ShaderSource vertex;
     ShaderSource pixel;
