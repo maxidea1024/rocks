@@ -17,31 +17,43 @@
     }
   ],
   "translationUnits": [
-    "Lz4Unity.c"
+    "Lz4Unity.c",
+    "lz4-1.11.1/lib/lz4frame.c",
+    "lz4-1.11.1/lib/xxhash.c"
   ],
   "includeDirectories": [
     "lz4-1.11.1/lib"
   ],
   "defines": [
     "LZ4_STATIC_LINKING_ONLY_DISABLE_MEMORY_ALLOCATION",
-    "LZ4LIB_VISIBILITY="
+    "LZ4_USER_MEMORY_FUNCTIONS",
+    "LZ4LIB_VISIBILITY=",
+    "LZ4FLIB_VISIBILITY=",
+    "XXH_NAMESPACE=LZ4_"
   ],
   "platformDefines": {},
   "consumerDefines": [
     "LZ4_HC_STATIC_LINKING_ONLY",
     "LZ4_STATIC_LINKING_ONLY_DISABLE_MEMORY_ALLOCATION",
-    "LZ4LIB_VISIBILITY="
+    "LZ4LIB_VISIBILITY=",
+    "LZ4F_STATIC_LINKING_ONLY",
+    "LZ4FLIB_VISIBILITY="
   ],
   "adapterHeaders": [
     "lz4-1.11.1/lib/lz4.h",
-    "lz4-1.11.1/lib/lz4hc.h"
+    "lz4-1.11.1/lib/lz4hc.h",
+    "lz4-1.11.1/lib/lz4frame.h"
   ],
   "files": {
     "lib/LICENSE": "8b58c446121a109ccf32edc094bba3010a3d85e4ee3702950db55e4d3e87736c",
     "lib/lz4.c": "2e58f124f1032f15aecc99772b7de624c4289245729fa5403506f00b06a54937",
     "lib/lz4.h": "c204caad0638a12c9ce80831094ec8fffb34aa57e74307067b08fc9452fc2611",
+    "lib/lz4frame.c": "33cfe96e2b373ef1d0e73a4d87ec9ef14937432ba0340eab4f8a464c74f44bdc",
+    "lib/lz4frame.h": "a4ce7507ce93f7411bde3c9231d83a4b04bac41e74745384622993c442d99c25",
     "lib/lz4hc.c": "44344dc172a6b8f6e4b915d0e792f32911b966d1df1d39731674327ffaec40f3",
-    "lib/lz4hc.h": "8b55bd835048b399ab451dad77d40227fcbcce5d2db7b622a79d92f36dc563e1"
+    "lib/lz4hc.h": "8b55bd835048b399ab451dad77d40227fcbcce5d2db7b622a79d92f36dc563e1",
+    "lib/xxhash.c": "9c5498e00479217d7573b2474397a4248127f013f24d9ef98de0281d2dd30d89",
+    "lib/xxhash.h": "aefdd236f35130495c18764cabed3f7b216906855fc5e6a9025cd2040bc84444"
   },
   "pragmaDirectives": [
     {
@@ -95,6 +107,11 @@
       "text": "#    pragma message(\"WARNING: LZ4_DEPRECATED needs custom implementation for this compiler\")"
     },
     {
+      "file": "lib/lz4frame.c",
+      "line": 49,
+      "text": "#  pragma warning(disable : 4127)   /* disable: C4127: conditional expression is constant */"
+    },
+    {
       "file": "lib/lz4hc.c",
       "line": 67,
       "text": "#  pragma GCC diagnostic ignored \"-Wunused-function\""
@@ -103,11 +120,21 @@
       "file": "lib/lz4hc.c",
       "line": 70,
       "text": "#  pragma clang diagnostic ignored \"-Wunused-function\""
+    },
+    {
+      "file": "lib/xxhash.c",
+      "line": 124,
+      "text": "#  pragma warning(disable : 4127)      /* disable: C4127: conditional expression is constant */"
     }
   ],
   "notes": [
     "Lz4Unity.c 한 번역 단위로 lz4.c와 lz4hc.c를 함께 빌드한다(upstream이 지원하는 LZ4_SRC_INCLUDED 방식). lz4hc.c의 -Wunused-function 억제 분기는 이 방식에서 비활성이다.",
-    "LZ4_compress_fast_extState_fastReset(LZ4_STATIC_LINKING_ONLY, lz4hc.h가 LZ4_HC_STATIC_LINKING_ONLY일 때 정의)과 LZ4_STREAMHC_EXTSIZE·LZ4_compress_HC_extStateHC_fastReset(LZ4_HC_STATIC_LINKING_ONLY, v1.11 실험 API)을 쓴다. 확장 상태를 쓰면 수준 10–12도 압축 중 할당이 없다. 정적 링크·고정 버전이라 실험 API를 쓸 수 있다.",
-    "LZ4_STATIC_LINKING_ONLY_DISABLE_MEMORY_ALLOCATION은 할당 API를 컴파일 단계에서 제거한다."
+    "lz4frame.c와 xxhash.c는 따로 컴파일한다. upstream 합본(lz4.c·lz4hc.c·lz4frame.c 순서)은 lz4.c의 ALLOC 매크로를 lz4frame.c가 이어 쓰는데, LZ4_STATIC_LINKING_ONLY_DISABLE_MEMORY_ALLOCATION이 그 매크로를 컴파일 오류 표지로 바꾸므로 합칠 수 없다. 따로 컴파일한 lz4frame.c는 lz4.c의 할당 API(LZ4_createStream 등)를 쓰지 않는다. xxhash.c는 upstream 합본에서도 별도 번역 단위다.",
+    "XXH_NAMESPACE=LZ4_: LZ4의 xxHash 0.6.5 심볼을 LZ4_XXH32 등으로 바꾼다. zstd는 자기 xxhash.h에서 XXH_NAMESPACE를 ZSTD_로 정하므로 두 라이브러리를 함께 링크해도 심볼이 겹치지 않는다. lz4frame.c와 xxhash.c가 같은 정의를 받는다.",
+    "LZ4F 할당: adapter는 LZ4F_createCompressionContext_advanced·LZ4F_createDecompressionContext_advanced(LZ4F_STATIC_LINKING_ONLY, v1.9.4+ 실험 API)에 할당·해제 함수를 모두 넘기므로 LZ4F의 모든 할당이 Rocks Allocator를 거친다. lz4frame.c에는 사용자 할당기가 없을 때 쓰는 기본 할당 경로(LZ4F_compressFrame·LZ4F_createCompressionContext·LZ4F_createDecompressionContext·LZ4F_createCDict)가 남는다. LZ4_USER_MEMORY_FUNCTIONS(upstream 설정 지점)로 그 경로를 Lz4Unity.c의 LZ4_malloc·LZ4_calloc·LZ4_free에 연결하고, 이 함수들은 NULL을 돌려주므로 실수로 기본 경로를 타면 CRT 대신 할당 실패가 된다. lz4.c는 DISABLE_MEMORY_ALLOCATION 분기가 먼저라 영향이 없다. xxhash.c의 XXH32_createState·XXH64_createState는 CRT malloc을 직접 부르지만 lz4frame.c는 상태를 문맥 안에 두고 이 함수를 쓰지 않는다(Docs/Design/Compression.ko.md 12.2절).",
+    "LZ4F_MULTITHREAD는 정의하지 않는다(기본 0: 스레드 코드가 컴파일되지 않고 nbWorkers 0만 쓴다).",
+    "LZ4_compress_fast_extState_fastReset(LZ4_STATIC_LINKING_ONLY, lz4hc.h가 LZ4_HC_STATIC_LINKING_ONLY일 때 정의)과 LZ4_STREAMHC_EXTSIZE·LZ4_compress_HC_extStateHC_fastReset(LZ4_HC_STATIC_LINKING_ONLY, v1.11 실험 API)을 쓴다. 확장 상태를 쓰면 수준 10–12도 압축 중 할당이 없다. LZ4F의 HC 상태도 같은 확장 크기다. 정적 링크·고정 버전이라 실험 API를 쓸 수 있다.",
+    "LZ4_STATIC_LINKING_ONLY_DISABLE_MEMORY_ALLOCATION은 lz4.c·lz4hc.c의 할당 API를 컴파일 단계에서 제거한다.",
+    "LZ4FLIB_VISIBILITY=: lz4frame.h가 GNU 계열에서 붙이는 visibility(\"default\")를 해제한다(LZ4LIB_VISIBILITY=와 같은 이유). lz4frame_static.h(LZ4F_STATIC_LINKING_ONLY를 정의하고 lz4frame.h를 포함하는 호환 헤더)는 consumerDefines의 LZ4F_STATIC_LINKING_ONLY로 대신하므로 들이지 않는다."
   ]
 }

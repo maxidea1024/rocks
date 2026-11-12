@@ -58,10 +58,11 @@ inline constexpr uint32 MaxCompressedBlockSizeLog2 = 24;     // 16MiB
 inline constexpr uint32 DefaultCompressedBlockSizeLog2 = 18; // 256KiB
 inline constexpr usize CompressedBlocksHeaderBytes = 48;
 
-// 블록 컨테이너 설정이다. 형식은 Lz4·Zstd·Deflate만 쓴다(Zlib·Gzip은 래퍼가 컨테이너와 중복이다).
+// 블록 컨테이너 설정이다. 형식은 Lz4·Zstd·Deflate만 쓴다(Zlib·Gzip 래퍼와 Lz4Frame frame은
+// 컨테이너와 중복이다. LZ4 블록은 Lz4 raw block으로 저장한다).
 class CompressedBlocksSettings {
 public:
-    // 실패: Zlib·Gzip·모르는 형식, blockSizeLog2가 12–24 밖이면 InvalidArgument다.
+    // 실패: Zlib·Gzip·Lz4Frame·모르는 형식, blockSizeLog2가 12–24 밖이면 InvalidArgument다.
     static Result<CompressedBlocksSettings>
     TryMake(const CompressionSettings& compression,
             uint32 blockSizeLog2 = DefaultCompressedBlockSizeLog2) noexcept;
@@ -353,8 +354,8 @@ public:
     // reader의 형식·블록 크기로 만든다. 실패: 열리지 않은 reader는 StaleHandle, OutOfMemory.
     static Result<CompressedBlocksReadContext> TryCreate(const CompressedBlocksReader& reader,
                                                          Allocator& allocator) noexcept;
-    // 형식·블록 크기로 만든다(여러 컨테이너에 같은 문맥을 쓸 때). 실패: Zlib·Gzip·모르는 형식·
-    // blockSizeLog2 범위 밖은 InvalidArgument, OutOfMemory.
+    // 형식·블록 크기로 만든다(여러 컨테이너에 같은 문맥을 쓸 때). 실패: Zlib·Gzip·Lz4Frame·모르는
+    // 형식·blockSizeLog2 범위 밖은 InvalidArgument, OutOfMemory.
     static Result<CompressedBlocksReadContext>
     TryCreate(CompressionFormat format, uint32 blockSizeLog2, Allocator& allocator) noexcept;
 

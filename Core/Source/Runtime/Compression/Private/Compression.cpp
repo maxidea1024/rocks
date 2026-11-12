@@ -17,6 +17,7 @@ bool IsKnownFormat(CompressionFormat format) noexcept {
     case CompressionFormat::Deflate:
     case CompressionFormat::Zlib:
     case CompressionFormat::Gzip:
+    case CompressionFormat::Lz4Frame:
         return true;
     }
     return false;
@@ -36,8 +37,21 @@ void DestroyCompressorCodec(CompressionFormat format, int32 level, void* codec,
                             Allocator& allocator) noexcept {
     if (format == CompressionFormat::Lz4) {
         lz4::DestroyCompressor(codec, level, allocator);
+    } else if (format == CompressionFormat::Lz4Frame) {
+        lz4frame::DestroyCompressor(codec);
     } else if (format == CompressionFormat::Zstd) {
         zstd::DestroyCompressor(codec);
+    } else if (IsZlibFamily(format)) {
+        zlib::Destroy(codec);
+    }
+}
+
+// Lz4 raw block 해제는 코덱 상태가 없다(codec은 nullptr).
+void DestroyDecompressorCodec(CompressionFormat format, void* codec) noexcept {
+    if (format == CompressionFormat::Lz4Frame) {
+        lz4frame::DestroyDecompressor(codec);
+    } else if (format == CompressionFormat::Zstd) {
+        zstd::DestroyDecompressor(codec);
     } else if (IsZlibFamily(format)) {
         zlib::Destroy(codec);
     }
@@ -110,6 +124,9 @@ CreateCompressorState(CompressionFormat format, int32 level, Allocator& allocato
     case CompressionFormat::Gzip:
         codec = zlib::CreateCompressor(format, level, allocator);
         break;
+    case CompressionFormat::Lz4Frame:
+        codec = lz4frame::CreateCompressor(level, allocator);
+        break;
     }
     if (!codec) {
         return Result<CompressorState*>::Failure(codec.Error());
@@ -148,33 +165,27 @@ CreateDecompressorState(CompressionFormat format, Allocator& allocator,
         return Result<DecompressorState*>::Failure(ErrorCode::InvalidArgument);
     }
 
-    void* codec = nullptr;
+    Result<void*> codec = Result<void*>::Success(nullptr);
     if (format == CompressionFormat::Zstd) {
-        auto created = zstd::CreateDecompressor(allocator, dictionary.Get());
-        if (!created) {
-            return Result<DecompressorState*>::Failure(created.Error());
-        }
-        codec = created.Value();
+        codec = zstd::CreateDecompressor(allocator, dictionary.Get());
+    } else if (format == CompressionFormat::Lz4Frame) {
+        codec = lz4frame::CreateDecompressor(allocator);
     } else if (IsZlibFamily(format)) {
-        auto created = zlib::CreateDecompressor(format, allocator);
-        if (!created) {
-            return Result<DecompressorState*>::Failure(created.Error());
-        }
-        codec = created.Value();
+        codec = zlib::CreateDecompressor(format, allocator);
+    }
+    if (!codec) {
+        return Result<DecompressorState*>::Failure(codec.Error());
     }
 
     void* memory = CodecAllocate(allocator, sizeof(DecompressorState));
     if (memory == nullptr) {
-        if (format == CompressionFormat::Zstd) {
-            zstd::DestroyDecompressor(codec);
-        } else if (IsZlibFamily(format)) {
-            zlib::Destroy(codec);
-        }
+        DestroyDecompressorCodec(format, codec.Value());
         return Result<DecompressorState*>::Failure(ErrorCode::OutOfMemory);
     }
 
-    return Result<DecompressorState*>::Success(ConstructAt<DecompressorState>(
-        memory, DecompressorState{format, &allocator, codec, dictionary, dictionary.Get()}));
+    return Result<DecompressorState*>::Success(
+        ConstructAt<DecompressorState>(memory, DecompressorState{format, &allocator, codec.Value(),
+                                                                 dictionary, dictionary.Get()}));
 }
 
 Result<void> BindDecompressorDictionary(DecompressorState& state,
@@ -206,11 +217,7 @@ void DestroyDecompressorState(DecompressorState* state) noexcept {
     }
 
     Allocator& allocator = *state->allocator;
-    if (state->format == CompressionFormat::Zstd) {
-        zstd::DestroyDecompressor(state->codec);
-    } else if (IsZlibFamily(state->format)) {
-        zlib::Destroy(state->codec);
-    }
+    DestroyDecompressorCodec(state->format, state->codec);
     DestroyAt(state);
     CodecFree(allocator, state);
 }
@@ -236,6 +243,8 @@ Result<usize> CompressInto(CompressorState& state, Span<const uint8> source,
     case CompressionFormat::Zlib:
     case CompressionFormat::Gzip:
         return zlib::Compress(state.codec, source, destination, probe);
+    case CompressionFormat::Lz4Frame:
+        return lz4frame::Compress(state.codec, source, destination, probe);
     }
     return Result<usize>::Failure(ErrorCode::InvalidArgument);
 }
@@ -296,6 +305,8 @@ Result<usize> DecompressInto(DecompressorState& state, Span<const uint8> source,
     case CompressionFormat::Zlib:
     case CompressionFormat::Gzip:
         return zlib::Decompress(state.codec, source, destination, probe);
+    case CompressionFormat::Lz4Frame:
+        return lz4frame::Decompress(state.codec, source, destination, probe);
     }
     return Result<usize>::Failure(ErrorCode::InvalidArgument);
 }
@@ -323,6 +334,8 @@ Result<usize> DecompressAppend(DecompressorState& state, Span<const uint8> sourc
     case CompressionFormat::Zlib:
     case CompressionFormat::Gzip:
         return zlib::DecompressAppend(state.codec, source, maxOutputBytes, output, probe);
+    case CompressionFormat::Lz4Frame:
+        return lz4frame::DecompressAppend(state.codec, source, maxOutputBytes, output, probe);
     }
     return Result<usize>::Failure(ErrorCode::InvalidArgument);
 }
@@ -399,6 +412,7 @@ Result<usize> DecompressAppendOnce(CompressionFormat format, Span<const uint8> s
 Result<CompressionLevelRange> TryGetCompressionLevelRange(CompressionFormat format) noexcept {
     switch (format) {
     case CompressionFormat::Lz4:
+    case CompressionFormat::Lz4Frame:
         return Result<CompressionLevelRange>::Success(CompressionLevelRange{1, 12, 1});
     case CompressionFormat::Zstd:
         return Result<CompressionLevelRange>::Success(CompressionLevelRange{1, 22, 3});
@@ -443,6 +457,8 @@ Result<usize> TryGetCompressBound(CompressionFormat format, usize sourceBytes) n
     case CompressionFormat::Zlib:
     case CompressionFormat::Gzip:
         return detail::zlib::Bound(sourceBytes);
+    case CompressionFormat::Lz4Frame:
+        return detail::lz4frame::Bound(sourceBytes);
     }
     return Result<usize>::Failure(ErrorCode::InvalidArgument);
 }

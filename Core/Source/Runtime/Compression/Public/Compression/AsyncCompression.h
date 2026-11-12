@@ -29,7 +29,8 @@
 //   source와 output 저장소의 겹침은 body가 검사해 InvalidArgument로 보고한다.
 // - 취소: 협력적이다. body 시작 전과 코덱 분할 단위(1MiB)마다 확인한다. Deflate·Zlib·Gzip과
 //   zstd 압축은 입력 소비나 출력 생성 1MiB마다, zstd 해제는 입력 1MiB마다 확인한다(압축률이
-//   아주 높은 입력은 한 번에 큰 출력을 만들 수 있다). Lz4는 한 번의 코덱 호출을 끊지 않는다
+//   아주 높은 입력은 한 번에 큰 출력을 만들 수 있다). Lz4Frame은 압축이 입력 1MiB마다, 해제가 입력
+//   소비나 출력 생성 1MiB마다 확인한다. Lz4(raw block)는 한 번의 코덱 호출을 끊지 않는다
 //   (HC 12로 2GiB 가까운 입력은 100초 이상 걸릴 수 있어 Shutdown(Cancel)도 그만큼 기다린다).
 //   취소를 관측하면 output 길이를 되돌리고 결과는 Cancelled다.
 // - 용량: scheduler의 maxInFlight를 넘으면 제출이 CapacityExceeded다. 제출 속도는 호출자가

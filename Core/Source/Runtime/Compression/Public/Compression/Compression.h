@@ -16,6 +16,12 @@
 //   auto restoredBytes =
 //       TryDecompressAppend(CompressionFormat::Zstd, packed.View(), 64 << 20, restored);
 //
+// 사용 예(LZ4 frame: 빠른 해제와 무결성 검사가 함께 필요한 캐시·`lz4` CLI 파일):
+//   auto fast = CompressionSettings::TryDefault(CompressionFormat::Lz4Frame).Value();
+//   auto framed = TryCompressAppend(fast, original, packed);      // 원본 크기·checksum 기록
+//   auto opened = TryDecompressAppend(CompressionFormat::Lz4Frame, packed.View(), 64 << 20,
+//                                     restored);                // 손상·절단은 InvalidArgument
+//
 // 사용 예(크기를 아는 해제, PNG IDAT처럼 원본 크기를 헤더로 아는 경우):
 //   Array<uint8> pixels(allocator);
 //   pixels.TryResize(expectedSize);
@@ -30,9 +36,10 @@
 //   길이를 호출 전으로 되돌린다(capacity는 늘 수 있다).
 // - 오류: 출력·상한 부족 CapacityExceeded, 손상·절단·체크섬 불일치·스트림 뒤 남는 byte·빈 해제
 //   입력·범위 밖 수준·source와 출력의 겹침 InvalidArgument, 문맥에 없거나 다른 사전이 필요한 입력
-//   (zlib 프리셋 사전, 사전 ID가 다른 zstd frame, 형식 사전 문맥에 사전 ID 없는 frame)과 window가
-//   구현 상한(2^31)을 넘는 zstd frame Unsupported, 할당 실패 OutOfMemory, 크기 산술 overflow
-//   Overflow, 외부 코덱이 계약 밖의 실패를 보고 DependencyFailed.
+//   (zlib 프리셋 사전, 사전 ID가 다른 zstd frame, 형식 사전 문맥에 사전 ID 없는 frame, 사전 ID를
+//   기록한 LZ4 frame), window가 구현 상한(2^31)을 넘는 zstd frame과 LZ4 legacy frame Unsupported,
+//   할당 실패 OutOfMemory, 크기 산술 overflow Overflow, 외부 코덱이 계약 밖의 실패를 보고
+//   DependencyFailed.
 // - 할당은 모두 인자로 받은 Allocator를 거친다. 전역·thread_local 캐시가 없어 자유 함수는 재진입
 //   가능하다. 반복 호출이 많으면 코덱 문맥을 재사용하는 Compressor·Decompressor를 쓴다.
 // - 같은 라이브러리 버전·설정·입력이면 64bit little-endian 대상(Windows x64·macOS ARM64·Android
@@ -54,22 +61,31 @@ class DecompressDictionary;
 inline constexpr uint32 CompressionOutputRevision = 1;
 
 // 압축 형식이다. 값은 프로세스 안 식별용이며 영속 포맷에 기록할 때는 상위 포맷이 별도 ID를 정한다.
+// 새 형식은 끝에 덧붙인다.
 // - Lz4: LZ4 raw block. 해제가 가장 빠르다. 원본 크기·체크섬이 없어 해제할 때 크기를 알아야
-// 효율적이다.
+// 효율적이다. 스트림을 지원하지 않는다(블록 컨테이너 CompressedBlocks의 LZ4 블록이 이 형식이다).
 // - Zstd: Zstandard frame(RFC 8878). 원본 크기와 content checksum(XXH64 하위 32bit)을 기록한다.
 // - Deflate: raw DEFLATE(RFC 1951). 무결성 검사가 없다.
 // - Zlib: zlib 래퍼(RFC 1950, Adler-32). PNG IDAT가 이 형식이다.
 // - Gzip: gzip member(RFC 1952, CRC-32·ISIZE). 해제는 연속 member를 모두 처리한다.
+// - Lz4Frame: LZ4 frame(LZ4 Frame Format 1.6.1, `lz4` CLI·.lz4 파일과 호환). 64KiB linked 블록과
+//   content checksum(XXH32)을 쓰고, 일회성 압축은 원본 크기도 기록한다. 무결성 검사·스트리밍
+//   (CompressStream·DecompressStream)을 지원하는 대신 해제는 Lz4보다 느리다(checksum 계산 때문에
+//   Lz4의 60%대, Docs/Design/Compression.ko.md 12.5절). 해제는 연속 frame과 skippable frame을 모두
+//   처리한다. 사전 ID를 기록한 frame과 legacy frame(`lz4 -l`)은 Unsupported다. 블록 컨테이너 형식은
+//   아니다.
 enum class CompressionFormat : uint8 {
     Lz4,
     Zstd,
     Deflate,
     Zlib,
-    Gzip
+    Gzip,
+    Lz4Frame
 };
 
 // 형식별 압축 수준 범위다.
-// - Lz4 {1, 12, 1}: 1 = fast, 2 = lz4mid, 3–9 = HC, 10–12 = HC optimal parser(가장 느리고 작다).
+// - Lz4·Lz4Frame {1, 12, 1}: 1 = fast, 2 = lz4mid, 3–9 = HC, 10–12 = HC optimal parser(가장 느리고
+//   작다).
 // - Zstd {1, 22, 3}: 20–22(ultra)는 window가 최대 128MiB(2^27)다. 원본 크기를 아는 압축은
 //   매개변수가 입력에 맞춰 줄지만, 큰 입력·크기를 모르는 스트림은 수백 MiB 작업 메모리를 쓴다(수준
 //   22 약 700MiB). 해제는 DecompressStreamLimits 기본 window 상한(2^27)으로 풀린다.
@@ -110,12 +126,13 @@ private:
 };
 
 // LZ4 블록 형식의 입력 한계(LZ4_MAX_INPUT_SIZE)다. 더 큰 입력의 Lz4 압축·bound 계산은
-// InvalidArgument다.
+// InvalidArgument다. Lz4Frame은 64KiB 블록으로 나누므로 이 한계가 없다.
 inline constexpr usize Lz4MaxInputBytes = 0x7E000000;
 
 // sourceBytes를 압축한 결과의 최악 크기다. 이 크기 이상의 destination을 주면 TryCompress는
 // CapacityExceeded로 실패하지 않는다. Lz4 입력 한계 초과·모르는 형식은 InvalidArgument, 계산
-// overflow는 Overflow다.
+// overflow는 Overflow다. Lz4Frame은 헤더(최대 19byte) + 64KiB 블록마다 4byte + 원본 + 8byte
+// (endmark·checksum)다.
 Result<usize> TryGetCompressBound(CompressionFormat format, usize sourceBytes) noexcept;
 
 // source를 압축해 destination 앞부분에 쓰고 쓴 byte 수를 반환한다. scratch는 코덱 작업 메모리이며
@@ -143,6 +160,8 @@ Result<usize> TryDecompress(CompressionFormat format, Span<const uint8> source,
 // CapacityExceeded다(악성 입력의 메모리 폭주 방지). 작업 메모리는 output.GetAllocator()를 쓴다.
 // - Zstd는 frame에 기록된 크기로 한 번에 확보한다. 크기가 없는 frame은 블록 수로 상한을 구한다.
 // - Deflate·Zlib·Gzip은 출력을 점진적으로 늘린다.
+// - Lz4Frame은 첫 frame에 기록된 크기(없으면 64KiB)를 먼저 확보하고, 출력이 더 나올 때만 두 배씩
+//   늘린다. 먼저 잡는 크기는 상한과 입력 크기 × 256 + 64KiB를 넘지 않는다.
 // - Lz4는 크기 정보가 없어 출력이 부족하면 두 배로 늘려 처음부터 다시 해제한다(크기를 알면
 // TryDecompress를 쓴다).
 Result<usize> TryDecompressAppend(CompressionFormat format, Span<const uint8> source,
@@ -170,8 +189,9 @@ Result<usize> TryDecompressAppend(const DecompressDictionary& dictionary, Span<c
                                   usize maxOutputBytes, Array<uint8>& output,
                                   Allocator& scratch) noexcept;
 
-// 반복 압축용 문맥이다. 코덱 상태(zstd 문맥·LZ4 상태·zlib deflate 상태)를 한 번 할당해 재사용하므로
-// 작은 입력을 많이 압축할 때 빠르다. 결과는 자유 함수와 byte 단위로 같다.
+// 반복 압축용 문맥이다. 코덱 상태(zstd 문맥·LZ4 상태·LZ4 frame 문맥·zlib deflate 상태)를 한 번
+// 할당해 재사용하므로 작은 입력을 많이 압축할 때 빠르다. 결과는 자유 함수와 byte 단위로 같다.
+// LZ4 frame 문맥은 블록 버퍼·LZ4 상태를 첫 압축에서 할당하고 이후 재사용한다.
 // - 이동 전용이다. 이동된 뒤의 객체에 호출하면 StaleHandle이다.
 // - 한 객체는 동시에 한 스레드만 쓴다. 할당기는 객체보다 오래 살아야 한다.
 // - 실패(용량 부족·OOM·취소) 뒤에도 다음 호출은 새 문맥과 같은 결과를 낸다.

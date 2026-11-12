@@ -7,8 +7,8 @@ namespace rocks {
 namespace detail {
 
 // 압축 스트림의 단계다. 코덱을 부른 flush·finish가 끝나기 전에는 같은 요청만 받는다. zlib은 미완료
-// flush를 같은 모드로 다시 부르기를 요구하고 zstd는 미완료 e_end 뒤에 e_end·e_flush만 받는다. 두
-// 형식을 같은 규칙으로 맞춘다.
+// flush를 같은 모드로 다시 부르기를 요구하고 zstd는 미완료 e_end 뒤에 e_end·e_flush만 받는다. LZ4
+// frame은 단계 버퍼에 남은 flush·end 출력을 넘기는 중이다. 세 형식을 같은 규칙으로 맞춘다.
 enum class StreamPhase : uint8 {
     Open,
     Flushing,
@@ -50,6 +50,7 @@ bool IsStreamFormat(CompressionFormat format) noexcept {
     case CompressionFormat::Deflate:
     case CompressionFormat::Zlib:
     case CompressionFormat::Gzip:
+    case CompressionFormat::Lz4Frame:
         return true;
     case CompressionFormat::Lz4:
         return false;
@@ -71,6 +72,12 @@ void DestroyCodec(StreamState& state) noexcept {
             zstd::DestroyCompressor(state.codec);
         } else {
             zstd::DestroyDecompressor(state.codec);
+        }
+    } else if (state.format == CompressionFormat::Lz4Frame) {
+        if (state.compressing) {
+            lz4frame::DestroyCompressor(state.codec);
+        } else {
+            lz4frame::DestroyDecompressor(state.codec);
         }
     } else {
         zlib::Destroy(state.codec);
@@ -114,7 +121,23 @@ Result<void> ResetCompressorCodec(StreamState& state) noexcept {
         zstd::ResetStreamCompressor(state.codec);
         return Result<void>::Success();
     }
+    if (state.format == CompressionFormat::Lz4Frame) {
+        lz4frame::ResetStreamCompressor(state.codec);
+        return Result<void>::Success();
+    }
     return zlib::ResetStreamCompressor(state.codec);
+}
+
+Result<StreamProgress> CompressCodecStep(StreamState& state, Span<const uint8> input,
+                                         Span<uint8> output, StreamFlush flush) noexcept {
+    switch (state.format) {
+    case CompressionFormat::Zstd:
+        return zstd::CompressStep(state.codec, input, output, flush);
+    case CompressionFormat::Lz4Frame:
+        return lz4frame::CompressStep(state.codec, input, output, flush);
+    default:
+        return zlib::CompressStep(state.codec, input, output, flush);
+    }
 }
 
 // 단계 검사 뒤 코덱 한 단계를 부른다. 출력 공간이 0이면 코덱을 부르지 않는다.
@@ -129,9 +152,7 @@ Result<StreamProgress> CompressStep(StreamState& state, Span<const uint8> input,
         return Result<StreamProgress>::Success(StreamProgress{});
     }
 
-    auto step = state.format == CompressionFormat::Zstd
-                    ? zstd::CompressStep(state.codec, input, output, flush)
-                    : zlib::CompressStep(state.codec, input, output, flush);
+    auto step = CompressCodecStep(state, input, output, flush);
     if (!step) {
         return Fail<StreamProgress>(state, step.Error());
     }
@@ -235,7 +256,24 @@ Result<void> ResetDecompressorCodec(StreamState& state) noexcept {
         zstd::ResetStreamDecompressor(state.codec);
         return Result<void>::Success();
     }
+    if (state.format == CompressionFormat::Lz4Frame) {
+        lz4frame::ResetStreamDecompressor(state.codec);
+        return Result<void>::Success();
+    }
     return zlib::ResetStreamDecompressor(state.codec);
+}
+
+Result<StreamProgress> DecompressCodecStep(StreamState& state, Span<const uint8> input,
+                                           Span<uint8> output) noexcept {
+    switch (state.format) {
+    case CompressionFormat::Zstd:
+        return zstd::DecompressStep(state.codec, input, output, state.maxWindowLog,
+                                    state.dictionary ? state.dictionary->id : 0, state.decode);
+    case CompressionFormat::Lz4Frame:
+        return lz4frame::DecompressStep(state.codec, input, output, state.decode);
+    default:
+        return zlib::DecompressStep(state.codec, input, output, state.decode);
+    }
 }
 
 // 누계 상한까지 남은 출력이다.
@@ -259,11 +297,7 @@ Result<StreamProgress> DecompressStep(StreamState& state, Span<const uint8> inpu
     const usize allowance = Allowance(state);
     const usize window = output.Size() > allowance ? allowance + 1 : output.Size();
     const Span<uint8> target(output.Data(), window);
-    auto step =
-        state.format == CompressionFormat::Zstd
-            ? zstd::DecompressStep(state.codec, input, target, state.maxWindowLog,
-                                   state.dictionary ? state.dictionary->id : 0, state.decode)
-            : zlib::DecompressStep(state.codec, input, target, state.decode);
+    auto step = DecompressCodecStep(state, input, target);
     if (!step) {
         return Fail<StreamProgress>(state, step.Error());
     }
@@ -322,10 +356,15 @@ CompressStream::TryCreateWith(CompressionFormat format, int32 level, Allocator& 
             detail::IsKnownFormat(format) ? ErrorCode::Unsupported : ErrorCode::InvalidArgument);
     }
 
-    auto codec =
-        format == CompressionFormat::Zstd
-            ? detail::zstd::CreateStreamCompressor(level, sizeHint, allocator, dictionary.Get())
-            : detail::zlib::CreateCompressor(format, level, allocator);
+    // sizeHint는 zstd만 쓴다(LZ4 frame은 블록 64KiB 고정, zlib은 window 고정).
+    Result<void*> codec = Result<void*>::Failure(ErrorCode::InvalidArgument);
+    if (format == CompressionFormat::Zstd) {
+        codec = detail::zstd::CreateStreamCompressor(level, sizeHint, allocator, dictionary.Get());
+    } else if (format == CompressionFormat::Lz4Frame) {
+        codec = detail::lz4frame::CreateStreamCompressor(level, allocator);
+    } else {
+        codec = detail::zlib::CreateCompressor(format, level, allocator);
+    }
     if (!codec) {
         return Result<CompressStream>::Failure(codec.Error());
     }
@@ -438,10 +477,17 @@ DecompressStream::TryCreateWith(CompressionFormat format, const DecompressStream
         return Result<DecompressStream>::Failure(ErrorCode::InvalidArgument);
     }
 
-    auto codec = format == CompressionFormat::Zstd
-                     ? detail::zstd::CreateStreamDecompressor(limits.maxWindowLog, allocator,
-                                                              dictionary.Get())
-                     : detail::zlib::CreateDecompressor(format, allocator);
+    // maxWindowLog는 zstd만 쓴다. LZ4 frame 해제 메모리는 frame 헤더의 블록 크기(최대 4MiB)가
+    // 정한다.
+    Result<void*> codec = Result<void*>::Failure(ErrorCode::InvalidArgument);
+    if (format == CompressionFormat::Zstd) {
+        codec = detail::zstd::CreateStreamDecompressor(limits.maxWindowLog, allocator,
+                                                       dictionary.Get());
+    } else if (format == CompressionFormat::Lz4Frame) {
+        codec = detail::lz4frame::CreateDecompressor(allocator);
+    } else {
+        codec = detail::zlib::CreateDecompressor(format, allocator);
+    }
     if (!codec) {
         return Result<DecompressStream>::Failure(codec.Error());
     }

@@ -46,6 +46,8 @@ uint8 CodecId(CompressionFormat format) noexcept {
         return 3;
     case CompressionFormat::Zlib:
     case CompressionFormat::Gzip:
+    case CompressionFormat::Lz4Frame:
+        // 래퍼·frame이 컨테이너(블록 크기·CRC)와 중복이다. LZ4 블록은 raw block(Lz4)으로 둔다.
         return 0;
     }
     return 0;

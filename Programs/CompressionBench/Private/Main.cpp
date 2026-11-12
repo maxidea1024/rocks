@@ -11,7 +11,8 @@
 #include <stdio.h>
 
 // 압축 처리량 측정 도구다. 세 부분을 잰다.
-// - 일회성: 형식·수준마다 Compressor·Decompressor를 재사용한 단일 스레드 처리량.
+// - 일회성: 형식·수준마다 Compressor·Decompressor를 재사용한 단일 스레드 처리량. LZ4는 raw
+//   block(lz4)과 frame(lz4frame: 64KiB linked 블록, 원본 크기·content checksum)을 함께 잰다.
 // - 스트림: CompressStream·DecompressStream에 64KiB 조각으로 넣는 처리량(단일 스레드).
 // - 블록 컨테이너: 256KiB 블록 RCBK의 순차·병렬 압축과 전체 읽기 처리량.
 // - 사전: 작은 항목(1KiB·4KiB)을 하나씩 zstd로 압축할 때 사전 유무의 압축률·처리량. 사전은 학습하지
@@ -227,7 +228,8 @@ int RunStreams(Span<const uint8> input, uint32 rounds, Allocator& allocator) {
         const char* name;
         int32 level;
     };
-    static constexpr Case Cases[] = {{CompressionFormat::Zstd, "zstd", 3},
+    static constexpr Case Cases[] = {{CompressionFormat::Lz4Frame, "lz4frame", 1},
+                                     {CompressionFormat::Zstd, "zstd", 3},
                                      {CompressionFormat::Gzip, "gzip", 6}};
     for (const Case& item : Cases) {
         auto stream = CompressStream::TryCreate(
@@ -383,11 +385,12 @@ int Run(const Options& options) {
         int32 level;
     };
     static constexpr Case Cases[] = {
-        {CompressionFormat::Lz4, "lz4", 1},         {CompressionFormat::Lz4, "lz4", 9},
-        {CompressionFormat::Lz4, "lz4", 12},        {CompressionFormat::Zstd, "zstd", 1},
-        {CompressionFormat::Zstd, "zstd", 3},       {CompressionFormat::Zstd, "zstd", 9},
-        {CompressionFormat::Zstd, "zstd", 19},      {CompressionFormat::Deflate, "deflate", 1},
-        {CompressionFormat::Deflate, "deflate", 6}, {CompressionFormat::Gzip, "gzip", 9}};
+        {CompressionFormat::Lz4, "lz4", 1},           {CompressionFormat::Lz4, "lz4", 9},
+        {CompressionFormat::Lz4, "lz4", 12},          {CompressionFormat::Lz4Frame, "lz4frame", 1},
+        {CompressionFormat::Lz4Frame, "lz4frame", 9}, {CompressionFormat::Zstd, "zstd", 1},
+        {CompressionFormat::Zstd, "zstd", 3},         {CompressionFormat::Zstd, "zstd", 9},
+        {CompressionFormat::Zstd, "zstd", 19},        {CompressionFormat::Deflate, "deflate", 1},
+        {CompressionFormat::Deflate, "deflate", 6},   {CompressionFormat::Gzip, "gzip", 9}};
     const Span<const uint8> input(corpus.Data(), corpus.Size());
     for (const Case& item : Cases) {
         auto settings = CompressionSettings::TryMake(item.format, item.level);

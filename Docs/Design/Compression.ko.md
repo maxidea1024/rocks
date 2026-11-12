@@ -7,15 +7,15 @@
 
 ## 1. 범위
 
-| 1차 범위 | 2차 범위(9·10절) | 3차 범위(11절) | 4차 범위(11.6절) | 후속 |
-|---|---|---|---|---|
-| 형식을 고르는 일회성 압축·해제, 최악 압축 크기, 크기를 모르는 해제(상한 필수, `Array` 뒤에 붙임), 재사용 문맥(`Compressor`·`Decompressor`), worker 비동기 압축·해제(의존 작업 연결·협력적 취소), 모든 할당의 Rocks `Allocator` 경유, 결정적 출력 | 블록 단위 seek 가능 컨테이너(Godot `FileAccessCompressed`·UE `FCompressedBuffer` 대응)와 큰 버퍼의 블록 병렬 압축·해제, gzip·zstd 스트리밍 객체(역압) | zstd 사전 사용(압축·해제 사전 handle, 일회성·문맥·스트림·비동기·블록 컨테이너 연동, frame 사전 ID 검사) | zstd 사전 학습(fastCover)·finalize, `licenses` manifest | Brotli 해제(WOFF2), 형식 플러그인 등록(UE `ICompressionFormat`), AsyncFile 완료 → 해제 작업 연결(외부 완료 이벤트 handle 필요), LZ4 frame 스트리밍, zstd ultra 수준(20–22), LZ4·zlib 사전 |
+| 1차 범위 | 2차 범위(9·10절) | 3차 범위(11절) | 4차 범위(11.6절) | 5차 범위(12절) | 후속 |
+|---|---|---|---|---|---|
+| 형식을 고르는 일회성 압축·해제, 최악 압축 크기, 크기를 모르는 해제(상한 필수, `Array` 뒤에 붙임), 재사용 문맥(`Compressor`·`Decompressor`), worker 비동기 압축·해제(의존 작업 연결·협력적 취소), 모든 할당의 Rocks `Allocator` 경유, 결정적 출력 | 블록 단위 seek 가능 컨테이너(Godot `FileAccessCompressed`·UE `FCompressedBuffer` 대응)와 큰 버퍼의 블록 병렬 압축·해제, gzip·zstd 스트리밍 객체(역압) | zstd 사전 사용(압축·해제 사전 handle, 일회성·문맥·스트림·비동기·블록 컨테이너 연동, frame 사전 ID 검사) | zstd 사전 학습(fastCover)·finalize, `licenses` manifest | LZ4 frame 형식(`Lz4Frame`, `lz4` CLI 호환. legacy frame 제외): 일회성·문맥·비동기·스트리밍, content checksum·원본 크기 검사, upstream 결과와의 byte 비교 | Brotli 해제(WOFF2), 형식 플러그인 등록(UE `ICompressionFormat`), LZ4·LZ4 frame·zlib 사전 |
 
 ## 2. 코덱 선정
 
 | 형식 | 라이브러리 | 라이선스(SPDX) | 선정 이유 |
 |---|---|---|---|
-| `Lz4`(raw block) | LZ4 1.11.1(2026-11-10), `lib/`의 `lz4.[ch]`·`lz4hc.[ch]`만 | BSD-2-Clause. 원문은 `lib/LICENSE`다. 저장소 루트 `LICENSE`는 "lib은 BSD-2, 나머지는 GPL-2.0-or-later" 안내문이며 CLI(`programs/`)는 들이지 않는다 | 해제 최고속. 1.11은 HC 확장 상태(`LZ4_STREAMHC_EXTSIZE`)로 수준 10–12도 할당 없이 동작하고, 1.10.0이 Android(non-Apple aarch64 clang)에서 껐던 빠른 해제 루프를 켠다. 1.11.0의 회귀는 폐기 API `LZ4_resetStreamHC()`에 국한되며 Rocks는 쓰지 않는다 |
+| `Lz4`(raw block)·`Lz4Frame`(LZ4 frame, 12절) | LZ4 1.11.1(2026-11-10), `lib/`의 `lz4.[ch]`·`lz4hc.[ch]`·`lz4frame.[ch]`·`xxhash.[ch]`만 | BSD-2-Clause. 원문은 `lib/LICENSE`다. 저장소 루트 `LICENSE`는 "lib은 BSD-2, 나머지는 GPL-2.0-or-later" 안내문이며 CLI(`programs/`)는 들이지 않는다 | 해제 최고속. 1.11은 HC 확장 상태(`LZ4_STREAMHC_EXTSIZE`)로 수준 10–12도 할당 없이 동작하고, 1.10.0이 Android(non-Apple aarch64 clang)에서 껐던 빠른 해제 루프를 켠다. 1.11.0의 회귀는 폐기 API `LZ4_resetStreamHC()`에 국한되며 Rocks는 쓰지 않는다. frame 형식은 스트리밍·무결성 검사를 더하는 대신 해제가 raw block의 60%대다(XXH32 checksum, 12.5절) |
 | `Zstd`(frame, RFC 8878) | zstd 1.5.7(2025-02-19, 최신 안정) | `BSD-3-Clause OR GPL-2.0-only` 중 **BSD-3-Clause 선택**. 부분집합 전 파일(xxhash 포함)이 이중 라이선스이며 특허 조항은 없다. 단 사전 생성기의 `divsufsort.[ch]`는 MIT(Yuta Mori)라 따로 고지한다(11.6절) | 압축률·속도 균형, `ZSTD_customMem`으로 할당기 주입, 원본 크기·체크섬 기록. upstream C 라이브러리의 알려진 CVE는 없다(검색된 CVE는 zstd-jni 것) |
 | `Deflate`(RFC 1951)·`Zlib`(RFC 1950)·`Gzip`(RFC 1952) | zlib 1.4(2026-11-04) | Zlib | 호환 형식(PNG·gzip·zip). `zalloc`·`zfree`·`opaque`로 할당기 주입, 스트림 API로 4GiB 이상과 취소를 처리. 1.4는 최신 유지와 UB·Android·Windows 이식성 수정이 근거다(보안 수정 대부분은 Rocks가 쓰지 않는 gz·inflateSync·Prime·inflateBack API) |
 
@@ -37,7 +37,7 @@ gate를 둔다.** 설치 SDK는 각 라이브러리 manifest `licenses`의 모�
 
 ```text
 Core/Source/ThirdParty/
-  Lz4/   Lz4.Build.cs   ThirdParty.json   Lz4Unity.c   lz4-1.11.1/lib/{LICENSE, lz4.c, lz4.h, lz4hc.c, lz4hc.h}
+  Lz4/   Lz4.Build.cs   ThirdParty.json   Lz4Unity.c   lz4-1.11.1/lib/{LICENSE, lz4.[ch], lz4hc.[ch], lz4frame.[ch], xxhash.[ch]}
   Zstd/  Zstd.Build.cs  ThirdParty.json   zstd-1.5.7/{LICENSE, lib/zstd.h, lib/zstd_errors.h, lib/zdict.h, lib/common/…, lib/compress/…,
                                                       lib/decompress/…, lib/dictBuilder/…}
   Zlib/  Zlib.Build.cs  ThirdParty.json   zlib-1.4/{LICENSE, adler32.c, crc32.[ch], deflate.[ch], inffast.[ch], inffixed.h,
@@ -50,9 +50,10 @@ Core/Source/Runtime/Compression/   Compression.Build.cs  Public/Compression/  Pr
 - 컴파일하지 않는 파일은 넣지 않는다. zstd는 `legacy/ deprecated/`, `zstdmt_compress.c threading.c debug.c
   huf_decompress_amd64.S`를 뺀 27개 번역 단위(frame 압축·해제 22개와 사전 학습용 `dictBuilder/`의 `cover.c fastcover.c
   zdict.c divsufsort.c`·`common/pool.c` 5개, 헤더 `pool.h threading.h`도 넣는다. 11.6절), zlib은 `gz*.c compress.c uncompr.c
-  infback.c`를 뺀 8개, LZ4는 `lz4frame* lz4file* xxhash*`를 뺀다.
+  infback.c`를 뺀 8개, LZ4는 `lz4file*`와 `lz4frame_static.h`(12.2절)를 뺀다.
 - LZ4는 Rocks 글루 `Lz4Unity.c`(`#include "lz4.c"` 다음 `#include "lz4hc.c"`) 한 번역 단위로 빌드한다. upstream이 지원하는
-  방식(`LZ4_SRC_INCLUDED`)이며 이렇게 하면 `lz4hc.c`의 `-Wunused-function` 억제 분기가 비활성이다.
+  방식(`LZ4_SRC_INCLUDED`)이며 이렇게 하면 `lz4hc.c`의 `-Wunused-function` 억제 분기가 비활성이다. `lz4frame.c`·`xxhash.c`는
+  따로 컴파일한다(합본에 넣을 수 없는 이유는 12.2절).
 
 ### 3.2 manifest(`ThirdParty.json`) — 단일 출처
 
@@ -108,8 +109,10 @@ Core/Source/Runtime/Compression/   Compression.Build.cs  Public/Compression/  Pr
 
 | 라이브러리 | 정의 | 이유 |
 |---|---|---|
-| LZ4 | `LZ4_STATIC_LINKING_ONLY_DISABLE_MEMORY_ALLOCATION` | 할당 API를 컴파일 단계에서 제거(남은 할당 경로는 컴파일 오류). adapter는 상태를 직접 할당한다 |
-| LZ4 | `LZ4LIB_VISIBILITY=` | ELF·Mach-O에서 `visibility("default")` 강제 해제(Android `.so` 심볼 노출 방지) |
+| LZ4 | `LZ4_STATIC_LINKING_ONLY_DISABLE_MEMORY_ALLOCATION` | lz4.c·lz4hc.c의 할당 API를 컴파일 단계에서 제거(남은 할당 경로는 컴파일 오류). adapter는 상태를 직접 할당한다. lz4frame.c는 자기 할당 매크로를 쓰므로 아래 정의로 막는다 |
+| LZ4 | `LZ4_USER_MEMORY_FUNCTIONS` | lz4frame.c의 기본 할당 경로(사용자 할당기가 없을 때)를 `Lz4Unity.c`의 `LZ4_malloc`·`LZ4_calloc`·`LZ4_free`로 보낸다. 이 함수들은 NULL을 돌려주므로 그 경로를 타면 CRT 대신 할당 실패가 된다(12.2절). lz4.c는 위 정의 분기가 먼저라 영향이 없다 |
+| LZ4 | `LZ4LIB_VISIBILITY=`, `LZ4FLIB_VISIBILITY=` | ELF·Mach-O에서 `visibility("default")` 강제 해제(Android `.so` 심볼 노출 방지). 뒤의 것은 `lz4frame.h` |
+| LZ4 | `XXH_NAMESPACE=LZ4_` | LZ4가 들고 있는 xxHash 0.6.5 심볼을 `LZ4_XXH32` 등으로 바꾼다. zstd는 자기 `xxhash.h`에서 `ZSTD_` 접두사를 정하므로 함께 링크해도 겹치지 않는다(12.2절) |
 | zstd | `ZSTD_DISABLE_ASM=1` | `.S` 없이 모든 플랫폼 같은 C 경로. 잃는 것은 Android x86_64의 asm Huffman 해제뿐 |
 | zstd | `ZSTD_TRACE=0`, 멀티스레드·legacy 미정의 | ELF weak symbol trace 비활성, 단일 스레드, 구형 형식 제외 |
 | zstd | `ZSTDLIB_VISIBLE=`, `ZSTDERRORLIB_VISIBLE=`, `ZDICTLIB_VISIBLE=` | 심볼 노출 해제(위와 같음). `ZDICTLIB_STATIC_API`는 DLL 정의가 없으면 `ZDICTLIB_VISIBLE`로 정해지므로 따로 주지 않는다 |
@@ -121,7 +124,9 @@ Core/Source/Runtime/Compression/   Compression.Build.cs  Public/Compression/  Pr
 | zlib(Windows 외) | `HAVE_HIDDEN` | 내부 심볼 hidden |
 
 `Z_SOLO`·`Z_PREFIX`·`Z_U4`·`Z_U8`, zstd의 visibility 정의와 `ZSTD_STATIC_LINKING_ONLY`·`ZDICT_STATIC_LINKING_ONLY`(fastCover 학습 API), LZ4의 `LZ4_HC_STATIC_LINKING_ONLY`·
-`LZ4_STATIC_LINKING_ONLY_DISABLE_MEMORY_ALLOCATION`·`LZ4LIB_VISIBILITY=`는 adapter에도 같은 값으로 준다(`consumerDefines`).
+`LZ4_STATIC_LINKING_ONLY_DISABLE_MEMORY_ALLOCATION`·`LZ4LIB_VISIBILITY=`·`LZ4F_STATIC_LINKING_ONLY`(사용자 할당기 frame 문맥)·
+`LZ4FLIB_VISIBILITY=`는 adapter에도 같은 값으로 준다(`consumerDefines`). `lz4frame.c`는 `LZ4F_STATIC_LINKING_ONLY`를 스스로
+정의하므로 라이브러리 정의에는 넣지 않는다.
 같은 이름이 라이브러리 정의에도 있으면 값이 같아야 한다(manifest 리더가 확인). `LZ4_STATIC_LINKING_ONLY`는 `lz4hc.h`가
 `LZ4_HC_STATIC_LINKING_ONLY`일 때 스스로 정의하므로 명령줄로 주지 않는다(값이 다르면 재정의 경고). LZ4 HC 확장 상태 API는
 1.11의 실험 API이므로 manifest `notes`에 고정 사유를 남긴다.
@@ -149,9 +154,10 @@ Core/Source/Runtime/Compression/   Compression.Build.cs  Public/Compression/  Pr
 ### 3.6 외부 원본 내부의 진단 지시문 (2026-11-12 승인, [경고 정책](CompilerDiagnostics.ko.md)에 반영)
 
 원본에는 다음 진단 지시문이 있다: zstd `compiler.h`(MSVC 4100·4127·4204·4214·4324), `xxhash.h`(4127, once 4606),
-`huf_compress.c`(4127), LZ4 `lz4.c`(4127·6237·6239·6240·6326, push/6385/pop), zlib `deflate.c`(push/4127/pop),
+`huf_compress.c`(4127), LZ4 `lz4.c`(4127·6237·6239·6240·6326, push/6385/pop)·`lz4hc.c`(GCC·clang `-Wunused-function`, 합본에서
+비활성)·`lz4frame.c`(4127)·`xxhash.c`(4127), zlib `deflate.c`(push/4127/pop),
 `zstd.h`(clang push/`-Wzero-as-null-pointer-constant`/pop). **clang-cl은 일부 MSVC 번호를 clang 진단에 매핑해 실제로
-따른다**(4100 → `-Wunused-parameter` 확인). 그래서 원본의 진단 지시문을 모두 지운 사본을 같은 프로필로 컴파일했다. 결과는
+따른다**(4100 → `-Wunused-parameter` 확인). 전체 목록은 각 manifest의 `pragmaDirectives`가 기준이다. 그래서 원본의 진단 지시문을 모두 지운 사본을 같은 프로필로 컴파일했다. 결과는
 clang-cl `/W4 /WX`(`/Od`·`/O2`)와 GNU식 `-Wall -Wextra -Wpedantic -Werror`(`-O0`·`-O2`) 모두 경고 0이었다. 즉 이
 버전·프로필에서 실제로 가리는 경고는 없다.
 
@@ -178,8 +184,8 @@ clang-cl `/W4 /WX`(`/Od`·`/O2`)와 GNU식 `-Wall -Wextra -Wpedantic -Werror`(`-
 ```cpp
 namespace rocks {
 
-// 프로세스 안 식별용이다. 영속 포맷에 기록할 때는 상위 포맷이 별도 ID를 정한다.
-enum class CompressionFormat : uint8 { Lz4, Zstd, Deflate, Zlib, Gzip };
+// 프로세스 안 식별용이다. 영속 포맷에 기록할 때는 상위 포맷이 별도 ID를 정한다. 새 형식은 끝에 덧붙인다.
+enum class CompressionFormat : uint8 { Lz4, Zstd, Deflate, Zlib, Gzip, Lz4Frame };
 
 struct CompressionLevelRange {
     int32 minimum;
@@ -187,8 +193,8 @@ struct CompressionLevelRange {
     int32 defaultLevel;
 };
 
-// Lz4 {1, 12, 1}: 1 = fast(acceleration 1), 2 = lz4mid, 3–9 = HC, 10–12 = HC optimal parser.
-// Zstd {1, 19, 3}. Deflate·Zlib·Gzip {0, 9, 6}(0 = stored). 모르는 형식은 InvalidArgument.
+// Lz4·Lz4Frame {1, 12, 1}: 1 = fast(acceleration 1), 2 = lz4mid, 3–9 = HC, 10–12 = HC optimal parser.
+// Zstd {1, 22, 3}(20–22 ultra). Deflate·Zlib·Gzip {0, 9, 6}(0 = stored). 모르는 형식은 InvalidArgument.
 Result<CompressionLevelRange> TryGetCompressionLevelRange(CompressionFormat format) noexcept;
 
 // 검증된 형식·수준 쌍이다.
@@ -255,9 +261,11 @@ public:
     mtime 0·OS 255·이름·주석·extra·FHCRC 없음을 다시 적용한다(zlib 1.4 `deflateResetKeep`이 헤더를 지우고, 기본 OS 코드는
     플랫폼마다 다르다).
   - zstd: checksum과 content size를 켠다. 사전 ID는 사전 문맥만 기록한다(11절).
+  - LZ4 frame: 12.1절 설정을 고정한다. 일회성 결과는 64KiB를 넘는 입력에서 upstream `LZ4F_compressFrame`과 같은 byte다.
   - 동기·비동기는 같은 내부 구현과 같은 chunk 상수를 쓴다.
   - 테스트가 고정 입력의 압축 결과 CRC-32를 golden으로 고정한다. 버전을 올릴 때는 의도적으로 갱신한다.
-- **무결성**: Zstd는 content checksum(XXH64 하위 32bit), Zlib은 Adler-32, Gzip은 CRC-32·ISIZE를 검사한다. Lz4 raw block과
+- **무결성**: Zstd는 content checksum(XXH64 하위 32bit), Zlib은 Adler-32, Gzip은 CRC-32·ISIZE, Lz4Frame은 content
+  checksum(XXH32)·기록된 원본 크기·(있으면) 블록 checksum을 검사한다. Lz4 raw block과
   Deflate raw는 무결성 검사가 없어 손상이 "성공한 다른 데이터"로 보일 수 있다. 체크섬 형식도 의미 없는 bit(zstd 프레임
   헤더의 미사용 bit, deflate 마지막 byte의 padding, FHCRC 없는 gzip의 MTIME·XFL·OS)는 바꿔도 같은 결과로 성공할 수 있다.
   따라서 계약은 "손상은 실패하거나, 성공하면 원본과 같은 출력"이다.
@@ -268,7 +276,7 @@ public:
 |---|---|
 | destination 또는 `maxOutputBytes` 부족 | CapacityExceeded |
 | 손상·절단·체크섬 불일치·스트림 뒤 남는 byte(Lz4 제외)·빈 해제 입력·범위 밖 수준·겹침·Lz4 입력 한계 초과 | InvalidArgument |
-| 문맥에 없거나 다른 사전이 필요한 입력: zlib 프리셋 사전(FDICT, `Z_NEED_DICT`), 사전 ID가 다른 zstd frame(`dictionary_wrong`), 형식 사전 문맥에 사전 ID 없는 frame, 블록 컨테이너의 사전이 후보에 없음 | Unsupported |
+| 문맥에 없거나 다른 사전이 필요한 입력: zlib 프리셋 사전(FDICT, `Z_NEED_DICT`), 사전 ID가 다른 zstd frame(`dictionary_wrong`), 형식 사전 문맥에 사전 ID 없는 frame, 사전 ID를 기록한 LZ4 frame, 블록 컨테이너의 사전이 후보에 없음 | Unsupported |
 | zstd frame의 window가 구현 상한(2^31)을 넘음(RFC상 유효, 일회성·스트림·사전 ID 조회 모두) | Unsupported |
 | 할당 실패(`Z_MEM_ERROR`·`memory_allocation` 포함) | OutOfMemory |
 | 크기 산술 overflow, `deflateBound_z`의 `(z_size_t)-1` | Overflow |
@@ -282,6 +290,7 @@ public:
     (255 × 입력 + 상수)에 이르렀으면 InvalidArgument, 아니면 CapacityExceeded다. raw block에는 끝 표지가 없으므로 "남는
     byte" 검사는 하지 않는다.
   - int 경계: source가 `Lz4MaxInputBytes`를 넘으면 InvalidArgument, destination 용량은 `INT_MAX`로 자른다.
+- **Lz4Frame**: 12.3절(일회성)·12.4절(스트림). 64KiB 블록으로 나누므로 입력 한계가 없다.
 - **Zstd**
   - 압축: `ZSTD_CCtx`에 수준·checksum·content size를 고정한다. pledged size와 `ZSTD_c_stableInBuffer`를 쓰고 입력을 일정
     chunk씩 늘려 주는 스트림 루프로 처리한다(비동기 취소 지점, 동기와 같은 구현).
@@ -306,9 +315,9 @@ public:
   - Gzip 연속 member: RFC 1952대로 모두 해제한다(`inflateReset`). member 사이·뒤의 쓰레기와 0 padding은 거부한다.
   - Gzip 헤더: FEXTRA·FNAME·FCOMMENT·FHCRC를 받고, 틀린 FHCRC와 예약 FLG는 거부한다.
   - zlib 1.4부터 raw deflate가 출력 버퍼를 정확히 채우면 `Z_STREAM_END`를 반환한다. 이를 정상으로 처리한다.
-- **수준과 메모리**: zstd 수준 19의 압축 문맥은 큰 입력에서 수십 MiB를 쓰고(ultra 20–22는 수백 MiB라 제외), LZ4 HC 확장
-  상태는 약 320KiB, zlib deflate는 약 256KiB, inflate는 약 40KiB, zstd 해제 문맥은 약 160KiB다. 정확한 값은 테스트의 계수
-  allocator로 기록한다.
+- **수준과 메모리**: zstd 수준 19의 압축 문맥은 큰 입력에서 수십 MiB를 쓰고(ultra 20–22는 큰 입력·크기를 모르는 스트림에서 수백 MiB), LZ4 HC 확장
+  상태는 약 320KiB, zlib deflate는 약 256KiB, inflate는 약 40KiB, zstd 해제 문맥은 약 160KiB다. LZ4 frame 압축 문맥은 수준
+  1 약 145KiB·HC 약 450KiB, 해제 문맥은 약 256KiB다(12.3절). 정확한 값은 테스트의 계수 allocator로 기록한다.
 
 ## 5. 비동기 API — `Compression/AsyncCompression.h`
 
@@ -373,8 +382,8 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
     zstd 해제는 stable output 방식이라 입력 1MiB마다 확인한다(압축률이 아주 높은 입력은 한 번의 호출로 큰 출력을 만든다).
   - `IsCancellationRequested`는 scheduler gate를 잡으므로 더 촘촘히 확인하지 않는다.
   - 취소를 관측하면 output 길이를 복원하고 Fail 없이 반환해 Cancelled가 된다.
-  - 취소 가능 경로: zlib 계열 전체, zstd 압축·해제.
-  - 끊지 않는 경로는 LZ4 압축·해제다. LZ4 fast·해제는 수 초 이내지만 HC 12는 약 10–20MB/s여서 2GiB 가까운 입력이면
+  - 취소 가능 경로: zlib 계열 전체, zstd 압축·해제, LZ4 frame 압축(입력 1MiB마다)·해제(입력 소비나 출력 생성 1MiB마다).
+  - 끊지 않는 경로는 LZ4 raw block 압축·해제다. LZ4 fast·해제는 수 초 이내지만 HC 12는 약 10–20MB/s여서 2GiB 가까운 입력이면
     100초 이상 걸린다. `Shutdown`은 worker를 Join하므로 Cancel 모드여도 그만큼 기다린다. 큰 입력은 블록 컨테이너(후속)를
     쓴다.
 - **소멸**: 진행 중인 task의 소멸자는 취소를 요청하고 기다린다. 대기 중인 작업의 취소는 worker가 처리하므로 모든 worker가
@@ -391,12 +400,12 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
 | `get_max_compressed_buffer_size` | `CompressMemoryBound` | `TryGetCompressBound` |
 | `decompress(dst, dst_max, src, size, mode)` | `UncompressMemory` | `TryDecompress` |
 | `decompress_dynamic(vec, max, …)` | — | `TryDecompressAppend`(상한 필수) |
-| 모드 FASTLZ·DEFLATE(실제는 zlib 래퍼)·ZSTD·GZIP·BROTLI(해제) | NAME_Zlib·Gzip·LZ4·Oodle | Lz4·Deflate(raw)·Zlib·Zstd·Gzip |
+| 모드 FASTLZ·DEFLATE(실제는 zlib 래퍼)·ZSTD·GZIP·BROTLI(해제) | NAME_Zlib·Gzip·LZ4·Oodle | Lz4(raw block)·Lz4Frame·Deflate(raw)·Zlib·Zstd·Gzip |
 | 전역 static 수준 설정 | flags(BiasSpeed·BiasSize) | 호출마다 `CompressionSettings` |
 | thread_local zstd 문맥 | — | 명시 `Compressor`·`Decompressor` |
 | — | IoStore 내부 비동기 해제 | `TrySubmitCompress`·`TrySubmitDecompress` |
 | `FileAccessCompressed`(블록·seek) | `FCompressedBuffer` | `CompressedBlocksWriter`·`CompressedBlocksReader`(9절) |
-| `StreamPeerGZIP` | — | `CompressStream`·`DecompressStream`(10절) |
+| `StreamPeerGZIP` | — | `CompressStream`·`DecompressStream`(10절, gzip·zlib·deflate·zstd·LZ4 frame) |
 | — | — (`FCompression`·`FCompressedBuffer`에 사전 인자 없음. 학습 사전은 OodleNetwork 플러그인의 패킷 압축이 쓰고 commandlet이 학습) | `CompressDictionary`·`DecompressDictionary`(11절) |
 
 ## 7. 검증 계획
@@ -448,6 +457,7 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
 | 공용 변경 | `Array::TryAppendUninitialized`(0 채우기 없는 성장), trivial 소멸 타입 축소·`Clear`를 O(1)로(Debug 스트림 시험 9.5초 → 1.1초). 1차 Append 경로도 0 채우기를 없앴다 |
 | 3차(zstd 사전, 11절) | 설계 교차검증 3건(zstd 원본·실측, API·계약·형식, dictBuilder 조사) 뒤 구현. 사전 시험(11.7절)이 Windows x64 Debug·ASan에서 통과. 구현 뒤 독립 검토 2건(수명·동시성·오류 분류, zstd 의미·결정성·형식·시험 공백)의 확정 항목을 반영했다: 이동된 블록 설정이 사전 없이 조용히 다른 결과를 냄, 큰 window frame의 사전 ID 조회 분류, 스트림의 사전 ID·window 검사 순서, 지문이 같고 내용이 다른 후보, 헤더 배치 변경의 version 미갱신(RCBK v2), 문서 오류. 검토가 만든 시험 18개를 저장소로 옮겼고, 사전과 무관한 기존 결함(일회성 zstd 해제가 window 상한 초과 frame을 InvalidArgument로 분류)도 Unsupported로 고쳤다. Foundation 전체 908개 통과(Debug). 표준 경로 등가성은 원본 내부 함수로 1,367만 건, 실측 8,328건을 비교해 반례가 없었다. macOS·Android 실행은 아직 하지 않았다 |
 | 4차(사전 학습, 11.6절) | 설계 교차검증(dictBuilder 원본·실측: 예외 경로 충돌 재현, 기본값 시간·이득 비교) 뒤 구현. 학습 시험 8개와 manifest `licenses` 이전 시험(Policy.ThirdPartyLicenses·ThirdPartySdkLicenses)을 포함해, HEAD 기반 worktree에서 Foundation Debug·ASan 916개, Release 압축 82개, `self` 84개, `native` 95개, 빌드 도구 시험 22개 그룹, 정책·형식 검사가 통과했다. 구현 뒤 독립 검토의 확정 항목(표본 수 상한 1 초과, POSIX 종료 중 mutex 소멸, finalize 헤더 버퍼 초과 분류, 빈 표본 포인터)을 반영했다. 학습 golden은 upstream 원본만으로 빌드한 probe로 Windows x64·Android x86_64에서 같은 byte임을 확인했다. arm64는 아직 확인하지 않았다 |
+| 5차(LZ4 frame, 12절) | 공식 tarball(sha256 일치)의 `lz4frame.[ch]`·`xxhash.[ch]`를 들이고 upstream 원본만으로 빌드한 probe로 설정·호출 순서·할당 경로를 먼저 확인한 뒤 구현했다. 시험 24개(12.6절)를 포함해 HEAD 기반 worktree에서 Foundation Debug·ASan·Release 949개, `self` 84개, `native` 95개(Debug compile DB: 지시문을 지운 `lz4frame.c`·`xxhash.c` 사본 경고 0 포함), 정책·형식·third-party 검사가 통과했다. 일회성 결과는 upstream `LZ4F_compressFrame`과 byte 단위로 같다(수준 1·2·9·12, 1.5MiB). 구현 뒤 독립 검토 2건(adapter 의미, 시험·문서·manifest)의 확정 항목을 반영했다: 손상된 FLG의 사전 ID bit가 Unsupported로 분류됨(헤더를 LZ4F로 먼저 검증하도록 수정), legacy frame 분류, 기본 할당 경로를 저장소 안에서 막는 `LZ4_USER_MEMORY_FUNCTIONS`, 스트림 경계·상한·수준 2·12·Append 성장 OOM·출력 기준 취소 시험 보강, 문서 수치. Android NDK arm64 문법 검사(지시문 유무 모두)는 경고 0이고, macOS·Android 실행은 아직 하지 않았다 |
 
 처리량(로컬 1회 측정, 1차 때 저장소 밖 임시 벤치): Windows x64 Release(ThinLTO), 단일 스레드, `Compressor`·`Decompressor`
 재사용, 저장소 소스·문서 8.9MiB, 여러 번 중 최고값이다. 기기 사양을 고정한 반복 측정이 아니므로 기준값이 아니라 adapter가 원본
@@ -596,8 +606,8 @@ frame 하나로 압축·해제한다. 사전은 학습하지 않은 raw 내용(�
 ## 10. 스트리밍 `CompressStream`·`DecompressStream` (2차, 교차검증 반영)
 
 전체 크기를 모르거나 메모리에 다 올리지 않는 입력을 조각 단위로 압축·해제한다(Godot `StreamPeerGZIP` 대응. Godot의
-deflate 스트림은 zlib 래퍼라 Rocks `Zlib`에 대응한다). 형식은 Zstd·Deflate·Zlib·Gzip이며, Lz4 raw block은 스트림 형식이
-아니라 Unsupported다(LZ4 frame은 후속). 헤더는 `Compression/CompressionStream.h`다.
+deflate 스트림은 zlib 래퍼라 Rocks `Zlib`에 대응한다). 형식은 Zstd·Deflate·Zlib·Gzip·Lz4Frame이며, Lz4 raw block은 스트림
+형식이 아니라 Unsupported다. LZ4 frame 스트림의 세부 사항은 12.4절이다. 헤더는 `Compression/CompressionStream.h`다.
 
 - 기본 API는 역압이 있는 `TryProcess(input, output) → StreamProgress{consumed, produced, complete}`다. 출력이 모자라면
   오류가 아니라 일부만 소비하고 돌아오므로, 작은 입력 하나가 큰 출력을 한꺼번에 만들지 않는다. `TryWriteAppend`
@@ -611,8 +621,8 @@ deflate 스트림은 zlib 래퍼라 Rocks `Zlib`에 대응한다). 형식은 Zst
   flush를 같은 모드로 다시 부르기를 요구하므로, Flushing에서는 TryFlush만, Finishing에서는 TryFinish만 받는다(그 밖은
   InvalidArgument, 상태 불변). Finished에서 TryFinish는 {0, 0, true}, Process·Flush는 InvalidArgument다.
 - 출력 공간이 0인 호출은 코덱을 부르지 않고 {0, 0, false}다(역압과 같은 의미).
-- 해제: `DecompressStreamLimits{maxOutputBytes(필수, 0이면 InvalidArgument), maxWindowLog = 27(10–31, zlib 계열은
-  범위만 검사)}`.
+- 해제: `DecompressStreamLimits{maxOutputBytes(필수, 0이면 InvalidArgument), maxWindowLog = 27(10–31, zlib 계열과
+  LZ4 frame은 범위만 검사)}`.
   - 출력 누계(member·frame 합)가 상한을 넘으면 CapacityExceeded다(정확히 상한이면 성공). `TryProcess`는 코덱에 주는
     출력 창을 남은 허용량 + 1로 줄여 1byte 초과로 감지한다. `TryWriteAppend`는 output을 남은 허용량까지만 늘리고, 허용량을
     다 쓰면 1byte 임시 창으로 블록 끝·체크섬까지만 진행한다. 그래서 output이 상한보다 길어지지 않는다.
@@ -621,7 +631,7 @@ deflate 스트림은 zlib 래퍼라 Rocks `Zlib`에 대응한다). 형식은 Zst
     검사를 건너뛰므로 adapter가 먼저 막는다.
   - zstd 스트림 해제기는 내부 버퍼에 먼저 풀어 나눠 내보내므로, 이 경로의 `dstSize_tooSmall`은 출력 부족이 아니라 블록이
     frame 정보를 어긴 손상이다. InvalidArgument로 분류한다.
-  - 스트림이 끝난 뒤의 byte: Gzip은 다음 member(inflate가 magic을 직접 검사), Zstd는 다음 frame, Deflate·Zlib은
+  - 스트림이 끝난 뒤의 byte: Gzip은 다음 member(inflate가 magic을 직접 검사), Zstd·Lz4Frame은 다음 frame, Deflate·Zlib은
     InvalidArgument다.
   - `IsAtStreamBoundary()`는 지금까지의 입력이 완결된 스트림(들)인지다. `TryFinish()`는 경계가 아니거나 스트림이 하나도
     없으면 InvalidArgument다(skippable frame만 있으면 성공, 출력 0). 출력은 frame·member 끝의 체크섬을 확인하기 전까지 미검증이다.
@@ -832,3 +842,165 @@ localDict도 내부적으로 수준 없는 CDict라 같은 문제가 있어 기�
   (ASan), 이동된 블록 설정의 사전 유지, window 2^32 frame의 사전 ID 조회(Unsupported).
 - 사전 밖 회귀: window가 구현 상한을 넘는 zstd frame을 일회성 해제(크기를 아는·모르는)에 넣으면 스트림과 같이
   Unsupported다(`CompressionTests.cpp`). 전에는 `ZSTD_findDecompressedSize`가 원인을 하나로 뭉쳐 InvalidArgument였다.
+
+## 12. LZ4 frame (5차)
+
+기준일 2026-11-13. `CompressionFormat::Lz4Frame`은 LZ4 Frame Format 1.6.1(`lz4` CLI·`.lz4` 파일과 호환)이다. `Lz4` raw block은
+원본 크기·체크섬·끝 표지가 없어 스트리밍과 무결성 검사를 할 수 없다. frame은 블록 헤더·endmark·content checksum을 더해 둘 다
+제공하고, 그 대가로 해제가 raw block의 60%대다(12.5절). legacy frame(`lz4 -l`, magic 0x184C2102)은 지원하지 않는다
+(Unsupported). raw block은 블록 컨테이너(RCBK)의 LZ4 블록 형식으로 그대로 둔다(컨테이너가 크기·CRC를
+따로 가진다). enum 값은 끝에 덧붙였다(프로세스 안 식별용이며 영속 값이 아니다). 구현은 `Private/Lz4FrameCodec.cpp`다.
+
+### 12.1 frame 설정
+
+| 항목 | 값 | 근거 |
+|---|---|---|
+| 블록 최대 크기 | 64KiB(`LZ4F_max64KB`) | linked 블록은 앞 64KiB를 참조하므로(LZ4 offset 상한과 같다) 4MiB 블록과 압축률이 거의 같다. 블록 헤더는 64KiB당 4byte(0.006%)다. 해제 문맥은 약 256KiB로 작다(4MiB 블록이면 약 8.1MiB) |
+| 블록 방식 | linked | 독립 블록은 블록마다 history를 잃어 압축률이 떨어진다. 블록 단위 임의 접근은 RCBK가 맡는다 |
+| content checksum | 켬(XXH32) | 무결성. zstd checksum·gzip CRC와 같은 역할이다 |
+| 블록 checksum | 끔 | content checksum이 같은 손상을 잡고, 블록마다 4byte와 XXH32 비용이 든다. 해제는 블록 checksum이 있는 frame도 확인한다 |
+| 원본 크기 | 일회성만 기록 | 해제가 출력을 한 번에 확보한다. 스트림은 크기를 모른다 |
+| autoFlush | 일회성 1, 스트림 0 | 아래 참고 |
+| favorDecSpeed | 0 | 수준 10–12는 압축률 우선 |
+| 수준 | {1, 12, 1}, Rocks 수준 = LZ4F `compressionLevel` | lz4frame.c는 2 미만(`LZ4HC_CLEVEL_MIN`)을 fast(acceleration 1), 2를 lz4mid, 3–9를 HC, 10–12를 optimal parser로 쓴다. `Lz4`와 같은 의미다 |
+| nbWorkers | 0(`LZ4F_MULTITHREAD` 미정의) | 스레드 코드가 컴파일되지 않는다. 병렬은 RCBK·비동기 작업이 맡는다 |
+| 사전 ID | 0 | 사전은 zstd만 지원한다 |
+
+autoFlush는 처음 결정(일회성·스트림 모두 0)에서 일회성만 1로 바꿨다. frame 형식은 같고 압축기 동작만 다르다.
+
+1. `TryGetCompressBound`(= `LZ4F_compressFrameBound`)는 autoFlush 1 기준이다. autoFlush 0이면 1MiB 조각의
+   `LZ4F_compressBound`(블록 하나를 더 센다)가 bound 크기 출력의 남은 공간보다 커서, 조각마다의 성공이 LZ4F 계약 밖(1.11의
+   "출력이 작아도 시도" 동작)에 기댄다. autoFlush 1이면 bound 크기 출력에서 모든 `LZ4F_compressUpdate`가 계약으로 성공한다.
+2. 마지막 부분 블록도 입력 위치에서 바로 압축한다. autoFlush 0은 그 블록을 LZ4F 내부 버퍼로 복사해 압축하므로 history가
+   외부 dictionary가 되고, 결과가 두 버퍼의 주소 배치에 영향받을 여지가 있다. autoFlush 1(`stableSrc`)은 1MiB 조각이 앞 조각
+   바로 뒤에 이어져 한 번에 넣은 것과 같고, 64KiB를 넘는 입력에서 upstream `LZ4F_compressFrame`과 byte 단위로 같다(probe로
+   수준 1·2·9·12 확인, 시험 golden이 그 값이다).
+3. 내부 블록 버퍼가 64KiB 작다(128KiB).
+
+### 12.2 할당과 빌드
+
+- 문맥은 `LZ4F_createCompressionContext_advanced`·`LZ4F_createDecompressionContext_advanced`(`LZ4F_STATIC_LINKING_ONLY`,
+  v1.9.4+)에 Allocator 경유 alloc·free를 넘겨 만든다(calloc은 비워 두면 LZ4F가 alloc 뒤 0으로 채운다). 문맥·LZ4 상태·블록
+  버퍼·flush 단계 버퍼 등 LZ4F의 모든 할당이 이 함수를 거친다.
+- 기본 할당 경로: lz4frame.c는 사용자 할당기가 없으면 기본 할당 함수를 쓴다. 이 경로를 타는 함수는
+  `LZ4F_compressFrame`(HEAPMODE 0에서도 HC 상태를 기본 할당기로 잡는다)·`LZ4F_createCompressionContext`·
+  `LZ4F_createDecompressionContext`·`LZ4F_createCDict`이며 adapter는 부르지 않는다. 저장소 안에서 이를 강제하려고
+  `LZ4_USER_MEMORY_FUNCTIONS`(upstream 설정 지점)로 기본 경로를 `Lz4Unity.c`의 `LZ4_malloc`·`LZ4_calloc`·`LZ4_free`에 연결했다.
+  이 함수들은 NULL을 돌려주므로 실수로 기본 경로를 타면 CRT 할당 대신 `allocation_failed`가 되고 시험에 드러난다. 그래서
+  lz4frame.obj는 CRT 할당 함수를 참조하지 않는다. 남는 CRT 호출은 xxhash.c의 `XXH32_createState`·`XXH64_createState`(사용자
+  할당 설정 지점이 없다)뿐인데 lz4frame.c는 XXH 상태를 문맥 안에 두고 이 함수를 부르지 않는다. probe에서도 같은 감시
+  함수로 adapter와 같은 호출 순서(일회성·스트림·flush·해제)가 기본 경로를 0회 탐을 확인했고, 시험은 계수 allocator로 모든
+  할당이 주입 할당기를 거치고 해제 뒤 0인지 확인한다.
+- 번역 단위: `lz4frame.c`·`xxhash.c`는 `Lz4Unity.c`에 합치지 않고 manifest에 따로 둔다. upstream 합본(`cat lz4.c lz4hc.c
+  lz4frame.c`)에서 lz4frame.c는 lz4.c의 `ALLOC` 매크로를 이어 쓰는데, `LZ4_STATIC_LINKING_ONLY_DISABLE_MEMORY_ALLOCATION`이
+  그 매크로를 컴파일 오류 표지로 바꾸므로 합칠 수 없다(upstream도 이 정의에서는 LZ4F를 지원하지 않는다고 적는다). 따로
+  컴파일한 lz4frame.c는 자기 할당 매크로를 쓰고 lz4.c에서 제거된 할당 API(`LZ4_createStream` 등)를 부르지 않으므로 정의를
+  유지한 채 빌드된다. xxhash.c는 upstream 합본에서도 별도 번역 단위다.
+- xxHash 심볼: LZ4는 xxHash 0.6.5를 들고 있다. `XXH_NAMESPACE=LZ4_`로 심볼을 `LZ4_XXH32` 등으로 바꾼다(llvm-nm 확인). zstd는
+  자기 `xxhash.h`에서 `XXH_NAMESPACE`를 `ZSTD_`로 정하므로 두 라이브러리를 함께 링크해도 겹치지 않고, 앱이 다른 xxHash를
+  링크해도 겹치지 않는다. `XXH_PRIVATE_API`(static inline)도 가능하지만 upstream이 충돌 회피용으로 문서화한 방식은 namespace다.
+- `LZ4FLIB_VISIBILITY=`(라이브러리·adapter), `LZ4F_STATIC_LINKING_ONLY`(adapter만. lz4frame.c는 스스로 정의한다).
+  `lz4frame_static.h`는 `LZ4F_STATIC_LINKING_ONLY`를 정의하고 lz4frame.h를 포함하는 호환 헤더라 consumerDefines로 대신하고
+  들이지 않는다(컴파일하지 않는 파일은 넣지 않는다).
+- 진단 지시문: `lz4frame.c` 49행·`xxhash.c` 124행의 `#pragma warning(disable : 4127)`(`_MSC_VER` 조건)을 manifest에 기록했다.
+  지시문을 지운 사본도 clang-cl `/W4 /WX`(`/Od`·`/O2`)와 Android NDK clang `-Wall -Wextra -Wpedantic -Werror`(`-O0`·`-O2`)에서
+  경고 0이다(`native`의 `ThirdPartyDirectivesHideNoWarnings`가 매 실행 확인).
+
+### 12.3 일회성 계약
+
+- bound: 헤더 19 + 4 × ⌈n / 64KiB⌉ + n + 8(endmark·checksum)이다. 계산 전에 overflow를 거른다. `Lz4MaxInputBytes` 한계가 없다.
+- 압축: `LZ4F_compressBegin`(원본 크기 기록) → 1MiB 조각 `LZ4F_compressUpdate`(`stableSrc`, 조각마다 취소 확인) →
+  `LZ4F_compressEnd`다. 출력이 bound보다 작으면 시도하고 넘치면(헤더·블록·footer 어디서든) CapacityExceeded다. footer가 남은
+  공간을 정확히 채우면 LZ4F는 출력이 남았을 수 있다고 보므로 1byte 예비 창으로 끝을 확인한다. 그래서 정확히 결과 크기인
+  출력은 성공한다. 실패·취소 뒤 남은 frame은 다음 `LZ4F_compressBegin`이 버리므로 재사용 문맥도 새 문맥과 같은 byte다.
+- 해제: 연속 frame과 skippable frame(magic 0x184D2A5X)을 모두 처리한다. frame 시작마다 magic을 확인하고(아니면
+  InvalidArgument, legacy frame은 Unsupported) 헤더 전체(`LZ4F_headerSize`, 7–19byte)만 LZ4F에 먼저 넣어 version·예약 bit·블록
+  크기·헤더 checksum을 검증한다. 검증을 통과한 frame이 사전 ID를 기록했으면 Unsupported다(zstd 사전 ID frame·zlib FDICT와 같은
+  분류). 헤더를 먼저 검증하므로 FLG가 손상된 frame은 사전 frame이 아니라 InvalidArgument다(독립 검토에서 발견해 고쳤다). 입력·출력을 1MiB 단위로 넣으며 취소를
+  확인한다. 출력이 차면 1byte 예비 창으로 계속한다. 1byte라도 나오면 Span은 CapacityExceeded, Append는 출력을 늘린다(상한이면
+  CapacityExceeded). frame 끝(endmark·checksum)만 남았으면 출력 없이 끝나므로 정확히 상한 크기인 결과는 성공한다. 입력을 다
+  넣었는데 frame이 끝나지 않았고 출력 공간이 남았으면 절단(InvalidArgument)이다. frame 뒤 쓰레기는 magic 검사나 절단으로
+  InvalidArgument다.
+- Append 성장: 첫 frame에 기록된 원본 크기(없으면 64KiB)를 min(상한, 입력 × 256 + 64KiB)만큼 먼저 확보하고, 이후에는 예비
+  창에 byte가 나올 때만 두 배씩(최소 64KiB) 늘린다. output 길이는 base + 상한을 넘지 않고, 2^40byte를 선언한 30byte frame도
+  입력에 비례한 만큼만 먼저 잡는다. Span 해제는 `stableDst`(이전 출력이 다음 창 바로 앞에 그대로 있다)로 history 복사를
+  생략한다. Append는 성장 재할당 때문에 쓰지 않는다(LZ4F가 history를 내부 버퍼로 복사한다).
+- 무결성: content checksum(있으면 frame 끝), 블록 checksum(있으면 블록마다), 기록된 원본 크기(frame 끝, `frameSize_wrong`)를
+  확인한다. 원본 크기 필드는 출력 확보 힌트로만 쓰고 믿지 않는다. 헤더 checksum까지 다시 맞춘 거짓 크기도 InvalidArgument다.
+- 오류 대응: `allocation_failed` OutOfMemory, 압축의 `dstCapacity_tooSmall` CapacityExceeded, API 계약 오류(parameter·
+  stage·io 계열) DependencyFailed, 그 밖의 해제 오류(헤더·블록·checksum·크기·GENERIC) InvalidArgument다. 빈 해제 입력은
+  InvalidArgument다.
+- 메모리(계수 allocator로 시험이 상한을 묶는다): 압축 문맥 수준 1 약 145KiB, HC(2–12) 약 450KiB(블록 버퍼 128KiB + LZ4
+  상태), 해제 문맥 약 256KiB(64KiB linked 블록). 첫 frame에서 할당하고, 재사용 문맥은 같은 설정이면 다시 할당하지 않는다.
+
+### 12.4 스트림
+
+- 압축: `TryProcess`는 입력을 64KiB − 1 이하 조각으로 `LZ4F_compressUpdate`에 넣는다. 블록보다 작게 넣으면 LZ4F가 블록을
+  항상 내부 버퍼에서 완성해 압축하므로 결과 byte가 입력 내용과 `TryFlush` 위치로만 정해진다(입력 조각·출력 창 크기·단계 버퍼
+  경유와 무관). 10절의 일반 계약("같은 호출 순서일 때만")보다 강하다. probe에서 upstream에 1byte–1MiB 조각으로 넣어도 같은
+  byte였고, 시험이 출력 창 7–70000byte·입력 조각 1byte–128KiB로 확인한다.
+- 출력 대상: LZ4F 호출 한 번의 최악 출력(헤더 19byte, update는 `LZ4F_compressBound(조각)` = 65548byte, flush·end는
+  `LZ4F_compressBound(0)` = 65548byte) 이상의 창이면 호출자 출력에 바로 쓰고, 아니면 65548byte 단계 버퍼에 쓴 뒤 나눠
+  넘긴다(zlib carry와 같은 방식). 최악 크기 이상을 주므로 LZ4F 호출은 출력 부족으로 실패하지 않는다(실패하면 frame이 무효가
+  된다). flush·end는 한 번에 끝나서 LZ4F 자체의 flush 단계 버퍼는 쓰이지 않는다. 그래서 1byte 창으로도 헤더·블록·flush·
+  finish가 유한한 호출 안에 끝난다.
+- `TryFlush`는 `LZ4F_flush`, `TryFinish`는 `LZ4F_compressEnd`다. 단계 규칙은 10절과 같다(단계 버퍼를 넘기는 중이면
+  Flushing·Finishing). `Reset`은 단계 버퍼를 비우고, 다음 호출의 `LZ4F_compressBegin`이 진행 중인 frame을 버린다. frame에 원본
+  크기를 기록하지 않는다(헤더 7byte). 입력 없이 끝낸 스트림은 15byte 빈 frame이다.
+- 해제: `LZ4F_decompress`가 부분 입력·출력을 직접 처리한다(반환값은 다음 입력 크기 힌트이고 0이면 frame 끝이다). frame
+  시작에서 magic·FLG 5byte로 헤더 크기를 알고 헤더 전체(최대 19byte)를 모아 일회성과 같이 LZ4F로 먼저 검증한다. 쓰레기는 받은
+  byte에서 바로 InvalidArgument, legacy frame과 사전 ID frame은 Unsupported다. frame 뒤 byte는 다음 frame이며 skippable frame만 받아도 `TryFinish`는 성공이다. 출력 누계 상한·
+  sticky 실패·경계 판정은 10절과 같다. `maxWindowLog`는 범위만 검사한다(작업 메모리는 frame 헤더의 블록 크기가 정한다).
+- 메모리: 압축 스트림 수준 1 약 270KiB, HC 약 580KiB(블록 버퍼 192KiB + 단계 버퍼 64KiB + LZ4 상태), 해제 약 256KiB(4MiB
+  블록 frame은 약 8.1MiB). Reset으로 해제되지 않고 객체 수명 동안 유지한다.
+
+### 12.5 처리량
+
+`CompressionBench --size 16`(합성 16MiB, Release, Windows x64, 같은 기기 1회, 단일 스레드)이다.
+
+| 형식 | 수준 | 압축 비율 | 압축 MB/s | 해제 MB/s |
+|---|---|---|---|---|
+| Lz4(raw block) | 1 / 9 | 0.742 / 0.600 | 1320 / 23.4 | 5702 / 6064 |
+| Lz4Frame | 1 / 9 | 0.740 / 0.600 | 1006 / 23.1 | 3619 / 3949 |
+| Lz4Frame 스트림(64KiB 조각) | 1 | 0.740 | 948 | 2679 |
+
+frame 해제가 raw block보다 느린 차이는 대부분 XXH32 content checksum 계산이다. upstream probe에서 checksum 확인만 끈
+(`skipChecksums`) frame 해제는 raw block 해제와 같은 속도였고, XXH32는 이 기기에서 약 8GB/s였다. 압축률은 64KiB linked 블록이라
+raw block과 거의 같다. 스트림은 64KiB 조각마다 LZ4F 내부 버퍼를 거치므로 일회성보다 느리다.
+
+### 12.6 시험
+
+`Tests/Lz4FrameTests.cpp` 24개(Windows x64 Debug 약 2.0초, ASan 약 3.8초). 독립 자료는 공식 tarball 원본만으로 빌드한
+probe(저장소 밖)가 만들었다.
+
+- 수준·bound·쓰지 않는 용도: 수준 범위, bound 식과 overflow, 사전 생성 Unsupported, 블록 컨테이너 설정·읽기 문맥
+  InvalidArgument, 빈 해제 입력·겹침
+- 왕복: 0·1·1000·64KiB·64KiB+1·1MiB+5byte × 수준 1·2·9·12, Span·Append·문맥 재사용, 정확한 크기 출력의 압축·해제 성공과
+  1byte 부족 CapacityExceeded, 원본 크기 기록
+- 재사용 문맥: 헤더·블록·footer 단계의 출력 부족 뒤에도 자유 함수와 같은 byte
+- 결정성 golden: 일회성 1.5MiB 수준 1·2·9·12(upstream `LZ4F_compressFrame`과 같은 값), 스트림 1.5MiB 수준 1·9(4099byte 조각과
+  중간 flush, 큰 조각·Reset 재사용도 같은 byte), 출력 창·입력 조각을 바꿔도 같은 byte
+- upstream 호환: upstream 기본 설정 frame(checksum·크기 없음, 독립 블록) 해제, adapter 결과 = upstream이 같은 설정으로 만든
+  frame, 4MiB 블록·독립 블록·블록 checksum·비압축 블록이 섞인 upstream frame 해제(1byte 스트림 포함), 블록 checksum 손상,
+  사전 ID frame Unsupported
+- 연속·skippable frame, 출력 상한의 합산, skippable만 있는 입력, 빈 frame
+- 손상·절단·뒤 byte: 모든 길이 절단, 쓰레기·0·magic 앞부분·skippable 앞부분, checksum·헤더 checksum·magic·예약 bit 손상,
+  고정 seed bit flip 600회(실패하거나 원본과 같음)
+- 원본 크기 검사: 헤더 checksum을 다시 맞춘 거짓 크기(66·68), 2^40 선언 frame의 메모리 상한
+- 폭탄: 16MiB 0을 1MiB 상한으로 해제(일회성·스트림, 최고 사용량 < 2MiB)
+- 취소 probe: 압축 입력 1MiB·해제 1MiB마다, Append 길이 복원, 확인 횟수(4MiB의 0을 풀 때 출력 1MiB마다 확인)
+- 비동기 = 동기(Append·Span, 의존 연결)
+- OOM: 할당 시도 위치마다(일회성 압축, 크기를 아는·모르는 frame의 Append 해제와 그 성장, Span 해제, 스트림 생성·쓰기·끝),
+  누수 0, 길이 복원, sticky·Reset 복구
+- 할당 경로: 계수 allocator, 재사용 문맥의 무할당, 문맥 메모리 상한
+- 헤더 검증: FLG 사전 ID bit 손상(일회성·스트림 frame)·version 손상은 InvalidArgument, 헤더가 유효한 사전 ID frame과 legacy
+  frame(단독·정상 frame 뒤)은 Unsupported
+- 스트림: 모든 조각 나누기(1·7·4096byte·1MiB) 왕복, 수준 2·9·12의 조각 무관성, 1byte 창 역압·종료(Append와 같은 byte),
+  flush 뒤 접두 해제(1byte 창 포함), 단계 규칙, 누계 상한·sticky·Reset, 1MiB를 넘는 창의 Process·Flush·Finish, 정확한 상한의
+  TryProcess, 상한 뒤 빈 frame·1byte frame, 여러 번 늘린 뒤 길이 복원, 상한 SIZE_MAX, 이동 대입, 창 = 원본 크기의 한 호출
+  완료, 입력·출력 겹침, 이동된 객체, 절단·경계·쓰레기·magic 앞부분·1byte skippable
+
+### 12.7 후속
+
+- macOS ARM64·Android 실기기 실행(결정성 golden 포함).
+- LZ4·LZ4 frame 사전(`LZ4F_compressBegin_usingCDict`), 독립 블록 선택 설정은 수요가 생기면 다룬다.

@@ -3,8 +3,16 @@
 #include <Compression/Compression.h>
 #include <Compression/CompressionDictionary.h>
 
-// 조각 단위 스트리밍 압축·해제다(Godot StreamPeerGZIP 대응, Docs/Design/Compression.ko.md 10절).
-// 형식은 Zstd·Deflate·Zlib·Gzip이며 Lz4(raw block)는 스트림 형식이 아니라 Unsupported다.
+// 조각 단위 스트리밍 압축·해제다(Godot StreamPeerGZIP 대응, Docs/Design/Compression.ko.md 10·12절).
+// 형식은 Zstd·Deflate·Zlib·Gzip·Lz4Frame이며 Lz4(raw block)는 스트림 형식이 아니라 Unsupported다.
+// 빠른 스트림(로그·네트워크 메시지)은 Lz4Frame, 압축률이 중요하면 Zstd를 쓴다.
+//
+// 사용 예(LZ4 frame으로 메시지를 보내며 메시지마다 flush):
+//   auto stream = CompressStream::TryCreate(
+//       CompressionSettings::TryDefault(CompressionFormat::Lz4Frame).Value(), allocator);
+//   stream.Value().TryWriteAppend(message, wire);   // 64KiB 블록이 차면 압축해 붙인다
+//   stream.Value().TryFlushAppend(wire);            // 여기까지 받은 쪽이 모두 해제할 수 있다
+//   stream.Value().TryFinishAppend(wire);           // endmark·content checksum
 //
 // 사용 예(네트워크에서 받은 gzip 조각을 해제):
 //   DecompressStreamLimits limits;
@@ -47,9 +55,10 @@ struct StreamProgress {
 
 // 압축 스트림이다. 결과 byte는 같은 호출 순서(입력 조각·출력 용량)일 때만 같다. 일회성
 // API와 byte가 같다고 약속하지 않는다(해제 결과는 같다). Deflate 수준 0은 출력 용량에 따라
-// stored block 경계가 바뀐다.
+// stored block 경계가 바뀐다. Lz4Frame은 더 강해서 입력 내용과 TryFlush 위치만 같으면 입력 조각
+// 나누기·출력 창 크기와 무관하게 같은 byte다(frame에 원본 크기를 기록하지 않는다).
 // 메모리: zlib deflate 약 256KiB, zstd는 크기를 모르므로 수준별 표를 최대로 쓴다(수준 19는
-// 약 90MiB).
+// 약 90MiB), Lz4Frame은 수준 1 약 270KiB·HC 약 580KiB(블록 버퍼 192KiB와 작은 창용 64KiB 포함).
 class CompressStream {
 public:
     CompressStream() noexcept = default;
@@ -60,7 +69,8 @@ public:
     CompressStream& operator=(const CompressStream&) = delete;
 
     // sizeHint는 전체 입력 크기 추정치(0 = 모름)다. zstd가 매개변수를 고르는 데만 쓴다(frame에
-    // 기록하지 않는다). 실패: Lz4는 Unsupported, OutOfMemory, DependencyFailed.
+    // 기록하지 않는다. Lz4Frame·zlib 계열은 쓰지 않는다). 실패: Lz4는 Unsupported, OutOfMemory,
+    // DependencyFailed.
     static Result<CompressStream> TryCreate(const CompressionSettings& settings,
                                             Allocator& allocator, uint64 sizeHint = 0) noexcept;
 
@@ -115,7 +125,8 @@ inline constexpr uint32 MaxZstdWindowLog = 31;
 // 해제 한계다. maxOutputBytes는 필수(0이면 TryCreate가 InvalidArgument)이며 Create·Reset 이후 모든
 // frame·member 출력의 누계 상한이다(넘으면 CapacityExceeded, 정확히 상한이면 성공). maxWindowLog는
 // zstd window 상한(작업 메모리 ≈ 2^maxWindowLog)이며 MinZstdWindowLog–MaxZstdWindowLog다. zlib
-// 계열은 window가 32KiB로 고정이라 범위 검사만 하고 쓰지 않는다.
+// 계열은 window가 32KiB로 고정이고, Lz4Frame은 frame 헤더의 블록 크기(64KiB–4MiB)가 작업 메모리를
+// 정하므로(최대 약 8.1MiB) 범위 검사만 하고 쓰지 않는다.
 struct DecompressStreamLimits {
     usize maxOutputBytes = 0;
     uint32 maxWindowLog = 27;
@@ -123,13 +134,17 @@ struct DecompressStreamLimits {
 
 // 해제 스트림이다. 해제 결과는 입력 조각 나누기와 무관하다. 출력은 frame·member 끝의 체크섬을
 // 확인하기 전까지 미검증이다(검증 시점은 IsAtStreamBoundary·TryFinish 성공).
-// - 스트림이 끝난 뒤의 byte: Gzip은 다음 member, Zstd는 다음 frame(skippable 포함),
-//   Deflate·Zlib은 InvalidArgument다.
+// - 스트림이 끝난 뒤의 byte: Gzip은 다음 member, Zstd·Lz4Frame은 다음 frame(skippable 포함),
+//   Deflate·Zlib은 InvalidArgument다. Zstd·Lz4Frame은 frame magic이 아닌 byte를 받은 호출에서 바로
+//   거부한다.
 // - zstd frame의 window(single segment frame은 원본 크기)가 2^31을 넘으면 Unsupported(구현
 //   상한), 2^maxWindowLog만 넘으면 CapacityExceeded(호출자 상한)다. 사전이 필요한 zstd frame·
-//   zlib FDICT는 Unsupported다.
-// - 메모리: zlib inflate 약 40KiB, zstd는 window + 블록 버퍼(Reset으로 해제되지 않고 객체
-//   수명 동안 유지).
+//   zlib FDICT·사전 ID를 기록한 LZ4 frame·LZ4 legacy frame(`lz4 -l`)은 Unsupported다. LZ4 frame
+//   헤더(FLG·BD·헤더 checksum)는 사전 ID를 보기 전에 검증하므로 손상된 헤더는 InvalidArgument다.
+// - 무결성: LZ4 frame은 content checksum이 있으면 frame 끝에서, 블록 checksum이 있으면 블록마다
+//   확인한다. 원본 크기가 기록된 frame은 frame 끝에서 크기도 확인한다.
+// - 메모리: zlib inflate 약 40KiB, zstd는 window + 블록 버퍼, Lz4Frame은 블록 버퍼(64KiB 블록 약
+//   256KiB, 4MiB 블록 약 8.1MiB). 모두 Reset으로 해제되지 않고 객체 수명 동안 유지한다.
 class DecompressStream {
 public:
     DecompressStream() noexcept = default;

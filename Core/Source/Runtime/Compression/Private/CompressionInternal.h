@@ -5,15 +5,17 @@
 #include <Compression/CompressionStream.h>
 
 // 압축 모듈 내부 경계다. 공개 API(Compression.cpp)·비동기(AsyncCompression.cpp)와 코덱
-// adapter(Lz4Codec.cpp· ZstdCodec.cpp·ZlibCodec.cpp) 사이의 계약만 둔다. 외부 코덱 헤더는 각
-// adapter 번역 단위만 포함한다.
+// adapter(Lz4Codec.cpp·Lz4FrameCodec.cpp·ZstdCodec.cpp·ZlibCodec.cpp) 사이의 계약만 둔다. 외부 코덱
+// 헤더는 각 adapter 번역 단위만 포함한다.
 namespace rocks::detail {
 
-// 취소 확인·32bit 길이 분할의 단위다. Deflate·Zlib·Gzip은 입력 소비나 출력 생성이, zstd 압축은 입력
-// 소비가, zstd 해제는 입력 소비가 이만큼 진행될 때마다 취소를 확인한다(zstd 해제는 stable
-// output이라 출력을 나눌 수 없다). Lz4는 한 번의 코덱 호출이다. 동기·비동기가 같은 값을 써야 결과
-// byte가 같다(zstd·deflate 스트림 경계가 이 값에 따른다). zstd 최대 블록 크기(128KiB)의 배수여야
-// 한다(ZstdCodec.cpp의 static_assert).
+// 취소 확인·32bit 길이 분할의 단위다. Deflate·Zlib·Gzip과 LZ4 frame 해제는 입력 소비나 출력 생성이,
+// zstd·LZ4 frame 압축은 입력 소비가, zstd 해제는 입력 소비가 이만큼 진행될 때마다 취소를 확인한다
+// (zstd 해제는 stable output이라 출력을 나눌 수 없다). Lz4 raw block은 한 번의 코덱 호출이다.
+// 동기·비동기가 같은 값을 써야 결과 byte가 같다(zstd·deflate 스트림 경계가 이 값에 따른다). zstd
+// 최대 블록 크기(128KiB)의 배수여야 한다(ZstdCodec.cpp의 static_assert). LZ4 frame 블록(64KiB)의
+// 배수이기도 해서 LZ4 frame 일회성 결과는 입력을 한 번에 넣은 것과 같다(Lz4FrameCodec.cpp의
+// static_assert).
 inline constexpr usize CompressionChunkBytes = usize{1} << 20;
 
 // 코덱 작업 메모리 정렬이다. zstd·zlib·LZ4 상태는 malloc 수준 정렬을 가정한다.
@@ -182,11 +184,36 @@ struct StreamDecodeState {
     bool outputPending =
         false; // 지난 호출이 출력 공간을 다 채웠다(코덱 안에 출력이 남았을 수 있다)
     // zstd: frame 시작에서 헤더를 모아 window를 먼저 검사한다(단일 패스 경로가 상한 검사를
-    // 건너뛰므로).
+    // 건너뛰므로). LZ4 frame: frame 시작의 magic·FLG를 모아 쓰레기와 사전 ID frame을 먼저 거른다.
     bool atFrameStart = true;
     uint32 headerBytes = 0;
     uint8 header[32] = {};
 };
+
+// LZ4 frame(12절). 문맥은 Allocator 경유 사용자 할당기로 만든다(LZ4F_*_advanced).
+namespace lz4frame {
+// TryGetCompressBound의 Lz4Frame 값(LZ4F_compressFrameBound, overflow 검사 포함)이다.
+Result<usize> Bound(usize sourceBytes) noexcept;
+// 일회성 압축 문맥이다(원본 크기 기록, autoFlush).
+Result<void*> CreateCompressor(int32 level, Allocator& allocator) noexcept;
+// 스트림 압축 문맥이다(원본 크기 없음, 작은 출력 창용 단계 버퍼 포함).
+Result<void*> CreateStreamCompressor(int32 level, Allocator& allocator) noexcept;
+void DestroyCompressor(void* codec) noexcept;
+Result<void*> CreateDecompressor(Allocator& allocator) noexcept;
+void DestroyDecompressor(void* codec) noexcept;
+Result<usize> Compress(void* codec, Span<const uint8> source, Span<uint8> destination,
+                       const CompressionProbe& probe) noexcept;
+Result<usize> Decompress(void* codec, Span<const uint8> source, Span<uint8> destination,
+                         const CompressionProbe& probe) noexcept;
+Result<usize> DecompressAppend(void* codec, Span<const uint8> source, usize maxOutputBytes,
+                               Array<uint8>& output, const CompressionProbe& probe) noexcept;
+void ResetStreamCompressor(void* codec) noexcept;
+void ResetStreamDecompressor(void* codec) noexcept;
+Result<StreamProgress> CompressStep(void* codec, Span<const uint8> input, Span<uint8> output,
+                                    StreamFlush flush) noexcept;
+Result<StreamProgress> DecompressStep(void* codec, Span<const uint8> input, Span<uint8> output,
+                                      StreamDecodeState& state) noexcept;
+} // namespace lz4frame
 
 namespace zstd {
 Result<usize> Bound(usize sourceBytes) noexcept;
