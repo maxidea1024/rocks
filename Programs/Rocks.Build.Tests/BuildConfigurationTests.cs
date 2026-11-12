@@ -158,11 +158,17 @@ internal static class BuildConfigurationTests
         }
 
         // release-mixed: ThinLTO 모듈(Game)은 LLVM bitcode object, 최적화를 끈 모듈(Engine)은 native object다.
+        // bitcode는 raw("BC" C0 DE)이거나, Apple clang처럼 Darwin bitcode wrapper(magic 0x0B17C0DE, little-endian
+        // 헤더의 offset 위치에 raw bitcode)로 감싸져 있다.
+        static bool IsRawBitcode(byte[] bytes, int offset) => offset >= 0 && offset + 4 <= bytes.Length &&
+            bytes[offset] == 0x42 && bytes[offset + 1] == 0x43 && bytes[offset + 2] == 0xc0 && bytes[offset + 3] == 0xde;
         static bool IsBitcode(string directory) => Directory.EnumerateFiles(directory).All(path =>
         {
-            byte[] magic = new byte[4];
-            using var stream = File.OpenRead(path);
-            return stream.Read(magic, 0, 4) == 4 && magic[0] == 0x42 && magic[1] == 0x43 && magic[2] == 0xc0 && magic[3] == 0xde;
+            byte[] bytes = File.ReadAllBytes(path);
+            if (IsRawBitcode(bytes, 0))
+                return true;
+            bool wrapper = bytes.Length >= 20 && bytes[0] == 0xde && bytes[1] == 0xc0 && bytes[2] == 0x17 && bytes[3] == 0x0b;
+            return wrapper && IsRawBitcode(bytes, (int)System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(8, 4)));
         });
         string mixedObjects = Path.Combine(root, "configuration-release-mixed", "obj");
         Check(IsBitcode(Path.Combine(mixedObjects, "Game")), "Release ThinLTO module must compile to LLVM bitcode");
