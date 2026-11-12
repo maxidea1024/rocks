@@ -1,5 +1,6 @@
 #include <Core/Math/Color.h>
 
+#include <DeterministicMath/DeterministicMath.h>
 #include <Platform/PlatformMath.h>
 #include <Platform/Memory.h>
 
@@ -11,27 +12,16 @@ using platform::PlatformMath;
 // HSV 변환이 정의되지 않는 입력의 결과로 쓰는 quiet NaN이다.
 constexpr float QuietNaN = PlatformMath::QuietNaN<float>();
 
-// IEC 61966-2-1의 decode 식이다. byte/255와 이후 계산을 double로 수행해 float로 한 번만 반올림한다.
+// IEC 61966-2-1 decode(byte/255)를 가장 가까운 float로 반올림한 값이다. 결정적 수학의 생성 표를
+// 쓴다 (정확한 정수 비교로 만든 표라 플랫폼·CRT와 무관하게 같다).
 float DecodeSrgbChannel(uint8 encodedByte) noexcept {
-    const double encoded = static_cast<double>(encodedByte) / 255.0;
-    if (encoded <= 0.04045) {
-        return static_cast<float>(encoded / 12.92);
-    }
-
-    return static_cast<float>(PlatformMath::Pow((encoded + 0.055) / 1.055, 2.4));
+    return deterministic::SrgbByteToLinear(encodedByte);
 }
 
-// IEC 61966-2-1의 encode 식이다. 포화(NaN → 0 포함)를 먼저 적용하므로 pow에는 [0,1]만 전달된다.
-// encode 결과는 [0,1]이고 반올림 규칙은 QuantizeRound와 같은 0.5 올림이다.
+// IEC 61966-2-1 encode 결과의 0.5 올림(QuantizeRound와 같은 규칙)을 정확히 계산한다. NaN·0 이하는
+// 0, 1 이상은 255다(ColorClampUnit 포화와 같은 결과). 결정적 수학의 경계 표 이분 탐색이다.
 uint8 EncodeSrgbChannel(float linearValue) noexcept {
-    const double linear = detail::ColorClampUnit(linearValue);
-    const double encoded =
-        linear <= 0.0031308 ? linear * 12.92 : 1.055 * PlatformMath::Pow(linear, 1.0 / 2.4) - 0.055;
-
-    // 두 구간 식 모두 0 이상이고 linear = 1의 결과는 double 오차 몇 ulp 안의 1이다. 따라서 scaled는
-    // [0.5, 256) 안에 있고 절사가 반올림(0.5 올림)이며 결과는 uint8 범위다.
-    const double scaled = encoded * 255.0 + 0.5;
-    return static_cast<uint8>(scaled);
+    return deterministic::LinearToSrgbByte(linearValue);
 }
 
 // 결과 Hue를 [0, 360)으로 유지한다. double에서 360 미만이어도 float 변환이 360으로 올릴 수 있고

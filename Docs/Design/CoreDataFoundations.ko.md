@@ -74,12 +74,13 @@ bool IsDefaultIgnorable(char32 codePoint) noexcept;
 
 ### 2.1 범위와 이유
 
-쿠킹 결과는 같은 도구 빌드라면 호스트와 무관하게 같은 바이트여야 한다(AssetSystem 10절). CRT의 `pow`·`exp`·`log`·`sin`은 구현과 CPU 경로(예: UCRT의 FMA3 분기)에 따라 결과가 달라질 수 있다(지금 `LinearColor::ToSRGB`가 이것을 쓴다 — Color.h 주석). 빌드는 이미 `-ffp-contract=off`이고 fast-math를 쓰지 않으며 x87을 쓰지 않으므로, IEEE 기본 연산(+ − × ÷ √, 정수 bit 연산)과 float↔double 변환만 쓰는 구현은 x64·ARM64에서 같은 결과를 낸다. 단 다음 전제를 지킨다.
+쿠킹 결과는 같은 도구 빌드라면 호스트와 무관하게 같은 바이트여야 한다(AssetSystem 10절). CRT의 `pow`·`exp`·`log`·`sin`은 구현과 CPU 경로(예: UCRT의 FMA3 분기)에 따라 결과가 달라질 수 있다(C3 전에는 `LinearColor::ToSRGB`가 UCRT `pow`를 썼다). 빌드는 이미 `-ffp-contract=off`이고 fast-math를 쓰지 않으며 x87을 쓰지 않으므로, IEEE 기본 연산(+ − × ÷ √, 정수 bit 연산)과 float↔double 변환만 쓰는 구현은 x64·ARM64에서 같은 결과를 낸다. 단 다음 전제를 지킨다.
 
-- 부동소수점 환경: 반올림 모드 nearest, 비정규 수 보존(FTZ·DAZ 끔), 예외 trap 꺼짐. 검사는 상태 플래그를 빼고 한다: x64는 `(MXCSR & ~0x3F) == 0x1F80`(bit 0–5는 보통 연산이 켜는 상태 플래그), ARM64는 FPCR의 RMode·FZ·DN·AH·FIZ·NEP와 trap enable 비트가 모두 0. 에디터 프로세스 안에서는 드라이버·미들웨어가 이 값을 바꿀 수 있으므로 PlatformBase에 `FloatingPointEnvironmentGuard`(확인 + 저장·복원)를 추가하고(A0-P 보강) 쿠킹·결정적 계산 작업이 진입할 때 건다.
-- 암묵적 libm 호출 금지: clang-cl x64는 `floor`·`trunc`·`round`·`fmod`와 음수 분기의 `sqrt`를 UCRT 호출로, Android arm64는 `fmod`를 bionic 호출로 만든다(실측). 그래서 Floor·Trunc·RoundHalfEven·지수 조정(ldexp 대응)을 bit 연산으로 직접 구현하고, 모듈에 `-fno-math-errno`를 준다(sqrt가 명령 하나가 된다). Rocks.Build는 compile 인자를 모듈 단위로만 받으므로 결정적 수학은 **별도 모듈 `DeterministicMath`**(Core/Source/Runtime/DeterministicMath, Base에만 의존)로 두어 이 인자와 외부 심볼 검사가 그 모듈에만 걸리게 한다. Core(`LinearColor`)는 이 모듈에 의존한다.
+- 부동소수점 환경: 반올림 모드 nearest, 비정규 수 보존(FTZ·DAZ 끔), 예외 trap 꺼짐. 검사는 상태 플래그를 빼고 한다: x64는 `(MXCSR & ~0x3F) == 0x1F80`(bit 0–5는 보통 연산이 켜는 상태 플래그), ARM64는 FPCR의 FIZ·AH·NEP·trap enable·EBF·FZ16·RMode·FZ·DN·AHP 비트가 모두 0(기능이 없는 CPU에서는 RES0). 에디터 프로세스 안에서는 드라이버·미들웨어가 이 값을 바꿀 수 있으므로 쿠킹·결정적 계산은 PlatformBase의 `RunWithDeterministicFloatingPoint(function, context)` 안에서 실행한다(구현됨). 제어 설정을 기대 값으로 바꾸고 function을 실행한 뒤 제어 설정을 호출 전 값으로 되돌린다(안에서 바뀌었어도). 실행 중 쌓인 상태 플래그는 남긴다.
+  - RAII guard로 하지 않는 이유: compiler는 부동소수점 연산이 환경과 무관하다고 보고(FENV_ACCESS off) 같은 함수 안의 연산을 제어 레지스터 쓰기 앞뒤로 옮기거나 합친다. 검증에서 guard 안의 곱셈이 guard 앞의 FTZ 결과로 합쳐지는 것을 재현했다. `#pragma STDC FENV_ACCESS ON`도 inline된 다른 함수의 연산을 `round.tonearest`/`fpexcept.ignore` constrained 연산으로 바꿀 뿐이라 MXCSR 쓰기를 가로질러 합쳐지고, LLVM은 FTZ 변화를 모델링하지 않는다(clang 21 IR로 확인). 그래서 환경을 바꾼 뒤 inline asm으로 세탁한 함수 포인터(ThinLTO도 대상을 알 수 없다)를 호출해 그 안의 연산이 환경 변경 뒤에만 실행되게 한다.
+- 암묵적 libm 호출 금지: clang-cl x64는 `floor`·`trunc`·`round`·`fmod`와 음수 분기의 `sqrt`를 UCRT 호출로, Android arm64는 `fmod`를 bionic 호출로 만든다(실측). 그래서 Floor·Trunc·RoundHalfEven·2의 거듭제곱 곱(ldexp 대응)을 bit 연산으로 직접 구현하고, sqrt·fmod를 포함한 CRT 수학 함수를 전혀 부르지 않는다(그러면 math-errno 설정과 무관하다 — clang-cl에서 `-fno-math-errno`는 compile 인자 검증이 거부하는 `/clang:` 형태라 쓰지 않는다). 결정적 수학은 **별도 모듈 `DeterministicMath`**(Core/Source/Runtime/DeterministicMath, PlatformBase의 `BitCast`에만 의존)로 두어 외부 심볼 검사가 그 모듈에만 걸리게 한다. Core(`LinearColor`)는 이 모듈에 의존한다.
 - 정수 변환: 범위 밖 값·NaN의 float → int 변환 결과가 x64(0x8000…)와 ARM64(포화)에서 다르므로, 정수 추출은 범위를 먼저 검사하고 shifter 기법(x + 0x1.8p52)으로 한다.
-- `long double` 금지(Android arm64에서는 binary128 soft-float라 compiler-rt를 부른다) — 정책 검사.
+- `long double` 금지(Android arm64에서는 binary128 soft-float라 compiler-rt를 부르고, x86-64 macOS에서는 x87이다) — 정책 검사 `deterministic-math-sources`(아래 2.3).
 - NaN: 기본 NaN 비트가 x64(0xFFF8…)와 ARM64(0x7FF8…)에서 다르고, 두 NaN 피연산자의 결과는 순서에 따른다. 그래서 모든 함수는 출구에서 결과가 NaN이면 고정 quiet NaN(0x7FF8000000000000, float는 0x7FC00000)을 반환한다.
 
 ### 2.2 API(모듈 `DeterministicMath`, `DeterministicMath/DeterministicMath.h`, namespace `rocks::deterministic`)
@@ -88,21 +89,24 @@ bool IsDefaultIgnorable(char32 codePoint) noexcept;
 inline constexpr uint32 Version = 1;   // 결과 비트가 바뀌면 올린다 — 빌드 캐시 키·cookKey에 들어간다
 double Floor(double x) noexcept;  double Trunc(double x) noexcept;  double RoundHalfEven(double x) noexcept;
 double Exp2(double x) noexcept;   double Log2(double x) noexcept;
-double Pow(double base, double exponent) noexcept;   // base ≥ 0만(음수는 고정 NaN). Pow(0, 0) = 1, Pow(0, y<0) = +Inf, Pow(+Inf, y>0) = +Inf, Pow(x, ±0) = 1
+double Pow(double base, double exponent) noexcept;   // base ≥ 0만(음수·−Inf는 고정 NaN). Pow(x, ±0) = Pow(1, y) = 1(NaN 입력 포함), Pow(±0, y<0) = +Inf, Pow(+Inf, y>0) = +Inf
 double SinPi(double x) noexcept;  double CosPi(double x) noexcept;   // sin(πx)·cos(πx)
-double Sin(double x) noexcept;    double Cos(double x) noexcept;     // |x| ≤ 2^20, 넘으면 고정 NaN
 double Sinc(double x) noexcept;   double Lanczos(double x, int lobes) noexcept;   // SinPi로 정의
 double SrgbToLinear(double encoded) noexcept;   double LinearToSrgb(double linear) noexcept;   // IEC 61966-2-1 구간 함수
-double Gamma22ToLinear(double encoded) noexcept;                                             // x^2.2(bUseLegacyGamma)
+double Gamma22ToLinear(double encoded) noexcept;                                             // x^(11/5)(bUseLegacyGamma, 정확한 2.2)
 float SrgbByteToLinear(uint8 value) noexcept;    // 생성 표 256칸(정확히 반올림한 값)
 uint8 LinearToSrgbByte(float linear) noexcept;   // 경계 표 이분 탐색. NaN·0 이하 → 0, 1 이상 → 255
 ```
 
 - 구현:
-  - `SinPi`·`CosPi`: x − RoundHalfEven(2x)/2는 오차 없이 계산되므로 [−¼, ¼]로 정확히 줄인 뒤 고정 계수 다항식. Lanczos·Sinc는 이것을 쓴다(π·x를 먼저 곱하면 정수 근처 0점에서 정확도를 잃는다).
-  - `Sin`·`Cos`: 3단 Cody-Waite π/2 축소(fdlibm 방식, |x| ≤ 2^20) + 다항식. 축소 최악 입력은 생성기가 고정밀 계산으로 찾아 시험에 넣는다.
-  - `Log2`: 128칸 표 + double-double 보정(약 0.52 ulp), `Exp2`: 표 + 다항식, `Pow` = Exp2(y · Log2 x)를 double-double로 이어 계산한다. 오차 상한은 |y · log2 x|에 따라 시험으로 측정해 문서에 표로 기록한다(sRGB 범위 |t| ≤ 8.3에서 목표 2 ulp 이하).
-  - 계수는 16진 실수 리터럴로 고정한다. 정확도와 무관하게 **결과 비트의 결정성**이 계약이다.
+  - `SinPi`·`CosPi`: x − RoundHalfEven(2x)/2는 오차 없이 계산되므로 [−¼, ¼]로 정확히 줄인 뒤 21·22차 Taylor(cos(πx)는 4분면 번호를 하나 옮겨 sin으로). 0의 부호는 IEEE 754-2019 권고(sinPi(±n) = ±0, cosPi(n + ½) = +0). Lanczos·Sinc는 이것을 쓴다(π·x를 먼저 곱하면 정수 근처 0점에서 정확도를 잃는다). Lanczos는 |x| ≥ L/2에서 창 함수 분자를 sin(π(L − |x|)/L)로 계산한다(L − |x|는 Sterbenz로 정확 — 지지 경계 근처의 상대 오차 증폭을 없앤다).
+  - 일반 `Sin`·`Cos`는 쓰는 곳(텍스처 파이프라인은 SinPi만 쓴다)이 생길 때 3단 Cody-Waite π/2 축소(fdlibm 방식)로 추가한다.
+  - 정밀도가 필요한 곳은 오차 없는 변환(Knuth TwoSum, Dekker 분할 곱 — FMA 없이 기본 연산만)으로 두 double의 합(double-double)을 쓴다.
+  - `Log2`: 지수와 m ∈ (√½, √2]로 나누고 f = m − 1(정확), s = f/(2 + f)를 double-double로 나눈 뒤 ln m = 2s + (2/3)s³ + 2s·s⁴·(1/5 + s²/7 + …)의 앞 두 항을 double-double로, 나머지를 double로 계산한다(상대 오차 약 2^−66). 1/ln2도 double-double 상수.
+  - `Exp2`(double-double 지수 t): n = RoundHalfEven(t.hi), r = t − n(정확), a = r·ln2(double-double), e^a = 1 + a + a²·Q(a)(Q는 18차 Taylor)에서 큰 항을 정확히 더하고 작은 항을 모아 한 번 반올림한 뒤 2^n을 곱한다(정규 결과는 정확, 비정규 결과는 한 번 더 반올림).
+  - `Pow` = Exp2(y · Log2 x)를 지수까지 double-double로 계산한다(|y·log2 x|가 1100을 넘으면 +Inf·0이 확실). sRGB 함수는 상수 0.055·1.055와 밑 (x + 0.055)/1.055를 double-double로, 지수는 정확한 12/5·5/12로 계산하고, LinearToSrgb는 거듭제곱을 double-double로 남겨 1.055·p − 0.055의 상쇄가 오차를 키우지 않게 한다. Gamma22는 정확한 11/5 지수.
+  - 계수는 1/n!·1/(2k+1)을 컴파일 시점 IEEE 나눗셈으로 만든 상수다(clang의 상수 접기는 대상과 무관하다). ln2·1/ln2·0.055·1.055(각 hi·lo)·π·√2는 비트 패턴으로 고정한다. 정확도와 무관하게 **결과 비트의 결정성**이 계약이다.
+  - 정확도(가장 가까운 double까지의 비트 거리, 2.3의 생성 기준값 표로 시험): 상한 Exp2·Log2 1, Pow·SinPi·CosPi·sRGB·Gamma22 2(비정규 결과는 1 더). 측정 최대: Log2 0, 나머지 모두 1(교차검증에서 찾은 최악 입력 — 예: Pow(0.77…, 2701.28…) 이전 9 ulp — 포함).
 - 표 생성(`Rocks.ToolTests math-tables --root . [--write]`, 정책 검사로 갱신 여부 확인): x^2.4·x^(1/2.4)·x^2.2는 유리수가 아니므로 반올림 경계 판정을 정수 비교로 한다. 지수 12/5이면 후보 값 m에 대해 m^5와 q^12를 BigInteger 분수로 정확히 비교한다(2.2 = 11/5, 1/2.4 = 5/12도 같은 방식).
   - `SrgbByteToLinear` 표: decode(k/255)를 정확히 반올림한 float.
   - `LinearToSrgbByte` 경계: t_k = decode((k + 0.5)/255)(부호화 공간의 중간점 — AssetSystem 12.2절의 round-half-up 양자화와 같다)이고, 표에는 t_k 이상인 가장 작은 float를 저장한다(가장 가까운 float가 아니다). 그래서 8비트 경로는 정확한 반올림이고, 16비트·float 경로(`LinearToSrgb`)는 근사 Pow를 쓰는 다른 의미다(문서화).
@@ -110,12 +114,16 @@ uint8 LinearToSrgbByte(float linear) noexcept;   // 경계 표 이분 탐색. Na
 
 ### 2.3 시험
 
-- 기준값: 각 함수의 고정 입력 표(범위 경계·특수값·고정 시드 PCG32 표본 수천 개)의 출력 비트를 저장하고, Windows x64·macOS arm64(CI)·Android arm64(arm64 기기 또는 arm64 호스트 — x64 에뮬레이터는 해당 없음)에서 같은지 본다. float 입력 함수(`LinearToSrgbByte`)는 2^32 전수 출력의 SHA-256을 호스트끼리 비교한다.
-- 정확도: C#에서 BigInteger 고정밀 계산(급수·유리수)으로 만든 참값과의 ulp 차이를 재서 표로 기록한다.
-- 버전 강제: 기준값 표의 SHA-256을 `Version`과 함께 시험에 고정해, 결과가 바뀌었는데 Version을 올리지 않으면 실패한다.
-- 외부 심볼 허용 목록(정책 검사, 이 단계가 소유): Development 구성의 `DeterministicMath` 모듈 기계어 오브젝트(Release ThinLTO bitcode는 backend libcall이 보이지 않으므로 대상이 아니다)에 툴체인의 `llvm-nm`을 돌려 외부 심볼이 허용 목록(Base 심볼)뿐인지 본다. 회귀: aarch64에서 `a*b+c`가 fmadd가 되지 않는지.
-- 환경 guard: FTZ를 강제로 켠 상태에서 guard가 바로잡고 결과가 기준값과 같은지.
-- `LinearToSrgbByte(SrgbByteToLinear(b)) == b`(256값), 단조성, 경계 바로 아래·위 값.
+- 기준값: 범위 경계·특수값·정확한 경우(비정규 포함 2^n의 Exp2·Log2, 정수·반정수의 SinPi·CosPi와 0의 부호, Pow 특수값, Lanczos 비트 대칭 등)는 개별 시험으로, 나머지는 아래 digest로 고정한다. 같은 foundation 시험이 Windows x64·macOS arm64(CI)·Android arm64(arm64 기기 — x64 에뮬레이터는 해당 없음)에서 돌므로 호스트 사이 비트 비교가 된다. Windows는 Debug와 Release(ThinLTO)의 digest가 같음을 확인했다. float 입력 함수(`LinearToSrgbByte`)는 float 비교만 하고 반올림이 없어(경계 표의 이분 탐색) 구성상 호스트와 무관하다(교차검증에서 2^32 전수를 기본 환경과 FTZ+DAZ+RZ 환경에서 비교해 차이 0).
+- 정확도: `Rocks.ToolTests math-tables`가 BigInteger 400비트 고정소수점으로 계산한 기준값 표(`Tests/DeterministicMathReference.generated.h` — 함수별 고정 시드 xorshift 표본 150–230개와 교차검증의 최악 입력, 정책 검사로 갱신 여부 확인)와 비교해 2.2의 상한을 검사한다. 생성기 값은 Python decimal 독립 계산과 대조했다.
+- 버전 강제: 모든 함수와 분기(비정규 결과·입력, |x| ≥ 2^52의 SinPi·CosPi, 여러 lobes, 범위 밖 sRGB, Gamma22·Sinc, byte 표 256칸, LinearToSrgbByte)를 덮는 고정 시드 LCG 표본 4096개의 출력 비트 FNV-1a digest와 비정규 결과 digest를 `Version`과 함께 시험에 고정한다(`DeterministicMath_GoldenDigest`). 결과가 바뀌었는데 Version을 올리지 않으면 실패한다.
+- 소스 정책(`deterministic-math-sources`, `Policy.DeterministicMathSources`): Private은 생성 표·자기 공개 헤더·`Platform/Memory.h`·`Base/Types.h`만 include한다(PlatformMath·CRT 수학 헤더는 header inline 근사 명령을 끌어와 외부 심볼에 보이지 않는다). 공개 헤더는 `Base/Types.h`만 include하고 함수 본문을 두지 않는다. long double을 쓰지 않는다.
+- 오브젝트 검사(`DeterministicMathObjectCheck`, 도구 시험 `Native.DeterministicMathObjects`, Android 교차 빌드에서는 host 전용 `objects` 명령): 이번 구성의 compile DB에서 `DeterministicMath/Private` 번역 단위 오브젝트를 찾는다. Release ThinLTO bitcode는 compiler 옆 clang으로 `-O2 -x ir` 기계어를 만든 뒤 검사한다(backend가 libcall·명령을 고르기 전이라 bitcode로는 볼 수 없다). 도구는 compiler 옆 → PATH → (macOS) Xcode `nm`·`objdump` 순으로 찾는다.
+  - 외부 심볼(`llvm-nm -u -j`)이 코드 생성 지원 심볼뿐인지: `_fltused`·`/GS` cookie·`__chkstk`(`__chkstk_darwin`)·stack protector·`memcpy`/`memmove`/`memset`·`bzero`(Darwin), Asan 구성이면 sanitizer 계측(`__asan_` 등)과 Darwin의 module dtor 등록 `__cxa_atexit`·`__dso_handle`. CRT 수학 함수와 다른 모듈 함수는 허용하지 않는다. 측정: Windows Debug는 `_fltused`·cookie 2개, O2·Release는 `_fltused`만.
+  - 금지 명령(`llvm-objdump -d`, 아키텍처는 출력의 file format으로): 융합 곱셈-덧셈(x86 `vfmadd…`·`vfnmsub…`, AArch64 `fmadd`·`fnmsub`·`fmla`·`fmls`, SVE `fmad`·`fmsb`), AArch64 근사·보조 명령(`frecpe`·`frsqrte`·`frecps`·`frsqrts`·`frecpx`), x86 근사 명령(`rcp`·`rsqrt` SSE·AVX-512)과 x87 명령. `-ffp-contract=off`가 빠지거나 무시되는 회귀와 근사 명령 유입을 잡는다.
+  - 음성 대조(`Native.DeterministicMathObjectsNegativeControl`): `sin` 호출과 `__builtin_fma`(x64는 `/arch:AVX2`·`-mfma`)가 든 probe를 같은 compiler로 만들어 두 위반이 모두 보고되는지 본다(도구 출력 형식이 바뀌어 검사가 아무것도 못 보는 경우). 규칙 단위 시험은 `Policy.DeterministicMathObjectRules`.
+- 환경 실행(`FloatingPointEnvironmentTests`·`DeterministicMath_EnvironmentRunRestoresResultsUnderFlushToZero`): FTZ·DAZ·toward-zero 반올림을 켠 상태에서 실행 안의 결과가 기본 환경과 같은 비트이고, 실행 뒤 원래 제어 설정이 돌아오며, 안에서 바꾼 설정도 되돌리고, 중첩되며, x64 상태 플래그는 남는지 본다. 비정규 결과 Exp2 digest는 실행 밖(FTZ)에서 달라져 민감도를 확인한다.
+- `LinearToSrgbByte(SrgbByteToLinear(b)) == b`(256값), 단조성, 모든 경계 t_k와 바로 아래 float의 byte(k + 1·k)와 부호화 값(k + 0.5 이상·미만).
 
 ## 3. JSON(RFC 8259)
 
@@ -164,7 +172,7 @@ uint8 LinearToSrgbByte(float linear) noexcept;   // 경계 표 이분 탐색. Na
 |---|---|---|
 | C1(구현됨) | 데이터 전용 ThirdParty 종류(`kind`·`embeddedIn`·`licenseSource`, 도구·정책·SDK 라이선스 복사·시험), UCD 18.0.0 원본 추가(JSONTestSuite는 C5와 함께) | 정책 검사·self-test·SDK 통합 시험 통과 |
 | C2(구현됨) | Unicode 생성기·표·API, 정책 검사 `unicode-tables` | NormalizationTest 전체(각 열의 IsNormalized 포함), caseless 키 망라 멱등성, CaseFolding·General_Category·Default_Ignorable, 생성기 결정성 |
-| C3 | `DeterministicMath` 모듈·표 생성기·외부 심볼 허용 목록 검사, `LinearColor` sRGB 교체(`FloatingPointEnvironmentGuard`는 A0-P가 PlatformBase에 구현하고 여기서 쓴다) | 기준값·정확도 표·버전 강제·FTZ guard·심볼 검사, macOS arm64 비트 비교 |
+| C3(구현됨) | `DeterministicMath` 모듈·표 생성기(sRGB 표·정확도 기준값)·소스 정책·오브젝트 검사, `LinearColor` sRGB 교체, PlatformBase `RunWithDeterministicFloatingPoint` | 기준값·정확도 표·버전 강제(digest)·환경 실행·오브젝트 검사(음성 대조 포함), macOS arm64 비트 비교(CI의 digest 시험) |
 | C4 | CRT 없는 숫자 변환(파서·최단 표기)과 NumberText·StringBuilder 교체 | .NET 대조·어려운 사례 표 |
 | C5 | JSON 읽기·쓰기 | JSONTestSuite·왕복·고정점·한도·위치 시험 |
 | C6 | RecordList(`WireType::RecordList`) | 형식·예산·실패 원자성 시험 |

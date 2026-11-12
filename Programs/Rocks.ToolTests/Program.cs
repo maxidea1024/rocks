@@ -25,13 +25,18 @@ internal static class Program
                 case "native":
                     NativeTests.Register(suite, options, await NativeEnvironment.CreateAsync(options.Optional("compiler")));
                     break;
+                case "objects":
+                    // host에서 빌드 오브젝트만 검사한다(native 실행 파일이 필요 없다 — Android 교차 빌드용).
+                    NativeTests.RegisterObjectChecks(suite, options, await NativeEnvironment.CreateAsync(options.Optional("compiler")),
+                        options.Required("compile-commands"));
+                    break;
                 case "meta":
                     MetaTests.Register(suite, options, await NativeEnvironment.CreateAsync(options.Required("compiler")));
                     break;
                 case "policy":
                     var failures = PolicyChecks.Runtime(root).Concat(PolicyChecks.PlatformBoundary(root))
                         .Concat(PolicyChecks.SourceWarnings(root)).Concat(PolicyChecks.OptimizationOverrides(root))
-                        .Concat(PolicyChecks.CompilerBuiltins(root)).Concat(UnicodeTables.Check(root))
+                        .Concat(PolicyChecks.CompilerBuiltins(root)).Concat(PolicyChecks.DeterministicMathSources(root)).Concat(UnicodeTables.Check(root)).Concat(MathTables.Check(root)).Concat(NumberTables.Check(root))
                         .Concat(PolicyChecks.PythonFreeMainPath(root)).Concat(PolicyChecks.ThirdParty(root)).ToList();
                     if (options.Optional("compile-commands") is string database) failures.AddRange(PolicyChecks.CompilationDatabase(database));
                     foreach (var failure in failures) Console.Error.WriteLine(failure);
@@ -51,6 +56,21 @@ internal static class Program
                     if (tablesChanged)
                         Console.WriteLine((writeTables ? "updated " : "stale ") + UnicodeTables.OutputPath);
                     return writeTables || !tablesChanged ? 0 : 1;
+                case "math-tables":
+                    // 결정적 수학 모듈의 8비트 sRGB 표와 정확도 기준값 표를 정확한 정수 계산으로 다시 만든다(기본은
+                    // 차이만 보고, --write면 고친다).
+                    bool writeMath = options.Write;
+                    var mathChanged = MathTables.Run(root, writeMath);
+                    foreach (string path in mathChanged)
+                        Console.WriteLine((writeMath ? "updated " : "stale ") + path);
+                    return writeMath || mathChanged.Count == 0 ? 0 : 1;
+                case "number-tables":
+                    // Core 10진 ↔ 2진 변환의 5의 거듭제곱 표를 BigInteger로 다시 만든다(기본은 차이만 보고, --write면 고친다).
+                    bool writeNumbers = options.Write;
+                    bool numbersChanged = NumberTables.Run(root, writeNumbers);
+                    if (numbersChanged)
+                        Console.WriteLine((writeNumbers ? "updated " : "stale ") + NumberTables.OutputPath);
+                    return writeNumbers || !numbersChanged ? 0 : 1;
                 case "format":
                     await FormatCheck.CheckAsync(root, options.Optional("formatter") ??
                         Environment.GetEnvironmentVariable("ROCKS_CLANG_FORMAT") ?? "clang-format");

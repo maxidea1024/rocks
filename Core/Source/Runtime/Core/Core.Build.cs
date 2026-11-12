@@ -4,5 +4,5 @@ using Rocks.Build.Rules;
 public sealed class Core : CoreModuleRules
 {
     protected override string ModuleName => "Core";
-    protected override string[] RequiredModules => ["PlatformBase"];
+    protected override string[] RequiredModules => ["PlatformBase", "DeterministicMath"];
 }

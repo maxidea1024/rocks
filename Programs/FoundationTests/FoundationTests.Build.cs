@@ -13,7 +13,7 @@ public abstract class TestsModule : ModuleRules
     protected enum TestLayer { Core, Foundation, Engine }
 
     // Object 계열이 아닌 런타임 모듈의 테스트다.
-    private static readonly string[] RuntimeTestModules = ["Base", "Core", "PlatformBase", "Task", "Localization", "Serialization", "Compression"];
+    private static readonly string[] RuntimeTestModules = ["Base", "Core", "PlatformBase", "Task", "Localization", "Serialization", "Compression", "DeterministicMath"];
 
     // Object 계열 모듈의 테스트다(FoundationTests·EngineTests에 들어간다).
     private static readonly string[] ObjectTestModules = ["ObjectRuntime", "ObjectSerialization"];

@@ -339,10 +339,10 @@ struct LinearColor {
 
     // ---- sRGB 변환 ----
     // RGB에 IEC 61966-2-1 decode를 적용한다. c = byte/255일 때 c <= 0.04045이면 c/12.92, 아니면
-    // ((c+0.055)/1.055)^2.4다. double로 계산해 float로 한 번 반올림하며 alpha는 변환 없이 /255다.
-    // 256개 byte 모두 ToSRGB로 같은 byte가 된다. 각 byte의 정확값은 float 반올림 경계에서 0.004ulp
-    // 이상 떨어져 있어 플랫폼 pow의 double 오차가 float 결과를 바꾸지 않는다.
-    // UE는 미리 계산한 float 표를 읽으며 그 표는 25개 byte에서 정확 반올림보다 1ulp 작다.
+    // ((c+0.055)/1.055)^2.4다. 결과는 정확한 값을 float로 반올림한 값이며(결정적 수학 모듈의 생성
+    // 표 — 정확한 유리수·정수 비교로 만들어 플랫폼·CRT와 무관하다) alpha는 변환 없이 /255다. 256개
+    // byte 모두 ToSRGB로 같은 byte가 된다. UE는 미리 계산한 float 표를 읽으며 그 표는 25개 byte에서
+    // 정확 반올림보다 1ulp 작다.
     static LinearColor FromSRGB(Color encoded) noexcept;
 
     // RGB를 [0,1]로 포화한 뒤 sRGB encode하고 255배 값을 반올림(0.5는 올림)한다.
@@ -351,8 +351,8 @@ struct LinearColor {
     // 특수값은 채널마다 독립적이다: NaN·음수·-Inf → 0, 1 초과·+Inf → 255.
     // UE ToFColorSRGB는 구간 표 보간 encoder(stb 방식)라서 [2^-13, 1)의 float 입력 중 547,648개에서
     // 정확 반올림과 ±1 다르다. 예: 0x1.3dap-13f는 UE 1, Rocks 0이다. byte round trip은 둘 다
-    // 성립한다. 플랫폼 pow 결과에 의존하므로 반올림 경계에 1e-13 이내로 붙은 입력은 플랫폼마다
-    // 다를 수 있다.
+    // 성립한다. Rocks는 결정적 수학 모듈의 경계 표(정확한 비교로 생성)를 이분 탐색하므로 모든
+    // 입력에서 정확한 반올림이고 플랫폼과 무관하다.
     Color ToSRGB() const noexcept;
 
     // sRGB 변환 없이 네 성분을 clamp(x,0,1)*255의 가장 가까운 정수로 바꾼다(0.5는 올림).

@@ -166,10 +166,26 @@ namespace Rocks.Build.Cli
                             toolchain.Environment, cancellationToken);
                         evidence.RecordStep("foundation-android", [executable, "--seed", "7351", "--json", report], deviceExit,
                             System.Diagnostics.Stopwatch.GetElapsedTime(deviceStart), tests: true);
-                        Console.WriteLine("Android: device tests only; host harness, self, and meta checks were not run.");
+                        Console.WriteLine("Android: device tests and host object checks only; host harness, self, and meta checks were not run.");
                         if (deviceExit != 0)
                         {
                             await evidence.FinishAsync("Android device tests failed.");
+                            return 1;
+                        }
+
+                        // 오브젝트 검사(결정적 수학의 외부 심볼·금지 명령)는 host에서 오브젝트만 읽으므로 Android에서도 돈다.
+                        var objectsCommand = new[] { HostTool(root, "Rocks.ToolTests"), "objects", "--root", root,
+                            "--compile-commands", result.CompilationDatabasePath, "--json", Path.Combine(output, "tool-objects-report.json") };
+                        var objectsStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                        var objects = await ProcessRunner.RunAsync(new("dotnet", objectsCommand, root, toolchain.Environment,
+                            Timeout: TimeSpan.FromMinutes(10)), cancellationToken);
+                        Console.Write(objects.StdOut);
+                        Console.Error.Write(objects.StdErr);
+                        evidence.RecordStep("objects", objectsCommand, objects.ExitCode, System.Diagnostics.Stopwatch.GetElapsedTime(objectsStart),
+                            tests: true);
+                        if (objects.ExitCode != 0)
+                        {
+                            await evidence.FinishAsync("objects checks failed.");
                             return 1;
                         }
                         var androidCompleted = await evidence.FinishAsync();

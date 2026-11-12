@@ -6,6 +6,22 @@ namespace Rocks.ToolTests;
 
 internal static class NativeTests
 {
+    /// <summary>
+    /// 결정적 수학 오브젝트 검사(외부 심볼 허용 목록·금지 명령, CoreDataFoundations.ko.md 2.3)를 등록한다. host에서 오브젝트만
+    /// 읽으므로 Android 교차 빌드에서도 돈다(<c>objects</c> 명령). Release ThinLTO bitcode는 기계어로 만든 뒤 검사한다.
+    /// </summary>
+    public static void RegisterObjectChecks(TestSuite suite, Options options, IReadOnlyDictionary<string, string?> environment,
+        string database)
+    {
+        suite.Add("Native.DeterministicMathObjects", async () =>
+        {
+            var result = await DeterministicMathObjectCheck.VerifyAsync(options.Root, database, environment, options.Asan);
+            Verify.That(result.Failures.Count == 0, string.Join('\n', result.Failures));
+            Verify.That(result.Verified != 0 || !File.ReadAllText(database).Contains("DeterministicMath", StringComparison.Ordinal),
+                "deterministic math objects in the compile database were not verified");
+        });
+    }
+
     public static void Register(TestSuite suite, Options options, IReadOnlyDictionary<string, string?> environment)
     {
         LoggerOutputTests.Register(suite, options, environment);
@@ -364,6 +380,36 @@ internal static class NativeTests
                     }
                 }
             });
+            // 결정적 수학 오브젝트 검사의 음성 대조: CRT sin 호출과 FMA 명령이 든 실제 오브젝트를 이 compiler로 만들어
+            // 두 위반이 모두 보고되는지 본다(도구 출력 형식이 바뀌어 검사가 아무것도 못 보는 경우를 잡는다).
+            suite.Add("Native.DeterministicMathObjectsNegativeControl", async () =>
+            {
+                using TemporaryDirectory fixture = new();
+                string source = Path.GetFullPath(fixture.FilePath(DeterministicMathObjectCheck.SourceDirectory + "/Probe.cpp"));
+                fixture.Write(DeterministicMathObjectCheck.SourceDirectory + "/Probe.cpp",
+                    "extern \"C\" double sin(double);\n" +
+                    "double Probe(double a, double b, double c) { return sin(a) + __builtin_fma(a, b, c); }\n");
+                bool clangCl = Path.GetFileNameWithoutExtension(compiler).Equals("clang-cl", StringComparison.OrdinalIgnoreCase);
+                bool x64 = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture ==
+                           System.Runtime.InteropServices.Architecture.X64;
+                string output = fixture.FilePath(clangCl ? "Probe.obj" : "Probe.o");
+                List<string> arguments = clangCl
+                    ? [compiler, "/nologo", "/Od", "/c", "/TP", source, "/Fo" + output]
+                    : [compiler, "-O0", "-c", "-x", "c++", source, "-o", output];
+                if (x64)
+                    arguments.Insert(1, clangCl ? "/arch:AVX2" : "-mfma");
+                var compiled = await ProcessRunner.RunAsync(new(arguments[0], arguments.Skip(1).ToArray(), fixture.Root, environment,
+                    Timeout: TimeSpan.FromMinutes(2)));
+                Verify.Equal(0, compiled.ExitCode, "probe compile failed: " + compiled.StdErr);
+                fixture.Write("compile_commands.json", JsonSerializer.Serialize(new[] { new { directory = fixture.Root, file = source, output, arguments } }));
+                var result = await DeterministicMathObjectCheck.VerifyAsync(fixture.Root, fixture.FilePath("compile_commands.json"), environment);
+                Verify.Equal(1, result.Verified, "probe object was not verified");
+                Verify.That(result.Failures.Any(failure => failure.Contains("'sin'", StringComparison.Ordinal) ||
+                                                           failure.Contains("'_sin'", StringComparison.Ordinal)),
+                    "CRT sin reference not reported:\n" + string.Join('\n', result.Failures));
+                Verify.That(result.Failures.Any(failure => failure.Contains("forbidden instruction", StringComparison.Ordinal)),
+                    "FMA instruction not reported:\n" + string.Join('\n', result.Failures));
+            });
         }
         if (options.Optional("compile-commands") is string database)
         {
@@ -379,6 +425,7 @@ internal static class NativeTests
                 Verify.That(verified != 0 || !File.ReadAllText(database).Contains("ThirdParty", StringComparison.Ordinal),
                     "third-party translation units in the compile database were not verified");
             });
+            RegisterObjectChecks(suite, options, environment, database);
         }
     }
 }

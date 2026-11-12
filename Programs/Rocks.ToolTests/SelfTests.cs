@@ -108,6 +108,66 @@ internal static class SelfTests
             // 생성기는 결정적이다(두 번 만든 결과가 같은 byte).
             Verify.Equal(UnicodeTables.Generate(options.Root), UnicodeTables.Generate(options.Root), "Unicode table generator is not deterministic");
         });
+        suite.Add("Policy.RepositoryMathTables", () =>
+        {
+            NoFailures(MathTables.Check(options.Root));
+            Verify.Equal(MathTables.Generate(), MathTables.Generate(), "sRGB table generator is not deterministic");
+        });
+        suite.Add("Policy.DeterministicMathSources", () =>
+        {
+            NoFailures(PolicyChecks.DeterministicMathSources(options.Root));
+            using TemporaryDirectory temporary = new();
+            const string module = "Core/Source/Runtime/DeterministicMath";
+            temporary.Write(module + "/Private/Good.cpp",
+                "#include \"SrgbTables.generated.h\"\n#include <DeterministicMath/DeterministicMath.h>\n#include <Platform/Memory.h>\n");
+            temporary.Write(module + "/Public/DeterministicMath/Good.h",
+                "#pragma once\n#include <Base/Types.h>\ninline constexpr uint32 Version = 1;\ndouble Exp2(double x) noexcept;\n");
+            NoFailures(PolicyChecks.DeterministicMathSources(temporary.Root));
+            // PlatformMath(header inline 근사 명령)·CRT 수학 헤더, 확장 정밀도, 공개 헤더의 함수 본문.
+            temporary.Write(module + "/Private/Leak.cpp",
+                "#include <Platform/PlatformMath.h>\n#include <math.h>\nlong  double Wide();\n");
+            temporary.Write(module + "/Public/DeterministicMath/Inline.h",
+                "#pragma once\n#include <Platform/Memory.h>\ninline double Twice(double x) noexcept { return x + x; }\n");
+            var failures = PolicyChecks.DeterministicMathSources(temporary.Root);
+            Verify.Equal(5, failures.Count, "deterministic math source violations: " + string.Join("; ", failures));
+        });
+        suite.Add("Policy.DeterministicMathObjectRules", () =>
+        {
+            // 외부 심볼: 코드 생성 지원 심볼(COFF·ELF·Mach-O 이름)은 허용, CRT 수학·다른 모듈 함수는 거부.
+            foreach (string allowed in new[] { "_fltused", "__security_check_cookie", "__chkstk", "___chkstk_darwin",
+                         "__stack_chk_fail", "___stack_chk_guard", "memcpy", "_memset", "_bzero", "___bzero" })
+                Verify.That(DeterministicMathObjectCheck.IsAllowedSymbol(allowed), "allowed symbol rejected: " + allowed);
+            foreach (string rejected in new[] { "sin", "_sin", "pow", "_exp2", "floor", "fmod", "__exp_finite", "sqrtf", "fma",
+                         "__powidf2", "__imp_sin", "sin@GLIBC_2.2.5", "?Pow@PlatformMath@platform@rocks@@SANNN@Z",
+                         "__ZN5rocks8platform12PlatformMath3PowEdd", "fltused", "__memcpy", "___cxa_atexit", "__asan_init" })
+                Verify.That(!DeterministicMathObjectCheck.IsAllowedSymbol(rejected), "forbidden symbol accepted: " + rejected);
+            // Asan 구성에서만: sanitizer 계측과 Darwin module dtor 등록.
+            foreach (string sanitizer in new[] { "__asan_report_load8", "___asan_init", "___cxa_atexit", "___dso_handle", "__ubsan_handle_add_overflow" })
+            {
+                Verify.That(DeterministicMathObjectCheck.IsAllowedSymbol(sanitizer, sanitizer: true), "sanitizer symbol rejected: " + sanitizer);
+                Verify.That(!DeterministicMathObjectCheck.IsAllowedSymbol(sanitizer), "sanitizer symbol accepted outside Asan: " + sanitizer);
+            }
+            Verify.That(!DeterministicMathObjectCheck.IsAllowedSymbol("_sin", sanitizer: true), "CRT symbol accepted under Asan");
+            // 금지 명령: 융합 곱셈-덧셈(두 아키텍처), AArch64 근사, x86 근사·x87. 아키텍처는 "file format" 줄로 정한다.
+            string arm = string.Join('\n', "probe.o:\tfile format mach-o arm64", "",
+                "  14: fmadd d0, d1, d2, d3", "  18: fnmsub d0, d1, d2, d3", "  1c: fmla v0.2d, v1.2d, v2.2d",
+                "  20: fmla.2d v0, v1, v2", "  24: frsqrte d0, d1", "  28: frecps s0, s1, s2", "  2c: frecpx d0, d1",
+                "0000000000000030 <?Exp2@deterministic@rocks@@YANN@Z>:", "  30: fmul d0, d1, d2", "  34: fadd d0, d0, d3",
+                "  38: fsqrt d0, d1", "  3c: fmov d0, #1.00000000", "  40: fmaxnm d0, d1, d2", "  44: frintn d0, d1",
+                "  48: bl 0x0 <fmla>", "  4c: madd x0, x1, x2, x3");
+            Verify.Equal(7, DeterministicMathObjectCheck.ForbiddenInstructions(arm).Count, "AArch64 forbidden instructions");
+            string x86 = string.Join('\n', "probe.obj:\tfile format coff-x86-64", "",
+                "  10: vfmadd231sd %xmm2, %xmm1, %xmm0", "  14: vfnmadd213ps %ymm1, %ymm2, %ymm3", "  18: rsqrtss %xmm1, %xmm0",
+                "  1c: vrcp14pd %zmm1, %zmm0", "  20: fldt 0x10(%rsp)", "  24: fmulp %st, %st(1)",
+                "  28: mulsd %xmm1, %xmm0", "  2c: addsd %xmm2, %xmm0", "  30: sqrtsd %xmm1, %xmm0", "  34: vpmadd52luq %zmm1, %zmm2, %zmm3",
+                "  38: callq 0x0 <fldt_helper>", "  3c: movq %fs:0x28, %rax");
+            Verify.Equal(6, DeterministicMathObjectCheck.ForbiddenInstructions(x86).Count, "x86 forbidden instructions");
+            // LLVM bitcode(raw·wrapper)는 건너뛰고 COFF·Mach-O·ELF 기계어는 검사한다.
+            Verify.That(DeterministicMathObjectCheck.IsBitcode([0x42, 0x43, 0xC0, 0xDE]), "raw bitcode not detected");
+            Verify.That(DeterministicMathObjectCheck.IsBitcode([0xDE, 0xC0, 0x17, 0x0B]), "bitcode wrapper not detected");
+            foreach (byte[] machine in new byte[][] { [0x64, 0x86, 0x05, 0x00], [0xCF, 0xFA, 0xED, 0xFE], [0x7F, 0x45, 0x4C, 0x46], [0x42, 0x43] })
+                Verify.That(!DeterministicMathObjectCheck.IsBitcode(machine), "machine object treated as bitcode");
+        });
         suite.Add("Policy.UnicodeTablesDetectEdits", () =>
         {
             // 손으로 고친 생성 파일과 없는 파일을 잡는다. 원본은 저장소의 UCD를 그대로 복사한다.
