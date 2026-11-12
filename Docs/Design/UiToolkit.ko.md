@@ -287,7 +287,7 @@ class BoxContainer : public Container {
 
 항목 사이의 선행 관계는 다음과 같다. CU1·CU4는 enum·구조체·배열을 대상으로 하므로 CU8 이후에 확정한다. CU3은 연결 대상이 리플렉션된 함수이므로 CU2 이후다. CU5는 생성 setter의 형태가 정해지는 UD7 이후다. CU6은 같은 저장·Transaction 경로를 쓰므로 CU4·CU5 이후다. CU7은 다른 항목과 독립이다.
 
-자체 언어 Sparks(전체 계획 23절)도 CU2·CU3·CU5를 언어 L1의 선행 조건으로 사용한다. CU3은 별도 이벤트 매크로·타입 없이 Core `MulticastDelegate` 필드에 `ROCKS_PROPERTY(Params = ...)`를 붙여 선언하고 메타 컴파일러가 `FieldKind::Event`로 분류한다. CU5의 변경 통지는 Sparks의 필드 `Changed` 이벤트로 노출한다. 스크립트가 구현하는 interface의 리플렉션 표(CU9)는 [Sparks 언어 설계](SparksLanguage.ko.md)에서 정의한다.
+자체 언어 Sparks(전체 계획 23절)도 CU2·CU3·CU5·CU8을 언어 L1의 선행 조건으로 사용한다. CU3은 별도 이벤트 매크로·타입 없이 Core `MulticastDelegate` 필드에 `ROCKS_PROPERTY(Params = ...)`를 붙여 선언하고 메타 컴파일러가 `FieldKind::Event`로 분류한다. CU5의 변경 통지는 Sparks의 필드 `Changed` 이벤트로 노출한다. 스크립트가 구현하는 interface의 리플렉션 표(CU9)는 [Sparks 언어 설계](SparksLanguage.ko.md) §10.3에서 정의한다.
 
 ## 8. Godot 오라클 검증
 

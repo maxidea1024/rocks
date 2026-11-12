@@ -562,7 +562,7 @@ void Clear(ObjectWriteContext&, AnyObjectRef&) noexcept;
 
 ObjectRef의 raw handle storage를 일반 public copy-assignment로 다른 owner에 복사하지 못하게 한다. generated accessor·GcArray가 owner identity를 알고 barrier를 호출한다. 같은 owner의 GcArray buffer 재배치는 기존 edge를 실패 없이 이전하는 내부 noexcept 연산이다. 다른 owner로의 clone은 remap·검증·barrier를 거친다.
 
-ObjectRef를 stack/native Array에 복사하는 것으로 root가 생성되지는 않는다. MetaCompiler는 reflected Object raw pointer·비추적 reference container를 오류로 판정한다. visitor 없는 custom container는 managed field로 등록할 수 없다. VM stack/root provider는 후속 등록 계약을 사용하며 Foundation에서 VM을 구현할 필요는 없다.
+ObjectRef를 stack/native Array에 복사하는 것으로 root가 생성되지는 않는다. MetaCompiler는 reflected Object raw pointer·비추적 reference container를 오류로 판정한다. visitor 없는 custom container는 managed field로 등록할 수 없다. Sparks VM은 GC root를 제공하지 않으며(전체 계획 23.2절) Foundation에서 VM을 구현할 필요는 없다.
 
 ### 11.3 Borrow와 read phase
 
@@ -1117,7 +1117,7 @@ InputProfileEditor는 Action/Binding/Context 목록, processor parameter propert
 
 개발자 명령 콘솔은 text consumer와 command dispatcher다. 게임 console hardware backend와 별개다. shipping build에서는 명시적으로 허용한 명령만 노출하며 text focus 중 이동·발사 action이 발생하지 않아야 한다.
 
-자체 언어 Sparks(전체 계획 23절, [Sparks 언어 설계](SparksLanguage.ko.md))에는 InputAction 필드(`Action("…")`)와 선언형 연결(`on Jump.Pressed()`), action 값 조회, 유지 자원으로서의 input context, rebinding/profile API를 typed binding으로 제공한다. Blueprint와 시각적 gameplay script graph는 지원하지 않는다. 연결 항목은 session 연결 표의 key와 handler ID만 보유하고 revision lease를 보유하지 않는다. 연결은 구독자 Detach·World 종료·`on` 선언이 바뀌는 reload에서 해제되고 함수 본문 reload에서는 유지된다. action 연결은 session의 InputConsumerScope 안의 action instance에 생성한다. callback은 Input lane에서 바로 VM에 진입하지 않고 gameplay 단계의 event batch로 전달한다. root로 연결 owner를 영구 보존하는 cycle을 만들지 않는다.
+자체 언어 Sparks(전체 계획 23절, [Sparks 언어 설계](SparksLanguage.ko.md))에는 InputAction 필드(`Action("…")`)와 선언형 연결(`on Jump.Pressed()`), action 값 조회, 유지 자원으로서의 input context, rebinding/profile API를 typed binding으로 제공한다. Blueprint와 시각적 gameplay script graph는 지원하지 않는다. 연결 항목은 session 연결 표의 key와 handler ID만 보유하고 revision lease를 보유하지 않는다. 연결 항목은 구독자 Detach, 원천 필드 변경, `on` 선언이 추가·삭제·변경되는 reload, CloseSession에서 삭제되고 Disable에서는 비활성으로 표시되며 함수 본문 reload에서는 유지된다. action 연결은 session의 InputConsumerScope 안의 action instance에 생성한다. callback은 Input lane에서 바로 VM에 진입하지 않고 입력 batch 스크립트 단계(Sparks 언어 설계 §5.4)로 전달한다. root로 연결 owner를 영구 보존하는 cycle을 만들지 않는다.
 
 ## 23. 재생·네트워크·헤드리스 검증
 
@@ -1279,7 +1279,7 @@ fully concurrent GC, lock-free registry, moving/compacting heap, runtime native 
 | Renderer/Audio/Physics | immutable snapshot·backend completion token | 실제 GPU/audio/physics resource manager |
 | UI 툴킷·Editor·Cutscene | schema property·CU1–CU8 리플렉션 계약·transaction·input focus/context | widget layout/render·편집 화면·timeline |
 | Material Editor·Compiler | stable ID·schema·Task·snapshot·module lease | 필수 M3/M4 그래프·preview·instance/function; M5/M6 layer |
-| Custom Language | TypeSchema·typed binding·root provider·weak subscription | VM/compiler/debugger |
+| Custom Language | TypeSchema·typed binding·약한 handle·weak subscription | VM/compiler/debugger |
 | Net/AI/Navigation | quantized command·scheduler·context epoch | replication/prediction·AI runtime·nav query |
 
 머티리얼 에디터는 반드시 구현할 후속 제품 기능이다. 그래프 편집·인스턴스·함수·레이어·native live preview·비동기 compile·DDC/cook를 전체 계획의 14.5–14.9절에 정의한다. Blueprint 제외는 gameplay visual scripting에 적용하며 shader 제작 그래프는 유지한다. C++/커스텀 언어는 parameter API로 재질을 제어한다.
