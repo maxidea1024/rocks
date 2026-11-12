@@ -270,10 +270,13 @@ public:
 
     // handle 객체를 T&로 빌려 function을 호출하고 결과를 돌려준다. function이 void면 Result<void>,
     // Result<X>면 그대로, X면 Result<X>를 반환한다. 대상이 없거나 타입이 다르면 그 오류다.
+    // 호출 동안 이 World의 ObjectAccessScope를 세우므로 다른 Registry 문맥(엔진 hook 등) 안에서
+    // 불러도 된다. function 안에서 다른 World 객체에 접근하려면 그 World의 With를 쓴다.
     template <class T, class Function>
     auto With(ObjectHandle handle, Function&& function) noexcept {
         using Returned = decltype(function(DeclVal<T&>()));
         using Output = typename detail::WithResult<Returned>::Type;
+        ObjectAccessScope scope(Access());
         auto borrowed = objects_.Resolve<T>(Access(), handle);
         if (!borrowed) {
             return Output::Failure(borrowed.Error());

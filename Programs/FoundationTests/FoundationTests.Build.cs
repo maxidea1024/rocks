@@ -22,7 +22,7 @@ public abstract class TestsModule : ModuleRules
     private static readonly string[] EngineTestModules = ["Runtime/Input", "Runtime/World", "Runtime/Engine", "Runtime/AssetRuntime", "Developer/AssetTools"];
 
     // EngineTests가 링크하는 엔진 모듈이다(테스트가 쓰는 최상위 모듈만 둔다. 하위 의존은 전파된다).
-    private static readonly string[] EngineTestDependencies = ["Input", "World"];
+    private static readonly string[] EngineTestDependencies = ["Input", "Engine"];
 
     protected abstract TestLayer Layer { get; }
 
