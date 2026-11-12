@@ -3,233 +3,139 @@ using Rocks.Tooling.Common;
 
 namespace Rocks.Build.Cli;
 
+/// <summary>
+/// 모듈 소유 메타데이터를 생성한다(Docs/Design/ReflectionFoundations.ko.md 1.3–1.7절). 타깃에서 도달하는 메타데이터
+/// 모듈을 의존 순서로 모듈마다 한 번 MetaCompiler로 실행하고, 모든 모듈의 inventory와 명세 집합을 검증한 뒤 생성
+/// 헤더·descriptor를 한 번에 게시한다. 실행 중 산출물은 stage에 두며 의존 모듈은 stage의 descriptor와 생성
+/// 루트를 본다(이전 빌드의 게시본을 보지 않는다).
+/// </summary>
 public static class MetadataRunner
 {
-    public static async Task<int> GenerateAsync(BuildContext context, NativeToolchain toolchain,
-        IReadOnlyList<NativeModuleInput> modules, TargetRules target, string compilerTool,
-        CancellationToken cancellationToken)
+    private static readonly StringComparer PathComparer =
+        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
+    /// <summary>
+    /// roots는 native 빌드와 같은 root 모듈 집합이다(게임 빌드는 켠 플러그인 모듈을 더한다). null이면 타깃 모듈이다.
+    /// 반환값은 0(성공 또는 메타데이터 모듈 없음) 또는 1(진단을 출력함)이다.
+    /// </summary>
+    public static async Task<int> GenerateAsync(BuildContext context, NativeToolchain toolchain, MetadataPlan plan,
+        TargetRules target, string compilerTool, CancellationToken cancellationToken, IReadOnlyList<string>? roots = null)
     {
-        var byName = modules.ToDictionary(module => module.Name, StringComparer.OrdinalIgnoreCase);
-        var reachable = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        // ActionGraph와 같이 모듈 이름은 대소문자를 무시해 비교한다.
+        var byName = plan.Modules.ToDictionary(module => module.Name, StringComparer.OrdinalIgnoreCase);
+        var reachable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var order = new List<string>();
+        var visiting = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         void Reach(string name)
         {
-            if (!byName.TryGetValue(name, out var module))
+            if (!byName.TryGetValue(name, out NativeModuleInput? module))
             {
                 throw new ArgumentException($"Target '{target.Name}': unknown module '{name}'.");
             }
 
-            if (reachable.TryGetValue(name, out bool complete))
+            if (reachable.Contains(module.Name))
             {
-                if (!complete)
-                {
-                    throw new ArgumentException($"Target '{target.Name}': dependency cycle at '{name}'.");
-                }
-
                 return;
             }
 
-            reachable.Add(name, false);
-            foreach (var dependency in module.Dependencies)
+            if (!visiting.Add(module.Name))
+            {
+                throw new ArgumentException($"Target '{target.Name}': dependency cycle at '{module.Name}'.");
+            }
+
+            foreach (string dependency in module.Dependencies)
             {
                 Reach(dependency);
             }
 
-            reachable[name] = true;
+            visiting.Remove(module.Name);
+            reachable.Add(module.Name);
+            order.Add(module.Name); // 후위 순서: 의존 모듈이 먼저다
         }
 
-        foreach (var name in target.Modules)
+        foreach (string name in roots ?? target.Modules)
         {
             Reach(name);
         }
 
-        // 전체 unit의 소유권을 먼저 확인한다. 뒤 unit이 잘못되었을 때 앞 unit만 게시하지 않는다.
-        var inputOwners = new Dictionary<string, MetadataUnit>(OperatingSystem.IsWindows()
-            ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
-        foreach (var unit in target.Metadata)
+        var metadata = plan.Generated.ToDictionary(module => module.Name, StringComparer.OrdinalIgnoreCase);
+        List<MetadataModule> runs = order.Where(metadata.ContainsKey).Select(name => metadata[name]).ToList();
+        List<NativeModuleInput> imported = order.Select(name => byName[name]).Where(module => module.ImportedMetadata is not null).ToList();
+        if (runs.Count == 0)
         {
-            if (!byName.ContainsKey(unit.Module))
-            {
-                throw new ArgumentException($"Metadata '{unit.Input}': unknown owner module '{unit.Module}'.");
-            }
-
-            if (!reachable.ContainsKey(unit.Module))
-            {
-                throw new ArgumentException($"Metadata '{unit.Input}': owner module '{unit.Module}' is not reachable from target '{target.Name}'.");
-            }
-
-            var input = context.PathInRoot(unit.Input);
-            var relative = Path.GetRelativePath(context.RootDirectory, input);
-            if (!File.Exists(input) || Path.IsPathRooted(relative) || relative.Split('/', '\\').Any(part => part == ".."))
-            {
-                throw new ArgumentException($"Metadata '{unit.Input}': input must exist inside the project root.");
-            }
-
-            var canonical = CanonicalInput(input);
-            var canonicalRootForInput = CanonicalInput(context.RootDirectory);
-            var resolvedInput = Path.GetRelativePath(canonicalRootForInput, canonical);
-            if (Path.IsPathRooted(resolvedInput) || resolvedInput.Split('/', '\\').Any(part => part == ".."))
-            {
-                throw new ArgumentException($"Metadata '{unit.Input}': source must resolve inside the project root.");
-            }
-
-            if (!inputOwners.TryAdd(canonical, unit))
-            {
-                var first = inputOwners[canonical];
-                throw new ArgumentException($"Metadata '{unit.Input}': duplicate input ownership; '{first.Module}/{first.Output}' and '{unit.Module}/{unit.Output}' resolve to '{canonical}'.");
-            }
+            return 0;
         }
 
-        string? identityManifest = null;
-        if (target.IdentityManifest is not null)
-        {
-            if (string.IsNullOrWhiteSpace(target.IdentityManifest) || !target.IdentityManifest.EndsWith(".rocksids.json", StringComparison.Ordinal))
-            {
-                throw new ArgumentException("Identity manifest path must end in .rocksids.json so history checks can discover it.");
-            }
-
-            identityManifest = context.PathInRoot(target.IdentityManifest);
-            var identityRelative = Path.GetRelativePath(context.RootDirectory, identityManifest);
-            if (!File.Exists(identityManifest) || Path.IsPathRooted(identityRelative) ||
-                identityRelative.Split('/', '\\').Any(part => part == ".."))
-            {
-                throw new ArgumentException($"Identity manifest '{target.IdentityManifest}' must exist inside the project root.");
-            }
-
-            string[] identityParts = identityRelative.Replace('\\', '/').Split('/');
-            var excluded = new HashSet<string>([".git", "out", "bin", "obj", "__pycache__"],
-                OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
-            if (identityParts.Any(excluded.Contains) || (identityParts.Length >= 2 &&
-                string.Equals(identityParts[0], "Build", StringComparison.OrdinalIgnoreCase) &&
-                (string.Equals(identityParts[1], "Artifacts", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(identityParts[1], "Cache", StringComparison.OrdinalIgnoreCase))))
-            {
-                throw new ArgumentException($"Identity manifest '{target.IdentityManifest}' must not be inside a generated or excluded directory.");
-            }
-
-            var canonicalManifest = CanonicalInput(identityManifest);
-            var canonicalRoot = CanonicalInput(context.RootDirectory);
-            var resolvedRelative = Path.GetRelativePath(canonicalRoot, canonicalManifest);
-            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-            if (!string.Equals(Path.GetFullPath(identityRelative, canonicalRoot), canonicalManifest, comparison))
-            {
-                throw new ArgumentException($"Identity manifest '{target.IdentityManifest}' cannot use symbolic link paths.");
-            }
-
-            var outputRelative = Path.GetRelativePath(Path.GetFullPath(context.OutputDirectory), identityManifest);
-            if (Path.IsPathRooted(resolvedRelative) || resolvedRelative.Split('/', '\\').Any(part => part == "..") ||
-                (!Path.IsPathRooted(outputRelative) && !outputRelative.Split('/', '\\').Any(part => part == "..")))
-            {
-                throw new ArgumentException($"Identity manifest '{target.IdentityManifest}' must resolve inside the project source and outside the output directory.");
-            }
-        }
-
-        byte[]? manifestSnapshot = null;
-        if (identityManifest is not null)
-        {
-            manifestSnapshot = BoundedFile.Read(identityManifest, BoundedFile.MaximumIdentityBytes);
-        }
-
-        var outputs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var stagedOutputs = new List<(string Staged, string Final)>();
-        var inventories = new List<string>();
         string tag = Guid.NewGuid().ToString("N");
+        string stage = Path.Combine(context.OutputDirectory, ".metadata-stage", tag);
+        string StageRoot(string module) => Path.Combine(stage, module);
+        string StageDescriptor(string module) => Path.Combine(stage, module + ".rocksmeta.json");
+        string Inventory(string module) => Path.Combine(stage, module + ".inventory.json");
+
+        // 생성 include 루트(자기 모듈 포함)를 이번 실행의 stage 루트로 바꾼다.
+        var rootMap = new Dictionary<string, string>(PathComparer);
+        foreach (MetadataModule run in runs)
+        {
+            rootMap[Path.GetFullPath(run.GeneratedPublic)] = Path.Combine(StageRoot(run.Name), "Public");
+            rootMap[Path.GetFullPath(run.GeneratedPrivate)] = Path.Combine(StageRoot(run.Name), "Private");
+        }
+
+        var manifests = new List<(string Path, byte[] Snapshot)>();
         bool cleanupSafe = true;
         bool commandFailed = false;
         Exception? pendingError = null;
         try
         {
-            foreach (var unit in target.Metadata)
+            foreach (MetadataModule run in runs)
             {
-                if (!byName.TryGetValue(unit.Module, out var owner))
-                {
-                    throw new ArgumentException($"Metadata '{unit.Input}': unknown owner module '{unit.Module}'.");
-                }
+                Directory.CreateDirectory(Path.Combine(StageRoot(run.Name), "Public"));
+                Directory.CreateDirectory(Path.Combine(StageRoot(run.Name), "Private"));
+                manifests.Add((run.Manifest, BoundedFile.Read(run.Manifest, BoundedFile.MaximumIdentityBytes)));
+            }
 
-                if (string.IsNullOrWhiteSpace(unit.Output) || Path.GetFileName(unit.Output) != unit.Output ||
-                    unit.Output.Contains('\\') || !unit.Output.EndsWith(".generated.h", StringComparison.Ordinal) ||
-                    !outputs.Add(unit.Output))
+            foreach (MetadataModule run in runs)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                NativeModuleInput owner = byName[run.Name];
+                List<NativeModuleInput> dependencies = TransitiveDependencies(owner, byName);
+                var arguments = new List<string> { compilerTool, "--module", run.Name };
+                foreach (MetadataHeader header in run.Headers)
                 {
-                    throw new ArgumentException($"Metadata '{unit.Input}': output must be a unique *.generated.h basename.");
-                }
-
-                var input = context.PathInRoot(unit.Input);
-                var relative = Path.GetRelativePath(context.RootDirectory, input);
-                if (!File.Exists(input) || Path.IsPathRooted(relative) || relative.Split('/', '\\').Any(part => part == ".."))
-                {
-                    throw new ArgumentException($"Metadata '{unit.Input}': input must exist inside the project root.");
-                }
-
-                if (unit.Include.IndexOfAny(['"', '\r', '\n', '<', '>']) >= 0 ||
-                    Path.IsPathRooted(unit.Include) || unit.Include.Split('/', '\\').Any(part => part == ".."))
-                {
-                    throw new ArgumentException($"Metadata '{unit.Input}': include must be a project-relative header path.");
-                }
-
-                var dependencies = new List<NativeModuleInput>();
-                var marks = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
-                void Visit(string name)
-                {
-                    if (!byName.TryGetValue(name, out var module))
+                    arguments.AddRange(["--input", header.Path, "--include", header.Include]);
+                    if (header.Private)
                     {
-                        throw new ArgumentException($"Module '{unit.Module}': unknown dependency '{name}'.");
-                    }
-
-                    if (marks.TryGetValue(name, out var done))
-                    {
-                        if (!done)
-                        {
-                            throw new ArgumentException($"Module dependency cycle at '{name}'.");
-                        }
-
-                        return;
-                    }
-
-                    marks[name] = false;
-                    foreach (var dependency in module.Dependencies)
-                    {
-                        Visit(dependency);
-                    }
-
-                    marks[name] = true;
-                    if (module != owner)
-                    {
-                        dependencies.Add(module);
+                        arguments.AddRange(["--private", header.Include]);
                     }
                 }
 
-                Visit(owner.Name);
-                string finalOutput = Path.Combine(context.OutputDirectory, "Generated", unit.Output);
-                string generatedOutput = identityManifest is null ? finalOutput :
-                    Path.Combine(context.OutputDirectory, "Generated", ".rocks-stage-" + tag + "-" + unit.Output);
-                if (identityManifest is not null)
+                arguments.AddRange(["--output-root", StageRoot(run.Name), "--descriptor", StageDescriptor(run.Name),
+                    "--identity-manifest", run.Manifest, "--identity-inventory", Inventory(run.Name), "--compiler", toolchain.CompilerPath]);
+                foreach (NativeModuleInput dependency in dependencies)
                 {
-                    stagedOutputs.Add((generatedOutput, finalOutput));
+                    if (metadata.ContainsKey(dependency.Name))
+                    {
+                        arguments.AddRange(["--import", StageDescriptor(dependency.Name)]);
+                    }
+                    else if (dependency.ImportedMetadata is not null)
+                    {
+                        arguments.AddRange(["--import", dependency.ImportedMetadata.Descriptor]);
+                    }
                 }
 
-                var arguments = new List<string> { compilerTool, "--input", input, "--include", unit.Include,
-                    "--output", generatedOutput,
-                    "--compiler", toolchain.CompilerPath };
-                if (identityManifest is not null)
-                {
-                    string inventory = Path.Combine(context.OutputDirectory, "Generated", ".rocks-inventory-" + tag + "-" + Hashing.Sha256Text(unit.Output) + ".json");
-                    inventories.Add(inventory);
-                    arguments.AddRange(["--identity-manifest", identityManifest, "--identity-inventory", inventory]);
-                }
                 // native compile과 같은 순서/프로필을 사용한다. 다른 모듈의 private 설정을 누출하지 않는다.
-                foreach (var argument in owner.AdditionalCompileArguments.Concat(NativeCompileProfile.Arguments(toolchain, context.Configuration, owner.Optimization)))
+                foreach (string argument in owner.AdditionalCompileArguments.Concat(NativeCompileProfile.Arguments(toolchain, context.Configuration, owner.Optimization)))
                 {
                     arguments.Add("--clang-arg=" + argument);
                 }
 
-                foreach (var define in owner.PublicDefines.Concat(owner.PrivateDefines).Concat(dependencies.SelectMany(module => module.PublicDefines)).Distinct())
+                foreach (string define in owner.PublicDefines.Concat(owner.PrivateDefines).Concat(dependencies.SelectMany(module => module.PublicDefines)).Distinct())
                 {
                     arguments.Add("--clang-arg=" + (toolchain.Platform == NativePlatform.Windows ? "/D" : "-D") + define);
                 }
 
-                foreach (var directory in owner.PublicIncludeDirectories.Concat(owner.PrivateIncludeDirectories)
-                    .Concat(dependencies.SelectMany(module => module.PublicIncludeDirectories)).Select(context.PathInRoot).Distinct())
+                foreach (string directory in MetadataLayout.IncludeOrder(owner, byName))
                 {
-                    arguments.AddRange(["--include-dir", directory]);
+                    arguments.AddRange(["--include-dir", rootMap.TryGetValue(directory, out string? staged) ? staged : directory]);
                 }
 
                 var generated = await ProcessRunner.RunAsync(new("dotnet", arguments, context.RootDirectory,
@@ -243,27 +149,36 @@ public static class MetadataRunner
                 }
             }
 
-            if (identityManifest is not null)
+            // 명세별 inventory 검증, 그 뒤 명세 사이 ID 중복 검증(SDK 동봉 명세 포함).
+            foreach (MetadataModule run in runs)
             {
-                var verify = new List<string> { compilerTool, "ids", "verify", "--manifest", identityManifest };
-                foreach (string inventory in inventories)
-                {
-                    verify.AddRange(["--inventory", inventory]);
-                }
-
-                var result = await ProcessRunner.RunAsync(new("dotnet", verify, context.RootDirectory,
-                    toolchain.Environment, Timeout: TimeSpan.FromMinutes(2)), cancellationToken);
-                Console.Write(result.StdOut);
-                Console.Error.Write(result.StdErr);
-                if (result.ExitCode != 0)
+                int verified = await RunIdsAsync(context, toolchain, compilerTool,
+                    ["ids", "verify", "--manifest", run.Manifest, "--inventory", Inventory(run.Name)], cancellationToken);
+                if (verified != 0)
                 {
                     commandFailed = true;
-                    return result.ExitCode;
+                    return verified;
                 }
-                // 모든 단위를 검증한 뒤 게시한다. 중간 실패 시 기존 결과를 복구한다.
-                MetadataOutputTransaction.Publish(stagedOutputs, identityManifest, manifestSnapshot!, cancellationToken);
             }
 
+            // 은퇴 항목만 남은 명세(ID 예약)도 넣어 예약된 ID·이름의 재사용을 막는다.
+            var set = new List<string> { "ids", "verify-set" };
+            foreach (string manifest in runs.Select(run => run.Manifest).Concat(plan.ReservedManifests)
+                .Concat(imported.Select(module => module.ImportedMetadata!.IdentityManifest)))
+            {
+                set.AddRange(["--manifest", manifest]);
+            }
+
+            int unique = await RunIdsAsync(context, toolchain, compilerTool, set, cancellationToken);
+            if (unique != 0)
+            {
+                commandFailed = true;
+                return unique;
+            }
+
+            // 백업은 생성 include 디렉터리 밖에 둔다(복구에 실패해 남은 백업이 다음 게시의 잉여 파일로 지워지지 않게).
+            MetadataOutputTransaction.Publish(PublishItems(runs, StageRoot, StageDescriptor), manifests, cancellationToken,
+                backupDirectory: Path.Combine(context.OutputDirectory, ".metadata-backup", tag));
             return 0;
         }
         catch (Exception error)
@@ -281,34 +196,103 @@ public static class MetadataRunner
         {
             if (cleanupSafe)
             {
-                MetadataTemporaryCleanup.Finish(stagedOutputs.Select(value => value.Staged).Concat(inventories),
-                    pendingError is not null || commandFailed);
+                MetadataTemporaryCleanup.Finish([stage], pendingError is not null || commandFailed,
+                    delete: path =>
+                    {
+                        if (Directory.Exists(path))
+                        {
+                            Directory.Delete(path, true);
+                        }
+                    });
             }
         }
     }
 
-    // 중간 디렉터리의 symlink도 해소하여 별칭으로 같은 헤더를 두 번 등록하는 실수를 감지한다.
-    // 서로 다른 hard link의 동일 파일 ID 판정은 현재 지원 범위가 아니다.
-    private static string CanonicalInput(string path, int depth = 0)
+    // stage의 생성물을 게시 위치로, 게시 위치에만 있는 잉여 생성 파일은 삭제 항목으로 만든다. 대소문자만 다른 경로는
+    // 그 볼륨이 대소문자를 무시할 때만 삭제하지 않는다 — 같은 파일이라 쓰기 항목이 이미 덮어쓴다(macOS 기본·Windows).
+    // 대소문자를 구분하는 볼륨에서는 다른 파일이므로 지운다.
+    private static List<(string? Staged, string Final)> PublishItems(IReadOnlyList<MetadataModule> runs,
+        Func<string, string> stageRoot, Func<string, string> stageDescriptor)
     {
-        if (depth > 40)
+        var items = new List<(string? Staged, string Final)>();
+        foreach (MetadataModule run in runs)
         {
-            throw new IOException("Too many symbolic links: " + path);
+            foreach ((string staged, string published) in new[] { ("Public", run.GeneratedPublic), ("Private", run.GeneratedPrivate) })
+            {
+                string source = Path.Combine(stageRoot(run.Name), staged);
+                var produced = new HashSet<string>(StringComparer.Ordinal);
+                var producedIgnoringCase = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (string file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
+                {
+                    string final = Path.Combine(published, Path.GetRelativePath(source, file));
+                    produced.Add(Path.GetFullPath(final));
+                    producedIgnoringCase.Add(Path.GetFullPath(final));
+                    items.Add((file, final));
+                }
+
+                if (Directory.Exists(published))
+                {
+                    foreach (string existing in Directory.EnumerateFiles(published, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
+                    {
+                        string full = Path.GetFullPath(existing);
+                        bool sameFile = produced.Contains(full) || (producedIgnoringCase.Contains(full) && CaseInsensitiveVolume(full));
+                        if (!sameFile)
+                        {
+                            items.Add((null, existing));
+                        }
+                    }
+                }
+            }
+
+            items.Add((stageDescriptor(run.Name), run.Descriptor));
         }
 
-        var full = Path.GetFullPath(path);
-        var root = Path.GetPathRoot(full) ?? throw new IOException("Input path has no filesystem root: " + full);
-        var current = root;
-        foreach (var component in full[root.Length..].Split(
-            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
+        return items;
+    }
+
+    // 있는 파일의 이름 대소문자를 바꾼 경로가 같은 파일로 열리면 그 볼륨은 대소문자를 무시한다. 바꿀 글자가 없으면
+    // 구분하는 것으로 본다(지우는 쪽이 안전하지 않으므로 아무 이름도 같은 파일로 보지 않는다).
+    private static bool CaseInsensitiveVolume(string existing)
+    {
+        string name = Path.GetFileName(existing);
+        string swapped = new(name.Select(c => char.IsUpper(c) ? char.ToLowerInvariant(c) : char.ToUpperInvariant(c)).ToArray());
+        return !string.Equals(name, swapped, StringComparison.Ordinal) && File.Exists(Path.Combine(Path.GetDirectoryName(existing)!, swapped));
+    }
+
+    private static List<NativeModuleInput> TransitiveDependencies(NativeModuleInput module, IReadOnlyDictionary<string, NativeModuleInput> byName)
+    {
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var result = new List<NativeModuleInput>();
+        void Visit(string name)
         {
-            var candidate = Path.Combine(current, component);
-            FileSystemInfo? entry = Directory.Exists(candidate) ? new DirectoryInfo(candidate) :
-                File.Exists(candidate) ? new FileInfo(candidate) : null;
-            var target = entry?.ResolveLinkTarget(returnFinalTarget: true);
-            current = target is null ? candidate : CanonicalInput(target.FullName, depth + 1);
+            NativeModuleInput current = byName[name];
+            if (!visited.Add(current.Name))
+            {
+                return;
+            }
+
+            foreach (string dependency in current.Dependencies)
+            {
+                Visit(dependency);
+            }
+
+            if (!string.Equals(current.Name, module.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                result.Add(current);
+            }
         }
 
-        return Path.GetFullPath(current);
+        Visit(module.Name);
+        return result;
+    }
+
+    private static async Task<int> RunIdsAsync(BuildContext context, NativeToolchain toolchain, string compilerTool,
+        IReadOnlyList<string> command, CancellationToken cancellationToken)
+    {
+        var result = await ProcessRunner.RunAsync(new("dotnet", [compilerTool, .. command], context.RootDirectory,
+            toolchain.Environment, Timeout: TimeSpan.FromMinutes(2)), cancellationToken);
+        Console.Write(result.StdOut);
+        Console.Error.Write(result.StdErr);
+        return result.ExitCode;
     }
 }

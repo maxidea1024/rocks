@@ -34,6 +34,8 @@ internal static class MetaTests
         TypeConvenienceCompilerTests.Register(suite, options, actualEnvironment);
         IdentityCompilerTests.Register(suite, options, actualEnvironment);
         IdentityCliReviewTests.Register(suite, options, actualEnvironment);
+        ModuleMetaTests.Register(suite, options, actualEnvironment);
+        IdentityModuleCliTests.Register(suite, options, actualEnvironment);
 
         suite.Add("Meta.FixtureDeterminismTimestampAndStaleCheck", async () =>
         {
@@ -86,7 +88,7 @@ internal static class MetaTests
         AddRejectGroup("Meta.UnreflectedBaseAndReference", [
             Declaration(bases: "public Hidden").Replace("namespace probe {", "namespace probe { struct Hidden : rocks::Object {};", StringComparison.Ordinal),
             Declaration("ROCKS_PROPERTY() rocks::ObjectRef<Hidden> next;")
-                .Replace("namespace probe {", "namespace probe { struct Hidden : rocks::Object {};", StringComparison.Ordinal)], "RMC2000", "reflected");
+                .Replace("namespace probe {", "namespace probe { struct Hidden : rocks::Object {};", StringComparison.Ordinal)], "RMC2003", "reflected");
         AddRejectGroup("Meta.ClangSyntaxFailurePreservesOutput", [Declaration("this is not valid cxx;")], "RMC3000", "Clang");
         suite.Add("Meta.DiagnosticsAndResponseOverridesRejected", async () =>
         {
@@ -253,6 +255,7 @@ internal static class MetaTests
         private readonly IReadOnlyDictionary<string, string?> environment;
         private readonly string generator;
         private readonly string compiler;
+
         public Probe(Options options, IReadOnlyDictionary<string, string?> environment, string generator, string compiler)
         {
             this.options = options;
@@ -261,13 +264,20 @@ internal static class MetaTests
             this.compiler = compiler;
             MetaProbeIdentity.Create(IdentityPath);
         }
-        public string Output => temporary.FilePath("Probe.generated.h");
+
+        private string lastInclude = "Probe.h";
+
+        // 마지막으로 생성한 헤더의 생성 경로다(fixture 모드는 fixture 철자).
+        public string Output => MetaCompilerArguments.GeneratedPath(temporary.Root, lastInclude);
+
         private string IdentityPath => temporary.FilePath("probe.rocksids.json");
 
         public async Task GenerateAsync(string? source = null, bool fixture = false, IReadOnlyList<string>? extra = null,
             string? expectedCode = null, string? reason = null)
         {
-            string input = fixture ? Path.Combine(options.Root, "Core", "Source", "Runtime", "ObjectRuntime", "Tests", "Reflection", "ReflectionFixture.h") : temporary.FilePath("Probe.h");
+            string include = fixture ? "ReflectionTestFixtures/ReflectionFixture.h" : "Probe.h";
+            string input = fixture ? Path.Combine(FixturePublic, "ReflectionTestFixtures", "ReflectionFixture.h") : temporary.FilePath("Probe.h");
+            lastInclude = include;
             if (source is not null)
             {
                 File.WriteAllText(input, source, new UTF8Encoding(false, true));
@@ -281,11 +291,10 @@ internal static class MetaTests
                 arguments.Add(generator);
             }
 
-            arguments.AddRange(["--input", input, "--include", fixture ? "Core/Source/Runtime/ObjectRuntime/Tests/Reflection/ReflectionFixture.h" : "Probe.h",
-                "--output", Output, "--compiler", compiler]);
+            arguments.AddRange([.. MetaCompilerArguments.Single(temporary.Root, input, include), "--compiler", compiler]);
             AddDefaultIncludes(arguments);
             arguments.AddRange(["--identity-manifest", fixture
-                ? Path.Combine(options.Root, "Core", "Source", "Runtime", "ObjectRuntime", "Tests", "Reflection", "Foundation.rocksids.json") : IdentityPath]);
+                ? Path.Combine(options.Root, "Core", "Source", "Developer", "ReflectionTestFixtures", "ReflectionTestFixtures.rocksids.json") : IdentityPath]);
             foreach (string argument in options.ClangArguments)
             {
                 arguments.Add("--clang-arg=" + argument);
@@ -320,17 +329,21 @@ internal static class MetaTests
             File.WriteAllText(temporary.FilePath("Other.h"), "struct Value : public rocks::Object {};\n");
             await RejectAsync(source, "RMC2000", "ROCKS_CLASS");
         }
+
+        // 생성 헤더는 원본을 <철자>로 포함하므로 --include 철자는 --include-dir 검색 순서로 원본에 풀려야 한다.
+        // 검색 순서에서 앞선 다른 헤더가 같은 철자를 가리면 거부하고(이전 출력 보존), 지운 뒤에는 받아들인다.
         public async Task OutputDirectoryBindingAsync()
         {
             string sourceDirectory = temporary.FilePath("Source");
-            string generatedDirectory = temporary.FilePath("Generated");
+            string shadowDirectory = temporary.FilePath("Shadow");
             Directory.CreateDirectory(sourceDirectory);
-            Directory.CreateDirectory(generatedDirectory);
+            Directory.CreateDirectory(shadowDirectory);
             string author = Path.Combine(sourceDirectory, "Probe.h");
-            string shadow = Path.Combine(generatedDirectory, "Probe.h");
-            string output = Path.Combine(generatedDirectory, "Probe.generated.h");
+            string shadow = Path.Combine(shadowDirectory, "Probe.h");
+            string output = MetaCompilerArguments.GeneratedPath(temporary.Root, "Probe.h");
             File.WriteAllText(author, Declaration());
             File.WriteAllText(shadow, Declaration(extra: "void Shadow() noexcept {}"));
+            Directory.CreateDirectory(Path.GetDirectoryName(output)!);
             File.WriteAllText(output, "previous accepted output\n");
             async Task<ProcessResult> Run()
             {
@@ -342,8 +355,9 @@ internal static class MetaTests
                     arguments.Add(generator);
                 }
 
-                arguments.AddRange(["--input", author, "--include", "Probe.h", "--output", output, "--compiler", compiler]);
-                foreach (string include in new[] { sourceDirectory }.Concat(Directory.GetDirectories(Path.Combine(options.Root, "Core", "Source", "Runtime"))
+                arguments.AddRange([.. MetaCompilerArguments.Single(temporary.Root, author, "Probe.h"), "--compiler", compiler]);
+                IEnumerable<string> searchOrder = File.Exists(shadow) ? [shadowDirectory, sourceDirectory] : [sourceDirectory];
+                foreach (string include in searchOrder.Concat(Directory.GetDirectories(Path.Combine(options.Root, "Core", "Source", "Runtime"))
                     .Select(module => Path.Combine(module, "Public")).Where(Directory.Exists)))
                 {
                     arguments.AddRange(["--include-dir", include]);
@@ -358,23 +372,25 @@ internal static class MetaTests
                 return await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: TimeSpan.FromSeconds(60)));
             }
 
+            bool ValidationLeaked() => Directory.EnumerateDirectories(temporary.Root, ".rocks-meta-validation-*").Any();
             var rejected = await Run();
-            Verify.That(rejected.ExitCode != 0, "output-directory shadow header accepted");
-            Verify.Contains("RMC1000", rejected.StdErr, "output shadow error code");
-            Verify.Contains(shadow, rejected.StdErr, "actual output-directory shadow path");
+            Verify.That(rejected.ExitCode != 0, "shadowing header accepted");
+            Verify.Contains("RMC1000", rejected.StdErr, "shadow error code");
+            Verify.Contains(shadow, rejected.StdErr, "actual shadow path");
             Verify.Equal("previous accepted output\n", File.ReadAllText(output), "shadow failure changed accepted output");
             File.Delete(shadow);
             var accepted = await Run();
             Verify.Equal(0, accepted.ExitCode, "original header not selected after shadow removal: " + accepted.StdErr);
-            Verify.That(!Directory.EnumerateFiles(generatedDirectory, ".rocks-meta-validation-*").Any(), "successful validation temporary file leaked");
+            Verify.That(!ValidationLeaked(), "successful validation temporary directory leaked");
             string validOutput = File.ReadAllText(output);
             File.WriteAllText(author, Preamble + "ROCKS_CLASS()\nstruct Value : public rocks::Object { Value() {} };\n}\n");
             var invalid = await Run();
             Verify.That(invalid.ExitCode != 0, "invalid generated contract accepted");
             Verify.Contains("RMC3000", invalid.StdErr, "generated contract rejection code");
             Verify.Equal(validOutput, File.ReadAllText(output), "failed validation published output");
-            Verify.That(!Directory.EnumerateFiles(generatedDirectory, ".rocks-meta-validation-*").Any(), "failed validation temporary file leaked");
+            Verify.That(!ValidationLeaked(), "failed validation temporary directory leaked");
         }
+
         public async Task SymlinkLocationsAsync()
         {
             string real = temporary.FilePath("real");
@@ -397,7 +413,7 @@ internal static class MetaTests
             string aliasInput = Path.Combine(alias, "Probe.h");
             File.WriteAllText(actualInput, original);
             File.WriteAllText(Path.Combine(shadow, "Probe.h"), Declaration(extra: "void Shadow() noexcept {}"));
-            async Task<ProcessResult> Run(string input, string output, params string[] includeDirs)
+            async Task<ProcessResult> Run(string input, string outputRoot, params string[] includeDirs)
             {
                 List<string> arguments = [];
                 string executable = generator;
@@ -407,7 +423,8 @@ internal static class MetaTests
                     arguments.Add(generator);
                 }
 
-                arguments.AddRange(["--input", input, "--include", "Probe.h", "--output", output, "--compiler", compiler]);
+                arguments.AddRange(["--module", MetaCompilerArguments.Module, "--input", input, "--include", "Probe.h", "--output-root", outputRoot,
+                    "--descriptor", MetaCompilerArguments.Descriptor(temporary.Root), "--compiler", compiler]);
                 foreach (string include in includeDirs.Concat(Directory.GetDirectories(Path.Combine(options.Root, "Core", "Source", "Runtime"))
                     .Select(module => Path.Combine(module, "Public")).Where(Directory.Exists)))
                 {
@@ -423,18 +440,20 @@ internal static class MetaTests
                 return await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: TimeSpan.FromSeconds(60)));
             }
 
-            var valid = await Run(aliasInput, Output, real);
+            var valid = await Run(aliasInput, MetaCompilerArguments.OutputRoot(temporary.Root), real);
             Verify.Equal(0, valid.ExitCode, "same file through symlinked parent rejected: " + valid.StdErr);
-            var shadowed = await Run(aliasInput, Output, shadow, real);
+            var shadowed = await Run(aliasInput, MetaCompilerArguments.OutputRoot(temporary.Root), shadow, real);
             Verify.That(shadowed.ExitCode != 0, "different shadow header accepted");
             Verify.Contains("resolved input=", shadowed.StdErr, "resolved input path missing");
             Verify.Contains("resolved target=", shadowed.StdErr, "resolved shadow target missing");
             Verify.Contains(Path.Combine(shadow, "Probe.h"), shadowed.StdErr, "shadow header path missing");
-            var sameOutput = await Run(actualInput, aliasInput, real);
+            // 출력 루트가 (symlink 별칭으로) 입력 헤더를 담으면 거부한다(원본 헤더를 덮어쓰지 않는다).
+            var sameOutput = await Run(actualInput, alias, real);
             Verify.That(sameOutput.ExitCode != 0, "input/output symlink alias was accepted");
             Verify.Contains("RMC1000", sameOutput.StdErr, "same input/output rejection code");
             Verify.Equal(original, File.ReadAllText(actualInput), "source header changed after rejected output alias");
         }
+
         public async Task SourceNotesAsync()
         {
             string input = temporary.FilePath("Probe.h");
@@ -451,7 +470,7 @@ internal static class MetaTests
                 arguments.Add(generator);
             }
 
-            arguments.AddRange(["--input", input, "--include", "Probe.h", "--output", Output, "--compiler", compiler]);
+            arguments.AddRange([.. MetaCompilerArguments.Single(temporary.Root, input, "Probe.h"), "--compiler", compiler]);
             AddDefaultIncludes(arguments);
             arguments.AddRange(["--identity-manifest", IdentityPath]);
             foreach (string argument in options.ClangArguments)
@@ -468,6 +487,7 @@ internal static class MetaTests
             Verify.That(!result.StdErr.Contains("note: diagnostic references CLASS a::ThingExtended", StringComparison.Ordinal),
                 "prefix name was falsely identified");
         }
+
         public async Task NestedLocationAsync()
         {
             string main = temporary.FilePath("Main.h");
@@ -498,7 +518,9 @@ internal static class MetaTests
                     arguments.Add(generator);
                 }
 
-                arguments.AddRange(["--input", main, "--include", "Main.h", "--output", Output, "--compiler", compiler]);
+                // 리플렉션 선언은 모듈 입력 헤더에 있어야 한다: 오류 선언이 있는 Deep.h를 입력으로 두고 진단 위치를 본다.
+                arguments.AddRange(["--module", MetaCompilerArguments.Module, "--input", a, "--include", "First.h", "--input", bad, "--include", "Deep.h",
+                    "--output-root", MetaCompilerArguments.OutputRoot(temporary.Root), "--descriptor", MetaCompilerArguments.Descriptor(temporary.Root), "--compiler", compiler]);
                 AddDefaultIncludes(arguments);
                 arguments.AddRange(["--identity-manifest", IdentityPath]);
                 foreach (string argument in options.ClangArguments)
@@ -508,13 +530,15 @@ internal static class MetaTests
 
                 var result = await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: TimeSpan.FromSeconds(60)));
                 Verify.That(result.ExitCode != 0, "invalid nested declaration was accepted");
-                Verify.Contains($"{bad}:{line}: error RMC2000", result.StdErr, "nested source file and physical line");
+                Verify.Contains($"{bad}:{line}: error RMC2000".Replace('\\', '/'), result.StdErr.Replace('\\', '/'), "nested source file and physical line");
                 Verify.Contains("hint:", result.StdErr, "nested declaration correction guidance");
             }
         }
+
         public async Task RejectAsync(string source, string code, string reason)
         {
             byte[] previous = Encoding.UTF8.GetBytes("previous accepted output\n");
+            Directory.CreateDirectory(Path.GetDirectoryName(Output)!);
             File.WriteAllBytes(Output, previous);
             await GenerateAsync(source, expectedCode: code, reason: reason);
             Verify.That(File.ReadAllBytes(Output).AsSpan().SequenceEqual(previous), "rejected input changed previous accepted output");
@@ -525,11 +549,13 @@ internal static class MetaTests
         {
             foreach (string directory in Directory.GetDirectories(Path.Combine(options.Root, "Core", "Source", "Runtime"))
                 .Select(module => Path.Combine(module, "Public")).Where(Directory.Exists).Order(StringComparer.Ordinal)
-                .Concat([options.Root, temporary.Root]))
+                .Concat([FixturePublic, options.Root, temporary.Root]))
             {
                 arguments.AddRange(["--include-dir", directory]);
             }
         }
+
+        private string FixturePublic => Path.Combine(options.Root, "Core", "Source", "Developer", "ReflectionTestFixtures", "Public");
 
         public void Dispose() => temporary.Dispose();
     }

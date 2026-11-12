@@ -32,7 +32,28 @@ internal static class IdentityGitMergeTests
             await fixture.SetHeadAsync(await fixture.CommitAsync(merge, first, second));
             ProcessResult result = await fixture.CheckAsync();
             Verify.Equal(0, result.ExitCode, "valid Git merge: " + result.StdOut + result.StdErr);
-            Verify.Contains("Stable identity history checked: 1 manifest(s).", result.StdOut, "manifest path was not discovered");
+            Verify.Contains("Stable identity history checked: 1 manifest path(s).", result.StdOut, "manifest path was not discovered");
+        });
+
+        // 한쪽 PR이 타입을 다른 모듈 명세로 옮기고(ids move) 다른 쪽이 원래 명세에 타입을 더해도, 리비전마다 모든 명세를
+        // ID 기준으로 합쳐 비교하므로 통과한다. 합친 결과가 옮긴 ID를 잃으면 거부한다.
+        suite.Add("IdentityGit.ManifestMovedBetweenModulesIsAccepted", async () =>
+        {
+            const string moved = "Moved 모듈/moved.rocksids.json";
+            using Fixture fixture = await Fixture.CreateAsync(script, compiler);
+            object[] actor = [Type("sample::Old", Original), Property("sample::Old::health", Field)];
+            string common = await fixture.CommitAsync(actor);
+            string first = await fixture.CommitFilesAsync(new() { [moved] = actor }, common);
+            string second = await fixture.CommitAsync([.. actor, Type("sample::Right", Right)], common);
+            await fixture.SetHeadAsync(await fixture.CommitFilesAsync(new() { [Fixture.Manifest] = [Type("sample::Right", Right)], [moved] = actor }, first, second));
+            ProcessResult accepted = await fixture.CheckAsync();
+            Verify.Equal(0, accepted.ExitCode, "merge of a moved manifest: " + accepted.StdOut + accepted.StdErr);
+            Verify.Contains("Stable identity history checked: 2 manifest path(s).", accepted.StdOut, "both manifest paths");
+
+            await fixture.SetHeadAsync(await fixture.CommitFilesAsync(new() { [Fixture.Manifest] = [Type("sample::Right", Right)] }, first, second));
+            ProcessResult lost = await fixture.CheckAsync();
+            Verify.That(lost.ExitCode != 0, "merge losing the moved manifest's IDs was accepted");
+            Verify.Contains("disappeared", lost.StdOut + lost.StdErr, "moved ID loss diagnosis");
         });
 
         suite.Add("IdentityGit.ConcurrentSameNameDifferentIdsRejected", async () =>
@@ -91,7 +112,7 @@ internal static class IdentityGitMergeTests
         private readonly string script;
         private readonly string compiler;
         private readonly Dictionary<string, string?> environment;
-        private const string Manifest = "Folder 한글/identity example.rocksids.json";
+        public const string Manifest = "Folder 한글/identity example.rocksids.json";
         private int counter;
 
         private Fixture(string scriptPath, string compilerPath)
@@ -124,10 +145,19 @@ internal static class IdentityGitMergeTests
             }
         }
 
-        public async Task<string> CommitAsync(object[] entries, params string[] parents)
+        public Task<string> CommitAsync(object[] entries, params string[] parents) =>
+            CommitFilesAsync(new() { [Manifest] = entries }, parents);
+
+        // 커밋 tree는 주어진 명세 파일만 담는다(이전 커밋의 다른 명세는 index에서 지운다).
+        public async Task<string> CommitFilesAsync(Dictionary<string, object[]> manifests, params string[] parents)
         {
-            temporary.Write(Manifest, JsonSerializer.Serialize(new { schema = 1, entries }));
-            await GitAsync("add", "--", Manifest);
+            await GitAsync("rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", ".");
+            foreach ((string path, object[] entries) in manifests)
+            {
+                temporary.Write(path, JsonSerializer.Serialize(new { schema = 1, entries }));
+                await GitAsync("add", "--", path);
+            }
+
             string tree = (await GitAsync("write-tree")).Trim();
             List<string> arguments = ["commit-tree", tree, "-m", "identity fixture " + ++counter];
             foreach (string parent in parents)

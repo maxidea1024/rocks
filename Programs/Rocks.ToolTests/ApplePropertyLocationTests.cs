@@ -70,7 +70,8 @@ internal static class ApplePropertyLocationTests
     private static void Validate(string path, JsonObject field)
     {
         using JsonDocument document = JsonDocument.Parse(field.ToJsonString());
-        new ClangAstParser(path).VerifyPropertySourceForTest(document.RootElement);
+        new ClangAstParser([new ModuleInput(path, "Probe.h", false)], null, new Dictionary<string, ClassModel>(), _ => null)
+            .VerifyPropertySourceForTest(document.RootElement);
     }
 
     private static JsonObject Mutate(string path, string source, int type, Action<JsonObject> mutate)

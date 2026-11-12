@@ -7,16 +7,19 @@ using Rocks.Tooling.Common;
 namespace Rocks.Build.Cli;
 
 // SystemLibraries·Frameworks는 정적 라이브러리가 요구하는 플랫폼 링크 의존이다. 외부 게임의 최종 링크가 같은 선언을
-// 받아야 하므로 SDK에 함께 담는다(NativeModuleInput과 같은 의미·검증).
+// 받아야 하므로 SDK에 함께 담는다(NativeModuleInput과 같은 의미·검증). Descriptor·IdentityManifest는 리플렉션 헤더가
+// 있는 모듈의 descriptor(<M>.rocksmeta.json)와 identity 명세의 SDK 상대 경로다(없으면 둘 다 null). 게임 빌드는 이 모듈을
+// 다시 생성하지 않고 descriptor를 import하며 명세를 명세 집합 검증에 넣는다.
 public sealed record SdkModule(string Name, string[] Includes, string[] Defines, string[] Dependencies, string[] Libraries,
-    string[] SystemLibraries, string[] Frameworks);
+    string[] SystemLibraries, string[] Frameworks, string? Descriptor, string? IdentityManifest);
+
 public sealed record SdkManifest(int Version, string Configuration, string Platform, string Architecture,
     string CompilerIdentity, string SdkIdentity, SdkModule[] Modules, Dictionary<string, string> Files);
 
 public static class InstalledSdk
 {
-    // 2: SdkModule에 SystemLibraries·Frameworks 추가.
-    private const int ManifestVersion = 2;
+    // 2: SdkModule에 SystemLibraries·Frameworks 추가. 3: Descriptor·IdentityManifest 추가.
+    private const int ManifestVersion = 3;
 
     /// <summary>
     /// SDK 타깃에서 도달하는 모듈만 고른다. 규칙 로더는 모든 모듈 규칙을 읽으므로 타깃이 쓰지 않는(빌드되지 않은)
@@ -45,8 +48,8 @@ public static class InstalledSdk
     }
 
     public static async Task ExportAsync(string root, string destination, NativeConfiguration configuration,
-        NativeToolchain toolchain, IReadOnlyList<NativeModuleInput> modules, NativeBuildResult build,
-        CancellationToken cancellationToken)
+        NativeToolchain toolchain, IReadOnlyList<NativeModuleInput> modules, IReadOnlyList<MetadataModule> metadata,
+        NativeBuildResult build, CancellationToken cancellationToken)
     {
         destination = Path.GetFullPath(destination);
         if (Directory.Exists(destination) || File.Exists(destination))
@@ -89,9 +92,27 @@ public static class InstalledSdk
                     throw new InvalidOperationException($"Module {module.Name} was not built for this SDK target.");
                 }
 
+                // 생성 public 헤더는 모듈의 public include 디렉터리라 위에서 Headers/<M>/로 복사되었다.
+                // descriptor와 명세는 Metadata/<M>/로 내보낸다.
+                string? descriptor = null;
+                string? identityManifest = null;
+                if (metadata.FirstOrDefault(item => item.Name == module.Name) is MetadataModule reflected)
+                {
+                    if (!File.Exists(reflected.Descriptor))
+                    {
+                        throw new InvalidOperationException($"Module {module.Name} has no generated metadata descriptor: {reflected.Descriptor}");
+                    }
+
+                    descriptor = $"Metadata/{module.Name}/{module.Name}.rocksmeta.json";
+                    identityManifest = $"Metadata/{module.Name}/{module.Name}.rocksids.json";
+                    Directory.CreateDirectory(Path.Combine(stage, "Metadata", module.Name));
+                    File.Copy(reflected.Descriptor, Path.Combine(stage, descriptor));
+                    File.Copy(reflected.Manifest, Path.Combine(stage, identityManifest));
+                }
+
                 packaged.Add(new(module.Name, includes.ToArray(), module.PublicDefines.ToArray(),
                     module.Dependencies.ToArray(), libraries.ToArray(), module.SystemLibraries.ToArray(),
-                    module.Frameworks.ToArray()));
+                    module.Frameworks.ToArray(), descriptor, identityManifest));
             }
             // 고정 버전 외부 라이브러리의 라이선스 원문을 모두 함께 배포한다(BSD 계열은 바이너리 배포 시 고지 의무가 있다).
             // code 라이브러리는 모듈을 담을 때, 데이터 전용 라이브러리(예: Unicode UCD)는 파생물이 들어간 모듈(embeddedIn)을
@@ -255,6 +276,7 @@ public static class InstalledSdk
         var rules = RuleLoader.Load(rulesPath, options.GetValueOrDefault("target", "Game"), context);
         // 규칙 모듈을 기술자와 대조하고, 켜지지 않은 플러그인·Editor·플랫폼 미지원 모듈 등을 뺀다.
         var projectModules = moduleSet.Apply(rules.Modules, rules.Target.Modules);
+        // SDK 모듈은 다시 생성하지 않는다. 리플렉션 모듈이면 descriptor·명세를 ImportedMetadata로 넘긴다.
         var modules = manifest.Modules.Select(module => new NativeModuleInput
         {
             Name = module.Name,
@@ -263,12 +285,18 @@ public static class InstalledSdk
             Dependencies = module.Dependencies,
             PrebuiltLibraries = module.Libraries.Select(path => SafePath(sdk, path)).ToArray(),
             SystemLibraries = module.SystemLibraries,
-            Frameworks = module.Frameworks
+            Frameworks = module.Frameworks,
+            ImportedMetadata = module.Descriptor is null
+                ? null
+                : new ImportedMetadata(SafePath(sdk, module.Descriptor), SafePath(sdk, module.IdentityManifest!))
         }).Concat(projectModules).ToArray();
-        var declaredInputs = GameInputSnapshot.DeclaredInputs(context, modules, rules.Target);
+        // 켠 플러그인의 모듈도 빌드한다(UE처럼 타깃이 직접 참조하지 않아도 컴파일된다). 메타데이터 생성도 같은 root 집합이다.
+        string[] targets = rules.Target.Modules.Concat(moduleSet.IncludedPluginModules).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var plan = MetadataLayout.Apply(context, modules, targets);
+        var declaredInputs = GameInputSnapshot.DeclaredInputs(context, plan);
         var initialDeclared = GameInputSnapshot.Capture(project, output, sdk, declaredInputs);
-        var metadata = await MetadataRunner.GenerateAsync(context, toolchain, modules, rules.Target,
-            Path.Combine(sdk, "Tools/Rocks.MetaCompiler/Rocks.MetaCompiler.dll"), cancellationToken);
+        var metadata = await MetadataRunner.GenerateAsync(context, toolchain, plan, rules.Target,
+            Path.Combine(sdk, "Tools/Rocks.MetaCompiler/Rocks.MetaCompiler.dll"), cancellationToken, targets);
         if (metadata != 0)
         {
             return 1;
@@ -279,11 +307,10 @@ public static class InstalledSdk
             Toolchain = toolchain,
             Configuration = configuration,
             OutputDirectory = output,
-            // 켠 플러그인의 모듈도 빌드한다(UE처럼 타깃이 직접 참조하지 않아도 컴파일된다). 정적 링크이므로
-            // 실행 파일에는 참조한 모듈만 들어간다.
+            // 정적 링크이므로 실행 파일에는 참조한 모듈만 들어간다.
             RootDirectory = project,
-            Modules = modules,
-            Targets = rules.Target.Modules.Concat(moduleSet.IncludedPluginModules).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+            Modules = plan.Modules,
+            Targets = targets,
             ContextFingerprint = "rocks-installed-sdk-v1",
             MaxParallelism = BuildCommand.Jobs(options)
         }, cancellationToken);
@@ -395,6 +422,13 @@ public static class InstalledSdk
                 {
                     throw new InvalidDataException("Unverified SDK library.");
                 }
+            }
+
+            // 리플렉션 모듈은 descriptor와 명세를 함께 담는다(둘 다 검증된 SDK 파일).
+            if ((module.Descriptor is null) != (module.IdentityManifest is null) ||
+                (module.Descriptor is not null && (!manifest.Files.ContainsKey(module.Descriptor) || !manifest.Files.ContainsKey(module.IdentityManifest!))))
+            {
+                throw new InvalidDataException($"SDK module '{module.Name}' has incomplete or unverified reflection metadata.");
             }
         }
 

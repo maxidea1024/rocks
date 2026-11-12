@@ -6,10 +6,11 @@
 
 - `Game.rocksproject`는 프로젝트 기술자다(UE .uproject 대응). 엔진 버전·모듈(`SampleGame`)·대상 플랫폼을 적는다. 형식은 [저장소 구성](../../../Docs/Design/RepositoryLayout.ko.md)의 기술자 절을 따른다.
 - `Game.Build.cs`는 `SampleGame` 실행 모듈과 `ObjectRuntime` 의존성을 선언한다.
-- `Game.Target.cs`는 `Game` 타깃과 메타컴파일러가 처리할 `GameObject.h`를 지정한다.
-- `Game.rocksids.json`은 이 예제 타깃의 타입·필드 식별자를 보관한다. 소스의 매크로에는 식별자나 버전 숫자를 적지 않는다.
+- `Game.Target.cs`는 `Game` 타깃이 빌드할 모듈(`SampleGame`)을 고른다. 리플렉션 헤더는 모듈이 소유한다: `Game.Build.cs`의 `Metadata = ["GameObject.h"]`가 메타컴파일러가 처리할 헤더이고, 생성 헤더는 `<GameObject.generated.h>`로 include한다.
+- `SampleGame.rocksids.json`(모듈 이름 + `.rocksids.json`, `ModuleDirectory` = 프로젝트 루트)은 이 모듈의 타입·필드 식별자를 보관한다. 소스의 매크로에는 식별자를 적지 않는다.
 - `Source/GameObject.h`는 자체 `rocks::Object` 기반 클래스와 `ROCKS_CLASS`, 읽기 전용 `ROCKS_PROPERTY`를 선언한다.
-- `Source/Main.cpp`는 생성된 타입을 등록하고 객체를 만든 뒤 핸들로 조회하여 기본 체력 값이 100인지 검사한다. 성공 시 종료 코드는 0이다.
+- `Source/Main.cpp`는 모듈 집계 헤더 `<SampleGame/SampleGame.module.generated.h>`의 `rocks::generated::SampleGame::RegisterModuleTypes`로 이 모듈(과 리플렉션 타입을 가진 SDK 의존 모듈)의 타입을 등록하고, 객체를 만든 뒤 핸들로 조회하여 기본 체력 값이 100인지 검사한다. 성공 시 종료 코드는 0이다.
+- SDK 모듈의 리플렉션 타입(예: SDK가 담은 모듈의 `ROCKS_CLASS`)을 상속·참조하려면 그 모듈에 의존하고 헤더를 include한다. 게임 빌드는 SDK의 descriptor(`Metadata/<모듈>/<모듈>.rocksmeta.json`)를 import하므로 SDK 모듈을 다시 생성하지 않는다.
 
 템플릿 디렉터리를 SDK 외부의 새 게임 디렉터리로 복사한 뒤, 엔진 저장소에서 다음 명령을 실행한다. SDK는 게임 빌드에 사용할 플랫폼과 구성에 맞춰 미리 생성해야 한다. `SDK_경로`와 `게임_경로`는 실제 절대 경로로 바꾼다.
 

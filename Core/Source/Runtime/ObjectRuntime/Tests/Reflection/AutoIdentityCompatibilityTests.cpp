@@ -1,4 +1,4 @@
-#include "AutoIdentityFixture.generated.h"
+#include <ReflectionTestFixtures/AutoIdentityFixture.generated.h>
 #include <TestSupport/Test.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Object/GeneratedFieldAccess.h>

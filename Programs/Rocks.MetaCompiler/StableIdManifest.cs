@@ -23,6 +23,49 @@ internal sealed class StableIdManifest
 
     public IReadOnlyList<StableIdEntry> Entries => entries.Select(Copy).ToArray();
 
+    // 한 리비전의 모든 명세를 ID 기준으로 합친 뷰다(명세 위치 이동을 이력 검사가 삭제로 오인하지 않게 한다). 빈
+    // 목록은 빈 명세다. 같은 ID나 같은 이름이 두 파일에 있으면 InvalidDataException이므로 먼저 SetFailures로
+    // 파일과 함께 보고한다.
+    public static StableIdManifest Combine(IEnumerable<StableIdManifest> manifests) =>
+        new(manifests.SelectMany(manifest => manifest.entries));
+
+    // 명세 집합(타깃·리비전의 모든 명세)에서 같은 ID, 또는 같은 종류의 같은 이름·별칭이 두 파일에 나오는 경우를
+    // 파일 경로와 함께 돌려준다. 한 ID·한 이름은 한 명세에만 있다(타입을 옮길 때는 ids move). 은퇴 항목도 센다.
+    public static IReadOnlyList<string> SetFailures(IEnumerable<(string Path, StableIdManifest Manifest)> manifests)
+    {
+        var ids = new Dictionary<string, string>(StringComparer.Ordinal);
+        var names = new Dictionary<(string Kind, string Name), string>();
+        var failures = new List<string>();
+        foreach ((string path, StableIdManifest manifest) in manifests)
+        {
+            foreach (StableIdEntry entry in manifest.entries)
+            {
+                if (ids.TryGetValue(entry.Id, out string? first) && first != path)
+                {
+                    failures.Add($"ID {entry.Id} ({entry.Kind} {entry.Name}) appears in both {first} and {path}");
+                }
+                else
+                {
+                    ids[entry.Id] = path;
+                }
+
+                foreach (string name in entry.Aliases.Prepend(entry.Name))
+                {
+                    if (names.TryGetValue((entry.Kind, name), out string? owner) && owner != path)
+                    {
+                        failures.Add($"{entry.Kind} name {name} appears in both {owner} and {path}");
+                    }
+                    else
+                    {
+                        names[(entry.Kind, name)] = path;
+                    }
+                }
+            }
+        }
+
+        return failures;
+    }
+
     public static StableIdManifest Load(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -261,6 +304,46 @@ internal sealed class StableIdManifest
         entries.AddRange(next);
     }
 
+    // ids move의 원본 쪽: type과 그 필드(·중첩 타입은 거부) 항목을 ID·별칭·은퇴 상태째로 떼어 돌려준다.
+    public IReadOnlyList<StableIdEntry> Detach(string typeName)
+    {
+        ValidateKindAndName("type", typeName);
+        if (!entries.Any(value => value.Kind == "type" && value.Name == typeName))
+        {
+            throw new InvalidDataException($"type {typeName} does not exist in this manifest");
+        }
+
+        if (entries.Any(value => value.Kind == "type" && value.Name.StartsWith(typeName + "::", StringComparison.Ordinal)))
+        {
+            throw new InvalidDataException("Moving a type containing reflected nested types requires moving each nested type explicitly");
+        }
+
+        var moved = entries.Where(value => (value.Kind == "type" && value.Name == typeName) ||
+            (value.Kind == "field" && Owner(value.Name) == typeName)).Select(Copy).ToList();
+        var next = entries.Where(value => !moved.Any(item => item.Kind == value.Kind && item.Name == value.Name)).Select(Copy).ToList();
+        Validate(next);
+        entries.Clear();
+        entries.AddRange(next);
+        return moved;
+    }
+
+    // ids move의 대상 쪽: 떼어 낸 항목을 그대로 붙인다. 같은 항목이 이미 모두 있으면 아무것도 하지 않는다(중단 뒤 재실행).
+    public void Attach(IReadOnlyList<StableIdEntry> moved)
+    {
+        bool Same(StableIdEntry left, StableIdEntry right) => left.Kind == right.Kind && left.Name == right.Name &&
+            left.Id == right.Id && left.Retired == right.Retired && left.Aliases.Order(StringComparer.Ordinal)
+                .SequenceEqual(right.Aliases.Order(StringComparer.Ordinal), StringComparer.Ordinal);
+        if (moved.All(item => entries.Any(value => Same(value, item))))
+        {
+            return;
+        }
+
+        var next = entries.Select(Copy).Concat(moved.Select(Copy)).ToList();
+        Validate(next);
+        entries.Clear();
+        entries.AddRange(next);
+    }
+
     private static StableIdEntry RenameEntry(StableIdEntry entry, string name) =>
         entry with { Name = name, Aliases = entry.Aliases.Append(entry.Name).ToArray() };
 
@@ -279,7 +362,8 @@ internal sealed class StableIdManifest
                 retired = value.Retired
             }).ToArray()
         };
-        return Utf8.GetBytes(JsonSerializer.Serialize(document, new JsonSerializerOptions { WriteIndented = true }) + "\n");
+        // 줄바꿈 기본값은 플랫폼마다 다르므로(Windows CRLF) LF로 고정한다. 저장소 명세는 LF로 관리된다.
+        return Utf8.GetBytes(JsonSerializer.Serialize(document, new JsonSerializerOptions { WriteIndented = true, NewLine = "\n" }) + "\n");
     }
 
     private static Dictionary<string, JsonElement> Object(JsonElement node, string description, string[] required)
@@ -383,6 +467,7 @@ internal sealed class StableIdManifest
     }
 
     private static string Owner(string name) => name[..name.LastIndexOf("::", StringComparison.Ordinal)];
+
     private static void ValidateId(string id)
     {
         if (id is null || id.Length != 32 || !Guid.TryParseExact(id, "N", out Guid guid) || guid == Guid.Empty ||
@@ -393,5 +478,6 @@ internal sealed class StableIdManifest
     }
 
     private static bool IsLink(string path) => File.Exists(path) && new FileInfo(path).LinkTarget is not null;
+
     private static StableIdEntry Copy(StableIdEntry value) => value with { Aliases = value.Aliases.ToArray() };
 }

@@ -12,6 +12,7 @@ Console.CancelKeyPress += (_, e) =>
     e.Cancel = true;
     cancellation.Cancel();
 };
+
 try
 {
     return await BuildCommand.RunAsync(args, cancellation.Token);
@@ -113,13 +114,15 @@ namespace Rocks.Build.Cli
             Directory.CreateDirectory(output);
             await using var invocationLock = await OutputInvocationLock.AcquireAsync(output, cancellationToken);
             Directory.CreateDirectory(Path.Combine(output, "Generated"));
-
             var evidence = await BuildEvidence.StartAsync(root, Path.GetRelativePath(Path.Combine(root, "out"), output), toolchain.Environment);
             evidence.SetConfiguration(configuration.ToString(), targetName, configuration == NativeConfiguration.Asan ? "address" : "none", toolchain.CompilerPath, toolchain.Identity);
             try
             {
+                // 모듈 소유 메타데이터의 배치(생성 include 디렉터리·명세 경로·검증)를 타깃에서 도달하는 모듈에 대해 정한다.
+                // 아래 모든 단계가 이 결과를 쓰고, 검증 실패도 build-evidence에 기록된다.
+                var plan = MetadataLayout.Apply(context, rules.Modules, rules.Target.Modules);
                 var metaStart = System.Diagnostics.Stopwatch.GetTimestamp();
-                var metadata = await MetadataRunner.GenerateAsync(context, toolchain, rules.Modules, rules.Target,
+                var metadata = await MetadataRunner.GenerateAsync(context, toolchain, plan, rules.Target,
                     HostTool(root, "Rocks.MetaCompiler"), cancellationToken);
                 evidence.RecordStep("metadata", ["Rocks.MetaCompiler", targetName], metadata,
                     System.Diagnostics.Stopwatch.GetElapsedTime(metaStart));
@@ -129,7 +132,7 @@ namespace Rocks.Build.Cli
                     return 1;
                 }
 
-                var modules = rules.Modules.ToList();
+                var modules = plan.Modules.ToList();
                 var targets = rules.Target.Modules.ToList();
                 if (rules.Target.CheckPublicHeaders)
                 {
@@ -166,19 +169,12 @@ namespace Rocks.Build.Cli
                         }
                     }
 
-                    foreach (var unit in rules.Target.Metadata)
-                    {
-                        var path = Path.Combine(output, "HeaderChecks/" + Hashing.Sha256Text(unit.Output) + ".cpp");
-                        AtomicFile.WriteIfChanged(path, $"#include <{unit.Output}>\nint RocksGeneratedHeaderCheck_{Hashing.Sha256Text(unit.Output)}() noexcept {{ return 0; }}\n");
-                        sources.Add(path);
-                    }
-
                     modules.Add(new()
                     {
                         Name = "PublicHeaderChecks",
                         Sources = sources,
                         Dependencies = reached.Where(name => modules.Single(module => module.Name == name).Kind == NativeModuleKind.StaticLibrary).Order(StringComparer.Ordinal).ToArray(),
-                        PrivateIncludeDirectories = [root, Path.Combine(output, "Generated")]
+                        PrivateIncludeDirectories = [root]
                     });
                     targets.Add("PublicHeaderChecks");
                 }
@@ -206,7 +202,8 @@ namespace Rocks.Build.Cli
 
                 if (args[0] == "sdk")
                 {
-                    await InstalledSdk.ExportAsync(root, options["destination"], configuration, toolchain, InstalledSdk.Reachable(rules.Modules, targets), result, cancellationToken);
+                    await InstalledSdk.ExportAsync(root, options["destination"], configuration, toolchain, InstalledSdk.Reachable(plan.Modules, targets),
+                        plan.Generated, result, cancellationToken);
                 }
 
                 if (args[0] == "test")
@@ -276,7 +273,7 @@ namespace Rocks.Build.Cli
                         checks[1] = [.. checks[1], "--asan"];
                     }
 
-                    if (rules.Target.Metadata.Count != 0)
+                    if (plan.Generated.Count != 0)
                     {
                         checks.Add(["meta", "--root", root, "--compiler", toolchain.CompilerPath, "--metacompiler", HostTool(root, "Rocks.MetaCompiler"), "--json", Path.Combine(output, "tool-meta-report.json")]);
                     }
@@ -308,10 +305,13 @@ namespace Rocks.Build.Cli
         }
 
         internal static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+
         internal static string HostTool(string root, string name) => Path.Combine(root, "out/dotnet/bin", name, "Debug/net10.0", name + ".dll");
+
         internal static NativeConfiguration Configuration(Dictionary<string, string> options) =>
             Enum.TryParse<NativeConfiguration>(options.GetValueOrDefault("configuration", "Debug"), true, out var value) && Enum.IsDefined(value)
                 ? value : throw new ArgumentException("Configuration must be Debug, Development, Release, or Asan.");
+
         internal static int Jobs(Dictionary<string, string> options) =>
             int.TryParse(options.GetValueOrDefault("jobs", Math.Min(8, Environment.ProcessorCount).ToString()), out var value) &&
             value > 0 && value <= ProcessRunner.MaximumConcurrentProcesses

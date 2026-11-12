@@ -1,11 +1,12 @@
-#include "GameObject.generated.h"
+#include <SampleGame/SampleGame.module.generated.h>
 #include <Core/Memory/SystemAllocator.h>
 
 int main() {
     rocks::SystemAllocator allocator;
     rocks::TypeRegistry types(allocator);
-    auto registered = rocks::GeneratedType<sample::GameObject>::Register(types);
-    if (!registered) {
+    // 모듈 집계 헤더가 이 모듈과 의존 모듈의 리플렉션 타입을 base 먼저 등록한다.
+    rocks::ModuleRegistration registration(types, allocator);
+    if (!rocks::generated::SampleGame::RegisterModuleTypes(registration)) {
         return 1;
     }
     rocks::ObjectRegistry objects(allocator, types, {100, 1});

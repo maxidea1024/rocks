@@ -6,6 +6,7 @@ namespace Rocks.ToolTests;
 internal static class GeneratedBodyReviewTests
 {
     private const string Preamble = "#include <Meta/Annotations.h>\n#include <Object/Object.h>\nnamespace probe {\n";
+
     private const string ValidClass = "ROCKS_CLASS()\n" +
         "class Object : public rocks::Object {\n" +
         "    ROCKS_GENERATED_BODY()\n" +
@@ -79,7 +80,8 @@ internal static class GeneratedBodyReviewTests
     private sealed class Probe(Options options, IReadOnlyDictionary<string, string?> environment) : IDisposable
     {
         private readonly TemporaryDirectory temporary = new();
-        public string Output => temporary.FilePath("Probe.generated.h");
+
+        public string Output => MetaCompilerArguments.GeneratedPath(temporary.Root, "Probe.h");
 
         public async Task<ProcessResult> Run(string source)
         {
@@ -99,8 +101,8 @@ internal static class GeneratedBodyReviewTests
                 arguments.Add(generator);
             }
 
-            arguments.AddRange(["--input", temporary.FilePath("Probe.h"), "--include", "Probe.h",
-                "--output", Output, "--compiler", options.Required("compiler"), "--identity-manifest", identity]);
+            arguments.AddRange([.. MetaCompilerArguments.Single(temporary.Root, temporary.FilePath("Probe.h"), "Probe.h"),
+                "--compiler", options.Required("compiler"), "--identity-manifest", identity]);
             foreach (string directory in Directory.GetDirectories(Path.Combine(options.Root, "Core", "Source", "Runtime"))
                 .Select(module => Path.Combine(module, "Public")).Where(Directory.Exists).Order(StringComparer.Ordinal)
                 .Concat([options.Root, temporary.Root]))
@@ -120,6 +122,7 @@ internal static class GeneratedBodyReviewTests
         public async Task Reject(string source, string location, string reason)
         {
             const string previous = "previous accepted output\n";
+            Directory.CreateDirectory(Path.GetDirectoryName(Output)!);
             File.WriteAllText(Output, previous, new UTF8Encoding(false));
             ProcessResult result = await Run(source);
             Verify.That(result.ExitCode != 0, "invalid generated body accepted");

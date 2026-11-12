@@ -2,6 +2,7 @@ namespace Rocks.Build;
 
 // Android는 Windows·macOS host에서 NDK로 교차 빌드한다(그 밖의 host/target 조합은 거부).
 public enum NativePlatform { Windows, MacOS, Android }
+
 /// <summary>
 /// 빌드 구성이다(UE5.6 Debug·Development·Shipping 대응).
 /// <list type="bullet">
@@ -16,6 +17,7 @@ public enum NativePlatform { Windows, MacOS, Android }
 /// (Asan은 ROCKS_BUILD_DEBUG).
 /// </summary>
 public enum NativeConfiguration { Debug, Development, Release, Asan }
+
 public enum NativeModuleKind { StaticLibrary, Executable }
 
 /// <summary>
@@ -41,17 +43,27 @@ public enum NativeLanguage { Cpp, C }
 public sealed record NativeToolchain
 {
     public required NativePlatform Platform { get; init; }
+
     public required string CompilerPath { get; init; }
+
     public required string ArchiverPath { get; init; }
+
     public string? LinkerPath { get; init; }
+
     public required string Identity { get; init; }
+
     // Installed SDK 호환 판정용. 설치 경로를 제외한 compiler/target/SDK/deployment 계약의 digest다.
     public string AbiIdentity { get; init; } = "";
+
     public IReadOnlyDictionary<string, string?> Environment { get; init; } = new Dictionary<string, string?>();
+
     public IReadOnlyList<string> CompileArguments { get; init; } = [];
+
     public IReadOnlyList<string> LinkArguments { get; init; } = [];
+
     // SDK/런타임의 내용 변경을 검사할 파일 또는 디렉터리. 선언한 경로가 없으면 오류다.
     public IReadOnlyList<string> FingerprintPaths { get; init; } = [];
+
     public IReadOnlyList<string> RuntimeFiles { get; init; } = [];
 }
 
@@ -59,39 +71,75 @@ public sealed record NativeToolchain
 public sealed record NativeModuleInput
 {
     public required string Name { get; init; }
+
     public NativeModuleKind Kind { get; init; } = NativeModuleKind.StaticLibrary;
+
     public IReadOnlyList<string> Sources { get; init; } = [];
+
     public IReadOnlyList<string> PublicIncludeDirectories { get; init; } = [];
+
     public IReadOnlyList<string> PrivateIncludeDirectories { get; init; } = [];
+
     public IReadOnlyList<string> PublicDefines { get; init; } = [];
+
     public IReadOnlyList<string> PrivateDefines { get; init; } = [];
+
     public IReadOnlyList<string> Dependencies { get; init; } = [];
+
     public IReadOnlyList<string> AdditionalCompileArguments { get; init; } = [];
+
     public IReadOnlyList<string> AdditionalLinkArguments { get; init; } = [];
+
     // 링크할 플랫폼 시스템 라이브러리 이름이다(UE PublicSystemLibraries 대응). 접두사·확장자 없이 쓴다
     // (예: "user32", "d3d12", "log"). 최종 링크에서 Windows는 "<이름>.lib", 그 밖은 "-l<이름>"이 되며,
     // 의존하는 실행 파일의 링크로 전파된다. 플랫폼마다 다르면 규칙이 BuildContext.Platform으로 고른다.
     public IReadOnlyList<string> SystemLibraries { get; init; } = [];
+
     // 링크할 Apple framework 이름이다(UE PublicFrameworks 대응, 예: "CoreServices"). Apple toolchain에서만
     // "-framework <이름>"이 되며 다른 toolchain으로 빌드하는 요청에 있으면 입력 오류다. 전파는 SystemLibraries와 같다.
     public IReadOnlyList<string> Frameworks { get; init; } = [];
+
     public IReadOnlyList<string> PrebuiltLibraries { get; init; } = [];
+
     // include 디렉터리 밖의 forced include/생성 입력 등은 명시적으로 추가한다.
     public IReadOnlyList<string> AdditionalInputs { get; init; } = [];
+
     // 이 모듈 소스에만 적용하는 최적화 재정의다. dependency로 전파하지 않는다.
     public CodeOptimization Optimization { get; init; } = CodeOptimization.Default;
+
+    // 리플렉션 메타데이터 헤더의 include 철자다(이 모듈의 public 또는 private include 디렉터리 기준,
+    // Docs/Design/ReflectionFoundations.ko.md 1.1절). 비어 있지 않으면 ModuleDirectory가 필요하다.
+    // 빌드는 생성 include 디렉터리(<out>/Generated/<Name>/Public·Private)를 이 모듈에 더한다.
+    public IReadOnlyList<string> Metadata { get; init; } = [];
+
+    // 프로젝트 루트 기준 모듈 폴더다. identity 명세 <ModuleDirectory>/<Name>.rocksids.json의 위치를 정한다.
+    public string? ModuleDirectory { get; init; }
+
+    // 설치 SDK 모듈 전용: 미리 생성된 descriptor와 identity 명세다. 다시 생성하지 않고 import만 한다.
+    // Metadata와 함께 쓸 수 없다.
+    public ImportedMetadata? ImportedMetadata { get; init; }
 }
+
+/// <summary>설치 SDK가 동봉한 모듈 메타데이터다(절대 경로).</summary>
+public sealed record ImportedMetadata(string Descriptor, string IdentityManifest);
 
 public sealed record NativeBuildRequest
 {
     public required NativeToolchain Toolchain { get; init; }
+
     public required string OutputDirectory { get; init; }
+
     public required IReadOnlyList<NativeModuleInput> Modules { get; init; }
+
     public string RootDirectory { get; init; } = Directory.GetCurrentDirectory();
+
     public NativeConfiguration Configuration { get; init; } = NativeConfiguration.Debug;
+
     // 빈 목록은 모든 모듈을 뜻한다. 지정하면 도달하는 dependency만 빌드한다.
     public IReadOnlyList<string> Targets { get; init; } = [];
+
     public string ContextFingerprint { get; init; } = "";
+
     public int MaxParallelism { get; init; } = 1;
 }
 
@@ -101,10 +149,16 @@ public sealed record NativeActionResult(string Id, string Module, string Kind, b
 public sealed record NativeBuildResult
 {
     public required bool Succeeded { get; init; }
+
     public required int ExecutedActions { get; init; }
+
     public required int SkippedActions { get; init; }
+
     public required IReadOnlyDictionary<string, string> ModuleOutputs { get; init; }
+
     public required IReadOnlyList<NativeActionResult> Actions { get; init; }
+
     public required string CompilationDatabasePath { get; init; }
+
     public string? Failure { get; init; }
 }

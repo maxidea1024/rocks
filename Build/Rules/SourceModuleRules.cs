@@ -44,6 +44,16 @@ public abstract class SourceModuleRules : ModuleRules
     protected string ModuleDirectory => $"{Layer}/Source/{Group}/{ModuleName}";
 
     /// <summary>
+    /// 리플렉션 메타데이터 헤더(ROCKS_CLASS 선언)의 include 철자다. Public/ 또는 Private/ 기준이다. 비어 있지 않으면
+    /// 이 모듈 폴더에 identity 명세 <c>&lt;ModuleName&gt;.rocksids.json</c>이 있어야 한다. 예:
+    /// <code>
+    /// protected override IReadOnlyList&lt;string&gt; Metadata =&gt; ["ReflectionTestFixtures/ReflectionFixture.h"];
+    /// </code>
+    /// 생성 헤더는 <c>&lt;ReflectionTestFixtures/ReflectionFixture.generated.h&gt;</c>로 include한다.
+    /// </summary>
+    protected virtual IReadOnlyList<string> Metadata => [];
+
+    /// <summary>
     /// 이 모듈 소스에만 쓰는 include 경로다(의존 모듈로 전파하지 않는다). 외부 라이브러리 adapter가 쓴다.
     /// 예: <c>ThirdPartyModuleRules.ConsumerIncludeDirectories(context, "Zstd")</c>.
     /// </summary>
@@ -61,13 +71,17 @@ public abstract class SourceModuleRules : ModuleRules
             PrivateIncludeDirectories = PrivateIncludeDirectories(context),
             PrivateDefines = PrivateDefines(context),
             Dependencies = RequiredModules,
-            Optimization = Optimization
+            Optimization = Optimization,
+            Metadata = Metadata,
+            ModuleDirectory = ModuleDirectory
         }
         : new()
         {
             Name = ModuleName,
             PublicIncludeDirectories = [context.PathInRoot($"{ModuleDirectory}/Public")],
-            Dependencies = RequiredModules
+            Dependencies = RequiredModules,
+            Metadata = Metadata,
+            ModuleDirectory = ModuleDirectory
         };
 }
 

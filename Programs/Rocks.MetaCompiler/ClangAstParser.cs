@@ -4,16 +4,25 @@ using System.Text.Json;
 
 namespace Rocks.MetaCompiler;
 
-internal sealed class ClangAstParser(string inputFile, StableIdManifest? manifest = null)
+// inputs는 이 모듈의 리플렉션 헤더다. 그 헤더에 물리적으로 있는 선언만 이 모듈 타입이 되고, 나머지 리플렉션
+// 선언은 imported(의존 모듈 descriptor)에 같은 이름·같은 헤더 파일로 있어야 한다(RMC2003).
+// resolveHeader는 descriptor의 header 철자를 이번 include 검색 순서로 찾은 정규 경로다(없으면 null).
+internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableIdManifest? manifest,
+    IReadOnlyDictionary<string, ClassModel> imported, Func<string, string?> resolveHeader)
 {
+    // 진단의 기본 위치로 쓰는 첫 입력이다.
+    private readonly string inputFile = inputs[0].Path;
     private readonly Dictionary<string, ClassModel> classes = new(StringComparer.Ordinal);
+
     private sealed record PrefixBinding(object?[] Arguments, SourceSite Site);
+
     private readonly Dictionary<string, PrefixBinding> prefixClasses = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> identifiers = new(StringComparer.Ordinal);
+
     private readonly HashSet<string> propertyMarkers = new(OperatingSystem.IsWindows()
         ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
 
-    private SourceSite currentSite = new(inputFile, 1);
+    private SourceSite currentSite = new(inputs[0].Path, 1);
     private readonly Dictionary<string, byte[]> sourceBytes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (string? File, int Offset)> locations = new(StringComparer.Ordinal);
     private string? serializedFile;
@@ -23,18 +32,48 @@ internal sealed class ClangAstParser(string inputFile, StableIdManifest? manifes
     {
         using JsonDocument document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 2048 });
         IndexLocations(document.RootElement);
-        try { BindPrefixMarkers(document.RootElement); ValidateAnnotationPlacement(document.RootElement, false); currentSite = UnknownSite(); Visit(document.RootElement, [], false, false); }
-        catch (MetadataException error) { throw error.At(currentSite); }
-        if (classes.Count == 0) throw new MetadataException("no ROCKS_CLASS definitions found in the translation unit");
-        return SchemaValidator.Validate(classes);
+        try
+        {
+            BindPrefixMarkers(document.RootElement);
+            ValidateAnnotationPlacement(document.RootElement, false);
+            currentSite = UnknownSite();
+            Visit(document.RootElement, [], false, false);
+        }
+        catch (MetadataException error)
+        {
+            throw error.At(currentSite);
+        }
+
+        if (classes.Count == 0)
+        {
+            throw new MetadataException("no ROCKS_CLASS definitions found in the module's reflected headers");
+        }
+
+        foreach (ModuleInput input in inputs)
+        {
+            if (!classes.Values.Any(model => model.Header == input.Include))
+            {
+                throw new MetadataException($"reflected header declares no ROCKS_CLASS: {input.Include}", "RMC2000",
+                    "Remove the header from the module's Metadata list or declare its reflected types.").At(new(input.Path, 1));
+            }
+        }
+
+        return SchemaValidator.Validate(classes, imported);
     }
+
+    // 선언의 물리 파일이 이 모듈 입력이면 그 입력을, 아니면 null을 돌려준다.
+    private ModuleInput? OwningInput(string? file) =>
+        file is null ? null : inputs.FirstOrDefault(input => CanonicalPath.Equals(input.Path, file));
 
     private static IEnumerable<JsonElement> Children(JsonElement node) =>
         node.TryGetProperty("inner", out JsonElement inner) ? inner.EnumerateArray() : [];
+
     private static string Text(JsonElement node, string property) =>
         node.TryGetProperty(property, out JsonElement value) ? value.GetString() ?? "" : "";
+
     private static bool Flag(JsonElement node, string property) =>
         node.TryGetProperty(property, out JsonElement value) && value.ValueKind == JsonValueKind.True;
+
     private static string TypeSpelling(JsonElement node)
     {
         JsonElement type = node.GetProperty("type");
@@ -46,14 +85,27 @@ internal sealed class ClangAstParser(string inputFile, StableIdManifest? manifes
     {
         string kind = Text(node, "kind");
         if (kind == "ConstantExpr" && BigInteger.TryParse(Text(node, "value"), NumberStyles.Integer,
-                CultureInfo.InvariantCulture, out BigInteger evaluated)) return evaluated;
-        if (kind == "StringLiteral") return ClangLiteral.Decode(Text(node, "value"));
-        if (kind == "IntegerLiteral") return BigInteger.Parse(Text(node, "value"), CultureInfo.InvariantCulture);
+                CultureInfo.InvariantCulture, out BigInteger evaluated))
+        {
+            return evaluated;
+        }
+
+        if (kind == "StringLiteral")
+        {
+            return ClangLiteral.Decode(Text(node, "value"));
+        }
+
+        if (kind == "IntegerLiteral")
+        {
+            return BigInteger.Parse(Text(node, "value"), CultureInfo.InvariantCulture);
+        }
+
         if (kind is "ConstantExpr" or "ImplicitCastExpr" or "ParenExpr")
         {
             JsonElement[] children = Children(node).ToArray();
             return children.Length == 1 ? Constant(children[0]) : null;
         }
+
         return null;
     }
 
@@ -62,29 +114,52 @@ internal sealed class ClangAstParser(string inputFile, StableIdManifest? manifes
         object?[]? result = null;
         foreach (JsonElement child in Children(node))
         {
-            if (Text(child, "kind") != "AnnotateAttr") continue;
+            if (Text(child, "kind") != "AnnotateAttr")
+            {
+                continue;
+            }
+
             object?[] arguments = Children(child).Select(Constant).ToArray();
-            if (arguments.Length == 0 || arguments[0] is not string name || name != marker) continue;
-            if (result is not null) throw new MetadataException($"duplicate {marker} annotation on {Text(node, "name")}");
+            if (arguments.Length == 0 || arguments[0] is not string name || name != marker)
+            {
+                continue;
+            }
+
+            if (result is not null)
+            {
+                throw new MetadataException($"duplicate {marker} annotation on {Text(node, "name")}");
+            }
+
             result = arguments[1..];
         }
+
         return result;
     }
 
     private string Identity(string kind, string symbol)
     {
         if (manifest is null)
+        {
             throw new MetadataException($"{symbol}: stable identity requires an identity manifest", "RMC2100",
                 "Pass --identity-manifest and register this declaration with the identity authoring tool.");
+        }
+
         string id;
-        try { id = manifest.Resolve(kind, symbol); }
+        try
+        {
+            id = manifest.Resolve(kind, symbol);
+        }
         catch (InvalidDataException error)
         {
             throw new MetadataException($"{symbol}: stable identity unavailable: {error.Message}", "RMC2100",
                 "Use the identity authoring tool to register or explicitly rename the declaration; ordinary builds never modify the manifest.");
         }
+
         if (!identifiers.TryAdd(id, symbol))
+        {
             throw new MetadataException($"{symbol}: duplicate stable ID already used by {identifiers[id]}");
+        }
+
         return id;
     }
 
@@ -92,12 +167,16 @@ internal sealed class ClangAstParser(string inputFile, StableIdManifest? manifes
     {
         object?[]? modern = Annotation(member, "rocks.field.arguments");
         if (modern is null || modern.Length != 1 || modern[0] is not string raw)
+        {
             throw new MetadataException($"{symbol}: every nonstatic field requires a PROPERTY annotation");
+        }
+
         return raw;
     }
 
     private static bool HasFieldAnnotation(JsonElement node) =>
         Annotation(node, "rocks.field.arguments") is not null;
+
     private void Visit(JsonElement node, string[] scope, bool anonymous, bool templated)
     {
         string kind = Text(node, "kind");
@@ -105,10 +184,18 @@ internal sealed class ClangAstParser(string inputFile, StableIdManifest? manifes
         {
             string name = Text(node, "name");
             foreach (JsonElement child in Children(node))
+            {
                 Visit(child, name.Length == 0 ? scope : [.. scope, name], anonymous || name.Length == 0, templated);
+            }
+
             return;
         }
-        if (kind is "ClassTemplateDecl" or "ClassTemplateSpecializationDecl") templated = true;
+
+        if (kind is "ClassTemplateDecl" or "ClassTemplateSpecializationDecl")
+        {
+            templated = true;
+        }
+
         if (kind == "CXXRecordDecl" && Flag(node, "completeDefinition"))
         {
             string name = Text(node, "name");
@@ -119,21 +206,66 @@ internal sealed class ClangAstParser(string inputFile, StableIdManifest? manifes
             {
                 UpdateSite(node);
                 SourceSite classSite = currentSite;
-                if (prefix is not null) currentSite = prefix.Site;
+                if (prefix is not null)
+                {
+                    currentSite = prefix.Site;
+                }
+
                 if (anonymous || templated || name.Length == 0)
+                {
                     throw new MetadataException($"{qualified}: anonymous/template/invalid reflected type is unsupported");
+                }
+
                 if (mark.Length != 1 || mark[0] is not string classSpecifiers)
+                {
                     throw new MetadataException($"{qualified}: invalid CLASS annotation arguments");
+                }
+
+                // identity 조회보다 먼저 소유 모듈을 가린다: 의존 모듈의 리플렉션 선언을 이 모듈 명세에서 찾지 않는다.
+                string? physical = locations.TryGetValue(Text(node, "id"), out var declared) ? declared.File : null;
+                ModuleInput? owner = OwningInput(physical);
+                if (owner is null)
+                {
+                    if (!imported.TryGetValue(qualified, out ClassModel? external) || physical is null ||
+                        resolveHeader(external.Header) is not string externalFile || !CanonicalPath.Equals(externalFile, physical))
+                    {
+                        throw new MetadataException($"{qualified}: reflected declaration is neither in this module's Metadata headers nor in an imported descriptor (same name and header)",
+                            "RMC2003", "Add the header to the owning module's Metadata list and depend on that module; do not redeclare reflected types.");
+                    }
+
+                    foreach (JsonElement child in Children(node))
+                    {
+                        if (Text(child, "kind") is "CXXRecordDecl" or "ClassTemplateDecl")
+                        {
+                            Visit(child, name.Length == 0 ? scope : [.. scope, name], anonymous, templated);
+                        }
+                    }
+
+                    return;
+                }
+
                 bool explicitAbstract = Specifiers.Class(classSpecifiers, qualified);
                 string id = Identity("type", qualified);
                 currentSite = classSite;
                 JsonElement[] bases = node.TryGetProperty("bases", out JsonElement baseArray) ? baseArray.EnumerateArray().ToArray() : [];
                 if (bases.Length != 1 || Text(bases[0], "access") != "public" || Flag(bases[0], "isVirtual"))
+                {
                     throw new MetadataException($"{qualified}: exactly one public nonvirtual Object/reflected base is required");
+                }
+
                 bool abstractType = node.TryGetProperty("definitionData", out JsonElement definition) && Flag(definition, "isAbstract");
 
-                ClassModel model = new() { Name = qualified, Id = id, Site = currentSite, Version = 1,
-                    Base = TypeSpelling(bases[0]), Abstract = abstractType || explicitAbstract };
+                ClassModel model = new()
+                {
+                    Name = qualified,
+                    Id = id,
+                    Site = currentSite,
+                    Version = 1,
+                    Base = TypeSpelling(bases[0]),
+                    Abstract = abstractType || explicitAbstract,
+                    Header = owner.Include,
+                    Private = owner.Private
+                };
                 JsonElement[] members = Children(node).ToArray();
                 bool generatedBody = members.Any(member => Annotation(member, "rocks.generated") is not null);
                 string access = Text(node, "tagUsed") == "class" ? "private" : "public";
@@ -142,33 +274,71 @@ internal sealed class ClangAstParser(string inputFile, StableIdManifest? manifes
                     UpdateSite(member);
                     string memberKind = Text(member, "kind");
                     string memberName = Text(member, "name");
-                    if (memberKind == "AccessSpecDecl") access = Text(member, "access");
+                    if (memberKind == "AccessSpecDecl")
+                    {
+                        access = Text(member, "access");
+                    }
+
                     if (memberKind == "CXXMethodDecl" && memberName == "Trace")
+                    {
                         throw new MetadataException($"{qualified}: manual Trace conflicts with complete generated field tracing");
+                    }
+
                     if (memberKind == "VarDecl" && HasFieldAnnotation(member))
+                    {
                         throw new MetadataException($"{qualified}: static fields cannot carry reflected field annotations");
-                    if (memberKind != "FieldDecl") continue;
+                    }
+
+                    if (memberKind != "FieldDecl")
+                    {
+                        continue;
+                    }
+
                     string symbol = qualified + "::" + memberName;
                     string fieldSpecifiers = FieldArguments(member, symbol);
                     if (memberName.Length == 0 || Flag(member, "isBitfield"))
+                    {
                         throw new MetadataException($"{symbol}: only named non-bitfield members are supported");
+                    }
+
                     if (access != "public" && !generatedBody)
+                    {
                         throw new MetadataException($"{symbol}: private/protected PROPERTY requires ROCKS_GENERATED_BODY");
-                    model.OwnFields.Add(new FieldModel { Id = Identity("field", symbol), Site = currentSite, Name = memberName,
-                        Owner = qualified, NativeSpelling = TypeSpelling(member), Spec = Specifiers.Property(fieldSpecifiers, symbol) });
+                    }
+
+                    model.OwnFields.Add(new FieldModel
+                    {
+                        Id = Identity("field", symbol),
+                        Site = currentSite,
+                        Name = memberName,
+                        Owner = qualified,
+                        NativeSpelling = TypeSpelling(member),
+                        Spec = Specifiers.Property(fieldSpecifiers, symbol)
+                    });
                 }
+
                 classes.Add(qualified, model);
             }
+
             foreach (JsonElement child in Children(node))
+            {
                 if (Text(child, "kind") is "CXXRecordDecl" or "ClassTemplateDecl")
+                {
                     Visit(child, name.Length == 0 ? scope : [.. scope, name], anonymous, templated);
+                }
+            }
+
             return;
         }
-        foreach (JsonElement child in Children(node)) Visit(child, scope, anonymous, templated);
+
+        foreach (JsonElement child in Children(node))
+        {
+            Visit(child, scope, anonymous, templated);
+        }
     }
 
     // 마커는 바로 뒤의 완전한 class/struct에만 결합한다. lexical scope·실제 파일과
-    // 비활성 전처리 영역을 확인하지 않은 채 AST 이웃만 믿으면 다른 타입을 반영할 수 있다.
+    // 비활성 전처리 영역을 확인하지 않은 채 AST 이웃만 믿으면 다른 타입을 리플렉션할 수 있다.
     private void BindPrefixMarkers(JsonElement parent)
     {
         JsonElement[] children = Children(parent).ToArray();
@@ -185,19 +355,30 @@ internal sealed class ClangAstParser(string inputFile, StableIdManifest? manifes
                     string parentKind = Text(parent, "kind");
                     if (marked.Length != 1 || Text(marker, "name").Length != 0 ||
                         parentKind is not ("TranslationUnitDecl" or "NamespaceDecl" or "CXXRecordDecl"))
+                    {
                         throw new MetadataException("ROCKS_CLASS marker must be a standalone declaration in a namespace or class scope");
+                    }
+
                     if (index + 1 >= children.Length || Text(children[index + 1], "kind") != "CXXRecordDecl" ||
                         !Flag(children[index + 1], "completeDefinition") ||
                         Text(children[index + 1], "tagUsed") is not ("class" or "struct"))
+                    {
                         throw new MetadataException("ROCKS_CLASS must be immediately followed by a complete class or struct definition",
                             hint: "Place ROCKS_CLASS immediately before its class definition; put both inside the same #if block.");
+                    }
+
                     JsonElement target = children[index + 1];
                     if (Annotation(target, "rocks.type") is not null)
+                    {
                         throw new MetadataException("ROCKS_CLASS prefix marker and direct rocks.type annotation cannot both annotate the same class");
+                    }
+
                     SourceSite markerSite = currentSite;
                     VerifyPrefixSource(marked[0], target);
                     if (!prefixClasses.TryAdd(Text(target, "id"), new PrefixBinding(Annotation(marked[0], "rocks.class.marker")!, markerSite)))
+                    {
                         throw new MetadataException("duplicate ROCKS_CLASS marker for the same class");
+                    }
                 }
             }
             // 다른 AST 항목도 재귀 검사한다. 함수/지역 class의 마커는 무시하지 않고 거부한다.
@@ -212,19 +393,26 @@ internal sealed class ClangAstParser(string inputFile, StableIdManifest? manifes
             markLocation.File is null || targetLocation.File is null ||
             !File.Exists(markLocation.File) || !File.Exists(targetLocation.File) ||
             !CanonicalPath.Equals(markLocation.File, targetLocation.File))
+        {
             throw new MetadataException("ROCKS_CLASS and class must have the same known physical source file",
                 hint: "Place the marker and class directly in one source file; macro-generated or ambiguous locations are unsupported.");
+        }
+
         if (!target.TryGetProperty("range", out JsonElement range) ||
             !range.TryGetProperty("begin", out JsonElement begin) ||
             begin.TryGetProperty("expansionLoc", out _) ||
             !begin.TryGetProperty("offset", out JsonElement classOffset) || !classOffset.TryGetInt32(out int end))
+        {
             throw new MetadataException("ROCKS_CLASS target location is macro-generated or ambiguous",
                 hint: "Write the class keyword directly after ROCKS_CLASS; wrapper macros are unsupported.");
+        }
+
         if (!sourceBytes.TryGetValue(markLocation.File, out byte[]? bytes))
         {
             bytes = File.ReadAllBytes(markLocation.File);
             sourceBytes.Add(markLocation.File, bytes);
         }
+
         PrefixSourceVerifier.Verify(bytes, markLocation.Offset, end);
     }
 
@@ -234,25 +422,42 @@ internal sealed class ClangAstParser(string inputFile, StableIdManifest? manifes
         string kind = Text(node, "kind");
         UpdateSite(node);
         if (Annotation(node, "rocks.type") is not null || Annotation(node, "rocks.field") is not null)
+        {
             throw new MetadataException("legacy direct reflection annotations are unsupported; use ROCKS_CLASS/ROCKS_PROPERTY");
+        }
+
         bool classAnnotation = prefixClasses.ContainsKey(Text(node, "id"));
         bool fieldAnnotation = HasFieldAnnotation(node);
         object?[]? generated = Annotation(node, "rocks.generated");
         if (classAnnotation && (kind != "CXXRecordDecl" || !Flag(node, "completeDefinition")))
+        {
             throw new MetadataException("ROCKS_CLASS must annotate a complete class definition");
+        }
+
         if (fieldAnnotation && (kind != "FieldDecl" || !reflectedOwner))
+        {
             throw new MetadataException("ROCKS_PROPERTY must annotate a nonstatic data field owned by a reflected CLASS");
-        if (fieldAnnotation) VerifyPropertySource(node);
+        }
+
+        if (fieldAnnotation)
+        {
+            VerifyPropertySource(node);
+        }
+
         if (generated is not null)
         {
             string signature = node.TryGetProperty("type", out JsonElement type) ? Text(type, "qualType") : "";
             if (kind != "CXXMethodDecl" || !directReflectedMember ||
                 Text(node, "name") != "rocksGeneratedAccessMarker" ||
                 Text(node, "storageClass") != "static" || signature != "void () noexcept" || generated.Length != 0)
+            {
                 throw new MetadataException("ROCKS_GENERATED_BODY marker must be a static noexcept marker directly owned by a reflected CLASS",
                     hint: "Place exactly one ROCKS_GENERATED_BODY() directly inside a reflected class; do not hand-write or attach its annotation elsewhere.");
+            }
+
             VerifyGeneratedBodySource(node, directOwnerFile);
         }
+
         JsonElement[] children = Children(node).ToArray();
         if (kind == "CXXRecordDecl")
         {
@@ -264,13 +469,17 @@ internal sealed class ClangAstParser(string inputFile, StableIdManifest? manifes
                     hint: "Remove the duplicate and leave one ROCKS_GENERATED_BODY() in the reflected class.");
             }
         }
-        // 직접 소유자가 반영 클래스인 경우에만 generated marker를 허용한다. 중첩 클래스나
+
+        // 직접 소유자가 리플렉션 클래스인 경우에만 generated marker를 허용한다. 중첩 클래스나
         // method-local 선언에 조상 클래스의 권한이 전파되지 않도록 별도로 구분한다.
         bool childOwner = kind == "CXXRecordDecl" ? classAnnotation : reflectedOwner;
         bool directMember = kind == "CXXRecordDecl" && classAnnotation && Flag(node, "completeDefinition");
         string? ownerFile = directMember && locations.TryGetValue(Text(node, "id"), out var ownerLocation)
             ? ownerLocation.File : null;
-        foreach (JsonElement child in children) ValidateAnnotationPlacement(child, childOwner, directMember, ownerFile);
+        foreach (JsonElement child in children)
+        {
+            ValidateAnnotationPlacement(child, childOwner, directMember, ownerFile);
+        }
     }
 
     // attribute의 expansion과 필드 시작이 직접 작성된 동일 매크로에서 시작하는지 확인한다.
@@ -280,14 +489,19 @@ internal sealed class ClangAstParser(string inputFile, StableIdManifest? manifes
         if (!locations.TryGetValue(Text(field, "id"), out var declaration) ||
             declaration.File is null || !File.Exists(declaration.File) || declaration.Offset < 0 ||
             !field.TryGetProperty("loc", out JsonElement location) || location.TryGetProperty("expansionLoc", out _))
+        {
             throw InvalidPropertySource();
+        }
+
         JsonElement attribute = Children(field).FirstOrDefault(child => Text(child, "kind") == "AnnotateAttr" &&
             Children(child).Select(Constant).FirstOrDefault() is string marker && marker == "rocks.field.arguments");
         if (attribute.ValueKind == JsonValueKind.Undefined ||
             !TryExpansion(attribute, out string? attrFile, out int begin) || attrFile is null ||
             !CanonicalPath.Equals(attrFile, declaration.File) ||
             begin < 0 || begin >= declaration.Offset)
+        {
             throw InvalidPropertySource();
+        }
 
         // LLVM Clang은 필드 범위 시작을 매크로 확장으로, Apple Clang은 매크로 바로 뒤
         // 타입의 직접 위치로 기록한다. 후자의 경우 실제 확장 위치는 attribute에 명시된
@@ -296,7 +510,9 @@ internal sealed class ClangAstParser(string inputFile, StableIdManifest? manifes
         if (TryExpansion(field, out string? fieldFile, out int fieldExpansion))
         {
             if (fieldFile is null || !CanonicalPath.Equals(fieldFile, declaration.File) || fieldExpansion != begin)
+            {
                 throw InvalidPropertySource();
+            }
         }
         else
         {
@@ -305,100 +521,181 @@ internal sealed class ClangAstParser(string inputFile, StableIdManifest? manifes
                 direct.TryGetProperty("expansionLoc", out _) || direct.TryGetProperty("spellingLoc", out _) ||
                 !direct.TryGetProperty("offset", out JsonElement offset) || !offset.TryGetInt32(out directFieldBegin) ||
                 directFieldBegin <= begin || directFieldBegin > declaration.Offset)
+            {
                 throw InvalidPropertySource();
+            }
+
             string directFile = Text(direct, "file");
             if (directFile.Length != 0 && (!File.Exists(directFile) || !CanonicalPath.Equals(directFile, declaration.File)))
+            {
                 throw InvalidPropertySource();
+            }
+
             string locationParent = location.TryGetProperty("includedFrom", out JsonElement locationInclude)
                 ? Text(locationInclude, "file") : "";
             string directParent = direct.TryGetProperty("includedFrom", out JsonElement directInclude)
                 ? Text(directInclude, "file") : "";
             if (!string.Equals(locationParent.Replace('\\', '/'), directParent.Replace('\\', '/'),
                     OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            {
                 throw InvalidPropertySource();
+            }
         }
+
         if (!sourceBytes.TryGetValue(declaration.File, out byte[]? bytes))
         {
             bytes = File.ReadAllBytes(declaration.File);
             sourceBytes.Add(declaration.File, bytes);
         }
-        if (declaration.Offset >= bytes.Length) throw InvalidPropertySource();
+
+        if (declaration.Offset >= bytes.Length)
+        {
+            throw InvalidPropertySource();
+        }
+
         int markerLine = 1;
         for (int index = 0; index < begin; ++index)
-            if (bytes[index] == (byte)'\n') ++markerLine;
+        {
+            if (bytes[index] == (byte)'\n')
+            {
+                ++markerLine;
+            }
+        }
+
         currentSite = new(declaration.File, markerLine);
         string key = CanonicalPath.Resolve(declaration.File) + "\0" + begin.ToString(CultureInfo.InvariantCulture);
         if (!propertyMarkers.Add(key))
+        {
             throw new MetadataException("each PROPERTY must directly annotate exactly one field",
                 hint: "Declare each field separately with its own ROCKS_PROPERTY macro.");
+        }
 
         ReadOnlySpan<byte> macro = "ROCKS_PROPERTY"u8;
         int cursor = begin;
         if (cursor > bytes.Length - macro.Length || !bytes.AsSpan(cursor, macro.Length).SequenceEqual(macro))
+        {
             throw InvalidPropertySource();
+        }
+
         cursor += macro.Length;
         SkipTrivia();
-        if (cursor >= declaration.Offset || bytes[cursor++] != (byte)'(') throw InvalidPropertySource();
+        if (cursor >= declaration.Offset || bytes[cursor++] != (byte)'(')
+        {
+            throw InvalidPropertySource();
+        }
+
         int depth = 1;
         while (cursor < declaration.Offset && depth != 0)
         {
             byte value = bytes[cursor++];
-            if (value == (byte)'(') ++depth;
-            else if (value == (byte)')') --depth;
-            else if (value is (byte)'"' or (byte)'\'') SkipQuoted(value);
+            if (value == (byte)'(')
+            {
+                ++depth;
+            }
+            else if (value == (byte)')')
+            {
+                --depth;
+            }
+            else if (value is (byte)'"' or (byte)'\'')
+            {
+                SkipQuoted(value);
+            }
             else if (value == (byte)'/' && cursor < declaration.Offset && bytes[cursor] is (byte)'/' or (byte)'*')
             {
                 --cursor;
                 SkipTrivia();
             }
-            else if (value is (byte)'#' or (byte)'\\') throw InvalidPropertySource();
+            else if (value is (byte)'#' or (byte)'\\')
+            {
+                throw InvalidPropertySource();
+            }
         }
-        if (depth != 0) throw InvalidPropertySource();
+
+        if (depth != 0)
+        {
+            throw InvalidPropertySource();
+        }
+
         if (directFieldBegin >= 0)
         {
             // 직접 타입 위치인 경우 매크로에서 타입까지는 공백/주석만 있어야 한다.
             // 다른 매크로·attribute·#include를 중간에 끼워 넣어 출처를 위조하지 못한다.
             SkipTrivia();
-            if (cursor != directFieldBegin) throw InvalidPropertySource();
+            if (cursor != directFieldBegin)
+            {
+                throw InvalidPropertySource();
+            }
         }
         // 전처리 지시문은 CLASS marker처럼 매크로와 선언 사이에 넣지 않는다.
         // 타입의 모든 구문은 Clang이 판단하고, 이 경계는 토큰 출처만 보수적으로 점검한다.
         while (cursor < declaration.Offset)
         {
             byte value = bytes[cursor++];
-            if (value is (byte)'"' or (byte)'\'') SkipQuoted(value);
+            if (value is (byte)'"' or (byte)'\'')
+            {
+                SkipQuoted(value);
+            }
             else if (value == (byte)'/' && cursor < declaration.Offset && bytes[cursor] is (byte)'/' or (byte)'*')
             {
                 --cursor;
                 SkipTrivia();
             }
             else if (value == (byte)'#' || (value == (byte)'\\' && cursor < declaration.Offset &&
-                     bytes[cursor] is (byte)'\r' or (byte)'\n')) throw InvalidPropertySource();
+                     bytes[cursor] is (byte)'\r' or (byte)'\n'))
+            {
+                throw InvalidPropertySource();
+            }
         }
 
         void SkipQuoted(byte quote)
         {
-            if (quote == (byte)'"' && cursor >= 2 && bytes[cursor - 2] == (byte)'R') throw InvalidPropertySource();
+            if (quote == (byte)'"' && cursor >= 2 && bytes[cursor - 2] == (byte)'R')
+            {
+                throw InvalidPropertySource();
+            }
+
             while (cursor < declaration.Offset)
             {
                 byte next = bytes[cursor++];
-                if (next == quote) return;
+                if (next == quote)
+                {
+                    return;
+                }
+
                 if (next == (byte)'\\')
                 {
-                    if (cursor >= declaration.Offset || bytes[cursor] is (byte)'\r' or (byte)'\n') throw InvalidPropertySource();
+                    if (cursor >= declaration.Offset || bytes[cursor] is (byte)'\r' or (byte)'\n')
+                    {
+                        throw InvalidPropertySource();
+                    }
+
                     ++cursor;
                 }
-                else if (next is (byte)'\r' or (byte)'\n') throw InvalidPropertySource();
+                else if (next is (byte)'\r' or (byte)'\n')
+                {
+                    throw InvalidPropertySource();
+                }
             }
+
             throw InvalidPropertySource();
         }
+
         void SkipTrivia()
         {
             while (cursor < declaration.Offset)
             {
                 byte value = bytes[cursor];
-                if (value is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n' or (byte)'\f' or (byte)'\v') { ++cursor; continue; }
-                if (value != (byte)'/' || cursor + 1 >= declaration.Offset) return;
+                if (value is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n' or (byte)'\f' or (byte)'\v')
+                {
+                    ++cursor;
+                    continue;
+                }
+
+                if (value != (byte)'/' || cursor + 1 >= declaration.Offset)
+                {
+                    return;
+                }
+
                 if (bytes[cursor + 1] == (byte)'/')
                 {
                     cursor += 2;
@@ -416,16 +713,28 @@ internal sealed class ClangAstParser(string inputFile, StableIdManifest? manifes
                         RejectSplice();
                         ++cursor;
                     }
-                    if (cursor + 1 >= declaration.Offset) throw InvalidPropertySource();
+
+                    if (cursor + 1 >= declaration.Offset)
+                    {
+                        throw InvalidPropertySource();
+                    }
+
                     cursor += 2;
                 }
-                else return;
+                else
+                {
+                    return;
+                }
             }
         }
+
         void RejectSplice()
         {
             if (bytes[cursor] == (byte)'\\' && cursor + 1 < declaration.Offset &&
-                bytes[cursor + 1] is (byte)'\r' or (byte)'\n') throw InvalidPropertySource();
+                bytes[cursor + 1] is (byte)'\r' or (byte)'\n')
+            {
+                throw InvalidPropertySource();
+            }
         }
     }
 
@@ -436,9 +745,17 @@ internal sealed class ClangAstParser(string inputFile, StableIdManifest? manifes
         if (!node.TryGetProperty("range", out JsonElement range) ||
             !range.TryGetProperty("begin", out JsonElement begin) ||
             !begin.TryGetProperty("expansionLoc", out JsonElement expansion) ||
-            !expansion.TryGetProperty("offset", out JsonElement value) || !value.TryGetInt32(out offset)) return false;
+            !expansion.TryGetProperty("offset", out JsonElement value) || !value.TryGetInt32(out offset))
+        {
+            return false;
+        }
+
         string path = Text(expansion, "file");
-        if (path.Length == 0 || !File.Exists(path)) return false;
+        if (path.Length == 0 || !File.Exists(path))
+        {
+            return false;
+        }
+
         file = path;
         return true;
     }
@@ -463,41 +780,77 @@ internal sealed class ClangAstParser(string inputFile, StableIdManifest? manifes
             !location.TryGetProperty("expansionLoc", out _) ||
             !locations.TryGetValue(Text(node, "id"), out var marker) || marker.File is null ||
             !File.Exists(marker.File) || !CanonicalPath.Equals(ownerFile, marker.File))
+        {
             throw InvalidGeneratedBodySource();
+        }
+
         if (!sourceBytes.TryGetValue(marker.File, out byte[]? bytes))
         {
             bytes = File.ReadAllBytes(marker.File);
             sourceBytes.Add(marker.File, bytes);
         }
+
         ReadOnlySpan<byte> keyword = "ROCKS_GENERATED_BODY"u8;
         int cursor = marker.Offset;
         if (cursor < 0 || cursor > bytes.Length - keyword.Length ||
             !bytes.AsSpan(cursor, keyword.Length).SequenceEqual(keyword))
+        {
             throw InvalidGeneratedBodySource();
+        }
+
         cursor += keyword.Length;
-        while (cursor < bytes.Length && bytes[cursor] is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n') ++cursor;
-        if (cursor >= bytes.Length || bytes[cursor++] != (byte)'(') throw InvalidGeneratedBodySource();
-        while (cursor < bytes.Length && bytes[cursor] is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n') ++cursor;
-        if (cursor >= bytes.Length || bytes[cursor] != (byte)')') throw InvalidGeneratedBodySource();
+        while (cursor < bytes.Length && bytes[cursor] is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n')
+        {
+            ++cursor;
+        }
+
+        if (cursor >= bytes.Length || bytes[cursor++] != (byte)'(')
+        {
+            throw InvalidGeneratedBodySource();
+        }
+
+        while (cursor < bytes.Length && bytes[cursor] is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n')
+        {
+            ++cursor;
+        }
+
+        if (cursor >= bytes.Length || bytes[cursor] != (byte)')')
+        {
+            throw InvalidGeneratedBodySource();
+        }
     }
 
     private static MetadataException InvalidGeneratedBodySource() => new(
         "ROCKS_GENERATED_BODY must be a direct invocation in the same source file as its class",
         hint: "Write ROCKS_GENERATED_BODY() directly inside the reflected class; hand-written annotations and wrapper macros are unsupported.");
+
     // Clang JSON은 연속 위치의 file을 생략한다. AST parent의 파일이 아니라 JSON 직렬화 순서의
     // 마지막 명시 파일을 사용한다. includedFrom은 호출자이므로 원본 파일로 취급하지 않는다.
     private void IndexLocations(JsonElement element)
     {
         if (element.ValueKind == JsonValueKind.Array)
         {
-            foreach (JsonElement child in element.EnumerateArray()) IndexLocations(child);
+            foreach (JsonElement child in element.EnumerateArray())
+            {
+                IndexLocations(child);
+            }
+
             return;
         }
-        if (element.ValueKind != JsonValueKind.Object) return;
+
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
         string id = Text(element, "id");
         foreach (JsonProperty property in element.EnumerateObject())
         {
-            if (property.Name == "includedFrom") continue;
+            if (property.Name == "includedFrom")
+            {
+                continue;
+            }
+
             if (property.Name == "loc" && id.Length != 0)
             {
                 var site = IndexLocation(property.Value);
@@ -509,26 +862,38 @@ internal sealed class ClangAstParser(string inputFile, StableIdManifest? manifes
             }
         }
         // range begin/end와 macro spelling/expansion도 파일 생략 상태를 갱신한다.
-        if (element.TryGetProperty("offset", out _)) UpdateSerializedFile(element);
+        if (element.TryGetProperty("offset", out _))
+        {
+            UpdateSerializedFile(element);
+        }
     }
 
     private (string? File, int Offset) IndexLocation(JsonElement location)
     {
-        if (location.ValueKind != JsonValueKind.Object) return (null, -1);
+        if (location.ValueKind != JsonValueKind.Object)
+        {
+            return (null, -1);
+        }
+
         (string? File, int Offset) site = (null, -1);
         foreach (JsonProperty property in location.EnumerateObject())
         {
             if (property.Name is "spellingLoc" or "expansionLoc")
             {
                 var nested = IndexLocation(property.Value);
-                if (property.Name == "expansionLoc" || site.Offset < 0) site = nested;
+                if (property.Name == "expansionLoc" || site.Offset < 0)
+                {
+                    site = nested;
+                }
             }
         }
+
         if (location.TryGetProperty("offset", out JsonElement offset) && offset.TryGetInt32(out int value))
         {
             UpdateSerializedFile(location);
             site = (serializedFile, value);
         }
+
         return site;
     }
 
@@ -562,19 +927,28 @@ internal sealed class ClangAstParser(string inputFile, StableIdManifest? manifes
             currentSite = UnknownSite();
             return;
         }
+
         if (!sourceBytes.TryGetValue(location.File, out byte[]? bytes))
         {
             bytes = File.ReadAllBytes(location.File);
             sourceBytes.Add(location.File, bytes);
         }
+
         if (location.Offset >= bytes.Length)
         {
             currentSite = UnknownSite();
             return;
         }
+
         int line = 1;
         for (int index = 0; index < location.Offset; ++index)
-            if (bytes[index] == (byte)'\n') ++line;
+        {
+            if (bytes[index] == (byte)'\n')
+            {
+                ++line;
+            }
+        }
+
         currentSite = new(location.File, line);
     }
 }

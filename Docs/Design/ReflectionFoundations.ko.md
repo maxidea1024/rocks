@@ -29,14 +29,14 @@
 - `NativeModuleInput`에 `Metadata`(헤더 include 철자 목록), `ModuleDirectory`(프로젝트 상대 경로), `ImportedMetadata`(SDK 모듈 전용 — 미리 생성된 descriptor·명세 경로, 1.8절)를 더한다. 규칙은 `Configure()`에서 설정한다(RuleLoader는 `Configure`만 부른다). `SourceModuleRules`는 기존 `{Layer}/Source/{Group}/{Name}`를 `ModuleDirectory`로 넘기고, `ModuleRules`를 직접 상속하는 게임 모듈은 명시한다. Metadata가 있으면 `ModuleDirectory`는 필수다(루트 기본값을 두지 않는다 — 실수로 루트 명세를 쓰지 않게). `Metadata`와 `ImportedMetadata`는 함께 쓸 수 없다.
 - 생성 include 디렉터리 추가·명세 경로 결정·검증은 Rocks.Build의 **공용 함수 하나**(`MetadataLayout.Apply(modules, outputDirectory)`)가 한다. RuleLoader(와 SDK 모듈 복원) 뒤, ActionGraph 앞에서 부르고 Program.cs·InstalledSdk·GameInputSnapshot·IntegrationTests가 모두 이 결과를 본다(같은 목록을 따로 계산하지 않는다).
 - Metadata의 철자는 모듈의 **public 또는 private include 디렉터리** 기준이다. public 헤더의 타입은 의존 모듈이 import할 수 있고, private 헤더의 타입은 그 모듈 안에서만 쓴다(UE도 Private 헤더의 UCLASS를 허용한다). 검증(존재·루트 안·symlink 정규화·같은 헤더의 모듈 사이 이중 소유 금지)은 지금의 `MetadataRunner` 규칙을 모듈마다 적용한다.
-- 생성 헤더는 원본 헤더를 같은 철자(`#include <철자>`)로 포함한다. 그 철자가 **그 헤더를 쓰는 모든 모듈**의 include 검색 순서에서 같은 파일로 풀려야 한다 — MetadataRunner가 생성 모듈과, public 헤더면 그 모듈에 의존하는 타깃 내 모든 모듈의 검색 순서로 확인한다(가리는 같은 철자 헤더가 있으면 RMC1001).
+- 생성 헤더는 원본 헤더를 같은 철자(`#include <철자>`)로 포함한다. 그 철자가 **그 헤더를 쓰는 모든 모듈**의 include 검색 순서에서 같은 파일로 풀려야 한다 — MetadataLayout이 생성 모듈과, public 헤더면 그 모듈에 의존하는 타깃 내 모든 모듈의 검색 순서로 확인한다(가리는 같은 철자 헤더가 있으면 RMC1001).
 - identity 명세는 `<ModuleDirectory>/<ModuleName>.rocksids.json`로 고정한다. Metadata가 있는 모듈은 명세가 있어야 하고(RMC2100), Metadata가 없는 모듈에 **활성 항목이 있는** 명세가 있으면 RMC2102다(은퇴 항목만 남은 명세는 ID 예약이므로 허용한다). SDK 모듈(`ImportedMetadata`)은 이 위치 규칙과 RMC2102에서 빠진다 — 명세 위치는 SDK manifest가 정하고 읽기 전용이다.
 - `TargetRules.Metadata`·`IdentityManifest`와 `MetadataUnit`은 지운다.
 
 ### 1.2 생성 위치와 include
 
-- 모듈 M의 생성 헤더는 원본 철자를 그대로 따른다: public 헤더 `ReflectionTestFixtures/ReflectionFixture.h` → `<out>/Generated/<M>/Public/ReflectionTestFixtures/ReflectionFixture.generated.h`, private 헤더는 `.../Private/...`. `<out>/Generated/<M>/Public`을 **M의 public include 디렉터리로**, `.../Private`를 private include 디렉터리로 자동 추가한다(ActionGraph의 public 전파). 사용 철자는 원본 철자의 `.h`를 `.generated.h`로 바꾼 것이다(`#include <ReflectionTestFixtures/ReflectionFixture.generated.h>`). 생성 철자의 유일성은 저절로 보장되지 않으므로(빌드는 public 헤더 철자의 모듈 사이 유일성을 강제하지 않는다) MetadataRunner가 타깃 전체의 생성 철자를 대소문자 무시로 비교해 겹치면 RMC2005, 원본 철자를 가리는 헤더는 RMC1001로 거부한다.
-- 모듈 집계 헤더 `<M>/<M>.module.generated.h`를 public 생성 루트에 둔다(원본 이름이 `.module.h`로 끝나는 헤더는 RMC2005). B1에서는 모듈의 생성 헤더를 모두 include하고 클래스를 base 먼저 등록하는 `RegisterModuleTypes`(3.5절)를 담는다 — B3가 enum·struct 등록을 더한다.
+- 모듈 M의 생성 헤더는 원본 철자를 그대로 따른다: public 헤더 `ReflectionTestFixtures/ReflectionFixture.h` → `<out>/Generated/<M>/Public/ReflectionTestFixtures/ReflectionFixture.generated.h`, private 헤더는 `.../Private/...`. `<out>/Generated/<M>/Public`을 **M의 public include 디렉터리로**, `.../Private`를 private include 디렉터리로 자동 추가한다(ActionGraph의 public 전파). 사용 철자는 원본 철자의 `.h`를 `.generated.h`로 바꾼 것이다(`#include <ReflectionTestFixtures/ReflectionFixture.generated.h>`). 생성 철자의 유일성은 저절로 보장되지 않으므로(빌드는 public 헤더 철자의 모듈 사이 유일성을 강제하지 않는다) MetadataLayout이 타깃에서 도달하는 모듈의 생성 철자를 대소문자 무시로 비교해 겹치면 RMC2005, 원본 철자나 생성 철자(`.generated.h`·집계 헤더)를 생성 루트보다 앞에서 가리는 파일은 RMC1001로 거부한다.
+- 모듈 집계 헤더 `<M>/<M>.module.generated.h`를 public 생성 루트에 둔다(원본 이름이 `.module.h`·`.generated.h`로 끝나는 헤더는 RMC2005). B1에서는 모듈의 생성 헤더를 모두 include하고 클래스를 base 먼저 등록하는 `RegisterModuleTypes`(3.5절)를 담는다 — B3가 enum·struct 등록을 더한다.
 - 생성 디렉터리는 **메타 생성 전에** 만든다(MetaCompiler의 `--include-dir`가 존재를 요구하고, ActionGraph도 없는 include 디렉터리를 거부한다). stage·백업·검증 임시 파일·descriptor는 `<out>/Generated/<M>` **밖**에 둔다(`<out>/Metadata/`·`<out>/.metadata-stage/<tag>/`) — 안에 두면 헤더 검사·증분 스캔·SDK 복사에 걸린다.
 - 규칙마다 손으로 넣던 `out/Generated` private include(FoundationTests·Game·Program.cs)와 Program.cs의 생성 헤더 별도 검사 루프는 지운다(public include의 `*.h`를 도는 기존 헤더 검사가 생성 헤더도 덮는다 — 두 번 등록하면 "Duplicate source"다).
 
@@ -78,9 +78,9 @@
 ### 1.6 identity 검증과 이력
 
 - 모듈마다 inventory를 만들고 `ids verify --manifest <m> --inventory <i>`를 명세별로 실행한다(누락·고아·중복 규칙은 지금과 같다).
-- 명세 사이 ID 중복: `ids verify-set --manifest <m>…`가 타깃의 모든 명세(SDK 동봉 명세 포함)에서 활성·은퇴 ID를 모아 같은 ID가 두 파일에 나오면 RMC2101이다.
+- 명세 사이 ID·이름 중복: `ids verify-set --manifest <m>…`가 타깃에서 도달하는 모듈의 모든 명세(은퇴 전용 예약 명세·SDK 동봉 명세 포함)에서 활성·은퇴 항목을 모아 같은 ID나 같은 종류의 같은 이름·별칭이 두 파일에 나오면 RMC2101이다.
 - 명세의 `kind`는 그대로 `type`·`field`다. enum·struct 타입은 `type`, struct 필드는 `field`다. enumerator는 정수 값으로 저장되므로 ID를 받지 않는다.
-- **이력·병합 검사 개정(필수)**: `CheckIdentityMerges`·`StableIdMergeValidator`는 지금 경로별로 비교하므로 명세를 옮기면 옛 경로가 "disappeared"로 반드시 실패한다. 리비전마다 저장소의 모든 명세를 **ID 기준으로 합친 뷰**(한 ID는 한 파일에만)를 만들어 보존 규칙(ID 삭제·재사용 금지, 이름 재사용 금지)을 검사하고, 이름 충돌은 명세별로 본다. 새 명령 `ids move --from <m> --to <m> --type <name>`이 타입과 그 필드를 함께 옮긴다(필드의 owner 타입이 같은 명세에 있어야 하는 규칙 유지). `BuildEvidence`는 접미사로 찾아 해시만 하므로 그대로다.
+- **이력·병합 검사 개정(필수)**: `CheckIdentityMerges`·`StableIdMergeValidator`는 지금 경로별로 비교하므로 명세를 옮기면 옛 경로가 "disappeared"로 반드시 실패한다. 리비전마다 저장소의 모든 명세를 **ID 기준으로 합친 뷰**(한 ID·한 이름은 한 파일에만)를 만들어 보존 규칙(ID 삭제·재사용 금지, 이름 재사용 금지)을 검사한다. 이름(별칭 포함)도 합친 뷰에서 유일해야 한다 — 빌드의 `ids verify-set`과 같은 규칙이라 로컬 빌드와 CI 병합 검사가 같은 결과를 낸다(초안의 "이름 충돌은 명세별"을 B1 구현에서 바꿨다). 새 명령 `ids move --from <m> --to <m> --type <name>`이 타입과 그 필드를 함께 옮긴다(필드의 owner 타입이 같은 명세에 있어야 하는 규칙 유지). `BuildEvidence`는 접미사로 찾아 해시만 하므로 그대로다.
 
 ### 1.7 게시 트랜잭션
 
@@ -91,7 +91,7 @@
 
 - `InstalledSdk`: 생성 public 루트가 모듈의 public include 디렉터리에 들어가므로 기존 export가 `Headers/<M>/…`로 복사한다(별도 복사를 두지 않는다). descriptor·명세는 `Metadata/<M>/`로 내보내고 `rocks-sdk.json` 모듈 항목에 `descriptor`·`identityManifest`를 더한다(manifest 버전 3, 모르는 속성 거부 유지). SDK 모듈을 `NativeModuleInput`으로 되살릴 때(InstalledSdk의 모듈 복원 지점) 이 둘을 `ImportedMetadata`로 넘긴다 — SDK 모듈은 다시 생성하지 않고, 게임 빌드는 SDK descriptor를 import하고 SDK 명세를 명세 집합 검증에 넣는다. ThirdParty manifest 형식을 바꾸는 다른 세션의 InstalledSdk 변경과 겹치므로 착수 전에 조율한다.
 - `GameInputSnapshot`: 선언 입력에 모듈의 Metadata 헤더와 명세를 넣는다.
-- `Templates/Game`: SampleGame 모듈에 public include 디렉터리(`Source/Public`)를 두고 `Metadata`와 `ModuleDirectory = "."`를 선언한다. 명세는 `ids move`로 `SampleGame.rocksids.json`이 된다. `Main.cpp`는 생성 철자를 쓰고 README를 고친다.
+- `Templates/Game`: SampleGame 모듈은 `Source`를 public include 디렉터리로 두고(`GameObject.h` 철자) `Metadata`와 `ModuleDirectory = "."`를 선언한다. 명세는 `ids move`로 `SampleGame.rocksids.json`이 된다. `Main.cpp`는 생성 철자를 쓰고 README를 고친다.
 - `Program.cs`: ToolTests `meta` 실행 조건은 "타깃에 Metadata 모듈이 있음"이다.
 
 ### 1.9 fixture 이전과 시험
@@ -210,7 +210,7 @@ struct FieldSchema {
 - **TypeRegistry 종류 구분**: 레코드에 종류(Class·Struct·Enum)를 둔다. 기존 `Acquire(TypeId)`는 **클래스만** 돌려준다(다른 종류는 TypeMismatch — ObjectRegistry·GraphSave·GraphLoad의 기존 호출자는 모두 클래스를 가정한다). struct·enum은 `AcquireValueType(TypeId, TypeKind)`으로 연다. 등록은 `RegisterStruct(const StructSchema&, RuntimeStructOps)`·`RegisterEnum(const EnumSchema&)`.
 - **의존 계수**: 클래스(또는 struct)가 가리키는 enum·struct가 등록 때 이미 있어야 하고(없으면 NotFound), 참조는 lease가 아니라 base와 같은 `dependents` 계수로 표시한다 — 가리키는 레코드 포인터 목록을 등록 단일 할당 안에 두고 `DestroyRecord`에서 각각 줄인다(lease로 쥐면 Shutdown이 영구 Busy가 된다). 의존자가 남은 레코드의 Unregister는 Busy다.
 - **native 타입 대조**: struct 필드의 생성 ops는 정적 타입 `S`의 `NativeTypeKey<S>()`를 싣고, 등록이 그 필드가 가리키는 struct 레코드의 native 키와 같은지 확인한다(schema로 해석한 경로와 정적 thunk가 어긋나 엉뚱한 멤버에 쓰지 않게). enum도 같다.
-- **모듈 등록**: 집계 헤더의 `RegisterModuleTypes(TypeRegistry&, ModuleLease) -> Result<ModuleRegistration>`이 먼저 **리플렉션 타입을 가진 의존 모듈의 `RegisterModuleTypes`를 부르고**(의존 모듈의 집계 헤더를 include한다 — descriptor가 모듈 목록을 준다), 이어서 자기 모듈의 enum → struct(중첩 의존 위상 순) → class(base 먼저) 순으로 등록한다. 같은 ID·같은 native 키로 이미 등록된 타입은 건너뛴다(여러 모듈이 같은 의존을 공유해도 한 번만 등록 — 다른 native 키면 AlreadyExists). 중간 실패면 이 호출이 등록한 것을 역순으로 해제한 뒤 오류를 돌려준다. `ModuleRegistration`은 이 호출이 등록한 토큰 목록이며 역순 해제를 한다(의존 계수가 남아 있으면 그 해제는 Busy다).
+- **모듈 등록**(B1에서 구현, 클래스만): 집계 헤더의 `RegisterModuleTypes(ModuleRegistration&, const ModuleLease& = {}) -> Result<void>`가 먼저 `registration.EnterModule(모듈 키)`로 이 registration에 이미 들어온 모듈이면 바로 성공한다(의존 그래프의 여러 경로로 불려도 모듈마다 한 번 — 호출 수가 경로 수만큼 늘지 않는다). 이어서 **리플렉션 타입을 가진 의존 모듈의 `RegisterModuleTypes`를 부르고**(import한 descriptor의 모듈 집계 헤더를 include한다), 자기 모듈의 enum → struct(중첩 의존 위상 순) → class(base 먼저) 순으로 등록한다(B3가 enum·struct를 더한다). 같은 ID·같은 native 키로 이미 등록된 타입은 새로 등록하지 않고 그 타입의 lease를 붙잡는다 — 여러 registration이 같은 의존을 공유해도 한 번만 등록되고, 쓰는 쪽이 남아 있는 동안 그 타입은 해제되지 않는다(다른 native 키면 AlreadyExists). 중간 실패면 이 호출의 기록을 역순으로 되돌린 뒤 오류를 돌려준다. `ModuleRegistration`은 모듈·등록 토큰·lease 기록이며 역순으로 되돌린다(객체나 다른 기록의 lease가 남아 있으면 그 해제는 Busy다).
 
 ### 3.6 `FieldValue`와 thunk
 
@@ -342,13 +342,13 @@ struct BulkDataRef {
 
 | 코드 | 판정 | 뜻 |
 |---|---|---|
-| RMC1001 | MetadataRunner | 생성 헤더의 원본 include 철자를 소비 모듈의 다른 헤더가 가림 |
+| RMC1001 | MetadataLayout | 생성 헤더의 원본 include 철자, 또는 생성 철자를 소비 모듈의 다른 헤더가 가림 |
 | RMC2003 | MetaCompiler | 리플렉션 선언이 이 모듈 입력에도 import에도 없음(헤더·물리 파일까지 대조) |
-| RMC2004 | MetaCompiler | import 사이 같은 정규 이름 |
-| RMC2005 | MetadataRunner | 생성 철자 충돌(대소문자만 다름·예약 `.module.h`) |
+| RMC2004 | MetaCompiler | import 사이 같은 정규 이름·같은 모듈 두 번·자기 descriptor import·import 타입 재정의 |
+| RMC2005 | MetadataLayout | 생성 철자 충돌(대소문자만 다름·예약 `.module.h`·`.generated.h`) |
 | RMC2006 | MetaCompiler | 다른 모듈의 private 타입 사용 |
-| RMC2101 | ids verify-set | 명세 사이 ID 중복 |
-| RMC2102 | MetadataRunner | Metadata 없는 모듈의 활성 항목 명세 |
+| RMC2101 | ids verify-set | 명세 사이 ID·이름 중복 |
+| RMC2102 | MetadataLayout | Metadata 없는 모듈의 활성 항목 명세 |
 | RMC2202 | MetaCompiler | 지정자를 그 필드 종류에 쓸 수 없음(Required·MaxElements) |
 | RMC2203 | MetaCompiler | 도구 이름(상속·접두 포함) 대소문자 무시 중복·형식 오류 |
 | RMC2204 | MetaCompiler | 필드에 PROPERTY와 NATIVE가 함께 있음 |
@@ -360,7 +360,7 @@ struct BulkDataRef {
 | RMC2304 | MetaCompiler | 배열 원소로 쓸 수 없는 형식(ObjectRef·참조 struct·배열) |
 | RMC2401 | MetaCompiler | enum underlying 미지정·지원하지 않는 폭·값 별칭 |
 
-기존 코드(RMC1000·2000·2001·2100·3000·3100·4000)는 그대로다. RMC2005 중 한 모듈 안의 충돌(`.module.h`·대소문자)은 MetaCompiler도 판정한다.
+기존 코드(RMC1000·2000·2001·2100·3000·3100·4000)는 그대로다. RMC2005 중 한 모듈 안의 충돌(`.module.h`·`.generated.h`·대소문자)은 MetaCompiler도 판정한다.
 
 ## 11. 단계와 완료 기준
 
@@ -374,6 +374,8 @@ struct BulkDataRef {
 | B6 | 경로 접근(FieldId 체인)·이름 해석 앞단 | 경로 읽기·쓰기·배열 연산·UnknownProperty·실패 시 미게시 (A6 전까지 미룰 수 있음) |
 | B7 | 툴체인 지문·도구 빌드 ID 생성·주입, AS 문서 정정 | 8절 시험 (다른 단계와 독립 — 병렬 가능) |
 | B8 | Level·Actor·Component의 `ROCKS_CLASS(WorldOnly)` 이전 | 기존 World 시험 전부 + 리플렉션 Trace·저장 |
+
+상태: B1은 2026-11-13에 구현했다(사용 계약은 [리플렉션 메타데이터](../Implementation/ReflectionMetadata.ko.md)의 "모듈 메타데이터"·"생성물과 등록"). B1의 `RegisterModuleTypes`는 클래스만 등록하며 B3가 enum·struct와 TypeRegistry 종류를 더한다. 구현에서 정한 것: 메타데이터 배치·검증은 타깃에서 도달하는 모듈에만 적용한다. `ModuleRegistration`은 이미 등록된 공유 타입의 lease를 붙잡는다. `.generated.h` 철자를 예약한다(RMC2005). 명세 사이 이름도 유일해야 한다(1.6절).
 
 의존: B1 → B3(집계 헤더·import), B2 → B3(Required·EditorOnly 검증), B3 → B4 → B5(struct 원소 배열), B3·B5 → B6(경로는 struct·배열을 지난다), B2·B5 → B8. B7은 독립이다. 각 단계는 구현 뒤 다수 서브에이전트 교차검증, Debug·Release·Asan·format·policy·Android 빌드를 거쳐 커밋한다.
 
@@ -403,7 +405,7 @@ struct BulkDataRef {
 다른 문서 정정(이 설계를 반영할 때 함께):
 
 - AS 1절 A0-B 행·리플렉션 한계 행·5.6절(이 문서로 연결, `-fno-math-errno`·llvm-nm 서술 정정)·14절 시나리오 13·25(구성 사이 쿠킹 byte 비교): 이 초안과 함께 반영했다.
-- `ReflectionMetadata.ko.md`: 타깃 소유·버전 비노출·모든 비정적 필드 리플렉션 필수 서술을 B1–B2 결과로 바꾼다.
+- `ReflectionMetadata.ko.md`: 타깃 소유 서술은 B1에서 모듈 소유로 바꿨다. 버전 비노출·모든 비정적 필드 리플렉션 필수 서술은 B2 결과로 바꾼다.
 - `SparksLanguage.ko.md`의 `Soft<T>`(AssetId만)·`UiToolkit.ko.md`의 `AssetRef<T>` → `SoftObjectRef<T>`(AssetId + 객체 경로). `UiToolkit.ko.md`의 `Sides<float>`(비템플릿 구체 타입으로)·지정자 확장 문법(CU1이 2.1절 표를 넓힌다).
 - `EngineImplementationPlan.ko.md` 7.1절 예시 매크로(`ROCKS_REFLECT`·`ROCKS_FIELD(FieldId=…)`)와 `GcArray` 용어 → 현재 문법·`ObjectRefArray`.
 - `EngineRuntime.ko.md` 68·80·105행: `ROCKS_NATIVE_CLASS` → `ROCKS_NATIVE_TYPE`, B8 이전 계획.

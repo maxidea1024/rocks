@@ -4,7 +4,7 @@
 
 ## 타입 조회의 현재 상태와 사용성 목표
 
-생성 헤더를 포함한 반영 타입은 `rocks::TypeIdOf<T>()`로 정적 ID, `rocks::TypeOf<T>()`로 생성된 정적 schema를 조회한다. 정적 schema는 등록된 타입 lease가 아니다. schema와 이름 참조는 생성 코드가 포함된 모듈의 수명에 종속된다. 생성 헤더 누락 또는 미반영 타입은 컴파일 시 진단한다.
+생성 헤더를 포함한 리플렉션 타입은 `rocks::TypeIdOf<T>()`로 정적 ID, `rocks::TypeOf<T>()`로 생성된 정적 schema를 조회한다. 정적 schema는 등록된 타입 lease가 아니다. schema와 이름 참조는 생성 코드가 포함된 모듈의 수명에 종속된다. 생성 헤더 누락 또는 리플렉션하지 않은 타입은 컴파일 시 진단한다.
 
 유효한 Borrow로 접근 중인 객체는 `object->GetType()`으로 실제 등록 타입의 `TypeLease`를 얻는다. 호출 실패를 직접 처리하려면 `object->TryGetType()`을 사용한다. `GetType()`은 오류를 상태로 추측하지 않고 원인을 진단한 뒤 중단한다. 객체는 유효한 Borrow가 필요하며, 문맥·소유 스레드·생존 상태를 검사한다. 파괴 요청 후에는 새 타입 lease를 얻을 수 없다.
 
@@ -34,7 +34,9 @@ auto runtimeName = type.Name();
 
 `ROCKS_CLASS()` 또는 `ROCKS_CLASS(Abstract)`를 `class`/`struct` 앞에, `ROCKS_PROPERTY(...)`를 필드 앞에 직접 작성한다. 선언에 안정 ID와 스키마 버전을 넣지 않는다. 매크로와 타입 사이에는 공백과 주석만 허용하고 전처리 지시문·별도 선언·wrapper 매크로는 거부한다. 조건부 선언은 마커와 클래스를 같은 `#if` 블록 안에 둔다.
 
-타깃이 지정한 `.rocksids.json`이 타입과 필드의 무작위 안정 ID, 이전 이름과 폐기 이력을 보관한다. 새로운 선언의 ID 발급과 이름 변경·폐기는 `ids add`, `ids rename`, `ids retire`를 사용하는 명시적인 저작 작업이다. 일반 빌드는 명세를 읽기만 하고 누락 또는 중복을 거부한다. 각 타깃의 모든 메타 입력을 합산하여 활성 명세의 누락과 메타 단위 간 중복 선언을 검사한 다음 생성 헤더를 게시한다. 같은 reflected 헤더를 여러 메타 단위가 포함하는 구성은 현재 정의 동등성을 보장할 수 없어 거부한다. 서로 다른 타깃이 별도 명세를 쓰는 경우의 전역 ID 검증, 미등록 헤더의 자동 탐색은 아직 없다.
+리플렉션 헤더를 가진 모듈은 모듈 폴더에 identity 명세 `<ModuleName>.rocksids.json`을 둔다. 명세는 그 모듈 타입과 필드의 무작위 안정 ID, 이전 이름과 폐기 이력을 보관한다. 새로운 선언의 ID 발급과 이름 변경·폐기는 `ids add`, `ids rename`, `ids retire`를 사용하는 명시적인 저작 작업이다. 타입을 다른 모듈로 옮길 때는 `ids move --from <명세> --to <명세> --type <이름>`이 타입과 그 필드 항목을 ID 그대로 옮긴다. 대상에 먼저 붙이고 원본에서 떼므로 중간에 멈추면 같은 명령을 다시 실행한다. 일반 빌드는 명세를 읽기만 하고 누락 또는 중복을 거부한다. 모듈마다 생성 결과의 inventory로 활성 명세의 누락과 중복을 검사하고(`ids verify`), 타깃에서 도달하는 모듈의 모든 명세(은퇴 항목만 남은 예약 명세와 SDK가 동봉한 명세 포함) 사이에 같은 ID나 같은 종류의 같은 이름·별칭이 있으면 거부한다(`ids verify-set`, RMC2101 — 한 ID·한 이름은 한 명세에만 있다). 이 검사가 모두 끝나야 생성물을 게시한다. 리플렉션 헤더는 정확히 한 모듈이 소유한다. 미등록 헤더의 자동 탐색은 아직 없다.
+
+이력 검사(`ids merge-check`, `Build/CheckIdentityMerges.ps1`)는 리비전마다 저장소의 모든 명세를 ID 기준으로 합쳐 비교한다. 따라서 명세를 옮기거나 타입을 다른 명세로 옮겨도 ID가 사라진 것으로 보지 않으며, ID 삭제·재사용과 예약 이름 재사용은 계속 거부한다. 합치기 전에 한 리비전 안의 두 명세에 같은 ID나 이름이 있는지 보고, 있으면 측면과 파일 경로를 함께 보고하고 실패한다(빌드의 `ids verify-set`과 같은 규칙).
 
 저장 레코드에는 내부 스키마 버전이 있으며 현재 생성된 타입의 버전은 1이다. 이 값은 클래스 선언에 노출하지 않는다. 사용자 정의 스키마 변경의 자동 판정과 마이그레이션 생성은 아직 구현되지 않았다. 이름 변경 시 명세의 `ids rename`으로 ID를 유지하며, 다른 ID를 새로 발급해 이전 필드를 대체하면 활성 이전 선언이 누락되어 빌드가 실패한다.
 
@@ -48,9 +50,9 @@ auto runtimeName = type.Name();
 | `String` | 소유한 유효 UTF-8 문자열; 길이는 바이트 수 |
 | `ObjectRef<T>` | `ObjectHandle`을 담은 참조 값; 실제 변경은 Registry barrier 경유 |
 
-현재 생성 대상은 이름 있는 비템플릿 타입이며, 모든 비정적 필드에 annotation이 필요하다. private/protected 필드는 해당 반영 클래스 안에 `ROCKS_GENERATED_BODY()`를 직접 한 번 선언해야 한다. 반영되지 않은 클래스, 다른 매크로로 감싼 호출, 수동 작성한 내부 annotation과 중복 선언은 거부한다. raw pointer, 배열·컨테이너, enum, const/volatile 필드, bitfield와 annotation을 붙인 static 필드는 거부한다. static 보조 데이터는 annotation 없이 둘 수 있다. 수동 `Trace`와 자동 추적을 섞어 완전한 필드 레이아웃으로 오인하지 않도록, 생성 대상의 직접 선언된 `Trace`는 거부한다.
+현재 생성 대상은 이름 있는 비템플릿 타입이며, 모든 비정적 필드에 annotation이 필요하다. private/protected 필드는 해당 리플렉션 클래스 안에 `ROCKS_GENERATED_BODY()`를 직접 한 번 선언해야 한다. 리플렉션하지 않은 클래스, 다른 매크로로 감싼 호출, 수동 작성한 내부 annotation과 중복 선언은 거부한다. raw pointer, 배열·컨테이너, enum, const/volatile 필드, bitfield와 annotation을 붙인 static 필드는 거부한다. static 보조 데이터는 annotation 없이 둘 수 있다. 수동 `Trace`와 자동 추적을 섞어 완전한 필드 레이아웃으로 오인하지 않도록, 생성 대상의 직접 선언된 `Trace`는 거부한다.
 
-단일 public 비가상 상속만 지원한다. 기반 타입은 `Object` 또는 같은 입력 번역 단위에서 확인된 reflected 타입이어야 한다. 파생 스키마는 상속 필드를 안정 ID 순서로 펼치며, 상속을 포함한 필드 수는 최대 4,096개다. 생성 접근기는 멤버 포인터를 사용한다. 객체 레이아웃에서 offset을 추정하거나 raw 필드 주소를 반환하지 않는다.
+단일 public 비가상 상속만 지원한다. 기반 타입과 `ObjectRef<T>`의 대상은 `Object`, 같은 모듈의 리플렉션 타입, 또는 import한 의존 모듈 descriptor의 public 리플렉션 타입이어야 한다(아래 "모듈 메타데이터"). 파생 스키마는 상속 필드를 안정 ID 순서로 펼치며, 상속을 포함한 필드 수는 최대 4,096개다. 생성 접근기는 멤버 포인터를 사용한다. 객체 레이아웃에서 offset을 추정하거나 raw 필드 주소를 반환하지 않는다.
 
 ### 속성 지정자와 표시 문자열
 
@@ -74,6 +76,21 @@ CLASS는 선택적 `Abstract`를, PROPERTY는 `Transient`, `ReadOnly`, `Category
 
 생성 헤더는 `GeneratedType<T>`의 `Id`, `Schema`, `Ops`, `Register`를 제공한다. `Schema()`는 타입·필드 ID, 버전, 이름, 값 형식, 기반 타입 ID와 참조 대상 타입 ID를 제공한다. `Ops()`는 실제 C++ 타입으로 검증되는 read/write/writeStaged 함수와 자동 Trace를 제공한다.
 
+모듈마다 집계 헤더 `<M>/<M>.module.generated.h`가 생긴다. 이 헤더는 그 모듈의 public 생성 헤더를 모두 include하고 `rocks::generated::<M>::RegisterModuleTypes`를 제공한다. 이 함수는 registration마다 모듈을 한 번만 등록하고(의존 그래프의 여러 경로로 다시 불리면 바로 성공한다), import한 의존 모듈의 `RegisterModuleTypes`를 먼저 부른 뒤 이 모듈의 public 타입을 base 먼저 등록한다. 같은 ID가 같은 native 타입으로 이미 등록되어 있으면 새로 등록하지 않고 그 타입의 lease를 붙잡으므로, 여러 모듈이 같은 의존 모듈을 공유해도 한 번만 등록되고 공유 타입을 쓰는 쪽이 있는 동안에는 그 타입이 해제되지 않는다. 실패하면 그 호출의 기록을 역순으로 되돌리고 오류를 돌려준다. private 헤더가 있는 모듈은 `<M>/<M>.private.module.generated.h`의 `RegisterPrivateModuleTypes`가 public 타입(public 헤더가 없으면 의존 모듈)까지 등록한 뒤 private 타입을 등록한다. 이 헤더는 그 모듈의 private include에서만 보인다. 집계 헤더의 이름은 모두 `::rocks::`로 한정하므로 모듈 이름이 rocks의 이름을 가리지 않는다.
+
+```cpp
+#include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
+
+rocks::ModuleRegistration registration(types, allocator);   // types: TypeRegistry
+if (auto registered = rocks::generated::ReflectionTestFixtures::RegisterModuleTypes(registration); !registered) {
+    return registered;   // 이 호출의 기록(등록·lease)은 이미 되돌려졌다
+}
+// ... 종료할 때 (객체나 다른 기록의 lease가 남으면 Busy, 남은 기록을 보존하므로 다시 호출할 수 있다)
+if (auto removed = registration.Unregister(); !removed) { ... }
+```
+
+`ModuleRegistration`은 들어온 모듈(`EnterModule`), 자기가 등록한 타입의 token, 이미 등록되어 있어 붙잡은 타입의 lease를 기록한다(`Size()`는 모두 센다). `Unregister()`·`UnregisterFrom(mark)`는 기록을 역순으로 되돌린다: lease는 놓고 등록한 타입은 해제한다(파생 타입이 base보다 먼저 빠진다). 해제할 타입에 객체나 다른 기록의 lease가 남아 있으면 Busy로 멈추고 남은 기록을 보존한다. 소멸자는 등록한 타입을 해제하지 않고(lease만 놓는다) 호출자가 `Unregister()`를 부른다. lease가 남아 있으면 `TypeRegistry::Shutdown`이 Busy이므로 모든 기록을 해제한 뒤 Shutdown한다. TypeRegistry와 allocator는 이 객체보다 오래 살아야 하며 등록·해제는 TypeRegistry 생성 스레드에서만 한다.
+
 `MakeRuntimeTypeOps<T>`는 `noexcept T(Allocator&)`가 있으면 Registry allocator를 전달하고, 없으면 `noexcept T()`를 호출한다. 실패 가능한 초기화는 생성자 이후의 ConstructionContext 단계에서 처리한다. 자동 생성한 `Ops()`는 전체 지원 필드를 확인한 후 `completeFieldLayout = true`를 지정하고, 부수 효과 없이 ObjectRef를 방문하는 Trace에 `parallelTraceSafe = true`를 지정한다. 수동 Ops의 두 값은 기본적으로 false다. 실제 병렬 실행의 허용 여부는 GC의 단계·safepoint 규약에 달려 있다.
 
 TypeRegistry는 스키마, 이름·속성 바이트와 RuntimeFieldOps 배열을 등록 시 깊게 복사한다. 원본 배열을 함수 지역 변수로 두어도 등록 이후의 배열 수명에 의존하지 않는다. 코드 포인터의 동적 모듈 수명은 `ModuleLease`가 유지한다. 등록 실패 시 기존 레코드는 유지되며 값으로 전달한 Ops의 ModuleLease는 정상 반환된다.
@@ -86,7 +103,7 @@ TypeRegistry는 스키마, 이름·속성 바이트와 RuntimeFieldOps 배열을
 
 Shutdown은 새 Acquire/Clone을 닫고 외부 lease가 있으면 `Busy`를 반환한다. 모든 lease를 반환한 뒤 재호출하면 파생 타입부터 기반 타입 순서로 정리한다. allocator·모듈 정리 callback은 Registry 잠금 밖에서 호출한다. 등록·해제·Shutdown은 생성 스레드 전용이며 Acquire와 서로 다른 lease의 계수 조작은 잠금으로 보호된다. 같은 lease 래퍼의 동시 변경은 허용하지 않는다.
 
-`TypeLease::IsA`와 `TypeRegistry::IsA`는 스키마 ID 기준의 상속 관계 조회다. native 상속 판정은 `TypeLease::IsNativeA(NativeTypeKey<T>())`가 등록된 base 사슬을 따라 한다. 등록 시 각 레코드의 `nativeBaseType`이 base 레코드의 `nativeType`과 같은지 검증하고 단일 비가상 상속만 허용하므로, base 사슬은 실제 C++ 상속 사슬과 같다. 이 규칙으로 `Resolve<T>`·`TryPin<T>`·`NewObject<T>`·`SetReference`(필드 선언 타입)·반사 필드 쓰기·객체 그래프 저장과 로드는 T 자신과 T의 파생 객체를 허용한다. Registry는 항상 `Object` 하위 객체 주소를 주고 `Borrow<T>::Get`·`ConstructionContext::Get`이 `static_cast<T*>`로 기반 하위 객체 위치를 보정한다. 자동 생성한 파생 필드 thunk는 정확한 파생 native type을 Resolve하고, 상속 멤버에 대한 typed member pointer로 접근한다.
+`TypeLease::IsA`와 `TypeRegistry::IsA`는 스키마 ID 기준의 상속 관계 조회다. native 상속 판정은 `TypeLease::IsNativeA(NativeTypeKey<T>())`가 등록된 base 사슬을 따라 한다. 등록 시 각 레코드의 `nativeBaseType`이 base 레코드의 `nativeType`과 같은지 검증하고 단일 비가상 상속만 허용하므로, base 사슬은 실제 C++ 상속 사슬과 같다. 이 규칙으로 `Resolve<T>`·`TryPin<T>`·`NewObject<T>`·`SetReference`(필드 선언 타입)·리플렉션 필드 쓰기·객체 그래프 저장과 로드는 T 자신과 T의 파생 객체를 허용한다. Registry는 항상 `Object` 하위 객체 주소를 주고 `Borrow<T>::Get`·`ConstructionContext::Get`이 `static_cast<T*>`로 기반 하위 객체 위치를 보정한다. 자동 생성한 파생 필드 thunk는 정확한 파생 native type을 Resolve하고, 상속 멤버에 대한 typed member pointer로 접근한다.
 
 ## 필드 접근과 실패 보장
 
@@ -114,35 +131,58 @@ ObjectReference 필드는 등록 시점에 참조 대상 타입이 아직 등록
 
 ```text
 dotnet build Programs/Rocks.Tools.csproj
-dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll --input Core/Source/Runtime/ObjectRuntime/Tests/Reflection/ReflectionFixture.h --include Core/Source/Runtime/ObjectRuntime/Tests/Reflection/ReflectionFixture.h --output out/Generated/ReflectionFixture.generated.h --compiler clang-cl
+dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll --module SampleGame --input Templates/Game/Foundation/Source/GameObject.h --include GameObject.h --output-root out/Generated/SampleGame --descriptor out/Metadata/SampleGame.rocksmeta.json --identity-manifest Templates/Game/Foundation/SampleGame.rocksids.json --compiler clang-cl
 dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll meta --root . --compiler clang-cl --metacompiler out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll
 ```
+
+MetaCompiler는 모듈 하나를 한 번에 생성한다. `--module`(모듈 이름), 짝을 이루는 `--input <헤더>`·`--include <철자>`(여러 번), private 헤더 표시 `--private <철자>`, 생성 루트 `--output-root`, descriptor `--descriptor <M>.rocksmeta.json`, 의존 모듈 descriptor `--import`(여러 번)를 받는다. 입력 헤더 전부를 include하는 번역 단위 하나를 Clang에 주므로 같은 모듈의 헤더 사이 base·참조가 풀린다. 생성 헤더는 `<생성 루트>/Public|Private/<철자의 .h를 .generated.h로 바꾼 경로>`에 쓴다. 위 예는 `out/Generated/SampleGame/Public/GameObject.generated.h`, 집계 헤더 `out/Generated/SampleGame/Public/SampleGame/SampleGame.module.generated.h`와 descriptor를 만든다. 실제 빌드에서는 빌드 도구가 이 인자를 모두 구성한다.
+
 컴파일러는 C++23, 예외·RTTI 비활성화와 경고 오류 정책을 적용한다. Windows SDK 환경은 공통 NativeEnvironment가 준비한다. macOS에서 위 예시의 `clang-cl`은 `clang++`로 바꾼다. annotation은 Clang 기능이며 지원하지 않는 컴파일러에서 빈 매크로로 대체하지 않는다.
 
-`--include-dir`을 지정하면 전달한 순서만 사용한다. 지정하지 않은 단독 호출에서는 저장소의 공개 헤더 경로를 탐색한다. 생성 헤더와 같은 디렉터리의 quote include가 먼저 선택되며, 실제 선택된 헤더가 `--input`과 다르면 오류다. 다른 파일을 가리키는 shadow 경로는 허용하지 않는다.
+`--include-dir`을 지정하면 전달한 순서만 사용한다. 빌드는 native 컴파일과 같은 순서 — 소유 모듈의 public include(끝에 생성 Public 루트), private include(끝에 생성 Private 루트), 의존 모듈의 public include(각 모듈의 생성 Public 루트 포함) — 로 넘기며, 생성 루트는 이번 실행의 stage 루트로 바꿔 넘긴다. 지정하지 않은 단독 호출에서는 저장소의 공개 헤더 경로, 저장소 루트, 입력 헤더의 디렉터리를 탐색한다. 생성 헤더는 원본을 `#include <철자>`로 포함하므로 각 `--include` 철자는 이 검색 순서에서 실제로 `--input` 파일로 풀려야 한다. 앞선 디렉터리의 다른 헤더가 같은 철자를 가리면 MetaCompiler가 RMC1000으로 거부한다. 빌드는 그 전에 public 리플렉션 헤더를 쓰는 타깃 안 모든 모듈의 검색 순서로 이를 확인하고, 생성 철자(`.generated.h`·집계 헤더)가 생성 루트보다 앞선 디렉터리의 파일에 가려지는지도 본다(RMC1001). 생성물 검증 컴파일은 검색 순서에서 출력 루트가 있던 자리에 검증용 임시 루트를 넣어 소비자와 같은 순서로 푼다.
 
 반복 가능한 `--clang-arg`는 현재 네이티브 Debug/Release/ASan 프로필, 붙임형 `-DNAME=value` 및 clang-cl의 `/DNAME=value`, macOS에서 xcrun이 선택한 `-isysroot` 경로와 최소 버전만 허용한다. 경고 억제, 임의 검색 경로, 강제 include, response file과 그 밖의 미지원 인자는 거부한다. 옵션 확장은 네이티브 컴파일과 AST에 적용되는 조건이 같은지 검토하고 양성·음성 회귀를 추가한 후 수행한다.
 
 C++ 구문은 원문 정규식이 아닌 실제 Clang JSON AST에서 읽는다. 선언의 annotation 인자, 접근 지정, 기반 관계와 컴파일러가 확정한 필드 타입을 사용한다. `--include`는 출력 헤더에 넣을 논리 경로이며 절대 입력 경로는 생성물에 포함하지 않는다.
 
-생성 형식은 `ROCKS_CLANG_FORMAT` 환경변수를 우선 사용하고 clang-format 21.1.6을 요구한다. 같은 입력·타깃 문맥이면 같은 UTF-8/LF 바이트를 생성한다. 출력 디렉터리의 고유 임시 C++ 파일에서 생성물을 실제 Clang으로 검사한 뒤 게시하며 정상 종료와 관리된 실패에서 임시 파일을 정리한다. 기존 출력과 같으면 다시 쓰지 않아 timestamp를 보존한다. 변경된 결과는 같은 디렉터리의 고유 임시 파일에 완성한 뒤 교체한다. `--check`는 생성물과 기존 출력을 비교하며 stale 출력을 수정하지 않는다. 서로 다른 생성 설정이 같은 출력을 공유하는 빌드 그래프는 금지하며, 고유 임시 파일 사용이 그런 논리 충돌을 해결하는 것은 아니다.
+생성 형식은 `ROCKS_CLANG_FORMAT` 환경변수를 우선 사용하고 clang-format 21.1.6을 요구한다. 같은 입력·타깃 문맥이면 같은 UTF-8/LF 바이트를 생성한다. 생성물은 출력 루트 옆의 고유 임시 디렉터리(`.rocks-meta-validation-*`)에 두고, 생성 헤더와 집계 헤더마다 따로 실제 Clang으로 검사한 뒤 게시한다. 정상 종료와 관리된 실패에서 임시 디렉터리를 정리한다. 기존 출력과 같으면 다시 쓰지 않아 timestamp를 보존한다. 변경된 결과는 같은 디렉터리의 고유 임시 파일에 완성한 뒤 교체한다. 단독 실행은 입력에서 빠진 헤더의 이전 생성물을 지우지 않는다(지우기는 빌드의 게시 트랜잭션이 맡는다). `--check`는 모든 생성 헤더·집계 헤더·descriptor를 기존 출력과 비교하고 생성 루트에 남은 잉여 파일도 stale로 거부하며, 출력을 수정하지 않는다. 서로 다른 생성 설정이 같은 출력을 공유하는 빌드 그래프는 금지하며, 고유 임시 파일 사용이 그런 논리 충돌을 해결하는 것은 아니다.
 
-MSBuild와 C# 빌드 도구는 객체 런타임을 포함하는 구성에서 fixture 생성, 생성 헤더 단독 컴파일과 ReflectionTests를 연결한다. Core-only 구성은 이 생성 작업을 요구하지 않는다. 실제 생성 헤더도 일반 엔진 코드와 같은 경고 오류 기준으로 컴파일한다.
+C# 빌드 도구는 타깃에서 도달하는 모듈 가운데 `Metadata`가 있는 모듈을 의존 순서로 하나씩 생성한다. 생성 디렉터리 `<out>/Generated/<M>/Public`·`Private`는 각각 그 모듈의 public·private include 디렉터리가 되어 의존 모듈로 전파된다. 생성은 `<out>/.metadata-stage/`에 하고, 의존 모듈은 stage의 descriptor와 생성 루트를 본다(이전 빌드의 게시본을 보지 않는다). 모든 모듈의 생성·`ids verify`·`ids verify-set`이 성공하면 생성 헤더·descriptor(`<out>/Metadata/<M>.rocksmeta.json`)와 입력에서 빠진 헤더의 이전 생성물 삭제를 한 트랜잭션으로 게시한다. 게시 중 실패하면 교체와 삭제를 모두 되돌리며, 실행 동안 명세가 바뀌었으면 게시하지 않는다. Core-only 구성은 이 생성 작업을 요구하지 않는다. 생성 헤더는 public include 헤더 검사에서 일반 엔진 헤더와 같은 경고 오류 기준으로 단독 컴파일된다.
 
 ## 진단과 수정
 
-진단은 가능한 원본 파일과 줄, 오류 코드, 원인, `hint`를 함께 출력한다. 예를 들어 지원하지 않는 `PROPERTY` 지정자는 `RMC2000`으로 거부한다. `RMC1000`은 잘못된 명령·경로·지원하지 않는 컴파일 옵션, `RMC2001`은 처리할 수 없는 Clang AST 형태, `RMC3000`은 Clang 입력 또는 생성 코드의 계약 오류, `RMC3100`은 포매터 오류, `RMC4000`은 `--check`의 stale 출력을 나타낸다. 실패 시 기존 생성물은 유지하며 빌드는 실패로 판정한다.
+진단은 가능한 원본 파일과 줄, 오류 코드, 원인, `hint`를 함께 출력한다. 예를 들어 지원하지 않는 `PROPERTY` 지정자는 `RMC2000`으로 거부한다. `RMC1000`은 잘못된 명령·경로·지원하지 않는 컴파일 옵션, `RMC1001`은 리플렉션 헤더 철자를 가리는 다른 헤더, `RMC2001`은 처리할 수 없는 Clang AST 형태, `RMC2003`은 모듈 입력에도 import한 descriptor에도 없는 리플렉션 선언·base·참조 대상, `RMC2004`는 같은 모듈 또는 같은 타입을 두 번 import하거나, 자기 descriptor를 import하거나, import한 타입 이름을 이 모듈이 다시 정의한 경우, `RMC2005`는 대소문자만 다르거나 겹치는 생성 철자와 예약된 `.module.h`·`.generated.h` 이름, `RMC2006`은 private 타입을 public 타입의 base로 쓰거나 다른 모듈에서 쓴 경우, `RMC2100`은 명세 누락·변경과 inventory 불일치, `RMC2101`은 명세 사이 ID·이름 중복, `RMC2102`는 Metadata가 없는 모듈의 활성 명세, `RMC3000`은 Clang 입력 또는 생성 코드의 계약 오류, `RMC3100`은 포매터 오류, `RMC4000`은 `--check`의 stale 출력을 나타낸다. 실패 시 기존 생성물은 유지하며 빌드는 실패로 판정한다.
 
 ## 현재 한계와 검증 범위
 
-각 메타 입력은 별도 번역 단위로 처리한다. 포함된 reflected 타입을 모두 수집하므로 여러 생성 헤더가 같은 타입의 specialization을 중복 소유하지 않도록 빌드 입력을 구성해야 한다. 모듈별 타입 소유 manifest, compile_commands 기반 정확한 타깃 문맥 복원, 원격·로컬 생성 캐시, depfile 기반 최소 재생성은 아직 지원하지 않는다. 여러 타깃의 define·include 차이는 호출 측에서 정확히 전달해야 한다. 컴파일러나 타깃 문맥이 달라져도 항상 같은 산출물을 보장한다는 의미는 아니다.
+모듈의 리플렉션 헤더는 한 번역 단위로 처리하고, 그 모듈 입력 헤더에 물리적으로 있는 선언만 생성 대상으로 모은다. include로 들어온 다른 모듈의 리플렉션 선언은 import한 descriptor에 같은 이름·같은 헤더 파일로 있어야 하며 다시 생성하지 않는다. compile_commands 기반 정확한 타깃 문맥 복원, 원격·로컬 생성 캐시, depfile 기반 최소 재생성은 아직 지원하지 않는다. 여러 타깃의 define·include 차이는 호출 측에서 정확히 전달해야 한다. 컴파일러나 타깃 문맥이 달라져도 항상 같은 산출물을 보장한다는 의미는 아니다.
 
 런타임 회귀는 scalar/Guid/UTF-8 소유 값, 상속 관계와 native cast 분리, 잘못된 context·thread, staged write와 참조 barrier, typed target 거부, descriptor 함수표의 깊은 복사, String OOM·논리 파괴 재진입, Swap의 allocator 소유권, 등록 OOM 후 기반 의존성 원복을 검사한다. 계수·allocator ledger가 종료 후 0으로 돌아오는지도 확인한다.
 
-C# 하네스는 실제 Clang을 호출하여 자동 ID, 잘못된 명세·중복·누락, 빠진 annotation, 미지원 필드·상속·Trace, 컴파일 오류와 경고 강등 옵션을 검사한다. 오류가 기존 출력 파일을 훼손하지 않는지, 같은 입력의 바이트·timestamp가 유지되는지, `--check`가 변경 없이 stale 출력을 거부하는지도 검사한다.
+C# 하네스는 실제 Clang을 호출하여 자동 ID, 잘못된 명세·중복·누락, 빠진 annotation, 미지원 필드·상속·Trace, 컴파일 오류와 경고 강등 옵션을 검사한다. 오류가 기존 출력 파일을 훼손하지 않는지, 같은 입력의 바이트·timestamp가 유지되는지, `--check`가 변경 없이 stale 출력과 잉여 생성물을 거부하는지도 검사한다. 모듈 모드는 여러 헤더·집계 헤더·descriptor 생성, 의존 모듈 import(상속 필드·참조 대상 ID), private 헤더 분리와 private 헤더만 있는 모듈의 의존 등록, 같은 이름·다른 파일의 선언, 자기 descriptor import·import 타입 재정의, descriptor의 엄격한 읽기, RMC2003·2004·2005·2006을 검사한다. identity 명령은 `ids move`의 ID·별칭 보존·중첩 타입·재실행, `ids verify-set`의 ID·이름 중복, ID 기준으로 합친 merge-check와 명세를 옮긴 Git 병합을 검사한다. 빌드 통합 시험은 MetadataLayout의 가림(RMC1001)·이중 소유·생성 철자 충돌·잘못된 선언·고아와 예약 명세·타깃 범위, 게시 트랜잭션의 삭제·되돌리기·백업 위치를 검사한다. 설치형 SDK 시험은 SDK descriptor import와, 메타데이터 모듈 두 개(라이브러리와 실행 파일)가 있는 게임에서 stage import, 상위 모듈 실패 시 미게시, Metadata에서 뺀 헤더의 생성물 삭제를 검사한다. 런타임 시험은 공유 모듈의 한 번 등록과 lease 보유, Busy에서 역순 해제 중단과 재시도, 다른 native 타입의 같은 ID 거부, 성공 실행에서 잰 모든 할당 실패 지점의 되돌리기를 검사한다.
 
 이전 구현은 Windows 로컬 Debug·Release·ASan과 [Windows/macOS native CI](https://github.com/maxidea1024/rocks/actions/runs/42775786556)에서 생성 코드 및 실제 Clang 회귀 실행을 확인하였다. 최종 수치·산출물 hash는 [5차 검증 기록](../Reviews/ImplementationRound5.FoundationValidation.ko.md)을 따른다. macOS는 ARM64 Debug·ASan 범위이며 Intel Mac과 TSan은 미검증이다.
 
-## 메타 단위 등록의 현재 제한
+## 모듈 메타데이터
 
-현재 빌드에서는 반영할 각 헤더를 대상의 `TargetRules.Metadata`에 명시해야 한다. 등록하지 않은 헤더의 `ROCKS_CLASS` 선언은 일반 C++ 컴파일만으로 검증 누락이 탐지된다고 보장하지 않는다. 컴파일 단위와 생성 선언의 coverage를 강제하는 기능은 후속 구현 항목이다.
+리플렉션 헤더는 그 헤더를 소유한 모듈의 규칙이 `Metadata`로 선언한다. 철자는 모듈의 public 또는 private include 디렉터리 기준이다. public 헤더의 타입은 의존 모듈이 쓸 수 있고, private 헤더의 타입은 그 모듈 안에서만 쓴다.
+
+```csharp
+public sealed class ReflectionTestFixtures : CoreModuleRules
+{
+    protected override string Group => "Developer";
+
+    protected override string ModuleName => "ReflectionTestFixtures";
+
+    protected override string[] RequiredModules => ["ObjectRuntime"];
+
+    protected override bool HasSources => false;
+
+    protected override IReadOnlyList<string> Metadata =>
+        ["ReflectionTestFixtures/ReflectionFixture.h", "ReflectionTestFixtures/AutoIdentityFixture.h"];
+}
+```
+
+생성 헤더는 원본 철자의 `.h`를 `.generated.h`로 바꿔 include한다(`#include <ReflectionTestFixtures/ReflectionFixture.generated.h>`). 명세는 모듈 폴더의 `ReflectionTestFixtures.rocksids.json`이다. `ModuleRules`를 직접 상속하는 게임 모듈은 `NativeModuleInput`에 `Metadata`와 함께 명세가 있는 폴더 `ModuleDirectory`(프로젝트 상대 경로)를 적는다(`Templates/Game/Foundation/Game.Build.cs`).
+
+빌드는 다음을 거부한다: `Metadata`가 있는데 명세가 없는 모듈(RMC2100), `Metadata`가 없는데 활성 항목이 있는 명세(RMC2102 — 은퇴 항목만 남은 명세는 ID 예약이므로 허용), 한 헤더를 두 모듈이나 한 모듈에서 두 번 선언, 모듈 include 디렉터리 밖이거나 없는 헤더, 대소문자만 다른 생성 철자(RMC2005). 등록하지 않은 헤더의 `ROCKS_CLASS` 선언은 일반 C++ 컴파일만으로 누락이 탐지된다고 보장하지 않는다. 컴파일 단위와 생성 선언의 coverage를 강제하는 기능은 후속 구현 항목이다.

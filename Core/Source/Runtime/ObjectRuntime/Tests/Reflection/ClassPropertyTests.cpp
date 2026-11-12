@@ -1,4 +1,4 @@
-#include "ReflectionFixture.generated.h"
+#include <ReflectionTestFixtures/ReflectionFixture.generated.h>
 #include <TestSupport/Test.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <ObjectSerialization/ObjectGraph.h>

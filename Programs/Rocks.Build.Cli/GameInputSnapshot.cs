@@ -76,11 +76,11 @@ public static class GameInputSnapshot
         return Convert.ToHexStringLower(hash.GetHashAndReset());
     }
 
-    public static string[] DeclaredInputs(BuildContext context, IEnumerable<NativeModuleInput> modules, TargetRules target) =>
-        modules.SelectMany(module => module.Sources.Concat(module.PublicIncludeDirectories)
+    // 모듈 입력과 모듈 소유 메타데이터(리플렉션 헤더·identity 명세)다. 생성 include 디렉터리는 출력 아래라 제외된다.
+    public static string[] DeclaredInputs(BuildContext context, MetadataPlan plan) =>
+        plan.Modules.SelectMany(module => module.Sources.Concat(module.PublicIncludeDirectories)
             .Concat(module.PrivateIncludeDirectories).Concat(module.AdditionalInputs).Concat(module.PrebuiltLibraries))
-            .Concat(target.Metadata.Select(unit => unit.Input))
-            .Concat(target.IdentityManifest is null ? [] : [target.IdentityManifest])
+            .Concat(plan.Generated.SelectMany(module => module.Headers.Select(header => header.Path).Append(module.Manifest)))
             .Select(context.PathInRoot).Distinct().ToArray();
 
     private static bool Inside(string root, string path)

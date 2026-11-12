@@ -13,7 +13,8 @@ internal static class TypeConvenienceCompilerTests
             bool clangCl = Path.GetFileNameWithoutExtension(compiler).Equals("clang-cl", StringComparison.OrdinalIgnoreCase);
             string[] includeDirectories = Directory.GetDirectories(Path.Combine(options.Root, "Core", "Source", "Runtime"))
                 .Select(module => Path.Combine(module, "Public")).Where(Directory.Exists).Order(StringComparer.Ordinal)
-                .Concat([options.Root, temporary.Root]).ToArray();
+                .Concat([options.Root, temporary.Root, Path.Combine(MetaCompilerArguments.OutputRoot(temporary.Root), "Public")]).ToArray();
+            Directory.CreateDirectory(Path.Combine(MetaCompilerArguments.OutputRoot(temporary.Root), "Public"));
 
             // 실제 메타컴파일러를 실행해 같은 생성 헤더를 두 번역 단위가 사용하게 한다.
             temporary.Write("Probe.h", "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n" +
@@ -29,9 +30,8 @@ internal static class TypeConvenienceCompilerTests
                 generate.Add(generator);
             }
 
-            generate.AddRange(["--input", temporary.FilePath("Probe.h"), "--include", "Probe.h",
-                "--output", temporary.FilePath("Probe.generated.h"), "--compiler", compiler,
-                "--identity-manifest", identity]);
+            generate.AddRange([.. MetaCompilerArguments.Single(temporary.Root, temporary.FilePath("Probe.h"), "Probe.h"),
+                "--compiler", compiler, "--identity-manifest", identity]);
             foreach (string directory in includeDirectories)
             {
                 generate.AddRange(["--include-dir", directory]);
@@ -46,10 +46,10 @@ internal static class TypeConvenienceCompilerTests
                 Timeout: TimeSpan.FromSeconds(60)));
             Verify.Equal(0, generated.ExitCode, "metadata generation: " + generated.StdOut + generated.StdErr);
 
-            temporary.Write("first.cpp", "#include \"Probe.generated.h\"\n" +
+            temporary.Write("first.cpp", "#include <Probe.generated.h>\n" +
                 "const rocks::TypeSchema* FirstSchema() noexcept { return &rocks::TypeOf<probe::Value>(); }\n" +
                 "rocks::TypeId FirstId() noexcept { return rocks::TypeIdOf<probe::Value>(); }\n");
-            temporary.Write("second.cpp", "#include \"Probe.generated.h\"\n" +
+            temporary.Write("second.cpp", "#include <Probe.generated.h>\n" +
                 "const rocks::TypeSchema* FirstSchema() noexcept; rocks::TypeId FirstId() noexcept;\n" +
                 "int main() { const auto* left = FirstSchema(); const auto* right = &rocks::TypeOf<probe::Value>(); " +
                 "const auto id = rocks::TypeIdOf<probe::Value>(); " +

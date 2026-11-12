@@ -21,7 +21,9 @@ internal sealed class MetadataRollbackException : IOException
         Failures = failures;
         Backups = backups;
     }
+
     public IReadOnlyList<string> Failures { get; }
+
     public IReadOnlyList<MetadataRecoveryBackup> Backups { get; }
 }
 
@@ -29,19 +31,28 @@ internal sealed class MetadataRollbackException : IOException
 internal interface IMetadataOutputFiles
 {
     bool Exists(string path);
+
     byte[] Read(string path);
+
     byte[] ReadBounded(string path, int maximumBytes);
+
     void CreateBackup(string path, byte[] bytes);
+
     void WriteAtomic(string path, byte[] bytes);
+
     void Delete(string path);
 }
 
 internal sealed class MetadataOutputFiles : IMetadataOutputFiles
 {
     public static MetadataOutputFiles Instance { get; } = new();
+
     public bool Exists(string path) => File.Exists(path);
+
     public byte[] Read(string path) => File.ReadAllBytes(path);
+
     public byte[] ReadBounded(string path, int maximumBytes) => BoundedFile.Read(path, maximumBytes);
+
     public void CreateBackup(string path, byte[] bytes)
     {
         bool created = false;
@@ -70,42 +81,61 @@ internal sealed class MetadataOutputFiles : IMetadataOutputFiles
             throw;
         }
     }
+
     public void WriteAtomic(string path, byte[] bytes) => AtomicFile.WriteIfChanged(path, bytes);
+
     public void Delete(string path) => File.Delete(path);
 }
 
 internal static class MetadataOutputTransaction
 {
-    private sealed record Item(string Final, byte[] Generated, byte[]? Original, string? Backup);
+    // Generated가 null이면 삭제 항목이다(입력에서 빠진 헤더의 생성물·잉여 파일).
+    private sealed record Item(string Final, byte[]? Generated, byte[]? Original, string? Backup);
 
+    // 모든 모듈의 생성물과 삭제를 한 번에 게시한다. outputs의 Staged가 null이면 Final을 지운다.
+    // manifests는 실행이 읽은 identity 명세와 그 시점 내용이며 게시 동안 하나라도 바뀌면 전체를 되돌린다.
+    // backupDirectory를 주면 바꾸거나 지울 출력의 백업을 그 디렉터리(호출마다 새 경로)에 두고, 없으면 출력 옆에 둔다.
+    // 백업은 성공·완전한 복구 뒤 지우며, 복구가 불완전하면 MetadataRollbackException이 남은 백업을 알려 준다.
     // 단일 writer가 출력과 명세를 관리한다는 전제다. 다른 프로세스의 경합을 OS 원자 CAS로
     // 막지 않으며, 강제 종료·전원 장애를 넘는 다중 파일 원자성은 제공하지 않는다.
-    public static void Publish(IReadOnlyList<(string Staged, string Final)> outputs,
-        string manifestPath, byte[] manifestSnapshot, CancellationToken cancellationToken,
-        IMetadataOutputFiles? files = null)
+    public static void Publish(IReadOnlyList<(string? Staged, string Final)> outputs,
+        IReadOnlyList<(string Path, byte[] Snapshot)> manifests, CancellationToken cancellationToken,
+        IMetadataOutputFiles? files = null, string? backupDirectory = null)
     {
         ArgumentNullException.ThrowIfNull(outputs);
-        ArgumentException.ThrowIfNullOrWhiteSpace(manifestPath);
-        ArgumentNullException.ThrowIfNull(manifestSnapshot);
-        if (manifestSnapshot.Length > BoundedFile.MaximumIdentityBytes)
+        ArgumentNullException.ThrowIfNull(manifests);
+        foreach ((string manifestPath, byte[] snapshot) in manifests)
         {
-            throw new InvalidDataException("Identity manifest snapshot exceeds size limit.");
+            ArgumentException.ThrowIfNullOrWhiteSpace(manifestPath);
+            ArgumentNullException.ThrowIfNull(snapshot);
+            if (snapshot.Length > BoundedFile.MaximumIdentityBytes)
+            {
+                throw new InvalidDataException("Identity manifest snapshot exceeds size limit.");
+            }
         }
 
         files ??= MetadataOutputFiles.Instance;
-        string manifest = Path.GetFullPath(manifestPath);
-        byte[] expectedManifest = manifestSnapshot.ToArray();
         StringComparer paths = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        List<(string Path, byte[] Expected)> expectedManifests = manifests
+            .Select(manifest => (Path.GetFullPath(manifest.Path), manifest.Snapshot.ToArray())).ToList();
+        HashSet<string> manifestPaths = new(expectedManifests.Select(manifest => manifest.Path), paths);
         HashSet<string> finalPaths = new(paths);
         HashSet<string> stagePaths = new(paths);
-        foreach ((string staged, string final) in outputs)
+        foreach ((string? staged, string final) in outputs)
         {
-            string stagePath = Path.GetFullPath(staged);
             string finalPath = Path.GetFullPath(final);
-            if (!stagePaths.Add(stagePath) || !finalPaths.Add(finalPath) || paths.Equals(stagePath, finalPath) ||
-                paths.Equals(stagePath, manifest) || paths.Equals(finalPath, manifest))
+            if (!finalPaths.Add(finalPath) || manifestPaths.Contains(finalPath))
             {
                 throw new ArgumentException("Metadata staging, output and manifest paths must be distinct.");
+            }
+
+            if (staged is not null)
+            {
+                string stagePath = Path.GetFullPath(staged);
+                if (!stagePaths.Add(stagePath) || paths.Equals(stagePath, finalPath) || manifestPaths.Contains(stagePath))
+                {
+                    throw new ArgumentException("Metadata staging, output and manifest paths must be distinct.");
+                }
             }
         }
 
@@ -118,41 +148,53 @@ internal static class MetadataOutputTransaction
         List<Item> items = [];
         List<string> createdBackups = [];
         List<Item> attempted = [];
-        void CheckManifest()
+        void CheckManifests()
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!files.Exists(manifest) || !files.ReadBounded(manifest, BoundedFile.MaximumIdentityBytes).AsSpan().SequenceEqual(expectedManifest))
+            foreach ((string manifest, byte[] expected) in expectedManifests)
             {
-                throw new IOException("Identity manifest changed during metadata publication.");
+                if (!files.Exists(manifest) || !files.ReadBounded(manifest, BoundedFile.MaximumIdentityBytes).AsSpan().SequenceEqual(expected))
+                {
+                    throw new IOException("Identity manifest changed during metadata publication: " + manifest);
+                }
             }
         }
 
+        bool Unchanged(Item item) =>
+            item.Generated is null ? item.Original is null : item.Original is not null && item.Generated.AsSpan().SequenceEqual(item.Original);
+
         try
         {
-            CheckManifest();
+            CheckManifests();
             int index = 0;
-            foreach ((string staged, string final) in outputs)
+            foreach ((string? staged, string final) in outputs)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                string source = Path.GetFullPath(staged);
                 string target = Path.GetFullPath(final);
-                byte[] generated = files.Read(source); // 하나라도 실패하면 어떤 출력도 게시하지 않는다.
+                byte[]? generated = staged is null ? null : files.Read(Path.GetFullPath(staged)); // 하나라도 실패하면 어떤 출력도 게시하지 않는다.
                 byte[]? old = files.Exists(target) ? files.Read(target) : null;
-                string? backup = old is null ? null : target + ".rocks-backup-" + tag + "-" + index;
+                string? backup = old is null ? null
+                    : backupDirectory is null ? target + ".rocks-backup-" + tag + "-" + index
+                    : Path.Combine(Path.GetFullPath(backupDirectory), index + ".rocks-backup");
                 items.Add(new(target, generated, old, backup));
                 ++index;
             }
 
-            foreach (Item item in items.Where(item => item.Backup is not null && !item.Generated.AsSpan().SequenceEqual(item.Original)))
+            if (backupDirectory is not null && items.Any(item => item.Backup is not null && !Unchanged(item)))
             {
-                CheckManifest();
+                Directory.CreateDirectory(backupDirectory);
+            }
+
+            foreach (Item item in items.Where(item => item.Backup is not null && !Unchanged(item)))
+            {
+                CheckManifests();
                 files.CreateBackup(item.Backup!, item.Original!);
                 createdBackups.Add(item.Backup!);
             }
 
             foreach (Item item in items)
             {
-                CheckManifest();
+                CheckManifests();
                 bool stillExists = files.Exists(item.Final);
                 if (stillExists != (item.Original is not null) ||
                     (stillExists && !files.Read(item.Final).AsSpan().SequenceEqual(item.Original)))
@@ -160,16 +202,24 @@ internal static class MetadataOutputTransaction
                     throw new IOException("Metadata output changed before publication: " + item.Final);
                 }
 
-                if (item.Original is not null && item.Generated.AsSpan().SequenceEqual(item.Original))
+                if (Unchanged(item))
                 {
                     continue;
                 }
+
                 // 쓰기 함수가 변경 후 예외를 던질 수도 있으므로 호출 전에 복구 목록에 넣는다.
                 attempted.Add(item);
-                files.WriteAtomic(item.Final, item.Generated);
+                if (item.Generated is null)
+                {
+                    files.Delete(item.Final);
+                }
+                else
+                {
+                    files.WriteAtomic(item.Final, item.Generated);
+                }
             }
 
-            CheckManifest();
+            CheckManifests();
         }
         catch (Exception cause)
         {
@@ -200,7 +250,7 @@ internal static class MetadataOutputTransaction
                 throw new MetadataRollbackException(cause, failures, backups);
             }
 
-            var cleanup = Cleanup(files, createdBackups);
+            var cleanup = Cleanup(files, createdBackups, backupDirectory);
             if (cleanup.Count != 0)
             {
                 throw new IOException("Metadata publication failed; rollback succeeded but backup cleanup failed: " + string.Join("; ", cleanup), cause);
@@ -210,14 +260,14 @@ internal static class MetadataOutputTransaction
             throw; // 도달 불가. 분석기가 정상 반환 경로로 취급하지 않게 한다.
         }
 
-        var remaining = Cleanup(files, createdBackups);
+        var remaining = Cleanup(files, createdBackups, backupDirectory);
         if (remaining.Count != 0)
         {
             throw new IOException("Metadata publication succeeded, but backup cleanup failed: " + string.Join("; ", remaining));
         }
     }
 
-    private static List<string> Cleanup(IMetadataOutputFiles files, IReadOnlyList<string> paths)
+    private static List<string> Cleanup(IMetadataOutputFiles files, IReadOnlyList<string> paths, string? directory)
     {
         List<string> failures = [];
         foreach (string path in paths)
@@ -229,6 +279,24 @@ internal static class MetadataOutputTransaction
             catch (Exception error)
             {
                 failures.Add($"{path}: {error.Message}");
+            }
+        }
+
+        // 이 호출의 백업 디렉터리는 비었을 때만 지운다(다른 파일이 있으면 남긴다).
+        if (failures.Count == 0 && directory is not null && Directory.Exists(directory) && !Directory.EnumerateFileSystemEntries(directory).Any())
+        {
+            try
+            {
+                Directory.Delete(directory);
+                string? parent = Path.GetDirectoryName(Path.GetFullPath(directory));
+                if (parent is not null && Directory.Exists(parent) && !Directory.EnumerateFileSystemEntries(parent).Any())
+                {
+                    Directory.Delete(parent);
+                }
+            }
+            catch (IOException error)
+            {
+                failures.Add($"{directory}: {error.Message}");
             }
         }
 

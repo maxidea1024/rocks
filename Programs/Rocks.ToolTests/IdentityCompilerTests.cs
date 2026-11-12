@@ -11,6 +11,7 @@ internal static class IdentityCompilerTests
     private const string TypeId = "b1000000000000000000000000000001";
     private const string FieldId = "b1000000000000000000000000000011";
     private const string Prefix = "#include <Meta/Annotations.h>\n#include <Object/Object.h>\nnamespace probe {\n";
+
     private static string Source(string type, string field) => Prefix + type +
         "\nstruct Value : public rocks::Object {\n" + field + " rocks::int32 count = 7;\n};\n}\n";
 
@@ -39,7 +40,7 @@ internal static class IdentityCompilerTests
         {
             using var probe = new Probe(options, environment);
             probe.Source(Source("ROCKS_CLASS()", "ROCKS_PROPERTY()"));
-            File.WriteAllText(probe.Output, "previous output");
+            probe.WritePrevious("previous output");
             await probe.Failure("requires an identity manifest");
             probe.Manifest(TypeId, FieldId);
             foreach (var value in new[] {
@@ -111,7 +112,7 @@ internal static class IdentityCompilerTests
             foreach (bool duringLoad in new[] { true, false })
             {
                 probe.Manifest(TypeId, FieldId);
-                File.WriteAllText(probe.Output, "previous output");
+                probe.WritePrevious("previous output");
                 await probe.MutationFailure(duringLoad);
                 Verify.Equal("previous output", File.ReadAllText(probe.Output), "changed manifest published generated output");
             }
@@ -123,16 +124,30 @@ internal static class IdentityCompilerTests
         private readonly TemporaryDirectory temporary = new();
         private readonly Options options;
         private readonly IReadOnlyDictionary<string, string?> environment;
+
         public Probe(Options options, IReadOnlyDictionary<string, string?> environment)
         {
             this.options = options;
             this.environment = environment;
         }
+
         public string Input => temporary.FilePath("Probe.h");
-        public string Output => temporary.FilePath("Probe.generated.h");
+
+        public string Output => MetaCompilerArguments.GeneratedPath(temporary.Root, "Probe.h");
+
+        // 실패한 실행이 덮어쓰지 않아야 하는 이전 출력을 만든다.
+        public void WritePrevious(string text)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(Output)!);
+            File.WriteAllText(Output, text);
+        }
+
         public string ManifestPath => temporary.FilePath("identities.rocksids.json");
+
         public string InventoryPath => temporary.FilePath("inventory.json");
+
         public void Source(string text) => temporary.Write("Probe.h", text);
+
         public void Manifest(string typeId, string fieldId)
         {
             var entries = new[] {
@@ -141,6 +156,7 @@ internal static class IdentityCompilerTests
             };
             temporary.Write("identities.rocksids.json", JsonSerializer.Serialize(new { schema = 1, entries }));
         }
+
         private async Task<ProcessResult> Run(params string[] extra)
         {
             string generator = Path.GetFullPath(options.Required("metacompiler"));
@@ -151,7 +167,7 @@ internal static class IdentityCompilerTests
                 args.Add(generator);
             }
 
-            args.AddRange(["--input", Input, "--include", "Probe.h", "--output", Output, "--compiler", options.Required("compiler")]);
+            args.AddRange([.. MetaCompilerArguments.Single(temporary.Root, Input, "Probe.h"), "--compiler", options.Required("compiler")]);
             foreach (string argument in options.ClangArguments)
             {
                 args.Add("--clang-arg=" + argument);
@@ -160,11 +176,13 @@ internal static class IdentityCompilerTests
             args.AddRange(extra);
             return await ProcessRunner.RunAsync(new(executable, args, options.Root, environment, Timeout: TimeSpan.FromSeconds(60)));
         }
+
         public async Task Success(params string[] extra)
         {
             ProcessResult result = await Run(extra);
             Verify.Equal(0, result.ExitCode, "metadata generation: " + result.StdErr);
         }
+
         public async Task Failure(string message, params string[] extra)
         {
             ProcessResult result = await Run(extra);
@@ -172,6 +190,7 @@ internal static class IdentityCompilerTests
             Verify.Contains(message, result.StdErr, "identity diagnostic");
             Verify.Contains("hint:", result.StdErr, "identity diagnostic hint");
         }
+
         public async Task FailureAt(string message, int line, params string[] extra)
         {
             ProcessResult result = await Run(extra);
@@ -180,9 +199,10 @@ internal static class IdentityCompilerTests
             Verify.Contains(Input.Replace('\\', '/') + ":" + line + ": error",
                 result.StdErr.Replace('\\', '/'), "identity source location");
         }
+
         public async Task MutationFailure(bool duringLoad)
         {
-            List<string> arguments = ["--input", Input, "--include", "Probe.h", "--output", Output,
+            List<string> arguments = [.. MetaCompilerArguments.Single(temporary.Root, Input, "Probe.h"),
                 "--compiler", options.Required("compiler"), "--identity-manifest", ManifestPath, "--include-dir", temporary.Root];
             foreach (string directory in Directory.GetDirectories(Path.Combine(options.Root, "Core", "Source", "Runtime")))
             {
@@ -224,6 +244,7 @@ internal static class IdentityCompilerTests
                 Environment.SetEnvironmentVariable("ROCKS_CLANG_FORMAT", oldFormatter);
             }
         }
+
         public void Dispose() => temporary.Dispose();
     }
 }

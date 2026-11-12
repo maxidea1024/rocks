@@ -61,16 +61,19 @@ public abstract class TestsModule : ModuleRules
             _ => ["ObjectSerialization", "Localization", "Compression", .. DeveloperTestModules,
                 .. EngineTestDependencies]
         };
+
+        // Object 계열 시험은 리플렉션 fixture 모듈에 의존한다. 생성 헤더(<ReflectionTestFixtures/*.generated.h>)는
+        // 그 모듈의 public include로 전파된다.
+        string[] fixtures = objects ? ["ReflectionTestFixtures"] : [];
         return new()
         {
             Name = ExecutableName,
             Kind = NativeModuleKind.Executable,
             Sources = sources,
-            // 저장소 루트: 메타 생성 코드가 fixture를 루트 기준 경로로 include한다.
-            PrivateIncludeDirectories = [context.RootDirectory, context.PathInRoot($"{support}/Public"),
-                Path.Combine(context.OutputDirectory, "Generated")],
+            // 저장소 루트: 시험이 모듈의 Private 헤더를 루트 기준 경로로 include한다.
+            PrivateIncludeDirectories = [context.RootDirectory, context.PathInRoot($"{support}/Public")],
             PrivateDefines = ["ROCKS_TESTING=1"],
-            Dependencies = dependencies
+            Dependencies = [.. dependencies, .. fixtures]
         };
     }
 }
@@ -78,17 +81,20 @@ public abstract class TestsModule : ModuleRules
 public sealed class FoundationTests : TestsModule
 {
     protected override TestLayer Layer => TestLayer.Foundation;
+
     protected override string ExecutableName => "FoundationTests";
 }
 
 public sealed class CoreFoundationTests : TestsModule
 {
     protected override TestLayer Layer => TestLayer.Core;
+
     protected override string ExecutableName => "CoreFoundationTests";
 }
 
 public sealed class EngineTests : TestsModule
 {
     protected override TestLayer Layer => TestLayer.Engine;
+
     protected override string ExecutableName => "EngineTests";
 }

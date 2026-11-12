@@ -28,6 +28,7 @@ if (args.Length == 1 && args[0] == "--platform-path-header")
 }
 
 var options = new Dictionary<string, string>(StringComparer.Ordinal);
+
 for (var index = 0; index < args.Length; index += 2)
 {
     if (index + 1 >= args.Length || args[index] is not ("--root" or "--compiler") || !options.TryAdd(args[index], args[index + 1]))
@@ -47,11 +48,13 @@ var reports = Path.Combine(root, "out/sdk-integration");
 Directory.CreateDirectory(reports);
 var cases = new List<object>();
 bool success = false;
+
 try
 {
     var timer = Stopwatch.StartNew();
     await OutputInvocationLockTests.RunAsync();
     MetadataOutputTransactionTests.Run();
+    MetadataLayoutTests.Run();
     MetadataTemporaryCleanupTests.Run();
     await PlatformPrivateHeaderTests.RunAsync(toolchain, Path.Combine(fixture, "platform-header"));
     Pass("output-invocation-lock-and-platform-header-incremental", timer.Elapsed);
@@ -84,8 +87,8 @@ try
     timer.Restart();
     string gameHeader = Path.Combine(game, "Source/GameObject.h");
     string gameMain = Path.Combine(game, "Source/Main.cpp");
-    string gameIdentity = Path.Combine(game, "Game.rocksids.json");
-    string generatedIdentityHeader = Path.Combine(output, "Generated/GameObject.generated.h");
+    string gameIdentity = Path.Combine(game, "SampleGame.rocksids.json");
+    string generatedIdentityHeader = Path.Combine(output, "Generated/SampleGame/Public/GameObject.generated.h");
     string identityOriginalHeader = File.ReadAllText(gameHeader);
     string originalMain = File.ReadAllText(gameMain);
     byte[] originalIdentity = File.ReadAllBytes(gameIdentity);
@@ -132,6 +135,211 @@ try
 
     Require((await Game()).ExitCode == 0, "Game did not recover after identity integration test");
     Pass("identity-rename-and-orphan-rejection", timer.Elapsed);
+
+    // SDK descriptor import: 리플렉션 fixture 모듈을 담은 SDK를 내보내고(엔진 SDK의 출력 디렉터리를 같이 써 다시
+    // 컴파일하지 않는다), 게임 모듈이 그 SDK 모듈의 타입을 상속·참조한다. SDK 모듈은 다시 생성하지 않는다.
+    timer.Restart();
+    var reflectionSdk = Path.Combine(fixture, "installed-reflection");
+    var engineOutput = Path.Combine(root, "out", $"dotnet-{(OperatingSystem.IsWindows() ? "windows" : "macos")}-engine-debug");
+    var reflectionExport = await Cli("sdk", "--root", root, "--target", "ReflectionFixtures", "--configuration", "Debug",
+        "--destination", reflectionSdk, "--output", engineOutput);
+    Require(reflectionExport.ExitCode == 0, "Reflection fixture SDK export failed: " + reflectionExport.StdOut + reflectionExport.StdErr);
+    using (var sdkManifest = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(reflectionSdk, "rocks-sdk.json"))))
+    {
+        var sdkModules = sdkManifest.RootElement.GetProperty("Modules").EnumerateArray().ToArray();
+        var fixtureModule = sdkModules.Single(module => module.GetProperty("Name").GetString() == "ReflectionTestFixtures");
+        Require(fixtureModule.GetProperty("Descriptor").GetString() == "Metadata/ReflectionTestFixtures/ReflectionTestFixtures.rocksmeta.json" &&
+            fixtureModule.GetProperty("IdentityManifest").GetString() == "Metadata/ReflectionTestFixtures/ReflectionTestFixtures.rocksids.json",
+            "SDK manifest does not name the fixture module's descriptor and identity manifest");
+        Require(sdkModules.Where(module => module.GetProperty("Name").GetString() != "ReflectionTestFixtures")
+            .All(module => module.GetProperty("Descriptor").ValueKind == JsonValueKind.Null && module.GetProperty("IdentityManifest").ValueKind == JsonValueKind.Null),
+            "SDK module without reflection headers exported metadata");
+        Require(File.Exists(Path.Combine(reflectionSdk, "Headers/ReflectionTestFixtures/1/ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h")),
+            "SDK is missing the fixture module's generated public headers");
+    }
+
+    // 게임에는 메타데이터 모듈이 둘이다: 라이브러리 GameCore(CoreThing : SDK Base)와 실행 파일 SampleGame
+    // (FixtureChild : GameCore의 CoreThing, SDK Node 참조). 한 빌드 안에서 stage descriptor import와 stage 생성 루트
+    // 치환, 상위 모듈 실패 시 미게시, Metadata에서 뺀 헤더의 생성물 삭제를 확인한다.
+    var reflectionGame = Path.Combine(fixture, "game-reflection");
+    var reflectionOutput = Path.Combine(reflectionGame, "out/Debug");
+    CopyTree(Path.Combine(root, "Templates/Game/Foundation"), reflectionGame);
+    var reflectionRules = Path.Combine(reflectionGame, "Game.Build.cs");
+    var reflectionRulesText = File.ReadAllText(reflectionRules);
+    Require(reflectionRulesText.Contains("Dependencies = [\"ObjectRuntime\"]", StringComparison.Ordinal) &&
+        reflectionRulesText.Contains("Metadata = [\"GameObject.h\"]", StringComparison.Ordinal), "Game template rules changed; update the SDK descriptor fixture");
+    File.WriteAllText(reflectionRules, reflectionRulesText
+        .Replace("Dependencies = [\"ObjectRuntime\"]", "Dependencies = [\"ObjectRuntime\", \"GameCore\"]", StringComparison.Ordinal)
+        .Replace("Metadata = [\"GameObject.h\"]", "Metadata = [\"GameObject.h\", \"FixtureChild.h\"]", StringComparison.Ordinal));
+    var reflectionProject = Path.Combine(reflectionGame, "Game.rocksproject");
+    var reflectionProjectText = File.ReadAllText(reflectionProject);
+    const string sampleModuleEntry = "{ \"name\": \"SampleGame\", \"type\": \"Runtime\", \"loadingPhase\": \"Default\" }";
+    Require(reflectionProjectText.Contains(sampleModuleEntry, StringComparison.Ordinal), "Game template descriptor changed; update the SDK descriptor fixture");
+    File.WriteAllText(reflectionProject, reflectionProjectText.Replace(sampleModuleEntry,
+        sampleModuleEntry + ",\n    { \"name\": \"GameCore\", \"type\": \"Runtime\", \"loadingPhase\": \"Default\" }", StringComparison.Ordinal));
+    var coreRules = Path.Combine(reflectionGame, "GameCore.Build.cs");
+    const string coreRulesText = """
+        using Rocks.Build;
+        using Rocks.Build.Rules;
+
+        public sealed class GameCoreModule : ModuleRules
+        {
+            public override NativeModuleInput Configure(BuildContext context) => new()
+            {
+                Name = "GameCore",
+                PublicIncludeDirectories = [context.PathInRoot("Core/Public")],
+                Dependencies = ["ReflectionTestFixtures"],
+                Metadata = ["GameCore/CoreThing.h", "GameCore/Extra.h"],
+                ModuleDirectory = "Core"
+            };
+        }
+
+        """;
+    File.WriteAllText(coreRules, coreRulesText);
+    Directory.CreateDirectory(Path.Combine(reflectionGame, "Core/Public/GameCore"));
+    var coreHeader = Path.Combine(reflectionGame, "Core/Public/GameCore/CoreThing.h");
+    const string coreHeaderText = """
+        #pragma once
+
+        #include <Meta/Annotations.h>
+        #include <ReflectionTestFixtures/ReflectionFixture.h>
+
+        namespace sample {
+
+        ROCKS_CLASS()
+        struct CoreThing : rocks::reflection_fixture::Base {
+            ROCKS_PROPERTY() rocks::int32 level = 1;
+        };
+
+        } // namespace sample
+
+        """;
+    File.WriteAllText(coreHeader, coreHeaderText);
+    File.WriteAllText(Path.Combine(reflectionGame, "Core/Public/GameCore/Extra.h"), """
+        #pragma once
+
+        #include <Meta/Annotations.h>
+        #include <Object/Object.h>
+
+        namespace sample {
+
+        ROCKS_CLASS()
+        struct Extra final : rocks::Object {};
+
+        } // namespace sample
+
+        """);
+    var childHeader = Path.Combine(reflectionGame, "Source/FixtureChild.h");
+    const string childHeaderText = """
+        #pragma once
+
+        #include <GameCore/CoreThing.h>
+        #include <Meta/Annotations.h>
+
+        namespace sample {
+
+        ROCKS_CLASS()
+        struct FixtureChild final : CoreThing {
+            ROCKS_PROPERTY() rocks::ObjectRef<rocks::reflection_fixture::Node> link;
+        };
+
+        } // namespace sample
+
+        """;
+    File.WriteAllText(childHeader, childHeaderText);
+    File.WriteAllText(Path.Combine(reflectionGame, "Source/Main.cpp"), """
+        #include <SampleGame/SampleGame.module.generated.h>
+        #include <Core/Memory/SystemAllocator.h>
+
+        // 게임 집계 헤더가 GameCore와 SDK 모듈(ReflectionTestFixtures)의 RegisterModuleTypes를 먼저 부르고, 게임 타입의
+        // schema가 두 모듈 타입의 상속 필드와 SDK 타입을 가리키는 참조 대상 ID를 담는다.
+        int main() {
+            rocks::SystemAllocator allocator;
+            rocks::TypeRegistry types(allocator);
+            rocks::ModuleRegistration registration(types, allocator);
+            if (!rocks::generated::SampleGame::RegisterModuleTypes(registration)) {
+                return 1;
+            }
+            const rocks::TypeId base = rocks::TypeIdOf<rocks::reflection_fixture::Base>();
+            const rocks::TypeId core = rocks::TypeIdOf<sample::CoreThing>();
+            auto child = types.Acquire(rocks::TypeIdOf<sample::FixtureChild>());
+            if (!types.Acquire(base) || !child || !child.Value().IsA(core) || !child.Value().IsA(base)) {
+                return 2;
+            }
+            // 필드는 상속 포함 안정 ID 순이다. 상속 필드는 CoreThing schema와 같은 ID로, 자기 필드는 SDK 타입을 가리킨다.
+            const auto& schema = child.Value().Schema();
+            const auto& inherited = rocks::TypeOf<sample::CoreThing>().fields;
+            if (schema.baseType != core || schema.fields.Size() != inherited.Size() + 1) {
+                return 3;
+            }
+            auto find = [&](const rocks::Guid& id) noexcept -> const rocks::FieldSchema* {
+                for (const auto& field : schema.fields) {
+                    if (field.id == id) {
+                        return &field;
+                    }
+                }
+                return nullptr;
+            };
+            for (const auto& field : inherited) {
+                if (!find(field.id)) {
+                    return 4;
+                }
+            }
+            for (const auto& field : schema.fields) {
+                if (field.referencedType == rocks::TypeIdOf<rocks::reflection_fixture::Node>()) {
+                    return 0;
+                }
+            }
+            return 5;
+        }
+
+        """);
+    var coreManifest = Path.Combine(reflectionGame, "Core/GameCore.rocksids.json");
+    var coreIds = await Ids("add", "--manifest", coreManifest, "--type", "sample::CoreThing", "--field", "sample::CoreThing::level",
+        "--type", "sample::Extra");
+    Require(coreIds.ExitCode == 0, "Could not register the GameCore fixture identities: " + coreIds.StdErr);
+    var fixtureIds = await Ids("add", "--manifest", Path.Combine(reflectionGame, "SampleGame.rocksids.json"),
+        "--type", "sample::FixtureChild", "--field", "sample::FixtureChild::link");
+    Require(fixtureIds.ExitCode == 0, "Could not register the SDK descriptor fixture identities: " + fixtureIds.StdErr);
+    Task<ProcessResult> ReflectionGame() => Cli("game", "--sdk", reflectionSdk, "--project", reflectionGame, "--configuration", "Debug");
+    var reflectionBuilt = await ReflectionGame();
+    Require(reflectionBuilt.ExitCode == 0, "Game importing an SDK descriptor failed: " + reflectionBuilt.StdOut + reflectionBuilt.StdErr);
+    var reflectionResult = JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(Path.Combine(reflectionOutput, "action-report.json")))!;
+    Require(reflectionResult.Succeeded && reflectionResult.Actions.All(action => action.Module is "SampleGame" or "GameCore"),
+        "Game importing an SDK descriptor compiled an SDK module");
+    Require(!Directory.Exists(Path.Combine(reflectionOutput, "Generated/ReflectionTestFixtures")),
+        "Game build regenerated the SDK module's metadata");
+    var reflectionRun = await ProcessRunner.RunAsync(new(reflectionResult.ModuleOutputs["SampleGame"], [], reflectionGame, toolchain.Environment));
+    Require(reflectionRun.ExitCode == 0, $"SDK descriptor import runtime check failed with exit code {reflectionRun.ExitCode}");
+
+    // 상위 모듈(SampleGame)이 실패하면 하위 모듈(GameCore)의 새 생성물도 게시하지 않는다.
+    var coreGenerated = Path.Combine(reflectionOutput, "Generated/GameCore/Public/GameCore/CoreThing.generated.h");
+    var coreDescriptor = Path.Combine(reflectionOutput, "Metadata/GameCore.rocksmeta.json");
+    string coreGeneratedHash = Hashing.Sha256File(coreGenerated);
+    string coreDescriptorHash = Hashing.Sha256File(coreDescriptor);
+    File.WriteAllText(coreHeader, coreHeaderText.Replace("rocks::int32 level = 1;", "rocks::int32 level = 1;\n    ROCKS_PROPERTY() rocks::int32 rank = 0;", StringComparison.Ordinal));
+    var rankIds = await Ids("add", "--manifest", coreManifest, "--field", "sample::CoreThing::rank");
+    Require(rankIds.ExitCode == 0, "Could not register the GameCore rank identity: " + rankIds.StdErr);
+    File.WriteAllText(childHeader, childHeaderText.Replace("ROCKS_PROPERTY()", "ROCKS_PROPERTY(NoSuchSpecifier)", StringComparison.Ordinal));
+    var upperFailed = await ReflectionGame();
+    Require(upperFailed.ExitCode != 0 && upperFailed.StdErr.Contains("RMC2000", StringComparison.Ordinal),
+        "Invalid dependent module metadata was accepted: " + upperFailed.StdErr);
+    Require(Hashing.Sha256File(coreGenerated) == coreGeneratedHash && Hashing.Sha256File(coreDescriptor) == coreDescriptorHash,
+        "A failed dependent module published its dependency's staged metadata");
+    File.WriteAllText(childHeader, childHeaderText);
+    Require((await ReflectionGame()).ExitCode == 0, "Game did not recover after the dependent module metadata failure");
+    Require(Hashing.Sha256File(coreGenerated) != coreGeneratedHash, "GameCore metadata change was not published after recovery");
+
+    // Metadata에서 뺀 헤더의 생성물은 게시 트랜잭션이 지운다(ID는 은퇴시켜 예약한다).
+    var extraGenerated = Path.Combine(reflectionOutput, "Generated/GameCore/Public/GameCore/Extra.generated.h");
+    Require(File.Exists(extraGenerated), "GameCore Extra metadata was not generated");
+    File.WriteAllText(coreRules, coreRulesText.Replace(", \"GameCore/Extra.h\"", "", StringComparison.Ordinal));
+    var extraRetired = await Ids("retire", "--manifest", coreManifest, "--kind", "type", "--name", "sample::Extra");
+    Require(extraRetired.ExitCode == 0, "Could not retire the GameCore Extra identity: " + extraRetired.StdErr);
+    Require((await ReflectionGame()).ExitCode == 0, "Game failed after removing a header from Metadata");
+    Require(!File.Exists(extraGenerated), "Generated header of a header removed from Metadata was not deleted");
+    Require(!Directory.Exists(Path.Combine(reflectionOutput, ".metadata-backup")), "Metadata publication left backup files");
+    Pass("sdk-descriptor-import-and-module-chain", timer.Elapsed);
 
     timer.Restart();
     var evidencePath = Path.Combine(output, "game-build-evidence.json");
@@ -195,40 +403,51 @@ try
     Pass("game-edit-engine-reuse", timer.Elapsed);
 
     timer.Restart();
-    var targetRulesPath = Path.Combine(game, "Game.Target.cs");
-    var validTargetRules = File.ReadAllText(targetRulesPath);
-    var generatedHeader = Path.Combine(output, "Generated/GameObject.generated.h");
+    // 모듈 소유 메타데이터: 잘못된 선언은 메타 생성 전에 명확한 진단으로 거부하고 기존 생성물을 바꾸지 않는다.
+    var moduleRulesPath = Path.Combine(game, "Game.Build.cs");
+    var validModuleRules = File.ReadAllText(moduleRulesPath);
+    var generatedHeader = Path.Combine(output, "Generated/SampleGame/Public/GameObject.generated.h");
     var validGeneratedHash = Hashing.Sha256File(generatedHeader);
+    var manifestPath = Path.Combine(game, "SampleGame.rocksids.json");
+    var movedManifest = manifestPath + ".moved";
     try
     {
-        var wrongOwner = validTargetRules.Replace("[\"SampleGame\"]", "[\"Core\"]", StringComparison.Ordinal);
-        Require(wrongOwner != validTargetRules, "Target rule fixture no longer matches");
-        File.WriteAllText(targetRulesPath, wrongOwner);
+        // Metadata를 지우면 활성 항목이 남은 명세가 고아가 된다(RMC2102).
+        var orphan = validModuleRules.Replace("        Metadata = [\"GameObject.h\"],\n", "", StringComparison.Ordinal);
+        Require(orphan != validModuleRules, "Module rule fixture no longer matches (Metadata)");
+        File.WriteAllText(moduleRulesPath, orphan);
         var rejected = await Game();
-        Require(rejected.ExitCode != 0 && rejected.StdErr.Contains("not reachable from target", StringComparison.Ordinal),
-            "Metadata unit with unreachable owner was not rejected with a clear diagnostic");
-        Require(Hashing.Sha256File(generatedHeader) == validGeneratedHash, "Unreachable owner modified previously generated output");
+        Require(rejected.ExitCode != 0 && (rejected.StdOut + rejected.StdErr).Contains("RMC2102", StringComparison.Ordinal),
+            "Orphan identity manifest with active entries was not rejected: " + rejected.StdErr);
+        Require(Hashing.Sha256File(generatedHeader) == validGeneratedHash, "Orphan manifest rejection modified generated output");
 
-        var duplicateInput = validTargetRules.Replace(
-            "new(\"SampleGame\", \"Source/GameObject.h\", \"Source/GameObject.h\", \"GameObject.generated.h\")",
-            "new(\"SampleGame\", \"Source/GameObject.h\", \"Source/GameObject.h\", \"GameObject.generated.h\"), " +
-            "new(\"SampleGame\", \"Source/./GameObject.h\", \"Source/GameObject.h\", \"Other.generated.h\")", StringComparison.Ordinal);
-        Require(duplicateInput != validTargetRules, "Metadata unit fixture no longer matches");
-        File.WriteAllText(targetRulesPath, duplicateInput);
+        // 같은 헤더를 두 번 소유할 수 없다.
+        var duplicate = validModuleRules.Replace("Metadata = [\"GameObject.h\"]", "Metadata = [\"GameObject.h\", \"GameObject.h\"]", StringComparison.Ordinal);
+        File.WriteAllText(moduleRulesPath, duplicate);
         rejected = await Game();
-        Require(rejected.ExitCode != 0 && rejected.StdErr.Contains("duplicate input ownership", StringComparison.Ordinal),
-            "Duplicate metadata input with different output was not rejected");
-        Require(Hashing.Sha256File(generatedHeader) == validGeneratedHash &&
-            !File.Exists(Path.Combine(output, "Generated/Other.generated.h")), "Invalid units published metadata before rejection");
+        Require(rejected.ExitCode != 0 && (rejected.StdOut + rejected.StdErr).Contains("duplicate input ownership", StringComparison.Ordinal),
+            "Duplicate metadata header ownership was not rejected: " + rejected.StdErr);
+        Require(Hashing.Sha256File(generatedHeader) == validGeneratedHash, "Duplicate ownership published metadata before rejection");
+
+        // Metadata가 있는데 명세가 없으면 RMC2100이다.
+        File.WriteAllText(moduleRulesPath, validModuleRules);
+        File.Move(manifestPath, movedManifest);
+        rejected = await Game();
+        Require(rejected.ExitCode != 0 && (rejected.StdOut + rejected.StdErr).Contains("RMC2100", StringComparison.Ordinal),
+            "Missing module identity manifest was not rejected: " + rejected.StdErr);
+        Require(Hashing.Sha256File(generatedHeader) == validGeneratedHash, "Missing manifest modified generated output");
     }
     finally
     {
-        File.WriteAllText(targetRulesPath, validTargetRules);
+        File.WriteAllText(moduleRulesPath, validModuleRules);
+        if (File.Exists(movedManifest))
+        {
+            File.Move(movedManifest, manifestPath, true);
+        }
     }
 
-    Require((await Game()).ExitCode == 0, "Game did not recover after correcting metadata unit ownership");
-    Pass("metadata-unit-target-and-input-ownership", timer.Elapsed);
-
+    Require((await Game()).ExitCode == 0, "Game did not recover after correcting module metadata ownership");
+    Pass("metadata-module-ownership", timer.Elapsed);
     timer.Restart();
     var incompatible = await Cli("game", "--sdk", sdk, "--project", game, "--configuration", "Release");
     Require(incompatible.ExitCode != 0 && incompatible.StdErr.Contains("mismatch", StringComparison.OrdinalIgnoreCase),
@@ -281,7 +500,7 @@ try
     timer.Restart();
     var header = Path.Combine(game, "Source/GameObject.h");
     var originalHeader = File.ReadAllText(header);
-    var generated = Path.Combine(output, "Generated/GameObject.generated.h");
+    var generated = Path.Combine(output, "Generated/SampleGame/Public/GameObject.generated.h");
     var generatedHash = Hashing.Sha256File(generated);
     try
     {
@@ -447,7 +666,9 @@ async Task<ProcessResult> Cli(params string[] arguments)
 }
 
 Task<ProcessResult> Game() => Cli("game", "--sdk", sdk, "--project", game, "--configuration", "Debug");
+
 NativeBuildResult ReadActionReport() => JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(Path.Combine(output, "action-report.json")))!;
+
 void Pass(string name, TimeSpan elapsed)
 {
     Console.WriteLine("[PASS] " + name);

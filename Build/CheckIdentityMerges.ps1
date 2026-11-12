@@ -48,23 +48,27 @@ foreach ($revision in $revisions) {
 $temporary = Join-Path ([IO.Path]::GetTempPath()) ('rocks-identity-merge-' + [Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($temporary)
 try {
-    $counter = 0
-    foreach ($name in $all) {
-        $files = @()
-        for ($index = 0; $index -lt 4; $index++) {
-            $file = Join-Path $temporary ("$counter-$index.json")
-            $content = if ($sets[$index].Contains($name)) {
-                Invoke-Git -GitArguments @('show', ($revisions[$index] + ':' + $name))
-            } else { '{"schema":1,"entries":[]}' }
+    # 리비전마다 모든 명세를 넘긴다. MetaCompiler가 측면별로 ID 기준으로 합쳐 비교하므로 명세를 다른 모듈 경로로
+    # 옮긴 PR(ids move)도 ID가 사라진 것으로 보지 않는다.
+    $sides = @('--base', '--ours', '--theirs', '--merged')
+    $arguments = @('ids', 'merge-check')
+    for ($index = 0; $index -lt 4; $index++) {
+        $count = 0
+        foreach ($name in $sets[$index]) {
+            # 진단이 원래 명세 경로를 보이도록 <임시>/<측면>/<저장소 상대 경로>에 둔다.
+            $file = Join-Path (Join-Path $temporary $sides[$index].TrimStart('-')) $name
+            [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($file))
+            $content = Invoke-Git -GitArguments @('show', ($revisions[$index] + ':' + $name))
             [IO.File]::WriteAllText($file, $content, [Text.UTF8Encoding]::new($false, $true))
-            $files += $file
+            $arguments += @($sides[$index], $file)
+            $count++
         }
-        Write-Host "Checking stable identity history: $name"
-        & dotnet $MetaCompiler ids merge-check --base $files[0] --ours $files[1] --theirs $files[2] --merged $files[3]
-        if ($LASTEXITCODE -ne 0) { throw "Identity merge check failed: $name" }
-        $counter++
+        if ($count -eq 0) { $arguments += @($sides[$index], 'none') }
     }
-    Write-Host "Stable identity history checked: $counter manifest(s)."
+    Write-Host "Checking stable identity history across $($all.Count) manifest path(s)"
+    & dotnet $MetaCompiler @arguments
+    if ($LASTEXITCODE -ne 0) { throw 'Identity merge check failed.' }
+    Write-Host "Stable identity history checked: $($all.Count) manifest path(s)."
 } finally {
     # 이 스크립트가 생성한 무작위 하위 디렉터리만 제거한다.
     if ([IO.Directory]::Exists($temporary)) { [IO.Directory]::Delete($temporary, $true) }
