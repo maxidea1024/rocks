@@ -18,8 +18,9 @@ C++23 기반 멀티플랫폼 3D 게임 엔진 프로젝트.
 ## 저장소 구성
 
 ```text
-Core/        기반 라이브러리(엔진 아님): Base·PlatformBase·Core·Task·Serialization·MetaSchema·
-             Localization·ObjectRuntime·ObjectSerialization (Source/Runtime/<모듈>)
+Core/        기반 라이브러리(엔진 아님): Base·PlatformBase·Core·Task·Compression·Serialization·MetaSchema·
+             Localization·ObjectRuntime·ObjectSerialization (Source/Runtime/<모듈>),
+             고정 버전 외부 라이브러리 원본(Source/ThirdParty/<Lib>: LZ4·zstd·zlib)
 Engine/      게임 엔진 계층(World·Renderer·Gameplay·Editor, 단계적으로 채움)과 엔진 플러그인
 Programs/    실행 프로그램: 테스트 실행 파일·Commandlet(C++), 빌드·메타·검사 도구(C#)
 Build/       규칙 어셈블리·공통 빌드 설정·CI 스크립트
@@ -51,6 +52,7 @@ dotnet msbuild Rocks.proj /t:Test /p:Configuration=Debug /p:RocksTarget=Foundati
 - [전체 구현 계획](Docs/Design/EngineImplementationPlan.ko.md)
 - [Core·Object·Input 상세 구현 계획](Docs/Design/CoreObjectInputDetailedPlan.ko.md)
 - [UI 툴킷 설계(게임 UI·에디터)](Docs/Design/UiToolkit.ko.md)
+- [압축 헬퍼 설계(코덱 선정·외부 라이브러리 통합·동기/비동기 API)](Docs/Design/Compression.ko.md)
 - [작업 목록](Docs/Design/CoreObjectInputTasks.ko.csv)
 - [예정 파일 구조](Docs/Design/CoreObjectInputFiles.ko.csv)
 - [다회차 설계 검증 결과](Docs/Reviews/DesignReview.ko.md)

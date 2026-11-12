@@ -147,7 +147,7 @@ namespace Rocks.Build.Cli
                 }
                 if (args[0] == "sdk")
                 {
-                    await InstalledSdk.ExportAsync(root, options["destination"], configuration, toolchain, rules.Modules, result, cancellationToken);
+                    await InstalledSdk.ExportAsync(root, options["destination"], configuration, toolchain, InstalledSdk.Reachable(rules.Modules, targets), result, cancellationToken);
                 }
                 if (args[0] == "test")
                 {

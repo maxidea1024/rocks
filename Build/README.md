@@ -65,6 +65,19 @@ dotnet msbuild Rocks.proj /t:Game /p:SdkDirectory=C:/work/rocks-sdk/debug /p:Gam
 
 SDK 대상 디렉터리는 새 경로여야 한다. SDK의 파일 목록과 내용, 플랫폼·아키텍처·컴파일러 및 SDK ABI·구성이 일치하지 않으면 게임 빌드를 중단한다. 게임 소스와 출력은 SDK 밖에 둔다. `Templates/Game/Foundation`은 C# 모듈·타깃 규칙과 생성된 CLASS/PROPERTY를 사용하는 예제다. 현재 SDK 내보내기는 외부 라이브러리와 임의 컴파일·링크 옵션이 있는 모듈을 지원하지 않으며 해당 선언을 오류로 거부한다.
 
+SDK는 타깃에서 도달하는 모듈만 내보낸다. 고정 버전 외부 라이브러리(`Core/Source/ThirdParty`) 모듈은 정적 라이브러리로 들어가며 라이선스 원문을 `Licenses/<모듈>/`에 함께 복사한다. BSD 계열(LZ4·zstd)은 바이너리 배포 시 고지 의무가 있으므로 게임 배포 패키지에도 이 고지를 포함한다.
+
+## 외부 라이브러리(C 원본)
+
+빌드 도구는 확장자가 정확히 `.c`인 번역 단위를 C17로 컴파일한다(clang-cl `/TC /clang:-std=c17`, POSIX `-x c -std=c17`). 경고·FP·구성·CRT·최적화 프로필은 C++와 같고 C++ 전용 플래그만 빠진다. C++ 번역 단위의 인자는 바뀌지 않는다. `.c`는 `Core/Source/ThirdParty/<Lib>/` 아래에서만 허용하며(compile DB 감사), 모듈 인자로 언어·표준을 바꿀 수 없다.
+
+라이브러리 폴더는 `<Lib>.Build.cs`(`ThirdPartyModuleRules` 상속, 이름만 적는다), `ThirdParty.json`(단일 출처), `<lib>-<version>/`(릴리스 원본을 byte 그대로)로 구성한다. 업그레이드 절차:
+
+1. 새 릴리스를 받아 서명·해시를 확인하고 필요한 파일만 새 버전 디렉터리에 그대로 복사한다. 이전 버전 디렉터리를 지운다.
+2. `ThirdParty.json`의 `version`·`upstreamDirectory`·`source`·경로를 고친 뒤 `dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll third-party --root . --write`로 `files`(SHA-256)와 `pragmaDirectives`를 다시 계산한다. 인자 없이 실행하면 차이만 보고한다.
+3. 새로 기록된 진단 지시문을 검토한다. `native` 단계의 `Native.ThirdPartyDirectivesHideNoWarnings`가 지시문을 지운 사본도 경고 0인지 실제 compile DB 인자로 확인한다.
+4. 압축 결과 golden(`Compression_DeterministicOutputGoldens`)이 바뀌면 의도한 변경인지 확인하고 갱신한다.
+
 ## 메타 선언
 
 `ROCKS_CLASS()` 또는 `ROCKS_CLASS(Abstract)`를 `class`/`struct` 바로 앞에 두고, 반영할 필드에 `ROCKS_PROPERTY(...)`를 붙인다. 선언에 ID나 스키마 버전 숫자를 넣지 않는다. 비공개 필드에는 `ROCKS_GENERATED_BODY()`가 필요하다. 타입 마커와 클래스 사이에는 공백·주석만 허용한다. 조건부 선언은 마커와 클래스를 같은 조건 블록에 둔다. 미지원 타입·상속·선언 위치·지정자와 모호한 선언은 오류다.

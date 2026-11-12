@@ -49,7 +49,7 @@ try
     var exported = await Cli("sdk", "--root", root, "--target", "Engine", "--configuration", "Debug", "--destination", sdk);
     Require(exported.ExitCode == 0, "SDK export failed: " + exported.StdErr);
     Require(File.Exists(Path.Combine(sdk, "rocks-sdk.json")), "SDK manifest missing");
-    Require(!Directory.GetFiles(sdk, "*.cpp", SearchOption.AllDirectories).Any(), "Installed SDK contains engine sources");
+    Require(!Directory.GetFiles(sdk, "*.cpp", SearchOption.AllDirectories).Concat(Directory.GetFiles(sdk, "*.c", SearchOption.AllDirectories)).Any(), "Installed SDK contains engine or third-party sources");
     Pass("engine-export", timer.Elapsed);
 
     CopyTree(Path.Combine(root, "Templates/Game/Foundation"), game);

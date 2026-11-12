@@ -215,6 +215,9 @@ try
     await BuildConfigurationTests.RunAsync(request, root);
     Pass("build configurations, ThinLTO, and per-module optimization overrides");
 
+    await CLanguageTests.RunAsync(request, root);
+    Pass("C17 translation units: C++ flag golden, C profile, real build, included .c invalidation");
+
     string marker = Path.Combine(root, "child.pid");
     string dotnet = NativeEnvironment.FindExecutable("dotnet", toolchain.Environment);
     var fakeToolchain = toolchain with { CompilerPath = dotnet, CompileArguments = [Assembly.GetExecutingAssembly().Location, "--fake-compiler", marker] };

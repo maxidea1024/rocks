@@ -87,6 +87,12 @@ internal static class InputValidation
                 argument.StartsWith("-I", StringComparison.Ordinal) || argument.StartsWith("/I", StringComparison.Ordinal) ||
                 argument.StartsWith("-D", StringComparison.Ordinal) || argument.StartsWith("/D", StringComparison.Ordinal) ||
                 lower is "-xclang" or "-xpreprocessor" ||
+                // 번역 단위 언어와 표준은 빌드 도구가 확장자로 정한다(.c → C17, 그 밖 → C++23).
+                lower == "-x" || (lower.StartsWith("-x", StringComparison.Ordinal) && !lower.StartsWith("-xclang", StringComparison.Ordinal) &&
+                                  !lower.StartsWith("-xpreprocessor", StringComparison.Ordinal)) ||
+                lower.StartsWith("--language", StringComparison.Ordinal) || lower.StartsWith("-std=", StringComparison.Ordinal) ||
+                lower.StartsWith("/std:", StringComparison.Ordinal) || lower is "/tc" or "/tp" ||
+                (argument.Length > 3 && (argument.StartsWith("/Tc", StringComparison.Ordinal) || argument.StartsWith("/Tp", StringComparison.Ordinal))) ||
                 // 최적화 수준·LTO는 구성과 NativeModuleInput.Optimization이 정한다. 수준을 바꾸지 않는
                 // /Oy-(frame pointer 유지)·/Oi(intrinsic) 등은 허용한다.
                 OptimizationLevel.IsMatch(argument) || lower.StartsWith("-flto", StringComparison.Ordinal) ||

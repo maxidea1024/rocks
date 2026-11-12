@@ -6,6 +6,9 @@
 *.hpp text eol=lf
 *.h text eol=lf
 *.c text eol=lf
+# 외부 라이브러리 원본(Core/Source/ThirdParty/<Lib>/<lib>-<version>/)은 byte 그대로 보존한다(줄끝 변환 금지).
+# 각 라이브러리의 ThirdParty.json이 파일별 SHA-256으로 확인한다. Rocks 글루는 <Lib>/ 바로 아래에 두어 이 규칙 밖이다.
+Core/Source/ThirdParty/*/*/** -text
 *.pdf binary
 *.png binary
 *.zip binary

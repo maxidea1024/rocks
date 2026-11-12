@@ -73,8 +73,10 @@ internal static class Fingerprints
         return Convert.ToHexStringLower(digest.GetHashAndReset());
     }
 
+    // .c도 포함한다: 외부 C 라이브러리는 다른 .c를 include해 한 번역 단위로 빌드할 수 있다
+    // (예: LZ4의 lz4hc.c가 lz4.c를 포함). include된 .c가 바뀌면 그 번역 단위를 다시 컴파일해야 한다.
     private static readonly HashSet<string> HeaderExtensions = new(StringComparer.OrdinalIgnoreCase)
-        { ".h", ".hh", ".hpp", ".hxx", ".inl", ".inc", ".ipp", ".tpp" };
+        { ".h", ".hh", ".hpp", ".hxx", ".inl", ".inc", ".ipp", ".tpp", ".c" };
 
     public static IEnumerable<string> TreeFiles(string root, bool headersOnly, string? exclude = null, string? buildRoot = null)
     {

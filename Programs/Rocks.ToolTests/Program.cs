@@ -31,10 +31,17 @@ internal static class Program
                 case "policy":
                     var failures = PolicyChecks.Runtime(root).Concat(PolicyChecks.PlatformBoundary(root))
                         .Concat(PolicyChecks.SourceWarnings(root)).Concat(PolicyChecks.OptimizationOverrides(root))
-                        .Concat(PolicyChecks.PythonFreeMainPath(root)).ToList();
+                        .Concat(PolicyChecks.PythonFreeMainPath(root)).Concat(PolicyChecks.ThirdParty(root)).ToList();
                     if (options.Optional("compile-commands") is string database) failures.AddRange(PolicyChecks.CompilationDatabase(database));
                     foreach (var failure in failures) Console.Error.WriteLine(failure);
                     return failures.Count == 0 ? 0 : 1;
+                case "third-party":
+                    // 외부 라이브러리 업그레이드: manifest의 files·pragmaDirectives를 원본에서 다시 계산한다.
+                    // 기본은 차이만 보고(종료 코드 1), --write면 고친다. 새 지시문은 3.6 규칙으로 검토한다.
+                    bool write = options.Write;
+                    var refreshed = ThirdPartyManifestRefresh.Run(root, write);
+                    foreach (string path in refreshed) Console.WriteLine((write ? "updated " : "stale ") + path);
+                    return write || refreshed.Count == 0 ? 0 : 1;
                 case "format":
                     await FormatCheck.CheckAsync(root, options.Optional("formatter") ??
                         Environment.GetEnvironmentVariable("ROCKS_CLANG_FORMAT") ?? "clang-format");

@@ -12,6 +12,26 @@ public sealed record SdkManifest(int Version, string Configuration, string Platf
 
 public static class InstalledSdk
 {
+    /// <summary>
+    /// SDK 타깃에서 도달하는 모듈만 고른다. 규칙 로더는 모든 모듈 규칙을 읽으므로 타깃이 쓰지 않는(빌드되지 않은)
+    /// 모듈까지 내보내려 하면 "built for this SDK target" 오류가 난다.
+    /// </summary>
+    public static IReadOnlyList<NativeModuleInput> Reachable(IReadOnlyList<NativeModuleInput> modules, IEnumerable<string> targets)
+    {
+        var byName = modules.ToDictionary(module => module.Name, StringComparer.OrdinalIgnoreCase);
+        var reached = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var pending = new Stack<string>(targets);
+        while (pending.Count != 0)
+        {
+            string name = pending.Pop();
+            if (!reached.Add(name) || !byName.TryGetValue(name, out var module))
+                continue;
+            foreach (string dependency in module.Dependencies)
+                pending.Push(dependency);
+        }
+        return modules.Where(module => reached.Contains(module.Name)).ToArray();
+    }
+
     public static async Task ExportAsync(string root, string destination, NativeConfiguration configuration,
         NativeToolchain toolchain, IReadOnlyList<NativeModuleInput> modules, NativeBuildResult build,
         CancellationToken cancellationToken)
@@ -47,6 +67,17 @@ public static class InstalledSdk
                     throw new InvalidOperationException($"Module {module.Name} was not built for this SDK target.");
                 packaged.Add(new(module.Name, includes.ToArray(), module.PublicDefines.ToArray(),
                     module.Dependencies.ToArray(), libraries.ToArray()));
+            }
+            // 고정 버전 외부 라이브러리의 라이선스 원문을 함께 배포한다(BSD 계열은 바이너리 배포 시 고지 의무가 있다).
+            foreach (var module in packaged)
+            {
+                string library = Path.Combine(root, ThirdPartyManifest.ThirdPartyRoot, module.Name);
+                if (!File.Exists(Path.Combine(library, ThirdPartyManifest.FileName)))
+                    continue;
+                var thirdParty = ThirdPartyManifest.Read(library);
+                string license = Path.Combine(stage, "Licenses", module.Name, Path.GetFileName(thirdParty.License.File));
+                Directory.CreateDirectory(Path.GetDirectoryName(license)!);
+                File.Copy(Path.Combine(library, thirdParty.License.File), license);
             }
             // SDK 자체의 도구만으로 외부 게임 규칙을 빌드할 수 있어야 한다.
             foreach (var tool in new[] { "Rocks.Build.Cli", "Rocks.MetaCompiler" })

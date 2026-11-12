@@ -100,6 +100,8 @@ internal sealed class Options
     private readonly Dictionary<string, string> values = new(StringComparer.Ordinal);
     public List<string> ClangArguments { get; } = [];
     public bool Asan { get; private set; }
+    // third-party 명령: manifest를 실제로 고친다(없으면 차이만 보고).
+    public bool Write { get; private set; }
     public string Root => Path.GetFullPath(Required("root"));
     public string? Json => Optional("json");
     public ulong Seed => values.TryGetValue("seed", out string? value) ? ulong.Parse(value, System.Globalization.CultureInfo.InvariantCulture) : 7351;
@@ -116,6 +118,7 @@ internal sealed class Options
         {
             string argument = arguments[index];
             if (argument == "--asan") { if (result.Asan) throw new ArgumentException("Duplicate --asan"); result.Asan = true; continue; }
+            if (argument == "--write") { if (result.Write) throw new ArgumentException("Duplicate --write"); result.Write = true; continue; }
             if (!argument.StartsWith("--", StringComparison.Ordinal)) throw new ArgumentException("Unknown argument: " + argument);
             int equals = argument.IndexOf('=');
             string key = equals < 0 ? argument[2..] : argument[2..equals];

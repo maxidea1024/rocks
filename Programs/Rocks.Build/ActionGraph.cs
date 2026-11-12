@@ -112,14 +112,19 @@ internal static class ActionGraph
                 string identity = Fingerprints.Strings([source])[..20];
                 string objectPath = Path.Combine(output, "obj", module.Name, identity + (windows ? ".obj" : ".o"));
                 string id = module.Name + ":compile:" + identity;
+                NativeLanguage language = LanguageOf(source);
                 var arguments = new List<string>();
                 arguments.AddRange(module.AdditionalCompileArguments);
-                arguments.AddRange(NativeCompileProfile.Arguments(request.Toolchain, request.Configuration, module.Optimization));
+                arguments.AddRange(NativeCompileProfile.Arguments(request.Toolchain, request.Configuration, module.Optimization, language));
                 // ThinLTO는 코드 생성 옵션이라 AST 프로필(NativeCompileProfile)에 넣지 않는다.
                 if (UsesThinLto(request.Configuration, module.Optimization)) arguments.Add("-flto=thin");
                 arguments.AddRange(defines.Select(value => (windows ? "/D" : "-D") + value));
                 foreach (string include in includes) arguments.Add((windows ? "/I" : "-I") + include);
-                if (windows) arguments.AddRange(["/c", "/TP", source, "/Fo{OUTPUT0}"]);
+                // C++ 번역 단위의 인자는 C 지원 이전과 byte 단위로 같아야 한다(action key가 인자를 포함하므로
+                // 바뀌면 모든 증분 빌드가 무효화된다). macOS·Android의 compiler는 clang++ driver라서 C 소스에는
+                // 언어를 명시한다(없으면 C++로 처리하며 -Werror에서 경고가 오류가 된다).
+                if (windows) arguments.AddRange(["/c", language == NativeLanguage.C ? "/TC" : "/TP", source, "/Fo{OUTPUT0}"]);
+                else if (language == NativeLanguage.C) arguments.AddRange(["-c", "-x", "c", source, "-o", "{OUTPUT0}"]);
                 else arguments.AddRange(["-c", source, "-o", "{OUTPUT0}"]);
                 actions.Add(new(id, module.Name, "Compile", request.Toolchain.CompilerPath, arguments,
                     [objectPath], [source], headers, extraInputs, [],
@@ -231,9 +236,15 @@ internal static class ActionGraph
     internal static bool UsesThinLto(NativeConfiguration configuration, CodeOptimization optimization) =>
         configuration == NativeConfiguration.Release && Optimizes(configuration, optimization);
 
+    /// <summary>확장자가 정확히 소문자 <c>.c</c>인 소스만 C다. 대문자 <c>.C</c>는 관례상 C++이므로 C로 보지 않는다.</summary>
+    internal static NativeLanguage LanguageOf(string source) =>
+        Path.GetExtension(source).Equals(".c", StringComparison.Ordinal) ? NativeLanguage.C : NativeLanguage.Cpp;
+
     internal static IEnumerable<string> CompileFlags(NativeToolchain toolchain, NativeConfiguration configuration,
-        CodeOptimization optimization = CodeOptimization.Default)
+        CodeOptimization optimization = CodeOptimization.Default, NativeLanguage language = NativeLanguage.Cpp)
     {
+        if (!Enum.IsDefined(language)) throw new ArgumentException($"Invalid native language: {language}");
+        bool c = language == NativeLanguage.C;
         bool release = configuration == NativeConfiguration.Release;
         bool asan = configuration == NativeConfiguration.Asan;
         bool optimize = Optimizes(configuration, optimization);
@@ -247,8 +258,16 @@ internal static class ActionGraph
         };
         if (toolchain.Platform == NativePlatform.Windows)
         {
-            yield return "/nologo"; yield return "/utf-8"; yield return "/W4"; yield return "/WX"; yield return "/GR-";
-            yield return "/EHs-c-"; yield return "/Zc:__cplusplus"; yield return "/clang:-std=c++23";
+            yield return "/nologo"; yield return "/utf-8"; yield return "/W4"; yield return "/WX";
+            if (c)
+            {
+                // C17. RTTI·예외·__cplusplus 보고는 C++ 전용이다. 경고 수준과 오류 처리는 C++와 같다.
+                yield return "/clang:-std=c17";
+            }
+            else
+            {
+                yield return "/GR-"; yield return "/EHs-c-"; yield return "/Zc:__cplusplus"; yield return "/clang:-std=c++23";
+            }
             // 부동소수점 축약(FMA) 금지: ARM64처럼 FMA가 항상 있는 CPU에서만 a*b+c가 fused되어
             // 플랫폼별 결과·판정(예: 행렬 역행렬 성공 여부)이 달라지는 것을 막는다.
             yield return "/clang:-ffp-contract=off";
@@ -265,7 +284,10 @@ internal static class ActionGraph
         }
         else
         {
-            foreach (string flag in new[] { "-std=c++23", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-fno-rtti", "-fno-exceptions", "-ffp-contract=off" }) yield return flag;
+            string[] languageFlags = c
+                ? ["-std=c17", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-ffp-contract=off"]
+                : ["-std=c++23", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-fno-rtti", "-fno-exceptions", "-ffp-contract=off"];
+            foreach (string flag in languageFlags) yield return flag;
             if (toolchain.Platform == NativePlatform.Android)
             {
                 // Android 실행 파일·공유 라이브러리는 PIE/PIC가 필수다.

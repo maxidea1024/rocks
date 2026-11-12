@@ -323,12 +323,62 @@ internal static class NativeTests
                 Verify.Contains("AddressSanitizer: heap-use-after-free", result.StdErr, "actual ASan report");
             });
         if (options.Optional("compiler") is string compiler)
+        {
             suite.Add("Native.CompilerRejectsIntentionalWarning", () => WarningProbe.VerifyAsync(compiler, options.Root, environment));
+            // 지시문 무효 확인의 음성 대조: 원본의 억제가 실제 경고(-Wunused-parameter)를 가리면 실패해야 하고,
+            // 가리는 것이 없으면 통과해야 한다.
+            suite.Add("Native.ThirdPartyDirectiveProbeControls", async () =>
+            {
+                foreach (bool hides in new[] { false, true })
+                {
+                    using TemporaryDirectory fixture = new();
+                    string library = "Core/Source/ThirdParty/Fake";
+                    string body = hides ? "int Fake(int unused) { return 0; }\n" : "int Fake(int used) { return used; }\n";
+                    fixture.Write(library + "/fake-1.0/fake.c", "#pragma clang diagnostic ignored \"-Wunused-parameter\"\n" +
+                                                                "#pragma warning(disable : 4100)\n" + body);
+                    fixture.Write(library + "/ThirdParty.json", JsonSerializer.Serialize(new Dictionary<string, object>
+                    {
+                        ["schema"] = 1, ["name"] = "Fake", ["version"] = "1.0", ["upstreamDirectory"] = "fake-1.0",
+                        ["source"] = new { url = "https://example.invalid/fake.tar.gz", sha256 = new string('0', 64), verification = "fixture" },
+                        ["license"] = new { spdx = "BSD-2-Clause", upstreamExpression = "BSD-2-Clause", file = "fake-1.0/fake.c", binaryNoticeRequired = true },
+                        ["translationUnits"] = new[] { "fake-1.0/fake.c" }, ["includeDirectories"] = Array.Empty<string>(),
+                        ["defines"] = Array.Empty<string>(), ["platformDefines"] = new Dictionary<string, string[]>(),
+                        ["consumerDefines"] = Array.Empty<string>(), ["adapterHeaders"] = new[] { "fake-1.0/fake.c" },
+                        ["files"] = new Dictionary<string, string> { ["fake.c"] = new string('0', 64) },
+                        ["pragmaDirectives"] = Array.Empty<object>(), ["notes"] = Array.Empty<string>()
+                    }));
+                    string source = Path.GetFullPath(fixture.FilePath(library + "/fake-1.0/fake.c"));
+                    bool clangCl = Path.GetFileNameWithoutExtension(compiler).Equals("clang-cl", StringComparison.OrdinalIgnoreCase);
+                    string[] arguments = clangCl
+                        ? [compiler, "/nologo", "/W4", "/WX", "/clang:-std=c17", "/c", "/TC", source, "/Fo" + fixture.FilePath("fake.obj")]
+                        : [compiler, "-std=c17", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-c", "-x", "c", source, "-o", fixture.FilePath("fake.o")];
+                    fixture.Write("compile_commands.json", JsonSerializer.Serialize(new[] { new { directory = fixture.Root, file = source, arguments } }));
+                    try
+                    {
+                        int verified = await ThirdPartyDirectiveProbe.VerifyAsync(fixture.Root, fixture.FilePath("compile_commands.json"), environment);
+                        Verify.That(!hides && verified == 1, "directive probe missed a warning hidden by an upstream pragma");
+                    }
+                    catch (InvalidOperationException error) when (hides)
+                    {
+                        Verify.Contains("hide warnings", error.Message, "directive probe failure diagnostic");
+                    }
+                }
+            });
+        }
         if (options.Optional("compile-commands") is string database)
+        {
             suite.Add("Native.CompileCommandsWarningPolicy", () =>
             {
                 var failures = PolicyChecks.CompilationDatabase(database);
                 Verify.That(failures.Count == 0, string.Join('\n', failures));
             });
+            // 외부 원본의 진단 지시문을 지운 사본도 같은 인자로 경고 0이어야 한다(Compression.ko.md 3.6 규칙 2).
+            suite.Add("Native.ThirdPartyDirectivesHideNoWarnings", async () =>
+            {
+                int verified = await ThirdPartyDirectiveProbe.VerifyAsync(options.Root, database, environment);
+                Verify.That(verified != 0 || !File.ReadAllText(database).Contains("ThirdParty", StringComparison.Ordinal),
+                    "third-party translation units in the compile database were not verified");
+            });
+        }
     }
 }

@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Rocks.Tooling.Common;
 
 namespace Rocks.Tooling.Checks;
 
@@ -11,7 +12,7 @@ public sealed record CheckFailure(string Path, int Line, string Rule, string Mes
 }
 
 /// <summary>엔진 소유 소스의 lexical 정책이다. 외부 SDK나 최종 바이너리 의존성을 증명하지 않는다.</summary>
-public static class PolicyChecks
+public static partial class PolicyChecks
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private static Regex Pattern(string value) => new(value,
@@ -31,8 +32,11 @@ public static class PolicyChecks
         "#\\s*(?:if|ifdef|ifndef|elif)\\b[^\\n]*(?:_WIN32|_WIN64|__APPLE__|__linux__|ROCKS_PLATFORM_)" +
         "|#\\s*include\\s*[<\"](?:[Ww]indows|windowsx|synchapi|processthreadsapi|pthread|semaphore|unistd|mach/[^>\"]+)\\.h[>\"]" +
         "|\\b(?:CreateThread|WaitForSingleObject|pthread_create|pthread_join|pthread_mutex_lock|pthread_cond_wait|Sleep|nanosleep)\\s*\\(");
+    // #pragma와 같은 억제를 매크로 형태(_Pragma("..."), MSVC __pragma(...))로 쓰는 경우도 거부한다.
     private static readonly Regex BannedSuppression = Pattern(
         "^\\s*#\\s*pragma\\s+(?:warning\\s*\\(\\s*(?:disable|[0-3])\\b|(?:clang|GCC)\\s+diagnostic\\s+(?:ignored|warning)\\b)" +
+        "|\\b_Pragma\\s*\\(\\s*\"\\s*(?:clang|GCC)\\s+diagnostic\\s+(?:ignored|warning)\\b" +
+        "|\\b__pragma\\s*\\(\\s*warning\\s*\\(\\s*(?:disable|[0-3])\\b" +
         "|^\\s*#\\s*define\\s+(?:_CRT_SECURE_NO_WARNINGS|_SCL_SECURE_NO_WARNINGS)\\b");
     private static readonly Regex SuppressedFlag = Pattern(
         "^(?:/WX-|/W[0-3]|/w(?:d[0-9]+)?|(?:/clang:)?(?:-w|-Wno-.+))$");
@@ -196,11 +200,20 @@ public static class PolicyChecks
         foreach (JsonElement entry in document.RootElement.EnumerateArray())
         {
             string file = entry.TryGetProperty("file", out var name) ? name.GetString() ?? path : path;
+            string? directory = entry.TryGetProperty("directory", out var folder) ? folder.GetString() : null;
             if (entry.TryGetProperty("arguments", out JsonElement values) && values.ValueKind == JsonValueKind.Array)
-                failures.AddRange(CompilerArguments(values.EnumerateArray().Select(value =>
-                    value.GetString() ?? throw new FormatException("null compiler argument")).ToArray(), file));
+            {
+                string[] arguments = values.EnumerateArray().Select(value =>
+                    value.GetString() ?? throw new FormatException("null compiler argument")).ToArray();
+                failures.AddRange(CompilerArguments(arguments, file));
+                failures.AddRange(LanguageArguments(arguments, file, directory));
+            }
             else if (entry.TryGetProperty("command", out JsonElement command))
+            {
                 failures.AddRange(CompilerCommand(command.GetString() ?? "", file));
+                try { failures.AddRange(LanguageArguments(SplitCommand(command.GetString() ?? ""), file, directory)); }
+                catch (FormatException) { } // CompilerCommand가 이미 형식 오류를 보고했다.
+            }
             else
                 failures.Add(new(file, 0, "warning-database", "missing compiler command/arguments"));
         }
@@ -234,9 +247,43 @@ public static class PolicyChecks
         return failures;
     }
 
-    public static IReadOnlyList<string> NativeSources(string root, IReadOnlyList<string>? folders = null) =>
-        Files(root, folders ?? OwnedSourceRoots).Where(path =>
-            Path.GetExtension(path).ToLowerInvariant() is ".h" or ".cpp" or ".mm").ToArray();
+    /// <summary>
+    /// 엔진이 소유한 native 소스(.h·.c·.cpp·.mm)다. 외부 라이브러리 원본 디렉터리는 제외한다. 제외 범위는 각 라이브러리
+    /// manifest의 <c>upstreamDirectory</c>와 정확히 같은 디렉터리뿐이다(이름이 비슷한 디렉터리·읽을 수 없는 manifest의
+    /// 디렉터리는 계속 검사한다). 원본은 <see cref="ThirdParty"/> 검사가 SHA-256·지시문 목록으로 대신 확인한다.
+    /// </summary>
+    public static IReadOnlyList<string> NativeSources(string root, IReadOnlyList<string>? folders = null)
+    {
+        IReadOnlyList<string> upstream = UpstreamDirectories(root);
+        return Files(root, folders ?? OwnedSourceRoots).Where(path =>
+                Path.GetExtension(path).ToLowerInvariant() is ".h" or ".c" or ".cpp" or ".mm" &&
+                !upstream.Any(directory => Relative(root, path).StartsWith(directory, StringComparison.Ordinal)))
+            .ToArray();
+    }
+
+    /// <summary>
+    /// 유효한 manifest가 선언한 외부 원본 디렉터리(저장소 상대, '/'로 끝남)다. manifest 오류는 여기서 무시하고
+    /// <see cref="ThirdParty"/>가 보고한다(무시된 라이브러리의 원본은 제외되지 않으므로 다른 검사에서도 드러난다).
+    /// </summary>
+    internal static IReadOnlyList<string> UpstreamDirectories(string root)
+    {
+        string thirdParty = Path.Combine(Path.GetFullPath(root), ThirdPartyManifest.ThirdPartyRoot);
+        if (!Directory.Exists(thirdParty))
+            return [];
+        List<string> directories = [];
+        foreach (string library in Directory.EnumerateDirectories(thirdParty).Order(StringComparer.Ordinal))
+        {
+            try
+            {
+                ThirdPartyManifest manifest = ThirdPartyManifest.Read(library);
+                directories.Add($"{ThirdPartyManifest.ThirdPartyRoot}/{Path.GetFileName(library)}/{manifest.UpstreamDirectory}/");
+            }
+            catch (FormatException)
+            {
+            }
+        }
+        return directories;
+    }
 
     internal static IEnumerable<string> Files(string root, IReadOnlyList<string> folders)
     {

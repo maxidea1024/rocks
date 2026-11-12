@@ -30,6 +30,13 @@ public enum NativeModuleKind { StaticLibrary, Executable }
 /// </summary>
 public enum CodeOptimization { Default, Never, Always }
 
+/// <summary>
+/// 번역 단위의 언어다. 확장자가 정확히 <c>.c</c>인 소스만 C(C17)로, 나머지는 C++(C++23)로 컴파일한다.
+/// C는 고정 버전 외부 라이브러리 원본(Core/Source/ThirdParty)용이며 경고·FP·구성 프로필은 C++와 같다.
+/// C++ 전용 플래그(RTTI·예외 끄기, __cplusplus 보고)만 빠진다.
+/// </summary>
+public enum NativeLanguage { Cpp, C }
+
 /// <summary>호스트 실행 도구와 target SDK/ABI 신원을 분리하여 전달한다.</summary>
 public sealed record NativeToolchain
 {

@@ -8,3 +8,14 @@ indent_size = 4
 tab_width = 4
 insert_final_newline = true
 trim_trailing_whitespace = true
+
+# 외부 라이브러리 원본(Core/Source/ThirdParty/<Lib>/<lib>-<version>/)은 byte 그대로 둔다. 편집기가 공백·줄끝을
+# 바꾸지 않도록 모든 규칙을 해제한다. ThirdParty.json의 SHA-256이 원본 보존을 확인한다.
+[Core/Source/ThirdParty/*/*/**]
+charset = unset
+end_of_line = unset
+indent_style = unset
+indent_size = unset
+tab_width = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset

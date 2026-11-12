@@ -5,11 +5,13 @@ public static class NativeCompileProfile
 {
     /// <param name="optimization">모듈의 최적화 재정의다. AST 생성도 같은 값을 넘겨 최적화 관련 predefined
     /// macro(__OPTIMIZE__ 등)가 native compile과 같게 한다.</param>
+    /// <param name="language">번역 단위 언어다. AST·reflection 생성은 C++만 쓰므로 기본값을 유지한다.</param>
     public static IReadOnlyList<string> Arguments(NativeToolchain toolchain, NativeConfiguration configuration,
-        CodeOptimization optimization = CodeOptimization.Default)
+        CodeOptimization optimization = CodeOptimization.Default, NativeLanguage language = NativeLanguage.Cpp)
     {
         if (!Enum.IsDefined(configuration)) throw new ArgumentException($"Invalid native configuration: {configuration}");
         if (!Enum.IsDefined(optimization)) throw new ArgumentException($"Invalid code optimization: {optimization}");
-        return toolchain.CompileArguments.Concat(ActionGraph.CompileFlags(toolchain, configuration, optimization)).ToArray();
+        if (!Enum.IsDefined(language)) throw new ArgumentException($"Invalid native language: {language}");
+        return toolchain.CompileArguments.Concat(ActionGraph.CompileFlags(toolchain, configuration, optimization, language)).ToArray();
     }
 }

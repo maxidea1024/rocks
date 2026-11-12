@@ -58,6 +58,7 @@ internal static class SelfTests
             Verify.Equal(input, result.StdOut, "stdin bytes/text changed");
         });
         suite.Add("Policy.RepositoryRuntime", () => NoFailures(PolicyChecks.Runtime(options.Root)));
+        ThirdPartyPolicyTests.Register(suite, options);
         suite.Add("Policy.RepositoryPlatform", () => NoFailures(PolicyChecks.PlatformBoundary(options.Root)));
         suite.Add("Policy.RepositoryWarnings", () => NoFailures(PolicyChecks.SourceWarnings(options.Root)));
         suite.Add("Policy.RepositoryOptimizationOverrides", () => NoFailures(PolicyChecks.OptimizationOverrides(options.Root)));
@@ -179,7 +180,9 @@ internal static class SelfTests
             using TemporaryDirectory temporary = new();
             foreach (string source in new[] { "#pragma warning(disable: 4101)", "#pragma clang diagnostic ignored \"-Wunused-variable\"",
                 "#pragma GCC diagnostic ignored \"-Wunused-variable\"", "#define _CRT_SECURE_NO_WARNINGS", "#define _SCL_SECURE_NO_WARNINGS",
-                "#pragma clang diagnostic warning \"-Wunused-variable\"", "#pragma GCC diagnostic warning \"-Wunused-variable\"" })
+                "#pragma clang diagnostic warning \"-Wunused-variable\"", "#pragma GCC diagnostic warning \"-Wunused-variable\"",
+                "#define QUIET _Pragma(\"clang diagnostic ignored \\\"-Wunused-variable\\\"\")",
+                "#define QUIET __pragma(warning(disable: 4101))" })
             {
                 temporary.Write("Engine/Probe.cpp", source);
                 Verify.That(PolicyChecks.SourceWarnings(temporary.Root).Count != 0, "warning suppression escaped audit");
@@ -190,7 +193,7 @@ internal static class SelfTests
             using TemporaryDirectory temporary = new();
             temporary.Write("compile_commands.json", "[]");
             Verify.That(PolicyChecks.CompilationDatabase(temporary.FilePath("compile_commands.json")).Count != 0, "empty compilation database accepted");
-            temporary.Write("compile_commands.json", JsonSerializer.Serialize(new[] { new { file = "a.cpp", arguments = new[] { "clang-cl", "/W4", "/WX", "/c", "a.cpp" } } }));
+            temporary.Write("compile_commands.json", JsonSerializer.Serialize(new[] { new { file = "a.cpp", arguments = new[] { "clang-cl", "/W4", "/WX", "/clang:-std=c++23", "/c", "/TP", "a.cpp" } } }));
             NoFailures(PolicyChecks.CompilationDatabase(temporary.FilePath("compile_commands.json")));
             temporary.Write("compile_commands.json", "[{\"file\":\"a.cpp\",\"command\":\"clang-cl /W4 /c a.cpp\"}]");
             Verify.That(PolicyChecks.CompilationDatabase(temporary.FilePath("compile_commands.json")).Count != 0, "missing WX in database accepted");

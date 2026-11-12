@@ -43,12 +43,23 @@ public abstract class SourceModuleRules : ModuleRules
     /// <summary>저장소 루트 기준 모듈 폴더다. 예: Core/Source/Runtime/Core.</summary>
     protected string ModuleDirectory => $"{Layer}/Source/{Group}/{ModuleName}";
 
+    /// <summary>
+    /// 이 모듈 소스에만 쓰는 include 경로다(의존 모듈로 전파하지 않는다). 외부 라이브러리 adapter가 쓴다.
+    /// 예: <c>ThirdPartyModuleRules.ConsumerIncludeDirectories(context, "Zstd")</c>.
+    /// </summary>
+    protected virtual IReadOnlyList<string> PrivateIncludeDirectories(BuildContext context) => [];
+
+    /// <summary>이 모듈 소스에만 쓰는 정의다(의존 모듈로 전파하지 않는다).</summary>
+    protected virtual IReadOnlyList<string> PrivateDefines(BuildContext context) => [];
+
     public override NativeModuleInput Configure(BuildContext context) => HasSources
         ? new()
         {
             Name = ModuleName,
             Sources = context.Sources($"{ModuleDirectory}/Private"),
             PublicIncludeDirectories = [context.PathInRoot($"{ModuleDirectory}/Public")],
+            PrivateIncludeDirectories = PrivateIncludeDirectories(context),
+            PrivateDefines = PrivateDefines(context),
             Dependencies = RequiredModules,
             Optimization = Optimization
         }

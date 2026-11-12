@@ -9,8 +9,10 @@ Rocks 저장소는 **Core(기반 라이브러리)**와 **Engine(게임 엔진 �
 rocks/
   Core/                       기반 라이브러리(엔진 아님)
     Source/
-      Runtime/                모듈: Base PlatformBase Core Task Serialization MetaSchema Localization
-                              ObjectRuntime ObjectSerialization
+      Runtime/                모듈: Base PlatformBase Core Task Compression Serialization MetaSchema
+                              Localization ObjectRuntime ObjectSerialization
+      ThirdParty/             고정 버전 외부 라이브러리 원본(Lz4·Zstd·Zlib). <Lib>/<Lib>.Build.cs·ThirdParty.json·
+                              <lib>-<version>/(릴리스 원본을 byte 그대로)·필요 시 Rocks 글루 .c
         <Module>/
           <Module>.Build.cs   모듈 규칙(CoreModuleRules 상속)
           Public/             다른 모듈이 include하는 헤더
@@ -47,6 +49,11 @@ rocks/
   플랫폼 조건부 전처리를 쓰지 않는다(policy 검사가 확인한다).
 - 런타임 소스(Core·Engine·플러그인·프로그램)는 STL을 쓰지 않는다. 모듈 `Tests/`와 테스트 실행 파일은
   STL 정책 밖이다(STL 호환성 테스트가 STL을 직접 쓴다).
+- 외부 라이브러리는 Core가 쓰는 것이면 `Core/Source/ThirdParty/<Lib>/`에 둔다(Core는 Engine을 참조하지 않는다).
+  원본 디렉터리는 수정하지 않고 `ThirdParty.json`(버전·출처·라이선스·파일별 SHA-256·번역 단위·정의·컴파일러 지시문
+  목록)이 단일 출처다. 정책 검사 `third-party`가 manifest와 원본의 일치를 확인하며, lexical 검사는 manifest가 선언한
+  원본 디렉터리만 제외한다. 외부 헤더는 소비 모듈의 Private 구현에만 노출한다. 규칙과 절차는
+  [압축 설계](Compression.ko.md) 3절을 따른다.
 
 ## 규칙 파일
 

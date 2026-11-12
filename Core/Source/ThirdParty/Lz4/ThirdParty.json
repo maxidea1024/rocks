@@ -1,0 +1,111 @@
+{
+  "schema": 1,
+  "name": "LZ4",
+  "version": "1.11.1",
+  "upstreamDirectory": "lz4-1.11.1",
+  "source": {
+    "url": "https://github.com/lz4/lz4/releases/download/v1.11.1/lz4-1.11.1.tar.gz",
+    "sha256": "683fed08a844ad012196381e40badf80c0bbe4962959761416d41c9e67d77ec7",
+    "verification": "GitHub 릴리스 자산 digest(sha256)와 일치. upstream 서명 파일은 없다."
+  },
+  "license": {
+    "spdx": "BSD-2-Clause",
+    "upstreamExpression": "BSD-2-Clause (lib/), GPL-2.0-or-later (programs/ 등 lib 밖, 들이지 않음)",
+    "file": "lz4-1.11.1/lib/LICENSE",
+    "binaryNoticeRequired": true
+  },
+  "translationUnits": [
+    "Lz4Unity.c"
+  ],
+  "includeDirectories": [
+    "lz4-1.11.1/lib"
+  ],
+  "defines": [
+    "LZ4_STATIC_LINKING_ONLY_DISABLE_MEMORY_ALLOCATION",
+    "LZ4LIB_VISIBILITY="
+  ],
+  "platformDefines": {},
+  "consumerDefines": [
+    "LZ4_HC_STATIC_LINKING_ONLY",
+    "LZ4_STATIC_LINKING_ONLY_DISABLE_MEMORY_ALLOCATION",
+    "LZ4LIB_VISIBILITY="
+  ],
+  "adapterHeaders": [
+    "lz4-1.11.1/lib/lz4.h",
+    "lz4-1.11.1/lib/lz4hc.h"
+  ],
+  "files": {
+    "lib/LICENSE": "8b58c446121a109ccf32edc094bba3010a3d85e4ee3702950db55e4d3e87736c",
+    "lib/lz4.c": "2e58f124f1032f15aecc99772b7de624c4289245729fa5403506f00b06a54937",
+    "lib/lz4.h": "c204caad0638a12c9ce80831094ec8fffb34aa57e74307067b08fc9452fc2611",
+    "lib/lz4hc.c": "44344dc172a6b8f6e4b915d0e792f32911b966d1df1d39731674327ffaec40f3",
+    "lib/lz4hc.h": "8b55bd835048b399ab451dad77d40227fcbcce5d2db7b622a79d92f36dc563e1"
+  },
+  "pragmaDirectives": [
+    {
+      "file": "lib/lz4.c",
+      "line": 114,
+      "text": "#  pragma warning(disable : 4127)   /* disable: C4127: conditional expression is constant */"
+    },
+    {
+      "file": "lib/lz4.c",
+      "line": 115,
+      "text": "#  pragma warning(disable : 6237)   /* disable: C6237: conditional expression is always 0 */"
+    },
+    {
+      "file": "lib/lz4.c",
+      "line": 116,
+      "text": "#  pragma warning(disable : 6239)   /* disable: C6239: (<non-zero constant> && <expression>) always evaluates to the result of <expression> */"
+    },
+    {
+      "file": "lib/lz4.c",
+      "line": 117,
+      "text": "#  pragma warning(disable : 6240)   /* disable: C6240: (<expression> && <non-zero constant>) always evaluates to the result of <expression> */"
+    },
+    {
+      "file": "lib/lz4.c",
+      "line": 118,
+      "text": "#  pragma warning(disable : 6326)   /* disable: C6326: Potential comparison of a constant with another constant */"
+    },
+    {
+      "file": "lib/lz4.c",
+      "line": 372,
+      "text": "#define LZ4_PACK( __Declaration__ ) __pragma( pack(push, 1) ) __Declaration__ __pragma( pack(pop))"
+    },
+    {
+      "file": "lib/lz4.c",
+      "line": 577,
+      "text": "#  pragma warning(push)"
+    },
+    {
+      "file": "lib/lz4.c",
+      "line": 578,
+      "text": "#  pragma warning(disable : 6385) /* warning C6385: Reading invalid data from 'v'. */"
+    },
+    {
+      "file": "lib/lz4.c",
+      "line": 582,
+      "text": "#  pragma warning(pop)"
+    },
+    {
+      "file": "lib/lz4.h",
+      "line": 816,
+      "text": "#    pragma message(\"WARNING: LZ4_DEPRECATED needs custom implementation for this compiler\")"
+    },
+    {
+      "file": "lib/lz4hc.c",
+      "line": 67,
+      "text": "#  pragma GCC diagnostic ignored \"-Wunused-function\""
+    },
+    {
+      "file": "lib/lz4hc.c",
+      "line": 70,
+      "text": "#  pragma clang diagnostic ignored \"-Wunused-function\""
+    }
+  ],
+  "notes": [
+    "Lz4Unity.c 한 번역 단위로 lz4.c와 lz4hc.c를 함께 빌드한다(upstream이 지원하는 LZ4_SRC_INCLUDED 방식). lz4hc.c의 -Wunused-function 억제 분기는 이 방식에서 비활성이다.",
+    "LZ4_compress_fast_extState_fastReset(LZ4_STATIC_LINKING_ONLY, lz4hc.h가 LZ4_HC_STATIC_LINKING_ONLY일 때 정의)과 LZ4_STREAMHC_EXTSIZE·LZ4_compress_HC_extStateHC_fastReset(LZ4_HC_STATIC_LINKING_ONLY, v1.11 실험 API)을 쓴다. 확장 상태를 쓰면 수준 10–12도 압축 중 할당이 없다. 정적 링크·고정 버전이라 실험 API를 쓸 수 있다.",
+    "LZ4_STATIC_LINKING_ONLY_DISABLE_MEMORY_ALLOCATION은 할당 API를 컴파일 단계에서 제거한다."
+  ]
+}
