@@ -5,5 +5,6 @@ using Rocks.Build.Rules;
 public sealed class Renderer : EngineModuleRules
 {
     protected override string ModuleName => "Renderer";
+
     protected override string[] RequiredModules => ["Graphics"];
 }

@@ -49,11 +49,17 @@ internal static class BoundedFileTests
     private sealed class GrowingStream(int available) : Stream
     {
         public int BytesRead { get; private set; }
+
         public override bool CanRead => true;
+
         public override bool CanSeek => true;
+
         public override bool CanWrite => false;
+
         public override long Length => 0;
+
         public override long Position { get => BytesRead; set => throw new NotSupportedException(); }
+
         public override int Read(byte[] buffer, int offset, int count)
         {
             int read = Math.Min(count, available - BytesRead);
@@ -61,9 +67,13 @@ internal static class BoundedFileTests
             BytesRead += read;
             return read;
         }
+
         public override void Flush() => throw new NotSupportedException();
+
         public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
         public override void SetLength(long value) => throw new NotSupportedException();
+
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 }

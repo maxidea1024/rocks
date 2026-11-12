@@ -6,6 +6,7 @@ using Rocks.Build.Rules;
 public sealed class PlatformWindow : EngineModuleRules
 {
     protected override string ModuleName => "PlatformWindow";
+
     protected override string[] RequiredModules => ["Input"];
 
     public override NativeModuleInput Configure(BuildContext context)

@@ -4,6 +4,8 @@ using Rocks.Build.Rules;
 public sealed class Base : CoreModuleRules
 {
     protected override string ModuleName => "Base";
+
     protected override string[] RequiredModules => [];
+
     protected override bool HasSources => false;
 }

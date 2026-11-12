@@ -5,6 +5,8 @@ using Rocks.Build.Rules;
 public sealed class EngineTarget : TargetRules
 {
     public override string Name => "Engine";
+
     public override IReadOnlyList<string> Modules => ["ObjectSerialization", "Localization"];
+
     public override bool CheckPublicHeaders => true;
 }

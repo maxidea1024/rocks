@@ -110,6 +110,7 @@ internal static class IdentityCliReviewTests
         temporary.Write(path, JsonSerializer.Serialize(new { schema = 1, entries = entries.Select(e => new { kind = "type", name = e.Name, id = e.Id, aliases = Array.Empty<string>(), retired = false }) }));
         return temporary.FilePath(path);
     }
+
     private static async Task<ProcessResult> Run(Options options, IReadOnlyDictionary<string, string?> environment, params string[] arguments)
     {
         string generator = Path.GetFullPath(options.Required("metacompiler"));
@@ -124,7 +125,9 @@ internal static class IdentityCliReviewTests
         command.AddRange(arguments);
         return await ProcessRunner.RunAsync(new(executable, command, options.Root, environment, Timeout: TimeSpan.FromSeconds(30)));
     }
+
     private static void Success(ProcessResult result) => Verify.Equal(0, result.ExitCode, "identity command: " + result.StdErr);
+
     private static void Error(ProcessResult result, string message)
     {
         Verify.Equal(1, result.ExitCode, "identity command error exit: " + result.StdErr);

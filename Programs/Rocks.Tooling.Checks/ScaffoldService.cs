@@ -281,9 +281,12 @@ public static class ScaffoldService
             return false;
         }
     }
+
     private static bool IsLink(string path) => (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
+
     private static bool PathsEqual(string left, string right) => string.Equals(left, right,
         OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+
     private static string Hash(string text) => Convert.ToHexStringLower(SHA256.HashData(Utf8.GetBytes(text)));
 
     private static void WriteNew(string path, byte[] bytes)

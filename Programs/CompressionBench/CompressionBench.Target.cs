@@ -5,5 +5,6 @@ using Rocks.Build.Rules;
 public sealed class CompressionBenchTarget : TargetRules
 {
     public override string Name => "CompressionBench";
+
     public override IReadOnlyList<string> Modules => ["CompressionBench"];
 }

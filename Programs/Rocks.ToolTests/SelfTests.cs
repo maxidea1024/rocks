@@ -10,6 +10,7 @@ namespace Rocks.ToolTests;
 internal static class SelfTests
 {
     private static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
     public static void Register(TestSuite suite, Options options)
     {
         BoundedFileTests.Register(suite);
@@ -589,5 +590,6 @@ internal static class SelfTests
     }
 
     private static void NoFailures(IReadOnlyList<CheckFailure> failures) => Verify.That(failures.Count == 0, string.Join('\n', failures));
+
     private static string Hash(string text) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
 }

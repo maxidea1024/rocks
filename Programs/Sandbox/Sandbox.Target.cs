@@ -4,6 +4,8 @@ using Rocks.Build.Rules;
 public sealed class SandboxTarget : TargetRules
 {
     public override string Name => "Sandbox";
+
     public override IReadOnlyList<string> Modules => ["Sandbox"];
+
     public override bool CheckPublicHeaders => true;
 }

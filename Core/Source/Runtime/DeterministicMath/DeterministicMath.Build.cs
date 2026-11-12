@@ -5,5 +5,6 @@ using Rocks.Build.Rules;
 public sealed class DeterministicMath : CoreModuleRules
 {
     protected override string ModuleName => "DeterministicMath";
+
     protected override string[] RequiredModules => ["PlatformBase"];
 }

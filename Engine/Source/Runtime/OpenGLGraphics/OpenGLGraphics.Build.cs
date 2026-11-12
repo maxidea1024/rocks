@@ -5,6 +5,7 @@ using Rocks.Build.Rules;
 public sealed class OpenGLGraphics : EngineModuleRules
 {
     protected override string ModuleName => "OpenGLGraphics";
+
     protected override string[] RequiredModules => ["Graphics"];
 
     public override NativeModuleInput Configure(BuildContext context)

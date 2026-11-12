@@ -4,5 +4,6 @@ using Rocks.Build.Rules;
 public sealed class TaskRuntime : CoreModuleRules
 {
     protected override string ModuleName => "Task";
+
     protected override string[] RequiredModules => ["Core"];
 }

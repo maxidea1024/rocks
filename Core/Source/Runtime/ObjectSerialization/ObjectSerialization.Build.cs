@@ -4,5 +4,6 @@ using Rocks.Build.Rules;
 public sealed class ObjectSerialization : CoreModuleRules
 {
     protected override string ModuleName => "ObjectSerialization";
+
     protected override string[] RequiredModules => ["ObjectRuntime", "Serialization"];
 }

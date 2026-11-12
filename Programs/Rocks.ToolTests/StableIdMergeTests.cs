@@ -8,8 +8,10 @@ internal static class StableIdMergeTests
     private const string FirstId = "10000000000000000000000000000001";
     private const string SecondId = "10000000000000000000000000000002";
     private const string FieldId = "20000000000000000000000000000001";
+
     private static StableIdEntry Type(string name, string id = FirstId, bool retired = false, params string[] aliases) =>
         new("type", name, id, aliases, retired);
+
     private static StableIdEntry Field(string name, params string[] aliases) =>
         new("field", name, FieldId, aliases, false);
 

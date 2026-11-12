@@ -30,6 +30,7 @@ public static class ProcessRunner
     // 완료되지 않은 cleanup이 무한 누적되지 않게 신규 프로세스 실행 전에 용량을 확보한다.
     public const int MaximumConcurrentProcesses = 64;
     private static readonly ProcessCleanupBudget Budget = new(MaximumConcurrentProcesses);
+
     public static async Task<ProcessResult> RunAsync(ProcessSpec spec, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(spec);

@@ -364,6 +364,7 @@ internal static class ThirdPartyPolicyTests
 
     private const string FakeSource = "#include \"fake.h\"\n#ifdef _MSC_VER\n#pragma warning(disable : 4100)\n#endif\n" +
                                       "static __forceinline int Helper(int value) { return value; }\nint Fake(void) { return Helper(1); }\n";
+
     private const string FakeHeader = "#pragma once\n#pragma clang diagnostic push\n#pragma clang diagnostic ignored \"-Wshadow\"\n" +
                                       "int Fake(void);\n#pragma clang diagnostic pop\n";
 

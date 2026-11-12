@@ -15,6 +15,7 @@ public static partial class PolicyChecks
 
     private static readonly Regex DeterministicMathInclude = Pattern("^\\s*#\\s*include\\s*([<\"][^>\"]+[>\"])");
     private static readonly Regex ExtendedPrecisionType = Pattern("\\blong\\s+double\\b");
+
     // 공개 헤더의 함수 본문(선언 뒤 '{'). 본문이 소비자 오브젝트에 inline되면 오브젝트 검사 범위 밖이 된다.
     private static readonly Regex FunctionBody = Pattern("\\)\\s*(?:const\\s*)?(?:noexcept\\s*)?\\{");
 

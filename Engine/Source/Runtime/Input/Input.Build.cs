@@ -5,5 +5,6 @@ using Rocks.Build.Rules;
 public sealed class Input : EngineModuleRules
 {
     protected override string ModuleName => "Input";
+
     protected override string[] RequiredModules => ["Core"];
 }

@@ -8,7 +8,9 @@ public sealed class CompressionTraining : CoreModuleRules
     private static readonly string[] Codecs = ["Zstd"];
 
     protected override string Group => "Developer";
+
     protected override string ModuleName => "CompressionTraining";
+
     protected override string[] RequiredModules => ["Core", "Compression", .. Codecs];
 
     protected override IReadOnlyList<string> PrivateIncludeDirectories(BuildContext context) =>

@@ -4,5 +4,6 @@ using Rocks.Build.Rules;
 public sealed class ObjectRuntime : CoreModuleRules
 {
     protected override string ModuleName => "ObjectRuntime";
+
     protected override string[] RequiredModules => ["MetaSchema", "Task"];
 }

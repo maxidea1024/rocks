@@ -262,6 +262,7 @@ public static partial class PolicyChecks
     // pack 등 진단과 무관한 push/pop은 세지 않는다. 억제가 스택 밖에 있거나 균형이 맞지 않으면 실패다.
     private static readonly Regex MsvcWarningAction = Pattern(
         "(?:#\\s*pragma\\s+warning|__pragma\\s*\\(\\s*warning)\\s*\\(\\s*(push|pop|disable|[0-4]|once|default|error|suppress)\\b");
+
     private static readonly Regex GnuDiagnosticAction = Pattern(
         "(?:#\\s*pragma|_Pragma\\s*\\(\\s*\")\\s*(?:clang|GCC)\\s+diagnostic\\s+(push|pop|ignored|warning|error)\\b");
 

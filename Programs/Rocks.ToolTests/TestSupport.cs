@@ -15,10 +15,13 @@ internal static class Verify
             throw new InvalidOperationException(message);
         }
     }
+
     public static void Equal<T>(T expected, T actual, string message)
     { That(EqualityComparer<T>.Default.Equals(expected, actual), $"{message}: expected={expected}; actual={actual}"); }
+
     public static void Contains(string expected, string actual, string message)
     { That(actual.Contains(expected, StringComparison.Ordinal), $"{message}: missing '{expected}' in:\n{actual}"); }
+
     public static void Throws<T>(Action action) where T : Exception
     {
         try
@@ -32,6 +35,7 @@ internal static class Verify
 
         throw new InvalidOperationException("Expected " + typeof(T).Name);
     }
+
     public static async Task ThrowsAsync<T>(Func<Task> action) where T : Exception
     {
         try
@@ -50,19 +54,24 @@ internal static class Verify
 internal sealed class TemporaryDirectory : IDisposable
 {
     private readonly string parent;
+
     public TemporaryDirectory()
     {
         Root = Directory.CreateTempSubdirectory("rocks-tools-").FullName;
         parent = Path.GetDirectoryName(Root)!;
     }
+
     public string Root { get; }
+
     public string FilePath(string relative) => Path.Combine(Root, relative);
+
     public void Write(string relative, string content)
     {
         string path = FilePath(relative);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, content, new UTF8Encoding(false, true));
     }
+
     public void Dispose()
     {
         string path = Path.GetFullPath(Root);
@@ -81,11 +90,13 @@ internal sealed class TemporaryDirectory : IDisposable
 internal sealed class TestSuite
 {
     private readonly SortedDictionary<string, Func<Task>> tests = new(StringComparer.Ordinal);
+
     public void Add(string name, Action action) => Add(name, () =>
     {
         action();
         return Task.CompletedTask;
     });
+
     public void Add(string name, Func<Task> action) => tests.Add(name, action);
 
     public async Task<int> RunAsync(string? jsonPath, ulong seed)
@@ -153,15 +164,23 @@ internal sealed class TestSuite
 internal sealed class Options
 {
     private readonly Dictionary<string, string> values = new(StringComparer.Ordinal);
+
     public List<string> ClangArguments { get; } = [];
+
     public bool Asan { get; private set; }
+
     // third-party 명령: manifest를 실제로 고친다(없으면 차이만 보고).
     public bool Write { get; private set; }
+
     public string Root => Path.GetFullPath(Required("root"));
+
     public string? Json => Optional("json");
+
     public ulong Seed => values.TryGetValue("seed", out string? value) ? ulong.Parse(value, System.Globalization.CultureInfo.InvariantCulture) : 7351;
+
     public string Required(string key) => values.TryGetValue(key, out string? value) && value.Length != 0 ? value :
         throw new ArgumentException("Missing --" + key);
+
     public string? Optional(string key) => values.GetValueOrDefault(key);
 
     public static Options Parse(string[] arguments)

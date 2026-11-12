@@ -5,5 +5,6 @@ using Rocks.Build.Rules;
 public sealed class Engine : EngineModuleRules
 {
     protected override string ModuleName => "Engine";
+
     protected override string[] RequiredModules => ["World"];
 }

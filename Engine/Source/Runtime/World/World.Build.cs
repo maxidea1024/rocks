@@ -5,5 +5,6 @@ using Rocks.Build.Rules;
 public sealed class World : EngineModuleRules
 {
     protected override string ModuleName => "World";
+
     protected override string[] RequiredModules => ["ObjectRuntime"];
 }

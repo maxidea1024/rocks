@@ -5,5 +5,6 @@ using Rocks.Build.Rules;
 public sealed class GraphicsTypes : EngineModuleRules
 {
     protected override string ModuleName => "GraphicsTypes";
+
     protected override string[] RequiredModules => ["Core"];
 }

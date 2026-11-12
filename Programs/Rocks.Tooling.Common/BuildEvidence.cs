@@ -119,35 +119,60 @@ public sealed record SourceSnapshot(string Algorithm, string Digest, int FileCou
 
 public sealed record GitSnapshot(string? Head, bool? Dirty, IReadOnlyList<string> DirtyEntries,
     string? HeadError = null, string? StatusError = null);
+
 public sealed record EvidenceStep(string Name, IReadOnlyList<string> Command, int ExitCode,
     long DurationNs, string Status, bool Tests, string? Error = null);
 
 public sealed class BuildEvidenceDocument
 {
     public int Schema { get; init; } = 2;
+
     public required string Preset { get; init; }
+
     public required string Platform { get; init; }
+
     public required string Architecture { get; set; }
+
     public ulong Seed { get; set; } = 7351;
+
     public long StartedUnixNs { get; init; }
+
     public long FinishedUnixNs { get; set; }
+
     public required SourceSnapshot SourceBefore { get; init; }
+
     public SourceSnapshot? SourceAfter { get; set; }
+
     public required GitSnapshot GitBefore { get; init; }
+
     public GitSnapshot? GitAfter { get; set; }
+
     public List<EvidenceStep> Steps { get; } = [];
+
     public string? Configuration { get; set; }
+
     public string? Target { get; set; }
+
     public string? Sanitizer { get; set; }
+
     public string? Compiler { get; set; }
+
     public string? CompilerVersion { get; set; }
+
     public bool SourceStableDuringRun { get; set; }
+
     public string Status { get; set; } = "NOT RUN";
+
     public string TestsStatus { get; set; } = "NOT RUN";
+
     public string? Error { get; set; }
+
     public string? RunnerReport { get; set; }
+
     public bool RunnerReportCurrent { get; set; }
+
     public string? RunnerReportSha256 { get; set; }
+
     public string? RunnerReportError { get; set; }
 }
 
@@ -185,6 +210,7 @@ public sealed class BuildEvidence
     }
 
     public string OutputDirectory { get; }
+
     public string EvidencePath => Path.Combine(OutputDirectory, "build-evidence.json");
 
     public static async Task<BuildEvidence> StartAsync(string root, string preset,
@@ -406,6 +432,7 @@ public sealed class BuildEvidence
             throw new InvalidOperationException("Evidence already finished");
         }
     }
+
     private static long UnixNanoseconds(DateTime value) => checked((value.ToUniversalTime().Ticks - DateTime.UnixEpoch.Ticks) * 100);
 
     private static async Task<GitSnapshot> CaptureGitAsync(string root,

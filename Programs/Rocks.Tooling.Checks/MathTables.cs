@@ -144,6 +144,7 @@ public static class MathTables
     private readonly record struct Candidate(BigInteger M, int E)
     {
         public Candidate Next() => M + 1 == (BigInteger.One << 24) ? new(BigInteger.One << 23, E + 1) : new(M + 1, E);
+
         public Candidate Previous() => M == (BigInteger.One << 23) ? new((BigInteger.One << 24) - 1, E - 1) : new(M - 1, E);
 
         public uint Bits()

@@ -15,11 +15,13 @@ public sealed record CheckFailure(string Path, int Line, string Rule, string Mes
 public static partial class PolicyChecks
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
+
     private static Regex Pattern(string value) => new(value,
         RegexOptions.CultureInvariant | RegexOptions.Compiled, TimeSpan.FromSeconds(1));
 
     private static readonly Regex BannedRuntime = Pattern(
         "#\\s*include\\s*[<\"](?:vector|string|array|deque|list|map|set|unordered_map|unordered_set|memory|functional|thread|mutex|future|iostream|fstream|sstream|algorithm|ranges|span|filesystem|utility|tuple|type_traits)[>\"]|\\bstd\\s*::");
+
     // 언어 규칙이 std 이름을 직접 요구하는 지점만 파일·이름 단위로 허용한다. 구조적 바인딩의 tuple
     // protocol은 std::tuple_size/std::tuple_element 특수화를 찾으므로 Tuple.h만 그 두 이름과 기본
     // 템플릿 선언용 <utility>를 쓸 수 있다. 같은 줄에 다른 std 사용이 있으면 여전히 위반이다.
@@ -28,18 +30,22 @@ public static partial class PolicyChecks
         ["Core/Source/Runtime/Core/Public/Core/Tuple.h"] = Pattern(
             "#\\s*include\\s*<utility>|\\bstd\\s*::\\s*(?:tuple_size|tuple_element)\\b"),
     };
+
     private static readonly Regex BannedPlatform = Pattern(
         "#\\s*(?:if|ifdef|ifndef|elif)\\b[^\\n]*(?:_WIN32|_WIN64|__APPLE__|__linux__|ROCKS_PLATFORM_)" +
         "|#\\s*include\\s*[<\"](?:[Ww]indows|windowsx|synchapi|processthreadsapi|pthread|semaphore|unistd|mach/[^>\"]+)\\.h[>\"]" +
         "|\\b(?:CreateThread|WaitForSingleObject|pthread_create|pthread_join|pthread_mutex_lock|pthread_cond_wait|Sleep|nanosleep)\\s*\\(");
+
     // #pragma와 같은 억제를 매크로 형태(_Pragma("..."), MSVC __pragma(...))로 쓰는 경우도 거부한다.
     private static readonly Regex BannedSuppression = Pattern(
         "^\\s*#\\s*pragma\\s+(?:warning\\s*\\(\\s*(?:disable|[0-3])\\b|(?:clang|GCC)\\s+diagnostic\\s+(?:ignored|warning)\\b)" +
         "|\\b_Pragma\\s*\\(\\s*\"\\s*(?:clang|GCC)\\s+diagnostic\\s+(?:ignored|warning)\\b" +
         "|\\b__pragma\\s*\\(\\s*warning\\s*\\(\\s*(?:disable|[0-3])\\b" +
         "|^\\s*#\\s*define\\s+(?:_CRT_SECURE_NO_WARNINGS|_SCL_SECURE_NO_WARNINGS)\\b");
+
     private static readonly Regex SuppressedFlag = Pattern(
         "^(?:/WX-|/W[0-3]|/w(?:d[0-9]+)?|(?:/clang:)?(?:-w|-Wno-.+))$");
+
     private static readonly Regex PythonInvocation = Pattern(
         "\\bpython(?:3(?:\\.[0-9]+)?)?(?:\\.exe)?\\b|setup-python\\b|[^\\s\"']+\\.py(?:[\\s\"']|$)");
 
@@ -88,10 +94,13 @@ public static partial class PolicyChecks
     private static readonly Regex OptimizationOverride = Pattern(
         "\\bROCKS_(?:DISABLE|ENABLE)_OPTIMIZATION\\b|#\\s*pragma\\s+(?:clang\\s+)?optimize\\b|_Pragma\\s*\\(\\s*\"(?:clang\\s+)?optimize\\b" +
         "|\\[\\[\\s*clang\\s*::\\s*optnone\\s*\\]\\]|__attribute__\\s*\\(\\(\\s*optnone\\b");
+
     private static readonly Regex NeverOptimizedRule = Pattern("\\bCodeOptimization\\s*\\.\\s*Never\\b");
+
     // 강제 인라인은 쓰지 않는다(인라인 판단은 Clang 최적화·ThinLTO에 맡긴다).
     private static readonly Regex ForcedInline = Pattern(
         "__attribute__\\s*\\(\\(\\s*(?:__)?always_inline|\\[\\[\\s*(?:clang|gnu)\\s*::\\s*always_inline|__forceinline\\b");
+
     private const string OptimizationMacroHeader = "Core/Source/Runtime/Base/Public/Base/Compiler.h";
 
     /// <summary>

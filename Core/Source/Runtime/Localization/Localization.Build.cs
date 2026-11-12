@@ -4,5 +4,6 @@ using Rocks.Build.Rules;
 public sealed class Localization : CoreModuleRules
 {
     protected override string ModuleName => "Localization";
+
     protected override string[] RequiredModules => ["Core"];
 }

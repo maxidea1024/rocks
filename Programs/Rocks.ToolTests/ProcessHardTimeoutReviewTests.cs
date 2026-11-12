@@ -301,7 +301,9 @@ internal static class ProcessHardTimeoutReviewTests
     private sealed class BlockingResource : IDisposable
     {
         public ManualResetEventSlim Entered { get; } = new();
+
         public ManualResetEventSlim Release { get; } = new();
+
         public bool Disposed { get; private set; }
 
         public void Dispose()
@@ -321,6 +323,7 @@ internal static class ProcessHardTimeoutReviewTests
     private sealed class TrackingResource : IDisposable
     {
         public bool Disposed { get; private set; }
+
         public void Dispose() => Disposed = true;
     }
 }

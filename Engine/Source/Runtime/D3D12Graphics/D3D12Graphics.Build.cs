@@ -5,6 +5,7 @@ using Rocks.Build.Rules;
 public sealed class D3D12Graphics : EngineModuleRules
 {
     protected override string ModuleName => "D3D12Graphics";
+
     protected override string[] RequiredModules => ["Graphics"];
 
     public override NativeModuleInput Configure(BuildContext context)

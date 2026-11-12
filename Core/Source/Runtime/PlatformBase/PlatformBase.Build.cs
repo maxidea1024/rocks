@@ -6,6 +6,7 @@ using Rocks.Build.Rules;
 public sealed class PlatformBase : CoreModuleRules
 {
     protected override string ModuleName => "PlatformBase";
+
     protected override string[] RequiredModules => ["Base"];
 
     public override NativeModuleInput Configure(BuildContext context)
