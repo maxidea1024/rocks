@@ -71,6 +71,21 @@ uint64 MonotonicNanoseconds() noexcept {
     return seconds * 1000000000 + static_cast<uint64>(time.tv_nsec);
 }
 
+int64 UtcTicks() noexcept {
+    timespec time{};
+    if (clock_gettime(CLOCK_REALTIME, &time) != 0) {
+        Fatal("clock_gettime(CLOCK_REALTIME) failed");
+    }
+    // 0001-01-01부터 1970-01-01까지는 719162일이다.
+    constexpr int64 Offset = 719162ll * 864000000000ll;
+    constexpr int64 MaxTicks = 3155378975999999999ll;
+    const int64 seconds = static_cast<int64>(time.tv_sec);
+    if (seconds < -Offset / 10000000ll || seconds > (MaxTicks - Offset) / 10000000ll) {
+        Fatal("UTC clock is outside the DateTime range");
+    }
+    return seconds * 10000000ll + static_cast<int64>(time.tv_nsec) / 100 + Offset;
+}
+
 uint64 CurrentThreadId() noexcept {
     return detail::PosixThreadId();
 }

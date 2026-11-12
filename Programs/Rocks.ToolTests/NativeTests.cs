@@ -291,6 +291,8 @@ internal static class NativeTests
                 ("shared-ref-from-empty", "SharedPtr::ToSharedRef called on an empty pointer"),
                 ("sparse-array-free-index", "SparseArray index is not allocated"),
                 ("slot-array-stale-handle", "SlotArray handle is stale or invalid"),
+                ("time-span-overflow", "TimeSpan arithmetic overflow"),
+                ("date-time-out-of-range", "DateTime arithmetic is outside the supported range"),
                 ("variant-wrong-alternative", "Variant::Get called with a different alternative"),
                 ("delegate-rebind-during-target-destruction", "Delegate rebound while its target is being destroyed"),
                 ("unique-ptr-null-deleter", "UniquePtr adopted an object with a null deleter"),

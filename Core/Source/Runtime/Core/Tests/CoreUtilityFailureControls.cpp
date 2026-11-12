@@ -7,6 +7,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Optional.h>
+#include <Core/Time/DateTime.h>
 #include <Core/Variant.h>
 #include <TestSupport/HostFailure.h>
 
@@ -125,6 +126,19 @@ int RunSlotArrayStaleHandleControl() noexcept {
     (void)slots.TryRemove(first.Value());
     (void)slots.TryAdd(2);
     return slots[first.Value()];
+}
+
+// 시간 연산자는 범위를 넘으면 조용히 wrap하지 않고 Fatal이다.
+int RunTimeSpanOverflowControl() noexcept {
+    PrepareFatalTestProcess();
+    const TimeSpan sum = TimeSpan::MaxValue() + TimeSpan::FromTicks(1);
+    return sum.Ticks() == 0 ? 2 : 3;
+}
+
+int RunDateTimeOutOfRangeControl() noexcept {
+    PrepareFatalTestProcess();
+    const DateTime later = DateTime::MaxValue() + TimeSpan::FromTicks(1);
+    return later.Ticks() == 0 ? 2 : 3;
 }
 
 int RunSharedRefFromEmptyControl() noexcept {

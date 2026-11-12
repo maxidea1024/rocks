@@ -24,6 +24,8 @@ int RunSharedPtrEmptyControl() noexcept;
 int RunSharedRefFromEmptyControl() noexcept;
 int RunSparseArrayFreeIndexControl() noexcept;
 int RunSlotArrayStaleHandleControl() noexcept;
+int RunTimeSpanOverflowControl() noexcept;
+int RunDateTimeOutOfRangeControl() noexcept;
 int RunVariantWrongAlternativeControl() noexcept;
 int RunDelegateRebindDuringTargetDestructionControl() noexcept;
 int RunUniquePtrNullDeleterControl() noexcept;
@@ -230,6 +232,10 @@ int main(int argc, char** argv) {
                 return test::RunSparseArrayFreeIndexControl();
             } else if (strcmp(control, "slot-array-stale-handle") == 0) {
                 return test::RunSlotArrayStaleHandleControl();
+            } else if (strcmp(control, "time-span-overflow") == 0) {
+                return test::RunTimeSpanOverflowControl();
+            } else if (strcmp(control, "date-time-out-of-range") == 0) {
+                return test::RunDateTimeOutOfRangeControl();
             } else if (strcmp(control, "variant-wrong-alternative") == 0) {
                 return test::RunVariantWrongAlternativeControl();
             } else if (strcmp(control, "delegate-rebind-during-target-destruction") == 0) {

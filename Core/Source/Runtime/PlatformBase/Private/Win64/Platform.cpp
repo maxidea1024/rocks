@@ -62,6 +62,19 @@ uint64 MonotonicNanoseconds() noexcept {
     return static_cast<uint64>(nanoseconds);
 }
 
+int64 UtcTicks() noexcept {
+    FILETIME time{};
+    GetSystemTimePreciseAsFileTime(&time);
+    // FILETIME은 1601-01-01부터의 100ns다. 0001-01-01부터 1601-01-01까지는 584388일이다.
+    constexpr int64 Offset = 584388ll * 864000000000ll;
+    constexpr uint64 MaxTicks = 3155378975999999999ull;
+    const uint64 value = (static_cast<uint64>(time.dwHighDateTime) << 32) | time.dwLowDateTime;
+    if (value > MaxTicks - static_cast<uint64>(Offset)) {
+        Fatal("UTC clock is outside the DateTime range");
+    }
+    return static_cast<int64>(value) + Offset;
+}
+
 uint64 CurrentThreadId() noexcept {
     return static_cast<uint64>(GetCurrentThreadId());
 }
