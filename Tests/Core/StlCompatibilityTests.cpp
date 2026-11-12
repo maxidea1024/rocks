@@ -16,7 +16,13 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/StringView.h>
 
+#include <Core/Math/RandomStream.h>
+#include <Core/Text/NumberText.h>
+#include <Core/Text/StringBuilder.h>
 #include <algorithm>
+#include <charconv>
+#include <cstdlib>
+#include <cstring>
 #include <iterator>
 #include <numeric>
 #include <ranges>
@@ -93,6 +99,105 @@ TEST(StlCompatibility_HashContainersWithAlgorithms) {
     }
     CHECK(std::ranges::count_if(set, [](int key) { return key >= 10; }) == 10);
     CHECK(std::accumulate(set.begin(), set.end(), 0) == 190);
+}
+
+namespace {
+
+// 문자열 표기에서 유효 숫자 개수를 센다(부호·지수·소수점·앞뒤 0 제외).
+int SignificantDigits(const char* text, usize length) noexcept {
+    char digits[64];
+    int count = 0;
+    for (usize index = 0; index < length; ++index) {
+        const char character = text[index];
+        if (character == 'e' || character == 'E') {
+            break;
+        }
+
+        if (character >= '0' && character <= '9' && count < 64) {
+            digits[count++] = character;
+        }
+    }
+
+    int first = 0;
+    while (first < count && digits[first] == '0') {
+        ++first;
+    }
+
+    int last = count;
+    while (last > first && digits[last - 1] == '0') {
+        --last;
+    }
+
+    return last - first;
+}
+
+template <typename T>
+bool MatchesStandardShortest(T value) noexcept {
+    SystemAllocator allocator;
+    StringBuilder<64> ours(allocator);
+    if (!ours.TryAppendFormat("{}", value)) {
+        return false;
+    }
+
+    // std::to_chars(scientific)는 왕복하는 가장 짧은 표기를 낸다.
+    char standard[64];
+    const auto converted =
+        std::to_chars(standard, standard + sizeof(standard), value, std::chars_format::scientific);
+    if (converted.ec != std::errc()) {
+        return false;
+    }
+
+    // 왕복은 C의 strtod·strtof로 확인한다(Android libc++에는 실수 from_chars가 없다).
+    char* end = nullptr;
+    T back{};
+    if constexpr (sizeof(T) == sizeof(float)) {
+        back = std::strtof(ours.CString(), &end);
+    } else {
+        back = std::strtod(ours.CString(), &end);
+    }
+
+    return end == ours.CString() + ours.ByteCount() && std::memcmp(&back, &value, sizeof(T)) == 0 &&
+           SignificantDigits(ours.CString(), ours.ByteCount()) ==
+               SignificantDigits(standard, static_cast<usize>(converted.ptr - standard));
+}
+
+} // namespace
+
+// Rocks 실수 최단 표기의 자릿수를 STL to_chars와 비교하고 C runtime으로 왕복을 확인한다.
+TEST(StlCompatibility_ShortestFloatingPointMatchesToChars) {
+    bool matches = true;
+    double power = 1.0;
+    for (int exponent = 0; exponent < 1074 && matches; ++exponent) {
+        matches = MatchesStandardShortest(power) && MatchesStandardShortest(-power * 3.0);
+        power /= 2.0;
+    }
+
+    CHECK(matches);
+    float single = 1.0f;
+    for (int exponent = 0; exponent < 149 && matches; ++exponent) {
+        matches = MatchesStandardShortest(single);
+        single /= 2.0f;
+    }
+
+    CHECK(matches);
+    RandomStream random(test::CurrentSeed() ^ 0x70c4ull);
+    for (int iteration = 0; iteration < 4000 && matches; ++iteration) {
+        const uint64 bits = (static_cast<uint64>(random.NextUInt32()) << 32) | random.NextUInt32();
+        double value = 0;
+        std::memcpy(&value, &bits, sizeof(value));
+        if (value != value || value - value != 0.0) {
+            continue;
+        }
+
+        const uint32 singleBits = random.NextUInt32();
+        float singleValue = 0;
+        std::memcpy(&singleValue, &singleBits, sizeof(singleValue));
+        matches = MatchesStandardShortest(value) &&
+                  (singleValue != singleValue || singleValue - singleValue != 0.0f ||
+                   MatchesStandardShortest(singleValue));
+    }
+
+    CHECK(matches);
 }
 
 TEST(StlCompatibility_SparseAndSlotArraysWithAlgorithms) {

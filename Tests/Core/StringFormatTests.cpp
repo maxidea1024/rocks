@@ -1,4 +1,5 @@
 #include <Core/Math/RandomStream.h>
+#include <Core/Memory/StackAllocator.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/NumberText.h>
 #include <Core/Text/StringBuilder.h>
@@ -302,6 +303,57 @@ TEST(Format_IgnoresCLocaleDecimalSeparator) {
     CHECK(formatted);
     CHECK(parsed && parsed.Value() == 2.75);
     CHECK(!comma && comma.Error() == ErrorCode::InvalidArgument);
+}
+
+TEST(Format_ReviewRegressions) {
+    // NUL 없는 char 배열은 배열 끝에서 멈춘다(뒤 메모리를 읽지 않는다).
+    struct {
+        char head[4];
+        char tail[8];
+    } packed{};
+    memcpy(packed.head, "abcd", 4);
+    memcpy(packed.tail, "XYZ", 4);
+    CHECK(Formats("[abcd]", "[{}]", packed.head));
+
+    // std::format처럼 bool·char에는 정밀도를 받지 않는다.
+    CHECK(FormatError("{:.2}", true) == ErrorCode::InvalidArgument);
+    CHECK(FormatError("{:.0}", 'A') == ErrorCode::InvalidArgument);
+
+    // 최단 표기는 찾은 유효 숫자로 조립한다(이진 값을 다시 전개하지 않는다).
+    CHECK(Formats("100000000000 1000000000000000 1e+16", "{} {} {}", 1e11f, 1e15f, 1e16f));
+    // 2의 거듭제곱 경계: 반올림 값이 아니라 그 이웃이 한 자리 짧게 왕복한다.
+    double boundary = 1.0;
+    for (int i = 0; i < 1017; ++i) {
+        boundary /= 2.0;
+    }
+
+    CHECK(Formats("7.120236347223045e-307", "{}", boundary));
+    float singleBoundary = 1.0f;
+    for (int i = 0; i < 96; ++i) {
+        singleBoundary /= 2.0f;
+    }
+
+    CHECK(Formats("1.2621775e-29", "{}", singleBoundary));
+
+    // 정밀도 상한(1074)까지는 heap 없이 쓴다. 넘으면 InvalidArgument다.
+    SystemAllocator allocator;
+    StringBuilder<> builder(allocator);
+    REQUIRE(builder.TryAppendFormat("{:.1074f}", 1.0));
+    CHECK(builder.ByteCount() == 1 + 1 + 1074);
+    CHECK(FormatError("{:.1075f}", 1.0) == ErrorCode::InvalidArgument);
+}
+
+TEST(Format_WorksWithLifoAllocatorAfterReserve) {
+    // 역순 반환만 받는 allocator에서도 미리 확보하면 서식이 별도 할당을 하지 않는다.
+    SystemAllocator backing;
+    StackAllocator stack(backing, 16384);
+    {
+        StringBuilder<16> builder(stack);
+        REQUIRE(builder.TryReserve(4096));
+        REQUIRE(builder.TryAppendFormat("{:300}{:300}", 1, 2));
+        REQUIRE(builder.TryAppendFormat("{:.300f}", 1.0));
+        CHECK(builder.ByteCount() == 600 + 302);
+    }
 }
 
 TEST(NumberText_StrictIntegers) {
