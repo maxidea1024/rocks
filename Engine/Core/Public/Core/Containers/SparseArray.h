@@ -15,8 +15,9 @@ namespace rocks {
 // - 추가는 가장 최근에 지운 자리부터 재사용한다(LIFO). 가장 낮은 빈 index가 필요하면
 //   TryEmplaceAtLowestFreeIndex를 쓴다. 빈 자리가 없으면 MaxIndex() 위치에 붙인다.
 // - 반복은 사용 중인 index의 오름차순이다. 반복 중 원소를 지워도 되며(다음 원소로 진행한다), 반복
-//   중 추가한 원소는 현재 위치보다 큰 index일 때만 방문한다. 지운 원소를 가리키는 반복자의
-//   역참조는 Fatal이다.
+//   중 추가한 원소는 현재 위치보다 큰 index일 때만 방문한다. 반복자는 index만 기억하므로 가리키는
+//   index가 빈 slot이면 역참조는 Fatal이지만, 그 index가 다른 원소로 재사용되면 새 원소를 가리킨다
+//   (원소 identity는 index다).
 // - 원소 생성·이동·소멸 중 같은 SparseArray를 다시 변경하는 재진입은 지원하지 않는다. 동시
 //   접근의 동기화는 caller 책임이다.
 // - index는 uint32 free list에 들어가므로 MaxIndex()는 MaxSlots를 넘지 않는다(Overflow).
@@ -145,6 +146,7 @@ public:
     }
 
     // 가장 낮은 빈 index에 생성한다(UE EmplaceAtLowestFreeIndex). 빈 자리가 없으면 끝에 붙인다.
+    // 매번 사용 표시 bit를 처음부터 찾으므로 O(MaxIndex()/64)다(UE의 검색 시작 hint는 없다).
     template <typename... Args>
     Result<usize> TryEmplaceAtLowestFreeIndex(Args&&... args) noexcept {
         static_assert(__is_nothrow_constructible(T, Args && ...));
@@ -159,7 +161,8 @@ public:
     }
 
     // 지정 index에 생성한다(UE EmplaceAt). 사용 중이면 AlreadyExists, MaxIndex() 이상이면 그 사이를
-    // 빈 slot으로 늘린다(낮은 index부터 재사용된다). 실패하면 상태를 보존한다.
+    // 빈 slot으로 늘린다. 늘어난 빈 slot은 낮은 index부터 재사용된다(UE 구현과 순서가 다를 수
+    // 있으므로 순서에 의존하지 않는다). 실패하면 상태를 보존한다.
     template <typename... Args>
     Result<usize> TryEmplaceAt(usize index, Args&&... args) noexcept {
         static_assert(__is_nothrow_constructible(T, Args && ...));
@@ -306,7 +309,7 @@ public:
 
     // ---- 반복자 ----
     // 사용 중인 index를 오름차순으로 방문한다. Index()로 현재 index를 얻는다. 반복자는 index만
-    // 기억하므로 용량 확장 뒤에도 쓸 수 있지만, 가리키는 원소가 지워지면 역참조는 Fatal이다.
+    // 기억하므로 용량 확장 뒤에도 쓸 수 있다. 가리키는 index가 빈 slot이면 역참조는 Fatal이다.
     template <bool Constant>
     class IteratorBase {
         using Owner = ConditionalT<Constant, const SparseArray, SparseArray>;
@@ -446,7 +449,13 @@ private:
         if (allocation.Value() == nullptr) {
             platform::Fatal("Allocator returned null for a nonzero allocation");
         }
-        return Result<Node*>::Success(static_cast<Node*>(allocation.Value()));
+        // Node는 사용자 정의 생성자가 있어 암묵적으로 생기지 않으므로 수명을 명시적으로 시작한다.
+        // 활성 멤버(value·link)는 사용할 때 정한다.
+        auto* nodes = static_cast<Node*>(allocation.Value());
+        for (usize index = 0; index < capacity; ++index) {
+            ConstructAt<Node>(nodes + index);
+        }
+        return Result<Node*>::Success(nodes);
     }
 
     void FreeNodes(Node* nodes) noexcept {

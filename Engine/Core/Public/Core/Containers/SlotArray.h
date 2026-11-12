@@ -27,9 +27,14 @@ struct SlotHandle {
 //   가리키는 일은 없다.
 // - Clear는 원소만 지우고 slot과 generation을 유지한다. 저장소는 소멸 시에만 반환한다(generation
 //   기록을 버리면 이전 handle이 다시 유효해질 수 있다).
+// - handle은 발급한 배열 객체의 generation 기록 안에서만 의미가 있다. 이동하면 기록이 대상으로
+//   옮겨 가고, 이동된 원본이나 새로 만든 배열(이동 대입 대상 포함)은 generation 1부터 다시
+//   발급한다. 그 뒤 이전 기록의 handle을 쓰면 새 원소를 가리킬 수 있으며 이를 검출하지
+//   않는다(caller 책임). 저장소를 줄이려고 새 배열로 교체할 때는 이전 handle을 모두 버린다.
 // - 원소 주소는 용량 확장에서 바뀔 수 있다. 오래 보관할 때는 handle을 보관한다.
 // - 반복은 사용 중인 slot의 오름차순이다. 반복 중 원소를 지워도 되며, 추가한 원소는 현재보다 큰
-//   slot일 때만 방문한다. 지운 원소를 가리키는 반복자의 역참조는 Fatal이다.
+//   slot일 때만 방문한다. 반복자는 방문한 원소의 generation을 기억하므로 그 원소가 지워지면(같은
+//   slot이 다른 원소로 재사용돼도) Handle()은 빈 handle이고 역참조는 Fatal이다.
 // - 원소 생성·이동·소멸 중 같은 SlotArray를 다시 변경하는 재진입은 지원하지 않는다. 동시 접근의
 //   동기화는 caller 책임이다.
 template <typename T>
@@ -282,6 +287,7 @@ public:
 
         IteratorBase() noexcept = default;
         IteratorBase(Owner* owner, usize index) noexcept : owner_(owner), index_(index) {
+            Capture();
         }
 
         Reference operator*() const noexcept {
@@ -292,17 +298,18 @@ public:
             return &(*owner_)[Handle()];
         }
 
-        // 가리키는 slot의 현재 handle이다. 원소가 지워졌으면 비어 있는 handle이다.
+        // 방문한 원소의 handle이다. 그 원소가 지워졌으면(같은 slot이 다른 원소로 재사용된 경우
+        // 포함) 비어 있는 handle이다.
         SlotHandle Handle() const noexcept {
-            if (owner_ == nullptr || index_ >= owner_->slotCount_ ||
-                owner_->slots_[index_].next != Occupied) {
-                return {};
-            }
-            return SlotHandle{static_cast<uint32>(index_), owner_->slots_[index_].generation};
+            const SlotHandle visited{static_cast<uint32>(index_), generation_};
+            return owner_ != nullptr && index_ < owner_->slotCount_ && owner_->IsValid(visited)
+                       ? visited
+                       : SlotHandle{};
         }
 
         IteratorBase& operator++() noexcept {
             index_ = owner_->NextOccupied(index_ + 1);
+            Capture();
             return *this;
         }
 
@@ -317,8 +324,16 @@ public:
         }
 
     private:
+        // 방문한 slot의 generation을 기억해 재사용된 slot을 구별한다.
+        void Capture() noexcept {
+            generation_ = owner_ != nullptr && index_ < owner_->slotCount_
+                              ? owner_->slots_[index_].generation
+                              : 0;
+        }
+
         Owner* owner_ = nullptr;
         usize index_ = MaxSize;
+        uint32 generation_ = 0;
     };
 
     using Iterator = IteratorBase<false>;
@@ -385,7 +400,13 @@ private:
         if (allocation.Value() == nullptr) {
             platform::Fatal("Allocator returned null for a nonzero allocation");
         }
-        return Result<Slot*>::Success(static_cast<Slot*>(allocation.Value()));
+        // Slot은 사용자 정의 생성자가 있어 암묵적으로 생기지 않으므로 수명을 명시적으로 시작한다.
+        // value는 생성하지 않는다.
+        auto* slots = static_cast<Slot*>(allocation.Value());
+        for (usize index = 0; index < capacity; ++index) {
+            ConstructAt<Slot>(slots + index);
+        }
+        return Result<Slot*>::Success(slots);
     }
 
     void FreeStorage(Slot* slots) noexcept {

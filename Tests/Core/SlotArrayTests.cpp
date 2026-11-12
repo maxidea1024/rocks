@@ -238,7 +238,55 @@ TEST(SlotArray_MoveTransfersGenerations) {
     REQUIRE(assigned.TryAdd(9));
     assigned = Move(moved);
     CHECK(assigned.IsValid(second.Value()) && assigned.Size() == 1);
-    REQUIRE(source.TryAdd(3)); // 이동 뒤 원본을 다시 쓸 수 있다
+    // 이동된 원본은 generation 1부터 다시 발급한다. 이전 기록의 handle(first)은 새 원소를 가리킬 수
+    // 있으며 이는 문서화된 caller 책임이다(검출하지 않는다).
+    auto reissued = source.TryAdd(3);
+    REQUIRE(reissued);
+    CHECK(reissued.Value() == (SlotHandle{0, 1}) && reissued.Value() == first.Value());
+}
+
+TEST(SlotArray_IteratorNoticesSlotReuse) {
+    SystemAllocator allocator;
+    SlotArray<int> slots(allocator);
+    for (int i = 0; i < 4; ++i) {
+        REQUIRE(slots.TryAdd(i));
+    }
+    usize visits = 0;
+    for (auto it = slots.begin(); it != slots.end(); ++it) {
+        ++visits;
+        if (it.Handle().index == 1) {
+            REQUIRE(slots.TryRemove(it.Handle()));
+            auto replacement = slots.TryAdd(999); // 같은 slot 1을 새 generation으로 재사용한다
+            REQUIRE(replacement);
+            CHECK(replacement.Value() == (SlotHandle{1, 2}));
+            // 반복자는 방문한 원소(generation 1)를 기억하므로 새 원소를 자기 원소로 보지 않는다.
+            CHECK(it.Handle().IsNull());
+        }
+    }
+    CHECK(visits == 4 && slots.Size() == 4);
+}
+
+TEST(SlotArray_MaxGenerationOneRetiresOnEveryRelease) {
+    SystemAllocator allocator;
+    Tracked::live = 0;
+    {
+        SlotArray<Tracked> slots(allocator, 1);
+        auto a = slots.TryEmplace(1);
+        auto b = slots.TryEmplace(2);
+        auto c = slots.TryEmplace(3);
+        REQUIRE(a && b && c);
+        REQUIRE(slots.TryRemove(a.Value()));
+        auto taken = slots.TryTake(b.Value());
+        REQUIRE(taken);
+        CHECK(taken.Value().value == 2);
+        slots.Clear();
+        CHECK(slots.RetiredCount() == 3 && slots.IsEmpty() && slots.SlotCount() == 3);
+        auto fresh = slots.TryEmplace(4);
+        REQUIRE(fresh);
+        CHECK(fresh.Value() == (SlotHandle{3, 1}));
+        CHECK(!slots.IsValid(a.Value()) && !slots.IsValid(b.Value()) && !slots.IsValid(c.Value()));
+    }
+    CHECK(Tracked::live == 0);
 }
 
 TEST(SlotArray_RandomizedOracle) {
