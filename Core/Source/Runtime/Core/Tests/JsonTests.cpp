@@ -4,6 +4,7 @@
 #include <Platform/File.h>
 #include <Platform/FloatingPointEnvironment.h>
 #include <Platform/Memory.h>
+#include <Platform/Thread.h>
 #include <TestSupport/Test.h>
 #include <stdio.h>
 #include <string.h>
@@ -650,7 +651,7 @@ TEST(Json_EqualsHandlesAndDepth) {
     platform::detail::WriteFloatingPointControl(original);
     CHECK(!zeroVsSubnormal && !subnormals);
 
-    // 깊이와 무관하게 재귀하지 않는다: 10만 단계 문서 비교와 같은 maxDepth의 writer.
+    // 깊이와 무관하게 재귀하지 않는다: 10만 단계 문서의 읽기·비교.
     StringBuilder<> text(allocator);
     REQUIRE(text.TryAppendRepeated('[', 100000) && text.TryAppendRepeated(']', 100000));
     JsonReadOptions options;
@@ -658,9 +659,32 @@ TEST(Json_EqualsHandlesAndDepth) {
     REQUIRE(left.Parse(text.View(), options).Succeeded() &&
             right.Parse(text.View(), options).Succeeded());
     CHECK(JsonEquals(left.Root(), right.Root()));
-    StringBuilder<> written(allocator);
-    JsonWriter writer(written, JsonNumberMode::Canonical, 100000);
-    CHECK(writer.Value(left.Root()) && writer.Finish());
+
+    // writer도 재귀하지 않는다. 고정 서식(2칸 들여쓰기)의 출력은 깊이의 제곱에 비례하므로(깊이 D면
+    // 약 2·D² byte) 10만 단계는 쓰지 않고 5천 단계(약 50 MB)를 보조 스레드에서 쓴다 — 보조 스레드의
+    // 기본 스택(macOS 512 KiB)에서 단계마다 frame을 쌓는 구현이면 넘친다.
+    StringBuilder<> deepText(allocator);
+    REQUIRE(deepText.TryAppendRepeated('[', 5000) && deepText.TryAppendRepeated(']', 5000));
+    options.maxDepth = 5000;
+    REQUIRE(left.Parse(deepText.View(), options).Succeeded());
+    struct DeepWrite {
+        Allocator* allocator;
+        const JsonDocument* document;
+        bool written;
+        usize bytes;
+    } deep{&allocator, &left, false, 0};
+    platform::Thread writerThread;
+    REQUIRE(writerThread.Start(
+                [](void* raw) noexcept {
+                    auto& work = *static_cast<DeepWrite*>(raw);
+                    StringBuilder<> written(*work.allocator);
+                    JsonWriter writer(written, JsonNumberMode::Canonical, 5000);
+                    work.written = writer.Value(work.document->Root()) && writer.Finish();
+                    work.bytes = written.ByteCount();
+                },
+                &deep) == platform::ThreadStatus::Success);
+    REQUIRE(writerThread.Join() == platform::ThreadStatus::Success);
+    CHECK(deep.written && deep.bytes > 2ull * 4990 * 5000); // 들여쓰기가 깊이의 제곱으로 쌓였다
 
     // 다시 Parse하거나 Clear하면 이전 핸들은 무효다(새 내용을 조용히 가리키지 않는다).
     REQUIRE(ParseText(left, "{\"x\": \"old\"}").Succeeded());
