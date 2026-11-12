@@ -109,11 +109,36 @@ public sealed class Core : CoreModuleRules
   자동으로 켠다. 프로젝트가 끈 플러그인을 다른 켜진 플러그인이 요구하거나, 없는 플러그인을 참조하거나,
   의존이 순환하면 오류다. 결과는 의존이 앞에 오는 순서다.
 
+### 게임 빌드 연동
+
+설치 SDK로 게임을 빌드할 때(`Rocks.proj /t:Game`) `DescriptorModuleSet`이 기술자로 빌드할 모듈을 정한다.
+
+1. 프로젝트 루트에 `.rocksproject`가 정확히 하나 있어야 한다. 이번 플랫폼이 `targetPlatforms`에 없으면 빌드하지
+   않는다.
+2. `<프로젝트>/Plugins/`의 플러그인을 찾고 위 규칙으로 켤 플러그인을 정한다.
+3. 프로젝트와 모든 플러그인(켜지지 않은 것 포함)의 모듈을 C# 규칙 모듈과 이름으로 대조한다. 규칙은 있는데
+   기술자가 선언하지 않은 모듈, 선언은 있는데 규칙이 없는 모듈, 대소문자만 다른 이름, 여러 기술자의 같은 모듈
+   이름은 오류다.
+4. 다음 모듈은 이번 빌드에서 뺀다. 타깃이나 남은 모듈이 빠진 모듈을 쓰면 이유와 함께 오류다.
+5. 켠 플러그인의 남은 모듈은 타깃이 참조하지 않아도 빌드한다(UE처럼). 정적 링크이므로 실행 파일에는
+   참조한 모듈만 들어간다.
+
+| 조건 | 이유 |
+|---|---|
+| 켜지지 않은 플러그인의 모듈 | 프로젝트가 끄거나 `enabledByDefault`가 false이고 아무도 요구하지 않음 |
+| `type: Editor` | 에디터 타깃이 아직 없음 |
+| `type: Developer`이고 Release | 배포 빌드에 개발 도구를 넣지 않음. UE 5.6의 `DeveloperTool`과 같은 의미다(UE `Developer`는 에디터·프로그램 타깃 전용) |
+| `platforms`에 이번 플랫폼이 없음 | 플랫폼 전용 모듈 |
+
+규칙 계약: 규칙 로더는 모듈 이름을 알기 위해 모든 모듈 규칙의 `Configure`를 먼저 실행한 뒤 위 필터를 적용한다.
+따라서 빠질 모듈(켜지지 않은 플러그인, 다른 플랫폼 전용)의 규칙도 예외 없이 결과를 돌려줘야 한다.
+
 ## 후속
 
-- 빌드 통합: 기술자의 프로젝트 모듈과 켠 플러그인의 모듈(`Source/<모듈>/<모듈>.Build.cs`)을 찾아 빌드하고,
-  모듈 type·platforms·loadingPhase를 빌드·로딩에 반영한다. 기술자 모듈과 규칙 파일의 일치 검사.
-- engineVersion 호환 판정(지금은 형식만 검사).
+- 규칙 이름을 `Configure` 전에 알 수 있게 해(UBT처럼 파일·클래스 이름 규약) 빠질 모듈의 규칙을 실행하지 않는다.
+- 엔진 저장소 빌드(`Foundation`·`Engine` 타깃)의 `Engine/Plugins` 연동: 지금은 엔진 플러그인이 없어 게임 빌드만
+  기술자를 적용한다. 설치 SDK는 엔진 플러그인을 내보내지 않는다.
+- `loadingPhase`의 런타임 반영(모듈 로더가 생기면), engineVersion 호환 판정(지금은 형식만 검사).
 - 2026-11-12 이전 구조(`Engine/<Module>`, 최상위 `Tests/`·`Tools/`)를 가리키는 과거 검토·배포 문서
   (`Docs/Reviews`, `Docs/Releases`)는 기록이므로 경로를 고치지 않는다. 계획 데이터
   (`CoreObjectInputData.json`, `CoreObjectInputFiles.ko.csv`, `CoreObjectInputTasks.ko.csv`)의 예정 파일

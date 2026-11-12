@@ -32,8 +32,8 @@ Base → PlatformBase → Core → Task / Localization / Serialization / MetaSch
 
 | ID/우선 | 기능·상태 | 완료 조건과 검증 |
 |---|---|---|
-| B01 P0 | 고정 폭 signed/unsigned, 크기·포인터 차이, 정렬, 엔디언, GUID; `Types.h`, `Checked.h`, `Guid.h` **부분** | checked add/sub/mul/align/변환, shift, 0/최대/음수·ABI 테스트. 네이티브 포인터 크기·padding을 영속 데이터에 직접 사용하지 않는다. |
-| B02 P0 | compiler/OS/CPU 속성·capability, 진단/내장함수 경계 **부분** | 미지원 기능은 빌드·초기화 오류로 드러낸다. Clang Win64/macOS x64·ARM64 단독 헤더, 경고 음성 대조. |
+| B01 P0 | 고정 폭 signed/unsigned, 크기·포인터 차이, 정렬, 엔디언, GUID **완료**: `Types.h`(int8·int16 추가), `Checked.h`(동일·혼합 타입 `TryAdd`·`TrySubtract`·`TryMultiply`, `TryNarrow`, `TryAlignUp`·`IsAligned`, `TryShiftLeft`, 모두 `[[nodiscard]]`; 혼합 타입은 인자를 결과 타입으로 값 보존 변환해 음수 count를 거부), `Endian.h`, `Base/Guid.h`·`Core/Guid.h`(UUID v4 발급, 36·32자 해석, 36자 소문자 서식). 독립 리뷰(int8·uint8 전수·TryNarrow·shift 전수 probe) 반영 | checked add/sub/mul/align/변환, shift, 0/최대/음수·ABI 테스트. 네이티브 포인터 크기·padding을 영속 데이터에 직접 사용하지 않는다. |
+| B02 P0 | compiler/OS/CPU 속성·capability, 진단/내장함수 경계 **부분**: `Base/Compiler.h`(Clang·C++23·64-bit 확인, `ROCKS_FORCEINLINE`·`NOINLINE`·`UNREACHABLE`·`DEBUG_BREAK`, 구성 매크로 `ROCKS_BUILD_*` 정확히 하나 검사, `ROCKS_DISABLE_OPTIMIZATION`), `Platform/Cpu.h`(SSE4.2·POPCNT·AVX·AVX2·FMA·BMI2·NEON, AVX2·FMA는 AVX에 묶음), `Platform/SecureRandom.h`(BCryptGenRandom·arc4random_buf). CPU bit의 OS 값 대조 oracle은 후속 | 미지원 기능은 빌드·초기화 오류로 드러낸다. Clang Win64/macOS x64·ARM64 단독 헤더, 경고 음성 대조. |
 | M01 P0 | allocator 요청 크기·alignment·0·overflow·소유권·해제·재할당 계약. System/Arena/Stack/Pool/Binned/Budget/Debug 및 외부 backend **부분** | 할당 실패 전 상태 보존, allocator 수명·교차 해제·중복 해제, 누수 계수, 조각화와 false sharing 측정. Realloc/TryRealloc의 보존·alignment·0 semantics를 정하고 모든 구현의 지원 여부를 명시한다. |
 | M02 P0 | 가상 메모리 reserve/commit/decommit/protect/release, page size **부분** | OS 오류, 페이지 경계·부분 변경·cleanup 재시도, fault injection, 실제 Windows/macOS. 보호·page guard 등 미구현 세부 사항은 별도 판정한다. |
 | M03 P1 | frame/scratch, stack mark/rewind, slab, per-thread cache/trim, 큰 할당 **후속** | reset 이후 포인터·destructor·스레드 소유권, nested mark, OOM·회수·통계, 엄격 LIFO allocator와 growing container의 비호환을 진단한다. |
@@ -95,7 +95,7 @@ Base → PlatformBase → Core → Task / Localization / Serialization / MetaSch
 | P04 P0 | thread/Mutex/CV/event/semaphore·clock **부분** | start/join/timeout/자기 join·동시 wait·shutdown·timeout 음성대조, 재귀 여부, primitive 생성/소멸과 memory ordering. 프로세스 fatal 테스트의 실제 setup 성공을 독립적으로 검증하고 partial stderr 및 timeout 단계를 보존한다. |
 | P05 P1 | atomic/TLS/RW lock·thread name/priority/affinity·CPU·stack 옵션·wait groups **후속/확인 필요** | supported capability, atomic order·ABA·lost wakeup·writer starvation·over-subscription·OS 실패. 동기화 없는 잘못된 사용은 암묵적 성공으로 감추지 않는다. |
 | P06 P1 | process spawn/wait/exit·pipe/IPC·환경·CLI·동적 라이브러리 **후속/부분** | argument quoting, pipe concurrent drain과 bounded output, 제한시간·child cleanup·분리 자손/OS job 한계, 재시도·재진입·Unicode, Windows/macOS와 headless. |
-| P07 P0/P1 | monotonic clock/duration·UTC/date/timecode·tick과 dilation **부분/후속** | timeout 단조시계, overflow·clock adjustment·윤년·timezone, fixed/variable tick의 pause·time dilation·누적치·결정성. engine tick은 상위 모듈과 통합한다. |
+| P07 P0/P1 | monotonic clock/duration·UTC/date/timecode·tick과 dilation **부분/후속**: `TimeSpan`·`DateTime`(100ns tick, 0001–9999년, ISO 8601 해석·서식, 검사형 산술)·`platform::UtcTicks` **완료**(독립 리뷰 반영: 실수 초 반올림·해석 오류 순서·`TrySubtract`); 시간대·timecode·engine tick·dilation **후속** | timeout 단조시계, overflow·clock adjustment·윤년·timezone, fixed/variable tick의 pause·time dilation·누적치·결정성. engine tick은 상위 모듈과 통합한다. |
 
 ### 플랫폼 비동기 파일 I/O 상세 계약과 단계
 
@@ -134,9 +134,9 @@ Base → PlatformBase → Core → Task / Localization / Serialization / MetaSch
 | ID/우선 | 기능·상태 | 완료 조건과 검증 |
 |---|---|---|
 | R01 P0 | worker scheduler/inline executor, task dependencies·취소·결과·wait·shutdown **부분** | fan-in/out·nested task·capacity/OOM·취소/late completion·teardown·공정성·stress. thread lifecycle과 객체 문맥/GC write barrier를 상위 계약과 연결한다. |
-| R02 P1 | module/plugin 등록·capability·dynamic load/unload·hot reload **부분/후속** | lease/in-flight callback·ABI/version 충돌·provider 교체·실패 rollback·동기화. 모듈을 unload하기 전에 호출 가능한 함수와 메모리 소유권을 회수한다. |
+| R02 P1 | module/plugin 등록·capability·dynamic load/unload·hot reload **부분/후속**: 게임 빌드의 `.rocksproject`·`.rocksplugin` 기반 모듈 선택(플러그인 활성화, Editor·Release Developer·플랫폼 필터, 규칙과 기술자 대조) **부분**. 엔진 저장소 `Engine/Plugins` 연동·런타임 로딩은 후속 | lease/in-flight callback·ABI/version 충돌·provider 교체·실패 rollback·동기화. 모듈을 unload하기 전에 호출 가능한 함수와 메모리 소유권을 회수한다. |
 | R03 P1 | serialization·reflection·object 수명·GC와 Core 공용 타입 연결 **부분** | Core 기능 구현을 CoreUObject 전체 완료로 오인하지 않는다. 생성 메타/식별·schema·rename·GC root/weak/barrier·파괴 상태·데이터 오류와 allocator·thread 안전성을 별도 게이트로 검증한다. |
-| R04 P0 | 빌드/테스트/명령행 도구, 경고 오류 처리·harness·headless **부분** | .NET/MSBuild·Clang, 자체 빌드의 증분 정확성, native unit + negative compile/fatal·단독 헤더·seed·fault injection·sanitizer·비교 oracle. 실패/skip은 성공 수에 포함해도 실행 증거로 취급하지 않는다. Windows/macOS 실기기·CI evidence와 source digest를 분리한다. |
+| R04 P0 | 빌드/테스트/명령행 도구, 경고 오류 처리·harness·headless **부분**: 구성 Debug·Development·Release(ThinLTO, PDB)·Asan, 구성 매크로, 모듈 최적화 재정의(`CodeOptimization`), compiler 폴더의 LLVM 도구 강제, 최적화 끄기 정책 검사(독립 리뷰 반영). ThinLTO 캐시·PGO는 후속 | .NET/MSBuild·Clang, 자체 빌드의 증분 정확성, native unit + negative compile/fatal·단독 헤더·seed·fault injection·sanitizer·비교 oracle. 실패/skip은 성공 수에 포함해도 실행 증거로 취급하지 않는다. Windows/macOS 실기기·CI evidence와 source digest를 분리한다. |
 
 ## 4. 공통 API·수명·오류 규약
 

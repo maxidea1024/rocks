@@ -316,3 +316,11 @@ Rocks.Build에 Android 대상을 정식으로 추가했다(`--platform android`,
 - P07 `TimeSpan`·`DateTime`·`platform::UtcTicks`를 구현했다(UTC 전용, 시간대·timecode·engine tick은 후속).
 - 저장소를 Core(기반 라이브러리)·Engine(게임 엔진 계층)·Programs·Build로 나누고 모듈마다 `<모듈>.Build.cs`·`Tests/`를 두는 구성으로 바꿨다([저장소 구성](../Design/RepositoryLayout.ko.md)). 이전 CMake/Python 경로는 제거했다. 프로젝트·플러그인 기술자(`.rocksproject`·`.rocksplugin`)의 형식·검증·플러그인 해석을 추가했다(빌드 통합은 후속).
 - 검증: Windows Debug native 719·harness 94·meta 41, policy·format, 빌드 도구 회귀 19그룹, SDK·외부 게임 통합 테스트, Commandlet, Android x86_64 에뮬레이터 716. 도구 self 검사의 IdentityGit 4건은 `pwsh`가 없어 실행되지 않는다. macOS는 빌드하지 않았다.
+
+## 2026-11-12 엔진 작업 준비: 빌드 구성·기술자 기반 빌드·B01/B02
+
+- 빌드 구성 Debug·Development·Release·Asan([빌드 구성](../../Build/README.md#빌드-구성)). Release는 ThinLTO(compiler 폴더의 llvm-lib·lld-link 강제)와 PDB를 쓴다. 구성 매크로 `ROCKS_BUILD_*`(정확히 하나), 모듈 최적화 재정의 `CodeOptimization`(UE `OptimizeCode` 대응), 임시 최적화 끄기 `ROCKS_DISABLE_OPTIMIZATION`과 제품 소스·규칙에 남지 않게 하는 정책 검사를 추가했다.
+- 게임 빌드가 `.rocksproject`·`.rocksplugin`으로 모듈을 고른다(플러그인 활성화, Editor·Release Developer·플랫폼 필터, 규칙과 기술자 대조, 켠 플러그인 모듈 빌드). 엔진 저장소의 `Engine/Plugins` 연동은 후속이다([저장소 구성](../Design/RepositoryLayout.ko.md)).
+- B01·B02(a67689d)와 위 빌드 변경을 각각 독립 리뷰했다. 반영: 혼합 타입 검사 산술이 음수 인자를 usize로 바꾸던 문제와 usize·uint64 플랫폼 이식성, `[[nodiscard]]`, 곱셈 oracle의 성공 경로 부족, AVX2·FMA의 AVX 의존, archiver·linker를 PATH 대신 compiler 폴더에서 찾기, 최적화 인자 거부 범위(`/Oy-` 허용, `--optimize`·link LTO 인자 거부), Release PDB, 기술자 snapshot 순서, 켠 플러그인 모듈 빌드, 정책의 `optnone`·`#pragma optimize`·커밋된 `CodeOptimization.Never`. 후속으로 남긴 것: 규칙 Configure가 기술자 필터 전에 실행됨, ThinLTO 캐시, CPU bit의 OS 값 대조 oracle, ToolTests 단독 compile probe의 구성 매크로 전달.
+- macOS CI가 처음 실제로 실행되며(저장소 공개 전환 후) `std::to_chars(double)`가 배포 대상 macOS 13.0에서 사용 불가인 테스트 문제를 드러냈다. libc++가 사용 불가로 표시하면 표준 대조를 건너뛰고 왕복만 확인하도록 고쳤다.
+- 검증(Windows x64 clang-cl, 마지막 소스): Debug native 728(BaseTests 포함), Development native 728, Release(ThinLTO) native 728·harness 94·meta 41(구성 4 × 최적화 재정의 3 프로필), ASan native 728·ASan harness 95, 빌드 도구 회귀 20그룹, SDK·외부 게임 통합 16건(Release ThinLTO SDK·게임 실행, 플러그인 필터 포함), Commandlet, policy·format. Android x86_64 에뮬레이터 Debug 725·Release(ThinLTO) 725. 도구 self 검사의 IdentityGit 4건은 `pwsh`가 없어 실행되지 않는다. macOS는 CI 결과로 확인한다.
