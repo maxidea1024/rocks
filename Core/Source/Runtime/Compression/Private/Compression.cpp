@@ -401,7 +401,7 @@ Result<CompressionLevelRange> TryGetCompressionLevelRange(CompressionFormat form
     case CompressionFormat::Lz4:
         return Result<CompressionLevelRange>::Success(CompressionLevelRange{1, 12, 1});
     case CompressionFormat::Zstd:
-        return Result<CompressionLevelRange>::Success(CompressionLevelRange{1, 19, 3});
+        return Result<CompressionLevelRange>::Success(CompressionLevelRange{1, 22, 3});
     case CompressionFormat::Deflate:
     case CompressionFormat::Zlib:
     case CompressionFormat::Gzip:

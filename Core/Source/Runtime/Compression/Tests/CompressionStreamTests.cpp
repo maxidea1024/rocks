@@ -953,4 +953,41 @@ TEST(CompressionStream_OutcomeIndependentOfWindow) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+// zstd ultra 수준(20–22): 일회성과 크기 힌트를 준 스트림이 왕복하고, 스트림 frame은 기본 window
+// 상한(2^27)으로 풀린다. 크기 힌트가 매개변수를 입력에 맞춰 줄여 작업 메모리가 작다(힌트 없는 큰
+// 스트림은 수백 MiB).
+TEST(CompressionStream_ZstdUltraLevelsRoundTrip) {
+    SystemAllocator allocator;
+    {
+        Array<uint8> original(allocator);
+        Fill(original, 300000, Pattern::Text, 91);
+        for (int32 level = 20; level <= 22; ++level) {
+            const CompressionSettings settings = Settings(CompressionFormat::Zstd, level);
+            Array<uint8> packed(allocator);
+            REQUIRE(TryCompressAppend(settings, View(original), packed));
+            Array<uint8> restored(allocator);
+            REQUIRE(TryDecompressAppend(CompressionFormat::Zstd, View(packed), original.Size(),
+                                        restored));
+            CHECK(Same(restored, View(original)));
+
+            auto stream = CompressStream::TryCreate(settings, allocator, original.Size());
+            REQUIRE(stream);
+            Array<uint8> streamed(allocator);
+            REQUIRE(stream.Value().TryWriteAppend(View(original), streamed));
+            REQUIRE(stream.Value().TryFinishAppend(streamed));
+            auto decoder = DecompressStream::TryCreate(
+                CompressionFormat::Zstd, {.maxOutputBytes = original.Size()}, allocator);
+            REQUIRE(decoder);
+            Array<uint8> decoded(allocator);
+            REQUIRE(decoder.Value().TryWriteAppend(View(streamed), decoded));
+            CHECK(decoder.Value().TryFinish());
+            CHECK(Same(decoded, View(original)));
+        }
+        CHECK(CompressionSettings::TryMake(CompressionFormat::Zstd, 22));
+        CHECK(CompressionSettings::TryMake(CompressionFormat::Zstd, 23).Error() ==
+              ErrorCode::InvalidArgument);
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
 } // namespace rocks::test

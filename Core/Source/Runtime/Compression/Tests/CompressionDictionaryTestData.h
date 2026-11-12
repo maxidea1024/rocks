@@ -225,6 +225,23 @@ inline constexpr DictionaryGolden DictionaryGoldens[] = {
     {Dictionary::Raw300K, 19, 1000, 164, 0x8f58e9f0u},
     {Dictionary::Raw300K, 19, 50000, 6000, 0x1ae7999eu},
     {Dictionary::Raw300K, 19, 2000000, 225125, 0xe7df649bu},
+    // ultra 수준 20·22(300KB 이하 입력은 표가 수준 19와 같다).
+    {Dictionary::FormattedA, 20, 100, 41, 0xf2c75aa2u},
+    {Dictionary::FormattedA, 20, 5000, 787, 0x8a128649u},
+    {Dictionary::FormattedA, 20, 70000, 9908, 0x9258f015u},
+    {Dictionary::FormattedA, 20, 300000, 37307, 0x35994d81u},
+    {Dictionary::FormattedA, 22, 100, 41, 0xf2c75aa2u},
+    {Dictionary::FormattedA, 22, 5000, 787, 0x8a128649u},
+    {Dictionary::FormattedA, 22, 70000, 9908, 0x9258f015u},
+    {Dictionary::FormattedA, 22, 300000, 37307, 0x35994d81u},
+    {Dictionary::Raw4K, 20, 100, 49, 0x1329d06fu},
+    {Dictionary::Raw4K, 20, 5000, 760, 0x085de77au},
+    {Dictionary::Raw4K, 20, 70000, 9532, 0x552a3c3du},
+    {Dictionary::Raw4K, 20, 300000, 37347, 0x0de0a200u},
+    {Dictionary::Raw4K, 22, 100, 49, 0x1329d06fu},
+    {Dictionary::Raw4K, 22, 5000, 760, 0x085de77au},
+    {Dictionary::Raw4K, 22, 70000, 9532, 0x552a3c3du},
+    {Dictionary::Raw4K, 22, 300000, 37347, 0x0de0a200u},
     // copy 모드(128KiB ≤ n < 6 × 사전)와 재적재 경계(6 × 307200 − 1, 6 × 307200), 수준
     // 1·5·9·13·16·19.
     {Dictionary::Raw300K, 1, 150000, 27991, 0xfabf8948u},

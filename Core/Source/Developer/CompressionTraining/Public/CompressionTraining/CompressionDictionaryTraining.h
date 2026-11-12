@@ -49,7 +49,7 @@ struct DictionaryTrainingSettings {
     // 합이 capacity의 10배 이상이면 좋다(적으면 사전이 표본을 그대로 담아 효과가 떨어진다).
     usize capacity = usize{110} << 10;
     // 엔트로피 표 통계를 낼 압축 수준이다. 사전을 쓸 수준과 맞춘다(수준 3으로 만든 사전을 19에서
-    // 쓰면 약 8% 나빠진다). 1–19.
+    // 쓰면 약 8% 나빠진다). 1–22.
     int32 compressionLevel = 3;
     // frame에 기록할 사전 ID다. 0이면 내용에서 유도한다.
     uint32 dictionaryId = 0;
@@ -78,7 +78,7 @@ TryTrainCompressionDictionary(Span<const uint8> samples, Span<const usize> sampl
                               Array<uint8>& output) noexcept;
 
 struct DictionaryFinalizeSettings {
-    // 엔트로피 표 통계를 낼 압축 수준이다(1–19).
+    // 엔트로피 표 통계를 낼 압축 수준이다(1–22).
     int32 compressionLevel = 3;
     // 0이면 내용에서 유도한다. 직접 주면 [32768, 2^31 − 1].
     uint32 dictionaryId = 0;
@@ -93,5 +93,20 @@ Result<usize> TryFinalizeCompressionDictionary(Span<const uint8> content, Span<c
                                                Span<const usize> sampleSizes,
                                                const DictionaryFinalizeSettings& settings,
                                                Array<uint8>& output) noexcept;
+
+// 형식 사전(학습 결과 등)의 내용은 그대로 두고 다른 압축 수준·사전 ID로 엔트로피 표를 다시 만든다.
+// 한 번 학습한 사전으로 수준별 사전을 만들 때 쓴다(재학습 없이). 같은 내용이면 ID 0(유도)은 같은
+// 값이 되므로 수준마다 다른 ID를 준다. 사용 예:
+//   DictionaryFinalizeSettings level19;
+//   level19.compressionLevel = 19;
+//   level19.dictionaryId = 40019;
+//   TryRefinalizeCompressionDictionary(trained.View(), samples.View(), sizes.View(), level19, out);
+// 오류: dictionary가 zstd 형식 사전이 아니거나 손상·MaxDictionaryBytes 초과면 InvalidArgument, 그
+// 밖은 TryFinalizeCompressionDictionary와 같다.
+Result<usize> TryRefinalizeCompressionDictionary(Span<const uint8> dictionary,
+                                                 Span<const uint8> samples,
+                                                 Span<const usize> sampleSizes,
+                                                 const DictionaryFinalizeSettings& settings,
+                                                 Array<uint8>& output) noexcept;
 
 } // namespace rocks

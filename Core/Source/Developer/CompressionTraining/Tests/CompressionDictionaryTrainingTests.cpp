@@ -132,7 +132,7 @@ TEST(CompressionDictionaryTraining_FinalizeContracts) {
         bad.compressionLevel = 0;
         CHECK(FinalizeError(View(content), View(samples), SizesView(sizes), bad, output) ==
               ErrorCode::InvalidArgument);
-        bad.compressionLevel = 20;
+        bad.compressionLevel = 23;
         CHECK(FinalizeError(View(content), View(samples), SizesView(sizes), bad, output) ==
               ErrorCode::InvalidArgument);
         CHECK(FinalizeError(View(content), Slice(View(samples), 0, samples.Size() - 1),
@@ -282,7 +282,7 @@ TEST(CompressionDictionaryTraining_ArgumentValidation) {
             with([](auto& s) { s.capacity = MinTrainingCapacity - 1; }),
             with([](auto& s) { s.capacity = MaxDictionaryBytes + 1; }),
             with([](auto& s) { s.compressionLevel = 0; }),
-            with([](auto& s) { s.compressionLevel = 20; }),
+            with([](auto& s) { s.compressionLevel = 23; }),
             with([](auto& s) { s.dictionaryId = MinExplicitDictionaryId - 1; }),
             with([](auto& s) { s.dictionaryId = MaxExplicitDictionaryId + 1; }),
             with([](auto& s) { s.dmerSize = 7; }),
@@ -319,6 +319,53 @@ TEST(CompressionDictionaryTraining_ArgumentValidation) {
         REQUIRE(withEmpty.TryAppend(allSizes));
         REQUIRE(withEmpty.TryPushBack(0));
         CHECK(TrainError(all, SizesView(withEmpty), FixedSettings(), output) == ErrorCode::None);
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// 수준별 재생성: 같은 설정이면 원래 사전을 그대로 재현하고, 다른 수준·ID면 내용은 같고 엔트로피
+// 표만 바뀐다.
+TEST(CompressionDictionaryTraining_RefinalizeKeepsContent) {
+    SystemAllocator allocator;
+    {
+        Array<uint8> samples(allocator);
+        MakeRecords(samples, 65536, 7);
+        Array<usize> sizes(allocator);
+        for (usize index = 0; index < 256; ++index) {
+            REQUIRE(sizes.TryPushBack(256));
+        }
+
+        DictionaryFinalizeSettings same;
+        same.compressionLevel = 3;
+        same.dictionaryId = DictionaryIdA;
+        Array<uint8> again(allocator);
+        REQUIRE(TryRefinalizeCompressionDictionary(DictionaryA(), View(samples), SizesView(sizes),
+                                                   same, again));
+        CHECK(Same(again, DictionaryA()));
+
+        DictionaryFinalizeSettings level19;
+        level19.compressionLevel = 19;
+        level19.dictionaryId = 40019;
+        Array<uint8> refinalized(allocator);
+        REQUIRE(TryRefinalizeCompressionDictionary(DictionaryA(), View(samples), SizesView(sizes),
+                                                   level19, refinalized));
+        CHECK(!Same(refinalized, DictionaryA()));
+        CHECK(MakeDecompress(View(refinalized), allocator).Id() == 40019);
+        // 내용(사전 끝 2048byte)은 같다.
+        CHECK(Same(Slice(View(refinalized), refinalized.Size() - 2048, 2048),
+                   Slice(DictionaryA(), sizeof(FormattedDictionaryA) - 2048, 2048)));
+
+        // 형식 사전이 아니면(raw 내용·손상) InvalidArgument다.
+        Array<uint8> raw(allocator);
+        MakeRecords(raw, 4096, 3);
+        Array<uint8> out(allocator);
+        CHECK(TryRefinalizeCompressionDictionary(View(raw), View(samples), SizesView(sizes),
+                                                 level19, out)
+                  .Error() == ErrorCode::InvalidArgument);
+        CHECK(TryRefinalizeCompressionDictionary(Slice(DictionaryA(), 0, 40), View(samples),
+                                                 SizesView(sizes), level19, out)
+                  .Error() == ErrorCode::InvalidArgument);
+        CHECK(out.Size() == 0);
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }

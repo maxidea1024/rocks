@@ -206,4 +206,27 @@ Result<usize> TryFinalizeCompressionDictionary(Span<const uint8> content, Span<c
     return Result<usize>::Success(written);
 }
 
+Result<usize> TryRefinalizeCompressionDictionary(Span<const uint8> dictionary,
+                                                 Span<const uint8> samples,
+                                                 Span<const usize> sampleSizes,
+                                                 const DictionaryFinalizeSettings& settings,
+                                                 Array<uint8>& output) noexcept {
+    if (dictionary.Size() > MaxDictionaryBytes) {
+        return Result<usize>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 엔트로피 표를 읽어 헤더 크기를 구한다(magic이 없거나 표가 손상이면 오류). 내용은 헤더 뒤
+    // 전부다.
+    const size_t header = ZDICT_getDictHeaderSize(NonNull(dictionary), dictionary.Size());
+    if (ZDICT_isError(header)) {
+        return Result<usize>::Failure(ZSTD_getErrorCode(header) == ZSTD_error_memory_allocation
+                                          ? ErrorCode::OutOfMemory
+                                          : ErrorCode::InvalidArgument);
+    }
+
+    return TryFinalizeCompressionDictionary(
+        Span<const uint8>(dictionary.Data() + header, dictionary.Size() - header), samples,
+        sampleSizes, settings, output);
+}
+
 } // namespace rocks

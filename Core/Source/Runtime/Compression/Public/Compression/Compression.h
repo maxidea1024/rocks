@@ -70,7 +70,9 @@ enum class CompressionFormat : uint8 {
 
 // 형식별 압축 수준 범위다.
 // - Lz4 {1, 12, 1}: 1 = fast, 2 = lz4mid, 3–9 = HC, 10–12 = HC optimal parser(가장 느리고 작다).
-// - Zstd {1, 19, 3}: 20–22(ultra)는 수백 MiB 작업 메모리가 필요해 지원하지 않는다.
+// - Zstd {1, 22, 3}: 20–22(ultra)는 window가 최대 128MiB(2^27)다. 원본 크기를 아는 압축은
+//   매개변수가 입력에 맞춰 줄지만, 큰 입력·크기를 모르는 스트림은 수백 MiB 작업 메모리를 쓴다(수준
+//   22 약 700MiB). 해제는 DecompressStreamLimits 기본 window 상한(2^27)으로 풀린다.
 // - Deflate·Zlib·Gzip {0, 9, 6}: 0 = 압축하지 않음(stored).
 struct CompressionLevelRange {
     int32 minimum = 0;

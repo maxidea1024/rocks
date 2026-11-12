@@ -704,8 +704,8 @@ localDict도 내부적으로 수준 없는 CDict라 같은 문제가 있어 기�
   `ZSTD_c_forceAttachDict` = (크기 ≥ 128KiB이고 크기 ≥ 6 × 사전 크기면 `ZSTD_dictForceLoad`, 아니면 기본 attach). 두 상수는
   zstd 내부(`ZSTD_USE_CDICT_PARAMS_SRCSIZE_CUTOFF`·`DICTSIZE_MULTIPLIER`)와 같아야 하므로 1.5.7 고정을 전제로 golden 시험이
   묶는다.
-- 검증: 표준 경로(`ZSTD_createCDict(L)` + `ZSTD_CCtx_refCDict` + `ZSTD_compress2`)와 byte 비교 golden 84개가 같다. 형식 사전
-  2178byte·raw 4KiB·raw 300KiB, 수준 1·3·5·9·13·16·19, 입력 0byte–2MB(copy 모드, 재적재 경계 6 × 사전 크기 ± 1 포함)다.
+- 검증: 표준 경로(`ZSTD_createCDict(L)` + `ZSTD_CCtx_refCDict` + `ZSTD_compress2`)와 byte 비교 golden 100개가 같다. 형식 사전
+  2178byte·raw 4KiB·raw 300KiB, 수준 1·3·5·9·13·16·19·20·22, 입력 0byte–2MB(copy 모드, 재적재 경계 6 × 사전 크기 ± 1 포함)다.
   golden은 공식 tarball 원본으로 만든 probe가 생성한다(`Tests/CompressionDictionaryTestData.h`에 방법 기록). 구현 교차검증은
   zstd 내부 함수를 직접 불러 CDict 매개변수 91,637건(수준 1–19 × 사전 9byte–32MiB)과 frame별 실효 상태(attach·copy·재적재
   경로, 매개변수 7개, 블록 분할기, LDM, row match finder) 1,367만 건이 표준과 같고, 실측 8,328건(raw·형식 사전 2.2KB–32MiB,
@@ -782,7 +782,7 @@ localDict도 내부적으로 수준 없는 CDict라 같은 문제가 있어 기�
     shrinkDict 0, nbThreads 1, splitPoint 1.0(모든 표본으로 학습·평가)이다. 고른 k·d를 돌려주며 그 값으로 다시 학습하면 같은
     사전이다.
   - 호출 전에 거르는 인자 규칙(InvalidArgument): 표본 5개 이상·2^32 − 2개 이하(fastCover가 표본 수 + 1을 32bit로 계산한다), 길이 합 = 표본 byte 수, 8 ≤ 합 < 2^32 − 1,
-    capacity 256(ZDICT_DICTSIZE_MIN) – 32MiB, 압축 수준 1–19, d ∈ {6, 8}, k = 0이거나 d ≤ k ≤ capacity이고 k − d + 1 ≤ 65535,
+    capacity 256(ZDICT_DICTSIZE_MIN) – 32MiB, 압축 수준 1–22, d ∈ {6, 8}, k = 0이거나 d ≤ k ≤ capacity이고 k − d + 1 ≤ 65535,
     사전 ID 0 또는 [32768, 2^31 − 1](zstd 예약 범위 밖), 표본이 output 저장소와 겹치지 않음. upstream은 d ∉ {6, 8}·k >
     capacity를 원인 없는 GENERIC으로 알리고, splitPoint < 1에서 학습 부분 합이 8byte 미만이면 프로세스가 죽는다(실측:
     접근 위반·0 나누기). splitPoint를 1.0으로 고정해 그 경로를 없앴다.
@@ -814,10 +814,10 @@ localDict도 내부적으로 수준 없는 CDict라 같은 문제가 있어 기�
 ### 11.7 시험
 
 사전 시험 27개(Windows x64 Debug·ASan 통과). 세 파일로 나뉜다. 공용 도구(결정적 레코드 생성기·시험 사전·생성 도우미)는
-`Tests/CompressionDictionaryTestSupport.h`, 시험 자료(형식 사전 A, 표준 경로 golden 84개)는 `Tests/CompressionDictionaryTestData.h`다.
+`Tests/CompressionDictionaryTestSupport.h`, 시험 자료(형식 사전 A, 표준 경로 golden 100개)는 `Tests/CompressionDictionaryTestData.h`다.
 
 - `CompressionDictionaryTests.cpp`(9): 생성 계약(형식·크기 경계·사전 ID·Digest·손상·magic raw·ID 0·handle·모든 소비 API의
-  빈 handle), 표준 수준 의미 golden 84개와 자유 함수 = 문맥·왕복, 작은 입력 압축률(레코드 40개, 5575byte 대 9760byte),
+  빈 handle), 표준 수준 의미 golden 100개와 자유 함수 = 문맥·왕복, 작은 입력 압축률(레코드 40개, 5575byte 대 9760byte),
   frame 사전 ID 검사(조회·불일치·ID 없음·섞인 연결 frame·raw 사전 checksum), 스트림 왕복·Reset·거부, handle 수명(임시
   handle만 준 문맥·스트림·블록 설정·reader), 4 worker 비동기 공유 = 동기, 사전·문맥·스트림 생성 OOM 분류, 블록 컨테이너
   (헤더 bit·지문, 병렬 = 순차, 압축률, 후보 선택, 문맥 공유, 지문 손상 대 다시 맞춘 지문, golden).
