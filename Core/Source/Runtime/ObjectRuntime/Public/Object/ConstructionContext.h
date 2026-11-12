@@ -31,7 +31,9 @@ public:
         if (!result) {
             return Result<T*>::Failure(result.Error());
         }
-        return Result<T*>::Success(static_cast<T*>(result.Value()));
+        // Registry는 Object 하위 객체 주소를 준다. 파생 객체의 기반 T 접근도 static_cast가
+        // 보정한다.
+        return Result<T*>::Success(static_cast<T*>(static_cast<Object*>(result.Value())));
     }
 
     template <class T>

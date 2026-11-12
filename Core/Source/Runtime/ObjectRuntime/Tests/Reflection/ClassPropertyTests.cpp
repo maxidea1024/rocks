@@ -284,3 +284,40 @@ TEST(ReflectionAutomaticIdentityProvidesPrivateFieldOperations) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+
+TEST(ReflectionPolymorphicDerivedResolvesThroughAbstractBase) {
+    // AbstractBase는 가상 함수가 있고 Object는 없다. Object 하위 객체가 vptr 뒤에 놓이는 배치에서도
+    // Borrow<AbstractBase>가 올바른 하위 객체를 가리켜 가상 호출이 파생 구현에 닿아야 한다.
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterProperties(types));
+        ObjectRegistry objects(allocator, types, {712, 1});
+        auto created = objects.NewObject<AbstractBase>(objects.OwnerAccess(),
+                                                       GeneratedType<PropertyNode>::Id());
+        REQUIRE(created);
+        {
+            auto base =
+                objects.Resolve<AbstractBase>(objects.OwnerAccess(), created.Value().Handle());
+            REQUIRE(base);
+            auto basePointer = base.Value().Get();
+            REQUIRE(basePointer);
+            CHECK(basePointer.Value()->ClassValue() == 21);
+            auto exact =
+                objects.Resolve<PropertyNode>(objects.OwnerAccess(), created.Value().Handle());
+            REQUIRE(exact);
+            auto exactPointer = exact.Value().Get();
+            REQUIRE(exactPointer);
+            CHECK(static_cast<AbstractBase*>(exactPointer.Value()) == basePointer.Value());
+            auto object = objects.Resolve<Object>(objects.OwnerAccess(), created.Value().Handle());
+            REQUIRE(object);
+            CHECK(static_cast<Object*>(exactPointer.Value()) == object.Value().Get().Value());
+            CHECK(objects.Resolve<AbstractByPolicy>(objects.OwnerAccess(), created.Value().Handle())
+                      .Error() == ErrorCode::TypeMismatch);
+        }
+        created.Value().Reset();
+        REQUIRE(objects.Collect(objects.OwnerAccess()));
+        CHECK(objects.Stats().liveObjects == 0);
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}

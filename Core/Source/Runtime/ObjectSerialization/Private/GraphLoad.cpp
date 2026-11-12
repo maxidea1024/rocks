@@ -286,9 +286,9 @@ Result<void> ValidateReachability(Allocator& allocator, TypeRegistry& types,
                 if (!expected) {
                     return Result<void>::Failure(expected.Error());
                 }
-                // IsA만으로 허용하면 Base 필드에 Derived를 써서 생성 뒤 setter가 실패한다.
-                // 생성 전에 native exact 계약을 검사하며 같은 native의 다른 TypeId는 허용한다.
-                if (expected.Value().Ops().nativeType != nodes[target].lease.Ops().nativeType) {
+                // setter와 같은 native 상속 계약을 생성 전에 검사한다. 선언 타입의 파생 객체와 같은
+                // native의 다른 TypeId는 허용한다.
+                if (!nodes[target].lease.IsNativeA(expected.Value().Ops().nativeType)) {
                     return Result<void>::Failure(ErrorCode::TypeMismatch);
                 }
             }

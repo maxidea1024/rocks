@@ -121,16 +121,19 @@ public:
     }
 
     // 매 호출에서 타입·스레드·논리 생존 상태를 확인한다. 파괴 요청 후에는 접근 실패한다.
-    // 명시 scope가 있으면 다른 World의 Borrow를 거부한다. scope가 없을 때는 호출자의 World를
-    // 판별할 수 없으며, requireLifecycleScope는 이 Get 호출에 scope를 요구하지 않는다.
-    // 이미 꺼낸 포인터는 이 Borrow가 살아 있는 동안 Object의 수명 상태 조회와 멱등 Destroy에만
-    // 사용할 수 있다. 다른 객체 접근과 Borrow 종료 뒤의 포인터 사용은 금지다.
+    // 실제 객체가 T이거나 T의 파생이면 성공한다(예: Borrow<Actor>로 SpinningActor 접근). 다른
+    // 타입은 TypeMismatch다. 명시 scope가 있으면 다른 World의 Borrow를 거부한다. scope가 없을 때는
+    // 호출자의 World를 판별할 수 없으며, requireLifecycleScope는 이 Get 호출에 scope를 요구하지
+    // 않는다. 이미 꺼낸 포인터는 이 Borrow가 살아 있는 동안 Object의 수명 상태 조회와 멱등
+    // Destroy에만 사용할 수 있다. 다른 객체 접근과 Borrow 종료 뒤의 포인터 사용은 금지다.
     Result<T*> Get() const noexcept {
         auto result = detail::AccessBorrow(registry_, handle_, NativeTypeKey<T>());
         if (!result) {
             return Result<T*>::Failure(result.Error());
         }
-        return Result<T*>::Success(static_cast<T*>(result.Value()));
+        // Registry는 Object 하위 객체 주소를 준다. T가 Object의 파생이므로 static_cast가 기반 하위
+        // 객체 위치 보정을 정확히 한다(다형 파생 + 비다형 Object 배치 포함).
+        return Result<T*>::Success(static_cast<T*>(static_cast<Object*>(result.Value())));
     }
 
     // 파괴 요청 후에도 이미 보유한 Borrow로 상태만 조회한다. 스레드·슬롯을 확인하고 명시된
@@ -163,6 +166,7 @@ private:
 // 객체 안에 직접 포함하는 강한 GC 간선이다. 자체적으로 루트가 되지는 않는다.
 // Registry/ConstructionContext의 SetReference로만 변경하고 소유자의 Trace에서 방문한다.
 // 복사·이동으로 소유자 검증을 우회하지 못하게 한다. 외부 배열 안의 간선은 아직 미지원이다.
+// 대상은 T 또는 T의 파생 타입 객체다.
 template <class T = Object>
 class ObjectRef {
 public:

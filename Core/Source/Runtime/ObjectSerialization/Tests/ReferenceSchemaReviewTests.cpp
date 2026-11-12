@@ -104,12 +104,18 @@ TEST(ReferenceWriteChecksBothSchemasAcrossRegistriesAndNativeAliases) {
             genericWriter->write(target, target.OwnerAccess(), compatible.Value().Handle(), value));
         CHECK(writer->write(target, target.OwnerAccess(), incompatible.Value().Handle(), value)
                   .Error() == ErrorCode::TypeMismatch);
+        // 출처 선언이 없는(wildcard) writer는 대상 선언(Base)만 검사한다. Node는 Base의 파생이므로
+        // 허용되며 실제 native 필드(ObjectRef<Node>)도 Node를 받는다.
+        REQUIRE(genericWriter->write(target, target.OwnerAccess(), incompatible.Value().Handle(),
+                                     value));
+        FieldValue output(allocator);
+        REQUIRE(writer->read(target, target.OwnerAccess(), incompatible.Value().Handle(), output));
+        CHECK(output.reference == child.Value().Handle());
+        // 대상 선언은 만족하지만 native 필드 타입(Node)이 아닌 Base 객체는 setter가 거부한다.
+        value.reference = base.Value().Handle();
         CHECK(
             genericWriter->write(target, target.OwnerAccess(), incompatible.Value().Handle(), value)
                 .Error() == ErrorCode::TypeMismatch);
-        FieldValue output(allocator);
-        REQUIRE(writer->read(target, target.OwnerAccess(), incompatible.Value().Handle(), output));
-        CHECK(output.reference == ObjectHandle{});
         value.reference = {};
         // 유효한 자기 참조 타입과 일반 Object 경계의 null은 대입할 수 있다.
         REQUIRE(writer->write(target, target.OwnerAccess(), compatible.Value().Handle(), value));

@@ -129,9 +129,9 @@ Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
                     if (!expected) {
                         return Result<void>::Failure(expected.Error());
                     }
-                    // Registry setter와 같은 native 계약이다. schema ID가 다른 별명 등록도
-                    // 허용한다.
-                    if (expected.Value().Ops().nativeType != target.Value().Ops().nativeType) {
+                    // Registry setter와 같은 native 상속 계약이다. 선언 타입의 파생 객체와 schema
+                    // ID가 다른 별명 등록도 허용한다.
+                    if (!target.Value().IsNativeA(expected.Value().Ops().nativeType)) {
                         return Result<void>::Failure(ErrorCode::TypeMismatch);
                     }
                 }

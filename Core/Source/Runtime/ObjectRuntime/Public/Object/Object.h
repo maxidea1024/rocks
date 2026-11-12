@@ -74,7 +74,8 @@ template <class T>
 inline const uint8 NativeTypeIdentity = 0;
 
 // 현재 실행 이미지 안의 정확한 C++ 타입 비교용 키다. 직렬화하거나 ABI에 노출하지 않는다.
-// Object의 nullptr 키는 기반 타입 조회를 뜻한다. 일반 IsA/상속 탐색은 아직 없다.
+// Object의 nullptr 키는 기반 타입 조회를 뜻한다. 상속 판정은 등록된 base 사슬을 따라
+// TypeLease::IsNativeA가 한다.
 // 동적 모듈 사이의 키 통합은 보장하지 않으며 별도 ABI 계약이 필요하다.
 template <class T>
 const void* NativeTypeKey() noexcept {

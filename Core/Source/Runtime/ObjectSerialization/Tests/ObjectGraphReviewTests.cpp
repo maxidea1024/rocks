@@ -216,7 +216,9 @@ TEST(ObjectGraphGeneratedInheritanceRoundTripOutlivesSourceAndScratchAllocator) 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
-TEST(ObjectGraphNativeReferenceMismatchIsRejectedBeforeAnyConstructor) {
+TEST(ObjectGraphDerivedReferenceIntoBaseFieldIsAccepted) {
+    // ObjectRef<Base> 필드에 파생 Node 객체를 저장한 그래프는 SetReference와 같은 상속 규칙으로
+    // 복원한다.
     SystemAllocator allocator;
     {
         TypeRegistry types(allocator);
@@ -226,6 +228,40 @@ TEST(ObjectGraphNativeReferenceMismatchIsRejectedBeforeAnyConstructor) {
                                   GeneratedType<Node>::Schema().version);
         REQUIRE(source);
         ObjectRegistry target(allocator, types, {921, 1});
+        ObjectGraphLoadOptions options;
+        options.allowMissingFields = true;
+        ConstructedForReview = 0;
+        auto loaded = LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
+                                      source.Value().View(), options);
+        REQUIRE(loaded);
+        // BaseHolder와 Node가 각각 한 번씩 생성된다(두 생성자 모두 계수한다).
+        CHECK(ConstructedForReview == 2);
+        CHECK(target.Stats().liveObjects == 2);
+        {
+            auto holder = target.Resolve<BaseHolder>(target.OwnerAccess(), loaded.Value().Handle());
+            REQUIRE(holder);
+            auto value = holder.Value().Get();
+            REQUIRE(value);
+            auto node = target.Resolve<Node>(target.OwnerAccess(), value.Value()->edge.Handle());
+            CHECK(node.IsOk());
+        }
+        loaded.Value().Reset();
+        REQUIRE(target.Collect(target.OwnerAccess()));
+        CHECK(target.Stats().liveObjects == 0);
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+TEST(ObjectGraphUnrelatedReferenceTypeIsRejectedBeforeAnyConstructor) {
+    // 선언 타입과 상속 관계가 없는 객체(BaseHolder 자신)를 가리키면 생성 전에 거부한다.
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterGenerated(types, true));
+        REQUIRE(RegisterHolder(types));
+        auto source = HolderGraph(allocator, HolderType, 1);
+        REQUIRE(source);
+        ObjectRegistry target(allocator, types, {923, 1});
         ObjectGraphLoadOptions options;
         options.allowMissingFields = true;
         ConstructedForReview = 0;

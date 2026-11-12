@@ -37,9 +37,15 @@ public:
     StringView Name() const& noexcept;
     StringView Name() const&& = delete;
 
-    // immutable schema ancestry 조회다. 빈 lease는 Fatal이다. native pointer 변환이나
-    // Borrow<base> 허용을 뜻하지 않는다.
+    // immutable schema ancestry 조회다. 빈 lease는 Fatal이다. 스키마 ID 기준이므로 같은 native
+    // 타입을 다른 TypeId로 등록한 별칭은 구분된다.
     bool IsA(TypeId expected) const noexcept;
+
+    // 이 타입이 nativeType(NativeTypeKey<T>())의 C++ 타입이거나 그 파생인지다. nullptr(Object)는
+    // 항상 참이다. Resolve<T>·SetReference·NewObject<T>가 이 규칙으로 기반 타입 접근을 허용한다.
+    // 단일 비가상 상속만 등록되므로 참이면 Object*에서 T*로의 static_cast가 안전하다. 빈 lease는
+    // Fatal.
+    bool IsNativeA(const void* nativeType) const noexcept;
 
     bool IsValid() const noexcept {
         return record_ != nullptr;

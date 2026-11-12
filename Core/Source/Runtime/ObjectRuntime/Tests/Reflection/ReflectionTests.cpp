@@ -172,8 +172,12 @@ TEST(ReflectionIsAAndMetadataLifetimeDoNotEnableUnsafeNativeBaseCast) {
             ObjectRegistry objects(allocator, types, {702, 1});
             auto object = objects.NewObject<Node>(objects.OwnerAccess(), GeneratedType<Node>::Id());
             REQUIRE(object);
-            CHECK(objects.Resolve<Base>(objects.OwnerAccess(), object.Value().Handle()).Error() ==
-                  ErrorCode::TypeMismatch);
+            // 파생 Node는 기반 Base로 Resolve할 수 있다. 관계없는 타입은 여전히 TypeMismatch다.
+            CHECK(objects.Resolve<Base>(objects.OwnerAccess(), object.Value().Handle()).IsOk());
+            CHECK(objects
+                      .Resolve<reflection_fixture::AliasPrivate>(objects.OwnerAccess(),
+                                                                 object.Value().Handle())
+                      .Error() == ErrorCode::TypeMismatch);
             FieldValue output(allocator);
             output.kind = ValueKind::UInt64;
             output.unsignedInteger = 91;

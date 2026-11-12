@@ -76,8 +76,9 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
             if (!referenced) {
                 return Result<void>::Failure(referenced.Error());
             }
-            const void* actualKey = referenced.Value().Ops().nativeType;
-            if ((sourceKey && actualKey != sourceKey) || (targetKey && actualKey != targetKey)) {
+            // 선언 타입 또는 그 파생 타입 객체를 허용한다(SetReference와 같은 상속 규칙).
+            if ((sourceKey && !referenced.Value().IsNativeA(sourceKey)) ||
+                (targetKey && !referenced.Value().IsNativeA(targetKey))) {
                 return Result<void>::Failure(ErrorCode::TypeMismatch);
             }
         }
@@ -212,6 +213,26 @@ bool TypeLease::IsA(TypeId expected) const noexcept {
     for (auto* record = static_cast<TypeRegistry::Record*>(record_); record;
          record = record->base) {
         if (record->schema.id == expected) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool TypeLease::IsNativeA(const void* nativeType) const noexcept {
+    if (!record_) {
+        platform::Fatal("TypeLease::IsNativeA called on empty lease");
+    }
+
+    // nullptr는 기반 Object이며 모든 등록 타입이 만족한다. 등록 시 base 레코드의 nativeType과
+    // 파생 레코드의 nativeBaseType 일치를 검증했으므로 base 사슬이 곧 C++ 상속 사슬이다.
+    if (nativeType == nullptr) {
+        return true;
+    }
+
+    for (auto* record = static_cast<TypeRegistry::Record*>(record_); record;
+         record = record->base) {
+        if (record->ops.nativeType == nativeType) {
             return true;
         }
     }

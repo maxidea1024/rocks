@@ -133,8 +133,14 @@ TEST(ObjectTypeConvenienceReturnsActualTypeAndRetainsLease) {
         REQUIRE(checked);
         CHECK(checked.Value().Schema().id == TypeIdOf<Node>());
 
-        // 메타 상속은 C++ 기반 클래스 포인터 변환이 안전하다는 뜻은 아니다.
-        CHECK(objects.Resolve<Base>(access, handle).Error() == ErrorCode::TypeMismatch);
+        // 등록된 상속 사슬에 있는 기반 타입으로도 Resolve한다. 포인터는 Base 하위 객체를 가리킨다.
+        {
+            auto asBase = objects.Resolve<Base>(access, handle);
+            REQUIRE(asBase);
+            auto basePointer = asBase.Value().Get();
+            REQUIRE(basePointer);
+            CHECK(static_cast<Base*>(pointer.Value()) == basePointer.Value());
+        }
         borrowed.Value().Reset();
         root.Value().Reset();
         REQUIRE(objects.Collect(access));

@@ -86,13 +86,13 @@ TypeRegistry는 스키마, 이름·속성 바이트와 RuntimeFieldOps 배열을
 
 Shutdown은 새 Acquire/Clone을 닫고 외부 lease가 있으면 `Busy`를 반환한다. 모든 lease를 반환한 뒤 재호출하면 파생 타입부터 기반 타입 순서로 정리한다. allocator·모듈 정리 callback은 Registry 잠금 밖에서 호출한다. 등록·해제·Shutdown은 생성 스레드 전용이며 Acquire와 서로 다른 lease의 계수 조작은 잠금으로 보호된다. 같은 lease 래퍼의 동시 변경은 허용하지 않는다.
 
-`TypeLease::IsA`와 `TypeRegistry::IsA`는 메타데이터의 상속 관계 조회다. 이를 근거로 native pointer 변환을 허용하지 않는다. 현재 `Resolve<T>`는 일반적인 파생 객체를 기반 C++ 타입으로 변환하는 기능을 제공하지 않는다. 자동 생성한 파생 필드 thunk는 정확한 파생 native type을 Resolve하고, 상속 멤버에 대한 typed member pointer로 접근한다.
+`TypeLease::IsA`와 `TypeRegistry::IsA`는 스키마 ID 기준의 상속 관계 조회다. native 상속 판정은 `TypeLease::IsNativeA(NativeTypeKey<T>())`가 등록된 base 사슬을 따라 한다. 등록 시 각 레코드의 `nativeBaseType`이 base 레코드의 `nativeType`과 같은지 검증하고 단일 비가상 상속만 허용하므로, base 사슬은 실제 C++ 상속 사슬과 같다. 이 규칙으로 `Resolve<T>`·`TryPin<T>`·`NewObject<T>`·`SetReference`(필드 선언 타입)·반사 필드 쓰기·객체 그래프 저장과 로드는 T 자신과 T의 파생 객체를 허용한다. Registry는 항상 `Object` 하위 객체 주소를 주고 `Borrow<T>::Get`·`ConstructionContext::Get`이 `static_cast<T*>`로 기반 하위 객체 위치를 보정한다. 자동 생성한 파생 필드 thunk는 정확한 파생 native type을 Resolve하고, 상속 멤버에 대한 typed member pointer로 접근한다.
 
 ## 필드 접근과 실패 보장
 
 `FieldValue`는 이동 전용 소유 값이며 String도 자체 복제한다. kind에 대응하는 payload만 유효한 값으로 읽는다. 같은 FieldValue의 동시 변경이나 allocator callback에서 그 래퍼로 변경 재진입하는 동작은 금지한다. allocator는 값과 진행 중인 호출보다 오래 살아야 한다.
 
-일반 read와 쓰기 가능 필드의 write는 ObjectAccessContext와 ObjectHandle을 받아 Registry에서 owner thread, context, generation, 논리 수명과 정확한 native type을 검사한다. raw object pointer나 StringView를 외부 반환값으로 유출하지 않는다. staged write는 ConstructionContext의 아직 게시되지 않은 객체를 검사한다.
+일반 read와 쓰기 가능 필드의 write는 ObjectAccessContext와 ObjectHandle을 받아 Registry에서 owner thread, context, generation, 논리 수명과 owner의 native type을 검사한다. 참조 필드 값은 선언 타입 또는 그 파생 객체여야 한다. raw object pointer나 StringView를 외부 반환값으로 유출하지 않는다. staged write는 ConstructionContext의 아직 게시되지 않은 객체를 검사한다.
 
 - String read는 임시 소유 값에 복제하고, 할당 callback 이후 Borrow의 논리 유효성을 다시 확인한 뒤 output에 게시한다. OOM 또는 논리 파괴는 기존 output을 유지한다.
 - String write는 대상 필드의 allocator로 replacement를 완성하고, 논리 유효성을 다시 검사한 후 할당·해제 없는 Swap으로 commit한다. OOM과 commit 전 논리 파괴는 기존 필드를 유지한다.

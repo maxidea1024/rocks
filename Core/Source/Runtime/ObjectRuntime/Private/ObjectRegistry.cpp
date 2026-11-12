@@ -108,7 +108,8 @@ Result<void> ObjectRegistry::CheckLive(Slot* slot, const void* nativeType) const
     if (slot->state != SlotState::Alive || IsCutoff(slot)) {
         return Result<void>::Failure(ErrorCode::Destroyed);
     }
-    if (nativeType && slot->type.Ops().nativeType != nativeType) {
+    // 요청 타입이거나 그 파생이면 허용한다(단일 비가상 상속 사슬, TypeLease::IsNativeA).
+    if (nativeType && !slot->type.IsNativeA(nativeType)) {
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
     return Result<void>::Success();
@@ -221,7 +222,9 @@ Result<void*> AccessBorrow(ObjectRegistry* registry, ObjectHandle handle,
     if (slot->borrows == 0) {
         return Result<void*>::Failure(ErrorCode::StaleHandle);
     }
-    return Result<void*>::Success(nativeType ? slot->storage : static_cast<void*>(slot->object));
+    // 항상 Object 하위 객체 주소를 돌려준다. Borrow<T>::Get이 static_cast로 T*를 얻는다(파생 타입의
+    // 기반 T 하위 객체 위치는 C++ 변환만 정확히 안다).
+    return Result<void*>::Success(static_cast<void*>(slot->object));
 }
 
 Result<ObjectLifecycle> InspectBorrow(ObjectRegistry* registry, ObjectHandle handle) noexcept {
@@ -287,7 +290,7 @@ Result<void> ObjectRegistry::SetEdge(const ObjectAccessContext& access, ObjectHa
                destination->transaction == transaction))) {
             return Result<void>::Failure(ErrorCode::StaleHandle);
         }
-        if (nativeType && destination->type.Ops().nativeType != nativeType) {
+        if (nativeType && !destination->type.IsNativeA(nativeType)) {
             return Result<void>::Failure(ErrorCode::TypeMismatch);
         }
         // staged 내부 간선은 Commit에서 전체 게시·shade한다. 이미 게시된 대상은 즉시 보존한다.
@@ -547,7 +550,7 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
         finish();
         return Result<ObjectHandle>::Failure(typeLease.Error());
     }
-    if (nativeType && typeLease.Value().Ops().nativeType != nativeType) {
+    if (nativeType && !typeLease.Value().IsNativeA(nativeType)) {
         finish();
         return Result<ObjectHandle>::Failure(ErrorCode::TypeMismatch);
     }
@@ -660,10 +663,10 @@ Result<void*> ObjectRegistry::GetPending(const ObjectAccessContext& access, Obje
         slot->transaction != transaction || !slot->object) {
         return Result<void*>::Failure(ErrorCode::StaleHandle);
     }
-    if (nativeType && slot->type.Ops().nativeType != nativeType) {
+    if (nativeType && !slot->type.IsNativeA(nativeType)) {
         return Result<void*>::Failure(ErrorCode::TypeMismatch);
     }
-    return Result<void*>::Success(nativeType ? slot->storage : static_cast<void*>(slot->object));
+    return Result<void*>::Success(static_cast<void*>(slot->object));
 }
 
 void ObjectRegistry::ValidateStagedEdge(void* pointer, ObjectHandle handle) noexcept {
