@@ -16,7 +16,7 @@
 | 생성 단위 사이 참조 | base·참조 대상은 같은 단위만("not reflected in this unit") | descriptor `--import`로 의존 모듈의 타입 사용 |
 | 값 종류 | 스칼라·Guid·String·ObjectRef | + Enum·Struct·Array·AssetId·SoftObjectReference·Digest256, ObjectRefArray |
 | 지정자 | CLASS `Abstract`, PROPERTY `Transient`·`ReadOnly`·`Category`·`DisplayName` | + CLASS·STRUCT `Version`, CLASS `WorldOnly`, STRUCT `Binds`, ENUM `Flags`·`ToolPrefix`, PROPERTY `EditorOnly`·`Required`·`Name`·`MaxElements`, 열거자 `Name`·`DisplayName`·`Hidden` |
-| 비반영 멤버 | 금지(모든 비정적 필드에 PROPERTY) | `ROCKS_NATIVE`(비영속, 강한 참조 재귀 금지) |
+| 비리플렉션 멤버 | 금지(모든 비정적 필드에 PROPERTY) | `ROCKS_NATIVE`(비영속, 강한 참조 재귀 금지) |
 | 스키마 버전 | 1 고정 | `Version=N` |
 | 필드 직렬화 | GraphValues의 `FieldValue` switch | 필드별 생성 codec thunk(encode·두 단계 decode) + 관찰 hook |
 | 엔진 World 타입 | `ROCKS_NATIVE_CLASS` 수동 등록 | `ROCKS_CLASS(WorldOnly)`(B8) |
@@ -70,7 +70,7 @@
 
 ### 1.5 import와 파서의 수집 범위
 
-- 파서는 **이 모듈의 입력 헤더에 물리적으로 있는 선언만** 반영 대상으로 모은다. 비교는 디스크 철자로 정규화한 정규 경로로 한다(macOS의 대소문자 무시 볼륨에서 철자만 다른 경로로 거짓 오류가 나지 않게). 필터는 **identity 조회보다 앞에** 둔다(지금은 선언을 모으는 시점에 ID를 찾으므로, 의존 모듈의 반영 헤더를 include하면 그 타입의 ID를 이 모듈 명세에서 찾다가 실패한다).
+- 파서는 **이 모듈의 입력 헤더에 물리적으로 있는 선언만** 리플렉션 대상으로 모은다. 비교는 디스크 철자로 정규화한 정규 경로로 한다(macOS의 대소문자 무시 볼륨에서 철자만 다른 경로로 거짓 오류가 나지 않게). 필터는 **identity 조회보다 앞에** 둔다(지금은 선언을 모으는 시점에 ID를 찾으므로, 의존 모듈의 리플렉션 헤더를 include하면 그 타입의 ID를 이 모듈 명세에서 찾다가 실패한다).
 - 입력 밖의 `ROCKS_CLASS`·`ROCKS_STRUCT`·`ROCKS_ENUM` 선언은 import한 descriptor에 같은 정규 이름으로, **같은 헤더 철자·같은 물리 파일**로 있어야 한다(이름만 같은 이중 정의를 막는다). 없으면 RMC2003. private 타입을 다른 모듈이 쓰면 RMC2006.
 - base·참조·값 형식 해석은 이 모듈 타입 → import 타입 순으로 정규 이름을 찾는다(`SchemaValidator`·`CppEmitter`에 import 조회를 더한다). 같은 이름이 둘 이상이면 RMC2004.
 - import는 직접·간접 의존 모듈 전부의 descriptor다(빌드가 닫힌 집합을 넘긴다).
@@ -96,8 +96,8 @@
 
 ### 1.9 fixture 이전과 시험
 
-- Foundation 반영 fixture를 `Core/Source/Developer/ReflectionTestFixtures` 모듈(Public/`ReflectionTestFixtures/`)로 옮기고 명세를 `ids move`로 `ReflectionTestFixtures.rocksids.json`에 옮긴다(ID는 그대로). FoundationTests·EngineTests는 이 모듈에 의존한다(두 타깃 이중 owner가 없어진다).
-- 시험: Rocks.Build.IntegrationTests의 타깃 소유 전제를 모듈 소유 사례로 바꾸고, 모듈 사이 상속·참조(import), private 타입 import 거부, 고아 명세(활성·은퇴만), 명세 사이 ID 중복, 입력 밖 반영 선언(RMC2003), 가리는 include 철자(RMC1001), stage import 후 실패 시 미게시·삭제 복구, SDK descriptor import, 명세 이동 PR의 병합 검사 통과를 더한다. ToolTests(`IdentityCompilerTests`·`MetaTests`·`IdentityInventoryTests`·`MetadataOutputTransactionTests`·`IdentityGitMergeTests`)를 새 CLI·다중 명세·합친 뷰로 고친다.
+- Foundation 리플렉션 fixture를 `Core/Source/Developer/ReflectionTestFixtures` 모듈(Public/`ReflectionTestFixtures/`)로 옮기고 명세를 `ids move`로 `ReflectionTestFixtures.rocksids.json`에 옮긴다(ID는 그대로). FoundationTests·EngineTests는 이 모듈에 의존한다(두 타깃 이중 owner가 없어진다).
+- 시험: Rocks.Build.IntegrationTests의 타깃 소유 전제를 모듈 소유 사례로 바꾸고, 모듈 사이 상속·참조(import), private 타입 import 거부, 고아 명세(활성·은퇴만), 명세 사이 ID 중복, 입력 밖 리플렉션 선언(RMC2003), 가리는 include 철자(RMC1001), stage import 후 실패 시 미게시·삭제 복구, SDK descriptor import, 명세 이동 PR의 병합 검사 통과를 더한다. ToolTests(`IdentityCompilerTests`·`MetaTests`·`IdentityInventoryTests`·`MetadataOutputTransactionTests`·`IdentityGitMergeTests`)를 새 CLI·다중 명세·합친 뷰로 고친다.
 - 문서: `Build/README.md`, `ReflectionMetadata.ko.md`(타깃 소유 서술).
 
 ## 2. 지정자와 플래그(B2)
@@ -133,9 +133,9 @@
 
 ### 2.4 `ROCKS_NATIVE`
 
-- `ROCKS_NATIVE()`는 반영 클래스·구조체 안의 **비영속 런타임 멤버**다(GPU 핸들·캐시·World 쪽 `AssetLease`). 모든 비정적 필드는 `ROCKS_PROPERTY` 또는 `ROCKS_NATIVE` 중 하나다(둘 다 없으면 지금처럼 오류, 둘 다면 RMC2204).
-- **강한 참조 재귀 금지**(GC 구멍 방지): MetaCompiler가 Clang AST로 NATIVE 멤버의 타입을 재귀 검사한다 — 필드·base 클래스·포인터와 배열의 가리키는 타입·템플릿 특수화의 필드를 따라가며 `ObjectRef`·`ObjectRefArray`·`RootRef`가 있거나 `Object` 파생 타입을 가리키는 raw 포인터(EIP 525행)가 있으면 RMC2205다. 반영 struct는 생성 형질 `ContainsStrongReference`로 판정한다. 생성 코드는 직접 타입에 대해 같은 조건을 `static_assert`로 한 번 더 둔다. `WeakRef`·`ObjectHandle`은 허용한다(추적하지 않는 참조).
-- WorldOnly 전용 멤버: 타입이 `static constexpr bool RocksRequiresWorldOnlyOwner = true;`를 선언하면(A1의 `AssetLease`가 선언) WorldOnly가 아닌 클래스의 `ROCKS_NATIVE` 멤버로 둘 수 없다(RMC2206, 같은 재귀 검사로 담는 타입까지 본다). 반영 struct가 그런 NATIVE 멤버를 (중첩까지) 담으면 struct 자체가 생성 형질 `RequiresWorldOnlyOwner`를 갖고, 그 struct를 필드로 둔 WorldOnly 아닌 클래스도 RMC2206이다. 이름 문자열이 아니라 형질로 판정하므로 `AssetLease`가 생기기 전에도 규칙과 시험을 둘 수 있다.
+- `ROCKS_NATIVE()`는 리플렉션 클래스·구조체 안의 **비영속 런타임 멤버**다(GPU 핸들·캐시·World 쪽 `AssetLease`). 모든 비정적 필드는 `ROCKS_PROPERTY` 또는 `ROCKS_NATIVE` 중 하나다(둘 다 없으면 지금처럼 오류, 둘 다면 RMC2204).
+- **강한 참조 재귀 금지**(GC 구멍 방지): MetaCompiler가 Clang AST로 NATIVE 멤버의 타입을 재귀 검사한다 — 필드·base 클래스·포인터와 배열의 가리키는 타입·템플릿 특수화의 필드를 따라가며 `ObjectRef`·`ObjectRefArray`·`RootRef`가 있거나 `Object` 파생 타입을 가리키는 raw 포인터(EIP 525행)가 있으면 RMC2205다. 리플렉션 struct는 생성 형질 `ContainsStrongReference`로 판정한다. 생성 코드는 직접 타입에 대해 같은 조건을 `static_assert`로 한 번 더 둔다. `WeakRef`·`ObjectHandle`은 허용한다(추적하지 않는 참조).
+- WorldOnly 전용 멤버: 타입이 `static constexpr bool RocksRequiresWorldOnlyOwner = true;`를 선언하면(A1의 `AssetLease`가 선언) WorldOnly가 아닌 클래스의 `ROCKS_NATIVE` 멤버로 둘 수 없다(RMC2206, 같은 재귀 검사로 담는 타입까지 본다). 리플렉션 struct가 그런 NATIVE 멤버를 (중첩까지) 담으면 struct 자체가 생성 형질 `RequiresWorldOnlyOwner`를 갖고, 그 struct를 필드로 둔 WorldOnly 아닌 클래스도 RMC2206이다. 이름 문자열이 아니라 형질로 판정하므로 `AssetLease`가 생기기 전에도 규칙과 시험을 둘 수 있다.
 - 수동 등록 매크로 `ROCKS_NATIVE_CLASS`는 이름이 겹치므로 `ROCKS_NATIVE_TYPE`으로 바꾼다(EngineRuntime 80행 서술도 고친다).
 
 ### 2.5 `completeFieldLayout`
@@ -210,7 +210,7 @@ struct FieldSchema {
 - **TypeRegistry 종류 구분**: 레코드에 종류(Class·Struct·Enum)를 둔다. 기존 `Acquire(TypeId)`는 **클래스만** 돌려준다(다른 종류는 TypeMismatch — ObjectRegistry·GraphSave·GraphLoad의 기존 호출자는 모두 클래스를 가정한다). struct·enum은 `AcquireValueType(TypeId, TypeKind)`으로 연다. 등록은 `RegisterStruct(const StructSchema&, RuntimeStructOps)`·`RegisterEnum(const EnumSchema&)`.
 - **의존 계수**: 클래스(또는 struct)가 가리키는 enum·struct가 등록 때 이미 있어야 하고(없으면 NotFound), 참조는 lease가 아니라 base와 같은 `dependents` 계수로 표시한다 — 가리키는 레코드 포인터 목록을 등록 단일 할당 안에 두고 `DestroyRecord`에서 각각 줄인다(lease로 쥐면 Shutdown이 영구 Busy가 된다). 의존자가 남은 레코드의 Unregister는 Busy다.
 - **native 타입 대조**: struct 필드의 생성 ops는 정적 타입 `S`의 `NativeTypeKey<S>()`를 싣고, 등록이 그 필드가 가리키는 struct 레코드의 native 키와 같은지 확인한다(schema로 해석한 경로와 정적 thunk가 어긋나 엉뚱한 멤버에 쓰지 않게). enum도 같다.
-- **모듈 등록**: 집계 헤더의 `RegisterModuleTypes(TypeRegistry&, ModuleLease) -> Result<ModuleRegistration>`이 먼저 **반영 타입을 가진 의존 모듈의 `RegisterModuleTypes`를 부르고**(의존 모듈의 집계 헤더를 include한다 — descriptor가 모듈 목록을 준다), 이어서 자기 모듈의 enum → struct(중첩 의존 위상 순) → class(base 먼저) 순으로 등록한다. 같은 ID·같은 native 키로 이미 등록된 타입은 건너뛴다(여러 모듈이 같은 의존을 공유해도 한 번만 등록 — 다른 native 키면 AlreadyExists). 중간 실패면 이 호출이 등록한 것을 역순으로 해제한 뒤 오류를 돌려준다. `ModuleRegistration`은 이 호출이 등록한 토큰 목록이며 역순 해제를 한다(의존 계수가 남아 있으면 그 해제는 Busy다).
+- **모듈 등록**: 집계 헤더의 `RegisterModuleTypes(TypeRegistry&, ModuleLease) -> Result<ModuleRegistration>`이 먼저 **리플렉션 타입을 가진 의존 모듈의 `RegisterModuleTypes`를 부르고**(의존 모듈의 집계 헤더를 include한다 — descriptor가 모듈 목록을 준다), 이어서 자기 모듈의 enum → struct(중첩 의존 위상 순) → class(base 먼저) 순으로 등록한다. 같은 ID·같은 native 키로 이미 등록된 타입은 건너뛴다(여러 모듈이 같은 의존을 공유해도 한 번만 등록 — 다른 native 키면 AlreadyExists). 중간 실패면 이 호출이 등록한 것을 역순으로 해제한 뒤 오류를 돌려준다. `ModuleRegistration`은 이 호출이 등록한 토큰 목록이며 역순 해제를 한다(의존 계수가 남아 있으면 그 해제는 Busy다).
 
 ### 3.6 `FieldValue`와 thunk
 
@@ -256,7 +256,7 @@ struct BulkDataRef {
 ### 4.5 Core 값 타입 결합(`Binds`)
 
 - 색·벡터 설정(`PaddingColor`·`ChromaKeyColor`는 UE FColor(8비트), `AlphaCoverageThresholds`는 FVector4(LWC double), 12.4절)은 Core 수학 타입을 쓴다. Core는 MetaSchema·ObjectRuntime에 의존하지 않으므로 Core 헤더에 annotation을 달 수 없다.
-- ObjectRuntime에 결합 헤더(`Object/CoreValueTypes.h`)를 두고 `ROCKS_STRUCT(Binds = "<실제 타입 철자>", Version = 1)`로 같은 공개 멤버를 가진 거울 선언을 반영한다(UE NoExportTypes 방식). 생성 코드는 거울이 아니라 실제 타입의 멤버 포인터를 쓰고, 거울과 실제 타입의 멤버 이름·타입·개수가 같은지 static_assert로 확인한다(어긋나면 컴파일 실패).
+- ObjectRuntime에 결합 헤더(`Object/CoreValueTypes.h`)를 두고 `ROCKS_STRUCT(Binds = "<실제 타입 철자>", Version = 1)`로 같은 공개 멤버를 가진 거울 선언을 리플렉션한다(UE NoExportTypes 방식). 생성 코드는 거울이 아니라 실제 타입의 멤버 포인터를 쓰고, 거울과 실제 타입의 멤버 이름·타입·개수가 같은지 static_assert로 확인한다(어긋나면 컴파일 실패).
 - 대상(구체 인스턴스 철자): `rocks::Vector2<float>`·`Vector2<double>`, `Vector3<float>`·`Vector3<double>`, `Vector4<float>`·`Vector4<double>`, `IntVec2`·`IntVec3`, `Quaternion<float>`·`Quaternion<double>`, `Rotator<float>`·`Rotator<double>`, `Color`(uint8 RGBA)·`LinearColor`(float RGBA), `Transform`(템플릿이면 구체 인스턴스). 실제 멤버 구성은 착수 때 헤더에서 확인한다. ID는 ObjectRuntime 명세에 등록한다.
 
 ## 5. 배열(B5)
@@ -287,7 +287,7 @@ struct BulkDataRef {
 ### 5.5 한도
 
 - 필드별 길이 상한 `MaxElements`: 기본 65,536, 최대 1,048,576. 인코딩된 필드 값은 그래프 `maxValueBytes`(4 MiB)도 지켜야 한다(넘으면 CapacityExceeded — 예를 들어 U64 원소는 약 52만 개가 한계다).
-- **강제 지점**: 반영 쓰기(경로 접근 7절)·저장(encode)·로드(decode). Registry 변경 API(`AddReference` 등)와 C++ 직접 사용에는 걸지 않는다(Level의 actor 목록 같은 런타임 목록을 막지 않는다 — 넘친 목록은 저장할 때 오류다).
+- **강제 지점**: 리플렉션 쓰기(경로 접근 7절)·저장(encode)·로드(decode). Registry 변경 API(`AddReference` 등)와 C++ 직접 사용에는 걸지 않는다(Level의 actor 목록 같은 런타임 목록을 막지 않는다 — 넘친 목록은 저장할 때 오류다).
 - 그래프 전체: A0-B에서 `ObjectGraphLimits`에 `maxTotalElements`(기본 4,194,304)를 더하고, 중첩 struct TLV를 `maxTotalFields`에 세면서 그 기본값을 4,096에서 A0-O 목표치인 1,048,576으로 올린다(필드 3개짜리 struct 배열이 원소 약 1,366개에서 막히지 않게). 바이트·작업량 한도 확장(64 MiB·8 × (필드 + 원소))은 A0-O의 graph v2가 정한다.
 
 ## 6. 필드 codec(B3–B5 공통)
@@ -333,7 +333,7 @@ struct BulkDataRef {
 - 시험: 지문이 구성과 무관하고 컴파일러 버전·대상에 따라 바뀜, 줄 끝 정규화, 생성 TU만 재컴파일. AS 시나리오 13·25에 **구성 사이 쿠킹 byte 비교**를 더한다(C3은 수학 digest만 확인했다).
 - 문서 정정(반영함): llvm-nm 외부 심볼 검사·fmadd·`long double` 정책은 C3에서 이미 모든 구성에 구현되었다(CDF 2절). AS 5.6절의 "A0-B에서 추가"·"Development 구성"·`-fno-math-errno`(clang-cl이 거부해 쓰지 않기로 함, CDF 2.1절) 서술을 고쳤다.
 
-## 9. 엔진 World 타입 반영(B8)
+## 9. 엔진 World 타입 리플렉션(B8)
 
 - `Level`·`Actor`·`Component`를 `ROCKS_NATIVE_TYPE` 수동 등록에서 `ROCKS_CLASS(WorldOnly)`로 옮긴다. 컨테이너는 `ObjectRefArray`(actor·component 목록)·`Array`, raw 포인터·캐시는 `ROCKS_NATIVE`로 바꾼다(EngineRuntime 68·80·105행의 수동 등록 이유가 B2·B5로 해소된다). WorldOnly가 상속되므로 Actor 파생에 다시 쓰지 않는다.
 - 소비자: AS 6.3절의 World 객체(SoftObjectRef 필드, `AssetLease` 멤버). World 모듈을 다루는 세션과 착수 전에 조율한다.
@@ -343,7 +343,7 @@ struct BulkDataRef {
 | 코드 | 판정 | 뜻 |
 |---|---|---|
 | RMC1001 | MetadataRunner | 생성 헤더의 원본 include 철자를 소비 모듈의 다른 헤더가 가림 |
-| RMC2003 | MetaCompiler | 반영 선언이 이 모듈 입력에도 import에도 없음(헤더·물리 파일까지 대조) |
+| RMC2003 | MetaCompiler | 리플렉션 선언이 이 모듈 입력에도 import에도 없음(헤더·물리 파일까지 대조) |
 | RMC2004 | MetaCompiler | import 사이 같은 정규 이름 |
 | RMC2005 | MetadataRunner | 생성 철자 충돌(대소문자만 다름·예약 `.module.h`) |
 | RMC2006 | MetaCompiler | 다른 모듈의 private 타입 사용 |
@@ -366,14 +366,14 @@ struct BulkDataRef {
 
 | 단계 | 내용 | 완료 기준 |
 |---|---|---|
-| B1 | 모듈 소유 메타데이터·descriptor·import·stage 의존 해석·명세 집합 검증·합친 뷰 병합 검사·`ids move`·다중 명세 게시(삭제 포함)·SDK·템플릿·fixture 모듈 | 기존 반영 시험 전부 + 1.9절 통합 시험 |
+| B1 | 모듈 소유 메타데이터·descriptor·import·stage 의존 해석·명세 집합 검증·합친 뷰 병합 검사·`ids move`·다중 명세 게시(삭제 포함)·SDK·템플릿·fixture 모듈 | 기존 리플렉션 시험 전부 + 1.9절 통합 시험 |
 | B2 | 지정자 문법(정수)·`Version`·`WorldOnly`(상속)·`EditorOnly`·`Required`·`Name`·`MaxElements`·`ROCKS_NATIVE`(재귀 강한 참조 검사·WorldOnly 형질)·`completeFieldLayout` 뜻·`ROCKS_NATIVE_TYPE` | MetaTests 진단 사례, Registry 마스크·유일성·WorldOnly 상속 시험, 버전이 Record에 기록됨 |
 | B3 | `AssetId`·`Sha256Digest`·`SoftObjectRef<T>`·`ROCKS_ENUM`(열거자 지정자·constexpr 검증기)·`ValueType`·TypeRegistry 종류·의존 계수·native 대조·`RegisterModuleTypes`·codec thunk와 문맥 전체·두 단계 decode·decode 정책·진단 | 종류별 읽기·쓰기·그래프 왕복, 잘못된 값 거부·정책별 진단, Shutdown이 Busy로 남지 않음, 모든 할당 실패 rollback |
 | B4 | `ROCKS_STRUCT`·`RegisterStruct`·참조 struct Trace·중첩 Record·struct 마이그레이션·버전 정책·`Binds` Core 값 타입 | 중첩·참조 struct 왕복, 버전 낮음·높음 처리, Binds static_assert 실패 사례, 깊이·순환 진단 |
 | B5 | `Array<T>`·`ObjectRefArray<T>`(Insert·SetAt)·staged `AssignReferences`·`ValueArray` wire·`MaxElements`·`maxTotalElements` | 원소 종류별 왕복, 순환 참조 배열 로드, Marking 중 staged 배열, 길이·바이트 상한, 잘림·count 사전 검사, 모든 할당 실패 |
 | B6 | 경로 접근(FieldId 체인)·이름 해석 앞단 | 경로 읽기·쓰기·배열 연산·UnknownProperty·실패 시 미게시 (A6 전까지 미룰 수 있음) |
 | B7 | 툴체인 지문·도구 빌드 ID 생성·주입, AS 문서 정정 | 8절 시험 (다른 단계와 독립 — 병렬 가능) |
-| B8 | Level·Actor·Component의 `ROCKS_CLASS(WorldOnly)` 이전 | 기존 World 시험 전부 + 반영 Trace·저장 |
+| B8 | Level·Actor·Component의 `ROCKS_CLASS(WorldOnly)` 이전 | 기존 World 시험 전부 + 리플렉션 Trace·저장 |
 
 의존: B1 → B3(집계 헤더·import), B2 → B3(Required·EditorOnly 검증), B3 → B4 → B5(struct 원소 배열), B3·B5 → B6(경로는 struct·배열을 지난다), B2·B5 → B8. B7은 독립이다. 각 단계는 구현 뒤 다수 서브에이전트 교차검증, Debug·Release·Asan·format·policy·Android 빌드를 거쳐 커밋한다.
 
@@ -385,7 +385,7 @@ struct BulkDataRef {
 2. 단일 값 배열은 `ValueArray`로 압축한다(5.4절) — 원소 한도와 바이트 한도를 함께 만족한다.
 3. 플래그 enum을 지원한다(3.4절) — 미선언 값 거부를 "선언 값들의 OR"로 정의한다.
 4. struct 상속은 v1에서 금지(4.1절). DataTable 행 같은 base struct 요구가 생기면 base 필드를 펼치는 방식으로 연다.
-5. Core 수학 타입은 `Binds` 거울 선언으로 반영한다(4.5절) — Core의 의존 방향을 지킨다.
+5. Core 수학 타입은 `Binds` 거울 선언으로 리플렉션한다(4.5절) — Core의 의존 방향을 지킨다.
 6. 필드 codec은 생성 thunk의 두 단계 파싱이며 1단계 산출물을 보관하고 2단계 작업량을 1단계에서 청구한다(6.2절).
 7. 툴체인 지문에 빌드 구성을 넣지 않는다(8절). 구성 사이 쿠킹 byte 비교 시험으로 확인한다.
 8. WorldOnly는 상속되는 플래그다(2.2절). `Required`는 저장·쿠킹에서만 거부한다(2.3절).
@@ -403,7 +403,7 @@ struct BulkDataRef {
 다른 문서 정정(이 설계를 반영할 때 함께):
 
 - AS 1절 A0-B 행·리플렉션 한계 행·5.6절(이 문서로 연결, `-fno-math-errno`·llvm-nm 서술 정정)·14절 시나리오 13·25(구성 사이 쿠킹 byte 비교): 이 초안과 함께 반영했다.
-- `ReflectionMetadata.ko.md`: 타깃 소유·버전 비노출·모든 비정적 필드 반영 서술을 B1–B2 결과로 바꾼다.
+- `ReflectionMetadata.ko.md`: 타깃 소유·버전 비노출·모든 비정적 필드 리플렉션 필수 서술을 B1–B2 결과로 바꾼다.
 - `SparksLanguage.ko.md`의 `Soft<T>`(AssetId만)·`UiToolkit.ko.md`의 `AssetRef<T>` → `SoftObjectRef<T>`(AssetId + 객체 경로). `UiToolkit.ko.md`의 `Sides<float>`(비템플릿 구체 타입으로)·지정자 확장 문법(CU1이 2.1절 표를 넓힌다).
 - `EngineImplementationPlan.ko.md` 7.1절 예시 매크로(`ROCKS_REFLECT`·`ROCKS_FIELD(FieldId=…)`)와 `GcArray` 용어 → 현재 문법·`ObjectRefArray`.
 - `EngineRuntime.ko.md` 68·80·105행: `ROCKS_NATIVE_CLASS` → `ROCKS_NATIVE_TYPE`, B8 이전 계획.
