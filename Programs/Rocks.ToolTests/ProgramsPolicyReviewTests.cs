@@ -26,8 +26,15 @@ internal static class ProgramsPolicyReviewTests
         {
             using TemporaryDirectory temporary = new();
             temporary.Write("Programs/Commandlet/Private/Win64/Main.cpp", "#include <Windows.h>\n");
-            Verify.Equal(0, PolicyChecks.PlatformBoundary(temporary.Root).Count, "native Win64 entry rejected");
+            temporary.Write("Engine/Source/Runtime/PlatformWindow/Private/Win64/Window.cpp", "#include <Windows.h>\n");
+            temporary.Write("Engine/Source/Developer/Tool/Private/Mac/Tool.cpp", "#if __APPLE__\n#endif\n");
+            Verify.Equal(0, PolicyChecks.PlatformBoundary(temporary.Root).Count, "native backend entry rejected");
             foreach (string path in new[] {
+                "Engine/Source/Runtime/PlatformWindow/Public/Window.h",
+                "Engine/Source/Runtime/PlatformWindow/Private/Window.cpp",
+                "Engine/Source/Runtime/PlatformWindow/Private/Win64Wrong/Window.cpp",
+                "Engine/Source/Editor/PlatformWindow/Private/Win64/Window.cpp",
+                "Engine/Source/Runtime/PlatformWindow/Tests/Private/Win64/Window.cpp",
                 "Programs/Commandlet/Private/Win64Wrong/Main.cpp",
                 "Programs/Commandlet/Private/Mac/Main.mm",
                 "Programs/Commandlet/Private/Common/Main.cpp",

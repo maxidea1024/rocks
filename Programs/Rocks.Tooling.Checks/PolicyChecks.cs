@@ -137,6 +137,8 @@ public static class PolicyChecks
     /// <item>Core/Source/Runtime/PlatformBase/Private/{Win64,Mac,Posix,Apple,Android}/</item>
     /// <item>Core/Source/Developer/TestSupport/Private/{Win64,Mac,Posix,Apple,Android}/</item>
     /// <item>Programs/Commandlet/Private/Win64/</item>
+    /// <item>Engine/Source/{Runtime,Developer}/&lt;Module&gt;/Private/{Win64,Mac,Posix,Apple,Android}/: 창·그래픽
+    /// backend처럼 OS SDK를 직접 쓰는 엔진 모듈 구현. 공개 헤더(Public/)와 공통 구현은 여전히 금지다.</item>
     /// </list>
     /// </summary>
     public static bool IsNativeBackend(string relative)
@@ -144,6 +146,9 @@ public static class PolicyChecks
         string[] parts = relative.Replace('\\', '/').Split('/');
         if (parts.Length >= 5 && parts[0] == "Programs" && parts[1] == "Commandlet" && parts[2] == "Private")
             return parts[3] == "Win64";
+        if (parts.Length >= 7 && parts[0] == "Engine" && parts[1] == "Source" &&
+            parts[2] is "Runtime" or "Developer" && parts[4] == "Private")
+            return parts[5] is "Win64" or "Mac" or "Posix" or "Apple" or "Android";
         if (parts.Length < 7 || parts[0] != "Core" || parts[1] != "Source" || parts[4] != "Private")
             return false;
         bool platform = parts[5] is "Win64" or "Mac" or "Posix" or "Apple" or "Android";
