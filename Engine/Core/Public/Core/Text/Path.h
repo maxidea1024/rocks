@@ -15,6 +15,90 @@ enum class PathRoot {
     WindowsUnc
 };
 
+// 루트 뒤의 경로 구성 요소를 앞에서부터 빌려 주는 범위다(UE FPathViews::IterateComponents 대응).
+// 반복 구분자로 생긴 빈 구성 요소는 건너뛰고 '.'·'..'는 정규화하지 않고 그대로 낸다. 루트 자체는
+// 포함하지 않는다(Path::RootPart). view는 원본 경로를 빌린다.
+// 사용 예: for (StringView part : Path::Components("a//b/c").Value()) { ... }
+class PathComponentRange {
+public:
+    class Iterator {
+    public:
+        using value_type = StringView;
+        using difference_type = isize;
+        using reference = StringView;
+
+        Iterator() noexcept = default;
+
+        StringView operator*() const noexcept {
+            return StringView(text_ + start_, end_ - start_);
+        }
+
+        Iterator& operator++() noexcept {
+            Advance(end_);
+            return *this;
+        }
+
+        Iterator operator++(int) noexcept {
+            Iterator previous = *this;
+            Advance(end_);
+            return previous;
+        }
+
+        friend bool operator==(const Iterator& left, const Iterator& right) noexcept {
+            return left.start_ == right.start_;
+        }
+
+    private:
+        friend class PathComponentRange;
+
+        Iterator(const char* text, usize size, usize from, bool windows) noexcept
+            : text_(text), size_(size), windows_(windows) {
+            Advance(from);
+        }
+
+        bool Separator(char value) const noexcept {
+            return value == '/' || (windows_ && value == '\\');
+        }
+
+        void Advance(usize from) noexcept {
+            usize cursor = from;
+            while (cursor < size_ && Separator(text_[cursor])) {
+                ++cursor;
+            }
+            start_ = cursor;
+            end_ = cursor;
+            while (end_ < size_ && !Separator(text_[end_])) {
+                ++end_;
+            }
+        }
+
+        const char* text_ = nullptr;
+        usize size_ = 0;
+        usize start_ = 0;
+        usize end_ = 0;
+        bool windows_ = false;
+    };
+
+    Iterator begin() const noexcept {
+        return Iterator(path_.Data(), path_.ByteCount(), rootEnd_, windows_);
+    }
+
+    Iterator end() const noexcept {
+        return Iterator(path_.Data(), path_.ByteCount(), path_.ByteCount(), windows_);
+    }
+
+private:
+    friend class Path;
+
+    PathComponentRange(StringView path, usize rootEnd, bool windows) noexcept
+        : path_(path), rootEnd_(rootEnd), windows_(windows) {
+    }
+
+    StringView path_;
+    usize rootEnd_ = 0;
+    bool windows_ = false;
+};
+
 // Split의 결과는 원본 저장소를 빌린다. 원본이 변경·파괴되면 사용하지 않는다.
 struct PathParts {
     StringView directory;
@@ -106,6 +190,23 @@ public:
                                           PathStyle style = HostStyle()) noexcept;
     static Result<String> SetExtension(Allocator& allocator, StringView path, StringView extension,
                                        PathStyle style = HostStyle()) noexcept;
+
+    // 경로의 루트 표기("/", "C:", "C:\\", "\\\\server\\share\\" 등)를 빌린다. 상대 경로는 빈
+    // view다.
+    static Result<StringView> RootPart(StringView path, PathStyle style = HostStyle()) noexcept;
+    // 루트 뒤의 구성 요소 범위다. 오류는 Root와 같다(무효 UTF-8·NUL은 InvalidArgument, Windows
+    // device namespace는 Unsupported). 조상 순회는 Parent를 루트에 닿을 때까지 반복한다.
+    static Result<PathComponentRange> Components(StringView path,
+                                                 PathStyle style = HostStyle()) noexcept;
+    // 끝 구분자를 무시한 마지막 구성 요소다(UE FPathViews::GetPathLeaf 대응). "a/b/"는 "b", 루트만
+    // 있거나 빈 경로는 빈 view다. FileName과 달리 디렉터리 경로의 이름도 돌려준다.
+    static Result<StringView> PathLeaf(StringView path, PathStyle style = HostStyle()) noexcept;
+    // 구분자를 대상 플랫폼 표기로 바꾼 사본이다(UE FPaths::MakePlatformFilename 대응). Windows
+    // 문법은
+    // '/'를 '\\'로 바꾸고 POSIX 문법은 그대로 복사한다('\\'는 POSIX에서 문자다). 그 밖의 표기는
+    // 정규화하지 않는다. 오류는 Root와 같다.
+    static Result<String> MakePlatformFilename(Allocator& allocator, StringView path,
+                                               PathStyle style = HostStyle()) noexcept;
 };
 
 } // namespace rocks

@@ -77,6 +77,30 @@ uint64 HashBytes(StringView value, usize baseBytes) noexcept {
     return hash;
 }
 
+// NameKey 영속 알고리즘 v1이다. pool 내부 hash(HashBytes)와 분리해 두며 값을 바꾸지 않는다.
+uint64 NameKeyHashV1(StringView value, usize baseBytes) noexcept {
+    uint64 hash = 14695981039346656037ull;
+    for (usize index = 0; index < baseBytes; ++index) {
+        hash ^= FoldAscii(static_cast<uint8>(value.Data()[index]));
+        hash *= 1099511628211ull;
+    }
+    hash = (hash ^ (hash >> 30)) * 0xbf58476d1ce4e5b9ull;
+    hash = (hash ^ (hash >> 27)) * 0x94d049bb133111ebull;
+    hash ^= hash >> 31;
+    return hash == 0 ? 1 : hash;
+}
+
+NameKey KeyFor(StringView source) noexcept {
+    const ParsedName parsed = ParseName(source);
+    if (parsed.baseBytes == 0) {
+        return {};
+    }
+    if (IsNoneBase(source, parsed.baseBytes)) {
+        return NameKey{0, parsed.number};
+    }
+    return NameKey{NameKeyHashV1(source, parsed.baseBytes), parsed.number};
+}
+
 bool EqualBase(StringView left, StringView right, usize baseBytes) noexcept {
     for (usize index = 0; index < baseBytes; ++index) {
         if (FoldAscii(static_cast<uint8>(left.Data()[index])) !=
@@ -162,6 +186,10 @@ StringView NameLease::BaseView() const noexcept {
     return firstDigit != 0 && view_.Data()[firstDigit - 1] == '_'
                ? StringView(view_.Data(), firstDigit - 1)
                : view_;
+}
+
+NameKey NameLease::Key() const noexcept {
+    return pool_ == nullptr ? NameKey{} : KeyFor(view_);
 }
 
 Result<NameLease> NameLease::TryClone() const noexcept {
@@ -502,6 +530,14 @@ Result<void> NamePool::Shutdown() noexcept {
 NamePoolStats NamePool::Stats() const noexcept {
     platform::LockGuard lock(gate_);
     return stats_;
+}
+
+Result<NameKey> TryMakeNameKey(StringView text) noexcept {
+    auto valid = text.ValidateUtf8();
+    if (!valid) {
+        return Result<NameKey>::Failure(valid.Error());
+    }
+    return Result<NameKey>::Success(KeyFor(text));
 }
 
 } // namespace rocks

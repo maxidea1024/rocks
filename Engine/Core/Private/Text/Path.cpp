@@ -934,6 +934,61 @@ Result<StringView> Path::Directory(StringView path, PathStyle style) noexcept {
     return Result<StringView>::Success(Slice(path, 0, end == 0 ? 0 : end - 1));
 }
 
+Result<StringView> Path::RootPart(StringView path, PathStyle style) noexcept {
+    auto root = Parse(path, style);
+    if (!root) {
+        return Result<StringView>::Failure(root.Error());
+    }
+    return Result<StringView>::Success(Slice(path, 0, root.Value().end));
+}
+
+Result<PathComponentRange> Path::Components(StringView path, PathStyle style) noexcept {
+    auto root = Parse(path, style);
+    if (!root) {
+        return Result<PathComponentRange>::Failure(root.Error());
+    }
+    return Result<PathComponentRange>::Success(
+        PathComponentRange(path, root.Value().end, style == PathStyle::Windows));
+}
+
+Result<StringView> Path::PathLeaf(StringView path, PathStyle style) noexcept {
+    auto root = Parse(path, style);
+    if (!root) {
+        return Result<StringView>::Failure(root.Error());
+    }
+    const usize rootEnd = root.Value().end;
+    usize end = path.ByteCount();
+    while (end > rootEnd && Separator(path.Data()[end - 1], style)) {
+        --end;
+    }
+    usize begin = end;
+    while (begin > rootEnd && !Separator(path.Data()[begin - 1], style)) {
+        --begin;
+    }
+    return Result<StringView>::Success(Slice(path, begin, end - begin));
+}
+
+Result<String> Path::MakePlatformFilename(Allocator& allocator, StringView path,
+                                          PathStyle style) noexcept {
+    auto root = Parse(path, style);
+    if (!root) {
+        return Result<String>::Failure(root.Error());
+    }
+    String output(allocator);
+    auto assigned = output.TryAssign(path);
+    if (!assigned) {
+        return Result<String>::Failure(assigned.Error());
+    }
+    if (style == PathStyle::Windows) {
+        // '/'와 '\\'는 모두 ASCII이므로 바꿔도 UTF-8 유효성은 유지된다.
+        auto replaced = output.TryReplace("/", "\\", StringComparison::CaseSensitive);
+        if (!replaced) {
+            return Result<String>::Failure(replaced.Error());
+        }
+    }
+    return Result<String>::Success(Move(output));
+}
+
 Result<StringView> Path::Parent(StringView path, PathStyle style) noexcept {
     auto root = Parse(path, style);
     if (!root) {

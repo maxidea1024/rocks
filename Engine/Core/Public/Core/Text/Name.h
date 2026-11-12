@@ -73,6 +73,30 @@ struct Name {
     }
 };
 
+// 실행·pool과 무관한 이름의 비교 identity다. 저장·네트워크 형식에서 런타임 token(Name의 domain·id는
+// 실행마다 다르다) 대신 쓰는 key다. ASCII 대소문자만 다른 이름은 같은 key, 번호는 Name::number와
+// 같은 표현(0은 번호 없음, 그 밖은 외부 번호 + 1)이다. None 규칙도 NamePool과 같다: 빈 문자열과
+// 빈 base의 번호 이름("_5")은 None key {0, 0}, "None"의 대소문자 변형은 hash 0이다.
+// hash는 고정된 영속 알고리즘 v1이다: base byte를 ASCII 소문자로 바꿔 FNV-1a 64로 hash하고
+// splitmix64 마무리를 적용한다(결과 0은 1로 바꾼다). 이 값은 버전·플랫폼 사이에 바뀌지 않으며
+// 바꾸려면 새 버전을 정의한다. 비ASCII는 byte 그대로이며 Unicode folding·정규화는 하지 않는다.
+// 64-bit hash이므로 서로 다른 이름이 같은 key일 수 있다. key만으로 이름을 복원할 수 없으므로 영속
+// 형식은 이름 원문 표를 함께 저장하고 읽을 때 원문으로 검증한다.
+struct NameKey {
+    uint64 hash = 0;
+    uint32 number = 0;
+
+    constexpr bool IsNone() const noexcept {
+        return hash == 0 && number == 0;
+    }
+
+    friend constexpr bool operator==(NameKey, NameKey) noexcept = default;
+};
+
+// text의 NameKey다. NamePool::TryIntern과 같은 번호 접미사·None 규칙으로 해석한다. 잘못된 UTF-8은
+// InvalidArgument다. pool·allocator가 필요 없다.
+Result<NameKey> TryMakeNameKey(StringView text) noexcept;
+
 // immutable 문자열의 조회 수명을 붙드는 이동 전용 lease다. pool 객체 자체를 소유하지 않으므로
 // pool/allocator는 모든 lease 반환과 진행 중 호출 종료까지 살아 있어야 한다.
 // 서로 다른 lease의 반환은 병행 가능하지만 같은 lease의 이동/반환/조회 경합은 caller가 막는다.
@@ -95,6 +119,8 @@ public:
 
     // 유효한 번호 접미사 `_N`을 제외한 원문 이름이다. view 수명은 View()와 같다.
     StringView BaseView() const noexcept;
+    // 이 이름의 실행 독립 key다. 빈 lease는 None key다.
+    NameKey Key() const noexcept;
 
     // 새 lease admission이다. Shutdown 이후 ShuttingDown, 계수 소진은 Overflow다.
     // 실패해도 원본 lease와 그 view는 유효하다. 빈 lease는 StaleHandle이다.
