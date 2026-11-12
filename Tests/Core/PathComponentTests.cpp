@@ -56,6 +56,20 @@ TEST(Path_ComponentsSkipEmptyAndKeepDots) {
     CHECK(Path::Components(StringView("\xff", 1), PathStyle::Posix).Error() ==
           ErrorCode::InvalidArgument);
     CHECK(Path::Components("\\\\?\\C:\\x", PathStyle::Windows).Error() == ErrorCode::Unsupported);
+    // NT object namespace도 거부한다(역슬래시·슬래시 모두).
+    CHECK(Path::Components("\\??\\C:\\x", PathStyle::Windows).Error() == ErrorCode::Unsupported);
+    CHECK(Path::Components("/\?\?/C:/x", PathStyle::Windows).Error() == ErrorCode::Unsupported);
+    CHECK(Path::Components("\\\\server", PathStyle::Windows).Error() ==
+          ErrorCode::InvalidArgument); // 불완전한 UNC
+    CHECK(ComponentsAre("//a", PathStyle::Posix, "a"));
+    CHECK(ComponentsAre("\\\\server\\share", PathStyle::Windows, ""));
+    CHECK(Same(Path::PathLeaf("\\\\server\\share", PathStyle::Windows).Value(), ""));
+    // 반복자 비교: 기본 생성끼리는 같고, 서로 다른 경로의 반복자는 다르다.
+    CHECK(PathComponentRange::Iterator() == PathComponentRange::Iterator());
+    auto first = Path::Components("x/y", PathStyle::Posix);
+    auto second = Path::Components("p/q", PathStyle::Posix);
+    REQUIRE(first && second);
+    CHECK(!(first.Value().begin() == second.Value().begin()));
     // 반복자는 forward 반복 규약을 따른다.
     auto range = Path::Components("x/y", PathStyle::Posix);
     REQUIRE(range);
@@ -70,9 +84,13 @@ TEST(Path_RootPartAndPathLeaf) {
     CHECK(Same(Path::RootPart("C:\\a", PathStyle::Windows).Value(), "C:\\"));
     CHECK(Same(Path::RootPart("C:a", PathStyle::Windows).Value(), "C:"));
     CHECK(Same(Path::RootPart("\\a", PathStyle::Windows).Value(), "\\"));
-    auto unc = Path::RootPart("\\\\server\\share\\dir", PathStyle::Windows);
-    REQUIRE(unc);
-    CHECK(unc.Value().StartsWith("\\\\server\\share"));
+    // UNC 루트는 공유 이름 뒤 구분자가 있으면 포함한다(다른 절대 루트와 같이 바로 이어 붙일 수
+    // 있다).
+    CHECK(Same(Path::RootPart("\\\\server\\share\\dir", PathStyle::Windows).Value(),
+               "\\\\server\\share\\"));
+    CHECK(
+        Same(Path::RootPart("\\\\server\\share", PathStyle::Windows).Value(), "\\\\server\\share"));
+    CHECK(Path::RootPart("\\\\server", PathStyle::Windows).Error() == ErrorCode::InvalidArgument);
 
     CHECK(Same(Path::PathLeaf("a/b/", PathStyle::Posix).Value(), "b"));
     CHECK(Same(Path::PathLeaf("a/b//", PathStyle::Posix).Value(), "b"));
@@ -99,8 +117,10 @@ TEST(Path_MakePlatformFilename) {
     auto posix = Path::MakePlatformFilename(allocator, "a/b\\c", PathStyle::Posix);
     REQUIRE(posix);
     CHECK(Same(posix.Value().View(), "a/b\\c"));
-    // 변환 결과가 device namespace가 되는 입력은 처음부터 거부한다.
+    // 변환 결과가 device·NT namespace가 되는 입력은 처음부터 거부한다.
     CHECK(Path::MakePlatformFilename(allocator, "//?/C:/x", PathStyle::Windows).Error() ==
+          ErrorCode::Unsupported);
+    CHECK(Path::MakePlatformFilename(allocator, "/\?\?/C:/Windows", PathStyle::Windows).Error() ==
           ErrorCode::Unsupported);
     CHECK(Path::MakePlatformFilename(allocator, StringView("a\0", 2), PathStyle::Posix).Error() ==
           ErrorCode::InvalidArgument);

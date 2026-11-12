@@ -92,6 +92,13 @@ Result<ParsedRoot> Parse(StringView path, PathStyle style) noexcept {
         return Result<ParsedRoot>::Success(root);
     }
 
+    // NT object namespace("\??\C:\x")도 device namespace처럼 거부한다. Win32는 이 접두사를
+    // 역슬래시일 때만 그대로 넘기므로, '/'로 쓴 "/??/"를 MakePlatformFilename이 바꾸면 의미가
+    // 달라진다.
+    if (size >= 4 && text[1] == '?' && text[2] == '?' && Separator(text[3], style)) {
+        return Result<ParsedRoot>::Failure(ErrorCode::Unsupported);
+    }
+
     if (size < 2 || !Separator(text[1], style)) {
         root.kind = PathRoot::WindowsCurrentDriveRoot;
         root.end = 1;
@@ -939,7 +946,16 @@ Result<StringView> Path::RootPart(StringView path, PathStyle style) noexcept {
     if (!root) {
         return Result<StringView>::Failure(root.Error());
     }
-    return Result<StringView>::Success(Slice(path, 0, root.Value().end));
+
+    // UNC 루트는 공유 이름 뒤의 구분자 하나까지 포함해 다른 절대 루트("C:\\", "/")와 같이
+    // 구성 요소를 바로 이어 붙일 수 있게 한다.
+    usize end = root.Value().end;
+    if (root.Value().kind == PathRoot::WindowsUnc && end < path.ByteCount() &&
+        Separator(path.Data()[end], style)) {
+        ++end;
+    }
+
+    return Result<StringView>::Success(Slice(path, 0, end));
 }
 
 Result<PathComponentRange> Path::Components(StringView path, PathStyle style) noexcept {

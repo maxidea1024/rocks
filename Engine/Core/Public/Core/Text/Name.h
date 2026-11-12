@@ -73,21 +73,67 @@ struct Name {
     }
 };
 
-// 실행·pool과 무관한 이름의 비교 identity다. 저장·네트워크 형식에서 런타임 token(Name의 domain·id는
-// 실행마다 다르다) 대신 쓰는 key다. ASCII 대소문자만 다른 이름은 같은 key, 번호는 Name::number와
-// 같은 표현(0은 번호 없음, 그 밖은 외부 번호 + 1)이다. None 규칙도 NamePool과 같다: 빈 문자열과
-// 빈 base의 번호 이름("_5")은 None key {0, 0}, "None"의 대소문자 변형은 hash 0이다.
-// hash는 고정된 영속 알고리즘 v1이다: base byte를 ASCII 소문자로 바꿔 FNV-1a 64로 hash하고
-// splitmix64 마무리를 적용한다(결과 0은 1로 바꾼다). 이 값은 버전·플랫폼 사이에 바뀌지 않으며
-// 바꾸려면 새 버전을 정의한다. 비ASCII는 byte 그대로이며 Unicode folding·정규화는 하지 않는다.
-// 64-bit hash이므로 서로 다른 이름이 같은 key일 수 있다. key만으로 이름을 복원할 수 없으므로 영속
-// 형식은 이름 원문 표를 함께 저장하고 읽을 때 원문으로 검증한다.
+// 실행·pool과 무관한 이름의 비교 identity다. 저장 파일·네트워크 메시지에서 런타임 token(Name의
+// domain·id는 실행마다 다르다) 대신 쓴다.
+//
+// 사용 예(저장):
+//   auto key = TryMakeNameKey("Weapon_3");          // 또는 lease.Key()
+//   uint8 bytes[NameKey::EncodedBytes];
+//   key.Value().Encode(bytes);                      // NameKey::AlgorithmVersion도 파일 머리에 기록
+//
+// 규칙:
+// - ASCII 대소문자만 다른 이름은 같은 key다("Weapon"과 "WEAPON"). 비ASCII는 byte 그대로 비교한다.
+// - number는 Name::number와 같다: 0은 번호 없음, 그 밖은 외부 번호 + 1("Weapon_3"은 4).
+// - None 규칙도 NamePool과 같다: 빈 문자열과 빈 base의 번호 이름("_5")은 None key {0, 0}, "None"의
+//   대소문자 변형은 hash 0이다("None_3"은 {0, 4}).
+// - hash는 고정 알고리즘 v1(AlgorithmVersion)이다: base byte를 ASCII 소문자로 바꿔 FNV-1a 64로
+//   hash하고 splitmix64 마무리를 적용한다(결과 0은 1로 바꾼다). 버전·플랫폼 사이에 바뀌지 않는다.
+//
+// 주의(충돌):
+// - 64-bit hash이므로 서로 다른 이름이 같은 key일 수 있고, 일부러 충돌시키는 것도 어렵지 않다.
+// key만
+//   으로 이름을 복원하거나 신뢰하지 않는다.
+// - 영속 형식은 이름 원문 표를 함께 저장하고 읽을 때 원문으로 key를 다시 계산해 확인한다. 이름 표를
+//   만들 때 서로 다른 원문이 같은 key이면 그 형식에서 오류로 처리한다(쓰는 쪽 책임).
+// - 네트워크 상대가 보낸 key는 그 연결에서 원문으로 확인한 이름에만 대응시킨다.
 struct NameKey {
+    // 영속 형식은 이 버전을 함께 기록한다. hash 알고리즘이나 Name 비교 규칙(예: Unicode case
+    // folding 도입)이 바뀌면 새 버전을 정의하고, 읽을 때 버전이 다르면 이름 원문으로 다시 계산한다.
+    static constexpr uint32 AlgorithmVersion = 1;
+
+    // EncodedBytes byte의 고정 byte 표현이다(hash 8 byte little-endian, number 4 byte
+    // little-endian). 구조체를 그대로 memcpy하면 padding·endianness 때문에 플랫폼마다 달라지므로 이
+    // 형식을 쓴다.
+    static constexpr usize EncodedBytes = 12;
+
     uint64 hash = 0;
     uint32 number = 0;
 
     constexpr bool IsNone() const noexcept {
         return hash == 0 && number == 0;
+    }
+
+    constexpr void Encode(uint8 (&out)[EncodedBytes]) const noexcept {
+        for (usize index = 0; index < 8; ++index) {
+            out[index] = static_cast<uint8>(hash >> (index * 8));
+        }
+
+        for (usize index = 0; index < 4; ++index) {
+            out[8 + index] = static_cast<uint8>(number >> (index * 8));
+        }
+    }
+
+    static constexpr NameKey Decode(const uint8 (&in)[EncodedBytes]) noexcept {
+        NameKey key;
+        for (usize index = 0; index < 8; ++index) {
+            key.hash |= static_cast<uint64>(in[index]) << (index * 8);
+        }
+
+        for (usize index = 0; index < 4; ++index) {
+            key.number |= static_cast<uint32>(in[8 + index]) << (index * 8);
+        }
+
+        return key;
     }
 
     friend constexpr bool operator==(NameKey, NameKey) noexcept = default;

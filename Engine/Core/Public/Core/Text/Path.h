@@ -15,10 +15,21 @@ enum class PathRoot {
     WindowsUnc
 };
 
-// 루트 뒤의 경로 구성 요소를 앞에서부터 빌려 주는 범위다(UE FPathViews::IterateComponents 대응).
-// 반복 구분자로 생긴 빈 구성 요소는 건너뛰고 '.'·'..'는 정규화하지 않고 그대로 낸다. 루트 자체는
-// 포함하지 않는다(Path::RootPart). view는 원본 경로를 빌린다.
-// 사용 예: for (StringView part : Path::Components("a//b/c").Value()) { ... }
+// 루트 뒤의 경로 구성 요소를 앞에서부터 하나씩 빌려 주는 범위다(Path::Components가 만든다).
+//
+//   auto parts = Path::Components("C:\\Game\\Content\\Maps", PathStyle::Windows);
+//   if (parts) {
+//       for (StringView part : parts.Value()) { ... }   // "Game", "Content", "Maps"
+//   }
+//
+// - 루트("C:\\"·"/"·"\\\\server\\share\\")는 내지 않는다. 루트는 Path::RootPart로 얻는다.
+// - 반복 구분자로 생기는 빈 구성 요소는 건너뛴다("a//b"는 "a", "b").
+// - '.'·'..'는 정규화하지 않고 그대로 낸다. 정규화가 필요하면 Path::Normalize를 먼저 쓴다.
+// - 구성 요소 view는 원본 경로를 빌린다. 원본이 바뀌거나 사라지면 쓰지 않는다. 결과 Result를 지역
+//   변수에 담은 뒤 반복한다(임시 Result에 바로 range-for를 걸면 이전 컴파일러에서 수명 문제가
+//   있다).
+// - UE FPathViews::IterateComponents와 쓰임은 같지만 루트·빈 구성 요소를 다루는 방식은 다를 수
+// 있다.
 class PathComponentRange {
 public:
     class Iterator {
@@ -44,8 +55,9 @@ public:
             return previous;
         }
 
+        // 같은 경로의 같은 위치일 때 같다. 서로 다른 범위의 반복자는 비교하지 않는다.
         friend bool operator==(const Iterator& left, const Iterator& right) noexcept {
-            return left.start_ == right.start_;
+            return left.text_ == right.text_ && left.start_ == right.start_;
         }
 
     private:
@@ -191,20 +203,31 @@ public:
     static Result<String> SetExtension(Allocator& allocator, StringView path, StringView extension,
                                        PathStyle style = HostStyle()) noexcept;
 
-    // 경로의 루트 표기("/", "C:", "C:\\", "\\\\server\\share\\" 등)를 빌린다. 상대 경로는 빈
-    // view다.
+    // 경로의 루트 부분을 빌린다. 상대 경로는 빈 view다.
+    //   "/usr/lib"(POSIX) → "/",  "C:\\a" → "C:\\",  "C:a" → "C:",  "\\a" → "\\",
+    //   "\\\\server\\share\\dir" → "\\\\server\\share\\"(공유 이름 뒤 구분자가 있으면 포함)
+    // 오류는 Root와 같다(잘못된 UTF-8·NUL은 InvalidArgument, Windows device·NT namespace는
+    // Unsupported, 불완전한 UNC는 InvalidArgument).
     static Result<StringView> RootPart(StringView path, PathStyle style = HostStyle()) noexcept;
-    // 루트 뒤의 구성 요소 범위다. 오류는 Root와 같다(무효 UTF-8·NUL은 InvalidArgument, Windows
-    // device namespace는 Unsupported). 조상 순회는 Parent를 루트에 닿을 때까지 반복한다.
+
+    // 루트 뒤의 구성 요소 범위다(PathComponentRange 참고). 오류는 RootPart와 같다.
+    // 조상 디렉터리를 차례로 보려면 Parent를 루트에 닿을 때까지 반복한다.
     static Result<PathComponentRange> Components(StringView path,
                                                  PathStyle style = HostStyle()) noexcept;
-    // 끝 구분자를 무시한 마지막 구성 요소다(UE FPathViews::GetPathLeaf 대응). "a/b/"는 "b", 루트만
-    // 있거나 빈 경로는 빈 view다. FileName과 달리 디렉터리 경로의 이름도 돌려준다.
+
+    // 끝 구분자를 무시한 마지막 구성 요소다(UE FPathViews::GetPathLeaf와 같은 용도).
+    //   "a/b/" → "b",  "a/b.txt" → "b.txt",  "/"·"" → 빈 view,  "C:x" → "x"
+    // FileName과 다른 점: FileName은 끝 구분자가 있으면 빈 값이고 루트도 이름으로 볼 수 있다
+    // ("C:a" → "C:a", "\\\\server\\share" → "share"). PathLeaf는 루트를 구성 요소로 보지 않는다
+    // ("C:a" → "a", "\\\\server\\share" → 빈 view). 오류는 RootPart와 같다.
     static Result<StringView> PathLeaf(StringView path, PathStyle style = HostStyle()) noexcept;
-    // 구분자를 대상 플랫폼 표기로 바꾼 사본이다(UE FPaths::MakePlatformFilename 대응). Windows
-    // 문법은
-    // '/'를 '\\'로 바꾸고 POSIX 문법은 그대로 복사한다('\\'는 POSIX에서 문자다). 그 밖의 표기는
-    // 정규화하지 않는다. 오류는 Root와 같다.
+
+    // 구분자를 대상 플랫폼 표기로 바꾼 사본을 만든다(UE FPaths::MakePlatformFilename과 같은 용도).
+    //   Windows 문법: "C:/Game/Saved" → "C:\\Game\\Saved"
+    //   POSIX 문법: 그대로 복사한다. '\\'는 POSIX 파일 이름에 쓸 수 있는 문자이므로 바꾸지
+    //   않는다(UE는 바꿀 수 있다).
+    // 구분자 외의 표기('.'·'..'·반복 구분자)는 정규화하지 않는다. 오류는 RootPart와 같으며, 바꾼
+    // 결과가 device·NT namespace가 되는 입력("//?/…", "/??/…")도 Unsupported다.
     static Result<String> MakePlatformFilename(Allocator& allocator, StringView path,
                                                PathStyle style = HostStyle()) noexcept;
 };

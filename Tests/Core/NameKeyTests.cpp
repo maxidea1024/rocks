@@ -30,6 +30,25 @@ TEST(NameKey_GoldenValuesAreStable) {
     CHECK(KeyOf(StringView("a\0b", 3)) == (NameKey{0xeb38c838c62d597eull, 0}));
 }
 
+TEST(NameKey_FixedByteEncoding) {
+    CHECK(NameKey::AlgorithmVersion == 1 && NameKey::EncodedBytes == 12);
+    uint8 bytes[NameKey::EncodedBytes];
+    KeyOf("Player_7").Encode(bytes);
+    // hash 0x5d971a6972fa29e7과 number 8의 little-endian이다.
+    const uint8 expected[NameKey::EncodedBytes] = {0xe7, 0x29, 0xfa, 0x72, 0x69, 0x1a,
+                                                   0x97, 0x5d, 0x08, 0x00, 0x00, 0x00};
+    bool same = true;
+    for (usize index = 0; index < NameKey::EncodedBytes; ++index) {
+        same = same && bytes[index] == expected[index];
+    }
+
+    CHECK(same);
+    CHECK(NameKey::Decode(bytes) == KeyOf("Player_7"));
+    const NameKey extreme{~0ull, 0xffffffffu};
+    extreme.Encode(bytes);
+    CHECK(NameKey::Decode(bytes) == extreme);
+}
+
 TEST(NameKey_FollowsPoolComparisonAndNoneRules) {
     // ASCII 대소문자만 무시한다. 비ASCII는 byte 비교다.
     CHECK(KeyOf("player") == KeyOf("PLAYER") && KeyOf("Player_3") == KeyOf("pLAYER_3"));
@@ -55,11 +74,35 @@ TEST(NameKey_MatchesNameEqualityAcrossPools) {
     NamePool second(allocator);
     REQUIRE(first.Initialize());
     REQUIRE(second.Initialize());
-    const char* texts[] = {
-        "Actor",   "actor",   "ACTOR_1", "Actor_1", "Actor_01", "None",
-        "none",    "None_0",  "NONE_0",  "",        "_9",       "Mesh",
-        "Mesh_10", "mesh_10", "Mesh_2",  "Ab",      "aB",       "a_b",
-        "a_B_1",   "A_b_1",   "x_",      "X_",      "Player",   "PLAYER_2147483646"};
+    const char* texts[] = {"Actor",
+                           "actor",
+                           "ACTOR_1",
+                           "Actor_1",
+                           "Actor_01",
+                           "None",
+                           "none",
+                           "None_0",
+                           "NONE_0",
+                           "",
+                           "_9",
+                           "Mesh",
+                           "Mesh_10",
+                           "mesh_10",
+                           "Mesh_2",
+                           "Ab",
+                           "aB",
+                           "a_b",
+                           "a_B_1",
+                           "A_b_1",
+                           "x_",
+                           "X_",
+                           "Player",
+                           "PLAYER_2147483646",
+                           "None_2147483646",
+                           "_2147483647",
+                           "Ã¼",
+                           "Ã",
+                           "a_9999999999"};
     constexpr usize Count = sizeof(texts) / sizeof(texts[0]);
     Name inFirst[Count];
     Name inSecond[Count];
