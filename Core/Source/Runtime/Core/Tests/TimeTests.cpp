@@ -153,11 +153,31 @@ TEST(DateTime_KnownDatesAndValidation) {
 }
 
 TEST(DateTime_EveryDayMatchesIndependentCalendar) {
-    // 0001-01-01부터 9999-12-31까지 하루씩 진행하며 직접 센 달력과 GetDate·TryFromDate·요일을
-    // 대조한다.
+    // 0001-01-01부터 9999-12-31까지 하루씩 진행하며 직접 센 달력과 대조한다.
+    // - 연·월·일: 이 루프가 직접 센 값(달의 날 수는 아래 독립 함수)
+    // - 요일: Sakamoto 공식(구현의 tick 나눗셈과 무관한 독립 계산)
+    // - 연중 날짜: 이 루프가 직접 센 값
+    auto daysInMonth = [](int32 year, int32 month) {
+        constexpr int32 table[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+        const bool leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+        return month == 2 && leap ? 29 : table[month - 1];
+    };
+    auto sakamoto = [](int32 year, int32 month, int32 day) {
+        constexpr int32 offsets[12] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
+        if (month < 3) {
+            --year;
+        }
+
+        // 0은 일요일이다. Rocks는 월요일이 0이므로 6을 더해 맞춘다.
+        const int32 sunday =
+            (year + year / 4 - year / 100 + year / 400 + offsets[month - 1] + day) % 7;
+        return (sunday + 6) % 7;
+    };
+
     int32 year = 1;
     int32 month = 1;
     int32 day = 1;
+    int32 dayOfYear = 1;
     int64 count = 0;
     bool same = true;
     while (same) {
@@ -167,17 +187,19 @@ TEST(DateTime_EveryDayMatchesIndependentCalendar) {
         int32 d = 0;
         value.GetDate(y, m, d);
         same = y == year && m == month && d == day &&
-               static_cast<int64>(value.GetDayOfWeek()) == count % 7;
-        // 생성 방향은 매달 1일·마지막 날과 무작위 날 대신 매 7일마다 확인한다(시간 절약).
+               static_cast<int32>(value.GetDayOfWeek()) == sakamoto(year, month, day) &&
+               value.DayOfYear() == dayOfYear;
+        // 생성 방향(TryFromDate)은 시간을 줄이려고 7일마다 확인한다.
         if (count % 7 == 0) {
             same = same && DateTime::TryFromDate(year, month, day).Value() == value;
         }
 
-        const int32 days = DateTime::TryDaysInMonth(year, month).Value();
-        if (++day > days) {
+        ++dayOfYear;
+        if (++day > daysInMonth(year, month)) {
             day = 1;
             if (++month > 12) {
                 month = 1;
+                dayOfYear = 1;
                 if (++year > 9999) {
                     break;
                 }
@@ -189,6 +211,24 @@ TEST(DateTime_EveryDayMatchesIndependentCalendar) {
 
     CHECK(same);
     CHECK(count == DateTime::MaxTicks / TimeSpan::TicksPerDay);
+}
+
+TEST(Time_ReviewRegressions) {
+    // round()로 큰 값도 정확히 반올림한다(floor(x + 0.5)는 2^52 이상에서 1 tick 어긋났다).
+    CHECK(TimeSpan::TryFromTotalSeconds(450359962.7370497).Value().Ticks() == 4503599627370497ll);
+    CHECK(TimeSpan::TryFromTotalSeconds(-450359962.7370497).Value().Ticks() == -4503599627370497ll);
+
+    // 문법 오류는 일 자릿수가 범위를 넘어도 InvalidArgument다.
+    CHECK(TryParseTimeSpan("99999999999.junk").Error() == ErrorCode::InvalidArgument);
+    CHECK(TryParseTimeSpan("10675201.").Error() == ErrorCode::InvalidArgument);
+    CHECK(TryParseTimeSpan("10675201.00:00:00").Error() == ErrorCode::Overflow);
+
+    // DateTime의 Try 뺄셈은 TimeSpan::MinValue도 Fatal 없이 Overflow로 돌려준다.
+    const DateTime start = Date(2000, 1, 1);
+    CHECK(start.TrySubtract(TimeSpan::MinValue()).Error() == ErrorCode::Overflow);
+    CHECK(start.TrySubtract(TimeSpan::TryFromDays(1).Value()).Value() == Date(1999, 12, 31));
+    CHECK(DateTime::MinValue().TrySubtract(TimeSpan::FromTicks(1)).Error() == ErrorCode::Overflow);
+    CHECK((start - TimeSpan::TryFromHours(1).Value()) == Date(1999, 12, 31, 23));
 }
 
 TEST(DateTime_UnixTimeArithmeticAndUtcNow) {

@@ -119,9 +119,10 @@ Result<TimeSpan> TimeSpan::TryFromTotalSeconds(double seconds) noexcept {
         return Result<TimeSpan>::Failure(ErrorCode::InvalidArgument);
     }
 
-    // 0.5 tick은 0에서 먼 쪽으로 반올림한다.
+    // round()는 .5를 0에서 먼 쪽으로 정확히 반올림한다(floor(x + 0.5)는 큰 값에서 덧셈이 먼저
+    // 반올림되어 1 tick 어긋날 수 있다).
     const double ticks = seconds * static_cast<double>(TicksPerSecond);
-    const double rounded = ticks >= 0.0 ? floor(ticks + 0.5) : ceil(ticks - 0.5);
+    const double rounded = round(ticks);
     // int64 범위는 [-2^63, 2^63)이다. 두 경계는 double로 정확히 표현된다.
     if (!(rounded >= -9223372036854775808.0 && rounded < 9223372036854775808.0)) {
         return Result<TimeSpan>::Failure(ErrorCode::Overflow);
@@ -144,15 +145,10 @@ Result<TimeSpan> TryParseTimeSpan(StringView text) noexcept {
         return Result<TimeSpan>::Failure(ErrorCode::InvalidArgument);
     }
 
-    uint64 days = 0;
+    // 일 자릿수의 범위는 문법 전체를 확인한 뒤에 본다(문법 오류는 범위와 관계없이 InvalidArgument).
+    usize dayEnd = start;
     if (index < text.ByteCount() && text.Data()[index] == '.') {
-        for (usize digit = start; digit < index; ++digit) {
-            days = days * 10 + static_cast<uint64>(text.Data()[digit] - '0');
-            if (days > MaxTimeSpanDays + 1) {
-                return Result<TimeSpan>::Failure(ErrorCode::Overflow);
-            }
-        }
-
+        dayEnd = index;
         ++index; // '.'
     } else {
         index = start;
@@ -174,6 +170,14 @@ Result<TimeSpan> TryParseTimeSpan(StringView text) noexcept {
 
     if (index != text.ByteCount()) {
         return Result<TimeSpan>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    uint64 days = 0;
+    for (usize digit = start; digit < dayEnd; ++digit) {
+        days = days * 10 + static_cast<uint64>(text.Data()[digit] - '0');
+        if (days > MaxTimeSpanDays + 1) {
+            return Result<TimeSpan>::Failure(ErrorCode::Overflow);
+        }
     }
 
     // 크기를 부호 없이 모은 뒤 부호를 붙인다(MinValue의 크기 2^63도 표현한다).

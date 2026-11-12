@@ -166,6 +166,16 @@ public:
         return TryFromTicks(sum);
     }
 
+    // span만큼 앞으로 옮긴 시각이다. 범위를 넘으면 Overflow다(span이 TimeSpan::MinValue여도 된다).
+    Result<DateTime> TrySubtract(TimeSpan span) const noexcept {
+        int64 difference = 0;
+        if (__builtin_sub_overflow(ticks_, span.Ticks(), &difference)) {
+            return Result<DateTime>::Failure(ErrorCode::Overflow);
+        }
+
+        return TryFromTicks(difference);
+    }
+
     // 연산자는 범위를 넘으면 Fatal이다.
     friend DateTime operator+(DateTime time, TimeSpan span) noexcept {
         auto result = time.TryAdd(span);
@@ -177,7 +187,12 @@ public:
     }
 
     friend DateTime operator-(DateTime time, TimeSpan span) noexcept {
-        return time + (-span);
+        auto result = time.TrySubtract(span);
+        if (!result) {
+            platform::Fatal("DateTime arithmetic is outside the supported range");
+        }
+
+        return result.Value();
     }
 
     // 두 시각의 차이다. 범위가 약 1만 년이라 항상 TimeSpan 안이다.

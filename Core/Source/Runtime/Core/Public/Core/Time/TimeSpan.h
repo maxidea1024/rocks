@@ -85,6 +85,9 @@ public:
 
     // 실수 초(예: 프레임 delta 0.016)에서 가장 가까운 tick으로 만든다. 정확히 반인 경우는 0에서 먼
     // 쪽으로 반올림한다. NaN은 InvalidArgument, 무한·범위 밖은 Overflow다.
+    // 정밀도: 2^53 tick(약 28.5년)보다 긴 값은 seconds × 10^7의 double 곱이 먼저 반올림되므로 가장
+    // 가까운 tick과 수백 tick까지 다를 수 있고, int64 끝 근처 값은 범위 안이어도 Overflow일 수
+    // 있다. 정확한 긴 간격은 정수 단위 함수(TryFromSeconds 등)로 만든다.
     static Result<TimeSpan> TryFromTotalSeconds(double seconds) noexcept;
 
     // 전체 tick 수다.
