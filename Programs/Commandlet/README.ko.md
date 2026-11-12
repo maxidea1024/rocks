@@ -7,7 +7,7 @@ dotnet msbuild Rocks.proj /t:Build /p:RocksTarget=Commandlet
 RocksCommandlet --help
 RocksCommandlet --list
 RocksCommandlet core-check
-dotnet run --project Tools/Rocks.Commandlet.Tests -- --executable <빌드된 실행 파일의 절대 경로>
+dotnet run --project Programs/Rocks.Commandlet.Tests -- --executable <빌드된 실행 파일의 절대 경로>
 ```
 
 인수는 UTF-8로 명시적으로 전달한다. 잘못된 인코딩이나 길이 초과도 사용법 오류 2로 처리한다. Windows 콘솔 출력은 Unicode API를, 리디렉션은 UTF-8 바이트를 사용한다. 실제 Windows 콘솔의 Unicode 표시는 별도 실기 검증이 필요하다. macOS 프로세스는 닫힌 pipe에 의한 SIGPIPE를 무시하여 출력 실패를 처리한다. 성공은 0, 명령 사용법과 알 수 없는 명령은 2, 내부 실행·출력 오류는 1이다. 등록된 명령은 0부터 125까지의 종료 코드를 반환할 수 있다. `--help`와 `--list`에는 추가 인수를 허용하지 않는다.

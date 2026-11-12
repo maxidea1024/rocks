@@ -50,9 +50,9 @@ Transient 필드는 GC 참조 추적에는 참여하지만 저장 그래프에 �
 ## 별도 회귀 검사
 
 ```text
-dotnet run --project Tools/Rocks.Build.Tests
-dotnet run --project Tools/Rocks.Build.IntegrationTests -- --root .
+dotnet run --project Programs/Rocks.Build.Tests
+dotnet run --project Programs/Rocks.Build.IntegrationTests -- --root .
 dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll format --root .
 ```
 
-기존 CMake/Python 경로는 이전 구현의 참고 자료다. 새 기능과 검증의 기준은 C#/.NET 경로다. 구현된 기능과 후속 과제는 실제 검증 범위와 구분하여 관리한다.
+이전 CMake/Python 경로는 2026-11-12 저장소 구성 개편 때 제거했다(git 이력에 남아 있다). 빌드와 검증은 C#/.NET 경로만 쓴다. 구현된 기능과 후속 과제는 실제 검증 범위와 구분하여 관리한다.

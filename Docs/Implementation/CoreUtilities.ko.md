@@ -50,7 +50,7 @@ if (auto locked = observer.Lock()) { Use(*locked); }
 | `HashSet<K>` | `const K&` | `std::forward_iterator` | HashMap과 같음 |
 
 - HashMap 반복자의 역참조는 값으로 반환되는 참조 쌍이므로 `auto` 또는 `const auto&`로 받는다. 구조 변경은 revision으로 탐지하며 `ForEach`와 달리 사전 차단이 아니라 다음 반복 연산에서 Fatal로 드러낸다(음성 대조 `hash-map-iterator-modified`).
-- 검증: `Tests/Core/ContainerIteratorTests.cpp`(STL 없이), `Tests/Core/StlCompatibilityTests.cpp`(이 파일에서만 STL 헤더를 포함해 `std::sort`, `std::accumulate`, `std::ranges::*`, `std::span`, `std::find_if`와 concept `static_assert`로 확인). MSVC STL을 예외 없이 쓰려면 `_HAS_EXCEPTIONS=0`이 필요하다. macOS libc++ 경로는 미검증이다.
+- 검증: `Core/Source/Runtime/Core/Tests/ContainerIteratorTests.cpp`(STL 없이), `Core/Source/Runtime/Core/Tests/StlCompatibilityTests.cpp`(이 파일에서만 STL 헤더를 포함해 `std::sort`, `std::accumulate`, `std::ranges::*`, `std::span`, `std::find_if`와 concept `static_assert`로 확인). MSVC STL을 예외 없이 쓰려면 `_HAS_EXCEPTIONS=0`이 필요하다. macOS libc++ 경로는 미검증이다.
 
 ## 4. 문자(code point) 단위 문자열 처리
 

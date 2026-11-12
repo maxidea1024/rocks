@@ -45,6 +45,6 @@ Trace 오류나 작업 제출 실패는 수락한 모든 worker를 정리한 후
 
 ## 검증과 남은 범위
 
-`Tests/Object/IncrementalGcTests.cpp`와 `IncrementalGcReviewTests.cpp`에서 삽입 장벽, 신규 루트, newborn의 outgoing edge, cutoff, slice 재개, safepoint, 취소, 잘못된 Trace, 큐 OOM, worker 제출 실패, 부분 제출 후 drain, 실제 worker 표식, 독립 그래프 oracle, 회수 예산과 backend 보유를 검증한다. 기존 full collector·수명·음성 대조군을 함께 유지한다.
+`Core/Source/Runtime/ObjectRuntime/Tests/IncrementalGcTests.cpp`와 `IncrementalGcReviewTests.cpp`에서 삽입 장벽, 신규 루트, newborn의 outgoing edge, cutoff, slice 재개, safepoint, 취소, 잘못된 Trace, 큐 OOM, worker 제출 실패, 부분 제출 후 drain, 실제 worker 표식, 독립 그래프 oracle, 회수 예산과 backend 보유를 검증한다. 기존 full collector·수명·음성 대조군을 함께 유지한다.
 
 hard real-time GC, mutator와 동시 스캔, 다중 mutator, 자동 root stack 스캔, 객체 이동/압축, 객체 cluster, 병렬 sweep, 대규모 성능 보증은 이 구현의 완료 범위가 아니다. 새로운 최적화는 현재 수명 규약과 독립 oracle을 유지하면서 별도 측정으로 승인한다. 실제 테스트 수와 native 실행 결과는 FoundationStatus 및 해당 회차 검증 보고서에서 확인한다.

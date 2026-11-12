@@ -19,7 +19,7 @@
   </PropertyGroup>
   <!-- MSBuild는 호스트 도구/규칙/단계를 조직한다. C++ 최신성 판단은 매 호출 Rocks.Build가 담당한다. -->
   <Target Name="BootstrapTools">
-    <Exec Command="dotnet build &quot;$(RocksRoot)Tools/Rocks.Tools.csproj&quot; --nologo" />
+    <Exec Command="dotnet build &quot;$(RocksRoot)Programs/Rocks.Tools.csproj&quot; --nologo" />
   </Target>
   <Target Name="Build" DependsOnTargets="BootstrapTools">
     <Exec Command="$(Tool) build $(CommonArguments) --target $(RocksTarget)" />

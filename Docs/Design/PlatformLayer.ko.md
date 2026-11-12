@@ -14,7 +14,7 @@ UE 5.8 공개 문서에서 확인한 구조는 기능마다 다르다.
 
 ### UE 5.6 소스 확인
 
-추가로 UE 5.6 branch commit `cdda65cecacd9a1278020925c357bf4cc0b17e8c`의 제한된 소스 사본을 확인하였다. 검토한 원본 경로는 `Engine/Source/Runtime/Core/Public/GenericPlatform/GenericPlatformMisc.h`, `GenericPlatformFile.h`, `Windows/WindowsPlatformMisc.h`, `Windows/WindowsPlatformFile.h`, `Apple/ApplePlatformFile.h`, `Mac/MacPlatformFile.h`, `Misc/Paths.h`, `Misc/PathViews.h`와 대응 `Paths.cpp`, `PathViews.cpp`다. 검토용 사본은 현재 작업 공간의 `work/ue5-reference/`에 있으며 엔진 저장소에 포함하지 않는다. 이는 UE 5.6의 해당 파일 확인 결과다. UE 5.8의 전체 플랫폼 구현이 같다는 증거는 아니며 실제 플랫폼 소스 전수 감사는 남아 있다.
+추가로 UE 5.6 branch commit `cdda65cecacd9a1278020925c357bf4cc0b17e8c`의 제한된 소스 사본을 확인하였다. 검토한 원본 경로는 `Core/Source/Runtime/Core/Public/GenericPlatform/GenericPlatformMisc.h`, `GenericPlatformFile.h`, `Windows/WindowsPlatformMisc.h`, `Windows/WindowsPlatformFile.h`, `Apple/ApplePlatformFile.h`, `Mac/MacPlatformFile.h`, `Misc/Paths.h`, `Misc/PathViews.h`와 대응 `Paths.cpp`, `PathViews.cpp`다. 검토용 사본은 현재 작업 공간의 `work/ue5-reference/`에 있으며 엔진 저장소에 포함하지 않는다. 이는 UE 5.6의 해당 파일 확인 결과다. UE 5.8의 전체 플랫폼 구현이 같다는 증거는 아니며 실제 플랫폼 소스 전수 감사는 남아 있다.
 
 - `FGenericPlatformMisc`는 `NormalizePath` 기본 구현 두 종류와 절대 경로 형식 판정 `IsValidAbsolutePathFormat`을 제공한다. 해당 5.6 소스의 기본 경로 보정은 아무 동작도 하지 않고, 기본 절대 형식 판정은 참을 반환한다. `FWindowsPlatformMisc`는 Generic에서 파생하고 절대 형식 판정을 별도로 선언한다. 실제 Windows 구현 내용은 확보한 헤더만으로 확인하지 않았다.
 - `FPaths::NormalizeFilename`과 `FPathViews::NormalizeFilename`은 구분자 처리 후 선택된 `FPlatformMisc::NormalizePath`를 호출한다. Generic 주석에는 Unix의 홈 디렉터리 확장 예가 있지만, 확인한 사본에 해당 Unix 구현은 포함되지 않는다. 플랫폼 보정은 순수 문자열 정규화와 OS 정보 조회가 함께 필요할 수 있다.
@@ -122,7 +122,7 @@ Engine / Tools / Game         프로젝트·설치 구성과 상위 시스템
 | `Private/Mac` | 기본 경로(`_NSGetExecutablePath`·`~/Library`) | macOS |
 | `Private/Android` | hook의 Android 구현(`st_mtim`, `renameat2(RENAME_NOREPLACE)` system call과 미지원 시 검사 후 rename, `fsync`, `gettid`, `CLOCK_MONOTONIC` 조건 변수, `MADV_DONTNEED`)과 경로(`/proc/self/exe`, 앱 등록 디렉터리) | Android |
 
-POSIX 공통 코드는 hook 밖의 OS 전용 API를 직접 쓰지 않는다. policy 검사는 `Posix`·`Apple`·`Android`를 native backend 디렉터리로 인정한다. 테스트 지원 코드도 `Tests/Support/Private/Posix`로 합쳤다.
+POSIX 공통 코드는 hook 밖의 OS 전용 API를 직접 쓰지 않는다. policy 검사는 `Posix`·`Apple`·`Android`를 native backend 디렉터리로 인정한다. 테스트 지원 코드도 `Core/Source/Developer/TestSupport/Private/Posix`로 합쳤다.
 
 Android 앱 전용 저장소 경로는 Java 쪽 Context에서만 알 수 있으므로 앱이 시작 시 `RegisterApplicationDirectories(data, cache)`로 넘긴다. 등록 전에는 `UserData`·`UserCache`가 NotFound이며, `Temporary`는 등록된 cache 또는 `TMPDIR`·`/data/local/tmp`, `Home`은 등록된 data 또는 `HOME`이다. desktop에서 등록은 Unsupported다.
 
@@ -154,7 +154,7 @@ dotnet msbuild Rocks.proj -t:Test -p:RocksPlatform=android -p:AndroidAbi=x86_64
 
 ## UE 5.6 원본 기준 기반 기능 후속 목록
 
-다음 항목은 UE 5.6 commit `cdda65cecacd9a1278020925c357bf4cc0b17e8c`의 지정 헤더 선언과 Rocks `Engine/PlatformBase`, `Engine/Core` 공개 API를 대조한 결과다. UE 헤더의 선언은 기능 범위의 근거이며, 해당 기능이 모든 UE 플랫폼에서 동일하게 구현된다는 뜻은 아니다. Rocks의 기존 일부 구현은 부분 지원으로 기록하고 나머지는 후속으로 분류한다.
+다음 항목은 UE 5.6 commit `cdda65cecacd9a1278020925c357bf4cc0b17e8c`의 지정 헤더 선언과 Rocks `Core/Source/Runtime/PlatformBase`, `Core/Source/Runtime/Core` 공개 API를 대조한 결과다. UE 헤더의 선언은 기능 범위의 근거이며, 해당 기능이 모든 UE 플랫폼에서 동일하게 구현된다는 뜻은 아니다. Rocks의 기존 일부 구현은 부분 지원으로 기록하고 나머지는 후속으로 분류한다.
 
 | 우선순위 | 영역과 UE 5.6 확인 근거 | Rocks 현황과 후속 기능 | 검증 기준 |
 |---|---|---|---|

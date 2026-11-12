@@ -15,6 +15,20 @@ C++23 기반 멀티플랫폼 3D 게임 엔진 프로젝트.
 - **컴파일러 경고 무허용.** 경고는 오류로 처리하며 로컬·CI와 모든 구성에 같은 [필수 정책](Docs/Design/CompilerDiagnostics.ko.md)을 적용한다.
 - 각 구현에 유닛·계약·장애 주입·수명·동시성 하네스와 재현 가능한 검증 증거를 연결한다.
 
+## 저장소 구성
+
+```text
+Core/        기반 라이브러리(엔진 아님): Base·PlatformBase·Core·Task·Serialization·MetaSchema·
+             Localization·ObjectRuntime·ObjectSerialization (Source/Runtime/<모듈>)
+Engine/      게임 엔진 계층(World·Renderer·Gameplay·Editor, 단계적으로 채움)과 엔진 플러그인
+Programs/    실행 프로그램: 테스트 실행 파일·Commandlet(C++), 빌드·메타·검사 도구(C#)
+Build/       규칙 어셈블리·공통 빌드 설정·CI 스크립트
+Templates/   게임 프로젝트 템플릿
+```
+
+모듈마다 폴더에 `<모듈>.Build.cs`·`Public/`·`Private/`·`Tests/`를 둔다. 자세한 규칙은
+[저장소 구성](Docs/Design/RepositoryLayout.ko.md)을 참고한다.
+
 ## 빌드·검증
 
 Windows/macOS의 .NET 10 SDK와 Clang 도구 체인을 사용한다. 명령과 설치 SDK·게임 빌드 옵션은 [빌드 안내](Build/README.md)를 참고한다.
@@ -33,6 +47,7 @@ dotnet msbuild Rocks.proj /t:Test /p:Configuration=Debug /p:RocksTarget=Foundati
 - [Clang 생성 Reflection](Docs/Implementation/ReflectionMetadata.ko.md)
 - [Archive·Record·객체 그래프 직렬화](Docs/Implementation/Serialization.ko.md)
 - [WorkerScheduler 수명·종료 계약](Docs/Implementation/WorkerScheduler.ko.md)
+- [저장소 구성](Docs/Design/RepositoryLayout.ko.md)
 - [전체 구현 계획](Docs/Design/EngineImplementationPlan.ko.md)
 - [Core·Object·Input 상세 구현 계획](Docs/Design/CoreObjectInputDetailedPlan.ko.md)
 - [UI 툴킷 설계(게임 UI·에디터)](Docs/Design/UiToolkit.ko.md)

@@ -9,7 +9,7 @@
 | `rocks_serialization` | Core | `ArchiveWriter`, `ArchiveReader`, `RecordBuilder`, `RecordReader` |
 | `rocks_object_serialization` | ObjectRuntime, Serialization | `SaveObjectGraph`, `LoadObjectGraph`, limits/load options/migration callback |
 
-저장소의 공개 헤더는 `Engine/Serialization/Public/Serialization`과 `Engine/ObjectSerialization/Public/ObjectSerialization`에 위치한다. C++23, 명시 Allocator, move-only Result/소유 컨테이너를 사용한다. 엔진 소유 구현에는 STL 컨테이너·문자열·알고리즘과 host 구조체 메모리 덤프를 사용하지 않는다.
+저장소의 공개 헤더는 `Core/Source/Runtime/Serialization/Public/Serialization`과 `Core/Source/Runtime/ObjectSerialization/Public/ObjectSerialization`에 위치한다. C++23, 명시 Allocator, move-only Result/소유 컨테이너를 사용한다. 엔진 소유 구현에는 STL 컨테이너·문자열·알고리즘과 host 구조체 메모리 덤프를 사용하지 않는다.
 
 ## Binary Archive 값 형식
 

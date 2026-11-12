@@ -68,13 +68,13 @@
 
 주요 파일 위치는 다음과 같다.
 
-- `Engine/Core/Public/Core/Memory`, `Containers`, `Text`: 메모리·컨테이너·문자열 계약.
-- `Engine/Core/Public/Core/Function.h`, `Lifetime`, `Diagnostics`: callable·코드 수명·시스템 진단.
-- `Engine/ObjectRuntime/Public/Object`: 타입 등록·핸들·참조·생성·GC 공개 API.
-- `Engine/ObjectRuntime/Private`: 스키마 저장소, 비이동 Registry와 수집·회수 구현.
-- `Tests/Core`, `Tests/Platform`, `Tests/Object`, `Tests/Foundation`, `Tests/Integration`: 단위·통합·장애·음성 대조군.
-- `Rocks.proj`, `Build/Rules`, `Tools/Rocks.Build*`: MSBuild 진입점과 C# 규칙·네이티브 빌드·SDK 도구.
-- `Tools/Rocks.MetaCompiler`, `Tools/Rocks.ToolTests`: C# 메타컴파일러와 검사·회귀 하네스.
+- `Core/Source/Runtime/Core/Public/Core/Memory`, `Containers`, `Text`: 메모리·컨테이너·문자열 계약.
+- `Core/Source/Runtime/Core/Public/Core/Function.h`, `Lifetime`, `Diagnostics`: callable·코드 수명·시스템 진단.
+- `Core/Source/Runtime/ObjectRuntime/Public/Object`: 타입 등록·핸들·참조·생성·GC 공개 API.
+- `Core/Source/Runtime/ObjectRuntime/Private`: 스키마 저장소, 비이동 Registry와 수집·회수 구현.
+- `Core/Source/Runtime/Core/Tests`, `Core/Source/Runtime/PlatformBase/Tests`, `Core/Source/Runtime/ObjectRuntime/Tests`, `Programs/FoundationTests`, `Build/Legacy/Integration`: 단위·통합·장애·음성 대조군.
+- `Rocks.proj`, `Build/Rules`, `Programs/Rocks.Build*`: MSBuild 진입점과 C# 규칙·네이티브 빌드·SDK 도구.
+- `Programs/Rocks.MetaCompiler`, `Programs/Rocks.ToolTests`: C# 메타컴파일러와 검사·회귀 하네스.
 
 ## 3. 반드시 지켜야 할 수명·동시성 계약
 
@@ -102,7 +102,7 @@
 - `Array`는 단일 원소 삽입·emplace, span/배열 append, resize, 순서 보존/교환 삭제, pop, 앞/뒤 검색, reset·empty·shrink를 제공한다. 이동 전용 원소, 자기 별칭과 할당 실패 시 원상 보존을 고려한다. 재할당·삽입·삭제 시 포인터와 view의 무효화 및 할당기의 반환 순서 계약을 따라야 한다. 정렬·heap과 추가 범위 API는 후속이다.
 - `BitArray`는 bit 단위 크기 조절·삽입·삭제·검색·설정·개수 및 AND/OR/XOR 조합을 제공한다. 자동 크기 증가는 기하 성장하고 명시적 reserve는 워드 경계로 반올림한다. 실패하면 기존 내용과 저장소를 보존한다. UE5.6과 같이 겹치는 구간의 교환 삭제는 `Array`와 `BitArray`가 서로 다른 원본 구간에서 채울 수 있으므로 두 연산의 결과를 동일하다고 가정하지 않는다. 동시 변경에는 외부 동기화가 필요하다.
 
-관련 테스트는 `Tests/Core`의 `StringOperationsTests`, `NameNoneTests`·`NameTokenReviewTests`·`NameEqualityPropertyTests`, `ArrayFeatureTests`·`ArrayGrowthReviewTests`·`ArrayStackReviewTests`, `BitArrayTests`·`BitArrayBoundaryTests`·`BitArrayGrowthTests` 및 실패 대조군에 있다. 존재하는 테스트와 해당 소스의 실제 플랫폼별 실행 결과는 별도로 구분한다.
+관련 테스트는 `Core/Source/Runtime/Core/Tests`의 `StringOperationsTests`, `NameNoneTests`·`NameTokenReviewTests`·`NameEqualityPropertyTests`, `ArrayFeatureTests`·`ArrayGrowthReviewTests`·`ArrayStackReviewTests`, `BitArrayTests`·`BitArrayBoundaryTests`·`BitArrayGrowthTests` 및 실패 대조군에 있다. 존재하는 테스트와 해당 소스의 실제 플랫폼별 실행 결과는 별도로 구분한다.
 
 ## 5. 진단과 검증
 

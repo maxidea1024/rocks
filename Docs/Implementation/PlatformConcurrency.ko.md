@@ -8,7 +8,7 @@
 
 OS 헤더·호출은 플랫폼 private backend와 테스트용 OS adapter만 사용한다. SDK의 `Yield` 매크로와 충돌하지 않도록 공개 함수 이름은 `YieldThread`다. 공용 함수에 `#undef`를 늘려 문제를 가리지 않는다. 지원하지 않는 OS는 구성 단계에서 명확히 실패하며 Linux·콘솔 backend를 구현한 것으로 표시하지 않는다.
 
-`Build/audit_platform_boundary.py`와 음성 fixture는 공용 소스의 알려진 OS 헤더·조건부 전처리·네이티브 호출 유입을 검사한다. 이것은 lexical guard이며 모든 native API 이름이나 매크로 확장을 증명하는 검사는 아니다. 새로운 backend를 추가할 때 플랫폼 선택·감사 범위·native CI를 함께 추가한다.
+`PolicyChecks.PlatformBoundary`(`policy`)와 음성 fixture(`Rocks.ToolTests self`)는 공용 소스의 알려진 OS 헤더·조건부 전처리·네이티브 호출 유입을 검사한다. 이것은 lexical guard이며 모든 native API 이름이나 매크로 확장을 증명하는 검사는 아니다. 새로운 backend를 추가할 때 플랫폼 선택·감사 범위·native CI를 함께 추가한다.
 
 ## API와 수명
 

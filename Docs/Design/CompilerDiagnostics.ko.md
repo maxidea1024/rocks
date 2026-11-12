@@ -26,10 +26,10 @@
 
 ## 실제 강제와 수용 기준
 
-1. CMake의 `rocks_options`가 공통 진단 설정을 전파한다. 새로운 target도 이 프로필을 반드시 사용한다.
-2. `Build/audit_warning_policy.py`는 실제 `compile_commands.json`의 모든 번역 단위에서 필수 플래그와 금지된 억제·강등 옵션을 확인한다. 엔진·테스트·도구 소스의 직접적인 진단 억제 pragma/define도 검사한다.
-3. CTest의 `warning_policy`는 정상 fixture의 실제 컴파일 성공과, 같은 프로필의 미사용 지역 변수 fixture가 **warning-as-error 진단으로 실패함**을 함께 검증한다. 단순한 문법 오류·파일 누락으로 실패한 것은 통과로 인정하지 않는다. fixture는 기본 제품 빌드에서 제외하고 매 실행 재컴파일한다.
-4. 필수 플래그 누락·경고 강등·소스 억제를 주입하는 음성 대조군으로 감사 자체도 검증한다. `Build/build.py`의 정상 검증 경로와 Windows/macOS CI가 이 CTest를 실행한다. `--skip-tests`/`--configure-only`는 최종 수용 증거로 인정하지 않는다.
+1. `Rocks.Build`(`Programs/Rocks.Build`)가 모든 번역 단위에 공통 진단 설정을 붙인다. 모듈 규칙은 이 프로필을 바꾸지 않는다.
+2. `PolicyChecks.CompilationDatabase`(`policy --compile-commands`)는 실제 `compile_commands.json`의 모든 번역 단위에서 필수 플래그와 금지된 억제·강등 옵션을 확인한다. `PolicyChecks.SourceWarnings`는 엔진·테스트·도구 소스의 직접적인 진단 억제 pragma/define도 검사한다.
+3. 도구 harness(`Rocks.ToolTests native`)는 정상 fixture의 실제 컴파일 성공과, 같은 프로필의 미사용 지역 변수 fixture가 **warning-as-error 진단으로 실패함**을 함께 검증한다. 단순한 문법 오류·파일 누락으로 실패한 것은 통과로 인정하지 않는다. fixture는 기본 제품 빌드에서 제외하고 매 실행 재컴파일한다.
+4. 필수 플래그 누락·경고 강등·소스 억제를 주입하는 음성 대조군으로 감사 자체도 검증한다. `dotnet msbuild Rocks.proj /t:Test`의 정상 검증 경로와 Windows/macOS CI가 이 검사를 실행한다. 빌드만 한 결과는 최종 수용 증거로 인정하지 않는다.
 5. 빌드 성공, 경고 정책 검사 성공, 서식 검사 성공, 관련 단위·장애·수명 시험 성공을 모두 요구한다. warning-as-error 실패를 해결하려고 테스트를 삭제하거나 경고 수준을 낮추지 않는다.
 
 소스 검사는 `.h`/`.cpp`/`.mm` 대상 lexical guard이며 전처리 확장 전체의 형식 검증은 아니다. 블록 주석에 쓴 pragma 예제도 탐지할 수 있으므로 긴 예시는 설계 문서에 둔다. `_Pragma` 같은 우회와 새 build script·새 compiler driver를 통한 설정 변경도 코드 리뷰에서 금지한다. 신규 도구 체계 지원 시 실제 compiler invocation에 대한 감사와 음성 fixture를 확장해야 한다. 컴파일 경고 규약은 로깅의 Warning 등급이나 에셋 검증 경고를 자동으로 금지하는 규칙과는 구분한다.

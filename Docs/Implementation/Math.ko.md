@@ -88,7 +88,7 @@ UE 5.6 `Color.h`/`Color.cpp`와의 차이(원본 확인): UE sRGB 디코딩은 �
 
 ## 5. 검증
 
-- 단위 테스트: `Tests/Platform/PlatformMathTests.cpp`(Generic↔CPU 구현 bit 대조, 정수 변환 경계·무작위 30만 건, InvSqrtEstimate 오차, scalar↔SIMD 레지스터 bit 대조 5만 건×2), `Tests/Core/Math*Tests.cpp`(벡터·행렬·투영·quaternion·Transform·Rotator·보간·Rect·Float16, 독립 Gauss-Jordan 역행렬 oracle·Python 정수 행렬식·half 65,536개 전수 왕복과 이진 탐색 oracle 등), `ColorTests.cpp`, `RandomStreamTests.cpp`.
+- 단위 테스트: `Core/Source/Runtime/PlatformBase/Tests/PlatformMathTests.cpp`(Generic↔CPU 구현 bit 대조, 정수 변환 경계·무작위 30만 건, InvSqrtEstimate 오차, scalar↔SIMD 레지스터 bit 대조 5만 건×2), `Core/Source/Runtime/Core/Tests/Math*Tests.cpp`(벡터·행렬·투영·quaternion·Transform·Rotator·보간·Rect·Float16, 독립 Gauss-Jordan 역행렬 oracle·Python 정수 행렬식·half 65,536개 전수 왕복과 이진 탐색 oracle 등), `ColorTests.cpp`, `RandomStreamTests.cpp`.
 - 음성 대조(자식 프로세스): `math-invalid-0..7` — NaN·범위 밖 정수 변환, IntVector overflow, 일괄 변환 크기 불일치·부분 겹침, 행렬 인덱스, 비단위 축, Clamp 범위 위반이 각각 정상 종료하지 않고 지정 진단으로 끝나는지 확인한다.
 - ARM64는 `--target=aarch64-pc-windows-msvc`로 NEON 경로의 **컴파일만** 확인했다. 실행 결과는 아래 미검증이다.
 - 독립 리뷰(2026-11-11, 수학·도형 각 1개 subagent): 수학 쪽은 SSE↔Generic 정수 변환(double 1.6억 건, float 전체 2^32), InvSqrtEstimate(양의 정규 float 전수, ARM FRSQRTE 에뮬레이션 포함), half 변환(F16C 하드웨어와 전수 일치), scalar↔SSE 레지스터(300만 세트)에서 불일치 0을 확인했고, 위 표의 LookTo 평행 판정·Reversed oblique·AngularDistance·quaternion 역원·NaN 전파·FMA 축약·큰 far overflow를 찾아 수정했다. 도형 쪽은 비단위 OBB 회전, capsule 옆면 시작, 삼각형 끝점, 평면 Inf 거리, Box NaN 소실을 찾아 수정했고 수정 후 리뷰어 재현 프로그램 전부(OBB 무작위 70만 쌍 등)에서 실패 0이다. 재현 입력은 회귀 테스트로 옮겼다.

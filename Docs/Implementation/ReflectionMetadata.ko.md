@@ -113,8 +113,8 @@ ObjectReference 필드는 등록 시점에 참조 대상 타입이 아직 등록
 다음 예시는 저장소 루트에서 실행한다.
 
 ```text
-dotnet build Tools/Rocks.Tools.csproj
-dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll --input Tests/Reflection/ReflectionFixture.h --include Tests/Reflection/ReflectionFixture.h --output out/Generated/ReflectionFixture.generated.h --compiler clang-cl
+dotnet build Programs/Rocks.Tools.csproj
+dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll --input Core/Source/Runtime/ObjectRuntime/Tests/Reflection/ReflectionFixture.h --include Core/Source/Runtime/ObjectRuntime/Tests/Reflection/ReflectionFixture.h --output out/Generated/ReflectionFixture.generated.h --compiler clang-cl
 dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll meta --root . --compiler clang-cl --metacompiler out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll
 ```
 컴파일러는 C++23, 예외·RTTI 비활성화와 경고 오류 정책을 적용한다. Windows SDK 환경은 공통 NativeEnvironment가 준비한다. macOS에서 위 예시의 `clang-cl`은 `clang++`로 바꾼다. annotation은 Clang 기능이며 지원하지 않는 컴파일러에서 빈 매크로로 대체하지 않는다.
