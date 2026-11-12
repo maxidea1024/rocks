@@ -134,7 +134,15 @@ uint8 LinearToSrgbByte(float linear) noexcept;   // 경계 표 이분 탐색. Na
 ### 3.2 숫자 변환(CRT 없이)
 
 - 지금 `TryParseDouble`은 strtod·locale 사본을 쓰고(1023 byte 초과 토큰 거부), `FormatShortestFloatingPoint`는 snprintf·strtod 이분 탐색을 쓴다. 둘 다 CRT 구현에 의존하므로 Core에 CRT 없는 구현을 넣는다: 정확히 반올림하는 10진 → 2진(Eisel-Lemire + 큰 정수 보조 경로, 길이 제한 없음 — 입력 상한 안), 최단 왕복 2진 → 10진(Ryu 계열). NumberText·StringBuilder가 이것을 쓰도록 바꾼다(공개 계약은 같다).
-- 시험: .NET(Core 3.0+)의 `double.Parse`·`"R"` 서식과 고정 시드 무작위·경계 사례 수백만 개를 비교하고, 알려진 어려운 사례 표를 고정한다.
+- 구현(구현됨, `Core/Private/Text/DecimalConversion`, 정수 연산만 — CRT·locale·부동소수점 환경과 무관):
+  - 해석: 유효 숫자를 769자리까지 보관하고(그 뒤는 0이 아닌지만 — double 두 이웃 값의 중간점은 768자리 이하, float는 113자리 이하) 지수는 10^17 이상이 되면 더 읽지 않는다(자릿수에서 오는 소수점 이동은 입력 byte 수 이하라, 상쇄하려면 입력이 10^17 byte를 넘어야 한다 — 10^9로 두었을 때 1 GiB 입력이 상쇄하는 것을 교차검증에서 재현해 고쳤다). 10^309 이상은 무한대(Overflow), 10^−324 미만은 0으로 먼저 판정해 표 범위 q ∈ [−342, 308]를 보장한다. 앞 19자리 w와 5^q·2^s의 128비트 내림 표 X(`number-tables` 생성기, BigInteger)로 참값을 [w·X, w′·(X + 1))(잘렸으면 w′ = w + 1, q ∈ [0, 55]면 X가 정확) 사이에 두고 두 경계를 반올림한 결과가 같으면 그것이 답이다(반올림의 단조성 — Eisel-Lemire의 무폴백 증명에 기대지 않는 변형). 다르면 5120비트 고정 용량 큰 정수로 10진 값과 두 후보의 중간점을 정확히 비교한다(동점은 짝수, 잘린 꼬리는 큼). float도 같은 경로로 바로 반올림한다(이중 반올림 없음). 입력 길이 제한은 없다(옛 1023 byte 제한 제거).
+  - 부동소수점 환경과의 무관함은 경계까지 지킨다: 해석 결과·서식 입력을 IEEE 비트로 주고받고 float ↔ double도 정수 연산으로 넓힌다. 교차검증에서 값을 변환 명령에 통과시키던 경계가 FTZ에서 float 서식 무한 루프, DAZ에서 비정규 수를 "0"으로 쓰고 `TryParseFloat`가 0을 내는 것을 재현해 고쳤다(FTZ·DAZ를 켠 회귀 시험).
+  - 최단 표기: Ryu d2d를 형식 매개변수로 일반화했다. 같은 e2에서 계산이 double과 같고 가수 범위만 작으므로 double용 125비트 표(생성)를 float에도 쓴다. 끝 0 판정은 원본의 범위 자르기(q ≤ 21) 없이 정확히 계산한다.
+  - 정밀도 지정 서식('f'·'e'·'g'): 정확한 10진 전개(정수부와 (m mod 2^k)·5^k의 k자리 소수부)를 가장 가까운 값(동점은 짝수)으로 자른다 — glibc·UCRT(Windows 10 2004 이후) printf와 같은 규칙. %g의 고정·과학 선택과 끝 0 제거는 C 표준 규칙이다.
+- 시험(구현됨):
+  - Core: 알려진 어려운 사례 표(Overflow와 문법 오류를 구별)(2^53 + 1의 동점, 최대 비정규·최소 정규 경계, 넘침 경계, `1e23`, float 경계), 2^−1075 정확 중간점(750자리 이상)과 2900자리 꼬리, ToBinary와 독립인 기준값(중간점 비교만 쓰는 이분 탐색)과 무작위 1500건·이웃 double 중간점과 그 위아래 900건 대조, 최단 표기의 최단성·최근접성을 정확한 전개로 독립 확인(double·float 무작위 8000건과 경계 — .NET이 틀리는 2^−25·2^−958 포함), 정밀도 서식의 정확한 반올림 사례, float → double 정수 확장, FTZ·DAZ 환경의 해석·서식. 교차검증은 float 최단 표기 전수(21억 개)·double 14.5억 개를 MS STL `to_chars`·Python과, 해석 237만 건을 Python 정확 오라클과 대조해 불일치 0이었다.
+  - .NET 대조(`Native.NumberConversionMatchesDotNet`): 고정 시드 xorshift로 최단 표기 double 20만·float 10만, 해석 20만(무작위 1–900자리·이웃 중간점과 그 위아래, double·float)을 .NET 10의 `ToString()`·`double.Parse`·`float.Parse`와 비교해 불일치 0. .NET 10의 최단 표기는 2의 거듭제곱 중 2^−25·2^−958 두 값에서 왕복하지 않는 16자리를 낸다(예: 2^−25 → `2.980232238769531E-08`, Python repr과 Rocks는 17자리 `2.9802322387695312e-08` — 직접 확인). 이 둘은 올바른 문자열로 고정해 대조하고, 그 밖에 .NET 기준이 왕복하지 않으면 말뭉치 생성이 실패한다(조용히 빼지 않는다). 표본은 2의 거듭제곱과 그 바로 아래, 비대칭·넘침 경계 중간점, float 범위에 맞춘 지수를 포함한다.
+  - 정책 `crt-number-conversion`: Core·Engine의 런타임과 개발 도구(쿠킹 결정성, 시험 제외)는 CRT 실수 해석(`strtod` 계열 POSIX·MSVC·wide 변형, `atof`)·scanf 계열·locale 함수·cvt 계열과 실수 변환(`%f`·`%e`·`%g`·`%a`)이 있는 printf 계열을 쓰지 않는다. 주석·문자열 리터럴을 지운 뒤 식별자를 비교하고 멤버·한정 이름은 제외한다(함수 포인터·여러 줄 호출도 잡는다). self 시험이 생성 표 최신성(`Policy.RepositoryNumberTables`)과 정책 양성·음성 대조를 줄 단위로 본다.
 
 ### 3.3 읽기(`Core/Text/Json.h`)
 
@@ -173,6 +181,6 @@ uint8 LinearToSrgbByte(float linear) noexcept;   // 경계 표 이분 탐색. Na
 | C1(구현됨) | 데이터 전용 ThirdParty 종류(`kind`·`embeddedIn`·`licenseSource`, 도구·정책·SDK 라이선스 복사·시험), UCD 18.0.0 원본 추가(JSONTestSuite는 C5와 함께) | 정책 검사·self-test·SDK 통합 시험 통과 |
 | C2(구현됨) | Unicode 생성기·표·API, 정책 검사 `unicode-tables` | NormalizationTest 전체(각 열의 IsNormalized 포함), caseless 키 망라 멱등성, CaseFolding·General_Category·Default_Ignorable, 생성기 결정성 |
 | C3(구현됨) | `DeterministicMath` 모듈·표 생성기(sRGB 표·정확도 기준값)·소스 정책·오브젝트 검사, `LinearColor` sRGB 교체, PlatformBase `RunWithDeterministicFloatingPoint` | 기준값·정확도 표·버전 강제(digest)·환경 실행·오브젝트 검사(음성 대조 포함), macOS arm64 비트 비교(CI의 digest 시험) |
-| C4 | CRT 없는 숫자 변환(파서·최단 표기)과 NumberText·StringBuilder 교체 | .NET 대조·어려운 사례 표 |
+| C4(구현됨) | CRT 없는 숫자 변환(파서·최단 표기·정밀도 서식)과 NumberText·StringBuilder 교체, `number-tables` 생성기, 정책 `crt-number-conversion` | .NET 대조·어려운 사례 표·독립 기준값(이분 탐색·최단성) |
 | C5 | JSON 읽기·쓰기 | JSONTestSuite·왕복·고정점·한도·위치 시험 |
 | C6 | RecordList(`WireType::RecordList`) | 형식·예산·실패 원자성 시험 |

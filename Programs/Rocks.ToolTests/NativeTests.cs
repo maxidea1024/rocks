@@ -70,6 +70,18 @@ internal static class NativeTests
                     }
                 });
             }
+        // CRT 없는 숫자 변환을 .NET(Core 3.0+, 최단 왕복 "R"·IEEE 정확 Parse)과 고정 시드 사례 수십만 개로 대조한다
+        // (CoreDataFoundations.ko.md 3.2절).
+        suite.Add("Native.NumberConversionMatchesDotNet", async () =>
+        {
+            using TemporaryDirectory fixture = new();
+            string corpus = fixture.FilePath("numbers.txt");
+            int cases = NumberCorpus.Write(corpus, 0x2026C4ul, shortestDoubles: 200_000, shortestFloats: 100_000, parses: 200_000);
+            var result = await ProcessRunner.RunAsync(new(executable, ["--number-corpus", corpus], options.Root, environment,
+                Timeout: TimeSpan.FromMinutes(5)));
+            Verify.Equal(0, result.ExitCode, "number corpus: " + result.StdOut + result.StdErr);
+            Verify.Contains($"number corpus: {cases} cases, 0 mismatches", result.StdOut, "number corpus summary");
+        });
         suite.Add("Native.InvalidFilterAndRepeat", async () =>
         {
             Verify.Equal(2, (await Run("--filter", "ThisTestDoesNotExist")).ExitCode, "unmatched test filter");

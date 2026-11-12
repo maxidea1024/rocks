@@ -131,6 +131,33 @@ internal static class SelfTests
             var failures = PolicyChecks.DeterministicMathSources(temporary.Root);
             Verify.Equal(5, failures.Count, "deterministic math source violations: " + string.Join("; ", failures));
         });
+        suite.Add("Policy.CrtNumberConversions", () =>
+        {
+            NoFailures(PolicyChecks.CrtNumberConversions(options.Root));
+            using TemporaryDirectory temporary = new();
+            // 양성: 이름마다 한 줄(해석·wide·POSIX·MSVC 변형·scanf·locale·cvt, 전역 한정, 함수 포인터, 여러 줄 호출).
+            string[] positives =
+            [
+                "double a = strtod(text, &end);", "float b = strtof (text, nullptr);", "long double c = ::strtold(t, 0);",
+                "auto d = strtod_l(t, 0, locale);", "auto e = _strtod_l(t, 0, locale);", "auto f = atof(t);", "auto g = _wtof(w);",
+                "auto h = wcstod(w, 0);", "sscanf(t, \"%d\", &i);", "sscanf_s(t, \"%d\", &i);", "vsscanf(t, f, args);",
+                "setlocale(LC_ALL, \"\");", "auto* k = localeconv();", "uselocale(l);", "_configthreadlocale(1);",
+                "_gcvt(x, 17, buffer);", "auto pointer = &strtod;", "auto call = strtod", "snprintf(b, n, \"%.17g\", x);",
+                "printf(\"%f\\n\", x);",
+            ];
+            var positiveText = string.Join('\n', positives) + "\n    (text, nullptr);\n";
+            temporary.Write("Core/Source/Runtime/Fake/Private/Parse.cpp", positiveText);
+            // 음성: 정수 strtol, 정수·문자열 printf, 주석·문자열 안의 이름, 멤버·한정 이름, 시험 소스.
+            temporary.Write("Engine/Source/Developer/Fake/Private/Clean.cpp", string.Join('\n',
+                "long i = strtol(text, nullptr, 10);", "snprintf(b, n, \"[%s][%u] \", name, id);", "// strtod()와 달리 정확하다",
+                "/* atof(x) */ const char* s = \"atof(\";", "parser.strtod(text);", "value = Parser::atof(text);", "reader->sscanf(x);",
+                "int strtodCount = 0;") + "\n");
+            temporary.Write("Core/Source/Runtime/Fake/Tests/ParseTests.cpp", "double a = strtod(text, &end);\n");
+            var failures = PolicyChecks.CrtNumberConversions(temporary.Root);
+            var expected = Enumerable.Range(1, positives.Length).Select(line => ("Core/Source/Runtime/Fake/Private/Parse.cpp", line)).ToHashSet();
+            var actual = failures.Select(failure => (failure.Path, failure.Line)).ToHashSet();
+            Verify.That(actual.SetEquals(expected), "CRT number conversion lines: " + string.Join("; ", failures));
+        });
         suite.Add("Policy.DeterministicMathObjectRules", () =>
         {
             // 외부 심볼: 코드 생성 지원 심볼(COFF·ELF·Mach-O 이름)은 허용, CRT 수학·다른 모듈 함수는 거부.
@@ -167,6 +194,18 @@ internal static class SelfTests
             Verify.That(DeterministicMathObjectCheck.IsBitcode([0xDE, 0xC0, 0x17, 0x0B]), "bitcode wrapper not detected");
             foreach (byte[] machine in new byte[][] { [0x64, 0x86, 0x05, 0x00], [0xCF, 0xFA, 0xED, 0xFE], [0x7F, 0x45, 0x4C, 0x46], [0x42, 0x43] })
                 Verify.That(!DeterministicMathObjectCheck.IsBitcode(machine), "machine object treated as bitcode");
+        });
+        suite.Add("Policy.RepositoryNumberTables", () =>
+        {
+            // policy 명령은 CI에서 돌지 않으므로 self 시험이 생성 표의 최신성을 본다.
+            NoFailures(NumberTables.Check(options.Root));
+            string generated = NumberTables.Generate();
+            Verify.Equal(generated, NumberTables.Generate(), "decimal table generator is not deterministic");
+            using TemporaryDirectory temporary = new();
+            temporary.Write(NumberTables.OutputPath, generated);
+            NoFailures(NumberTables.Check(temporary.Root));
+            temporary.Write(NumberTables.OutputPath, generated.Replace("0x0000000000000001u", "0x0000000000000002u"));
+            Verify.That(NumberTables.Check(temporary.Root).Count == 1, "edited decimal tables were not detected");
         });
         suite.Add("Policy.UnicodeTablesDetectEdits", () =>
         {

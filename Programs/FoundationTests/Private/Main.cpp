@@ -35,6 +35,7 @@ int RunRandomStreamPreconditionControl(uint32 operation) noexcept;
 int RunExternalAllocatorNegativeControl(uint32 operation) noexcept;
 int RunDebugAllocatorNegativeControl(uint32 operation) noexcept;
 int RunVirtualMemoryAccessProbe(uint32 state, bool write) noexcept;
+int RunNumberCorpus(const char* path) noexcept;
 static TestCase* first = nullptr;
 static uint64 failures = 0;
 static platform::Mutex failureMutex;
@@ -103,6 +104,9 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--logger-failure-probe") == 0 && argc == 2) {
             return test::RunLoggerFailureProbe();
+        } else if (strcmp(argv[i], "--number-corpus") == 0 && argc == 3) {
+            // .NET 대조 말뭉치(도구 시험 Native.NumberConversionMatchesDotNet이 만든다).
+            return test::RunNumberCorpus(argv[2]);
         } else if (strcmp(argv[i], "--list") == 0) {
             list = true;
         } else if (strcmp(argv[i], "--filter") == 0 && i + 1 < argc) {

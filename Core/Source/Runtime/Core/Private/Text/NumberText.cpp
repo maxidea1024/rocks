@@ -1,62 +1,14 @@
+#include "DecimalConversion.h"
 #include "NumberTextInternal.h"
 
 #include <Core/Text/NumberText.h>
 #include <Platform/Memory.h>
 #include <Platform/PlatformMath.h>
 
-#include <errno.h>
-#include <locale.h>
-#include <math.h>
-#include <stdio.h>
-#include <stdlib.h>
-
 namespace rocks {
 namespace {
 
-// strtod·strtof에 넘길 사본의 최대 크기다. 입력 1023 byte + locale 소수점(보통 1 byte) + NUL.
-constexpr usize ParseBufferBytes = 1024 + 16;
-
-// 현재 C locale의 소수점 문자열이다. 대부분 "."이며 일부 locale은 ","다.
-const char* LocaleDecimalPoint() noexcept {
-    const lconv* conventions = localeconv();
-    if (conventions == nullptr || conventions->decimal_point == nullptr ||
-        conventions->decimal_point[0] == '\0') {
-        return ".";
-    }
-
-    return conventions->decimal_point;
-}
-
-// printf 결과에 들어간 locale 소수점을 '.'로 바꾼다. 소수점이 여러 byte면 길이가 줄어드므로 새
-// 길이를 반환한다.
-usize NormalizeDecimalPoint(char* buffer, usize length) noexcept {
-    const char* point = LocaleDecimalPoint();
-    if (point[0] == '.' && point[1] == '\0') {
-        return length;
-    }
-
-    const usize pointLength = platform::CStringLength(point);
-    for (usize index = 0; index + pointLength <= length; ++index) {
-        bool match = true;
-        for (usize offset = 0; offset < pointLength && match; ++offset) {
-            match = buffer[index + offset] == point[offset];
-        }
-
-        if (!match) {
-            continue;
-        }
-
-        buffer[index] = '.';
-        // 나머지(끝의 NUL 포함)를 앞으로 당긴다.
-        for (usize from = index + pointLength, to = index + 1; from <= length; ++from, ++to) {
-            buffer[to] = buffer[from];
-        }
-
-        return length - pointLength + 1;
-    }
-
-    return length;
-}
+namespace decimal = detail::decimal;
 
 bool IsDigit(char character) noexcept {
     return character >= '0' && character <= '9';
@@ -81,120 +33,129 @@ bool EqualsIgnoreAsciiCase(const char* text, usize bytes, const char* word) noex
     return true;
 }
 
-// 엄격한 10진 실수 문법인지 본다: [+|-](digits[.digits]|.digits)([e|E][+|-]digits).
-// inf·nan은 호출자가 먼저 처리한다.
-bool IsDecimalFloatingPoint(const char* text, usize bytes) noexcept {
-    usize index = 0;
-    if (index < bytes && (text[index] == '+' || text[index] == '-')) {
-        ++index;
+// 10진 실수 [+|-](digits[.[digits]]|.digits)([e|E][+|-]digits)를 읽어 가장 가까운 값으로 반올림한
+// IEEE 비트(부호 포함, single이면 하위 32비트가 float 비트)를 돌려준다. float로 바로
+// 반올림하고(double을 거쳐 두 번 반올림하지 않는다) 값을 부동소수점 변환 명령에 통과시키지 않으므로
+// FTZ·DAZ 환경에서도 비정규 수가 그대로다. 입력 길이 제한은 없다: 앞 MaxSignificantDigits개 유효
+// 숫자를 보관하고 그 뒤는 0이 아닌지만 기록한다.
+Result<uint64> ParseFloatingPoint(StringView view, bool single) noexcept {
+    const char* text = view.Data();
+    const usize bytes = view.ByteCount();
+    if (bytes == 0) {
+        return Result<uint64>::Failure(ErrorCode::InvalidArgument);
     }
 
+    const decimal::BinaryFormat format = single ? decimal::FloatFormat : decimal::DoubleFormat;
+    const uint64 signBit = uint64{1} << (format.mantissaBits + format.exponentBits);
+    const uint64 infinityBits = static_cast<uint64>((1 << format.exponentBits) - 1)
+                                << format.mantissaBits;
+    usize index = 0;
+    bool negative = false;
+    if (text[0] == '+' || text[0] == '-') {
+        negative = text[0] == '-';
+        index = 1;
+    }
+
+    // 특수 값: [+|-](inf|infinity|nan), 대소문자 무관.
+    if (EqualsIgnoreAsciiCase(text + index, bytes - index, "inf") ||
+        EqualsIgnoreAsciiCase(text + index, bytes - index, "infinity")) {
+        return Result<uint64>::Success(infinityBits | (negative ? signBit : 0));
+    }
+
+    if (EqualsIgnoreAsciiCase(text + index, bytes - index, "nan")) {
+        // quiet NaN: 지수 전부 1, 가수 최상위 비트.
+        const uint64 quiet = infinityBits | (uint64{1} << (format.mantissaBits - 1));
+        return Result<uint64>::Success(quiet | (negative ? signBit : 0));
+    }
+
+    decimal::DecimalNumber number;
+    auto append = [&number](uint8 digit) noexcept {
+        if (number.count < decimal::MaxSignificantDigits) {
+            number.digits[number.count++] = digit;
+        } else if (digit != 0) {
+            number.truncated = true;
+        }
+    };
+
+    // 정수부: 첫 유효 숫자부터 소수점 앞 자리 수만큼 pointPosition이 커진다.
     usize integerDigits = 0;
     while (index < bytes && IsDigit(text[index])) {
-        ++index;
+        const uint8 digit = static_cast<uint8>(text[index] - '0');
+        if (number.count != 0 || digit != 0) {
+            append(digit);
+            ++number.pointPosition;
+        }
+
         ++integerDigits;
+        ++index;
     }
 
+    // 소수부: 첫 유효 숫자 앞의 0은 pointPosition을 줄인다.
     usize fractionDigits = 0;
     if (index < bytes && text[index] == '.') {
         ++index;
         while (index < bytes && IsDigit(text[index])) {
-            ++index;
+            const uint8 digit = static_cast<uint8>(text[index] - '0');
+            if (number.count == 0 && digit == 0) {
+                --number.pointPosition;
+            } else {
+                append(digit);
+            }
+
             ++fractionDigits;
+            ++index;
         }
     }
 
     if (integerDigits + fractionDigits == 0) {
-        return false;
+        return Result<uint64>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // 지수: 10^17 이상이 되면 더 읽지 않는다. 자릿수에서 오는 소수점 이동은 입력 byte 수를 넘지
+    // 않으므로 포화한 지수를 상쇄하려면 입력이 10^17 byte를 넘어야 한다(pointPosition은 int64라
+    // 넘치지 않는다). 10^9로 두면 1 GiB 입력이 상쇄할 수 있었다(교차검증에서 재현).
     if (index < bytes && (text[index] == 'e' || text[index] == 'E')) {
         ++index;
+        bool negativeExponent = false;
         if (index < bytes && (text[index] == '+' || text[index] == '-')) {
+            negativeExponent = text[index] == '-';
             ++index;
         }
 
+        int64 exponent = 0;
         usize exponentDigits = 0;
         while (index < bytes && IsDigit(text[index])) {
-            ++index;
+            if (exponent < 100000000000000000ll) {
+                exponent = exponent * 10 + (text[index] - '0');
+            }
+
             ++exponentDigits;
+            ++index;
         }
 
         if (exponentDigits == 0) {
-            return false;
+            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (number.count != 0) {
+            number.pointPosition += negativeExponent ? -exponent : exponent;
         }
     }
 
-    return index == bytes;
-}
-
-// 문법을 검사한 뒤 strtod/strtof로 읽는다. single이면 float로 읽는다(double을 거쳐 두 번
-// 반올림하지 않는다).
-Result<double> ParseFloatingPoint(StringView view, bool single) noexcept {
-    const char* text = view.Data();
-    const usize bytes = view.ByteCount();
-    if (bytes == 0 || bytes > 1023) {
-        return Result<double>::Failure(ErrorCode::InvalidArgument);
+    if (index != bytes) {
+        return Result<uint64>::Failure(ErrorCode::InvalidArgument);
     }
 
-    // 특수 값: [+|-](inf|infinity|nan), 대소문자 무관.
-    usize start = 0;
-    bool negative = false;
-    if (text[0] == '+' || text[0] == '-') {
-        negative = text[0] == '-';
-        start = 1;
+    if (number.count == 0) {
+        return Result<uint64>::Success(negative ? signBit : 0);
     }
 
-    if (EqualsIgnoreAsciiCase(text + start, bytes - start, "inf") ||
-        EqualsIgnoreAsciiCase(text + start, bytes - start, "infinity")) {
-        const double infinity = platform::PlatformMath::Infinity<double>();
-        return Result<double>::Success(negative ? -infinity : infinity);
+    const uint64 bits = decimal::ToBinary(number, format);
+    if (bits == infinityBits) {
+        return Result<uint64>::Failure(ErrorCode::Overflow);
     }
 
-    if (EqualsIgnoreAsciiCase(text + start, bytes - start, "nan")) {
-        const double nan = platform::PlatformMath::QuietNaN<double>();
-        return Result<double>::Success(negative ? -nan : nan);
-    }
-
-    if (!IsDecimalFloatingPoint(text, bytes)) {
-        return Result<double>::Failure(ErrorCode::InvalidArgument);
-    }
-
-    // C runtime은 현재 locale의 소수점을 기대하므로 '.'를 그것으로 바꾼 NUL 종료 사본을 만든다.
-    char buffer[ParseBufferBytes];
-    const char* point = LocaleDecimalPoint();
-    const usize pointLength = platform::CStringLength(point);
-    usize written = 0;
-    for (usize index = 0; index < bytes; ++index) {
-        const usize needed = text[index] == '.' ? pointLength : 1;
-        if (written + needed >= sizeof(buffer)) {
-            return Result<double>::Failure(ErrorCode::InvalidArgument);
-        }
-
-        if (text[index] == '.') {
-            for (usize offset = 0; offset < pointLength; ++offset) {
-                buffer[written++] = point[offset];
-            }
-        } else {
-            buffer[written++] = text[index];
-        }
-    }
-
-    buffer[written] = '\0';
-
-    char* end = nullptr;
-    errno = 0;
-    const double value = single ? static_cast<double>(strtof(buffer, &end)) : strtod(buffer, &end);
-    if (end != buffer + written) {
-        return Result<double>::Failure(ErrorCode::InvalidArgument);
-    }
-
-    // ERANGE는 overflow(±HUGE)와 underflow(0·비정규) 모두에서 나온다. underflow는 값으로 받는다.
-    if (errno == ERANGE && isinf(value)) {
-        return Result<double>::Failure(ErrorCode::Overflow);
-    }
-
-    return Result<double>::Success(value);
+    return Result<uint64>::Success(bits | (negative ? signBit : 0));
 }
 
 int DigitValue(char character) noexcept {
@@ -283,120 +244,164 @@ Result<uint64> ParseUnsigned(StringView view, uint32 base, uint64 maximum) noexc
     return ParseMagnitude(text, bytes, base, maximum);
 }
 
-// ---- 최단 왕복 표기 ----
+// ---- 표기 ----
 
-// 유효 숫자열 digits(앞자리 0 없음)와 10진 지수로 나타낸 값 d.ddd × 10^exponent다.
-struct DecimalDigits {
-    char digits[24];
-    int count = 0;
-    int exponent = 0;
+// capacity 안에서만 쓰고 전체 길이를 센다. 끝나면 NUL을 붙인다(넘쳤으면 잘린 내용).
+class TextWriter {
+public:
+    TextWriter(char* buffer, usize capacity) noexcept : buffer_(buffer), capacity_(capacity) {
+    }
+
+    void Put(char character) noexcept {
+        if (length_ + 1 < capacity_) {
+            buffer_[length_] = character;
+        }
+
+        ++length_;
+    }
+
+    void PutRepeated(char character, int64 count) noexcept {
+        for (int64 index = 0; index < count; ++index) {
+            Put(character);
+        }
+    }
+
+    // 지수를 부호와 최소 두 자리로 쓴다(printf 방식: e+05, e-300).
+    void PutExponent(char marker, int32 exponent) noexcept {
+        Put(marker);
+        Put(exponent < 0 ? '-' : '+');
+        const uint32 magnitude = static_cast<uint32>(exponent < 0 ? -exponent : exponent);
+        char digits[10];
+        int count = 0;
+        uint32 rest = magnitude;
+        do {
+            digits[count++] = static_cast<char>('0' + rest % 10);
+            rest /= 10;
+        } while (rest != 0);
+
+        if (count < 2) {
+            Put('0');
+        }
+
+        while (count > 0) {
+            Put(digits[--count]);
+        }
+    }
+
+    usize Finish() noexcept {
+        if (capacity_ != 0) {
+            buffer_[length_ < capacity_ ? length_ : capacity_ - 1] = '\0';
+        }
+
+        return length_;
+    }
+
+    usize Length() const noexcept {
+        return length_;
+    }
+
+private:
+    char* buffer_;
+    usize capacity_;
+    usize length_ = 0;
 };
 
-// "%.{p-1}e" 결과("d.ddde±XX" 또는 "de±XX")를 숫자열과 지수로 나눈다.
-bool SplitScientific(const char* text, usize length, DecimalDigits& out) noexcept {
-    out.count = 0;
-    usize index = 0;
-    while (index < length && text[index] != 'e' && text[index] != 'E') {
-        if (IsDigit(text[index])) {
-            if (out.count >= static_cast<int>(sizeof(out.digits))) {
-                return false;
-            }
-
-            out.digits[out.count++] = text[index];
+// 정확한 전개를 소수점 아래 precision자리로 반올림해 고정 소수점으로 쓴다.
+void WriteFixed(decimal::ExactDecimal value, int32 precision, TextWriter& out) noexcept {
+    decimal::RoundExact(value, static_cast<int64>(value.pointPosition) + precision);
+    const int64 point = value.count == 0 ? 0 : value.pointPosition;
+    if (point <= 0) {
+        out.Put('0');
+    } else {
+        for (int64 index = 0; index < point; ++index) {
+            out.Put(index < static_cast<int64>(value.count) ? value.digits[index] : '0');
         }
-
-        ++index;
     }
 
-    if (index >= length || out.count == 0) {
-        return false;
+    if (precision > 0) {
+        out.Put('.');
+        for (int64 offset = 0; offset < precision; ++offset) {
+            const int64 index = point + offset;
+            out.Put(value.count != 0 && index >= 0 && index < static_cast<int64>(value.count)
+                        ? value.digits[index]
+                        : '0');
+        }
     }
-
-    ++index;
-    bool negative = false;
-    if (index < length && (text[index] == '+' || text[index] == '-')) {
-        negative = text[index++] == '-';
-    }
-
-    int exponent = 0;
-    while (index < length && IsDigit(text[index])) {
-        exponent = exponent * 10 + (text[index++] - '0');
-    }
-
-    out.exponent = negative ? -exponent : exponent;
-    return true;
 }
 
-// 과학 표기 문자열 "d.ddde±X"를 만든다.
-usize ComposeScientific(const DecimalDigits& value, char* buffer, usize capacity) noexcept {
-    const int count = value.count == 1
-                          ? snprintf(buffer, capacity, "%ce%+d", value.digits[0], value.exponent)
-                          : snprintf(buffer, capacity, "%c.%.*se%+d", value.digits[0],
-                                     value.count - 1, value.digits + 1, value.exponent);
-    return count < 0 ? MaxSize : static_cast<usize>(count);
+// 정확한 전개를 유효 숫자 precision + 1자리로 반올림해 d.ddd e±XX로 쓴다.
+void WriteScientific(decimal::ExactDecimal value, int32 precision, bool upper,
+                     TextWriter& out) noexcept {
+    decimal::RoundExact(value, static_cast<int64>(precision) + 1);
+    out.Put(value.count == 0 ? '0' : value.digits[0]);
+    if (precision > 0) {
+        out.Put('.');
+        for (int32 index = 1; index <= precision; ++index) {
+            out.Put(static_cast<usize>(index) < value.count ? value.digits[index] : '0');
+        }
+    }
+
+    out.PutExponent(upper ? 'E' : 'e', value.count == 0 ? 0 : value.pointPosition - 1);
 }
 
-bool RoundTrips(const DecimalDigits& value, double expected, bool single) noexcept {
-    char text[48];
-    const usize length = ComposeScientific(value, text, sizeof(text));
-    if (length == MaxSize || length >= sizeof(text)) {
-        return false;
+// printf %g: 유효 숫자 P(0이면 1)로 반올림했을 때의 지수 X가 −4 ≤ X < P면 고정 소수점(소수 P − 1 −
+// X자리), 아니면 과학 표기(소수 P − 1자리). 그 뒤 소수부 끝의 0과 남는 소수점을 지운다('#' 없음).
+// 정밀도 상한(StringBuilder의 MaxFloatingPrecision과 같다). %g의 지우기 전 결과는 1080자 이하다.
+constexpr int MaxPrecision = 1074;
+
+usize WriteGeneral(const decimal::ExactDecimal& value, int32 precision, bool upper, char* buffer,
+                   usize capacity) noexcept {
+    const int32 significant = precision == 0 ? 1 : precision;
+    decimal::ExactDecimal rounded = value;
+    decimal::RoundExact(rounded, significant);
+    const int32 exponent = rounded.count == 0 ? 0 : rounded.pointPosition - 1;
+    // 지우기 전 결과를 내부 buffer에 만들고, 지운 결과의 길이를 돌려준다(capacity가 부족해도 필요한
+    // 길이).
+    char scratch[1100];
+    TextWriter out(scratch, sizeof(scratch));
+    if (exponent >= -4 && exponent < significant) {
+        WriteFixed(value, significant - 1 - exponent, out);
+    } else {
+        WriteScientific(value, significant - 1, upper, out);
     }
 
-    auto parsed = ParseFloatingPoint(StringView(text, length), single);
-    return parsed && parsed.Value() == expected;
-}
+    usize length = out.Finish();
+    if (length >= sizeof(scratch)) {
+        return MaxSize; // 정밀도 상한 안에서는 일어나지 않는다
+    }
 
-// 유효 숫자 precision개로 올바르게 반올림한 표기다.
-bool RoundedDigits(double value, int precision, DecimalDigits& out) noexcept {
-    char text[48];
-    const usize length = detail::FormatFloatingPoint(value, 'e', precision - 1, text, sizeof(text));
-    return length != MaxSize && length < sizeof(text) && SplitScientific(text, length, out);
-}
+    // 소수점이 있으면 가수 부분 끝의 0과 소수점을 지우고 지수 부분을 앞으로 당긴다.
+    usize mantissaEnd = 0;
+    bool hasPoint = false;
+    while (mantissaEnd < length && scratch[mantissaEnd] != 'e' && scratch[mantissaEnd] != 'E') {
+        hasPoint = hasPoint || scratch[mantissaEnd] == '.';
+        ++mantissaEnd;
+    }
 
-// 마지막 자리에 delta(+1 또는 -1)를 더한다. 자리올림·자리내림으로 자릿수가 바뀌면 지수를 고친다.
-// 0에서 빼는 경우는 count 0을 돌려준다.
-DecimalDigits AdjustLastDigit(const DecimalDigits& value, int delta) noexcept {
-    DecimalDigits result = value;
-    int index = result.count - 1;
-    if (delta > 0) {
-        while (index >= 0 && result.digits[index] == '9') {
-            result.digits[index--] = '0';
+    if (hasPoint) {
+        usize trimmed = mantissaEnd;
+        while (scratch[trimmed - 1] == '0') {
+            --trimmed;
         }
 
-        if (index >= 0) {
-            ++result.digits[index];
-        } else {
-            // 999 + 1 = 1000: 숫자열 "1"과 지수 + 1.
-            result.digits[0] = '1';
-            result.count = 1;
-            ++result.exponent;
+        if (scratch[trimmed - 1] == '.') {
+            --trimmed;
         }
 
-        return result;
-    }
-
-    while (index >= 0 && result.digits[index] == '0') {
-        result.digits[index--] = '9';
-    }
-
-    if (index < 0) {
-        result.count = 0;
-        return result;
-    }
-
-    --result.digits[index];
-    if (result.digits[0] == '0') {
-        // 1000 - 1 = 0999: 앞의 0을 지우고 지수 - 1.
-        for (int shift = 0; shift + 1 < result.count; ++shift) {
-            result.digits[shift] = result.digits[shift + 1];
+        const usize exponentLength = length - mantissaEnd;
+        for (usize index = 0; index < exponentLength; ++index) {
+            scratch[trimmed + index] = scratch[mantissaEnd + index];
         }
 
-        --result.count;
-        --result.exponent;
+        length = trimmed + exponentLength;
     }
 
-    return result;
+    TextWriter result(buffer, capacity);
+    for (usize index = 0; index < length; ++index) {
+        result.Put(scratch[index]);
+    }
+
+    return result.Finish();
 }
 
 } // namespace
@@ -422,168 +427,121 @@ Result<uint32> TryParseUInt32(StringView text, uint32 base) noexcept {
 }
 
 Result<double> TryParseDouble(StringView text) noexcept {
-    return ParseFloatingPoint(text, false);
+    auto parsed = ParseFloatingPoint(text, false);
+    return parsed ? Result<double>::Success(platform::BitCast<double>(parsed.Value()))
+                  : Result<double>::Failure(parsed.Error());
 }
 
 Result<float> TryParseFloat(StringView text) noexcept {
     auto parsed = ParseFloatingPoint(text, true);
-    return parsed ? Result<float>::Success(static_cast<float>(parsed.Value()))
+    return parsed ? Result<float>::Success(
+                        platform::BitCast<float>(static_cast<uint32>(parsed.Value())))
                   : Result<float>::Failure(parsed.Error());
 }
 
 namespace detail {
 
-usize FormatFloatingPoint(double value, char type, int precision, char* buffer,
+usize FormatFloatingPoint(uint64 doubleBits, char type, int precision, char* buffer,
                           usize capacity) noexcept {
-    // -Wformat-nonliteral을 피하려고 형식 문자열을 상수로 고른다.
-    int count = -1;
+    if (precision < 0 || precision > MaxPrecision) {
+        return MaxSize;
+    }
+
+    decimal::ExactDecimal exact;
+    decimal::ExpandExact(doubleBits, exact);
     switch (type) {
-    case 'f':
-        count = snprintf(buffer, capacity, "%.*f", precision, value);
-        break;
+    case 'f': {
+        TextWriter out(buffer, capacity);
+        WriteFixed(exact, precision, out);
+        return out.Finish();
+    }
     case 'e':
-        count = snprintf(buffer, capacity, "%.*e", precision, value);
-        break;
-    case 'E':
-        count = snprintf(buffer, capacity, "%.*E", precision, value);
-        break;
+    case 'E': {
+        TextWriter out(buffer, capacity);
+        WriteScientific(exact, precision, type == 'E', out);
+        return out.Finish();
+    }
     case 'g':
-        count = snprintf(buffer, capacity, "%.*g", precision, value);
-        break;
     case 'G':
-        count = snprintf(buffer, capacity, "%.*G", precision, value);
-        break;
+        return WriteGeneral(exact, precision, type == 'G', buffer, capacity);
     default:
         return MaxSize;
     }
-
-    if (count < 0) {
-        return MaxSize;
-    }
-
-    const usize length = static_cast<usize>(count);
-    if (length >= capacity) {
-        return length; // 잘렸다. 호출자가 더 큰 buffer로 다시 부른다.
-    }
-
-    return NormalizeDecimalPoint(buffer, length);
 }
 
-usize FormatShortestFloatingPoint(double value, bool single, char* buffer,
-                                  usize capacity) noexcept {
+usize FormatShortestFloatingPoint(uint64 bits, bool single, char* buffer, usize capacity) noexcept {
     if (capacity < 32) {
         return MaxSize;
     }
 
-    if (value == 0.0) {
+    // 0 판정도 비트로 한다(DAZ 환경의 비정규 수를 0으로 보지 않는다).
+    if (bits == 0) {
         buffer[0] = '0';
         buffer[1] = '\0';
         return 1;
     }
 
-    // 1) 올바르게 반올림한 p자리 표기가 왕복하는 가장 작은 p를 이진 탐색한다. p자리가 왕복하면 더
-    // 긴
-    //    표기도 왕복하므로 단조다. 최대 자릿수(float 9, double 17)는 항상 왕복한다.
-    const int maximum = single ? 9 : 17;
-    int low = 1;
-    int high = maximum;
-    while (low < high) {
-        const int middle = (low + high) / 2;
-        DecimalDigits candidate;
-        if (!RoundedDigits(value, middle, candidate)) {
-            return MaxSize;
-        }
-
-        if (RoundTrips(candidate, value, single)) {
-            high = middle;
-        } else {
-            low = middle + 1;
-        }
+    // Ryu 최단 표기: significand·10^exponent. 끝의 0은 유효 숫자가 아니다.
+    const decimal::ShortestDecimal shortest =
+        decimal::Shortest(bits, single ? decimal::FloatFormat : decimal::DoubleFormat);
+    uint64 significand = shortest.significand;
+    int32 decimalExponent = shortest.exponent;
+    while (significand % 10 == 0) {
+        significand /= 10;
+        ++decimalExponent;
     }
 
-    DecimalDigits best;
-    if (!RoundedDigits(value, high, best)) {
-        return MaxSize;
+    char digits[24];
+    int count = 0;
+    char reversed[24];
+    while (significand != 0) {
+        reversed[count++] = static_cast<char>('0' + significand % 10);
+        significand /= 10;
     }
 
-    // 2) 2의 거듭제곱 경계에서는 반올림한 값이 아니라 그 이웃(마지막 자리 ±1)이 한 자리 짧게 왕복할
-    //    수 있다. 한 자리 짧은 반올림 값의 두 이웃을 검사한다.
-    if (high > 1) {
-        DecimalDigits shorter;
-        if (RoundedDigits(value, high - 1, shorter)) {
-            const DecimalDigits up = AdjustLastDigit(shorter, 1);
-            const DecimalDigits down = AdjustLastDigit(shorter, -1);
-            if (RoundTrips(up, value, single)) {
-                best = up;
-            } else if (down.count != 0 && RoundTrips(down, value, single)) {
-                best = down;
+    for (int index = 0; index < count; ++index) {
+        digits[index] = reversed[count - 1 - index];
+    }
+
+    // 첫 유효 숫자의 10진 지수가 −4 이상 16 미만이면 고정 소수점, 아니면 과학 표기로 조립한다. 찾은
+    // 유효 숫자만 쓰고 이진 값을 다시 전개하지 않는다(그래서 1e11f도 "100000000000"이다).
+    const int32 exponent = decimalExponent + count - 1;
+    TextWriter out(buffer, capacity);
+    if (exponent < -4 || exponent >= 16) {
+        out.Put(digits[0]);
+        if (count > 1) {
+            out.Put('.');
+            for (int index = 1; index < count; ++index) {
+                out.Put(digits[index]);
             }
         }
-    }
 
-    // 끝의 0은 유효 숫자가 아니다.
-    while (best.count > 1 && best.digits[best.count - 1] == '0') {
-        --best.count;
-    }
-
-    // 3) 지수가 -4 이상 16 미만이면 고정 소수점, 아니면 과학 표기로 조립한다. 찾은 유효 숫자만 쓰고
-    //    이진 값을 다시 전개하지 않는다(그래서 1e11f도 "100000000000"이다).
-    const int exponent = best.exponent;
-    if (exponent < -4 || exponent >= 16) {
-        usize length = ComposeScientific(best, buffer, capacity);
-        if (length == MaxSize || length + 1 >= capacity) {
-            return MaxSize;
-        }
-
-        // printf처럼 지수를 최소 두 자리로 쓴다("1e+20", "1e-05").
-        usize mark = 0;
-        while (buffer[mark] != 'e') {
-            ++mark;
-        }
-
-        if (length - mark == 3) {
-            buffer[length + 1] = '\0';
-            buffer[length] = buffer[length - 1];
-            buffer[length - 1] = '0';
-            ++length;
-        }
-
-        return length;
-    }
-
-    if (static_cast<usize>(best.count) + 24 >= capacity) {
-        return MaxSize;
-    }
-
-    usize length = 0;
-    if (exponent < 0) {
+        out.PutExponent('e', exponent);
+    } else if (exponent < 0) {
         // 0.000ddd
-        buffer[length++] = '0';
-        buffer[length++] = '.';
-        for (int zero = 0; zero < -exponent - 1; ++zero) {
-            buffer[length++] = '0';
-        }
-
-        for (int index = 0; index < best.count; ++index) {
-            buffer[length++] = best.digits[index];
+        out.Put('0');
+        out.Put('.');
+        out.PutRepeated('0', -exponent - 1);
+        for (int index = 0; index < count; ++index) {
+            out.Put(digits[index]);
         }
     } else {
         // 정수부 exponent + 1자리(모자라면 0으로 채운다), 남는 숫자는 소수부다.
         const int integerDigits = exponent + 1;
         for (int index = 0; index < integerDigits; ++index) {
-            buffer[length++] = index < best.count ? best.digits[index] : '0';
+            out.Put(index < count ? digits[index] : '0');
         }
 
-        if (best.count > integerDigits) {
-            buffer[length++] = '.';
-            for (int index = integerDigits; index < best.count; ++index) {
-                buffer[length++] = best.digits[index];
+        if (count > integerDigits) {
+            out.Put('.');
+            for (int index = integerDigits; index < count; ++index) {
+                out.Put(digits[index]);
             }
         }
     }
 
-    buffer[length] = '\0';
-    return length;
+    const usize length = out.Finish();
+    return length >= capacity ? MaxSize : length;
 }
 
 } // namespace detail

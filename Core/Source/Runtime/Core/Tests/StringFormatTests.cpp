@@ -402,11 +402,12 @@ TEST(NumberText_StrictFloatingPoint) {
     CHECK(tiny && tiny.Value() == 0.0);
     CHECK(TryParseFloat("3.4e39").Error() == ErrorCode::Overflow);
     CHECK(TryParseFloat("0.1").Value() == 0.1f);
+    // 길이 제한이 없다: 1100자리 정수는 범위를 넘고(Overflow), 300자리는 정확히 반올림된다.
     char longText[1100];
     memset(longText, '1', sizeof(longText));
-    CHECK(TryParseDouble(StringView(longText, sizeof(longText))).Error() ==
-          ErrorCode::InvalidArgument);
-    CHECK(TryParseDouble(StringView(longText, 300)));
+    CHECK(TryParseDouble(StringView(longText, sizeof(longText))).Error() == ErrorCode::Overflow);
+    auto threeHundred = TryParseDouble(StringView(longText, 300));
+    CHECK(threeHundred && threeHundred.Value() > 1.11e299 && threeHundred.Value() < 1.12e299);
 }
 
 TEST(StringSplit_IntoArrayAndJoin) {

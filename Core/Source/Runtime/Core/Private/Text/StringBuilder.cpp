@@ -1,9 +1,9 @@
+#include "DecimalConversion.h"
 #include "NumberTextInternal.h"
 
 #include <Core/Text/StringBuilder.h>
 #include <Platform/Fatal.h>
-
-#include <math.h>
+#include <Platform/Memory.h>
 
 namespace rocks {
 
@@ -541,7 +541,9 @@ Result<void> AppendText(StringBuilderBase& out, StringView text, const Spec& spe
     return AppendAligned(out, body, count.Value(), spec, '<');
 }
 
-Result<void> AppendFloating(StringBuilderBase& out, double value, bool single,
+// bits는 single이면 float 비트, 아니면 double 비트다. 값을 부동소수점 변환 명령에 통과시키지
+// 않으므로(정수 연산만) FTZ·DAZ 환경에서도 비정규 수가 그대로 표기된다.
+Result<void> AppendFloating(StringBuilderBase& out, uint64 bits, bool single,
                             const Spec& spec) noexcept {
     char type = spec.type;
     const bool upper = type == 'F' || type == 'E' || type == 'G';
@@ -558,15 +560,20 @@ Result<void> AppendFloating(StringBuilderBase& out, double value, bool single,
         return Fail();
     }
 
-    const bool negative = signbit(value) != 0;
-    if (isnan(value) || isinf(value)) {
-        const char* word = isnan(value) ? (upper ? "NAN" : "nan") : (upper ? "INF" : "inf");
+    const int mantissaBits = single ? 23 : 52;
+    const int exponentBits = single ? 8 : 11;
+    const uint64 signBit = uint64{1} << (mantissaBits + exponentBits);
+    const uint64 exponentMask = ((uint64{1} << exponentBits) - 1) << mantissaBits;
+    const bool negative = (bits & signBit) != 0;
+    if ((bits & exponentMask) == exponentMask) {
+        const bool nan = (bits & ((uint64{1} << mantissaBits) - 1)) != 0;
+        const char* word = nan ? (upper ? "NAN" : "nan") : (upper ? "INF" : "inf");
         return AppendNumeric(out, SignFor(negative, spec), StringView(), StringView(word), spec,
                              false);
     }
 
     // 부호는 따로 붙이므로 크기만 표기한다(-0.0도 '-'가 붙는다).
-    const double magnitude = negative ? -value : value;
+    const uint64 magnitude = bits & ~signBit;
     char buffer[FloatingBufferBytes];
     usize length = 0;
     if (type == 0 && spec.precision == NoPrecision) {
@@ -579,7 +586,11 @@ Result<void> AppendFloating(StringBuilderBase& out, double value, bool single,
         }
 
         const int precision = spec.precision == NoPrecision ? 6 : static_cast<int>(spec.precision);
-        length = FormatFloatingPoint(magnitude, type, precision, buffer, sizeof(buffer));
+        // float는 정확한 double 비트로 넓힌다(정수 연산).
+        const uint64 doubleBits =
+            single ? detail::decimal::FloatBitsToDoubleBits(static_cast<uint32>(magnitude))
+                   : magnitude;
+        length = FormatFloatingPoint(doubleBits, type, precision, buffer, sizeof(buffer));
     }
 
     if (length == MaxSize || length >= sizeof(buffer)) {
@@ -636,9 +647,9 @@ Result<void> AppendArgument(StringBuilderBase& out, const FormatArg& arg, String
     case FormatArg::Kind::Unsigned:
         return AppendInteger(out, arg.unsignedValue, false, spec);
     case FormatArg::Kind::Float:
-        return AppendFloating(out, static_cast<double>(arg.single), true, spec);
+        return AppendFloating(out, platform::BitCast<uint32>(arg.single), true, spec);
     case FormatArg::Kind::Double:
-        return AppendFloating(out, arg.real, false, spec);
+        return AppendFloating(out, platform::BitCast<uint64>(arg.real), false, spec);
     case FormatArg::Kind::Text:
         return AppendText(out, StringView(arg.text.data, arg.text.bytes), spec);
     case FormatArg::Kind::NullText:
