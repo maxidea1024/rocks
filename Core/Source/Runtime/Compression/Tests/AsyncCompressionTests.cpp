@@ -3,7 +3,14 @@
 #include <Compression/AsyncCompression.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Move.h>
+#include <Core/ScopeExit.h>
+#include <Platform/AsyncFile.h>
+#include <Platform/Clock.h>
+#include <Platform/File.h>
+#include <Task/AsyncIoEvent.h>
 #include <TestSupport/Test.h>
+
+#include <stdio.h>
 
 // 내부 경계(취소 probe)를 결정적으로 시험한다. 시험은 저장소 루트를 include 경로로 쓴다(PathTests와
 // 같은 방식).
@@ -405,6 +412,90 @@ TEST(Compression_AsyncSubmitAfterShutdownIsRejected) {
                   .Error() == ErrorCode::ShuttingDown);
         CHECK(task.TryGetResult().Error() == ErrorCode::StaleHandle);
         CHECK(output.Size() == 0);
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// AsyncFile 완료 → 해제: 비동기 읽기 완료가 외부 이벤트(TrySubmitReadEvent)를 완료하고, 그 이벤트에
+// 의존한 해제 작업이 읽은 버퍼를 푼다. 짧은 읽기(파일이 기대보다 짧음)는 이벤트 실패로 해제가
+// DependencyFailed다. 반복마다 모든 객체를 바로 소멸해 완료 콜백과의 수명 경합이 없는지 본다(ASan).
+TEST(Compression_AsyncDecompressAfterAsyncFileRead) {
+    SystemAllocator allocator;
+    {
+        Array<uint8> original(allocator);
+        Fill(original, 200000, Pattern::Text, 5);
+        Array<uint8> packed(allocator);
+        REQUIRE(
+            TryCompressAppend(DefaultSettings(CompressionFormat::Zstd), View(original), packed));
+
+        char path[160] = {};
+        const int count =
+            snprintf(path, sizeof(path), "rocks-async-decompress-%llu.tmp",
+                     static_cast<unsigned long long>(platform::MonotonicNanoseconds()));
+        REQUIRE(count > 0 && static_cast<usize>(count) < sizeof(path));
+        const usize pathBytes = static_cast<usize>(count);
+        {
+            platform::File file;
+            REQUIRE(file.Open(platform::PhysicalFileSystem(), path, pathBytes,
+                              platform::FileOpenMode::CreateNew));
+            auto written = file.WriteAll(packed.Data(), packed.Size());
+            REQUIRE(written.status && written.bytes == packed.Size());
+            REQUIRE(file.Close());
+        }
+        auto removeFile = MakeScopeExit(
+            [&]() noexcept { CHECK(platform::PhysicalFileSystem().Delete(path, pathBytes)); });
+
+        platform::AsyncIoContext io;
+        REQUIRE(io.Start(platform::DefaultAsyncIoBackend()));
+        WorkerScheduler scheduler(allocator);
+        REQUIRE(scheduler.Start({.workerCount = 2, .maxInFlight = 16}));
+        {
+            platform::AsyncReadFile reader;
+            REQUIRE(reader.Open(io, path, pathBytes));
+            for (int round = 0; round < 40; ++round) {
+                Array<uint8> buffer(allocator);
+                REQUIRE(buffer.TryResize(packed.Size()));
+                Array<uint8> output(allocator);
+                auto event = scheduler.TryCreateEvent();
+                REQUIRE(event);
+                CompressionTask task;
+                // 해제를 먼저 제출해도 이벤트가 완료될 때까지 실행되지 않는다(source 길이는 제출 때
+                // 고정, 내용은 IO가 채운다).
+                REQUIRE(TrySubmitDecompress(
+                    scheduler, task, CompressionFormat::Zstd,
+                    Span<const uint8>(buffer.Data(), buffer.Size()), original.Size(), output,
+                    Span<const WorkerTaskHandle>(&event.Value().Handle(), 1)));
+                platform::AsyncIoRequest request;
+                REQUIRE(TrySubmitReadEvent(reader, request, 0, buffer.Data(), buffer.Size(),
+                                           Move(event.Value()), allocator));
+                auto bytes = task.TryWaitResult();
+                REQUIRE(bytes);
+                CHECK(bytes.Value() == original.Size());
+                CHECK(Same(output, View(original)));
+                REQUIRE(request.Wait(30000) == platform::WaitResult::Signaled);
+            }
+
+            // 파일보다 많이 기대하면 짧은 읽기라 이벤트가 실패하고 해제는 실행되지 않는다.
+            Array<uint8> larger(allocator);
+            REQUIRE(larger.TryResize(packed.Size() + 100));
+            Array<uint8> unused(allocator);
+            auto shortEvent = scheduler.TryCreateEvent();
+            REQUIRE(shortEvent);
+            CompressionTask shortTask;
+            REQUIRE(TrySubmitDecompress(
+                scheduler, shortTask, CompressionFormat::Zstd,
+                Span<const uint8>(larger.Data(), larger.Size()), original.Size(), unused,
+                Span<const WorkerTaskHandle>(&shortEvent.Value().Handle(), 1)));
+            platform::AsyncIoRequest shortRequest;
+            REQUIRE(TrySubmitReadEvent(reader, shortRequest, 0, larger.Data(), larger.Size(),
+                                       Move(shortEvent.Value()), allocator));
+            CHECK(shortTask.TryWaitResult().Error() == ErrorCode::DependencyFailed);
+            CHECK(unused.Size() == 0);
+            REQUIRE(shortRequest.Wait(30000) == platform::WaitResult::Signaled);
+            REQUIRE(reader.Close());
+        }
+        REQUIRE(scheduler.Shutdown());
+        REQUIRE(io.Shutdown());
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }

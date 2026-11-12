@@ -40,6 +40,11 @@ struct WorkerRecord {
     Function<void(WorkerTaskContext&)> body;
     WorkerRecord* dependencies[64]{};
     uint32 dependencyCount = 0;
+    // 외부 완료 이벤트(WorkerTaskEvent)다. worker는 취소 요청이 있을 때만 꺼내 Cancelled로 끝낸다.
+    bool external = false;
+    // 수락 뒤 terminal 전까지 들어 있는 state.records 칸이다(회수·이벤트 완료가 선형 탐색하지
+    // 않는다).
+    uint32 slot = 0;
 };
 } // namespace rocks::detail
 
@@ -128,6 +133,28 @@ bool IsSubmitting(WorkerState* state) noexcept {
         }
     }
     return false;
+}
+
+// gate 안에서 부른다. 실행(Running)·정리(Completing) 중인 작업이 없으면 취소 요청이 없는 외부
+// 이벤트에 취소를 요청하고 하나라도 바꿨으면 true다(호출자는 다시 고른다).
+bool CancelStalledEvents(WorkerState& state) noexcept {
+    for (uint32 index = 0; index < state.capacity; ++index) {
+        const WorkerRecord* record = state.records[index];
+        if (record != nullptr && (record->status.state == WorkerTaskState::Running ||
+                                  record->status.state == WorkerTaskState::Completing)) {
+            return false;
+        }
+    }
+
+    bool changed = false;
+    for (uint32 index = 0; index < state.capacity; ++index) {
+        WorkerRecord* record = state.records[index];
+        if (record != nullptr && record->external && !record->status.cancellationRequested) {
+            record->status.cancellationRequested = true;
+            changed = true;
+        }
+    }
+    return changed;
 }
 
 void EndReservation(WorkerState& state) noexcept {
@@ -247,12 +274,10 @@ Result<bool> WorkerTaskHandle::TryRevoke() const noexcept {
         if (record_->status.state != WorkerTaskState::Pending) {
             return Result<bool>::Success(false);
         }
-        // Pending 작업은 수락 뒤 terminal 전까지 records에 있다. Completing으로 바꾸면 worker가
-        // 꺼내지 않는다(worker는 Pending만 고른다).
-        while (slot < state.capacity && state.records[slot] != record_) {
-            ++slot;
-        }
-        ROCKS_ASSERT(slot < state.capacity);
+        // Pending 작업은 수락 뒤 terminal 전까지 records의 자기 칸에 있다. Completing으로 바꾸면
+        // worker가 꺼내지 않는다(worker는 Pending만 고른다).
+        slot = record_->slot;
+        ROCKS_ASSERT(slot < state.capacity && state.records[slot] == record_);
         record_->status.cancellationRequested = true;
         record_->status.state = WorkerTaskState::Completing;
         body = Move(record_->body);
@@ -293,6 +318,68 @@ Result<platform::WaitResult> WorkerTaskHandle::Wait(uint32 timeoutMs) const noex
         }
     }
     return Result<platform::WaitResult>::Success(platform::WaitResult::Signaled);
+}
+
+namespace {
+
+// 외부 이벤트를 완료한다. Pending일 때만 바꾸며(이미 완료·취소·worker가 취소 처리 중이면 false),
+// body·dependency가 없으므로 정리 없이 terminal을 게시하고 scheduler 보존분을 반환한다.
+Result<bool> CompleteEvent(WorkerRecord* record, ErrorCode error) noexcept {
+    if (record == nullptr) {
+        return Result<bool>::Failure(ErrorCode::StaleHandle);
+    }
+    WorkerState& state = *record->state;
+    {
+        platform::LockGuard lock(state.gate);
+        if (record->status.state != WorkerTaskState::Pending) {
+            return Result<bool>::Success(false);
+        }
+        const uint32 slot = record->slot;
+        ROCKS_ASSERT(record->external && slot < state.capacity && state.records[slot] == record);
+        record->status.state =
+            error == ErrorCode::None ? WorkerTaskState::Succeeded : WorkerTaskState::Failed;
+        record->status.error = error;
+        state.records[slot] = nullptr;
+        --state.inFlight;
+    }
+    state.changed.NotifyAll();
+    ReleaseRecord(record); // scheduler의 보존분을 반환한다.
+    return Result<bool>::Success(true);
+}
+
+} // namespace
+
+WorkerTaskEvent& WorkerTaskEvent::operator=(WorkerTaskEvent&& other) noexcept {
+    if (this != &other) {
+        CancelPending();
+        handle_ = static_cast<WorkerTaskHandle&&>(other.handle_);
+    }
+    return *this;
+}
+
+WorkerTaskEvent::~WorkerTaskEvent() noexcept {
+    CancelPending();
+}
+
+void WorkerTaskEvent::CancelPending() noexcept {
+    if (!handle_.IsValid()) {
+        return;
+    }
+    auto status = handle_.Status();
+    if (status && status.Value().state == WorkerTaskState::Pending) {
+        // Trigger 없이 버린 이벤트에 의존한 작업이 영원히 기다리지 않게 한다(worker가 Cancelled로
+        // 끝낸다).
+        (void)handle_.RequestCancel();
+    }
+}
+
+Result<bool> WorkerTaskEvent::TryTrigger() const noexcept {
+    return CompleteEvent(handle_.record_, ErrorCode::None);
+}
+
+Result<bool> WorkerTaskEvent::TryFail(ErrorCode error) const noexcept {
+    return CompleteEvent(handle_.record_,
+                         error == ErrorCode::None ? ErrorCode::InvalidArgument : error);
 }
 
 WorkerScheduler::WorkerScheduler(Allocator& allocator) noexcept
@@ -510,6 +597,7 @@ WorkerScheduler::Submit(Function<void(WorkerTaskContext&)>&& body,
                 if (state->records[index] == nullptr) {
                     record->generation = state->generation;
                     record->body = Move(body); // 빈 목적지이며 capture 소멸자를 호출하지 않는다.
+                    record->slot = index;
                     ++record->references;
                     state->records[index] = record;
                     ++state->inFlight;
@@ -531,6 +619,65 @@ WorkerScheduler::Submit(Function<void(WorkerTaskContext&)>&& body,
     return Result<WorkerTaskHandle>::Success(WorkerTaskHandle(record));
 }
 
+Result<WorkerTaskEvent> WorkerScheduler::TryCreateEvent() noexcept {
+    WorkerState* state;
+    {
+        platform::LockGuard ownerLock(lifecycleGate_);
+        state = state_;
+        if (state == nullptr) {
+            return Result<WorkerTaskEvent>::Failure(ErrorCode::ShuttingDown);
+        }
+        platform::LockGuard lock(state->gate);
+        if (!state->accepting) {
+            return Result<WorkerTaskEvent>::Failure(ErrorCode::ShuttingDown);
+        }
+        if (state->inFlight + state->reservations >= state->capacity) {
+            return Result<WorkerTaskEvent>::Failure(ErrorCode::CapacityExceeded);
+        }
+        if (state->references == static_cast<uint64>(-1)) {
+            return Result<WorkerTaskEvent>::Failure(ErrorCode::Overflow);
+        }
+        ++state->references; // 예약에서 record로 이전할 control 수명
+        ++state->reservations;
+    }
+    // Submit과 같은 예약 절차다(할당은 gate 밖, 할당기 재진입 Shutdown 검사 포함).
+    SubmitScope scope(state);
+    auto memory = state->allocator->Allocate(sizeof(WorkerRecord), alignof(WorkerRecord));
+    if (!memory) {
+        EndReservation(*state);
+        ReleaseState(state);
+        return Result<WorkerTaskEvent>::Failure(memory.Error());
+    }
+    WorkerRecord* record = ConstructAt<WorkerRecord>(memory.Value(), *state);
+    record->external = true;
+    bool accepted = false;
+    {
+        platform::LockGuard lock(state->gate);
+        if (state->accepting) {
+            for (uint32 index = 0; index < state->capacity; ++index) {
+                if (state->records[index] == nullptr) {
+                    record->generation = state->generation;
+                    record->slot = index;
+                    ++record->references;
+                    state->records[index] = record;
+                    ++state->inFlight;
+                    --state->reservations;
+                    accepted = true;
+                    break;
+                }
+            }
+            ROCKS_ASSERT(accepted); // 예약이 capacity를 이미 확보하였다.
+        }
+    }
+    state->changed.NotifyAll();
+    if (!accepted) {
+        ReleaseRecord(record);
+        EndReservation(*state);
+        return Result<WorkerTaskEvent>::Failure(ErrorCode::ShuttingDown);
+    }
+    return Result<WorkerTaskEvent>::Success(WorkerTaskEvent(WorkerTaskHandle(record)));
+}
+
 void WorkerScheduler::RunWorker(void* raw) noexcept {
     WorkerState& state = *static_cast<WorkerSlot*>(raw)->state;
     executingState = &state; // body뿐 아니라 모든 capture/dependency cleanup까지 포함한다.
@@ -547,6 +694,11 @@ void WorkerScheduler::RunWorker(void* raw) noexcept {
                     for (uint32 index = 0; index < state.capacity; ++index) {
                         WorkerRecord* record = state.records[index];
                         if (record == nullptr || record->status.state != WorkerTaskState::Pending) {
+                            continue;
+                        }
+                        // 외부 이벤트는 TryTrigger·TryFail이 완료한다. 취소 요청만 worker가
+                        // 처리한다.
+                        if (record->external && !record->status.cancellationRequested) {
                             continue;
                         }
                         bool ready = true;
@@ -580,6 +732,14 @@ void WorkerScheduler::RunWorker(void* raw) noexcept {
                     state.reservations == 0) {
                     executingState = nullptr;
                     return;
+                }
+                // Drain 중 더 진행할 수 없으면(실행·정리 중인 작업이 없고 고를 작업도 없다) 남은
+                // 것은 완료되지 않은 외부 이벤트와 그에 막힌 작업뿐이다. 이벤트를 취소해 Drain을
+                // 끝낸다. 실행 중인 작업이 곧 Trigger할 이벤트는 그 작업이 끝날 때까지 취소하지
+                // 않는다.
+                if (!state.starting && state.stopping && state.reservations == 0 &&
+                    CancelStalledEvents(state)) {
+                    continue;
                 }
                 ROCKS_ASSERT(state.changed.Wait(state.gate) != platform::WaitResult::Failed);
             }

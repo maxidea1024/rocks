@@ -12,6 +12,7 @@
 | 대기 | `Wait(timeoutMs)` → `Result<platform::WaitResult>`; timeout은 작업 취소가 아니다 |
 | 취소 | `RequestCancel`; 실행 중 body는 `WorkerTaskContext::IsCancellationRequested`로 관측 |
 | 회수 | `TryRevoke` → `Result<bool>`; 아직 worker가 꺼내지 않은 Pending 작업을 호출 스레드에서 바로 Cancelled로 끝낸다 |
+| 외부 완료 이벤트 | `TryCreateEvent` → `Result<WorkerTaskEvent>`; body 없이 `TryTrigger`·`TryFail`로 완료하는 작업(UE 5.6 `UE::Tasks::FTaskEvent` 대응). `Task/AsyncIoEvent.h`의 `TrySubmitReadEvent`·`TrySubmitWriteEvent`가 AsyncFile 완료를 이벤트로 잇는다 |
 | 실패 | body의 `WorkerTaskContext::Fail(ErrorCode)`; 최종 상태의 `error`로 관측 |
 | 종료 | `Shutdown(Drain 또는 Cancel)`; native Join까지 회수 |
 | 실행 문맥 검사 | `IsCurrentWorker`; body와 capture/dependency 정리 문맥을 포함 |
@@ -44,6 +45,8 @@ dependency는 같은 scheduler의 같은 Start 세대에 이미 발급된 handle
 
 TryRevoke는 Pending 작업만 회수한다. 상태를 Completing으로 바꿔 worker가 꺼내지 못하게 한 뒤, worker 정리와 같은 순서로 capture와 dependency 보존분을 gate 밖에서 이 스레드가 정리하고 Cancelled(error Cancelled)를 게시한다. worker가 비지 않아도 끝나므로, 호출 스레드가 helper 작업과 일을 나눠 하다 먼저 끝냈을 때 남은 helper를 기다리지 않는 데 쓴다(블록 컨테이너 병렬 압축·해제). 실행 중이거나 끝난 작업은 바꾸지 않고 false를 돌려주며, 회수된 작업에 의존한 작업은 DependencyFailed가 된다.
 
+외부 완료 이벤트(`WorkerTaskEvent`)는 body가 없는 작업 기록이다. 일반 작업처럼 maxInFlight 한 칸을 쓰고 같은 세대의 dependency·Wait·Status·Clone에 쓰인다. worker는 이벤트를 실행하지 않고 취소 요청이 있을 때만 꺼내 Cancelled로 끝낸다. `TryTrigger`는 Succeeded, `TryFail(error)`은 Failed(None이면 InvalidArgument)로, Pending일 때만 gate 안에서 terminal을 게시하고 scheduler 보존분을 반환한다(body·dependency가 없어 정리할 것이 없다). 이미 완료·취소·취소 처리 중이면 false다. 취소 요청 뒤라도 worker가 처리하기 전에 Trigger하면 성공이다. Trigger 없이 이벤트 객체가 소멸하거나 Pending 이벤트 위에 이동 대입하면 취소를 요청해 의존 작업이 영원히 기다리지 않는다(DependencyFailed). Shutdown(Cancel)은 이벤트를 바로 취소한다. Shutdown(Drain)은 이벤트를 바로 취소하지 않고, worker가 더 진행할 수 없을 때(Running·Completing 작업이 없고 고를 작업도 없을 때) 남은 이벤트를 취소해 끝난다. 그래서 실행 중인 작업이 Trigger할 이벤트는 기다리지만, scheduler 밖(IO 등)의 완료는 기다리지 않는다(교차검증에서 Drain이 실행 중인 작업의 Trigger보다 먼저 이벤트를 취소하던 결함을 고쳤다). 늦은 Trigger는 false다. `TrySubmitReadEvent`·`TrySubmitWriteEvent(file, request, …, Move(event), allocator)`는 이벤트를 소유한 완료 문맥을 allocator에 만들어 콜백 문맥으로 넘기고, IO 스레드의 콜백이 이벤트를 완료한 뒤 그 문맥을 마지막으로 해제한다. AsyncFile은 완료를 게시한 뒤 콜백을 부르므로 request.Wait() 반환이 콜백 종료를 뜻하지 않는다. 처음 설계(호출자가 binding 객체를 쥐는 방식)는 Wait 뒤 binding을 지우면 콜백이 해제된 메모리를 쓰고(ASan 재현), 이벤트를 옮기면 Trigger가 사라지는 결함이 교차검증에서 나와 이 방식으로 바꿨다. 완료 규칙은 성공이고 전송 byte가 요청과 같으면 Trigger, 짧은 전송은 InvalidArgument, 그 밖은 Core 공용 `FileErrorCode`다. 제출이 즉시 실패하면 이벤트를 그 오류로 Fail하고, 문맥 할당이 실패하면 이벤트를 호출자에게 남긴다. 압축 해제처럼 source 길이를 제출 때 고정하는 작업이 IO가 채운 버퍼를 쓰게 한다. 기록 칸 번호를 기록에 저장해 회수·이벤트 완료가 gate 안에서 선형 탐색하지 않는다.
+
 RequestCancel은 요청 게시이며 실행 중 body를 강제로 중단하지 않는다. pending 작업은 worker가 정리할 때 body를 생략한다. 실행 중 작업은 취소를 폴링하여 반환해야 하며 이미 발생한 부수 효과를 되돌리지 않는다. 명시적 body 실패와 dependency 실패가 있으면 Failed가 우선하고, 그 외 취소 요청을 받은 작업은 body 반환·cleanup 이후 Cancelled가 된다.
 
 Drain은 신규 제출을 닫고 수락한 작업을 완료한다. Cancel은 pending과 running 작업에 취소를 요청한 뒤 같은 정리·합류 절차를 수행한다. 무한 실행 body나 사용자 cleanup을 강제로 종료하지 않으며 제한시간 내 Shutdown 완료를 보장하지 않는다. Submit/lifecycle allocator callback에서 재진입한 Shutdown은 `Busy`이며, worker/capture cleanup에서는 `WrongThread`이다. Submit은 할당 없는 TLS 연결 프레임 스택으로 기록한다. A.Submit의 allocator가 B.Submit을 호출하고 그 allocator가 A.Shutdown을 호출하는 경우에도 바깥 A의 활성 제출을 검색하여 Busy로 거부한다. 최상단 B만 검사하면 A의 예약 반환과 worker Join이 서로 기다리는 교착이 발생한다. 제출 중이 아닌 별도 scheduler의 정상 Shutdown은 허용하며, 정상·OOM 복귀 모두 프레임을 복원한다.
@@ -55,5 +58,7 @@ Drain은 신규 제출을 닫고 수락한 작업을 완료한다. Cancel은 pen
 현재 구현은 mutex와 선형 ready 탐색을 이용한다. 우선순위, work stealing, lock-free 큐, job affinity, fiber 대기, 성능 우위는 이 단계의 제공 범위가 아니다. `InlineExecutor`의 기존 owner-thread handle 계약도 변경하지 않는다.
 
 `Core/Source/Runtime/Task/Tests/WorkerSchedulerTests.cpp`의 초기 10개 사례는 8개 실제 worker 동시 실행, 8개 외부 producer의 제출 경합, fan-in과 실패 전파, pending·running 취소, 큐 제한·OOM 시 Function 보존, Start의 세 할당 지점 실패, 실제 두 thread 시작 이후 세 번째 시작 실패, capture 정리 중 재진입, 이전 세대 dependency 거부, 100회 재시작, scheduler 밖의 handle 수명, 제출 예약과 Shutdown 경합을 포함한다. 이 기록은 구현 및 사례 정의이며, 실제 실행 판정은 통합 빌드 보고서에서 별도로 확정한다.
+
+외부 이벤트 시험 6개: 다른 스레드의 Trigger가 의존 작업을 풀고 재완료는 false, Fail·취소 요청·Trigger 없는 소멸·회수가 의존 작업을 DependencyFailed로 만듦, Drain이 아무도 완료하지 않는 이벤트를 취소·이벤트의 maxInFlight 사용·시작 전·종료 뒤 생성 거부·이전 세대 dependency 거부, AsyncIo 완료 규칙·즉시 제출 실패·문맥 할당 실패, Drain이 실행 중인 작업의 Trigger를 기다림·Cancel은 바로 취소, Pending 이벤트 위 이동 대입·이벤트 생성 OOM. 압축 쪽 통합 시험(`Compression_AsyncDecompressAfterAsyncFileRead`)은 실제 파일을 AsyncReadFile로 읽고 그 완료에 의존한 해제가 원본을 돌려주는지(40회 반복하며 객체를 바로 소멸), 짧은 읽기에서 해제가 실행되지 않는지 확인한다.
 
 `Core/Source/Runtime/Task/Tests/WorkerSchedulerReentryReviewTests.cpp`의 추가 2개 사례는 서로 다른 scheduler의 중첩 Submit에서 바깥·안쪽 Shutdown 거부, 무관한 scheduler 종료 허용, 내부 record OOM 시 caller Function 보존과 실행 생략, 예약 계수·TLS 프레임 복원 및 최종 allocator ledger 0을 검사한다. 이 사례의 실제 실행 결과도 해당 통합 빌드 증거를 따른다.

@@ -87,6 +87,65 @@ private:
 
     detail::WorkerRecord* record_ = nullptr;
     friend class WorkerScheduler;
+    friend class WorkerTaskEvent;
+};
+
+// 외부 완료 이벤트다(UE 5.6 UE::Tasks::FTaskEvent 대응). body가 없고 worker가 실행하지 않으며,
+// 호출자가 TryTrigger·TryFail로 완료한다. 파일 IO 완료 콜백·다른 시스템의 신호를 scheduler 작업의
+// dependency로 잇는다(예: 비동기 읽기가 끝나면 해제 작업 실행, Task/AsyncIoEvent.h).
+//
+// 사용 예:
+//   auto event = scheduler.TryCreateEvent();
+//   auto after = Span<const WorkerTaskHandle>(&event.Value().Handle(), 1);
+//   auto decode = scheduler.Submit(Move(body), after);
+//   // 다른 스레드(IO 완료 등)에서:
+//   event.Value().TryTrigger();   // decode가 실행된다(TryFail이면 DependencyFailed)
+//
+// 계약:
+// - Pending 동안 scheduler의 maxInFlight 한 칸을 쓴다. Status·Wait·Clone·dependency 사용은 일반
+//   handle과 같다.
+// - TryTrigger는 Succeeded, TryFail(error)은 Failed(error, None이면 InvalidArgument)로 완료하고 이
+//   호출이 완료했으면 true를 돌려준다. 이미 완료·취소된 뒤면 false다(아무것도 바꾸지 않는다). 어느
+//   스레드에서든 부를 수 있다(worker body 포함). 취소 요청 뒤라도 worker가 처리하기 전에
+//   Trigger하면 성공으로 끝난다.
+// - 취소: RequestCancel·TryRevoke·Shutdown·Trigger 없이 소멸·Pending 이벤트 위에 이동 대입하면
+//   Cancelled로 끝나고, 이 이벤트에 의존한 작업은 DependencyFailed다. Shutdown(Cancel)은 바로
+//   취소한다. Shutdown(Drain)은 더 진행할 수 없을 때(실행·정리 중인 작업이 없고 실행할 수 있는
+//   작업도 없을 때) 남은 이벤트를 취소한다. 실행 중인 작업이 Trigger할 이벤트는 기다리지만
+//   scheduler 밖(IO 등)의 완료는 기다리지 않는다. 늦은 Trigger는 false다.
+// - 이동 가능하다. 빈 이벤트(기본 생성·이동된 뒤)의 Trigger·Fail은 StaleHandle이다. 완료 함수는
+//   여러 스레드가 동시에 불러도 되지만, 이동·소멸은 같은 객체의 어떤 호출과도 겹치지 않아야 한다.
+class WorkerTaskEvent {
+public:
+    WorkerTaskEvent() noexcept = default;
+    WorkerTaskEvent(WorkerTaskEvent&& other) noexcept = default;
+    WorkerTaskEvent& operator=(WorkerTaskEvent&& other) noexcept;
+    WorkerTaskEvent(const WorkerTaskEvent&) = delete;
+    WorkerTaskEvent& operator=(const WorkerTaskEvent&) = delete;
+    ~WorkerTaskEvent() noexcept;
+
+    // dependency·Wait·Status·Clone용 handle이다.
+    const WorkerTaskHandle& Handle() const noexcept {
+        return handle_;
+    }
+
+    bool IsValid() const noexcept {
+        return handle_.IsValid();
+    }
+
+    Result<bool> TryTrigger() const noexcept;
+    Result<bool> TryFail(ErrorCode error) const noexcept;
+
+private:
+    explicit WorkerTaskEvent(WorkerTaskHandle&& handle) noexcept
+        : handle_(static_cast<WorkerTaskHandle&&>(handle)) {
+    }
+
+    // 아직 완료되지 않았으면 취소를 요청한다(소멸·대입 전).
+    void CancelPending() noexcept;
+
+    WorkerTaskHandle handle_;
+    friend class WorkerScheduler;
 };
 
 // 테스트·호스트 정책에서 thread 생성 실패를 명시적으로 주입할 수 있는 최소 경계다.
@@ -134,10 +193,15 @@ public:
     // body를 보존한다.
     Result<WorkerTaskHandle> Submit(Function<void(WorkerTaskContext&)>&& body,
                                     Span<const WorkerTaskHandle> dependencies = {}) noexcept;
+    // 외부 완료 이벤트를 만든다(WorkerTaskEvent). 실패: 시작 전·종료 중 ShuttingDown, maxInFlight
+    // 초과 CapacityExceeded, 할당 실패는 그 오류다.
+    Result<WorkerTaskEvent> TryCreateEvent() noexcept;
     // 새 제출을 닫고 cleanup·native Join을 완료한다. 강제 종료·제한시간 종료를 보장하지 않는다.
-    // Cancel은 pending body를 생략하고 running에는 협력적 요청을 게시한다. 명시 Fail이 취소보다
-    // 우선한다. 자기 worker/capture cleanup에서는 WrongThread, lifecycle/Submit 재진입에서는
-    // Busy다. Shutdown 뒤 Start 재사용 가능하며 이전 세대 handle 결과는 그대로 유지한다.
+    // 완료되지 않은 외부 이벤트는 Cancel이면 바로, Drain이면 더 진행할 수 없을 때 Cancelled로
+    // 끝낸다. Cancel은 pending body를 생략하고 running에는 협력적 요청을 게시한다. 명시 Fail이
+    // 취소보다 우선한다. 자기 worker/capture cleanup에서는 WrongThread, lifecycle/Submit
+    // 재진입에서는 Busy다. Shutdown 뒤 Start 재사용 가능하며 이전 세대 handle 결과는 그대로
+    // 유지한다.
     Result<void> Shutdown(WorkerShutdownMode = WorkerShutdownMode::Drain) noexcept;
     WorkerSchedulerStats Stats() const noexcept;
     // body 및 capture/dependency cleanup 실행 문맥을 포함한다. Submit 전 deadlock 검사용이다.

@@ -2,6 +2,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Platform/Clock.h>
+#include <Task/AsyncIoEvent.h>
 #include <Task/WorkerScheduler.h>
 
 using namespace rocks;
@@ -654,4 +655,302 @@ TEST(WorkerSchedulerRevokeReclaimsPendingWithoutWorker) {
         CHECK(scheduler.Stats().inFlight == 0);
     }
     CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+namespace {
+
+struct TriggerContext {
+    const WorkerTaskEvent* event;
+    ManualResetEvent* go;
+};
+
+void TriggerFromThread(void* raw) noexcept {
+    auto* context = static_cast<TriggerContext*>(raw);
+    CHECK(context->go->Wait(10000) == WaitResult::Signaled);
+    auto triggered = context->event->TryTrigger();
+    CHECK(triggered && triggered.Value());
+}
+
+AsyncIoResult IoResult(FileCode code, usize bytes) noexcept {
+    AsyncIoResult value;
+    value.status.code = code;
+    value.bytes = bytes;
+    return value;
+}
+
+} // namespace
+
+// 외부 이벤트: worker가 실행하지 않고, 다른 스레드의 Trigger가 의존 작업을 풀어 준다. 다시 완료하면
+// false다.
+TEST(WorkerSchedulerEventTriggerReleasesDependents) {
+    SystemAllocator allocator;
+    {
+        WorkerScheduler scheduler(allocator);
+        REQUIRE(scheduler.Start({2, 8, 4}));
+        Counter calls;
+        auto event = scheduler.TryCreateEvent();
+        REQUIRE(event);
+        CHECK(scheduler.Stats().inFlight == 1);
+        auto body =
+            Body::TryCreate(allocator, [&](WorkerTaskContext&) noexcept { calls.Increment(); });
+        REQUIRE(body);
+        auto dependent = scheduler.Submit(Move(body.Value()),
+                                          Span<const WorkerTaskHandle>(&event.Value().Handle(), 1));
+        REQUIRE(dependent);
+        // Trigger 전에는 실행되지 않는다.
+        auto early = dependent.Value().Wait(50);
+        CHECK(early && early.Value() == WaitResult::TimedOut);
+        CHECK(event.Value().Handle().Status().Value().state == WorkerTaskState::Pending);
+
+        ManualResetEvent go;
+        TriggerContext context{&event.Value(), &go};
+        Thread trigger;
+        REQUIRE(trigger.Start(TriggerFromThread, &context) == ThreadStatus::Success);
+        go.Signal();
+        JoinTestThread(trigger);
+        CheckTerminal(event.Value().Handle(), WorkerTaskState::Succeeded);
+        CheckTerminal(dependent.Value(), WorkerTaskState::Succeeded);
+        CHECK(calls.calls == 1);
+        auto again = event.Value().TryTrigger();
+        CHECK(again && !again.Value());
+        auto failLate = event.Value().TryFail(ErrorCode::Cancelled);
+        CHECK(failLate && !failLate.Value());
+        CHECK(scheduler.Stats().inFlight == 0);
+        REQUIRE(scheduler.Shutdown());
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// Fail은 의존 작업을 DependencyFailed로, 이벤트는 Failed(error)로 끝낸다. 취소·소멸·회수도 의존
+// 작업을 실패시킨다.
+TEST(WorkerSchedulerEventFailAndCancelPropagate) {
+    SystemAllocator allocator;
+    {
+        WorkerScheduler scheduler(allocator);
+        REQUIRE(scheduler.Start({1, 8, 4}));
+        Counter calls;
+        auto submitAfter = [&](const WorkerTaskEvent& event) {
+            auto body =
+                Body::TryCreate(allocator, [&](WorkerTaskContext&) noexcept { calls.Increment(); });
+            return scheduler.Submit(Move(body.Value()),
+                                    Span<const WorkerTaskHandle>(&event.Handle(), 1));
+        };
+
+        auto failing = scheduler.TryCreateEvent();
+        REQUIRE(failing);
+        auto afterFail = submitAfter(failing.Value());
+        REQUIRE(afterFail);
+        auto failed = failing.Value().TryFail(ErrorCode::NotFound);
+        CHECK(failed && failed.Value());
+        CheckTerminal(failing.Value().Handle(), WorkerTaskState::Failed);
+        CHECK(failing.Value().Handle().Status().Value().error == ErrorCode::NotFound);
+        CheckTerminal(afterFail.Value(), WorkerTaskState::Failed);
+        CHECK(afterFail.Value().Status().Value().error == ErrorCode::DependencyFailed);
+
+        auto none = scheduler.TryCreateEvent();
+        REQUIRE(none);
+        CHECK(none.Value().TryFail(ErrorCode::None).Value());
+        CHECK(none.Value().Handle().Status().Value().error == ErrorCode::InvalidArgument);
+
+        // 취소 요청은 worker가 Cancelled로 끝낸다.
+        auto cancelled = scheduler.TryCreateEvent();
+        REQUIRE(cancelled);
+        auto afterCancel = submitAfter(cancelled.Value());
+        REQUIRE(afterCancel);
+        REQUIRE(cancelled.Value().Handle().RequestCancel());
+        CheckTerminal(cancelled.Value().Handle(), WorkerTaskState::Cancelled);
+        CheckTerminal(afterCancel.Value(), WorkerTaskState::Failed);
+        CHECK(!cancelled.Value().TryTrigger().Value());
+
+        // Trigger 없이 소멸하면 취소된다(의존 작업이 영원히 기다리지 않는다).
+        WorkerTaskHandle orphanDependent;
+        {
+            auto orphan = scheduler.TryCreateEvent();
+            REQUIRE(orphan);
+            auto dependent = submitAfter(orphan.Value());
+            REQUIRE(dependent);
+            orphanDependent = Move(dependent.Value());
+        }
+        CheckTerminal(orphanDependent, WorkerTaskState::Failed);
+        CHECK(orphanDependent.Status().Value().error == ErrorCode::DependencyFailed);
+
+        // 회수도 된다.
+        auto revocable = scheduler.TryCreateEvent();
+        REQUIRE(revocable);
+        CHECK(revocable.Value().Handle().TryRevoke().Value());
+        CHECK(!revocable.Value().TryTrigger().Value());
+
+        CHECK(calls.calls == 0);
+        WorkerTaskEvent empty;
+        CHECK(empty.TryTrigger().Error() == ErrorCode::StaleHandle);
+        REQUIRE(scheduler.Shutdown());
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// Drain도 완료되지 않은 이벤트를 기다리지 않고 취소한다. 이벤트는 maxInFlight 칸을 쓰고 시작
+// 전·종료 뒤에는 만들 수 없다.
+TEST(WorkerSchedulerEventShutdownAndCapacity) {
+    SystemAllocator allocator;
+    {
+        WorkerScheduler scheduler(allocator);
+        CHECK(scheduler.TryCreateEvent().Error() == ErrorCode::ShuttingDown);
+        REQUIRE(scheduler.Start({1, 2, 4}));
+        auto first = scheduler.TryCreateEvent();
+        auto second = scheduler.TryCreateEvent();
+        REQUIRE(first);
+        REQUIRE(second);
+        CHECK(scheduler.TryCreateEvent().Error() == ErrorCode::CapacityExceeded);
+        CHECK(first.Value().TryTrigger().Value());
+        auto third = scheduler.TryCreateEvent();
+        REQUIRE(third);
+        REQUIRE(scheduler.Shutdown(WorkerShutdownMode::Drain));
+        CheckTerminal(second.Value().Handle(), WorkerTaskState::Cancelled);
+        CheckTerminal(third.Value().Handle(), WorkerTaskState::Cancelled);
+        CHECK(!second.Value().TryTrigger().Value());
+        CHECK(scheduler.TryCreateEvent().Error() == ErrorCode::ShuttingDown);
+        // 이전 세대 이벤트는 새 세대 작업의 dependency로 쓸 수 없다.
+        REQUIRE(scheduler.Start({1, 4, 4}));
+        auto body = Body::TryCreate(allocator, [](WorkerTaskContext&) noexcept {});
+        REQUIRE(body);
+        CHECK(scheduler
+                  .Submit(Move(body.Value()),
+                          Span<const WorkerTaskHandle>(&first.Value().Handle(), 1))
+                  .Error() == ErrorCode::WrongContext);
+        REQUIRE(scheduler.Shutdown());
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// AsyncIo 완료 결과 → 이벤트 완료 규칙, 즉시 제출 실패, 문맥 할당 실패.
+TEST(WorkerSchedulerAsyncIoEventSubmission) {
+    CHECK(AsyncIoCompletionError(IoResult(FileCode::Success, 10), 10) == ErrorCode::None);
+    CHECK(AsyncIoCompletionError(IoResult(FileCode::Success, 9), 10) == ErrorCode::InvalidArgument);
+    CHECK(AsyncIoCompletionError(IoResult(FileCode::Success, 11), 10) ==
+          ErrorCode::InvalidArgument);
+    CHECK(AsyncIoCompletionError(IoResult(FileCode::Cancelled, 0), 10) == ErrorCode::Cancelled);
+    CHECK(AsyncIoCompletionError(IoResult(FileCode::OutOfMemory, 0), 10) == ErrorCode::OutOfMemory);
+    CHECK(AsyncIoCompletionError(IoResult(FileCode::NotFound, 0), 10) == ErrorCode::NotFound);
+    CHECK(AsyncIoCompletionError(IoResult(FileCode::SystemError, 0), 10) ==
+          ErrorCode::DependencyFailed);
+
+    SystemAllocator allocator;
+    {
+        WorkerScheduler scheduler(allocator);
+        REQUIRE(scheduler.Start({1, 8, 4}));
+        AsyncIoContext io;
+        REQUIRE(io.Start(AsyncIoBackend::WorkerPool, 1));
+        AsyncReadFile unopened;
+        uint8 buffer[16];
+
+        // 열리지 않은 파일: 콜백 없이 즉시 실패하므로 이벤트를 그 오류로 Fail한다.
+        auto event = scheduler.TryCreateEvent();
+        REQUIRE(event);
+        auto observed = event.Value().Handle().Clone();
+        REQUIRE(observed);
+        AsyncIoRequest request;
+        auto submitted = TrySubmitReadEvent(unopened, request, 0, buffer, sizeof(buffer),
+                                            Move(event.Value()), allocator);
+        CHECK(!submitted && submitted.Error() == ErrorCode::DependencyFailed);
+        CHECK(!event.Value().IsValid());
+        CheckTerminal(observed.Value(), WorkerTaskState::Failed);
+        CHECK(observed.Value().Status().Value().error == ErrorCode::DependencyFailed);
+
+        // 문맥 할당 실패: 이벤트는 호출자에게 그대로 남는다.
+        test::NFailAllocator failing(allocator);
+        auto kept = scheduler.TryCreateEvent();
+        REQUIRE(kept);
+        failing.FailOnAttempt(1);
+        auto oom = TrySubmitReadEvent(unopened, request, 0, buffer, sizeof(buffer),
+                                      Move(kept.Value()), failing);
+        CHECK(!oom && oom.Error() == ErrorCode::OutOfMemory);
+        CHECK(kept.Value().IsValid());
+        CHECK(kept.Value().Handle().Status().Value().state == WorkerTaskState::Pending);
+        failing.DisableFailure();
+        CHECK(kept.Value().TryTrigger().Value());
+
+        WorkerTaskEvent empty;
+        CHECK(
+            TrySubmitReadEvent(unopened, request, 0, buffer, sizeof(buffer), Move(empty), allocator)
+                .Error() == ErrorCode::StaleHandle);
+        REQUIRE(io.Shutdown());
+        REQUIRE(scheduler.Shutdown());
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// Drain은 실행 중인 작업이 Trigger할 이벤트를 먼저 취소하지 않는다. 더 진행할 수 없을 때만 남은
+// 이벤트를 취소한다. Cancel은 바로 취소한다.
+TEST(WorkerSchedulerEventDrainWaitsForInternalTrigger) {
+    SystemAllocator allocator;
+    {
+        WorkerScheduler scheduler(allocator);
+        REQUIRE(scheduler.Start({2, 8, 4}));
+        Counter calls;
+        auto event = scheduler.TryCreateEvent();
+        REQUIRE(event);
+        auto stale = scheduler.TryCreateEvent();
+        REQUIRE(stale);
+        const WorkerTaskEvent* target = &event.Value();
+        ManualResetEvent running;
+        auto trigger = Body::TryCreate(allocator, [&running, target](WorkerTaskContext&) noexcept {
+            running.Signal();
+            const uint64 start = MonotonicNanoseconds();
+            while (MonotonicNanoseconds() - start < 100000000ull) {
+            }
+            CHECK(target->TryTrigger().Value());
+        });
+        REQUIRE(trigger);
+        auto producer = scheduler.Submit(Move(trigger.Value()));
+        REQUIRE(producer);
+        auto body =
+            Body::TryCreate(allocator, [&](WorkerTaskContext&) noexcept { calls.Increment(); });
+        REQUIRE(body);
+        auto dependent = scheduler.Submit(Move(body.Value()),
+                                          Span<const WorkerTaskHandle>(&event.Value().Handle(), 1));
+        REQUIRE(dependent);
+        REQUIRE(running.Wait(10000) == WaitResult::Signaled);
+        REQUIRE(scheduler.Shutdown(WorkerShutdownMode::Drain));
+        CheckTerminal(event.Value().Handle(), WorkerTaskState::Succeeded);
+        CheckTerminal(dependent.Value(), WorkerTaskState::Succeeded);
+        CHECK(calls.calls == 1);
+        // 아무도 완료하지 않는 이벤트는 Drain이 기다리지 않고 취소한다.
+        CheckTerminal(stale.Value().Handle(), WorkerTaskState::Cancelled);
+
+        REQUIRE(scheduler.Start({1, 8, 4}));
+        auto cancelled = scheduler.TryCreateEvent();
+        REQUIRE(cancelled);
+        REQUIRE(scheduler.Shutdown(WorkerShutdownMode::Cancel));
+        CheckTerminal(cancelled.Value().Handle(), WorkerTaskState::Cancelled);
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// Pending 이벤트 위에 이동 대입하면 이전 이벤트는 취소된다. 이벤트 생성의 할당 실패는 그 오류이고
+// 칸을 남기지 않는다.
+TEST(WorkerSchedulerEventMoveAssignAndOutOfMemory) {
+    SystemAllocator system;
+    {
+        test::NFailAllocator allocator(system);
+        WorkerScheduler scheduler(allocator);
+        REQUIRE(scheduler.Start({1, 8, 4}));
+        auto first = scheduler.TryCreateEvent();
+        auto second = scheduler.TryCreateEvent();
+        REQUIRE(first);
+        REQUIRE(second);
+        auto firstHandle = first.Value().Handle().Clone();
+        REQUIRE(firstHandle);
+        first.Value() = Move(second.Value());
+        CheckTerminal(firstHandle.Value(), WorkerTaskState::Cancelled);
+        CHECK(first.Value().TryTrigger().Value());
+
+        allocator.FailOnAttempt(1);
+        auto failed = scheduler.TryCreateEvent();
+        CHECK(!failed && failed.Error() == ErrorCode::OutOfMemory);
+        allocator.DisableFailure();
+        CHECK(scheduler.Stats().inFlight == 0);
+        CHECK(scheduler.Stats().reservedSubmissions == 0);
+        REQUIRE(scheduler.Shutdown());
+    }
+    CHECK(system.Stats().liveAllocations == 0);
 }
