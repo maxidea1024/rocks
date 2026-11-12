@@ -1270,19 +1270,19 @@ fully concurrent GC, lock-free registry, moving/compacting heap, runtime native 
 
 ### 26.1 기존 요구의 유지
 
-이 상세안은 Rocks 전체 계획을 대체하는 축소 사양이 아니다. tags·component·prefab·asset/cook/DDC·WorldPartition·네트워크·오디오·AI/nav·physics·animation·VFX·UI 툴킷(게임 UI·에디터)·컷씬·viewport는 Object/Schema/Task의 후속 소비자다. Deferred/Forward·upscaling·GPU-driven geometry/GI·high-end post effect는 renderer 계획에 유지한다. Blueprint 제외·커스텀 언어 정책도 유지한다.
+이 상세안은 Rocks 전체 계획을 대체하는 축소 사양이 아니다. tags·component·prefab·asset/cook/빌드 캐시·WorldPartition·네트워크·오디오·AI/nav·physics·animation·VFX·UI 툴킷(게임 UI·에디터)·컷씬·viewport는 Object/Schema/Task의 후속 소비자다. Deferred/Forward·upscaling·GPU-driven geometry/GI·high-end post effect는 renderer 계획에 유지한다. Blueprint 제외·커스텀 언어 정책도 유지한다.
 
 | 후속 시스템 | 이번에 확보할 연결점 | 지금 구현하지 않아도 되는 부분 |
 |---|---|---|
 | Entity/Component/Tags/Prefab | Type/Field/Subobject ID·owner edge·clone/default | World lifecycle·tag editor·prefab importer |
-| Asset/Async/Cook/DDC | Archive·stable ID·IO lease·Task·schema version | asset database·cook farm·package format 전체 |
+| Asset/Async/Cook/빌드 캐시 | Archive·stable ID·IO lease·Task·schema version | asset database·cook farm·package format 전체 |
 | Renderer/Audio/Physics | immutable snapshot·backend completion token | 실제 GPU/audio/physics resource manager |
 | UI 툴킷·Editor·Cutscene | schema property·CU1–CU8 리플렉션 계약·transaction·input focus/context | widget layout/render·편집 화면·timeline |
 | Material Editor·Compiler | stable ID·schema·Task·snapshot·module lease | 필수 M3/M4 그래프·preview·instance/function; M5/M6 layer |
 | Custom Language | TypeSchema·typed binding·약한 handle·weak subscription | VM/compiler/debugger |
 | Net/AI/Navigation | quantized command·scheduler·context epoch | replication/prediction·AI runtime·nav query |
 
-머티리얼 에디터는 반드시 구현할 후속 제품 기능이다. 그래프 편집·인스턴스·함수·레이어·native live preview·비동기 compile·DDC/cook를 전체 계획의 14.5–14.9절에 정의한다. Blueprint 제외는 gameplay visual scripting에 적용하며 shader 제작 그래프는 유지한다. C++/커스텀 언어는 parameter API로 재질을 제어한다.
+머티리얼 에디터는 반드시 구현할 후속 제품 기능이다. 그래프 편집·인스턴스·함수·레이어·native live preview·비동기 compile·빌드 캐시/cook를 전체 계획의 14.5–14.9절에 정의한다. Blueprint 제외는 gameplay visual scripting에 적용하며 shader 제작 그래프는 유지한다. C++/커스텀 언어는 parameter API로 재질을 제어한다.
 
 Core 단계에서는 stable Guid·versioned schema·Archive·Task 취소/terminal·immutable snapshot·module lease·transaction 연결 계약을 준비한다. MaterialSchema·MaterialCompiler·MaterialRuntime·EditorMaterial은 별도 상위 모듈이며 Core가 이 모듈을 include/link하지 않는다. M3/M4의 MAT0–MAT2 기본 에디터는 필수이고 layer 고도화는 M5/M6, 미지원 domain/target은 명시 상태로 확장한다. Core/Input 작업 ID 52개는 유지하되 예정 파일 수는 생성기에서 실제 집계한다. 상위 제작 기능 전체를 첫 Foundation 완료 조건에 추가하지 않는다.
 
@@ -1298,7 +1298,7 @@ Core 단계에서는 stable Guid·versioned schema·Archive·Task 취소/termina
 | texture streaming·기본 콘텐츠 | allocation budget·lease·IO/decode·stable ID | 최소 mip residency/손상·취소, built-in lifetime/baseline을 실제 asset/renderer Gate에서 검증 |
 | 5개 graphics API·Deferred/Forward·upscale·고급 post | immutable snapshot·backend completion·capability·시간 history ID | D3D11/D3D12/Vulkan/OpenGL/Metal 각각 지원표·실장비 conformance; 기능별 일정은 전체 계획 |
 | UI 툴킷 Studio·viewport·인게임 UI 편집·컷씬 | Win/Mac focus/IME·transaction·schema·CU1–CU8·clock·PIE scope | 단일 UI 툴킷의 designer/runtime·Godot 오라클 GO1–GO6·sequence authoring/capture 필수; 자체 언어 이벤트 |
-| Build/Cook/DDC·분산/반복 최적화 | C00 manifest·C20 내용 동일 유지·C31 action/cache 계약 | Rocks Build·분산 executor·로컬 fallback·compile/link/cook 측정; headless 필수 |
+| Build/Cook/빌드 캐시·분산/반복 최적화 | C00 manifest·C20 내용 동일 유지·C31 action/cache 계약 | Rocks Build·분산 executor·로컬 fallback·compile/link/cook 측정; headless 필수 |
 | 전체 gameplay/AI/VFX/network/audio/nav/physics | Object/Schema/Task/context·ownership·테스트 하네스 | 각 subsystem 최초 구현부터 unit/contract/fault/concurrency·관측·누수 Gate |
 
 엔진 내부 명명은 Rocks 고유 체계를 유지하고 Blueprint는 지원하지 않는다. 자체 언어와 material/UI/animation의 전문 편집기를 구분한다. 모든 후속 구현의 검증 의무와 안정성 우선은 Foundation 이후에도 유지한다. 위 표는 구현 완료 선언이나 별도 신규 Core task가 아니며 전체 계획의 마일스톤으로 연결한다.
