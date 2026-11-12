@@ -22,7 +22,7 @@ S4·S5는 S2·S3과 독립이다. 이번 범위에서 macOS는 창·Metal 구현
 - 게임 규칙 조율 객체는 **GameDirector**, 진행 상태는 **GameState**, 제어 주체는 **Controller/PlayerController**, 제어 대상은 **Pawn**, 월드 배치 객체는 **Actor**다. 기존 계획 20.4·20.5절의 MatchRules·MatchState·PlayerAgent·ControlledEntity·Entity 명칭은 이 이름으로 대체한다.
 - 그래픽 장치 추상화는 **Graphics**(`rocks::graphics`)다. 타입에 접두사를 붙이지 않는다(`graphics::Device`, `graphics::SwapChain`). 기존 계획의 "RHI" 표기는 Graphics로 바꾼다.
 - 수명 hook은 계획 20.2절(2026-11-12 결정)을 따른다: `OnAwake`(Initialize), `OnEnable`, `OnStart`(BeginPlay), `OnTick`·`OnFixedTick`·`OnLateTick`, `OnDisable`, `OnDestroy`(EndPlay).
-- Tick phase는 `PrePhysics`, `Physics`, `PostPhysics`, `PreRender`, `LateUpdate`다. `Physics` phase만 고정 스텝으로 실행한다.
+- Tick phase는 `PrePhysics`, `Physics`, `PostPhysics`, `LateUpdate`, `PreRender`(실행 순서)다. `Physics` phase만 고정 스텝으로 실행한다.
 
 ## 3. 모듈과 의존 방향
 
@@ -56,9 +56,14 @@ Engine은 창·그래픽·게임플레이를 모른다. 이벤트 펌프와 렌�
 
 ### 4.2 소유권
 
-- World는 Actor마다 `ActorRecord`를 `SlotArray`에 두고, 레코드가 `RootRef<Actor>`와 그 Actor의 Component `RootRef` 목록을 소유한다. Actor·Component는 **World가 명시적으로 소유하고 명시적으로 파괴**한다. GC는 파괴 요청 이후의 저장소 회수 수단이다.
-- 객체 사이 참조(부모·자식 SceneComponent, Actor의 root component, Controller↔Pawn)는 `WeakRef`/`ObjectHandle`이다. 대상 파괴 후 접근은 핸들 generation 검사로 실패한다.
-- Actor·Component는 소속 `World*`를 보관한다. World는 C++ 객체이며 자신의 Registry와 모든 객체보다 오래 산다.
+- 소유 사슬은 **World → Level → Actor → Component**다(UE의 UWorld → ULevel → AActor → UActorComponent와 같은 형태).
+  - World는 Level마다 `RootRef<Level>`을 보유한다. World가 가진 객체 루트는 이것뿐이다. 시작할 때 영구 Level을 만들고, 서브 Level은 `CreateLevel`로 추가한다.
+  - Level은 소속 Actor를, Actor는 자기 Component를 **GC 추적 강한 간선 목록 `ObjectRefArray<T>`**로 소유한다. 소유자의 `Trace`가 목록을 방문하므로 GC 도달성이 소유 관계를 그대로 따른다.
+  - World는 Actor마다 수명 기록(`ActorRecord`: 상태·Tick 핸들·소속 Level)만 `SlotArray`에 둔다. Component의 수명 기록은 Component 객체 자신이 갖는다.
+- 파괴는 **명시적**이다. World가 hook을 부른 뒤 소유자의 간선에서 빼고 `RequestDestroy`한다. GC는 그 뒤 저장소를 회수하는 수단이다. Level 파괴는 소속 Actor를 모두 정리한 뒤 Level 루트를 반환한다.
+- `ObjectRefArray`는 이번 단계에서 Core(ObjectRuntime)에 추가했다(4.5절). 추가할 때 대상 타입·생존·같은 Registry를 검증하고, 증분 GC Marking 중이면 대상을 shade한 뒤 게시한다(삽입 장벽). 제거에는 장벽이 필요 없다.
+- 소유가 아닌 객체 사이 참조(부모·자식 SceneComponent, Actor의 root component, Controller↔Pawn)는 `ObjectHandle`이다. 대상 파괴 후 접근은 핸들 generation 검사로 실패한다.
+- Actor·Component·Level은 소속 `World*`를 보관한다. World는 C++ 객체이며 자신의 Registry와 모든 객체보다 오래 산다.
 - 현재 메타컴파일러는 컨테이너·raw pointer 필드를 거부한다. Actor·Component는 이런 필드가 필요하므로 메타 생성 대신 **네이티브 클래스 등록**(4.4절)을 쓴다. 이 타입들은 필드 리플렉션·그래프 직렬화 대상이 아니다.
 
 ### 4.3 접근
@@ -79,7 +84,24 @@ public:
 rocks::RegisterNativeClass<SpinningActor>(types);
 ```
 
-매크로는 `Super` 별칭, 정적 `TypeId`, 이름을 정의한다. `RegisterNativeClass<T>`는 필드 없는 스키마(`baseType = T::Super`의 ID)와 `MakeRuntimeTypeOps<T>`(`nativeBaseType` 설정)를 등록한다. 기반 타입을 먼저 등록해야 한다(TypeRegistry 규칙).
+매크로는 `ThisClass`·`Super` 별칭, 정적 `TypeId`, 이름을 정의한다. `NativeClassType` concept은 매크로를 빠뜨려 기반의 ID를 물려받은 클래스를 컴파일 시 거부한다. `RegisterNativeClass<T>`는 필드 없는 스키마(`baseType = T::Super`의 ID)와 `MakeRuntimeTypeOps<T>`(`nativeBaseType` 설정)를 등록한다. 기반 타입을 먼저 등록해야 한다(TypeRegistry 규칙). `nativeBaseType`은 상속 Resolve의 포인터 변환 근거이므로 C++ 상속을 `static_assert`로 보증한 코드(RegisterNativeClass, 메타 생성 코드)만 설정하고, TypeRegistry는 기반 레코드 일치와 크기·정렬 하한을 검사한다.
+
+### 4.5 ObjectRefArray
+
+```cpp
+class Actor : public Object {
+public:
+    explicit Actor(Allocator& allocator) noexcept : components_(allocator) {}
+    void Trace(TraceVisitor& visitor) const noexcept { components_.Trace(visitor); }
+    ObjectRefArray<Component> components_;
+};
+
+registry.AddReference(access, actor, actorPointer->components_, component);
+registry.RemoveReference(access, actor, actorPointer->components_, component);
+```
+
+- 원소 버퍼는 소유 객체의 allocator(Registry allocator)에서 할당하고, 확장은 Registry 잠금 밖에서 한다. 원소를 바꾸는 쪽은 소유 스레드뿐이고 GC trace는 slice 안에서만 원소를 읽으므로, 확장과 trace가 겹치지 않는다.
+- 배열 객체는 소유자 저장소 안에 직접 있어야 한다(`SetReference`의 필드 위치 검사와 같은 규칙). 추가는 게시된 생존 소유자만 받고, 정리용 제거는 파괴 요청된 소유자에서도 허용한다.
 
 ## 5. 시간
 
@@ -89,9 +111,9 @@ Core에 `Core/Time/GameClock.h`를 둔다(계획 8.3절의 StepPlanner).
 - `GameClock::Advance(realDeltaSeconds) → StepPlan{unscaledDelta, delta, fixedSteps, fixedStep, alpha, droppedSeconds}`.
 - 실제 시간 delta는 `maxFrameDeltaSeconds`로 자른다. 게임 delta = 잘린 실제 delta × scale이며 pause면 0이다. 고정 accumulator에는 게임 delta만 더하므로 scale·pause가 같은 값을 두 번 적용하지 않는다.
 - 한 프레임의 고정 스텝 수는 `maxSubsteps`를 넘지 않으며, 넘는 누적은 버리고 `droppedSeconds`로 보고한다.
-- pause 중 `StepSingle(debugDelta)`은 고정 스텝 정확히 한 번을 계획하고, 가변 Update에는 명시한 디버그 delta(생략 시 fixedStep)를 넘긴다.
-- scale은 [0, 1000] 범위의 유한한 값이다. 0은 게임 시간을 멈추지만 pause 상태가 아니다(`StepSingle` 거부, `TickWhenPaused` 미실행). 음수·NaN은 `InvalidArgument`다. scale과 pause는 별도 상태라 pause 해제 시 이전 scale이 그대로 적용된다.
-- 고정 스텝은 [10µs, 1s], 프레임당 고정 스텝 상한은 [1, 1024]다. 극단값에서도 보간 비율과 잔여 누적을 [0, 1)·[0, step)으로 고정한다.
+- pause 중 `RequestSingleStep(debugDelta)`은 단일 스텝을 요청하고, 다음 `Advance`가 이를 소비해 고정 스텝 정확히 한 번과 디버그 delta(생략 시 fixedStep)를 계획한다(`StepPlan::singleStep`). 실제·unscaled 시간은 측정값 그대로 흐르고, World는 그 프레임을 pause가 아닌 것처럼 실행한다.
+- scale은 [0, 1000] 범위의 유한한 값이다. 0은 게임 시간을 멈추지만 pause 상태가 아니다(단일 스텝 요청 거부, `TickWhenPaused` 미실행). 음수·NaN은 `InvalidArgument`다. scale과 pause는 별도 상태라 pause 해제 시 이전 scale이 그대로 적용된다.
+- 고정 스텝은 [10µs, 1s], 프레임당 고정 스텝 상한은 [1, 1024], 프레임 delta 상한은 (0, 60s]다. 고정 시간은 스텝 길이가 바뀐 시점을 기준점으로 누적한다. 극단값에서도 보간 비율과 잔여 누적을 [0, 1)·[0, step)으로 고정한다.
 - Engine은 실제 시간과 프레임 번호를, World는 자기 `GameClock`을 가진다. World별 pause·scale이 독립이다.
 
 ## 6. Engine
@@ -129,9 +151,8 @@ Uninitialized → Initializing → Running → Stopping → Stopped
 
 ### 7.3 Component
 
-- `Component`는 Actor에 속하고 `OnRegister`/`OnUnregister`(엔진 내부·backend 등록)와 위 hook을 가진다. Actor의 `FinishSpawning`이 Component를 등록하고, 이미 Playing인 Actor에 추가된 Component는 추가 시점에 등록·시작한다.
-- `SceneComponent`는 부모·자식 계층, 상대 Transform, 월드 Transform을 가진다. 월드 Transform은 dirty 플래그로 지연 계산하며 부모 변경 시 하위 전체를 dirty로 표시한다. `Attach`는 순환(자기 자신·조상)을 `InvalidArgument`로 거부한다. 같은 Actor 안 계층만 우선 지원한다.
-- 월드 변환 합성은 `Transform::TryCompose`를 쓰고, shear로 실패하면 상대 Transform 변경을 되돌리고 오류를 반환한다.
+- `Component`는 Actor에 속하고 `OnRegister`/`OnUnregister`(엔진 내부·backend 등록)와 위 hook을 가진다. Actor의 `FinishSpawning`이 Component를 등록한다(OnRegister → Actor OnAwake → Component OnAwake → OnEnable). 이미 초기화된 Actor에 추가된 Component는 추가 즉시 OnRegister·OnAwake·OnEnable을 받고 OnStart는 다음 프레임 시작에 받는다(다른 객체의 hook 실행 중 OnStart 재진입 방지). 정리는 OnDisable(Component 역순 → Actor) → OnDestroy(Component 역순 → Actor) → OnUnregister 순이며, OnDestroy는 OnAwake가 성공한 객체만 받는다.
+- `SceneComponent`는 부모·자식 계층, 상대 Transform, 월드 행렬(`Mat4d` affine)을 가진다. 월드 행렬 = 부모 월드 행렬 × 상대 TRS 행렬이며 dirty 플래그로 지연 계산한다. 행렬로 저장하므로 비균일 scale 부모 아래 회전한 자식(shear)도 정확하고, TRS가 필요할 때만 `TryWorldTransform`이 분해한다(shear면 Unsupported). 상대 Transform·부모 변경 시 하위 전체를 dirty로 표시한다. `AttachTo`는 순환(자기 자신·조상)을 `InvalidArgument`로 거부하며 같은 World 안에서만 붙인다. 부모가 파괴되면 자식은 루트가 된다.
 
 ### 7.4 지연 작업과 안전 지점
 
@@ -141,11 +162,13 @@ Uninitialized → Initializing → Running → Stopping → Stopped
 
 ## 8. Tick Scheduler
 
-- 등록 기반이다. 등록 단위는 `(대상 핸들, 종류, phase, priority, interval, pause 정책)`이며 `TickHandle`(slot+generation)로 식별한다.
-- phase마다 밀집 배열을 두고, 등록 집합이 바뀐 phase만 다시 정렬한다(선행 의존 위상 정렬 → priority). 순회 중 할당하지 않는다.
-- 선행 의존은 같은 phase 안에서만 허용하고 사이클은 등록 반영 시 검출해 해당 등록을 거부한다. 다른 phase 간 순서는 phase 순서로 보장된다.
-- interval은 대상별 누적 시간으로 판정하고 실제 경과 시간을 delta로 넘긴다.
-- pause 정책: 기본은 World pause 시 정지, `TickWhenPaused`는 unscaled delta로 계속 실행.
+- 등록 기반이다. 등록 단위는 `(대상 핸들, 종류, hook, phase, priority, interval, pause 정책)`이며 `TickHandle`(slot+generation)로 식별한다.
+- 단계 순서(열거 순서 = 실행 순서)는 `PrePhysics → Physics(고정 스텝 수만큼) → PostPhysics → LateUpdate → PreRender`다. LateUpdate(카메라 추적 등 후처리)가 PreRender(렌더 추출 준비)보다 먼저 와야 같은 프레임 렌더에 반영된다.
+- phase마다 밀집 배열을 두고, 등록 집합이 바뀐 phase만 다시 정렬한다. 정렬은 (priority, 등록 순서) 최소 힙을 쓰는 위상 정렬이다. 선행 의존으로 묶이지 않은 항목끼리는 항상 (priority, 등록 순서)를 따른다. 순회 중에는 할당하지 않는다(실행 중 해제도 표시만 하고 단계 경계에서 지운다).
+- 선행 의존은 같은 phase 안에서만 허용한다. 사이클은 `AddPrerequisite` 호출 시점에 방문 표시 탐색(선형 시간)으로 검출해 거부한다. 다른 phase 간 순서는 phase 순서로 보장된다.
+- Component Tick은 같은 hook의 소유 Actor Tick 뒤에 오도록 World가 선행 의존을 자동으로 건다(UE의 기본 순서와 같다).
+- interval은 대상별 누적으로 판정하고 상대 허용오차(1e-9)로 합산 오차를 흡수한다. 남은 누적은 다음 주기로 이월해 평균 주기를 interval에 맞추되 한 번에 여러 주기를 따라잡지 않는다. delta는 마지막 실행 이후 흐른 시간이다.
+- pause 정책: 기본은 World pause 시 정지, `TickWhenPaused`는 unscaled delta로 계속 실행한다. 디버그 단일 스텝 프레임은 pause가 아닌 것처럼 실행한다.
 - 병렬 Tick은 후속이다. 등록 단위가 읽기·쓰기 선언을 추가할 수 있도록 구조를 남긴다.
 
 ## 9. 입력

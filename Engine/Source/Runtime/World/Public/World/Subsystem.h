@@ -26,7 +26,8 @@ namespace rocks {
 
 namespace detail {
 template <class T>
-inline const uint8 SubsystemIdentity = 0;
+// const를 붙이지 않는다: 읽기 전용 상수는 링커의 동일 데이터 병합(ICF)으로 주소가 합쳐질 수 있다.
+inline uint8 SubsystemIdentity = 0;
 } // namespace detail
 
 // Subsystem 타입의 실행 중 식별 키다. 저장하거나 다른 실행 이미지와 비교하지 않는다.
@@ -108,9 +109,7 @@ public:
 
         for (uint32 index : order) {
             const SubsystemType<Base>& type = types[index];
-            auto created = type.create
-                               ? type.create(allocator_)
-                               : Result<UniquePtr<Base>>::Failure(ErrorCode::InvalidArgument);
+            auto created = type.create(allocator_);
             if (!created) {
                 Deinitialize(owner);
                 return Result<void>::Failure(created.Error());
@@ -118,6 +117,9 @@ public:
             auto initialized = created.Value()->Initialize(owner);
             if (!initialized) {
                 // 초기화에 실패한 Subsystem은 Deinitialize하지 않는다(부분 정리는 Initialize 책임).
+                // 그 소멸자가 Initialize 중 얻은 의존에 접근할 수 있으므로 의존을 정리하기 전에
+                // 파괴한다.
+                created.Value().Reset();
                 Deinitialize(owner);
                 return initialized;
             }
@@ -133,11 +135,13 @@ public:
 
     // 초기화 역순으로 Deinitialize하고 파괴한다. 여러 번 호출해도 안전하다.
     void Deinitialize(Owner& owner) noexcept {
+        // 자기 Deinitialize 중에도 Get<자기 타입>이 동작하도록 정리한 뒤에 목록에서 뺀다.
         while (instances_.Size() != 0) {
+            instances_[instances_.Size() - 1]->Deinitialize(owner);
             auto last = instances_.TryPopBack();
             auto key = keys_.TryPopBack();
+            (void)last;
             (void)key;
-            last.Value()->Deinitialize(owner);
         }
     }
 
@@ -173,6 +177,10 @@ private:
         }
         for (usize left = 0; left < types.Size(); ++left) {
             marks[left] = 0;
+            // 생성 함수가 없는 항목은 아무것도 만들기 전에 거부한다.
+            if (types[left].create == nullptr) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
             for (usize right = left + 1; right < types.Size(); ++right) {
                 if (types[left].key == types[right].key) {
                     return Result<void>::Failure(ErrorCode::InvalidArgument);

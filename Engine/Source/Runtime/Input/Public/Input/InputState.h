@@ -25,7 +25,8 @@ struct GamepadDeadZone {
 // - WasPressed/WasReleased는 해당 프레임에만 참이다. 소비하지 않은 edge는 다음 프레임으로 넘어가지
 //   않으므로 pause 뒤 resume에서 과거 입력이 다시 발생하지 않는다.
 // - 한 프레임 안에서 눌렀다 뗐으면 WasPressed와 WasReleased가 모두 참이고 IsDown은 거짓이다.
-// - OS 자동 반복(repeat) KeyDown은 edge를 만들지 않는다.
+// - 이미 눌린 키의 KeyDown(OS 자동 반복 포함)은 edge를 만들지 않는다. 눌려 있지 않던 키의 KeyDown은
+//   repeat 표시와 관계없이 눌림 edge다(포커스 복귀 직후의 반복 down).
 // - FocusLost는 눌린 키·마우스 버튼을 모두 놓은 것으로 처리하고 WasReleased를 세운다.
 //
 // 스레드: 동기화하지 않는다. BeginFrame은 게임 스레드의 프레임 시작에서 호출한다.
@@ -33,9 +34,9 @@ class InputState {
 public:
     InputState() noexcept = default;
 
-    void SetGamepadDeadZone(const GamepadDeadZone& deadZone) noexcept {
-        deadZone_ = deadZone;
-    }
+    // 데드존을 바꾼다. 각 값은 [0, 1) 범위의 유한한 값이어야 하며 아니면 InvalidArgument로 거부하고
+    // 기존 값을 유지한다.
+    Result<void> SetGamepadDeadZone(const GamepadDeadZone& deadZone) noexcept;
 
     // 이전 프레임의 edge를 지우고 events를 순서대로 적용해 새 스냅샷을 만든다. 이벤트가 없어도
     // 프레임마다 호출해야 edge와 마우스 이동량이 초기화된다. 잘못된 열거 값의 이벤트는 무시한다.

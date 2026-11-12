@@ -158,3 +158,34 @@ TEST(Input_KeyNamesCoverEveryKey) {
     CHECK(strcmp(KeyName(Key::NumpadEnter), "NumpadEnter") == 0);
     CHECK(strcmp(KeyName(Key::Count), "Unknown") == 0);
 }
+
+TEST(Input_RepeatDownForReleasedKeyCountsAsPress) {
+    // 키를 누른 채 포커스를 되찾으면 OS의 첫 down이 반복 표시로 온다. 눌림·뗌 edge가 짝을 이뤄야
+    // 한다.
+    InputState state;
+    Frame(state, {InputEvent::KeyDown(Key::W, true)});
+    CHECK(state.IsDown(Key::W) && state.WasPressed(Key::W));
+    Frame(state, {InputEvent::KeyUp(Key::W)});
+    CHECK(state.WasReleased(Key::W));
+}
+
+TEST(Input_DeadZoneRejectsOutOfRangeValues) {
+    InputState state;
+    const float zero = 0.0f;
+    GamepadDeadZone bad;
+    bad.leftStick = -0.1f;
+    CHECK(state.SetGamepadDeadZone(bad).Error() == ErrorCode::InvalidArgument);
+    bad = {};
+    bad.trigger = 1.0f;
+    CHECK(state.SetGamepadDeadZone(bad).Error() == ErrorCode::InvalidArgument);
+    bad = {};
+    bad.rightStick = zero / zero;
+    CHECK(state.SetGamepadDeadZone(bad).Error() == ErrorCode::InvalidArgument);
+    GamepadDeadZone none{0.0f, 0.0f, 0.0f};
+    REQUIRE(state.SetGamepadDeadZone(none));
+    GamepadSnapshot pad;
+    pad.connected = true;
+    pad.axes[static_cast<uint32>(GamepadAxis::LeftX)] = 0.05f;
+    Frame(state, {InputEvent::Gamepad(0, pad)});
+    CHECK(Near(state.GamepadAxisValue(0, GamepadAxis::LeftX), 0.05f));
+}

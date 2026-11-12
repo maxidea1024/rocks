@@ -3,6 +3,16 @@
 
 namespace rocks {
 
+namespace {
+
+constexpr uint32 NoIndex = 0xffffffffu;
+
+// interval 판정의 상대 허용오차다. 1/60초를 여러 번 더한 값이 0.1초에 아주 조금 못 미쳐 한 프레임
+// 늦게 실행되는 일을 막는다(GameClock의 고정 스텝 판정과 같은 값).
+constexpr double IntervalTolerance = 1.0e-9;
+
+} // namespace
+
 const char* TickPhaseName(TickPhase phase) noexcept {
     switch (phase) {
     case TickPhase::PrePhysics:
@@ -11,10 +21,10 @@ const char* TickPhaseName(TickPhase phase) noexcept {
         return "Physics";
     case TickPhase::PostPhysics:
         return "PostPhysics";
-    case TickPhase::PreRender:
-        return "PreRender";
     case TickPhase::LateUpdate:
         return "LateUpdate";
+    case TickPhase::PreRender:
+        return "PreRender";
     case TickPhase::Count:
         break;
     }
@@ -32,7 +42,9 @@ TickScheduler::TickScheduler(Allocator& allocator) noexcept
       order_{Array<TickHandle>(allocator), Array<TickHandle>(allocator),
              Array<TickHandle>(allocator), Array<TickHandle>(allocator),
              Array<TickHandle>(allocator)},
-      scratch_(allocator), marks_(allocator), stack_(allocator), pendingRemovals_(allocator) {
+      scratch_(allocator), localIndex_(allocator), indegree_(allocator),
+      dependentOffsets_(allocator), dependents_(allocator), heap_(allocator), marks_(allocator),
+      stack_(allocator) {
 }
 
 Result<TickHandle> TickScheduler::Register(const TickRegistration& registration) noexcept {
@@ -62,17 +74,14 @@ Result<void> TickScheduler::Unregister(TickHandle handle) noexcept {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    const uint32 phase = static_cast<uint32>(entry->registration.phase);
     if (running_) {
-        // 실행 중에는 저장소를 옮기지 않도록 표시만 하고 단계 경계에서 지운다.
-        auto queued = pendingRemovals_.TryPushBack(handle);
-        if (!queued) {
-            return queued;
-        }
+        // 실행 중에는 저장소를 옮기지 않도록 표시만 하고 단계 경계에서 지운다(할당 없음).
         entry->removed = true;
+        ++pendingRemovals_;
         return Result<void>::Success();
     }
 
+    const uint32 phase = static_cast<uint32>(entry->registration.phase);
     auto removed = entries_.TryRemove(handle.slot);
     if (!removed) {
         return removed;
@@ -91,6 +100,7 @@ Result<void> TickScheduler::SetEnabled(TickHandle handle, bool enabled) noexcept
     if (enabled && !entry->registration.enabled) {
         // 다시 켠 항목은 꺼져 있던 동안의 시간을 한꺼번에 넘기지 않는다.
         entry->accumulated = 0.0;
+        entry->sinceLastRun = 0.0;
     }
 
     entry->registration.enabled = enabled;
@@ -98,14 +108,21 @@ Result<void> TickScheduler::SetEnabled(TickHandle handle, bool enabled) noexcept
 }
 
 Result<bool> TickScheduler::Reaches(TickHandle from, TickHandle to) noexcept {
+    auto resized = marks_.TryResize(entries_.SlotCount());
+    if (!resized) {
+        return Result<bool>::Failure(resized.Error());
+    }
+    for (uint8& mark : marks_) {
+        mark = 0;
+    }
+
     stack_.Clear();
     auto pushed = stack_.TryPushBack(from);
     if (!pushed) {
         return Result<bool>::Failure(pushed.Error());
     }
 
-    // 의존 그래프는 사이클이 없으므로 방문 표시 없이도 끝난다. 다이아몬드 모양에서 중복 방문이 생길
-    // 수 있지만 등록 시점에만 실행한다.
+    // 각 항목을 한 번만 펼친다(다이아몬드 모양 의존에서도 선형).
     while (stack_.Size() != 0) {
         auto popped = stack_.TryPopBack();
         const TickHandle current = popped.Value();
@@ -113,10 +130,15 @@ Result<bool> TickScheduler::Reaches(TickHandle from, TickHandle to) noexcept {
             return Result<bool>::Success(true);
         }
         const Entry* entry = entries_.Find(current.slot);
-        if (entry == nullptr || entry->removed) {
+        if (entry == nullptr || entry->removed || marks_[current.slot.index] != 0) {
             continue;
         }
+        marks_[current.slot.index] = 1;
         for (const TickHandle& prerequisite : entry->prerequisites) {
+            const Entry* before = entries_.Find(prerequisite.slot);
+            if (before == nullptr || before->removed || marks_[prerequisite.slot.index] != 0) {
+                continue;
+            }
             auto next = stack_.TryPushBack(prerequisite);
             if (!next) {
                 return Result<bool>::Failure(next.Error());
@@ -195,27 +217,94 @@ void TickScheduler::BeginFrame() noexcept {
 }
 
 void TickScheduler::ApplyPendingRemovals() noexcept {
-    for (const TickHandle& handle : pendingRemovals_) {
-        const Entry* entry = entries_.Find(handle.slot);
-        if (entry == nullptr) {
+    if (pendingRemovals_ == 0) {
+        return;
+    }
+
+    // SlotArray는 순회 중 현재 원소 삭제를 허용한다.
+    for (auto iterator = entries_.begin(); iterator != entries_.end(); ++iterator) {
+        if (!iterator->removed) {
             continue;
         }
-        dirty_[static_cast<uint32>(entry->registration.phase)] = true;
-        // 표시된 항목은 유효하므로 제거가 실패하지 않는다.
-        auto removed = entries_.TryRemove(handle.slot);
+        dirty_[static_cast<uint32>(iterator->registration.phase)] = true;
+        auto removed = entries_.TryRemove(iterator.Handle());
         (void)removed;
     }
 
-    pendingRemovals_.Clear();
+    pendingRemovals_ = 0;
+}
+
+bool TickScheduler::Before(uint32 left, uint32 right) const noexcept {
+    const Entry& a = *entries_.Find(scratch_[left].slot);
+    const Entry& b = *entries_.Find(scratch_[right].slot);
+    if (a.registration.priority != b.registration.priority) {
+        return a.registration.priority < b.registration.priority;
+    }
+    return a.sequence < b.sequence;
+}
+
+void TickScheduler::HeapPush(uint32 local) noexcept {
+    // 용량은 RebuildOrder가 미리 확보한다.
+    auto pushed = heap_.TryPushBack(local);
+    (void)pushed;
+    usize child = heap_.Size() - 1;
+    while (child > 0) {
+        const usize parent = (child - 1) / 2;
+        if (!Before(heap_[child], heap_[parent])) {
+            break;
+        }
+        const uint32 swap = heap_[child];
+        heap_[child] = heap_[parent];
+        heap_[parent] = swap;
+        child = parent;
+    }
+}
+
+uint32 TickScheduler::HeapPop() noexcept {
+    const uint32 top = heap_[0];
+    const uint32 last = heap_.TryPopBack().Value();
+    if (heap_.Size() == 0) {
+        return top;
+    }
+
+    heap_[0] = last;
+    usize parent = 0;
+    for (;;) {
+        const usize left = parent * 2 + 1;
+        const usize right = left + 1;
+        usize smallest = parent;
+        if (left < heap_.Size() && Before(heap_[left], heap_[smallest])) {
+            smallest = left;
+        }
+        if (right < heap_.Size() && Before(heap_[right], heap_[smallest])) {
+            smallest = right;
+        }
+        if (smallest == parent) {
+            break;
+        }
+        const uint32 swap = heap_[parent];
+        heap_[parent] = heap_[smallest];
+        heap_[smallest] = swap;
+        parent = smallest;
+    }
+
+    return top;
 }
 
 Result<void> TickScheduler::RebuildOrder(uint32 phase) noexcept {
-    // 1) 이 단계의 살아 있는 항목을 priority → 등록 순서로 정렬한다.
+    // 1) 이 단계의 살아 있는 항목을 모으고, 해제된 선행 handle을 의존 목록에서 지운다.
     scratch_.Clear();
     for (auto iterator = entries_.begin(); iterator != entries_.end(); ++iterator) {
-        const Entry& entry = *iterator;
+        Entry& entry = *iterator;
         if (entry.removed || static_cast<uint32>(entry.registration.phase) != phase) {
             continue;
+        }
+        for (usize index = entry.prerequisites.Size(); index > 0; --index) {
+            const Entry* before = entries_.Find(entry.prerequisites[index - 1].slot);
+            if (before == nullptr || before->removed) {
+                auto pruned = entry.prerequisites.TryRemoveAt(index - 1);
+                (void)pruned;
+            }
         }
         auto pushed = scratch_.TryPushBack(TickHandle{iterator.Handle()});
         if (!pushed) {
@@ -223,76 +312,86 @@ Result<void> TickScheduler::RebuildOrder(uint32 phase) noexcept {
         }
     }
 
-    scratch_.Sort([this](const TickHandle& left, const TickHandle& right) noexcept {
-        const Entry& a = *entries_.Find(left.slot);
-        const Entry& b = *entries_.Find(right.slot);
-        if (a.registration.priority != b.registration.priority) {
-            return a.registration.priority < b.registration.priority;
+    const usize count = scratch_.Size();
+    if (!localIndex_.TryResize(entries_.SlotCount()) || !indegree_.TryResize(count) ||
+        !dependentOffsets_.TryResize(count + 1) || !heap_.TryReserve(count)) {
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+    for (uint32& value : localIndex_) {
+        value = NoIndex;
+    }
+    for (usize index = 0; index < count; ++index) {
+        localIndex_[scratch_[index].slot.index] = static_cast<uint32>(index);
+        indegree_[index] = 0;
+    }
+    for (uint32& value : dependentOffsets_) {
+        value = 0;
+    }
+
+    // 2) 진입 차수와 역방향(선행 → 의존) 인접 목록(CSR)을 만든다.
+    uint32 edges = 0;
+    for (usize index = 0; index < count; ++index) {
+        const Entry& entry = *entries_.Find(scratch_[index].slot);
+        for (const TickHandle& prerequisite : entry.prerequisites) {
+            const uint32 local = localIndex_[prerequisite.slot.index];
+            if (local == NoIndex) {
+                continue;
+            }
+            ++indegree_[index];
+            ++dependentOffsets_[local + 1];
+            ++edges;
         }
-        return a.sequence < b.sequence;
-    });
-
-    // 2) 정렬 순서대로 깊이 우선 후위 방문해 선행 의존을 먼저 내보낸다. 의존이 없는 항목끼리는
-    //    정렬 순서가 유지되고, 선행 항목은 priority와 무관하게 의존 항목 앞으로 당겨진다.
-    //    표시: 0 미방문, 1 방문 중, 2 완료.
-    auto resized = marks_.TryResize(entries_.SlotCount());
-    if (!resized) {
-        return resized;
     }
-    for (uint8& mark : marks_) {
-        mark = 0;
+    for (usize index = 0; index < count; ++index) {
+        dependentOffsets_[index + 1] += dependentOffsets_[index];
+    }
+    if (!dependents_.TryResize(edges)) {
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+    // 채우기 위치로 heap_을 잠시 쓴다(아래 정렬 전에 비운다).
+    heap_.Clear();
+    for (usize index = 0; index < count; ++index) {
+        auto pushed = heap_.TryPushBack(dependentOffsets_[index]);
+        (void)pushed;
+    }
+    for (usize index = 0; index < count; ++index) {
+        const Entry& entry = *entries_.Find(scratch_[index].slot);
+        for (const TickHandle& prerequisite : entry.prerequisites) {
+            const uint32 local = localIndex_[prerequisite.slot.index];
+            if (local != NoIndex) {
+                dependents_[heap_[local]++] = static_cast<uint32>(index);
+            }
+        }
     }
 
+    // 3) 준비된 항목 중 (priority, 등록 순서) 최소부터 내보낸다.
     Array<TickHandle>& order = order_[phase];
     order.Clear();
-    auto reserved = order.TryReserve(scratch_.Size());
+    auto reserved = order.TryReserve(count);
     if (!reserved) {
         return reserved;
     }
+    heap_.Clear();
+    for (usize index = 0; index < count; ++index) {
+        if (indegree_[index] == 0) {
+            HeapPush(static_cast<uint32>(index));
+        }
+    }
+    while (heap_.Size() != 0) {
+        const uint32 local = HeapPop();
+        auto emitted = order.TryPushBack(scratch_[local]);
+        (void)emitted;
+        for (uint32 edge = dependentOffsets_[local]; edge < dependentOffsets_[local + 1]; ++edge) {
+            const uint32 next = dependents_[edge];
+            if (--indegree_[next] == 0) {
+                HeapPush(next);
+            }
+        }
+    }
 
-    for (const TickHandle& root : scratch_) {
-        if (marks_[root.slot.index] != 0) {
-            continue;
-        }
-        stack_.Clear();
-        auto pushed = stack_.TryPushBack(root);
-        if (!pushed) {
-            return pushed;
-        }
-        while (stack_.Size() != 0) {
-            const TickHandle current = stack_[stack_.Size() - 1];
-            uint8& mark = marks_[current.slot.index];
-            if (mark == 2) {
-                auto popped = stack_.TryPopBack();
-                (void)popped;
-                continue;
-            }
-            if (mark == 1) {
-                // 모든 선행을 내보낸 뒤 돌아왔다.
-                mark = 2;
-                auto popped = stack_.TryPopBack();
-                (void)popped;
-                auto emitted = order.TryPushBack(current);
-                if (!emitted) {
-                    return emitted;
-                }
-                continue;
-            }
-            mark = 1;
-            const Entry& entry = *entries_.Find(current.slot);
-            for (usize index = entry.prerequisites.Size(); index > 0; --index) {
-                const TickHandle prerequisite = entry.prerequisites[index - 1];
-                const Entry* before = entries_.Find(prerequisite.slot);
-                // 해제된 선행과 이미 방문한 선행은 건너뛴다. 사이클은 추가 시점에 거부했다.
-                if (before == nullptr || before->removed || marks_[prerequisite.slot.index] != 0) {
-                    continue;
-                }
-                auto next = stack_.TryPushBack(prerequisite);
-                if (!next) {
-                    return next;
-                }
-            }
-        }
+    // 사이클은 추가 시점에 거부하므로 모든 항목이 나와야 한다.
+    if (order.Size() != count) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     dirty_[phase] = false;
@@ -332,13 +431,20 @@ Result<void> TickScheduler::RunPhase(TickPhase phase, const TickPhaseFrame& fram
 
         const double delta = frame.paused ? frame.unscaledDeltaSeconds : frame.deltaSeconds;
         double executedDelta = delta;
-        if (entry->registration.intervalSeconds > 0.0) {
+        const double interval = entry->registration.intervalSeconds;
+        if (interval > 0.0) {
             entry->accumulated += delta;
-            if (entry->accumulated < entry->registration.intervalSeconds) {
+            entry->sinceLastRun += delta;
+            if (entry->accumulated < interval * (1.0 - IntervalTolerance)) {
                 continue;
             }
-            executedDelta = entry->accumulated;
-            entry->accumulated = 0.0;
+            executedDelta = entry->sinceLastRun;
+            entry->sinceLastRun = 0.0;
+            // 남은 누적을 다음 주기로 넘기되 한 번에 여러 주기를 따라잡지 않는다.
+            entry->accumulated -= interval;
+            if (!(entry->accumulated > 0.0) || entry->accumulated >= interval) {
+                entry->accumulated = 0.0;
+            }
         }
 
         TickContext context;
@@ -372,7 +478,7 @@ TickStats TickScheduler::Stats() const noexcept {
     }
 
     stats.executedThisFrame = executedThisFrame_;
-    stats.pendingChanges = static_cast<uint32>(pendingRemovals_.Size());
+    stats.pendingChanges = pendingRemovals_;
     for (bool dirty : dirty_) {
         stats.pendingChanges += dirty ? 1u : 0u;
     }

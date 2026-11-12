@@ -170,6 +170,18 @@ bool InputQueue::Push(const InputEvent& event) noexcept {
     return true;
 }
 
+Result<void> InputState::SetGamepadDeadZone(const GamepadDeadZone& deadZone) noexcept {
+    const float values[] = {deadZone.leftStick, deadZone.rightStick, deadZone.trigger};
+    for (float value : values) {
+        if (!math::IsFinite(value) || value < 0.0f || value >= 1.0f) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
+    deadZone_ = deadZone;
+    return Result<void>::Success();
+}
+
 void InputState::BeginFrame(Span<const InputEvent> events) noexcept {
     keysPressed_ = {};
     keysReleased_ = {};
@@ -191,8 +203,10 @@ void InputState::BeginFrame(Span<const InputEvent> events) noexcept {
             if (event.key == Key::None || index >= KeyCount) {
                 break;
             }
-            // 자동 반복이거나 이미 눌린 키의 중복 down은 edge를 만들지 않는다.
-            if (!event.repeat && !keysDown_.Get(index)) {
+            // 이미 눌린 키의 down(자동 반복 포함)은 edge를 만들지 않는다. 눌려 있지 않던 키는
+            // repeat 표시가 있어도 눌림으로 본다: 키를 누른 채 포커스를 되찾으면 OS의 첫 down이
+            // 반복으로 오며, 이를 무시하면 뗄 때 짝 없는 WasReleased만 생긴다.
+            if (!keysDown_.Get(index)) {
                 keysPressed_.Set(index, true);
             }
             keysDown_.Set(index, true);

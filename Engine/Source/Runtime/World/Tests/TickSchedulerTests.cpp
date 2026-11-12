@@ -113,7 +113,7 @@ TEST(Tick_PrerequisitesOverridePriorityAndCyclesAreRejected) {
     CHECK(scheduler.RemovePrerequisite(a.Value(), b.Value()).Error() == ErrorCode::NotFound);
 }
 
-TEST(Tick_IntervalAccumulatesAndPassesElapsedDelta) {
+TEST(Tick_IntervalCarriesRemainderAndPassesElapsedDelta) {
     SystemAllocator allocator;
     TickScheduler scheduler(allocator);
     RecordingExecutor executor(scheduler);
@@ -123,12 +123,73 @@ TEST(Tick_IntervalAccumulatesAndPassesElapsedDelta) {
     for (int frame = 0; frame < 5; ++frame) {
         REQUIRE(scheduler.RunPhase(TickPhase::PrePhysics, Frame(0.1), executor));
     }
-    // 0.1씩 5번: 0.3에서 한 번 실행(누적 0.3 전달), 이후 0.2는 아직 미달.
-    REQUIRE(executor.count == 1);
+    // 0.3에서 실행(흐른 시간 0.3 전달, 0.05 이월), 0.5에서 다시 실행(흐른 시간 0.2).
+    REQUIRE(executor.count == 2);
     CHECK(executor.deltas[0] > 0.29 && executor.deltas[0] < 0.31);
+    CHECK(executor.deltas[1] > 0.19 && executor.deltas[1] < 0.21);
     TickRegistration invalid = Make(2);
     invalid.intervalSeconds = -1.0;
     CHECK(scheduler.Register(invalid).Error() == ErrorCode::InvalidArgument);
+}
+
+TEST(Tick_IntervalAtSixtyHertzKeepsAverageFrequency) {
+    // 1/60초 프레임으로 0.1초 간격이면 정확히 6프레임마다 실행해야 한다(합산 오차로 7프레임 금지).
+    SystemAllocator allocator;
+    TickScheduler scheduler(allocator);
+    RecordingExecutor executor(scheduler);
+    TickRegistration slow = Make(1);
+    slow.intervalSeconds = 0.1;
+    REQUIRE(scheduler.Register(slow));
+    for (int frame = 0; frame < 60; ++frame) {
+        REQUIRE(scheduler.RunPhase(TickPhase::PrePhysics, Frame(1.0 / 60.0), executor));
+    }
+    CHECK(executor.count == 10);
+}
+
+TEST(Tick_IndependentEntriesKeepPriorityOrderAroundDependencies) {
+    SystemAllocator allocator;
+    TickScheduler scheduler(allocator);
+    RecordingExecutor executor(scheduler);
+    auto x = scheduler.Register(Make(1, TickPhase::PrePhysics, 0));
+    auto p1 = scheduler.Register(Make(2, TickPhase::PrePhysics, 1));
+    auto p2 = scheduler.Register(Make(3, TickPhase::PrePhysics, 5));
+    auto q = scheduler.Register(Make(4, TickPhase::PrePhysics, 3));
+    REQUIRE(x && p1 && p2 && q);
+    REQUIRE(scheduler.AddPrerequisite(x.Value(), p2.Value()));
+    REQUIRE(scheduler.AddPrerequisite(x.Value(), p1.Value()));
+    REQUIRE(scheduler.RunPhase(TickPhase::PrePhysics, Frame(), executor));
+    // 독립인 P1(1)·Q(3)·P2(5)는 priority 순이고, X는 두 선행이 끝난 뒤 실행된다.
+    REQUIRE(executor.count == 4);
+    CHECK(executor.order[0] == 2 && executor.order[1] == 4 && executor.order[2] == 3 &&
+          executor.order[3] == 1);
+}
+
+TEST(Tick_CycleCheckIsLinearOnDiamondDependencies) {
+    // 층마다 두 항목이 아래 층 두 항목 모두에 의존하는 40층 그래프. 방문 표시가 없으면 2^40 경로를
+    // 탐색한다.
+    SystemAllocator allocator;
+    TickScheduler scheduler(allocator);
+    RecordingExecutor executor(scheduler);
+    constexpr uint32 Layers = 40;
+    TickHandle handles[Layers][2];
+    for (uint32 layer = 0; layer < Layers; ++layer) {
+        for (uint32 side = 0; side < 2; ++side) {
+            auto registered = scheduler.Register(Make(static_cast<uint8>(layer)));
+            REQUIRE(registered);
+            handles[layer][side] = registered.Value();
+            if (layer > 0) {
+                REQUIRE(scheduler.AddPrerequisite(handles[layer][side], handles[layer - 1][0]));
+                REQUIRE(scheduler.AddPrerequisite(handles[layer][side], handles[layer - 1][1]));
+            }
+        }
+    }
+    auto unrelated = scheduler.Register(Make(200));
+    REQUIRE(unrelated);
+    REQUIRE(scheduler.AddPrerequisite(unrelated.Value(), handles[Layers - 1][0]));
+    CHECK(scheduler.AddPrerequisite(handles[0][0], unrelated.Value()).Error() ==
+          ErrorCode::InvalidArgument);
+    REQUIRE(scheduler.RunPhase(TickPhase::PrePhysics, Frame(), executor));
+    CHECK(scheduler.Stats().executedThisFrame == Layers * 2 + 1);
 }
 
 TEST(Tick_PausePolicyAndEnableToggle) {

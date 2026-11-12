@@ -6,14 +6,15 @@
 
 namespace rocks {
 
-// 한 프레임의 Tick 실행 단계다. 단계 순서가 실행 순서다. Physics 단계만 고정 스텝(프레임당 0회
-// 이상)으로 실행하고 나머지는 프레임당 한 번 가변 delta로 실행한다.
+// 한 프레임의 Tick 실행 단계다. 열거 순서가 실행 순서다. Physics 단계만 고정 스텝(프레임당 0회
+// 이상)으로 실행하고 나머지는 프레임당 한 번 가변 delta로 실행한다. LateUpdate(카메라 추적 등
+// 후처리)는 PreRender(렌더 추출 준비)보다 먼저 와서 그 결과가 같은 프레임 렌더에 반영된다.
 enum class TickPhase : uint8 {
     PrePhysics,
     Physics,
     PostPhysics,
-    PreRender,
     LateUpdate,
+    PreRender,
     Count
 };
 
@@ -44,11 +45,12 @@ struct TickTarget {
 struct TickRegistration {
     TickTarget target;
     TickPhase phase = TickPhase::PrePhysics;
-    // 같은 단계 안에서 선행 의존이 없는 등록끼리의 순서다. 작은 값이 먼저 실행된다. 같은 값은
-    // 등록 순서를 따른다.
+    // 같은 단계 안에서 선행 의존으로 묶이지 않은 등록끼리의 순서다. 작은 값이 먼저 실행된다. 같은
+    // 값은 등록 순서를 따른다.
     int32 priority = 0;
-    // 0이면 매 실행 기회마다, 양수면 누적 시간이 interval 이상일 때 실행한다(초). 실행 시 delta는
-    // 마지막 실행 이후 누적 시간이다. Physics 단계에서는 고정 스텝 횟수로 누적한다.
+    // 0이면 매 실행 기회마다, 양수면 누적 시간이 interval에 이르면 실행한다(초). 실행 시 delta는
+    // 마지막 실행 이후 흐른 시간이다. 남은 누적은 다음 주기로 이월해 평균 주기를 interval에 맞춘다
+    // (한 실행 기회에 여러 번 따라잡지는 않는다). 부동소수점 합산 오차는 상대 허용오차로 흡수한다.
     double intervalSeconds = 0.0;
     // World pause 중에도 unscaled delta로 실행한다. 기본은 pause 중 정지다.
     bool tickWhenPaused = false;
@@ -59,7 +61,7 @@ struct TickRegistration {
 // 실행기에 넘기는 한 번의 실행 정보다.
 struct TickContext {
     TickPhase phase = TickPhase::PrePhysics;
-    // 이 등록에 넘기는 delta(초). interval이 있으면 누적 시간이다.
+    // 이 등록에 넘기는 delta(초). interval이 있으면 마지막 실행 이후 흐른 시간이다.
     double deltaSeconds = 0.0;
     // pause·scale을 적용하지 않은 이번 프레임 delta다.
     double unscaledDeltaSeconds = 0.0;
@@ -70,7 +72,7 @@ struct TickContext {
 };
 
 // Tick 실행기다. World가 구현해 대상 객체를 Borrow하고 hook을 호출한다. 실행 중 스케줄러의
-// 등록·해제 ·의존 변경은 허용하며 단계 경계에서 반영된다.
+// 등록·해제·활성·의존 변경은 허용한다.
 class TickExecutor {
 public:
     virtual void ExecuteTick(const TickTarget& target, const TickContext& context) noexcept = 0;
@@ -91,9 +93,9 @@ struct TickPhaseFrame {
 struct TickStats {
     uint32 registered = 0;
     uint32 enabled = 0;
-    // 마지막 RunPhase들에서 실제로 실행한 수다(BeginFrame에서 0으로 초기화).
+    // BeginFrame 이후 실제로 실행한 수다.
     uint32 executedThisFrame = 0;
-    // 아직 반영하지 않은 등록 변경 수다.
+    // 아직 반영하지 않은 해제 수와 순서 재계산이 필요한 단계 수의 합이다.
     uint32 pendingChanges = 0;
 };
 
@@ -107,13 +109,17 @@ struct TickStats {
 //   ticks.RunPhase(TickPhase::PrePhysics, frame, executor);
 //
 // 계약:
-// - 등록·해제·활성 변경·의존 변경은 언제든 호출할 수 있다. RunPhase 실행 중의 변경은 그 단계가 끝난
-//   뒤(단계 경계) 반영되며, 실행 중 해제·비활성화된 항목은 즉시 이후 실행에서 빠진다.
+// - 등록·해제·활성 변경·의존 변경은 언제든 호출할 수 있다. 실행 중(RunPhase 안) 변경의 반영 시점:
+//   해제·비활성화는 즉시(남은 실행에서 빠진다), 활성화는 즉시(이번 단계의 아직 실행 전 위치면
+//   이번에 실행된다), 새 등록과 의존 변경은 다음 단계 경계(Physics는 다음 고정 스텝)부터다.
+// - 실행 중 해제는 할당하지 않는다(표시만 하고 단계 경계에서 지운다).
 // - 선행 의존은 같은 단계의 등록 사이에만 둘 수 있다(다른 단계 간 순서는 단계 순서로 보장된다).
-//   사이클을 만드는 의존 추가는 InvalidArgument로 거부하며 상태를 바꾸지 않는다. 해제된 등록에 걸린
-//   의존은 자동으로 사라진다.
-// - 순서 계산(위상 정렬 → priority → 등록 순서)은 등록 집합이 바뀐 단계에서만 다시 한다. 단계 실행
-//   중에는 할당하지 않는다.
+//   사이클을 만드는 의존 추가는 추가 시점에 InvalidArgument로 거부하며 상태를 바꾸지 않는다. 해제된
+//   등록에 걸린 의존은 다음 순서 재계산 때 지운다.
+// - 순서: 선행 의존을 지키는 범위에서 준비된 항목 중 (priority, 등록 순서)가 가장 작은 것부터
+// 실행한다
+//   (priority 최소 힙 위상 정렬). 의존으로 묶이지 않은 항목끼리는 항상 (priority, 등록 순서)를
+//   따른다. 순서 계산은 등록 집합이 바뀐 단계에서만 다시 하며 단계 실행 중에는 할당하지 않는다.
 // - 스레드: 동기화하지 않는다. World의 게임 스레드에서만 쓴다. 병렬 실행은 후속 범위다.
 class TickScheduler {
 public:
@@ -159,25 +165,35 @@ private:
         TickRegistration registration;
         Array<TickHandle> prerequisites;
         uint64 sequence = 0;
+        // interval 판정용 누적(이월 포함)과 마지막 실행 이후 흐른 시간이다.
         double accumulated = 0.0;
+        double sinceLastRun = 0.0;
         bool removed = false;
     };
 
     Result<void> RebuildOrder(uint32 phase) noexcept;
-    // from에서 선행 간선을 따라 to에 닿는지 본다. 작업 스택 할당 실패는 OutOfMemory다.
+    // from에서 선행 간선을 따라 to에 닿는지 본다(방문 표시로 선형 시간). 할당 실패는 OutOfMemory다.
     Result<bool> Reaches(TickHandle from, TickHandle to) noexcept;
     void ApplyPendingRemovals() noexcept;
+    bool Before(uint32 left, uint32 right) const noexcept;
+    void HeapPush(uint32 local) noexcept;
+    uint32 HeapPop() noexcept;
 
     Allocator& allocator_;
     SlotArray<Entry> entries_;
     Array<TickHandle> order_[TickPhaseCount];
     bool dirty_[TickPhaseCount] = {};
-    // 정렬·탐색 작업 공간이다. 프레임 사이에 재사용한다(순서가 바뀐 단계에서만 쓴다).
+    // 정렬·탐색 작업 공간이다. 순서가 바뀐 단계와 의존 추가 때만 쓰며 크기를 재사용한다.
     Array<TickHandle> scratch_;
+    Array<uint32> localIndex_;
+    Array<uint32> indegree_;
+    Array<uint32> dependentOffsets_;
+    Array<uint32> dependents_;
+    Array<uint32> heap_;
     Array<uint8> marks_;
     Array<TickHandle> stack_;
-    Array<TickHandle> pendingRemovals_;
     uint64 nextSequence_ = 1;
+    uint32 pendingRemovals_ = 0;
     uint32 executedThisFrame_ = 0;
     bool running_ = false;
     bool closed_ = false;
