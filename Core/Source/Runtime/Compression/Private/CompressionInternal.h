@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Compression/Compression.h>
+#include <Compression/CompressionStream.h>
 
 // 압축 모듈 내부 경계다. 공개 API(Compression.cpp)·비동기(AsyncCompression.cpp)와 코덱
 // adapter(Lz4Codec.cpp· ZstdCodec.cpp·ZlibCodec.cpp) 사이의 계약만 둔다. 외부 코덱 헤더는 각
@@ -57,8 +58,10 @@ struct DecompressorState {
     void* codec;
 };
 
+// zstdChecksum: zstd frame에 content checksum을 넣을지다. 블록 컨테이너는 자체 CRC가 있어 끈다.
 Result<CompressorState*> CreateCompressorState(CompressionFormat format, int32 level,
-                                               Allocator& allocator) noexcept;
+                                               Allocator& allocator,
+                                               bool zstdChecksum = true) noexcept;
 void DestroyCompressorState(CompressorState* state) noexcept;
 Result<DecompressorState*> CreateDecompressorState(CompressionFormat format,
                                                    Allocator& allocator) noexcept;
@@ -102,9 +105,40 @@ Result<usize> DecompressAppend(Span<const uint8> source, usize maxOutputBytes,
                                Array<uint8>& output) noexcept;
 } // namespace lz4
 
+// --- 스트리밍(10절) ---
+
+enum class StreamFlush : uint8 {
+    None,
+    Sync,
+    End
+};
+
+// 해제 스트림의 경계 추적 상태다. adapter의 단계 함수가 갱신한다.
+struct StreamDecodeState {
+    bool sawStream = false;  // frame·member를 하나 이상 끝까지 받았다
+    bool atBoundary = false; // 지금까지의 입력이 완결된 스트림(들)이다
+    bool ended = false;      // Deflate·Zlib: 스트림이 끝났다(뒤 byte는 손상)
+    bool outputPending =
+        false; // 지난 호출이 출력 공간을 다 채웠다(코덱 안에 출력이 남았을 수 있다)
+    // zstd: frame 시작에서 헤더를 모아 window를 먼저 검사한다(단일 패스 경로가 상한 검사를
+    // 건너뛰므로).
+    bool atFrameStart = true;
+    uint32 headerBytes = 0;
+    uint8 header[32] = {};
+};
+
 namespace zstd {
 Result<usize> Bound(usize sourceBytes) noexcept;
-Result<void*> CreateCompressor(int32 level, Allocator& allocator) noexcept;
+Result<void*> CreateCompressor(int32 level, Allocator& allocator, bool checksum = true) noexcept;
+// 스트림용 문맥이다(stable buffer를 쓰지 않는다).
+Result<void*> CreateStreamCompressor(int32 level, uint64 sizeHint, Allocator& allocator) noexcept;
+Result<void*> CreateStreamDecompressor(uint32 maxWindowLog, Allocator& allocator) noexcept;
+void ResetStreamCompressor(void* codec) noexcept;
+void ResetStreamDecompressor(void* codec) noexcept;
+Result<StreamProgress> CompressStep(void* codec, Span<const uint8> input, Span<uint8> output,
+                                    StreamFlush flush) noexcept;
+Result<StreamProgress> DecompressStep(void* codec, Span<const uint8> input, Span<uint8> output,
+                                      uint32 maxWindowLog, StreamDecodeState& state) noexcept;
 void DestroyCompressor(void* codec) noexcept;
 Result<void*> CreateDecompressor(Allocator& allocator) noexcept;
 void DestroyDecompressor(void* codec) noexcept;
@@ -130,6 +164,16 @@ Result<usize> Decompress(void* codec, Span<const uint8> source, Span<uint8> dest
                          const CompressionProbe& probe) noexcept;
 Result<usize> DecompressAppend(void* codec, Span<const uint8> source, usize maxOutputBytes,
                                Array<uint8>& output, const CompressionProbe& probe) noexcept;
+
+Result<void> ResetStreamCompressor(void* codec) noexcept;
+Result<void> ResetStreamDecompressor(void* codec) noexcept;
+Result<StreamProgress> CompressStep(void* codec, Span<const uint8> input, Span<uint8> output,
+                                    StreamFlush flush) noexcept;
+Result<StreamProgress> DecompressStep(void* codec, Span<const uint8> input, Span<uint8> output,
+                                      StreamDecodeState& state) noexcept;
+
+// CRC-32(Core Crc32와 같은 값). zlib의 braid·하드웨어 가속 구현을 쓴다. 길이 제한 없음.
+uint32 Crc32(Span<const uint8> data, uint32 previous = 0) noexcept;
 } // namespace zlib
 
 } // namespace rocks::detail

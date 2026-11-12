@@ -235,6 +235,44 @@ Result<void> WorkerTaskHandle::RequestCancel() const noexcept {
     return Result<void>::Success();
 }
 
+Result<bool> WorkerTaskHandle::TryRevoke() const noexcept {
+    if (record_ == nullptr) {
+        return Result<bool>::Failure(ErrorCode::StaleHandle);
+    }
+    WorkerState& state = *record_->state;
+    Function<void(WorkerTaskContext&)> body;
+    uint32 slot = 0;
+    {
+        platform::LockGuard lock(state.gate);
+        if (record_->status.state != WorkerTaskState::Pending) {
+            return Result<bool>::Success(false);
+        }
+        // Pending 작업은 수락 뒤 terminal 전까지 records에 있다. Completing으로 바꾸면 worker가
+        // 꺼내지 않는다(worker는 Pending만 고른다).
+        while (slot < state.capacity && state.records[slot] != record_) {
+            ++slot;
+        }
+        ROCKS_ASSERT(slot < state.capacity);
+        record_->status.cancellationRequested = true;
+        record_->status.state = WorkerTaskState::Completing;
+        body = Move(record_->body);
+    }
+    // worker 정리와 같은 순서다: capture와 dependency 보존분을 gate 밖에서 정리한 뒤 terminal을
+    // 게시한다.
+    body.Reset();
+    ClearDependencies(*record_);
+    {
+        platform::LockGuard lock(state.gate);
+        record_->status.state = WorkerTaskState::Cancelled;
+        record_->status.error = ErrorCode::Cancelled;
+        state.records[slot] = nullptr;
+        --state.inFlight;
+    }
+    state.changed.NotifyAll();
+    ReleaseRecord(record_); // scheduler의 실행 보존분을 반환한다.
+    return Result<bool>::Success(true);
+}
+
 Result<platform::WaitResult> WorkerTaskHandle::Wait(uint32 timeoutMs) const noexcept {
     if (record_ == nullptr) {
         return Result<platform::WaitResult>::Failure(ErrorCode::StaleHandle);

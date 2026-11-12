@@ -7,9 +7,9 @@
 
 ## 1. 범위
 
-| 이번 범위 | 후속 |
-|---|---|
-| 형식을 고르는 일회성 압축·해제, 최악 압축 크기, 크기를 모르는 해제(상한 필수, `Array` 뒤에 붙임), 재사용 문맥(`Compressor`·`Decompressor`), worker 비동기 압축·해제(의존 작업 연결·협력적 취소), 모든 할당의 Rocks `Allocator` 경유, 결정적 출력 | 블록 단위 seek 가능 컨테이너(Godot `FileAccessCompressed`·UE `FCompressedBuffer` 대응)와 큰 버퍼의 블록 병렬 압축, gzip·zstd 스트리밍 객체, zstd 사전, Brotli 해제(WOFF2), 형식 플러그인 등록(UE `ICompressionFormat`), AsyncFile 완료 → 해제 작업 연결(외부 완료 이벤트 handle 필요), zstd ultra 수준(20–22) |
+| 1차 범위 | 2차 범위(9·10절) | 후속 |
+|---|---|---|
+| 형식을 고르는 일회성 압축·해제, 최악 압축 크기, 크기를 모르는 해제(상한 필수, `Array` 뒤에 붙임), 재사용 문맥(`Compressor`·`Decompressor`), worker 비동기 압축·해제(의존 작업 연결·협력적 취소), 모든 할당의 Rocks `Allocator` 경유, 결정적 출력 | 블록 단위 seek 가능 컨테이너(Godot `FileAccessCompressed`·UE `FCompressedBuffer` 대응)와 큰 버퍼의 블록 병렬 압축·해제, gzip·zstd 스트리밍 객체(역압) | zstd 사전, Brotli 해제(WOFF2), 형식 플러그인 등록(UE `ICompressionFormat`), AsyncFile 완료 → 해제 작업 연결(외부 완료 이벤트 handle 필요), LZ4 frame 스트리밍, zstd ultra 수준(20–22) |
 
 ## 2. 코덱 선정
 
@@ -378,8 +378,8 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
 | 전역 static 수준 설정 | flags(BiasSpeed·BiasSize) | 호출마다 `CompressionSettings` |
 | thread_local zstd 문맥 | — | 명시 `Compressor`·`Decompressor` |
 | — | IoStore 내부 비동기 해제 | `TrySubmitCompress`·`TrySubmitDecompress` |
-| `FileAccessCompressed`(블록·seek) | `FCompressedBuffer` | 후속 |
-| `StreamPeerGZIP` | — | 후속 |
+| `FileAccessCompressed`(블록·seek) | `FCompressedBuffer` | `CompressedBlocksWriter`·`CompressedBlocksReader`(9절) |
+| `StreamPeerGZIP` | — | `CompressStream`·`DecompressStream`(10절) |
 
 ## 7. 검증 계획
 
@@ -416,7 +416,7 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
 - **플랫폼**: Windows x64 로컬. macOS ARM64·Android는 CI·실기기 결과가 생기기 전까지 미검증으로 표시한다. LZ4 1.11의
   Android 빠른 해제 루프는 과거 칩셋 회귀 사례가 있어 실기기로 측정한다.
 
-## 8. 구현 상태와 검증 (2026-11-12, Windows x64 로컬)
+## 8. 구현 상태와 검증 (2026-11-12)
 
 | 항목 | 결과 |
 |---|---|
@@ -425,10 +425,14 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
 | Compression 시험 | 17개(동기 10·비동기 7: 실행 중·늦은 취소, 같은 output 연쇄 Append 포함)가 Debug·ASan·Release에서 통과. Foundation 전체 통과 |
 | 빌드 도구 시험 | `Rocks.Build.Tests` 21개 그룹 통과(C++ compile action golden Debug·Release, C17 프로필, 실제 C 빌드·실행 Debug·Release, include된 `.c` 무효화, 언어 변경 인자 거부) |
 | 정책 시험 | `Rocks.ToolTests self` 72개 통과(third-party 저장소 검사와 음성 대조). `native` 96개 통과(실제 compile DB 언어·경고 감사, 지시문 무효 확인과 그 양성·음성 대조) |
+| 다른 플랫폼 | GitHub Actions(macOS 15 ARM64, Apple clang)에서 01f1b98·64ff35f의 Compression 시험이 모두 통과(64ff35f: 17개, 1.5MiB 결정성 golden 포함). Android NDK arm64·x86_64 교차 빌드 경고 0(C 번역 단위 31개가 `clang++ -x c -std=c17`), Android 35 x86_64 에뮬레이터에서 17개 통과(golden 포함). 세 플랫폼에서 압축 결과 byte가 같음을 확인 |
+| 2차(스트리밍·블록 컨테이너) | 스트림 14개·블록 컨테이너 16개 시험(결정성 golden 각 1개 포함)이 Windows x64 Debug·ASan에서 통과. 구현 뒤 독립 검토 5건(zstd·zlib adapter, 스트림 드라이버, RCBK 형식·reader, 병렬·writer)의 확정 결함을 모두 반영했다: zlib 작은 창 flush 무한 반복(major), 읽기 문맥 캐시의 reader 주소 재사용 혼동(major), 병렬 경로가 worker가 빌 때까지 기다리다 교착(major, `WorkerTaskHandle::TryRevoke` 추가), 그 밖의 오류 분류·캐시 검증·helper 자원 실패 처리. macOS·Android 실행은 아직 하지 않았다 |
+| 공용 변경 | `Array::TryAppendUninitialized`(0 채우기 없는 성장), trivial 소멸 타입 축소·`Clear`를 O(1)로(Debug 스트림 시험 9.5초 → 1.1초). 1차 Append 경로도 0 채우기를 없앴다 |
 
-처리량(로컬 1회 측정, 저장소 밖 임시 벤치): Windows x64 Release(ThinLTO), 단일 스레드, `Compressor`·`Decompressor` 재사용,
-저장소 소스·문서 8.9MiB, 여러 번 중 최고값이다. 기기 사양을 고정한 반복 측정이 아니므로 기준값이 아니라 adapter가 원본 라이브러리
-성능을 해치지 않는다는 확인으로 본다.
+처리량(로컬 1회 측정, 1차 때 저장소 밖 임시 벤치): Windows x64 Release(ThinLTO), 단일 스레드, `Compressor`·`Decompressor`
+재사용, 저장소 소스·문서 8.9MiB, 여러 번 중 최고값이다. 기기 사양을 고정한 반복 측정이 아니므로 기준값이 아니라 adapter가 원본
+라이브러리 성능을 해치지 않는다는 확인으로 본다. 지금은 저장소의 `Programs/CompressionBench`(고정 seed 합성 코퍼스 또는
+`--file`, 일회성·스트림·블록 컨테이너 순차/병렬)로 같은 측정을 반복할 수 있다.
 
 | 형식 | 수준 | 압축 비율 | 압축 MB/s | 해제 MB/s |
 |---|---|---|---|---|
@@ -436,8 +440,166 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
 | Zstd | 1 / 3 / 9 / 19 | 0.286 / 0.248 / 0.214 / 0.188 | 496 / 367 / 92 / 4.0 | 1473 / 1440 / 1576 / 1520 |
 | Deflate·Zlib·Gzip | 1 / 6 / 9 | 0.314 / 0.256 / 0.254 | 171 / 46 / 17 | 480 / 483 / 517 |
 
+`CompressionBench --size 32 --workers 8`(합성 32MiB, Release, 같은 기기 1회): 블록 컨테이너(256KiB 블록) 처리량 MB/s.
+
+| 형식 | 수준 | 순차 압축 | 병렬 압축(8) | 순차 읽기 | 병렬 읽기(8) |
+|---|---|---|---|---|---|
+| Lz4 | 1 | 1052 | 2950 | 2824 | 7711 |
+| Zstd | 3 | 381 | 1830 | 1070 | 4435 |
+| Deflate | 6 | 20 | 128 | 435 | 2382 |
+
+스트림(64KiB 조각): zstd 3은 압축 267 / 해제 999MB/s, gzip 6은 19 / 416MB/s(같은 코퍼스의 일회성 342 / 1151, 19 / 465).
+
 미검증·후속:
-- macOS ARM64·Android 실행과 결정성 golden의 교차 플랫폼 일치는 CI·실기기 결과가 생길 때까지 미검증이다.
-- 저장소 안의 반복 가능한 벤치(고정 코퍼스·기기 기록), `DYNAMIC_BMI2=0`·LZ4 1.11 Android 해제 루프의 영향 측정은 후속이다.
-- 루트를 include하는 시험 모듈은 증분 키를 계산할 때 ThirdParty `.c`(약 1.6MB)도 해시한다. 빌드 안 디렉터리 fingerprint
-  memoize는 후속 최적화다.
+- Android arm64 실기기 실행은 미검증이다(arm64는 교차 빌드만 확인).
+- 기기 사양을 고정한 반복 측정 기록, `DYNAMIC_BMI2=0`·LZ4 1.11 Android 해제 루프의 영향 측정은 후속이다.
+- 루트를 include하는 시험 모듈은 증분 키를 계산할 때 ThirdParty `.c`(약 1.6MB)도 해시한다. 빌드 실행 안에서 파일 hash·
+  디렉터리 목록을 재사용하는 memoize를 구현해 재 보았으나(2026-11-12) Foundation Debug no-op 빌드가 전후 모두 13–16초로
+  차이가 없었다. 저장소 header·`.c`는 270개뿐이고, 루트 include가 없는 작은 타깃(CompressionBench)도 no-op에 6.6초가 걸려
+  고정 비용이 대부분이다. 효과 없는 복잡도라 넣지 않았고, no-op 빌드 시간은 단계별 계측으로 병목을 찾은 뒤 다룬다.
+
+## 9. 블록 컨테이너 `CompressedBlocks` (2차, 교차검증 반영)
+
+큰 데이터를 고정 크기 블록으로 나눠 각각 압축하고, 임의 위치를 필요한 블록만 해제해 읽는다(Godot
+`FileAccessCompressed`, UE `FCompressedBuffer`·`FCompressedBufferReader` 대응). 블록이 독립이라 병렬 압축·해제가 되고,
+블록마다 저장 byte의 CRC로 무결성을 확인한다(LZ4·Deflate raw처럼 체크섬이 없는 코덱도 보호). 헤더는
+`Compression/CompressedBlocks.h`다.
+
+### 9.1 영속 형식 RCBK v1
+
+모든 정수는 little-endian이며 byte 단위로 읽는다(컨테이너가 Append로 임의 위치에 놓일 수 있어 struct 재해석을 쓰지 않는다).
+
+| offset | 크기 | 필드 | 거부 |
+|---|---|---|---|
+| 0 | 4 | magic `RCBK` | InvalidArgument |
+| 4 | 2 | version = 1 | 다르면 Unsupported |
+| 6 | 1 | codec ID(영속 값): 1 Lz4, 2 Zstd, 3 Deflate | 0은 InvalidArgument, 4 이상은 Unsupported |
+| 7 | 1 | blockSizeLog2 12–24(4KiB–16MiB) | InvalidArgument |
+| 8 | 8 | rawSize | |
+| 16 | 4 | blockCount = ⌈rawSize / blockSize⌉ | 다르면 InvalidArgument |
+| 20 | 4 | flags = 0(기능 bit 예약: 사전·payload 정렬) | 0이 아니면 Unsupported |
+| 24 | 8 | payloadSize = 저장 크기 합 | |
+| 32 | 4 | reserved = 0 | 0이 아니면 InvalidArgument |
+| 36 | 4 | indexCrc32 = CRC-32(header[0, 36) ‖ block table) | InvalidArgument |
+
+- block table: blockCount × {`storedSize: u32`, `storedCrc32: u32`(그 블록 저장 byte의 CRC-32)}. 그 뒤 payload는 블록 저장
+  byte를 순서대로 이어 붙인다.
+- raw 저장 ⇔ storedSize == 블록 원본 크기, 압축 ⇔ 1 ≤ storedSize < 블록 원본 크기. storedSize만 보고 raw·압축이 하나로
+  정해진다(같은 원본의 저장 byte가 하나뿐이라는 뜻은 아니다: 압축 가능한 블록을 raw로 둔 컨테이너도 유효하다).
+  마지막 블록 원본 크기 = rawSize − (n − 1)·blockSize.
+- 헤더만으로도 크기 일관성을 검사한다: n ≤ payloadSize ≤ rawSize, 40 + 8n + payloadSize == 컨테이너 길이(overflow 없이
+  계산). 따라서 n ≤ 컨테이너 길이 / 9이고, 40byte짜리 악성 헤더로 큰 인덱스 할당을 유도할 수 없다.
+- 블록 코덱 데이터(writer 규칙): Lz4 raw block, Zstd frame 하나(content size 포함, checksum 끔 — 컨테이너 CRC가 대신한다),
+  Deflate raw. reader는 해제 결과가 정확히 블록 원본 크기인지만 강제한다(zstd frame 여러 개·checksum 포함 frame도 결과가
+  맞으면 받는다). 사전이 필요한 블록은 flags 0인 v1에서 형식 위반이라 InvalidArgument다.
+  Zlib·Gzip은 래퍼 중복이라 허용하지 않는다. 블록 압축 결과가 원본 이상이면(용량 = 원본 − 1에서 CapacityExceeded) raw로
+  저장한다. Deflate 수준 0은 항상 raw다.
+- CRC-32는 zlib `crc32_z`(Core `Crc32`와 같은 값)로 저장 byte에 대해 계산한다. 원본이 아니라 저장 byte라 압축률만큼 싸고,
+  해제 전에 손상을 거르며, 해제 없이 무결성만 검사할 수 있다. 읽을 때 검증을 끌 수 있다(기본 켬). CRC는 우발 손상만
+  잡는다. CRC를 다시 맞춘 의도적 변조는 거르지 못하므로(LZ4·Deflate는 다른 데이터로 성공할 수 있다) 신뢰할 수 없는 출처의
+  무결성은 서명·해시로 따로 확인한다.
+- 헤더 검사 순서: magic(InvalidArgument) → version → codec ID → flags(여기까지 모르는 값은 Unsupported) → blockSizeLog2·
+  reserved·블록 수·payload·전체 길이(InvalidArgument) → (TryOpen) indexCrc32 → 저장 크기 규칙·합계. 그래서 version·flags가
+  손상돼도 Unsupported로 보고된다.
+- 원본 크기 증폭: 블록 하나가 1byte로 저장될 수 있어 rawSize는 컨테이너 길이의 최대 약 186만 배다(49byte → 16MiB). reader는
+  이만큼 할당하지 않지만, `RawSize()`로 출력을 잡는 호출자는 자기 상한과 비교해야 한다.
+- 결정성: 같은 라이브러리 버전·설정·입력이면 같은 byte다. 병렬 압축도 순차와 같은 byte다.
+
+### 9.2 API
+
+- `CompressedBlocksSettings::TryMake(compressionSettings, blockSizeLog2 = 18)`: 형식은 Lz4·Zstd·Deflate만이며 수준은
+  `CompressionSettings`가 정한다.
+- `TryGetCompressedBlocksBound(blockSizeLog2, rawSize)` = 40 + 8n + rawSize(블록은 원본보다 커지지 않는다).
+- `TryCompressBlocksAppend(settings, source, output, scratch)`: 순차. 실패 시 output 길이 복원.
+- `TryCompressBlocksAppend(scheduler, settings, source, output, scratch)`: 병렬.
+  - 연속 블록 범위 job을 atomic 카운터로 worker와 호출 스레드가 함께 가져간다. job마다 자기 Array에 압축한다.
+  - 끝나면 output을 정확히 한 번 늘려(0 채우기 없이) 인덱스와 job 결과를 순서대로 복사한다. 그래서 Submit 거부나
+    Shutdown(Cancel)로 body가 돌지 않아도 호출 스레드가 남은 job을 처리해 결과가 완성된다.
+  - 실패하면 공유 flag로 일찍 멈추고, 가장 작은 블록 index의 오류를 돌려준다(결정적: job은 번호 순서로만 나가고 가져간
+    job은 끝까지 처리하므로, 실패한 job보다 앞선 job은 모두 처리된다).
+  - 반환 시점: 호출 스레드가 job을 다 처리하면 아직 시작하지 않은 helper는 `WorkerTaskHandle::TryRevoke()`로 회수하고,
+    실행 중인 helper가 가져간 job(16MiB 이하)을 마칠 때까지만 기다린다. 처음 구현은 모든 helper가 terminal이 될 때까지
+    기다려, worker가 다른 일로 바쁘면 그만큼 늦고 호출 스레드가 쥔 lock을 worker가 기다리면 교착했다(교차검증에서 재현).
+    Pending 작업을 호출 스레드에서 Cancelled로 끝내는 회수 API를 scheduler에 추가해 고쳤다.
+  - helper는 job을 가져가기 전에 코덱 문맥을 만들고, 만들지 못하면 참여하지 않는다(helper 자원 부족이 호출 전체를
+    실패시키지 않는다). job 결과는 job 원본 크기로 한 번 확보한다.
+  - 호출 스레드가 그 scheduler의 worker면 WrongThread다. 블록 4개 이하이거나 1MiB 미만이면 순차로 처리한다. scratch는
+    여러 스레드가 동시에 할당하고 다른 스레드가 해제해도 되는 할당기여야 한다(capture는 호출 스레드가 할당하고 worker가
+    해제한다).
+  - job 크기: worker 수 × 4개 정도의 job을 만들되 job 하나는 원본 16MiB 이하다. helper 작업은 worker 수(최대 64, 원본
+    512KiB당 하나 이하)만큼 제출하고, 취소 요청을 받은 helper는 새 job을 가져가지 않는다(남은 job은 호출 스레드가 처리한다).
+  - 메모리: 참여 스레드마다 코덱 문맥 하나다. zstd 고수준·큰 블록은 문맥이 크므로(수준 19·16MiB 블록 약 81MiB) worker
+    수로 조절한다. job 결과는 모든 job이 끝날 때까지 보관하므로 압축 결과 크기만큼 더 쓴다.
+- `CompressedBlocksWriter`(증분 writer, IO 비의존): `TryBegin(settings, rawSize)`로 인덱스 크기(40 + 8n)를 정한다. 코덱
+  문맥은 처음 압축하는 블록에서 만든다(빈 원본·Deflate 수준 0은 만들지 않는다). 블록 추가가 실패하면 상태가 그대로라 같은
+  블록을 다시 줄 수 있다.
+  `TryAppendBlock(rawBlock, payloadOutput)`을 블록 순서대로 부르고(마지막 외에는 정확히 blockSize), `TryFinishIndex(indexOut)`로
+  인덱스를 쓴다. 파일이면 인덱스 자리를 비워 두고 payload를 흘려 쓴 뒤 되돌아가 인덱스를 쓴다.
+- `CompressedBlocksReader`(불변, 여러 스레드가 const로 공유)
+  - `TryGetIndexBytes(header, containerBytes)`: 헤더 40byte만 검사해 인덱스 크기를 돌려준다(파일은 이만큼만 먼저 읽는다).
+  - `TryOpen(index, containerBytes, allocator)`, `TryOpen(container, allocator)`: 표 CRC·저장 크기 규칙·합계를 검사하고
+    블록별 저장 offset 표(16byte/블록)를 만든다.
+  - `TryLocate(rawOffset, rawBytes)`: 걸치는 블록과 그 저장 byte 범위(컨테이너 기준)를 돌려준다.
+  - `TryRead(rawOffset, destination, stored, storedBase, context, verify = true)`: stored는 컨테이너의 [storedBase, +크기)
+    byte다. 필요한 범위를 내부에서 다시 계산해 stored 안에 있는지 확인한다(호출자가 준 범위를 믿지 않는다). 메모리 전체
+    컨테이너 편의 overload는 storedBase 0이다. rawSize를 넘는 읽기는 InvalidArgument, 0byte 읽기는 빈 성공이다.
+  - `TryRead(scheduler, …)`: 큰 범위 병렬 해제(블록 범위 job, 블록은 destination에 바로 해제). 걸치는 끝 블록만 job별
+    임시 버퍼를 쓴다.
+  - `TryVerify(stored, storedBase)`: 해제 없이 모든 블록 저장 byte의 CRC를 확인한다.
+- `CompressedBlocksReadContext`: 스레드마다 하나. 같은 형식의 Decompressor, 블록 크기 버퍼 하나, 마지막으로 해제한
+  블록 캐시를 가진다. 블록 일부만 걸치는 읽기는 이 버퍼로 해제하고, 같은 블록을 이어 읽으면 다시 해제하지 않는다.
+  - `TryCreate(reader, allocator)` 또는 `TryCreate(format, blockSizeLog2, allocator)`. 형식이 같고 블록 크기가 같거나 큰
+    문맥이면 여러 reader에 쓸 수 있다.
+  - 캐시 식별은 (reader가 `TryOpen`에서 받는 64bit 고유 번호, 블록)이다. 처음에는 위치 표 주소로 식별했으나, reader를
+    닫고 새 reader가 같은 주소를 받으면 다른 컨테이너의 블록이 반환되는 결함이 교차검증에서 나와 고쳤다. 같은 reader로
+    읽는 저장 byte 자체를 바꾸면 `Invalidate()`를 부른다.
+  - 캐시를 써도 stored가 블록을 덮는지 확인하고, verify 없이 채운 캐시를 verify 읽기가 쓰면 그때 CRC를 확인한다(결과가
+    캐시 상태에 따라 달라지지 않는다).
+- 오류: 형식 위반·길이·CRC 불일치·블록 해제 결과 크기 불일치는 InvalidArgument다. 블록 안 코덱의 CapacityExceeded도
+  InvalidArgument로 바꾼다(블록 원본 크기는 표가 보장한다). 모르는 version·flags·codec ID는 Unsupported다.
+
+## 10. 스트리밍 `CompressStream`·`DecompressStream` (2차, 교차검증 반영)
+
+전체 크기를 모르거나 메모리에 다 올리지 않는 입력을 조각 단위로 압축·해제한다(Godot `StreamPeerGZIP` 대응. Godot의
+deflate 스트림은 zlib 래퍼라 Rocks `Zlib`에 대응한다). 형식은 Zstd·Deflate·Zlib·Gzip이며, Lz4 raw block은 스트림 형식이
+아니라 Unsupported다(LZ4 frame은 후속). 헤더는 `Compression/CompressionStream.h`다.
+
+- 기본 API는 역압이 있는 `TryProcess(input, output) → StreamProgress{consumed, produced, complete}`다. 출력이 모자라면
+  오류가 아니라 일부만 소비하고 돌아오므로, 작은 입력 하나가 큰 출력을 한꺼번에 만들지 않는다. `TryWriteAppend`
+  (입력을 모두 소비하고 Array 뒤에 붙임)는 편의 함수다.
+- 압축: `TryProcess`, `TryFlush`(네트워크용 동기 flush: Z_SYNC_FLUSH·ZSTD_e_flush), `TryFinish`(complete까지 반복),
+  `Reset`. 결정성은 같은 호출 순서(입력 조각·출력 용량)일 때만 성립하고 일회성 API와 byte가 같다고 약속하지 않는다.
+  Deflate 수준 0은 출력 용량에 따라 stored block 경계가 바뀐다. Append 편의 함수는 고정 크기(1MiB)로 출력을 늘려 같은 입력
+  조각이면 같은 byte를 만든다. zstd 압축 스트림은 크기를 모르므로 수준별 표를 최대로 쓴다(수준 19는 약 90MiB). 선택적 크기
+  힌트를 받는다.
+- 압축 단계: Open → (TryFlush 미완료) Flushing → Open, (TryFinish 미완료) Finishing → Finished. zlib·zstd는 미완료
+  flush를 같은 모드로 다시 부르기를 요구하므로, Flushing에서는 TryFlush만, Finishing에서는 TryFinish만 받는다(그 밖은
+  InvalidArgument, 상태 불변). Finished에서 TryFinish는 {0, 0, true}, Process·Flush는 InvalidArgument다.
+- 출력 공간이 0인 호출은 코덱을 부르지 않고 {0, 0, false}다(역압과 같은 의미).
+- 해제: `DecompressStreamLimits{maxOutputBytes(필수, 0이면 InvalidArgument), maxWindowLog = 27(10–31, zlib 계열은
+  범위만 검사)}`.
+  - 출력 누계(member·frame 합)가 상한을 넘으면 CapacityExceeded다(정확히 상한이면 성공). `TryProcess`는 코덱에 주는
+    출력 창을 남은 허용량 + 1로 줄여 1byte 초과로 감지한다. `TryWriteAppend`는 output을 남은 허용량까지만 늘리고, 허용량을
+    다 쓰면 1byte 임시 창으로 블록 끝·체크섬까지만 진행한다. 그래서 output이 상한보다 길어지지 않는다.
+  - zstd는 frame이 시작될 때마다 헤더를 미리 검사한다. window(single segment frame은 원본 크기)가 2^31을 넘으면
+    Unsupported(구현 상한), 2^maxWindowLog만 넘으면 CapacityExceeded(호출자 상한)다. zstd의 단일 패스 경로가 window 상한
+    검사를 건너뛰므로 adapter가 먼저 막는다.
+  - zstd 스트림 해제기는 내부 버퍼에 먼저 풀어 나눠 내보내므로, 이 경로의 `dstSize_tooSmall`은 출력 부족이 아니라 블록이
+    frame 정보를 어긴 손상이다. InvalidArgument로 분류한다.
+  - 스트림이 끝난 뒤의 byte: Gzip은 다음 member(inflate가 magic을 직접 검사), Zstd는 다음 frame, Deflate·Zlib은
+    InvalidArgument다.
+  - `IsAtStreamBoundary()`는 지금까지의 입력이 완결된 스트림(들)인지다. `TryFinish()`는 경계가 아니거나 스트림이 하나도
+    없으면 InvalidArgument다(skippable frame만 있으면 성공, 출력 0). 출력은 frame·member 끝의 체크섬을 확인하기 전까지 미검증이다.
+  - 진행할 것이 없는 호출(빈 입력이고 코덱에 남은 출력도 없음)은 코덱을 부르지 않고 {0, 0, true}를 돌려준다. 남은 출력이
+    있으면 빈 입력으로도 부른다. 코덱에는 출력 공간을 항상 0보다 크게 넘기고, 입력을 다 넣었는데 출력 공간이 남았으면 빈
+    입력으로 다시 부르지 않는다(zlib Z_BUF_ERROR·zstd 무진행 반복 오류 방지).
+  - Deflate·Zlib 스트림 뒤 byte는 출력 창 크기와 무관하게 그 byte를 받은 호출에서 거부한다.
+- zlib 압축의 작은 출력 창: deflate는 flush 중 출력이 가득 차면 다음 호출에서 flush marker(빈 stored block)를 다시
+  만든다. 창이 marker보다 작으면 TryFlush가 끝나지 않으므로(교차검증에서 발견), 남은 창이 64byte보다 작으면 64byte carry
+  버퍼에 deflate한 뒤 나눠 넘긴다. 그래서 1byte 창으로도 flush·finish가 끝난다. 창이 정확히 차면 빈 marker가 한 번 더
+  붙을 수 있으나 해제 결과는 같다.
+- 실패: 코덱 실패·출력 성장 OOM·상한 초과는 Reset 전까지 같은 오류를 유지한다(sticky, 코덱 상태가 이미 입력을 소비했다).
+  코덱을 건드리기 전의 거부(겹침, Finish 뒤 Process)는 상태를 바꾸지 않는다. Append 편의 함수는 그 호출에서 붙인 길이를
+  되돌린다(일관성일 뿐 무결성 보장은 아니다).
+- 메모리: zlib inflate 약 40KiB, deflate 약 256KiB, zstd 해제는 window + 블록 버퍼(Reset으로 해제되지 않고 객체 수명 동안
+  유지). 이동 전용이며 코덱 상태는 heap에 고정하고, 이동된 뒤 호출은 StaleHandle이다. 한 객체는 한 번에 한 스레드만 쓴다.

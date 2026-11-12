@@ -317,3 +317,63 @@ TEST(ArrayRandomizedOperationsMatchIndependentFixedArrayOracle) {
         }
     }
 }
+
+TEST(ArrayAppendUninitializedGrowsWithoutConstructing) {
+    SystemAllocator backing;
+    test::NFailAllocator allocator(backing);
+    {
+        Array<uint32> values(allocator);
+        // 빈 배열에 0개를 붙이면 할당하지 않는다.
+        auto none = values.TryAppendUninitialized(0);
+        REQUIRE(none);
+        CHECK(none.Value().Size() == 0 && values.Size() == 0 && allocator.Attempts() == 0);
+
+        auto first = values.TryAppendUninitialized(3);
+        REQUIRE(first);
+        CHECK(first.Value().Data() == values.Data() && first.Value().Size() == 3);
+        CHECK(values.Size() == 3);
+        for (usize index = 0; index < 3; ++index) {
+            first.Value()[index] = static_cast<uint32>(10 + index);
+        }
+
+        // capacity 안에서는 재할당 없이 끝에 붙인다.
+        REQUIRE(values.TryReserve(16));
+        uint32* storage = values.Data();
+        const uint64 attempts = allocator.Attempts();
+        auto tail = values.TryAppendUninitialized(5);
+        REQUIRE(tail);
+        CHECK(values.Data() == storage && tail.Value().Data() == storage + 3);
+        CHECK(values.Size() == 8 && allocator.Attempts() == attempts);
+        for (usize index = 0; index < 5; ++index) {
+            tail.Value()[index] = static_cast<uint32>(20 + index);
+        }
+
+        // 실패하면 데이터·크기·capacity·저장소를 보존한다.
+        const usize capacity = values.Capacity();
+        allocator.FailOnAttempt(1);
+        auto failed = values.TryAppendUninitialized(capacity);
+        CHECK(!failed && failed.Error() == ErrorCode::OutOfMemory);
+        CHECK(values.Data() == storage && values.Size() == 8 && values.Capacity() == capacity);
+        allocator.DisableFailure();
+        auto overflow = values.TryAppendUninitialized(MaxSize / sizeof(uint32));
+        CHECK(!overflow && overflow.Error() == ErrorCode::Overflow);
+        CHECK(values.Size() == 8 && values.Data() == storage);
+
+        // 성장은 기존 원소를 옮긴다.
+        auto grown = values.TryAppendUninitialized(capacity);
+        REQUIRE(grown);
+        CHECK(values.Size() == 8 + capacity && values.Capacity() >= 8 + capacity);
+        CHECK(grown.Value().Data() == values.Data() + 8);
+        CHECK(values[0] == 10 && values[2] == 12 && values[3] == 20 && values[7] == 24);
+
+        // trivial 타입의 축소·Clear는 길이만 바꾸고 저장소를 유지한다.
+        uint32* grownStorage = values.Data();
+        const usize grownCapacity = values.Capacity();
+        REQUIRE(values.TryResize(4));
+        CHECK(values.Size() == 4 && values.Data() == grownStorage);
+        CHECK(values.Capacity() == grownCapacity && values[3] == 20);
+        values.Clear();
+        CHECK(values.IsEmpty() && values.Capacity() == grownCapacity);
+    }
+    CHECK(backing.Stats().liveAllocations == 0);
+}

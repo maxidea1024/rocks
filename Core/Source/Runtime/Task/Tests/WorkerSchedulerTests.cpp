@@ -591,3 +591,67 @@ TEST(WorkerSchedulerShutdownWaitsForReservedSubmissionCleanupAndPreservesRejecte
     }
     CHECK(backing.Stats().liveAllocations == 0);
 }
+
+// Pending 작업은 유일한 worker가 막혀 있어도 호출 스레드에서 바로 회수된다(body 미실행, 의존 작업은
+// DependencyFailed). 실행 중이거나 끝난 작업은 회수하지 않는다.
+TEST(WorkerSchedulerRevokeReclaimsPendingWithoutWorker) {
+    SystemAllocator allocator;
+    {
+        ManualResetEvent running;
+        ManualResetEvent release;
+        Counter calls;
+        WorkerScheduler scheduler(allocator);
+        OpenOnExit unblock{release};
+        REQUIRE(scheduler.Start({1, 8, 4}));
+        auto blocker = Body::TryCreate(allocator, [&](WorkerTaskContext&) noexcept {
+            running.Signal();
+            CHECK(release.Wait(10000) == WaitResult::Signaled);
+        });
+        REQUIRE(blocker);
+        auto first = scheduler.Submit(Move(blocker.Value()));
+        REQUIRE(first);
+        REQUIRE(running.Wait(10000) == WaitResult::Signaled);
+
+        auto pending =
+            Body::TryCreate(allocator, [&](WorkerTaskContext&) noexcept { calls.Increment(); });
+        REQUIRE(pending);
+        auto second = scheduler.Submit(Move(pending.Value()));
+        REQUIRE(second);
+        auto follower =
+            Body::TryCreate(allocator, [&](WorkerTaskContext&) noexcept { calls.Increment(); });
+        REQUIRE(follower);
+        auto third = scheduler.Submit(Move(follower.Value()),
+                                      Span<const WorkerTaskHandle>(&second.Value(), 1));
+        REQUIRE(third);
+        CHECK(scheduler.Stats().inFlight == 3);
+
+        // worker는 아직 막혀 있다. 회수는 기다리지 않고 terminal을 게시한다.
+        auto revoked = second.Value().TryRevoke();
+        REQUIRE(revoked);
+        CHECK(revoked.Value());
+        auto status = second.Value().Status();
+        REQUIRE(status);
+        CHECK(status.Value().state == WorkerTaskState::Cancelled);
+        CHECK(status.Value().error == ErrorCode::Cancelled);
+        CHECK(scheduler.Stats().inFlight == 2);
+        auto again = second.Value().TryRevoke();
+        CHECK(again && !again.Value());
+        auto busy = first.Value().TryRevoke();
+        CHECK(busy && !busy.Value());
+
+        release.Signal();
+        CheckTerminal(first.Value(), WorkerTaskState::Succeeded);
+        CheckTerminal(third.Value(), WorkerTaskState::Failed);
+        auto followerStatus = third.Value().Status();
+        REQUIRE(followerStatus);
+        CHECK(followerStatus.Value().error == ErrorCode::DependencyFailed);
+        CHECK(calls.calls == 0);
+        auto finished = first.Value().TryRevoke();
+        CHECK(finished && !finished.Value());
+        WorkerTaskHandle invalid;
+        CHECK(invalid.TryRevoke().Error() == ErrorCode::StaleHandle);
+        REQUIRE(scheduler.Shutdown());
+        CHECK(scheduler.Stats().inFlight == 0);
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}

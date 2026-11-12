@@ -6,6 +6,8 @@
 #include <zstd.h>
 #include <zstd_errors.h>
 
+#include <Platform/Memory.h>
+
 namespace rocks::detail::zstd {
 namespace {
 
@@ -134,7 +136,7 @@ Result<usize> Bound(usize sourceBytes) noexcept {
     return Result<usize>::Success(bound);
 }
 
-Result<void*> CreateCompressor(int32 level, Allocator& allocator) noexcept {
+Result<void*> CreateCompressor(int32 level, Allocator& allocator, bool checksum) noexcept {
     ZSTD_CCtx* context = ZSTD_createCCtx_advanced(Memory(allocator));
     if (context == nullptr) {
         return Result<void*>::Failure(ErrorCode::OutOfMemory);
@@ -142,12 +144,13 @@ Result<void*> CreateCompressor(int32 level, Allocator& allocator) noexcept {
 
     // 결정성: 수준·checksum·원본 크기를 고정하고 사전 ID는 쓰지 않는다. stable buffer는 입력·출력
     // 복사본을 만들지 않는다(입력은 분할 단위로 늘려 주며 출력 부족은 dstSize_tooSmall로 보고된다).
-    const bool configured = SetCompressionParameter(context, ZSTD_c_compressionLevel, level) &&
-                            SetCompressionParameter(context, ZSTD_c_checksumFlag, 1) &&
-                            SetCompressionParameter(context, ZSTD_c_contentSizeFlag, 1) &&
-                            SetCompressionParameter(context, ZSTD_c_dictIDFlag, 0) &&
-                            SetCompressionParameter(context, ZSTD_c_stableInBuffer, 1) &&
-                            SetCompressionParameter(context, ZSTD_c_stableOutBuffer, 1);
+    const bool configured =
+        SetCompressionParameter(context, ZSTD_c_compressionLevel, level) &&
+        SetCompressionParameter(context, ZSTD_c_checksumFlag, checksum ? 1 : 0) &&
+        SetCompressionParameter(context, ZSTD_c_contentSizeFlag, 1) &&
+        SetCompressionParameter(context, ZSTD_c_dictIDFlag, 0) &&
+        SetCompressionParameter(context, ZSTD_c_stableInBuffer, 1) &&
+        SetCompressionParameter(context, ZSTD_c_stableOutBuffer, 1);
     if (!configured) {
         ZSTD_freeCCtx(context);
         return Result<void*>::Failure(ErrorCode::DependencyFailed);
@@ -266,7 +269,7 @@ Result<usize> DecompressAppend(void* codec, Span<const uint8> source, usize maxO
     }
 
     const usize base = output.Size();
-    auto grown = output.TryResize(base + capacity);
+    auto grown = output.TryAppendUninitialized(capacity);
     if (!grown) {
         return Result<usize>::Failure(grown.Error());
     }
@@ -280,6 +283,207 @@ Result<usize> DecompressAppend(void* codec, Span<const uint8> source, usize maxO
 
     RestoreLength(output, base + written.Value());
     return written;
+}
+
+// --- 스트리밍(10절) ---
+
+namespace {
+
+// 스트림 해제의 오류 분류다. 스트림 해제기는 내부 버퍼에 먼저 풀어 호출자 출력으로 나눠 내보내므로,
+// dstSize_tooSmall은 출력 부족이 아니라 블록이 frame 정보(원본 크기·블록 최대 크기)를 어긴
+// 손상이다.
+ErrorCode StreamDecodeError(size_t code) noexcept {
+    switch (ZSTD_getErrorCode(code)) {
+    case ZSTD_error_dstSize_tooSmall:
+        return ErrorCode::InvalidArgument;
+    case ZSTD_error_frameParameter_windowTooLarge:
+        // 헤더를 미리 검사하므로 오지 않는다. 오면 호출자 상한 초과다.
+        return ErrorCode::CapacityExceeded;
+    default:
+        return DecompressionError(code);
+    }
+}
+
+} // namespace
+
+Result<void*> CreateStreamCompressor(int32 level, uint64 sizeHint, Allocator& allocator) noexcept {
+    ZSTD_CCtx* context = ZSTD_createCCtx_advanced(Memory(allocator));
+    if (context == nullptr) {
+        return Result<void*>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    // 스트림은 입력·출력 버퍼가 호출마다 바뀌므로 stable buffer를 쓰지 않는다. 크기 힌트는 매개변수
+    // 선택에만 쓰고 frame에 기록하지 않는다(원본 크기는 모름).
+    const int hint = sizeHint > 0x7fffffffull ? 0x7fffffff : static_cast<int>(sizeHint);
+    const bool configured =
+        SetCompressionParameter(context, ZSTD_c_compressionLevel, level) &&
+        SetCompressionParameter(context, ZSTD_c_checksumFlag, 1) &&
+        SetCompressionParameter(context, ZSTD_c_dictIDFlag, 0) &&
+        (hint == 0 || SetCompressionParameter(context, ZSTD_c_srcSizeHint, hint));
+    if (!configured) {
+        ZSTD_freeCCtx(context);
+        return Result<void*>::Failure(ErrorCode::DependencyFailed);
+    }
+
+    return Result<void*>::Success(context);
+}
+
+Result<void*> CreateStreamDecompressor(uint32 maxWindowLog, Allocator& allocator) noexcept {
+    ZSTD_DCtx* context = ZSTD_createDCtx_advanced(Memory(allocator));
+    if (context == nullptr) {
+        return Result<void*>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    if (ZSTD_isError(
+            ZSTD_DCtx_setParameter(context, ZSTD_d_windowLogMax, static_cast<int>(maxWindowLog)))) {
+        ZSTD_freeDCtx(context);
+        return Result<void*>::Failure(ErrorCode::DependencyFailed);
+    }
+
+    return Result<void*>::Success(context);
+}
+
+void ResetStreamCompressor(void* codec) noexcept {
+    ZSTD_CCtx_reset(static_cast<ZSTD_CCtx*>(codec), ZSTD_reset_session_only);
+}
+
+void ResetStreamDecompressor(void* codec) noexcept {
+    ZSTD_DCtx_reset(static_cast<ZSTD_DCtx*>(codec), ZSTD_reset_session_only);
+}
+
+Result<StreamProgress> CompressStep(void* codec, Span<const uint8> input, Span<uint8> output,
+                                    StreamFlush flush) noexcept {
+    auto* context = static_cast<ZSTD_CCtx*>(codec);
+    const ZSTD_EndDirective mode = flush == StreamFlush::End    ? ZSTD_e_end
+                                   : flush == StreamFlush::Sync ? ZSTD_e_flush
+                                                                : ZSTD_e_continue;
+    ZSTD_inBuffer in{NonNullSource(input), input.Size(), 0};
+    ZSTD_outBuffer out{NonNullDestination(output), output.Size(), 0};
+    StreamProgress progress;
+    while (out.pos < out.size) {
+        const usize inBefore = in.pos;
+        const usize outBefore = out.pos;
+        const size_t remaining = ZSTD_compressStream2(context, &out, &in, mode);
+        if (ZSTD_isError(remaining)) {
+            return Result<StreamProgress>::Failure(CompressionError(remaining));
+        }
+        // continue는 입력을 모두 소비하면, flush·end는 내보낼 것이 없으면 끝이다.
+        if (flush == StreamFlush::None ? in.pos == in.size : remaining == 0) {
+            progress.complete = true;
+            break;
+        }
+        if (in.pos == inBefore && out.pos == outBefore) {
+            break;
+        }
+    }
+
+    progress.consumed = in.pos;
+    progress.produced = out.pos;
+    return Result<StreamProgress>::Success(progress);
+}
+
+Result<StreamProgress> DecompressStep(void* codec, Span<const uint8> input, Span<uint8> output,
+                                      uint32 maxWindowLog, StreamDecodeState& state) noexcept {
+    auto* context = static_cast<ZSTD_DCtx*>(codec);
+    const uint8* source = NonNullSource(input);
+    usize consumed = 0;
+    usize produced = 0;
+    // zstd가 내보내지 못한 출력을 갖고 있을 수 있는지다. 출력을 가득 채우고 frame이 끝나지 않았을
+    // 때만 참이다(frame 끝의 반환값 0은 모두 내보냈다는 뜻이다).
+    bool pending = false;
+    while (produced < output.Size()) {
+        if (state.atFrameStart) {
+            if (consumed == input.Size()) {
+                break;
+            }
+            // frame 헤더를 먼저 모아 window를 검사한다. 헤더 byte도 새 frame의 입력이므로 경계를
+            // 지운다.
+            const usize need = sizeof(state.header) - state.headerBytes;
+            const usize take = Minimum(need, input.Size() - consumed);
+            ZSTD_FrameHeader header{};
+            platform::MemoryCopy(state.header + state.headerBytes, source + consumed, take);
+            const size_t parsed =
+                ZSTD_getFrameHeader(&header, state.header, state.headerBytes + take);
+            if (ZSTD_isError(parsed)) {
+                return Result<StreamProgress>::Failure(
+                    ZSTD_getErrorCode(parsed) == ZSTD_error_frameParameter_windowTooLarge
+                        ? ErrorCode::Unsupported
+                        : ErrorCode::InvalidArgument);
+            }
+            state.atBoundary = false;
+            if (parsed != 0) {
+                // 헤더가 아직 덜 왔다. 받은 만큼 보관하고 소비한다.
+                state.headerBytes += static_cast<uint32>(take);
+                consumed += take;
+                continue;
+            }
+            // window(single segment frame은 원본 크기)가 구현 상한 2^31을 넘으면 어떤 설정으로도 풀
+            // 수 없어 Unsupported, 호출자 상한만 넘으면 CapacityExceeded다.
+            if (header.frameType == ZSTD_frame) {
+                if (header.windowSize > (1ull << MaxZstdWindowLog)) {
+                    return Result<StreamProgress>::Failure(ErrorCode::Unsupported);
+                }
+                if (header.windowSize > (1ull << maxWindowLog)) {
+                    return Result<StreamProgress>::Failure(ErrorCode::CapacityExceeded);
+                }
+            }
+
+            // 검사한 헤더 byte(보관분 + 이번 입력에서 헤더까지)를 zstd에 먼저 넣는다. 헤더를 따로
+            // 넣으므로 frame 전체가 한 입력에 들어 있지 않아 zstd의 단일 패스 경로(상한 검사
+            // 생략)도 타지 않는다.
+            const usize headerFromInput = header.headerSize - state.headerBytes;
+            ZSTD_inBuffer in{state.header, header.headerSize, 0};
+            ZSTD_outBuffer out{output.Data() + produced, output.Size() - produced, 0};
+            const size_t hint = ZSTD_decompressStream(context, &out, &in);
+            if (ZSTD_isError(hint)) {
+                return Result<StreamProgress>::Failure(StreamDecodeError(hint));
+            }
+            produced += out.pos;
+            consumed += headerFromInput;
+            state.headerBytes = 0;
+            state.atFrameStart = false;
+            pending = false;
+            if (hint == 0) {
+                // 헤더만으로 끝나는 frame(빈 skippable 등).
+                state.atFrameStart = true;
+                state.atBoundary = true;
+                state.sawStream = true;
+            }
+            continue;
+        }
+
+        ZSTD_inBuffer in{source + consumed, input.Size() - consumed, 0};
+        ZSTD_outBuffer out{output.Data() + produced, output.Size() - produced, 0};
+        const size_t hint = ZSTD_decompressStream(context, &out, &in);
+        if (ZSTD_isError(hint)) {
+            return Result<StreamProgress>::Failure(StreamDecodeError(hint));
+        }
+        consumed += in.pos;
+        produced += out.pos;
+        if (hint == 0) {
+            pending = false;
+            state.atFrameStart = true;
+            state.atBoundary = true;
+            state.sawStream = true;
+            continue;
+        }
+        pending = out.pos == out.size;
+        // 입력을 다 넣었고 출력 공간이 남았다면 zstd가 가진 출력도 다 나왔다. 빈 입력으로 다시
+        // 부르지 않는다(무진행 호출 계수를 늘리지 않는다).
+        if (consumed == input.Size() && !pending) {
+            break;
+        }
+        if (in.pos == 0 && out.pos == 0) {
+            break;
+        }
+    }
+
+    state.outputPending = pending;
+    StreamProgress progress;
+    progress.consumed = consumed;
+    progress.produced = produced;
+    progress.complete = consumed == input.Size() && !pending;
+    return Result<StreamProgress>::Success(progress);
 }
 
 } // namespace rocks::detail::zstd

@@ -270,9 +270,14 @@ public:
             return Result<void>::Failure(ErrorCode::Overflow);
         }
         if (newSize <= size_) {
-            while (size_ > newSize) {
-                --size_;
-                DestroyAt(data_ + size_);
+            // trivial 소멸 타입은 길이만 줄인다(Debug 빌드에서도 O(1)).
+            if constexpr (__is_trivially_destructible(T)) {
+                size_ = newSize;
+            } else {
+                while (size_ > newSize) {
+                    --size_;
+                    DestroyAt(data_ + size_);
+                }
             }
             return Result<void>::Success();
         }
@@ -298,6 +303,44 @@ public:
         capacity_ = capacity;
         size_ = newSize;
         return Result<void>::Success();
+    }
+
+    // 원소를 초기화하지 않고 count개 늘린다(생성·0 채우기 없음, UE AddUninitialized 대응). 늘어난
+    // 구간의 내용은 미정이므로 읽기 전에 모두 써야 한다. trivial 타입(uint8·정수·POD)만 쓸 수 있다.
+    // 반환 Span은 늘어난 구간이며 다음 재할당·축소·Clear·파괴로 무효화된다. 실패하면 데이터·size·
+    // capacity·기존 view를 보존한다. 외부 코덱이 큰 출력 버퍼를 채우는 경우(압축 해제)에 쓴다.
+    //
+    // 사용 예:
+    //   const usize base = bytes.Size();
+    //   auto tail = bytes.TryAppendUninitialized(4096);
+    //   if (tail) {
+    //       const usize written = Fill(tail.Value());   // tail 앞부분만 채울 수 있다
+    //       bytes.TryResize(base + written);              // 축소는 실패하지 않는다
+    //   }
+    // 오류: 크기 overflow는 Overflow, 확장 할당 실패는 allocator 오류(OutOfMemory 등).
+    Result<Span<T>> TryAppendUninitialized(usize count) noexcept {
+        static_assert(__is_trivially_constructible(T) && __is_trivially_destructible(T),
+                      "TryAppendUninitialized requires a trivial element type");
+        if (count > MaxSize / sizeof(T) - size_) {
+            return Result<Span<T>>::Failure(ErrorCode::Overflow);
+        }
+
+        const usize newSize = size_ + count;
+        if (newSize > capacity_) {
+            const usize capacity = GrowthCapacity(newSize);
+            auto allocation = AllocateElements(capacity);
+            if (!allocation) {
+                return Result<Span<T>>::Failure(allocation.Error());
+            }
+            T* replacement = allocation.Value();
+            RelocateTo(replacement);
+            data_ = replacement;
+            capacity_ = capacity;
+        }
+
+        T* begin = data_ + size_;
+        size_ = newSize;
+        return Result<Span<T>>::Success(Span<T>(begin, count));
     }
 
     // 지정 범위를 제거한다. 범위 밖이면 InvalidArgument이며 변경하지 않는다.
@@ -479,8 +522,10 @@ public:
     // 원소를 역순 소멸시키고 capacity는 유지한다. 원소 참조는 무효지만 다음 추가에 buffer를
     // 재사용한다.
     void Clear() noexcept {
-        for (usize index = size_; index != 0; --index) {
-            DestroyAt(data_ + index - 1);
+        if constexpr (!__is_trivially_destructible(T)) {
+            for (usize index = size_; index != 0; --index) {
+                DestroyAt(data_ + index - 1);
+            }
         }
 
         size_ = 0;

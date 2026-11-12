@@ -139,7 +139,9 @@ Result<usize> DecompressAppend(Span<const uint8> source, usize maxOutputBytes,
     }
 
     while (true) {
-        auto grown = output.TryResize(base + capacity);
+        // 재시도 전 길이를 되돌린다(축소는 저장소 유지). 0으로 채우지 않는다.
+        RestoreLength(output, base);
+        auto grown = output.TryAppendUninitialized(capacity);
         if (!grown) {
             RestoreLength(output, base);
             return Result<usize>::Failure(grown.Error());

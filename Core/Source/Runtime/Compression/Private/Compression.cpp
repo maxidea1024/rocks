@@ -84,14 +84,14 @@ void RestoreLength(Array<uint8>& output, usize base) noexcept {
 }
 
 Result<CompressorState*> CreateCompressorState(CompressionFormat format, int32 level,
-                                               Allocator& allocator) noexcept {
+                                               Allocator& allocator, bool zstdChecksum) noexcept {
     Result<void*> codec = Result<void*>::Failure(ErrorCode::InvalidArgument);
     switch (format) {
     case CompressionFormat::Lz4:
         codec = lz4::CreateCompressor(level, allocator);
         break;
     case CompressionFormat::Zstd:
-        codec = zstd::CreateCompressor(level, allocator);
+        codec = zstd::CreateCompressor(level, allocator, zstdChecksum);
         break;
     case CompressionFormat::Deflate:
     case CompressionFormat::Zlib:
@@ -206,7 +206,7 @@ Result<usize> CompressAppend(CompressorState& state, Span<const uint8> source, A
     }
 
     // zlib 계열은 문맥의 실제 설정(수준·window·memLevel)으로 구한 상한을 쓴다. 문맥 없는 공개
-    // bound보다 훨씬 작아(약 13% → 0.03% 여유) 0으로 채우는 확보량이 줄어든다.
+    // bound보다 훨씬 작아(약 13% → 0.03% 여유) 미리 확보하는 저장소가 줄어든다.
     auto bound = IsZlibFamily(state.format) ? zlib::StreamBound(state.codec, source.Size())
                                             : TryGetCompressBound(state.format, source.Size());
     if (!bound) {
@@ -218,7 +218,7 @@ Result<usize> CompressAppend(CompressorState& state, Span<const uint8> source, A
         return Result<usize>::Failure(ErrorCode::Overflow);
     }
 
-    auto grown = output.TryResize(base + bound.Value());
+    auto grown = output.TryAppendUninitialized(bound.Value());
     if (!grown) {
         return Result<usize>::Failure(grown.Error());
     }

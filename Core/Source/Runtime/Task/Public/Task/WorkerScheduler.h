@@ -65,6 +65,18 @@ public:
 
     Result<WorkerTaskStatus> Status() const noexcept;
     Result<void> RequestCancel() const noexcept;
+    // 아직 worker가 꺼내지 않은(Pending) 작업을 호출 스레드에서 바로 회수해 Cancelled로 끝낸다.
+    // body는 실행하지 않고 capture·dependency 보존분은 이 스레드가 정리한다(gate 밖). worker가 비지
+    // 않아도 끝나므로, 호출 스레드가 모든 일을 마친 뒤 남은 helper 작업을 기다리지 않을 때 쓴다.
+    // 회수했으면 true, 이미 실행 중이거나 끝났으면 false(아무것도 바꾸지 않는다)다. 이 작업에
+    // 의존한 작업은 RequestCancel과 같이 DependencyFailed가 된다. invalid handle은 StaleHandle이다.
+    //
+    // 사용 예:
+    //   auto revoked = helper.TryRevoke();
+    //   if (revoked && !revoked.Value()) {
+    //       helper.Wait();   // 이미 실행 중이면 끝날 때까지 기다린다
+    //   }
+    Result<bool> TryRevoke() const noexcept;
     // timeout은 TimedOut 값이며 취소하지 않는다. invalid handle은 StaleHandle이다.
     // 같은 scheduler의 worker/body/capture cleanup 중 호출은 완료 여부와 무관하게 WrongThread다.
     Result<platform::WaitResult> Wait(uint32 timeoutMs = platform::InfiniteTimeout) const noexcept;

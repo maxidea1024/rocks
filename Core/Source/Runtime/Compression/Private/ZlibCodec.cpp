@@ -1,6 +1,7 @@
 #include "CompressionInternal.h"
 
 #include <Core/Move.h>
+#include <Platform/Memory.h>
 
 // zlib 1.4 adapter. Z_SOLO·Z_PREFIX·Z_U4·Z_U8은 모듈 규칙이 ThirdParty.json의 consumerDefines에서
 // 정의한다 (라이브러리 빌드와 같아야 한다). Z_SOLO라 기본 할당기가 없으므로 zalloc·zfree를 반드시
@@ -14,6 +15,12 @@ constexpr int WindowBits = 15;
 constexpr int MemoryLevel = 8;
 constexpr usize AppendInitialBytes = usize{64} << 10;
 
+// 스트림 압축에서 출력 창이 이보다 작으면 deflate를 carry 버퍼에 대고 부른 뒤 나눠 넘긴다.
+// deflate는 flush 중 avail_out이 0이 되면 다음 호출에서 flush marker(빈 stored block)를 다시
+// 만들므로, 창이 marker보다 작으면 끝나지 않는다(zlib.h: flush marker가 시작될 때 avail_out은 6보다
+// 커야 한다).
+constexpr usize CarryBytes = 64;
+
 // z_stream과 gzip 헤더는 zlib이 주소를 보관하므로(state->strm 역참조, gzhead 포인터) heap에
 // 고정한다.
 struct ZlibState {
@@ -22,6 +29,10 @@ struct ZlibState {
     Allocator* allocator;
     CompressionFormat format;
     bool deflating;
+    // 스트림 압축의 carry 버퍼다. [carryBegin, carryEnd)가 아직 넘기지 않은 출력이다.
+    uint8 carry[CarryBytes];
+    uint32 carryBegin;
+    uint32 carryEnd;
 };
 
 voidpf Allocate(voidpf opaque, uInt items, uInt size) {
@@ -115,9 +126,10 @@ struct InflateOutput {
 
         usize growth = produced > AppendInitialBytes ? produced : AppendInitialBytes;
         growth = Minimum(growth, limit - produced);
-        auto grown = array->TryResize(base + produced + growth);
+        // 늘린 구간은 inflate가 채우므로 0으로 채우지 않는다.
+        auto grown = array->TryAppendUninitialized(base + produced + growth - array->Size());
         if (!grown) {
-            return grown;
+            return Result<void>::Failure(grown.Error());
         }
         writable = growth;
         return Result<void>::Success();
@@ -126,11 +138,11 @@ struct InflateOutput {
 
 // Deflate·Zlib·Gzip 해제 공통 루프다.
 // - 입력·출력을 분할 단위로 넣어 uInt 한계와 취소 확인을 처리한다.
-// - 출력이 상한에 이르면 1byte 예비 버퍼로 계속 진행한다. 1byte라도 나오면 상한 초과, 블록
-// 끝·체크섬만 남았으면
-//   성공이다(이 상태들은 출력 공간 없이 진행된다). 그래서 정확히 상한 크기인 결과는 성공한다.
-// - Gzip은 연속 member를 모두 해제한다. member 뒤의 쓰레기·0 padding과 다른 형식의 남는 byte는
-// 손상이다.
+// - 출력이 상한에 이르면 1byte 예비 버퍼로 계속 진행한다. 1byte라도 나오면 상한 초과,
+//   블록 끝·체크섬만 남았으면 성공이다(이 상태들은 출력 공간 없이 진행된다). 그래서
+//   정확히 상한 크기인 결과는 성공한다.
+// - Gzip은 연속 member를 모두 해제한다. member 뒤의 쓰레기·0 padding과 다른 형식의
+//   남는 byte는 손상이다.
 Result<void> Inflate(ZlibState& state, Span<const uint8> source, InflateOutput& output,
                      const CompressionProbe& probe) noexcept {
     z_stream& stream = state.stream;
@@ -351,6 +363,191 @@ Result<usize> DecompressAppend(void* codec, Span<const uint8> source, usize maxO
 
     RestoreLength(output, target.base + target.produced);
     return Result<usize>::Success(target.produced);
+}
+
+// --- 스트리밍(10절) ---
+
+Result<void> ResetStreamCompressor(void* codec) noexcept {
+    ZlibState& state = *static_cast<ZlibState*>(codec);
+    state.carryBegin = 0;
+    state.carryEnd = 0;
+    if (deflateReset(&state.stream) != Z_OK || !ApplyGzipHeader(state)) {
+        return Result<void>::Failure(ErrorCode::DependencyFailed);
+    }
+    return Result<void>::Success();
+}
+
+Result<void> ResetStreamDecompressor(void* codec) noexcept {
+    ZlibState& state = *static_cast<ZlibState*>(codec);
+    return inflateReset(&state.stream) == Z_OK ? Result<void>::Success()
+                                               : Result<void>::Failure(ErrorCode::DependencyFailed);
+}
+
+Result<StreamProgress> CompressStep(void* codec, Span<const uint8> input, Span<uint8> output,
+                                    StreamFlush flush) noexcept {
+    ZlibState& state = *static_cast<ZlibState*>(codec);
+    z_stream& stream = state.stream;
+    const uint8* source = NonNullSource(input);
+    usize consumed = 0;
+    usize produced = 0;
+    StreamProgress progress;
+    // 입력·출력은 uInt 한계 안의 분할 단위로 넣는다. flush 모드는 남은 입력의 마지막 조각에만 쓴다.
+    while (produced < output.Size()) {
+        // 지난 호출의 carry를 먼저 넘긴다(출력 순서 유지).
+        if (state.carryBegin != state.carryEnd) {
+            const usize copy = Minimum(state.carryEnd - state.carryBegin, output.Size() - produced);
+            platform::MemoryCopy(output.Data() + produced, state.carry + state.carryBegin, copy);
+            state.carryBegin += static_cast<uint32>(copy);
+            produced += copy;
+            continue;
+        }
+
+        const usize room = output.Size() - produced;
+        const bool viaCarry = room < CarryBytes;
+        const usize inputChunk = Minimum(input.Size() - consumed, CompressionChunkBytes);
+        const usize outputChunk = viaCarry ? CarryBytes : Minimum(room, CompressionChunkBytes);
+        const bool lastInput = inputChunk == input.Size() - consumed;
+        stream.next_in = const_cast<Bytef*>(source + consumed);
+        stream.avail_in = static_cast<uInt>(inputChunk);
+        stream.next_out = viaCarry ? state.carry : output.Data() + produced;
+        stream.avail_out = static_cast<uInt>(outputChunk);
+        const int mode = !lastInput || flush == StreamFlush::None ? Z_NO_FLUSH
+                         : flush == StreamFlush::Sync             ? Z_SYNC_FLUSH
+                                                                  : Z_FINISH;
+        const int status = deflate(&stream, mode);
+        const usize read = inputChunk - stream.avail_in;
+        const usize written = outputChunk - stream.avail_out;
+        const bool roomLeft = stream.avail_out != 0;
+        consumed += read;
+        if (viaCarry) {
+            const usize copy = Minimum(written, room);
+            platform::MemoryCopy(output.Data() + produced, state.carry, copy);
+            produced += copy;
+            state.carryBegin = static_cast<uint32>(copy);
+            state.carryEnd = static_cast<uint32>(written);
+        } else {
+            produced += written;
+        }
+
+        // 요청 완료: End는 Z_STREAM_END, Sync는 입력을 다 넣고 출력 공간이 남은 채 돌아온 때(zlib
+        // 계약), None은 입력을 다 넣은 때다. Z_BUF_ERROR는 진행할 것이 없다는 뜻이다(완료된 flush의
+        // 반복 등).
+        bool done = false;
+        if (status == Z_STREAM_END) {
+            done = true;
+        } else if (status == Z_BUF_ERROR) {
+            done = flush != StreamFlush::End && consumed == input.Size();
+            if (!done) {
+                break;
+            }
+        } else if (status != Z_OK) {
+            return Result<StreamProgress>::Failure(
+                status == Z_MEM_ERROR ? ErrorCode::OutOfMemory : ErrorCode::DependencyFailed);
+        } else if (consumed == input.Size()) {
+            done = flush == StreamFlush::None || (flush == StreamFlush::Sync && roomLeft);
+        }
+
+        if (done) {
+            // flush·finish는 carry까지 다 넘겨야 끝이다. 남았으면 다음 호출이 넘긴 뒤 다시 확인한다
+            // (완료된 flush·finish를 반복해 불러도 deflate는 byte를 더 만들지 않는다).
+            progress.complete = flush == StreamFlush::None || state.carryBegin == state.carryEnd;
+            break;
+        }
+        if (read == 0 && written == 0) {
+            break;
+        }
+    }
+
+    progress.consumed = consumed;
+    progress.produced = produced;
+    return Result<StreamProgress>::Success(progress);
+}
+
+Result<StreamProgress> DecompressStep(void* codec, Span<const uint8> input, Span<uint8> output,
+                                      StreamDecodeState& decode) noexcept {
+    ZlibState& state = *static_cast<ZlibState*>(codec);
+    z_stream& stream = state.stream;
+    const uint8* source = NonNullSource(input);
+    usize consumed = 0;
+    usize produced = 0;
+    bool filled = false;
+    while (produced < output.Size()) {
+        const usize remaining = input.Size() - consumed;
+        if (decode.ended) {
+            // Deflate·Zlib 스트림 뒤의 byte는 손상이다.
+            if (remaining != 0) {
+                return Result<StreamProgress>::Failure(ErrorCode::InvalidArgument);
+            }
+            break;
+        }
+        if (remaining == 0 && !decode.outputPending) {
+            break;
+        }
+
+        const usize inputChunk = Minimum(remaining, CompressionChunkBytes);
+        const usize outputChunk = Minimum(output.Size() - produced, CompressionChunkBytes);
+        stream.next_in = const_cast<Bytef*>(source + consumed);
+        stream.avail_in = static_cast<uInt>(inputChunk);
+        stream.next_out = output.Data() + produced;
+        stream.avail_out = static_cast<uInt>(outputChunk);
+        const int status = inflate(&stream, Z_NO_FLUSH);
+        const usize read = inputChunk - stream.avail_in;
+        const usize written = outputChunk - stream.avail_out;
+        consumed += read;
+        produced += written;
+        filled = stream.avail_out == 0;
+        decode.outputPending = filled;
+        if (read != 0) {
+            decode.atBoundary = false;
+        }
+
+        if (status == Z_STREAM_END) {
+            decode.sawStream = true;
+            decode.atBoundary = true;
+            decode.outputPending = false;
+            if (state.format == CompressionFormat::Gzip) {
+                // 다음 member: inflate가 magic을 직접 검사한다(gzip이 아니면 Z_DATA_ERROR).
+                if (inflateReset(&stream) != Z_OK) {
+                    return Result<StreamProgress>::Failure(ErrorCode::DependencyFailed);
+                }
+            } else {
+                decode.ended = true;
+            }
+            continue;
+        }
+        if (status == Z_BUF_ERROR) {
+            // 진행 불가: 입력이 더 필요하다(스트림에서는 오류가 아니다). 입력과 출력 공간이
+            // 있는데도 진행하지 못했다면 zlib 계약 밖이다.
+            if (inputChunk != 0 && read == 0 && written == 0) {
+                return Result<StreamProgress>::Failure(ErrorCode::DependencyFailed);
+            }
+            decode.outputPending = false;
+            break;
+        }
+        if (status != Z_OK) {
+            return Result<StreamProgress>::Failure(StatusError(status));
+        }
+        if (read == 0 && written == 0) {
+            break;
+        }
+    }
+
+    // Deflate·Zlib 스트림 뒤의 byte는 출력 창 크기와 무관하게 이 호출에서 거부한다(inflate는 끝난
+    // 스트림 뒤를 소비하지 않으므로 adapter가 판정한다). 거부에는 출력 공간이 필요 없다.
+    if (decode.ended && consumed != input.Size()) {
+        return Result<StreamProgress>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    StreamProgress progress;
+    progress.consumed = consumed;
+    progress.produced = produced;
+    progress.complete = consumed == input.Size() && !decode.outputPending;
+    return Result<StreamProgress>::Success(progress);
+}
+
+uint32 Crc32(Span<const uint8> data, uint32 previous) noexcept {
+    return static_cast<uint32>(
+        crc32_z(previous, NonNullSource(data), static_cast<z_size_t>(data.Size())));
 }
 
 } // namespace rocks::detail::zlib

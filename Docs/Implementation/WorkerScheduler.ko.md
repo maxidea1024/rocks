@@ -11,6 +11,7 @@
 | 결과 보존 | 이동 전용 `WorkerTaskHandle`, 명시적 `Clone`, `Reset`, `Status` |
 | 대기 | `Wait(timeoutMs)` → `Result<platform::WaitResult>`; timeout은 작업 취소가 아니다 |
 | 취소 | `RequestCancel`; 실행 중 body는 `WorkerTaskContext::IsCancellationRequested`로 관측 |
+| 회수 | `TryRevoke` → `Result<bool>`; 아직 worker가 꺼내지 않은 Pending 작업을 호출 스레드에서 바로 Cancelled로 끝낸다 |
 | 실패 | body의 `WorkerTaskContext::Fail(ErrorCode)`; 최종 상태의 `error`로 관측 |
 | 종료 | `Shutdown(Drain 또는 Cancel)`; native Join까지 회수 |
 | 실행 문맥 검사 | `IsCurrentWorker`; body와 capture/dependency 정리 문맥을 포함 |
@@ -40,6 +41,8 @@ dependency는 같은 scheduler의 같은 Start 세대에 이미 발급된 handle
 따라서 handle 보존이 capture 자원을 불필요하게 유지하지 않으며, terminal 관측이 capture cleanup보다 먼저 발생하지 않는다. 결과 record와 공유 control storage는 별도 보존 계수로 관리한다. handle은 scheduler 파괴 후에도 유효하지만 주입한 allocator는 마지막 handle·노드 해제까지 유효하고 해당 스레드의 할당·해제를 지원해야 한다.
 
 ## 취소·종료·시작 실패
+
+TryRevoke는 Pending 작업만 회수한다. 상태를 Completing으로 바꿔 worker가 꺼내지 못하게 한 뒤, worker 정리와 같은 순서로 capture와 dependency 보존분을 gate 밖에서 이 스레드가 정리하고 Cancelled(error Cancelled)를 게시한다. worker가 비지 않아도 끝나므로, 호출 스레드가 helper 작업과 일을 나눠 하다 먼저 끝냈을 때 남은 helper를 기다리지 않는 데 쓴다(블록 컨테이너 병렬 압축·해제). 실행 중이거나 끝난 작업은 바꾸지 않고 false를 돌려주며, 회수된 작업에 의존한 작업은 DependencyFailed가 된다.
 
 RequestCancel은 요청 게시이며 실행 중 body를 강제로 중단하지 않는다. pending 작업은 worker가 정리할 때 body를 생략한다. 실행 중 작업은 취소를 폴링하여 반환해야 하며 이미 발생한 부수 효과를 되돌리지 않는다. 명시적 body 실패와 dependency 실패가 있으면 Failed가 우선하고, 그 외 취소 요청을 받은 작업은 body 반환·cleanup 이후 Cancelled가 된다.
 
