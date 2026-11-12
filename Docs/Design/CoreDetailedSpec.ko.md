@@ -46,7 +46,7 @@ Base → PlatformBase → Core → Task / Localization / Serialization / MetaSch
 |---|---|---|
 | C01 P0 | `Array`, `Span`의 조회·용량·범위 삽입/삭제·검색·반복, 정적/inline 배열·small buffer; 동적 배열·span **부분**, 나머지 **후속** | alias 포함 insert/append, overflow/OOM rollback, move-only·생성/파괴 수명, view 무효화, allocator 수명·Stack/LIFO 제약. 명확한 빈 범위와 iterator 경계. |
 | C02 P0 | `HashMap`/`HashSet`, policy·이종 조회·중복·iteration; **부분** | 충돌·tombstone·reserve/rehash·seeded random oracle, 잘못된 hash/equality 계약, OOM 보존, 삽입 입력 이동 및 key/value 교체 정책. 현재 Rocks의 중복 의미와 UE의 차이를 문서화한다. |
-| C03 P0 | `BitArray` **부분**, `SparseArray`/stable slot 및 generation **후속** | word 경계·tail bit masking·self alias·remove swap 차이, slot free-list·stale handle·generation wrap·OOM, 메모리 사용량과 반복 순서. |
+| C03 P0 | `BitArray` **부분**, `SparseArray`(`Core/Containers/SparseArray.h`, UE TSparseArray 대응: 삭제해도 index 안정, LIFO free list, EmplaceAt·LowestFreeIndex·Compact·CompactStable·Shrink, 오름차순 반복)·`SlotArray`/`SlotHandle`(`Core/Containers/SlotArray.h`: generation 1부터, 한도 도달 slot 폐기로 순환 없음, 반복자의 재사용 slot 감지) **완료**(독립 리뷰: SparseArray 1000 seed OOM·별칭 fuzz, SlotArray 2000 seed 차등 fuzz·generation 0xffffffff 4.29e9회). 이동·새 배열은 handle namespace를 새로 시작(문서화된 caller 책임) | word 경계·tail bit masking·self alias·remove swap 차이, slot free-list·stale handle·generation wrap·OOM, 메모리 사용량과 반복 순서. |
 | C04 P1 | queue/deque/ring·heap/priority queue·multi-map/set·tree **후속** | 소유권·용량·순서·포인터 무효화·overflow·OOM. 단일 스레드 queue와 동시 queue는 별도 계약이며 SPSC/MPSC/MPMC, bounded/unbounded, blocking/close를 명확히 구분한다. |
 | C05 P0 | 범용 sort/lower/upper/binary search와 `Array::Sort` **부분** | 비안정/안정 정렬 구분, comparator 엄격 약순서·noexcept·이종 키 양방향, 포인터 자동 역참조 정책, move-only 수명·대조 oracle·최악 복잡도. stable sort·projection·filter·transform·heap 등은 **후속**. |
 | C06 P0 | traits/concepts, `Move`, `Result`, `Function`, `Optional`(`Core/Optional.h`, UE TOptional 대응: 빈 접근 Fatal, 자기 별칭 Emplace 안전), `Tuple`(`Core/Tuple.h`, UE TTuple 대응: 구조적 바인딩·Tie·Apply, std trait 특수화는 이 파일에만 허용), `Variant`(`Core/Variant.h`, UE TVariant 대응: 정확한 타입만 암묵 변환, 다른 대안 접근 Fatal, 자기 참조 안전 교체), `Delegate`/`MulticastDelegate`(`Core/Delegate.h`, UE TDelegate/TMulticastDelegate 대응: SharedPtr 약한 바인딩, 실행 중 자기 해제 지연, Broadcast 중 추가·제거·중첩 안전) **부분**; Pair, delegate payload·GC 객체 바인딩·스레드 안전 모드·event **후속** | 빈 상태, move-only, 비복사성·noexcept, compile-negative, in-flight callback의 해제/재진입/모듈 수명. `Result<bool>` 성공과 값의 혼동을 편의 API에 노출하지 않는다. |
@@ -56,11 +56,11 @@ Base → PlatformBase → Core → Task / Localization / Serialization / MetaSch
 
 | ID/우선 | 기능·상태 | 완료 조건과 검증 |
 |---|---|---|
-| T01 P0 | 소유 `String`/비소유 `StringView`, append/insert/replace/find/split·join/builder/format **부분** | UTF-8 byte 인덱스 계약, embedded NUL, malformed UTF-8, 빈 값·중첩 alias·OOM rollback, 경로 연산 시 `/` 지원 및 절대 경로 정책. 사용자가 인코딩 단위와 view 수명을 추측하지 않도록 한다. |
-| T02 P0 | interned `Name`, None·번호·case 비교·표기 **부분** | pool/domain 수명·동시 종료·lease·대소문자·번호 경계·hash/equality·unicode 정책, 안정 영속 ID와 네트워크 표현을 런타임 token과 분리한다. |
+| T01 P0 | 소유 `String`/비소유 `StringView`, append/insert/replace/find/split **부분**; `StringBuilder<N>`(UE TStringBuilder 대응, 객체 안 buffer 후 heap, 연쇄 오류 기억)·타입 안전 `{}` 서식(C++ 표준 format 부분 집합, `Formatter<T>` 확장, 최단 왕복 실수 표기, locale 소수점 무관)·엄격한 숫자 해석(`Core/Text/NumberText.h`)·`TrySplitIntoArray`·`TryJoin` **완료**(독립 리뷰 반영, STL to_chars 자릿수 대조) | UTF-8 byte 인덱스 계약, embedded NUL, malformed UTF-8, 빈 값·중첩 alias·OOM rollback, 경로 연산 시 `/` 지원 및 절대 경로 정책. 사용자가 인코딩 단위와 view 수명을 추측하지 않도록 한다. |
+| T02 P0 | interned `Name`, None·번호·case 비교·표기 **부분**; 실행·pool 독립 영속 key `NameKey`(알고리즘 v1 고정·12 byte little-endian 인코딩·버전 상수, Name 동등성과 1:1 — 독립 리뷰 41,415개 입력) **완료**. Unicode folding·네트워크 이름 표 **후속** | pool/domain 수명·동시 종료·lease·대소문자·번호 경계·hash/equality·unicode 정책, 안정 영속 ID와 네트워크 표현을 런타임 token과 분리한다. |
 | T03 P1 | Unicode validation·UTF-8/16/32 변환, normalization/case folding·locale **후속** | Unicode 버전과 외부 라이브러리/라이선스, invalid sequence 정책, surrogate·분할 스트림·확장 문자·멀티바이트 인덱스 golden/fuzz. ASCII 기능을 Unicode 전체 지원으로 표시하지 않는다. |
 | T04 P1 | `Text` 지역화 catalog·culture snapshot, plural/gender·숫자·통화·날짜 **부분** | fallback·동시 culture 변경·번역 누락·형식 오류·시간대·대형/음수, 에디터 추출 및 쿠킹 연동. 표시용 Text와 내부 식별 Name을 구분한다. |
-| T05 P0 | 공용 경로 lexical 처리·플랫폼 호스트 문법 선택 **부분** | Windows drive/UNC/root-relative·POSIX root, 상대 계산·정규화·확장자·path join·Unicode·embedded NUL·대소문자. 문자열 정규화만으로 symlink 포함 관계·보안 경계·동일 파일을 보증하지 않는다. |
+| T05 P0 | 공용 경로 lexical 처리·플랫폼 호스트 문법 선택 **부분**; `RootPart`·`Components`(UE IterateComponents)·`PathLeaf`(UE GetPathLeaf)·`MakePlatformFilename`(UE MakePlatformFilename), NT·device namespace 거부 **완료** | Windows drive/UNC/root-relative·POSIX root, 상대 계산·정규화·확장자·path join·Unicode·embedded NUL·대소문자. 문자열 정규화만으로 symlink 포함 관계·보안 경계·동일 파일을 보증하지 않는다. |
 
 ### 3.4 수학·기본 충돌·SIMD
 

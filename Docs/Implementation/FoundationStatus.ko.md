@@ -309,3 +309,10 @@ Rocks.Build에 Android 대상을 정식으로 추가했다(`--platform android`,
 ### 파일 시스템 수정 재검토 반영
 
 수정 커밋(7ece555)을 독립 재검토한 결과를 반영했다. `DeleteDirectoryTree("link/.")`가 POSIX에서 여전히 link 대상을 비우던 문제는 마지막 구성 요소 `.`·`..`를 InvalidArgument로 거부해 막았다. POSIX `Move`는 같은 파일 객체(대소문자만 바꾸는 이름 변경)이면 no-replace 이동 대신 일반 rename을 써서 대소문자를 구분하지 않는 volume(macOS 기본·Android casefold 저장소)에서도 되게 했다(macOS·casefold 저장소에서는 미실행). Windows `Move`는 link를 POSIX처럼 디렉터리가 아닌 것으로 분류하고, 같은 파일 판정은 ReFS에서 유일하지 않을 수 있는 64-bit index 대신 128-bit `FILE_ID_INFO`를 비교한다. `Copy`의 같은 파일 판정은 link를 따라가 POSIX와 같은 InvalidArgument를 낸다. hard link 사이 `Move`의 플랫폼 차이, 끝 구분자 `Stat`의 `isLink` 차이, 순환 link 루트의 Stat 오류 반환은 계약 문서에 적었다. Windows Foundation Debug native 685·harness 92·meta 41, policy·format, Android x86_64 에뮬레이터 682건 통과.
+
+## 2026-11-12 C03·T01·T02·T05·P07과 저장소 구성 개편
+
+- C03 `SparseArray`·`SlotArray`, T01 `StringBuilder`·`{}` 서식·엄격한 숫자 해석·분할/결합, T02 영속 `NameKey`, T05 경로 구성 요소·플랫폼 표기를 구현하고 각각 독립 리뷰 결과(서식의 배열 밖 읽기·LIFO allocator Fatal·최단 표기 오류, NT namespace 변환, SlotArray 반복자 재사용 감지 등)를 반영했다.
+- P07 `TimeSpan`·`DateTime`·`platform::UtcTicks`를 구현했다(UTC 전용, 시간대·timecode·engine tick은 후속).
+- 저장소를 Core(기반 라이브러리)·Engine(게임 엔진 계층)·Programs·Build로 나누고 모듈마다 `<모듈>.Build.cs`·`Tests/`를 두는 구성으로 바꿨다([저장소 구성](../Design/RepositoryLayout.ko.md)). 이전 CMake/Python 경로는 제거했다. 프로젝트·플러그인 기술자(`.rocksproject`·`.rocksplugin`)의 형식·검증·플러그인 해석을 추가했다(빌드 통합은 후속).
+- 검증: Windows Debug native 719·harness 94·meta 41, policy·format, 빌드 도구 회귀 19그룹, SDK·외부 게임 통합 테스트, Commandlet, Android x86_64 에뮬레이터 716. 도구 self 검사의 IdentityGit 4건은 `pwsh`가 없어 실행되지 않는다. macOS는 빌드하지 않았다.
