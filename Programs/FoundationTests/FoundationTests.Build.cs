@@ -9,7 +9,7 @@ using Rocks.Build.Rules;
 public abstract class TestsModule : ModuleRules
 {
     // Object 계열이 아닌 런타임 모듈의 테스트다.
-    private static readonly string[] RuntimeTestModules = ["Core", "PlatformBase", "Task", "Localization", "Serialization"];
+    private static readonly string[] RuntimeTestModules = ["Base", "Core", "PlatformBase", "Task", "Localization", "Serialization"];
 
     // Object 계열 모듈의 테스트다(FoundationTests에만 들어간다).
     private static readonly string[] ObjectTestModules = ["ObjectRuntime", "ObjectSerialization"];
