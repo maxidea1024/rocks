@@ -5,7 +5,8 @@
 
 namespace rocks {
 
-// Actor에 속하는 기능 단위의 기반이다. World가 소유 Actor와 함께 생성·파괴한다.
+// Actor에 속하는 기능 단위의 기반이다. 소유 Actor가 강한 GC 간선으로 소유하고 World가 수명을
+// 진행한다.
 //
 // 사용 예:
 //   class Health final : public Component {
@@ -13,16 +14,19 @@ namespace rocks {
 //   public:
 //       int32 value = 100;
 //   };
+//   RegisterNativeClass<Health>(types);                // World 기본 타입 등록 뒤
 //   auto health = world.AddComponent<Health>(actor);   // Actor가 이미 초기화됐으면 즉시 OnAwake
-//   world.With<Health>(health.Value(), [](Health& h) { h.value -= 10; });
+//   if (health) {
+//       auto hit = world.With<Health>(health.Value(), [](Health& h) noexcept { h.value -= 10; });
+//   }
 //
 // 수명:
-// - hook 순서는 Actor와 같다: OnRegister → OnAwake → OnEnable → (프레임 시작) OnStart → OnTick… →
+// - hook 순서: OnRegister → OnAwake → OnEnable → OnStart(시작 단계, 활성일 때) → OnTick… →
 //   OnDisable → OnDestroy → OnUnregister. OnRegister/OnUnregister는 엔진 내부 등록(렌더·물리
 //   backend 연결)용이며 게임플레이 hook보다 먼저/나중에 불린다.
-// - 소유 Actor가 Constructed이면 FinishSpawning 때 함께 등록된다. 이미 초기화된 Actor에 추가하면
-// 추가
-//   즉시 OnRegister·OnAwake·OnEnable을 부르고 OnStart는 다음 프레임 시작에 부른다.
+// - 소유 Actor가 Constructed이면 FinishSpawning 때(그 hook 안에서 추가해도) 함께 진행한다. 이미
+//   초기화된 Actor에 추가하면 즉시 OnRegister·OnAwake·OnEnable을 부르고 OnStart는 Actor 시작 때
+//   또는 다음 프레임 시작에 부른다.
 // - 소멸자에서 World·다른 객체·외부 관리자를 호출하지 않는다(OnDestroy/OnUnregister에서 반환).
 //
 // 스레드: World의 게임 스레드에서만 접근한다.
@@ -111,6 +115,7 @@ private:
     bool registered_ = false;
     bool awake_ = false;
     bool enabledApplied_ = false;
+    bool startQueued_ = false;
     TickHandle ticks_[detail::TickHookCount];
 };
 

@@ -59,6 +59,8 @@ enum class WorldState : uint8 {
 //   tick.tick = true;                      // OnTick을 PrePhysics에서 매 프레임
 //   tick.lateTick = true;                  // OnLateTick도 받는다
 //   tick.intervalSeconds = 0.5;            // 0.5초마다(누적 delta 전달)
+// 잘못된 설정(OnTick 단계가 Physics·LateUpdate·범위 밖, 음수·비유한 interval)은 FinishSpawning·
+// AddComponent가 InvalidArgument로 거부한다(IsValidTickSettings).
 struct TickSettings {
     // OnTick을 받는다. 실행 단계는 phase(PrePhysics·PostPhysics·PreRender 중 하나)다.
     bool tick = false;
@@ -73,6 +75,9 @@ struct TickSettings {
     // World pause 중에도 unscaled delta로 실행한다.
     bool tickWhenPaused = false;
 };
+
+// 등록할 수 있는 Tick 설정인지다(TickSettings 설명의 규칙).
+bool IsValidTickSettings(const TickSettings& settings) noexcept;
 
 // World 진단 수치다. 값은 호출 시점 스냅샷이다.
 struct WorldStats {
@@ -90,6 +95,11 @@ struct WorldStats {
     uint64 tickNanoseconds = 0;
     // 대상이 이미 파괴되어 건너뛴 Tick 실행 수(마지막 Tick 기준)다.
     uint32 skippedTicks = 0;
+    // Registry를 직접 조작해 우회 파괴된 객체를 Tick이 발견해 정리한 누적 수다.
+    uint32 repairedTicks = 0;
+    // 지금 살아 있는 Borrow 수다. Tick 밖에서 0이 아니면 외부 코드가 Borrow를 쥐고 있어 GC가
+    // 미뤄진다.
+    uint32 externalBorrows = 0;
 };
 
 namespace detail {

@@ -69,6 +69,8 @@ struct TickContext {
     // Physics 단계에서 이번 실행의 고정 스텝 번호다. 다른 단계에서는 0이다.
     uint64 fixedStepIndex = 0;
     bool paused = false;
+    // 실행 중인 등록이다. 실행기가 대상이 사라진 것을 발견하면 이 handle로 등록을 해제할 수 있다.
+    TickHandle handle;
 };
 
 // Tick 실행기다. World가 구현해 대상 객체를 Borrow하고 hook을 호출한다. 실행 중 스케줄러의

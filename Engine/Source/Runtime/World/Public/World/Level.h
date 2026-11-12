@@ -14,10 +14,11 @@ namespace rocks {
 //
 // 사용 예:
 //   auto dungeon = world.CreateLevel("Dungeon");
+//   if (!dungeon) { ... }
 //   SpawnParams params;
 //   params.level = dungeon.Value();
 //   auto orc = world.SpawnActor<Orc>(params);
-//   world.DestroyLevel(dungeon.Value());     // 소속 Actor를 모두 정리한 뒤 Level을 회수
+//   auto unloaded = world.DestroyLevel(dungeon.Value());   // 소속 Actor를 정리한 뒤 Level 회수
 //
 // 객체 포인터는 World가 준 Borrow 범위에서만 쓴다. 스레드: World의 게임 스레드 전용이다.
 class Level final : public Object {

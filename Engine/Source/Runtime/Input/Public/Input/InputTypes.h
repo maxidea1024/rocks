@@ -3,7 +3,7 @@
 #include <Base/Types.h>
 
 // 입력 장치의 키·버튼·축 식별자다. 값은 실행 중 식별용이며 저장 형식(키 바인딩 파일 등)에 숫자를
-// 그대로 쓰지 않는다. 저장이 필요하면 이름(InputKeyName)으로 기록한다.
+// 그대로 쓰지 않는다. 저장이 필요하면 이름(KeyName)으로 기록한다.
 namespace rocks::input {
 
 // 키보드 키다. 문자 배치(QWERTY·AZERTY)와 무관한 물리 위치 기준이다. 예: Key::W는 US 배열의 W

@@ -160,10 +160,11 @@ Result<void> SceneComponent::Detach() noexcept {
     return Result<void>::Success();
 }
 
-void SceneComponent::OnUnregister() noexcept {
+void SceneComponent::DetachForDestroy() noexcept {
     auto detached = Detach();
     (void)detached;
-    // 자식은 루트가 된다(상대 Transform 유지).
+    // 자식은 루트가 된다(상대 Transform 유지). 이미 계산된 월드 행렬은 죽은 부모를 포함하므로 다시
+    // 계산하도록 자손까지 dirty로 표시한다.
     World& world = GetWorld();
     for (ObjectHandle child : children_) {
         auto orphaned = world.With<SceneComponent>(child, [](SceneComponent& component) noexcept {
@@ -175,7 +176,6 @@ void SceneComponent::OnUnregister() noexcept {
     }
 
     children_.Clear();
-    Component::OnUnregister();
 }
 
 } // namespace rocks

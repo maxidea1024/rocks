@@ -731,3 +731,220 @@ TEST(World_EmptyLevelIsReleasedImmediatelyOutsideTick) {
     CHECK(!world.HasLevel(empty.Value()));
     REQUIRE(world.Shutdown());
 }
+
+namespace {
+
+// OnAwake·OnStart에서 Component를 추가하는 Actor다.
+class BuilderActor final : public Actor {
+    ROCKS_NATIVE_CLASS(BuilderActor, Actor, 0x9c3a144c0c4d4505ull, 0xb41cb2d5455ce56full)
+
+public:
+    explicit BuilderActor(Allocator& allocator) noexcept : Actor(allocator) {
+        PrimaryTick().tick = true;
+    }
+
+    Result<void> OnAwake() noexcept override {
+        Record("b.awake");
+        auto added = GetWorld().AddComponent<LoggingComponent>(Handle());
+        if (!added) {
+            return Result<void>::Failure(added.Error());
+        }
+        awakeComponent = added.Value();
+        return Result<void>::Success();
+    }
+
+    void OnStart() noexcept override {
+        Record("b.start");
+        auto added = GetWorld().AddComponent<LoggingComponent>(Handle());
+        CHECK(added.IsOk());
+        if (added) {
+            startComponent = added.Value();
+        }
+    }
+
+    void OnTick(const TickContext&) noexcept override {
+        Record("b.tick");
+        if (tryReenter) {
+            CHECK(GetWorld().Tick(0.016).Error() == ErrorCode::Busy);
+            CHECK(GetWorld().Shutdown().Error() == ErrorCode::Busy);
+            CHECK(GetWorld().BeginPlay().Error() != ErrorCode::None);
+            tryReenter = false;
+        }
+    }
+
+    ObjectHandle awakeComponent;
+    ObjectHandle startComponent;
+    bool tryReenter = false;
+};
+
+// 잘못된 Tick 설정(OnTick을 Physics 단계로)을 가진 Actor다.
+class BadTickActor final : public Actor {
+    ROCKS_NATIVE_CLASS(BadTickActor, Actor, 0xc21acd5377604e47ull, 0xa8d34f284a9bd3a5ull)
+
+public:
+    explicit BadTickActor(Allocator& allocator) noexcept : Actor(allocator) {
+        PrimaryTick().tick = true;
+        PrimaryTick().phase = TickPhase::Physics;
+    }
+};
+
+bool RegisterExtraTypes(TypeRegistry& types) noexcept {
+    return RegisterNativeClass<BuilderActor>(types).IsOk() &&
+           RegisterNativeClass<BadTickActor>(types).IsOk();
+}
+
+} // namespace
+
+TEST(World_ComponentsAddedInsideAwakeAndStartRunFullLifecycle) {
+    ResetEvents();
+    Fixture fixture;
+    REQUIRE(RegisterExtraTypes(fixture.types));
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    REQUIRE(world.BeginPlay());
+    auto actor = world.SpawnActor<BuilderActor>();
+    REQUIRE(actor);
+    // OnAwake에서 추가한 Component는 Actor OnAwake 뒤에 등록·Awake·Enable을 받는다.
+    const char* const spawned[] = {"b.awake", "c.register", "c.awake", "c.enable"};
+    CHECK(EventsAre(spawned));
+    ResetEvents();
+    REQUIRE(world.Tick(0.016));
+    // 시작 단계: 기존 Component → Actor OnStart → OnStart 안에서 추가한 Component가 같은 프레임에
+    // 시작. Tick은 Actor 뒤에 두 Component(선행 의존).
+    const char* const started[] = {"c.start", "b.start", "c.register", "c.awake", "c.enable",
+                                   "c.start", "b.tick",  "c.tick",     "c.tick"};
+    CHECK(EventsAre(started));
+    Borrow<BuilderActor> borrow;
+    BuilderActor* builder = fixture.Pointer(actor.Value(), borrow);
+    REQUIRE(builder != nullptr);
+    const ObjectHandle first = builder->awakeComponent;
+    const ObjectHandle second = builder->startComponent;
+    borrow.Reset();
+    CHECK(world.GetComponentState(first).Value() == ComponentState::Playing);
+    CHECK(world.GetComponentState(second).Value() == ComponentState::Playing);
+    REQUIRE(world.Shutdown());
+}
+
+TEST(World_HooksCannotReenterTickShutdownOrBeginPlay) {
+    Fixture fixture;
+    REQUIRE(RegisterExtraTypes(fixture.types));
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    REQUIRE(world.BeginPlay());
+    auto actor = world.SpawnActor<BuilderActor>();
+    REQUIRE(actor);
+    {
+        Borrow<BuilderActor> borrow;
+        BuilderActor* builder = fixture.Pointer(actor.Value(), borrow);
+        REQUIRE(builder != nullptr);
+        builder->tryReenter = true;
+    }
+    REQUIRE(world.Tick(0.016));
+    CHECK(world.State() == WorldState::Playing);
+    REQUIRE(world.Shutdown());
+}
+
+TEST(World_DisabledActorDefersStartUntilEnabled) {
+    ResetEvents();
+    Fixture fixture;
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    REQUIRE(world.BeginPlay());
+    auto actor = world.SpawnActorDeferred<LoggingActor>();
+    REQUIRE(actor);
+    auto disabled = world.With<Actor>(
+        actor.Value(), [](Actor& value) noexcept { return value.SetEnabled(false); });
+    REQUIRE(disabled);
+    REQUIRE(world.FinishSpawning(actor.Value()));
+    REQUIRE(world.Tick(0.016));
+    CHECK(CountEvent("a.start") == 0 && CountEvent("a.tick") == 0);
+    CHECK(world.GetActorState(actor.Value()).Value() == ActorState::Initialized);
+    auto enabled = world.With<Actor>(actor.Value(),
+                                     [](Actor& value) noexcept { return value.SetEnabled(true); });
+    REQUIRE(enabled);
+    REQUIRE(world.Tick(0.016));
+    CHECK(CountEvent("a.enable") == 1 && CountEvent("a.start") == 1 && CountEvent("a.tick") == 1);
+    REQUIRE(world.Shutdown());
+}
+
+TEST(World_UnregisteredSceneParentDestructionOrphansChildren) {
+    Fixture fixture;
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    auto actor = world.SpawnActorDeferred<Actor>();
+    REQUIRE(actor);
+    auto parent = world.AddComponent<SceneComponent>(actor.Value());
+    auto child = world.AddComponent<SceneComponent>(actor.Value());
+    REQUIRE(parent && child);
+    auto attached = world.With<SceneComponent>(child.Value(), [&](SceneComponent& scene) noexcept {
+        return scene.AttachTo(parent.Value());
+    });
+    REQUIRE(attached);
+    auto moved = world.With<SceneComponent>(parent.Value(), [](SceneComponent& scene) noexcept {
+        return scene.SetRelativeLocation(Vec3d(5.0, 0.0, 0.0));
+    });
+    REQUIRE(moved);
+    auto before = world.With<SceneComponent>(
+        child.Value(), [](SceneComponent& scene) noexcept { return scene.WorldLocation(); });
+    REQUIRE(before);
+    CHECK(before.Value() == Vec3d(5.0, 0.0, 0.0));
+    // FinishSpawning 전(OnRegister 전) 파괴여도 계층은 엔진이 정리한다.
+    REQUIRE(world.DestroyComponent(parent.Value()));
+    REQUIRE(world.Tick(0.016));
+    auto after = world.With<SceneComponent>(child.Value(), [](SceneComponent& scene) noexcept {
+        return scene.Parent().IsNull() && scene.WorldLocation() == Vec3d(0.0, 0.0, 0.0);
+    });
+    CHECK(after && after.Value());
+    REQUIRE(world.Shutdown());
+}
+
+TEST(World_InvalidTickSettingsFailSpawn) {
+    Fixture fixture;
+    REQUIRE(RegisterExtraTypes(fixture.types));
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    CHECK(world.SpawnActor<BadTickActor>().Error() == ErrorCode::InvalidArgument);
+    REQUIRE(world.Tick(0.016));
+    CHECK(world.Stats().actors == 0);
+    REQUIRE(world.Shutdown());
+}
+
+TEST(World_BypassedObjectDestroyIsRepairedByTick) {
+    ResetEvents();
+    Fixture fixture;
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    REQUIRE(world.BeginPlay());
+    auto actor = world.SpawnActor<LoggingActor>();
+    REQUIRE(actor);
+    REQUIRE(world.Tick(0.016));
+    // 계약 위반: Registry로 직접 파괴한다. World는 다음 Tick에서 레코드를 정리한다(hook 없이).
+    REQUIRE(world.Objects().RequestDestroy(world.Access(), actor.Value()));
+    REQUIRE(world.Tick(0.016));
+    CHECK(!world.HasActor(actor.Value()));
+    CHECK(world.Stats().repairedTicks == 1);
+    REQUIRE(world.Shutdown());
+}
+
+TEST(World_MassShutdownReleasesThousandsOfActors) {
+    Fixture fixture;
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    REQUIRE(world.BeginPlay());
+    auto level = world.CreateLevel("Bulk");
+    REQUIRE(level);
+    SpawnParams params;
+    params.level = level.Value();
+    for (uint32 index = 0; index < 3000; ++index) {
+        auto actor = world.SpawnActor<Actor>(index % 2 == 0 ? SpawnParams{} : params);
+        REQUIRE(actor);
+        REQUIRE(world.AddComponent<SceneComponent>(actor.Value()));
+    }
+    REQUIRE(world.Tick(0.016));
+    CHECK(world.Stats().actors == 3000 && world.Stats().components == 3000);
+    REQUIRE(world.DestroyLevel(level.Value()));
+    REQUIRE(world.Tick(0.016));
+    CHECK(world.Stats().actors == 1500 && !world.HasLevel(level.Value()));
+    REQUIRE(world.Shutdown());
+    CHECK(world.Stats().actors == 0 && world.Stats().components == 0);
+}

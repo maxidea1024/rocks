@@ -6,7 +6,8 @@
 namespace rocks::input {
 
 enum class InputEventType : uint8 {
-    // key가 눌림. repeat가 true면 OS 자동 반복이며 눌림 edge를 만들지 않는다.
+    // key가 눌림. repeat는 OS 자동 반복 표시다. 이미 눌린 키의 down은 edge를 만들지
+    // 않는다(InputState).
     KeyDown,
     KeyUp,
     // 입력된 문자 하나(UTF-32 code point). 키 바인딩이 아니라 텍스트 입력에 쓴다.

@@ -62,19 +62,21 @@ public:
         return children_.View();
     }
 
-    // parent의 자식으로 붙인다(상대 Transform 유지). 이미 다른 부모가 있으면 먼저 뗀다. parent가
-    // SceneComponent가 아니거나 다른 World이면 InvalidArgument/TypeMismatch, 순환이면
-    // InvalidArgument, 자식 목록 할당 실패는 OutOfMemory이며 기존 계층을 유지한다.
+    // parent의 자식으로 붙인다(상대 Transform 유지). 이미 다른 부모가 있으면 먼저 뗀다. null·자기
+    // 자신·순환은 InvalidArgument, SceneComponent가 아니면 TypeMismatch, 다른 World·파괴된 대상은
+    // StaleHandle, 자식 목록 할당 실패는 OutOfMemory이며 실패하면 기존 계층을 유지한다.
     Result<void> AttachTo(ObjectHandle parent) noexcept;
 
     // 부모에서 뗀다. 부모가 없으면 성공이다.
     Result<void> Detach() noexcept;
 
-protected:
-    // 등록 해제 시 부모에서 떼고 자식들을 루트로 만든다. 파생 클래스가 재정의하면 Super를 호출한다.
-    void OnUnregister() noexcept override;
-
 private:
+    friend class World;
+
+    // 파괴 직전에 World가 부른다(등록 여부·파생 재정의와 무관). 부모에서 떼고 자식들을 루트로
+    // 만든다(자식의 상대 Transform 유지, 월드 행렬은 다시 계산).
+    void DetachForDestroy() noexcept;
+
     void MarkDirty() noexcept;
     Result<void> AddChild(ObjectHandle child) noexcept;
     void RemoveChild(ObjectHandle child) noexcept;

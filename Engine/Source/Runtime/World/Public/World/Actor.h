@@ -6,7 +6,8 @@
 
 namespace rocks {
 
-// World에 배치되는 게임플레이 객체의 기반이다. World가 생성·소유·파괴하며 Component를 가진다.
+// World에 배치되는 게임플레이 객체의 기반이다. World가 생성하고 Level이 소유하며, Actor는 자기
+// Component를 소유한다.
 //
 // 사용 예:
 //   class Spinner final : public Actor {
@@ -17,26 +18,34 @@ namespace rocks {
 //       }
 //       Result<void> OnAwake() noexcept override {
 //           auto root = GetWorld().AddComponent<SceneComponent>(Handle());
-//           if (!root) { return Result<void>::Failure(root.Error()); }
+//           if (!root) {
+//               return Result<void>::Failure(root.Error());
+//           }
 //           return SetRootComponent(root.Value());
 //       }
-//       void OnTick(const TickContext& context) noexcept override { angle += context.deltaSeconds;
-//       } double angle = 0.0;
+//       void OnTick(const TickContext& context) noexcept override {
+//           angle += context.deltaSeconds;
+//       }
+//       double angle = 0.0;
 //   };
 //
-//   auto spawned = world.SpawnActor<Spinner>();          // OnAwake까지 실행
-//   world.DestroyActor(spawned.Value());                 // 프레임 끝에 OnDestroy·회수
+//   RegisterNativeClass<Spinner>(types);                 // World 기본 타입 등록 뒤
+//   auto spawned = world.SpawnActor<Spinner>();          // OnAwake·OnEnable까지 실행
+//   if (spawned) {
+//       auto destroyed = world.DestroyActor(spawned.Value());   // 프레임 끝에 OnDestroy·회수
+//   }
 //
-// 소유: Actor는 자기 Component를 강한 GC 간선 목록(ObjectRefArray)으로 소유한다. World는 Actor의
-// 루트만 보유하므로 Component의 저장소 수명은 소유 Actor를 따른다. 파생 클래스가 다른 객체로의 강한
-// 간선을 더하면 Trace를 재정의하고 Actor::Trace를 먼저 호출한다.
+// 소유: Level이 Actor를, Actor가 자기 Component를 강한 GC 간선 목록(ObjectRefArray)으로 소유한다.
+// 파생 클래스가 다른 객체로의 강한 간선(ObjectRef·ObjectRefArray)을 더하면
+// `void Trace(TraceVisitor&) const noexcept`를 선언해 자기 필드만 방문한다. 기반 클래스의 Trace는
+// RegisterNativeClass가 상속 사슬을 따라 자동으로 호출한다.
 //
 // 수명(ActorState 참고):
 // - 생성자에서는 World에 연결되기 전이다. GetWorld()·Handle() 기반 API를 쓰지 않는다. 기본값과 Tick
 //   설정만 채운다. 실패할 수 있는 초기화는 OnAwake에서 한다.
-// - hook 호출 순서: OnAwake → OnEnable(활성일 때) → (프레임 시작) OnStart → OnTick… →
-// OnDisable(활성
-//   이었을 때) → OnDestroy. OnDestroy는 OnAwake가 성공한 Actor에만 호출한다.
+// - hook 순서: OnAwake → OnEnable(활성일 때) → OnStart(시작 단계, 활성일 때) → OnTick… →
+//   OnDisable(활성이었을 때) → OnDestroy. OnDestroy는 OnAwake가 성공한 Actor에만 호출한다.
+//   Component와 섞인 전체 순서는 World 설명을 참고한다.
 // - 소멸자는 저장소 회수(GC) 시점에 불린다. World·다른 객체·에셋 관리자를 호출하지 않는다. 외부
 // 자원은
 //   OnDestroy에서 반환한다.
@@ -54,7 +63,8 @@ public:
 
     virtual ~Actor() noexcept = default;
 
-    // GC 강한 간선(소유 Component)을 방문한다.
+    // 자기 필드의 GC 강한 간선(소유 Component)을 방문한다. 파생 클래스의 Trace는 이것을 부르지
+    // 않는다(RegisterNativeClass가 사슬을 따라 호출한다).
     void Trace(TraceVisitor& visitor) const noexcept {
         components_.Trace(visitor);
     }

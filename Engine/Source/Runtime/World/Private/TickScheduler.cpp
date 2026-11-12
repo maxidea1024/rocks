@@ -454,6 +454,7 @@ Result<void> TickScheduler::RunPhase(TickPhase phase, const TickPhaseFrame& fram
         context.frameIndex = frame.frameIndex;
         context.fixedStepIndex = frame.fixedStepIndex;
         context.paused = frame.paused;
+        context.handle = order[position];
         const TickTarget target = entry->registration.target;
         ++executedThisFrame_;
         // 실행기가 등록을 바꿔 저장소가 재배치될 수 있으므로 이후 entry 포인터를 쓰지 않는다.
