@@ -128,10 +128,11 @@ public:
     }
 
     // owner 저장소 안에 직접 포함된 ObjectRefArray에 target을 강한 간선으로 추가한다. owner는
-    // 게시된 생존 객체(Alive)여야 하고 target은 같은 Registry의 생존 T(또는 파생) 객체여야
-    // 한다(null 불가). 원소 버퍼가 가득 차면 Registry 잠금 밖에서 배열의 allocator로 늘린다(실패 시
-    // OutOfMemory, 배열 불변). Marking 중이면 target을 shade한 뒤 게시한다. 검증 실패 시 배열
-    // 내용은 바뀌지 않는다(용량만 늘었을 수 있다). GC·callback 처리 중에는 Busy, 종료 시작 후에는
+    // 게시된 생존 객체(Alive)이고 호출자가 owner의 Borrow를 쥐고 있어야 한다(없으면
+    // InvalidArgument). target은 같은 Registry의 생존 T(또는 파생) 객체여야 한다(null 불가). 원소
+    // 버퍼가 가득 차면 Registry 잠금 밖에서 배열의 allocator로 늘린다(실패 시 OutOfMemory, 배열
+    // 불변). Marking 중이면 target을 shade한 뒤 게시한다. 검증 실패 시 배열 내용은 바뀌지
+    // 않는다(용량만 늘었을 수 있다). GC·callback 처리 중에는 Busy, 종료 시작 후에는
     // ShuttingDown이다.
     template <class T>
     Result<void> AddReference(const ObjectAccessContext& access, ObjectHandle owner,
@@ -140,7 +141,7 @@ public:
     }
 
     // index 원소를 지우고 뒤 원소를 당긴다(순서 유지). 범위 밖은 InvalidArgument다. 할당하지
-    // 않는다. owner는 Alive 또는 DestroyRequested(정리 중)여야 한다.
+    // 않는다. owner는 Alive 또는 DestroyRequested(정리 중)이고 Borrow를 쥐고 있어야 한다.
     template <class T>
     Result<void> RemoveReferenceAt(const ObjectAccessContext& access, ObjectHandle owner,
                                    ObjectRefArray<T>& array, usize index) noexcept {

@@ -47,6 +47,32 @@ concept NativeClassType = __is_base_of(Object, T) && requires {
     T::StaticTypeName;
 } && __is_same(typename T::ThisClass, T);
 
+namespace detail {
+
+// U가 Trace를 직접 선언했는지다(상속받은 Trace는 멤버 포인터 타입의 클래스가 기반이라 거짓이다).
+template <class U>
+constexpr bool DeclaresOwnTrace() noexcept {
+    if constexpr (requires { &U::Trace; }) {
+        return __is_same(decltype(&U::Trace), void (U::*)(TraceVisitor&) const noexcept);
+    } else {
+        return false;
+    }
+}
+
+// 기반부터 파생 순서로, 각 클래스가 직접 선언한 Trace(자기 필드만 방문)를 부른다. 파생 클래스가
+// Super::Trace를 부르지 않아도 기반의 간선이 빠지지 않는다(불러도 같은 간선을 두 번 방문할 뿐이다).
+template <class U>
+void TraceNativeChain(const U& object, TraceVisitor& visitor) noexcept {
+    if constexpr (!__is_same(U, Object)) {
+        TraceNativeChain<typename U::Super>(object, visitor);
+        if constexpr (DeclaresOwnTrace<U>()) {
+            object.U::Trace(visitor);
+        }
+    }
+}
+
+} // namespace detail
+
 // T의 정적 TypeId다. ROCKS_NATIVE_CLASS 선언이 필요하다. 등록 여부와 무관한 값이다.
 template <NativeClassType T>
 constexpr TypeId NativeTypeIdOf() noexcept {
@@ -54,7 +80,9 @@ constexpr TypeId NativeTypeIdOf() noexcept {
 }
 
 // T를 필드 없는 스키마로 등록한다. 성공하면 등록 토큰을 반환하며, 이 토큰으로 Unregister할 수 있다.
-// 기반 타입이 아직 등록되지 않았으면 NotFound, 같은 ID가 이미 있으면 AlreadyExists, 종료 중이면
+// GC Trace는 상속 사슬의 각 클래스가 직접 선언한 `void Trace(TraceVisitor&) const noexcept`를
+// 기반부터 차례로 부른다. Trace 시그니처가 다르면(const·noexcept 누락 등) 컴파일 시 거부한다. 기반
+// 타입이 아직 등록되지 않았으면 NotFound, 같은 ID가 이미 있으면 AlreadyExists, 종료 중이면
 // ShuttingDown이다. 실패해도 기존 등록 상태는 바뀌지 않는다. 등록 스레드 규약은 TypeRegistry를
 // 따른다. module은 동적 모듈의 코드 수명을 유지할 때 넘긴다(정적 링크면 생략).
 template <NativeClassType T>
@@ -66,12 +94,21 @@ Result<TypeRegistrationToken> RegisterNativeClass(TypeRegistry& types,
     static_assert(__is_base_of(Base, T) && !__is_same(Base, T));
     static_assert(__is_same(Base, Object) || NativeClassType<Base>,
                   "native class base must be rocks::Object or another native class");
+    static_assert(
+        !requires { &T::Trace; } ||
+            requires(const T& value, TraceVisitor& visitor) {
+                { value.Trace(visitor) } noexcept;
+            },
+        "Trace must be declared as `void Trace(TraceVisitor&) const noexcept`");
 
     TypeSchema schema;
     schema.id = T::StaticTypeId;
     schema.name = Span<const char>(T::StaticTypeName, sizeof(T::StaticTypeName) - 1);
     schema.flags = __is_abstract(T) ? static_cast<uint32>(TypeFlags::Abstract) : 0u;
     RuntimeTypeOps ops = MakeRuntimeTypeOps<T>(Move(module));
+    ops.trace = [](const Object& object, TraceVisitor& visitor) noexcept {
+        detail::TraceNativeChain<T>(static_cast<const T&>(object), visitor);
+    };
     if constexpr (!__is_same(Base, Object)) {
         schema.baseType = Base::StaticTypeId;
         ops.nativeBaseType = NativeTypeKey<Base>();

@@ -289,7 +289,8 @@ TEST(ObjectRefArray_RejectsInvalidTargetsAndForeignStorage) {
             CHECK(objects.AddReference(access, owner, local, valid.Value().Handle()).Error() ==
                   ErrorCode::InvalidArgument);
             CHECK(pointer->items.IsEmpty() && local.IsEmpty());
-            // 잘못된 소유자 handle은 StaleHandle이다.
+            // 배열이 그 객체 안에 없거나 Borrow 없는 소유자는 InvalidArgument, 빈 handle은
+            // StaleHandle이다.
             CHECK(objects
                       .AddReference(access, other.Value().Handle(), pointer->items,
                                     valid.Value().Handle())
@@ -388,6 +389,279 @@ TEST(ObjectRefArray_InsertionBarrierPreservesTargetsMovedDuringIncrementalMarkin
         }
         first.Value().Reset();
         second.Value().Reset();
+        REQUIRE(objects.Collect(access));
+        CHECK(objects.Stats().liveObjects == 0);
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+namespace {
+
+// ObjectRefArray 버퍼 태그(0x4f524146) 할당을 정해진 횟수 뒤부터 실패시키는 allocator다.
+class ArrayFailingAllocator final : public Allocator {
+public:
+    explicit ArrayFailingAllocator(uint32 allowedArrayAllocations) noexcept
+        : allowed_(allowedArrayAllocations) {
+    }
+
+    Result<void*> Allocate(usize bytes, usize alignment, uint32 tag) noexcept override {
+        if (tag == 0x4f524146u) {
+            if (allowed_ == 0) {
+                return Result<void*>::Failure(ErrorCode::OutOfMemory);
+            }
+            --allowed_;
+        }
+        return backing_.Allocate(bytes, alignment, tag);
+    }
+
+    Result<void> Deallocate(void* address) noexcept override {
+        return backing_.Deallocate(address);
+    }
+
+    SystemAllocator backing_;
+
+private:
+    uint32 allowed_;
+};
+
+ObjectRegistry* reentrantRegistry = nullptr;
+ObjectHandle reentrantTarget;
+ErrorCode reentrantResult = ErrorCode::None;
+
+// Trace 안에서 배열 변경을 시도하는 잘못된 타입이다(Registry가 Busy로 거부해야 한다).
+class ReentrantHolder final : public Object {
+    ROCKS_NATIVE_CLASS(ReentrantHolder, Object, 0x5c1d2e3f4a5b6c7dull, 0x8e9fa0b1c2d3e4f5ull)
+
+public:
+    explicit ReentrantHolder(Allocator& allocator) noexcept : items(allocator) {
+    }
+
+    void Trace(TraceVisitor& visitor) const noexcept {
+        items.Trace(visitor);
+        if (reentrantRegistry != nullptr) {
+            auto& mutableItems = const_cast<ObjectRefArray<NativeBase>&>(items);
+            reentrantResult = reentrantRegistry
+                                  ->AddReference(reentrantRegistry->OwnerAccess(), Handle(),
+                                                 mutableItems, reentrantTarget)
+                                  .Error();
+        }
+    }
+
+    ObjectRefArray<NativeBase> items;
+};
+
+} // namespace
+
+TEST(ObjectRefArray_RequiresOwnerBorrow) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterAll(types));
+        ObjectRegistry objects(allocator, types, {0x4e43, 7});
+        const auto access = objects.OwnerAccess();
+        auto holder = objects.NewObject<NativeHolder>(access, NativeTypeIdOf<NativeHolder>());
+        auto item = objects.NewObject<NativeBase>(access, NativeTypeIdOf<NativeBase>());
+        REQUIRE(holder && item);
+        NativeHolder* pointer = nullptr;
+        {
+            auto borrowed = objects.Resolve<NativeHolder>(access, holder.Value().Handle());
+            REQUIRE(borrowed);
+            pointer = Get(borrowed.Value());
+            REQUIRE(pointer != nullptr);
+        }
+        // Borrow를 놓은 뒤의 변경은 계약 위반이다(루트가 저장소를 살려 두므로 포인터 자체는 유효).
+        CHECK(objects
+                  .AddReference(access, holder.Value().Handle(), pointer->items,
+                                item.Value().Handle())
+                  .Error() == ErrorCode::InvalidArgument);
+        CHECK(objects.ClearReferences(access, holder.Value().Handle(), pointer->items).Error() ==
+              ErrorCode::InvalidArgument);
+        CHECK(pointer->items.IsEmpty());
+        holder.Value().Reset();
+        item.Value().Reset();
+        REQUIRE(objects.Collect(access));
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+TEST(ObjectRefArray_RejectsCutoffTargetDuringSweeping) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterAll(types));
+        ObjectRegistry objects(allocator, types, {0x4e43, 8});
+        const auto access = objects.OwnerAccess();
+        auto holder = objects.NewObject<NativeHolder>(access, NativeTypeIdOf<NativeHolder>());
+        REQUIRE(holder);
+        ObjectHandle white;
+        ObjectHandle other;
+        {
+            auto first = objects.NewObject<NativeBase>(access, NativeTypeIdOf<NativeBase>());
+            auto second = objects.NewObject<NativeBase>(access, NativeTypeIdOf<NativeBase>());
+            REQUIRE(first && second);
+            white = first.Value().Handle();
+            other = second.Value().Handle();
+        }
+        REQUIRE(objects.BeginCollection(access));
+        GcBudget budget;
+        budget.maxObjects = 1;
+        budget.maxNanoseconds = 0;
+        for (uint32 guard = 0; guard < 16 && objects.CollectionPhase() == GcPhase::Marking;
+             ++guard) {
+            REQUIRE(objects.StepCollection(access, budget));
+        }
+        REQUIRE(objects.CollectionPhase() == GcPhase::Sweeping);
+        {
+            // cutoff 이후 흰 객체는 간선으로 되살릴 수 없다.
+            auto borrowed = objects.Resolve<NativeHolder>(access, holder.Value().Handle());
+            REQUIRE(borrowed);
+            NativeHolder* pointer = Get(borrowed.Value());
+            REQUIRE(pointer != nullptr);
+            CHECK(objects.AddReference(access, holder.Value().Handle(), pointer->items, white)
+                      .Error() == ErrorCode::StaleHandle);
+            CHECK(pointer->items.IsEmpty());
+            CHECK(!objects.Resolve<NativeBase>(access, other).IsOk());
+        }
+        // maxObjects=1이면 sweep이 슬롯마다 한 단위를 쓰므로 chunk(64슬롯)보다 넉넉한 상한을 둔다.
+        for (uint32 guard = 0; guard < 1000 && objects.CollectionPhase() != GcPhase::Idle;
+             ++guard) {
+            REQUIRE(objects.StepCollection(access, budget));
+        }
+        CHECK(objects.CollectionPhase() == GcPhase::Idle);
+        CHECK(objects.Stats().liveObjects == 1);
+        holder.Value().Reset();
+        REQUIRE(objects.Collect(access));
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+TEST(ObjectRefArray_MutationFromTraceIsBusy) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterAll(types));
+        REQUIRE(RegisterNativeClass<ReentrantHolder>(types));
+        ObjectRegistry objects(allocator, types, {0x4e43, 9});
+        const auto access = objects.OwnerAccess();
+        auto holder = objects.NewObject<ReentrantHolder>(access, NativeTypeIdOf<ReentrantHolder>());
+        auto item = objects.NewObject<NativeBase>(access, NativeTypeIdOf<NativeBase>());
+        REQUIRE(holder && item);
+        reentrantRegistry = &objects;
+        reentrantTarget = item.Value().Handle();
+        reentrantResult = ErrorCode::None;
+        REQUIRE(objects.Collect(access));
+        reentrantRegistry = nullptr;
+        CHECK(reentrantResult == ErrorCode::Busy);
+        holder.Value().Reset();
+        item.Value().Reset();
+        REQUIRE(objects.Collect(access));
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+TEST(ObjectRefArray_GrowthFailureKeepsExistingElements) {
+    ArrayFailingAllocator allocator(1);
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterAll(types));
+        ObjectRegistry objects(allocator, types, {0x4e43, 10});
+        const auto access = objects.OwnerAccess();
+        auto holder = objects.NewObject<NativeHolder>(access, NativeTypeIdOf<NativeHolder>());
+        REQUIRE(holder);
+        RootRef<NativeBase> roots[5];
+        for (RootRef<NativeBase>& root : roots) {
+            auto created = objects.NewObject<NativeBase>(access, NativeTypeIdOf<NativeBase>());
+            REQUIRE(created);
+            root = Move(created.Value());
+        }
+        {
+            auto borrowed = objects.Resolve<NativeHolder>(access, holder.Value().Handle());
+            REQUIRE(borrowed);
+            NativeHolder* pointer = Get(borrowed.Value());
+            REQUIRE(pointer != nullptr);
+            // 첫 버퍼(용량 4)는 허용, 두 번째 확장은 실패한다.
+            for (uint32 index = 0; index < 4; ++index) {
+                REQUIRE(objects.AddReference(access, holder.Value().Handle(), pointer->items,
+                                             roots[index].Handle()));
+            }
+            CHECK(objects
+                      .AddReference(access, holder.Value().Handle(), pointer->items,
+                                    roots[4].Handle())
+                      .Error() == ErrorCode::OutOfMemory);
+            CHECK(pointer->items.Size() == 4);
+            CHECK(pointer->items[0] == roots[0].Handle() && pointer->items[3] == roots[3].Handle());
+        }
+        for (RootRef<NativeBase>& root : roots) {
+            root.Reset();
+        }
+        holder.Value().Reset();
+        REQUIRE(objects.Collect(access));
+        CHECK(objects.Stats().liveObjects == 0);
+    }
+    CHECK(allocator.backing_.Stats().liveAllocations == 0);
+}
+
+namespace {
+
+class ChainBase : public Object {
+    ROCKS_NATIVE_CLASS(ChainBase, Object, 0xc331405def4c4b33ull, 0xa44f05b9d37df2d8ull)
+
+public:
+    explicit ChainBase(Allocator& allocator) noexcept : items(allocator) {
+    }
+
+    void Trace(TraceVisitor& visitor) const noexcept {
+        items.Trace(visitor);
+    }
+
+    ObjectRefArray<NativeBase> items;
+};
+
+// 자기 필드만 방문하고 ChainBase::Trace를 부르지 않는다. 등록이 사슬을 따라 기반 Trace를 부른다.
+class ChainDerived final : public ChainBase {
+    ROCKS_NATIVE_CLASS(ChainDerived, ChainBase, 0x9a3e2cd17e7347e7ull, 0x9af28d76f74e6cecull)
+
+public:
+    using ChainBase::ChainBase;
+
+    void Trace(TraceVisitor& visitor) const noexcept {
+        visitor.Visit(extra);
+    }
+
+    ObjectRef<NativeBase> extra;
+};
+
+} // namespace
+
+TEST(NativeClass_TraceChainVisitsBaseEdgesWithoutSuperCall) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterAll(types));
+        REQUIRE(RegisterNativeClass<ChainBase>(types));
+        REQUIRE(RegisterNativeClass<ChainDerived>(types));
+        ObjectRegistry objects(allocator, types, {0x4e43, 11});
+        const auto access = objects.OwnerAccess();
+        auto holder = objects.NewObject<ChainBase>(access, NativeTypeIdOf<ChainDerived>());
+        auto inBase = objects.NewObject<NativeBase>(access, NativeTypeIdOf<NativeBase>());
+        auto inDerived = objects.NewObject<NativeBase>(access, NativeTypeIdOf<NativeBase>());
+        REQUIRE(holder && inBase && inDerived);
+        {
+            auto borrowed = objects.Resolve<ChainDerived>(access, holder.Value().Handle());
+            REQUIRE(borrowed);
+            ChainDerived* pointer = Get(borrowed.Value());
+            REQUIRE(pointer != nullptr);
+            REQUIRE(objects.AddReference(access, holder.Value().Handle(), pointer->items,
+                                         inBase.Value().Handle()));
+            REQUIRE(objects.SetReference(access, holder.Value().Handle(), pointer->extra,
+                                         inDerived.Value().Handle()));
+        }
+        inBase.Value().Reset();
+        inDerived.Value().Reset();
+        REQUIRE(objects.Collect(access));
+        // 기반 필드(items)와 파생 필드(extra)의 대상이 모두 살아 있다.
+        CHECK(objects.Stats().liveObjects == 3);
+        holder.Value().Reset();
         REQUIRE(objects.Collect(access));
         CHECK(objects.Stats().liveObjects == 0);
     }

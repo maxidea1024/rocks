@@ -19,7 +19,7 @@ Sweeping 이후 취소는 Busy다. 일부 흰 객체가 이미 Retired인 상태
 
 ## 표식 불변식과 수명
 
-RootRef 생성·복제와 SetReference는 Marking 동안 대상의 shade와 참조 게시를 같은 gate 안에서 수행한다. 검은 객체에서 아직 흰 대상에 연결한 새 간선을 놓치지 않는다. 삭제 장벽은 없으므로 cycle 중 끊어진 객체 일부는 이번 cycle에 보존되고 다음 cycle에서 수거되는 floating garbage가 될 수 있다.
+RootRef 생성·복제, SetReference, ObjectRefArray 추가(AddReference)는 Marking 동안 대상의 shade와 참조 게시를 같은 gate 안에서 수행한다. ObjectRefArray는 owner Borrow를 쥔 채 바꾸므로 잠금 밖 버퍼 확장 중에도 수집·회수가 끼어들지 않는다. 검은 객체에서 아직 흰 대상에 연결한 새 간선을 놓치지 않는다. 삭제 장벽은 없으므로 cycle 중 끊어진 객체 일부는 이번 cycle에 보존되고 다음 cycle에서 수거되는 floating garbage가 될 수 있다.
 
 Marking 중 공개하는 newborn은 모든 staged 객체를 grey로 넣어 자체 Trace가 실행되도록 한다. 검게만 표시하고 스캔을 생략하지 않는다. 생성 전에 전체 슬롯 수에 맞는 큐 용량을 확보하여 잠금 안의 shade가 할당하지 않도록 한다. 현재 cycle의 Marking 중에는 객체를 회수·슬롯 재사용하지 않는다.
 

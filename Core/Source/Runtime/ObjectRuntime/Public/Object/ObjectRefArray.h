@@ -44,14 +44,13 @@ struct ObjectRefArrayStorage {
 //   생성자에 준 allocator(보통 Registry allocator)에서 할당하며 그 allocator가 소유 객체보다 오래
 //   살아야 한다.
 // - 변경은 ObjectRegistry의 AddReference·RemoveReference·RemoveReferenceAt·ClearReferences로만
-// 한다.
-//   추가는 대상 타입·생존·같은 Registry를 검증하고, 증분 GC Marking 중이면 대상을 shade한 뒤
-//   게시한다 (삽입 장벽). 소유자의 Trace는 Trace(visitor)로 모든 원소를 빠짐없이 방문해야 한다.
+//   하며, 호출 동안 소유 객체의 Borrow를 쥐고 있어야 한다(배열 포인터를 얻은 그 Borrow).
+// - 추가는 대상 타입·생존·같은 Registry를 검증하고, 증분 GC Marking 중이면 대상을 shade한 뒤
+//   게시한다(삽입 장벽). 소유자의 Trace는 Trace(visitor)로 모든 원소를 조건 없이 방문해야 한다.
 // - 읽기(Size·operator[]·View)는 소유자 Borrow 범위에서 소유 스레드가 한다. View의 Span은 다음
-// 변경까지
-//   유효하다(추가가 버퍼를 재배치할 수 있다).
+//   변경까지만 유효하다(추가가 버퍼를 재배치할 수 있다).
 // - 복사·이동은 소유자 검증을 우회하므로 금지한다. 원소 버퍼는 소유 객체 소멸(저장소 회수) 때
-// 반환한다.
+//   반환한다.
 template <class T = Object>
 class ObjectRefArray {
 public:

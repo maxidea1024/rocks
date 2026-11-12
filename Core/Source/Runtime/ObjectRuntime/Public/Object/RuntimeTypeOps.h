@@ -163,9 +163,11 @@ struct RuntimeTypeOps {
 template <class T, bool Abstract = __is_abstract(T)>
 RuntimeTypeOps MakeRuntimeTypeOps(ModuleLease module = {}) noexcept {
     static_assert(__is_base_of(Object, T));
-    static_assert(Abstract || __is_nothrow_constructible(T, Allocator&) ||
-                  __is_nothrow_constructible(T));
-    static_assert(__is_nothrow_destructible(T));
+    static_assert(
+        Abstract || __is_nothrow_constructible(T, Allocator&) || __is_nothrow_constructible(T),
+        "Object types need `explicit T(Allocator&) noexcept` or `T() noexcept`; a derived "
+        "class whose base takes Allocator& must forward it (e.g. `using Super::Super;`)");
+    static_assert(__is_nothrow_destructible(T), "Object types need a noexcept destructor");
 
     RuntimeTypeOps ops;
     ops.size = sizeof(T);

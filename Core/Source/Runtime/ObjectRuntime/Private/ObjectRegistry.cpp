@@ -317,6 +317,12 @@ Result<void> ObjectRegistry::CheckArrayOwnerLocked(ObjectHandle owner,
           (allowDestroyRequested && source->state == SlotState::DestroyRequested))) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
+    // 배열은 owner 객체 안의 멤버이므로 호출자는 owner의 Borrow를 쥔 채 호출해야 한다. Borrow가
+    // 있는 동안은 수집이 Busy이고 회수도 일어나지 않으므로, 잠금 밖 버퍼 확장 중 allocator가
+    // Registry에 재진입해도 owner 저장소가 사라지지 않는다.
+    if (source->borrows == 0) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
     // 배열 객체는 owner 저장소 안에 직접 포함되어야 한다(SetEdge의 필드 위치 검사와 같다).
     const uptr start = reinterpret_cast<uptr>(source->storage);
     const uptr location = reinterpret_cast<uptr>(&storage);
@@ -362,9 +368,10 @@ Result<void> ObjectRegistry::AppendArrayEdge(const ObjectAccessContext& access, 
     if (storage.size == storage.capacity) {
         // allocator callback은 Registry 잠금 밖에서 실행한다. 원소 버퍼는 소유 스레드만 바꾸며 GC
         // trace는 slice 안에서만(같은 소유 스레드의 호출 중) 읽으므로 이 재배치와 겹치지 않는다.
-        if (storage.capacity == 0xffffffffu || storage.allocator == nullptr) {
-            return Result<void>::Failure(storage.allocator ? ErrorCode::Overflow
-                                                           : ErrorCode::InvalidArgument);
+        // owner Borrow가 수집·회수를 막으므로 allocator가 Registry에 재진입해도 owner와 버퍼는 살아
+        // 있다.
+        if (storage.capacity == 0xffffffffu) {
+            return Result<void>::Failure(ErrorCode::Overflow);
         }
         const uint32 grown = storage.capacity < 4u            ? 4u
                              : storage.capacity > 0x7fffffffu ? 0xffffffffu
@@ -386,7 +393,9 @@ Result<void> ObjectRegistry::AppendArrayEdge(const ObjectAccessContext& access, 
         }
     }
     platform::LockGuard lock(gate_);
-    // 잠금을 놓은 사이 다른 스레드는 루트·Borrow 반환만 할 수 있지만, 게시 직전에 다시 확인한다.
+    // 잠금을 놓은 사이 allocator가 같은 스레드에서 Registry를 다시 불렀을 수 있다(대상 파괴 요청
+    // 등). owner Borrow 덕분에 owner는 남아 있지만 대상 상태는 바뀌었을 수 있으므로 게시 직전에
+    // 다시 확인한다.
     auto checked = CheckArrayOwnerLocked(owner, storage, false);
     if (!checked) {
         return checked;
