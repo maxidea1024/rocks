@@ -1,6 +1,6 @@
 #include <Core/Text/String.h>
 #include <Base/Checked.h>
-#include <string.h>
+#include <Platform/Memory.h>
 
 namespace rocks {
 namespace {
@@ -184,7 +184,7 @@ void String::TrimAsciiStart() noexcept {
     if (trimmed.ByteCount() == bytes_) {
         return;
     }
-    memmove(data_, trimmed.Data(), trimmed.ByteCount());
+    platform::MemoryMove(data_, trimmed.Data(), trimmed.ByteCount());
     bytes_ = trimmed.ByteCount();
     data_[bytes_] = '\0';
 }
@@ -203,7 +203,7 @@ void String::TrimAscii() noexcept {
     if (trimmed.ByteCount() == bytes_) {
         return;
     }
-    memmove(data_, trimmed.Data(), trimmed.ByteCount());
+    platform::MemoryMove(data_, trimmed.Data(), trimmed.ByteCount());
     bytes_ = trimmed.ByteCount();
     data_[bytes_] = '\0';
 }

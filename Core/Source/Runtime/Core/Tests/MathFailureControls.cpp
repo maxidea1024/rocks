@@ -2,6 +2,7 @@
 #include <Core/Math/MathBatch.h>
 #include <Core/Math/Quaternion.h>
 #include <TestSupport/HostFailure.h>
+#include <Platform/PlatformMath.h>
 
 // 수학 계약 위반이 잘못된 값으로 계속 진행되지 않고 Fatal로 끝나는지 자식 프로세스에서 확인한다.
 // 각 operation은 정확히 하나의 위반을 일으킨다. 반환에 도달하면 하네스가 실패로 판정한다.
@@ -9,7 +10,7 @@ namespace rocks::test {
 
 int RunMathNegativeControl(uint32 operation) noexcept {
     PrepareFatalTestProcess();
-    volatile double nan = __builtin_nan("");
+    volatile double nan = platform::PlatformMath::QuietNaN<double>();
     volatile double justAboveInt32 = 2147483647.5;
     Vec3 values[4] = {};
     switch (operation) {

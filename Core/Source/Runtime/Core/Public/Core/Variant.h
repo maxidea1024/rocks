@@ -4,6 +4,7 @@
 #include <Core/Move.h>
 #include <Core/Traits.h>
 #include <Platform/Fatal.h>
+#include <Platform/Memory.h>
 
 namespace rocks {
 
@@ -247,12 +248,12 @@ private:
     // 같은 저장소에 다른 타입 객체를 다시 만들므로 launder로 포인터 가정을 끊는다.
     template <typename T>
     T& Ref() noexcept {
-        return *__builtin_launder(reinterpret_cast<T*>(storage_));
+        return *platform::Launder(reinterpret_cast<T*>(storage_));
     }
 
     template <typename T>
     const T& Ref() const noexcept {
-        return *__builtin_launder(reinterpret_cast<const T*>(storage_));
+        return *platform::Launder(reinterpret_cast<const T*>(storage_));
     }
 
     template <usize... Indices>

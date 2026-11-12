@@ -109,8 +109,10 @@ void Run(const Job& job, WorkerTaskContext& context) noexcept {
         CompressionTaskAccess::Complete(*job.task, result.Value());
         return;
     }
-    if (result.Error() == ErrorCode::Cancelled) {
-        // 출력은 코덱 구현이 이미 되돌렸다. Fail하지 않아 scheduler 상태가 Cancelled가 된다.
+    if (result.Error() == ErrorCode::Cancelled && context.IsCancellationRequested()) {
+        // 출력은 코덱 구현이 이미 되돌렸다. Fail하지 않아 scheduler 상태가 Cancelled가 된다. 취소
+        // 요청 없이 Cancelled가 나오면(예: 할당기가 돌려준 오류) 실패로 보고해 후속 작업이 실행되지
+        // 않게 한다.
         CompressionTaskAccess::Cancel(*job.task);
         return;
     }
@@ -198,7 +200,9 @@ Result<usize> CompressionTask::TryGetResult() const noexcept {
         break;
     }
 
-    // body가 실행되지 않았다: 실행 전 취소·Shutdown(Cancel)·의존 실패.
+    // body가 실행되지 않았다: 실행 전 취소·Shutdown(Cancel)·의존 실패. body는 항상 결과를
+    // 기록하므로 실행 없이 Succeeded일 수 없다(순서 오류를 다른 오류로 가리지 않는다).
+    ROCKS_ASSERT(value.state != WorkerTaskState::Succeeded);
     if (value.state == WorkerTaskState::Cancelled) {
         return Result<usize>::Failure(ErrorCode::Cancelled);
     }
@@ -229,8 +233,9 @@ Result<void> TrySubmitCompress(WorkerScheduler& scheduler, CompressionTask& task
                                const CompressionSettings& settings, Span<const uint8> source,
                                Array<uint8>& output,
                                Span<const WorkerTaskHandle> dependencies) noexcept {
-    if (detail::OverlapsArrayStorage(source, output) ||
-        (settings.Format() == CompressionFormat::Lz4 && source.Size() > Lz4MaxInputBytes)) {
+    // output은 의존 작업이 worker에서 키우는 중일 수 있으므로 제출 시점에는 읽지 않는다. output과의
+    // 겹침은 body가 실행 시점에 검사한다(TryCompressAppend와 같은 InvalidArgument).
+    if (settings.Format() == CompressionFormat::Lz4 && source.Size() > Lz4MaxInputBytes) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -249,8 +254,8 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
                                  CompressionFormat format, Span<const uint8> source,
                                  usize maxOutputBytes, Array<uint8>& output,
                                  Span<const WorkerTaskHandle> dependencies) noexcept {
-    if (source.Size() == 0 || detail::OverlapsArrayStorage(source, output) ||
-        !TryGetCompressionLevelRange(format)) {
+    // output은 제출 시점에 읽지 않는다(위와 같은 이유). 겹침은 body가 검사한다.
+    if (source.Size() == 0 || !TryGetCompressionLevelRange(format)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

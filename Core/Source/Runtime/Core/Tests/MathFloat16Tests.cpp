@@ -1,6 +1,8 @@
 #include <TestSupport/Test.h>
 #include <TestSupport/MathTestSupport.h>
 #include <Core/Math/Float16.h>
+#include <Platform/Memory.h>
+#include <Platform/PlatformMath.h>
 
 namespace rocks::test {
 namespace {
@@ -9,7 +11,7 @@ using platform::GenericPlatformMath;
 using platform::PlatformMath;
 
 float Bits(uint32 value) {
-    return __builtin_bit_cast(float, value);
+    return platform::BitCast<float>(value);
 }
 
 // 독립 oracle: 모든 유한 half 값 중 가장 가까운 값을 double로 직접 찾고, 동률이면 짝수 mantissa를
@@ -82,9 +84,9 @@ TEST(Float16_RoundToNearestEvenBoundaries) {
     CHECK(Float16::FromFloat(1.0f + 3.0f / 2048.0f).bits == 0x3c02u);
     CHECK(Float16::FromFloat(-0.0f).bits == 0x8000u);
     CHECK(Float16::FromFloatClamped(1.0e9f).bits == 0x7bffu);
-    CHECK(Float16::FromFloatClamped(-__builtin_huge_valf()).bits == 0xfbffu);
-    CHECK(Float16::FromFloatClamped(__builtin_nanf("")).IsNaN());
-    CHECK(!Float16::FromFloat(__builtin_huge_valf()).IsFinite());
+    CHECK(Float16::FromFloatClamped(-platform::PlatformMath::Infinity<float>()).bits == 0xfbffu);
+    CHECK(Float16::FromFloatClamped(platform::PlatformMath::QuietNaN<float>()).IsNaN());
+    CHECK(!Float16::FromFloat(platform::PlatformMath::Infinity<float>()).IsFinite());
     CHECK(Float16::FromFloat(0.0f) != Float16::FromFloat(-0.0f)); // bit 비교
 }
 
@@ -112,7 +114,7 @@ TEST(Float16_NaNPayloadAndQuietBit) {
         CHECK(PlatformMath::FloatToHalf(Bits(bits)) == half);
     }
     // signaling half NaN(0x7c01)은 quiet float NaN이 된다.
-    const uint32 widened = __builtin_bit_cast(uint32, GenericPlatformMath::HalfToFloat(0x7c01u));
+    const uint32 widened = platform::BitCast<uint32>(GenericPlatformMath::HalfToFloat(0x7c01u));
     CHECK((widened & 0x7f800000u) == 0x7f800000u && (widened & 0x00400000u) != 0);
     CHECK((widened & 0x003fffffu) == (0x001u << 13));
     // 정확한 half → float 값을 독립 계산(지수·가수 직접 조립)과 대조한다.

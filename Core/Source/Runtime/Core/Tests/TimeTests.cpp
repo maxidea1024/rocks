@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <Platform/PlatformMath.h>
 
 using namespace rocks;
 
@@ -54,7 +55,7 @@ TEST(TimeSpan_FactoriesComponentsAndOverflow) {
     CHECK(TimeSpan::TryFromTotalSeconds(1.5).Value().Ticks() == 15000000);
     CHECK(TimeSpan::TryFromTotalSeconds(0.00000005).Value().Ticks() == 1);
     CHECK(TimeSpan::TryFromTotalSeconds(-0.00000005).Value().Ticks() == -1);
-    const double nan = __builtin_nan("");
+    const double nan = platform::PlatformMath::QuietNaN<double>();
     CHECK(TimeSpan::TryFromTotalSeconds(nan).Error() == ErrorCode::InvalidArgument);
     CHECK(TimeSpan::TryFromTotalSeconds(1e12).Error() == ErrorCode::Overflow);
     CHECK(TimeSpan::TryFromTotalSeconds(-1e300).Error() == ErrorCode::Overflow);

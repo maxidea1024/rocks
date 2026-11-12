@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Platform/Math/GenericPlatformMath.h>
+#include <Platform/Memory.h>
 
 namespace rocks::platform::scalar {
 
@@ -89,7 +90,7 @@ inline Register4f Negate(Register4f a) noexcept {
     Register4f result;
     for (int i = 0; i < 4; ++i) {
         result.lane[i] =
-            __builtin_bit_cast(float, __builtin_bit_cast(uint32, a.lane[i]) ^ 0x80000000u);
+            platform::BitCast<float>(platform::BitCast<uint32>(a.lane[i]) ^ 0x80000000u);
     }
     return result;
 }

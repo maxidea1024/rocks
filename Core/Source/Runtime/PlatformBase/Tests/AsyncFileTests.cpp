@@ -3,6 +3,7 @@
 #include <Platform/File.h>
 #include <TestSupport/Test.h>
 #include <stdio.h>
+#include <Platform/Atomics.h>
 
 using namespace rocks;
 using namespace rocks::platform;
@@ -91,19 +92,19 @@ struct CallbackLog {
 // callback은 Wait가 반환된 뒤에 끝날 수 있다(계약). 고정 횟수 yield 대신 시간 제한으로 기다린다.
 bool WaitForCallbacks(const CallbackLog& log, int expected) noexcept {
     const uint64 deadline = MonotonicNanoseconds() + 10000000000ull;
-    while (__atomic_load_n(&log.calls, __ATOMIC_ACQUIRE) < expected) {
+    while (AtomicLoad<MemoryOrder::Acquire>(&log.calls) < expected) {
         if (MonotonicNanoseconds() > deadline) {
             return false;
         }
         YieldThread();
     }
-    return __atomic_load_n(&log.calls, __ATOMIC_ACQUIRE) == expected;
+    return AtomicLoad<MemoryOrder::Acquire>(&log.calls) == expected;
 }
 
 void CountingCallback(const AsyncReadResult& result, void* raw) noexcept {
     auto* log = static_cast<CallbackLog*>(raw);
-    __atomic_store_n(&log->lastBytes, result.bytes, __ATOMIC_RELAXED);
-    __atomic_fetch_add(&log->calls, 1, __ATOMIC_ACQ_REL);
+    AtomicStore<MemoryOrder::Relaxed>(&log->lastBytes, result.bytes);
+    AtomicFetchAdd<MemoryOrder::AcquireRelease>(&log->calls, 1);
 }
 
 } // namespace
@@ -328,7 +329,7 @@ struct TempPath {
         static int counter = 0;
         const int count = snprintf(path, sizeof(path), "rocks-async-%s-%llu-%d.tmp", tag,
                                    static_cast<unsigned long long>(MonotonicNanoseconds()),
-                                   __atomic_add_fetch(&counter, 1, __ATOMIC_RELAXED));
+                                   AtomicFetchAdd<MemoryOrder::Relaxed>(&counter, 1) + 1);
         if (count <= 0 || static_cast<usize>(count) >= sizeof(path)) {
             return false;
         }

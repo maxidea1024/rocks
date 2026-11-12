@@ -2,6 +2,7 @@
 
 #include <Core/Containers/Span.h>
 #include <Core/Move.h>
+#include <Platform/Memory.h>
 
 namespace rocks::algo {
 
@@ -20,8 +21,8 @@ namespace detail {
 
 template <typename T>
 void Swap(T& left, T& right) noexcept {
-    T* leftAddress = __builtin_addressof(left);
-    T* rightAddress = __builtin_addressof(right);
+    T* leftAddress = platform::AddressOf(left);
+    T* rightAddress = platform::AddressOf(right);
     if (leftAddress == rightAddress) {
         return;
     }

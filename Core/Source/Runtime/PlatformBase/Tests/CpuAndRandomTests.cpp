@@ -4,6 +4,7 @@
 #include <TestSupport/Test.h>
 #include <stdio.h>
 #include <string.h>
+#include <Platform/PlatformMath.h>
 
 using namespace rocks;
 
@@ -47,7 +48,7 @@ TEST(Platform_SecureRandomFillsBuffers) {
     REQUIRE(platform::TryFillSecureRandom(large, sizeof(large)));
     usize ones = 0;
     for (uint8 value : large) {
-        ones += static_cast<usize>(__builtin_popcount(value));
+        ones += static_cast<usize>(platform::PlatformMath::PopCount32(value));
     }
 
     CHECK(ones > sizeof(large) * 8 * 4 / 10 && ones < sizeof(large) * 8 * 6 / 10);

@@ -1,6 +1,7 @@
 #include <Core/Math/Color.h>
 #include <Platform/PlatformMath.h>
 #include <TestSupport/Test.h>
+#include <Platform/Memory.h>
 
 using namespace rocks;
 
@@ -8,16 +9,16 @@ namespace {
 
 using platform::PlatformMath;
 
-constexpr float NaN = __builtin_nanf("");
-constexpr float Infinity = __builtin_inff();
+constexpr float NaN = platform::PlatformMath::QuietNaN<float>();
+constexpr float Infinity = platform::PlatformMath::Infinity<float>();
 
 // 양의 유한 float의 바로 위·아래 값이다. 반올림 경계 양쪽을 검사하는 데 사용한다.
 float NextUp(float value) noexcept {
-    return __builtin_bit_cast(float, __builtin_bit_cast(uint32, value) + 1u);
+    return platform::BitCast<float>(platform::BitCast<uint32>(value) + 1u);
 }
 
 float NextDown(float value) noexcept {
-    return __builtin_bit_cast(float, __builtin_bit_cast(uint32, value) - 1u);
+    return platform::BitCast<float>(platform::BitCast<uint32>(value) - 1u);
 }
 
 bool Near(float actual, double expected, double tolerance) noexcept {

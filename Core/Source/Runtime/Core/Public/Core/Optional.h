@@ -2,6 +2,7 @@
 
 #include <Core/Move.h>
 #include <Platform/Fatal.h>
+#include <Platform/Memory.h>
 
 namespace rocks {
 
@@ -189,11 +190,11 @@ private:
     // 저장소에 placement로 생성한 객체에 접근한다. 같은 저장소에 객체를 다시 만들 수 있으므로
     // 포인터 최적화 가정을 끊기 위해 launder를 거친다.
     T& Get() noexcept {
-        return *__builtin_launder(reinterpret_cast<T*>(storage_));
+        return *platform::Launder(reinterpret_cast<T*>(storage_));
     }
 
     const T& Get() const noexcept {
-        return *__builtin_launder(reinterpret_cast<const T*>(storage_));
+        return *platform::Launder(reinterpret_cast<const T*>(storage_));
     }
 
     alignas(T) unsigned char storage_[sizeof(T)];

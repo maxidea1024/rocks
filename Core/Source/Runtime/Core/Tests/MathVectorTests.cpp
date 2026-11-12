@@ -5,12 +5,14 @@
 #include <Core/Math/Vector4.h>
 
 #include <float.h>
+#include <Platform/Memory.h>
+#include <Platform/PlatformMath.h>
 
 namespace rocks::test {
 namespace {
 
-constexpr float InfinityF = __builtin_huge_valf();
-const float NaNF = __builtin_nanf("");
+constexpr float InfinityF = platform::PlatformMath::Infinity<float>();
+const float NaNF = platform::PlatformMath::QuietNaN<float>();
 
 } // namespace
 
@@ -234,8 +236,8 @@ TEST(MathUtility_LerpOverflowAndNaNPropagation) {
     CHECK(math::Lerp(lowest, highest, 1.0f) == highest);
     CHECK(math::Lerp(lowest, highest, 0.5f) == 0.0f);
     CHECK(math::IsFinite(math::Lerp(lowest, highest, 0.75f)));
-    CHECK(math::IsNaN(math::MinPropagateNaN(1.0, __builtin_nan(""))));
-    CHECK(math::IsNaN(math::MaxPropagateNaN(__builtin_nan(""), 1.0)));
+    CHECK(math::IsNaN(math::MinPropagateNaN(1.0, platform::PlatformMath::QuietNaN<double>())));
+    CHECK(math::IsNaN(math::MaxPropagateNaN(platform::PlatformMath::QuietNaN<double>(), 1.0)));
     CHECK(math::MinPropagateNaN(2.0f, -1.0f) == -1.0f &&
           math::MaxPropagateNaN(2.0f, -1.0f) == 2.0f);
 }
@@ -250,21 +252,21 @@ TEST(MathUtility_NamedTolerancesAndUlpComparison) {
     CHECK(math::IsNearlyEqualRelative(1.0e6, 1.0e6 + 0.5, 1.0e-6, 1.0e-9));
     CHECK(!math::IsNearlyEqualRelative(1.0, 1.1, 1.0e-6, 1.0e-9));
     CHECK(math::IsNearlyEqualRelative(0.0, 1.0e-10, 1.0e-6, 1.0e-9));
-    CHECK(!math::IsNearlyEqualRelative(__builtin_nan(""), 0.0, 1.0, 1.0));
+    CHECK(!math::IsNearlyEqualRelative(platform::PlatformMath::QuietNaN<double>(), 0.0, 1.0, 1.0));
     // ULP 비교: 0을 사이에 둔 값, 부호 있는 0, 무한대, NaN
     const float one = 1.0f;
-    const float next = __builtin_bit_cast(float, __builtin_bit_cast(uint32, one) + 4u);
+    const float next = platform::BitCast<float>(platform::BitCast<uint32>(one) + 4u);
     CHECK(math::IsNearlyEqualByUlps(one, next, 4) && !math::IsNearlyEqualByUlps(one, next, 3));
     CHECK(math::IsNearlyEqualByUlps(0.0f, -0.0f, 0));
-    const float tinyPositive = __builtin_bit_cast(float, 1u);
-    const float tinyNegative = __builtin_bit_cast(float, 0x80000001u);
+    const float tinyPositive = platform::BitCast<float>(1u);
+    const float tinyNegative = platform::BitCast<float>(0x80000001u);
     CHECK(math::IsNearlyEqualByUlps(tinyPositive, tinyNegative, 2));
     CHECK(!math::IsNearlyEqualByUlps(tinyPositive, tinyNegative, 1));
     CHECK(!math::IsNearlyEqualByUlps(FLT_MAX, InfinityF, 1000000));
     CHECK(math::IsNearlyEqualByUlps(InfinityF, InfinityF, 0));
     CHECK(!math::IsNearlyEqualByUlps(NaNF, NaNF, 1000000));
     const double d = 1.0;
-    const double dNext = __builtin_bit_cast(double, __builtin_bit_cast(uint64, d) + 2ull);
+    const double dNext = platform::BitCast<double>(platform::BitCast<uint64>(d) + 2ull);
     CHECK(math::IsNearlyEqualByUlps(d, dNext, 2) && !math::IsNearlyEqualByUlps(d, dNext, 1));
     CHECK(math::IsNearlyEqualByUlps(-0.0, 0.0, 0));
 }

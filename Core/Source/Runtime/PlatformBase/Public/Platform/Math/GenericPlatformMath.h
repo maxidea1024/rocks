@@ -5,6 +5,7 @@
 
 #include <float.h>
 #include <math.h>
+#include <Platform/Memory.h>
 
 namespace rocks::platform {
 
@@ -20,61 +21,81 @@ namespace rocks::platform {
 // - 근사 함수(*Estimate)는 정확한 함수와 이름으로 구분한다. 근사 오차는 CPU마다 다를 수 있다.
 // - fast-math나 finite-math-only 설정을 전제하지 않는다. 분류 함수는 bit 표현을 직접 검사한다.
 struct GenericPlatformMath {
+    // ---- IEEE 특수 값(float·double) ----
+    template <class T>
+    static constexpr T QuietNaN() noexcept {
+        static_assert(__is_same(T, float) || __is_same(T, double), "QuietNaN<float|double>");
+        if constexpr (__is_same(T, float)) {
+            return __builtin_nanf("");
+        } else {
+            return __builtin_nan("");
+        }
+    }
+
+    template <class T>
+    static constexpr T Infinity() noexcept {
+        static_assert(__is_same(T, float) || __is_same(T, double), "Infinity<float|double>");
+        if constexpr (__is_same(T, float)) {
+            return __builtin_huge_valf();
+        } else {
+            return __builtin_huge_val();
+        }
+    }
+
     // ---- 분류: compiler 최적화 설정과 무관하게 bit 표현으로 판정한다. ----
     static constexpr bool IsNaN(float value) noexcept {
-        return (__builtin_bit_cast(uint32, value) & 0x7fffffffu) > 0x7f800000u;
+        return (platform::BitCast<uint32>(value) & 0x7fffffffu) > 0x7f800000u;
     }
 
     static constexpr bool IsNaN(double value) noexcept {
-        return (__builtin_bit_cast(uint64, value) & 0x7fffffffffffffffull) > 0x7ff0000000000000ull;
+        return (platform::BitCast<uint64>(value) & 0x7fffffffffffffffull) > 0x7ff0000000000000ull;
     }
 
     // NaN·±무한대가 아니면 true다. subnormal과 ±0은 유한값이다.
     static constexpr bool IsFinite(float value) noexcept {
-        return (__builtin_bit_cast(uint32, value) & 0x7f800000u) != 0x7f800000u;
+        return (platform::BitCast<uint32>(value) & 0x7f800000u) != 0x7f800000u;
     }
 
     static constexpr bool IsFinite(double value) noexcept {
-        return (__builtin_bit_cast(uint64, value) & 0x7ff0000000000000ull) != 0x7ff0000000000000ull;
+        return (platform::BitCast<uint64>(value) & 0x7ff0000000000000ull) != 0x7ff0000000000000ull;
     }
 
     static constexpr bool IsInfinite(float value) noexcept {
-        return (__builtin_bit_cast(uint32, value) & 0x7fffffffu) == 0x7f800000u;
+        return (platform::BitCast<uint32>(value) & 0x7fffffffu) == 0x7f800000u;
     }
 
     static constexpr bool IsInfinite(double value) noexcept {
-        return (__builtin_bit_cast(uint64, value) & 0x7fffffffffffffffull) == 0x7ff0000000000000ull;
+        return (platform::BitCast<uint64>(value) & 0x7fffffffffffffffull) == 0x7ff0000000000000ull;
     }
 
     // -0.0과 음수 NaN도 부호 bit가 1이면 true다.
     static constexpr bool SignBit(float value) noexcept {
-        return (__builtin_bit_cast(uint32, value) >> 31) != 0;
+        return (platform::BitCast<uint32>(value) >> 31) != 0;
     }
 
     static constexpr bool SignBit(double value) noexcept {
-        return (__builtin_bit_cast(uint64, value) >> 63) != 0;
+        return (platform::BitCast<uint64>(value) >> 63) != 0;
     }
 
     // 부호 bit만 지운다. NaN payload와 -0.0 → +0.0을 보존·정규화한다.
     static constexpr float Abs(float value) noexcept {
-        return __builtin_bit_cast(float, __builtin_bit_cast(uint32, value) & 0x7fffffffu);
+        return platform::BitCast<float>(platform::BitCast<uint32>(value) & 0x7fffffffu);
     }
 
     static constexpr double Abs(double value) noexcept {
-        return __builtin_bit_cast(double,
-                                  __builtin_bit_cast(uint64, value) & 0x7fffffffffffffffull);
+        return platform::BitCast<double>(platform::BitCast<uint64>(value) & 0x7fffffffffffffffull);
     }
 
     // magnitude의 크기와 sign의 부호 bit를 결합한다.
     static constexpr float CopySign(float magnitude, float sign) noexcept {
-        return __builtin_bit_cast(float, (__builtin_bit_cast(uint32, magnitude) & 0x7fffffffu) |
-                                             (__builtin_bit_cast(uint32, sign) & 0x80000000u));
+        return platform::BitCast<float>((platform::BitCast<uint32>(magnitude) & 0x7fffffffu) |
+                                        (platform::BitCast<uint32>(sign) & 0x80000000u));
     }
 
     static constexpr double CopySign(double magnitude, double sign) noexcept {
-        return __builtin_bit_cast(double,
-                                  (__builtin_bit_cast(uint64, magnitude) & 0x7fffffffffffffffull) |
-                                      (__builtin_bit_cast(uint64, sign) & 0x8000000000000000ull));
+        return platform::BitCast<double>(
+            (platform::BitCast<uint64>(magnitude) & 0x7fffffffffffffffull) |
+            (platform::BitCast<uint64>(sign) & 0x8000000000000000ull));
     }
 
     // (a < b) ? a : b 로 정의한다. 둘 중 하나가 NaN이면 b를, -0.0과 +0.0은 b를 반환한다.
@@ -352,7 +373,7 @@ struct GenericPlatformMath {
     // NaN은 부호와 상위 payload를 보존하고 quiet bit를 켠다. 현재 부동소수점 반올림 모드와
     // 무관하다.
     static constexpr uint16 FloatToHalf(float value) noexcept {
-        const uint32 bits = __builtin_bit_cast(uint32, value);
+        const uint32 bits = platform::BitCast<uint32>(value);
         const auto sign = static_cast<uint16>((bits >> 16) & 0x8000u);
         const uint32 magnitude = bits & 0x7fffffffu;
         if (magnitude >= 0x7f800000u) {
@@ -398,13 +419,13 @@ struct GenericPlatformMath {
         if (exponent == 0) {
             // subnormal과 0: mantissa * 2^-24는 float에서 정확하다.
             const float magnitude = static_cast<float>(mantissa) * 5.9604644775390625e-8f;
-            return __builtin_bit_cast(float, __builtin_bit_cast(uint32, magnitude) | sign);
+            return platform::BitCast<float>(platform::BitCast<uint32>(magnitude) | sign);
         }
         if (exponent == 31u) {
             const uint32 payload = mantissa == 0 ? 0u : (0x400000u | (mantissa << 13));
-            return __builtin_bit_cast(float, sign | 0x7f800000u | payload);
+            return platform::BitCast<float>(sign | 0x7f800000u | payload);
         }
-        return __builtin_bit_cast(float, sign | ((exponent + 112u) << 23) | (mantissa << 13));
+        return platform::BitCast<float>(sign | ((exponent + 112u) << 23) | (mantissa << 13));
     }
 
     // ---- 정수 bit 연산: 0 입력의 결과를 bit 폭으로 정의한다. ----

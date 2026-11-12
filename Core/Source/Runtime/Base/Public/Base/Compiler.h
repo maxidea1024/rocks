@@ -72,6 +72,9 @@
 // 연결된 디버거에 중단점을 건다. 디버거가 없으면 프로세스가 종료될 수 있다.
 #define ROCKS_DEBUG_BREAK() __builtin_debugtrap()
 
+// 표준 배치 타입 Type 안에서 member의 byte offset이다(offsetof 대응, 상수 식).
+#define ROCKS_OFFSET_OF(Type, member) __builtin_offsetof(Type, member)
+
 // 이 지점부터 ROCKS_ENABLE_OPTIMIZATION까지 정의하는 함수의 최적화를 끈다(UE5.6
 // UE_DISABLE_OPTIMIZATION·UE_ENABLE_OPTIMIZATION 대응). Development 빌드에서 파일 일부만 단계
 // 실행하려고 임시로 쓴다. 모듈 전체는 규칙의 Optimization => CodeOptimization.Never로 끈다.

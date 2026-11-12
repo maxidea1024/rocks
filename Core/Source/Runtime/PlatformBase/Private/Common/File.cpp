@@ -277,6 +277,18 @@ FileStatus File::Size(uint64& bytes) noexcept {
     return result;
 }
 
+FileStatus File::Flush() noexcept {
+    ActiveFile entry(this);
+    if (!entry.entered) {
+        return Error(FileCode::Busy);
+    }
+    LockGuard lock(mutex_);
+    if (!handle_) {
+        return Error(FileCode::NotOpen);
+    }
+    return handle_->Flush();
+}
+
 FileStatus File::Close() noexcept {
     ActiveFile entry(this);
     if (!entry.entered) {

@@ -28,6 +28,18 @@ FileStatus FileSystem::Move(const char*, usize, const char*, usize, bool) noexce
     return {FileCode::Unsupported, 0};
 }
 
+FileStatus FileHandle::Flush() noexcept {
+    return {FileCode::Unsupported, 0};
+}
+
+FileStatus FileSystem::Replace(const char*, usize, const char*, usize) noexcept {
+    return {FileCode::Unsupported, 0};
+}
+
+FileStatus FileSystem::SetModifiedTime(const char*, usize, int64) noexcept {
+    return {FileCode::Unsupported, 0};
+}
+
 FileStatus FileSystem::Copy(const char*, usize, const char*, usize, bool) noexcept {
     return {FileCode::Unsupported, 0};
 }
@@ -182,10 +194,7 @@ FileStatus DeleteTreeContents(FileSystem& system, const char* path, usize bytes)
     while (cursor < children.size) {
         const char kind = children.data[cursor++];
         const char* name = children.data + cursor;
-        usize nameBytes = 0;
-        while (name[nameBytes] != '\0') {
-            ++nameBytes;
-        }
+        const usize nameBytes = CStringLength(name);
         cursor += nameBytes + 1;
         usize childBytes = 0;
         char* child = JoinChild(path, bytes, name, nameBytes, childBytes);

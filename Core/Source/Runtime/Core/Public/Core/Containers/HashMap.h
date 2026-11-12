@@ -4,6 +4,7 @@
 #include <Core/Hash.h>
 #include <Core/Memory/Allocator.h>
 #include <Platform/Fatal.h>
+#include <Platform/Memory.h>
 
 namespace rocks {
 
@@ -54,16 +55,16 @@ class HashMap {
         uint64 hash;
         State state;
         K* Key() noexcept {
-            return __builtin_launder(reinterpret_cast<K*>(key));
+            return platform::Launder(reinterpret_cast<K*>(key));
         }
         const K* Key() const noexcept {
-            return __builtin_launder(reinterpret_cast<const K*>(key));
+            return platform::Launder(reinterpret_cast<const K*>(key));
         }
         V* Value() noexcept {
-            return __builtin_launder(reinterpret_cast<V*>(value));
+            return platform::Launder(reinterpret_cast<V*>(value));
         }
         const V* Value() const noexcept {
-            return __builtin_launder(reinterpret_cast<const V*>(value));
+            return platform::Launder(reinterpret_cast<const V*>(value));
         }
     };
 
@@ -578,15 +579,15 @@ private:
         if (!slots_) {
             return false;
         }
-        const uptr address = reinterpret_cast<uptr>(__builtin_addressof(arg));
+        const uptr address = reinterpret_cast<uptr>(platform::AddressOf(arg));
         const uptr base = reinterpret_cast<uptr>(slots_);
         return Overlap(address, sizeof(A), base, slotCount_ * sizeof(Slot));
     }
 
     template <typename A, typename B>
     static bool ArgumentsOverlap(A& a, B& b) noexcept {
-        return Overlap(reinterpret_cast<uptr>(__builtin_addressof(a)), sizeof(A),
-                       reinterpret_cast<uptr>(__builtin_addressof(b)), sizeof(B));
+        return Overlap(reinterpret_cast<uptr>(platform::AddressOf(a)), sizeof(A),
+                       reinterpret_cast<uptr>(platform::AddressOf(b)), sizeof(B));
     }
 
     template <bool Assign, typename KeyArg, typename ValueArg>

@@ -7,8 +7,11 @@
 // adapter 번역 단위만 포함한다.
 namespace rocks::detail {
 
-// 취소 확인·32bit 길이 분할의 단위다. 입력 소비나 출력 생성이 이만큼 진행될 때마다 취소를 확인한다.
-// 동기·비동기가 같은 값을 써야 결과 byte가 같다(zstd·deflate 스트림 경계가 이 값에 따른다).
+// 취소 확인·32bit 길이 분할의 단위다. Deflate·Zlib·Gzip은 입력 소비나 출력 생성이, zstd 압축은 입력
+// 소비가, zstd 해제는 입력 소비가 이만큼 진행될 때마다 취소를 확인한다(zstd 해제는 stable
+// output이라 출력을 나눌 수 없다). Lz4는 한 번의 코덱 호출이다. 동기·비동기가 같은 값을 써야 결과
+// byte가 같다(zstd·deflate 스트림 경계가 이 값에 따른다). zstd 최대 블록 크기(128KiB)의 배수여야
+// 한다(ZstdCodec.cpp의 static_assert).
 inline constexpr usize CompressionChunkBytes = usize{1} << 20;
 
 // 코덱 작업 메모리 정렬이다. zstd·zlib·LZ4 상태는 malloc 수준 정렬을 가정한다.
@@ -115,6 +118,8 @@ Result<usize> DecompressAppend(void* codec, Span<const uint8> source, usize maxO
 
 namespace zlib {
 Result<usize> Bound(usize sourceBytes) noexcept;
+// 압축 문맥의 설정으로 구한 상한이다(Bound보다 작다). 문맥이 만들 수 있는 최악 크기 이상이다.
+Result<usize> StreamBound(void* codec, usize sourceBytes) noexcept;
 Result<void*> CreateCompressor(CompressionFormat format, int32 level,
                                Allocator& allocator) noexcept;
 Result<void*> CreateDecompressor(CompressionFormat format, Allocator& allocator) noexcept;

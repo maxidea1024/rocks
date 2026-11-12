@@ -1,6 +1,6 @@
 #include <Core/Text/NamePool.h>
 #include <Base/Checked.h>
-#include <string.h>
+#include <Platform/Memory.h>
 
 namespace rocks {
 namespace {
@@ -344,7 +344,7 @@ Result<Name> NamePool::TryIntern(StringView source) noexcept {
     candidate->baseBytes = parsed.baseBytes;
     candidate->bytes = source.ByteCount();
     if (!source.IsEmpty()) {
-        memcpy(candidate->Data(), source.Data(), source.ByteCount());
+        platform::MemoryCopy(candidate->Data(), source.Data(), source.ByteCount());
     }
 
     candidate->Data()[candidate->bytes] = '\0';

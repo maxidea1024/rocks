@@ -6,6 +6,7 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <Platform/Memory.h>
 
 // Android 경로 backend다. 앱 전용 저장소(내부 files·cache)는 Java 쪽 Context에서만 알 수 있으므로
 // 앱이 시작 시 RegisterApplicationDirectories로 넘겨야 한다. 등록 전에는 UserData·UserCache가
@@ -32,14 +33,6 @@ struct ApplicationDirectories {
 ApplicationDirectories& Registered() noexcept {
     static ApplicationDirectories directories;
     return directories;
-}
-
-usize Length(const char* text) noexcept {
-    usize length = 0;
-    while (text[length] != '\0') {
-        ++length;
-    }
-    return length;
 }
 
 FileStatus Write(const char* text, usize length, char* buffer, usize capacity,
@@ -70,7 +63,7 @@ FileStatus WriteRegistered(bool cache, char* buffer, usize capacity, usize& byte
 }
 
 bool CopyRegistered(const char* source, char* target, usize& targetBytes) noexcept {
-    const usize length = Length(source);
+    const usize length = CStringLength(source);
     if (length == 0 || length >= MaxRegistered || source[0] != '/') {
         return false;
     }
@@ -140,7 +133,7 @@ FileStatus GetStandardDirectory(StandardDirectory kind, char* buffer, usize capa
         if (path == nullptr) {
             return {FileCode::SystemError, static_cast<uint32>(errno)};
         }
-        auto status = Write(path, Length(path), buffer, capacity, bytes);
+        auto status = Write(path, CStringLength(path), buffer, capacity, bytes);
         free(path);
         return status;
     }
@@ -154,7 +147,7 @@ FileStatus GetStandardDirectory(StandardDirectory kind, char* buffer, usize capa
         if (fallback == nullptr || fallback[0] == '\0') {
             fallback = "/data/local/tmp";
         }
-        return Write(fallback, Length(fallback), buffer, capacity, bytes);
+        return Write(fallback, CStringLength(fallback), buffer, capacity, bytes);
     }
     case StandardDirectory::Home: {
         auto registered = WriteRegistered(false, buffer, capacity, bytes);
@@ -165,7 +158,7 @@ FileStatus GetStandardDirectory(StandardDirectory kind, char* buffer, usize capa
         if (home == nullptr || home[0] == '\0') {
             return {FileCode::NotFound, 0};
         }
-        return Write(home, Length(home), buffer, capacity, bytes);
+        return Write(home, CStringLength(home), buffer, capacity, bytes);
     }
     case StandardDirectory::UserData:
         return WriteRegistered(false, buffer, capacity, bytes);

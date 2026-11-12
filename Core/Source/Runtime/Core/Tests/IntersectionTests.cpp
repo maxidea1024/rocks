@@ -1,5 +1,7 @@
 #include <Core/Math/Intersection.h>
 #include <TestSupport/Test.h>
+#include <Platform/Memory.h>
+#include <Platform/PlatformMath.h>
 
 using namespace rocks;
 
@@ -9,18 +11,18 @@ namespace {
 template <typename T>
 T Infinity() noexcept {
     if constexpr (IsSameV<T, float>) {
-        return __builtin_huge_valf();
+        return platform::PlatformMath::Infinity<float>();
     } else {
-        return __builtin_huge_val();
+        return platform::PlatformMath::Infinity<double>();
     }
 }
 
 template <typename T>
 T QuietNaN() noexcept {
     if constexpr (IsSameV<T, float>) {
-        return __builtin_nanf("");
+        return platform::PlatformMath::QuietNaN<float>();
     } else {
-        return __builtin_nan("");
+        return platform::PlatformMath::QuietNaN<double>();
     }
 }
 
@@ -29,18 +31,18 @@ T QuietNaN() noexcept {
 template <typename T>
 T UlpAway(T value) noexcept {
     if constexpr (IsSameV<T, float>) {
-        return __builtin_bit_cast(float, __builtin_bit_cast(uint32, value) + 1u);
+        return platform::BitCast<float>(platform::BitCast<uint32>(value) + 1u);
     } else {
-        return __builtin_bit_cast(double, __builtin_bit_cast(uint64, value) + 1ull);
+        return platform::BitCast<double>(platform::BitCast<uint64>(value) + 1ull);
     }
 }
 
 template <typename T>
 T UlpToward(T value) noexcept {
     if constexpr (IsSameV<T, float>) {
-        return __builtin_bit_cast(float, __builtin_bit_cast(uint32, value) - 1u);
+        return platform::BitCast<float>(platform::BitCast<uint32>(value) - 1u);
     } else {
-        return __builtin_bit_cast(double, __builtin_bit_cast(uint64, value) - 1ull);
+        return platform::BitCast<double>(platform::BitCast<uint64>(value) - 1ull);
     }
 }
 
@@ -1967,7 +1969,7 @@ TEST(IntersectionReviewRayPlaneOverflowIsMiss) {
 }
 
 TEST(IntersectionReviewBoxExpandKeepsNaN) {
-    const float nan = __builtin_nanf("");
+    const float nan = platform::PlatformMath::QuietNaN<float>();
     Box<float> box = Box<float>::Empty().ExpandedToInclude(Vec3(nan, 0.0f, 0.0f));
     CHECK(!box.IsValid());
     box = box.ExpandedToInclude(Vec3(1.0f, 1.0f, 1.0f));

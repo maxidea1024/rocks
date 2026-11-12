@@ -3,6 +3,7 @@
 #include <Core/Result.h>
 #include <Core/Text/StringBuilder.h>
 #include <Platform/Fatal.h>
+#include <Base/Checked.h>
 
 // 시간 간격(TimeSpan)이다. 두 시각의 차이, 타이머 길이, 쿨다운처럼 "얼마나 긴가"를 나타낸다.
 // 시각 자체는 DateTime(Core/Time/DateTime.h)이 나타낸다.
@@ -149,7 +150,7 @@ public:
     // 더하거나 뺀다. 결과가 범위를 넘으면 Overflow다(값은 바뀌지 않는다).
     Result<TimeSpan> TryAdd(TimeSpan other) const noexcept {
         int64 sum = 0;
-        if (__builtin_add_overflow(ticks_, other.ticks_, &sum)) {
+        if (!::rocks::TryAdd(ticks_, other.ticks_, sum)) {
             return Result<TimeSpan>::Failure(ErrorCode::Overflow);
         }
 
@@ -158,7 +159,7 @@ public:
 
     Result<TimeSpan> TrySubtract(TimeSpan other) const noexcept {
         int64 difference = 0;
-        if (__builtin_sub_overflow(ticks_, other.ticks_, &difference)) {
+        if (!::rocks::TrySubtract(ticks_, other.ticks_, difference)) {
             return Result<TimeSpan>::Failure(ErrorCode::Overflow);
         }
 
@@ -213,7 +214,7 @@ public:
 private:
     static Result<TimeSpan> TryScale(int64 value, int64 unit) noexcept {
         int64 ticks = 0;
-        if (__builtin_mul_overflow(value, unit, &ticks)) {
+        if (!::rocks::TryMultiply(value, unit, ticks)) {
             return Result<TimeSpan>::Failure(ErrorCode::Overflow);
         }
 

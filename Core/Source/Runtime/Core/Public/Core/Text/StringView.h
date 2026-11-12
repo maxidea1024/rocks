@@ -2,6 +2,7 @@
 
 #include <Base/Types.h>
 #include <Core/Result.h>
+#include <Platform/Memory.h>
 
 namespace rocks {
 
@@ -26,12 +27,9 @@ public:
 
     // C 문자열의 첫 NUL까지 읽는다. nullptr는 빈 view다.
     // embedded NUL을 포함하려면 아래 pointer/byteCount 생성자를 사용한다.
-    constexpr StringView(const char* nullTerminated) noexcept : data_(nullTerminated) {
-        if (data_ != nullptr) {
-            while (data_[bytes_] != '\0') {
-                ++bytes_;
-            }
-        }
+    constexpr StringView(const char* nullTerminated) noexcept
+        : data_(nullTerminated),
+          bytes_(nullTerminated != nullptr ? platform::CStringLength(nullTerminated) : 0) {
     }
 
     // caller는 byteCount만큼 읽을 수 있는 storage를 제공한다. nullptr는 길이 0에만 허용한다.

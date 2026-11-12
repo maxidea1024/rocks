@@ -210,6 +210,19 @@ Result<usize> Bound(usize sourceBytes) noexcept {
     return Result<usize>::Success(static_cast<usize>(bound));
 }
 
+Result<usize> StreamBound(void* codec, usize sourceBytes) noexcept {
+    // 문맥의 수준·window·memLevel·래퍼(gzip은 확장 필드 없는 헤더)로 구한 상한이다.
+    // Z_NO_FLUSH·Z_FINISH만 쓰므로(zlib.h deflateBound 계약) 분할 호출에도 성립한다. 수준 0은
+    // zlib이 stored 기준 상한을 쓴다.
+    auto* state = static_cast<ZlibState*>(codec);
+    const z_size_t bound = deflateBound_z(&state->stream, static_cast<z_size_t>(sourceBytes));
+    if (bound == static_cast<z_size_t>(-1) || bound < sourceBytes) {
+        return Result<usize>::Failure(ErrorCode::Overflow);
+    }
+
+    return Result<usize>::Success(static_cast<usize>(bound));
+}
+
 Result<void*> CreateCompressor(CompressionFormat format, int32 level,
                                Allocator& allocator) noexcept {
     auto created = CreateState(format, allocator, true);

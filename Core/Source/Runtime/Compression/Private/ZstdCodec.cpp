@@ -9,6 +9,13 @@
 namespace rocks::detail::zstd {
 namespace {
 
+// stable input 압축은 ZSTD_e_continue 호출마다 입력을 분할 단위만큼 늘려 준다. 분할 단위가 최대
+// 블록 크기(128KiB)의 배수여야 호출이 끝날 때 미소비 입력이 남지 않는다. 남으면
+// ZSTD_CCtx_reset(session_only)이 그 값을 지우지 않아, 취소·실패 뒤 문맥을 재사용할 때 다음 세션의
+// 입력 위치가 어긋난다.
+static_assert(CompressionChunkBytes % ZSTD_BLOCKSIZE_MAX == 0,
+              "compression chunk must be a multiple of the zstd maximum block size");
+
 void* Allocate(void* opaque, size_t bytes) {
     return CodecAllocate(*static_cast<Allocator*>(opaque), bytes);
 }
@@ -48,12 +55,24 @@ ErrorCode DecompressionError(size_t code) noexcept {
     case ZSTD_error_dictionary_wrong:
     case ZSTD_error_dictionary_corrupted:
         return ErrorCode::Unsupported;
+    case ZSTD_error_frameParameter_windowTooLarge:
+        // RFC 8878은 2^31보다 큰 window도 허용하지만 이 구현의 상한(ZSTD_WINDOWLOG_MAX)을 넘는다.
+        return ErrorCode::Unsupported;
     case ZSTD_error_stage_wrong:
     case ZSTD_error_init_missing:
     case ZSTD_error_parameter_unsupported:
     case ZSTD_error_parameter_outOfBound:
+    case ZSTD_error_stabilityCondition_notRespected:
+    case ZSTD_error_dstBuffer_null:
+    case ZSTD_error_dstBuffer_wrong:
+    case ZSTD_error_srcBuffer_wrong:
+    case ZSTD_error_workSpace_tooSmall:
+    case ZSTD_error_noForwardProgress_destFull:
+    case ZSTD_error_noForwardProgress_inputEmpty:
+        // adapter가 API 계약을 어긴 경우다(입력 데이터 탓이 아니다).
         return ErrorCode::DependencyFailed;
     default:
+        // GENERIC을 포함한 나머지는 입력 손상이다(예: FSE 정규화 표가 틀리면 GENERIC).
         return ErrorCode::InvalidArgument;
     }
 }

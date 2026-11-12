@@ -2,6 +2,7 @@
 
 #include <Core/Containers/Span.h>
 #include <Core/Math/Quaternion.h>
+#include <Platform/PlatformMath.h>
 
 namespace rocks {
 
@@ -42,9 +43,9 @@ using GeometryScalar = typename GeometryNonDeduced<T>::Type;
 template <typename T>
 constexpr T GeometryInfinity() noexcept {
     if constexpr (IsSameV<T, float>) {
-        return __builtin_huge_valf();
+        return platform::PlatformMath::Infinity<float>();
     } else {
-        return __builtin_huge_val();
+        return platform::PlatformMath::Infinity<double>();
     }
 }
 

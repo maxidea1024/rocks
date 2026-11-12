@@ -101,6 +101,47 @@ internal static class SelfTests
                 }
             }
         });
+        suite.Add("Policy.RepositoryCompilerBuiltins", () => NoFailures(PolicyChecks.CompilerBuiltins(options.Root)));
+        suite.Add("Policy.CompilerBuiltinControls", () =>
+        {
+            using TemporaryDirectory temporary = new();
+            // 지정 헤더는 자기 계열만 쓴다. 기능 검사 매크로와 builtin이 아닌 이름은 허용한다.
+            const string memory = "Core/Source/Runtime/PlatformBase/Public/Platform/Memory.h";
+            const string atomics = "Core/Source/Runtime/PlatformBase/Public/Platform/Atomics.h";
+            temporary.Write(memory, "inline void C(void* d, const void* s, usize n) { __builtin_memcpy(d, s, n); }\n" +
+                "constexpr usize L(const char* t) { return __builtin_strlen(t); }\n");
+            temporary.Write(atomics, "enum class MemoryOrder { Relaxed = __ATOMIC_RELAXED };\n" +
+                "template <class T> T Load(const T* a) { T r; __atomic_load(a, &r, __ATOMIC_ACQUIRE); return r; }\n");
+            temporary.Write("Core/Source/Runtime/Base/Public/Base/Compiler.h", "#define ROCKS_UNREACHABLE() __builtin_unreachable()\n");
+            temporary.Write("Engine/Source/Runtime/Probe/Private/Clean.cpp",
+                "#if __has_builtin(x)\n#endif\nvoid builtin_memcpy(); int my__builtin_x;\n");
+            NoFailures(PolicyChecks.CompilerBuiltins(temporary.Root));
+
+            // 지정 헤더라도 다른 계열은 위반이다.
+            foreach (string source in new[] { "__atomic_fetch_add(&x, 1, 0);", "__builtin_bswap32(x);" })
+            {
+                temporary.Write(memory, source + "\n");
+                Verify.Equal(1, PolicyChecks.CompilerBuiltins(temporary.Root).Count, "helper allowance too wide: " + source);
+            }
+            temporary.Write(memory, "#pragma once\n");
+
+            // 그 밖의 소스는 테스트까지 모두 위반이다.
+            foreach (string source in new[] { "__builtin_memcpy(d, s, n);", "x = __builtin_bit_cast(float, y);",
+                "__atomic_add_fetch(&counter, 1, __ATOMIC_RELAXED);", "__sync_synchronize();",
+                "__c11_atomic_load(&x, 0);", "int order = __ATOMIC_SEQ_CST;", "auto o = __builtin_offsetof(T, m);" })
+            {
+                foreach (string file in new[] { "Engine/Source/Runtime/Probe/Private/Probe.cpp",
+                    "Core/Source/Runtime/Core/Tests/ProbeTests.cpp", "Programs/Sandbox/Private/Probe.h" })
+                {
+                    temporary.Write(file, "// first line\n" + source + "\n");
+                    var failures = PolicyChecks.CompilerBuiltins(temporary.Root);
+                    Verify.That(failures.Count == 1 && failures[0].Line == 2 &&
+                        failures[0].ToString().Contains("compiler-builtin", StringComparison.Ordinal),
+                        $"builtin escaped audit in {file}: {source}");
+                    temporary.Write(file, "// clean\n");
+                }
+            }
+        });
         suite.Add("Policy.RepositoryPythonFreeMainPath", () => NoFailures(PolicyChecks.PythonFreeMainPath(options.Root)));
         suite.Add("Policy.RuntimePositiveAndNegativeControls", () =>
         {

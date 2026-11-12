@@ -205,7 +205,10 @@ Result<usize> CompressAppend(CompressorState& state, Span<const uint8> source, A
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
 
-    auto bound = TryGetCompressBound(state.format, source.Size());
+    // zlib 계열은 문맥의 실제 설정(수준·window·memLevel)으로 구한 상한을 쓴다. 문맥 없는 공개
+    // bound보다 훨씬 작아(약 13% → 0.03% 여유) 0으로 채우는 확보량이 줄어든다.
+    auto bound = IsZlibFamily(state.format) ? zlib::StreamBound(state.codec, source.Size())
+                                            : TryGetCompressBound(state.format, source.Size());
     if (!bound) {
         return Result<usize>::Failure(bound.Error());
     }
@@ -305,6 +308,12 @@ Result<usize> DecompressIntoOnce(CompressionFormat format, Span<const uint8> sou
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // Lz4 해제는 코덱 상태가 없으므로 할당하지 않는다(가장 빠른 경로에 OOM 실패를 만들지 않는다).
+    if (format == CompressionFormat::Lz4) {
+        DecompressorState stateless{format, &scratch, nullptr};
+        return DecompressInto(stateless, source, destination, probe);
+    }
+
     auto state = CreateDecompressorState(format, scratch);
     if (!state) {
         return Result<usize>::Failure(state.Error());
@@ -320,6 +329,11 @@ Result<usize> DecompressAppendOnce(CompressionFormat format, Span<const uint8> s
                                    const CompressionProbe& probe) noexcept {
     if (source.Size() == 0 || OverlapsArrayStorage(source, output)) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (format == CompressionFormat::Lz4) {
+        DecompressorState stateless{format, &scratch, nullptr};
+        return DecompressAppend(stateless, source, maxOutputBytes, output, probe);
     }
 
     auto state = CreateDecompressorState(format, scratch);

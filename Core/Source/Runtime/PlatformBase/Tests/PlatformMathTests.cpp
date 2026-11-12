@@ -2,6 +2,7 @@
 #include <Platform/PlatformMath.h>
 
 #include <float.h>
+#include <Platform/Memory.h>
 
 // CPU별 PlatformMath·simd 구현이 Generic/scalar 기준 구현과 같은 계약을 지키는지 차등 검사한다.
 // 정확 함수는 bit 단위(NaN은 NaN끼리) 일치, 근사 함수는 문서화한 상대 오차 이내를 요구한다.
@@ -28,11 +29,11 @@ struct TestRandom {
 };
 
 float FloatBits(uint32 bits) {
-    return __builtin_bit_cast(float, bits);
+    return platform::BitCast<float>(bits);
 }
 
 double DoubleBits(uint64 bits) {
-    return __builtin_bit_cast(double, bits);
+    return platform::BitCast<double>(bits);
 }
 
 // 같은 bit이거나 둘 다 NaN이면 같은 결과로 본다. NaN payload는 CPU 계약에 포함하지 않는다.
@@ -40,17 +41,17 @@ bool SameFloat(float a, float b) {
     if (GenericPlatformMath::IsNaN(a) || GenericPlatformMath::IsNaN(b)) {
         return GenericPlatformMath::IsNaN(a) && GenericPlatformMath::IsNaN(b);
     }
-    return __builtin_bit_cast(uint32, a) == __builtin_bit_cast(uint32, b);
+    return platform::BitCast<uint32>(a) == platform::BitCast<uint32>(b);
 }
 
 bool SameDouble(double a, double b) {
     if (GenericPlatformMath::IsNaN(a) || GenericPlatformMath::IsNaN(b)) {
         return GenericPlatformMath::IsNaN(a) && GenericPlatformMath::IsNaN(b);
     }
-    return __builtin_bit_cast(uint64, a) == __builtin_bit_cast(uint64, b);
+    return platform::BitCast<uint64>(a) == platform::BitCast<uint64>(b);
 }
 
-constexpr float Infinity = __builtin_huge_valf();
+constexpr float Infinity = platform::PlatformMath::Infinity<float>();
 const float QuietNaN = FloatBits(0x7fc00000u);
 
 const float SpecialFloats[] = {
@@ -151,8 +152,8 @@ TEST(PlatformMath_ClassificationUsesBitPatterns) {
     CHECK(PlatformMath::IsNaN(DoubleBits(0x7ff8000000000000ull)));
     CHECK(!PlatformMath::IsFinite(DoubleBits(0x7ff0000000000000ull)));
     CHECK(PlatformMath::IsFinite(DBL_MIN));
-    static_assert(GenericPlatformMath::IsNaN(__builtin_nanf("")));
-    static_assert(!GenericPlatformMath::IsFinite(__builtin_huge_val()));
+    static_assert(GenericPlatformMath::IsNaN(platform::PlatformMath::QuietNaN<float>()));
+    static_assert(!GenericPlatformMath::IsFinite(platform::PlatformMath::Infinity<double>()));
 }
 
 TEST(PlatformMath_MinMaxFollowComparisonSelectContract) {
@@ -162,7 +163,7 @@ TEST(PlatformMath_MinMaxFollowComparisonSelectContract) {
     CHECK(PlatformMath::SignBit(PlatformMath::Min(0.0f, -0.0f)));
     CHECK(!PlatformMath::SignBit(PlatformMath::Min(-0.0f, 0.0f)));
     CHECK(PlatformMath::Max(2.0, 3.0) == 3.0);
-    CHECK(PlatformMath::IsNaN(PlatformMath::Max(1.0, __builtin_nan(""))));
+    CHECK(PlatformMath::IsNaN(PlatformMath::Max(1.0, platform::PlatformMath::QuietNaN<double>())));
 }
 
 TEST(PlatformMath_AbsAndCopySignHandleSignedZeroAndNaN) {
@@ -258,7 +259,7 @@ TEST(PlatformMath_RoundingDirectionContract) {
 
 TEST(PlatformMath_TryConversionsRejectWithoutChangingOutput) {
     int32 output = 77;
-    CHECK(!PlatformMath::TryFloorToInt32(__builtin_nan(""), output));
+    CHECK(!PlatformMath::TryFloorToInt32(platform::PlatformMath::QuietNaN<double>(), output));
     CHECK(!PlatformMath::TryRoundToInt32(2147483647.5, output));
     CHECK(!PlatformMath::TryCeilToInt32(2147483647.1, output));
     CHECK(!PlatformMath::TryTruncToInt32(-2147483649.0, output));

@@ -2,6 +2,7 @@
 
 #include <Base/Types.h>
 #include <Platform/Fatal.h>
+#include <Base/Checked.h>
 
 namespace rocks {
 
@@ -12,7 +13,7 @@ namespace detail {
 
 inline int32 CheckedAdd(int32 a, int32 b) noexcept {
     int32 result = 0;
-    if (__builtin_add_overflow(a, b, &result)) {
+    if (!TryAdd(a, b, result)) {
         platform::Fatal("IntVector addition overflow");
     }
     return result;
@@ -20,7 +21,7 @@ inline int32 CheckedAdd(int32 a, int32 b) noexcept {
 
 inline int32 CheckedSubtract(int32 a, int32 b) noexcept {
     int32 result = 0;
-    if (__builtin_sub_overflow(a, b, &result)) {
+    if (!TrySubtract(a, b, result)) {
         platform::Fatal("IntVector subtraction overflow");
     }
     return result;
@@ -28,7 +29,7 @@ inline int32 CheckedSubtract(int32 a, int32 b) noexcept {
 
 inline int32 CheckedMultiply(int32 a, int32 b) noexcept {
     int32 result = 0;
-    if (__builtin_mul_overflow(a, b, &result)) {
+    if (!TryMultiply(a, b, result)) {
         platform::Fatal("IntVector multiplication overflow");
     }
     return result;

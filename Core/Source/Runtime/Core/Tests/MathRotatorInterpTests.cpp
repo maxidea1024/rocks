@@ -1,6 +1,7 @@
 #include <TestSupport/Test.h>
 #include <TestSupport/MathTestSupport.h>
 #include <Core/Math/Rotator.h>
+#include <Platform/PlatformMath.h>
 
 namespace rocks::test {
 
@@ -46,7 +47,7 @@ TEST(Rotator_QuaternionRoundTripIncludingGimbalLock) {
         CHECK(AngularDistance(recovered.Value().ToQuaternion(), locked.ToQuaternion()) < 1.0e-6);
     }
     CHECK(!Rotator<float>::TryFromQuaternion(Quat(0.0f, 0.0f, 0.0f, 0.0f)));
-    CHECK(!Rotator<double>(__builtin_nan(""), 0.0, 0.0).IsFinite());
+    CHECK(!Rotator<double>(platform::PlatformMath::QuietNaN<double>(), 0.0, 0.0).IsFinite());
     const Rotator<double> wrapped = Rotator<double>(7.0, -7.0, 4.0).Normalized();
     CHECK(wrapped.yaw <= math::Pi<double> && wrapped.yaw > -math::Pi<double>);
     CHECK(AngularDistance(wrapped.ToQuaternion(), Rotator<double>(7.0, -7.0, 4.0).ToQuaternion()) <
@@ -58,7 +59,8 @@ TEST(MathInterp_SmoothStepAndCubic) {
     CHECK(math::SmoothStep(0.0, 1.0, 2.0) == 1.0);
     CHECK(math::SmoothStep(0.0, 1.0, 0.5) == 0.5);
     CHECK(math::SmoothStep(2.0f, 4.0f, 3.0f) == 0.5f);
-    CHECK(math::IsNaN(math::SmoothStep(0.0, 1.0, static_cast<double>(__builtin_nan("")))));
+    CHECK(math::IsNaN(math::SmoothStep(
+        0.0, 1.0, static_cast<double>(platform::PlatformMath::QuietNaN<double>()))));
     CHECK(math::CubicInterp(1.0, 0.0, 5.0, 0.0, 0.0) == 1.0);
     CHECK(math::CubicInterp(1.0, 0.0, 5.0, 0.0, 1.0) == 5.0);
     CHECK(math::CubicInterp(0.0, 0.0, 2.0, 0.0, 0.5) == 1.0);
@@ -93,7 +95,8 @@ TEST(MathInterp_GridSnapWrapAndDeltaAngle) {
     CHECK(math::Wrap(360.0, 0.0, 360.0) == 0.0);
     CHECK(math::Wrap(-360.0, 0.0, 360.0) == 0.0);
     CHECK(math::Wrap(-1.0e-20, 0.0, 360.0) == 0.0); // 보정 반올림이 max가 되면 min
-    CHECK(math::IsNaN(math::Wrap(static_cast<double>(__builtin_huge_val()), 0.0, 1.0)));
+    CHECK(math::IsNaN(
+        math::Wrap(static_cast<double>(platform::PlatformMath::Infinity<double>()), 0.0, 1.0)));
     CHECK(Near(math::FindDeltaAngleRadians(3.0, -3.0), 2.0 * math::Pi<double> - 6.0, 1.0e-12));
     CHECK(Near(math::FindDeltaAngleRadians(-3.0, 3.0), 6.0 - 2.0 * math::Pi<double>, 1.0e-12));
 }
@@ -133,7 +136,7 @@ TEST(Rotator_FromQuaternionUsesHalfOpenRange) {
 }
 
 TEST(Interp_PropagatesNaNInsteadOfReturningTarget) {
-    const double nan = __builtin_nan("");
+    const double nan = platform::PlatformMath::QuietNaN<double>();
     CHECK(math::IsNaN(math::InterpTo(0.0, 1.0, 0.1, nan)));
     CHECK(math::IsNaN(math::InterpTo(nan, 1.0, 0.1, 100.0)));
     CHECK(math::IsNaN(math::InterpTo(0.0, nan, 0.1, 0.0)));
@@ -141,7 +144,7 @@ TEST(Interp_PropagatesNaNInsteadOfReturningTarget) {
     CHECK(math::IsNaN(math::InterpConstantTo(0.0, -nan, 1.0, 1.0)));
     CHECK(math::IsNaN(math::InterpConstantTo(nan, 1.0, 1.0, 1.0)));
     // 같은 무한대는 이미 도달한 상태다(차가 NaN이어도 NaN으로 바꾸지 않는다).
-    const double infinity = __builtin_huge_val();
+    const double infinity = platform::PlatformMath::Infinity<double>();
     CHECK(math::InterpConstantTo(infinity, infinity, 1.0, 1.0) == infinity);
     CHECK(math::InterpConstantTo(-infinity, -infinity, 1.0, 1.0) == -infinity);
     // 유효 입력의 기존 의미는 유지된다.

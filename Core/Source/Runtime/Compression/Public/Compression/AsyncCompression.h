@@ -3,44 +3,45 @@
 #include <Compression/Compression.h>
 #include <Task/WorkerScheduler.h>
 
-// WorkerScheduler 위의 비동기 압축·해제다. 동기 API와 같은 구현·같은 분할 단위를 쓰므로 결과 byte가
-// 같다.
+// WorkerScheduler 위의 비동기 압축·해제다. 동기 API와 같은 구현·같은 분할 단위를 쓰므로
+// 결과 byte가 같다.
 //
 // 사용 예(파일 읽기 작업이 채운 버퍼를 이어서 해제):
-//   CompressionTask task;                      // source·output보다 나중에 선언한다(먼저 소멸해야
-//   한다) auto submitted = TrySubmitDecompress(scheduler, task, CompressionFormat::Zstd,
-//   packed.View(), 64 << 20,
-//                                        unpacked, Span<const WorkerTaskHandle>(&readTask, 1));
+//   // task는 source·output보다 나중에 선언한다(먼저 소멸해야 한다).
+//   CompressionTask task;
+//   auto readDone = Span<const WorkerTaskHandle>(&readTask, 1);
+//   auto submitted = TrySubmitDecompress(scheduler, task, CompressionFormat::Zstd, packed.View(),
+//                                        64 << 20, unpacked, readDone);
 //   ...
-//   auto bytes = task.TryWaitResult();          // 성공 시 unpacked 뒤에 붙인 byte 수
+//   auto bytes = task.TryWaitResult(); // 성공 시 unpacked 뒤에 붙인 byte 수
 //
 // 계약:
-// - 할당기: body와 코덱 작업 메모리는 Append 변형에서는 output.GetAllocator(), Span 변형에서는
-// scratch에서
-//   할당한다. 이 할당기는 worker에서 output 성장·코덱 scratch·capture 해제를 수행하므로 소유
-//   스레드와 동시에 써도 안전해야 한다(System·Binned·Budget·Pool·External·Debug 허용, Arena·Stack
-//   금지).
-// - 수명: source·output(또는 destination·scratch)은 작업이 terminal이 될 때까지 유효해야 하고 다른
-// 코드가 건드리지
-//   않아야 한다. source의 주소·길이는 제출 시점에 고정되며 앞선 의존 작업은 내용만 채울 수 있다.
-//   output의 원래 길이는 body가 시작할 때 기록하므로 의존으로 직렬화한 여러 작업이 같은 output에
-//   이어 붙일 수 있다.
-// - 취소: 협력적이다. body 시작 전과, 입력 소비나 출력 생성이 1MiB에 이를 때마다 확인한다. 취소를
-// 관측하면
-//   output 길이를 되돌리고 결과는 Cancelled다. Zstd·Deflate·Zlib·Gzip은 진행 중에도 취소되지만
-//   Lz4는 한 번의 코덱 호출을 끊지 않는다(HC 12로 2GiB 가까운 입력은 100초 이상 걸릴 수 있어
-//   Shutdown(Cancel)도 그만큼 기다린다).
+// - 할당기: body와 코덱 작업 메모리는 Append 변형에서는 output.GetAllocator(), Span
+//   변형에서는 scratch에서 할당한다. 이 할당기는 worker에서 output 성장·코덱 scratch·capture
+//   해제를 수행하므로 소유 스레드와 동시에 써도 안전해야 한다(System·Binned·Budget·Pool·
+//   External·Debug 허용, Arena·Stack 금지).
+// - 수명: source·output(또는 destination·scratch)은 작업이 terminal이 될 때까지 유효해야
+//   하고 다른 코드가 건드리지 않아야 한다. source의 주소·길이는 제출 시점에 고정되며 앞선
+//   의존 작업은 내용만 채울 수 있다. output은 제출 시점에 읽지 않고 body가 시작할 때 원래
+//   길이를 기록하므로, 의존으로 직렬화한 여러 작업이 같은 output에 이어 붙일 수 있다.
+//   source와 output 저장소의 겹침은 body가 검사해 InvalidArgument로 보고한다.
+// - 취소: 협력적이다. body 시작 전과 코덱 분할 단위(1MiB)마다 확인한다. Deflate·Zlib·Gzip과
+//   zstd 압축은 입력 소비나 출력 생성 1MiB마다, zstd 해제는 입력 1MiB마다 확인한다(압축률이
+//   아주 높은 입력은 한 번에 큰 출력을 만들 수 있다). Lz4는 한 번의 코덱 호출을 끊지 않는다
+//   (HC 12로 2GiB 가까운 입력은 100초 이상 걸릴 수 있어 Shutdown(Cancel)도 그만큼 기다린다).
+//   취소를 관측하면 output 길이를 되돌리고 결과는 Cancelled다.
 // - 용량: scheduler의 maxInFlight를 넘으면 제출이 CapacityExceeded다. 제출 속도는 호출자가
-// 조절한다.
+//   조절한다.
 namespace rocks {
 
-// 비동기 작업 한 건의 결과 보관소다. 결과 slot을 객체 안에 두므로 이동할 수 없다(Array 원소가 될 수
-// 없으니 C 배열이나 UniquePtr로 둔다).
-// - 소멸자는 진행 중인 작업에 취소를 요청하고 끝날 때까지 기다린다. 같은 scheduler의 worker에서
-// 진행 중인 task를
-//   소멸하면 기다릴 수 없으므로 Fatal이다.
-// - 같은 객체에 대한 제출·결과 조회·소멸은 한 스레드에서 한다. 다른 스레드는 Handle()로
-// Wait·Status만 한다.
+// 비동기 작업 한 건의 결과 보관소다. 결과 slot을 객체 안에 두므로 이동할 수 없다(Array
+// 원소가 될 수 없으니 C 배열이나 UniquePtr로 둔다).
+// - 소멸자는 진행 중인 작업에 취소를 요청하고 끝날 때까지 기다린다. 대기 중인 작업의 취소는
+//   worker가 처리하므로, 모든 worker가 막혀 있으면 소멸자도 기다린다. 같은 scheduler의 worker
+//   (다른 작업의 body·capture 정리 포함)에서 진행 중인 task를 소멸하면 기다릴 수 없으므로
+//   Fatal이다. 그래서 task를 다른 작업의 capture가 소유하게 하지 않는다.
+// - 같은 객체에 대한 제출·결과 조회·소멸은 한 스레드에서 한다. 다른 스레드는 Handle().Clone()
+//   으로 얻은 handle로 Wait·Status를 한다(재제출이 handle을 바꾸기 때문이다).
 // - terminal 이후 같은 객체로 다시 제출할 수 있다.
 class CompressionTask {
 public:

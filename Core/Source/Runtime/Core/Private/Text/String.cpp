@@ -1,6 +1,6 @@
 #include <Core/Text/String.h>
 #include <Base/Checked.h>
-#include <string.h>
+#include <Platform/Memory.h>
 
 namespace rocks {
 namespace {
@@ -143,7 +143,7 @@ Result<void> String::TryAssign(StringView source) noexcept {
     const usize required = source.ByteCount();
     if (required <= capacity_) {
         // 자기 부분 문자열도 source와 destination이 겹칠 수 있으므로 memmove를 사용한다.
-        memmove(data_, source.Data(), required);
+        platform::MemoryMove(data_, source.Data(), required);
         data_[required] = '\0';
         bytes_ = required;
         return Result<void>::Success();
@@ -156,7 +156,7 @@ Result<void> String::TryAssign(StringView source) noexcept {
 
     char* replacement = allocation.Value();
     // source가 이전 buffer를 참조해도 복사가 끝나기 전에는 해제하지 않는다.
-    memcpy(replacement, source.Data(), required);
+    platform::MemoryCopy(replacement, source.Data(), required);
     replacement[required] = '\0';
     FreeBuffer(data_);
     data_ = replacement;
@@ -181,7 +181,7 @@ Result<void> String::TryAppend(StringView source) noexcept {
     }
 
     if (required <= capacity_) {
-        memmove(data_ + bytes_, source.Data(), source.ByteCount());
+        platform::MemoryMove(data_ + bytes_, source.Data(), source.ByteCount());
         data_[required] = '\0';
         bytes_ = required;
         return Result<void>::Success();
@@ -195,11 +195,11 @@ Result<void> String::TryAppend(StringView source) noexcept {
 
     char* replacement = allocation.Value();
     if (bytes_ != 0) {
-        memcpy(replacement, data_, bytes_);
+        platform::MemoryCopy(replacement, data_, bytes_);
     }
 
     // prefix와 추가 source를 모두 읽은 뒤에만 이전 buffer를 회수한다.
-    memcpy(replacement + bytes_, source.Data(), source.ByteCount());
+    platform::MemoryCopy(replacement + bytes_, source.Data(), source.ByteCount());
     replacement[required] = '\0';
     FreeBuffer(data_);
     data_ = replacement;
@@ -212,7 +212,7 @@ void String::AppendPathInPlace(StringView suffix, bool separator) noexcept {
     const usize offset = bytes_ + (separator ? 1 : 0);
     if (!suffix.IsEmpty()) {
         // separator를 먼저 쓰면 겹친 suffix가 손상될 수 있다. memmove로 원본부터 보존한다.
-        memmove(data_ + offset, suffix.Data(), suffix.ByteCount());
+        platform::MemoryMove(data_ + offset, suffix.Data(), suffix.ByteCount());
     }
     if (separator) {
         data_[bytes_] = '/';
@@ -232,7 +232,7 @@ Result<void> String::TryReserve(usize byteCapacity) noexcept {
     }
 
     char* replacement = allocation.Value();
-    memcpy(replacement, CStr(), bytes_ + 1);
+    platform::MemoryCopy(replacement, CStr(), bytes_ + 1);
     FreeBuffer(data_);
     data_ = replacement;
     capacity_ = byteCapacity;

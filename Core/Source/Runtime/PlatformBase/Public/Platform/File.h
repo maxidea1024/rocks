@@ -25,7 +25,10 @@ enum class FileCode {
     // 비어 있지 않은 디렉터리를 DeleteDirectory로 지우려 했다.
     DirectoryNotEmpty,
     // 파일 연산을 디렉터리에, 디렉터리 연산을 파일에 적용했다.
-    WrongType
+    WrongType,
+    // 연산 결과는 이미 보이지만 저장 매체 기록을 확인하지 못했다(FileSystem::Replace 뒤 부모
+    // 디렉터리 동기화 실패). 전원이 끊기면 연산 전 상태로 돌아갈 수 있다. 되돌리지 않는다.
+    NotDurable
 };
 
 struct [[nodiscard]] FileStatus {
@@ -68,6 +71,11 @@ public:
     virtual FileTransfer Write(const void* source, usize bytes) noexcept = 0;
     virtual FileStatus Seek(int64 offset, FileSeekOrigin origin, uint64& position) noexcept = 0;
     virtual FileStatus Size(uint64& bytes) noexcept = 0;
+    // 지금까지 쓴 내용과 크기 정보를 저장 매체까지 내보낸다(Windows FlushFileBuffers, macOS
+    // F_FULLFSYNC, 그 밖의 POSIX fsync). 읽기 전용으로 연 핸들은 이 핸들로 쓴 내용이 없으므로
+    // 성공한다(Windows는 쓰기 권한 없는 핸들로 매체 기록을 요청할 수 없다). 기본 구현은
+    // Unsupported다(wrapper는 하위 핸들로 전달한다).
+    virtual FileStatus Flush() noexcept;
     virtual FileStatus Close() noexcept = 0;
     virtual void Destroy() noexcept = 0;
 
@@ -85,6 +93,10 @@ enum class FileType : uint8 {
 // 파일 시각의 단위다. 시각은 0001-01-01T00:00:00 UTC부터의 100ns tick이며(UE FDateTime tick과
 // 같은 기준) 0은 알 수 없음이다. 운영체제·파일 시스템마다 실제 해상도가 다르다(FAT 2초 등).
 inline constexpr int64 FileTicksPerSecond = 10000000;
+// FileSystem::SetModifiedTime이 받는 tick 범위다. 하한(1601-01-01T00:00:00 UTC, Windows FILETIME
+// 0)은 포함하지 않고 상한(9999-12-31T23:59:59.9999999 UTC)은 포함한다.
+inline constexpr int64 FileTicksSettableAfter = 584388ll * 864000000000ll;
+inline constexpr int64 FileTicksSettableLast = 3155378975999999999ll;
 
 // Stat·EnumerateDirectory가 채우는 항목 정보다.
 // - Stat: link를 따라간 대상의 type·size·시각이며, isLink는 경로 자체가 link인지다.
@@ -161,6 +173,30 @@ public:
     // 같은 파일이면 원본을 지키기 위해 실패한다.
     virtual FileStatus Copy(const char* from, usize fromBytes, const char* to, usize toBytes,
                             bool replaceExisting) noexcept;
+    // 일반 파일 from으로 to를 교체한다(같은 volume, to가 없으면 이름만 바꾼다). 저장을 원자적으로
+    // 끝내는 마지막 단계용이다: 임시 파일에 다 쓰고 Flush한 뒤 Replace한다. 교체는 이름만 바꾸므로
+    // to의 속성·권한·대체 스트림은 from의 것이 된다(이전 to에서 승계하지 않는다).
+    // - Windows: POSIX 의미 rename(FileRenameInfoEx, REPLACE_IF_EXISTS | POSIX_SEMANTICS)으로 to를
+    //   다른 프로세스가 FILE_SHARE_DELETE로 열어 두었어도 교체한다. 이 의미를 지원하지 않는 볼륨
+    //   (FAT·일부 네트워크 FS)은 MoveFileExW(REPLACE_EXISTING)로 대신하며, 그 볼륨에서는 다른
+    //   프로세스가 연 to를 교체할 수 없다(Busy 또는 AccessDenied). 이름 변경의 매체 기록은 NTFS
+    //   메타데이터 로그에 맡긴다: 전원이 끊겨도 이전 이름 또는 새 이름 중 하나로 남지만, 반환 직후
+    //   끊기면 이전 상태일 수 있다(Windows는 일반 권한으로 디렉터리를 동기화할 수 없다).
+    // - POSIX: rename 후 to의 부모 디렉터리를 fsync(macOS는 F_FULLFSYNC)해 이름 변경을 매체에
+    //   남긴다. 그 동기화만 실패하면 NotDurable이다(교체는 이미 보인다).
+    // 실패: from이 일반 파일이 아니면(디렉터리·link·장치) WrongType, to가 디렉터리·link면
+    // WrongType(link를 따라 교체하지 않는다), to가 읽기 전용이거나 권한이 없으면 AccessDenied,
+    // from·to를 다른 프로세스가 공유 없이 열어 두었으면 Busy, 다른 volume은 Unsupported, from이나
+    // to의 부모가 없으면 NotFound. NotDurable 밖의 실패에서는 to가 바뀌지 않는다(OS 보장 범위
+    // 안에서). 검사와 교체 사이에 다른 프로세스가 경로를 바꾸면 결과는 OS 규칙을 따른다.
+    virtual FileStatus Replace(const char* from, usize fromBytes, const char* to,
+                               usize toBytes) noexcept;
+    // 파일의 수정 시각을 modifiedTicks(FileTicksPerSecond 단위, 0001-01-01 UTC 기준)로 바꾼다(캐시
+    // 사용 표시 등). link는 따라간 대상을 바꾼다. 모든 플랫폼이 표현하는 범위인 1601-01-01 UTC
+    // 초과 9999-12-31 UTC 이하만 받고(Windows FILETIME 하한·FileInfo 상한) 그 밖은
+    // InvalidArgument다.
+    virtual FileStatus SetModifiedTime(const char* path, usize pathBytes,
+                                       int64 modifiedTicks) noexcept;
 };
 
 // FileSystem 기본 연산 위의 공용 helper다.
@@ -181,7 +217,9 @@ FileStatus DeleteDirectoryTree(FileSystem& system, const char* path, usize pathB
 // 파일명 유효성/권한, symbolic link 추적 여부와 공유 모드 등은 운영체제의 의미를 따른다.
 // 보안 경계가 필요한 호출자는 별도 핸들 기반 경로 제약을 사용해야 한다. Windows 장치
 // namespace·확장 경로와 레거시 DOS 장치 이름은 Unsupported다. Exists는 OS가 해석한 링크
-// 대상을 검사하며 결과와 이후 접근 사이의 변경을 막지 않는다. ReadAt/Flush/Truncate는 없다.
+// 대상을 검사하며 결과와 이후 접근 사이의 변경을 막지 않는다. ReadAt/Truncate는 없다.
+// Windows는 경로가 MAX_PATH 근처를 넘으면(상대 경로는 현재 디렉터리를 붙인 길이 기준) 확장 경로로
+// 바꿔 긴 경로를 지원한다.
 FileSystem& PhysicalFileSystem() noexcept;
 
 // 사용 예: File file; if (auto s = file.Open("data.bin", FileOpenMode::ReadExisting))
@@ -218,12 +256,54 @@ public:
     // 성공할 때만 output을 갱신한다. 같은 File 내 seek/read/write는 호출 단위로 직렬화한다.
     FileStatus Seek(int64 offset, FileSeekOrigin origin, uint64& position) noexcept;
     FileStatus Size(uint64& bytes) noexcept;
+    // 쓴 내용을 저장 매체까지 내보낸다(FileHandle::Flush). 열려 있지 않으면 NotOpen이다.
+    FileStatus Flush() noexcept;
     FileStatus Close() noexcept;
     bool IsOpen() noexcept;
 
 private:
     Mutex mutex_;
     FileHandle* handle_ = nullptr;
+};
+
+// 프로세스 사이 배타 잠금이다(권고 잠금 — 잠금을 쓰는 프로그램끼리만 효력이 있다). 잠금 파일 하나를
+// 열어 Windows LockFileEx, POSIX flock으로 잠근다. 같은 프로세스 안의 다른 FileLock과도 배타다.
+// 프로세스가 끝나면 OS가 잠금을 푼다(비정상 종료 포함). 잠금 파일은 지우지 않는다(지우면 잠금을
+// 우회하는 경합이 생긴다). Windows는 잠금 파일을 연 동안 지우거나 바꿀 수 없게 열고, POSIX는 잠근
+// 뒤 경로가 여전히 같은 파일인지 확인해 다르면(다른 쪽이 지우거나 바꿨다) 다시 연다. 잠금에는 읽기
+// 권한만 필요하다(POSIX는 새 잠금 파일을 umask를 적용한 0666으로 만든다).
+//
+// 사용 예:
+//   platform::FileLock lock;
+//   if (auto held = lock.Acquire("C:/Game/Intermediate/AssetDatabase.lock", 5000); !held) {
+//       // held.code == FileCode::Busy: 다른 프로세스가 5초 동안 놓지 않았다
+//   }
+//   ... 쓰기 작업 ...
+//   lock.Release();
+//
+// 스레드: 한 객체를 여러 스레드가 동시에 쓰지 않는다.
+class FileLock final {
+public:
+    FileLock() noexcept = default;
+    ~FileLock() noexcept;
+    FileLock(const FileLock&) = delete;
+    FileLock& operator=(const FileLock&) = delete;
+
+    // path(없으면 만든다)를 배타 잠근다. 다른 쪽이 잡고 있으면 timeoutMilliseconds까지 50 ms
+    // 간격으로 다시 시도하고(0이면 한 번만) 넘으면 Busy다. 이미 잡고 있으면 AlreadyOpen이다.
+    FileStatus Acquire(const char* path, usize pathBytes, uint32 timeoutMilliseconds) noexcept;
+    FileStatus Acquire(const char* path, uint32 timeoutMilliseconds) noexcept;
+
+    // 잠금을 푼다. 잡고 있지 않으면 아무것도 하지 않는다.
+    void Release() noexcept;
+
+    bool IsHeld() const noexcept {
+        return held_;
+    }
+
+private:
+    uptr handle_ = 0;
+    bool held_ = false;
 };
 
 } // namespace rocks::platform

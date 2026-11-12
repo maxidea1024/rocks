@@ -14,27 +14,27 @@ namespace {
 constexpr uint32 MaxWorkers = 64;
 
 AsyncContextState& ContextOf(unsigned char* storage) noexcept {
-    return *__builtin_launder(reinterpret_cast<AsyncContextState*>(storage));
+    return *platform::Launder(reinterpret_cast<AsyncContextState*>(storage));
 }
 
 const AsyncContextState& ContextOf(const unsigned char* storage) noexcept {
-    return *__builtin_launder(reinterpret_cast<const AsyncContextState*>(storage));
+    return *platform::Launder(reinterpret_cast<const AsyncContextState*>(storage));
 }
 
 AsyncFileState& FileOf(unsigned char* storage) noexcept {
-    return *__builtin_launder(reinterpret_cast<AsyncFileState*>(storage));
+    return *platform::Launder(reinterpret_cast<AsyncFileState*>(storage));
 }
 
 const AsyncFileState& FileOf(const unsigned char* storage) noexcept {
-    return *__builtin_launder(reinterpret_cast<const AsyncFileState*>(storage));
+    return *platform::Launder(reinterpret_cast<const AsyncFileState*>(storage));
 }
 
 AsyncRequestState& RequestOf(unsigned char* storage) noexcept {
-    return *__builtin_launder(reinterpret_cast<AsyncRequestState*>(storage));
+    return *platform::Launder(reinterpret_cast<AsyncRequestState*>(storage));
 }
 
 const AsyncRequestState& RequestOf(const unsigned char* storage) noexcept {
-    return *__builtin_launder(reinterpret_cast<const AsyncRequestState*>(storage));
+    return *platform::Launder(reinterpret_cast<const AsyncRequestState*>(storage));
 }
 
 bool IsInFlight(const AsyncRequestState& request) noexcept {
@@ -435,13 +435,7 @@ FileStatus SubmitFileRequest(AsyncFileState& file, AsyncRequestState& request, u
 }
 
 usize PathLength(const char* path) noexcept {
-    usize bytes = 0;
-    if (path != nullptr) {
-        while (path[bytes] != '\0') {
-            ++bytes;
-        }
-    }
-    return bytes;
+    return path != nullptr ? CStringLength(path) : 0;
 }
 
 } // namespace

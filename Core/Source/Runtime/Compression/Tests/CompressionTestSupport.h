@@ -74,37 +74,43 @@ inline CompressionSettings DefaultSettings(CompressionFormat format) {
 }
 
 // 할당 수·현재 byte·최고 byte를 세는 스레드 안전 allocator다. 실제 할당은 inner에 맡긴다.
+// 요청 정렬을 지키도록 사용자 주소 앞에 정렬 크기(최소 16byte)의 머리를 두고 크기·머리 길이를
+// 기록한다.
 class CountingAllocator final : public Allocator {
 public:
     explicit CountingAllocator(Allocator& inner) noexcept : inner_(inner) {
     }
 
     Result<void*> Allocate(usize bytes, usize alignment, uint32 tag = 0) noexcept override {
-        auto allocation =
-            inner_.Allocate(bytes + Header, alignment > Header ? alignment : Header, tag);
+        const usize offset = alignment > Header ? alignment : Header;
+        if (bytes > static_cast<usize>(-1) - offset) {
+            return Result<void*>::Failure(ErrorCode::Overflow);
+        }
+        auto allocation = inner_.Allocate(bytes + offset, offset, tag);
         if (!allocation) {
             return allocation;
         }
-        auto* base = static_cast<uint8*>(allocation.Value());
-        *reinterpret_cast<usize*>(base) = bytes;
+        auto* user = static_cast<uint8*>(allocation.Value()) + offset;
+        reinterpret_cast<usize*>(user)[-2] = bytes;
+        reinterpret_cast<usize*>(user)[-1] = offset;
         platform::LockGuard lock(gate_);
         ++allocations_;
         current_ += bytes;
         peak_ = current_ > peak_ ? current_ : peak_;
-        return Result<void*>::Success(base + Header);
+        return Result<void*>::Success(user);
     }
 
     Result<void> Deallocate(void* address) noexcept override {
         if (address == nullptr) {
             return Result<void>::Success();
         }
-        auto* base = static_cast<uint8*>(address) - Header;
-        const usize bytes = *reinterpret_cast<usize*>(base);
+        const usize bytes = reinterpret_cast<usize*>(address)[-2];
+        const usize offset = reinterpret_cast<usize*>(address)[-1];
         {
             platform::LockGuard lock(gate_);
             current_ -= bytes;
         }
-        return inner_.Deallocate(base);
+        return inner_.Deallocate(static_cast<uint8*>(address) - offset);
     }
 
     uint64 Allocations() const noexcept {
@@ -128,14 +134,95 @@ public:
     }
 
 private:
-    // 정렬 16을 유지하면서 크기를 기록하는 머리다. 코덱 요청 정렬(16)과 같다.
-    static constexpr usize Header = 16;
+    static constexpr usize Header = 2 * sizeof(usize);
 
     Allocator& inner_;
     mutable platform::Mutex gate_;
     uint64 allocations_ = 0;
     usize current_ = 0;
     usize peak_ = 0;
+};
+
+// 비동기 시험의 시점 제어용 스레드 안전 allocator다. 무장한 뒤 N번째 할당 직전, 또는 기록한 주소의
+// 해제 직전에 멈추고(paused 신호) Resume까지 기다린다. 실제 할당은 inner에 맡긴다.
+class PausingAllocator final : public Allocator {
+public:
+    explicit PausingAllocator(Allocator& inner) noexcept : inner_(inner) {
+    }
+
+    // 지금부터 ordinal번째(1부터) 할당 직전에 멈춘다.
+    void PauseOnAllocation(uint32 ordinal) noexcept {
+        platform::LockGuard lock(gate_);
+        allocations_ = 0;
+        pauseAllocation_ = ordinal;
+    }
+
+    // 지금부터 ordinal번째 할당의 주소를 기록하고, 그 주소가 해제될 때 멈춘다.
+    void PauseOnDeallocationOf(uint32 ordinal) noexcept {
+        platform::LockGuard lock(gate_);
+        allocations_ = 0;
+        recordAllocation_ = ordinal;
+        pauseAddress_ = nullptr;
+    }
+
+    bool WaitPaused(uint32 timeoutMs = 10000) noexcept {
+        return paused_.Wait(timeoutMs) == platform::WaitResult::Signaled;
+    }
+
+    void Resume() noexcept {
+        resume_.Signal();
+    }
+
+    Result<void*> Allocate(usize bytes, usize alignment, uint32 tag = 0) noexcept override {
+        bool pause = false;
+        bool record = false;
+        {
+            platform::LockGuard lock(gate_);
+            ++allocations_;
+            pause = pauseAllocation_ != 0 && allocations_ == pauseAllocation_;
+            record = recordAllocation_ != 0 && allocations_ == recordAllocation_;
+            if (pause) {
+                pauseAllocation_ = 0;
+            }
+        }
+        if (pause) {
+            paused_.Signal();
+            (void)resume_.Wait(platform::InfiniteTimeout);
+        }
+        auto allocation = inner_.Allocate(bytes, alignment, tag);
+        if (record && allocation) {
+            platform::LockGuard lock(gate_);
+            pauseAddress_ = allocation.Value();
+            recordAllocation_ = 0;
+        }
+        return allocation;
+    }
+
+    Result<void> Deallocate(void* address) noexcept override {
+        bool pause = false;
+        {
+            platform::LockGuard lock(gate_);
+            pause = address != nullptr && address == pauseAddress_;
+            if (pause) {
+                pauseAddress_ = nullptr;
+            }
+        }
+        if (pause) {
+            paused_.Signal();
+            (void)resume_.Wait(platform::InfiniteTimeout);
+        }
+        return inner_.Deallocate(address);
+    }
+
+private:
+    Allocator& inner_;
+    platform::Mutex gate_;
+    uint32 allocations_ = 0;
+    uint32 pauseAllocation_ = 0;
+    uint32 recordAllocation_ = 0;
+    void* pauseAddress_ = nullptr;
+    platform::ManualResetEvent paused_;
+    platform::ManualResetEvent resume_;
 };
 
 } // namespace rocks::test::compression

@@ -1,7 +1,7 @@
 #include <Serialization/Archive.h>
 #include "ArchiveInternal.h"
 #include <float.h>
-#include <string.h>
+#include <Platform/Memory.h>
 
 namespace rocks {
 namespace {
@@ -142,15 +142,11 @@ Result<void> ArchiveWriter::WriteI64(int64 value) noexcept {
 }
 
 Result<void> ArchiveWriter::WriteF32(float value) noexcept {
-    uint32 bits = 0;
-    memcpy(&bits, &value, sizeof(bits));
-    return WriteU32(bits);
+    return WriteU32(platform::BitCast<uint32>(value));
 }
 
 Result<void> ArchiveWriter::WriteF64(double value) noexcept {
-    uint64 bits = 0;
-    memcpy(&bits, &value, sizeof(bits));
-    return WriteU64(bits);
+    return WriteU64(platform::BitCast<uint64>(value));
 }
 
 Result<void> ArchiveWriter::WriteGuid(Guid value) noexcept {
@@ -332,10 +328,7 @@ Result<float> ArchiveReader::ReadF32() noexcept {
     if (!value) {
         return Result<float>::Failure(value.Error());
     }
-    float result = 0;
-    const uint32 bits = value.Value();
-    memcpy(&result, &bits, sizeof(result));
-    return Result<float>::Success(result);
+    return Result<float>::Success(platform::BitCast<float>(value.Value()));
 }
 
 Result<double> ArchiveReader::ReadF64() noexcept {
@@ -343,10 +336,7 @@ Result<double> ArchiveReader::ReadF64() noexcept {
     if (!value) {
         return Result<double>::Failure(value.Error());
     }
-    double result = 0;
-    const uint64 bits = value.Value();
-    memcpy(&result, &bits, sizeof(result));
-    return Result<double>::Success(result);
+    return Result<double>::Success(platform::BitCast<double>(value.Value()));
 }
 
 Result<Guid> ArchiveReader::ReadGuid() noexcept {

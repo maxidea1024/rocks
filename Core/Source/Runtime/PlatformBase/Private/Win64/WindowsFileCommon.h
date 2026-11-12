@@ -83,13 +83,82 @@ public:
             return NativeError(GetLastError());
         }
         value_[required] = L'\0';
+        // 긴 경로: Win32가 실제로 쓰는 전체 경로가 MAX_PATH(260, 디렉터리 생성은 248) 근처를 넘으면
+        // 확장 경로 접두사를 붙인다. 상대 경로("a\b", "\a", "C:a")는 입력이 짧아도 현재
+        // 디렉터리를 붙이면 넘을 수 있으므로 전체 경로 길이로 판정한다. 확장 경로는 OS가
+        // '/'·'.'·'..'를 해석하지 않으므로 GetFullPathNameW로 먼저 정규화한다. 짧은 경로는 기존
+        // Win32 해석을 그대로 쓴다.
+        if (static_cast<usize>(required) >= LongPathThreshold) {
+            return Extend();
+        }
+        if (!IsFullyQualified(value_, static_cast<usize>(required))) {
+            // 반환값은 NUL을 포함한 필요 단위 수다(0은 실패이며 실패는 아래 열기가 보고한다).
+            const DWORD fullUnits = GetFullPathNameW(value_, 0, nullptr, nullptr);
+            if (fullUnits != 0 && static_cast<usize>(fullUnits) - 1u >= LongPathThreshold) {
+                return Extend();
+            }
+        }
         return {};
     }
     const wchar_t* Value() const noexcept {
         return value_;
     }
 
+    // 이 길이(UTF-16 단위) 이상이면 확장 경로로 바꾼다.
+    static constexpr usize LongPathThreshold = 240;
+
 private:
+    // 현재 디렉터리와 무관한 경로인지다: "X:\"·"X:/" 드라이브 절대 경로 또는 "\\"·"//" UNC.
+    // 장치 namespace는 Initialize가 먼저 거부한다.
+    static bool IsFullyQualified(const wchar_t* path, usize units) noexcept {
+        const auto separator = [](wchar_t value) noexcept {
+            return value == L'\\' || value == L'/';
+        };
+        if (units >= 2 && separator(path[0]) && separator(path[1])) {
+            return true;
+        }
+        const bool letter =
+            (path[0] >= L'A' && path[0] <= L'Z') || (path[0] >= L'a' && path[0] <= L'z');
+        return units >= 3 && letter && path[1] == L':' && separator(path[2]);
+    }
+
+    FileStatus Extend() noexcept {
+        const DWORD fullUnits = GetFullPathNameW(value_, 0, nullptr, nullptr);
+        if (fullUnits == 0) {
+            return NativeError(GetLastError());
+        }
+        auto* full =
+            static_cast<wchar_t*>(AlignedAllocate(fullUnits * sizeof(wchar_t), alignof(wchar_t)));
+        if (full == nullptr) {
+            return {FileCode::OutOfMemory, 0};
+        }
+        const DWORD written = GetFullPathNameW(value_, fullUnits, full, nullptr);
+        if (written == 0 || written >= fullUnits) {
+            AlignedFree(full);
+            return NativeError(GetLastError());
+        }
+        // "\\server\share\..." → "\\?\UNC\server\share\...", "C:\..." → "\\?\C:\...".
+        const bool unc = written >= 2 && full[0] == L'\\' && full[1] == L'\\';
+        const wchar_t* prefix = unc ? L"\\\\?\\UNC\\" : L"\\\\?\\";
+        const usize prefixUnits = unc ? 8u : 4u;
+        const usize skip = unc ? 2u : 0u;
+        const usize units = prefixUnits + written - skip;
+        auto* extended = static_cast<wchar_t*>(
+            AlignedAllocate((units + 1u) * sizeof(wchar_t), alignof(wchar_t)));
+        if (extended == nullptr) {
+            AlignedFree(full);
+            return {FileCode::OutOfMemory, 0};
+        }
+        platform::MemoryCopy(extended, prefix, prefixUnits * sizeof(wchar_t));
+        platform::MemoryCopy(extended + prefixUnits, full + skip,
+                             (written - skip) * sizeof(wchar_t));
+        extended[units] = L'\0';
+        AlignedFree(full);
+        AlignedFree(value_);
+        value_ = extended;
+        return {};
+    }
+
     wchar_t* value_ = nullptr;
 };
 

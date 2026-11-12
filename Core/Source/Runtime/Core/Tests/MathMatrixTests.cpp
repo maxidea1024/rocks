@@ -2,6 +2,7 @@
 #include <TestSupport/MathTestSupport.h>
 #include <Core/Math/MathBatch.h>
 #include <Core/Math/MatrixFactory.h>
+#include <Platform/PlatformMath.h>
 
 namespace rocks::test {
 namespace {
@@ -164,7 +165,7 @@ TEST(Matrix4_TryInverseMatchesOracleAndFailsOnSingular) {
     CHECK(Mat4d::Zero().TryInverse().Error() == ErrorCode::InvalidArgument);
     CHECK(!Mat4::Scale(Vec3(1.0f, 0.0f, 1.0f)).TryInverse());
     Mat4d nanMatrix;
-    nanMatrix.m[5] = __builtin_nan("");
+    nanMatrix.m[5] = platform::PlatformMath::QuietNaN<double>();
     CHECK(!nanMatrix.TryInverse());
     // float 행렬: double 계산 뒤 float로 표현할 수 없는 역행렬은 실패한다.
     CHECK(!Mat4::Scale(Vec3(1.0e-39f, 1.0f, 1.0f)).TryInverse());    // 역수 1e39 > FLT_MAX
@@ -206,7 +207,7 @@ TEST(MatrixFactory_MirrorReflectsAcrossPlane) {
         mirror.Value().TransformPoint(Vec3d(1.0, 2.0, 5.0)).Equals(Vec3d(1.0, 2.0, -1.0), 1.0e-14));
     CHECK(Near(mirror.Value().Determinant(), -1.0, 1.0e-15));
     CHECK(!TryMakeMirror(Vec3d::Zero(), 1.0));
-    CHECK(!TryMakeMirror(Vec3d::Up(), __builtin_nan("")));
+    CHECK(!TryMakeMirror(Vec3d::Up(), platform::PlatformMath::QuietNaN<double>()));
 }
 
 TEST(MatrixFactory_PerspectiveMapsRocksViewToNdc) {
@@ -229,7 +230,8 @@ TEST(MatrixFactory_PerspectiveMapsRocksViewToNdc) {
     const Vec3d topEdge = ndc(reversed.Value(), Vec3d(1.0, 0.0, 1.0));
     CHECK(Near(leftEdge.x, -1.0, 1.0e-15) && Near(topEdge.y, 1.0, 1.0e-15));
     // 무한 원거리: 깊이가 커질수록 0(reversed)·1(standard)에 수렴한다.
-    auto infinite = TryMakePerspective(fov, 1.0, 0.1, static_cast<double>(__builtin_huge_val()));
+    auto infinite = TryMakePerspective(
+        fov, 1.0, 0.1, static_cast<double>(platform::PlatformMath::Infinity<double>()));
     REQUIRE(infinite);
     CHECK(Near(ndc(infinite.Value(), Vec3d(0.1, 0.0, 0.0)).z, 1.0, 1.0e-15));
     CHECK(ndc(infinite.Value(), Vec3d(1.0e9, 0.0, 0.0)).z < 1.0e-9);
@@ -239,7 +241,7 @@ TEST(MatrixFactory_PerspectiveMapsRocksViewToNdc) {
     CHECK(!TryMakePerspective(1.0, 0.0, 0.1, 10.0));
     CHECK(!TryMakePerspective(1.0, 1.0, 0.0, 10.0));
     CHECK(!TryMakePerspective(1.0, 1.0, 10.0, 10.0));
-    CHECK(!TryMakePerspective(1.0, 1.0, 0.1, __builtin_nan("")));
+    CHECK(!TryMakePerspective(1.0, 1.0, 0.1, platform::PlatformMath::QuietNaN<double>()));
     CHECK(!TryMakePerspectiveOffCenter(1.0, -1.0, -1.0, 1.0, 0.1, 10.0));
 }
 
@@ -270,7 +272,8 @@ TEST(MatrixFactory_OrthographicMapsBoxToNdc) {
     CHECK(Near((standard.Value() * Vec4d::Point(Vec3d(101.0, 0.0, 0.0))).z, 1.0, 1.0e-15));
     CHECK(!TryMakeOrthographic(0.0, 1.0, 0.0, 1.0));
     CHECK(!TryMakeOrthographic(1.0, 1.0, 5.0, 5.0));
-    CHECK(!TryMakeOrthographic(1.0, 1.0, 0.0, static_cast<double>(__builtin_huge_val())));
+    CHECK(!TryMakeOrthographic(1.0, 1.0, 0.0,
+                               static_cast<double>(platform::PlatformMath::Infinity<double>())));
     CHECK(!TryMakeOrthographic(1.0, 1.0, -1.0, 5.0));
 }
 
@@ -296,7 +299,8 @@ TEST(MatrixFactory_LookAtBuildsRocksViewSpace) {
     CHECK(!TryMakeLookTo(Vec3d::Zero(), Vec3d::Forward(), Vec3d::Zero()));
     // 거의 평행하지만 기준보다 큰 각은 성공한다.
     CHECK(TryMakeLookTo(Vec3d::Zero(), Vec3d::Up(), Vec3d(1.0e-6, 0.0, 1.0)));
-    CHECK(!TryMakeLookTo(Vec3d::Zero(), Vec3d::Forward(), Vec3d(0.0, 0.0, __builtin_nan(""))));
+    CHECK(!TryMakeLookTo(Vec3d::Zero(), Vec3d::Forward(),
+                         Vec3d(0.0, 0.0, platform::PlatformMath::QuietNaN<double>())));
 }
 
 TEST(MatrixFactory_ObliqueClipPlaneBecomesNearPlane) {
@@ -373,7 +377,8 @@ TEST(MatrixFactory_ObliqueClipRejectsUnsupportedInputs) {
         TryMakeObliqueClipProjection(reversed.Value(), Vec3d::UnitX(), 200.0, DepthRange::Reversed)
             .Error() == ErrorCode::InvalidArgument);
     // 무한 원거리 Reversed 투영은 지원한다.
-    auto infinite = TryMakePerspective(1.2, 1.0, 0.1, static_cast<double>(__builtin_huge_val()));
+    auto infinite = TryMakePerspective(
+        1.2, 1.0, 0.1, static_cast<double>(platform::PlatformMath::Infinity<double>()));
     REQUIRE(infinite);
     CHECK(TryMakeObliqueClipProjection(infinite.Value(), Vec3d::UnitX(), 200.0,
                                        DepthRange::Reversed));

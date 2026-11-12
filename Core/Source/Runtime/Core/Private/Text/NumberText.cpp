@@ -1,6 +1,8 @@
 #include "NumberTextInternal.h"
 
 #include <Core/Text/NumberText.h>
+#include <Platform/Memory.h>
+#include <Platform/PlatformMath.h>
 
 #include <errno.h>
 #include <locale.h>
@@ -13,15 +15,6 @@ namespace {
 
 // strtod·strtof에 넘길 사본의 최대 크기다. 입력 1023 byte + locale 소수점(보통 1 byte) + NUL.
 constexpr usize ParseBufferBytes = 1024 + 16;
-
-usize CStringLength(const char* text) noexcept {
-    usize length = 0;
-    while (text[length] != '\0') {
-        ++length;
-    }
-
-    return length;
-}
 
 // 현재 C locale의 소수점 문자열이다. 대부분 "."이며 일부 locale은 ","다.
 const char* LocaleDecimalPoint() noexcept {
@@ -42,7 +35,7 @@ usize NormalizeDecimalPoint(char* buffer, usize length) noexcept {
         return length;
     }
 
-    const usize pointLength = CStringLength(point);
+    const usize pointLength = platform::CStringLength(point);
     for (usize index = 0; index + pointLength <= length; ++index) {
         bool match = true;
         for (usize offset = 0; offset < pointLength && match; ++offset) {
@@ -75,7 +68,7 @@ char LowerAscii(char character) noexcept {
 }
 
 bool EqualsIgnoreAsciiCase(const char* text, usize bytes, const char* word) noexcept {
-    if (bytes != CStringLength(word)) {
+    if (bytes != platform::CStringLength(word)) {
         return false;
     }
 
@@ -154,11 +147,12 @@ Result<double> ParseFloatingPoint(StringView view, bool single) noexcept {
 
     if (EqualsIgnoreAsciiCase(text + start, bytes - start, "inf") ||
         EqualsIgnoreAsciiCase(text + start, bytes - start, "infinity")) {
-        return Result<double>::Success(negative ? -HUGE_VAL : HUGE_VAL);
+        const double infinity = platform::PlatformMath::Infinity<double>();
+        return Result<double>::Success(negative ? -infinity : infinity);
     }
 
     if (EqualsIgnoreAsciiCase(text + start, bytes - start, "nan")) {
-        const double nan = static_cast<double>(NAN);
+        const double nan = platform::PlatformMath::QuietNaN<double>();
         return Result<double>::Success(negative ? -nan : nan);
     }
 
@@ -169,7 +163,7 @@ Result<double> ParseFloatingPoint(StringView view, bool single) noexcept {
     // C runtime은 현재 locale의 소수점을 기대하므로 '.'를 그것으로 바꾼 NUL 종료 사본을 만든다.
     char buffer[ParseBufferBytes];
     const char* point = LocaleDecimalPoint();
-    const usize pointLength = CStringLength(point);
+    const usize pointLength = platform::CStringLength(point);
     usize written = 0;
     for (usize index = 0; index < bytes; ++index) {
         const usize needed = text[index] == '.' ? pointLength : 1;

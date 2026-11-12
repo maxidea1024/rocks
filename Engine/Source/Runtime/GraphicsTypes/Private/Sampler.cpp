@@ -1,4 +1,5 @@
 #include <GraphicsTypes/Sampler.h>
+#include <Platform/Memory.h>
 
 namespace rocks::graphics {
 
@@ -64,7 +65,7 @@ const char* BorderColorName(BorderColor color) noexcept {
 namespace {
 
 bool EqualsIgnoringCase(StringView text, const char* name) noexcept {
-    const usize nameBytes = __builtin_strlen(name);
+    const usize nameBytes = platform::CStringLength(name);
     if (text.ByteCount() != nameBytes) {
         return false;
     }

@@ -1,5 +1,6 @@
 #include <Core/Math/Shapes.h>
 #include <TestSupport/Test.h>
+#include <Platform/PlatformMath.h>
 
 using namespace rocks;
 
@@ -8,18 +9,18 @@ namespace {
 template <typename T>
 T Infinity() noexcept {
     if constexpr (IsSameV<T, float>) {
-        return __builtin_huge_valf();
+        return platform::PlatformMath::Infinity<float>();
     } else {
-        return __builtin_huge_val();
+        return platform::PlatformMath::Infinity<double>();
     }
 }
 
 template <typename T>
 T QuietNaN() noexcept {
     if constexpr (IsSameV<T, float>) {
-        return __builtin_nanf("");
+        return platform::PlatformMath::QuietNaN<float>();
     } else {
-        return __builtin_nan("");
+        return platform::PlatformMath::QuietNaN<double>();
     }
 }
 

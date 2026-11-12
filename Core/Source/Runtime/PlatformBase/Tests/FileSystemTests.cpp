@@ -5,6 +5,7 @@
 #include <TestSupport/Test.h>
 #include <stdio.h>
 #include <string.h>
+#include <Platform/Atomics.h>
 
 using namespace rocks;
 using namespace rocks::platform;
@@ -24,7 +25,7 @@ struct Scratch {
         static int counter = 0;
         const int count = snprintf(path, sizeof(path), "rocks-fs-%s-%llu-%d", tag,
                                    static_cast<unsigned long long>(MonotonicNanoseconds()),
-                                   __atomic_add_fetch(&counter, 1, __ATOMIC_RELAXED));
+                                   AtomicFetchAdd<MemoryOrder::Relaxed>(&counter, 1) + 1);
         if (count <= 0 || static_cast<usize>(count) >= sizeof(path)) {
             return false;
         }

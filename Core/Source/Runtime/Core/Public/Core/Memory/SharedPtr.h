@@ -3,6 +3,8 @@
 #include <Core/Memory/Allocator.h>
 #include <Core/Move.h>
 #include <Platform/Fatal.h>
+#include <Base/Compiler.h>
+#include <Platform/Atomics.h>
 
 namespace rocks {
 
@@ -24,7 +26,7 @@ namespace detail {
 // deleter와 같은 할당에 둔다. destroyObject는 제어 블록을 받아 객체(와 deleter)를 정리한다.
 // - strong: 살아 있는 SharedPtr 수. 0이 되면 객체를 소멸한다.
 // - weak: 살아 있는 WeakPtr 수 + (strong > 0이면 1). 0이 되면 할당 전체를 allocator에 반환한다.
-// 계수는 compiler 원자 builtin으로 갱신한다. 일반 증가는 relaxed, WeakPtr::Lock의 조건부
+// 계수는 Platform/Atomics.h 원자 연산으로 갱신한다. 일반 증가는 relaxed, WeakPtr::Lock의 조건부
 // 증가(CAS)와 감소는 acq_rel이며 마지막 감소가 이전 사용자의 모든 쓰기를 관찰한 뒤 소멸·반환을
 // 수행한다. 계수는 64-bit라 실사용에서 넘치지 않는다.
 struct SharedControlBlock {
@@ -35,20 +37,21 @@ struct SharedControlBlock {
     void (*destroyObject)(SharedControlBlock* control) noexcept;
 
     void AddStrong() noexcept {
-        __atomic_fetch_add(&strong, 1, __ATOMIC_RELAXED);
+        platform::AtomicFetchAdd<platform::MemoryOrder::Relaxed>(&strong, 1);
     }
 
     void AddWeak() noexcept {
-        __atomic_fetch_add(&weak, 1, __ATOMIC_RELAXED);
+        platform::AtomicFetchAdd<platform::MemoryOrder::Relaxed>(&weak, 1);
     }
 
     // strong이 0이 아닐 때만 1 증가시킨다. WeakPtr::Lock이 이미 소멸 중인 객체를 되살리지 않게
     // 한다.
     bool TryAddStrong() noexcept {
-        uint64 expected = __atomic_load_n(&strong, __ATOMIC_RELAXED);
+        uint64 expected = platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&strong);
         while (expected != 0) {
-            if (__atomic_compare_exchange_n(&strong, &expected, expected + 1, true,
-                                            __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)) {
+            if (platform::AtomicCompareExchangeWeak<platform::MemoryOrder::AcquireRelease,
+                                                    platform::MemoryOrder::Relaxed>(
+                    &strong, expected, expected + 1)) {
                 return true;
             }
         }
@@ -56,7 +59,7 @@ struct SharedControlBlock {
     }
 
     void ReleaseStrong() noexcept {
-        if (__atomic_fetch_sub(&strong, 1, __ATOMIC_ACQ_REL) == 1) {
+        if (platform::AtomicFetchSub<platform::MemoryOrder::AcquireRelease>(&strong, 1) == 1) {
             // 객체 소멸자가 같은 객체의 WeakPtr를 해제해도 strong 그룹의 weak 토큰이 남아 있어
             // 저장소는 아직 유효하다. 소멸이 끝난 뒤 그 토큰을 반환한다.
             destroyObject(this);
@@ -65,7 +68,7 @@ struct SharedControlBlock {
     }
 
     void ReleaseWeak() noexcept {
-        if (__atomic_fetch_sub(&weak, 1, __ATOMIC_ACQ_REL) == 1) {
+        if (platform::AtomicFetchSub<platform::MemoryOrder::AcquireRelease>(&weak, 1) == 1) {
             Allocator* owner = allocator;
             if (!owner->Deallocate(this)) {
                 platform::Fatal("SharedPtr storage deallocation failed");
@@ -74,7 +77,7 @@ struct SharedControlBlock {
     }
 
     uint64 StrongCount() const noexcept {
-        return __atomic_load_n(&strong, __ATOMIC_ACQUIRE);
+        return platform::AtomicLoad<platform::MemoryOrder::Acquire>(&strong);
     }
 };
 
@@ -199,7 +202,7 @@ public:
         }
         // 저장소 객체의 수명을 먼저 시작한 뒤 그 안에 T를 생성한다. 제어 블록은 첫 멤버라 할당
         // 주소와 같으며, 마지막 ReleaseWeak가 그 주소로 저장소를 반환한다.
-        static_assert(__builtin_offsetof(Storage, control) == 0);
+        static_assert(ROCKS_OFFSET_OF(Storage, control) == 0);
         Storage* storage = ConstructAt<Storage>(memory.Value());
         T* object = ConstructAt<T>(storage->object, Forward<Args>(args)...);
         storage->control = detail::SharedControlBlock{1, 1, &allocator, object, &Storage::Destroy};

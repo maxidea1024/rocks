@@ -1,4 +1,5 @@
 #include <Renderer/Renderer.h>
+#include <Base/Compiler.h>
 
 namespace rocks::render {
 
@@ -115,9 +116,9 @@ Result<void> Renderer::Initialize(graphics::Device& device, graphics::Format col
     }
 
     const graphics::VertexAttribute attributes[] = {
-        {0, graphics::VertexFormat::Float3, __builtin_offsetof(Vertex, position)},
-        {1, graphics::VertexFormat::Float2, __builtin_offsetof(Vertex, uv)},
-        {2, graphics::VertexFormat::Float4, __builtin_offsetof(Vertex, color)},
+        {0, graphics::VertexFormat::Float3, ROCKS_OFFSET_OF(Vertex, position)},
+        {1, graphics::VertexFormat::Float2, ROCKS_OFFSET_OF(Vertex, uv)},
+        {2, graphics::VertexFormat::Float4, ROCKS_OFFSET_OF(Vertex, color)},
     };
     graphics::PipelineDesc pipeline;
     pipeline.vertex = {BuiltinShaderHlsl(), BuiltinVertexGlsl()};

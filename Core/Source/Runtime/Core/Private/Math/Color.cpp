@@ -1,6 +1,7 @@
 #include <Core/Math/Color.h>
 
 #include <Platform/PlatformMath.h>
+#include <Platform/Memory.h>
 
 namespace rocks {
 namespace {
@@ -8,7 +9,7 @@ namespace {
 using platform::PlatformMath;
 
 // HSV 변환이 정의되지 않는 입력의 결과로 쓰는 quiet NaN이다.
-constexpr float QuietNaN = __builtin_bit_cast(float, 0x7fc00000u);
+constexpr float QuietNaN = PlatformMath::QuietNaN<float>();
 
 // IEC 61966-2-1의 decode 식이다. byte/255와 이후 계산을 double로 수행해 float로 한 번만 반올림한다.
 float DecodeSrgbChannel(uint8 encodedByte) noexcept {

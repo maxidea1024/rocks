@@ -4,6 +4,7 @@
 
 #include <Windows.h>
 #include <GL/gl.h>
+#include <Platform/Memory.h>
 
 namespace rocks::graphics {
 
@@ -73,7 +74,7 @@ bool HasExtension(const char* list, const char* name) noexcept {
     if (list == nullptr) {
         return false;
     }
-    const usize nameBytes = __builtin_strlen(name);
+    const usize nameBytes = platform::CStringLength(name);
     for (const char* cursor = list; *cursor != '\0';) {
         while (*cursor == ' ') {
             ++cursor;
@@ -83,7 +84,7 @@ bool HasExtension(const char* list, const char* name) noexcept {
             ++end;
         }
         if (static_cast<usize>(end - cursor) == nameBytes &&
-            __builtin_memcmp(cursor, name, nameBytes) == 0) {
+            platform::MemoryCompare(cursor, name, nameBytes) == 0) {
             return true;
         }
         cursor = end;
@@ -427,9 +428,10 @@ public:
         for (GLint index = 0; index < extensionCount && !anisotropic; ++index) {
             const auto* name = reinterpret_cast<const char*>(
                 gl_.GetStringi(GL_EXTENSIONS, static_cast<GLuint>(index)));
-            anisotropic = name != nullptr &&
-                          (__builtin_strcmp(name, "GL_ARB_texture_filter_anisotropic") == 0 ||
-                           __builtin_strcmp(name, "GL_EXT_texture_filter_anisotropic") == 0);
+            anisotropic =
+                name != nullptr &&
+                (platform::CStringCompare(name, "GL_ARB_texture_filter_anisotropic") == 0 ||
+                 platform::CStringCompare(name, "GL_EXT_texture_filter_anisotropic") == 0);
         }
         if (anisotropic) {
             glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_VALUE, &maxAnisotropy_);
@@ -437,7 +439,7 @@ public:
         const auto* renderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
         if (renderer != nullptr) {
             auto assigned =
-                adapterName_.TryAssign(StringView(renderer, __builtin_strlen(renderer)));
+                adapterName_.TryAssign(StringView(renderer, platform::CStringLength(renderer)));
             (void)assigned;
         }
 
@@ -853,7 +855,7 @@ private:
     }
 
     Result<void> Fail(const char* message) noexcept {
-        auto assigned = lastError_.TryAssign(StringView(message, __builtin_strlen(message)));
+        auto assigned = lastError_.TryAssign(StringView(message, platform::CStringLength(message)));
         (void)assigned;
         return Result<void>::Failure(ErrorCode::DependencyFailed);
     }

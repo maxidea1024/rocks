@@ -2,6 +2,7 @@
 
 #include <Base/Types.h>
 #include <Platform/Fatal.h>
+#include <Platform/Memory.h>
 
 namespace rocks {
 
@@ -255,20 +256,20 @@ private:
 
     // compiler 최적화 설정과 무관하게 bit 표현으로 NaN·무한대를 판정한다.
     static constexpr bool IsFinite(float value) noexcept {
-        return (__builtin_bit_cast(uint32, value) & 0x7f800000u) != 0x7f800000u;
+        return (platform::BitCast<uint32>(value) & 0x7f800000u) != 0x7f800000u;
     }
 
     // value보다 작은 float 중 가장 큰 값이다. value는 -FLT_MAX보다 큰 유한값이어야 한다.
     // ±0 바로 아래는 음의 최소 subnormal이고, 음수는 크기 bit를 늘려야 작아진다.
     static constexpr float PreviousFloat(float value) noexcept {
-        const uint32 bits = __builtin_bit_cast(uint32, value);
+        const uint32 bits = platform::BitCast<uint32>(value);
         if ((bits & 0x7fffffffu) == 0u) {
-            return __builtin_bit_cast(float, 0x80000001u);
+            return platform::BitCast<float>(0x80000001u);
         }
         if ((bits >> 31u) != 0u) {
-            return __builtin_bit_cast(float, bits + 1u);
+            return platform::BitCast<float>(bits + 1u);
         }
-        return __builtin_bit_cast(float, bits - 1u);
+        return platform::BitCast<float>(bits - 1u);
     }
 
     uint64 state_ = 0;

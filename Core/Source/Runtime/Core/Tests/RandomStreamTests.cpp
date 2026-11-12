@@ -1,5 +1,6 @@
 #include <Core/Math/RandomStream.h>
 #include <TestSupport/Test.h>
+#include <Platform/Memory.h>
 
 using namespace rocks;
 
@@ -38,11 +39,11 @@ constexpr int32 Int32Min = -2147483647 - 1;
 constexpr int32 Int32Max = 2147483647;
 
 float FloatFromBits(uint32 bits) noexcept {
-    return __builtin_bit_cast(float, bits);
+    return platform::BitCast<float>(bits);
 }
 
 uint32 BitsFromFloat(float value) noexcept {
-    return __builtin_bit_cast(uint32, value);
+    return platform::BitCast<uint32>(value);
 }
 
 bool IsFiniteFloat(float value) noexcept {

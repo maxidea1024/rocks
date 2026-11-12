@@ -4,6 +4,7 @@
 #include <Platform/Fatal.h>
 
 #include <new>
+#include <Platform/Memory.h>
 
 // Windows backend다. Native는 FILE_FLAG_OVERLAPPED 핸들과 IO completion port, 전용 완료 스레드를
 // 사용한다. 모든 결과(즉시 실패 포함)는 completion packet으로 완료 스레드에 전달하여 callback 실행
@@ -33,11 +34,11 @@ static_assert(sizeof(NativeRequest) <= sizeof(AsyncRequestState::native));
 static_assert(alignof(NativeRequest) <= 16 && alignof(NativeContext) <= 16);
 
 NativeContext& NativeOf(AsyncContextState& context) noexcept {
-    return *__builtin_launder(reinterpret_cast<NativeContext*>(context.native));
+    return *platform::Launder(reinterpret_cast<NativeContext*>(context.native));
 }
 
 NativeRequest& NativeOf(AsyncRequestState& request) noexcept {
-    return *__builtin_launder(reinterpret_cast<NativeRequest*>(request.native));
+    return *platform::Launder(reinterpret_cast<NativeRequest*>(request.native));
 }
 
 HANDLE HandleOf(uptr handle) noexcept {

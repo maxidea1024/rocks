@@ -8,6 +8,7 @@
 #include <d3dcompiler.h>
 #include <dxgi1_6.h>
 #include <dxgidebug.h>
+#include <Platform/Memory.h>
 
 namespace rocks::graphics {
 
@@ -577,7 +578,7 @@ public:
         if (FAILED(record.resource->Map(0, &noRead, &mapped))) {
             return FailWith<BufferHandle>("vertex buffer map failed");
         }
-        __builtin_memcpy(mapped, initial.Data(), desc.size);
+        platform::MemoryCopy(mapped, initial.Data(), desc.size);
         record.resource->Unmap(0, nullptr);
         record.view.BufferLocation = record.resource->GetGPUVirtualAddress();
         record.view.SizeInBytes = static_cast<UINT>(desc.size);
@@ -905,9 +906,9 @@ public:
         const uint8* rows = static_cast<const uint8*>(mapped) + footprint.Offset;
         const usize rowBytes = static_cast<usize>(record->width) * bytesPerPixel;
         for (uint32 row = 0; row < record->height; ++row) {
-            __builtin_memcpy(out.Data() + row * rowBytes,
-                             rows + static_cast<usize>(row) * footprint.Footprint.RowPitch,
-                             rowBytes);
+            platform::MemoryCopy(out.Data() + row * rowBytes,
+                                 rows + static_cast<usize>(row) * footprint.Footprint.RowPitch,
+                                 rowBytes);
         }
         const D3D12_RANGE noWrite = {0, 0};
         readback->Unmap(0, &noWrite);
@@ -1013,7 +1014,7 @@ private:
     };
 
     Result<void> Fail(const char* message) noexcept {
-        auto assigned = lastError_.TryAssign(StringView(message, __builtin_strlen(message)));
+        auto assigned = lastError_.TryAssign(StringView(message, platform::CStringLength(message)));
         (void)assigned;
         return Result<void>::Failure(ErrorCode::DependencyFailed);
     }
@@ -1265,9 +1266,9 @@ private:
             const usize rowBytes = static_cast<usize>(width) * bytesPerPixel;
             uint8* rows = static_cast<uint8*>(mapped) + footprints[level].Offset;
             for (uint32 row = 0; row < height; ++row) {
-                __builtin_memcpy(rows +
-                                     static_cast<usize>(row) * footprints[level].Footprint.RowPitch,
-                                 pixels.Data() + sourceOffset + row * rowBytes, rowBytes);
+                platform::MemoryCopy(rows + static_cast<usize>(row) *
+                                                footprints[level].Footprint.RowPitch,
+                                     pixels.Data() + sourceOffset + row * rowBytes, rowBytes);
             }
             sourceOffset += rowBytes * height;
         }

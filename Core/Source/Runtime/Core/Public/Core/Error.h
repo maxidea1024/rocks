@@ -27,4 +27,49 @@ enum class ErrorCode : uint32 {
     TypeMismatch
 };
 
+// 진단 출력용 열거자 이름이다(예: ErrorCode::NotFound → "NotFound"). 모르는 값은 "Unknown"이다.
+// 반환 문자열은 정적 수명이며 NUL로 끝난다.
+//
+// 사용 예:
+//   printf("load failed: %s\n", ErrorCodeName(result.Error()));
+constexpr const char* ErrorCodeName(ErrorCode code) noexcept {
+    switch (code) {
+    case ErrorCode::None:
+        return "None";
+    case ErrorCode::InvalidArgument:
+        return "InvalidArgument";
+    case ErrorCode::OutOfMemory:
+        return "OutOfMemory";
+    case ErrorCode::Overflow:
+        return "Overflow";
+    case ErrorCode::Busy:
+        return "Busy";
+    case ErrorCode::NotFound:
+        return "NotFound";
+    case ErrorCode::AlreadyExists:
+        return "AlreadyExists";
+    case ErrorCode::StaleHandle:
+        return "StaleHandle";
+    case ErrorCode::WrongThread:
+        return "WrongThread";
+    case ErrorCode::WrongContext:
+        return "WrongContext";
+    case ErrorCode::Destroyed:
+        return "Destroyed";
+    case ErrorCode::Unsupported:
+        return "Unsupported";
+    case ErrorCode::CapacityExceeded:
+        return "CapacityExceeded";
+    case ErrorCode::DependencyFailed:
+        return "DependencyFailed";
+    case ErrorCode::Cancelled:
+        return "Cancelled";
+    case ErrorCode::ShuttingDown:
+        return "ShuttingDown";
+    case ErrorCode::TypeMismatch:
+        return "TypeMismatch";
+    }
+    return "Unknown";
+}
+
 } // namespace rocks

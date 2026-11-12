@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <stdio.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <new>
@@ -18,6 +19,21 @@ namespace {
 
 FileStatus NativeError(int error) noexcept {
     return detail::PosixFileError(error);
+}
+
+// 파일·디렉터리 descriptor의 내용과 메타데이터를 저장 매체까지 내보낸다. 실패하면 -1이며 errno를
+// 남긴다. macOS의 fsync는 장치 캐시를 비우지 않으므로 F_FULLFSYNC를 쓰고, 그 FS가 F_FULLFSYNC를
+// 지원하지 않을 때만(ENOTSUP·ENOTTY·EINVAL) fsync로 대신한다. 그 밖의 오류(EIO 등)는 숨기지 않는다.
+int SyncDescriptor(int descriptor) noexcept {
+#if defined(F_FULLFSYNC)
+    if (fcntl(descriptor, F_FULLFSYNC) == 0) {
+        return 0;
+    }
+    if (errno != ENOTSUP && errno != ENOTTY && errno != EINVAL) {
+        return -1;
+    }
+#endif
+    return fsync(descriptor);
 }
 
 class NativePath {
@@ -123,6 +139,12 @@ public:
             return {FileCode::SystemError, 0};
         }
         bytes = static_cast<uint64>(state.st_size);
+        return {};
+    }
+    FileStatus Flush() noexcept override {
+        if (SyncDescriptor(handle_) != 0) {
+            return NativeError(errno);
+        }
         return {};
     }
     FileStatus Close() noexcept override {
@@ -341,11 +363,7 @@ public:
             }
             DirectoryEntry entry;
             entry.name = name;
-            usize nameBytes = 0;
-            while (name[nameBytes] != '\0') {
-                ++nameBytes;
-            }
-            entry.nameBytes = nameBytes;
+            entry.nameBytes = CStringLength(name);
             entry.info = InfoFromStat(state, S_ISLNK(state.st_mode));
             if (!visitor(entry, context)) {
                 break;
@@ -397,6 +415,105 @@ public:
                                ? rename(source.Value(), target.Value())
                                : detail::PosixRenameNoReplace(source.Value(), target.Value());
         if (result != 0) {
+            return NativeError(errno);
+        }
+        return {};
+    }
+
+    FileStatus Replace(const char* from, usize fromBytes, const char* to,
+                       usize toBytes) noexcept override {
+        NativePath source;
+        auto valid = source.Initialize(from, fromBytes);
+        if (!valid) {
+            return valid;
+        }
+        NativePath target;
+        valid = target.Initialize(to, toBytes);
+        if (!valid) {
+            return valid;
+        }
+        // 원본은 일반 파일만 받는다(link는 rename이 link 자체를 옮겨 Windows와 결과가 달라진다).
+        struct stat sourceState{};
+        if (lstat(source.Value(), &sourceState) != 0) {
+            return NativeError(errno);
+        }
+        if (!S_ISREG(sourceState.st_mode)) {
+            return {FileCode::WrongType, 0};
+        }
+        struct stat targetState{};
+        if (lstat(target.Value(), &targetState) == 0) {
+            if (S_ISDIR(targetState.st_mode) || S_ISLNK(targetState.st_mode)) {
+                return {FileCode::WrongType, 0};
+            }
+            if ((targetState.st_mode & S_IWUSR) == 0) {
+                return {FileCode::AccessDenied, EACCES};
+            }
+        }
+        // 이름 변경을 매체에 남기려면 대상의 부모 디렉터리를 동기화해야 한다. 그 디렉터리는 rename
+        // 전에 연다: 열기 실패를 교체 뒤에 알리면 호출자가 이전 내용이 남았다고 오판한다.
+        const char* value = target.Value();
+        usize slash = toBytes;
+        while (slash > 0 && value[slash - 1] != '/') {
+            --slash;
+        }
+        char parent[PATH_MAX];
+        if (slash == 0) {
+            parent[0] = '.';
+            parent[1] = '\0';
+        } else {
+            const usize parentBytes = slash > 1 ? slash - 1 : 1;
+            if (parentBytes >= sizeof(parent)) {
+                return {FileCode::Overflow, 0};
+            }
+            platform::MemoryCopy(parent, value, parentBytes);
+            parent[parentBytes] = '\0';
+        }
+        const int directory = open(parent, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+        if (directory < 0) {
+            return NativeError(errno);
+        }
+        if (rename(source.Value(), target.Value()) != 0) {
+            const int error = errno;
+            close(directory);
+            return NativeError(error);
+        }
+        const int synced = SyncDescriptor(directory);
+        const int error = errno;
+        close(directory);
+        // 디렉터리 동기화를 지원하지 않는 FS(EINVAL·ENOTSUP)는 그 FS가 주는 보장이 전부다. 그 밖의
+        // 실패는 교체가 이미 보이므로 되돌리지 않고 NotDurable로 알린다.
+        if (synced != 0 && error != EINVAL && error != ENOTSUP) {
+            return {FileCode::NotDurable, static_cast<uint32>(error)};
+        }
+        return {};
+    }
+
+    FileStatus SetModifiedTime(const char* path, usize bytes,
+                               int64 modifiedTicks) noexcept override {
+        // FileInfo tick(0001-01-01부터 100ns)을 Unix 시각으로 바꾼다(1970-01-01까지 719162일).
+        constexpr int64 Epoch1970 = 719162ll * 864000000000ll;
+        // 모든 플랫폼이 표현하는 범위만 받는다(Windows FILETIME 하한과 맞춘다).
+        if (modifiedTicks <= FileTicksSettableAfter || modifiedTicks > FileTicksSettableLast) {
+            return {FileCode::InvalidArgument, 0};
+        }
+        NativePath native;
+        auto valid = native.Initialize(path, bytes);
+        if (!valid) {
+            return valid;
+        }
+        const int64 relative = modifiedTicks - Epoch1970;
+        int64 seconds = relative / FileTicksPerSecond;
+        int64 remainder = relative % FileTicksPerSecond;
+        if (remainder < 0) {
+            remainder += FileTicksPerSecond;
+            --seconds;
+        }
+        struct timespec times[2];
+        times[0].tv_sec = 0;
+        times[0].tv_nsec = UTIME_OMIT;
+        times[1].tv_sec = static_cast<time_t>(seconds);
+        times[1].tv_nsec = static_cast<long>(remainder * 100);
+        if (utimensat(AT_FDCWD, native.Value(), times, 0) != 0) {
             return NativeError(errno);
         }
         return {};
@@ -498,4 +615,73 @@ FileSystem& PhysicalFileSystem() noexcept {
     static PosixFileSystem system;
     return system;
 }
+namespace detail {
+
+FileStatus LockFileOpen(const char* path, usize bytes, uptr& handle) noexcept {
+    char native[PATH_MAX];
+    if (bytes >= sizeof(native)) {
+        return {FileCode::Overflow, 0};
+    }
+    platform::MemoryCopy(native, path, bytes);
+    native[bytes] = '\0';
+    // flock에는 읽기 권한이면 충분하다. 다른 사용자도 같은 잠금을 쓸 수 있게 0666(umask 적용)으로
+    // 만든다.
+    const int file = open(native, O_RDONLY | O_CREAT | O_CLOEXEC, 0666);
+    if (file < 0) {
+        return NativeError(errno);
+    }
+    handle = static_cast<uptr>(file);
+    return {};
+}
+
+FileStatus LockFileIsCurrent(const char* path, usize bytes, uptr handle, bool& current) noexcept {
+    char native[PATH_MAX];
+    if (bytes >= sizeof(native)) {
+        return {FileCode::Overflow, 0};
+    }
+    platform::MemoryCopy(native, path, bytes);
+    native[bytes] = '\0';
+    struct stat locked{};
+    if (fstat(static_cast<int>(handle), &locked) != 0) {
+        return NativeError(errno);
+    }
+    struct stat named{};
+    if (stat(native, &named) != 0) {
+        // 잠그기 전에 다른 쪽이 지웠다. 다시 열면 새로 만든다.
+        if (errno == ENOENT) {
+            current = false;
+            return {};
+        }
+        return NativeError(errno);
+    }
+    current = locked.st_dev == named.st_dev && locked.st_ino == named.st_ino;
+    return {};
+}
+
+FileStatus LockFileTry(uptr handle, bool& acquired) noexcept {
+    for (;;) {
+        if (flock(static_cast<int>(handle), LOCK_EX | LOCK_NB) == 0) {
+            acquired = true;
+            return {};
+        }
+        if (errno == EINTR) {
+            continue;
+        }
+        if (errno == EWOULDBLOCK) {
+            acquired = false;
+            return {};
+        }
+        return NativeError(errno);
+    }
+}
+
+void LockFileClose(uptr handle, bool held) noexcept {
+    if (held) {
+        flock(static_cast<int>(handle), LOCK_UN);
+    }
+    close(static_cast<int>(handle));
+}
+
+} // namespace detail
+
 } // namespace rocks::platform

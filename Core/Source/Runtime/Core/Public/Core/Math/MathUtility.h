@@ -3,6 +3,7 @@
 #include <Core/Assert.h>
 #include <Core/Traits.h>
 #include <Platform/PlatformMath.h>
+#include <Platform/Memory.h>
 
 namespace rocks::math {
 
@@ -216,7 +217,7 @@ constexpr bool IsNearlyEqualByUlps(T a, T b, uint64 maxUlps) noexcept {
     if constexpr (IsSameV<T, float>) {
         // 부호-크기 표현을 0이 중앙인 단조 정수로 바꿔 0을 넘는 차이도 연속으로 센다.
         auto ordered = [](float value) constexpr {
-            const uint32 raw = __builtin_bit_cast(uint32, value);
+            const uint32 raw = platform::BitCast<uint32>(value);
             return (raw & 0x80000000u) != 0
                        ? static_cast<int64>(0x80000000u) - static_cast<int64>(raw & 0x7fffffffu)
                        : static_cast<int64>(0x80000000u) + raw;
@@ -225,7 +226,7 @@ constexpr bool IsNearlyEqualByUlps(T a, T b, uint64 maxUlps) noexcept {
         return static_cast<uint64>(distance < 0 ? -distance : distance) <= maxUlps;
     } else {
         auto ordered = [](double value) constexpr {
-            const uint64 raw = __builtin_bit_cast(uint64, value);
+            const uint64 raw = platform::BitCast<uint64>(value);
             return (raw & 0x8000000000000000ull) != 0
                        ? 0x8000000000000000ull - (raw & 0x7fffffffffffffffull)
                        : 0x8000000000000000ull + raw;

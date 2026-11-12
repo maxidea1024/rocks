@@ -2,6 +2,7 @@
 #include <TestSupport/MathTestSupport.h>
 #include <Core/Math/MatrixFactory.h>
 #include <Core/Math/Transform.h>
+#include <Platform/PlatformMath.h>
 
 namespace rocks::test {
 namespace {
@@ -33,7 +34,7 @@ TEST(Quaternion_AxisAngleFollowsRightHandRule) {
     REQUIRE(created);
     CHECK(created.Value().IsNormalized(1.0e-6f));
     CHECK(!Quat::TryFromAxisAngle(Vec3::Zero(), 1.0f));
-    CHECK(!Quat::TryFromAxisAngle(Vec3::Up(), __builtin_nanf("")));
+    CHECK(!Quat::TryFromAxisAngle(Vec3::Up(), platform::PlatformMath::QuietNaN<float>()));
     CHECK(Quatd() == Quatd::Identity() && Quatd().w == 1.0);
 }
 
@@ -89,13 +90,13 @@ TEST(Quaternion_FromRotationMatrixCoversAllBranches) {
         }
     }
     Mat4d bad;
-    bad.m[0] = __builtin_nan("");
+    bad.m[0] = platform::PlatformMath::QuietNaN<double>();
     CHECK(!Quatd::TryFromRotationMatrix(bad));
 }
 
 TEST(Quaternion_NormalizeInverseAndAxisAngle) {
     CHECK(!Quat(0.0f, 0.0f, 0.0f, 0.0f).TryNormalize());
-    CHECK(!Quat(__builtin_nanf(""), 0.0f, 0.0f, 1.0f).TryNormalize());
+    CHECK(!Quat(platform::PlatformMath::QuietNaN<float>(), 0.0f, 0.0f, 1.0f).TryNormalize());
     auto big = Quat(0.0f, 0.0f, 3.0e30f, 4.0e30f).TryNormalize();
     REQUIRE(big);
     CHECK(big.Value().Equals(Quat(0.0f, 0.0f, 0.6f, 0.8f), 1.0e-6f));
@@ -165,7 +166,8 @@ TEST(Transform_InverseFailsOnZeroScale) {
     CHECK(flat.TryInverseTransformPoint(Vec3d::One()).Error() == ErrorCode::InvalidArgument);
     CHECK(!flat.TryInverseTransformVector(Vec3d::One()));
     CHECK(flat.TryInverse().Error() == ErrorCode::InvalidArgument);
-    const Transform invalid(Vec3d(__builtin_nan(""), 0.0, 0.0), Quat::Identity(), Vec3::One());
+    const Transform invalid(Vec3d(platform::PlatformMath::QuietNaN<double>(), 0.0, 0.0),
+                            Quat::Identity(), Vec3::One());
     CHECK(!invalid.IsValid());
     CHECK(!Transform(Vec3d::Zero(), Quat(0.0f, 0.0f, 0.0f, 2.0f), Vec3::One()).IsValid());
 }
@@ -259,16 +261,18 @@ TEST(Quaternion_TryInverseHandlesExtremeMagnitudes) {
     CHECK((general * inverse.Value()).Equals(Quatd(), 1.0e-15));
     // 실패: 영, 비유한, 역원이 float 범위를 넘음(1/1e-40 > FLT_MAX).
     CHECK(Quat(0.0f, 0.0f, 0.0f, 0.0f).TryInverse().Error() == ErrorCode::InvalidArgument);
-    CHECK(!Quat(__builtin_nanf(""), 0.0f, 0.0f, 1.0f).TryInverse());
+    CHECK(!Quat(platform::PlatformMath::QuietNaN<float>(), 0.0f, 0.0f, 1.0f).TryInverse());
     CHECK(!Quat(1.0e-40f, 0.0f, 0.0f, 0.0f).TryInverse());
 }
 
 TEST(Quaternion_SlerpPropagatesNonFiniteInput) {
     const Quat a = Quat::FromUnitAxisAngle(Vec3::UnitZ(), 0.3f);
-    const Quat bad(__builtin_nanf(""), 0.0f, 0.0f, 1.0f);
+    const Quat bad(platform::PlatformMath::QuietNaN<float>(), 0.0f, 0.0f, 1.0f);
     CHECK(!Slerp(a, bad, 0.5f).IsFinite());
     CHECK(!Slerp(bad, a, 0.5f).IsFinite());
-    CHECK(!Slerp(a, Quat::FromUnitAxisAngle(Vec3::UnitX(), 0.2f), __builtin_nanf("")).IsFinite());
+    CHECK(!Slerp(a, Quat::FromUnitAxisAngle(Vec3::UnitX(), 0.2f),
+                 platform::PlatformMath::QuietNaN<float>())
+               .IsFinite());
     // 유한 입력은 그대로 정규화된 결과다.
     CHECK(Slerp(a, a, 0.5f).IsNormalized(1.0e-6f));
 }
@@ -303,7 +307,8 @@ TEST(Quaternion_AngularDistanceStaysWithinPi) {
         const float single = AngularDistance(Quat(p), Quat(orthogonal.Value()));
         CHECK(single >= 0.0f && single <= math::Pi<float>);
     }
-    CHECK(math::IsNaN(AngularDistance(Quat(__builtin_nanf(""), 0.0f, 0.0f, 1.0f), a)));
+    CHECK(math::IsNaN(
+        AngularDistance(Quat(platform::PlatformMath::QuietNaN<float>(), 0.0f, 0.0f, 1.0f), a)));
 }
 
 } // namespace rocks::test

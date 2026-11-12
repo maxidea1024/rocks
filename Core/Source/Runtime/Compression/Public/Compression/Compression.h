@@ -5,38 +5,37 @@
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
 
-// 압축 헬퍼(Godot Compression·UE FCompression 대응)다. 설계·근거는 Docs/Design/Compression.ko.md를
-// 따른다.
+// 압축 헬퍼(Godot Compression·UE FCompression 대응)다. 설계·근거는
+// Docs/Design/Compression.ko.md를 따른다.
 //
 // 사용 예(일회성):
 //   auto settings = CompressionSettings::TryDefault(CompressionFormat::Zstd).Value();
 //   Array<uint8> packed(allocator);
-//   auto packedBytes = TryCompressAppend(settings, original, packed);          // packed 뒤에
-//   붙인다 Array<uint8> restored(allocator); auto restoredBytes =
-//   TryDecompressAppend(CompressionFormat::Zstd, packed.View(), 64 << 20, restored);
+//   auto packedBytes = TryCompressAppend(settings, original, packed); // packed 뒤에 붙인다
+//   Array<uint8> restored(allocator);
+//   auto restoredBytes =
+//       TryDecompressAppend(CompressionFormat::Zstd, packed.View(), 64 << 20, restored);
 //
 // 사용 예(크기를 아는 해제, PNG IDAT처럼 원본 크기를 헤더로 아는 경우):
 //   Array<uint8> pixels(allocator);
 //   pixels.TryResize(expectedSize);
-//   auto written = TryDecompress(CompressionFormat::Zlib, idat, Span<uint8>(pixels.Data(),
-//   pixels.Size()), allocator);
+//   auto target = Span<uint8>(pixels.Data(), pixels.Size());
+//   auto written = TryDecompress(CompressionFormat::Zlib, idat, target, allocator);
 //   // written.Value()가 expectedSize와 다르면 상위 포맷 오류로 처리한다.
 //
 // 공통 계약:
 // - 압축·해제 함수는 쓴(붙인) byte 수를 반환한다.
-// - Span 출력은 실패 시 내용이 미정이며 범위 밖에는 쓰지 않는다. Append는 실패 시 output 길이를
-// 호출 전으로
-//   되돌린다(capacity는 늘 수 있다).
+// - Span 출력은 범위 밖에는 쓰지 않는다. 실패 시 내용은 미정이고, 성공 시에도 [반환값, 끝)
+//   구간은 미정이다(코덱이 성능을 위해 반환 크기 뒤를 덮어쓸 수 있다). Append는 실패 시 output
+//   길이를 호출 전으로 되돌린다(capacity는 늘 수 있다).
 // - 오류: 출력·상한 부족 CapacityExceeded, 손상·절단·체크섬 불일치·스트림 뒤 남는 byte·빈 해제
-// 입력·범위 밖 수준·
-//   source와 출력의 겹침 InvalidArgument, 프리셋 사전이 필요한 입력 Unsupported, 할당 실패
-//   OutOfMemory, 크기 산술 overflow Overflow, 외부 코덱이 계약 밖의 실패를 보고 DependencyFailed.
+//   입력·범위 밖 수준·source와 출력의 겹침 InvalidArgument, 프리셋 사전이 필요한 입력 Unsupported,
+//   할당 실패 OutOfMemory, 크기 산술 overflow Overflow, 외부 코덱이 계약 밖의 실패를 보고
+//   DependencyFailed.
 // - 할당은 모두 인자로 받은 Allocator를 거친다. 전역·thread_local 캐시가 없어 자유 함수는 재진입
-// 가능하다.
-//   반복 호출이 많으면 코덱 문맥을 재사용하는 Compressor·Decompressor를 쓴다.
+//   가능하다. 반복 호출이 많으면 코덱 문맥을 재사용하는 Compressor·Decompressor를 쓴다.
 // - 같은 라이브러리 버전·설정·입력이면 64bit little-endian 대상(Windows x64·macOS ARM64·Android
-// arm64/x86_64)에서
-//   같은 byte를 만든다(쿠킹 재현성). 비동기 API도 같은 결과를 만든다.
+//   arm64/x86_64)에서 같은 byte를 만든다(쿠킹 재현성). 비동기 API도 같은 결과를 만든다.
 namespace rocks {
 
 namespace detail {

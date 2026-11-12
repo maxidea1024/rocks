@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Core/Time/TimeSpan.h>
+#include <Base/Checked.h>
 
 // UTC 시각(DateTime)이다. 저장 파일의 시각, 로그 시각, 서버와 주고받는 시각처럼 "언제인가"를
 // 나타낸다.
@@ -159,7 +160,7 @@ public:
     // span만큼 옮긴 시각이다. 범위를 넘으면 Overflow다(이 값은 바뀌지 않는다).
     Result<DateTime> TryAdd(TimeSpan span) const noexcept {
         int64 sum = 0;
-        if (__builtin_add_overflow(ticks_, span.Ticks(), &sum)) {
+        if (!::rocks::TryAdd(ticks_, span.Ticks(), sum)) {
             return Result<DateTime>::Failure(ErrorCode::Overflow);
         }
 
@@ -169,7 +170,7 @@ public:
     // span만큼 앞으로 옮긴 시각이다. 범위를 넘으면 Overflow다(span이 TimeSpan::MinValue여도 된다).
     Result<DateTime> TrySubtract(TimeSpan span) const noexcept {
         int64 difference = 0;
-        if (__builtin_sub_overflow(ticks_, span.Ticks(), &difference)) {
+        if (!::rocks::TrySubtract(ticks_, span.Ticks(), difference)) {
             return Result<DateTime>::Failure(ErrorCode::Overflow);
         }
 

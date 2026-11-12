@@ -276,15 +276,16 @@ public:
     넘으면 해제 전에 CapacityExceeded다. 크기 미기록 frame에서는 CapacityExceeded다.
 - **Deflate·Zlib·Gzip**
   - z_stream과 `gz_header`는 할당기로 할당한 heap 블록에 고정한다.
-  - bound: `deflateBound_z(Z_NULL, n)`(1.4, `z_size_t`는 64bit 대상에서 64bit)을 쓴다.
-  - 32bit 한계: `uInt` 한계를 넘는 입력·출력은 스트림 루프로 나눠 넣는다. 테스트는 chunk 크기를 내부에서 작게 주입해
-    검증한다.
-  - Append 해제: 64KiB chunk로 inflate한 뒤 `output.TryAppend`로 붙인다(0 채우기·재시작 없음).
-  - Span 해제의 `Z_BUF_ERROR` 판별
-    - `avail_in > 0 && avail_out == 0`이면 출력 부족이다.
-    - `avail_in == 0 && avail_out > 0`이면 절단이다.
-    - 둘 다 0이면 1byte 임시 출력으로 다시 inflate한다. 진행이 있으면 CapacityExceeded, 없으면 InvalidArgument다.
-    - 블록 끝과 체크섬 검사는 출력 공간 없이도 진행되므로 "정확히 상한이면 성공"이 성립한다.
+  - bound: 공개 `TryGetCompressBound`는 `deflateBound_z(Z_NULL, n)`(1.4, `z_size_t`는 64bit 대상에서 64bit)으로 모든
+    래퍼를 덮는 보수적 상한(약 13% 여유)을 준다. 압축 문맥이 있는 Append는 문맥 설정으로 구한 `deflateBound_z(&stream, n)`
+    (약 0.03% 여유, 수준 0은 stored 기준)만큼만 확보한다. `Z_NO_FLUSH`·`Z_FINISH`만 쓰므로 분할 호출에도 성립한다.
+  - 32bit 한계: `uInt` 한계를 넘는 입력·출력은 분할 단위(1MiB)로 나눠 넣는다. 1MiB를 넘는 일반 입력으로 같은 루프가
+    실행되므로 별도 주입 없이 검증된다.
+  - Append 해제: 출력을 `Array::TryResize`로 두 배씩(최소 64KiB) 늘리며 그 뒤로 직접 inflate한다(늘린 구간은 0으로
+    채워진다). 실패하면 길이를 되돌린다.
+  - 출력 상한 판별: 쓸 공간이 0이 되면(Span 끝 또는 Append 상한) 1byte 예비 버퍼로 계속 inflate한다. 1byte라도 나오면
+    CapacityExceeded, 블록 끝·체크섬만 남았으면 성공이다(이 상태들은 출력 공간 없이 진행된다). 입력을 다 넣었는데 진행이
+    없으면(`Z_BUF_ERROR`) 절단(InvalidArgument)이다. 그래서 정확히 상한 크기인 결과는 성공한다.
   - Gzip 연속 member: RFC 1952대로 모두 해제한다(`inflateReset`). member 사이·뒤의 쓰레기와 0 padding은 거부한다.
   - Gzip 헤더: FEXTRA·FNAME·FCOMMENT·FHCRC를 받고, 틀린 FHCRC와 예약 FLG는 거부한다.
   - zlib 1.4부터 raw deflate가 출력 버퍼를 정확히 채우면 `Z_STREAM_END`를 반환한다. 이를 정상으로 처리한다.
@@ -335,7 +336,9 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
   할당기는 output 성장·코덱 scratch·capture 해제를 worker에서 수행하므로 소유 스레드와 **동시에 써도 안전해야** 한다.
   System·Binned·Budget·Pool·External·Debug는 허용하고 Arena·Stack은 금지한다. scheduler 할당기는 task보다 오래 살아야 한다.
 - **제출 순서**: 제출은 다음 순서로 진행한다.
-  1. 동기 검증(겹침·한계·빈 해제 입력·overflow)
+  1. output을 읽지 않는 동기 검증(Lz4 입력 한계·빈 해제 입력·모르는 형식·Span 변형의 source·destination 겹침).
+     output은 앞선 의존 작업이 worker에서 키우는 중일 수 있어 제출 시점에 읽지 않는다(읽으면 데이터 경합). output과의
+     겹침·크기 overflow는 body가 실행 시점에 검사한다.
   2. 진행 중 task면 Busy
   3. `Function::TryCreate`(실패 시 아무것도 바뀌지 않음)
   4. 이전 결과 보관 후 slot 초기화(worker가 Submit 반환 전에 실행할 수 있음)
@@ -347,14 +350,19 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
   - output의 원래 길이는 body 시작 시점에 기록한다. 의존으로 직렬화한 여러 작업이 같은 output에 이어 붙일 수 있다.
   - source의 주소·길이는 제출 시점에 고정된다. 앞선 작업은 내용만 채울 수 있다.
   - 코덱 오류는 `context.Fail(error)`로 보고한다. 보고하지 않으면 Succeeded가 되어 후속 작업이 잘못된 데이터로 실행된다.
+    코덱이 Cancelled를 돌려줘도 실제 취소 요청이 없으면 실패로 보고한다.
 - **취소**
-  - 협력적이며, body 시작 전과 "입력 소비 또는 출력 생성이 먼저 1MiB에 이를 때마다" 확인한다.
+  - 협력적이며 body 시작 전과 분할 단위(1MiB)마다 확인한다. zlib 계열과 zstd 압축은 입력 소비나 출력 생성 1MiB마다,
+    zstd 해제는 stable output 방식이라 입력 1MiB마다 확인한다(압축률이 아주 높은 입력은 한 번의 호출로 큰 출력을 만든다).
   - `IsCancellationRequested`는 scheduler gate를 잡으므로 더 촘촘히 확인하지 않는다.
   - 취소를 관측하면 output 길이를 복원하고 Fail 없이 반환해 Cancelled가 된다.
   - 취소 가능 경로: zlib 계열 전체, zstd 압축·해제.
   - 끊지 않는 경로는 LZ4 압축·해제다. LZ4 fast·해제는 수 초 이내지만 HC 12는 약 10–20MB/s여서 2GiB 가까운 입력이면
     100초 이상 걸린다. `Shutdown`은 worker를 Join하므로 Cancel 모드여도 그만큼 기다린다. 큰 입력은 블록 컨테이너(후속)를
     쓴다.
+- **소멸**: 진행 중인 task의 소멸자는 취소를 요청하고 기다린다. 대기 중인 작업의 취소는 worker가 처리하므로 모든 worker가
+  막혀 있으면 소멸자도 기다린다. 같은 scheduler의 worker(다른 작업의 body·capture 정리 포함)에서는 기다릴 수 없어 Fatal이므로
+  task를 다른 작업의 capture가 소유하게 하지 않는다. 다른 스레드는 `Handle().Clone()`으로 얻은 handle로만 기다린다.
 - **용량**: scheduler의 `maxInFlight`(기본 256)를 넘으면 CapacityExceeded다. caller가 제출 속도를 조절한다. task는 이동할
   수 없어 `Array` 원소가 될 수 없으므로 C 배열이나 `UniquePtr`로 둔다.
 
@@ -385,7 +393,7 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
 - **경계**
   - destination 1byte 부족, `maxOutputBytes` 정확히 같음(성공)과 1 작음(실패)
   - zlib avail 둘 다 0, zstd 거짓 크기(작게·크게), skippable만 있는 입력(성공 0), frame 뒤 1–4byte와 5byte 이상
-  - FDICT, dictID frame, gzip 헤더 플래그 조합, 32bit chunk 분할 루프
+  - FDICT, dictID frame, gzip 헤더 플래그 조합, 1MiB 분할 루프(1MiB를 넘는 입력)
 - **손상**: 고정 seed bit flip, 모든 길이로 자른 입력, 무작위 입력을 넣는다. 오류이거나, 성공하면 원본과 같아야 한다(무결성
   없는 형식은 범위 밖 쓰기가 없음만 확인). ASan 구성에서 실행한다.
 - **폭탄 입력**: 2^40을 선언한 zstd frame, 1KB → 1GB zlib을 상한 1MiB로 해제한다. 계수 allocator의 최고 사용량이
@@ -414,7 +422,7 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
 |---|---|
 | 원본 무결성 | zstd 공식 `.sha256` 일치, zlib `.asc` GPG 서명 정상(지문 5ED4…AFBA), LZ4·zlib GitHub 자산 digest 일치. 저장소 원본 81개 파일의 SHA-256이 manifest와 일치 |
 | 빌드 | clang 21(clang-cl)로 Debug·ASan·Release(ThinLTO, C bitcode 포함) Foundation 타깃 경고 0 |
-| Compression 시험 | 14개(동기 10·비동기 4)가 Debug·ASan·Release에서 모두 통과. Foundation 전체 777개 통과 |
+| Compression 시험 | 17개(동기 10·비동기 7: 실행 중·늦은 취소, 같은 output 연쇄 Append 포함)가 Debug·ASan·Release에서 통과. Foundation 전체 통과 |
 | 빌드 도구 시험 | `Rocks.Build.Tests` 21개 그룹 통과(C++ compile action golden Debug·Release, C17 프로필, 실제 C 빌드·실행 Debug·Release, include된 `.c` 무효화, 언어 변경 인자 거부) |
 | 정책 시험 | `Rocks.ToolTests self` 72개 통과(third-party 저장소 검사와 음성 대조). `native` 96개 통과(실제 compile DB 언어·경고 감사, 지시문 무효 확인과 그 양성·음성 대조) |
 

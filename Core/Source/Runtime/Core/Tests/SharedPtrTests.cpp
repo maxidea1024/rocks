@@ -3,6 +3,7 @@
 #include <Core/Memory/SharedPtr.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Platform/Thread.h>
+#include <Platform/Atomics.h>
 
 namespace rocks::test {
 namespace {
@@ -106,7 +107,8 @@ void RaceEntry(void* raw) noexcept {
                 ++context->failures;
             }
             if (!signaled) {
-                __atomic_fetch_add(context->aliveSignals, 1, __ATOMIC_ACQ_REL);
+                platform::AtomicFetchAdd<platform::MemoryOrder::AcquireRelease>(
+                    context->aliveSignals, 1);
                 signaled = true;
             }
         } else {
@@ -260,7 +262,7 @@ TEST(SharedPtr_LockRacesWithLastRelease) {
         }
         start.Signal();
         // 모든 작업자가 Lock에 성공한 뒤 해제해 경합 구간을 보장한다.
-        while (__atomic_load_n(&aliveSignals, __ATOMIC_ACQUIRE) < 3) {
+        while (platform::AtomicLoad<platform::MemoryOrder::Acquire>(&aliveSignals) < 3) {
             platform::YieldThread();
         }
         owner.Reset(); // Lock 중인 스레드와 마지막 해제가 경합한다.

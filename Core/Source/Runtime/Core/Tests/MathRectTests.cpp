@@ -1,6 +1,7 @@
 #include <TestSupport/Test.h>
 #include <Core/Math/Interval.h>
 #include <Core/Math/Rect.h>
+#include <Platform/PlatformMath.h>
 
 namespace rocks::test {
 
@@ -12,7 +13,7 @@ TEST(Box2_ClosedBoundaryContracts) {
     CHECK(box.Contains(Vec2d(4.0, 2.0)) && !box.ContainsStrictly(Vec2d(4.0, 2.0)));
     CHECK(box.ContainsStrictly(Vec2d(1.0, 1.0)));
     CHECK(!box.Contains(Vec2d(4.0000000001, 1.0)));
-    CHECK(!box.Contains(Vec2d(__builtin_nan(""), 1.0)));
+    CHECK(!box.Contains(Vec2d(platform::PlatformMath::QuietNaN<double>(), 1.0)));
     // 변 접촉은 겹침이고 교집합은 넓이 0인 선분이다.
     const Box2<double> touching(Vec2d(4.0, -1.0), Vec2d(5.0, 1.0));
     CHECK(box.Overlaps(touching) && touching.Overlaps(box));
@@ -32,14 +33,15 @@ TEST(Box2_ClosedBoundaryContracts) {
 
 TEST(Box2_ConstructionValidation) {
     CHECK(!Box2<float>::TryMake(Vec2(1.0f, 0.0f), Vec2(0.0f, 1.0f)));
-    CHECK(!Box2<float>::TryMake(Vec2(0.0f, 0.0f), Vec2(__builtin_huge_valf(), 1.0f)));
+    CHECK(!Box2<float>::TryMake(Vec2(0.0f, 0.0f),
+                                Vec2(platform::PlatformMath::Infinity<float>(), 1.0f)));
     CHECK(Box2<float>::TryMake(Vec2(1.0f, 1.0f), Vec2(1.0f, 1.0f))); // 점 경계
     const Vec2d points[] = {Vec2d(3.0, -1.0), Vec2d(-2.0, 5.0), Vec2d(0.5, 0.5)};
     auto fromPoints = Box2<double>::TryFromPoints(Span<const Vec2d>(points));
     REQUIRE(fromPoints);
     CHECK(fromPoints.Value() == Box2<double>(Vec2d(-2.0, -1.0), Vec2d(3.0, 5.0)));
     CHECK(!Box2<double>::TryFromPoints(Span<const Vec2d>()));
-    const Vec2d bad[] = {Vec2d(0.0, 0.0), Vec2d(__builtin_nan(""), 1.0)};
+    const Vec2d bad[] = {Vec2d(0.0, 0.0), Vec2d(platform::PlatformMath::QuietNaN<double>(), 1.0)};
     CHECK(!Box2<double>::TryFromPoints(Span<const Vec2d>(bad)));
 }
 
@@ -62,18 +64,18 @@ TEST(Interval_ClosedRangeContracts) {
     const Interval<double> range(2.0, 6.0);
     CHECK(range.IsValid() && range.Size() == 4.0);
     CHECK(range.Contains(2.0) && range.Contains(6.0) && !range.Contains(6.5));
-    CHECK(!range.Contains(__builtin_nan("")));
+    CHECK(!range.Contains(platform::PlatformMath::QuietNaN<double>()));
     CHECK(range.Clamp(9.0) == 6.0 && range.Clamp(-1.0) == 2.0);
     CHECK(range.Interpolate(0.0) == 2.0 && range.Interpolate(1.0) == 6.0);
     CHECK(range.Interpolate(0.25) == 3.0);
     CHECK(range.ExpandedToInclude(-3.0) == Interval<double>(-3.0, 6.0));
-    CHECK(!range.ExpandedToInclude(__builtin_nan("")).IsValid());
+    CHECK(!range.ExpandedToInclude(platform::PlatformMath::QuietNaN<double>()).IsValid());
     auto touching = range.TryIntersection(Interval<double>(6.0, 8.0));
     REQUIRE(touching);
     CHECK(touching.Value() == Interval<double>(6.0, 6.0));
     CHECK(range.TryIntersection(Interval<double>(7.0, 8.0)).Error() == ErrorCode::NotFound);
     CHECK(!Interval<float>::TryMake(1.0f, 0.0f));
-    CHECK(!Interval<float>::TryMake(0.0f, __builtin_huge_valf()));
+    CHECK(!Interval<float>::TryMake(0.0f, platform::PlatformMath::Infinity<float>()));
     CHECK(Interval<float>::TryMake(1.0f, 1.0f));
 }
 
@@ -87,7 +89,7 @@ TEST(Rect_ReviewRegressions) {
     CHECK(!square.Overlaps(IntRect(IntVec2(8, 8), IntVec2(2, 2))));
     CHECK(!IntRect(IntVec2(8, 8), IntVec2(2, 2)).Overlaps(square));
     // NaN은 누적 다음 단계에서도 사라지지 않는다.
-    const double nan = __builtin_nan("");
+    const double nan = platform::PlatformMath::QuietNaN<double>();
     const Box2<double> box(Vec2d(0.0, 0.0), Vec2d(1.0, 1.0));
     const Box2<double> poisoned = box.ExpandedToInclude(Vec2d(nan, 0.5));
     CHECK(!poisoned.IsValid());

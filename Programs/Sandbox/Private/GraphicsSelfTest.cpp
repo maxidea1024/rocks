@@ -6,6 +6,7 @@
 #include <PlatformWindow/Window.h>
 #include <Renderer/Renderer.h>
 #include <stdio.h>
+#include <Platform/Memory.h>
 
 namespace sandbox {
 
@@ -303,7 +304,7 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
             const uint8 color[4] = {static_cast<uint8>(level >= 4 ? 0 : 255), 0,
                                     static_cast<uint8>(level >= 4 ? 255 : 0), 255};
             for (uint32 index = 0; index < extent * extent; ++index) {
-                __builtin_memcpy(chain.Data() + offset + index * 4u, color, 4);
+                platform::MemoryCopy(chain.Data() + offset + index * 4u, color, 4);
             }
             offset += static_cast<usize>(extent) * extent * 4u;
         }

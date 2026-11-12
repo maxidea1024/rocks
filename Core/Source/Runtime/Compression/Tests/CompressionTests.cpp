@@ -219,44 +219,78 @@ TEST(Compression_RoundTripAllFormatsLevelsAndSizes) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+// 재사용 문맥은 입력 크기·이전 실패와 무관하게 새 문맥(자유 함수)과 같은 byte를 낸다. 크기를 번갈아
+// 써서 LZ4 table 재사용(4KiB 미만 입력), zstd 세션 재설정, gzip 헤더 재적용, zlib 분할 루프를 함께
+// 거친다.
 TEST(Compression_ReusedContextsMatchFreeFunctionsAfterFailures) {
     SystemAllocator allocator;
     {
-        Array<uint8> original(allocator);
-        Fill(original, 300000, Pattern::Text);
-        for (CompressionFormat format : AllFormats) {
-            const auto settings = DefaultSettings(format);
-            Array<uint8> expected(allocator);
-            REQUIRE(TryCompressAppend(settings, View(original), expected));
-
-            auto compressor = Compressor::TryCreate(settings, allocator);
-            auto decompressor = Decompressor::TryCreate(format, allocator);
-            REQUIRE(compressor && decompressor);
-            for (uint32 round = 0; round < 3; ++round) {
-                // 실패(출력 부족) 직후에도 다음 결과가 같아야 한다(zstd 세션·gzip 헤더 재설정).
-                uint8 tiny[4];
-                CHECK(
-                    compressor.Value().TryCompress(View(original), Span<uint8>(tiny, 4)).Error() ==
-                    ErrorCode::CapacityExceeded);
-                Array<uint8> packed(allocator);
-                REQUIRE(compressor.Value().TryCompressAppend(View(original), packed));
-                CHECK(Same(packed, View(expected)));
-
-                CHECK(decompressor.Value()
-                          .TryDecompress(View(packed), Span<uint8>(tiny, 4))
-                          .Error() == ErrorCode::CapacityExceeded);
-                Array<uint8> restored(allocator);
-                auto restoredBytes = decompressor.Value().TryDecompressAppend(
-                    View(packed), original.Size(), restored);
-                CHECK(restoredBytes && Same(restored, View(original)));
-            }
-
-            Compressor moved = Move(compressor.Value());
-            Array<uint8> after(allocator);
-            CHECK(compressor.Value().TryCompressAppend(View(original), after).Error() ==
-                  ErrorCode::StaleHandle);
-            CHECK(moved.TryCompressAppend(View(original), after) && Same(after, View(expected)));
+        static constexpr usize Sizes[] = {100, 3000, 300000, (usize{2} << 20) + 5, 3000, 100};
+        struct LevelSet {
+            CompressionFormat format;
+            int32 levels[3];
+        };
+        static constexpr LevelSet Levels[] = {{CompressionFormat::Lz4, {1, 2, 12}},
+                                              {CompressionFormat::Zstd, {1, 3, 19}},
+                                              {CompressionFormat::Deflate, {0, 6, 9}},
+                                              {CompressionFormat::Zlib, {0, 6, 9}},
+                                              {CompressionFormat::Gzip, {0, 6, 9}}};
+        Array<uint8> inputs[6] = {Array<uint8>(allocator), Array<uint8>(allocator),
+                                  Array<uint8>(allocator), Array<uint8>(allocator),
+                                  Array<uint8>(allocator), Array<uint8>(allocator)};
+        for (usize index = 0; index < 6; ++index) {
+            Fill(inputs[index], Sizes[index], index % 2 == 0 ? Pattern::Text : Pattern::Random,
+                 index + 3);
         }
+
+        for (const LevelSet& set : Levels) {
+            auto decompressor = Decompressor::TryCreate(set.format, allocator);
+            REQUIRE(decompressor);
+            for (int32 level : set.levels) {
+                const auto settings = Settings(set.format, level);
+                auto compressor = Compressor::TryCreate(settings, allocator);
+                REQUIRE(compressor);
+                for (usize index = 0; index < 6; ++index) {
+                    // zstd 최고 수준은 느리므로 큰 입력에는 쓰지 않는다.
+                    if (level == 19 && Sizes[index] > 300000) {
+                        continue;
+                    }
+                    const Span<const uint8> input = View(inputs[index]);
+                    Array<uint8> expected(allocator);
+                    REQUIRE(TryCompressAppend(settings, input, expected));
+
+                    // 실패(출력 부족) 직후에도 다음 결과가 같아야 한다.
+                    uint8 tiny[4];
+                    CHECK(compressor.Value().TryCompress(input, Span<uint8>(tiny, 4)).Error() ==
+                          ErrorCode::CapacityExceeded);
+                    Array<uint8> packed(allocator);
+                    REQUIRE(compressor.Value().TryCompressAppend(input, packed));
+                    CHECK(Same(packed, View(expected)));
+
+                    if (input.Size() > 4) {
+                        CHECK(decompressor.Value()
+                                  .TryDecompress(View(packed), Span<uint8>(tiny, 4))
+                                  .Error() == ErrorCode::CapacityExceeded);
+                    }
+                    Array<uint8> restored(allocator);
+                    auto restoredBytes = decompressor.Value().TryDecompressAppend(
+                        View(packed), input.Size(), restored);
+                    CHECK(restoredBytes && Same(restored, input));
+                }
+            }
+        }
+
+        // 이동된 뒤의 문맥은 StaleHandle이고 이동받은 문맥은 그대로 동작한다.
+        const auto settings = DefaultSettings(CompressionFormat::Zstd);
+        auto compressor = Compressor::TryCreate(settings, allocator);
+        REQUIRE(compressor);
+        Array<uint8> expected(allocator);
+        REQUIRE(TryCompressAppend(settings, View(inputs[2]), expected));
+        Compressor moved = Move(compressor.Value());
+        Array<uint8> after(allocator);
+        CHECK(compressor.Value().TryCompressAppend(View(inputs[2]), after).Error() ==
+              ErrorCode::StaleHandle);
+        CHECK(moved.TryCompressAppend(View(inputs[2]), after) && Same(after, View(expected)));
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
@@ -271,15 +305,16 @@ TEST(Compression_DeterministicOutputGoldens) {
     };
     static constexpr Golden Goldens[] = {
         // 기준: Windows x64 clang 21.1.6, LZ4 1.11.1·zstd 1.5.7·zlib 1.4, 각 형식 기본 수준.
-        {CompressionFormat::Lz4, 198783, 0x1183d1dbu},
-        {CompressionFormat::Zstd, 113514, 0xc86ed9edu},
-        {CompressionFormat::Deflate, 112982, 0xdf59b65au},
-        {CompressionFormat::Zlib, 112988, 0x6bdc5a13u},
-        {CompressionFormat::Gzip, 113000, 0x19b08befu},
+        {CompressionFormat::Lz4, 1561682, 0x68143ef1u},
+        {CompressionFormat::Zstd, 847092, 0xa5bcc580u},
+        {CompressionFormat::Deflate, 884860, 0x5479ce6eu},
+        {CompressionFormat::Zlib, 884866, 0x7fffd6cdu},
+        {CompressionFormat::Gzip, 884878, 0x16eb60f5u},
     };
     SystemAllocator allocator;
     Array<uint8> original(allocator);
-    Fill(original, 200000, Pattern::Text, 7);
+    // 분할 단위(1MiB)를 넘겨 스트림 경계까지 고정한다.
+    Fill(original, (usize{3} << 19) + 11, Pattern::Text, 7);
     for (const Golden& golden : Goldens) {
         Array<uint8> packed(allocator);
         REQUIRE(TryCompressAppend(DefaultSettings(golden.format), View(original), packed));
@@ -429,6 +464,9 @@ TEST(Compression_OutOfMemoryAtEveryAllocationRollsBack) {
                 failing.FailOnAttempt(attempt);
                 auto result = TryCompressAppend(DefaultSettings(format), View(original), output);
                 succeeded = result.IsOk();
+                // 성공은 실패 주입 지점이 실제 할당 수를 넘었을 때만이다(주입이 실제로 일어났음을
+                // 보장).
+                CHECK(!succeeded || failing.Attempts() < attempt);
                 CHECK(succeeded || result.Error() == ErrorCode::OutOfMemory);
                 CHECK(succeeded || output.Size() == 4);
             }
@@ -445,6 +483,9 @@ TEST(Compression_OutOfMemoryAtEveryAllocationRollsBack) {
                 failing.FailOnAttempt(attempt);
                 auto result = TryDecompressAppend(format, View(packed), original.Size(), output);
                 succeeded = result.IsOk();
+                // 성공은 실패 주입 지점이 실제 할당 수를 넘었을 때만이다(주입이 실제로 일어났음을
+                // 보장).
+                CHECK(!succeeded || failing.Attempts() < attempt);
                 CHECK(succeeded || result.Error() == ErrorCode::OutOfMemory);
                 CHECK(succeeded ? Same(Span<const uint8>(output.Data() + 4, output.Size() - 4),
                                        View(original))

@@ -7,6 +7,7 @@
 #include <Core/Result.h>
 #include <Core/Traits.h>
 #include <Platform/Fatal.h>
+#include <Platform/Memory.h>
 
 namespace rocks {
 
@@ -442,12 +443,12 @@ private:
 
     template <typename Target>
     static Target& TargetAt(void* storage) noexcept {
-        return *__builtin_launder(static_cast<Target*>(storage));
+        return *platform::Launder(static_cast<Target*>(storage));
     }
 
     template <typename Target>
     static const Target& TargetAt(const void* storage) noexcept {
-        return *__builtin_launder(static_cast<const Target*>(storage));
+        return *platform::Launder(static_cast<const Target*>(storage));
     }
 
     template <typename Target>
