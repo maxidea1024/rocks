@@ -154,6 +154,27 @@ internal static class ModuleMetaTests
             await Reject(layout.RunUpperAsync(), "RMC3000", "stale generated header");
         });
 
+        // import한 base의 WorldOnly와 도구 이름은 descriptor로 전해져 파생 모듈에 상속된다(B2).
+        suite.Add("Meta.ImportedWorldOnlyAndToolNamesAreInherited", async () =>
+        {
+            using Layout layout = new(options, environment);
+            layout.Write("Lower/Public/Lower/Parent.h", Parent.Replace("ROCKS_CLASS()", "ROCKS_CLASS(WorldOnly)", StringComparison.Ordinal)
+                .Replace("ROCKS_PROPERTY()", "ROCKS_PROPERTY(Name=\"Amount\", EditorOnly)", StringComparison.Ordinal));
+            Verify.Equal(0, (await layout.RunLowerAsync()).ExitCode, "lower module");
+            ProcessResult upper = await layout.RunUpperAsync();
+            Verify.Equal(0, upper.ExitCode, "upper module: " + upper.StdErr);
+            using JsonDocument descriptor = JsonDocument.Parse(File.ReadAllBytes(layout.Descriptor("Upper")));
+            JsonElement value = Type(descriptor, "probe::Value");
+            Verify.Equal("WorldOnly", value.GetProperty("flags")[0].GetString(), "WorldOnly inherited from an imported base");
+            JsonElement inherited = value.GetProperty("fields").EnumerateArray().Single(field => field.GetProperty("name").GetString() == "value");
+            Verify.Equal("Amount", inherited.GetProperty("toolName").GetString(), "inherited tool name");
+            Verify.Equal("EditorOnly", inherited.GetProperty("flags")[0].GetString(), "inherited field flags round-trip");
+
+            // 상속한 도구 이름과 대소문자만 다른 이름은 RMC2203이다.
+            layout.Write("Upper/Public/Upper/Value.h", Value.Replace("ROCKS_PROPERTY()", "ROCKS_PROPERTY(Name=\"amount\")", StringComparison.Ordinal));
+            await Reject(layout.RunUpperAsync(), "RMC2203", "tool name");
+        });
+
         // private 헤더만 있는 모듈도 private 집계가 import한 모듈을 먼저 등록한다(base가 등록되어 있어야 한다).
         suite.Add("Meta.PrivateOnlyModuleRegistersImportedModules", async () =>
         {
@@ -200,7 +221,7 @@ internal static class ModuleMetaTests
                 ("newline", "\"name\": \"probe::Parent\"", "\"name\": \"probe::Parent\\n\""),
                 ("element", "\"element\": null", "\"element\": 1"),
                 ("maxElements", "\"maxElements\": 0", "\"maxElements\": 3"),
-                ("toolName", "\"toolName\": \"value\"", "\"toolName\": \"other\""),
+                ("toolName", "\"toolName\": \"value\"", "\"toolName\": \"1bad\""),
                 ("duplicate", "\"module\": \"Lower\"", "\"module\": \"Lower\",\n  \"module\": \"Lower\"")
             })
             {

@@ -38,6 +38,11 @@ internal static class ModuleDescriptor
                     json.WriteStringValue("Abstract");
                 }
 
+                if (type.WorldOnly)
+                {
+                    json.WriteStringValue("WorldOnly");
+                }
+
                 json.WriteEndArray();
                 json.WriteString("base", type.Base);
                 json.WriteString("header", type.Header);
@@ -70,8 +75,18 @@ internal static class ModuleDescriptor
                         json.WriteStringValue("ReadOnly");
                     }
 
+                    if (field.Spec.EditorOnly)
+                    {
+                        json.WriteStringValue("EditorOnly");
+                    }
+
+                    if (field.Spec.Required)
+                    {
+                        json.WriteStringValue("Required");
+                    }
+
                     json.WriteEndArray();
-                    json.WriteString("toolName", field.Name);
+                    json.WriteString("toolName", field.EffectiveToolName);
                     json.WriteString("category", field.Spec.Category);
                     json.WriteString("displayName", field.Spec.DisplayName);
                     json.WriteNumber("maxElements", 0);
@@ -142,7 +157,7 @@ internal static class ModuleDescriptor
             string name = Name(type.GetProperty("name"), QualifiedName, "type name");
             string id = Hex(type.GetProperty("id"), Invalid);
             string[] flags = type.GetProperty("flags").EnumerateArray().Select(flag => flag.GetString() ?? "").ToArray();
-            if (flags.Any(flag => flag != "Abstract") || flags.Distinct(StringComparer.Ordinal).Count() != flags.Length)
+            if (flags.Any(flag => flag is not ("Abstract" or "WorldOnly")) || flags.Distinct(StringComparer.Ordinal).Count() != flags.Length)
             {
                 throw Invalid("unknown or duplicate type flag in " + name);
             }
@@ -153,7 +168,7 @@ internal static class ModuleDescriptor
                 throw Invalid("visibility of " + name);
             }
 
-            if (!type.GetProperty("version").TryGetUInt32(out uint version) || version == 0)
+            if (!type.GetProperty("version").TryGetUInt32(out uint version) || version == 0 || version > int.MaxValue)
             {
                 throw Invalid("version of " + name);
             }
@@ -173,6 +188,7 @@ internal static class ModuleDescriptor
                 Version = version,
                 Base = Name(type.GetProperty("base"), QualifiedName, "base of " + name),
                 Abstract = flags.Contains("Abstract"),
+                WorldOnly = flags.Contains("WorldOnly"),
                 Header = header,
                 Private = visibility == "private",
                 Imported = true,
@@ -202,7 +218,8 @@ internal static class ModuleDescriptor
                 }
 
                 string[] fieldFlags = field.GetProperty("flags").EnumerateArray().Select(flag => flag.GetString() ?? "").ToArray();
-                if (fieldFlags.Any(flag => flag is not ("Transient" or "ReadOnly")) || fieldFlags.Distinct(StringComparer.Ordinal).Count() != fieldFlags.Length)
+                if (fieldFlags.Any(flag => flag is not ("Transient" or "ReadOnly" or "EditorOnly" or "Required")) ||
+                    fieldFlags.Distinct(StringComparer.Ordinal).Count() != fieldFlags.Length)
                 {
                     throw Invalid("unknown or duplicate field flag");
                 }
@@ -215,10 +232,8 @@ internal static class ModuleDescriptor
                 }
 
                 string fieldName = Name(field.GetProperty("name"), Identifier, "field name");
-                if (field.GetProperty("toolName").GetString() != fieldName)
-                {
-                    throw Invalid("toolName of " + fieldName);
-                }
+                // toolName은 실효 도구 이름이다(지정하지 않았으면 필드 이름).
+                string toolName = Name(field.GetProperty("toolName"), Identifier, "toolName of " + fieldName);
 
                 fields.Add(new FieldModel
                 {
@@ -229,7 +244,12 @@ internal static class ModuleDescriptor
                     NativeSpelling = "",
                     Spec = new(fieldFlags.Contains("Transient"), fieldFlags.Contains("ReadOnly"),
                         field.GetProperty("category").GetString() ?? throw Invalid("category"),
-                        field.GetProperty("displayName").GetString() ?? throw Invalid("displayName")),
+                        field.GetProperty("displayName").GetString() ?? throw Invalid("displayName"))
+                    {
+                        EditorOnly = fieldFlags.Contains("EditorOnly"),
+                        Required = fieldFlags.Contains("Required"),
+                        ToolName = toolName == fieldName ? "" : toolName
+                    },
                     Kind = kind,
                     ReferenceId = referenceId
                 });

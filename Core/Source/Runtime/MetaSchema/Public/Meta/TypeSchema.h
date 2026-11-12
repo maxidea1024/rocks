@@ -9,14 +9,28 @@ using TypeId = Guid;
 using ContextId = Guid;
 
 // flags는 저장 형식과 별개인 메타데이터 정책이다. 알 수 없는 비트는 등록 단계에서 거부한다.
+//
+// TypeFlags:
+//   Abstract  — 등록할 수 있으나 생성할 수 없다(construct가 null).
+//   WorldOnly — World 쪽에서만 쓰는 타입이다. 상속된다(base가 WorldOnly면 파생도 이 플래그가
+//               있어야 등록된다). 에셋 객체 Registry의 생성 거부 정책은 패키지 단계(A0-O)다.
 enum class TypeFlags : uint32 {
     None = 0,
-    Abstract = 1
+    Abstract = 1,
+    WorldOnly = 2
 };
+
+// FieldFlags:
+//   Transient  — GC 추적은 하되 저장 그래프에서 뺀다.
+//   ReadOnly   — 일반 write를 거부하고 생성·복원의 staged write만 허용한다.
+//   EditorOnly — 항상 컴파일되고 플래그만 단다. 쿠킹 데이터에서 빼는 것은 graph v2(A0-O)다.
+//   Required   — typed 참조 필드(ValueKind::ObjectReference)에만 쓴다. null 거부는 패키지 저장(A1).
 enum class FieldFlags : uint32 {
     None = 0,
     Transient = 1,
-    ReadOnly = 2
+    ReadOnly = 2,
+    EditorOnly = 4,
+    Required = 8
 };
 
 constexpr bool HasFlag(uint32 flags, TypeFlags flag) noexcept {
@@ -65,6 +79,11 @@ struct FieldSchema {
     // 표시 문자열도 등록 시 깊게 복사한다. category는 그룹, displayName은 표시용이며 ID가 아니다.
     Span<const char> category{};
     Span<const char> displayName{};
+    // 도구·명령행 이름(ROCKS_PROPERTY(Name="…"))이다. 비어 있으면 name을 쓴다. 비어 있지 않으면
+    // ASCII 식별자([A-Za-z_][A-Za-z0-9_]*)여야 하고, 실효 이름(toolName 또는 name)은 상속 필드를
+    // 포함한 타입의 필드 사이에서 대소문자 무시로 유일해야 한다. 직렬화는 필드 ID를 쓰므로 이름과
+    // 무관하다.
+    Span<const char> toolName{};
 };
 
 // 안정적인 타입 식별자인 id와 스키마 version을 실행 중 native type key와 구분한다.

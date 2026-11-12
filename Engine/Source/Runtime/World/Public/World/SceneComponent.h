@@ -27,7 +27,7 @@ namespace rocks {
 // - 메서드는 부모·자식에 접근하기 위해 World Borrow를 새로 얻는다. 다른 SceneComponent의 With 콜백
 //   안에서 호출해도 된다.
 class SceneComponent : public Component {
-    ROCKS_NATIVE_CLASS(SceneComponent, Component, 0xf502dd5f77584a5dull, 0xba341911db1cacb6ull)
+    ROCKS_NATIVE_TYPE(SceneComponent, Component, 0xf502dd5f77584a5dull, 0xba341911db1cacb6ull)
 
 public:
     explicit SceneComponent(Allocator& allocator) noexcept : children_(allocator) {

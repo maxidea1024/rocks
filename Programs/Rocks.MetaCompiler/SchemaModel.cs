@@ -17,8 +17,6 @@ internal sealed class MetadataException(string message, string code = "RMC2000",
     }
 }
 
-internal sealed record PropertySpec(bool Transient, bool ReadOnly, string Category, string DisplayName);
-
 internal sealed class FieldModel
 {
     public required string Id { get; init; }
@@ -43,7 +41,11 @@ internal sealed class FieldModel
 
     public bool IsReference => Kind == "ObjectReference";
 
-    public uint Flags => (Spec.Transient ? 1u : 0u) | (Spec.ReadOnly ? 2u : 0u);
+    // FieldFlags 비트: Transient 1, ReadOnly 2, EditorOnly 4, Required 8.
+    public uint Flags => (Spec.Transient ? 1u : 0u) | (Spec.ReadOnly ? 2u : 0u) | (Spec.EditorOnly ? 4u : 0u) | (Spec.Required ? 8u : 0u);
+
+    // 도구 이름(지정하지 않았으면 필드 이름)이다. 상속 포함 대소문자 무시로 유일해야 한다(RMC2203).
+    public string EffectiveToolName => Spec.ToolName.Length != 0 ? Spec.ToolName : Name;
 }
 
 internal sealed class ClassModel
@@ -59,6 +61,18 @@ internal sealed class ClassModel
     public required string Base { get; set; }
 
     public required bool Abstract { get; init; }
+
+    // TypeFlags::WorldOnly. 선언이 직접 쓰거나 base에서 상속된다(SchemaValidator가 base를 보고 채운다).
+    public bool WorldOnly { get; set; }
+
+    // TypeFlags 비트: Abstract 1, WorldOnly 2.
+    public uint Flags => (Abstract ? 1u : 0u) | (WorldOnly ? 2u : 0u);
+
+    // ROCKS_NATIVE 멤버 이름이다(스키마에 넣지 않고 생성 코드의 static_assert만 받는다).
+    public List<string> NativeMembers { get; } = [];
+
+    // RocksRequiresWorldOnlyOwner 형질을 담는 NATIVE 멤버다. 상속까지 본 WorldOnly가 아니면 RMC2206이다.
+    public List<(string Symbol, string Path, SourceSite Site)> WorldOnlyNatives { get; } = [];
 
     // 선언이 있는 입력 헤더의 include 철자다(import 타입은 descriptor의 header).
     public string Header { get; set; } = "";

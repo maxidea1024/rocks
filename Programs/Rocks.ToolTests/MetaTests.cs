@@ -226,6 +226,93 @@ internal static class MetaTests
             await probe.GenerateAsync(source);
             Verify.Contains("MakeRuntimeTypeOps<::probe::Value, true>", File.ReadAllText(probe.Output), "abstract generated runtime ops");
         });
+        // B2: CLASS·PROPERTY 지정자가 descriptor와 생성 스키마에 닿는다(Docs/Design/ReflectionFoundations.ko.md 2절).
+        suite.Add("Meta.ClassAndPropertySpecifiersReachTheSchema", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            string source = Preamble + "struct Lease { static constexpr bool RocksRequiresWorldOnlyOwner = true; };\n" +
+                "struct Cache { rocks::ObjectRef<rocks::Object> ref; };\n" +
+                "ROCKS_CLASS(WorldOnly, Version=2147483647)\nstruct Parent : public rocks::Object {};\n" +
+                "ROCKS_CLASS(Version=3)\nstruct Value : public Parent {\n" +
+                "ROCKS_PROPERTY(EditorOnly, Name=\"Hits\") rocks::int32 count = 0;\n" +
+                "ROCKS_PROPERTY(Required) rocks::ObjectRef<Value> next;\n" +
+                "ROCKS_PROPERTY(Name=\"other\") rocks::int32 other = 0;\n" +
+                "ROCKS_NATIVE() rocks::int32 cache = 0;\n" +
+                "ROCKS_NATIVE() rocks::WeakRef<Value> weak;\n" +
+                "ROCKS_NATIVE() int* raw = nullptr;\n" +
+                "ROCKS_NATIVE() Cache* borrowed = nullptr;\n" +
+                "ROCKS_NATIVE() Lease lease;\n};\n}\n";
+            await probe.GenerateAsync(source);
+            using System.Text.Json.JsonDocument descriptor = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(probe.Descriptor));
+            System.Text.Json.JsonElement Type(string name) => descriptor.RootElement.GetProperty("types").EnumerateArray()
+                .Single(type => type.GetProperty("name").GetString() == name);
+            System.Text.Json.JsonElement value = Type("probe::Value");
+            Verify.Equal(3, value.GetProperty("version").GetInt32(), "Version specifier");
+            Verify.Equal("WorldOnly", value.GetProperty("flags")[0].GetString(), "WorldOnly is inherited from the base");
+            Verify.Equal("WorldOnly", Type("probe::Parent").GetProperty("flags")[0].GetString(), "WorldOnly specifier");
+            Verify.Equal(int.MaxValue, Type("probe::Parent").GetProperty("version").GetInt32(), "largest Version value");
+            System.Text.Json.JsonElement Field(string name) => value.GetProperty("fields").EnumerateArray()
+                .Single(field => field.GetProperty("name").GetString() == name);
+            Verify.Equal("EditorOnly", Field("count").GetProperty("flags")[0].GetString(), "EditorOnly flag");
+            Verify.Equal("Hits", Field("count").GetProperty("toolName").GetString(), "Name specifier");
+            Verify.Equal("Required", Field("next").GetProperty("flags")[0].GetString(), "Required flag");
+            Verify.Equal("other", Field("other").GetProperty("toolName").GetString(), "Name equal to the field name is the default");
+            Verify.Equal(3, value.GetProperty("fields").GetArrayLength(), "NATIVE members are not schema fields");
+            string generated = File.ReadAllText(probe.Output);
+            Verify.Contains("IsNativeStrongReference", generated, "NATIVE strong reference static_assert");
+            Verify.Contains("::probe::Value::lease", generated, "NATIVE member static_assert target");
+            Verify.That(!generated.Contains("RequiresWorldOnlyOwner<", StringComparison.Ordinal), "WorldOnly owner needs no RMC2206 static_assert");
+        });
+        AddRejectGroup("Meta.IntegerSpecifierSyntax", new[] { "Version=0", "Version=01", "Version=2147483648", "Version=\"2\"", "Version=1x", "Version", "Version=-1", "Version=+1" }
+            .Select(spec => Declaration().Replace("ROCKS_CLASS()", $"ROCKS_CLASS({spec})", StringComparison.Ordinal)), "RMC2000", "specifier");
+        AddRejectGroup("Meta.RequiredAndMaxElementsNeedMatchingFieldKinds", [Declaration("ROCKS_PROPERTY(Required) rocks::int32 count = 0;"),
+            Declaration("ROCKS_PROPERTY(MaxElements=4) rocks::int32 count = 0;")], "RMC2202", "applies only to");
+        AddRejectGroup("Meta.ToolNameMustBeAnIdentifier", [Declaration("ROCKS_PROPERTY(Name=\"1bad\") rocks::int32 count = 0;"),
+            Declaration("ROCKS_PROPERTY(Name=\"has space\") rocks::int32 count = 0;"),
+            Declaration("ROCKS_PROPERTY(Name=\"\") rocks::int32 count = 0;")], "RMC2203", "Name specifier");
+        AddRejectGroup("Meta.ToolNamesAreUniqueIgnoringCase", [Declaration("ROCKS_PROPERTY(Name=\"Other\") rocks::int32 count = 0;\nROCKS_PROPERTY() rocks::int32 other = 0;")],
+            "RMC2203", "tool name");
+        AddRejectGroup("Meta.PropertyAndNativeAreExclusive", [Declaration("ROCKS_PROPERTY() ROCKS_NATIVE() rocks::int32 count = 0;"),
+            Declaration("ROCKS_NATIVE() ROCKS_PROPERTY() rocks::int32 count = 0;")], "RMC2204", "not both");
+        AddRejectGroup("Meta.NativeTakesNoSpecifiersAndNeedsGeneratedBodyWhenPrivate", [
+            Declaration(extra: "ROCKS_NATIVE(Transient) rocks::int32 cache = 0;"),
+            Declaration(extra: "private: ROCKS_NATIVE() rocks::int32 cache = 0;\npublic: rocks::int32 Read() const noexcept { return cache; }")], "RMC2000", "NATIVE");
+        const string holders = "namespace probe { struct Holder { rocks::ObjectRef<rocks::Object> ref; };\n" +
+            "template <class T> struct Box { T value{}; };\n" +
+            "template <class T> struct Keep { rocks::ObjectRef<rocks::Object> ref; T value{}; };\n" +
+            "template <class A, class B> struct Pair { A first{}; B second{}; };\n" +
+            "struct Tagged { union { rocks::Object* object; unsigned long long bits; }; };\n";
+        AddRejectGroup("Meta.NativeMembersCannotHoldStrongReferences", new[]
+            {
+                "rocks::ObjectRef<Value> cache;",
+                "rocks::RootRef<Value> cache;",
+                "rocks::ObjectRef<Value> cache[2];",
+                "Value* cache = nullptr;",
+                "const rocks::Object* cache = nullptr;",
+                "Holder cache;",
+                "Box<Value*> cache;",
+                "Keep<int> cache;",
+                "Pair<Value*, void (*)()> cache;",
+                "Tagged cache;",
+                "Value** cache = nullptr;"
+            }.Select(member => Declaration(extra: "ROCKS_NATIVE() " + member).Replace("namespace probe {", holders, StringComparison.Ordinal)),
+            "RMC2205", "strong object reference");
+        const string lease = "namespace probe { struct Lease { static constexpr bool RocksRequiresWorldOnlyOwner = true; };\n" +
+            "struct Wrapper { Lease inner; };\n";
+        AddRejectGroup("Meta.WorldOnlyOwnerTraitNeedsWorldOnlyClass", [
+            Declaration(extra: "ROCKS_NATIVE() Lease lease;").Replace("namespace probe {", lease, StringComparison.Ordinal),
+            Declaration(extra: "ROCKS_NATIVE() Wrapper lease;").Replace("namespace probe {", lease, StringComparison.Ordinal)],
+            "RMC2206", "WorldOnly owner");
+        // private NATIVE 멤버는 GENERATED_BODY가 있으면 생성 static_assert가 friend로 접근해 컴파일된다(검증 컴파일).
+        suite.Add("Meta.PrivateNativeMemberCompilesWithGeneratedBody", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            string source = Preamble + "ROCKS_CLASS()\nclass Value : public rocks::Object {\nROCKS_GENERATED_BODY()\n" +
+                "ROCKS_PROPERTY() rocks::int32 count = 0;\nROCKS_NATIVE() rocks::int32 cache[2] = {};\n" +
+                "public: rocks::int32 Read() const noexcept { return count + cache[0]; }\n};\n}\n";
+            await probe.GenerateAsync(source);
+            Verify.Contains("::probe::Value::cache", File.ReadAllText(probe.Output), "private NATIVE static_assert");
+        });
         AddRejectGroup("Meta.UnknownDuplicateAndWrongValueSpecifiers", new[] { "UnknownFlag", "ReadOnly, ReadOnly", "ReadOnly=\"yes\"", "Category=12", "DisplayName" }
             .Select(spec => Declaration($"ROCKS_PROPERTY({spec}) rocks::int32 count=0;")), "RMC2000", "specifier");
         AddRejectGroup("Meta.UnannotatedOwnerAndParameterMisuse", [
@@ -269,6 +356,8 @@ internal static class MetaTests
 
         // 마지막으로 생성한 헤더의 생성 경로다(fixture 모드는 fixture 철자).
         public string Output => MetaCompilerArguments.GeneratedPath(temporary.Root, lastInclude);
+
+        public string Descriptor => MetaCompilerArguments.Descriptor(temporary.Root);
 
         private string IdentityPath => temporary.FilePath("probe.rocksids.json");
 
@@ -575,7 +664,7 @@ internal static class MetaProbeIdentity
                 manifest.Register("type", name);
             }
 
-            foreach (string name in new[] { "probe::Value::count", "probe::Value::next", "probe::Object::value",
+            foreach (string name in new[] { "probe::Value::count", "probe::Value::next", "probe::Value::other", "probe::Object::value",
                 "example::Invalid::valid", "example::Invalid::bad" })
             {
                 manifest.Register("field", name);

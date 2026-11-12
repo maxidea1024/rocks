@@ -10,7 +10,7 @@ namespace rocks {
 //
 // 사용 예:
 //   class Health final : public Component {
-//       ROCKS_NATIVE_CLASS(Health, Component, 0x...ull, 0x...ull)
+//       ROCKS_NATIVE_TYPE(Health, Component, 0x...ull, 0x...ull)
 //   public:
 //       int32 value = 100;
 //   };
@@ -31,7 +31,7 @@ namespace rocks {
 //
 // 스레드: World의 게임 스레드에서만 접근한다.
 class Component : public Object {
-    ROCKS_NATIVE_CLASS(Component, Object, 0xb4cc30b3df9f47f0ull, 0xbc573c886ac3d468ull)
+    ROCKS_NATIVE_TYPE(Component, Object, 0xb4cc30b3df9f47f0ull, 0xbc573c886ac3d468ull)
 
 public:
     Component() noexcept = default;

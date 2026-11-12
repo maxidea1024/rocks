@@ -16,6 +16,21 @@
     };
 #define ROCKS_PROPERTY(...) [[clang::annotate("rocks", "rocks.field.arguments", #__VA_ARGS__)]]
 
+// 리플렉션 클래스 안의 비영속 런타임 멤버다(GPU 핸들·캐시 등). 저장·리플렉션 대상이 아니며 강한
+// 객체 참조(ObjectRef·RootRef·Object 파생 타입의 raw 포인터 — 담는 타입·배열·템플릿 인자까지)를
+// 담을 수 없다 (RMC2205). RocksRequiresWorldOnlyOwner 형질 타입은 WorldOnly 클래스에만
+// 둔다(RMC2206). 지정자는 받지 않는다. 리플렉션 클래스의 모든 비정적 필드는 ROCKS_PROPERTY 또는
+// ROCKS_NATIVE 중 하나다(둘 다면 RMC2204).
+//
+// 사용 예:
+//   ROCKS_CLASS()
+//   class Mesh : public rocks::Object {
+//       ROCKS_GENERATED_BODY()
+//       ROCKS_PROPERTY() rocks::String sourcePath;
+//       ROCKS_NATIVE() GpuBufferHandle gpuBuffer{};   // 저장하지 않는 런타임 핸들
+//   };
+#define ROCKS_NATIVE(...) [[clang::annotate("rocks", "rocks.field.native", #__VA_ARGS__)]]
+
 // generated typed 접근기만 private/protected 필드 접근을 허용한다. 파생 타입에 펼친 기반 필드도
 // 해당 GeneratedType specialization을 통해 접근한다. raw 주소 공개나 Object 수명 검사를 우회하지
 // 않는다.

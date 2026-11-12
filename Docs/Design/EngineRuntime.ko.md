@@ -65,7 +65,7 @@ Engine은 창·그래픽·게임플레이를 모른다. 이벤트 펌프와 렌�
 - `ObjectRefArray`는 이번 단계에서 Core(ObjectRuntime)에 추가했다(4.5절). 추가할 때 대상 타입·생존·같은 Registry를 검증하고, 증분 GC Marking 중이면 대상을 shade한 뒤 게시한다(삽입 장벽). 제거에는 장벽이 필요 없다.
 - 소유가 아닌 객체 사이 참조(부모·자식 SceneComponent, Actor의 root component, Controller↔Pawn)는 `ObjectHandle`이다. 대상 파괴 후 접근은 핸들 generation 검사로 실패한다.
 - Actor·Component·Level은 소속 `World*`를 보관한다. World는 C++ 객체이며 자신의 Registry와 모든 객체보다 오래 산다.
-- 현재 메타컴파일러는 컨테이너·raw pointer 필드를 거부한다. Actor·Component는 이런 필드가 필요하므로 메타 생성 대신 **네이티브 클래스 등록**(4.4절)을 쓴다. 이 타입들은 필드 리플렉션·그래프 직렬화 대상이 아니다.
+- 현재 메타컴파일러는 컨테이너·raw pointer PROPERTY 필드를 거부한다. Actor·Component는 이런 필드가 필요하므로 메타 생성 대신 **네이티브 클래스 등록**(4.4절, `ROCKS_NATIVE_TYPE`)을 쓴다. 이 타입들은 필드 리플렉션·그래프 직렬화 대상이 아니다. A0-B의 B8에서 `ROCKS_CLASS(WorldOnly)`로 옮긴다: 영속 상태는 `ROCKS_PROPERTY`, World 포인터·런타임 캐시는 `ROCKS_NATIVE`(강한 객체 참조 금지 — 소유 간선은 PROPERTY의 ObjectRef·ObjectRefArray)로 둔다([리플렉션·빌드 보강 설계](ReflectionFoundations.ko.md) 9절).
 
 ### 4.3 접근
 
@@ -77,7 +77,7 @@ Engine은 창·그래픽·게임플레이를 모른다. 이벤트 펌프와 렌�
 ```cpp
 class SpinningActor final : public rocks::Actor {
 public:
-    ROCKS_NATIVE_CLASS(SpinningActor, rocks::Actor, 0x5b1c..., 0x9e02...)
+    ROCKS_NATIVE_TYPE(SpinningActor, rocks::Actor, 0x5b1c..., 0x9e02...)
     // ...
 };
 

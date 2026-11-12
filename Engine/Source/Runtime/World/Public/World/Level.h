@@ -22,7 +22,7 @@ namespace rocks {
 //
 // 객체 포인터는 World가 준 Borrow 범위에서만 쓴다. 스레드: World의 게임 스레드 전용이다.
 class Level final : public Object {
-    ROCKS_NATIVE_CLASS(Level, Object, 0x7e747b03964c4c42ull, 0x8914763d72829f13ull)
+    ROCKS_NATIVE_TYPE(Level, Object, 0x7e747b03964c4c42ull, 0x8914763d72829f13ull)
 
 public:
     explicit Level(Allocator& allocator) noexcept : actors_(allocator), name_(allocator) {

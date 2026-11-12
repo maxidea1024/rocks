@@ -6,7 +6,7 @@
 
 bool, uint8/16/32/64, int32/64, float32/64, Guid, UTF-8 String, 강한 ObjectRef를 지원한다. 좁은 unsigned는 U32, signed는 I64 wire 형식을 사용하고 복원 시 실제 값 폭을 검사한다. unknown GUID field는 skip한다. known field의 wire tag·값·trailing byte는 엄격히 검사한다.
 
-`RuntimeTypeOps::completeFieldLayout`이 true이고 schema와 accessor가 stable field GUID별 1:1이어야 한다. 이 선언에는 상속된 모든 비정적 필드와 강한 간선도 포함된다. 기본 수동 metadata는 false이며 부분 metadata·Opaque·누락 accessor는 Unsupported다. 수동 작성자가 거짓 완전성을 선언하는 임의 플러그인의 메모리 안전성을 검증하는 기능은 아니다.
+`RuntimeTypeOps::completeFieldLayout`이 true이고 schema와 accessor가 stable field GUID별 1:1이어야 한다. 이 선언에는 상속 필드를 포함한 모든 영속 필드와 모든 강한 간선이 포함된다(ROCKS_NATIVE 멤버는 영속 필드가 아니고 강한 참조를 담을 수 없어 포함 대상이 아니다). 기본 수동 metadata는 false이며 부분 metadata·Opaque·누락 accessor는 Unsupported다. 수동 작성자가 거짓 완전성을 선언하는 임의 플러그인의 메모리 안전성을 검증하는 기능은 아니다.
 
 객체 포인터나 ObjectHandle의 registry/slot/generation bytes는 저장하지 않는다. 각 객체에 1부터 시작하는 파일 내부 ID를 부여하고 참조는 u64 ID, null은 0으로 쓴다. 동일 객체를 중복 생성하지 않으므로 cycle과 shared identity가 유지된다. metadata 필드 순서 BFS에 따라 ID와 출력 순서가 정해진다. 원본과 다른 Registry로 복원해도 동등한 그래프를 다시 저장하면 같은 bytes가 된다.
 

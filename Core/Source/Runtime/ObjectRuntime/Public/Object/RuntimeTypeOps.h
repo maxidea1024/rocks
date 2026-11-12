@@ -151,8 +151,10 @@ struct RuntimeTypeOps {
     const void* nativeBaseType = nullptr;
     // 기본 수동 Trace는 owner 전용이다. side effect 없는 generated Trace만 명시 opt-in한다.
     bool parallelTraceSafe = false;
-    // 모든 비정적 필드와 강한 간선이 typed metadata에 포함된 경우만 true다.
-    // graph serializer는 이 선언 없는 수동/부분 metadata를 완전한 객체로 저장하지 않는다.
+    // 모든 영속 필드와 모든 강한 간선이 typed metadata에 포함된 경우만 true다. ROCKS_NATIVE 멤버는
+    // 영속 필드가 아니고 강한 참조를 담을 수 없으므로(MetaCompiler RMC2205·생성 static_assert) 생성
+    // 타입은 계속 true다. graph serializer는 이 선언 없는 수동/부분 metadata를 완전한 객체로
+    // 저장하지 않는다.
     bool completeFieldLayout = false;
 };
 

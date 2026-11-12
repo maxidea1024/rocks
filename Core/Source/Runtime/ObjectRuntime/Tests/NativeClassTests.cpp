@@ -10,7 +10,7 @@ namespace {
 uint32 nativeDestructions = 0;
 
 class NativeBase : public Object {
-    ROCKS_NATIVE_CLASS(NativeBase, Object, 0x57ca819b95494dd8ull, 0x8218eb5a2683d903ull)
+    ROCKS_NATIVE_TYPE(NativeBase, Object, 0x57ca819b95494dd8ull, 0x8218eb5a2683d903ull)
 
 public:
     NativeBase() noexcept = default;
@@ -27,7 +27,7 @@ public:
 };
 
 class NativeDerived final : public NativeBase {
-    ROCKS_NATIVE_CLASS(NativeDerived, NativeBase, 0xb73983e396224842ull, 0x9e8910effde52fc8ull)
+    ROCKS_NATIVE_TYPE(NativeDerived, NativeBase, 0xb73983e396224842ull, 0x9e8910effde52fc8ull)
 
 public:
     int32 Value() const noexcept override {
@@ -38,11 +38,11 @@ public:
 };
 
 class NativeOther final : public Object {
-    ROCKS_NATIVE_CLASS(NativeOther, Object, 0x6e48877d1bbe4adaull, 0x8ea5b47fb588fc8bull)
+    ROCKS_NATIVE_TYPE(NativeOther, Object, 0x6e48877d1bbe4adaull, 0x8ea5b47fb588fc8bull)
 };
 
 class NativeHolder final : public Object {
-    ROCKS_NATIVE_CLASS(NativeHolder, Object, 0xb91bc41cc98a4792ull, 0xa53ae998473352d9ull)
+    ROCKS_NATIVE_TYPE(NativeHolder, Object, 0xb91bc41cc98a4792ull, 0xa53ae998473352d9ull)
 
 public:
     explicit NativeHolder(Allocator& allocator) noexcept : items(allocator) {
@@ -430,7 +430,7 @@ ErrorCode reentrantResult = ErrorCode::None;
 
 // Trace 안에서 배열 변경을 시도하는 잘못된 타입이다(Registry가 Busy로 거부해야 한다).
 class ReentrantHolder final : public Object {
-    ROCKS_NATIVE_CLASS(ReentrantHolder, Object, 0x5c1d2e3f4a5b6c7dull, 0x8e9fa0b1c2d3e4f5ull)
+    ROCKS_NATIVE_TYPE(ReentrantHolder, Object, 0x5c1d2e3f4a5b6c7dull, 0x8e9fa0b1c2d3e4f5ull)
 
 public:
     explicit ReentrantHolder(Allocator& allocator) noexcept : items(allocator) {
@@ -604,7 +604,7 @@ TEST(ObjectRefArray_GrowthFailureKeepsExistingElements) {
 namespace {
 
 class ChainBase : public Object {
-    ROCKS_NATIVE_CLASS(ChainBase, Object, 0xc331405def4c4b33ull, 0xa44f05b9d37df2d8ull)
+    ROCKS_NATIVE_TYPE(ChainBase, Object, 0xc331405def4c4b33ull, 0xa44f05b9d37df2d8ull)
 
 public:
     explicit ChainBase(Allocator& allocator) noexcept : items(allocator) {
@@ -619,7 +619,7 @@ public:
 
 // 자기 필드만 방문하고 ChainBase::Trace를 부르지 않는다. 등록이 사슬을 따라 기반 Trace를 부른다.
 class ChainDerived final : public ChainBase {
-    ROCKS_NATIVE_CLASS(ChainDerived, ChainBase, 0x9a3e2cd17e7347e7ull, 0x9af28d76f74e6cecull)
+    ROCKS_NATIVE_TYPE(ChainDerived, ChainBase, 0x9a3e2cd17e7347e7ull, 0x9af28d76f74e6cecull)
 
 public:
     using ChainBase::ChainBase;

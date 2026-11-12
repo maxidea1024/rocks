@@ -91,6 +91,19 @@ internal static class SchemaValidator
                     throw new MetadataException($"{field.Owner}::{field.Name}: unsupported field type '{field.NativeSpelling}'",
                     hint: "Use a supported scalar, Guid, String or ObjectRef field; raw pointers/containers/cv-qualified fields need an explicit codec extension.").At(field.Site);
                 }
+
+                // 지정자를 그 필드 종류에 쓸 수 있는지 본다(RMC2202). 배열 필드는 B5에서 생긴다.
+                if (field.Spec.Required && !field.IsReference)
+                {
+                    throw new MetadataException($"{field.Owner}::{field.Name}: Required applies only to object reference fields", "RMC2202",
+                        "Remove Required or change the field to ObjectRef.").At(field.Site);
+                }
+
+                if (field.Spec.MaxElements != 0)
+                {
+                    throw new MetadataException($"{field.Owner}::{field.Name}: MaxElements applies only to array fields", "RMC2202",
+                        "Remove MaxElements; it limits the length of reflected array fields.").At(field.Site);
+                }
             }
         }
 
@@ -112,21 +125,50 @@ internal static class SchemaValidator
             List<FieldModel> inherited = [];
             if (model.Base != "rocks::Object")
             {
+                ClassModel baseModel;
                 if (classes.TryGetValue(model.Base, out ClassModel? ownBase))
                 {
                     Order(ownBase);
-                    inherited.AddRange(ownBase.Fields);
+                    baseModel = ownBase;
                 }
                 else
                 {
-                    inherited.AddRange(imported[model.Base].Fields); // import 타입의 Fields는 상속 포함 전체다
+                    baseModel = imported[model.Base]; // import 타입의 Fields는 상속 포함 전체다
                 }
+
+                inherited.AddRange(baseModel.Fields);
+                // WorldOnly는 상속된다(파생에 다시 쓰지 않아도 된다).
+                model.WorldOnly |= baseModel.WorldOnly;
             }
 
             model.Fields = inherited.Concat(model.OwnFields).OrderBy(field => field.Id, StringComparer.Ordinal).ToList();
             if (model.Fields.Count > 4096)
             {
                 throw new MetadataException($"{model.Name}: inherited field count exceeds 4096").At(model.Site);
+            }
+
+            // 도구 이름은 상속 포함 대소문자 무시로 유일하다(RMC2203).
+            Dictionary<string, FieldModel> toolNames = new(StringComparer.OrdinalIgnoreCase);
+            foreach (FieldModel field in model.Fields)
+            {
+                if (!toolNames.TryAdd(field.EffectiveToolName, field))
+                {
+                    FieldModel other = toolNames[field.EffectiveToolName];
+                    // import 필드의 위치는 descriptor이므로 이 모듈 쪽 필드 위치로 보고한다.
+                    SourceSite site = model.OwnFields.Contains(field) ? field.Site : model.OwnFields.Contains(other) ? other.Site : model.Site;
+                    throw new MetadataException($"{model.Name}: tool name '{field.EffectiveToolName}' of {field.Owner}::{field.Name} collides with {other.Owner}::{other.Name} (case-insensitive)",
+                        "RMC2203", "Give the field a distinct Name=\"...\" specifier; tool names are unique per type including inherited fields.").At(site);
+                }
+            }
+
+            // WorldOnly 소유자 형질을 담는 NATIVE 멤버는 WorldOnly 클래스(상속 포함)에만 둔다(RMC2206).
+            foreach ((string symbol, string path, SourceSite site) in model.WorldOnlyNatives)
+            {
+                if (!model.WorldOnly)
+                {
+                    throw new MetadataException($"{symbol}: NATIVE member requires a WorldOnly owner ({path})", "RMC2206",
+                        "Mark the class ROCKS_CLASS(WorldOnly) or move the member to a World-side type.").At(site);
+                }
             }
 
             visiting.Remove(model.Name);

@@ -135,6 +135,66 @@ Span<const T> CopyBytes(Span<const T> source, uint8*& cursor) noexcept {
     return {destination, source.Size()};
 }
 
+constexpr uint32 KnownTypeFlags =
+    static_cast<uint32>(TypeFlags::Abstract) | static_cast<uint32>(TypeFlags::WorldOnly);
+
+constexpr uint32 KnownFieldFlags =
+    static_cast<uint32>(FieldFlags::Transient) | static_cast<uint32>(FieldFlags::ReadOnly) |
+    static_cast<uint32>(FieldFlags::EditorOnly) | static_cast<uint32>(FieldFlags::Required);
+
+bool IsAsciiIdentifier(Span<const char> text) noexcept {
+    if (text.Size() == 0) {
+        return false;
+    }
+
+    for (usize index = 0; index < text.Size(); ++index) {
+        const char c = text[index];
+        const bool letter = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_';
+        if (!letter && (index == 0 || c < '0' || c > '9')) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+char AsciiLower(char c) noexcept {
+    return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+}
+
+bool EqualsIgnoringAsciiCase(Span<const char> left, Span<const char> right) noexcept {
+    if (left.Size() != right.Size()) {
+        return false;
+    }
+
+    for (usize index = 0; index < left.Size(); ++index) {
+        if (AsciiLower(left[index]) != AsciiLower(right[index])) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool SameBytes(Span<const char> left, Span<const char> right) noexcept {
+    if (left.Size() != right.Size()) {
+        return false;
+    }
+
+    for (usize index = 0; index < left.Size(); ++index) {
+        if (left[index] != right[index]) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// 도구 이름이 없으면 C++ 필드 이름이 도구 이름이다.
+Span<const char> EffectiveToolName(const FieldSchema& field) noexcept {
+    return field.toolName.Size() != 0 ? field.toolName : field.name;
+}
+
 } // namespace
 
 TypeRegistry::TypeRegistry(Allocator& allocator) noexcept
@@ -259,7 +319,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     }
     if (schema.id == Guid{} || schema.version == 0 || schema.fields.Size() > 4096 ||
         ops.fields.Size() > schema.fields.Size() || schema.baseType == schema.id ||
-        (schema.flags & ~static_cast<uint32>(TypeFlags::Abstract)) != 0 ||
+        (schema.flags & ~KnownTypeFlags) != 0 ||
         (HasFlag(schema.flags, TypeFlags::Abstract) != (ops.construct == nullptr)) ||
         !ops.destroy || !ops.trace || !ops.nativeType || ops.size < sizeof(Object) ||
         ops.alignment < alignof(Object) || (ops.alignment & (ops.alignment - 1)) != 0 ||
@@ -269,14 +329,17 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     usize typedFields = 0;
     for (usize index = 0; index < schema.fields.Size(); ++index) {
         const auto& field = schema.fields[index];
-        if (field.id == Guid{} ||
-            (field.flags & ~(static_cast<uint32>(FieldFlags::Transient) |
-                             static_cast<uint32>(FieldFlags::ReadOnly))) != 0 ||
+        // Required는 typed 참조 필드에만 뜻이 있다(저장이 null을 검사하려면 접근기가 있어야 한다).
+        // 도구 이름은 비어 있거나 ASCII 식별자다.
+        if (field.id == Guid{} || (field.flags & ~KnownFieldFlags) != 0 ||
+            (HasFlag(field.flags, FieldFlags::Required) &&
+             field.valueKind != ValueKind::ObjectReference) ||
             (field.kind != FieldKind::Value && field.kind != FieldKind::ObjectReference) ||
             static_cast<uint8>(field.valueKind) > static_cast<uint8>(ValueKind::ObjectReference) ||
             !StringView(field.name.Data(), field.name.Size()).ValidateUtf8() ||
             !StringView(field.category.Data(), field.category.Size()).ValidateUtf8() ||
-            !StringView(field.displayName.Data(), field.displayName.Size()).ValidateUtf8()) {
+            !StringView(field.displayName.Data(), field.displayName.Size()).ValidateUtf8() ||
+            (field.toolName.Size() != 0 && !IsAsciiIdentifier(field.toolName))) {
             return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
         }
         if (field.valueKind != ValueKind::Opaque) {
@@ -291,6 +354,14 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         }
         for (usize previous = 0; previous < index; ++previous) {
             if (field.id == schema.fields[previous].id) {
+                return Result<TypeRegistrationToken>::Failure(ErrorCode::AlreadyExists);
+            }
+
+            // 실효 도구 이름(상속 필드 포함)은 대소문자 무시로 유일하다. 이름 없는 Opaque 필드는
+            // 제외한다.
+            const Span<const char> name = EffectiveToolName(field);
+            if (name.Size() != 0 &&
+                EqualsIgnoringAsciiCase(name, EffectiveToolName(schema.fields[previous]))) {
                 return Result<TypeRegistrationToken>::Failure(ErrorCode::AlreadyExists);
             }
         }
@@ -332,7 +403,8 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
         const auto& field = schema.fields[fieldIndex];
         if (!AddBytes(bytes, field.name.Size()) || !AddBytes(bytes, field.attributes.Size()) ||
-            !AddBytes(bytes, field.category.Size()) || !AddBytes(bytes, field.displayName.Size())) {
+            !AddBytes(bytes, field.category.Size()) || !AddBytes(bytes, field.displayName.Size()) ||
+            !AddBytes(bytes, field.toolName.Size())) {
             return Result<TypeRegistrationToken>::Failure(ErrorCode::Overflow);
         }
     }
@@ -367,6 +439,11 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
             if (ops.size < base->ops.size || ops.alignment < base->ops.alignment) {
                 return Result<TypeRegistrationToken>::Failure(ErrorCode::TypeMismatch);
             }
+            // WorldOnly는 상속되는 플래그다. 수동 등록이 파생에서 빠뜨려도 받아들이지 않는다.
+            if (HasFlag(base->schema.flags, TypeFlags::WorldOnly) &&
+                !HasFlag(schema.flags, TypeFlags::WorldOnly)) {
+                return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
+            }
             // 파생 스키마는 base field를 동일한 안정 ID/표현으로 포함한다. 그래서 기반 타입의 필드
             // 함수(Resolve<기반> 경유)를 파생 객체에 써도 같은 필드를 가리킨다.
             for (usize baseIndex = 0; baseIndex < base->schema.fields.Size(); ++baseIndex) {
@@ -376,7 +453,8 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
                     const auto& field = schema.fields[fieldIndex];
                     if (field.id == inherited.id && field.kind == inherited.kind &&
                         field.valueKind == inherited.valueKind && field.flags == inherited.flags &&
-                        field.referencedType == inherited.referencedType) {
+                        field.referencedType == inherited.referencedType &&
+                        SameBytes(EffectiveToolName(field), EffectiveToolName(inherited))) {
                         matched = true;
                         break;
                     }
@@ -418,6 +496,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         fields[index].attributes = CopyBytes(schema.fields[index].attributes, cursor);
         fields[index].category = CopyBytes(schema.fields[index].category, cursor);
         fields[index].displayName = CopyBytes(schema.fields[index].displayName, cursor);
+        fields[index].toolName = CopyBytes(schema.fields[index].toolName, cursor);
     }
     for (usize index = 0; index < ops.fields.Size(); ++index) {
         ::new (fieldOps + index) RuntimeFieldOps(ops.fields[index]);

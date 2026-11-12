@@ -53,7 +53,7 @@ uint32 CountEvent(const char* text) noexcept {
 // --- 시험용 타입 ---
 
 class LoggingComponent : public Component {
-    ROCKS_NATIVE_CLASS(LoggingComponent, Component, 0xfb5782f76d854126ull, 0x931d5877944c5b96ull)
+    ROCKS_NATIVE_TYPE(LoggingComponent, Component, 0xfb5782f76d854126ull, 0x931d5877944c5b96ull)
 
 public:
     LoggingComponent() noexcept {
@@ -97,7 +97,7 @@ protected:
 };
 
 class LoggingActor : public Actor {
-    ROCKS_NATIVE_CLASS(LoggingActor, Actor, 0xf15fcef171ac4370ull, 0xa61f10f1f070605aull)
+    ROCKS_NATIVE_TYPE(LoggingActor, Actor, 0xf15fcef171ac4370ull, 0xa61f10f1f070605aull)
 
 public:
     explicit LoggingActor(Allocator& allocator) noexcept : Actor(allocator) {
@@ -153,7 +153,7 @@ public:
 
 // 고정·Late Tick과 pause 정책 시험용이다.
 class PhaseActor final : public Actor {
-    ROCKS_NATIVE_CLASS(PhaseActor, Actor, 0xbc5246fdc7e44d63ull, 0xa642a8413ec8877eull)
+    ROCKS_NATIVE_TYPE(PhaseActor, Actor, 0xbc5246fdc7e44d63ull, 0xa642a8413ec8877eull)
 
 public:
     explicit PhaseActor(Allocator& allocator) noexcept : Actor(allocator) {
@@ -182,7 +182,7 @@ public:
 };
 
 class PausedTicker final : public Actor {
-    ROCKS_NATIVE_CLASS(PausedTicker, Actor, 0x0d081e2bd12d4e0bull, 0x86101adb6a8f75f8ull)
+    ROCKS_NATIVE_TYPE(PausedTicker, Actor, 0x0d081e2bd12d4e0bull, 0x86101adb6a8f75f8ull)
 
 public:
     explicit PausedTicker(Allocator& allocator) noexcept : Actor(allocator) {
@@ -736,7 +736,7 @@ namespace {
 
 // OnAwake·OnStart에서 Component를 추가하는 Actor다.
 class BuilderActor final : public Actor {
-    ROCKS_NATIVE_CLASS(BuilderActor, Actor, 0x9c3a144c0c4d4505ull, 0xb41cb2d5455ce56full)
+    ROCKS_NATIVE_TYPE(BuilderActor, Actor, 0x9c3a144c0c4d4505ull, 0xb41cb2d5455ce56full)
 
 public:
     explicit BuilderActor(Allocator& allocator) noexcept : Actor(allocator) {
@@ -779,7 +779,7 @@ public:
 
 // 잘못된 Tick 설정(OnTick을 Physics 단계로)을 가진 Actor다.
 class BadTickActor final : public Actor {
-    ROCKS_NATIVE_CLASS(BadTickActor, Actor, 0xc21acd5377604e47ull, 0xa8d34f284a9bd3a5ull)
+    ROCKS_NATIVE_TYPE(BadTickActor, Actor, 0xc21acd5377604e47ull, 0xa8d34f284a9bd3a5ull)
 
 public:
     explicit BadTickActor(Allocator& allocator) noexcept : Actor(allocator) {

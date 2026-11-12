@@ -11,7 +11,7 @@ namespace rocks {
 //
 // 사용 예:
 //   class Spinner final : public Actor {
-//       ROCKS_NATIVE_CLASS(Spinner, Actor, 0x...ull, 0x...ull)
+//       ROCKS_NATIVE_TYPE(Spinner, Actor, 0x...ull, 0x...ull)
 //   public:
 //       explicit Spinner(Allocator& allocator) noexcept : Actor(allocator) {
 //           PrimaryTick().tick = true;            // OnTick을 받는다
@@ -54,7 +54,7 @@ namespace rocks {
 //
 // 스레드: World의 게임 스레드에서만 접근한다.
 class Actor : public Object {
-    ROCKS_NATIVE_CLASS(Actor, Object, 0x7745f127432e4d2aull, 0xa86d84d477d93eb6ull)
+    ROCKS_NATIVE_TYPE(Actor, Object, 0x7745f127432e4d2aull, 0xa86d84d477d93eb6ull)
 
 public:
     // allocator는 Registry allocator다(Object 생성 시 주입). 파생 클래스 생성자도 받아서 넘긴다.

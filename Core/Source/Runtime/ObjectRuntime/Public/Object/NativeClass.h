@@ -2,15 +2,15 @@
 
 #include <Object/TypeRegistry.h>
 
-// 메타컴파일러를 거치지 않는 네이티브 클래스의 타입 등록이다. 메타 생성 타입은 모든 필드가 반영
+// 메타컴파일러를 거치지 않는 네이티브 클래스의 타입 등록이다. 메타 생성 타입은 모든 필드가 리플렉션
 // 가능한 형식이어야 하지만(컨테이너·raw pointer 거부), 엔진 런타임 클래스(Actor·Component 등)는
 // Array, World 포인터 같은 C++ 상태가 필요하다. 이런 클래스는 필드 없는 스키마로 등록해 Object
 // 생성·수명·상속 판정(Resolve<기반 타입>)만 쓴다. 필드 리플렉션·객체 그래프 직렬화 대상은 아니다.
 //
 // 사용 예:
 //   class SpinningActor : public rocks::Actor {
-//       ROCKS_NATIVE_CLASS(SpinningActor, rocks::Actor, 0x5b1c7d2e8a4f4c10ull,
-//                          0x9e02b6a1d3c84f57ull)
+//       ROCKS_NATIVE_TYPE(SpinningActor, rocks::Actor, 0x5b1c7d2e8a4f4c10ull,
+//                         0x9e02b6a1d3c84f57ull)
 //   public:
 //       explicit SpinningActor(rocks::Allocator& allocator) noexcept;
 //   };
@@ -29,7 +29,7 @@
 // - 객체 안에 다른 객체로의 강한 간선(ObjectRef·ObjectRefArray)을 두면
 //   `void Trace(TraceVisitor&) const noexcept`를 정의해 모두 방문한다. 파생 클래스가 간선을 더하면
 //   Trace를 재정의하고 Super::Trace를 먼저 호출한다.
-#define ROCKS_NATIVE_CLASS(Type, Base, IdHigh, IdLow)                                              \
+#define ROCKS_NATIVE_TYPE(Type, Base, IdHigh, IdLow)                                               \
 public:                                                                                            \
     using ThisClass = Type;                                                                        \
     using Super = Base;                                                                            \
@@ -38,7 +38,7 @@ public:                                                                         
 
 namespace rocks {
 
-// ROCKS_NATIVE_CLASS를 선언한 Object 파생 클래스다.
+// ROCKS_NATIVE_TYPE를 선언한 Object 파생 클래스다.
 template <class T>
 concept NativeClassType = __is_base_of(Object, T) && requires {
     typename T::ThisClass;
@@ -73,7 +73,7 @@ void TraceNativeChain(const U& object, TraceVisitor& visitor) noexcept {
 
 } // namespace detail
 
-// T의 정적 TypeId다. ROCKS_NATIVE_CLASS 선언이 필요하다. 등록 여부와 무관한 값이다.
+// T의 정적 TypeId다. ROCKS_NATIVE_TYPE 선언이 필요하다. 등록 여부와 무관한 값이다.
 template <NativeClassType T>
 constexpr TypeId NativeTypeIdOf() noexcept {
     return T::StaticTypeId;
@@ -89,7 +89,7 @@ template <NativeClassType T>
 Result<TypeRegistrationToken> RegisterNativeClass(TypeRegistry& types,
                                                   ModuleLease module = {}) noexcept {
     static_assert(__is_same(typename T::ThisClass, T),
-                  "ROCKS_NATIVE_CLASS is missing in this class; it inherited its base's identity");
+                  "ROCKS_NATIVE_TYPE is missing in this class; it inherited its base's identity");
     using Base = typename T::Super;
     static_assert(__is_base_of(Base, T) && !__is_same(Base, T));
     static_assert(__is_same(Base, Object) || NativeClassType<Base>,
@@ -104,6 +104,8 @@ Result<TypeRegistrationToken> RegisterNativeClass(TypeRegistry& types,
     TypeSchema schema;
     schema.id = T::StaticTypeId;
     schema.name = Span<const char>(T::StaticTypeName, sizeof(T::StaticTypeName) - 1);
+    // native 타입은 WorldOnly가 아니다(World 타입은 B8에서 ROCKS_CLASS(WorldOnly)로 옮긴다). 그래서
+    // WorldOnly base의 파생을 이 경로로 등록하면 TypeRegistry가 InvalidArgument로 거부한다.
     schema.flags = __is_abstract(T) ? static_cast<uint32>(TypeFlags::Abstract) : 0u;
     RuntimeTypeOps ops = MakeRuntimeTypeOps<T>(Move(module));
     ops.trace = [](const Object& object, TraceVisitor& visitor) noexcept {

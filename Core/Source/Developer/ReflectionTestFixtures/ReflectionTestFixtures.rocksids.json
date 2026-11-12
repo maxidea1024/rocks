@@ -131,6 +131,27 @@
       "retired": false
     },
     {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::WorldChild::depth",
+      "id": "a82897e303e74b2c8e817c9f0fb46194",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::WorldFixture::note",
+      "id": "46e93712694f40f38e58b9f8ea862072",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::WorldFixture::target",
+      "id": "f32d0e1ac8434b77a6530927e74079f9",
+      "aliases": [],
+      "retired": false
+    },
+    {
       "kind": "type",
       "name": "identity_fixture::RenamedActor",
       "id": "c0100000000000000000000000000001",
@@ -178,6 +199,20 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::PropertyNode",
       "id": "ad100000000000000000000000000004",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::WorldChild",
+      "id": "e695fedc040e45a08cbf8f68a53cac60",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::WorldFixture",
+      "id": "832b22f7646445fe860271cf5b4a367d",
       "aliases": [],
       "retired": false
     }

@@ -19,7 +19,7 @@
 | 비리플렉션 멤버 | 금지(모든 비정적 필드에 PROPERTY) | `ROCKS_NATIVE`(비영속, 강한 참조 재귀 금지) |
 | 스키마 버전 | 1 고정 | `Version=N` |
 | 필드 직렬화 | GraphValues의 `FieldValue` switch | 필드별 생성 codec thunk(encode·두 단계 decode) + 관찰 hook |
-| 엔진 World 타입 | `ROCKS_NATIVE_CLASS` 수동 등록 | `ROCKS_CLASS(WorldOnly)`(B8) |
+| 엔진 World 타입 | `ROCKS_NATIVE_TYPE` 수동 등록(B2에서 `ROCKS_NATIVE_CLASS`를 바꿈) | `ROCKS_CLASS(WorldOnly)`(B8) |
 | 빌드 주입 상수 | 없음 | 툴체인 지문·도구 빌드 ID |
 
 ## 1. 모듈 소유 메타데이터(B1)
@@ -134,7 +134,7 @@
 ### 2.4 `ROCKS_NATIVE`
 
 - `ROCKS_NATIVE()`는 리플렉션 클래스·구조체 안의 **비영속 런타임 멤버**다(GPU 핸들·캐시·World 쪽 `AssetLease`). 모든 비정적 필드는 `ROCKS_PROPERTY` 또는 `ROCKS_NATIVE` 중 하나다(둘 다 없으면 지금처럼 오류, 둘 다면 RMC2204).
-- **강한 참조 재귀 금지**(GC 구멍 방지): MetaCompiler가 Clang AST로 NATIVE 멤버의 타입을 재귀 검사한다 — 필드·base 클래스·포인터와 배열의 가리키는 타입·템플릿 특수화의 필드를 따라가며 `ObjectRef`·`ObjectRefArray`·`RootRef`가 있거나 `Object` 파생 타입을 가리키는 raw 포인터(EIP 525행)가 있으면 RMC2205다. 리플렉션 struct는 생성 형질 `ContainsStrongReference`로 판정한다. 생성 코드는 직접 타입에 대해 같은 조건을 `static_assert`로 한 번 더 둔다. `WeakRef`·`ObjectHandle`은 허용한다(추적하지 않는 참조).
+- **강한 참조 재귀 금지**(GC 구멍 방지): MetaCompiler가 Clang AST로 NATIVE 멤버의 타입을 재귀 검사한다 — 값으로 담는 필드·base 클래스·이름 없는 struct/union 멤버·배열 원소·템플릿 인자와 템플릿 패턴의 필드를 따라가며 `ObjectRef`·`ObjectRefArray`·`RootRef`가 있거나 `Object` 파생 타입을 가리키는 raw 포인터·참조(EIP 525행)가 있으면 RMC2205다. 포인터·참조는 대상이 `Object` 파생이거나 대상이 다시 강한 참조인지만 보고, 빌린 포인터가 가리키는 비-Object 레코드의 필드는 펼치지 않는다(B2 구현에서 정함 — `World*` 같은 NATIVE 멤버를 허용한다). `Object` 파생 타입은 값이나 템플릿 인자로 닿아도 펼치지 않는다. 리플렉션 struct는 생성 형질 `ContainsStrongReference`로 판정한다. 생성 코드는 직접 타입에 대해 같은 조건을 `static_assert`로 한 번 더 둔다. `WeakRef`·`ObjectHandle`은 허용한다(추적하지 않는 참조).
 - WorldOnly 전용 멤버: 타입이 `static constexpr bool RocksRequiresWorldOnlyOwner = true;`를 선언하면(A1의 `AssetLease`가 선언) WorldOnly가 아닌 클래스의 `ROCKS_NATIVE` 멤버로 둘 수 없다(RMC2206, 같은 재귀 검사로 담는 타입까지 본다). 리플렉션 struct가 그런 NATIVE 멤버를 (중첩까지) 담으면 struct 자체가 생성 형질 `RequiresWorldOnlyOwner`를 갖고, 그 struct를 필드로 둔 WorldOnly 아닌 클래스도 RMC2206이다. 이름 문자열이 아니라 형질로 판정하므로 `AssetLease`가 생기기 전에도 규칙과 시험을 둘 수 있다.
 - 수동 등록 매크로 `ROCKS_NATIVE_CLASS`는 이름이 겹치므로 `ROCKS_NATIVE_TYPE`으로 바꾼다(EngineRuntime 80행 서술도 고친다).
 
@@ -375,7 +375,7 @@ struct BulkDataRef {
 | B7 | 툴체인 지문·도구 빌드 ID 생성·주입, AS 문서 정정 | 8절 시험 (다른 단계와 독립 — 병렬 가능) |
 | B8 | Level·Actor·Component의 `ROCKS_CLASS(WorldOnly)` 이전 | 기존 World 시험 전부 + 리플렉션 Trace·저장 |
 
-상태: B1은 2026-11-13에 구현했다(사용 계약은 [리플렉션 메타데이터](../Implementation/ReflectionMetadata.ko.md)의 "모듈 메타데이터"·"생성물과 등록"). B1의 `RegisterModuleTypes`는 클래스만 등록하며 B3가 enum·struct와 TypeRegistry 종류를 더한다. 구현에서 정한 것: 메타데이터 배치·검증은 타깃에서 도달하는 모듈에만 적용한다. `ModuleRegistration`은 이미 등록된 공유 타입의 lease를 붙잡는다. `.generated.h` 철자를 예약한다(RMC2005). 명세 사이 이름도 유일해야 한다(1.6절).
+상태: B1은 2026-11-13에 구현했다(사용 계약은 [리플렉션 메타데이터](../Implementation/ReflectionMetadata.ko.md)의 "모듈 메타데이터"·"생성물과 등록"). B1의 `RegisterModuleTypes`는 클래스만 등록하며 B3가 enum·struct와 TypeRegistry 종류를 더한다. B2는 2026-11-13에 구현했다: 정수 지정자 값, `Version`·상속되는 `WorldOnly`, `EditorOnly`·`Required`(참조 필드만, RMC2202)·`Name`(도구 이름, RMC2203)·`MaxElements`(배열 전용 — 배열이 생기기 전까지 RMC2202), `ROCKS_NATIVE`(RMC2204·2205·2206, 생성 static_assert), `ROCKS_NATIVE_TYPE`, `completeFieldLayout`의 새 뜻, TypeRegistry 마스크·WorldOnly 상속·도구 이름 검사. 리플렉션 struct의 `ContainsStrongReference`·`RequiresWorldOnlyOwner` 형질은 struct가 생기는 B4에서 더한다. B1 구현에서 정한 것: 메타데이터 배치·검증은 타깃에서 도달하는 모듈에만 적용한다. `ModuleRegistration`은 이미 등록된 공유 타입의 lease를 붙잡는다. `.generated.h` 철자를 예약한다(RMC2005). 명세 사이 이름도 유일해야 한다(1.6절).
 
 의존: B1 → B3(집계 헤더·import), B2 → B3(Required·EditorOnly 검증), B3 → B4 → B5(struct 원소 배열), B3·B5 → B6(경로는 struct·배열을 지난다), B2·B5 → B8. B7은 독립이다. 각 단계는 구현 뒤 다수 서브에이전트 교차검증, Debug·Release·Asan·format·policy·Android 빌드를 거쳐 커밋한다.
 

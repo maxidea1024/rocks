@@ -103,4 +103,18 @@ public:
     }
 };
 
+// B2 지정자: 스키마 버전, WorldOnly(파생에 상속), EditorOnly·Required·도구 이름, 비영속 NATIVE
+// 멤버.
+ROCKS_CLASS(Version = 2, WorldOnly)
+struct WorldFixture : Object {
+    ROCKS_PROPERTY(EditorOnly, Name = "Label") int32 note = 0;
+    ROCKS_PROPERTY(Required) ObjectRef<Node> target;
+    ROCKS_NATIVE() int32 runtimeCache = 0;
+};
+
+ROCKS_CLASS()
+struct WorldChild final : WorldFixture {
+    ROCKS_PROPERTY() int32 depth = 0;
+};
+
 } // namespace rocks::reflection_fixture

@@ -37,7 +37,7 @@ bool StepsAre(const char* const (&expected)[Count]) noexcept {
 }
 
 class TickingActor final : public Actor {
-    ROCKS_NATIVE_CLASS(TickingActor, Actor, 0x98bc5cdd579047d2ull, 0xaf07b4855fa639dcull)
+    ROCKS_NATIVE_TYPE(TickingActor, Actor, 0x98bc5cdd579047d2ull, 0xaf07b4855fa639dcull)
 
 public:
     explicit TickingActor(Allocator& allocator) noexcept : Actor(allocator) {

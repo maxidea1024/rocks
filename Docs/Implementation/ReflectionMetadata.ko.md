@@ -32,13 +32,13 @@ auto runtimeName = type.Name();
 
 ## 선언과 지원 형식
 
-`ROCKS_CLASS()` 또는 `ROCKS_CLASS(Abstract)`를 `class`/`struct` 앞에, `ROCKS_PROPERTY(...)`를 필드 앞에 직접 작성한다. 선언에 안정 ID와 스키마 버전을 넣지 않는다. 매크로와 타입 사이에는 공백과 주석만 허용하고 전처리 지시문·별도 선언·wrapper 매크로는 거부한다. 조건부 선언은 마커와 클래스를 같은 `#if` 블록 안에 둔다.
+`ROCKS_CLASS(...)`를 `class`/`struct` 앞에, `ROCKS_PROPERTY(...)` 또는 `ROCKS_NATIVE()`를 필드 앞에 직접 작성한다. 선언에 안정 ID를 넣지 않는다(스키마 버전은 `Version=N` 지정자로 정한다). 매크로와 타입 사이에는 공백과 주석만 허용하고 전처리 지시문·별도 선언·wrapper 매크로는 거부한다. 조건부 선언은 마커와 클래스를 같은 `#if` 블록 안에 둔다.
 
 리플렉션 헤더를 가진 모듈은 모듈 폴더에 identity 명세 `<ModuleName>.rocksids.json`을 둔다. 명세는 그 모듈 타입과 필드의 무작위 안정 ID, 이전 이름과 폐기 이력을 보관한다. 새로운 선언의 ID 발급과 이름 변경·폐기는 `ids add`, `ids rename`, `ids retire`를 사용하는 명시적인 저작 작업이다. 타입을 다른 모듈로 옮길 때는 `ids move --from <명세> --to <명세> --type <이름>`이 타입과 그 필드 항목을 ID 그대로 옮긴다. 대상에 먼저 붙이고 원본에서 떼므로 중간에 멈추면 같은 명령을 다시 실행한다. 일반 빌드는 명세를 읽기만 하고 누락 또는 중복을 거부한다. 모듈마다 생성 결과의 inventory로 활성 명세의 누락과 중복을 검사하고(`ids verify`), 타깃에서 도달하는 모듈의 모든 명세(은퇴 항목만 남은 예약 명세와 SDK가 동봉한 명세 포함) 사이에 같은 ID나 같은 종류의 같은 이름·별칭이 있으면 거부한다(`ids verify-set`, RMC2101 — 한 ID·한 이름은 한 명세에만 있다). 이 검사가 모두 끝나야 생성물을 게시한다. 리플렉션 헤더는 정확히 한 모듈이 소유한다. 미등록 헤더의 자동 탐색은 아직 없다.
 
 이력 검사(`ids merge-check`, `Build/CheckIdentityMerges.ps1`)는 리비전마다 저장소의 모든 명세를 ID 기준으로 합쳐 비교한다. 따라서 명세를 옮기거나 타입을 다른 명세로 옮겨도 ID가 사라진 것으로 보지 않으며, ID 삭제·재사용과 예약 이름 재사용은 계속 거부한다. 합치기 전에 한 리비전 안의 두 명세에 같은 ID나 이름이 있는지 보고, 있으면 측면과 파일 경로를 함께 보고하고 실패한다(빌드의 `ids verify-set`과 같은 규칙).
 
-저장 레코드에는 내부 스키마 버전이 있으며 현재 생성된 타입의 버전은 1이다. 이 값은 클래스 선언에 노출하지 않는다. 사용자 정의 스키마 변경의 자동 판정과 마이그레이션 생성은 아직 구현되지 않았다. 이름 변경 시 명세의 `ids rename`으로 ID를 유지하며, 다른 ID를 새로 발급해 이전 필드를 대체하면 활성 이전 선언이 누락되어 빌드가 실패한다.
+저장 레코드에는 그 타입의 스키마 버전이 기록된다. 버전은 `ROCKS_CLASS(Version=N)`(없으면 1)이며 영속 필드의 의미·형식이 바뀌면 올리고 마이그레이션을 등록한다. base의 버전은 파생 Record에 기록되지 않으므로 base의 영속 배치를 바꾸면 파생 타입들도 버전을 올린다(MetaCompiler는 강제하지 않는다). 사용자 정의 스키마 변경의 자동 판정과 마이그레이션 생성은 아직 구현되지 않았다. 이름 변경 시 명세의 `ids rename`으로 ID를 유지하며, 다른 ID를 새로 발급해 이전 필드를 대체하면 활성 이전 선언이 누락되어 빌드가 실패한다.
 
 | 필드 형식 | 런타임 표현 |
 | --- | --- |
@@ -50,7 +50,7 @@ auto runtimeName = type.Name();
 | `String` | 소유한 유효 UTF-8 문자열; 길이는 바이트 수 |
 | `ObjectRef<T>` | `ObjectHandle`을 담은 참조 값; 실제 변경은 Registry barrier 경유 |
 
-현재 생성 대상은 이름 있는 비템플릿 타입이며, 모든 비정적 필드에 annotation이 필요하다. private/protected 필드는 해당 리플렉션 클래스 안에 `ROCKS_GENERATED_BODY()`를 직접 한 번 선언해야 한다. 리플렉션하지 않은 클래스, 다른 매크로로 감싼 호출, 수동 작성한 내부 annotation과 중복 선언은 거부한다. raw pointer, 배열·컨테이너, enum, const/volatile 필드, bitfield와 annotation을 붙인 static 필드는 거부한다. static 보조 데이터는 annotation 없이 둘 수 있다. 수동 `Trace`와 자동 추적을 섞어 완전한 필드 레이아웃으로 오인하지 않도록, 생성 대상의 직접 선언된 `Trace`는 거부한다.
+현재 생성 대상은 이름 있는 비템플릿 타입이며, 모든 비정적 필드는 `ROCKS_PROPERTY`(영속·리플렉션 필드) 또는 `ROCKS_NATIVE`(비영속 런타임 멤버) 중 하나를 단다(둘 다면 RMC2204). private/protected 필드는 해당 리플렉션 클래스 안에 `ROCKS_GENERATED_BODY()`를 직접 한 번 선언해야 한다. 리플렉션하지 않은 클래스, 다른 매크로로 감싼 호출, 수동 작성한 내부 annotation과 중복 선언은 거부한다. PROPERTY 필드에서 raw pointer, 배열·컨테이너, enum, const/volatile 필드는 거부한다(NATIVE 멤버는 강한 객체 참조만 아니면 이런 타입을 둘 수 있다). bitfield와 annotation을 붙인 static 필드는 거부한다. static 보조 데이터는 annotation 없이 둘 수 있다. 수동 `Trace`와 자동 추적을 섞어 완전한 필드 레이아웃으로 오인하지 않도록, 생성 대상의 직접 선언된 `Trace`는 거부한다.
 
 단일 public 비가상 상속만 지원한다. 기반 타입과 `ObjectRef<T>`의 대상은 `Object`, 같은 모듈의 리플렉션 타입, 또는 import한 의존 모듈 descriptor의 public 리플렉션 타입이어야 한다(아래 "모듈 메타데이터"). 파생 스키마는 상속 필드를 안정 ID 순서로 펼치며, 상속을 포함한 필드 수는 최대 4,096개다. 생성 접근기는 멤버 포인터를 사용한다. 객체 레이아웃에서 offset을 추정하거나 raw 필드 주소를 반환하지 않는다.
 
@@ -68,7 +68,22 @@ public:
 };
 ```
 
-CLASS는 선택적 `Abstract`를, PROPERTY는 `Transient`, `ReadOnly`, `Category="..."`, `DisplayName="..."`를 지원한다. 중복·알 수 없는 지정자, 값이 필요한 지정자의 값 누락과 잘못된 형식은 거부한다. 지정자 값의 escape는 JSON 문자열 표기를 사용한다. `Transient` 참조는 GC에서 추적하지만 저장 그래프에서는 제외한다. `ReadOnly`의 일반 write는 거부하고 생성·복원을 위한 staged write는 허용한다. `Abstract` 타입은 등록할 수 있으나 생성할 수 없다.
+지정자 값은 JSON escape 문자열 또는 부호 없는 10진 정수(앞자리 0 금지, 1–2³¹−1)다. 중복·알 수 없는 지정자, 값이 필요한 지정자의 값 누락과 잘못된 형식은 거부한다.
+
+| 지정자 | 대상 | 뜻 |
+|---|---|---|
+| `Abstract` | CLASS | 등록할 수 있으나 생성할 수 없다(`TypeFlags::Abstract`). |
+| `Version=N` | CLASS | 스키마·Record 버전(없으면 1). |
+| `WorldOnly` | CLASS | `TypeFlags::WorldOnly`. **상속된다** — base가 WorldOnly면 파생도 자동으로 WorldOnly다(TypeRegistry도 수동 등록에서 확인). 에셋 객체 Registry의 생성 거부는 패키지 단계(A0-O)의 정책이다. |
+| `Transient` | PROPERTY | GC에서 추적하지만 저장 그래프에서 뺀다. |
+| `ReadOnly` | PROPERTY | 일반 write는 거부하고 생성·복원의 staged write만 허용한다. |
+| `EditorOnly` | PROPERTY | 플래그만 단다(항상 컴파일). 쿠킹 데이터에서 빼는 것은 graph v2(A0-O)이며 지금 graph는 보통 필드처럼 저장한다. |
+| `Required` | PROPERTY | ObjectRef 필드에만 쓴다(그 밖은 RMC2202). 패키지 저장·쿠킹이 null을 거부한다(A1). 로드는 거부하지 않는다. |
+| `Name="…"` | PROPERTY | 도구·명령행 이름(`FieldSchema::toolName`). ASCII 식별자이며, 없으면 C++ 필드 이름이다. 상속 필드를 포함해 대소문자 무시로 유일해야 한다(RMC2203). 직렬화는 필드 ID를 쓰므로 이름과 무관하다. |
+| `Category="…"`·`DisplayName="…"` | PROPERTY | 표시용 UTF-8 문자열(아래). |
+| `MaxElements=N` | PROPERTY | 배열 길이 상한. 배열 필드는 B5에서 생기므로 지금은 모든 필드에서 RMC2202다. |
+
+`ROCKS_NATIVE()`는 저장·리플렉션하지 않는 런타임 멤버(GPU 핸들·캐시)이며 지정자를 받지 않는다. GC가 추적하지 않으므로 강한 객체 참조를 담을 수 없다: MetaCompiler가 Clang AST로 멤버 타입을 값으로 담는 필드·base·이름 없는 struct/union 멤버·배열 원소·템플릿 인자와 패턴 필드까지 재귀 검사해 `ObjectRef`·`RootRef`·`ObjectRefArray`나 Object 파생 타입의 raw 포인터·참조가 있으면 RMC2205로 거부한다. 포인터·참조는 대상이 Object 파생이거나 대상이 다시 강한 참조(`T**`·`ObjectRef<T>*`)인지만 본다 — 빌린 포인터가 가리키는 비-Object 레코드(예: `World*`)의 필드는 그 소유자가 추적한다. Object 파생 타입은 값이나 템플릿 인자로 닿아도 펼치지 않고, `WeakRef`·`ObjectHandle`은 허용한다. `static constexpr bool RocksRequiresWorldOnlyOwner = true;`를 선언한 타입(을 값으로 담는 타입)은 WorldOnly 클래스의 NATIVE 멤버로만 둘 수 있다(RMC2206). 생성 코드는 직접 멤버 타입(배열 원소·포인터와 참조의 대상 포함, 담는 타입의 필드는 제외)에 대해 같은 조건을 `static_assert`(`IsNativeStrongReference`·`RequiresWorldOnlyOwner`, `<Object/NativeMemberTraits.h>`)로 한 번 더 둔다. NATIVE 멤버는 영속 필드가 아니고 강한 간선을 담지 않으므로 생성 타입의 `completeFieldLayout`은 계속 true다. 수동 등록 매크로는 `ROCKS_NATIVE_TYPE`이다(이전 `ROCKS_NATIVE_CLASS`).
 
 `Category`와 `DisplayName`은 바이트 길이를 가진 UTF-8 데이터이며 중간 NUL(`\u0000`)도 유효하다. `Span<const char>`의 길이를 사용해야 하며 NUL 종료 문자열 함수로 읽으면 값이 잘린다. 등록 시 이 바이트를 깊게 복사한다. 생성 C++은 한글 등 읽을 수 있는 문자를 유지하고 인용부호·역슬래시·제어 문자를 escape한다. 제어 바이트는 정확히 세 자리 8진수로 표현하므로 뒤에 숫자가 와도 서로 합쳐지지 않는다.
 

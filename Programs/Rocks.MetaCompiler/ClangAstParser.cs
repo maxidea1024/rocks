@@ -32,6 +32,7 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
     {
         using JsonDocument document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 2048 });
         IndexLocations(document.RootElement);
+        IndexRecords(document.RootElement, []);
         try
         {
             BindPrefixMarkers(document.RootElement);
@@ -59,6 +60,328 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
         }
 
         return SchemaValidator.Validate(classes, imported);
+    }
+
+    // ROCKS_NATIVE 재귀 검사용 레코드 색인이다(정규 이름 → 필드·base 타입 철자, WorldOnly 소유자 형질). 클래스
+    // 템플릿은 패턴 레코드를 템플릿 이름으로 둔다(특수화의 필드는 패턴 필드와 템플릿 인자로 근사한다).
+    private sealed record RecordInfo(List<string> Fields, List<string> Bases, bool RequiresWorldOnlyOwner);
+
+    private readonly Dictionary<string, RecordInfo> records = new(StringComparer.Ordinal);
+
+    private static readonly HashSet<string> StrongReferenceTemplates = new(StringComparer.Ordinal)
+    {
+        "rocks::ObjectRef", "rocks::RootRef", "rocks::ObjectRefArray"
+    };
+
+    // 대상 객체를 담지도 추적하지도 않는 참조 템플릿이다. 인자 타입을 따라가지 않는다(WeakRef<T>는 T의 필드를 담지 않는다).
+    private static readonly HashSet<string> NonOwningTemplates = new(StringComparer.Ordinal)
+    {
+        "rocks::WeakRef"
+    };
+
+    private void IndexRecords(JsonElement node, string[] scope)
+    {
+        string kind = Text(node, "kind");
+        string name = Text(node, "name");
+        if (kind == "NamespaceDecl")
+        {
+            string[] inner = [.. scope, name.Length == 0 ? "(anonymous namespace)" : name];
+            foreach (JsonElement child in Children(node))
+            {
+                IndexRecords(child, inner);
+            }
+
+            return;
+        }
+
+        if (kind == "ClassTemplateDecl")
+        {
+            foreach (JsonElement child in Children(node))
+            {
+                if (Text(child, "kind") == "CXXRecordDecl")
+                {
+                    IndexRecords(child, scope);
+                }
+            }
+
+            return;
+        }
+
+        if (kind == "CXXRecordDecl" && Flag(node, "completeDefinition") && name.Length != 0)
+        {
+            string qualified = string.Join("::", scope.Append(name));
+            List<string> fields = [];
+            bool worldOnly = false;
+            // 이름 없는 struct/union 멤버의 필드는 부모가 값으로 담으므로 부모 필드로 본다.
+            void Collect(JsonElement record)
+            {
+                foreach (JsonElement child in Children(record))
+                {
+                    string childKind = Text(child, "kind");
+                    if (childKind == "FieldDecl" && child.TryGetProperty("type", out _))
+                    {
+                        fields.Add(TypeSpelling(child));
+                    }
+                    else if (childKind == "CXXRecordDecl" && Text(child, "name").Length == 0 && Flag(child, "completeDefinition"))
+                    {
+                        Collect(child);
+                    }
+                    else if (childKind == "VarDecl" && Text(child, "name") == "RocksRequiresWorldOnlyOwner" && ContainsTrue(child))
+                    {
+                        worldOnly = true;
+                    }
+                }
+            }
+
+            Collect(node);
+
+            List<string> bases = node.TryGetProperty("bases", out JsonElement baseArray)
+                ? baseArray.EnumerateArray().Select(TypeSpelling).ToList() : [];
+            records.TryAdd(qualified, new(fields, bases, worldOnly));
+            foreach (JsonElement child in Children(node))
+            {
+                IndexRecords(child, [.. scope, name]);
+            }
+
+            return;
+        }
+
+        foreach (JsonElement child in Children(node))
+        {
+            IndexRecords(child, scope);
+        }
+    }
+
+    private static bool ContainsTrue(JsonElement node) =>
+        (Text(node, "kind") == "CXXBoolLiteralExpr" && node.TryGetProperty("value", out JsonElement value) && value.ValueKind == JsonValueKind.True) ||
+        Children(node).Any(ContainsTrue);
+
+    // 타입 철자를 cv·elaborated 키워드 없이 다듬는다.
+    private static string CleanType(string type)
+    {
+        string text = type.Trim();
+        foreach (string prefix in new[] { "const ", "volatile ", "struct ", "class ", "union ", "enum " })
+        {
+            while (text.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                text = text[prefix.Length..].TrimStart();
+            }
+        }
+
+        foreach (string suffix in new[] { " const", " volatile" })
+        {
+            while (text.EndsWith(suffix, StringComparison.Ordinal))
+            {
+                text = text[..^suffix.Length].TrimEnd();
+            }
+        }
+
+        return text.StartsWith("::", StringComparison.Ordinal) ? text[2..] : text;
+    }
+
+    // 깊이 0의 template 인자 목록을 나눈다. 템플릿이 아니면 null이다.
+    private static (string Name, List<string> Arguments)? SplitTemplate(string type)
+    {
+        int open = type.IndexOf('<');
+        if (open < 0 || !type.EndsWith('>'))
+        {
+            return null;
+        }
+
+        List<string> arguments = [];
+        int depth = 0;
+        int start = open + 1;
+        for (int index = open + 1; index < type.Length - 1; ++index)
+        {
+            char c = type[index];
+            if (c is '<' or '(' or '[')
+            {
+                ++depth;
+            }
+            else if (c is '>' or ')' or ']')
+            {
+                --depth;
+            }
+            else if (c == ',' && depth == 0)
+            {
+                arguments.Add(type[start..index].Trim());
+                start = index + 1;
+            }
+        }
+
+        arguments.Add(type[start..^1].Trim());
+        return (type[..open].Trim(), arguments);
+    }
+
+    // 템플릿 인자 밖(깊이 0)에서 token이 나오면 참이다(함수 포인터·참조 판정용).
+    private static bool TopLevelContains(string type, string token)
+    {
+        int depth = 0;
+        for (int index = 0; index < type.Length; ++index)
+        {
+            char c = type[index];
+            if (c == '<')
+            {
+                ++depth;
+            }
+            else if (c == '>')
+            {
+                --depth;
+            }
+            else if (depth == 0 && string.CompareOrdinal(type, index, token, 0, token.Length) == 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsObjectDerived(string record, HashSet<string> visited)
+    {
+        if (record == "rocks::Object")
+        {
+            return true;
+        }
+
+        return visited.Add(record) && records.TryGetValue(record, out RecordInfo? info) &&
+            info.Bases.Any(baseType => IsObjectDerived(CleanType(baseType), visited));
+    }
+
+    // NATIVE 멤버 타입이 강한 객체 참조를 담으면 그 경로를, 아니면 null을 돌려준다. 값으로 담는 필드·base·배열 원소·
+    // 템플릿 인자와 패턴 필드를 따라간다. 포인터·참조는 대상이 Object 파생이거나 대상이 다시 강한 참조(T**,
+    // ObjectRef<T>*)인지만 본다 — 빌린 포인터가 가리키는 비-Object 레코드의 필드는 그 소유자가 추적한다. Object 파생
+    // 타입은 값이나 템플릿 인자로 닿아도 펼치지 않는다(객체는 Registry에 살고, 템플릿 인자로는 handle·borrow의 대상이다).
+    private string? StrongReferencePath(string type, HashSet<string> visited, bool throughPointer = false)
+    {
+        string text = CleanType(type);
+        if (text.Length == 0 || !visited.Add((throughPointer ? "*" : "") + text) || visited.Count > 512)
+        {
+            return null;
+        }
+
+        if (TopLevelContains(text, "(*)") || TopLevelContains(text, "(&)"))
+        {
+            return null; // 함수 포인터·참조
+        }
+
+        if (text.EndsWith(']'))
+        {
+            int bracket = text.LastIndexOf('[');
+            return bracket > 0 ? StrongReferencePath(text[..bracket], visited, throughPointer) : null;
+        }
+
+        if (text.EndsWith('*') || text.EndsWith('&'))
+        {
+            string stripped = text.TrimEnd('&').TrimEnd();
+            if (stripped.EndsWith('*'))
+            {
+                stripped = stripped[..^1];
+            }
+
+            string pointee = CleanType(stripped);
+            if (IsObjectDerived(pointee, []))
+            {
+                return $"raw pointer to Object-derived {pointee}";
+            }
+
+            return StrongReferencePath(pointee, visited, throughPointer: true) is string inner ? $"{text} -> {inner}" : null;
+        }
+
+        if (SplitTemplate(text) is (string name, List<string> arguments))
+        {
+            string templateName = CleanType(name);
+            if (StrongReferenceTemplates.Contains(templateName))
+            {
+                return templateName;
+            }
+
+            if (NonOwningTemplates.Contains(templateName) || throughPointer)
+            {
+                return null;
+            }
+
+            foreach (string argument in arguments)
+            {
+                if (StrongReferencePath(argument, visited) is string inner)
+                {
+                    return $"{text} -> {inner}";
+                }
+            }
+
+            text = templateName;
+        }
+
+        if (throughPointer || IsObjectDerived(text, []))
+        {
+            return null;
+        }
+
+        if (records.TryGetValue(text, out RecordInfo? info))
+        {
+            foreach (string member in info.Fields.Concat(info.Bases))
+            {
+                if (StrongReferencePath(member, visited) is string inner)
+                {
+                    return $"{text} -> {inner}";
+                }
+            }
+        }
+
+        return null;
+    }
+
+    // NATIVE 멤버 타입이 (값으로 담는 타입까지) RocksRequiresWorldOnlyOwner 형질을 가지면 그 경로를 돌려준다.
+    private string? RequiresWorldOnlyOwnerPath(string type, HashSet<string> visited)
+    {
+        string text = CleanType(type);
+        if (text.Length == 0 || !visited.Add(text) || visited.Count > 512 || text.EndsWith('*') || text.EndsWith('&') ||
+            TopLevelContains(text, "(*)") || TopLevelContains(text, "(&)"))
+        {
+            return null;
+        }
+
+        if (text.EndsWith(']'))
+        {
+            int bracket = text.LastIndexOf('[');
+            return bracket > 0 ? RequiresWorldOnlyOwnerPath(text[..bracket], visited) : null;
+        }
+
+        if (SplitTemplate(text) is (string name, List<string> arguments))
+        {
+            if (NonOwningTemplates.Contains(CleanType(name)))
+            {
+                return null;
+            }
+
+            foreach (string argument in arguments)
+            {
+                if (RequiresWorldOnlyOwnerPath(argument, visited) is string inner)
+                {
+                    return $"{text} -> {inner}";
+                }
+            }
+
+            text = CleanType(name);
+        }
+
+        if (records.TryGetValue(text, out RecordInfo? info))
+        {
+            if (info.RequiresWorldOnlyOwner)
+            {
+                return text;
+            }
+
+            foreach (string member in info.Fields.Concat(info.Bases))
+            {
+                if (RequiresWorldOnlyOwnerPath(member, visited) is string inner)
+                {
+                    return $"{text} -> {inner}";
+                }
+            }
+        }
+
+        return null;
     }
 
     // 선언의 물리 파일이 이 모듈 입력이면 그 입력을, 아니면 null을 돌려준다.
@@ -168,7 +491,7 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
         object?[]? modern = Annotation(member, "rocks.field.arguments");
         if (modern is null || modern.Length != 1 || modern[0] is not string raw)
         {
-            throw new MetadataException($"{symbol}: every nonstatic field requires a PROPERTY annotation");
+            throw new MetadataException($"{symbol}: every nonstatic field requires a PROPERTY or NATIVE annotation");
         }
 
         return raw;
@@ -244,7 +567,7 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
                     return;
                 }
 
-                bool explicitAbstract = Specifiers.Class(classSpecifiers, qualified);
+                ClassSpec classSpec = Specifiers.Class(classSpecifiers, qualified);
                 string id = Identity("type", qualified);
                 currentSite = classSite;
                 JsonElement[] bases = node.TryGetProperty("bases", out JsonElement baseArray) ? baseArray.EnumerateArray().ToArray() : [];
@@ -260,9 +583,10 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
                     Name = qualified,
                     Id = id,
                     Site = currentSite,
-                    Version = 1,
+                    Version = classSpec.Version,
                     Base = TypeSpelling(bases[0]),
-                    Abstract = abstractType || explicitAbstract,
+                    Abstract = abstractType || classSpec.Abstract,
+                    WorldOnly = classSpec.WorldOnly,
                     Header = owner.Include,
                     Private = owner.Private
                 };
@@ -295,6 +619,47 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
                     }
 
                     string symbol = qualified + "::" + memberName;
+                    object?[]? native = Annotation(member, "rocks.field.native");
+                    if (native is not null)
+                    {
+                        if (HasFieldAnnotation(member))
+                        {
+                            throw new MetadataException($"{symbol}: a field is either ROCKS_PROPERTY or ROCKS_NATIVE, not both", "RMC2204",
+                                "Keep ROCKS_PROPERTY for persistent reflected fields and ROCKS_NATIVE for runtime-only members.");
+                        }
+
+                        if (native.Length != 1 || native[0] is not string nativeSpecifiers)
+                        {
+                            throw new MetadataException($"{symbol}: invalid ROCKS_NATIVE annotation arguments");
+                        }
+
+                        Specifiers.Native(nativeSpecifiers, symbol);
+                        if (memberName.Length == 0 || Flag(member, "isBitfield"))
+                        {
+                            throw new MetadataException($"{symbol}: only named non-bitfield members are supported");
+                        }
+
+                        if (access != "public" && !generatedBody)
+                        {
+                            throw new MetadataException($"{symbol}: private/protected NATIVE requires ROCKS_GENERATED_BODY");
+                        }
+
+                        string nativeType = TypeSpelling(member);
+                        if (StrongReferencePath(nativeType, []) is string path)
+                        {
+                            throw new MetadataException($"{symbol}: ROCKS_NATIVE member holds a strong object reference ({path})", "RMC2205",
+                                "Native members are not traced; store ObjectRef/RootRef/Object pointers in ROCKS_PROPERTY fields or use WeakRef/ObjectHandle.");
+                        }
+
+                        if (RequiresWorldOnlyOwnerPath(nativeType, []) is string worldOnlyPath)
+                        {
+                            model.WorldOnlyNatives.Add((symbol, worldOnlyPath, currentSite));
+                        }
+
+                        model.NativeMembers.Add(memberName);
+                        continue;
+                    }
+
                     string fieldSpecifiers = FieldArguments(member, symbol);
                     if (memberName.Length == 0 || Flag(member, "isBitfield"))
                     {
@@ -313,7 +678,7 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
                         Name = memberName,
                         Owner = qualified,
                         NativeSpelling = TypeSpelling(member),
-                        Spec = Specifiers.Property(fieldSpecifiers, symbol)
+                        Spec = Specifiers.Property(fieldSpecifiers, symbol, memberName)
                     });
                 }
 
@@ -437,6 +802,17 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
         if (fieldAnnotation && (kind != "FieldDecl" || !reflectedOwner))
         {
             throw new MetadataException("ROCKS_PROPERTY must annotate a nonstatic data field owned by a reflected CLASS");
+        }
+
+        if (Annotation(node, "rocks.field.native") is not null && (kind != "FieldDecl" || !reflectedOwner))
+        {
+            throw new MetadataException("ROCKS_NATIVE must annotate a nonstatic data field owned by a reflected CLASS");
+        }
+
+        if (fieldAnnotation && Annotation(node, "rocks.field.native") is not null)
+        {
+            throw new MetadataException("a field is either ROCKS_PROPERTY or ROCKS_NATIVE, not both", "RMC2204",
+                "Keep ROCKS_PROPERTY for persistent reflected fields and ROCKS_NATIVE for runtime-only members.");
         }
 
         if (fieldAnnotation)

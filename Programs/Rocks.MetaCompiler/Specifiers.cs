@@ -2,43 +2,93 @@ using System.Text.Json;
 
 namespace Rocks.MetaCompiler;
 
-// C++ 원문 파서가 아니다. Clang이 확정한 annotation 문자열의 작은 specifier 문법만 처리한다.
+// CLASS 지정자 결과다. Version은 Record schema version(없으면 1), WorldOnly는 이 선언이 직접 쓴 값이다(상속은
+// SchemaValidator가 base에서 더한다).
+internal sealed record ClassSpec(bool Abstract, uint Version, bool WorldOnly);
+
+// PROPERTY 지정자 결과다. ToolName은 Name="…"의 값이고 필드 이름과 같거나 없으면 ""다(기본 도구 이름은 필드
+// 이름이다). MaxElements는 배열 필드 전용이라 0이 아니면 SchemaValidator가 배열이 아닌 필드에서 거부한다.
+internal sealed record PropertySpec(bool Transient, bool ReadOnly, string Category, string DisplayName)
+{
+    public bool EditorOnly { get; init; }
+
+    public bool Required { get; init; }
+
+    public string ToolName { get; init; } = "";
+
+    public uint MaxElements { get; init; }
+}
+
+// C++ 원문 파서가 아니다. Clang이 확정한 annotation 문자열의 작은 specifier 문법만 처리한다(Docs/Design/
+// ReflectionFoundations.ko.md 2.1절). 값은 JSON escape 문자열 또는 부호 없는 10진 정수(앞자리 0 금지, 1–2³¹−1)다.
 internal static class Specifiers
 {
-    public static bool Class(string text, string symbol)
+    private sealed record Value(string? Text, uint? Number);
+
+    public static ClassSpec Class(string text, string symbol)
     {
-        Dictionary<string, string?> values = Parse(text, symbol);
-        foreach ((string key, string? value) in values)
+        Dictionary<string, Value?> values = Parse(text, symbol);
+        foreach ((string key, Value? value) in values)
         {
-            if (key != "Abstract" || value is not null)
+            bool flag = key is "Abstract" or "WorldOnly";
+            bool number = key is "Version";
+            if ((!flag && !number) || (flag && value is not null) || (number && value?.Number is null))
             {
-                throw new MetadataException($"{symbol}: unsupported CLASS specifier {key}");
+                throw new MetadataException($"{symbol}: unsupported CLASS specifier/value {key}");
             }
         }
 
-        return values.ContainsKey("Abstract");
+        return new(values.ContainsKey("Abstract"), values.GetValueOrDefault("Version")?.Number ?? 1, values.ContainsKey("WorldOnly"));
     }
 
-    public static PropertySpec Property(string text, string symbol)
+    public static PropertySpec Property(string text, string symbol, string fieldName)
     {
-        Dictionary<string, string?> values = Parse(text, symbol);
-        foreach ((string key, string? value) in values)
+        Dictionary<string, Value?> values = Parse(text, symbol);
+        foreach ((string key, Value? value) in values)
         {
-            bool flag = key is "Transient" or "ReadOnly";
-            bool label = key is "Category" or "DisplayName";
-            if ((!flag && !label) || (flag && value is not null) || (label && value is null))
+            bool flag = key is "Transient" or "ReadOnly" or "EditorOnly" or "Required";
+            bool label = key is "Category" or "DisplayName" or "Name";
+            bool number = key is "MaxElements";
+            if ((!flag && !label && !number) || (flag && value is not null) || (label && value?.Text is null) ||
+                (number && value?.Number is null))
             {
                 throw new MetadataException($"{symbol}: unsupported PROPERTY specifier/value {key}");
             }
         }
 
+        string toolName = values.GetValueOrDefault("Name")?.Text ?? "";
+        if (values.ContainsKey("Name") && !IsAsciiIdentifier(toolName))
+        {
+            throw new MetadataException($"{symbol}: Name specifier must be a non-empty ASCII identifier ([A-Za-z_][A-Za-z0-9_]*): \"{toolName}\"", "RMC2203",
+                "Use an ASCII identifier for the tool name, or omit Name to use the field name.");
+        }
+
         return new(values.ContainsKey("Transient"), values.ContainsKey("ReadOnly"),
-            values.GetValueOrDefault("Category") ?? "", values.GetValueOrDefault("DisplayName") ?? "");
+            values.GetValueOrDefault("Category")?.Text ?? "", values.GetValueOrDefault("DisplayName")?.Text ?? "")
+        {
+            EditorOnly = values.ContainsKey("EditorOnly"),
+            Required = values.ContainsKey("Required"),
+            // 필드 이름과 같은 Name은 지정하지 않은 것과 같다(모듈 사이 상속 필드의 도구 이름이 같은 바이트가 되게).
+            ToolName = toolName == fieldName ? "" : toolName,
+            MaxElements = values.GetValueOrDefault("MaxElements")?.Number ?? 0
+        };
     }
 
-    private static Dictionary<string, string?> Parse(string text, string symbol)
+    // ROCKS_NATIVE는 지정자를 받지 않는다.
+    public static void Native(string text, string symbol)
     {
-        Dictionary<string, string?> result = new(StringComparer.Ordinal);
+        if (Parse(text, symbol).Count != 0)
+        {
+            throw new MetadataException($"{symbol}: ROCKS_NATIVE takes no specifiers");
+        }
+    }
+
+    public static bool IsAsciiIdentifier(string text) =>
+        text.Length != 0 && (char.IsAsciiLetter(text[0]) || text[0] == '_') && text.All(c => char.IsAsciiLetterOrDigit(c) || c == '_');
+
+    private static Dictionary<string, Value?> Parse(string text, string symbol)
+    {
+        Dictionary<string, Value?> result = new(StringComparer.Ordinal);
         int cursor = 0;
         void Space()
         {
@@ -64,54 +114,22 @@ internal static class Specifiers
 
             string name = text[start..cursor];
             Space();
-            string? value = null;
+            Value? value = null;
             if (cursor < text.Length && text[cursor] == '=')
             {
                 ++cursor;
                 Space();
-                if (cursor == text.Length || text[cursor] != '"')
+                if (cursor < text.Length && char.IsAsciiDigit(text[cursor]))
                 {
-                    throw new MetadataException($"{symbol}: specifier values must be quoted strings");
+                    value = new(null, Number(ref cursor));
                 }
-
-                start = cursor++;
-                bool closed = false;
-                while (cursor < text.Length)
+                else if (cursor < text.Length && text[cursor] == '"')
                 {
-                    char next = text[cursor++];
-                    if (next == '\\')
-                    {
-                        if (cursor == text.Length)
-                        {
-                            break;
-                        }
-
-                        ++cursor;
-                    }
-                    else if (next == '"')
-                    {
-                        closed = true;
-                        break;
-                    }
+                    value = new(Quoted(ref cursor), null);
                 }
-
-                if (!closed)
+                else
                 {
-                    throw new MetadataException($"{symbol}: unterminated specifier value");
-                }
-
-                try
-                {
-                    value = JsonSerializer.Deserialize<string>(text[start..cursor]);
-                }
-                catch (JsonException)
-                {
-                    throw new MetadataException($"{symbol}: specifier escape must use JSON string spelling");
-                }
-
-                if (value is null)
-                {
-                    throw new MetadataException($"{symbol}: invalid specifier text");
+                    throw new MetadataException($"{symbol}: specifier values must be quoted strings or unsigned decimal integers");
                 }
 
                 Space();
@@ -140,5 +158,62 @@ internal static class Specifiers
         }
 
         return result;
+
+        // 부호 없는 10진 정수: 앞자리 0 금지, 1–2³¹−1.
+        uint Number(ref int position)
+        {
+            int begin = position;
+            while (position < text.Length && char.IsAsciiDigit(text[position]))
+            {
+                ++position;
+            }
+
+            string digits = text[begin..position];
+            if (digits[0] == '0' || digits.Length > 10 || !uint.TryParse(digits, out uint number) || number > int.MaxValue ||
+                (position < text.Length && (char.IsAsciiLetter(text[position]) || text[position] is '_' or '.')))
+            {
+                throw new MetadataException($"{symbol}: integer specifier values must be decimal 1..2147483647 without leading zeros");
+            }
+
+            return number;
+        }
+
+        string Quoted(ref int position)
+        {
+            int begin = position++;
+            bool closed = false;
+            while (position < text.Length)
+            {
+                char next = text[position++];
+                if (next == '\\')
+                {
+                    if (position == text.Length)
+                    {
+                        break;
+                    }
+
+                    ++position;
+                }
+                else if (next == '"')
+                {
+                    closed = true;
+                    break;
+                }
+            }
+
+            if (!closed)
+            {
+                throw new MetadataException($"{symbol}: unterminated specifier value");
+            }
+
+            try
+            {
+                return JsonSerializer.Deserialize<string>(text[begin..position]) ?? throw new MetadataException($"{symbol}: invalid specifier text");
+            }
+            catch (JsonException)
+            {
+                throw new MetadataException($"{symbol}: specifier escape must use JSON string spelling");
+            }
+        }
     }
 }

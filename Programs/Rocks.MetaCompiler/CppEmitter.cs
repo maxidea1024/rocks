@@ -135,12 +135,29 @@ internal static class CppEmitter
         Line($"#include <{include}>");
         Line("#include <Meta/GeneratedType.h>");
         Line("#include <Object/GeneratedFieldAccess.h>");
+        if (schema.Ordered.Any(type => type.Header == include && type.NativeMembers.Count != 0))
+        {
+            Line("#include <Object/NativeMemberTraits.h>");
+        }
+
         Line("namespace rocks {");
         foreach (ClassModel type in schema.Ordered.Where(type => type.Header == include))
         {
             string native = "::" + type.Name;
             string? baseId = type.Base == "rocks::Object" ? null : schema.Find(type.Base).Id;
             Line($"template <> struct GeneratedType<{native}> {{");
+            // ROCKS_NATIVE 멤버는 스키마에 넣지 않는다. MetaCompiler의 AST 재귀 검사(RMC2205·2206)를 직접 타입에
+            // 대해 컴파일러가 한 번 더 확인한다(GeneratedType은 GENERATED_BODY로 private 멤버에도 접근한다).
+            foreach (string member in type.NativeMembers)
+            {
+                string memberType = $"decltype({native}::{member})";
+                Line($"static_assert(!IsNativeStrongReference<{memberType}>, \"ROCKS_NATIVE member {type.Name}::{member} must not hold a strong object reference (RMC2205)\");");
+                if (!type.WorldOnly)
+                {
+                    Line($"static_assert(!RequiresWorldOnlyOwner<{memberType}>, \"ROCKS_NATIVE member {type.Name}::{member} requires a WorldOnly owner (RMC2206)\");");
+                }
+            }
+
             Line($"static constexpr TypeId Id() noexcept {{ return {GuidValue(type.Id)}; }}");
             Line("static const TypeSchema& Schema() noexcept {");
             if (type.Fields.Count != 0)
@@ -150,14 +167,14 @@ internal static class CppEmitter
                 {
                     string? targetId = field.IsReference ? field.ReferenceId : null;
                     string kind = field.IsReference ? "ObjectReference" : "Value";
-                    Line($"{{{GuidValue(field.Id)}, FieldKind::{kind}, {field.Flags}u, {View(field.Name)}, {{}}, ValueKind::{field.Kind}, {GuidValue(targetId)}, {View(field.Spec.Category)}, {View(field.Spec.DisplayName)}}},");
+                    Line($"{{{GuidValue(field.Id)}, FieldKind::{kind}, {field.Flags}u, {View(field.Name)}, {{}}, ValueKind::{field.Kind}, {GuidValue(targetId)}, {View(field.Spec.Category)}, {View(field.Spec.DisplayName)}, {View(field.Spec.ToolName)}}},");
                 }
 
                 Line("};");
             }
 
             string fieldSpan = type.Fields.Count == 0 ? "Span<const FieldSchema>{}" : $"Span<const FieldSchema>(fields, {type.Fields.Count})";
-            Line($"static const TypeSchema schema{{Id(), {type.Version}, {fieldSpan}, {View(type.Name)}, {GuidValue(baseId)}, {(type.Abstract ? "1u" : "0u")}}};");
+            Line($"static const TypeSchema schema{{Id(), {type.Version}, {fieldSpan}, {View(type.Name)}, {GuidValue(baseId)}, {type.Flags}u}};");
             Line("return schema;");
             Line("}");
             Line("static RuntimeTypeOps Ops(ModuleLease module = {}) noexcept {");

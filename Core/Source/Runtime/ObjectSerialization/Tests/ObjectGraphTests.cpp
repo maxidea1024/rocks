@@ -65,10 +65,20 @@ RuntimeFieldOps FieldOps(Guid id) noexcept {
         }};
 }
 
+// 필드 이름은 타입 안에서 유일해야 한다(TypeRegistry가 도구 이름의 대소문자 무시 유일성을
+// 검사한다).
 FieldSchema SchemaField(Guid id, ValueKind kind) noexcept {
+    static constexpr const char* Names[] = {"number", "text",   "left",  "right",  "small",
+                                            "key",    "signed", "float", "double", "flag"};
     FieldSchema field;
     field.id = id;
-    field.name = {"testField", 9};
+    const char* name = id.high == 1 && id.low >= 1 && id.low <= 10 ? Names[id.low - 1] : "extra";
+    usize size = 0;
+    while (name[size] != '\0') {
+        ++size;
+    }
+
+    field.name = {name, size};
     field.valueKind = kind;
     if (kind == ValueKind::ObjectReference) {
         field.kind = FieldKind::ObjectReference;
