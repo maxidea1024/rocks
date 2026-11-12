@@ -488,6 +488,52 @@ public:
         return {};
     }
 
+    FileStatus SyncDirectory(const char* path, usize bytes) noexcept override {
+        NativePath native;
+        auto valid = native.Initialize(path, bytes);
+        if (!valid) {
+            return valid;
+        }
+        // 파일에 대한 O_DIRECTORY는 ENOTDIR(NotFound로 해석된다)이므로 종류를 먼저 본다(link는
+        // 따라간다).
+        struct stat state{};
+        if (stat(native.Value(), &state) != 0) {
+            const int error = errno;
+            // "file/"은 POSIX에서 ENOTDIR이다. 끝 구분자를 뗀 경로가 디렉터리가 아닌 항목이면
+            // Windows(ERROR_DIRECTORY)와 같이 WrongType이다. 중간 구성 요소가 파일인 "file/x"는
+            // NotFound 그대로다.
+            if (error == ENOTDIR && bytes > 1 && path[bytes - 1] == '/') {
+                usize trimmed = bytes;
+                while (trimmed > 1 && path[trimmed - 1] == '/') {
+                    --trimmed;
+                }
+                NativePath stripped;
+                struct stat self{};
+                if (stripped.Initialize(path, trimmed) && stat(stripped.Value(), &self) == 0 &&
+                    !S_ISDIR(self.st_mode)) {
+                    return {FileCode::WrongType, 0};
+                }
+            }
+            return NativeError(error);
+        }
+        if (!S_ISDIR(state.st_mode)) {
+            return {FileCode::WrongType, 0};
+        }
+        const int directory = open(native.Value(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+        if (directory < 0) {
+            return NativeError(errno);
+        }
+        const int synced = SyncDescriptor(directory);
+        const int error = errno;
+        close(directory);
+        // 디렉터리 동기화를 지원하지 않는 FS(EINVAL·ENOTSUP)는 그 FS가 주는 보장이 전부다(Replace와
+        // 같다). 그 밖의 실패는 항목 변경이 이미 보이므로 NotDurable로 알린다.
+        if (synced != 0 && error != EINVAL && error != ENOTSUP) {
+            return {FileCode::NotDurable, static_cast<uint32>(error)};
+        }
+        return {};
+    }
+
     FileStatus SetModifiedTime(const char* path, usize bytes,
                                int64 modifiedTicks) noexcept override {
         // FileInfo tick(0001-01-01부터 100ns)을 Unix 시각으로 바꾼다(1970-01-01까지 719162일).

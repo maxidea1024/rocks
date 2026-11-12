@@ -499,6 +499,7 @@ TEST(FileSystem_WrapperDefaultsAreUnsupported) {
     CHECK(minimal.EnumerateDirectory("x", 1, Collect, nullptr).code == FileCode::Unsupported);
     CHECK(minimal.Move("x", 1, "y", 1, false).code == FileCode::Unsupported);
     CHECK(minimal.Copy("x", 1, "y", 1, false).code == FileCode::Unsupported);
+    CHECK(minimal.SyncDirectory("x", 1).code == FileCode::Unsupported);
     CHECK(MakeDirectoryTree(minimal, "x/y", 3).code == FileCode::Unsupported);
     CHECK(DeleteDirectoryTree(minimal, "x", 1).code == FileCode::Unsupported);
 }

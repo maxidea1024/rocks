@@ -504,12 +504,40 @@ public:
         info->Flags = FILE_RENAME_FLAG_REPLACE_IF_EXISTS | FILE_RENAME_FLAG_POSIX_SEMANTICS;
         info->RootDirectory = nullptr;
         info->FileNameLength = written * sizeof(wchar_t);
+        // 이름 변경을 매체에 남기려면 대상의 부모 디렉터리를 flush해야 한다. 그 디렉터리는 rename
+        // 전에 연다: 열기 실패를 교체 뒤에 알리면 호출자가 이전 내용이 남았다고 오판한다(POSIX와
+        // 같다). 부모는 전체 경로의 마지막 구분자까지다(끝 구분자를 남겨 "C:\"·UNC share 루트도
+        // 연다).
+        usize cut = written;
+        while (cut > 0 && info->FileName[cut - 1] != L'\\' && info->FileName[cut - 1] != L'/') {
+            --cut;
+        }
+        if (cut == 0) {
+            AlignedFree(info);
+            return {FileCode::InvalidArgument, 0};
+        }
+        auto* parent =
+            static_cast<wchar_t*>(AlignedAllocate((cut + 1) * sizeof(wchar_t), alignof(wchar_t)));
+        if (parent == nullptr) {
+            AlignedFree(info);
+            return {FileCode::OutOfMemory, 0};
+        }
+        platform::MemoryCopy(parent, info->FileName, cut * sizeof(wchar_t));
+        parent[cut] = L'\0';
+        HANDLE directory = OpenDirectoryForFlush(parent);
+        AlignedFree(parent);
+        if (directory == INVALID_HANDLE_VALUE) {
+            const DWORD error = GetLastError();
+            AlignedFree(info);
+            return ReplaceError(error);
+        }
         // OPEN_REPARSE_POINT: 검사 뒤 원본이 link로 바뀌어도 link를 따라가지 않는다.
         HANDLE file = CreateFileW(source.Value(), DELETE | SYNCHRONIZE,
                                   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                                   OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
         if (file == INVALID_HANDLE_VALUE) {
             const DWORD error = GetLastError();
+            CloseHandle(directory);
             AlignedFree(info);
             return ReplaceError(error);
         }
@@ -518,20 +546,23 @@ public:
         const DWORD renameError = renamed ? ERROR_SUCCESS : GetLastError();
         CloseHandle(file);
         AlignedFree(info);
-        if (renamed) {
-            return {};
-        }
-        if (renameError != ERROR_INVALID_PARAMETER && renameError != ERROR_NOT_SUPPORTED &&
-            renameError != ERROR_INVALID_FUNCTION) {
+        if (!renamed && renameError != ERROR_INVALID_PARAMETER &&
+            renameError != ERROR_NOT_SUPPORTED && renameError != ERROR_INVALID_FUNCTION) {
+            CloseHandle(directory);
             return ReplaceError(renameError);
         }
         // POSIX 의미 rename을 지원하지 않는 볼륨(FAT·일부 네트워크 FS)이다. 일반 rename은 대상이
         // 있으면 원자적으로 바꾸고, 실패하면 대상을 건드리지 않는다. ReplaceFileW는 이전 대상의
         // 속성·스트림을 합치고 일부 실패에서 대상을 지운 채 남기므로 쓰지 않는다.
-        if (MoveFileExW(source.Value(), target.Value(), MOVEFILE_REPLACE_EXISTING)) {
-            return {};
+        if (!renamed && !MoveFileExW(source.Value(), target.Value(), MOVEFILE_REPLACE_EXISTING)) {
+            const DWORD error = GetLastError();
+            CloseHandle(directory);
+            return ReplaceError(error);
         }
-        return ReplaceError(GetLastError());
+        // 교체는 이미 보인다. flush만 실패하면 되돌리지 않고 NotDurable로 알린다.
+        const FileStatus flushed = FlushDirectoryHandle(directory);
+        CloseHandle(directory);
+        return flushed;
     }
 
     // Replace 실패 코드다. 공유 위반은 다른 프로세스가 원본·대상을 공유 없이 연 경우(Busy)이고,
@@ -541,6 +572,29 @@ public:
             return {FileCode::Busy, error};
         }
         return NativeError(error);
+    }
+
+    // 디렉터리 항목 변경을 매체에 내리기 위해 디렉터리를 연다(link는 따라간다). FlushFileBuffers는
+    // 쓰기 권한이 있는 handle을 요구하므로 FILE_ADD_FILE(항목을 만들 권한)로 연다. 관리자 권한은
+    // 필요 없다.
+    static HANDLE OpenDirectoryForFlush(const wchar_t* path) noexcept {
+        return CreateFileW(path, FILE_ADD_FILE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                           OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    }
+
+    // 연 디렉터리의 항목 변경을 매체에 내린다. 디렉터리 flush를 지원하지 않는 FS
+    // (ERROR_INVALID_FUNCTION·ERROR_NOT_SUPPORTED)는 그 FS가 주는 보장이 전부라 성공이다(POSIX의
+    // EINVAL·ENOTSUP과 같다). 그 밖의 실패는 변경이 이미 보이므로 NotDurable이다.
+    static FileStatus FlushDirectoryHandle(HANDLE directory) noexcept {
+        if (FlushFileBuffers(directory)) {
+            return {};
+        }
+        const DWORD error = GetLastError();
+        if (error == ERROR_INVALID_FUNCTION || error == ERROR_NOT_SUPPORTED) {
+            return {};
+        }
+        return {FileCode::NotDurable, error};
     }
 
     FileStatus SetModifiedTime(const char* path, usize bytes,
@@ -569,6 +623,40 @@ public:
         const DWORD error = set ? ERROR_SUCCESS : GetLastError();
         CloseHandle(file);
         return set ? FileStatus{} : NativeError(error);
+    }
+
+    FileStatus SyncDirectory(const char* path, usize bytes) noexcept override {
+        // 종류를 먼저 읽기 권한으로 확인한 뒤(파일을 쓰기 권한으로 열지 않는다) 디렉터리를 항목
+        // 추가 권한으로 열어 flush한다. link는 따라간다(다른 volume의 디렉터리여도 그 volume에
+        // 내린다).
+        WidePath native;
+        auto valid = native.Initialize(path, bytes);
+        if (!valid) {
+            return valid;
+        }
+        HANDLE handle = CreateFileW(native.Value(), FILE_READ_ATTRIBUTES,
+                                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                                    OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+        if (handle == INVALID_HANDLE_VALUE) {
+            return NativeError(GetLastError());
+        }
+        BY_HANDLE_FILE_INFORMATION data{};
+        const BOOL queried = GetFileInformationByHandle(handle, &data);
+        const DWORD error = queried ? ERROR_SUCCESS : GetLastError();
+        CloseHandle(handle);
+        if (!queried) {
+            return NativeError(error);
+        }
+        if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
+            return {FileCode::WrongType, 0};
+        }
+        HANDLE directory = OpenDirectoryForFlush(native.Value());
+        if (directory == INVALID_HANDLE_VALUE) {
+            return NativeError(GetLastError());
+        }
+        const FileStatus flushed = FlushDirectoryHandle(directory);
+        CloseHandle(directory);
+        return flushed;
     }
 
     FileStatus Copy(const char* from, usize fromBytes, const char* to, usize toBytes,

@@ -182,6 +182,67 @@ TEST(FileDurability_SetModifiedTimeIsVisibleThroughStat) {
     // 1601-01-01 직후는 파일 시스템 해상도에 따라 반올림될 수 있으므로 읽기 결과는 보지 않는다.
 }
 
+TEST(FileDurability_SyncDirectoryAcceptsDirectoriesOnly) {
+    Scratch scratch;
+    REQUIRE(scratch.Make("sync"));
+    // 게시 순서: 패키지 파일을 Replace로 게시하고 그 디렉터리를 동기화한 뒤 manifest를 게시한다.
+    char packages[256];
+    scratch.Child("Packages", packages, sizeof(packages));
+    REQUIRE(PhysicalFileSystem().MakeDirectory(packages, strlen(packages)));
+    char temp[300];
+    char package[300];
+    snprintf(temp, sizeof(temp), "%s/a.rpak.tmp", packages);
+    snprintf(package, sizeof(package), "%s/a.rpak", packages);
+    REQUIRE(WriteFile(temp, "package"));
+    REQUIRE(PhysicalFileSystem().Replace(temp, strlen(temp), package, strlen(package)));
+    CHECK(PhysicalFileSystem().SyncDirectory(packages, strlen(packages)));
+    CHECK(PhysicalFileSystem().SyncDirectory(scratch.path, scratch.length));
+    // 끝 구분자도 디렉터리로 해석한다.
+    char trailing[260];
+    snprintf(trailing, sizeof(trailing), "%s/", packages);
+    CHECK(PhysicalFileSystem().SyncDirectory(trailing, strlen(trailing)));
+    // 현재 디렉터리(상대 경로 ".")도 된다.
+    CHECK(PhysicalFileSystem().SyncDirectory(".", 1));
+
+    // 파일은 끝 구분자가 있어도 WrongType(두 플랫폼 같은 결과), 중간 구성 요소가 파일이거나 없는
+    // 경로는 NotFound, 빈·잘못된 경로는 InvalidArgument다.
+    CHECK(PhysicalFileSystem().SyncDirectory(package, strlen(package)).code == FileCode::WrongType);
+    char packageSlash[310];
+    snprintf(packageSlash, sizeof(packageSlash), "%s/", package);
+    CHECK(PhysicalFileSystem().SyncDirectory(packageSlash, strlen(packageSlash)).code ==
+          FileCode::WrongType);
+    char throughFile[310];
+    snprintf(throughFile, sizeof(throughFile), "%s/inner", package);
+    CHECK(PhysicalFileSystem().SyncDirectory(throughFile, strlen(throughFile)).code ==
+          FileCode::NotFound);
+    char missing[300];
+    snprintf(missing, sizeof(missing), "%s/missing", packages);
+    CHECK(PhysicalFileSystem().SyncDirectory(missing, strlen(missing)).code == FileCode::NotFound);
+    CHECK(PhysicalFileSystem().SyncDirectory("", 0).code == FileCode::InvalidArgument);
+    const char embedded[] = {'a', '\0', 'b'};
+    CHECK(PhysicalFileSystem().SyncDirectory(embedded, sizeof(embedded)).code ==
+          FileCode::InvalidArgument);
+
+    // 디렉터리 link는 대상 디렉터리를 동기화하고, 파일 link는 WrongType이다.
+    char directoryLink[300];
+    snprintf(directoryLink, sizeof(directoryLink), "%s/packages-link", scratch.path);
+    const test::FileLinkResult directoryCreated =
+        test::CreateDirectoryLink(directoryLink, "Packages");
+    if (directoryCreated != test::FileLinkResult::Unavailable) {
+        REQUIRE(directoryCreated == test::FileLinkResult::Created);
+        CHECK(PhysicalFileSystem().SyncDirectory(directoryLink, strlen(directoryLink)));
+    }
+
+    char fileLink[300];
+    snprintf(fileLink, sizeof(fileLink), "%s/file-link", packages);
+    const test::FileLinkResult fileCreated = test::CreateFileLink(fileLink, "a.rpak");
+    if (fileCreated != test::FileLinkResult::Unavailable) {
+        REQUIRE(fileCreated == test::FileLinkResult::Created);
+        CHECK(PhysicalFileSystem().SyncDirectory(fileLink, strlen(fileLink)).code ==
+              FileCode::WrongType);
+    }
+}
+
 TEST(FileDurability_FileLockIsExclusiveUntilReleased) {
     Scratch scratch;
     REQUIRE(scratch.Make("lock"));

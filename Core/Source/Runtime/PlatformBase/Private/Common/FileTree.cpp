@@ -40,6 +40,10 @@ FileStatus FileSystem::SetModifiedTime(const char*, usize, int64) noexcept {
     return {FileCode::Unsupported, 0};
 }
 
+FileStatus FileSystem::SyncDirectory(const char*, usize) noexcept {
+    return {FileCode::Unsupported, 0};
+}
+
 FileStatus FileSystem::Copy(const char*, usize, const char*, usize, bool) noexcept {
     return {FileCode::Unsupported, 0};
 }

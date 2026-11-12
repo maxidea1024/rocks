@@ -8,7 +8,7 @@
 
 | 단계 | 내용 | 완료 기준 |
 |---|---|---|
-| A0-P | PlatformBase: `DirectoryWatcher`, `File::Flush`, `FileSystem::Replace`, `FileLock`, `SetModifiedTime`, Windows 긴 경로(구현됨), `FileSystem::SyncDirectory`(쿠킹 게시용 디렉터리 동기화 — POSIX fsync, Windows는 NTFS·ReFS 메타데이터 로그 순서에 기대는 성공, 추가 예정), `RunWithDeterministicFloatingPoint`(쿠킹 결정성용 부동소수점 환경 확인·실행·복원, 구현됨 — CoreDataFoundations 2.1절) | 기능별 시험(Windows 실행·Android 빌드, macOS 미검증 명시) |
+| A0-P | PlatformBase: `DirectoryWatcher`, `File::Flush`, `FileSystem::Replace`, `FileLock`, `SetModifiedTime`, Windows 긴 경로(구현됨), `FileSystem::SyncDirectory`(쿠킹 게시용 디렉터리 동기화 — POSIX fsync(macOS F_FULLFSYNC), Windows는 항목 추가 권한(FILE_ADD_FILE, 관리자 불필요)으로 연 디렉터리 FlushFileBuffers, 동기화 실패는 NotDurable, wrapper 기본 Unsupported, 구현됨. `Replace`도 Windows에서 부모 디렉터리를 같은 방식으로 flush한다), `RunWithDeterministicFloatingPoint`(쿠킹 결정성용 부동소수점 환경 확인·실행·복원, 구현됨 — CoreDataFoundations 2.1절) | 기능별 시험(Windows 실행·Android 빌드, macOS 미검증 명시) |
 | A0-C | Core: SHA-256(구현됨), Unicode(착수 시 최신 버전 — 2026-11 기준 18.0.0. NFC·NFD·simple case folding·General_Category, UCD 생성기), Default_Ignorable, 결정적 수학(기본 연산만 쓰는 exp2·log2·pow·SinPi·sin, 정확한 8비트 sRGB 표, 부동소수점 환경 guard), CRT 없는 숫자 변환(정확한 파서·최단 표기), JSON 읽기·쓰기(RFC 8259), `RecordList`(`WireType::RecordList`), 데이터 전용 ThirdParty 종류(C1) — 상세와 단계(C1–C6)는 [CoreDataFoundations](CoreDataFoundations.ko.md) | NIST·NormalizationTest·CaseFolding·JSONTestSuite·숫자 변환 대조·결정적 수학 기준값·RecordList 시험 |
 | A0-B | 빌드·MetaCompiler(5.6절): 모듈 소유 메타데이터·모듈별 identity 명세·단위 간 import, `ROCKS_ENUM`, `ROCKS_STRUCT`(값 구조체), 배열 필드(`Array<T>`·`ObjectRefArray<T>`), `SoftObjectRef<T>` 필드, `EditorOnly`·`Required`·`Version=N`·`Name="…"` 지정자, `Sha256Digest` 값 종류, `ROCKS_CLASS(WorldOnly)`(그 밖 클래스의 `AssetLease` 멤버 거부), `AssetId` 값 종류, `ROCKS_NATIVE` 비영속 멤버, 툴체인 지문·도구 빌드 ID 주입 | 기존 시험 + 새 fixture |
 | A0-O | ObjectRuntime·ObjectSerialization: Outer·Name, `Discard`(`RequestDestroy` + Outer·Name 표에서 즉시 제거, 메모리는 GC), 패키지 사이 간선 관찰자 `ReferenceObserver`(큐 전달), Registry 정책(패키지 없는 객체·WorldOnly 타입 거부), 다중 root `Commit`, graph v2(호출자가 준 저장 집합·순서 = localId, 집합 밖 참조는 외부 참조 resolver 또는 거부, 참조 값 표기(5.1절), 노드 타입은 export 표 기준, EditorOnly 제외, `prepare` hook(로드)·저장 쪽 값 치환 hook(bulkId 재매핑 등), Commit 때 패키지 사이 간선 다중도 보고, 외부 참조 목록), 한도(객체 4096 = export 상한, 외부 참조 65536, 필드 누계 1,048,576, 배열 원소 누계 4,194,304, 문자열 4 KiB, 그래프 바이트 64 MiB, 작업량 8 × (필드 + 원소)) | 그래프 왕복·외부 참조·마이그레이션·Discard·관찰자 시험 |
@@ -302,7 +302,7 @@ World 객체는 에셋 객체 Registry 밖에 있어 `ObjectRef<에셋>`을 걸 
 - 출력: 쿠킹 루트 `<Project>/Saved/Cooked/<Profile>/` 아래 `CookedManifest.rman`과 `Packages/`. 패키지 파일 이름은 내용 주소(4.2절)라 게시된 파일을 덮어쓰지 않는다.
 - 게시:
   1. 각 패키지를 `.staging/`에 기록·Flush한 뒤 `Move(no-replace)`로 `Packages/<a>/`에 놓는다. 같은 이름이 이미 있으면 크기·SHA-256을 확인해 같으면 임시 파일만 지우고, 다르면(손상) `CorruptEntry` 경고 후 `Replace`로 바꾼다.
-  2. 바뀐 `Packages/<a>/`와 `Packages/`를 `FileSystem::SyncDirectory`(A0-P 추가)로 동기화한다 — 매니페스트보다 패키지 이름이 먼저 매체에 남아야 한다. POSIX는 디렉터리 fsync(macOS `F_FULLFSYNC`)다. Windows는 일반 권한으로 디렉터리를 동기화할 수 없으므로 물리 파일 시스템 구현이 아무것도 하지 않고 성공한다(`Replace`가 Windows에서 디렉터리 동기화 없이 성공하는 것과 같은 근거: NTFS·ReFS는 메타데이터 변경을 로그에 순서대로 기록하므로 패키지 이름 변경이 매니페스트 교체보다 먼저 남는다). FAT·exFAT 같은 비로그 볼륨에서는 전원 차단 시 순서를 보장하지 않으며 `Platform/File.h`에 적는다. `Unsupported`(wrapper 기본 구현)는 오류다.
+  2. 바뀐 `Packages/<a>/`와 `Packages/`, 그리고 이번 게시에서 새로 만든 상위 디렉터리(첫 쿠킹이면 쿠킹 루트 — 그 안의 `Packages` 항목)를 안쪽부터 `FileSystem::SyncDirectory`(A0-P)로 동기화한다 — 매니페스트보다 패키지 이름이 먼저 매체에 남아야 한다. POSIX는 디렉터리 fsync(macOS `F_FULLFSYNC`), Windows는 항목 추가 권한으로 연 디렉터리의 `FlushFileBuffers`다(관리자 권한 불필요. 로그 순서에 기대지 않으므로 `Packages`가 다른 volume을 가리키는 link여도 순서가 지켜진다). 디렉터리 동기화를 지원하지 않는 FS는 그 FS의 보장이 전부라 성공이다. `NotDurable`은 게시를 멈추고(매니페스트를 바꾸지 않는다) 오류로 보고한다. `Unsupported`(wrapper 기본 구현)도 오류다.
   3. 매니페스트를 임시 파일에 써서 Flush하고 `Replace`로 한 번에 바꾼다(POSIX는 쿠킹 루트도 동기화된다).
   매니페스트 교체가 유일한 전환점이므로 reader는 이전 매니페스트(이전 파일이 모두 있음) 또는 새 매니페스트(새 파일이 모두 있음)만 본다. 실패하면 매니페스트는 그대로이고 놓인 새 파일은 다음 전체 쿠킹이 지운다.
 - 전체 쿠킹(`asset-cook --profile=X`)은 매니페스트를 바꾼 뒤 새 매니페스트가 가리키지 않는 패키지 파일을 지운다(이전 매니페스트로 이미 실행 중인 게임은 그 파일을 `NotFound`로 받는다 — 개발용 쿠킹 디렉터리의 한계이며 배포본은 바뀌지 않는다). 부분 쿠킹은 대상만 다시 만들고 기존 매니페스트에 병합하며 패키지 파일은 지우지 않는다(사라진 에셋의 매니페스트 항목만 뺀다). 병합은 기존 매니페스트의 프로파일 id·프로파일 출력 설정 SHA-256·CookSettings SHA-256·쿠커 버전이 모두 같을 때만 하고, 다르면 `IncompatibleCook`(전체 쿠킹 필요)이다. 처리기·포맷·타입 스키마·툴체인 변화는 항목별 cookKey가 잡는다(위 지역 입력).
@@ -601,7 +601,7 @@ cache-gc --max-bytes=<n> --unused-days=<n>
 14. 저장 실패 주입 시 기존 보존, 열린 대상 교체, 잠금 Busy, ExternalModification
 15. 경로 정책: NFC/NFD 같은 이름, 대소문자 중복, 예약 이름, 길이, CaseCollision
 16. 소프트 참조 비자동 로드, 요청 합류·개별 취소, OnReady 중복 AlreadyRegistered, scope Revoke·ScopeClosed, 의존 retention, lease 해제 후 회수
-17. PlatformBase A0-P: DirectoryWatcher 8건·파일 내구성 8건 Windows 통과(깊은 작업 디렉터리 포함), Android 빌드, macOS 미검증. SyncDirectory는 추가하면서 시험
+17. PlatformBase A0-P: DirectoryWatcher 8건·파일 내구성 8건 Windows 통과(깊은 작업 디렉터리 포함), Android 빌드, macOS 미검증. SyncDirectory 시험(디렉터리·끝 구분자·현재 디렉터리·디렉터리 link 성공, 파일·끝 구분자 붙인 파일·파일 link WrongType, 없는 경로·파일을 지나는 경로 NotFound, 잘못된 경로 InvalidArgument, wrapper 기본 Unsupported) Windows 통과
 18. PNG 적합성: PngSuite 대조
 19. UnsupportedSetting(계약 설정 값), NeverCookReferenced, LossySource 거부
 20. 다중 출력: 시험 전용 임포터(원본 하나 → 출력 둘)로 출력 대응 유지·사라진 출력 OrphanedOutput 표시·명시 삭제

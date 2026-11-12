@@ -27,7 +27,8 @@ enum class FileCode {
     // 파일 연산을 디렉터리에, 디렉터리 연산을 파일에 적용했다.
     WrongType,
     // 연산 결과는 이미 보이지만 저장 매체 기록을 확인하지 못했다(FileSystem::Replace 뒤 부모
-    // 디렉터리 동기화 실패). 전원이 끊기면 연산 전 상태로 돌아갈 수 있다. 되돌리지 않는다.
+    // 디렉터리 동기화 실패, FileSystem::SyncDirectory의 동기화 실패). 전원이 끊기면 연산 전 상태로
+    // 돌아갈 수 있다. 되돌리지 않는다.
     NotDurable
 };
 
@@ -179,16 +180,18 @@ public:
     // - Windows: POSIX 의미 rename(FileRenameInfoEx, REPLACE_IF_EXISTS | POSIX_SEMANTICS)으로 to를
     //   다른 프로세스가 FILE_SHARE_DELETE로 열어 두었어도 교체한다. 이 의미를 지원하지 않는 볼륨
     //   (FAT·일부 네트워크 FS)은 MoveFileExW(REPLACE_EXISTING)로 대신하며, 그 볼륨에서는 다른
-    //   프로세스가 연 to를 교체할 수 없다(Busy 또는 AccessDenied). 이름 변경의 매체 기록은 NTFS
-    //   메타데이터 로그에 맡긴다: 전원이 끊겨도 이전 이름 또는 새 이름 중 하나로 남지만, 반환 직후
-    //   끊기면 이전 상태일 수 있다(Windows는 일반 권한으로 디렉터리를 동기화할 수 없다).
+    //   프로세스가 연 to를 교체할 수 없다(Busy 또는 AccessDenied). 이름 변경 뒤 to의 부모
+    //   디렉터리를 항목 추가 권한으로 열어 FlushFileBuffers해 매체에 남긴다.
     // - POSIX: rename 후 to의 부모 디렉터리를 fsync(macOS는 F_FULLFSYNC)해 이름 변경을 매체에
-    //   남긴다. 그 동기화만 실패하면 NotDurable이다(교체는 이미 보인다).
-    // 실패: from이 일반 파일이 아니면(디렉터리·link·장치) WrongType, to가 디렉터리·link면
-    // WrongType(link를 따라 교체하지 않는다), to가 읽기 전용이거나 권한이 없으면 AccessDenied,
-    // from·to를 다른 프로세스가 공유 없이 열어 두었으면 Busy, 다른 volume은 Unsupported, from이나
-    // to의 부모가 없으면 NotFound. NotDurable 밖의 실패에서는 to가 바뀌지 않는다(OS 보장 범위
-    // 안에서). 검사와 교체 사이에 다른 프로세스가 경로를 바꾸면 결과는 OS 규칙을 따른다.
+    //   남긴다.
+    // 부모 디렉터리는 교체 전에 연다(열 수 없으면 교체하지 않고 그 오류다). 교체 뒤 동기화만
+    // 실패하면 NotDurable이다(교체는 이미 보인다). 디렉터리 동기화를 지원하지 않는 FS는
+    // SyncDirectory와 같이 성공이다. 실패: from이 일반 파일이 아니면(디렉터리·link·장치) WrongType,
+    // to가 디렉터리·link면 WrongType(link를 따라 교체하지 않는다), to가 읽기 전용이거나 권한이
+    // 없으면 AccessDenied, from·to를 다른 프로세스가 공유 없이 열어 두었으면 Busy, 다른 volume은
+    // Unsupported, from이나 to의 부모가 없으면 NotFound. NotDurable 밖의 실패에서는 to가 바뀌지
+    // 않는다(OS 보장 범위 안에서). 검사와 교체 사이에 다른 프로세스가 경로를 바꾸면 결과는 OS
+    // 규칙을 따른다.
     virtual FileStatus Replace(const char* from, usize fromBytes, const char* to,
                                usize toBytes) noexcept;
     // 파일의 수정 시각을 modifiedTicks(FileTicksPerSecond 단위, 0001-01-01 UTC 기준)로 바꾼다(캐시
@@ -197,6 +200,23 @@ public:
     // InvalidArgument다.
     virtual FileStatus SetModifiedTime(const char* path, usize pathBytes,
                                        int64 modifiedTicks) noexcept;
+    // 디렉터리 항목 변경(그 안에서 만든·지운·이름을 바꾼 파일)을 저장 매체에 남긴다. 여러 파일을
+    // 게시하는 쪽이 순서를 보장할 때 쓴다: 예를 들어 패키지 파일들을 Replace로 게시한 뒤 그
+    // 디렉터리를 SyncDirectory하고 나서야 그것을 가리키는 manifest를 Replace하면, 전원이 끊겨도
+    // manifest가 없는 패키지를 가리키지 않는다. link는 따라간 대상 디렉터리를 동기화한다.
+    //   auto synced = system.SyncDirectory("Cooked/Packages", 15);
+    //   if (!synced) { ... }   // manifest를 게시하지 않는다
+    // - POSIX: 디렉터리를 읽기 권한으로 열어 fsync한다(macOS는 F_FULLFSYNC, 지원하지 않는 FS면
+    //   fsync).
+    // - Windows: 디렉터리를 항목 추가 권한(FILE_ADD_FILE, 관리자 권한 불필요)으로 열어
+    //   FlushFileBuffers한다. 그래서 그 디렉터리에 파일을 만들 권한이 있어야 한다.
+    // 두 플랫폼 모두 디렉터리 동기화를 지원하지 않는 FS(POSIX EINVAL·ENOTSUP, Windows
+    // ERROR_INVALID_FUNCTION·ERROR_NOT_SUPPORTED)는 그 FS가 주는 보장이 전부라 성공이다.
+    // 실패: 없으면 NotFound, 디렉터리가 아니면(끝 구분자를 붙인 파일 경로 포함) WrongType, 권한이
+    // 없으면 AccessDenied, 동기화 자체가 실패하면 NotDurable(항목 변경은 이미 보이지만 매체 기록을
+    // 확인하지 못했다)이다. 기본 구현은 Unsupported이며 이것은 성공이 아니다(wrapper는 하위 파일
+    // 시스템으로 전달해야 한다).
+    virtual FileStatus SyncDirectory(const char* path, usize pathBytes) noexcept;
 };
 
 // FileSystem 기본 연산 위의 공용 helper다.
