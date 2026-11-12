@@ -79,6 +79,9 @@ public static class PolicyChecks
         "\\bROCKS_(?:DISABLE|ENABLE)_OPTIMIZATION\\b|#\\s*pragma\\s+(?:clang\\s+)?optimize\\b|_Pragma\\s*\\(\\s*\"(?:clang\\s+)?optimize\\b" +
         "|\\[\\[\\s*clang\\s*::\\s*optnone\\s*\\]\\]|__attribute__\\s*\\(\\(\\s*optnone\\b");
     private static readonly Regex NeverOptimizedRule = Pattern("\\bCodeOptimization\\s*\\.\\s*Never\\b");
+    // 강제 인라인은 쓰지 않는다(인라인 판단은 Clang 최적화·ThinLTO에 맡긴다).
+    private static readonly Regex ForcedInline = Pattern(
+        "__attribute__\\s*\\(\\(\\s*(?:__)?always_inline|\\[\\[\\s*(?:clang|gnu)\\s*::\\s*always_inline|__forceinline\\b");
     private const string OptimizationMacroHeader = "Core/Source/Runtime/Base/Public/Base/Compiler.h";
 
     /// <summary>
@@ -88,6 +91,8 @@ public static class PolicyChecks
     /// <item>C++: ROCKS_DISABLE_OPTIMIZATION, #pragma (clang) optimize, optnone 속성. 매크로를 정의하는
     /// Base/Compiler.h와 테스트 소스는 예외다.</item>
     /// <item>모듈 규칙(*.Build.cs): CodeOptimization.Never. Always는 의도한 성능 설정이므로 허용한다.</item>
+    /// <item>강제 인라인(always_inline 속성, __forceinline): 테스트를 포함한 모든 소스(규칙 rule id
+    /// forced-inline). 인라인 판단은 Clang 최적화와 ThinLTO에 맡긴다.</item>
     /// </list>
     /// </summary>
     public static IReadOnlyList<CheckFailure> OptimizationOverrides(string root)
@@ -96,7 +101,11 @@ public static class PolicyChecks
         foreach (string path in NativeSources(root, OwnedSourceRoots))
         {
             string relative = Relative(root, path);
-            if (relative == OptimizationMacroHeader || IsTestSource(relative))
+            if (relative == OptimizationMacroHeader)
+                continue;
+            ScanFile(path, relative, ForcedInline, "forced-inline",
+                "forced inlining is not used; let Clang optimization and ThinLTO decide", failures);
+            if (IsTestSource(relative))
                 continue;
             ScanFile(path, relative, OptimizationOverride, "optimization-override",
                 "temporary optimization override left in product source", failures);

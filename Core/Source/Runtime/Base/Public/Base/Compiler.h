@@ -8,8 +8,9 @@
 // 지원 환경: Clang 계열(clang·clang-cl·Apple Clang·Android NDK clang), C++23, x64 또는
 // ARM64(64-bit).
 //
-// 속성 매크로는 측정으로 필요가 확인된 경우에만 쓴다. 성능은 기본적으로 빌드 구성(최적화
-// 수준·ThinLTO·모듈 단위 최적화)으로 얻으며 함수마다 붙이지 않는다.
+// 강제 인라인(UE FORCEINLINE 대응)은 제공하지 않는다. 인라인 판단은 Clang 최적화(Development·
+// Release의 -O2, Release의 ThinLTO 모듈 간 인라인)에 맡기며, always_inline·__forceinline은 정책
+// 검사가 거부한다. 성능 문제는 측정한 뒤 알고리즘·데이터 배치·모듈 최적화 설정으로 다룬다.
 
 #if !defined(__clang__)
 #error "Rocks는 Clang 계열 컴파일러만 지원한다(clang, clang-cl, Apple Clang, NDK clang)."
@@ -60,9 +61,6 @@
 #error                                                                                             \
     "ROCKS_BUILD_DEBUG·ROCKS_BUILD_DEVELOPMENT·ROCKS_BUILD_RELEASE 중 정확히 하나가 1이어야 한다(Rocks.Build가 정의한다)."
 #endif
-
-// 항상 인라인한다. 디버그 빌드(-O0)에서도 펼친다. 측정한 hot path에만 쓴다.
-#define ROCKS_FORCEINLINE inline __attribute__((always_inline))
 
 // 인라인하지 않는다. 드문 오류 경로·큰 진단 함수를 hot path 밖으로 뺄 때 쓴다.
 #define ROCKS_NOINLINE __attribute__((noinline))

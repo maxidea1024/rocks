@@ -31,7 +31,7 @@ UE5.6 Debug·Development·Shipping에 대응한다. 구성마다 `ROCKS_BUILD_DE
 - Release는 최적화된 모듈을 ThinLTO bitcode로 컴파일한다. 도구 탐색은 archiver·linker를 compiler와 같은 폴더에서 먼저 찾으며, Windows Release는 compiler 폴더의 `llvm-lib`·`lld-link`만 받는다(MSVC `lib.exe`·`link.exe`나 다른 LLVM 설치의 도구는 빌드 전에 거부). macOS는 compiler 옆에 `llvm-ar`가 없으면 Xcode `ar`(libLTO)를 쓴다. POSIX link driver에는 `-flto=thin`을 넘긴다.
 - 모든 구성이 디버그 정보를 만든다. Release PDB는 UE Shipping처럼 배포 파일과 분리해 크래시 덤프 심볼화에 쓴다.
 - 후속: ThinLTO 캐시(`/lldltocache`·`--thinlto-cache-dir`)가 없어 Release relink는 backend를 모두 다시 생성한다. 병렬 link 수와 LTO thread 수 조정도 측정 후 정한다.
-- 함수마다 `ROCKS_FORCEINLINE`을 붙이지 않는다. 성능은 구성(최적화·ThinLTO)과 모듈 재정의로 얻고, 강제 인라인은 측정으로 필요가 확인된 hot path에만 쓴다.
+- 강제 인라인(UE `FORCEINLINE` 대응)은 쓰지 않는다. 인라인 판단은 Clang 최적화(`-O2`, Release ThinLTO의 모듈 간 인라인)에 맡기고, 정책 검사(`forced-inline`)가 제품 소스의 `always_inline`·`__forceinline`을 거부한다. 성능 문제는 측정한 뒤 알고리즘·데이터 배치·모듈 최적화 설정으로 다룬다.
 
 ### 모듈 최적화 재정의
 

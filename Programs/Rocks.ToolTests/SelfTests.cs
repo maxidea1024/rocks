@@ -81,6 +81,24 @@ internal static class SelfTests
             temporary.Write("Engine/Source/Runtime/Probe/Private/Probe.cpp", "void F();\n");
             temporary.Write("Engine/Source/Runtime/Probe/Probe.Build.cs", "protected override CodeOptimization Optimization => CodeOptimization.Never;\n");
             Verify.Equal(1, PolicyChecks.OptimizationOverrides(temporary.Root).Count, "committed Never optimization rule escaped audit");
+            temporary.Write("Engine/Source/Runtime/Probe/Probe.Build.cs", "// rules\n");
+
+            // 강제 인라인은 테스트 소스에서도 거부한다. 단어만 언급한 주석은 허용한다.
+            temporary.Write("Engine/Source/Runtime/Probe/Private/Probe.cpp", "// UE FORCEINLINE과 always_inline은 쓰지 않는다\nvoid F();\n");
+            NoFailures(PolicyChecks.OptimizationOverrides(temporary.Root));
+            foreach (string source in new[] { "inline __attribute__((always_inline)) void F();", "__attribute__ ((__always_inline__)) void F();",
+                "[[clang::always_inline]] void F();", "[[gnu::always_inline]] void F();", "__forceinline void F();" })
+            {
+                foreach (string file in new[] { "Engine/Source/Runtime/Probe/Private/Probe.cpp", "Core/Source/Runtime/Core/Tests/ProbeTests.cpp" })
+                {
+                    temporary.Write("Engine/Source/Runtime/Probe/Private/Probe.cpp", "void F();\n");
+                    temporary.Write("Core/Source/Runtime/Core/Tests/ProbeTests.cpp", "void G();\n");
+                    temporary.Write(file, source + "\n");
+                    var failures = PolicyChecks.OptimizationOverrides(temporary.Root);
+                    Verify.That(failures.Count == 1 && failures[0].ToString().Contains("forced-inline", StringComparison.Ordinal),
+                        $"forced inline escaped audit in {file}: {source}");
+                }
+            }
         });
         suite.Add("Policy.RepositoryPythonFreeMainPath", () => NoFailures(PolicyChecks.PythonFreeMainPath(options.Root)));
         suite.Add("Policy.RuntimePositiveAndNegativeControls", () =>

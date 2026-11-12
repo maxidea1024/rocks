@@ -221,8 +221,20 @@ try
     var cancellationRequest = request with { Toolchain = fakeToolchain, OutputDirectory = Path.Combine(root, "cancel"), Targets = ["Engine"], MaxParallelism = 1 };
     using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
     Task<NativeBuildResult> cancelling = builder.BuildAsync(cancellationRequest, cancellation.Token);
-    while (!File.Exists(marker)) { cancellation.Token.ThrowIfCancellationRequested(); await Task.Delay(10, cancellation.Token); }
-    int childId = int.Parse(File.ReadAllText(marker), System.Globalization.CultureInfo.InvariantCulture);
+    // 가짜 compiler가 marker를 쓰는 중이면(파일은 있지만 쓰기 handle이 열려 있거나 내용이 비어 있으면) 다시 읽는다.
+    int childId = 0;
+    while (true)
+    {
+        cancellation.Token.ThrowIfCancellationRequested();
+        try
+        {
+            if (File.Exists(marker) && int.TryParse(File.ReadAllText(marker), System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out childId) && childId > 0)
+                break;
+        }
+        catch (IOException) { }
+        await Task.Delay(10, cancellation.Token);
+    }
     cancellation.Cancel();
     try { await cancelling; throw new InvalidOperationException("Cancellation ignored"); }
     catch (OperationCanceledException) { }
