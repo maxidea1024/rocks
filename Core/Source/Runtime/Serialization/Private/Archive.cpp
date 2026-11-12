@@ -1,6 +1,7 @@
 #include <Serialization/Archive.h>
-#include "ArchiveInternal.h"
+#include <Base/Endian.h>
 #include <float.h>
+#include <Platform/Atomics.h>
 #include <Platform/Memory.h>
 
 namespace rocks {
@@ -127,13 +128,13 @@ Result<void> ArchiveWriter::WriteBool(bool value) noexcept {
 
 Result<void> ArchiveWriter::WriteU32(uint32 value) noexcept {
     uint8 bytes[4];
-    archive_detail::Store32(bytes, value);
+    StoreLittleEndian<uint32>(bytes, value);
     return Append(bytes, {});
 }
 
 Result<void> ArchiveWriter::WriteU64(uint64 value) noexcept {
     uint8 bytes[8];
-    archive_detail::Store64(bytes, value);
+    StoreLittleEndian<uint64>(bytes, value);
     return Append(bytes, {});
 }
 
@@ -151,20 +152,20 @@ Result<void> ArchiveWriter::WriteF64(double value) noexcept {
 
 Result<void> ArchiveWriter::WriteGuid(Guid value) noexcept {
     uint8 bytes[16];
-    archive_detail::Store64(bytes, value.high);
-    archive_detail::Store64(bytes + 8, value.low);
+    StoreLittleEndian<uint64>(bytes, value.high);
+    StoreLittleEndian<uint64>(bytes + 8, value.low);
     return Append(bytes, {});
 }
 
 Result<void> ArchiveWriter::WriteBytes(Span<const uint8> value) noexcept {
     uint8 prefix[8];
-    archive_detail::Store64(prefix, static_cast<uint64>(value.Size()));
+    StoreLittleEndian<uint64>(prefix, static_cast<uint64>(value.Size()));
     return Append(prefix, value);
 }
 
 Result<void> ArchiveWriter::WriteString(StringView value) noexcept {
     uint8 prefix[8];
-    archive_detail::Store64(prefix, static_cast<uint64>(value.ByteCount()));
+    StoreLittleEndian<uint64>(prefix, static_cast<uint64>(value.ByteCount()));
     return Append(prefix, {reinterpret_cast<const uint8*>(value.Data()), value.ByteCount()}, true);
 }
 
@@ -192,19 +193,97 @@ Array<uint8> ArchiveWriter::TakeBytes() noexcept {
     return Move(bytes_);
 }
 
-ArchiveReader::ArchiveReader(Span<const uint8> source, ArchiveLimits limits) noexcept
-    : source_(source), limits_(limits) {
+Result<void> ArchiveBudget::Spend(uint64 work) noexcept {
+    // 원자적 누적: 한도를 넘으면 사용량을 한도로 포화한다(줄이지 않는다).
+    uint64 current = platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&work_);
+    while (true) {
+        if (work > maxWork_ - current) {
+            while (current < maxWork_ &&
+                   !platform::AtomicCompareExchangeWeak<platform::MemoryOrder::Relaxed,
+                                                        platform::MemoryOrder::Relaxed>(
+                       &work_, current, maxWork_)) {
+            }
+
+            return Result<void>::Failure(ErrorCode::CapacityExceeded);
+        }
+
+        if (platform::AtomicCompareExchangeWeak<platform::MemoryOrder::Relaxed,
+                                                platform::MemoryOrder::Relaxed>(&work_, current,
+                                                                                current + work)) {
+            return Result<void>::Success();
+        }
+    }
+}
+
+Result<void> ArchiveBudget::Charge(uint64 work) noexcept {
+    uint64 current = platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&operations_);
+    while (true) {
+        if (current >= maxOperations_) {
+            return Result<void>::Failure(ErrorCode::CapacityExceeded);
+        }
+
+        if (platform::AtomicCompareExchangeWeak<platform::MemoryOrder::Relaxed,
+                                                platform::MemoryOrder::Relaxed>(
+                &operations_, current, current + 1)) {
+            break;
+        }
+    }
+
+    return Spend(work);
+}
+
+uint64 ArchiveBudget::OperationsUsed() const noexcept {
+    return platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&operations_);
+}
+
+uint64 ArchiveBudget::WorkUsed() const noexcept {
+    return platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&work_);
+}
+
+ArchiveReader::ArchiveReader(Span<const uint8> source, ArchiveLimits limits,
+                             SharedPtr<ArchiveBudget> shared) noexcept
+    : source_(source), limits_(limits), shared_(Move(shared)) {
+}
+
+ArchiveReader::ArchiveReader(ArchiveReader&& other) noexcept
+    : source_(other.source_), limits_(other.limits_), position_(other.position_),
+      operations_(other.operations_), work_(other.work_), shared_(Move(other.shared_)) {
+    // 이동된 원본은 빈 입력이다(남은 자기 예산으로 같은 입력을 다시 읽지 못한다).
+    other.source_ = Span<const uint8>();
+    other.position_ = 0;
+}
+
+ArchiveReader& ArchiveReader::operator=(ArchiveReader&& other) noexcept {
+    if (this != &other) {
+        source_ = other.source_;
+        limits_ = other.limits_;
+        position_ = other.position_;
+        operations_ = other.operations_;
+        work_ = other.work_;
+        shared_ = Move(other.shared_);
+        other.source_ = Span<const uint8>();
+        other.position_ = 0;
+    }
+    return *this;
 }
 
 Result<ArchiveReader> ArchiveReader::Create(Span<const uint8> source,
                                             ArchiveLimits limits) noexcept {
+    return CreateShared(source, limits, SharedPtr<ArchiveBudget>());
+}
+
+Result<ArchiveReader> ArchiveReader::CreateShared(Span<const uint8> source, ArchiveLimits limits,
+                                                  SharedPtr<ArchiveBudget> shared) noexcept {
     if (source.Size() > limits.maxTotalBytes) {
         return Result<ArchiveReader>::Failure(ErrorCode::CapacityExceeded);
     }
-    return Result<ArchiveReader>::Success(ArchiveReader(source, limits));
+    return Result<ArchiveReader>::Success(ArchiveReader(source, limits, Move(shared)));
 }
 
 Result<void> ArchiveReader::Spend(uint64 work) noexcept {
+    if (shared_) {
+        return shared_->Spend(work);
+    }
     if (work > limits_.maxWork - work_) {
         work_ = limits_.maxWork;
         return Result<void>::Failure(ErrorCode::CapacityExceeded);
@@ -214,6 +293,9 @@ Result<void> ArchiveReader::Spend(uint64 work) noexcept {
 }
 
 Result<void> ArchiveReader::Charge(uint64 work) noexcept {
+    if (shared_) {
+        return shared_->Charge(work);
+    }
     if (operations_ == limits_.maxOperations) {
         return Result<void>::Failure(ErrorCode::CapacityExceeded);
     }
@@ -245,7 +327,7 @@ Result<Span<const uint8>> ArchiveReader::Variable(bool utf8, bool ownedCopy) noe
     if (!prefix) {
         return Result<Span<const uint8>>::Failure(prefix.Error());
     }
-    const uint64 length = archive_detail::Load64(prefix.Value().Data());
+    const uint64 length = LoadLittleEndian<uint64>(prefix.Value().Data());
     if (length > limits_.maxValueBytes) {
         return Result<Span<const uint8>>::Failure(ErrorCode::CapacityExceeded);
     }
@@ -296,7 +378,7 @@ Result<uint32> ArchiveReader::ReadU32() noexcept {
     if (!bytes) {
         return Result<uint32>::Failure(bytes.Error());
     }
-    const uint32 value = archive_detail::Load32(bytes.Value().Data());
+    const uint32 value = LoadLittleEndian<uint32>(bytes.Value().Data());
     position_ += 4;
     return Result<uint32>::Success(value);
 }
@@ -306,7 +388,7 @@ Result<uint64> ArchiveReader::ReadU64() noexcept {
     if (!bytes) {
         return Result<uint64>::Failure(bytes.Error());
     }
-    const uint64 value = archive_detail::Load64(bytes.Value().Data());
+    const uint64 value = LoadLittleEndian<uint64>(bytes.Value().Data());
     position_ += 8;
     return Result<uint64>::Success(value);
 }
@@ -344,8 +426,8 @@ Result<Guid> ArchiveReader::ReadGuid() noexcept {
     if (!bytes) {
         return Result<Guid>::Failure(bytes.Error());
     }
-    Guid value{archive_detail::Load64(bytes.Value().Data()),
-               archive_detail::Load64(bytes.Value().Data() + 8)};
+    Guid value{LoadLittleEndian<uint64>(bytes.Value().Data()),
+               LoadLittleEndian<uint64>(bytes.Value().Data() + 8)};
     position_ += 16;
     return Result<Guid>::Success(value);
 }
@@ -409,11 +491,11 @@ bool ArchiveReader::AtEnd() const noexcept {
 }
 
 uint64 ArchiveReader::OperationsUsed() const noexcept {
-    return operations_;
+    return shared_ ? shared_->OperationsUsed() : operations_;
 }
 
 uint64 ArchiveReader::WorkUsed() const noexcept {
-    return work_;
+    return shared_ ? shared_->WorkUsed() : work_;
 }
 
 } // namespace rocks

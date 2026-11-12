@@ -17,7 +17,9 @@ enum class WireType : uint32 {
     Guid = 7,
     String = 8,
     Bytes = 9,
-    Record = 10
+    Record = 10,
+    // 항목 Record 목록: u32 count + count × (u64 length + 중첩 Record). Serialization/RecordList.h.
+    RecordList = 11
 };
 
 struct RecordLimits {
@@ -74,6 +76,12 @@ private:
 // 않는다. envelopeVersion과 허용 범위 밖 schemaVersion은 Unsupported, schema Guid 불일치는
 // TypeMismatch다. 실패하는 Open은 부분 reader를 반환하지 않는다. 객체 그래프·fixup·압축·암호화는 이
 // 계층에 없다.
+//
+// 예산: Open은 이 Record 트리의 누적 예산(ArchiveBudget, RecordLimits.archive의
+// maxOperations·maxWork)을 만든다. OpenValue로 연 값 reader, RecordListReader::OpenField로 연 중첩
+// 목록과 그 항목 reader가 모두 같은 예산을 공유하므로(값·항목마다 새 예산을 주지 않는다) 트리를
+// 순회해도 한도를 넘을 수 없다. 값을 따로 ArchiveReader::Create로 읽으면 새 예산이 생기므로
+// 신뢰하지 않는 입력은 OpenValue로 읽는다.
 class RecordReader {
 public:
     static Result<RecordReader> Open(Allocator&, Span<const uint8>, Guid expectedSchema,
@@ -89,17 +97,31 @@ public:
     // 실패해도 Next의 iteration 위치는 불변이며 사용한 예산은 환급하지 않는다.
     Result<FieldView> Next() noexcept;
     Result<FieldView> Find(Guid) noexcept;
+    // 이 reader가 돌려준 필드의 값을 읽는 ArchiveReader를 연다. 이 Record 트리와 같은 예산·한도를
+    // 쓴다. operation 하나를 청구하며, 이 Record 밖의 범위는 InvalidArgument다.
+    Result<ArchiveReader> OpenValue(const FieldView& field) const noexcept;
     usize Position() const noexcept;
     usize FieldCount() const noexcept;
     uint32 SchemaVersion() const noexcept;
+    // 이 Record 트리가 지금까지 함께 쓴 예산이다(값·중첩 목록·항목 reader 포함).
+    uint64 OperationsUsed() const noexcept;
     uint64 WorkUsed() const noexcept;
 
 private:
-    RecordReader(Allocator&, ArchiveReader&&, uint32 version) noexcept;
+    friend class RecordListReader;
+    RecordReader(Allocator&, ArchiveReader&&, uint32 version, RecordLimits limits) noexcept;
+    // shared가 있으면 그 누적 예산을 쓰고, 없으면 limits.archive로 새 예산을 만든다.
+    static Result<RecordReader> OpenWith(Allocator&, Span<const uint8>, Guid expectedSchema,
+                                         uint32 minSchemaVersion, uint32 maxSchemaVersion,
+                                         RecordLimits, SharedPtr<ArchiveBudget> shared) noexcept;
+    // range가 이 Record 입력 안인지 본다.
+    bool Contains(Span<const uint8> range) const noexcept;
     ArchiveReader archive_;
-    Array<FieldView> fields_;
+    Array<FieldView> fields_; // 기록 순서(Next)
+    Array<uint32> byId_;      // id 순으로 정렬한 fields_ index(중복 검사·Find 이진 탐색)
     uint32 schemaVersion_;
     usize next_ = 0;
+    RecordLimits limits_;
 };
 
 } // namespace rocks

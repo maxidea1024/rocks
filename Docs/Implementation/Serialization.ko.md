@@ -32,9 +32,17 @@ String의 내부 NUL은 U+0000으로 보존하며 파일에 별도 종단 NUL은
 
 44-byte envelope는 magic `ROCKSREC` 8 bytes, envelope version u32=1, schema Guid 16 bytes, schema version u32, field count u32, payload byte count u64로 구성한다. 필드 TLV의 고정 부분은 field GUID 16 bytes, wire tag u32, encoded payload 길이 u64의 28 bytes다.
 
-`RecordBuilder`는 field 추가 순서를 유지한다. GUID 정렬 canonicalization은 제공하지 않으며 동일한 추가 순서와 값에 대한 byte 재현성을 제공한다. `Open`은 전체 envelope·길이·field count·중복 GUID·모든 TLV 경계를 검증한 뒤 소유 index를 반환한다. index 소유권으로 원본 payload 수명이 연장되지는 않는다.
+`RecordBuilder`는 field 추가 순서를 유지한다. GUID 정렬 canonicalization은 제공하지 않으며 동일한 추가 순서와 값에 대한 byte 재현성을 제공한다. `Open`은 전체 envelope·길이·field count·모든 TLV 경계를 검증하고, id 순으로 정렬한 index의 이웃 비교로 중복 GUID를 검사한 뒤(O(n log n), 정렬 비교 상한 2·n·bitwidth(n)+n을 work로 미리 청구) 소유 index를 반환한다. `Find`는 같은 index로 이진 탐색한다(work bitwidth(n)+1). `Next`는 기록 순서다. index 소유권으로 원본 payload 수명이 연장되지는 않는다.
 
-unknown nonzero tag는 FieldView로 반환하여 skip할 수 있다. known tag의 의미는 상위 소비자가 기대 tag와 실제 값 표현을 확인하고 `ArchiveReader::AtEnd`로 trailing bytes까지 검증한다. id/tag 0은 InvalidArgument, 중복 ID는 AlreadyExists, 허용되지 않는 envelope/schema version은 Unsupported, 기대 schema GUID 불일치는 TypeMismatch다. checksum/인증이 없으므로 범위 안 payload bit 변경이 반드시 오류로 검출되는 포맷은 아니다.
+unknown nonzero tag는 FieldView로 반환하여 skip할 수 있다. known tag의 의미는 상위 소비자가 기대 tag와 실제 값 표현을 확인하고, `RecordReader::OpenValue(field)`로 연 ArchiveReader로 읽어 `ArchiveReader::AtEnd`로 trailing bytes까지 검증한다. id/tag 0은 InvalidArgument, 중복 ID는 AlreadyExists, 허용되지 않는 envelope/schema version은 Unsupported, 기대 schema GUID 불일치는 TypeMismatch다. checksum/인증이 없으므로 범위 안 payload bit 변경이 반드시 오류로 검출되는 포맷은 아니다.
+
+### Record 트리 예산
+
+`RecordReader::Open`은 Record 트리의 누적 예산 `ArchiveBudget`(maxOperations·maxWork, 원자적 누적·포화)을 `SharedPtr`로 만든다. `OpenValue`로 연 값 reader, `RecordListReader::OpenField`로 연 중첩 목록, 그 `OpenItem` 항목 reader가 같은 예산을 공유하므로 값·항목마다 새 예산을 받아 한도를 우회할 수 없다. 실패한 `OpenValue`·`OpenField`·`OpenItem` 호출도 operation 하나를 소비한다. 한도를 예산이 들고 있어 공유자마다 판정이 다르지 않고, 서로 다른 reader를 여러 스레드에서 써도 사용량이 정확히 합산된다.
+
+### RecordList (wire tag 11)
+
+payload는 u32 count + count × (u64 length + 중첩 Record)이며 빈 목록도 count 0으로 기록한다. `RecordListLimits`는 maxItems·maxPayloadBytes(기본 4 MiB)·maxItemBytes(기본 4 MiB − 12)로, 기본값은 기본 maxValueBytes에 맞춰 기본 한도의 목록이 기본 한도의 부모 값 하나에 들어간다. builder는 완성된 payload를 기하 성장 buffer에 쌓고(실패 원자적) Finish가 부모에 한 번 복사한다. reader는 count를 할당 전에 남은 byte / 52와 비교하고, count만큼 work를 항목 파싱 전에 청구한 뒤 모든 length·항목 envelope를 검증하고 index를 게시한다. 목록 archive의 크기 한도는 목록 한도에서 오고 항목 Record 한도와 분리된다.
 
 ## Object Graph version 1
 
@@ -81,7 +89,7 @@ maxBytes는 전체 RAM peak 제한과 같지 않다. 저장 시 중간 record와
 
 ## 검증 구성과 후속 범위
 
-Archive/Record 시험에는 독립 little-endian golden, IEEE bits, UTF-8/NUL, 비정상 길이·bool·version·tag, compound cursor 불변, 자기 alias 성장, 모든 할당 지점 N-fail, 실패 예산 유지, field iteration/move 수명, 결정적 byte mutation이 포함된다. ObjectGraph 시험에는 cycle/shared identity, 다른 Registry 복원, scalar/String/Guid, unknown/missing policy, migration, 참조·폭·trailing 오류, TypeRegistry 불일치, incomplete metadata, save/load 전체 N-fail과 객체/할당/lease 원상태 검사가 포함된다.
+Archive/Record 시험에는 독립 little-endian golden, IEEE bits, UTF-8/NUL, 비정상 길이·bool·version·tag, compound cursor 불변, 자기 alias 성장, 모든 할당 지점 N-fail, 실패 예산 유지, field iteration/move 수명, 결정적 byte mutation, 최대 필드 수(4096)의 정렬 index·이진 탐색 비용과 비이웃 중복이 포함된다. RecordList 시험에는 손으로 조립한 payload와의 byte 비교, 잘림·length 불일치·count 사전 검사, 모든 한도의 정확한 경계(builder·reader), 기본 한도 조합(4 MiB − 12 항목), 트리 예산 공유·포화·스레드 합산, 실패 호출의 operation 소비, 부모 한도 전파, 다항목 N-fail 후 재시도 결과의 byte 동일성과 누수 검사가 포함된다. ObjectGraph 시험에는 cycle/shared identity, 다른 Registry 복원, scalar/String/Guid, unknown/missing policy, migration, 참조·폭·trailing 오류, TypeRegistry 불일치, incomplete metadata, save/load 전체 N-fail과 객체/할당/lease 원상태 검사가 포함된다.
 
 weak/external asset 참조, 다중 root, 임의 컨테이너와 native 숨은 필드, 비동기·병행 graph snapshot, 파일 IO, 압축·암호화, 무결성 인증은 현재 구현 범위에 포함하지 않는다. 장기 계획의 전체 serialization/cook/savegame 완료로 합산하지 않는다. 지원하지 않는 표현을 raw struct dump나 성공한 부분 저장으로 대체하지 않는다.
 

@@ -1,5 +1,6 @@
 #include <Serialization/Record.h>
-#include "ArchiveInternal.h"
+#include <Base/Endian.h>
+#include <Core/Algorithms.h>
 
 namespace rocks {
 namespace {
@@ -16,6 +17,21 @@ ArchiveLimits PayloadLimits(ArchiveLimits limits) noexcept {
 
 bool IsZero(Guid value) noexcept {
     return value == Guid{};
+}
+
+bool IdLess(Guid left, Guid right) noexcept {
+    return left.high != right.high ? left.high < right.high : left.low < right.low;
+}
+
+// n의 2진 자릿수(0이면 0)다. 이진 탐색 비교 횟수와 heap 정렬 비용의 상한에 쓴다.
+uint64 BitWidth(uint64 value) noexcept {
+    uint64 bits = 0;
+    while (value != 0) {
+        ++bits;
+        value >>= 1;
+    }
+
+    return bits;
 }
 
 } // namespace
@@ -67,10 +83,10 @@ Result<void> RecordBuilder::AddField(Guid id, uint32 type, Span<const uint8> enc
         return reserved;
     }
     uint8 header[FieldHeaderBytes];
-    archive_detail::Store64(header, id.high);
-    archive_detail::Store64(header + 8, id.low);
-    archive_detail::Store32(header + 16, type);
-    archive_detail::Store64(header + 20, static_cast<uint64>(encoded.Size()));
+    StoreLittleEndian<uint64>(header, id.high);
+    StoreLittleEndian<uint64>(header + 8, id.low);
+    StoreLittleEndian<uint32>(header + 16, type);
+    StoreLittleEndian<uint64>(header + 20, static_cast<uint64>(encoded.Size()));
     auto appendedResult = payload_.AppendReserved(header, encoded);
     if (!appendedResult) {
         return appendedResult;
@@ -103,12 +119,12 @@ Result<Array<uint8>> RecordBuilder::Build() noexcept {
     for (usize index = 0; index < sizeof(Magic); ++index) {
         header[index] = Magic[index];
     }
-    archive_detail::Store32(header + 8, 1);
-    archive_detail::Store64(header + 12, schema_.high);
-    archive_detail::Store64(header + 20, schema_.low);
-    archive_detail::Store32(header + 28, schemaVersion_);
-    archive_detail::Store32(header + 32, static_cast<uint32>(ids_.Size()));
-    archive_detail::Store64(header + 36, static_cast<uint64>(payload_.ByteCount()));
+    StoreLittleEndian<uint32>(header + 8, 1);
+    StoreLittleEndian<uint64>(header + 12, schema_.high);
+    StoreLittleEndian<uint64>(header + 20, schema_.low);
+    StoreLittleEndian<uint32>(header + 28, schemaVersion_);
+    StoreLittleEndian<uint32>(header + 32, static_cast<uint32>(ids_.Size()));
+    StoreLittleEndian<uint64>(header + 36, static_cast<uint64>(payload_.ByteCount()));
 
     // 별도 output을 완성한 뒤 반환한다. builder는 계속 재사용 가능하며 byte 소유권을 잃지 않는다.
     ArchiveWriter output(*allocator_, limits_.archive);
@@ -127,13 +143,15 @@ uint64 RecordBuilder::WorkUsed() const noexcept {
     return payload_.WorkUsed();
 }
 
-RecordReader::RecordReader(Allocator& allocator, ArchiveReader&& archive, uint32 version) noexcept
-    : archive_(Move(archive)), fields_(allocator), schemaVersion_(version) {
+RecordReader::RecordReader(Allocator& allocator, ArchiveReader&& archive, uint32 version,
+                           RecordLimits limits) noexcept
+    : archive_(Move(archive)), fields_(allocator), byId_(allocator), schemaVersion_(version),
+      limits_(limits) {
 }
 
 RecordReader::RecordReader(RecordReader&& other) noexcept
-    : archive_(Move(other.archive_)), fields_(Move(other.fields_)),
-      schemaVersion_(other.schemaVersion_), next_(other.next_) {
+    : archive_(Move(other.archive_)), fields_(Move(other.fields_)), byId_(Move(other.byId_)),
+      schemaVersion_(other.schemaVersion_), next_(other.next_), limits_(other.limits_) {
     other.schemaVersion_ = 0;
     other.next_ = 0;
 }
@@ -142,8 +160,10 @@ RecordReader& RecordReader::operator=(RecordReader&& other) noexcept {
     if (this != &other) {
         archive_ = Move(other.archive_);
         fields_ = Move(other.fields_);
+        byId_ = Move(other.byId_);
         schemaVersion_ = other.schemaVersion_;
         next_ = other.next_;
+        limits_ = other.limits_;
         other.schemaVersion_ = 0;
         other.next_ = 0;
     }
@@ -153,10 +173,27 @@ RecordReader& RecordReader::operator=(RecordReader&& other) noexcept {
 Result<RecordReader> RecordReader::Open(Allocator& allocator, Span<const uint8> source,
                                         Guid expectedSchema, uint32 minimum, uint32 maximum,
                                         RecordLimits limits) noexcept {
+    return OpenWith(allocator, source, expectedSchema, minimum, maximum, limits,
+                    SharedPtr<ArchiveBudget>());
+}
+
+Result<RecordReader> RecordReader::OpenWith(Allocator& allocator, Span<const uint8> source,
+                                            Guid expectedSchema, uint32 minimum, uint32 maximum,
+                                            RecordLimits limits,
+                                            SharedPtr<ArchiveBudget> shared) noexcept {
     if (IsZero(expectedSchema) || minimum == 0 || maximum < minimum) {
         return Result<RecordReader>::Failure(ErrorCode::InvalidArgument);
     }
-    auto sourceReader = ArchiveReader::Create(source, limits.archive);
+    // 이 Record 트리의 누적 예산(값·중첩 목록·항목 reader가 공유한다).
+    if (!shared) {
+        auto made = SharedPtr<ArchiveBudget>::TryMake(allocator, limits.archive.maxOperations,
+                                                      limits.archive.maxWork);
+        if (!made) {
+            return Result<RecordReader>::Failure(made.Error());
+        }
+        shared = Move(made.Value());
+    }
+    auto sourceReader = ArchiveReader::CreateShared(source, limits.archive, Move(shared));
     if (!sourceReader) {
         return Result<RecordReader>::Failure(sourceReader.Error());
     }
@@ -213,8 +250,13 @@ Result<RecordReader> RecordReader::Open(Allocator& allocator, Span<const uint8> 
     if (!spent) {
         return Result<RecordReader>::Failure(spent.Error());
     }
-    RecordReader result(allocator, Move(archive), version.Value());
+    RecordReader result(allocator, Move(archive), version.Value(), limits);
     auto reserved = result.fields_.TryReserve(fieldCount.Value());
+    if (!reserved) {
+        return Result<RecordReader>::Failure(reserved.Error());
+    }
+
+    reserved = result.byId_.TryReserve(fieldCount.Value());
     if (!reserved) {
         return Result<RecordReader>::Failure(reserved.Error());
     }
@@ -243,21 +285,31 @@ Result<RecordReader> RecordReader::Open(Allocator& allocator, Span<const uint8> 
             return Result<RecordReader>::Failure(payload.Error());
         }
 
-        for (usize previous = 0; previous < result.fields_.Size(); ++previous) {
-            spent = result.archive_.Spend(1);
-            if (!spent) {
-                return Result<RecordReader>::Failure(spent.Error());
-            }
-            if (result.fields_[previous].id == id.Value()) {
-                return Result<RecordReader>::Failure(ErrorCode::AlreadyExists);
-            }
-        }
-        if (!result.fields_.TryPushBack(FieldView{id.Value(), type.Value(), payload.Value()})) {
+        if (!result.fields_.TryPushBack(FieldView{id.Value(), type.Value(), payload.Value()}) ||
+            !result.byId_.TryPushBack(index)) {
             platform::Fatal("Record index reservation invariant failed");
         }
     }
     if (!result.archive_.AtEnd()) {
         return Result<RecordReader>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 중복 id: id 순으로 정렬한 index에서 이웃만 비교한다(O(n log n)). heap 정렬 비교 횟수의 상한
+    // 2·n·bitwidth(n)을 정렬 전에 청구한다. 같은 index는 Find의 이진 탐색에도 쓴다.
+    const uint64 count = result.fields_.Size();
+    spent = result.archive_.Spend(2 * count * BitWidth(count) + count);
+    if (!spent) {
+        return Result<RecordReader>::Failure(spent.Error());
+    }
+
+    const FieldView* fields = result.fields_.Data();
+    algo::Sort(result.byId_.View(), [fields](uint32 left, uint32 right) noexcept {
+        return IdLess(fields[left].id, fields[right].id);
+    });
+    for (usize index = 1; index < result.byId_.Size(); ++index) {
+        if (fields[result.byId_[index - 1]].id == fields[result.byId_[index]].id) {
+            return Result<RecordReader>::Failure(ErrorCode::AlreadyExists);
+        }
     }
     return Result<RecordReader>::Success(Move(result));
 }
@@ -281,16 +333,45 @@ Result<FieldView> RecordReader::Find(Guid id) noexcept {
     if (IsZero(id)) {
         return Result<FieldView>::Failure(ErrorCode::InvalidArgument);
     }
-    for (usize index = 0; index < fields_.Size(); ++index) {
-        auto spent = archive_.Spend(1);
-        if (!spent) {
-            return Result<FieldView>::Failure(spent.Error());
-        }
-        if (fields_[index].id == id) {
-            return Result<FieldView>::Success(fields_[index]);
-        }
+
+    // 이진 탐색 비교 횟수의 상한을 먼저 청구한다(필드 수와 무관하게 log 비용).
+    auto spent = archive_.Spend(BitWidth(fields_.Size()) + 1);
+    if (!spent) {
+        return Result<FieldView>::Failure(spent.Error());
     }
-    return Result<FieldView>::Failure(ErrorCode::NotFound);
+
+    const FieldView* fields = fields_.Data();
+    const usize at = algo::LowerBound(
+        Span<const uint32>(byId_.View()), id,
+        [fields](uint32 index, Guid key) noexcept { return IdLess(fields[index].id, key); });
+    if (at == byId_.Size() || fields[byId_[at]].id != id) {
+        return Result<FieldView>::Failure(ErrorCode::NotFound);
+    }
+
+    return Result<FieldView>::Success(fields[byId_[at]]);
+}
+
+bool RecordReader::Contains(Span<const uint8> range) const noexcept {
+    const auto begin = reinterpret_cast<usize>(archive_.source_.Data());
+    const auto end = begin + archive_.source_.Size();
+    const auto start = reinterpret_cast<usize>(range.Data());
+    return archive_.source_.Size() != 0 && start >= begin && start <= end &&
+           range.Size() <= end - start;
+}
+
+Result<ArchiveReader> RecordReader::OpenValue(const FieldView& field) const noexcept {
+    if (!archive_.shared_) {
+        return Result<ArchiveReader>::Failure(ErrorCode::InvalidArgument); // 이동된 reader
+    }
+    // 예산은 공유 객체라 const reader에서도 청구한다(호출도 operation을 소비한다).
+    auto charged = archive_.shared_->Charge(1);
+    if (!charged) {
+        return Result<ArchiveReader>::Failure(charged.Error());
+    }
+    if (!Contains(field.payload)) {
+        return Result<ArchiveReader>::Failure(ErrorCode::InvalidArgument);
+    }
+    return ArchiveReader::CreateShared(field.payload, limits_.archive, archive_.shared_);
 }
 
 usize RecordReader::Position() const noexcept {
@@ -303,6 +384,10 @@ usize RecordReader::FieldCount() const noexcept {
 
 uint32 RecordReader::SchemaVersion() const noexcept {
     return schemaVersion_;
+}
+
+uint64 RecordReader::OperationsUsed() const noexcept {
+    return archive_.OperationsUsed();
 }
 
 uint64 RecordReader::WorkUsed() const noexcept {

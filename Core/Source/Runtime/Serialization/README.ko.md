@@ -15,9 +15,23 @@
 
 헤더는 `ROCKSREC` 8 bytes, envelope version u32, schema Guid, schema version u32, field count u32, payload byte count u64의 44 bytes다. 필드마다 GUID 16 bytes, wire tag u32, payload 길이 u64, encoded payload를 쓴다.
 
-`RecordBuilder`는 추가 순서를 보존한다. 같은 순서의 입력은 같은 bytes를 만들지만 GUID 정렬 canonicalization은 하지 않는다. `RecordReader::Open`은 전체 envelope와 모든 필드 경계·중복 ID를 검증한 뒤 index를 반환한다. reader는 index만 소유하므로 caller의 원본 buffer를 유지해야 한다.
+`RecordBuilder`는 추가 순서를 보존한다. 같은 순서의 입력은 같은 bytes를 만들지만 GUID 정렬 canonicalization은 하지 않는다. `RecordReader::Open`은 전체 envelope와 모든 필드 경계·중복 ID를 검증한 뒤 index를 반환한다. 중복 검사는 id 순으로 정렬한 index의 이웃 비교(O(n log n), 정렬 비교 상한을 work로 미리 청구)이며, 같은 index로 `Find`가 이진 탐색한다(work는 log 비용). `Next`는 기록 순서를 따른다. reader는 index만 소유하므로 caller의 원본 buffer를 유지해야 한다.
 
-unknown nonzero wire tag는 그대로 열거하고 skip할 수 있다. 알려진 tag도 record 계층이 payload 의미를 대신 검증하지 않는다. 소비자가 기대 tag를 확인하고 별도 ArchiveReader로 값을 읽은 다음 `AtEnd()`까지 확인한다. ID/tag 0은 InvalidArgument, 중복 ID는 AlreadyExists, envelope/schema version 미지원은 Unsupported, 기대 schema GUID 불일치는 TypeMismatch다. 누락 필드와 iteration 끝은 NotFound다.
+unknown nonzero wire tag는 그대로 열거하고 skip할 수 있다. 알려진 tag도 record 계층이 payload 의미를 대신 검증하지 않는다. 소비자가 기대 tag를 확인하고 `RecordReader::OpenValue(field)`로 연 ArchiveReader(Record 트리 예산을 공유한다)로 값을 읽은 다음 `AtEnd()`까지 확인한다. ID/tag 0은 InvalidArgument, 중복 ID는 AlreadyExists, envelope/schema version 미지원은 Unsupported, 기대 schema GUID 불일치는 TypeMismatch다. 누락 필드와 iteration 끝은 NotFound다.
+
+## RecordList (wire tag 11)
+
+`WireType::RecordList` payload는 u32 count와 count개의 (u64 length + 중첩 Record)다. 각 length는 중첩 Record의 전체 길이(44 + payloadBytes)와 같아야 하고, 빈 목록도 count 0으로 기록한다. `RecordListBuilder::AddItem`은 완성된 항목 Record 바이트를 깊게 복사하고(envelope magic·길이 일관성 검사), `Finish(parent, fieldId)`가 부모의 필드 하나로 추가한다. builder는 완성된 payload를 기하 성장 buffer에 바로 쌓고 Finish는 그것을 부모에 한 번 복사한다. 실패하면 builder와 부모의 필드·bytes는 호출 전 상태이며, 부모가 이미 소비한 operation·work 예산만 환급되지 않는다.
+
+`RecordListLimits`는 maxItems(항목 수), maxPayloadBytes(목록 payload 전체, 기본 4 MiB), maxItemBytes(항목 Record 하나, 기본 4 MiB − 12)다. 기본값은 기본 `ArchiveLimits::maxValueBytes`(4 MiB)에 맞춰, 기본 한도로 만든 목록이 기본 한도의 부모 값 하나에 그대로 들어가고 다시 읽힌다(가장 큰 항목 하나짜리 목록도 count 4 + length 8을 더해 4 MiB). 부모 Record 한도는 별개로 적용되므로 큰 목록은 두 한도를 함께 올린다. builder와 reader는 이 크기·개수 한도를 같게 판정한다. 읽기의 operation·work 예산은 이와 별개로 Record 트리 전체에 누적되므로(아래 "예산 공유"), 크기 한도 안의 목록이라도 항목·필드가 아주 많은 트리는 `RecordLimits.archive`의 maxOperations·maxWork를 올려 연다.
+
+`RecordListReader`는 count를 할당 전에 남은 byte / 52(항목 최소 크기)와 비교하고, count만큼의 work를 항목 파싱 전에 청구한 뒤, 모든 length와 항목 envelope 경계를 검증하고 index를 게시한다. 항목은 `OpenItem`이 schema·버전 범위를 검사하며 `RecordReader`로 연다. 잘림·length 불일치·남은 바이트·잘못된 항목 envelope는 InvalidArgument, `RecordListLimits` 초과는 CapacityExceeded다.
+
+## 예산 공유(Record 트리)
+
+`RecordReader::Open`은 그 Record 트리의 누적 예산 `ArchiveBudget`(RecordLimits.archive의 maxOperations·maxWork)을 만든다. `RecordReader::OpenValue(field)`로 연 값 reader, `RecordListReader::OpenField(parent, field, …)`로 연 중첩 목록과 그 `OpenItem` 항목 reader가 모두 같은 예산을 쓴다. 값·항목마다 새 예산을 주지 않으므로 위 "환급하지 않는다" 원칙이 트리 전체에 적용되어, 중첩 목록을 순회해도 한도를 넘지 못한다(`ArchiveReader::Create`로 값을 따로 읽으면 새 예산이 생기므로 신뢰하지 않는 입력은 `OpenValue`로 읽는다). 최상위 목록을 payload만으로 열 때(`RecordListReader::Open`)는 새 예산을 만든다.
+
+예산은 `SharedPtr`로 공유되어 reader의 파괴·이동 순서에 제약이 없고, 한도를 예산이 들고 있어 공유자가 서로 다른 한도로 판정하지 않는다. 사용량은 원자적으로 누적·포화하므로 같은 예산을 공유하는 서로 다른 reader를 여러 스레드에서 써도 된다(같은 reader의 병행은 여전히 금지). work 한도를 넘으면 공유 사용량이 한도로 포화되어 형제 reader의 이후 호출도 실패한다. 실패한 `OpenItem`·`OpenValue`·`OpenField` 호출도 operation을 소비한다. 이동된 `ArchiveReader` 원본은 빈 입력이 되어 남은 자기 예산으로 같은 입력을 다시 읽지 못한다.
 
 이 계층은 checksum/인증/압축/파일 IO/객체 생성/참조 fixup을 제공하지 않는다. 범위 안의 payload bit 변경이 반드시 오류라는 뜻은 아니며, 데이터 무결성 검증이 필요한 상위 포맷은 별도 정책을 제공해야 한다.
 

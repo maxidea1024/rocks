@@ -225,6 +225,59 @@ TEST(RecordDuplicateWireIdsAreRejectedBeforeReaderPublication) {
     CHECK(reader.Error() == ErrorCode::AlreadyExists);
 }
 
+TEST(RecordManyFieldsUseSortedIndexForDuplicatesAndFind) {
+    // 최대 필드 수(4096)의 Record: 중복 검사는 정렬 index(O(n log n))라 work가 n²에 비례하지 않고,
+    // Find는 이진 탐색이며 Next는 기록 순서를 지킨다. id는 기록 순서와 정렬 순서가 다르고 high가
+    // 겹치게(low로 갈리게) 섞는다.
+    SystemAllocator allocator;
+    constexpr uint32 Count = 4096;
+    auto idAt = [](uint32 index) noexcept {
+        const uint32 mixed = (index * 1237u) % Count; // 1237은 홀수라 순열이다
+        return Guid{mixed % 5u + 1u, static_cast<uint64>(mixed) + 1u};
+    };
+
+    RecordBuilder builder(allocator, Schema, 1);
+    for (uint32 index = 0; index < Count; ++index) {
+        REQUIRE(builder.AddField(idAt(index), WireType::Bytes, {}));
+    }
+
+    auto bytes = builder.Build();
+    REQUIRE(bytes);
+    auto reader = RecordReader::Open(allocator, bytes.Value().View(), Schema, 1, 1);
+    REQUIRE(reader);
+    // n² 비교였다면 약 840만 work다. 정렬 index는 파싱 byte와 2·n·13 + n 정도다.
+    CHECK(reader.Value().WorkUsed() < 400000);
+    for (uint32 index = 0; index < 3; ++index) {
+        auto next = reader.Value().Next();
+        CHECK(next && next.Value().id == idAt(index));
+    }
+
+    bool allFound = true;
+    uint64 maxFindWork = 0;
+    for (uint32 index = 0; index < Count; ++index) {
+        const uint64 before = reader.Value().WorkUsed();
+        auto found = reader.Value().Find(idAt(index));
+        allFound = allFound && found && found.Value().id == idAt(index);
+        const uint64 spent = reader.Value().WorkUsed() - before;
+        maxFindWork = spent > maxFindWork ? spent : maxFindWork;
+    }
+
+    CHECK(allFound);
+    CHECK(maxFindWork <= 16); // 이진 탐색 상한(13 + 1) + 호출 비용
+    CHECK(reader.Value().Find(Guid{0, 1}).Error() == ErrorCode::NotFound);      // 가장 작은 쪽 밖
+    CHECK(reader.Value().Find(Guid{3, 999999}).Error() == ErrorCode::NotFound); // 중간의 빈 자리
+    CHECK(reader.Value().Find(Guid{9, 1}).Error() == ErrorCode::NotFound);      // 가장 큰 쪽 밖
+
+    // 첫 필드와 마지막 필드(이웃하지 않은 기록 위치)의 중복도 찾는다.
+    const usize last = 44 + static_cast<usize>(Count - 1) * 28;
+    for (usize index = 0; index < 16; ++index) {
+        bytes.Value()[last + index] = bytes.Value()[44 + index];
+    }
+
+    auto duplicate = RecordReader::Open(allocator, bytes.Value().View(), Schema, 1, 1);
+    CHECK(!duplicate && duplicate.Error() == ErrorCode::AlreadyExists);
+}
+
 TEST(RecordBuilderAllocationFailuresPreservePriorFieldsAndBuildIsReusable) {
     SystemAllocator allocator;
     for (uint64 failedAttempt = 1; failedAttempt <= 2; ++failedAttempt) {
@@ -313,7 +366,9 @@ TEST(RecordEmptyHeaderAndCountValueWorkLimitsAreEnforced) {
     auto work = RecordReader::Open(allocator, OneFieldGolden, Schema, 1, 1, limits);
     CHECK(!work);
     CHECK(work.Error() == ErrorCode::CapacityExceeded);
-    CHECK(allocator.Stats().liveAllocations == 1); // 빈 header 소유 Array만 남는다.
+    // 빈 header 소유 Array와 위에서 연 빈 Record reader의 트리 예산(SharedPtr)만 남는다. 실패한
+    // Open은 아무것도 남기지 않는다.
+    CHECK(allocator.Stats().liveAllocations == 2);
 }
 
 TEST(RecordIterationBudgetFailureKeepsPositionAndMoveTransfersIndex) {

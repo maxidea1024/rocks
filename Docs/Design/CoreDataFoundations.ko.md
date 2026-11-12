@@ -174,11 +174,12 @@ uint8 LinearToSrgbByte(float linear) noexcept;   // 경계 표 이분 탐색. Na
 ## 4. RecordList(Serialization)
 
 - 형식: Record에 새 wire type `WireType::RecordList`를 추가한다(범용 도구·리플렉션이 목록을 구분한다). payload = `u32 count + count × (u64 length + 중첩 Record)`. 각 항목의 length는 중첩 Record의 전체 길이(헤더 44 byte + payload)와 같아야 한다. 빈 목록도 count 0으로 기록한다(Record에는 "없으면 기본값" 규칙이 없고 ObjectSerialization은 아는 필드가 없으면 NotFound다 — 결정적이고 단순하다).
-- 한도: `RecordListLimits { maxItems, maxItemBytes }`를 두되 상위 Record 한도(`maxValueBytes`·`maxTotalBytes`)를 넘지 않게 맞춘다. 읽기는 할당 전에 count ≤ 남은 byte / 52(항목 최소 크기)를 확인한다. 패키지처럼 큰 Record를 쓰는 곳은 상위 Record 한도를 그 용도에 맞게 올려 넘긴다(AssetSystem 5.1절 상한).
+- 한도: `RecordListLimits { maxItems, maxPayloadBytes, maxItemBytes }`를 둔다. 기본값(payload 4 MiB, 항목 4 MiB − 12)은 기본 `maxValueBytes`(4 MiB)에 맞춰 기본 한도의 목록이 기본 한도의 부모 값 하나에 들어가게 한다. builder와 reader가 같은 한도를 판정하고, 목록 archive의 크기 한도는 항목 Record 한도와 분리한다. 읽기는 할당 전에 count ≤ 남은 byte / 52(항목 최소 크기)를 확인하고 항목 파싱 전에 count만큼 work를 청구한다. 패키지처럼 큰 Record를 쓰는 곳은 상위 Record 한도를 그 용도에 맞게 올려 넘긴다(AssetSystem 5.1절 상한).
 - 예산: 항목별 하위 reader는 목록 reader와 **누적 예산을 공유**한다(Serialization README의 "예산은 환급하지 않는다" 원칙 — 항목마다 새 예산을 주지 않는다).
-- API: `RecordListBuilder`의 `AddItem(Span<const uint8> builtRecord)`(완성된 Record 바이트를 받는다 — RecordBuilder는 중첩 스트리밍 기록이 없다)와 `Finish(RecordBuilder& parent, Guid fieldId)`. AddField가 깊은 복사를 하므로 메모리 피크는 항목·목록·부모의 세 벌까지 커질 수 있다(문서화, 큰 목록은 항목을 순서대로 만들어 바로 AddItem한다). `RecordListReader`는 항목의 schema와 버전 범위를 인자로 받아 항목별 `RecordReader`를 길이 범위로 제한해 넘긴다.
+- API: `RecordListBuilder`의 `AddItem(Span<const uint8> builtRecord)`(완성된 Record 바이트를 받는다 — RecordBuilder는 중첩 스트리밍 기록이 없다)와 `Finish(RecordBuilder& parent, Guid fieldId)`. builder는 완성된 payload를 기하 성장 buffer에 쌓고(항목마다 전체를 다시 복사하지 않는다) Finish가 부모에 한 번 복사한다. 목록 데이터의 사본은 builder buffer(성장 중 이전·새 buffer)·부모 builder·부모 Build 결과로 여러 벌이 되므로, 큰 목록은 항목을 순서대로 만들어 바로 AddItem하고 Finish 뒤 builder를 일찍 파괴한다(문서화). `RecordListReader`는 항목의 schema와 버전 범위를 인자로 받아 항목별 `RecordReader`를 길이 범위로 제한해 넘긴다.
 - 오류 코드는 Archive 규약을 따른다: 잘림·길이 불일치·남은 바이트는 `InvalidArgument`, 한도 초과는 `CapacityExceeded`. 실패하면 builder는 부분 결과를 남기지 않는다(호출 전 상태로).
 - 시험: 빈 목록(count 0), 중첩 목록, 잘린 길이·count 과대·남은 바이트·length 불일치, 한도, 예산 공유, 실패 원자성.
+- 구현(구현됨, `Serialization/RecordList.h`, `WireType::RecordList = 11`): 예산 공유는 Archive에 공유 누적 예산 `ArchiveBudget`(한도 포함, 원자적 누적·포화)을 두어 Record 트리 단위로 했다. `RecordReader::Open`이 트리 예산을 만들고, `RecordReader::OpenValue`(값 reader)·`RecordListReader::OpenField`(중첩 목록)·`OpenItem`(항목 reader)이 모두 같은 예산을 `SharedPtr`로 공유한다 — 파괴·이동 순서 제약이 없고, 서로 다른 스레드의 공유 reader도 안전하다. 실패한 열기 호출도 operation을 소비하고, 이동된 `ArchiveReader` 원본은 빈 입력이 된다. 교차검증에서 처음 설계(목록 한 단계만 공유, 이동 가능한 raw 포인터)의 결함을 재현해 바꿨다: 목록 reader 이동·이동 대입 뒤 항목 reader의 해제 메모리 사용(ASan), 스레드 간 카운터 갱신 손실, 중첩 목록·값 reader가 새 예산을 받아 트리 순회가 maxWork의 17.6배까지 통과. 시험(`RecordListTests.cpp`): 왕복·빈 목록·중첩, 잘못된 payload 7종, builder·reader 한도, 목록 파싱·항목 열기·조회의 operation·work 공유와 각 한도, 범위 밖 OpenItem 청구, 이동 생성·이동 대입·목록 먼저 파괴 뒤 항목 reader, 이동된 ArchiveReader 원본, 부모 → 목록 → 항목 → 중첩 목록 → 값 트리의 단일 예산(트리 사용량 − 1 한도에서 CapacityExceeded), 두 스레드의 정확한 합산, 부모 AddField 실패·모든 할당 지점 실패의 원자성.
 
 ## 5. 단계와 완료 기준
 
@@ -189,4 +190,4 @@ uint8 LinearToSrgbByte(float linear) noexcept;   // 경계 표 이분 탐색. Na
 | C3(구현됨) | `DeterministicMath` 모듈·표 생성기(sRGB 표·정확도 기준값)·소스 정책·오브젝트 검사, `LinearColor` sRGB 교체, PlatformBase `RunWithDeterministicFloatingPoint` | 기준값·정확도 표·버전 강제(digest)·환경 실행·오브젝트 검사(음성 대조 포함), macOS arm64 비트 비교(CI의 digest 시험) |
 | C4(구현됨) | CRT 없는 숫자 변환(파서·최단 표기·정밀도 서식)과 NumberText·StringBuilder 교체, `number-tables` 생성기, 정책 `crt-number-conversion` | .NET 대조·어려운 사례 표·독립 기준값(이분 탐색·최단성) |
 | C5(구현됨) | JSON 읽기·쓰기, JSONTestSuite 데이터 라이브러리 | JSONTestSuite·왕복·고정점·한도·위치 시험 |
-| C6 | RecordList(`WireType::RecordList`) | 형식·예산·실패 원자성 시험 |
+| C6(구현됨) | RecordList(`WireType::RecordList`), Record 트리 공유 예산(`ArchiveBudget`, `OpenValue`·`OpenField`) | 형식·예산·실패 원자성 시험 |
