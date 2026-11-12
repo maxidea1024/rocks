@@ -146,24 +146,30 @@ uint8 LinearToSrgbByte(float linear) noexcept;   // 경계 표 이분 탐색. Na
 
 ### 3.3 읽기(`Core/Text/Json.h`)
 
-- 결과: `JsonReadResult { document, warnings }`(경고 목록 — `JsonBomIgnored` 등) 또는 `JsonError`.
-- 입력은 UTF-8. 맨 앞 BOM 하나는 건너뛰고 `JsonBomIgnored` 경고를 남긴다(RFC 8259 §8.1의 MAY — PowerShell 5.1·Visual Studio가 기본으로 붙인다). 주석·끝 쉼표·작은따옴표·NaN/Infinity 리터럴·잘못된 UTF-8·짝 없는 surrogate 이스케이프(`\uD800`)는 거부.
+- 결과: `JsonDocument::Parse(input, options)`가 `JsonError { code, position }`를 돌려준다(성공이면 code None, 실패하면 문서가 빈다). 경고는 `Warnings()`(`JsonWarningCode::BomIgnored` 등), 설명 문자열은 `JsonErrorMessage(code)`다. 문서는 핸들(`JsonValue`)이 문서 포인터를 들고 있어 이동·복사하지 않으며, 다시 Parse·Clear하면 세대 번호로 이전 핸들이 무효가 된다.
+- 입력은 UTF-8. 맨 앞 BOM 하나는 건너뛰고 `BomIgnored` 경고를 남긴다(RFC 8259 §8.1의 MAY — PowerShell 5.1·Visual Studio가 기본으로 붙인다). 주석·끝 쉼표·작은따옴표·NaN/Infinity 리터럴·잘못된 UTF-8·짝 없는 surrogate 이스케이프(`\uD800`)는 거부.
 - 같은 객체 안 중복 키는 오류다(조용히 덮어쓰지 않는다). 판정은 이스케이프를 푼 뒤 byte 비교이며 Unicode 정규화는 하지 않는다(키 `a`와 이스케이프로 쓴 키 `a`(역슬래시·u·0061)은 같은 키, NFC·NFD 차이는 다른 키).
 - 숫자 모델: 소수부·지수가 없는 토큰만 정수 종류(int64, 넘으면 uint64, 그보다 크면 double)이고 나머지는 double(3.2절 파서). double로도 표현할 수 없는 크기(예: `1e400`)는 `NumberOutOfRange` 오류다(±Inf로 바꾸지 않는다). `-0`은 double −0.0. 원문 토큰도 보관한다(Preserve 쓰기용). 값 비교는 수치 기준.
-- 위치: 줄·열은 1부터, CRLF는 줄바꿈 1개, CR 단독도 줄바꿈, 열은 코드 포인트 단위(tab은 1칸), byte offset을 함께 보고한다. 오류 `JsonError { code, line, column, byteOffset, message }`.
+- 위치: 줄·열은 1부터, CRLF는 줄바꿈 1개, CR 단독도 줄바꿈, 열은 코드 포인트 단위(tab은 1칸), byte offset을 함께 보고한다(`JsonPosition { line, column, byteOffset }`, 오류 위치는 잘못된 값·문자·이스케이프의 시작, 건너뛴 BOM은 세지 않는다).
 - 한도(`JsonReadOptions`로 조정, 기본): 입력 64 MiB, 깊이 128, 문자열 하나 16 MiB, 노드 수 4,194,304. 파서는 반복형(명시 스택)이다(`n_structure_100000_opening_arrays`).
-- DOM: `JsonDocument`(allocator 소유 arena) — `JsonValue`(Null·Bool·Number·String·Array·Object), 객체는 원문 순서를 보존하는 (키, 값) 배열 + 조회용 해시.
+- DOM: `JsonDocument` — `JsonValue`(Null·Bool·Integer·Unsigned·Double·String·Array·Object의 가벼운 핸들), 객체는 원문 순서를 보존하는 (키, 값) 배열 + 조회용 해시.
+- 구현(구현됨, `Core/Text/Json.h`): ArenaAllocator는 소멸 전에 모든 할당이 반환돼야 하므로 노드·배열 원소 색인·객체 멤버·문자열 byte를 allocator의 평평한 배열 네 개에 담는다(할당 수가 적고 해제가 단순하다). 반복형 파서는 컨테이너마다 frame을 쌓고 자식을 대기 배열에 모았다가 닫을 때 최종 배열로 옮긴다. (객체 노드, 키 byte) 하나의 해시 색인이 중복 키 판정과 조회를 함께 맡는다. 줄·열은 오류·경고 때만 앞에서부터 다시 센다(정상 경로 비용 없음). 숫자 분류는 Core NumberText(C4)를 쓰고 원문 토큰을 보관한다. 입력은 1 GiB 이하(위치가 uint32).
 
 ### 3.4 쓰기
 
 - `JsonWriter`(StringBuilder 대상)의 byte 단위 고정 규칙: 들여쓰기 2칸, 줄바꿈 LF, 끝에 줄바꿈 1개, 키 구분자 `": "`, 빈 컨테이너 `{}`·`[]`, 키 순서는 호출자 순서(정렬이 필요한 파일은 호출자가 AssetSystem 4.2절 정렬로 넣는다). 문자열 이스케이프는 `"`·`\\`·제어 문자만(U+0008·U+000C·U+000A·U+000D·U+0009는 `\b\f\n\r\t`, 그 밖은 소문자 16진 `\u00xx` — 키 안의 U+0000 포함), 그 밖의 문자는 UTF-8 그대로. 호출자가 준 문자열은 UTF-8을 검증한다. BOM은 쓰지 않는다.
 - 모드: **Canonical**(기본 — 정수 종류는 10진, double은 최단 왕복 표기이며 결과에 `.`·`e`가 없으면 `.0`을 붙여 다시 읽어도 double이 된다, −0.0은 `-0.0`) — 읽기 → 쓰기 → 읽기가 같은 DOM이고 쓰기 결과는 고정점이다. **Preserve**(원문 숫자 토큰 그대로 — 사람이 쓴 표기를 유지해야 하는 편집 도구용, 고정점 보장 없음). NaN·Inf는 쓰기 오류.
+- 쓰기 보강(구현됨): 같은 객체의 중복 키는 InvalidArgument(자기 reader가 거부하므로), 깊이 한도는 reader와 같은 128 기본값(생성자 인자 — 더 깊게 읽은 문서는 같은 한도의 writer로 쓴다), DOM 쓰기(`Value`)와 비교(`JsonEquals`)는 재귀하지 않는다(10만 단계 시험). `JsonEquals`는 노드가 전위 순서로 쌓여 서브트리가 연속 구간이라는 점을 써서 두 구간을 한 번 훑고, 숫자는 비트를 정수로 풀어 정확히 비교한다(부동소수점 환경과 무관 — DAZ 시험). 입력 문자열이 출력 builder의 View()여도 된다(복사 후 쓴다).
 - 원자적 파일 기록은 호출자가 `FileSystem::Replace` 흐름으로 한다(AssetSystem 5.5절과 같은 임시 파일 규칙).
 
 ### 3.5 시험
 
 - JSONTestSuite(nst/JSONTestSuite, MIT, 릴리스가 없어 commit 고정)의 y_·n_ 사례 전체. 이 문서의 선택과 다른 사례는 표로 고정한다: `y_object_duplicated_key`·`y_object_duplicated_key_and_value`(중복 키 거부 — 의도한 예외), i_ 사례 각각의 결정(BOM은 받음 등). 데이터는 `Core/Source/ThirdParty/JsonTestSuite/JSONTestSuite-<commit>/`에 데이터 전용 라이브러리(1.2절)로 둔다(`.gitattributes`의 `-text` 규칙이 `Core/Source/ThirdParty/*/*/**`에 걸려 CR·NUL·BOM·잘못된 UTF-8 파일이 보존된다).
 - 왕복·고정점(Canonical), 중복 키, 한도, 오류 위치(CRLF·CR·tab), 숫자 경계.
+- 구현됨(`JsonTests.cpp`): 사례 목록은 데이터 라이브러리 manifest의 files를 이 파서로 읽어 얻는다. 318개 중 99개 받음·219개 거부, i_ 35개는 결정 표와 같다. 받은 사례 모두 Canonical 왕복·고정점과 Preserve 왕복을 확인한다.
+  - i_ 결정: 받음 — 0으로 underflow하는 지수, int64·uint64를 넘는 정수(double), BOM 하나(경고). 거부 — double 범위 밖 지수, 짝 없는 surrogate, UTF-8이 아닌 입력(UTF-16·Latin-1·overlong·잘림·범위 밖), 500단계 중첩(기본 깊이 한도 128 — 한도를 올리면 받는다).
+  - 그 밖: 쓰기 상태 기계 오용 8종, 이스케이프 규칙(NUL·0x1F 소문자, '/'·U+007F·U+2028 그대로), 최단 표기 배치 경계(1e16·1e-4·비정규), 2^53 + 1 정수, 출력 builder 별칭, 자기 문자열 별칭 Parse, 같지 않은 쌍 15종의 JsonEquals(키 순서·정수와 정수 아닌 double·2^63·2^64 경계), 오래된 핸들, surrogate 쌍 도중 끝·두 번째 이스케이프 위치·한도 초과 값 시작 위치. 왕복은 JsonEquals와 별도로 종류·비트까지 엄격 비교한다. 교차검증: 파서 퍼징 약 40만 건(참조 파서·Python 대조)과 writer 무작위 문서 22.5만 건·double 60만 건의 고정점, JsonEquals 152만 쌍 정확 대조에서 불일치 0, 변이 시험 16종 중 12종이 살아남던 시험 공백을 위 시험으로 메웠다.
+  - `n_structure_trailing_#.json`은 manifest 경로 규칙 때문에 `n_structure_trailing_hash.json`으로 이름만 바꿨다(내용은 그대로).
 
 ## 4. RecordList(Serialization)
 
@@ -178,9 +184,9 @@ uint8 LinearToSrgbByte(float linear) noexcept;   // 경계 표 이분 탐색. Na
 
 | 순서 | 내용 | 완료 기준 |
 |---|---|---|
-| C1(구현됨) | 데이터 전용 ThirdParty 종류(`kind`·`embeddedIn`·`licenseSource`, 도구·정책·SDK 라이선스 복사·시험), UCD 18.0.0 원본 추가(JSONTestSuite는 C5와 함께) | 정책 검사·self-test·SDK 통합 시험 통과 |
+| C1(구현됨) | 데이터 전용 ThirdParty 종류(`kind`·`embeddedIn`·`licenseSource`, 도구·정책·SDK 라이선스 복사·시험), UCD 18.0.0 원본 추가(JSONTestSuite는 C5에서 추가됨) | 정책 검사·self-test·SDK 통합 시험 통과 |
 | C2(구현됨) | Unicode 생성기·표·API, 정책 검사 `unicode-tables` | NormalizationTest 전체(각 열의 IsNormalized 포함), caseless 키 망라 멱등성, CaseFolding·General_Category·Default_Ignorable, 생성기 결정성 |
 | C3(구현됨) | `DeterministicMath` 모듈·표 생성기(sRGB 표·정확도 기준값)·소스 정책·오브젝트 검사, `LinearColor` sRGB 교체, PlatformBase `RunWithDeterministicFloatingPoint` | 기준값·정확도 표·버전 강제(digest)·환경 실행·오브젝트 검사(음성 대조 포함), macOS arm64 비트 비교(CI의 digest 시험) |
 | C4(구현됨) | CRT 없는 숫자 변환(파서·최단 표기·정밀도 서식)과 NumberText·StringBuilder 교체, `number-tables` 생성기, 정책 `crt-number-conversion` | .NET 대조·어려운 사례 표·독립 기준값(이분 탐색·최단성) |
-| C5 | JSON 읽기·쓰기 | JSONTestSuite·왕복·고정점·한도·위치 시험 |
+| C5(구현됨) | JSON 읽기·쓰기, JSONTestSuite 데이터 라이브러리 | JSONTestSuite·왕복·고정점·한도·위치 시험 |
 | C6 | RecordList(`WireType::RecordList`) | 형식·예산·실패 원자성 시험 |
