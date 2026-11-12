@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Compression/Compression.h>
+#include <Compression/CompressionDictionary.h>
 #include <Compression/CompressionStream.h>
 
 // 압축 모듈 내부 경계다. 공개 API(Compression.cpp)·비동기(AsyncCompression.cpp)와 코덱
@@ -44,28 +45,84 @@ bool Overlaps(const void* first, usize firstSize, const void* second, usize seco
 // 비교한다.
 bool OverlapsArrayStorage(Span<const uint8> source, const Array<uint8>& output) noexcept;
 
-// 압축·해제 문맥이다. 형식별 코덱 상태는 adapter가 소유한다.
+// 사전 코덱(CDict·DDict)의 할당 경로다. zstd create 함수는 OOM과 손상을 모두 NULL로 알리므로 할당
+// 실패를 따로 기록한다. 코덱이 해제할 때도 쓰므로 코덱보다 오래 살아야 한다(사전 상태 안에 둔다).
+struct CodecMemory {
+    Allocator* allocator = nullptr;
+    bool allocationFailed = false;
+};
+
+// 공유 사전 handle의 대상이다(CompressDictionary·DecompressDictionary). 만든 뒤에는 바뀌지 않는다.
+struct DictionaryState {
+    CompressionFormat format = CompressionFormat::Zstd;
+    bool compressing = false; // codec이 CDict(압축)인지 DDict(해제)인지
+    int32 level = 0;          // 압축 사전의 수준
+    uint32 id = 0;            // frame에 기록되는 사전 ID(raw 사전은 0)
+    usize bytes = 0;
+    Sha256Digest digest;
+    CodecMemory memory;
+    void* codec = nullptr;
+
+    DictionaryState() noexcept = default;
+    ~DictionaryState() noexcept;
+    DictionaryState(const DictionaryState&) = delete;
+    DictionaryState& operator=(const DictionaryState&) = delete;
+};
+
+// 공개 handle의 내부 상태 접근이다.
+struct DictionaryAccess {
+    static const SharedPtr<DictionaryState>& State(const CompressDictionary& dictionary) noexcept {
+        return dictionary.state_;
+    }
+
+    static const SharedPtr<DictionaryState>&
+    State(const DecompressDictionary& dictionary) noexcept {
+        return dictionary.state_;
+    }
+};
+
+// 압축·해제 문맥이다. 형식별 코덱 상태는 adapter가 소유한다. dictionary는 사전 문맥이 가진 handle
+// 복사본이다(사전 없으면 빈 handle).
 struct CompressorState {
     CompressionFormat format;
     int32 level;
     Allocator* allocator;
     void* codec;
+    SharedPtr<DictionaryState> dictionary;
 };
 
+// active는 지금 코덱에 걸린 사전이다. 사전 문맥은 dictionary와 같고, 블록 컨테이너 읽기는 읽을
+// 때마다 reader의 사전을 빌려 건다(BindDecompressorDictionary).
 struct DecompressorState {
     CompressionFormat format;
     Allocator* allocator;
     void* codec;
+    SharedPtr<DictionaryState> dictionary;
+    const DictionaryState* active;
+};
+
+struct DecompressorAccess {
+    static DecompressorState* State(Decompressor& decompressor) noexcept {
+        return decompressor.state_;
+    }
 };
 
 // zstdChecksum: zstd frame에 content checksum을 넣을지다. 블록 컨테이너는 자체 CRC가 있어 끈다.
-Result<CompressorState*> CreateCompressorState(CompressionFormat format, int32 level,
-                                               Allocator& allocator,
-                                               bool zstdChecksum = true) noexcept;
+// dictionary가 있으면 형식·수준은 사전의 값이며 format·level 인자는 무시한다.
+Result<CompressorState*> CreateCompressorState(
+    CompressionFormat format, int32 level, Allocator& allocator, bool zstdChecksum = true,
+    const SharedPtr<DictionaryState>& dictionary = SharedPtr<DictionaryState>()) noexcept;
 void DestroyCompressorState(CompressorState* state) noexcept;
-Result<DecompressorState*> CreateDecompressorState(CompressionFormat format,
-                                                   Allocator& allocator) noexcept;
+Result<DecompressorState*> CreateDecompressorState(
+    CompressionFormat format, Allocator& allocator,
+    const SharedPtr<DictionaryState>& dictionary = SharedPtr<DictionaryState>()) noexcept;
 void DestroyDecompressorState(DecompressorState* state) noexcept;
+
+// 해제 문맥에 사전을 건다(nullptr이면 뗀다). 걸 때는 항상 다시 걸고, 떼어진 문맥을 떼는 것만
+// 생략한다. 사전을 가진 문맥(dictionary 보유)에는 쓰지 않는다. dictionary는 다음 Bind까지 살아
+// 있어야 한다.
+Result<void> BindDecompressorDictionary(DecompressorState& state,
+                                        const DictionaryState* dictionary) noexcept;
 
 // 공개 API·비동기가 함께 쓰는 단일 구현이다. 인자 검증(겹침·한계)을 포함한다.
 Result<usize> CompressInto(CompressorState& state, Span<const uint8> source,
@@ -78,16 +135,20 @@ Result<usize> DecompressAppend(DecompressorState& state, Span<const uint8> sourc
                                usize maxOutputBytes, Array<uint8>& output,
                                const CompressionProbe& probe) noexcept;
 
-// 일회성 작업: 문맥을 scratch로 만들고 작업 뒤 반환한다.
-Result<usize> CompressAppendOnce(const CompressionSettings& settings, Span<const uint8> source,
-                                 Array<uint8>& output, Allocator& scratch,
-                                 const CompressionProbe& probe) noexcept;
-Result<usize> DecompressIntoOnce(CompressionFormat format, Span<const uint8> source,
-                                 Span<uint8> destination, Allocator& scratch,
-                                 const CompressionProbe& probe) noexcept;
-Result<usize> DecompressAppendOnce(CompressionFormat format, Span<const uint8> source,
-                                   usize maxOutputBytes, Array<uint8>& output, Allocator& scratch,
-                                   const CompressionProbe& probe) noexcept;
+// 일회성 작업: 문맥을 scratch로 만들고 작업 뒤 반환한다. dictionary가 있으면 사전 문맥이다(형식·
+// 수준은 사전의 값).
+Result<usize> CompressAppendOnce(
+    const CompressionSettings& settings, Span<const uint8> source, Array<uint8>& output,
+    Allocator& scratch, const CompressionProbe& probe,
+    const SharedPtr<DictionaryState>& dictionary = SharedPtr<DictionaryState>()) noexcept;
+Result<usize> DecompressIntoOnce(
+    CompressionFormat format, Span<const uint8> source, Span<uint8> destination, Allocator& scratch,
+    const CompressionProbe& probe,
+    const SharedPtr<DictionaryState>& dictionary = SharedPtr<DictionaryState>()) noexcept;
+Result<usize> DecompressAppendOnce(
+    CompressionFormat format, Span<const uint8> source, usize maxOutputBytes, Array<uint8>& output,
+    Allocator& scratch, const CompressionProbe& probe,
+    const SharedPtr<DictionaryState>& dictionary = SharedPtr<DictionaryState>()) noexcept;
 
 // Append 출력의 기존 길이 base 뒤로 길이를 맞춘다. 축소는 실패하지 않는다.
 void RestoreLength(Array<uint8>& output, usize base) noexcept;
@@ -129,25 +190,50 @@ struct StreamDecodeState {
 
 namespace zstd {
 Result<usize> Bound(usize sourceBytes) noexcept;
-Result<void*> CreateCompressor(int32 level, Allocator& allocator, bool checksum = true) noexcept;
+// dictionary가 있으면 사전(CDict)을 걸고 frame에 사전 ID를 기록한다(수준은 사전의 값).
+Result<void*> CreateCompressor(int32 level, Allocator& allocator, bool checksum = true,
+                               const DictionaryState* dictionary = nullptr) noexcept;
 // 스트림용 문맥이다(stable buffer를 쓰지 않는다).
-Result<void*> CreateStreamCompressor(int32 level, uint64 sizeHint, Allocator& allocator) noexcept;
-Result<void*> CreateStreamDecompressor(uint32 maxWindowLog, Allocator& allocator) noexcept;
+Result<void*> CreateStreamCompressor(int32 level, uint64 sizeHint, Allocator& allocator,
+                                     const DictionaryState* dictionary = nullptr) noexcept;
+Result<void*> CreateStreamDecompressor(uint32 maxWindowLog, Allocator& allocator,
+                                       const DictionaryState* dictionary = nullptr) noexcept;
+
+// 사전 코덱이다. bytes를 복사한 CDict(수준 고정)·DDict를 만든다. memory는 반환한 코덱이 해제될
+// 때까지 유효해야 한다. 오류: 할당 실패 OutOfMemory, 형식 사전 손상·사전 ID 0 InvalidArgument.
+Result<void*> CreateCompressDictionary(Span<const uint8> bytes, int32 level,
+                                       CodecMemory& memory) noexcept;
+Result<void*> CreateDecompressDictionary(Span<const uint8> bytes, CodecMemory& memory) noexcept;
+void DestroyCompressDictionary(void* dictionary) noexcept;
+void DestroyDecompressDictionary(void* dictionary) noexcept;
+uint32 CompressDictionaryId(const void* dictionary) noexcept;
+uint32 DecompressDictionaryId(const void* dictionary) noexcept;
+usize CompressDictionaryMemory(const void* dictionary) noexcept;
+usize DecompressDictionaryMemory(const void* dictionary) noexcept;
+Result<uint32> FrameDictionaryId(Span<const uint8> frame) noexcept;
+// 해제 문맥의 사전을 바꾼다(nullptr이면 뗀다).
+Result<void> BindDecompressDictionary(void* codec, const DictionaryState* dictionary) noexcept;
 void ResetStreamCompressor(void* codec) noexcept;
 void ResetStreamDecompressor(void* codec) noexcept;
 Result<StreamProgress> CompressStep(void* codec, Span<const uint8> input, Span<uint8> output,
                                     StreamFlush flush) noexcept;
+// requiredDictionaryId: 형식 사전 문맥이면 그 사전 ID다. 사전 ID 없는 frame을 Unsupported로
+// 거부한다(0이면 검사하지 않는다).
 Result<StreamProgress> DecompressStep(void* codec, Span<const uint8> input, Span<uint8> output,
-                                      uint32 maxWindowLog, StreamDecodeState& state) noexcept;
+                                      uint32 maxWindowLog, uint32 requiredDictionaryId,
+                                      StreamDecodeState& state) noexcept;
 void DestroyCompressor(void* codec) noexcept;
-Result<void*> CreateDecompressor(Allocator& allocator) noexcept;
+Result<void*> CreateDecompressor(Allocator& allocator,
+                                 const DictionaryState* dictionary = nullptr) noexcept;
 void DestroyDecompressor(void* codec) noexcept;
-Result<usize> Compress(void* codec, Span<const uint8> source, Span<uint8> destination,
-                       const CompressionProbe& probe) noexcept;
-Result<usize> Decompress(void* codec, Span<const uint8> source, Span<uint8> destination,
-                         const CompressionProbe& probe) noexcept;
-Result<usize> DecompressAppend(void* codec, Span<const uint8> source, usize maxOutputBytes,
-                               Array<uint8>& output, const CompressionProbe& probe) noexcept;
+// dictionary는 CreateCompressor에 준 사전이다(frame마다 수준 매개변수를 다시 정한다).
+Result<usize> Compress(void* codec, const DictionaryState* dictionary, Span<const uint8> source,
+                       Span<uint8> destination, const CompressionProbe& probe) noexcept;
+Result<usize> Decompress(void* codec, uint32 requiredDictionaryId, Span<const uint8> source,
+                         Span<uint8> destination, const CompressionProbe& probe) noexcept;
+Result<usize> DecompressAppend(void* codec, uint32 requiredDictionaryId, Span<const uint8> source,
+                               usize maxOutputBytes, Array<uint8>& output,
+                               const CompressionProbe& probe) noexcept;
 } // namespace zstd
 
 namespace zlib {

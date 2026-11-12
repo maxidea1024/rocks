@@ -46,10 +46,10 @@ uint32 StoredSize(const Array<uint8>& container, uint32 block) {
 // 헤더·표를 고친 뒤 indexCrc32를 다시 계산한다(헤더 검사보다 뒤의 검사를 시험할 때).
 void Reseal(Array<uint8>& container) {
     const uint32 count = LoadLittleEndian<uint32>(container.Data() + 16);
-    uint32 crc = Crc32(Span<const uint8>(container.Data(), 36));
+    uint32 crc = Crc32(Span<const uint8>(container.Data(), 44));
     crc = Crc32(Span<const uint8>(container.Data() + CompressedBlocksHeaderBytes, usize{8} * count),
                 crc);
-    StoreLittleEndian<uint32>(container.Data() + 36, crc);
+    StoreLittleEndian<uint32>(container.Data() + 44, crc);
 }
 
 ErrorCode OpenError(const Array<uint8>& container) {
@@ -111,9 +111,9 @@ TEST(CompressedBlocks_SettingsAndBound) {
     CHECK(settings.Value().BlockSizeLog2() == DefaultCompressedBlockSizeLog2);
     CHECK(settings.Value().BlockSize() == usize{1} << DefaultCompressedBlockSizeLog2);
 
-    CHECK(TryGetCompressedBlocksBound(12, 0).Value() == 40);
-    CHECK(TryGetCompressedBlocksBound(12, 4096).Value() == 40 + 8 + 4096);
-    CHECK(TryGetCompressedBlocksBound(12, 4097).Value() == 40 + 16 + 4097);
+    CHECK(TryGetCompressedBlocksBound(12, 0).Value() == 48);
+    CHECK(TryGetCompressedBlocksBound(12, 4096).Value() == 48 + 8 + 4096);
+    CHECK(TryGetCompressedBlocksBound(12, 4097).Value() == 48 + 16 + 4097);
     CHECK(TryGetCompressedBlocksBound(11, 1).Error() == ErrorCode::InvalidArgument);
     // 블록 수가 u32를 넘는다.
     CHECK(TryGetCompressedBlocksBound(12, uint64{1} << 44).Error() == ErrorCode::InvalidArgument);
@@ -200,7 +200,7 @@ TEST(CompressedBlocks_WriterMatchesOneShot) {
         auto writer = CompressedBlocksWriter::TryBegin(settings, original.Size(), allocator);
         REQUIRE(writer);
         CHECK(writer.Value().BlockCount() == 8);
-        CHECK(writer.Value().IndexBytes() == 40 + 8 * 8);
+        CHECK(writer.Value().IndexBytes() == 48 + 8 * 8);
         Array<uint8> payload(allocator);
         // 크기가 다르거나 겹치면 거부하고 상태는 그대로다.
         CHECK(writer.Value().TryAppendBlock(Slice(View(original), 0, 4095), payload).Error() ==
@@ -270,18 +270,23 @@ TEST(CompressedBlocks_HeaderValidation) {
         };
         const Mutation Mutations[] = {
             {0, 'X', ErrorCode::InvalidArgument},   // magic
-            {4, 2, ErrorCode::Unsupported},         // version
+            {4, 1, ErrorCode::Unsupported},         // version(이전 40byte 헤더의 1)
+            {4, 3, ErrorCode::Unsupported},         // version(모르는 값)
             {6, 0, ErrorCode::InvalidArgument},     // codec 0
             {6, 4, ErrorCode::Unsupported},         // 모르는 codec
             {7, 11, ErrorCode::InvalidArgument},    // blockSizeLog2
             {7, 13, ErrorCode::InvalidArgument},    // 블록 수 불일치
             {8, 0xff, ErrorCode::InvalidArgument},  // rawSize
             {16, 9, ErrorCode::InvalidArgument},    // blockCount
-            {20, 1, ErrorCode::Unsupported},        // flags
+            {20, 1, ErrorCode::Unsupported},        // 사전 bit + Lz4(지원하지 않는 조합)
+            {20, 2, ErrorCode::Unsupported},        // 모르는 flags bit
+            {23, 0x80, ErrorCode::Unsupported},     // 모르는 flags bit(최상위)
             {24, 0, ErrorCode::InvalidArgument},    // payloadSize
-            {32, 1, ErrorCode::InvalidArgument},    // reserved
-            {36, 0x55, ErrorCode::InvalidArgument}, // indexCrc32
-            {44, 0x55, ErrorCode::InvalidArgument}, // 표(CRC 불일치)
+            {32, 1, ErrorCode::InvalidArgument},    // 사전 bit 없이 지문
+            {39, 1, ErrorCode::InvalidArgument},    // 사전 bit 없이 지문(마지막 byte)
+            {40, 1, ErrorCode::InvalidArgument},    // reserved
+            {44, 0x55, ErrorCode::InvalidArgument}, // indexCrc32
+            {52, 0x55, ErrorCode::InvalidArgument}, // 표(CRC 불일치)
         };
         for (const Mutation& mutation : Mutations) {
             Array<uint8> bad(allocator);
@@ -298,8 +303,8 @@ TEST(CompressedBlocks_HeaderValidation) {
         for (const auto& sizes : Sizes) {
             Array<uint8> bad(allocator);
             REQUIRE(bad.TryAppend(View(good)));
-            StoreLittleEndian<uint32>(bad.Data() + 40, sizes[0]);
-            StoreLittleEndian<uint32>(bad.Data() + 48, sizes[1]);
+            StoreLittleEndian<uint32>(bad.Data() + 48, sizes[0]);
+            StoreLittleEndian<uint32>(bad.Data() + 56, sizes[1]);
             Reseal(bad);
             CHECK(OpenError(bad) == ErrorCode::InvalidArgument);
         }
@@ -315,10 +320,10 @@ TEST(CompressedBlocks_HeaderValidation) {
         CHECK(OpenError(Array<uint8>(allocator)) == ErrorCode::InvalidArgument);
 
         // 헤더만으로 인덱스 크기를 구한다. 거짓 블록 수로 큰 할당을 유도할 수 없다.
-        CHECK(CompressedBlocksReader::TryGetIndexBytes(Slice(View(good), 0, 40), good.Size())
-                  .Value() == 40 + 8 * 4);
+        CHECK(CompressedBlocksReader::TryGetIndexBytes(Slice(View(good), 0, 48), good.Size())
+                  .Value() == 48 + 8 * 4);
         Array<uint8> huge(allocator);
-        REQUIRE(huge.TryAppend(Slice(View(good), 0, 40)));
+        REQUIRE(huge.TryAppend(Slice(View(good), 0, 48)));
         StoreLittleEndian<uint64>(huge.Data() + 8, uint64{0xffffffff} << 12);
         StoreLittleEndian<uint32>(huge.Data() + 16, 0xffffffffu);
         StoreLittleEndian<uint64>(huge.Data() + 24, 0xffffffffull);
@@ -611,10 +616,11 @@ TEST(CompressedBlocks_DeterministicOutputGoldens) {
         uint32 crc;
     };
     static constexpr Golden Goldens[] = {
-        // 기준: Windows x64 clang 21.1.6, LZ4 1.11.1·zstd 1.5.7·zlib 1.4, 기본 수준, 64KiB 블록.
-        {CompressionFormat::Lz4, 1405516, 0x670a5fcau},
-        {CompressionFormat::Zstd, 820599, 0xe8abd8a9u},
-        {CompressionFormat::Deflate, 900476, 0xf03f9289u},
+        // 기준: Windows x64 clang 21.1.6, LZ4 1.11.1·zstd 1.5.7·zlib 1.4, 기본 수준, 64KiB 블록,
+        // RCBK v2(헤더 48byte).
+        {CompressionFormat::Lz4, 1405524, 0x8193c4edu},
+        {CompressionFormat::Zstd, 820607, 0xa64ce078u},
+        {CompressionFormat::Deflate, 900484, 0x5ada0e61u},
     };
     SystemAllocator allocator;
     Array<uint8> original(allocator);
@@ -696,20 +702,21 @@ Array<uint8> Handmade(uint8 codec, uint32 blockSizeLog2, uint64 rawSize,
     for (usize index = 0; index < count; ++index) {
         payload += blocks[index].Size();
     }
-    (void)container.TryResize(40 + 8 * count);
+    (void)container.TryResize(48 + 8 * count);
     platform::MemoryCopy(container.Data(), "RCBK", 4);
-    StoreLittleEndian<uint16>(container.Data() + 4, 1);
+    StoreLittleEndian<uint16>(container.Data() + 4, 2);
     container[6] = codec;
     container[7] = static_cast<uint8>(blockSizeLog2);
     StoreLittleEndian<uint64>(container.Data() + 8, rawSize);
     StoreLittleEndian<uint32>(container.Data() + 16, static_cast<uint32>(count));
     StoreLittleEndian<uint32>(container.Data() + 20, 0);
     StoreLittleEndian<uint64>(container.Data() + 24, payload);
-    StoreLittleEndian<uint32>(container.Data() + 32, 0);
+    StoreLittleEndian<uint64>(container.Data() + 32, 0);
+    StoreLittleEndian<uint32>(container.Data() + 40, 0);
     for (usize index = 0; index < count; ++index) {
-        StoreLittleEndian<uint32>(container.Data() + 40 + 8 * index,
+        StoreLittleEndian<uint32>(container.Data() + 48 + 8 * index,
                                   static_cast<uint32>(blocks[index].Size()));
-        StoreLittleEndian<uint32>(container.Data() + 44 + 8 * index, Crc32(blocks[index]));
+        StoreLittleEndian<uint32>(container.Data() + 52 + 8 * index, Crc32(blocks[index]));
     }
     for (usize index = 0; index < count; ++index) {
         (void)container.TryAppend(blocks[index]);
@@ -857,34 +864,34 @@ TEST(CompressedBlocks_HeaderRulesAndFileFlow) {
     SystemAllocator allocator;
     {
         auto header = [](uint64 rawSize, uint32 count, uint64 payload) {
-            uint8 bytes[40] = {'R', 'C', 'B', 'K', 1, 0, 1, 12};
+            uint8 bytes[48] = {'R', 'C', 'B', 'K', 2, 0, 1, 12};
             StoreLittleEndian<uint64>(bytes + 8, rawSize);
             StoreLittleEndian<uint32>(bytes + 16, count);
             StoreLittleEndian<uint64>(bytes + 24, payload);
-            struct Bytes40 {
-                uint8 data[40];
+            struct Bytes48 {
+                uint8 data[48];
             } result{};
-            platform::MemoryCopy(result.data, bytes, 40);
+            platform::MemoryCopy(result.data, bytes, 48);
             return result;
         };
         auto indexBytes = [](const auto& bytes, uint64 containerBytes) {
-            return CompressedBlocksReader::TryGetIndexBytes(Span<const uint8>(bytes.data, 40),
+            return CompressedBlocksReader::TryGetIndexBytes(Span<const uint8>(bytes.data, 48),
                                                             containerBytes);
         };
         // payload < 블록 수, payload > rawSize(전체 길이는 맞춘다).
-        CHECK(indexBytes(header(8192, 2, 1), 40 + 16 + 1).Error() == ErrorCode::InvalidArgument);
-        CHECK(indexBytes(header(10, 1, 11), 40 + 8 + 11).Error() == ErrorCode::InvalidArgument);
-        // 40byte 미만.
+        CHECK(indexBytes(header(8192, 2, 1), 48 + 16 + 1).Error() == ErrorCode::InvalidArgument);
+        CHECK(indexBytes(header(10, 1, 11), 48 + 8 + 11).Error() == ErrorCode::InvalidArgument);
+        // 48byte 미만.
         const auto good = header(10, 1, 5);
-        CHECK(indexBytes(good, 40 + 8 + 5).Value() == 48);
-        CHECK(CompressedBlocksReader::TryGetIndexBytes(Span<const uint8>(good.data, 39), 53)
+        CHECK(indexBytes(good, 48 + 8 + 5).Value() == 56);
+        CHECK(CompressedBlocksReader::TryGetIndexBytes(Span<const uint8>(good.data, 47), 61)
                   .Error() == ErrorCode::InvalidArgument);
         // 최대 블록 수(2^32 − 1)는 길이만 맞으면 된다. rawSize 2^64 − 1은 블록 수가 u32를 넘는다.
         const uint64 maxCount = 0xffffffffull;
         CHECK(
-            indexBytes(header(maxCount << 12, 0xffffffffu, maxCount), 40 + 9 * maxCount).Value() ==
-            40 + 8 * maxCount);
-        CHECK(indexBytes(header(~uint64{0}, 0xffffffffu, maxCount), 40 + 9 * maxCount).Error() ==
+            indexBytes(header(maxCount << 12, 0xffffffffu, maxCount), 48 + 9 * maxCount).Value() ==
+            48 + 8 * maxCount);
+        CHECK(indexBytes(header(~uint64{0}, 0xffffffffu, maxCount), 48 + 9 * maxCount).Error() ==
               ErrorCode::InvalidArgument);
 
         // 파일 흐름: 헤더 → 인덱스만 → TryLocate → 필요한 저장 byte만 읽는다.
@@ -893,7 +900,7 @@ TEST(CompressedBlocks_HeaderRulesAndFileFlow) {
         Array<uint8> container(allocator);
         REQUIRE(TryCompressBlocksAppend(BlockSettings(CompressionFormat::Deflate, 12),
                                         View(original), container, allocator));
-        auto index = CompressedBlocksReader::TryGetIndexBytes(Slice(View(container), 0, 40),
+        auto index = CompressedBlocksReader::TryGetIndexBytes(Slice(View(container), 0, 48),
                                                               container.Size());
         REQUIRE(index);
         CHECK(CompressedBlocksReader::TryOpen(Slice(View(container), 0, index.Value() - 1),

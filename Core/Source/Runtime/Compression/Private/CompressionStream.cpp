@@ -33,6 +33,9 @@ struct StreamState {
     uint32 maxWindowLog = 0;
     usize totalOutput = 0;
     StreamDecodeState decode;
+
+    // 사전 스트림이 가진 사전 handle이다(코덱이 CDict·DDict를 참조한다).
+    SharedPtr<DictionaryState> dictionary;
 };
 
 namespace {
@@ -80,8 +83,10 @@ void DestroyState(StreamState* state) noexcept {
         return;
     }
 
+    // 코덱이 사전을 참조하므로 코덱을 먼저 정리한 뒤 사전 handle을 놓는다.
     Allocator& allocator = *state->allocator;
     DestroyCodec(*state);
+    DestroyAt(state);
     CodecFree(allocator, state);
 }
 
@@ -256,7 +261,8 @@ Result<StreamProgress> DecompressStep(StreamState& state, Span<const uint8> inpu
     const Span<uint8> target(output.Data(), window);
     auto step =
         state.format == CompressionFormat::Zstd
-            ? zstd::DecompressStep(state.codec, input, target, state.maxWindowLog, state.decode)
+            ? zstd::DecompressStep(state.codec, input, target, state.maxWindowLog,
+                                   state.dictionary ? state.dictionary->id : 0, state.decode)
             : zlib::DecompressStep(state.codec, input, target, state.decode);
     if (!step) {
         return Fail<StreamProgress>(state, step.Error());
@@ -293,15 +299,33 @@ CompressStream& CompressStream::operator=(CompressStream&& other) noexcept {
 
 Result<CompressStream> CompressStream::TryCreate(const CompressionSettings& settings,
                                                  Allocator& allocator, uint64 sizeHint) noexcept {
-    const CompressionFormat format = settings.Format();
+    return TryCreateWith(settings.Format(), settings.Level(), allocator, sizeHint,
+                         SharedPtr<detail::DictionaryState>());
+}
+
+Result<CompressStream> CompressStream::TryCreate(const CompressDictionary& dictionary,
+                                                 Allocator& allocator, uint64 sizeHint) noexcept {
+    const auto& state = detail::DictionaryAccess::State(dictionary);
+    if (!state) {
+        return Result<CompressStream>::Failure(ErrorCode::StaleHandle);
+    }
+
+    return TryCreateWith(state->format, state->level, allocator, sizeHint, state);
+}
+
+Result<CompressStream>
+CompressStream::TryCreateWith(CompressionFormat format, int32 level, Allocator& allocator,
+                              uint64 sizeHint,
+                              const SharedPtr<detail::DictionaryState>& dictionary) noexcept {
     if (!detail::IsStreamFormat(format)) {
         return Result<CompressStream>::Failure(
             detail::IsKnownFormat(format) ? ErrorCode::Unsupported : ErrorCode::InvalidArgument);
     }
 
-    auto codec = format == CompressionFormat::Zstd
-                     ? detail::zstd::CreateStreamCompressor(settings.Level(), sizeHint, allocator)
-                     : detail::zlib::CreateCompressor(format, settings.Level(), allocator);
+    auto codec =
+        format == CompressionFormat::Zstd
+            ? detail::zstd::CreateStreamCompressor(level, sizeHint, allocator, dictionary.Get())
+            : detail::zlib::CreateCompressor(format, level, allocator);
     if (!codec) {
         return Result<CompressStream>::Failure(codec.Error());
     }
@@ -311,6 +335,7 @@ Result<CompressStream> CompressStream::TryCreate(const CompressionSettings& sett
     initial.codec = codec.Value();
     initial.format = format;
     initial.compressing = true;
+    initial.dictionary = dictionary;
     auto state = detail::AdoptCodec(initial);
     if (!state) {
         return Result<CompressStream>::Failure(state.Error());
@@ -386,6 +411,24 @@ DecompressStream& DecompressStream::operator=(DecompressStream&& other) noexcept
 Result<DecompressStream> DecompressStream::TryCreate(CompressionFormat format,
                                                      const DecompressStreamLimits& limits,
                                                      Allocator& allocator) noexcept {
+    return TryCreateWith(format, limits, allocator, SharedPtr<detail::DictionaryState>());
+}
+
+Result<DecompressStream> DecompressStream::TryCreate(const DecompressDictionary& dictionary,
+                                                     const DecompressStreamLimits& limits,
+                                                     Allocator& allocator) noexcept {
+    const auto& state = detail::DictionaryAccess::State(dictionary);
+    if (!state) {
+        return Result<DecompressStream>::Failure(ErrorCode::StaleHandle);
+    }
+
+    return TryCreateWith(state->format, limits, allocator, state);
+}
+
+Result<DecompressStream>
+DecompressStream::TryCreateWith(CompressionFormat format, const DecompressStreamLimits& limits,
+                                Allocator& allocator,
+                                const SharedPtr<detail::DictionaryState>& dictionary) noexcept {
     if (!detail::IsStreamFormat(format)) {
         return Result<DecompressStream>::Failure(
             detail::IsKnownFormat(format) ? ErrorCode::Unsupported : ErrorCode::InvalidArgument);
@@ -396,7 +439,8 @@ Result<DecompressStream> DecompressStream::TryCreate(CompressionFormat format,
     }
 
     auto codec = format == CompressionFormat::Zstd
-                     ? detail::zstd::CreateStreamDecompressor(limits.maxWindowLog, allocator)
+                     ? detail::zstd::CreateStreamDecompressor(limits.maxWindowLog, allocator,
+                                                              dictionary.Get())
                      : detail::zlib::CreateDecompressor(format, allocator);
     if (!codec) {
         return Result<DecompressStream>::Failure(codec.Error());
@@ -409,6 +453,7 @@ Result<DecompressStream> DecompressStream::TryCreate(CompressionFormat format,
     initial.compressing = false;
     initial.maxOutputBytes = limits.maxOutputBytes;
     initial.maxWindowLog = limits.maxWindowLog;
+    initial.dictionary = dictionary;
     auto state = detail::AdoptCodec(initial);
     if (!state) {
         return Result<DecompressStream>::Failure(state.Error());

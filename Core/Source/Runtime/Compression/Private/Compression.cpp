@@ -27,6 +27,11 @@ bool IsZlibFamily(CompressionFormat format) noexcept {
            format == CompressionFormat::Gzip;
 }
 
+// 형식 사전이 걸린 해제 문맥이면 그 사전 ID다(사전 ID 없는 frame 거부용).
+uint32 RequiredDictionaryId(const DecompressorState& state) noexcept {
+    return state.active != nullptr ? state.active->id : 0;
+}
+
 void DestroyCompressorCodec(CompressionFormat format, int32 level, void* codec,
                             Allocator& allocator) noexcept {
     if (format == CompressionFormat::Lz4) {
@@ -83,15 +88,22 @@ void RestoreLength(Array<uint8>& output, usize base) noexcept {
     ROCKS_ASSERT(restored.IsOk());
 }
 
-Result<CompressorState*> CreateCompressorState(CompressionFormat format, int32 level,
-                                               Allocator& allocator, bool zstdChecksum) noexcept {
+Result<CompressorState*>
+CreateCompressorState(CompressionFormat format, int32 level, Allocator& allocator,
+                      bool zstdChecksum, const SharedPtr<DictionaryState>& dictionary) noexcept {
+    if (dictionary) {
+        // 사전이 형식·수준을 정한다(지금은 zstd만 사전을 만든다).
+        format = dictionary->format;
+        level = dictionary->level;
+    }
+
     Result<void*> codec = Result<void*>::Failure(ErrorCode::InvalidArgument);
     switch (format) {
     case CompressionFormat::Lz4:
         codec = lz4::CreateCompressor(level, allocator);
         break;
     case CompressionFormat::Zstd:
-        codec = zstd::CreateCompressor(level, allocator, zstdChecksum);
+        codec = zstd::CreateCompressor(level, allocator, zstdChecksum, dictionary.Get());
         break;
     case CompressionFormat::Deflate:
     case CompressionFormat::Zlib:
@@ -111,7 +123,7 @@ Result<CompressorState*> CreateCompressorState(CompressionFormat format, int32 l
     }
 
     return Result<CompressorState*>::Success(ConstructAt<CompressorState>(
-        memory, CompressorState{format, level, &allocator, codec.Value()}));
+        memory, CompressorState{format, level, &allocator, codec.Value(), dictionary}));
 }
 
 void DestroyCompressorState(CompressorState* state) noexcept {
@@ -119,20 +131,26 @@ void DestroyCompressorState(CompressorState* state) noexcept {
         return;
     }
 
+    // 코덱이 사전(CDict)을 참조하므로 코덱을 먼저 정리한 뒤 사전 handle을 놓는다.
     Allocator& allocator = *state->allocator;
     DestroyCompressorCodec(state->format, state->level, state->codec, allocator);
+    DestroyAt(state);
     CodecFree(allocator, state);
 }
 
-Result<DecompressorState*> CreateDecompressorState(CompressionFormat format,
-                                                   Allocator& allocator) noexcept {
+Result<DecompressorState*>
+CreateDecompressorState(CompressionFormat format, Allocator& allocator,
+                        const SharedPtr<DictionaryState>& dictionary) noexcept {
+    if (dictionary) {
+        format = dictionary->format;
+    }
     if (!IsKnownFormat(format)) {
         return Result<DecompressorState*>::Failure(ErrorCode::InvalidArgument);
     }
 
     void* codec = nullptr;
     if (format == CompressionFormat::Zstd) {
-        auto created = zstd::CreateDecompressor(allocator);
+        auto created = zstd::CreateDecompressor(allocator, dictionary.Get());
         if (!created) {
             return Result<DecompressorState*>::Failure(created.Error());
         }
@@ -155,8 +173,31 @@ Result<DecompressorState*> CreateDecompressorState(CompressionFormat format,
         return Result<DecompressorState*>::Failure(ErrorCode::OutOfMemory);
     }
 
-    return Result<DecompressorState*>::Success(
-        ConstructAt<DecompressorState>(memory, DecompressorState{format, &allocator, codec}));
+    return Result<DecompressorState*>::Success(ConstructAt<DecompressorState>(
+        memory, DecompressorState{format, &allocator, codec, dictionary, dictionary.Get()}));
+}
+
+Result<void> BindDecompressorDictionary(DecompressorState& state,
+                                        const DictionaryState* dictionary) noexcept {
+    ROCKS_ASSERT(!state.dictionary);
+    // 걸 때는 같은 주소라도 다시 건다. 해제된 사전 상태의 주소를 새 사전이 재사용하면 주소 비교로는
+    // 다른 사전임을 알 수 없다(호출자는 해제 뒤 항상 떼지만, 그 불변식에만 기대지 않는다).
+    if (dictionary == nullptr && state.active == nullptr) {
+        return Result<void>::Success();
+    }
+    if (state.format != CompressionFormat::Zstd) {
+        // 사전은 zstd만 만든다. 다른 형식에 걸 사전은 없다.
+        return dictionary == nullptr ? Result<void>::Success()
+                                     : Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto bound = zstd::BindDecompressDictionary(state.codec, dictionary);
+    if (!bound) {
+        return bound;
+    }
+
+    state.active = dictionary;
+    return Result<void>::Success();
 }
 
 void DestroyDecompressorState(DecompressorState* state) noexcept {
@@ -170,6 +211,7 @@ void DestroyDecompressorState(DecompressorState* state) noexcept {
     } else if (IsZlibFamily(state->format)) {
         zlib::Destroy(state->codec);
     }
+    DestroyAt(state);
     CodecFree(allocator, state);
 }
 
@@ -189,7 +231,7 @@ Result<usize> CompressInto(CompressorState& state, Span<const uint8> source,
         }
         return lz4::Compress(state.codec, state.level, source, destination);
     case CompressionFormat::Zstd:
-        return zstd::Compress(state.codec, source, destination, probe);
+        return zstd::Compress(state.codec, state.dictionary.Get(), source, destination, probe);
     case CompressionFormat::Deflate:
     case CompressionFormat::Zlib:
     case CompressionFormat::Gzip:
@@ -248,7 +290,8 @@ Result<usize> DecompressInto(DecompressorState& state, Span<const uint8> source,
         }
         return lz4::Decompress(source, destination);
     case CompressionFormat::Zstd:
-        return zstd::Decompress(state.codec, source, destination, probe);
+        return zstd::Decompress(state.codec, RequiredDictionaryId(state), source, destination,
+                                probe);
     case CompressionFormat::Deflate:
     case CompressionFormat::Zlib:
     case CompressionFormat::Gzip:
@@ -274,7 +317,8 @@ Result<usize> DecompressAppend(DecompressorState& state, Span<const uint8> sourc
         }
         return lz4::DecompressAppend(source, maxOutputBytes, output);
     case CompressionFormat::Zstd:
-        return zstd::DecompressAppend(state.codec, source, maxOutputBytes, output, probe);
+        return zstd::DecompressAppend(state.codec, RequiredDictionaryId(state), source,
+                                      maxOutputBytes, output, probe);
     case CompressionFormat::Deflate:
     case CompressionFormat::Zlib:
     case CompressionFormat::Gzip:
@@ -285,12 +329,14 @@ Result<usize> DecompressAppend(DecompressorState& state, Span<const uint8> sourc
 
 Result<usize> CompressAppendOnce(const CompressionSettings& settings, Span<const uint8> source,
                                  Array<uint8>& output, Allocator& scratch,
-                                 const CompressionProbe& probe) noexcept {
+                                 const CompressionProbe& probe,
+                                 const SharedPtr<DictionaryState>& dictionary) noexcept {
     if (OverlapsArrayStorage(source, output)) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
 
-    auto state = CreateCompressorState(settings.Format(), settings.Level(), scratch);
+    auto state =
+        CreateCompressorState(settings.Format(), settings.Level(), scratch, true, dictionary);
     if (!state) {
         return Result<usize>::Failure(state.Error());
     }
@@ -302,7 +348,8 @@ Result<usize> CompressAppendOnce(const CompressionSettings& settings, Span<const
 
 Result<usize> DecompressIntoOnce(CompressionFormat format, Span<const uint8> source,
                                  Span<uint8> destination, Allocator& scratch,
-                                 const CompressionProbe& probe) noexcept {
+                                 const CompressionProbe& probe,
+                                 const SharedPtr<DictionaryState>& dictionary) noexcept {
     if (source.Size() == 0 ||
         Overlaps(source.Data(), source.Size(), destination.Data(), destination.Size())) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
@@ -310,11 +357,11 @@ Result<usize> DecompressIntoOnce(CompressionFormat format, Span<const uint8> sou
 
     // Lz4 해제는 코덱 상태가 없으므로 할당하지 않는다(가장 빠른 경로에 OOM 실패를 만들지 않는다).
     if (format == CompressionFormat::Lz4) {
-        DecompressorState stateless{format, &scratch, nullptr};
+        DecompressorState stateless{format, &scratch, nullptr, {}, nullptr};
         return DecompressInto(stateless, source, destination, probe);
     }
 
-    auto state = CreateDecompressorState(format, scratch);
+    auto state = CreateDecompressorState(format, scratch, dictionary);
     if (!state) {
         return Result<usize>::Failure(state.Error());
     }
@@ -326,17 +373,18 @@ Result<usize> DecompressIntoOnce(CompressionFormat format, Span<const uint8> sou
 
 Result<usize> DecompressAppendOnce(CompressionFormat format, Span<const uint8> source,
                                    usize maxOutputBytes, Array<uint8>& output, Allocator& scratch,
-                                   const CompressionProbe& probe) noexcept {
+                                   const CompressionProbe& probe,
+                                   const SharedPtr<DictionaryState>& dictionary) noexcept {
     if (source.Size() == 0 || OverlapsArrayStorage(source, output)) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
 
     if (format == CompressionFormat::Lz4) {
-        DecompressorState stateless{format, &scratch, nullptr};
+        DecompressorState stateless{format, &scratch, nullptr, {}, nullptr};
         return DecompressAppend(stateless, source, maxOutputBytes, output, probe);
     }
 
-    auto state = CreateDecompressorState(format, scratch);
+    auto state = CreateDecompressorState(format, scratch, dictionary);
     if (!state) {
         return Result<usize>::Failure(state.Error());
     }

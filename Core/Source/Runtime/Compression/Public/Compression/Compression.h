@@ -29,9 +29,10 @@
 //   구간은 미정이다(코덱이 성능을 위해 반환 크기 뒤를 덮어쓸 수 있다). Append는 실패 시 output
 //   길이를 호출 전으로 되돌린다(capacity는 늘 수 있다).
 // - 오류: 출력·상한 부족 CapacityExceeded, 손상·절단·체크섬 불일치·스트림 뒤 남는 byte·빈 해제
-//   입력·범위 밖 수준·source와 출력의 겹침 InvalidArgument, 프리셋 사전이 필요한 입력 Unsupported,
-//   할당 실패 OutOfMemory, 크기 산술 overflow Overflow, 외부 코덱이 계약 밖의 실패를 보고
-//   DependencyFailed.
+//   입력·범위 밖 수준·source와 출력의 겹침 InvalidArgument, 문맥에 없거나 다른 사전이 필요한 입력
+//   (zlib 프리셋 사전, 사전 ID가 다른 zstd frame, 형식 사전 문맥에 사전 ID 없는 frame)과 window가
+//   구현 상한(2^31)을 넘는 zstd frame Unsupported, 할당 실패 OutOfMemory, 크기 산술 overflow
+//   Overflow, 외부 코덱이 계약 밖의 실패를 보고 DependencyFailed.
 // - 할당은 모두 인자로 받은 Allocator를 거친다. 전역·thread_local 캐시가 없어 자유 함수는 재진입
 //   가능하다. 반복 호출이 많으면 코덱 문맥을 재사용하는 Compressor·Decompressor를 쓴다.
 // - 같은 라이브러리 버전·설정·입력이면 64bit little-endian 대상(Windows x64·macOS ARM64·Android
@@ -41,7 +42,16 @@ namespace rocks {
 namespace detail {
 struct CompressorState;
 struct DecompressorState;
+struct DecompressorAccess;
 } // namespace detail
+
+class CompressDictionary;
+class DecompressDictionary;
+
+// 이 모듈의 출력 byte를 바꾸는 결정(코덱 버전, frame 설정·분할 단위·사전 매개변수 정책, 블록
+// 컨테이너 배치 등)이 바뀔 때마다 올리는 개정 번호다. 압축 결과를 캐시하는 쪽(쿠킹 빌드 키)은
+// 형식·수준·사전 Digest와 함께 이 값을 키에 넣는다.
+inline constexpr uint32 CompressionOutputRevision = 1;
 
 // 압축 형식이다. 값은 프로세스 안 식별용이며 영속 포맷에 기록할 때는 상위 포맷이 별도 ID를 정한다.
 // - Lz4: LZ4 raw block. 해제가 가장 빠르다. 원본 크기·체크섬이 없어 해제할 때 크기를 알아야
@@ -141,6 +151,23 @@ Result<usize> TryDecompressAppend(CompressionFormat format, Span<const uint8> so
                                   usize maxOutputBytes, Array<uint8>& output,
                                   Allocator& scratch) noexcept;
 
+// 사전을 쓰는 일회성 변형이다(CompressionDictionary.h). 형식·수준은 사전이 정하며 계약은 사전 없는
+// 함수와 같다. 빈 사전 handle은 StaleHandle이다. 사전 준비(CDict·DDict)는 handle이 가지므로
+// 호출마다 드는 비용은 사전 없는 함수와 같은 문맥 생성뿐이다.
+Result<usize> TryCompress(const CompressDictionary& dictionary, Span<const uint8> source,
+                          Span<uint8> destination, Allocator& scratch) noexcept;
+Result<usize> TryCompressAppend(const CompressDictionary& dictionary, Span<const uint8> source,
+                                Array<uint8>& output) noexcept;
+Result<usize> TryCompressAppend(const CompressDictionary& dictionary, Span<const uint8> source,
+                                Array<uint8>& output, Allocator& scratch) noexcept;
+Result<usize> TryDecompress(const DecompressDictionary& dictionary, Span<const uint8> source,
+                            Span<uint8> destination, Allocator& scratch) noexcept;
+Result<usize> TryDecompressAppend(const DecompressDictionary& dictionary, Span<const uint8> source,
+                                  usize maxOutputBytes, Array<uint8>& output) noexcept;
+Result<usize> TryDecompressAppend(const DecompressDictionary& dictionary, Span<const uint8> source,
+                                  usize maxOutputBytes, Array<uint8>& output,
+                                  Allocator& scratch) noexcept;
+
 // 반복 압축용 문맥이다. 코덱 상태(zstd 문맥·LZ4 상태·zlib deflate 상태)를 한 번 할당해 재사용하므로
 // 작은 입력을 많이 압축할 때 빠르다. 결과는 자유 함수와 byte 단위로 같다.
 // - 이동 전용이다. 이동된 뒤의 객체에 호출하면 StaleHandle이다.
@@ -163,6 +190,11 @@ public:
 
     // 실패: OutOfMemory, 외부 코덱 초기화 실패 DependencyFailed.
     static Result<Compressor> TryCreate(const CompressionSettings& settings,
+                                        Allocator& allocator) noexcept;
+
+    // 사전을 쓰는 문맥이다. 형식·수준은 사전이 정하고, frame에 사전 ID(있으면)를 기록한다. 문맥이
+    // 사전 handle 복사본을 가진다. 빈 handle은 StaleHandle이다.
+    static Result<Compressor> TryCreate(const CompressDictionary& dictionary,
                                         Allocator& allocator) noexcept;
 
     Result<usize> TryCompress(Span<const uint8> source, Span<uint8> destination) noexcept;
@@ -189,6 +221,10 @@ public:
 
     static Result<Decompressor> TryCreate(CompressionFormat format, Allocator& allocator) noexcept;
 
+    // 사전을 쓰는 문맥이다(DecompressDictionary의 frame 검사 계약). 빈 handle은 StaleHandle이다.
+    static Result<Decompressor> TryCreate(const DecompressDictionary& dictionary,
+                                          Allocator& allocator) noexcept;
+
     Result<usize> TryDecompress(Span<const uint8> source, Span<uint8> destination) noexcept;
 
     // 작업 메모리는 문맥의 할당기를 쓴다. output 성장은 output의 할당기를 쓴다.
@@ -196,6 +232,8 @@ public:
                                       Array<uint8>& output) noexcept;
 
 private:
+    friend struct detail::DecompressorAccess;
+
     explicit Decompressor(detail::DecompressorState* state) noexcept : state_(state) {
     }
 

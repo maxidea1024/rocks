@@ -384,6 +384,20 @@ TEST(Compression_InputContractsAndStrictness) {
         CHECK(DecodeError(CompressionFormat::Zlib, Bytes(ZlibPresetDictionary)) ==
               ErrorCode::Unsupported);
 
+        // window가 구현 상한(2^31)을 넘는 zstd frame(window descriptor 0xB0 = 2^32)은 손상이 아니라
+        // Unsupported다(스트림 해제·사전 ID 조회와 같다). 크기를 아는 해제도 같다.
+        static constexpr uint8 ZstdHugeWindow[] = {0x28, 0xb5, 0x2f, 0xfd, 0x00,
+                                                   0xb0, 0x09, 0x00, 0x00, 'A'};
+        CHECK(DecodeError(CompressionFormat::Zstd, Bytes(ZstdHugeWindow)) ==
+              ErrorCode::Unsupported);
+        {
+            SystemAllocator scratch;
+            uint8 out[16];
+            CHECK(TryDecompress(CompressionFormat::Zstd, Bytes(ZstdHugeWindow),
+                                Span<uint8>(out, sizeof(out)), scratch)
+                      .Error() == ErrorCode::Unsupported);
+        }
+
         // 체크섬 불일치: zlib Adler-32 마지막 byte, gzip CRC 첫 byte.
         static constexpr uint8 ZlibBadAdler[] = {0x78, 0x9c, 0x4b, 0x4c, 0x4a, 0x06,
                                                  0x00, 0x02, 0x4d, 0x01, 0x28};

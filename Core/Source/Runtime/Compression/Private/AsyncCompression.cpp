@@ -76,6 +76,8 @@ struct Job {
     usize maxOutputBytes = 0;
     Span<uint8> destination;
     Allocator* scratch = nullptr;
+    // 사전 작업이 가진 사전 handle 복사본이다(capture가 정리될 때 놓는다).
+    SharedPtr<detail::DictionaryState> dictionary;
 };
 
 Result<usize> Execute(const Job& job, const detail::CompressionProbe& probe) noexcept {
@@ -85,14 +87,14 @@ Result<usize> Execute(const Job& job, const detail::CompressionProbe& probe) noe
         auto settings = CompressionSettings::TryMake(job.format, job.level);
         ROCKS_ASSERT(settings.IsOk());
         return detail::CompressAppendOnce(settings.Value(), job.source, *job.output, *job.scratch,
-                                          probe);
+                                          probe, job.dictionary);
     }
     case Work::DecompressAppend:
         return detail::DecompressAppendOnce(job.format, job.source, job.maxOutputBytes, *job.output,
-                                            *job.scratch, probe);
+                                            *job.scratch, probe, job.dictionary);
     case Work::DecompressInto:
         return detail::DecompressIntoOnce(job.format, job.source, job.destination, *job.scratch,
-                                          probe);
+                                          probe, job.dictionary);
     }
     return Result<usize>::Failure(ErrorCode::InvalidArgument);
 }
@@ -287,6 +289,75 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
     job.source = source;
     job.destination = destination;
     job.scratch = &scratch;
+    return Submit(scheduler, task, job, scratch, dependencies);
+}
+
+Result<void> TrySubmitCompress(WorkerScheduler& scheduler, CompressionTask& task,
+                               const CompressDictionary& dictionary, Span<const uint8> source,
+                               Array<uint8>& output,
+                               Span<const WorkerTaskHandle> dependencies) noexcept {
+    const auto& state = detail::DictionaryAccess::State(dictionary);
+    if (!state) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    Job job;
+    job.task = &task;
+    job.work = Work::CompressAppend;
+    job.format = state->format;
+    job.level = state->level;
+    job.source = source;
+    job.output = &output;
+    job.scratch = &output.GetAllocator();
+    job.dictionary = state;
+    return Submit(scheduler, task, job, output.GetAllocator(), dependencies);
+}
+
+Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& task,
+                                 const DecompressDictionary& dictionary, Span<const uint8> source,
+                                 usize maxOutputBytes, Array<uint8>& output,
+                                 Span<const WorkerTaskHandle> dependencies) noexcept {
+    const auto& state = detail::DictionaryAccess::State(dictionary);
+    if (!state) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+    if (source.Size() == 0) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    Job job;
+    job.task = &task;
+    job.work = Work::DecompressAppend;
+    job.format = state->format;
+    job.source = source;
+    job.output = &output;
+    job.maxOutputBytes = maxOutputBytes;
+    job.scratch = &output.GetAllocator();
+    job.dictionary = state;
+    return Submit(scheduler, task, job, output.GetAllocator(), dependencies);
+}
+
+Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& task,
+                                 const DecompressDictionary& dictionary, Span<const uint8> source,
+                                 Span<uint8> destination, Allocator& scratch,
+                                 Span<const WorkerTaskHandle> dependencies) noexcept {
+    const auto& state = detail::DictionaryAccess::State(dictionary);
+    if (!state) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+    if (source.Size() == 0 ||
+        detail::Overlaps(source.Data(), source.Size(), destination.Data(), destination.Size())) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    Job job;
+    job.task = &task;
+    job.work = Work::DecompressInto;
+    job.format = state->format;
+    job.source = source;
+    job.destination = destination;
+    job.scratch = &scratch;
+    job.dictionary = state;
     return Submit(scheduler, task, job, scratch, dependencies);
 }
 

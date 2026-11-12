@@ -13,10 +13,13 @@ namespace rocks {
 namespace {
 
 constexpr uint8 Magic[4] = {'R', 'C', 'B', 'K'};
-constexpr uint16 FormatVersion = 1;
+// 2: 헤더 48byte(사전 bit·지문). 40byte 헤더의 1은 지원하지 않는 version(Unsupported)이다.
+constexpr uint16 FormatVersion = 2;
 constexpr usize EntryBytes = 8;
 // indexCrc32가 덮는 헤더 앞부분이다(CRC 필드 앞까지).
-constexpr usize CrcCoveredHeaderBytes = 36;
+constexpr usize CrcCoveredHeaderBytes = 44;
+// flags bit0: 블록이 사전으로 압축되었다(헤더 32의 dictionaryFingerprint가 그 사전이다).
+constexpr uint32 FlagDictionary = 1;
 constexpr uint64 MaxBlockCount = 0xffffffffull;
 // 블록 수가 이 값 이하이거나 원본이 ParallelMinimumBytes보다 작으면 병렬 API도 순차로 처리한다
 // (helper 제출·worker 깨우기 비용이 일보다 크다).
@@ -88,20 +91,34 @@ struct Header {
     uint32 blockCount = 0;
     uint64 payloadSize = 0;
     uint32 indexCrc = 0;
+    bool dictionary = false;
+    uint64 fingerprint = 0;
 };
+
+// 사전 지문은 사전 SHA-256의 앞 8byte다. 헤더에는 그 byte를 그대로 쓰고 little-endian 값으로
+// 비교한다.
+uint64 FingerprintOf(const detail::DictionaryState& dictionary) noexcept {
+    return LoadLittleEndian<uint64>(dictionary.digest.bytes);
+}
 
 // 헤더와 블록 표를 쓰고 CRC를 계산한다. out은 IndexBytesFor(count) byte다.
 void WriteIndex(uint8* out, CompressionFormat format, uint32 blockSizeLog2, uint64 rawSize,
-                uint32 count, uint64 payloadSize, const uint8* table) noexcept {
+                uint32 count, uint64 payloadSize, const uint8* table,
+                const detail::DictionaryState* dictionary) noexcept {
     platform::MemoryCopy(out, Magic, sizeof(Magic));
     StoreLittleEndian<uint16>(out + 4, FormatVersion);
     out[6] = CodecId(format);
     out[7] = static_cast<uint8>(blockSizeLog2);
     StoreLittleEndian<uint64>(out + 8, rawSize);
     StoreLittleEndian<uint32>(out + 16, count);
-    StoreLittleEndian<uint32>(out + 20, 0);
+    StoreLittleEndian<uint32>(out + 20, dictionary != nullptr ? FlagDictionary : 0);
     StoreLittleEndian<uint64>(out + 24, payloadSize);
-    StoreLittleEndian<uint32>(out + 32, 0);
+    if (dictionary != nullptr) {
+        platform::MemoryCopy(out + 32, dictionary->digest.bytes, 8);
+    } else {
+        StoreLittleEndian<uint64>(out + 32, 0);
+    }
+    StoreLittleEndian<uint32>(out + 40, 0);
     platform::MemoryCopy(out + CompressedBlocksHeaderBytes, table, EntryBytes * count);
     uint32 crc = detail::zlib::Crc32(Span<const uint8>(out, CrcCoveredHeaderBytes));
     crc = detail::zlib::Crc32(
@@ -109,7 +126,7 @@ void WriteIndex(uint8* out, CompressionFormat format, uint32 blockSizeLog2, uint
     StoreLittleEndian<uint32>(out + CrcCoveredHeaderBytes, crc);
 }
 
-// 헤더 40byte와 컨테이너 길이의 일관성을 검사한다.
+// 헤더 48byte와 컨테이너 길이의 일관성을 검사한다.
 Result<Header> ParseHeader(Span<const uint8> bytes, uint64 containerBytes) noexcept {
     if (bytes.Size() < CompressedBlocksHeaderBytes ||
         !platform::MemoryEquals(bytes.Data(), Magic, sizeof(Magic))) {
@@ -137,16 +154,22 @@ Result<Header> ParseHeader(Span<const uint8> bytes, uint64 containerBytes) noexc
     default:
         return Result<Header>::Failure(ErrorCode::Unsupported);
     }
-    if (LoadLittleEndian<uint32>(data + 20) != 0) {
+    // 모르는 기능 bit와 아직 지원하지 않는 조합(Zstd 아닌 사전)은 손상이 아니라 Unsupported다.
+    const uint32 flags = LoadLittleEndian<uint32>(data + 20);
+    if ((flags & ~FlagDictionary) != 0 ||
+        ((flags & FlagDictionary) != 0 && header.format != CompressionFormat::Zstd)) {
         return Result<Header>::Failure(ErrorCode::Unsupported);
     }
+    header.dictionary = (flags & FlagDictionary) != 0;
+    header.fingerprint = LoadLittleEndian<uint64>(data + 32);
 
     header.blockSizeLog2 = data[7];
     header.rawSize = LoadLittleEndian<uint64>(data + 8);
     header.blockCount = LoadLittleEndian<uint32>(data + 16);
     header.payloadSize = LoadLittleEndian<uint64>(data + 24);
     header.indexCrc = LoadLittleEndian<uint32>(data + CrcCoveredHeaderBytes);
-    if (!IsBlockSizeLog2(header.blockSizeLog2) || LoadLittleEndian<uint32>(data + 32) != 0 ||
+    if (!IsBlockSizeLog2(header.blockSizeLog2) || LoadLittleEndian<uint32>(data + 40) != 0 ||
+        (!header.dictionary && header.fingerprint != 0) ||
         BlockCountFor(header.rawSize, header.blockSizeLog2) != header.blockCount) {
         return Result<Header>::Failure(ErrorCode::InvalidArgument);
     }
@@ -171,11 +194,12 @@ bool Compresses(CompressionFormat format, int32 level) noexcept {
 // 원본보다 작지 않으면(용량 raw − 1에서 CapacityExceeded) raw로 저장한다. compressor는 압축을
 // 시도할 때만 쓰며, 없으면 allocator로 만든다(만들지 못하면 그 오류다).
 Result<usize> EncodeBlock(detail::CompressorState*& compressor, CompressionFormat format,
-                          int32 level, Allocator& allocator, Span<const uint8> raw,
-                          Span<uint8> dst) noexcept {
+                          int32 level, Allocator& allocator, Span<const uint8> raw, Span<uint8> dst,
+                          const SharedPtr<detail::DictionaryState>& dictionary) noexcept {
     if (raw.Size() >= 2 && Compresses(format, level)) {
         if (compressor == nullptr) {
-            auto created = detail::CreateCompressorState(format, level, allocator, false);
+            auto created =
+                detail::CreateCompressorState(format, level, allocator, false, dictionary);
             if (!created) {
                 return Result<usize>::Failure(created.Error());
             }
@@ -301,6 +325,8 @@ struct CompressShared {
     uint8* table;
     CompressJob* jobs;
     Allocator* scratch;
+    // 사전 블록이면 그 사전이다(호출 동안 settings가 handle을 가진다).
+    const SharedPtr<detail::DictionaryState>* dictionary;
 
     ErrorCode RunJob(uint32 job, detail::CompressorState*& compressor) noexcept {
         Array<uint8>& payload = jobs[job].payload;
@@ -322,7 +348,8 @@ struct CompressShared {
             if (!grown) {
                 return grown.Error();
             }
-            auto stored = EncodeBlock(compressor, format, level, *scratch, raw, grown.Value());
+            auto stored =
+                EncodeBlock(compressor, format, level, *scratch, raw, grown.Value(), *dictionary);
             if (!stored) {
                 return stored.Error();
             }
@@ -339,7 +366,8 @@ struct CompressShared {
         // helper는 job을 가져가기 전에 문맥을 만든다. 만들지 못하면 참여하지 않는다(호출 스레드가
         // 남은 job을 처리하므로 helper 자원 부족이 호출 전체를 실패시키지 않는다).
         if (context != nullptr && Compresses(format, level)) {
-            auto created = detail::CreateCompressorState(format, level, *scratch, false);
+            auto created =
+                detail::CreateCompressorState(format, level, *scratch, false, *dictionary);
             if (!created) {
                 return;
             }
@@ -362,6 +390,19 @@ struct CompressShared {
 
 // --- 설정 ---
 
+struct CompressedBlocksSettingsAccess {
+    static const SharedPtr<detail::DictionaryState>&
+    Dictionary(const CompressedBlocksSettings& settings) noexcept {
+        return settings.dictionary_;
+    }
+
+    static CompressedBlocksSettings
+    Make(const CompressionSettings& compression, uint32 blockSizeLog2,
+         const SharedPtr<detail::DictionaryState>& dictionary) noexcept {
+        return CompressedBlocksSettings(compression, blockSizeLog2, dictionary);
+    }
+};
+
 Result<CompressedBlocksSettings>
 CompressedBlocksSettings::TryMake(const CompressionSettings& compression,
                                   uint32 blockSizeLog2) noexcept {
@@ -369,8 +410,23 @@ CompressedBlocksSettings::TryMake(const CompressionSettings& compression,
         return Result<CompressedBlocksSettings>::Failure(ErrorCode::InvalidArgument);
     }
 
+    return Result<CompressedBlocksSettings>::Success(CompressedBlocksSettingsAccess::Make(
+        compression, blockSizeLog2, SharedPtr<detail::DictionaryState>()));
+}
+
+Result<CompressedBlocksSettings>
+CompressedBlocksSettings::TryMake(const CompressDictionary& dictionary,
+                                  uint32 blockSizeLog2) noexcept {
+    const auto& state = detail::DictionaryAccess::State(dictionary);
+    if (!state) {
+        return Result<CompressedBlocksSettings>::Failure(ErrorCode::StaleHandle);
+    }
+    if (!IsBlockFormat(state->format) || !IsBlockSizeLog2(blockSizeLog2)) {
+        return Result<CompressedBlocksSettings>::Failure(ErrorCode::InvalidArgument);
+    }
+
     return Result<CompressedBlocksSettings>::Success(
-        CompressedBlocksSettings(compression, blockSizeLog2));
+        CompressedBlocksSettingsAccess::Make(dictionary.Settings(), blockSizeLog2, state));
 }
 
 Result<usize> TryGetCompressedBlocksBound(uint32 blockSizeLog2, uint64 rawSize) noexcept {
@@ -405,6 +461,7 @@ struct CompressedBlocksWriter::State {
     uint32 blockCount = 0;
     uint32 nextBlock = 0;
     uint64 payloadSize = 0;
+    SharedPtr<detail::DictionaryState> dictionary;
 };
 
 CompressedBlocksWriter::~CompressedBlocksWriter() noexcept {
@@ -412,9 +469,11 @@ CompressedBlocksWriter::~CompressedBlocksWriter() noexcept {
         return;
     }
 
+    // 압축 문맥이 사전을 참조하므로 문맥을 먼저 정리한 뒤 상태(사전 handle)를 소멸한다.
     Allocator& allocator = *state_->allocator;
     detail::DestroyCompressorState(state_->compressor);
     detail::CodecFree(allocator, state_->table);
+    DestroyAt(state_);
     detail::CodecFree(allocator, state_);
 }
 
@@ -449,6 +508,7 @@ CompressedBlocksWriter::TryBegin(const CompressedBlocksSettings& settings, uint6
     state->format = settings.Compression().Format();
     state->level = settings.Compression().Level();
     state->blockSizeLog2 = settings.BlockSizeLog2();
+    state->dictionary = CompressedBlocksSettingsAccess::Dictionary(settings);
     state->rawSize = rawSize;
     state->blockCount = static_cast<uint32>(count);
     CompressedBlocksWriter writer(state);
@@ -492,7 +552,7 @@ Result<usize> CompressedBlocksWriter::TryAppendBlock(Span<const uint8> rawBlock,
     }
 
     auto stored = EncodeBlock(state.compressor, state.format, state.level, *state.allocator,
-                              rawBlock, grown.Value());
+                              rawBlock, grown.Value(), state.dictionary);
     if (!stored) {
         detail::RestoreLength(payloadOutput, base);
         return stored;
@@ -518,7 +578,7 @@ Result<void> CompressedBlocksWriter::TryFinishIndex(Span<uint8> indexOut) const 
     }
 
     WriteIndex(indexOut.Data(), state.format, state.blockSizeLog2, state.rawSize, state.blockCount,
-               state.payloadSize, state.table);
+               state.payloadSize, state.table, state.dictionary.Get());
     return Result<void>::Success();
 }
 
@@ -609,6 +669,7 @@ Result<usize> TryCompressBlocksAppend(WorkerScheduler& scheduler,
     shared.table = table;
     shared.jobs = jobs;
     shared.scratch = &scratch;
+    shared.dictionary = &CompressedBlocksSettingsAccess::Dictionary(settings);
     RunParticipants(scheduler, shared, HelperCount(scheduler, jobCount, source.Size()), scratch);
 
     // 가장 앞 job의 오류를 돌려준다. 성공이면 output을 한 번만 늘려 인덱스와 payload를 복사한다.
@@ -628,7 +689,7 @@ Result<usize> TryCompressBlocksAppend(WorkerScheduler& scheduler,
         } else {
             uint8* cursor = grown.Value().Data();
             WriteIndex(cursor, shared.format, blockSizeLog2, source.Size(), blockCount, payloadSize,
-                       table);
+                       table, shared.dictionary->Get());
             cursor += indexBytes;
             for (uint32 job = 0; job < jobCount; ++job) {
                 platform::MemoryCopy(cursor, jobs[job].payload.Data(), jobs[job].payload.Size());
@@ -664,10 +725,12 @@ struct CompressedBlocksAccess {
             Span<const uint8>(stored.Data() + (entry.storedOffset - storedBase), entry.storedSize));
     }
 
-    // 블록 하나를 out(정확히 블록 원본 크기)에 해제한다.
+    // 블록 하나를 out(정확히 블록 원본 크기)에 해제한다. dictionary는 reader의 사전이다. 해제하는
+    // 동안만 문맥에 걸고 끝나면 뗀다(문맥은 사전과 무관하게 여러 reader에 쓸 수 있고, 해제된 사전을
+    // 가리킨 채 남지 않는다).
     static Result<void> DecodeBlock(const Entry& entry, Span<const uint8> stored, uint64 storedBase,
-                                    bool verify, Decompressor& decompressor,
-                                    Span<uint8> out) noexcept {
+                                    bool verify, Decompressor& decompressor, Span<uint8> out,
+                                    const detail::DictionaryState* dictionary) noexcept {
         auto bytes = StoredBytes(entry, stored, storedBase);
         if (!bytes) {
             return Result<void>::Failure(bytes.Error());
@@ -680,9 +743,19 @@ struct CompressedBlocksAccess {
             return Result<void>::Success();
         }
 
-        // 블록 원본 크기는 표가 보장하므로 코덱의 출력 부족도 손상이다. flags 0인 v1 컨테이너는
-        // 사전을 쓰지 않으므로 사전이 필요한 블록(Unsupported)도 형식 위반이다.
+        // 블록 원본 크기는 표가 보장하므로 코덱의 출력 부족도 손상이다. 사전은 헤더 지문으로 이미
+        // 맞췄으므로 사전 ID가 다르거나 없는 블록·사전 없는 컨테이너의 사전 블록(Unsupported)도
+        // 형식 위반이다.
+        detail::DecompressorState& state = *detail::DecompressorAccess::State(decompressor);
+        auto bound = detail::BindDecompressorDictionary(state, dictionary);
+        if (!bound) {
+            return bound;
+        }
         auto decoded = decompressor.TryDecompress(bytes.Value(), out);
+        if (dictionary != nullptr) {
+            auto unbound = detail::BindDecompressorDictionary(state, nullptr);
+            ROCKS_ASSERT(unbound.IsOk());
+        }
         if (!decoded) {
             const ErrorCode error = decoded.Error();
             return Result<void>::Failure(error == ErrorCode::CapacityExceeded ||
@@ -720,6 +793,8 @@ struct ReadShared {
     uint64 storedBase;
     bool verify;
     ErrorCode* errors;
+    // reader의 사전이다(없으면 nullptr). 해제할 때마다 helper 문맥에 걸고 뗀다.
+    const detail::DictionaryState* dictionary;
     Allocator* scratch;
 
     struct Worker {
@@ -751,8 +826,9 @@ struct ReadShared {
             const Span<uint8> slice(destination.Data() + (from - rawOffset),
                                     static_cast<usize>(to - from));
             if (from == blockStart && to == blockStart + rawBytes) {
-                auto decoded = CompressedBlocksAccess::DecodeBlock(
-                    entries[block], stored, storedBase, verify, worker.decompressor, slice);
+                auto decoded =
+                    CompressedBlocksAccess::DecodeBlock(entries[block], stored, storedBase, verify,
+                                                        worker.decompressor, slice, dictionary);
                 if (!decoded) {
                     return decoded.Error();
                 }
@@ -769,7 +845,7 @@ struct ReadShared {
             }
             auto decoded = CompressedBlocksAccess::DecodeBlock(
                 entries[block], stored, storedBase, verify, worker.decompressor,
-                Span<uint8>(worker.buffer, rawBytes));
+                Span<uint8>(worker.buffer, rawBytes), dictionary);
             if (!decoded) {
                 return decoded.Error();
             }
@@ -811,9 +887,11 @@ CompressedBlocksReader::CompressedBlocksReader(CompressedBlocksReader&& other) n
     : allocator_(other.allocator_), entries_(other.entries_), rawSize_(other.rawSize_),
       containerBytes_(other.containerBytes_), indexBytes_(other.indexBytes_),
       blockCount_(other.blockCount_), blockSizeLog2_(other.blockSizeLog2_), format_(other.format_),
-      id_(other.id_) {
+      id_(other.id_), dictionary_(Move(other.dictionary_)),
+      dictionaryFingerprint_(other.dictionaryFingerprint_) {
     other.allocator_ = nullptr;
     other.entries_ = nullptr;
+    other.dictionaryFingerprint_ = 0;
 }
 
 CompressedBlocksReader& CompressedBlocksReader::operator=(CompressedBlocksReader&& other) noexcept {
@@ -828,8 +906,11 @@ CompressedBlocksReader& CompressedBlocksReader::operator=(CompressedBlocksReader
         blockSizeLog2_ = other.blockSizeLog2_;
         format_ = other.format_;
         id_ = other.id_;
+        dictionary_ = Move(other.dictionary_);
+        dictionaryFingerprint_ = other.dictionaryFingerprint_;
         other.allocator_ = nullptr;
         other.entries_ = nullptr;
+        other.dictionaryFingerprint_ = 0;
     }
     return *this;
 }
@@ -840,6 +921,8 @@ void CompressedBlocksReader::Release() noexcept {
     }
     allocator_ = nullptr;
     entries_ = nullptr;
+    dictionary_.Reset();
+    dictionaryFingerprint_ = 0;
 }
 
 Result<usize> CompressedBlocksReader::TryGetIndexBytes(Span<const uint8> header,
@@ -855,6 +938,19 @@ Result<usize> CompressedBlocksReader::TryGetIndexBytes(Span<const uint8> header,
 Result<CompressedBlocksReader> CompressedBlocksReader::TryOpen(Span<const uint8> index,
                                                                uint64 containerBytes,
                                                                Allocator& allocator) noexcept {
+    return TryOpen(index, containerBytes, Span<const DecompressDictionary>(), allocator);
+}
+
+Result<CompressedBlocksReader>
+CompressedBlocksReader::TryOpen(Span<const uint8> index, uint64 containerBytes,
+                                Span<const DecompressDictionary> dictionaries,
+                                Allocator& allocator) noexcept {
+    for (const DecompressDictionary& candidate : dictionaries) {
+        if (!candidate.IsValid()) {
+            return Result<CompressedBlocksReader>::Failure(ErrorCode::StaleHandle);
+        }
+    }
+
     auto parsed = ParseHeader(index, containerBytes);
     if (!parsed) {
         return Result<CompressedBlocksReader>::Failure(parsed.Error());
@@ -874,7 +970,31 @@ Result<CompressedBlocksReader> CompressedBlocksReader::TryOpen(Span<const uint8>
         return Result<CompressedBlocksReader>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // CRC 뒤에 사전을 고른다(지문 byte 손상은 CRC가 InvalidArgument로 거른다). 위치 표 할당 전이다.
+    // 지문이 같은데 내용(Digest)이 다른 후보가 둘 이상이면 어느 사전인지 정할 수 없어
+    // InvalidArgument다. 64bit 지문은 의도적으로 맞출 수 있고, raw 사전은 frame에 ID가 없어 잘못
+    // 고르면 검사가 없다.
+    SharedPtr<detail::DictionaryState> dictionary;
+    if (header.dictionary) {
+        for (const DecompressDictionary& candidate : dictionaries) {
+            const auto& state = detail::DictionaryAccess::State(candidate);
+            if (state->format != header.format || FingerprintOf(*state) != header.fingerprint) {
+                continue;
+            }
+            if (!dictionary) {
+                dictionary = state;
+            } else if (dictionary->digest != state->digest) {
+                return Result<CompressedBlocksReader>::Failure(ErrorCode::InvalidArgument);
+            }
+        }
+        if (!dictionary) {
+            return Result<CompressedBlocksReader>::Failure(ErrorCode::Unsupported);
+        }
+    }
+
     CompressedBlocksReader reader;
+    reader.dictionary_ = Move(dictionary);
+    reader.dictionaryFingerprint_ = header.fingerprint;
     reader.allocator_ = &allocator;
     reader.rawSize_ = header.rawSize;
     reader.containerBytes_ = containerBytes;
@@ -915,7 +1035,14 @@ Result<CompressedBlocksReader> CompressedBlocksReader::TryOpen(Span<const uint8>
 
 Result<CompressedBlocksReader> CompressedBlocksReader::TryOpen(Span<const uint8> container,
                                                                Allocator& allocator) noexcept {
-    return TryOpen(container, container.Size(), allocator);
+    return TryOpen(container, container.Size(), Span<const DecompressDictionary>(), allocator);
+}
+
+Result<CompressedBlocksReader>
+CompressedBlocksReader::TryOpen(Span<const uint8> container,
+                                Span<const DecompressDictionary> dictionaries,
+                                Allocator& allocator) noexcept {
+    return TryOpen(container, container.Size(), dictionaries, allocator);
 }
 
 Result<CompressedBlocksLocation> CompressedBlocksReader::TryLocate(uint64 rawOffset,
@@ -970,8 +1097,8 @@ Result<void> CompressedBlocksReader::TryRead(uint64 rawOffset, Span<uint8> desti
         const Span<uint8> slice(destination.Data() + (from - rawOffset),
                                 static_cast<usize>(to - from));
         if (from == blockStart && to == blockStart + rawBytes) {
-            auto decoded = CompressedBlocksAccess::DecodeBlock(entry, stored, storedBase, verify,
-                                                               context.decompressor_, slice);
+            auto decoded = CompressedBlocksAccess::DecodeBlock(
+                entry, stored, storedBase, verify, context.decompressor_, slice, dictionary_.Get());
             if (!decoded) {
                 return decoded;
             }
@@ -998,7 +1125,7 @@ Result<void> CompressedBlocksReader::TryRead(uint64 rawOffset, Span<uint8> desti
             context.cached_ = false;
             auto decoded = CompressedBlocksAccess::DecodeBlock(
                 entry, stored, storedBase, verify, context.decompressor_,
-                Span<uint8>(context.buffer_, rawBytes));
+                Span<uint8>(context.buffer_, rawBytes), dictionary_.Get());
             if (!decoded) {
                 return decoded;
             }
@@ -1069,6 +1196,7 @@ Result<void> CompressedBlocksReader::TryRead(WorkerScheduler& scheduler, uint64 
     shared.storedBase = storedBase;
     shared.verify = verify;
     shared.errors = errors;
+    shared.dictionary = dictionary_.Get();
     shared.scratch = &scratch;
     RunParticipants(scheduler, shared,
                     jobCount > 1 ? HelperCount(scheduler, jobCount, destination.Size()) : 0,

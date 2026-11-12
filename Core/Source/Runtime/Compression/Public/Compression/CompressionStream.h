@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Compression/Compression.h>
+#include <Compression/CompressionDictionary.h>
 
 // 조각 단위 스트리밍 압축·해제다(Godot StreamPeerGZIP 대응, Docs/Design/Compression.ko.md 10절).
 // 형식은 Zstd·Deflate·Zlib·Gzip이며 Lz4(raw block)는 스트림 형식이 아니라 Unsupported다.
@@ -63,6 +64,12 @@ public:
     static Result<CompressStream> TryCreate(const CompressionSettings& settings,
                                             Allocator& allocator, uint64 sizeHint = 0) noexcept;
 
+    // 사전 스트림이다(CompressionDictionary.h). 형식·수준은 사전이 정하고 frame에 사전 ID(있으면)를
+    // 기록한다. 원본 크기를 모르므로 사전을 붙여(attach) 쓴다. Reset 뒤에도 같은 사전을 쓴다. 빈
+    // handle은 StaleHandle이다.
+    static Result<CompressStream> TryCreate(const CompressDictionary& dictionary,
+                                            Allocator& allocator, uint64 sizeHint = 0) noexcept;
+
     // input을 소비하고 만들어진 출력을 output 앞부분에 쓴다. complete는 input을 모두 소비했는지다
     // (코덱이 내보내지 않은 출력은 다음 호출이 먼저 내보낸다).
     // 실패: 미완료 flush·finish 중·끝난 스트림·겹침은 InvalidArgument, 그 밖은 공통 계약.
@@ -93,6 +100,10 @@ public:
 private:
     explicit CompressStream(detail::StreamState* state) noexcept : state_(state) {
     }
+
+    static Result<CompressStream>
+    TryCreateWith(CompressionFormat format, int32 level, Allocator& allocator, uint64 sizeHint,
+                  const SharedPtr<detail::DictionaryState>& dictionary) noexcept;
 
     detail::StreamState* state_ = nullptr;
 };
@@ -134,6 +145,12 @@ public:
                                               const DecompressStreamLimits& limits,
                                               Allocator& allocator) noexcept;
 
+    // 사전 스트림이다(DecompressDictionary의 frame 검사 계약). 사전 메모리(DDict)는 window 상한과
+    // 별개다. 빈 handle은 StaleHandle이다.
+    static Result<DecompressStream> TryCreate(const DecompressDictionary& dictionary,
+                                              const DecompressStreamLimits& limits,
+                                              Allocator& allocator) noexcept;
+
     // input을 소비하고 만들어진 출력을 output 앞부분에 쓴다. complete는 input을 모두 소비했고 코덱
     // 안에 내보낼 출력이 남지 않았는지다(아니면 출력 공간을 더 주며 다시 부른다. 빈 input도 된다).
     // 상한에 정확히 닿은 뒤에도 블록 끝·체크섬을 처리하려면 1byte 이상의 출력 창이 필요하다.
@@ -158,6 +175,11 @@ public:
 private:
     explicit DecompressStream(detail::StreamState* state) noexcept : state_(state) {
     }
+
+    static Result<DecompressStream>
+    TryCreateWith(CompressionFormat format, const DecompressStreamLimits& limits,
+                  Allocator& allocator,
+                  const SharedPtr<detail::DictionaryState>& dictionary) noexcept;
 
     detail::StreamState* state_ = nullptr;
 };

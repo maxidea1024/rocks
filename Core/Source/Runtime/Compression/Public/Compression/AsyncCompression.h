@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Compression/Compression.h>
+#include <Compression/CompressionDictionary.h>
 #include <Task/WorkerScheduler.h>
 
 // WorkerScheduler 위의 비동기 압축·해제다. 동기 API와 같은 구현·같은 분할 단위를 쓰므로
@@ -19,7 +20,8 @@
 // - 할당기: body와 코덱 작업 메모리는 Append 변형에서는 output.GetAllocator(), Span
 //   변형에서는 scratch에서 할당한다. 이 할당기는 worker에서 output 성장·코덱 scratch·capture
 //   해제를 수행하므로 소유 스레드와 동시에 써도 안전해야 한다(System·Binned·Budget·Pool·
-//   External·Debug 허용, Arena·Stack 금지).
+//   External·Debug 허용, Arena·Stack 금지). 사전 작업은 capture가 사전 handle 복사본을 가지므로
+//   마지막 handle이 worker에서 놓일 수 있다(사전 할당기도 같은 조건, CompressionDictionary.h).
 // - 수명: source·output(또는 destination·scratch)은 작업이 terminal이 될 때까지 유효해야
 //   하고 다른 코드가 건드리지 않아야 한다. source의 주소·길이는 제출 시점에 고정되며 앞선
 //   의존 작업은 내용만 채울 수 있다. output은 제출 시점에 읽지 않고 body가 시작할 때 원래
@@ -105,6 +107,22 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
 // 한다.
 Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& task,
                                  CompressionFormat format, Span<const uint8> source,
+                                 Span<uint8> destination, Allocator& scratch,
+                                 Span<const WorkerTaskHandle> dependencies = {}) noexcept;
+
+// 사전 변형이다. 각각 사전을 쓰는 TryCompressAppend·TryDecompressAppend·TryDecompress를 worker에서
+// 실행한다. 작업이 사전 handle 복사본을 가지므로 제출 뒤 호출자의 handle을 놓아도 된다. 빈 handle은
+// StaleHandle이다.
+Result<void> TrySubmitCompress(WorkerScheduler& scheduler, CompressionTask& task,
+                               const CompressDictionary& dictionary, Span<const uint8> source,
+                               Array<uint8>& output,
+                               Span<const WorkerTaskHandle> dependencies = {}) noexcept;
+Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& task,
+                                 const DecompressDictionary& dictionary, Span<const uint8> source,
+                                 usize maxOutputBytes, Array<uint8>& output,
+                                 Span<const WorkerTaskHandle> dependencies = {}) noexcept;
+Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& task,
+                                 const DecompressDictionary& dictionary, Span<const uint8> source,
                                  Span<uint8> destination, Allocator& scratch,
                                  Span<const WorkerTaskHandle> dependencies = {}) noexcept;
 

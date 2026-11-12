@@ -1,8 +1,9 @@
 #pragma once
 
 #include <Compression/Compression.h>
+#include <Compression/CompressionDictionary.h>
 
-// 블록 컨테이너 RCBK v1이다(Godot FileAccessCompressed, UE FCompressedBuffer 대응,
+// 블록 컨테이너 RCBK v2다(Godot FileAccessCompressed, UE FCompressedBuffer 대응,
 // Docs/Design/Compression.ko.md 9절). 큰 데이터를 고정 크기 블록으로 나눠 각각 압축하고, 임의
 // 위치를 필요한 블록만 해제해 읽는다. 블록이 독립이라 병렬 압축·해제가 되고, 블록마다 저장 byte의
 // CRC-32로 무결성을 확인한다(체크섬이 없는 LZ4·Deflate raw도 보호한다).
@@ -17,7 +18,7 @@
 //   reader.Value().TryRead(offset, destination, container.View(), context.Value());
 //
 // 사용 예(파일: 인덱스만 먼저 읽고 필요한 블록 byte만 읽는다):
-//   uint8 header[CompressedBlocksHeaderBytes];          // 파일 앞 40byte
+//   uint8 header[CompressedBlocksHeaderBytes];          // 파일 앞 48byte
 //   auto indexBytes = CompressedBlocksReader::TryGetIndexBytes(header, fileSize);
 //   ...                                                 // 파일 앞 indexBytes를 index로 읽는다
 //   auto reader = CompressedBlocksReader::TryOpen(index, fileSize, allocator);
@@ -26,16 +27,25 @@
 //   reader.Value().TryRead(offset, destination, stored, where.Value().storedOffset,
 //                          context.Value());
 //
+// 사용 예(사전: 작은 블록이 많을 때 압축률을 높인다. 쓰는 쪽과 읽는 쪽이 같은 사전 byte를 쓴다):
+//   auto settings = CompressedBlocksSettings::TryMake(compressDictionary, 14).Value();
+//   ...
+//   DecompressDictionary candidates[] = {decompressDictionary};
+//   auto reader = CompressedBlocksReader::TryOpen(container.View(), candidates, allocator);
+//
 // 형식(모든 정수 little-endian):
-// - 헤더 40byte: magic "RCBK", version 1(u16), codec ID(u8: 1 Lz4, 2 Zstd, 3 Deflate),
-//   blockSizeLog2(u8, 12–24), rawSize(u64), blockCount(u32), flags(u32, 0), payloadSize(u64),
-//   reserved(u32, 0), indexCrc32(u32: 헤더 앞 36byte와 블록 표의 CRC-32).
+// - 헤더 48byte: magic "RCBK", version 2(u16), codec ID(u8: 1 Lz4, 2 Zstd, 3 Deflate),
+//   blockSizeLog2(u8, 12–24), rawSize(u64), blockCount(u32), flags(u32: bit0 = 사전),
+//   payloadSize(u64), dictionaryFingerprint(8byte: 사전 SHA-256 앞 8byte, 사전 없으면 0),
+//   reserved(u32, 0), indexCrc32(u32: 헤더 앞 44byte와 블록 표의 CRC-32).
 // - 블록 표: 블록마다 {storedSize u32, storedCrc32 u32}. 그 뒤 payload는 블록 저장 byte를 순서대로
 //   이어 붙인다. storedSize가 블록 원본 크기와 같으면 raw 저장, 작으면 압축이다.
-// - 블록 코덱 데이터: Lz4 raw block, Zstd frame(원본 크기 포함, 체크섬 없음), Deflate raw.
+// - 블록 코덱 데이터: Lz4 raw block, Zstd frame(원본 크기 포함, 체크섬 없음, 형식 사전 컨테이너는
+//   사전 ID 포함), Deflate raw.
 //
-// 오류: 형식 위반·길이·CRC 불일치·블록 해제 결과 크기 불일치·사전이 필요한 블록은 InvalidArgument,
-// 모르는 version·flags·codec ID는 Unsupported, 할당 실패는 OutOfMemory다.
+// 오류: 형식 위반·길이·CRC 불일치·블록 해제 결과 크기 불일치·사전 없는 컨테이너의 사전 블록은
+// InvalidArgument, 모르는 version·flags·codec ID와 사전 bit + Zstd 아닌 codec, 컨테이너가 쓴 사전이
+// 후보에 없음은 Unsupported, 할당 실패는 OutOfMemory다.
 // 보안: CRC는 우발 손상만 잡는다(다시 맞춘 의도적 변조는 거르지 못한다). rawSize는 컨테이너 길이의
 // 최대 약 186만 배일 수 있으므로 RawSize()로 출력을 잡기 전에 호출자 상한과 비교한다.
 // 결정성: 같은 라이브러리 버전·설정·입력이면 결과 byte가 같고 병렬 압축도 순차와 같은 byte다.
@@ -46,7 +56,7 @@ class WorkerScheduler;
 inline constexpr uint32 MinCompressedBlockSizeLog2 = 12;     // 4KiB
 inline constexpr uint32 MaxCompressedBlockSizeLog2 = 24;     // 16MiB
 inline constexpr uint32 DefaultCompressedBlockSizeLog2 = 18; // 256KiB
-inline constexpr usize CompressedBlocksHeaderBytes = 40;
+inline constexpr usize CompressedBlocksHeaderBytes = 48;
 
 // 블록 컨테이너 설정이다. 형식은 Lz4·Zstd·Deflate만 쓴다(Zlib·Gzip은 래퍼가 컨테이너와 중복이다).
 class CompressedBlocksSettings {
@@ -55,6 +65,22 @@ public:
     static Result<CompressedBlocksSettings>
     TryMake(const CompressionSettings& compression,
             uint32 blockSizeLog2 = DefaultCompressedBlockSizeLog2) noexcept;
+
+    // 사전 블록 설정이다(Zstd만). 형식·수준은 사전이 정하고 설정이 사전 handle 복사본을 가진다.
+    // 헤더에 사전 지문을 쓰고, 형식 사전이면 블록 frame에 사전 ID도 기록한다(raw 사전은 ID가 0이라
+    // 지문만으로 맞춘다). 사전은 작은 블록(64KiB 이하)에서 효과가 크다. 빈 handle은 StaleHandle,
+    // blockSizeLog2가 범위 밖이면 InvalidArgument다. 복사는 사전 handle을 공유한다(이동도 복사다).
+    static Result<CompressedBlocksSettings>
+    TryMake(const CompressDictionary& dictionary,
+            uint32 blockSizeLog2 = DefaultCompressedBlockSizeLog2) noexcept;
+
+    // 복사만 선언해 이동도 복사로 동작한다(이동된 설정이 사전 없이 조용히 다른 결과를 내지 않는다).
+    CompressedBlocksSettings(const CompressedBlocksSettings&) noexcept = default;
+    CompressedBlocksSettings& operator=(const CompressedBlocksSettings&) noexcept = default;
+
+    bool UsesDictionary() const noexcept {
+        return static_cast<bool>(dictionary_);
+    }
 
     const CompressionSettings& Compression() const noexcept {
         return compression_;
@@ -69,12 +95,16 @@ public:
     }
 
 private:
-    CompressedBlocksSettings(const CompressionSettings& compression, uint32 blockSizeLog2) noexcept
-        : compression_(compression), blockSizeLog2_(blockSizeLog2) {
+    friend struct CompressedBlocksSettingsAccess;
+
+    CompressedBlocksSettings(const CompressionSettings& compression, uint32 blockSizeLog2,
+                             const SharedPtr<detail::DictionaryState>& dictionary) noexcept
+        : compression_(compression), blockSizeLog2_(blockSizeLog2), dictionary_(dictionary) {
     }
 
     CompressionSettings compression_;
     uint32 blockSizeLog2_;
+    SharedPtr<detail::DictionaryState> dictionary_;
 };
 
 // rawSize byte를 담은 컨테이너의 최대 크기(헤더 + 블록 표 + rawSize)다. 블록은 원본보다 커지지
@@ -139,7 +169,7 @@ public:
     static Result<CompressedBlocksWriter> TryBegin(const CompressedBlocksSettings& settings,
                                                    uint64 rawSize, Allocator& allocator) noexcept;
 
-    // 헤더 + 블록 표 byte 수(40 + 8 × 블록 수)다. 이동된 객체는 0이다.
+    // 헤더 + 블록 표 byte 수(48 + 8 × 블록 수)다. 이동된 객체는 0이다.
     usize IndexBytes() const noexcept;
     uint32 BlockCount() const noexcept;
 
@@ -186,7 +216,7 @@ public:
     CompressedBlocksReader(const CompressedBlocksReader&) = delete;
     CompressedBlocksReader& operator=(const CompressedBlocksReader&) = delete;
 
-    // 헤더 40byte만 검사해 인덱스 크기(헤더 + 블록 표)를 돌려준다. 파일은 이만큼만 먼저 읽는다.
+    // 헤더 48byte만 검사해 인덱스 크기(헤더 + 블록 표)를 돌려준다. 파일은 이만큼만 먼저 읽는다.
     // containerBytes는 컨테이너 전체 길이다. 헤더는 크기 일관성(블록 수·payload 합·전체 길이)까지
     // 검사하므로 악성 헤더로 컨테이너 길이에 비례하지 않는 큰 할당을 유도할 수 없다.
     static Result<usize> TryGetIndexBytes(Span<const uint8> header, uint64 containerBytes) noexcept;
@@ -197,6 +227,18 @@ public:
                                                   Allocator& allocator) noexcept;
     // 메모리에 있는 컨테이너 전체로 연다.
     static Result<CompressedBlocksReader> TryOpen(Span<const uint8> container,
+                                                  Allocator& allocator) noexcept;
+
+    // 사전 후보를 주는 변형이다. 컨테이너가 사전을 쓰면 표 CRC 확인 뒤 지문이 같은 후보를 골라
+    // handle 복사본을 가진다(없으면 Unsupported, 지문이 같고 내용이 다른 후보가 둘 이상이면
+    // InvalidArgument). 사전을 쓰지 않는 컨테이너는 후보를 무시하므로
+    // 범용 로더는 항상 패키지의 사전들을 넘겨도 된다. 후보 안의 빈 handle은 StaleHandle이다.
+    // reader는 사전을 파싱하거나 만들지 않는다(악성 컨테이너가 사전 할당을 유도할 수 없다).
+    static Result<CompressedBlocksReader> TryOpen(Span<const uint8> index, uint64 containerBytes,
+                                                  Span<const DecompressDictionary> dictionaries,
+                                                  Allocator& allocator) noexcept;
+    static Result<CompressedBlocksReader> TryOpen(Span<const uint8> container,
+                                                  Span<const DecompressDictionary> dictionaries,
                                                   Allocator& allocator) noexcept;
 
     bool IsOpen() const noexcept {
@@ -225,6 +267,16 @@ public:
 
     uint64 ContainerBytes() const noexcept {
         return containerBytes_;
+    }
+
+    bool UsesDictionary() const noexcept {
+        return static_cast<bool>(dictionary_);
+    }
+
+    // 컨테이너 헤더의 사전 지문(사전 SHA-256 앞 8byte의 little-endian 값)이다. 진단용이며 사전을
+    // 쓰지 않으면 0이다.
+    uint64 DictionaryFingerprint() const noexcept {
+        return dictionaryFingerprint_;
     }
 
     // [rawOffset, rawOffset + rawBytes)가 걸치는 블록과 저장 byte 범위다. rawBytes 0은 빈 결과다.
@@ -280,6 +332,9 @@ private:
     CompressionFormat format_ = CompressionFormat::Zstd;
     // TryOpen마다 새로 받는 번호다(0은 쓰지 않는다). 읽기 문맥 캐시의 식별자다.
     uint64 id_ = 0;
+    // 컨테이너가 쓰는 사전이다. 읽기 문맥은 사전과 무관하며 블록을 해제할 때마다 이 사전을 건다.
+    SharedPtr<detail::DictionaryState> dictionary_;
+    uint64 dictionaryFingerprint_ = 0;
 };
 
 // 읽기 문맥이다. 스레드마다 하나 둔다. 같은 형식의 Decompressor, 블록 크기 버퍼 하나, 마지막으로

@@ -6,10 +6,22 @@
 #include <zstd.h>
 #include <zstd_errors.h>
 
+#include <Base/Endian.h>
 #include <Platform/Memory.h>
 
 namespace rocks::detail::zstd {
 namespace {
+
+// 사전 문맥의 수준 매개변수 정책(11절). zstd는 사용자 할당기를 받는 CDict를 수준 없음
+// (ZSTD_NO_CLEVEL)으로 만들어, 그대로 쓰면 frame 매개변수가 수준 3 표로 정해지고 큰 입력의 사전
+// 재적재도 막힌다. 그래서 frame마다 ZSTD_createCDict(L) 경로가 고를 값을 명시한다. 아래 두 상수는
+// zstd_compress.c의 ZSTD_USE_CDICT_PARAMS_SRCSIZE_CUTOFF·DICTSIZE_MULTIPLIER(1.5.7)와 같아야 한다.
+inline constexpr usize DictionaryReloadMinimumBytes = usize{128} << 10;
+inline constexpr usize DictionaryReloadSizeMultiplier = 6;
+
+// ZSTD_createCDict가 원본 크기를 모를 때 가정하는 크기(zstd_compress.c
+// ZSTD_adjustCParams_internal의 minSrcSize)다. CDict 표 매개변수를 같은 방식으로 정하는 데 쓴다.
+inline constexpr unsigned long long DictionaryAssumedSourceBytes = 513;
 
 // stable input 압축은 ZSTD_e_continue 호출마다 입력을 분할 단위만큼 늘려 준다. 분할 단위가 최대
 // 블록 크기(128KiB)의 배수여야 호출이 끝날 때 미소비 입력이 남지 않는다. 남으면
@@ -83,6 +95,103 @@ usize Minimum(usize first, usize second) noexcept {
     return first < second ? first : second;
 }
 
+// --- 사전 ---
+
+void* DictionaryAllocate(void* opaque, size_t bytes) {
+    auto* memory = static_cast<CodecMemory*>(opaque);
+    void* address = CodecAllocate(*memory->allocator, bytes);
+    if (address == nullptr) {
+        memory->allocationFailed = true;
+    }
+    return address;
+}
+
+void DictionaryFree(void* opaque, void* address) {
+    CodecFree(*static_cast<CodecMemory*>(opaque)->allocator, address);
+}
+
+ZSTD_customMem DictionaryMemory(CodecMemory& memory) noexcept {
+    return ZSTD_customMem{&DictionaryAllocate, &DictionaryFree, &memory};
+}
+
+// ZSTD_dct_auto가 형식 사전으로 읽는 byte인지다.
+bool IsFormattedDictionary(Span<const uint8> bytes) noexcept {
+    return bytes.Size() >= 4 && LoadLittleEndian<uint32>(bytes.Data()) == ZSTD_MAGIC_DICTIONARY;
+}
+
+// 사전 생성 실패의 분류다. 할당이 한 번이라도 실패했으면 OOM, 아니면 사전 손상이다.
+ErrorCode DictionaryCreateError(const CodecMemory& memory) noexcept {
+    return memory.allocationFailed ? ErrorCode::OutOfMemory : ErrorCode::InvalidArgument;
+}
+
+// 형식 사전 문맥이면 사전 ID 없는 zstd frame을 거부한다. ID가 다른 frame은 zstd가
+// dictionary_wrong으로 거부한다. 헤더·frame 손상을 만나면 검사를 멈추고 해제가 보고하게 둔다.
+Result<void> CheckFrameDictionaryIds(Span<const uint8> source, uint32 required) noexcept {
+    if (required == 0) {
+        return Result<void>::Success();
+    }
+
+    const uint8* cursor = source.Data();
+    usize left = source.Size();
+    while (left > 0) {
+        ZSTD_FrameHeader header{};
+        const size_t parsed = ZSTD_getFrameHeader(&header, cursor, left);
+        if (ZSTD_isError(parsed) || parsed != 0) {
+            break;
+        }
+        if (header.frameType == ZSTD_frame && header.dictID == 0) {
+            return Result<void>::Failure(ErrorCode::Unsupported);
+        }
+
+        const size_t frameBytes = ZSTD_findFrameCompressedSize(cursor, left);
+        if (ZSTD_isError(frameBytes)) {
+            break;
+        }
+        cursor += frameBytes;
+        left -= frameBytes;
+    }
+    return Result<void>::Success();
+}
+
+// frame 크기 정보를 구하지 못한 입력(ZSTD_CONTENTSIZE_ERROR)의 분류다. zstd는 원인을 하나로
+// 뭉치므로 frame을 다시 훑어, window가 구현 상한(2^31)을 넘는 frame이면 스트림 해제와 같이
+// Unsupported, 그 밖(손상·절단·뒤 byte)은 InvalidArgument로 본다.
+ErrorCode FrameSizeError(Span<const uint8> source) noexcept {
+    const uint8* cursor = source.Data();
+    usize left = source.Size();
+    while (left > 0) {
+        ZSTD_FrameHeader header{};
+        const size_t parsed = ZSTD_getFrameHeader(&header, cursor, left);
+        if (ZSTD_isError(parsed)) {
+            return ZSTD_getErrorCode(parsed) == ZSTD_error_frameParameter_windowTooLarge
+                       ? ErrorCode::Unsupported
+                       : ErrorCode::InvalidArgument;
+        }
+        const size_t frameBytes = parsed == 0 ? ZSTD_findFrameCompressedSize(cursor, left) : 0;
+        if (parsed != 0 || ZSTD_isError(frameBytes)) {
+            return ErrorCode::InvalidArgument;
+        }
+        cursor += frameBytes;
+        left -= frameBytes;
+    }
+    return ErrorCode::InvalidArgument;
+}
+
+// 사전 문맥의 frame 매개변수를 정한다(ZSTD_createCDict(L) + refCDict와 같은 선택). 세션 재설정
+// 뒤, 원본 크기 고정 전에 부른다.
+bool ConfigureDictionaryFrame(ZSTD_CCtx* context, const DictionaryState& dictionary,
+                              usize sourceBytes) noexcept {
+    // ZSTD_getCParams의 0은 "크기 모름"이므로 빈 입력은 1byte로 본다.
+    const unsigned long long hint = sourceBytes == 0 ? 1 : sourceBytes;
+    const ZSTD_compressionParameters parameters =
+        ZSTD_getCParams(dictionary.level, hint, dictionary.bytes);
+    const bool reload = sourceBytes >= DictionaryReloadMinimumBytes &&
+                        sourceBytes >= dictionary.bytes * DictionaryReloadSizeMultiplier;
+    return !ZSTD_isError(ZSTD_CCtx_setCParams(context, parameters)) &&
+           SetCompressionParameter(context, ZSTD_c_forceAttachDict,
+                                   reload ? ZSTD_dictForceLoad : ZSTD_dictDefaultAttach);
+}
+
 // 크기를 아는 해제의 공통 루프다. stable output이므로 window 메모리를 할당하지 않는다.
 // authoritativeCapacity: 출력 용량이 원본 크기 이상임이 frame 정보로 보장되면 true이며, 이때 출력
 // 부족은 거짓 크기 헤더(손상)다.
@@ -136,21 +245,26 @@ Result<usize> Bound(usize sourceBytes) noexcept {
     return Result<usize>::Success(bound);
 }
 
-Result<void*> CreateCompressor(int32 level, Allocator& allocator, bool checksum) noexcept {
+Result<void*> CreateCompressor(int32 level, Allocator& allocator, bool checksum,
+                               const DictionaryState* dictionary) noexcept {
     ZSTD_CCtx* context = ZSTD_createCCtx_advanced(Memory(allocator));
     if (context == nullptr) {
         return Result<void*>::Failure(ErrorCode::OutOfMemory);
     }
 
-    // 결정성: 수준·checksum·원본 크기를 고정하고 사전 ID는 쓰지 않는다. stable buffer는 입력·출력
-    // 복사본을 만들지 않는다(입력은 분할 단위로 늘려 주며 출력 부족은 dstSize_tooSmall로 보고된다).
+    // 결정성: 수준·checksum·원본 크기를 고정한다. 사전 ID는 사전 문맥만 기록한다(raw 사전은 ID가
+    // 0이라 기록되지 않는다). stable buffer는 입력·출력 복사본을 만들지 않는다(입력은 분할 단위로
+    // 늘려 주며 출력 부족은 dstSize_tooSmall로 보고된다). 사전(CDict)은 문맥이 참조만 하며 세션
+    // 재설정(session_only)에도 유지된다.
     const bool configured =
         SetCompressionParameter(context, ZSTD_c_compressionLevel, level) &&
         SetCompressionParameter(context, ZSTD_c_checksumFlag, checksum ? 1 : 0) &&
         SetCompressionParameter(context, ZSTD_c_contentSizeFlag, 1) &&
-        SetCompressionParameter(context, ZSTD_c_dictIDFlag, 0) &&
+        SetCompressionParameter(context, ZSTD_c_dictIDFlag, dictionary != nullptr ? 1 : 0) &&
         SetCompressionParameter(context, ZSTD_c_stableInBuffer, 1) &&
-        SetCompressionParameter(context, ZSTD_c_stableOutBuffer, 1);
+        SetCompressionParameter(context, ZSTD_c_stableOutBuffer, 1) &&
+        (dictionary == nullptr || !ZSTD_isError(ZSTD_CCtx_refCDict(
+                                      context, static_cast<const ZSTD_CDict*>(dictionary->codec))));
     if (!configured) {
         ZSTD_freeCCtx(context);
         return Result<void*>::Failure(ErrorCode::DependencyFailed);
@@ -163,7 +277,7 @@ void DestroyCompressor(void* codec) noexcept {
     ZSTD_freeCCtx(static_cast<ZSTD_CCtx*>(codec));
 }
 
-Result<void*> CreateDecompressor(Allocator& allocator) noexcept {
+Result<void*> CreateDecompressor(Allocator& allocator, const DictionaryState* dictionary) noexcept {
     ZSTD_DCtx* context = ZSTD_createDCtx_advanced(Memory(allocator));
     if (context == nullptr) {
         return Result<void*>::Failure(ErrorCode::OutOfMemory);
@@ -173,7 +287,9 @@ Result<void*> CreateDecompressor(Allocator& allocator) noexcept {
     // window frame도 받을 수 있게 window 상한을 최대로 둔다(메모리 상한은 출력 용량이 정한다).
     const bool configured =
         !ZSTD_isError(ZSTD_DCtx_setParameter(context, ZSTD_d_windowLogMax, ZSTD_WINDOWLOG_MAX)) &&
-        !ZSTD_isError(ZSTD_DCtx_setParameter(context, ZSTD_d_stableOutBuffer, 1));
+        !ZSTD_isError(ZSTD_DCtx_setParameter(context, ZSTD_d_stableOutBuffer, 1)) &&
+        (dictionary == nullptr || !ZSTD_isError(ZSTD_DCtx_refDDict(
+                                      context, static_cast<const ZSTD_DDict*>(dictionary->codec))));
     if (!configured) {
         ZSTD_freeDCtx(context);
         return Result<void*>::Failure(ErrorCode::DependencyFailed);
@@ -186,12 +302,16 @@ void DestroyDecompressor(void* codec) noexcept {
     ZSTD_freeDCtx(static_cast<ZSTD_DCtx*>(codec));
 }
 
-Result<usize> Compress(void* codec, Span<const uint8> source, Span<uint8> destination,
-                       const CompressionProbe& probe) noexcept {
+Result<usize> Compress(void* codec, const DictionaryState* dictionary, Span<const uint8> source,
+                       Span<uint8> destination, const CompressionProbe& probe) noexcept {
     auto* context = static_cast<ZSTD_CCtx*>(codec);
 
-    // 이전 호출의 실패·취소 상태를 지우고 원본 크기를 고정한다(frame header에 기록된다).
+    // 이전 호출의 실패·취소 상태를 지우고 원본 크기를 고정한다(frame header에 기록된다). 사전
+    // 문맥은 그 전에 이 크기의 수준 매개변수를 정한다.
     ZSTD_CCtx_reset(context, ZSTD_reset_session_only);
+    if (dictionary != nullptr && !ConfigureDictionaryFrame(context, *dictionary, source.Size())) {
+        return Result<usize>::Failure(ErrorCode::DependencyFailed);
+    }
     if (ZSTD_isError(ZSTD_CCtx_setPledgedSrcSize(context, source.Size()))) {
         return Result<usize>::Failure(ErrorCode::DependencyFailed);
     }
@@ -226,12 +346,17 @@ Result<usize> Compress(void* codec, Span<const uint8> source, Span<uint8> destin
     }
 }
 
-Result<usize> Decompress(void* codec, Span<const uint8> source, Span<uint8> destination,
-                         const CompressionProbe& probe) noexcept {
+Result<usize> Decompress(void* codec, uint32 requiredDictionaryId, Span<const uint8> source,
+                         Span<uint8> destination, const CompressionProbe& probe) noexcept {
+    auto checked = CheckFrameDictionaryIds(source, requiredDictionaryId);
+    if (!checked) {
+        return Result<usize>::Failure(checked.Error());
+    }
+
     // 모든 frame의 원본 크기가 기록되어 있으면 해제 전에 용량을 확인한다(skippable frame은 0).
     const unsigned long long total = ZSTD_findDecompressedSize(source.Data(), source.Size());
     if (total == ZSTD_CONTENTSIZE_ERROR) {
-        return Result<usize>::Failure(ErrorCode::InvalidArgument);
+        return Result<usize>::Failure(FrameSizeError(source));
     }
 
     const bool known = total != ZSTD_CONTENTSIZE_UNKNOWN;
@@ -242,11 +367,17 @@ Result<usize> Decompress(void* codec, Span<const uint8> source, Span<uint8> dest
     return DecodeInto(static_cast<ZSTD_DCtx*>(codec), source, destination, known, probe);
 }
 
-Result<usize> DecompressAppend(void* codec, Span<const uint8> source, usize maxOutputBytes,
-                               Array<uint8>& output, const CompressionProbe& probe) noexcept {
+Result<usize> DecompressAppend(void* codec, uint32 requiredDictionaryId, Span<const uint8> source,
+                               usize maxOutputBytes, Array<uint8>& output,
+                               const CompressionProbe& probe) noexcept {
+    auto checked = CheckFrameDictionaryIds(source, requiredDictionaryId);
+    if (!checked) {
+        return Result<usize>::Failure(checked.Error());
+    }
+
     const unsigned long long total = ZSTD_findDecompressedSize(source.Data(), source.Size());
     if (total == ZSTD_CONTENTSIZE_ERROR) {
-        return Result<usize>::Failure(ErrorCode::InvalidArgument);
+        return Result<usize>::Failure(FrameSizeError(source));
     }
 
     // 원본 크기가 모두 기록되어 있으면 정확히 그만큼, 아니면 블록 수로 구한 상한(블록당 최대
@@ -262,7 +393,7 @@ Result<usize> DecompressAppend(void* codec, Span<const uint8> source, usize maxO
     } else {
         const unsigned long long bound = ZSTD_decompressBound(source.Data(), source.Size());
         if (bound == ZSTD_CONTENTSIZE_ERROR) {
-            return Result<usize>::Failure(ErrorCode::InvalidArgument);
+            return Result<usize>::Failure(FrameSizeError(source));
         }
         capacity = bound < maxOutputBytes ? static_cast<usize>(bound) : maxOutputBytes;
         authoritative = bound <= maxOutputBytes;
@@ -306,20 +437,29 @@ ErrorCode StreamDecodeError(size_t code) noexcept {
 
 } // namespace
 
-Result<void*> CreateStreamCompressor(int32 level, uint64 sizeHint, Allocator& allocator) noexcept {
+Result<void*> CreateStreamCompressor(int32 level, uint64 sizeHint, Allocator& allocator,
+                                     const DictionaryState* dictionary) noexcept {
     ZSTD_CCtx* context = ZSTD_createCCtx_advanced(Memory(allocator));
     if (context == nullptr) {
         return Result<void*>::Failure(ErrorCode::OutOfMemory);
     }
 
     // 스트림은 입력·출력 버퍼가 호출마다 바뀌므로 stable buffer를 쓰지 않는다. 크기 힌트는 매개변수
-    // 선택에만 쓰고 frame에 기록하지 않는다(원본 크기는 모름).
+    // 선택에만 쓰고 frame에 기록하지 않는다(원본 크기는 모름). 사전 스트림은 원본 크기를 모르는
+    // ZSTD_createCDict(L) 경로처럼 사전을 붙여(attach) 쓰고, 그 수준·힌트의 매개변수를 명시한다
+    // (사전 크기는 attach 매개변수 선택에 들어가지 않는다).
     const int hint = sizeHint > 0x7fffffffull ? 0x7fffffff : static_cast<int>(sizeHint);
     const bool configured =
         SetCompressionParameter(context, ZSTD_c_compressionLevel, level) &&
         SetCompressionParameter(context, ZSTD_c_checksumFlag, 1) &&
-        SetCompressionParameter(context, ZSTD_c_dictIDFlag, 0) &&
-        (hint == 0 || SetCompressionParameter(context, ZSTD_c_srcSizeHint, hint));
+        SetCompressionParameter(context, ZSTD_c_dictIDFlag, dictionary != nullptr ? 1 : 0) &&
+        (hint == 0 || SetCompressionParameter(context, ZSTD_c_srcSizeHint, hint)) &&
+        (dictionary == nullptr ||
+         (!ZSTD_isError(
+              ZSTD_CCtx_refCDict(context, static_cast<const ZSTD_CDict*>(dictionary->codec))) &&
+          !ZSTD_isError(ZSTD_CCtx_setCParams(
+              context,
+              ZSTD_getCParams(dictionary->level, static_cast<unsigned long long>(hint), 0)))));
     if (!configured) {
         ZSTD_freeCCtx(context);
         return Result<void*>::Failure(ErrorCode::DependencyFailed);
@@ -328,14 +468,18 @@ Result<void*> CreateStreamCompressor(int32 level, uint64 sizeHint, Allocator& al
     return Result<void*>::Success(context);
 }
 
-Result<void*> CreateStreamDecompressor(uint32 maxWindowLog, Allocator& allocator) noexcept {
+Result<void*> CreateStreamDecompressor(uint32 maxWindowLog, Allocator& allocator,
+                                       const DictionaryState* dictionary) noexcept {
     ZSTD_DCtx* context = ZSTD_createDCtx_advanced(Memory(allocator));
     if (context == nullptr) {
         return Result<void*>::Failure(ErrorCode::OutOfMemory);
     }
 
     if (ZSTD_isError(
-            ZSTD_DCtx_setParameter(context, ZSTD_d_windowLogMax, static_cast<int>(maxWindowLog)))) {
+            ZSTD_DCtx_setParameter(context, ZSTD_d_windowLogMax, static_cast<int>(maxWindowLog))) ||
+        (dictionary != nullptr &&
+         ZSTD_isError(
+             ZSTD_DCtx_refDDict(context, static_cast<const ZSTD_DDict*>(dictionary->codec))))) {
         ZSTD_freeDCtx(context);
         return Result<void*>::Failure(ErrorCode::DependencyFailed);
     }
@@ -383,7 +527,8 @@ Result<StreamProgress> CompressStep(void* codec, Span<const uint8> input, Span<u
 }
 
 Result<StreamProgress> DecompressStep(void* codec, Span<const uint8> input, Span<uint8> output,
-                                      uint32 maxWindowLog, StreamDecodeState& state) noexcept {
+                                      uint32 maxWindowLog, uint32 requiredDictionaryId,
+                                      StreamDecodeState& state) noexcept {
     auto* context = static_cast<ZSTD_DCtx*>(codec);
     const uint8* source = NonNullSource(input);
     usize consumed = 0;
@@ -420,6 +565,11 @@ Result<StreamProgress> DecompressStep(void* codec, Span<const uint8> input, Span
             // window(single segment frame은 원본 크기)가 구현 상한 2^31을 넘으면 어떤 설정으로도 풀
             // 수 없어 Unsupported, 호출자 상한만 넘으면 CapacityExceeded다.
             if (header.frameType == ZSTD_frame) {
+                // 형식 사전 문맥은 사전 ID 없는 frame을 거부한다(검사 없이 사전으로 풀면 틀린
+                // 결과). window 검사보다 먼저 해 오류가 호출자 상한 설정에 따라 바뀌지 않는다.
+                if (requiredDictionaryId != 0 && header.dictID == 0) {
+                    return Result<StreamProgress>::Failure(ErrorCode::Unsupported);
+                }
                 if (header.windowSize > (1ull << MaxZstdWindowLog)) {
                     return Result<StreamProgress>::Failure(ErrorCode::Unsupported);
                 }
@@ -484,6 +634,98 @@ Result<StreamProgress> DecompressStep(void* codec, Span<const uint8> input, Span
     progress.produced = produced;
     progress.complete = consumed == input.Size() && !pending;
     return Result<StreamProgress>::Success(progress);
+}
+
+// --- 사전(11절) ---
+
+Result<void*> CreateCompressDictionary(Span<const uint8> bytes, int32 level,
+                                       CodecMemory& memory) noexcept {
+    // ZSTD_createCDict(L)과 같은 표 매개변수다. 원본 크기를 모르는 CDict는 작은 원본(513byte)을
+    // 가정해 표를 줄인다(zstd의 createCDict 모드). 공개 API로 같은 조정을 재현한다.
+    const ZSTD_compressionParameters parameters = ZSTD_adjustCParams(
+        ZSTD_getCParams(level, 0, bytes.Size()), DictionaryAssumedSourceBytes, bytes.Size());
+    memory.allocationFailed = false;
+    ZSTD_CDict* dictionary =
+        ZSTD_createCDict_advanced(bytes.Data(), bytes.Size(), ZSTD_dlm_byCopy, ZSTD_dct_auto,
+                                  parameters, DictionaryMemory(memory));
+    if (dictionary == nullptr) {
+        return Result<void*>::Failure(DictionaryCreateError(memory));
+    }
+    if (IsFormattedDictionary(bytes) && ZSTD_getDictID_fromCDict(dictionary) == 0) {
+        ZSTD_freeCDict(dictionary);
+        return Result<void*>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return Result<void*>::Success(dictionary);
+}
+
+Result<void*> CreateDecompressDictionary(Span<const uint8> bytes, CodecMemory& memory) noexcept {
+    memory.allocationFailed = false;
+    ZSTD_DDict* dictionary = ZSTD_createDDict_advanced(bytes.Data(), bytes.Size(), ZSTD_dlm_byCopy,
+                                                       ZSTD_dct_auto, DictionaryMemory(memory));
+    if (dictionary == nullptr) {
+        return Result<void*>::Failure(DictionaryCreateError(memory));
+    }
+    if (IsFormattedDictionary(bytes) && ZSTD_getDictID_fromDDict(dictionary) == 0) {
+        ZSTD_freeDDict(dictionary);
+        return Result<void*>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return Result<void*>::Success(dictionary);
+}
+
+void DestroyCompressDictionary(void* dictionary) noexcept {
+    ZSTD_freeCDict(static_cast<ZSTD_CDict*>(dictionary));
+}
+
+void DestroyDecompressDictionary(void* dictionary) noexcept {
+    ZSTD_freeDDict(static_cast<ZSTD_DDict*>(dictionary));
+}
+
+uint32 CompressDictionaryId(const void* dictionary) noexcept {
+    return ZSTD_getDictID_fromCDict(static_cast<const ZSTD_CDict*>(dictionary));
+}
+
+uint32 DecompressDictionaryId(const void* dictionary) noexcept {
+    return ZSTD_getDictID_fromDDict(static_cast<const ZSTD_DDict*>(dictionary));
+}
+
+usize CompressDictionaryMemory(const void* dictionary) noexcept {
+    return ZSTD_sizeof_CDict(static_cast<const ZSTD_CDict*>(dictionary));
+}
+
+usize DecompressDictionaryMemory(const void* dictionary) noexcept {
+    return ZSTD_sizeof_DDict(static_cast<const ZSTD_DDict*>(dictionary));
+}
+
+Result<uint32> FrameDictionaryId(Span<const uint8> frame) noexcept {
+    ZSTD_FrameHeader header{};
+    const size_t parsed = ZSTD_getFrameHeader(&header, NonNullSource(frame), frame.Size());
+    if (ZSTD_isError(parsed)) {
+        // window가 구현 상한(2^31)을 넘는 frame은 손상이 아니다. 해제 경로와 같이 Unsupported다.
+        return Result<uint32>::Failure(ZSTD_getErrorCode(parsed) ==
+                                               ZSTD_error_frameParameter_windowTooLarge
+                                           ? ErrorCode::Unsupported
+                                           : ErrorCode::InvalidArgument);
+    }
+    if (parsed != 0) {
+        return Result<uint32>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return Result<uint32>::Success(header.frameType == ZSTD_frame ? header.dictID : 0);
+}
+
+Result<void> BindDecompressDictionary(void* codec, const DictionaryState* dictionary) noexcept {
+    // 세션을 처음 상태로 돌린 뒤 바꾼다(refDDict는 frame 사이에서만 받는다). nullptr은 사전을 뗀다.
+    auto* context = static_cast<ZSTD_DCtx*>(codec);
+    ZSTD_DCtx_reset(context, ZSTD_reset_session_only);
+    const auto* ddict =
+        dictionary != nullptr ? static_cast<const ZSTD_DDict*>(dictionary->codec) : nullptr;
+    if (ZSTD_isError(ZSTD_DCtx_refDDict(context, ddict))) {
+        return Result<void>::Failure(ErrorCode::DependencyFailed);
+    }
+
+    return Result<void>::Success();
 }
 
 } // namespace rocks::detail::zstd

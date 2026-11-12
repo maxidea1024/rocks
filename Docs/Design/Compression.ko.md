@@ -7,9 +7,9 @@
 
 ## 1. 범위
 
-| 1차 범위 | 2차 범위(9·10절) | 후속 |
-|---|---|---|
-| 형식을 고르는 일회성 압축·해제, 최악 압축 크기, 크기를 모르는 해제(상한 필수, `Array` 뒤에 붙임), 재사용 문맥(`Compressor`·`Decompressor`), worker 비동기 압축·해제(의존 작업 연결·협력적 취소), 모든 할당의 Rocks `Allocator` 경유, 결정적 출력 | 블록 단위 seek 가능 컨테이너(Godot `FileAccessCompressed`·UE `FCompressedBuffer` 대응)와 큰 버퍼의 블록 병렬 압축·해제, gzip·zstd 스트리밍 객체(역압) | zstd 사전, Brotli 해제(WOFF2), 형식 플러그인 등록(UE `ICompressionFormat`), AsyncFile 완료 → 해제 작업 연결(외부 완료 이벤트 handle 필요), LZ4 frame 스트리밍, zstd ultra 수준(20–22) |
+| 1차 범위 | 2차 범위(9·10절) | 3차 범위(11절) | 후속 |
+|---|---|---|---|
+| 형식을 고르는 일회성 압축·해제, 최악 압축 크기, 크기를 모르는 해제(상한 필수, `Array` 뒤에 붙임), 재사용 문맥(`Compressor`·`Decompressor`), worker 비동기 압축·해제(의존 작업 연결·협력적 취소), 모든 할당의 Rocks `Allocator` 경유, 결정적 출력 | 블록 단위 seek 가능 컨테이너(Godot `FileAccessCompressed`·UE `FCompressedBuffer` 대응)와 큰 버퍼의 블록 병렬 압축·해제, gzip·zstd 스트리밍 객체(역압) | zstd 사전 사용(압축·해제 사전 handle, 일회성·문맥·스트림·비동기·블록 컨테이너 연동, frame 사전 ID 검사) | zstd 사전 학습(dictBuilder, 11.6절), Brotli 해제(WOFF2), 형식 플러그인 등록(UE `ICompressionFormat`), AsyncFile 완료 → 해제 작업 연결(외부 완료 이벤트 handle 필요), LZ4 frame 스트리밍, zstd ultra 수준(20–22), LZ4·zlib 사전 |
 
 ## 2. 코덱 선정
 
@@ -238,7 +238,7 @@ public:
   - zlib: windowBits 15·memLevel 8·`Z_DEFAULT_STRATEGY`로 고정한다. Gzip 헤더는 매 reset 뒤 `deflateSetHeader`로
     mtime 0·OS 255·이름·주석·extra·FHCRC 없음을 다시 적용한다(zlib 1.4 `deflateResetKeep`이 헤더를 지우고, 기본 OS 코드는
     플랫폼마다 다르다).
-  - zstd: checksum과 content size를 켜고 dictID는 쓰지 않는다.
+  - zstd: checksum과 content size를 켠다. 사전 ID는 사전 문맥만 기록한다(11절).
   - 동기·비동기는 같은 내부 구현과 같은 chunk 상수를 쓴다.
   - 테스트가 고정 입력의 압축 결과 CRC-32를 golden으로 고정한다. 버전을 올릴 때는 의도적으로 갱신한다.
 - **무결성**: Zstd는 content checksum(XXH64 하위 32bit), Zlib은 Adler-32, Gzip은 CRC-32·ISIZE를 검사한다. Lz4 raw block과
@@ -252,7 +252,8 @@ public:
 |---|---|
 | destination 또는 `maxOutputBytes` 부족 | CapacityExceeded |
 | 손상·절단·체크섬 불일치·스트림 뒤 남는 byte(Lz4 제외)·빈 해제 입력·범위 밖 수준·겹침·Lz4 입력 한계 초과 | InvalidArgument |
-| zlib 프리셋 사전(FDICT, `Z_NEED_DICT`)·사전이 필요한 zstd frame(`dictionary_wrong`) | Unsupported |
+| 문맥에 없거나 다른 사전이 필요한 입력: zlib 프리셋 사전(FDICT, `Z_NEED_DICT`), 사전 ID가 다른 zstd frame(`dictionary_wrong`), 형식 사전 문맥에 사전 ID 없는 frame, 블록 컨테이너의 사전이 후보에 없음 | Unsupported |
+| zstd frame의 window가 구현 상한(2^31)을 넘음(RFC상 유효, 일회성·스트림·사전 ID 조회 모두) | Unsupported |
 | 할당 실패(`Z_MEM_ERROR`·`memory_allocation` 포함) | OutOfMemory |
 | 크기 산술 overflow, `deflateBound_z`의 `(z_size_t)-1` | Overflow |
 | 외부 코덱이 계약 밖의 실패를 보고(예: dst ≥ bound인데 LZ4 압축이 0 반환, `Z_STREAM_ERROR`) | DependencyFailed |
@@ -380,6 +381,7 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
 | — | IoStore 내부 비동기 해제 | `TrySubmitCompress`·`TrySubmitDecompress` |
 | `FileAccessCompressed`(블록·seek) | `FCompressedBuffer` | `CompressedBlocksWriter`·`CompressedBlocksReader`(9절) |
 | `StreamPeerGZIP` | — | `CompressStream`·`DecompressStream`(10절) |
+| — | — (`FCompression`·`FCompressedBuffer`에 사전 인자 없음. 학습 사전은 OodleNetwork 플러그인의 패킷 압축이 쓰고 commandlet이 학습) | `CompressDictionary`·`DecompressDictionary`(11절) |
 
 ## 7. 검증 계획
 
@@ -428,6 +430,7 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
 | 다른 플랫폼 | GitHub Actions(macOS 15 ARM64, Apple clang)에서 01f1b98·64ff35f의 Compression 시험이 모두 통과(64ff35f: 17개, 1.5MiB 결정성 golden 포함). Android NDK arm64·x86_64 교차 빌드 경고 0(C 번역 단위 31개가 `clang++ -x c -std=c17`), Android 35 x86_64 에뮬레이터에서 17개 통과(golden 포함). 세 플랫폼에서 압축 결과 byte가 같음을 확인 |
 | 2차(스트리밍·블록 컨테이너) | 스트림 14개·블록 컨테이너 16개 시험(결정성 golden 각 1개 포함)이 Windows x64 Debug·ASan에서 통과. 구현 뒤 독립 검토 5건(zstd·zlib adapter, 스트림 드라이버, RCBK 형식·reader, 병렬·writer)의 확정 결함을 모두 반영했다: zlib 작은 창 flush 무한 반복(major), 읽기 문맥 캐시의 reader 주소 재사용 혼동(major), 병렬 경로가 worker가 빌 때까지 기다리다 교착(major, `WorkerTaskHandle::TryRevoke` 추가), 그 밖의 오류 분류·캐시 검증·helper 자원 실패 처리. macOS·Android 실행은 아직 하지 않았다 |
 | 공용 변경 | `Array::TryAppendUninitialized`(0 채우기 없는 성장), trivial 소멸 타입 축소·`Clear`를 O(1)로(Debug 스트림 시험 9.5초 → 1.1초). 1차 Append 경로도 0 채우기를 없앴다 |
+| 3차(zstd 사전, 11절) | 설계 교차검증 3건(zstd 원본·실측, API·계약·형식, dictBuilder 조사) 뒤 구현. 사전 시험(11.7절)이 Windows x64 Debug·ASan에서 통과. 구현 뒤 독립 검토 2건(수명·동시성·오류 분류, zstd 의미·결정성·형식·시험 공백)의 확정 항목을 반영했다: 이동된 블록 설정이 사전 없이 조용히 다른 결과를 냄, 큰 window frame의 사전 ID 조회 분류, 스트림의 사전 ID·window 검사 순서, 지문이 같고 내용이 다른 후보, 헤더 배치 변경의 version 미갱신(RCBK v2), 문서 오류. 검토가 만든 시험 18개를 저장소로 옮겼고, 사전과 무관한 기존 결함(일회성 zstd 해제가 window 상한 초과 frame을 InvalidArgument로 분류)도 Unsupported로 고쳤다. Foundation 전체 908개 통과(Debug). 표준 경로 등가성은 원본 내부 함수로 1,367만 건, 실측 8,328건을 비교해 반례가 없었다. macOS·Android 실행은 아직 하지 않았다 |
 
 처리량(로컬 1회 측정, 1차 때 저장소 밖 임시 벤치): Windows x64 Release(ThinLTO), 단일 스레드, `Compressor`·`Decompressor`
 재사용, 저장소 소스·문서 8.9MiB, 여러 번 중 최고값이다. 기기 사양을 고정한 반복 측정이 아니므로 기준값이 아니라 adapter가 원본
@@ -450,6 +453,18 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
 
 스트림(64KiB 조각): zstd 3은 압축 267 / 해제 999MB/s, gzip 6은 19 / 416MB/s(같은 코퍼스의 일회성 342 / 1151, 19 / 465).
 
+사전(`CompressionBench --size 16`, Release, 같은 기기 1회): 합성 코퍼스 앞 4MiB를 1KiB·4KiB 항목으로 나눠 항목마다 zstd
+frame 하나로 압축·해제한다. 사전은 학습하지 않은 raw 내용(항목 구간 바로 뒤 64KiB)이라 학습 사전보다 효과가 작은 하한이다.
+
+| 항목 | 수준 | 압축률(사전 없음 → 있음) | 압축 MB/s(없음 → 있음) | 해제 MB/s(없음 → 있음) |
+|---|---|---|---|---|
+| 1KiB | 3 | 0.475 → 0.335 | 167 → 247 | 420 → 543 |
+| 1KiB | 19 | 0.457 → 0.335 | 11.0 → 5.7 | 409 → 391 |
+| 4KiB | 3 | 0.376 → 0.303 | 230 → 257 | 675 → 559 |
+| 4KiB | 19 | 0.344 → 0.294 | 8.2 → 5.5 | 693 → 668 |
+
+작은 항목일수록 이득이 크다. 수준 19는 사전까지 탐색해 압축이 느려진다.
+
 미검증·후속:
 - Android arm64 실기기 실행은 미검증이다(arm64는 교차 빌드만 확인).
 - 기기 사양을 고정한 반복 측정 기록, `DYNAMIC_BMI2=0`·LZ4 1.11 Android 해제 루프의 영향 측정은 후속이다.
@@ -465,43 +480,46 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
 블록마다 저장 byte의 CRC로 무결성을 확인한다(LZ4·Deflate raw처럼 체크섬이 없는 코덱도 보호). 헤더는
 `Compression/CompressedBlocks.h`다.
 
-### 9.1 영속 형식 RCBK v1
+### 9.1 영속 형식 RCBK v2
 
 모든 정수는 little-endian이며 byte 단위로 읽는다(컨테이너가 Append로 임의 위치에 놓일 수 있어 struct 재해석을 쓰지 않는다).
 
 | offset | 크기 | 필드 | 거부 |
 |---|---|---|---|
 | 0 | 4 | magic `RCBK` | InvalidArgument |
-| 4 | 2 | version = 1 | 다르면 Unsupported |
+| 4 | 2 | version = 2(1은 사전 지문 없는 40byte 헤더였다) | 다르면 Unsupported |
 | 6 | 1 | codec ID(영속 값): 1 Lz4, 2 Zstd, 3 Deflate | 0은 InvalidArgument, 4 이상은 Unsupported |
 | 7 | 1 | blockSizeLog2 12–24(4KiB–16MiB) | InvalidArgument |
 | 8 | 8 | rawSize | |
 | 16 | 4 | blockCount = ⌈rawSize / blockSize⌉ | 다르면 InvalidArgument |
-| 20 | 4 | flags = 0(기능 bit 예약: 사전·payload 정렬) | 0이 아니면 Unsupported |
+| 20 | 4 | flags: bit0 = 사전(11.4절) | 모르는 bit, bit0인데 codec ≠ Zstd는 Unsupported |
 | 24 | 8 | payloadSize = 저장 크기 합 | |
-| 32 | 4 | reserved = 0 | 0이 아니면 InvalidArgument |
-| 36 | 4 | indexCrc32 = CRC-32(header[0, 36) ‖ block table) | InvalidArgument |
+| 32 | 8 | dictionaryFingerprint = 사전 SHA-256 앞 8byte(bit0 = 0이면 0) | bit0 = 0인데 0이 아니면 InvalidArgument |
+| 40 | 4 | reserved = 0 | 0이 아니면 InvalidArgument |
+| 44 | 4 | indexCrc32 = CRC-32(header[0, 44) ‖ block table) | InvalidArgument |
 
 - block table: blockCount × {`storedSize: u32`, `storedCrc32: u32`(그 블록 저장 byte의 CRC-32)}. 그 뒤 payload는 블록 저장
   byte를 순서대로 이어 붙인다.
 - raw 저장 ⇔ storedSize == 블록 원본 크기, 압축 ⇔ 1 ≤ storedSize < 블록 원본 크기. storedSize만 보고 raw·압축이 하나로
   정해진다(같은 원본의 저장 byte가 하나뿐이라는 뜻은 아니다: 압축 가능한 블록을 raw로 둔 컨테이너도 유효하다).
   마지막 블록 원본 크기 = rawSize − (n − 1)·blockSize.
-- 헤더만으로도 크기 일관성을 검사한다: n ≤ payloadSize ≤ rawSize, 40 + 8n + payloadSize == 컨테이너 길이(overflow 없이
-  계산). 따라서 n ≤ 컨테이너 길이 / 9이고, 40byte짜리 악성 헤더로 큰 인덱스 할당을 유도할 수 없다.
+- 헤더만으로도 크기 일관성을 검사한다: n ≤ payloadSize ≤ rawSize, 48 + 8n + payloadSize == 컨테이너 길이(overflow 없이
+  계산). 따라서 n ≤ 컨테이너 길이 / 9이고, 48byte짜리 악성 헤더로 큰 인덱스 할당을 유도할 수 없다.
 - 블록 코덱 데이터(writer 규칙): Lz4 raw block, Zstd frame 하나(content size 포함, checksum 끔 — 컨테이너 CRC가 대신한다),
   Deflate raw. reader는 해제 결과가 정확히 블록 원본 크기인지만 강제한다(zstd frame 여러 개·checksum 포함 frame도 결과가
-  맞으면 받는다). 사전이 필요한 블록은 flags 0인 v1에서 형식 위반이라 InvalidArgument다.
+  맞으면 받는다). 사전 컨테이너의 zstd frame은 사전 ID를 기록한다. 사전 없는 컨테이너의 사전 블록과 사전 컨테이너의 ID
+  없는·다른 ID 블록은 형식 위반이라 InvalidArgument다.
   Zlib·Gzip은 래퍼 중복이라 허용하지 않는다. 블록 압축 결과가 원본 이상이면(용량 = 원본 − 1에서 CapacityExceeded) raw로
   저장한다. Deflate 수준 0은 항상 raw다.
 - CRC-32는 zlib `crc32_z`(Core `Crc32`와 같은 값)로 저장 byte에 대해 계산한다. 원본이 아니라 저장 byte라 압축률만큼 싸고,
   해제 전에 손상을 거르며, 해제 없이 무결성만 검사할 수 있다. 읽을 때 검증을 끌 수 있다(기본 켬). CRC는 우발 손상만
   잡는다. CRC를 다시 맞춘 의도적 변조는 거르지 못하므로(LZ4·Deflate는 다른 데이터로 성공할 수 있다) 신뢰할 수 없는 출처의
   무결성은 서명·해시로 따로 확인한다.
-- 헤더 검사 순서: magic(InvalidArgument) → version → codec ID → flags(여기까지 모르는 값은 Unsupported) → blockSizeLog2·
-  reserved·블록 수·payload·전체 길이(InvalidArgument) → (TryOpen) indexCrc32 → 저장 크기 규칙·합계. 그래서 version·flags가
-  손상돼도 Unsupported로 보고된다.
-- 원본 크기 증폭: 블록 하나가 1byte로 저장될 수 있어 rawSize는 컨테이너 길이의 최대 약 186만 배다(49byte → 16MiB). reader는
+- 헤더 검사 순서: magic(InvalidArgument) → version → codec ID → flags(모르는 bit, 사전 bit + Zstd 아닌 codec. 여기까지
+  Unsupported) → blockSizeLog2·reserved·사전 bit 없는 지문·블록 수·payload·전체 길이(InvalidArgument) → (TryOpen)
+  indexCrc32 → 사전 후보 선택(Unsupported) → 저장 크기 규칙·합계. 그래서 version·flags가 손상돼도 Unsupported로
+  보고되고, 지문 byte 손상은 CRC에서 InvalidArgument로 걸려 "사전 불일치"로 잘못 보고되지 않는다.
+- 원본 크기 증폭: 블록 하나가 1byte로 저장될 수 있어 rawSize는 컨테이너 길이의 최대 약 186만 배다(57byte → 16MiB). reader는
   이만큼 할당하지 않지만, `RawSize()`로 출력을 잡는 호출자는 자기 상한과 비교해야 한다.
 - 결정성: 같은 라이브러리 버전·설정·입력이면 같은 byte다. 병렬 압축도 순차와 같은 byte다.
 
@@ -509,7 +527,7 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
 
 - `CompressedBlocksSettings::TryMake(compressionSettings, blockSizeLog2 = 18)`: 형식은 Lz4·Zstd·Deflate만이며 수준은
   `CompressionSettings`가 정한다.
-- `TryGetCompressedBlocksBound(blockSizeLog2, rawSize)` = 40 + 8n + rawSize(블록은 원본보다 커지지 않는다).
+- `TryGetCompressedBlocksBound(blockSizeLog2, rawSize)` = 48 + 8n + rawSize(블록은 원본보다 커지지 않는다).
 - `TryCompressBlocksAppend(settings, source, output, scratch)`: 순차. 실패 시 output 길이 복원.
 - `TryCompressBlocksAppend(scheduler, settings, source, output, scratch)`: 병렬.
   - 연속 블록 범위 job을 atomic 카운터로 worker와 호출 스레드가 함께 가져간다. job마다 자기 Array에 압축한다.
@@ -530,13 +548,13 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
     512KiB당 하나 이하)만큼 제출하고, 취소 요청을 받은 helper는 새 job을 가져가지 않는다(남은 job은 호출 스레드가 처리한다).
   - 메모리: 참여 스레드마다 코덱 문맥 하나다. zstd 고수준·큰 블록은 문맥이 크므로(수준 19·16MiB 블록 약 81MiB) worker
     수로 조절한다. job 결과는 모든 job이 끝날 때까지 보관하므로 압축 결과 크기만큼 더 쓴다.
-- `CompressedBlocksWriter`(증분 writer, IO 비의존): `TryBegin(settings, rawSize)`로 인덱스 크기(40 + 8n)를 정한다. 코덱
+- `CompressedBlocksWriter`(증분 writer, IO 비의존): `TryBegin(settings, rawSize)`로 인덱스 크기(48 + 8n)를 정한다. 코덱
   문맥은 처음 압축하는 블록에서 만든다(빈 원본·Deflate 수준 0은 만들지 않는다). 블록 추가가 실패하면 상태가 그대로라 같은
   블록을 다시 줄 수 있다.
   `TryAppendBlock(rawBlock, payloadOutput)`을 블록 순서대로 부르고(마지막 외에는 정확히 blockSize), `TryFinishIndex(indexOut)`로
   인덱스를 쓴다. 파일이면 인덱스 자리를 비워 두고 payload를 흘려 쓴 뒤 되돌아가 인덱스를 쓴다.
 - `CompressedBlocksReader`(불변, 여러 스레드가 const로 공유)
-  - `TryGetIndexBytes(header, containerBytes)`: 헤더 40byte만 검사해 인덱스 크기를 돌려준다(파일은 이만큼만 먼저 읽는다).
+  - `TryGetIndexBytes(header, containerBytes)`: 헤더 48byte만 검사해 인덱스 크기를 돌려준다(파일은 이만큼만 먼저 읽는다).
   - `TryOpen(index, containerBytes, allocator)`, `TryOpen(container, allocator)`: 표 CRC·저장 크기 규칙·합계를 검사하고
     블록별 저장 offset 표(16byte/블록)를 만든다.
   - `TryLocate(rawOffset, rawBytes)`: 걸치는 블록과 그 저장 byte 범위(컨테이너 기준)를 돌려준다.
@@ -603,3 +621,162 @@ deflate 스트림은 zlib 래퍼라 Rocks `Zlib`에 대응한다). 형식은 Zst
   되돌린다(일관성일 뿐 무결성 보장은 아니다).
 - 메모리: zlib inflate 약 40KiB, deflate 약 256KiB, zstd 해제는 window + 블록 버퍼(Reset으로 해제되지 않고 객체 수명 동안
   유지). 이동 전용이며 코덱 상태는 heap에 고정하고, 이동된 뒤 호출은 StaleHandle이다. 한 객체는 한 번에 한 스레드만 쓴다.
+
+## 11. 압축 사전 (3차, 교차검증 반영)
+
+작은 입력(수십 byte–수십 KiB의 에셋·JSON·네트워크 메시지)이 많을 때 공통 내용을 미리 알려 압축률을 높인다. 헤더는
+`Compression/CompressionDictionary.h`다. Godot `Compression`과 UE 5.6 `FCompression`·`FCompressedBuffer`에는 범용 압축의
+사전 인자가 없다. UE에서 학습 사전을 쓰는 곳은 OodleNetwork 플러그인의 패킷 압축이며 학습은 commandlet(도구 단계)이
+맡는다. 그래서 사용은 Core 런타임에, 학습은 도구 계층에 둔다(11.6절). 설계 초안은 교차검증 3건(zstd 1.5.7 원본·실측,
+API·계약·형식, dictBuilder 조사)을 반영했다.
+
+### 11.1 사전 객체
+
+- `CompressDictionary`(zstd CDict, 압축 수준 고정)와 `DecompressDictionary`(DDict). 런타임 로더는 해제 사전만 만든다.
+- 공유 handle이다(Core `SharedPtr`, 원자 참조 계수). 사전을 쓰는 문맥·스트림·블록 설정·reader·비동기 작업이 복사본을 가져
+  수명을 보장한다. 사전 할당기는 마지막 handle을 놓는 스레드(비동기 worker 포함)가 해제하므로 다른 스레드 해제를 허용해야
+  한다(System·Binned·Budget·Pool·External·Debug 가능, Arena·Stack 불가).
+- 내용은 `ZSTD_dct_auto`다. magic 0xEC30A437로 시작하면 zstd 사전 형식(엔트로피 표·반복 offset·내용·사전 ID), 아니면 raw
+  내용이다. 그래서 magic으로 시작하는 raw 내용은 형식 사전으로 해석되어 손상(InvalidArgument)이다. 형식 사전의 사전 ID가
+  0이면 frame에 ID를 기록할 수 없어 raw와 구분되지 않으므로 InvalidArgument다. `Id()`는 생성된 CDict·DDict에서 읽는다
+  (`ZSTD_getDictID_fromDict`는 검증 없이 필드만 읽는다).
+- 크기 9byte–32MiB. zstd는 8byte 이하 내용을 색인하지 않고(압축기는 8byte 미만 사전을 조용히 무시한다), CDict는 사전 끝의
+  2^max(hashLog+3, chainLog+1) byte만 색인하므로 큰 사전은 이득이 없다. 상한은 실수로 큰 버퍼를 넘기는 것을 막는다.
+- 사전 byte는 복사한다(`ZSTD_dlm_byCopy`). byRef 사전은 원본이 사전 바로 뒤에 놓이면 연속 window로 처리되어 결과 byte가
+  메모리 배치에 따라 바뀐다(교차검증 실측). 복사본이면 결정적이다.
+- 식별: `Digest()`는 사전 byte 전체의 SHA-256(쿠킹 빌드 키·패키지의 사전 참조), `Id()`는 frame 헤더에 기록되는 zstd 사전
+  ID(raw 0), `MemoryBytes()`는 준비된 사전과 상태의 크기다.
+- OOM과 손상의 구분: zstd create 함수는 둘 다 NULL로 알린다. customMem opaque를 사전 상태 안의 `CodecMemory`로 두어 할당
+  실패 flag를 기록한다(opaque는 해제 때도 쓰이므로 사전 상태가 CDict·DDict보다 오래 산다).
+- 빈 handle(기본 생성·이동된 뒤)의 조회는 Fatal(`SharedPtr` 역참조와 같다), 소비 API에 넘기면 StaleHandle이다.
+- LZ4(`LZ4_loadDict`)·zlib(`deflateSetDictionary`) 사전은 Unsupported(후속)다.
+
+### 11.2 API 연동
+
+- 일회성: `TryCompress`·`TryCompressAppend`·`TryDecompress`·`TryDecompressAppend`의 사전 overload. 사전 준비(CDict·DDict)는
+  handle에 있어 호출마다 드는 비용은 사전 없는 함수와 같은 문맥 생성뿐이다.
+- 문맥: `Compressor::TryCreate(CompressDictionary, allocator)`, `Decompressor::TryCreate(DecompressDictionary, allocator)`.
+- 스트림: `CompressStream::TryCreate(CompressDictionary, allocator, sizeHint)`,
+  `DecompressStream::TryCreate(DecompressDictionary, limits, allocator)`. Reset 뒤에도 같은 사전이다(세션 재설정은 참조
+  사전을 유지한다). 사전 메모리는 window 상한과 별개다.
+- 비동기: `TrySubmitCompress`·`TrySubmitDecompress`(Append·Span)의 사전 overload. 작업 capture가 handle 복사본을 가진다.
+- `TryGetZstdFrameDictionaryId(frame)`: frame 헤더의 사전 ID(0 = 기록 없음, skippable 0). 로더·수신 측이 사전을 고를 때
+  쓴다. `ZSTD_getDictID_fromFrame`은 여러 원인을 0 하나로 뭉치므로 `ZSTD_getFrameHeader`를 쓴다.
+- `CompressionOutputRevision`(Compression.h): 이 모듈의 출력 byte를 바꾸는 결정(코덱 버전, frame 설정, 사전 매개변수 정책,
+  블록 컨테이너 배치)이 바뀔 때마다 올린다. 압축 결과를 캐시하는 쪽은 형식·수준·사전 Digest(·블록 크기)와 함께 키에 넣는다.
+  사전을 다시 학습하면 그 사전에 의존한 결과는 모두 다시 쿠킹된다.
+
+### 11.3 수준 매개변수 정책
+
+zstd 1.5.7에서 사용자 할당기를 받는 CDict 생성 함수(`ZSTD_createCDict_advanced`·`advanced2`)는 CDict를 "수준 없음"
+(`ZSTD_NO_CLEVEL`, zstd_compress.c 5636)으로 만든다. 수준을 기록하는 `ZSTD_createCDict(L)`은 기본 malloc만 쓴다. 수준 없는
+CDict를 그대로 쓰면 세 가지가 달라진다(교차검증 원본 추적).
+
+1. `ZSTD_CCtx_init_compressStream2`가 frame 수준을 0(→ 수준 3 표)으로 덮어 windowLog가 수준 3 값이 된다.
+2. 블록 분할기 판정도 수준 3 전략(dfast)으로 해 수준 16 이상에서 분할기가 꺼진다.
+3. `ZSTD_compressBegin_internal`이 큰 입력(128KiB 이상이고 사전의 6배 이상)에서 그 수준의 전체 표로 사전을 다시 적재하는
+   경로를 막고 항상 작은 입력용 CDict 표를 쓴다.
+
+대책 없이 5.19MB 입력을 압축하면 표준보다 수준 9에서 59.5%, 수준 19에서 4.9% 크다(실측). 문맥마다 사전을 적재하는
+localDict도 내부적으로 수준 없는 CDict라 같은 문제가 있어 기각했다. 채택한 방식은 이렇다.
+
+- CDict: `ZSTD_createCDict_advanced(byCopy, dct_auto, ZSTD_adjustCParams(ZSTD_getCParams(L, 0, n), 513, n), customMem)`.
+  `ZSTD_createCDict(L)`이 원본 크기를 모를 때 작은 원본(513byte)을 가정해 표를 줄이는 것(createCDict 모드)을 공개 API로
+  재현한다.
+- frame마다(세션 재설정 뒤, 원본 크기 고정 전): `ZSTD_CCtx_setCParams(ZSTD_getCParams(L, max(크기, 1), 사전 크기))`와
+  `ZSTD_c_forceAttachDict` = (크기 ≥ 128KiB이고 크기 ≥ 6 × 사전 크기면 `ZSTD_dictForceLoad`, 아니면 기본 attach). 두 상수는
+  zstd 내부(`ZSTD_USE_CDICT_PARAMS_SRCSIZE_CUTOFF`·`DICTSIZE_MULTIPLIER`)와 같아야 하므로 1.5.7 고정을 전제로 golden 시험이
+  묶는다.
+- 검증: 표준 경로(`ZSTD_createCDict(L)` + `ZSTD_CCtx_refCDict` + `ZSTD_compress2`)와 byte 비교 golden 84개가 같다. 형식 사전
+  2178byte·raw 4KiB·raw 300KiB, 수준 1·3·5·9·13·16·19, 입력 0byte–2MB(copy 모드, 재적재 경계 6 × 사전 크기 ± 1 포함)다.
+  golden은 공식 tarball 원본으로 만든 probe가 생성한다(`Tests/CompressionDictionaryTestData.h`에 방법 기록). 구현 교차검증은
+  zstd 내부 함수를 직접 불러 CDict 매개변수 91,637건(수준 1–19 × 사전 9byte–32MiB)과 frame별 실효 상태(attach·copy·재적재
+  경로, 매개변수 7개, 블록 분할기, LDM, row match finder) 1,367만 건이 표준과 같고, 실측 8,328건(raw·형식 사전 2.2KB–32MiB,
+  입력 0–3.3MB)이 byte 단위로 같음을 확인했다. 사전 크기는 zstd도 형식 사전 전체 byte 수를 쓴다(`cdict->dictContentSize`).
+- 1MiB를 넘는 입력은 1MiB 단위 stable 입력 호출(분할 단위)이라, 블록 분할기가 보는 경계가 `ZSTD_compress2` 단일 호출과 다를 수
+  있다(이질적인 데이터에서 −0.28%–+2.26%, 사전과 무관한 기존 동작, 결정적). 비교는 같은 호출 패턴의 표준 경로와 한다.
+- 스트림: 원본 크기를 모르므로 사전을 붙여(attach) 쓰고, 생성 때 `setCParams(ZSTD_getCParams(L, sizeHint, 0))`을 명시한다
+  (attach 모드는 사전 크기를 매개변수 선택에 넣지 않는다). 공개 API의 호출 패턴(Process 반복 + Finish)은 수준 1–19에서 표준
+  스트림과 같은 byte다(교차검증). 주의: 첫 호출이 입력을 가진 End면 zstd가 원본 크기를 정하는데 수준 없는 CDict라 재적재가
+  막혀 결과가 달라진다(최대 +9.7%). `TryFinish`는 입력을 받지 않아 지금은 빈 스트림만 이 경로를 타며 결과가 같다. 입력을 받는
+  Finish를 추가하면 frame 경로처럼 매개변수를 정해야 한다.
+- 비용: 사전 문맥으로 큰 입력을 압축하면 사전 없는 수준 L과 같은 작업 메모리와 frame당 사전 재적재 비용(수준 19 약 5ms,
+  수준 3 약 0.3ms)이 든다. 사전은 작은 입력에서 효과가 크고 큰 입력에서는 작다.
+
+### 11.4 frame 사전 ID와 검사
+
+- 사전 문맥(일회성·`Compressor`·스트림·블록 컨테이너)은 frame에 사전 ID를 기록한다(`ZSTD_c_dictIDFlag` 1). raw 사전은 ID가
+  0이라 기록되지 않는다. 사전 없는 문맥은 기록하지 않는다(기존과 같다).
+- 해제 문맥의 사전 ID와 다른 ID frame, 사전 없는 문맥에 ID가 있는 frame은 zstd가 `dictionary_wrong`으로 거부하고
+  Unsupported로 보고한다.
+- 형식 사전 문맥은 사전 ID 없는 frame(skippable 제외)을 Unsupported로 거부한다. zstd는 ID가 0인 frame을 검사 없이 사전으로
+  푸는데, 형식 사전은 초기 반복 offset·엔트로피 표를 바꾸므로 checksum 없는 frame은 오류 없이 틀린 결과가 나온다(교차검증
+  실측). 일회성 해제는 해제 전에 frame 헤더를 훑어 확인하고(헤더·frame 손상을 만나면 멈추고 해제가 보고), 스트림은 frame
+  시작의 헤더 선파싱에서 window 검사보다 먼저 확인한다(오류가 호출자 상한 설정에 따라 바뀌지 않는다).
+- raw 사전은 frame으로 불일치를 알 수 없다. checksum이 있으면 checksum 불일치(InvalidArgument)로 걸린다. raw 사전은 초기
+  상태를 바꾸지 않아 사전 없이 압축한 frame도 그대로 풀린다.
+
+### 11.5 블록 컨테이너 연동
+
+- 헤더(9.1절) flags bit0과 사전 지문(사전 SHA-256 앞 8byte를 그대로 기록, little-endian 값으로 비교). 지문은 CRC를 통과한
+  뒤의 우발적 사전 불일치를 잡는 용도라 64bit로 충분하다. zstd 사전 ID는 31bit이고 사용자 지정 ID는 충돌할 수 있으며 raw
+  사전은 0이라 쓰지 않는다. 전체 Digest는 빌드 키·매니페스트에 둔다. 블록 frame은 사전 ID도 기록해 zstd가 블록마다 한 번 더
+  확인한다.
+- `CompressedBlocksSettings::TryMake(CompressDictionary, blockSizeLog2)`: 형식·수준은 사전이 정하고 설정이 handle 복사본을
+  가진다. writer·순차·병렬 압축이 같은 byte를 만든다. 병렬 helper는 같은 CDict를 공유한다(읽기 전용, 스레드 안전).
+- `CompressedBlocksReader::TryOpen(…, Span<const DecompressDictionary> 후보, allocator)`: 후보의 빈 handle은 파싱 전에
+  StaleHandle이다. CRC 확인 뒤 지문이 같은 후보를 골라 handle을 가지며, 없으면 Unsupported다. 지문이 같은데 내용(Digest)이
+  다른 후보가 둘 이상이면 InvalidArgument다(64bit 지문은 약 2^32 작업으로 맞출 수 있고, raw 사전은 frame에 ID가 없어 잘못
+  고르면 검사가 없다). 사전을 쓰지 않는 컨테이너는
+  후보를 무시하므로 범용 로더는 항상 패키지의 사전들을 넘겨도 된다. reader는 사전을 파싱하거나 만들지 않아 악성 컨테이너가
+  사전 할당을 유도할 수 없다(stable output 해제는 사전과 무관하게 블록 입력 버퍼만 쓴다). `ZSTD_d_refMultipleDDicts`는
+  refDDict마다 hash set을 할당하고 ID 없는 frame에 마지막 사전을 쓰므로 쓰지 않는다.
+- 읽기 문맥은 사전과 무관하다. 블록을 해제할 때마다 reader의 DDict를 문맥에 걸고(`ZSTD_DCtx_refDDict`, O(1)) 해제 뒤 뗀다.
+  그래서 한 문맥을 사전 있는·없는 reader에 번갈아 쓸 수 있고, 닫힌 reader의 사전을 가리킨 채 남지 않는다(주소 재사용으로
+  다른 사전과 섞이지 않는다). 캐시 식별(reader id, 블록)은 그대로다. 병렬 읽기 helper도 같다.
+- 헤더 배치를 바꾸며 version을 2로 올렸다. 40byte 헤더의 version 1 컨테이너는 손상이 아니라 Unsupported로 보고된다.
+- 효과(시험): 레코드 600KB, 4KiB 블록, 수준 3에서 사전 컨테이너가 사전 없는 컨테이너보다 10% 이상 작다. 블록이 클수록
+  이득은 줄어든다(기본 256KiB 블록보다 64KiB 이하 블록에서 쓴다).
+
+### 11.6 학습(후속, ThirdParty manifest 변경 필요)
+
+교차검증 조사 결과와 다른 세션 합의를 기록한다.
+
+- 링크 묶음: `lib/dictBuilder`의 cover.c·fastcover.c·zdict.c·divsufsort.c와 `lib/common/pool.c`는 서로 참조해 떼어낼 수 없다
+  (fastCover와 finalize만 써도 divsufsort가 필요하다). threading.c·debug.c는 필요 없다. 같은 Zstd 모듈 manifest에 넣는다
+  (별도 모듈은 폴더당 모듈 하나·'..' 금지 규칙 때문에 헤더 약 40개를 복제해야 하고 내부 구조체 배치에 묶여 버전 동기화
+  위험이 크다). 정적 라이브러리라 학습을 부르지 않는 게임 바이너리에는 들어가지 않는다.
+- 라이선스: divsufsort.c·.h는 MIT(Yuta Mori)이고 zstd LICENSE에 포함되지 않아 별도 고지가 필요하다. manifest의 `license`를
+  모든 manifest에서 `licenses` 배열로 바꾼다(2026-11-12 rocks-62와 합의: 항목마다 `licenseSource` 선택, InstalledSdk의 데이터
+  라이브러리 라이선스 복사는 `embeddedIn` 모듈이 SDK에 있을 때만 하는 동작 유지).
+- 할당: dictBuilder는 malloc·calloc을 직접 부르고(약 30곳) customMem을 받지 않으며, 내부 CCtx·CDict도 기본 메모리를 쓴다.
+  원본을 고치지 않고 할당기를 바꿀 방법이 없어 학습 시점의 CRT 할당을 좁은 예외로 둔다. 학습 wrapper는 Developer 계층
+  모듈에 두고 zdict.h를 포함하는 유일한 adapter로 한다.
+- 스레드: cover.c·fastcover.c는 전역 표시 수준을 동기화 없이 쓰고, Android에서는 COVER의 qsort가 전역 문맥을 쓰는 C90
+  경로라 재진입할 수 없다. 학습 호출은 프로세스 mutex로 직렬화하고 표시 수준은 0, 알고리즘은 fastCover만 쓴다.
+- 진입점: `ZDICT_optimizeTrainFromBuffer_fastCover`에 k·d를 고정해 1회 실행한다(`ZDICT_trainFromBuffer_fastCover`는
+  calloc NULL 검사가 빠져 OOM에서 죽는다). 압축 수준·splitPoint·사전 ID를 명시한다. 사전 ID를 0으로 두면 내용의 XXH64에서
+  유도해 엔트로피 표가 달라도 같은 ID가 나오므로 명시를 권한다.
+- 결정성: fastCover·finalize 출력이 Windows x64와 Android x86_64에서 같다(실측, COVER는 다르다). 표본 순서도 입력이다.
+
+### 11.7 시험
+
+사전 시험 27개(Windows x64 Debug·ASan 통과). 세 파일로 나뉜다. 공용 도구(결정적 레코드 생성기·시험 사전·생성 도우미)는
+`Tests/CompressionDictionaryTestSupport.h`, 시험 자료(형식 사전 A, 표준 경로 golden 84개)는 `Tests/CompressionDictionaryTestData.h`다.
+
+- `CompressionDictionaryTests.cpp`(9): 생성 계약(형식·크기 경계·사전 ID·Digest·손상·magic raw·ID 0·handle·모든 소비 API의
+  빈 handle), 표준 수준 의미 golden 84개와 자유 함수 = 문맥·왕복, 작은 입력 압축률(레코드 40개, 5575byte 대 9760byte),
+  frame 사전 ID 검사(조회·불일치·ID 없음·섞인 연결 frame·raw 사전 checksum), 스트림 왕복·Reset·거부, handle 수명(임시
+  handle만 준 문맥·스트림·블록 설정·reader), 4 worker 비동기 공유 = 동기, 사전·문맥·스트림 생성 OOM 분류, 블록 컨테이너
+  (헤더 bit·지문, 병렬 = 순차, 압축률, 후보 선택, 문맥 공유, 지문 손상 대 다시 맞춘 지문, golden).
+- `CompressionDictionaryEdgeTests.cpp`(9, 교차검증 시험 이전): 스트림 헤더를 1·2·3·5·7·13byte로 나눠 넣기와 skippable
+  frame, 사전 ID 검사가 window 검사보다 먼저임, 값이 0인 사전 ID 필드, 일회성 frame 순회(크기 미기록 frame 뒤 ID 없는
+  frame, 잘린 꼬리), Span 비동기 해제, 수준이 사전의 일부임(1 대 19), writer = 일회성 = 병렬(난수 구간이 섞여 raw 저장과
+  압축 블록이 함께 있는 입력, 재적재 경로 포함), 블록 일부만 걸치는 1MiB 초과 병렬 읽기·인덱스만 여는 흐름·verify를 끈
+  손상 블록 뒤 같은 문맥 재사용, 블록 사전 ID 위조·raw 사전 컨테이너·version 1 레이아웃(Unsupported).
+- `CompressionDictionaryRobustnessTests.cpp`(9, 교차검증 시험 이전): 사전 상태 주소 재사용을 강제한 reader·사전 교체 중 문맥
+  재사용, 8 스레드의 CDict·DDict·reader 공유, 압축 크기 1MiB를 넘는 블록(zstd 스트리밍 경로) 뒤 사전 없는 컨테이너, 블록
+  컨테이너 OOM sweep, raw·형식 사전 교차·블록 frame 바꿔치기 분류, 인덱스만 여는 파일 흐름, 해제된 사전 뒤 문맥 재사용
+  (ASan), 이동된 블록 설정의 사전 유지, window 2^32 frame의 사전 ID 조회(Unsupported).
+- 사전 밖 회귀: window가 구현 상한을 넘는 zstd frame을 일회성 해제(크기를 아는·모르는)에 넣으면 스트림과 같이
+  Unsupported다(`CompressionTests.cpp`). 전에는 `ZSTD_findDecompressedSize`가 원인을 하나로 뭉쳐 InvalidArgument였다.

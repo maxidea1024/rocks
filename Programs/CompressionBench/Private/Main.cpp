@@ -1,5 +1,6 @@
 #include <Compression/CompressedBlocks.h>
 #include <Compression/Compression.h>
+#include <Compression/CompressionDictionary.h>
 #include <Compression/CompressionStream.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Platform/Clock.h>
@@ -13,6 +14,8 @@
 // - 일회성: 형식·수준마다 Compressor·Decompressor를 재사용한 단일 스레드 처리량.
 // - 스트림: CompressStream·DecompressStream에 64KiB 조각으로 넣는 처리량(단일 스레드).
 // - 블록 컨테이너: 256KiB 블록 RCBK의 순차·병렬 압축과 전체 읽기 처리량.
+// - 사전: 작은 항목(1KiB·4KiB)을 하나씩 zstd로 압축할 때 사전 유무의 압축률·처리량. 사전은 학습하지
+//   않은 raw 내용(항목 구간 바로 뒤의 64KiB)이라 학습 사전보다 효과가 작다(하한 추정).
 //
 // 사용:
 //   CompressionBench                       고정 합성 코퍼스(기본 16MiB)
@@ -128,6 +131,92 @@ double Best(uint32 rounds, Body&& body) {
 }
 
 constexpr usize StreamPieceBytes = usize{64} << 10;
+
+// 작은 항목을 하나씩 압축·해제한다. 사전 문맥과 사전 없는 문맥을 같은 항목에 쓴다.
+int RunDictionary(Span<const uint8> input, uint32 rounds, Allocator& allocator) {
+    constexpr usize DictionaryBytes = usize{64} << 10;
+    constexpr usize ItemsBytes = usize{4} << 20;
+    if (input.Size() < ItemsBytes + DictionaryBytes) {
+        printf("\ndictionary: corpus smaller than %u MiB, skipped\n", 4u);
+        return 0;
+    }
+    const Span<const uint8> items(input.Data(), ItemsBytes);
+    const Span<const uint8> dictionaryBytes(input.Data() + ItemsBytes, DictionaryBytes);
+
+    printf("\ndictionary (zstd, raw 64KiB dictionary, one frame per item)\n%-6s %5s %10s %8s %12s "
+           "%12s\n",
+           "item", "level", "dictionary", "ratio", "comp MB/s", "decomp MB/s");
+    static constexpr usize ItemSizes[] = {usize{1} << 10, usize{4} << 10};
+    static constexpr int32 Levels[] = {3, 19};
+    for (const usize itemBytes : ItemSizes) {
+        for (const int32 level : Levels) {
+            auto settings = CompressionSettings::TryMake(CompressionFormat::Zstd, level);
+            auto encoding =
+                CompressDictionary::TryCreate(settings.Value(), dictionaryBytes, allocator);
+            auto decoding = DecompressDictionary::TryCreate(CompressionFormat::Zstd,
+                                                            dictionaryBytes, allocator);
+            if (!encoding || !decoding) {
+                printf("%-6u %5d dictionary setup failed\n", static_cast<unsigned>(itemBytes),
+                       level);
+                return 1;
+            }
+            for (int useDictionary = 0; useDictionary < 2; ++useDictionary) {
+                auto compressor = useDictionary != 0
+                                      ? Compressor::TryCreate(encoding.Value(), allocator)
+                                      : Compressor::TryCreate(settings.Value(), allocator);
+                auto decompressor =
+                    useDictionary != 0
+                        ? Decompressor::TryCreate(decoding.Value(), allocator)
+                        : Decompressor::TryCreate(CompressionFormat::Zstd, allocator);
+                Array<uint8> packed(allocator);
+                Array<usize> ends(allocator);
+                Array<uint8> restored(allocator);
+                if (!compressor || !decompressor || !restored.TryResize(itemBytes)) {
+                    printf("%-6u %5d setup failed\n", static_cast<unsigned>(itemBytes), level);
+                    return 1;
+                }
+                const double compressSeconds = Best(rounds, [&]() {
+                    (void)packed.TryResize(0);
+                    (void)ends.TryResize(0);
+                    for (usize offset = 0; offset < items.Size(); offset += itemBytes) {
+                        const Span<const uint8> item(items.Data() + offset, itemBytes);
+                        if (!compressor.Value().TryCompressAppend(item, packed) ||
+                            !ends.TryPushBack(packed.Size())) {
+                            return false;
+                        }
+                    }
+                    return true;
+                });
+                const double decompressSeconds = Best(rounds, [&]() {
+                    usize begin = 0;
+                    for (usize index = 0; index < ends.Size(); ++index) {
+                        const Span<const uint8> frame(packed.Data() + begin, ends[index] - begin);
+                        auto written = decompressor.Value().TryDecompress(
+                            frame, Span<uint8>(restored.Data(), restored.Size()));
+                        if (!written || written.Value() != itemBytes ||
+                            !platform::MemoryEquals(restored.Data(),
+                                                    items.Data() + index * itemBytes, itemBytes)) {
+                            return false;
+                        }
+                        begin = ends[index];
+                    }
+                    return true;
+                });
+                if (compressSeconds < 0 || decompressSeconds < 0) {
+                    printf("%-6u %5d dictionary round trip failed\n",
+                           static_cast<unsigned>(itemBytes), level);
+                    return 1;
+                }
+                const double megabytes = static_cast<double>(items.Size()) / (1024.0 * 1024.0);
+                printf("%-6u %5d %10s %8.3f %12.1f %12.1f\n", static_cast<unsigned>(itemBytes),
+                       level, useDictionary != 0 ? "yes" : "no",
+                       static_cast<double>(packed.Size()) / static_cast<double>(items.Size()),
+                       megabytes / compressSeconds, megabytes / decompressSeconds);
+            }
+        }
+    }
+    return 0;
+}
 
 int RunStreams(Span<const uint8> input, uint32 rounds, Allocator& allocator) {
     const double megabytes = static_cast<double>(input.Size()) / (1024.0 * 1024.0);
@@ -359,7 +448,11 @@ int Run(const Options& options) {
     if (streams != 0) {
         return streams;
     }
-    return RunBlocks(input, options.rounds, options.workers, allocator);
+    const int blocks = RunBlocks(input, options.rounds, options.workers, allocator);
+    if (blocks != 0) {
+        return blocks;
+    }
+    return RunDictionary(input, options.rounds, allocator);
 }
 
 bool Parse(int argc, char** argv, Options& options) {
