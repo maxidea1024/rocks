@@ -366,8 +366,10 @@ TEST(DecimalConversion_LongHalfwayInputs) {
     MakeNumber(longer, 2900, point, number);
     CHECK(number.truncated);
     CHECK(decimal::ToBinary(number, decimal::DoubleFormat) == 1);
-    // 같은 수를 문자열로: "0.<0…>…"는 길이 제한 없이 읽는다.
-    static char text[3200];
+    // 같은 수를 문자열로: "0.<0…>…"는 길이 제한 없이 읽는다. 2^-1075의 첫 유효 숫자는 소수점 아래
+    // 324번째라 "0." + 0 323개 + 2900자리가 필요하다.
+    static char text[2 + 400 + 2900];
+    REQUIRE(point < 0 && static_cast<usize>(-point) <= 400);
     usize length = 0;
     text[length++] = '0';
     text[length++] = '.';
