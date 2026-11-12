@@ -1,5 +1,6 @@
 using System.Security;
 using System.Text.Json;
+using Rocks.Build.Descriptors;
 using Rocks.Build.Rules;
 using Rocks.Tooling.Common;
 
@@ -131,6 +132,14 @@ public static class InstalledSdk
         Directory.CreateDirectory(output);
         Directory.CreateDirectory(Path.Combine(output, "Generated"));
         var initialProject = GameInputSnapshot.Capture(project, output, sdk, []);
+        // 프로젝트 기술자(UE .uproject 대응)가 빌드할 모듈·플러그인·플랫폼을 정한다. 입력 snapshot 뒤에 읽어
+        // 빌드 중 기술자 변경을 최종 검사가 잡게 하고, 규칙을 컴파일하기 전에 기술자 오류를 먼저 알린다.
+        var projectFiles = Directory.GetFiles(project, "*" + DescriptorReader.ProjectExtension, SearchOption.TopDirectoryOnly);
+        if (projectFiles.Length != 1)
+            throw new ArgumentException($"The game project root must contain exactly one {DescriptorReader.ProjectExtension} file (found {projectFiles.Length}).");
+        var projectDescriptor = DescriptorReader.ReadProject(projectFiles[0]);
+        var moduleSet = DescriptorModuleSet.Resolve(projectDescriptor,
+            PluginCatalog.Discover([Path.Combine(project, "Plugins")]), toolchain.Platform, configuration);
         var rulesFiles = Directory.GetFiles(project, "*.cs", SearchOption.AllDirectories)
             .Where(file => !Inside(output, file) && (file.EndsWith(".Build.cs", StringComparison.Ordinal) || file.EndsWith(".Target.cs", StringComparison.Ordinal)))
             .Order(StringComparer.Ordinal).ToArray();
@@ -157,6 +166,8 @@ public static class InstalledSdk
         var rulesPath = Path.Combine(rulesDirectory, "bin/Debug/net10.0/Rocks.Game.Rules.dll");
         var context = new BuildContext(project, output, toolchain.Platform, configuration, sdk);
         var rules = RuleLoader.Load(rulesPath, options.GetValueOrDefault("target", "Game"), context);
+        // 규칙 모듈을 기술자와 대조하고, 켜지지 않은 플러그인·Editor·플랫폼 미지원 모듈 등을 뺀다.
+        var projectModules = moduleSet.Apply(rules.Modules, rules.Target.Modules);
         var modules = manifest.Modules.Select(module => new NativeModuleInput
         {
             Name = module.Name,
@@ -164,7 +175,7 @@ public static class InstalledSdk
             PublicDefines = module.Defines,
             Dependencies = module.Dependencies,
             PrebuiltLibraries = module.Libraries.Select(path => SafePath(sdk, path)).ToArray()
-        }).Concat(rules.Modules).ToArray();
+        }).Concat(projectModules).ToArray();
         var declaredInputs = GameInputSnapshot.DeclaredInputs(context, modules, rules.Target);
         var initialDeclared = GameInputSnapshot.Capture(project, output, sdk, declaredInputs);
         var metadata = await MetadataRunner.GenerateAsync(context, toolchain, modules, rules.Target,
@@ -173,7 +184,10 @@ public static class InstalledSdk
         var result = await new NativeBuildEngine().BuildAsync(new()
         {
             Toolchain = toolchain, Configuration = configuration, OutputDirectory = output,
-            RootDirectory = project, Modules = modules, Targets = rules.Target.Modules,
+            // 켠 플러그인의 모듈도 빌드한다(UE처럼 타깃이 직접 참조하지 않아도 컴파일된다). 정적 링크이므로
+            // 실행 파일에는 참조한 모듈만 들어간다.
+            RootDirectory = project, Modules = modules,
+            Targets = rules.Target.Modules.Concat(moduleSet.IncludedPluginModules).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
             ContextFingerprint = "rocks-installed-sdk-v1",
             MaxParallelism = BuildCommand.Jobs(options)
         }, cancellationToken);

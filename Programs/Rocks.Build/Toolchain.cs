@@ -17,8 +17,13 @@ public static class NativeToolchains
             Directory.GetCurrentDirectory(), environment), cancellationToken);
         if (version.ExitCode != 0 || !version.StdOut.Contains("clang", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("A working Clang compiler is required.");
-        string archiver = FindFirst(environment, windows ? ["llvm-lib", "lib.exe"] : ["llvm-ar", "/usr/bin/ar"]);
-        string? linker = windows ? FindFirst(environment, ["lld-link", "link.exe"]) : null;
+        // archiver·linker는 compiler와 같은 LLVM 설치에서 먼저 찾는다. Release의 ThinLTO bitcode는 같은 LLVM
+        // 버전의 도구만 확실히 읽으며, clang-cl의 -fuse-ld=lld도 자기 폴더의 lld-link를 쓴다. macOS에서
+        // compiler 옆에 llvm-ar가 없으면(Apple clang) PATH의 다른 llvm-ar 대신 Xcode의 ar(libLTO)를 쓴다.
+        string compilerDirectory = Path.GetDirectoryName(compilerPath)!;
+        string archiver = FindBeside(compilerDirectory, windows ? "llvm-lib.exe" : "llvm-ar")
+            ?? (windows ? FindFirst(environment, ["llvm-lib", "lib.exe"]) : "/usr/bin/ar");
+        string? linker = windows ? FindBeside(compilerDirectory, "lld-link.exe") ?? FindFirst(environment, ["lld-link", "link.exe"]) : null;
         var paths = new List<string>();
         var runtime = new List<string>();
         var compile = new List<string>();
@@ -180,6 +185,12 @@ public static class NativeToolchains
     }
 
     internal static StringComparer PathComparer => OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
+    private static string? FindBeside(string directory, string name)
+    {
+        string candidate = Path.Combine(directory, name);
+        return File.Exists(candidate) ? candidate : null;
+    }
 
     private static string FindFirst(IReadOnlyDictionary<string, string?> environment, string[] candidates)
     {

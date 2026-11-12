@@ -114,14 +114,16 @@ internal static class ActionGraph
                 string id = module.Name + ":compile:" + identity;
                 var arguments = new List<string>();
                 arguments.AddRange(module.AdditionalCompileArguments);
-                arguments.AddRange(NativeCompileProfile.Arguments(request.Toolchain, request.Configuration));
+                arguments.AddRange(NativeCompileProfile.Arguments(request.Toolchain, request.Configuration, module.Optimization));
+                // ThinLTO는 코드 생성 옵션이라 AST 프로필(NativeCompileProfile)에 넣지 않는다.
+                if (UsesThinLto(request.Configuration, module.Optimization)) arguments.Add("-flto=thin");
                 arguments.AddRange(defines.Select(value => (windows ? "/D" : "-D") + value));
                 foreach (string include in includes) arguments.Add((windows ? "/I" : "-I") + include);
                 if (windows) arguments.AddRange(["/c", "/TP", source, "/Fo{OUTPUT0}"]);
                 else arguments.AddRange(["-c", source, "-o", "{OUTPUT0}"]);
                 actions.Add(new(id, module.Name, "Compile", request.Toolchain.CompilerPath, arguments,
                     [objectPath], [source], headers, extraInputs, [],
-                    new[] { request.ContextFingerprint, request.Configuration.ToString() }.Concat(sources).ToArray(), source));
+                    new[] { request.ContextFingerprint, request.Configuration.ToString(), module.Optimization.ToString() }.Concat(sources).ToArray(), source));
                 objectPaths.Add(objectPath);
                 compileIds.Add(id);
             }
@@ -184,11 +186,9 @@ internal static class ActionGraph
                     finalArguments.AddRange(["/Fe{OUTPUT0}", "/link", "/INCREMENTAL:NO", "/SUBSYSTEM:CONSOLE", "/MANIFEST:EMBED"]);
                     if (asanThunk != null)
                         finalArguments.AddRange(["/INCLUDE:__asan_seh_interceptor", "/WHOLEARCHIVE:" + asanThunk]);
-                    if (request.Configuration != NativeConfiguration.Release)
-                    {
-                        finalOutputs.Add(Path.ChangeExtension(finalPath, ".pdb"));
-                        finalArguments.AddRange(["/DEBUG:FULL", "/PDB:{OUTPUT1}"]);
-                    }
+                    // 모든 구성이 PDB를 남긴다. Release PDB는 배포 파일과 분리해 크래시 분석용으로 보관한다.
+                    finalOutputs.Add(Path.ChangeExtension(finalPath, ".pdb"));
+                    finalArguments.AddRange(["/DEBUG:FULL", "/PDB:{OUTPUT1}"]);
                     finalArguments.AddRange(new[] { "kernel32", "user32", "gdi32", "winspool", "shell32", "ole32", "oleaut32", "uuid", "comdlg32", "advapi32" }
                         .Select(value => "/DEFAULTLIB:" + value + ".lib"));
                 }
@@ -218,10 +218,33 @@ internal static class ActionGraph
         return new(actions, outputs);
     }
 
-    internal static IEnumerable<string> CompileFlags(NativeToolchain toolchain, NativeConfiguration configuration)
+    /// <summary>구성과 모듈 재정의로 최적화 여부를 정한다. Debug·Asan은 끄고 Development·Release는 켠다.</summary>
+    internal static bool Optimizes(NativeConfiguration configuration, CodeOptimization optimization) => optimization switch
+    {
+        CodeOptimization.Always => true,
+        CodeOptimization.Never => false,
+        CodeOptimization.Default => configuration is NativeConfiguration.Development or NativeConfiguration.Release,
+        _ => throw new ArgumentException($"Invalid code optimization: {optimization}")
+    };
+
+    /// <summary>Release의 최적화된 모듈만 ThinLTO bitcode로 만든다. 최적화를 끈 모듈은 일반 object로 남는다.</summary>
+    internal static bool UsesThinLto(NativeConfiguration configuration, CodeOptimization optimization) =>
+        configuration == NativeConfiguration.Release && Optimizes(configuration, optimization);
+
+    internal static IEnumerable<string> CompileFlags(NativeToolchain toolchain, NativeConfiguration configuration,
+        CodeOptimization optimization = CodeOptimization.Default)
     {
         bool release = configuration == NativeConfiguration.Release;
         bool asan = configuration == NativeConfiguration.Asan;
+        bool optimize = Optimizes(configuration, optimization);
+        // 구성 매크로는 정확히 하나만 1로 정의한다(Base/Compiler.h가 확인한다). Asan은 Debug 계열이다.
+        string buildMacro = configuration switch
+        {
+            NativeConfiguration.Debug or NativeConfiguration.Asan => "ROCKS_BUILD_DEBUG=1",
+            NativeConfiguration.Development => "ROCKS_BUILD_DEVELOPMENT=1",
+            NativeConfiguration.Release => "ROCKS_BUILD_RELEASE=1",
+            _ => throw new ArgumentException($"Invalid native configuration: {configuration}")
+        };
         if (toolchain.Platform == NativePlatform.Windows)
         {
             yield return "/nologo"; yield return "/utf-8"; yield return "/W4"; yield return "/WX"; yield return "/GR-";
@@ -231,10 +254,13 @@ internal static class ActionGraph
             yield return "/clang:-ffp-contract=off";
             yield return "/DWIN32"; yield return "/D_WINDOWS"; yield return "/DNOMINMAX";
             yield return "/DWIN32_LEAN_AND_MEAN"; yield return "/DROCKS_PLATFORM_WINDOWS=1";
-            yield return release || asan ? "/MD" : "/MDd";
-            yield return release ? "/O2" : "/Od";
+            yield return "/D" + buildMacro;
+            // 디버그 CRT는 Debug에서만 쓴다. 모듈 재정의는 CRT를 바꾸지 않는다(링크 시 CRT 불일치 방지).
+            yield return configuration == NativeConfiguration.Debug ? "/MDd" : "/MD";
+            yield return optimize ? "/O2" : "/Od";
+            // 디버그 정보는 모든 구성에서 만든다(UE Shipping처럼 배포본 크래시 덤프를 심볼화한다).
             if (release) yield return "/DNDEBUG";
-            else yield return "/Z7";
+            yield return "/Z7";
             if (asan) yield return "/fsanitize=address";
         }
         else
@@ -247,8 +273,10 @@ internal static class ActionGraph
                 yield return "-DROCKS_PLATFORM_ANDROID=1";
             }
             else yield return "-DROCKS_PLATFORM_MAC=1";
-            yield return release ? "-O2" : "-O0";
-            yield return release ? "-DNDEBUG" : "-g";
+            yield return "-D" + buildMacro;
+            yield return optimize ? "-O2" : "-O0";
+            if (release) yield return "-DNDEBUG";
+            yield return "-g";
             if (asan) { yield return "-fsanitize=address"; yield return "-fno-omit-frame-pointer"; }
         }
     }
@@ -266,5 +294,8 @@ internal static class ActionGraph
             // /fsanitize=address는 compile에만 사용해 driver의 잘못된 triple 경로 추정을 피한다.
         }
         else if (request.Configuration == NativeConfiguration.Asan) yield return "-fsanitize=address";
+        // POSIX link driver는 bitcode object를 받으려면 LTO를 알아야 한다(ld64는 libLTO, lld는 내장).
+        // Windows lld-link는 bitcode object를 자동으로 ThinLTO 처리한다.
+        else if (request.Configuration == NativeConfiguration.Release) yield return "-flto=thin";
     }
 }

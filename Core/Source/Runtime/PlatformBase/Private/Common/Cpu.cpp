@@ -33,12 +33,14 @@ CpuFeatures Detect() noexcept {
         ymmEnabled = (low & 0x6u) == 0x6u;
     }
 
+    // FMA·AVX2는 VEX 인코딩과 YMM 레지스터를 쓰므로 AVX를 쓸 수 있어야 한다. 일부 가상 머신은 AVX
+    // bit만 가리고 AVX2·FMA bit를 남기므로 AVX 판정에 묶는다(avx2·fma가 켜지면 avx도 켜져 있다).
     features.avx = cpuAvx && ymmEnabled;
-    features.fma = cpuFma && ymmEnabled;
+    features.fma = cpuFma && features.avx;
     unsigned maxLeaf = __get_cpuid_max(0, nullptr);
     if (maxLeaf >= 7) {
         __cpuid_count(7, 0, eax, ebx, ecx, edx);
-        features.avx2 = (ebx & (1u << 5)) != 0 && ymmEnabled;
+        features.avx2 = (ebx & (1u << 5)) != 0 && features.avx;
         features.bmi2 = (ebx & (1u << 8)) != 0;
     }
 #else

@@ -4,7 +4,7 @@
 
 ## 현재 지원 범위
 
-- Windows clang-cl/x64와 macOS clang++의 Debug/Release/ASan. Windows ASan은 선택한 x64 compiler runtime DLL 및 같은 디렉터리의 import/thunk를 함께 사용한다. Mac deployment target은 `MACOSX_DEPLOYMENT_TARGET` 또는 명시 기본 13.0이며 compile/link/ABI 신원에 동일하게 적용한다.
+- Windows clang-cl/x64와 macOS clang++의 Debug/Development/Release/ASan(구성별 옵션은 [빌드 구성](../../Build/README.md#빌드-구성)). Release는 ThinLTO이며 Windows에서 llvm-lib·lld-link를 요구한다. ThinLTO는 코드 생성 옵션이라 `NativeCompileProfile`(AST 프로필)이 아니라 compile action에만 붙는다. 모듈별 `NativeModuleInput.Optimization`은 최적화 여부만 바꾸고 compile action identity에 포함된다. Windows ASan은 선택한 x64 compiler runtime DLL 및 같은 디렉터리의 import/thunk를 함께 사용한다. Mac deployment target은 `MACOSX_DEPLOYMENT_TARGET` 또는 명시 기본 13.0이며 compile/link/ABI 신원에 동일하게 적용한다.
 - 모듈 dependency는 public include/define을 전파한다. private include/define은 owner에서만 사용한다. 현재 dependency 자체의 public/private 구분은 없다. 정적 의존의 PrebuiltLibraries/AdditionalLinkArguments는 최종 link로 전달한다.
 - 소스가 없는 static module은 header-only다. 가짜 archive를 만들지 않고 ModuleOutputs에도 기록하지 않는다. DLL/shared library, PCH, Unity, remote executor, artifact cache 서버는 아직 구현하지 않았다.
 - `Identity`는 전체 compiler 진단용이며 설치 경로가 들어갈 수 있다. `AbiIdentity`는 Installed SDK용 compiler version/target·architecture·SDK version/build·deployment의 경로 독립 digest다. 실제 증분 key에는 별도로 compiler/archiver/linker 및 선언 SDK 경로의 내용과 실행 환경을 포함한다.

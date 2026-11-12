@@ -30,7 +30,8 @@ internal static class Program
                     break;
                 case "policy":
                     var failures = PolicyChecks.Runtime(root).Concat(PolicyChecks.PlatformBoundary(root))
-                        .Concat(PolicyChecks.SourceWarnings(root)).Concat(PolicyChecks.PythonFreeMainPath(root)).ToList();
+                        .Concat(PolicyChecks.SourceWarnings(root)).Concat(PolicyChecks.OptimizationOverrides(root))
+                        .Concat(PolicyChecks.PythonFreeMainPath(root)).ToList();
                     if (options.Optional("compile-commands") is string database) failures.AddRange(PolicyChecks.CompilationDatabase(database));
                     foreach (var failure in failures) Console.Error.WriteLine(failure);
                     return failures.Count == 0 ? 0 : 1;

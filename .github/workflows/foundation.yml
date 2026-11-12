@@ -39,6 +39,8 @@ jobs:
         run: dotnet run --project Programs/Rocks.Build.IntegrationTests -- --root .
       - name: AddressSanitizer
         run: dotnet msbuild Rocks.proj /t:Test /p:Configuration=Asan /p:RocksTarget=Foundation /v:minimal
+      - name: Release with ThinLTO
+        run: dotnet msbuild Rocks.proj /t:Test /p:Configuration=Release /p:RocksTarget=Foundation /v:minimal
       - name: Preserve reports
         if: always()
         uses: actions/upload-artifact@v4

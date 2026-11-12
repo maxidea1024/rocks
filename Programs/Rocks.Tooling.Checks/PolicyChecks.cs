@@ -75,6 +75,39 @@ public static class PolicyChecks
         Scan(root, OwnedSourceRoots, BannedSuppression,
             "warning-source", "owned source suppresses warnings");
 
+    private static readonly Regex OptimizationOverride = Pattern(
+        "\\bROCKS_(?:DISABLE|ENABLE)_OPTIMIZATION\\b|#\\s*pragma\\s+(?:clang\\s+)?optimize\\b|_Pragma\\s*\\(\\s*\"(?:clang\\s+)?optimize\\b" +
+        "|\\[\\[\\s*clang\\s*::\\s*optnone\\s*\\]\\]|__attribute__\\s*\\(\\(\\s*optnone\\b");
+    private static readonly Regex NeverOptimizedRule = Pattern("\\bCodeOptimization\\s*\\.\\s*Never\\b");
+    private const string OptimizationMacroHeader = "Core/Source/Runtime/Base/Public/Base/Compiler.h";
+
+    /// <summary>
+    /// 최적화 끄기는 디버깅 중 임시 설정이다. 제품 소스에 남으면 Development 성능이 조용히 떨어지고 Release가
+    /// 최적화 없이 나가거나 깨지므로 다음을 거부한다.
+    /// <list type="bullet">
+    /// <item>C++: ROCKS_DISABLE_OPTIMIZATION, #pragma (clang) optimize, optnone 속성. 매크로를 정의하는
+    /// Base/Compiler.h와 테스트 소스는 예외다.</item>
+    /// <item>모듈 규칙(*.Build.cs): CodeOptimization.Never. Always는 의도한 성능 설정이므로 허용한다.</item>
+    /// </list>
+    /// </summary>
+    public static IReadOnlyList<CheckFailure> OptimizationOverrides(string root)
+    {
+        List<CheckFailure> failures = [];
+        foreach (string path in NativeSources(root, OwnedSourceRoots))
+        {
+            string relative = Relative(root, path);
+            if (relative == OptimizationMacroHeader || IsTestSource(relative))
+                continue;
+            ScanFile(path, relative, OptimizationOverride, "optimization-override",
+                "temporary optimization override left in product source", failures);
+        }
+
+        foreach (string path in Files(root, OwnedSourceRoots).Where(path => path.EndsWith(".Build.cs", StringComparison.Ordinal)))
+            ScanFile(path, Relative(root, path), NeverOptimizedRule, "optimization-override",
+                "module rule disables optimization (CodeOptimization.Never is for local debugging only)", failures);
+        return failures;
+    }
+
     public static IReadOnlyList<CheckFailure> PlatformBoundary(string root)
     {
         List<CheckFailure> failures = [];

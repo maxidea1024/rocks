@@ -30,6 +30,16 @@ public abstract class SourceModuleRules : ModuleRules
     /// <summary>Private/에 구현 소스가 있는지다. 헤더만 있는 모듈은 false로 둔다.</summary>
     protected virtual bool HasSources => true;
 
+    /// <summary>
+    /// 이 모듈의 최적화 재정의다(UE ModuleRules.OptimizeCode 대응). 기본값은 구성을 따른다.
+    /// 예: Development 빌드에서 이 모듈만 단계 실행하려면 임시로 Never를 둔다.
+    /// <code>
+    /// protected override CodeOptimization Optimization => CodeOptimization.Never;
+    /// </code>
+    /// Never는 Release에서도 최적화와 ThinLTO를 끄므로 커밋하지 않는다. Always는 Debug에서도 최적화한다.
+    /// </summary>
+    protected virtual CodeOptimization Optimization => CodeOptimization.Default;
+
     /// <summary>저장소 루트 기준 모듈 폴더다. 예: Core/Source/Runtime/Core.</summary>
     protected string ModuleDirectory => $"{Layer}/Source/{Group}/{ModuleName}";
 
@@ -39,7 +49,8 @@ public abstract class SourceModuleRules : ModuleRules
             Name = ModuleName,
             Sources = context.Sources($"{ModuleDirectory}/Private"),
             PublicIncludeDirectories = [context.PathInRoot($"{ModuleDirectory}/Public")],
-            Dependencies = RequiredModules
+            Dependencies = RequiredModules,
+            Optimization = Optimization
         }
         : new()
         {

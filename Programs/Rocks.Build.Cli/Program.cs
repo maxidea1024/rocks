@@ -222,7 +222,7 @@ namespace Rocks.Build.Cli
         internal static string HostTool(string root, string name) => Path.Combine(root, "out/dotnet/bin", name, "Debug/net10.0", name + ".dll");
         internal static NativeConfiguration Configuration(Dictionary<string, string> options) =>
             Enum.TryParse<NativeConfiguration>(options.GetValueOrDefault("configuration", "Debug"), true, out var value) && Enum.IsDefined(value)
-                ? value : throw new ArgumentException("Configuration must be Debug, Release, or Asan.");
+                ? value : throw new ArgumentException("Configuration must be Debug, Development, Release, or Asan.");
         internal static int Jobs(Dictionary<string, string> options) =>
             int.TryParse(options.GetValueOrDefault("jobs", Math.Min(8, Environment.ProcessorCount).ToString()), out var value) &&
             value > 0 && value <= ProcessRunner.MaximumConcurrentProcesses

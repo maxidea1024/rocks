@@ -137,7 +137,7 @@ public static class MetadataRunner
                     arguments.AddRange(["--identity-manifest", identityManifest, "--identity-inventory", inventory]);
                 }
                 // native compile과 같은 순서/프로필을 사용한다. 다른 모듈의 private 설정을 누출하지 않는다.
-                foreach (var argument in owner.AdditionalCompileArguments.Concat(NativeCompileProfile.Arguments(toolchain, context.Configuration)))
+                foreach (var argument in owner.AdditionalCompileArguments.Concat(NativeCompileProfile.Arguments(toolchain, context.Configuration, owner.Optimization)))
                     arguments.Add("--clang-arg=" + argument);
                 foreach (var define in owner.PublicDefines.Concat(owner.PrivateDefines).Concat(dependencies.SelectMany(module => module.PublicDefines)).Distinct())
                     arguments.Add("--clang-arg=" + (toolchain.Platform == NativePlatform.Windows ? "/D" : "-D") + define);

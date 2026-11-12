@@ -21,6 +21,7 @@
 #include <Core/Text/StringBuilder.h>
 #include <algorithm>
 #include <charconv>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <iterator>
@@ -131,19 +132,24 @@ int SignificantDigits(const char* text, usize length) noexcept {
     return last - first;
 }
 
+// libc++는 배포 대상 OS의 시스템 라이브러리에 실수 to_chars가 없으면(macOS 13.3 미만) 그 함수를
+// 쓸 수 없게 표시한다. 그때는 표준 대조(자릿수 비교)를 건너뛰고 왕복만 확인한다. 최단 표기
+// 알고리즘은 플랫폼과 무관하므로 Windows·Android 실행이 표준 대조를 맡는다.
+#if (defined(_LIBCPP_AVAILABILITY_HAS_TO_CHARS_FLOATING_POINT) &&                                  \
+     !_LIBCPP_AVAILABILITY_HAS_TO_CHARS_FLOATING_POINT) ||                                         \
+    defined(_LIBCPP_AVAILABILITY_HAS_NO_TO_CHARS_FLOATING_POINT)
+#define ROCKS_TEST_HAS_FLOAT_TO_CHARS 0
+#else
+#define ROCKS_TEST_HAS_FLOAT_TO_CHARS 1
+#endif
+
+constexpr bool HasStandardFloatToChars = ROCKS_TEST_HAS_FLOAT_TO_CHARS != 0;
+
 template <typename T>
 bool MatchesStandardShortest(T value) noexcept {
     SystemAllocator allocator;
     StringBuilder<64> ours(allocator);
     if (!ours.TryAppendFormat("{}", value)) {
-        return false;
-    }
-
-    // std::to_chars(scientific)는 왕복하는 가장 짧은 표기를 낸다.
-    char standard[64];
-    const auto converted =
-        std::to_chars(standard, standard + sizeof(standard), value, std::chars_format::scientific);
-    if (converted.ec != std::errc()) {
         return false;
     }
 
@@ -156,15 +162,31 @@ bool MatchesStandardShortest(T value) noexcept {
         back = std::strtod(ours.CString(), &end);
     }
 
-    return end == ours.CString() + ours.ByteCount() && std::memcmp(&back, &value, sizeof(T)) == 0 &&
+    if (end != ours.CString() + ours.ByteCount() || std::memcmp(&back, &value, sizeof(T)) != 0) {
+        return false;
+    }
+
+#if !ROCKS_TEST_HAS_FLOAT_TO_CHARS
+    return true;
+#else
+    // std::to_chars(scientific)는 왕복하는 가장 짧은 표기를 낸다.
+    char standard[64];
+    const auto converted =
+        std::to_chars(standard, standard + sizeof(standard), value, std::chars_format::scientific);
+    return converted.ec == std::errc() &&
            SignificantDigits(ours.CString(), ours.ByteCount()) ==
                SignificantDigits(standard, static_cast<usize>(converted.ptr - standard));
+#endif
 }
 
 } // namespace
 
 // Rocks 실수 최단 표기의 자릿수를 STL to_chars와 비교하고 C runtime으로 왕복을 확인한다.
 TEST(StlCompatibility_ShortestFloatingPointMatchesToChars) {
+    if constexpr (!HasStandardFloatToChars) {
+        std::printf("  to_chars unavailable for this deployment target: round-trip only\n");
+    }
+
     bool matches = true;
     double power = 1.0;
     for (int exponent = 0; exponent < 1074 && matches; ++exponent) {

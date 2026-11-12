@@ -130,9 +130,11 @@ internal static class MetaTests
         {
             using Probe probe = new(options, actualEnvironment, generator, compiler);
             NativeToolchain toolchain = await NativeToolchains.DiscoverAsync(compiler);
-            foreach (NativeConfiguration configuration in new[] { NativeConfiguration.Debug, NativeConfiguration.Release, NativeConfiguration.Asan })
+            // 모든 구성 × 모든 모듈 최적화 재정의 조합이 AST 허용 목록을 통과해야 한다.
+            foreach (NativeConfiguration configuration in Enum.GetValues<NativeConfiguration>())
+            foreach (CodeOptimization optimization in Enum.GetValues<CodeOptimization>())
             {
-                string[] arguments = NativeCompileProfile.Arguments(toolchain, configuration)
+                string[] arguments = NativeCompileProfile.Arguments(toolchain, configuration, optimization)
                     .Select(argument => "--clang-arg=" + argument)
                     .Append("--clang-arg=-DROCKS_META_PROFILE_PROBE=1").ToArray();
                 await probe.GenerateAsync(Declaration(), extra: arguments);

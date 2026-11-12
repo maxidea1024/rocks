@@ -10,11 +10,15 @@
 //   uint8 key[32];
 //   if (!platform::TryFillSecureRandom(key, sizeof(key))) { /* OS 난수 실패 */ }
 //
-// 구현: Windows BCryptGenRandom(시스템 기본 RNG), macOS·Android arc4random_buf(커널 엔트로피).
+// 구현: Windows BCryptGenRandom(시스템 기본 RNG, 1 GiB 단위로 나눠 호출), macOS·Android
+// arc4random_buf(커널 엔트로피).
 namespace rocks::platform {
 
 // buffer의 bytes byte를 채운다. 성공하면 true다. bytes가 0이면 아무것도 하지 않고 true다.
 // buffer가 nullptr인데 bytes가 0이 아니면 false다. 실패하면 buffer 내용은 정해지지 않는다.
-bool TryFillSecureRandom(void* buffer, usize bytes) noexcept;
+// 플랫폼별 실패: Windows는 BCryptGenRandom 오류를 false로 돌려준다. macOS·Android의
+// arc4random_buf는 오류를 돌려주지 않으며, 엔트로피를 얻지 못하면 OS가 프로세스를 종료한다(false에
+// 도달하지 않는다).
+[[nodiscard]] bool TryFillSecureRandom(void* buffer, usize bytes) noexcept;
 
 } // namespace rocks::platform

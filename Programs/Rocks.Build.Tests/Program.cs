@@ -212,6 +212,9 @@ try
     Check(asanRun.ExitCode == 0, "ASan executable failed: " + asanRun.StdErr);
     Pass("Release and ASan compiler/link/runtime deployment");
 
+    await BuildConfigurationTests.RunAsync(request, root);
+    Pass("build configurations, ThinLTO, and per-module optimization overrides");
+
     string marker = Path.Combine(root, "child.pid");
     string dotnet = NativeEnvironment.FindExecutable("dotnet", toolchain.Environment);
     var fakeToolchain = toolchain with { CompilerPath = dotnet, CompileArguments = [Assembly.GetExecutingAssembly().Location, "--fake-compiler", marker] };

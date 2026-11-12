@@ -22,7 +22,19 @@ internal static class InputValidation
         if (!hostMatches)
             throw new PlatformNotSupportedException($"Toolchain.Platform {request.Toolchain.Platform}: this native host is not supported for that target.");
         if (request.Toolchain.Platform == NativePlatform.Android && request.Configuration == NativeConfiguration.Asan)
-            throw new ArgumentException("Toolchain.Platform Android: the Asan configuration is not supported yet (use Debug or Release).");
+            throw new ArgumentException("Toolchain.Platform Android: the Asan configuration is not supported yet (use Debug, Development, or Release).");
+        // Release는 ThinLTO bitcode object를 만든다. MSVC lib.exe·link.exe는 bitcode를 읽지 못하고, 다른
+        // 버전의 LLVM 도구는 새 bitcode를 읽지 못할 수 있으므로 compiler와 같은 폴더의 llvm-lib·lld-link를
+        // 요구한다(clang-cl -fuse-ld=lld도 그 폴더의 lld-link를 쓴다).
+        if (request.Toolchain.Platform == NativePlatform.Windows && request.Configuration == NativeConfiguration.Release)
+        {
+            string compilerDirectory = Path.GetDirectoryName(request.Toolchain.CompilerPath) ?? "";
+            bool Beside(string? path, string name) => path != null && IsTool(path, name) &&
+                NativeToolchains.PathComparer.Equals(Path.GetDirectoryName(path), compilerDirectory);
+            if (!Beside(request.Toolchain.ArchiverPath, "llvm-lib") || !Beside(request.Toolchain.LinkerPath, "lld-link"))
+                throw new ArgumentException("Configuration Release: ThinLTO requires llvm-lib and lld-link in the compiler's directory " +
+                    $"{compilerDirectory} (archiver: {request.Toolchain.ArchiverPath}, linker: {request.Toolchain.LinkerPath ?? "<none>"}).");
+        }
         if (NativeToolchains.PathComparer.Equals(request.RootDirectory, request.OutputDirectory) ||
             Fingerprints.IsUnder(request.RootDirectory, request.OutputDirectory))
             throw new ArgumentException($"OutputDirectory must not be the source root or its ancestor: {request.OutputDirectory}");
@@ -35,6 +47,7 @@ internal static class InputValidation
         foreach (var module in request.Modules)
         {
             if (!Enum.IsDefined(module.Kind)) throw new ArgumentException($"Module {module.Name}: unsupported Kind {module.Kind}.");
+            if (!Enum.IsDefined(module.Optimization)) throw new ArgumentException($"Module {module.Name}: unsupported Optimization {module.Optimization}.");
             string basename = module.Name.Split('.')[0].ToUpperInvariant();
             if (new[] { "CON", "PRN", "AUX", "NUL" }.Contains(basename) ||
                 (basename.Length == 4 && (basename.StartsWith("COM", StringComparison.Ordinal) || basename.StartsWith("LPT", StringComparison.Ordinal)) && basename[3] is >= '1' and <= '9'))
@@ -49,6 +62,9 @@ internal static class InputValidation
                 if (name.Length == 0 || (!char.IsAsciiLetter(name[0]) && name[0] != '_') ||
                     name.Any(value => !char.IsAsciiLetterOrDigit(value) && value != '_') || define.IndexOfAny(['\0', '\r', '\n']) >= 0)
                     throw new ArgumentException($"Module {module.Name}: invalid define '{define}'.");
+                // 구성 매크로는 빌드 시스템만 정의한다(모듈이 바꾸면 구성 판정이 모듈마다 달라진다).
+                if (name.StartsWith("ROCKS_BUILD_", StringComparison.Ordinal))
+                    throw new ArgumentException($"Module {module.Name}: define '{define}' is reserved for the build configuration.");
             }
         }
     }
@@ -70,8 +86,29 @@ internal static class InputValidation
                 lower.StartsWith("-isystem", StringComparison.Ordinal) || lower.StartsWith("/external:", StringComparison.Ordinal) ||
                 argument.StartsWith("-I", StringComparison.Ordinal) || argument.StartsWith("/I", StringComparison.Ordinal) ||
                 argument.StartsWith("-D", StringComparison.Ordinal) || argument.StartsWith("/D", StringComparison.Ordinal) ||
-                lower is "-xclang" or "-xpreprocessor";
+                lower is "-xclang" or "-xpreprocessor" ||
+                // 최적화 수준·LTO는 구성과 NativeModuleInput.Optimization이 정한다. 수준을 바꾸지 않는
+                // /Oy-(frame pointer 유지)·/Oi(intrinsic) 등은 허용한다.
+                OptimizationLevel.IsMatch(argument) || lower.StartsWith("-flto", StringComparison.Ordinal) ||
+                lower.StartsWith("-fno-lto", StringComparison.Ordinal);
+        }
+        else
+        {
+            // link 단계에서 LTO를 끄거나 backend 최적화 수준을 바꾸는 인자도 구성이 정한다.
+            invalid |= lower.StartsWith("-flto", StringComparison.Ordinal) || lower.StartsWith("-fno-lto", StringComparison.Ordinal) ||
+                lower.StartsWith("/opt:lldlto", StringComparison.Ordinal) || lower.StartsWith("/lldlto", StringComparison.Ordinal) ||
+                lower.StartsWith("-wl,--lto", StringComparison.Ordinal) || lower.StartsWith("-wl,--thinlto", StringComparison.Ordinal) ||
+                lower.StartsWith("-wl,-lto", StringComparison.Ordinal) || lower.StartsWith("--lto", StringComparison.Ordinal);
         }
         if (invalid) throw new ArgumentException($"Module {module}, {field}: argument '{argument}' overrides owned output/policy or hides inputs; use structured settings.");
     }
+
+    // 최적화 수준 인자다(대소문자 구분). clang: -O, -O0~3, -Os, -Oz, -Og, -Ofast, --optimize[=N].
+    // clang-cl: /O1, /O2, /Od, /Og, /Os, /Ot, /Ox, /Ob0~3.
+    private static readonly System.Text.RegularExpressions.Regex OptimizationLevel = new(
+        "^(?:-O(?:[0-9]|s|z|g|fast)?|--optimize(?:=.*)?|/O(?:[12dgstx]|b[0-3]))$",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+
+    private static bool IsTool(string path, string name) =>
+        Path.GetFileNameWithoutExtension(path).Equals(name, StringComparison.OrdinalIgnoreCase);
 }

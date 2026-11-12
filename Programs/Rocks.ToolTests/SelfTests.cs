@@ -60,6 +60,28 @@ internal static class SelfTests
         suite.Add("Policy.RepositoryRuntime", () => NoFailures(PolicyChecks.Runtime(options.Root)));
         suite.Add("Policy.RepositoryPlatform", () => NoFailures(PolicyChecks.PlatformBoundary(options.Root)));
         suite.Add("Policy.RepositoryWarnings", () => NoFailures(PolicyChecks.SourceWarnings(options.Root)));
+        suite.Add("Policy.RepositoryOptimizationOverrides", () => NoFailures(PolicyChecks.OptimizationOverrides(options.Root)));
+        suite.Add("Policy.OptimizationOverrideControls", () =>
+        {
+            using TemporaryDirectory temporary = new();
+            // 정의 헤더와 테스트 소스는 허용한다.
+            temporary.Write("Core/Source/Runtime/Base/Public/Base/Compiler.h", "#define ROCKS_DISABLE_OPTIMIZATION _Pragma(\"clang optimize off\")\n");
+            temporary.Write("Core/Source/Runtime/Core/Tests/ProbeTests.cpp", "ROCKS_DISABLE_OPTIMIZATION\nvoid F() {}\nROCKS_ENABLE_OPTIMIZATION\n");
+            temporary.Write("Engine/Source/Runtime/Probe/Private/Clean.cpp", "// ROCKS_DISABLE_OPTIMIZATIONS is a different name\nvoid G() {}\n");
+            NoFailures(PolicyChecks.OptimizationOverrides(temporary.Root));
+            temporary.Write("Engine/Source/Runtime/Probe/Probe.Build.cs", "// CodeOptimization.Always\nOptimization => CodeOptimization.Always;\n");
+            NoFailures(PolicyChecks.OptimizationOverrides(temporary.Root));
+            foreach (string source in new[] { "ROCKS_DISABLE_OPTIMIZATION", "ROCKS_ENABLE_OPTIMIZATION", "#pragma clang optimize off",
+                "#  pragma  clang optimize on", "_Pragma(\"clang optimize off\")", "#pragma optimize(\"\", off)",
+                "[[clang::optnone]] void F();", "__attribute__((optnone)) void F();" })
+            {
+                temporary.Write("Engine/Source/Runtime/Probe/Private/Probe.cpp", source + "\n");
+                Verify.Equal(1, PolicyChecks.OptimizationOverrides(temporary.Root).Count, "optimization override escaped audit: " + source);
+            }
+            temporary.Write("Engine/Source/Runtime/Probe/Private/Probe.cpp", "void F();\n");
+            temporary.Write("Engine/Source/Runtime/Probe/Probe.Build.cs", "protected override CodeOptimization Optimization => CodeOptimization.Never;\n");
+            Verify.Equal(1, PolicyChecks.OptimizationOverrides(temporary.Root).Count, "committed Never optimization rule escaped audit");
+        });
         suite.Add("Policy.RepositoryPythonFreeMainPath", () => NoFailures(PolicyChecks.PythonFreeMainPath(options.Root)));
         suite.Add("Policy.RuntimePositiveAndNegativeControls", () =>
         {

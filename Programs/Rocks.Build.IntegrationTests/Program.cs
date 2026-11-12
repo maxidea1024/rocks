@@ -254,6 +254,110 @@ try
     finally { File.WriteAllText(header, originalHeader); }
     Require((await Game()).ExitCode == 0, "Build failed after correcting the author typo");
     Pass("author-error-and-recovery", timer.Elapsed);
+
+    // 프로젝트 기술자(.rocksproject)가 없거나 규칙 모듈을 선언하지 않으면 빌드를 시작하지 않는다.
+    timer.Restart();
+    var descriptor = Path.Combine(game, "Game.rocksproject");
+    var descriptorText = File.ReadAllText(descriptor);
+    try
+    {
+        File.Delete(descriptor);
+        var missing = await Game();
+        Require(missing.ExitCode != 0 && (missing.StdOut + missing.StdErr).Contains("exactly one .rocksproject", StringComparison.Ordinal),
+            "Game without a project descriptor was not rejected: " + missing.StdErr);
+        File.WriteAllText(descriptor, descriptorText.Replace("\"SampleGame\"", "\"OtherGame\"", StringComparison.Ordinal));
+        var undeclared = await Game();
+        Require(undeclared.ExitCode != 0 && (undeclared.StdOut + undeclared.StdErr).Contains("has rules but no descriptor declares it", StringComparison.Ordinal),
+            "Undeclared rules module was not rejected: " + undeclared.StdErr);
+        File.WriteAllText(descriptor, descriptorText.Replace("\"MacOS\"", "\"Android\"", StringComparison.Ordinal)
+            .Replace("\"Windows\"", "\"Android\"", StringComparison.Ordinal).Replace("[\"Android\", \"Android\"]", "[\"Android\"]", StringComparison.Ordinal));
+        var untargeted = await Game();
+        Require(untargeted.ExitCode != 0 && (untargeted.StdOut + untargeted.StdErr).Contains("does not target", StringComparison.Ordinal),
+            "Game built for a platform outside targetPlatforms: " + untargeted.StdErr);
+    }
+    finally { File.WriteAllText(descriptor, descriptorText); }
+    Require((await Game()).ExitCode == 0, "Build failed after restoring the project descriptor");
+    Pass("project-descriptor-validates-modules-and-platforms", timer.Elapsed);
+
+    // 프로젝트 플러그인: 꺼진 플러그인과 Editor 모듈은 컴파일하지 않고, 켜면 타깃이 참조하지 않아도 빌드한다.
+    timer.Restart();
+    var pluginRoot = Path.Combine(game, "Plugins", "Extras");
+    try
+    {
+        Directory.CreateDirectory(Path.Combine(pluginRoot, "Source", "Extras", "Private"));
+        Directory.CreateDirectory(Path.Combine(pluginRoot, "Source", "ExtrasEditor", "Private"));
+        File.WriteAllText(Path.Combine(pluginRoot, "Extras.rocksplugin"), """
+            { "fileVersion": 1, "version": 1, "versionName": "1.0", "friendlyName": "Extras",
+              "modules": [ { "name": "Extras", "type": "Runtime" }, { "name": "ExtrasEditor", "type": "Editor" } ] }
+            """);
+        File.WriteAllText(Path.Combine(pluginRoot, "Source", "Extras", "Extras.Build.cs"), """
+            using Rocks.Build;
+            using Rocks.Build.Rules;
+
+            public sealed class ExtrasModule : ModuleRules
+            {
+                public override NativeModuleInput Configure(BuildContext context) => new()
+                {
+                    Name = "Extras", Sources = context.Sources("Plugins/Extras/Source/Extras/Private")
+                };
+            }
+
+            public sealed class ExtrasEditorModule : ModuleRules
+            {
+                public override NativeModuleInput Configure(BuildContext context) => new()
+                {
+                    Name = "ExtrasEditor", Sources = context.Sources("Plugins/Extras/Source/ExtrasEditor/Private")
+                };
+            }
+            """);
+        File.WriteAllText(Path.Combine(pluginRoot, "Source", "Extras", "Private", "Extras.cpp"),
+            "int ExtrasValue() noexcept;\nint ExtrasValue() noexcept { return 3; }\n");
+        File.WriteAllText(Path.Combine(pluginRoot, "Source", "ExtrasEditor", "Private", "ExtrasEditor.cpp"),
+            "#error \"an Editor module must not be compiled for a game target\"\n");
+
+        var disabled = await Game();
+        Require(disabled.ExitCode == 0, "Game with a disabled plugin failed: " + disabled.StdErr);
+        Require(!ReadActionReport().Actions.Any(action => action.Module is "Extras" or "ExtrasEditor"),
+            "A disabled plugin module was built");
+
+        File.WriteAllText(descriptor, descriptorText.Replace("\"targetPlatforms\"",
+            "\"plugins\": [ { \"name\": \"Extras\", \"enabled\": true } ],\n  \"targetPlatforms\"", StringComparison.Ordinal));
+        var enabled = await Game();
+        Require(enabled.ExitCode == 0, "Game with an enabled plugin failed: " + enabled.StdOut + enabled.StdErr);
+        var enabledReport = ReadActionReport();
+        Require(enabledReport.Actions.Any(action => action.Module == "Extras" && action.Kind == "Archive" && action.Executed),
+            "An enabled plugin module was not built");
+        Require(!enabledReport.Actions.Any(action => action.Module == "ExtrasEditor"), "An Editor plugin module was built");
+    }
+    finally
+    {
+        File.WriteAllText(descriptor, descriptorText);
+        Directory.Delete(Path.Combine(game, "Plugins"), true);
+    }
+    Require((await Game()).ExitCode == 0, "Build failed after removing the project plugin");
+    Pass("project-plugins-enable-and-filter-modules", timer.Elapsed);
+
+    // Release SDK: 엔진 라이브러리는 ThinLTO bitcode이고, 게임 Release가 같은 LLVM으로 link해 실행된다.
+    timer.Restart();
+    var releaseSdk = Path.Combine(fixture, "installed-release");
+    var releaseExport = await Cli("sdk", "--root", root, "--target", "Engine", "--configuration", "Release", "--destination", releaseSdk);
+    Require(releaseExport.ExitCode == 0, "Release SDK export failed: " + releaseExport.StdErr);
+    static bool ContainsBitcode(string path)
+    {
+        byte[] bytes = File.ReadAllBytes(path);
+        for (int index = 0; index + 4 <= bytes.Length; ++index)
+            if (bytes[index] == 0x42 && bytes[index + 1] == 0x43 && bytes[index + 2] == 0xc0 && bytes[index + 3] == 0xde)
+                return true;
+        return false;
+    }
+    Require(Directory.GetFiles(Path.Combine(releaseSdk, "Libraries")).All(ContainsBitcode),
+        "Release SDK libraries are not ThinLTO bitcode archives");
+    var releaseGame = await Cli("game", "--sdk", releaseSdk, "--project", game, "--configuration", "Release");
+    Require(releaseGame.ExitCode == 0, "Release game build against the Release SDK failed: " + releaseGame.StdOut + releaseGame.StdErr);
+    var releaseReport = JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(Path.Combine(game, "out/Release/action-report.json")))!;
+    var releaseRun = await ProcessRunner.RunAsync(new(releaseReport.ModuleOutputs["SampleGame"], [], game, toolchain.Environment));
+    Require(releaseRun.ExitCode == 0, "Release ThinLTO game failed at runtime");
+    Pass("release-thinlto-sdk-and-game", timer.Elapsed);
     success = true;
     return 0;
 }

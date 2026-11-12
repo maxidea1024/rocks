@@ -11,9 +11,46 @@
 
 ```text
 dotnet msbuild Rocks.proj /t:Test /p:Configuration=Debug /p:RocksTarget=Foundation
+dotnet msbuild Rocks.proj /t:Test /p:Configuration=Development /p:RocksTarget=Foundation
 dotnet msbuild Rocks.proj /t:Test /p:Configuration=Asan /p:RocksTarget=Foundation
 dotnet msbuild Rocks.proj /t:Build /p:Configuration=Release /p:RocksTarget=Engine
 ```
+
+### 빌드 구성
+
+UE5.6 Debug·Development·Shipping에 대응한다. 구성마다 `ROCKS_BUILD_DEBUG`·`ROCKS_BUILD_DEVELOPMENT`·`ROCKS_BUILD_RELEASE` 중 정확히 하나를 1로 정의하며(`Base/Compiler.h`가 확인), 모듈은 이 매크로를 직접 정의할 수 없다.
+
+| 구성 | 최적화 | 디버그 정보 | Windows CRT | NDEBUG | ThinLTO | 구성 매크로 | 용도 |
+|---|---|---|---|---|---|---|---|
+| Debug | 끔 | 있음(PDB) | `/MDd` | 없음 | 없음 | `ROCKS_BUILD_DEBUG` | 단계 실행·변수 확인 |
+| Development | `-O2` | 있음(PDB) | `/MD` | 없음 | 없음 | `ROCKS_BUILD_DEVELOPMENT` | 일상 개발·성능 확인 |
+| Release | `-O2` | 있음(PDB) | `/MD` | 정의 | 사용 | `ROCKS_BUILD_RELEASE` | 배포(UE Shipping) |
+| Asan | 끔 | 있음(PDB) | `/MD` | 없음 | 없음 | `ROCKS_BUILD_DEBUG` | 메모리 오류 검출 |
+
+- 계약 위반 검사(Fatal)는 모든 구성에서 유지한다. 구성 매크로로 빼는 것은 디버그 표시·치트·통계 같은 개발용 기능뿐이다.
+- Release는 최적화된 모듈을 ThinLTO bitcode로 컴파일한다. 도구 탐색은 archiver·linker를 compiler와 같은 폴더에서 먼저 찾으며, Windows Release는 compiler 폴더의 `llvm-lib`·`lld-link`만 받는다(MSVC `lib.exe`·`link.exe`나 다른 LLVM 설치의 도구는 빌드 전에 거부). macOS는 compiler 옆에 `llvm-ar`가 없으면 Xcode `ar`(libLTO)를 쓴다. POSIX link driver에는 `-flto=thin`을 넘긴다.
+- 모든 구성이 디버그 정보를 만든다. Release PDB는 UE Shipping처럼 배포 파일과 분리해 크래시 덤프 심볼화에 쓴다.
+- 후속: ThinLTO 캐시(`/lldltocache`·`--thinlto-cache-dir`)가 없어 Release relink는 backend를 모두 다시 생성한다. 병렬 link 수와 LTO thread 수 조정도 측정 후 정한다.
+- 함수마다 `ROCKS_FORCEINLINE`을 붙이지 않는다. 성능은 구성(최적화·ThinLTO)과 모듈 재정의로 얻고, 강제 인라인은 측정으로 필요가 확인된 hot path에만 쓴다.
+
+### 모듈 최적화 재정의
+
+모듈 규칙의 `Optimization`으로 구성의 최적화 여부만 바꾼다(UE `ModuleRules.OptimizeCode` 대응). CRT·디버그 정보·구성 매크로·NDEBUG는 구성을 따르므로 같은 실행 파일 안에서 ABI가 섞이지 않는다.
+
+```csharp
+public sealed class Physics : EngineModuleRules
+{
+    protected override string ModuleName => "Physics";
+    protected override string[] RequiredModules => ["Core"];
+    // Development에서 이 모듈만 단계 실행한다(커밋하지 않는다).
+    protected override CodeOptimization Optimization => CodeOptimization.Never;
+}
+```
+
+- `Default`: 구성을 따른다. `Never`: 모든 구성에서 끈다(Release에서는 ThinLTO에서도 빠진다). `Always`: Debug에서도 켠다(Debug에서 너무 느린 계산 모듈).
+- 파일 일부만 끄려면 `ROCKS_DISABLE_OPTIMIZATION` … `ROCKS_ENABLE_OPTIMIZATION`(UE `UE_DISABLE_OPTIMIZATION` 대응)을 임시로 쓴다. Release에서는 컴파일 오류이며, 제품 소스에 남으면 정책 검사(`optimization-override`)가 거부한다. 테스트 소스는 예외다.
+- 모듈 인자로 최적화 수준(`-O0~3`·`-Os`·`-Oz`·`-Og`·`-Ofast`·`--optimize`·`/O1`·`/O2`·`/Od`·`/Og`·`/Os`·`/Ot`·`/Ox`·`/Ob*`)과 LTO(`-flto*`·`-fno-lto`, link의 `/opt:lldlto*`·`-Wl,--lto*`·`-Wl,--thinlto*`)를 바꾸는 것은 거부한다. `/Oy-`·`/Oi`·`-fno-omit-frame-pointer`처럼 수준을 바꾸지 않는 인자는 받는다.
+- 정책 검사(`optimization-override`)는 제품 소스의 `ROCKS_DISABLE_OPTIMIZATION`·`#pragma (clang) optimize`·`optnone`과 *.Build.cs에 커밋된 `CodeOptimization.Never`를 거부한다.
 
 `Compiler`, `Jobs`, `NativeOutput` 속성으로 컴파일러 경로, 병렬 작업 수, 출력 위치를 지정할 수 있다. `RocksTarget=Core`는 오브젝트 모듈을 제외한 기반 테스트를 선택한다. 출력과 증거는 기본적으로 `out/` 아래에 기록한다.
 
@@ -43,7 +80,7 @@ dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll id
 
 `Category`와 `DisplayName`은 길이를 별도로 보관하는 UTF-8 바이트 문자열이다. 중간 NUL도 보존하므로 C 문자열 종료 문자로 길이를 추정하지 않는다. 생성 코드는 한글처럼 읽을 수 있는 문자를 그대로 표시하고, 제어 문자는 안전한 escape로 표현한다.
 
-메타컴파일러의 `--clang-arg`는 현재 네이티브 Debug/Release/ASan 프로필과 붙임형 매크로 정의(`-DNAME=value`, clang-cl의 `/DNAME=value`), macOS의 xcrun 선택 sysroot 및 최소 버전만 허용한다. include 디렉터리는 `--include-dir`에 실제 컴파일 순서대로 지정한다. 미지원 옵션을 추가하려면 네이티브 컴파일과 AST의 동등성을 검토하고 회귀 검사를 먼저 추가해야 한다. 오류는 코드·위치·원인·수정 안내와 함께 출력한다.
+메타컴파일러의 `--clang-arg`는 현재 네이티브 Debug/Development/Release/ASan 프로필(모듈 최적화 재정의 포함)과 붙임형 매크로 정의(`-DNAME=value`, clang-cl의 `/DNAME=value`), macOS의 xcrun 선택 sysroot 및 최소 버전만 허용한다. include 디렉터리는 `--include-dir`에 실제 컴파일 순서대로 지정한다. 미지원 옵션을 추가하려면 네이티브 컴파일과 AST의 동등성을 검토하고 회귀 검사를 먼저 추가해야 한다. 오류는 코드·위치·원인·수정 안내와 함께 출력한다.
 
 Transient 필드는 GC 참조 추적에는 참여하지만 저장 그래프에 포함되지 않는다. ReadOnly 필드는 일반 쓰기를 거부하고 복원 트랜잭션의 쓰기는 허용한다. Abstract 타입은 등록할 수 있으나 생성할 수 없다. 현재 지원 범위는 단일 공개 비가상 상속과 기본 스칼라·Guid·String·ObjectRef로 제한된다.
 
