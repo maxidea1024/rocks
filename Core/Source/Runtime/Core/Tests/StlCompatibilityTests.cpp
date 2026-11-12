@@ -104,8 +104,9 @@ TEST(StlCompatibility_HashContainersWithAlgorithms) {
 
 namespace {
 
-// 문자열 표기에서 유효 숫자 개수를 센다(부호·지수·소수점·앞뒤 0 제외).
-int SignificantDigits(const char* text, usize length) noexcept {
+// 문자열 표기에서 유효 숫자 개수를 센다(부호·지수·소수점·앞뒤 0 제외). to_chars 대조에서만 쓰므로
+// to_chars를 쓸 수 없는 배포 대상(macOS 13.3 미만)에서는 쓰이지 않는다.
+[[maybe_unused]] int SignificantDigits(const char* text, usize length) noexcept {
     char digits[64];
     int count = 0;
     for (usize index = 0; index < length; ++index) {
