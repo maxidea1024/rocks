@@ -74,6 +74,8 @@ auto points = name.TryCodePoints();          // for (char32_t point : points.Val
 |---|---|---|
 | `Core/Encoding/Crc32.h` | zlib 호환 CRC-32(`"123456789"` → `0xCBF43926`), 분할 계산 | 256개 상수 표, 표는 테스트가 다항식 독립 생성 결과와 전부 대조. 비암호 |
 | `Core/Encoding/Base64.h` | RFC 4648 Base64 인코딩·디코딩 | 엄격 디코딩(패딩·알파벳·비정규 bit 거부), 실패 시 출력 불변, 호출자 버퍼 |
+| `Core/Encoding/ByteReader.h` | 외부 binary 형식(PNG·PSD·TrueType BE, BMP·TGA·WAV·DDS LE) 읽기 cursor. 읽기마다 byte 순서 명시, `Take`·`Peek`·`Sub`(chunk 본문 독립 reader)·`ReadInto`, 정수·부동소수 bit 보존. UE FMemoryReader(FArchive::IsError 방식) 대응 | 이어지는(sticky) 실패: 범위 밖 읽기는 0·빈 범위, 위치는 마지막 성공 위치, 이후 읽기 전부 실패, 형식 오류는 `MarkFailed`로 합류. 할당 없음, 원본을 빌림, `Base/Endian.h` 위에 구현. Rocks 자체 형식은 예산·한도가 있는 Serialization `ArchiveReader`를 쓴다 |
+| `Core/Encoding/ByteWriter.h` | `Array<uint8>` 끝에 덧붙이는 외부 형식 writer. 폭·순서별 쓰기, `WriteZeros`, 뒤에서 길이 채우기(`PatchLittleEndian`·`PatchBigEndian`). UE FMemoryWriter·FArrayWriter 대응 | 이어지는 실패: 할당 실패·크기 넘침·범위 밖 Patch는 그 호출이 target을 바꾸지 않고 이후 쓰기는 무시되어 target은 항상 성공한 쓰기의 결과, `Status()`로 첫 오류 확인. target 자신의 범위를 써도 된다 |
 | `Core/Text/Uri.h` | RFC 3986 URI 참조 분해(`TryParseUri`), 상대 참조 해석(`TryResolveUriReference`, §5.2–5.3 strict), percent encode/decode, query 파라미터 조회 | 할당 없이 입력을 빌리는 view, IPv6/IPvFuture literal·포트 범위·`%HH` 검증, IRI(비ASCII) 미지원, form 방식 `+`는 명시 모드. 해석은 dot segment를 제자리에서 제거하고 정규화(대소문자·percent·기본 포트)는 하지 않는다. 출력 버퍼는 결과 길이가 아니라 `ResolvedUriMaxSize`(base + reference + 2) 이상이어야 하며 실패 시 버퍼를 바꾸지 않는다. authority 없는 결과 path가 `//`로 시작하면 `/.`를 붙인다(RFC 미규정, WHATWG와 같은 처리). UE 5.6에서는 URL 함수가 Core가 아닌 HTTP 모듈(`FGenericPlatformHttp`)에 있다 |
 
 검증(URI 해석): RFC 3986 §5.4.1·§5.4.2 예제 43개 전체, 경계·실패 사례, 그리고 RFC §5.2 의사코드를 그대로 옮긴 Python 참조 구현과 무작위 8,000쌍(절반 이상이 dot segment 포함) 차등 비교에서 불일치 0.
