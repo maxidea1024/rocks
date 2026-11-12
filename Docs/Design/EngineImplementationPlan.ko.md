@@ -2,7 +2,7 @@
 
 STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-driven 렌더러
 
-**설계 기준일 2026.11.11 · 개정 1.6 · 상태: 구현 제안 / 성능 미측정**
+**설계 기준일 2026.11.12 · 개정 1.7 · 상태: 구현 제안 / 성능 미측정**
 
 **추가 요구 반영:** Deferred·Forward 정식 지원, 업스케일링, 태깅·컴포넌트·프리팹, Unreal 참고 체계 확대, 컷씬 제작 핵심화, Blueprint 제외·자체 언어 채택, 하이엔드 포스트이펙트 전체 기능군, UBT 계열 자체 빌드 도구·분산 빌드·반복 개발 최적화, 정식 헤드리스 모드, 필수 노드 기반 머티리얼 에디터.
 
@@ -15,6 +15,8 @@ STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-d
 **1.5 공간 인덱스:** World의 런타임 공간 인덱스를 Unreal의 분담 방식으로 정의한다. 렌더 판정은 평면 SoA와 SceneCulling 유사 계층 공간 해시, 충돌 질의는 물리 scene query, 비충돌 게임플레이 질의는 2D 계층 공간 해시로 구분한다. 10.4절에 규약과 수용 시험 SI01–SI10을, 33.10절에 교차 검증 결과와 개정 범위를 기록한다.
 
 **1.6 물리 middleware:** Jolt 기본안을 PhysX 5로 전환한다. 모든 대상 플랫폼에서 O3DE 관리 fork의 플랫폼 patch를 기반으로 동일 commit의 PhysX 5를 source 빌드하며, UE 5.6 Chaos는 통합 구조의 참고로만 사용한다. 16.4·16.5절에 버전·빌드·결정성 범위·큰 월드 규약과 수용 시험 PC01–PC08을, 33.11절에 교차 검증 결과와 개정 범위를 기록한다.
+
+**1.7 게임플레이 언어 Sparks:** 자체 게임플레이 언어의 이름을 Sparks(소스 `.spark`, 모듈 `.sparks`)로 정하고, 프로그래머가 아닌 사용자를 위한 방어적·단순한 설계, Unity 체계의 수명 hook, 메모리·리소스 누수 0, 비동기 로딩, 런타임 eval·AOT를 반영한다. 23절을 엔진 계약 중심으로 개정하고 전체 설계는 [Sparks 언어 설계](SparksLanguage.ko.md)에 둔다. 스크립트 단계의 파괴 지연(5.2절), 수명 hook 이름(20.2절), 로딩 계약 연결(9.2절), 누수 Gate NL09(29.6절)를 함께 개정한다. 교차 검증 결과와 개정 범위는 33.12절에 기록한다.
 
 ## 1. 목표와 실행 전략
 
@@ -149,7 +151,7 @@ prefix를 모든 경계에서 금지하거나 강제하는 결론은 보류한�
 
 C language linkage의 동일 이름은 C++ namespace가 달라도 같은 entity를 가리킬 수 있으므로, namespace만으로 C export 충돌을 방지한다고 가정하지 않는다. 정확한 symbol decoration·calling convention은 target toolchain에서 확인한다. [S68](https://timsong-cpp.github.io/cppwp/n4950/dcl.link)
 
-경계 후보 예시는 C++의 `rocks::Object`에 대응하는 C ABI의 `rocks_object_handle`·`rocks_object_create`, namespace를 표현할 수 있는 언어의 `rocks.Object`, 평면 타입 이름이 필요한 바인딩의 `RocksObject`다. 마지막 형태는 해당 바인딩의 편의 선택이며 내부 타입까지 변경하는 근거가 아니다. macro·export와 같이 namespace로 구분할 수 없는 전역 식별자는 ROCKS_/rocks_ 프로젝트 표식을 사용할 수 있다. 중첩 namespace를 모든 언어에 그대로 복제할 필요는 없으며 타입·함수 ID로 원래 선언과 연결한다.
+경계 후보 예시는 C++의 `rocks::Object`에 대응하는 C ABI의 `rocks_object_handle`·`rocks_object_create`, namespace를 표현할 수 있는 언어의 `rocks.Object`, 평면 타입 이름이 필요한 바인딩의 `RocksObject`다. 마지막 형태는 해당 바인딩의 편의 선택이며 내부 타입까지 변경하는 근거가 아니다. macro·export와 같이 namespace로 구분할 수 없는 전역 식별자는 ROCKS_/rocks_ 프로젝트 표식을 사용할 수 있다. 중첩 namespace를 모든 언어에 그대로 복제할 필요는 없으며 타입·함수 ID로 원래 선언과 연결한다. 자체 언어 Sparks의 경계는 2026-11-12에 정하였다: 엔진 API는 패키지 `Rocks`에 두고, 타입·함수·이벤트 이름은 C++ 이름을 그대로 사용하며, 리플렉션 필드는 첫 글자를 대문자로 바꾸고 끝의 `_`를 제거해 노출한다. C++ 오버로드는 서로 다른 `ScriptName`이 있어야 노출된다(23절, [Sparks 언어 설계](SparksLanguage.ko.md)).
 
 C ABI는 fixed-width POD·opaque handle·status code·명시 release 함수를 사용한다. Result·String·Array·vtable·예외를 경계에 직접 전달하지 않는다. allocator ownership·calling convention·packing·structSize·ABI version은 이름 정책과 독립 검증한다. serialization의 TypeId/FieldId는 namespace나 display name 변경으로 바뀌지 않는다.
 
@@ -233,7 +235,7 @@ Apple은 Windows용 Metal 제작 도구와 macOS/Windows용 Metal Shader Convert
 | UI / TextLayout | ObjectRuntime, MetaSchema, Task, TextLayout / Core, shaping·폰트 adapter | widget 트리·레이아웃·테마·입력 라우팅·UiDrawList 기록 / shaping·줄바꿈·BiDi. RHI·World·PlatformWindow 직접 의존 금지 |
 | UiRender | UI의 UiDrawList 계약, RHI, Task | 배칭·클립·glyph atlas. widget Object 순회 금지 |
 | NetCore / Replication | Core, IO / ObjectRuntime, MetaSchema | transport와 객체 replication 분리. Renderer 없음 |
-| ScriptRuntime | ObjectRuntime, MetaSchema, Task | bytecode VM·root provider·native binding. World·Renderer 의존 금지 |
+| ScriptRuntime | ObjectRuntime, MetaSchema, Task | Sparks bytecode VM·native binding·이벤트 연결 표·누수 ledger. 스크립트 상태는 GC root를 만들지 않는다. World·Renderer 의존 금지 |
 | Gameplay / WorldIntegration | World, ScriptRuntime 및 필요한 시스템 | component binding·render/physics/audio command 변환 |
 | BuildDriver / BuildAgent | Host Core, manifest·toolchain·artifact store | action DAG·캐시·local/remote executor. Shipping 링크 금지 |
 | EditorBackend | WorldIntegration, Asset 도구, Transaction | 편집 명령·PIE·검증. Runtime이 이 모듈을 참조하지 않음 |
@@ -470,6 +472,8 @@ NewObject가 반환하는 RootRef는 첫 소유자의 추적 가능한 필드에
 - 근거: UE의 Outer는 경로·패키지 소속·GC 효과를 한 필드에 섞어 "outer가 inner를 소유한다"는 오해와 rename 시 경로 변경 버그를 낳는다. 이 설명은 UE 일반 동작 기준이며 5.6 소스(`UObjectBase::OuterPrivate`, GC 참조 수집)로 대조하지 않았다.
 
 RequestDestroy는 논리적 사용 종료이며 즉시 delete가 아니다. owner Game lane에서 DestroyRequested 전이와 신규 사용·일반 task/activation admission 차단을 먼저 선형화한다. 그 뒤 기존 소유자의 짧은 teardown 전용 권한으로 EndPlay/Deactivate 등 필요한 종료 hook을 수행한다. 일반 Resolve/TryPin은 계속 실패하며 hook은 no-yield/no-safepoint이며 재진입 RequestDestroy는 idempotent다. 다른 lane의 요청은 Game lane commit 전까지 취소 요청 상태이며 즉시 파괴 완료로 보고하지 않는다.
+
+**스크립트 단계의 파괴 지연(2026-11-12 결정).** Sparks가 실행되는 단계(23.2절) 안에서 스크립트 또는 스크립트가 호출한 native API가 요청한 Entity·Component 파괴는 20.2절의 deferred command로 등록하고, 그 단계의 이벤트 전달이 끝난 뒤 DestroyRequested로 전이한다. 같은 단계 안에서 스크립트가 확인한 객체는 단계 끝까지 유효하다. 단계 밖의 요청(스트리밍 unload, network despawn, 스크립트 단계 밖의 C++ 게임 코드)은 위 규칙대로 즉시 전이한다. 스크립트에 노출하는 native API는 binding schema에 파괴 지연 준수를 선언하며 위반은 `ContractViolation` fault다. 생성(`World.Spawn`)은 지연하지 않는다. BeginDestroy는 스크립트 객체의 Detach(23.3절)를 정확히 1회 수행하므로 GC가 도달 불가로 판정한 경로에서도 이벤트 연결과 유지 자원이 해제된다.
 
 BeginDestroy는 정확히 1회 실행하여 추적 edge를 정리하고 render/physics/audio의 독립 자원 token 해제를 요청한다. GC가 발견한 unreachable graph에도 적용되므로 managed 이웃의 생존·호출에 의존하지 않는다. cleanup의 필드 변경 자체도 기존 Borrow/GC-aware reader가 끝난 owner-lane 경계에서 수행한다. 후속 비동기 cleanup은 POD·backend token만 사용하며 Object graph를 역참조하지 않는다.
 
@@ -777,6 +781,8 @@ PIE/World 종료의 명시 scope revoke는 정상 cache eviction과 분리한다
 Closing 이후 subsystem detach → package RootRef 해제 → 논리 수거/retire → backend 완료 → 물리 회수 순서를 따른다. AssetId가 존재한다는 사실과 resident asset이 존재한다는 사실을 혼동하지 않는다. texture mip, geometry page, audio chunk는 Object 수명과 별도의 streaming residency로 제어한다.
 
 NL03/NL04·PI05의 asset 통합 부속 사례는 성공 직후 마지막 ticket 반환과 lease 단독 다음 프레임 사용, interest 0과 lease 발급 경합, 공유 A/B 중 A revoke와 B 사용, revoke와 completion/GC/late Submit 경합을 검사한다. 정상 lease의 조기 무효화·타 scope 취소·stale commit·완료 전 회수·retention 이중 반환은 0건이어야 한다. 마지막 lease와 작업 종료 뒤 full GC 2회 및 backend drain에서 package graph/root/retention이 기준선으로 돌아와야 하며, 보관 중인 revoked token도 검사한다. C24 fake owner 시험과 M3 이후 실제 loader/RHI 시험 결과를 분리한다. callback 내부 같은 package 재요청·lease 복사·자기 Stop, 등록 OOM/queue 포화, delivery admission 전후 revoke를 추가하여 교착·accepted callback 유실·terminal 중복·capture 잔존이 0건인지 검사한다.
+
+Sparks의 로드(23.3절)는 이 계약 위에 구현한다. 스크립트의 로드 요청 handle은 LoadTicket의 요청 관심, 로드 결과 값은 AssetLease에 대응한다. 한 ticket의 OnReady는 하나이므로 같은 요청을 기다리는 여러 실행에는 binding이 결과를 분배하고, 결과를 받을 실행이 없는 완료는 binding의 고립 완료 경로가 lease를 반환한다. `World.Spawn`은 prefab 의존 묶음과 template revision의 lease를 생성한 Entity에 귀속한다. 준비 mask는 타입이 요구하는 mask와 target capability의 교집합이며, DedicatedServer에서 외형 전용 타입(texture·사운드 등)의 요청은 효과 없는 stub으로 즉시 완료하고 그것을 받는 API는 효과가 없다. 스크립트 클래스의 필드 초기값과 함수 본문에 쓴 하드 에셋 참조는 스크립트 모듈이 아니라 그 클래스를 instantiate하는 prefab·셀의 의존성으로 cook한다. scope revoke 순서는 스크립트 실행 취소 → owner의 정상 해제 → revoke이며, revoke 시점에 남은 항목은 누수 ledger 실패로 보고한다.
 
 ### 9.3 패키지와 패치
 
@@ -1638,14 +1644,21 @@ Component는 Entity 소유의 Object이며 TransformComponent만 SceneNodeHandle
 
 **Construct → ApplyDefaults/Fixup → Attach → Initialize → Register → Activate/BeginPlay → Tick → Deactivate/EndPlay → Unregister → Retire**의 순서를 정의한다. BeginPlay/EndPlay는 world session과 별도 event로 기록하여 PIE 재시작·셀 unload·prefab 재적용 중 중복 실행을 방지한다. disabled와 unregistered, editor-only, pending destruction은 서로 다른 상태다.
 
+수명 hook의 이름은 Unity의 hook 체계(종류·호출 순서·의미)를 따르고 Rocks 어휘를 사용한다(2026-11-12 결정). 단계와 hook의 대응은 Initialize→`Awake`, Activate→`Enable`, BeginPlay→`Start`, 가변·고정·LateUpdate tick→`Tick`·`FixedTick`·`LateTick`, Deactivate→`Disable`, EndPlay→`Destroy`이며, 자기 Entity collider의 물리 통지는 `TriggerEnter`·`TriggerExit`·`CollisionEnter`·`CollisionExit`, 편집기 재구성은 `Validate`다. C++ 가상 함수는 `On` 접두를 붙여 오디오·타임라인의 일반 `Start()` 메서드와 충돌하지 않게 하고 Sparks의 `on Start()`와 1:1로 대응한다. 단계 이름(Initialize·BeginPlay 등)은 엔진 내부 단계 이름으로 유지한다. 같은 hook 체계를 WorldService·WidgetController에도 적용한다. 같은 spawn 묶음의 모든 Awake가 끝난 뒤 Start를 시작하고, Start가 끝나기 전에는 그 객체의 Tick을 시작하지 않는다. Disable은 그 객체의 스크립트 실행 취소·유지 자원 해제·이벤트 수신 중지를 수반한다.
+
 ~~~cpp
 class Component : public Object {
 public:
     WeakObjectRef<Entity> Owner() const;
-    virtual Result<void> OnInitialize(ComponentContext&);
-    virtual Result<void> OnRegister(ComponentContext&);
-    virtual void OnActivate();
-    virtual void OnDeactivate();
+    virtual Result<void> OnAwake(ComponentContext&);   // Initialize
+    virtual void OnEnable();                            // Activate
+    virtual void OnStart();                             // BeginPlay
+    virtual void OnTick(const TickContext&);            // FixedTick·LateTick도 같은 형식
+    virtual void OnDisable();                           // Deactivate
+    virtual void OnDestroy();                           // EndPlay, teardown 권한
+
+protected:
+    virtual Result<void> OnRegister(ComponentContext&); // backend 등록, 스크립트 비노출
     virtual void OnUnregister();
 };
 
@@ -1857,64 +1870,79 @@ Stop은 비동기 전이로 일반 작업 차단→취소·논리 종료→teard
 
 누수 없는 종료는 필수 기준이나 보편적 무오류의 증명은 아니다. 미종료 기록·증가 추세·미확인 cache는 성능보다 먼저 수정한다.
 
-## 23. 자체 게임플레이 언어·컴파일러·VM
+## 23. 자체 게임플레이 언어 Sparks·컴파일러·VM
 
 ### 23.1 언어 범위와 구현 단계
 
-**게임플레이는 C++와 자체 정적 타입 언어로 작성한다. Blueprint, 범용 visual scripting, Lua/C#를 기본 게임플레이 언어로 채택하지 않는다.** 언어 이름과 문법은 Foundation Gate 이후 L0/M3에서 확정하며 아래 예시는 요구 기능을 나타내는 가상 문법이다.
+**게임플레이는 C++와 자체 정적 타입 언어 Sparks로 작성한다. Blueprint, 범용 visual scripting, Lua/C#를 기본 게임플레이 언어로 채택하지 않는다.** 소스는 `.spark`, 컴파일 모듈은 `.sparks`이며 파일 경로가 import 경로다. 문법·타입·이벤트·수명·로딩·VM의 전체 설계와 결정 SD1–SD10은 [Sparks 언어 설계](SparksLanguage.ko.md)에 두고, 이 절은 엔진과의 계약과 완료 기준을 정의한다.
+
+설계 목표는 프로그래머가 아닌 사용자도 실수할 여지가 적은 언어다. 진단은 경고 없이 오류만 두고 모든 오류에 수정 예를 제시한다. 한 가지 일에는 한 가지 방법만 두며, 실수가 잦은 구조는 lint가 아니라 언어 규칙으로 제거한다. [S93](https://go.dev/doc/faq) 문법은 C 계열이고 수명 hook은 Unity 체계를 따른다(20.2절). Epic이 UE6의 게임플레이 프로그래밍 모델을 Verse로 전환한다고 밝혔으나 [S95](https://www.unrealengine.com/news/the-road-to-ue-6), Sparks는 Verse의 문법을 채택하지 않고 failure context·구조적 동시성·persistable 호환성 검사 등의 의미만 차용한다. [S94](https://verselang.github.io/book/)
 
 ~~~text
-component DoorLogic : ScriptComponent {
-    @edit @save var openAngle: Float = 1.57;
-    @edit @save var target: WeakRef<TransformComponent>;
+import Gameplay.Interaction;      // event Entity.Interacted(actor: Entity);
 
-    on Interact(actor: ObjectRef<Entity>) {
-        if actor.tags.has(tag("Character.Player")) {
-            if let scene = target.pin() {
-                scene.setRotation(angle(openAngle));
-            }
+enum DoorState { Closed, Opening, Open }
+
+class DoorLogic : ScriptComponent {
+    @edit @save var OpenAngle: float = 90.0;
+    @edit var Hinge: TransformComponent;          // 같은 prefab 안의 필수 참조
+    @net var State = DoorState.Closed;
+
+    on Owner.Interacted(actor: Entity) {          // 서버에서 발행되는 Entity 확장 이벤트
+        if (State != DoorState.Closed || !actor.Tags.Has(Tag("Character.Player"))) { return; }
+        State = DoorState.Opening;
+        var t = 0.0;
+        while (t < 1.0) {
+            await NextTick();                     // 실행 중 같은 발행자의 새 상호작용은 무시
+            t = Math.Min(t + Time.Delta, 1.0);
+            Hinge.RelativeRotation.Yaw = OpenAngle * t;
         }
+        State = DoorState.Open;
     }
 }
 ~~~
 
-전체 언어 범위는 module/import, 명시 타입·지역 타입 추론, value struct·enum, 함수·interface, control flow, array/map, ObjectRef/WeakRef/AssetRef, component event, attribute, async/await, Result를 지원한다. 임의 포인터 연산·unchecked cast·native heap 접근·사용자 정의 allocator·동적 eval은 초기 언어에서 제외한다. generic은 기본 container에 필요한 범위부터 지원하고 C++ 전체 문법을 복제하지 않는다.
+언어 범위는 import, 엔진 수명 타입·DataAsset을 상속하는 `class`, 값 `struct`·`enum`, 멤버·Entity 확장·World `event`, `fn`·`async fn`, `on` handler, `emit`, `await`, `try`, attribute다. 타입은 `bool`·`int`(64비트)·`float`(64비트)·수학 타입·`string`·`Text`·`Tag`·`Array`/`Map`/`Set`·`T?`·`Result`·`Soft<T>`이며 엔진 객체 참조는 `T?` 하나로 표현한다. 동적 타입·예외·closure와 함수 값·명시 구독·비구조적 coroutine·`defer`·독립 스크립트 객체·사용자 정의 generic·사용자 오버로딩·조건 연산자·비트 연산자·강제 unwrap·변경 가능한 전역 변수, 그리고 임의 포인터 연산·unchecked cast·native heap 접근·사용자 정의 allocator는 제외한다. 기능은 기본 단계(core)와 전체 단계(full)로 구분하고 core 패키지에서 full 문법을 쓰면 컴파일 오류다.
 
-구현은 lexer/parser → AST → 이름/타입 검사 → typed IR → verified bytecode → interpreter VM → debugger 순서다. LLVM 기반 AOT 또는 JIT는 VM 성능 측정 이후 선택한다. 초기부터 복수 backend를 개발하지 않는다. C++ native binding은 meta compiler가 생성한 허용 API 테이블을 통해 호출한다.
+구현은 오류 허용 parser → 이름/타입 검사(binding schema 입력) → typed IR → verified bytecode → register VM → debugger 순서다. 컴파일러는 CLI·Rocks Build·언어 서버·런타임 eval이 공유하는 C++ 라이브러리다. bytecode 사전 컴파일은 항상 수행하고, native AOT는 VM 프로파일 이후 typed IR → C++ 생성 → 플랫폼 toolchain 방식으로 선택한다. JIT는 채택하지 않는다. 런타임 eval(소스 컴파일)과 외부 모듈 로드는 target 정책 `ScriptEval`·`ExternalModules`로 정하며 출시 기본값은 `Off`이고 이때 컴파일러를 링크하지 않는다. target별 값은 마켓 규정 검토 후 정한다. C++ native binding은 meta compiler가 생성한 허용 API 테이블을 통해 호출한다.
 
 | 단계 | 산출물 | 완료 기준 |
 |---|---|---|
-| L0 · Foundation Gate 이후 M3 | 문법·타입·오류·모듈·수명·실행 모델 규격, conformance fixture | Core/Object 계약에 맞는 언어 규칙 확정 |
-| L1 · M3 | compiler, verifier, interpreter, native call | 조건문·함수·객체 필드·배열·오류 처리와 바인딩 테스트 |
-| L2 · M3/M4 | ScriptComponent, event, prefab 기본값, editor 진단 | 상호작용·문·카메라·컷씬 trigger를 C++ 수정 없이 제작 |
-| L3 · M5 | async, RPC, save schema, debugger, 안전한 reload | 취소·GC·replication·중단점·migration 통합 검증 |
-| L4 · M6 이후 | profiler·최적화 IR, 선택 AOT | hot function 비용을 근거로 backend 투자 결정 |
+| L0 · Foundation Gate 이후 M3 | core·full 문법, 타입·참조·대입·숫자 규칙, hook·단계·이벤트 전달 모델, 유지 자원, 소유·해제 연산 규격, conformance fixture | Core/Object 계약에 맞는 언어 규칙 확정 |
+| L1 · M3 | 컴파일러 라이브러리, verifier, interpreter, native call, 오류만 있는 진단, Core 변경 C1–C5, 언어 서버 기본 | 조건문·함수·객체 필드·배열·오류 처리와 바인딩 테스트 |
+| L2 · M3/M4 | 수명 hook, `on 경로.이벤트`·큐·`Changed`, async handler·`All`/`Race`, 유지 자원, `Load`·`LoadAll`·Teleport·Travel, NL09 G1·G4, 자동완성·빠른 수정, VS Code 확장 | 상호작용·문·카메라·컷씬 trigger를 C++ 수정 없이 제작 |
+| L3 · M5 | `@net`·RPC, 저장 호환성, debugger(DAP), reload, NL09 G2·G3, eval `DevOnly` | 취소·GC·replication·중단점·migration·누수 Gate 통합 검증 |
+| L4 · M6 이후 | profiler·최적화 IR, 선택 AOT, target별 eval 정책 | hot function 비용과 마켓 규정을 근거로 결정 |
 
-### 23.2 GC·동시성·오류 규약
+### 23.2 실행·참조·오류 규약
 
-script reference object는 ObjectRuntime의 TypeInfo와 GC 추적 체계에 편입한다. VM용 두 번째 독립 tracing heap을 초기안으로 도입하지 않는다. VM stack·global·suspended coroutine은 등록된 root provider가 active reference slot을 열거한다. verified bytecode의 root map 또는 보수적으로 전체 tagged reference slot을 정확히 스캔하는 기준 구현을 사용한다. native bridge는 ObjectHandle을 검증한 뒤 같은 Game lane에서만 객체 필드를 수정한다.
+**단계와 이벤트.** Sparks 코드는 엔진의 정해진 지점(입력 batch, 물리 이벤트 batch, tick group, coroutine 재개)에서 실행되며 이 실행 묶음을 단계라고 한다. `emit`과 필드 `Changed`는 큐에 등록되어 현재 실행 조각이 반환하거나 `await`에 도달한 뒤 같은 단계 안에서 FIFO로 전달된다. C++ handler도 전달 시점에 호출되므로 스크립트 handler의 재진입이 없다. 연쇄는 단계당 16회로 제한한다. 파괴는 이벤트 전달이 끝난 뒤 반영한다(5.2절). 이벤트 수신은 `on 경로.이벤트` 선언 한 형태이며 명시 구독 API는 없다. 초기값 적용·저장 로드·late join은 `Changed`를 발행하지 않는다.
 
-script field·container reference 변경은 ObjectRef와 같은 insertion barrier를 사용한다. await 이후에도 필요한 Object는 coroutine root로 유지하고 owner 파괴·World 종료 시 coroutine을 취소한다. native pointer·Borrow·Span을 yield 너머에 보관할 수 없도록 타입 검사한다. default 실행 lane은 Game이며 worker script는 immutable value 데이터와 thread-safe native API만 사용한다.
+**참조와 GC.** 스크립트 상태는 GC root가 되지 않는다. 엔진 객체 참조는 handle과 generation을 담은 약한 참조이고 파괴되면 null로 읽힌다. 값은 참조계수 copy-on-write 버퍼이며 closure가 없으므로 순환이 형성되지 않는다. 로드한 에셋 값은 AssetLease를 공유한다. 따라서 VM용 두 번째 tracing heap과 coroutine root가 없다. `await` 이후 `this`가 아닌 객체 변수는 `T?`로 바뀌고, 재개 시 `this`의 generation을 확인해 사라졌으면 실행을 취소한다. native bridge는 handle을 검증한 뒤 같은 Game lane에서만 객체 필드를 수정하고 Borrow는 native call thunk 안에서만 유지한다.
 
-bytecode verifier는 type, branch target, stack depth, local initialization, native API index, reference store를 검사한다. VM은 instruction·recursion·memory budget과 cancellation poll을 제공한다. 무한 loop는 프레임 전체를 점유하지 않도록 interrupt하며 script error에는 source range·call stack·entity·World·tick을 기록한다. 엔진의 손상 없이 해당 script instance 또는 transaction을 종료하는 정책을 정한다.
+**동시성.** 모든 coroutine은 handler 실행에 속하며 `All`·`Race`의 하위 작업은 부모와 함께 끝난다. 기다리는 handler가 같은 발행자의 이벤트로 실행 중이면 새 이벤트는 무시하고 횟수를 디버거에 표시하며, `@restart`로 재시작을 선택한다. 기본 lane은 Game이며 `@worker` 함수는 고정된 값과 thread-safe native API만 사용한다. `Delay`는 GameClock·UIClock 중 하나를 명시하고(8.3절), prediction·replay 대상은 `@deterministic` 부분집합으로 제한하여 wall clock·순서 불명 순회·비고정 RNG·IO·고정 tick 외 대기를 금지한다.
 
-script reload는 함수 본문 교체부터 지원한다. 실행 중 frame은 이전 code revision을 유지하고 그 revision은 frame/coroutine이 종료될 때 반환한다. layout 변경은 stable FieldId migration과 기본값 적용 후 safe boundary에서 교체하며 불가능하면 해당 instance 또는 PIE를 재시작한다. 변경된 script가 오래된 serialized prefab·save·RPC와 호환되는지 cooker가 검사한다.
+**오류와 예산.** 복구 가능한 실패는 `T?`와 `Result`, 버그는 fault다. fault는 실행 단계별로 처리한다: Awake는 spawn 실패와 미공개 graph rollback, Enable·Start는 instance 비활성화, Tick은 reload 전까지 Tick 중지, 그 밖의 handler는 그 실행만 중단하며, 원격 client가 유발한 fault는 instance·session으로 확대하지 않는다. 명령어·재귀·메모리 예산은 플랫폼 allocator가 아닌 논리 단위로 계산하여 모든 플랫폼·빌드·재시뮬레이션에서 결과가 같다. cooperative VM 중단은 opcode·native call 경계에서만 수행하고 native call 안의 lock 보유 코드를 강제 선점하지 않는다. fault에는 source range·call stack·entity·World·tick을 기록하고 위치별로 1회 상세 보고 후 횟수를 집계한다. 개발·출시 빌드는 같은 검사를 수행한다.
 
-네트워크 RPC는 script annotation에서 static manifest를 생성한다. client가 임의 함수 이름으로 server 코드를 호출할 수 없게 한다. prediction·replay 대상 함수는 deterministic subset으로 제한하여 wall clock·unordered iteration·비고정 RNG·임의 IO를 금지한다. native physics를 호출한 전체 script가 자동으로 결정적이 되는 것은 아니다.
+**네트워크.** `@net` 필드는 권한 측에서만 쓸 수 있으며 위반은 모든 빌드에서 fault다. RPC는 annotation에서 static manifest를 생성하고 `Server.`·`AllClients.`·`OwnerClient.` 접두로만 호출한다. 서버 RPC에는 호출 connection을 주입하고 interest set·소유권·길이·유한성·enum 값·호출 빈도를 검사하므로 client가 임의 함수 이름으로 server 코드를 호출할 수 없다. native physics를 호출한 script가 자동으로 결정적이 되는 것은 아니다.
 
-### 23.3 제작 경험과 검증
+### 23.3 유지 자원·로딩·누수 방지
 
-Studio의 Script Editor(UI 툴킷 코드 편집 widget)는 compiler와 동일 parser/type schema를 사용하는 language service를 연결한다. completion·rename·find references·hover·diagnostic·source map을 제공한다. debugger는 breakpoint·step·call stack·watch·native boundary 표시를 지원하고 멀티플레이에서 어느 process/world를 제어하는지 표시한다. 중단 시 physics/audio/Render와의 pause 정책을 명시한다.
+**유지 자원.** 반복 사운드·지속 VFX·입력 context·로딩 요청·표시한 widget처럼 멈출 때까지 계속되는 자원은 필드나 지역 변수에 담을 때만 생성되고, 필드에 새 값이나 null을 넣을 때·지역 변수의 블록이 끝날 때(fault·취소 포함)·객체가 비활성화되거나 종료될 때 해제된다. 복사·전달할 수 없다. 일회성 효과는 handle 없이 호출한다. binding schema가 반환값의 자원 종류를 선언하며 선언이 없는 native API는 노출하지 않는다.
 
-conformance corpus는 정상 코드뿐 아니라 잘못된 타입·미초기화·순환 import·잘못된 bytecode·GC 경합·reload·취소를 포함한다. AST/bytecode fuzzer와 C++ oracle fixture를 사용한다. allocation·native call·GC barrier·task 대기 비용을 profiler에 표시한다. 라이브러리 API 문서와 script binding 문서는 같은 TypeInfo에서 생성한다.
+**로드.** `try await X.Load()`로 로드하고 결과 값을 보관하는 동안 상주를 유지한다. 진행률은 지역 전용 요청 handle(`X.Load()`, `Assets.LoadAll(list)`)로 조회한다. `Owner.Teleport`는 목적지 prefetch와 commit gate를 내부에서 처리하고(10.2절), `Session.Travel`은 요청을 접수하며 로딩 화면은 엔진이 프로젝트 설정으로 관리한다(10.3절). 9.2절 계약과의 대응은 9.2절에 기록한다.
 
-### 23.4 ABI·오류·재구성의 경계
+**소유와 해제.** 소유자는 Session·Instance·Execution·ModuleHost 넷이고, 해제는 사용자 코드를 실행하지 않고 할당하지 않으며 멈추지 않는 3개 연산 EndExec·Detach·CloseSession으로만 수행한다. 이벤트 연결 항목은 session 연결 표의 key와 handler ID만 가지며, 구독자 Detach는 key를 폐기하고 발행자의 Detach·BeginDestroy는 delegate를 비워 연결 기록을 해제한다. 이를 위해 Core `Delegate.h`에 생존 판정 확장 지점(C1), `TryAdd`의 상한 compact(C2), 단일 pass compact(C3), `CompactDead`·`Stats`(C4)를, `NamePool`에 검색 전용 `TryFind`(C5)를 추가한다. 범위가 종료될 때마다 0을 검사하고 NL09(29.6절)로 PIE 종료·장시간 soak·음성 대조·실패 주입을 검증한다.
 
-MetaCompiler는 native binding schema를 먼저 생성하고 ScriptCompiler는 이를 읽어 TypeId/FieldId/RpcId와 bytecode를 생성한다. 두 compiler는 같은 schema registry를 사용하고 서로의 generated source를 다시 입력하는 cycle을 만들지 않는다. ScriptRuntime은 opaque script class·field storage를 다루며 World 관련 native API는 WorldIntegration이 등록한다.
+### 23.4 바인딩·제작 경험·재구성
 
-nullable reference는 pin/resolve 결과 확인 없이 호출할 수 없고 tag literal은 compile/cook 시 dictionary에 검증한다. cooperative VM 중단은 opcode·native call 경계에서만 수행한다. native call 안의 lock 보유 코드를 강제 선점하지 않으며 native API마다 lane·최대 작업·취소 가능 여부를 선언한다.
+MetaCompiler는 native binding schema를 먼저 생성하고 Sparks 컴파일러는 이를 읽어 TypeId/FieldId/SubobjectGuid/FunctionId/RpcId와 bytecode를 생성한다. 두 compiler는 같은 schema registry를 사용하고 서로의 generated source를 다시 입력하는 cycle을 만들지 않는다. native API는 lane·최대 작업·취소 가능 여부에 더해 스레드 안전성·결정성·부수 효과·safepoint 가능 여부·권한·자원 종류·파괴 지연 준수·고립 완료 해제 경로를 선언한다. 이벤트는 별도 매크로 없이 Core `MulticastDelegate` 필드에 `ROCKS_PROPERTY(Params = ...)`를 붙여 선언하고 메타 컴파일러가 `FieldKind::Event`로 분류한다. 타입·함수·이벤트 이름은 C++와 같고 리플렉션 필드는 첫 글자를 대문자로 노출한다(2.4절). ScriptRuntime은 opaque script class·field storage를 다루며 World 관련 native API는 WorldIntegration이 등록한다.
 
-script error·task cancellation은 이미 외부에 적용한 damage/IO/RPC를 자동 rollback하지 않는다. 원자성이 필요한 편집·능력 판정은 staged command transaction을 commit 전에 검증한다. reload는 code뿐 아니라 TypeInfo·binding table·source map의 revision lease를 유지한다. layout migration 시 coroutine root map을 검증하며 불가능한 paused frame은 명시 취소 후 재시작한다.
+Studio Script Editor와 VS Code 확장은 컴파일러 라이브러리를 공유하는 LSP 언어 서버를 사용하므로 같은 입력에서 CLI와 같은 진단을 얻는다. 자동완성은 멤버·hook·attribute와 태그·action·에셋 경로 리터럴을 포함한다. [S96](https://microsoft.github.io/language-server-protocol/) debugger는 Debug Adapter Protocol로 연결하고 breakpoint·step·call stack·watch·native boundary와 멀티플레이의 process·World를 표시한다. 중단 시 physics/audio/Render와의 pause 정책을 명시하고, pause 중 쌓이는 큐에는 상한과 병합을 적용한다.
+
+reload는 함수 본문 교체부터 지원한다. 실행 중 frame은 이전 code revision을 유지하고 종료 시 반환하며, frame을 새 코드로 자동 이전하지 않고 편집기가 이전 코드로 실행 중인 handler와 재시작 명령을 표시한다. 필드·`on` 선언 변경은 Sparks frame이 0개인 경계에서 FieldId migration과 연결 재구성 후 교체하고, `@net`·`@rpc` 배치와 클래스 계층 변경은 PIE를 재시작한다. 데이터가 연결된 ID의 소실은 매 컴파일의 오류이며 `@formerly`로 이전 이름을 표시한다. 변경된 script가 오래된 serialized prefab·save·RPC와 호환되는지 cooker가 검사한다. reload는 code와 함께 TypeInfo·binding table·source map의 revision lease를 유지한다.
+
+script error·task cancellation은 이미 외부에 적용한 damage/IO/RPC를 자동 rollback하지 않는다. 원자성이 필요한 편집·능력 판정은 staged command transaction을 commit 전에 검증한다. Verse식 투기 실행·rollback은 엔진 C++ 쪽의 transactional 기반이 마련될 때 재검토한다. conformance corpus는 정상 코드와 잘못된 타입·미초기화·순환 import·잘못된 bytecode·GC 경합·reload·취소를 포함하고 AST/bytecode fuzzer, C++ oracle fixture, VM·AOT 차등 시험을 사용한다. allocation·native call·이벤트 큐·task 대기 비용을 profiler에 표시하고, 라이브러리 API 문서와 script binding 문서는 같은 TypeInfo에서 생성한다.
 
 ## 24. Unreal 참고 체계의 추가 도입
 
@@ -2441,6 +2469,7 @@ cancel·timeout만으로 외부 callback/GPU 완료를 가정하지 않는다. �
 | NL06 | 정상 shutdown·중간 실패·강제 crash: 정상 ledger 잔존 0, crash의 복구 범위·truncated 상태 명시 |
 | NL07 | 지원 sanitizer·독립 allocator ledger·graph oracle·seed stress: 툴별 관찰 범위/NOT RUN 공개 |
 | NL08 | 최적화 on/off·1/N worker·cache cold/warm: 의미·소유권 동일, 성능 개선 전 정확성 통과 |
+| NL09 | Sparks: PIE Stop 시 스크립트 counter·연결 표·revision lease·이름 pool 기준선 복귀(G1), 2시간 soak의 30초 구간 최솟값 증가 추세 없음(G2), 의도적으로 넣은 누수가 Gate를 실패시킴(G3), 모든 획득·await의 실패 주입 후 Detach counter 0(G4) |
 
 N-fail·rollback·baseline·원인 report는 Core CF02/CF07–CF12에서 시작한다. leak sanitizer 지원 플랫폼에서 상세 검사하고, 미지원 target은 자체 ledger·반복 scope 종료·heap/resource snapshot을 병행한다. 일정 압박으로 correctness gate를 생략하지 않는다. lock-free·allocator cache·parallel GC·async queue 등 최적화는 검증된 기준 경로와 비교 가능한 선택 switch를 갖는다.
 
@@ -2506,7 +2535,7 @@ RHI·UI 툴킷·언어·전문 빌드 도구의 본격 구현은 Foundation Gate
 |---|---|---|
 | R01 · P0 | 참조 변경 barrier 누락·GC 조기 회수 | mutation API 제한·meta 진단·full oracle. M2 정확성 미통과 시 점진화 중단 |
 | R02 · P0 | 자체 container/lock-free/allocator의 UAF·ABA·overflow | 단순 잠금 기준 구현·sanitizer·fuzz·epoch 검증. 성능 이전 정확성 gate |
-| R03 · P0 | VM와 native 사이 수명 누락·언어 개발 범위 확대 | 단일 객체 GC·root provider·제한 언어/인터프리터 우선. M2 native/GC 계약 검토, M3/L1 VM 통합에서 범위 재산정 |
+| R03 · P0 | VM와 native 사이 수명 누락·언어 개발 범위 확대 | 스크립트 상태는 약한 handle·값·lease만 보유(GC root 없음), 고정 소유자와 3개 해제 연산, core·full 단계로 언어 범위 제한(23절). M2 native/GC 계약 검토, M3/L1 VM 통합에서 범위 재산정 |
 | R04 · P0 | Type/Field ID drift·prefab override 오적용·save 손상 | stable ID·3-way rebase·schema fixture·atomic save. migration 없이 release 금지 |
 | R05 · P0 | task capture·module unload·cancel 완료 누락 | owning capture·root token·drain gate·exactly-once terminal stress |
 | R06 · P1 | Deferred/Forward 기능 차이·shader permutation 증가 | 공통 IR·기능 manifest·cooker 오류·pairwise/full 주요 matrix. M3부터 회귀 |
@@ -2617,7 +2646,7 @@ RHI·UI 툴킷·언어·전문 빌드 도구의 본격 구현은 Foundation Gate
 | Headless·server·commandlet·offscreen | capability별 target·결과·timeout·drain | 필수 CoreTest부터 단계별 확장 |
 | Framework·입력·camera·save·travel | MatchRules/State·PlayerState·LocalPlayer·possession·epoch·snapshot | 필수 M4–M6 |
 | Tag·component·prefab·feature plugin | 계층 query·등록/tick·variant/rebase·load/unload token | 필수 M4–M6 |
-| 커스텀 언어·debugger·RPC·reload | static type·verified VM·GC roots·native binding·언어 서비스 | 필수 Foundation 후 L0–L4 |
+| 커스텀 언어(Sparks)·debugger·RPC·reload | static type·verified VM·약한 handle·native binding·LSP 언어 서버 | 필수 Foundation 후 L0–L4 |
 | Blueprint·범용 gameplay visual scripting | UI/AI/sequence 이벤트도 C++/자체 언어로 연결 | 명시 제외 |
 | Asset Manager·DataAsset/Table·DDC·virtual assets | primary/bundle·stable schema·source bulk·incremental import/cook | 필수 M3–M6 |
 | Deferred·Forward·RHI/RG·shader·GPU Scene | 두 경로 정식·공통 IR·typed pass/queue/fence·capability | 필수 M3부터 전체 회귀 |
@@ -2795,6 +2824,35 @@ Jolt는 `CROSS_PLATFORM_DETERMINISTIC` build에서 x64·ARM64를 포함한 플�
 
 확인하지 못한 항목은 O3DE 5.12 port(PR #18)의 build·시험 통과, x64·ARM64 간 실제 차이의 크기, PhysX의 플랫폼 간 차이 측정 공개 자료다. 개정 범위는 표지·1·2.1·2.2·3.1·10.4·16·17.2·28.1·31(R22–R24)·33.2·33.10·33.11·34절이다. 본 개정은 문서 계약의 변경이며 구현·측정 결과가 아니다.
 
+### 33.12 개정 1.7의 게임플레이 언어 Sparks
+
+검토 입력은 사용자 요구(정적 타입, 스펙 예시 수준의 평범한 문법, 코어·엔진·이벤트 접근, VM 실행, 사전 컴파일)와 이후 추가 요구(Unity 수준의 접근성, 프로그래머가 아닌 사용자를 위한 방어적·Go식 설계, 메모리·리소스 누수 0, 비동기 로딩, 런타임 eval, VS Code 자동완성, Verse 차용 검토)다. 설계는 초안 0.1–0.5를 거쳤고 각 초안마다 서브에이전트 교차 검증을 수행하였다.
+
+| 회차 | 검증 | 주요 결정 |
+|---|---|---|
+| 1차(0.1) | 독립 설계, 반례 검토, 사실 확인 | Scalar·Ref·Buf bank VM, 필드 컨테이너 barrier, Worker 경계 값 고정, native→스크립트 진입 문맥 검사. VM Showdown 수치 정정(실행 시간 32.28% 감소), 콘솔 JIT 제한은 미확인으로 표기 |
+| 2차(0.4) | Go 관점 단순성 감사, 비프로그래머 실수 시뮬레이션 31건, 언어 안티패턴, 런타임 방어성, 외부 근거, 초안을 보지 않은 최소 설계, Verse 조사 | "없음" 단일 개념(`T?`), 함수 결과 대입 금지, 명시 구독·closure·`launch`·`defer` 제거, 큐 전달, 경고 없는 오류, `/`는 float, 단계별 fault 정책, 런타임 eval 정책 |
+| 3차(0.5) | 정합성 점검 48건, 누수 반례 16건, 누수 수정안 반례, 수정안을 보지 않은 수명 모델 독립 설계, 비동기 로딩 반례 | 고정 소유자와 3개 해제 연산, 스크립트 상태 GC root 없음, 유지 자원 3규칙, Core 변경 C1–C5, Spawn의 prefab lease, 외형 전용 stub, Start 대기 중 Tick만 보류, frame 자동 이전 미채택 |
+
+| 지적 | 조치 |
+|---|---|
+| null·파괴·Weak 미설정·Weak 만료의 4가지 "없음" | `T?` 단일 개념, 약한 handle 저장, 모든 null 검사가 파괴를 포함(23.2절) |
+| 확인한 객체가 같은 handler 안에서 사라짐 | 스크립트 단계의 파괴를 단계 끝으로 지연(5.2절) |
+| 동기 이벤트 발행의 재진입과 호출 수 폭증 | 단계 안 FIFO 큐, 연쇄 16회 상한(23.2절) |
+| 구독·coroutine·자원 handle의 해제 누락 | 선언형 연결만 허용, 구조적 동시성, 유지 자원 3규칙, 고정 소유자와 해제 연산(23.3절) |
+| delegate 항목이 GC 경로·발행자 우선 소멸에서 남음 | BeginDestroy Detach, 회수 가능 대상과 상한 compact(Core C1–C4) |
+| 세션 종료 검사만으로는 세션 중 증가를 검출하지 못함 | 범위 종료마다 0 검사, 논리 단위 메모리 예산, NL09 soak Gate(29.6절) |
+| 런타임 문자열이 이름 pool을 영구히 증가 | 검색 전용 `TryFind`(C5), eval의 이름 등록 금지 |
+| 생성된 Entity가 prefab lease보다 오래 남음, 전용 서버의 외형 에셋 실패 | Spawn의 prefab lease 귀속, 준비 mask 교집합과 stub(9.2절) |
+| 필드 초기값 하드 참조의 세션 상주 | instantiate하는 prefab·셀의 의존성으로 cook(9.2절) |
+| reload 시 실행 중 frame의 새 코드 이전이 상수표·inline 변경에서 오동작 | 자동 이전 미채택, 편집기 재시작 안내(23.4절) |
+| C++ 가상 함수 `Start()`가 일반 메서드와 충돌 | Unity 체계 hook과 C++ `On*` 가상 함수(20.2절) |
+| 별도 이벤트 매크로·타입의 중복 | Core `MulticastDelegate` 필드와 `FieldKind::Event` 재사용(23.4절) |
+
+Verse 조사에서 Epic의 "The road to UE6"(2026-06-17)는 게임플레이 프로그래밍 모델의 Verse 전환과 Blueprint의 장기적 deprecate를 밝혔고, UE6 Early Access부터의 즉시 제거는 2차 보도로만 확인되었다. 원문 페이지는 접근이 거부되어 재게재 인용으로 확인하였다. Verse의 투기 실행·rollback은 엔진 C++ 쪽의 transactional 기반이 없어 보류하였다. 누수 검토가 근거로 든 코드 사실(`MulticastDelegate::TryAdd`의 compact 부재, `NamePool`의 Shutdown 전용 해제와 기본 상한 65,536, TypeRegistry Busy)은 저장소 코드와 대조하였다.
+
+결정 SD1–SD10은 2026-11-12에 확정하였다. 런타임 eval의 target별 사용 여부만 마켓 규정 검토 후 정하며, 기본값은 출시 `Off`, 개발 `DevOnly`다. 개정 범위는 표지·2.4·5.2·9.2·20.2·23·29.6(NL09)·31(R03)·33.2·33.12·34절과 신규 [Sparks 언어 설계](SparksLanguage.ko.md), 입력 상세안 22.3절, UI 툴킷 7절이다. 본 개정은 문서 계약의 변경이며 구현·측정 결과가 아니다.
+
 ## 34. 참고 자료와 설계 근거
 
 이전 대화는 사용자 제공 참조 「3D 엔진 설계」와 현재 대화의 추가 요구를 기준으로 한다. 아래 공식 문서는 기술 개념과 API 경계를 확인하기 위한 자료다. 일정·API·예산·구현 단계는 이 계획의 제안이며 참고 자료의 성능 보증이 아니다. 온라인 문서는 변경될 수 있으므로 실제 구현 착수 시 선택 SDK 버전의 문서·commit을 build manifest에 고정한다. 조회일은 2026.11.10이며 S75–S92는 2026.11.11이다.
@@ -2893,3 +2951,7 @@ Jolt는 `CROSS_PLATFORM_DETERMINISTIC` build에서 x64·ARM64를 포함한 플�
 | S90 | [NVIDIA · PhysX 5.6.1 Rigid Body Dynamics](https://nvidia-omniverse.github.io/PhysX/physx/5.6.1/docs/RigidBodyDynamics.html) | 결정성 보장 범위 |
 | S91 | [Epic · Networked Physics Overview (5.6)](https://dev.epicgames.com/documentation/en-us/unreal-engine/networked-physics-overview?application_version=5.6) | 서버 권한 보정·재시뮬레이션 참고 |
 | S92 | [Epic · UE 5.6.1-release 소스](https://github.com/EpicGames/UnrealEngine/tree/5.6.1-release) | Chaos `FReal`·질의 acceleration structure 참고. Epic 계정 연결 필요 |
+| S93 | [Go · FAQ](https://go.dev/doc/faq) | 경고 없는 오류·암묵 변환 금지·한 가지 방법의 설계 근거 |
+| S94 | [The Book of Verse](https://verselang.github.io/book/) | failure context·구조적 동시성·persistable 호환성 검사 |
+| S95 | [Epic · The road to UE6 (2026-06-17)](https://www.unrealengine.com/news/the-road-to-ue-6) | Verse 전환·Blueprint deprecate 계획. 원문 접근 거부로 재게재 인용 확인 |
+| S96 | [Microsoft · Language Server Protocol](https://microsoft.github.io/language-server-protocol/) | Sparks 언어 서버·VS Code 확장 |

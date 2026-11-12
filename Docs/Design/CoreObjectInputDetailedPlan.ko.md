@@ -1117,7 +1117,7 @@ InputProfileEditor는 Action/Binding/Context 목록, processor parameter propert
 
 개발자 명령 콘솔은 text consumer와 command dispatcher다. 게임 console hardware backend와 별개다. shipping build에서는 명시적으로 허용한 명령만 노출하며 text focus 중 이동·발사 action이 발생하지 않아야 한다.
 
-커스텀 언어에는 ActionId 조회, action event 구독, context token, rebinding/profile API를 typed binding으로 제공한다. Blueprint와 시각적 gameplay script graph는 지원하지 않는다. subscription은 WeakObjectRef owner와 module/script lease를 보유하고 owner destroy·VM reload·World 종료 때 해제한다. callback은 Input lane에서 바로 VM에 진입하지 않고 지정된 gameplay phase에 event batch를 전달한다. root로 subscription owner를 영구 보존하는 cycle을 만들지 않는다.
+자체 언어 Sparks(전체 계획 23절, [Sparks 언어 설계](SparksLanguage.ko.md))에는 InputAction 필드(`Action("…")`)와 선언형 연결(`on Jump.Pressed()`), action 값 조회, 유지 자원으로서의 input context, rebinding/profile API를 typed binding으로 제공한다. Blueprint와 시각적 gameplay script graph는 지원하지 않는다. 연결 항목은 session 연결 표의 key와 handler ID만 보유하고 revision lease를 보유하지 않는다. 연결은 구독자 Detach·World 종료·`on` 선언이 바뀌는 reload에서 해제되고 함수 본문 reload에서는 유지된다. action 연결은 session의 InputConsumerScope 안의 action instance에 생성한다. callback은 Input lane에서 바로 VM에 진입하지 않고 gameplay 단계의 event batch로 전달한다. root로 연결 owner를 영구 보존하는 cycle을 만들지 않는다.
 
 ## 23. 재생·네트워크·헤드리스 검증
 
