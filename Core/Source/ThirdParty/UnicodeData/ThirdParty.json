@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "kind": "data",
+  "name": "UnicodeData",
+  "version": "18.0.0",
+  "upstreamDirectory": "ucd-18.0.0",
+  "source": {
+    "url": "https://www.unicode.org/Public/18.0.0/ucd/UCD.zip",
+    "sha256": "7b3e555514060b92290d154f53655c5eb0fa62b16eb04c03434ff72d1a66a0d8",
+    "verification": "unicode.org HTTPS 배포본(2026-09-01). 꺼낸 파일은 같은 디렉터리의 개별 배포 파일과 SHA-256이 같음을 확인했다(2026-11-12). Unicode는 서명을 제공하지 않는다."
+  },
+  "license": {
+    "spdx": "Unicode-3.0",
+    "upstreamExpression": "Unicode-3.0",
+    "file": "ucd-18.0.0/license.txt",
+    "binaryNoticeRequired": true
+  },
+  "licenseSource": {
+    "url": "https://www.unicode.org/license.txt",
+    "sha256": "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
+  },
+  "embeddedIn": [
+    "Core"
+  ],
+  "translationUnits": [],
+  "includeDirectories": [],
+  "defines": [],
+  "platformDefines": {},
+  "consumerDefines": [],
+  "adapterHeaders": [],
+  "files": {
+    "CaseFolding.txt": "a004797658a457bec4dc11683e39f69249ea3b595b752dbea6721c4c9f587b0d",
+    "CompositionExclusions.txt": "c759b100e9ae8960ae6b50fc5765950a7581fd9f30d4ef95f68f25a6d97e818e",
+    "DerivedCoreProperties.txt": "09c928886a178fcafd93c29e4bd59073a058e5a100b716d425cb563ab50f68c9",
+    "DerivedNormalizationProps.txt": "98ac7f67d985fe781e317f6182e885e94cabb0c314769e6dd73e48b226931ccd",
+    "NormalizationTest.txt": "25a50d816764b04abfb4a646d3eb2b2a803284c3873d9a06757b94fe4513dde3",
+    "UnicodeData.txt": "0736451de439ae7baf1425136617da495e09ee5afbe6e394374db7009ea08950",
+    "license.txt": "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
+  },
+  "pragmaDirectives": [],
+  "notes": [
+    "UCD.zip에서 Unicode 정규화·simple case folding·General_Category·Default_Ignorable 표 생성과 시험에 쓰는 파일만 byte 그대로 꺼냈다(쓰지 않는 UCD 파일은 두지 않는다). 설계는 Docs/Design/CoreDataFoundations.ko.md 1절.",
+    "license.txt는 UCD 디렉터리 밖(https://www.unicode.org/license.txt)에서 받았다(licenseSource).",
+    "생성 표(Core/Source/Runtime/Core/Private/Text/UnicodeTables.generated.h)가 Core에 들어가므로 embeddedIn = Core — SDK가 Core를 담으면 이 라이선스를 배포한다."
+  ]
+}

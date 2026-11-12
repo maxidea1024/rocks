@@ -102,6 +102,29 @@ internal static class SelfTests
             }
         });
         suite.Add("Policy.RepositoryCompilerBuiltins", () => NoFailures(PolicyChecks.CompilerBuiltins(options.Root)));
+        suite.Add("Policy.RepositoryUnicodeTables", () =>
+        {
+            NoFailures(UnicodeTables.Check(options.Root));
+            // 생성기는 결정적이다(두 번 만든 결과가 같은 byte).
+            Verify.Equal(UnicodeTables.Generate(options.Root), UnicodeTables.Generate(options.Root), "Unicode table generator is not deterministic");
+        });
+        suite.Add("Policy.UnicodeTablesDetectEdits", () =>
+        {
+            // 손으로 고친 생성 파일과 없는 파일을 잡는다. 원본은 저장소의 UCD를 그대로 복사한다.
+            using TemporaryDirectory temporary = new();
+            string library = Path.Combine(ThirdPartyManifest.ThirdPartyRoot, UnicodeTables.LibraryName);
+            foreach (string file in Directory.EnumerateFiles(Path.Combine(options.Root, library), "*", SearchOption.AllDirectories))
+            {
+                string relative = Path.GetRelativePath(options.Root, file).Replace('\\', '/');
+                Directory.CreateDirectory(Path.GetDirectoryName(temporary.FilePath(relative))!);
+                File.Copy(file, temporary.FilePath(relative));
+            }
+            Verify.That(UnicodeTables.Check(temporary.Root).Count == 1, "missing generated tables escaped audit");
+            Verify.That(UnicodeTables.Run(temporary.Root, write: true), "generator must write missing tables");
+            NoFailures(UnicodeTables.Check(temporary.Root));
+            File.AppendAllText(temporary.FilePath(UnicodeTables.OutputPath), "// edited\n");
+            Verify.That(UnicodeTables.Check(temporary.Root).Count == 1, "edited generated tables escaped audit");
+        });
         suite.Add("Policy.CompilerBuiltinControls", () =>
         {
             using TemporaryDirectory temporary = new();

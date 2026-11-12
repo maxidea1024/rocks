@@ -31,7 +31,8 @@ internal static class Program
                 case "policy":
                     var failures = PolicyChecks.Runtime(root).Concat(PolicyChecks.PlatformBoundary(root))
                         .Concat(PolicyChecks.SourceWarnings(root)).Concat(PolicyChecks.OptimizationOverrides(root))
-                        .Concat(PolicyChecks.CompilerBuiltins(root)).Concat(PolicyChecks.PythonFreeMainPath(root)).Concat(PolicyChecks.ThirdParty(root)).ToList();
+                        .Concat(PolicyChecks.CompilerBuiltins(root)).Concat(UnicodeTables.Check(root))
+                        .Concat(PolicyChecks.PythonFreeMainPath(root)).Concat(PolicyChecks.ThirdParty(root)).ToList();
                     if (options.Optional("compile-commands") is string database) failures.AddRange(PolicyChecks.CompilationDatabase(database));
                     foreach (var failure in failures) Console.Error.WriteLine(failure);
                     return failures.Count == 0 ? 0 : 1;
@@ -42,6 +43,14 @@ internal static class Program
                     var refreshed = ThirdPartyManifestRefresh.Run(root, write);
                     foreach (string path in refreshed) Console.WriteLine((write ? "updated " : "stale ") + path);
                     return write || refreshed.Count == 0 ? 0 : 1;
+                case "unicode-tables":
+                    // UCD 원본에서 Core의 Unicode 표(UnicodeTables.OutputPath)를 다시 만든다. 기본은 차이만 보고하고
+                    // (종료 코드 1), --write면 고친다.
+                    bool writeTables = options.Write;
+                    bool tablesChanged = UnicodeTables.Run(root, writeTables);
+                    if (tablesChanged)
+                        Console.WriteLine((writeTables ? "updated " : "stale ") + UnicodeTables.OutputPath);
+                    return writeTables || !tablesChanged ? 0 : 1;
                 case "format":
                     await FormatCheck.CheckAsync(root, options.Optional("formatter") ??
                         Environment.GetEnvironmentVariable("ROCKS_CLANG_FORMAT") ?? "clang-format");
