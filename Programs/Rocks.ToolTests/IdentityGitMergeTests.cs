@@ -117,7 +117,11 @@ internal static class IdentityGitMergeTests
                 await fixture.GitAsync("config", "--local", "commit.gpgSign", "false");
                 return fixture;
             }
-            catch { fixture.Dispose(); throw; }
+            catch
+            {
+                fixture.Dispose();
+                throw;
+            }
         }
 
         public async Task<string> CommitAsync(object[] entries, params string[] parents)
@@ -126,7 +130,12 @@ internal static class IdentityGitMergeTests
             await GitAsync("add", "--", Manifest);
             string tree = (await GitAsync("write-tree")).Trim();
             List<string> arguments = ["commit-tree", tree, "-m", "identity fixture " + ++counter];
-            foreach (string parent in parents) { arguments.Add("-p"); arguments.Add(parent); }
+            foreach (string parent in parents)
+            {
+                arguments.Add("-p");
+                arguments.Add(parent);
+            }
+
             return (await GitAsync(arguments.ToArray())).Trim();
         }
 
@@ -140,7 +149,11 @@ internal static class IdentityGitMergeTests
         {
             ProcessResult result = await ProcessRunner.RunAsync(new ProcessSpec("git", arguments, temporary.Root,
                 environment, Timeout: TimeSpan.FromSeconds(30)));
-            if (result.ExitCode != 0) throw new InvalidOperationException("Git fixture failed: " + result.StdErr);
+            if (result.ExitCode != 0)
+            {
+                throw new InvalidOperationException("Git fixture failed: " + result.StdErr);
+            }
+
             return result.StdOut;
         }
 
@@ -151,15 +164,22 @@ internal static class IdentityGitMergeTests
             string gitDirectory = Path.Combine(temporary.Root, ".git");
             if (Directory.Exists(gitDirectory))
             {
-                var enumeration = new EnumerationOptions { RecurseSubdirectories = true,
-                    AttributesToSkip = FileAttributes.ReparsePoint, IgnoreInaccessible = false };
+                var enumeration = new EnumerationOptions
+                {
+                    RecurseSubdirectories = true,
+                    AttributesToSkip = FileAttributes.ReparsePoint,
+                    IgnoreInaccessible = false
+                };
                 foreach (string file in Directory.EnumerateFiles(gitDirectory, "*", enumeration))
                 {
                     FileAttributes attributes = File.GetAttributes(file);
                     if ((attributes & FileAttributes.ReadOnly) != 0)
+                    {
                         File.SetAttributes(file, attributes & ~FileAttributes.ReadOnly);
+                    }
                 }
             }
+
             temporary.Dispose();
         }
     }

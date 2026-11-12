@@ -10,7 +10,10 @@ public static class RuleLoader
 {
     private static T Create<T>(Type type)
     {
-        try { return (T)Activator.CreateInstance(type)!; }
+        try
+        {
+            return (T)Activator.CreateInstance(type)!;
+        }
         catch (Exception error)
         {
             throw new ArgumentException($"Rule '{type.FullName}' could not be constructed: {(error.InnerException ?? error).Message}", error);
@@ -19,7 +22,10 @@ public static class RuleLoader
 
     private static NativeModuleInput Configure(Type type, BuildContext context)
     {
-        try { return Create<ModuleRules>(type).Configure(context); }
+        try
+        {
+            return Create<ModuleRules>(type).Configure(context);
+        }
         catch (Exception error)
         {
             throw new ArgumentException($"Module rule '{type.FullName}' failed for {context.Platform}/{context.Configuration}: {(error.InnerException ?? error).Message}", error);
@@ -36,11 +42,17 @@ public static class RuleLoader
             .Select(type => Create<TargetRules>(type)).ToArray();
         if (modules.GroupBy(module => module.Name, StringComparer.Ordinal).Any(group => group.Count() != 1) ||
             targets.GroupBy(target => target.Name, StringComparer.Ordinal).Any(group => group.Count() != 1))
+        {
             throw new ArgumentException("Duplicate module/target rule name.");
+        }
+
         var selected = targets.SingleOrDefault(target => target.Name == targetName)
             ?? throw new ArgumentException($"Unknown target '{targetName}'. Available: {string.Join(", ", targets.Select(target => target.Name))}");
         if (selected.Modules.Count == 0)
+        {
             throw new ArgumentException("A target must select at least one module.");
+        }
+
         return new(modules, selected);
     }
 }

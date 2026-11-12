@@ -17,8 +17,12 @@ internal static class ExecutorCleanupTests
 
         void Check(bool condition, string message)
         {
-            if (!condition) throw new InvalidOperationException(message);
+            if (!condition)
+            {
+                throw new InvalidOperationException(message);
+            }
         }
+
         void FailDelete(string path) => throw new IOException("injected sharing violation");
         Task<ProcessResult> Success(ProcessSpec spec, CancellationToken _)
         {

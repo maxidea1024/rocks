@@ -29,46 +29,72 @@ internal static class StableIdMergeValidator
         // 저장 데이터가 손실된다. 현재 이름과 과거 alias 모두 비교한다.
         var theirNames = ByName(theirs);
         foreach (StableIdEntry entry in ours.Entries)
+        {
             foreach (string name in Names(entry))
+            {
                 if (theirNames.TryGetValue((entry.Kind, name), out string? otherId) &&
                     !StringComparer.Ordinal.Equals(entry.Id, otherId))
+                {
                     failures.Add($"name collision: {entry.Kind} {name} has different IDs in the two parents ({entry.Id}, {otherId})");
+                }
+            }
+        }
 
         foreach ((string id, StableIdEntry left) in ourIds)
         {
-            if (!theirIds.TryGetValue(id, out StableIdEntry? right)) continue;
+            if (!theirIds.TryGetValue(id, out StableIdEntry? right))
+            {
+                continue;
+            }
+
             if (!StringComparer.Ordinal.Equals(left.Kind, right.Kind))
             {
                 failures.Add($"ID {id} has different kinds in the two parents");
                 continue;
             }
+
             if (baseIds.TryGetValue(id, out StableIdEntry? prior))
             {
                 bool leftRenamed = !StringComparer.Ordinal.Equals(left.Name, prior.Name);
                 bool rightRenamed = !StringComparer.Ordinal.Equals(right.Name, prior.Name);
                 if (leftRenamed && rightRenamed && !StringComparer.Ordinal.Equals(left.Name, right.Name))
+                {
                     failures.Add($"conflicting rename for {left.Kind} ID {id}: {left.Name} versus {right.Name}");
+                }
+
                 if ((left.Retired && !prior.Retired && rightRenamed) ||
                     (right.Retired && !prior.Retired && leftRenamed))
+                {
                     failures.Add($"rename conflicts with retirement for {left.Kind} ID {id}");
+                }
                 // 한쪽에서 타입을 은퇴하는 동안 다른 쪽이 그 타입의 필드를 만들거나 바꿨다면
                 // 새 필드까지 은퇴시켜 병합하는 것은 조용한 데이터 손실이다.
                 if (left.Kind == "type" && !prior.Retired &&
                     ((left.Retired && HasFieldChanges(id, theirFields, baseIds)) ||
                      (right.Retired && HasFieldChanges(id, ourFields, baseIds))))
+                {
                     failures.Add($"type retirement conflicts with field changes for type ID {id}");
+                }
+
                 if (mergedIds.TryGetValue(id, out StableIdEntry? result))
                 {
                     if (leftRenamed && !rightRenamed && !StringComparer.Ordinal.Equals(result.Name, left.Name))
+                    {
                         failures.Add($"merge discarded the ours rename for {left.Kind} ID {id}");
+                    }
+
                     if (rightRenamed && !leftRenamed && !StringComparer.Ordinal.Equals(result.Name, right.Name))
+                    {
                         failures.Add($"merge discarded the theirs rename for {left.Kind} ID {id}");
+                    }
                 }
             }
             else if (!StringComparer.Ordinal.Equals(left.Name, right.Name))
+            {
                 failures.Add($"independently added ID {id} has different names in the two parents");
-
+            }
         }
+
         foreach ((string id, StableIdEntry result) in mergedIds)
         {
             bool hadLeft = ourIds.TryGetValue(id, out StableIdEntry? left);
@@ -76,8 +102,11 @@ internal static class StableIdMergeValidator
             if ((hadLeft || hadRight) &&
                 (!hadLeft || !StringComparer.Ordinal.Equals(result.Name, left!.Name)) &&
                 (!hadRight || !StringComparer.Ordinal.Equals(result.Name, right!.Name)))
+            {
                 failures.Add($"merge introduced an unreviewed rename for {result.Kind} ID {id}: {result.Name}");
+            }
         }
+
         return failures.ToArray();
 
         void Preserve(StableIdManifest from, StableIdManifest to, Dictionary<string, StableIdEntry> before,
@@ -92,10 +121,17 @@ internal static class StableIdMergeValidator
                     failures.Add($"{edge}: ID {id} ({old.Kind} {old.Name}) disappeared or was replaced");
                     continue;
                 }
+
                 if (!StringComparer.Ordinal.Equals(old.Kind, next.Kind))
+                {
                     failures.Add($"{edge}: ID {id} changed kind from {old.Kind} to {next.Kind}");
+                }
+
                 if (old.Retired && !next.Retired)
+                {
                     failures.Add($"{edge}: retired ID {id} was reused");
+                }
+
                 if (old.Kind == "field" && next.Kind == "field")
                 {
                     string oldOwner = Owner(old.Name);
@@ -103,12 +139,19 @@ internal static class StableIdMergeValidator
                     if (!oldNames.TryGetValue(("type", oldOwner), out string? oldOwnerId) ||
                         !newNames.TryGetValue(("type", newOwner), out string? newOwnerId) ||
                         !StringComparer.Ordinal.Equals(oldOwnerId, newOwnerId))
+                    {
                         failures.Add($"{edge}: field ID {id} changed or lost its owning type");
+                    }
                 }
+
                 HashSet<string> nextNames = Names(next).ToHashSet(StringComparer.Ordinal);
                 foreach (string name in Names(old))
+                {
                     if (!nextNames.Contains(name))
+                    {
                         failures.Add($"{edge}: ID {id} lost reserved name {name}");
+                    }
+                }
             }
         }
     }
@@ -120,8 +163,13 @@ internal static class StableIdMergeValidator
     {
         var names = new Dictionary<(string Kind, string Name), string>();
         foreach (StableIdEntry entry in manifest.Entries)
+        {
             foreach (string name in Names(entry))
+            {
                 names.Add((entry.Kind, name), entry.Id);
+            }
+        }
+
         return names;
     }
 
@@ -134,25 +182,39 @@ internal static class StableIdMergeValidator
         foreach (StableIdEntry field in manifest.Entries.Where(entry => entry.Kind == "field"))
         {
             if (!names.TryGetValue(("type", Owner(field.Name)), out string? typeId))
+            {
                 throw new InvalidDataException($"field {field.Name} has no owner");
+            }
+
             if (!result.TryGetValue(typeId, out List<StableIdEntry>? fields))
+            {
                 result.Add(typeId, fields = []);
+            }
+
             fields.Add(field);
         }
+
         return result;
     }
 
     private static bool HasFieldChanges(string ownerId, Dictionary<string, List<StableIdEntry>> fields,
         Dictionary<string, StableIdEntry> ancestor)
     {
-        if (!fields.TryGetValue(ownerId, out List<StableIdEntry>? owned)) return false;
+        if (!fields.TryGetValue(ownerId, out List<StableIdEntry>? owned))
+        {
+            return false;
+        }
+
         foreach (StableIdEntry field in owned)
         {
             if (!ancestor.TryGetValue(field.Id, out StableIdEntry? prior) ||
                 prior.Kind != field.Kind || prior.Name != field.Name || prior.Retired != field.Retired ||
                 !prior.Aliases.ToHashSet(StringComparer.Ordinal).SetEquals(field.Aliases))
+            {
                 return true;
+            }
         }
+
         return false;
     }
 

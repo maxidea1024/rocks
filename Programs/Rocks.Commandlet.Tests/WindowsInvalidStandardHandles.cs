@@ -57,19 +57,29 @@ internal static class WindowsInvalidStandardHandles
         var commandLine = new StringBuilder($"\"{executable}\" {argument}");
         if (!CreateProcessW(executable, commandLine, IntPtr.Zero, IntPtr.Zero, true, 0x08000000,
                 IntPtr.Zero, workingDirectory, ref startup, out var child))
+        {
             throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateProcessW failed");
+        }
+
         try
         {
             uint wait = WaitForSingleObject(child.Process, 15000);
             if (wait == 258)
             {
                 if (!TerminateProcess(child.Process, 1))
+                {
                     throw new Win32Exception(Marshal.GetLastWin32Error(), "TerminateProcess failed");
+                }
+
                 _ = WaitForSingleObject(child.Process, 3000);
                 throw new TimeoutException("Commandlet process exceeded deadline");
             }
+
             if (wait != 0 || !GetExitCodeProcess(child.Process, out uint code))
+            {
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "Commandlet wait failed");
+            }
+
             return code;
         }
         finally

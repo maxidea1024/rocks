@@ -49,7 +49,11 @@ internal static class IdentityInventoryTests
             Verify.Throws<InvalidDataException>(() => IdentityInventory.Verify(manifestPath, [first, second]));
             Write(second, new { kind = "type", name = "demo::Actor", id = field.id, file = source, line = 1 });
             Verify.Throws<InvalidDataException>(() => IdentityInventory.Verify(manifestPath, [first, second]));
-            StableIdManifest.Update(manifestPath, false, manifest => { manifest.Retire("field", "demo::Actor::health"); return 0; });
+            StableIdManifest.Update(manifestPath, false, manifest =>
+            {
+                manifest.Retire("field", "demo::Actor::health");
+                return 0;
+            });
             Write(first, type);
             IdentityInventory.Verify(manifestPath, [first]);
         });

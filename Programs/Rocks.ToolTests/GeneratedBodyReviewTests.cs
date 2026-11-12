@@ -85,7 +85,11 @@ internal static class GeneratedBodyReviewTests
         {
             temporary.Write("Probe.h", source);
             string identity = temporary.FilePath("probe.rocksids.json");
-            if (!File.Exists(identity)) MetaProbeIdentity.Create(identity);
+            if (!File.Exists(identity))
+            {
+                MetaProbeIdentity.Create(identity);
+            }
+
             string generator = Path.GetFullPath(options.Required("metacompiler"));
             string executable = generator;
             List<string> arguments = [];
@@ -94,14 +98,21 @@ internal static class GeneratedBodyReviewTests
                 executable = options.Optional("dotnet") ?? "dotnet";
                 arguments.Add(generator);
             }
+
             arguments.AddRange(["--input", temporary.FilePath("Probe.h"), "--include", "Probe.h",
                 "--output", Output, "--compiler", options.Required("compiler"), "--identity-manifest", identity]);
             foreach (string directory in Directory.GetDirectories(Path.Combine(options.Root, "Core", "Source", "Runtime"))
                 .Select(module => Path.Combine(module, "Public")).Where(Directory.Exists).Order(StringComparer.Ordinal)
                 .Concat([options.Root, temporary.Root]))
+            {
                 arguments.AddRange(["--include-dir", directory]);
+            }
+
             foreach (string argument in options.ClangArguments)
+            {
                 arguments.Add("--clang-arg=" + argument);
+            }
+
             return await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment,
                 Timeout: TimeSpan.FromSeconds(60)));
         }

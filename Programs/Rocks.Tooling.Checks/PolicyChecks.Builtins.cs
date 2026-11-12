@@ -53,11 +53,14 @@ public static partial class PolicyChecks
                 ++line;
                 string checkedText = allowance is null ? text : allowance.Replace(text, " ");
                 if (CompilerBuiltin.IsMatch(checkedText))
+                {
                     failures.Add(new(relative, line, "compiler-builtin",
                         "compiler builtin outside its helper header (Platform/Memory.h, Platform/Atomics.h, " +
                         "Base/Checked.h, Base/Endian.h, Base/Compiler.h, PlatformMath)"));
+                }
             }
         }
+
         return failures;
     }
 }

@@ -14,7 +14,10 @@ public static class FormatCheck
             Timeout: TimeSpan.FromSeconds(15)), cancellationToken);
         if (version.ExitCode != 0 || !System.Text.RegularExpressions.Regex.IsMatch(version.StdOut,
             @"version\s+21\.1\.6(?:\s|$)", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)))
+        {
             throw new InvalidOperationException("Rocks requires clang-format " + RequiredVersion);
+        }
+
         IReadOnlyList<string> files = PolicyChecks.NativeSources(root);
         for (int offset = 0; offset < files.Count; offset += 40)
         {
@@ -23,7 +26,9 @@ public static class FormatCheck
             var result = await ProcessRunner.RunAsync(new(formatter, arguments, root, environment,
                 Timeout: TimeSpan.FromSeconds(60)), cancellationToken);
             if (result.ExitCode != 0)
+            {
                 throw new InvalidOperationException("clang-format failed:\n" + result.StdOut + result.StdErr);
+            }
         }
     }
 }

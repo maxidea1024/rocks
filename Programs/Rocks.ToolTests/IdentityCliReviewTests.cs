@@ -115,7 +115,11 @@ internal static class IdentityCliReviewTests
         string generator = Path.GetFullPath(options.Required("metacompiler"));
         string executable = generator.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ? options.Optional("dotnet") ?? "dotnet" : generator;
         List<string> command = [];
-        if (executable != generator) command.Add(generator);
+        if (executable != generator)
+        {
+            command.Add(generator);
+        }
+
         command.Add("ids");
         command.AddRange(arguments);
         return await ProcessRunner.RunAsync(new(executable, command, options.Root, environment, Timeout: TimeSpan.FromSeconds(30)));

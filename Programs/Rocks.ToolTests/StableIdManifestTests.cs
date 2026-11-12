@@ -22,7 +22,11 @@ internal static class StableIdManifestTests
             Verify.Equal(ids[1], read.Resolve("field", "sample::Character::health"), "field registration");
             Verify.That(beforeRead.SequenceEqual(File.ReadAllBytes(path)), "build lookup changed manifest");
 
-            StableIdManifest.Update(path, false, manifest => { manifest.Rename("type", "sample::Character", "sample::Player"); return 0; });
+            StableIdManifest.Update(path, false, manifest =>
+            {
+                manifest.Rename("type", "sample::Character", "sample::Player");
+                return 0;
+            });
             read = StableIdManifest.Load(path);
             Verify.Equal(ids[0], read.Resolve("type", "sample::Player"), "type rename lost ID");
             Verify.Equal(ids[1], read.Resolve("field", "sample::Player::health"), "type rename lost field ID");
@@ -30,11 +34,19 @@ internal static class StableIdManifestTests
             Verify.Throws<InvalidDataException>(() => read.Resolve("field", "sample::Character::health"));
             Verify.That(read.Entries.Single(e => e.Id == ids[1]).Aliases.Contains("sample::Character::health"), "field history missing");
 
-            StableIdManifest.Update(path, false, manifest => { manifest.Rename("field", "sample::Player::health", "sample::Player::hitpoints"); return 0; });
+            StableIdManifest.Update(path, false, manifest =>
+            {
+                manifest.Rename("field", "sample::Player::health", "sample::Player::hitpoints");
+                return 0;
+            });
             read = StableIdManifest.Load(path);
             Verify.Equal(ids[1], read.Resolve("field", "sample::Player::hitpoints"), "field rename lost ID");
             Verify.Throws<InvalidDataException>(() => StableIdManifest.Update(path, false, manifest => manifest.Register("field", "sample::Player::health")));
-            StableIdManifest.Update(path, false, manifest => { manifest.Retire("type", "sample::Player"); return 0; });
+            StableIdManifest.Update(path, false, manifest =>
+            {
+                manifest.Retire("type", "sample::Player");
+                return 0;
+            });
             read = StableIdManifest.Load(path);
             Verify.Throws<InvalidDataException>(() => read.Resolve("type", "sample::Player"));
             Verify.Throws<InvalidDataException>(() => read.Resolve("field", "sample::Player::hitpoints"));
@@ -55,10 +67,22 @@ internal static class StableIdManifestTests
             Verify.Equal(ids[1], StableIdManifest.Load(path).Resolve("field", "sample::GameObject::health"), "field registration");
             byte[] before = File.ReadAllBytes(path);
             Verify.Throws<InvalidDataException>(() => StableIdManifest.Update(path, false, m => m.Register("type", "sample::GameObject")));
-            Verify.Throws<InvalidDataException>(() => StableIdManifest.Update(path, false, m => { m.Rename("type", "unknown", "unknown"); return 0; }));
+            Verify.Throws<InvalidDataException>(() => StableIdManifest.Update(path, false, m =>
+            {
+                m.Rename("type", "unknown", "unknown");
+                return 0;
+            }));
             Verify.Throws<InvalidDataException>(() => StableIdManifest.Update(path, false, m => m.Register("field", "missing::field")));
-            Verify.Throws<InvalidDataException>(() => StableIdManifest.Update(path, false, m => { m.Rename("field", "sample::GameObject::health", "other::field"); return 0; }));
-            Verify.Throws<InvalidOperationException>(() => StableIdManifest.Update<int>(path, false, m => { m.Register("type", "sample::Temporary"); throw new InvalidOperationException("injected"); }));
+            Verify.Throws<InvalidDataException>(() => StableIdManifest.Update(path, false, m =>
+            {
+                m.Rename("field", "sample::GameObject::health", "other::field");
+                return 0;
+            }));
+            Verify.Throws<InvalidOperationException>(() => StableIdManifest.Update<int>(path, false, m =>
+            {
+                m.Register("type", "sample::Temporary");
+                throw new InvalidOperationException("injected");
+            }));
             Verify.That(before.SequenceEqual(File.ReadAllBytes(path)), "failed mutations modified manifest");
             Verify.That(!File.Exists(path + ".lock"), "failed mutation left lock");
         });
@@ -72,6 +96,7 @@ internal static class StableIdManifestTests
                 File.WriteAllText(path, content);
                 Verify.Throws<InvalidDataException>(() => StableIdManifest.Load(path));
             }
+
             Reject("<<<<<<< branch\n=======\n>>>>>>> branch\n");
             Reject("{\"schema\":1,\"schema\":1,\"entries\":[]}");
             Reject("{\"schema\":1,\"unknown\":1,\"entries\":[]}");
@@ -90,7 +115,10 @@ internal static class StableIdManifestTests
             StableIdManifest.Update(path, true, manifest => manifest.Register("type", "A"));
             byte[] before = File.ReadAllBytes(path);
             using (new FileStream(path + ".lock", FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
                 Verify.Throws<IOException>(() => StableIdManifest.Update(path, false, m => m.Register("type", "B")));
+            }
+
             File.Delete(path + ".lock");
             Verify.That(before.SequenceEqual(File.ReadAllBytes(path)), "lock conflict changed manifest");
             Verify.Throws<IOException>(() => StableIdManifest.Update(path, false, m =>
@@ -126,7 +154,11 @@ internal static class StableIdManifestTests
                 manifest.Retire("field", "old::Actor::obsolete");
                 return new[] { type, retired, live };
             });
-            StableIdManifest.Update(path, false, manifest => { manifest.Rename("type", "old::Actor", "newscope::Actor"); return 0; });
+            StableIdManifest.Update(path, false, manifest =>
+            {
+                manifest.Rename("type", "old::Actor", "newscope::Actor");
+                return 0;
+            });
             StableIdManifest current = StableIdManifest.Load(path);
             StableIdEntry retiredField = current.Entries.Single(entry => entry.Id == ids[1]);
             Verify.That(retiredField.Retired && retiredField.Name == "newscope::Actor::obsolete" &&
@@ -134,7 +166,11 @@ internal static class StableIdManifestTests
             Verify.Equal(ids[2], current.Resolve("field", "newscope::Actor::health"), "active field identity lost");
             Verify.Throws<InvalidDataException>(() => StableIdManifest.Update(path, false, m => m.Register("field", "newscope::Actor::obsolete")));
             Verify.Throws<InvalidDataException>(() => StableIdManifest.Update(path, false, m => m.Register("type", "old::Actor")));
-            StableIdManifest.Update(path, false, manifest => { manifest.Retire("type", "newscope::Actor"); return 0; });
+            StableIdManifest.Update(path, false, manifest =>
+            {
+                manifest.Retire("type", "newscope::Actor");
+                return 0;
+            });
             current = StableIdManifest.Load(path);
             Verify.That(current.Entries.Where(entry => entry.Id == ids[1] || entry.Id == ids[2]).All(entry => entry.Retired),
                 "type retirement did not preserve retired and active field histories");
@@ -151,9 +187,14 @@ internal static class StableIdManifestTests
             int index = 0;
             while (text.Length < maximumBytes - 65536)
             {
-                if (index != 0) text.Append(',');
+                if (index != 0)
+                {
+                    text.Append(',');
+                }
+
                 text.Append('"').Append('A').Append(index++).Append(new string('x', 1000)).Append('"');
             }
+
             text.Append("],\"retired\":false}]}");
             string before = text.ToString();
             Verify.That(before.Length < maximumBytes, "fixture must be readable before update");

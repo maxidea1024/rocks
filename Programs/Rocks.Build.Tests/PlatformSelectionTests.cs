@@ -43,6 +43,7 @@ internal static class PlatformSelectionTests
                 Check(error.Message.Contains("Toolchain.Platform", StringComparison.Ordinal),
                     "Unknown target diagnostic must identify Toolchain.Platform.");
             }
+
             Check(!Directory.Exists(output), "Invalid target must fail before creating its output.");
         }
 
@@ -64,11 +65,15 @@ internal static class PlatformSelectionTests
             Check(error.Message.Contains("Toolchain.Platform", StringComparison.Ordinal),
                 "Mismatched target diagnostic must identify Toolchain.Platform.");
         }
+
         Check(!Directory.Exists(mismatchOutput), "Mismatched target must fail before creating its output.");
     }
 
     private static void Check(bool condition, string message)
     {
-        if (!condition) throw new InvalidOperationException(message);
+        if (!condition)
+        {
+            throw new InvalidOperationException(message);
+        }
     }
 }

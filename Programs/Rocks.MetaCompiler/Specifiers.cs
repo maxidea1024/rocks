@@ -11,8 +11,11 @@ internal static class Specifiers
         foreach ((string key, string? value) in values)
         {
             if (key != "Abstract" || value is not null)
+            {
                 throw new MetadataException($"{symbol}: unsupported CLASS specifier {key}");
+            }
         }
+
         return values.ContainsKey("Abstract");
     }
 
@@ -24,8 +27,11 @@ internal static class Specifiers
             bool flag = key is "Transient" or "ReadOnly";
             bool label = key is "Category" or "DisplayName";
             if ((!flag && !label) || (flag && value is not null) || (label && value is null))
+            {
                 throw new MetadataException($"{symbol}: unsupported PROPERTY specifier/value {key}");
+            }
         }
+
         return new(values.ContainsKey("Transient"), values.ContainsKey("ReadOnly"),
             values.GetValueOrDefault("Category") ?? "", values.GetValueOrDefault("DisplayName") ?? "");
     }
@@ -34,14 +40,28 @@ internal static class Specifiers
     {
         Dictionary<string, string?> result = new(StringComparer.Ordinal);
         int cursor = 0;
-        void Space() { while (cursor < text.Length && char.IsWhiteSpace(text[cursor])) ++cursor; }
+        void Space()
+        {
+            while (cursor < text.Length && char.IsWhiteSpace(text[cursor]))
+            {
+                ++cursor;
+            }
+        }
+
         Space();
         while (cursor < text.Length)
         {
             int start = cursor;
-            while (cursor < text.Length && (char.IsAsciiLetterOrDigit(text[cursor]) || text[cursor] == '_')) ++cursor;
+            while (cursor < text.Length && (char.IsAsciiLetterOrDigit(text[cursor]) || text[cursor] == '_'))
+            {
+                ++cursor;
+            }
+
             if (start == cursor || !char.IsAsciiLetter(text[start]))
+            {
                 throw new MetadataException($"{symbol}: invalid specifier syntax");
+            }
+
             string name = text[start..cursor];
             Space();
             string? value = null;
@@ -50,7 +70,10 @@ internal static class Specifiers
                 ++cursor;
                 Space();
                 if (cursor == text.Length || text[cursor] != '"')
+                {
                     throw new MetadataException($"{symbol}: specifier values must be quoted strings");
+                }
+
                 start = cursor++;
                 bool closed = false;
                 while (cursor < text.Length)
@@ -58,24 +81,64 @@ internal static class Specifiers
                     char next = text[cursor++];
                     if (next == '\\')
                     {
-                        if (cursor == text.Length) break;
+                        if (cursor == text.Length)
+                        {
+                            break;
+                        }
+
                         ++cursor;
                     }
-                    else if (next == '"') { closed = true; break; }
+                    else if (next == '"')
+                    {
+                        closed = true;
+                        break;
+                    }
                 }
-                if (!closed) throw new MetadataException($"{symbol}: unterminated specifier value");
-                try { value = JsonSerializer.Deserialize<string>(text[start..cursor]); }
-                catch (JsonException) { throw new MetadataException($"{symbol}: specifier escape must use JSON string spelling"); }
+
+                if (!closed)
+                {
+                    throw new MetadataException($"{symbol}: unterminated specifier value");
+                }
+
+                try
+                {
+                    value = JsonSerializer.Deserialize<string>(text[start..cursor]);
+                }
+                catch (JsonException)
+                {
+                    throw new MetadataException($"{symbol}: specifier escape must use JSON string spelling");
+                }
+
                 if (value is null)
+                {
                     throw new MetadataException($"{symbol}: invalid specifier text");
+                }
+
                 Space();
             }
-            if (!result.TryAdd(name, value)) throw new MetadataException($"{symbol}: duplicate specifier {name}");
-            if (cursor == text.Length) break;
-            if (text[cursor++] != ',') throw new MetadataException($"{symbol}: expected comma between specifiers");
+
+            if (!result.TryAdd(name, value))
+            {
+                throw new MetadataException($"{symbol}: duplicate specifier {name}");
+            }
+
+            if (cursor == text.Length)
+            {
+                break;
+            }
+
+            if (text[cursor++] != ',')
+            {
+                throw new MetadataException($"{symbol}: expected comma between specifiers");
+            }
+
             Space();
-            if (cursor == text.Length) throw new MetadataException($"{symbol}: trailing specifier comma");
+            if (cursor == text.Length)
+            {
+                throw new MetadataException($"{symbol}: trailing specifier comma");
+            }
         }
+
         return result;
     }
 }

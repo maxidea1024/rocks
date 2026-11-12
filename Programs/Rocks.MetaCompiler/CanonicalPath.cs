@@ -7,7 +7,11 @@ internal static class CanonicalPath
 
     private static string Resolve(string path, int depth)
     {
-        if (depth > 40) throw new IOException("Too many symbolic links while resolving: " + path);
+        if (depth > 40)
+        {
+            throw new IOException("Too many symbolic links while resolving: " + path);
+        }
+
         string full = Path.GetFullPath(path);
         string root = Path.GetPathRoot(full) ?? throw new IOException("Path has no filesystem root: " + full);
         string current = root;
@@ -20,6 +24,7 @@ internal static class CanonicalPath
             FileSystemInfo? target = entry?.ResolveLinkTarget(returnFinalTarget: true);
             current = target is null ? candidate : Resolve(target.FullName, depth + 1);
         }
+
         return Path.GetFullPath(current);
     }
 

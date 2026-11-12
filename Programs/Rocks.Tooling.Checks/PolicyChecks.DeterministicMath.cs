@@ -56,7 +56,10 @@ public static partial class PolicyChecks
         {
             string relative = Relative(root, path);
             if (IsTestSource(relative))
+            {
                 continue;
+            }
+
             var (code, literals) = StripCommentsAndLiterals(File.ReadAllText(path, StrictUtf8));
             for (int index = 0; index < code.Length; ++index)
             {
@@ -67,13 +70,17 @@ public static partial class PolicyChecks
                     bool crt = CrtNumberFunctions.Contains(name);
                     bool printf = PrintfFunctions.Contains(name) && literals[index].Any(literal => FloatConversion.IsMatch(literal));
                     if ((!crt && !printf) || IsMemberOrQualified(line, match.Index))
+                    {
                         continue;
+                    }
+
                     failures.Add(new(relative, index + 1, "crt-number-conversion", crt
                         ? $"C runtime number conversion or locale function '{name}' (use Core NumberText/StringBuilder)"
                         : $"floating-point printf format with '{name}' (use Core StringBuilder formatting)"));
                 }
             }
         }
+
         return failures;
     }
 
@@ -82,18 +89,31 @@ public static partial class PolicyChecks
     {
         int index = start - 1;
         while (index >= 0 && char.IsWhiteSpace(line[index]))
+        {
             --index;
+        }
+
         if (index < 0)
+        {
             return false;
+        }
+
         if (line[index] == '.' || (line[index] == '>' && index > 0 && line[index - 1] == '-'))
+        {
             return true;
+        }
+
         if (line[index] == ':' && index > 0 && line[index - 1] == ':')
         {
             int before = index - 2;
             while (before >= 0 && char.IsWhiteSpace(line[before]))
+            {
                 --before;
+            }
+
             return before >= 0 && (char.IsLetterOrDigit(line[before]) || line[before] == '_' || line[before] == '>');
         }
+
         return false;
     }
 
@@ -125,7 +145,9 @@ public static partial class PolicyChecks
             else if (c == '/' && i + 1 < text.Length && text[i + 1] == '/')
             {
                 while (i < text.Length && text[i] != '\n')
+                {
                     ++i;
+                }
             }
             else if (c == '/' && i + 1 < text.Length && text[i + 1] == '*')
             {
@@ -133,9 +155,13 @@ public static partial class PolicyChecks
                 while (i < text.Length && !(text[i] == '*' && i + 1 < text.Length && text[i + 1] == '/'))
                 {
                     if (text[i] == '\n')
+                    {
                         EndLine();
+                    }
+
                     ++i;
                 }
+
                 i += 2;
                 code.Append(' ');
             }
@@ -147,7 +173,10 @@ public static partial class PolicyChecks
                 string close = ")" + delimiter + "\"";
                 int end = open < 0 ? -1 : text.IndexOf(close, open + 1, StringComparison.Ordinal);
                 if (end < 0)
+                {
                     end = text.Length - close.Length;
+                }
+
                 literal.Clear();
                 for (int k = open + 1; k < end; ++k)
                 {
@@ -158,8 +187,11 @@ public static partial class PolicyChecks
                         EndLine();
                     }
                     else
+                    {
                         literal.Append(text[k]);
+                    }
                 }
+
                 literals.Add(literal.ToString());
                 code.Append("\"\"");
                 i = end + close.Length;
@@ -177,13 +209,21 @@ public static partial class PolicyChecks
                         i += 2;
                         continue;
                     }
+
                     literal.Append(text[i]);
                     ++i;
                 }
+
                 if (i < text.Length && text[i] == quote)
+                {
                     ++i;
+                }
+
                 if (quote == '"')
+                {
                     literals.Add(literal.ToString());
+                }
+
                 code.Append(quote).Append(quote);
             }
             else
@@ -192,6 +232,7 @@ public static partial class PolicyChecks
                 ++i;
             }
         }
+
         EndLine();
         return (codeLines.ToArray(), literalLines.ToArray());
     }
@@ -212,7 +253,10 @@ public static partial class PolicyChecks
         {
             string directory = Path.Combine(moduleRoot, folder);
             if (!Directory.Exists(directory))
+            {
                 continue;
+            }
+
             bool isPublic = folder == "Public";
             foreach (string path in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
                          .Where(file => file.EndsWith(".h", StringComparison.Ordinal) || file.EndsWith(".cpp", StringComparison.Ordinal))
@@ -226,17 +270,26 @@ public static partial class PolicyChecks
                     Match include = DeterministicMathInclude.Match(text);
                     if (include.Success && (isPublic ? include.Groups[1].Value != "<Base/Types.h>"
                                                      : !DeterministicMathPrivateIncludes.Contains(include.Groups[1].Value)))
+                    {
                         failures.Add(new(relative, line, "deterministic-math-sources",
                             $"include {include.Groups[1].Value} is not allowed in deterministic math {folder} sources"));
+                    }
+
                     if (ExtendedPrecisionType.IsMatch(text))
+                    {
                         failures.Add(new(relative, line, "deterministic-math-sources",
                             "extended precision floating type is not deterministic across hosts"));
+                    }
+
                     if (isPublic && FunctionBody.IsMatch(text))
+                    {
                         failures.Add(new(relative, line, "deterministic-math-sources",
                             "deterministic math public headers must not define function bodies"));
+                    }
                 }
             }
         }
+
         return failures;
     }
 }

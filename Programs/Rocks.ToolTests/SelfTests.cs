@@ -30,10 +30,17 @@ internal static class SelfTests
                     string source = name + "()" + gap + "class Object {};";
                     byte[] bytes = Encoding.UTF8.GetBytes(source);
                     int end = Encoding.UTF8.GetByteCount(source[..source.IndexOf("class Object", StringComparison.Ordinal)]);
-                    if (allowed) PrefixSourceVerifier.Verify(bytes, 0, end);
-                    else Verify.Throws<MetadataException>(() => PrefixSourceVerifier.Verify(bytes, 0, end));
+                    if (allowed)
+                    {
+                        PrefixSourceVerifier.Verify(bytes, 0, end);
+                    }
+                    else
+                    {
+                        Verify.Throws<MetadataException>(() => PrefixSourceVerifier.Verify(bytes, 0, end));
+                    }
                 }
             }
+
             CheckGap("\n// ordinary \\ path #if\n", true);
             CheckGap("\n/* ordinary \\ path #include */\n", true);
             CheckGap("\n// line splice \\\n", false);
@@ -79,6 +86,7 @@ internal static class SelfTests
                 temporary.Write("Engine/Source/Runtime/Probe/Private/Probe.cpp", source + "\n");
                 Verify.Equal(1, PolicyChecks.OptimizationOverrides(temporary.Root).Count, "optimization override escaped audit: " + source);
             }
+
             temporary.Write("Engine/Source/Runtime/Probe/Private/Probe.cpp", "void F();\n");
             temporary.Write("Engine/Source/Runtime/Probe/Probe.Build.cs", "protected override CodeOptimization Optimization => CodeOptimization.Never;\n");
             Verify.Equal(1, PolicyChecks.OptimizationOverrides(temporary.Root).Count, "committed Never optimization rule escaped audit");
@@ -163,17 +171,23 @@ internal static class SelfTests
             // 외부 심볼: 코드 생성 지원 심볼(COFF·ELF·Mach-O 이름)은 허용, CRT 수학·다른 모듈 함수는 거부.
             foreach (string allowed in new[] { "_fltused", "__security_check_cookie", "__chkstk", "___chkstk_darwin",
                          "__stack_chk_fail", "___stack_chk_guard", "memcpy", "_memset", "_bzero", "___bzero" })
+            {
                 Verify.That(DeterministicMathObjectCheck.IsAllowedSymbol(allowed), "allowed symbol rejected: " + allowed);
+            }
+
             foreach (string rejected in new[] { "sin", "_sin", "pow", "_exp2", "floor", "fmod", "__exp_finite", "sqrtf", "fma",
                          "__powidf2", "__imp_sin", "sin@GLIBC_2.2.5", "?Pow@PlatformMath@platform@rocks@@SANNN@Z",
                          "__ZN5rocks8platform12PlatformMath3PowEdd", "fltused", "__memcpy", "___cxa_atexit", "__asan_init" })
+            {
                 Verify.That(!DeterministicMathObjectCheck.IsAllowedSymbol(rejected), "forbidden symbol accepted: " + rejected);
+            }
             // Asan 구성에서만: sanitizer 계측과 Darwin module dtor 등록.
             foreach (string sanitizer in new[] { "__asan_report_load8", "___asan_init", "___cxa_atexit", "___dso_handle", "__ubsan_handle_add_overflow" })
             {
                 Verify.That(DeterministicMathObjectCheck.IsAllowedSymbol(sanitizer, sanitizer: true), "sanitizer symbol rejected: " + sanitizer);
                 Verify.That(!DeterministicMathObjectCheck.IsAllowedSymbol(sanitizer), "sanitizer symbol accepted outside Asan: " + sanitizer);
             }
+
             Verify.That(!DeterministicMathObjectCheck.IsAllowedSymbol("_sin", sanitizer: true), "CRT symbol accepted under Asan");
             // 금지 명령: 융합 곱셈-덧셈(두 아키텍처), AArch64 근사, x86 근사·x87. 아키텍처는 "file format" 줄로 정한다.
             string arm = string.Join('\n', "probe.o:\tfile format mach-o arm64", "",
@@ -193,7 +207,9 @@ internal static class SelfTests
             Verify.That(DeterministicMathObjectCheck.IsBitcode([0x42, 0x43, 0xC0, 0xDE]), "raw bitcode not detected");
             Verify.That(DeterministicMathObjectCheck.IsBitcode([0xDE, 0xC0, 0x17, 0x0B]), "bitcode wrapper not detected");
             foreach (byte[] machine in new byte[][] { [0x64, 0x86, 0x05, 0x00], [0xCF, 0xFA, 0xED, 0xFE], [0x7F, 0x45, 0x4C, 0x46], [0x42, 0x43] })
+            {
                 Verify.That(!DeterministicMathObjectCheck.IsBitcode(machine), "machine object treated as bitcode");
+            }
         });
         suite.Add("Policy.RepositoryNumberTables", () =>
         {
@@ -218,6 +234,7 @@ internal static class SelfTests
                 Directory.CreateDirectory(Path.GetDirectoryName(temporary.FilePath(relative))!);
                 File.Copy(file, temporary.FilePath(relative));
             }
+
             Verify.That(UnicodeTables.Check(temporary.Root).Count == 1, "missing generated tables escaped audit");
             Verify.That(UnicodeTables.Run(temporary.Root, write: true), "generator must write missing tables");
             NoFailures(UnicodeTables.Check(temporary.Root));
@@ -245,6 +262,7 @@ internal static class SelfTests
                 temporary.Write(memory, source + "\n");
                 Verify.Equal(1, PolicyChecks.CompilerBuiltins(temporary.Root).Count, "helper allowance too wide: " + source);
             }
+
             temporary.Write(memory, "#pragma once\n");
 
             // 그 밖의 소스는 테스트까지 모두 위반이다.
@@ -318,6 +336,7 @@ internal static class SelfTests
                 temporary.Write("Core/Source/Runtime/Core/Tests/Probe.cpp", source);
                 Verify.That(PolicyChecks.PlatformBoundary(temporary.Root).Count != 0, "public platform regression accepted");
             }
+
             temporary.Write("Core/Source/Runtime/Core/Tests/Probe.cpp", "#pragma once\n");
             temporary.Write("Core/Source/Runtime/PlatformBase/Private/Win64/Probe.cpp", "#include <Windows.h>\n");
             temporary.Write("Core/Source/Developer/TestSupport/Private/Mac/Probe.mm", "#include <pthread.h>\n");
@@ -329,14 +348,19 @@ internal static class SelfTests
         {
             foreach (string valid in new[] { "clang-cl /W4 /WX /c probe.cpp", "clang++ -Wall -Wextra -Wpedantic -Werror -c probe.cpp",
                 "\"C:\\compiler tools\\clang-cl.exe\" \"/W4\" \"/WX\" /c probe.cpp" })
+            {
                 NoFailures(PolicyChecks.CompilerCommand(valid));
+            }
+
             foreach (string invalid in new[] { "clang-cl /W4 /c probe.cpp", "clang++ -Wall -c probe.cpp",
                 "clang-cl /W4 /WX /WX-", "clang-cl /W4 /WX /wd4101", "clang-cl /W4 /WX /W0",
                 "clang++ -Wall -Wextra -Wpedantic -Werror -Wno-error=unused-variable", "clang++ -Wall -Wextra -Wpedantic -Werror -w",
                 "clang-cl /W4 /WX /D_CRT_SECURE_NO_WARNINGS", "clang++ -Wall -Werror", "clang++ -Wall -Wextra -Werror",
                 "clang++ -Wall -Wpedantic -Werror", "clang-cl /W4 /WX /clang:-Wno-error=unused-variable", "clang-cl /W4 /WX @hidden.rsp",
                 "clang-cl \"/W4 /WX" })
+            {
                 Verify.That(PolicyChecks.CompilerCommand(invalid).Count != 0, "invalid warning profile accepted: " + invalid);
+            }
         });
         suite.Add("Policy.SourceSuppressionControls", () =>
         {
@@ -379,7 +403,8 @@ internal static class SelfTests
             string plan = temporary.FilePath("plan.json");
             var created = ScaffoldService.PlanModule(options.Root, "Example", temporary.Root, plan);
             byte[] original = File.ReadAllBytes(plan);
-            ScaffoldService.Apply(plan); ScaffoldService.ValidateOutput(plan);
+            ScaffoldService.Apply(plan);
+            ScaffoldService.ValidateOutput(plan);
             Verify.That(File.ReadAllBytes(plan).AsSpan().SequenceEqual(original), "apply/validate changed the reviewed plan");
             Verify.That(File.Exists(Path.Combine(created.Target, "Example.cpp")), "module source missing");
             Verify.Throws<IOException>(() => ScaffoldService.Apply(plan));
@@ -395,6 +420,7 @@ internal static class SelfTests
                 var modified = original with { Files = new(StringComparer.Ordinal) { [relative] = "escape" }, Hashes = new(StringComparer.Ordinal) { [relative] = Hash("escape") } };
                 Verify.Throws<InvalidDataException>(() => ScaffoldService.ValidatePlan(modified));
             }
+
             var changed = original with { Files = new(original.Files, StringComparer.Ordinal) };
             changed.Files[changed.Files.Keys.First()] += "tamper";
             Verify.Throws<InvalidDataException>(() => ScaffoldService.ValidatePlan(changed));
@@ -484,14 +510,24 @@ internal static class SelfTests
                 {
                     Directory.CreateDirectory(evidence.OutputDirectory);
                     File.WriteAllText(reportPath, mode == "malformed" ? "{" :
-                        JsonSerializer.Serialize(new { failures = mode == "failed" ? 1 : 0,
-                            tests = new[] { new { name = "case", status = mode is "failed" or "inconsistent" ? "FAIL" : "PASS" } } }));
-                    if (mode == "stale") File.SetLastWriteTimeUtc(reportPath, DateTime.UnixEpoch.AddYears(30));
+                        JsonSerializer.Serialize(new
+                        {
+                            failures = mode == "failed" ? 1 : 0,
+                            tests = new[] { new { name = "case", status = mode is "failed" or "inconsistent" ? "FAIL" : "PASS" } }
+                        }));
+                    if (mode == "stale")
+                    {
+                        File.SetLastWriteTimeUtc(reportPath, DateTime.UnixEpoch.AddYears(30));
+                    }
                 }
+
                 evidence.RecordStep("tests", ["native"], 0, TimeSpan.Zero, tests: true);
                 var report = await evidence.FinishAsync();
                 Verify.Equal("FAIL", report.Status, mode + " evidence status");
-                if (mode is "missing" or "stale" or "malformed") Verify.That(!report.RunnerReportCurrent, "invalid report current");
+                if (mode is "missing" or "stale" or "malformed")
+                {
+                    Verify.That(!report.RunnerReportCurrent, "invalid report current");
+                }
             }
         });
         suite.Add("Evidence.SnapshotFailureDoesNotKeepOldPass", async () =>
@@ -502,7 +538,10 @@ internal static class SelfTests
             Directory.CreateDirectory(Path.GetDirectoryName(evidencePath)!);
             File.WriteAllText(evidencePath, "{\"status\":\"PASS\"}");
             using (var locked = new FileStream(temporary.FilePath("Engine/source.h"), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
                 await Verify.ThrowsAsync<IOException>(async () => { await BuildEvidence.StartAsync(temporary.Root, "current"); });
+            }
+
             using var evidence = JsonDocument.Parse(File.ReadAllText(evidencePath));
             Verify.Equal("RUNNING", evidence.RootElement.GetProperty("status").GetString(), "snapshot failure left old PASS");
         });
@@ -515,7 +554,10 @@ internal static class SelfTests
             File.WriteAllText(evidencePath, "{\"status\":\"PASS\"}");
             var evidence = await BuildEvidence.StartAsync(temporary.Root, "current");
             using (var running = JsonDocument.Parse(File.ReadAllText(evidencePath)))
+            {
                 Verify.Equal("RUNNING", running.RootElement.GetProperty("status").GetString(), "previous PASS retained on start");
+            }
+
             evidence.SetConfiguration("Debug", "FoundationTests", null, "test-compiler", "fixture-version");
             Directory.CreateDirectory(evidence.OutputDirectory);
             string reportPath = Path.Combine(evidence.OutputDirectory, "foundation-report.json");
@@ -527,7 +569,10 @@ internal static class SelfTests
             var report = await evidence.FinishAsync();
             Verify.That(report.Status == "PASS" && report.RunnerReportCurrent && report.RunnerReportSha256?.Length == 64, "valid current report did not pass");
             using (var completed = JsonDocument.Parse(File.ReadAllText(evidencePath)))
+            {
                 Verify.Equal("PASS", completed.RootElement.GetProperty("status").GetString(), "final evidence was not published");
+            }
+
             Verify.Throws<InvalidOperationException>(() => evidence.RecordStep("late", [], 0, TimeSpan.Zero));
             Verify.Throws<InvalidOperationException>(() => evidence.BeginTests());
             await Verify.ThrowsAsync<InvalidOperationException>(async () => { await evidence.FinishAsync(); });

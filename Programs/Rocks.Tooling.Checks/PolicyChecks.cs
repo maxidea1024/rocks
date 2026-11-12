@@ -61,7 +61,10 @@ public static partial class PolicyChecks
         {
             string relative = Relative(root, path);
             if (IsTestSource(relative))
+            {
                 continue;
+            }
+
             RuntimeStdAllowances.TryGetValue(relative, out Regex? allowance);
             int line = 0;
             foreach (string text in File.ReadLines(path, StrictUtf8))
@@ -69,9 +72,12 @@ public static partial class PolicyChecks
                 ++line;
                 string checkedText = allowance is null ? text : allowance.Replace(text, " ");
                 if (BannedRuntime.IsMatch(checkedText))
+                {
                     failures.Add(new(relative, line, "runtime-stl", "forbidden runtime STL use"));
+                }
             }
         }
+
         return failures;
     }
 
@@ -106,18 +112,27 @@ public static partial class PolicyChecks
         {
             string relative = Relative(root, path);
             if (relative == OptimizationMacroHeader)
+            {
                 continue;
+            }
+
             ScanFile(path, relative, ForcedInline, "forced-inline",
                 "forced inlining is not used; let Clang optimization and ThinLTO decide", failures);
             if (IsTestSource(relative))
+            {
                 continue;
+            }
+
             ScanFile(path, relative, OptimizationOverride, "optimization-override",
                 "temporary optimization override left in product source", failures);
         }
 
         foreach (string path in Files(root, OwnedSourceRoots).Where(path => path.EndsWith(".Build.cs", StringComparison.Ordinal)))
+        {
             ScanFile(path, Relative(root, path), NeverOptimizedRule, "optimization-override",
                 "module rule disables optimization (CodeOptimization.Never is for local debugging only)", failures);
+        }
+
         return failures;
     }
 
@@ -128,10 +143,14 @@ public static partial class PolicyChecks
         {
             string relative = Relative(root, path);
             if (IsNativeBackend(relative))
+            {
                 continue;
+            }
+
             ScanFile(path, relative, BannedPlatform, "platform-boundary",
                 "OS dependency outside native backend", failures);
         }
+
         return failures;
     }
 
@@ -149,12 +168,21 @@ public static partial class PolicyChecks
     {
         string[] parts = relative.Replace('\\', '/').Split('/');
         if (parts.Length >= 5 && parts[0] == "Programs" && parts[1] == "Commandlet" && parts[2] == "Private")
+        {
             return parts[3] == "Win64";
+        }
+
         if (parts.Length >= 7 && parts[0] == "Engine" && parts[1] == "Source" &&
             parts[2] is "Runtime" or "Developer" && parts[4] == "Private")
+        {
             return parts[5] is "Win64" or "Mac" or "Posix" or "Apple" or "Android";
+        }
+
         if (parts.Length < 7 || parts[0] != "Core" || parts[1] != "Source" || parts[4] != "Private")
+        {
             return false;
+        }
+
         bool platform = parts[5] is "Win64" or "Mac" or "Posix" or "Apple" or "Android";
         return (parts[2] == "Runtime" && parts[3] == "PlatformBase" && platform) ||
                (parts[2] == "Developer" && parts[3] == "TestSupport" && platform);
@@ -167,28 +195,51 @@ public static partial class PolicyChecks
         List<CheckFailure> failures = [];
         bool windows = arguments.Contains("/WX", StringComparer.Ordinal);
         if (!windows && !arguments.Contains("-Werror", StringComparer.Ordinal))
+        {
             Fail("missing warnings-as-errors");
+        }
+
         foreach (string flag in windows ? new[] { "/W4" } : ["-Wall", "-Wextra", "-Wpedantic"])
+        {
             if (!arguments.Contains(flag, StringComparer.Ordinal))
+            {
                 Fail("missing required warning flag: " + flag);
+            }
+        }
+
         foreach (string argument in arguments)
         {
             if (SuppressedFlag.IsMatch(argument))
+            {
                 Fail("warning suppression or reduced warning level: " + argument);
+            }
+
             if (argument.Contains("_CRT_SECURE_NO_WARNINGS", StringComparison.Ordinal) ||
                 argument.Contains("_SCL_SECURE_NO_WARNINGS", StringComparison.Ordinal))
+            {
                 Fail("global deprecation suppression: " + argument);
+            }
+
             if (argument.StartsWith('@'))
+            {
                 Fail("unexpanded response file; audit the expanded compiler arguments");
+            }
         }
+
         return failures;
         void Fail(string message) => failures.Add(new(source, 0, "warning-command", message));
     }
 
     public static IReadOnlyList<CheckFailure> CompilerCommand(string command, string source = "<command>")
     {
-        try { return CompilerArguments(SplitCommand(command), source); }
-        catch (FormatException error) { return [new(source, 0, "warning-command", error.Message)]; }
+        try
+        {
+            return CompilerArguments(SplitCommand(command), source);
+        }
+        catch (FormatException error)
+        {
+            return [new(source, 0, "warning-command", error.Message)];
+        }
     }
 
     public static IReadOnlyList<CheckFailure> CompilationDatabase(string path)
@@ -196,7 +247,10 @@ public static partial class PolicyChecks
         using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path, StrictUtf8));
         List<CheckFailure> failures = [];
         if (document.RootElement.ValueKind != JsonValueKind.Array || document.RootElement.GetArrayLength() == 0)
+        {
             return [new(path, 0, "warning-database", "empty or invalid compilation database")];
+        }
+
         foreach (JsonElement entry in document.RootElement.EnumerateArray())
         {
             string file = entry.TryGetProperty("file", out var name) ? name.GetString() ?? path : path;
@@ -211,12 +265,18 @@ public static partial class PolicyChecks
             else if (entry.TryGetProperty("command", out JsonElement command))
             {
                 failures.AddRange(CompilerCommand(command.GetString() ?? "", file));
-                try { failures.AddRange(LanguageArguments(SplitCommand(command.GetString() ?? ""), file, directory)); }
+                try
+                {
+                    failures.AddRange(LanguageArguments(SplitCommand(command.GetString() ?? ""), file, directory));
+                }
                 catch (FormatException) { } // CompilerCommand가 이미 형식 오류를 보고했다.
             }
             else
+            {
                 failures.Add(new(file, 0, "warning-database", "missing compiler command/arguments"));
+            }
         }
+
         return failures;
     }
 
@@ -229,21 +289,33 @@ public static partial class PolicyChecks
             string relative = Relative(root, path);
             if (relative.StartsWith("Programs/Rocks.ToolTests/", StringComparison.Ordinal) ||
                 relative.StartsWith("Programs/Rocks.Tooling.Checks/", StringComparison.Ordinal))
+            {
                 continue;
+            }
+
             string extension = Path.GetExtension(path).ToLowerInvariant();
             if (extension is not (".cs" or ".csproj" or ".props" or ".targets" or ".proj" or ".ps1" or ".cmd" or ".sh" or ".yml" or ".yaml"))
+            {
                 continue;
+            }
+
             int line = 0;
             foreach (string text in File.ReadLines(path, StrictUtf8))
             {
                 ++line;
                 string trimmed = text.TrimStart();
                 if (trimmed.StartsWith("//", StringComparison.Ordinal) || trimmed.StartsWith('#'))
+                {
                     continue;
+                }
+
                 if (PythonInvocation.IsMatch(text))
+                {
                     failures.Add(new(relative, line, "python-main-path", "Python dependency in an active tool entry point"));
+                }
             }
         }
+
         return failures;
     }
 
@@ -269,7 +341,10 @@ public static partial class PolicyChecks
     {
         string thirdParty = Path.Combine(Path.GetFullPath(root), ThirdPartyManifest.ThirdPartyRoot);
         if (!Directory.Exists(thirdParty))
+        {
             return [];
+        }
+
         List<string> directories = [];
         foreach (string library in Directory.EnumerateDirectories(thirdParty).Order(StringComparer.Ordinal))
         {
@@ -282,6 +357,7 @@ public static partial class PolicyChecks
             {
             }
         }
+
         return directories;
     }
 
@@ -289,9 +365,16 @@ public static partial class PolicyChecks
     {
         root = Path.GetFullPath(root);
         if (!Directory.Exists(root))
+        {
             throw new DirectoryNotFoundException(root);
-        EnumerationOptions options = new() { RecurseSubdirectories = true,
-            AttributesToSkip = FileAttributes.ReparsePoint, IgnoreInaccessible = false };
+        }
+
+        EnumerationOptions options = new()
+        {
+            RecurseSubdirectories = true,
+            AttributesToSkip = FileAttributes.ReparsePoint,
+            IgnoreInaccessible = false
+        };
         return folders.Select(folder => Path.Combine(root, folder)).Where(Directory.Exists)
             .SelectMany(folder => Directory.EnumerateFiles(folder, "*", options))
             .Where(path => !Relative(root, path).Split('/').Any(part => part is "bin" or "obj" or "__pycache__"))
@@ -303,7 +386,10 @@ public static partial class PolicyChecks
     {
         List<CheckFailure> failures = [];
         foreach (string path in NativeSources(root, folders))
+        {
             ScanFile(path, Relative(root, path), pattern, rule, message, failures);
+        }
+
         return failures;
     }
 
@@ -312,10 +398,16 @@ public static partial class PolicyChecks
     {
         int line = 0;
         foreach (string text in File.ReadLines(path, StrictUtf8))
+        {
             if (pattern.IsMatch(text))
+            {
                 failures.Add(new(relative, ++line, rule, message));
+            }
             else
+            {
                 ++line;
+            }
+        }
     }
 
     private static string Relative(string root, string path) => Path.GetRelativePath(root, path).Replace('\\', '/');
@@ -330,17 +422,43 @@ public static partial class PolicyChecks
         {
             if (quote != '\0')
             {
-                if (character == quote) quote = '\0'; else token.Append(character);
+                if (character == quote)
+                {
+                    quote = '\0';
+                }
+                else
+                {
+                    token.Append(character);
+                }
             }
-            else if (character is '\'' or '"') quote = character;
+            else if (character is '\'' or '"')
+            {
+                quote = character;
+            }
             else if (char.IsWhiteSpace(character))
             {
-                if (token.Length > 0) { result.Add(token.ToString()); token.Clear(); }
+                if (token.Length > 0)
+                {
+                    result.Add(token.ToString());
+                    token.Clear();
+                }
             }
-            else token.Append(character);
+            else
+            {
+                token.Append(character);
+            }
         }
-        if (quote != '\0') throw new FormatException("unterminated compiler command quote");
-        if (token.Length > 0) result.Add(token.ToString());
+
+        if (quote != '\0')
+        {
+            throw new FormatException("unterminated compiler command quote");
+        }
+
+        if (token.Length > 0)
+        {
+            result.Add(token.ToString());
+        }
+
         return result;
     }
 }

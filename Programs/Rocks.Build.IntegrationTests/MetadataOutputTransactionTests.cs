@@ -56,6 +56,7 @@ internal static class MetadataOutputTransactionTests
                 File.WriteAllText(path, "partial replacement");
                 throw new IOException("injected after replace");
             }
+
             MetadataOutputFiles.Instance.WriteAtomic(path, bytes);
         };
         Expect<IOException>(() => fixture.Publish(files));
@@ -74,7 +75,10 @@ internal static class MetadataOutputTransactionTests
         files.Write = (path, bytes) =>
         {
             MetadataOutputFiles.Instance.WriteAtomic(path, bytes);
-            if (++calls == 1) cancellation.Cancel();
+            if (++calls == 1)
+            {
+                cancellation.Cancel();
+            }
         };
         Expect<OperationCanceledException>(() => fixture.Publish(files, cancellation.Token));
         Require(File.ReadAllText(fixture.A) == "old-a" && File.ReadAllText(fixture.B) == "old-b", "cancel did not restore originals");
@@ -83,7 +87,10 @@ internal static class MetadataOutputTransactionTests
         files.Write = (path, bytes) =>
         {
             MetadataOutputFiles.Instance.WriteAtomic(path, bytes);
-            if (++calls == 2) File.WriteAllText(fixture.Manifest, "changed-manifest");
+            if (++calls == 2)
+            {
+                File.WriteAllText(fixture.Manifest, "changed-manifest");
+            }
         };
         Expect<IOException>(() => fixture.Publish(files));
         Require(File.ReadAllText(fixture.A) == "old-a" && File.ReadAllText(fixture.B) == "old-b", "manifest change did not roll back");
@@ -104,7 +111,12 @@ internal static class MetadataOutputTransactionTests
                 File.WriteAllText(path, "partial replacement");
                 throw new IOException("original write failed");
             }
-            if (calls == 3) throw new IOException("rollback write failed");
+
+            if (calls == 3)
+            {
+                throw new IOException("rollback write failed");
+            }
+
             MetadataOutputFiles.Instance.WriteAtomic(path, bytes);
         };
         MetadataRollbackException failure = Expect<MetadataRollbackException>(() => fixture.Publish(files));
@@ -170,11 +182,24 @@ internal static class MetadataOutputTransactionTests
 
     private static T Expect<T>(Action action) where T : Exception
     {
-        try { action(); }
-        catch (T error) { return error; }
+        try
+        {
+            action();
+        }
+        catch (T error)
+        {
+            return error;
+        }
+
         throw new InvalidOperationException("Expected " + typeof(T).Name);
     }
-    private static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
+    private static void Require(bool condition, string message)
+    {
+        if (!condition)
+        {
+            throw new InvalidOperationException(message);
+        }
+    }
 
     private sealed class InjectFiles : IMetadataOutputFiles
     {

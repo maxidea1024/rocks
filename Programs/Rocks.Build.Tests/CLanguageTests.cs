@@ -90,6 +90,7 @@ internal static class CLanguageTests
             {
             }
         }
+
         Check(ActionGraph.CompileFlags(toolchain, NativeConfiguration.Debug, CodeOptimization.Default, NativeLanguage.Cpp)
             .SequenceEqual(cppGolden), "explicit C++ language must equal the default");
 
@@ -131,13 +132,16 @@ internal static class CLanguageTests
         };
         NativeAction compile = ActionGraph.Create(cRequest).Actions.Single(action => action.Kind == "Compile" && action.Module == "CLib");
         if (windows)
+        {
             Check(compile.Arguments.Contains("/TC") && !compile.Arguments.Contains("/TP"), "C compile must use /TC");
+        }
         else
         {
             int index = compile.Arguments.ToList().IndexOf(unity);
             Check(index >= 2 && compile.Arguments[index - 2] == "-x" && compile.Arguments[index - 1] == "c",
                 "POSIX C compile must place -x c before the source (clang++ driver)");
         }
+
         NativeAction cppCompile = ActionGraph.Create(cRequest).Actions.Single(action => action.Kind == "Compile" && action.Module == "CApp");
         Check(!cppCompile.Arguments.Contains("/TC") && !cppCompile.Arguments.Contains("-x"), "C++ compile must not switch language");
 
@@ -146,8 +150,11 @@ internal static class CLanguageTests
         {
             var result = await builder.BuildAsync(cRequest);
             if (!result.Succeeded)
+            {
                 throw new InvalidOperationException("C fixture build failed: " + result.Failure + "\n" +
                     string.Join("\n", result.Actions.Select(action => action.StdOut + action.StdErr)));
+            }
+
             return result;
         }
 
@@ -157,6 +164,7 @@ internal static class CLanguageTests
             var run = await ProcessRunner.RunAsync(new(cold.ModuleOutputs["CApp"], [], root, toolchain.Environment));
             Check(run.ExitCode == 0, "C fixture executable returned " + run.ExitCode);
         }
+
         Check((await Build()).ExecutedActions == 0, "unchanged C fixture rebuilt");
 
         // 4. include된 .c가 바뀌면 그 번역 단위를 다시 컴파일한다.
@@ -168,11 +176,15 @@ internal static class CLanguageTests
         // 5. Release: C 번역 단위도 ThinLTO bitcode로 만들어 C++ 실행 파일과 링크한다.
         var release = await builder.BuildAsync(cRequest with
         {
-            Configuration = NativeConfiguration.Release, OutputDirectory = Path.Combine(fixture, "out-release")
+            Configuration = NativeConfiguration.Release,
+            OutputDirectory = Path.Combine(fixture, "out-release")
         });
         if (!release.Succeeded)
+        {
             throw new InvalidOperationException("C fixture Release build failed: " + release.Failure + "\n" +
                 string.Join("\n", release.Actions.Select(action => action.StdOut + action.StdErr)));
+        }
+
         if (toolchain.Platform != NativePlatform.Android)
         {
             var run = await ProcessRunner.RunAsync(new(release.ModuleOutputs["CApp"], [], root, toolchain.Environment));
@@ -182,6 +194,9 @@ internal static class CLanguageTests
 
     private static void Check(bool condition, string message)
     {
-        if (!condition) throw new InvalidOperationException(message);
+        if (!condition)
+        {
+            throw new InvalidOperationException(message);
+        }
     }
 }

@@ -16,18 +16,33 @@ internal sealed class IncrementalStore
     {
         path = Path.Combine(output, "native-cache.json");
         Dictionary<string, CachedAction>? loaded = null;
-        try { if (File.Exists(path)) loaded = JsonSerializer.Deserialize<Dictionary<string, CachedAction>>(File.ReadAllText(path)); }
+        try
+        {
+            if (File.Exists(path))
+            {
+                loaded = JsonSerializer.Deserialize<Dictionary<string, CachedAction>>(File.ReadAllText(path));
+            }
+        }
         catch (JsonException) { /* 손상된 index는 miss이며, 검증하지 않은 출력은 재사용하지 않는다. */ }
+
         actions = new(loaded ?? new Dictionary<string, CachedAction>(), StringComparer.Ordinal);
     }
 
     public bool IsCurrent(NativeAction action, string key)
     {
         if (!actions.TryGetValue(action.Id, out var cached) || cached.Key != key || cached.Outputs.Count != action.Outputs.Count)
+        {
             return false;
+        }
+
         foreach (string output in action.Outputs)
+        {
             if (!cached.Outputs.TryGetValue(output, out string? digest) || !File.Exists(output) || Fingerprints.FileHash(output) != digest)
+            {
                 return false;
+            }
+        }
+
         return true;
     }
 
@@ -46,10 +61,24 @@ internal static class AtomicFiles
     public static void Write(string path, string content)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        if (File.Exists(path) && File.ReadAllText(path) == content) return;
+        if (File.Exists(path) && File.ReadAllText(path) == content)
+        {
+            return;
+        }
+
         string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try { File.WriteAllText(temporary, content, new UTF8Encoding(false)); File.Move(temporary, path, true); }
-        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        try
+        {
+            File.WriteAllText(temporary, content, new UTF8Encoding(false));
+            File.Move(temporary, path, true);
+        }
+        finally
+        {
+            if (File.Exists(temporary))
+            {
+                File.Delete(temporary);
+            }
+        }
     }
 }
 
@@ -70,6 +99,7 @@ internal static class Fingerprints
             digest.AppendData(BitConverter.GetBytes(bytes.Length));
             digest.AppendData(bytes);
         }
+
         return Convert.ToHexStringLower(digest.GetHashAndReset());
     }
 
@@ -93,11 +123,26 @@ internal static class Fingerprints
             if (!visited.Add(identity) ||
                 (exclude != null && !IsUnder(root, exclude) && IsUnder(directory, exclude)) ||
                 (headersOnly && buildRoot != null && !IsUnder(root, Path.Combine(buildRoot, "out")) &&
-                    IsUnder(directory, Path.Combine(buildRoot, "out")))) continue;
+                    IsUnder(directory, Path.Combine(buildRoot, "out"))))
+            {
+                continue;
+            }
+
             foreach (string file in Directory.EnumerateFiles(directory).Order(StringComparer.Ordinal))
-                if (!headersOnly || HeaderExtensions.Contains(Path.GetExtension(file))) yield return Path.GetFullPath(file);
+            {
+                if (!headersOnly || HeaderExtensions.Contains(Path.GetExtension(file)))
+                {
+                    yield return Path.GetFullPath(file);
+                }
+            }
+
             foreach (string child in Directory.EnumerateDirectories(directory).OrderDescending(StringComparer.Ordinal))
-                if (Path.GetFileName(child) != ".git" && (!headersOnly || Path.GetFileName(child) != ".native-tmp")) pending.Push(child);
+            {
+                if (Path.GetFileName(child) != ".git" && (!headersOnly || Path.GetFileName(child) != ".native-tmp"))
+                {
+                    pending.Push(child);
+                }
+            }
         }
     }
 
@@ -115,19 +160,40 @@ internal static class Fingerprints
         foreach (string path in paths.Distinct(NativeToolchains.PathComparer))
         {
             tokens.Add(path);
-            if (File.Exists(path)) files.Add(path);
+            if (File.Exists(path))
+            {
+                files.Add(path);
+            }
             else if (Directory.Exists(path))
-                foreach (string file in TreeFiles(path, headersOnly, exclude, buildRoot)) files.Add(file);
-            else throw new FileNotFoundException("Declared build input does not exist.", path);
+            {
+                foreach (string file in TreeFiles(path, headersOnly, exclude, buildRoot))
+                {
+                    files.Add(file);
+                }
+            }
+            else
+            {
+                throw new FileNotFoundException("Declared build input does not exist.", path);
+            }
         }
-        foreach (string file in files) { tokens.Add(file); tokens.Add(FileHash(file)); }
+
+        foreach (string file in files)
+        {
+            tokens.Add(file);
+            tokens.Add(FileHash(file));
+        }
+
         return Strings(tokens);
     }
 
     public static string Toolchain(NativeToolchain toolchain)
     {
         var files = new List<string> { toolchain.CompilerPath, toolchain.ArchiverPath };
-        if (toolchain.LinkerPath != null) files.Add(toolchain.LinkerPath);
+        if (toolchain.LinkerPath != null)
+        {
+            files.Add(toolchain.LinkerPath);
+        }
+
         files.AddRange(toolchain.FingerprintPaths);
         files.AddRange(toolchain.RuntimeFiles);
         return Strings(new[] { "rocks-native-v1", toolchain.Identity, toolchain.Platform.ToString(), Paths(files) }

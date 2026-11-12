@@ -52,7 +52,9 @@ public static class ThirdPartyDirectiveProbe
                 ThirdPartyManifest manifest = ThirdPartyManifest.Read(source);
                 int stripped = CopyWithoutDiagnosticDirectives(source, copy, manifest.UpstreamDirectory);
                 if (stripped == 0)
+                {
                     continue;
+                }
 
                 List<string> failures = [];
                 using var gate = new SemaphoreSlim(Math.Max(1, Environment.ProcessorCount / 2));
@@ -69,7 +71,9 @@ public static class ThirdPartyDirectiveProbe
                             diagnostic.Contains("error", StringComparison.OrdinalIgnoreCase))
                         {
                             lock (failures)
+                            {
                                 failures.Add($"{Path.GetFileName(entry.File)}: exit {result.ExitCode}\n{diagnostic}");
+                            }
                         }
                     }
                     finally
@@ -78,9 +82,12 @@ public static class ThirdPartyDirectiveProbe
                     }
                 }));
                 if (failures.Count != 0)
+                {
                     throw new InvalidOperationException(
                         $"{library.Key}: upstream diagnostic directives hide warnings (Compression.ko.md 3.6 rule 2):\n" +
                         string.Join("\n", failures));
+                }
+
                 verified += library.Count();
             }
         }
@@ -89,9 +96,13 @@ public static class ThirdPartyDirectiveProbe
             string actual = Path.GetFullPath(temporary);
             if (!Path.GetFileName(actual).StartsWith("rocks-thirdparty-", StringComparison.Ordinal) ||
                 Path.GetDirectoryName(actual) != Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath())))
+            {
                 throw new InvalidOperationException("Refusing cleanup outside owned third-party fixture");
+            }
+
             Directory.Delete(actual, recursive: true);
         }
+
         return verified;
     }
 
@@ -116,15 +127,26 @@ public static class ThirdPartyDirectiveProbe
                 int start = index;
                 string logical = lines[index];
                 while (logical.EndsWith('\\') && index + 1 < lines.Length)
+                {
                     logical = logical[..^1] + lines[++index];
+                }
+
                 if (!DiagnosticDirective.IsMatch(logical.TrimStart('﻿')))
+                {
                     continue;
+                }
+
                 for (int blank = start; blank <= index; ++blank)
+                {
                     lines[blank] = "";
+                }
+
                 ++stripped;
             }
+
             File.WriteAllBytes(target, Encoding.UTF8.GetBytes(string.Join('\n', lines)));
         }
+
         return stripped;
     }
 
@@ -142,14 +164,19 @@ public static class ThirdPartyDirectiveProbe
         {
             string argument = arguments[index];
             if (argument is "-c" or "/c" or "-flto=thin" || argument.StartsWith("/Fo", StringComparison.Ordinal))
+            {
                 continue;
+            }
+
             if (argument == "-o")
             {
                 ++index;
                 continue;
             }
+
             result.Add(Rewrite(argument));
         }
+
         result.Insert(1, clangCl ? "/Zs" : "-fsyntax-only");
         return result.ToArray();
     }

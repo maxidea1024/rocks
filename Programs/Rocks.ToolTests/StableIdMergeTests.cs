@@ -95,10 +95,15 @@ internal static class StableIdMergeTests
         using TemporaryDirectory temporary = new();
         StableIdManifest Load(string filename, StableIdEntry[] entries)
         {
-            temporary.Write(filename, JsonSerializer.Serialize(new { schema = 1, entries = entries.Select(entry =>
-                new { kind = entry.Kind, name = entry.Name, id = entry.Id, aliases = entry.Aliases, retired = entry.Retired }) }));
+            temporary.Write(filename, JsonSerializer.Serialize(new
+            {
+                schema = 1,
+                entries = entries.Select(entry =>
+                new { kind = entry.Kind, name = entry.Name, id = entry.Id, aliases = entry.Aliases, retired = entry.Retired })
+            }));
             return StableIdManifest.Load(temporary.FilePath(filename));
         }
+
         return StableIdMergeValidator.Validate(Load("ancestor.json", ancestor), Load("ours.json", ours),
             Load("theirs.json", theirs), Load("merged.json", merged));
     }

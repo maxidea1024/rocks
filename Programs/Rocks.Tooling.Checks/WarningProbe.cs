@@ -25,10 +25,15 @@ public static class WarningProbe
                     Timeout: TimeSpan.FromSeconds(60)), cancellationToken);
                 string diagnostic = result.StdOut + result.StdErr;
                 if (!warning && (result.ExitCode != 0 || !File.Exists(output)))
+                {
                     throw new InvalidOperationException("Clean native compiler control failed:\n" + diagnostic);
+                }
+
                 if (warning && (result.ExitCode == 0 || !diagnostic.Contains("unusedWarningProbe", StringComparison.Ordinal) ||
                     !(diagnostic.Contains("-Werror", StringComparison.Ordinal) || diagnostic.Contains("C2220", StringComparison.Ordinal))))
+                {
                     throw new InvalidOperationException("Compiler did not reject the required warning:\n" + diagnostic);
+                }
             }
         }
         finally
@@ -36,7 +41,10 @@ public static class WarningProbe
             string actual = Path.GetFullPath(temporary);
             if (!Path.GetFileName(actual).StartsWith("rocks-warning-", StringComparison.Ordinal) ||
                 Path.GetDirectoryName(actual) != Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath())))
+            {
                 throw new InvalidOperationException("Refusing cleanup outside owned warning fixture");
+            }
+
             Directory.Delete(actual, recursive: true);
         }
     }

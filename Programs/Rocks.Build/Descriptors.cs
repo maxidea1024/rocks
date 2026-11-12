@@ -120,7 +120,9 @@ public static class DescriptorReader
 
         string engineVersion = RequiredString(path, root, "engineVersion");
         if (!VersionText.IsMatch(engineVersion))
+        {
             throw new DescriptorException(path, $"engineVersion '{engineVersion}' must look like '0.1'.");
+        }
 
         IReadOnlyList<NativePlatform> platforms = root.TryGetProperty("targetPlatforms", out JsonElement value)
             ? ReadPlatforms(path, value, "targetPlatforms")
@@ -142,7 +144,9 @@ public static class DescriptorReader
         string name = DescriptorName(path, PluginExtension);
         string folder = Path.GetFileName(Path.GetDirectoryName(Path.GetFullPath(path))!);
         if (!string.Equals(folder, name, StringComparison.Ordinal))
+        {
             throw new DescriptorException(path, $"plugin descriptor name '{name}' must match its folder '{folder}'.");
+        }
 
         using JsonDocument document = Parse(path);
         JsonElement root = document.RootElement;
@@ -152,7 +156,9 @@ public static class DescriptorReader
 
         int version = RequiredInt(path, root, "version");
         if (version < 1)
+        {
             throw new DescriptorException(path, "version must be 1 or greater.");
+        }
 
         return new(name, Path.GetFullPath(path), fileVersion, version,
             RequiredString(path, root, "versionName"),
@@ -169,11 +175,15 @@ public static class DescriptorReader
     private static string DescriptorName(string path, string extension)
     {
         if (!string.Equals(Path.GetExtension(path), extension, StringComparison.Ordinal))
+        {
             throw new DescriptorException(path, $"descriptor file must end with '{extension}'.");
+        }
 
         string name = Path.GetFileNameWithoutExtension(path);
         if (!Identifier.IsMatch(name))
+        {
             throw new DescriptorException(path, $"descriptor name '{name}' must be an identifier (letters, digits, '_').");
+        }
 
         return name;
     }
@@ -182,10 +192,14 @@ public static class DescriptorReader
     {
         var info = new FileInfo(path);
         if (!info.Exists)
+        {
             throw new DescriptorException(path, "descriptor file does not exist.");
+        }
 
         if (info.Length > MaximumBytes)
+        {
             throw new DescriptorException(path, "descriptor file is larger than 1 MiB.");
+        }
 
         string text;
         try
@@ -225,10 +239,14 @@ public static class DescriptorReader
         foreach (JsonProperty property in element.EnumerateObject())
         {
             if (!allowed.Contains(property.Name))
+            {
                 throw new DescriptorException(path, $"unknown {what} field '{property.Name}'.");
+            }
 
             if (!seen.Add(property.Name))
+            {
                 throw new DescriptorException(path, $"duplicate {what} field '{property.Name}'.");
+            }
         }
     }
 
@@ -236,8 +254,10 @@ public static class DescriptorReader
     {
         int version = RequiredInt(path, root, "fileVersion");
         if (version != CurrentFileVersion)
+        {
             throw new DescriptorException(path,
                 $"fileVersion {version} is not supported (supported: {CurrentFileVersion}).");
+        }
 
         return version;
     }
@@ -245,7 +265,9 @@ public static class DescriptorReader
     private static IReadOnlyList<ModuleDescriptor> ReadModules(string path, JsonElement root)
     {
         if (!root.TryGetProperty("modules", out JsonElement modules))
+        {
             return [];
+        }
 
         RequireKind(path, modules, JsonValueKind.Array, "modules");
         var result = new List<ModuleDescriptor>();
@@ -257,7 +279,9 @@ public static class DescriptorReader
             string name = RequiredIdentifier(path, module, "name");
             // 대소문자만 다른 모듈은 대소문자를 구분하지 않는 파일 시스템에서 같은 폴더가 된다.
             if (!names.Add(name))
+            {
                 throw new DescriptorException(path, $"duplicate module '{name}'.");
+            }
 
             ModuleType type = RequiredEnum<ModuleType>(path, module, "type");
             LoadingPhase phase = module.TryGetProperty("loadingPhase", out _)
@@ -275,7 +299,9 @@ public static class DescriptorReader
     private static IReadOnlyList<PluginReference> ReadReferences(string path, JsonElement root, bool requireEnabled)
     {
         if (!root.TryGetProperty("plugins", out JsonElement plugins))
+        {
             return [];
+        }
 
         RequireKind(path, plugins, JsonValueKind.Array, "plugins");
         var result = new List<PluginReference>();
@@ -286,13 +312,17 @@ public static class DescriptorReader
             RequireKeys(path, reference, "plugin reference", ["name", "enabled"]);
             string name = RequiredIdentifier(path, reference, "name");
             if (!names.Add(name))
+            {
                 throw new DescriptorException(path, $"duplicate plugin reference '{name}'.");
+            }
 
             bool enabled = OptionalBool(path, reference, "enabled")
                 ?? throw new DescriptorException(path, $"plugin reference '{name}' requires 'enabled'.");
             // 플러그인의 plugins는 의존 목록이다. 의존을 끄는 표기는 뜻이 없으므로 받지 않는다.
             if (requireEnabled && !enabled)
+            {
                 throw new DescriptorException(path, $"plugin dependency '{name}' must have \"enabled\": true.");
+            }
 
             result.Add(new(name, enabled));
         }
@@ -310,17 +340,23 @@ public static class DescriptorReader
             string text = item.GetString()!;
             if (!Enum.TryParse(text, ignoreCase: false, out NativePlatform platform) ||
                 !Enum.IsDefined(platform) || !string.Equals(platform.ToString(), text, StringComparison.Ordinal))
+            {
                 throw new DescriptorException(path,
                     $"unknown platform '{text}' in {what} (expected: {string.Join(", ", Enum.GetNames<NativePlatform>())}).");
+            }
 
             if (result.Contains(platform))
+            {
                 throw new DescriptorException(path, $"duplicate platform '{text}' in {what}.");
+            }
 
             result.Add(platform);
         }
 
         if (result.Count == 0)
+        {
             throw new DescriptorException(path, $"{what} must not be empty (omit it to allow every platform).");
+        }
 
         return result;
     }
@@ -328,14 +364,18 @@ public static class DescriptorReader
     private static void RequireKind(string path, JsonElement element, JsonValueKind kind, string what)
     {
         if (element.ValueKind != kind)
+        {
             throw new DescriptorException(path, $"{what} must be a JSON {kind.ToString().ToLowerInvariant()}.");
+        }
     }
 
     private static string RequiredString(string path, JsonElement element, string key)
     {
         string? value = OptionalString(path, element, key);
         if (string.IsNullOrWhiteSpace(value))
+        {
             throw new DescriptorException(path, $"'{key}' is required and must be a non-empty string.");
+        }
 
         return value;
     }
@@ -343,7 +383,9 @@ public static class DescriptorReader
     private static string? OptionalString(string path, JsonElement element, string key)
     {
         if (!element.TryGetProperty(key, out JsonElement value))
+        {
             return null;
+        }
 
         RequireKind(path, value, JsonValueKind.String, key);
         return value.GetString();
@@ -353,7 +395,9 @@ public static class DescriptorReader
     {
         string value = RequiredString(path, element, key);
         if (!Identifier.IsMatch(value))
+        {
             throw new DescriptorException(path, $"'{value}' is not a valid name (letters, digits, '_', max 64).");
+        }
 
         return value;
     }
@@ -361,10 +405,14 @@ public static class DescriptorReader
     private static int RequiredInt(string path, JsonElement element, string key)
     {
         if (!element.TryGetProperty(key, out JsonElement value))
+        {
             throw new DescriptorException(path, $"'{key}' is required.");
+        }
 
         if (value.ValueKind != JsonValueKind.Number || !value.TryGetInt32(out int result))
+        {
             throw new DescriptorException(path, $"'{key}' must be an integer.");
+        }
 
         return result;
     }
@@ -372,10 +420,14 @@ public static class DescriptorReader
     private static bool? OptionalBool(string path, JsonElement element, string key)
     {
         if (!element.TryGetProperty(key, out JsonElement value))
+        {
             return null;
+        }
 
         if (value.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+        {
             throw new DescriptorException(path, $"'{key}' must be true or false.");
+        }
 
         return value.GetBoolean();
     }
@@ -385,8 +437,10 @@ public static class DescriptorReader
         string text = RequiredString(path, element, key);
         if (!Enum.TryParse(text, ignoreCase: false, out T value) || !Enum.IsDefined(value) ||
             !string.Equals(value.ToString(), text, StringComparison.Ordinal))
+        {
             throw new DescriptorException(path,
                 $"'{key}' value '{text}' is not one of: {string.Join(", ", Enum.GetNames<T>())}.");
+        }
 
         return value;
     }
@@ -408,7 +462,9 @@ public static class PluginCatalog
         foreach (string root in roots)
         {
             if (Directory.Exists(root))
+            {
                 Visit(Path.GetFullPath(root), found);
+            }
         }
 
         return found.Values.OrderBy(plugin => plugin.Name, StringComparer.Ordinal).ToList();
@@ -429,14 +485,18 @@ public static class PluginCatalog
         foreach (PluginDescriptor plugin in available)
         {
             if (!byName.TryAdd(plugin.Name, plugin))
+            {
                 throw new DescriptorException(plugin.FilePath, $"duplicate plugin '{plugin.Name}'.");
+            }
         }
 
         var explicitChoice = new Dictionary<string, bool>(StringComparer.Ordinal);
         foreach (PluginReference reference in project.Plugins)
         {
             if (!byName.ContainsKey(reference.Name))
+            {
                 throw new DescriptorException(project.FilePath, $"project references unknown plugin '{reference.Name}'.");
+            }
 
             explicitChoice[reference.Name] = reference.Enabled;
         }
@@ -447,37 +507,49 @@ public static class PluginCatalog
         {
             bool on = explicitChoice.TryGetValue(plugin.Name, out bool choice) ? choice : plugin.EnabledByDefault;
             if (on)
+            {
                 enabled.Add(plugin.Name);
+            }
         }
 
         // 2) 의존을 따라 켜고, 깊이 우선으로 순서를 정하며 순환을 찾는다.
         var ordered = new List<PluginDescriptor>();
         var state = new Dictionary<string, bool>(StringComparer.Ordinal); // false=방문 중, true=완료
         foreach (string name in enabled.OrderBy(name => name, StringComparer.Ordinal).ToList())
+        {
             Visit(name, requiredBy: null);
+        }
 
         return ordered;
 
         void Visit(string name, PluginDescriptor? requiredBy)
         {
             if (!byName.TryGetValue(name, out PluginDescriptor? plugin))
+            {
                 throw new DescriptorException(requiredBy?.FilePath, $"plugin '{requiredBy?.Name}' depends on unknown plugin '{name}'.");
+            }
 
             if (requiredBy is not null && explicitChoice.TryGetValue(name, out bool choice) && !choice)
+            {
                 throw new DescriptorException(project.FilePath,
                     $"plugin '{requiredBy.Name}' requires '{name}', but the project disables it.");
+            }
 
             if (state.TryGetValue(name, out bool done))
             {
                 if (!done)
+                {
                     throw new DescriptorException(plugin.FilePath, $"plugin dependency cycle reaches '{name}'.");
+                }
 
                 return;
             }
 
             state[name] = false;
             foreach (PluginReference dependency in plugin.Plugins.OrderBy(reference => reference.Name, StringComparer.Ordinal))
+            {
                 Visit(dependency.Name, plugin);
+            }
 
             state[name] = true;
             ordered.Add(plugin);
@@ -492,8 +564,10 @@ public static class PluginCatalog
         {
             PluginDescriptor plugin = DescriptorReader.ReadPlugin(candidate);
             if (found.TryGetValue(plugin.Name, out PluginDescriptor? existing))
+            {
                 throw new DescriptorException(plugin.FilePath,
                     $"duplicate plugin '{plugin.Name}' (also at {existing.FilePath}).");
+            }
 
             found.Add(plugin.Name, plugin);
             return;
@@ -503,10 +577,14 @@ public static class PluginCatalog
         {
             string childName = Path.GetFileName(child);
             if (childName is "bin" or "obj" or "out" or ".git")
+            {
                 continue;
+            }
 
             if ((File.GetAttributes(child) & FileAttributes.ReparsePoint) != 0)
+            {
                 continue; // link를 따라가 같은 플러그인을 두 번 찾거나 저장소 밖을 읽지 않는다
+            }
 
             Visit(child, found);
         }

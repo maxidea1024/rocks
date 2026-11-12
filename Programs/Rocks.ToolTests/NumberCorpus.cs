@@ -37,31 +37,75 @@ internal static class NumberCorpus
         var invariant = CultureInfo.InvariantCulture;
         // .NET 결함 값은 항상 넣는다.
         foreach (var (bits, shortest) in KnownDotNetDefects)
+        {
             Line($"D {bits:X16} {shortest}");
+        }
+
         for (int i = 0; i < shortestDoubles; ++i)
         {
             ulong bits = random.Next() & 0x7FFFFFFFFFFFFFFFul;
-            if (i % 8 == 1) bits = (ulong)random.Next(1, 2047) << 52; // 2의 거듭제곱(비대칭 구간), 2^-1022 … 2^1023
-            if (i % 8 == 2) bits = random.Next() & 0x000FFFFFFFFFFFFFul; // 비정규
-            if (i % 8 == 3) bits = BitConverter.DoubleToUInt64Bits((double)(long)(random.Next() >> random.Next(11, 63)));
-            if (i % 8 == 4) bits = ((ulong)random.Next(1, 2047) << 52) - 1; // 2의 거듭제곱 바로 아래(가수 전부 1)
+            if (i % 8 == 1)
+            {
+                bits = (ulong)random.Next(1, 2047) << 52; // 2의 거듭제곱(비대칭 구간), 2^-1022 … 2^1023
+            }
+
+            if (i % 8 == 2)
+            {
+                bits = random.Next() & 0x000FFFFFFFFFFFFFul; // 비정규
+            }
+
+            if (i % 8 == 3)
+            {
+                bits = BitConverter.DoubleToUInt64Bits((double)(long)(random.Next() >> random.Next(11, 63)));
+            }
+
+            if (i % 8 == 4)
+            {
+                bits = ((ulong)random.Next(1, 2047) << 52) - 1; // 2의 거듭제곱 바로 아래(가수 전부 1)
+            }
+
             double value = BitConverter.UInt64BitsToDouble(bits);
-            if (!double.IsFinite(value) || value == 0) continue;
+            if (!double.IsFinite(value) || value == 0)
+            {
+                continue;
+            }
+
             Line($"D {bits:X16} {Shortest(bits, value, invariant)}");
         }
+
         for (int i = 0; i < shortestFloats; ++i)
         {
             uint bits = (uint)random.Next() & 0x7FFFFFFFu;
-            if (i % 8 == 1) bits = (uint)random.Next(1, 255) << 23;
-            if (i % 8 == 2) bits = (uint)random.Next() & 0x007FFFFFu;
-            if (i % 8 == 4) bits = ((uint)random.Next(1, 255) << 23) - 1;
+            if (i % 8 == 1)
+            {
+                bits = (uint)random.Next(1, 255) << 23;
+            }
+
+            if (i % 8 == 2)
+            {
+                bits = (uint)random.Next() & 0x007FFFFFu;
+            }
+
+            if (i % 8 == 4)
+            {
+                bits = ((uint)random.Next(1, 255) << 23) - 1;
+            }
+
             float value = BitConverter.UInt32BitsToSingle(bits);
-            if (!float.IsFinite(value) || value == 0) continue;
+            if (!float.IsFinite(value) || value == 0)
+            {
+                continue;
+            }
+
             string shortest = value.ToString(invariant);
             if (float.Parse(shortest, NumberStyles.Float, invariant) != value)
+            {
                 throw new InvalidOperationException($".NET float shortest does not round-trip (new .NET defect): {bits:X8} {shortest}");
+            }
+
             Line($"F {bits:X8} {shortest}");
         }
+
         for (int i = 0; i < parses; ++i)
         {
             bool single = i % 2 == 1;
@@ -83,6 +127,7 @@ internal static class NumberCorpus
                 Line($"Q {decimalText} {expected:X8}");
             }
         }
+
         File.WriteAllText(path, text.ToString(), new UTF8Encoding(false));
         return cases;
     }
@@ -92,10 +137,16 @@ internal static class NumberCorpus
     private static string Shortest(ulong bits, double value, CultureInfo invariant)
     {
         if (KnownDotNetDefects.TryGetValue(bits, out string? known))
+        {
             return known;
+        }
+
         string text = value.ToString(invariant);
         if (double.Parse(text, NumberStyles.Float, invariant) != value)
+        {
             throw new InvalidOperationException($".NET double shortest does not round-trip (new .NET defect): {bits:X16} {text}");
+        }
+
         return text;
     }
 
@@ -103,12 +154,20 @@ internal static class NumberCorpus
     private static string RandomDecimal(XorShift random, bool single)
     {
         var text = new StringBuilder();
-        if (random.Next(0, 4) == 0) text.Append('-');
+        if (random.Next(0, 4) == 0)
+        {
+            text.Append('-');
+        }
+
         int digits = random.Next(0, 16) == 0 ? random.Next(26, 900) : random.Next(1, 26);
         int point = random.Next(0, digits + 1);
         for (int i = 0; i < digits; ++i)
         {
-            if (i == point && i != 0) text.Append('.');
+            if (i == point && i != 0)
+            {
+                text.Append('.');
+            }
+
             text.Append((char)('0' + random.Next(0, 10)));
         }
         // 값의 10진 지수가 대략 [-330, 310](double)·[-48, 40](float)에 들도록 소수점 위치를 보정한다.
@@ -128,10 +187,18 @@ internal static class NumberCorpus
         BigInteger fraction = new BigInteger(random.Next()) & ((BigInteger.One << mantissaBits) - 1);
         switch (random.Next(0, 16))
         {
-            case 0: fraction = (BigInteger.One << mantissaBits) - 1; break;
-            case 1: fraction = 0; break;
-            case 2: fraction = (BigInteger.One << mantissaBits) - 1; biased = maxBiased; break; // max와 2^(최대+1) 사이
+            case 0:
+                fraction = (BigInteger.One << mantissaBits) - 1;
+                break;
+            case 1:
+                fraction = 0;
+                break;
+            case 2:
+                fraction = (BigInteger.One << mantissaBits) - 1;
+                biased = maxBiased;
+                break; // max와 2^(최대+1) 사이
         }
+
         BigInteger m = biased == 0 ? fraction : fraction | (BigInteger.One << mantissaBits);
         long e = (biased == 0 ? 1 : biased) - bias - mantissaBits;
         // 중간점 = (2m + 1)·2^(e − 1).
@@ -149,11 +216,18 @@ internal static class NumberCorpus
             digits = numerator * BigInteger.Pow(5, (int)-shift);
             decimalExponent = shift;
         }
+
         switch (random.Next(0, 3))
         {
-            case 1: digits -= 1; break;
-            case 2: digits = digits * 10 + 1; --decimalExponent; break;
+            case 1:
+                digits -= 1;
+                break;
+            case 2:
+                digits = digits * 10 + 1;
+                --decimalExponent;
+                break;
         }
+
         return digits.ToString(CultureInfo.InvariantCulture) + "e" + decimalExponent.ToString(CultureInfo.InvariantCulture);
     }
 

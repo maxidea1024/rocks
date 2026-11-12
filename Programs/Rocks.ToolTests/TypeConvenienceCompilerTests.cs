@@ -28,13 +28,20 @@ internal static class TypeConvenienceCompilerTests
                 executable = options.Optional("dotnet") ?? "dotnet";
                 generate.Add(generator);
             }
+
             generate.AddRange(["--input", temporary.FilePath("Probe.h"), "--include", "Probe.h",
                 "--output", temporary.FilePath("Probe.generated.h"), "--compiler", compiler,
                 "--identity-manifest", identity]);
             foreach (string directory in includeDirectories)
+            {
                 generate.AddRange(["--include-dir", directory]);
+            }
+
             foreach (string argument in options.ClangArguments)
+            {
                 generate.Add("--clang-arg=" + argument);
+            }
+
             var generated = await ProcessRunner.RunAsync(new(executable, generate, options.Root, environment,
                 Timeout: TimeSpan.FromSeconds(60)));
             Verify.Equal(0, generated.ExitCode, "metadata generation: " + generated.StdOut + generated.StdErr);
@@ -56,7 +63,10 @@ internal static class TypeConvenienceCompilerTests
                     ? ["/nologo", "/std:c++latest", "/W4", "/WX", "/c", source, "/Fo" + output]
                     : ["-std=c++23", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-c", source, "-o", output];
                 foreach (string directory in includeDirectories)
+                {
                     arguments.Add((clangCl ? "/I" : "-I") + directory);
+                }
+
                 arguments.AddRange(options.ClangArguments);
                 var compiled = await ProcessRunner.RunAsync(new(compiler, arguments, options.Root, environment,
                     Timeout: TimeSpan.FromSeconds(60)));
@@ -93,7 +103,10 @@ internal static class TypeConvenienceCompilerTests
                     ? ["/nologo", "/std:c++latest", "/W4", "/WX", "/c", source, "/Fo" + output]
                     : ["-std=c++23", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-c", source, "-o", output];
                 foreach (string directory in includeDirectories)
+                {
                     arguments.Add((clangCl ? "/I" : "-I") + directory);
+                }
+
                 arguments.AddRange(options.ClangArguments);
                 return await ProcessRunner.RunAsync(new(compiler, arguments, options.Root, environment,
                     Timeout: TimeSpan.FromSeconds(60)));

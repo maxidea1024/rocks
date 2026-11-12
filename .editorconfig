@@ -9,6 +9,32 @@ tab_width = 4
 insert_final_newline = true
 trim_trailing_whitespace = true
 
+# C#(빌드 도구·MetaCompiler·도구 시험·모듈 규칙)은 Microsoft C# 코딩 규칙(.NET 런타임 스타일)을 따른다.
+# Allman 중괄호, 본문이 한 줄이어도 중괄호, 블록 뒤 빈 줄, 한 줄에 문장 하나. 검사는
+# `dotnet format <project> --verify-no-changes --severity warn`이다(Rocks.ToolTests format이 실행한다).
+[*.cs]
+csharp_new_line_before_open_brace = all
+csharp_new_line_before_else = true
+csharp_new_line_before_catch = true
+csharp_new_line_before_finally = true
+csharp_new_line_before_members_in_object_initializers = true
+csharp_new_line_before_members_in_anonymous_types = true
+csharp_new_line_between_query_expression_clauses = true
+csharp_indent_case_contents = true
+csharp_indent_switch_labels = true
+csharp_preserve_single_line_statements = false
+csharp_preserve_single_line_blocks = true
+csharp_prefer_braces = true:warning
+dotnet_diagnostic.IDE0011.severity = warning
+dotnet_style_allow_multiple_blank_lines_experimental = false:warning
+dotnet_diagnostic.IDE2000.severity = warning
+dotnet_style_allow_statement_immediately_after_block_experimental = false:warning
+dotnet_diagnostic.IDE2003.severity = warning
+csharp_style_allow_embedded_statements_on_same_line_experimental = false:warning
+dotnet_diagnostic.IDE2001.severity = warning
+csharp_style_allow_blank_lines_between_consecutive_braces_experimental = false:warning
+dotnet_diagnostic.IDE2002.severity = warning
+
 # 외부 라이브러리 원본(Core/Source/ThirdParty/<Lib>/<lib>-<version>/)은 byte 그대로 둔다. 편집기가 공백·줄끝을
 # 바꾸지 않도록 모든 규칙을 해제한다. ThirdParty.json의 SHA-256이 원본 보존을 확인한다.
 [Core/Source/ThirdParty/*/*/**]

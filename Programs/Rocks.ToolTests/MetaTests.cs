@@ -19,9 +19,17 @@ internal static class MetaTests
     {
         string compiler = options.Required("compiler");
         string generator = Path.GetFullPath(options.Required("metacompiler"));
-        if (!File.Exists(generator)) throw new FileNotFoundException("MetaCompiler executable missing", generator);
+        if (!File.Exists(generator))
+        {
+            throw new FileNotFoundException("MetaCompiler executable missing", generator);
+        }
+
         Dictionary<string, string?> actualEnvironment = new(environment, OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
-        if (options.Optional("formatter") is string formatter) actualEnvironment["ROCKS_CLANG_FORMAT"] = formatter;
+        if (options.Optional("formatter") is string formatter)
+        {
+            actualEnvironment["ROCKS_CLANG_FORMAT"] = formatter;
+        }
+
         GeneratedBodyReviewTests.Register(suite, options, actualEnvironment);
         TypeConvenienceCompilerTests.Register(suite, options, actualEnvironment);
         IdentityCompilerTests.Register(suite, options, actualEnvironment);
@@ -86,7 +94,10 @@ internal static class MetaTests
             var arguments = new List<string> { "-Wno-error", "-w", "@hidden.rsp", "-I", "-Ihidden", "-iquote", "-iquotehidden", "-isystem", "-isystemhidden", "-idirafter", "-idirafterhidden", "-include", "-includehidden", "-imacros", "-imacroshidden", "-F", "-Fhidden", "-iframeworkhidden", "-Wp,-Ihidden", "-ivfsoverlay=hidden", "--config=hidden" };
             arguments.AddRange(["-iwithprefixbefore", "-iwithprefixbeforehidden", "-iwithprefix", "-iwithprefixhidden", "-iprefix", "-iprefixhidden", "-iwithsysroot", "-iwithsysroothidden", "-stdlib++-isystem", "-stdlib++-isystemhidden", "--gcc-toolchain", "--gcc-toolchain=hidden", "-vfsoverlay", "-vfsoverlay=hidden", "-working-directory", "-working-directory=hidden", "-D", "-D=invalid", "-D_CRT_SECURE_NO_WARNINGS", "--target=hidden"]);
             if (OperatingSystem.IsWindows())
+            {
                 arguments.AddRange(["/clang:-Wno-error", "/W0", "/I", "/Ihidden", "/FI", "/FIhidden", "/external:Ihidden", "/clang:-Ihidden"]);
+            }
+
             foreach (string argument in arguments)
             {
                 await probe.GenerateAsync(Declaration(), extra: ["--clang-arg=" + argument], expectedCode: "RMC1000", reason: "override");
@@ -100,10 +111,13 @@ internal static class MetaTests
                 using Probe probe = new(options, actualEnvironment, generator, compiler);
                 // 경로가 없으므로 SDK 진단으로 거부한다. /I·/FI Windows 옵션으로 오인하지 않는다.
                 foreach (string path in new[] { "/Install/RocksMissingSdk", "/Files/RocksMissingSdk" })
+                {
                     await probe.GenerateAsync(Declaration(), extra: ["--clang-arg=-isysroot", "--clang-arg=" + path],
                         expectedCode: "RMC1000", reason: "SDK");
+                }
             });
         }
+
         suite.Add("Meta.ConflictingOrDuplicateCompilerOptionsAreRejected", async () =>
         {
             using Probe probe = new(options, actualEnvironment, generator, compiler);
@@ -114,11 +128,16 @@ internal static class MetaTests
                 new[] { "-DROCKS_SAME", "-DROCKS_SAME=1" }
             };
             if (OperatingSystem.IsWindows())
+            {
                 cases.AddRange([["/MD", "/MDd"], ["/O2", "/Od"], ["/MD", "/MD"],
                     ["/MDd", "/fsanitize=address"], ["/DROCKS_MIXED=1", "-DROCKS_MIXED=2"]]);
+            }
             else
+            {
                 cases.AddRange([["-O0", "-O2"], ["-Wall", "-Wall"],
                     ["-mmacosx-version-min=13.0", "-mmacosx-version-min=14.0"]]);
+            }
+
             foreach (string[] conflict in cases)
             {
                 await probe.GenerateAsync(Declaration(), extra: conflict.Select(value => "--clang-arg=" + value).ToArray(),
@@ -132,12 +151,14 @@ internal static class MetaTests
             NativeToolchain toolchain = await NativeToolchains.DiscoverAsync(compiler);
             // 모든 구성 × 모든 모듈 최적화 재정의 조합이 AST 허용 목록을 통과해야 한다.
             foreach (NativeConfiguration configuration in Enum.GetValues<NativeConfiguration>())
-            foreach (CodeOptimization optimization in Enum.GetValues<CodeOptimization>())
             {
-                string[] arguments = NativeCompileProfile.Arguments(toolchain, configuration, optimization)
-                    .Select(argument => "--clang-arg=" + argument)
-                    .Append("--clang-arg=-DROCKS_META_PROFILE_PROBE=1").ToArray();
-                await probe.GenerateAsync(Declaration(), extra: arguments);
+                foreach (CodeOptimization optimization in Enum.GetValues<CodeOptimization>())
+                {
+                    string[] arguments = NativeCompileProfile.Arguments(toolchain, configuration, optimization)
+                        .Select(argument => "--clang-arg=" + argument)
+                        .Append("--clang-arg=-DROCKS_META_PROFILE_PROBE=1").ToArray();
+                    await probe.GenerateAsync(Declaration(), extra: arguments);
+                }
             }
         });
         suite.Add("Meta.PrefixClassSupportsNestedScopesCommentsAndConditionalBlock", async () =>
@@ -174,7 +195,9 @@ internal static class MetaTests
                 marker + "\n#line 100 \"nonexistent_virtual_source.hpp\"\n" + definition
             ];
             foreach (string body in invalid)
+            {
                 await probe.RejectAsync(Preamble + body + "}\n", "RMC", "ROCKS_CLASS");
+            }
         });
         suite.Add("Meta.PrefixClassCannotBindAcrossIncludeFiles", async () =>
         {
@@ -215,7 +238,10 @@ internal static class MetaTests
             suite.Add(name, async () =>
             {
                 using Probe probe = new(options, actualEnvironment, generator, compiler);
-                foreach (string source in fixedSources) await probe.RejectAsync(source, code, reason);
+                foreach (string source in fixedSources)
+                {
+                    await probe.RejectAsync(source, code, reason);
+                }
             });
         }
     }
@@ -242,27 +268,49 @@ internal static class MetaTests
             string? expectedCode = null, string? reason = null)
         {
             string input = fixture ? Path.Combine(options.Root, "Core", "Source", "Runtime", "ObjectRuntime", "Tests", "Reflection", "ReflectionFixture.h") : temporary.FilePath("Probe.h");
-            if (source is not null) File.WriteAllText(input, source, new UTF8Encoding(false, true));
+            if (source is not null)
+            {
+                File.WriteAllText(input, source, new UTF8Encoding(false, true));
+            }
+
             List<string> arguments = [];
             string executable = generator;
             if (generator.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
-            { executable = options.Optional("dotnet") ?? "dotnet"; arguments.Add(generator); }
+            {
+                executable = options.Optional("dotnet") ?? "dotnet";
+                arguments.Add(generator);
+            }
+
             arguments.AddRange(["--input", input, "--include", fixture ? "Core/Source/Runtime/ObjectRuntime/Tests/Reflection/ReflectionFixture.h" : "Probe.h",
                 "--output", Output, "--compiler", compiler]);
             AddDefaultIncludes(arguments);
             arguments.AddRange(["--identity-manifest", fixture
                 ? Path.Combine(options.Root, "Core", "Source", "Runtime", "ObjectRuntime", "Tests", "Reflection", "Foundation.rocksids.json") : IdentityPath]);
-            foreach (string argument in options.ClangArguments) arguments.Add("--clang-arg=" + argument);
-            if (extra is not null) arguments.AddRange(extra);
+            foreach (string argument in options.ClangArguments)
+            {
+                arguments.Add("--clang-arg=" + argument);
+            }
+
+            if (extra is not null)
+            {
+                arguments.AddRange(extra);
+            }
+
             var result = await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: TimeSpan.FromSeconds(60)));
-            if (expectedCode is null) Verify.Equal(0, result.ExitCode, result.StdErr);
+            if (expectedCode is null)
+            {
+                Verify.Equal(0, result.ExitCode, result.StdErr);
+            }
             else
             {
                 Verify.That(result.ExitCode != 0, "invalid reflection input accepted");
                 Verify.Contains(expectedCode, result.StdErr, "stable diagnostic code");
                 Verify.Contains("hint:", result.StdErr.ToLowerInvariant(), "actionable diagnostic hint");
                 Verify.That(Regex.IsMatch(result.StdErr, @":\d+:.*RMC", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)), "file/line diagnostic missing:\n" + result.StdErr);
-                if (reason is not null) Verify.That(result.StdErr.Contains(reason, StringComparison.OrdinalIgnoreCase), "diagnostic reason missing: " + reason + "\n" + result.StdErr);
+                if (reason is not null)
+                {
+                    Verify.That(result.StdErr.Contains(reason, StringComparison.OrdinalIgnoreCase), "diagnostic reason missing: " + reason + "\n" + result.StdErr);
+                }
             }
         }
 
@@ -289,15 +337,27 @@ internal static class MetaTests
                 List<string> arguments = [];
                 string executable = generator;
                 if (generator.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
-                { executable = options.Optional("dotnet") ?? "dotnet"; arguments.Add(generator); }
+                {
+                    executable = options.Optional("dotnet") ?? "dotnet";
+                    arguments.Add(generator);
+                }
+
                 arguments.AddRange(["--input", author, "--include", "Probe.h", "--output", output, "--compiler", compiler]);
                 foreach (string include in new[] { sourceDirectory }.Concat(Directory.GetDirectories(Path.Combine(options.Root, "Core", "Source", "Runtime"))
                     .Select(module => Path.Combine(module, "Public")).Where(Directory.Exists)))
+                {
                     arguments.AddRange(["--include-dir", include]);
+                }
+
                 arguments.AddRange(["--identity-manifest", IdentityPath]);
-                foreach (string argument in options.ClangArguments) arguments.Add("--clang-arg=" + argument);
+                foreach (string argument in options.ClangArguments)
+                {
+                    arguments.Add("--clang-arg=" + argument);
+                }
+
                 return await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: TimeSpan.FromSeconds(60)));
             }
+
             var rejected = await Run();
             Verify.That(rejected.ExitCode != 0, "output-directory shadow header accepted");
             Verify.Contains("RMC1000", rejected.StdErr, "output shadow error code");
@@ -322,12 +382,16 @@ internal static class MetaTests
             string shadow = temporary.FilePath("shadow");
             Directory.CreateDirectory(real);
             Directory.CreateDirectory(shadow);
-            try { Directory.CreateSymbolicLink(alias, real); }
+            try
+            {
+                Directory.CreateSymbolicLink(alias, real);
+            }
             catch (Exception error) when (OperatingSystem.IsWindows() && error is UnauthorizedAccessException or IOException)
             {
                 Console.WriteLine("[SKIP] Meta symlink fixture: Windows account cannot create symbolic links: " + error.Message);
                 return;
             }
+
             string original = Declaration();
             string actualInput = Path.Combine(real, "Probe.h");
             string aliasInput = Path.Combine(alias, "Probe.h");
@@ -338,15 +402,27 @@ internal static class MetaTests
                 List<string> arguments = [];
                 string executable = generator;
                 if (generator.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
-                { executable = options.Optional("dotnet") ?? "dotnet"; arguments.Add(generator); }
+                {
+                    executable = options.Optional("dotnet") ?? "dotnet";
+                    arguments.Add(generator);
+                }
+
                 arguments.AddRange(["--input", input, "--include", "Probe.h", "--output", output, "--compiler", compiler]);
                 foreach (string include in includeDirs.Concat(Directory.GetDirectories(Path.Combine(options.Root, "Core", "Source", "Runtime"))
                     .Select(module => Path.Combine(module, "Public")).Where(Directory.Exists)))
+                {
                     arguments.AddRange(["--include-dir", include]);
+                }
+
                 arguments.AddRange(["--identity-manifest", IdentityPath]);
-                foreach (string argument in options.ClangArguments) arguments.Add("--clang-arg=" + argument);
+                foreach (string argument in options.ClangArguments)
+                {
+                    arguments.Add("--clang-arg=" + argument);
+                }
+
                 return await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: TimeSpan.FromSeconds(60)));
             }
+
             var valid = await Run(aliasInput, Output, real);
             Verify.Equal(0, valid.ExitCode, "same file through symlinked parent rejected: " + valid.StdErr);
             var shadowed = await Run(aliasInput, Output, shadow, real);
@@ -370,11 +446,19 @@ internal static class MetaTests
             List<string> arguments = [];
             string executable = generator;
             if (generator.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
-            { executable = options.Optional("dotnet") ?? "dotnet"; arguments.Add(generator); }
+            {
+                executable = options.Optional("dotnet") ?? "dotnet";
+                arguments.Add(generator);
+            }
+
             arguments.AddRange(["--input", input, "--include", "Probe.h", "--output", Output, "--compiler", compiler]);
             AddDefaultIncludes(arguments);
             arguments.AddRange(["--identity-manifest", IdentityPath]);
-            foreach (string argument in options.ClangArguments) arguments.Add("--clang-arg=" + argument);
+            foreach (string argument in options.ClangArguments)
+            {
+                arguments.Add("--clang-arg=" + argument);
+            }
+
             var result = await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: TimeSpan.FromSeconds(60)));
             Verify.That(result.ExitCode != 0, "throwing constructor was accepted");
             Verify.Contains("RMC3000", result.StdErr, "generated contract failure");
@@ -409,11 +493,19 @@ internal static class MetaTests
                 List<string> arguments = [];
                 string executable = generator;
                 if (generator.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
-                { executable = options.Optional("dotnet") ?? "dotnet"; arguments.Add(generator); }
+                {
+                    executable = options.Optional("dotnet") ?? "dotnet";
+                    arguments.Add(generator);
+                }
+
                 arguments.AddRange(["--input", main, "--include", "Main.h", "--output", Output, "--compiler", compiler]);
                 AddDefaultIncludes(arguments);
                 arguments.AddRange(["--identity-manifest", IdentityPath]);
-                foreach (string argument in options.ClangArguments) arguments.Add("--clang-arg=" + argument);
+                foreach (string argument in options.ClangArguments)
+                {
+                    arguments.Add("--clang-arg=" + argument);
+                }
+
                 var result = await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: TimeSpan.FromSeconds(60)));
                 Verify.That(result.ExitCode != 0, "invalid nested declaration was accepted");
                 Verify.Contains($"{bad}:{line}: error RMC2000", result.StdErr, "nested source file and physical line");
@@ -434,7 +526,9 @@ internal static class MetaTests
             foreach (string directory in Directory.GetDirectories(Path.Combine(options.Root, "Core", "Source", "Runtime"))
                 .Select(module => Path.Combine(module, "Public")).Where(Directory.Exists).Order(StringComparer.Ordinal)
                 .Concat([options.Root, temporary.Root]))
+            {
                 arguments.AddRange(["--include-dir", directory]);
+            }
         }
 
         public void Dispose() => temporary.Dispose();
@@ -451,10 +545,16 @@ internal static class MetaProbeIdentity
         {
             foreach (string name in new[] { "probe::Value", "probe::Outer::Inner", "probe::Object", "probe::Parent",
                 "first::Good", "example::Invalid", "a::Thing", "b::Thing", "a::ThingExtended" })
+            {
                 manifest.Register("type", name);
+            }
+
             foreach (string name in new[] { "probe::Value::count", "probe::Value::next", "probe::Object::value",
                 "example::Invalid::valid", "example::Invalid::bad" })
+            {
                 manifest.Register("field", name);
+            }
+
             return 0;
         });
     }

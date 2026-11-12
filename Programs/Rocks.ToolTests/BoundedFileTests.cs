@@ -30,11 +30,17 @@ internal static class BoundedFileTests
             using TemporaryDirectory temporary = new();
             string path = temporary.FilePath("boundary.rocksids.json");
             using (var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write))
+            {
                 file.SetLength(BoundedFile.MaximumIdentityBytes);
+            }
+
             Verify.Equal(BoundedFile.MaximumIdentityBytes,
                 BoundedFile.Read(path, BoundedFile.MaximumIdentityBytes).Length, "exact real file limit rejected");
             using (var file = new FileStream(path, FileMode.Open, FileAccess.Write))
+            {
                 file.SetLength((long)BoundedFile.MaximumIdentityBytes + 1);
+            }
+
             Verify.Throws<InvalidDataException>(() => BoundedFile.Read(path, BoundedFile.MaximumIdentityBytes));
         });
     }

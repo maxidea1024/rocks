@@ -40,7 +40,10 @@ public static class UnicodeTables
         string library = Path.Combine(Path.GetFullPath(root), ThirdPartyManifest.ThirdPartyRoot, LibraryName);
         ThirdPartyManifest manifest = ThirdPartyManifest.Read(library);
         if (manifest.Kind != ThirdPartyKind.Data)
+        {
             throw new FormatException($"{LibraryName}: manifest must be a data library");
+        }
+
         string upstream = Path.Combine(library, manifest.UpstreamDirectory);
         var hashes = new SortedDictionary<string, string>(StringComparer.Ordinal);
         var texts = new Dictionary<string, string[]>(StringComparer.Ordinal);
@@ -49,7 +52,10 @@ public static class UnicodeTables
             byte[] bytes = File.ReadAllBytes(Path.Combine(upstream, name));
             string hash = Convert.ToHexStringLower(SHA256.HashData(bytes));
             if (!manifest.Files.TryGetValue(name, out string? listed) || listed != hash)
+            {
                 throw new FormatException($"{LibraryName}: {name} differs from the manifest SHA-256");
+            }
+
             hashes[name] = hash;
             texts[name] = new UTF8Encoding(false, true).GetString(bytes).Split('\n');
         }
@@ -68,7 +74,10 @@ public static class UnicodeTables
     {
         string library = Path.Combine(Path.GetFullPath(root), ThirdPartyManifest.ThirdPartyRoot, LibraryName);
         if (!Directory.Exists(library))
+        {
             return [];
+        }
+
         string expected;
         try
         {
@@ -78,9 +87,13 @@ public static class UnicodeTables
         {
             return [new(OutputPath, 0, "unicode-tables", error.Message)];
         }
+
         string path = Path.Combine(Path.GetFullPath(root), OutputPath);
         if (!File.Exists(path))
+        {
             return [new(OutputPath, 0, "unicode-tables", "generated Unicode tables are missing (run unicode-tables --write)")];
+        }
+
         return File.ReadAllText(path, new UTF8Encoding(false)) == expected
             ? []
             : [new(OutputPath, 0, "unicode-tables", "generated Unicode tables are stale or edited (run unicode-tables --write)")];
@@ -92,7 +105,10 @@ public static class UnicodeTables
         string expected = Generate(root);
         string path = Path.Combine(Path.GetFullPath(root), OutputPath);
         if (File.Exists(path) && File.ReadAllText(path, new UTF8Encoding(false)) == expected)
+        {
             return false;
+        }
+
         if (write)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -100,6 +116,7 @@ public static class UnicodeTables
             File.WriteAllText(temporary, expected, new UTF8Encoding(false));
             File.Move(temporary, path, overwrite: true);
         }
+
         return true;
     }
 
@@ -122,7 +139,9 @@ public static class UnicodeTables
             int comment = raw.IndexOf('#');
             string line = (comment >= 0 ? raw[..comment] : raw).Trim();
             if (line.Length != 0)
+            {
                 yield return line.Split(';').Select(field => field.Trim()).ToArray();
+            }
         }
     }
 
@@ -130,7 +149,10 @@ public static class UnicodeTables
     {
         int value = int.Parse(text, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
         if (value < 0 || value >= CodePointCount)
+        {
             throw new FormatException($"code point {text} out of range");
+        }
+
         return value;
     }
 
@@ -146,30 +168,41 @@ public static class UnicodeTables
         foreach (string[] fields in Records(lines))
         {
             if (fields.Length < 15)
+            {
                 throw new FormatException("UnicodeData.txt: malformed line");
+            }
+
             int code = Hex(fields[0]);
             int category = System.Array.IndexOf(Categories, fields[2]);
             if (category < 0)
+            {
                 throw new FormatException($"UnicodeData.txt: unknown General_Category {fields[2]}");
+            }
+
             byte combining = byte.Parse(fields[3], CultureInfo.InvariantCulture);
             if (fields[1].EndsWith(", First>", StringComparison.Ordinal))
             {
                 rangeFirst = code;
                 continue;
             }
+
             int first = code;
             if (fields[1].EndsWith(", Last>", StringComparison.Ordinal))
             {
                 first = rangeFirst ?? throw new FormatException("UnicodeData.txt: range Last without First");
                 rangeFirst = null;
             }
+
             for (int point = first; point <= code; ++point)
             {
                 data.Category[point] = (byte)category;
                 data.CombiningClass[point] = combining;
             }
+
             if (fields[5].Length != 0 && !fields[5].StartsWith('<'))
+            {
                 data.Decomposition[code] = fields[5].Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(Hex).ToArray();
+            }
         }
     }
 
@@ -188,7 +221,9 @@ public static class UnicodeTables
                     case "NFC_QC":
                         data.NfcQuickCheck[point] = fields[2] switch
                         {
-                            "N" => 1, "M" => 2, _ => throw new FormatException("NFC_QC: unknown value " + fields[2])
+                            "N" => 1,
+                            "M" => 2,
+                            _ => throw new FormatException("NFC_QC: unknown value " + fields[2])
                         };
                         break;
                     case "NFD_QC":
@@ -202,8 +237,12 @@ public static class UnicodeTables
     private static void ParseCaseFolding(string[] lines, Data data)
     {
         foreach (string[] fields in Records(lines))
+        {
             if (fields[1] is "C" or "S")
+            {
                 data.SimpleFolding.Add(Hex(fields[0]), Hex(fields[2]));
+            }
+        }
     }
 
     private static void ParseDefaultIgnorable(string[] lines, Data data)
@@ -211,10 +250,15 @@ public static class UnicodeTables
         foreach (string[] fields in Records(lines))
         {
             if (fields[1] != "Default_Ignorable_Code_Point")
+            {
                 continue;
+            }
+
             (int first, int last) = Range(fields[0]);
             for (int point = first; point <= last; ++point)
+            {
                 data.DefaultIgnorable[point] = true;
+            }
         }
     }
 
@@ -226,20 +270,35 @@ public static class UnicodeTables
         {
             (int first, int last) = Range(fields[0]);
             for (int point = first; point <= last; ++point)
+            {
                 derived.Add(point);
+            }
         }
+
         foreach ((int code, int[] mapping) in data.Decomposition)
+        {
             if (mapping.Length == 1 || data.CombiningClass[code] != 0 || data.CombiningClass[mapping[0]] != 0)
+            {
                 derived.Add(code);
+            }
+        }
+
         for (int point = 0; point < CodePointCount; ++point)
+        {
             if (data.FullCompositionExclusion[point] != derived.Contains(point))
+            {
                 throw new FormatException($"Full_Composition_Exclusion disagrees with the derivation at U+{point:X4}");
+            }
+        }
     }
 
     private static int[] FullDecomposition(Data data, int code)
     {
         if (!data.Decomposition.TryGetValue(code, out int[]? mapping))
+        {
             return [code];
+        }
+
         return mapping.SelectMany(point => FullDecomposition(data, point)).ToArray();
     }
 
@@ -266,8 +325,10 @@ public static class UnicodeTables
                     records.Add(record);
                     recordIndex.Add(record, index);
                 }
+
                 values[offset] = index;
             }
+
             string key = string.Join(',', values);
             if (!blockIndex.TryGetValue(key, out ushort id))
             {
@@ -275,6 +336,7 @@ public static class UnicodeTables
                 blocks.Add(values);
                 blockIndex.Add(key, id);
             }
+
             stage1[block] = id;
         }
 
@@ -310,6 +372,7 @@ public static class UnicodeTables
                     continue;
                 }
             }
+
             foldingRanges.Add((code, code, 1, delta));
         }
 
@@ -319,7 +382,10 @@ public static class UnicodeTables
         Line("// 생성 파일이다. 직접 고치지 않는다: Rocks.ToolTests unicode-tables --root . --write");
         Line($"// Unicode {version}, 생성기 버전 {GeneratorVersion}. 원본 SHA-256:");
         foreach ((string name, string hash) in hashes)
+        {
             Line($"//   {name} {hash}");
+        }
+
         Line("#pragma once");
         Line();
         Line("#include <Base/Types.h>");
@@ -373,7 +439,10 @@ public static class UnicodeTables
         string[] items = values.ToArray();
         text.Append($"inline constexpr {type} {name}[] = {{\n");
         for (int index = 0; index < items.Length; index += perLine)
+        {
             text.Append("    ").Append(string.Join(", ", items.Skip(index).Take(perLine))).Append(",\n");
+        }
+
         text.Append("};\n");
         text.Append($"inline constexpr usize {name}Count = {items.Length};\n\n");
     }

@@ -28,7 +28,10 @@ internal static class AlgorithmsCompilerTests
                     ? ["/nologo", "/std:c++latest", "/W4", "/WX", "/Zs", source]
                     : ["-std=c++23", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-fsyntax-only", source];
                 foreach (string directory in includeDirectories)
+                {
                     arguments.Add((clangCl ? "/I" : "-I") + directory);
+                }
+
                 arguments.AddRange(options.ClangArguments);
                 return await ProcessRunner.RunAsync(new(compiler, arguments, options.Root, environment,
                     Timeout: TimeSpan.FromSeconds(60)));

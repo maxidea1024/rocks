@@ -6,7 +6,11 @@ internal static class OutputInvocationLockTests
 {
     public static async Task<int> ChildAsync(string[] args)
     {
-        if (args.Length != 4) throw new ArgumentException("Invalid output lock child arguments.");
+        if (args.Length != 4)
+        {
+            throw new ArgumentException("Invalid output lock child arguments.");
+        }
+
         string output = args[1], waiting = args[2], acquired = args[3];
         File.WriteAllText(waiting, "waiting");
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
@@ -16,7 +20,10 @@ internal static class OutputInvocationLockTests
             File.WriteAllText(acquired, "acquired");
             return 0;
         }
-        catch (OperationCanceledException) { return 41; }
+        catch (OperationCanceledException)
+        {
+            return 41;
+        }
     }
 
     public static async Task RunAsync()
@@ -46,8 +53,11 @@ internal static class OutputInvocationLockTests
 
                 // 동일 프로세스의 게임 호출도 대기 중에는 RUNNING/FAIL 보고서를 덮지 않는다.
                 using var cancel = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
-                var options = new Dictionary<string, string>(StringComparer.Ordinal) {
-                    ["sdk"] = Path.Combine(root, "sdk"), ["project"] = Path.Combine(root, "project"), ["output"] = output
+                var options = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["sdk"] = Path.Combine(root, "sdk"),
+                    ["project"] = Path.Combine(root, "project"),
+                    ["output"] = output
                 };
                 try
                 {
@@ -55,8 +65,10 @@ internal static class OutputInvocationLockTests
                     throw new InvalidOperationException("game call did not cancel while waiting for output ownership");
                 }
                 catch (OperationCanceledException) when (cancel.IsCancellationRequested) { }
+
                 Require(!File.Exists(Path.Combine(output, "game-build-evidence.json")), "waiting game call published evidence");
             }
+
             string nextWaiting = Path.Combine(root, "next-waiting");
             string nextAcquired = Path.Combine(root, "next-acquired");
             var next = await Child(root, output, nextWaiting, nextAcquired);
@@ -72,10 +84,21 @@ internal static class OutputInvocationLockTests
             {
                 Require(error.Message.Contains("directory", StringComparison.Ordinal), "invalid lock path diagnostic omitted cause");
             }
+
             Console.WriteLine("PASS output invocation lock: cross-process exclusion, cancellation, game evidence, release");
         }
-        catch (ProcessCleanupException) { cleanupSafe = false; throw; }
-        finally { if (cleanupSafe) Directory.Delete(root, true); }
+        catch (ProcessCleanupException)
+        {
+            cleanupSafe = false;
+            throw;
+        }
+        finally
+        {
+            if (cleanupSafe)
+            {
+                Directory.Delete(root, true);
+            }
+        }
     }
 
     private static async Task<ProcessResult> Child(string root, string output, string waiting, string acquired)
@@ -87,6 +110,9 @@ internal static class OutputInvocationLockTests
 
     private static void Require(bool condition, string message)
     {
-        if (!condition) throw new InvalidOperationException(message);
+        if (!condition)
+        {
+            throw new InvalidOperationException(message);
+        }
     }
 }

@@ -95,8 +95,10 @@ internal static class DescriptorTests
             """[ ]""",
         ];
         for (int index = 0; index < badProjects.Length; ++index)
+        {
             ExpectFailure(() => DescriptorReader.ReadProject(Write(directory, $"Bad{index}/Bad{index}.rocksproject",
                 badProjects[index])), "bad project " + index);
+        }
 
         ExpectFailure(() => DescriptorReader.ReadProject(Write(directory, "Bad-Name/Bad-Name.rocksproject",
             """{ "fileVersion": 1, "engineVersion": "0.1" }""")), "non-identifier project name");
@@ -289,7 +291,9 @@ internal static class DescriptorTests
         catch (DescriptorException error)
         {
             if (diagnostic != null && !error.Message.Contains(diagnostic, StringComparison.Ordinal))
+            {
                 throw new InvalidOperationException($"descriptor error for '{what}' had an unexpected message: {error.Message}");
+            }
 
             return;
         }
@@ -300,6 +304,8 @@ internal static class DescriptorTests
     private static void Check(bool condition, string message)
     {
         if (!condition)
+        {
             throw new InvalidOperationException(message);
+        }
     }
 }

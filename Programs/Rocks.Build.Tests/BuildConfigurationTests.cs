@@ -31,14 +31,18 @@ internal static class BuildConfigurationTests
             Check(arguments.Contains(DebugInfo()), $"{name}: debug information missing");
             Check(arguments.Contains("-flto=thin") == lto, $"{name}: ThinLTO mismatch");
             if (windows)
+            {
                 Check(arguments.Contains(configuration == NativeConfiguration.Debug ? "/MDd" : "/MD"), $"{name}: CRT mismatch");
+            }
         }
 
         Expect(NativeConfiguration.Debug, Unoptimized(), ndebug: false, lto: false, "ROCKS_BUILD_DEBUG=1");
         Expect(NativeConfiguration.Development, Optimized(), ndebug: false, lto: false, "ROCKS_BUILD_DEVELOPMENT=1");
         Expect(NativeConfiguration.Release, Optimized(), ndebug: true, lto: true, "ROCKS_BUILD_RELEASE=1");
         if (request.Toolchain.Platform != NativePlatform.Android)
+        {
             Expect(NativeConfiguration.Asan, Unoptimized(), ndebug: false, lto: false, "ROCKS_BUILD_DEBUG=1");
+        }
 
         // 모든 구성의 실행 파일이 PDB를 남긴다(Windows).
         if (windows)
@@ -90,9 +94,13 @@ internal static class BuildConfigurationTests
             catch (ArgumentException error)
             {
                 if (diagnostic != null && !error.Message.Contains(diagnostic, StringComparison.Ordinal))
+                {
                     throw new InvalidOperationException(message + ": unexpected diagnostic " + error.Message);
+                }
+
                 return;
             }
+
             throw new InvalidOperationException(message);
         }
 
@@ -104,14 +112,22 @@ internal static class BuildConfigurationTests
             "reserved for the build configuration");
         foreach (string argument in new[] { "-O", "-O3", "-Os", "-Ofast", "--optimize=2", "/O1", "/O2", "/Ox", "/Od", "/Ob2",
                      "-flto", "-flto=full", "-fno-lto" })
+        {
             await Rejects(WithEngineModule(module => module with { AdditionalCompileArguments = [argument] }), "accepted " + argument,
                 "overrides owned output/policy");
+        }
+
         foreach (string argument in new[] { "-flto=thin", "-fno-lto", "/opt:lldlto=0", "-Wl,--lto-O0", "-Wl,--thinlto-jobs=1" })
+        {
             await Rejects(WithEngineModule(module => module with { AdditionalLinkArguments = [argument] }), "accepted link " + argument,
                 "overrides owned output/policy");
+        }
         // 최적화 수준을 바꾸지 않는 인자는 받는다(frame pointer 유지 등).
         foreach (string argument in windows ? new[] { "/Oy-", "/Oi" } : ["-fno-omit-frame-pointer"])
+        {
             InputValidation.Validate(WithEngineModule(module => module with { AdditionalCompileArguments = [argument] }));
+        }
+
         await Rejects(WithEngineModule(module => module with { Optimization = (CodeOptimization)7 }), "accepted undefined optimization",
             "unsupported Optimization");
         await Rejects(request with { Configuration = (NativeConfiguration)9 }, "accepted undefined configuration");
@@ -137,7 +153,8 @@ internal static class BuildConfigurationTests
             string compilerDirectory = Path.GetDirectoryName(request.Toolchain.CompilerPath)!;
             Check(string.Equals(Path.GetDirectoryName(request.Toolchain.ArchiverPath), compilerDirectory, StringComparison.OrdinalIgnoreCase) &&
                   string.Equals(Path.GetDirectoryName(request.Toolchain.LinkerPath), compilerDirectory, StringComparison.OrdinalIgnoreCase),
-                "toolchain discovery must prefer llvm-lib and lld-link beside the compiler");        }
+                "toolchain discovery must prefer llvm-lib and lld-link beside the compiler");
+        }
 
         // 실제 빌드·실행: Development, 그리고 ThinLTO 모듈과 최적화를 끈 모듈이 섞인 Release.
         foreach (var (name, input) in new[]
@@ -149,10 +166,16 @@ internal static class BuildConfigurationTests
         {
             var result = await builder.BuildAsync(input with { OutputDirectory = Path.Combine(root, "configuration-" + name) });
             if (!result.Succeeded)
+            {
                 throw new InvalidOperationException(name + ": " + result.Failure + "\n" +
                     string.Join("\n", result.Actions.Select(action => action.StdOut + action.StdErr)));
+            }
+
             if (request.Toolchain.Platform == NativePlatform.Android)
+            {
                 continue;
+            }
+
             var run = await ProcessRunner.RunAsync(new(result.ModuleOutputs["Game"], [], root, request.Toolchain.Environment));
             Check(run.ExitCode == 0, name + " executable failed: " + run.StdErr);
         }
@@ -166,7 +189,10 @@ internal static class BuildConfigurationTests
         {
             byte[] bytes = File.ReadAllBytes(path);
             if (IsRawBitcode(bytes, 0))
+            {
                 return true;
+            }
+
             bool wrapper = bytes.Length >= 20 && bytes[0] == 0xde && bytes[1] == 0xc0 && bytes[2] == 0x17 && bytes[3] == 0x0b;
             return wrapper && IsRawBitcode(bytes, (int)System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(8, 4)));
         });
@@ -195,6 +221,9 @@ internal static class BuildConfigurationTests
 
     private static void Check(bool condition, string message)
     {
-        if (!condition) throw new InvalidOperationException(message);
+        if (!condition)
+        {
+            throw new InvalidOperationException(message);
+        }
     }
 }

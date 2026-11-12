@@ -16,7 +16,10 @@ internal sealed class ProcessCleanupBudget(int maximum)
         public void ReleaseAfter(Task cleanup)
         {
             if (Interlocked.Exchange(ref attached, 1) != 0)
+            {
                 throw new InvalidOperationException("Process cleanup reservation is already attached.");
+            }
+
             _ = cleanup.ContinueWith(completed =>
             {
                 _ = completed.Exception; // 나중에 fault해도 관찰한다.

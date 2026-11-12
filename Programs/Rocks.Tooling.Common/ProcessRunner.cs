@@ -39,11 +39,21 @@ public static class ProcessRunner
         TimeSpan limit = spec.Timeout ?? TimeSpan.FromMinutes(5);
         // 예외가 날 수 있는 설정 검사는 child를 시작하기 전에 끝낸다.
         if (limit <= TimeSpan.Zero || limit.TotalMilliseconds > uint.MaxValue - 1)
+        {
             throw new ArgumentOutOfRangeException(nameof(spec), "Timeout must be finite, positive and within the timer range.");
+        }
+
         if (spec.FileName.Contains('\0') || spec.WorkingDirectory.Contains('\0') ||
             spec.Arguments.Any(value => value is null || value.Contains('\0')))
+        {
             throw new ArgumentException("Process path/arguments cannot contain null characters.", nameof(spec));
-        if (!Directory.Exists(spec.WorkingDirectory)) throw new DirectoryNotFoundException(spec.WorkingDirectory);
+        }
+
+        if (!Directory.Exists(spec.WorkingDirectory))
+        {
+            throw new DirectoryNotFoundException(spec.WorkingDirectory);
+        }
+
         using var timeout = new CancellationTokenSource(limit);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
         var start = new ProcessStartInfo(spec.FileName)
@@ -58,12 +68,20 @@ public static class ProcessRunner
             StandardOutputEncoding = spec.StandardOutputEncoding ?? new UTF8Encoding(false),
             StandardErrorEncoding = spec.StandardErrorEncoding ?? new UTF8Encoding(false)
         };
-        foreach (string argument in spec.Arguments) start.ArgumentList.Add(argument);
+        foreach (string argument in spec.Arguments)
+        {
+            start.ArgumentList.Add(argument);
+        }
+
         if (spec.Environment is not null)
         {
             start.Environment.Clear();
-            foreach (var pair in spec.Environment) start.Environment[pair.Key] = pair.Value;
+            foreach (var pair in spec.Environment)
+            {
+                start.Environment[pair.Key] = pair.Value;
+            }
         }
+
         linked.Token.ThrowIfCancellationRequested();
         var process = new Process { StartInfo = start };
         var reservation = Budget.TryReserve();
@@ -72,6 +90,7 @@ public static class ProcessRunner
             process.Dispose();
             throw new InvalidOperationException("Process execution capacity exhausted: 64 running or not-yet-cleaned operations. Retry after cleanup completes.");
         }
+
         Task? cleanupTask = null;
         Task<string> stdout = Task.FromResult("");
         Task<string> stderr = Task.FromResult("");
@@ -92,15 +111,22 @@ public static class ProcessRunner
                 inputClose = Task.Run(process.StandardInput.Close);
                 await inputClose.WaitAsync(linked.Token);
             }
+
             await process.WaitForExitAsync(linked.Token);
             await Task.WhenAll(stdout, stderr).WaitAsync(linked.Token);
             var result = new ProcessResult(process.ExitCode, stdout.Result, stderr.Result);
             // 정상적인 EOF 후에도 OS handle 정리가 예상 밖으로 지연될 수 있으므로 deadline을 둔다.
             cleanupTask = StartBackgroundCleanup([process.StandardOutput, process.StandardError], process);
             if (!await CompletesWithinAsync(cleanupTask, TimeSpan.FromSeconds(3)))
+            {
                 throw new ProcessCleanupException("Process cleanup incomplete: resource disposal exceeded deadline; cleanup remains pending");
+            }
+
             if (cleanupTask.IsFaulted)
+            {
                 throw new ProcessCleanupException("Process cleanup incomplete: resource disposal failed", cleanupTask.Exception!.GetBaseException());
+            }
+
             return result;
         }
         catch (Exception error)
@@ -110,7 +136,10 @@ public static class ProcessRunner
             bool cancelled = cancellationToken.IsCancellationRequested;
             linked.Cancel();
             if (cleanupTask is not null)
+            {
                 throw; // 성공 경로의 cleanup이 실패·시간 초과한 경우 이미 정리 작업을 소유한다.
+            }
+
             if (started)
             {
                 var outcome = await CleanupAsync(process, stdout, stderr, start.RedirectStandardInput, inputClose);
@@ -126,11 +155,20 @@ public static class ProcessRunner
                 }
             }
             else
+            {
                 process.Dispose();
+            }
+
             if (timedOut && !cancelled)
+            {
                 throw new TimeoutException($"Process/pipe deadline expired: {Path.GetFileName(spec.FileName)}", error);
+            }
+
             if (cancelled)
+            {
                 throw new OperationCanceledException("Process execution cancelled.", error, cancellationToken);
+            }
+
             throw;
         }
         finally
@@ -150,21 +188,43 @@ public static class ProcessRunner
 
         async Task FinishAsync()
         {
-            try { await Task.WhenAll(streams); }
+            try
+            {
+                await Task.WhenAll(streams);
+            }
             finally
             {
                 // 종료 작업이 아직 Process 객체를 사용하는 동안 owner를 파괴하지 않는다.
-                try { if (termination is not null) await termination; }
-                finally { await Task.Run(owner.Dispose); }
+                try
+                {
+                    if (termination is not null)
+                    {
+                        await termination;
+                    }
+                }
+                finally
+                {
+                    await Task.Run(owner.Dispose);
+                }
             }
         }
     }
 
     internal static async Task<bool> CompletesWithinAsync(Task task, TimeSpan timeout)
     {
-        try { await task.WaitAsync(timeout); return true; }
-        catch (TimeoutException) { return false; }
-        catch (Exception) when (task.IsFaulted) { return true; }
+        try
+        {
+            await task.WaitAsync(timeout);
+            return true;
+        }
+        catch (TimeoutException)
+        {
+            return false;
+        }
+        catch (Exception) when (task.IsFaulted)
+        {
+            return true;
+        }
     }
 
     private sealed record CleanupOutcome(string Details, Task Completion);
@@ -176,32 +236,51 @@ public static class ProcessRunner
         // 동기 호출하지 않는다. 제한 시간을 넘기면 정리 대기 중임을 명시하고 호출에서 복귀한다.
         Task termination = Task.Run(async () =>
         {
-            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+
             await process.WaitForExitAsync();
         });
         if (!await CompletesWithinAsync(termination, TimeSpan.FromSeconds(3)))
+        {
             failures.Add("native termination exceeded deadline; background cleanup remains pending");
+        }
         else if (termination.IsFaulted)
+        {
             failures.Add("native termination: " + termination.Exception!.GetBaseException().Message);
+        }
         // 이미 종료한 parent의 분리된 descendants를 OS job/process-group 없이 모두 찾는다고 주장하지
         // 않는다. 남은 pipe는 닫고 bounded 복귀한다. 완전한 subtree 격리는 별도 Host 기능이다.
         // StreamReader.Dispose는 진행 중인 OS read를 동기적으로 기다릴 수 있다. 호출자 스레드에서
         // 직접 실행하지 않는다. 실제 Dispose 완료 전에는 Process도 파괴하지 않으며, 무기한 대기를
         // 호출자에게 성공으로 숨기지 않고 별도 실패로 보고한다.
         var resources = new List<IDisposable>();
-        if (hasInput && inputClose is null) resources.Add(process.StandardInput);
+        if (hasInput && inputClose is null)
+        {
+            resources.Add(process.StandardInput);
+        }
+
         resources.Add(process.StandardOutput);
         resources.Add(process.StandardError);
         Task prerequisites = inputClose is null ? termination : Task.WhenAll(termination, inputClose);
         Task cleanup = StartBackgroundCleanup(resources, process, prerequisites);
         if (!await CompletesWithinAsync(cleanup, TimeSpan.FromSeconds(3)))
+        {
             failures.Add("pipe closure exceeded deadline; background cleanup remains pending");
+        }
         else if (cleanup.IsFaulted)
+        {
             failures.Add("resource disposal: " + cleanup.Exception!.GetBaseException().Message);
+        }
         // timeout 이후에도 나중에 fault한 pipe task의 예외는 관찰한다.
         foreach (Task task in new Task[] { stdout, stderr, termination, prerequisites, cleanup })
+        {
             _ = task.ContinueWith(completed => { _ = completed.Exception; }, CancellationToken.None,
                 TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        }
+
         return new CleanupOutcome(string.Join("; ", failures), cleanup);
     }
 }

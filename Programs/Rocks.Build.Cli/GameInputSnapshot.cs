@@ -18,23 +18,50 @@ public static class GameInputSnapshot
         void Visit(string path)
         {
             path = Path.GetFullPath(path, project);
-            if (Inside(output, path) || Inside(sdk, path)) return;
+            if (Inside(output, path) || Inside(sdk, path))
+            {
+                return;
+            }
+
             if (!File.Exists(path) && !Directory.Exists(path))
+            {
                 throw new FileNotFoundException("Game build input does not exist.", path);
+            }
+
             if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+            {
                 throw new IOException("Game input snapshot cannot follow links: " + path);
-            if (!Directory.Exists(path)) { inputs.Add(path); return; }
-            if (!directories.Add(path)) return;
+            }
+
+            if (!Directory.Exists(path))
+            {
+                inputs.Add(path);
+                return;
+            }
+
+            if (!directories.Add(path))
+            {
+                return;
+            }
             // 빈 디렉터리와 파일 목록의 변화도 규칙 평가 결과를 바꿀 수 있다.
             inputs.Add(path + Path.DirectorySeparatorChar);
             foreach (var child in Directory.EnumerateFileSystemEntries(path))
             {
-                if (Directory.Exists(child) && Path.GetFileName(child) == ".git") continue;
+                if (Directory.Exists(child) && Path.GetFileName(child) == ".git")
+                {
+                    continue;
+                }
+
                 Visit(child);
             }
         }
+
         Visit(project);
-        foreach (var input in explicitInputs) Visit(input);
+        foreach (var input in explicitInputs)
+        {
+            Visit(input);
+        }
+
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         foreach (var input in inputs)
         {
@@ -45,6 +72,7 @@ public static class GameInputSnapshot
                 hash.AppendData(SHA256.HashData(stream));
             }
         }
+
         return Convert.ToHexStringLower(hash.GetHashAndReset());
     }
 

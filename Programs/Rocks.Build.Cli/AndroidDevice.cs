@@ -47,12 +47,18 @@ internal static class AndroidDevice
             string trimmed = line.Trim();
             if (trimmed.StartsWith("ROCKS_EXIT=", StringComparison.Ordinal) &&
                 int.TryParse(trimmed["ROCKS_EXIT=".Length..], out int parsed))
+            {
                 exit = parsed;
+            }
         }
+
         var pulled = await ProcessRunner.RunAsync(new(tool, ["pull", deviceReport, report],
             Directory.GetCurrentDirectory(), environment, Timeout: TimeSpan.FromMinutes(5)), cancellationToken);
         if (pulled.ExitCode != 0 && exit == 0)
+        {
             throw new InvalidOperationException("adb pull of the test report failed.");
+        }
+
         return exit;
     }
 
@@ -68,10 +74,18 @@ internal static class AndroidDevice
                          : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "Android", "sdk")
                  })
         {
-            if (sdk is null) continue;
+            if (sdk is null)
+            {
+                continue;
+            }
+
             string candidate = Path.Combine(sdk, "platform-tools", executable);
-            if (File.Exists(candidate)) return candidate;
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
         }
+
         return null;
     }
 }

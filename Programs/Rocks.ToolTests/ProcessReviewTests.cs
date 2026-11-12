@@ -12,8 +12,11 @@ internal static class ProcessReviewTests
             using TemporaryDirectory temporary = new();
             string marker = temporary.FilePath("started.txt");
             foreach (TimeSpan invalid in new[] { TimeSpan.Zero, TimeSpan.FromMilliseconds(-2), TimeSpan.MaxValue })
+            {
                 await Verify.ThrowsAsync<ArgumentOutOfRangeException>(() => ProcessRunner.RunAsync(
                     SelfProcess.Command(["child", "--review-marker", marker], options.Root, invalid)));
+            }
+
             await Task.Delay(300);
             Verify.That(!File.Exists(marker), "Rejected timeout launched a child");
         });
@@ -43,14 +46,20 @@ internal static class ProcessReviewTests
             try
             {
                 bool rejected = false;
-                try {
+                try
+                {
                     await ProcessRunner.RunAsync(SelfProcess.Command(["child", "--review-fork-pipe", childId], options.Root, TimeSpan.FromSeconds(1)));
                 }
-                catch (TimeoutException) { rejected = true; }
-                catch (IOException error) {
+                catch (TimeoutException)
+                {
+                    rejected = true;
+                }
+                catch (IOException error)
+                {
                     Verify.Contains("Process cleanup incomplete:", error.Message, "Expected explicit incomplete pipe cleanup");
                     rejected = true;
                 }
+
                 Verify.That(rejected, "An open descendant pipe was reported as successful completion");
                 Verify.That(Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(9), "Pipe drain ignored its deadline");
                 Verify.That(File.Exists(childId), "Fixture never spawned the pipe-holding child");
@@ -63,7 +72,11 @@ internal static class ProcessReviewTests
                     try
                     {
                         using Process descendant = Process.GetProcessById(int.Parse(File.ReadAllText(childId), System.Globalization.CultureInfo.InvariantCulture));
-                        if (!descendant.HasExited) descendant.Kill(entireProcessTree: true);
+                        if (!descendant.HasExited)
+                        {
+                            descendant.Kill(entireProcessTree: true);
+                        }
+
                         await descendant.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
                     }
                     catch (ArgumentException) { }
@@ -79,7 +92,11 @@ internal static class ProcessReviewTests
             try
             {
                 Environment.SetEnvironmentVariable(key, expected);
-                if (OperatingSystem.IsWindows()) Environment.SetEnvironmentVariable("VCToolsInstallDir", null);
+                if (OperatingSystem.IsWindows())
+                {
+                    Environment.SetEnvironmentVariable("VCToolsInstallDir", null);
+                }
+
                 Dictionary<string, string?> environment = await NativeEnvironment.CreateAsync();
                 Verify.Equal(expected, environment[key], "Native environment corrupted Unicode or equals in value");
             }
@@ -99,20 +116,27 @@ internal static class ProcessReviewTests
             await File.WriteAllTextAsync(arguments[1], "started");
             return 0;
         }
+
         if (arguments.SequenceEqual(new[] { "--review-hold-pipe" }))
         {
             await Task.Delay(TimeSpan.FromSeconds(30));
             return 0;
         }
+
         if (arguments.Length == 2 && arguments[0] == "--review-fork-pipe")
         {
             ProcessSpec command = SelfProcess.Command(["child", "--review-hold-pipe"], Directory.GetCurrentDirectory());
             ProcessStartInfo start = new(command.FileName) { UseShellExecute = false, CreateNoWindow = true };
-            foreach (string argument in command.Arguments) start.ArgumentList.Add(argument);
+            foreach (string argument in command.Arguments)
+            {
+                start.ArgumentList.Add(argument);
+            }
+
             using Process child = Process.Start(start) ?? throw new InvalidOperationException("Could not start child fixture");
             await File.WriteAllTextAsync(arguments[1], child.Id.ToString(System.Globalization.CultureInfo.InvariantCulture));
             return 0;
         }
+
         return null;
     }
 }

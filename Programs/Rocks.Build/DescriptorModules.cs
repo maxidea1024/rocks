@@ -75,8 +75,10 @@ public sealed class DescriptorModuleSet
         NativePlatform platform, NativeConfiguration configuration)
     {
         if (!project.TargetPlatforms.Contains(platform))
+        {
             throw new DescriptorException(project.FilePath,
                 $"the project does not target {platform} (targetPlatforms: {string.Join(", ", project.TargetPlatforms)}).");
+        }
 
         IReadOnlyList<PluginDescriptor> enabled = PluginCatalog.ResolveEnabled(project, available);
         var enabledNames = enabled.Select(plugin => plugin.Name).ToHashSet(StringComparer.Ordinal);
@@ -91,18 +93,24 @@ public sealed class DescriptorModuleSet
                 _ => module.SupportsPlatform(platform) ? null : $"the module does not support {platform}"
             };
             if (!result.TryAdd(module.Name, new(module, owner, file, fromPlugin, reason)))
+            {
                 throw new DescriptorException(file,
                     $"module '{module.Name}' is also declared by {result[module.Name].OwnerFile}.");
+            }
         }
 
         foreach (ModuleDescriptor module in project.Modules)
+        {
             Add(module, project.Name, project.FilePath, false, null);
+        }
 
         foreach (PluginDescriptor plugin in available.OrderBy(plugin => plugin.Name, StringComparer.Ordinal))
         {
             string? notEnabled = enabledNames.Contains(plugin.Name) ? null : $"plugin '{plugin.Name}' is not enabled";
             foreach (ModuleDescriptor module in plugin.Modules)
+            {
                 Add(module, plugin.Name, plugin.FilePath, true, notEnabled);
+            }
         }
 
         return new(project, result, enabled);
@@ -118,13 +126,17 @@ public sealed class DescriptorModuleSet
         foreach (NativeModuleInput rule in ruleModules)
         {
             if (!modules.TryGetValue(rule.Name, out DescribedModule? described))
+            {
                 throw new DescriptorException(Project.FilePath,
                     $"module '{rule.Name}' has rules but no descriptor declares it; add it to \"modules\" of " +
                     $"{Path.GetFileName(Project.FilePath)} or of its plugin's .rocksplugin.");
+            }
 
             if (!string.Equals(described.Name, rule.Name, StringComparison.Ordinal))
+            {
                 throw new DescriptorException(described.OwnerFile,
                     $"module '{described.Name}' differs in case from its rules name '{rule.Name}'.");
+            }
 
             rules.Add(rule.Name);
         }
@@ -132,24 +144,32 @@ public sealed class DescriptorModuleSet
         foreach (DescribedModule module in Modules)
         {
             if (!rules.Contains(module.Name))
+            {
                 throw new DescriptorException(module.OwnerFile,
                     $"declared module '{module.Name}' has no rules (expected a ModuleRules class named '{module.Name}' in a *.Build.cs file).");
+            }
         }
 
         void RequireIncluded(string name, string user)
         {
             if (modules.TryGetValue(name, out DescribedModule? module) && !module.Included)
+            {
                 throw new DescriptorException(module.OwnerFile, $"{user} uses module '{name}', which is excluded: {module.ExcludedReason}.");
+            }
         }
 
         foreach (string target in targetModules)
+        {
             RequireIncluded(target, "the target");
+        }
 
         var included = ruleModules.Where(rule => modules[rule.Name].Included).ToList();
         foreach (NativeModuleInput rule in included)
         {
             foreach (string dependency in rule.Dependencies)
+            {
                 RequireIncluded(dependency, $"module '{rule.Name}'");
+            }
         }
 
         return included;

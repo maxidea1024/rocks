@@ -86,4 +86,5 @@ if (OperatingSystem.IsMacOS())
         Console.Error.WriteLine($"  exit={closedStderr.ExitCode}");
     }
 }
+
 return failures == 0 ? 0 : 1;

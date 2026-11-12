@@ -45,11 +45,15 @@ public static class NumberTables
             significands.Add(value);
             exponents.Add(exponent);
         }
+
         text.Append("// 5^q ≈ Pow5Significand[q + 342] · 2^Pow5Exponent[q + 342](내림, 상위 비트 2^127이 켜져 있다).\n");
         Emit128(text, "Pow5Significand", significands);
         text.Append("inline constexpr int16 Pow5Exponent[] = {\n");
         for (int index = 0; index < exponents.Count; index += 12)
+        {
             text.Append("    ").Append(string.Join(", ", exponents.Skip(index).Take(12))).Append(",\n");
+        }
+
         text.Append("};\n\n");
 
         var inverse = new List<BigInteger>();
@@ -58,6 +62,7 @@ public static class NumberTables
             BigInteger power = BigInteger.Pow(5, q);
             inverse.Add((BigInteger.One << ((int)power.GetBitLength() - 1 + RyuBitCount)) / power + 1);
         }
+
         text.Append("// Ryu: ⌊2^(B(q) − 1 + 125) / 5^q⌋ + 1(B(q) = 5^q의 비트 길이).\n");
         Emit128(text, "Pow5InvSplit", inverse);
 
@@ -68,6 +73,7 @@ public static class NumberTables
             int length = (int)power.GetBitLength();
             split.Add(length >= RyuBitCount ? power >> (length - RyuBitCount) : power << (RyuBitCount - length));
         }
+
         text.Append("// Ryu: 5^i를 125비트로 맞춘 값(넘치는 비트는 버린다).\n");
         Emit128(text, "Pow5Split", split);
         text.Append("// clang-format on\n\n} // namespace rocks::detail::decimal\n");
@@ -102,9 +108,15 @@ public static class NumberTables
     {
         string path = Path.Combine(Path.GetFullPath(root), OutputPath);
         if (!Directory.Exists(Path.GetDirectoryName(path)!))
+        {
             return [];
+        }
+
         if (!File.Exists(path))
+        {
             return [new(OutputPath, 0, "number-tables", "generated decimal tables are missing (run number-tables --write)")];
+        }
+
         return File.ReadAllText(path, new UTF8Encoding(false)) == Generate()
             ? []
             : [new(OutputPath, 0, "number-tables", "generated decimal tables are stale or edited (run number-tables --write)")];
@@ -116,7 +128,10 @@ public static class NumberTables
         string expected = Generate();
         string path = Path.Combine(Path.GetFullPath(root), OutputPath);
         if (File.Exists(path) && File.ReadAllText(path, new UTF8Encoding(false)) == expected)
+        {
             return false;
+        }
+
         if (write)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -124,6 +139,7 @@ public static class NumberTables
             File.WriteAllText(temporary, expected, new UTF8Encoding(false));
             File.Move(temporary, path, overwrite: true);
         }
+
         return true;
     }
 
@@ -134,9 +150,13 @@ public static class NumberTables
         foreach (BigInteger value in values)
         {
             if (value.Sign < 0 || value.GetBitLength() > 128)
+            {
                 throw new InvalidOperationException(name + " value does not fit in 128 bits");
+            }
+
             text.Append($"    {{0x{(ulong)(value & mask):X16}u, 0x{(ulong)(value >> 64):X16}u}},\n");
         }
+
         text.Append("};\n\n");
     }
 }

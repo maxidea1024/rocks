@@ -19,7 +19,9 @@ internal static class PlatformPrivateHeaderTests
         string publicBase = Path.Combine(root, "Core/Source/Runtime/Base/Public");
         string app = Path.Combine(root, "App");
         foreach (string directory in new[] { mac, common, apple, posix, publicPlatform, publicBase, app })
+        {
             Directory.CreateDirectory(directory);
+        }
 
         string header = Path.Combine(apple, "ApplePlatformPath.h");
         string pathSource = Path.Combine(mac, "Path.cpp");
@@ -41,7 +43,10 @@ internal static class PlatformPrivateHeaderTests
         // framework는 Apple toolchain에서만 링크할 수 있다. 이 시험은 헤더 의존 추적만 보며 고정 원본은 OS API를 쓰지
         // 않으므로, 다른 호스트에서는 규칙 결과에서 framework만 뺀다(빼지 않으면 입력 검증이 거부한다).
         if (toolchain.Platform != NativePlatform.MacOS)
+        {
             platform = platform with { Frameworks = [] };
+        }
+
         var application = new NativeModuleInput
         {
             Name = "PathHeaderFixture",
@@ -92,6 +97,8 @@ internal static class PlatformPrivateHeaderTests
     private static void Require(bool condition, string message)
     {
         if (!condition)
+        {
             throw new InvalidOperationException(message);
+        }
     }
 }

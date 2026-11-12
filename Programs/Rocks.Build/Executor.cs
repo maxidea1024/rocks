@@ -15,7 +15,10 @@ internal static class Executor
         cancellationToken.ThrowIfCancellationRequested();
         string key = action.Key(toolchainKey, outputRoot, request.RootDirectory);
         if (store.IsCurrent(action, key))
+        {
             return Result(action, false, true, 0, "", "");
+        }
+
         string temporaryRoot = Path.Combine(outputRoot, ".native-tmp", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(temporaryRoot);
         string[] stagedOutputs = action.Outputs.Select(path => Path.Combine(temporaryRoot, Path.GetFileName(path))).ToArray();
@@ -35,18 +38,25 @@ internal static class Executor
                 process = await (runProcess ?? ProcessRunner.RunAsync)(new ProcessSpec(action.Tool,
                     action.ResolveArguments(stagedOutputs), request.RootDirectory, request.Toolchain.Environment), cancellationToken);
             }
+
             cancellationToken.ThrowIfCancellationRequested();
             if (process.ExitCode != 0)
+            {
                 result = Result(action, true, false, process.ExitCode, process.StdOut, process.StdErr);
+            }
             else if (stagedOutputs.Any(path => !File.Exists(path)))
+            {
                 result = Result(action, true, false, -1, process.StdOut, process.StdErr + "\nNative tool did not produce every declared output.");
+            }
             else if (action.Key(toolchainKey, outputRoot, request.RootDirectory) != key)
+            {
                 result = Result(action, true, false, -1, process.StdOut, process.StdErr + "\nBuild inputs changed during the action; outputs were not published.");
+            }
             else
             {
 
-            // dependency는 이 함수가 모든 출력을 게시한 뒤에만 실행된다. crash로 부분 교체가 남아도
-            // cache index의 모든 output hash가 일치해야 hit이므로 부분 산출물을 성공으로 재사용하지 않는다.
+                // dependency는 이 함수가 모든 출력을 게시한 뒤에만 실행된다. crash로 부분 교체가 남아도
+                // cache index의 모든 output hash가 일치해야 hit이므로 부분 산출물을 성공으로 재사용하지 않는다.
                 PublishOutputs(action.Outputs, stagedOutputs, temporaryRoot);
                 store.Publish(action, key);
                 result = Result(action, true, true, 0, process.StdOut, process.StdErr);
@@ -58,9 +68,12 @@ internal static class Executor
             store.Forget(action.Id);
             unsafeToDelete = true;
             if (error.InnerException is OperationCanceledException cancelled)
+            {
                 throw new OperationCanceledException(cancelled.Message +
                     $"\nTemporary output retained because process cleanup is incomplete: {temporaryRoot}. {error.Message}",
                     error, cancelled.CancellationToken);
+            }
+
             result = Result(action, true, false, -1, "", error.ToString() +
                 $"\nTemporary output retained because process cleanup is incomplete: {temporaryRoot}");
         }
@@ -88,15 +101,30 @@ internal static class Executor
                 store.Forget(action.Id);
                 string diagnostic = $"Temporary output cleanup failed: {temporaryRoot}: {error.Message}";
                 if (pending is OperationCanceledException cancelled)
+                {
                     throw new OperationCanceledException(cancelled.Message + "\n" + diagnostic, cancelled, cancelled.CancellationToken);
+                }
+
                 if (pending is not null)
+                {
                     throw new IOException(diagnostic, pending);
+                }
+
                 NativeActionResult original = result ?? throw new InvalidOperationException("Action result is missing.");
-                result = original with { Succeeded = false, ExitCode = original.ExitCode == 0 ? -1 : original.ExitCode,
-                    StdErr = original.StdErr + "\n" + diagnostic };
+                result = original with
+                {
+                    Succeeded = false,
+                    ExitCode = original.ExitCode == 0 ? -1 : original.ExitCode,
+                    StdErr = original.StdErr + "\n" + diagnostic
+                };
             }
         }
-        if (pending is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(pending).Throw();
+
+        if (pending is not null)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(pending).Throw();
+        }
+
         return result!;
     }
 
@@ -118,6 +146,7 @@ internal static class Executor
                     backups.Add(output, backup);
                 }
             }
+
             for (int index = 0; index < outputs.Count; ++index)
             {
                 File.Move(staged[index], outputs[index], true);
@@ -128,9 +157,16 @@ internal static class Executor
         {
             foreach (string output in published)
             {
-                if (backups.TryGetValue(output, out string? backup)) File.Move(backup, output, true);
-                else File.Delete(output);
+                if (backups.TryGetValue(output, out string? backup))
+                {
+                    File.Move(backup, output, true);
+                }
+                else
+                {
+                    File.Delete(output);
+                }
             }
+
             throw;
         }
     }

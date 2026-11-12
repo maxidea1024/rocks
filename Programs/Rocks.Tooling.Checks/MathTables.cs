@@ -25,23 +25,39 @@ public static class MathTables
         for (int k = 0; k < 256; ++k)
         {
             if (k == 0)
+            {
                 decode[k] = 0;
+            }
             else if (k <= 10)
+            {
                 decode[k] = RoundRational(5 * (BigInteger)k, 16473, ceiling: false); // k/255/12.92 = 5k/16473
+            }
             else
+            {
                 decode[k] = PowerFloat(1000 * (BigInteger)k + 14025, 269025, ceiling: false); // ((k/255+0.055)/1.055)^2.4
+            }
         }
+
         var thresholds = new uint[255];
         for (int k = 0; k < 255; ++k)
         {
             if (k <= 9)
+            {
                 thresholds[k] = RoundRational(5 * (2 * (BigInteger)k + 1), 32946, ceiling: true); // (k+0.5)/255/12.92
+            }
             else
+            {
                 thresholds[k] = PowerFloat(2000 * (BigInteger)k + 29050, 538050, ceiling: true);
+            }
         }
+
         for (int k = 1; k < 255; ++k)
+        {
             if (thresholds[k] <= thresholds[k - 1])
+            {
                 throw new InvalidOperationException("sRGB thresholds must increase");
+            }
+        }
 
         var text = new StringBuilder();
         text.Append("// 생성 파일이다. 직접 고치지 않는다: Rocks.ToolTests math-tables --root . --write\n");
@@ -68,12 +84,20 @@ public static class MathTables
         {
             string path = Path.Combine(Path.GetFullPath(root), relative);
             if (!Directory.Exists(Path.GetDirectoryName(path)!))
+            {
                 continue;
+            }
+
             if (!File.Exists(path))
+            {
                 failures.Add(new(relative, 0, "math-tables", "generated math table is missing (run math-tables --write)"));
+            }
             else if (File.ReadAllText(path, new UTF8Encoding(false)) != generate())
+            {
                 failures.Add(new(relative, 0, "math-tables", "generated math table is stale or edited (run math-tables --write)"));
+            }
         }
+
         return failures;
     }
 
@@ -86,15 +110,22 @@ public static class MathTables
             string expected = generate();
             string path = Path.Combine(Path.GetFullPath(root), relative);
             if (File.Exists(path) && File.ReadAllText(path, new UTF8Encoding(false)) == expected)
+            {
                 continue;
+            }
+
             changed.Add(relative);
             if (!write)
+            {
                 continue;
+            }
+
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             string temporary = path + ".tmp";
             File.WriteAllText(temporary, expected, new UTF8Encoding(false));
             File.Move(temporary, path, overwrite: true);
         }
+
         return changed;
     }
 
@@ -102,7 +133,10 @@ public static class MathTables
     {
         text.Append($"inline constexpr uint32 {name}[] = {{\n");
         for (int index = 0; index < values.Length; index += 8)
+        {
             text.Append("    ").Append(string.Join(", ", values.Skip(index).Take(8).Select(value => $"0x{value:X8}u"))).Append(",\n");
+        }
+
         text.Append("};\n\n");
     }
 
@@ -116,7 +150,10 @@ public static class MathTables
         {
             int exponent = E + 150;
             if (exponent <= 0 || exponent >= 255)
+            {
                 throw new InvalidOperationException("sRGB table value is not a normal float");
+            }
+
             return ((uint)exponent << 23) | (uint)(M - (BigInteger.One << 23));
         }
     }
@@ -134,11 +171,13 @@ public static class MathTables
                 ++e;
                 continue;
             }
+
             if (m < (BigInteger.One << 23))
             {
                 --e;
                 continue;
             }
+
             bool up = ceiling ? remainder > 0 : (remainder * 2 > denominator || (remainder * 2 == denominator && !m.IsEven));
             var candidate = new Candidate(m, e);
             return (up ? candidate.Next() : candidate).Bits();
@@ -156,9 +195,14 @@ public static class MathTables
             BigInteger left = BigInteger.Pow(m, 5) * scale;
             BigInteger right = target;
             if (e >= 0)
+            {
                 left <<= 5 * e;
+            }
             else
+            {
                 right <<= -5 * e;
+            }
+
             return left.CompareTo(right);
         }
 
@@ -169,14 +213,21 @@ public static class MathTables
         {
             // 이상인 가장 작은 float: c^5 ≥ target이고 이전 float는 아님.
             while (Compare(candidate.M, candidate.E) < 0)
+            {
                 candidate = candidate.Next();
+            }
+
             while (true)
             {
                 Candidate previous = candidate.Previous();
                 if (Compare(previous.M, previous.E) < 0)
+                {
                     break;
+                }
+
                 candidate = previous;
             }
+
             return candidate.Bits();
         }
         // 가장 가까운 float: 위·아래 중간점((2m ± 1)·2^(e−1))의 5제곱과 비교한다.
@@ -193,6 +244,7 @@ public static class MathTables
                 candidate = next;
                 continue;
             }
+
             Candidate previous = candidate.Previous();
             (BigInteger lowerM, int lowerE) = previous.E == candidate.E
                 ? (2 * candidate.M - 1, candidate.E - 1)
@@ -204,6 +256,7 @@ public static class MathTables
                 candidate = previous;
                 continue;
             }
+
             return candidate.Bits();
         }
     }

@@ -9,9 +9,21 @@ public static class NativeCompileProfile
     public static IReadOnlyList<string> Arguments(NativeToolchain toolchain, NativeConfiguration configuration,
         CodeOptimization optimization = CodeOptimization.Default, NativeLanguage language = NativeLanguage.Cpp)
     {
-        if (!Enum.IsDefined(configuration)) throw new ArgumentException($"Invalid native configuration: {configuration}");
-        if (!Enum.IsDefined(optimization)) throw new ArgumentException($"Invalid code optimization: {optimization}");
-        if (!Enum.IsDefined(language)) throw new ArgumentException($"Invalid native language: {language}");
+        if (!Enum.IsDefined(configuration))
+        {
+            throw new ArgumentException($"Invalid native configuration: {configuration}");
+        }
+
+        if (!Enum.IsDefined(optimization))
+        {
+            throw new ArgumentException($"Invalid code optimization: {optimization}");
+        }
+
+        if (!Enum.IsDefined(language))
+        {
+            throw new ArgumentException($"Invalid native language: {language}");
+        }
+
         return toolchain.CompileArguments.Concat(ActionGraph.CompileFlags(toolchain, configuration, optimization, language)).ToArray();
     }
 }

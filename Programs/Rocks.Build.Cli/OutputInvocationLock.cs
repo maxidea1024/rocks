@@ -17,7 +17,10 @@ public static class OutputInvocationLock
         ArgumentException.ThrowIfNullOrWhiteSpace(output);
         TimeSpan limit = maximumWait ?? DefaultMaximumWait;
         if (limit <= TimeSpan.Zero || limit > TimeSpan.FromDays(1))
+        {
             throw new ArgumentOutOfRangeException(nameof(maximumWait));
+        }
+
         cancellationToken.ThrowIfCancellationRequested();
         string directory = Path.GetFullPath(output);
         Directory.CreateDirectory(directory);
@@ -26,7 +29,11 @@ public static class OutputInvocationLock
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (Directory.Exists(path)) throw new IOException("Output invocation lock path is a directory: " + path);
+            if (Directory.Exists(path))
+            {
+                throw new IOException("Output invocation lock path is a directory: " + path);
+            }
+
             try
             {
                 var stream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
@@ -35,14 +42,21 @@ public static class OutputInvocationLock
                     stream.Dispose();
                     cancellationToken.ThrowIfCancellationRequested();
                 }
+
                 return stream;
             }
             catch (IOException error)
             {
-                if (Directory.Exists(path)) throw new IOException("Output invocation lock path is a directory: " + path, error);
+                if (Directory.Exists(path))
+                {
+                    throw new IOException("Output invocation lock path is a directory: " + path, error);
+                }
+
                 TimeSpan remaining = limit - Stopwatch.GetElapsedTime(start);
                 if (remaining <= TimeSpan.Zero)
+                {
                     throw new TimeoutException($"Output invocation lock could not be acquired within {limit}: {path}", error);
+                }
                 // 다른 호출이 소유한 동안 bounded polling한다. 취소는 다음 대기에서 즉시 반영한다.
                 await Task.Delay(remaining < TimeSpan.FromMilliseconds(50) ? remaining : TimeSpan.FromMilliseconds(50), cancellationToken);
             }

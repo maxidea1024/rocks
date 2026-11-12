@@ -30,6 +30,7 @@ public sealed class NativeBuildEngine
             Task<NativeActionResult>[] predecessors = action.Dependencies.Select(id => tasks[id]).ToArray();
             tasks.Add(action.Id, RunAsync(action, predecessors));
         }
+
         NativeActionResult[] results;
         bool stable = false;
         try
@@ -40,20 +41,35 @@ public sealed class NativeBuildEngine
         {
             // 취소/예외에서도 입력 변경을 검사한다. 변화 중 생성된 산출물은 다음 실행에서 hit이
             // 되면 안 되므로 완료된 action의 cache entry를 제거한다.
-            try { stable = toolchainKey == Fingerprints.Toolchain(request.Toolchain) && initialInputs == InputSnapshot(request, plan); }
-            catch (IOException) { stable = false; }
+            try
+            {
+                stable = toolchainKey == Fingerprints.Toolchain(request.Toolchain) && initialInputs == InputSnapshot(request, plan);
+            }
+            catch (IOException)
+            {
+                stable = false;
+            }
+
             if (!stable)
+            {
                 foreach (var task in tasks.Values.Where(value => value.IsCompletedSuccessfully && value.Result.Executed))
+                {
                     store.Forget(task.Result.Id);
+                }
+            }
+
             store.Save();
         }
+
         bool succeeded = stable && results.All(value => value.Succeeded);
         return new NativeBuildResult
         {
             Succeeded = succeeded,
             ExecutedActions = results.Count(value => value.Executed),
             SkippedActions = results.Count(value => !value.Executed && value.Succeeded),
-            ModuleOutputs = plan.ModuleOutputs, Actions = results, CompilationDatabasePath = compilationDatabase,
+            ModuleOutputs = plan.ModuleOutputs,
+            Actions = results,
+            CompilationDatabasePath = compilationDatabase,
             Failure = !stable ? "Source/toolchain inputs changed during the build." :
                 results.FirstOrDefault(value => !value.Succeeded)?.StdErr
         };
@@ -63,12 +79,20 @@ public sealed class NativeBuildEngine
             var completed = await Task.WhenAll(dependencies);
             cancellationToken.ThrowIfCancellationRequested();
             if (completed.Any(value => !value.Succeeded))
+            {
                 return new(action.Id, action.Module, action.Kind, false, false, -1, "",
                     "A prerequisite action failed.", action.Outputs[0]);
+            }
             // 의존 작업을 기다리는 동안 실행 슬롯을 보유하지 않아 작은 예산에서도 진척한다.
             await slots.WaitAsync(cancellationToken);
-            try { return await Executor.RunAsync(request, action, request.OutputDirectory, toolchainKey, store, cancellationToken); }
-            finally { slots.Release(); }
+            try
+            {
+                return await Executor.RunAsync(request, action, request.OutputDirectory, toolchainKey, store, cancellationToken);
+            }
+            finally
+            {
+                slots.Release();
+            }
         }
     }
 
@@ -88,8 +112,14 @@ public sealed class NativeBuildEngine
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            try { return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
-            catch (IOException) { await Task.Delay(50, cancellationToken); }
+            try
+            {
+                return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException)
+            {
+                await Task.Delay(50, cancellationToken);
+            }
         }
     }
 }

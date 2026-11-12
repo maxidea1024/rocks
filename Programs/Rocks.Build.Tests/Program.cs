@@ -4,7 +4,12 @@ using System.Text.Json;
 using Rocks.Build;
 using Rocks.Tooling.Common;
 
-if (args.Contains("--fake-child")) { await Task.Delay(Timeout.InfiniteTimeSpan); return 0; }
+if (args.Contains("--fake-child"))
+{
+    await Task.Delay(Timeout.InfiniteTimeSpan);
+    return 0;
+}
+
 if (args.Contains("--fake-compiler"))
 {
     string marker = args[Array.IndexOf(args, "--fake-compiler") + 1];
@@ -46,20 +51,40 @@ try
         new() { Name = "Engine", Sources = [librarySource], Dependencies = ["Headers"] },
         new() { Name = "Game", Kind = NativeModuleKind.Executable, Sources = [gameSource], Dependencies = ["Engine"] }
     };
-    var request = new NativeBuildRequest { RootDirectory = root, OutputDirectory = Path.Combine(root, "out"),
-        Toolchain = toolchain, Modules = modules, Targets = ["Game"], MaxParallelism = 4 };
+    var request = new NativeBuildRequest
+    {
+        RootDirectory = root,
+        OutputDirectory = Path.Combine(root, "out"),
+        Toolchain = toolchain,
+        Modules = modules,
+        Targets = ["Game"],
+        MaxParallelism = 4
+    };
     var builder = new NativeBuildEngine();
     async Task<NativeBuildResult> Build(NativeBuildRequest? input = null)
     {
         var value = await builder.BuildAsync(input ?? request);
-        if (!value.Succeeded) throw new InvalidOperationException(value.Failure + "\n" + string.Join("\n", value.Actions.Select(action => action.StdOut + action.StdErr)));
+        if (!value.Succeeded)
+        {
+            throw new InvalidOperationException(value.Failure + "\n" + string.Join("\n", value.Actions.Select(action => action.StdOut + action.StdErr)));
+        }
+
         return value;
     }
+
     void Check(bool condition, string message)
     {
-        if (!condition) throw new InvalidOperationException(message);
+        if (!condition)
+        {
+            throw new InvalidOperationException(message);
+        }
     }
-    void Pass(string name) { ++passed; Console.WriteLine("PASS " + name); }
+
+    void Pass(string name)
+    {
+        ++passed;
+        Console.WriteLine("PASS " + name);
+    }
 
     await PlatformSelectionTests.RunAsync(request, root);
     Pass("platform routing rejects unknown and mismatched targets");
@@ -84,6 +109,7 @@ try
                 "Invalid parallelism must fail before creating build output.");
         }
     }
+
     Pass("invalid process parallelism rejected before output creation");
 
     var cold = await Build();
@@ -177,6 +203,7 @@ try
         throw new InvalidOperationException("Cycle accepted");
     }
     catch (ArgumentException) { }
+
     Pass("module cycle rejection");
 
     foreach (var badRequest in new[]
@@ -187,9 +214,14 @@ try
         request with { Modules = [new() { Name = "CON" }], Targets = ["CON"] }
     })
     {
-        try { await builder.BuildAsync(badRequest); throw new InvalidOperationException("Invalid input accepted"); }
+        try
+        {
+            await builder.BuildAsync(badRequest);
+            throw new InvalidOperationException("Invalid input accepted");
+        }
         catch (ArgumentException) { }
     }
+
     Pass("invalid output, warning downgrade, duplicate source and reserved module rejected");
 
     string generated = Directory.CreateDirectory(Path.Combine(root, "out", "Generated")).FullName;
@@ -236,17 +268,34 @@ try
         {
             if (File.Exists(marker) && int.TryParse(File.ReadAllText(marker), System.Globalization.NumberStyles.None,
                     System.Globalization.CultureInfo.InvariantCulture, out childId) && childId > 0)
+            {
                 break;
+            }
         }
         catch (IOException) { }
+
         await Task.Delay(10, cancellation.Token);
     }
+
     cancellation.Cancel();
-    try { await cancelling; throw new InvalidOperationException("Cancellation ignored"); }
+    try
+    {
+        await cancelling;
+        throw new InvalidOperationException("Cancellation ignored");
+    }
     catch (OperationCanceledException) { }
+
     bool childAlive;
-    try { using var child = Process.GetProcessById(childId); childAlive = !child.HasExited; }
-    catch (ArgumentException) { childAlive = false; }
+    try
+    {
+        using var child = Process.GetProcessById(childId);
+        childAlive = !child.HasExited;
+    }
+    catch (ArgumentException)
+    {
+        childAlive = false;
+    }
+
     Check(!childAlive, "Cancelled compiler child survived");
     Check(!Directory.EnumerateFileSystemEntries(Path.Combine(cancellationRequest.OutputDirectory, ".native-tmp")).Any(), "Cancelled temporary output retained");
     var afterCancel = await Build(request with { OutputDirectory = cancellationRequest.OutputDirectory });
@@ -266,5 +315,8 @@ catch (Exception error)
 finally
 {
     // 작업 시작 시 직접 만든 고유 임시 경로만 정리한다. 실패 시 원인 자료를 보존한다.
-    if (allPassed && Directory.Exists(root)) Directory.Delete(root, true);
+    if (allPassed && Directory.Exists(root))
+    {
+        Directory.Delete(root, true);
+    }
 }

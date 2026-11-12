@@ -57,12 +57,16 @@ internal static class SystemLibraryTests
             Rejects(With(engine => engine with { SystemLibraries = [name] }), "bare library or framework name",
                 $"system library '{name}' accepted");
             if (apple)
+            {
                 Rejects(With(engine => engine with { Frameworks = [name] }), "bare library or framework name",
                     $"framework '{name}' accepted");
+            }
         }
         // 버전 접미사·밑줄·점·하이픈·더하기는 실제 시스템 라이브러리 이름에 쓰이므로 받는다.
         foreach (string name in new[] { "d3d12", "user32", "c++", "z", "android-log", "vulkan_1", "GL.1" })
+        {
             InputValidation.Validate(With(engine => engine with { SystemLibraries = [name] }));
+        }
     }
 
     private static void Rejects(NativeBuildRequest request, string diagnostic, string message)
@@ -74,15 +78,21 @@ internal static class SystemLibraryTests
         catch (ArgumentException error)
         {
             if (!error.Message.Contains(diagnostic, StringComparison.Ordinal))
+            {
                 throw new InvalidOperationException(message + ": unexpected diagnostic " + error.Message);
+            }
+
             return;
         }
+
         throw new InvalidOperationException(message);
     }
 
     private static void Check(bool condition, string message)
     {
         if (!condition)
+        {
             throw new InvalidOperationException(message);
+        }
     }
 }

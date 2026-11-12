@@ -36,6 +36,7 @@ internal static class ApplePropertyLocationTests
                 var field = Field(path, source, source.IndexOf("int key", StringComparison.Ordinal));
                 Verify.Throws<MetadataException>(() => Validate(path, field));
             }
+
             const string wrapper = "WRAPPER() int key;\n";
             File.WriteAllText(path, wrapper);
             var wrapped = Field(path, wrapper, wrapper.IndexOf("int key", StringComparison.Ordinal), marker: 0);
@@ -60,7 +61,9 @@ internal static class ApplePropertyLocationTests
                 Mutate(path, source, type, root => root["loc"]!.AsObject().Remove("file")),
                 Mutate(path, source, type, root => root["range"]!["begin"]!["offset"] = 0),
             })
+            {
                 Verify.Throws<MetadataException>(() => Validate(path, mutation));
+            }
         });
     }
 
@@ -84,7 +87,8 @@ internal static class ApplePropertyLocationTests
         var begin = llvm ? new JsonObject { ["expansionLoc"] = expansion.DeepClone() } : new JsonObject { ["offset"] = type };
         return new JsonObject
         {
-            ["id"] = "field-id", ["kind"] = "FieldDecl",
+            ["id"] = "field-id",
+            ["kind"] = "FieldDecl",
             ["loc"] = new JsonObject { ["file"] = path, ["offset"] = declaration },
             ["range"] = new JsonObject { ["begin"] = begin },
             ["inner"] = new JsonArray(new JsonObject

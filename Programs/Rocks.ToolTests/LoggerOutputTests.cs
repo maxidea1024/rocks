@@ -11,13 +11,21 @@ internal static class LoggerOutputTests
         {
             var start = new ProcessStartInfo(executable)
             {
-                WorkingDirectory = options.Root, UseShellExecute = false,
-                RedirectStandardError = true, RedirectStandardInput = true, CreateNoWindow = true
+                WorkingDirectory = options.Root,
+                UseShellExecute = false,
+                RedirectStandardError = true,
+                RedirectStandardInput = true,
+                CreateNoWindow = true
             };
             start.Environment.Clear();
-            foreach (var pair in environment) start.Environment[pair.Key] = pair.Value;
+            foreach (var pair in environment)
+            {
+                start.Environment[pair.Key] = pair.Value;
+            }
+
             return start;
         }
+
         suite.Add("Native.Logger.StderrUtf8AndEmbeddedNul", async () =>
         {
             var start = StartInfo();

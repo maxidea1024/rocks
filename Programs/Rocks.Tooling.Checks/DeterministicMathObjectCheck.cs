@@ -75,7 +75,10 @@ public static class DeterministicMathObjectCheck
         {
             string directory = entry.TryGetProperty("directory", out JsonElement value) ? value.GetString()! : root;
             if (!Path.GetFullPath(entry.GetProperty("file").GetString()!, Path.GetFullPath(directory)).StartsWith(source, comparison))
+            {
                 continue;
+            }
+
             string[] arguments = entry.GetProperty("arguments").EnumerateArray().Select(item => item.GetString()!).ToArray();
             entries.Add((Path.GetFullPath(entry.GetProperty("output").GetString()!, Path.GetFullPath(directory)),
                 NativeEnvironment.FindExecutable(arguments[0], environment), arguments));
@@ -93,7 +96,10 @@ public static class DeterministicMathObjectCheck
                 byte[] header = new byte[4];
                 int read;
                 using (FileStream stream = File.OpenRead(objectPath))
+                {
                     read = stream.ReadAtLeast(header, header.Length, throwOnEndOfStream: false);
+                }
+
                 if (read < header.Length)
                 {
                     failures.Add($"{name}: object file is shorter than an object header ({objectPath})");
@@ -109,7 +115,10 @@ public static class DeterministicMathObjectCheck
                     List<string> codegen = ["-O2", "-ffp-contract=off", "-c", "-x", "ir", objectPath, "-o", machine];
                     string? target = arguments.FirstOrDefault(argument => argument.StartsWith("--target=", StringComparison.Ordinal));
                     if (target is not null)
+                    {
                         codegen.Insert(0, target);
+                    }
+
                     await RunToolAsync(FindTool(compiler, "clang", null, environment), codegen.ToArray(), root, environment,
                         cancellationToken);
                 }
@@ -117,20 +126,31 @@ public static class DeterministicMathObjectCheck
                 var symbols = await RunToolAsync(FindTool(compiler, "llvm-nm", "/usr/bin/nm", environment), ["-u", "-j", machine], root,
                     environment, cancellationToken);
                 foreach (string symbol in symbols.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
                     if (!IsAllowedSymbol(symbol, sanitizer))
+                    {
                         failures.Add($"{name}: external symbol '{symbol}' is not in the deterministic math allow-list");
+                    }
+                }
+
                 var disassembly = await RunToolAsync(FindTool(compiler, "llvm-objdump", "/usr/bin/objdump", environment),
                     ["-d", "--no-show-raw-insn", machine], root, environment, cancellationToken);
                 foreach (string instruction in ForbiddenInstructions(disassembly))
+                {
                     failures.Add($"{name}: forbidden instruction '{instruction}'");
+                }
+
                 ++verified;
             }
         }
         finally
         {
             if (Directory.Exists(temporary))
+            {
                 Directory.Delete(temporary, recursive: true);
+            }
         }
+
         return new Result(verified, bitcode, failures);
     }
 
@@ -166,13 +186,19 @@ public static class DeterministicMathObjectCheck
             // 명령 줄은 "주소: mnemonic 피연산자" 형태다.
             int colon = line.IndexOf(':');
             if (colon <= 0 || !line[..colon].All(Uri.IsHexDigit))
+            {
                 continue;
+            }
+
             string[] tokens = line[(colon + 1)..].Split([' ', '\t', ','], StringSplitOptions.RemoveEmptyEntries);
             bool forbidden = tokens.Any(token => FusedMnemonic.IsMatch(token) || (arm && ArmApproximation.IsMatch(token)) ||
                                                  (x86 && X86Forbidden.IsMatch(token)));
             if (forbidden)
+            {
                 found.Add(line);
+            }
         }
+
         return found;
     }
 
@@ -186,7 +212,10 @@ public static class DeterministicMathObjectCheck
         string executable = llvmName + (OperatingSystem.IsWindows() ? ".exe" : "");
         string beside = Path.Combine(Path.GetDirectoryName(compiler)!, executable);
         if (File.Exists(beside))
+        {
             return beside;
+        }
+
         try
         {
             return NativeEnvironment.FindExecutable(llvmName, environment);
@@ -194,7 +223,10 @@ public static class DeterministicMathObjectCheck
         catch (Exception error) when (error is FileNotFoundException or InvalidOperationException)
         {
             if (OperatingSystem.IsMacOS() && macFallback is not null && File.Exists(macFallback))
+            {
                 return macFallback;
+            }
+
             throw new FileNotFoundException($"{llvmName} not found beside the compiler or on PATH; install it with the toolchain.", beside);
         }
     }
@@ -205,7 +237,10 @@ public static class DeterministicMathObjectCheck
         var result = await ProcessRunner.RunAsync(new(tool, arguments, root, environment, Timeout: TimeSpan.FromMinutes(2)),
             cancellationToken);
         if (result.ExitCode != 0)
+        {
             throw new InvalidOperationException($"{Path.GetFileName(tool)} failed with exit {result.ExitCode}: {result.StdErr.Trim()}");
+        }
+
         return result.StdOut.Replace("\r", "", StringComparison.Ordinal);
     }
 }

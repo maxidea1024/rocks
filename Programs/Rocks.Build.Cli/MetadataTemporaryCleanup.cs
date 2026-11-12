@@ -13,15 +13,31 @@ internal static class MetadataTemporaryCleanup
         List<string> failures = [];
         foreach (string path in paths)
         {
-            try { delete(path); }
+            try
+            {
+                delete(path);
+            }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-            { failures.Add(path + ": " + error.Message); }
+            {
+                failures.Add(path + ": " + error.Message);
+            }
         }
-        if (failures.Count == 0) return;
+
+        if (failures.Count == 0)
+        {
+            return;
+        }
+
         string diagnostic = "Metadata temporary cleanup failed: " + string.Join("; ", failures);
-        if (!priorFailure) throw new IOException(diagnostic);
+        if (!priorFailure)
+        {
+            throw new IOException(diagnostic);
+        }
         // 오류 출력 자체가 닫힌 pipe 등으로 실패해도 기존 컴파일 오류/취소를 덮지 않는다.
-        try { report(diagnostic); }
+        try
+        {
+            report(diagnostic);
+        }
         catch (Exception error) when (error is not OutOfMemoryException) { }
     }
 }

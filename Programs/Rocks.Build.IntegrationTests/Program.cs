@@ -5,7 +5,11 @@ using Rocks.Build.Cli;
 using Rocks.Build.IntegrationTests;
 using Rocks.Tooling.Common;
 
-if (args.Length != 0 && args[0] == "--output-lock-child") return await OutputInvocationLockTests.ChildAsync(args);
+if (args.Length != 0 && args[0] == "--output-lock-child")
+{
+    return await OutputInvocationLockTests.ChildAsync(args);
+}
+
 if (args.Length == 1 && args[0] == "--platform-path-header")
 {
     var native = await NativeToolchains.DiscoverAsync();
@@ -17,15 +21,21 @@ if (args.Length == 1 && args[0] == "--platform-path-header")
         Console.WriteLine("[PASS] platform-private-header-incremental");
         return 0;
     }
-    finally { Directory.Delete(temporary, recursive: true); }
+    finally
+    {
+        Directory.Delete(temporary, recursive: true);
+    }
 }
 
 var options = new Dictionary<string, string>(StringComparer.Ordinal);
 for (var index = 0; index < args.Length; index += 2)
 {
     if (index + 1 >= args.Length || args[index] is not ("--root" or "--compiler") || !options.TryAdd(args[index], args[index + 1]))
+    {
         throw new ArgumentException("Expected unique --root/--compiler options with values.");
+    }
 }
+
 var root = Path.GetFullPath(options.GetValueOrDefault("--root", "."));
 var toolchain = await NativeToolchains.DiscoverAsync(options.GetValueOrDefault("--compiler"));
 var cli = Path.Combine(root, "out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks.Build.Cli.dll");
@@ -55,7 +65,11 @@ try
     CopyTree(Path.Combine(root, "Templates/Game/Foundation"), game);
     var originalFiles = Directory.GetFiles(sdk, "*", SearchOption.AllDirectories)
         .ToDictionary(path => path, Hashing.Sha256File, StringComparer.Ordinal);
-    foreach (var file in originalFiles.Keys) SetReadOnly(file, true);
+    foreach (var file in originalFiles.Keys)
+    {
+        SetReadOnly(file, true);
+    }
+
     timer.Restart();
     var built = await Game();
     Require(built.ExitCode == 0, "External game build failed: " + built.StdOut + built.StdErr);
@@ -115,6 +129,7 @@ try
         File.WriteAllText(gameMain, originalMain);
         File.WriteAllBytes(gameIdentity, originalIdentity);
     }
+
     Require((await Game()).ExitCode == 0, "Game did not recover after identity integration test");
     Pass("identity-rename-and-orphan-rejection", timer.Elapsed);
 
@@ -122,10 +137,16 @@ try
     var evidencePath = Path.Combine(output, "game-build-evidence.json");
     InstalledSdk.BeginGameEvidence(output, sdk, game);
     using (var running = JsonDocument.Parse(File.ReadAllText(evidencePath)))
+    {
         Require(running.RootElement.GetProperty("status").GetString() == "RUNNING", "Old game PASS remained when new execution began");
+    }
+
     Require((await Game()).ExitCode == 0, "Game did not finish after interrupted marker");
     using (var completed = JsonDocument.Parse(File.ReadAllText(evidencePath)))
+    {
         Require(completed.RootElement.GetProperty("status").GetString() == "PASS", "Game completion did not replace RUNNING marker");
+    }
+
     Pass("game-running-evidence-and-completion", timer.Elapsed);
 
     timer.Restart();
@@ -150,9 +171,14 @@ try
             throw new InvalidOperationException("Changed metadata input was accepted");
         }
         catch (InvalidOperationException error) when (error.Message.Contains("Game inputs changed", StringComparison.Ordinal)) { }
+
         Require(!ReadActionReport().Succeeded, "Input mutation published a successful action report");
     }
-    finally { File.WriteAllText(changedSource, oldSource); }
+    finally
+    {
+        File.WriteAllText(changedSource, oldSource);
+    }
+
     Pass("game-input-mutation-does-not-publish-success", timer.Elapsed);
     timer.Restart();
     Require((await Game()).ExitCode == 0, "No-op game build failed");
@@ -195,7 +221,11 @@ try
         Require(Hashing.Sha256File(generatedHeader) == validGeneratedHash &&
             !File.Exists(Path.Combine(output, "Generated/Other.generated.h")), "Invalid units published metadata before rejection");
     }
-    finally { File.WriteAllText(targetRulesPath, validTargetRules); }
+    finally
+    {
+        File.WriteAllText(targetRulesPath, validTargetRules);
+    }
+
     Require((await Game()).ExitCode == 0, "Game did not recover after correcting metadata unit ownership");
     Pass("metadata-unit-target-and-input-ownership", timer.Elapsed);
 
@@ -223,11 +253,17 @@ try
             throw new InvalidOperationException("Changed SDK was accepted by publication");
         }
         catch (InvalidDataException error) when (error.Message.Contains("changed or missing", StringComparison.Ordinal)) { }
+
         Require(!ReadActionReport().Succeeded, "SDK mutation published a successful action report");
         var corrupt = await Game();
         Require(corrupt.ExitCode != 0 && corrupt.StdErr.Contains("changed or missing", StringComparison.Ordinal), "SDK library corruption not rejected");
     }
-    finally { File.WriteAllBytes(library, original); SetReadOnly(library, true); }
+    finally
+    {
+        File.WriteAllBytes(library, original);
+        SetReadOnly(library, true);
+    }
+
     var additional = Path.Combine(sdk, "Headers", "Unexpected.h");
     try
     {
@@ -235,7 +271,11 @@ try
         var injected = await Game();
         Require(injected.ExitCode != 0 && injected.StdErr.Contains("inventory changed", StringComparison.Ordinal), "Untracked SDK header not rejected");
     }
-    finally { File.Delete(additional); }
+    finally
+    {
+        File.Delete(additional);
+    }
+
     Pass("sdk-content-and-inventory-integrity", timer.Elapsed);
 
     timer.Restart();
@@ -251,7 +291,11 @@ try
             "Author typo lacks an actionable rejection");
         Require(Hashing.Sha256File(generated) == generatedHash, "Failed author validation published partial metadata");
     }
-    finally { File.WriteAllText(header, originalHeader); }
+    finally
+    {
+        File.WriteAllText(header, originalHeader);
+    }
+
     Require((await Game()).ExitCode == 0, "Build failed after correcting the author typo");
     Pass("author-error-and-recovery", timer.Elapsed);
 
@@ -275,7 +319,11 @@ try
         Require(untargeted.ExitCode != 0 && (untargeted.StdOut + untargeted.StdErr).Contains("does not target", StringComparison.Ordinal),
             "Game built for a platform outside targetPlatforms: " + untargeted.StdErr);
     }
-    finally { File.WriteAllText(descriptor, descriptorText); }
+    finally
+    {
+        File.WriteAllText(descriptor, descriptorText);
+    }
+
     Require((await Game()).ExitCode == 0, "Build failed after restoring the project descriptor");
     Pass("project-descriptor-validates-modules-and-platforms", timer.Elapsed);
 
@@ -334,6 +382,7 @@ try
         File.WriteAllText(descriptor, descriptorText);
         Directory.Delete(Path.Combine(game, "Plugins"), true);
     }
+
     Require((await Game()).ExitCode == 0, "Build failed after removing the project plugin");
     Pass("project-plugins-enable-and-filter-modules", timer.Elapsed);
 
@@ -346,10 +395,16 @@ try
     {
         byte[] bytes = File.ReadAllBytes(path);
         for (int index = 0; index + 4 <= bytes.Length; ++index)
+        {
             if (bytes[index] == 0x42 && bytes[index + 1] == 0x43 && bytes[index + 2] == 0xc0 && bytes[index + 3] == 0xde)
+            {
                 return true;
+            }
+        }
+
         return false;
     }
+
     Require(Directory.GetFiles(Path.Combine(releaseSdk, "Libraries")).All(ContainsBitcode),
         "Release SDK libraries are not ThinLTO bitcode archives");
     var releaseGame = await Cli("game", "--sdk", releaseSdk, "--project", game, "--configuration", "Release");
@@ -371,10 +426,14 @@ catch (Exception error)
 finally
 {
     AtomicFile.WriteIfChanged(Path.Combine(reports, "sdk-integration-report.json"), JsonSerializer.Serialize(new
-        { status = success ? "PASS" : "FAIL", tests = cases, fixture }, new JsonSerializerOptions { WriteIndented = true }));
+    { status = success ? "PASS" : "FAIL", tests = cases, fixture }, new JsonSerializerOptions { WriteIndented = true }));
     if (success && Directory.Exists(fixture))
     {
-        foreach (var file in Directory.GetFiles(fixture, "*", SearchOption.AllDirectories)) SetReadOnly(file, false);
+        foreach (var file in Directory.GetFiles(fixture, "*", SearchOption.AllDirectories))
+        {
+            SetReadOnly(file, false);
+        }
+
         Directory.Delete(fixture, recursive: true);
     }
 }
@@ -386,6 +445,7 @@ async Task<ProcessResult> Cli(params string[] arguments)
     File.AppendAllText(Path.Combine(reports, "sdk-integration.log"), string.Join(" ", arguments) + "\n" + result.StdOut + result.StdErr + "\n");
     return result;
 }
+
 Task<ProcessResult> Game() => Cli("game", "--sdk", sdk, "--project", game, "--configuration", "Debug");
 NativeBuildResult ReadActionReport() => JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(Path.Combine(output, "action-report.json")))!;
 void Pass(string name, TimeSpan elapsed)
@@ -393,20 +453,38 @@ void Pass(string name, TimeSpan elapsed)
     Console.WriteLine("[PASS] " + name);
     cases.Add(new { name, status = "PASS", durationMs = elapsed.TotalMilliseconds });
 }
-static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
+
+static void Require(bool condition, string message)
+{
+    if (!condition)
+    {
+        throw new InvalidOperationException(message);
+    }
+}
+
 static void SetReadOnly(string path, bool value)
 {
     if (OperatingSystem.IsWindows())
+    {
         File.SetAttributes(path, value ? File.GetAttributes(path) | FileAttributes.ReadOnly : File.GetAttributes(path) & ~FileAttributes.ReadOnly);
+    }
     else
     {
         var mode = File.GetUnixFileMode(path);
         File.SetUnixFileMode(path, value ? mode & ~(UnixFileMode.UserWrite | UnixFileMode.GroupWrite | UnixFileMode.OtherWrite) : mode | UnixFileMode.UserWrite);
     }
 }
+
 static void CopyTree(string source, string destination)
 {
     Directory.CreateDirectory(destination);
-    foreach (var file in Directory.GetFiles(source)) File.Copy(file, Path.Combine(destination, Path.GetFileName(file)));
-    foreach (var directory in Directory.GetDirectories(source)) CopyTree(directory, Path.Combine(destination, Path.GetFileName(directory)));
+    foreach (var file in Directory.GetFiles(source))
+    {
+        File.Copy(file, Path.Combine(destination, Path.GetFileName(file)));
+    }
+
+    foreach (var directory in Directory.GetDirectories(source))
+    {
+        CopyTree(directory, Path.Combine(destination, Path.GetFileName(directory)));
+    }
 }

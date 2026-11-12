@@ -24,7 +24,10 @@ public static class AtomicFile
     {
         path = Path.GetFullPath(path);
         if (File.Exists(path) && File.ReadAllBytes(path).AsSpan().SequenceEqual(content))
+        {
             return false;
+        }
+
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
@@ -36,7 +39,9 @@ public static class AtomicFile
         finally
         {
             if (File.Exists(temporary))
+            {
                 File.Delete(temporary);
+            }
         }
     }
 }

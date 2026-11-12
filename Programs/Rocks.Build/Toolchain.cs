@@ -11,12 +11,17 @@ public static class NativeToolchains
         var environment = await NativeEnvironment.CreateAsync(compiler, cancellationToken);
         bool windows = OperatingSystem.IsWindows();
         if (!windows && !OperatingSystem.IsMacOS())
+        {
             throw new PlatformNotSupportedException("Only Windows and macOS native hosts are supported.");
+        }
+
         string compilerPath = NativeEnvironment.FindExecutable(compiler ?? (windows ? "clang-cl" : "clang++"), environment);
         var version = await ProcessRunner.RunAsync(new ProcessSpec(compilerPath, ["--version"],
             Directory.GetCurrentDirectory(), environment), cancellationToken);
         if (version.ExitCode != 0 || !version.StdOut.Contains("clang", StringComparison.OrdinalIgnoreCase))
+        {
             throw new InvalidOperationException("A working Clang compiler is required.");
+        }
         // archiver·linker는 compiler와 같은 LLVM 설치에서 먼저 찾는다. Release의 ThinLTO bitcode는 같은 LLVM
         // 버전의 도구만 확실히 읽으며, clang-cl의 -fuse-ld=lld도 자기 폴더의 lld-link를 쓴다. macOS에서
         // compiler 옆에 llvm-ar가 없으면(Apple clang) PATH의 다른 llvm-ar 대신 Xcode의 ar(libLTO)를 쓴다.
@@ -37,7 +42,10 @@ public static class NativeToolchains
             [windows ? "/clang:-print-resource-dir" : "-print-resource-dir"],
             Directory.GetCurrentDirectory(), environment), cancellationToken);
         if (resource.ExitCode != 0)
+        {
             throw new InvalidOperationException("Cannot identify the compiler resource directory.");
+        }
+
         string resourcePath = resource.StdOut.Trim();
         if (Directory.Exists(resourcePath))
         {
@@ -49,14 +57,23 @@ public static class NativeToolchains
                 foreach (string relative in new[] { "lib/x86_64-unknown-windows-msvc", "lib/x86_64-pc-windows-msvc", "lib/windows" })
                 {
                     string directory = Path.Combine(resourcePath, relative);
-                    if (!Directory.Exists(directory)) continue;
+                    if (!Directory.Exists(directory))
+                    {
+                        continue;
+                    }
+
                     string[] files = Directory.EnumerateFiles(directory, "clang_rt.asan_dynamic*.dll").ToArray();
-                    if (files.Length == 0) continue;
+                    if (files.Length == 0)
+                    {
+                        continue;
+                    }
+
                     runtime.AddRange(files.Where(file => !Path.GetFileName(file).Contains("i386", StringComparison.OrdinalIgnoreCase)));
                     break;
                 }
             }
         }
+
         if (windows)
         {
             abi.Add("WindowsSDKVersion=" + EnvironmentValue("WindowsSDKVersion").TrimEnd('/', '\\'));
@@ -66,7 +83,12 @@ public static class NativeToolchains
             {
                 string? value = environment.FirstOrDefault(pair => pair.Key.Equals(variable, StringComparison.OrdinalIgnoreCase)).Value;
                 foreach (string directory in (value ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                    if (Directory.Exists(directory)) paths.Add(directory);
+                {
+                    if (Directory.Exists(directory))
+                    {
+                        paths.Add(directory);
+                    }
+                }
             }
         }
         else
@@ -75,21 +97,35 @@ public static class NativeToolchains
             var sdk = await ProcessRunner.RunAsync(new ProcessSpec(xcrun, ["--show-sdk-path"],
                 Directory.GetCurrentDirectory(), environment), cancellationToken);
             if (sdk.ExitCode != 0 || !Directory.Exists(sdk.StdOut.Trim()))
+            {
                 throw new InvalidOperationException("Cannot identify the macOS SDK.");
+            }
+
             string sdkPath = sdk.StdOut.Trim();
             foreach (string option in new[] { "--show-sdk-version", "--show-sdk-build-version" })
             {
                 var sdkVersion = await ProcessRunner.RunAsync(new ProcessSpec(xcrun, [option],
                     Directory.GetCurrentDirectory(), environment), cancellationToken);
                 if (sdkVersion.ExitCode != 0 || string.IsNullOrWhiteSpace(sdkVersion.StdOut))
+                {
                     throw new InvalidOperationException("Cannot identify macOS SDK ABI: " + option);
+                }
+
                 abi.Add(option + "=" + sdkVersion.StdOut.Trim());
             }
+
             string deployment = EnvironmentValue("MACOSX_DEPLOYMENT_TARGET");
-            if (deployment.Length == 0) deployment = "13.0";
+            if (deployment.Length == 0)
+            {
+                deployment = "13.0";
+            }
+
             if (!Version.TryParse(deployment, out var minimum) || minimum.Major < 13 ||
                 deployment.Any(value => !char.IsAsciiDigit(value) && value != '.'))
+            {
                 throw new ArgumentException("MACOSX_DEPLOYMENT_TARGET must be a numeric version >= 13.0.");
+            }
+
             environment["MACOSX_DEPLOYMENT_TARGET"] = deployment;
             compile.Add("-mmacosx-version-min=" + deployment);
             link.Add("-mmacosx-version-min=" + deployment);
@@ -100,14 +136,20 @@ public static class NativeToolchains
             // Apple ar의 deterministic archive 모드. 환경 값도 action key에 포함된다.
             environment["ZERO_AR_DATE"] = "1";
         }
+
         return new NativeToolchain
         {
             Platform = windows ? NativePlatform.Windows : NativePlatform.MacOS,
-            CompilerPath = compilerPath, ArchiverPath = archiver, LinkerPath = linker,
-            Identity = version.StdOut.Trim(), Environment = environment,
+            CompilerPath = compilerPath,
+            ArchiverPath = archiver,
+            LinkerPath = linker,
+            Identity = version.StdOut.Trim(),
+            Environment = environment,
             AbiIdentity = Fingerprints.Strings(abi),
-            CompileArguments = compile, LinkArguments = link,
-            FingerprintPaths = paths.Distinct(PathComparer).ToArray(), RuntimeFiles = runtime
+            CompileArguments = compile,
+            LinkArguments = link,
+            FingerprintPaths = paths.Distinct(PathComparer).ToArray(),
+            RuntimeFiles = runtime
         };
     }
 
@@ -121,7 +163,10 @@ public static class NativeToolchains
         CancellationToken cancellationToken = default)
     {
         if (!OperatingSystem.IsWindows() && !OperatingSystem.IsMacOS())
+        {
             throw new PlatformNotSupportedException("Android builds require a Windows or macOS host.");
+        }
+
         string triple = abi switch
         {
             "arm64" => "aarch64-linux-android",
@@ -129,14 +174,20 @@ public static class NativeToolchains
             _ => throw new ArgumentException("android-abi must be arm64 or x86_64.")
         };
         if (apiLevel < 26 || apiLevel > 39)
+        {
             throw new ArgumentException("android-api must be between 26 and 39.");
+        }
+
         string root = ndk ?? Environment.GetEnvironmentVariable("ANDROID_NDK_HOME")
             ?? Environment.GetEnvironmentVariable("ANDROID_NDK_ROOT") ?? FindDefaultNdk()
             ?? throw new FileNotFoundException("Android NDK not found. Pass --android-ndk or set ANDROID_NDK_HOME.");
         root = Path.GetFullPath(root);
         string properties = Path.Combine(root, "source.properties");
         if (!File.Exists(properties))
+        {
             throw new FileNotFoundException("Not an Android NDK directory (source.properties missing).", properties);
+        }
+
         string revision = File.ReadAllLines(properties).Select(line => line.Trim())
             .FirstOrDefault(line => line.StartsWith("Pkg.Revision", StringComparison.Ordinal))?.Split('=', 2)[1].Trim()
             ?? throw new InvalidOperationException("Cannot read Pkg.Revision from " + properties);
@@ -146,14 +197,23 @@ public static class NativeToolchains
         string compiler = Path.Combine(bin, "clang++" + executable);
         string archiver = Path.Combine(bin, "llvm-ar" + executable);
         foreach (string tool in new[] { compiler, archiver })
-            if (!File.Exists(tool)) throw new FileNotFoundException("Android NDK tool is missing.", tool);
+        {
+            if (!File.Exists(tool))
+            {
+                throw new FileNotFoundException("Android NDK tool is missing.", tool);
+            }
+        }
+
         var environment = Environment.GetEnvironmentVariables().Cast<System.Collections.DictionaryEntry>()
             .ToDictionary(entry => (string)entry.Key, entry => (string?)entry.Value,
                 OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
         var version = await ProcessRunner.RunAsync(new ProcessSpec(compiler, ["--version"],
             Directory.GetCurrentDirectory(), environment), cancellationToken);
         if (version.ExitCode != 0 || !version.StdOut.Contains("clang", StringComparison.OrdinalIgnoreCase))
+        {
             throw new InvalidOperationException("The Android NDK clang does not run: " + compiler);
+        }
+
         string target = "--target=" + triple + apiLevel;
         var abiIdentity = new List<string> { "rocks-native-abi-v1", "Android", abi, "api=" + apiLevel, "ndk=" + revision };
         abiIdentity.AddRange(version.StdOut.Split('\n').Select(value => value.Trim())
@@ -161,12 +221,17 @@ public static class NativeToolchains
         return new NativeToolchain
         {
             Platform = NativePlatform.Android,
-            CompilerPath = compiler, ArchiverPath = archiver, LinkerPath = null,
-            Identity = version.StdOut.Trim() + "\n" + target + "\nndk=" + revision, Environment = environment,
+            CompilerPath = compiler,
+            ArchiverPath = archiver,
+            LinkerPath = null,
+            Identity = version.StdOut.Trim() + "\n" + target + "\nndk=" + revision,
+            Environment = environment,
             AbiIdentity = Fingerprints.Strings(abiIdentity),
             // 엔진은 STL을 쓰지 않지만 compiler runtime(예: 정적 지역 변수 guard)을 위해 libc++를 정적으로 묶는다.
-            CompileArguments = [target], LinkArguments = [target, "-static-libstdc++"],
-            FingerprintPaths = [properties], RuntimeFiles = []
+            CompileArguments = [target],
+            LinkArguments = [target, "-static-libstdc++"],
+            FingerprintPaths = [properties],
+            RuntimeFiles = []
         };
     }
 
@@ -177,7 +242,11 @@ public static class NativeToolchains
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "Android", "sdk");
         sdk = Environment.GetEnvironmentVariable("ANDROID_HOME") ?? Environment.GetEnvironmentVariable("ANDROID_SDK_ROOT") ?? sdk;
         string ndkRoot = Path.Combine(sdk, "ndk");
-        if (!Directory.Exists(ndkRoot)) return null;
+        if (!Directory.Exists(ndkRoot))
+        {
+            return null;
+        }
+
         return Directory.EnumerateDirectories(ndkRoot)
             .Select(path => (path, version: Version.TryParse(Path.GetFileName(path), out var parsed) ? parsed : null))
             .Where(item => item.version != null && File.Exists(Path.Combine(item.path, "source.properties")))
@@ -196,9 +265,13 @@ public static class NativeToolchains
     {
         foreach (string candidate in candidates)
         {
-            try { return NativeEnvironment.FindExecutable(candidate, environment); }
+            try
+            {
+                return NativeEnvironment.FindExecutable(candidate, environment);
+            }
             catch (Exception error) when (error is FileNotFoundException or InvalidOperationException) { }
         }
+
         throw new FileNotFoundException($"Native tool not found: {string.Join(", ", candidates)}");
     }
 }

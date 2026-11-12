@@ -28,16 +28,44 @@ public static class MathReference
         var random = new XorShift(0x5EED2026u);
 
         var exp2 = new List<double> { 0.5, -0.25, 10.3, -1074.5, -1022.25, 1023.75 };
-        for (int i = 0; i < 80; ++i) exp2.Add(random.Uniform(-1, 1));
-        for (int i = 0; i < 60; ++i) exp2.Add(random.Uniform(-60, 60));
-        for (int i = 0; i < 40; ++i) exp2.Add(random.Uniform(-1075, -1020));
-        for (int i = 0; i < 20; ++i) exp2.Add(random.Uniform(1000, 1024));
+        for (int i = 0; i < 80; ++i)
+        {
+            exp2.Add(random.Uniform(-1, 1));
+        }
+
+        for (int i = 0; i < 60; ++i)
+        {
+            exp2.Add(random.Uniform(-60, 60));
+        }
+
+        for (int i = 0; i < 40; ++i)
+        {
+            exp2.Add(random.Uniform(-1075, -1020));
+        }
+
+        for (int i = 0; i < 20; ++i)
+        {
+            exp2.Add(random.Uniform(1000, 1024));
+        }
+
         Emit(text, "Exp2Reference", exp2.Select(x => (x, 0.0, Exp2(x))));
 
         var log2 = new List<double> { 3.0, 0.1, 1.0000001, 1.0890875381237388, 5e-324, 1.5e-310 };
-        for (int i = 0; i < 80; ++i) log2.Add(random.Uniform(0.5, 2));
-        for (int i = 0; i < 40; ++i) log2.Add(1 + random.Uniform(-1e-6, 1e-6));
-        for (int i = 0; i < 80; ++i) log2.Add(random.WideDouble(-1074, 1023));
+        for (int i = 0; i < 80; ++i)
+        {
+            log2.Add(random.Uniform(0.5, 2));
+        }
+
+        for (int i = 0; i < 40; ++i)
+        {
+            log2.Add(1 + random.Uniform(-1e-6, 1e-6));
+        }
+
+        for (int i = 0; i < 80; ++i)
+        {
+            log2.Add(random.WideDouble(-1074, 1023));
+        }
+
         Emit(text, "Log2Reference", log2.Select(x => (x, 0.0, Log2(x))));
 
         var pow = new List<(double, double)>
@@ -45,34 +73,71 @@ public static class MathReference
             (0.5, 2.4), (10.0, 0.3), (0.0535106097531263, 2.4), (0.0020289703374550827, 4.181753663104813),
             (1e300, 1), (10, -300), (0.7702913350633479, 2701.285042709936), (3, 3), (2, 0.5)
         };
-        for (int i = 0; i < 100; ++i) pow.Add((random.Uniform(1e-3, 1), random.Uniform(0.1, 5)));
-        for (int i = 0; i < 60; ++i) pow.Add((random.Uniform(0.5, 2), random.Uniform(-100, 100)));
+        for (int i = 0; i < 100; ++i)
+        {
+            pow.Add((random.Uniform(1e-3, 1), random.Uniform(0.1, 5)));
+        }
+
+        for (int i = 0; i < 60; ++i)
+        {
+            pow.Add((random.Uniform(0.5, 2), random.Uniform(-100, 100)));
+        }
+
         for (int i = 0; i < 60; ++i)
         {
             double x = random.WideDouble(-300, 300);
             double limit = 1000 / Math.Max(1e-9, Math.Abs(Math.Log2(x)));
             pow.Add((x, random.Uniform(-limit, limit)));
         }
+
         Emit(text, "PowReference", pow.Select(p => (p.Item1, p.Item2, Pow(p.Item1, p.Item2))));
 
         var trig = new List<double> { 1.0 / 6.0, 0.25, 1.0 / 3.0, 0.4999999999999999, 1e-9, 1234567.125 };
-        for (int i = 0; i < 120; ++i) trig.Add(random.Uniform(-4, 4));
-        for (int i = 0; i < 30; ++i) trig.Add(random.Uniform(-1e12, 1e12));
-        for (int i = 0; i < 30; ++i) trig.Add(Math.Round(random.Uniform(-100, 100)) + 0.5 + random.Uniform(-1e-12, 1e-12));
+        for (int i = 0; i < 120; ++i)
+        {
+            trig.Add(random.Uniform(-4, 4));
+        }
+
+        for (int i = 0; i < 30; ++i)
+        {
+            trig.Add(random.Uniform(-1e12, 1e12));
+        }
+
+        for (int i = 0; i < 30; ++i)
+        {
+            trig.Add(Math.Round(random.Uniform(-100, 100)) + 0.5 + random.Uniform(-1e-12, 1e-12));
+        }
+
         Emit(text, "SinPiReference", trig.Select(x => (x, 0.0, SinPi(x, cosine: false))));
         Emit(text, "CosPiReference", trig.Select(x => (x, 0.0, SinPi(x, cosine: true))));
 
         var srgb = new List<double> { 0.5, 0.047568846871931615, 0.04045000000000001, 1.0, 1.5 };
-        for (int i = 0; i < 150; ++i) srgb.Add(random.Uniform(0.0405, 1.5));
+        for (int i = 0; i < 150; ++i)
+        {
+            srgb.Add(random.Uniform(0.0405, 1.5));
+        }
+
         Emit(text, "SrgbToLinearReference", srgb.Select(x => (x, 0.0, SrgbToLinear(x))));
 
         var linear = new List<double> { 0.5, 0.0032992206618530657, 0.0031308000000000003, 1.0, 2.0 };
-        for (int i = 0; i < 150; ++i) linear.Add(random.Uniform(0.00314, 1.5));
+        for (int i = 0; i < 150; ++i)
+        {
+            linear.Add(random.Uniform(0.00314, 1.5));
+        }
+
         Emit(text, "LinearToSrgbReference", linear.Select(x => (x, 0.0, LinearToSrgb(x))));
 
         var gamma = new List<double> { 0.5, 0.0006876114417719847, 2.0 };
-        for (int i = 0; i < 100; ++i) gamma.Add(random.Uniform(1e-4, 1));
-        for (int i = 0; i < 50; ++i) gamma.Add(random.WideDouble(-200, 200));
+        for (int i = 0; i < 100; ++i)
+        {
+            gamma.Add(random.Uniform(1e-4, 1));
+        }
+
+        for (int i = 0; i < 50; ++i)
+        {
+            gamma.Add(random.WideDouble(-200, 200));
+        }
+
         Emit(text, "Gamma22Reference", gamma.Select(x => (x, 0.0, PowRational(x, 11, 5))));
 
         text.Append("// clang-format on\n\n} // namespace rocks::deterministic::reference\n");
@@ -83,7 +148,10 @@ public static class MathReference
     {
         text.Append($"inline constexpr ReferenceCase {name}[] = {{\n");
         foreach (var (input, second, expected) in cases)
+        {
             text.Append($"    {{0x{Bits(input):X16}u, 0x{Bits(second):X16}u, 0x{Bits(expected):X16}u}},\n");
+        }
+
         text.Append("};\n\n");
     }
 
@@ -97,7 +165,11 @@ public static class MathReference
         ulong bits = Bits(value) & 0x7FFFFFFFFFFFFFFFul;
         int biased = (int)(bits >> 52);
         BigInteger m = bits & 0xFFFFFFFFFFFFFul;
-        if (biased == 0) return (m, -1074);
+        if (biased == 0)
+        {
+            return (m, -1074);
+        }
+
         return (m | (BigInteger.One << 52), biased - 1075);
     }
 
@@ -107,8 +179,20 @@ public static class MathReference
         // x = numerator/denominator = 2^k·m, m ∈ [1, 2).
         int k = (int)(numerator.GetBitLength() - denominator.GetBitLength());
         BigInteger n = numerator, d = denominator;
-        if (k >= 0) d <<= k; else n <<= -k;
-        if (n < d) { n <<= 1; --k; }
+        if (k >= 0)
+        {
+            d <<= k;
+        }
+        else
+        {
+            n <<= -k;
+        }
+
+        if (n < d)
+        {
+            n <<= 1;
+            --k;
+        }
         // ln m = 2·atanh((m − 1)/(m + 1)) = 2·atanh((n − d)/(n + d)).
         BigInteger lnM = 2 * Atanh(n - d, n + d);
         return k * One + lnM * One / Ln2Fixed;
@@ -131,6 +215,7 @@ public static class MathReference
             sum += power / (2 * k + 1);
             power = power * square >> Precision;
         }
+
         return sum;
     }
 
@@ -145,6 +230,7 @@ public static class MathReference
             sum += (k % 2 == 0 ? power : -power) / (2 * k + 1);
             power /= n * n;
         }
+
         return sum;
     }
 
@@ -152,7 +238,11 @@ public static class MathReference
     private static (BigInteger Mantissa, BigInteger Exponent) Exp2Fixed(BigInteger t)
     {
         BigInteger n = BigInteger.Divide(t, One);
-        if (t.Sign < 0 && n * One != t) n -= 1; // floor
+        if (t.Sign < 0 && n * One != t)
+        {
+            n -= 1; // floor
+        }
+
         BigInteger r = t - n * One;           // [0, 1)
         BigInteger a = r * Ln2Fixed >> Precision; // e^a, a ∈ [0, ln2)
         BigInteger sum = One, term = One;
@@ -161,31 +251,54 @@ public static class MathReference
             term = term * a / (k * One);
             sum += term;
         }
+
         return (sum, n);
     }
 
     // 고정소수점 mantissa·2^exponent(양수)를 가장 가까운 double로(동점 짝수, 비정규·넘침 처리).
     private static double Round(BigInteger fixedMantissa, BigInteger exponent, bool negative = false)
     {
-        if (fixedMantissa.Sign == 0) return negative ? -0.0 : 0.0;
+        if (fixedMantissa.Sign == 0)
+        {
+            return negative ? -0.0 : 0.0;
+        }
         // 값 = fixedMantissa·2^(exponent − Precision).
         long exp2 = (long)exponent - Precision;
         long length = (long)fixedMantissa.GetBitLength();
         long top = exp2 + length - 1;
-        if (top > 1023) return negative ? double.NegativeInfinity : double.PositiveInfinity;
+        if (top > 1023)
+        {
+            return negative ? double.NegativeInfinity : double.PositiveInfinity;
+        }
+
         long shift = top >= -1022 ? length - 53 : -1074 - exp2;
         BigInteger m;
-        if (shift <= 0) m = fixedMantissa << (int)-shift;
+        if (shift <= 0)
+        {
+            m = fixedMantissa << (int)-shift;
+        }
         else
         {
-            if (shift > length + 1) return negative ? -0.0 : 0.0;
+            if (shift > length + 1)
+            {
+                return negative ? -0.0 : 0.0;
+            }
+
             m = fixedMantissa >> (int)shift;
             BigInteger remainder = fixedMantissa - (m << (int)shift);
             BigInteger half = BigInteger.One << (int)(shift - 1);
-            if (remainder > half || (remainder == half && !m.IsEven)) m += 1;
+            if (remainder > half || (remainder == half && !m.IsEven))
+            {
+                m += 1;
+            }
         }
+
         long finalExp = exp2 + shift; // 값 = m·2^finalExp
-        if (m.GetBitLength() > 53) { m >>= 1; ++finalExp; }
+        if (m.GetBitLength() > 53)
+        {
+            m >>= 1;
+            ++finalExp;
+        }
         // m ≤ 2^53이고 결과가 표현 가능하면 ScaleB는 정확하다(넘치면 무한대).
         double result = Math.ScaleB((double)(ulong)m, (int)finalExp);
         return negative ? -result : result;
@@ -195,7 +308,11 @@ public static class MathReference
     {
         var (m, e) = Exact(Math.Abs(x));
         BigInteger t = e >= 0 ? (m << e) * One : (m * One) >> -e;
-        if (x < 0) t = -t;
+        if (x < 0)
+        {
+            t = -t;
+        }
+
         var (mantissa, exponent) = Exp2Fixed(t);
         return Round(mantissa, exponent);
     }
@@ -211,7 +328,11 @@ public static class MathReference
         var (m, e) = Exact(Math.Abs(y));
         BigInteger t = Log2Fixed(x) * m;
         t = e >= 0 ? t << e : t >> -e;
-        if (y < 0) t = -t;
+        if (y < 0)
+        {
+            t = -t;
+        }
+
         var (mantissa, exponent) = Exp2Fixed(t);
         return Round(mantissa, exponent);
     }
@@ -248,20 +369,44 @@ public static class MathReference
         var (m, e) = Exact(x);
         // x mod 2를 정확히: x = m·2^e.
         BigInteger r;
-        if (e >= 0) r = (m << e) % 2 * One;
+        if (e >= 0)
+        {
+            r = (m << e) % 2 * One;
+        }
         else
         {
             // 고정소수점이 입력 비트를 모두 담아야 한다(표본은 |x| ≥ 2^−60 정도).
-            if (-e > Precision - 100) throw new InvalidOperationException("SinPi reference input is too small");
+            if (-e > Precision - 100)
+            {
+                throw new InvalidOperationException("SinPi reference input is too small");
+            }
+
             BigInteger period = BigInteger.One << (1 - e); // 2·2^−e
             r = (m % period) * One >> -e;                // [0, 2)·One
         }
-        if (x < 0) r = (2 * One - r) % (2 * One);
-        if (cosine) r = (r + One / 2) % (2 * One); // cos(πx) = sin(π(x + ½))
+
+        if (x < 0)
+        {
+            r = (2 * One - r) % (2 * One);
+        }
+
+        if (cosine)
+        {
+            r = (r + One / 2) % (2 * One); // cos(πx) = sin(π(x + ½))
+        }
         // sin(πr), r ∈ [0, 2).
         bool negative = false;
-        if (r >= One) { r -= One; negative = true; }   // sin(π(r + 1)) = −sin(πr)
-        if (r > One / 2) r = One - r;                   // sin(π(1 − r)) = sin(πr)
+        if (r >= One)
+        {
+            r -= One;
+            negative = true;
+        }   // sin(π(r + 1)) = −sin(πr)
+
+        if (r > One / 2)
+        {
+            r = One - r;                   // sin(π(1 − r)) = sin(πr)
+        }
+
         BigInteger angle = r * PiFixed >> Precision;
         BigInteger sum = 0, term = angle, square = angle * angle >> Precision;
         for (int k = 1; term != 0; k += 2)
@@ -269,7 +414,13 @@ public static class MathReference
             sum += term;
             term = -(term * square >> Precision) / ((k + 1) * (k + 2));
         }
-        if (sum.Sign < 0) { sum = -sum; negative = !negative; }
+
+        if (sum.Sign < 0)
+        {
+            sum = -sum;
+            negative = !negative;
+        }
+
         return Round(sum, 0, negative && sum.Sign != 0);
     }
 

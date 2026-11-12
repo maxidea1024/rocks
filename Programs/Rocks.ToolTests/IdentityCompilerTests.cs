@@ -123,7 +123,11 @@ internal static class IdentityCompilerTests
         private readonly TemporaryDirectory temporary = new();
         private readonly Options options;
         private readonly IReadOnlyDictionary<string, string?> environment;
-        public Probe(Options options, IReadOnlyDictionary<string, string?> environment) { this.options = options; this.environment = environment; }
+        public Probe(Options options, IReadOnlyDictionary<string, string?> environment)
+        {
+            this.options = options;
+            this.environment = environment;
+        }
         public string Input => temporary.FilePath("Probe.h");
         public string Output => temporary.FilePath("Probe.generated.h");
         public string ManifestPath => temporary.FilePath("identities.rocksids.json");
@@ -142,9 +146,17 @@ internal static class IdentityCompilerTests
             string generator = Path.GetFullPath(options.Required("metacompiler"));
             string executable = generator.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ? options.Optional("dotnet") ?? "dotnet" : generator;
             List<string> args = [];
-            if (executable != generator) args.Add(generator);
+            if (executable != generator)
+            {
+                args.Add(generator);
+            }
+
             args.AddRange(["--input", Input, "--include", "Probe.h", "--output", Output, "--compiler", options.Required("compiler")]);
-            foreach (string argument in options.ClangArguments) args.Add("--clang-arg=" + argument);
+            foreach (string argument in options.ClangArguments)
+            {
+                args.Add("--clang-arg=" + argument);
+            }
+
             args.AddRange(extra);
             return await ProcessRunner.RunAsync(new(executable, args, options.Root, environment, Timeout: TimeSpan.FromSeconds(60)));
         }
@@ -175,11 +187,23 @@ internal static class IdentityCompilerTests
             foreach (string directory in Directory.GetDirectories(Path.Combine(options.Root, "Core", "Source", "Runtime")))
             {
                 string include = Path.Combine(directory, "Public");
-                if (Directory.Exists(include)) arguments.AddRange(["--include-dir", include]);
+                if (Directory.Exists(include))
+                {
+                    arguments.AddRange(["--include-dir", include]);
+                }
             }
-            foreach (string argument in options.ClangArguments) arguments.Add("--clang-arg=" + argument);
+
+            foreach (string argument in options.ClangArguments)
+            {
+                arguments.Add("--clang-arg=" + argument);
+            }
+
             string? oldFormatter = Environment.GetEnvironmentVariable("ROCKS_CLANG_FORMAT");
-            if (options.Optional("formatter") is string formatter) Environment.SetEnvironmentVariable("ROCKS_CLANG_FORMAT", formatter);
+            if (options.Optional("formatter") is string formatter)
+            {
+                Environment.SetEnvironmentVariable("ROCKS_CLANG_FORMAT", formatter);
+            }
+
             try
             {
                 Action mutate = () => File.AppendAllText(ManifestPath, " ");
@@ -195,7 +219,10 @@ internal static class IdentityCompilerTests
                     Verify.Contains("changed during metadata generation", error.Message, "manifest mutation diagnostic");
                 }
             }
-            finally { Environment.SetEnvironmentVariable("ROCKS_CLANG_FORMAT", oldFormatter); }
+            finally
+            {
+                Environment.SetEnvironmentVariable("ROCKS_CLANG_FORMAT", oldFormatter);
+            }
         }
         public void Dispose() => temporary.Dispose();
     }
