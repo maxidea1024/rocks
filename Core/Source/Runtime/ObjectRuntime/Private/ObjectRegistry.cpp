@@ -305,6 +305,154 @@ Result<void> ObjectRegistry::SetEdge(const ObjectAccessContext& access, ObjectHa
     return Result<void>::Success();
 }
 
+Result<void> ObjectRegistry::CheckArrayOwnerLocked(ObjectHandle owner,
+                                                   const detail::ObjectRefArrayStorage& storage,
+                                                   bool allowDestroyRequested) noexcept {
+    if (processing_ || closed_) {
+        return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
+    }
+    Slot* source = FindSlot(owner);
+    if (!source || !source->object || IsCutoff(source) ||
+        !(source->state == SlotState::Alive ||
+          (allowDestroyRequested && source->state == SlotState::DestroyRequested))) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+    // 배열 객체는 owner 저장소 안에 직접 포함되어야 한다(SetEdge의 필드 위치 검사와 같다).
+    const uptr start = reinterpret_cast<uptr>(source->storage);
+    const uptr location = reinterpret_cast<uptr>(&storage);
+    const usize size = source->type.Ops().size;
+    if (size < sizeof(storage) || location < start || location - start > size - sizeof(storage)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+    return Result<void>::Success();
+}
+
+Result<void> ObjectRegistry::AppendArrayEdge(const ObjectAccessContext& access, ObjectHandle owner,
+                                             detail::ObjectRefArrayStorage& storage,
+                                             ObjectHandle target, const void* nativeType) noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return valid;
+    }
+    if (target.IsNull()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+    auto validateTarget = [&]() noexcept -> Result<void> {
+        Slot* destination = FindSlot(target);
+        if (!destination || IsCutoff(destination) || destination->state != SlotState::Alive) {
+            return Result<void>::Failure(ErrorCode::StaleHandle);
+        }
+        if (nativeType && !destination->type.IsNativeA(nativeType)) {
+            return Result<void>::Failure(ErrorCode::TypeMismatch);
+        }
+        return Result<void>::Success();
+    };
+    {
+        // 용량을 늘리기 전에 검증해 잘못된 호출이 할당을 일으키지 않게 한다.
+        platform::LockGuard lock(gate_);
+        auto checked = CheckArrayOwnerLocked(owner, storage, false);
+        if (!checked) {
+            return checked;
+        }
+        auto targetChecked = validateTarget();
+        if (!targetChecked) {
+            return targetChecked;
+        }
+    }
+    if (storage.size == storage.capacity) {
+        // allocator callback은 Registry 잠금 밖에서 실행한다. 원소 버퍼는 소유 스레드만 바꾸며 GC
+        // trace는 slice 안에서만(같은 소유 스레드의 호출 중) 읽으므로 이 재배치와 겹치지 않는다.
+        if (storage.capacity == 0xffffffffu || storage.allocator == nullptr) {
+            return Result<void>::Failure(storage.allocator ? ErrorCode::Overflow
+                                                           : ErrorCode::InvalidArgument);
+        }
+        const uint32 grown = storage.capacity < 4u            ? 4u
+                             : storage.capacity > 0x7fffffffu ? 0xffffffffu
+                                                              : storage.capacity * 2u;
+        auto memory = storage.allocator->Allocate(sizeof(ObjectHandle) * grown,
+                                                  alignof(ObjectHandle), 0x4f524146u);
+        if (!memory) {
+            return Result<void>::Failure(memory.Error());
+        }
+        auto* replacement = static_cast<ObjectHandle*>(memory.Value());
+        for (uint32 index = 0; index < storage.size; ++index) {
+            replacement[index] = storage.data[index];
+        }
+        ObjectHandle* previous = storage.data;
+        storage.data = replacement;
+        storage.capacity = grown;
+        if (previous != nullptr && !storage.allocator->Deallocate(previous)) {
+            platform::Fatal("ObjectRefArray storage deallocation failed");
+        }
+    }
+    platform::LockGuard lock(gate_);
+    // 잠금을 놓은 사이 다른 스레드는 루트·Borrow 반환만 할 수 있지만, 게시 직전에 다시 확인한다.
+    auto checked = CheckArrayOwnerLocked(owner, storage, false);
+    if (!checked) {
+        return checked;
+    }
+    auto targetChecked = validateTarget();
+    if (!targetChecked) {
+        return targetChecked;
+    }
+    const ErrorCode shaded = ShadeLocked(target);
+    if (shaded != ErrorCode::None) {
+        return Result<void>::Failure(shaded);
+    }
+    storage.data[storage.size++] = target;
+    return Result<void>::Success();
+}
+
+Result<void> ObjectRegistry::RemoveArrayEdge(const ObjectAccessContext& access, ObjectHandle owner,
+                                             detail::ObjectRefArrayStorage& storage, usize index,
+                                             ObjectHandle target, bool byHandle) noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return valid;
+    }
+    platform::LockGuard lock(gate_);
+    auto checked = CheckArrayOwnerLocked(owner, storage, true);
+    if (!checked) {
+        return checked;
+    }
+    if (byHandle) {
+        index = storage.size;
+        for (uint32 position = 0; position < storage.size; ++position) {
+            if (storage.data[position] == target) {
+                index = position;
+                break;
+            }
+        }
+        if (index == storage.size) {
+            return Result<void>::Failure(ErrorCode::NotFound);
+        }
+    } else if (index >= storage.size) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+    // 삽입 장벽 GC에서 간선 삭제는 장벽이 필요 없다. 지운 대상은 다른 경로로 도달하지 않으면
+    // 회수된다.
+    for (usize position = index + 1; position < storage.size; ++position) {
+        storage.data[position - 1] = storage.data[position];
+    }
+    --storage.size;
+    return Result<void>::Success();
+}
+
+Result<void> ObjectRegistry::ClearArrayEdges(const ObjectAccessContext& access, ObjectHandle owner,
+                                             detail::ObjectRefArrayStorage& storage) noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return valid;
+    }
+    platform::LockGuard lock(gate_);
+    auto checked = CheckArrayOwnerLocked(owner, storage, true);
+    if (!checked) {
+        return checked;
+    }
+    storage.size = 0;
+    return Result<void>::Success();
+}
+
 Result<void> ObjectRegistry::RequestDestroy(const ObjectAccessContext& access,
                                             ObjectHandle handle) noexcept {
     return RequestDestroyChecked(access, handle, nullptr, false);

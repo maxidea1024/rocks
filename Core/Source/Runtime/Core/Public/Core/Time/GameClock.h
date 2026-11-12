@@ -36,7 +36,7 @@ struct TimeStepPolicy {
     // 고정 Update 한 번의 길이(초). [MinFixedStepSeconds, 1] 범위여야 한다.
     double fixedStepSeconds = 1.0 / 60.0;
     // 한 프레임에서 인정하는 실제 delta 상한(초). 디버거 정지·로딩 같은 긴 정지를 한 번에 따라잡지
-    // 않게 한다. 유한한 양수여야 한다.
+    // 않게 한다. (0, MaxFrameDeltaSeconds] 범위여야 한다.
     double maxFrameDeltaSeconds = 0.25;
     // 한 프레임의 고정 스텝 실행 상한. [1, MaxSubsteps] 범위여야 한다. 넘는 누적 시간은 버리고
     // 보고한다.
@@ -47,9 +47,11 @@ struct TimeStepPolicy {
     static constexpr double MinFixedStepSeconds = 1.0e-5;
     // 프레임당 고정 스텝 상한의 최댓값이다. 한 프레임이 무한정 길어지는 설정을 막는다.
     static constexpr uint32 MaxSubsteps = 1024;
+    // 프레임 delta 상한의 최댓값(초)이다. 배율과 곱해도 유한한 범위에 머물게 한다.
+    static constexpr double MaxFrameDeltaSeconds = 60.0;
 };
 
-// Advance/StepSingle 한 번의 결과다. 모든 시간은 초 단위다.
+// Advance 한 번의 결과다. 모든 시간은 초 단위다.
 struct StepPlan {
     // 호출자가 측정해 넘긴 실제 경과 시간이다.
     double realDeltaSeconds = 0.0;
@@ -71,6 +73,9 @@ struct StepPlan {
     uint64 frameIndex = 0;
     // 이 계획의 첫 고정 스텝 번호다. fixedSteps가 0이면 다음에 실행할 번호다. 첫 스텝이 0이다.
     uint64 firstFixedStepIndex = 0;
+    // pause 중 RequestSingleStep을 소비한 디버그 단일 스텝 프레임이다. 이 프레임은 pause가 아닌
+    // 것처럼 실행한다(일반 게임플레이 Tick도 돈다). deltaSeconds는 요청한 디버그 delta다.
+    bool singleStep = false;
 };
 
 // 한 시간 도메인(엔진 전체 또는 World 하나)의 게임 시계다. pause와 timeScale은 서로 독립 상태라서
@@ -92,15 +97,18 @@ public:
     // InvalidArgument이며 상태를 바꾸지 않는다. 0은 허용한다(같은 시각에 두 번 호출).
     Result<StepPlan> Advance(double realDeltaSeconds) noexcept;
 
-    // pause 상태에서 고정 스텝 정확히 한 번을 실행하는 디버그 단일 스텝을 계획한다. 가변 Update에
-    // 넘길 delta는 debugDeltaSeconds(생략하면 fixedStepSeconds)이며 고정 누적은 바꾸지 않는다.
-    // pause가 아니거나 debugDeltaSeconds가 음수·비유한 값이면 InvalidArgument다.
-    Result<StepPlan> StepSingle(double debugDeltaSeconds = -1.0) noexcept;
+    // pause 상태에서 디버그 단일 스텝을 요청한다. 다음 Advance가 이를 소비해 고정 스텝 정확히 한
+    // 번(fixedSteps = 1)과 가변 delta = debugDeltaSeconds(생략하면 fixedStepSeconds)를 계획하고
+    // singleStep을 세운다. 실제·unscaled 시간은 측정값 그대로 흐르고 고정 누적은 바뀌지 않는다.
+    // 같은 프레임의 중복 요청은 마지막 delta로 덮는다. pause가 아니거나 delta가 음수·비유한 값이면
+    // InvalidArgument다.
+    Result<void> RequestSingleStep() noexcept;
+    Result<void> RequestSingleStep(double debugDeltaSeconds) noexcept;
 
     // 시간 배율이다. [0, MaxTimeScale] 범위의 유한한 값만 허용하며 그 외는 InvalidArgument다. 0은
-    // 게임 시간을 멈추지만 pause와는 별개 상태다: IsPaused는 false로 남고, StepSingle은 거부되며,
-    // World의 "pause 중 실행" Tick도 돌지 않는다. 디버그 정지에는 SetPaused를 쓴다. 역재생은 seek
-    // 경로를 쓴다.
+    // 게임 시간을 멈추지만 pause와는 별개 상태다: IsPaused는 false로 남고, 단일 스텝 요청은
+    // 거부되며, World의 "pause 중 실행" Tick도 돌지 않는다. 디버그 정지에는 SetPaused를 쓴다.
+    // 역재생은 seek 경로를 쓴다.
     Result<void> SetTimeScale(double scale) noexcept;
 
     // 시간 배율 상한이다. 큰 배율은 고정 스텝 상한에 걸려 대부분 버려지므로 의미가 없다.
@@ -110,8 +118,12 @@ public:
         return timeScale_;
     }
 
+    // pause를 바꾼다. pause를 풀면 대기 중인 단일 스텝 요청은 버린다.
     void SetPaused(bool paused) noexcept {
         paused_ = paused;
+        if (!paused) {
+            singleStepPending_ = false;
+        }
     }
 
     bool IsPaused() const noexcept {
@@ -128,9 +140,16 @@ public:
         return unscaledTime_;
     }
 
-    // 실행한 고정 스텝 수다. 고정 시간은 FixedStepCount() × fixedStepSeconds다.
+    // 실행한 고정 스텝 수다.
     uint64 FixedStepCount() const noexcept {
         return fixedSteps_;
+    }
+
+    // 고정 스텝으로 진행한 시간이다. 스텝 길이가 바뀐 시점의 값을 기준점으로 두고 그 뒤 스텝 수 ×
+    // 현재 스텝 길이를 더하므로, 길이를 바꿔도 이미 지난 시간이 다시 계산되지 않는다.
+    double FixedTimeSeconds() const noexcept {
+        return fixedTimeBase_ +
+               static_cast<double>(fixedSteps_ - fixedStepsBase_) * policy_.fixedStepSeconds;
     }
 
     // 마지막으로 계획한 프레임 번호다. Advance 전에는 0이다.
@@ -147,6 +166,10 @@ private:
     double unscaledTime_ = 0.0;
     uint64 fixedSteps_ = 0;
     uint64 frameIndex_ = 0;
+    double fixedTimeBase_ = 0.0;
+    uint64 fixedStepsBase_ = 0;
+    double singleStepDelta_ = 0.0;
+    bool singleStepPending_ = false;
 };
 
 } // namespace rocks

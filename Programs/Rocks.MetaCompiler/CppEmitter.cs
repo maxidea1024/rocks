@@ -97,7 +97,13 @@ internal static class CppEmitter
                 Line("};");
                 Line($"ops.fields = Span<const RuntimeFieldOps>(fields, {type.Fields.Count});");
             }
-            if (baseId is not null) Line($"ops.nativeBaseType = NativeTypeKey<::{type.Base}>();");
+            if (baseId is not null)
+            {
+                // nativeBaseType은 상속 Resolve의 포인터 변환 근거다. 오래된 생성 헤더나 잘못된 base 선언이
+                // 조용히 컴파일되지 않도록 C++ 상속을 컴파일 시 확인한다.
+                Line($"static_assert(__is_base_of(::{type.Base}, {native}), \"reflected base must be a C++ base\");");
+                Line($"ops.nativeBaseType = NativeTypeKey<::{type.Base}>();");
+            }
             Line("ops.completeFieldLayout = true;");
             Line("ops.parallelTraceSafe = true;");
             Line("ops.trace = +[](const Object& object, TraceVisitor& visitor) noexcept {");

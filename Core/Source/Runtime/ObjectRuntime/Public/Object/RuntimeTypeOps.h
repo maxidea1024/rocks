@@ -143,6 +143,11 @@ struct RuntimeTypeOps {
     ModuleLease module;
     // 등록 시 배열 자체도 깊게 복사한다. callback 코드 수명은 위 module이 보존한다.
     Span<const RuntimeFieldOps> fields;
+    // 기반 C++ 타입의 NativeTypeKey다. Resolve<기반>이 Object*에서 기반 포인터로 static_cast하는
+    // 근거이므로, 등록 타입이 이 기반을 단일 public 비가상 상속한다는 것을 설정하는 쪽이 컴파일 시
+    // 보증해야 한다(RegisterNativeClass·메타 생성 코드는 static_assert(__is_base_of)를 거친다).
+    // 수동 함수표에서 임의로 설정하지 않는다. TypeRegistry는 기반 레코드 일치·크기·정렬 하한만
+    // 검사한다.
     const void* nativeBaseType = nullptr;
     // 기본 수동 Trace는 owner 전용이다. side effect 없는 generated Trace만 명시 opt-in한다.
     bool parallelTraceSafe = false;

@@ -23,7 +23,9 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
     if (!type) {
         return Result<void>::Failure(type.Error());
     }
-    if (type.Value().Ops().nativeType != nativeType_) {
+    // 필드를 선언한 타입 또는 그 파생 객체에 쓸 수 있다. 파생 스키마는 상속 필드를 같은 id·kind·
+    // flags·참조 타입으로 포함함을 등록 시 강제한다.
+    if (!type.Value().IsNativeA(nativeType_)) {
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
     const FieldSchema* actual = nullptr;
@@ -359,9 +361,14 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
                                                                   ? ErrorCode::Overflow
                                                                   : ErrorCode::TypeMismatch);
             }
-            // 파생 스키마는 base field를 동일한 안정 ID/표현으로 포함한다. 실제 멤버 접근은
-            // 파생 native type을 검증하는 generated thunk가 담당하며 이 조회가 cast를 허용하지
-            // 않는다.
+            // nativeBaseType은 Resolve<기반>의 포인터 변환 근거다. C++ 상속 자체는 등록 코드의
+            // static_assert(__is_base_of)가 보증하고, 여기서는 명백히 잘못된 수동 함수표(기반보다
+            // 작거나 정렬이 약한 파생)를 거부한다.
+            if (ops.size < base->ops.size || ops.alignment < base->ops.alignment) {
+                return Result<TypeRegistrationToken>::Failure(ErrorCode::TypeMismatch);
+            }
+            // 파생 스키마는 base field를 동일한 안정 ID/표현으로 포함한다. 그래서 기반 타입의 필드
+            // 함수(Resolve<기반> 경유)를 파생 객체에 써도 같은 필드를 가리킨다.
             for (usize baseIndex = 0; baseIndex < base->schema.fields.Size(); ++baseIndex) {
                 const auto& inherited = base->schema.fields[baseIndex];
                 bool matched = false;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Core/Containers/Array.h>
+#include <Object/ObjectRefArray.h>
 #include <Object/ObjectRefs.h>
 #include <Object/ObjectDiagnostics.h>
 #include <Object/TypeRegistry.h>
@@ -126,6 +127,40 @@ public:
         return SetEdge(access, owner, field.handle_, target, 0, NativeTypeKey<T>());
     }
 
+    // owner 저장소 안에 직접 포함된 ObjectRefArray에 target을 강한 간선으로 추가한다. owner는
+    // 게시된 생존 객체(Alive)여야 하고 target은 같은 Registry의 생존 T(또는 파생) 객체여야
+    // 한다(null 불가). 원소 버퍼가 가득 차면 Registry 잠금 밖에서 배열의 allocator로 늘린다(실패 시
+    // OutOfMemory, 배열 불변). Marking 중이면 target을 shade한 뒤 게시한다. 검증 실패 시 배열
+    // 내용은 바뀌지 않는다(용량만 늘었을 수 있다). GC·callback 처리 중에는 Busy, 종료 시작 후에는
+    // ShuttingDown이다.
+    template <class T>
+    Result<void> AddReference(const ObjectAccessContext& access, ObjectHandle owner,
+                              ObjectRefArray<T>& array, ObjectHandle target) noexcept {
+        return AppendArrayEdge(access, owner, array.storage_, target, NativeTypeKey<T>());
+    }
+
+    // index 원소를 지우고 뒤 원소를 당긴다(순서 유지). 범위 밖은 InvalidArgument다. 할당하지
+    // 않는다. owner는 Alive 또는 DestroyRequested(정리 중)여야 한다.
+    template <class T>
+    Result<void> RemoveReferenceAt(const ObjectAccessContext& access, ObjectHandle owner,
+                                   ObjectRefArray<T>& array, usize index) noexcept {
+        return RemoveArrayEdge(access, owner, array.storage_, index, ObjectHandle{}, false);
+    }
+
+    // target과 같은 첫 원소를 지운다. 없으면 NotFound다.
+    template <class T>
+    Result<void> RemoveReference(const ObjectAccessContext& access, ObjectHandle owner,
+                                 ObjectRefArray<T>& array, ObjectHandle target) noexcept {
+        return RemoveArrayEdge(access, owner, array.storage_, 0, target, true);
+    }
+
+    // 모든 원소를 지운다(용량 유지). 할당하지 않는다.
+    template <class T>
+    Result<void> ClearReferences(const ObjectAccessContext& access, ObjectHandle owner,
+                                 ObjectRefArray<T>& array) noexcept {
+        return ClearArrayEdges(access, owner, array.storage_);
+    }
+
     // 논리적 접근을 즉시 닫는다. 기존 루트/간선은 GC에서 추적되어 보관된 자식도 보존한다.
     // 저장소 파괴는 도달성 및 모든 보유 계수 해소 뒤 Collect/DrainRetired에서 수행한다.
     Result<void> RequestDestroy(const ObjectAccessContext&, ObjectHandle) noexcept;
@@ -200,6 +235,17 @@ private:
     Result<void> AddBorrow(const ObjectAccessContext&, ObjectHandle, const void*) noexcept;
     Result<void> SetEdge(const ObjectAccessContext&, ObjectHandle, ObjectHandle&, ObjectHandle,
                          uint64, const void*) noexcept;
+    Result<void> AppendArrayEdge(const ObjectAccessContext&, ObjectHandle,
+                                 detail::ObjectRefArrayStorage&, ObjectHandle,
+                                 const void*) noexcept;
+    Result<void> RemoveArrayEdge(const ObjectAccessContext&, ObjectHandle,
+                                 detail::ObjectRefArrayStorage&, usize, ObjectHandle,
+                                 bool byHandle) noexcept;
+    Result<void> ClearArrayEdges(const ObjectAccessContext&, ObjectHandle,
+                                 detail::ObjectRefArrayStorage&) noexcept;
+    // owner·저장소 위치 검증(잠금 보유 상태에서 호출). allowDestroyRequested는 제거 연산용이다.
+    Result<void> CheckArrayOwnerLocked(ObjectHandle, const detail::ObjectRefArrayStorage&,
+                                       bool allowDestroyRequested) noexcept;
     Result<RootRef<Object>> NewRoot(const ObjectAccessContext&, TypeId, const void*) noexcept;
     Result<uint64> BeginConstruction(const ObjectAccessContext&) noexcept;
     Result<ObjectHandle> CreatePending(const ObjectAccessContext&, TypeId, uint64,

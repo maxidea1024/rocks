@@ -70,8 +70,10 @@ private:
     ObjectHandle handle_;
 };
 
+// 타입마다 고유한 주소를 갖는 표지다. const를 붙이지 않는다: 읽기 전용 상수는 링커의 동일 데이터
+// 병합(ICF)으로 서로 다른 타입의 주소가 합쳐질 수 있다.
 template <class T>
-inline const uint8 NativeTypeIdentity = 0;
+inline uint8 NativeTypeIdentity = 0;
 
 // 현재 실행 이미지 안의 정확한 C++ 타입 비교용 키다. 직렬화하거나 ABI에 노출하지 않는다.
 // Object의 nullptr 키는 기반 타입 조회를 뜻한다. 상속 판정은 등록된 base 사슬을 따라

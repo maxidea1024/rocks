@@ -108,20 +108,27 @@ TEST(GameClock_PauseStopsGameTimeAndResumeKeepsScaleWithoutCatchUp) {
     CHECK(clock.TimeScale() == 0.5);
 }
 
-TEST(GameClock_SingleStepRunsExactlyOneFixedStepWhilePaused) {
+TEST(GameClock_SingleStepRequestIsConsumedByNextAdvance) {
     GameClock clock;
     REQUIRE(clock.SetPolicy({0.1, 1.0, 8}));
-    CHECK(clock.StepSingle().Error() == ErrorCode::InvalidArgument);
+    CHECK(clock.RequestSingleStep().Error() == ErrorCode::InvalidArgument);
     clock.SetPaused(true);
-    auto step = clock.StepSingle();
+    REQUIRE(clock.RequestSingleStep());
+    auto step = clock.Advance(0.016);
     REQUIRE(step);
+    CHECK(step.Value().singleStep);
     CHECK(step.Value().fixedSteps == 1);
     CHECK(Near(step.Value().deltaSeconds, 0.1));
+    // 실제·unscaled 시간은 측정값 그대로 흐른다(UI·timeout 왜곡 없음).
+    CHECK(Near(step.Value().unscaledDeltaSeconds, 0.016));
+    CHECK(step.Value().frameIndex == 1);
     CHECK(clock.FixedStepCount() == 1);
     CHECK(Near(clock.GameTimeSeconds(), 0.1));
+    // 요청은 한 번만 소비된다.
     auto after = clock.Advance(0.3);
     REQUIRE(after);
-    CHECK(after.Value().fixedSteps == 0);
+    CHECK(!after.Value().singleStep && after.Value().fixedSteps == 0);
+    CHECK(after.Value().frameIndex == 2);
 }
 
 TEST(GameClock_LongFrameIsClampedAndExcessSubstepsAreReported) {
@@ -180,19 +187,42 @@ TEST(GameClock_ExtremeButValidSettingsKeepAlphaInRange) {
     CHECK(clock.FixedStepCount() == 60);
 }
 
-TEST(GameClock_SingleStepUsesExplicitDebugDelta) {
+TEST(GameClock_SingleStepUsesExplicitDebugDeltaAndUnpauseDropsRequest) {
     GameClock clock;
     REQUIRE(clock.SetPolicy({0.1, 1.0, 8}));
     clock.SetPaused(true);
-    auto step = clock.StepSingle(0.25);
+    REQUIRE(clock.RequestSingleStep(0.25));
+    auto step = clock.Advance(0.0);
     REQUIRE(step);
-    CHECK(step.Value().fixedSteps == 1);
-    CHECK(Near(step.Value().deltaSeconds, 0.25));
-    CHECK(clock.StepSingle(-0.5).Error() == ErrorCode::InvalidArgument);
-    // scale 0은 pause가 아니므로 단일 스텝을 허용하지 않는다.
+    CHECK(step.Value().fixedSteps == 1 && Near(step.Value().deltaSeconds, 0.25));
+    CHECK(clock.RequestSingleStep(-0.5).Error() == ErrorCode::InvalidArgument);
+    CHECK(clock.RequestSingleStep(-1.0).Error() == ErrorCode::InvalidArgument);
+    // pause를 풀면 대기 중인 요청은 버린다.
+    REQUIRE(clock.RequestSingleStep());
+    clock.SetPaused(false);
+    clock.SetPaused(true);
+    auto paused = clock.Advance(0.1);
+    REQUIRE(paused);
+    CHECK(!paused.Value().singleStep && paused.Value().fixedSteps == 0);
+    // scale 0은 pause가 아니므로 단일 스텝을 요청할 수 없다.
     clock.SetPaused(false);
     REQUIRE(clock.SetTimeScale(0.0));
-    CHECK(clock.StepSingle().Error() == ErrorCode::InvalidArgument);
+    CHECK(clock.RequestSingleStep().Error() == ErrorCode::InvalidArgument);
+}
+
+TEST(GameClock_FixedTimeSurvivesStepLengthChange) {
+    GameClock clock;
+    REQUIRE(clock.SetPolicy({0.1, 1.0, 16}));
+    for (int frame = 0; frame < 10; ++frame) {
+        REQUIRE(clock.Advance(0.1));
+    }
+    CHECK(Near(clock.FixedTimeSeconds(), 1.0, 1.0e-6));
+    REQUIRE(clock.SetPolicy({0.2, 1.0, 16}));
+    CHECK(Near(clock.FixedTimeSeconds(), 1.0, 1.0e-6));
+    REQUIRE(clock.Advance(0.4));
+    CHECK(Near(clock.FixedTimeSeconds(), 1.4, 1.0e-6));
+    CHECK(clock.SetPolicy({0.1, TimeStepPolicy::MaxFrameDeltaSeconds * 2.0, 1}).Error() ==
+          ErrorCode::InvalidArgument);
 }
 
 TEST(GameClock_ChangingFixedStepResetsAccumulator) {

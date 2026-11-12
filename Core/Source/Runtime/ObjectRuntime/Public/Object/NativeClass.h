@@ -5,12 +5,12 @@
 // 메타컴파일러를 거치지 않는 네이티브 클래스의 타입 등록이다. 메타 생성 타입은 모든 필드가 반영
 // 가능한 형식이어야 하지만(컨테이너·raw pointer 거부), 엔진 런타임 클래스(Actor·Component 등)는
 // Array, World 포인터 같은 C++ 상태가 필요하다. 이런 클래스는 필드 없는 스키마로 등록해 Object
-// 생성·수명· 상속 판정(Resolve<기반 타입>)만 쓴다. 필드 리플렉션·객체 그래프 직렬화 대상은 아니다.
+// 생성·수명·상속 판정(Resolve<기반 타입>)만 쓴다. 필드 리플렉션·객체 그래프 직렬화 대상은 아니다.
 //
 // 사용 예:
 //   class SpinningActor : public rocks::Actor {
 //       ROCKS_NATIVE_CLASS(SpinningActor, rocks::Actor, 0x5b1c7d2e8a4f4c10ull,
-//       0x9e02b6a1d3c84f57ull)
+//                          0x9e02b6a1d3c84f57ull)
 //   public:
 //       explicit SpinningActor(rocks::Allocator& allocator) noexcept;
 //   };
@@ -18,12 +18,17 @@
 //   // 기반 타입을 먼저 등록한다(TypeRegistry 규칙). 실패하면 AlreadyExists·NotFound 등을 반환한다.
 //   auto token = rocks::RegisterNativeClass<SpinningActor>(types);
 //
-// - TypeId는 저장소 전체에서 유일한 128비트 값이다. 새 클래스마다 무작위 값을 발급한다(재사용
-// 금지).
+// - TypeId는 저장소 전체에서 유일한 128비트 값이다. 새 클래스마다 무작위 값을 발급하고 재사용하지
+//   않는다.
 // - 매크로는 `public:` 접근 지정을 남긴다. 매크로 뒤의 멤버 접근 지정은 직접 다시 쓴다.
 // - 기반 클래스도 네이티브 클래스이거나 rocks::Object여야 한다. 단일 public 비가상 상속만 지원한다.
-// - 파생 클래스가 매크로를 빠뜨리면 기반의 ID를 물려받는다. RegisterNativeClass가 컴파일 시
-// 거부한다.
+// - 파생 클래스가 매크로를 빠뜨리면 기반의 ID를 물려받는다. NativeClassType concept이 이를
+// 거부하므로
+//   NativeTypeIdOf·RegisterNativeClass(그리고 이를 쓰는 World Spawn·AddComponent)가 컴파일되지
+//   않는다.
+// - 객체 안에 다른 객체로의 강한 간선(ObjectRef·ObjectRefArray)을 두면
+//   `void Trace(TraceVisitor&) const noexcept`를 정의해 모두 방문한다. 파생 클래스가 간선을 더하면
+//   Trace를 재정의하고 Super::Trace를 먼저 호출한다.
 #define ROCKS_NATIVE_CLASS(Type, Base, IdHigh, IdLow)                                              \
 public:                                                                                            \
     using ThisClass = Type;                                                                        \
@@ -40,7 +45,7 @@ concept NativeClassType = __is_base_of(Object, T) && requires {
     typename T::Super;
     T::StaticTypeId;
     T::StaticTypeName;
-};
+} && __is_same(typename T::ThisClass, T);
 
 // T의 정적 TypeId다. ROCKS_NATIVE_CLASS 선언이 필요하다. 등록 여부와 무관한 값이다.
 template <NativeClassType T>

@@ -20,12 +20,15 @@ Result<void> GameClock::SetPolicy(const TimeStepPolicy& policy) noexcept {
     if (!math::IsFinite(policy.fixedStepSeconds) ||
         policy.fixedStepSeconds < TimeStepPolicy::MinFixedStepSeconds ||
         policy.fixedStepSeconds > 1.0 || !IsPositiveFinite(policy.maxFrameDeltaSeconds) ||
+        policy.maxFrameDeltaSeconds > TimeStepPolicy::MaxFrameDeltaSeconds ||
         policy.maxSubsteps == 0 || policy.maxSubsteps > TimeStepPolicy::MaxSubsteps) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     if (policy.fixedStepSeconds != policy_.fixedStepSeconds) {
         accumulator_ = 0.0;
+        fixedTimeBase_ = FixedTimeSeconds();
+        fixedStepsBase_ = fixedSteps_;
     }
 
     policy_ = policy;
@@ -47,6 +50,19 @@ Result<StepPlan> GameClock::Advance(double realDeltaSeconds) noexcept {
     plan.fixedStepSeconds = policy_.fixedStepSeconds;
     plan.frameIndex = frameIndex_ + 1;
     plan.firstFixedStepIndex = fixedSteps_;
+    if (paused_ && singleStepPending_) {
+        // 디버그 단일 스텝: 고정 스텝 한 번, 가변 delta는 요청값, 고정 누적·보간 비율은 그대로다.
+        singleStepPending_ = false;
+        plan.singleStep = true;
+        plan.deltaSeconds = singleStepDelta_;
+        plan.fixedSteps = 1;
+        plan.interpolationAlpha = accumulator_ / policy_.fixedStepSeconds;
+        gameTime_ += plan.deltaSeconds;
+        unscaledTime_ += plan.unscaledDeltaSeconds;
+        fixedSteps_ += 1;
+        frameIndex_ = plan.frameIndex;
+        return Result<StepPlan>::Success(plan);
+    }
 
     // 고정 accumulator는 가변 Update와 같은 게임 delta를 받는다(scale·pause의 이중 적용 방지).
     double accumulator = accumulator_ + plan.deltaSeconds;
@@ -88,26 +104,18 @@ Result<StepPlan> GameClock::Advance(double realDeltaSeconds) noexcept {
     return Result<StepPlan>::Success(plan);
 }
 
-Result<StepPlan> GameClock::StepSingle(double debugDeltaSeconds) noexcept {
-    const double delta = debugDeltaSeconds == -1.0 ? policy_.fixedStepSeconds : debugDeltaSeconds;
-    if (!paused_ || !math::IsFinite(delta) || delta < 0.0) {
-        return Result<StepPlan>::Failure(ErrorCode::InvalidArgument);
+Result<void> GameClock::RequestSingleStep() noexcept {
+    return RequestSingleStep(policy_.fixedStepSeconds);
+}
+
+Result<void> GameClock::RequestSingleStep(double debugDeltaSeconds) noexcept {
+    if (!paused_ || !math::IsFinite(debugDeltaSeconds) || debugDeltaSeconds < 0.0) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    StepPlan plan;
-    plan.realDeltaSeconds = delta;
-    plan.unscaledDeltaSeconds = delta;
-    plan.deltaSeconds = delta;
-    plan.fixedSteps = 1;
-    plan.fixedStepSeconds = policy_.fixedStepSeconds;
-    plan.interpolationAlpha = accumulator_ / policy_.fixedStepSeconds;
-    plan.frameIndex = frameIndex_ + 1;
-    plan.firstFixedStepIndex = fixedSteps_;
-    gameTime_ += plan.deltaSeconds;
-    unscaledTime_ += plan.unscaledDeltaSeconds;
-    fixedSteps_ += 1;
-    frameIndex_ = plan.frameIndex;
-    return Result<StepPlan>::Success(plan);
+    singleStepDelta_ = debugDeltaSeconds;
+    singleStepPending_ = true;
+    return Result<void>::Success();
 }
 
 Result<void> GameClock::SetTimeScale(double scale) noexcept {
