@@ -64,6 +64,9 @@ try
     await PlatformSelectionTests.RunAsync(request, root);
     Pass("platform routing rejects unknown and mismatched targets");
 
+    DescriptorTests.Run(root, args.Contains("--root") ? args[Array.IndexOf(args, "--root") + 1] : null);
+    Pass("project and plugin descriptors parse strictly and resolve plugins");
+
     await ExecutorCleanupTests.RunAsync(request, root);
     Pass("cleanup failures preserve diagnostics, cancellation, and cache safety");
 

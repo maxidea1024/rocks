@@ -4,6 +4,7 @@
 
 ## 현재 동작
 
+- `Game.rocksproject`는 프로젝트 기술자다(UE .uproject 대응). 엔진 버전·모듈(`SampleGame`)·대상 플랫폼을 적는다. 형식은 [저장소 구성](../../../Docs/Design/RepositoryLayout.ko.md)의 기술자 절을 따른다.
 - `Game.Build.cs`는 `SampleGame` 실행 모듈과 `ObjectRuntime` 의존성을 선언한다.
 - `Game.Target.cs`는 `Game` 타깃과 메타컴파일러가 처리할 `GameObject.h`를 지정한다.
 - `Game.rocksids.json`은 이 예제 타깃의 타입·필드 식별자를 보관한다. 소스의 매크로에는 식별자나 버전 숫자를 적지 않는다.

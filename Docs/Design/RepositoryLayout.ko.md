@@ -74,11 +74,46 @@ public sealed class Core : CoreModuleRules
    목록에 이름을 더한다.
 3. 다른 모듈은 `RequiredModules`에 이름을 넣어 의존한다.
 
+## 프로젝트·플러그인 기술자
+
+게임 프로젝트는 폴더 최상위에 `<프로젝트>.rocksproject`, 플러그인은 `<플러그인>/<플러그인>.rocksplugin`을
+둔다(UE `.uproject`·`.uplugin` 대응, UTF-8 JSON, 필드 이름은 camelCase). 읽기·검증·플러그인 해석은
+`Programs/Rocks.Build/Descriptors.cs`(`DescriptorReader`·`PluginCatalog`)다.
+
+```json
+{
+  "fileVersion": 1,
+  "engineVersion": "0.1",
+  "description": "예제 게임",
+  "modules": [ { "name": "MyGame", "type": "Runtime", "loadingPhase": "Default" } ],
+  "plugins": [ { "name": "Water", "enabled": true } ],
+  "targetPlatforms": ["Windows", "MacOS", "Android"]
+}
+```
+
+| 필드 | 프로젝트 | 플러그인 | 뜻 |
+|---|---|---|---|
+| fileVersion | 필수 | 필수 | 기술자 형식 버전(지금 1). 다른 값은 오류 |
+| engineVersion | 필수 | — | 대상 엔진 버전 "주.부" |
+| version·versionName·friendlyName | — | 필수 | 플러그인 버전(정수 1 이상)·표시 버전·표시 이름 |
+| description·category | 선택 | 선택 | 설명·분류 |
+| enabledByDefault | — | 선택(false) | 프로젝트가 따로 적지 않을 때 켤지 |
+| modules | 선택 | 선택 | `{name, type(Runtime·Developer·Editor), loadingPhase(기본 Default), platforms}` |
+| plugins | 선택 | 선택 | 프로젝트: `{name, enabled}`로 켜고 끔. 플러그인: 의존 목록(`enabled`는 true만) |
+| targetPlatforms | 선택(모두) | — | Windows·MacOS·Android |
+
+- 모르는 필드·중복 필드·잘못된 타입·주석·끝 쉼표·1 MiB 초과는 오류다. 모듈·플러그인 이름은 영문자로
+  시작하는 식별자(최대 64자)이며 대소문자만 다른 중복도 오류다.
+- 플러그인 탐색 위치는 `Engine/Plugins/`와 `<프로젝트>/Plugins/`이며 같은 이름이 둘 이상이면 오류다.
+- 켤 플러그인: 프로젝트가 `enabled: true`로 적은 것과, 적지 않은 것 중 `enabledByDefault`인 것. 그 의존은
+  자동으로 켠다. 프로젝트가 끈 플러그인을 다른 켜진 플러그인이 요구하거나, 없는 플러그인을 참조하거나,
+  의존이 순환하면 오류다. 결과는 의존이 앞에 오는 순서다.
+
 ## 후속
 
-- 프로젝트·플러그인 기술자(`<이름>.rocksproject`·`<이름>.rocksplugin`, UE `.uproject`·`.uplugin` 대응)와
-  기술자 기반 모듈·플러그인 탐색.
-- 게임 프로젝트의 `Plugins/` 탐색, 플러그인 활성화·의존성·로딩 단계.
+- 빌드 통합: 기술자의 프로젝트 모듈과 켠 플러그인의 모듈(`Source/<모듈>/<모듈>.Build.cs`)을 찾아 빌드하고,
+  모듈 type·platforms·loadingPhase를 빌드·로딩에 반영한다. 기술자 모듈과 규칙 파일의 일치 검사.
+- engineVersion 호환 판정(지금은 형식만 검사).
 - 2026-11-12 이전 구조(`Engine/<Module>`, 최상위 `Tests/`·`Tools/`)를 가리키는 과거 검토·배포 문서
   (`Docs/Reviews`, `Docs/Releases`)는 기록이므로 경로를 고치지 않는다. 계획 데이터
   (`CoreObjectInputData.json`, `CoreObjectInputFiles.ko.csv`, `CoreObjectInputTasks.ko.csv`)의 예정 파일
