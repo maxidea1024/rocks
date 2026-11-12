@@ -22,7 +22,9 @@ public static class ThirdPartyManifestRefresh
         string thirdParty = Path.Combine(root, ThirdPartyManifest.ThirdPartyRoot);
         List<string> changed = [];
         if (!Directory.Exists(thirdParty))
+        {
             return changed;
+        }
 
         foreach (string library in Directory.EnumerateDirectories(thirdParty).Order(StringComparer.Ordinal))
         {
@@ -43,19 +45,29 @@ public static class ThirdPartyManifestRefresh
                 files[file] = Convert.ToHexStringLower(SHA256.HashData(bytes));
                 // 데이터 전용 라이브러리는 컴파일하지 않으므로 지시문을 기록하지 않는다(목록은 비어 있어야 한다).
                 if (manifest.Kind == ThirdPartyKind.Code)
+                {
                     foreach (ThirdPartyPragma pragma in ThirdPartyManifest.ScanPragmaDirectives(file, bytes))
+                    {
                         pragmas.Add(new JsonObject { ["file"] = pragma.File, ["line"] = pragma.Line, ["text"] = pragma.Text });
+                    }
+                }
             }
+
             document["files"] = files;
             document["pragmaDirectives"] = pragmas;
 
             string updated = document.ToJsonString(new JsonSerializerOptions
             {
                 // 줄바꿈은 플랫폼과 무관하게 LF다(저장소 규칙, 결과 byte가 플랫폼마다 같아야 한다).
-                WriteIndented = true, NewLine = "\n", Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                WriteIndented = true,
+                NewLine = "\n",
+                Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
             }) + "\n";
             if (updated == original)
+            {
                 continue;
+            }
+
             changed.Add(Path.GetRelativePath(root, path).Replace('\\', '/'));
             if (write)
             {
@@ -65,6 +77,7 @@ public static class ThirdPartyManifestRefresh
                 ThirdPartyManifest.Read(library); // 쓴 결과도 엄격한 읽기를 통과해야 한다.
             }
         }
+
         return changed;
     }
 }

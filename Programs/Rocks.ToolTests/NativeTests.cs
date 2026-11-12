@@ -27,17 +27,25 @@ internal static class NativeTests
         LoggerOutputTests.Register(suite, options, environment);
         AlgorithmsCompilerTests.Register(suite, options, environment);
         string executable = Path.GetFullPath(options.Required("native-executable"));
-        if (!File.Exists(executable)) throw new FileNotFoundException("Native test executable missing", executable);
+        if (!File.Exists(executable))
+        {
+            throw new FileNotFoundException("Native test executable missing", executable);
+        }
+
         Task<ProcessResult> Run(params string[] args) => ProcessRunner.RunAsync(new(executable, args, options.Root,
             environment, Timeout: TimeSpan.FromSeconds(20)));
         foreach (string control in new[] { "check", "require" })
+        {
             suite.Add("Native.Negative." + control, async () =>
             {
                 var result = await Run("--negative-control", control);
                 Verify.Equal(1, result.ExitCode, "negative control exit");
                 Verify.Contains("CHECK FAILED: false", result.StdErr, "negative control diagnostic");
             });
+        }
+
         foreach (string state in new[] { "reserved", "decommitted", "committed" })
+        {
             foreach (string access in new[] { "read", "write" })
             {
                 string control = $"vm-{state}-{access}";
@@ -70,6 +78,7 @@ internal static class NativeTests
                     }
                 });
             }
+        }
         // CRT 없는 숫자 변환을 .NET(Core 3.0+, 최단 왕복 "R"·IEEE 정확 Parse)과 고정 시드 사례 수십만 개로 대조한다
         // (CoreDataFoundations.ko.md 3.2절).
         suite.Add("Native.NumberConversionMatchesDotNet", async () =>
@@ -120,6 +129,7 @@ internal static class NativeTests
         });
         foreach ((string control, string diagnostic) in new[] { ("assert-stderr-lock", "Rocks invariant failed:"),
             ("thread-unjoined", "Thread"), ("name-live-lease", "NamePool destroyed with active operations or leases") })
+        {
             suite.Add("Native.Fatal." + control, async () =>
             {
                 var result = await Run("--negative-control", control);
@@ -137,11 +147,14 @@ internal static class NativeTests
                     Verify.That(!result.StdErr.Contains("THREAD_SETUP_", StringComparison.Ordinal), "thread setup failed");
                 }
             });
+        }
+
         foreach ((string control, string diagnostic) in new[]
         {
             ("thread-unjoined-start-failure", "THREAD_SETUP_START_FAILED"),
             ("thread-unjoined-wait-failure", "THREAD_SETUP_WAIT_FAILED")
         })
+        {
             suite.Add("Native.Fatal." + control, async () =>
             {
                 var result = await Run("--negative-control", control);
@@ -150,40 +163,62 @@ internal static class NativeTests
                 Verify.That(!result.StdErr.Contains("THREAD_UNJOINED_READY", StringComparison.Ordinal), "setup failure appeared ready");
                 Verify.That(!result.StdErr.Contains("Thread destroyed without a successful Join", StringComparison.Ordinal), "setup failure appeared as unjoined destructor");
             });
+        }
+
         if (string.Equals(Path.GetFileNameWithoutExtension(executable), "FoundationTests", StringComparison.OrdinalIgnoreCase))
+        {
             foreach (string control in new[] { "object-scope-lifo", "object-scope-thread" })
+            {
                 suite.Add("Native.Fatal." + control, async () =>
                 {
                     var result = await Run("--negative-control", control);
                     Verify.That(result.ExitCode != 0, "invalid scope lifetime did not fail");
                     Verify.Contains("ObjectAccessScope must close", result.StdErr, "scope fatal diagnostic");
                 });
+            }
+        }
+
         if (string.Equals(Path.GetFileNameWithoutExtension(executable), "FoundationTests", StringComparison.OrdinalIgnoreCase))
+        {
             foreach ((string control, string error) in new[] { ("object-status-stale", "StaleHandle"), ("object-status-context", "WrongContext") })
+            {
                 suite.Add("Native.Fatal." + control, async () =>
                 {
                     var result = await Run("--negative-control", control);
                     Verify.That(result.ExitCode != 0, "invalid status query did not fail");
                     Verify.Contains("Object::IsDestroyRequested failed: " + error, result.StdErr, "status fatal diagnostic");
                 });
+            }
+        }
+
         if (string.Equals(Path.GetFileNameWithoutExtension(executable), "FoundationTests", StringComparison.OrdinalIgnoreCase))
+        {
             foreach ((string control, string error) in new[] { ("object-type-stale", "StaleHandle"), ("object-type-context", "WrongContext") })
+            {
                 suite.Add("Native.Fatal." + control, async () =>
                 {
                     var result = await Run("--negative-control", control);
                     Verify.That(result.ExitCode != 0, "invalid type query did not fail");
                     Verify.Contains("Object::GetType failed: " + error, result.StdErr, "type fatal diagnostic");
                 });
+            }
+        }
+
         if (string.Equals(Path.GetFileNameWithoutExtension(executable), "FoundationTests", StringComparison.OrdinalIgnoreCase))
+        {
             suite.Add("Native.Fatal.empty-type-isa", async () =>
             {
                 var result = await Run("--negative-control", "empty-type-isa");
                 Verify.That(result.ExitCode != 0, "empty type IsA did not fail");
                 Verify.Contains("TypeLease::IsA called on empty lease", result.StdErr, "empty type fatal diagnostic");
             });
+        }
+
         if (string.Equals(Path.GetFileNameWithoutExtension(executable), "FoundationTests", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(Path.GetFileNameWithoutExtension(executable), "CoreFoundationTests", StringComparison.OrdinalIgnoreCase))
+        {
             foreach (string kind in new[] { "map", "set" })
+            {
                 foreach (string operation in new[] { "erase", "clear", "reset" })
                 {
                     string control = $"hash-{kind}-foreach-{operation}";
@@ -194,17 +229,26 @@ internal static class NativeTests
                         Verify.Contains("HashMap structural mutation during iteration", result.StdErr, "hash mutation fatal diagnostic");
                     });
                 }
+            }
+        }
+
         if (string.Equals(Path.GetFileNameWithoutExtension(executable), "FoundationTests", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(Path.GetFileNameWithoutExtension(executable), "CoreFoundationTests", StringComparison.OrdinalIgnoreCase))
+        {
             foreach (string control in new[] { "hash-map-eraseif-clear", "hash-set-eraseif-clear", "hash-map-factory-clear", "hash-set-union-erase" })
+            {
                 suite.Add("Native.Fatal." + control, async () =>
                 {
                     var result = await Run("--negative-control", control);
                     Verify.That(result.ExitCode != 0, "hash operation mutation did not fail");
                     Verify.Contains("HashMap structural mutation during iteration", result.StdErr, "hash operation fatal diagnostic");
                 });
+            }
+        }
+
         if (string.Equals(Path.GetFileNameWithoutExtension(executable), "FoundationTests", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(Path.GetFileNameWithoutExtension(executable), "CoreFoundationTests", StringComparison.OrdinalIgnoreCase))
+        {
             foreach ((string control, string diagnostic) in new[]
             {
                 ("allocator-arena-live", "ArenaAllocator destroyed with live allocations"),
@@ -215,12 +259,16 @@ internal static class NativeTests
                 ("allocator-external-metadata", "ExternalAllocator metadata allocator rejected owned record"),
                 ("allocator-external-live", "ExternalAllocator destroyed with active calls or live allocations")
             })
+            {
                 suite.Add("Native.Fatal." + control, async () =>
                 {
                     var result = await Run("--negative-control", control);
                     Verify.That(result.ExitCode != 0, "allocator with live allocation did not fail");
                     Verify.Contains(diagnostic, result.StdErr, "allocator fatal diagnostic");
                 });
+            }
+        }
+
         if (string.Equals(Path.GetFileNameWithoutExtension(executable), "FoundationTests", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(Path.GetFileNameWithoutExtension(executable), "CoreFoundationTests", StringComparison.OrdinalIgnoreCase))
         {
@@ -230,6 +278,7 @@ internal static class NativeTests
                 ("allocator-debug-back", "DebugAllocator detected back guard corruption", "0"),
                 ("allocator-debug-after-free", "DebugAllocator detected write after free", "0")
             })
+            {
                 suite.Add("Native.Fatal." + control, async () =>
                 {
                     var result = await Run("--negative-control", control);
@@ -239,6 +288,8 @@ internal static class NativeTests
                     Verify.Contains("tag=439", result.StdErr, "debug corruption tag");
                     Verify.Contains("offset=" + offset, result.StdErr, "debug corruption offset");
                 });
+            }
+
             suite.Add("Native.Fatal.allocator-debug-live", async () =>
             {
                 var result = await Run("--negative-control", "allocator-debug-live");
@@ -246,20 +297,27 @@ internal static class NativeTests
                 Verify.Contains("DebugAllocator destroyed with live allocations", result.StdErr, "debug leak diagnostic");
             });
         }
+
         if (string.Equals(Path.GetFileNameWithoutExtension(executable), "FoundationTests", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(Path.GetFileNameWithoutExtension(executable), "CoreFoundationTests", StringComparison.OrdinalIgnoreCase))
+        {
             foreach ((string control, string diagnostic) in new[] {
                 ("allocator-stack-live", "StackAllocator destroyed with live allocations"),
                 ("allocator-stack-wrong-thread", "StackAllocator mark accessed on wrong thread or during reentrant call"),
                 ("allocator-stack-array-growth", "Array storage was not owned by its allocator") })
+            {
                 suite.Add("Native.Fatal." + control, async () =>
                 {
                     var result = await Run("--negative-control", control);
                     Verify.That(result.ExitCode != 0, "invalid stack allocator usage did not fail");
                     Verify.Contains(diagnostic, result.StdErr, "stack allocator fatal diagnostic");
                 });
+            }
+        }
+
         if (string.Equals(Path.GetFileNameWithoutExtension(executable), "FoundationTests", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(Path.GetFileNameWithoutExtension(executable), "CoreFoundationTests", StringComparison.OrdinalIgnoreCase))
+        {
             foreach ((int operation, string diagnostic) in new[] {
                 (0, "BinnedAllocator backing returned invalid storage"),
                 (1, "BinnedAllocator backing returned invalid storage"),
@@ -268,14 +326,19 @@ internal static class NativeTests
                 (4, "BinnedAllocator backing returned overlapping storage"),
                 (5, "BinnedAllocator backing returned overlapping storage"),
                 (6, "BinnedAllocator backing returned overlapping storage") })
+            {
                 suite.Add("Native.Fatal.allocator-binned-invalid-" + operation, async () =>
                 {
                     var result = await Run("--negative-control", "allocator-binned-invalid-" + operation);
                     Verify.That(result.ExitCode != 0, "invalid backing allocation did not fail");
                     Verify.Contains(diagnostic, result.StdErr, "binned backing fatal diagnostic");
                 });
+            }
+        }
+
         if (string.Equals(Path.GetFileNameWithoutExtension(executable), "FoundationTests", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(Path.GetFileNameWithoutExtension(executable), "CoreFoundationTests", StringComparison.OrdinalIgnoreCase))
+        {
             foreach ((int operation, string diagnostic) in new[] {
                 (0, "FileSystem Open violated handle ownership contract"),
                 (1, "FileSystem Open violated handle ownership contract"),
@@ -285,14 +348,19 @@ internal static class NativeTests
                 (5, "FileHandle reported more bytes than requested"),
                 (6, "FileHandle reported more bytes than requested"),
                 (7, "FileHandle reported more bytes than requested") })
+            {
                 suite.Add("Native.Fatal.platform-file-invalid-" + operation, async () =>
                 {
                     var result = await Run("--negative-control", "platform-file-invalid-" + operation);
                     Verify.That(result.ExitCode != 0, "invalid file backend did not fail");
                     Verify.Contains(diagnostic, result.StdErr, "file backend fatal diagnostic");
                 });
+            }
+        }
+
         if (string.Equals(Path.GetFileNameWithoutExtension(executable), "FoundationTests", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(Path.GetFileNameWithoutExtension(executable), "CoreFoundationTests", StringComparison.OrdinalIgnoreCase))
+        {
             foreach ((int operation, string diagnostic) in new[] {
                 (0, "PlatformMath int32 conversion is NaN or out of range"),
                 (1, "PlatformMath int32 conversion is NaN or out of range"),
@@ -302,6 +370,7 @@ internal static class NativeTests
                 (5, "Matrix4 index out of range"),
                 (6, "Rocks invariant failed: unitAxis.IsNormalized"),
                 (7, "Rocks invariant failed: minimum <= maximum") })
+            {
                 suite.Add("Native.Fatal.math-invalid-" + operation, async () =>
                 {
                     // 계약 위반 값을 반환하며 정상 종료하면 안 된다. 진단 문구로 위반 종류를 구분한다.
@@ -309,8 +378,12 @@ internal static class NativeTests
                     Verify.That(result.ExitCode != 0, "math contract violation did not fail");
                     Verify.Contains(diagnostic, result.StdErr, "math fatal diagnostic");
                 });
+            }
+        }
+
         if (string.Equals(Path.GetFileNameWithoutExtension(executable), "FoundationTests", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(Path.GetFileNameWithoutExtension(executable), "CoreFoundationTests", StringComparison.OrdinalIgnoreCase))
+        {
             foreach ((string control, string diagnostic) in new[] {
                 ("optional-empty-value", "Optional::Value called on an empty Optional"),
                 ("unique-ptr-empty", "UniquePtr dereferenced while empty"),
@@ -329,27 +402,37 @@ internal static class NativeTests
                 ("random-invalid-0", "RandomStream::NextUInt32Below requires bound > 0"),
                 ("random-invalid-1", "RandomStream::NextInt32InRange requires minimum <= maximum"),
                 ("random-invalid-2", "RandomStream::NextFloatInRange requires finite minimum < maximum") })
+            {
                 suite.Add("Native.Fatal." + control, async () =>
                 {
                     var result = await Run("--negative-control", control);
                     Verify.That(result.ExitCode != 0, "empty value access did not fail");
                     Verify.Contains(diagnostic, result.StdErr, "empty value fatal diagnostic");
                 });
+            }
+        }
+
         if (string.Equals(Path.GetFileNameWithoutExtension(executable), "FoundationTests", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(Path.GetFileNameWithoutExtension(executable), "CoreFoundationTests", StringComparison.OrdinalIgnoreCase))
+        {
             suite.Add("Native.Fatal.bit-array-invalid-index", async () =>
             {
                 var result = await Run("--negative-control", "bit-array-invalid-index");
                 Verify.That(result.ExitCode != 0, "out-of-range bit access did not fail");
                 Verify.Contains("BitArray index is out of range", result.StdErr, "bit array fatal diagnostic");
             });
+        }
+
         if (options.Asan)
+        {
             suite.Add("Native.AsanDetectsActualUseAfterFree", async () =>
             {
                 var result = await Run("--negative-control", "asan-uaf");
                 Verify.That(result.ExitCode != 0, "ASan negative control succeeded");
                 Verify.Contains("AddressSanitizer: heap-use-after-free", result.StdErr, "actual ASan report");
             });
+        }
+
         if (options.Optional("compiler") is string compiler)
         {
             suite.Add("Native.CompilerRejectsIntentionalWarning", () => WarningProbe.VerifyAsync(compiler, options.Root, environment));
@@ -366,14 +449,21 @@ internal static class NativeTests
                                                                 "#pragma warning(disable : 4100)\n" + body);
                     fixture.Write(library + "/ThirdParty.json", JsonSerializer.Serialize(new Dictionary<string, object>
                     {
-                        ["schema"] = 1, ["name"] = "Fake", ["version"] = "1.0", ["upstreamDirectory"] = "fake-1.0",
+                        ["schema"] = 1,
+                        ["name"] = "Fake",
+                        ["version"] = "1.0",
+                        ["upstreamDirectory"] = "fake-1.0",
                         ["source"] = new { url = "https://example.invalid/fake.tar.gz", sha256 = new string('0', 64), verification = "fixture" },
-                        ["license"] = new { spdx = "BSD-2-Clause", upstreamExpression = "BSD-2-Clause", file = "fake-1.0/fake.c", binaryNoticeRequired = true },
-                        ["translationUnits"] = new[] { "fake-1.0/fake.c" }, ["includeDirectories"] = Array.Empty<string>(),
-                        ["defines"] = Array.Empty<string>(), ["platformDefines"] = new Dictionary<string, string[]>(),
-                        ["consumerDefines"] = Array.Empty<string>(), ["adapterHeaders"] = new[] { "fake-1.0/fake.c" },
+                        ["licenses"] = new[] { new { spdx = "BSD-2-Clause", upstreamExpression = "BSD-2-Clause", file = "fake-1.0/fake.c", binaryNoticeRequired = true } },
+                        ["translationUnits"] = new[] { "fake-1.0/fake.c" },
+                        ["includeDirectories"] = Array.Empty<string>(),
+                        ["defines"] = Array.Empty<string>(),
+                        ["platformDefines"] = new Dictionary<string, string[]>(),
+                        ["consumerDefines"] = Array.Empty<string>(),
+                        ["adapterHeaders"] = new[] { "fake-1.0/fake.c" },
                         ["files"] = new Dictionary<string, string> { ["fake.c"] = new string('0', 64) },
-                        ["pragmaDirectives"] = Array.Empty<object>(), ["notes"] = Array.Empty<string>()
+                        ["pragmaDirectives"] = Array.Empty<object>(),
+                        ["notes"] = Array.Empty<string>()
                     }));
                     string source = Path.GetFullPath(fixture.FilePath(library + "/fake-1.0/fake.c"));
                     bool clangCl = Path.GetFileNameWithoutExtension(compiler).Equals("clang-cl", StringComparison.OrdinalIgnoreCase);
@@ -409,7 +499,10 @@ internal static class NativeTests
                     ? [compiler, "/nologo", "/Od", "/c", "/TP", source, "/Fo" + output]
                     : [compiler, "-O0", "-c", "-x", "c++", source, "-o", output];
                 if (x64)
+                {
                     arguments.Insert(1, clangCl ? "/arch:AVX2" : "-mfma");
+                }
+
                 var compiled = await ProcessRunner.RunAsync(new(arguments[0], arguments.Skip(1).ToArray(), fixture.Root, environment,
                     Timeout: TimeSpan.FromMinutes(2)));
                 Verify.Equal(0, compiled.ExitCode, "probe compile failed: " + compiled.StdErr);
@@ -423,6 +516,7 @@ internal static class NativeTests
                     "FMA instruction not reported:\n" + string.Join('\n', result.Failures));
             });
         }
+
         if (options.Optional("compile-commands") is string database)
         {
             suite.Add("Native.CompileCommandsWarningPolicy", () =>

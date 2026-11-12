@@ -10,7 +10,7 @@
 
 - Unicode **18.0.0**(2026-09-01 배포, `https://www.unicode.org/Public/18.0.0/ucd/`).
 - 원본 파일: `UnicodeData.txt`(General_Category·정규 분해·결합 등급), `CompositionExclusions.txt`(교차 확인용), `DerivedNormalizationProps.txt`(Full_Composition_Exclusion·NFC_QC·NFD_QC), `CaseFolding.txt`(상태 C·S), `DerivedCoreProperties.txt`(Default_Ignorable_Code_Point), `NormalizationTest.txt`(시험), Unicode 라이선스 원문(`https://www.unicode.org/license.txt` — UCD 디렉터리 밖에 있다).
-- 위치: `Core/Source/ThirdParty/UnicodeData/ucd-18.0.0/`(원본 파일 + `license.txt`) + `ThirdParty.json`. 출처는 `UCD.zip`(URL·SHA-256)이고 라이선스 원문은 별도 출처이므로 manifest에 선택 필드 `licenseSource { url, sha256 }`를 추가한다(라이선스 파일은 원본 디렉터리에 두고 `files`에 등록한다 — 기존 "라이선스 파일은 등록된 원본 파일" 규칙 유지).
+- 위치: `Core/Source/ThirdParty/UnicodeData/ucd-18.0.0/`(원본 파일 + `license.txt`) + `ThirdParty.json`. 출처는 `UCD.zip`(URL·SHA-256)이고 라이선스 원문은 별도 출처이므로 manifest `licenses` 항목의 선택 필드 `licenseSource { url, sha256 }`에 적는다(라이선스 파일은 원본 디렉터리에 두고 `files`에 등록한다 — 기존 "라이선스 파일은 등록된 원본 파일" 규칙 유지). 처음에는 최상위 선택 필드였고, 2026-11-12에 단일 `license` 객체를 `licenses` 배열로 바꾸며 항목별 필드로 옮겼다([Compression.ko.md](Compression.ko.md) 3.2절).
 - 버전 올리기: 원본 교체 + 생성기 재실행 + 시험 갱신 한 묶음. 정규화·case pair 안정성 정책 덕분에 이미 할당된 문자의 정규화·folding 결과는 바뀌지 않지만 **General_Category와 Default_Ignorable은 안정성 정책 대상이 아니다** — 이전 버전에서 유효한 경로 이름이 무효가 될 수 있다. 그래서 버전을 올릴 때 생성기가 경로 허용 집합의 이전·이후 차이를 보고하고, `asset-index-verify`로 프로젝트 이름을 다시 검사하는 절차를 둔다. AssetIndex 캐시는 도구 빌드 ID로 이미 무효화된다.
 
 ### 1.2 데이터 전용 ThirdParty 종류
@@ -18,7 +18,7 @@
 기존 manifest는 C 번역 단위가 있는 라이브러리만 받았다. 다음을 추가했다(C1, 구현됨 — `Policy.ThirdPartyDataLibrary` 시험).
 
 - 최상위 필드 `kind`(`"code"` 기본·`"data"`). `data`면 `translationUnits`·`includeDirectories`·`defines`·`platformDefines`·`consumerDefines`·`adapterHeaders`·`pragmaDirectives`가 비어야 하고(`nonEmpty` 검사를 kind에 따라 바꾼다) `<Lib>.Build.cs`가 없어야 한다. `files` SHA-256·출처·라이선스 검증은 같다. 지시문 스캔(정책 검사·refresh)은 data 종류를 건너뛴다.
-- 최상위 필드 `embeddedIn`(모듈 이름 목록): 이 데이터의 파생물(생성 표)이 들어가는 모듈. SDK 내보내기(`InstalledSdk.cs` 라이선스 복사)는 packaged 모듈 이름이 아니라 `embeddedIn`에 packaged 모듈이 있으면 라이선스를 `Licenses/<Lib>/`로 복사한다. 시험 전용 데이터(JSONTestSuite)는 `embeddedIn`이 비어 배포하지 않는다. 게임 패키징의 고지 경로는 패키징 단계(후속)에서 같은 필드를 쓴다.
+- 최상위 필드 `embeddedIn`(모듈 이름 목록): 이 데이터의 파생물(생성 표)이 들어가는 모듈. SDK 내보내기(`InstalledSdk.cs` → `ThirdPartyManifest.CopySdkLicenses`)는 packaged 모듈 이름이 아니라 `embeddedIn`에 packaged 모듈이 있으면 `licenses`의 모든 원문을 `Licenses/<Lib>/<원본 디렉터리 기준 경로>`로 복사한다. 시험 전용 데이터(JSONTestSuite)는 `embeddedIn`이 비어 배포하지 않는다. 게임 패키징의 고지 경로는 패키징 단계(후속)에서 같은 필드를 쓴다.
 - 바꿀 곳: `ThirdPartyManifest.cs`(필드·검증), `PolicyChecks.ThirdParty.cs`, `ThirdPartyManifestRefresh.cs`, `InstalledSdk.cs`, 시험(`ThirdPartyPolicyTests.cs`, `NativeTests.cs`의 fixture JSON), 기존 manifest 3개는 `kind` 생략(기본 code)으로 그대로 둔다. Rocks.Tooling은 다른 세션이 함께 쓰므로 착수 전에 조율한다.
 - 라이선스: UCD는 SPDX `Unicode-3.0`, 고지 조건(사본 또는 문서에 저작권·허가 고지)을 지키려고 `binaryNoticeRequired: true`.
 

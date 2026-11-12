@@ -65,7 +65,7 @@ dotnet msbuild Rocks.proj /t:Game /p:SdkDirectory=C:/work/rocks-sdk/debug /p:Gam
 
 SDK 대상 디렉터리는 새 경로여야 한다. SDK의 파일 목록과 내용, 플랫폼·아키텍처·컴파일러 및 SDK ABI·구성이 일치하지 않으면 게임 빌드를 중단한다. 게임 소스와 출력은 SDK 밖에 둔다. `Templates/Game/Foundation`은 C# 모듈·타깃 규칙과 생성된 CLASS/PROPERTY를 사용하는 예제다. 현재 SDK 내보내기는 외부 라이브러리와 임의 컴파일·링크 옵션이 있는 모듈을 지원하지 않으며 해당 선언을 오류로 거부한다.
 
-SDK는 타깃에서 도달하는 모듈만 내보낸다. 고정 버전 외부 라이브러리(`Core/Source/ThirdParty`) 모듈은 정적 라이브러리로 들어가며 라이선스 원문을 `Licenses/<모듈>/`에 함께 복사한다. BSD 계열(LZ4·zstd)은 바이너리 배포 시 고지 의무가 있으므로 게임 배포 패키지에도 이 고지를 포함한다.
+SDK는 타깃에서 도달하는 모듈만 내보낸다. 고정 버전 외부 라이브러리(`Core/Source/ThirdParty`) 모듈은 정적 라이브러리로 들어가며 manifest `licenses`의 모든 라이선스 원문을 `Licenses/<모듈>/<원본 디렉터리 기준 경로>`에 함께 복사한다(예: `Licenses/Zstd/LICENSE`와 사전 생성기의 MIT 고지 `Licenses/Zstd/lib/dictBuilder/divsufsort.h`). 원본 안 경로를 유지하므로 이름이 같은 원문도 겹치지 않는다. BSD 계열(LZ4·zstd)과 MIT(zstd divsufsort)는 바이너리 배포 시 고지 의무가 있으므로 게임 배포 패키지에도 이 고지를 포함한다.
 
 ## 외부 라이브러리(C 원본)
 

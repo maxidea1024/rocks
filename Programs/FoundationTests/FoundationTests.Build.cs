@@ -15,6 +15,9 @@ public abstract class TestsModule : ModuleRules
     // Object 계열이 아닌 런타임 모듈의 테스트다.
     private static readonly string[] RuntimeTestModules = ["Base", "Core", "PlatformBase", "Task", "Localization", "Serialization", "Compression", "DeterministicMath"];
 
+    // Core 계층 개발 도구 모듈(Core/Source/Developer)의 테스트다(모든 테스트 실행 파일에 들어간다).
+    private static readonly string[] DeveloperTestModules = ["CompressionTraining"];
+
     // Object 계열 모듈의 테스트다(FoundationTests·EngineTests에 들어간다).
     private static readonly string[] ObjectTestModules = ["ObjectRuntime", "ObjectSerialization"];
 
@@ -34,11 +37,17 @@ public abstract class TestsModule : ModuleRules
         bool objects = Layer != TestLayer.Core;
         var directories = new List<string> { "Programs/FoundationTests/Private" };
         directories.AddRange(RuntimeTestModules.Select(module => $"Core/Source/Runtime/{module}/Tests"));
+        directories.AddRange(DeveloperTestModules.Select(module => $"Core/Source/Developer/{module}/Tests"));
         if (objects)
+        {
             directories.AddRange(ObjectTestModules.Select(module => $"Core/Source/Runtime/{module}/Tests"));
+        }
+
         if (Layer == TestLayer.Engine)
+        {
             directories.AddRange(EngineTestModules.Select(module => $"Engine/Source/{module}/Tests")
                 .Where(directory => Directory.Exists(context.PathInRoot(directory))));
+        }
 
         // POSIX 플랫폼은 공통 테스트 지원 구현을 쓴다.
         directories.Add(context.Platform == NativePlatform.Windows ? $"{support}/Private/Win64" : $"{support}/Private/Posix");
@@ -47,9 +56,10 @@ public abstract class TestsModule : ModuleRules
             ? $"{support}/Private/Asan/Enabled.cpp" : $"{support}/Private/Asan/Disabled.cpp"));
         string[] dependencies = Layer switch
         {
-            TestLayer.Core => ["Task", "Localization", "Serialization", "Compression"],
-            TestLayer.Foundation => ["ObjectSerialization", "Localization", "Compression"],
-            _ => ["ObjectSerialization", "Localization", "Compression", .. EngineTestDependencies]
+            TestLayer.Core => ["Task", "Localization", "Serialization", "Compression", .. DeveloperTestModules],
+            TestLayer.Foundation => ["ObjectSerialization", "Localization", "Compression", .. DeveloperTestModules],
+            _ => ["ObjectSerialization", "Localization", "Compression", .. DeveloperTestModules,
+                .. EngineTestDependencies]
         };
         return new()
         {

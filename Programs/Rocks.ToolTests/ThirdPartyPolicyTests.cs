@@ -23,9 +23,14 @@ internal static class ThirdPartyPolicyTests
             foreach (string library in new[] { "Lz4", "Zstd", "Zlib" })
             {
                 var manifest = ThirdPartyManifest.Read(Path.Combine(options.Root, ThirdPartyManifest.ThirdPartyRoot, library));
-                Verify.That(manifest.TranslationUnits.Count != 0 && manifest.License.File.EndsWith("LICENSE", StringComparison.Ordinal),
+                Verify.That(manifest.TranslationUnits.Count != 0 && manifest.Licenses[0].File.EndsWith("LICENSE", StringComparison.Ordinal),
                     library + ": manifest must list translation units and a license file");
             }
+            // zstd 사전 생성기의 divsufsort(MIT)는 본체(BSD-3-Clause) LICENSE에 없으므로 두 번째 원문으로 고지한다.
+            var zstd = ThirdPartyManifest.Read(Path.Combine(options.Root, ThirdPartyManifest.ThirdPartyRoot, "Zstd"));
+            Verify.That(zstd.Licenses.Select(license => license.Spdx).SequenceEqual(["BSD-3-Clause", "MIT"]) &&
+                        zstd.Licenses[1] is { File: "zstd-1.5.7/lib/dictBuilder/divsufsort.h", BinaryNoticeRequired: true },
+                "Zstd: the MIT divsufsort notice must be listed after the BSD-3-Clause license");
         });
         suite.Add("Policy.ThirdPartyPositiveFixture", () =>
         {
@@ -141,6 +146,7 @@ internal static class ThirdPartyPolicyTests
                 fixture.Write(Library + "/fake-1.0x/fake.c", "#pragma warning(disable: 4100)\n");
                 Verify.Equal(1, PolicyChecks.SourceWarnings(fixture.Root).Count, "lookalike upstream directory escaped lexical audit");
             }
+
             using (TemporaryDirectory fixture = new())
             {
                 WriteFixture(fixture);
@@ -149,6 +155,7 @@ internal static class ThirdPartyPolicyTests
                 fixture.Write(Library + "/Glue.c", "static __forceinline int F(void) { return 0; }\n#include \"fake.c\"\n");
                 Verify.Equal(1, PolicyChecks.OptimizationOverrides(fixture.Root).Count, "glue forced inline escaped audit");
             }
+
             using (TemporaryDirectory fixture = new())
             {
                 // manifest가 깨지면 원본도 제외하지 않는다(경계가 조용히 넓어지지 않는다).
@@ -167,7 +174,8 @@ internal static class ThirdPartyPolicyTests
                 NoFailures(PolicyChecks.ThirdParty(fixture.Root));
                 var manifest = ThirdPartyManifest.Read(fixture.FilePath(DataLibrary));
                 Verify.That(manifest.Kind == ThirdPartyKind.Data && manifest.EmbeddedIn.SequenceEqual(["Core"]) &&
-                            manifest.LicenseSource?.Url == "https://example.invalid/license.txt",
+                            manifest.Licenses.Count == 1 &&
+                            manifest.Licenses[0].LicenseSource?.Url == "https://example.invalid/license.txt",
                     "data manifest fields were not read");
                 // 데이터 파일 안의 '#pragma' 글자는 지시문 검사 대상이 아니고, 갱신 도구도 지시문을 기록하지 않는다.
                 fixture.Write(DataUpstream + "/table.txt", "#pragma warning(disable : 4100)\n0041;LATIN CAPITAL LETTER A\n");
@@ -176,6 +184,7 @@ internal static class ThirdPartyPolicyTests
                 Verify.Equal(0, ThirdPartyManifestRefresh.Run(fixture.Root, write: false).Count,
                     "refresh must keep a data manifest unchanged (no pragma records)");
             }
+
             ExpectDataFailure("module rule in data library", fixture => fixture.Write(DataLibrary + "/FakeData.Build.cs", "// rule\n"));
             ExpectDataFailure("data file changed", fixture => File.AppendAllText(fixture.FilePath(DataUpstream + "/table.txt"), "x"));
             ExpectDataFailure("unlisted data file", fixture => fixture.Write(DataUpstream + "/extra.txt", "x\n"));
@@ -188,10 +197,107 @@ internal static class ThirdPartyPolicyTests
                          ("licenseSource without https", "https://example.invalid/license.txt", "http://example.invalid/license.txt"),
                          ("licenseSource uppercase hash", "\"sha256\": \"" + new string('a', 64) + "\"", "\"sha256\": \"" + new string('A', 64) + "\"")
                      })
+            {
                 ExpectDataFailure(label, fixture => WriteDataFixture(fixture, manifest => Replace(manifest, from, to)));
+            }
             // code 라이브러리는 embeddedIn을 쓰지 않는다(모듈 자신이 라이브러리다).
             ExpectFailure("embeddedIn in code library", fixture =>
                 WriteManifest(fixture, manifest => Replace(manifest, "\"schema\": 1,", "\"schema\": 1, \"embeddedIn\": [ \"Core\" ],")));
+        });
+        suite.Add("Policy.ThirdPartyLicenses", () =>
+        {
+            // 라이선스가 여럿인 code 라이브러리: 하위 구성요소의 원문(최상위와 이름이 같은 LICENSE)과 항목별 licenseSource.
+            using (TemporaryDirectory fixture = new())
+            {
+                WriteMultiLicenseFixture(fixture);
+                NoFailures(PolicyChecks.ThirdParty(fixture.Root));
+                var manifest = ThirdPartyManifest.Read(fixture.FilePath(Library));
+                Verify.Equal(2, manifest.Licenses.Count, "license entry count");
+                Verify.That(manifest.Licenses[0] is { Spdx: "BSD-2-Clause", File: "fake-1.0/LICENSE", BinaryNoticeRequired: true, LicenseSource: null },
+                    "first license entry was not read");
+                Verify.That(manifest.Licenses[1] is { Spdx: "MIT", UpstreamExpression: "MIT (component)", File: "fake-1.0/sub/LICENSE", BinaryNoticeRequired: false } &&
+                            manifest.Licenses[1].LicenseSource == new ThirdPartyFileSource("https://example.invalid/sub/LICENSE", new string('b', 64)),
+                    "second license entry and its licenseSource were not read");
+            }
+
+            object license = DefaultLicense;
+            ExpectFailure("empty licenses array", fixture => WriteManifest(fixture, manifest => manifest, Array.Empty<object>()));
+            ExpectFailure("licenses is an object", fixture => WriteManifest(fixture, manifest => manifest, license));
+            ExpectFailure("unknown license entry field", fixture => WriteManifest(fixture, manifest => manifest, new object[]
+            {
+                new { spdx = "BSD-2-Clause", upstreamExpression = "BSD-2-Clause", file = "fake-1.0/LICENSE", binaryNoticeRequired = true, url = "https://example.invalid" }
+            }));
+            ExpectFailure("missing license entry field", fixture => WriteManifest(fixture, manifest => manifest, new object[]
+            {
+                new { spdx = "BSD-2-Clause", upstreamExpression = "BSD-2-Clause", file = "fake-1.0/LICENSE" }
+            }));
+            ExpectFailure("duplicate license file", fixture => WriteManifest(fixture, manifest => manifest, new[] { license, license }));
+            ExpectFailure("duplicate license file differing only by case", fixture => WriteManifest(fixture, manifest => manifest, new[]
+            {
+                license, new { spdx = "MIT", upstreamExpression = "MIT", file = "fake-1.0/license", binaryNoticeRequired = true }
+            }));
+            ExpectFailure("second license file is not a listed upstream file", fixture => WriteManifest(fixture, manifest => manifest, new[]
+            {
+                license, new { spdx = "MIT", upstreamExpression = "MIT", file = "fake-1.0/sub/LICENSE", binaryNoticeRequired = true }
+            }));
+            ExpectFailure("license file outside upstream directory", fixture => WriteManifest(fixture, manifest => manifest, new[]
+            {
+                license, new { spdx = "MIT", upstreamExpression = "MIT", file = "Glue.c", binaryNoticeRequired = true }
+            }));
+            ExpectFailure("license entry licenseSource without https", fixture =>
+            {
+                WriteMultiLicenseFixture(fixture);
+                string manifestPath = fixture.FilePath(Library + "/ThirdParty.json");
+                File.WriteAllText(manifestPath, Replace(File.ReadAllText(manifestPath), "https://example.invalid/sub/LICENSE", "http://example.invalid/sub/LICENSE"));
+            });
+            ExpectFailure("license entry licenseSource with unknown field", fixture => WriteManifest(fixture, manifest => manifest, new object[]
+            {
+                new
+                {
+                    spdx = "BSD-2-Clause", upstreamExpression = "BSD-2-Clause", file = "fake-1.0/LICENSE", binaryNoticeRequired = true,
+                    licenseSource = new { url = "https://example.invalid/LICENSE", sha256 = new string('b', 64), size = 1 }
+                }
+            }));
+            // 이전 schema(단일 license 객체·최상위 licenseSource)는 호환하지 않는다.
+            ExpectFailure("old single license object", fixture =>
+                WriteManifest(fixture, manifest => Replace(manifest, "\"licenses\": {", "\"license\": {"), license));
+            ExpectFailure("top-level licenseSource", fixture => WriteManifest(fixture, manifest => Replace(manifest, "\"schema\": 1,",
+                "\"schema\": 1, \"licenseSource\": { \"url\": \"https://example.invalid/LICENSE\", \"sha256\": \"" + new string('b', 64) + "\" },")));
+        });
+        suite.Add("Policy.ThirdPartySdkLicenses", () =>
+        {
+            // SDK 내보내기의 라이선스 복사: code 라이브러리는 모든 원문을 원본 디렉터리 기준 경로로, data 라이브러리는
+            // embeddedIn 모듈이 SDK에 있을 때만 복사한다.
+            using TemporaryDirectory fixture = new();
+            WriteMultiLicenseFixture(fixture);
+            WriteDataFixture(fixture, manifest => manifest);
+            NoFailures(PolicyChecks.ThirdParty(fixture.Root));
+
+            string codeOnly = fixture.FilePath("sdk-code");
+            IReadOnlyList<string> copied = ThirdPartyManifest.CopySdkLicenses(fixture.Root, codeOnly, ["Fake"]);
+            Verify.That(copied.SequenceEqual(["Licenses/Fake/LICENSE", "Licenses/Fake/sub/LICENSE"]),
+                "code module licenses: " + string.Join(", ", copied));
+            Verify.Equal(File.ReadAllText(fixture.FilePath(Upstream + "/LICENSE")), File.ReadAllText(Path.Combine(codeOnly, "Licenses/Fake/LICENSE")),
+                "top-level license content");
+            Verify.Equal(File.ReadAllText(fixture.FilePath(Upstream + "/sub/LICENSE")), File.ReadAllText(Path.Combine(codeOnly, "Licenses/Fake/sub/LICENSE")),
+                "component license content (same file name must not overwrite)");
+            Verify.Equal(2, Directory.GetFiles(codeOnly, "*", SearchOption.AllDirectories).Length, "data license copied without its embedding module");
+
+            string withCore = fixture.FilePath("sdk-core");
+            copied = ThirdPartyManifest.CopySdkLicenses(fixture.Root, withCore, ["Core", "Fake"]);
+            Verify.That(copied.SequenceEqual(["Licenses/Fake/LICENSE", "Licenses/Fake/sub/LICENSE", "Licenses/FakeData/license.txt"]),
+                "code and embedded data licenses: " + string.Join(", ", copied));
+
+            // 모듈 이름은 대소문자를 구분하고, 담지 않은 모듈의 원문은 복사하지 않는다.
+            Verify.Equal(0, ThirdPartyManifest.CopySdkLicenses(fixture.Root, fixture.FilePath("sdk-none"), ["fake", "Other"]).Count,
+                "license copied for a module the SDK does not contain");
+            Verify.That(!Directory.Exists(fixture.FilePath("sdk-none")), "empty license copy created the destination");
+
+            // 시험 전용 데이터(embeddedIn 없음)는 Core를 담아도 배포하지 않는다.
+            WriteDataFixture(fixture, manifest => Replace(manifest, "  \"embeddedIn\": [\n    \"Core\"\n  ],\n", ""));
+            NoFailures(PolicyChecks.ThirdParty(fixture.Root));
+            Verify.Equal(0, ThirdPartyManifest.CopySdkLicenses(fixture.Root, fixture.FilePath("sdk-test-data"), ["Core"]).Count,
+                "test-only data license was copied");
         });
         suite.Add("Policy.LanguageArgumentControls", () =>
         {
@@ -220,9 +326,13 @@ internal static class ThirdPartyPolicyTests
             {
                 int count = PolicyChecks.LanguageArguments(arguments, file).Count;
                 if (label.EndsWith("passes", StringComparison.Ordinal))
+                {
                     Verify.Equal(0, count, label);
+                }
                 else
+                {
                     Verify.That(count != 0, "language mismatch accepted: " + label);
+                }
             }
 
             // 상대 file은 compile DB directory 기준으로 위치를 판정한다.
@@ -267,8 +377,29 @@ internal static class ThirdPartyPolicyTests
         WriteManifest(fixture, manifest => manifest);
     }
 
+    // fixture code 라이브러리의 기본 라이선스 항목이다(원본 디렉터리의 LICENSE).
+    private static readonly object DefaultLicense =
+        new { spdx = "BSD-2-Clause", upstreamExpression = "BSD-2-Clause", file = "fake-1.0/LICENSE", binaryNoticeRequired = true };
+
+    // 최상위 LICENSE와 파일 이름이 같은 하위 구성요소 원문(sub/LICENSE, MIT, 항목별 licenseSource)을 더한 code 라이브러리 fixture다.
+    private static void WriteMultiLicenseFixture(TemporaryDirectory fixture)
+    {
+        WriteFixture(fixture);
+        fixture.Write(Upstream + "/sub/LICENSE", "Fake component license\n");
+        WriteManifest(fixture, manifest => manifest, new[]
+        {
+            DefaultLicense,
+            new
+            {
+                spdx = "MIT", upstreamExpression = "MIT (component)", file = "fake-1.0/sub/LICENSE", binaryNoticeRequired = false,
+                licenseSource = new { url = "https://example.invalid/sub/LICENSE", sha256 = new string('b', 64) }
+            }
+        });
+    }
+
     // 현재 원본 파일에서 해시·지시문 목록을 다시 계산해 manifest를 쓴다. change는 직렬화된 JSON 문자열을 바꾼다.
-    private static void WriteManifest(TemporaryDirectory fixture, Func<string, string> change)
+    // licenses는 manifest licenses 필드에 그대로 직렬화할 값이다(생략하면 DefaultLicense 하나의 배열).
+    private static void WriteManifest(TemporaryDirectory fixture, Func<string, string> change, object? licenses = null)
     {
         string upstream = fixture.FilePath(Upstream);
         var files = new SortedDictionary<string, string>(StringComparer.Ordinal);
@@ -279,8 +410,11 @@ internal static class ThirdPartyPolicyTests
             byte[] bytes = File.ReadAllBytes(path);
             files.Add(relative, Convert.ToHexStringLower(SHA256.HashData(bytes)));
             foreach (ThirdPartyPragma pragma in ThirdPartyManifest.ScanPragmaDirectives(relative, bytes))
+            {
                 pragmas.Add(new { file = pragma.File, line = pragma.Line, text = pragma.Text });
+            }
         }
+
         var manifest = new Dictionary<string, object>
         {
             ["schema"] = 1,
@@ -288,7 +422,7 @@ internal static class ThirdPartyPolicyTests
             ["version"] = "1.0",
             ["upstreamDirectory"] = "fake-1.0",
             ["source"] = new { url = "https://example.invalid/fake-1.0.tar.gz", sha256 = new string('0', 64), verification = "fixture" },
-            ["license"] = new { spdx = "BSD-2-Clause", upstreamExpression = "BSD-2-Clause", file = "fake-1.0/LICENSE", binaryNoticeRequired = true },
+            ["licenses"] = licenses ?? new[] { DefaultLicense },
             ["translationUnits"] = new[] { "Glue.c", "fake-1.0/fake.c" },
             ["includeDirectories"] = new[] { "fake-1.0" },
             ["defines"] = new[] { "FAKE_CONFIG=1" },
@@ -306,7 +440,7 @@ internal static class ThirdPartyPolicyTests
     private const string DataLibrary = "Core/Source/ThirdParty/FakeData";
     private const string DataUpstream = DataLibrary + "/fakedata-1.0";
 
-    // 데이터 전용 라이브러리 fixture: 원본 파일 두 개(라이선스 포함)와 kind·embeddedIn·licenseSource가 있는 manifest.
+    // 데이터 전용 라이브러리 fixture: 원본 파일 두 개(라이선스 포함)와 kind·embeddedIn·항목별 licenseSource가 있는 manifest.
     private static void WriteDataFixture(TemporaryDirectory fixture, Func<string, string> change)
     {
         if (!File.Exists(fixture.FilePath(DataUpstream + "/license.txt")))
@@ -314,10 +448,14 @@ internal static class ThirdPartyPolicyTests
             fixture.Write(DataUpstream + "/license.txt", "Fake data license\n");
             fixture.Write(DataUpstream + "/table.txt", "0041;LATIN CAPITAL LETTER A\n");
         }
+
         string upstream = fixture.FilePath(DataUpstream);
         var files = new SortedDictionary<string, string>(StringComparer.Ordinal);
         foreach (string path in Directory.EnumerateFiles(upstream, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
+        {
             files.Add(Path.GetRelativePath(upstream, path).Replace('\\', '/'), Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path))));
+        }
+
         var manifest = new Dictionary<string, object>
         {
             ["schema"] = 1,
@@ -326,8 +464,14 @@ internal static class ThirdPartyPolicyTests
             ["version"] = "1.0",
             ["upstreamDirectory"] = "fakedata-1.0",
             ["source"] = new { url = "https://example.invalid/fakedata-1.0.zip", sha256 = new string('0', 64), verification = "fixture" },
-            ["license"] = new { spdx = "Unicode-3.0", upstreamExpression = "Unicode-3.0", file = "fakedata-1.0/license.txt", binaryNoticeRequired = true },
-            ["licenseSource"] = new { url = "https://example.invalid/license.txt", sha256 = new string('a', 64) },
+            ["licenses"] = new[]
+            {
+                new
+                {
+                    spdx = "Unicode-3.0", upstreamExpression = "Unicode-3.0", file = "fakedata-1.0/license.txt", binaryNoticeRequired = true,
+                    licenseSource = new { url = "https://example.invalid/license.txt", sha256 = new string('a', 64) }
+                }
+            },
             ["embeddedIn"] = new[] { "Core" },
             ["translationUnits"] = Array.Empty<string>(),
             ["includeDirectories"] = Array.Empty<string>(),
@@ -342,7 +486,9 @@ internal static class ThirdPartyPolicyTests
         // 갱신 도구(ThirdPartyManifestRefresh)와 같은 서식으로 써서 갱신이 바꾸지 않는지 볼 수 있게 한다.
         string json = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(manifest))!.ToJsonString(new JsonSerializerOptions
         {
-            WriteIndented = true, NewLine = "\n", Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+            WriteIndented = true,
+            NewLine = "\n",
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
         }) + "\n";
         fixture.Write(DataLibrary + "/ThirdParty.json", change(json));
     }

@@ -9,12 +9,14 @@
     "sha256": "5b205e1f9533123411e794f1f052cf50df8e723a855f629a07f777f472af53d8",
     "verification": "GitHub HTTPS commit archive(2026-11-12, master = 1ef36fa01286573e846ac449e8683f8833c5b26a). 릴리스가 없어 commit으로 고정한다. 서명은 없다."
   },
-  "license": {
-    "spdx": "MIT",
-    "upstreamExpression": "MIT",
-    "file": "JSONTestSuite-1ef36fa01286/LICENSE",
-    "binaryNoticeRequired": false
-  },
+  "licenses": [
+    {
+      "spdx": "MIT",
+      "upstreamExpression": "MIT",
+      "file": "JSONTestSuite-1ef36fa01286/LICENSE",
+      "binaryNoticeRequired": false
+    }
+  ],
   "translationUnits": [],
   "includeDirectories": [],
   "defines": [],

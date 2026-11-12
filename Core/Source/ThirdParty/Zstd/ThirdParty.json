@@ -8,16 +8,25 @@
     "sha256": "eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3",
     "verification": "공식 zstd-1.5.7.tar.gz.sha256 파일과 일치."
   },
-  "license": {
-    "spdx": "BSD-3-Clause",
-    "upstreamExpression": "BSD-3-Clause OR GPL-2.0-only (BSD-3-Clause 선택)",
-    "file": "zstd-1.5.7/LICENSE",
-    "binaryNoticeRequired": true
-  },
+  "licenses": [
+    {
+      "spdx": "BSD-3-Clause",
+      "upstreamExpression": "BSD-3-Clause OR GPL-2.0-only (BSD-3-Clause 선택)",
+      "file": "zstd-1.5.7/LICENSE",
+      "binaryNoticeRequired": true
+    },
+    {
+      "spdx": "MIT",
+      "upstreamExpression": "MIT (libdivsufsort-lite, Yuta Mori)",
+      "file": "zstd-1.5.7/lib/dictBuilder/divsufsort.h",
+      "binaryNoticeRequired": true
+    }
+  ],
   "translationUnits": [
     "zstd-1.5.7/lib/common/entropy_common.c",
     "zstd-1.5.7/lib/common/error_private.c",
     "zstd-1.5.7/lib/common/fse_decompress.c",
+    "zstd-1.5.7/lib/common/pool.c",
     "zstd-1.5.7/lib/common/xxhash.c",
     "zstd-1.5.7/lib/common/zstd_common.c",
     "zstd-1.5.7/lib/compress/fse_compress.c",
@@ -36,7 +45,11 @@
     "zstd-1.5.7/lib/decompress/huf_decompress.c",
     "zstd-1.5.7/lib/decompress/zstd_ddict.c",
     "zstd-1.5.7/lib/decompress/zstd_decompress.c",
-    "zstd-1.5.7/lib/decompress/zstd_decompress_block.c"
+    "zstd-1.5.7/lib/decompress/zstd_decompress_block.c",
+    "zstd-1.5.7/lib/dictBuilder/cover.c",
+    "zstd-1.5.7/lib/dictBuilder/divsufsort.c",
+    "zstd-1.5.7/lib/dictBuilder/fastcover.c",
+    "zstd-1.5.7/lib/dictBuilder/zdict.c"
   ],
   "includeDirectories": [
     "zstd-1.5.7/lib"
@@ -46,6 +59,7 @@
     "ZSTD_TRACE=0",
     "ZSTDLIB_VISIBLE=",
     "ZSTDERRORLIB_VISIBLE=",
+    "ZDICTLIB_VISIBLE=",
     "MEM_STATIC=static __inline __attribute__((unused))"
   ],
   "platformDefines": {
@@ -55,12 +69,15 @@
   },
   "consumerDefines": [
     "ZSTD_STATIC_LINKING_ONLY",
+    "ZDICT_STATIC_LINKING_ONLY",
     "ZSTDLIB_VISIBLE=",
-    "ZSTDERRORLIB_VISIBLE="
+    "ZSTDERRORLIB_VISIBLE=",
+    "ZDICTLIB_VISIBLE="
   ],
   "adapterHeaders": [
     "zstd-1.5.7/lib/zstd.h",
-    "zstd-1.5.7/lib/zstd_errors.h"
+    "zstd-1.5.7/lib/zstd_errors.h",
+    "zstd-1.5.7/lib/zdict.h"
   ],
   "files": {
     "LICENSE": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8",
@@ -77,7 +94,10 @@
     "lib/common/fse_decompress.c": "84eba7030a036b36363a5108e760428ce549f1a833bec6464dc755f6ed51a6fb",
     "lib/common/huf.h": "9a83d899c8c9bf03389d482562090ec2443bc0f87f27864a2b891b180333f2d4",
     "lib/common/mem.h": "4dd5fe76fa30a020cd4b3af3134ae143920300a1fe54baac1a5da73297e66783",
+    "lib/common/pool.c": "9431e26cf7ca46ffb878f17df31198046664d592ae208dfbe3715e82b87af79d",
+    "lib/common/pool.h": "bca19a2408e85f31bad3a13f205de92ac26ecda0c5af96fdd7f213ce03d9fc78",
     "lib/common/portability_macros.h": "75e2b43968b70decc6bd17876833be04894035594ddc1e745cd6b70be8265637",
+    "lib/common/threading.h": "9ca63027ea64046acacccbe056a414d37ea7ea428ce299fe08abe53c204c5c65",
     "lib/common/xxhash.c": "8444d064922f434b67b708a987981aa21dfeece735b48c82d31f7027d0ccef03",
     "lib/common/xxhash.h": "8cb837b21a8fe9a6b9dbcd0961ab16e733bfcbfa9e003f3a496ce07ae80aa8ee",
     "lib/common/zstd_common.c": "f49eb8023a90d3de925373bd9ee0d36ed46b26c529840b64220397446cd73795",
@@ -118,6 +138,13 @@
     "lib/decompress/zstd_decompress_block.c": "9cb8bcb07aeb87e4717a9c8a86d20832dc525dde2c1b72efdaaab7c937f43b87",
     "lib/decompress/zstd_decompress_block.h": "62ee0c6ae3f7353020538397f436b59743da8acb922068841b346f480f7078ac",
     "lib/decompress/zstd_decompress_internal.h": "73217b49a644c0fcf567b70677cae31449ba9f50a235ef3b681001c3f36dc56d",
+    "lib/dictBuilder/cover.c": "2419631b20b0f4867d0f3c178fc4a3006d05f58e8ce3ce6657133f85ed40d683",
+    "lib/dictBuilder/cover.h": "6e2906e7e5c486a5b7f479f60210ff67d068b2c58744ad6a936ba5a9f4a23755",
+    "lib/dictBuilder/divsufsort.c": "2081acb08865f623857d2c0dcb0e79fce9489f01416528c30cfee7097915c616",
+    "lib/dictBuilder/divsufsort.h": "14c16c2f67019875a2ea6cd07a4e803adfadce448e0b80351c51e5f910230d38",
+    "lib/dictBuilder/fastcover.c": "0b8b511e6370e89cb257d1a4b4d8e77add5537ffb999cfe5e7e59e454c93f38f",
+    "lib/dictBuilder/zdict.c": "dbe57910c9d446bbf2195f31bdba5cffef2c80b93c0325e9df8c9ffa744b0aa3",
+    "lib/zdict.h": "abacadb94e3f79e591f4b1648e839b0160fbf4291211fd01bdba1380269b245c",
     "lib/zstd.h": "9b4bc8245565c98ccfc61c07749928b57e7c0f6fddb0530c4f6aa1971893d88b",
     "lib/zstd_errors.h": "66a8c3f71d12ea6e797e4f622f31f3f8f81c41b36f48cad4f5de7d8bfb6aac0a"
   },
@@ -151,6 +178,11 @@
       "file": "lib/common/compiler.h",
       "line": 207,
       "text": "#  pragma warning(disable : 4324)        /* disable: C4324: padded structure */"
+    },
+    {
+      "file": "lib/common/pool.c",
+      "line": 20,
+      "text": "#  pragma warning(disable : 4204)        /* disable: C4204: non-constant aggregate initializer */"
     },
     {
       "file": "lib/common/xxhash.h",
@@ -233,6 +265,36 @@
       "text": "#  pragma warning(disable : 4127)        /* disable: C4127: conditional expression is constant */"
     },
     {
+      "file": "lib/dictBuilder/divsufsort.c",
+      "line": 29,
+      "text": "#pragma clang diagnostic ignored \"-Wshorten-64-to-32\""
+    },
+    {
+      "file": "lib/dictBuilder/divsufsort.c",
+      "line": 33,
+      "text": "#  pragma warning(disable : 4244)"
+    },
+    {
+      "file": "lib/dictBuilder/divsufsort.c",
+      "line": 34,
+      "text": "#  pragma warning(disable : 4127)    /* C4127 : Condition expression is constant */"
+    },
+    {
+      "file": "lib/dictBuilder/divsufsort.c",
+      "line": 1511,
+      "text": "#pragma omp parallel default(shared) private(bufsize, curbuf, k, l, d0, d1)"
+    },
+    {
+      "file": "lib/dictBuilder/divsufsort.c",
+      "line": 1517,
+      "text": "#pragma omp critical(sssort_lock)"
+    },
+    {
+      "file": "lib/zdict.h",
+      "line": 467,
+      "text": "#    pragma message(\"WARNING: You need to implement ZDICT_DEPRECATED for this compiler\")"
+    },
+    {
       "file": "lib/zstd.h",
       "line": 72,
       "text": "#    pragma message(\"WARNING: You need to implement ZSTD_DEPRECATED for this compiler\")"
@@ -254,7 +316,13 @@
     }
   ],
   "notes": [
-    "제외: legacy/, deprecated/, dictBuilder/, zstdmt_compress.c, pool.c, threading.c, debug.c(DEBUGLEVEL 0에서 쓰지 않는 g_debuglevel만 정의), huf_decompress_amd64.S(ZSTD_DISABLE_ASM).",
+    "제외: legacy/, deprecated/, zstdmt_compress.c, threading.c(ZSTD_MULTITHREAD 없이는 쓰지 않는 기호 하나만 정의), debug.c(DEBUGLEVEL 0에서 쓰지 않는 g_debuglevel만 정의), huf_decompress_amd64.S(ZSTD_DISABLE_ASM).",
+    "사전 학습: dictBuilder/(cover.c·fastcover.c·zdict.c·divsufsort.c)와 common/pool.c·pool.h·threading.h를 넣는다. 서로 참조해 떼어낼 수 없다(fastCover만 써도 divsufsort가 필요하다). ZSTD_MULTITHREAD가 없어 pool.c는 단일 스레드 대체 구현이다. 정적 라이브러리라 학습을 부르지 않는 바이너리에는 링크되지 않는다(Docs/Design/Compression.ko.md 11.6절).",
+    "divsufsort.c·divsufsort.h는 MIT(libdivsufsort-lite, Yuta Mori)이고 zstd LICENSE에 포함되지 않는다. 원문 전체가 divsufsort.h 머리 주석에 있어 licenses의 두 번째 항목으로 고지한다.",
+    "할당 예외: dictBuilder는 CRT malloc·calloc을 직접 부르고 Rocks Allocator를 거치지 않는다(customMem을 받지 않으며 내부 CCtx·CDict도 기본 메모리를 쓴다). 도구 시점 학습에 한한 승인된 좁은 예외이고, 학습 wrapper 모듈은 Core/Source/Developer/CompressionTraining이다.",
+    "스레드: cover.c·fastcover.c는 프로세스 전역(g_displayLevel·g_time, COVER의 g_coverCtx)을 동기화 없이 쓴다. 호출자가 학습을 직렬화해야 한다.",
+    "fastCover만 쓴다: Android에서 COVER의 qsort 대체 경로는 전역 문맥(g_coverCtx)을 써 재진입할 수 없고, COVER 출력은 플랫폼마다 다르다(fastCover·finalize 출력은 Windows x64와 Android x86_64에서 같음을 실측).",
+    "ZDICTLIB_VISIBLE=: zstd.h의 ZSTDLIB_VISIBLE=와 같은 이유로 GNU 계열의 기본 visibility 속성을 비운다. ZDICTLIB_STATIC_API는 DLL 정의가 없으면 ZDICTLIB_VISIBLE로 정해지므로 따로 정의하지 않는다. ZDICT_STATIC_LINKING_ONLY(소비 측)는 fastCover 학습 API를 연다.",
     "MEM_STATIC: clang-cl은 __GNUC__가 없어 zstd가 GNU 계열에서 붙이는 unused 속성을 빼고, assert 전용 HUF_isSorted·ZSTD_isAligned가 -Wunused-function 오류가 된다. compiler.h의 #ifndef MEM_STATIC 가드(커널 빌드용, README 설정 항목은 아님)로 GNU 계열 정의를 그대로 재현한다. 경고 정책(CompilerDiagnostics.ko.md) \"외부 원본 내부 진단 지시문\" 4항으로 승인(2026-11-12).",
     "DYNAMIC_BMI2=0(Windows): clang-cl에서는 TARGET_ATTRIBUTE가 비어 BMI2 사본이 이득 없이 중복된다.",
     "ZSTD_customMem·ZSTD_decompressBound·ZSTD_c_stableInBuffer·ZSTD_d_stableOutBuffer는 ZSTD_STATIC_LINKING_ONLY API다. 정적 링크·고정 버전이라 쓸 수 있다."

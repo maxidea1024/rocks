@@ -9,16 +9,18 @@
     "sha256": "7b3e555514060b92290d154f53655c5eb0fa62b16eb04c03434ff72d1a66a0d8",
     "verification": "unicode.org HTTPS 배포본(2026-09-01). 꺼낸 파일은 같은 디렉터리의 개별 배포 파일과 SHA-256이 같음을 확인했다(2026-11-12). Unicode는 서명을 제공하지 않는다."
   },
-  "license": {
-    "spdx": "Unicode-3.0",
-    "upstreamExpression": "Unicode-3.0",
-    "file": "ucd-18.0.0/license.txt",
-    "binaryNoticeRequired": true
-  },
-  "licenseSource": {
-    "url": "https://www.unicode.org/license.txt",
-    "sha256": "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
-  },
+  "licenses": [
+    {
+      "spdx": "Unicode-3.0",
+      "upstreamExpression": "Unicode-3.0",
+      "file": "ucd-18.0.0/license.txt",
+      "binaryNoticeRequired": true,
+      "licenseSource": {
+        "url": "https://www.unicode.org/license.txt",
+        "sha256": "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
+      }
+    }
+  ],
   "embeddedIn": [
     "Core"
   ],

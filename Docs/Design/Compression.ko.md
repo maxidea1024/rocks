@@ -7,16 +7,16 @@
 
 ## 1. 범위
 
-| 1차 범위 | 2차 범위(9·10절) | 3차 범위(11절) | 후속 |
-|---|---|---|---|
-| 형식을 고르는 일회성 압축·해제, 최악 압축 크기, 크기를 모르는 해제(상한 필수, `Array` 뒤에 붙임), 재사용 문맥(`Compressor`·`Decompressor`), worker 비동기 압축·해제(의존 작업 연결·협력적 취소), 모든 할당의 Rocks `Allocator` 경유, 결정적 출력 | 블록 단위 seek 가능 컨테이너(Godot `FileAccessCompressed`·UE `FCompressedBuffer` 대응)와 큰 버퍼의 블록 병렬 압축·해제, gzip·zstd 스트리밍 객체(역압) | zstd 사전 사용(압축·해제 사전 handle, 일회성·문맥·스트림·비동기·블록 컨테이너 연동, frame 사전 ID 검사) | zstd 사전 학습(dictBuilder, 11.6절), Brotli 해제(WOFF2), 형식 플러그인 등록(UE `ICompressionFormat`), AsyncFile 완료 → 해제 작업 연결(외부 완료 이벤트 handle 필요), LZ4 frame 스트리밍, zstd ultra 수준(20–22), LZ4·zlib 사전 |
+| 1차 범위 | 2차 범위(9·10절) | 3차 범위(11절) | 4차 범위(11.6절) | 후속 |
+|---|---|---|---|---|
+| 형식을 고르는 일회성 압축·해제, 최악 압축 크기, 크기를 모르는 해제(상한 필수, `Array` 뒤에 붙임), 재사용 문맥(`Compressor`·`Decompressor`), worker 비동기 압축·해제(의존 작업 연결·협력적 취소), 모든 할당의 Rocks `Allocator` 경유, 결정적 출력 | 블록 단위 seek 가능 컨테이너(Godot `FileAccessCompressed`·UE `FCompressedBuffer` 대응)와 큰 버퍼의 블록 병렬 압축·해제, gzip·zstd 스트리밍 객체(역압) | zstd 사전 사용(압축·해제 사전 handle, 일회성·문맥·스트림·비동기·블록 컨테이너 연동, frame 사전 ID 검사) | zstd 사전 학습(fastCover)·finalize, `licenses` manifest | Brotli 해제(WOFF2), 형식 플러그인 등록(UE `ICompressionFormat`), AsyncFile 완료 → 해제 작업 연결(외부 완료 이벤트 handle 필요), LZ4 frame 스트리밍, zstd ultra 수준(20–22), LZ4·zlib 사전 |
 
 ## 2. 코덱 선정
 
 | 형식 | 라이브러리 | 라이선스(SPDX) | 선정 이유 |
 |---|---|---|---|
 | `Lz4`(raw block) | LZ4 1.11.1(2026-11-10), `lib/`의 `lz4.[ch]`·`lz4hc.[ch]`만 | BSD-2-Clause. 원문은 `lib/LICENSE`다. 저장소 루트 `LICENSE`는 "lib은 BSD-2, 나머지는 GPL-2.0-or-later" 안내문이며 CLI(`programs/`)는 들이지 않는다 | 해제 최고속. 1.11은 HC 확장 상태(`LZ4_STREAMHC_EXTSIZE`)로 수준 10–12도 할당 없이 동작하고, 1.10.0이 Android(non-Apple aarch64 clang)에서 껐던 빠른 해제 루프를 켠다. 1.11.0의 회귀는 폐기 API `LZ4_resetStreamHC()`에 국한되며 Rocks는 쓰지 않는다 |
-| `Zstd`(frame, RFC 8878) | zstd 1.5.7(2025-02-19, 최신 안정) | `BSD-3-Clause OR GPL-2.0-only` 중 **BSD-3-Clause 선택**. 부분집합 전 파일(xxhash 포함)이 이중 라이선스이며 특허 조항은 없다 | 압축률·속도 균형, `ZSTD_customMem`으로 할당기 주입, 원본 크기·체크섬 기록. upstream C 라이브러리의 알려진 CVE는 없다(검색된 CVE는 zstd-jni 것) |
+| `Zstd`(frame, RFC 8878) | zstd 1.5.7(2025-02-19, 최신 안정) | `BSD-3-Clause OR GPL-2.0-only` 중 **BSD-3-Clause 선택**. 부분집합 전 파일(xxhash 포함)이 이중 라이선스이며 특허 조항은 없다. 단 사전 생성기의 `divsufsort.[ch]`는 MIT(Yuta Mori)라 따로 고지한다(11.6절) | 압축률·속도 균형, `ZSTD_customMem`으로 할당기 주입, 원본 크기·체크섬 기록. upstream C 라이브러리의 알려진 CVE는 없다(검색된 CVE는 zstd-jni 것) |
 | `Deflate`(RFC 1951)·`Zlib`(RFC 1950)·`Gzip`(RFC 1952) | zlib 1.4(2026-11-04) | Zlib | 호환 형식(PNG·gzip·zip). `zalloc`·`zfree`·`opaque`로 할당기 주입, 스트림 API로 4GiB 이상과 취소를 처리. 1.4는 최신 유지와 UB·Android·Windows 이식성 수정이 근거다(보안 수정 대부분은 Rocks가 쓰지 않는 gz·inflateSync·Prime·inflateBack API) |
 
 제외한 후보: Oodle(독점 라이선스), FastLZ(LZ4가 속도·압축률 모두 우위), libdeflate(MIT·Deflate 최고속이지만 스트리밍이
@@ -26,7 +26,7 @@
 **고지 의무.** BSD-2·BSD-3은 바이너리 배포 시 저작권 고지·조건·면책 문구를 문서나 함께 배포하는 자료에 재현해야 한다.
 Zlib 라이선스는 바이너리 고지 의무가 없고 수정본은 수정본임을 밝혀야 한다. Rocks는 원본을 수정하지 않는다. 코덱은 첫
 버전부터 엔진 바이너리에 들어가므로 **외부 배포(설치 SDK·게임 패키지·APK) 전에 고지 묶음이 반드시 포함되도록 배포 경로에
-gate를 둔다.** 설치 SDK는 각 라이브러리의 LICENSE를 함께 복사한다.
+gate를 둔다.** 설치 SDK는 각 라이브러리 manifest `licenses`의 모든 원문을 함께 복사한다(3.2절).
 
 ## 3. 저장소와 빌드
 
@@ -38,7 +38,8 @@ gate를 둔다.** 설치 SDK는 각 라이브러리의 LICENSE를 함께 복사�
 ```text
 Core/Source/ThirdParty/
   Lz4/   Lz4.Build.cs   ThirdParty.json   Lz4Unity.c   lz4-1.11.1/lib/{LICENSE, lz4.c, lz4.h, lz4hc.c, lz4hc.h}
-  Zstd/  Zstd.Build.cs  ThirdParty.json   zstd-1.5.7/{LICENSE, lib/zstd.h, lib/zstd_errors.h, lib/common/…, lib/compress/…, lib/decompress/…}
+  Zstd/  Zstd.Build.cs  ThirdParty.json   zstd-1.5.7/{LICENSE, lib/zstd.h, lib/zstd_errors.h, lib/zdict.h, lib/common/…, lib/compress/…,
+                                                      lib/decompress/…, lib/dictBuilder/…}
   Zlib/  Zlib.Build.cs  ThirdParty.json   zlib-1.4/{LICENSE, adler32.c, crc32.[ch], deflate.[ch], inffast.[ch], inffixed.h,
                                                     inflate.[ch], inftrees.[ch], trees.[ch], zconf.h, zlib.h, zutil.[ch]}
 Core/Source/Runtime/Compression/   Compression.Build.cs  Public/Compression/  Private/  Tests/
@@ -46,9 +47,10 @@ Core/Source/Runtime/Compression/   Compression.Build.cs  Public/Compression/  Pr
 
 - 버전 디렉터리(`<lib>-<version>/`)는 릴리스 tarball의 파일을 **byte 그대로** 둔다. `.gitattributes`는 이 디렉터리를
   `-text`로, `.editorconfig`는 trim·final newline 규칙의 예외로 둔다(줄끝·공백 변환 방지).
-- 컴파일하지 않는 파일은 넣지 않는다. zstd는 `legacy/ deprecated/ dictBuilder/`, `zstdmt_compress.c pool.c threading.c
-  debug.c huf_decompress_amd64.S`를 뺀 22개 번역 단위, zlib은 `gz*.c compress.c uncompr.c infback.c`를 뺀 8개, LZ4는
-  `lz4frame* lz4file* xxhash*`를 뺀다.
+- 컴파일하지 않는 파일은 넣지 않는다. zstd는 `legacy/ deprecated/`, `zstdmt_compress.c threading.c debug.c
+  huf_decompress_amd64.S`를 뺀 27개 번역 단위(frame 압축·해제 22개와 사전 학습용 `dictBuilder/`의 `cover.c fastcover.c
+  zdict.c divsufsort.c`·`common/pool.c` 5개, 헤더 `pool.h threading.h`도 넣는다. 11.6절), zlib은 `gz*.c compress.c uncompr.c
+  infback.c`를 뺀 8개, LZ4는 `lz4frame* lz4file* xxhash*`를 뺀다.
 - LZ4는 Rocks 글루 `Lz4Unity.c`(`#include "lz4.c"` 다음 `#include "lz4hc.c"`) 한 번역 단위로 빌드한다. upstream이 지원하는
   방식(`LZ4_SRC_INCLUDED`)이며 이렇게 하면 `lz4hc.c`의 `-Wunused-function` 억제 분기가 비활성이다.
 
@@ -60,7 +62,7 @@ Core/Source/Runtime/Compression/   Compression.Build.cs  Public/Compression/  Pr
 |---|---|
 | `name`·`version`·`upstreamDirectory` | 이름·고정 버전·원본 디렉터리(라이브러리 폴더 기준) |
 | `source` | 릴리스 URL, tarball SHA-256, 서명 검증 방법(zlib `.asc`, zstd 공식 `.sha256`) |
-| `license` | 선택한 SPDX, upstream 표현식, 원문 파일 경로, 바이너리 고지 필요 여부 |
+| `licenses` | 라이선스 배열(1개 이상). 항목마다 `spdx`(선택한 SPDX)·`upstreamExpression`(upstream 표현식)·`file`(원문 파일 경로)·`binaryNoticeRequired`(바이너리 고지 필요 여부)와 선택 필드 `licenseSource`(`url`·`sha256`, 원문이 원본 archive 밖에서 왔을 때) |
 | `files` | 원본 디렉터리 안 모든 파일의 상대 경로 → SHA-256(byte 기준) |
 | `translationUnits` | 컴파일할 파일(라이브러리 폴더 기준. 원본 파일 또는 Rocks 글루) |
 | `includeDirectories` | adapter가 private으로 쓰는 include 경로 |
@@ -69,6 +71,20 @@ Core/Source/Runtime/Compression/   Compression.Build.cs  Public/Compression/  Pr
 | `adapterHeaders` | 엔진 소유 번역 단위가 include하는 외부 헤더 |
 | `pragmaDirectives` | 원본의 컴파일러 지시문 전체: `#pragma`(`once` 제외, MSVC 번호 형식 포함)·`_Pragma`·`__pragma`·경고/deprecation 억제 define. 줄 이음을 합친 논리 줄 기준(파일·시작 줄·원문). 3.6 참고 |
 | `notes` | 실험 API 고정 사유, 설정 매크로 근거 등 |
+
+라이선스(`licenses`) 규칙:
+
+- 한 라이브러리에 라이선스가 다른 구성요소가 있으면 항목을 여럿 둔다. zstd는 본체 `BSD-3-Clause`(`zstd-1.5.7/LICENSE`)와
+  사전 생성기의 `MIT`(libdivsufsort-lite, 원문이 머리 주석에 있는 `zstd-1.5.7/lib/dictBuilder/divsufsort.h`) 두 항목이다.
+- 빈 배열, 항목의 모르는·누락 필드, 같은 `file`을 두 번 적은 항목(대소문자만 다른 경로 포함)은 manifest 오류다.
+- 각 항목의 `file`은 라이브러리 폴더 기준 경로이고 `files`에 등록된 원본 파일이어야 한다(`third-party` 검사). 원문이 archive
+  밖에서 왔으면(예: Unicode `license.txt`) 그 항목에 `licenseSource`를 적되 파일 자체는 원본 디렉터리에 두고 `files`에
+  등록한다.
+- 설치 SDK는 code 라이브러리 모듈을 담으면 모든 항목의 원문을, data 라이브러리는 `embeddedIn` 모듈을 담을 때만 복사한다.
+  위치는 `Licenses/<Lib>/<원본 디렉터리 기준 경로>`다(예: `Licenses/Zstd/LICENSE`, `Licenses/Zstd/lib/dictBuilder/divsufsort.h`,
+  `Licenses/Lz4/lib/LICENSE`). 파일 이름만 쓰지 않고 원본 안 경로를 유지하므로 이름이 같은 원문(최상위 LICENSE와 하위
+  구성요소의 LICENSE)도 겹치지 않고, 어느 구성요소의 고지인지 경로로 드러난다.
+- 이전 형식(단일 `license` 객체와 최상위 `licenseSource`)은 2026-11-12 합의로 폐기했고 읽지 않는다.
 
 ### 3.3 빌드 도구의 C 지원
 
@@ -96,7 +112,7 @@ Core/Source/Runtime/Compression/   Compression.Build.cs  Public/Compression/  Pr
 | LZ4 | `LZ4LIB_VISIBILITY=` | ELF·Mach-O에서 `visibility("default")` 강제 해제(Android `.so` 심볼 노출 방지) |
 | zstd | `ZSTD_DISABLE_ASM=1` | `.S` 없이 모든 플랫폼 같은 C 경로. 잃는 것은 Android x86_64의 asm Huffman 해제뿐 |
 | zstd | `ZSTD_TRACE=0`, 멀티스레드·legacy 미정의 | ELF weak symbol trace 비활성, 단일 스레드, 구형 형식 제외 |
-| zstd | `ZSTDLIB_VISIBLE=`, `ZSTDERRORLIB_VISIBLE=` | 심볼 노출 해제(위와 같음) |
+| zstd | `ZSTDLIB_VISIBLE=`, `ZSTDERRORLIB_VISIBLE=`, `ZDICTLIB_VISIBLE=` | 심볼 노출 해제(위와 같음). `ZDICTLIB_STATIC_API`는 DLL 정의가 없으면 `ZDICTLIB_VISIBLE`로 정해지므로 따로 주지 않는다 |
 | zstd | `MEM_STATIC=static __inline __attribute__((unused))` | clang-cl은 `__GNUC__`가 없어 zstd가 GNU 계열에서 기본으로 붙이는 `unused` 속성을 빼므로, assert 전용 `HUF_isSorted`·`ZSTD_isAligned`가 `-Wunused-function` 오류가 된다. zstd의 `#ifndef MEM_STATIC` 가드(커널 빌드용, README 설정 항목은 아님)로 GNU 계열 정의를 그대로 재현한다. 경고 정책 "외부 원본 내부 진단 지시문" 4항으로 승인 |
 | zstd(Windows) | `DYNAMIC_BMI2=0` | clang-cl에서는 `TARGET_ATTRIBUTE`가 비어 BMI2 사본이 이득 없이 중복된다(README 문서화 설정). 해제 속도 측정으로 확인 |
 | zlib | `Z_SOLO` | 기본 할당기·gz 파일 IO 제거(할당기 주입 강제, `_CRT_SECURE_NO_WARNINGS`를 정의하는 `gzguts.h` 미포함). `memcpy`가 내부 루프로 바뀌지만 `-O2`에서 벡터화 복사로 컴파일됨을 확인 |
@@ -104,7 +120,7 @@ Core/Source/Runtime/Compression/   Compression.Build.cs  Public/Compression/  Pr
 | zlib | `Z_PREFIX` | 심볼에 `z_` 접두사(Android·macOS 시스템 libz와 충돌 방지) |
 | zlib(Windows 외) | `HAVE_HIDDEN` | 내부 심볼 hidden |
 
-`Z_SOLO`·`Z_PREFIX`·`Z_U4`·`Z_U8`, zstd의 visibility 정의와 `ZSTD_STATIC_LINKING_ONLY`, LZ4의 `LZ4_HC_STATIC_LINKING_ONLY`·
+`Z_SOLO`·`Z_PREFIX`·`Z_U4`·`Z_U8`, zstd의 visibility 정의와 `ZSTD_STATIC_LINKING_ONLY`·`ZDICT_STATIC_LINKING_ONLY`(fastCover 학습 API), LZ4의 `LZ4_HC_STATIC_LINKING_ONLY`·
 `LZ4_STATIC_LINKING_ONLY_DISABLE_MEMORY_ALLOCATION`·`LZ4LIB_VISIBILITY=`는 adapter에도 같은 값으로 준다(`consumerDefines`).
 같은 이름이 라이브러리 정의에도 있으면 값이 같아야 한다(manifest 리더가 확인). `LZ4_STATIC_LINKING_ONLY`는 `lz4hc.h`가
 `LZ4_HC_STATIC_LINKING_ONLY`일 때 스스로 정의하므로 명령줄로 주지 않는다(값이 다르면 재정의 경고). LZ4 HC 확장 상태 API는
@@ -116,8 +132,8 @@ Core/Source/Runtime/Compression/   Compression.Build.cs  Public/Compression/  Pr
   디렉터리만** 제외한다. 이름이 비슷한 디렉터리는 계속 검사한다. Rocks 글루(`*.Build.cs`, `Lz4Unity.c`)는 검사 대상이며
   검사 대상 확장자에 `.c`를 더한다.
 - 새 `third-party` 검사: manifest 스키마 엄격 검사(모르는·중복 필드 거부), 실제 파일 집합과 SHA-256(byte 기준) 일치,
-  링크 파일 거부, LICENSE 존재, `translationUnits` ⊆ 원본 파일 ∪ 글루, 컴파일러 지시문 목록(`pragmaDirectives`)의 정확한
-  일치.
+  링크 파일 거부, `licenses`의 모든 원문이 등록된 원본 파일임, `translationUnits` ⊆ 원본 파일 ∪ 글루, 컴파일러 지시문
+  목록(`pragmaDirectives`)의 정확한 일치.
 - adapter 헤더의 진단 억제는 같은 계열(MSVC `warning`, clang/GCC `diagnostic`)의 push/pop 안에서만 허용하고(pack 등 무관한
   push/pop은 세지 않는다), adapter 헤더가 따옴표로 include하는 원본도 adapter 헤더여야 한다. 엔진 소유 소스는 adapter 헤더
   외의 원본을 include할 수 없다(등록된 글루는 자기 라이브러리의 원본 `.c`를 include할 수 있다).
@@ -431,6 +447,7 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
 | 2차(스트리밍·블록 컨테이너) | 스트림 14개·블록 컨테이너 16개 시험(결정성 golden 각 1개 포함)이 Windows x64 Debug·ASan에서 통과. 구현 뒤 독립 검토 5건(zstd·zlib adapter, 스트림 드라이버, RCBK 형식·reader, 병렬·writer)의 확정 결함을 모두 반영했다: zlib 작은 창 flush 무한 반복(major), 읽기 문맥 캐시의 reader 주소 재사용 혼동(major), 병렬 경로가 worker가 빌 때까지 기다리다 교착(major, `WorkerTaskHandle::TryRevoke` 추가), 그 밖의 오류 분류·캐시 검증·helper 자원 실패 처리. macOS·Android 실행은 아직 하지 않았다 |
 | 공용 변경 | `Array::TryAppendUninitialized`(0 채우기 없는 성장), trivial 소멸 타입 축소·`Clear`를 O(1)로(Debug 스트림 시험 9.5초 → 1.1초). 1차 Append 경로도 0 채우기를 없앴다 |
 | 3차(zstd 사전, 11절) | 설계 교차검증 3건(zstd 원본·실측, API·계약·형식, dictBuilder 조사) 뒤 구현. 사전 시험(11.7절)이 Windows x64 Debug·ASan에서 통과. 구현 뒤 독립 검토 2건(수명·동시성·오류 분류, zstd 의미·결정성·형식·시험 공백)의 확정 항목을 반영했다: 이동된 블록 설정이 사전 없이 조용히 다른 결과를 냄, 큰 window frame의 사전 ID 조회 분류, 스트림의 사전 ID·window 검사 순서, 지문이 같고 내용이 다른 후보, 헤더 배치 변경의 version 미갱신(RCBK v2), 문서 오류. 검토가 만든 시험 18개를 저장소로 옮겼고, 사전과 무관한 기존 결함(일회성 zstd 해제가 window 상한 초과 frame을 InvalidArgument로 분류)도 Unsupported로 고쳤다. Foundation 전체 908개 통과(Debug). 표준 경로 등가성은 원본 내부 함수로 1,367만 건, 실측 8,328건을 비교해 반례가 없었다. macOS·Android 실행은 아직 하지 않았다 |
+| 4차(사전 학습, 11.6절) | 설계 교차검증(dictBuilder 원본·실측: 예외 경로 충돌 재현, 기본값 시간·이득 비교) 뒤 구현. 학습 시험 8개와 manifest `licenses` 이전 시험(Policy.ThirdPartyLicenses·ThirdPartySdkLicenses)을 포함해, HEAD 기반 worktree에서 Foundation Debug·ASan 916개, Release 압축 82개, `self` 84개, `native` 95개, 빌드 도구 시험 22개 그룹, 정책·형식 검사가 통과했다. 구현 뒤 독립 검토의 확정 항목(표본 수 상한 1 초과, POSIX 종료 중 mutex 소멸, finalize 헤더 버퍼 초과 분류, 빈 표본 포인터)을 반영했다. 학습 golden은 upstream 원본만으로 빌드한 probe로 Windows x64·Android x86_64에서 같은 byte임을 확인했다. arm64는 아직 확인하지 않았다 |
 
 처리량(로컬 1회 측정, 1차 때 저장소 밖 임시 벤치): Windows x64 Release(ThinLTO), 단일 스레드, `Compressor`·`Decompressor`
 재사용, 저장소 소스·문서 8.9MiB, 여러 번 중 최고값이다. 기기 사양을 고정한 반복 측정이 아니므로 기준값이 아니라 adapter가 원본
@@ -738,26 +755,61 @@ localDict도 내부적으로 수준 없는 CDict라 같은 문제가 있어 기�
 - 효과(시험): 레코드 600KB, 4KiB 블록, 수준 3에서 사전 컨테이너가 사전 없는 컨테이너보다 10% 이상 작다. 블록이 클수록
   이득은 줄어든다(기본 256KiB 블록보다 64KiB 이하 블록에서 쓴다).
 
-### 11.6 학습(후속, ThirdParty manifest 변경 필요)
+### 11.6 학습 (4차, 교차검증 반영)
 
-교차검증 조사 결과와 다른 세션 합의를 기록한다.
+모듈 `Core/Source/Developer/CompressionTraining`(Core 계층 개발 도구, 헤더 `CompressionTraining/CompressionDictionaryTraining.h`)
+이다. 쿠커·도구가 링크하고 게임 런타임은 링크하지 않는다(UE에서 사전 학습을 OodleNetwork commandlet이 맡는 것과 같은
+배치). zdict.h를 include하는 유일한 adapter다. 설계 초안은 dictBuilder 조사 결과와 원본·실측 교차검증(예외 경로 충돌
+재현 포함)을 반영했다.
 
 - 링크 묶음: `lib/dictBuilder`의 cover.c·fastcover.c·zdict.c·divsufsort.c와 `lib/common/pool.c`는 서로 참조해 떼어낼 수 없다
-  (fastCover와 finalize만 써도 divsufsort가 필요하다). threading.c·debug.c는 필요 없다. 같은 Zstd 모듈 manifest에 넣는다
+  (fastCover와 finalize만 써도 divsufsort가 필요하다). threading.c·debug.c는 필요 없다. 같은 Zstd 모듈 manifest에 넣었다
   (별도 모듈은 폴더당 모듈 하나·'..' 금지 규칙 때문에 헤더 약 40개를 복제해야 하고 내부 구조체 배치에 묶여 버전 동기화
   위험이 크다). 정적 라이브러리라 학습을 부르지 않는 게임 바이너리에는 들어가지 않는다.
 - 라이선스: divsufsort.c·.h는 MIT(Yuta Mori)이고 zstd LICENSE에 포함되지 않아 별도 고지가 필요하다. manifest의 `license`를
-  모든 manifest에서 `licenses` 배열로 바꾼다(2026-11-12 rocks-62와 합의: 항목마다 `licenseSource` 선택, InstalledSdk의 데이터
-  라이브러리 라이선스 복사는 `embeddedIn` 모듈이 SDK에 있을 때만 하는 동작 유지).
-- 할당: dictBuilder는 malloc·calloc을 직접 부르고(약 30곳) customMem을 받지 않으며, 내부 CCtx·CDict도 기본 메모리를 쓴다.
-  원본을 고치지 않고 할당기를 바꿀 방법이 없어 학습 시점의 CRT 할당을 좁은 예외로 둔다. 학습 wrapper는 Developer 계층
-  모듈에 두고 zdict.h를 포함하는 유일한 adapter로 한다.
-- 스레드: cover.c·fastcover.c는 전역 표시 수준을 동기화 없이 쓰고, Android에서는 COVER의 qsort가 전역 문맥을 쓰는 C90
-  경로라 재진입할 수 없다. 학습 호출은 프로세스 mutex로 직렬화하고 표시 수준은 0, 알고리즘은 fastCover만 쓴다.
-- 진입점: `ZDICT_optimizeTrainFromBuffer_fastCover`에 k·d를 고정해 1회 실행한다(`ZDICT_trainFromBuffer_fastCover`는
-  calloc NULL 검사가 빠져 OOM에서 죽는다). 압축 수준·splitPoint·사전 ID를 명시한다. 사전 ID를 0으로 두면 내용의 XXH64에서
-  유도해 엔트로피 표가 달라도 같은 ID가 나오므로 명시를 권한다.
-- 결정성: fastCover·finalize 출력이 Windows x64와 Android x86_64에서 같다(실측, COVER는 다르다). 표본 순서도 입력이다.
+  모든 manifest에서 `licenses` 배열로 바꿨다(2026-11-12 rocks-62와 합의: 항목마다 `licenseSource` 선택, InstalledSdk의 데이터
+  라이브러리 라이선스 복사는 `embeddedIn` 모듈이 SDK에 있을 때만 하는 동작 유지). Zstd manifest는 `divsufsort.h`(MIT 원문
+  전체가 머리 주석에 있다)를 두 번째 항목으로 둔다(3.2절).
+- 할당(승인된 좁은 예외, 2026-11-13): dictBuilder는 malloc·calloc을 직접 부르고(약 30곳) customMem을 받지 않으며, 내부
+  CCtx·CDict도 기본 메모리를 쓴다. 원본을 고치지 않고 할당기를 바꿀 방법이 없어 학습 시점의 CRT 할당만 예외로 둔다. 결과
+  사전은 output의 할당기로 저장한다. 학습 작업 메모리는 대략 10MiB + 4 × capacity + 압축 수준별 문맥이다(capacity 110KiB에서
+  수준 3 약 12MiB, 수준 19 약 15MiB, 실측).
+- `TryTrainCompressionDictionary(표본, 표본 길이들, settings, output) → {bytes, segmentSize, dmerSize}`:
+  - `ZDICT_optimizeTrainFromBuffer_fastCover` 하나만 쓴다(`ZDICT_trainFromBuffer_fastCover`는 calloc NULL 검사가 빠져 OOM에서
+    죽고, `ZDICT_trainFromBuffer`는 압축 수준이 3으로 고정이라 수준 19에서 쓸 사전이 약 8% 나빠진다). k를 지정하면 탐색 범위가
+    그 값 하나라 정확히 1회다. k가 0이면 [50, 2000]에서 후보 5개(steps 4, `ZDICT_trainFromBuffer`와 같다)를 시험한다. steps
+    40은 8–16배 느린데 이득이 0–0.5%였다. d는 8(6 선택 가능, 둘 다 탐색은 시간만 두 배이고 매번 8이 뽑혔다), f 20, accel 1,
+    shrinkDict 0, nbThreads 1, splitPoint 1.0(모든 표본으로 학습·평가)이다. 고른 k·d를 돌려주며 그 값으로 다시 학습하면 같은
+    사전이다.
+  - 호출 전에 거르는 인자 규칙(InvalidArgument): 표본 5개 이상·2^32 − 2개 이하(fastCover가 표본 수 + 1을 32bit로 계산한다), 길이 합 = 표본 byte 수, 8 ≤ 합 < 2^32 − 1,
+    capacity 256(ZDICT_DICTSIZE_MIN) – 32MiB, 압축 수준 1–19, d ∈ {6, 8}, k = 0이거나 d ≤ k ≤ capacity이고 k − d + 1 ≤ 65535,
+    사전 ID 0 또는 [32768, 2^31 − 1](zstd 예약 범위 밖), 표본이 output 저장소와 겹치지 않음. upstream은 d ∉ {6, 8}·k >
+    capacity를 원인 없는 GENERIC으로 알리고, splitPoint < 1에서 학습 부분 합이 8byte 미만이면 프로세스가 죽는다(실측:
+    접근 위반·0 나누기). splitPoint를 1.0으로 고정해 그 경로를 없앴다.
+  - 오류 대응: parameter_outOfBound·srcSize_wrong·dstSize_tooSmall InvalidArgument, memory_allocation OutOfMemory, GENERIC
+    (모든 후보 실패) DependencyFailed(후보 안의 할당 실패도 GENERIC으로 올 수 있다). finalize의 dstSize_tooSmall은
+    래퍼가 충분히 확보하므로 upstream 헤더 버퍼(256byte, 이론상 최대 297byte) 초과라 DependencyFailed다.
+  - 결과 크기는 대개 capacity와 같다. fastCover가 사전 끝부터 채운 뒤 finalize가 헤더 자리만큼 앞부분을 남기고 끝을 자른다
+    (upstream 동작, 결정적).
+- `TryFinalizeCompressionDictionary(내용, 표본, 표본 길이들, settings, output)`: 호출자가 정한 내용에 엔트로피 표·반복
+  offset·사전 ID를 붙인다(`ZDICT_finalizeDictionary`). capacity를 받지 않고 헤더(최대 256byte) + max(내용, 8)을 확보해 내용을
+  자르지 않는다(zstd는 용량이 모자라면 헤더 정의와 달리 내용의 끝을 자른다). 표본은 엔트로피 통계에만 쓴다(0개도 된다).
+- 스레드: fastCover는 전역 표시 수준을 동기화 없이 쓰므로 학습 호출만 해제하지 않는 `platform::Mutex`로 직렬화한다(종료
+  중 학습해도 소멸된 mutex를 쓰지 않는다. POSIX mutex 소멸자는 잠긴 상태에서 Fatal이다). fastCover가 부르는 COVER 보조 함수는
+  전역을 쓰지 않고, COVER의 qsort 전역은 fastCover 경로에 없다. finalize는 전역 상태가 없어 잠그지 않는다. 취소·진행률은
+  dictBuilder가 제공하지 않는다. 표시 수준은 0이다.
+- 사전 ID: 0이면 내용의 XXH64에서 유도한다(0이 되지 않으며 엔트로피 표·수준·표본은 반영하지 않는다). 정체성은 Digest와
+  RCBK 지문이 맡고 frame의 ID는 해제 대조용이라 충돌해도 그 검사만 약해진다. 같은 내용으로 수준만 다른 사전을 만들면 ID를
+  다르게 준다.
+- 결정성: 같은 표본(순서 포함)·설정이면 같은 byte다. fastCover·finalize 출력이 Windows x64와 Android x86_64에서 같다(실측,
+  COVER는 qsort 구현에 따라 다르다). 표본 순서는 위치·epoch 순회에만 영향을 줘 일부 순열에서만 결과가 바뀐다.
+- 시험(`Tests/CompressionDictionaryTrainingTests.cpp` 8개, Windows x64 Debug·ASan): finalize가 사전 사용 시험 자료
+  `FormattedDictionaryA`(probe가 공식 원본으로 만든 사전)를 byte 단위로 재현, finalize 계약(유도 ID 범위, 내용 비자름, 빈
+  입력, 인자 오류 시 output 불변, 겹침), 학습 결정성 golden·탐색 결과 재현, 학습 사전 효과(레코드 40개: 사전 없음 6331byte,
+  같은 크기 raw 사전 3569byte, 학습 사전 2961byte), 인자 규칙(upstream이 죽거나 GENERIC인 경우, 길이 합 overflow·상한 포함)·0byte 표본,
+  output OOM, 6개 worker 동시 학습 = 순차 결과.
+- 후속: 학습한 내용을 수준별로 다시 finalize하는 보조 함수(`ZDICT_getDictHeaderSize`로 내용 위치를 얻는다), 메모리 추정
+  함수, macOS ARM64·Android arm64 실기기 결정성 확인.
 
 ### 11.7 시험
 

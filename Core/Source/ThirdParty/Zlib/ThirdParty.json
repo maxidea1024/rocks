@@ -8,12 +8,14 @@
     "sha256": "02dd159783677a749c04adbdd02b55b8a2bcc7e054f51b76b549199a916ad584",
     "verification": "zlib-1.4.tar.gz.asc GPG 서명 검증(Mark Adler, 지문 5ED4 6A67 21D3 6558 7791 E2AA 783F CD8E 58BC AFBA)과 GitHub 릴리스 자산 digest 일치."
   },
-  "license": {
-    "spdx": "Zlib",
-    "upstreamExpression": "Zlib",
-    "file": "zlib-1.4/LICENSE",
-    "binaryNoticeRequired": false
-  },
+  "licenses": [
+    {
+      "spdx": "Zlib",
+      "upstreamExpression": "Zlib",
+      "file": "zlib-1.4/LICENSE",
+      "binaryNoticeRequired": false
+    }
+  ],
   "translationUnits": [
     "zlib-1.4/adler32.c",
     "zlib-1.4/crc32.c",

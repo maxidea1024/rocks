@@ -8,12 +8,14 @@
     "sha256": "683fed08a844ad012196381e40badf80c0bbe4962959761416d41c9e67d77ec7",
     "verification": "GitHub 릴리스 자산 digest(sha256)와 일치. upstream 서명 파일은 없다."
   },
-  "license": {
-    "spdx": "BSD-2-Clause",
-    "upstreamExpression": "BSD-2-Clause (lib/), GPL-2.0-or-later (programs/ 등 lib 밖, 들이지 않음)",
-    "file": "lz4-1.11.1/lib/LICENSE",
-    "binaryNoticeRequired": true
-  },
+  "licenses": [
+    {
+      "spdx": "BSD-2-Clause",
+      "upstreamExpression": "BSD-2-Clause (lib/), GPL-2.0-or-later (programs/ 등 lib 밖, 들이지 않음)",
+      "file": "lz4-1.11.1/lib/LICENSE",
+      "binaryNoticeRequired": true
+    }
+  ],
   "translationUnits": [
     "Lz4Unity.c"
   ],

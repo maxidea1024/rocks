@@ -31,10 +31,16 @@ public static class InstalledSdk
         {
             string name = pending.Pop();
             if (!reached.Add(name) || !byName.TryGetValue(name, out var module))
+            {
                 continue;
+            }
+
             foreach (string dependency in module.Dependencies)
+            {
                 pending.Push(dependency);
+            }
         }
+
         return modules.Where(module => reached.Contains(module.Name)).ToArray();
     }
 
@@ -44,7 +50,10 @@ public static class InstalledSdk
     {
         destination = Path.GetFullPath(destination);
         if (Directory.Exists(destination) || File.Exists(destination))
+        {
             throw new IOException("SDK destination already exists. Use a new versioned directory.");
+        }
+
         var stage = destination + ".staging-" + Guid.NewGuid().ToString("N");
         Directory.CreateDirectory(stage);
         try
@@ -55,7 +64,10 @@ public static class InstalledSdk
                 // 원시 compile·link 인자와 외부 prebuilt 라이브러리는 ABI·배포 규칙이 정해지지 않아 거부한다.
                 // 플랫폼 시스템 라이브러리·framework는 구조화된 선언이라 SDK manifest로 전달한다.
                 if (module.PrebuiltLibraries.Count != 0 || module.AdditionalLinkArguments.Count != 0 || module.AdditionalCompileArguments.Count != 0)
+                {
                     throw new NotSupportedException($"SDK module '{module.Name}' declares external libraries/custom compile or link flags. Add an explicit SDK packaging/ABI rule before exporting this module.");
+                }
+
                 var includes = new List<string>();
                 foreach (var directory in module.PublicIncludeDirectories)
                 {
@@ -63,6 +75,7 @@ public static class InstalledSdk
                     CopyTree(directory, Path.Combine(stage, relative));
                     includes.Add(relative);
                 }
+
                 var libraries = new List<string>();
                 if (build.ModuleOutputs.TryGetValue(module.Name, out var library))
                 {
@@ -72,43 +85,25 @@ public static class InstalledSdk
                     libraries.Add(relative);
                 }
                 else if (module.Sources.Count != 0)
+                {
                     throw new InvalidOperationException($"Module {module.Name} was not built for this SDK target.");
+                }
+
                 packaged.Add(new(module.Name, includes.ToArray(), module.PublicDefines.ToArray(),
                     module.Dependencies.ToArray(), libraries.ToArray(), module.SystemLibraries.ToArray(),
                     module.Frameworks.ToArray()));
             }
-            // 고정 버전 외부 라이브러리의 라이선스 원문을 함께 배포한다(BSD 계열은 바이너리 배포 시 고지 의무가 있다).
-            foreach (var module in packaged)
-            {
-                string library = Path.Combine(root, ThirdPartyManifest.ThirdPartyRoot, module.Name);
-                if (!File.Exists(Path.Combine(library, ThirdPartyManifest.FileName)))
-                    continue;
-                var thirdParty = ThirdPartyManifest.Read(library);
-                string license = Path.Combine(stage, "Licenses", module.Name, Path.GetFileName(thirdParty.License.File));
-                Directory.CreateDirectory(Path.GetDirectoryName(license)!);
-                File.Copy(Path.Combine(library, thirdParty.License.File), license);
-            }
-            // 데이터 전용 라이브러리(예: Unicode UCD)는 모듈이 아니므로, 파생물이 들어간 모듈(embeddedIn)을 SDK가 담을 때
-            // 라이선스를 배포한다. 시험 전용 데이터(embeddedIn 없음)는 배포하지 않는다.
-            string thirdPartyRoot = Path.Combine(root, ThirdPartyManifest.ThirdPartyRoot);
-            if (Directory.Exists(thirdPartyRoot))
-            {
-                foreach (string library in Directory.EnumerateDirectories(thirdPartyRoot).Order(StringComparer.Ordinal))
-                {
-                    if (!File.Exists(Path.Combine(library, ThirdPartyManifest.FileName)))
-                        continue;
-                    var data = ThirdPartyManifest.Read(library);
-                    if (data.Kind != ThirdPartyKind.Data ||
-                        !data.EmbeddedIn.Any(name => packaged.Any(module => string.Equals(module.Name, name, StringComparison.Ordinal))))
-                        continue;
-                    string license = Path.Combine(stage, "Licenses", Path.GetFileName(library), Path.GetFileName(data.License.File));
-                    Directory.CreateDirectory(Path.GetDirectoryName(license)!);
-                    File.Copy(Path.Combine(library, data.License.File), license);
-                }
-            }
+            // 고정 버전 외부 라이브러리의 라이선스 원문을 모두 함께 배포한다(BSD 계열은 바이너리 배포 시 고지 의무가 있다).
+            // code 라이브러리는 모듈을 담을 때, 데이터 전용 라이브러리(예: Unicode UCD)는 파생물이 들어간 모듈(embeddedIn)을
+            // 담을 때 복사하고, 시험 전용 데이터(embeddedIn 없음)는 배포하지 않는다. 경로는 Licenses/<Lib>/<원본 디렉터리 기준
+            // 경로>라 이름이 같은 원문도 겹치지 않는다(ThirdPartyManifest.CopySdkLicenses).
+            ThirdPartyManifest.CopySdkLicenses(root, stage, packaged.Select(module => module.Name).ToArray());
             // SDK 자체의 도구만으로 외부 게임 규칙을 빌드할 수 있어야 한다.
             foreach (var tool in new[] { "Rocks.Build.Cli", "Rocks.MetaCompiler" })
+            {
                 CopyTree(Path.GetDirectoryName(BuildCommand.HostTool(root, tool))!, Path.Combine(stage, "Tools", tool));
+            }
+
             File.Copy(Path.Combine(root, "global.json"), Path.Combine(stage, "global.json"));
             File.Copy(Path.Combine(root, ".clang-format"), Path.Combine(stage, ".clang-format"));
             var hashes = Directory.GetFiles(stage, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal)
@@ -125,7 +120,10 @@ public static class InstalledSdk
         finally
         {
             // 삭제 대상은 이 호출이 만든 동일 부모의 임의 stage 하나로 제한한다.
-            if (Directory.Exists(stage)) Directory.Delete(stage, recursive: true);
+            if (Directory.Exists(stage))
+            {
+                Directory.Delete(stage, recursive: true);
+            }
         }
     }
 
@@ -135,15 +133,23 @@ public static class InstalledSdk
         var project = Path.GetFullPath(options["project"]);
         var output = Path.GetFullPath(options.GetValueOrDefault("output", Path.Combine(project, "out", BuildCommand.Configuration(options).ToString())));
         if (Inside(sdk, output) || Inside(sdk, project) || Inside(output, project) || Inside(output, sdk))
+        {
             throw new ArgumentException("Game output cannot overlap or contain the project or installed SDK.");
+        }
+
         Directory.CreateDirectory(output);
         await using var invocationLock = await OutputInvocationLock.AcquireAsync(output, cancellationToken);
         var started = BeginGameEvidence(output, sdk, project);
         // 앞 실행의 PASS 보고서가 이번 실패를 성공으로 보이게 하지 않는다. 네이티브 출력 자체는 보존한다.
         AtomicFile.WriteIfChanged(Path.Combine(output, "action-report.json"), JsonSerializer.Serialize(new NativeBuildResult
         {
-            Succeeded = false, ExecutedActions = 0, SkippedActions = 0, Actions = [],
-            ModuleOutputs = new Dictionary<string, string>(), CompilationDatabasePath = "", Failure = "Current game build has not completed."
+            Succeeded = false,
+            ExecutedActions = 0,
+            SkippedActions = 0,
+            Actions = [],
+            ModuleOutputs = new Dictionary<string, string>(),
+            CompilationDatabasePath = "",
+            Failure = "Current game build has not completed."
         }, BuildCommand.JsonOptions));
         var status = "FAIL";
         string? failure = null;
@@ -162,7 +168,12 @@ public static class InstalledSdk
         {
             AtomicFile.WriteIfChanged(Path.Combine(output, "game-build-evidence.json"), JsonSerializer.Serialize(new
             {
-                status, startedUtc = started, finishedUtc = DateTime.UtcNow, sdk, project, error = failure
+                status,
+                startedUtc = started,
+                finishedUtc = DateTime.UtcNow,
+                sdk,
+                project,
+                error = failure
             }, BuildCommand.JsonOptions));
         }
     }
@@ -172,7 +183,12 @@ public static class InstalledSdk
         var started = DateTime.UtcNow;
         AtomicFile.WriteIfChanged(Path.Combine(output, "game-build-evidence.json"), JsonSerializer.Serialize(new
         {
-            status = "RUNNING", startedUtc = started, finishedUtc = (DateTime?)null, sdk, project, error = (string?)null
+            status = "RUNNING",
+            startedUtc = started,
+            finishedUtc = (DateTime?)null,
+            sdk,
+            project,
+            error = (string?)null
         }, BuildCommand.JsonOptions));
         return started;
     }
@@ -184,7 +200,10 @@ public static class InstalledSdk
         var configuration = BuildCommand.Configuration(options);
         var output = Path.GetFullPath(options.GetValueOrDefault("output", Path.Combine(project, "out", configuration.ToString())));
         if (Inside(sdk, output) || Inside(sdk, project) || Inside(output, project) || Inside(output, sdk))
+        {
             throw new ArgumentException("Game output cannot overlap or contain the project or installed SDK.");
+        }
+
         var toolchain = await NativeToolchains.DiscoverAsync(options.GetValueOrDefault("compiler"), cancellationToken);
         var manifest = Verify(sdk, configuration, toolchain);
         Directory.CreateDirectory(output);
@@ -194,7 +213,10 @@ public static class InstalledSdk
         // 빌드 중 기술자 변경을 최종 검사가 잡게 하고, 규칙을 컴파일하기 전에 기술자 오류를 먼저 알린다.
         var projectFiles = Directory.GetFiles(project, "*" + DescriptorReader.ProjectExtension, SearchOption.TopDirectoryOnly);
         if (projectFiles.Length != 1)
+        {
             throw new ArgumentException($"The game project root must contain exactly one {DescriptorReader.ProjectExtension} file (found {projectFiles.Length}).");
+        }
+
         var projectDescriptor = DescriptorReader.ReadProject(projectFiles[0]);
         var moduleSet = DescriptorModuleSet.Resolve(projectDescriptor,
             PluginCatalog.Discover([Path.Combine(project, "Plugins")]), toolchain.Platform, configuration);
@@ -202,7 +224,10 @@ public static class InstalledSdk
             .Where(file => !Inside(output, file) && (file.EndsWith(".Build.cs", StringComparison.Ordinal) || file.EndsWith(".Target.cs", StringComparison.Ordinal)))
             .Order(StringComparer.Ordinal).ToArray();
         if (rulesFiles.Length == 0)
+        {
             throw new ArgumentException("No *.Build.cs or *.Target.cs rules found in the game project.");
+        }
+
         var rulesDirectory = Path.Combine(output, "Rules");
         var projectFile = Path.Combine(rulesDirectory, "Rocks.Game.Rules.csproj");
         string Escape(string value) => SecurityElement.Escape(value)!;
@@ -220,7 +245,11 @@ public static class InstalledSdk
             "-p:ImportDirectoryBuildProps=false", "-p:ImportDirectoryBuildTargets=false"], sdk, toolchain.Environment), cancellationToken);
         Console.Write(compiled.StdOut);
         Console.Error.Write(compiled.StdErr);
-        if (compiled.ExitCode != 0) return 1;
+        if (compiled.ExitCode != 0)
+        {
+            return 1;
+        }
+
         var rulesPath = Path.Combine(rulesDirectory, "bin/Debug/net10.0/Rocks.Game.Rules.dll");
         var context = new BuildContext(project, output, toolchain.Platform, configuration, sdk);
         var rules = RuleLoader.Load(rulesPath, options.GetValueOrDefault("target", "Game"), context);
@@ -240,13 +269,20 @@ public static class InstalledSdk
         var initialDeclared = GameInputSnapshot.Capture(project, output, sdk, declaredInputs);
         var metadata = await MetadataRunner.GenerateAsync(context, toolchain, modules, rules.Target,
             Path.Combine(sdk, "Tools/Rocks.MetaCompiler/Rocks.MetaCompiler.dll"), cancellationToken);
-        if (metadata != 0) return 1;
+        if (metadata != 0)
+        {
+            return 1;
+        }
+
         var result = await new NativeBuildEngine().BuildAsync(new()
         {
-            Toolchain = toolchain, Configuration = configuration, OutputDirectory = output,
+            Toolchain = toolchain,
+            Configuration = configuration,
+            OutputDirectory = output,
             // 켠 플러그인의 모듈도 빌드한다(UE처럼 타깃이 직접 참조하지 않아도 컴파일된다). 정적 링크이므로
             // 실행 파일에는 참조한 모듈만 들어간다.
-            RootDirectory = project, Modules = modules,
+            RootDirectory = project,
+            Modules = modules,
             Targets = rules.Target.Modules.Concat(moduleSet.IncludedPluginModules).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
             ContextFingerprint = "rocks-installed-sdk-v1",
             MaxParallelism = BuildCommand.Jobs(options)
@@ -265,7 +301,10 @@ public static class InstalledSdk
         Verify(sdk, configuration, toolchain);
         if (GameInputSnapshot.Capture(project, output, sdk, []) != initialProject ||
             GameInputSnapshot.Capture(project, output, sdk, declaredInputs) != initialDeclared)
+        {
             throw new InvalidOperationException("Game inputs changed during rule evaluation, metadata generation, or native build. Retry the build.");
+        }
+
         AtomicFile.WriteIfChanged(Path.Combine(output, "action-report.json"), JsonSerializer.Serialize(result, BuildCommand.JsonOptions));
     }
 
@@ -277,42 +316,88 @@ public static class InstalledSdk
             manifest.Platform != toolchain.Platform.ToString() || manifest.CompilerIdentity != toolchain.AbiIdentity ||
             manifest.SdkIdentity != toolchain.AbiIdentity ||
             manifest.Architecture != System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString())
+        {
             throw new InvalidDataException("SDK configuration, compiler, platform, architecture, or native SDK ABI mismatch.");
+        }
+
         if (manifest.Files is null || manifest.Modules is null || manifest.Files.Count == 0 || manifest.Modules.Length == 0)
+        {
             throw new InvalidDataException("SDK manifest is missing its file inventory or module declarations.");
+        }
+
         var actual = new HashSet<string>(StringComparer.Ordinal);
         void Inventory(string directory)
         {
             foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
             {
                 if ((File.GetAttributes(entry) & FileAttributes.ReparsePoint) != 0)
+                {
                     throw new InvalidDataException("SDK inventory must not contain linked files/directories.");
-                if (Directory.Exists(entry)) Inventory(entry);
+                }
+
+                if (Directory.Exists(entry))
+                {
+                    Inventory(entry);
+                }
                 else if (Path.GetRelativePath(sdk, entry) != "rocks-sdk.json")
+                {
                     actual.Add(Path.GetRelativePath(sdk, entry).Replace('\\', '/'));
+                }
             }
         }
+
         Inventory(sdk);
         if (!actual.SetEquals(manifest.Files.Keys))
+        {
             throw new InvalidDataException("SDK file inventory changed. Re-export instead of adding/removing installed headers or tools.");
+        }
+
         if (manifest.Modules.Select(module => module.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != manifest.Modules.Length)
+        {
             throw new InvalidDataException("SDK contains duplicate module names.");
+        }
+
         foreach (var pair in manifest.Files)
+        {
             if (!File.Exists(SafePath(sdk, pair.Key)) || Hashing.Sha256File(SafePath(sdk, pair.Key)) != pair.Value)
+            {
                 throw new InvalidDataException($"SDK file changed or missing: {pair.Key}");
+            }
+        }
+
         foreach (var module in manifest.Modules)
         {
             if (module.Includes is null || module.Libraries is null || module.Dependencies is null || module.Defines is null ||
                 module.SystemLibraries is null || module.Frameworks is null)
+            {
                 throw new InvalidDataException($"SDK module '{module.Name}' has incomplete declarations.");
+            }
+
             foreach (var include in module.Includes)
-                if (!Directory.Exists(SafePath(sdk, include))) throw new InvalidDataException($"Missing SDK include directory: {include}");
+            {
+                if (!Directory.Exists(SafePath(sdk, include)))
+                {
+                    throw new InvalidDataException($"Missing SDK include directory: {include}");
+                }
+            }
+
             foreach (var dependency in module.Dependencies)
+            {
                 if (!manifest.Modules.Any(candidate => candidate.Name == dependency))
+                {
                     throw new InvalidDataException($"SDK module '{module.Name}' has unknown dependency '{dependency}'.");
+                }
+            }
+
             foreach (var library in module.Libraries)
-                if (!manifest.Files.ContainsKey(library)) throw new InvalidDataException("Unverified SDK library.");
+            {
+                if (!manifest.Files.ContainsKey(library))
+                {
+                    throw new InvalidDataException("Unverified SDK library.");
+                }
+            }
         }
+
         return manifest;
     }
 
@@ -320,7 +405,10 @@ public static class InstalledSdk
     {
         var full = Path.GetFullPath(relative, root);
         if (Path.IsPathRooted(relative) || !Inside(root, full) || relative.Split('/', '\\').Any(part => part == ".."))
+        {
             throw new InvalidDataException("SDK path escapes its root.");
+        }
+
         return full;
     }
 
@@ -335,10 +423,19 @@ public static class InstalledSdk
         foreach (var entry in Directory.EnumerateFileSystemEntries(source))
         {
             if ((File.GetAttributes(entry) & FileAttributes.ReparsePoint) != 0)
+            {
                 throw new IOException("SDK packaging does not accept symbolic links/reparse points.");
+            }
+
             var target = Path.Combine(destination, Path.GetFileName(entry));
-            if (Directory.Exists(entry)) CopyTree(entry, target);
-            else File.Copy(entry, target);
+            if (Directory.Exists(entry))
+            {
+                CopyTree(entry, target);
+            }
+            else
+            {
+                File.Copy(entry, target);
+            }
         }
     }
 }
