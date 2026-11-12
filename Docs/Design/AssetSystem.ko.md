@@ -10,7 +10,7 @@
 |---|---|---|
 | A0-P | PlatformBase: `DirectoryWatcher`, `File::Flush`, `FileSystem::Replace`, `FileLock`, `SetModifiedTime`, Windows 긴 경로(구현됨), `FileSystem::SyncDirectory`(쿠킹 게시용 디렉터리 동기화 — POSIX fsync(macOS F_FULLFSYNC), Windows는 항목 추가 권한(FILE_ADD_FILE, 관리자 불필요)으로 연 디렉터리 FlushFileBuffers, 동기화 실패는 NotDurable, wrapper 기본 Unsupported, 구현됨. `Replace`도 Windows에서 부모 디렉터리를 같은 방식으로 flush한다), `RunWithDeterministicFloatingPoint`(쿠킹 결정성용 부동소수점 환경 확인·실행·복원, 구현됨 — CoreDataFoundations 2.1절) | 기능별 시험(Windows 실행·Android 빌드, macOS 미검증 명시) |
 | A0-C | Core: SHA-256(구현됨), Unicode(착수 시 최신 버전 — 2026-11 기준 18.0.0. NFC·NFD·simple case folding·General_Category, UCD 생성기), Default_Ignorable, 결정적 수학(기본 연산만 쓰는 exp2·log2·pow·SinPi·sin, 정확한 8비트 sRGB 표, 부동소수점 환경 guard), CRT 없는 숫자 변환(정확한 파서·최단 표기), JSON 읽기·쓰기(RFC 8259), `RecordList`(`WireType::RecordList`), 데이터 전용 ThirdParty 종류(C1) — 상세와 단계(C1–C6)는 [CoreDataFoundations](CoreDataFoundations.ko.md) | NIST·NormalizationTest·CaseFolding·JSONTestSuite·숫자 변환 대조·결정적 수학 기준값·RecordList 시험 |
-| A0-B | 빌드·MetaCompiler(5.6절): 모듈 소유 메타데이터·모듈별 identity 명세·단위 간 import, `ROCKS_ENUM`, `ROCKS_STRUCT`(값 구조체), 배열 필드(`Array<T>`·`ObjectRefArray<T>`), `SoftObjectRef<T>` 필드, `EditorOnly`·`Required`·`Version=N`·`Name="…"` 지정자, `Sha256Digest` 값 종류, `ROCKS_CLASS(WorldOnly)`(그 밖 클래스의 `AssetLease` 멤버 거부), `AssetId` 값 종류, `ROCKS_NATIVE` 비영속 멤버, 툴체인 지문·도구 빌드 ID 주입 | 기존 시험 + 새 fixture |
+| A0-B | 빌드·MetaCompiler(5.6절, 상세 [ReflectionFoundations](ReflectionFoundations.ko.md) B1–B8): 모듈 소유 메타데이터·모듈별 identity 명세·단위 간 import, `ROCKS_ENUM`, `ROCKS_STRUCT`(값 구조체), 배열 필드(`Array<T>`·`ObjectRefArray<T>`), `SoftObjectRef<T>` 필드, `EditorOnly`·`Required`·`Version=N`·`Name="…"` 지정자, `Sha256Digest` 값 종류, `ROCKS_CLASS(WorldOnly)`(그 밖 클래스의 `AssetLease` 멤버 거부), `AssetId` 값 종류, `ROCKS_NATIVE` 비영속 멤버, 필드 codec thunk·문맥, 툴체인 지문·도구 빌드 ID 주입, World 타입 반영 이전 | 기존 시험 + 새 fixture(단계별 완료 기준은 상세 설계 11절) |
 | A0-O | ObjectRuntime·ObjectSerialization: Outer·Name, `Discard`(`RequestDestroy` + Outer·Name 표에서 즉시 제거, 메모리는 GC), 패키지 사이 간선 관찰자 `ReferenceObserver`(큐 전달), Registry 정책(패키지 없는 객체·WorldOnly 타입 거부), 다중 root `Commit`, graph v2(호출자가 준 저장 집합·순서 = localId, 집합 밖 참조는 외부 참조 resolver 또는 거부, 참조 값 표기(5.1절), 노드 타입은 export 표 기준, EditorOnly 제외, `prepare` hook(로드)·저장 쪽 값 치환 hook(bulkId 재매핑 등), Commit 때 패키지 사이 간선 다중도 보고, 외부 참조 목록), 한도(객체 4096 = export 상한, 외부 참조 65536, 필드 누계 1,048,576, 배열 원소 누계 4,194,304, 문자열 4 KiB, 그래프 바이트 64 MiB, 작업량 8 × (필드 + 원소)) | 그래프 왕복·외부 참조·마이그레이션·Discard·관찰자 시험 |
 | A0-G | GraphicsTypes·Graphics: 차원(2D·Cube·3D·2DArray·CubeArray)·형식(R8·RG8·RGBA8·R16·RG16·RGBA16·R16F·RG16F·RGBA16F·R32F·RG32F·RGBA32F·BGRA8, sRGB 변형)·view swizzle(D3D12 `Shader4ComponentMapping`, OpenGL `TEXTURE_SWIZZLE_RGBA`)·샘플러 W축 주소·필터 5종(Point·Bilinear·Trilinear·AnisotropicPoint·AnisotropicLinear — 기존 `Nearest`·`Anisotropic`의 이름 변경 포함), 쿠킹 데이터 샘플러 D3D12·OpenGL | self-test 확장 |
 | A1 | AssetRuntime: 패키지 포맷 v1, `Package`·`Asset`, 에셋 객체 Registry, 쿠킹 매니페스트(`CookedManifest.rman`), 로더(worker IO·압축 해제, Game 스레드 객체 생성, SCC), `AssetManager`(scope·PrimaryAsset·bundle), `CancelToken`·`TaskLane`·`LoadPriority`, Core ErrorCode 추가(`UnsupportedCapability`·`AlreadyRegistered`·`ScopeClosed`), EngineAssets 모듈 | 포맷·SCC·수명·scope 시험 |
@@ -25,7 +25,7 @@
 | 영역 | 있는 것 | 부족한 것 → 보강 |
 |---|---|---|
 | 객체 | `ObjectRegistry`(ContextId 문맥)·`RootRef`·`ObjectRef`(같은 Registry 안에서만)·`WeakRef`·`Borrow`(다른 문맥 Registry는 WrongContext), `ConstructionContext`(스테이징한 객체를 한 번에 공개, RootRef는 첫 객체에만), `TypeId = Guid` | Outer·Name, 다중 root → A0-O |
-| 리플렉션 | MetaCompiler: 스칼라·Guid·String·`ObjectRef`, 모든 비정적 필드 반영 필수, 상속 base·참조 대상은 같은 생성 단위, 스키마 버전 1 고정, 타깃 소유 메타데이터·명세 | → A0-B |
+| 리플렉션 | MetaCompiler: 스칼라·Guid·String·`ObjectRef`, 모든 비정적 필드 반영 필수, 상속 base·참조 대상은 같은 생성 단위, 스키마 버전 1 고정, 타깃 소유 메타데이터·명세 | → A0-B([ReflectionFoundations](ReflectionFoundations.ko.md)) |
 | 직렬화 | Archive·Record(TLV, 반복 필드 없음), `SaveObjectGraph/LoadObjectGraph`(단일 root, 내부 Commit, 마이그레이션 콜백, maxObjects 1024) | → A0-O, `RecordList` → A0-C |
 | 비동기 | `WorkerScheduler`(DAG·취소), `AsyncReadFile/AsyncWriteFile`(IOCP, `Flush`) | 로더가 사용(11절) |
 | 파일 | `FileSystem`, `CreateNew`, no-replace Move, `Path`, Win64는 `FILE_SHARE_DELETE` 열기 | → A0-P, VFS(APK) → 후속 |
@@ -207,17 +207,15 @@ ImportRecord (스키마 Guid, 버전 1)
 
 ### 5.6 리플렉션·빌드 보강(A0-B 상세)
 
-- 메타데이터 소유를 타깃에서 모듈로: `NativeModuleInput.Metadata`(반영 헤더 목록), 모듈별 identity 명세 `<ModuleDir>/<Module>.rocksids.json`, 생성물 `Generated/<Module>/`을 그 모듈의 public include로 전파. MetaCompiler는 모듈 의존 순서로 실행하며 각 단위가 descriptor(`<Module>.rocksmeta.json`: 타입 ID·base·필드 ID/종류/플래그)를 내고, 다른 단위의 타입은 `--import`로 해석한다. inventory 검증은 명세별로 한다. `TargetRules.Metadata`·`IdentityManifest`는 제거하고 Foundation 반영 fixture는 `ReflectionTestFixtures` 모듈로 분리한다. `GameInputSnapshot`·`InstalledSdk`(헤더·명세·descriptor 배포)·`Templates/Game`·Rocks.Build 시험·IdentityCompiler 시험을 함께 고친다.
-- `ROCKS_ENUM`(고정 underlying 타입, 값 목록 → `EnumSchema`, `ValueKind::Enum`, 선언되지 않은 값 거부).
-- `ROCKS_STRUCT`(값 구조체: 반영 필드만, ObjectRef 포함 가능 시 소유 객체 Trace가 방문, `ValueKind::Struct`, 중첩 Record로 직렬화).
-- 배열: `Array<T>`(T = 스칼라·String·Guid·enum·struct·`SoftObjectRef`)와 `ObjectRefArray<T>`(GC 간선). `ValueKind::Array` + 원소 schema, 길이 상한, `RecordList`로 직렬화.
-- `AssetId` 값 종류(`ValueKind::AssetId`, wire Guid), `SoftObjectRef<T>`: `ValueKind::SoftObjectReference`(wire = AssetId + 객체 경로), `referencedType`.
-- `Sha256Digest` 값 종류(`ValueKind::Digest256`, wire 32 byte): 콘텐츠 해시 필드용.
-- 지정자: `ROCKS_PROPERTY(EditorOnly)`(항상 컴파일, 플래그만), `Required`, `ROCKS_CLASS(Version=N)`, `ROCKS_PROPERTY(Name="…")`(도구·명령행에 보이는 속성 이름 — 직렬화는 필드 ID라 이름과 무관하다. 텍스처 설정은 UE C++ 이름을 이 지정자로 준다, 12.4절).
-- `ROCKS_NATIVE`: 반영 클래스 안의 비영속 런타임 멤버(예: GPU 자원 핸들, 캐시, World 쪽 객체의 `AssetLease`). 직렬화하지 않으며 ObjectRef류는 금지(static_assert). 영속 데이터는 모두 반영 필드다 — `BulkDataRef`·`TextureSource`·`TexturePlatformData`도 `ROCKS_STRUCT`이므로 네이티브 직렬화 hook을 두지 않는다. `AssetLease` 멤버는 `ROCKS_CLASS(WorldOnly)` 클래스에만 둘 수 있고 MetaCompiler가 그 밖의 반영 클래스에서 거부한다. 에셋 객체 Registry는 WorldOnly 타입의 객체 생성을 거부한다(패키지에 들어갈 수 있는 모든 클래스가 lease를 가질 수 없다 — 11.4절). `completeFieldLayout`의 의미는 "모든 영속 필드와 강한 간선을 기술"로 바꾸고 GraphSave·TypeRegistry 계약·시험을 고친다.
-- 부동소수점: 빌드 전체가 이미 `-ffp-contract=off`이고 fast-math를 쓰지 않으므로 모듈별 모델은 두지 않는다(clang-cl의 `/fp:precise`는 contract=on을 뜻하고 `/WX`에서 옵션 충돌 경고가 오류가 되므로 쓰지 않는다). 결정적 수학 모듈은 `-fno-math-errno`를 더해 암묵적 CRT 호출을 막는다. 회귀 시험: aarch64에서 `a*b+c`에 fmadd가 생기지 않는지, `long double`을 쓰지 않는지(정책 검사).
-- 빌드가 주입하는 상수: 툴체인 지문(빌드 캐시 키)과 도구 빌드 ID(Summary)를 Rocks.Build가 생성 헤더로 넣는다. 결정적 수학 모듈의 외부 심볼 허용 목록 검사(Development 구성의 기계어 오브젝트에 `llvm-nm`)도 이 단계에서 정책 검사로 추가한다.
+상세 설계와 단계(B1–B8)는 [리플렉션·빌드 보강 설계](ReflectionFoundations.ko.md)다. 요약:
 
+- 메타데이터 소유를 타깃에서 모듈로(`NativeModuleInput.Metadata`·`ModuleDirectory`, 모듈별 명세 `<ModuleDir>/<Module>.rocksids.json`, 원본 철자를 따르는 생성 include를 모듈의 public·private include로 전파). 모듈 의존 순서로 모듈마다 한 번 실행하고, descriptor(`<Module>.rocksmeta.json`)를 `--import`해 다른 모듈의 타입을 쓴다. 명세 사이 ID 중복 검사, ID 기준으로 합친 이력·병합 검사(`ids move`), 다중 명세 원자 게시. `TargetRules.Metadata`·`IdentityManifest` 제거, fixture는 `ReflectionTestFixtures` 모듈.
+- 값 종류: `ROCKS_ENUM`(열거자 `Name`·`DisplayName`·`Hidden`, 플래그 enum, 미선언 값 거부·로드 정책), `ROCKS_STRUCT`(중첩 Record, 참조 struct는 배열 원소 불가, struct 버전·마이그레이션, Core 수학 타입은 `Binds`), `Array<T>`(단일 값 원소는 `ValueArray` wire, struct 원소는 `RecordList`)·`ObjectRefArray<T>`, `AssetId`, `SoftObjectRef<T>`(AssetId + 객체 경로), `Sha256Digest`.
+- 지정자: `Version=N`·`WorldOnly`(상속)·`EditorOnly`·`Required`(저장·쿠킹에서 거부)·`Name="…"`(도구 이름, 텍스처 설정은 UE C++ 이름, 12.4절)·`MaxElements`. `ROCKS_NATIVE`(비영속 멤버, 강한 참조를 재귀적으로 금지, `AssetLease`처럼 WorldOnly 전용 형질을 선언한 타입은 WorldOnly 클래스에만 — 에셋 객체 Registry는 WorldOnly 타입 생성을 거부한다, 11.4절). 영속 데이터는 모두 반영 필드다 — `BulkDataRef`·`TextureSource`·`TexturePlatformData`도 `ROCKS_STRUCT`이므로 네이티브 직렬화 hook을 두지 않는다. `completeFieldLayout`은 "모든 영속 필드와 강한 간선을 기술"이다.
+- 필드 codec: 필드별 생성 encode·두 단계 decode thunk와 문맥(참조 wire 매개변수, Soft 참조 수집기, 유효 플래그, struct 관찰·치환 hook, 진단, decode 정책) — graph v2(A0-O)와 패키지(A1)가 같은 thunk를 쓴다.
+- 부동소수점: 빌드 전체가 이미 `-ffp-contract=off`이고 fast-math를 쓰지 않으므로 모듈별 모델은 두지 않는다(clang-cl의 `/fp:precise`는 contract=on을 뜻하고 `/WX`에서 옵션 충돌 경고가 오류가 되므로 쓰지 않는다). 결정적 수학 모듈의 fmadd·`long double`·외부 심볼(`llvm-nm`) 검사는 C3에서 모든 구성에 구현되었다([CoreDataFoundations](CoreDataFoundations.ko.md) 2절). `-fno-math-errno`는 clang-cl이 그 형태를 받지 않아 쓰지 않는다.
+- 빌드가 주입하는 상수: 툴체인 지문(빌드 캐시 키, 구성·호스트 경로 제외)과 도구 빌드 ID(Summary·AssetIndex 캐시 키 진단용, 입력 내용 해시 기반)를 Rocks.Build가 실행 파일마다 생성 번역 단위로 넣는다.
+- 엔진 World 타입(Level·Actor·Component)은 `ROCKS_CLASS(WorldOnly)`로 옮긴다(B8).
 ## 6. 에셋 타입·객체 통합·참조
 
 ### 6.1 객체 통합
@@ -597,7 +595,7 @@ cache-gc --max-bytes=<n> --unused-days=<n>
 10. mip 크기·대표 픽셀(12.5절 표: sRGB·알파·홀수·Unfiltered·PreserveBorder·FlipGreen·NoAlpha(비압축 결과 불변)·Normalize·Volume·Cube)
 11. 쿠킹 패키지만으로 로드, EditorOnly 데이터·필드 부재
 12. 잘못된 패키지(magic·CRC·섹션 순서·겹침·범위·크기)·UnsupportedVersion·NewerVersion
-13. 쿠킹 재현성(빌드 캐시 빈/찬, 두 번 쿠킹 동일 바이트), 부분 쿠킹 병합·전체 쿠킹 정리, 실패 시 게시본 불변
+13. 쿠킹 재현성(빌드 캐시 빈/찬, 두 번 쿠킹 동일 바이트, Debug·Release 도구 사이 동일 바이트), 부분 쿠킹 병합·전체 쿠킹 정리, 실패 시 게시본 불변
 14. 저장 실패 주입 시 기존 보존, 열린 대상 교체, 잠금 Busy, ExternalModification
 15. 경로 정책: NFC/NFD 같은 이름, 대소문자 중복, 예약 이름, 길이, CaseCollision
 16. 소프트 참조 비자동 로드, 요청 합류·개별 취소, OnReady 중복 AlreadyRegistered, scope Revoke·ScopeClosed, 의존 retention, lease 해제 후 회수
@@ -609,7 +607,7 @@ cache-gc --max-bytes=<n> --unused-days=<n>
 22. 매니페스트 게시: 교체 전후 reader가 일관된 집합만 보는지, 쿠킹 실패 주입 시 이전 매니페스트 유지, 부분 쿠킹 `IncompatibleCook`
 23. 수명: Closing 직후 같은 ID 재요청이 GC 전에 새 로드로 성공(Discard), Closing 대기 중 재요청 revive, 하드 순환 SCC 단위의 해제, 로드 중 의존 단위 보유, 동적 하드 간선의 계수 반영, lease 해제 지연
 24. 12.4절 표: 모든 계약 설정에 기본값이 아닌 값 → `UnsupportedSetting`, 숨김 CompressionSettings → `InvalidSetting`, 선형 설정·float 출력 + SRGB on → `SrgbIgnored`, CompressionSettings 15종 × 원본 형식의 쿠킹 형식·swizzle, sRGB 출력 규칙, LOD 그룹 합성·필터 조합
-25. 결정적 수학 기준값·CRT 초월 함수 미사용 링크 검사, 서로 다른 호스트의 쿠킹 바이트 비교
+25. 결정적 수학 기준값·CRT 초월 함수 미사용 링크 검사, 서로 다른 호스트·빌드 구성의 쿠킹 바이트 비교
 26. 원본 규칙: BMP 32비트 BI_RGB 알파 무시·V5 알파 마스크, TGA 알파 비트·확장 영역(premultiplied), PSD 색 모드·hasRealMergedData·추가 채널, PNG 회색 16비트 + tRNS
 27. 매니페스트 대조: 프로파일 불일치 `IncompatibleCook`, 크기·SHA·의존 불일치 `CorruptPackage`, 손상된 게시 파일의 재게시
 28. 순환 키: 하드 순환 A↔B·3-node 순환의 cookKey와 Build 순환의 빌드 캐시 키가 정의되고, 구성원 하나를 바꾸면 SCC 전체의 키가 바뀐다. 동적 간선으로 생긴 순환의 단위 병합과 해제, 간선 다중도(필드 둘 중 하나 제거)
