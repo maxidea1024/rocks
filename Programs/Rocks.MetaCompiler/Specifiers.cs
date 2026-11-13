@@ -6,7 +6,7 @@ namespace Rocks.MetaCompiler;
 // SchemaValidator가 base에서 더한다).
 internal sealed record ClassSpec(bool Abstract, uint Version, bool WorldOnly);
 
-// STRUCT 지정자 결과다. Version은 Record schema version(없으면 1)이다. Binds는 거울 선언이 결합하는 실제 C++ 타입의
+// STRUCT 지정자 결과다. Version은 Record schema version(없으면 1)이다. Binds는 미러 선언이 결합하는 실제 C++ 타입의
 // 원문 철자다(Core 값 타입 결합 — Docs/Design/ReflectionFoundations.ko.md 4.5절, 없으면 ""). 정규 철자는 Clang이
 // 정한다(문자열로 비교하지 않는다).
 internal sealed record StructSpec(uint Version, string Binds);

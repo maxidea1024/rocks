@@ -13,7 +13,7 @@ internal static class ModuleDescriptor
         ["kind", "name", "id", "version", "flags", "base", "header", "visibility", "fields"];
 
     // struct 항목: base 대신 생성 형질 flags(ContainsStrongReference·RequiresWorldOnlyOwner)와 binds(Binds 실제
-    // 타입의 Clang 정규 철자, 거울이 아니면 "")다(Docs/Design/ReflectionFoundations.ko.md 1.4·4.6절).
+    // 타입의 Clang 정규 철자, 미러가 아니면 "")다(Docs/Design/ReflectionFoundations.ko.md 1.4·4.6절).
     private static readonly string[] StructKeys =
         ["kind", "name", "id", "version", "header", "visibility", "flags", "binds", "fields"];
 

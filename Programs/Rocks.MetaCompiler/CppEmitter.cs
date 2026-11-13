@@ -117,7 +117,7 @@ internal static class CppEmitter
 
             if (type.IsStruct)
             {
-                // Binds 거울은 실제 타입의 GeneratedType이다(NativeName).
+                // Binds 미러는 실제 타입의 GeneratedType이다(NativeName).
                 Line($"if (auto added = registration.RegisterStructIfAbsent(::rocks::GeneratedType<::{type.NativeName}>::Schema(), ::rocks::GeneratedType<::{type.NativeName}>::Ops(module)); !added) return fail(added.Error());");
                 continue;
             }
@@ -150,7 +150,7 @@ internal static class CppEmitter
         Line("#include <Meta/GeneratedType.h>");
         Line("#include <Object/GeneratedFieldAccess.h>");
         Line("#include <Object/GeneratedFieldCodec.h>");
-        // Binds 거울의 순서 대조(ROCKS_OFFSET_OF)는 Base 매크로를 쓴다(__builtin은 Base 헤더 밖에서 쓰지 않는다).
+        // Binds 미러의 순서 대조(ROCKS_OFFSET_OF)는 Base 매크로를 쓴다(__builtin은 Base 헤더 밖에서 쓰지 않는다).
         if (schema.Ordered.Any(type => type.Header == include && type.Binds.Length != 0))
         {
             Line("#include <Base/Compiler.h>");
@@ -351,7 +351,7 @@ internal static class CppEmitter
         spelling.Contains("::", StringComparison.Ordinal) && !spelling.StartsWith("::", StringComparison.Ordinal) && !spelling.Contains(' ', StringComparison.Ordinal)
             ? "::" + spelling : spelling;
 
-    // Binds 거울과 실제 타입의 대조다(Docs/Design/ReflectionFoundations.ko.md 4.6절 Binds). 비템플릿 함수 안이라 항상
+    // Binds 미러와 실제 타입의 대조다(Docs/Design/ReflectionFoundations.ko.md 4.6절 Binds). 비템플릿 함수 안이라 항상
     // 검사된다: 멤버마다 실제 타입의 같은 이름 멤버가 같은 형식이고 실제 타입에 직접 선언되었는지(base에 있으면 멤버
     // 포인터가 T Base::*라 멤버 thunk가 base를 소유자로 본다), 구조적 바인딩으로 공개 데이터 멤버의 개수(private 데이터·
     // union·base 분할도 컴파일 실패)와 위치별 형식, standard layout과 offset 증가 사슬로 선언 순서(같은 형식 멤버끼리
@@ -384,8 +384,8 @@ internal static class CppEmitter
     // (ContainsStrongReference·RequiresWorldOnlyOwner)과 중첩 깊이, Id, Schema(base·클래스 플래그 없는 TypeSchema),
     // Trace(모든 struct — 참조 없는 struct는 빈 본문), Ops(RuntimeStructOps — 멤버 codec 함수표, 참조 struct만 trace,
     // Migrate가 있으면 migrate), Register. 형질과 깊이는 모델 값을 내되 직접 멤버의 생성 값을 포함하는지
-    // static_assert로 대조한다(import descriptor의 flags를 믿지 않는다). Binds 거울은 실제 타입(NativeName)의
-    // 특수화를 내고 멤버 thunk·Trace·생성·소멸이 모두 실제 타입을 쓰며, 스키마 이름만 거울 이름이다.
+    // static_assert로 대조한다(import descriptor의 flags를 믿지 않는다). Binds 미러는 실제 타입(NativeName)의
+    // 특수화를 내고 멤버 thunk·Trace·생성·소멸이 모두 실제 타입을 쓰며, 스키마 이름만 미러 이름이다.
     private static void EmitStruct(SchemaModel schema, ClassModel type, Action<string> Line)
     {
         string native = "::" + type.NativeName;

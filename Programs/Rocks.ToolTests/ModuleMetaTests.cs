@@ -42,7 +42,7 @@ internal static class ModuleMetaTests
         "ROCKS_STRUCT()\nstruct Outer {\nROCKS_PROPERTY() WorldBits inner;\n};\n" +
         "ROCKS_CLASS()\nstruct Parent : public rocks::Object {\nROCKS_PROPERTY() rocks::int32 value = 0;\nROCKS_PROPERTY() Point origin;\n};\n}\n";
 
-    // B4c: CoreTypeBindings로 생성하는 Lower다(Vec3·Vec3d Binds 거울과 Parent).
+    // B4c: CoreTypeBindings로 생성하는 Lower다(Vec3·Vec3d Binds 미러와 Parent).
     private const string BindsParent = "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n#include <Core/Math/Vector3.h>\nnamespace probe {\n" +
         "ROCKS_STRUCT(Binds = \"rocks::Vec3\")\nstruct Vec3Binding {\nROCKS_PROPERTY() float x = 0;\nROCKS_PROPERTY() float y = 0;\nROCKS_PROPERTY() float z = 0;\n};\n" +
         "ROCKS_STRUCT(Binds = \"rocks::Vec3d\")\nstruct Vec3dBinding {\nROCKS_PROPERTY() double x = 0;\nROCKS_PROPERTY() double y = 0;\nROCKS_PROPERTY() double z = 0;\n};\n" +
@@ -595,9 +595,9 @@ internal static class ModuleMetaTests
             await Reject(layout.RunUpperAsync(imports: [layout.Descriptor("Lower"), otherPath]), "RMC2006", "of module Lower");
         });
 
-        // B4c: CoreTypeBindings descriptor의 Binds 거울은 실제 타입 철자(binds)로 다른 모듈의 필드 형식을 푼다. 생성 헤더는
-        // 거울의 생성 헤더를 include하고 실제 타입의 native 키를 싣는다. descriptor의 binds는 철자 문법(RMC1000)과 모듈·중복·
-        // 리플렉션 타입 결합 규칙(RMC2004)을 검사하고, 거울 타입을 필드 형식으로 쓰면 거부한다.
+        // B4c: CoreTypeBindings descriptor의 Binds 미러는 실제 타입 철자(binds)로 다른 모듈의 필드 형식을 푼다. 생성 헤더는
+        // 미러의 생성 헤더를 include하고 실제 타입의 native 키를 싣는다. descriptor의 binds는 철자 문법(RMC1000)과 모듈·중복·
+        // 리플렉션 타입 결합 규칙(RMC2004)을 검사하고, 미러 타입을 필드 형식으로 쓰면 거부한다.
         suite.Add("Meta.ImportedBindsResolveRealTypes", async () =>
         {
             using Layout layout = new(options, environment);
@@ -613,7 +613,7 @@ internal static class ModuleMetaTests
                 "ROCKS_PROPERTY() rocks::ObjectRef<Parent> next;\n" + member, StringComparison.Ordinal);
             Task<ProcessResult> RunUpper(string descriptor) => layout.RunUpperInputsAsync([(layout.Source("Upper/Public/Upper/Value.h"), "Upper/Value.h", false)],
                 imports: [descriptor], dependencyModule: BindingsModule);
-            // 묶인 실제 타입을 NATIVE 멤버로 두면 생성 코드가 그 거울의 생성 헤더를 include하고 형질을 확인한다.
+            // 묶인 실제 타입을 NATIVE 멤버로 두면 생성 코드가 그 미러의 생성 헤더를 include하고 형질을 확인한다.
             layout.Write("Upper/Public/Upper/Value.h", ValueWith("ROCKS_PROPERTY() rocks::Vec3 position;\nROCKS_NATIVE() rocks::Vec3 cache;\n"));
             ProcessResult upper = await RunUpper(layout.Descriptor(BindingsModule));
             Verify.Equal(0, upper.ExitCode, "consumer module: " + upper.StdErr);

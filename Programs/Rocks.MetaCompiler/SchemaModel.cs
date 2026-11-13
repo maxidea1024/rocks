@@ -231,12 +231,12 @@ internal sealed class ClassModel
 
     public SourceSite? BindsSite { get; init; }
 
-    // Binds 거울 선언이 결합하는 실제 C++ 타입의 Clang 정규 철자다(예: rocks::Vector3<float>, 없으면 "").
+    // Binds 미러 선언이 결합하는 실제 C++ 타입의 Clang 정규 철자다(예: rocks::Vector3<float>, 없으면 "").
     // descriptor의 binds 키다(Docs/Design/ReflectionFoundations.ko.md 4.5절).
     public string Binds { get; set; } = "";
 
-    // 생성 코드가 쓰는 C++ 타입 이름이다: Binds 거울이면 실제 타입의 정규 철자, 아니면 정규 이름. 스키마 이름(Name)은
-    // 거울 이름 그대로다.
+    // 생성 코드가 쓰는 C++ 타입 이름이다: Binds 미러면 실제 타입의 정규 철자, 아니면 정규 이름. 스키마 이름(Name)은
+    // 미러 이름 그대로다.
     public string NativeName => Binds.Length != 0 ? Binds : Name;
 
     // 선언이 있는 입력 헤더의 include 철자다(import 타입은 descriptor의 header).

@@ -106,7 +106,7 @@ internal static class CompilerDriver
         try
         {
             Dictionary<string, ClassModel> declared = parser.Parse(compiled.StdOut);
-            // Binds 거울의 실제 타입 철자는 문자열로 비교하지 않고 같은 번역 단위에 별칭을 붙인 두 번째 Clang 실행으로
+            // Binds 미러의 실제 타입 철자는 문자열로 비교하지 않고 같은 번역 단위에 별칭을 붙인 두 번째 Clang 실행으로
             // 정규화한다(Docs/Design/ReflectionFoundations.ko.md 4.6절 Binds). 필드 형식 해석이 그 철자를 쓰므로 검증 전에 한다.
             List<string> bindsArguments = [.. arguments.Take(arguments.Count - 1)];
             bindsArguments.AddRange(clangCl ? ["/clang:-Xclang", "/clang:-ast-dump-filter=rocksBinds_"] : ["-Xclang", "-ast-dump-filter=rocksBinds_"]);
@@ -362,10 +362,10 @@ internal static class CompilerDriver
         return (types, publicModules);
     }
 
-    // Binds 거울의 실제 타입 철자를 Clang 정규 철자로 푼다(ClassModel.Binds). Binds는 CoreTypeBindings 모듈에서만
-    // 받는다(RMC2004). 같은 합성 번역 단위 끝에 거울마다 `using rocksBinds_N = <철자>;`와 완전한 class 타입인지 확인하는
+    // Binds 미러의 실제 타입 철자를 Clang 정규 철자로 푼다(ClassModel.Binds). Binds는 CoreTypeBindings 모듈에서만
+    // 받는다(RMC2004). 같은 합성 번역 단위 끝에 미러마다 `using rocksBinds_N = <철자>;`와 완전한 class 타입인지 확인하는
     // static_assert를 붙여 Clang을 한 번 더 실행하고(-ast-dump-filter로 그 별칭만 덤프한다) 별칭의 desugar 철자를 쓴다.
-    // 이 실행의 오류는 그 거울 선언 위치로 보고한다(RMC3000).
+    // 이 실행의 오류는 그 미러 선언 위치로 보고한다(RMC3000).
     private static async Task ResolveBindsAsync(Dictionary<string, ClassModel> declared, string module, int baseLines, Func<string, Task<ProcessResult>> run)
     {
         ClassModel[] mirrors = declared.Values.Where(model => model.BindsSpelling.Length != 0).OrderBy(model => model.Name, StringComparer.Ordinal).ToArray();
@@ -382,7 +382,7 @@ internal static class CompilerDriver
         }
 
         // 철자는 번역 단위 끝 전역 범위에서 해석하므로 ::로 시작하지 않으면 붙인다(전역 기준 완전 한정 이름 — 같은 이름의
-        // 전역 타입이나 using namespace가 다른 타입을 고르지 않게). 거울 N의 별칭은 합성 단위의 baseLines + 2N + 1번째 줄이다.
+        // 전역 타입이나 using namespace가 다른 타입을 고르지 않게). 미러 N의 별칭은 합성 단위의 baseLines + 2N + 1번째 줄이다.
         StringBuilder aliases = new();
         for (int index = 0; index < mirrors.Length; ++index)
         {
@@ -395,7 +395,7 @@ internal static class CompilerDriver
         ProcessResult result = await run(aliases.ToString());
         if (result.ExitCode != 0 || result.StdErr.Contains("warning:", StringComparison.OrdinalIgnoreCase))
         {
-            // 진단의 <stdin> 줄로 실패한 거울을 찾는다(없으면 진단에 나온 첫 별칭, 그것도 없으면 첫 거울).
+            // 진단의 <stdin> 줄로 실패한 미러를 찾는다(없으면 진단에 나온 첫 별칭, 그것도 없으면 첫 미러).
             Match line = Regex.Match(result.StdErr, @"<stdin>[:(](\d+)", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
             Match named = Regex.Match(result.StdErr, @"rocksBinds_(\d+)", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
             int failed = line.Success && int.TryParse(line.Groups[1].Value, out int number) && number > baseLines ? (number - baseLines - 1) / 2

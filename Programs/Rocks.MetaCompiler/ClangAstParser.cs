@@ -36,7 +36,7 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
     private string? serializedParent;
 
     // 이 모듈 입력의 리플렉션 선언을 모은다. 해석·검증(SchemaValidator.Validate)은 호출자가 Binds 정규 철자를 채운
-    // 뒤에 한다(필드 형식이 Binds 실제 타입으로 거울을 찾으므로).
+    // 뒤에 한다(필드 형식이 Binds 실제 타입으로 미러를 찾으므로).
     public Dictionary<string, ClassModel> Parse(string json)
     {
         using JsonDocument document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 2048 });

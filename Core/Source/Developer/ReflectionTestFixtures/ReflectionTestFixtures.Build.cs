@@ -8,7 +8,7 @@ public sealed class ReflectionTestFixtures : CoreModuleRules
 
     protected override string ModuleName => "ReflectionTestFixtures";
 
-    // CoreTypeBindings: Core 값 타입 필드 fixture(CoreValueFixture.h)가 그 모듈의 Binds 거울을 import한다.
+    // CoreTypeBindings: Core 값 타입 필드 fixture(CoreValueFixture.h)가 그 모듈의 Binds 미러를 import한다.
     protected override string[] RequiredModules => ["ObjectRuntime", "CoreTypeBindings"];
 
     protected override bool HasSources => false;

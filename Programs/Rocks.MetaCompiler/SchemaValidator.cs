@@ -61,7 +61,7 @@ internal static class SchemaValidator
             byId.TryAdd(external.Id, external);
         }
 
-        // Binds 거울은 CoreTypeBindings만 내고, 한 실제 타입은 거울 하나만 묶으며, 리플렉션 타입이나 거울 자신을 묶을 수
+        // Binds 미러는 CoreTypeBindings만 내고, 한 실제 타입은 미러 하나만 묶으며, 리플렉션 타입이나 미러 자신을 묶을 수
         // 없다(같은 C++ 타입에 GeneratedType 특수화가 둘이 되거나 리플렉션 타입과 겹친다).
         Dictionary<string, ClassModel> bound = new(StringComparer.Ordinal);
         foreach (ClassModel mirror in imported.Values.Where(model => model.Binds.Length != 0).OrderBy(model => model.Name, StringComparer.Ordinal))
@@ -247,8 +247,8 @@ internal static class SchemaValidator
             return resolved;
         }
 
-        // Binds 실제 타입의 정규 철자 → 거울이다(이 모듈과 import). 한 실제 타입은 거울 하나만 묶고(RMC2004), 리플렉션
-        // 타입·거울을 묶을 수 없다(RMC2004).
+        // Binds 실제 타입의 정규 철자 → 미러다(이 모듈과 import). 한 실제 타입은 미러 하나만 묶고(RMC2004), 리플렉션
+        // 타입·미러를 묶을 수 없다(RMC2004).
         Dictionary<string, ClassModel> mirrors = new(StringComparer.Ordinal);
         foreach (ClassModel mirror in imported.Values.Where(model => model.Binds.Length != 0))
         {
@@ -269,7 +269,7 @@ internal static class SchemaValidator
                     "Keep exactly one Binds mirror per real type; aliases such as rocks::Vec3 and rocks::Vector3<float> name the same type.").At(mirror.BindsSite ?? mirror.Site);
             }
 
-            // 거울의 멤버는 실제 타입의 공개 데이터 멤버와 1:1이다(생성 static_assert가 이름·형식·개수·순서를 대조한다).
+            // 미러의 멤버는 실제 타입의 공개 데이터 멤버와 1:1이다(생성 static_assert가 이름·형식·개수·순서를 대조한다).
             // NATIVE 멤버·Migrate는 실제 타입에 둘 수 없으므로 받지 않는다(그 멤버 위치로 보고한다).
             (string? invalid, SourceSite site) = mirror.NativeMembers.Count != 0
                 ? ("a Binds mirror lists only persistent members (ROCKS_NATIVE is not allowed)", mirror.NativeMembers[0].Site)
@@ -284,7 +284,7 @@ internal static class SchemaValidator
         }
 
         // 리플렉션 enum(structs면 struct) 철자(desugar된 정규 이름)면 그 모델을 돌려준다(아니면 null). struct는 Binds
-        // 실제 타입의 정규 철자로도 거울을 찾고, 거울 타입을 직접 쓰면 거부한다. 다른 모듈의 private 타입은 RMC2006이다.
+        // 실제 타입의 정규 철자로도 미러를 찾고, 미러 타입을 직접 쓰면 거부한다. 다른 모듈의 private 타입은 RMC2006이다.
         ClassModel? ValueType(string spelling, bool structs, string owner, SourceSite site)
         {
             string name = spelling.StartsWith("::", StringComparison.Ordinal) ? spelling[2..] : spelling;
@@ -368,7 +368,7 @@ internal static class SchemaValidator
 
         ClassModel Find(string name) => classes.TryGetValue(name, out ClassModel? own) ? own : imported[name];
 
-        // 지원하지 않는 필드 형식의 안내다. Core 값 타입(Vector3·Color·Transform 등)은 CoreTypeBindings의 Binds 거울로
+        // 지원하지 않는 필드 형식의 안내다. Core 값 타입(Vector3·Color·Transform 등)은 CoreTypeBindings의 Binds 미러로
         // 리플렉션된다: 그 descriptor를 import했으면 같은 템플릿의 묶인 인스턴스를 알려 주고(예: Vector3<int>는 묶이지
         // 않았다), import하지 않았으면 그 모듈에 의존하라고 안내한다.
         string UnsupportedFieldHint(string spelling)

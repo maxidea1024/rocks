@@ -566,8 +566,8 @@ internal static class MetaTests
             Preamble + "class Outer {\nROCKS_STRUCT()\nstruct Leaf {\nROCKS_PROPERTY() rocks::int32 count = 0;\n};\n};\n" +
                 "ROCKS_CLASS()\nstruct Value : public rocks::Object {};\n}\n"],
             "RMC2000", "must be public");
-        // B4c: Binds 거울은 별칭을 Clang 정규 철자로 풀고(rocks::Vec3 → rocks::Vector3<float>), 생성 코드는 실제 타입의
-        // GeneratedType을 내며, 실제 타입 필드(별칭 포함)가 거울로 풀린다. 다른 거울에 의존하는 거울은 그 뒤에 나온다.
+        // B4c: Binds 미러는 별칭을 Clang 정규 철자로 풀고(rocks::Vec3 → rocks::Vector3<float>), 생성 코드는 실제 타입의
+        // GeneratedType을 내며, 실제 타입 필드(별칭 포함)가 미러로 풀린다. 다른 미러에 의존하는 미러는 그 뒤에 나온다.
         suite.Add("Meta.BindsResolveAliasesAndReflectTheRealType", async () =>
         {
             using Probe probe = new(options, actualEnvironment, generator, compiler, BindsModule);
@@ -613,7 +613,7 @@ internal static class MetaTests
                 generated.IndexOf("structGeneratedType<::probe::Pair>", StringComparison.Ordinal), "mirrors used by a mirror come first");
         });
         AddRejectGroup("Meta.BindsIsAllowedOnlyInCoreTypeBindings", [BindsPreamble + BindsVec3 + "}\n"], "RMC2004", "allowed only in module CoreTypeBindings");
-        // 별칭·앞의 ::·템플릿 인자 공백은 같은 정규 철자로 모이므로 같은 실제 타입의 두 번째 거울이다.
+        // 별칭·앞의 ::·템플릿 인자 공백은 같은 정규 철자로 모이므로 같은 실제 타입의 두 번째 미러다.
         AddRejectGroup("Meta.BindsConflictsAreRejected", [
             BindsPreamble + BindsVec3 + BindsVec3.Replace("Vec3Binding", "OtherBinding", StringComparison.Ordinal).Replace("rocks::Vec3", "rocks::Vector3<float>", StringComparison.Ordinal) + "}\n",
             BindsPreamble + BindsVec3.Replace("rocks::Vec3", "::rocks::Vec3", StringComparison.Ordinal) +
@@ -625,7 +625,7 @@ internal static class MetaTests
             BindsPreamble + BindsVec3.Replace("rocks::Vec3", "probe::Missing", StringComparison.Ordinal) + "}\n",
             BindsPreamble + "struct Later;\n" + BindsVec3.Replace("rocks::Vec3", "probe::Later", StringComparison.Ordinal) + "}\n"],
             "RMC3000", "does not name a complete class type", BindsModule);
-        // 철자 문법, 정규 철자가 descriptor binds 문법 밖(별칭으로 묶은 Fixed<-3>), 거울의 NATIVE 멤버·Migrate·필드 없음.
+        // 철자 문법, 정규 철자가 descriptor binds 문법 밖(별칭으로 묶은 Fixed<-3>), 미러의 NATIVE 멤버·Migrate·필드 없음.
         AddRejectGroup("Meta.BindsSpellingAndMirrorMembersAreRestricted", [
             BindsPreamble + BindsVec3.Replace("rocks::Vec3", "rocks::Vec3; int x", StringComparison.Ordinal) + "}\n",
             BindsPreamble + "template <int N>\nstruct Fixed {\nrocks::int32 v = 0;\n};\nusing FixedAlias = Fixed<-3>;\n" +
@@ -634,7 +634,7 @@ internal static class MetaTests
             BindsPreamble + BindsVec3.Replace("ROCKS_PROPERTY() float z = 0;", "ROCKS_PROPERTY() float z = 0;\nstatic void Migrate() noexcept {}", StringComparison.Ordinal) + "}\n",
             BindsPreamble + "ROCKS_STRUCT(Binds = \"rocks::Vec3\")\nstruct Vec3Binding {};\n}\n"],
             "RMC2000", "Binds", BindsModule);
-        // 거울 타입은 필드 형식으로 쓰지 않는다(실제 타입을 쓴다).
+        // 미러 타입은 필드 형식으로 쓰지 않는다(실제 타입을 쓴다).
         AddRejectGroup("Meta.BindsMirrorIsNotAFieldType", [
             BindsPreamble + BindsVec3 + "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() Vec3Binding position;\n};\n}\n"],
             "RMC2000", "is a Binds mirror declaration", BindsModule);
@@ -642,14 +642,14 @@ internal static class MetaTests
         AddRejectGroup("Meta.CoreValueFieldWithoutBindingsHintsTheDependency", [
             BindsPreamble + "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() rocks::Vec3 position;\n};\n}\n"],
             "RMC2000", "depend on CoreTypeBindings");
-        // 거울이 자기가 묶는 실제 타입을 값으로 담으면(직접·서로) C++에서도 struct 순환이다(RMC2302).
+        // 미러가 자기가 묶는 실제 타입을 값으로 담으면(직접·서로) C++에서도 struct 순환이다(RMC2302).
         AddRejectGroup("Meta.BindsCycleIsRejected", [
             BindsPreamble + "struct Real {\nrocks::int32 a = 0;\n};\nROCKS_STRUCT(Binds = \"probe::Real\")\nstruct RealBinding {\nROCKS_PROPERTY() Real inner;\n};\n}\n",
             BindsPreamble + "struct RealA {\nrocks::int32 a = 0;\n};\nstruct RealB {\nrocks::int32 b = 0;\n};\n" +
                 "ROCKS_STRUCT(Binds = \"probe::RealA\")\nstruct ABinding {\nROCKS_PROPERTY() RealB inner;\n};\n" +
                 "ROCKS_STRUCT(Binds = \"probe::RealB\")\nstruct BBinding {\nROCKS_PROPERTY() RealA inner;\n};\n}\n"],
             "RMC2302", "cycle", BindsModule);
-        // 거울과 실제 타입의 대조 실패는 생성 코드 검증 컴파일이 거부한다: 멤버 이름·형식·개수·순서(같은 형식 멤버끼리
+        // 미러와 실제 타입의 대조 실패는 생성 코드 검증 컴파일이 거부한다: 멤버 이름·형식·개수·순서(같은 형식 멤버끼리
         // 바뀐 순서 포함), private 데이터 멤버, base에만 있는 멤버.
         AddRejectGroup("Meta.BindsMismatchFailsToCompile", new[]
             {

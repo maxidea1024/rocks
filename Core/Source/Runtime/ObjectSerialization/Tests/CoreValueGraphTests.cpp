@@ -4,16 +4,16 @@
 #include <TestSupport/Test.h>
 
 // B4c Core 값 타입 필드의 그래프 저장·복원 시험이다(Docs/Design/ReflectionFoundations.ko.md 4.5절).
-// CoreTypeBindings의 Binds 거울이 생성한 실제 타입의 GeneratedType(Vector2·3·4<float|double>,
+// CoreTypeBindings의 Binds 미러가 생성한 실제 타입의 GeneratedType(Vector2·3·4<float|double>,
 // Quaternion<float|double>, Rotator<float|double>, Color, LinearColor, IntVec2·3, Transform)을 모듈
 // 집계 등록(fixture 모듈이 CoreTypeBindings를 먼저 등록한다)으로 등록하고 태그형 중첩 Record로
-// 왕복한다. 사용자 리플렉션 struct(CoreValueBundle)가 다른 모듈의 거울 struct를 멤버로 담는 경로도
+// 왕복한다. 사용자 리플렉션 struct(CoreValueBundle)가 다른 모듈의 미러 struct를 멤버로 담는 경로도
 // 거친다.
 using namespace rocks;
 using reflection_fixture::CoreValueBundle;
 using reflection_fixture::CoreValueFields;
 
-// 생성 특수화는 실제 Core 타입에 있고(거울 타입이 아니다) Transform은 다른 거울 struct를 담는다.
+// 생성 특수화는 실제 Core 타입에 있고(미러 타입이 아니다) Transform은 다른 미러 struct를 담는다.
 static_assert(GeneratedType<Vec3>::Depth == 1);
 static_assert(GeneratedType<Transform>::Depth == 2);
 static_assert(GeneratedType<CoreValueBundle>::Depth == 2);
@@ -137,7 +137,7 @@ Result<Array<uint8>> SaveFilled(Allocator& allocator, ObjectRegistry& objects,
 
 } // namespace
 
-// 등록된 struct 레코드는 거울 이름의 스키마와 실제 타입의 native 키를 갖는다. 값은 모든 멤버가
+// 등록된 struct 레코드는 미러 이름의 스키마와 실제 타입의 native 키를 갖는다. 값은 모든 멤버가
 // 그대로 돌아오고 재저장 byte가 같다.
 TEST(CoreValueGraph_BoundCoreTypesRoundTripThroughGeneratedCode) {
     SystemAllocator allocator;
