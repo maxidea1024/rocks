@@ -16,9 +16,9 @@
 | 두 번째 검증 backend | Vulkan(2026-11-13 사용자 결정). VulkanGraphics 최소 구현을 SH2에 넣고, D3D12·Vulkan self-test가 통과하는 같은 변경에서 OpenGLGraphics를 제거한다(2026-11-13 사용자 결정 9) | SH2가 backend별 원문을 없애므로 OpenGL이 받을 셰이더가 없어진다. 같은 변경에서 바꾸면 두 backend 대조가 끊기지 않는다 |
 | 런타임 | 쿠킹된 코드만 받는다. Release(UE Shipping에 해당) 실행 파일에 셰이더 컴파일러를 넣지 않는다 | UE RHI는 `RHICreatePixelShader(TArrayView<const uint8> Code, const FSHAHash&)`(`Runtime/RHI/Public/DynamicRHI.h:266`) |
 | 컴파일 실행 | 메인 프로세스가 입력 수집·**전처리**·키 계산을 하고, 별도 ShaderCompileWorker 프로세스가 컴파일한다. 메인 프로세스는 DXC·FXC·SPIRV-Cross·SPIRV-Tools 바이너리와 ShaderFormat 모듈을 링크하지 않는다 | UE 5.6은 전처리를 "항상 메인 프로세스에서 job 제출 때" 한다(`Runtime/RenderCore/Public/ShaderCompilerCore.h:686–688`), 워커는 `Programs/ShaderCompileWorker`. 전처리기 구현은 12절 결정 6 |
-| 캐시 | 빌드 캐시(AssetSystem 9절) | UE의 job 캐시와 원격 캐시 역할이다 |
+| 캐시 | 에셋 너겟(AssetSystem 9절) | UE의 job 캐시와 원격 캐시 역할이다 |
 
-이 문서가 정한 규칙: 바인딩·상수 버퍼·단계 사이 변수(5절), ThirdParty 종류·오프라인 도구 빌드·의존 규칙(6절), 런타임 파일 배치(7절), 셰이더 job 키 구성(8절). 사용자가 정한 것: 확장자 `.rsf`(엔트리)·`.rsh`(include)(결정 1), 도구 공급은 UE 방식(결정 8), SH2에서 Vulkan 추가와 OpenGL 제거(결정 9), 셰이더 job 키도 빌드 캐시 공통 규칙 준수(결정 10). 남은 사용자 결정(12절): HLSL 2021 범위, D3D12 셰이더 모델, 파라미터 선언, 생산 호스트, 전처리기.
+이 문서가 정한 규칙: 바인딩·상수 버퍼·단계 사이 변수(5절), ThirdParty 종류·오프라인 도구 빌드·의존 규칙(6절), 런타임 파일 배치(7절), 셰이더 job 키 구성(8절). 사용자가 정한 것: 확장자 `.rsf`(엔트리)·`.rsh`(include)(결정 1), 도구 공급은 UE 방식(결정 8), SH2에서 Vulkan 추가와 OpenGL 제거(결정 9), 셰이더 job 키도 에셋 너겟 공통 규칙 준수(결정 10). 남은 사용자 결정(12절): HLSL 2021 범위, D3D12 셰이더 모델, 파라미터 선언, 생산 호스트, 전처리기.
 
 ## 2. 형식과 변환 경로
 
@@ -42,12 +42,12 @@ Engine/Config/ShaderFormats/<id>.json        형식 정의(9절)
 Engine/Config/TargetProfiles/<id>.json       graphicsBackends·shaderFormats(9절)
 Engine/Source/ThirdParty/<Lib>/              DXC·SPIRV-Cross·SPIRV-Tools(binary와 오프라인 빌드 스크립트), FXC(binary), SPIRV-Reflect·Vulkan-Headers(C)(6절)
 Engine/Source/Runtime/ShaderCore             셰이더 타입·퍼뮤테이션 ID·파라미터 메타데이터·셰이더 전용 정렬 타입·라이브러리 로드
-Engine/Source/Developer/ShaderCompiler       ShaderCompileManager·전처리기·키·빌드 캐시·워커 통신(메인 프로세스)
+Engine/Source/Developer/ShaderCompiler       ShaderCompileManager·전처리기·키·에셋 너겟·워커 통신(메인 프로세스)
 Engine/Source/Developer/ShaderFormat{D3D,Vulkan,Metal}   워커 안의 형식별 컴파일·재배치·리플렉션(도구는 C·COM 형태 API로 부른다)
 Programs/ShaderCompileWorker                 워커 프로세스
 ```
 
-가상 경로 `/Engine/{Public,Private,Shared,Generated}`·`/Plugin/<이름>`·`/Project`, 규칙은 UE `CheckVirtualShaderFilePath`(`Runtime/RenderCore/Private/ShaderCore.cpp:1481–1532`)와 같다. 키는 두 층이다: 셰이더 맵 키(엔트리 파일과 include 폐포의 내용 SHA-256, 낡음 판정)와 job 키(8절, 빌드 캐시 키). UE는 각각 SHA-1(`ShaderCore.cpp:2998–3071`)·BLAKE3(`ShaderCore.cpp:4144–4199`)다.
+가상 경로 `/Engine/{Public,Private,Shared,Generated}`·`/Plugin/<이름>`·`/Project`, 규칙은 UE `CheckVirtualShaderFilePath`(`Runtime/RenderCore/Private/ShaderCore.cpp:1481–1532`)와 같다. 키는 두 층이다: 셰이더 맵 키(엔트리 파일과 include 폐포의 내용 SHA-256, 낡음 판정)와 job 키(8절, 너겟 키). UE는 각각 SHA-1(`ShaderCore.cpp:2998–3071`)·BLAKE3(`ShaderCore.cpp:4144–4199`)다.
 
 ## 4. 선행 작업 개요
 
@@ -57,7 +57,7 @@ Programs/ShaderCompileWorker                 워커 프로세스
 | P2 | backend 간 바인딩 규약 | 설계(5절) | SH2 | — |
 | P3 | ThirdParty 확장: Engine 루트, `binary` 종류와 사용자 단위 저장소, 오프라인 도구 빌드(UE 방식)·게시 | 설계(6절) | SH0 | — |
 | P4 | 빌드 시스템: 바이너리 링크와 런타임 의존 파일 배치 | 설계(7절) | SH0 | P3 |
-| P5 | 빌드 캐시(AssetSystem A3) + 셰이더 job 키 | 설계(8절) | SH1 | AssetSystem A0-C(구현됨)·A2(`ProjectLayout`), ReflectionFoundations B7(툴체인 지문) |
+| P5 | 에셋 너겟(AssetSystem A3) + 셰이더 job 키 | 설계(8절) | SH1 | AssetSystem A0-C(구현됨)·A2(`ProjectLayout`), ReflectionFoundations B7(툴체인 지문) |
 | P6 | 형식 정의·TargetProfile `shaderFormats`·쿠킹 매니페스트 v2(A4의 일부) | 설계(9절) | 쿠킹 단계 | P5, A4 |
 | P7 | MetaCompiler 셰이더 파라미터 종류 | 설계(10절) | SH3 | ReflectionFoundations B3–B4 |
 | P8 | 계획 문서 개정 | 목록(11절) | 모든 단계의 기준 | 이 문서 확정 |
@@ -262,13 +262,13 @@ Rocks PlatformBase에는 동적 라이브러리 API가 없고, 계획은 동적 
 - 로드된 DLL이 복사본이다.
 - Release 대상의 링크 입력에 셰이더 컴파일러가 없음을 정책 시험으로 확인한다.
 
-## 8. P5 빌드 캐시와 셰이더 job 키
+## 8. P5 에셋 너겟과 셰이더 job 키
 
-AssetSystem A3(9절 설계)을 그대로 구현하고, 셰이더 job도 AssetSystem 9절의 **공통 키 규칙을 그대로 따른다**(2026-11-13 사용자 결정 10). 의존: A2 `ProjectLayout`(캐시 위치 `<Project>/Intermediate/BuildCache/`, AssetSystem 9절), ReflectionFoundations B7(툴체인 지문). 프로젝트 없이 엔진 셰이더만 컴파일할 때(Sandbox·self-test)는 엔진 루트의 `Intermediate/BuildCache/`를 같은 설정 규칙으로 쓴다.
+AssetSystem A3(9절 설계)을 그대로 구현하고, 셰이더 job도 AssetSystem 9절의 **공통 키 규칙을 그대로 따른다**(2026-11-13 사용자 결정 10). 의존: A2 `ProjectLayout`(캐시 위치 `<Project>/Intermediate/AssetNuggets/`, AssetSystem 9절), ReflectionFoundations B7(툴체인 지문). 프로젝트 없이 엔진 셰이더만 컴파일할 때(Sandbox·self-test)는 엔진 루트의 `Intermediate/AssetNuggets/`를 같은 설정 규칙으로 쓴다.
 
 **job 키.** 메인 프로세스가 계산한다(ShaderFormat 모듈을 링크하지 않으므로 형식별 값은 형식 정의에서 읽는다). 처리기 `BuildKey(KeyWriter&)`가 아래 순서·타입 태그로 기록한 바이트의 SHA-256이다. 순서와 항목은 AssetSystem 공통 항목(`AssetSystem.ko.md` 9절)을 따르고, 에셋이 아니므로 에셋 TypeId·입력 bulk 자리에 셰이더 입력을 넣는다.
 
-1. `"RocksBuildCache"` 형식 버전.
+1. `"RocksAssetNugget"` 형식 버전.
 2. 셰이더 job 처리기 Guid·처리기 버전 Guid.
 3. 결과를 만드는 외부 도구의 이름·버전·설정.
    - 형식 id와 형식 정의 파일(`Engine/Config/ShaderFormats/<id>.json`)의 SHA-256. 형식 정의는 ShaderFormat 처리기 버전, 컴파일러·셰이더 모델, 상한·기능 요구를 가진다.
@@ -291,7 +291,7 @@ Apple 도구 지문: `metal -v`의 버전·대상 문자열(UE도 이 출력을 
 
 **값과 결정성.** AssetSystem §10 결정성 규칙(같은 도구 빌드에서 호스트 무관하게 같은 바이트)을 셰이더에도 적용한다.
 
-- 값은 바이트코드, 정규화된 바인딩 layout, 진단, 디버그 심볼을 부분으로 나눈다(기존 `.rbc` 부분 구조).
+- 값은 바이트코드, 정규화된 바인딩 layout, 진단, 디버그 심볼을 부분으로 나눈다(기존 `.rnug` 부분 구조).
 - 경로 누출 금지: 입력은 메모리 버퍼와 가상 이름으로 넘기고 `#line`에는 가상 경로만 둔다. 디버그 정보는 별도 부분으로 빼고 Apple 도구에는 prefix map을 쓴다. "작업 디렉터리를 바꿔도 같은 바이트" 시험을 둔다.
 - SPIRV-Cross의 실수 출력(`%.32g`)에서 locale 소수점은 SPIRV-Cross가 보정하므로(`spirv_common.hpp:250–291`, `fixup_radix_point`) CRT `%g` 구현 차이만 남는다. 같은 호스트 키 안에서도 OS의 CRT 버전은 다를 수 있다. 워커를 C locale로 고정하고, 극값(비정규수·최대값·17자리 이상 필요한 값) fixture로 출력이 같은지 시험한다. 다르면 추적 가능한 SPIRV-Cross patch(6절 3항)로 고정한다.
 - **상수 접기.** DXC(LLVM)와 SPIRV-Tools 최적화기가 초월 함수 상수식을 호스트 libm으로 접으면, 같은 호스트 키 안에서도 CPU(예: UCRT의 FMA3 분기, [핵심 데이터 기반](CoreDataFoundations.ko.md))에 따라 바이트가 다를 수 있다. SH0에서 상수 초월 함수 fixture를 FMA3 유무와 OS 버전을 바꿔 비교한다. 다르면 결정성 규칙을 지킬 방법(도구 빌드 patch, 해당 최적화 끄기 등)을 정하기 전에는 그 형식을 공유 캐시에 올리지 않고, 방법은 사용자 결정으로 올린다.
@@ -365,7 +365,7 @@ Apple 도구 지문: `metal -v`의 버전·대상 문자열(UE도 이 출력을 
 
 ## 12. 결정 필요 사항
 
-1. **확장자** — **결정됨(2026-11-13): `.rsf`(엔트리)·`.rsh`(include).** UE `.usf`/`.ush`의 역할 분리를 따르고 Rocks 명명(`.rasset`·`.rpkg`·`.rbc`)에 맞춘다. C++·HLSL 공용 헤더는 `.h`다(3절). 고려했던 대안은 `.hlsl`/`.hlsli`였다.
+1. **확장자** — **결정됨(2026-11-13): `.rsf`(엔트리)·`.rsh`(include).** UE `.usf`/`.ush`의 역할 분리를 따르고 Rocks 명명(`.rasset`·`.rpkg`·`.rnug`)에 맞춘다. C++·HLSL 공용 헤더는 `.h`다(3절). 고려했던 대안은 `.hlsl`/`.hlsli`였다.
 2. **HLSL 2021 범위** — UE는 플랫폼 값 `EnablesHLSL2021ByDefault`(0 끔, 1 Global 셰이더 전부, 2 모든 셰이더, `Runtime/RHI/Public/DataDrivenShaderPlatformInfo.h:117`. PCD3D_SM6·VULKAN_SM5·VULKAN_SM6·VULKAN_SM5_ANDROID·METAL_SM5·METAL_SM6은 1, PCD3D_SM5는 0. `Engine/Config/Windows/DataDrivenPlatformInfo.ini:127`, `Engine/Config/VulkanPC/DataDrivenPlatformInfo.ini:130·252`, `Engine/Config/Android/DataDrivenPlatformInfo.ini:125`, `Engine/Config/Mac/DataDrivenPlatformInfo.ini:52·91`)에 레이 트레이싱 셰이더 강제(`Runtime/Engine/Private/ShaderCompiler/ShaderCompiler.cpp:3290–3299`)와 타입별 선택을 더한다. 권장: 형식 정의의 기본값 + 셰이더 타입 선택. `D3D11_SM5`에서 2021 셰이더는 SPIRV-Cross 경로를 탄다.
 3. **D3D12 셰이더 모델** — 6.6(UE와 같음) 또는 6.0~6.2 + bindless 프로필 6.6. 6.6은 Windows 10에서 Agility SDK가 Runtime 의존이 된다(7절). SH0에서 WARP 지원과 Windows 10 요건을 실측한 뒤 정한다.
 4. **파라미터 선언** — MetaCompiler 셰이더 파라미터 종류(권장, 10절, 리플렉션 단일 출처·생성 HLSL을 디스크에 둠) 또는 UE 매크로 방식.
@@ -381,7 +381,7 @@ Apple 도구 지문: `metal -v`의 버전·대상 문자열(UE도 이 출력을 
 | 단계 | 내용 | 완료 기준 |
 |---|---|---|
 | SH0 | 도구 스파이크(P3·P4 산출물): Sprite 셰이더 하나를 DXIL·SPIR-V·DXBC·MSL 텍스트로 만들고 검증 도구를 돌린다. Windows·macOS 양쪽에서 실행 | 형식별 산출, `spirv-val` 통과, DXIL 서명 hash 검사(macOS DXC 포함), FXC 고정본 로드, 리플렉션 덤프, 같은 호스트 키 안의 실수 출력·상수 접기 예비 시험 |
-| SH1 | 소스 트리·가상 경로·`Platform.rsh`·전처리기(결정 6)·ShaderCompileWorker(P1)·두 층 키·빌드 캐시·`shader-compile` Commandlet·Development 필요 시 컴파일 | 같은 입력 같은 바이트, 빈/찬 캐시 동일, 워커 강제 종료 보고 |
+| SH1 | 소스 트리·가상 경로·`Platform.rsh`·전처리기(결정 6)·ShaderCompileWorker(P1)·두 층 키·에셋 너겟·`shader-compile` Commandlet·Development 필요 시 컴파일 | 같은 입력 같은 바이트, 빈/찬 캐시 동일, 워커 강제 종료 보고 |
 | SH2 | 리플렉션 정규화·워커 규칙 검사(5.2절)·Graphics API(`ShaderCodeKind`·`CreateShader`·파이프라인 layout·root signature)·GlobalShader·퍼뮤테이션, VulkanGraphics 최소 구현(offscreen·Sprite, P9), OpenGLGraphics·Renderer 원문·런타임 `D3DCompile` 제거(결정 9) | Sandbox self-test에서 D3D12·Vulkan이 허용 오차 안 일치(Vulkan은 CI에서 NOT RUN일 수 있다), 행렬 옵션 기록, Release에 컴파일러 없음, 5.3절 SH2 시험 |
 | SH3 | 파라미터 구조체(P7)·생성 HLSL·오프셋 시험 | 5.3절 (a)·(f)를 생성 구조체로 |
 | SH4 | 감시 재컴파일·오류 위치·디버그 심볼·PSO 교체 | 저장 후 10초 안 반영(계획 I5) |

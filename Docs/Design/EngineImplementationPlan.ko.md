@@ -163,7 +163,7 @@ C ABI는 fixed-width POD·opaque handle·status code·명시 release 함수를 �
 
 ### 2.5 Windows·macOS 개발 환경의 동등 지원
 
-Windows와 macOS는 모두 **정식 개발 플랫폼**이다. 두 OS에 전체 Rocks Studio(UI 툴킷 제작 화면과 3D viewport), 프로젝트 생성, 빌드·메타 컴파일러·셰이더 cook·빌드 캐시·에셋 편집·PIE·테스트·headless를 제공한다. macOS를 Metal runtime 시험 전용으로 한정하지 않는다. Linux의 runtime·DedicatedServer·headless baseline은 별도 지원표로 관리하며, Linux 전체 Studio는 이 요구에서 자동 확정하지 않는다.
+Windows와 macOS는 모두 **정식 개발 플랫폼**이다. 두 OS에 전체 Rocks Studio(UI 툴킷 제작 화면과 3D viewport), 프로젝트 생성, 빌드·메타 컴파일러·셰이더 cook·에셋 너겟·에셋 편집·PIE·테스트·headless를 제공한다. macOS를 Metal runtime 시험 전용으로 한정하지 않는다. Linux의 runtime·DedicatedServer·headless baseline은 별도 지원표로 관리하며, Linux 전체 Studio는 이 요구에서 자동 확정하지 않는다.
 
 공통 Studio 기능과 데이터 계약은 유지하고 OS 통합부만 교체한다. Studio 화면은 게임 UI와 같은 UI 툴킷으로 구성하며 두 OS가 같은 widget·명령·transaction·selection·undo 스키마를 사용한다. OS별 차이는 PlatformWindow adapter(Windows는 Win32 창·TSF, macOS는 AppKit 창·NSTextInputClient)에 한정하고 플랫폼마다 다른 frontend를 별도로 제작하지 않는다. 툴킷의 구조와 계약은 [UI 툴킷 설계](UiToolkit.ko.md)를 따른다.
 
@@ -173,14 +173,14 @@ Windows와 macOS는 모두 **정식 개발 플랫폼**이다. 두 OS에 전체 R
 |---|---|---|
 | Core·Object·Task | 동일 소스의 CPU-only build/test, allocator·handle·GC·shutdown 검증 | 각 OS의 native compiler·sanitizer/진단 도구로 시험하고 미지원 검사를 NOT RUN으로 기록 |
 | Build·MetaCompiler | 같은 manifest/action graph·진단 스키마·증분 무효화 규약 | Windows SDK와 Apple SDK를 독립 toolchain으로 고정; host 실행 파일과 target 산출물 분리 |
-| Asset·Shader·빌드 캐시 | 같은 import/cook API·content identity·원자적 게시·취소·복구 | target compiler worker를 명시 선택; host 간 결과 동등성은 시험한 artifact만 공유 |
+| Asset·Shader·에셋 너겟 | 같은 import/cook API·content identity·원자적 게시·취소·복구 | target compiler worker를 명시 선택; host 간 결과 동등성은 시험한 artifact만 공유 |
 | Studio·PIE | World/Session 분리, material/UI/cutscene/prefab 등 완성된 편집 기능의 양OS 제공 | 창·text service 차이를 PlatformWindow adapter에 한정; macOS Metal viewport와 Windows native RHI 각각 검증 |
 | Headless·CI | `rocks build`, `rocks cook`, `rocks test` 등 동일 CLI 계약, exit code·JSON·timeout·graceful shutdown | CPU-only는 window/GPU가 없는 환경에서 수행; offscreen GPU suite는 별도 실행 |
 | 배포·디버깅 | version·symbol·crash artifact·지원 manifest 일치 | Windows 서명·설치 검증과 macOS app bundle·서명·notarization 검증을 각각 native CI에서 수행 |
 
 Toolhost와 target ABI는 `OS × CPU(x64/ARM64) × compiler/SDK × configuration × contract version`으로 식별한다. x64와 ARM64의 executable·library·PCH/BMI·object·symbol을 교환하지 않는다. 각 지원 조합은 빌드 가능·실행 검증·배포 검증 상태를 별도 기록하며, 에뮬레이션 실행을 native 검증으로 대체하지 않는다. 프로세스/worker 경계에는 크기·정렬·endianness를 정의한 직렬화 메시지 또는 검증된 C ABI만 사용한다. C++ 객체 layout·예외·CRT allocator를 compiler/architecture가 다른 모듈 사이의 ABI로 노출하지 않는다. native plugin은 같은 target ABI로 별도 빌드한다. 이 규약은 초기 정적 모듈 구성에도 적용하며 동적 loader를 Foundation 선행 조건으로 만들지 않는다.
 
-경로의 대소문자 충돌·Unicode 정규화·separator·symlink·긴 경로·파일 잠금·원자적 교체 차이를 Platform/FileSystem에서 검증한다. 공통 에셋 ID는 절대 경로에 의존하지 않으며 저장소에는 대소문자로만 구분되는 경로를 허용하지 않는다. 코드 생성은 target ABI·define을 명시 입력으로 받고 native host 구조체의 offset을 타 target의 값으로 재사용하지 않는다. 빌드 캐시·action key에는 target·compiler/translator digest·SDK·옵션·binding/layout·schema 및 실제 입력 closure를 포함한다. host가 다르면 우선 분리하고, 정규화한 artifact의 byte 동일성을 검증한 변환만 공용 cache namespace를 사용한다. 영상의 허용 오차 비교를 cache 산출물의 동일성으로 대체하지 않는다.
+경로의 대소문자 충돌·Unicode 정규화·separator·symlink·긴 경로·파일 잠금·원자적 교체 차이를 Platform/FileSystem에서 검증한다. 공통 에셋 ID는 절대 경로에 의존하지 않으며 저장소에는 대소문자로만 구분되는 경로를 허용하지 않는다. 코드 생성은 target ABI·define을 명시 입력으로 받고 native host 구조체의 offset을 타 target의 값으로 재사용하지 않는다. 에셋 너겟·action key에는 target·compiler/translator digest·SDK·옵션·binding/layout·schema 및 실제 입력 closure를 포함한다. host가 다르면 우선 분리하고, 정규화한 artifact의 byte 동일성을 검증한 변환만 공용 cache namespace를 사용한다. 영상의 허용 오차 비교를 cache 산출물의 동일성으로 대체하지 않는다.
 
 **셰이더 target과 compiler host의 구분.** 5개 RHI의 첫 정식 renderer gate는 모두 필수지만, 모든 API를 모든 OS에서 실행한다는 의미는 아니다. Core/Foundation은 GPU·window·shader SDK에 의존하지 않는다. Studio 양OS 동등 지원은 제작 작업과 데이터의 동등 지원이며 hardware capability 차이의 은폐가 아니다.
 
@@ -199,7 +199,7 @@ Apple은 Windows용 Metal 제작 도구와 macOS/Windows용 Metal Shader Convert
 | Gate | 필수 수용 기준 |
 |---|---|
 | PL01 · C00–Foundation | Windows·macOS native CPU-only Core/Object suite; 실패 주입·잔존 allocation/lease·thread 종료, GPU/window link dependency 0건 |
-| PL02 · M3 도구 | 양OS clean checkout→project→build/meta/cook/test, 공백·Unicode·대소문자 충돌 fixture, cold/warm 빌드 캐시와 취소/재시작 |
+| PL02 · M3 도구 | 양OS clean checkout→project→build/meta/cook/test, 공백·Unicode·대소문자 충돌 fixture, cold/warm 에셋 너겟과 취소/재시작 |
 | PL03 · M3/M4 renderer | 5개 backend의 §11.5 기본 profile·Deferred/Forward·offscreen·실장비 검증; SDK/장비 미확보는 미완료 |
 | PL04 · M3/M4 Studio | 양OS UI 툴킷 Studio·viewport, asset 편집/undo·기본 material·PIE·저장/재개·input/IME/DPI·프로세스 실패 복구 |
 | PL05 · 해당 기능 첫 정식 단계 | UI Designer·컷씬 등 후속 편집기의 같은 기능을 양OS에서 검증; Windows만 통과한 결과로 공통 기능 완료 선언 금지 |
@@ -227,7 +227,7 @@ Apple은 Windows용 Metal 제작 도구와 macOS/Windows용 Metal Shader Convert
 | MetaSchema / Serialization | Core | TypeId·FieldId·Archive 계약, 버전 규칙. Object 없음 |
 | ObjectRuntime | Core, Task, MetaSchema | Object, Registry, GC, Reflection 실행. Asset 의존 금지 |
 | ObjectSerialization | ObjectRuntime, Serialization | R2 객체 Archive bridge. ObjectRuntime의 역참조 금지 |
-| AssetRuntime | IO, Task, ObjectRuntime, Serialization, ObjectSerialization | Package, LoadTicket, AssetId, 쿠킹 매니페스트 reader(빌드 캐시는 쿠커·도구 쪽 BuildCache 모듈이며 AssetRuntime은 의존하지 않는다 — AssetSystem 3절) |
+| AssetRuntime | IO, Task, ObjectRuntime, Serialization, ObjectSerialization | Package, LoadTicket, AssetId, 쿠킹 매니페스트 reader(에셋 너겟은 쿠커·도구 쪽 AssetNugget 모듈이며 AssetRuntime은 의존하지 않는다 — AssetSystem 3절) |
 | World | AssetRuntime, ObjectRuntime, Task, SpatialIndex | Entity/Component, Scene Graph, Cell, SpatialQueryService, 시스템 실행 순서 |
 | RHI | Core, Task, graphics SDK adapter | device·offscreen은 Window 불필요, interactive swapchain만 Window 사용. World·Object 없음 |
 | RenderGraph / Renderer | RHI, Task, Core, RenderData, SpatialIndex | pass·GPU Scene·조명·메시·visibility 판정 인덱스. World 순회 없음 |
@@ -735,11 +735,11 @@ physics 내부 병렬화와 외부 gameplay mutation을 구분하고, read phase
 
 Core C02/C15에서 clock/step 값을, C17/C26에서 Task·replay fixture를 검증한다. 실제 World/physics/PIE 연결은 M3/M4 필수다. 멀티스레딩의 처리량 향상은 실측하고 정확성·진척·누수 기준을 완화하지 않는다.
 
-## 9. 에셋 파이프라인·쿠킹·빌드 캐시·비동기 로딩
+## 9. 에셋 파이프라인·쿠킹·에셋 너겟·비동기 로딩
 
 ### 9.1 식별자와 파생 데이터
 
-AssetId는 위치와 독립된 128-bit GUID로 부여한다. source asset, importer setting, stable type schema, platform profile, toolchain version의 관계는 ImportRecord·빌드 캐시 키·쿠킹 매니페스트에 기록하고 AssetIndex(에디터 패키지 인덱스)가 그것을 검색한다. 파일 rename·move는 ID를 보존하고, 복제는 새 ID를 부여한다. package manifest에는 hard dependency와 soft reference를 구분한다. 패키지당 대표 에셋 ID = 패키지 ID이고, 쿠킹 패키지 파일 이름은 `<AssetId>-<패키지 SHA-256 앞 16자>`(내용 주소)다. 런타임 VFS(APK)는 Android 패키징과 함께 후속이다(AssetSystem 4.2·17절).
+AssetId는 위치와 독립된 128-bit GUID로 부여한다. source asset, importer setting, stable type schema, platform profile, toolchain version의 관계는 ImportRecord·너겟 키·쿠킹 매니페스트에 기록하고 AssetIndex(에디터 패키지 인덱스)가 그것을 검색한다. 파일 rename·move는 ID를 보존하고, 복제는 새 ID를 부여한다. package manifest에는 hard dependency와 soft reference를 구분한다. 패키지당 대표 에셋 ID = 패키지 ID이고, 쿠킹 패키지 파일 이름은 `<AssetId>-<패키지 SHA-256 앞 16자>`(내용 주소)다. 런타임 VFS(APK)는 Android 패키징과 함께 후속이다(AssetSystem 4.2·17절).
 
 **rename·move와 redirect(2026-11-11 결정, 미구현).** 에셋 참조를 경로가 아닌 AssetId로 저장하므로 UE의 ObjectRedirector 같은 에셋별 redirector 패키지를 두지 않는다.
 
@@ -752,7 +752,7 @@ AssetId는 위치와 독립된 128-bit GUID로 부여한다. source asset, impor
 
 <!-- FIGURE:asset -->
 
-빌드 캐시 key는 source bytes hash + importer/version + canonical setting + dependency content hashes + target/feature profile + compiler/schema version으로 구성한다. 키만 있으면 재현 가능한 결과를 얻도록 경로·timestamp·locale을 제거한다. 순서 의존 출력은 canonical 정렬하고 난수 seed를 기록한다. 로컬 cache를 먼저 조회하고 공유 cache는 checksum을 검증한 뒤 사용한다. 빌드 캐시는 삭제·재생성 가능한 파생 cache이며 원본 에셋 저장소가 아니다.
+너겟 key는 source bytes hash + importer/version + canonical setting + dependency content hashes + target/feature profile + compiler/schema version으로 구성한다. 키만 있으면 재현 가능한 결과를 얻도록 경로·timestamp·locale을 제거한다. 순서 의존 출력은 canonical 정렬하고 난수 seed를 기록한다. 로컬 cache를 먼저 조회하고 공유 cache는 checksum을 검증한 뒤 사용한다. 에셋 너겟은 삭제·재생성 가능한 파생 cache이며 원본 에셋 저장소가 아니다.
 
 runtime reference graph와 cook build-dependency graph를 분리한다. 단순 AssetId 참조는 상대 cooked payload의 완료를 자동 선행 조건으로 만들지 않는다. 실제 산출물 의존이 순환하면 지원 가능한 SCC를 하나의 cook 단위로 축약하고, 정렬된 구성원 source/settings/schema·내부 edge ID·외부 component의 확정 digest로 key를 계산한다. 구성원 output은 component key+local output ID에서 파생하며 서로의 cooked hash를 재귀 정의하지 않는다. 지원하지 않는 순환 변환은 cycle 경로와 함께 거부한다. A↔B·3-node cycle 및 외부 변경 fixture에서 clean/incremental/local/remote 결과를 대조한다.
 
@@ -803,7 +803,7 @@ Package는 header/version, export/import table, dependency manifest, chunk table
 
 ### 9.4 Virtual Asset·원본 bulk·재임포트
 
-원본 metadata와 대형 bulk payload를 분리하여 작업자가 필요한 payload만 가져오는 Virtual Asset 흐름을 추가한다(후속 — 첫 구현은 에디터 패키지 안 bulk가 권위 저장소다, AssetSystem 17절). 원본 bulk store는 authoritative·내구성 보관소이며 재생성 가능한 빌드 캐시와 분리한다. 원본 payload가 빌드 캐시에만 존재하는 구성은 허용하지 않는다. cook은 오프라인 가용성·누락 payload·hash를 사전 검증한다. 작업 흐름의 참고 범위는 Unreal Virtual Assets다. [S30](https://dev.epicgames.com/documentation/en-us/unreal-engine/virtual-assets-in-unreal-engine)
+원본 metadata와 대형 bulk payload를 분리하여 작업자가 필요한 payload만 가져오는 Virtual Asset 흐름을 추가한다(후속 — 첫 구현은 에디터 패키지 안 bulk가 권위 저장소다, AssetSystem 17절). 원본 bulk store는 authoritative·내구성 보관소이며 재생성 가능한 에셋 너겟과 분리한다. 원본 payload가 에셋 너겟에만 존재하는 구성은 허용하지 않는다. cook은 오프라인 가용성·누락 payload·hash를 사전 검증한다. 작업 흐름의 참고 범위는 Unreal Virtual Assets다. [S30](https://dev.epicgames.com/documentation/en-us/unreal-engine/virtual-assets-in-unreal-engine)
 
 자동 재임포트는 source watcher event를 debounce하고 source revision·import setting·local override를 비교한다. 임포트 오류 시 이전 정상 asset을 유지한다. metadata-only 조회·thumbnail·dependency audit은 bulk 전체 로드를 요구하지 않는다. branch 전환·asset move·source control lock·대형 binary diff를 editor에 연결한다.
 
@@ -850,11 +850,11 @@ white/black/transparent·flat-normal·checker/error texture, error material, 기
 
 내장 GPU 자원은 device 수명 동안 pin하여 streaming 예산에 별도 예약한다. shader/mesh/font atlas의 residency·성장 상한도 계상한다. project unload로 해제하지 않으며 shutdown은 recording lease·GPU fence 후 정리한다. DeviceLost는 구 handle을 무효화하고 복구 device에 재생성한다. 불확실한 완료로 정상 pool에 반환하지 않는다.
 
-manifest는 ID/schema·target/profile·hash·cooked shader variant·출처/라이선스/고지를 포함하며 font 재배포 조건도 검토한다. CPU-only/서버는 필요한 CPU data만 포함하고 GPU·font renderer를 링크하지 않는다. GPU 요청은 UnsupportedCapability이며 가짜 handle을 만들지 않는다. GPU offscreen은 실제 BuiltinReady를 검사한다. 빌드 캐시·네트워크·프로젝트 없는 설치에서도 최소 자원을 제공한다.
+manifest는 ID/schema·target/profile·hash·cooked shader variant·출처/라이선스/고지를 포함하며 font 재배포 조건도 검토한다. CPU-only/서버는 필요한 CPU data만 포함하고 GPU·font renderer를 링크하지 않는다. GPU 요청은 UnsupportedCapability이며 가짜 handle을 만들지 않는다. GPU offscreen은 실제 BuiltinReady를 검사한다. 에셋 너겟·네트워크·프로젝트 없는 설치에서도 최소 자원을 제공한다.
 
 | ID | 수용 시험·판정 |
 |---|---|
-| BR01 | 빈 프로젝트·빌드 캐시 없음·오프라인에서 pack만으로 초기화 |
+| BR01 | 빈 프로젝트·에셋 너겟 없음·오프라인에서 pack만으로 초기화 |
 | BR02 | dimension/format/색공간/stride mismatch 거부, 기준 영상/값 일치 |
 | BR03 | 최초 요청 경합/실패: generation별 생성 1회, 실패 Ready 0 |
 | BR04 | unload·늦은 submit·device loss에서 stale handle·조기 free 0 |
@@ -901,7 +901,7 @@ World Partition은 actor descriptor, grid cell, data layer, streaming source, HL
 
 우선순위는 거리·이동 속도·시야·게임 중요도·네트워크 relevance를 반영한다. unload hysteresis와 최소 residence time으로 진동을 방지한다. CPU/GPU/physics/nav residency를 각각 계측하고 통합 상한으로 admission을 제어한다. teleport는 destination prefetch와 commit gate를 사용한다. 카메라 상대 render origin, 물리 지역 원점, audio listener-relative 위치, network quantization origin에 같은 world epoch를 기록한다.
 
-HLOD·terrain tile·foliage instance·nav tile·GI proxy는 동일 cell manifest에 연결하되 서로 다른 streaming level을 허용한다. HLOD 재생성과 cell recook 범위는 빌드 캐시 dependency graph로 추적한다. editor의 one-actor-per-file 저장, data layer preview, cell lock·dirty 상태는 P2에서 추가한다.
+HLOD·terrain tile·foliage instance·nav tile·GI proxy는 동일 cell manifest에 연결하되 서로 다른 streaming level을 허용한다. HLOD 재생성과 cell recook 범위는 에셋 너겟 dependency graph로 추적한다. editor의 one-actor-per-file 저장, data layer preview, cell lock·dirty 상태는 P2에서 추가한다.
 
 ### 10.3 맵 이동·저장·런타임 공간 서비스
 
@@ -1264,7 +1264,7 @@ Core/Object가 첫 작업이라는 순서는 유지한다. M3에서 최소 제�
 | 인스턴스 편집 | parent 상속, parameter 그룹·override/reset, texture/color picker, static variant, runtime dynamic parameter | M4 기본 instance·상속, M5 확장 |
 | 재사용 | typed Material Function·입출력, 함수 탐색·의존 추적·변경 전파, Material Attributes 집합 | M4 함수, M5/M6 layer/blend instance |
 | 진단·비용 | node/pin 위치 오류, generated HLSL, target/path별 compile 결과·instruction/texture/sampler 비용·variant 수 | M3 오류 표시, M4 상세 통계·compile queue |
-| 제작 통합 | asset browser·mesh slot drag/drop, 저장·재열기·source control diff, PIE preview, cooker/빌드 캐시·headless compiler | M3 왕복, M4 반복 제작·자동 회귀 |
+| 제작 통합 | asset browser·mesh slot drag/drop, 저장·재열기·source control diff, PIE preview, cooker/에셋 너겟·headless compiler | M3 왕복, M4 반복 제작·자동 회귀 |
 
 Unreal의 문서는 live update·node preview·platform stats·generated shader code와 인스턴스 override를 제작 기능으로 구분한다. 자체 구현도 각각의 완료 기준을 둔다. 통계는 compiler가 제공하는 정적 지표와 실제 GPU 측정을 분리하며 instruction 수만으로 frame 성능을 보장하지 않는다. [S61](https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-engine-material-editor-ui), [S62](https://dev.epicgames.com/documentation/en-us/unreal-engine/instanced-materials-in-unreal-engine)
 
@@ -1326,13 +1326,13 @@ Custom HLSL expression은 선언된 input/output·include allowlist·resource bu
 
 편집 명령은 expected document revision을 포함한 transaction으로 적용한다. source asset 저장과 shader 성공 여부는 분리한다. 오류가 있는 graph를 draft로 저장·재열기할 수 있지만 cooker는 현재 source semantic hash의 필수 variant가 모두 검증된 경우에만 publish한다. 이전 성공 shader로 잘못된 현재 graph를 조용히 출하하지 않는다.
 
-CompileCoordinator는 연속 편집을 debounce/coalesce하고 foreground material과 선택 node preview를 우선 처리한다. node preview는 요청한 node/해상도/target 수를 제한하며 모든 node를 매번 컴파일하지 않는다. material·function dependency hash, node plugin/compiler/translator/target toolchain 버전, include closure, static parameter, platform/path/domain/quality/profile이 빌드 캐시 key에 포함된다. graph 위치·zoom·selection 같은 UI metadata는 semantic key에서 제외한다. remote compile에는 동일 toolchain과 immutable 입력을 사용하고 cache corruption·worker 실패는 검증 후 local retry/terminal error로 처리한다.
+CompileCoordinator는 연속 편집을 debounce/coalesce하고 foreground material과 선택 node preview를 우선 처리한다. node preview는 요청한 node/해상도/target 수를 제한하며 모든 node를 매번 컴파일하지 않는다. material·function dependency hash, node plugin/compiler/translator/target toolchain 버전, include closure, static parameter, platform/path/domain/quality/profile이 너겟 key에 포함된다. graph 위치·zoom·selection 같은 UI metadata는 semantic key에서 제외한다. remote compile에는 동일 toolchain과 immutable 입력을 사용하고 cache corruption·worker 실패는 검증 후 local retry/terminal error로 처리한다.
 
 결과 수용 조건은 session epoch·현재 semantic hash·target profile·compile generation의 일치다. undo/redo·빠른 edit·preview 종료 이후 늦은 결과는 폐기한다. 취소는 즉시 worker 소멸을 뜻하지 않으므로 source snapshot·module lease·출력 buffer를 terminal까지 유지한다. node 이동으로 document revision만 바뀐 경우에는 같은 semantic 결과를 사용할 수 있다.
 
 compile 실패 시 preview는 이전 검증 shader를 유지하되 ‘현재 graph와 다른 마지막 성공 버전’ 상태와 오류 위치를 표시한다. 성공 shader set·parameter layout·resource binding은 호환성을 검사하여 frame 경계에서 한 묶음으로 교체한다. parameter 갱신과 texture 교체도 frame별 immutable snapshot을 사용한다. 구 PSO·shader·texture·descriptor는 recording lease와 실제 마지막 GPU fence가 모두 종료된 뒤 회수한다. node/graph를 닫았다는 이유로 진행 중 GPU 자원을 해제하지 않는다.
 
-성능 검증은 dynamic parameter-only 변경의 compile job 0개, graph UI layout-only 편집의 semantic hash 불변, 변경된 function의 역의존 closure만 재컴파일하는지를 우선 판정한다. warm/cold compile p50/p95, worker queue, 빌드 캐시 hit, foreground preview 도달 시간, VRAM을 계측한 뒤 시간 목표를 확정한다. 에디터 편집·CPU headless compiler와 GPU offscreen preview의 검증 결과를 구분한다.
+성능 검증은 dynamic parameter-only 변경의 compile job 0개, graph UI layout-only 편집의 semantic hash 불변, 변경된 function의 역의존 closure만 재컴파일하는지를 우선 판정한다. warm/cold compile p50/p95, worker queue, 에셋 너겟 hit, foreground preview 도달 시간, VRAM을 계측한 뒤 시간 목표를 확정한다. 에디터 편집·CPU headless compiler와 GPU offscreen preview의 검증 결과를 구분한다.
 
 ### 14.9 필수 마일스톤과 수용 시험
 
@@ -1352,7 +1352,7 @@ compile 실패 시 preview는 이전 검증 shader를 유지하되 ‘현재 gra
 | MT04 | instance parameter/texture 변경·static switch 변경 | dynamic parameter/graph UI layout-only compile 0개, static 변경의 필요한 variant 생성 |
 | MT05 | 빠른 edit·undo·cancel·session close·compile 결과 역순 도착 | 현재 hash/profile만 적용, stale publish·UAF 0건 |
 | MT06 | function/layer 반복 사용·parent chain·dependency 변경 | 순환 거부, instance별 override 분리, 영향 closure만 invalidation |
-| MT07 | compiler 실패·빌드 캐시 손상·worker 종료·cook 누락 variant | 이전 preview 상태 표시·재시도 한도·현재 source cook 실패 |
+| MT07 | compiler 실패·에셋 너겟 손상·worker 종료·cook 누락 variant | 이전 preview 상태 표시·재시도 한도·현재 source cook 실패 |
 | MT08 | 에디터 없는 CPU headless compile/cook·GPU offscreen 비교 | 동일 toolchain/profile의 canonical artifact hash, GPU 실행은 별도 지원 장비에서 확인 |
 | MT09 | shader/texture 교체 중 late GPU submit·preview 반복 종료 | recording/fence 전 free 0건, 완료 후 resource/lease 회수 |
 | MT10 | plugin node 추가·비활성 target·저장 충돌·draft recovery | Core 변경 없이 확장, unsupported 구분, source 보존 |
@@ -1363,7 +1363,7 @@ MAT2의 MT06은 Material Function·기본 instance에 적용하고 layer fixture
 
 라이트맵 베이킹과 이동 객체용 프로브 조명은 범용 제품의 필수 기능이다. 고급 DynamicGI의 대체 경로이자 낮은 GPU 비용의 정식 품질 profile로 제공한다. M3에 bake/runtime artifact 계약, M4에 CPU 기준 baker·lightmap 적용·기본 probe 샘플링, M5/M6에 adaptive volume·scenario blend·규모/제작 도구를 확장한다. GPU baker는 성능 선택이며 CPU baker의 실행·headless 재현성을 선행한다.
 
-BakeScene은 geometry revision·light/material/sky 값·UV/chart·transform·sampling seed·settings의 immutable snapshot이다. lightmap UV 생성/검사·overlap/padding·texel density·atlas packing·방향성/비방향성 출력·dilation·denoise·압축을 제공한다. progressive preview와 최종 품질을 구분하고 재베이크 영향 dependency·중단/재개·분산 job·결과 checksum·atomic publish를 지원한다. bake 결과는 빌드 캐시와 별도 versioned lighting asset/manifest로 저장하며 원본 scene 변경으로 stale가 되면 명시 표시한다.
+BakeScene은 geometry revision·light/material/sky 값·UV/chart·transform·sampling seed·settings의 immutable snapshot이다. lightmap UV 생성/검사·overlap/padding·texel density·atlas packing·방향성/비방향성 출력·dilation·denoise·압축을 제공한다. progressive preview와 최종 품질을 구분하고 재베이크 영향 dependency·중단/재개·분산 job·결과 checksum·atomic publish를 지원한다. bake 결과는 에셋 너겟과 별도 versioned lighting asset/manifest로 저장하며 원본 scene 변경으로 stale가 되면 명시 표시한다.
 
 M3에 BakeMaterialProfile을 Material IR의 CPU 소비 target으로 정의한다. M4 기본 PBR·opacity/mask·emissive·normal/UV·static switch·material function 부분집합은 CPU evaluator 또는 명시 surface 표현으로 변환한다. texture의 offline sampling·색공간·footprint와 instance/time 입력을 BakeScene revision에 고정한다. derivative·view-dependent·Custom HLSL 등은 정확/근사/proxy/미지원 상태를 선언하고 승인된 bake proxy가 없으면 node 위치를 포함한 오류로 종료한다. 묵시 불투명/평균색 대입으로 성공시키지 않는다. CPU-only bake는 GPU raster/readback에 의존하지 않는다. LT01/LT06에 UV 변환·masked/emissive texture·함수·static switch를 추가하여 GPU 없는 전체 bake와 stale 결과 차단을 검증한다. M8 RayMaterialProfile이 이 초기 CPU 계약을 대체하지 않는다.
 
@@ -1381,7 +1381,7 @@ bake editor는 lightmap density/UV/chart·probe validity·샘플링 위치·dire
 | LT02 | direct/indirect/mixed shadow 항 분리, Deferred/Forward 및 5개 backend의 결과 비교 |
 | LT03 | 이동 entity·대형 mesh·얇은 벽·probe validity·cell 경계의 보간·누광 기준 |
 | LT04 | scenario 변경/혼합·낮/밤·memory peak·미지원 runtime 갱신의 명시 상태 |
-| LT05 | geometry/light/material 변경·재베이크·빌드 캐시 손상·중단/재개·stale publish 0 |
+| LT05 | geometry/light/material 변경·재베이크·에셋 너겟 손상·중단/재개·stale publish 0 |
 | LT06 | editor/headless 동일 입력 결과·취소/실패/반복 bake의 lease/메모리 누수 0 |
 
 RT/cache 재질의 근사·동적 입력 갱신은 AAA03, 대기·reflection·probe의 일관된 환경 revision은 AAA09 계약을 함께 적용한다(33.6절).
@@ -1421,7 +1421,7 @@ GPU skinning은 vertex shader baseline 후 compute skin cache로 확장한다. c
 
 socket/attachment, blend space, layered/additive blend, montage slot·sync group·marker, pose cache·animation sharing, notify state와 root-motion source를 지원한다. Motion Warping·stride/orientation warping·foot placement는 목표 transform·window·collision 결과를 결합한다. 시각 보정이 authoritative 이동을 무단 변경하지 않게 한다. 참고 개념을 자체 component·언어 API로 제공한다. [S38](https://dev.epicgames.com/documentation/en-us/unreal-engine/motion-warping-in-unreal-engine)
 
-M6의 basic rig·morph/facial editor → M7의 retarget·full-body IK·동작 검색 prototype → M8/M9의 motion matching·cloth/groom profile 순서로 확장한다. pose search database는 feature schema·normalization·selection cost·빌드 캐시 key를 갖는다. geometry cache/Alembic 계열과 USD scene import는 선택 importer를 통해 M7 이후 편입하고 지원 field·변환 손실을 보고한다.
+M6의 basic rig·morph/facial editor → M7의 retarget·full-body IK·동작 검색 prototype → M8/M9의 motion matching·cloth/groom profile 순서로 확장한다. pose search database는 feature schema·normalization·selection cost·너겟 key를 갖는다. geometry cache/Alembic 계열과 USD scene import는 선택 importer를 통해 M7 이후 편입하고 지원 field·변환 손실을 보고한다.
 
 ## 16. 충돌·물리·캐릭터 이동
 
@@ -1482,7 +1482,7 @@ collision channel·object type·query filter·trigger·ignore pair·physical mat
 
 **빌드 설정 통일.** PhysX는 Rocks Build로 빌드하고 Core와 같은 `-ffp-contract=off`를 적용한다. upstream Windows 기본값인 `/fp:fast`(`PX_FLOAT_POINT_PRECISE_MATH` OFF)는 사용하지 않는다. 예외·RTTI는 끄고, gameplay 기준 경로는 CUDA를 비활성화한 CPU build(`DISABLE_CUDA_PHYSX`)다. solver·friction(`eIMPROVED_PATCH_FRICTION` 명시)·PCM·enhanced determinism·broadphase(PABP)·CCD 설정은 manifest에 고정하여 SDK 기본값 변경에 의존하지 않는다.
 
-**cook.** 같은 SDK 버전에서는 endianness가 같아 하나의 cook 결과를 모든 플랫폼에서 사용한다. 빌드 캐시 key에 PhysX version·commit·cook parameter·adapter cook schema를 포함하고, blob header 불일치는 load 시 거부한다. 플랫폼 tag와 version GUID의 완전 일치를 요구하는 `PxSerialization` binary는 asset에 사용하지 않고 cooked mesh stream을 사용한다. runtime cooking은 editor·개발 build에 한정한다. navigation은 PhysX blob이 아니라 중립 collision source에서 생성한다.
+**cook.** 같은 SDK 버전에서는 endianness가 같아 하나의 cook 결과를 모든 플랫폼에서 사용한다. 너겟 key에 PhysX version·commit·cook parameter·adapter cook schema를 포함하고, blob header 불일치는 load 시 거부한다. 플랫폼 tag와 version GUID의 완전 일치를 요구하는 `PxSerialization` binary는 asset에 사용하지 않고 cooked mesh stream을 사용한다. runtime cooking은 editor·개발 build에 한정한다. navigation은 PhysX blob이 아니라 중립 collision source에서 생성한다.
 
 **결과 차이의 범위.** NVIDIA는 같은 release·같은 platform에서만 결과 반복을 보장한다. [S90](https://nvidia-omniverse.github.io/PhysX/physx/5.6.1/docs/RigidBodyDynamics.html) PhysX의 NEON 경로는 나눗셈·제곱근을 추정 명령과 Newton 반복으로 계산하므로, 같은 버전·같은 설정에서도 x64와 ARM64의 결과는 bit 단위로 일치하지 않는다. 결정성 범위는 동일 binary·동일 platform·동일 command 순서로 한정하며 로컬 replay와 회귀 시험에 사용한다. 플랫폼 간 결과 정합은 서버 권한과 field별 보정(17.2절)으로 확보한다. UE 5.6 Chaos도 플랫폼 간 결정성을 명시하지 않으며, 오차가 임계값을 넘을 때 보정하고 표시 상태를 보간한다. [S91](https://dev.epicgames.com/documentation/en-us/unreal-engine/networked-physics-overview?application_version=5.6)
 
@@ -2223,7 +2223,7 @@ action cache는 이전 depfile에 포함된 파일만 재해시하여 완전성�
 
 local content-addressed store → 팀 shared cache → 필요 시 승인된 remote executor 순으로 조회·실행한다. cache miss 이유를 file/flag/toolchain 단위로 보고한다. output·depfile·diagnostic·debug file을 완전한 artifact set으로 atomic publish한다. 실패·취소·부분 출력은 hit로 등록하지 않는다. 한 output의 중복 producer는 plan 오류다.
 
-빌드 캐시는 asset/shader 파생 데이터, BuildArtifactCache는 object/PCH/generated/link 산출물을 관리한다. 공통 저장 엔진을 사용할 수 있으나 namespace·key·retention을 구분한다. original bulk store는 어느 캐시에도 대체하지 않는다. 동일 입력 full rebuild와 incremental rebuild의 의미적 결과를 비교하고 stale hit 0건을 필수 기준으로 한다.
+에셋 너겟은 asset/shader 파생 데이터, BuildArtifactCache는 object/PCH/generated/link 산출물을 관리한다. 공통 저장 엔진을 사용할 수 있으나 namespace·key·retention을 구분한다. original bulk store는 어느 캐시에도 대체하지 않는다. 동일 입력 full rebuild와 incremental rebuild의 의미적 결과를 비교하고 stale hit 0건을 필수 기준으로 한다.
 
 ### 27.3 Compile time 최적화
 
@@ -2396,7 +2396,7 @@ CoreTest는 첫 작업부터, M3에는 asset Commandlet·CPU boot, M4에는 단�
 
 Trace는 CPU scope·Task dependency·GC phase·allocation tag·IO request·asset state·GPU pass·network packet·audio block·script function·sequence playhead를 동일 session ID로 기록한다. CPU와 GPU clock은 calibration pair로 연결하고 오디오 sample time·server tick은 명시 변환 테이블을 유지한다. 서로 다른 clock을 같은 숫자로 해석하지 않는다.
 
-ring buffer는 bounded이며 event loss count를 기록한다. profiling 자체의 비용·buffer 용량을 표시하고 shipping은 최소 crash breadcrumb 수준으로 구성한다. profiler UI는 critical path, worker idle/starvation, GC barrier 대기, residency, object root chain, 빌드 캐시 miss reason, shader permutation 수, post-effect resolved value를 조회한다.
+ring buffer는 bounded이며 event loss count를 기록한다. profiling 자체의 비용·buffer 용량을 표시하고 shipping은 최소 crash breadcrumb 수준으로 구성한다. profiler UI는 critical path, worker idle/starvation, GC barrier 대기, residency, object root chain, 에셋 너겟 miss reason, shader permutation 수, post-effect resolved value를 조회한다.
 
 ### 29.2 재현 가능한 시험 장면
 
@@ -2428,7 +2428,7 @@ Quality30과 CinematicOffline은 별도 target이다. Runtime60 달성을 위해
 
 병렬 구현은 직렬 oracle, GC는 full collector, skinning은 CPU reference, culling은 conservative CPU set, shader는 기준 image와 비교한다. 픽셀 비교는 비결정적인 GPU 차이를 고려한 tolerance와 temporal sequence 평가를 사용한다. render validation layer 결과, crash·hang·leak, data race·OOB는 성능과 무관하게 실패다.
 
-IO 지연·부분 read·빌드 캐시 손상·shader compile 실패·GPU memory budget 초과·asset 순환·오디오 장치 제거·network loss·script 무한 loop·save 도중 종료를 주입한다. 각 장애는 terminal error·fallback·cleanup·재시도 한도가 있는지 검증한다. bug 재현 asset와 최소 script·trace·seed를 regression fixture로 보존한다.
+IO 지연·부분 read·에셋 너겟 손상·shader compile 실패·GPU memory budget 초과·asset 순환·오디오 장치 제거·network loss·script 무한 loop·save 도중 종료를 주입한다. 각 장애는 terminal error·fallback·cleanup·재시도 한도가 있는지 검증한다. bug 재현 asset와 최소 script·trace·seed를 regression fixture로 보존한다.
 
 ### 29.4 필수 로깅·프로파일러·상태 진단
 
@@ -2439,7 +2439,7 @@ IO 지연·부분 read·빌드 캐시 손상·shader compile 실패·GPU memory 
 | 구조화 로그 | level/category·UTC+monotonic time·thread/session·task/asset/entity correlation, 필터·검색·파일 rotation·stack link | R0/C06 console/file, M3 viewer 통합 |
 | CPU·Task | scope·frame p50/p95/p99·hitch·worker별 실행/대기·dependency/critical path·lock wait | R0 최소 scope, R2 timeline/Task 연결 |
 | 메모리·Object·GC | tag별 current/peak·allocation/free·retained·live object/root·GC phase/pause·root chain·retire backlog | R1 summary, R2 history/diff·선택 상세 allocation |
-| 자산·스트리밍·빌드 | load/IO/decode/upload 상태·mip demand/residency/pool·빌드 캐시 miss·shader variants·compile/link/cook 시간 | M3/M4 해당 기능과 함께 |
+| 자산·스트리밍·빌드 | load/IO/decode/upload 상태·mip demand/residency/pool·에셋 너겟 miss·shader variants·compile/link/cook 시간 | M3/M4 해당 기능과 함께 |
 | GPU·렌더링 | pass/queue timestamp·GPU/CPU clock 상관·resource budget·transient peak·draw/triangle/material·history | M3 초기 GPU scope, M4 queue/pass viewer |
 | 기타 시스템 | network RTT/loss/queue·audio underrun/voice·physics/nav/animation/script·입력 loss·컷씬 상태 | 각 시스템 최초 통합 Gate |
 | 상태 조작 | capture 시작/종료·채널/level 변경·bookmark·현재값 snapshot·diff·export·watchdog dump | R2 CPU headless, M3 editor 연결 |
@@ -2529,7 +2529,7 @@ line coverage는 누락 후보 탐색 수단이며 안정성 증명이 아니다
 | M0 · 1개월 | 착수 | Core bootstrap·PlatformBase·allocator·Array/Span·assert/trace·CPU runner, 최소 객체 계약 | F0–F2 초기 fixture, GPU/UI/언어 VM 의존 0 |
 | M1 · 2–3개월 | M0 | Core library·thread/task/IO·Registry·handle/reference·manual TypeInfo·Object 생성/파괴 | F1–F4 정확성·stress·no-op baseline |
 | M2 · 4–6개월 | M1 | ClassDefaults/instancing·full GC·barrier API·Archive·Clang 최소 생성기·UI용 리플렉션 계약 CU1–CU8·Foundation 통합 | CF01–CF12·B0/B1 정확성 통과, 후속 착수 gate |
-| M3 · 기존 7–9개월 참고 | Foundation Gate | Rocks Build/local cache·asset/빌드 캐시·5종 RHI/RG 기본 개발·Deferred/Forward·texture/builtin·Material MAT0/MAT1·UI 툴킷 UT1–UT4(Studio 기초)·script L0/L1·spatial upscale | import→edit→save→cook→run, Win/Mac Studio·CPU headless·기본 PIE·UI 오라클 GO1–GO6·iteration trace |
+| M3 · 기존 7–9개월 참고 | Foundation Gate | Rocks Build/local cache·asset/에셋 너겟·5종 RHI/RG 기본 개발·Deferred/Forward·texture/builtin·Material MAT0/MAT1·UI 툴킷 UT1–UT4(Studio 기초)·script L0/L1·spatial upscale | import→edit→save→cook→run, Win/Mac Studio·CPU headless·기본 PIE·UI 오라클 GO1–GO6·iteration trace |
 | M4 · 기존 10–12개월 참고 | M3 | 5종 RHI 기본 Gate·lightmap/probe·정식 PIE·템플릿·애니메이션·물리/audio/input/AI·게임 UI runtime/Designer·Material MAT2·ScriptComponent·TAAU·기본 nested 컷씬·post, Incredibuild/분산 worker | gameplay+2분 컷씬, 두 렌더 경로·API/TX/BR/PI 전체 기본 profile 및 LT/TT/MT의 단계별 필수 subset·offscreen·UI callback·build adapter |
 | M5 · 13–16개월 | M4 | replication/subobject·travel·nested prefab·능력 기초·script debugger/async·FSR·UI binding/animation·Material layer MAT3·adaptive probe/scenario·고급 post | B3/B5/B6/B8·I0–I6, GC 병렬/점진 최적화·agent 장애·headless server |
 | M6 · 17–20개월 | M5 | 컷씬/capture·EXR/AOV·HDR/post·DLSS/XeSS·ability/feature·UI 전문 Designer·Material MAT3·기본 고급 재질 | B7·UI/headless GPU 회귀·script reload·feature teardown·link profile |
@@ -2567,7 +2567,7 @@ RHI·UI 툴킷·언어·전문 빌드 도구의 본격 구현은 Foundation Gate
 | R14 · P2 | GI leak/noise/coverage·비싼 RT/SDF 제작 | probe baseline·시각 debug·콘텐츠 제한·caps 분리. M9 이전 장면 검증 |
 | R15 · P2 | ThirdParty STL·ABI·toolchain 변경 전파 | adapter·고정 manifest·allocator 소유권·Host/Target 분리·업데이트 fixture |
 | R16 · P2 | 기능 증가로 Foundation·제작 검증 지연 | Core/Object gate 우선·M4 game/cutscene·다중 backend·Mac 개발 범위를 반영한 전체 일정 재산정 |
-| R17 · P0 | compile/빌드 캐시 stale hit·원격 늦은 output 오염 | 완전한 key·원자 artifact set·session ID·local/clean 대조 |
+| R17 · P0 | compile/에셋 너겟 stale hit·원격 늦은 output 오염 | 완전한 key·원자 artifact set·session ID·local/clean 대조 |
 | R18 · P1 | 원격 compile만 개선하고 link/restart가 병목 유지 | I0–I6 전체 시간·module link/PDB·실행 복구·비 native 반복 경로 |
 | R19 · P1 | NullRHI로 영상/UI 성공을 오판 | CPU-only/GPU offscreen profile·capability 실패·실제 image 비교 |
 | R20 · P1 | UI designer/runtime 차이·binding root 누수 | 동일 evaluator/layout·typed binding·preview/cooked/headless 통합 |
@@ -2599,7 +2599,7 @@ RHI·UI 툴킷·언어·전문 빌드 도구의 본격 구현은 Foundation Gate
 | Object·청크·Nonmoving 병렬·점진 GC | 5–6 | M2 정확성, M5 최적화 / B1 |
 | Clang 메타·직렬화·schema | 7 | M2 / migration corpus |
 | Task·비동기·수명·trace | 8·29 | M1부터 / B0·B1·전체 stress |
-| 비동기 에셋·쿠킹·빌드 캐시·패키지 | 9·27 | M3 / clean package·corrupt data fixture |
+| 비동기 에셋·쿠킹·에셋 너겟·패키지 | 9·27 | M3 / clean package·corrupt data fixture |
 | Scene·World Partition·큰 월드 | 10 | M3 기반, M7 규모 / B4 |
 | Deferred·Forward 둘 다 정식 | 11 | M3 기본, 전 단계 기능 matrix / B2 |
 | 업스케일·동적 해상도·AA | 12 | M4–M6 / B8 |
@@ -2648,7 +2648,7 @@ RHI·UI 툴킷·언어·전문 빌드 도구의 본격 구현은 Foundation Gate
 | A18 | default subobject 공유·nested prefab ID alias 가능성 | instance별 clone/remap, instance 경로 포함 stable key. 5.3·20.5절 |
 | A19 | VM 중단·오류가 native lock 선점/외부 효과 rollback으로 해석될 위험 | safe poll boundary·native call 계약·staged transaction·revision lease. 23.4절 |
 | A20 | 모든 asset ready가 GPU를 요구할 가능성 | target mask·server bundle·unsupported 검증, AudioRT 일반 callback 금지. 9.4·28절 |
-| A21 | 빌드 캐시와 source bulk virtualisation의 내구성 혼동 가능성 | authoritative 원본 bulk store·재생성 빌드 캐시·BuildArtifactCache 분리. 9·27절 |
+| A21 | 에셋 너겟과 source bulk virtualisation의 내구성 혼동 가능성 | authoritative 원본 bulk store·재생성 에셋 너겟·BuildArtifactCache 분리. 9·27절 |
 | A22 | 빌드가 CMake orchestration에 한정되어 새 요구 미충족 | UBT 계열 Rocks Build·Incredibuild/선택 executor·link 독립 최적화·I0–I6. 27절 |
 | A23 | 모든 headless를 NullRHI로 처리할 위험 | CPU-only·Server·Backend·GPU offscreen capability와 결과 구분. 28절 |
 | A24 | UI runtime 설명에 비해 편집·binding·cook 완료 기준이 약함 | WidgetAsset/Designer·자체 언어 controller·IME/focus·layout/pixel tests. 21.2–21.5절 |
@@ -2666,9 +2666,9 @@ RHI·UI 툴킷·언어·전문 빌드 도구의 본격 구현은 Foundation Gate
 | Tag·component·prefab·feature plugin | 계층 query·등록/tick·variant/rebase·load/unload token | 필수 M4–M6 |
 | 커스텀 언어(Sparks)·debugger·RPC·reload | static type·verified VM·약한 handle·native binding·LSP 언어 서버 | 필수 Foundation 후 L0–L4 |
 | Blueprint·범용 gameplay visual scripting | UI/AI/sequence 이벤트도 C++/자체 언어로 연결 | 명시 제외 |
-| Asset Manager·DataAsset/Table·빌드 캐시·virtual assets | primary/bundle·stable schema·source bulk·incremental import/cook | 필수 M3–M6 |
+| Asset Manager·DataAsset/Table·에셋 너겟·virtual assets | primary/bundle·stable schema·source bulk·incremental import/cook | 필수 M3–M6 |
 | Deferred·Forward·RHI/RG·shader·GPU Scene | 두 경로 정식·공통 IR·typed pass/queue/fence·capability | 필수 M3부터 전체 회귀 |
-| 필수 머티리얼 에디터·instance/function/layer | node graph·live preview·typed IR·진단·비동기 compile·빌드 캐시·cook | 필수 MAT0–MAT2 M3/M4, MAT3 M5/M6; 14.5–14.9 MT gate |
+| 필수 머티리얼 에디터·instance/function/layer | node graph·live preview·typed IR·진단·비동기 compile·에셋 너겟·cook | 필수 MAT0–MAT2 M3/M4, MAT3 M5/M6; 14.5–14.9 MT gate |
 | 고급 surface·transparency·capture | skin/SSS·clear coat·cloth·eye·foliage·water·planar/scene capture | 필수 M6–M8, layered closure 별도 연구 |
 | VirtualGeometry·GI·VSM·VT·RT | 대체 경로·page/representation·memory·capture 지원표 | 필수 장기 M8–M9 연구 gate |
 | 전체 post·upscale·HDR | 26절 catalog·두 경로·FSR/DLSS/XeSS·volume/shot·history | 필수 M4–M9 |

@@ -79,7 +79,7 @@ protected:
 //   1–32byte다(예 "oodle.kraken", "studio.rle-v2"). 내장 형식 이름(lz4·zstd·deflate·zlib·
 //   gzip·lz4frame·brotli)에는 '.'가 없어 겹치지 않는다. 등록이 복사하므로 호출 뒤 버려도 된다.
 // - version: 출력 byte를 바꾸는 변경마다 올린다(TryGetCompressionFormatInfo의 revision,
-//   빌드 캐시 키).
+//   너겟 키).
 // - levels: 수준 범위. minimum ≤ defaultLevel ≤ maximum이어야 한다.
 struct CompressionCodecDescription {
     StringView name;
@@ -91,7 +91,7 @@ struct CompressionCodecDescription {
 inline constexpr uint32 MaxCompressionCodecs = 16;
 
 // codec을 등록하고 이 프로세스에서 쓸 형식 값을 돌려준다. 값은 256(0x100)부터 등록 순서대로
-// 커지며 해제한 값을 다시 쓰지 않으므로 실행마다 달라질 수 있다(파일·빌드 캐시에는 이름을
+// 커지며 해제한 값을 다시 쓰지 않으므로 실행마다 달라질 수 있다(파일·에셋 너겟에는 이름을
 // 쓴다). codec은 해제가 성공할 때까지 살아 있어야 한다.
 // 오류: 이름 규칙·수준 범위 위반 InvalidArgument, 같은 이름(해제 중 포함) AlreadyExists, 표가
 // 가득 찼거나(해제 중 포함) 형식 값을 다 썼으면 CapacityExceeded.

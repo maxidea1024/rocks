@@ -68,7 +68,7 @@ inline constexpr uint32 CompressionOutputRevision = 1;
 
 // 압축 형식이다. 값은 프로세스 안 식별용이며 영속 포맷에 기록할 때는 상위 포맷이 별도 ID(또는 형식
 // 이름)를 정한다. 0–255는 내장 형식이며 새 형식은 끝에 덧붙인다. 256 이상은 사용자 등록 형식
-// (CompressionCodec.h)의 값으로, 등록 순서에 따라 실행마다 달라지므로 파일·빌드 캐시 키에는 형식
+// (CompressionCodec.h)의 값으로, 등록 순서에 따라 실행마다 달라지므로 파일·너겟 키에는 형식
 // 이름을 쓴다. 등록되지 않았거나 해제된 값은 모르는 형식 값과 같이 InvalidArgument다.
 // - Lz4: LZ4 raw block. 해제가 가장 빠르다. 원본 크기·체크섬이 없어 해제할 때 크기를 알아야
 // 효율적이다. 스트림을 지원하지 않는다(블록 컨테이너 CompressedBlocks의 LZ4 블록이 이 형식이다).
@@ -130,7 +130,7 @@ Result<CompressionLevelRange> TryGetCompressionLevelRange(CompressionFormat form
 // 형식 이름의 최대 길이(byte)다.
 inline constexpr usize MaxCompressionFormatNameBytes = 32;
 
-// 형식의 이름·개정 번호다(내장·사용자 등록 형식 공통). 빌드 캐시 키는 형식 값 대신 이 이름과
+// 형식의 이름·개정 번호다(내장·사용자 등록 형식 공통). 너겟 키는 형식 값 대신 이 이름과
 // revision을 쓴다(사용자 등록 형식의 값은 실행마다 다를 수 있다).
 // - Name(): 내장 형식은 "lz4"·"zstd"·"deflate"·"zlib"·"gzip"·"lz4frame"·"brotli",
 //   사용자 등록 형식은 등록 이름("oodle.kraken" 같은 '.' 포함 이름)이다. 반환 view는 이 객체

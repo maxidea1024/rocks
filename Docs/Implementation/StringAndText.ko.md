@@ -37,7 +37,7 @@
 4. **resolve:** 명시한 culture와 불변 catalog revision snapshot을 사용해 소유 String 또는 명시 lease가 있는 resolved view를 반환한다. 실패는 Result로 전파하고 누락 키는 원문 fallback과 진단을 제공한다. 프로세스 전역 locale 변경에 숨은 의존을 만들지 않는다.
 5. **언어 변경:** 언어/catalog 교체는 새 snapshot을 게시한다. 기존 frame/비동기 reader가 해제될 때까지 이전 snapshot을 유지한다. UI는 revision 변경으로 layout을 갱신한다.
 6. **지역 규칙:** plural/select, 숫자·통화·날짜·시간 formatting은 검증된 라이브러리 adapter로 제공한다. Core에 임의 언어 규칙을 직접 구현하지 않는다. UI shaping/IME는 별도 시스템이다.
-7. **저장·쿠킹:** 에셋은 Text 정체성과 typed 인자를 저장한다. resolve된 언어별 표시 String을 영속 정체성으로 사용하지 않는다. 추출→번역→검증→catalog cook→빌드 캐시 key에 locale·schema·source revision을 포함한다.
+7. **저장·쿠킹:** 에셋은 Text 정체성과 typed 인자를 저장한다. resolve된 언어별 표시 String을 영속 정체성으로 사용하지 않는다. 추출→번역→검증→catalog cook→너겟 key에 locale·schema·source revision을 포함한다.
 8. **헤드리스·서버:** 폰트/윈도 없이 키 추출·카탈로그 검증·format 테스트가 가능해야 한다. 게임 규칙·네트워크 동기화는 번역된 표시 문자열의 비교에 의존하지 않는다.
 
 ## 검증 기준

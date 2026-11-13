@@ -15,7 +15,7 @@
 | A0-G | GraphicsTypes·Graphics: 차원(2D·Cube·3D·2DArray·CubeArray)·형식(R8·RG8·RGBA8·R16·RG16·RGBA16·R16F·RG16F·RGBA16F·R32F·RG32F·RGBA32F·BGRA8, sRGB 변형)·view swizzle(D3D12 `Shader4ComponentMapping`, OpenGL `TEXTURE_SWIZZLE_RGBA`)·샘플러 W축 주소·필터 5종(Point·Bilinear·Trilinear·AnisotropicPoint·AnisotropicLinear — 기존 `Nearest`·`Anisotropic`의 이름 변경 포함), 쿠킹 데이터 샘플러 D3D12·OpenGL | self-test 확장 |
 | A1 | AssetRuntime: 패키지 포맷 v1, `Package`·`Asset`, 에셋 객체 Registry, 쿠킹 매니페스트(`CookedManifest.rman`), 로더(worker IO·압축 해제, Game 스레드 객체 생성, SCC), `AssetManager`(scope·PrimaryAsset·bundle), `CancelToken`·`TaskLane`·`LoadPriority`, Core ErrorCode 추가(`UnsupportedCapability`·`AlreadyRegistered`·`ScopeClosed`), EngineAssets 모듈 | 포맷·SCC·수명·scope 시험 |
 | A2 | AssetDatabase: `ProjectLayout`, 경로 정책, 인덱스(검색·의존·별칭·진단·캐시·감시), 저장·dirty, 이동·복제·삭제, 임포트 프레임워크 | 인덱스·이동·동시 쓰기 시험 |
-| A3 | BuildCache | 적중·무효화·손상·동시 기록·GC 시험 |
+| A3 | AssetNugget | 적중·무효화·손상·동시 기록·GC 시험 |
 | A4 | AssetCooker | 원본 없이 쿠킹·재현성·부분 쿠킹 시험 |
 | A5 | 텍스처: `Texture` 계열, `TextureSource`, ImageCore(BMP·TGA·PNG·PSD), TextureTools(임포터·빌드·쿠킹 처리기) | 14절 텍스처 시나리오 |
 | A6 | 명령행·문서·검증 보고 | 14절 결과 기록 |
@@ -46,7 +46,7 @@
 | Importer | AssetDatabase `Importer`, TextureTools `TextureImporter` | 구현(텍스처) |
 | Import Metadata | 에디터 패키지 `ImportRecord` 섹션 | 구현 |
 | Asset Registry(인덱스) | AssetDatabase `AssetIndex` | 구현 |
-| 빌드 캐시 | BuildCache | 구현(로컬), 공유·원격 backend 계약 |
+| 에셋 너겟 | AssetNugget | 구현(로컬), 공유·원격 backend 계약 |
 | Cooker | AssetCooker | 구현(비압축 형식), 블록 압축 계약 |
 | Runtime Asset Loader | AssetRuntime `AssetLoader` | 구현(CPU ready), `Render` ready 계약 |
 | Asset Manager | AssetRuntime `AssetManager` | 구현(scope·PrimaryAsset·bundle·즉시 해제), 예산 LRU 해제 후속 |
@@ -56,8 +56,8 @@
 의존 방향(→는 의존):
 
 ```
-Programs/Commandlet → TextureTools → { AssetCooker, AssetDatabase, BuildCache, ImageCore, Texture }
-AssetCooker → { AssetDatabase, BuildCache }        AssetDatabase → AssetRuntime
+Programs/Commandlet → TextureTools → { AssetCooker, AssetDatabase, AssetNugget, ImageCore, Texture }
+AssetCooker → { AssetDatabase, AssetNugget }        AssetDatabase → AssetRuntime
 Texture(Runtime) → { AssetRuntime, GraphicsTypes }       ImageCore(Developer) → { Core, Compression }
 AssetRuntime → { ObjectSerialization, ObjectRuntime, Serialization, Task, Compression }
 EngineAssets(Runtime, 신규) → { Engine, AssetRuntime }   — AssetManager를 EngineSubsystem으로 붙이는 연결 모듈
@@ -112,7 +112,7 @@ AssetRuntime은 Engine을 모른다. 도구는 Engine을 링크하지 않고 `As
 | `CorruptPackage`, `UnsupportedVersion`, `NewerVersion`, `ExternalModification`, `NotDurable`(경고 — 교체는 됐고 디렉터리 동기화만 실패, 5.5절) | 패키지·저장 |
 | `MissingSource`, `SourceChanged`, `InvalidSource`(원본 해석 실패), `UnsupportedSourceFormat`(지원하지 않는 원본 변형, 예: PSD CMYK), `LossySource`, `NonSrgbSource`, `IgnoredSourceChannels`(경고), `AbsoluteSourcePath` | 원본 |
 | `ImporterOutdated`, `InvalidImportOption`, `OrphanedOutput`, `UnknownProperty`(모르는 속성 이름), `UnsupportedSetting`(계약 설정의 기본값이 아닌 값), `InvalidSetting`(모순된 조합·숨김 값), `SrgbIgnored`(경고 — 선형 설정·float 출력의 SRGB), `PreserveBorderWithWrap`(경고) | 임포트·설정 |
-| `CorruptEntry`(빌드 캐시 항목·게시 패키지 파일 손상), `IncompatibleCook`(부분 쿠킹 병합 불가·런타임 프로파일 불일치), `NeverCookReferenced` | 빌드 캐시·쿠킹 |
+| `CorruptEntry`(에셋 너겟 항목·게시 패키지 파일 손상), `IncompatibleCook`(부분 쿠킹 병합 불가·런타임 프로파일 불일치), `NeverCookReferenced` | 에셋 너겟·쿠킹 |
 | `AliasResolved`, `RootLost`(감시 루트 소실) | 그 밖 |
 
 ## 5. 패키지 포맷 v1
@@ -191,7 +191,7 @@ ImportRecord (스키마 Guid, 버전 1)
   ownerAssetId: Guid   — 다중 출력의 Import 기록 소유 패키지. 자기 자신이면 전체 기록, 아니면 sources·options·outputs는 비고 소유자를 가리킨다(Dependencies에 ImportOwner로 남아 소유자 삭제를 막는다)
 ```
 
-원본 역할(`role`): 2D `source`, Cube 면 `px`·`nx`·`py`·`ny`·`pz`·`nz`, 2DArray·Volume slice `0`·`1`…, CubeArray `<i>.<면>`. 옵션 경계: 디코딩·원본 변환 옵션 = ImportRecord.options(바뀌면 재임포트), 빌드·쿠킹 설정 = 에셋 저장 속성(바뀌면 재빌드, 빌드 캐시 키 변경).
+원본 역할(`role`): 2D `source`, Cube 면 `px`·`nx`·`py`·`ny`·`pz`·`nz`, 2DArray·Volume slice `0`·`1`…, CubeArray `<i>.<면>`. 옵션 경계: 디코딩·원본 변환 옵션 = ImportRecord.options(바뀌면 재임포트), 빌드·쿠킹 설정 = 에셋 저장 속성(바뀌면 재빌드, 너겟 키 변경).
 
 ### 5.5 저장
 
@@ -214,7 +214,7 @@ ImportRecord (스키마 Guid, 버전 1)
 - 지정자: `Version=N`·`WorldOnly`(상속)·`EditorOnly`·`Required`(저장·쿠킹에서 거부)·`Name="…"`(도구 이름, 텍스처 설정은 UE C++ 이름, 12.4절)·`MaxElements`. `ROCKS_NATIVE`(비영속 멤버, 강한 참조를 재귀적으로 금지, `AssetLease`처럼 WorldOnly 전용 형질을 선언한 타입은 WorldOnly 클래스에만 — 에셋 객체 Registry는 WorldOnly 타입 생성을 거부한다, 11.4절). 영속 데이터는 모두 리플렉션 필드다 — `BulkDataRef`·`TextureSource`·`TexturePlatformData`도 `ROCKS_STRUCT`이므로 네이티브 직렬화 hook을 두지 않는다. `completeFieldLayout`은 "모든 영속 필드와 강한 간선을 기술"이다.
 - 필드 codec: 필드별 생성 encode·두 단계 decode thunk와 문맥(참조 wire 매개변수, Soft 참조 수집기, 유효 플래그, struct 관찰·치환 hook, 진단, decode 정책) — graph v2(A0-O)와 패키지(A1)가 같은 thunk를 쓴다.
 - 부동소수점: 빌드 전체가 이미 `-ffp-contract=off`이고 fast-math를 쓰지 않으므로 모듈별 모델은 두지 않는다(clang-cl의 `/fp:precise`는 contract=on을 뜻하고 `/WX`에서 옵션 충돌 경고가 오류가 되므로 쓰지 않는다). 결정적 수학 모듈의 fmadd·`long double`·외부 심볼(`llvm-nm`) 검사는 C3에서 모든 구성에 구현되었다([CoreDataFoundations](CoreDataFoundations.ko.md) 2절). `-fno-math-errno`는 clang-cl이 그 형태를 받지 않아 쓰지 않는다.
-- 빌드가 주입하는 상수: 툴체인 지문(빌드 캐시 키, 구성·호스트 경로 제외)과 도구 빌드 ID(Summary·AssetIndex 캐시 키 진단용, 입력 내용 해시 기반)를 Rocks.Build가 실행 파일마다 생성 번역 단위로 넣는다.
+- 빌드가 주입하는 상수: 툴체인 지문(너겟 키, 구성·호스트 경로 제외)과 도구 빌드 ID(Summary·AssetIndex 캐시 키 진단용, 입력 내용 해시 기반)를 Rocks.Build가 실행 파일마다 생성 번역 단위로 넣는다.
 - 엔진 World 타입(Level·Actor·Component)은 `ROCKS_CLASS(WorldOnly)`로 옮긴다(B8).
 ## 6. 에셋 타입·객체 통합·참조
 
@@ -240,7 +240,7 @@ ImportRecord (스키마 Guid, 버전 1)
 | Hard | `ObjectRef<T>` / `ObjectRefArray<T>`(다른 패키지 객체) | ObjectImports + Dependencies(Hard) | 같은 로드 작업에서 먼저 준비, 실패 시 참조자도 실패 | 전이 포함 | 저장·`set` 거부, 로드 `MissingDependency` | 저장 거부, 로드 실패 | SCC 함께 로드·상주(11.3·11.4절) |
 | Soft | `SoftObjectRef<T>` / 배열 | Dependencies(Soft) | 자동 로드 안 함 | 기본 포함(`CookSoftReferences`) | 저장 경고(`Required`면 거부), 로드 요청 NotFound | `RequestAsset` TypeMismatch | 허용 |
 | EditorOnly | `EditorOnly` 표시 Hard·Soft 필드 | Dependencies(EditorOnly) | 런타임 로더 무시 | 제외, 쿠킹 데이터에서 필드 제외 | 에디터 진단만 | 에디터 진단만 | 허용 |
-| Build | `DependencyDeclarer`가 선언(16.2절) | Dependencies(Build) | — | 산출물 선행 조건·빌드 캐시 키 포함 | 쿠킹 실패 | 쿠킹 실패 | 지원 SCC는 한 단위, 아니면 `UnsupportedCycle` |
+| Build | `DependencyDeclarer`가 선언(16.2절) | Dependencies(Build) | — | 산출물 선행 조건·너겟 키 포함 | 쿠킹 실패 | 쿠킹 실패 | 지원 SCC는 한 단위, 아니면 `UnsupportedCycle` |
 | ImportOwner | ImportRecord `ownerAssetId`(다중 출력의 소유 패키지) | Dependencies(ImportOwner) | 런타임 로더 무시 | 제외 | 에디터 진단(`MissingDependency`) | — | 허용 |
 
 동적으로 로드하는 에셋은 `CookSettings`의 AlwaysCook·PrimaryAsset 규칙에 명시한다.
@@ -262,13 +262,13 @@ World 객체는 에셋 객체 Registry 밖에 있어 `ObjectRef<에셋>`을 걸 
 ## 8. 동시성
 
 - 쓰기 잠금: `Intermediate/AssetDatabase.lock`을 `FileLock`(Windows `LockFileEx` + 삭제 공유 없는 열기, POSIX `flock` + 잠근 뒤 dev/ino 재확인)으로 잡은 프로세스만 에셋·별칭 표·인덱스 캐시·쿠킹 출력을 바꾼다. 잠금을 잡는 명령은 13절 목록이며 서비스 API도 같은 규칙이다. 쿠킹도 이 잠금을 쥐므로(에디터 패키지가 쿠킹 중 바뀌지 않게) 같은 프로젝트의 쿠킹은 프로파일과 무관하게 직렬화되고 쿠킹 출력에 따로 잠금을 두지 않는다. 못 잡으면 `Busy`(`--wait=<초>`).
-- 빌드 캐시는 내용 주소 저장소라 잠금 없이 동시 기록(9절).
+- 에셋 너겟은 내용 주소 저장소라 잠금 없이 동시 기록(9절).
 
-## 9. 빌드 캐시
+## 9. 에셋 너겟
 
-- 위치: `<BuildCache>` = `Config/BuildCache.json`의 `localPath`(기본 `<Project>/Intermediate/BuildCache/`). 프로젝트 사이 공유 경로도 쓸 수 있다(내용 주소라 안전하다).
-- 빌드 캐시는 "캐시 키 → 가공 결과" 저장소다. 같은 에셋이라도 설정·대상 플랫폼이 다르면 결과가 다르므로(예: Windows용·Android용 `T_Wall`은 다른 키) **결과에 영향을 주는 입력은 빠짐없이 키에 들어가야 한다.** 빠진 입력은 오래된 결과를 돌려주는 버그가 되고, 불필요한 입력(경로·시각·locale)은 적중률만 떨어뜨린다(계획 §9.1).
-- 키: 처리기 `BuildKey(KeyWriter&)`가 고정 순서·타입 태그로 기록한 바이트의 SHA-256. 모든 처리기에 공통으로 들어가는 것: `"RocksBuildCache" 형식 버전`, 처리기 Guid·처리기 버전 Guid, 결과를 만드는 **인코더·외부 라이브러리의 이름·버전·설정**(블록 압축 인코더 등 — 비압축이면 없음), **결정적 수학 버전**(A0-C), **툴체인 지문**(컴파일러 id·버전·대상 아키텍처·부동소수점 모델 — 빌드가 상수로 주입), 에셋 TypeId, 입력 bulk SHA-256, 결과에 영향을 주는 설정 전체(기본값 포함, float는 bit 패턴, NaN 단일화, `CompressionCacheId` 포함), 대상 프로파일 id와 출력 설정 전체, 의존 입력 (역할, AssetId, 그 의존 에셋의 같은 처리기 build key) 정렬 목록 — 의존의 설정·전이 Build 의존 변화까지 키에 들어간다(Merkle). 경로·시각·locale 제외.
+- 위치: `<AssetNuggets>` = `Config/AssetNuggets.json`의 `localPath`(기본 `<Project>/Intermediate/AssetNuggets/`). 프로젝트 사이 공유 경로도 쓸 수 있다(내용 주소라 안전하다).
+- 에셋 너겟은 "캐시 키 → 가공 결과" 저장소다. 같은 에셋이라도 설정·대상 플랫폼이 다르면 결과가 다르므로(예: Windows용·Android용 `T_Wall`은 다른 키) **결과에 영향을 주는 입력은 빠짐없이 키에 들어가야 한다.** 빠진 입력은 오래된 결과를 돌려주는 버그가 되고, 불필요한 입력(경로·시각·locale)은 적중률만 떨어뜨린다(계획 §9.1).
+- 키: 처리기 `BuildKey(KeyWriter&)`가 고정 순서·타입 태그로 기록한 바이트의 SHA-256. 모든 처리기에 공통으로 들어가는 것: `"RocksAssetNugget" 형식 버전`, 처리기 Guid·처리기 버전 Guid, 결과를 만드는 **인코더·외부 라이브러리의 이름·버전·설정**(블록 압축 인코더 등 — 비압축이면 없음), **결정적 수학 버전**(A0-C), **툴체인 지문**(컴파일러 id·버전·대상 아키텍처·부동소수점 모델 — 빌드가 상수로 주입), 에셋 TypeId, 입력 bulk SHA-256, 결과에 영향을 주는 설정 전체(기본값 포함, float는 bit 패턴, NaN 단일화, `CompressionCacheId` 포함), 대상 프로파일 id와 출력 설정 전체, 의존 입력 (역할, AssetId, 그 의존 에셋의 같은 처리기 build key) 정렬 목록 — 의존의 설정·전이 Build 의존 변화까지 키에 들어간다(Merkle). 경로·시각·locale 제외.
 - Build 의존 순환(지원 SCC, 6.2절)에서는 서로의 key가 서로를 포함해 값이 정해지지 않으므로 SCC 단위로 계산한다: SCC key = SHA-256(구성원의 지역 입력(위 항목 중 의존을 뺀 것)을 AssetId 순으로, SCC 밖 의존 튜플 (구성원 AssetId, 역할, 의존 AssetId, 그 key)의 정렬 목록), 구성원 key = SHA-256(SCC key, AssetId). 순환이 없어도 이 식 하나만 쓴다(구성원 하나인 SCC — 값 체계를 하나로 둔다).
 - 텍스처 키의 구성(위 공통 항목의 텍스처 대응):
 
@@ -284,19 +284,19 @@ World 객체는 에셋 객체 Registry 밖에 있어 `ObjectRef<에셋>`을 걸 
   | 대상 픽셀 형식 | 12.4.3절 규칙으로 확정한 쿠킹 형식·sRGB 표시·swizzle(설정·프로파일에서 유도되지만 유도 규칙의 버그를 막기 위해 결과 형식도 넣는다) |
   | 처리기 버전 | 텍스처 처리기 Guid·버전 Guid |
   | 인코더 버전 | 블록 압축 인코더 라이브러리 이름·버전·품질 설정(비압축 단계에는 없음) |
-- 값: `<BuildCache>/<key[0..2]>/<key>.rbc` = `{ "RBCH", 버전, key, 부분 수, 부분별(크기·SHA-256), 본문 }`(텍스처는 mip·slice별 부분).
+- 값: `<AssetNuggets>/<key[0..2]>/<key>.rnug` = `{ "RNUG", 버전, key, 부분 수, 부분별(크기·SHA-256), 본문 }`(텍스처는 mip·slice별 부분).
 - 읽기: 검증 실패 → `CorruptEntry` 진단·삭제·미적중(경합으로 정상 항목을 지워도 재생성되므로 무해).
-- 쓰기: `<BuildCache>/tmp/<guid>` 기록·Flush → `Move(no-replace)`. 대상이 있으면 성공(게시 항목 불변). Put 실패는 치명적이지 않다. 전원 차단 뒤의 손상 항목은 읽기 검증이 거른다.
-- 정리: 적중 시 `SetModifiedTime`, `cache-gc --max-bytes --unused-days`, `tmp` 24시간 경과 삭제.
-- 인터페이스: `BuildCacheBackend { Get, Put, Remove, Touch }`, 계층 `BuildCache`(공유·원격은 계약). `--verify-cache`(적중 결과 = 재생성 결과 대조).
-- 원본 bulk는 에디터 패키지가 권위 저장소(계획 §9.4)이므로 빌드 캐시를 지워도 손실 없음. Virtual Asset(원본 bulk 분리 저장소)은 후속(17절).
+- 쓰기: `<AssetNuggets>/tmp/<guid>` 기록·Flush → `Move(no-replace)`. 대상이 있으면 성공(게시 항목 불변). Put 실패는 치명적이지 않다. 전원 차단 뒤의 손상 항목은 읽기 검증이 거른다.
+- 정리: 적중 시 `SetModifiedTime`, `nugget-gc --max-bytes --unused-days`, `tmp` 24시간 경과 삭제.
+- 인터페이스: `NuggetBackend { Get, Put, Remove, Touch }`, 계층 `NuggetCache`(공유·원격은 계약). `--verify-nuggets`(적중 결과 = 재생성 결과 대조).
+- 원본 bulk는 에디터 패키지가 권위 저장소(계획 §9.4)이므로 에셋 너겟을 지워도 손실 없음. Virtual Asset(원본 bulk 분리 저장소)은 후속(17절).
 
 ## 10. Cooker
 
 - `TargetProfile`(엔진 `Engine/Config/TargetProfiles/<id>.json` + 프로젝트 재정의): id, 그래픽 backend, 형식 지원 표(비압축, 블록 압축 지원 = 이번에는 없음), LOD 그룹 표(12.4.5절), bulk 정렬. 엔진 기본: `Windows`, `Android`(형식 표만, 그래픽 backend 후속).
 - `CookSettings`(`Config/CookSettings.json`): AlwaysCook·NeverCook(경로·디렉터리), PrimaryAsset 규칙(타입 → 디렉터리·bundle 목록), `CookSoftReferences`.
 - 대상: 전체 쿠킹은 (AlwaysCook ∪ PrimaryAsset) → Hard 전이 ∪ (설정 시) Soft 전이. 부분 쿠킹은 (인자 경로) → Hard 전이 ∪ (설정 시) Soft 전이 ∪ 역방향 Build 폐포(원본 Texture2D를 고치면 그것을 묶는 Texture2DArray도 다시 쿠킹) ∪ 기존 매니페스트에서 cookKey가 달라진 항목. 부분 쿠킹은 에디터에서 사라진 에셋의 매니페스트 항목을 지우고, 그것을 하드 참조하는 남은 항목은 `MissingDependency`로 실패시킨다. 공통: EditorOnly 제외, NeverCook에 걸리면 `NeverCookReferenced`. 규칙에도 참조에도 없는 에셋은 쿠킹하지 않는다.
-- 처리: 타입별 `CookProcessor`(빌드 캐시 사용)가 에디터 객체 → 쿠킹 객체·bulk. 쿠킹 데이터는 같은 타입에서 EditorOnly 필드를 뺀 것이다(EditorOnly 필드는 런타임 바이너리에 있고 쿠킹 데이터에 기록·로드되지 않는다). 항목마다 **cookKey**를 계산한다. 지역 입력 = (에디터 패키지 콘텐츠 해시, 논리 경로(경로 힌트·디렉터리 기반 NeverCook·PrimaryAsset 판정이 바뀐다), 그 항목에 적용된 CookSettings 판정(PrimaryAsset·bundle), 처리기 build key들, 쿠커 버전, 쿠킹 패키지 formatVersion·섹션 schemaVersion 집합, 타입 스키마 버전 표 SHA-256, 프로파일 출력 설정 SHA-256). 하드 참조 순환을 위해 SCC 단위로 계산한다: SCC key = SHA-256(구성원 지역 입력을 AssetId 순으로, SCC 밖 하드 의존 튜플 (구성원 AssetId, 의존 AssetId, 그 cookKey)의 정렬 목록), cookKey = SHA-256(SCC key, AssetId). 순환이 없어도 같은 식이다.
+- 처리: 타입별 `CookProcessor`(에셋 너겟 사용)가 에디터 객체 → 쿠킹 객체·bulk. 쿠킹 데이터는 같은 타입에서 EditorOnly 필드를 뺀 것이다(EditorOnly 필드는 런타임 바이너리에 있고 쿠킹 데이터에 기록·로드되지 않는다). 항목마다 **cookKey**를 계산한다. 지역 입력 = (에디터 패키지 콘텐츠 해시, 논리 경로(경로 힌트·디렉터리 기반 NeverCook·PrimaryAsset 판정이 바뀐다), 그 항목에 적용된 CookSettings 판정(PrimaryAsset·bundle), 처리기 build key들, 쿠커 버전, 쿠킹 패키지 formatVersion·섹션 schemaVersion 집합, 타입 스키마 버전 표 SHA-256, 프로파일 출력 설정 SHA-256). 하드 참조 순환을 위해 SCC 단위로 계산한다: SCC key = SHA-256(구성원 지역 입력을 AssetId 순으로, SCC 밖 하드 의존 튜플 (구성원 AssetId, 의존 AssetId, 그 cookKey)의 정렬 목록), cookKey = SHA-256(SCC key, AssetId). 순환이 없어도 같은 식이다.
 - 출력: 쿠킹 루트 `<Project>/Saved/Cooked/<Profile>/` 아래 `CookedManifest.rman`과 `Packages/`. 패키지 파일 이름은 내용 주소(4.2절)라 게시된 파일을 덮어쓰지 않는다.
 - 게시:
   1. 각 패키지를 `.staging/`에 기록·Flush한 뒤 `Move(no-replace)`로 `Packages/<a>/`에 놓는다. 같은 이름이 이미 있으면 크기·SHA-256을 확인해 같으면 임시 파일만 지우고, 다르면(손상) `CorruptEntry` 경고 후 `Replace`로 바꾼다.
@@ -308,7 +308,7 @@ World 객체는 에셋 객체 Registry 밖에 있어 `ObjectRef<에셋>`을 걸 
 - 도구 빌드 ID(Summary): 빌드 시스템이 쿠커·에디터 도구 실행 파일의 입력 지문으로 주입하는 값이며 진단·추적용이다(병합 조건이 아니다).
 - 런타임 쿠킹 루트: 도구(`asset-load-cooked`)는 `<Project>/Saved/Cooked/<Profile>/`. 게임은 `EngineAssets`가 명령행 `-CookedRoot=<dir>`(없으면 실행 파일 디렉터리의 `Cooked/`)를 `AssetManager`에 넘긴다. 쿠킹 결과를 배포 위치로 옮기는 패키징 단계는 후속이다.
 - 쿠킹 bulk codec: 프로파일 설정(None·Zstd, 기본 None — 후속 스트리밍의 mip 단위 접근을 위해 entry 단위 압축).
-- 결정성(범위: 같은 도구 빌드에서 호스트 무관하게 같은 바이트): 정렬된 순회, 병렬 결과 정렬 후 기록, ID는 에디터 값 복사, 패딩 0. 이미지 처리 모듈은 SIMD 분기 없이 스칼라 경로만 쓰고, 초월 함수(pow·exp2·log2·sin)와 sRGB·감마 변환은 CRT를 쓰지 않는 Core 결정적 수학(A0-C)으로 하며 쿠킹 작업 동안 부동소수점 환경 guard(A0-C)를 건다. 현재 Core `LinearColor::ToSRGB`는 CRT `pow`를 써서 호스트마다 결과가 다를 수 있으므로(Color.h 주석) A0-C에서 결정적 수학의 표·함수로 바꾼다(런타임과 쿠킹의 sRGB 구현을 하나로). 결정적 수학 버전은 빌드 캐시 키와 cookKey에 들어간다. 시험: 결정적 수학의 기준값 표, CRT 미사용 링크 검사, 빌드 캐시 빈/찬 상태 출력 비교.
+- 결정성(범위: 같은 도구 빌드에서 호스트 무관하게 같은 바이트): 정렬된 순회, 병렬 결과 정렬 후 기록, ID는 에디터 값 복사, 패딩 0. 이미지 처리 모듈은 SIMD 분기 없이 스칼라 경로만 쓰고, 초월 함수(pow·exp2·log2·sin)와 sRGB·감마 변환은 CRT를 쓰지 않는 Core 결정적 수학(A0-C)으로 하며 쿠킹 작업 동안 부동소수점 환경 guard(A0-C)를 건다. 현재 Core `LinearColor::ToSRGB`는 CRT `pow`를 써서 호스트마다 결과가 다를 수 있으므로(Color.h 주석) A0-C에서 결정적 수학의 표·함수로 바꾼다(런타임과 쿠킹의 sRGB 구현을 하나로). 결정적 수학 버전은 너겟 키와 cookKey에 들어간다. 시험: 결정적 수학의 기준값 표, CRT 미사용 링크 검사, 에셋 너겟 빈/찬 상태 출력 비교.
 - 오류: 에셋별 원인·경로를 모아 보고, 하나라도 실패하면 게시하지 않는다.
 
 ## 11. 런타임 로딩과 수명(계획 §9.2 계약)
@@ -415,8 +415,8 @@ Requested → ResolveManifest(`CookedManifest.rman`, 하드 의존 SCC 계산) �
 | `SRGB`, `bUseLegacyGamma`(원본을 sRGB 대신 2.2 감마로 해석, 12.2절) | 구현 |
 | `CompressionSettings`(편집 가능 15종, 대응은 12.4.3절). 숨김 값 `TC_LQ`(13)·`TC_EncodedReflectionCapture`(14, UE 주석: 더 이상 쓰지 않음) | 구현. 숨김 값은 `InvalidSetting` |
 | `CompressionNoAlpha` | 구현. UE 설명대로 비압축 RGBA 출력에는 적용하지 않으므로 지금은 결과를 바꾸지 않는다(블록 압축 단계에서 의미가 생긴다) |
-| `CompressionForceAlpha`, `CompressionNone`(UE 내부 설정 — 편집 속성 아님) | 구현(스키마·빌드 캐시 키 포함). 비압축 쿠킹은 알파를 자동으로 빼지 않고 모두 비압축이므로 지금은 결과를 바꾸지 않는다 |
-| `CompressionCacheId`(Guid — 빌드 캐시 키에 넣어 바꾸면 재빌드) | 구현 |
+| `CompressionForceAlpha`, `CompressionNone`(UE 내부 설정 — 편집 속성 아님) | 구현(스키마·너겟 키 포함). 비압축 쿠킹은 알파를 자동으로 빼지 않고 모두 비압축이므로 지금은 결과를 바꾸지 않는다 |
+| `CompressionCacheId`(Guid — 너겟 키에 넣어 바꾸면 재빌드) | 구현 |
 | `MipGenSettings`: `FromTextureGroup`·`SimpleAverage`·`NoMipmaps`·`Unfiltered` | 구현(12.5절) |
 | `Filter`(`Nearest`·`Bilinear`·`Trilinear`·`Default` = 그룹 값) | 구현 |
 | `LODBias`, `MaxTextureSize`(0 = 형식 최대) | 구현(그룹 값과의 합성은 12.5절) |
@@ -562,15 +562,15 @@ asset-alias-remove <옛 path>
 asset-alias-prune
 asset-orphans-list
 asset-orphans-delete <path>
-asset-cook --profile=<id> [<path>…] [--verify-cache]
+asset-cook --profile=<id> [<path>…] [--verify-nuggets]
 asset-load-cooked --profile=<id> <AssetId|경로 힌트>
-cache-gc --max-bytes=<n> --unused-days=<n>
+nugget-gc --max-bytes=<n> --unused-days=<n>
 공통 옵션: --project=<dir>(기본: 현재 디렉터리에서 위로 *.rocksproject 탐색), --wait=<초>(쓰기 잠금 대기, 기본 0)
 ```
 
 문법:
 
-- 옵션은 값이 있는 `--<이름>=<값>`과 값 없는 bool 플래그 `--<이름>`(`--force`·`--verify-cache`) 두 형태다. 공백으로 나눈 값·짧은 옵션은 없다.
+- 옵션은 값이 있는 `--<이름>=<값>`과 값 없는 bool 플래그 `--<이름>`(`--force`·`--verify-nuggets`) 두 형태다. 공백으로 나눈 값·짧은 옵션은 없다.
 - 설정(`[설정…]`)은 `--<속성>=<값>`, `asset-new`·`asset-set`의 속성은 `<속성>=<값>`이다. 속성 이름은 `ROCKS_PROPERTY(Name="…")`로 노출한 이름(텍스처는 UE C++ 이름, 대소문자 무시)이고 구조체 필드는 `<속성>.<필드>`(예: `SourceColorSettings.ColorSpace=sRGB`)다. 모르는 이름은 `UnknownProperty`.
 - 값: enum은 열거자 이름(대소문자 무시, UE 접두사는 붙여도 되고 빼도 된다 — 12.4절), 정수·실수는 10진, bool은 `on`·`off`·`true`·`false`, 문자열은 그대로, 참조는 논리 경로 또는 36자 AssetId(`none` = null), 배열은 쉼표 목록(빈 배열은 빈 값).
 - 목록 구분자는 `,`, `--cube-array`의 cube 구분자는 `;`, `--cube`의 면 이름 구분자는 `:`(앞 2자 `px`…`nz`만 면 이름으로 본다). 값 안의 `\,`·`\;`만 이스케이프(→ `,`·`;`)이고 그 밖의 `\`는 글자 그대로다(Windows 경로 `C:\Art\a.png`·UNC `\\server\share\a.png`는 그대로 쓴다). 논리 경로는 경로 정책상 `,`·`;`·`\`를 가질 수 없다. `;`가 든 인자는 셸 구분자이므로 따옴표로 감싼다.
@@ -585,17 +585,17 @@ cache-gc --max-bytes=<n> --unused-days=<n>
 
 1. PNG 임포트·저장 → 새 프로세스에서 같은 AssetId·픽셀
 2. 원본 PNG 삭제 후 에디터 패키지만으로 쿠킹
-3. 원본 변경 재임포트: ID·참조 유지, 해시 갱신, 빌드 캐시 무효화
+3. 원본 변경 재임포트: ID·참조 유지, 해시 갱신, 에셋 너겟 무효화
 4. 잘못된 PNG·원본 누락·잘못된 옵션 재임포트 실패 시 기존 패키지 바이트 불변
 5. 이동·이름 변경(디렉터리 포함) 후 ID 참조 유지, 별칭 해석·경고·만료
 6. 복제본 새 ID·내부 참조 재매핑
 7. 중복 ID·깨진 참조·TypeMismatch·UnsupportedCycle 진단, 하드 순환 SCC 로드
 8. 인덱스 캐시 삭제 후 재구축, 에디터 밖 이동·삭제 후 재검색, 감시 Overflow·RootLost 복구
-9. 빌드 캐시 적중·설정 변경 무효화·툴체인 지문 변경 무효화·손상 복구·두 프로세스 동시 기록·GC
+9. 에셋 너겟 적중·설정 변경 무효화·툴체인 지문 변경 무효화·손상 복구·두 프로세스 동시 기록·GC
 10. mip 크기·대표 픽셀(12.5절 표: sRGB·알파·홀수·Unfiltered·PreserveBorder·FlipGreen·NoAlpha(비압축 결과 불변)·Normalize·Volume·Cube)
 11. 쿠킹 패키지만으로 로드, EditorOnly 데이터·필드 부재
 12. 잘못된 패키지(magic·CRC·섹션 순서·겹침·범위·크기)·UnsupportedVersion·NewerVersion
-13. 쿠킹 재현성(빌드 캐시 빈/찬, 두 번 쿠킹 동일 바이트, Debug·Release 도구 사이 동일 바이트), 부분 쿠킹 병합·전체 쿠킹 정리, 실패 시 게시본 불변
+13. 쿠킹 재현성(에셋 너겟 빈/찬, 두 번 쿠킹 동일 바이트, Debug·Release 도구 사이 동일 바이트), 부분 쿠킹 병합·전체 쿠킹 정리, 실패 시 게시본 불변
 14. 저장 실패 주입 시 기존 보존, 열린 대상 교체, 잠금 Busy, ExternalModification
 15. 경로 정책: NFC/NFD 같은 이름, 대소문자 중복, 예약 이름, 길이, CaseCollision
 16. 소프트 참조 비자동 로드, 요청 합류·개별 취소, OnReady 중복 AlreadyRegistered, scope Revoke·ScopeClosed, 의존 retention, lease 해제 후 회수
@@ -610,7 +610,7 @@ cache-gc --max-bytes=<n> --unused-days=<n>
 25. 결정적 수학 기준값·CRT 초월 함수 미사용 링크 검사, 서로 다른 호스트·빌드 구성의 쿠킹 바이트 비교
 26. 원본 규칙: BMP 32비트 BI_RGB 알파 무시·V5 알파 마스크, TGA 알파 비트·확장 영역(premultiplied), PSD 색 모드·hasRealMergedData·추가 채널, PNG 회색 16비트 + tRNS
 27. 매니페스트 대조: 프로파일 불일치 `IncompatibleCook`, 크기·SHA·의존 불일치 `CorruptPackage`, 손상된 게시 파일의 재게시
-28. 순환 키: 하드 순환 A↔B·3-node 순환의 cookKey와 Build 순환의 빌드 캐시 키가 정의되고, 구성원 하나를 바꾸면 SCC 전체의 키가 바뀐다. 동적 간선으로 생긴 순환의 단위 병합과 해제, 간선 다중도(필드 둘 중 하나 제거)
+28. 순환 키: 하드 순환 A↔B·3-node 순환의 cookKey와 Build 순환의 너겟 키가 정의되고, 구성원 하나를 바꾸면 SCC 전체의 키가 바뀐다. 동적 간선으로 생긴 순환의 단위 병합과 해제, 간선 다중도(필드 둘 중 하나 제거)
 29. 저장: 이전 파일의 손상 bulk entry 복사 거부, bulkId 재매핑 후 지연 읽기, 저장 중 편집 시 재연결 생략, 대체 경로(FAT 등)에서 자기 핸들 때문에 실패하지 않음
 
 ## 15. PNG 디코더 범위
@@ -625,7 +625,7 @@ cache-gc --max-bytes=<n> --unused-days=<n>
 
 ### 16.2 Build 의존 선언
 
-`DependencyDeclarer`(AssetRuntime 인터페이스, 타입별 등록)가 에디터 객체에서 Build 의존(예: Texture2DArray의 원본 Texture2D)을 선언한다. AssetDatabase는 저장 때 이 인터페이스로 목록을 얻어 Dependencies에 기록하고(쿠커를 부르지 않는다 — 의존 방향 유지), AssetCooker는 같은 선언을 빌드 캐시 키·선행 조건에 쓴다.
+`DependencyDeclarer`(AssetRuntime 인터페이스, 타입별 등록)가 에디터 객체에서 Build 의존(예: Texture2DArray의 원본 Texture2D)을 선언한다. AssetDatabase는 저장 때 이 인터페이스로 목록을 얻어 Dependencies에 기록하고(쿠커를 부르지 않는다 — 의존 방향 유지), AssetCooker는 같은 선언을 너겟 키·선행 조건에 쓴다.
 
 ## 17. 계획 문서 개정 사항
 
@@ -637,13 +637,13 @@ cache-gc --max-bytes=<n> --unused-days=<n>
 - 로딩 API 추가: `AssetRequest.expectedType`·`scope`, `LoadBlocking`(도구·초기화 전용), `OnReady(LoadTicket&)` 참조 인자. `OnReady` lane·`ReadyMask`의 이번 구현 범위는 개정이 아니라 11.1절의 `계약` 상태다.
 - §9.2 수명: 상주 단위 = 하드 참조 SCC, Closing 대기 중 revive, Pump 안의 Closing → Discard(11.4절). 계획의 발급·Closing 선형화 규칙과 같다.
 - 임포트 worker process(§9.1): 장시간 실행 호스트(에디터)를 임포터 실패로부터 보호하는 장치이므로 에디터와 함께 구현한다. 이번 범위의 임포트 호스트는 명령행 프로세스 자체이며(실패해도 원자적 저장으로 에셋 보존), `Importer` 인터페이스는 입력(원본 바이트·옵션)·출력(객체 그래프·bulk)만 주고받아 프로세스 경계로 옮길 수 있게 한다.
-- Virtual Asset(§9.4): 원본 bulk의 분리 저장소는 후속. 이번에는 에디터 패키지 안 bulk가 권위 저장소다(빌드 캐시에만 있는 원본은 허용하지 않는다는 원칙은 지킨다).
+- Virtual Asset(§9.4): 원본 bulk의 분리 저장소는 후속. 이번에는 에디터 패키지 안 bulk가 권위 저장소다(에셋 너겟에만 있는 원본은 허용하지 않는다는 원칙은 지킨다).
 - 런타임 VFS(APK)는 Android 그래픽·패키징과 함께 후속(쿠킹 매니페스트는 쿠킹 루트 기준 상대 경로만 사용).
-- 용어: UE의 DDC(Derived Data Cache)에 해당하는 것을 **빌드 캐시**(BuildCache)라 부른다(사용자 결정). 코드 산출물 캐시는 계획 문서의 `BuildArtifactCache`다. 계획 문서 전체에 반영.
-- 반영한 계획 문서 위치: §3.1 모듈 표(AssetRuntime은 빌드 캐시 reader가 아니라 쿠킹 매니페스트 reader), §7.1 예시(`SoftObjectRef<MaterialAsset>`), §9.1 AssetIndex·별칭·worker process, §9.2 `AssetRequest`·수명, §9.4 Virtual Asset 후속·쿠킹 패키지 이름(내용 주소), VFS 후속, A21 위험 항목.
+- 용어: UE의 DDC(Derived Data Cache)에 해당하는 것을 **에셋 너겟**(AssetNugget)이라 부른다(사용자 결정). 저장되는 가공 결과 하나가 너겟이고, 모듈은 `AssetNugget`, 모듈 안 타입은 짧은 `Nugget` 접두(`NuggetCache`·`NuggetBackend`·너겟 키)를 쓴다. 2026-11-13에 "빌드 캐시(BuildCache)"에서 바꿨다 — 코드 빌드의 캐시와 헷갈렸기 때문이다. 코드 산출물 캐시는 계획 문서의 `BuildArtifactCache`다. 계획 문서 전체에 반영.
+- 반영한 계획 문서 위치: §3.1 모듈 표(AssetRuntime은 에셋 너겟 reader가 아니라 쿠킹 매니페스트 reader), §7.1 예시(`SoftObjectRef<MaterialAsset>`), §9.1 AssetIndex·별칭·worker process, §9.2 `AssetRequest`·수명, §9.4 Virtual Asset 후속·쿠킹 패키지 이름(내용 주소), VFS 후속, A21 위험 항목.
 
 ## 18. 범위 밖과 후속
 
 후속(이번 범위에 API도 없음): 에디터 UI, GPU 업로드·텍스처 mip 스트리밍(계획 §9.5), HDR·EXR 디코더·equirect Cube, Cube 면 경계 연속 mip, 임포트 worker process, Virtual Asset, VFS, 예산 LRU 해제, 실제 다중 출력 임포터(FBX·glTF), UE의 다른 텍스처 계열(렌더 타깃 에셋·IES `TextureLightProfile`·`RuntimeVirtualTexture`·미디어·동적 텍스처), 일반 에셋 사용자 데이터(`AssetUserData`), 쿠킹 결과 패키징(배포 위치 배치).
 
-계약(API·스키마는 있고 기본값이 아니거나 호출하면 명시 오류)으로 이번에 두는 것은 3·11·12절 표에 있다: 공유·원격 빌드 캐시 backend, 블록 압축, 12.4절 계약 설정(가상 텍스처·스트리밍·보정·색 관리·압축 설정 포함), `ReadyMask::Render`, `TaskLane::Worker`·`Render`.
+계약(API·스키마는 있고 기본값이 아니거나 호출하면 명시 오류)으로 이번에 두는 것은 3·11·12절 표에 있다: 공유·원격 에셋 너겟 backend, 블록 압축, 12.4절 계약 설정(가상 텍스처·스트리밍·보정·색 관리·압축 설정 포함), `ReadyMask::Render`, `TaskLane::Worker`·`Render`.

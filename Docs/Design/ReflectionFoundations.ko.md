@@ -329,7 +329,7 @@ struct BulkDataRef {
 
 ## 8. 빌드 주입 상수(B7)
 
-- **툴체인 지문**: SHA-256(정규 텍스트: 컴파일러 `--version`에서 `InstalledDir:` 등 호스트 경로 줄을 뺀 식별·버전, `Target:` 줄의 대상 triple, 실제 `CompileFlags`에서 가져온 부동소수점 모델 인자). 빌드 구성(Debug·Release)과 호스트 경로·환경은 넣지 않는다. 지문은 빌드 캐시 키에만 들어가고 쿠킹 byte에는 들어가지 않는다(AS 10절의 호스트 무관 요구와 충돌하지 않는다 — 다른 툴체인의 캐시 항목을 재사용하지 않을 뿐이다).
+- **툴체인 지문**: SHA-256(정규 텍스트: 컴파일러 `--version`에서 `InstalledDir:` 등 호스트 경로 줄을 뺀 식별·버전, `Target:` 줄의 대상 triple, 실제 `CompileFlags`에서 가져온 부동소수점 모델 인자). 빌드 구성(Debug·Release)과 호스트 경로·환경은 넣지 않는다. 지문은 너겟 키에만 들어가고 쿠킹 byte에는 들어가지 않는다(AS 10절의 호스트 무관 요구와 충돌하지 않는다 — 다른 툴체인의 캐시 항목을 재사용하지 않을 뿐이다).
 - **도구 빌드 ID**: SHA-256(정렬된 입력 목록 + 정규화된 compile 인자 + 툴체인 지문). 입력은 실행 파일 모듈 액션 그래프의 1차 입력(소스·규칙)과 `NativeBuildEngine.InputSnapshot`의 헤더 디렉터리 inventory(그 모듈과 의존 모듈의 include 디렉터리 안 헤더 전부)이고, 생성물과 BuildInfo 자신은 뺀다. depfile은 쓰지 않는다(Rocks.Build에 depfile 추적이 없고, 컴파일 뒤에야 생기는 정보라 clean 빌드와 증분 빌드의 ID가 달라진다). 경로는 `src:`·`out:`·`sdk:` 접두를 붙인 상대 경로(출력 디렉터리 이름의 preset·구성이 섞이지 않게)이며 내용 해시는 **텍스트 파일만** CRLF를 LF로 정규화해 계산한다(prebuilt 바이너리는 그대로 — 저장소는 이미 `* text=auto eol=lf`). Summary·AssetIndex 캐시 키의 진단용이다(AS 10절, 병합 조건 아님).
 - 주입: NativeBuildEngine이 Core에 도달하는 실행 파일 모듈마다 `<out>/BuildInfo/<Module>.BuildInfo.cpp`를 만들어(계획 두 단계 — 파일을 만든 뒤 액션 그래프를 세운다) 그 모듈 소스에 더한다(Program.cs와 InstalledSdk 경로가 함께 쓴다). Core에 선언 헤더(`Core/Build/BuildInfo.h`: `ToolchainFingerprint()`·`ToolBuildId()`가 `Sha256Digest`를 돌려준다)를 둔다. 생성 TU 하나만 다시 컴파일된다.
 - 시험: 지문이 구성과 무관하고 컴파일러 버전·대상에 따라 바뀜, 줄 끝 정규화, 생성 TU만 재컴파일. AS 시나리오 13·25에 **구성 사이 쿠킹 byte 비교**를 더한다(C3은 수학 digest만 확인했다).

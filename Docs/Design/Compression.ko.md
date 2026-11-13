@@ -210,7 +210,7 @@ struct CompressionLevelRange {
 Result<CompressionLevelRange> TryGetCompressionLevelRange(CompressionFormat format) noexcept;
 
 // 형식 이름·revision이다. 내장 형식은 "lz4"·"zstd"·"deflate"·"zlib"·"gzip"·"lz4frame"·"brotli"와
-// CompressionOutputRevision, 사용자 등록 형식은 등록 이름("oodle.kraken"처럼 '.' 포함)과 version이다. 빌드 캐시 키는
+// CompressionOutputRevision, 사용자 등록 형식은 등록 이름("oodle.kraken"처럼 '.' 포함)과 version이다. 너겟 키는
 // 형식 값 대신 이름·revision과 수준·사전 Digest를 쓴다.
 struct CompressionFormatInfo { /* Name()·revision·plugin·compresses */ };
 Result<CompressionFormatInfo> TryGetCompressionFormatInfo(CompressionFormat format) noexcept; // 모름 InvalidArgument
@@ -1251,7 +1251,7 @@ brotli==1.1.0`, google/brotli 1.1.0의 공식 binding)가 만든 13개(합 4,107
 
 UE 5.6 `ICompressionFormat` 대응이다. UE는 `IModularFeatures`("CompressionFormat")에 형식을 등록하고
 `FCompression::GetCompressionFormat(FName)`이 내장 형식(Zlib·Gzip·LZ4·Oodle) 다음으로 찾는다. 형식은 `FName`으로 식별하고
-`GetVersion`·`GetDDCKeySuffix`를 빌드 캐시 키에 넣는다. Rocks도 저장소에 넣지 않는 외부 코덱(라이선스상 프로젝트가 따로
+`GetVersion`·`GetDDCKeySuffix`를 너겟 키에 넣는다. Rocks도 저장소에 넣지 않는 외부 코덱(라이선스상 프로젝트가 따로
 가져오는 코덱 등)을 프로젝트·플러그인이 등록해 내장 형식과 같은 API로 쓰게 한다. 헤더는 `Compression/CompressionCodec.h`,
 구현은 `Private/CompressionCodec.cpp`다. 설계 초안은 교차검증(값 인코딩·수명·비동기 연동·거부 표면)을 거쳤다.
 
@@ -1265,7 +1265,7 @@ UE 5.6 `ICompressionFormat` 대응이다. UE는 `IModularFeatures`("CompressionF
 - 이름 문법: 소문자 ASCII `[a-z0-9_-]`로 된 비지 않은 조각을 `.`로 이은 1–32byte다. 내장 이름(`lz4`·`zstd`·`deflate`·
   `zlib`·`gzip`·`lz4frame`·`brotli`)은 조각이 하나이고, 사용자 등록 이름은 둘 이상이어야 해서(예 `oodle.kraken`) 절대
   겹치지 않는다.
-- 사용자 등록 형식의 값은 등록 순서에 따라 실행마다 다르다. 파일·빌드 캐시 키에는 `TryGetCompressionFormatInfo`의
+- 사용자 등록 형식의 값은 등록 순서에 따라 실행마다 다르다. 파일·너겟 키에는 `TryGetCompressionFormatInfo`의
   이름과 revision(내장 형식은 `CompressionOutputRevision`, 사용자 등록 형식은 등록 version)을 수준·사전 Digest와 함께
   쓴다. 설정 파일의 이름은 `TryFindCompressionFormat`으로 값으로 바꾼다(문법 위반 InvalidArgument, 없거나 해제 중이면
   NotFound).

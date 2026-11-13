@@ -82,7 +82,7 @@
 
 **PASS 근거:** BakeMaterialProfile이 CPU 소비 target으로 정의되어 Shader IR을 GPU raster/readback에 의존해 평가하는 모순이 없다. 지원 불가 node는 승인 proxy 또는 위치가 있는 오류가 필요하다. BakeScene은 입력 revision·texture sampling·seed가 고정된 immutable snapshot이며 worker는 scene 주소를 보관하지 않는다. 현재 source와 다른 결과 및 취소된 부분 결과를 성공 asset으로 게시할 수 없다. CPU headless와 실제 GPU preview 검증도 구분한다.
 
-**검증 조건:** LT01/05/06·MT08에 GPU device 생성 시 즉시 실패하는 host fixture를 사용한다. 정상 부분집합은 CPU만으로 완료하고 미지원 node는 명시 실패한다. 편집·취소·worker crash·DDC 손상 후 current lighting manifest가 바뀌지 않고, 임시 출력·module/resource lease가 drain 후 반환되는지 검사한다.
+**검증 조건:** LT01/05/06·MT08에 GPU device 생성 시 즉시 실패하는 host fixture를 사용한다. 정상 부분집합은 CPU만으로 완료하고 미지원 node는 명시 실패한다. 편집·취소·worker crash·에셋 너겟 손상 후 current lighting manifest가 바뀌지 않고, 임시 출력·module/resource lease가 drain 후 반환되는지 검사한다.
 
 **유보:** CPU evaluator의 정확한 수치 오차·denoise 품질 기준은 구현 workload에서 확정한다. 이것은 소유권 모순으로 분류하지 않는다.
 
@@ -92,7 +92,7 @@
 
 **실행 순서:** plugin node lowering을 수행하는 compile worker를 멈춘다. 이전 성공 material의 PSO가 preview recording에 쓰이는 동안 plugin unregister를 시작한다. compile 취소 뒤 worker가 늦게 복귀하고 viewport도 닫힌다. DDC에는 해당 node/compiler 버전으로 만든 이전 artifact가 남아 있다.
 
-**PASS 근거:** node descriptor 배열은 등록 시 소유 복사하고 lowering pointer는 ModuleLease로 보호한다. unregister는 compile admission 차단과 drain을 거치며, 공통 확장 계약은 instance/metadata/backend lease가 남으면 Busy로 DLL unload를 보류한다. runtime material에는 원본 node 구현을 포함하지 않으므로 검증된 shader bytecode만 남은 DDC/PSO cache를 곧바로 plugin code 사용으로 간주할 필요는 없다. 실제 함수 pointer나 plugin 소멸 연산을 보유한 cache entry는 공통 ModuleLease 계약의 사용자이며 lease 종료 전 unload할 수 없다. GPU packet이 보유한 PSO·vendor context는 recording/fence 규약을 따른다.
+**PASS 근거:** node descriptor 배열은 등록 시 소유 복사하고 lowering pointer는 ModuleLease로 보호한다. unregister는 compile admission 차단과 drain을 거치며, 공통 확장 계약은 instance/metadata/backend lease가 남으면 Busy로 DLL unload를 보류한다. runtime material에는 원본 node 구현을 포함하지 않으므로 검증된 shader bytecode만 남은 에셋 너겟/PSO cache를 곧바로 plugin code 사용으로 간주할 필요는 없다. 실제 함수 pointer나 plugin 소멸 연산을 보유한 cache entry는 공통 ModuleLease 계약의 사용자이며 lease 종료 전 unload할 수 없다. GPU packet이 보유한 PSO·vendor context는 recording/fence 규약을 따른다.
 
 **검증 조건:** MT05/09/10·CT22/23에서 느린 lowering·cancel·unregister·preview close·늦은 Submit을 교차한다. 마지막 lowering/destructor 이전 code unload 0, Busy 중 신규 compile 거부, stale 결과 publish 0을 확인한다. bytecode-only cache와 plugin 함수 pointer를 가진 test cache를 별도로 만들어 후자만 unload를 지연하는지 검사한다. 무기한 cache pin을 정상 완료로 보고하지 않고 보유 owner를 출력한다.
 

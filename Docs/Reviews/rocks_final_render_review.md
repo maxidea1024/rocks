@@ -72,7 +72,7 @@
 | 5 API와 Deferred/Forward | 유지. §2.5/§11.5는 target와 compiler host를 구분하고 두 경로의 기본 profile을 모두 필수로 한다. 모든 OS에서 모든 API가 작동한다는 약속은 없다. Mac Studio도 정식 개발 환경이다. |
 | Shader toolchain·runtime 예외 | 유지. D3D11 DXBC와 D3D12 DXIL을 구분한다. §14.7은 OpenGL의 target GLSL compile/link 및 driver binary fallback을 원본 material graph/HLSL 도구 포함과 구별한다. |
 | Material Editor와 Blueprint 제외 | 유지. §14.5–14.9의 편집·함수·레이어·미리보기·Undo·진단·compile revision은 필수 단계가 있다. 전문 재질 그래프를 범용 게임플레이 시각 언어로 확대하지 않으며 게임플레이 커스텀 언어 원칙이 유지된다. |
-| Streaming·builtin bootstrap | 핵심 유지. 실제 backing memory 회수·구/신 peak·취소 세대·lease/fence·typed fallback·pin carveout·DDC 독립 bootstrap·CPU-only GPU 금지가 명시되었다. FR02/FR05는 이 경로의 추가 경계다. |
+| Streaming·builtin bootstrap | 핵심 유지. 실제 backing memory 회수·구/신 peak·취소 세대·lease/fence·typed fallback·pin carveout·에셋 너겟 독립 bootstrap·CPU-only GPU 금지가 명시되었다. FR02/FR05는 이 경로의 추가 경계다. |
 | 베이크·프로브 의미 | 범위 정의 유지. baked direct/indirect와 Mixed runtime 항이 분리되며, baked probe를 움직이는 객체가 샘플링하는 것·scenario blend·runtime GI 재계산을 구별한다. FR01은 이 기능들의 첫 실행 경로를 연결한다. |
 | 수학·명명·SIMD | 유지. §3.3은 MS식 명명 불호와 라이브러리 성능을 혼동하지 않는다. 공개 Rocks storage/API, f32/f64, 후보 미선정·benchmark 미실행, 채택 library adapter를 명시한다. 작은 연산별 virtual/function-pointer dispatch를 금지하고 batch dispatch·SSE2/선택 AVX2/FMA의 OS 상태 검사·ARM64 NEON 검증을 요구한다. |
 | Inline·의존성 절충 | 유지. §3.3 253줄은 vendor header 완전 비공개와 모든 작은 연산 무비용 inline의 동시 보장을 하지 않는다. detail inline 의존과 private TU/LTO의 비용을 측정하도록 규정한다. |
