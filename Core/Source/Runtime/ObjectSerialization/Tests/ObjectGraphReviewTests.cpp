@@ -1,3 +1,4 @@
+#include <Object/GeneratedFieldCodec.h>
 #include <ReflectionTestFixtures/ReflectionFixture.generated.h>
 #include <TestSupport/Test.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -48,7 +49,8 @@ Result<TypeRegistrationToken> RegisterHolder(TypeRegistry& types) noexcept {
             const FieldValue& input) noexcept {
              return detail::WriteGeneratedStagedField<BaseHolder>(transaction, owner,
                                                                   &BaseHolder::edge, input);
-         }}};
+         },
+         &detail::EncodeThroughFieldValue, &detail::DecodeThroughFieldValue}};
     auto ops = MakeRuntimeTypeOps<BaseHolder>();
     ops.fields = accessors;
     ops.completeFieldLayout = true;
@@ -228,7 +230,7 @@ TEST(ObjectGraphDerivedReferenceIntoBaseFieldIsAccepted) {
         REQUIRE(source);
         ObjectRegistry target(allocator, types, {921, 1});
         ObjectGraphLoadOptions options;
-        options.allowMissingFields = true;
+        options.policy.allowMissingFields = true;
         ConstructedForReview = 0;
         auto loaded = LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
                                       source.Value().View(), options);
@@ -262,7 +264,7 @@ TEST(ObjectGraphUnrelatedReferenceTypeIsRejectedBeforeAnyConstructor) {
         REQUIRE(source);
         ObjectRegistry target(allocator, types, {923, 1});
         ObjectGraphLoadOptions options;
-        options.allowMissingFields = true;
+        options.policy.allowMissingFields = true;
         ConstructedForReview = 0;
         const auto before = allocator.Stats();
         const auto leases = types.Stats().leases;
@@ -292,7 +294,7 @@ TEST(ObjectGraphReferenceToNativeAliasTypePreservesAliasSchemaOnResave) {
         REQUIRE(source);
         ObjectRegistry target(allocator, types, {922, 1});
         ObjectGraphLoadOptions options;
-        options.allowMissingFields = true;
+        options.policy.allowMissingFields = true;
         auto loaded = LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
                                       source.Value().View(), options);
         REQUIRE(loaded);

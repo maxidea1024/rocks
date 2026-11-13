@@ -206,7 +206,7 @@ TEST(ReflectionTransientWireAndAbstractGraphAreRejectedBeforeConstructors) {
                                        {record.Value().Data(), record.Value().Size()});
         REQUIRE(graph);
         ObjectGraphLoadOptions options;
-        options.allowMissingFields = true;
+        options.policy.allowMissingFields = true;
         CHECK(LoadObjectGraph(allocator, objects, types, objects.OwnerAccess(),
                               {graph.Value().Data(), graph.Value().Size()}, options)
                   .Error() == ErrorCode::Unsupported);

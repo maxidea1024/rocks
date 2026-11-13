@@ -1,3 +1,4 @@
+#include <Object/GeneratedFieldCodec.h>
 #include <TestSupport/Test.h>
 #include <TestSupport/NFailAllocator.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -20,10 +21,13 @@ constexpr Guid FloatId{1, 8};
 constexpr Guid DoubleId{1, 9};
 constexpr Guid BoolId{1, 10};
 uint32 LiveNodes = 0;
+// 단조 증가 생성 횟수다(rollback으로 줄지 않는다 — 생성자가 실행됐는지 확인한다).
+uint32 ConstructedNodes = 0;
 
 struct GraphNode final : Object {
     explicit GraphNode(Allocator& allocator) noexcept : text(allocator) {
         ++LiveNodes;
+        ++ConstructedNodes;
     }
 
     ~GraphNode() noexcept {
@@ -62,7 +66,9 @@ RuntimeFieldOps FieldOps(Guid id) noexcept {
         [](ConstructionContext& transaction, ObjectHandle object,
            const FieldValue& value) noexcept {
             return detail::WriteGeneratedStagedField<GraphNode>(transaction, object, Member, value);
-        }};
+        },
+        &detail::EncodeThroughFieldValue,
+        &detail::DecodeThroughFieldValue};
 }
 
 // 필드 이름은 타입 안에서 유일해야 한다(TypeRegistry가 도구 이름의 대소문자 무시 유일성을
@@ -333,7 +339,7 @@ TEST(ObjectGraphUnknownFieldsSkipAndMissingFieldsNeedExplicitDefaultPolicy) {
     CHECK(strict.Error() == ErrorCode::NotFound);
     CHECK(target.Stats().liveObjects == 0);
     ObjectGraphLoadOptions options;
-    options.allowMissingFields = true;
+    options.policy.allowMissingFields = true;
     auto permissive = LoadObjectGraph(source.allocator, target, source.types, target.OwnerAccess(),
                                       bytes.Value().View(), options);
     REQUIRE(permissive);
@@ -423,7 +429,7 @@ TEST(ObjectGraphMalformedKnownFieldsNeverPublishObjects) {
                           {BoolId, WireType::Bool, {2}, 1, ErrorCode::InvalidArgument},
                           {LeftId, WireType::U64, {2}, 8, ErrorCode::InvalidArgument}};
     ObjectGraphLoadOptions options;
-    options.allowMissingFields = true;
+    options.policy.allowMissingFields = true;
     for (const auto& example : cases) {
         RecordBuilder record(source.allocator, NodeType, 1);
         REQUIRE(record.AddField(example.id, example.type, {example.bytes, example.size}));
@@ -443,16 +449,16 @@ TEST(ObjectGraphMalformedKnownFieldsNeverPublishObjects) {
 TEST(ObjectGraphLimitsAreAppliedBeforePublication) {
     SourceGraph source;
     REQUIRE(source.Initialize());
-    ObjectGraphLimits limits;
-    limits.maxObjects = 1;
+    ObjectGraphSaveOptions limited;
+    limited.limits.maxObjects = 1;
     auto tooMany = SaveObjectGraph(source.allocator, source.registry, source.registry.OwnerAccess(),
-                                   source.root.Handle(), limits);
+                                   source.root.Handle(), limited);
     CHECK(!tooMany);
     CHECK(tooMany.Error() == ErrorCode::CapacityExceeded);
-    limits = {};
-    limits.maxValueBytes = 1;
+    limited = {};
+    limited.limits.maxValueBytes = 1;
     auto tooLong = SaveObjectGraph(source.allocator, source.registry, source.registry.OwnerAccess(),
-                                   source.root.Handle(), limits);
+                                   source.root.Handle(), limited);
     CHECK(!tooLong);
     CHECK(tooLong.Error() == ErrorCode::CapacityExceeded);
     auto bytes = SaveObjectGraph(source.allocator, source.registry, source.registry.OwnerAccess(),
@@ -466,6 +472,100 @@ TEST(ObjectGraphLimitsAreAppliedBeforePublication) {
     CHECK(!noWork);
     CHECK(noWork.Error() == ErrorCode::CapacityExceeded);
     CHECK(target.Stats().liveObjects == 0);
+}
+
+// 1단계가 2단계 몫까지 미리 청구하므로 work 한도로 인한 실패는 모두 생성자 실행 전이다. 한도를
+// 0부터 올려 가며 성공하는 첫 값까지 확인한다.
+TEST(ObjectGraphEveryWorkLimitFailureHappensBeforeAnyConstructor) {
+    SourceGraph source;
+    REQUIRE(source.Initialize());
+    auto bytes = SaveObjectGraph(source.allocator, source.registry, source.registry.OwnerAccess(),
+                                 source.root.Handle());
+    REQUIRE(bytes);
+    const uint32 baseline = LiveNodes;
+    bool loaded = false;
+    for (uint64 work = 0; !loaded && work < 1000000; ++work) {
+        ObjectRegistry target(source.allocator, source.types, {130, static_cast<uint32>(work)});
+        ObjectGraphLoadOptions options;
+        options.limits.maxWork = work;
+        const uint32 constructed = ConstructedNodes;
+        auto result = LoadObjectGraph(source.allocator, target, source.types, target.OwnerAccess(),
+                                      bytes.Value().View(), options);
+        if (!result) {
+            CHECK(result.Error() == ErrorCode::CapacityExceeded);
+            CHECK(ConstructedNodes == constructed);
+            CHECK(target.Stats().liveObjects == 0);
+            continue;
+        }
+
+        loaded = true;
+        CHECK(ConstructedNodes == constructed + 2);
+        result.Value().Reset();
+        REQUIRE(target.Collect(target.OwnerAccess()));
+    }
+
+    CHECK(loaded);
+    CHECK(LiveNodes == baseline);
+}
+
+// codec 등록 규칙: encode·decode는 둘 다 있거나 둘 다 없고, completeFieldLayout이면 Transient가
+// 아닌 모든 필드에 있어야 한다. Transient 필드는 codec 없이 등록되고 그래프 저장·복원도 된다.
+TEST(ObjectGraphCodecRegistrationRules) {
+    SystemAllocator allocator;
+    TypeRegistry types(allocator);
+    FieldSchema fields[] = {SchemaField(NumberId, ValueKind::UInt32),
+                            SchemaField(TextId, ValueKind::Utf8String),
+                            SchemaField(LeftId, ValueKind::ObjectReference),
+                            SchemaField(RightId, ValueKind::ObjectReference),
+                            SchemaField(SmallId, ValueKind::UInt8),
+                            SchemaField(KeyId, ValueKind::Guid),
+                            SchemaField(SignedId, ValueKind::Int64),
+                            SchemaField(FloatId, ValueKind::Float32),
+                            SchemaField(DoubleId, ValueKind::Float64),
+                            SchemaField(BoolId, ValueKind::Bool)};
+    RuntimeFieldOps accessors[] = {
+        FieldOps<&GraphNode::number>(NumberId),       FieldOps<&GraphNode::text>(TextId),
+        FieldOps<&GraphNode::left>(LeftId),           FieldOps<&GraphNode::right>(RightId),
+        FieldOps<&GraphNode::small>(SmallId),         FieldOps<&GraphNode::key>(KeyId),
+        FieldOps<&GraphNode::signedNumber>(SignedId), FieldOps<&GraphNode::weight>(FloatId),
+        FieldOps<&GraphNode::precision>(DoubleId),    FieldOps<&GraphNode::enabled>(BoolId)};
+    auto registerWith = [&]() noexcept {
+        auto ops = MakeRuntimeTypeOps<GraphNode>();
+        ops.fields = accessors;
+        ops.completeFieldLayout = true;
+        return types.Register({NodeType, 1, fields, {"GraphNode", 9}}, Move(ops));
+    };
+
+    // encode만 있으면 거부한다.
+    accessors[4].decode = nullptr;
+    CHECK(registerWith().Error() == ErrorCode::InvalidArgument);
+    // 둘 다 없는 영속 필드도 completeFieldLayout이면 거부한다.
+    accessors[4].encode = nullptr;
+    CHECK(registerWith().Error() == ErrorCode::InvalidArgument);
+    // Transient 필드는 codec이 없어도 등록되고 저장·복원된다(그 필드는 저장하지 않는다).
+    fields[4].flags = static_cast<uint32>(FieldFlags::Transient);
+    auto registered = registerWith();
+    REQUIRE(registered);
+    {
+        ObjectRegistry source(allocator, types, {131, 1});
+        ObjectRegistry target(allocator, types, {131, 2});
+        {
+            auto root = source.NewObject<GraphNode>(source.OwnerAccess(), NodeType);
+            REQUIRE(root);
+            auto bytes =
+                SaveObjectGraph(allocator, source, source.OwnerAccess(), root.Value().Handle());
+            REQUIRE(bytes);
+            auto loaded = LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
+                                          bytes.Value().View());
+            REQUIRE(loaded);
+        }
+
+        REQUIRE(source.Shutdown(source.OwnerAccess()));
+        REQUIRE(target.Shutdown(target.OwnerAccess()));
+    }
+
+    REQUIRE(types.Unregister(registered.Value()));
+    CHECK(types.Shutdown());
 }
 
 TEST(ObjectGraphEverySaveAllocationFailureReleasesTemporaryOwnership) {

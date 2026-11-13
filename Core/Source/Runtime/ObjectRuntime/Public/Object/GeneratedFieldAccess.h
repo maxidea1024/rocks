@@ -15,6 +15,7 @@ struct ObjectReferenceField {
 template <class T>
 struct ObjectReferenceField<ObjectRef<T>> {
     static constexpr bool Supported = true;
+    using Target = T;
 };
 
 template <class T>

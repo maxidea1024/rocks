@@ -486,8 +486,15 @@ internal static class MetaTests
             AddDefaultIncludes(arguments);
             arguments.AddRange(["--identity-manifest", fixture
                 ? Path.Combine(options.Root, "Core", "Source", "Developer", "ReflectionTestFixtures", "ReflectionTestFixtures.rocksids.json") : IdentityPath]);
+            // 시험이 구성 프로필 전체를 넘기면(구성 매크로 포함) 기본 인자의 구성 매크로는 빼서 중복 정의가 되지 않게 한다.
+            bool extraDefinesBuild = extra?.Any(argument => argument.Contains("ROCKS_BUILD_", StringComparison.Ordinal)) == true;
             foreach (string argument in options.ClangArguments)
             {
+                if (extraDefinesBuild && argument.Contains("ROCKS_BUILD_", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
                 arguments.Add("--clang-arg=" + argument);
             }
 

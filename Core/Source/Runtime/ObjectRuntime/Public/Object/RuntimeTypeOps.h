@@ -12,6 +12,24 @@
 namespace rocks {
 
 class ConstructionContext;
+class ArchiveWriter;
+struct FieldView;
+class FieldEncodeContext;
+class FieldDecodeContext;
+struct RuntimeFieldOps;
+
+// 필드 codec thunk다(Docs/Design/ReflectionFoundations.ko.md 6.4절, 문맥은 Object/FieldCodec.h).
+// encode는 필드 값을 payload에 쓰고 wire tag를 돌려준다. decode는 construction이 nullptr이면 1단계
+// (검증·참조 기록·진단, 값을 게시하지 않음), 아니면 2단계(staged 객체에 게시)다. self는 이 thunk를
+// 가진 함수표다(같은 표의 read·writeStaged를 쓰는 범용 codec용).
+using FieldEncodeFunction = Result<uint32> (*)(const RuntimeFieldOps& self, ObjectRegistry&,
+                                               const ObjectAccessContext&, ObjectHandle,
+                                               ArchiveWriter& payload,
+                                               FieldEncodeContext& context) noexcept;
+using FieldDecodeFunction = Result<void> (*)(const RuntimeFieldOps& self,
+                                             ConstructionContext* construction, ObjectHandle,
+                                             const FieldView& field,
+                                             FieldDecodeContext& context) noexcept;
 
 // 필드 조회 결과를 소유하는 이동 전용 값이다. 문자열도 복제하므로 임시 Borrow의 view를 유출하지
 // 않는다. kind와 대응하는 payload만 읽는다. 같은 래퍼의 변경/allocator callback 재진입은 금지다.
@@ -50,6 +68,41 @@ private:
 };
 
 class TypeRegistry;
+class TypeLease;
+
+namespace detail {
+
+// 필드 쓰기의 바인딩(등록된 원본 스키마 쪽)이다: 값 형식, 읽기 전용 정책.
+struct FieldWriteBinding {
+    ValueType value{};
+    bool readOnly = false;
+};
+
+// 필드 쓰기의 실제 대상이다. actual은 대상 객체 스키마의 그 필드, effectiveFlags는 전파된 유효
+// 플래그(최상위 필드면 필드 플래그 — B6 경로 쓰기는 바깥 ReadOnly를 전파한다), actualEnum은 그
+// 필드의 등록된 enum 스키마, sourceExpectedNative·targetExpectedNative는 원본·대상 스키마의 참조
+// 기대 타입 native 키(0이면 Object), referenced는 non-null 참조 값의 대상 타입 lease, allowNull은
+// null 참조 허용(ObjectRefArray 원소는 false — B5)이다. lease는 호출자가 얻어 쓰기 완료까지 쥔다.
+struct FieldWriteTarget {
+    const FieldSchema* actual = nullptr;
+    uint32 effectiveFlags = 0;
+    const EnumSchema* actualEnum = nullptr;
+    const void* sourceExpectedNative = nullptr;
+    const void* targetExpectedNative = nullptr;
+    const TypeLease* referenced = nullptr;
+    bool allowNull = true;
+};
+
+// 필드 쓰기 검증의 한 곳이다(Docs/Design/ReflectionFoundations.ko.md 3.6·6.4절).
+// FieldWriteOperation과 경로 쓰기(B6)가 같이 쓴다. lease를 얻지 않는 순수 검사이며 오류 순서는 값
+// 종류·enum ID·참조 대상 타입(TypeMismatch) → null 금지(InvalidArgument) → 읽기 전용(Unsupported) →
+// 값 내용(소프트 참조 규칙·선언되지 않은 enum 값 InvalidArgument; 정수 폭 Overflow는 thunk가
+// 검사한다)이다. 그래프 복원의 staged 쓰기는 이 검사를 거치지 않는다(읽기 전용은 복원을 막지
+// 않는다).
+Result<void> ValidateFieldWrite(const FieldWriteBinding& binding, const FieldWriteTarget& target,
+                                const FieldValue& value) noexcept;
+
+} // namespace detail
 
 // 등록된 필드의 실제 대상 schema, 타입과 값 형식을 검사한다. 오류 순서는 context·수명, 타입·필드,
 // 전달 값 종류(TypeMismatch — enum은 FieldValue::type이 필드의 enum ID와 다를 때도), 읽기
@@ -83,23 +136,19 @@ public:
 private:
     friend class TypeRegistry;
 
-    // enumSchema는 Enum 필드가 가리키는 등록된 enum 레코드의 스키마다. 필드를 가진 레코드가 그
-    // enum을 의존으로 붙잡으므로 이 연산(레코드의 함수표 안)보다 오래 산다.
     void Bind(TypeRegistry& registry, const void* nativeType, Guid fieldId, ValueKind valueKind,
-              TypeId referencedType, bool readOnly, const EnumSchema* enumSchema) noexcept {
+              TypeId referencedType, bool readOnly) noexcept {
         registry_ = &registry;
         nativeType_ = nativeType;
         fieldId_ = fieldId;
         referencedType_ = referencedType;
         valueKind_ = valueKind;
         readOnly_ = readOnly;
-        enumSchema_ = enumSchema;
         bound_ = true;
     }
 
     Callback callback_ = nullptr;
     TypeRegistry* registry_ = nullptr;
-    const EnumSchema* enumSchema_ = nullptr;
     TypeId referencedType_{};
     const void* nativeType_ = nullptr;
     Guid fieldId_{};
@@ -118,6 +167,11 @@ struct RuntimeFieldOps {
     FieldWriteOperation write;
     Result<void> (*writeStaged)(ConstructionContext&, ObjectHandle,
                                 const FieldValue&) noexcept = nullptr;
+    // 그래프 저장·복원 codec이다. 둘 다 있거나 둘 다 없어야 하고, completeFieldLayout인 타입은
+    // Transient가 아닌 모든 필드에 있어야 한다. 수동 함수표는 detail::EncodeThroughFieldValue·
+    // DecodeThroughFieldValue(Object/GeneratedFieldCodec.h)를 그대로 쓸 수 있다.
+    FieldEncodeFunction encode = nullptr;
+    FieldDecodeFunction decode = nullptr;
     // Enum 필드가 쓰는 C++ enum의 NativeTypeKey<E>()다(그 밖의 필드는 nullptr). 등록이 필드의
     // value.type으로 찾은 enum 레코드의 native 키와 같은지 확인한다 — 스키마로 해석한 enum과
     // 정적 thunk의 enum이 어긋나지 않게 한다(어긋나면 TypeMismatch).

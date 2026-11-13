@@ -30,29 +30,30 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
     const FieldSchema* actual = nullptr;
+    usize actualIndex = 0;
     const auto fields = type.Value().Schema().fields;
     for (usize index = 0; index < fields.Size(); ++index) {
         if (fields[index].id == fieldId_) {
             actual = &fields[index];
+            actualIndex = index;
             break;
         }
     }
     if (!actual) {
         return Result<void>::Failure(ErrorCode::NotFound);
     }
-    if (actual->value.kind != valueKind_ || value.kind != valueKind_) {
-        return Result<void>::Failure(ErrorCode::TypeMismatch);
-    }
-    // enum 값은 필드가 가리키는 enum의 ID를 싣는다(원본·대상 스키마가 같은 enum을 가리켜야 한다).
-    if (valueKind_ == ValueKind::Enum &&
-        (value.type != referencedType_ || actual->value.type != referencedType_)) {
-        return Result<void>::Failure(ErrorCode::TypeMismatch);
-    }
-    // 검증한 참조 타입은 callback 완료까지 유지한다. 그 전에 해제하면 callback 재진입에서
-    // 같은 ID의 타입을 unregister/재등록해 검증과 실제 필드 게시의 기준이 달라질 수 있다.
+    // 검증에 쓴 lease(대상 타입·양쪽 기대 타입·참조 대상)는 callback 완료까지 유지한다. 그 전에
+    // 해제하면 callback 재진입에서 같은 ID의 타입을 unregister/재등록해 검증과 실제 필드 게시의
+    // 기준이 달라질 수 있다.
     TypeLease sourceExpected;
     TypeLease targetExpected;
-    if (valueKind_ == ValueKind::ObjectReference) {
+    TypeLease referenced;
+    detail::FieldWriteTarget target;
+    target.actual = actual;
+    target.effectiveFlags = actual->flags;
+    target.actualEnum = type.Value().FieldEnum(actualIndex);
+    if (valueKind_ == ValueKind::ObjectReference && value.kind == ValueKind::ObjectReference &&
+        actual->value.kind == ValueKind::ObjectReference) {
         // 등록 시점에 자기 참조나 별칭이 아직 미등록일 수 있으므로 호출 시 각 레지스트리에서
         // 참조 타입을 확인한다. 서로 다른 GUID라도 같은 native 타입인 별칭은 허용한다.
         if (referencedType_ != TypeId{}) {
@@ -69,45 +70,95 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
             }
             targetExpected = Move(expected.Value());
         }
-        const void* sourceKey =
+        target.sourceExpectedNative =
             sourceExpected.IsValid() ? sourceExpected.Ops().nativeType : nullptr;
-        const void* targetKey =
+        target.targetExpectedNative =
             targetExpected.IsValid() ? targetExpected.Ops().nativeType : nullptr;
-        if (sourceKey && targetKey && sourceKey != targetKey) {
+        // 원본·대상 스키마의 기대 타입이 서로 다른 native면 참조 값을 조회하기 전에 거부한다(별칭은
+        // 같은 native라 통과한다). ValidateFieldWrite도 같은 검사를 한다.
+        if (target.sourceExpectedNative && target.targetExpectedNative &&
+            target.sourceExpectedNative != target.targetExpectedNative) {
             return Result<void>::Failure(ErrorCode::TypeMismatch);
         }
+
         if (value.reference != ObjectHandle{}) {
             if (value.reference.IsNull()) {
                 return Result<void>::Failure(ErrorCode::StaleHandle);
             }
-            auto referenced = registry.AcquireType(access, value.reference);
-            if (!referenced) {
-                return Result<void>::Failure(referenced.Error());
+            auto found = registry.AcquireType(access, value.reference);
+            if (!found) {
+                return Result<void>::Failure(found.Error());
             }
-            // 선언 타입 또는 그 파생 타입 객체를 허용한다(SetReference와 같은 상속 규칙).
-            if ((sourceKey && !referenced.Value().IsNativeA(sourceKey)) ||
-                (targetKey && !referenced.Value().IsNativeA(targetKey))) {
-                return Result<void>::Failure(ErrorCode::TypeMismatch);
-            }
+            referenced = Move(found.Value());
+            target.referenced = &referenced;
         }
     }
-    if (readOnly_ || HasFlag(actual->flags, FieldFlags::ReadOnly)) {
-        return Result<void>::Failure(ErrorCode::Unsupported);
-    }
-    // 값 내용 검사는 읽기 전용 정책 뒤다(정수 폭 Overflow를 callback이 검사하는 것과 같은 순서).
-    // 소프트 참조의 null 규칙(asset 0이면 경로 없음)·경로 상한은 수동 callback도 지키도록 여기서
-    // 검사한다. 기대 타입(value.type)은 대상 에셋을 로드하지 않으므로 쓰기에서 검사하지 않는다.
-    if (valueKind_ == ValueKind::SoftObjectReference &&
-        !SoftObjectRef<>::Validate(AssetId{value.guid}, value.string.View())) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
-    }
-    // 선언되지 않은 enum 값(Flags는 선언 값의 OR가 아닌 값)은 수동 callback에도 넘기지 않는다.
-    if (valueKind_ == ValueKind::Enum &&
-        (!enumSchema_ || !IsDeclaredEnumValue(*enumSchema_, value.signedInteger))) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    detail::FieldWriteBinding binding;
+    binding.value = ValueType{valueKind_, referencedType_};
+    binding.readOnly = readOnly_;
+    if (auto valid = detail::ValidateFieldWrite(binding, target, value); !valid) {
+        return valid;
     }
     return callback_(registry, access, handle, value);
 }
+
+namespace detail {
+
+Result<void> ValidateFieldWrite(const FieldWriteBinding& binding, const FieldWriteTarget& target,
+                                const FieldValue& value) noexcept {
+    const ValueKind kind = binding.value.kind;
+    if (!target.actual || target.actual->value.kind != kind || value.kind != kind) {
+        return Result<void>::Failure(ErrorCode::TypeMismatch);
+    }
+
+    // enum 값은 필드가 가리키는 enum의 ID를 싣는다(원본·대상 스키마가 같은 enum을 가리켜야 한다).
+    if (kind == ValueKind::Enum &&
+        (value.type != binding.value.type || target.actual->value.type != binding.value.type)) {
+        return Result<void>::Failure(ErrorCode::TypeMismatch);
+    }
+
+    if (kind == ValueKind::ObjectReference) {
+        // 서로 다른 GUID라도 같은 native 타입인 별칭은 허용한다.
+        const void* source = target.sourceExpectedNative;
+        const void* expected = target.targetExpectedNative;
+        if (source && expected && source != expected) {
+            return Result<void>::Failure(ErrorCode::TypeMismatch);
+        }
+
+        if (value.reference != ObjectHandle{}) {
+            // 선언 타입 또는 그 파생 타입 객체를 허용한다(SetReference와 같은 상속 규칙).
+            if (!target.referenced || (source && !target.referenced->IsNativeA(source)) ||
+                (expected && !target.referenced->IsNativeA(expected))) {
+                return Result<void>::Failure(ErrorCode::TypeMismatch);
+            }
+        } else if (!target.allowNull) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
+    if (binding.readOnly || HasFlag(target.effectiveFlags, FieldFlags::ReadOnly)) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    // 값 내용 검사는 읽기 전용 정책 뒤다(정수 폭 Overflow를 callback이 검사하는 것과 같은 순서).
+    // 소프트 참조의 null 규칙·경로 상한은 수동 callback도 지키도록 여기서 검사한다. 기대 타입은
+    // 대상 에셋을 로드하지 않으므로 쓰기에서 검사하지 않는다.
+    if (kind == ValueKind::SoftObjectReference &&
+        !SoftObjectRef<>::Validate(AssetId{value.guid}, value.string.View())) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 선언되지 않은 enum 값(Flags는 선언 값의 OR가 아닌 값)은 수동 callback에도 넘기지 않는다.
+    // 실제 대상 객체 쪽 enum 스키마로 검사한다.
+    if (kind == ValueKind::Enum &&
+        (!target.actualEnum || !IsDeclaredEnumValue(*target.actualEnum, value.signedInteger))) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return Result<void>::Success();
+}
+
+} // namespace detail
 
 namespace detail {
 
@@ -489,6 +540,28 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         (ops.completeFieldLayout && typedFields != schema.fields.Size())) {
         return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
     }
+    // 완전한 필드 배치를 선언한 타입은 그래프에 저장할 수 있어야 하므로 Transient가 아닌 모든
+    // 필드에 codec(encode·decode)이 있어야 한다(Docs/Design/ReflectionFoundations.ko.md 6.4절).
+    if (ops.completeFieldLayout) {
+        for (usize schemaIndex = 0; schemaIndex < schema.fields.Size(); ++schemaIndex) {
+            const auto& schemaField = schema.fields[schemaIndex];
+            if (HasFlag(schemaField.flags, FieldFlags::Transient)) {
+                continue;
+            }
+
+            bool coded = false;
+            for (usize opsIndex = 0; opsIndex < ops.fields.Size(); ++opsIndex) {
+                if (ops.fields[opsIndex].fieldId == schemaField.id) {
+                    coded = ops.fields[opsIndex].encode != nullptr;
+                    break;
+                }
+            }
+
+            if (!coded) {
+                return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
+            }
+        }
+    }
     for (usize index = 0; index < ops.fields.Size(); ++index) {
         const auto& field = ops.fields[index];
         bool matched = false;
@@ -501,7 +574,8 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
                 break;
             }
         }
-        if (!matched || !field.read || !field.write || !field.writeStaged) {
+        if (!matched || !field.read || !field.write || !field.writeStaged ||
+            (field.encode == nullptr) != (field.decode == nullptr)) {
             return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
         }
         for (usize previous = 0; previous < index; ++previous) {
@@ -694,11 +768,10 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
             if (fields[fieldIndex].id == fieldOps[index].fieldId) {
                 // 원본 입력 함수표는 변경하지 않는다. 등록된 복사본에만 정책을 결합한다.
-                fieldOps[index].write.Bind(
-                    *this, ops.nativeType, fields[fieldIndex].id, fields[fieldIndex].value.kind,
-                    fields[fieldIndex].value.type,
-                    HasFlag(fields[fieldIndex].flags, FieldFlags::ReadOnly),
-                    fieldTypes[fieldIndex] ? &fieldTypes[fieldIndex]->enumSchema : nullptr);
+                fieldOps[index].write.Bind(*this, ops.nativeType, fields[fieldIndex].id,
+                                           fields[fieldIndex].value.kind,
+                                           fields[fieldIndex].value.type,
+                                           HasFlag(fields[fieldIndex].flags, FieldFlags::ReadOnly));
                 break;
             }
         }

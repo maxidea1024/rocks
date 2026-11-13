@@ -116,13 +116,13 @@ public:
 
 enum은 그 enum을 필드로 쓰는 클래스보다 먼저 등록한다(`TypeRegistry::RegisterEnum`, 모듈 집계 함수는 enum을 먼저 등록한다). 클래스 등록은 Enum 필드의 `value.type`이 등록된 enum 레코드여야 하고(없으면 NotFound, 클래스 레코드면 TypeMismatch), 생성 접근기가 싣는 C++ enum의 native 키(`RuntimeFieldOps::valueNativeType`)가 그 레코드의 키와 같아야 한다(다르면 TypeMismatch). 등록된 클래스는 쓰는 enum을 의존으로 붙잡으므로 그 enum의 `Unregister`는 Busy다(lease가 아니므로 `Shutdown`을 막지 않는다). `Acquire`는 클래스만 돌려주고(enum ID면 TypeMismatch), enum은 `AcquireValueType(id, TypeKind::Enum)`으로 열어 `TypeLease::Enum()`으로 스키마를 읽는다. 클래스 lease의 `FieldEnum(fieldIndex)`는 그 필드가 가리키는 enum의 스키마다.
 
-Enum 필드의 `FieldValue`는 `kind = ValueKind::Enum`, `signedInteger = 값`, `type = enum ID`다. 쓰기(등록된 `write`·`writeStaged`·등록 전 callback)는 `type`이 필드의 enum ID와 다르면 TypeMismatch, 선언되지 않은 값(범위 밖 포함)이면 InvalidArgument이며 값은 그대로다. 그래프 저장은 C++에서 `static_cast`로 넣은 선언되지 않은 값을 InvalidArgument로 거부하고, 복원은 저장된 선언되지 않은 값을 객체를 만들기 전에 InvalidArgument로 거부한다(기본값으로 바꾸고 진단하는 decode 정책은 B3c).
+Enum 필드의 `FieldValue`는 `kind = ValueKind::Enum`, `signedInteger = 값`, `type = enum ID`다. 쓰기(등록된 `write`·`writeStaged`·등록 전 callback)는 `type`이 필드의 enum ID와 다르면 TypeMismatch, 선언되지 않은 값(범위 밖 포함)이면 InvalidArgument이며 값은 그대로다. 그래프 저장은 C++에서 `static_cast`로 넣은 선언되지 않은 값을 InvalidArgument로 거부하고, 복원은 기본 정책에서 저장된 선언되지 않은 값을 객체를 만들기 전에 InvalidArgument로 거부하고, `UndeclaredEnumPolicy::ReportAndDefault`면 `UndeclaredEnumValue`를 진단한 뒤 대체 값을 쓴다([Serialization](Serialization.ko.md) "필드 codec과 문맥").
 
 `Category`와 `DisplayName`은 바이트 길이를 가진 UTF-8 데이터이며 중간 NUL(`\u0000`)도 유효하다. `Span<const char>`의 길이를 사용해야 하며 NUL 종료 문자열 함수로 읽으면 값이 잘린다. 등록 시 이 바이트를 깊게 복사한다. 생성 C++은 한글 등 읽을 수 있는 문자를 유지하고 인용부호·역슬래시·제어 문자를 escape한다. 제어 바이트는 정확히 세 자리 8진수로 표현하므로 뒤에 숫자가 와도 서로 합쳐지지 않는다.
 
 ## 생성물과 등록
 
-생성 헤더는 `GeneratedType<T>`의 `Id`, `Schema`, `Ops`, `Register`를 제공한다. `Schema()`는 타입·필드 ID, 버전, 이름, 값 형식(`ValueType`), 기반 타입 ID와 참조 대상 타입 ID를 제공한다. `Ops()`는 실제 C++ 타입으로 검증되는 read/write/writeStaged 함수와 자동 Trace를 제공한다.
+생성 헤더는 `GeneratedType<T>`의 `Id`, `Schema`, `Ops`, `Register`를 제공한다. `Schema()`는 타입·필드 ID, 버전, 이름, 값 형식(`ValueType`), 기반 타입 ID와 참조 대상 타입 ID를 제공한다. `Ops()`는 실제 C++ 타입으로 검증되는 read/write/writeStaged 함수, 그래프 저장·복원 codec(encode/decode — `Object/GeneratedFieldCodec.h`)과 자동 Trace를 제공한다.
 
 모듈마다 집계 헤더 `<M>/<M>.module.generated.h`가 생긴다. 이 헤더는 그 모듈의 public 생성 헤더를 모두 include하고 `rocks::generated::<M>::RegisterModuleTypes`를 제공한다. 이 함수는 registration마다 모듈을 한 번만 등록하고(의존 그래프의 여러 경로로 다시 불리면 바로 성공한다), import한 의존 모듈의 `RegisterModuleTypes`를 먼저 부른 뒤 이 모듈의 public 타입을 base 먼저 등록한다. 같은 ID가 같은 native 타입으로 이미 등록되어 있으면 새로 등록하지 않고 그 타입의 lease를 붙잡으므로, 여러 모듈이 같은 의존 모듈을 공유해도 한 번만 등록되고 공유 타입을 쓰는 쪽이 있는 동안에는 그 타입이 해제되지 않는다. 실패하면 그 호출의 기록을 역순으로 되돌리고 오류를 돌려준다. private 헤더가 있는 모듈은 `<M>/<M>.private.module.generated.h`의 `RegisterPrivateModuleTypes`가 public 타입(public 헤더가 없으면 의존 모듈)까지 등록한 뒤 private 타입을 등록한다. 이 헤더는 그 모듈의 private include에서만 보인다. 집계 헤더의 이름은 모두 `::rocks::`로 한정하므로 모듈 이름이 rocks의 이름을 가리지 않는다.
 
@@ -180,7 +180,7 @@ ObjectReference 필드는 등록 시점에 참조 대상 타입이 아직 등록
 ```text
 dotnet build Programs/Rocks.Tools.csproj
 dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll --module SampleGame --input Templates/Game/Foundation/Source/GameObject.h --include GameObject.h --output-root out/Generated/SampleGame --descriptor out/Metadata/SampleGame.rocksmeta.json --identity-manifest Templates/Game/Foundation/SampleGame.rocksids.json --compiler clang-cl
-dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll meta --root . --compiler clang-cl --metacompiler out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll
+dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll meta --root . --compiler clang-cl --metacompiler out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll --clang-arg=-DROCKS_BUILD_DEBUG=1
 ```
 
 MetaCompiler는 모듈 하나를 한 번에 생성한다. `--module`(모듈 이름), 짝을 이루는 `--input <헤더>`·`--include <철자>`(여러 번), private 헤더 표시 `--private <철자>`, 생성 루트 `--output-root`, descriptor `--descriptor <M>.rocksmeta.json`, 의존 모듈 descriptor `--import`(여러 번)를 받는다. 입력 헤더 전부를 include하는 번역 단위 하나를 Clang에 주므로 같은 모듈의 헤더 사이 base·참조가 풀린다. 생성 헤더는 `<생성 루트>/Public|Private/<철자의 .h를 .generated.h로 바꾼 경로>`에 쓴다. 위 예는 `out/Generated/SampleGame/Public/GameObject.generated.h`, 집계 헤더 `out/Generated/SampleGame/Public/SampleGame/SampleGame.module.generated.h`와 descriptor를 만든다. 실제 빌드에서는 빌드 도구가 이 인자를 모두 구성한다.

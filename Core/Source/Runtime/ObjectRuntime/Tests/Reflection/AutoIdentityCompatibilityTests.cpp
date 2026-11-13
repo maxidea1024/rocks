@@ -1,3 +1,4 @@
+#include <Object/GeneratedFieldCodec.h>
 #include <ReflectionTestFixtures/AutoIdentityFixture.generated.h>
 #include <TestSupport/Test.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -37,7 +38,8 @@ Result<TypeRegistrationToken> RegisterOriginal(TypeRegistry& types) noexcept {
             const FieldValue& value) noexcept {
              return detail::WriteGeneratedStagedField<OriginalActor>(transaction, object,
                                                                      &OriginalActor::health, value);
-         }}};
+         },
+         &detail::EncodeThroughFieldValue, &detail::DecodeThroughFieldValue}};
     auto ops = MakeRuntimeTypeOps<OriginalActor>();
     ops.fields = accessors;
     ops.completeFieldLayout = true;

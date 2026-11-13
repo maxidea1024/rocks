@@ -379,13 +379,7 @@ internal static class ActionGraph
         bool asan = configuration == NativeConfiguration.Asan;
         bool optimize = Optimizes(configuration, optimization);
         // 구성 매크로는 정확히 하나만 1로 정의한다(Base/Compiler.h가 확인한다). Asan은 Debug 계열이다.
-        string buildMacro = configuration switch
-        {
-            NativeConfiguration.Debug or NativeConfiguration.Asan => "ROCKS_BUILD_DEBUG=1",
-            NativeConfiguration.Development => "ROCKS_BUILD_DEVELOPMENT=1",
-            NativeConfiguration.Release => "ROCKS_BUILD_RELEASE=1",
-            _ => throw new ArgumentException($"Invalid native configuration: {configuration}")
-        };
+        string buildMacro = NativeConfigurations.BuildMacro(configuration);
         if (toolchain.Platform == NativePlatform.Windows)
         {
             yield return "/nologo";

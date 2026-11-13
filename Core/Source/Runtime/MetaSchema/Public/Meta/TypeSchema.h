@@ -41,6 +41,17 @@ constexpr bool HasFlag(uint32 flags, FieldFlags flag) noexcept {
     return (flags & static_cast<uint32>(flag)) != 0;
 }
 
+// 바깥 필드(struct 필드·배열 필드)의 플래그 중 안쪽으로 전파되는
+// 것(EditorOnly·Transient·ReadOnly)과 안쪽 필드 자기 플래그를 합친 유효
+// 플래그다(Docs/Design/ReflectionFoundations.ko.md 6.4절). 최상위 필드의 유효 플래그는 자기
+// 플래그다. 직렬화(제외·Required)와 경로 쓰기(ReadOnly)가 같은 규칙을 쓴다.
+constexpr uint32 PropagateFieldFlags(uint32 parent, uint32 own) noexcept {
+    constexpr uint32 inherited = static_cast<uint32>(FieldFlags::EditorOnly) |
+                                 static_cast<uint32>(FieldFlags::Transient) |
+                                 static_cast<uint32>(FieldFlags::ReadOnly);
+    return (parent & inherited) | own;
+}
+
 enum class FieldKind : uint8 {
     Value,
     ObjectReference
@@ -103,6 +114,13 @@ struct FieldSchema {
     // Array 필드의 원소 형식과 길이 상한이다(B5). 그 밖의 필드는 Opaque·0이어야 한다.
     ValueType element{};
     uint32 maxElements = 0;
+};
+
+// 필드 경로의 한 단계다(7절 PropertyPath, 6.4절 진단 경로): 필드 ID와, 배열 원소면 그 index.
+struct PathStep {
+    Guid fieldId;
+    uint32 index = 0;
+    bool indexed = false;
 };
 
 // 안정적인 타입 식별자인 id와 스키마 version을 실행 중 native type key와 구분한다.
@@ -220,6 +238,41 @@ constexpr bool IsDeclaredEnumValue(const EnumSchema& schema, int64 value) noexce
     }
 
     return false;
+}
+
+// 선언 값들의 OR(Flags enum의 유효 비트)다.
+constexpr uint64 EnumDeclaredMask(const EnumSchema& schema) noexcept {
+    uint64 mask = 0;
+    for (usize index = 0; index < schema.values.Size(); ++index) {
+        mask |= static_cast<uint64>(schema.values[index].value);
+    }
+
+    return mask;
+}
+
+// 저장된 미선언 값을 대신할 값이다(decode 정책 ReportAndDefault, 6.4절). 일반 enum은 값 0이
+// 선언되어 있으면 0, 아니면 첫 열거자다. Flags enum은 underlying 범위 안의 값이면 선언되지 않은
+// 비트만 지운 값이고(알려진 비트를 잃지 않는다), 범위 밖·음수 값이면 0이다(-1이 모든 플래그를 켜지
+// 않게). 결과는 항상 IsDeclaredEnumValue를 만족한다. 열거자가 없는 스키마는 0이다(등록이 막는다).
+constexpr int64 EnumReplacementValue(const EnumSchema& schema, int64 stored) noexcept {
+    if (HasFlag(schema.flags, EnumFlags::Flags)) {
+        int64 minimum = 0;
+        int64 maximum = 0;
+        if (!EnumUnderlyingRange(schema.underlying, minimum, maximum) || stored < 0 ||
+            stored > maximum) {
+            return 0;
+        }
+
+        return static_cast<int64>(static_cast<uint64>(stored) & EnumDeclaredMask(schema));
+    }
+
+    for (usize index = 0; index < schema.values.Size(); ++index) {
+        if (schema.values[index].value == 0) {
+            return 0;
+        }
+    }
+
+    return schema.values.Size() != 0 ? schema.values[0].value : 0;
 }
 
 namespace detail {

@@ -141,6 +141,7 @@ internal static class CppEmitter
         Line($"#include <{include}>");
         Line("#include <Meta/GeneratedType.h>");
         Line("#include <Object/GeneratedFieldAccess.h>");
+        Line("#include <Object/GeneratedFieldCodec.h>");
         // 다른 헤더에 선언된 리플렉션 enum을 필드로 쓰면 그 enum의 GeneratedType이 먼저 보여야 한다(생성 접근기가
         // GeneratedType<E>::Id·IsDeclared로 enum을 알아본다).
         IEnumerable<string> enumHeaders = schema.Ordered.Where(type => type.Header == include)
@@ -231,9 +232,15 @@ internal static class CppEmitter
 
                     Line("},");
                     Line("+[](ConstructionContext& construction, ObjectHandle object, const FieldValue& value) noexcept -> Result<void> {");
+                    Line($"return detail::WriteGeneratedStagedField<{native}>(construction, object, {member}, value); }},");
+                    // 그래프 저장·복원 codec(Docs/Design/ReflectionFoundations.ko.md 6.4절)이다. 문맥이 참조 wire·진단·예산을 맡으므로
+                    // 그래프 형식이 바뀌어도 이 코드를 다시 만들지 않는다.
+                    Line("+[](const RuntimeFieldOps&, ObjectRegistry& registry, const ObjectAccessContext& access, ObjectHandle object, ArchiveWriter& payload, FieldEncodeContext& context) noexcept -> Result<uint32> {");
+                    Line($"return detail::EncodeGeneratedField<{native}>(registry, access, object, {member}, payload, context); }},");
+                    Line("+[](const RuntimeFieldOps&, ConstructionContext* construction, ObjectHandle object, const FieldView& field, FieldDecodeContext& context) noexcept -> Result<void> {");
                     // Enum 필드는 정적 thunk의 enum native 키를 싣는다(등록이 value.type의 enum 레코드와 대조한다).
                     string valueNativeType = field.Kind == "Enum" ? $", NativeTypeKey<::{field.Reference}>()" : "";
-                    Line($"return detail::WriteGeneratedStagedField<{native}>(construction, object, {member}, value); }}{valueNativeType} }},");
+                    Line($"return detail::DecodeGeneratedField<{native}>(construction, object, {member}, field, context); }}{valueNativeType} }},");
                 }
 
                 Line("};");

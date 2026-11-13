@@ -181,7 +181,7 @@ TEST(EnumGraph_SaveRejectsUndeclaredValues) {
 }
 
 // 저장된 선언되지 않은 값·범위 밖 값·Flags의 선언되지 않은 비트·잘못된 wire는 객체를 공개하지 않고
-// 거부한다(decode 정책은 B3c — 지금은 항상 거부).
+// 거부한다(기본 decode 정책 — ReportAndDefault는 CodecGraphTests).
 TEST(EnumGraph_LoadRejectsUndeclaredValuesAndWrongWire) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
@@ -189,7 +189,7 @@ TEST(EnumGraph_LoadRejectsUndeclaredValuesAndWrongWire) {
     {
         ObjectRegistry target(allocator, types, {0x4547, 4});
         ObjectGraphLoadOptions options;
-        options.allowMissingFields = true;
+        options.policy.allowMissingFields = true;
         const TypeSchema& schema = TypeOf<EnumFields>();
         struct Case {
             StringView field;

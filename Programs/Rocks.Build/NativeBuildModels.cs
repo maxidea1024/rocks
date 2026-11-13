@@ -18,6 +18,23 @@ public enum NativePlatform { Windows, MacOS, Android }
 /// </summary>
 public enum NativeConfiguration { Debug, Development, Release, Asan }
 
+/// <summary>
+/// 구성 매크로다. 컴파일과, 생성 헤더를 따로 컴파일하는 도구(MetaCompiler 검사 시험)가 같은 정의를 쓴다.
+/// </summary>
+public static class NativeConfigurations
+{
+    /// <summary>
+    /// 구성의 매크로 정의(<c>NAME=1</c>)다. Asan은 Debug 계열이다.
+    /// </summary>
+    public static string BuildMacro(NativeConfiguration configuration) => configuration switch
+    {
+        NativeConfiguration.Debug or NativeConfiguration.Asan => "ROCKS_BUILD_DEBUG=1",
+        NativeConfiguration.Development => "ROCKS_BUILD_DEVELOPMENT=1",
+        NativeConfiguration.Release => "ROCKS_BUILD_RELEASE=1",
+        _ => throw new ArgumentException($"Invalid native configuration: {configuration}")
+    };
+}
+
 public enum NativeModuleKind { StaticLibrary, Executable }
 
 /// <summary>

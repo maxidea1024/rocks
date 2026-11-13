@@ -359,7 +359,7 @@ TEST(ValueKinds_MalformedStoredValuesAreRejected) {
     {
         ObjectRegistry target(allocator, types, {0x5643, 4});
         ObjectGraphLoadOptions options;
-        options.allowMissingFields = true;
+        options.policy.allowMissingFields = true;
         const TypeSchema& schema = TypeOf<AssetFields>();
         const Guid source = SchemaField(schema, "source").id;
         const Guid hash = SchemaField(schema, "hash").id;

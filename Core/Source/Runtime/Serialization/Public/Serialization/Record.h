@@ -89,6 +89,18 @@ public:
     static Result<RecordReader> Open(Allocator&, Span<const uint8>, Guid expectedSchema,
                                      uint32 minSchemaVersion, uint32 maxSchemaVersion,
                                      RecordLimits = {}) noexcept;
+    // 바깥(예: 객체 그래프 하나)이 가진 누적 예산 budget을 이 Record 트리가 함께 쓴다.
+    // operation·work 한도는 budget의 것이고 크기 한도(maxTotalBytes·maxValueBytes)와 필드 수는
+    // limits의 것이다. 여러 Record를 같은 예산으로 열면 그 사용량이 하나로 누적되며,
+    // OperationsUsed·WorkUsed도 그 공유 누계를 돌려준다. budget이 비어 있으면 InvalidArgument다.
+    //
+    // 사용 예(객체 그래프):
+    //   auto budget = SharedPtr<ArchiveBudget>::TryMake(allocator, maxWork, maxWork);
+    //   auto record = RecordReader::Open(allocator, bytes, type, version, version, limits,
+    //                                    budget.Value());
+    static Result<RecordReader> Open(Allocator&, Span<const uint8>, Guid expectedSchema,
+                                     uint32 minSchemaVersion, uint32 maxSchemaVersion, RecordLimits,
+                                     SharedPtr<ArchiveBudget> budget) noexcept;
     // index 소유권을 이전한다. 원본은 field/iteration이 0인 비어 있는 reader로 남는다.
     RecordReader(RecordReader&&) noexcept;
     RecordReader& operator=(RecordReader&&) noexcept;

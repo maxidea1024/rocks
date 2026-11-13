@@ -4,9 +4,9 @@
 
 ## 지원 범위
 
-bool, uint8/16/32/64, int32/64, float32/64, Guid, UTF-8 String, 강한 ObjectRef, AssetId(Guid wire), Sha256Digest(Bytes wire, 정확히 32 byte), SoftObjectRef(SoftObjectReference wire), 리플렉션 enum(I64 wire)을 지원한다. enum은 저장·복원 모두 선언되지 않은 값을 InvalidArgument로 거부한다. 소프트 참조는 값으로 저장하며 대상을 그래프에 넣거나 찾지 않는다. 저장(C++에서 직접 대입한 값)과 복원 모두 null 규칙(asset 0에 경로가 있으면 안 됨)과 4 KiB 경로 상한을 검사해 InvalidArgument로 거부한다. 좁은 unsigned는 U32, signed는 I64 wire 형식을 사용하고 복원 시 실제 값 폭을 검사한다. unknown GUID field는 skip한다. known field의 wire tag·값·trailing byte는 엄격히 검사한다.
+bool, uint8/16/32/64, int32/64, float32/64, Guid, UTF-8 String, 강한 ObjectRef, AssetId(Guid wire), Sha256Digest(Bytes wire, 정확히 32 byte), SoftObjectRef(SoftObjectReference wire), 리플렉션 enum(I64 wire)을 지원한다. enum의 선언되지 않은 값은 저장에서 InvalidArgument이고, 복원은 기본 정책에서 거부하며 `ReportAndDefault`면 진단 후 대체 값을 쓴다. 소프트 참조는 값으로 저장하며 대상을 그래프에 넣거나 찾지 않는다. 저장(C++에서 직접 대입한 값)과 복원 모두 null 규칙(asset 0에 경로가 있으면 안 됨)과 4 KiB 경로 상한을 검사해 InvalidArgument로 거부한다. 좁은 unsigned는 U32, signed는 I64 wire 형식을 사용하고 복원 시 실제 값 폭을 검사한다. unknown GUID field는 기본 진단 후 skip한다(`UnknownFieldPolicy::Reject`면 거부). known field의 wire tag·값·trailing byte는 엄격히 검사한다.
 
-`RuntimeTypeOps::completeFieldLayout`이 true이고 schema와 accessor가 stable field GUID별 1:1이어야 한다. 이 선언에는 상속 필드를 포함한 모든 영속 필드와 모든 강한 간선이 포함된다(ROCKS_NATIVE 멤버는 영속 필드가 아니고 강한 참조를 담을 수 없어 포함 대상이 아니다). 기본 수동 metadata는 false이며 부분 metadata·Opaque·누락 accessor는 Unsupported다. 수동 작성자가 거짓 완전성을 선언하는 임의 플러그인의 메모리 안전성을 검증하는 기능은 아니다.
+`RuntimeTypeOps::completeFieldLayout`이 true이고 schema와 필드 codec(`RuntimeFieldOps::encode`·`decode`)이 stable field GUID별 1:1이어야 한다. 값은 등록된 codec이 쓰고 읽으며, 복원은 두 단계(1단계 검증·사전 청구, 2단계 생성·적용)이고 decode 정책·진단 hook·소프트 참조 수집은 `ObjectGraphSaveOptions`·`ObjectGraphLoadOptions`로 정한다(Docs/Implementation/Serialization.ko.md "필드 codec과 문맥"). 이 선언에는 상속 필드를 포함한 모든 영속 필드와 모든 강한 간선이 포함된다(ROCKS_NATIVE 멤버는 영속 필드가 아니고 강한 참조를 담을 수 없어 포함 대상이 아니다). 기본 수동 metadata는 false이며 부분 metadata·Opaque·누락 codec은 Unsupported다(Transient 필드는 codec이 없어도 된다). 수동 작성자가 거짓 완전성을 선언하는 임의 플러그인의 메모리 안전성을 검증하는 기능은 아니다.
 
 객체 포인터나 ObjectHandle의 registry/slot/generation bytes는 저장하지 않는다. 각 객체에 1부터 시작하는 파일 내부 ID를 부여하고 참조는 u64 ID, null은 0으로 쓴다. 동일 객체를 중복 생성하지 않으므로 cycle과 shared identity가 유지된다. metadata 필드 순서 BFS에 따라 ID와 출력 순서가 정해진다. 원본과 다른 Registry로 복원해도 동등한 그래프를 다시 저장하면 같은 bytes가 된다.
 

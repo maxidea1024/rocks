@@ -177,6 +177,17 @@ Result<RecordReader> RecordReader::Open(Allocator& allocator, Span<const uint8> 
                     SharedPtr<ArchiveBudget>());
 }
 
+Result<RecordReader> RecordReader::Open(Allocator& allocator, Span<const uint8> source,
+                                        Guid expectedSchema, uint32 minimum, uint32 maximum,
+                                        RecordLimits limits,
+                                        SharedPtr<ArchiveBudget> budget) noexcept {
+    if (!budget) {
+        return Result<RecordReader>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return OpenWith(allocator, source, expectedSchema, minimum, maximum, limits, Move(budget));
+}
+
 Result<RecordReader> RecordReader::OpenWith(Allocator& allocator, Span<const uint8> source,
                                             Guid expectedSchema, uint32 minimum, uint32 maximum,
                                             RecordLimits limits,
