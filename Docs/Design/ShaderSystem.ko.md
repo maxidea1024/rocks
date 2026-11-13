@@ -1,10 +1,10 @@
 # 셰이더 시스템 설계
 
-기준일: 2026-11-13, 개정 5(초안). 셰이더 원문을 HLSL 하나로 쓰고 오프라인에서 D3D12·D3D11·Vulkan·Metal용 코드로 바꾸는 구조와, 그 구현에 앞서 갖춰야 할 **선행 작업**을 정한다. 조사 근거(UE 5.6 backend별 경로·컴파일 파이프라인·외부 도구 현황)는 조사 문서 [Rocks 셰이더 시스템](https://claude.ai/artifact/U5uNh2EWGvXKQiNYXnuc1Q)에 있고, 이 문서는 그 결론과 Rocks 적용 규칙만 담는다. UE 근거는 EpicGames/UnrealEngine `5.6` 브랜치 commit `cdda65cecacd9a1278020925c357bf4cc0b17e8c`의 원본이며 경로는 `Engine/Source/` 기준이다(`Engine/Shaders`·`Engine/Config`·`Engine/Binaries`·`Engine/Build`는 그대로 적는다).
+기준일: 2026-11-13, 개정 6(초안). 셰이더 원문을 HLSL 하나로 쓰고 오프라인에서 D3D12·D3D11·Vulkan·Metal용 코드로 바꾸는 구조와, 그 구현에 앞서 갖춰야 할 **선행 작업**을 정한다. 조사 근거(UE 5.6 backend별 경로·컴파일 파이프라인·외부 도구 현황)는 조사 문서 [Rocks 셰이더 시스템](https://claude.ai/artifact/U5uNh2EWGvXKQiNYXnuc1Q)에 있고, 이 문서는 그 결론과 Rocks 적용 규칙만 담는다. UE 근거는 EpicGames/UnrealEngine `5.6` 브랜치 commit `cdda65cecacd9a1278020925c357bf4cc0b17e8c`의 원본이며 경로는 `Engine/Source/` 기준이다(`Engine/Shaders`·`Engine/Config`·`Engine/Binaries`·`Engine/Build`는 그대로 적는다).
 
 [엔진 구현 계획](EngineImplementationPlan.ko.md)·[엔진 런타임](EngineRuntime.ko.md)과 충돌하는 부분은 이 문서 기준으로 바꾸고 계획 문서도 같이 고친다(11절). 개정은 이 문서가 확정될 때 함께 한다.
 
-상태 표기는 AssetSystem과 같다: **구현**(동작·시험), **계약**(API·형식이 있고 미지원 값은 명시 오류), **후속**(API도 없음). 이 문서 전체는 아직 **설계**이며 P1만 구현되었다. 엔진 기반이 준비될 때까지 이 문서는 스펙으로만 두고 P2 이후는 구현하지 않는다(2026-11-13 사용자 지시). 착수할 때도 12절 결정이 먼저다. 확장자 `.rsf`/`.rsh`는 12절 결정 1의 권장안을 가정한 표기다.
+상태 표기는 AssetSystem과 같다: **구현**(동작·시험), **계약**(API·형식이 있고 미지원 값은 명시 오류), **후속**(API도 없음). 이 문서 전체는 아직 **설계**이며 P1만 구현되었다. 엔진 기반이 준비될 때까지 이 문서는 스펙으로만 두고 P2 이후는 구현하지 않는다(2026-11-13 사용자 지시). 착수할 때도 12절 결정이 먼저다.
 
 ## 1. 결정
 
@@ -18,7 +18,7 @@
 | 컴파일 실행 | 메인 프로세스가 입력 수집·**전처리**·키 계산을 하고, 별도 ShaderCompileWorker 프로세스가 컴파일한다. 메인 프로세스는 DXC·FXC·SPIRV-Cross·SPIRV-Tools 바이너리와 ShaderFormat 모듈을 링크하지 않는다 | UE 5.6은 전처리를 "항상 메인 프로세스에서 job 제출 때" 한다(`Runtime/RenderCore/Public/ShaderCompilerCore.h:686–688`), 워커는 `Programs/ShaderCompileWorker`. 전처리기 구현은 12절 결정 6 |
 | 캐시 | 빌드 캐시(AssetSystem 9절) | UE의 job 캐시와 원격 캐시 역할이다 |
 
-이 문서가 정한 규칙: 바인딩·상수 버퍼·단계 사이 변수(5절), ThirdParty 종류·오프라인 도구 빌드·의존 규칙(6절), 런타임 파일 배치(7절), 셰이더 job 키 구성(8절). 사용자가 정한 것: 도구 공급은 UE 방식(결정 8), SH2에서 Vulkan 추가와 OpenGL 제거(결정 9), 셰이더 job 키도 빌드 캐시 공통 규칙 준수(결정 10). 남은 사용자 결정(12절): 확장자, HLSL 2021 범위, D3D12 셰이더 모델, 파라미터 선언, 생산 호스트, 전처리기.
+이 문서가 정한 규칙: 바인딩·상수 버퍼·단계 사이 변수(5절), ThirdParty 종류·오프라인 도구 빌드·의존 규칙(6절), 런타임 파일 배치(7절), 셰이더 job 키 구성(8절). 사용자가 정한 것: 확장자 `.rsf`(엔트리)·`.rsh`(include)(결정 1), 도구 공급은 UE 방식(결정 8), SH2에서 Vulkan 추가와 OpenGL 제거(결정 9), 셰이더 job 키도 빌드 캐시 공통 규칙 준수(결정 10). 남은 사용자 결정(12절): HLSL 2021 범위, D3D12 셰이더 모델, 파라미터 선언, 생산 호스트, 전처리기.
 
 ## 2. 형식과 변환 경로
 
@@ -365,7 +365,7 @@ Apple 도구 지문: `metal -v`의 버전·대상 문자열(UE도 이 출력을 
 
 ## 12. 결정 필요 사항
 
-1. **확장자** — `.rsf`/`.rsh`(권장, UE `.usf`/`.ush` 역할 분리와 Rocks 명명 `.rasset`·`.rpkg`·`.rbc`) 또는 `.hlsl`/`.hlsli`.
+1. **확장자** — **결정됨(2026-11-13): `.rsf`(엔트리)·`.rsh`(include).** UE `.usf`/`.ush`의 역할 분리를 따르고 Rocks 명명(`.rasset`·`.rpkg`·`.rbc`)에 맞춘다. C++·HLSL 공용 헤더는 `.h`다(3절). 고려했던 대안은 `.hlsl`/`.hlsli`였다.
 2. **HLSL 2021 범위** — UE는 플랫폼 값 `EnablesHLSL2021ByDefault`(0 끔, 1 Global 셰이더 전부, 2 모든 셰이더, `Runtime/RHI/Public/DataDrivenShaderPlatformInfo.h:117`. PCD3D_SM6·VULKAN_SM5·VULKAN_SM6·VULKAN_SM5_ANDROID·METAL_SM5·METAL_SM6은 1, PCD3D_SM5는 0. `Engine/Config/Windows/DataDrivenPlatformInfo.ini:127`, `Engine/Config/VulkanPC/DataDrivenPlatformInfo.ini:130·252`, `Engine/Config/Android/DataDrivenPlatformInfo.ini:125`, `Engine/Config/Mac/DataDrivenPlatformInfo.ini:52·91`)에 레이 트레이싱 셰이더 강제(`Runtime/Engine/Private/ShaderCompiler/ShaderCompiler.cpp:3290–3299`)와 타입별 선택을 더한다. 권장: 형식 정의의 기본값 + 셰이더 타입 선택. `D3D11_SM5`에서 2021 셰이더는 SPIRV-Cross 경로를 탄다.
 3. **D3D12 셰이더 모델** — 6.6(UE와 같음) 또는 6.0~6.2 + bindless 프로필 6.6. 6.6은 Windows 10에서 Agility SDK가 Runtime 의존이 된다(7절). SH0에서 WARP 지원과 Windows 10 요건을 실측한 뒤 정한다.
 4. **파라미터 선언** — MetaCompiler 셰이더 파라미터 종류(권장, 10절, 리플렉션 단일 출처·생성 HLSL을 디스크에 둠) 또는 UE 매크로 방식.
@@ -405,3 +405,4 @@ Apple 도구 지문: `metal -v`의 버전·대상 문자열(UE도 이 출력을 
   - 셰이더 job 키에 AssetSystem 9절 공통 항목을 모두 넣는다: 툴체인 지문, 결정적 수학 버전, 대상 프로파일 id와 출력 설정 전체. 공유 등급(`portable`)·영역별 프로필 digest·호스트 사이 바이트 동일 시험을 없앴다. 셰이더 캐시는 호스트 사이에 공유하지 않는다.
   - 상수 접기 결정성은 예외로 두지 않는다. 다르게 나오면 방법을 사용자 결정으로 올린다.
   - 같은 원칙으로 P7 셰이더 파라미터의 identity 면제를 없애고 `ROCKS_STRUCT` 경로를 따르게 했다. 공통 상한 검사는 job 안으로 옮겼다.
+- 개정 6(2026-11-13): 결정 1(확장자 `.rsf`·`.rsh`)을 확정했다.
