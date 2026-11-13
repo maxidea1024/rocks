@@ -60,12 +60,14 @@
       "fields": [ { "owner": "rocks::reflection_fixture::Base", "name": "count", "id": "<hex>",
                     "fieldKind": "Value", "value": { "kind": "Int32" }, "element": null,
                     "flags": [], "toolName": "count", "category": "", "displayName": "", "maxElements": 0 } ] },
-    { "kind": "struct", "containsStrongReference": false, … },
+    { "kind": "struct", "name": "…", "id": "<32 hex>", "version": 1, "flags": [], "binds": "",
+      "header": "…", "visibility": "public", "fields": [ … ] },
     { "kind": "enum", "underlying": "UInt8", "flags": ["Flags"], "toolPrefix": "TC_",
       "values": [ { "name": "Default", "value": 0, "toolName": "Default", "displayName": "", "flags": ["Hidden"] } ] } ] }
 ```
 
 - 클래스 `fields`는 상속 포함 전체(정렬 순서 그대로)이고 각 필드에 선언 owner를 적는다. 생성 thunk는 `&::<owner>::<name>`을 쓰며 private 기반 필드는 owner의 `ROCKS_GENERATED_BODY`(모든 `GeneratedType` 특수화에 friend)로 접근한다 — 모듈 경계와 무관하다.
+- struct의 `flags`는 `ContainsStrongReference`·`RequiresWorldOnlyOwner`(생성 형질, 4.6절), `binds`는 Binds 실제 타입의 Clang 정규 철자(없으면 빈 문자열)다.
 - 읽기는 모르는 속성을 거부하고 schema 1만 받는다. 출력은 결정적이다(이름 순, 고정 서식, LF).
 
 ### 1.5 import와 파서의 수집 범위
@@ -239,33 +241,141 @@ struct BulkDataRef {
 
 ### 4.2 스키마·등록·생성 코드
 
-- `StructSchema { TypeId id; uint32 version; name; Span<FieldSchema> fields; uint32 flags }`. struct 필드도 identity 명세의 `field`다.
-- 생성 코드: `GeneratedType<S>`가 schema, constexpr 형질(`ContainsStrongReference`), codec 함수(6.1절)를 낸다. 다른 모듈의 struct를 쓰는 클래스의 생성 헤더는 **그 struct의 생성 헤더를 include한다**(같은 특수화를 두 번 정의하지 않는다 — ODR). 그래서 생성 중 의존 모듈의 stage 생성 루트를 넘긴다(1.3절).
-- `RuntimeStructOps`: 크기·정렬, native 키, 경로 접근 thunk(7절).
+- struct 스키마는 클래스와 같은 `TypeSchema`다(base 없음, 클래스 전용 플래그 없음). struct 필드도 identity 명세의 `field`다. 레지스트리는 enum처럼 기존 레코드 칸(schema·ops)을 쓴다(4.6절) — `TypeOf<S>()`·필드 배열·B6 경로 해석이 클래스와 같은 형태로 동작한다.
+- 생성 코드: `GeneratedType<S>`가 schema, constexpr 형질(`ContainsStrongReference`·`RequiresWorldOnlyOwner`), 멤버 codec thunk(6.1절)·Trace를 낸다. 다른 헤더(같은 모듈 포함)의 struct를 쓰는 생성 헤더는 **그 struct의 생성 헤더를 include한다**(같은 특수화를 두 번 정의하지 않는다 — ODR). 그래서 생성 중 의존 모듈의 stage 생성 루트를 넘긴다(1.3절).
+- `RuntimeStructOps`: 크기·정렬, native 키, 임시 값 생성·소멸(struct hook), Trace, 선택 마이그레이션, 멤버 codec 함수표(4.6절). 경로 접근 thunk는 B6에서 더한다(7절).
 
 ### 4.3 참조를 담는 struct
 
-- struct가 `ObjectRef<T>`나 `ObjectRefArray<T>`(직접 또는 중첩 struct 안)를 담을 수 있다("참조 struct", `ContainsStrongReference` = true). `ObjectRefArray`를 담으면 struct가 `explicit S(Allocator&) noexcept`로 allocator를 전달해야 한다. 소유 클래스의 생성 Trace가 그 경로를 따라 방문한다. 참조 쓰기는 소유 객체 저장소 안의 주소이므로 기존 `SetReference`·배열 소유자 검사의 범위 검사를 통과한다.
-- 참조 struct는 **배열 원소가 될 수 없다**(RMC2304 — 배열 버퍼는 소유 객체 밖이라 위치 검사를 통과하지 못하고, `ObjectRef`는 복사·이동 금지라 재배치할 수 없다. `Array`의 nothrow-move static_assert가 이중으로 막는다). 객체 참조 목록은 `ObjectRefArray<T>`를 쓴다. 텍스처의 `BulkDataRef`·`TexturePlatformData` 등은 참조를 담지 않는다.
+- struct가 `ObjectRef<T>`(직접 또는 중첩 struct 안 — `ObjectRefArray<T>` 멤버는 B5)를 담을 수 있다("참조 struct", `ContainsStrongReference` = true). `ObjectRefArray`를 담으면 struct가 `explicit S(Allocator&) noexcept`로 allocator를 전달해야 한다. 소유 클래스의 생성 Trace가 그 경로를 따라 방문한다. 참조 쓰기는 소유 객체 저장소 안의 주소이므로 기존 `SetReference`·배열 소유자 검사의 범위 검사를 통과한다.
+- 참조 struct의 목록은 **B5에서 지원한다**(2026-11-13 사용자 결정 — UE `UStaticMesh::StaticMaterials`·머티리얼 인스턴스 파라미터 배열 대응). `Array<S>`의 버퍼는 소유 객체 밖이고 `ObjectRef`는 복사·이동할 수 없으므로(`ObjectRefs.h`) `Array<S>`가 아니라 `ObjectRefArray`처럼 Registry가 관리하는 별도 컨테이너로 하고(`Array`의 nothrow-move static_assert는 유지), 그 원소 안 참조 쓰기는 SetEdge 범위 검사를 컨테이너 기준으로 넓힌다. B4는 이를 막지 않는다: struct thunk는 (소유 객체 handle, struct 주소)로 일하고 참조 멤버 쓰기를 `detail::SetStructMemberReference` 하나로 모은다.
 - 참조 struct 값은 통째로 복사·대입할 수 없으므로 도구의 struct 단위 쓰기는 경로 접근(7절)으로 멤버마다 하고, **struct 단위 원자성은 없다**(멤버 하나의 쓰기만 원자적이다).
 
 ### 4.4 직렬화와 버전
 
-- struct 값은 중첩 Record(wire `Record` = 10)다. 헤더 schema = struct ID, schema version = struct 버전, 필드는 struct 필드 ID TLV다. 중첩 TLV도 그래프의 필드 누계(`maxTotalFields`)에 센다.
-- 로드: struct ID가 다르면 TypeMismatch. 버전이 낮으면 등록된 struct 마이그레이션(`ObjectGraphLoadOptions.migrateStruct`, 객체 마이그레이션과 같은 형태, 결과 Record 재검증)을 적용하고 없으면 Unsupported. 버전이 높으면 decode 정책(6.1·6.4절)을 따른다 — 기본 거부(Unsupported), `LoadNewerSkippingUnknown`이면 현재 schema로 읽어 모르는 필드를 건너뛰고 `NewerVersion` 진단을 낸다(AS 5.3절의 "높으면 읽기 전용 열기"는 A1이 이 정책과 저장 금지를 함께 건다). 패키지 Summary의 타입 버전 표(AS 5.2절 Summary)에 struct 타입도 넣는다(A1).
+- struct 값은 중첩 Record(wire `Record` = 10)다. 헤더 schema = struct ID, schema version = struct 버전, 필드는 struct 필드 ID TLV다. 중첩 TLV도 그래프의 필드 누계(`maxTotalFields`)에 센다. Binds Core 값 타입을 포함한 **모든 struct가 태그형 중첩 Record**다 — 고정 배치는 쓰지 않는다(2026-11-13 사용자 결정: 용량이 늘어도 유연한 구조. 중첩 값만 떼어도 온전한 Record라 도구·클립보드·경로 접근이 같은 Record 기능을 쓴다).
+- 로드: struct ID가 다르면 TypeMismatch. 버전이 낮으면 마이그레이션 — 로드 옵션 override(`ObjectGraphLoadOptions.migrateStruct`, 시험·도구용)를 먼저 묻고(Unsupported를 내면 다음으로), 타입이 등록한 마이그레이션(`RuntimeStructOps.migrate` — UE가 타입별로 옛 버전을 올리는 것과 같은 자리)을 쓰며, 둘 다 없으면 Unsupported. 결과 Record는 정확히 현재 버전이어야 하고(아니면 Unsupported — 객체와 같다) 다시 마이그레이션하지 않는다. 버전이 높으면 decode 정책(6.1·6.4절)을 따른다 — 기본 거부(Unsupported), `LoadNewerSkippingUnknown`이면 현재 schema로 읽어 모르는 필드를 건너뛰고 `NewerVersion` 진단을 낸다(AS 5.3절의 "높으면 읽기 전용 열기"는 A1이 이 정책과 저장 금지를 함께 건다). 패키지 Summary의 타입 버전 표(AS 5.2절 Summary)에 struct 타입도 넣는다(A1).
 - 모르는 필드는 건너뛰고 `UnknownField` 진단을 내며, 누락은 객체와 같은 `allowMissingFields` 정책을 따른다.
 
 ### 4.5 Core 값 타입 결합(`Binds`)
 
 - 색·벡터 설정(`PaddingColor`·`ChromaKeyColor`는 UE FColor(8비트), `AlphaCoverageThresholds`는 FVector4(LWC double), 12.4절)은 Core 수학 타입을 쓴다. Core는 MetaSchema·ObjectRuntime에 의존하지 않으므로 Core 헤더에 annotation을 달 수 없다.
-- ObjectRuntime에 결합 헤더(`Object/CoreValueTypes.h`)를 두고 `ROCKS_STRUCT(Binds = "<실제 타입 철자>", Version = 1)`로 같은 공개 멤버를 가진 거울 선언을 리플렉션한다(UE NoExportTypes 방식). 생성 코드는 거울이 아니라 실제 타입의 멤버 포인터를 쓰고, 거울과 실제 타입의 멤버 이름·타입·개수가 같은지 static_assert로 확인한다(어긋나면 컴파일 실패).
-- 대상(구체 인스턴스 철자): `rocks::Vector2<float>`·`Vector2<double>`, `Vector3<float>`·`Vector3<double>`, `Vector4<float>`·`Vector4<double>`, `IntVec2`·`IntVec3`, `Quaternion<float>`·`Quaternion<double>`, `Rotator<float>`·`Rotator<double>`, `Color`(uint8 RGBA)·`LinearColor`(float RGBA), `Transform`(템플릿이면 구체 인스턴스). 실제 멤버 구성은 착수 때 헤더에서 확인한다. ID는 ObjectRuntime 명세에 등록한다.
+- 별도 Metadata 모듈 **`CoreTypeBindings`**(Core/Source/Runtime, 소스 없음, ObjectRuntime 의존)에 거울 선언 헤더 `CoreTypeBindings/CoreValueTypes.h`를 두고 `ROCKS_STRUCT(Binds = "<실제 타입 철자>", Version = 1)`로 같은 공개 멤버를 가진 거울 선언을 리플렉션한다(UE NoExportTypes 방식). ObjectRuntime을 Metadata 모듈로 만들지 않는다(그것에 닿는 모든 타깃에 meta 단계가 붙지 않게) — Core 값 타입 필드를 쓰는 모듈만 의존한다. 생성 코드는 거울이 아니라 실제 타입의 멤버 포인터를 쓰고, 거울과 실제 타입의 멤버 이름·형식·개수·순서가 같은지 static_assert로 확인한다(어긋나면 컴파일 실패, 4.6절).
+- 대상(Core 헤더 확인 결과): `rocks::Vector2<float|double>`·`Vector3<float|double>`·`Vector4<float|double>`, `Quaternion<float|double>`, `Rotator<float|double>`(yaw·pitch·roll 라디안 — UE FRotator는 pitch·yaw·roll 도라 UE 데이터 반입 때 변환), `Color`(uint8 RGBA), `LinearColor`(float RGBA), `IntVec2`·`IntVec3`(int32), `Transform`(비템플릿 — `Vec3d translation`·`Quat rotation`·`Vec3 scale`, 다른 Binds struct에 의존). ID는 `CoreTypeBindings` 명세에 등록한다.
+
+### 4.6 B4 구현 API(확정안)
+
+4.1–4.5절을 구현하는 구체 형태다. 설계 교차검증(2026-11-13 — 1차: 구현 적합성·반례·MetaCompiler와 UE 5.6 대조, 2차 최종: 런타임·MetaCompiler/Binds)의 지적과 사용자 결정(4.3·4.4절)을 반영했다. 세 커밋으로 나눈다: **B4a** 런타임, **B4b** MetaCompiler, **B4c** Binds.
+
+**상수·스키마**
+
+- `MaxStructDepth = 16`(MetaSchema) — 깊이 = 1 + 멤버 struct 깊이의 최댓값(멤버 struct가 없으면 1). MetaCompiler(RMC2303)·Registry·생성 static_assert가 같은 상수를 쓴다. 문맥 프레임은 최대 1(최상위 필드) + 16 = 17개다. B5 배열 원소의 index는 **같은 프레임**에 둔다(원소마다 새 프레임을 만들지 않는다) — `BuildPath`의 33 안이다.
+- `ValueKind::Struct` 필드: `value.type` = struct ID, `FieldKind::Value`.
+
+**레지스트리(B4a)**
+
+```cpp
+using StructFieldEncodeFunction = Result<uint32> (*)(const RuntimeStructFieldOps& self,
+    const void* structValue, ArchiveWriter& out, FieldEncodeContext&) noexcept;
+using StructFieldDecodeFunction = Result<void> (*)(const RuntimeStructFieldOps& self,
+    ConstructionContext* construction, ObjectHandle owner, void* structValue,
+    const FieldView& field, FieldDecodeContext&) noexcept;
+struct RuntimeStructFieldOps {
+    Guid fieldId{};
+    StructFieldEncodeFunction encode = nullptr;
+    StructFieldDecodeFunction decode = nullptr;
+    const void* valueNativeType = nullptr;   // Enum·Struct 멤버의 NativeTypeKey
+};
+using StructMigration = Result<Array<uint8>> (*)(Allocator&, TypeId, uint32 sourceVersion,
+    uint32 targetVersion, Span<const uint8> sourceRecord) noexcept;
+struct RuntimeStructOps {
+    usize size = 0;
+    usize alignment = 0;
+    const void* nativeType = nullptr;
+    void (*construct)(void*, Allocator&) noexcept = nullptr;
+    void (*destroy)(void*) noexcept = nullptr;
+    void (*trace)(const void*, TraceVisitor&) noexcept = nullptr;   // 참조 struct만
+    StructMigration migrate = nullptr;                                // 선택
+    bool requiresWorldOnlyOwner = false;                              // 생성 형질
+    ModuleLease module;
+    Span<const RuntimeStructFieldOps> fields;
+};
+Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema&, RuntimeStructOps) noexcept;
+```
+
+- decode의 세 방식: **검증**(construction·structValue null — 멤버 주소를 만들지 않는다), **관찰**(construction null, structValue = scratch 임시 값 — 직접 쓴다), **적용**(둘 다 non-null — 소유 객체 안 주소).
+- 레코드는 `RegisterEnum`처럼 기존 칸을 채운다: `record->schema`(id·version·name·fields), `record->ops`(size·alignment·nativeType·module — `ModuleRegistration::Retain`의 native 대조가 그대로 동작). 추가 칸: 스키마 순서로 정렬해 깊게 복사한 멤버 함수표, 필드 ID 정렬 색인, construct·destroy·trace·migrate, 계산 값 `depth`·`containsStrongReference`(Transient 참조 포함 — GC는 추적한다)·`requiresWorldOnlyOwner`(입력 OR 멤버 struct)·`containsRequired`(Required 후손이 있는지 — 누락 진단 가지치기).
+- 필드 검증은 `Register`와 공유하는 함수로 뽑는다(4096 필드 상한·플래그·값 종류·도구 이름·Required 규칙). Struct 필드를 위해 지원 값 종류·typed 판정·`valueNativeType` 대조(Enum|Struct)·의존 탐색과 `fieldTypes`를 일반화한다. `FieldEnum`은 의존 레코드의 종류를 확인한다.
+- `RegisterStruct` 규칙: version ≥ 1, base 없음·클래스 플래그 없음, Transient가 아닌 모든 필드에 encode·decode 둘 다(Transient는 둘 다 없거나 둘 다), 멤버 함수표는 스키마 필드와 1:1(같은 ID 둘·없는 ID는 InvalidArgument), size·alignment·nativeType·construct·destroy 필수, `trace != null ⇔ containsStrongReference`, depth > `MaxStructDepth`는 InvalidArgument, 같은 nativeType의 다른 ID는 AlreadyExists, 멤버 struct·enum이 미등록이면 NotFound·종류가 다르면 TypeMismatch·native 키가 다르면 TypeMismatch. 순환은 의존이 먼저 등록돼야 하므로 레지스트리에서는 생기지 않는다.
+- 클래스의 Struct 필드: `read`·`writeStaged`는 null, `write`는 Struct 종류로 묶어 호출하면 **Unsupported**(3.6절 — 멤버 단위 쓰기는 B6 경로 접근), encode·decode 필수, `valueNativeType` = struct native 키. 클래스가 WorldOnly가 아닌데 struct의 `requiresWorldOnlyOwner`가 참이면 InvalidArgument(MetaCompiler RMC2206이 먼저 막는다).
+- `TypeLease::FieldStruct(usize) const&`(`const&& = delete`) → `StructView`. struct 레코드 lease는 `AcquireValueType(id, TypeKind::Struct)`로 열고 `Schema()`·`Ops()`·`StructOps()`.
+- `StructView`(비소유 — 얻어 온 lease가 사는 동안 유효하다. 의존 사슬이 대상 레코드를 살린다): `Schema()`, `StructOps()`, `FieldOps(i)`(스키마 순서), `FieldIndex(Guid)`(정렬 색인 이진 탐색), `FieldEnum(i)`, `FieldStruct(i)`, `Depth()`, `ContainsStrongReference()`, `ContainsRequired()`, `IsEmpty()`.
+
+**Serialization(B4a)**
+
+- `RecordReader::OpenRecordField(Allocator&, const FieldView&, Guid schema, uint32 minVersion, uint32 maxVersion, uint32 maxFields) const` — 6.1절의 새 API. 이 Record의 TLV인지(범위) 검사하고 공유 예산을 쓰되 **헤더(44)·TLV 색인(29n)·정렬(2n·log n)만 청구한다** — payload 바이트는 바깥 Open이 이미 청구했으므로 다시 청구하지 않는다(중첩 깊이만큼 작업이 불어나지 않는다). 크기 한도는 바깥 reader의 한도. schemaVersion 0은 InvalidArgument, 버전 범위 밖은 Unsupported, schema가 다르면 TypeMismatch. 구현은 색인 전용 내부 파싱(범위 검사와 위치 이동만)이다.
+- `RecordBuilder::AppendTo(ArchiveWriter&)` — Build 버퍼 없이 바깥 writer에 이어 쓴다(저장의 단계별 복사를 줄인다). 저장 작업은 실제 복사·성장만 청구한다.
+
+**문맥(B4a, `Object/FieldCodec.h`)**
+
+- `FieldCodecFrame += StructView structure`, `FieldScope(context, field, declaringType, enumeration = nullptr, structure = {}, index = NoIndex)`.
+- 공통: `virtual Result<void> AddFields(usize) noexcept` — 저장·1단계는 그래프 `maxTotalFields` 누계, 2단계 no-op. `ReportUnknownField(Guid)`는 프레임이 있으면 그 path(감싼 struct 필드까지)를 넣는다.
+- 저장 문맥: `NestedRecordLimits()`·`ValueLimits()`(그래프 옵션에서 — 최상위와 struct 안의 값 한도가 같게).
+- **복원 Record 스택**: 문맥이 `MaxStructDepth + 1`개 reader 자리를 소유한다. `RecordScope`는 (문맥, 깊이)만 갖는 RAII다(`[[nodiscard]]`, 이동 가능 — 이동된 원본은 pop하지 않는다, LIFO가 아니면 Fatal). `CurrentRecord()`는 맨 위 reader(non-const — `Next()` 순회)다. `OpenValue`는 스택이 비면 지금 경로(1단계 노드 Record, 2단계 보관 FieldView), 아니면 맨 위 reader로 연다 — 마이그레이션 결과 안의 멤버도 올바르게 열린다.
+- `OpenRecord(const FieldView&, TypeId, uint32 minVersion, uint32 maxVersion) -> Result<RecordScope>` — wire가 Record(10)인지 먼저 확인한다(TypeMismatch). 1단계: 맨 위(또는 노드) Record의 `OpenRecordField`, `maxFields` = 남은 `maxTotalFields`, `AddFields(fieldCount)`. 2단계: 스택이 비면 정적 `RecordReader::Open`(자체 예산 — 같은 크기 한도·버전 범위, 무제한 operation·work, `maxFields` = `maxTotalFields`), 아니면 맨 위 reader의 `OpenRecordField`를 같은 설정으로. B5 RecordList 항목 reader도 쌓을 수 있게 스택에 reader를 넣는 내부 경로를 FieldView 전용으로 닫지 않는다.
+- `OpenMigratedRecord(Span<const uint8>, TypeId, uint32 version) -> Result<RecordScope>` — 마이그레이션 결과를 정확히 현재 버전으로만 연다(아니면 Unsupported). 원본 scope는 마이그레이션 전에 닫는다(스택 깊이가 불어나지 않게).
+- `MigrateStruct(TypeId, uint32 from, uint32 to, Span<const uint8>) -> Result<Span<const uint8>>` — 1단계: override → (Unsupported면) 타입 migrate → 둘 다 없으면 Unsupported. 결과는 `maxMigrationBytes` 누계, 작업량은 원본 + 결과 바이트를 문맥의 `Charge`로(reader 작업 Δ 청구와 이중이 되지 않게), (TypeId, from, 소유 버퍼)를 노드 목록(`StoredStructMigration`)에 **발생 순서대로** 보관하고 view를 돌려준다(view는 `Array` 이동이 heap 블록을 유지하므로 유효하다). 2단계: 노드별 커서(`GraphApplyContext` 소유)로 다음 항목을 꺼내 (TypeId, from)을 대조한다 — 어긋남·부족·노드 끝에 남은 항목은 InvalidArgument(계약 위반 — 오류 반환·rollback, Fatal 아님 — 6.4절 2단계 규칙).
+- **struct hook**(6.4절): `FieldCodecHooks`에 기본 no-op 가상 함수 — `ObservedStructs() -> Span<const TypeId>`, `ObserveStruct(const FieldCodecFrame&, TypeId, const void* nativeKey, const void* value)`, `SubstituteStruct(const FieldCodecFrame&, TypeId, const void* nativeKey, const void* in) -> Result<const void*>`. 계약은 6.4절(한 번의 해석, 반환 수명, 참조 struct 제외).
+
+**struct 값 codec(B4a, `Object/GeneratedFieldCodec.h`)**
+
+- `EncodeStructRecord(StructView, const void* value, ArchiveWriter& out, FieldEncodeContext&)`: 참조 struct가 아니면 `SubstituteStruct` → `RecordBuilder(Scratch(), id, version, NestedRecordLimits())` → 스키마 순서로 멤버마다 `FieldScope(멤버, struct ID, FieldEnum(i), FieldStruct(i))`, 유효 플래그가 제외면 건너뜀, 멤버 `ArchiveWriter(Scratch(), ValueLimits())`에 thunk가 쓰고 wire 재확인, `AddField` → `AppendTo(out)`. `AddFields(쓴 TLV 수)`, 작업량 = 멤버 writer 작업 + builder의 실제 작업.
+- `DecodeStructRecord(StructView, ConstructionContext*, ObjectHandle owner, void* value, FieldDecodeContext&)`: `CurrentRecord()`를 순회한다 — `FieldIndex`, 모르는 필드 → unknownField 정책(path 포함), 저장된 Transient → Unsupported, 멤버 thunk, 누락 → `IsMissingAllowed`가 아니면 NotFound, 허용된 누락 중 Required는 진단, 누락된 Struct 멤버는 `ContainsRequired()`일 때만 스키마를 재귀로 돌며 Required 후손마다 전체 path로 진단(방문마다 `Spend(1)`, 2단계는 생략). present는 스택 bitset(4096 bit).
+- `DecodeStructField(StructView, ConstructionContext*, ObjectHandle, void* value, const FieldView&, FieldDecodeContext&)`: 1단계에서 관찰 대상이면 scratch에 `construct`(모든 경로에서 RAII `destroy`)하고 value = scratch로 이후를 **한 번에** 해석한다 → `OpenRecord(view, id, 1, UINT32_MAX)` → 버전이 같으면 그대로, 낮으면 원본 Record 바이트로 `MigrateStruct` → 원본 scope를 닫고 `OpenMigratedRecord`, 높으면 newerVersion 정책(`LoadNewerSkippingUnknown`이면 `NewerVersion` 진단 — path = 이 struct 필드, 현재 스키마로 해석, 모르는 필드 Reject가 우선) → `DecodeStructRecord` → 관찰이면 `ObserveStruct`.
+- 정책 판정(모르는 필드·Transient·누락·NewerVersion)은 그래프 `DecodeNode`와 같은 술어 함수(`detail::RecordFieldRules`)를 쓴다. 청구는 호출자 몫이다 — 객체 루프는 1배(2단계가 보관 결과를 재생한다), struct는 `Spend`의 2배(2단계가 다시 해석한다). `OpenRecordField`의 작업은 그래프 `DecodeNode`의 reader 작업 Δ가 2배로 청구하므로 codec이 따로 `Spend`하지 않는다.
+- 멤버 thunk 도우미(생성 코드·수동 시험 공용) `template <class S, auto Member> RuntimeStructFieldOps StructFieldOps(Guid)`: 단일 값 멤버는 `EncodeFieldWire`·`ParseFieldValue`(검증 방식은 value에 손대지 않는다), Enum 멤버는 정적 `GeneratedType<E>::IsDeclared`도 확인(관찰 방식의 ReportAndDefault는 대체 값을 scratch에), 참조 멤버 적용은 `detail::SetStructMemberReference`(지금은 `SetReference` — B5에서 컨테이너 기준 검사로 넓힌다), String 멤버는 `TryAssign`(적용은 새 객체 — 실패하면 객체째 rollback), Struct 멤버는 `EncodeStructRecord`·`DecodeStructField` 재귀, `MatchesSchema`(Struct 멤버는 `value.type == GeneratedType<S>::Id()`).
+- 클래스의 struct 필드 thunk: encode는 owner Borrow → `EncodeStructRecord(context.Current()->structure, &(owner->*member), …)` → 수명 재확인, decode 1단계는 `DecodeStructField(view, nullptr, handle, nullptr, …)`, 2단계는 `construction->Get<Owner>(handle)`의 멤버 주소. `FieldWireType(Struct)` = Record(10).
+
+**그래프(B4a, ObjectSerialization)**
+
+- `ObjectGraphLoadOptions.migrateStruct`(override, `ObjectGraphMigration` 형태 — type 인자가 struct ID, `migrationUser` 공유).
+- `maxTotalFields` 기본값 1,048,576(5.5절). Record별 `maxFields`는 남은 누계로 연다(최상위·중첩 모두 — 큰 입력이 누계 검사 전에 색인을 할당하지 않게). `node.fields` 예약은 min(FieldCount, 스키마 필드 수).
+- `LoadNode += Array<StoredStructMigration>`, 2단계 소비 커서는 `GraphApplyContext`가 노드별로 갖는다(`ConstructGraph`의 const 순회와 충돌하지 않게).
+- `ValidateLayout`: Struct 필드는 `FieldStruct(i)`가 비어 있지 않아야 한다. `FieldScope` 호출 네 곳에 `FieldStruct(i)`를 넘긴다.
+- 저장 청구 정정: `SaveNodeFields`가 필드마다 누적 payload 바이트를 청구하던 과대 청구(B3 이전부터)를 RecordBuilder의 실제 작업(성장할 때만 복사) 하나로 바꾼다(선청구와 겹치지 않게).
+
+**Trace**
+
+- 모든 struct에 생성 `GeneratedType<S>::Trace(const S&, TraceVisitor&) noexcept`를 낸다(비참조 struct는 빈 본문 — 생성 클래스 Trace는 비템플릿 람다라 `if constexpr`의 버려진 분기도 검사되기 때문). 참조 struct는 직접 `ObjectRef` 멤버를 Visit하고 멤버 struct의 Trace를 부른다. 클래스 생성 Trace는 struct 필드마다 그 Trace를 부른다. `RuntimeStructOps.trace`는 참조 struct만 같은 함수를 `const void*`로 감싼 것이다(B5 컨테이너·도구용).
+
+**MetaCompiler(B4b)**
+
+- 마커: `Annotations.h`에 `rocks.struct.marker`, `BindPrefixMarkers`·`PrefixSourceVerifier`에 세 번째 모드, 한 레코드에 CLASS·STRUCT 마커가 함께 있으면 오류, `Specifiers.Struct`(Version·Binds).
+- 검사: base가 하나라도 있으면 RMC2301, 템플릿은 기존 RMC2000, 모든 비정적 데이터 멤버는 PROPERTY 또는 NATIVE, 생성자·소멸자 noexcept static_assert. struct는 base·`ObjectRef`·`SoftObjectRef` 대상에서 거부(`Resolve`), Base 해석·`Order()`는 struct를 건너뛰되 필드 목록 구성·RMC2203 검사·"선언 없음" 검사·IdentityInventory에는 넣는다. `KindHasTargetType`에 Struct, descriptor 빈 ID 규칙, RMC2006(public 타입의 private struct 필드).
+- 순환 RMC2302: native 철자로 푼 필드 간선 DFS를 Order·깊이 계산·생성보다 먼저 한다(Binds 거울은 C++에서 순환을 만들 수 있다 — 거울이 자기가 묶는 실제 타입을 필드로 가지는 경우). import 쪽은 `LoadImports`에서 같은 DFS·깊이 계산(descriptor에 깊이 키는 없다). 깊이 RMC2303, 생성 코드에 `static_assert(depth <= ::rocks::MaxStructDepth)`.
+- 형질: `ContainsStrongReference`(ObjectReference 필드 — Transient 포함 — 또는 그런 struct). `RequiresWorldOnlyOwner`: struct의 NATIVE 멤버가 RMC2206 형질을 가져도 struct 자체는 오류가 아니라 형질을 전파한다. 생성 struct는 `static constexpr bool RequiresWorldOnlyOwner`와 모델 값이 직접 멤버의 형질을 포함하는지 확인하는 static_assert를 내고, WorldOnly가 아닌 클래스는 struct 필드마다 `static_assert(!GeneratedType<S>::RequiresWorldOnlyOwner)`를 낸다(import 플래그를 믿지 않는다). NATIVE 멤버의 직접 타입이 리플렉션 struct면 그 생성 헤더를 include하고 `static_assert(!GeneratedType<S>::ContainsStrongReference)`(RMC2205의 생성 대조) — `NativeMemberTraits`에 `GeneratedType` 탐지 특수화를 두지 않는다(생성 헤더가 없으면 조용히 false가 되는 ODR 위반).
+- 생성: `GeneratedType<S>`(Id·Schema·Ops·형질·Trace·Register), struct가 `static Result<Array<uint8>> Migrate(Allocator&, TypeId, uint32, uint32, Span<const uint8>) noexcept`를 가지면 `Ops().migrate`에 연결, 클래스 struct 필드의 read·writeStaged는 nullptr·write는 Struct 종류, 헤더 안 특수화는 위상 순서, 다른 헤더(같은 모듈 포함)·import base의 상속 struct 필드가 쓰는 struct의 생성 헤더 include(header≠include 규칙), import 필드 Reference ID 채우기 확장.
+- descriptor struct 항목 키(1.4절): kind·name·id·version·header·visibility·flags·binds·fields.
+- 모듈 등록: `ModuleRegistration::RegisterStructIfAbsent`, 집계 순서 enum → struct(의존 위상 순서, 같은 깊이는 이름 순) → 클래스.
+
+**Binds(B4c)**
+
+- 모듈 `CoreTypeBindings`: ReflectionTestFixtures와 같은 형태(`CoreModuleRules`, 소스 없음, `RequiredModules = ["ObjectRuntime"]`, Group Runtime, `CoreTypeBindings.rocksids.json`)이고 SDK 타깃에서 도달하게 한다. Binds는 이 모듈에서만 허용한다(다른 모듈의 Binds는 RMC2004 — 무관한 두 모듈이 같은 타입을 묶으면 ODR 위반·런타임 AlreadyExists가 되므로). 소비 모듈이 의존하지 않고 Core 값 타입 필드를 쓰면 "CoreTypeBindings에 의존하라"는 힌트를 진단에 붙인다.
+- 철자: Binds가 있으면 MetaCompiler가 같은 합성 TU에 `using rocksBinds_N = <철자>; static_assert(sizeof(rocksBinds_N) > 0);`를 붙여 Clang을 한 번 더 돌리고(`-ast-dump-filter`로 출력을 줄인다) 기존 `TypeSpelling`의 정규 철자를 쓴다(문자열 비교 금지). 이 실행의 오류는 거울 선언 위치로 보고한다. `ClassModel.NativeName`(Binds 정규 철자, 없으면 Name)을 생성 코드 전체가 쓰고(`::` + 이름, `&::{owner}::{name}`), schema 이름은 거울 이름이다. descriptor `binds` 검증기는 템플릿 철자를 받고 대상이 리플렉션 타입·거울이면 거부한다. import와 자기 모듈의 native 철자 색인을 두고(Transform 거울이 같은 모듈의 Vector·Quaternion 거울을 쓴다), 거울 타입을 필드 형식으로 직접 쓰면 거부한다.
+- 대조(생성 static_assert): 멤버마다 `__is_same(decltype(Real::m), T)`, 개수·순서는 비템플릿 inline 함수의 구조적 바인딩 `[[maybe_unused]] const auto& [m0, …] = value;`와 위치별 `__is_same(__remove_cv(decltype(mi)), T)`(private 데이터·union·base 분할도 컴파일 실패), noexcept 생성·소멸은 실제 타입에 건다. sizeof·offset 대조는 쓰지 않는다(Transform은 데이터 52 B·sizeof 56 — 꼬리 패딩에 숨은 멤버를 놓친다).
+
+**시험(11절 B4 행 + 교차검증 추가분)**
+
+- 레지스트리: 공유 필드 검증·trace⇔참조·깊이 17 거부·native 대조·같은 native 다른 ID·의존 Busy·FieldEnum 종류 검사·클래스 struct 필드 write Unsupported·WorldOnly 형질 전파.
+- codec·그래프: 3단 중첩·참조 struct 왕복과 재저장 byte 동일, 낮은 버전(타입 migrate·override와 Unsupported 이어 넘김·결과가 현재 버전 아님·버전 0·마이그레이션 결과 안 멤버의 OpenValue·2단계가 보관 결과를 재사용 — callback 1회·커서 어긋남 오류), 높은 버전(거부·건너뛰기·Reject 우선), 모르는 필드 path, 누락 struct 안 Required 진단과 가지치기, struct 안 EditorOnly 제외·ReadOnly 전파, struct 안 미선언 enum(path 2단)·정적 enum 확인, 모든 작업 한도 실패가 생성자 전, 깊이 16에서 로드·저장 작업이 깊이 배수로 불어나지 않음, struct hook(한 번의 해석·중첩 치환 수명·참조 struct 거부·미등록 관찰 ID), Trace가 struct 안 참조를 방문(GC 생존).
+- MetaCompiler: RMC2301·2302(Binds 거울 C++ fixture·조작 descriptor)·2303·2006·2205·2206 전파, 생성 코드·descriptor·import·include·등록 순서.
+- Binds: alias 정규화(`rocks::Vec3` → `rocks::Vector3<float>`), 다른 모듈 Binds RMC2004, 거울 타입 필드 거부, 의존 누락 힌트, 대조 실패(이름·형식·개수·순서) 컴파일 실패 probe.
 
 ## 5. 배열(B5)
 
 ### 5.1 `Array<T>`
 
-- 원소: 스칼라·`String`·`Guid`·`AssetId`·`Sha256Digest`·enum·참조 없는 struct·`SoftObjectRef<U>`. `Array<ObjectRef<…>>`·참조 struct·중첩 배열은 RMC2304(`ObjectRefArray`를 쓴다).
+- 원소: 스칼라·`String`·`Guid`·`AssetId`·`Sha256Digest`·enum·참조 없는 struct·`SoftObjectRef<U>`. `Array<ObjectRef<…>>`·참조 struct·중첩 배열은 RMC2304(참조 목록은 `ObjectRefArray`, 참조 struct 목록은 소유자를 아는 B5 컨테이너 — 4.3절).
 - 필드는 소유 타입 생성자가 allocator로 초기화한다. struct 원소가 `explicit T(Allocator&) noexcept`면 그 allocator로 만든다.
 - `ValueKind::Array`, `element`가 원소 형식이다.
 
@@ -290,7 +400,7 @@ struct BulkDataRef {
 
 - 필드별 길이 상한 `MaxElements`: 기본 65,536, 최대 1,048,576. 인코딩된 필드 값은 그래프 `maxValueBytes`(4 MiB)도 지켜야 한다(넘으면 CapacityExceeded — 예를 들어 U64 원소는 약 52만 개가 한계다).
 - **강제 지점**: 리플렉션 쓰기(경로 접근 7절)·저장(encode)·로드(decode). Registry 변경 API(`AddReference` 등)와 C++ 직접 사용에는 걸지 않는다(Level의 actor 목록 같은 런타임 목록을 막지 않는다 — 넘친 목록은 저장할 때 오류다).
-- 그래프 전체: A0-B에서 `ObjectGraphLimits`에 `maxTotalElements`(기본 4,194,304)를 더하고, 중첩 struct TLV를 `maxTotalFields`에 세면서 그 기본값을 4,096에서 A0-O 목표치인 1,048,576으로 올린다(필드 3개짜리 struct 배열이 원소 약 1,366개에서 막히지 않게). 바이트·작업량 한도 확장(64 MiB·8 × (필드 + 원소))은 A0-O의 graph v2가 정한다.
+- 그래프 전체: B4가 중첩 struct TLV를 `maxTotalFields`에 세기 시작하며 그 기본값을 4,096에서 A0-O 목표치인 1,048,576으로 올리고(필드 3개짜리 struct 배열이 원소 약 1,366개에서 막히지 않게 — Record별 `maxFields`는 남은 누계로 연다, 4.6절), B5가 `ObjectGraphLimits`에 `maxTotalElements`(기본 4,194,304)를 더한다. 바이트·작업량 한도 확장(64 MiB·8 × (필드 + 원소))은 A0-O의 graph v2가 정한다.
 
 ## 6. 필드 codec(B3–B5 공통)
 
@@ -371,9 +481,9 @@ struct BulkDataRef {
 
 **B4·B5가 같은 문맥에 더하는 것(계약만 지금 고정)**
 
-- 두 문맥의 `Scratch()`(예산을 청구하는 할당기), decode의 `OpenRecord`·`OpenValueArray`·`OpenRecordList`·`MigrateStruct`, `AddFields(n)`·`AddElements(n)`(2단계 no-op).
-- 1·2단계는 같은 값을 같은 순서로 방문한다. 중첩 struct 마이그레이션 결과는 1단계 방문 순번으로 `LoadNode`(`Array<Array<uint8>>`)에 보관하고 2단계가 같은 순번으로 받는다. 중첩 색인은 1단계에서 보관하거나 2단계 전용 open(같은 크기 한도, 무제한 work, 그래프 필드 누계에 세지 않음)으로 다시 연다.
-- struct hook(B4): 관찰은 1단계에서만, 관찰 대상으로 등록된 struct ID를 scratch 임시 값으로 해석해 `ObserveStruct(frame, TypeId, nativeKey, const void* value)`를 부른다(실패하면 생성 전에 로드 실패 — BulkDataRef 대조의 `CorruptPackage`). 치환은 encode에서 `SubstituteStruct(frame, TypeId, nativeKey, const void* in) -> Result<const void*>`(hook이 scratch에 같은 native 타입의 사본을 돌려준다 — 저장은 객체를 바꾸지 않는다). 참조를 담는 struct는 치환하지 않는다. 깊이·원소 여부와 무관하게 모든 struct 값에 적용하고 encode 순서는 결정적이다(AS 5.5).
+- 두 문맥의 `Scratch()`(예산을 청구하는 할당기), decode의 `OpenRecord`·`OpenValueArray`·`OpenRecordList`·`MigrateStruct`, `AddFields(n)`·`AddElements(n)`(2단계 no-op). B4의 구체 형태는 4.6절이다.
+- 1·2단계는 같은 값을 같은 순서로 방문한다. 중첩 struct 마이그레이션 결과는 1단계 방문 순번으로 `LoadNode`에 (struct ID, 원본 버전, 소유 버퍼)로 보관하고 2단계가 같은 순번으로 받아 대조한다(어긋나면 계약 위반 — 오류 반환·rollback). 중첩 색인은 2단계 전용 open(같은 크기 한도·버전 범위, 무제한 work, 그래프 필드 누계에 세지 않음)으로 다시 연다.
+- struct hook(B4): 관찰은 1단계에서만, 관찰 대상으로 등록된 struct ID(로드 시작 때 정렬·검사 — 미등록 NotFound, 참조 struct InvalidArgument)를 **검증과 같은 한 번의 해석으로** scratch 임시 값에 채워 `ObserveStruct(frame, TypeId, nativeKey, const void* value)`를 부른다(따로 두 번 해석하면 중첩 마이그레이션·진단·필드 누계가 두 번 일어난다. 실패하면 생성 전에 로드 실패 — BulkDataRef 대조의 `CorruptPackage`). 치환은 encode에서 `SubstituteStruct(frame, TypeId, nativeKey, const void* in) -> Result<const void*>`(hook이 같은 native 타입의 사본을 돌려준다 — 저장은 객체를 바꾸지 않는다. 반환값은 **그 struct 값의 encode가 끝날 때까지** 유효해야 한다 — 안쪽 struct의 치환이 바깥 결과를 무효로 만들지 않게. null은 InvalidArgument). 참조를 담는 struct는 치환·관찰하지 않는다. 깊이·원소 여부와 무관하게 모든 struct 값에 적용하고 encode 순서는 결정적이다(AS 5.5).
 - MaxElements를 올리면 그 타입의 Version도 올린다(옛 빌드가 새 데이터를 `CorruptPackage`로 오진하지 않게 — B5).
 - decode는 staged 객체 전용이다. live 객체의 속성 단위 변경·Undo는 B6 경로 쓰기가 맡는다.
 
@@ -416,7 +526,7 @@ struct BulkDataRef {
 | RMC2301 | MetaCompiler | struct 상속 |
 | RMC2302 | MetaCompiler | struct 타입 순환 |
 | RMC2303 | MetaCompiler | struct 중첩 깊이 초과 |
-| RMC2304 | MetaCompiler | 배열 원소로 쓸 수 없는 형식(ObjectRef·참조 struct·배열) |
+| RMC2304 | MetaCompiler | `Array<T>` 원소로 쓸 수 없는 형식(ObjectRef·참조 struct·배열 — 참조 struct 목록은 B5 컨테이너, 4.3절) |
 | RMC2401 | MetaCompiler | enum underlying 미지정·지원하지 않는 폭·값 별칭 |
 
 기존 코드(RMC1000·2000·2001·2100·3000·3100·4000)는 그대로다. RMC2005 중 한 모듈 안의 충돌(`.module.h`·`.generated.h`·대소문자)은 MetaCompiler도 판정한다.
@@ -434,7 +544,7 @@ struct BulkDataRef {
 | B7 | 툴체인 지문·도구 빌드 ID 생성·주입, AS 문서 정정 | 8절 시험 (다른 단계와 독립 — 병렬 가능) |
 | B8 | Level·Actor·Component의 `ROCKS_CLASS(WorldOnly)` 이전 | 기존 World 시험 전부 + 리플렉션 Trace·저장 |
 
-상태: B1은 2026-11-13에 구현했다(사용 계약은 [리플렉션 메타데이터](../Implementation/ReflectionMetadata.ko.md)의 "모듈 메타데이터"·"생성물과 등록"). B1의 `RegisterModuleTypes`는 클래스만 등록하며 B3가 enum·struct와 TypeRegistry 종류를 더한다. B2는 2026-11-13에 구현했다: 정수 지정자 값, `Version`·상속되는 `WorldOnly`, `EditorOnly`·`Required`(참조 필드만, RMC2202)·`Name`(도구 이름, RMC2203)·`MaxElements`(배열 전용 — 배열이 생기기 전까지 RMC2202), `ROCKS_NATIVE`(RMC2204·2205·2206, 생성 static_assert), `ROCKS_NATIVE_TYPE`, `completeFieldLayout`의 새 뜻, TypeRegistry 마스크·WorldOnly 상속·도구 이름 검사. 리플렉션 struct의 `ContainsStrongReference`·`RequiresWorldOnlyOwner` 형질은 struct가 생기는 B4에서 더한다. B3는 세 커밋으로 나눈다 — B3a(`ValueType`·`AssetId`·`Sha256Digest`·`SoftObjectRef<T>`, 3.1–3.3·3.5절의 스키마 표현), B3b(`ROCKS_ENUM`·TypeRegistry 종류·의존 계수·native 대조·enum 먼저 등록), B3c(codec thunk와 문맥·두 단계 decode·decode 정책·진단·`ValidateFieldWrite`). B3a는 2026-11-13에 구현했다: `FieldSchema::value`(`ValueType`)·`element`·`maxElements`(배열 전까지 Opaque·0만 등록), `ValueKind` 끝의 여섯 종류(Enum·Struct·Array는 B3b–B5까지 등록 거부), `FieldValue::digest`·`type`, wire `SoftObjectReference = 12`, 소프트 참조의 기대 타입과 `Required` 허용, 쓰기·저장·로드의 소프트 참조 규칙 검사(사용 계약은 [리플렉션 메타데이터](../Implementation/ReflectionMetadata.ko.md)의 형식 표). B3a에서 정한 것: `AssetId::TryParse`는 정규 표기(36자 소문자)만 받는다. FieldValue의 String은 UTF-8 불변식을 지키므로 소프트 참조의 UTF-8 검사는 `SoftObjectRef::TryAssign(StringView)`와 Archive 해석에서 걸린다. `SoftObjectRef`는 이동하면 원본이 null이 되고(경로만 비우면 같은 에셋의 대표 객체를 가리키게 된다), 받는 쪽 allocator를 유지하는 복사 `TryAssign(other)`와 allocator를 받는 `TryClone(allocator)`를 둔다. 등록된 쓰기의 오류 순서는 전달 값 종류 → 읽기 전용 → 값 내용(정수 폭·소프트 참조 규칙)이다. 소프트 참조의 기대 타입은 쓰기·저장·로드에서 검사하지 않는다(대상을 찾는 A0-O·A1의 일). descriptor import는 MetaCompiler가 만드는 값 종류만 받고 Required와 종류의 대응도 다시 검사한다(RMC1000). 상속 필드 대조에 `element`·`maxElements`를 포함한다. B3b는 2026-11-13에 구현했다: `ROCKS_ENUM`·`ROCKS_ENUMERATOR`(3.4절 문법·RMC2401·RMC2203), `EnumSchema`·`EnumeratorSchema`와 실행 시 검증기 `IsDeclaredEnumValue`·도구 이름 조회 `FindEnumerator`, TypeRegistry 종류(`TypeKind`)·`RegisterEnum`·`AcquireValueType`·enum 의존 계수·native 키 대조, `ModuleRegistration::RegisterEnumIfAbsent`와 enum 먼저 등록, 생성 `GeneratedType<E>`(constexpr `IsDeclared`), enum 필드 읽기·쓰기·staged 쓰기 검증, 그래프 I64 저장·복원(선언되지 않은 값 거부), descriptor의 enum 항목과 import. B3b 구현에서 정한 것: enum 레코드는 클래스와 같은 목록·ID 공간을 쓰고 `schema.id`·`name`과 `ops.nativeType`·`module`만 채운다. Enum 필드의 enum은 클래스 레코드의 필드별 의존 배열(`fieldTypes`)로 붙잡고 클래스 lease의 `FieldEnum(index)`로 연다(그래프 저장·복원이 이것으로 검증한다). 생성 접근기는 C++ enum의 native 키를 `RuntimeFieldOps::valueNativeType`으로 싣고, enum 등록 정보는 `RuntimeEnumOps{nativeType, module}`이다. Clang은 underlying을 생략한 `enum class`에도 int를 주므로 명시 여부는 원문(이름 뒤 `:`)으로 판정한다. 빈 enum·전방 선언·Flags enum의 음수 값·비ASCII 열거자 이름·4,096개 초과는 RMC2401이다. 클래스 안 중첩 enum도 리플렉션하되 public 구역이어야 한다. 생성 코드는 열거자 값마다 `static_assert`로 AST에서 읽은 값을 대조한다. 같은 C++ enum을 다른 ID로 다시 등록하지 않는다(AlreadyExists — 생성 thunk는 생성 ID 하나만 받는다). 같은 모듈의 public 클래스는 private enum을 필드로 쓸 수 없다(RMC2006). import한 base의 enum 필드는 import enum으로 해석한다. MetaCompiler는 enum을 클래스와 같은 타입 모델(`IsEnum`)로 두어 descriptor·import·inventory 경로를 공유한다. 미선언 값의 decode 정책(`ReportAndDefault`)은 B3c다. B3c는 2026-11-13에 구현했다: `Object/FieldCodec.h`(정책·진단·hooks·frame stack 문맥)와 `Object/GeneratedFieldCodec.h`(생성 codec·`EncodeThroughFieldValue`/`DecodeThroughFieldValue`), `RuntimeFieldOps::encode`/`decode`와 등록 규칙(둘 다 있거나 둘 다 없음, `completeFieldLayout`이면 Transient가 아닌 필드 전부), graph v1의 두 단계 decode(1단계 검증·예산 선청구, 2단계 예산 무접촉), `ObjectGraphSaveOptions`/`ObjectGraphLoadOptions`의 정책·hooks, `RecordReader::Open`의 공유 `ArchiveBudget`, `PropagateFieldFlags`·`EnumReplacementValue`, `detail::ValidateFieldWrite`(사용 계약은 [직렬화](../Implementation/Serialization.ko.md)의 "필드 codec과 문맥"). B3c 구현에서 정한 것: 진단을 보낼 hooks가 없으면 `ReportAndDefault`·`LoadNewerSkippingUnknown`은 InvalidArgument다. 더 새 객체 Record 버전은 migrate하지 않는다. 모르는 필드 `Reject`는 `LoadNewerSkippingUnknown`보다 우선한다. Meta 검사(`Rocks.Build.Cli`의 meta 단계와 ToolTests meta)는 구성의 `ROCKS_BUILD_*` 매크로를 넘긴다(생성 codec이 포함하는 Serialization·Core 헤더를 거쳐 `Base/Compiler.h`가 구성 매크로 정확히 하나를 요구하므로). B1 구현에서 정한 것: 메타데이터 배치·검증은 타깃에서 도달하는 모듈에만 적용한다. `ModuleRegistration`은 이미 등록된 공유 타입의 lease를 붙잡는다. `.generated.h` 철자를 예약한다(RMC2005). 명세 사이 이름도 유일해야 한다(1.6절).
+상태: B1은 2026-11-13에 구현했다(사용 계약은 [리플렉션 메타데이터](../Implementation/ReflectionMetadata.ko.md)의 "모듈 메타데이터"·"생성물과 등록"). B1의 `RegisterModuleTypes`는 클래스만 등록하며 B3가 enum·struct와 TypeRegistry 종류를 더한다. B2는 2026-11-13에 구현했다: 정수 지정자 값, `Version`·상속되는 `WorldOnly`, `EditorOnly`·`Required`(참조 필드만, RMC2202)·`Name`(도구 이름, RMC2203)·`MaxElements`(배열 전용 — 배열이 생기기 전까지 RMC2202), `ROCKS_NATIVE`(RMC2204·2205·2206, 생성 static_assert), `ROCKS_NATIVE_TYPE`, `completeFieldLayout`의 새 뜻, TypeRegistry 마스크·WorldOnly 상속·도구 이름 검사. 리플렉션 struct의 `ContainsStrongReference`·`RequiresWorldOnlyOwner` 형질은 struct가 생기는 B4에서 더한다. B3는 세 커밋으로 나눈다 — B3a(`ValueType`·`AssetId`·`Sha256Digest`·`SoftObjectRef<T>`, 3.1–3.3·3.5절의 스키마 표현), B3b(`ROCKS_ENUM`·TypeRegistry 종류·의존 계수·native 대조·enum 먼저 등록), B3c(codec thunk와 문맥·두 단계 decode·decode 정책·진단·`ValidateFieldWrite`). B3a는 2026-11-13에 구현했다: `FieldSchema::value`(`ValueType`)·`element`·`maxElements`(배열 전까지 Opaque·0만 등록), `ValueKind` 끝의 여섯 종류(Enum·Struct·Array는 B3b–B5까지 등록 거부), `FieldValue::digest`·`type`, wire `SoftObjectReference = 12`, 소프트 참조의 기대 타입과 `Required` 허용, 쓰기·저장·로드의 소프트 참조 규칙 검사(사용 계약은 [리플렉션 메타데이터](../Implementation/ReflectionMetadata.ko.md)의 형식 표). B3a에서 정한 것: `AssetId::TryParse`는 정규 표기(36자 소문자)만 받는다. FieldValue의 String은 UTF-8 불변식을 지키므로 소프트 참조의 UTF-8 검사는 `SoftObjectRef::TryAssign(StringView)`와 Archive 해석에서 걸린다. `SoftObjectRef`는 이동하면 원본이 null이 되고(경로만 비우면 같은 에셋의 대표 객체를 가리키게 된다), 받는 쪽 allocator를 유지하는 복사 `TryAssign(other)`와 allocator를 받는 `TryClone(allocator)`를 둔다. 등록된 쓰기의 오류 순서는 전달 값 종류 → 읽기 전용 → 값 내용(정수 폭·소프트 참조 규칙)이다. 소프트 참조의 기대 타입은 쓰기·저장·로드에서 검사하지 않는다(대상을 찾는 A0-O·A1의 일). descriptor import는 MetaCompiler가 만드는 값 종류만 받고 Required와 종류의 대응도 다시 검사한다(RMC1000). 상속 필드 대조에 `element`·`maxElements`를 포함한다. B3b는 2026-11-13에 구현했다: `ROCKS_ENUM`·`ROCKS_ENUMERATOR`(3.4절 문법·RMC2401·RMC2203), `EnumSchema`·`EnumeratorSchema`와 실행 시 검증기 `IsDeclaredEnumValue`·도구 이름 조회 `FindEnumerator`, TypeRegistry 종류(`TypeKind`)·`RegisterEnum`·`AcquireValueType`·enum 의존 계수·native 키 대조, `ModuleRegistration::RegisterEnumIfAbsent`와 enum 먼저 등록, 생성 `GeneratedType<E>`(constexpr `IsDeclared`), enum 필드 읽기·쓰기·staged 쓰기 검증, 그래프 I64 저장·복원(선언되지 않은 값 거부), descriptor의 enum 항목과 import. B3b 구현에서 정한 것: enum 레코드는 클래스와 같은 목록·ID 공간을 쓰고 `schema.id`·`name`과 `ops.nativeType`·`module`만 채운다. Enum 필드의 enum은 클래스 레코드의 필드별 의존 배열(`fieldTypes`)로 붙잡고 클래스 lease의 `FieldEnum(index)`로 연다(그래프 저장·복원이 이것으로 검증한다). 생성 접근기는 C++ enum의 native 키를 `RuntimeFieldOps::valueNativeType`으로 싣고, enum 등록 정보는 `RuntimeEnumOps{nativeType, module}`이다. Clang은 underlying을 생략한 `enum class`에도 int를 주므로 명시 여부는 원문(이름 뒤 `:`)으로 판정한다. 빈 enum·전방 선언·Flags enum의 음수 값·비ASCII 열거자 이름·4,096개 초과는 RMC2401이다. 클래스 안 중첩 enum도 리플렉션하되 public 구역이어야 한다. 생성 코드는 열거자 값마다 `static_assert`로 AST에서 읽은 값을 대조한다. 같은 C++ enum을 다른 ID로 다시 등록하지 않는다(AlreadyExists — 생성 thunk는 생성 ID 하나만 받는다). 같은 모듈의 public 클래스는 private enum을 필드로 쓸 수 없다(RMC2006). import한 base의 enum 필드는 import enum으로 해석한다. MetaCompiler는 enum을 클래스와 같은 타입 모델(`IsEnum`)로 두어 descriptor·import·inventory 경로를 공유한다. 미선언 값의 decode 정책(`ReportAndDefault`)은 B3c다. B3c는 2026-11-13에 구현했다: `Object/FieldCodec.h`(정책·진단·hooks·frame stack 문맥)와 `Object/GeneratedFieldCodec.h`(생성 codec·`EncodeThroughFieldValue`/`DecodeThroughFieldValue`), `RuntimeFieldOps::encode`/`decode`와 등록 규칙(둘 다 있거나 둘 다 없음, `completeFieldLayout`이면 Transient가 아닌 필드 전부), graph v1의 두 단계 decode(1단계 검증·예산 선청구, 2단계 예산 무접촉), `ObjectGraphSaveOptions`/`ObjectGraphLoadOptions`의 정책·hooks, `RecordReader::Open`의 공유 `ArchiveBudget`, `PropagateFieldFlags`·`EnumReplacementValue`, `detail::ValidateFieldWrite`(사용 계약은 [직렬화](../Implementation/Serialization.ko.md)의 "필드 codec과 문맥"). B3c 구현에서 정한 것: 진단을 보낼 hooks가 없으면 `ReportAndDefault`·`LoadNewerSkippingUnknown`은 InvalidArgument다. 더 새 객체 Record 버전은 migrate하지 않는다. 모르는 필드 `Reject`는 `LoadNewerSkippingUnknown`보다 우선한다. Meta 검사(`Rocks.Build.Cli`의 meta 단계와 ToolTests meta)는 구성의 `ROCKS_BUILD_*` 매크로를 넘긴다(생성 codec이 포함하는 Serialization·Core 헤더를 거쳐 `Base/Compiler.h`가 구성 매크로 정확히 하나를 요구하므로). B4는 세 커밋으로 나눈다 — B4a(런타임: 등록·문맥·struct codec·그래프·Trace), B4b(MetaCompiler), B4c(`CoreTypeBindings`의 Binds). 구현 형태는 4.6절이다. B1 구현에서 정한 것: 메타데이터 배치·검증은 타깃에서 도달하는 모듈에만 적용한다. `ModuleRegistration`은 이미 등록된 공유 타입의 lease를 붙잡는다. `.generated.h` 철자를 예약한다(RMC2005). 명세 사이 이름도 유일해야 한다(1.6절).
 
 의존: B1 → B3(집계 헤더·import), B2 → B3(Required·EditorOnly 검증), B3 → B4 → B5(struct 원소 배열), B3·B5 → B6(경로는 struct·배열을 지난다), B2·B5 → B8. B7은 독립이다. 각 단계는 구현 뒤 다수 서브에이전트 교차검증, Debug·Release·Asan·format·policy·Android 빌드를 거쳐 커밋한다.
 
@@ -442,7 +552,7 @@ struct BulkDataRef {
 
 결정:
 
-1. 참조 struct는 배열 원소가 될 수 없다(4.3절) — Registry 간선 모델(소유 객체 저장소 안의 간선)을 유지한다.
+1. 참조 struct의 목록은 `Array<T>` 원소가 아니라 B5의 Registry 관리 컨테이너로 지원한다(4.3절). 처음에는 금지였으나 2026-11-13 사용자 결정으로 바꿨다(UE `StaticMaterials`·머티리얼 파라미터 배열 대응). Registry 간선 모델은 컨테이너 기준 범위 검사로 넓힌다.
 2. 단일 값 배열은 `ValueArray`로 압축한다(5.4절) — 원소 한도와 바이트 한도를 함께 만족한다.
 3. 플래그 enum을 지원한다(3.4절) — 미선언 값 거부를 "선언 값들의 OR"로 정의한다.
 4. struct 상속은 v1에서 금지(4.1절). DataTable 행 같은 base struct 요구가 생기면 base 필드를 펼치는 방식으로 연다.
@@ -451,6 +561,8 @@ struct BulkDataRef {
 7. 툴체인 지문에 빌드 구성을 넣지 않는다(8절). 구성 사이 쿠킹 byte 비교 시험으로 확인한다.
 8. WorldOnly는 상속되는 플래그다(2.2절). `Required`는 저장·쿠킹에서만 거부한다(2.3절).
 9. 미선언 enum 값·높은 struct 버전은 기본 거부이고, 정책으로 보고 후 계속을 고를 수 있다(6.1절) — 새 빌드가 쓴 데이터를 손상으로 오진하지 않는다.
+10. struct 값은 용량보다 유연성을 택해 Binds Core 값 타입까지 모두 태그형 중첩 Record로 저장한다(4.4절, 2026-11-13 사용자 결정 — 고정 배치 없음).
+11. struct 마이그레이션은 타입이 등록하고(`RuntimeStructOps.migrate`, UE의 타입별 버전 처리 대응) 로드 옵션은 override다(4.4·4.6절).
 
 열린 문제(이 단계 밖에서 정한다):
 
