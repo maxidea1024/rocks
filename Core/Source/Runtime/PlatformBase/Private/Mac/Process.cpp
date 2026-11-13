@@ -631,8 +631,10 @@ FileStatus Process::Terminate() noexcept {
     }
 
     // 자식을 아직 회수하지 않았으므로 그룹 번호는 이 자식의 그룹이다. 자식이 그룹을 바꿨어도 직접
-    // 자식은 따로 끝낸다.
-    const bool groupSignaled = kill(-state_->pid, SIGKILL) == 0 || errno == ESRCH;
+    // 자식은 따로 끝낸다. macOS는 회수되지 않은 zombie만 남은 그룹에 신호를 보내면 ESRCH가 아니라
+    // EPERM을 돌려준다. 그래서 직접 자식이 끝난 뒤의 EPERM은 살아 있는 구성원이 없다는 뜻으로 본다.
+    const bool groupSignaled =
+        kill(-state_->pid, SIGKILL) == 0 || errno == ESRCH || (state_->exited && errno == EPERM);
     const int groupError = errno;
     const bool childSignaled = state_->exited || kill(state_->pid, SIGKILL) == 0 || errno == ESRCH;
     if (!groupSignaled) {
