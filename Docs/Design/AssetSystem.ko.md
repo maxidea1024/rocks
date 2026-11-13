@@ -158,7 +158,7 @@ offset size 필드
 
 | kind | 내용 | flags | 빈 경우 | Editor | Cooked |
 |---|---|---|---|---|---|
-| Summary(1) | Record: 타입 스키마 버전 표(TypeId → 버전, TypeId 정렬), 커스텀 버전(Guid → u32), 도구 빌드 ID(10절), Cooked면 프로파일 id·프로파일 출력 설정 SHA-256·쿠커 버전 | Required | 항상 있음 | ○ | ○ |
+| Summary(1) | Record: 타입 스키마 버전 표(TypeId → 버전, TypeId 정렬), 커스텀 버전(Guid → u32), Cooked면 프로파일 id·프로파일 출력 설정 SHA-256·쿠커 버전 | Required | 항상 있음 | ○ | ○ |
 | Exports(2) | `{ name(대표는 빈 문자열), typeId, outerIndex, flags(Primary·EditorOnly) }` | Required | 항상 있음 | ○ | ○(EditorOnly 제외) |
 | ObjectImports(3) | `{ assetId, outerImportIndex(0 = 그 패키지의 대표 에셋을 Outer로 하는 경로의 시작), name(빈 이름 = 대표 에셋), typeId }`. 깊은 하위 객체는 outer import를 거쳐 객체 경로를 이룬다(UE import 표와 같은 방식). (assetId, 객체 경로) 순 정렬, 중복 금지 | Required | 생략 | ○ | ○ |
 | Dependencies(4) | `{ assetId, kind(Hard·Soft·EditorOnly·Build·ImportOwner), expectedTypeId, required }` (assetId, kind) 정렬·중복 제거. Hard·Soft·EditorOnly는 저장 결과의 외부 참조 목록(A0-O)에서, Build는 저장 전에 호출한 `DependencyDeclarer`(16.2절)가 준 목록에서, ImportOwner는 ImportRecord `ownerAssetId`(자기 자신이 아니면)에서 만든다. 로드 때 Hard·Soft·EditorOnly는 Objects 디코딩 결과와, ImportOwner는 ImportRecord와 대조하며(Build는 대조하지 않음) 불일치는 `CorruptPackage` | Required | 생략 | ○ | ○(EditorOnly·Build·ImportOwner 제외) |
@@ -214,7 +214,7 @@ ImportRecord (스키마 Guid, 버전 1)
 - 지정자: `Version=N`·`WorldOnly`(상속)·`EditorOnly`·`Required`(저장·쿠킹에서 거부)·`Name="…"`(도구 이름, 텍스처 설정은 UE C++ 이름, 12.4절)·`MaxElements`. `ROCKS_NATIVE`(비영속 멤버, 강한 참조를 재귀적으로 금지, `AssetLease`처럼 WorldOnly 전용 형질을 선언한 타입은 WorldOnly 클래스에만 — 에셋 객체 Registry는 WorldOnly 타입 생성을 거부한다, 11.4절). 영속 데이터는 모두 리플렉션 필드다 — `BulkDataRef`·`TextureSource`·`TexturePlatformData`도 `ROCKS_STRUCT`이므로 네이티브 직렬화 hook을 두지 않는다. `completeFieldLayout`은 "모든 영속 필드와 강한 간선을 기술"이다.
 - 필드 codec: 필드별 생성 encode·두 단계 decode thunk와 문맥(참조 wire 매개변수, Soft 참조 수집기, 유효 플래그, struct 관찰·치환 hook, 진단, decode 정책) — graph v2(A0-O)와 패키지(A1)가 같은 thunk를 쓴다.
 - 부동소수점: 빌드 전체가 이미 `-ffp-contract=off`이고 fast-math를 쓰지 않으므로 모듈별 모델은 두지 않는다(clang-cl의 `/fp:precise`는 contract=on을 뜻하고 `/WX`에서 옵션 충돌 경고가 오류가 되므로 쓰지 않는다). 결정적 수학 모듈의 fmadd·`long double`·외부 심볼(`llvm-nm`) 검사는 C3에서 모든 구성에 구현되었다([CoreDataFoundations](CoreDataFoundations.ko.md) 2절). `-fno-math-errno`는 clang-cl이 그 형태를 받지 않아 쓰지 않는다.
-- 빌드가 주입하는 상수: 툴체인 지문(너겟 키, 구성·호스트 경로 제외)과 도구 빌드 ID(Summary·AssetIndex 캐시 키 진단용, 입력 내용 해시 기반)를 Rocks.Build가 실행 파일마다 생성 번역 단위로 넣는다.
+- 빌드가 주입하는 상수: 툴체인 지문(너겟 키, 구성·호스트 경로 제외)과 도구 빌드 ID(진단·캐시 무효화용, 입력 내용 해시 기반 — 패키지 Summary에는 넣지 않고 쿠킹 보고서·AssetIndex 캐시 header에 기록)를 Rocks.Build가 실행 파일마다 생성 번역 단위로 넣는다([ReflectionFoundations](ReflectionFoundations.ko.md) 8.1절·결정 17).
 - 엔진 World 타입(Level·Actor·Component)은 `ROCKS_CLASS(WorldOnly)`로 옮긴다(B8).
 ## 6. 에셋 타입·객체 통합·참조
 
@@ -255,7 +255,7 @@ World 객체는 에셋 객체 Registry 밖에 있어 `ObjectRef<에셋>`을 걸 
 - 조회: ID·경로 키·타입(상속 포함)·디렉터리·태그, 정방향·역방향 의존(종류별), 별칭.
 - 일관성: 프로세스 로컬 최종 일관 인덱스. 쓰기 결정은 잠금 아래에서 디스크를 다시 확인.
 - 갱신: 자기 명령은 즉시. 외부 변경은 `DirectoryWatcher`(계약은 `Platform/DirectoryWatch.h`): 감시 시작 → 검색 → 쌓인 이벤트 적용. 이벤트 종류를 믿지 않고 경로를 다시 Stat·범위 읽기(레벨 트리거). `Overflow(path)`는 그 하위 트리 재검색, `RootRemoved`는 감시를 닫고 `RootLost` 진단·1초 간격으로 루트 재출현을 확인해 다시 연다. 쓰는 중이라 `CorruptPackage`인 파일은 크기·시각이 두 번 연속 같아질 때까지 최대 10초 기다린 뒤 다시 읽고, 그래도 손상이면 진단으로 남긴다.
-- 캐시: `Intermediate/AssetIndex.cache`(형식·도구 빌드 ID 키, 원자적 기록, 잠금 보유 프로세스만 기록 — 읽기 명령은 캐시를 읽기만). 파일별 헤더+섹션 표 SHA-256과 요약. 시작 시 범위(약 1 KiB)만 읽어 비교, 다르면 그 파일만 다시 읽음. 범위 읽기는 WorkerScheduler 병렬.
+- 캐시: `Intermediate/AssetIndex.cache`(형식·Unicode·스키마 버전 키 — 도구 빌드 ID는 header에 진단용으로만 기록해 엔진을 다시 빌드할 때마다 캐시가 무효화되지 않게, 원자적 기록, 잠금 보유 프로세스만 기록 — 읽기 명령은 캐시를 읽기만). 파일별 헤더+섹션 표 SHA-256과 요약. 시작 시 범위(약 1 KiB)만 읽어 비교, 다르면 그 파일만 다시 읽음. 범위 읽기는 WorkerScheduler 병렬.
 - `Verify()`: 4.6절 진단 보고만.
 - 원본 감시: 원본 SHA-256이 ImportRecord와 다르면 `SourceChanged`. 자동 재임포트는 기본 꺼짐, 켜면 debounce(500 ms) 후 재임포트, 실패 시 기존 보존·진단(계획 §9.4).
 
@@ -268,7 +268,7 @@ World 객체는 에셋 객체 Registry 밖에 있어 `ObjectRef<에셋>`을 걸 
 
 - 위치: `<AssetNuggets>` = `Config/AssetNuggets.json`의 `localPath`(기본 `<Project>/Intermediate/AssetNuggets/`). 프로젝트 사이 공유 경로도 쓸 수 있다(내용 주소라 안전하다).
 - 에셋 너겟은 "캐시 키 → 가공 결과" 저장소다. 같은 에셋이라도 설정·대상 플랫폼이 다르면 결과가 다르므로(예: Windows용·Android용 `T_Wall`은 다른 키) **결과에 영향을 주는 입력은 빠짐없이 키에 들어가야 한다.** 빠진 입력은 오래된 결과를 돌려주는 버그가 되고, 불필요한 입력(경로·시각·locale)은 적중률만 떨어뜨린다(계획 §9.1).
-- 키: 처리기 `BuildKey(KeyWriter&)`가 고정 순서·타입 태그로 기록한 바이트의 SHA-256. 모든 처리기에 공통으로 들어가는 것: `"RocksAssetNugget" 형식 버전`, 처리기 Guid·처리기 버전 Guid, 결과를 만드는 **인코더·외부 라이브러리의 이름·버전·설정**(블록 압축 인코더 등 — 비압축이면 없음), **결정적 수학 버전**(A0-C), **툴체인 지문**(컴파일러 id·버전·대상 아키텍처·부동소수점 모델 — 빌드가 상수로 주입), 에셋 TypeId, 입력 bulk SHA-256, 결과에 영향을 주는 설정 전체(기본값 포함, float는 bit 패턴, NaN 단일화, `CompressionCacheId` 포함), 대상 프로파일 id와 출력 설정 전체, 의존 입력 (역할, AssetId, 그 의존 에셋의 같은 처리기 build key) 정렬 목록 — 의존의 설정·전이 Build 의존 변화까지 키에 들어간다(Merkle). 경로·시각·locale 제외.
+- 키: 처리기 `BuildKey(KeyWriter&)`가 고정 순서·타입 태그로 기록한 바이트의 SHA-256. 모든 처리기에 공통으로 들어가는 것: `"RocksAssetNugget" 형식 버전`, 처리기 Guid·처리기 버전 Guid, 결과를 만드는 **인코더·외부 라이브러리의 이름·버전·설정**(블록 압축 인코더 등 — 비압축이면 없음), **결정적 수학 버전**(A0-C), **툴체인 지문**(컴파일러 버전·컴파일러/링커 바이너리 해시·대상 triple·부동소수점 모델 — 빌드가 상수로 주입, [ReflectionFoundations](ReflectionFoundations.ko.md) 8.1절), 에셋 TypeId, 입력 bulk SHA-256, 결과에 영향을 주는 설정 전체(기본값 포함, float는 bit 패턴, NaN 단일화, `CompressionCacheId` 포함), 대상 프로파일 id와 출력 설정 전체, 의존 입력 (역할, AssetId, 그 의존 에셋의 같은 처리기 build key) 정렬 목록 — 의존의 설정·전이 Build 의존 변화까지 키에 들어간다(Merkle). 경로·시각·locale 제외.
 - Build 의존 순환(지원 SCC, 6.2절)에서는 서로의 key가 서로를 포함해 값이 정해지지 않으므로 SCC 단위로 계산한다: SCC key = SHA-256(구성원의 지역 입력(위 항목 중 의존을 뺀 것)을 AssetId 순으로, SCC 밖 의존 튜플 (구성원 AssetId, 역할, 의존 AssetId, 그 key)의 정렬 목록), 구성원 key = SHA-256(SCC key, AssetId). 순환이 없어도 이 식 하나만 쓴다(구성원 하나인 SCC — 값 체계를 하나로 둔다).
 - 텍스처 키의 구성(위 공통 항목의 텍스처 대응):
 
@@ -305,7 +305,7 @@ World 객체는 에셋 객체 Registry 밖에 있어 `ObjectRef<에셋>`을 걸 
   매니페스트 교체가 유일한 전환점이므로 reader는 이전 매니페스트(이전 파일이 모두 있음) 또는 새 매니페스트(새 파일이 모두 있음)만 본다. 실패하면 매니페스트는 그대로이고 놓인 새 파일은 다음 전체 쿠킹이 지운다.
 - 전체 쿠킹(`asset-cook --profile=X`)은 매니페스트를 바꾼 뒤 새 매니페스트가 가리키지 않는 패키지 파일을 지운다(이전 매니페스트로 이미 실행 중인 게임은 그 파일을 `NotFound`로 받는다 — 개발용 쿠킹 디렉터리의 한계이며 배포본은 바뀌지 않는다). 부분 쿠킹은 대상만 다시 만들고 기존 매니페스트에 병합하며 패키지 파일은 지우지 않는다(사라진 에셋의 매니페스트 항목만 뺀다). 병합은 기존 매니페스트의 프로파일 id·프로파일 출력 설정 SHA-256·CookSettings SHA-256·쿠커 버전이 모두 같을 때만 하고, 다르면 `IncompatibleCook`(전체 쿠킹 필요)이다. 처리기·포맷·타입 스키마·툴체인 변화는 항목별 cookKey가 잡는다(위 지역 입력).
 - 매니페스트 v1(`CookedManifest.rman`): 헤더 `{ "RMAN", 버전 1, 항목 수, 프로파일 id, 프로파일 출력 설정 SHA-256, CookSettings SHA-256, 쿠커 버전 }` + 항목 `{ assetId, typeId, 경로 힌트, 패키지 SHA-256, 패키지 크기, cookKey, PrimaryAsset 표시, bundle 목록, 런타임 의존 목록 { assetId, kind(Hard·Soft) } }`(AssetId 정렬) + 파일 전체 CRC32. 손상은 `CorruptPackage`, 버전 불일치는 `UnsupportedVersion`. 로더는 시작할 때 매니페스트 프로파일 id가 실행 플랫폼의 프로파일과 같은지 확인하고(다르면 `IncompatibleCook`), 패키지를 열 때 크기·SHA-256과 패키지 Dependencies(Hard·Soft)를 매니페스트와 대조한다(다르면 `CorruptPackage`). SCC 계산은 매니페스트의 Hard 의존으로 로드 전에 한다.
-- 도구 빌드 ID(Summary): 빌드 시스템이 쿠커·에디터 도구 실행 파일의 입력 지문으로 주입하는 값이며 진단·추적용이다(병합 조건이 아니다).
+- 도구 빌드 ID: 빌드 시스템이 쿠커·에디터 도구 실행 파일의 입력 지문으로 주입하는 값이며 진단·추적용이다(병합 조건이 아니다). 쿠킹 보고서에 기록하고 패키지 Summary에는 넣지 않는다 — Summary에 있으면 구성 사이 쿠킹 byte 동일(시나리오 13·25)이 깨지고 쿠킹 패키지 이름(내용 주소)이 엔진 빌드마다 바뀐다.
 - 런타임 쿠킹 루트: 도구(`asset-load-cooked`)는 `<Project>/Saved/Cooked/<Profile>/`. 게임은 `EngineAssets`가 명령행 `-CookedRoot=<dir>`(없으면 실행 파일 디렉터리의 `Cooked/`)를 `AssetManager`에 넘긴다. 쿠킹 결과를 배포 위치로 옮기는 패키징 단계는 후속이다.
 - 쿠킹 bulk codec: 프로파일 설정(None·Zstd, 기본 None — 후속 스트리밍의 mip 단위 접근을 위해 entry 단위 압축).
 - 결정성(범위: 같은 도구 빌드에서 호스트 무관하게 같은 바이트): 정렬된 순회, 병렬 결과 정렬 후 기록, ID는 에디터 값 복사, 패딩 0. 이미지 처리 모듈은 SIMD 분기 없이 스칼라 경로만 쓰고, 초월 함수(pow·exp2·log2·sin)와 sRGB·감마 변환은 CRT를 쓰지 않는 Core 결정적 수학(A0-C)으로 하며 쿠킹 작업 동안 부동소수점 환경 guard(A0-C)를 건다. 현재 Core `LinearColor::ToSRGB`는 CRT `pow`를 써서 호스트마다 결과가 다를 수 있으므로(Color.h 주석) A0-C에서 결정적 수학의 표·함수로 바꾼다(런타임과 쿠킹의 sRGB 구현을 하나로). 결정적 수학 버전은 너겟 키와 cookKey에 들어간다. 시험: 결정적 수학의 기준값 표, CRT 미사용 링크 검사, 에셋 너겟 빈/찬 상태 출력 비교.

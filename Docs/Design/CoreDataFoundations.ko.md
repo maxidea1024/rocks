@@ -11,7 +11,7 @@
 - Unicode **18.0.0**(2026-09-01 배포, `https://www.unicode.org/Public/18.0.0/ucd/`).
 - 원본 파일: `UnicodeData.txt`(General_Category·정규 분해·결합 등급), `CompositionExclusions.txt`(교차 확인용), `DerivedNormalizationProps.txt`(Full_Composition_Exclusion·NFC_QC·NFD_QC), `CaseFolding.txt`(상태 C·S), `DerivedCoreProperties.txt`(Default_Ignorable_Code_Point), `NormalizationTest.txt`(시험), Unicode 라이선스 원문(`https://www.unicode.org/license.txt` — UCD 디렉터리 밖에 있다).
 - 위치: `Core/Source/ThirdParty/UnicodeData/ucd-18.0.0/`(원본 파일 + `license.txt`) + `ThirdParty.json`. 출처는 `UCD.zip`(URL·SHA-256)이고 라이선스 원문은 별도 출처이므로 manifest `licenses` 항목의 선택 필드 `licenseSource { url, sha256 }`에 적는다(라이선스 파일은 원본 디렉터리에 두고 `files`에 등록한다 — 기존 "라이선스 파일은 등록된 원본 파일" 규칙 유지). 처음에는 최상위 선택 필드였고, 2026-11-12에 단일 `license` 객체를 `licenses` 배열로 바꾸며 항목별 필드로 옮겼다([Compression.ko.md](Compression.ko.md) 3.2절).
-- 버전 올리기: 원본 교체 + 생성기 재실행 + 시험 갱신 한 묶음. 정규화·case pair 안정성 정책 덕분에 이미 할당된 문자의 정규화·folding 결과는 바뀌지 않지만 **General_Category와 Default_Ignorable은 안정성 정책 대상이 아니다** — 이전 버전에서 유효한 경로 이름이 무효가 될 수 있다. 그래서 버전을 올릴 때 생성기가 경로 허용 집합의 이전·이후 차이를 보고하고, `asset-index-verify`로 프로젝트 이름을 다시 검사하는 절차를 둔다. AssetIndex 캐시는 도구 빌드 ID로 이미 무효화된다.
+- 버전 올리기: 원본 교체 + 생성기 재실행 + 시험 갱신 한 묶음. 정규화·case pair 안정성 정책 덕분에 이미 할당된 문자의 정규화·folding 결과는 바뀌지 않지만 **General_Category와 Default_Ignorable은 안정성 정책 대상이 아니다** — 이전 버전에서 유효한 경로 이름이 무효가 될 수 있다. 그래서 버전을 올릴 때 생성기가 경로 허용 집합의 이전·이후 차이를 보고하고, `asset-index-verify`로 프로젝트 이름을 다시 검사하는 절차를 둔다. AssetIndex 캐시 키에 Unicode 버전이 들어가므로 버전을 올리면 캐시가 무효화된다(AS 7절).
 
 ### 1.2 데이터 전용 ThirdParty 종류
 
