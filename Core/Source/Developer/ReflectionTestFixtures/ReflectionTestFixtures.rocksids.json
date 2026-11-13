@@ -69,6 +69,27 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::EnumFields::bias",
+      "id": "143574e2d2e246afb4434737709cc37b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::EnumFields::channels",
+      "id": "80e389547d1c470097f13e327d67c18c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::EnumFields::group",
+      "id": "c264f1083bc74df2b508cc7ed53833dc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::Node::enabled",
       "id": "ad100000000000000000000000000023",
       "aliases": [],
@@ -225,6 +246,27 @@
     },
     {
       "kind": "type",
+      "name": "rocks::reflection_fixture::Bias",
+      "id": "6ba8da01a9a74de9a2971b6caa9bc101",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::Channels",
+      "id": "d61b449c8ba74ff085cd9f131c115280",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::EnumFields",
+      "id": "f84efdb19e974c0aa334ba161c400144",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::reflection_fixture::Node",
       "id": "ad100000000000000000000000000002",
       "aliases": [],
@@ -234,6 +276,13 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::PropertyNode",
       "id": "ad100000000000000000000000000004",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::TextureGroup",
+      "id": "f7d5d28eb12f46b9990799c21ff47801",
       "aliases": [],
       "retired": false
     },

@@ -147,4 +147,36 @@ struct AssetFields final : Object {
     ROCKS_PROPERTY() SoftObjectRef<> anyAsset;
 };
 
+// B3b 리플렉션 enum: 도구 접두·숫자로 시작하는 도구 이름·표시 이름·숨김 열거자(uint8), 음수·암묵
+// 값(int32), 비트 플래그(uint16).
+ROCKS_ENUM(ToolPrefix = "TEXTUREGROUP_")
+enum class TextureGroup : uint8 {
+    World = 0,
+    EightBitData ROCKS_ENUMERATOR(Name = "8BitData", DisplayName = "8비트 데이터") = 7,
+    Reserved13 ROCKS_ENUMERATOR(Hidden) = 13,
+};
+
+ROCKS_ENUM()
+enum class Bias : int32 {
+    Low = -2,
+    Zero = 0,
+    High,
+};
+
+ROCKS_ENUM(Flags)
+enum class Channels : uint16 {
+    None = 0,
+    Red = 1,
+    Green = 2,
+    Blue = 4,
+    Alpha = 8,
+};
+
+ROCKS_CLASS()
+struct EnumFields final : Object {
+    ROCKS_PROPERTY() TextureGroup group = TextureGroup::World;
+    ROCKS_PROPERTY() Bias bias = Bias::Zero;
+    ROCKS_PROPERTY() Channels channels = Channels::None;
+};
+
 } // namespace rocks::reflection_fixture

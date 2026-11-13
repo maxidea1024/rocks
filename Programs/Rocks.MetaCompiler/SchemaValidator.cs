@@ -19,7 +19,7 @@ internal static class SchemaValidator
         ["rocks::Sha256Digest"] = "Digest256"
     };
 
-    // descriptor import가 받는 값 종류다(MetaCompiler가 만들 수 있는 종류). Enum·Struct·Array는 B3b–B5에서 더한다.
+    // descriptor import가 받는 값 종류다(MetaCompiler가 만들 수 있는 종류). Struct·Array는 B4·B5에서 더한다.
     public static bool IsSupportedValueKind(string kind) => Scalars.ContainsValue(kind) || FieldModel.KindHasTargetType(kind);
 
     // "prefix<T>" 철자의 T를 돌려준다(아니면 null).
@@ -43,10 +43,45 @@ internal static class SchemaValidator
     }
 
     // base·참조 대상은 이 모듈 타입 → import 타입 순으로 정규 이름을 찾는다. 다른 모듈의 private 타입은
-    // 쓸 수 없다(RMC2006).
+    // 쓸 수 없다(RMC2006). base·참조 대상은 클래스여야 하고 Enum 필드의 타입은 리플렉션 enum이어야 한다.
     public static SchemaModel Validate(Dictionary<string, ClassModel> classes, IReadOnlyDictionary<string, ClassModel> imported)
     {
         string Resolve(string spelling, string owner, SourceSite site)
+        {
+            string resolved = ResolveType(spelling, owner, site);
+            if (resolved != "rocks::Object" && Find(resolved).IsEnum)
+            {
+                throw new MetadataException($"{owner}: base/reference type '{resolved}' is a reflected enum, not a class", "RMC2003",
+                    "Use a reflected class as the base or reference target; enums are values.").At(site);
+            }
+
+            return resolved;
+        }
+
+        // 리플렉션 enum 철자(desugar된 정규 이름)면 그 모델을 돌려준다(아니면 null). 다른 모듈의 private enum은 RMC2006이다.
+        ClassModel? EnumType(string spelling, string owner, SourceSite site)
+        {
+            string name = spelling.StartsWith("::", StringComparison.Ordinal) ? spelling[2..] : spelling;
+            if (classes.TryGetValue(name, out ClassModel? own))
+            {
+                return own.IsEnum ? own : null;
+            }
+
+            if (!imported.TryGetValue(name, out ClassModel? external) || !external.IsEnum)
+            {
+                return null;
+            }
+
+            if (external.Private)
+            {
+                throw new MetadataException($"{owner}: '{name}' is a private reflected type of module {external.Module}", "RMC2006",
+                    "Move the type to a public header of its module or keep the reference inside that module.").At(site);
+            }
+
+            return external;
+        }
+
+        string ResolveType(string spelling, string owner, SourceSite site)
         {
             spelling = spelling.StartsWith("::", StringComparison.Ordinal) ? spelling[2..] : spelling;
             string? Candidate(string name)
@@ -95,7 +130,37 @@ internal static class SchemaValidator
         }
 
         ClassModel Find(string name) => classes.TryGetValue(name, out ClassModel? own) ? own : imported[name];
-        foreach (ClassModel model in classes.Values)
+
+        // import 클래스의 Enum 필드는 descriptor에 enum ID만 있다. 그 ID의 import enum으로 Reference를 채운다(이 모듈이
+        // 상속하면 생성 헤더가 그 enum의 생성 헤더를 include하고 native 키를 싣는다). 의존 descriptor는 전이 의존까지
+        // import되므로 찾지 못하면 descriptor가 어긋난 것이다.
+        Dictionary<string, ClassModel> importedEnums = new(StringComparer.Ordinal);
+        foreach (ClassModel external in imported.Values.Where(model => model.IsEnum))
+        {
+            importedEnums.TryAdd(external.Id, external);
+        }
+
+        foreach (ClassModel external in imported.Values.Where(model => !model.IsEnum))
+        {
+            foreach (FieldModel field in external.Fields.Where(field => field.Kind == "Enum"))
+            {
+                if (field.ReferenceId is null || !importedEnums.TryGetValue(field.ReferenceId, out ClassModel? target))
+                {
+                    throw new MetadataException($"{external.Name}::{field.Name}: enum {field.ReferenceId} of the imported field is not in an imported descriptor", "RMC2003",
+                        "Import the descriptors of every module the dependency uses; regenerate the dependency metadata.").At(external.Site);
+                }
+
+                if (target.Private && !external.Private)
+                {
+                    throw new MetadataException($"{external.Name}::{field.Name}: public imported type uses private enum {target.Name}", "RMC2006",
+                        "Regenerate the dependency metadata; public types cannot use private enums.").At(external.Site);
+                }
+
+                field.Reference = target.Name;
+            }
+        }
+
+        foreach (ClassModel model in classes.Values.Where(model => !model.IsEnum))
         {
             model.Base = Resolve(model.Base, model.Name, model.Site);
             foreach (FieldModel field in model.OwnFields)
@@ -103,6 +168,12 @@ internal static class SchemaValidator
                 if (Scalars.TryGetValue(field.NativeSpelling, out string? kind))
                 {
                     field.Kind = kind;
+                }
+                else if (EnumType(field.NativeSpelling, field.Owner, field.Site) is ClassModel enumeration)
+                {
+                    field.Reference = enumeration.Name;
+                    field.ReferenceId = enumeration.Id;
+                    field.Kind = "Enum";
                 }
                 else if (ReferenceSpelling(field.NativeSpelling) is { } reference)
                 {
@@ -114,11 +185,11 @@ internal static class SchemaValidator
                 else
                 {
                     throw new MetadataException($"{field.Owner}::{field.Name}: unsupported field type '{field.NativeSpelling}'",
-                    hint: "Use a supported scalar, Guid, String, AssetId, Sha256Digest, ObjectRef or SoftObjectRef field; raw pointers/containers/cv-qualified fields need an explicit codec extension.").At(field.Site);
+                    hint: "Use a supported scalar, Guid, String, AssetId, Sha256Digest, ROCKS_ENUM enum, ObjectRef or SoftObjectRef field; raw pointers/containers/cv-qualified fields need an explicit codec extension.").At(field.Site);
                 }
 
                 // 지정자를 그 필드 종류에 쓸 수 있는지 본다(RMC2202). 배열 필드는 B5에서 생긴다.
-                if (field.Spec.Required && !field.HasTargetType)
+                if (field.Spec.Required && !field.AcceptsRequired)
                 {
                     throw new MetadataException($"{field.Owner}::{field.Name}: Required applies only to object or soft object reference fields", "RMC2202",
                         "Remove Required or change the field to ObjectRef or SoftObjectRef.").At(field.Site);
@@ -201,7 +272,9 @@ internal static class SchemaValidator
             ordered.Add(model);
         }
 
-        foreach (ClassModel model in classes.Values.OrderBy(model => model.Name, StringComparer.Ordinal))
+        // enum은 그 enum을 쓰는 클래스보다 먼저 등록해야 하므로 앞에 둔다(필드가 없고 base도 없다).
+        ordered.AddRange(classes.Values.Where(model => model.IsEnum).OrderBy(model => model.Name, StringComparer.Ordinal));
+        foreach (ClassModel model in classes.Values.Where(model => !model.IsEnum).OrderBy(model => model.Name, StringComparer.Ordinal))
         {
             Order(model);
         }

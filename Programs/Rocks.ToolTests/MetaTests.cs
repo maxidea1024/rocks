@@ -271,6 +271,98 @@ internal static class MetaTests
             Verify.Contains("::probe::Value::lease", generated, "NATIVE member static_assert target");
             Verify.That(!generated.Contains("RequiresWorldOnlyOwner<", StringComparison.Ordinal), "WorldOnly owner needs no RMC2206 static_assert");
         });
+        // B3b: ROCKS_ENUM이 descriptor와 생성 스키마·검증기·집계 등록 순서에 닿는다(Docs/Design/ReflectionFoundations.ko.md 3.4절).
+        suite.Add("Meta.EnumSchemaReachesDescriptorAndGeneratedCode", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            string source = Preamble + "ROCKS_ENUM(ToolPrefix = \"MODE_\")\nenum class Mode : rocks::uint8 {\n" +
+                "Off = 0,\nEight ROCKS_ENUMERATOR(Name = \"8Bit\", DisplayName = \"여덟\") = 8,\nNext,\nSecret ROCKS_ENUMERATOR(Hidden) = 200,\n};\n" +
+                "ROCKS_CLASS()\nstruct Value : public rocks::Object {\n" +
+                "ROCKS_ENUM(Flags)\nenum class Nested : rocks::uint32 { None = 0, A = 1, B = 0x80000000u };\n" +
+                "ROCKS_PROPERTY() Mode mode = Mode::Off;\nROCKS_PROPERTY() Nested nested = Nested::None;\n};\n}\n";
+            await probe.GenerateAsync(source);
+            using System.Text.Json.JsonDocument descriptor = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(probe.Descriptor));
+            System.Text.Json.JsonElement Type(string name) => descriptor.RootElement.GetProperty("types").EnumerateArray()
+                .Single(type => type.GetProperty("name").GetString() == name);
+            System.Text.Json.JsonElement mode = Type("probe::Mode");
+            Verify.Equal("enum", mode.GetProperty("kind").GetString(), "enum descriptor kind");
+            Verify.Equal("UInt8", mode.GetProperty("underlying").GetString(), "underlying");
+            Verify.Equal("MODE_", mode.GetProperty("toolPrefix").GetString(), "tool prefix");
+            System.Text.Json.JsonElement[] values = mode.GetProperty("values").EnumerateArray().ToArray();
+            Verify.Equal(4, values.Length, "enumerator count");
+            Verify.Equal("8Bit", values[1].GetProperty("toolName").GetString(), "enumerator tool name");
+            Verify.Equal(9, values[2].GetProperty("value").GetInt32(), "implicit value is previous + 1");
+            Verify.Equal("Hidden", values[3].GetProperty("flags")[0].GetString(), "hidden enumerator");
+            Verify.Equal("Flags", Type("probe::Value::Nested").GetProperty("flags")[0].GetString(), "nested Flags enum");
+            System.Text.Json.JsonElement field = Type("probe::Value").GetProperty("fields").EnumerateArray()
+                .Single(item => item.GetProperty("name").GetString() == "mode");
+            Verify.Equal("Enum", field.GetProperty("value").GetProperty("kind").GetString(), "enum field kind");
+            Verify.Equal(mode.GetProperty("id").GetString(), field.GetProperty("value").GetProperty("type").GetString(), "enum field target");
+            string generated = File.ReadAllText(probe.Output);
+            Verify.Contains("struct GeneratedType<::probe::Mode>", generated, "enum specialization");
+            Verify.Contains("static constexpr bool IsDeclared", generated, "constexpr validator");
+            Verify.Contains("NativeTypeKey<::probe::Mode>()", generated, "enum field native key");
+            Verify.That(generated.IndexOf("GeneratedType<::probe::Mode>", StringComparison.Ordinal) <
+                generated.IndexOf("GeneratedType<::probe::Value>", StringComparison.Ordinal), "enums are emitted before classes");
+        });
+        AddRejectGroup("Meta.EnumUnderlyingAndValuesAreRestricted", new[]
+            {
+                "ROCKS_ENUM()\nenum class Mode { A };",
+                "ROCKS_ENUM()\nenum class Mode : long long { A };",
+                "ROCKS_ENUM()\nenum class Mode : signed char { A };",
+                "ROCKS_ENUM()\nenum class Mode : short { A };",
+                "ROCKS_ENUM()\nenum Mode : rocks::uint8 { A };",
+                "ROCKS_ENUM()\nenum class Mode : rocks::uint8 { A = 1, B = 1 };",
+                "ROCKS_ENUM(Flags)\nenum class Mode : rocks::int32 { A = -1 };",
+                "ROCKS_ENUM()\nenum class Mode : rocks::uint8 {};",
+                "ROCKS_ENUM()\nenum class Mode : rocks::uint8;",
+                "ROCKS_ENUM()\nenum class Mode : rocks::uint16 { " + string.Join(", ", Enumerable.Range(0, 4097).Select(index => "E" + index)) + " };"
+            }.Select(declaration => Preamble + declaration + "\n" + "ROCKS_CLASS()\nstruct Value : public rocks::Object {};\n}\n"), "RMC2401", "probe::Mode");
+        AddRejectGroup("Meta.EnumToolNamesAreValidAndUnique", new[]
+            {
+                "ROCKS_ENUM()\nenum class Mode : rocks::uint8 { A ROCKS_ENUMERATOR(Name = \"b\"), B };",
+                "ROCKS_ENUM(ToolPrefix = \"M_\")\nenum class Mode : rocks::uint8 { A, M_A };",
+                "ROCKS_ENUM()\nenum class Mode : rocks::uint8 { A ROCKS_ENUMERATOR(Name = \"has space\") };",
+                "ROCKS_ENUM(ToolPrefix = \"bad-\")\nenum class Mode : rocks::uint8 { A };"
+            }.Select(declaration => Preamble + declaration + "\n}\n"), "RMC2203", "probe::Mode");
+        AddRejectGroup("Meta.EnumMarkerMustPrecedeAnEnum", [Preamble + "ROCKS_ENUM()\nstruct Value : public rocks::Object {};\n}\n"],
+            "RMC2000", "immediately followed by a named enum");
+        AddRejectGroup("Meta.EnumeratorAnnotationNeedsReflectedEnum", [
+            Preamble + "enum class Mode : rocks::uint8 { A ROCKS_ENUMERATOR(Hidden) };\nROCKS_CLASS()\nstruct Value : public rocks::Object {};\n}\n"],
+            "RMC2000", "ROCKS_ENUMERATOR must annotate");
+        AddRejectGroup("Meta.NestedReflectedEnumMustBePublic", [
+            Preamble + "ROCKS_CLASS()\nclass Value : public rocks::Object {\nROCKS_ENUM()\nenum class Nested : rocks::uint8 { A };\n};\n}\n"],
+            "RMC2401", "must be public");
+        // underlying 명시 판정(주석·줄바꿈 사이, enum struct)과 식 초기값·int32 최솟값·uint32 최댓값을 받는다.
+        suite.Add("Meta.EnumValuesFollowClangEvaluation", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            string source = Preamble + "constexpr int Base = 21;\n" +
+                "ROCKS_ENUM()\nenum struct Mode /* explicit */\n    : rocks::int32 { Min = -2147483647 - 1, A = -3, B, C = B + 10, D = Base * 2 };\n" +
+                "struct Outer {\nROCKS_ENUM()\nenum class Inner : rocks::uint32 { Max = 0xffffffffu };\n};\n" +
+                "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() Mode mode = Mode::A;\nROCKS_PROPERTY() Outer::Inner nested = Outer::Inner::Max;\n};\n}\n";
+            await probe.GenerateAsync(source);
+            using System.Text.Json.JsonDocument descriptor = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(probe.Descriptor));
+            long[] Values(string name) => descriptor.RootElement.GetProperty("types").EnumerateArray()
+                .Single(type => type.GetProperty("name").GetString() == name).GetProperty("values").EnumerateArray()
+                .Select(value => value.GetProperty("value").GetInt64()).ToArray();
+            Verify.That(Values("probe::Mode").SequenceEqual(new long[] { -2147483648, -3, -2, 8, 42 }), "evaluated enumerator values");
+            Verify.That(Values("probe::Outer::Inner").SequenceEqual(new long[] { 4294967295 }), "uint32 maximum");
+            string generated = File.ReadAllText(probe.Output);
+            Verify.Contains("-2147483648ll", generated, "int32 minimum literal");
+            Verify.Contains("static_assert(static_cast<int64>(::probe::Mode::D) == 42ll", generated, "value static_assert");
+        });
+        AddRejectGroup("Meta.EnumFieldsRejectRequired", [
+            Preamble + "ROCKS_ENUM()\nenum class Mode : rocks::uint8 { A };\nROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY(Required) Mode count = Mode::A;\n};\n}\n"],
+            "RMC2202", "applies only to");
+        AddRejectGroup("Meta.EnumIsNotABaseOrReferenceTarget", [
+            Preamble.Replace("namespace probe {", "#include <Object/SoftObjectRef.h>\nnamespace probe {", StringComparison.Ordinal) +
+                "ROCKS_ENUM()\nenum class Mode : rocks::uint8 { A };\nROCKS_CLASS()\nstruct Value : public rocks::Object {\n" +
+                "explicit Value(rocks::Allocator& allocator) noexcept : next(allocator) {}\nROCKS_PROPERTY() rocks::SoftObjectRef<Mode> next;\n};\n}\n"],
+            "RMC2003", "enum");
+        AddRejectGroup("Meta.UnreflectedEnumFieldIsUnsupported", [
+            Preamble + "enum class Mode : rocks::uint8 { A };\nROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() Mode count = Mode::A;\n};\n}\n"],
+            "RMC2000", "unsupported field type");
         AddRejectGroup("Meta.IntegerSpecifierSyntax", new[] { "Version=0", "Version=01", "Version=2147483648", "Version=\"2\"", "Version=1x", "Version", "Version=-1", "Version=+1" }
             .Select(spec => Declaration().Replace("ROCKS_CLASS()", $"ROCKS_CLASS({spec})", StringComparison.Ordinal)), "RMC2000", "specifier");
         AddRejectGroup("Meta.RequiredAndMaxElementsNeedMatchingFieldKinds", [Declaration("ROCKS_PROPERTY(Required) rocks::int32 count = 0;"),
@@ -669,12 +761,13 @@ internal static class MetaProbeIdentity
         StableIdManifest.Update(path, true, manifest =>
         {
             foreach (string name in new[] { "probe::Value", "probe::Outer::Inner", "probe::Object", "probe::Parent",
-                "first::Good", "example::Invalid", "a::Thing", "b::Thing", "a::ThingExtended" })
+                "first::Good", "example::Invalid", "a::Thing", "b::Thing", "a::ThingExtended", "probe::Mode", "probe::Value::Nested" })
             {
                 manifest.Register("type", name);
             }
 
             foreach (string name in new[] { "probe::Value::count", "probe::Value::next", "probe::Value::other", "probe::Object::value",
+                "probe::Value::mode", "probe::Value::nested",
                 "example::Invalid::valid", "example::Invalid::bad" })
             {
                 manifest.Register("field", name);

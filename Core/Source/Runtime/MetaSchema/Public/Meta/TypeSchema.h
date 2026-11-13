@@ -62,7 +62,7 @@ enum class ValueKind : uint8 {
     Guid,
     Utf8String,
     ObjectReference,
-    // B3 이후의 값 종류다. Enum·Struct·Array는 각 단계(B3b·B4·B5)에서 등록을 연다.
+    // B3 이후의 값 종류다. Enum은 B3b에서 열렸고 Struct·Array는 B4·B5에서 등록을 연다.
     Enum,
     Struct,
     Array,
@@ -116,5 +116,163 @@ struct TypeSchema {
     TypeId baseType{};
     uint32 flags = 0;
 };
+
+// EnumFlags:
+//   Flags — 비트 플래그 enum이다(ROCKS_ENUM(Flags)). 값은 선언 값들의 OR(0 포함)이면 유효하다.
+//           열거자 값은 음수일 수 없다.
+enum class EnumFlags : uint32 {
+    None = 0,
+    Flags = 1
+};
+
+// EnumeratorFlags:
+//   Hidden — 저장 값으로는 유효하지만 도구가 설정 값으로 받지 않는 열거자다(UE UMETA(Hidden) 대응,
+//            판정은 설정 계층).
+enum class EnumeratorFlags : uint32 {
+    None = 0,
+    Hidden = 1
+};
+
+constexpr bool HasFlag(uint32 flags, EnumFlags flag) noexcept {
+    return (flags & static_cast<uint32>(flag)) != 0;
+}
+
+constexpr bool HasFlag(uint32 flags, EnumeratorFlags flag) noexcept {
+    return (flags & static_cast<uint32>(flag)) != 0;
+}
+
+// enum 열거자 하나다(Docs/Design/ReflectionFoundations.ko.md 3.4절). 이름은 길이 기반 비소유 뷰이며
+// 등록 때 깊게 복사한다.
+struct EnumeratorSchema {
+    // C++ 열거자 이름(ASCII 식별자)이다.
+    Span<const char> name;
+    // 도구 이름(ROCKS_ENUMERATOR(Name="…"))이다. 비면 name을 쓴다. [A-Za-z0-9_]+이며 숫자로 시작할
+    // 수 있다(접두를 뗀 UE 이름 "8BitData"). ToolPrefix는 포함하지 않는다.
+    Span<const char> toolName{};
+    // 표시용 UTF-8 문자열이다(UE UMETA(DisplayName)). ID가 아니다.
+    Span<const char> displayName{};
+    int64 value = 0;
+    uint32 flags = 0;
+};
+
+// 리플렉션 enum의 스키마다(ROCKS_ENUM). 필드에서는 ValueType{Enum, id}로 가리키고 저장 wire는
+// I64다. underlying은 UInt8·UInt16·UInt32·Int32 중 하나이며 열거자 값은 그 범위 안에서 서로
+// 다르다(별칭 금지). 등록은 TypeRegistry::RegisterEnum이다.
+struct EnumSchema {
+    TypeId id;
+    Span<const char> name;
+    ValueKind underlying = ValueKind::Opaque;
+    uint32 flags = 0;
+    Span<const EnumeratorSchema> values;
+    // 도구 이름 조회가 앞에 붙어 있어도 받는 접두(ROCKS_ENUM(ToolPrefix="…"), 예:
+    // "TEXTUREGROUP_")다.
+    Span<const char> toolPrefix{};
+};
+
+// underlying 폭의 값 범위를 minimum·maximum에 쓴다. 지원하지 않는 underlying이면 false다.
+constexpr bool EnumUnderlyingRange(ValueKind underlying, int64& minimum, int64& maximum) noexcept {
+    switch (underlying) {
+    case ValueKind::UInt8:
+        minimum = 0;
+        maximum = 0xff;
+        return true;
+    case ValueKind::UInt16:
+        minimum = 0;
+        maximum = 0xffff;
+        return true;
+    case ValueKind::UInt32:
+        minimum = 0;
+        maximum = 0xffffffffll;
+        return true;
+    case ValueKind::Int32:
+        minimum = -0x80000000ll;
+        maximum = 0x7fffffffll;
+        return true;
+    default:
+        return false;
+    }
+}
+
+// value가 이 enum의 유효한 저장 값인지다. 일반 enum은 선언된 값이어야 하고, Flags enum은 선언
+// 값들의 OR(0 포함)이어야 한다. 어느 쪽이든 underlying 범위 안이어야 한다. 쓰기·저장·복원의 검증과
+// 같은 규칙이다(생성 헤더의 GeneratedType<E>::IsDeclared도 같다).
+constexpr bool IsDeclaredEnumValue(const EnumSchema& schema, int64 value) noexcept {
+    int64 minimum = 0;
+    int64 maximum = 0;
+    if (!EnumUnderlyingRange(schema.underlying, minimum, maximum) || value < minimum ||
+        value > maximum) {
+        return false;
+    }
+
+    if (HasFlag(schema.flags, EnumFlags::Flags)) {
+        uint64 mask = 0;
+        for (usize index = 0; index < schema.values.Size(); ++index) {
+            mask |= static_cast<uint64>(schema.values[index].value);
+        }
+
+        return value >= 0 && (static_cast<uint64>(value) & ~mask) == 0;
+    }
+
+    for (usize index = 0; index < schema.values.Size(); ++index) {
+        if (schema.values[index].value == value) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+namespace detail {
+
+constexpr char EnumAsciiLower(char c) noexcept {
+    return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+}
+
+// left가 right[offset..]과 ASCII 대소문자 무시로 같은지다.
+constexpr bool EnumNameEquals(Span<const char> left, Span<const char> right,
+                              usize offset = 0) noexcept {
+    if (offset > right.Size() || left.Size() != right.Size() - offset) {
+        return false;
+    }
+
+    for (usize index = 0; index < left.Size(); ++index) {
+        if (EnumAsciiLower(left[index]) != EnumAsciiLower(right[offset + index])) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+} // namespace detail
+
+// 열거자의 실효 도구 이름이다(toolName이 비면 C++ 이름).
+constexpr Span<const char> EffectiveToolName(const EnumeratorSchema& value) noexcept {
+    return value.toolName.Size() != 0 ? value.toolName : value.name;
+}
+
+// 도구 이름으로 열거자를 찾는다. ASCII 대소문자를 무시하고, toolPrefix가 있으면 접두가 붙은
+// 이름("TEXTUREGROUP_8BitData")과 뗀 이름("8BitData")을 모두 받는다. 없으면 nullptr이다. 반환
+// 포인터는 schema의 수명을 따른다. Hidden 열거자도 찾는다(설정 값으로 받을지는 호출자가 flags로
+// 판단한다).
+constexpr const EnumeratorSchema* FindEnumerator(const EnumSchema& schema,
+                                                 Span<const char> toolName) noexcept {
+    const usize prefix = schema.toolPrefix.Size();
+    bool prefixed = prefix != 0 && toolName.Size() >= prefix;
+    for (usize index = 0; prefixed && index < prefix; ++index) {
+        prefixed = detail::EnumAsciiLower(toolName[index]) ==
+                   detail::EnumAsciiLower(schema.toolPrefix[index]);
+    }
+
+    for (usize index = 0; index < schema.values.Size(); ++index) {
+        const Span<const char> name = EffectiveToolName(schema.values[index]);
+        if (detail::EnumNameEquals(name, toolName) ||
+            (prefixed && detail::EnumNameEquals(name, toolName, prefix))) {
+            return &schema.values[index];
+        }
+    }
+
+    return nullptr;
+}
 
 } // namespace rocks

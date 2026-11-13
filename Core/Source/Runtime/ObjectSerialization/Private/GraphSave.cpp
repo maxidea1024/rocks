@@ -142,8 +142,16 @@ Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
             }
             local = referenced.Value();
         }
+        // enum 값 검증은 열거자 수에 비례하므로 그만큼 예산을 쓴다.
+        const EnumSchema* enumSchema = type.Value().FieldEnum(fieldIndex);
+        if (enumSchema) {
+            spent = budget.Spend(enumSchema->values.Size());
+            if (!spent) {
+                return spent;
+            }
+        }
         ArchiveWriter encoded(allocator, budget.Archive());
-        auto written = EncodeValue(encoded, value, local);
+        auto written = EncodeValue(encoded, value, local, enumSchema);
         if (!written) {
             return written;
         }

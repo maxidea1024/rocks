@@ -4,7 +4,7 @@
 
 ## 지원 범위
 
-bool, uint8/16/32/64, int32/64, float32/64, Guid, UTF-8 String, 강한 ObjectRef, AssetId(Guid wire), Sha256Digest(Bytes wire, 정확히 32 byte), SoftObjectRef(SoftObjectReference wire)를 지원한다. 소프트 참조는 값으로 저장하며 대상을 그래프에 넣거나 찾지 않는다. 저장(C++에서 직접 대입한 값)과 복원 모두 null 규칙(asset 0에 경로가 있으면 안 됨)과 4 KiB 경로 상한을 검사해 InvalidArgument로 거부한다. 좁은 unsigned는 U32, signed는 I64 wire 형식을 사용하고 복원 시 실제 값 폭을 검사한다. unknown GUID field는 skip한다. known field의 wire tag·값·trailing byte는 엄격히 검사한다.
+bool, uint8/16/32/64, int32/64, float32/64, Guid, UTF-8 String, 강한 ObjectRef, AssetId(Guid wire), Sha256Digest(Bytes wire, 정확히 32 byte), SoftObjectRef(SoftObjectReference wire), 리플렉션 enum(I64 wire)을 지원한다. enum은 저장·복원 모두 선언되지 않은 값을 InvalidArgument로 거부한다. 소프트 참조는 값으로 저장하며 대상을 그래프에 넣거나 찾지 않는다. 저장(C++에서 직접 대입한 값)과 복원 모두 null 규칙(asset 0에 경로가 있으면 안 됨)과 4 KiB 경로 상한을 검사해 InvalidArgument로 거부한다. 좁은 unsigned는 U32, signed는 I64 wire 형식을 사용하고 복원 시 실제 값 폭을 검사한다. unknown GUID field는 skip한다. known field의 wire tag·값·trailing byte는 엄격히 검사한다.
 
 `RuntimeTypeOps::completeFieldLayout`이 true이고 schema와 accessor가 stable field GUID별 1:1이어야 한다. 이 선언에는 상속 필드를 포함한 모든 영속 필드와 모든 강한 간선이 포함된다(ROCKS_NATIVE 멤버는 영속 필드가 아니고 강한 참조를 담을 수 없어 포함 대상이 아니다). 기본 수동 metadata는 false이며 부분 metadata·Opaque·누락 accessor는 Unsupported다. 수동 작성자가 거짓 완전성을 선언하는 임의 플러그인의 메모리 안전성을 검증하는 기능은 아니다.
 

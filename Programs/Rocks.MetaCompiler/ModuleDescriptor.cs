@@ -12,6 +12,12 @@ internal static class ModuleDescriptor
     private static readonly string[] TypeKeys =
         ["kind", "name", "id", "version", "flags", "base", "header", "visibility", "fields"];
 
+    // enum 항목: 필드·base 대신 underlying·열거자다(Docs/Design/ReflectionFoundations.ko.md 3.4절).
+    private static readonly string[] EnumKeys =
+        ["kind", "name", "id", "header", "visibility", "underlying", "flags", "toolPrefix", "values"];
+
+    private static readonly string[] EnumeratorKeys = ["name", "toolName", "displayName", "value", "flags"];
+
     private static readonly string[] FieldKeys =
         ["owner", "name", "id", "fieldKind", "value", "element", "flags", "toolName", "category", "displayName", "maxElements"];
 
@@ -27,6 +33,12 @@ internal static class ModuleDescriptor
             json.WriteStartArray("types");
             foreach (ClassModel type in types.OrderBy(type => type.Name, StringComparer.Ordinal))
             {
+                if (type.IsEnum)
+                {
+                    WriteEnum(json, type);
+                    continue;
+                }
+
                 json.WriteStartObject();
                 json.WriteString("kind", "class");
                 json.WriteString("name", type.Name);
@@ -105,6 +117,45 @@ internal static class ModuleDescriptor
         return new UTF8Encoding(false, true).GetBytes(text);
     }
 
+    private static void WriteEnum(Utf8JsonWriter json, ClassModel type)
+    {
+        json.WriteStartObject();
+        json.WriteString("kind", "enum");
+        json.WriteString("name", type.Name);
+        json.WriteString("id", type.Id);
+        json.WriteString("header", type.Header);
+        json.WriteString("visibility", type.Private ? "private" : "public");
+        json.WriteString("underlying", type.Underlying);
+        json.WriteStartArray("flags");
+        if (type.FlagsEnum)
+        {
+            json.WriteStringValue("Flags");
+        }
+
+        json.WriteEndArray();
+        json.WriteString("toolPrefix", type.ToolPrefix);
+        json.WriteStartArray("values");
+        foreach (EnumeratorModel value in type.Enumerators)
+        {
+            json.WriteStartObject();
+            json.WriteString("name", value.Name);
+            json.WriteString("toolName", value.EffectiveToolName);
+            json.WriteString("displayName", value.DisplayName);
+            json.WriteNumber("value", value.Value);
+            json.WriteStartArray("flags");
+            if (value.Hidden)
+            {
+                json.WriteStringValue("Hidden");
+            }
+
+            json.WriteEndArray();
+            json.WriteEndObject();
+        }
+
+        json.WriteEndArray();
+        json.WriteEndObject();
+    }
+
     // descriptor 하나를 읽어 import 모델을 돌려준다. descriptorPath는 진단용이다. 이름·철자는 생성 C++과 경로에
     // 그대로 들어가므로 문법을 검사하고, 형식 오류는 모두 RMC1000이다(SDK descriptor도 이 경로의 입력이다).
     public static (string Module, List<ClassModel> Types) Read(string descriptorPath)
@@ -145,11 +196,44 @@ internal static class ModuleDescriptor
             return pattern.IsMatch(text) ? text : throw Invalid($"invalid {what}: {text}");
         }
 
+        string Header(JsonElement type, string name)
+        {
+            string header = type.GetProperty("header").GetString() ?? "";
+            if (header.Length == 0 || header.IndexOfAny(['\0', '\r', '\n', '"', '\\', ':', '<', '>']) >= 0 || header.StartsWith('/') ||
+                header.Split('/').Any(part => part.Length == 0 || part is "." or "..") || !header.EndsWith(".h", StringComparison.Ordinal))
+            {
+                throw Invalid($"header spelling of {name}: {header}");
+            }
+
+            return header;
+        }
+
+        bool PrivateVisibility(JsonElement type, string name) => type.GetProperty("visibility").GetString() switch
+        {
+            "public" => false,
+            "private" => true,
+            _ => throw Invalid("visibility of " + name)
+        };
+
         List<ClassModel> types = [];
         foreach (JsonElement type in root.GetProperty("types").EnumerateArray())
         {
+            if (type.ValueKind != JsonValueKind.Object || !type.TryGetProperty("kind", out JsonElement typeKind))
+            {
+                throw Invalid("type entry");
+            }
+
+            if (typeKind.GetString() == "enum")
+            {
+                RequireKeys(type, EnumKeys, Invalid);
+                string enumName = Name(type.GetProperty("name"), QualifiedName, "type name");
+                types.Add(ParseEnum(type, enumName, Hex(type.GetProperty("id"), Invalid), Header(type, enumName),
+                    PrivateVisibility(type, enumName), module, descriptorPath, Invalid));
+                continue;
+            }
+
             RequireKeys(type, TypeKeys, Invalid);
-            if (type.GetProperty("kind").GetString() != "class")
+            if (typeKind.GetString() != "class")
             {
                 throw Invalid("unsupported type kind");
             }
@@ -162,24 +246,13 @@ internal static class ModuleDescriptor
                 throw Invalid("unknown or duplicate type flag in " + name);
             }
 
-            string visibility = type.GetProperty("visibility").GetString() ?? "";
-            if (visibility is not ("public" or "private"))
-            {
-                throw Invalid("visibility of " + name);
-            }
-
+            bool isPrivate = PrivateVisibility(type, name);
             if (!type.GetProperty("version").TryGetUInt32(out uint version) || version == 0 || version > int.MaxValue)
             {
                 throw Invalid("version of " + name);
             }
 
-            string header = type.GetProperty("header").GetString() ?? "";
-            if (header.Length == 0 || header.IndexOfAny(['\0', '\r', '\n', '"', '\\', ':', '<', '>']) >= 0 || header.StartsWith('/') ||
-                header.Split('/').Any(part => part.Length == 0 || part is "." or "..") || !header.EndsWith(".h", StringComparison.Ordinal))
-            {
-                throw Invalid($"header spelling of {name}: {header}");
-            }
-
+            string header = Header(type, name);
             ClassModel model = new()
             {
                 Name = name,
@@ -190,7 +263,7 @@ internal static class ModuleDescriptor
                 Abstract = flags.Contains("Abstract"),
                 WorldOnly = flags.Contains("WorldOnly"),
                 Header = header,
-                Private = visibility == "private",
+                Private = isPrivate,
                 Imported = true,
                 Module = module
             };
@@ -236,17 +309,18 @@ internal static class ModuleDescriptor
                     throw Invalid("unknown or duplicate field flag");
                 }
 
-                // Required는 대상 타입이 있는 참조 필드에만 쓴다(원본 선언의 RMC2202와 같은 규칙).
-                if (!targetType && fieldFlags.Contains("Required", StringComparer.Ordinal))
+                // Required는 강한·소프트 참조 필드에만 쓴다(원본 선언의 RMC2202와 같은 규칙).
+                if (!FieldModel.KindAcceptsRequired(kind) && fieldFlags.Contains("Required", StringComparer.Ordinal))
                 {
-                    throw Invalid("Required on a field without a target type");
+                    throw Invalid("Required on a field that is not an object or soft object reference");
                 }
 
                 string? referenceId = null;
                 if (targetType)
                 {
                     string target = value.GetProperty("type").GetString() ?? throw Invalid("reference target");
-                    referenceId = target.Length == 0 ? null : Hex(value.GetProperty("type"), Invalid);
+                    // Enum 필드는 enum ID가 있어야 한다(참조의 ""는 Object다).
+                    referenceId = target.Length == 0 && kind != "Enum" ? null : Hex(value.GetProperty("type"), Invalid);
                 }
 
                 string fieldName = Name(field.GetProperty("name"), Identifier, "field name");
@@ -278,6 +352,81 @@ internal static class ModuleDescriptor
         }
 
         return (module, types);
+    }
+
+    // enum 항목 하나를 읽는다. 런타임 RegisterEnum과 같은 규칙(underlying 범위·별칭·Flags의 음수·도구 이름 문자 집합과
+    // 접두 유무를 합친 유일성)을 검사하고 어기면 RMC1000이다.
+    private static ClassModel ParseEnum(JsonElement type, string name, string id, string header, bool isPrivate, string module,
+        string descriptorPath, Func<string, MetadataException> Invalid)
+    {
+        string underlying = type.GetProperty("underlying").GetString() ?? "";
+        (long minimum, long maximum) = EnumRules.Range(underlying) ?? throw Invalid("underlying of " + name);
+        string[] flags = type.GetProperty("flags").EnumerateArray().Select(flag => flag.GetString() ?? "").ToArray();
+        if (flags.Any(flag => flag != "Flags") || flags.Length > 1)
+        {
+            throw Invalid("unknown or duplicate enum flag in " + name);
+        }
+
+        bool flagsEnum = flags.Length == 1;
+        string prefix = type.GetProperty("toolPrefix").GetString() ?? throw Invalid("toolPrefix of " + name);
+        if (prefix.Length != 0 && !Specifiers.IsEnumToolName(prefix))
+        {
+            throw Invalid("toolPrefix of " + name);
+        }
+
+        List<EnumeratorModel> values = [];
+        foreach (JsonElement entry in type.GetProperty("values").EnumerateArray())
+        {
+            // 충돌 검사가 열거자 수의 제곱이므로 상한을 먼저 본다.
+            if (values.Count == EnumRules.MaxEnumerators)
+            {
+                throw Invalid("enumerator count of " + name);
+            }
+
+            RequireKeys(entry, EnumeratorKeys, Invalid);
+            string valueName = entry.GetProperty("name").GetString() ?? "";
+            string toolName = entry.GetProperty("toolName").GetString() ?? "";
+            string[] valueFlags = entry.GetProperty("flags").EnumerateArray().Select(flag => flag.GetString() ?? "").ToArray();
+            if (!Specifiers.IsAsciiIdentifier(valueName) || !Specifiers.IsEnumToolName(toolName) ||
+                !entry.GetProperty("value").TryGetInt64(out long value) || value < minimum || value > maximum || (flagsEnum && value < 0) ||
+                valueFlags.Any(flag => flag != "Hidden") || valueFlags.Length > 1)
+            {
+                throw Invalid($"enumerator {valueName} of {name}");
+            }
+
+            string displayName = entry.GetProperty("displayName").GetString() ?? throw Invalid($"displayName of {valueName} in {name}");
+            EnumeratorModel model = new(valueName, toolName == valueName ? "" : toolName, displayName, value, valueFlags.Length == 1);
+            if (values.Any(other => other.Value == value || EnumRules.ToolNamesCollide(other.EffectiveToolName, model.EffectiveToolName, prefix)))
+            {
+                throw Invalid($"duplicate enumerator value or tool name {valueName} in {name}");
+            }
+
+            values.Add(model);
+        }
+
+        if (values.Count == 0)
+        {
+            throw Invalid("enumerator count of " + name);
+        }
+
+        return new ClassModel
+        {
+            Name = name,
+            Id = id,
+            Site = new(descriptorPath, 1),
+            Version = 1,
+            Base = "",
+            Abstract = false,
+            Header = header,
+            Private = isPrivate,
+            Imported = true,
+            Module = module,
+            IsEnum = true,
+            Underlying = underlying,
+            FlagsEnum = flagsEnum,
+            ToolPrefix = prefix,
+            Enumerators = values
+        };
     }
 
     // .NET의 $는 끝의 \n 하나를 허용하므로 문자열 끝은 \z로 맞춘다.

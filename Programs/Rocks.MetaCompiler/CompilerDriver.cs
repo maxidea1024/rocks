@@ -128,6 +128,16 @@ internal static class CompilerDriver
                 throw new MetadataException($"{type.Name}: public reflected type derives from private type {ownBase.Name}", "RMC2006",
                     "Move the base to a public header or make the derived type private.").At(type.Site);
             }
+
+            // public 타입의 enum 필드는 public enum이어야 한다. public 집계는 private enum을 등록하지 않고(클래스 등록이
+            // NotFound가 된다), public 생성 헤더는 private 생성 헤더를 include할 수 없다.
+            FieldModel? privateEnum = type.Private ? null : type.OwnFields.FirstOrDefault(field => field.Kind == "Enum" && field.Reference is not null &&
+                schema.Classes.TryGetValue(field.Reference, out ClassModel? target) && target.Private);
+            if (privateEnum is not null)
+            {
+                throw new MetadataException($"{type.Name}::{privateEnum.Name}: public reflected type uses private enum {privateEnum.Reference}", "RMC2006",
+                    "Move the enum to a public header or make the class private.").At(privateEnum.Site);
+            }
         }
 
         // 생성물: 입력 헤더마다 하나, public·private 집계 헤더, descriptor.
@@ -521,7 +531,8 @@ internal static class CompilerDriver
                 continue;
             }
 
-            string description = qualified ? "diagnostic references CLASS" : "candidate CLASS";
+            string label = type.IsEnum ? "ENUM" : "CLASS";
+            string description = qualified ? "diagnostic references " + label : "candidate " + label;
             notes.AppendLine($"{type.Site.File}:{type.Site.Line}: note: {description} {type.Name}");
             foreach (FieldModel field in type.Fields)
             {

@@ -52,9 +52,10 @@ private:
 class TypeRegistry;
 
 // 등록된 필드의 실제 대상 schema, 타입과 값 형식을 검사한다. 오류 순서는 context·수명, 타입·필드,
-// 전달 값 종류(TypeMismatch), 읽기 전용(Unsupported), 값 내용(정수 폭 Overflow·소프트 참조의 null
-// 규칙과 경로 상한 InvalidArgument)이다. callback 코드 수명은 TypeLease가 보유하는 ModuleLease에
-// 종속되므로 이 값을 lease보다 오래 보관하거나 호출하지 않는다.
+// 전달 값 종류(TypeMismatch — enum은 FieldValue::type이 필드의 enum ID와 다를 때도), 읽기
+// 전용(Unsupported), 값 내용(정수 폭 Overflow·소프트 참조의 null 규칙과 경로 상한·선언되지 않은
+// enum 값 InvalidArgument)이다. callback 코드 수명은 TypeLease가 보유하는 ModuleLease에 종속되므로
+// 이 값을 lease보다 오래 보관하거나 호출하지 않는다.
 class FieldWriteOperation {
 public:
     using Callback = Result<void> (*)(ObjectRegistry&, const ObjectAccessContext&, ObjectHandle,
@@ -82,19 +83,23 @@ public:
 private:
     friend class TypeRegistry;
 
+    // enumSchema는 Enum 필드가 가리키는 등록된 enum 레코드의 스키마다. 필드를 가진 레코드가 그
+    // enum을 의존으로 붙잡으므로 이 연산(레코드의 함수표 안)보다 오래 산다.
     void Bind(TypeRegistry& registry, const void* nativeType, Guid fieldId, ValueKind valueKind,
-              TypeId referencedType, bool readOnly) noexcept {
+              TypeId referencedType, bool readOnly, const EnumSchema* enumSchema) noexcept {
         registry_ = &registry;
         nativeType_ = nativeType;
         fieldId_ = fieldId;
         referencedType_ = referencedType;
         valueKind_ = valueKind;
         readOnly_ = readOnly;
+        enumSchema_ = enumSchema;
         bound_ = true;
     }
 
     Callback callback_ = nullptr;
     TypeRegistry* registry_ = nullptr;
+    const EnumSchema* enumSchema_ = nullptr;
     TypeId referencedType_{};
     const void* nativeType_ = nullptr;
     Guid fieldId_{};
@@ -113,6 +118,18 @@ struct RuntimeFieldOps {
     FieldWriteOperation write;
     Result<void> (*writeStaged)(ConstructionContext&, ObjectHandle,
                                 const FieldValue&) noexcept = nullptr;
+    // Enum 필드가 쓰는 C++ enum의 NativeTypeKey<E>()다(그 밖의 필드는 nullptr). 등록이 필드의
+    // value.type으로 찾은 enum 레코드의 native 키와 같은지 확인한다 — 스키마로 해석한 enum과
+    // 정적 thunk의 enum이 어긋나지 않게 한다(어긋나면 TypeMismatch).
+    const void* valueNativeType = nullptr;
+};
+
+// 리플렉션 enum 등록의 실행 정보다(TypeRegistry::RegisterEnum). nativeType은 NativeTypeKey<E>()이며
+// Enum 필드의 valueNativeType과 대조한다. 동적 모듈이 등록하면 module로 그 키(정적 객체 주소)의
+// 수명을 유지한다.
+struct RuntimeEnumOps {
+    const void* nativeType = nullptr;
+    ModuleLease module;
 };
 
 // Trace 호출 동안만 유효한 방문자다. 보관하거나 다른 스레드에 전달하지 않는다.

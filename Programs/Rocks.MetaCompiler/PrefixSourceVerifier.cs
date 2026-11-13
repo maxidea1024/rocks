@@ -1,27 +1,24 @@
 namespace Rocks.MetaCompiler;
 
-// 전처리된 클래스와 마커 사이 원문에 허용된 토큰만 있는지 보수적으로 확인한다.
+// 전처리된 클래스(또는 enum)와 마커 사이 원문에 허용된 토큰만 있는지 보수적으로 확인한다. enumeration이면
+// ROCKS_ENUM 마커와 enum 정의다.
 internal static class PrefixSourceVerifier
 {
-    internal static void Verify(byte[] bytes, int start, int end)
+    internal static void Verify(byte[] bytes, int start, int end, bool enumeration = false)
     {
         int cursor = start;
         if (cursor < 0 || end <= cursor || end > bytes.Length)
         {
-            throw new MetadataException("Class marker location is unknown or ambiguous",
-                hint: "Write ROCKS_CLASS directly in the source.");
+            throw new MetadataException("Class or enum marker location is unknown or ambiguous",
+                hint: "Write ROCKS_CLASS or ROCKS_ENUM directly in the source.");
         }
 
         ReadOnlySpan<byte> remainder = bytes.AsSpan(cursor, end - cursor);
-        string macro;
-        if (remainder.StartsWith("ROCKS_CLASS"u8))
+        string macro = enumeration ? "ROCKS_ENUM" : "ROCKS_CLASS";
+        if (!remainder.StartsWith(System.Text.Encoding.ASCII.GetBytes(macro)))
         {
-            macro = "ROCKS_CLASS";
-        }
-        else
-        {
-            throw new MetadataException("ROCKS_CLASS marker is macro-generated or ambiguous",
-            hint: "Write the class macro directly in the source; do not wrap it in another macro.");
+            throw new MetadataException($"{macro} marker is macro-generated or ambiguous",
+            hint: "Write the class or enum macro directly in the source; do not wrap it in another macro.");
         }
 
         cursor += macro.Length;
@@ -103,7 +100,8 @@ internal static class PrefixSourceVerifier
         }
 
         ReadOnlySpan<byte> classSource = bytes.AsSpan(end);
-        if (!(classSource.StartsWith("class"u8) || classSource.StartsWith("struct"u8)))
+        bool keyword = enumeration ? classSource.StartsWith("enum"u8) : classSource.StartsWith("class"u8) || classSource.StartsWith("struct"u8);
+        if (!keyword)
         {
             throw InvalidGap();
         }
@@ -168,7 +166,7 @@ internal static class PrefixSourceVerifier
             }
         }
 
-        MetadataException InvalidGap() => new($"{macro} is not immediately before its class in source",
+        MetadataException InvalidGap() => new($"{macro} is not immediately before its {(enumeration ? "enum" : "class")} in source",
             hint: "Keep only whitespace and comments between the class macro and class; put both inside the same conditional block. Wrapper macros, raw strings and line splices are unsupported.");
     }
 }

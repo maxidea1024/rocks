@@ -56,8 +56,8 @@ internal static class CppEmitter
 
     private static string View(string text) => $"Span<const char>({Label(text)}, {Utf8.GetByteCount(text)})";
 
-    // 모듈 집계 헤더다. 의존 모듈(import)의 RegisterModuleTypes를 먼저 부르고 이 모듈 타입을 base 먼저
-    // 등록한다(같은 ID·같은 native 타입이 이미 있으면 건너뛴다). 실패하면 이 호출이 등록한 것을 역순으로
+    // 모듈 집계 헤더다. 의존 모듈(import)의 RegisterModuleTypes를 먼저 부르고 이 모듈 타입을 enum 먼저, 클래스는
+    // base 먼저 등록한다(같은 ID·같은 native 타입이 이미 있으면 건너뛴다). 실패하면 이 호출이 등록한 것을 역순으로
     // 해제한다. private 집계는 public 집계를(public 헤더가 없으면 의존 모듈 집계를 직접) 먼저 부른 뒤 private
     // 타입을 등록한다. 모듈 이름이 rocks의 이름(Result 등)을 가리지 않도록 모든 이름을 ::rocks::로 한정한다.
     public static string EmitAggregate(string module, SchemaModel schema, IReadOnlyList<ModuleInput> inputs,
@@ -108,6 +108,12 @@ internal static class CppEmitter
 
         foreach (ClassModel type in schema.Ordered.Where(type => type.Private == privateTypes))
         {
+            if (type.IsEnum)
+            {
+                Line($"if (auto added = registration.RegisterEnumIfAbsent(::rocks::GeneratedType<::{type.Name}>::Schema(), ::rocks::RuntimeEnumOps{{::rocks::NativeTypeKey<::{type.Name}>(), module}}); !added) return fail(added.Error());");
+                continue;
+            }
+
             Line($"if (auto added = registration.RegisterIfAbsent(::rocks::GeneratedType<::{type.Name}>::Schema(), ::rocks::GeneratedType<::{type.Name}>::Ops(module)); !added) return fail(added.Error());");
         }
 
@@ -135,6 +141,20 @@ internal static class CppEmitter
         Line($"#include <{include}>");
         Line("#include <Meta/GeneratedType.h>");
         Line("#include <Object/GeneratedFieldAccess.h>");
+        // 다른 헤더에 선언된 리플렉션 enum을 필드로 쓰면 그 enum의 GeneratedType이 먼저 보여야 한다(생성 접근기가
+        // GeneratedType<E>::Id·IsDeclared로 enum을 알아본다).
+        IEnumerable<string> enumHeaders = schema.Ordered.Where(type => type.Header == include)
+            .SelectMany(type => type.Fields)
+            .Where(field => field.Kind == "Enum" && field.Reference is not null)
+            .Select(field => schema.Find(field.Reference!).Header)
+            .Where(header => header != include)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal);
+        foreach (string header in enumHeaders)
+        {
+            Line($"#include <{CompilerOptions.GeneratedSpelling(header)}>");
+        }
+
         if (schema.Ordered.Any(type => type.Header == include && type.NativeMembers.Count != 0))
         {
             Line("#include <Object/NativeMemberTraits.h>");
@@ -143,6 +163,12 @@ internal static class CppEmitter
         Line("namespace rocks {");
         foreach (ClassModel type in schema.Ordered.Where(type => type.Header == include))
         {
+            if (type.IsEnum)
+            {
+                EmitEnum(type, Line);
+                continue;
+            }
+
             string native = "::" + type.Name;
             string? baseId = type.Base == "rocks::Object" ? null : schema.Find(type.Base).Id;
             Line($"template <> struct GeneratedType<{native}> {{");
@@ -205,7 +231,9 @@ internal static class CppEmitter
 
                     Line("},");
                     Line("+[](ConstructionContext& construction, ObjectHandle object, const FieldValue& value) noexcept -> Result<void> {");
-                    Line($"return detail::WriteGeneratedStagedField<{native}>(construction, object, {member}, value); }} }},");
+                    // Enum 필드는 정적 thunk의 enum native 키를 싣는다(등록이 value.type의 enum 레코드와 대조한다).
+                    string valueNativeType = field.Kind == "Enum" ? $", NativeTypeKey<::{field.Reference}>()" : "";
+                    Line($"return detail::WriteGeneratedStagedField<{native}>(construction, object, {member}, value); }}{valueNativeType} }},");
                 }
 
                 Line("};");
@@ -251,4 +279,61 @@ internal static class CppEmitter
         Line("} // namespace rocks");
         return output.ToString();
     }
+
+    // 리플렉션 enum의 GeneratedType 특수화다: Id, Schema(EnumSchema), constexpr IsDeclared(쓰기·복원 검증),
+    // Register. C++ underlying이 스키마와 같은지 컴파일 시 확인한다.
+    private static void EmitEnum(ClassModel type, Action<string> Line)
+    {
+        string native = "::" + type.Name;
+        Line($"template <> struct GeneratedType<{native}> {{");
+        Line($"static_assert(__is_same(__underlying_type({native}), {EnumRules.NativeType(type.Underlying)}), \"ROCKS_ENUM {type.Name} underlying type changed; regenerate metadata\");");
+        // 스키마의 값이 C++ 값과 같은지 컴파일 시 대조한다(MetaCompiler가 AST에서 읽은 값을 믿지 않는다).
+        foreach (EnumeratorModel value in type.Enumerators)
+        {
+            Line($"static_assert(static_cast<int64>({native}::{value.Name}) == {Int64(value.Value)}, \"ROCKS_ENUM {type.Name}::{value.Name} value changed; regenerate metadata\");");
+        }
+
+        Line($"static constexpr TypeId Id() noexcept {{ return {GuidValue(type.Id)}; }}");
+        Line("static const EnumSchema& Schema() noexcept {");
+        Line("static const EnumeratorSchema values[] = {");
+        foreach (EnumeratorModel value in type.Enumerators)
+        {
+            Line($"{{{View(value.Name)}, {View(value.ToolName)}, {View(value.DisplayName)}, {Int64(value.Value)}, {(value.Hidden ? 1 : 0)}u}},");
+        }
+
+        Line("};");
+        Line($"static const EnumSchema schema{{Id(), {View(type.Name)}, ValueKind::{type.Underlying}, {(type.FlagsEnum ? 1 : 0)}u, Span<const EnumeratorSchema>(values, {type.Enumerators.Count}), {View(type.ToolPrefix)}}};");
+        Line("return schema;");
+        Line("}");
+        // TypeRegistry 없이도(staged 쓰기·복원) 같은 규칙으로 값을 검증한다(IsDeclaredEnumValue와 같다).
+        Line("static constexpr bool IsDeclared(int64 value) noexcept {");
+        if (type.FlagsEnum)
+        {
+            ulong mask = type.Enumerators.Aggregate(0UL, (bits, value) => bits | (ulong)value.Value);
+            long maximum = EnumRules.Range(type.Underlying)!.Value.Maximum;
+            Line($"return value >= 0 && value <= {Int64(maximum)} && (static_cast<uint64>(value) & ~0x{mask:x}ull) == 0;");
+        }
+        else
+        {
+            Line("switch (value) {");
+            foreach (EnumeratorModel value in type.Enumerators)
+            {
+                Line($"case {Int64(value.Value)}:");
+            }
+
+            Line("return true;");
+            Line("default:");
+            Line("return false;");
+            Line("}");
+        }
+
+        Line("}");
+        Line("static Result<TypeRegistrationToken> Register(TypeRegistry& registry, ModuleLease module = {}) noexcept {");
+        Line($"return registry.RegisterEnum(Schema(), RuntimeEnumOps{{NativeTypeKey<{native}>(), Move(module)}});");
+        Line("}");
+        Line("};");
+    }
+
+    // int64 리터럴이다. 최솟값은 리터럴로 쓸 수 없지만 int32 범위의 enum만 있으므로 그 경우가 없다.
+    private static string Int64(long value) => value.ToString(CultureInfo.InvariantCulture) + "ll";
 }

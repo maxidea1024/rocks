@@ -58,17 +58,7 @@ Result<bool> ModuleRegistration::RegisterIfAbsent(const TypeSchema& schema,
 
     auto existing = registry_->Acquire(schema.id);
     if (existing) {
-        if (existing.Value().Ops().nativeType != ops.nativeType) {
-            return Result<bool>::Failure(ErrorCode::AlreadyExists);
-        }
-
-        Record record;
-        record.retained = Move(existing.Value());
-        if (!records_.TryPushBack(Move(record))) {
-            platform::Fatal("ModuleRegistration reservation invariant failed");
-        }
-
-        return Result<bool>::Success(false);
+        return Retain(Move(existing.Value()), ops.nativeType);
     }
 
     if (existing.Error() != ErrorCode::NotFound) {
@@ -80,8 +70,49 @@ Result<bool> ModuleRegistration::RegisterIfAbsent(const TypeSchema& schema,
         return Result<bool>::Failure(token.Error());
     }
 
+    return Keep(token.Value());
+}
+
+Result<bool> ModuleRegistration::RegisterEnumIfAbsent(const EnumSchema& schema,
+                                                      RuntimeEnumOps ops) noexcept {
+    if (auto reserved = ReserveRecord(); !reserved) {
+        return Result<bool>::Failure(reserved.Error());
+    }
+
+    auto existing = registry_->AcquireValueType(schema.id, TypeKind::Enum);
+    if (existing) {
+        return Retain(Move(existing.Value()), ops.nativeType);
+    }
+
+    if (existing.Error() != ErrorCode::NotFound) {
+        return Result<bool>::Failure(existing.Error());
+    }
+
+    auto token = registry_->RegisterEnum(schema, Move(ops));
+    if (!token) {
+        return Result<bool>::Failure(token.Error());
+    }
+
+    return Keep(token.Value());
+}
+
+Result<bool> ModuleRegistration::Retain(TypeLease existing, const void* nativeType) noexcept {
+    if (existing.Ops().nativeType != nativeType) {
+        return Result<bool>::Failure(ErrorCode::AlreadyExists);
+    }
+
     Record record;
-    record.token = token.Value();
+    record.retained = Move(existing);
+    if (!records_.TryPushBack(Move(record))) {
+        platform::Fatal("ModuleRegistration reservation invariant failed");
+    }
+
+    return Result<bool>::Success(false);
+}
+
+Result<bool> ModuleRegistration::Keep(TypeRegistrationToken token) noexcept {
+    Record record;
+    record.token = token;
     if (!records_.TryPushBack(Move(record))) {
         platform::Fatal("ModuleRegistration reservation invariant failed");
     }

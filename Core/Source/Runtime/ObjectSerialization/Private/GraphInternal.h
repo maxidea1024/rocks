@@ -53,9 +53,12 @@ Result<const RuntimeFieldOps*> FindOps(const TypeLease&, Guid, Budget&) noexcept
 Result<void> ValidateLayout(const TypeLease&, Budget&) noexcept;
 Result<WireType> FieldWireType(ValueKind) noexcept;
 Result<void> ValidateWidth(const FieldValue&) noexcept;
-Result<void> EncodeValue(ArchiveWriter&, const FieldValue&, uint64 localReference) noexcept;
+// enumSchema는 그 필드가 Enum이면 TypeLease::FieldEnum이 준 enum 스키마다(그 밖은 nullptr). Enum
+// 값은 선언된 값(Flags는 선언 값의 OR)이 아니면 저장·복원 모두 InvalidArgument다.
+Result<void> EncodeValue(ArchiveWriter&, const FieldValue&, uint64 localReference,
+                         const EnumSchema* enumSchema) noexcept;
 Result<FieldValue> DecodeValue(Allocator&, const FieldSchema&, const FieldView&, Budget&,
-                               uint64& localReference) noexcept;
+                               uint64& localReference, const EnumSchema* enumSchema) noexcept;
 
 struct DecodedField {
     explicit DecodedField(Allocator& allocator) noexcept : value(allocator) {

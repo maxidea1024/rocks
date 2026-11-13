@@ -19,6 +19,14 @@ internal sealed record PropertySpec(bool Transient, bool ReadOnly, string Catego
     public uint MaxElements { get; init; }
 }
 
+// ENUM 지정자 결과다. ToolPrefix는 도구 이름 조회가 앞에 붙어 있어도 받는 접두([A-Za-z0-9_]+, 없으면 "")이고,
+// Flags는 비트 플래그 enum(값은 선언 값의 OR)이다.
+internal sealed record EnumSpec(string ToolPrefix, bool Flags);
+
+// ENUMERATOR 지정자 결과다. ToolName은 Name="…"의 값이고 C++ 이름과 같거나 없으면 ""다. Hidden은 저장 값으로는
+// 유효하지만 도구 설정이 받지 않는 열거자다.
+internal sealed record EnumeratorSpec(string ToolName, string DisplayName, bool Hidden);
+
 // C++ 원문 파서가 아니다. Clang이 확정한 annotation 문자열의 작은 specifier 문법만 처리한다(Docs/Design/
 // ReflectionFoundations.ko.md 2.1절). 값은 JSON escape 문자열 또는 부호 없는 10진 정수(앞자리 0 금지, 1–2³¹−1)다.
 internal static class Specifiers
@@ -82,6 +90,57 @@ internal static class Specifiers
             throw new MetadataException($"{symbol}: ROCKS_NATIVE takes no specifiers");
         }
     }
+
+    public static EnumSpec Enum(string text, string symbol)
+    {
+        Dictionary<string, Value?> values = Parse(text, symbol);
+        foreach ((string key, Value? value) in values)
+        {
+            bool flag = key is "Flags";
+            bool label = key is "ToolPrefix";
+            if ((!flag && !label) || (flag && value is not null) || (label && value?.Text is null))
+            {
+                throw new MetadataException($"{symbol}: unsupported ENUM specifier/value {key}");
+            }
+        }
+
+        string prefix = values.GetValueOrDefault("ToolPrefix")?.Text ?? "";
+        if (values.ContainsKey("ToolPrefix") && !IsEnumToolName(prefix))
+        {
+            throw new MetadataException($"{symbol}: ToolPrefix must be non-empty [A-Za-z0-9_]+: \"{prefix}\"", "RMC2203",
+                "Use letters, digits and underscores for the tool name prefix, or omit ToolPrefix.");
+        }
+
+        return new(prefix, values.ContainsKey("Flags"));
+    }
+
+    public static EnumeratorSpec Enumerator(string text, string symbol, string name)
+    {
+        Dictionary<string, Value?> values = Parse(text, symbol);
+        foreach ((string key, Value? value) in values)
+        {
+            bool flag = key is "Hidden";
+            bool label = key is "Name" or "DisplayName";
+            if ((!flag && !label) || (flag && value is not null) || (label && value?.Text is null))
+            {
+                throw new MetadataException($"{symbol}: unsupported ENUMERATOR specifier/value {key}");
+            }
+        }
+
+        string toolName = values.GetValueOrDefault("Name")?.Text ?? "";
+        if (values.ContainsKey("Name") && !IsEnumToolName(toolName))
+        {
+            throw new MetadataException($"{symbol}: Name specifier must be non-empty [A-Za-z0-9_]+: \"{toolName}\"", "RMC2203",
+                "Use letters, digits and underscores for the enumerator tool name (a leading digit is allowed), or omit Name.");
+        }
+
+        // C++ 이름과 같은 Name은 지정하지 않은 것과 같다.
+        return new(toolName == name ? "" : toolName, values.GetValueOrDefault("DisplayName")?.Text ?? "", values.ContainsKey("Hidden"));
+    }
+
+    // enum 도구 이름·접두의 문자 집합이다: [A-Za-z0-9_]+ (UE의 접두를 뗀 이름 "8BitData"처럼 숫자로 시작할 수 있다).
+    public static bool IsEnumToolName(string text) =>
+        text.Length != 0 && text.All(c => char.IsAsciiLetterOrDigit(c) || c == '_');
 
     public static bool IsAsciiIdentifier(string text) =>
         text.Length != 0 && (char.IsAsciiLetter(text[0]) || text[0] == '_') && text.All(c => char.IsAsciiLetterOrDigit(c) || c == '_');

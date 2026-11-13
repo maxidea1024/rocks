@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Meta/GeneratedType.h>
 #include <Object/AssetId.h>
 #include <Object/ConstructionContext.h>
 #include <Object/SoftObjectRef.h>
@@ -24,6 +25,15 @@ struct SoftReferenceField {
 template <class T>
 struct SoftReferenceField<SoftObjectRef<T>> {
     static constexpr bool Supported = true;
+};
+
+// 리플렉션 enum(ROCKS_ENUM)이다: 생성 헤더가 GeneratedType<E>::Id·IsDeclared를 내는 enum class다.
+template <class T>
+struct ReflectedEnumField {
+    static constexpr bool Supported = __is_enum(T) && requires {
+        GeneratedType<T>::Id();
+        GeneratedType<T>::IsDeclared(int64{});
+    };
 };
 
 template <class T>
@@ -58,6 +68,8 @@ constexpr ValueKind FieldValueKind() noexcept {
         return ValueKind::Digest256;
     } else if constexpr (SoftReferenceField<T>::Supported) {
         return ValueKind::SoftObjectReference;
+    } else if constexpr (ReflectedEnumField<T>::Supported) {
+        return ValueKind::Enum;
     } else {
         return ValueKind::Opaque;
     }
@@ -76,6 +88,10 @@ Result<void> CopyFieldValue(const Member& source, FieldValue& value) noexcept {
         value.guid = source.value;
     } else if constexpr (IsSameV<Member, Sha256Digest>) {
         value.digest = source;
+    } else if constexpr (ReflectedEnumField<Member>::Supported) {
+        // enum 값은 정수와 enum ID를 함께 싣는다.
+        value.signedInteger = static_cast<int64>(source);
+        value.type = GeneratedType<Member>::Id();
     } else if constexpr (ObjectReferenceField<Member>::Supported) {
         value.reference = source.Handle();
     } else if constexpr (IsSameV<Member, bool>) {
@@ -104,6 +120,16 @@ Result<void> WriteScalarField(Member& target, const FieldValue& value) noexcept 
         target = AssetId{value.guid};
     } else if constexpr (IsSameV<Member, Sha256Digest>) {
         target = value.digest;
+    } else if constexpr (ReflectedEnumField<Member>::Supported) {
+        // 이 필드의 enum ID와 선언된 값(Flags는 선언 값의 OR)만 받는다. staged 쓰기·복원도 이
+        // 검사를 지난다(TypeRegistry를 거치지 않는다).
+        if (value.type != GeneratedType<Member>::Id()) {
+            return Result<void>::Failure(ErrorCode::TypeMismatch);
+        }
+        if (!GeneratedType<Member>::IsDeclared(value.signedInteger)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+        target = static_cast<Member>(value.signedInteger);
     } else if constexpr (IsSameV<Member, float>) {
         target = value.float32;
     } else if constexpr (IsSameV<Member, double>) {

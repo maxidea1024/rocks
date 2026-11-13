@@ -34,14 +34,46 @@ public:
     // 입력 버퍼는 호출 동안 유효해야 한다. 실패하면 기존 등록 상태를 유지한다.
     // ops는 값으로 소유권을 넘기므로 등록 실패 시에도 그 ModuleLease는 정리된다.
     // 주요 실패: 알 수 없는 플래그 비트·참조(ObjectReference·SoftObjectReference)가 아닌 필드의
-    // Required·참조가 아닌 값 종류의 value.type·아직 받지 않는 값 종류(Enum·Struct·Array, 범위 밖)·
-    // 비어 있지 않은 element·maxElements(배열은 B5)·FieldKind와 값 종류의 불일치(소프트 참조는
-    // FieldKind::Value)·ASCII 식별자가 아닌 도구 이름·WorldOnly base의 파생에 WorldOnly 없음은
-    // InvalidArgument, 같은 ID·같은 필드 ID·대소문자 무시로 같은 실효 도구 이름(toolName 또는
-    // name)은 AlreadyExists, base 미등록은 NotFound, base 필드와 다른 상속 필드 서술(값 형식·도구
-    // 이름 포함)은 TypeMismatch다.
+    // Required·참조·Enum이 아닌 값 종류의 value.type·value.type이 없는 Enum 필드·아직 받지 않는 값
+    // 종류(Struct·Array, 범위 밖)·비어 있지 않은 element·maxElements(배열은 B5)·FieldKind와 값
+    // 종류의 불일치(소프트 참조·Enum은 FieldKind::Value)·Enum 필드에 없거나 그 밖의 필드에 있는
+    // valueNativeType·ASCII 식별자가 아닌 도구 이름·WorldOnly base의 파생에 WorldOnly 없음은
+    // InvalidArgument, 같은 ID(다른 종류 포함)·같은 필드 ID·대소문자 무시로 같은 실효 도구
+    // 이름(toolName 또는 name)은 AlreadyExists, base나 Enum 필드의 enum 미등록은 NotFound, base
+    // 필드와 다른 상속 필드 서술(값 형식·도구 이름 포함)·enum이 아닌 레코드를 가리키는 Enum 필드·
+    // native 키가 다른 enum은 TypeMismatch다. Enum 필드가 가리키는 enum은 이 타입이 등록되어 있는
+    // 동안 의존으로 붙잡힌다(그 enum의 Unregister는 Busy).
     Result<TypeRegistrationToken> Register(const TypeSchema&, RuntimeTypeOps) noexcept;
+
+    // 리플렉션 enum을 등록한다(생성 코드는 GeneratedType<E>::Register). 입력 버퍼는 호출 동안
+    // 유효해야 하며 이름·열거자 바이트를 깊게 복사한다. 실패하면 기존 등록 상태를 유지하고 ops의
+    // ModuleLease는 정리된다. 주요 실패: id 0·빈 이름·UTF-8이 아닌 이름·지원하지 않는
+    // underlying(UInt8·UInt16·UInt32·Int32만)·알 수 없는 플래그·열거자 없음 또는 4096개 초과·ASCII
+    // 식별자가 아닌 열거자 이름·[A-Za-z0-9_]+가 아닌 도구 이름이나 접두·UTF-8이 아닌 표시 이름·
+    // underlying 범위 밖 값·Flags enum의 음수 값·nativeType null은 InvalidArgument, 같은 ID(다른
+    // 종류 포함)·같은 nativeType의 enum(다른 ID의 별칭)·같은 값(별칭)·접두 유무를 합쳐 대소문자
+    // 무시로 같은 도구 이름은 AlreadyExists다.
+    //
+    // 사용 예:
+    //   auto token = GeneratedType<TextureGroup>::Register(types);   // enum 먼저
+    //   auto owner = GeneratedType<TextureSettings>::Register(types); // 그 enum을 쓰는 클래스
+    Result<TypeRegistrationToken> RegisterEnum(const EnumSchema&, RuntimeEnumOps) noexcept;
+
+    // 클래스(TypeKind::Class) 레코드만 연다. Enum·Struct 레코드의 ID면 TypeMismatch, 없으면
+    // NotFound다.
     Result<TypeLease> Acquire(TypeId) noexcept;
+
+    // Enum·Struct 레코드를 연다. kind가 Class면 InvalidArgument(Acquire를 쓴다), 같은 ID의 다른
+    // 종류 레코드면 TypeMismatch, 없으면 NotFound다. lease가 있는 동안 그 레코드의 Unregister는
+    // Busy다.
+    //
+    // 사용 예:
+    //   auto lease = types.AcquireValueType(TypeIdOf<TextureGroup>(), TypeKind::Enum);
+    //   if (lease) {
+    //       const EnumSchema& schema = lease.Value().Enum();
+    //       const EnumeratorSchema* value = FindEnumerator(schema, toolName);   // 도구 이름 조회
+    //   }
+    Result<TypeLease> AcquireValueType(TypeId, TypeKind kind) noexcept;
     Result<bool> IsA(TypeId actual, TypeId expected) noexcept;
     Result<void> Unregister(TypeRegistrationToken) noexcept;
     // 신규 Acquire/Clone을 닫는다. lease가 남으면 Busy이며, 반환 후 다시 호출한다.

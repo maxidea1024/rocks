@@ -51,6 +51,16 @@ public:
     // 상태는 호출 전과 같다.
     Result<bool> RegisterIfAbsent(const TypeSchema& schema, RuntimeTypeOps ops) noexcept;
 
+    // 리플렉션 enum에 대한 RegisterIfAbsent다(TypeRegistry::RegisterEnum·AcquireValueType). 같은
+    // ID가 같은 native enum(ops.nativeType)으로 이미 등록되어 있으면 lease를 붙잡고 false, 다른
+    // native 타입이면 AlreadyExists, 같은 ID의 클래스가 있으면 TypeMismatch다. 실패하면 기록과
+    // Registry 상태는 호출 전과 같다. 집계 함수는 enum을 그 enum을 쓰는 클래스보다 먼저 등록한다.
+    //
+    // 사용 예(생성 집계 함수가 내는 형태):
+    //   registration.RegisterEnumIfAbsent(GeneratedType<TextureGroup>::Schema(),
+    //                                     RuntimeEnumOps{NativeTypeKey<TextureGroup>(), module});
+    Result<bool> RegisterEnumIfAbsent(const EnumSchema& schema, RuntimeEnumOps ops) noexcept;
+
     // mark(Size()로 얻은 값) 이후의 기록을 역순으로 되돌린다: 붙잡은 lease는 놓고, 등록한 타입은
     // 해제한다. 해제가 실패하면(그 타입의 객체나 다른 기록의 lease가 남아 Busy 등) 거기서 멈추고
     // 아직 되돌리지 못한 기록을 보존한 채 오류를 돌려준다(다시 호출할 수 있다). mark가 Size()보다
@@ -71,6 +81,10 @@ private:
     };
 
     Result<void> ReserveRecord() noexcept;
+    // 예약한 자리에 이미 등록된 타입의 lease(native 키가 같아야 한다)를 기록한다.
+    Result<bool> Retain(TypeLease existing, const void* nativeType) noexcept;
+    // 예약한 자리에 이 객체가 등록한 타입의 token을 기록한다.
+    Result<bool> Keep(TypeRegistrationToken token) noexcept;
 
     TypeRegistry* registry_;
     Array<Record> records_;

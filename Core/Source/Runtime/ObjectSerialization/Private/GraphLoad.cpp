@@ -219,7 +219,7 @@ Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& nod
         DecodedField decoded(allocator);
         decoded.schemaIndex = schemaIndex;
         auto value = DecodeValue(allocator, schema.fields[schemaIndex], field.Value(), budget,
-                                 decoded.localReference);
+                                 decoded.localReference, node.lease.FieldEnum(schemaIndex));
         if (!value) {
             return Result<void>::Failure(value.Error());
         }

@@ -16,6 +16,28 @@
     };
 #define ROCKS_PROPERTY(...) [[clang::annotate("rocks", "rocks.field.arguments", #__VA_ARGS__)]]
 
+// 리플렉션 enum이다(Docs/Design/ReflectionFoundations.ko.md 3.4절). 바로 뒤에 underlying을 명시한
+// enum class 정의가 와야 한다(uint8·uint16·uint32·int32, 열거자 하나 이상, 값 별칭 금지 —
+// RMC2401). 지정자: ToolPrefix="…"(도구 이름 조회가 앞에 붙어 있어도 받는 접두), Flags(비트 플래그
+// — 값은 선언 값의 OR). 열거자에는 ROCKS_ENUMERATOR(Name="…", DisplayName="…", Hidden)를 열거자
+// 이름 바로 뒤에 붙일 수 있다(Name은 [A-Za-z0-9_]+ 도구 이름, Hidden은 도구 설정이 받지 않는 값).
+// 접두 유무를 합친 도구 이름은 대소문자 무시로 유일해야 한다(RMC2203). 필드에 쓰면 저장 wire는
+// I64다.
+//
+// 사용 예:
+//   ROCKS_ENUM(ToolPrefix = "TEXTUREGROUP_")
+//   enum class TextureGroup : rocks::uint8 {
+//       World = 0,
+//       EightBitData ROCKS_ENUMERATOR(Name = "8BitData", DisplayName = "8비트 데이터") = 7,
+//       Reserved13 ROCKS_ENUMERATOR(Hidden) = 13,
+//   };
+#define ROCKS_ENUM(...)                                                                            \
+    enum {                                                                                         \
+        ROCKS_DETAIL_JOIN(rocksMetaEnumMarker_, __COUNTER__)                                       \
+        [[clang::annotate("rocks", "rocks.enum.marker", #__VA_ARGS__)]] = 0                        \
+    };
+#define ROCKS_ENUMERATOR(...) [[clang::annotate("rocks", "rocks.enumerator", #__VA_ARGS__)]]
+
 // 리플렉션 클래스 안의 비영속 런타임 멤버다(GPU 핸들·캐시 등). 저장·리플렉션 대상이 아니며 강한
 // 객체 참조(ObjectRef·RootRef·Object 파생 타입의 raw 포인터 — 담는 타입·배열·템플릿 인자까지)를
 // 담을 수 없다 (RMC2205). RocksRequiresWorldOnlyOwner 형질 타입은 WorldOnly 클래스에만

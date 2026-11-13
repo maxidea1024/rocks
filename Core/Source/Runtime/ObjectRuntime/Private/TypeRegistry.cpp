@@ -43,6 +43,11 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
     if (actual->value.kind != valueKind_ || value.kind != valueKind_) {
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
+    // enum 값은 필드가 가리키는 enum의 ID를 싣는다(원본·대상 스키마가 같은 enum을 가리켜야 한다).
+    if (valueKind_ == ValueKind::Enum &&
+        (value.type != referencedType_ || actual->value.type != referencedType_)) {
+        return Result<void>::Failure(ErrorCode::TypeMismatch);
+    }
     // 검증한 참조 타입은 callback 완료까지 유지한다. 그 전에 해제하면 callback 재진입에서
     // 같은 ID의 타입을 unregister/재등록해 검증과 실제 필드 게시의 기준이 달라질 수 있다.
     TypeLease sourceExpected;
@@ -96,6 +101,11 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
         !SoftObjectRef<>::Validate(AssetId{value.guid}, value.string.View())) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+    // 선언되지 않은 enum 값(Flags는 선언 값의 OR가 아닌 값)은 수동 callback에도 넘기지 않는다.
+    if (valueKind_ == ValueKind::Enum &&
+        (!enumSchema_ || !IsDeclaredEnumValue(*enumSchema_, value.signedInteger))) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
     return callback_(registry, access, handle, value);
 }
 
@@ -113,10 +123,17 @@ uint64 NextRegistryDomain() noexcept {
 
 } // namespace detail
 
+// 클래스와 enum 레코드가 같은 목록·ID 공간을 쓴다. enum 레코드는 schema.id·name과
+// ops.nativeType·module만 채우고 enumSchema에 열거자를 둔다. 클래스 레코드의 fieldTypes는
+// schema.fields와 같은 길이이며 Enum 필드가 가리키는 enum 레코드(그 밖은 nullptr)다 — 이 참조는
+// lease가 아니라 dependents 계수로 표시하므로 Shutdown이 영구 Busy가 되지 않는다.
 struct TypeRegistry::Record {
     Record* next = nullptr;
+    TypeKind kind = TypeKind::Class;
     TypeSchema schema;
     RuntimeTypeOps ops;
+    EnumSchema enumSchema;
+    Record** fieldTypes = nullptr;
     uint32 generation = 0;
     uint32 leases = 0;
     uint32 dependents = 0;
@@ -198,10 +215,9 @@ bool SameBytes(Span<const char> left, Span<const char> right) noexcept {
     return true;
 }
 
-// 지금 등록할 수 있는 값 종류다. Enum·Struct·Array는 각 단계(B3b·B4·B5)에서 연다.
+// 지금 등록할 수 있는 값 종류다. Struct·Array는 각 단계(B4·B5)에서 연다.
 bool SupportedValueKind(ValueKind kind) noexcept {
     switch (kind) {
-    case ValueKind::Enum:
     case ValueKind::Struct:
     case ValueKind::Array:
         return false;
@@ -209,6 +225,55 @@ bool SupportedValueKind(ValueKind kind) noexcept {
         return static_cast<uint8>(kind) <= static_cast<uint8>(ValueKind::Digest256);
     }
 }
+
+// enum 도구 이름·접두의 문자 집합이다: [A-Za-z0-9_]+ (숫자로 시작할 수 있다).
+bool IsEnumToolName(Span<const char> text) noexcept {
+    if (text.Size() == 0) {
+        return false;
+    }
+
+    for (usize index = 0; index < text.Size(); ++index) {
+        const char c = text[index];
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+              c == '_')) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// 접두 유무를 합친 두 도구 이름 집합이 대소문자 무시로 겹치는지다(a, prefix+a)와(b, prefix+b).
+bool EnumToolNamesCollide(Span<const char> left, Span<const char> right,
+                          Span<const char> prefix) noexcept {
+    if (EqualsIgnoringAsciiCase(left, right)) {
+        return true;
+    }
+
+    // prefix+left == right 또는 left == prefix+right
+    const auto prefixed = [&prefix](Span<const char> shorter, Span<const char> longer) noexcept {
+        if (prefix.Size() == 0 || longer.Size() != prefix.Size() + shorter.Size()) {
+            return false;
+        }
+
+        for (usize index = 0; index < prefix.Size(); ++index) {
+            if (AsciiLower(prefix[index]) != AsciiLower(longer[index])) {
+                return false;
+            }
+        }
+
+        for (usize index = 0; index < shorter.Size(); ++index) {
+            if (AsciiLower(shorter[index]) != AsciiLower(longer[prefix.Size() + index])) {
+                return false;
+            }
+        }
+
+        return true;
+    };
+    return prefixed(left, right) || prefixed(right, left);
+}
+
+constexpr usize MaxEnumerators = 4096;
 
 // 도구 이름이 없으면 C++ 필드 이름이 도구 이름이다.
 Span<const char> EffectiveToolName(const FieldSchema& field) noexcept {
@@ -273,6 +338,31 @@ const TypeSchema& TypeLease::Schema() const& noexcept {
 
 TypeId TypeLease::Id() const noexcept {
     return Schema().id;
+}
+
+TypeKind TypeLease::Kind() const noexcept {
+    if (!record_) {
+        platform::Fatal("Access to an empty TypeLease");
+    }
+    return static_cast<TypeRegistry::Record*>(record_)->kind;
+}
+
+const EnumSchema& TypeLease::Enum() const& noexcept {
+    if (Kind() != TypeKind::Enum) {
+        platform::Fatal("TypeLease::Enum called on a non-enum lease");
+    }
+    return static_cast<TypeRegistry::Record*>(record_)->enumSchema;
+}
+
+const EnumSchema* TypeLease::FieldEnum(usize fieldIndex) const& noexcept {
+    const auto* record = static_cast<TypeRegistry::Record*>(record_);
+    if (!record || fieldIndex >= record->schema.fields.Size()) {
+        platform::Fatal("TypeLease::FieldEnum called on an empty lease or out of range");
+    }
+    if (!record->fieldTypes || !record->fieldTypes[fieldIndex]) {
+        return nullptr;
+    }
+    return &record->fieldTypes[fieldIndex]->enumSchema;
 }
 
 StringView TypeLease::Name() const& noexcept {
@@ -365,13 +455,17 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
             return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
         }
         // FieldKind::ObjectReference(강한 GC 간선) ⇔ value.kind == ObjectReference. value.type은
-        // 참조·소프트 참조의 기대 대상에만 쓴다(Enum·Struct는 B3b·B4).
+        // 참조·소프트 참조의 기대 대상과 Enum의 enum ID에만 쓴다(Struct는 B4). Enum은 ID가
+        // 필요하다.
         if (field.value.kind != ValueKind::Opaque) {
             ++typedFields;
             const bool reference = field.value.kind == ValueKind::ObjectReference;
-            const bool typed = reference || field.value.kind == ValueKind::SoftObjectReference;
+            const bool enumeration = field.value.kind == ValueKind::Enum;
+            const bool typed =
+                reference || enumeration || field.value.kind == ValueKind::SoftObjectReference;
             if (field.name.Size() == 0 || (field.kind == FieldKind::ObjectReference) != reference ||
-                (!typed && field.value.type != TypeId{})) {
+                (!typed && field.value.type != TypeId{}) ||
+                (enumeration && field.value.type == TypeId{})) {
                 return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
             }
         } else if (field.value.type != TypeId{}) {
@@ -400,7 +494,9 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         bool matched = false;
         for (usize schemaIndex = 0; schemaIndex < schema.fields.Size(); ++schemaIndex) {
             const auto& schemaField = schema.fields[schemaIndex];
-            if (schemaField.id == field.fieldId && schemaField.value.kind != ValueKind::Opaque) {
+            // Enum 필드만 값의 native 키를 싣는다.
+            if (schemaField.id == field.fieldId && schemaField.value.kind != ValueKind::Opaque &&
+                (schemaField.value.kind == ValueKind::Enum) == (field.valueNativeType != nullptr)) {
                 matched = true;
                 break;
             }
@@ -421,7 +517,9 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     const usize fieldEnd = fieldOffset + schema.fields.Size() * sizeof(FieldSchema);
     const usize opsOffset =
         (fieldEnd + alignof(RuntimeFieldOps) - 1) & ~(alignof(RuntimeFieldOps) - 1);
-    usize bytes = opsOffset + ops.fields.Size() * sizeof(RuntimeFieldOps);
+    const usize opsEnd = opsOffset + ops.fields.Size() * sizeof(RuntimeFieldOps);
+    const usize typesOffset = (opsEnd + alignof(Record*) - 1) & ~(alignof(Record*) - 1);
+    usize bytes = typesOffset + schema.fields.Size() * sizeof(Record*);
     if (!AddBytes(bytes, schema.name.Size())) {
         return Result<TypeRegistrationToken>::Failure(ErrorCode::Overflow);
     }
@@ -446,7 +544,47 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
                 return Result<TypeRegistrationToken>::Failure(ErrorCode::AlreadyExists);
             }
             if (record->schema.id == schema.baseType) {
+                // base는 클래스여야 한다(Acquire의 종류 규칙과 같다).
+                if (record->kind != TypeKind::Class) {
+                    return Result<TypeRegistrationToken>::Failure(ErrorCode::TypeMismatch);
+                }
                 base = record;
+            }
+        }
+        // Enum 필드가 가리키는 enum은 먼저 등록되어 있어야 하고, 정적 thunk의 enum과 같은 native
+        // 타입이어야 한다.
+        for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
+            const auto& field = schema.fields[fieldIndex];
+            if (field.value.kind != ValueKind::Enum) {
+                continue;
+            }
+
+            Record* target = nullptr;
+            for (Record* record = records_; record; record = record->next) {
+                if (record->schema.id == field.value.type) {
+                    target = record;
+                    break;
+                }
+            }
+
+            if (!target) {
+                return Result<TypeRegistrationToken>::Failure(ErrorCode::NotFound);
+            }
+
+            const void* thunkType = nullptr;
+            for (usize opsIndex = 0; opsIndex < ops.fields.Size(); ++opsIndex) {
+                if (ops.fields[opsIndex].fieldId == field.id) {
+                    thunkType = ops.fields[opsIndex].valueNativeType;
+                    break;
+                }
+            }
+
+            if (target->kind != TypeKind::Enum || thunkType != target->ops.nativeType) {
+                return Result<TypeRegistrationToken>::Failure(ErrorCode::TypeMismatch);
+            }
+
+            if (target->dependents >= 0xffffffffu - schema.fields.Size()) {
+                return Result<TypeRegistrationToken>::Failure(ErrorCode::Overflow);
             }
         }
         if (schema.baseType != TypeId{}) {
@@ -512,7 +650,31 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         reinterpret_cast<FieldSchema*>(static_cast<uint8*>(memory.Value()) + fieldOffset);
     auto* fieldOps =
         reinterpret_cast<RuntimeFieldOps*>(static_cast<uint8*>(memory.Value()) + opsOffset);
-    uint8* cursor = reinterpret_cast<uint8*>(fieldOps + ops.fields.Size());
+    auto* fieldTypes =
+        reinterpret_cast<Record**>(static_cast<uint8*>(memory.Value()) + typesOffset);
+    uint8* cursor = reinterpret_cast<uint8*>(fieldTypes + schema.fields.Size());
+    {
+        // mutating_이 등록·해제를 막으므로 위에서 확인한 enum 레코드가 그대로 있다.
+        platform::LockGuard lock(gate_);
+        for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
+            fieldTypes[fieldIndex] = nullptr;
+            if (schema.fields[fieldIndex].value.kind != ValueKind::Enum) {
+                continue;
+            }
+
+            for (Record* target = records_; target; target = target->next) {
+                if (target->schema.id == schema.fields[fieldIndex].value.type) {
+                    fieldTypes[fieldIndex] = target;
+                    break;
+                }
+            }
+
+            if (!fieldTypes[fieldIndex]) {
+                platform::Fatal("TypeRegistry enum dependency vanished during registration");
+            }
+        }
+    }
+    record->fieldTypes = fieldTypes;
     record->schema.id = schema.id;
     record->schema.version = schema.version;
     record->schema.baseType = schema.baseType;
@@ -532,10 +694,11 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
             if (fields[fieldIndex].id == fieldOps[index].fieldId) {
                 // 원본 입력 함수표는 변경하지 않는다. 등록된 복사본에만 정책을 결합한다.
-                fieldOps[index].write.Bind(*this, ops.nativeType, fields[fieldIndex].id,
-                                           fields[fieldIndex].value.kind,
-                                           fields[fieldIndex].value.type,
-                                           HasFlag(fields[fieldIndex].flags, FieldFlags::ReadOnly));
+                fieldOps[index].write.Bind(
+                    *this, ops.nativeType, fields[fieldIndex].id, fields[fieldIndex].value.kind,
+                    fields[fieldIndex].value.type,
+                    HasFlag(fields[fieldIndex].flags, FieldFlags::ReadOnly),
+                    fieldTypes[fieldIndex] ? &fieldTypes[fieldIndex]->enumSchema : nullptr);
                 break;
             }
         }
@@ -551,6 +714,121 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     if (base) {
         ++base->dependents;
     }
+    for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
+        if (fieldTypes[fieldIndex]) {
+            ++fieldTypes[fieldIndex]->dependents;
+        }
+    }
+    mutating_ = false;
+    return Result<TypeRegistrationToken>::Success({domain_, record->generation, schema.id});
+}
+
+Result<TypeRegistrationToken> TypeRegistry::RegisterEnum(const EnumSchema& schema,
+                                                         RuntimeEnumOps ops) noexcept {
+    if (platform::CurrentThreadId() != ownerThread_) {
+        return Result<TypeRegistrationToken>::Failure(ErrorCode::WrongThread);
+    }
+
+    int64 minimum = 0;
+    int64 maximum = 0;
+    const bool flags = HasFlag(schema.flags, EnumFlags::Flags);
+    if (schema.id == Guid{} || schema.name.Size() == 0 ||
+        !StringView(schema.name.Data(), schema.name.Size()).ValidateUtf8() ||
+        !EnumUnderlyingRange(schema.underlying, minimum, maximum) ||
+        (schema.flags & ~static_cast<uint32>(EnumFlags::Flags)) != 0 || schema.values.Size() == 0 ||
+        schema.values.Size() > MaxEnumerators ||
+        (schema.toolPrefix.Size() != 0 && !IsEnumToolName(schema.toolPrefix)) ||
+        ops.nativeType == nullptr) {
+        return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    usize bytes =
+        (sizeof(Record) + alignof(EnumeratorSchema) - 1) & ~(alignof(EnumeratorSchema) - 1);
+    const usize valuesOffset = bytes;
+    bytes += schema.values.Size() * sizeof(EnumeratorSchema);
+    if (!AddBytes(bytes, schema.name.Size()) || !AddBytes(bytes, schema.toolPrefix.Size())) {
+        return Result<TypeRegistrationToken>::Failure(ErrorCode::Overflow);
+    }
+
+    for (usize index = 0; index < schema.values.Size(); ++index) {
+        const EnumeratorSchema& value = schema.values[index];
+        if (!IsAsciiIdentifier(value.name) ||
+            (value.toolName.Size() != 0 && !IsEnumToolName(value.toolName)) ||
+            !StringView(value.displayName.Data(), value.displayName.Size()).ValidateUtf8() ||
+            (value.flags & ~static_cast<uint32>(EnumeratorFlags::Hidden)) != 0 ||
+            value.value < minimum || value.value > maximum || (flags && value.value < 0)) {
+            return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        // 값 별칭과 (접두 유무를 합친) 도구 이름 중복은 받지 않는다.
+        for (usize previous = 0; previous < index; ++previous) {
+            const EnumeratorSchema& other = schema.values[previous];
+            if (other.value == value.value ||
+                EnumToolNamesCollide(EffectiveToolName(value), EffectiveToolName(other),
+                                     schema.toolPrefix)) {
+                return Result<TypeRegistrationToken>::Failure(ErrorCode::AlreadyExists);
+            }
+        }
+
+        if (!AddBytes(bytes, value.name.Size()) || !AddBytes(bytes, value.toolName.Size()) ||
+            !AddBytes(bytes, value.displayName.Size())) {
+            return Result<TypeRegistrationToken>::Failure(ErrorCode::Overflow);
+        }
+    }
+
+    {
+        platform::LockGuard lock(gate_);
+        if (closed_ || mutating_ || nextGeneration_ == 0) {
+            return Result<TypeRegistrationToken>::Failure(closed_     ? ErrorCode::ShuttingDown
+                                                          : mutating_ ? ErrorCode::Busy
+                                                                      : ErrorCode::Overflow);
+        }
+        // 같은 C++ enum을 다른 ID로 다시 등록하지 않는다. 생성 thunk는 GeneratedType<E>::Id()
+        // 하나만 받으므로 별칭 ID를 가리키는 필드는 쓸 수도 저장할 수도 없게 된다.
+        for (Record* record = records_; record; record = record->next) {
+            if (record->schema.id == schema.id ||
+                (record->kind == TypeKind::Enum && record->ops.nativeType == ops.nativeType)) {
+                return Result<TypeRegistrationToken>::Failure(ErrorCode::AlreadyExists);
+            }
+        }
+        mutating_ = true;
+    }
+
+    auto memory = allocator_.Allocate(bytes, alignof(Record), 0x54595045u);
+    if (!memory) {
+        platform::LockGuard lock(gate_);
+        mutating_ = false;
+        return Result<TypeRegistrationToken>::Failure(memory.Error());
+    }
+    if (!memory.Value()) {
+        platform::Fatal("Allocator returned null TypeRegistry record");
+    }
+    Record* record = ::new (memory.Value()) Record();
+    auto* values =
+        reinterpret_cast<EnumeratorSchema*>(static_cast<uint8*>(memory.Value()) + valuesOffset);
+    uint8* cursor = reinterpret_cast<uint8*>(values + schema.values.Size());
+    record->kind = TypeKind::Enum;
+    record->schema.id = schema.id;
+    record->schema.name = CopyBytes(schema.name, cursor);
+    record->enumSchema.id = schema.id;
+    record->enumSchema.name = record->schema.name;
+    record->enumSchema.underlying = schema.underlying;
+    record->enumSchema.flags = schema.flags;
+    record->enumSchema.toolPrefix = CopyBytes(schema.toolPrefix, cursor);
+    for (usize index = 0; index < schema.values.Size(); ++index) {
+        ::new (values + index) EnumeratorSchema(schema.values[index]);
+        values[index].name = CopyBytes(schema.values[index].name, cursor);
+        values[index].toolName = CopyBytes(schema.values[index].toolName, cursor);
+        values[index].displayName = CopyBytes(schema.values[index].displayName, cursor);
+    }
+    record->enumSchema.values = {values, schema.values.Size()};
+    record->ops.nativeType = ops.nativeType;
+    record->ops.module = Move(ops.module);
+
+    platform::LockGuard lock(gate_);
+    record->generation = nextGeneration_++;
+    record->next = records_;
+    records_ = record;
     mutating_ = false;
     return Result<TypeRegistrationToken>::Success({domain_, record->generation, schema.id});
 }
@@ -562,6 +840,33 @@ Result<TypeLease> TypeRegistry::Acquire(TypeId type) noexcept {
     }
     for (Record* record = records_; record; record = record->next) {
         if (record->schema.id == type) {
+            // 기존 호출자(ObjectRegistry·그래프 저장·복원)는 모두 클래스를 가정한다.
+            if (record->kind != TypeKind::Class) {
+                return Result<TypeLease>::Failure(ErrorCode::TypeMismatch);
+            }
+            if (record->leases == 0xffffffffu) {
+                return Result<TypeLease>::Failure(ErrorCode::Overflow);
+            }
+            ++record->leases;
+            return Result<TypeLease>::Success(TypeLease(this, record));
+        }
+    }
+    return Result<TypeLease>::Failure(ErrorCode::NotFound);
+}
+
+Result<TypeLease> TypeRegistry::AcquireValueType(TypeId type, TypeKind kind) noexcept {
+    if (kind == TypeKind::Class) {
+        return Result<TypeLease>::Failure(ErrorCode::InvalidArgument);
+    }
+    platform::LockGuard lock(gate_);
+    if (closed_) {
+        return Result<TypeLease>::Failure(ErrorCode::ShuttingDown);
+    }
+    for (Record* record = records_; record; record = record->next) {
+        if (record->schema.id == type) {
+            if (record->kind != kind) {
+                return Result<TypeLease>::Failure(ErrorCode::TypeMismatch);
+            }
             if (record->leases == 0xffffffffu) {
                 return Result<TypeLease>::Failure(ErrorCode::Overflow);
             }
@@ -592,12 +897,30 @@ void TypeRegistry::Release(void* pointer) noexcept {
 }
 
 void TypeRegistry::DestroyRecord(Record* record) noexcept {
+    // 의존자(파생 클래스·enum을 쓰는 클래스)는 의존 대상보다 먼저 파괴된다(Unregister는 Busy로
+    // 막고, Shutdown은 등록의 역순으로 파괴한다).
+    if (record->dependents != 0) {
+        platform::Fatal("TypeRegistry record destroyed before its dependents");
+    }
     if (record->base) {
         platform::LockGuard lock(gate_);
         if (record->base->dependents == 0) {
             platform::Fatal("TypeRegistry base dependency underflow");
         }
         --record->base->dependents;
+    }
+    if (record->fieldTypes) {
+        platform::LockGuard lock(gate_);
+        for (usize index = 0; index < record->schema.fields.Size(); ++index) {
+            Record* target = record->fieldTypes[index];
+            if (!target) {
+                continue;
+            }
+            if (target->dependents == 0) {
+                platform::Fatal("TypeRegistry value type dependency underflow");
+            }
+            --target->dependents;
+        }
     }
     record->~Record();
     auto result = allocator_.Deallocate(record);
@@ -663,8 +986,8 @@ Result<void> TypeRegistry::Shutdown() noexcept {
         records_ = nullptr;
         mutating_ = true;
     }
-    // base가 먼저 등록되어야 하므로 head 순서는 자식→부모다. 외부 lease만 검사하고 이 순서로
-    // dependent를 반환하여 내부 상속 관계 때문에 Shutdown이 영구 Busy가 되는 일을 피한다.
+    // base·enum이 먼저 등록되어야 하므로 head 순서는 의존자→의존 대상이다. 외부 lease만 검사하고
+    // 이 순서로 dependent를 반환하여 내부 의존 관계 때문에 Shutdown이 영구 Busy가 되는 일을 피한다.
     while (removed) {
         Record* next = removed->next;
         DestroyRecord(removed);

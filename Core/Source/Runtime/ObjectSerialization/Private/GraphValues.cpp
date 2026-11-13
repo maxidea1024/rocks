@@ -53,6 +53,7 @@ Result<WireType> FieldWireType(ValueKind kind) noexcept {
     case ValueKind::SoftObjectReference:
         return Result<WireType>::Success(WireType::SoftObjectReference);
     case ValueKind::Enum:
+        return Result<WireType>::Success(WireType::I64);
     case ValueKind::Struct:
     case ValueKind::Array:
     case ValueKind::Opaque:
@@ -77,10 +78,12 @@ Result<void> ValidateLayout(const TypeLease& type, Budget& budget) noexcept {
             return Result<void>::Failure(wire.Error());
         }
         const bool reference = field.value.kind == ValueKind::ObjectReference;
-        const bool soft = field.value.kind == ValueKind::SoftObjectReference;
+        const bool typed = field.value.kind == ValueKind::SoftObjectReference ||
+                           field.value.kind == ValueKind::Enum;
         if ((reference && field.kind != FieldKind::ObjectReference) ||
             (!reference &&
-             (field.kind != FieldKind::Value || (!soft && field.value.type != Guid{})))) {
+             (field.kind != FieldKind::Value || (!typed && field.value.type != Guid{}))) ||
+            (field.value.kind == ValueKind::Enum && type.FieldEnum(index) == nullptr)) {
             return Result<void>::Failure(ErrorCode::Unsupported);
         }
         auto accessor = FindOps(type, field.id, budget);
@@ -102,7 +105,8 @@ Result<void> ValidateWidth(const FieldValue& value) noexcept {
     return Result<void>::Success();
 }
 
-Result<void> EncodeValue(ArchiveWriter& writer, const FieldValue& value, uint64 local) noexcept {
+Result<void> EncodeValue(ArchiveWriter& writer, const FieldValue& value, uint64 local,
+                         const EnumSchema* enumSchema) noexcept {
     auto width = ValidateWidth(value);
     if (!width) {
         return width;
@@ -118,6 +122,15 @@ Result<void> EncodeValue(ArchiveWriter& writer, const FieldValue& value, uint64 
         return writer.WriteU64(value.unsignedInteger);
     case ValueKind::Int32:
     case ValueKind::Int64:
+        return writer.WriteI64(value.signedInteger);
+    case ValueKind::Enum:
+        // C++에서 직접 넣은 선언되지 않은 값(static_cast)은 저장하지 않는다.
+        if (!enumSchema || value.type != enumSchema->id ||
+            !IsDeclaredEnumValue(*enumSchema, value.signedInteger)) {
+            return Result<void>::Failure(!enumSchema || value.type != enumSchema->id
+                                             ? ErrorCode::TypeMismatch
+                                             : ErrorCode::InvalidArgument);
+        }
         return writer.WriteI64(value.signedInteger);
     case ValueKind::Float32:
         return writer.WriteF32(value.float32);
@@ -147,7 +160,6 @@ Result<void> EncodeValue(ArchiveWriter& writer, const FieldValue& value, uint64 
     }
     case ValueKind::ObjectReference:
         return writer.WriteU64(local);
-    case ValueKind::Enum:
     case ValueKind::Struct:
     case ValueKind::Array:
     case ValueKind::Opaque:
@@ -157,7 +169,8 @@ Result<void> EncodeValue(ArchiveWriter& writer, const FieldValue& value, uint64 
 }
 
 Result<FieldValue> DecodeValue(Allocator& allocator, const FieldSchema& schema,
-                               const FieldView& field, Budget& budget, uint64& local) noexcept {
+                               const FieldView& field, Budget& budget, uint64& local,
+                               const EnumSchema* enumSchema) noexcept {
     auto expected = FieldWireType(schema.value.kind);
     if (!expected) {
         return Result<FieldValue>::Failure(expected.Error());
@@ -212,6 +225,26 @@ Result<FieldValue> DecodeValue(Allocator& allocator, const FieldSchema& schema,
             return Result<FieldValue>::Failure(decoded.Error());
         }
         value.signedInteger = decoded.Value();
+        break;
+    }
+    case ValueKind::Enum: {
+        // 선언되지 않은 값은 객체를 만들기 전에 거부한다(decode 정책은 B3c).
+        auto decoded = archive.ReadI64();
+        if (!decoded) {
+            return Result<FieldValue>::Failure(decoded.Error());
+        }
+        if (!enumSchema) {
+            return Result<FieldValue>::Failure(ErrorCode::Unsupported);
+        }
+        // 검증은 열거자 수에 비례하므로 그만큼 예산을 쓴다.
+        if (auto spent = budget.Spend(enumSchema->values.Size()); !spent) {
+            return Result<FieldValue>::Failure(spent.Error());
+        }
+        if (!IsDeclaredEnumValue(*enumSchema, decoded.Value())) {
+            return Result<FieldValue>::Failure(ErrorCode::InvalidArgument);
+        }
+        value.signedInteger = decoded.Value();
+        value.type = schema.value.type;
         break;
     }
     case ValueKind::Float32: {
@@ -288,7 +321,6 @@ Result<FieldValue> DecodeValue(Allocator& allocator, const FieldSchema& schema,
         value.guid = asset.Value();
         break;
     }
-    case ValueKind::Enum:
     case ValueKind::Struct:
     case ValueKind::Array:
     case ValueKind::Opaque:

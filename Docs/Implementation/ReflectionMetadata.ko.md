@@ -52,8 +52,9 @@ auto runtimeName = type.Name();
 | `AssetId` | `ValueKind::AssetId`; 에셋 ID(`Object/AssetId.h`, Guid, 0 = null). 저장 wire는 Guid |
 | `Sha256Digest` | `ValueKind::Digest256`; 32 byte 해시(`Core/Encoding/Sha256.h`). 저장 wire는 정확히 32 byte의 Bytes |
 | `SoftObjectRef<T>` | `ValueKind::SoftObjectReference`; 에셋 ID와 패키지 안 객체 경로(`Object/SoftObjectRef.h`). GC 간선이 아니며 `value.type`이 기대 타입(Object면 0). 저장 wire는 `SoftObjectReference`(12) |
+| `ROCKS_ENUM` enum class | `ValueKind::Enum`; `value.type`이 enum ID. 값은 선언된 값(Flags enum은 선언 값의 OR)만 유효하다. 저장 wire는 I64 (아래 "리플렉션 enum") |
 
-스키마의 값 형식은 `FieldSchema::value`(`ValueType { ValueKind kind; TypeId type; }`)다. `type`은 강한 참조와 소프트 참조의 기대 대상 타입이며(0 = Object) 그 밖의 종류에서는 0이어야 한다. `element`·`maxElements`는 배열 필드(B5)용 자리이며 지금은 Opaque·0만 등록된다.
+스키마의 값 형식은 `FieldSchema::value`(`ValueType { ValueKind kind; TypeId type; }`)다. `type`은 강한 참조와 소프트 참조의 기대 대상 타입(0 = Object)과 Enum의 enum ID(0이면 안 된다)이며 그 밖의 종류에서는 0이어야 한다. `element`·`maxElements`는 배열 필드(B5)용 자리이며 지금은 Opaque·0만 등록된다.
 
 `SoftObjectRef<T>`의 규칙: null은 asset이 0이고 경로가 빈 것이다(asset만 있고 경로가 비면 그 에셋의 대표 객체다). asset이 0인데 경로가 있거나, 경로가 4 KiB(`MaxObjectPathBytes`)를 넘거나 UTF-8이 아니면 InvalidArgument다. 리플렉션 쓰기(`write`·`writeStaged`·등록 전 callback), 그래프 저장(직접 대입한 값도 다시 검사)과 로드가 같은 규칙을 검사한다. 경로 문법(Outer 이름을 `.`로 잇는다)과 기대 타입은 대상을 찾을 때(A0-O·A1) 검사하며 쓰기·저장·로드는 검사하지 않는다. 이동 전용이고 이동하면 원본은 null이 된다. 이동 대입은 원본의 경로 allocator를 넘겨받으므로 객체 필드에 값을 넣을 때는 `TryAssign(other)`(받는 쪽 allocator 유지)를 쓰고, 복제는 실패할 수 있는 `TryClone(allocator)`다. 쓰는 클래스에는 `noexcept T(Allocator&)` 생성자가 필요하다(String 필드와 같다). `AssetId`의 문자열 표기와 해석은 36자 소문자 하이픈 형식 하나뿐이다(`TryParse`는 대문자·32자·중괄호를 거부한다).
 
@@ -91,6 +92,31 @@ public:
 | `MaxElements=N` | PROPERTY | 배열 길이 상한. 배열 필드는 B5에서 생기므로 지금은 모든 필드에서 RMC2202다. |
 
 `ROCKS_NATIVE()`는 저장·리플렉션하지 않는 런타임 멤버(GPU 핸들·캐시)이며 지정자를 받지 않는다. GC가 추적하지 않으므로 강한 객체 참조를 담을 수 없다: MetaCompiler가 Clang AST로 멤버 타입을 값으로 담는 필드·base·이름 없는 struct/union 멤버·배열 원소·템플릿 인자와 패턴 필드까지 재귀 검사해 `ObjectRef`·`RootRef`·`ObjectRefArray`나 Object 파생 타입의 raw 포인터·참조가 있으면 RMC2205로 거부한다. 포인터·참조는 대상이 Object 파생이거나 대상이 다시 강한 참조(`T**`·`ObjectRef<T>*`)인지만 본다 — 빌린 포인터가 가리키는 비-Object 레코드(예: `World*`)의 필드는 그 소유자가 추적한다. Object 파생 타입은 값이나 템플릿 인자로 닿아도 펼치지 않고, `WeakRef`·`SoftObjectRef`·`ObjectHandle`은 허용한다(대상을 담지 않으므로 템플릿 인자도 따라가지 않는다). `static constexpr bool RocksRequiresWorldOnlyOwner = true;`를 선언한 타입(을 값으로 담는 타입)은 WorldOnly 클래스의 NATIVE 멤버로만 둘 수 있다(RMC2206). 생성 코드는 직접 멤버 타입(배열 원소·포인터와 참조의 대상 포함, 담는 타입의 필드는 제외)에 대해 같은 조건을 `static_assert`(`IsNativeStrongReference`·`RequiresWorldOnlyOwner`, `<Object/NativeMemberTraits.h>`)로 한 번 더 둔다. NATIVE 멤버는 영속 필드가 아니고 강한 간선을 담지 않으므로 생성 타입의 `completeFieldLayout`은 계속 true다. 수동 등록 매크로는 `ROCKS_NATIVE_TYPE`이다(이전 `ROCKS_NATIVE_CLASS`).
+
+### 리플렉션 enum(`ROCKS_ENUM`)
+
+```cpp
+ROCKS_ENUM(ToolPrefix = "TEXTUREGROUP_")
+enum class TextureGroup : rocks::uint8 {
+    World = 0,
+    EightBitData ROCKS_ENUMERATOR(Name = "8BitData", DisplayName = "8비트 데이터") = 7,
+    Reserved13 ROCKS_ENUMERATOR(Hidden) = 13,
+};
+
+ROCKS_CLASS()
+class TextureSettings : public rocks::Object {
+public:
+    ROCKS_PROPERTY() TextureGroup group = TextureGroup::World;
+};
+```
+
+`ROCKS_ENUM(...)`은 바로 뒤의 enum 정의 하나에 붙는다(`ROCKS_CLASS`와 같이 사이에는 공백·주석만, 같은 소스·스코프). 클래스 안의 중첩 enum도 되지만 public 구역이어야 한다(아니면 RMC2401 — 생성 코드가 바깥에서 이름을 쓴다). 대상은 underlying을 enum 이름 바로 뒤에 원문으로 명시한 `enum class`(또는 `enum struct`)이고 underlying은 `uint8`·`uint16`·`uint32`·`int32`만 받는다(생략·`int8`·`int16`·64비트는 RMC2401). 열거자는 하나 이상, 4,096개 이하이며 값이 서로 달라야 한다(별칭은 RMC2401). 초기값이 없는 열거자는 이전 값 + 1이다. 지정자는 `ToolPrefix="…"`(`[A-Za-z0-9_]+`)와 `Flags`(비트 플래그 — 열거자 값은 음수일 수 없고, 유효한 값은 선언 값들의 OR이며 0은 항상 유효)다. 열거자에는 이름 바로 뒤에 `ROCKS_ENUMERATOR(Name="…", DisplayName="…", Hidden)`를 붙일 수 있다. `Name`은 도구 이름(`[A-Za-z0-9_]+`, 숫자로 시작해도 된다 — 접두를 뗀 UE 이름 `8BitData`)이고 없으면 C++ 이름이다. `DisplayName`은 표시용 UTF-8, `Hidden`은 저장 값으로는 유효하지만 도구 설정이 받지 않는 열거자다(판정은 설정 계층). 접두가 붙은 이름과 뗀 이름을 합친 도구 이름 집합은 대소문자 무시로 유일해야 한다(RMC2203). enum도 타입 ID를 identity 명세의 `type` 항목으로 가진다(`ids add --type <정규 이름>`). 열거자는 ID가 없다 — 저장은 값으로 하므로 열거자 이름을 바꿔도 데이터가 유지되고, 값을 바꾸면 저장된 데이터의 뜻이 바뀐다.
+
+생성 헤더는 `GeneratedType<E>`에 `Id()`, `Schema()`(`EnumSchema` — 이름·underlying·플래그·접두와 열거자의 이름·도구 이름·표시 이름·값·플래그), constexpr `IsDeclared(int64)`, `Register(TypeRegistry&, ModuleLease = {})`를 낸다. C++ underlying이나 열거자 값이 바뀌었는데 생성물을 다시 만들지 않으면 생성 헤더의 `static_assert`가 실패한다(MetaCompiler가 Clang AST에서 읽은 값을 컴파일러가 한 번 더 대조한다). `IsDeclaredEnumValue(schema, value)`와 `FindEnumerator(schema, toolName)`(`Meta/TypeSchema.h`)은 같은 규칙의 실행 시 버전이다 — 도구 이름 조회는 ASCII 대소문자를 무시하고 접두가 있든 없든 받으며, 숨김 열거자도 찾는다.
+
+enum은 그 enum을 필드로 쓰는 클래스보다 먼저 등록한다(`TypeRegistry::RegisterEnum`, 모듈 집계 함수는 enum을 먼저 등록한다). 클래스 등록은 Enum 필드의 `value.type`이 등록된 enum 레코드여야 하고(없으면 NotFound, 클래스 레코드면 TypeMismatch), 생성 접근기가 싣는 C++ enum의 native 키(`RuntimeFieldOps::valueNativeType`)가 그 레코드의 키와 같아야 한다(다르면 TypeMismatch). 등록된 클래스는 쓰는 enum을 의존으로 붙잡으므로 그 enum의 `Unregister`는 Busy다(lease가 아니므로 `Shutdown`을 막지 않는다). `Acquire`는 클래스만 돌려주고(enum ID면 TypeMismatch), enum은 `AcquireValueType(id, TypeKind::Enum)`으로 열어 `TypeLease::Enum()`으로 스키마를 읽는다. 클래스 lease의 `FieldEnum(fieldIndex)`는 그 필드가 가리키는 enum의 스키마다.
+
+Enum 필드의 `FieldValue`는 `kind = ValueKind::Enum`, `signedInteger = 값`, `type = enum ID`다. 쓰기(등록된 `write`·`writeStaged`·등록 전 callback)는 `type`이 필드의 enum ID와 다르면 TypeMismatch, 선언되지 않은 값(범위 밖 포함)이면 InvalidArgument이며 값은 그대로다. 그래프 저장은 C++에서 `static_cast`로 넣은 선언되지 않은 값을 InvalidArgument로 거부하고, 복원은 저장된 선언되지 않은 값을 객체를 만들기 전에 InvalidArgument로 거부한다(기본값으로 바꾸고 진단하는 decode 정책은 B3c).
 
 `Category`와 `DisplayName`은 바이트 길이를 가진 UTF-8 데이터이며 중간 NUL(`\u0000`)도 유효하다. `Span<const char>`의 길이를 사용해야 하며 NUL 종료 문자열 함수로 읽으면 값이 잘린다. 등록 시 이 바이트를 깊게 복사한다. 생성 C++은 한글 등 읽을 수 있는 문자를 유지하고 인용부호·역슬래시·제어 문자를 escape한다. 제어 바이트는 정확히 세 자리 8진수로 표현하므로 뒤에 숫자가 와도 서로 합쳐지지 않는다.
 
