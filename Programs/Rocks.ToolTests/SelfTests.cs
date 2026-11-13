@@ -157,9 +157,10 @@ internal static class SelfTests
         });
         suite.Add("NativeEnvironment.ResourceDirectoryProbeIsClangClOnly", async () =>
         {
-            Verify.That(NativeEnvironment.IsClangCl(@"C:\llvm\bin\clang-cl.exe"), "clang-cl with extension");
+            // 경로 구분자는 호스트마다 다르므로(POSIX에서 \는 이름의 일부) Path.Combine으로 만든다.
+            Verify.That(NativeEnvironment.IsClangCl(Path.Combine("llvm", "bin", "clang-cl.exe")), "clang-cl with extension");
             Verify.That(NativeEnvironment.IsClangCl("CLANG-CL"), "clang-cl case-insensitive");
-            Verify.That(!NativeEnvironment.IsClangCl(@"C:\ndk\toolchains\llvm\prebuilt\windows-x86_64\bin\clang++.exe"), "NDK clang++");
+            Verify.That(!NativeEnvironment.IsClangCl(Path.Combine("ndk", "prebuilt", "windows-x86_64", "bin", "clang++.exe")), "NDK clang++");
             Verify.That(!NativeEnvironment.IsClangCl("/usr/bin/clang++"), "POSIX clang++");
             if (OperatingSystem.IsWindows())
             {

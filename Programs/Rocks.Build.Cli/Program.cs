@@ -291,7 +291,10 @@ namespace Rocks.Build.Cli
                     {
                         var command = new[] { HostTool(root, "Rocks.ToolTests") }.Concat(check).ToArray();
                         var checkStart = System.Diagnostics.Stopwatch.GetTimestamp();
-                        var tested = await ProcessRunner.RunAsync(new("dotnet", command, root, toolchain.Environment, Timeout: TimeSpan.FromMinutes(10)), cancellationToken);
+                        // 제한은 멈춘 검사를 끊는 장치다. meta는 시험마다 MetaCompiler·Clang을 띄워 3코어 macOS
+                        // 러너에서 병렬로도 9분 넘게 걸리므로(128건) 다른 검사보다 넉넉히 둔다.
+                        TimeSpan checkLimit = check[0] == "meta" ? TimeSpan.FromMinutes(30) : TimeSpan.FromMinutes(10);
+                        var tested = await ProcessRunner.RunAsync(new("dotnet", command, root, toolchain.Environment, Timeout: checkLimit), cancellationToken);
                         Console.Write(tested.StdOut);
                         Console.Error.Write(tested.StdErr);
                         evidence.RecordStep(check[0], command, tested.ExitCode, System.Diagnostics.Stopwatch.GetElapsedTime(checkStart), tests: true);
