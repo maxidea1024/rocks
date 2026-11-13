@@ -1,6 +1,6 @@
 # 셰이더 시스템 설계
 
-기준일: 2026-11-13, 개정 4(초안). 셰이더 원문을 HLSL 하나로 쓰고 오프라인에서 D3D12·D3D11·Vulkan·Metal용 코드로 바꾸는 구조와, 그 구현에 앞서 갖춰야 할 **선행 작업**을 정한다. 조사 근거(UE 5.6 backend별 경로·컴파일 파이프라인·외부 도구 현황)는 조사 문서 [Rocks 셰이더 시스템](https://claude.ai/artifact/U5uNh2EWGvXKQiNYXnuc1Q)에 있고, 이 문서는 그 결론과 Rocks 적용 규칙만 담는다. UE 근거는 EpicGames/UnrealEngine `5.6` 브랜치 commit `cdda65cecacd9a1278020925c357bf4cc0b17e8c`의 원본이며 경로는 `Engine/Source/` 기준이다(`Engine/Shaders`·`Engine/Config`·`Engine/Binaries`·`Engine/Build`는 그대로 적는다).
+기준일: 2026-11-13, 개정 5(초안). 셰이더 원문을 HLSL 하나로 쓰고 오프라인에서 D3D12·D3D11·Vulkan·Metal용 코드로 바꾸는 구조와, 그 구현에 앞서 갖춰야 할 **선행 작업**을 정한다. 조사 근거(UE 5.6 backend별 경로·컴파일 파이프라인·외부 도구 현황)는 조사 문서 [Rocks 셰이더 시스템](https://claude.ai/artifact/U5uNh2EWGvXKQiNYXnuc1Q)에 있고, 이 문서는 그 결론과 Rocks 적용 규칙만 담는다. UE 근거는 EpicGames/UnrealEngine `5.6` 브랜치 commit `cdda65cecacd9a1278020925c357bf4cc0b17e8c`의 원본이며 경로는 `Engine/Source/` 기준이다(`Engine/Shaders`·`Engine/Config`·`Engine/Binaries`·`Engine/Build`는 그대로 적는다).
 
 [엔진 구현 계획](EngineImplementationPlan.ko.md)·[엔진 런타임](EngineRuntime.ko.md)과 충돌하는 부분은 이 문서 기준으로 바꾸고 계획 문서도 같이 고친다(11절). 개정은 이 문서가 확정될 때 함께 한다.
 
@@ -18,7 +18,7 @@
 | 컴파일 실행 | 메인 프로세스가 입력 수집·**전처리**·키 계산을 하고, 별도 ShaderCompileWorker 프로세스가 컴파일한다. 메인 프로세스는 DXC·FXC·SPIRV-Cross·SPIRV-Tools 바이너리와 ShaderFormat 모듈을 링크하지 않는다 | UE 5.6은 전처리를 "항상 메인 프로세스에서 job 제출 때" 한다(`Runtime/RenderCore/Public/ShaderCompilerCore.h:686–688`), 워커는 `Programs/ShaderCompileWorker`. 전처리기 구현은 12절 결정 6 |
 | 캐시 | 빌드 캐시(AssetSystem 9절) | UE의 job 캐시와 원격 캐시 역할이다 |
 
-이 문서가 정한 규칙: 바인딩·상수 버퍼·단계 사이 변수(5절), ThirdParty 종류·오프라인 도구 빌드·의존 규칙(6절), 런타임 파일 배치(7절), 셰이더 job 키 구성(8절, 툴체인 지문 처리는 결정 10). 사용자가 정한 것: 도구 공급은 UE 방식(결정 8), SH2에서 Vulkan 추가와 OpenGL 제거(결정 9). 남은 사용자 결정(12절): 확장자, HLSL 2021 범위, D3D12 셰이더 모델, 파라미터 선언, 생산 호스트, 전처리기, 셰이더 키의 툴체인 지문.
+이 문서가 정한 규칙: 바인딩·상수 버퍼·단계 사이 변수(5절), ThirdParty 종류·오프라인 도구 빌드·의존 규칙(6절), 런타임 파일 배치(7절), 셰이더 job 키 구성(8절). 사용자가 정한 것: 도구 공급은 UE 방식(결정 8), SH2에서 Vulkan 추가와 OpenGL 제거(결정 9), 셰이더 job 키도 빌드 캐시 공통 규칙 준수(결정 10). 남은 사용자 결정(12절): 확장자, HLSL 2021 범위, D3D12 셰이더 모델, 파라미터 선언, 생산 호스트, 전처리기.
 
 ## 2. 형식과 변환 경로
 
@@ -57,7 +57,7 @@ Programs/ShaderCompileWorker                 워커 프로세스
 | P2 | backend 간 바인딩 규약 | 설계(5절) | SH2 | — |
 | P3 | ThirdParty 확장: Engine 루트, `binary` 종류와 사용자 단위 저장소, 오프라인 도구 빌드(UE 방식)·게시 | 설계(6절) | SH0 | — |
 | P4 | 빌드 시스템: 바이너리 링크와 런타임 의존 파일 배치 | 설계(7절) | SH0 | P3 |
-| P5 | 빌드 캐시(AssetSystem A3) + 셰이더 job 키 | 설계(8절) | SH1 | AssetSystem A0-C(구현됨)·A2(`ProjectLayout`), ReflectionFoundations B7(툴체인 지문), 결정 10 |
+| P5 | 빌드 캐시(AssetSystem A3) + 셰이더 job 키 | 설계(8절) | SH1 | AssetSystem A0-C(구현됨)·A2(`ProjectLayout`), ReflectionFoundations B7(툴체인 지문) |
 | P6 | 형식 정의·TargetProfile `shaderFormats`·쿠킹 매니페스트 v2(A4의 일부) | 설계(9절) | 쿠킹 단계 | P5, A4 |
 | P7 | MetaCompiler 셰이더 파라미터 종류 | 설계(10절) | SH3 | ReflectionFoundations B3–B4 |
 | P8 | 계획 문서 개정 | 목록(11절) | 모든 단계의 기준 | 이 문서 확정 |
@@ -99,7 +99,7 @@ Programs/ShaderCompileWorker                 워커 프로세스
    UE는 Vulkan에서 push constant를 쓰지 않는다. Rocks는 그리기별 상수를 위해 쓰며 5.3절 시험 (a)·(d)로 확인한다.
 3. **슬롯 정규화.** 컴파일 후 형식별 리플렉션(DXIL `ID3D12ShaderReflection`, SPIR-V SPIRV-Reflect)을 Rocks 공통 `ShaderBindingLayout`으로 바꾼다. 단위는 (단계, 종류, 단계 안 순번)이며 이름 hash·CB 크기·멤버 오프셋·텍스처와 샘플러의 짝(9항)을 함께 둔다(UE `FShaderParameterMap`·`FVulkanShaderHeader` 대응). 종류는 Vulkan descriptor 종류를 기준으로 나눈다: 상수 버퍼, SRV 텍스처(typed buffer SRV 포함), 구조화·raw 버퍼(SRV·UAV), storage image(UAV 텍스처·typed buffer UAV), 샘플러.
 4. **상한과 backend별 실제 위치.**
-   - **상한 검사 위치.** 형식 정의의 상한(장치 요구 수준별)은 job 안에서 검사한다(형식 정의 SHA가 키에 있다, 8절). 프로필 공통 상한(프로필에 든 형식들의 최소값)은 job 밖에서, 쿠킹·라이브러리 조립 때 캐시된 layout으로 프로필 단위로 검사한다. 프로필에 형식을 더해 상한이 내려가도 캐시 적중으로 검사가 빠지지 않는다. 파이프라인 합계 한도(D3D12 Tier 1 UAV, Vulkan `maxDescriptorSet*`)는 파이프라인 layout을 만들 때(쿠킹 때 알려진 쌍, 런타임 생성) 검사한다.
+   - **상한 검사 위치.** 형식 정의의 상한(장치 요구 수준별)과 프로필 공통 상한(프로필에 든 형식들의 최소값)은 job 안에서 검사한다. 형식 정의와 프로파일 출력 설정이 모두 키에 있으므로(8절) 프로필에 형식을 더해 상한이 내려가면 키가 바뀌어 다시 검사된다. 파이프라인 합계 한도(D3D12 Tier 1 UAV, Vulkan `maxDescriptorSet*`)는 파이프라인 layout을 만들 때(쿠킹 때 알려진 쌍, 런타임 생성) 검사한다.
    - **데스크톱 공통 상한(초기값).** Vulkan 값은 핵심 최소 보장이다. 더 큰 장치 요구는 다른 형식 id로 둔다(2절).
 
      | 종류(단계당) | D3D12(Tier 1) | D3D11(FL 11.0) | Vulkan 최소 | Metal(macOS) | 데스크톱 공통 |
@@ -217,7 +217,7 @@ Rocks도 같은 구조로 한다. 그래서 Rocks.Build에 공유 라이브러�
      - macOS arm64: dylib(install name `@rpath/<이름>`, ad-hoc 서명)·dSYM.
      - 공용 헤더·라이선스 고지.
      - 이것을 archive로 묶어 SHA-256과 함께 게시하고, 2항 manifest에 등록한다.
-     - UE처럼 Windows DXC도 같은 태그에서 직접 빌드한다. 두 호스트가 같은 원본을 쓰므로 바이트 동일 시험의 전제가 맞는다.
+     - UE처럼 Windows DXC도 같은 태그에서 직접 빌드한다. 두 호스트가 같은 원본·버전을 쓴다.
    - 실행 위치:
      - 수동으로 실행하는 별도 CI workflow(`.github/workflows/third-party-tools.yml`)가 두 호스트에서 빌드·게시한다. 개발자 기계에서도 같은 스크립트로 재현한다.
      - 이 workflow는 기본 빌드·시험 경로가 아니다. 그래서 Python을 막는 정책 검사(`Programs/Rocks.Tooling.Checks/PolicyChecks.cs`의 `PythonFreeMainPath`)에 이 workflow와 `Engine/Source/ThirdParty/*/Build/`를 명시 제외로 더한다.
@@ -264,40 +264,47 @@ Rocks PlatformBase에는 동적 라이브러리 API가 없고, 계획은 동적 
 
 ## 8. P5 빌드 캐시와 셰이더 job 키
 
-AssetSystem A3(9절 설계)을 그대로 구현하고 셰이더를 위해 다음을 더한다. 의존: A2 `ProjectLayout`(캐시 위치 `<Project>/Intermediate/BuildCache/`, AssetSystem 9절), ReflectionFoundations B7(툴체인 지문). 프로젝트 없이 엔진 셰이더만 컴파일할 때(Sandbox·self-test)는 엔진 루트의 `Intermediate/BuildCache/`를 같은 설정 규칙으로 쓴다.
+AssetSystem A3(9절 설계)을 그대로 구현하고, 셰이더 job도 AssetSystem 9절의 **공통 키 규칙을 그대로 따른다**(2026-11-13 사용자 결정 10). 의존: A2 `ProjectLayout`(캐시 위치 `<Project>/Intermediate/BuildCache/`, AssetSystem 9절), ReflectionFoundations B7(툴체인 지문). 프로젝트 없이 엔진 셰이더만 컴파일할 때(Sandbox·self-test)는 엔진 루트의 `Intermediate/BuildCache/`를 같은 설정 규칙으로 쓴다.
 
-**job 키.** 메인 프로세스가 계산한다(ShaderFormat 모듈을 링크하지 않으므로 형식별 값은 형식 정의에서 읽는다). 처리기 `BuildKey(KeyWriter&)`가 아래 순서·타입 태그로 기록한 바이트의 SHA-256이다.
+**job 키.** 메인 프로세스가 계산한다(ShaderFormat 모듈을 링크하지 않으므로 형식별 값은 형식 정의에서 읽는다). 처리기 `BuildKey(KeyWriter&)`가 아래 순서·타입 태그로 기록한 바이트의 SHA-256이다. 순서와 항목은 AssetSystem 공통 항목(`AssetSystem.ko.md` 9절)을 따르고, 에셋이 아니므로 에셋 TypeId·입력 bulk 자리에 셰이더 입력을 넣는다.
 
-1. `"RocksBuildCache"` 형식 버전(AssetSystem 공통).
-2. 셰이더 job 처리기 Guid·처리기 버전.
-3. 형식 id와 형식 정의 파일(`Engine/Config/ShaderFormats/<id>.json`)의 SHA-256. 형식 정의는 ShaderFormat 처리기 버전, 상한·기능 요구, 공유 등급(8항)을 가진다.
-4. 전처리 결과의 SHA-256(가상 경로만 담긴 `#line`), 엔트리 이름, 단계.
-5. 컴파일 옵션: 출력에 영향을 주는 정의·플래그를 정렬한 목록.
-6. 파라미터 레이아웃 서명(10절).
-7. 워커 안 도구 지문: SPIRV-Cross·SPIRV-Tools 바이너리와 SPIRV-Reflect 원본의 manifest SHA-256 목록(도구 빌드의 원본 태그·patch·컴파일러가 바뀌면 바이너리 SHA가 바뀐다).
-8. **공유 등급.** 형식 정의의 `sharing`이 `portable`이면 외부 도구의 **모든 호스트** manifest SHA-256 목록(어느 호스트에서 계산해도 같다)을 넣는다. `host`이면 생산 호스트 키(`windows-x64` 등)와 그 호스트의 외부 도구 SHA-256 목록을 넣는다. 같은 버전 태그로 macOS DXC를 다시 빌드하면 SHA가 바뀌어 키도 바뀐다. 외부 지문은 실행 중 바이너리가 아니라 manifest에 고정한 값이므로, FXC가 없는 macOS도 DXBC job의 키를 계산해 공유 캐시를 조회할 수 있다(Apple 도구도 manifest에 고정하므로 같다, 6절 2항). 워커는 실행 전에 자기 바이너리가 manifest와 같은지 확인하고 다르면 실패한다. `portable` 판정은 12절 결정 5의 바이트 동일 시험을 통과했을 때만 형식 정의에 기록한다.
+1. `"RocksBuildCache"` 형식 버전.
+2. 셰이더 job 처리기 Guid·처리기 버전 Guid.
+3. 결과를 만드는 외부 도구의 이름·버전·설정.
+   - 형식 id와 형식 정의 파일(`Engine/Config/ShaderFormats/<id>.json`)의 SHA-256. 형식 정의는 ShaderFormat 처리기 버전, 컴파일러·셰이더 모델, 상한·기능 요구를 가진다.
+   - 이 job이 쓰는 외부 도구(DXC·SPIRV-Cross·SPIRV-Tools·FXC)의 manifest SHA-256 목록, SPIRV-Reflect 원본 manifest SHA-256, Apple 도구 지문. 도구 빌드의 원본 태그·patch·컴파일러가 바뀌면 바이너리 SHA가 바뀐다.
+   - 워커는 실행 전에 자기 바이너리가 manifest와 같은지 확인하고 다르면 실패한다.
+4. 결정적 수학 버전(A0-C).
+5. 툴체인 지문(ReflectionFoundations B7, 컴파일러 id·버전·대상 아키텍처·부동소수점 모델).
+6. 입력: 전처리 결과의 SHA-256(가상 경로만 담긴 `#line`), 엔트리 이름, 단계. include 폐포는 전처리 결과에 들어 있으므로 별도 의존 목록은 없다.
+7. 결과에 영향을 주는 설정 전체: 컴파일 옵션(출력에 영향을 주는 정의·플래그의 정렬 목록, 기본값 포함), 파라미터 레이아웃 서명(10절).
+8. 대상 프로파일 id와 출력 설정 전체.
 
-AssetSystem 공통 항목과의 차이: 셰이더 job 키에는 툴체인 지문(대상 아키텍처 포함) 대신 7·8항을 넣는다. 툴체인 지문을 그대로 넣으면 x64 Windows와 ARM64 macOS의 키가 항상 달라 공유가 불가능하다. 이 단락은 12절 결정 10의 (가)를 가정한다. (나)를 고르면 7항에 툴체인 지문을 더하고 8항의 `portable` 등급을 쓰지 않는다. 프로필 전체(텍스처 LOD 그룹 등)도 넣지 않는다. 프로필은 영역별 digest로 나누고 셰이더 키에는 3항의 형식 정의만 들어간다. 반대로 텍스처 키와 cookKey는 셰이더 형식 목록을 넣지 않는다(AssetSystem §9·§10 개정).
+공통 규칙을 따른 결과:
+- 툴체인 지문에 대상 아키텍처가 들어가므로 Windows x64와 macOS arm64는 같은 셰이더도 키가 다르다. 셰이더 캐시는 호스트 사이에 공유하지 않는다.
+- 한 호스트만 만들 수 있는 형식(Windows의 DXBC, 12절 결정 5의 metallib)은 다른 호스트에서 해당 형식 job이 `CapabilityUnavailable`로 실패한다(계획 §27.9). 원격 워커(계획 §2.5 "macOS는 같은 action을 Windows worker에 전달", §27.7)가 생기면 그쪽으로 보낸다. 이때 키는 요청한 호스트의 것이다.
+- 프로파일의 출력 설정(텍스처 LOD 그룹, 셰이더 형식 목록 등)이 바뀌면 그 프로파일의 셰이더 키가 모두 바뀐다. 반대로 셰이더 형식 목록을 바꾸면 같은 프로파일의 텍스처 키도 바뀐다. 이것은 공통 규칙의 비용으로 받아들인다.
 
 Apple 도구 지문: `metal -v`의 버전·대상 문자열(UE도 이 출력을 해석한다, `Developer/Apple/MetalShaderFormat/Private/MetalShaderFormat.cpp:475–559`)과 `metal`·`metallib` 실행 파일의 SHA-256이다.
 
-**값과 재현성.**
+참고로 UE 5.6의 셰이더 job 키는 엔진을 빌드한 컴파일러·호스트를 넣지 않는다(캐시 버전 GUID, 형식 버전(DXC 버전 해시 포함), 대상, 엔트리, 컴파일 환경, 전처리 결과, 루트 파라미터 레이아웃 서명, `Runtime/RenderCore/Private/ShaderCore.cpp:4144–4199`, `Developer/Windows/ShaderFormatD3D/Private/ShaderFormatD3D.cpp:50–71`). Rocks는 이 점에서 UE와 다르게 공통 규칙을 우선한다.
+
+**값과 결정성.** AssetSystem §10 결정성 규칙(같은 도구 빌드에서 호스트 무관하게 같은 바이트)을 셰이더에도 적용한다.
 
 - 값은 바이트코드, 정규화된 바인딩 layout, 진단, 디버그 심볼을 부분으로 나눈다(기존 `.rbc` 부분 구조).
 - 경로 누출 금지: 입력은 메모리 버퍼와 가상 이름으로 넘기고 `#line`에는 가상 경로만 둔다. 디버그 정보는 별도 부분으로 빼고 Apple 도구에는 prefix map을 쓴다. "작업 디렉터리를 바꿔도 같은 바이트" 시험을 둔다.
-- SPIRV-Cross의 실수 출력(`%.32g`)에서 locale 소수점은 SPIRV-Cross가 보정하므로(`spirv_common.hpp:250–291`, `fixup_radix_point`) CRT `%g` 구현 차이만 남는다. 워커를 C locale로 고정하고, 극값(비정규수·최대값·17자리 이상 필요한 값) fixture로 Windows·macOS 출력이 같은지 시험한다. 다르면 추적 가능한 SPIRV-Cross 수정(manifest에 patch 기록)으로 고정한다.
-- **상수 접기.** DXC(LLVM)와 SPIRV-Tools 최적화기가 초월 함수 상수식을 호스트 libm으로 접으면, 같은 호스트 키 안에서도 CPU(예: UCRT의 FMA3 분기, [핵심 데이터 기반](CoreDataFoundations.ko.md))에 따라 바이트가 다를 수 있다. 결정 5의 시험에 상수 초월 함수 fixture를 넣어 OS와 FMA3 유무를 바꿔 비교한다. 다르면 그 형식은 생산자를 지정한 CI 기계 하나로 고정하고 다른 기계의 결과는 공유 캐시에 올리지 않는다. 이는 AssetSystem §10 결정성 규칙(:311, "호스트 무관하게 같은 바이트")의 셰이더 예외다.
+- SPIRV-Cross의 실수 출력(`%.32g`)에서 locale 소수점은 SPIRV-Cross가 보정하므로(`spirv_common.hpp:250–291`, `fixup_radix_point`) CRT `%g` 구현 차이만 남는다. 같은 호스트 키 안에서도 OS의 CRT 버전은 다를 수 있다. 워커를 C locale로 고정하고, 극값(비정규수·최대값·17자리 이상 필요한 값) fixture로 출력이 같은지 시험한다. 다르면 추적 가능한 SPIRV-Cross patch(6절 3항)로 고정한다.
+- **상수 접기.** DXC(LLVM)와 SPIRV-Tools 최적화기가 초월 함수 상수식을 호스트 libm으로 접으면, 같은 호스트 키 안에서도 CPU(예: UCRT의 FMA3 분기, [핵심 데이터 기반](CoreDataFoundations.ko.md))에 따라 바이트가 다를 수 있다. SH0에서 상수 초월 함수 fixture를 FMA3 유무와 OS 버전을 바꿔 비교한다. 다르면 결정성 규칙을 지킬 방법(도구 빌드 patch, 해당 최적화 끄기 등)을 정하기 전에는 그 형식을 공유 캐시에 올리지 않고, 방법은 사용자 결정으로 올린다.
 - **dxil 서명.** UE는 `dxil.dll`이 없으면 서명되지 않은 DXIL이 조용히 나온다고 적는다(`DXCWrapper.cpp:105–107`). 이는 UE가 동봉한 구버전 DXC의 동작이다. DXC 1.8.2505부터는 외부 `dxil.dll`을 찾지 않고 항상 내장 validator가 서명한다(DXC `docs/ReleaseNotes.md`, 1.8.2502에서 validator hash 공개). Rocks는 DXC를 1.8.2505 이상으로 고정하고 `dxil.dll`을 복사하지 않는다. 결과 DXIL container 헤더의 hash digest가 0이거나 preview용 우회 값(`PreviewByPassHash`, 0x02×16, `include/dxc/DxilContainer/DxilContainer.h:39–40`)이면 job을 실패시킨다. macOS DXC에서도 서명되는지 SH0에서 실측하고, 서명되지 않으면 `D3D12_SM6`의 생산 호스트를 형식 정의에서 Windows로 고정한다.
 
 완료 기준: A3 시험(적중·무효화·손상·동시 기록·GC)에 더해 다음을 시험한다.
-- job 키의 입력별 무효화: 옵션, 형식 정의, 도구 지문, 레이아웃 서명을 하나씩 바꾼다.
-- 영역 분리: 텍스처 LOD 그룹을 바꿔도 셰이더 키가 같고, 셰이더 형식을 더해도 텍스처 키가 같다.
-- 공유 등급별 키 차이와, macOS가 DXBC 키를 계산하는 것.
+- job 키의 입력별 무효화: 옵션, 형식 정의, 외부 도구 SHA, 툴체인 지문, 결정적 수학 버전, 레이아웃 서명, 프로파일 출력 설정을 하나씩 바꾼다.
+- 만들 수 없는 형식의 `CapabilityUnavailable`(macOS의 DXBC).
 - 실수 출력·상수 접기 fixture.
 
 ## 9. P6 형식 정의·TargetProfile·쿠킹 매니페스트
 
-- **형식 정의.** `Engine/Config/ShaderFormats/<id>.json`에 둔다: 언어 버전 기본값, 컴파일러(DXC·FXC·SPIRV-Cross 경로), 셰이더 모델·target env, 바인딩 규약 버전, ShaderFormat 처리기 버전, 상한(5.2절 4항)·지원 기능, 공유 등급(`sharing`)과 생산 호스트 규칙. UE에서는 기능·형식 이름 부분이 `DataDrivenPlatformInfo.ini`의 `[ShaderPlatform]`(`Language`·`MaxFeatureLevel`·`ShaderFormat`·기능 플래그, `Engine/Config/Windows/DataDrivenPlatformInfo.ini:78–136`)에 있고, SM 선택은 ShaderFormat 코드에 있다(`ShaderFormatD3D.cpp:146–164`, FXC·DXC 분기는 `D3DShaderCompiler.cpp`). Rocks는 둘 다 형식 정의에 둔다. 형식 정의 SHA-256이 job 키에 들어간다(8절 3항).
+- **형식 정의.** `Engine/Config/ShaderFormats/<id>.json`에 둔다: 언어 버전 기본값, 컴파일러(DXC·FXC·SPIRV-Cross 경로), 셰이더 모델·target env, 바인딩 규약 버전, ShaderFormat 처리기 버전, 상한(5.2절 4항)·지원 기능, 생산 호스트 규칙. UE에서는 기능·형식 이름 부분이 `DataDrivenPlatformInfo.ini`의 `[ShaderPlatform]`(`Language`·`MaxFeatureLevel`·`ShaderFormat`·기능 플래그, `Engine/Config/Windows/DataDrivenPlatformInfo.ini:78–136`)에 있고, SM 선택은 ShaderFormat 코드에 있다(`ShaderFormatD3D.cpp:146–164`, FXC·DXC 분기는 `D3DShaderCompiler.cpp`). Rocks는 둘 다 형식 정의에 둔다. 형식 정의 SHA-256이 job 키에 들어간다(8절 3항).
 - **TargetProfile**(AssetSystem 10절)은 backend와 형식 id 목록만 갖는다. 언어 버전·target env·생산 호스트·장치 요구를 프로필에 두면 출처가 둘이 되기 때문이다. 각 `graphicsBackends` 항목은 그 backend의 형식을 `shaderFormats`에 정확히 하나 가져야 하며, 짝이 없거나 남는 형식은 프로필 검증 오류다.
 
 ```json
@@ -307,25 +314,24 @@ Apple 도구 지문: `metal -v`의 버전·대상 문자열(UE도 이 출력을 
 
 - 엔진 기본 프로필에 `MacOS`(`graphicsBackends: ["Metal"]`, `shaderFormats: ["METAL_SM5"]`)를 더한다. 현재 엔진 기본은 `Windows`·`Android`뿐이다(AssetSystem 10절).
 - **쿠킹 산출물.** (프로필, 형식)마다 셰이더 라이브러리 파일 하나를 만든다. UE는 라이브러리(Global·프로젝트·플러그인/청크)×형식마다 `ShaderArchive-<Library>-<Format>-<Platform>.ushaderbytecode`를 쿠킹하고(파일 이름 `Runtime/RenderCore/Private/ShaderCodeLibrary.cpp:354–357`, `<Format>-<Platform>` 문자열 `:3378–3383`), 배포는 IoStore나 네이티브 라이브러리로 연다(ushaderbytecode는 배포 형식이 아니라는 주석, `:950–963`). Rocks도 라이브러리 파일은 쿠킹 단위이고, 배포 컨테이너로 옮기는 일은 패키징 단계가 맡는다. 라이브러리 분할(플러그인·청크)은 후속이다.
-- 라이브러리 조립 때 프로필 공통 상한을 캐시된 layout으로 검사한다(5.2절 4항).
 - 쿠킹 매니페스트 v1은 AssetId 단위라서 v2에 "에셋이 아닌 산출물" 항목(이름, 형식 id, 파일 SHA-256·크기, cookKey)을 더한다. 라이브러리 cookKey 입력은 포함된 job 키 정렬 목록과 라이브러리 형식 버전이다.
 - 런타임은 실행 장치의 backend에 맞는 형식의 라이브러리만 연다. 없거나 필요한 셰이더가 빠졌으면 `IncompatibleCook`이다.
 
-완료 기준: 형식 정의·프로필 스키마 검증(모르는 속성 거부, 프로필에 형식 옵션을 적으면 오류, backend·형식 짝 검사), 프로필 공통 상한 초과의 쿠킹 오류, 매니페스트 v2 왕복, 형식이 빠진 쿠킹을 연 런타임의 `IncompatibleCook`, 8절의 영역 분리 시험.
+완료 기준: 형식 정의·프로필 스키마 검증(모르는 속성 거부, 프로필에 형식 옵션을 적으면 오류, backend·형식 짝 검사), 프로필 공통 상한 초과의 쿠킹 오류, 매니페스트 v2 왕복, 형식이 빠진 쿠킹을 연 런타임의 `IncompatibleCook`.
 
 ## 10. P7 MetaCompiler 셰이더 파라미터
 
 12절 결정 4의 권장안(MetaCompiler 방식)을 고를 때의 내용이다.
 
 - **선언.** `ROCKS_SHADER_PARAMETERS(Name)` 구조체 종류를 MetaCompiler에 더한다. 파서·descriptor는 B4 `ROCKS_STRUCT`([리플렉션 기반](ReflectionFoundations.ko.md) 4절)를 바탕으로 한다. 멤버는 ShaderCore 셰이더 전용 정렬 타입(5.2절 5항)과 셰이더 자원 값 타입(텍스처·샘플러·버퍼 SRV·UAV)만 받고, 다른 타입(Core `Matrix4`·`Vector3` 포함)은 MetaCompiler 오류다.
-- **identity와 등록.** 셰이더 파라미터 구조체는 직렬화하지 않으므로 identity 명세(`<Module>.rocksids.json`)에 항목을 두지 않고 TypeRegistry에도 등록하지 않는다(StructSchema는 TypeId를 identity에서 얻는다, ReflectionFoundations 4절). ShaderCore가 (모듈, 이름)을 키로 하는 별도 표를 가진다. 셰이더 파라미터만 있는 헤더를 거부하는 지금의 RMC2000(`Programs/Rocks.MetaCompiler/ClangAstParser.cs`)과 identity 규칙(ReflectionFoundations 1절)은 이 종류를 받도록 고친다.
+- **identity와 등록.** 공통 규칙대로 셰이더 파라미터 구조체도 identity 명세(`<Module>.rocksids.json`)에 항목을 두고, `ROCKS_STRUCT`와 같은 경로로 StructSchema·TypeRegistry에 등록한다(StructSchema는 TypeId를 identity에서 얻는다, ReflectionFoundations 4절). 셰이더 파라미터 종류는 그 위에 허용 타입 제약과 HLSL 생성만 더한다. 셰이더 자원 멤버(텍스처·샘플러·버퍼)를 담을 리플렉션 값 종류는 B3 값 종류에 더한다.
 - **생성물.**
   - C++: 멤버별 offset·크기 static_assert, `ShaderBindingLayout`과 대조할 레이아웃 표.
   - HLSL: `<out>/Generated/<Module>/Shaders/<Name>.rsh`(기존 `<out>/Generated/<M>` 게시 규칙을 따른다). 가상 경로 `/Engine/Generated/<Module>/<Name>.rsh`(플러그인·프로젝트는 각자의 `Generated`)로 연결하며, UE `/Engine/Generated/`에 해당한다. 생성 HLSL은 셰이더 맵 키의 include 폐포에 들어간다. 설치 SDK로 내보내는 경로는 후속이다.
-- **레이아웃 서명.** 정규화한 레이아웃(멤버 이름·타입·offset·크기, 자원 종류·순번)의 SHA-256이다. job 키 6항이다.
+- **레이아웃 서명.** 정규화한 레이아웃(멤버 이름·타입·offset·크기, 자원 종류·순번)의 SHA-256이다. job 키 7항(8절)이다.
 - `DrawConstants`는 이 종류로 옮긴다.
 
-완료 기준: MetaCompiler 음성 대조(금지 타입, identity 명세에 항목을 두면 오류), 5.3절 시험 (a)·(f)를 생성 구조체로 통과.
+완료 기준: MetaCompiler 음성 대조(금지 타입), identity 명세 검증(일반 구조체와 같은 규칙), 5.3절 시험 (a)·(f)를 생성 구조체로 통과.
 
 ## 11. P8 계획 문서 개정
 
@@ -335,7 +341,6 @@ Apple 도구 지문: `metal -v`의 버전·대상 문자열(UE도 이 출력을 
 |---|---|---|---|
 | EngineImplementationPlan | 서문(:27) | "D3D11/D3D12/Vulkan/Metal/OpenGL 지원" | OpenGL 삭제 |
 | 〃 | §2.2 그래픽 행(:122) | D3D11/D3D12/Vulkan/Metal/OpenGL, 공통 material IR과 backend별 shader toolchain | D3D11/D3D12/Vulkan/Metal. HLSL 단일 원문(Material IR은 HLSL을 만드는 앞단) |
-| 〃 | §2.5(:183) | 빌드 캐시·action key에 target·compiler digest | 셰이더 job 키 예외(결정 10을 고를 때) |
 | 〃 | §2.5(:185–193) | "5개 RHI", D3D11 "HLSL→FXC/D3DCompile→DXBC", OpenGL "IR→GLSL" 행 | 4개 backend, 2절 표의 경로. OpenGL 행 삭제(Android GLES는 후속 선택) |
 | 〃 | §2.5(:197) | Windows용 Metal 제작 도구가 있으므로 Metal cook을 macOS 전용으로 단정하지 않는다 | 유지한다(12절 결정 5와 같은 방향) |
 | 〃 | §2.5(:203·:208), §11.5(:1101·:1121·:1128), §14.10(:1376·:1381 LT02) | "5개 backend"·"5개 RHI"·"5-backend" | "4개" |
@@ -350,8 +355,8 @@ Apple 도구 지문: `metal -v`의 버전·대상 문자열(UE도 이 출력을 
 | 〃 | §2.1(:114) | ThirdParty의 예외·RTTI 옵션은 별도 빌드, 예외가 엔진 경계를 넘지 않게 변환 | 유지한다(6절 3항의 오프라인 도구 빌드가 이 규칙의 사례) |
 | CoreObjectInputDetailedPlan | :1299 | 5개 graphics API, D3D11/D3D12/Vulkan/OpenGL/Metal | 4개 |
 | EngineRuntime | :3·:14·:38·:39·:190·:205–208·:213·:225·:235·:243 | 범위 "D3D12·OpenGL로 화면에", `OpenGLGraphics`, Vulkan·Metal "자리만", `Backend{D3D12, OpenGL, Vulkan, Metal}`, 런타임 `D3DCompile`·GLSL 4.50, "다른 backend 구현은 범위 밖", `--graphics=d3d12\|opengl`, OpenGL self-test, "Vulkan은 미구현" | OpenGL은 SH2까지의 임시 검증 backend로 표시하고, 셰이더 원문 규칙을 이 문서 참조로 바꾼다. SH2에서 VulkanGraphics 범위를 넣고 `Backend`에서 OpenGL 삭제, SH5에서 D3D11 추가(`DeviceTypes.h:16`) |
-| AssetSystem | §9 키 공통 항목(:271), §10 TargetProfile(:296)·cookKey(:299)·결정성(:311), A0-G(:15) | 툴체인 지문을 모든 키에, 프로필 전체를 출력 설정으로, 기본 프로필 Windows·Android, 호스트 무관 같은 바이트 | 8절 공유 등급·영역별 프로필 digest·상수 접기 예외, 9절 `graphicsBackends`·`shaderFormats`·`MacOS` 프로필. A0-G의 OpenGL swizzle은 그대로 두고 SH2의 OpenGL 제거 때 함께 지운다 |
-| ReflectionFoundations | 1절 identity 규칙, 4절 StructSchema, §8 툴체인 지문(:389) | 모든 리플렉션 종류가 명세 대상, 지문은 모든 빌드 캐시 키에 | 셰이더 파라미터 종류 제외(10절), 셰이더 job 키 예외(결정 10) |
+| AssetSystem | §10 TargetProfile(:296)·cookKey(:299), A0-G(:15) | 기본 프로필 Windows·Android, 그래픽 backend 단일 필드 | 9절 `graphicsBackends`·`shaderFormats`·`MacOS` 프로필. 키 공통 규칙(§9)과 결정성 규칙(:311)은 그대로 셰이더에 적용한다(8절). A0-G의 OpenGL swizzle은 그대로 두고 SH2의 OpenGL 제거 때 함께 지운다 |
+| ReflectionFoundations | 3절 값 종류, 4절 StructSchema | — | 셰이더 파라미터 종류가 `ROCKS_STRUCT` 경로를 쓰고 셰이더 자원 값 종류를 더한다(10절, 결정 4를 고를 때) |
 | RepositoryLayout | 트리(:14·:29)·:52–56 | Engine에 Shaders·Config 없음, ThirdParty는 Core만 원본 | 3절 구조와 6절 루트 추가 |
 | CompilerDiagnostics | :29(`Core/Source/ThirdParty/...` 경로) | Core 루트만 | 두 루트, 오프라인 도구 빌드는 Rocks 경고 규칙 밖이고 공개 헤더만 경고 0 확인. 셰이더 경고 절 추가: `-WX`는 작성자 원문에만(UE `ShaderConductorContext.cpp:405–413`), SPIRV-Cross가 다시 쓴 중간 원문은 제외 |
 | Compression | 3.1·3.3·3.5 | Core 루트, `.c` 번역 단위만 | Engine 루트와 `kind: binary` 언급(규칙 자체는 그대로) |
@@ -364,24 +369,18 @@ Apple 도구 지문: `metal -v`의 버전·대상 문자열(UE도 이 출력을 
 2. **HLSL 2021 범위** — UE는 플랫폼 값 `EnablesHLSL2021ByDefault`(0 끔, 1 Global 셰이더 전부, 2 모든 셰이더, `Runtime/RHI/Public/DataDrivenShaderPlatformInfo.h:117`. PCD3D_SM6·VULKAN_SM5·VULKAN_SM6·VULKAN_SM5_ANDROID·METAL_SM5·METAL_SM6은 1, PCD3D_SM5는 0. `Engine/Config/Windows/DataDrivenPlatformInfo.ini:127`, `Engine/Config/VulkanPC/DataDrivenPlatformInfo.ini:130·252`, `Engine/Config/Android/DataDrivenPlatformInfo.ini:125`, `Engine/Config/Mac/DataDrivenPlatformInfo.ini:52·91`)에 레이 트레이싱 셰이더 강제(`Runtime/Engine/Private/ShaderCompiler/ShaderCompiler.cpp:3290–3299`)와 타입별 선택을 더한다. 권장: 형식 정의의 기본값 + 셰이더 타입 선택. `D3D11_SM5`에서 2021 셰이더는 SPIRV-Cross 경로를 탄다.
 3. **D3D12 셰이더 모델** — 6.6(UE와 같음) 또는 6.0~6.2 + bindless 프로필 6.6. 6.6은 Windows 10에서 Agility SDK가 Runtime 의존이 된다(7절). SH0에서 WARP 지원과 Windows 10 요건을 실측한 뒤 정한다.
 4. **파라미터 선언** — MetaCompiler 셰이더 파라미터 종류(권장, 10절, 리플렉션 단일 출처·생성 HLSL을 디스크에 둠) 또는 UE 매크로 방식.
-5. **형식별 생산 호스트** — DXBC는 Windows. metallib은 macOS(Xcode Metal 도구)를 기준으로 하고, Windows의 Apple Metal Developer Tools(UE 5.6이 지원, `MetalShaderFormat.cpp:605–608, 925–945`) 결과가 바이트 동일 시험을 통과하면 양쪽. DXIL·SPIR-V는 바이트 동일 시험(실수 출력·상수 접기 fixture 포함, 8절)을 통과하면 양쪽(권장). AssetSystem §10 결정성 규칙의 개정이다.
+5. **형식별 생산 호스트** — 키가 호스트별이므로(8절) DXIL·SPIR-V는 각 호스트가 직접 만든다. 한 호스트만 만들 수 있는 형식: DXBC는 Windows. metallib은 macOS(Xcode Metal 도구)를 기준으로 하고, Windows에도 Apple Metal Developer Tools(UE 5.6이 지원, `MetalShaderFormat.cpp:605–608, 925–945`)가 있으면 만들게 할지 정한다(권장: 허용, 형식 정의의 생산 호스트 규칙). 만들 수 없는 호스트에서는 `CapabilityUnavailable`이고, 원격 워커가 생기면 그쪽으로 보낸다.
 6. **전처리기** — Rocks 자체 구현을 `Developer/ShaderCompiler`에 둔다(권장, UE처럼 메인 프로세스에서 실행. UE 전처리기 stb_preprocess는 Epic 저작권 원본이라 가져올 수 없다, `Developer/ShaderPreprocessor/Private/stb_preprocess/preprocessor.h:1`) 또는 라이선스를 확인한 외부 C 전처리기를 P3 C 원본 규칙으로 들인다. DXC `-P`는 메인 프로세스가 DXC를 링크하게 되어(6절 2항 의존 규칙 위반) 쓰지 않는다.
 7. **경고 정책** — 해당 없음. 결정 8로 C++ 외부 원본을 엔진 빌드에 넣지 않으므로 경고 억제 예외가 필요 없다.
 8. **도구 공급 방식** — **결정됨(2026-11-13): UE 방식.** DXC·SPIRV-Cross·SPIRV-Tools를 엔진 빌드 밖 스크립트로 직접 빌드해 바이너리로 배포하고, 엔진 빌드는 링크·복사만 한다(6절 3항). 조사 근거: upstream DXC는 macOS 빌드를 공식 CI로 돌리고(`azure-pipelines.yml:134, 164–179`), SPIRV-Cross는 C API 공유 라이브러리를 CMake 옵션으로 만든다(`CMakeLists.txt:40, 358`). 고려했던 대안은 LunarG Vulkan SDK 바이너리였다(SPIRV-Cross C API 공유 라이브러리 포함 여부 미확인, 설치기라 다시 묶어야 함, 패치 불가).
 9. **SH2 범위** — **결정됨(2026-11-13):** Graphics API를 컴파일된 코드로 바꾸는 변경이 D3D12·Vulkan self-test를 함께 통과할 때 들어가고, 같은 변경에서 OpenGL을 지운다. 두 backend 대조에 공백이 없다.
-10. **셰이더 키의 툴체인 지문** — 공통 규칙(모든 빌드 캐시 키에 엔진 툴체인 지문, 대상 아키텍처 포함)을 셰이더 job 키에도 적용할지 정한다.
-    - 공통 규칙이 있는 이유: 키가 Rocks 코드가 계산한 결과(텍스처 처리 등)를 가리키면, 같은 입력도 컴파일러·아키텍처에 따라 바이트가 달라질 수 있다.
-    - 셰이더에서는 결과를 만드는 것이 외부 도구(DXC·FXC·SPIRV-Cross·Apple 도구)이고, 그 바이너리 SHA가 7·8항으로 키에 들어간다. 메인 프로세스의 전처리는 결과 자체의 SHA가 4항이다. 그래서 툴체인 지문이 더하는 정보는 "어느 호스트에서 계산했는가"뿐이다.
-    - UE 5.6의 셰이더 job 키도 엔진을 빌드한 컴파일러·호스트를 넣지 않는다. 캐시 버전 GUID, 형식 버전(DXC 버전 해시 포함), 대상, 엔트리, 컴파일 환경, 전처리 결과, 루트 파라미터 레이아웃 서명뿐이다(`Runtime/RenderCore/Private/ShaderCore.cpp:4144–4199`, `Developer/Windows/ShaderFormatD3D/Private/ShaderFormatD3D.cpp:50–71`).
-    - (가) 셰이더 예외(UE 방식, 권장): 툴체인 지문 대신 7·8항을 넣는다. 호스트 사이 캐시 공유가 가능하다. 공유는 바이트 동일 시험을 통과한 형식(`portable`)만 하고, 통과하지 못한 형식은 호스트별 키가 된다.
-    - (나) 예외 없음: 공통 규칙대로 툴체인 지문을 넣는다. 정확성 문제는 없다. 다만 Windows x64·macOS arm64가 같은 셰이더를 각자 컴파일하고 캐시를 공유하지 못한다. 한 호스트만 만들 수 있는 형식(Windows의 DXBC, metallib)은 다른 호스트가 캐시로 받을 수 없어, 그 호스트의 원격 워커가 대신 컴파일해야 한다(계획 §2.5의 "macOS는 같은 action을 Windows worker에 전달").
-    - (가)는 AssetSystem §9, ReflectionFoundations §8, 계획 §2.5의 공통 규칙에 셰이더 예외를 적는 개정이다.
+10. **셰이더 키의 툴체인 지문** — **결정됨(2026-11-13): 공통 규칙 준수.** 셰이더 job 키에도 AssetSystem 9절 공통 항목(툴체인 지문·결정적 수학 버전·대상 프로파일 id와 출력 설정 전체 포함)을 그대로 넣는다(8절). UE 5.6은 셰이더 job 키에 엔진을 빌드한 컴파일러·호스트를 넣지 않지만(`Runtime/RenderCore/Private/ShaderCore.cpp:4144–4199`), Rocks는 공통 규칙을 우선한다. 비용은 호스트 사이 셰이더 캐시 비공유와, 프로파일 출력 설정이 바뀔 때의 재컴파일이다.
 
 ## 13. 이후 단계(선행 작업 뒤)
 
 | 단계 | 내용 | 완료 기준 |
 |---|---|---|
-| SH0 | 도구 스파이크(P3·P4 산출물): Sprite 셰이더 하나를 DXIL·SPIR-V·DXBC·MSL 텍스트로 만들고 검증 도구를 돌린다. Windows·macOS 양쪽에서 실행 | 형식별 산출, `spirv-val` 통과, DXIL 서명 hash 검사(macOS DXC 포함), FXC 고정본 로드, 리플렉션 덤프, 바이트 동일·실수 출력·상수 접기 예비 시험 |
+| SH0 | 도구 스파이크(P3·P4 산출물): Sprite 셰이더 하나를 DXIL·SPIR-V·DXBC·MSL 텍스트로 만들고 검증 도구를 돌린다. Windows·macOS 양쪽에서 실행 | 형식별 산출, `spirv-val` 통과, DXIL 서명 hash 검사(macOS DXC 포함), FXC 고정본 로드, 리플렉션 덤프, 같은 호스트 키 안의 실수 출력·상수 접기 예비 시험 |
 | SH1 | 소스 트리·가상 경로·`Platform.rsh`·전처리기(결정 6)·ShaderCompileWorker(P1)·두 층 키·빌드 캐시·`shader-compile` Commandlet·Development 필요 시 컴파일 | 같은 입력 같은 바이트, 빈/찬 캐시 동일, 워커 강제 종료 보고 |
 | SH2 | 리플렉션 정규화·워커 규칙 검사(5.2절)·Graphics API(`ShaderCodeKind`·`CreateShader`·파이프라인 layout·root signature)·GlobalShader·퍼뮤테이션, VulkanGraphics 최소 구현(offscreen·Sprite, P9), OpenGLGraphics·Renderer 원문·런타임 `D3DCompile` 제거(결정 9) | Sandbox self-test에서 D3D12·Vulkan이 허용 오차 안 일치(Vulkan은 CI에서 NOT RUN일 수 있다), 행렬 옵션 기록, Release에 컴파일러 없음, 5.3절 SH2 시험 |
 | SH3 | 파라미터 구조체(P7)·생성 HLSL·오프셋 시험 | 5.3절 (a)·(f)를 생성 구조체로 |
@@ -402,3 +401,7 @@ Apple 도구 지문: `metal -v`의 버전·대상 문자열(UE도 이 출력을 
   - 결정 8(도구 공급)을 UE 방식으로 정했다: 엔진 빌드 밖 스크립트로 DXC·SPIRV-Cross·SPIRV-Tools를 빌드해 바이너리로 배포하고 엔진은 링크·복사만 한다(UE ShaderConductor 빌드 스크립트·External 모듈 확인). 이에 따라 공유 라이브러리 모듈 종류, hostCode 종류, C++17·예외 빌드 설정, SPIRV-Tools 생성 파일 커밋, 경고 정책 결정(7)이 필요 없어졌다.
   - 결정 9(SH2에서 Vulkan 추가·OpenGL 제거를 한 변경으로)를 확정했다.
   - 결정 10에 UE 5.6 셰이더 job 키 구성(호스트·엔진 컴파일러 미포함)과 예외 없이 갈 때의 결과를 적었다.
+- 개정 5(2026-11-13): 결정 10을 공통 규칙 준수로 확정했다.
+  - 셰이더 job 키에 AssetSystem 9절 공통 항목을 모두 넣는다: 툴체인 지문, 결정적 수학 버전, 대상 프로파일 id와 출력 설정 전체. 공유 등급(`portable`)·영역별 프로필 digest·호스트 사이 바이트 동일 시험을 없앴다. 셰이더 캐시는 호스트 사이에 공유하지 않는다.
+  - 상수 접기 결정성은 예외로 두지 않는다. 다르게 나오면 방법을 사용자 결정으로 올린다.
+  - 같은 원칙으로 P7 셰이더 파라미터의 identity 면제를 없애고 `ROCKS_STRUCT` 경로를 따르게 했다. 공통 상한 검사는 job 안으로 옮겼다.
