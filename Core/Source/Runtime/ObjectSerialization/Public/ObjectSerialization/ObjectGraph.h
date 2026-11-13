@@ -16,7 +16,14 @@ struct ObjectGraphLimits {
     // 열 때도 남은 누계를 그 Record의 필드 수 한도로 쓴다(큰 입력이 누계 검사 전에 색인을 할당하지
     // 않게).
     uint32 maxTotalFields = 1024 * 1024;
+    // 리플렉션 배열 원소 수의 누계다(Docs/Design/ReflectionFoundations.ko.md 5.5절 — 저장·로드
+    // 모두, 원본과 struct 원소 배열 포함). 배열 하나의 원소 수는 따로 MaxArrayElements 이하다.
+    // 배열 원소의 강한 참조 token은 non-null 원소마다 하나이므로 원소 참조 token 수의 상한도 이
+    // 값이다. 로드 1단계는 struct 원소 목록을 열 때도 남은 누계를 항목 수 한도로 쓴다(색인을
+    // 할당하기 전에 같은 CapacityExceeded).
+    uint32 maxTotalElements = 4 * 1024 * 1024;
     usize maxBytes = 16 * 1024 * 1024;
+    // 필드 값 하나의 encoded byte 한도다(배열 필드 payload 전체 포함 — 넘으면 CapacityExceeded).
     usize maxValueBytes = 4 * 1024 * 1024;
     uint64 maxWork = 64 * 1024 * 1024;
     usize maxMigrationBytes = 16 * 1024 * 1024;
@@ -61,7 +68,9 @@ struct ObjectGraphLoadOptions {
 // 같은 입력은 같은 byte 순서다. 주소/registry domain/slot/generation은 파일에 저장하지 않는다.
 // 필드마다 등록된 codec(RuntimeFieldOps::encode)이 값을 쓴다. completeFieldLayout=true(상속 필드
 // 포함)와 GUID별 1:1 codec이 없으면 Unsupported다. C++에서 직접 넣은 잘못된 값(미선언 enum, 소프트
-// 참조 규칙 위반)은 InvalidArgument다.
+// 참조 규칙 위반)은 InvalidArgument다. 배열 필드의 원소 수가 필드 maxElements를 넘으면 그 배열
+// 필드 경로의 ArrayTooLong 진단(value = 원소 수)을 hooks에 보고한 뒤 CapacityExceeded다. encoded
+// payload가 maxValueBytes를 넘거나 원소 누계가 maxTotalElements를 넘어도 CapacityExceeded다.
 Result<Array<uint8>> SaveObjectGraph(Allocator&, ObjectRegistry&, const ObjectAccessContext&,
                                      ObjectHandle root, ObjectGraphSaveOptions = {}) noexcept;
 
@@ -75,8 +84,11 @@ Result<Array<uint8>> SaveObjectGraph(Allocator&, ObjectRegistry&, const ObjectAc
 // value.type 등록 타입과 생성 thunk의 정적 대상 타입의 native 타입이거나 그 파생이어야 하며 TypeId
 // 별명은 허용한다. value.type=0은 기반 Object다. nonnull의 명시 대상 타입 미등록은 NotFound다.
 // 소프트 참조는 값(에셋 ID + 객체 경로)으로 복원하며 대상을 그래프에 넣거나 찾지 않는다. Required
-// 필드의 null·누락은 거부하지 않고 RequiredMissing을 보고한다. 압축·async IO·다중 root는 이
-// format에서 지원하지 않으며 암묵적으로 ObjectHandle byte를 보존하지 않는다.
+// 필드의 null·누락은 거부하지 않고 RequiredMissing을 보고한다(Required 배열은 null 원소마다 [f[i]],
+// 누락 배열은 진단 없이 생성자 값). 배열 필드는 필드별 maxElements를 걸지 않고 배열마다
+// MaxArrayElements와 그래프 한도(maxValueBytes·maxTotalElements·maxTotalFields·work)로만
+// 막는다(상한을 낮춰도 기존 데이터가 열린다). 압축·async IO·다중 root는 이 format에서 지원하지
+// 않으며 암묵적으로 ObjectHandle byte를 보존하지 않는다.
 Result<RootRef<Object>> LoadObjectGraph(Allocator&, ObjectRegistry&, TypeRegistry&,
                                         const ObjectAccessContext&, Span<const uint8>,
                                         ObjectGraphLoadOptions = {}) noexcept;

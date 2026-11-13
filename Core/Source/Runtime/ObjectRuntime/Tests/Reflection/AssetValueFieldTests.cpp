@@ -150,11 +150,12 @@ TEST(AssetValueFields_ManualRegistrationEnforcesValueTypeRules) {
          [](FieldSchema& field) noexcept {
              field.flags |= static_cast<uint32>(FieldFlags::Required);
          }},
-        // 배열 자리(element·maxElements)는 B5 전까지 비어 있어야 한다.
+        // 배열 자리(element·maxElements)는 배열이 아닌 필드에서 비어 있어야 한다.
         {source, [](FieldSchema& field) noexcept { field.element.kind = ValueKind::Bool; }},
         {icon, [](FieldSchema& field) noexcept { field.element.type = Guid{1, 1}; }},
         {source, [](FieldSchema& field) noexcept { field.maxElements = 1; }},
-        // Enum·Struct는 대상 ID(value.type)가 있어야 하고, Array는 B5 전까지 받지 않는다.
+        // Enum·Struct는 대상 ID(value.type)가 있어야 하고, Array는 원소 형식·maxElements가 있어야
+        // 한다(원소 Opaque 거부).
         {source, [](FieldSchema& field) noexcept { field.value.kind = ValueKind::Enum; }},
         {source, [](FieldSchema& field) noexcept { field.value.kind = ValueKind::Struct; }},
         {source, [](FieldSchema& field) noexcept { field.value.kind = ValueKind::Array; }}};

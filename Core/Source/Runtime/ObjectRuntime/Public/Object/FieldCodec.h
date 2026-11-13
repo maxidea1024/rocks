@@ -2,10 +2,13 @@
 
 #include <Object/AssetId.h>
 #include <Object/RuntimeTypeOps.h>
+#include <Object/StructRefArray.h>
 #include <Object/TypeLease.h>
 #include <Platform/Fatal.h>
 #include <Serialization/Archive.h>
 #include <Serialization/Record.h>
+#include <Serialization/RecordList.h>
+#include <Serialization/ValueArray.h>
 
 // 필드 codec의 문맥·정책·hook이다(Docs/Design/ReflectionFoundations.ko.md 6.1–6.4절). 생성 codec
 // thunk(RuntimeFieldOps::encode·decode)는 이 문맥으로만 참조 wire·진단·Soft 수집·예산에 닿으므로,
@@ -59,7 +62,10 @@ enum class FieldDiagnosticKind : uint8 {
     // value는 저장된 값, valueType은 enum ID다.
     UndeclaredEnumValue,
     // value는 저장 버전이다(객체 Record면 path가 비어 있다).
-    NewerVersion
+    NewerVersion,
+    // 저장할 배열의 원소 수(value)가 필드 maxElements를 넘는다(path = 배열 필드). 저장은 이 진단
+    // 뒤 CapacityExceeded다(로드는 필드별 maxElements를 걸지 않으므로 내지 않는다).
+    ArrayTooLong
 };
 
 // 진단 하나다. objectIndex는 그래프 안 객체 위치(graph v1 local ID − 1, v2 export index), path는
@@ -92,7 +98,8 @@ class RecordScope;
 // 진단·수집은 무효이고 호출자가 버린다. hook은 소유 객체를 Borrow한 상태에서 불리므로 Registry와
 // 입력 byte를 바꾸지 않는다. 복원의 진단·수집은 1단계에서 한 번만 온다. struct 관찰·치환(B4,
 // Docs/Design/ReflectionFoundations.ko.md 4.6·6.4절)도 같은 묶음이고, A0-O가 외부 참조 보고를
-// 더한다.
+// 더한다. 배열 원소 struct의 Observe·Substitute에 오는 frame은 배열 필드의 frame이다(field의
+// value.kind == Array, structure = 원소 struct, index = 원소 index — 원소마다 새 frame이 아니다).
 //
 // 사용 예:
 //   struct Collect final : FieldCodecHooks {
@@ -143,9 +150,11 @@ protected:
 };
 
 // 지금 처리하는 필드 위치 하나다. field는 그 필드(struct 멤버면 멤버), declaringType은 그 필드를
-// 선언한 클래스·struct, effectiveFlags는 PropagateFieldFlags로 전파된 플래그, enumeration은 Enum
-// 필드의 등록된 enum 스키마(그 밖은 nullptr), structure는 Struct 필드의 등록 struct(그 밖은 빈
-// view), index는 배열 원소 index(아니면 NoIndex — B5 원소도 새 프레임이 아니라 이 칸을 쓴다)다.
+// 선언한 클래스·struct, effectiveFlags는 PropagateFieldFlags로 전파된 플래그(배열 원소와 원소
+// struct 멤버는 배열 필드의 것을 공유·전파한다), enumeration은 Enum 필드·enum 원소 배열의 등록된
+// enum 스키마(그 밖은 nullptr), structure는 Struct 필드·struct 원소 배열의 등록 struct(그 밖은 빈
+// view), index는 배열 필드에서 지금 처리하는 원소 index(아니면 NoIndex — 원소마다 새 프레임을
+// 만들지 않고 ElementIndexScope가 이 칸을 쓴다, 진단 경로는 [배열[i], 멤버])다.
 struct FieldCodecFrame {
     static constexpr uint32 NoIndex = ~0u;
 
@@ -173,6 +182,7 @@ struct DecodedReference {
 };
 
 class FieldScope;
+class ElementIndexScope;
 
 // 두 문맥의 공통 기반이다: 위치(프레임) 스택, 진단·Soft 보고, 예산, 참조 wire. 직렬화기가
 // 파생해 구현한다. 같은 문맥을 여러 스레드에서 쓰지 않는다.
@@ -262,9 +272,21 @@ public:
     // 값 임시 저장에 쓰는 할당기다(저장·1단계는 예산을 청구한다).
     virtual Allocator& Scratch() noexcept = 0;
 
+    // 관찰 대상 struct 임시 값과 그 안 배열의 원소 버퍼를 할당하는 할당기다(복원 1단계의 struct
+    // hook 관찰 — Docs/Design/ReflectionFoundations.ko.md 5.6절). 바이트를 작업량으로 청구하되
+    // Scratch와 달리 단일 할당 한도(maxValueBytes)가 없다: 관찰 struct 안 배열의 원소 버퍼는 wire
+    // 값 크기보다 클 수 있다(예: 빈 String 원소 20만 개 — wire 8 byte, native 수십 byte). work
+    // 예산이 상한이다. 복원 2단계와 저장은 관찰하지 않으므로 쓰지 않는다.
+    virtual Allocator& ObservationScratch() noexcept = 0;
+
     // 중첩 Record(struct 값)의 TLV 수를 그래프 필드 누계(maxTotalFields)에 더한다. 복원 2단계는
     // 세지 않는다.
     virtual Result<void> AddFields(usize count) noexcept = 0;
+
+    // 배열 원소 수를 그래프 원소 누계(maxTotalElements)에 더한다(넘으면 CapacityExceeded). 배열
+    // codec이 header를 해석한 직후·원소를 읽거나 할당하기 전에 부른다(저장은 원소를 쓰기 전).
+    // 복원 2단계는 세지 않는다.
+    virtual Result<void> AddElements(usize count) noexcept = 0;
 
 protected:
     FieldCodecContext(FieldCodecHooks* hooks, uint32 referenceWire) noexcept
@@ -297,9 +319,12 @@ protected:
 
 private:
     friend class FieldScope;
+    friend class ElementIndexScope;
 
     FieldCodecHooks* hooks_;
-    const FieldCodecFrame* current_ = nullptr;
+    // 맨 위 프레임이다. ElementIndexScope가 그 index 칸을 쓰므로 non-const다(Current()는 const를
+    // 돌려준다).
+    FieldCodecFrame* current_ = nullptr;
     TypeId objectType_{};
     uint32 objectIndex_ = 0;
     uint32 referenceWire_;
@@ -318,7 +343,7 @@ public:
                              TypeId declaringType, const EnumSchema* enumeration = nullptr,
                              StructView structure = {},
                              uint32 index = FieldCodecFrame::NoIndex) noexcept
-        : context_(context) {
+        : context_(context), previous_(context.current_) {
         frame_.field = &field;
         frame_.declaringType = declaringType;
         frame_.enumeration = enumeration;
@@ -337,7 +362,8 @@ public:
             platform::Fatal("FieldScope ended out of order");
         }
 
-        context_.current_ = frame_.parent;
+        // parent는 const 사슬이므로 바깥 프레임(non-const)은 따로 보관한 것으로 되돌린다.
+        context_.current_ = previous_;
     }
 
     FieldScope(const FieldScope&) = delete;
@@ -345,7 +371,52 @@ public:
 
 private:
     FieldCodecContext& context_;
+    FieldCodecFrame* previous_;
     FieldCodecFrame frame_;
+};
+
+// 배열 필드 프레임의 원소 index 칸을 쓴다(RAII, Docs/Design/ReflectionFoundations.ko.md 5.6절).
+// 원소마다 새 프레임을 만들지 않으므로 프레임은 최대 17개(BuildPath의 33 안)다. 만들 때 현재
+// 프레임이 배열 필드(value.kind == Array)이고 그 index가 NoIndex여야 한다(아니면 Fatal — 배열 codec
+// 계약 위반). Set은 현재 프레임이 그 배열 프레임일 때만 쓸 수 있고(원소 struct 멤버 scope 안에서
+// 부르면 Fatal), 소멸 때 index를 NoIndex로 되돌린다. 배열 프레임을 연 FieldScope보다 먼저 끝나야
+// 한다.
+//
+// 사용 예(배열 codec):
+//   ElementIndexScope element(context);
+//   for (usize index = 0; index < count; ++index) {
+//       element.Set(static_cast<uint32>(index));   // 진단·hook 경로가 [f[index]]가 된다
+//       ...
+//   }
+class ElementIndexScope {
+public:
+    [[nodiscard]] explicit ElementIndexScope(FieldCodecContext& context) noexcept
+        : context_(context), frame_(context.current_) {
+        if (!frame_ || frame_->field->value.kind != ValueKind::Array ||
+            frame_->index != FieldCodecFrame::NoIndex) {
+            platform::Fatal("ElementIndexScope requires an array field frame without an index");
+        }
+    }
+
+    ~ElementIndexScope() {
+        frame_->index = FieldCodecFrame::NoIndex;
+    }
+
+    ElementIndexScope(const ElementIndexScope&) = delete;
+    ElementIndexScope& operator=(const ElementIndexScope&) = delete;
+
+    // 지금 처리하는 원소 index를 프레임에 쓴다.
+    void Set(uint32 index) noexcept {
+        if (context_.current_ != frame_) {
+            platform::Fatal("ElementIndexScope::Set called outside its array frame");
+        }
+
+        frame_->index = index;
+    }
+
+private:
+    FieldCodecContext& context_;
+    FieldCodecFrame* frame_;
 };
 
 // 저장 문맥이다(그래프 저장이 구현한다).
@@ -461,6 +532,53 @@ public:
     virtual Result<RecordScope> OpenMigratedRecord(Span<const uint8> record, TypeId expected,
                                                    uint32 version) noexcept = 0;
 
+    // 단일 값 원소 배열 필드(wire ValueArray)를 연다(Docs/Design/ReflectionFoundations.ko.md
+    // 5.6절): wire가 ValueArray가 아니면 TypeMismatch, 그 뒤 OpenValue로 연 payload를
+    // ValueArrayReader::Open(elementWire, maxCount, shape)에 넘긴다(그 검사 순서·청구 — 1단계는
+    // 그래프 공유 예산, 2단계는 무제한). codec은 maxCount에 MaxArrayElements를 넘긴다(로드는 필드별
+    // maxElements를 걸지 않는다).
+    //
+    // 사용 예:
+    //   auto array = context.OpenValueArray(field, static_cast<uint32>(WireType::U32),
+    //                                       MaxArrayElements);
+    //   if (!array) { return Result<void>::Failure(array.Error()); }
+    Result<ValueArrayReader> OpenValueArray(const FieldView& field, uint32 elementWire,
+                                            uint32 maxCount, ValueArrayShape shape = {}) noexcept {
+        if (field.wireType != static_cast<uint32>(WireType::ValueArray)) {
+            return Result<ValueArrayReader>::Failure(ErrorCode::TypeMismatch);
+        }
+
+        auto opened = OpenValue(field);
+        if (!opened) {
+            return Result<ValueArrayReader>::Failure(opened.Error());
+        }
+
+        return ValueArrayReader::Open(Move(opened.Value()), elementWire, maxCount, shape);
+    }
+
+    // struct 원소 배열 필드(wire RecordList)를 연다. wire가 RecordList가 아니면 TypeMismatch다.
+    // 항목 schema는 itemSchema, 항목 버전 범위는 (1, UINT32_MAX)이며(버전 판정은 codec) 목록 한도는
+    // 직렬화기가 정한다(그래프는 {MaxArrayElements, maxValueBytes, maxValueBytes − 12} — 저장
+    // 한도와 같다). 1단계는 맨 위(없으면 객체) Record의 RecordListReader::OpenField(공유 예산 —
+    // 색인만 청구)이고 맨 위 Record가 없으면 2단계 단독 Open 몫(payload byte)을 미리 청구한다.
+    // 2단계는 스택이 비면 같은 한도의 단독 Open(무제한 operation·work), 있으면 맨 위의 OpenField다.
+    // 반환 reader는 이 필드 payload를 빌리며 호출자가 OpenListItem을 다 쓸 때까지 쥔다.
+    virtual Result<RecordListReader> OpenRecordList(const FieldView& field,
+                                                    TypeId itemSchema) noexcept = 0;
+
+    // list의 index번째 항목 Record를 Record 스택에 넣는다. 1단계는 OpenItem(index, 남은 그래프 필드
+    // 누계)과 AddFields(항목 TLV 수), 2단계는 OpenItem(index, maxTotalFields)다. 오류는
+    // OpenRecord와 같다(범위 밖 index·버전 0 InvalidArgument, schema 불일치 TypeMismatch, 필드 수
+    // 초과 CapacityExceeded).
+    virtual Result<RecordScope> OpenListItem(RecordListReader& list, usize index) noexcept = 0;
+
+    // 2단계 codec이 지금 적용하는 StructRefArray 원소의 위치다(StructElementScope 안 — 없으면
+    // nullptr). 원소 안 참조 멤버 쓰기(detail::SetStructMemberReference)가 이것이 있으면
+    // ConstructionContext::SetElementReference(컨테이너 기준 범위 검사)로 보낸다.
+    const detail::StructElementLocation* StructElement() const noexcept {
+        return element_;
+    }
+
     // struct의 옛 버전 Record를 현재 버전으로 올린다. 1단계는 로드 옵션 override(Unsupported면
     // 다음)·타입이 등록한 마이그레이션 순으로 부르고(둘 다 없으면 Unsupported) 결과를 발생 순서대로
     // 보관해 view를 돌려준다. 2단계는 같은 순서의 보관본을 대조해 돌려준다(어긋나면 InvalidArgument
@@ -544,6 +662,7 @@ protected:
 
 private:
     friend class RecordScope;
+    friend class StructElementScope;
 
     static constexpr uint32 MaxRecordDepth = MaxStructDepth + 1;
 
@@ -553,6 +672,7 @@ private:
 
     FieldDecodePolicy policy_;
     Span<const TypeId> observed_{};
+    const detail::StructElementLocation* element_ = nullptr;
     alignas(RecordReader) uint8 storage_[MaxRecordDepth * sizeof(RecordReader)];
     // placement new가 돌려준 포인터다(저장소 주소를 다시 해석하지 않는다).
     RecordReader* slots_[MaxRecordDepth] = {};
@@ -604,6 +724,42 @@ private:
 
     FieldDecodeContext* context_;
     uint32 depth_;
+};
+
+// 2단계 codec이 StructRefArray 원소 하나를 적용하는 동안 그 위치를 문맥에 세운다(RAII). 그 안의
+// 참조 멤버 쓰기는 원소 위치로 범위 검사된다(FieldDecodeContext::StructElement). 이미 원소 위치가
+// 있으면 Fatal이다(StructRefArray 원소는 Registry 컨테이너를 담지 않으므로 겹치지 않는다). 위치는
+// 이 scope가 복사해 쥐며 scope는 문맥보다 먼저 끝나야 한다.
+//
+// 사용 예(배열 codec 2단계):
+//   StructElementScope element(context, detail::StructRefArrayAccess::Location(array, index));
+//   // 원소 struct 해석 — 참조 멤버는 SetElementReference로 간다
+class StructElementScope {
+public:
+    [[nodiscard]] StructElementScope(FieldDecodeContext& context,
+                                     const detail::StructElementLocation& location) noexcept
+        : context_(context), location_(location) {
+        if (context.element_ != nullptr) {
+            platform::Fatal("StructElementScope nested inside another struct element");
+        }
+
+        context.element_ = &location_;
+    }
+
+    ~StructElementScope() {
+        if (context_.element_ != &location_) {
+            platform::Fatal("StructElementScope ended out of order");
+        }
+
+        context_.element_ = nullptr;
+    }
+
+    StructElementScope(const StructElementScope&) = delete;
+    StructElementScope& operator=(const StructElementScope&) = delete;
+
+private:
+    FieldDecodeContext& context_;
+    detail::StructElementLocation location_;
 };
 
 inline Result<RecordScope> FieldDecodeContext::PushRecord(RecordReader&& reader) noexcept {

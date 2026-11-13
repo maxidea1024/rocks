@@ -24,7 +24,10 @@ enum class TypeFlags : uint32 {
 //   Transient  — GC 추적은 하되 저장 그래프에서 뺀다.
 //   ReadOnly   — 일반 write를 거부하고 생성·복원의 staged write만 허용한다.
 //   EditorOnly — 항상 컴파일되고 플래그만 단다. 쿠킹 데이터에서 빼는 것은 graph v2(A0-O)다.
-//   Required   — typed 참조·소프트 참조 필드에만 쓴다. null 거부는 패키지 저장·쿠킹(A1).
+//   Required   — typed 참조·소프트 참조 필드와 그 원소 배열(ObjectRefArray,
+//                Array<SoftObjectRef>)에만 쓴다. 배열이면 원소마다 non-null이라는
+//                뜻이다(비어 있지 않아야 한다는 뜻은 없다). null 거부는 패키지
+//                저장·쿠킹(A1)이고 로드는 진단만 한다.
 enum class FieldFlags : uint32 {
     None = 0,
     Transient = 1,
@@ -57,6 +60,14 @@ constexpr uint32 PropagateFieldFlags(uint32 parent, uint32 own) noexcept {
 // 생성 코드가 같은 값을 쓴다. codec 위치 프레임은 최대 1(최상위 필드) + 16개다.
 inline constexpr uint32 MaxStructDepth = 16;
 
+// 배열 필드 길이 상한(Docs/Design/ReflectionFoundations.ko.md 5.5·5.6절). DefaultMaxElements는
+// MaxElements 지정자가 없을 때 MetaCompiler가 채우는 필드별 상한이고, MaxArrayElements는 필드별
+// 상한(FieldSchema::maxElements)의 최댓값이자 로드가 배열마다 거는 유일한 원소 수 상한이다(로드는
+// 필드별 maxElements를 걸지 않는다 — 상한을 낮춰도 기존 데이터가 열리고 다시 저장할 때 드러난다).
+// MetaCompiler·TypeRegistry·codec이 같은 값을 쓴다.
+inline constexpr uint32 DefaultMaxElements = 65536;
+inline constexpr uint32 MaxArrayElements = 1048576;
+
 enum class FieldKind : uint8 {
     Value,
     ObjectReference
@@ -78,7 +89,8 @@ enum class ValueKind : uint8 {
     Guid,
     Utf8String,
     ObjectReference,
-    // B3 이후의 값 종류다. Enum은 B3b에서 열렸고 Struct·Array는 B4·B5에서 등록을 연다.
+    // B3 이후의 값 종류다. Enum은 B3b, Struct는 B4, Array는 B5에서 등록을 열었다. Array 필드의
+    // 원소 형식은 FieldSchema::element다(Array·Opaque는 원소가 될 수 없다).
     Enum,
     Struct,
     Array,
@@ -89,7 +101,8 @@ enum class ValueKind : uint8 {
 };
 
 // 필드 값 형식이다. type은 Enum·Struct 스키마 ID, ObjectReference·SoftObjectReference의 기대 대상
-// 타입(0 = Object)에만 쓰고 그 밖은 0이어야 한다.
+// 타입(0 = Object)에만 쓰고 그 밖은 0이어야 한다(Array의 value.type도 0 — 원소 대상은
+// element.type).
 struct ValueType {
     ValueKind kind = ValueKind::Opaque;
     TypeId type{};
@@ -116,10 +129,25 @@ struct FieldSchema {
     // 포함한 타입의 필드 사이에서 대소문자 무시로 유일해야 한다. 직렬화는 필드 ID를 쓰므로 이름과
     // 무관하다.
     Span<const char> toolName{};
-    // Array 필드의 원소 형식과 길이 상한이다(B5). 그 밖의 필드는 Opaque·0이어야 한다.
+    // Array 필드(value = {Array, 0})의 원소 형식과 길이 상한이다(B5 — maxElements는 1 이상
+    // MaxArrayElements 이하, 저장·경로 쓰기에서 건다). 원소는 스칼라·Guid·Utf8String·
+    // ObjectReference·Enum·Struct·AssetId·SoftObjectReference·Digest256이고 element.type은 Enum·
+    // Struct면 필수, 두 참조는 기대 타입(선택), 그 밖은 0이다. 배열이 아닌 필드는 Opaque·0이어야
+    // 한다.
     ValueType element{};
     uint32 maxElements = 0;
 };
+
+// 필드 값의 대상 형식이다: Array 필드면 원소 형식(element), 아니면 값 형식(value). enum·struct·참조
+// 대상 해석(TypeRegistry의 의존·FieldEnum·FieldStruct, codec 검증, 그래프 기대 타입)이 같은 규칙을
+// 쓴다. 반환 참조는 field의 수명을 따른다.
+//
+// 사용 예:
+//   const ValueType& target = FieldTargetType(field);
+//   if (target.kind == ValueKind::Enum) { ... }   // Enum 필드이거나 enum 원소 배열
+constexpr const ValueType& FieldTargetType(const FieldSchema& field) noexcept {
+    return field.value.kind == ValueKind::Array ? field.element : field.value;
+}
 
 // 필드 경로의 한 단계다(7절 PropertyPath, 6.4절 진단 경로): 필드 ID와, 배열 원소면 그 index.
 struct PathStep {

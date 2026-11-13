@@ -33,16 +33,22 @@ public:
 
     // 입력 버퍼는 호출 동안 유효해야 한다. 실패하면 기존 등록 상태를 유지한다.
     // ops는 값으로 소유권을 넘기므로 등록 실패 시에도 그 ModuleLease는 정리된다.
-    // 주요 실패: 알 수 없는 플래그 비트·참조(ObjectReference·SoftObjectReference)가 아닌 필드의
-    // Required·참조·Enum이 아닌 값 종류의 value.type·value.type이 없는 Enum 필드·아직 받지 않는 값
-    // 종류(Struct·Array, 범위 밖)·비어 있지 않은 element·maxElements(배열은 B5)·FieldKind와 값
-    // 종류의 불일치(소프트 참조·Enum은 FieldKind::Value)·Enum 필드에 없거나 그 밖의 필드에 있는
-    // valueNativeType·ASCII 식별자가 아닌 도구 이름·WorldOnly base의 파생에 WorldOnly 없음은
-    // InvalidArgument, 같은 ID(다른 종류 포함)·같은 필드 ID·대소문자 무시로 같은 실효 도구
-    // 이름(toolName 또는 name)은 AlreadyExists, base나 Enum 필드의 enum 미등록은 NotFound, base
-    // 필드와 다른 상속 필드 서술(값 형식·도구 이름 포함)·enum이 아닌 레코드를 가리키는 Enum 필드·
-    // native 키가 다른 enum은 TypeMismatch다. Enum 필드가 가리키는 enum은 이 타입이 등록되어 있는
-    // 동안 의존으로 붙잡힌다(그 enum의 Unregister는 Busy).
+    // 주요 실패: 알 수 없는 플래그 비트·참조(ObjectReference·SoftObjectReference — 배열이면 원소)가
+    // 아닌 필드의 Required·참조·Enum·Struct가 아닌 대상 형식의 type·type이 없는 Enum·Struct 필드·
+    // 범위 밖 값 종류·배열이 아닌 필드의 비어 있지 않은 element·maxElements·FieldKind와 대상 형식의
+    // 불일치(소프트 참조·Enum·Struct는 FieldKind::Value)·Enum·Struct 대상에 없거나 그 밖의 필드에
+    // 있는 valueNativeType·ASCII 식별자가 아닌 도구 이름·WorldOnly base의 파생에 WorldOnly 없음·
+    // WorldOnly 소유자를 요구하는 struct(원소 포함)를 WorldOnly가 아닌 클래스에 둠·Struct·Array
+    // 필드의 read·write·writeStaged·Transient가 아닌 Struct·Array 필드의 codec 없음은
+    // InvalidArgument다. Array 필드(B5, Docs/Design/ReflectionFoundations.ko.md 5.6절)는 value =
+    // {Array, 0}, element는 스칼라·Guid·Utf8String·ObjectReference·Enum·Struct·AssetId·
+    // SoftObjectReference·Digest256 중 하나(Opaque·Array 거부), maxElements ∈ [1,
+    // MaxArrayElements]이고, 참조 struct 원소(StructRefArray)는 Registry 컨테이너를 담지 않아야
+    // 한다(위반은 InvalidArgument). 같은 ID(다른 종류 포함)·같은 필드 ID·대소문자 무시로 같은 실효
+    // 도구 이름(toolName 또는 name)은 AlreadyExists, base나 대상 enum·struct 미등록은 NotFound,
+    // base 필드와 다른 상속 필드 서술(값·원소 형식·maxElements·도구 이름 포함)·종류가 다른 레코드를
+    // 가리키는 대상·native 키가 다른 대상은 TypeMismatch다. 대상 enum·struct(원소 포함)는 이
+    // 타입이 등록되어 있는 동안 의존으로 붙잡힌다(그 레코드의 Unregister는 Busy).
     Result<TypeRegistrationToken> Register(const TypeSchema&, RuntimeTypeOps) noexcept;
 
     // 리플렉션 enum을 등록한다(생성 코드는 GeneratedType<E>::Register). 입력 버퍼는 호출 동안
@@ -64,10 +70,10 @@ public:
     // 없음)이고 입력 버퍼는 호출 동안 유효해야 하며 깊게 복사한다. 멤버 struct·enum이 먼저 등록되어
     // 있어야 하고 이 struct가 등록된 동안 의존으로 붙잡힌다. 주요 실패:
     // - InvalidArgument: id 0, version 0, base, 클래스 플래그, 필드 서술 오류(Register와 같은
-    // 규칙),
-    //   Opaque 필드, 스키마와 1:1이 아닌 함수표, Transient가 아닌 필드의 codec 없음, encode·decode
-    //   한쪽만, size·alignment·nativeType·construct·destroy 없음, trace와 강한 참조 멤버의 유무
-    //   불일치, 깊이 MaxStructDepth 초과.
+    //   규칙 — 배열 멤버 포함), Opaque 필드, 스키마와 1:1이 아닌 함수표, Transient가 아닌 필드의
+    //   codec 없음, encode·decode 한쪽만, size·alignment·nativeType·construct·destroy 없음, trace와
+    //   강한 참조 멤버(ObjectRefArray·StructRefArray 포함)의 유무 불일치, 깊이 MaxStructDepth
+    //   초과(struct 원소 배열 멤버는 원소 깊이 + 1), Registry 컨테이너를 담는 참조 struct 원소.
     // - AlreadyExists: 같은 ID(다른 종류 포함), 같은 nativeType의 struct, 같은 필드 ID, 대소문자
     // 무시로
     //   같은 실효 도구 이름.
@@ -107,9 +113,11 @@ private:
     Result<TypeLease> Clone(void*) noexcept;
     void Release(void*) noexcept;
     void DestroyRecord(Record*) noexcept;
-    // gate_를 쥔 채 부른다. fields의 Enum·Struct 필드가 가리키는 레코드를 찾아 종류·native
-    // 키(thunkType)·의존 계수 여유를 확인하고, targets가 있으면 필드별 대상(그 밖은 nullptr)을
-    // 쓴다. ownerWorldOnly가 거짓이면 WorldOnly 소유자를 요구하는 struct 필드를 거부한다.
+    // gate_를 쥔 채 부른다. fields의 대상 형식(FieldTargetType — 배열이면 원소)이 Enum·Struct인
+    // 필드가 가리키는 레코드를 찾아 종류·native 키(thunkType)·의존 계수 여유를 확인하고, targets가
+    // 있으면 필드별 대상(그 밖은 nullptr)을 쓴다. ownerWorldOnly가 거짓이면 WorldOnly 소유자를
+    // 요구하는 struct(원소 포함)를 거부하고, 참조 struct 원소 배열(StructRefArray)의 원소가
+    // Registry 컨테이너를 담으면 거부한다(InvalidArgument).
     Result<void> ResolveValueTypes(Span<const FieldSchema> fields,
                                    const void* (*thunkType)(const void* context, Guid fieldId),
                                    const void* context, bool ownerWorldOnly,

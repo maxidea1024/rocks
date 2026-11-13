@@ -12,9 +12,10 @@ namespace rocks {
 Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
                                              const ObjectAccessContext& access, ObjectHandle handle,
                                              const FieldValue& value) const noexcept {
-    // 묶인 struct 필드는 callback이 없다(아래에서 문맥·대상 검사 뒤 Unsupported).
-    const bool structField = bound_ && valueKind_ == ValueKind::Struct;
-    if (!callback_ && !structField) {
+    // 묶인 struct·배열 필드는 callback이 없다(아래에서 문맥·대상 검사 뒤 Unsupported).
+    const bool aggregateField =
+        bound_ && (valueKind_ == ValueKind::Struct || valueKind_ == ValueKind::Array);
+    if (!callback_ && !aggregateField) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -51,9 +52,10 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
         return Result<void>::Failure(ErrorCode::NotFound);
     }
 
-    // struct 필드는 FieldValue로 통째 쓰지 않는다(멤버 단위 쓰기는 B6 경로 접근 — 3.6절). 문맥·
-    // 수명·대상 타입·필드 검사 뒤의 정책 오류다.
-    if (structField) {
+    // struct·배열 필드는 FieldValue로 통째 쓰지 않는다(멤버·원소 단위 쓰기는 B6 경로 접근 —
+    // 3.6·5.6절, 배열 통째 쓰기는 B6 뒤에도 Unsupported). 문맥·수명·대상 타입·필드 검사 뒤의 정책
+    // 오류다.
+    if (aggregateField) {
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
@@ -130,13 +132,19 @@ namespace detail {
 Result<void> ValidateFieldWrite(const FieldWriteBinding& binding, const FieldWriteTarget& target,
                                 const FieldValue& value) noexcept {
     const ValueKind kind = binding.value.kind;
-    if (!target.actual || target.actual->value.kind != kind || value.kind != kind) {
+    // 원소 모드는 배열 필드의 원소 형식과 대조한다.
+    if (!target.actual || (target.element && target.actual->value.kind != ValueKind::Array)) {
+        return Result<void>::Failure(ErrorCode::TypeMismatch);
+    }
+
+    const ValueType& actual = target.element ? target.actual->element : target.actual->value;
+    if (actual.kind != kind || value.kind != kind) {
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
 
     // enum 값은 필드가 가리키는 enum의 ID를 싣는다(원본·대상 스키마가 같은 enum을 가리켜야 한다).
     if (kind == ValueKind::Enum &&
-        (value.type != binding.value.type || target.actual->value.type != binding.value.type)) {
+        (value.type != binding.value.type || actual.type != binding.value.type)) {
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
 
@@ -148,15 +156,20 @@ Result<void> ValidateFieldWrite(const FieldWriteBinding& binding, const FieldWri
             return Result<void>::Failure(ErrorCode::TypeMismatch);
         }
 
+        // null은 단일 참조·ObjectRefArray 원소 모두 받는다(B5 — 원소 null 허용).
         if (value.reference != ObjectHandle{}) {
             // 선언 타입 또는 그 파생 타입 객체를 허용한다(SetReference와 같은 상속 규칙).
             if (!target.referenced || (source && !target.referenced->IsNativeA(source)) ||
                 (expected && !target.referenced->IsNativeA(expected))) {
                 return Result<void>::Failure(ErrorCode::TypeMismatch);
             }
-        } else if (!target.allowNull) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
+    }
+
+    // struct 값·배열(원소 모드의 struct 원소 포함)은 FieldValue로 통째 쓰지 않는다 — 종류 대조
+    // 뒤의 정책 오류다(멤버·원소 단위 쓰기는 경로 접근이 단일 값으로 내려가 이 함수를 다시 거친다).
+    if (kind == ValueKind::Struct || kind == ValueKind::Array) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
     if (binding.readOnly || HasFlag(target.effectiveFlags, FieldFlags::ReadOnly)) {
@@ -176,6 +189,18 @@ Result<void> ValidateFieldWrite(const FieldWriteBinding& binding, const FieldWri
     if (kind == ValueKind::Enum &&
         (!target.actualEnum || !IsDeclaredEnumValue(*target.actualEnum, value.signedInteger))) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> ValidateArrayLength(const FieldSchema& field, usize newLength) noexcept {
+    if (field.value.kind != ValueKind::Array) {
+        return Result<void>::Failure(ErrorCode::TypeMismatch);
+    }
+
+    if (newLength > field.maxElements) {
+        return Result<void>::Failure(ErrorCode::CapacityExceeded);
     }
 
     return Result<void>::Success();
@@ -202,9 +227,9 @@ uint64 NextRegistryDomain() noexcept {
 // ops.nativeType·module만 채우고 enumSchema에 열거자를 둔다. struct 레코드는 schema(id·version·
 // name·fields)와 ops(size·alignment·nativeType·module)를 채우고 structOps에 멤버 함수표(스키마
 // 순서)·construct·destroy·trace·migrate를, fieldOrder에 필드 ID 순 정렬 색인을 둔다. 클래스·struct
-// 레코드의 fieldTypes는 schema.fields와 같은 길이이며 Enum·Struct 필드가 가리키는 레코드(그 밖은
-// nullptr)다 — 이 참조는 lease가 아니라 dependents 계수로 표시하므로 Shutdown이 영구 Busy가 되지
-// 않는다.
+// 레코드의 fieldTypes는 schema.fields와 같은 길이이며 필드의 대상 형식(배열이면 원소)이 가리키는
+// Enum·Struct 레코드(그 밖은 nullptr)다 — 이 참조는 lease가 아니라 dependents 계수로 표시하므로
+// Shutdown이 영구 Busy가 되지 않는다.
 struct TypeRegistry::Record {
     Record* next = nullptr;
     TypeKind kind = TypeKind::Class;
@@ -217,6 +242,7 @@ struct TypeRegistry::Record {
     bool containsStrongReference = false;
     bool containsRequired = false;
     bool requiresWorldOnlyOwner = false;
+    bool containsReferenceArray = false;
     Record** fieldTypes = nullptr;
     uint32 generation = 0;
     uint32 leases = 0;
@@ -301,14 +327,14 @@ bool SameBytes(Span<const char> left, Span<const char> right) noexcept {
     return true;
 }
 
-// 지금 등록할 수 있는 값 종류다. Array는 B5에서 연다.
+// 등록할 수 있는 값 종류다(Opaque부터 Digest256까지 — Array는 B5에서 열었다).
 bool SupportedValueKind(ValueKind kind) noexcept {
-    switch (kind) {
-    case ValueKind::Array:
-        return false;
-    default:
-        return static_cast<uint8>(kind) <= static_cast<uint8>(ValueKind::Digest256);
-    }
+    return static_cast<uint8>(kind) <= static_cast<uint8>(ValueKind::Digest256);
+}
+
+// 배열 원소가 될 수 있는 값 종류다(Opaque·Array 거부 — 중첩 배열은 MetaCompiler RMC2304).
+bool SupportedElementKind(ValueKind kind) noexcept {
+    return kind != ValueKind::Opaque && kind != ValueKind::Array && SupportedValueKind(kind);
 }
 
 // enum 도구 이름·접두의 문자 집합이다: [A-Za-z0-9_]+ (숫자로 시작할 수 있다).
@@ -376,15 +402,24 @@ Result<void> ValidateFieldList(Span<const FieldSchema> fields, usize& typedField
 
     for (usize index = 0; index < fields.Size(); ++index) {
         const auto& field = fields[index];
-        // Required는 typed 참조 필드에만 뜻이 있다(저장이 null을 검사하려면 접근기가 있어야 한다).
-        // 도구 이름은 비어 있거나 ASCII 식별자다.
+        // 대상 형식은 배열이면 원소, 아니면 값이다(Docs/Design/ReflectionFoundations.ko.md 5.6절).
+        // Array 필드는 value.type 0, 원소 종류는 단일 값 종류(Opaque·Array 거부), maxElements는
+        // [1, MaxArrayElements]이고, 배열이 아닌 필드는 element = {Opaque, 0}·maxElements 0이다.
+        const bool array = field.value.kind == ValueKind::Array;
+        const ValueType& target = FieldTargetType(field);
+        const bool arrayShape =
+            array ? field.value.type == TypeId{} && SupportedElementKind(field.element.kind) &&
+                        field.maxElements >= 1 && field.maxElements <= MaxArrayElements
+                  : field.element.kind == ValueKind::Opaque && field.element.type == TypeId{} &&
+                        field.maxElements == 0;
+        // Required는 typed 참조 필드(배열이면 원소)에만 뜻이 있다(저장이 null을 검사하려면
+        // 접근기·codec이 있어야 한다). 도구 이름은 비어 있거나 ASCII 식별자다.
         if (field.id == Guid{} || (field.flags & ~KnownFieldFlags) != 0 ||
             (HasFlag(field.flags, FieldFlags::Required) &&
-             field.value.kind != ValueKind::ObjectReference &&
-             field.value.kind != ValueKind::SoftObjectReference) ||
+             target.kind != ValueKind::ObjectReference &&
+             target.kind != ValueKind::SoftObjectReference) ||
             (field.kind != FieldKind::Value && field.kind != FieldKind::ObjectReference) ||
-            !SupportedValueKind(field.value.kind) || field.element.kind != ValueKind::Opaque ||
-            field.element.type != TypeId{} || field.maxElements != 0 ||
+            !SupportedValueKind(field.value.kind) || !arrayShape ||
             !StringView(field.name.Data(), field.name.Size()).ValidateUtf8() ||
             !StringView(field.category.Data(), field.category.Size()).ValidateUtf8() ||
             !StringView(field.displayName.Data(), field.displayName.Size()).ValidateUtf8() ||
@@ -392,19 +427,18 @@ Result<void> ValidateFieldList(Span<const FieldSchema> fields, usize& typedField
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
-        // FieldKind::ObjectReference(강한 GC 간선) ⇔ value.kind == ObjectReference. value.type은
-        // 참조·소프트 참조의 기대 대상과 Enum·Struct의 대상 ID에만 쓴다. Enum·Struct는 ID가
-        // 필요하다.
+        // FieldKind::ObjectReference(강한 GC 간선) ⇔ 대상 형식이 ObjectReference(단일 참조 또는
+        // ObjectRefArray). 대상 type은 참조·소프트 참조의 기대 대상과 Enum·Struct의 대상 ID에만
+        // 쓴다. Enum·Struct는 ID가 필요하다.
         if (field.value.kind != ValueKind::Opaque) {
             ++typedFields;
-            const bool reference = field.value.kind == ValueKind::ObjectReference;
+            const bool reference = target.kind == ValueKind::ObjectReference;
             const bool valueType =
-                field.value.kind == ValueKind::Enum || field.value.kind == ValueKind::Struct;
+                target.kind == ValueKind::Enum || target.kind == ValueKind::Struct;
             const bool typed =
-                reference || valueType || field.value.kind == ValueKind::SoftObjectReference;
+                reference || valueType || target.kind == ValueKind::SoftObjectReference;
             if (field.name.Size() == 0 || (field.kind == FieldKind::ObjectReference) != reference ||
-                (!typed && field.value.type != TypeId{}) ||
-                (valueType && field.value.type == TypeId{})) {
+                (!typed && target.type != TypeId{}) || (valueType && target.type == TypeId{})) {
                 return Result<void>::Failure(ErrorCode::InvalidArgument);
             }
         } else if (field.value.type != TypeId{}) {
@@ -429,9 +463,16 @@ Result<void> ValidateFieldList(Span<const FieldSchema> fields, usize& typedField
     return Result<void>::Success();
 }
 
-// Enum·Struct 필드만 값의 native 키를 싣는다.
-bool CarriesValueNativeType(ValueKind kind) noexcept {
+// 대상 형식(배열이면 원소)이 Enum·Struct인 필드만 값의 native 키를 싣는다.
+bool CarriesValueNativeType(const FieldSchema& field) noexcept {
+    const ValueKind kind = FieldTargetType(field).kind;
     return kind == ValueKind::Enum || kind == ValueKind::Struct;
+}
+
+// FieldValue로 통째 읽고 쓰지 않는 필드다(struct 값·배열 — read·write·writeStaged가 없어야 하고
+// Transient가 아니면 codec이 필수다).
+bool IsAggregateField(const FieldSchema& field) noexcept {
+    return field.value.kind == ValueKind::Struct || field.value.kind == ValueKind::Array;
 }
 
 // 클래스 함수표에서 필드 ID의 valueNativeType을 찾는다(ResolveValueTypes의 thunkType).
@@ -669,6 +710,10 @@ bool StructView::RequiresWorldOnlyOwner() const noexcept {
     return ViewAs<TypeRegistry::Record>(record_).requiresWorldOnlyOwner;
 }
 
+bool StructView::ContainsReferenceArray() const noexcept {
+    return ViewAs<TypeRegistry::Record>(record_).containsReferenceArray;
+}
+
 StringView TypeLease::Name() const& noexcept {
     const auto& name = Schema().name;
     return StringView(name.Data(), name.Size());
@@ -786,21 +831,21 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         for (usize schemaIndex = 0; schemaIndex < schema.fields.Size(); ++schemaIndex) {
             const auto& schemaField = schema.fields[schemaIndex];
             if (schemaField.id == field.fieldId && schemaField.value.kind != ValueKind::Opaque &&
-                CarriesValueNativeType(schemaField.value.kind) ==
-                    (field.valueNativeType != nullptr)) {
+                CarriesValueNativeType(schemaField) == (field.valueNativeType != nullptr)) {
                 matched = &schemaField;
                 break;
             }
         }
 
-        // struct 필드는 FieldValue로 통째 읽고 쓰지 않으므로 read·write·writeStaged가 없어야
-        // 하고(멤버 단위는 B6 경로 접근) 그 밖의 필드는 셋 다 있어야 한다.
-        const bool structField = matched && matched->value.kind == ValueKind::Struct;
-        const bool accessors = structField ? (!field.read && !field.write && !field.writeStaged)
-                                           : (field.read && field.write && field.writeStaged);
-        // struct 필드는 Transient가 아니면 codec이 있어야 한다(그 밖은 completeFieldLayout 규칙).
+        // struct·배열 필드는 FieldValue로 통째 읽고 쓰지 않으므로 read·write·writeStaged가 없어야
+        // 하고(멤버·원소 단위는 B6 경로 접근) 그 밖의 필드는 셋 다 있어야 한다.
+        const bool aggregateField = matched && IsAggregateField(*matched);
+        const bool accessors = aggregateField ? (!field.read && !field.write && !field.writeStaged)
+                                              : (field.read && field.write && field.writeStaged);
+        // struct·배열 필드는 Transient가 아니면 codec이 있어야 한다(그 밖은 completeFieldLayout
+        // 규칙).
         if (!matched || !accessors || (field.encode == nullptr) != (field.decode == nullptr) ||
-            (structField && !field.encode && !HasFlag(matched->flags, FieldFlags::Transient))) {
+            (aggregateField && !field.encode && !HasFlag(matched->flags, FieldFlags::Transient))) {
             return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
         }
 
@@ -1127,14 +1172,16 @@ Result<void> TypeRegistry::ResolveValueTypes(Span<const FieldSchema> fields,
             targets[index] = nullptr;
         }
 
-        const bool enumeration = field.value.kind == ValueKind::Enum;
-        if (!enumeration && field.value.kind != ValueKind::Struct) {
+        // 대상 형식(배열이면 원소)이 Enum·Struct인 필드만 레코드를 가리킨다.
+        const ValueType& value = FieldTargetType(field);
+        const bool enumeration = value.kind == ValueKind::Enum;
+        if (!enumeration && value.kind != ValueKind::Struct) {
             continue;
         }
 
         Record* target = nullptr;
         for (Record* record = records_; record; record = record->next) {
-            if (record->schema.id == field.value.type) {
+            if (record->schema.id == value.type) {
                 target = record;
                 break;
             }
@@ -1151,6 +1198,13 @@ Result<void> TypeRegistry::ResolveValueTypes(Span<const FieldSchema> fields,
         }
 
         if (!ownerWorldOnly && target->requiresWorldOnlyOwner) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        // 참조 struct 원소 배열(StructRefArray)의 원소는 Registry 컨테이너를 담지 않는다(원소
+        // 블록이 owner 저장소 밖이라 Registry가 그 컨테이너의 변경을 거부한다 — 5.6절 결정 15).
+        if (field.value.kind == ValueKind::Array && target->containsStrongReference &&
+            target->containsReferenceArray) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
@@ -1193,11 +1247,18 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
 
     bool strongReference = false;
     bool required = false;
+    bool referenceArray = false;
     for (const FieldSchema& field : schema.fields) {
-        strongReference = strongReference || field.value.kind == ValueKind::ObjectReference;
-        // Transient 멤버는 저장·복원하지 않으므로 Required 누락 진단 대상이 아니다.
+        // 강한 참조 멤버: 단일 참조와 ObjectRefArray(대상 형식이 ObjectReference).
+        const bool referenceTarget = FieldTargetType(field).kind == ValueKind::ObjectReference;
+        strongReference = strongReference || referenceTarget;
+        referenceArray =
+            referenceArray || (field.value.kind == ValueKind::Array && referenceTarget);
+        // Transient 멤버는 저장·복원하지 않으므로 Required 누락 진단 대상이 아니다. 배열 멤버의
+        // Required는 원소마다 non-null이라는 뜻이고 누락된 배열은 생성자 값이므로 세지 않는다.
         required = required || (HasFlag(field.flags, FieldFlags::Required) &&
-                                !HasFlag(field.flags, FieldFlags::Transient));
+                                !HasFlag(field.flags, FieldFlags::Transient) &&
+                                field.value.kind != ValueKind::Array);
         const RuntimeStructFieldOps* match = nullptr;
         usize found = 0;
         for (const RuntimeStructFieldOps& candidate : ops.fields) {
@@ -1207,8 +1268,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
             }
         }
 
-        if (found != 1 ||
-            CarriesValueNativeType(field.value.kind) != (match->valueNativeType != nullptr) ||
+        if (found != 1 || CarriesValueNativeType(field) != (match->valueNativeType != nullptr) ||
             (match->encode == nullptr) != (match->decode == nullptr) ||
             (!HasFlag(field.flags, FieldFlags::Transient) && !match->encode)) {
             return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
@@ -1263,19 +1323,26 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
             return Result<TypeRegistrationToken>::Failure(resolved.Error());
         }
 
+        // 멤버 struct와 struct 원소 배열 멤버의 형질을 전파한다(원소 배열 멤버의 깊이도 원소 깊이 +
+        // 1). 누락 struct 안 Required 후손 진단은 struct 멤버로만 내려가고(배열 원소 제외), 참조
+        // struct 원소 배열(StructRefArray) 멤버는 그 자체가 Registry 컨테이너다.
         for (const FieldSchema& field : schema.fields) {
-            if (field.value.kind != ValueKind::Struct) {
+            const ValueType& value = FieldTargetType(field);
+            if (value.kind != ValueKind::Struct) {
                 continue;
             }
 
+            const bool array = field.value.kind == ValueKind::Array;
             for (Record* record = records_; record; record = record->next) {
-                if (record->schema.id == field.value.type) {
+                if (record->schema.id == value.type) {
                     depth = record->depth + 1 > depth ? record->depth + 1 : depth;
                     strongReference = strongReference || record->containsStrongReference;
-                    required = required || (record->containsRequired &&
+                    required = required || (!array && record->containsRequired &&
                                             !HasFlag(field.flags, FieldFlags::Transient));
                     requiresWorldOnlyOwner =
                         requiresWorldOnlyOwner || record->requiresWorldOnlyOwner;
+                    referenceArray = referenceArray || (array ? record->containsStrongReference
+                                                              : record->containsReferenceArray);
                     break;
                 }
             }
@@ -1351,6 +1418,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     record->containsStrongReference = strongReference;
     record->containsRequired = required;
     record->requiresWorldOnlyOwner = requiresWorldOnlyOwner;
+    record->containsReferenceArray = referenceArray;
     record->ops.size = ops.size;
     record->ops.alignment = ops.alignment;
     record->ops.nativeType = ops.nativeType;

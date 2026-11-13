@@ -134,14 +134,14 @@ Result<Array<LoadNode>> ReadEnvelope(Allocator& allocator, Span<const uint8> sou
 
 // 1단계(검증) 문맥이다. 값 reader는 그래프 공유 예산으로 열고, 강한 참조 token을 범위 검사해
 // 기록하며, 진단·수집을 hook으로 보낸다. Spend는 2단계 몫까지 두 배, ReserveApply는 한 배를
-// 청구한다.
+// 청구한다. 관찰 할당(ObservationScratch)은 1단계에만 있는 일이라 Charge로 한 번만 청구한다.
 class GraphValidateContext final : public FieldDecodeContext {
 public:
     GraphValidateContext(Allocator& allocator, Budget& budget,
                          const ObjectGraphLoadOptions& options, usize objectCount) noexcept
         : FieldDecodeContext(options.policy, options.hooks, ReferenceWire), allocator_(allocator),
           budget_(budget), options_(options), objectCount_(objectCount),
-          scratch_(allocator, budget) {
+          scratch_(allocator, budget), observation_(allocator, *this) {
     }
 
     // 관찰할 struct ID(정렬됨, 로드 동안 유효)를 정한다.
@@ -155,10 +155,11 @@ public:
         SetObject(node.type, index);
     }
 
-    // 필드 하나의 decode 전에 부른다. 그 필드가 참조를 기록하면 기대 형식을 한 번만 보관한다.
+    // 필드 하나의 decode 전에 부른다. 그 필드가 참조를 기록하면 서로 다른 기대 형식마다 한 번만
+    // 보관한다(필드의 기대 시작 위치를 기록해 [시작, 끝)에서 재사용한다).
     void BeginField() noexcept {
         charged_ = 0;
-        expectation_ = NoExpectation;
+        expectationStart_ = node_ ? node_->expectations.Size() : 0;
     }
 
     uint64 Charged() const noexcept {
@@ -204,6 +205,48 @@ public:
         // 콜백 결과는 신뢰하지 않는다. 정확히 현재 버전의 envelope와 모든 TLV를 다시 검사한다.
         auto opened = RecordReader::Open(allocator_, record, expected, version, version,
                                          budget_.Record(), budget_.Shared());
+        if (!opened) {
+            return Result<RecordScope>::Failure(opened.Error());
+        }
+
+        if (auto counted = budget_.AddFields(opened.Value().FieldCount()); !counted) {
+            return Result<RecordScope>::Failure(counted.Error());
+        }
+
+        return PushRecord(Move(opened.Value()));
+    }
+
+    Result<RecordListReader> OpenRecordList(const FieldView& field,
+                                            TypeId itemSchema) noexcept override {
+        if (field.wireType != static_cast<uint32>(WireType::RecordList)) {
+            return Result<RecordListReader>::Failure(ErrorCode::TypeMismatch);
+        }
+
+        const RecordReader* parent = CurrentRecord() ? CurrentRecord() : record_;
+        if (!parent) {
+            return Result<RecordListReader>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        // 최상위 목록은 2단계가 독립 reader로 다시 열며 항목 byte를 청구하므로 그만큼 미리
+        // 청구한다(1단계는 객체 Record가 이미 청구했다). 항목은 색인 전용이다 — 그 작업은
+        // DecodeNode의 reader 작업 Δ 2배가 덮는다.
+        if (!CurrentRecord()) {
+            if (auto spent = Charge(field.payload.Size()); !spent) {
+                return Result<RecordListReader>::Failure(spent.Error());
+            }
+        }
+
+        // 항목 수 한도는 남은 원소 누계로도 건다 — 색인을 할당하기 전에 AddElements와 같은
+        // CapacityExceeded가 나게(2단계는 1단계가 판정했으므로 MaxArrayElements 그대로다).
+        RecordListLimits limits = ArrayLoadLimits(budget_.limits);
+        const uint32 remaining = budget_.RemainingElements();
+        limits.maxItems = remaining < limits.maxItems ? remaining : limits.maxItems;
+        return RecordListReader::OpenField(*parent, field, itemSchema, 1, ~0u, limits);
+    }
+
+    Result<RecordScope> OpenListItem(RecordListReader& list, usize index) noexcept override {
+        // 필드 수 한도는 남은 그래프 누계다(큰 항목이 누계 검사 전에 색인을 할당하지 않게).
+        auto opened = list.OpenItem(index, budget_.RemainingFields());
         if (!opened) {
             return Result<RecordScope>::Failure(opened.Error());
         }
@@ -271,6 +314,10 @@ public:
         return budget_.AddFields(count);
     }
 
+    Result<void> AddElements(usize count) noexcept override {
+        return budget_.AddElements(count);
+    }
+
     Result<DecodedReference>
     ReadReference(ArchiveReader& reader,
                   const ReferenceExpectation& expectation) noexcept override {
@@ -293,21 +340,33 @@ public:
             return Result<DecodedReference>::Failure(spent.Error());
         }
 
-        // 기대 형식은 필드 안에서 같은 값이 반복되면(B5 배열 원소) 한 번만 보관하고, 다르면(B4
-        // struct의 서로 다른 참조 멤버) 따로 보관한다.
-        if (expectation_ == NoExpectation ||
-            node_->expectations[expectation_].schemaType != expectation.schemaType ||
-            node_->expectations[expectation_].staticNative != expectation.staticNative) {
+        // 기대 형식은 이 필드가 보관한 것([시작, 끝))에서 같은 값을 선형으로 찾아 재사용하고(비교
+        // 수를 청구한다), 없으면 더한다. 한 필드 안 서로 다른 기대의 수는 스키마(참조 멤버 종류
+        // 수)가 정하므로 배열 원소마다 불어나지 않는다.
+        uint32 found = NoExpectation;
+        for (usize index = expectationStart_; index < node_->expectations.Size(); ++index) {
+            if (auto spent = Charge(1); !spent) {
+                return Result<DecodedReference>::Failure(spent.Error());
+            }
+
+            if (node_->expectations[index].schemaType == expectation.schemaType &&
+                node_->expectations[index].staticNative == expectation.staticNative) {
+                found = static_cast<uint32>(index);
+                break;
+            }
+        }
+
+        if (found == NoExpectation) {
             if (!node_->expectations.TryPushBack(expectation)) {
                 return Result<DecodedReference>::Failure(ErrorCode::OutOfMemory);
             }
 
-            expectation_ = static_cast<uint32>(node_->expectations.Size() - 1);
+            found = static_cast<uint32>(node_->expectations.Size() - 1);
         }
 
         ReferenceToken token;
         token.target = static_cast<uint32>(local.Value());
-        token.expectation = expectation_;
+        token.expectation = found;
         if (!node_->tokens.TryPushBack(token)) {
             return Result<DecodedReference>::Failure(ErrorCode::OutOfMemory);
         }
@@ -332,6 +391,10 @@ public:
         return scratch_;
     }
 
+    Allocator& ObservationScratch() noexcept override {
+        return observation_;
+    }
+
 protected:
     Result<ArchiveReader> OpenTopLevelValue(const FieldView& field) noexcept override {
         if (!record_) {
@@ -343,6 +406,32 @@ protected:
 
 private:
     static constexpr uint32 NoExpectation = ~0u;
+
+    // 관찰 임시 값(관찰 struct 안 배열의 원소 버퍼 포함)의 할당기다. 단일 할당 한도 없이 바이트를
+    // 이 문맥의 Charge로 청구한다 — 2단계는 관찰하지 않으므로 DecodeNode의 reader 작업 Δ 2배
+    // 청구(charged_를 뺀 나머지)에 들어가지 않고 한 번만 센다.
+    class ObservationAllocator final : public Allocator {
+    public:
+        ObservationAllocator(Allocator& allocator, GraphValidateContext& context) noexcept
+            : allocator_(allocator), context_(context) {
+        }
+
+        Result<void*> Allocate(usize bytes, usize alignment, uint32 tag = 0) noexcept override {
+            if (auto charged = context_.Charge(bytes); !charged) {
+                return Result<void*>::Failure(charged.Error());
+            }
+
+            return allocator_.Allocate(bytes, alignment, tag);
+        }
+
+        Result<void> Deallocate(void* value) noexcept override {
+            return allocator_.Deallocate(value);
+        }
+
+    private:
+        Allocator& allocator_;
+        GraphValidateContext& context_;
+    };
 
     Result<void> Charge(uint64 work) noexcept {
         auto spent = budget_.Spend(work);
@@ -358,10 +447,11 @@ private:
     const ObjectGraphLoadOptions& options_;
     usize objectCount_;
     BudgetAllocator scratch_;
+    ObservationAllocator observation_;
     LoadNode* node_ = nullptr;
     const RecordReader* record_ = nullptr;
     uint64 charged_ = 0;
-    uint32 expectation_ = NoExpectation;
+    usize expectationStart_ = 0;
 };
 
 // 2단계(적용) 문맥이다. 그래프 예산에 접근하지 않는다: 값 reader는 같은 크기 한도·무제한 work로
@@ -428,6 +518,33 @@ public:
         return PushRecord(Move(opened.Value()));
     }
 
+    Result<RecordListReader> OpenRecordList(const FieldView& field,
+                                            TypeId itemSchema) noexcept override {
+        if (field.wireType != static_cast<uint32>(WireType::RecordList)) {
+            return Result<RecordListReader>::Failure(ErrorCode::TypeMismatch);
+        }
+
+        // 1단계와 같은 목록 한도·항목 버전 범위, 무제한 operation·work. 스택이 비면 단독 Open(항목
+        // Record 크기 한도는 1단계 객체 Record와 같다), 있으면 맨 위 Record의 OpenField다.
+        if (RecordReader* parent = CurrentRecord()) {
+            return RecordListReader::OpenField(*parent, field, itemSchema, 1, ~0u,
+                                               ArrayLoadLimits(limits_));
+        }
+
+        return RecordListReader::Open(allocator_, field.payload, itemSchema, 1, ~0u,
+                                      {Unlimited(), limits_.maxTotalFields},
+                                      ArrayLoadLimits(limits_));
+    }
+
+    Result<RecordScope> OpenListItem(RecordListReader& list, usize index) noexcept override {
+        auto opened = list.OpenItem(index, limits_.maxTotalFields);
+        if (!opened) {
+            return Result<RecordScope>::Failure(opened.Error());
+        }
+
+        return PushRecord(Move(opened.Value()));
+    }
+
     Result<Span<const uint8>> MigrateStruct(TypeId type, uint32 fromVersion, uint32,
                                             Span<const uint8>) noexcept override {
         if (!node_ || migration_ >= node_->structMigrations.Size()) {
@@ -444,6 +561,10 @@ public:
     }
 
     Result<void> AddFields(usize) noexcept override {
+        return Result<void>::Success();
+    }
+
+    Result<void> AddElements(usize) noexcept override {
         return Result<void>::Success();
     }
 
@@ -477,6 +598,11 @@ public:
     }
 
     Allocator& Scratch() noexcept override {
+        return allocator_;
+    }
+
+    // 2단계는 관찰하지 않는다(계약상 부르지 않는다).
+    Allocator& ObservationScratch() noexcept override {
         return allocator_;
     }
 
@@ -734,23 +860,26 @@ Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& nod
     return Result<void>::Success();
 }
 
-// 강한 참조 대상 타입 검사의 캐시다: (기대 TypeId, 대상 TypeId) 결과와 기대 타입 lease(로드 끝까지
-// 쥔다).
-struct TypeCheck {
+// 강한 참조 대상 타입 검사 캐시의 키다: (기대 TypeId, 대상 TypeId).
+struct TypePair {
     TypeId expected{};
     TypeId actual{};
-    bool accepted = false;
+
+    bool operator==(const TypePair&) const noexcept = default;
 };
 
-struct ExpectedLease {
-    TypeId type{};
-    TypeLease lease;
+struct TypePairHash {
+    uint64 operator()(const TypePair& pair) const noexcept {
+        return MixHash(Hash<Guid>{}(pair.expected) ^ (Hash<Guid>{}(pair.actual) >> 1));
+    }
 };
 
-// leases는 검사에 쓴 기대 타입 lease를 받아 호출자가 로드 끝까지 쥔다.
+// leases는 검사에 쓴 기대 타입 lease(기대 TypeId → lease)를 받아 호출자가 로드 끝까지 쥔다.
+// (기대, 실제) 결과 캐시와 기대 lease 목록은 해시 표이고 조회·삽입마다 작업량 1을 청구한다(원소
+// 참조가 많아도 대상 타입 수에 비례하지 않는다).
 Result<void> ValidateReachability(Allocator& allocator, TypeRegistry& types,
                                   const Array<LoadNode>& nodes, Budget& budget,
-                                  Array<ExpectedLease>& leases) noexcept {
+                                  HashMap<TypeId, TypeLease>& leases) noexcept {
     auto spent = budget.Spend(nodes.Size());
     if (!spent) {
         return spent;
@@ -758,7 +887,7 @@ Result<void> ValidateReachability(Allocator& allocator, TypeRegistry& types,
 
     Array<uint8> visited(allocator);
     Array<usize> queue(allocator);
-    Array<TypeCheck> checks(allocator);
+    HashMap<TypePair, bool, TypePairHash> checks(allocator);
     auto reserved = visited.TryReserve(nodes.Size());
     if (!reserved) {
         return reserved;
@@ -799,36 +928,22 @@ Result<void> ValidateReachability(Allocator& allocator, TypeRegistry& types,
             }
 
             if (expectation.schemaType != Guid{}) {
-                bool cached = false;
+                spent = budget.Spend(1);
+                if (!spent) {
+                    return spent;
+                }
+
+                const TypePair key{expectation.schemaType, nodes[target].type};
                 bool accepted = false;
-                for (usize check = 0; check < checks.Size(); ++check) {
+                if (const bool* cached = checks.Find(key)) {
+                    accepted = *cached;
+                } else {
                     spent = budget.Spend(1);
                     if (!spent) {
                         return spent;
                     }
 
-                    if (checks[check].expected == expectation.schemaType &&
-                        checks[check].actual == nodes[target].type) {
-                        cached = true;
-                        accepted = checks[check].accepted;
-                        break;
-                    }
-                }
-
-                if (!cached) {
-                    const TypeLease* expected = nullptr;
-                    for (usize lease = 0; lease < leases.Size(); ++lease) {
-                        spent = budget.Spend(1);
-                        if (!spent) {
-                            return spent;
-                        }
-
-                        if (leases[lease].type == expectation.schemaType) {
-                            expected = &leases[lease].lease;
-                            break;
-                        }
-                    }
-
+                    const TypeLease* expected = leases.Find(expectation.schemaType);
                     if (!expected) {
                         // 조회와 마찬가지로 lease 획득·삽입도 청구한다.
                         spent = budget.Spend(1);
@@ -841,14 +956,12 @@ Result<void> ValidateReachability(Allocator& allocator, TypeRegistry& types,
                             return Result<void>::Failure(acquired.Error());
                         }
 
-                        auto added = leases.TryEmplaceBack();
+                        auto added = leases.Insert(expectation.schemaType, Move(acquired.Value()));
                         if (!added) {
                             return Result<void>::Failure(added.Error());
                         }
 
-                        added.Value()->type = expectation.schemaType;
-                        added.Value()->lease = Move(acquired.Value());
-                        expected = &added.Value()->lease;
+                        expected = leases.Find(expectation.schemaType);
                     }
 
                     accepted = nodes[target].lease.IsNativeA(expected->Ops().nativeType);
@@ -857,12 +970,8 @@ Result<void> ValidateReachability(Allocator& allocator, TypeRegistry& types,
                         return spent;
                     }
 
-                    TypeCheck entry;
-                    entry.expected = expectation.schemaType;
-                    entry.actual = nodes[target].type;
-                    entry.accepted = accepted;
-                    if (!checks.TryPushBack(entry)) {
-                        return Result<void>::Failure(ErrorCode::OutOfMemory);
+                    if (auto added = checks.Insert(key, accepted); !added) {
+                        return Result<void>::Failure(added.Error());
                     }
                 }
 
@@ -1011,7 +1120,7 @@ Result<RootRef<Object>> LoadObjectGraph(Allocator& allocator, ObjectRegistry& re
         references += nodes.Value()[index].tokens.Size();
     }
 
-    Array<ExpectedLease> expectedLeases(allocator);
+    HashMap<TypeId, TypeLease> expectedLeases(allocator);
     auto reachable =
         ValidateReachability(allocator, types, nodes.Value(), budget.Value(), expectedLeases);
     if (!reachable) {

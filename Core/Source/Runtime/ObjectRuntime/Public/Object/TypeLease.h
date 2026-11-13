@@ -42,16 +42,22 @@ public:
     // 필드 ID의 스키마 위치다(정렬 색인 이진 탐색, 없으면 NoField).
     usize FieldIndex(Guid fieldId) const noexcept;
 
-    // schemaIndex 멤버의 등록 enum·struct다(그 종류가 아니면 nullptr·빈 view).
+    // schemaIndex 멤버의 등록 enum·struct다(대상 형식 — 배열 멤버면 원소의 enum·struct, 그 종류가
+    // 아니면 nullptr·빈 view).
     const EnumSchema* FieldEnum(usize schemaIndex) const noexcept;
     StructView FieldStruct(usize schemaIndex) const noexcept;
 
-    // 등록이 계산한 값: 중첩 깊이(1 이상, MaxStructDepth 이하), 강한 참조 멤버가 있는지(Transient
-    // 포함·중첩 포함), Required 멤버가 있는지(중첩 포함), 소유 객체가 WorldOnly여야 하는지.
+    // 등록이 계산한 값: 중첩 깊이(1 이상, MaxStructDepth 이하 — struct 원소 배열 멤버는 원소 깊이 +
+    // 1), 강한 참조 멤버가 있는지(Transient 포함·중첩 포함·ObjectRefArray·StructRefArray 포함),
+    // Required 멤버가 있는지(중첩 포함, 배열 멤버 제외 — 누락 struct 안 배열은 생성자 값이다), 소유
+    // 객체가 WorldOnly여야 하는지(원소 struct 포함), Registry 컨테이너(ObjectRefArray·
+    // StructRefArray) 멤버를 (중첩 struct까지) 담는지. 마지막 값이 참인 참조 struct는
+    // StructRefArray의 원소가 될 수 없다.
     uint32 Depth() const noexcept;
     bool ContainsStrongReference() const noexcept;
     bool ContainsRequired() const noexcept;
     bool RequiresWorldOnlyOwner() const noexcept;
+    bool ContainsReferenceArray() const noexcept;
 
 private:
     friend class TypeRegistry;
@@ -104,8 +110,9 @@ public:
     const EnumSchema& Enum() const& noexcept;
     const EnumSchema& Enum() const&& = delete;
 
-    // Class·Struct lease에서 fieldIndex(Schema().fields의 위치) 필드가 가리키는 enum의 스키마다. 그
-    // 필드가 Enum 값이 아니면 nullptr이다. 등록이 그 enum을 의존으로 붙잡으므로(Unregister는 Busy)
+    // Class·Struct lease에서 fieldIndex(Schema().fields의 위치) 필드가 가리키는 enum의 스키마다
+    // (대상 형식 — enum 원소 배열이면 원소 enum). 그 필드가 Enum 값·enum 원소 배열이 아니면
+    // nullptr이다. 등록이 그 enum을 의존으로 붙잡으므로(Unregister는 Busy)
     // 반환 참조는 이 lease 수명 동안 유효하다. 범위 밖 index나 빈 lease는 Fatal이다.
     //
     // 사용 예(저장된 값 검증):
@@ -114,9 +121,9 @@ public:
     const EnumSchema* FieldEnum(usize fieldIndex) const& noexcept;
     const EnumSchema* FieldEnum(usize fieldIndex) const&& = delete;
 
-    // Class·Struct lease에서 fieldIndex 필드가 가리키는 등록 struct의 view다. 그 필드가 Struct 값이
-    // 아니면 빈 view다. 반환 view는 이 lease 수명 동안 유효하다. 범위 밖 index나 빈 lease는
-    // Fatal이다.
+    // Class·Struct lease에서 fieldIndex 필드가 가리키는 등록 struct의 view다(대상 형식 — struct
+    // 원소 배열이면 원소 struct). 그 필드가 Struct 값·struct 원소 배열이 아니면 빈 view다. 반환
+    // view는 이 lease 수명 동안 유효하다. 범위 밖 index나 빈 lease는 Fatal이다.
     StructView FieldStruct(usize fieldIndex) const& noexcept;
     StructView FieldStruct(usize fieldIndex) const&& = delete;
 

@@ -40,20 +40,23 @@ Result<void> ValidateLayout(const TypeLease& type, Budget& budget) noexcept {
 
     for (usize index = 0; index < schema.fields.Size(); ++index) {
         const auto& field = schema.fields[index];
-        auto wire = detail::FieldWireType(field.value.kind, ReferenceWire);
+        // 필드 단위 wire(배열은 원소에 따라 ValueArray·RecordList)가 있어야 한다.
+        auto wire = detail::FieldWireType(field, ReferenceWire);
         if (!wire) {
             return Result<void>::Failure(wire.Error());
         }
 
-        const bool reference = field.value.kind == ValueKind::ObjectReference;
-        const bool typed = field.value.kind == ValueKind::SoftObjectReference ||
-                           field.value.kind == ValueKind::Enum ||
-                           field.value.kind == ValueKind::Struct;
-        if ((reference && field.kind != FieldKind::ObjectReference) ||
-            (!reference &&
-             (field.kind != FieldKind::Value || (!typed && field.value.type != Guid{}))) ||
-            (field.value.kind == ValueKind::Enum && type.FieldEnum(index) == nullptr) ||
-            (field.value.kind == ValueKind::Struct && type.FieldStruct(index).IsEmpty())) {
+        // 대상 형식(배열이면 원소)으로 FieldKind·type 규칙과 등록 enum·struct를 확인한다. 배열의
+        // value.type은 0이다.
+        const ValueType& target = FieldTargetType(field);
+        const bool reference = target.kind == ValueKind::ObjectReference;
+        const bool typed = target.kind == ValueKind::SoftObjectReference ||
+                           target.kind == ValueKind::Enum || target.kind == ValueKind::Struct;
+        if ((field.value.kind == ValueKind::Array && field.value.type != Guid{}) ||
+            (reference && field.kind != FieldKind::ObjectReference) ||
+            (!reference && (field.kind != FieldKind::Value || (!typed && target.type != Guid{}))) ||
+            (target.kind == ValueKind::Enum && type.FieldEnum(index) == nullptr) ||
+            (target.kind == ValueKind::Struct && type.FieldStruct(index).IsEmpty())) {
             return Result<void>::Failure(ErrorCode::Unsupported);
         }
 

@@ -3,9 +3,9 @@
 #include <TestSupport/Test.h>
 
 // 필드 쓰기 검증의 한 곳(detail::ValidateFieldWrite)과 codec 도우미의 단위 시험이다(Docs/Design/
-// ReflectionFoundations.ko.md 3.6·6.4절): 오류 순서(TypeMismatch → null 금지 → 읽기 전용 → 값
-// 내용), 유효 플래그로 전파된 읽기 전용, 실제 대상 enum 스키마 기준 판정, PropagateFieldFlags·
-// EnumReplacementValue의 규칙.
+// ReflectionFoundations.ko.md 3.6·5.6·6.4절): 오류 순서(TypeMismatch → 읽기 전용 → 값 내용), 유효
+// 플래그로 전파된 읽기 전용, 실제 대상 enum 스키마 기준 판정, 원소 모드와 ValidateArrayLength,
+// PropagateFieldFlags·EnumReplacementValue의 규칙.
 using namespace rocks;
 
 namespace {
@@ -97,11 +97,95 @@ TEST(FieldWriteValidation_ReferenceRules) {
     value.reference = ObjectHandle{1, 1, 1};
     CHECK(detail::ValidateFieldWrite(binding, target, value).Error() == ErrorCode::TypeMismatch);
 
-    // null 금지(ObjectRefArray 원소)는 읽기 전용보다 먼저 InvalidArgument다.
+    // null은 받는다(B5 — null 금지 단계가 없다). 읽기 전용이면 Unsupported다.
     value.reference = ObjectHandle{};
-    target.allowNull = false;
+    CHECK(detail::ValidateFieldWrite(binding, target, value));
     binding.readOnly = true;
-    CHECK(detail::ValidateFieldWrite(binding, target, value).Error() == ErrorCode::InvalidArgument);
+    CHECK(detail::ValidateFieldWrite(binding, target, value).Error() == ErrorCode::Unsupported);
+}
+
+// 원소 모드(배열 필드의 원소 하나 쓰기 — B6 경로 쓰기가 쓴다): actual은 Array여야 하고 binding을
+// 원소 형식과 대조하며, ObjectRefArray 원소도 null을 받는다. ValidateArrayLength는 Array가 아니면
+// TypeMismatch, maxElements를 넘으면 CapacityExceeded다.
+TEST(FieldWriteValidation_ElementModeAndArrayLength) {
+    SystemAllocator allocator;
+    FieldSchema slots = Field(ValueKind::Array);
+    slots.kind = FieldKind::ObjectReference;
+    slots.element = ValueType{ValueKind::ObjectReference, {}};
+    slots.maxElements = 4;
+    detail::FieldWriteBinding binding;
+    binding.value = slots.element;
+    detail::FieldWriteTarget target;
+    target.actual = &slots;
+    FieldValue value(allocator);
+    value.kind = ValueKind::ObjectReference;
+    // 원소 모드가 아니면 Array 필드와 참조 binding은 TypeMismatch다.
+    CHECK(detail::ValidateFieldWrite(binding, target, value).Error() == ErrorCode::TypeMismatch);
+    target.element = true;
+    CHECK(detail::ValidateFieldWrite(binding, target, value));
+    // 원소 모드인데 actual이 Array가 아니면 TypeMismatch다.
+    const FieldSchema single = Field(ValueKind::ObjectReference);
+    target.actual = &single;
+    CHECK(detail::ValidateFieldWrite(binding, target, value).Error() == ErrorCode::TypeMismatch);
+
+    // enum 원소: 원소 enum ID와 원소 enum 스키마(TypeLease::FieldEnum이 돌려주는 값)로 판정한다.
+    FieldSchema channels = Field(ValueKind::Array);
+    channels.element = ValueType{ValueKind::Enum, FlagsEnum.id};
+    channels.maxElements = 8;
+    binding.value = channels.element;
+    target.actual = &channels;
+    target.actualEnum = &FlagsEnum;
+    FieldValue flags(allocator);
+    flags.kind = ValueKind::Enum;
+    flags.type = FlagsEnum.id;
+    flags.signedInteger = 5;
+    CHECK(detail::ValidateFieldWrite(binding, target, flags));
+    flags.signedInteger = 2;
+    CHECK(detail::ValidateFieldWrite(binding, target, flags).Error() == ErrorCode::InvalidArgument);
+    flags.type = PlainEnum.id;
+    CHECK(detail::ValidateFieldWrite(binding, target, flags).Error() == ErrorCode::TypeMismatch);
+
+    CHECK(detail::ValidateArrayLength(channels, 8));
+    CHECK(detail::ValidateArrayLength(channels, 9).Error() == ErrorCode::CapacityExceeded);
+    CHECK(detail::ValidateArrayLength(single, 0).Error() == ErrorCode::TypeMismatch);
+}
+
+// Struct·Array 종류의 통째 쓰기는 종류 대조(TypeMismatch) 뒤 Unsupported다 — 경로 쓰기가 이 함수만
+// 거쳐도 struct 값·배열·struct 원소를 FieldValue로 통째 쓰지 못한다. 읽기 전용보다 먼저다.
+TEST(FieldWriteValidation_AggregateKindsAreUnsupported) {
+    SystemAllocator allocator;
+    const FieldSchema holder = Field(ValueKind::Struct, Guid{0x535452, 1});
+    detail::FieldWriteBinding binding;
+    binding.value = holder.value;
+    binding.readOnly = true;
+    detail::FieldWriteTarget target;
+    target.actual = &holder;
+    FieldValue value(allocator);
+    value.kind = ValueKind::Int32;
+    CHECK(detail::ValidateFieldWrite(binding, target, value).Error() == ErrorCode::TypeMismatch);
+    value.kind = ValueKind::Struct;
+    CHECK(detail::ValidateFieldWrite(binding, target, value).Error() == ErrorCode::Unsupported);
+
+    FieldSchema items = Field(ValueKind::Array);
+    items.element = ValueType{ValueKind::UInt32, {}};
+    items.maxElements = 4;
+    binding.value = items.value;
+    binding.readOnly = false;
+    target.actual = &items;
+    value.kind = ValueKind::Array;
+    CHECK(detail::ValidateFieldWrite(binding, target, value).Error() == ErrorCode::Unsupported);
+    value.kind = ValueKind::UInt32;
+    CHECK(detail::ValidateFieldWrite(binding, target, value).Error() == ErrorCode::TypeMismatch);
+
+    // 원소 모드의 struct 원소도 통째로 쓰지 않는다.
+    FieldSchema slots = Field(ValueKind::Array);
+    slots.element = ValueType{ValueKind::Struct, Guid{0x535452, 2}};
+    slots.maxElements = 4;
+    binding.value = slots.element;
+    target.actual = &slots;
+    target.element = true;
+    value.kind = ValueKind::Struct;
+    CHECK(detail::ValidateFieldWrite(binding, target, value).Error() == ErrorCode::Unsupported);
 }
 
 TEST(FieldWriteValidation_ContentRulesUseTheActualEnum) {

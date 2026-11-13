@@ -47,9 +47,42 @@ struct ReflectedStructField {
     };
 };
 
+// 리플렉션 배열 필드의 컨테이너다(Docs/Design/ReflectionFoundations.ko.md 5.6절). 부분 특수화로만
+// 고르며(requires 탐지 없음) Element는 원소의 C++ 형식이다: Array<E>는 E(스칼라·String·Guid·
+// AssetId·Digest·enum·SoftObjectRef·참조 없는 struct), ObjectRefArray<T>는 ObjectRef<T>(원소 null
+// 허용), StructRefArray<S>는 참조 struct S다. Registry는 원소를 Registry가 관리하는 컨테이너
+// (ObjectRefArray·StructRefArray)인지다.
+template <class T>
+struct ArrayField {
+    static constexpr bool Supported = false;
+};
+
+template <class E>
+struct ArrayField<Array<E>> {
+    static constexpr bool Supported = true;
+    static constexpr bool Registry = false;
+    using Element = E;
+};
+
+template <class T>
+struct ArrayField<ObjectRefArray<T>> {
+    static constexpr bool Supported = true;
+    static constexpr bool Registry = true;
+    using Element = ObjectRef<T>;
+};
+
+template <class S>
+struct ArrayField<StructRefArray<S>> {
+    static constexpr bool Supported = true;
+    static constexpr bool Registry = true;
+    using Element = S;
+};
+
 template <class T>
 constexpr ValueKind FieldValueKind() noexcept {
-    if constexpr (IsSameV<T, bool>) {
+    if constexpr (ArrayField<T>::Supported) {
+        return ValueKind::Array;
+    } else if constexpr (IsSameV<T, bool>) {
         return ValueKind::Bool;
     } else if constexpr (IsSameV<T, uint8>) {
         return ValueKind::UInt8;

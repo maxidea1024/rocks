@@ -81,9 +81,12 @@ struct FieldWriteBinding {
 
 // 필드 쓰기의 실제 대상이다. actual은 대상 객체 스키마의 그 필드, effectiveFlags는 전파된 유효
 // 플래그(최상위 필드면 필드 플래그 — B6 경로 쓰기는 바깥 ReadOnly를 전파한다), actualEnum은 그
-// 필드의 등록된 enum 스키마, sourceExpectedNative·targetExpectedNative는 원본·대상 스키마의 참조
-// 기대 타입 native 키(0이면 Object), referenced는 non-null 참조 값의 대상 타입 lease, allowNull은
-// null 참조 허용(ObjectRefArray 원소는 false — B5)이다. lease는 호출자가 얻어 쓰기 완료까지 쥔다.
+// 필드의 등록된 enum 스키마(원소 모드면 원소 enum — TypeLease::FieldEnum이 돌려주는 값),
+// sourceExpectedNative·targetExpectedNative는 원본·대상 스키마의 참조 기대 타입 native 키(0이면
+// Object), referenced는 non-null 참조 값의 대상 타입 lease, element는 원소 모드(배열 필드의 원소
+// 하나를 쓴다 — actual은 Array여야 하고 binding을 actual->element와 대조한다)다. null 참조는 단일
+// 참조·ObjectRefArray 원소 모두 받는다(B5 — 원소 null 허용). lease는 호출자가 얻어 쓰기 완료까지
+// 쥔다.
 struct FieldWriteTarget {
     const FieldSchema* actual = nullptr;
     uint32 effectiveFlags = 0;
@@ -91,25 +94,42 @@ struct FieldWriteTarget {
     const void* sourceExpectedNative = nullptr;
     const void* targetExpectedNative = nullptr;
     const TypeLease* referenced = nullptr;
-    bool allowNull = true;
+    bool element = false;
 };
 
-// 필드 쓰기 검증의 한 곳이다(Docs/Design/ReflectionFoundations.ko.md 3.6·6.4절).
+// 필드 쓰기 검증의 한 곳이다(Docs/Design/ReflectionFoundations.ko.md 3.6·5.6·6.4절).
 // FieldWriteOperation과 경로 쓰기(B6)가 같이 쓴다. lease를 얻지 않는 순수 검사이며 오류 순서는 값
-// 종류·enum ID·참조 대상 타입(TypeMismatch) → null 금지(InvalidArgument) → 읽기 전용(Unsupported) →
-// 값 내용(소프트 참조 규칙·선언되지 않은 enum 값 InvalidArgument; 정수 폭 Overflow는 thunk가
+// 종류(원소 모드면 actual이 Array가 아니어도)·enum ID·참조 대상 타입(TypeMismatch) → Struct·Array
+// 종류의 통째 쓰기(Unsupported — 원소 모드의 struct 원소 포함) → 읽기 전용(Unsupported) → 값
+// 내용(소프트 참조 규칙·선언되지 않은 enum 값 InvalidArgument; 정수 폭 Overflow는 thunk가
 // 검사한다)이다. 그래프 복원의 staged 쓰기는 이 검사를 거치지 않는다(읽기 전용은 복원을 막지
 // 않는다).
+//
+// 사용 예(B6 경로 쓰기가 배열 원소 하나를 쓸 때):
+//   detail::FieldWriteTarget target;
+//   target.actual = &field;
+//   target.actualEnum = lease.FieldEnum(index);   // 원소 enum
+//   target.element = true;
+//   if (auto valid = detail::ValidateFieldWrite(binding, target, value); !valid) { ... }
 Result<void> ValidateFieldWrite(const FieldWriteBinding& binding, const FieldWriteTarget& target,
                                 const FieldValue& value) noexcept;
+
+// 배열 필드의 새 길이를 검사한다(경로 접근의 삽입·크기 변경 — B6, 저장의 MaxElements와 같은
+// 규칙). field가 Array가 아니면 TypeMismatch, newLength > field.maxElements면 CapacityExceeded다.
+// 로드는 필드별 상한을 걸지 않으므로 이 검사를 거치지 않는다(MaxArrayElements만 — 5.5절).
+//
+// 사용 예:
+//   if (auto fits = detail::ValidateArrayLength(field, array.Size() + 1); !fits) { ... }
+Result<void> ValidateArrayLength(const FieldSchema& field, usize newLength) noexcept;
 
 } // namespace detail
 
 // 등록된 필드의 실제 대상 schema, 타입과 값 형식을 검사한다. 오류 순서는 context·수명, 타입·필드,
 // 전달 값 종류(TypeMismatch — enum은 FieldValue::type이 필드의 enum ID와 다를 때도), 읽기
 // 전용(Unsupported), 값 내용(정수 폭 Overflow·소프트 참조의 null 규칙과 경로 상한·선언되지 않은
-// enum 값 InvalidArgument)이다. callback 코드 수명은 TypeLease가 보유하는 ModuleLease에 종속되므로
-// 이 값을 lease보다 오래 보관하거나 호출하지 않는다.
+// enum 값 InvalidArgument)이다. Struct·Array 필드는 FieldValue로 통째 쓰지 않으므로 문맥·수명·대상
+// 타입·필드 검사 뒤 Unsupported다(멤버·원소 단위는 B6 경로 접근). callback 코드 수명은 TypeLease가
+// 보유하는 ModuleLease에 종속되므로 이 값을 lease보다 오래 보관하거나 호출하지 않는다.
 class FieldWriteOperation {
 public:
     using Callback = Result<void> (*)(ObjectRegistry&, const ObjectAccessContext&, ObjectHandle,
@@ -173,9 +193,10 @@ struct RuntimeFieldOps {
     // DecodeThroughFieldValue(Object/GeneratedFieldCodec.h)를 그대로 쓸 수 있다.
     FieldEncodeFunction encode = nullptr;
     FieldDecodeFunction decode = nullptr;
-    // Enum 필드가 쓰는 C++ enum의 NativeTypeKey<E>()다(그 밖의 필드는 nullptr). 등록이 필드의
-    // value.type으로 찾은 enum 레코드의 native 키와 같은지 확인한다 — 스키마로 해석한 enum과
-    // 정적 thunk의 enum이 어긋나지 않게 한다(어긋나면 TypeMismatch).
+    // Enum·Struct 필드(또는 Enum·Struct 원소 배열)가 쓰는 C++ 타입의 NativeTypeKey다(그 밖의
+    // 필드는 nullptr). 등록이 필드의 대상 형식(FieldTargetType — 배열이면 원소)으로 찾은 레코드의
+    // native 키와 같은지 확인한다 — 스키마로 해석한 대상과 정적 thunk의 타입이 어긋나지 않게
+    // 한다(어긋나면 TypeMismatch).
     const void* valueNativeType = nullptr;
 };
 
@@ -204,8 +225,9 @@ using StructFieldDecodeFunction = Result<void> (*)(const RuntimeStructFieldOps& 
                                                    const FieldView& field,
                                                    FieldDecodeContext& context) noexcept;
 
-// struct 멤버 하나의 함수표다. valueNativeType은 Enum·Struct 멤버가 쓰는 C++ 타입의
-// NativeTypeKey다(그 밖은 nullptr — 등록이 대상 레코드의 native 키와 대조한다).
+// struct 멤버 하나의 함수표다. valueNativeType은 Enum·Struct 멤버(또는 Enum·Struct 원소 배열
+// 멤버의 원소)가 쓰는 C++ 타입의 NativeTypeKey다(그 밖은 nullptr — 등록이 대상 레코드의 native
+// 키와 대조한다).
 struct RuntimeStructFieldOps {
     Guid fieldId{};
     StructFieldEncodeFunction encode = nullptr;
@@ -243,12 +265,13 @@ private:
 };
 
 // 리플렉션 struct 등록의 실행 정보다(TypeRegistry::RegisterStruct, 4.6절). construct·destroy는
-// struct hook 관찰용 임시 값을 만들고 없앤다(필수). trace는 참조 struct(ObjectRef 멤버가 있는 —
-// Transient 포함 — struct)에만 있어야 한다. migrate는 선택이며 타입이 자기 옛 버전을 올린다(로드
-// 옵션 override가 먼저다). requiresWorldOnlyOwner는 생성 형질(NATIVE 멤버의 WorldOnly 요구)이다.
-// fields는 스키마 필드와 1:1이며 등록이 스키마 순서로 깊게 복사한다. 동적 모듈이면 module로 코드
-// 수명을 유지한다. 등록된 레코드의 StructOps()에서 module은 비어 있고(수명은 lease의 Ops().module이
-// 쥔다) requiresWorldOnlyOwner는 멤버 struct에서 전파된 값이다.
+// struct hook 관찰용 임시 값을 만들고 없앤다(필수). trace는 참조 struct(ObjectRef·ObjectRefArray·
+// StructRefArray 멤버가 있는 — Transient 포함, 중첩 struct 포함 — struct)에만 있어야 하고 생성
+// Trace는 모든 배열 멤버에 detail::TraceArrayField를 부른다. migrate는 선택이며 타입이 자기 옛
+// 버전을 올린다(로드 옵션 override가 먼저다). requiresWorldOnlyOwner는 생성 형질(NATIVE 멤버의
+// WorldOnly 요구)이다. fields는 스키마 필드와 1:1이며 등록이 스키마 순서로 깊게 복사한다. 동적
+// 모듈이면 module로 코드 수명을 유지한다. 등록된 레코드의 StructOps()에서 module은 비어 있고(수명은
+// lease의 Ops().module이 쥔다) requiresWorldOnlyOwner는 멤버 struct에서 전파된 값이다.
 struct RuntimeStructOps {
     usize size = 0;
     usize alignment = 0;
