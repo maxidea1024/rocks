@@ -1,6 +1,8 @@
 #pragma once
 
+#include <Object/AssetId.h>
 #include <Object/ConstructionContext.h>
+#include <Object/SoftObjectRef.h>
 
 namespace rocks::detail {
 
@@ -11,6 +13,16 @@ struct ObjectReferenceField {
 
 template <class T>
 struct ObjectReferenceField<ObjectRef<T>> {
+    static constexpr bool Supported = true;
+};
+
+template <class T>
+struct SoftReferenceField {
+    static constexpr bool Supported = false;
+};
+
+template <class T>
+struct SoftReferenceField<SoftObjectRef<T>> {
     static constexpr bool Supported = true;
 };
 
@@ -40,6 +52,12 @@ constexpr ValueKind FieldValueKind() noexcept {
         return ValueKind::Utf8String;
     } else if constexpr (ObjectReferenceField<T>::Supported) {
         return ValueKind::ObjectReference;
+    } else if constexpr (IsSameV<T, AssetId>) {
+        return ValueKind::AssetId;
+    } else if constexpr (IsSameV<T, Sha256Digest>) {
+        return ValueKind::Digest256;
+    } else if constexpr (SoftReferenceField<T>::Supported) {
+        return ValueKind::SoftObjectReference;
     } else {
         return ValueKind::Opaque;
     }
@@ -51,6 +69,13 @@ Result<void> CopyFieldValue(const Member& source, FieldValue& value) noexcept {
     value.kind = FieldValueKind<Member>();
     if constexpr (IsSameV<Member, String>) {
         return value.string.TryAssign(source.View());
+    } else if constexpr (SoftReferenceField<Member>::Supported) {
+        value.guid = source.asset.value;
+        return value.string.TryAssign(source.objectPath.View());
+    } else if constexpr (IsSameV<Member, AssetId>) {
+        value.guid = source.value;
+    } else if constexpr (IsSameV<Member, Sha256Digest>) {
+        value.digest = source;
     } else if constexpr (ObjectReferenceField<Member>::Supported) {
         value.reference = source.Handle();
     } else if constexpr (IsSameV<Member, bool>) {
@@ -75,6 +100,10 @@ Result<void> WriteScalarField(Member& target, const FieldValue& value) noexcept 
         target = value.boolean;
     } else if constexpr (IsSameV<Member, Guid>) {
         target = value.guid;
+    } else if constexpr (IsSameV<Member, AssetId>) {
+        target = AssetId{value.guid};
+    } else if constexpr (IsSameV<Member, Sha256Digest>) {
+        target = value.digest;
     } else if constexpr (IsSameV<Member, float>) {
         target = value.float32;
     } else if constexpr (IsSameV<Member, double>) {
@@ -147,6 +176,29 @@ Result<void> WriteGeneratedValue(Member MemberOwner::* member, const FieldValue&
         // 할당/해제 없는 Swap이 commit이다. 이후 old storage 반환 callback의 RequestDestroy는
         // 이미 완료한 성공을 되돌리지 않는다. 호출 측 Borrow는 이 정리까지 물리 수명을 유지한다.
         (target.Value()->*member).Swap(replacement);
+        return Result<void>::Success();
+    } else if constexpr (SoftReferenceField<Member>::Supported) {
+        // staged 쓰기·복원도 같은 null 규칙·경로 상한을 지킨다(등록된 write의 검증을 거치지
+        // 않는다).
+        const AssetId asset{value.guid};
+        if (auto valid = Member::Validate(asset, value.string.View()); !valid) {
+            return valid;
+        }
+
+        String replacement((target.Value()->*member).objectPath.GetAllocator());
+        auto copied = replacement.TryAssign(value.string.View());
+        if (!copied) {
+            return copied;
+        }
+
+        target = get();
+        if (!target) {
+            return Result<void>::Failure(target.Error());
+        }
+
+        // String과 같이 할당 없는 Swap이 commit이다.
+        (target.Value()->*member).asset = asset;
+        (target.Value()->*member).objectPath.Swap(replacement);
         return Result<void>::Success();
     } else {
         return WriteScalarField(target.Value()->*member, value);

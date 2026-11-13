@@ -88,7 +88,10 @@ internal static class MetaTests
         AddRejectGroup("Meta.UnreflectedBaseAndReference", [
             Declaration(bases: "public Hidden").Replace("namespace probe {", "namespace probe { struct Hidden : rocks::Object {};", StringComparison.Ordinal),
             Declaration("ROCKS_PROPERTY() rocks::ObjectRef<Hidden> next;")
-                .Replace("namespace probe {", "namespace probe { struct Hidden : rocks::Object {};", StringComparison.Ordinal)], "RMC2003", "reflected");
+                .Replace("namespace probe {", "namespace probe { struct Hidden : rocks::Object {};", StringComparison.Ordinal),
+            Declaration("ROCKS_PROPERTY() rocks::SoftObjectRef<Hidden> next;", extra: "explicit Value(rocks::Allocator& allocator) noexcept : next(allocator) {}")
+                .Replace("namespace probe {", "#include <Object/SoftObjectRef.h>\nnamespace probe { struct Hidden : rocks::Object {};", StringComparison.Ordinal)],
+            "RMC2003", "reflected");
         AddRejectGroup("Meta.ClangSyntaxFailurePreservesOutput", [Declaration("this is not valid cxx;")], "RMC3000", "Clang");
         suite.Add("Meta.DiagnosticsAndResponseOverridesRejected", async () =>
         {
@@ -230,8 +233,10 @@ internal static class MetaTests
         suite.Add("Meta.ClassAndPropertySpecifiersReachTheSchema", async () =>
         {
             using Probe probe = new(options, actualEnvironment, generator, compiler);
-            string source = Preamble + "struct Lease { static constexpr bool RocksRequiresWorldOnlyOwner = true; };\n" +
+            string source = Preamble.Replace("namespace probe {", "#include <Object/SoftObjectRef.h>\nnamespace probe {", StringComparison.Ordinal) +
+                "struct Lease { static constexpr bool RocksRequiresWorldOnlyOwner = true; };\n" +
                 "struct Cache { rocks::ObjectRef<rocks::Object> ref; };\n" +
+                "struct Holder { rocks::ObjectRef<rocks::Object> ref; Lease lease; };\n" +
                 "ROCKS_CLASS(WorldOnly, Version=2147483647)\nstruct Parent : public rocks::Object {};\n" +
                 "ROCKS_CLASS(Version=3)\nstruct Value : public Parent {\n" +
                 "ROCKS_PROPERTY(EditorOnly, Name=\"Hits\") rocks::int32 count = 0;\n" +
@@ -241,7 +246,10 @@ internal static class MetaTests
                 "ROCKS_NATIVE() rocks::WeakRef<Value> weak;\n" +
                 "ROCKS_NATIVE() int* raw = nullptr;\n" +
                 "ROCKS_NATIVE() Cache* borrowed = nullptr;\n" +
-                "ROCKS_NATIVE() Lease lease;\n};\n}\n";
+                "ROCKS_NATIVE() Lease lease;\n" +
+                // 소프트 참조는 대상을 담지 않으므로 인자(Holder)의 강한 참조를 따라가지 않는다(RMC2205 아님).
+                "ROCKS_NATIVE() rocks::SoftObjectRef<Holder> soft;\n" +
+                "explicit Value(rocks::Allocator& allocator) noexcept : soft(allocator) {}\n};\n}\n";
             await probe.GenerateAsync(source);
             using System.Text.Json.JsonDocument descriptor = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(probe.Descriptor));
             System.Text.Json.JsonElement Type(string name) => descriptor.RootElement.GetProperty("types").EnumerateArray()
@@ -266,6 +274,8 @@ internal static class MetaTests
         AddRejectGroup("Meta.IntegerSpecifierSyntax", new[] { "Version=0", "Version=01", "Version=2147483648", "Version=\"2\"", "Version=1x", "Version", "Version=-1", "Version=+1" }
             .Select(spec => Declaration().Replace("ROCKS_CLASS()", $"ROCKS_CLASS({spec})", StringComparison.Ordinal)), "RMC2000", "specifier");
         AddRejectGroup("Meta.RequiredAndMaxElementsNeedMatchingFieldKinds", [Declaration("ROCKS_PROPERTY(Required) rocks::int32 count = 0;"),
+            Declaration("ROCKS_PROPERTY(Required) rocks::AssetId count;")
+                .Replace("namespace probe {", "#include <Object/AssetId.h>\nnamespace probe {", StringComparison.Ordinal),
             Declaration("ROCKS_PROPERTY(MaxElements=4) rocks::int32 count = 0;")], "RMC2202", "applies only to");
         AddRejectGroup("Meta.ToolNameMustBeAnIdentifier", [Declaration("ROCKS_PROPERTY(Name=\"1bad\") rocks::int32 count = 0;"),
             Declaration("ROCKS_PROPERTY(Name=\"has space\") rocks::int32 count = 0;"),

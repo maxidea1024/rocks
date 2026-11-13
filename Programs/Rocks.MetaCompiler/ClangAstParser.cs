@@ -73,10 +73,12 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
         "rocks::ObjectRef", "rocks::RootRef", "rocks::ObjectRefArray"
     };
 
-    // 대상 객체를 담지도 추적하지도 않는 참조 템플릿이다. 인자 타입을 따라가지 않는다(WeakRef<T>는 T의 필드를 담지 않는다).
+    // 대상 객체를 담지도 추적하지도 않는 참조 템플릿이다. 인자 타입을 따라가지 않는다(WeakRef<T>는 T의 필드를 담지 않고,
+    // SoftObjectRef<T>는 에셋 ID와 경로만 담는다).
     private static readonly HashSet<string> NonOwningTemplates = new(StringComparer.Ordinal)
     {
-        "rocks::WeakRef"
+        "rocks::WeakRef",
+        "rocks::SoftObjectRef"
     };
 
     private void IndexRecords(JsonElement node, string[] scope)

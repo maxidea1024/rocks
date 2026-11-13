@@ -82,8 +82,9 @@ TEST(TypeFlags_KnownFlagsAreAcceptedAndUnknownBitsRejected) {
     CHECK(types.Shutdown());
 }
 
-// Required는 typed 참조 필드(ValueKind::ObjectReference)에만 쓴다. 값 필드와 접근기 없는 Opaque
-// 참조는 거부한다(typed 참조의 수락은 생성 fixture로 SpecifierTests가 본다).
+// Required는 typed 참조 필드(ValueKind::ObjectReference·SoftObjectReference)에만 쓴다. 값 필드와
+// 접근기 없는 Opaque 참조는 거부한다(typed 참조의 수락은 생성 fixture로 SpecifierTests·
+// AssetValueFieldTests가 본다).
 TEST(TypeFlags_RequiredIsOnlyForTypedReferenceFields) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);

@@ -280,7 +280,7 @@ Result<void> ValidateReachability(Allocator& allocator, TypeRegistry& types,
                 continue;
             }
             const usize target = static_cast<usize>(field.localReference - 1);
-            const auto expectedId = node.lease.Schema().fields[field.schemaIndex].referencedType;
+            const auto expectedId = node.lease.Schema().fields[field.schemaIndex].value.type;
             if (expectedId != Guid{}) {
                 auto expected = types.Acquire(expectedId);
                 if (!expected) {

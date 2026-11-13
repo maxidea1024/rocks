@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Encoding/Sha256.h>
 #include <Core/Lifetime/ModuleLease.h>
 #include <Core/Move.h>
 #include <Core/Text/String.h>
@@ -34,9 +35,15 @@ struct FieldValue {
     int64 signedInteger = 0;
     float float32 = 0;
     double float64 = 0;
+    // Guid·AssetId 값, SoftObjectReference의 asset이다.
     Guid guid{};
     ObjectHandle reference{};
+    // Utf8String 값, SoftObjectReference의 객체 경로다.
     String string;
+    // Digest256 값이다.
+    Sha256Digest digest{};
+    // Enum 값의 enum 스키마 ID다(B3b).
+    TypeId type{};
 
 private:
     Allocator* allocator_;
@@ -44,8 +51,10 @@ private:
 
 class TypeRegistry;
 
-// 등록된 필드의 실제 대상 schema, 타입과 값 형식을 검사한다. callback 코드 수명은 TypeLease가
-// 보유하는 ModuleLease에 종속되므로 이 값을 lease보다 오래 보관하거나 호출하지 않는다.
+// 등록된 필드의 실제 대상 schema, 타입과 값 형식을 검사한다. 오류 순서는 context·수명, 타입·필드,
+// 전달 값 종류(TypeMismatch), 읽기 전용(Unsupported), 값 내용(정수 폭 Overflow·소프트 참조의 null
+// 규칙과 경로 상한 InvalidArgument)이다. callback 코드 수명은 TypeLease가 보유하는 ModuleLease에
+// 종속되므로 이 값을 lease보다 오래 보관하거나 호출하지 않는다.
 class FieldWriteOperation {
 public:
     using Callback = Result<void> (*)(ObjectRegistry&, const ObjectAccessContext&, ObjectHandle,

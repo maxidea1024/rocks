@@ -46,10 +46,12 @@ Result<Array<uint8>> SaveObjectGraph(Allocator&, ObjectRegistry&, const ObjectAc
 // 실패는 부분 객체 공개 없이 역순 rollback한다. 할당기 통계/slot generation은 rollback 전 값으로
 // 돌아간다는 뜻이 아니다. 원본 bytes는 호출 동안 유효하고 불변이어야 하며 결과는 원본을 빌리지
 // 않는다. registry와 types는 같은 등록 저장소여야 한다. unknown field는 skip, orphan/dangling local
-// ID는 거부다. nonnull 참조는 referencedType 등록의 native type과 정확히 일치해야 하며 TypeId
-// 별명은 허용한다. referencedType=0은 기반 Object다. nonnull의 명시 대상 타입 미등록은 NotFound다.
-// weak/external asset 참조·압축· async IO·다중 root는 이 format에서 지원하지 않으며 암묵적으로
-// ObjectHandle byte를 보존하지 않는다.
+// ID는 거부다. nonnull 강한 참조는 value.type 등록의 native type과 정확히 일치해야 하며 TypeId
+// 별명은 허용한다. value.type=0은 기반 Object다. nonnull의 명시 대상 타입 미등록은 NotFound다.
+// 소프트 참조(SoftObjectRef)는 값(에셋 ID + 객체 경로)으로 저장·복원하며 대상을 그래프에 넣거나
+// 찾지 않는다(기대 타입도 검사하지 않는다). 소프트 참조의 null 규칙·4 KiB 경로 상한과 digest의
+// 32 byte 길이를 어기면 저장·복원 모두 InvalidArgument다. 압축·async IO·다중 root는 이 format에서
+// 지원하지 않으며 암묵적으로 ObjectHandle byte를 보존하지 않는다.
 Result<RootRef<Object>> LoadObjectGraph(Allocator&, ObjectRegistry&, TypeRegistry&,
                                         const ObjectAccessContext&, Span<const uint8>,
                                         ObjectGraphLoadOptions = {}) noexcept;

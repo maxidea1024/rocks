@@ -134,7 +134,7 @@
 ### 2.4 `ROCKS_NATIVE`
 
 - `ROCKS_NATIVE()`는 리플렉션 클래스·구조체 안의 **비영속 런타임 멤버**다(GPU 핸들·캐시·World 쪽 `AssetLease`). 모든 비정적 필드는 `ROCKS_PROPERTY` 또는 `ROCKS_NATIVE` 중 하나다(둘 다 없으면 지금처럼 오류, 둘 다면 RMC2204).
-- **강한 참조 재귀 금지**(GC 구멍 방지): MetaCompiler가 Clang AST로 NATIVE 멤버의 타입을 재귀 검사한다 — 값으로 담는 필드·base 클래스·이름 없는 struct/union 멤버·배열 원소·템플릿 인자와 템플릿 패턴의 필드를 따라가며 `ObjectRef`·`ObjectRefArray`·`RootRef`가 있거나 `Object` 파생 타입을 가리키는 raw 포인터·참조(EIP 525행)가 있으면 RMC2205다. 포인터·참조는 대상이 `Object` 파생이거나 대상이 다시 강한 참조인지만 보고, 빌린 포인터가 가리키는 비-Object 레코드의 필드는 펼치지 않는다(B2 구현에서 정함 — `World*` 같은 NATIVE 멤버를 허용한다). `Object` 파생 타입은 값이나 템플릿 인자로 닿아도 펼치지 않는다. 리플렉션 struct는 생성 형질 `ContainsStrongReference`로 판정한다. 생성 코드는 직접 타입에 대해 같은 조건을 `static_assert`로 한 번 더 둔다. `WeakRef`·`ObjectHandle`은 허용한다(추적하지 않는 참조).
+- **강한 참조 재귀 금지**(GC 구멍 방지): MetaCompiler가 Clang AST로 NATIVE 멤버의 타입을 재귀 검사한다 — 값으로 담는 필드·base 클래스·이름 없는 struct/union 멤버·배열 원소·템플릿 인자와 템플릿 패턴의 필드를 따라가며 `ObjectRef`·`ObjectRefArray`·`RootRef`가 있거나 `Object` 파생 타입을 가리키는 raw 포인터·참조(EIP 525행)가 있으면 RMC2205다. 포인터·참조는 대상이 `Object` 파생이거나 대상이 다시 강한 참조인지만 보고, 빌린 포인터가 가리키는 비-Object 레코드의 필드는 펼치지 않는다(B2 구현에서 정함 — `World*` 같은 NATIVE 멤버를 허용한다). `Object` 파생 타입은 값이나 템플릿 인자로 닿아도 펼치지 않는다. 리플렉션 struct는 생성 형질 `ContainsStrongReference`로 판정한다. 생성 코드는 직접 타입에 대해 같은 조건을 `static_assert`로 한 번 더 둔다. `WeakRef`·`SoftObjectRef`·`ObjectHandle`은 허용한다(추적하지 않는 참조 — 대상을 담지 않으므로 템플릿 인자도 따라가지 않는다).
 - WorldOnly 전용 멤버: 타입이 `static constexpr bool RocksRequiresWorldOnlyOwner = true;`를 선언하면(A1의 `AssetLease`가 선언) WorldOnly가 아닌 클래스의 `ROCKS_NATIVE` 멤버로 둘 수 없다(RMC2206, 같은 재귀 검사로 담는 타입까지 본다). 리플렉션 struct가 그런 NATIVE 멤버를 (중첩까지) 담으면 struct 자체가 생성 형질 `RequiresWorldOnlyOwner`를 갖고, 그 struct를 필드로 둔 WorldOnly 아닌 클래스도 RMC2206이다. 이름 문자열이 아니라 형질로 판정하므로 `AssetLease`가 생기기 전에도 규칙과 시험을 둘 수 있다.
 - 수동 등록 매크로 `ROCKS_NATIVE_CLASS`는 이름이 겹치므로 `ROCKS_NATIVE_TYPE`으로 바꾼다(EngineRuntime 80행 서술도 고친다).
 
@@ -195,15 +195,17 @@ struct FieldSchema {
     FieldKind kind;            // ObjectReference = 강한 GC 간선(ObjectRef·ObjectRefArray)
     uint32 flags;
     Span<const char> name;     // C++ 이름
-    Span<const char> toolName; // Name="…", 비면 name
     Span<const uint8> attributes;
     ValueType value;           // Array면 kind = Array
-    ValueType element;         // Array의 원소 형식, 그 밖은 Opaque
-    uint32 maxElements;        // Array만, 그 밖은 0
     Span<const char> category;
     Span<const char> displayName;
+    Span<const char> toolName; // Name="…", 비면 name
+    ValueType element;         // Array의 원소 형식, 그 밖은 Opaque
+    uint32 maxElements;        // Array만, 그 밖은 0
 };
 ```
+
+(멤버 순서는 기존 집합 초기화 순서를 유지하려고 새 멤버를 끝에 붙인 것이다 — B3a 구현.)
 
 - `ValueKind` 끝에 `Enum`·`Struct`·`Array`·`AssetId`·`SoftObjectReference`·`Digest256`를 붙이고 TypeRegistry의 상한 검사를 바꾼다.
 - 규칙(등록 때 검사): `kind == ObjectReference` ⇔ (`value.kind == ObjectReference`) 또는 (`value.kind == Array`이고 `element.kind == ObjectReference`). `value.type`은 Enum·Struct·ObjectReference·SoftObjectReference에서만 쓴다. Array 원소는 Array일 수 없다.
@@ -309,7 +311,7 @@ struct BulkDataRef {
 
 ### 6.2 두 단계 decode
 
-- **1단계(검증)**: construction = nullptr. 파싱·형식·한도·enum·버전을 검증하고 참조 token을 기대 타입과 함께 수집기로 보고한다(도달성·범위·타입 검증용 — 지금 GraphLoad가 최상위 필드의 `referencedType`만 보는 것을 중첩까지 넓힌다). 1단계 산출물 — 노드의 RecordReader 색인(FieldView 목록)과 객체·struct 마이그레이션 결과 Record — 을 `LoadNode`에 보관한다. **2단계의 작업량도 1단계에서 미리 청구한다**(같은 양).
+- **1단계(검증)**: construction = nullptr. 파싱·형식·한도·enum·버전을 검증하고 참조 token을 기대 타입과 함께 수집기로 보고한다(도달성·범위·타입 검증용 — 지금 GraphLoad가 최상위 필드의 `value.type`만 보는 것을 중첩까지 넓힌다). 1단계 산출물 — 노드의 RecordReader 색인(FieldView 목록)과 객체·struct 마이그레이션 결과 Record — 을 `LoadNode`에 보관한다. **2단계의 작업량도 1단계에서 미리 청구한다**(같은 양).
 - **2단계(적용)**: 모든 객체를 만든 뒤 staged 객체에 쓴다. 보관한 색인·마이그레이션 결과를 다시 쓰므로 record를 다시 열지 않고(필드 누계 이중 청구 없음) 마이그레이션도 다시 실행하지 않는다. 2단계의 값 읽기(`OpenValue`·중첩 Record·배열 reader)는 보관한 색인에서 **1단계와 같은 크기 한도, 무제한 operation·work의 별도 예산**으로 연다(같은 양을 1단계가 실제 예산에 미리 청구했으므로 이중 청구가 아니다). 그래서 2단계는 예산으로 실패하지 않는다 — "잘못된 파일은 생성자를 실행하지 않는다" 불변식이 유지된다(2단계 실패는 할당 실패뿐이며 그래프 로드 전체 rollback이다).
 - 참조 대상 타입 확인(`Acquire`)은 (기대 타입, 실제 타입) 쌍으로 캐시한다(간선마다 lease를 다시 열지 않는다).
 
@@ -375,7 +377,7 @@ struct BulkDataRef {
 | B7 | 툴체인 지문·도구 빌드 ID 생성·주입, AS 문서 정정 | 8절 시험 (다른 단계와 독립 — 병렬 가능) |
 | B8 | Level·Actor·Component의 `ROCKS_CLASS(WorldOnly)` 이전 | 기존 World 시험 전부 + 리플렉션 Trace·저장 |
 
-상태: B1은 2026-11-13에 구현했다(사용 계약은 [리플렉션 메타데이터](../Implementation/ReflectionMetadata.ko.md)의 "모듈 메타데이터"·"생성물과 등록"). B1의 `RegisterModuleTypes`는 클래스만 등록하며 B3가 enum·struct와 TypeRegistry 종류를 더한다. B2는 2026-11-13에 구현했다: 정수 지정자 값, `Version`·상속되는 `WorldOnly`, `EditorOnly`·`Required`(참조 필드만, RMC2202)·`Name`(도구 이름, RMC2203)·`MaxElements`(배열 전용 — 배열이 생기기 전까지 RMC2202), `ROCKS_NATIVE`(RMC2204·2205·2206, 생성 static_assert), `ROCKS_NATIVE_TYPE`, `completeFieldLayout`의 새 뜻, TypeRegistry 마스크·WorldOnly 상속·도구 이름 검사. 리플렉션 struct의 `ContainsStrongReference`·`RequiresWorldOnlyOwner` 형질은 struct가 생기는 B4에서 더한다. B1 구현에서 정한 것: 메타데이터 배치·검증은 타깃에서 도달하는 모듈에만 적용한다. `ModuleRegistration`은 이미 등록된 공유 타입의 lease를 붙잡는다. `.generated.h` 철자를 예약한다(RMC2005). 명세 사이 이름도 유일해야 한다(1.6절).
+상태: B1은 2026-11-13에 구현했다(사용 계약은 [리플렉션 메타데이터](../Implementation/ReflectionMetadata.ko.md)의 "모듈 메타데이터"·"생성물과 등록"). B1의 `RegisterModuleTypes`는 클래스만 등록하며 B3가 enum·struct와 TypeRegistry 종류를 더한다. B2는 2026-11-13에 구현했다: 정수 지정자 값, `Version`·상속되는 `WorldOnly`, `EditorOnly`·`Required`(참조 필드만, RMC2202)·`Name`(도구 이름, RMC2203)·`MaxElements`(배열 전용 — 배열이 생기기 전까지 RMC2202), `ROCKS_NATIVE`(RMC2204·2205·2206, 생성 static_assert), `ROCKS_NATIVE_TYPE`, `completeFieldLayout`의 새 뜻, TypeRegistry 마스크·WorldOnly 상속·도구 이름 검사. 리플렉션 struct의 `ContainsStrongReference`·`RequiresWorldOnlyOwner` 형질은 struct가 생기는 B4에서 더한다. B3는 세 커밋으로 나눈다 — B3a(`ValueType`·`AssetId`·`Sha256Digest`·`SoftObjectRef<T>`, 3.1–3.3·3.5절의 스키마 표현), B3b(`ROCKS_ENUM`·TypeRegistry 종류·의존 계수·native 대조·enum 먼저 등록), B3c(codec thunk와 문맥·두 단계 decode·decode 정책·진단·`ValidateFieldWrite`). B3a는 2026-11-13에 구현했다: `FieldSchema::value`(`ValueType`)·`element`·`maxElements`(배열 전까지 Opaque·0만 등록), `ValueKind` 끝의 여섯 종류(Enum·Struct·Array는 B3b–B5까지 등록 거부), `FieldValue::digest`·`type`, wire `SoftObjectReference = 12`, 소프트 참조의 기대 타입과 `Required` 허용, 쓰기·저장·로드의 소프트 참조 규칙 검사(사용 계약은 [리플렉션 메타데이터](../Implementation/ReflectionMetadata.ko.md)의 형식 표). B3a에서 정한 것: `AssetId::TryParse`는 정규 표기(36자 소문자)만 받는다. FieldValue의 String은 UTF-8 불변식을 지키므로 소프트 참조의 UTF-8 검사는 `SoftObjectRef::TryAssign(StringView)`와 Archive 해석에서 걸린다. `SoftObjectRef`는 이동하면 원본이 null이 되고(경로만 비우면 같은 에셋의 대표 객체를 가리키게 된다), 받는 쪽 allocator를 유지하는 복사 `TryAssign(other)`와 allocator를 받는 `TryClone(allocator)`를 둔다. 등록된 쓰기의 오류 순서는 전달 값 종류 → 읽기 전용 → 값 내용(정수 폭·소프트 참조 규칙)이다. 소프트 참조의 기대 타입은 쓰기·저장·로드에서 검사하지 않는다(대상을 찾는 A0-O·A1의 일). descriptor import는 MetaCompiler가 만드는 값 종류만 받고 Required와 종류의 대응도 다시 검사한다(RMC1000). 상속 필드 대조에 `element`·`maxElements`를 포함한다. B1 구현에서 정한 것: 메타데이터 배치·검증은 타깃에서 도달하는 모듈에만 적용한다. `ModuleRegistration`은 이미 등록된 공유 타입의 lease를 붙잡는다. `.generated.h` 철자를 예약한다(RMC2005). 명세 사이 이름도 유일해야 한다(1.6절).
 
 의존: B1 → B3(집계 헤더·import), B2 → B3(Required·EditorOnly 검증), B3 → B4 → B5(struct 원소 배열), B3·B5 → B6(경로는 struct·배열을 지난다), B2·B5 → B8. B7은 독립이다. 각 단계는 구현 뒤 다수 서브에이전트 교차검증, Debug·Release·Asan·format·policy·Android 빌드를 거쳐 커밋한다.
 

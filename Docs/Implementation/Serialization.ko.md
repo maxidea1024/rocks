@@ -44,13 +44,17 @@ unknown nonzero tag는 FieldView로 반환하여 skip할 수 있다. known tag�
 
 payload는 u32 count + count × (u64 length + 중첩 Record)이며 빈 목록도 count 0으로 기록한다. `RecordListLimits`는 maxItems·maxPayloadBytes(기본 4 MiB)·maxItemBytes(기본 4 MiB − 12)로, 기본값은 기본 maxValueBytes에 맞춰 기본 한도의 목록이 기본 한도의 부모 값 하나에 들어간다. builder는 완성된 payload를 기하 성장 buffer에 쌓고(실패 원자적) Finish가 부모에 한 번 복사한다. reader는 count를 할당 전에 남은 byte / 52와 비교하고, count만큼 work를 항목 파싱 전에 청구한 뒤 모든 length·항목 envelope를 검증하고 index를 게시한다. 목록 archive의 크기 한도는 목록 한도에서 오고 항목 Record 한도와 분리된다.
 
+### SoftObjectReference (wire tag 12)
+
+payload는 Guid 16 bytes(에셋 ID) + String(객체 경로, u64 길이 + UTF-8)이다. 형식만 정의하며 null 규칙과 경로 상한은 ObjectRuntime `SoftObjectRef`와 ObjectSerialization이 검사한다(아래 Object Graph).
+
 ## Object Graph version 1
 
 외곽 envelope는 magic `ROCKSGRF` 8 bytes, format version u32=1, object count u32, root local ID u32=1의 20 bytes다. 각 객체는 local ID u64, TypeId Guid, schema version u32, 길이 prefix가 있는 Record bytes로 구성한다. local ID는 1부터 count까지 연속 순서다.
 
 객체 주소나 runtime ObjectHandle의 registry/slot/generation을 저장하지 않는다. ObjectRef는 파일 내부 u64 ID로 표현하며 0은 null이다. metadata 순서 BFS로 객체 ID를 부여하여 cycle·shared identity를 보존한다. 다른 Registry에 복원한 동일 그래프를 다시 저장하는 byte 재현성을 시험한다.
 
-지원 ValueKind는 bool, UInt8/16/32/64, Int32/64, Float32/64, Guid, Utf8String, ObjectReference다. UInt8/16/32는 U32 wire, Int32/64는 I64 wire로 저장하고 대상 폭을 넘는 값은 Overflow로 거부한다. 모든 strong graph 필드가 `completeFieldLayout=true` metadata에 포함되고 schema와 typed accessor가 stable GUID별 1:1이어야 한다. 이 완전성 선언에는 상속 필드도 포함한다. Opaque·부분 metadata·누락 accessor는 Unsupported다.
+지원 ValueKind는 bool, UInt8/16/32/64, Int32/64, Float32/64, Guid, Utf8String, ObjectReference, AssetId, Digest256, SoftObjectReference다. UInt8/16/32는 U32 wire, Int32/64는 I64 wire로 저장하고 대상 폭을 넘는 값은 Overflow로 거부한다. AssetId는 Guid wire, Digest256은 Bytes wire(길이가 정확히 32가 아니면 InvalidArgument), SoftObjectReference는 SoftObjectReference wire다. 소프트 참조는 저장 때(C++에서 직접 대입한 값)와 로드 때 모두 null 규칙(asset 0에 경로가 있으면 안 됨)과 4 KiB 경로 상한을 검사하고 어기면 InvalidArgument다. 소프트 참조는 GC 간선이 아니므로 대상 객체를 그래프에 포함하거나 찾지 않는다. Enum·Struct·Array는 B3–B5 codec 전까지 Unsupported다. 모든 strong graph 필드가 `completeFieldLayout=true` metadata에 포함되고 schema와 typed accessor가 stable GUID별 1:1이어야 한다. 이 완전성 선언에는 상속 필드도 포함한다. Opaque·부분 metadata·누락 accessor는 Unsupported다.
 
 ## 저장·복원 수명과 실패 규약
 
@@ -89,10 +93,10 @@ maxBytes는 전체 RAM peak 제한과 같지 않다. 저장 시 중간 record와
 
 ## 검증 구성과 후속 범위
 
-Archive/Record 시험에는 독립 little-endian golden, IEEE bits, UTF-8/NUL, 비정상 길이·bool·version·tag, compound cursor 불변, 자기 alias 성장, 모든 할당 지점 N-fail, 실패 예산 유지, field iteration/move 수명, 결정적 byte mutation, 최대 필드 수(4096)의 정렬 index·이진 탐색 비용과 비이웃 중복이 포함된다. RecordList 시험에는 손으로 조립한 payload와의 byte 비교, 잘림·length 불일치·count 사전 검사, 모든 한도의 정확한 경계(builder·reader), 기본 한도 조합(4 MiB − 12 항목), 트리 예산 공유·포화·스레드 합산, 실패 호출의 operation 소비, 부모 한도 전파, 다항목 N-fail 후 재시도 결과의 byte 동일성과 누수 검사가 포함된다. ObjectGraph 시험에는 cycle/shared identity, 다른 Registry 복원, scalar/String/Guid, unknown/missing policy, migration, 참조·폭·trailing 오류, TypeRegistry 불일치, incomplete metadata, save/load 전체 N-fail과 객체/할당/lease 원상태 검사가 포함된다.
+Archive/Record 시험에는 독립 little-endian golden, IEEE bits, UTF-8/NUL, 비정상 길이·bool·version·tag, compound cursor 불변, 자기 alias 성장, 모든 할당 지점 N-fail, 실패 예산 유지, field iteration/move 수명, 결정적 byte mutation, 최대 필드 수(4096)의 정렬 index·이진 탐색 비용과 비이웃 중복이 포함된다. RecordList 시험에는 손으로 조립한 payload와의 byte 비교, 잘림·length 불일치·count 사전 검사, 모든 한도의 정확한 경계(builder·reader), 기본 한도 조합(4 MiB − 12 항목), 트리 예산 공유·포화·스레드 합산, 실패 호출의 operation 소비, 부모 한도 전파, 다항목 N-fail 후 재시도 결과의 byte 동일성과 누수 검사가 포함된다. ObjectGraph 시험에는 cycle/shared identity, 다른 Registry 복원, scalar/String/Guid, AssetId·digest·소프트 참조(왕복·재저장 byte 동일성·경로 4 KiB 경계·직접 대입한 잘못된 값의 저장 거부·wire 종류·길이·잘림·trailing 오류 행렬·save/load N-fail), unknown/missing policy, migration, 참조·폭·trailing 오류, TypeRegistry 불일치, incomplete metadata, save/load 전체 N-fail과 객체/할당/lease 원상태 검사가 포함된다.
 
-weak/external asset 참조, 다중 root, 임의 컨테이너와 native 숨은 필드, 비동기·병행 graph snapshot, 파일 IO, 압축·암호화, 무결성 인증은 현재 구현 범위에 포함하지 않는다. 장기 계획의 전체 serialization/cook/savegame 완료로 합산하지 않는다. 지원하지 않는 표현을 raw struct dump나 성공한 부분 저장으로 대체하지 않는다.
+소프트 참조의 해석·로드(값 저장·복원만 지원), 다중 root, 임의 컨테이너와 native 숨은 필드, 비동기·병행 graph snapshot, 파일 IO, 압축·암호화, 무결성 인증은 현재 구현 범위에 포함하지 않는다. 장기 계획의 전체 serialization/cook/savegame 완료로 합산하지 않는다. 지원하지 않는 표현을 raw struct dump나 성공한 부분 저장으로 대체하지 않는다.
 
 ## 참조 타입 사전 검증
 
-nonnull 참조의 `referencedType`이 0이 아니면 해당 등록 lease의 native type과 실제 대상의 native type을 비교한다. 파생 타입의 `IsA`만으로 참조를 허용하지 않으며 모든 생성자 실행 전에 TypeMismatch로 거부한다. 동일 native type을 다른 TypeId로 등록한 별명은 허용하여 기존 Registry setter 규약과 일치시킨다. `referencedType=0`은 기반 Object의 일반 참조다. nonnull 참조의 명시 대상 타입이 등록되지 않았으면 NotFound를 반환한다. null 참조는 대상 등록을 요구하지 않는다.
+강한 참조(ObjectReference)에만 해당한다. 소프트 참조의 `value.type`(기대 타입)은 저장·복원에서 검사하지 않는다(대상을 찾을 때 검사한다). nonnull 참조의 `value.type`이 0이 아니면 해당 등록 lease의 native type과 실제 대상의 native type을 비교한다. 파생 타입의 `IsA`만으로 참조를 허용하지 않으며 모든 생성자 실행 전에 TypeMismatch로 거부한다. 동일 native type을 다른 TypeId로 등록한 별명은 허용하여 기존 Registry setter 규약과 일치시킨다. `value.type=0`은 기반 Object의 일반 참조다. nonnull 참조의 명시 대상 타입이 등록되지 않았으면 NotFound를 반환한다. null 참조는 대상 등록을 요구하지 않는다.

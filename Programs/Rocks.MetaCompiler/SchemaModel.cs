@@ -41,6 +41,12 @@ internal sealed class FieldModel
 
     public bool IsReference => Kind == "ObjectReference";
 
+    // ValueType.type(기대 대상 타입 ID)을 쓰는 종류다: 강한 참조와 소프트 참조.
+    public bool HasTargetType => KindHasTargetType(Kind);
+
+    // descriptor 읽기·쓰기와 Required 검사가 같은 조건을 쓰도록 종류 이름으로도 판정한다.
+    public static bool KindHasTargetType(string kind) => kind is "ObjectReference" or "SoftObjectReference";
+
     // FieldFlags 비트: Transient 1, ReadOnly 2, EditorOnly 4, Required 8.
     public uint Flags => (Spec.Transient ? 1u : 0u) | (Spec.ReadOnly ? 2u : 0u) | (Spec.EditorOnly ? 4u : 0u) | (Spec.Required ? 8u : 0u);
 

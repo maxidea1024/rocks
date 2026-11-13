@@ -49,10 +49,17 @@ auto runtimeName = type.Name();
 | `Guid` | 두 개의 64비트 정수로 구성된 값 |
 | `String` | 소유한 유효 UTF-8 문자열; 길이는 바이트 수 |
 | `ObjectRef<T>` | `ObjectHandle`을 담은 참조 값; 실제 변경은 Registry barrier 경유 |
+| `AssetId` | `ValueKind::AssetId`; 에셋 ID(`Object/AssetId.h`, Guid, 0 = null). 저장 wire는 Guid |
+| `Sha256Digest` | `ValueKind::Digest256`; 32 byte 해시(`Core/Encoding/Sha256.h`). 저장 wire는 정확히 32 byte의 Bytes |
+| `SoftObjectRef<T>` | `ValueKind::SoftObjectReference`; 에셋 ID와 패키지 안 객체 경로(`Object/SoftObjectRef.h`). GC 간선이 아니며 `value.type`이 기대 타입(Object면 0). 저장 wire는 `SoftObjectReference`(12) |
+
+스키마의 값 형식은 `FieldSchema::value`(`ValueType { ValueKind kind; TypeId type; }`)다. `type`은 강한 참조와 소프트 참조의 기대 대상 타입이며(0 = Object) 그 밖의 종류에서는 0이어야 한다. `element`·`maxElements`는 배열 필드(B5)용 자리이며 지금은 Opaque·0만 등록된다.
+
+`SoftObjectRef<T>`의 규칙: null은 asset이 0이고 경로가 빈 것이다(asset만 있고 경로가 비면 그 에셋의 대표 객체다). asset이 0인데 경로가 있거나, 경로가 4 KiB(`MaxObjectPathBytes`)를 넘거나 UTF-8이 아니면 InvalidArgument다. 리플렉션 쓰기(`write`·`writeStaged`·등록 전 callback), 그래프 저장(직접 대입한 값도 다시 검사)과 로드가 같은 규칙을 검사한다. 경로 문법(Outer 이름을 `.`로 잇는다)과 기대 타입은 대상을 찾을 때(A0-O·A1) 검사하며 쓰기·저장·로드는 검사하지 않는다. 이동 전용이고 이동하면 원본은 null이 된다. 이동 대입은 원본의 경로 allocator를 넘겨받으므로 객체 필드에 값을 넣을 때는 `TryAssign(other)`(받는 쪽 allocator 유지)를 쓰고, 복제는 실패할 수 있는 `TryClone(allocator)`다. 쓰는 클래스에는 `noexcept T(Allocator&)` 생성자가 필요하다(String 필드와 같다). `AssetId`의 문자열 표기와 해석은 36자 소문자 하이픈 형식 하나뿐이다(`TryParse`는 대문자·32자·중괄호를 거부한다).
 
 현재 생성 대상은 이름 있는 비템플릿 타입이며, 모든 비정적 필드는 `ROCKS_PROPERTY`(영속·리플렉션 필드) 또는 `ROCKS_NATIVE`(비영속 런타임 멤버) 중 하나를 단다(둘 다면 RMC2204). private/protected 필드는 해당 리플렉션 클래스 안에 `ROCKS_GENERATED_BODY()`를 직접 한 번 선언해야 한다. 리플렉션하지 않은 클래스, 다른 매크로로 감싼 호출, 수동 작성한 내부 annotation과 중복 선언은 거부한다. PROPERTY 필드에서 raw pointer, 배열·컨테이너, enum, const/volatile 필드는 거부한다(NATIVE 멤버는 강한 객체 참조만 아니면 이런 타입을 둘 수 있다). bitfield와 annotation을 붙인 static 필드는 거부한다. static 보조 데이터는 annotation 없이 둘 수 있다. 수동 `Trace`와 자동 추적을 섞어 완전한 필드 레이아웃으로 오인하지 않도록, 생성 대상의 직접 선언된 `Trace`는 거부한다.
 
-단일 public 비가상 상속만 지원한다. 기반 타입과 `ObjectRef<T>`의 대상은 `Object`, 같은 모듈의 리플렉션 타입, 또는 import한 의존 모듈 descriptor의 public 리플렉션 타입이어야 한다(아래 "모듈 메타데이터"). 파생 스키마는 상속 필드를 안정 ID 순서로 펼치며, 상속을 포함한 필드 수는 최대 4,096개다. 생성 접근기는 멤버 포인터를 사용한다. 객체 레이아웃에서 offset을 추정하거나 raw 필드 주소를 반환하지 않는다.
+단일 public 비가상 상속만 지원한다. 기반 타입과 `ObjectRef<T>`·`SoftObjectRef<T>`의 대상은 `Object`, 같은 모듈의 리플렉션 타입, 또는 import한 의존 모듈 descriptor의 public 리플렉션 타입이어야 한다(아래 "모듈 메타데이터"). 파생 스키마는 상속 필드를 안정 ID 순서로 펼치며, 상속을 포함한 필드 수는 최대 4,096개다. 생성 접근기는 멤버 포인터를 사용한다. 객체 레이아웃에서 offset을 추정하거나 raw 필드 주소를 반환하지 않는다.
 
 ### 속성 지정자와 표시 문자열
 
@@ -78,18 +85,18 @@ public:
 | `Transient` | PROPERTY | GC에서 추적하지만 저장 그래프에서 뺀다. |
 | `ReadOnly` | PROPERTY | 일반 write는 거부하고 생성·복원의 staged write만 허용한다. |
 | `EditorOnly` | PROPERTY | 플래그만 단다(항상 컴파일). 쿠킹 데이터에서 빼는 것은 graph v2(A0-O)이며 지금 graph는 보통 필드처럼 저장한다. |
-| `Required` | PROPERTY | ObjectRef 필드에만 쓴다(그 밖은 RMC2202). 패키지 저장·쿠킹이 null을 거부한다(A1). 로드는 거부하지 않는다. |
+| `Required` | PROPERTY | `ObjectRef<T>`·`SoftObjectRef<T>` 필드에만 쓴다(그 밖은 RMC2202). 패키지 저장·쿠킹이 null을 거부한다(A1). 로드는 거부하지 않는다. |
 | `Name="…"` | PROPERTY | 도구·명령행 이름(`FieldSchema::toolName`). ASCII 식별자이며, 없으면 C++ 필드 이름이다. 상속 필드를 포함해 대소문자 무시로 유일해야 한다(RMC2203). 직렬화는 필드 ID를 쓰므로 이름과 무관하다. |
 | `Category="…"`·`DisplayName="…"` | PROPERTY | 표시용 UTF-8 문자열(아래). |
 | `MaxElements=N` | PROPERTY | 배열 길이 상한. 배열 필드는 B5에서 생기므로 지금은 모든 필드에서 RMC2202다. |
 
-`ROCKS_NATIVE()`는 저장·리플렉션하지 않는 런타임 멤버(GPU 핸들·캐시)이며 지정자를 받지 않는다. GC가 추적하지 않으므로 강한 객체 참조를 담을 수 없다: MetaCompiler가 Clang AST로 멤버 타입을 값으로 담는 필드·base·이름 없는 struct/union 멤버·배열 원소·템플릿 인자와 패턴 필드까지 재귀 검사해 `ObjectRef`·`RootRef`·`ObjectRefArray`나 Object 파생 타입의 raw 포인터·참조가 있으면 RMC2205로 거부한다. 포인터·참조는 대상이 Object 파생이거나 대상이 다시 강한 참조(`T**`·`ObjectRef<T>*`)인지만 본다 — 빌린 포인터가 가리키는 비-Object 레코드(예: `World*`)의 필드는 그 소유자가 추적한다. Object 파생 타입은 값이나 템플릿 인자로 닿아도 펼치지 않고, `WeakRef`·`ObjectHandle`은 허용한다. `static constexpr bool RocksRequiresWorldOnlyOwner = true;`를 선언한 타입(을 값으로 담는 타입)은 WorldOnly 클래스의 NATIVE 멤버로만 둘 수 있다(RMC2206). 생성 코드는 직접 멤버 타입(배열 원소·포인터와 참조의 대상 포함, 담는 타입의 필드는 제외)에 대해 같은 조건을 `static_assert`(`IsNativeStrongReference`·`RequiresWorldOnlyOwner`, `<Object/NativeMemberTraits.h>`)로 한 번 더 둔다. NATIVE 멤버는 영속 필드가 아니고 강한 간선을 담지 않으므로 생성 타입의 `completeFieldLayout`은 계속 true다. 수동 등록 매크로는 `ROCKS_NATIVE_TYPE`이다(이전 `ROCKS_NATIVE_CLASS`).
+`ROCKS_NATIVE()`는 저장·리플렉션하지 않는 런타임 멤버(GPU 핸들·캐시)이며 지정자를 받지 않는다. GC가 추적하지 않으므로 강한 객체 참조를 담을 수 없다: MetaCompiler가 Clang AST로 멤버 타입을 값으로 담는 필드·base·이름 없는 struct/union 멤버·배열 원소·템플릿 인자와 패턴 필드까지 재귀 검사해 `ObjectRef`·`RootRef`·`ObjectRefArray`나 Object 파생 타입의 raw 포인터·참조가 있으면 RMC2205로 거부한다. 포인터·참조는 대상이 Object 파생이거나 대상이 다시 강한 참조(`T**`·`ObjectRef<T>*`)인지만 본다 — 빌린 포인터가 가리키는 비-Object 레코드(예: `World*`)의 필드는 그 소유자가 추적한다. Object 파생 타입은 값이나 템플릿 인자로 닿아도 펼치지 않고, `WeakRef`·`SoftObjectRef`·`ObjectHandle`은 허용한다(대상을 담지 않으므로 템플릿 인자도 따라가지 않는다). `static constexpr bool RocksRequiresWorldOnlyOwner = true;`를 선언한 타입(을 값으로 담는 타입)은 WorldOnly 클래스의 NATIVE 멤버로만 둘 수 있다(RMC2206). 생성 코드는 직접 멤버 타입(배열 원소·포인터와 참조의 대상 포함, 담는 타입의 필드는 제외)에 대해 같은 조건을 `static_assert`(`IsNativeStrongReference`·`RequiresWorldOnlyOwner`, `<Object/NativeMemberTraits.h>`)로 한 번 더 둔다. NATIVE 멤버는 영속 필드가 아니고 강한 간선을 담지 않으므로 생성 타입의 `completeFieldLayout`은 계속 true다. 수동 등록 매크로는 `ROCKS_NATIVE_TYPE`이다(이전 `ROCKS_NATIVE_CLASS`).
 
 `Category`와 `DisplayName`은 바이트 길이를 가진 UTF-8 데이터이며 중간 NUL(`\u0000`)도 유효하다. `Span<const char>`의 길이를 사용해야 하며 NUL 종료 문자열 함수로 읽으면 값이 잘린다. 등록 시 이 바이트를 깊게 복사한다. 생성 C++은 한글 등 읽을 수 있는 문자를 유지하고 인용부호·역슬래시·제어 문자를 escape한다. 제어 바이트는 정확히 세 자리 8진수로 표현하므로 뒤에 숫자가 와도 서로 합쳐지지 않는다.
 
 ## 생성물과 등록
 
-생성 헤더는 `GeneratedType<T>`의 `Id`, `Schema`, `Ops`, `Register`를 제공한다. `Schema()`는 타입·필드 ID, 버전, 이름, 값 형식, 기반 타입 ID와 참조 대상 타입 ID를 제공한다. `Ops()`는 실제 C++ 타입으로 검증되는 read/write/writeStaged 함수와 자동 Trace를 제공한다.
+생성 헤더는 `GeneratedType<T>`의 `Id`, `Schema`, `Ops`, `Register`를 제공한다. `Schema()`는 타입·필드 ID, 버전, 이름, 값 형식(`ValueType`), 기반 타입 ID와 참조 대상 타입 ID를 제공한다. `Ops()`는 실제 C++ 타입으로 검증되는 read/write/writeStaged 함수와 자동 Trace를 제공한다.
 
 모듈마다 집계 헤더 `<M>/<M>.module.generated.h`가 생긴다. 이 헤더는 그 모듈의 public 생성 헤더를 모두 include하고 `rocks::generated::<M>::RegisterModuleTypes`를 제공한다. 이 함수는 registration마다 모듈을 한 번만 등록하고(의존 그래프의 여러 경로로 다시 불리면 바로 성공한다), import한 의존 모듈의 `RegisterModuleTypes`를 먼저 부른 뒤 이 모듈의 public 타입을 base 먼저 등록한다. 같은 ID가 같은 native 타입으로 이미 등록되어 있으면 새로 등록하지 않고 그 타입의 lease를 붙잡으므로, 여러 모듈이 같은 의존 모듈을 공유해도 한 번만 등록되고 공유 타입을 쓰는 쪽이 있는 동안에는 그 타입이 해제되지 않는다. 실패하면 그 호출의 기록을 역순으로 되돌리고 오류를 돌려준다. private 헤더가 있는 모듈은 `<M>/<M>.private.module.generated.h`의 `RegisterPrivateModuleTypes`가 public 타입(public 헤더가 없으면 의존 모듈)까지 등록한 뒤 private 타입을 등록한다. 이 헤더는 그 모듈의 private include에서만 보인다. 집계 헤더의 이름은 모두 `::rocks::`로 한정하므로 모듈 이름이 rocks의 이름을 가리지 않는다.
 
@@ -132,7 +139,7 @@ Shutdown은 새 Acquire/Clone을 닫고 외부 lease가 있으면 `Busy`를 반�
 - 정수 폭 축소는 범위를 확인하고 `Overflow`를 반환한다. 타입이 다르면 `TypeMismatch`이며 필드는 변경하지 않는다.
 - ObjectRef write는 `ObjectRegistry::SetReference` 또는 `ConstructionContext::SetReference`를 통과한다. owner/target 검증, typed target 규칙, GC barrier를 raw store로 우회하지 않는다.
 
-등록된 `TypeLease::Ops()`의 모든 일반 write는 실제 대상 객체의 타입 lease를 조회하고 native 타입, 필드 ID와 값 형식을 검증한다. 대상 타입에 필드가 없으면 `NotFound`, native 타입·필드 형식·전달 값 형식이 다르면 `TypeMismatch`를 반환한다. 오류 우선순위는 context·수명, 타입·필드, 전달 값, 읽기 전용 정책 순서다. 따라서 같은 native 타입의 다른 TypeId 별명이나 별도 TypeRegistry의 객체도 실제 대상 schema의 필드 정책을 검사한다.
+등록된 `TypeLease::Ops()`의 모든 일반 write는 실제 대상 객체의 타입 lease를 조회하고 native 타입, 필드 ID와 값 형식을 검증한다. 대상 타입에 필드가 없으면 `NotFound`, native 타입·필드 형식·전달 값 형식이 다르면 `TypeMismatch`를 반환한다. 오류 우선순위는 context·수명, 타입·필드, 전달 값 종류, 읽기 전용 정책, 값 내용(정수 폭 `Overflow`, 소프트 참조의 null 규칙·경로 상한 `InvalidArgument`) 순서다. 따라서 같은 native 타입의 다른 TypeId 별명이나 별도 TypeRegistry의 객체도 실제 대상 schema의 필드 정책을 검사한다.
 
 `ReadOnly`는 등록된 함수표의 일반 write에 적용되는 편집 정책이다. 원본 또는 대상 schema 중 하나라도 해당 필드를 ReadOnly로 선언하면 `Unsupported`를 반환한다. 미게시 객체에 대한 `writeStaged`는 초기화와 복원을 위해 허용한다. 등록된 write마다 타입 lease 조회와 필드 검색 비용이 발생하며, 안전한 정책 확인을 우선한다. `write`는 callable 값이며 기존 `.write(...)` 호출 구문을 유지한다. 이 값의 callback 코드 수명은 `TypeLease`가 보유하는 `ModuleLease`에 종속된다.
 ObjectReference 필드는 등록 시점에 참조 대상 타입이 아직 등록되지 않을 수 있으므로 write 시점에 원본 및 대상 TypeRegistry에서 각각 선언 타입을 조회한다. 둘 다 구체 타입이면 native 타입이 같아야 하며, 서로 다른 TypeId가 같은 native 타입을 가리키는 별칭은 허용한다. 한쪽이 0 GUID이면 일반 Object로 취급하고 다른 쪽의 구체 타입 제약을 적용한다. 실제 참조가 비어 있지 않으면 두 구체 제약에 모두 맞아야 한다. 두 구체 선언이 서로 충돌하거나 타입을 조회하지 못하면 null 대입도 거부한다. 정상적인 자기 참조 선언의 null은 허용하며 부분적으로만 비어 있는 잘못된 핸들은 거부한다.

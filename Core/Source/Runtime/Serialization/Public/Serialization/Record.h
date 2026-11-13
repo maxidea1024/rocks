@@ -19,7 +19,9 @@ enum class WireType : uint32 {
     Bytes = 9,
     Record = 10,
     // 항목 Record 목록: u32 count + count × (u64 length + 중첩 Record). Serialization/RecordList.h.
-    RecordList = 11
+    RecordList = 11,
+    // 소프트 객체 참조: Guid 16 byte(asset) + String(객체 경로). ObjectRuntime SoftObjectRef.
+    SoftObjectReference = 12
 };
 
 struct RecordLimits {

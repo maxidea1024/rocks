@@ -4,7 +4,7 @@
 
 ## 지원 범위
 
-bool, uint8/16/32/64, int32/64, float32/64, Guid, UTF-8 String, 강한 ObjectRef를 지원한다. 좁은 unsigned는 U32, signed는 I64 wire 형식을 사용하고 복원 시 실제 값 폭을 검사한다. unknown GUID field는 skip한다. known field의 wire tag·값·trailing byte는 엄격히 검사한다.
+bool, uint8/16/32/64, int32/64, float32/64, Guid, UTF-8 String, 강한 ObjectRef, AssetId(Guid wire), Sha256Digest(Bytes wire, 정확히 32 byte), SoftObjectRef(SoftObjectReference wire)를 지원한다. 소프트 참조는 값으로 저장하며 대상을 그래프에 넣거나 찾지 않는다. 저장(C++에서 직접 대입한 값)과 복원 모두 null 규칙(asset 0에 경로가 있으면 안 됨)과 4 KiB 경로 상한을 검사해 InvalidArgument로 거부한다. 좁은 unsigned는 U32, signed는 I64 wire 형식을 사용하고 복원 시 실제 값 폭을 검사한다. unknown GUID field는 skip한다. known field의 wire tag·값·trailing byte는 엄격히 검사한다.
 
 `RuntimeTypeOps::completeFieldLayout`이 true이고 schema와 accessor가 stable field GUID별 1:1이어야 한다. 이 선언에는 상속 필드를 포함한 모든 영속 필드와 모든 강한 간선이 포함된다(ROCKS_NATIVE 멤버는 영속 필드가 아니고 강한 참조를 담을 수 없어 포함 대상이 아니다). 기본 수동 metadata는 false이며 부분 metadata·Opaque·누락 accessor는 Unsupported다. 수동 작성자가 거짓 완전성을 선언하는 임의 플러그인의 메모리 안전성을 검증하는 기능은 아니다.
 
@@ -36,8 +36,8 @@ String getter 복제에는 임시 bounded forwarding allocator를 사용해 큰 
 
 maxBytes는 전체 RAM peak가 아니다. 저장은 record staging과 최종 output을, 복원은 input·index·decoded 문자열·migration output·staged 객체를 동시에 보유할 수 있다. 각 제한과 객체 수가 이를 제한하며 allocator 자체의 메모리 quota는 별도 정책이다.
 
-weak/external asset 참조, 다중 root, 임의 컨테이너/숨은 native field, 외부 IO, 압축·암호화, 비동기 저장, 실행 중 graph mutation snapshot은 후속 범위다. 이 기능들을 암묵적으로 raw memory 저장이나 부분 성공으로 대체하지 않는다.
+소프트 참조의 해석·로드(대상 에셋 찾기), 다중 root, 임의 컨테이너/숨은 native field, 외부 IO, 압축·암호화, 비동기 저장, 실행 중 graph mutation snapshot은 후속 범위다. 이 기능들을 암묵적으로 raw memory 저장이나 부분 성공으로 대체하지 않는다.
 
 ## 참조 타입 사전 검증
 
-nonnull 참조의 `referencedType`이 0이 아니면 해당 등록 lease의 native type과 실제 대상의 native type을 비교한다. 파생 타입의 `IsA`만으로 참조를 허용하지 않으며 모든 생성자 실행 전에 TypeMismatch로 거부한다. 동일 native type을 다른 TypeId로 등록한 별명은 허용하여 기존 Registry setter 규약과 일치시킨다. `referencedType=0`은 기반 Object의 일반 참조다. nonnull 참조의 명시 대상 타입이 등록되지 않았으면 NotFound를 반환한다. null 참조는 대상 등록을 요구하지 않는다.
+강한 참조(ObjectReference)에만 해당한다. 소프트 참조의 `value.type`(기대 타입)은 저장·복원에서 검사하지 않는다(대상을 찾을 때 검사한다). nonnull 참조의 `value.type`이 0이 아니면 해당 등록 lease의 native type과 실제 대상의 native type을 비교한다. 파생 타입의 `IsA`만으로 참조를 허용하지 않으며 모든 생성자 실행 전에 TypeMismatch로 거부한다. 동일 native type을 다른 TypeId로 등록한 별명은 허용하여 기존 Registry setter 규약과 일치시킨다. `value.type=0`은 기반 Object의 일반 참조다. nonnull 참조의 명시 대상 타입이 등록되지 않았으면 NotFound를 반환한다. null 참조는 대상 등록을 요구하지 않는다.

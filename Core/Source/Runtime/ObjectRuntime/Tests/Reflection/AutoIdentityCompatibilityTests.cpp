@@ -20,7 +20,7 @@ Result<TypeRegistrationToken> RegisterOriginal(TypeRegistry& types) noexcept {
     FieldSchema field;
     field.id = SavedFieldId;
     field.name = {"health", 6};
-    field.valueKind = ValueKind::Int32;
+    field.value.kind = ValueKind::Int32;
     const RuntimeFieldOps accessors[] = {
         {SavedFieldId,
          [](ObjectRegistry& registry, const ObjectAccessContext& access, ObjectHandle object,

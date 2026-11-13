@@ -175,6 +175,57 @@ internal static class ModuleMetaTests
             await Reject(layout.RunUpperAsync(), "RMC2203", "tool name");
         });
 
+        // B3a: AssetId·Sha256Digest·SoftObjectRef 필드가 descriptor에 담기고, import한 base의 소프트 참조 기대 타입이 파생
+        // 모듈로 전해진다(Docs/Design/ReflectionFoundations.ko.md 3.1–3.3절).
+        suite.Add("Meta.AssetValueKindsRoundTripThroughImportedDescriptors", async () =>
+        {
+            using Layout layout = new(options, environment);
+            layout.Write("Lower/Public/Lower/Parent.h", "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n" +
+                "#include <Object/AssetId.h>\n#include <Object/SoftObjectRef.h>\n#include <Core/Encoding/Sha256.h>\nnamespace probe {\n" +
+                "ROCKS_CLASS()\nstruct Parent : public rocks::Object {\n" +
+                "explicit Parent(rocks::Allocator& allocator) noexcept : icon(allocator), any(allocator) {}\n" +
+                "ROCKS_PROPERTY() rocks::int32 value = 0;\nROCKS_PROPERTY() rocks::AssetId source;\nROCKS_PROPERTY() rocks::Sha256Digest hash;\n" +
+                "ROCKS_PROPERTY(Required) rocks::SoftObjectRef<Parent> icon;\nROCKS_PROPERTY() rocks::SoftObjectRef<> any;\n};\n}\n");
+            layout.Manifest("Lower", [], ["probe::Parent::source", "probe::Parent::hash", "probe::Parent::icon", "probe::Parent::any"]);
+            layout.Write("Upper/Public/Upper/Value.h", Value.Replace("struct Value : public Parent {\n",
+                "struct Value : public Parent {\nexplicit Value(rocks::Allocator& allocator) noexcept : Parent(allocator), back(allocator) {}\n" +
+                "ROCKS_PROPERTY() rocks::SoftObjectRef<Parent> back;\n", StringComparison.Ordinal));
+            layout.Manifest("Upper", [], ["probe::Value::back"]);
+            ProcessResult lower = await layout.RunLowerAsync();
+            Verify.Equal(0, lower.ExitCode, "lower module: " + lower.StdErr);
+            ProcessResult upper = await layout.RunUpperInputsAsync([(layout.Source("Upper/Public/Upper/Value.h"), "Upper/Value.h", false)]);
+            Verify.Equal(0, upper.ExitCode, "upper module: " + upper.StdErr);
+
+            using JsonDocument lowerDescriptor = JsonDocument.Parse(File.ReadAllBytes(layout.Descriptor("Lower")));
+            using JsonDocument upperDescriptor = JsonDocument.Parse(File.ReadAllBytes(layout.Descriptor("Upper")));
+            string parentId = Type(lowerDescriptor, "probe::Parent").GetProperty("id").GetString()!;
+            JsonElement Field(JsonDocument descriptor, string type, string name) => Type(descriptor, type).GetProperty("fields").EnumerateArray()
+                .Single(field => field.GetProperty("name").GetString() == name);
+            Verify.Equal("AssetId", Field(lowerDescriptor, "probe::Parent", "source").GetProperty("value").GetProperty("kind").GetString(), "AssetId kind");
+            Verify.That(!Field(lowerDescriptor, "probe::Parent", "source").GetProperty("value").TryGetProperty("type", out _), "AssetId has no target type");
+            Verify.Equal("Digest256", Field(lowerDescriptor, "probe::Parent", "hash").GetProperty("value").GetProperty("kind").GetString(), "digest kind");
+            JsonElement icon = Field(lowerDescriptor, "probe::Parent", "icon");
+            Verify.Equal("SoftObjectReference", icon.GetProperty("value").GetProperty("kind").GetString(), "soft reference kind");
+            Verify.Equal(parentId, icon.GetProperty("value").GetProperty("type").GetString(), "soft reference target");
+            Verify.Equal("Required", icon.GetProperty("flags")[0].GetString(), "Required on a soft reference");
+            Verify.Equal("", Field(lowerDescriptor, "probe::Parent", "any").GetProperty("value").GetProperty("type").GetString(), "Object soft reference target");
+            Verify.Equal("", Field(upperDescriptor, "probe::Value", "any").GetProperty("value").GetProperty("type").GetString(), "inherited Object soft reference target");
+
+            // 파생 모듈의 자기 소프트 참조 필드도 import한 타입을 기대 타입으로 푼다.
+            JsonElement own = Field(upperDescriptor, "probe::Value", "back");
+            Verify.Equal("SoftObjectReference", own.GetProperty("value").GetProperty("kind").GetString(), "own soft reference kind");
+            Verify.Equal(parentId, own.GetProperty("value").GetProperty("type").GetString(), "own soft reference to an imported type");
+
+            // import한 base의 필드는 파생 descriptor와 생성 스키마에 같은 값 형식으로 펼쳐진다.
+            JsonElement inherited = Field(upperDescriptor, "probe::Value", "icon");
+            Verify.Equal("SoftObjectReference", inherited.GetProperty("value").GetProperty("kind").GetString(), "inherited soft reference kind");
+            Verify.Equal(parentId, inherited.GetProperty("value").GetProperty("type").GetString(), "inherited soft reference target");
+            Verify.Equal("Required", inherited.GetProperty("flags")[0].GetString(), "inherited Required flag");
+            string generated = File.ReadAllText(layout.Generated("Upper", "Public/Upper/Value.generated.h"));
+            Verify.Contains("ValueKind::SoftObjectReference", generated, "generated soft reference schema");
+            Verify.Contains("ValueKind::Digest256", generated, "generated digest schema");
+        });
+
         // private 헤더만 있는 모듈도 private 집계가 import한 모듈을 먼저 등록한다(base가 등록되어 있어야 한다).
         suite.Add("Meta.PrivateOnlyModuleRegistersImportedModules", async () =>
         {
@@ -229,6 +280,30 @@ internal static class ModuleMetaTests
                 string mutated = layout.Generated("Mutated", name + ".rocksmeta.json");
                 Directory.CreateDirectory(Path.GetDirectoryName(mutated)!);
                 File.WriteAllText(mutated, original.Replace(from, to, StringComparison.Ordinal));
+                await Reject(layout.RunUpperAsync(imports: [mutated]), "RMC1000", "invalid descriptor");
+            }
+
+            // 값 종류는 MetaCompiler가 만드는 종류만 받고, 대상 타입 키와 Required는 종류와 맞아야 한다(B3a).
+            const string Int32Kind = "\"kind\": \"Int32\"";
+            const string ValueField = "\"fieldKind\": \"Value\"";
+            int fieldFlags = original.LastIndexOf("\"flags\": []", StringComparison.Ordinal);
+            Verify.That(fieldFlags > original.IndexOf(ValueField, StringComparison.Ordinal), "descriptor fixture changed: field flags");
+            foreach ((string name, string mutatedText) in new[]
+            {
+                ("enumKind", original.Replace(Int32Kind, "\"kind\": \"Enum\"", StringComparison.Ordinal)),
+                ("opaqueKind", original.Replace(Int32Kind, "\"kind\": \"Opaque\"", StringComparison.Ordinal)),
+                ("unknownKind", original.Replace(Int32Kind, "\"kind\": \"Bogus\"", StringComparison.Ordinal)),
+                ("softWithoutType", original.Replace(Int32Kind, "\"kind\": \"SoftObjectReference\"", StringComparison.Ordinal)),
+                ("assetWithType", original.Replace(Int32Kind, "\"kind\": \"AssetId\",\n            \"type\": \"\"", StringComparison.Ordinal)),
+                ("softAsStrongEdge", original.Replace(Int32Kind, "\"kind\": \"SoftObjectReference\",\n            \"type\": \"\"", StringComparison.Ordinal)
+                    .Replace(ValueField, "\"fieldKind\": \"ObjectReference\"", StringComparison.Ordinal)),
+                ("requiredScalar", original[..fieldFlags] + "\"flags\": [\"Required\"]" + original[(fieldFlags + "\"flags\": []".Length)..])
+            })
+            {
+                Verify.That(mutatedText != original, "descriptor mutation had no effect: " + name);
+                string mutated = layout.Generated("Mutated", name + ".rocksmeta.json");
+                Directory.CreateDirectory(Path.GetDirectoryName(mutated)!);
+                File.WriteAllText(mutated, mutatedText);
                 await Reject(layout.RunUpperAsync(imports: [mutated]), "RMC1000", "invalid descriptor");
             }
         });
@@ -347,7 +422,7 @@ internal static class ModuleMetaTests
 
         public string Source(string relative) => temporary.FilePath(relative);
 
-        private void Manifest(string module, string[] types, string[] fields)
+        public void Manifest(string module, string[] types, string[] fields)
         {
             StableIdManifest.Update(Source(module + "/" + module + ".rocksids.json"), true, manifest =>
             {

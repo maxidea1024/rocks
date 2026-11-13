@@ -21,7 +21,7 @@ Result<TypeRegistrationToken> RegisterNodeAlias(TypeRegistry& types, TypeId id,
     for (usize index = 0; index < schema.fields.Size(); ++index) {
         fields[index] = schema.fields[index];
         if (fields[index].id == NextId) {
-            fields[index].referencedType = reference;
+            fields[index].value.type = reference;
             found = true;
         }
     }
@@ -196,7 +196,7 @@ TEST(ReferenceWriteKeepsBothDeclaredTypeLeasesUntilCallbackCompletes) {
             fields[index] = sourceSchema.fields[index];
             accessors[index] = sourceOps.fields[index];
             if (fields[index].id == NextId) {
-                fields[index].referencedType = sourceReference;
+                fields[index].value.type = sourceReference;
             }
             if (accessors[index].fieldId == NextId) {
                 accessors[index].write = &ProbeReferenceTypeLifetimes;

@@ -1,8 +1,11 @@
 #pragma once
 
+#include <Core/Encoding/Sha256.h>
 #include <Core/Text/String.h>
 #include <Meta/Annotations.h>
+#include <Object/AssetId.h>
 #include <Object/ObjectRefs.h>
+#include <Object/SoftObjectRef.h>
 
 namespace rocks::reflection_fixture {
 
@@ -115,6 +118,33 @@ struct WorldFixture : Object {
 ROCKS_CLASS()
 struct WorldChild final : WorldFixture {
     ROCKS_PROPERTY() int32 depth = 0;
+};
+
+// B3a 값 종류: 에셋 ID, SHA-256 digest, 소프트 객체 참조(기대 타입 있음·없음).
+ROCKS_CLASS()
+struct AssetFields final : Object {
+    explicit AssetFields(Allocator& allocator) noexcept : icon(allocator), anyAsset(allocator) {
+    }
+
+    // 시험이 파괴 시점의 icon 값을 확인한다(쓰기 도중 논리 파괴되어도 값이 바뀌지 않았는지).
+    static inline AssetId destroyedIcon{};
+    static inline char destroyedIconPath[32] = {};
+    static inline usize destroyedIconPathBytes = 0;
+
+    ~AssetFields() noexcept {
+        destroyedIcon = icon.asset;
+        const usize bytes = icon.objectPath.ByteCount();
+        destroyedIconPathBytes =
+            bytes < sizeof(destroyedIconPath) ? bytes : sizeof(destroyedIconPath);
+        for (usize index = 0; index < destroyedIconPathBytes; ++index) {
+            destroyedIconPath[index] = icon.objectPath.Data()[index];
+        }
+    }
+
+    ROCKS_PROPERTY() AssetId source;
+    ROCKS_PROPERTY() Sha256Digest hash;
+    ROCKS_PROPERTY(Required) SoftObjectRef<Node> icon;
+    ROCKS_PROPERTY() SoftObjectRef<> anyAsset;
 };
 
 } // namespace rocks::reflection_fixture

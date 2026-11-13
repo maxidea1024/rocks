@@ -118,7 +118,7 @@ TEST(RegisteredFieldWriteUsesActualObjectSchemaAcrossRegistriesAndAliases) {
             missingOps[index] = alteredOps.fields[index];
             if (missingFields[index].id == cacheId) {
                 missingFields[index].id = renamedField;
-                kindFields[index].valueKind = ValueKind::UInt32;
+                kindFields[index].value.kind = ValueKind::UInt32;
             }
             if (missingOps[index].fieldId == cacheId) {
                 missingOps[index].fieldId = renamedField;

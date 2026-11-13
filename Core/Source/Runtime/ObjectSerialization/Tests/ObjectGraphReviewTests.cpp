@@ -31,8 +31,7 @@ Result<TypeRegistrationToken> RegisterHolder(TypeRegistry& types) noexcept {
                                    0,
                                    {"edge", 4},
                                    {},
-                                   ValueKind::ObjectReference,
-                                   GeneratedType<Base>::Id()}};
+                                   {ValueKind::ObjectReference, GeneratedType<Base>::Id()}}};
     const RuntimeFieldOps accessors[] = {
         {HolderEdge,
          [](ObjectRegistry& registry, const ObjectAccessContext& access, ObjectHandle owner,

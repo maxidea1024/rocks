@@ -57,7 +57,7 @@ internal static class ModuleDescriptor
                     json.WriteString("fieldKind", field.IsReference ? "ObjectReference" : "Value");
                     json.WriteStartObject("value");
                     json.WriteString("kind", field.Kind);
-                    if (field.IsReference)
+                    if (field.HasTargetType)
                     {
                         json.WriteString("type", field.ReferenceId ?? "");
                     }
@@ -205,8 +205,20 @@ internal static class ModuleDescriptor
                     _ => throw Invalid("fieldKind")
                 };
                 JsonElement value = field.GetProperty("value");
-                RequireKeys(value, reference ? ["kind", "type"] : ["kind"], Invalid);
+                if (value.ValueKind != JsonValueKind.Object)
+                {
+                    throw Invalid("field value");
+                }
+
+                // 값 종류는 MetaCompiler가 만드는 종류만 받는다(그 밖은 생성 코드가 컴파일되어도 런타임 등록에서 실패한다).
                 string kind = Name(value.GetProperty("kind"), Identifier, "field value kind");
+                if (!SchemaValidator.IsSupportedValueKind(kind))
+                {
+                    throw Invalid("field value kind " + kind);
+                }
+
+                bool targetType = FieldModel.KindHasTargetType(kind);
+                RequireKeys(value, targetType ? ["kind", "type"] : ["kind"], Invalid);
                 if (reference != (kind == "ObjectReference"))
                 {
                     throw Invalid("fieldKind and value kind disagree");
@@ -224,8 +236,14 @@ internal static class ModuleDescriptor
                     throw Invalid("unknown or duplicate field flag");
                 }
 
+                // Required는 대상 타입이 있는 참조 필드에만 쓴다(원본 선언의 RMC2202와 같은 규칙).
+                if (!targetType && fieldFlags.Contains("Required", StringComparer.Ordinal))
+                {
+                    throw Invalid("Required on a field without a target type");
+                }
+
                 string? referenceId = null;
-                if (reference)
+                if (targetType)
                 {
                     string target = value.GetProperty("type").GetString() ?? throw Invalid("reference target");
                     referenceId = target.Length == 0 ? null : Hex(value.GetProperty("type"), Invalid);

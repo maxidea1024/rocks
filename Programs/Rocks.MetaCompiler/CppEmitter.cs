@@ -165,9 +165,9 @@ internal static class CppEmitter
                 Line("static const FieldSchema fields[] = {");
                 foreach (FieldModel field in type.Fields)
                 {
-                    string? targetId = field.IsReference ? field.ReferenceId : null;
+                    string? targetId = field.HasTargetType ? field.ReferenceId : null;
                     string kind = field.IsReference ? "ObjectReference" : "Value";
-                    Line($"{{{GuidValue(field.Id)}, FieldKind::{kind}, {field.Flags}u, {View(field.Name)}, {{}}, ValueKind::{field.Kind}, {GuidValue(targetId)}, {View(field.Spec.Category)}, {View(field.Spec.DisplayName)}, {View(field.Spec.ToolName)}}},");
+                    Line($"{{{GuidValue(field.Id)}, FieldKind::{kind}, {field.Flags}u, {View(field.Name)}, {{}}, {{ValueKind::{field.Kind}, {GuidValue(targetId)}}}, {View(field.Spec.Category)}, {View(field.Spec.DisplayName)}, {View(field.Spec.ToolName)}}},");
                 }
 
                 Line("};");

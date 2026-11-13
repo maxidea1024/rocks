@@ -79,10 +79,10 @@ FieldSchema SchemaField(Guid id, ValueKind kind) noexcept {
     }
 
     field.name = {name, size};
-    field.valueKind = kind;
+    field.value.kind = kind;
     if (kind == ValueKind::ObjectReference) {
         field.kind = FieldKind::ObjectReference;
-        field.referencedType = NodeType;
+        field.value.type = NodeType;
     }
     return field;
 }

@@ -114,7 +114,7 @@ Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
         if (!read) {
             return read;
         }
-        if (value.kind != field.valueKind) {
+        if (value.kind != field.value.kind) {
             return Result<void>::Failure(ErrorCode::TypeMismatch);
         }
         uint64 local = 0;
@@ -124,8 +124,8 @@ Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
                 if (!target) {
                     return Result<void>::Failure(target.Error());
                 }
-                if (field.referencedType != Guid{}) {
-                    auto expected = registry.AcquireRegisteredType(access, field.referencedType);
+                if (field.value.type != Guid{}) {
+                    auto expected = registry.AcquireRegisteredType(access, field.value.type);
                     if (!expected) {
                         return Result<void>::Failure(expected.Error());
                     }
@@ -151,7 +151,7 @@ Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
         if (!spent) {
             return spent;
         }
-        auto wire = FieldWireType(field.valueKind);
+        auto wire = FieldWireType(field.value.kind);
         if (!wire) {
             return Result<void>::Failure(wire.Error());
         }

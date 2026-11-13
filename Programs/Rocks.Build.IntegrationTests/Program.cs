@@ -286,7 +286,7 @@ try
                 }
             }
             for (const auto& field : schema.fields) {
-                if (field.referencedType == rocks::TypeIdOf<rocks::reflection_fixture::Node>()) {
+                if (field.value.type == rocks::TypeIdOf<rocks::reflection_fixture::Node>()) {
                     return 0;
                 }
             }

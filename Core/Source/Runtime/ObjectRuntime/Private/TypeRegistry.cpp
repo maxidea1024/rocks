@@ -1,5 +1,6 @@
 #include <Object/TypeRegistry.h>
 #include <Object/ObjectRegistry.h>
+#include <Object/SoftObjectRef.h>
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
 #include "RegistryIdentity.h"
@@ -39,7 +40,7 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
     if (!actual) {
         return Result<void>::Failure(ErrorCode::NotFound);
     }
-    if (actual->valueKind != valueKind_ || value.kind != valueKind_) {
+    if (actual->value.kind != valueKind_ || value.kind != valueKind_) {
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
     // 검증한 참조 타입은 callback 완료까지 유지한다. 그 전에 해제하면 callback 재진입에서
@@ -56,8 +57,8 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
             }
             sourceExpected = Move(expected.Value());
         }
-        if (actual->referencedType != TypeId{}) {
-            auto expected = registry.AcquireRegisteredType(access, actual->referencedType);
+        if (actual->value.type != TypeId{}) {
+            auto expected = registry.AcquireRegisteredType(access, actual->value.type);
             if (!expected) {
                 return Result<void>::Failure(expected.Error());
             }
@@ -87,6 +88,13 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
     }
     if (readOnly_ || HasFlag(actual->flags, FieldFlags::ReadOnly)) {
         return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+    // 값 내용 검사는 읽기 전용 정책 뒤다(정수 폭 Overflow를 callback이 검사하는 것과 같은 순서).
+    // 소프트 참조의 null 규칙(asset 0이면 경로 없음)·경로 상한은 수동 callback도 지키도록 여기서
+    // 검사한다. 기대 타입(value.type)은 대상 에셋을 로드하지 않으므로 쓰기에서 검사하지 않는다.
+    if (valueKind_ == ValueKind::SoftObjectReference &&
+        !SoftObjectRef<>::Validate(AssetId{value.guid}, value.string.View())) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
     return callback_(registry, access, handle, value);
 }
@@ -188,6 +196,18 @@ bool SameBytes(Span<const char> left, Span<const char> right) noexcept {
     }
 
     return true;
+}
+
+// 지금 등록할 수 있는 값 종류다. Enum·Struct·Array는 각 단계(B3b·B4·B5)에서 연다.
+bool SupportedValueKind(ValueKind kind) noexcept {
+    switch (kind) {
+    case ValueKind::Enum:
+    case ValueKind::Struct:
+    case ValueKind::Array:
+        return false;
+    default:
+        return static_cast<uint8>(kind) <= static_cast<uint8>(ValueKind::Digest256);
+    }
 }
 
 // 도구 이름이 없으면 C++ 필드 이름이 도구 이름이다.
@@ -333,23 +353,28 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         // 도구 이름은 비어 있거나 ASCII 식별자다.
         if (field.id == Guid{} || (field.flags & ~KnownFieldFlags) != 0 ||
             (HasFlag(field.flags, FieldFlags::Required) &&
-             field.valueKind != ValueKind::ObjectReference) ||
+             field.value.kind != ValueKind::ObjectReference &&
+             field.value.kind != ValueKind::SoftObjectReference) ||
             (field.kind != FieldKind::Value && field.kind != FieldKind::ObjectReference) ||
-            static_cast<uint8>(field.valueKind) > static_cast<uint8>(ValueKind::ObjectReference) ||
+            !SupportedValueKind(field.value.kind) || field.element.kind != ValueKind::Opaque ||
+            field.element.type != TypeId{} || field.maxElements != 0 ||
             !StringView(field.name.Data(), field.name.Size()).ValidateUtf8() ||
             !StringView(field.category.Data(), field.category.Size()).ValidateUtf8() ||
             !StringView(field.displayName.Data(), field.displayName.Size()).ValidateUtf8() ||
             (field.toolName.Size() != 0 && !IsAsciiIdentifier(field.toolName))) {
             return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
         }
-        if (field.valueKind != ValueKind::Opaque) {
+        // FieldKind::ObjectReference(강한 GC 간선) ⇔ value.kind == ObjectReference. value.type은
+        // 참조·소프트 참조의 기대 대상에만 쓴다(Enum·Struct는 B3b·B4).
+        if (field.value.kind != ValueKind::Opaque) {
             ++typedFields;
-            const bool reference = field.valueKind == ValueKind::ObjectReference;
+            const bool reference = field.value.kind == ValueKind::ObjectReference;
+            const bool typed = reference || field.value.kind == ValueKind::SoftObjectReference;
             if (field.name.Size() == 0 || (field.kind == FieldKind::ObjectReference) != reference ||
-                (!reference && field.referencedType != TypeId{})) {
+                (!typed && field.value.type != TypeId{})) {
                 return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
             }
-        } else if (field.referencedType != TypeId{}) {
+        } else if (field.value.type != TypeId{}) {
             return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
         }
         for (usize previous = 0; previous < index; ++previous) {
@@ -375,7 +400,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         bool matched = false;
         for (usize schemaIndex = 0; schemaIndex < schema.fields.Size(); ++schemaIndex) {
             const auto& schemaField = schema.fields[schemaIndex];
-            if (schemaField.id == field.fieldId && schemaField.valueKind != ValueKind::Opaque) {
+            if (schemaField.id == field.fieldId && schemaField.value.kind != ValueKind::Opaque) {
                 matched = true;
                 break;
             }
@@ -452,8 +477,12 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
                 for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
                     const auto& field = schema.fields[fieldIndex];
                     if (field.id == inherited.id && field.kind == inherited.kind &&
-                        field.valueKind == inherited.valueKind && field.flags == inherited.flags &&
-                        field.referencedType == inherited.referencedType &&
+                        field.value.kind == inherited.value.kind &&
+                        field.value.type == inherited.value.type &&
+                        field.element.kind == inherited.element.kind &&
+                        field.element.type == inherited.element.type &&
+                        field.maxElements == inherited.maxElements &&
+                        field.flags == inherited.flags &&
                         SameBytes(EffectiveToolName(field), EffectiveToolName(inherited))) {
                         matched = true;
                         break;
@@ -504,8 +533,8 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
             if (fields[fieldIndex].id == fieldOps[index].fieldId) {
                 // 원본 입력 함수표는 변경하지 않는다. 등록된 복사본에만 정책을 결합한다.
                 fieldOps[index].write.Bind(*this, ops.nativeType, fields[fieldIndex].id,
-                                           fields[fieldIndex].valueKind,
-                                           fields[fieldIndex].referencedType,
+                                           fields[fieldIndex].value.kind,
+                                           fields[fieldIndex].value.type,
                                            HasFlag(fields[fieldIndex].flags, FieldFlags::ReadOnly));
                 break;
             }

@@ -33,10 +33,13 @@ public:
 
     // 입력 버퍼는 호출 동안 유효해야 한다. 실패하면 기존 등록 상태를 유지한다.
     // ops는 값으로 소유권을 넘기므로 등록 실패 시에도 그 ModuleLease는 정리된다.
-    // 주요 실패: 알 수 없는 플래그 비트·typed 참조가 아닌 필드의 Required·ASCII 식별자가 아닌 도구
-    // 이름· WorldOnly base의 파생에 WorldOnly 없음은 InvalidArgument, 같은 ID·같은 필드 ID·대소문자
-    // 무시로 같은 실효 도구 이름(toolName 또는 name)은 AlreadyExists, base 미등록은 NotFound, base
-    // 필드와 다른 상속 필드 서술(도구 이름 포함)은 TypeMismatch다.
+    // 주요 실패: 알 수 없는 플래그 비트·참조(ObjectReference·SoftObjectReference)가 아닌 필드의
+    // Required·참조가 아닌 값 종류의 value.type·아직 받지 않는 값 종류(Enum·Struct·Array, 범위 밖)·
+    // 비어 있지 않은 element·maxElements(배열은 B5)·FieldKind와 값 종류의 불일치(소프트 참조는
+    // FieldKind::Value)·ASCII 식별자가 아닌 도구 이름·WorldOnly base의 파생에 WorldOnly 없음은
+    // InvalidArgument, 같은 ID·같은 필드 ID·대소문자 무시로 같은 실효 도구 이름(toolName 또는
+    // name)은 AlreadyExists, base 미등록은 NotFound, base 필드와 다른 상속 필드 서술(값 형식·도구
+    // 이름 포함)은 TypeMismatch다.
     Result<TypeRegistrationToken> Register(const TypeSchema&, RuntimeTypeOps) noexcept;
     Result<TypeLease> Acquire(TypeId) noexcept;
     Result<bool> IsA(TypeId actual, TypeId expected) noexcept;

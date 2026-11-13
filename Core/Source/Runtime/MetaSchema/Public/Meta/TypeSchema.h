@@ -24,7 +24,7 @@ enum class TypeFlags : uint32 {
 //   Transient  — GC 추적은 하되 저장 그래프에서 뺀다.
 //   ReadOnly   — 일반 write를 거부하고 생성·복원의 staged write만 허용한다.
 //   EditorOnly — 항상 컴파일되고 플래그만 단다. 쿠킹 데이터에서 빼는 것은 graph v2(A0-O)다.
-//   Required   — typed 참조 필드(ValueKind::ObjectReference)에만 쓴다. null 거부는 패키지 저장(A1).
+//   Required   — typed 참조·소프트 참조 필드에만 쓴다. null 거부는 패키지 저장·쿠킹(A1).
 enum class FieldFlags : uint32 {
     None = 0,
     Transient = 1,
@@ -61,7 +61,22 @@ enum class ValueKind : uint8 {
     Float64,
     Guid,
     Utf8String,
-    ObjectReference
+    ObjectReference,
+    // B3 이후의 값 종류다. Enum·Struct·Array는 각 단계(B3b·B4·B5)에서 등록을 연다.
+    Enum,
+    Struct,
+    Array,
+    AssetId,             // rocks::AssetId(Object/AssetId.h), wire Guid
+    SoftObjectReference, // rocks::SoftObjectRef<T>(Object/SoftObjectRef.h), wire
+                         // SoftObjectReference
+    Digest256            // rocks::Sha256Digest(Core/Encoding/Sha256.h), wire Bytes(정확히 32 byte)
+};
+
+// 필드 값 형식이다. type은 Enum·Struct 스키마 ID, ObjectReference·SoftObjectReference의 기대 대상
+// 타입(0 = Object)에만 쓰고 그 밖은 0이어야 한다.
+struct ValueType {
+    ValueKind kind = ValueKind::Opaque;
+    TypeId type{};
 };
 
 // 등록 입력은 비소유 뷰다. 이름은 길이 기반이며 널 종료를 요구하지 않는다.
@@ -73,9 +88,10 @@ struct FieldSchema {
     uint32 flags = 0;
     Span<const char> name;
     Span<const uint8> attributes;
-    ValueKind valueKind = ValueKind::Opaque;
-    // ObjectReference의 대상 schema다. 0은 기반 Object를 뜻하며 다른 kind에서는 0이어야 한다.
-    TypeId referencedType{};
+    // 값 형식이다. typed 필드(value.kind ≠ Opaque)에서 FieldKind::ObjectReference ⇔ value.kind가
+    // ObjectReference(또는 원소가 ObjectReference인 Array)다. 접근기 없는 Opaque 필드는 수동
+    // Trace의 간선을 FieldKind::ObjectReference로 서술할 수 있다.
+    ValueType value{};
     // 표시 문자열도 등록 시 깊게 복사한다. category는 그룹, displayName은 표시용이며 ID가 아니다.
     Span<const char> category{};
     Span<const char> displayName{};
@@ -84,6 +100,9 @@ struct FieldSchema {
     // 포함한 타입의 필드 사이에서 대소문자 무시로 유일해야 한다. 직렬화는 필드 ID를 쓰므로 이름과
     // 무관하다.
     Span<const char> toolName{};
+    // Array 필드의 원소 형식과 길이 상한이다(B5). 그 밖의 필드는 Opaque·0이어야 한다.
+    ValueType element{};
+    uint32 maxElements = 0;
 };
 
 // 안정적인 타입 식별자인 id와 스키마 version을 실행 중 native type key와 구분한다.

@@ -19,6 +19,10 @@
 
 unknown nonzero wire tag는 그대로 열거하고 skip할 수 있다. 알려진 tag도 record 계층이 payload 의미를 대신 검증하지 않는다. 소비자가 기대 tag를 확인하고 `RecordReader::OpenValue(field)`로 연 ArchiveReader(Record 트리 예산을 공유한다)로 값을 읽은 다음 `AtEnd()`까지 확인한다. ID/tag 0은 InvalidArgument, 중복 ID는 AlreadyExists, envelope/schema version 미지원은 Unsupported, 기대 schema GUID 불일치는 TypeMismatch다. 누락 필드와 iteration 끝은 NotFound다.
 
+## SoftObjectReference (wire tag 12)
+
+`WireType::SoftObjectReference` payload는 Guid 16 bytes(에셋 ID)와 String(객체 경로, u64 길이 + UTF-8)이다. Serialization은 형식만 정의하며 null 규칙(asset 0에 경로가 있으면 안 됨)과 4 KiB 경로 상한은 ObjectRuntime `SoftObjectRef`와 ObjectSerialization이 검사한다.
+
 ## RecordList (wire tag 11)
 
 `WireType::RecordList` payload는 u32 count와 count개의 (u64 length + 중첩 Record)다. 각 length는 중첩 Record의 전체 길이(44 + payloadBytes)와 같아야 하고, 빈 목록도 count 0으로 기록한다. `RecordListBuilder::AddItem`은 완성된 항목 Record 바이트를 깊게 복사하고(envelope magic·길이 일관성 검사), `Finish(parent, fieldId)`가 부모의 필드 하나로 추가한다. builder는 완성된 payload를 기하 성장 buffer에 바로 쌓고 Finish는 그것을 부모에 한 번 복사한다. 실패하면 builder와 부모의 필드·bytes는 호출 전 상태이며, 부모가 이미 소비한 operation·work 예산만 환급되지 않는다.

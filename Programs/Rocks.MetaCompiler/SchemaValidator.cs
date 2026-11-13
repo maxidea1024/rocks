@@ -14,8 +14,33 @@ internal static class SchemaValidator
         ["float"] = "Float32",
         ["double"] = "Float64",
         ["rocks::Guid"] = "Guid",
-        ["rocks::String"] = "Utf8String"
+        ["rocks::String"] = "Utf8String",
+        ["rocks::AssetId"] = "AssetId",
+        ["rocks::Sha256Digest"] = "Digest256"
     };
+
+    // descriptor import가 받는 값 종류다(MetaCompiler가 만들 수 있는 종류). Enum·Struct·Array는 B3b–B5에서 더한다.
+    public static bool IsSupportedValueKind(string kind) => Scalars.ContainsValue(kind) || FieldModel.KindHasTargetType(kind);
+
+    // "prefix<T>" 철자의 T를 돌려준다(아니면 null).
+    private static string? TemplateTarget(string spelling, string prefix) =>
+        spelling.StartsWith(prefix, StringComparison.Ordinal) && spelling.EndsWith('>') ? spelling[prefix.Length..^1].Trim() : null;
+
+    // 강한 참조(ObjectRef<T>)·소프트 참조(SoftObjectRef<T>) 철자면 대상 T와 값 종류를 돌려준다(아니면 null).
+    private static (string Target, string Kind)? ReferenceSpelling(string spelling)
+    {
+        if (TemplateTarget(spelling, "rocks::ObjectRef<") is string strong)
+        {
+            return (strong, "ObjectReference");
+        }
+
+        if (TemplateTarget(spelling, "rocks::SoftObjectRef<") is string soft)
+        {
+            return (soft, "SoftObjectReference");
+        }
+
+        return null;
+    }
 
     // base·참조 대상은 이 모듈 타입 → import 타입 순으로 정규 이름을 찾는다. 다른 모듈의 private 타입은
     // 쓸 수 없다(RMC2006).
@@ -79,24 +104,24 @@ internal static class SchemaValidator
                 {
                     field.Kind = kind;
                 }
-                else if (field.NativeSpelling.StartsWith("rocks::ObjectRef<", StringComparison.Ordinal) && field.NativeSpelling.EndsWith('>'))
+                else if (ReferenceSpelling(field.NativeSpelling) is { } reference)
                 {
-                    string target = field.NativeSpelling[17..^1].Trim();
-                    field.Reference = Resolve(target.Length == 0 ? "rocks::Object" : target, model.Name, field.Site);
+                    // 강한 참조와 소프트 참조(GC 간선이 아님) 모두 대상이 리플렉션 타입(또는 Object)이어야 한다.
+                    field.Reference = Resolve(reference.Target.Length == 0 ? "rocks::Object" : reference.Target, model.Name, field.Site);
                     field.ReferenceId = field.Reference == "rocks::Object" ? null : Find(field.Reference).Id;
-                    field.Kind = "ObjectReference";
+                    field.Kind = reference.Kind;
                 }
                 else
                 {
                     throw new MetadataException($"{field.Owner}::{field.Name}: unsupported field type '{field.NativeSpelling}'",
-                    hint: "Use a supported scalar, Guid, String or ObjectRef field; raw pointers/containers/cv-qualified fields need an explicit codec extension.").At(field.Site);
+                    hint: "Use a supported scalar, Guid, String, AssetId, Sha256Digest, ObjectRef or SoftObjectRef field; raw pointers/containers/cv-qualified fields need an explicit codec extension.").At(field.Site);
                 }
 
                 // 지정자를 그 필드 종류에 쓸 수 있는지 본다(RMC2202). 배열 필드는 B5에서 생긴다.
-                if (field.Spec.Required && !field.IsReference)
+                if (field.Spec.Required && !field.HasTargetType)
                 {
-                    throw new MetadataException($"{field.Owner}::{field.Name}: Required applies only to object reference fields", "RMC2202",
-                        "Remove Required or change the field to ObjectRef.").At(field.Site);
+                    throw new MetadataException($"{field.Owner}::{field.Name}: Required applies only to object or soft object reference fields", "RMC2202",
+                        "Remove Required or change the field to ObjectRef or SoftObjectRef.").At(field.Site);
                 }
 
                 if (field.Spec.MaxElements != 0)
