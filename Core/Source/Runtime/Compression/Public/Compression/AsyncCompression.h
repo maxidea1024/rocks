@@ -22,6 +22,11 @@
 //   해제를 수행하므로 소유 스레드와 동시에 써도 안전해야 한다(System·Binned·Budget·Pool·
 //   External·Debug 허용, Arena·Stack 금지). 사전 작업은 capture가 사전 handle 복사본을 가지므로
 //   마지막 handle이 worker에서 놓일 수 있다(사전 할당기도 같은 조건, CompressionDictionary.h).
+// - 사용자 등록 형식(CompressionCodec.h): 제출할 때 사용권을 얻는다(해제됐거나 해제 중이면
+//   InvalidArgument). 사용권은 실행이 끝날 때, 실행되지 않으면(취소·의존 실패) capture가
+//   정리될 때 놓으며 늦어도 terminal 게시 전이다. 그 전까지 TryUnregisterCompressionCodec은
+//   Busy이고, 대기 중에 해제가 시작돼도 작업은 끝까지 실행된다. TryWaitResult가 결과(완료·실패·
+//   취소)를 돌려준 뒤에는 사용권이 놓여 있다(시간 초과 Busy·WrongThread는 아니다).
 // - 수명: source·output(또는 destination·scratch)은 작업이 terminal이 될 때까지 유효해야
 //   하고 다른 코드가 건드리지 않아야 한다. source의 주소·길이는 제출 시점에 고정되며 앞선
 //   의존 작업은 내용만 채울 수 있다. output은 제출 시점에 읽지 않고 body가 시작할 때 원래

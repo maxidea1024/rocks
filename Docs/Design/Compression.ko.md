@@ -7,9 +7,9 @@
 
 ## 1. 범위
 
-| 1차 범위 | 2차 범위(9·10절) | 3차 범위(11절) | 4차 범위(11.6절) | 5차 범위(12절) | 6차 범위(13절·5절) | 후속 |
-|---|---|---|---|---|---|---|
-| 형식을 고르는 일회성 압축·해제, 최악 압축 크기, 크기를 모르는 해제(상한 필수, `Array` 뒤에 붙임), 재사용 문맥(`Compressor`·`Decompressor`), worker 비동기 압축·해제(의존 작업 연결·협력적 취소), 모든 할당의 Rocks `Allocator` 경유, 결정적 출력 | 블록 단위 seek 가능 컨테이너(Godot `FileAccessCompressed`·UE `FCompressedBuffer` 대응)와 큰 버퍼의 블록 병렬 압축·해제, gzip·zstd 스트리밍 객체(역압) | zstd 사전 사용(압축·해제 사전 handle, 일회성·문맥·스트림·비동기·블록 컨테이너 연동, frame 사전 ID 검사) | zstd 사전 학습(fastCover)·finalize, `licenses` manifest | LZ4 frame 형식(`Lz4Frame`, `lz4` CLI 호환. legacy frame 제외): 일회성·문맥·비동기·스트리밍, content checksum·원본 크기 검사, upstream 결과와의 byte 비교 | Brotli 해제 전용 형식(`Brotli`, RFC 7932, WOFF2·`Content-Encoding: br`): 모든 해제 API(일회성·문맥·스트림·비동기), 압축 경로 Unsupported. AsyncFile 완료 → 해제 작업 연결(5절, 완료) | 형식 플러그인 등록(UE `ICompressionFormat`), LZ4·LZ4 frame·zlib 사전, Brotli 압축 |
+| 1차 범위 | 2차 범위(9·10절) | 3차 범위(11절) | 4차 범위(11.6절) | 5차 범위(12절) | 6차 범위(13절·5절) | 7차 범위(14절) | 후속 |
+|---|---|---|---|---|---|---|---|
+| 형식을 고르는 일회성 압축·해제, 최악 압축 크기, 크기를 모르는 해제(상한 필수, `Array` 뒤에 붙임), 재사용 문맥(`Compressor`·`Decompressor`), worker 비동기 압축·해제(의존 작업 연결·협력적 취소), 모든 할당의 Rocks `Allocator` 경유, 결정적 출력 | 블록 단위 seek 가능 컨테이너(Godot `FileAccessCompressed`·UE `FCompressedBuffer` 대응)와 큰 버퍼의 블록 병렬 압축·해제, gzip·zstd 스트리밍 객체(역압) | zstd 사전 사용(압축·해제 사전 handle, 일회성·문맥·스트림·비동기·블록 컨테이너 연동, frame 사전 ID 검사) | zstd 사전 학습(fastCover)·finalize, `licenses` manifest | LZ4 frame 형식(`Lz4Frame`, `lz4` CLI 호환. legacy frame 제외): 일회성·문맥·비동기·스트리밍, content checksum·원본 크기 검사, upstream 결과와의 byte 비교 | Brotli 해제 전용 형식(`Brotli`, RFC 7932, WOFF2·`Content-Encoding: br`): 모든 해제 API(일회성·문맥·스트림·비동기), 압축 경로 Unsupported. AsyncFile 완료 → 해제 작업 연결(5절, 완료) | 형식 플러그인 등록(UE `ICompressionFormat` 대응, `CompressionCodec.h`): 이름·revision으로 식별하는 사용자 형식의 일회성·문맥·비동기·수준·bound, 사용 중 해제 Busy(사용권), 형식 이름·revision 조회(내장 포함) | LZ4·LZ4 frame·zlib 사전, Brotli 압축, 사용자 등록 형식의 스트림·사전 |
 
 ## 2. 코덱 선정
 
@@ -194,8 +194,9 @@ clang-cl `/W4 /WX`(`/Od`·`/O2`)와 GNU식 `-Wall -Wextra -Wpedantic -Werror`(`-
 ```cpp
 namespace rocks {
 
-// 프로세스 안 식별용이다. 영속 포맷에 기록할 때는 상위 포맷이 별도 ID를 정한다. 새 형식은 끝에 덧붙인다.
-enum class CompressionFormat : uint8 { Lz4, Zstd, Deflate, Zlib, Gzip, Lz4Frame, Brotli }; // Brotli는 해제 전용(13절)
+// 프로세스 안 식별용이다. 영속 포맷에 기록할 때는 상위 포맷이 별도 ID(또는 형식 이름)를 정한다. 0–255는 내장 형식이며
+// 새 형식은 끝에 덧붙인다. 256 이상은 사용자 등록 형식(14절)의 값으로, 등록 순서에 따라 실행마다 다르다.
+enum class CompressionFormat : uint32 { Lz4, Zstd, Deflate, Zlib, Gzip, Lz4Frame, Brotli }; // Brotli는 해제 전용(13절)
 
 struct CompressionLevelRange {
     int32 minimum;
@@ -204,9 +205,16 @@ struct CompressionLevelRange {
 };
 
 // Lz4·Lz4Frame {1, 12, 1}: 1 = fast(acceleration 1), 2 = lz4mid, 3–9 = HC, 10–12 = HC optimal parser.
-// Zstd {1, 22, 3}(20–22 ultra). Deflate·Zlib·Gzip {0, 9, 6}(0 = stored). 모르는 형식은 InvalidArgument,
-// 해제 전용 형식(Brotli)은 Unsupported.
+// Zstd {1, 22, 3}(20–22 ultra). Deflate·Zlib·Gzip {0, 9, 6}(0 = stored). 사용자 등록 형식은 등록한 범위.
+// 모르는 형식은 InvalidArgument, 해제 전용 형식(Brotli)은 Unsupported.
 Result<CompressionLevelRange> TryGetCompressionLevelRange(CompressionFormat format) noexcept;
+
+// 형식 이름·revision이다. 내장 형식은 "lz4"·"zstd"·"deflate"·"zlib"·"gzip"·"lz4frame"·"brotli"와
+// CompressionOutputRevision, 사용자 등록 형식은 등록 이름("oodle.kraken"처럼 '.' 포함)과 version이다. 빌드 캐시 키는
+// 형식 값 대신 이름·revision과 수준·사전 Digest를 쓴다.
+struct CompressionFormatInfo { /* Name()·revision·plugin·compresses */ };
+Result<CompressionFormatInfo> TryGetCompressionFormatInfo(CompressionFormat format) noexcept; // 모름 InvalidArgument
+Result<CompressionFormat> TryFindCompressionFormat(StringView name) noexcept; // 문법 위반 InvalidArgument, 없음 NotFound
 
 // 검증된 형식·수준 쌍이다.
 class CompressionSettings {
@@ -265,7 +273,8 @@ public:
 - **빈 입력·크기 산술**: 빈 Span의 nullptr는 adapter가 더미 주소로 바꿔 넘긴다(zlib은 `next_out == NULL`을 거부). 해제에
   빈 source는 InvalidArgument다. `maxOutputBytes == 0`은 결과가 비어야 성공이다. 기존 길이 + 상한의 overflow는 Overflow다.
 - **스레드**: 자유 함수는 재진입 가능하며 전역·thread_local 캐시가 없다. Godot의 thread_local zstd 문맥 대신 명시적
-  재사용 문맥으로 성능을 얻는다.
+  재사용 문맥으로 성능을 얻는다. 설정 성격의 전역 상태는 사용자 등록 형식 표(14.3절)뿐이며 내장 형식 경로는 이 표를 읽지
+  않는다. 그 밖에는 결과에 영향을 주지 않는 내부 전역(빈 Span 대체 주소, 블록 컨테이너 reader 번호 카운터)만 있다.
 - **결정성**: 같은 라이브러리 버전·설정·입력이면 64bit little-endian 대상(Windows x64·macOS ARM64·Android arm64/x86_64)
   에서 같은 byte다. LZ4는 32bit 대상에서 hash·table 형식이 달라 결정성 범위 밖이다.
   - zlib: windowBits 15·memLevel 8·`Z_DEFAULT_STRATEGY`로 고정한다. Gzip 헤더는 매 reset 뒤 `deflateSetHeader`로
@@ -275,6 +284,7 @@ public:
   - LZ4 frame: 12.1절 설정을 고정한다. 일회성 결과는 64KiB를 넘는 입력에서 upstream `LZ4F_compressFrame`과 같은 byte다.
   - 동기·비동기는 같은 내부 구현과 같은 chunk 상수를 쓴다.
   - 테스트가 고정 입력의 압축 결과 CRC-32를 golden으로 고정한다. 버전을 올릴 때는 의도적으로 갱신한다.
+  - 사용자 등록 형식의 결정성은 코덱 책임이며, 출력이 바뀌는 변경마다 등록 version(revision)을 올린다(14.2절).
 - **무결성**: Zstd는 content checksum(XXH64 하위 32bit), Zlib은 Adler-32, Gzip은 CRC-32·ISIZE, Lz4Frame은 content
   checksum(XXH32)·기록된 원본 크기·(있으면) 블록 checksum을 검사한다. Lz4 raw block·
   Deflate raw·Brotli는 무결성 검사가 없어 손상이 "성공한 다른 데이터"로 보일 수 있다. 체크섬 형식도 의미 없는 bit(zstd 프레임
@@ -286,13 +296,14 @@ public:
 | 상황 | 오류 |
 |---|---|
 | destination 또는 `maxOutputBytes` 부족 | CapacityExceeded |
-| 손상·절단·체크섬 불일치·스트림 뒤 남는 byte(Lz4 제외)·빈 해제 입력·범위 밖 수준·겹침·Lz4 입력 한계 초과 | InvalidArgument |
+| 손상·절단·체크섬 불일치·스트림 뒤 남는 byte(Lz4 제외)·빈 해제 입력·범위 밖 수준·겹침·Lz4 입력 한계 초과, 모르는 형식 값(등록되지 않았거나 해제가 시작된 사용자 형식 값 포함) | InvalidArgument |
 | 문맥에 없거나 다른 사전이 필요한 입력: zlib 프리셋 사전(FDICT, `Z_NEED_DICT`), 사전 ID가 다른 zstd frame(`dictionary_wrong`), 형식 사전 문맥에 사전 ID 없는 frame, 사전 ID를 기록한 LZ4 frame, 블록 컨테이너의 사전이 후보에 없음 | Unsupported |
 | zstd frame의 window가 구현 상한(2^31)을 넘음(RFC상 유효, 일회성·스트림·사전 ID 조회 모두) | Unsupported |
 | 해제 전용 형식(Brotli)의 압축 API(수준 범위·`CompressionSettings`·bound·압축 문맥), large window 확장 Brotli stream(비표준, 첫 byte 0x11) | Unsupported |
+| 사용자 등록 형식의 스트림·사전 API(블록 컨테이너는 영속 codec ID라 InvalidArgument) | Unsupported |
 | 할당 실패(`Z_MEM_ERROR`·`memory_allocation` 포함) | OutOfMemory |
 | 크기 산술 overflow, `deflateBound_z`의 `(z_size_t)-1` | Overflow |
-| 외부 코덱이 계약 밖의 실패를 보고(예: dst ≥ bound인데 LZ4 압축이 0 반환, `Z_STREAM_ERROR`) | DependencyFailed |
+| 외부 코덱이 계약 밖의 실패를 보고(예: dst ≥ bound인데 LZ4 압축이 0 반환, `Z_STREAM_ERROR`), 사용자 등록 코덱이 반환 계약(14.2절)을 어김 | DependencyFailed |
 
 - **Lz4**
   - 압축: fast(수준 1)는 `LZ4_initStream` 후 `LZ4_compress_fast_extState_fastReset`을 쓴다. HC(2–12)는
@@ -304,6 +315,7 @@ public:
   - int 경계: source가 `Lz4MaxInputBytes`를 넘으면 InvalidArgument, destination 용량은 `INT_MAX`로 자른다.
 - **Lz4Frame**: 12.3절(일회성)·12.4절(스트림). 64KiB 블록으로 나누므로 입력 한계가 없다.
 - **Brotli**: 해제 전용, 13.3절(일회성)·13.4절(스트림). stream은 이어 붙일 수 없어 뒤 byte는 InvalidArgument다.
+- **사용자 등록 형식**: 14절. 크기를 모르는 해제는 모듈이 두 배 재시도로 처리한다(14.4절).
 - **Zstd**
   - 압축: `ZSTD_CCtx`에 수준·checksum·content size를 고정한다. pledged size와 `ZSTD_c_stableInBuffer`를 쓰고 입력을 일정
     chunk씩 늘려 주는 스트림 루프로 처리한다(비동기 취소 지점, 동기와 같은 구현).
@@ -377,7 +389,8 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
   할당기는 output 성장·코덱 scratch·capture 해제를 worker에서 수행하므로 소유 스레드와 **동시에 써도 안전해야** 한다.
   System·Binned·Budget·Pool·External·Debug는 허용하고 Arena·Stack은 금지한다. scheduler 할당기는 task보다 오래 살아야 한다.
 - **제출 순서**: 제출은 다음 순서로 진행한다.
-  1. output을 읽지 않는 동기 검증(Lz4 입력 한계·빈 해제 입력·모르는 형식·Span 변형의 source·destination 겹침).
+  1. output을 읽지 않는 동기 검증(Lz4 입력 한계·빈 해제 입력·모르는 형식·Span 변형의 source·destination 겹침)과 사용자
+     등록 형식의 사용권 획득(해제됐거나 해제 중이면 InvalidArgument).
      output은 앞선 의존 작업이 worker에서 키우는 중일 수 있어 제출 시점에 읽지 않는다(읽으면 데이터 경합). output과의
      겹침·크기 overflow는 body가 실행 시점에 검사한다.
   2. 진행 중 task면 Busy
@@ -431,6 +444,11 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
     형식과 무관한 경로라 Brotli도 같다.
 - **용량**: scheduler의 `maxInFlight`(기본 256)를 넘으면 CapacityExceeded다. caller가 제출 속도를 조절한다. task는 이동할
   수 없어 `Array` 원소가 될 수 없으므로 C 배열이나 `UniquePtr`로 둔다.
+- **사용자 등록 형식의 사용권**: 제출할 때 얻은 사용권을 body capture가 가진다(capture는 이동 전용이며 `[job = Move(job)]`).
+  실행하면 일회성 경로로 넘겨 실행이 끝날 때, 실행하지 않으면(취소·의존 실패·Shutdown) capture가 정리될 때 놓는다. 둘 다
+  terminal 게시 전이므로 `TryWaitResult`가 결과(완료·실패·취소)를 돌려준 직후의 `TryUnregisterCompressionCodec`은
+  성공한다(시간 초과 Busy·WrongThread로 돌아온 경우는 아니다). body 할당·제출이 실패하면 그 자리에서 놓는다. 대기 중에
+  해제가 시작돼도 작업은 끝까지 실행된다(새 제출만 막힌다, 14.3절).
 
 ## 6. Godot·UE 대응
 
@@ -447,6 +465,7 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
 | `FileAccessCompressed`(블록·seek) | `FCompressedBuffer` | `CompressedBlocksWriter`·`CompressedBlocksReader`(9절) |
 | `StreamPeerGZIP` | — | `CompressStream`·`DecompressStream`(10절, gzip·zlib·deflate·zstd·LZ4 frame, Brotli는 해제만) |
 | — | — (`FCompression`·`FCompressedBuffer`에 사전 인자 없음. 학습 사전은 OodleNetwork 플러그인의 패킷 압축이 쓰고 commandlet이 학습) | `CompressDictionary`·`DecompressDictionary`(11절) |
+| — | `ICompressionFormat`(`IModularFeatures` "CompressionFormat", `FCompression::GetCompressionFormat(FName)`, `GetVersion`·`GetDDCKeySuffix`) | `CompressionCodec`·`TryRegisterCompressionCodec`·`TryFindCompressionFormat`·`TryGetCompressionFormatInfo`(14절) |
 
 ## 7. 검증 계획
 
@@ -499,6 +518,7 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
 | 4차(사전 학습, 11.6절) | 설계 교차검증(dictBuilder 원본·실측: 예외 경로 충돌 재현, 기본값 시간·이득 비교) 뒤 구현. 학습 시험 8개와 manifest `licenses` 이전 시험(Policy.ThirdPartyLicenses·ThirdPartySdkLicenses)을 포함해, HEAD 기반 worktree에서 Foundation Debug·ASan 916개, Release 압축 82개, `self` 84개, `native` 95개, 빌드 도구 시험 22개 그룹, 정책·형식 검사가 통과했다. 구현 뒤 독립 검토의 확정 항목(표본 수 상한 1 초과, POSIX 종료 중 mutex 소멸, finalize 헤더 버퍼 초과 분류, 빈 표본 포인터)을 반영했다. 학습 golden은 upstream 원본만으로 빌드한 probe로 Windows x64·Android x86_64에서 같은 byte임을 확인했다. arm64는 아직 확인하지 않았다 |
 | 5차(LZ4 frame, 12절) | 공식 tarball(sha256 일치)의 `lz4frame.[ch]`·`xxhash.[ch]`를 들이고 upstream 원본만으로 빌드한 probe로 설정·호출 순서·할당 경로를 먼저 확인한 뒤 구현했다. 시험 24개(12.6절)를 포함해 HEAD 기반 worktree에서 Foundation Debug·ASan·Release 949개, `self` 84개, `native` 95개(Debug compile DB: 지시문을 지운 `lz4frame.c`·`xxhash.c` 사본 경고 0 포함), 정책·형식·third-party 검사가 통과했다. 일회성 결과는 upstream `LZ4F_compressFrame`과 byte 단위로 같다(수준 1·2·9·12, 1.5MiB). 구현 뒤 독립 검토 2건(adapter 의미, 시험·문서·manifest)의 확정 항목을 반영했다: 손상된 FLG의 사전 ID bit가 Unsupported로 분류됨(헤더를 LZ4F로 먼저 검증하도록 수정), legacy frame 분류, 기본 할당 경로를 저장소 안에서 막는 `LZ4_USER_MEMORY_FUNCTIONS`, 스트림 경계·상한·수준 2·12·Append 성장 OOM·출력 기준 취소 시험 보강, 문서 수치. Android NDK arm64 문법 검사(지시문 유무 모두)는 경고 0이고, macOS·Android 실행은 아직 하지 않았다 |
 | 6차(Brotli 해제, 13절) | google/brotli 1.1.1 tag archive(sha256, tag tree blob hash 비교)의 해제기만 들였다. 시험 15개(13.7절)를 포함해 HEAD 기반 worktree에서 Foundation Debug·ASan·Release 969개, `self` 85개, `native` 95개(Debug compile DB), 정책·형식·third-party 검사가 통과했다. 참조 벡터는 google/brotli 1.1.0 encoder(Python binding)가 만들었다. llvm-nm으로 CRT 할당 참조가 기본 할당 경로 오브젝트 3개에만 있고 심볼 충돌이 없음을 확인했다. Android NDK arm64·x86_64 문법 검사(Brotli C17 `-Wall -Wextra -Wpedantic -Werror` `-O0`·`-O2`, adapter C++23)는 경고 0이다. 구현 뒤 독립 검토 2건(adapter 의미, 시험·문서·manifest)의 확정 항목을 반영했다: ring buffer를 늘리는 순간의 최고 사용량(약 1.5 × window) 문서·시험, large window 표지 판정(0x91은 손상)과 Append의 거부 전 출력 확보, 사전 오류 분류, 공개 헤더 WOFF2 예제의 해제 크기(totalSfntSize가 아니라 표 길이 합), CRT 경로 목록, 4·10절의 Brotli 누락, 벤치 측정 구간, 뒤 byte 조각·Reset OOM 시험 보강. macOS·Android 실행은 아직 하지 않았다 |
+| 7차(형식 플러그인, 14절) | 설계 교차검증(값 인코딩·수명·비동기 연동·거부 표면) 뒤 구현했다. 시험 13개(14.5절)를 포함해 HEAD 기반 worktree에서 Foundation Debug·ASan 989개, Release 압축 83개, 플러그인 시험 ASan 30회 반복, `self` 85개, `native` 95개, 정책·형식 검사가 통과했다. 동시성 시험은 해제의 Busy 검사를 끈 변이를 사용권 불변식 위반으로 잡는다. 구현 뒤 독립 검토 2건(수명·동시성·오류 분류, 시험·문서)의 확정 항목을 반영했다: 비동기 사용권을 놓는 시점 문서, 첫 크기가 상한보다 작아 여러 번 다시 해제하던 문제(Lz4 raw block 포함), 두 배 재시도의 OutOfMemory 문서, 해제된 형식 설정으로 만든 압축 사전의 오류 분류, 동시성 시험의 검출력(heap 코덱 파괴·겹침 확인), 실행 중 Busy·재시도 사이 취소·실행되지 않은 비동기 작업·해제 중 칸 용량 시험, 시험 사이 등록 누수 방지(`ScopedCodec`), clang-format이 접은 주석. macOS·Android 실행은 아직 하지 않았다 |
 
 처리량(로컬 1회 측정, 1차 때 저장소 밖 임시 벤치): Windows x64 Release(ThinLTO), 단일 스레드, `Compressor`·`Decompressor`
 재사용, 저장소 소스·문서 8.9MiB, 여러 번 중 최고값이다. 기기 사양을 고정한 반복 측정이 아니므로 기준값이 아니라 adapter가 원본
@@ -594,7 +614,8 @@ frame 하나로 압축·해제한다. 사전은 학습하지 않은 raw 내용(�
 ### 9.2 API
 
 - `CompressedBlocksSettings::TryMake(compressionSettings, blockSizeLog2 = 18)`: 형식은 Lz4·Zstd·Deflate만이며 수준은
-  `CompressionSettings`가 정한다.
+  `CompressionSettings`가 정한다. 사용자 등록 형식은 InvalidArgument다(codec ID가 파일에 남는 영속 값이라 실행마다 바뀌는
+  형식 값을 기록할 수 없다).
 - `TryGetCompressedBlocksBound(blockSizeLog2, rawSize)` = 48 + 8n + rawSize(블록은 원본보다 커지지 않는다).
 - `TryCompressBlocksAppend(settings, source, output, scratch)`: 순차. 실패 시 output 길이 복원.
 - `TryCompressBlocksAppend(scheduler, settings, source, output, scratch)`: 병렬.
@@ -1225,3 +1246,140 @@ brotli==1.1.0`, google/brotli 1.1.0의 공식 binding)가 만든 13개(합 4,107
 - macOS ARM64·Android 실기기 실행.
 - WOFF2 글꼴 importer(표 변환 복원)는 글꼴 모듈의 몫이다.
 - Brotli 압축(`c/enc`)과 사용자 사전·large window는 수요가 생기면 다룬다.
+
+## 14. 형식 플러그인 등록 (7차, 교차검증 반영)
+
+UE 5.6 `ICompressionFormat` 대응이다. UE는 `IModularFeatures`("CompressionFormat")에 형식을 등록하고
+`FCompression::GetCompressionFormat(FName)`이 내장 형식(Zlib·Gzip·LZ4·Oodle) 다음으로 찾는다. 형식은 `FName`으로 식별하고
+`GetVersion`·`GetDDCKeySuffix`를 빌드 캐시 키에 넣는다. Rocks도 저장소에 넣지 않는 외부 코덱(라이선스상 프로젝트가 따로
+가져오는 코덱 등)을 프로젝트·플러그인이 등록해 내장 형식과 같은 API로 쓰게 한다. 헤더는 `Compression/CompressionCodec.h`,
+구현은 `Private/CompressionCodec.cpp`다. 설계 초안은 교차검증(값 인코딩·수명·비동기 연동·거부 표면)을 거쳤다.
+
+### 14.1 식별: 형식 값과 이름
+
+- `CompressionFormat`을 `uint32`로 넓혔다. 0–255는 내장 형식이고 256(0x100) 이상이 사용자 등록 형식이다. 등록할 때마다
+  다음 값을 발급하고 해제한 값은 다시 쓰지 않는다(오래된 값이 다른 코덱으로 해석되지 않는다). 해제됐거나 해제가 시작된
+  값은 모르는 형식 값과 같이 InvalidArgument다. 0xFFFFFFFF까지 발급한 뒤의 등록은 CapacityExceeded다.
+- 별도 handle 타입 대신 같은 enum을 쓴다. 모든 API가 `CompressionFormat`을 받으므로 `CompressionSettings`·`Compressor`·
+  비동기 제출이 그대로 연동되고, 값 재사용 금지로 handle의 세대 검사와 같은 효과를 얻는다.
+- 이름 문법: 소문자 ASCII `[a-z0-9_-]`로 된 비지 않은 조각을 `.`로 이은 1–32byte다. 내장 이름(`lz4`·`zstd`·`deflate`·
+  `zlib`·`gzip`·`lz4frame`·`brotli`)은 조각이 하나이고, 사용자 등록 이름은 둘 이상이어야 해서(예 `oodle.kraken`) 절대
+  겹치지 않는다.
+- 사용자 등록 형식의 값은 등록 순서에 따라 실행마다 다르다. 파일·빌드 캐시 키에는 `TryGetCompressionFormatInfo`의
+  이름과 revision(내장 형식은 `CompressionOutputRevision`, 사용자 등록 형식은 등록 version)을 수준·사전 Digest와 함께
+  쓴다. 설정 파일의 이름은 `TryFindCompressionFormat`으로 값으로 바꾼다(문법 위반 InvalidArgument, 없거나 해제 중이면
+  NotFound).
+
+### 14.2 코덱 계약 (`CompressionCodec`)
+
+```cpp
+class CompressionCodec {
+public:
+    virtual ~CompressionCodec() = default;
+    virtual Result<usize> TryGetCompressBound(usize sourceBytes) const noexcept = 0;
+    virtual Result<usize> TryCompress(int32 level, Span<const uint8> source, Span<uint8> destination,
+                                      Allocator& scratch) const noexcept = 0;
+    virtual Result<usize> TryDecompress(Span<const uint8> source, Span<uint8> destination,
+                                        Allocator& scratch) const noexcept = 0;
+};
+
+struct CompressionCodecDescription {
+    StringView name;              // 복사한다
+    uint32 version = 0;           // 출력 byte가 바뀔 때마다 올린다
+    CompressionLevelRange levels; // minimum ≤ defaultLevel ≤ maximum
+};
+inline constexpr uint32 MaxCompressionCodecs = 16;
+Result<CompressionFormat> TryRegisterCompressionCodec(const CompressionCodecDescription&, const CompressionCodec&) noexcept;
+Result<void> TryUnregisterCompressionCodec(CompressionFormat format) noexcept;
+```
+
+- 코덱은 상태가 없어야 하며 여러 스레드가 동시에 부른다. 작업 메모리는 호출마다 scratch에서 받아 반환 전에 돌려준다.
+  코덱 안에서 이 모듈(다른 형식 압축 등)을 다시 불러도 된다. 출력 결정성은 코덱 책임이다.
+- 모듈이 호출 전에 보장하는 것: source·destination이 겹치지 않음, 빈 Span도 `Data()`가 nullptr가 아님, 수준이 등록 범위
+  안, 해제 입력이 비지 않음.
+- 반환 계약과 위반 처리(위반은 DependencyFailed로 바꾼다. 코덱이 외부 라이브러리를 감싸므로 내장 adapter의 "외부 코덱이
+  계약 밖의 실패를 보고"와 같은 분류다):
+
+| 함수 | 허용 오류 | 위반 |
+|---|---|---|
+| `TryGetCompressBound` | InvalidArgument·Overflow | 그 밖의 오류 |
+| `TryCompress` | InvalidArgument·CapacityExceeded·OutOfMemory·Overflow·DependencyFailed | 반환값 > destination, destination ≥ bound인데 CapacityExceeded, 그 밖의 오류(Unsupported·Cancelled 포함) |
+| `TryDecompress` | 위 다섯 가지 + Unsupported | 반환값 > destination, 그 밖의 오류(Cancelled 포함) |
+
+- 결과가 destination보다 크면 해제는 반드시 CapacityExceeded여야 한다. 크기를 모르는 해제의 재시도가 이 오류에 기댄다.
+- 가상 Append·스트림·사전 인터페이스는 두지 않았다. 코덱 계약을 UE `Compress`·`Uncompress`·`GetCompressedBufferSize`와
+  같은 최소 집합으로 유지하고, 크기를 모르는 해제는 모듈이 일반화한다(14.4절).
+
+### 14.3 등록 표와 사용권
+
+- 표는 고정 16칸이며 할당하지 않는다. 표와 mutex는 첫 호출에서 placement-new로 만들고 해제하지 않는다(프로세스 종료 중
+  다른 스레드가 압축해도 소멸된 mutex를 쓰지 않고, 정적 초기화 순서와 무관하다. 11.6절 학습 mutex와 같은 방식). 캐시가
+  아니라 설정이며, 내장 형식 경로는 표를 읽지 않는다. 등록·해제·조회 함수는 어느 스레드에서나(코덱 안에서도) 부를 수 있다.
+- 사용권(lease): 칸마다 사용 수와 해제 중 표시를 둔다. 일회성 호출은 호출 동안, `Compressor`·`Decompressor`는 문맥 수명
+  동안 쥔다. 비동기 작업은 실행이 끝날 때, 실행되지 않으면 capture가 정리될 때 놓는다(늦어도 terminal 게시 전, 5절).
+  사용권을 얻을 때와 놓을 때만 표를 잠그고, 코덱 호출 중에는 잠그지 않는다(재진입 가능).
+- `TryUnregisterCompressionCodec`:
+  - 처음 부른 순간 해제 중으로 표시해 그 값의 새 사용(일회성 호출·문맥 생성·비동기 제출·수준 범위·bound·형식 정보)을
+    InvalidArgument로, 이름 조회를 NotFound로 막는다. 해제 중인 이름은 칸을 차지하므로 같은 이름 등록은 AlreadyExists다.
+  - 사용권이 남아 있으면 Busy다. 남은 사용(진행 중인 호출, 살아 있는 문맥, 대기 중이거나 실행 중인 비동기 작업)은 끝까지
+    동작하며, 끝난 뒤 다시 부르면 칸을 비우고 성공한다. 성공한 뒤에만 codec을 파괴하거나 모듈을 언로드한다.
+  - 코덱이 자기 형식을 해제하면 자기 호출이 사용권을 쥐고 있어 Busy다.
+  - 내장 형식·등록되지 않은 값은 InvalidArgument다.
+- UE는 사용 중인 형식의 등록 해제를 막지 않는다(modular feature 제거 뒤의 사용은 호출자 책임). Rocks는 사용권과 Busy로
+  언로드 경합을 오류로 드러낸다.
+
+### 14.4 API 연동
+
+| API | 사용자 등록 형식 |
+|---|---|
+| `TryGetCompressionLevelRange`·`CompressionSettings` | 등록한 범위 |
+| `TryGetCompressBound` | 코덱 bound(사용권을 쥐고 부른다) |
+| `TryCompress`·`TryDecompress` | 상태 블록을 스택에 둔다(할당 없음) |
+| `TryCompressAppend` | 코덱 bound만큼 늘려 압축한 뒤 줄인다. 실패하면 길이를 되돌린다 |
+| `TryDecompressAppend` | 64KiB와 입력 × 4 중 큰 값에서 시작하고(입력 × 4가 상한을 넘으면 상한에서 시작), 코덱이 CapacityExceeded면 두 배로 늘려 처음부터 다시 해제한다. 상한까지 늘려도 부족하면 CapacityExceeded, 늘리다 할당이 실패하면 OutOfMemory다. 손상 입력도 상한까지 메모리를 쓸 수 있어 상한은 현실적인 값으로 준다. Lz4 raw block도 같은 첫 크기 규칙이다 |
+| `Compressor`·`Decompressor` | 문맥 상태가 사용권을 가진다(코덱 상태는 없다) |
+| 비동기 제출 | 제출할 때 사용권을 얻는다(5절) |
+| `CompressStream`·`DecompressStream`·`CompressDictionary`·`DecompressDictionary` | Unsupported |
+| `CompressedBlocksSettings`·`CompressedBlocksReadContext::TryCreate(format, …)` | InvalidArgument(codec ID가 영속 값) |
+| `TryGetCompressionFormatInfo`·`TryFindCompressionFormat` | 등록 이름·version, `plugin = true` |
+
+- 취소: 코덱 호출 하나는 끊지 않는다(Lz4 raw block과 같다). 비동기 작업은 코덱 호출 전마다(Append는 재시도 사이 포함)
+  취소를 확인한다.
+- 형식 판정: 내장 형식은 `detail::ResolveFormat`(known·compresses·streams·plugin) 하나에서 나온다. 사용자 등록 형식은
+  사용권 획득(`CodecLease::TryAcquire`)이나 수준 범위 조회가 판정을 겸하고(수준·bound·문맥·일회성·비동기 압축 제출),
+  `ResolveFormat`은 스트림·사전·비동기 해제 제출 입구에서 그 값을 판정한다. 사용자 등록 형식은 압축하고 스트림은 하지
+  않는 형식이다. 설정을 만든 뒤 해제가 시작된 형식은 어느 입구에서든 모르는 값(InvalidArgument)이다.
+- 사전 학습(`CompressionTraining`)은 zstd 전용이라 영향이 없다. `CompressionBench`는 형식 이름을
+  `TryGetCompressionFormatInfo`로 출력한다.
+
+### 14.5 시험
+
+`CompressionCodecTests.cpp` 13개. 가짜 코덱은 XOR(수준 byte + XOR, scratch 사용), RLE(해제 호출 수 계수), 계약 위반 코덱,
+진입을 알리고 멈추는 코덱, 재진입 코덱이다. 등록 표가 프로세스 전역이고 시험은 이름순으로 한 프로세스에서 실행되므로, 각
+시험은 `ScopedCodec`으로 등록해 일찍 끝나도 해제를 확인한다.
+
+- 등록 표: 이름 문법 위반(빈 이름·조각 하나·대문자·앞뒤·연속 `.`·공백·기호·33byte), 수준 범위 역전, 중복 이름, 17번째
+  등록, 해제 중인 칸도 용량에 포함, 32byte 이름, 값의 단조 증가와 재사용 금지, 내장·모르는 값 해제
+- 형식 정보: 내장 이름 golden과 이름 ↔ 값 왕복, 해제 전용 표시, 사용자 등록 형식의 이름·version, 이름 문법, 해제 뒤 조회
+- 공개 API 왕복: 일회성 Span·Append(기존 byte 보존), `Compressor`·`Decompressor`의 Span·Append(같은 byte), bound·overflow,
+  수준 검증, 크기를 아는 해제의 정확한 크기·1byte 부족·빈 입력·겹침
+- 두 배 재시도 경계: 64KiB 정확, 64KiB + 1, 1MiB(호출 5회), 상한 1 부족, 첫 크기가 상한, 입력 × 4 시작, 입력 × 4가
+  상한을 넘으면 상한 시작, 손상 시 재시도 없음, 실패 시 길이 복원, 재시도 사이 취소(호출 0·1·2회에서 Cancelled)
+- 계약 위반: 반환 크기 초과, bound 이상에서 CapacityExceeded(bound 미만은 그대로), 허용 목록 밖 오류(압축 Unsupported·
+  Cancelled·NotFound·Busy), bound 오류, Append 길이 복원
+- 거부 표면: 스트림·사전 Unsupported, 블록 설정·읽기 문맥 InvalidArgument, 해제 뒤(이미 만든 설정 포함) InvalidArgument
+- 사용권(문맥): 살아 있는 문맥이면 Busy, 해제 중 새 사용(설정 생성·일회성 압축·해제·문맥 생성·bound·수준·정보·이름)
+  거부·기존 문맥은 동작, 마지막 문맥을 놓은 뒤 성공
+- 사용권(실행 중): 비동기 작업과 다른 스레드의 일회성 호출이 코덱 안에 있는 동안 Busy·새 제출 InvalidArgument, 끝난 뒤 성공
+- 비동기: 대기 중 작업이 있으면 Busy·새 제출 InvalidArgument, 대기 작업은 끝까지 실행(동기와 같은 byte, Append·Span 해제),
+  `TryWaitResult` 직후 해제 성공. 실행되지 않은 작업(body 할당 실패, 실행 전 취소, 의존 실패)도 사용권을 놓음
+- 재진입: 코덱 안에서 Zstd 왕복·다른 사용자 형식 압축, 자기 형식 해제 Busy
+- OOM: 문맥 상태·코덱 scratch·output 성장의 모든 할당 시도 실패에서 OutOfMemory·길이 복원·사용권 누수 없음
+- 동시성: worker 4개가 일회성 왕복을 반복하는 동안 주 스레드가 다른 형식의 등록·해제를 200회 되풀이한다. 코덱은 라운드마다
+  heap에 만들고 해제가 성공하면 파괴하므로 사용권이 틀리면 ASan이 해제 뒤 사용을 잡는다. 해제 중 사용은
+  InvalidArgument·NotFound로만 실패하고, 성공과 거부가 모두 일어났는지(실제로 겹쳤는지) 확인한다
+
+### 14.6 후속
+
+- 사용자 등록 형식의 스트림·사전(코덱 인터페이스 확장)은 수요가 생기면 다룬다.
+- 블록 컨테이너에 사용자 형식을 쓰려면 영속 codec ID 대신 형식 이름을 기록하는 컨테이너 version이 필요하다.

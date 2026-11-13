@@ -5,8 +5,8 @@
 #include <Core/Memory/SharedPtr.h>
 
 // 압축 사전이다(Docs/Design/Compression.ko.md 11절). 작은 입력(수십 byte–수십 KiB)이 많을 때 공통
-// 내용을 미리 알려 압축률을 크게 높인다. 지금은 zstd만 지원한다(LZ4·LZ4 frame·zlib·Brotli 사전은
-// Unsupported).
+// 내용을 미리 알려 압축률을 크게 높인다. 지금은 zstd만 지원한다(LZ4·LZ4 frame·zlib·Brotli·사용자
+// 등록 형식 사전은 Unsupported).
 //
 // 사용 예(쿠킹: 작은 에셋 여러 개를 같은 사전으로 압축):
 //   auto settings = CompressionSettings::TryMake(CompressionFormat::Zstd, 19).Value();

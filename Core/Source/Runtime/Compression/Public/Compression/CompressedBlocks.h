@@ -62,7 +62,8 @@ inline constexpr usize CompressedBlocksHeaderBytes = 48;
 // 컨테이너와 중복이다. LZ4 블록은 Lz4 raw block으로 저장한다).
 class CompressedBlocksSettings {
 public:
-    // 실패: Zlib·Gzip·Lz4Frame·모르는 형식, blockSizeLog2가 12–24 밖이면 InvalidArgument다.
+    // 실패: Zlib·Gzip·Lz4Frame·Brotli·사용자 등록 형식(codec ID가 파일에 남는 영속 값이라 실행마다
+    // 바뀌는 형식 값을 쓸 수 없다)·모르는 형식, blockSizeLog2가 12–24 밖이면 InvalidArgument다.
     static Result<CompressedBlocksSettings>
     TryMake(const CompressionSettings& compression,
             uint32 blockSizeLog2 = DefaultCompressedBlockSizeLog2) noexcept;
@@ -355,7 +356,7 @@ public:
     static Result<CompressedBlocksReadContext> TryCreate(const CompressedBlocksReader& reader,
                                                          Allocator& allocator) noexcept;
     // 형식·블록 크기로 만든다(여러 컨테이너에 같은 문맥을 쓸 때). 실패: Zlib·Gzip·Lz4Frame·Brotli·
-    // 모르는 형식·blockSizeLog2 범위 밖은 InvalidArgument, OutOfMemory.
+    // 사용자 등록 형식·모르는 형식·blockSizeLog2 범위 밖은 InvalidArgument, OutOfMemory.
     static Result<CompressedBlocksReadContext>
     TryCreate(CompressionFormat format, uint32 blockSizeLog2, Allocator& allocator) noexcept;
 

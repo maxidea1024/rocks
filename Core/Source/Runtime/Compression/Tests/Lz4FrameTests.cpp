@@ -904,8 +904,8 @@ TEST(Lz4Frame_CancellationProbeStopsAtChunks) {
             detail::CompressionProbe probe{&CountdownProbe::Check, &countdown};
             Array<uint8> compressed(allocator);
             REQUIRE(compressed.TryAppend(Bytes(Base)));
-            CHECK(detail::CompressAppendOnce(DefaultSettings(Frame), View(original), compressed,
-                                             allocator, probe)
+            CHECK(detail::CompressAppendOnce(Frame, DefaultSettings(Frame).Level(), View(original),
+                                             compressed, allocator, probe)
                       .Error() == ErrorCode::Cancelled);
             CHECK(Same(compressed, Bytes(Base)));
             CHECK(countdown.checks == checks + 1);
@@ -931,8 +931,8 @@ TEST(Lz4Frame_CancellationProbeStopsAtChunks) {
         CountdownProbe untouched{1000};
         detail::CompressionProbe probe{&CountdownProbe::Check, &untouched};
         Array<uint8> again(allocator);
-        REQUIRE(detail::CompressAppendOnce(DefaultSettings(Frame), View(original), again, allocator,
-                                           probe));
+        REQUIRE(detail::CompressAppendOnce(Frame, DefaultSettings(Frame).Level(), View(original),
+                                           again, allocator, probe));
         CHECK(untouched.checks == 5);
         CHECK(Same(again, View(packed)));
 

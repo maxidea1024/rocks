@@ -4,6 +4,7 @@
 #include <Core/Containers/Span.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
+#include <Core/Text/StringView.h>
 
 // 압축 헬퍼(Godot Compression·UE FCompression 대응)다. 설계·근거는
 // Docs/Design/Compression.ko.md를 따른다.
@@ -35,13 +36,17 @@
 //   구간은 미정이다(코덱이 성능을 위해 반환 크기 뒤를 덮어쓸 수 있다). Append는 실패 시 output
 //   길이를 호출 전으로 되돌린다(capacity는 늘 수 있다).
 // - 오류: 출력·상한 부족 CapacityExceeded, 손상·절단·체크섬 불일치·스트림 뒤 남는 byte·빈 해제
-//   입력·범위 밖 수준·source와 출력의 겹침 InvalidArgument, 문맥에 없거나 다른 사전이 필요한 입력
+//   입력·범위 밖 수준·source와 출력의 겹침·모르는 형식 값(등록되지 않았거나 해제가 시작된
+//   사용자 등록 형식 값 포함) InvalidArgument, 문맥에 없거나 다른 사전이 필요한 입력
 //   (zlib 프리셋 사전, 사전 ID가 다른 zstd frame, 형식 사전 문맥에 사전 ID 없는 frame, 사전 ID를
 //   기록한 LZ4 frame), window가 구현 상한(2^31)을 넘는 zstd frame·LZ4 legacy frame·Brotli large
 //   window 스트림·해제 전용 형식(Brotli)의 압축 Unsupported, 할당 실패 OutOfMemory, 크기 산술
-//   overflow Overflow, 외부 코덱이 계약 밖의 실패를 보고 DependencyFailed.
+//   overflow Overflow, 외부 코덱이 계약 밖의 실패를 보고하거나 사용자 등록 코덱이 반환 계약
+//   (CompressionCodec.h)을 어김 DependencyFailed.
 // - 할당은 모두 인자로 받은 Allocator를 거친다. 전역·thread_local 캐시가 없어 자유 함수는 재진입
-//   가능하다. 반복 호출이 많으면 코덱 문맥을 재사용하는 Compressor·Decompressor를 쓴다.
+//   가능하다. 설정 성격의 전역 상태는 사용자 등록 형식 표(CompressionCodec.h)뿐이며 내장 형식
+//   경로는 이 표를 읽지 않는다. 반복 호출이 많으면 코덱 문맥을 재사용하는 Compressor·
+//   Decompressor를 쓴다.
 // - 같은 라이브러리 버전·설정·입력이면 64bit little-endian 대상(Windows x64·macOS ARM64·Android
 //   arm64/x86_64)에서 같은 byte를 만든다(쿠킹 재현성). 비동기 API도 같은 결과를 만든다.
 namespace rocks {
@@ -56,12 +61,15 @@ class CompressDictionary;
 class DecompressDictionary;
 
 // 이 모듈의 출력 byte를 바꾸는 결정(코덱 버전, frame 설정·분할 단위·사전 매개변수 정책, 블록
-// 컨테이너 배치 등)이 바뀔 때마다 올리는 개정 번호다. 압축 결과를 캐시하는 쪽(쿠킹 빌드 키)은
-// 형식·수준·사전 Digest와 함께 이 값을 키에 넣는다.
+// 컨테이너 배치 등)이 바뀔 때마다 올리는 개정 번호다. 내장 형식의 TryGetCompressionFormatInfo
+// revision이 이 값이다. 압축 결과를 캐시하는 쪽(쿠킹 빌드 키)은 형식 이름·revision
+// (TryGetCompressionFormatInfo)·수준·사전 Digest를 키에 넣는다.
 inline constexpr uint32 CompressionOutputRevision = 1;
 
-// 압축 형식이다. 값은 프로세스 안 식별용이며 영속 포맷에 기록할 때는 상위 포맷이 별도 ID를 정한다.
-// 새 형식은 끝에 덧붙인다.
+// 압축 형식이다. 값은 프로세스 안 식별용이며 영속 포맷에 기록할 때는 상위 포맷이 별도 ID(또는 형식
+// 이름)를 정한다. 0–255는 내장 형식이며 새 형식은 끝에 덧붙인다. 256 이상은 사용자 등록 형식
+// (CompressionCodec.h)의 값으로, 등록 순서에 따라 실행마다 달라지므로 파일·빌드 캐시 키에는 형식
+// 이름을 쓴다. 등록되지 않았거나 해제된 값은 모르는 형식 값과 같이 InvalidArgument다.
 // - Lz4: LZ4 raw block. 해제가 가장 빠르다. 원본 크기·체크섬이 없어 해제할 때 크기를 알아야
 // 효율적이다. 스트림을 지원하지 않는다(블록 컨테이너 CompressedBlocks의 LZ4 블록이 이 형식이다).
 // - Zstd: Zstandard frame(RFC 8878). 원본 크기와 content checksum(XXH64 하위 32bit)을 기록한다.
@@ -91,7 +99,7 @@ inline constexpr uint32 CompressionOutputRevision = 1;
 //   auto target = Span<uint8>(tables.Data(), tables.Size());
 //   auto written = TryDecompress(CompressionFormat::Brotli, compressedTables, target, allocator);
 //   // written.Value()가 합과 다르면 상위 포맷 오류로 처리한다.
-enum class CompressionFormat : uint8 {
+enum class CompressionFormat : uint32 {
     Lz4,
     Zstd,
     Deflate,
@@ -109,6 +117,7 @@ enum class CompressionFormat : uint8 {
 //   22 약 700MiB). 해제는 DecompressStreamLimits 기본 window 상한(2^27)으로 풀린다.
 // - Deflate·Zlib·Gzip {0, 9, 6}: 0 = 압축하지 않음(stored).
 // - Brotli: 해제 전용이라 범위가 없다(Unsupported).
+// - 사용자 등록 형식: 등록할 때 준 범위다.
 struct CompressionLevelRange {
     int32 minimum = 0;
     int32 maximum = 0;
@@ -118,7 +127,51 @@ struct CompressionLevelRange {
 // 모르는 형식 값이면 InvalidArgument, 해제 전용 형식(Brotli)이면 Unsupported다.
 Result<CompressionLevelRange> TryGetCompressionLevelRange(CompressionFormat format) noexcept;
 
-// 검증된 형식·수준 쌍이다. 생성 함수만 만들 수 있어 압축 함수는 항상 유효한 설정을 받는다.
+// 형식 이름의 최대 길이(byte)다.
+inline constexpr usize MaxCompressionFormatNameBytes = 32;
+
+// 형식의 이름·개정 번호다(내장·사용자 등록 형식 공통). 빌드 캐시 키는 형식 값 대신 이 이름과
+// revision을 쓴다(사용자 등록 형식의 값은 실행마다 다를 수 있다).
+// - Name(): 내장 형식은 "lz4"·"zstd"·"deflate"·"zlib"·"gzip"·"lz4frame"·"brotli",
+//   사용자 등록 형식은 등록 이름("oodle.kraken" 같은 '.' 포함 이름)이다. 반환 view는 이 객체
+//   안을 가리키므로 결과(Result)를 변수로 받아 그 수명 안에서 쓴다. 임시 정보 객체에서는
+//   부를 수 없지만, 임시 Result의 Value().Name()은 막지 못하므로 문장이 끝나면 무효다.
+// - revision: 내장 형식은 CompressionOutputRevision, 사용자 등록 형식은 등록 version이다.
+// - plugin: 사용자 등록 형식인지다.
+// - compresses: 압축을 지원하는지다(해제 전용 형식 Brotli는 false).
+//
+// 사용 예(쿠킹 빌드 키):
+//   auto info = TryGetCompressionFormatInfo(settings.Format());
+//   key.Append(info.Value().Name()); // 그 뒤에 revision·수준을 붙인다
+struct CompressionFormatInfo {
+    char nameBytes[MaxCompressionFormatNameBytes] = {};
+    uint8 nameSize = 0;
+    uint32 revision = 0;
+    bool plugin = false;
+    bool compresses = true;
+
+    StringView Name() const& noexcept {
+        return StringView(nameBytes, nameSize);
+    }
+
+    StringView Name() const&& = delete;
+};
+
+// 형식의 이름·revision이다. 모르는 값·등록되지 않았거나 해제(진행 중 포함)된 값은
+// InvalidArgument다.
+Result<CompressionFormatInfo> TryGetCompressionFormatInfo(CompressionFormat format) noexcept;
+
+// 이름으로 형식을 찾는다(내장·사용자 등록 형식 공통). 형식 이름 문법(소문자 ASCII
+// [a-z0-9_-]로 된 비지 않은 조각을 '.'로 이은 1–32byte) 위반은 InvalidArgument이며 대문자가
+// 섞인 이름도 여기에 든다. 문법에 맞지만 그런 형식이 없거나 해제 중이면 NotFound다.
+//
+// 사용 예(설정 파일의 "zstd"·"oodle.kraken" 같은 이름을 형식 값으로):
+//   auto format = TryFindCompressionFormat(StringView("zstd"));
+Result<CompressionFormat> TryFindCompressionFormat(StringView name) noexcept;
+
+// 검증된 형식·수준 쌍이다. 생성 함수만 만들 수 있어 압축 함수는 만들 때 유효했던 설정을 받는다.
+// 사용자 등록 형식은 설정을 만든 뒤 해제가 시작될 수 있으며, 그 뒤 이 설정을 쓰는 압축 함수·
+// 문맥 생성·비동기 제출·스트림 생성은 InvalidArgument다.
 class CompressionSettings {
 public:
     // 수준이 GetCompressionLevelRange 범위 밖이거나 모르는 형식이면 InvalidArgument, 해제 전용
@@ -184,7 +237,8 @@ Result<usize> TryDecompress(CompressionFormat format, Span<const uint8> source,
 //   늘린다. 먼저 잡는 크기는 상한과 입력 크기 × 256 + 64KiB를 넘지 않는다.
 // - Brotli는 원본 크기가 없어 64KiB(상한 이하)를 먼저 잡고 출력이 더 나올 때만 두 배씩 늘린다.
 // - Lz4는 크기 정보가 없어 출력이 부족하면 두 배로 늘려 처음부터 다시 해제한다(크기를 알면
-// TryDecompress를 쓴다).
+//   TryDecompress를 쓴다). 사용자 등록 형식도 같은 방식이다(CompressionCodec.h). 이 두 형식은
+//   손상 입력에서도 상한까지 출력을 늘려 볼 수 있어, 늘리다 할당이 실패하면 OutOfMemory다.
 Result<usize> TryDecompressAppend(CompressionFormat format, Span<const uint8> source,
                                   usize maxOutputBytes, Array<uint8>& output) noexcept;
 
@@ -216,6 +270,8 @@ Result<usize> TryDecompressAppend(const DecompressDictionary& dictionary, Span<c
 // - 이동 전용이다. 이동된 뒤의 객체에 호출하면 StaleHandle이다.
 // - 한 객체는 동시에 한 스레드만 쓴다. 할당기는 객체보다 오래 살아야 한다.
 // - 실패(용량 부족·OOM·취소) 뒤에도 다음 호출은 새 문맥과 같은 결과를 낸다.
+// - 사용자 등록 형식의 문맥은 살아 있는 동안 사용권을 쥔다. 그동안 그 형식의
+//   TryUnregisterCompressionCodec은 Busy이고, 해제가 시작된 뒤에도 이 문맥은 계속 쓸 수 있다.
 //
 // 사용 예:
 //   auto compressor = Compressor::TryCreate(settings, allocator);
@@ -231,7 +287,8 @@ public:
     Compressor(const Compressor&) = delete;
     Compressor& operator=(const Compressor&) = delete;
 
-    // 실패: OutOfMemory, 외부 코덱 초기화 실패 DependencyFailed.
+    // 실패: OutOfMemory, 외부 코덱 초기화 실패 DependencyFailed, 설정을 만든 뒤 해제가 시작된
+    // 사용자 등록 형식 InvalidArgument.
     static Result<Compressor> TryCreate(const CompressionSettings& settings,
                                         Allocator& allocator) noexcept;
 

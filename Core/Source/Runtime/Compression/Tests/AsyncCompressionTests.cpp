@@ -64,8 +64,9 @@ TEST(Compression_CancellationProbeStopsChunkedCodecs) {
 
                 Array<uint8> compressed(allocator);
                 REQUIRE(compressed.TryAppend(Span<const uint8>(Base, 4)));
-                auto compressedResult = detail::CompressAppendOnce(
-                    DefaultSettings(format), View(original), compressed, allocator, probe);
+                auto compressedResult =
+                    detail::CompressAppendOnce(format, DefaultSettings(format).Level(),
+                                               View(original), compressed, allocator, probe);
                 CHECK(compressedResult.Error() == ErrorCode::Cancelled);
                 CHECK(Same(compressed, Span<const uint8>(Base, 4)));
                 CHECK(countdown.checks == checks + 1);

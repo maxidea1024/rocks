@@ -66,9 +66,11 @@ enum class Work : uint8 {
 };
 
 // body가 capture하는 작업 설명이다. 모든 포인터·Span은 caller가 terminal까지 유지한다.
+// 사용권(plugin) 때문에 이동 전용이다.
 struct Job {
     CompressionTask* task = nullptr;
     Work work = Work::CompressAppend;
+    // 압축이면 제출 시 검증한 설정의 형식·수준이다.
     CompressionFormat format = CompressionFormat::Zstd;
     int32 level = 0;
     Span<const uint8> source;
@@ -78,28 +80,28 @@ struct Job {
     Allocator* scratch = nullptr;
     // 사전 작업이 가진 사전 handle 복사본이다(capture가 정리될 때 놓는다).
     SharedPtr<detail::DictionaryState> dictionary;
+    // 사용자 등록 형식의 사용권이다. 제출할 때 얻어 실행이 끝나거나 capture가 정리될 때
+    // (terminal 게시 전) 놓는다. 대기 중에 해제가 시작돼도 이 작업은 끝까지 실행된다.
+    detail::CodecLease plugin;
 };
 
-Result<usize> Execute(const Job& job, const detail::CompressionProbe& probe) noexcept {
+// 한 번만 실행된다. 사용권은 일회성 경로로 넘긴다.
+Result<usize> Execute(Job& job, const detail::CompressionProbe& probe) noexcept {
     switch (job.work) {
-    case Work::CompressAppend: {
-        // 제출 전에 검증한 설정이다.
-        auto settings = CompressionSettings::TryMake(job.format, job.level);
-        ROCKS_ASSERT(settings.IsOk());
-        return detail::CompressAppendOnce(settings.Value(), job.source, *job.output, *job.scratch,
-                                          probe, job.dictionary);
-    }
+    case Work::CompressAppend:
+        return detail::CompressAppendOnce(job.format, job.level, job.source, *job.output,
+                                          *job.scratch, probe, job.dictionary, Move(job.plugin));
     case Work::DecompressAppend:
         return detail::DecompressAppendOnce(job.format, job.source, job.maxOutputBytes, *job.output,
-                                            *job.scratch, probe, job.dictionary);
+                                            *job.scratch, probe, job.dictionary, Move(job.plugin));
     case Work::DecompressInto:
         return detail::DecompressIntoOnce(job.format, job.source, job.destination, *job.scratch,
-                                          probe, job.dictionary);
+                                          probe, job.dictionary, Move(job.plugin));
     }
     return Result<usize>::Failure(ErrorCode::InvalidArgument);
 }
 
-void Run(const Job& job, WorkerTaskContext& context) noexcept {
+void Run(Job& job, WorkerTaskContext& context) noexcept {
     detail::CompressionProbe probe{&IsCancellationRequested, &context};
     if (probe.IsCancelled()) {
         CompressionTaskAccess::Cancel(*job.task);
@@ -124,7 +126,7 @@ void Run(const Job& job, WorkerTaskContext& context) noexcept {
     context.Fail(result.Error());
 }
 
-Result<void> Submit(WorkerScheduler& scheduler, CompressionTask& task, const Job& job,
+Result<void> Submit(WorkerScheduler& scheduler, CompressionTask& task, Job&& job,
                     Allocator& allocator, Span<const WorkerTaskHandle> dependencies) noexcept {
     WorkerTaskHandle& handle = CompressionTaskAccess::Handle(task);
     if (handle.IsValid()) {
@@ -137,9 +139,10 @@ Result<void> Submit(WorkerScheduler& scheduler, CompressionTask& task, const Job
         }
     }
 
-    // body 할당이 실패하면 아무것도 바뀌지 않는다.
+    // body 할당이 실패하면 task는 바뀌지 않는다(job과 사용권은 여기서 정리된다).
     auto body = Function<void(WorkerTaskContext&)>::TryCreate(
-        allocator, [job](WorkerTaskContext& context) noexcept { Run(job, context); });
+        allocator,
+        [job = Move(job)](WorkerTaskContext& context) mutable noexcept { Run(job, context); });
     if (!body) {
         return Result<void>::Failure(body.Error());
     }
@@ -240,6 +243,11 @@ Result<void> TrySubmitCompress(WorkerScheduler& scheduler, CompressionTask& task
     if (settings.Format() == CompressionFormat::Lz4 && source.Size() > Lz4MaxInputBytes) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+    // 사용자 등록 형식은 제출할 때 사용권을 얻는다(해제됐거나 해제 중이면 InvalidArgument).
+    auto plugin = detail::CodecLease::TryAcquireIfPlugin(settings.Format());
+    if (!plugin) {
+        return Result<void>::Failure(plugin.Error());
+    }
 
     Job job;
     job.task = &task;
@@ -249,7 +257,8 @@ Result<void> TrySubmitCompress(WorkerScheduler& scheduler, CompressionTask& task
     job.source = source;
     job.output = &output;
     job.scratch = &output.GetAllocator();
-    return Submit(scheduler, task, job, output.GetAllocator(), dependencies);
+    job.plugin = Move(plugin.Value());
+    return Submit(scheduler, task, Move(job), output.GetAllocator(), dependencies);
 }
 
 Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& task,
@@ -261,6 +270,10 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
     if (source.Size() == 0 || !detail::ResolveFormat(format).known) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+    auto plugin = detail::CodecLease::TryAcquireIfPlugin(format);
+    if (!plugin) {
+        return Result<void>::Failure(plugin.Error());
+    }
 
     Job job;
     job.task = &task;
@@ -270,7 +283,8 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
     job.output = &output;
     job.maxOutputBytes = maxOutputBytes;
     job.scratch = &output.GetAllocator();
-    return Submit(scheduler, task, job, output.GetAllocator(), dependencies);
+    job.plugin = Move(plugin.Value());
+    return Submit(scheduler, task, Move(job), output.GetAllocator(), dependencies);
 }
 
 Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& task,
@@ -282,6 +296,10 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
         !detail::ResolveFormat(format).known) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+    auto plugin = detail::CodecLease::TryAcquireIfPlugin(format);
+    if (!plugin) {
+        return Result<void>::Failure(plugin.Error());
+    }
 
     Job job;
     job.task = &task;
@@ -290,7 +308,8 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
     job.source = source;
     job.destination = destination;
     job.scratch = &scratch;
-    return Submit(scheduler, task, job, scratch, dependencies);
+    job.plugin = Move(plugin.Value());
+    return Submit(scheduler, task, Move(job), scratch, dependencies);
 }
 
 Result<void> TrySubmitCompress(WorkerScheduler& scheduler, CompressionTask& task,
@@ -311,7 +330,7 @@ Result<void> TrySubmitCompress(WorkerScheduler& scheduler, CompressionTask& task
     job.output = &output;
     job.scratch = &output.GetAllocator();
     job.dictionary = state;
-    return Submit(scheduler, task, job, output.GetAllocator(), dependencies);
+    return Submit(scheduler, task, Move(job), output.GetAllocator(), dependencies);
 }
 
 Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& task,
@@ -335,7 +354,7 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
     job.maxOutputBytes = maxOutputBytes;
     job.scratch = &output.GetAllocator();
     job.dictionary = state;
-    return Submit(scheduler, task, job, output.GetAllocator(), dependencies);
+    return Submit(scheduler, task, Move(job), output.GetAllocator(), dependencies);
 }
 
 Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& task,
@@ -359,7 +378,7 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
     job.destination = destination;
     job.scratch = &scratch;
     job.dictionary = state;
-    return Submit(scheduler, task, job, scratch, dependencies);
+    return Submit(scheduler, task, Move(job), scratch, dependencies);
 }
 
 } // namespace rocks

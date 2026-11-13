@@ -35,6 +35,20 @@ namespace {
 
 using namespace rocks;
 
+// 출력용 형식 이름이다(TryGetCompressionFormatInfo, 내장·사용자 등록 형식 공통). printf 인자로 쓰는
+// 임시 객체라 문장이 끝날 때까지 유효하다.
+struct FormatName {
+    char text[MaxCompressionFormatNameBytes + 1] = {};
+
+    explicit FormatName(CompressionFormat format) noexcept {
+        auto info = TryGetCompressionFormatInfo(format);
+        const StringView name = info ? info.Value().Name() : StringView("?");
+        for (usize index = 0; index < name.ByteCount(); ++index) {
+            text[index] = name.Data()[index];
+        }
+    }
+};
+
 struct Options {
     const char* file = nullptr;
     const char* brotli = nullptr;
@@ -229,19 +243,18 @@ int RunStreams(Span<const uint8> input, uint32 rounds, Allocator& allocator) {
            "comp MB/s", "decomp MB/s");
     struct Case {
         CompressionFormat format;
-        const char* name;
         int32 level;
     };
-    static constexpr Case Cases[] = {{CompressionFormat::Lz4Frame, "lz4frame", 1},
-                                     {CompressionFormat::Zstd, "zstd", 3},
-                                     {CompressionFormat::Gzip, "gzip", 6}};
+    static constexpr Case Cases[] = {{CompressionFormat::Lz4Frame, 1},
+                                     {CompressionFormat::Zstd, 3},
+                                     {CompressionFormat::Gzip, 6}};
     for (const Case& item : Cases) {
         auto stream = CompressStream::TryCreate(
             CompressionSettings::TryMake(item.format, item.level).Value(), allocator, input.Size());
         auto decoder = DecompressStream::TryCreate(
             item.format, DecompressStreamLimits{input.Size(), 27}, allocator);
         if (!stream || !decoder) {
-            printf("%-8s %5d cannot create\n", item.name, item.level);
+            printf("%-8s %5d cannot create\n", FormatName(item.format).text, item.level);
             return 6;
         }
 
@@ -276,10 +289,10 @@ int RunStreams(Span<const uint8> input, uint32 rounds, Allocator& allocator) {
                    platform::MemoryCompare(restored.Data(), input.Data(), input.Size()) == 0;
         });
         if (compressSeconds < 0 || decompressSeconds < 0) {
-            printf("%-8s %5d stream round trip failed\n", item.name, item.level);
+            printf("%-8s %5d stream round trip failed\n", FormatName(item.format).text, item.level);
             return 7;
         }
-        printf("%-8s %5d %8.3f %12.1f %12.1f\n", item.name, item.level,
+        printf("%-8s %5d %8.3f %12.1f %12.1f\n", FormatName(item.format).text, item.level,
                static_cast<double>(packed.Size()) / static_cast<double>(input.Size()),
                megabytes / compressSeconds, megabytes / decompressSeconds);
     }
@@ -377,12 +390,10 @@ int RunBlocks(Span<const uint8> input, uint32 rounds, uint32 workers, Allocator&
            workers, "format", "level", "ratio", "comp MB/s", "par comp", "read MB/s", "par read");
     struct Case {
         CompressionFormat format;
-        const char* name;
         int32 level;
     };
-    static constexpr Case Cases[] = {{CompressionFormat::Lz4, "lz4", 1},
-                                     {CompressionFormat::Zstd, "zstd", 3},
-                                     {CompressionFormat::Deflate, "deflate", 6}};
+    static constexpr Case Cases[] = {
+        {CompressionFormat::Lz4, 1}, {CompressionFormat::Zstd, 3}, {CompressionFormat::Deflate, 6}};
     int status = 0;
     for (const Case& item : Cases) {
         const auto settings = CompressedBlocksSettings::TryMake(
@@ -413,7 +424,7 @@ int RunBlocks(Span<const uint8> input, uint32 rounds, uint32 workers, Allocator&
                               : Result<CompressedBlocksReadContext>::Failure(reader.Error());
         Array<uint8> restored(allocator);
         if (!same || !context || !restored.TryResize(input.Size())) {
-            printf("%-8s %5d block setup failed\n", item.name, item.level);
+            printf("%-8s %5d block setup failed\n", FormatName(item.format).text, item.level);
             status = 10;
             break;
         }
@@ -432,11 +443,12 @@ int RunBlocks(Span<const uint8> input, uint32 rounds, uint32 workers, Allocator&
         });
         if (sequentialSeconds < 0 || parallelSeconds < 0 || readSeconds < 0 ||
             parallelReadSeconds < 0) {
-            printf("%-8s %5d block round trip failed\n", item.name, item.level);
+            printf("%-8s %5d block round trip failed\n", FormatName(item.format).text, item.level);
             status = 11;
             break;
         }
-        printf("%-8s %5d %8.3f %10.1f %10.1f %10.1f %10.1f\n", item.name, item.level,
+        printf("%-8s %5d %8.3f %10.1f %10.1f %10.1f %10.1f\n", FormatName(item.format).text,
+               item.level,
                static_cast<double>(container.Size()) / static_cast<double>(input.Size()),
                megabytes / sequentialSeconds, megabytes / parallelSeconds, megabytes / readSeconds,
                megabytes / parallelReadSeconds);
@@ -464,22 +476,21 @@ int Run(const Options& options) {
 
     struct Case {
         CompressionFormat format;
-        const char* name;
         int32 level;
     };
     static constexpr Case Cases[] = {
-        {CompressionFormat::Lz4, "lz4", 1},           {CompressionFormat::Lz4, "lz4", 9},
-        {CompressionFormat::Lz4, "lz4", 12},          {CompressionFormat::Lz4Frame, "lz4frame", 1},
-        {CompressionFormat::Lz4Frame, "lz4frame", 9}, {CompressionFormat::Zstd, "zstd", 1},
-        {CompressionFormat::Zstd, "zstd", 3},         {CompressionFormat::Zstd, "zstd", 9},
-        {CompressionFormat::Zstd, "zstd", 19},        {CompressionFormat::Deflate, "deflate", 1},
-        {CompressionFormat::Deflate, "deflate", 6},   {CompressionFormat::Gzip, "gzip", 9}};
+        {CompressionFormat::Lz4, 1},      {CompressionFormat::Lz4, 9},
+        {CompressionFormat::Lz4, 12},     {CompressionFormat::Lz4Frame, 1},
+        {CompressionFormat::Lz4Frame, 9}, {CompressionFormat::Zstd, 1},
+        {CompressionFormat::Zstd, 3},     {CompressionFormat::Zstd, 9},
+        {CompressionFormat::Zstd, 19},    {CompressionFormat::Deflate, 1},
+        {CompressionFormat::Deflate, 6},  {CompressionFormat::Gzip, 9}};
     const Span<const uint8> input(corpus.Data(), corpus.Size());
     for (const Case& item : Cases) {
         auto settings = CompressionSettings::TryMake(item.format, item.level);
         auto bound = TryGetCompressBound(item.format, input.Size());
         if (!settings || !bound) {
-            printf("%-8s %5d unsupported\n", item.name, item.level);
+            printf("%-8s %5d unsupported\n", FormatName(item.format).text, item.level);
             continue;
         }
         auto compressor = Compressor::TryCreate(settings.Value(), allocator);
@@ -488,7 +499,7 @@ int Run(const Options& options) {
         Array<uint8> restored(allocator);
         if (!compressor || !decompressor || !packed.TryResize(bound.Value()) ||
             !restored.TryResize(input.Size())) {
-            printf("%-8s %5d out of memory\n", item.name, item.level);
+            printf("%-8s %5d out of memory\n", FormatName(item.format).text, item.level);
             return 3;
         }
 
@@ -502,7 +513,7 @@ int Run(const Options& options) {
                 compressor.Value().TryCompress(input, Span<uint8>(packed.Data(), packed.Size()));
             const double elapsed = Seconds(start);
             if (!written) {
-                printf("%-8s %5d compress failed (%u)\n", item.name, item.level,
+                printf("%-8s %5d compress failed (%u)\n", FormatName(item.format).text, item.level,
                        static_cast<unsigned>(written.Error()));
                 return 4;
             }
@@ -519,13 +530,13 @@ int Run(const Options& options) {
             const double elapsed = Seconds(start);
             if (!written || written.Value() != input.Size() ||
                 platform::MemoryCompare(restored.Data(), input.Data(), input.Size()) != 0) {
-                printf("%-8s %5d round trip failed\n", item.name, item.level);
+                printf("%-8s %5d round trip failed\n", FormatName(item.format).text, item.level);
                 return 5;
             }
             decompressSeconds = elapsed < decompressSeconds ? elapsed : decompressSeconds;
         }
 
-        printf("%-8s %5d %8.3f %12.1f %12.1f\n", item.name, item.level,
+        printf("%-8s %5d %8.3f %12.1f %12.1f\n", FormatName(item.format).text, item.level,
                static_cast<double>(packedBytes) / static_cast<double>(input.Size()),
                megabytes / compressSeconds, megabytes / decompressSeconds);
     }

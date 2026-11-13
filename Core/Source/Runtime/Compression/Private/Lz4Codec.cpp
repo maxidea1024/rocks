@@ -130,8 +130,12 @@ Result<usize> DecompressAppend(Span<const uint8> source, usize maxOutputBytes,
     const usize theoretical = MaximumDecompressedBytes(source.Size());
     const usize limit = maxOutputBytes < theoretical ? maxOutputBytes : theoretical;
     const usize base = output.Size();
+    // 첫 크기는 64KiB와 입력 × 4 중 큰 값이고, 입력 × 4가 상한을 넘으면 상한이다(작은 크기부터
+    // 여러 번 다시 해제하지 않는다. 사용자 등록 형식과 같은 규칙).
     usize capacity = AppendInitialBytes;
-    if (source.Size() <= limit / 4 && source.Size() * 4 > capacity) {
+    if (source.Size() > limit / 4) {
+        capacity = limit;
+    } else if (source.Size() * 4 > capacity) {
         capacity = source.Size() * 4;
     }
     if (capacity > limit) {

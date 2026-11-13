@@ -60,7 +60,10 @@ Result<CompressDictionary> CompressDictionary::TryCreate(const CompressionSettin
                                                          Span<const uint8> bytes,
                                                          Allocator& allocator) noexcept {
     if (settings.Format() != CompressionFormat::Zstd) {
-        return Result<CompressDictionary>::Failure(ErrorCode::Unsupported);
+        // 해제 사전과 같은 분류다. 설정을 만든 뒤 해제가 시작된 사용자 등록 형식은 모르는 값이다.
+        return Result<CompressDictionary>::Failure(detail::ResolveFormat(settings.Format()).known
+                                                       ? ErrorCode::Unsupported
+                                                       : ErrorCode::InvalidArgument);
     }
     if (!InDictionaryRange(bytes)) {
         return Result<CompressDictionary>::Failure(ErrorCode::InvalidArgument);
@@ -196,7 +199,7 @@ Result<usize> TryCompressAppend(const CompressDictionary& dictionary, Span<const
         return Result<usize>::Failure(ErrorCode::StaleHandle);
     }
 
-    return detail::CompressAppendOnce(SettingsOf(*state), source, output, scratch,
+    return detail::CompressAppendOnce(state->format, state->level, source, output, scratch,
                                       detail::CompressionProbe{}, state);
 }
 

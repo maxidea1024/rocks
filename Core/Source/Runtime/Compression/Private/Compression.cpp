@@ -24,6 +24,17 @@ uint32 RequiredDictionaryId(const DecompressorState& state) noexcept {
     return state.active != nullptr ? state.active->id : 0;
 }
 
+// 사용자 등록 형식의 일회성 호출이 쓸 사용권이다. 받은 lease가 있으면(비동기 작업) 그것을, 없으면
+// 새로 얻는다(해제됐거나 해제 중이면 InvalidArgument).
+Result<CodecLease> HoldPlugin(CompressionFormat format, CodecLease& given) noexcept {
+    if (given.Codec() != nullptr) {
+        // 비동기 작업이 같은 형식으로 얻은 사용권이다.
+        ROCKS_ASSERT(given.Format() == format);
+        return Result<CodecLease>::Success(Move(given));
+    }
+    return CodecLease::TryAcquire(format);
+}
+
 void DestroyCompressorCodec(CompressionFormat format, int32 level, void* codec,
                             Allocator& allocator) noexcept {
     if (format == CompressionFormat::Lz4) {
@@ -52,6 +63,15 @@ void DestroyDecompressorCodec(CompressionFormat format, void* codec) noexcept {
 
 FormatSupport ResolveFormat(CompressionFormat format) noexcept {
     FormatSupport support;
+    if (IsPluginFormat(format)) {
+        // 등록 표 조회다. 판정 뒤 해제될 수 있으므로 코덱을 부를 때는 lease를 얻는다.
+        const bool registered = PluginLevelRange(format).IsOk();
+        support.known = registered;
+        support.compresses = registered;
+        support.plugin = registered;
+        return support;
+    }
+
     switch (format) {
     case CompressionFormat::Lz4:
         // raw block에는 끝 표지·크기가 없어 스트림 형식이 아니다.
@@ -149,6 +169,24 @@ CreateCompressorState(CompressionFormat format, int32 level, Allocator& allocato
         format = dictionary->format;
         level = dictionary->level;
     }
+    if (IsPluginFormat(format)) {
+        // 사용자 등록 형식은 코덱 상태가 없다. 문맥이 사용권을 수명 동안 쥔다.
+        auto plugin = CodecLease::TryAcquire(format);
+        if (!plugin) {
+            return Result<CompressorState*>::Failure(plugin.Error());
+        }
+        const CompressionLevelRange& levels = plugin.Value().Levels();
+        if (level < levels.minimum || level > levels.maximum) {
+            return Result<CompressorState*>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        void* memory = CodecAllocate(allocator, sizeof(CompressorState));
+        if (memory == nullptr) {
+            return Result<CompressorState*>::Failure(ErrorCode::OutOfMemory);
+        }
+        return Result<CompressorState*>::Success(ConstructAt<CompressorState>(
+            memory, CompressorState{format, level, &allocator, nullptr, {}, Move(plugin.Value())}));
+    }
     const ErrorCode formatError = CompressFormatError(format);
     if (formatError != ErrorCode::None) {
         return Result<CompressorState*>::Failure(formatError);
@@ -186,7 +224,7 @@ CreateCompressorState(CompressionFormat format, int32 level, Allocator& allocato
     }
 
     return Result<CompressorState*>::Success(ConstructAt<CompressorState>(
-        memory, CompressorState{format, level, &allocator, codec.Value(), dictionary}));
+        memory, CompressorState{format, level, &allocator, codec.Value(), dictionary, {}}));
 }
 
 void DestroyCompressorState(CompressorState* state) noexcept {
@@ -206,6 +244,20 @@ CreateDecompressorState(CompressionFormat format, Allocator& allocator,
                         const SharedPtr<DictionaryState>& dictionary) noexcept {
     if (dictionary) {
         format = dictionary->format;
+    }
+    if (IsPluginFormat(format)) {
+        auto plugin = CodecLease::TryAcquire(format);
+        if (!plugin) {
+            return Result<DecompressorState*>::Failure(plugin.Error());
+        }
+
+        void* memory = CodecAllocate(allocator, sizeof(DecompressorState));
+        if (memory == nullptr) {
+            return Result<DecompressorState*>::Failure(ErrorCode::OutOfMemory);
+        }
+        return Result<DecompressorState*>::Success(ConstructAt<DecompressorState>(
+            memory,
+            DecompressorState{format, &allocator, nullptr, {}, nullptr, Move(plugin.Value())}));
     }
     if (!IsKnownFormat(format)) {
         return Result<DecompressorState*>::Failure(ErrorCode::InvalidArgument);
@@ -229,9 +281,9 @@ CreateDecompressorState(CompressionFormat format, Allocator& allocator,
         return Result<DecompressorState*>::Failure(ErrorCode::OutOfMemory);
     }
 
-    return Result<DecompressorState*>::Success(
-        ConstructAt<DecompressorState>(memory, DecompressorState{format, &allocator, codec.Value(),
-                                                                 dictionary, dictionary.Get()}));
+    return Result<DecompressorState*>::Success(ConstructAt<DecompressorState>(
+        memory,
+        DecompressorState{format, &allocator, codec.Value(), dictionary, dictionary.Get(), {}}));
 }
 
 Result<void> BindDecompressorDictionary(DecompressorState& state,
@@ -273,6 +325,10 @@ Result<usize> CompressInto(CompressorState& state, Span<const uint8> source,
     if (Overlaps(source.Data(), source.Size(), destination.Data(), destination.Size())) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
+    if (state.plugin.Codec() != nullptr) {
+        return plugin::Compress(state.plugin, state.level, source, destination, *state.allocator,
+                                probe);
+    }
 
     switch (state.format) {
     case CompressionFormat::Lz4:
@@ -305,9 +361,11 @@ Result<usize> CompressAppend(CompressorState& state, Span<const uint8> source, A
     }
 
     // zlib 계열은 문맥의 실제 설정(수준·window·memLevel)으로 구한 상한을 쓴다. 문맥 없는 공개
-    // bound보다 훨씬 작아(약 13% → 0.03% 여유) 미리 확보하는 저장소가 줄어든다.
-    auto bound = IsZlibFamily(state.format) ? zlib::StreamBound(state.codec, source.Size())
-                                            : TryGetCompressBound(state.format, source.Size());
+    // bound보다 훨씬 작아(약 13% → 0.03% 여유) 미리 확보하는 저장소가 줄어든다. 사용자 등록 형식은
+    // 문맥이 쥔 코덱의 bound다(형식 값으로 다시 찾지 않는다).
+    auto bound = state.plugin.Codec() != nullptr ? plugin::Bound(state.plugin, source.Size())
+                 : IsZlibFamily(state.format)    ? zlib::StreamBound(state.codec, source.Size())
+                                                 : TryGetCompressBound(state.format, source.Size());
     if (!bound) {
         return Result<usize>::Failure(bound.Error());
     }
@@ -338,6 +396,9 @@ Result<usize> DecompressInto(DecompressorState& state, Span<const uint8> source,
     if (source.Size() == 0 ||
         Overlaps(source.Data(), source.Size(), destination.Data(), destination.Size())) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
+    }
+    if (state.plugin.Codec() != nullptr) {
+        return plugin::Decompress(state.plugin, source, destination, *state.allocator, probe);
     }
 
     switch (state.format) {
@@ -370,6 +431,10 @@ Result<usize> DecompressAppend(DecompressorState& state, Span<const uint8> sourc
     if (maxOutputBytes > static_cast<usize>(-1) - output.Size()) {
         return Result<usize>::Failure(ErrorCode::Overflow);
     }
+    if (state.plugin.Codec() != nullptr) {
+        return plugin::DecompressAppend(state.plugin, source, maxOutputBytes, output,
+                                        *state.allocator, probe);
+    }
 
     switch (state.format) {
     case CompressionFormat::Lz4:
@@ -392,16 +457,26 @@ Result<usize> DecompressAppend(DecompressorState& state, Span<const uint8> sourc
     return Result<usize>::Failure(ErrorCode::InvalidArgument);
 }
 
-Result<usize> CompressAppendOnce(const CompressionSettings& settings, Span<const uint8> source,
+Result<usize> CompressAppendOnce(CompressionFormat format, int32 level, Span<const uint8> source,
                                  Array<uint8>& output, Allocator& scratch,
                                  const CompressionProbe& probe,
-                                 const SharedPtr<DictionaryState>& dictionary) noexcept {
+                                 const SharedPtr<DictionaryState>& dictionary,
+                                 CodecLease plugin) noexcept {
     if (OverlapsArrayStorage(source, output)) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
 
-    auto state =
-        CreateCompressorState(settings.Format(), settings.Level(), scratch, true, dictionary);
+    if (!dictionary && IsPluginFormat(format)) {
+        // 사용자 등록 형식은 코덱 상태가 없어 상태 블록을 스택에 둔다(할당 없음).
+        auto held = HoldPlugin(format, plugin);
+        if (!held) {
+            return Result<usize>::Failure(held.Error());
+        }
+        CompressorState stack{format, level, &scratch, nullptr, {}, Move(held.Value())};
+        return CompressAppend(stack, source, output, probe);
+    }
+
+    auto state = CreateCompressorState(format, level, scratch, true, dictionary);
     if (!state) {
         return Result<usize>::Failure(state.Error());
     }
@@ -414,16 +489,26 @@ Result<usize> CompressAppendOnce(const CompressionSettings& settings, Span<const
 Result<usize> DecompressIntoOnce(CompressionFormat format, Span<const uint8> source,
                                  Span<uint8> destination, Allocator& scratch,
                                  const CompressionProbe& probe,
-                                 const SharedPtr<DictionaryState>& dictionary) noexcept {
+                                 const SharedPtr<DictionaryState>& dictionary,
+                                 CodecLease plugin) noexcept {
     if (source.Size() == 0 ||
         Overlaps(source.Data(), source.Size(), destination.Data(), destination.Size())) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
 
+    if (!dictionary && IsPluginFormat(format)) {
+        auto held = HoldPlugin(format, plugin);
+        if (!held) {
+            return Result<usize>::Failure(held.Error());
+        }
+        DecompressorState stack{format, &scratch, nullptr, {}, nullptr, Move(held.Value())};
+        return DecompressInto(stack, source, destination, probe);
+    }
+
     // Lz4 raw block 해제는 코덱 상태가 없으므로 할당하지 않는다(가장 빠른 경로에 OOM 실패를 만들지
     // 않는다). Brotli는 해제마다 해제기 상태를 새로 만들므로 문맥 상태가 필요 없다.
     if (format == CompressionFormat::Lz4 || format == CompressionFormat::Brotli) {
-        DecompressorState stateless{format, &scratch, nullptr, {}, nullptr};
+        DecompressorState stateless{format, &scratch, nullptr, {}, nullptr, {}};
         return DecompressInto(stateless, source, destination, probe);
     }
 
@@ -440,13 +525,23 @@ Result<usize> DecompressIntoOnce(CompressionFormat format, Span<const uint8> sou
 Result<usize> DecompressAppendOnce(CompressionFormat format, Span<const uint8> source,
                                    usize maxOutputBytes, Array<uint8>& output, Allocator& scratch,
                                    const CompressionProbe& probe,
-                                   const SharedPtr<DictionaryState>& dictionary) noexcept {
+                                   const SharedPtr<DictionaryState>& dictionary,
+                                   CodecLease plugin) noexcept {
     if (source.Size() == 0 || OverlapsArrayStorage(source, output)) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
 
+    if (!dictionary && IsPluginFormat(format)) {
+        auto held = HoldPlugin(format, plugin);
+        if (!held) {
+            return Result<usize>::Failure(held.Error());
+        }
+        DecompressorState stack{format, &scratch, nullptr, {}, nullptr, Move(held.Value())};
+        return DecompressAppend(stack, source, maxOutputBytes, output, probe);
+    }
+
     if (format == CompressionFormat::Lz4 || format == CompressionFormat::Brotli) {
-        DecompressorState stateless{format, &scratch, nullptr, {}, nullptr};
+        DecompressorState stateless{format, &scratch, nullptr, {}, nullptr, {}};
         return DecompressAppend(stateless, source, maxOutputBytes, output, probe);
     }
 
@@ -463,6 +558,10 @@ Result<usize> DecompressAppendOnce(CompressionFormat format, Span<const uint8> s
 } // namespace detail
 
 Result<CompressionLevelRange> TryGetCompressionLevelRange(CompressionFormat format) noexcept {
+    if (detail::IsPluginFormat(format)) {
+        return detail::PluginLevelRange(format);
+    }
+
     const ErrorCode formatError = detail::CompressFormatError(format);
     if (formatError != ErrorCode::None) {
         return Result<CompressionLevelRange>::Failure(formatError);
@@ -509,6 +608,14 @@ Result<CompressionSettings> CompressionSettings::TryDefault(CompressionFormat fo
 }
 
 Result<usize> TryGetCompressBound(CompressionFormat format, usize sourceBytes) noexcept {
+    if (detail::IsPluginFormat(format)) {
+        auto plugin = detail::CodecLease::TryAcquire(format);
+        if (!plugin) {
+            return Result<usize>::Failure(plugin.Error());
+        }
+        return detail::plugin::Bound(plugin.Value(), sourceBytes);
+    }
+
     const ErrorCode formatError = detail::CompressFormatError(format);
     if (formatError != ErrorCode::None) {
         return Result<usize>::Failure(formatError);
@@ -538,6 +645,17 @@ Result<usize> TryCompress(const CompressionSettings& settings, Span<const uint8>
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
 
+    if (detail::IsPluginFormat(settings.Format())) {
+        // 상태 블록을 스택에 둔다(할당 없음). 사용권은 호출 동안 쥔다.
+        auto plugin = detail::CodecLease::TryAcquire(settings.Format());
+        if (!plugin) {
+            return Result<usize>::Failure(plugin.Error());
+        }
+        detail::CompressorState stack{settings.Format(),   settings.Level(), &scratch, nullptr, {},
+                                      Move(plugin.Value())};
+        return detail::CompressInto(stack, source, destination, detail::CompressionProbe{});
+    }
+
     auto state = detail::CreateCompressorState(settings.Format(), settings.Level(), scratch);
     if (!state) {
         return Result<usize>::Failure(state.Error());
@@ -551,13 +669,13 @@ Result<usize> TryCompress(const CompressionSettings& settings, Span<const uint8>
 
 Result<usize> TryCompressAppend(const CompressionSettings& settings, Span<const uint8> source,
                                 Array<uint8>& output) noexcept {
-    return detail::CompressAppendOnce(settings, source, output, output.GetAllocator(),
-                                      detail::CompressionProbe{});
+    return detail::CompressAppendOnce(settings.Format(), settings.Level(), source, output,
+                                      output.GetAllocator(), detail::CompressionProbe{});
 }
 
 Result<usize> TryCompressAppend(const CompressionSettings& settings, Span<const uint8> source,
                                 Array<uint8>& output, Allocator& scratch) noexcept {
-    return detail::CompressAppendOnce(settings, source, output, scratch,
+    return detail::CompressAppendOnce(settings.Format(), settings.Level(), source, output, scratch,
                                       detail::CompressionProbe{});
 }
 

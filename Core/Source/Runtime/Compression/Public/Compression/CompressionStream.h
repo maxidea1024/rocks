@@ -5,7 +5,8 @@
 
 // 조각 단위 스트리밍 압축·해제다(Godot StreamPeerGZIP 대응, Docs/Design/Compression.ko.md 10·12절).
 // 형식은 Zstd·Deflate·Zlib·Gzip·Lz4Frame이며 Lz4(raw block)는 스트림 형식이 아니라 Unsupported다.
-// Brotli는 해제 전용이다(DecompressStream만 되고 CompressStream은 Unsupported).
+// Brotli는 해제 전용이다(DecompressStream만 되고 CompressStream은 Unsupported). 사용자 등록
+// 형식(CompressionCodec.h)은 스트림을 지원하지 않는다(Unsupported).
 // 빠른 스트림(로그·네트워크 메시지)은 Lz4Frame, 압축률이 중요하면 Zstd를 쓴다.
 //
 // 사용 예(LZ4 frame으로 메시지를 보내며 메시지마다 flush):
@@ -70,8 +71,8 @@ public:
     CompressStream& operator=(const CompressStream&) = delete;
 
     // sizeHint는 전체 입력 크기 추정치(0 = 모름)다. zstd가 매개변수를 고르는 데만 쓴다(frame에
-    // 기록하지 않는다. Lz4Frame·zlib 계열은 쓰지 않는다). 실패: Lz4는 Unsupported, OutOfMemory,
-    // DependencyFailed.
+    // 기록하지 않는다. Lz4Frame·zlib 계열은 쓰지 않는다). 실패: Lz4·사용자 등록 형식은 Unsupported,
+    // OutOfMemory, DependencyFailed.
     static Result<CompressStream> TryCreate(const CompressionSettings& settings,
                                             Allocator& allocator, uint64 sizeHint = 0) noexcept;
 
@@ -162,8 +163,8 @@ public:
     DecompressStream(const DecompressStream&) = delete;
     DecompressStream& operator=(const DecompressStream&) = delete;
 
-    // 실패: Lz4는 Unsupported, maxOutputBytes 0·maxWindowLog 범위 밖·모르는 형식 InvalidArgument,
-    // OutOfMemory, DependencyFailed.
+    // 실패: Lz4·사용자 등록 형식은 Unsupported, maxOutputBytes 0·maxWindowLog 범위 밖·
+    // 모르는 형식 InvalidArgument, OutOfMemory, DependencyFailed.
     static Result<DecompressStream> TryCreate(CompressionFormat format,
                                               const DecompressStreamLimits& limits,
                                               Allocator& allocator) noexcept;

@@ -1,29 +1,92 @@
 #pragma once
 
 #include <Compression/Compression.h>
+#include <Compression/CompressionCodec.h>
 #include <Compression/CompressionDictionary.h>
 #include <Compression/CompressionStream.h>
 
 // 압축 모듈 내부 경계다. 공개 API(Compression.cpp)·비동기(AsyncCompression.cpp)와 코덱
-// adapter(Lz4Codec.cpp·Lz4FrameCodec.cpp·ZstdCodec.cpp·ZlibCodec.cpp·BrotliCodec.cpp) 사이의 계약만
-// 둔다. 외부 코덱 헤더는 각 adapter 번역 단위만 포함한다.
+// adapter(Lz4Codec.cpp·Lz4FrameCodec.cpp·ZstdCodec.cpp·ZlibCodec.cpp·BrotliCodec.cpp),
+// 사용자 등록 형식 표(CompressionCodec.cpp) 사이의 계약만 둔다. 외부 코덱 헤더는 각 adapter
+// 번역 단위만 포함한다.
 namespace rocks::detail {
 
-// 형식이 지원하는 범위다. 형식 판정은 ResolveFormat 하나로 모은다(수준·bound·문맥·스트림·비동기·
-// 사전이 같은 답을 쓴다). 블록 컨테이너는 블록 형식 목록(CompressedBlocks.cpp의 CodecId: Lz4·Zstd·
-// Deflate)으로 따로 판정하며 나머지 형식은 InvalidArgument다. 형식 플러그인 등록을 들이면 이 함수가
-// 등록표 조회가 된다.
-// - known: 이 모듈이 아는 형식이다. 아니면 모든 API가 InvalidArgument다.
-// - compresses: 압축(수준 범위·CompressionSettings·bound·Compressor·CompressStream)을 지원한다.
-//   아는 형식인데 압축하지 않으면 Unsupported다(해제 전용 형식: Brotli).
-// - streams: 스트림 API를 지원한다(압축은 compresses일 때만). Lz4 raw block은 아니다.
+// 사용자 등록 형식 값의 하한이다(0–255는 내장 형식).
+inline constexpr uint32 FirstPluginFormatValue = 0x100;
+
+constexpr bool IsPluginFormat(CompressionFormat format) noexcept {
+    return static_cast<uint32>(format) >= FirstPluginFormatValue;
+}
+
+// 형식이 지원하는 범위다. 내장 형식의 판정은 ResolveFormat 하나로 모은다(수준·bound·문맥·
+// 스트림·비동기·사전이 같은 답을 쓴다). 사용자 등록 형식은 사용권 획득(CodecLease::TryAcquire)이나
+// PluginLevelRange가 판정을 겸하고(수준·bound·문맥·일회성·비동기 압축 제출), ResolveFormat은
+// 스트림·사전·비동기 해제 제출 입구에서만 그 값을 판정한다. 블록 컨테이너는 블록 형식 목록
+// (CompressedBlocks.cpp의 CodecId: Lz4·Zstd·Deflate)으로 따로 판정하며 나머지 형식(사용자 등록
+// 형식 포함)은 InvalidArgument다. 내장 형식은 등록 표를 읽지 않는다.
+// - known: 이 모듈이 아는 형식이다(사용자 등록 형식은 등록돼 있고 해제 중이 아님). 아니면 모든
+//   API가 InvalidArgument다.
+// - compresses: 압축(수준 범위·CompressionSettings·bound·Compressor·CompressStream)을
+//   지원한다. 아는 형식인데 압축하지 않으면 Unsupported다(해제 전용 형식: Brotli).
+// - streams: 스트림 API를 지원한다(압축은 compresses일 때만). Lz4 raw block과 사용자 등록
+//   형식은 아니다.
+// - plugin: 사용자 등록 형식이다. 코덱을 부르려면 CodecLease를 얻는다(판정과 사용 사이에 해제될
+//   수 있다).
 struct FormatSupport {
     bool known = false;
     bool compresses = false;
     bool streams = false;
+    bool plugin = false;
 };
 
 FormatSupport ResolveFormat(CompressionFormat format) noexcept;
+
+// 사용자 등록 코덱의 사용권이다. 쥐고 있는 동안 그 형식의 TryUnregisterCompressionCodec은
+// Busy이고 코덱 객체는 살아 있다. 이동 전용이다. 빈 lease(Codec() == nullptr)는 내장 형식을
+// 뜻한다.
+// - 일회성 호출은 호출 동안, Compressor·Decompressor 상태는 문맥 수명 동안 쥔다. 비동기 작업은
+//   실행이 끝날 때, 실행되지 않으면 capture가 정리될 때 놓는다(늦어도 terminal 게시 전).
+// - 코덱 호출 중에는 표 잠금을 쥐지 않는다(코덱이 이 모듈을 다시 불러도 된다).
+class CodecLease {
+public:
+    CodecLease() noexcept = default;
+    ~CodecLease() noexcept;
+    CodecLease(CodecLease&& other) noexcept;
+    CodecLease& operator=(CodecLease&& other) noexcept;
+    CodecLease(const CodecLease&) = delete;
+    CodecLease& operator=(const CodecLease&) = delete;
+
+    // 등록돼 있고 해제 중이 아닌 사용자 등록 형식이면 사용권을 얻는다. 아니면 InvalidArgument다.
+    static Result<CodecLease> TryAcquire(CompressionFormat format) noexcept;
+
+    // 사용자 등록 형식이면 사용권을, 내장 형식이면 빈 lease를 돌려준다(내장 형식은 표를
+    // 읽지 않는다).
+    static Result<CodecLease> TryAcquireIfPlugin(CompressionFormat format) noexcept;
+
+    const CompressionCodec* Codec() const noexcept {
+        return codec_;
+    }
+
+    // 사용권을 얻은 형식 값이다(빈 lease면 의미 없다).
+    CompressionFormat Format() const noexcept {
+        return format_;
+    }
+
+    const CompressionLevelRange& Levels() const noexcept {
+        return levels_;
+    }
+
+private:
+    void Release() noexcept;
+
+    const CompressionCodec* codec_ = nullptr;
+    CompressionFormat format_ = CompressionFormat::Lz4;
+    uint32 slot_ = 0;
+    CompressionLevelRange levels_;
+};
+
+// 사용자 등록 형식의 수준 범위다. 등록돼 있지 않거나 해제 중이면 InvalidArgument다.
+Result<CompressionLevelRange> PluginLevelRange(CompressionFormat format) noexcept;
 
 // API 입구의 형식 검사다(ResolveFormat 기준). 해제 전용 형식은 이 두 함수만 거른다. 통과하면
 // None이다.
@@ -109,13 +172,15 @@ struct DictionaryAccess {
 };
 
 // 압축·해제 문맥이다. 형식별 코덱 상태는 adapter가 소유한다. dictionary는 사전 문맥이 가진 handle
-// 복사본이다(사전 없으면 빈 handle).
+// 복사본이다(사전 없으면 빈 handle). plugin은 사용자 등록 형식의 사용권이며(내장 형식이면 빈 lease)
+// 상태가 파괴될 때 놓는다.
 struct CompressorState {
     CompressionFormat format;
     int32 level;
     Allocator* allocator;
     void* codec;
     SharedPtr<DictionaryState> dictionary;
+    CodecLease plugin;
 };
 
 // active는 지금 코덱에 걸린 사전이다. 사전 문맥은 dictionary와 같고, 블록 컨테이너 읽기는 읽을
@@ -126,6 +191,7 @@ struct DecompressorState {
     void* codec;
     SharedPtr<DictionaryState> dictionary;
     const DictionaryState* active;
+    CodecLease plugin;
 };
 
 struct DecompressorAccess {
@@ -163,24 +229,47 @@ Result<usize> DecompressAppend(DecompressorState& state, Span<const uint8> sourc
                                const CompressionProbe& probe) noexcept;
 
 // 일회성 작업: 문맥을 scratch로 만들고 작업 뒤 반환한다. dictionary가 있으면 사전 문맥이다(형식·
-// 수준은 사전의 값).
-Result<usize> CompressAppendOnce(
-    const CompressionSettings& settings, Span<const uint8> source, Array<uint8>& output,
-    Allocator& scratch, const CompressionProbe& probe,
-    const SharedPtr<DictionaryState>& dictionary = SharedPtr<DictionaryState>()) noexcept;
-Result<usize> DecompressIntoOnce(
-    CompressionFormat format, Span<const uint8> source, Span<uint8> destination, Allocator& scratch,
-    const CompressionProbe& probe,
-    const SharedPtr<DictionaryState>& dictionary = SharedPtr<DictionaryState>()) noexcept;
-Result<usize> DecompressAppendOnce(
-    CompressionFormat format, Span<const uint8> source, usize maxOutputBytes, Array<uint8>& output,
-    Allocator& scratch, const CompressionProbe& probe,
-    const SharedPtr<DictionaryState>& dictionary = SharedPtr<DictionaryState>()) noexcept;
+// 수준은 사전의 값). 사용자 등록 형식은 상태 블록을 스택에 두며(할당 없음) plugin으로 받은 사용권을
+// 쓰고, 빈 lease면 여기서 얻는다(비동기 작업은 제출할 때 얻은 사용권을 넘긴다: 대기 중에 해제가
+// 시작돼도 끝까지 실행한다). level은 검증된 설정의 값이다.
+Result<usize>
+CompressAppendOnce(CompressionFormat format, int32 level, Span<const uint8> source,
+                   Array<uint8>& output, Allocator& scratch, const CompressionProbe& probe,
+                   const SharedPtr<DictionaryState>& dictionary = SharedPtr<DictionaryState>(),
+                   CodecLease plugin = CodecLease()) noexcept;
+Result<usize>
+DecompressIntoOnce(CompressionFormat format, Span<const uint8> source, Span<uint8> destination,
+                   Allocator& scratch, const CompressionProbe& probe,
+                   const SharedPtr<DictionaryState>& dictionary = SharedPtr<DictionaryState>(),
+                   CodecLease plugin = CodecLease()) noexcept;
+Result<usize>
+DecompressAppendOnce(CompressionFormat format, Span<const uint8> source, usize maxOutputBytes,
+                     Array<uint8>& output, Allocator& scratch, const CompressionProbe& probe,
+                     const SharedPtr<DictionaryState>& dictionary = SharedPtr<DictionaryState>(),
+                     CodecLease plugin = CodecLease()) noexcept;
 
 // Append 출력의 기존 길이 base 뒤로 길이를 맞춘다. 축소는 실패하지 않는다.
 void RestoreLength(Array<uint8>& output, usize base) noexcept;
 
 // --- 코덱 adapter. 검증을 마친 입력만 받는다. ---
+
+// 사용자 등록 코덱 호출(CompressionCodec.cpp)이다. 빈 Span을 nullptr 아닌 주소로 바꿔 넘기고,
+// 코덱이 반환 계약(CompressionCodec.h)을 어기면 DependencyFailed로 바꾼다. 코덱 호출 하나는 끊지
+// 않으며 취소는 호출 전(Append는 재시도 사이 포함)에 확인한다.
+namespace plugin {
+Result<usize> Bound(const CodecLease& plugin, usize sourceBytes) noexcept;
+Result<usize> Compress(const CodecLease& plugin, int32 level, Span<const uint8> source,
+                       Span<uint8> destination, Allocator& scratch,
+                       const CompressionProbe& probe) noexcept;
+Result<usize> Decompress(const CodecLease& plugin, Span<const uint8> source,
+                         Span<uint8> destination, Allocator& scratch,
+                         const CompressionProbe& probe) noexcept;
+// 크기를 모르는 해제다. 출력을 64KiB 또는 입력 × 4(상한 이하)에서 시작해, 코덱이 CapacityExceeded를
+// 보고하면 두 배로 늘려 처음부터 다시 해제한다. 상한까지 늘려도 부족하면 CapacityExceeded다.
+Result<usize> DecompressAppend(const CodecLease& plugin, Span<const uint8> source,
+                               usize maxOutputBytes, Array<uint8>& output, Allocator& scratch,
+                               const CompressionProbe& probe) noexcept;
+} // namespace plugin
 
 namespace lz4 {
 Result<usize> Bound(usize sourceBytes) noexcept;
