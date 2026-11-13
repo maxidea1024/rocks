@@ -44,24 +44,6 @@ namespace {
 // 나온다.
 constexpr usize StreamGrowBytes = usize{1} << 20;
 
-bool IsStreamFormat(CompressionFormat format) noexcept {
-    switch (format) {
-    case CompressionFormat::Zstd:
-    case CompressionFormat::Deflate:
-    case CompressionFormat::Zlib:
-    case CompressionFormat::Gzip:
-    case CompressionFormat::Lz4Frame:
-        return true;
-    case CompressionFormat::Lz4:
-        return false;
-    }
-    return false;
-}
-
-bool IsKnownFormat(CompressionFormat format) noexcept {
-    return IsStreamFormat(format) || format == CompressionFormat::Lz4;
-}
-
 void DestroyCodec(StreamState& state) noexcept {
     if (state.codec == nullptr) {
         return;
@@ -79,6 +61,9 @@ void DestroyCodec(StreamState& state) noexcept {
         } else {
             lz4frame::DestroyDecompressor(state.codec);
         }
+    } else if (state.format == CompressionFormat::Brotli) {
+        // 해제 전용이다(압축 스트림은 만들어지지 않는다).
+        brotli::DestroyStreamDecompressor(state.codec);
     } else {
         zlib::Destroy(state.codec);
     }
@@ -260,6 +245,11 @@ Result<void> ResetDecompressorCodec(StreamState& state) noexcept {
         lz4frame::ResetStreamDecompressor(state.codec);
         return Result<void>::Success();
     }
+    if (state.format == CompressionFormat::Brotli) {
+        // Brotli 해제기 상태는 한 stream만 풀 수 있어 새로 만든다(할당 실패면 OutOfMemory가
+        // 남는다).
+        return brotli::ResetStreamDecompressor(state.codec);
+    }
     return zlib::ResetStreamDecompressor(state.codec);
 }
 
@@ -271,6 +261,8 @@ Result<StreamProgress> DecompressCodecStep(StreamState& state, Span<const uint8>
                                     state.dictionary ? state.dictionary->id : 0, state.decode);
     case CompressionFormat::Lz4Frame:
         return lz4frame::DecompressStep(state.codec, input, output, state.decode);
+    case CompressionFormat::Brotli:
+        return brotli::DecompressStep(state.codec, input, output, state.maxWindowLog, state.decode);
     default:
         return zlib::DecompressStep(state.codec, input, output, state.decode);
     }
@@ -351,9 +343,9 @@ Result<CompressStream>
 CompressStream::TryCreateWith(CompressionFormat format, int32 level, Allocator& allocator,
                               uint64 sizeHint,
                               const SharedPtr<detail::DictionaryState>& dictionary) noexcept {
-    if (!detail::IsStreamFormat(format)) {
-        return Result<CompressStream>::Failure(
-            detail::IsKnownFormat(format) ? ErrorCode::Unsupported : ErrorCode::InvalidArgument);
+    const ErrorCode unsupported = detail::StreamFormatError(format, true);
+    if (unsupported != ErrorCode::None) {
+        return Result<CompressStream>::Failure(unsupported);
     }
 
     // sizeHint는 zstd만 쓴다(LZ4 frame은 블록 64KiB 고정, zlib은 window 고정).
@@ -468,23 +460,25 @@ Result<DecompressStream>
 DecompressStream::TryCreateWith(CompressionFormat format, const DecompressStreamLimits& limits,
                                 Allocator& allocator,
                                 const SharedPtr<detail::DictionaryState>& dictionary) noexcept {
-    if (!detail::IsStreamFormat(format)) {
-        return Result<DecompressStream>::Failure(
-            detail::IsKnownFormat(format) ? ErrorCode::Unsupported : ErrorCode::InvalidArgument);
+    const ErrorCode unsupported = detail::StreamFormatError(format, false);
+    if (unsupported != ErrorCode::None) {
+        return Result<DecompressStream>::Failure(unsupported);
     }
     if (limits.maxOutputBytes == 0 || limits.maxWindowLog < MinZstdWindowLog ||
         limits.maxWindowLog > MaxZstdWindowLog) {
         return Result<DecompressStream>::Failure(ErrorCode::InvalidArgument);
     }
 
-    // maxWindowLog는 zstd만 쓴다. LZ4 frame 해제 메모리는 frame 헤더의 블록 크기(최대 4MiB)가
-    // 정한다.
+    // maxWindowLog는 zstd와 Brotli(stream 헤더의 window)가 쓴다. LZ4 frame 해제 메모리는 frame
+    // 헤더의 블록 크기(최대 4MiB)가 정한다.
     Result<void*> codec = Result<void*>::Failure(ErrorCode::InvalidArgument);
     if (format == CompressionFormat::Zstd) {
         codec = detail::zstd::CreateStreamDecompressor(limits.maxWindowLog, allocator,
                                                        dictionary.Get());
     } else if (format == CompressionFormat::Lz4Frame) {
         codec = detail::lz4frame::CreateDecompressor(allocator);
+    } else if (format == CompressionFormat::Brotli) {
+        codec = detail::brotli::CreateStreamDecompressor(allocator);
     } else {
         codec = detail::zlib::CreateDecompressor(format, allocator);
     }

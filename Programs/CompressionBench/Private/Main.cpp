@@ -17,6 +17,7 @@
 // - 블록 컨테이너: 256KiB 블록 RCBK의 순차·병렬 압축과 전체 읽기 처리량.
 // - 사전: 작은 항목(1KiB·4KiB)을 하나씩 zstd로 압축할 때 사전 유무의 압축률·처리량. 사전은 학습하지
 //   않은 raw 내용(항목 구간 바로 뒤의 64KiB)이라 학습 사전보다 효과가 작다(하한 추정).
+// - Brotli: 해제 전용이라 --brotli로 준 외부 stream 파일의 해제 처리량만 잰다(일회성·스트림).
 //
 // 사용:
 //   CompressionBench                       고정 합성 코퍼스(기본 16MiB)
@@ -24,6 +25,8 @@
 //   CompressionBench --file <path>         실제 파일
 //   CompressionBench --rounds 5            반복 횟수(최고값을 보고한다)
 //   CompressionBench --workers 8           블록 병렬 측정의 worker 수(기본 4)
+//   CompressionBench --brotli a.br         Brotli stream 해제(a.br은 `brotli -q 11 a`처럼 만든다.
+//                                          --file a를 함께 주면 결과가 a와 같은지도 적는다)
 //
 // 합성 코퍼스는 고정 seed로 만든 결정적 데이터다(플랫폼·실행과 무관하게 같은 byte):
 // 절반은 어휘 200개로 만든 문장형 텍스트, 절반은 노이즈를 섞은 양자화 정점·색 배열(에셋 binary
@@ -34,6 +37,7 @@ using namespace rocks;
 
 struct Options {
     const char* file = nullptr;
+    const char* brotli = nullptr;
     usize sizeMiB = 16;
     uint32 rounds = 3;
     uint32 workers = 4;
@@ -282,6 +286,85 @@ int RunStreams(Span<const uint8> input, uint32 rounds, Allocator& allocator) {
     return 0;
 }
 
+// Brotli는 해제 전용이라(Rocks에 압축기가 없다) 외부 도구(`brotli -q 11` 등)가 만든 stream 파일을
+// 받아 해제 처리량만 잰다. 일회성은 크기를 아는 Span 해제(Decompressor 재사용), 스트림은 64KiB
+// 조각이다. 측정 구간에는 해제만 넣고, 결과 비교(첫 Append 해제 결과와 같은지)는 구간 밖에서 한다.
+// 해제 결과를 코퍼스와도 비교해 같은 파일을 --file로 주었는지 함께 적는다.
+int RunBrotli(const char* path, Span<const uint8> corpus, uint32 rounds, Allocator& allocator) {
+    if (path == nullptr) {
+        printf("\nbrotli: decode only (no encoder in Rocks), pass --brotli <file.br> to measure\n");
+        return 0;
+    }
+
+    Array<uint8> packed(allocator);
+    if (!Load(packed, path) || packed.Size() == 0) {
+        printf("\nbrotli: cannot read %s\n", path);
+        return 2;
+    }
+
+    const Span<const uint8> source(packed.Data(), packed.Size());
+    Array<uint8> reference(allocator);
+    auto decoded =
+        TryDecompressAppend(CompressionFormat::Brotli, source, usize{4096} << 20, reference);
+    if (!decoded) {
+        printf("\nbrotli: decode failed (%u)\n", static_cast<unsigned>(decoded.Error()));
+        return 5;
+    }
+
+    if (reference.Size() == 0) {
+        printf("\nbrotli: %s is an empty stream, nothing to measure\n", path);
+        return 0;
+    }
+
+    const usize outputBytes = reference.Size();
+    auto decompressor = Decompressor::TryCreate(CompressionFormat::Brotli, allocator);
+    auto decoder = DecompressStream::TryCreate(CompressionFormat::Brotli,
+                                               DecompressStreamLimits{outputBytes, 24}, allocator);
+    Array<uint8> fixed(allocator);
+    Array<uint8> streamed(allocator);
+    if (!decompressor || !decoder || !fixed.TryResize(outputBytes) ||
+        !streamed.TryReserve(outputBytes)) {
+        printf("\nbrotli: out of memory\n");
+        return 3;
+    }
+
+    const double oneShotSeconds = Best(rounds + 2, [&]() {
+        auto written =
+            decompressor.Value().TryDecompress(source, Span<uint8>(fixed.Data(), fixed.Size()));
+        return written && written.Value() == outputBytes;
+    });
+    const double streamSeconds = Best(rounds + 2, [&]() {
+        streamed.Clear();
+        decoder.Value().Reset();
+        for (usize offset = 0; offset < source.Size(); offset += StreamPieceBytes) {
+            const usize bytes = source.Size() - offset < StreamPieceBytes ? source.Size() - offset
+                                                                          : StreamPieceBytes;
+            if (!decoder.Value().TryWriteAppend(Span<const uint8>(source.Data() + offset, bytes),
+                                                streamed)) {
+                return false;
+            }
+        }
+
+        return decoder.Value().TryFinish().IsOk() && streamed.Size() == outputBytes;
+    });
+    if (oneShotSeconds < 0 || streamSeconds < 0 ||
+        platform::MemoryCompare(fixed.Data(), reference.Data(), outputBytes) != 0 ||
+        platform::MemoryCompare(streamed.Data(), reference.Data(), outputBytes) != 0) {
+        printf("\nbrotli: decode failed or results differ\n");
+        return 5;
+    }
+
+    const bool matches = outputBytes == corpus.Size() &&
+                         platform::MemoryCompare(reference.Data(), corpus.Data(), outputBytes) == 0;
+    const double megabytes = static_cast<double>(outputBytes) / (1024.0 * 1024.0);
+    const double ratio = static_cast<double>(source.Size()) / static_cast<double>(outputBytes);
+    printf("\nbrotli (decode only, %s, %.1f MiB out, %s)\n%-8s %8s %12s\n", path, megabytes,
+           matches ? "equals corpus" : "differs from corpus", "mode", "ratio", "decomp MB/s");
+    printf("%-8s %8.3f %12.1f\n", "oneshot", ratio, megabytes / oneShotSeconds);
+    printf("%-8s %8.3f %12.1f\n", "stream", ratio, megabytes / streamSeconds);
+    return 0;
+}
+
 int RunBlocks(Span<const uint8> input, uint32 rounds, uint32 workers, Allocator& allocator) {
     WorkerScheduler scheduler(allocator);
     if (!scheduler.Start({.workerCount = workers, .maxInFlight = 256})) {
@@ -455,7 +538,11 @@ int Run(const Options& options) {
     if (blocks != 0) {
         return blocks;
     }
-    return RunDictionary(input, options.rounds, allocator);
+    const int dictionary = RunDictionary(input, options.rounds, allocator);
+    if (dictionary != 0) {
+        return dictionary;
+    }
+    return RunBrotli(options.brotli, input, options.rounds, allocator);
 }
 
 bool Parse(int argc, char** argv, Options& options) {
@@ -463,6 +550,8 @@ bool Parse(int argc, char** argv, Options& options) {
         const bool hasValue = index + 1 < argc;
         if (platform::CStringEquals(argv[index], "--file") && hasValue) {
             options.file = argv[++index];
+        } else if (platform::CStringEquals(argv[index], "--brotli") && hasValue) {
+            options.brotli = argv[++index];
         } else if (platform::CStringEquals(argv[index], "--size") && hasValue) {
             options.sizeMiB = 0;
             for (const char* digit = argv[++index]; *digit >= '0' && *digit <= '9'; ++digit) {
@@ -500,7 +589,7 @@ int main(int argc, char** argv) {
     Options options;
     if (!Parse(argc, argv, options)) {
         printf("usage: CompressionBench [--file <path>] [--size <MiB 1-4096>] [--rounds <1-100>] "
-               "[--workers <1-64>]\n");
+               "[--workers <1-64>] [--brotli <file.br>]\n");
         return 1;
     }
     return Run(options);

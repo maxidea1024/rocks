@@ -7,9 +7,9 @@
 
 ## 1. 범위
 
-| 1차 범위 | 2차 범위(9·10절) | 3차 범위(11절) | 4차 범위(11.6절) | 5차 범위(12절) | 후속 |
-|---|---|---|---|---|---|
-| 형식을 고르는 일회성 압축·해제, 최악 압축 크기, 크기를 모르는 해제(상한 필수, `Array` 뒤에 붙임), 재사용 문맥(`Compressor`·`Decompressor`), worker 비동기 압축·해제(의존 작업 연결·협력적 취소), 모든 할당의 Rocks `Allocator` 경유, 결정적 출력 | 블록 단위 seek 가능 컨테이너(Godot `FileAccessCompressed`·UE `FCompressedBuffer` 대응)와 큰 버퍼의 블록 병렬 압축·해제, gzip·zstd 스트리밍 객체(역압) | zstd 사전 사용(압축·해제 사전 handle, 일회성·문맥·스트림·비동기·블록 컨테이너 연동, frame 사전 ID 검사) | zstd 사전 학습(fastCover)·finalize, `licenses` manifest | LZ4 frame 형식(`Lz4Frame`, `lz4` CLI 호환. legacy frame 제외): 일회성·문맥·비동기·스트리밍, content checksum·원본 크기 검사, upstream 결과와의 byte 비교 | Brotli 해제(WOFF2), 형식 플러그인 등록(UE `ICompressionFormat`), LZ4·LZ4 frame·zlib 사전 |
+| 1차 범위 | 2차 범위(9·10절) | 3차 범위(11절) | 4차 범위(11.6절) | 5차 범위(12절) | 6차 범위(13절·5절) | 후속 |
+|---|---|---|---|---|---|---|
+| 형식을 고르는 일회성 압축·해제, 최악 압축 크기, 크기를 모르는 해제(상한 필수, `Array` 뒤에 붙임), 재사용 문맥(`Compressor`·`Decompressor`), worker 비동기 압축·해제(의존 작업 연결·협력적 취소), 모든 할당의 Rocks `Allocator` 경유, 결정적 출력 | 블록 단위 seek 가능 컨테이너(Godot `FileAccessCompressed`·UE `FCompressedBuffer` 대응)와 큰 버퍼의 블록 병렬 압축·해제, gzip·zstd 스트리밍 객체(역압) | zstd 사전 사용(압축·해제 사전 handle, 일회성·문맥·스트림·비동기·블록 컨테이너 연동, frame 사전 ID 검사) | zstd 사전 학습(fastCover)·finalize, `licenses` manifest | LZ4 frame 형식(`Lz4Frame`, `lz4` CLI 호환. legacy frame 제외): 일회성·문맥·비동기·스트리밍, content checksum·원본 크기 검사, upstream 결과와의 byte 비교 | Brotli 해제 전용 형식(`Brotli`, RFC 7932, WOFF2·`Content-Encoding: br`): 모든 해제 API(일회성·문맥·스트림·비동기), 압축 경로 Unsupported. AsyncFile 완료 → 해제 작업 연결(5절, 완료) | 형식 플러그인 등록(UE `ICompressionFormat`), LZ4·LZ4 frame·zlib 사전, Brotli 압축 |
 
 ## 2. 코덱 선정
 
@@ -17,13 +17,14 @@
 |---|---|---|---|
 | `Lz4`(raw block)·`Lz4Frame`(LZ4 frame, 12절) | LZ4 1.11.1(2026-11-10), `lib/`의 `lz4.[ch]`·`lz4hc.[ch]`·`lz4frame.[ch]`·`xxhash.[ch]`만 | BSD-2-Clause. 원문은 `lib/LICENSE`다. 저장소 루트 `LICENSE`는 "lib은 BSD-2, 나머지는 GPL-2.0-or-later" 안내문이며 CLI(`programs/`)는 들이지 않는다 | 해제 최고속. 1.11은 HC 확장 상태(`LZ4_STREAMHC_EXTSIZE`)로 수준 10–12도 할당 없이 동작하고, 1.10.0이 Android(non-Apple aarch64 clang)에서 껐던 빠른 해제 루프를 켠다. 1.11.0의 회귀는 폐기 API `LZ4_resetStreamHC()`에 국한되며 Rocks는 쓰지 않는다. frame 형식은 스트리밍·무결성 검사를 더하는 대신 해제가 raw block의 60%대다(XXH32 checksum, 12.5절) |
 | `Zstd`(frame, RFC 8878) | zstd 1.5.7(2025-02-19, 최신 안정) | `BSD-3-Clause OR GPL-2.0-only` 중 **BSD-3-Clause 선택**. 부분집합 전 파일(xxhash 포함)이 이중 라이선스이며 특허 조항은 없다. 단 사전 생성기의 `divsufsort.[ch]`는 MIT(Yuta Mori)라 따로 고지한다(11.6절) | 압축률·속도 균형, `ZSTD_customMem`으로 할당기 주입, 원본 크기·체크섬 기록. upstream C 라이브러리의 알려진 CVE는 없다(검색된 CVE는 zstd-jni 것) |
+| `Brotli`(RFC 7932, 해제 전용, 13절) | google/brotli 1.1.1(2026-10-21), 해제기(`c/common`·`c/dec`, 해제 헤더)만 | MIT. 원문은 `LICENSE`다 | WOFF2 글꼴·HTTP `Content-Encoding: br` 자산 읽기(Godot `MODE_BROTLI`도 해제 전용). 할당 함수 2개와 opaque로 할당기 주입. 1.1.1은 1.1.0 해제기의 범위 밖 쓰기(CVE-2026-111497)를 고친 patch release다 |
 | `Deflate`(RFC 1951)·`Zlib`(RFC 1950)·`Gzip`(RFC 1952) | zlib 1.4(2026-11-04) | Zlib | 호환 형식(PNG·gzip·zip). `zalloc`·`zfree`·`opaque`로 할당기 주입, 스트림 API로 4GiB 이상과 취소를 처리. 1.4는 최신 유지와 UB·Android·Windows 이식성 수정이 근거다(보안 수정 대부분은 Rocks가 쓰지 않는 gz·inflateSync·Prime·inflateBack API) |
 
 제외한 후보: Oodle(독점 라이선스), FastLZ(LZ4가 속도·압축률 모두 우위), libdeflate(MIT·Deflate 최고속이지만 스트리밍이
 없고 할당 함수에 opaque 인자가 없다. Deflate가 hot path가 되면 adapter 뒤에서 교체 후보), zlib-ng(빠르지만 플랫폼별 SIMD
-구성 생성이 필요해 포팅 부담), LZMA·Brotli(현재 용도 없음).
+구성 생성이 필요해 포팅 부담), LZMA(현재 용도 없음), Brotli 압축기(`c/enc`, 쓰는 곳이 없어 해제기만 들인다).
 
-**고지 의무.** BSD-2·BSD-3은 바이너리 배포 시 저작권 고지·조건·면책 문구를 문서나 함께 배포하는 자료에 재현해야 한다.
+**고지 의무.** BSD-2·BSD-3·MIT(Brotli)는 바이너리 배포 시 저작권 고지·조건·면책 문구를 문서나 함께 배포하는 자료에 재현해야 한다.
 Zlib 라이선스는 바이너리 고지 의무가 없고 수정본은 수정본임을 밝혀야 한다. Rocks는 원본을 수정하지 않는다. 코덱은 첫
 버전부터 엔진 바이너리에 들어가므로 **외부 배포(설치 SDK·게임 패키지·APK) 전에 고지 묶음이 반드시 포함되도록 배포 경로에
 gate를 둔다.** 설치 SDK는 각 라이브러리 manifest `licenses`의 모든 원문을 함께 복사한다(3.2절).
@@ -42,6 +43,11 @@ Core/Source/ThirdParty/
                                                       lib/decompress/…, lib/dictBuilder/…}
   Zlib/  Zlib.Build.cs  ThirdParty.json   zlib-1.4/{LICENSE, adler32.c, crc32.[ch], deflate.[ch], inffast.[ch], inffixed.h,
                                                     inflate.[ch], inftrees.[ch], trees.[ch], zconf.h, zlib.h, zutil.[ch]}
+  Brotli/ Brotli.Build.cs ThirdParty.json brotli-1.1.1/{LICENSE,
+                                           c/common/{constants,context,dictionary,platform,transform}.[ch],
+                                           c/common/{shared_dictionary.c, shared_dictionary_internal.h, version.h},
+                                           c/dec/{bit_reader,huffman,state}.[ch], c/dec/{decode.c, prefix.h},
+                                           c/include/brotli/{decode,port,shared_dictionary,types}.h}
 Core/Source/Runtime/Compression/   Compression.Build.cs  Public/Compression/  Private/  Tests/
 ```
 
@@ -50,7 +56,8 @@ Core/Source/Runtime/Compression/   Compression.Build.cs  Public/Compression/  Pr
 - 컴파일하지 않는 파일은 넣지 않는다. zstd는 `legacy/ deprecated/`, `zstdmt_compress.c threading.c debug.c
   huf_decompress_amd64.S`를 뺀 27개 번역 단위(frame 압축·해제 22개와 사전 학습용 `dictBuilder/`의 `cover.c fastcover.c
   zdict.c divsufsort.c`·`common/pool.c` 5개, 헤더 `pool.h threading.h`도 넣는다. 11.6절), zlib은 `gz*.c compress.c uncompr.c
-  infback.c`를 뺀 8개, LZ4는 `lz4file*`와 `lz4frame_static.h`(12.2절)를 뺀다.
+  infback.c`를 뺀 8개, LZ4는 `lz4file*`와 `lz4frame_static.h`(12.2절)를 뺀다. Brotli는 해제기 10개 번역 단위와 그 헤더만
+  둔다(압축기 `c/enc`·`encode.h`, 도구 `c/tools`, binding·시험 자료 제외, 13.1절).
 - LZ4는 Rocks 글루 `Lz4Unity.c`(`#include "lz4.c"` 다음 `#include "lz4hc.c"`) 한 번역 단위로 빌드한다. upstream이 지원하는
   방식(`LZ4_SRC_INCLUDED`)이며 이렇게 하면 `lz4hc.c`의 `-Wunused-function` 억제 분기가 비활성이다. `lz4frame.c`·`xxhash.c`는
   따로 컴파일한다(합본에 넣을 수 없는 이유는 12.2절).
@@ -122,6 +129,7 @@ Core/Source/Runtime/Compression/   Compression.Build.cs  Public/Compression/  Pr
 | zlib | `Z_U4=__UINT32_TYPE__`, `Z_U8=__UINT64_TYPE__` | `Z_SOLO`가 끄는 braid CRC-32·ARMv8 하드웨어 CRC를 되살린다(Gzip 성능) |
 | zlib | `Z_PREFIX` | 심볼에 `z_` 접두사(Android·macOS 시스템 libz와 충돌 방지) |
 | zlib(Windows 외) | `HAVE_HIDDEN` | 내부 심볼 hidden |
+| Brotli | (없음) | `BROTLI_SHARED_COMPILATION`을 정의하지 않으면 `BROTLI_DEC_API`·`BROTLI_COMMON_API`가 비고 내부 심볼(`BROTLI_INTERNAL`)은 GNU 계열에서 hidden이다(LZ4·zstd의 visibility 정의를 비운 것과 같다). 외부 심볼은 `Brotli`·`kBrotli`·`_kBrotli` 접두사라 다른 코덱과 겹치지 않는다(llvm-nm). 할당 기본 경로를 막는 설정 지점은 없다(13.2절). consumerDefines도 없다 |
 
 `Z_SOLO`·`Z_PREFIX`·`Z_U4`·`Z_U8`, zstd의 visibility 정의와 `ZSTD_STATIC_LINKING_ONLY`·`ZDICT_STATIC_LINKING_ONLY`(fastCover 학습 API), LZ4의 `LZ4_HC_STATIC_LINKING_ONLY`·
 `LZ4_STATIC_LINKING_ONLY_DISABLE_MEMORY_ALLOCATION`·`LZ4LIB_VISIBILITY=`·`LZ4F_STATIC_LINKING_ONLY`(사용자 할당기 frame 문맥)·
@@ -156,7 +164,9 @@ Core/Source/Runtime/Compression/   Compression.Build.cs  Public/Compression/  Pr
 원본에는 다음 진단 지시문이 있다: zstd `compiler.h`(MSVC 4100·4127·4204·4214·4324), `xxhash.h`(4127, once 4606),
 `huf_compress.c`(4127), LZ4 `lz4.c`(4127·6237·6239·6240·6326, push/6385/pop)·`lz4hc.c`(GCC·clang `-Wunused-function`, 합본에서
 비활성)·`lz4frame.c`(4127)·`xxhash.c`(4127), zlib `deflate.c`(push/4127/pop),
-`zstd.h`(clang push/`-Wzero-as-null-pointer-constant`/pop). **clang-cl은 일부 MSVC 번호를 clang 진단에 매핑해 실제로
+`zstd.h`(clang push/`-Wzero-as-null-pointer-constant`/pop). Brotli `platform.h`의 `_Pragma` 5개는 TI·IAR·PGI용 인라인
+지시라 진단 지시문이 아니다(manifest에는 기록하고, `native`의 지시문 무효 확인은 진단 지시문이 없어 Brotli를 건너뛴다).
+**clang-cl은 일부 MSVC 번호를 clang 진단에 매핑해 실제로
 따른다**(4100 → `-Wunused-parameter` 확인). 전체 목록은 각 manifest의 `pragmaDirectives`가 기준이다. 그래서 원본의 진단 지시문을 모두 지운 사본을 같은 프로필로 컴파일했다. 결과는
 clang-cl `/W4 /WX`(`/Od`·`/O2`)와 GNU식 `-Wall -Wextra -Wpedantic -Werror`(`-O0`·`-O2`) 모두 경고 0이었다. 즉 이
 버전·프로필에서 실제로 가리는 경고는 없다.
@@ -178,14 +188,14 @@ clang-cl `/W4 /WX`(`/Od`·`/O2`)와 GNU식 `-Wall -Wextra -Wpedantic -Werror`(`-
 ## 4. 동기 API — `Compression/Compression.h`
 
 모듈 `Compression`(Core 계층, `Core/Source/Runtime/Compression`)이다. RequiredModules는 `Core`·`Task`와 ThirdParty `Lz4`·
-`Zstd`·`Zlib`이다. Core 모듈에 외부 의존이 생기지 않고, 비동기 API가 Task를 쓸 수 있다. 정적 링크이므로 동기 API만 쓰는
+`Zstd`·`Zlib`·`Brotli`다. Core 모듈에 외부 의존이 생기지 않고, 비동기 API가 Task를 쓸 수 있다. 정적 링크이므로 동기 API만 쓰는
 모듈(예: AssetTools PNG)은 Task의 object를 링크하지 않는다.
 
 ```cpp
 namespace rocks {
 
 // 프로세스 안 식별용이다. 영속 포맷에 기록할 때는 상위 포맷이 별도 ID를 정한다. 새 형식은 끝에 덧붙인다.
-enum class CompressionFormat : uint8 { Lz4, Zstd, Deflate, Zlib, Gzip, Lz4Frame };
+enum class CompressionFormat : uint8 { Lz4, Zstd, Deflate, Zlib, Gzip, Lz4Frame, Brotli }; // Brotli는 해제 전용(13절)
 
 struct CompressionLevelRange {
     int32 minimum;
@@ -194,7 +204,8 @@ struct CompressionLevelRange {
 };
 
 // Lz4·Lz4Frame {1, 12, 1}: 1 = fast(acceleration 1), 2 = lz4mid, 3–9 = HC, 10–12 = HC optimal parser.
-// Zstd {1, 22, 3}(20–22 ultra). Deflate·Zlib·Gzip {0, 9, 6}(0 = stored). 모르는 형식은 InvalidArgument.
+// Zstd {1, 22, 3}(20–22 ultra). Deflate·Zlib·Gzip {0, 9, 6}(0 = stored). 모르는 형식은 InvalidArgument,
+// 해제 전용 형식(Brotli)은 Unsupported.
 Result<CompressionLevelRange> TryGetCompressionLevelRange(CompressionFormat format) noexcept;
 
 // 검증된 형식·수준 쌍이다.
@@ -265,8 +276,8 @@ public:
   - 동기·비동기는 같은 내부 구현과 같은 chunk 상수를 쓴다.
   - 테스트가 고정 입력의 압축 결과 CRC-32를 golden으로 고정한다. 버전을 올릴 때는 의도적으로 갱신한다.
 - **무결성**: Zstd는 content checksum(XXH64 하위 32bit), Zlib은 Adler-32, Gzip은 CRC-32·ISIZE, Lz4Frame은 content
-  checksum(XXH32)·기록된 원본 크기·(있으면) 블록 checksum을 검사한다. Lz4 raw block과
-  Deflate raw는 무결성 검사가 없어 손상이 "성공한 다른 데이터"로 보일 수 있다. 체크섬 형식도 의미 없는 bit(zstd 프레임
+  checksum(XXH32)·기록된 원본 크기·(있으면) 블록 checksum을 검사한다. Lz4 raw block·
+  Deflate raw·Brotli는 무결성 검사가 없어 손상이 "성공한 다른 데이터"로 보일 수 있다. 체크섬 형식도 의미 없는 bit(zstd 프레임
   헤더의 미사용 bit, deflate 마지막 byte의 padding, FHCRC 없는 gzip의 MTIME·XFL·OS)는 바꿔도 같은 결과로 성공할 수 있다.
   따라서 계약은 "손상은 실패하거나, 성공하면 원본과 같은 출력"이다.
 
@@ -278,6 +289,7 @@ public:
 | 손상·절단·체크섬 불일치·스트림 뒤 남는 byte(Lz4 제외)·빈 해제 입력·범위 밖 수준·겹침·Lz4 입력 한계 초과 | InvalidArgument |
 | 문맥에 없거나 다른 사전이 필요한 입력: zlib 프리셋 사전(FDICT, `Z_NEED_DICT`), 사전 ID가 다른 zstd frame(`dictionary_wrong`), 형식 사전 문맥에 사전 ID 없는 frame, 사전 ID를 기록한 LZ4 frame, 블록 컨테이너의 사전이 후보에 없음 | Unsupported |
 | zstd frame의 window가 구현 상한(2^31)을 넘음(RFC상 유효, 일회성·스트림·사전 ID 조회 모두) | Unsupported |
+| 해제 전용 형식(Brotli)의 압축 API(수준 범위·`CompressionSettings`·bound·압축 문맥), large window 확장 Brotli stream(비표준, 첫 byte 0x11) | Unsupported |
 | 할당 실패(`Z_MEM_ERROR`·`memory_allocation` 포함) | OutOfMemory |
 | 크기 산술 overflow, `deflateBound_z`의 `(z_size_t)-1` | Overflow |
 | 외부 코덱이 계약 밖의 실패를 보고(예: dst ≥ bound인데 LZ4 압축이 0 반환, `Z_STREAM_ERROR`) | DependencyFailed |
@@ -291,6 +303,7 @@ public:
     byte" 검사는 하지 않는다.
   - int 경계: source가 `Lz4MaxInputBytes`를 넘으면 InvalidArgument, destination 용량은 `INT_MAX`로 자른다.
 - **Lz4Frame**: 12.3절(일회성)·12.4절(스트림). 64KiB 블록으로 나누므로 입력 한계가 없다.
+- **Brotli**: 해제 전용, 13.3절(일회성)·13.4절(스트림). stream은 이어 붙일 수 없어 뒤 byte는 InvalidArgument다.
 - **Zstd**
   - 압축: `ZSTD_CCtx`에 수준·checksum·content size를 고정한다. pledged size와 `ZSTD_c_stableInBuffer`를 쓰고 입력을 일정
     chunk씩 늘려 주는 스트림 루프로 처리한다(비동기 취소 지점, 동기와 같은 구현).
@@ -317,7 +330,9 @@ public:
   - zlib 1.4부터 raw deflate가 출력 버퍼를 정확히 채우면 `Z_STREAM_END`를 반환한다. 이를 정상으로 처리한다.
 - **수준과 메모리**: zstd 수준 19의 압축 문맥은 큰 입력에서 수십 MiB를 쓰고(ultra 20–22는 큰 입력·크기를 모르는 스트림에서 수백 MiB), LZ4 HC 확장
   상태는 약 320KiB, zlib deflate는 약 256KiB, inflate는 약 40KiB, zstd 해제 문맥은 약 160KiB다. LZ4 frame 압축 문맥은 수준
-  1 약 145KiB·HC 약 450KiB, 해제 문맥은 약 256KiB다(12.3절). 정확한 값은 테스트의 계수 allocator로 기록한다.
+  1 약 145KiB·HC 약 450KiB, 해제 문맥은 약 256KiB다(12.3절). Brotli 해제는 상태 약 7KiB + 출력에 맞춰 늘어나는 ring buffer
+  (window 이하) + Huffman 표(최악 약 2.6MiB)이고, ring buffer를 늘리는 순간 최고 약 1.5 × window + 표다(13.3절). 정확한 값은
+  테스트의 계수 allocator로 기록한다.
 
 ## 5. 비동기 API — `Compression/AsyncCompression.h`
 
@@ -382,13 +397,38 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
     zstd 해제는 stable output 방식이라 입력 1MiB마다 확인한다(압축률이 아주 높은 입력은 한 번의 호출로 큰 출력을 만든다).
   - `IsCancellationRequested`는 scheduler gate를 잡으므로 더 촘촘히 확인하지 않는다.
   - 취소를 관측하면 output 길이를 복원하고 Fail 없이 반환해 Cancelled가 된다.
-  - 취소 가능 경로: zlib 계열 전체, zstd 압축·해제, LZ4 frame 압축(입력 1MiB마다)·해제(입력 소비나 출력 생성 1MiB마다).
+  - 취소 가능 경로: zlib 계열 전체, zstd 압축·해제, LZ4 frame 압축(입력 1MiB마다)·해제(입력 소비나 출력 생성 1MiB마다),
+    Brotli 해제(입력 소비나 출력 생성 1MiB마다).
   - 끊지 않는 경로는 LZ4 raw block 압축·해제다. LZ4 fast·해제는 수 초 이내지만 HC 12는 약 10–20MB/s여서 2GiB 가까운 입력이면
     100초 이상 걸린다. `Shutdown`은 worker를 Join하므로 Cancel 모드여도 그만큼 기다린다. 큰 입력은 블록 컨테이너(후속)를
     쓴다.
 - **소멸**: 진행 중인 task의 소멸자는 취소를 요청하고 기다린다. 대기 중인 작업의 취소는 worker가 처리하므로 모든 worker가
   막혀 있으면 소멸자도 기다린다. 같은 scheduler의 worker(다른 작업의 body·capture 정리 포함)에서는 기다릴 수 없어 Fatal이므로
   task를 다른 작업의 capture가 소유하게 하지 않는다. 다른 스레드는 `Handle().Clone()`으로 얻은 handle로만 기다린다.
+- **파일 읽기와 연결(AsyncFile 완료 → 해제)**: 압축된 entry를 비동기로 읽고 읽기가 끝나면 해제가 실행되게 한다.
+  `WorkerScheduler::TryCreateEvent`로 외부 완료 이벤트(`WorkerTaskEvent`)를 만들고, 그 handle에 의존하는 해제를 먼저
+  제출한 뒤, `TrySubmitReadEvent(file, request, offset, buffer, bytes, Move(event), allocator)`(`<Task/AsyncIoEvent.h>`)로
+  읽기를 시작한다. 읽기가 요청 byte를 모두 채우면 이벤트가 Trigger되어 해제가 실행되고, 짧은 읽기·IO 오류면 이벤트가 Fail해
+  해제는 실행되지 않고 DependencyFailed다([WorkerScheduler](../Implementation/WorkerScheduler.ko.md)).
+
+  ```cpp
+  auto event = scheduler.TryCreateEvent();                      // Result<WorkerTaskEvent>
+  auto after = Span<const WorkerTaskHandle>(&event.Value().Handle(), 1);
+  TrySubmitDecompress(scheduler, task, CompressionFormat::Brotli,
+                      Span<const uint8>(buffer.Data(), buffer.Size()), rawBytes, output, after);
+  TrySubmitReadEvent(file, request, offset, buffer.Data(), buffer.Size(), Move(event.Value()), allocator);
+  auto bytes = task.TryWaitResult();                           // 읽기 완료 → 해제
+  ```
+
+  - source의 주소·길이는 해제 제출 시점에 고정되고 IO는 내용만 채운다. 그래서 buffer는 제출 전에 entry 크기로 확보하고
+    (해제가 먼저 제출되어도 이벤트 완료 전에는 실행되지 않는다) 읽기 완료까지 크기를 바꾸지 않는다.
+  - 해제는 실행되면 1MiB(`CompressionChunkBytes`) 조각마다 취소를 확인한다. Brotli·LZ4 frame·zlib 계열은 입력 소비나 출력
+    생성, zstd는 입력 소비 기준이고, Lz4 raw block은 한 번의 코덱 호출이라 확인하지 않는다(위 취소 항목). 큰 entry도 읽기 한
+    번, 해제 작업 하나로 처리하며 취소는 조각 단위로 반영된다.
+  - 이벤트의 완료 권한은 읽기 요청이 가져가고, 완료 문맥은 allocator(IO 스레드 해제 허용)에 만들어 콜백이 마지막에
+    해제한다. 이벤트 상태를 따로 보려면 넘기기 전에 `Handle().Clone()`을 받아 둔다.
+  - 시험: `Compression_AsyncDecompressAfterAsyncFileRead`(실제 파일 읽기 → zstd 해제 40회, 짧은 읽기에서 해제 미실행).
+    형식과 무관한 경로라 Brotli도 같다.
 - **용량**: scheduler의 `maxInFlight`(기본 256)를 넘으면 CapacityExceeded다. caller가 제출 속도를 조절한다. task는 이동할
   수 없어 `Array` 원소가 될 수 없으므로 C 배열이나 `UniquePtr`로 둔다.
 
@@ -400,12 +440,12 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
 | `get_max_compressed_buffer_size` | `CompressMemoryBound` | `TryGetCompressBound` |
 | `decompress(dst, dst_max, src, size, mode)` | `UncompressMemory` | `TryDecompress` |
 | `decompress_dynamic(vec, max, …)` | — | `TryDecompressAppend`(상한 필수) |
-| 모드 FASTLZ·DEFLATE(실제는 zlib 래퍼)·ZSTD·GZIP·BROTLI(해제) | NAME_Zlib·Gzip·LZ4·Oodle | Lz4(raw block)·Lz4Frame·Deflate(raw)·Zlib·Zstd·Gzip |
+| 모드 FASTLZ·DEFLATE(실제는 zlib 래퍼)·ZSTD·GZIP·BROTLI(해제) | NAME_Zlib·Gzip·LZ4·Oodle | Lz4(raw block)·Lz4Frame·Deflate(raw)·Zlib·Zstd·Gzip·Brotli(해제 전용, 13절) |
 | 전역 static 수준 설정 | flags(BiasSpeed·BiasSize) | 호출마다 `CompressionSettings` |
 | thread_local zstd 문맥 | — | 명시 `Compressor`·`Decompressor` |
 | — | IoStore 내부 비동기 해제 | `TrySubmitCompress`·`TrySubmitDecompress` |
 | `FileAccessCompressed`(블록·seek) | `FCompressedBuffer` | `CompressedBlocksWriter`·`CompressedBlocksReader`(9절) |
-| `StreamPeerGZIP` | — | `CompressStream`·`DecompressStream`(10절, gzip·zlib·deflate·zstd·LZ4 frame) |
+| `StreamPeerGZIP` | — | `CompressStream`·`DecompressStream`(10절, gzip·zlib·deflate·zstd·LZ4 frame, Brotli는 해제만) |
 | — | — (`FCompression`·`FCompressedBuffer`에 사전 인자 없음. 학습 사전은 OodleNetwork 플러그인의 패킷 압축이 쓰고 commandlet이 학습) | `CompressDictionary`·`DecompressDictionary`(11절) |
 
 ## 7. 검증 계획
@@ -458,6 +498,7 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
 | 3차(zstd 사전, 11절) | 설계 교차검증 3건(zstd 원본·실측, API·계약·형식, dictBuilder 조사) 뒤 구현. 사전 시험(11.7절)이 Windows x64 Debug·ASan에서 통과. 구현 뒤 독립 검토 2건(수명·동시성·오류 분류, zstd 의미·결정성·형식·시험 공백)의 확정 항목을 반영했다: 이동된 블록 설정이 사전 없이 조용히 다른 결과를 냄, 큰 window frame의 사전 ID 조회 분류, 스트림의 사전 ID·window 검사 순서, 지문이 같고 내용이 다른 후보, 헤더 배치 변경의 version 미갱신(RCBK v2), 문서 오류. 검토가 만든 시험 18개를 저장소로 옮겼고, 사전과 무관한 기존 결함(일회성 zstd 해제가 window 상한 초과 frame을 InvalidArgument로 분류)도 Unsupported로 고쳤다. Foundation 전체 908개 통과(Debug). 표준 경로 등가성은 원본 내부 함수로 1,367만 건, 실측 8,328건을 비교해 반례가 없었다. macOS·Android 실행은 아직 하지 않았다 |
 | 4차(사전 학습, 11.6절) | 설계 교차검증(dictBuilder 원본·실측: 예외 경로 충돌 재현, 기본값 시간·이득 비교) 뒤 구현. 학습 시험 8개와 manifest `licenses` 이전 시험(Policy.ThirdPartyLicenses·ThirdPartySdkLicenses)을 포함해, HEAD 기반 worktree에서 Foundation Debug·ASan 916개, Release 압축 82개, `self` 84개, `native` 95개, 빌드 도구 시험 22개 그룹, 정책·형식 검사가 통과했다. 구현 뒤 독립 검토의 확정 항목(표본 수 상한 1 초과, POSIX 종료 중 mutex 소멸, finalize 헤더 버퍼 초과 분류, 빈 표본 포인터)을 반영했다. 학습 golden은 upstream 원본만으로 빌드한 probe로 Windows x64·Android x86_64에서 같은 byte임을 확인했다. arm64는 아직 확인하지 않았다 |
 | 5차(LZ4 frame, 12절) | 공식 tarball(sha256 일치)의 `lz4frame.[ch]`·`xxhash.[ch]`를 들이고 upstream 원본만으로 빌드한 probe로 설정·호출 순서·할당 경로를 먼저 확인한 뒤 구현했다. 시험 24개(12.6절)를 포함해 HEAD 기반 worktree에서 Foundation Debug·ASan·Release 949개, `self` 84개, `native` 95개(Debug compile DB: 지시문을 지운 `lz4frame.c`·`xxhash.c` 사본 경고 0 포함), 정책·형식·third-party 검사가 통과했다. 일회성 결과는 upstream `LZ4F_compressFrame`과 byte 단위로 같다(수준 1·2·9·12, 1.5MiB). 구현 뒤 독립 검토 2건(adapter 의미, 시험·문서·manifest)의 확정 항목을 반영했다: 손상된 FLG의 사전 ID bit가 Unsupported로 분류됨(헤더를 LZ4F로 먼저 검증하도록 수정), legacy frame 분류, 기본 할당 경로를 저장소 안에서 막는 `LZ4_USER_MEMORY_FUNCTIONS`, 스트림 경계·상한·수준 2·12·Append 성장 OOM·출력 기준 취소 시험 보강, 문서 수치. Android NDK arm64 문법 검사(지시문 유무 모두)는 경고 0이고, macOS·Android 실행은 아직 하지 않았다 |
+| 6차(Brotli 해제, 13절) | google/brotli 1.1.1 tag archive(sha256, tag tree blob hash 비교)의 해제기만 들였다. 시험 15개(13.7절)를 포함해 HEAD 기반 worktree에서 Foundation Debug·ASan·Release 969개, `self` 85개, `native` 95개(Debug compile DB), 정책·형식·third-party 검사가 통과했다. 참조 벡터는 google/brotli 1.1.0 encoder(Python binding)가 만들었다. llvm-nm으로 CRT 할당 참조가 기본 할당 경로 오브젝트 3개에만 있고 심볼 충돌이 없음을 확인했다. Android NDK arm64·x86_64 문법 검사(Brotli C17 `-Wall -Wextra -Wpedantic -Werror` `-O0`·`-O2`, adapter C++23)는 경고 0이다. 구현 뒤 독립 검토 2건(adapter 의미, 시험·문서·manifest)의 확정 항목을 반영했다: ring buffer를 늘리는 순간의 최고 사용량(약 1.5 × window) 문서·시험, large window 표지 판정(0x91은 손상)과 Append의 거부 전 출력 확보, 사전 오류 분류, 공개 헤더 WOFF2 예제의 해제 크기(totalSfntSize가 아니라 표 길이 합), CRT 경로 목록, 4·10절의 Brotli 누락, 벤치 측정 구간, 뒤 byte 조각·Reset OOM 시험 보강. macOS·Android 실행은 아직 하지 않았다 |
 
 처리량(로컬 1회 측정, 1차 때 저장소 밖 임시 벤치): Windows x64 Release(ThinLTO), 단일 스레드, `Compressor`·`Decompressor`
 재사용, 저장소 소스·문서 8.9MiB, 여러 번 중 최고값이다. 기기 사양을 고정한 반복 측정이 아니므로 기준값이 아니라 adapter가 원본
@@ -607,7 +648,8 @@ frame 하나로 압축·해제한다. 사전은 학습하지 않은 raw 내용(�
 
 전체 크기를 모르거나 메모리에 다 올리지 않는 입력을 조각 단위로 압축·해제한다(Godot `StreamPeerGZIP` 대응. Godot의
 deflate 스트림은 zlib 래퍼라 Rocks `Zlib`에 대응한다). 형식은 Zstd·Deflate·Zlib·Gzip·Lz4Frame이며, Lz4 raw block은 스트림
-형식이 아니라 Unsupported다. LZ4 frame 스트림의 세부 사항은 12.4절이다. 헤더는 `Compression/CompressionStream.h`다.
+형식이 아니라 Unsupported다. Brotli는 해제 스트림만 있다(압축 스트림 Unsupported). LZ4 frame 스트림의 세부 사항은 12.4절,
+Brotli는 13.4절이다. 헤더는 `Compression/CompressionStream.h`다.
 
 - 기본 API는 역압이 있는 `TryProcess(input, output) → StreamProgress{consumed, produced, complete}`다. 출력이 모자라면
   오류가 아니라 일부만 소비하고 돌아오므로, 작은 입력 하나가 큰 출력을 한꺼번에 만들지 않는다. `TryWriteAppend`
@@ -622,7 +664,7 @@ deflate 스트림은 zlib 래퍼라 Rocks `Zlib`에 대응한다). 형식은 Zst
   InvalidArgument, 상태 불변). Finished에서 TryFinish는 {0, 0, true}, Process·Flush는 InvalidArgument다.
 - 출력 공간이 0인 호출은 코덱을 부르지 않고 {0, 0, false}다(역압과 같은 의미).
 - 해제: `DecompressStreamLimits{maxOutputBytes(필수, 0이면 InvalidArgument), maxWindowLog = 27(10–31, zlib 계열과
-  LZ4 frame은 범위만 검사)}`.
+  LZ4 frame은 범위만 검사, Brotli는 stream 첫 byte의 WBITS와 비교)}`.
   - 출력 누계(member·frame 합)가 상한을 넘으면 CapacityExceeded다(정확히 상한이면 성공). `TryProcess`는 코덱에 주는
     출력 창을 남은 허용량 + 1로 줄여 1byte 초과로 감지한다. `TryWriteAppend`는 output을 남은 허용량까지만 늘리고, 허용량을
     다 쓰면 1byte 임시 창으로 블록 끝·체크섬까지만 진행한다. 그래서 output이 상한보다 길어지지 않는다.
@@ -631,14 +673,14 @@ deflate 스트림은 zlib 래퍼라 Rocks `Zlib`에 대응한다). 형식은 Zst
     검사를 건너뛰므로 adapter가 먼저 막는다.
   - zstd 스트림 해제기는 내부 버퍼에 먼저 풀어 나눠 내보내므로, 이 경로의 `dstSize_tooSmall`은 출력 부족이 아니라 블록이
     frame 정보를 어긴 손상이다. InvalidArgument로 분류한다.
-  - 스트림이 끝난 뒤의 byte: Gzip은 다음 member(inflate가 magic을 직접 검사), Zstd·Lz4Frame은 다음 frame, Deflate·Zlib은
-    InvalidArgument다.
+  - 스트림이 끝난 뒤의 byte: Gzip은 다음 member(inflate가 magic을 직접 검사), Zstd·Lz4Frame은 다음 frame, Deflate·Zlib·
+    Brotli는 InvalidArgument다.
   - `IsAtStreamBoundary()`는 지금까지의 입력이 완결된 스트림(들)인지다. `TryFinish()`는 경계가 아니거나 스트림이 하나도
     없으면 InvalidArgument다(skippable frame만 있으면 성공, 출력 0). 출력은 frame·member 끝의 체크섬을 확인하기 전까지 미검증이다.
   - 진행할 것이 없는 호출(빈 입력이고 코덱에 남은 출력도 없음)은 코덱을 부르지 않고 {0, 0, true}를 돌려준다. 남은 출력이
     있으면 빈 입력으로도 부른다. 코덱에는 출력 공간을 항상 0보다 크게 넘기고, 입력을 다 넣었는데 출력 공간이 남았으면 빈
     입력으로 다시 부르지 않는다(zlib Z_BUF_ERROR·zstd 무진행 반복 오류 방지).
-  - Deflate·Zlib 스트림 뒤 byte는 출력 창 크기와 무관하게 그 byte를 받은 호출에서 거부한다.
+  - Deflate·Zlib·Brotli 스트림 뒤 byte는 출력 창 크기와 무관하게 그 byte를 받은 호출에서 거부한다.
 - zlib 압축의 작은 출력 창: deflate는 flush 중 출력이 가득 차면 다음 호출에서 flush marker(빈 stored block)를 다시
   만든다. 창이 marker보다 작으면 TryFlush가 끝나지 않으므로(교차검증에서 발견), 남은 창이 64byte보다 작으면 64byte carry
   버퍼에 deflate한 뒤 나눠 넘긴다. 그래서 1byte 창으로도 flush·finish가 끝난다. 창이 정확히 차면 빈 marker가 한 번 더
@@ -647,7 +689,7 @@ deflate 스트림은 zlib 래퍼라 Rocks `Zlib`에 대응한다). 형식은 Zst
   코덱을 건드리기 전의 거부(겹침, Finish 뒤 Process)는 상태를 바꾸지 않는다. Append 편의 함수는 그 호출에서 붙인 길이를
   되돌린다(일관성일 뿐 무결성 보장은 아니다).
 - 메모리: zlib inflate 약 40KiB, deflate 약 256KiB, zstd 해제는 window + 블록 버퍼(Reset으로 해제되지 않고 객체 수명 동안
-  유지). 이동 전용이며 코덱 상태는 heap에 고정하고, 이동된 뒤 호출은 StaleHandle이다. 한 객체는 한 번에 한 스레드만 쓴다.
+  유지). Brotli 해제는 출력에 맞춰 늘어나는 ring buffer와 Huffman 표이며 Reset이 해제기 상태를 새로 만들며 반환한다(13.4절). 이동 전용이며 코덱 상태는 heap에 고정하고, 이동된 뒤 호출은 StaleHandle이다. 한 객체는 한 번에 한 스레드만 쓴다.
 
 ## 11. 압축 사전 (3차, 교차검증 반영)
 
@@ -1004,3 +1046,182 @@ probe(저장소 밖)가 만들었다.
 
 - macOS ARM64·Android 실기기 실행(결정성 golden 포함).
 - LZ4·LZ4 frame 사전(`LZ4F_compressBegin_usingCDict`), 독립 블록 선택 설정은 수요가 생기면 다룬다.
+
+## 13. Brotli 해제 (6차)
+
+기준일 2026-11-13. `CompressionFormat::Brotli`는 Brotli stream(RFC 7932)의 **해제 전용** 형식이다. 용도는 WOFF2 글꼴(W3C
+WOFF File Format 2.0, 글꼴 표 전체가 Brotli stream 하나)과 HTTP `Content-Encoding: br`로 받은 자산이다. Godot
+`Compression::MODE_BROTLI`도 해제만 지원한다(Godot parity). Rocks가 Brotli를 쓰는 쪽은 아니어서 압축기는 들이지 않았다. enum
+값은 끝에 덧붙였다(프로세스 안 식별용이며 영속 값이 아니다). 구현은 `Private/BrotliCodec.cpp`다.
+
+### 13.1 선정·버전·출처
+
+- 라이브러리는 google/brotli 1.1.1(2026-10-21)이다. 처음 지시는 1.1.0이었으나 1.1.1로 바꿨다. 1.1.1은 해제기 보안 수정 하나와
+  버전 표기만 더한 patch release다. upstream CHANGELOG의 CVE-2026-111497이 그 수정이며, 잘못된 block switch를 오류로 보고하지
+  않아 범위 밖 쓰기가 가능했다(커밋 da98063 "Detect and report invalid stream earlier"). 공개 API는 같고 `decode.h`에 오류
+  코드 `BROTLI_DECODER_ERROR_FORMAT_BLOCK_SWITCH`(-17)가 추가됐다. 1.1.0 archive와 비교하면 `CHANGELOG.md`·
+  `c/common/version.h`·`c/dec/decode.c`·`c/include/brotli/decode.h` 4개만 다르다.
+- 출처는 GitHub tag archive(`v1.1.1.tar.gz`)다. sha256은 `1a84dfaa…20da8`이고 전체 값은 manifest에 있다. 릴리스 자산 digest와
+  upstream 서명은 없다. 그래서 GitHub API로 받은 tag commit(`db0631d…`)의 tree 목록과 archive 135개 파일의 git blob hash가
+  모두 같음을 확인했다. 나머지 파일은 upstream `.gitattributes`의 export-ignore라 archive에 없다. 비교한 1.1.0 archive의
+  sha256은 Homebrew formula 값과 같다.
+- 라이선스는 MIT(`brotli-1.1.1/LICENSE`)이고 바이너리 배포 시 고지가 필요하다(`binaryNoticeRequired`).
+- 해제기만 들였다.
+  - 번역 단위 10개: `c/common`의 `constants`·`context`·`dictionary`·`platform`·`shared_dictionary`·`transform`.c, `c/dec`의
+    `bit_reader`·`decode`·`huffman`·`state`.c
+  - 헤더: 그 내부 헤더와 `c/include/brotli`의 `decode.h`·`port.h`·`shared_dictionary.h`·`types.h`. 이 4개는 adapter 헤더다.
+  - 넣지 않은 것: 압축기(`c/enc`, `encode.h`), 도구(`c/tools`), 다른 언어 binding, 시험 자료
+  - 내장 사전(`dictionary.c`, 122,784byte, 약 120KiB)은 정적 데이터다.
+
+### 13.2 할당과 빌드
+
+- 해제기 상태는 `BrotliDecoderCreateInstance(alloc_func, free_func, opaque)`에 Allocator 경유 함수 두 개를 모두 넘겨 만든다.
+  해제기 상태, shared dictionary 상태, ring buffer, Huffman 표, context map, block type 표 등 upstream의 모든 할당이 이 함수를
+  거친다.
+- CRT 경로는 오브젝트에 남는다. 할당 함수가 없을 때 쓰는 분기는 다음과 같다:
+  - `platform.c`의 `BrotliDefaultAllocFunc`·`BrotliDefaultFreeFunc`와 이를 고르는 `state.c`의 `BrotliDecoderStateInit` 분기
+  - `decode.c`의 `BrotliDecoderCreateInstance`(malloc·free)
+  - `shared_dictionary.c`의 `BrotliSharedDictionaryCreateInstance`(malloc)
+  - 공개 일회성 API `BrotliDecoderDecompress`. 항상 기본 할당기로 상태를 초기화하므로 adapter는 부르지 않는다.
+
+  llvm-nm으로 보면 CRT 할당 참조(`__imp_malloc`·`__imp_free`)가 `platform`·`decode`·`shared_dictionary` 오브젝트에만 있고
+  adapter 오브젝트에는 없다. adapter가 부르는 API에 두 함수를 모두 넘기면 이 분기는 실행되지 않는다. upstream에는 이 경로를 컴파일 단계에서 빼는 설정 지점이 없어(LZ4의
+  `LZ4_USER_MEMORY_FUNCTIONS` 같은 것이 없다) 원본을 고치지 않는 한 남는다. 대신 시험이 계수 allocator로 모든 할당이 주입
+  할당기를 거치고 해제 뒤 0인지 확인한다.
+- 빌드 정의는 없다. `BROTLI_SHARED_COMPILATION`을 정의하지 않으면 `BROTLI_DEC_API`·`BROTLI_COMMON_API`가 비고, 내부
+  심볼(`BROTLI_INTERNAL`)은 GNU 계열에서 hidden이다. LZ4·zstd의 visibility 정의를 비운 것과 같은 상태다.
+- 외부 심볼은 37개이고 모두 `Brotli`·`kBrotli`·`_kBrotli` 접두사다(llvm-nm). zstd·LZ4·zlib·Compression·Core 오브젝트와 겹치는 이름은
+  없다. 같은 이름은 MSVC COMDAT 상수(`??_C@…`·`__xmm@…`)뿐이며 링커가 내용으로 합친다. 외부 헤더는 `brotli/` 하위 경로로만
+  include된다.
+- 진단 지시문: `platform.h`에 `_Pragma` 5개가 있다. TI·IAR·PGI 컴파일러용 인라인 지시(`BROTLI_INLINE`·`BROTLI_NOINLINE`)이고
+  진단 지시문이 아니며 clang·GCC 분기에서는 쓰이지 않는다. manifest `pragmaDirectives`에 기록했다(3.6절).
+
+### 13.3 일회성 계약
+
+- 압축 경로는 모두 Unsupported다: `TryGetCompressionLevelRange`, `CompressionSettings::TryMake`·`TryDefault`,
+  `TryGetCompressBound`, 내부 압축 문맥 생성. `CompressionSettings`를 만들 수 없으므로 `Compressor`·`CompressStream`·
+  `TryCompress`·비동기 압축·압축 사전은 공개 API로 Brotli에 닿지 않는다.
+  - 판정은 `detail::ResolveFormat`(`known`·`compresses`·`streams`) 하나에서 온다. 입구 검사 `CompressFormatError`·
+    `StreamFormatError`가 이 값을 쓰고, 비동기 제출과 해제 사전도 같은 함수로 판정한다.
+  - 모르는 형식은 InvalidArgument, 아는 형식인데 압축하지 않으면 Unsupported다.
+  - 블록 컨테이너는 자기 형식 목록(Lz4·Zstd·Deflate)으로 판정하므로 Brotli는 Lz4Frame·Zlib과 같이 InvalidArgument다.
+  - 해제 사전(`DecompressDictionary`)은 Lz4Frame·Zlib과 같이 Unsupported다.
+- 해제 경로(Span·Append·`Decompressor`·`DecompressStream`·비동기)는 모두 동작한다. 해제기 상태는 한 stream만 풀 수 있다
+  (upstream 계약). 그래서 일회성과 `Decompressor`는 호출마다 상태를 만들고 끝에 반환한다. 문맥이 들고 있는 것은 상태 블록
+  하나(48byte)뿐이다. 해제기 상태는 상태 블록 두 개(해제기 5,744byte·shared dictionary 1,408byte, 합 약 7KiB)다.
+- stream은 이어 붙일 수 없다. 해제기는 입력을 넘겨 읽지 않으므로(SUCCESS일 때 남은 입력을 돌려준다) 끝난 뒤의 byte는
+  1byte도 검출해 InvalidArgument다. 두 번째 stream도 같다. 입력을 모두 넣었는데 더 필요하면 절단(InvalidArgument)이다.
+- 출력 상한은 LZ4 frame과 같은 `DecodeOutput`이 맡는다. 쓸 공간이 없으면 1byte 예비 창으로 계속하고, 1byte라도 나오면
+  Span은 CapacityExceeded, Append는 출력을 늘린다. 정확히 상한 크기인 결과는 성공한다.
+- Append 성장: stream에 원본 크기가 없어 64KiB(상한 이하)를 먼저 잡고, 예비 창에 byte가 나올 때만 두 배씩 늘린다. 실패하면
+  길이를 되돌린다.
+- 오류 대응:
+  - 형식 오류(-1…-17)는 InvalidArgument다.
+  - 할당 실패(-21·-22·-25·-26·-27·-30)는 OutOfMemory다.
+  - API 계약 오류(-20), 도달할 수 없는 상태(-31), 내장 사전 데이터가 없는 빌드(-19, `BROTLI_EXTERNAL_DICTIONARY_DATA`)는
+    DependencyFailed다.
+  - 붙인 사전 범위 밖 참조(-18)는 손상이라 InvalidArgument다. 이 빌드는 사전을 붙이지 않는다.
+  - 입력·출력 공간이 있는데 진행하지 않으면 DependencyFailed다(무한 반복 방지, upstream에서는 도달하지 않음을 독립 검토가
+    확인했다).
+- large window(비표준 확장, 첫 byte가 정확히 0x11)는 해제기를 만들기 전에(Append는 출력을 확보하기 전에) Unsupported로
+  거부한다. 표지 다음 bit가 1인 0x91은 어느 모드에서도 예약 값이라 해제기가 형식 오류(InvalidArgument)로 보고한다(독립
+  검토 지적으로 7bit만 보던 판정을 고쳤다).
+- 취소: 입력·출력을 1MiB(`CompressionChunkBytes`)씩 넣어 입력 소비나 출력 생성 1MiB마다 확인한다. 압축률이 아주 높은
+  입력(54byte → 64MiB)도 출력 1MiB마다 확인한다.
+- 메모리(계수 allocator 측정, Windows x64):
+
+  | 항목 | 값 |
+  |---|---|
+  | 해제기 상태 | 약 7KiB |
+  | ring buffer | 2^k + 542byte. 기본("canny") 방식이라 출력에 필요한 크기(지금 위치 + metablock 길이) 이상의 2의 거듭제곱으로 늘고 window(최대 2^24)를 넘지 않는다. 64byte 출력은 1KiB, 3MiB 출력은 처음부터 4MiB를 쓴다 |
+  | Huffman 표 | metablock마다. 최악은 literal·insert&copy·distance 트리 각 256개로 약 2.6MiB(649,216 + 1,107,968 + 919,552 = 2,676,736byte) |
+  | context map·block type 표 | context map 최대 17,408byte(metablock마다), block type 표 12,336byte |
+  | 최고 사용량 | ring buffer를 늘리는 순간 이전 ring과 새 ring이 함께 있어 약 1.5 × window + 표다. 표준 최대 window에서 약 27MiB(8MiB + 16MiB + 2.6MiB), window를 처음부터 다 쓰는 stream(16MiB metablock)은 약 19MiB다 |
+
+  `BROTLI_DECODER_PARAM_DISABLE_RING_BUFFER_REALLOCATION`을 켜면 최고값은 window + 표로 고정된다. 대신 WOFF2처럼 작은
+  출력에도 window 전체(보통 4MiB, 최대 16MiB)를 바로 잡으므로 기본값을 유지했다. 처음 문서는 늘리는 순간의 최고값을
+  빠뜨렸는데, 독립 검토가 여러 metablock stream으로 24MiB를 재현해 바로잡았다.
+
+### 13.4 스트림
+
+- `DecompressStream::TryCreate(Brotli, limits, allocator)`를 쓴다. `CompressStream`은 Unsupported다.
+- `maxWindowLog`: 첫 byte의 WBITS(10–24, window 2^WBITS − 16)를 해제기에 넣기 전에 비교한다. 넘으면 CapacityExceeded이고
+  ring buffer를 잡지 않는다. 그래서 작업 메모리는 약 1.5 × 2^maxWindowLog + 표로 묶인다. large window 표지는 Unsupported다.
+  WBITS는 첫 byte만으로 정해지므로 1byte 조각에서도 같다.
+- 경계와 뒤 byte: stream이 끝나면 경계이고, 그 뒤에 오는 byte는 그 호출에서 InvalidArgument다. 같은 호출 안의 남는 byte도
+  InvalidArgument다. Deflate·Zlib과 같은 규칙이며 Gzip·Zstd·Lz4Frame처럼 다음 stream으로 읽지 않는다.
+- `complete` 판정:
+  - 해제기는 입력이 바닥났다고 보고(NEEDS_MORE_INPUT)할 때도 ring buffer에 내보낼 출력을 남길 수 있다. 출력 창이 차서 앞서
+    밀어 낸 쓰기가 일부만 끝난 경우다.
+  - 그래서 결과 코드가 아니라 `BrotliDecoderHasMoreOutput`으로 남은 출력을 판정한다. 1byte 출력 창으로도 모든 출력이 나온다.
+- `Reset`: 해제기 상태를 다시 쓸 수 없어 이전 상태를 반환하고 새로 만든다(이전 ring buffer도 이때 반환한다). 만들지 못하면
+  OutOfMemory가 다음 Reset까지 실패 상태로 남는다. 누계 상한·sticky 실패·`TryFinish`는 10절과 같다.
+
+### 13.5 결정
+
+- **large window를 끈다.** 비표준 확장이고 window가 최대 1GiB(2^30)라 메모리 상한을 잃는다. WOFF2와 HTTP
+  `Content-Encoding: br`은 표준 window만 쓴다. 필요해지면 `maxWindowLog`로 묶어 켤 수 있다(그때 표지 판정을 확장 WBITS
+  검사로 바꾼다).
+- **해제 전용을 helper 하나로 표현한다.** `detail::ResolveFormat`이 형식의 `known`·`compresses`·`streams`를 정하고, 입구
+  검사(`CompressFormatError`·`StreamFormatError`)와 비동기·사전이 이를 쓴다. 형식 플러그인 등록(UE `ICompressionFormat`,
+  후속)을 들이면 `CompressionFormat`을 uint32로 넓히고 `ResolveFormat`을 등록표 조회로 바꾸면 된다. 이번에는 구현하지
+  않았다.
+- **해제기 상태는 호출마다 만든다.** upstream 상태는 재사용할 수 없다. 상태 생성은 할당 두 번(합 약 7KiB)이라 비용이 작다.
+
+### 13.6 처리량
+
+`CompressionBench --file corpus.bin --brotli corpus.br`로 쟀다. Release, Windows x64, 같은 기기 1회, 단일 스레드다. 코퍼스는
+저장소 텍스트(Docs·Core·Engine 소스·C#, 7.7MiB)이고, `.br`은 참조 encoder(Python `brotli` 1.1.0)가 만들었다. 해제 결과가
+코퍼스와 같음도 확인했다. Rocks에는 압축기가 없으므로 `--brotli`가 없으면 안내 한 줄만 출력한다.
+
+| 형식 | 수준 | 압축 비율 | 해제 MB/s(일회성) | 해제 MB/s(스트림 64KiB 조각) |
+|---|---|---|---|---|
+| Brotli | quality 5, window 22 | 0.211 | 753 | 750 |
+| Brotli | quality 11, window 22 | 0.179 | 833 | 809 |
+| Brotli | quality 11, window 24 | 0.178 | 814 | 825 |
+| Zstd(같은 코퍼스) | 3 / 19 | 0.245 / 0.183 | 1433 / 1580 | — |
+| Deflate(같은 코퍼스) | 6 | 0.249 | 556 | — |
+
+측정 구간에는 해제만 넣고 결과 비교는 구간 밖에서 한다. quality 11은 zstd 19보다 조금 작고, 해제는 zstd의 약 53%이며
+Deflate보다 빠르다.
+
+### 13.7 시험
+
+`Tests/BrotliTests.cpp` 15개(Windows x64 Debug 약 1.0초, ASan 약 2.5초, Release 약 0.4초). 벡터는 참조 encoder(Python 3 + `pip install
+brotli==1.1.0`, google/brotli 1.1.0의 공식 binding)가 만든 13개(합 4,107byte, 약 4.0KiB)와 손으로 만든 3개다.
+
+- 참조 벡터: quality 1·5·9·11, window 10·16·18·20·22·24, `MODE_FONT`, 빈 입력, 비압축 metablock(난수 512byte), 고압축 입력
+  (3MiB, 64MiB 폭탄)
+- 손으로 만든 입력: large window 표지(0x11), 예약 window(0x91), 패딩 bit 오류
+- 생성 방법(같은 byte가 다시 나온다)은 시험 파일 머리 주석에 있다. 입력 생성기는 시험의 `Fill`·`MakeSparse`를 그대로 옮겼고,
+  생성 뒤 `brotli.decompress`로 원본과 같음을 확인했다. 주석에 원본 CRC-32와 WBITS를 적었다.
+
+시험 목록:
+
+- 해제 전용: 압축 경로 Unsupported, 모르는 형식 InvalidArgument, `ResolveFormat`·입구 검사, 해제 문맥·스트림 생성과 한계 검사,
+  해제 사전 Unsupported, 블록 컨테이너 InvalidArgument, 빈 입력·겹침
+- 왕복: 참조 벡터 11개(폭탄·ring 성장 벡터 제외)를 Span·Append(접두 보존)·`Decompressor` 재사용·스트림(조각 1·7·4096·전체)으로
+  풀어 비교, 경계 뒤 빈 입력
+- 역압: 출력 창 1·7·4096byte × 입력 조각 1·전체
+- 상한: 정확한 상한 성공, 1byte 부족 CapacityExceeded(Span·Append 길이 복원·스트림 sticky·큰 창 TryProcess), 상한 0인 빈 stream
+- 뒤 byte·연결: 쓰레기 1byte, 같은 stream 두 개(일회성·스트림 전체·조각 1·7: stream 끝과 뒤 byte가 한 조각에 오는 경우
+  포함), 경계 뒤 byte, Reset 복구
+- 절단: 모든 길이(문맥·Append·스트림 경계)
+- bit flip: 모든 bit(Span·Append), byte마다 1bit(스트림). 허용 결과 안이고 범위 밖 쓰기가 없다(ASan)
+- 폭탄: 54byte → 64MiB를 상한 1MiB로(일회성·스트림, 최고 사용량 < window + 2 × 상한 + 표), `maxWindowLog` 22로 첫 byte에서
+  거부(< 64KiB), 64KiB 창으로 끝까지 해제
+- window: 모든 벡터의 `maxWindowLog` = WBITS 성공·WBITS − 1 CapacityExceeded, large window 표지 Unsupported(일회성 Span·Append는
+  할당 없이), 첫 byte 256개 전부의 분류, 예약 값 0x91 InvalidArgument
+- Reset·sticky: 손상 뒤 sticky, 진행 중·끝난 뒤 Reset
+- OOM: 할당 시도 위치마다(Append 성장, Span, 문맥, 스트림 생성·쓰기, Reset의 재생성: 해제기 상태·shared dictionary 상태). 누수 0, 길이 복원, sticky·Reset 복구
+- 할당 경로: 계수 allocator. 일회성 반환 0, ring buffer가 주입 할당기를 거침(최고 ≥ 출력 3MiB, < 8MiB), 작은 출력의 작은 ring,
+  ring을 늘리는 순간의 최고값(1.25 × window < 최고 < 1.5 × window + 64KiB, 이전 ring과 새 ring이 함께 있음), 문맥의 무보유, 스트림 Reset의 반환
+- 취소 probe: 1MiB 단위 확인과 Append 길이 복원(1KiB → 3MiB)
+- 비동기 = 동기: Append·Span, 의존 연결, large window·뒤 byte 실패 결과, 제출 시점 거부
+- WOFF2식 사용: 헤더가 알려 준 크기로 Span 해제, 더 큰 선언(결과 크기 불일치), 더 작은 선언(CapacityExceeded)
+
+### 13.8 후속
+
+- macOS ARM64·Android 실기기 실행.
+- WOFF2 글꼴 importer(표 변환 복원)는 글꼴 모듈의 몫이다.
+- Brotli 압축(`c/enc`)과 사용자 사전·large window는 수요가 생기면 다룬다.

@@ -109,7 +109,7 @@ Result<DecompressDictionary> DecompressDictionary::TryCreate(CompressionFormat f
                                                              Allocator& allocator) noexcept {
     if (format != CompressionFormat::Zstd) {
         // 아는 형식이면 사전을 아직 지원하지 않는 것이고, 모르는 값이면 인자 오류다.
-        return Result<DecompressDictionary>::Failure(TryGetCompressionLevelRange(format).IsOk()
+        return Result<DecompressDictionary>::Failure(detail::ResolveFormat(format).known
                                                          ? ErrorCode::Unsupported
                                                          : ErrorCode::InvalidArgument);
     }

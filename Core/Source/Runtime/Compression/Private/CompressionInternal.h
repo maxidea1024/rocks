@@ -5,17 +5,42 @@
 #include <Compression/CompressionStream.h>
 
 // 압축 모듈 내부 경계다. 공개 API(Compression.cpp)·비동기(AsyncCompression.cpp)와 코덱
-// adapter(Lz4Codec.cpp·Lz4FrameCodec.cpp·ZstdCodec.cpp·ZlibCodec.cpp) 사이의 계약만 둔다. 외부 코덱
-// 헤더는 각 adapter 번역 단위만 포함한다.
+// adapter(Lz4Codec.cpp·Lz4FrameCodec.cpp·ZstdCodec.cpp·ZlibCodec.cpp·BrotliCodec.cpp) 사이의 계약만
+// 둔다. 외부 코덱 헤더는 각 adapter 번역 단위만 포함한다.
 namespace rocks::detail {
 
-// 취소 확인·32bit 길이 분할의 단위다. Deflate·Zlib·Gzip과 LZ4 frame 해제는 입력 소비나 출력 생성이,
-// zstd·LZ4 frame 압축은 입력 소비가, zstd 해제는 입력 소비가 이만큼 진행될 때마다 취소를 확인한다
-// (zstd 해제는 stable output이라 출력을 나눌 수 없다). Lz4 raw block은 한 번의 코덱 호출이다.
-// 동기·비동기가 같은 값을 써야 결과 byte가 같다(zstd·deflate 스트림 경계가 이 값에 따른다). zstd
-// 최대 블록 크기(128KiB)의 배수여야 한다(ZstdCodec.cpp의 static_assert). LZ4 frame 블록(64KiB)의
-// 배수이기도 해서 LZ4 frame 일회성 결과는 입력을 한 번에 넣은 것과 같다(Lz4FrameCodec.cpp의
-// static_assert).
+// 형식이 지원하는 범위다. 형식 판정은 ResolveFormat 하나로 모은다(수준·bound·문맥·스트림·비동기·
+// 사전이 같은 답을 쓴다). 블록 컨테이너는 블록 형식 목록(CompressedBlocks.cpp의 CodecId: Lz4·Zstd·
+// Deflate)으로 따로 판정하며 나머지 형식은 InvalidArgument다. 형식 플러그인 등록을 들이면 이 함수가
+// 등록표 조회가 된다.
+// - known: 이 모듈이 아는 형식이다. 아니면 모든 API가 InvalidArgument다.
+// - compresses: 압축(수준 범위·CompressionSettings·bound·Compressor·CompressStream)을 지원한다.
+//   아는 형식인데 압축하지 않으면 Unsupported다(해제 전용 형식: Brotli).
+// - streams: 스트림 API를 지원한다(압축은 compresses일 때만). Lz4 raw block은 아니다.
+struct FormatSupport {
+    bool known = false;
+    bool compresses = false;
+    bool streams = false;
+};
+
+FormatSupport ResolveFormat(CompressionFormat format) noexcept;
+
+// API 입구의 형식 검사다(ResolveFormat 기준). 해제 전용 형식은 이 두 함수만 거른다. 통과하면
+// None이다.
+// - CompressFormatError: 압축 입구(수준 범위·CompressionSettings·bound·압축 문맥). 모르는 형식은
+//   InvalidArgument, 압축하지 않는 형식은 Unsupported다.
+// - StreamFormatError: 스트림 입구. 모르는 형식은 InvalidArgument, 스트림이 아닌 형식(Lz4 raw
+//   block)과 압축 스트림의 해제 전용 형식은 Unsupported다.
+ErrorCode CompressFormatError(CompressionFormat format) noexcept;
+ErrorCode StreamFormatError(CompressionFormat format, bool compressing) noexcept;
+
+// 취소 확인·32bit 길이 분할의 단위다. Deflate·Zlib·Gzip과 LZ4 frame·Brotli 해제는 입력 소비나 출력
+// 생성이, zstd·LZ4 frame 압축은 입력 소비가, zstd 해제는 입력 소비가 이만큼 진행될 때마다 취소를
+// 확인한다(zstd 해제는 stable output이라 출력을 나눌 수 없다). Lz4 raw block은 한 번의 코덱
+// 호출이다. 동기·비동기가 같은 값을 써야 결과 byte가 같다(zstd·deflate 스트림 경계가 이 값에
+// 따른다). zstd 최대 블록 크기(128KiB)의 배수여야 한다(ZstdCodec.cpp의 static_assert). LZ4 frame
+// 블록(64KiB)의 배수이기도 해서 LZ4 frame 일회성 결과는 입력을 한 번에 넣은 것과 같다
+// (Lz4FrameCodec.cpp의 static_assert).
 inline constexpr usize CompressionChunkBytes = usize{1} << 20;
 
 // 코덱 작업 메모리 정렬이다. zstd·zlib·LZ4 상태는 malloc 수준 정렬을 가정한다.
@@ -180,14 +205,66 @@ enum class StreamFlush : uint8 {
 struct StreamDecodeState {
     bool sawStream = false;  // frame·member를 하나 이상 끝까지 받았다
     bool atBoundary = false; // 지금까지의 입력이 완결된 스트림(들)이다
-    bool ended = false;      // Deflate·Zlib: 스트림이 끝났다(뒤 byte는 손상)
+    bool ended = false;      // Deflate·Zlib·Brotli: 스트림이 끝났다(뒤 byte는 손상)
     bool outputPending =
         false; // 지난 호출이 출력 공간을 다 채웠다(코덱 안에 출력이 남았을 수 있다)
     // zstd: frame 시작에서 헤더를 모아 window를 먼저 검사한다(단일 패스 경로가 상한 검사를
     // 건너뛰므로). LZ4 frame: frame 시작의 magic·FLG를 모아 쓰레기와 사전 ID frame을 먼저 거른다.
+    // Brotli: 첫 byte의 WBITS를 해제기에 넣기 전에 검사한다.
     bool atFrameStart = true;
     uint32 headerBytes = 0;
     uint8 header[32] = {};
+};
+
+// 일회성 해제의 출력 대상이다(LZ4 frame·Brotli 공통). fixed면 Span, 아니면 Array 뒤를
+// 상한(limit)까지 늘린다. 쓸 공간이 없으면 코덱에 1byte 예비 창을 주고, 거기에 byte가 나올 때만
+// 늘리므로(AcceptSpare) 출력이 base + limit보다 길어지지 않고 정확히 상한 크기인 결과는 성공한다.
+inline constexpr usize DecodeOutputInitialBytes = usize{64} << 10;
+
+struct DecodeOutput {
+    uint8* fixed = nullptr;
+    Array<uint8>* array = nullptr;
+    usize base = 0;
+    usize limit = 0;
+    usize produced = 0;
+    usize writable = 0;
+
+    uint8* Cursor() noexcept {
+        if (array != nullptr) {
+            return array->Data() + base + produced;
+        }
+        return fixed + produced;
+    }
+
+    // 쓸 공간을 bytes만큼 늘린다(Array만, 호출자가 상한 안으로 정한다). 늘린 구간은 해제가 채우므로
+    // 0으로 채우지 않는다.
+    Result<void> Grow(usize bytes) noexcept {
+        auto grown = array->TryAppendUninitialized(bytes);
+        if (!grown) {
+            return Result<void>::Failure(grown.Error());
+        }
+        writable += bytes;
+        return Result<void>::Success();
+    }
+
+    // 예비 창에 1byte가 나왔다. 상한 안이면(Append) 출력을 두 배씩(최소 64KiB) 늘리고 그 byte를
+    // 옮긴다. Span이거나 상한에 닿았으면 CapacityExceeded다.
+    Result<void> AcceptSpare(uint8 spare) noexcept {
+        if (array == nullptr || produced == limit) {
+            return Result<void>::Failure(ErrorCode::CapacityExceeded);
+        }
+
+        const usize doubled =
+            produced > DecodeOutputInitialBytes ? produced : DecodeOutputInitialBytes;
+        auto grown = Grow(doubled < limit - produced ? doubled : limit - produced);
+        if (!grown) {
+            return grown;
+        }
+        *Cursor() = spare;
+        ++produced;
+        --writable;
+        return Result<void>::Success();
+    }
 };
 
 // LZ4 frame(12절). 문맥은 Allocator 경유 사용자 할당기로 만든다(LZ4F_*_advanced).
@@ -214,6 +291,22 @@ Result<StreamProgress> CompressStep(void* codec, Span<const uint8> input, Span<u
 Result<StreamProgress> DecompressStep(void* codec, Span<const uint8> input, Span<uint8> output,
                                       StreamDecodeState& state) noexcept;
 } // namespace lz4frame
+
+// Brotli 해제(13절). 해제 전용이다. upstream 해제기 상태는 한 번만 쓸 수 있으므로(decode.h 계약)
+// 일회성 해제는 호출마다 상태를 만들고 버린다. 일회성 문맥 상태가 없어 allocator만 받는다.
+namespace brotli {
+Result<usize> Decompress(Allocator& allocator, Span<const uint8> source, Span<uint8> destination,
+                         const CompressionProbe& probe) noexcept;
+Result<usize> DecompressAppend(Allocator& allocator, Span<const uint8> source, usize maxOutputBytes,
+                               Array<uint8>& output, const CompressionProbe& probe) noexcept;
+// 스트림 해제 문맥이다. Reset은 해제기 상태를 새로 만든다(할당 실패면 OutOfMemory).
+Result<void*> CreateStreamDecompressor(Allocator& allocator) noexcept;
+void DestroyStreamDecompressor(void* codec) noexcept;
+Result<void> ResetStreamDecompressor(void* codec) noexcept;
+// maxWindowLog: stream 헤더의 window(WBITS)가 이보다 크면 CapacityExceeded다.
+Result<StreamProgress> DecompressStep(void* codec, Span<const uint8> input, Span<uint8> output,
+                                      uint32 maxWindowLog, StreamDecodeState& state) noexcept;
+} // namespace brotli
 
 namespace zstd {
 Result<usize> Bound(usize sourceBytes) noexcept;

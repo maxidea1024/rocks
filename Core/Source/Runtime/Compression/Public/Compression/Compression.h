@@ -37,9 +37,9 @@
 // - 오류: 출력·상한 부족 CapacityExceeded, 손상·절단·체크섬 불일치·스트림 뒤 남는 byte·빈 해제
 //   입력·범위 밖 수준·source와 출력의 겹침 InvalidArgument, 문맥에 없거나 다른 사전이 필요한 입력
 //   (zlib 프리셋 사전, 사전 ID가 다른 zstd frame, 형식 사전 문맥에 사전 ID 없는 frame, 사전 ID를
-//   기록한 LZ4 frame), window가 구현 상한(2^31)을 넘는 zstd frame과 LZ4 legacy frame Unsupported,
-//   할당 실패 OutOfMemory, 크기 산술 overflow Overflow, 외부 코덱이 계약 밖의 실패를 보고
-//   DependencyFailed.
+//   기록한 LZ4 frame), window가 구현 상한(2^31)을 넘는 zstd frame·LZ4 legacy frame·Brotli large
+//   window 스트림·해제 전용 형식(Brotli)의 압축 Unsupported, 할당 실패 OutOfMemory, 크기 산술
+//   overflow Overflow, 외부 코덱이 계약 밖의 실패를 보고 DependencyFailed.
 // - 할당은 모두 인자로 받은 Allocator를 거친다. 전역·thread_local 캐시가 없어 자유 함수는 재진입
 //   가능하다. 반복 호출이 많으면 코덱 문맥을 재사용하는 Compressor·Decompressor를 쓴다.
 // - 같은 라이브러리 버전·설정·입력이면 64bit little-endian 대상(Windows x64·macOS ARM64·Android
@@ -74,13 +74,31 @@ inline constexpr uint32 CompressionOutputRevision = 1;
 //   Lz4의 60%대, Docs/Design/Compression.ko.md 12.5절). 해제는 연속 frame과 skippable frame을 모두
 //   처리한다. 사전 ID를 기록한 frame과 legacy frame(`lz4 -l`)은 Unsupported다. 블록 컨테이너 형식은
 //   아니다.
+// - Brotli: Brotli 스트림(RFC 7932, google/brotli 1.1.1). 해제 전용이다(WOFF2 글꼴·HTTP
+//   `Content-Encoding: br` 자산 읽기용). 압축 경로(TryGetCompressionLevelRange·
+//   CompressionSettings·TryGetCompressBound·Compressor·CompressStream)는 모두 Unsupported다.
+//   원본 크기·checksum이 없어 손상 검출은 형식 오류에 한정된다. 스트림 하나가 입력 전체여야 하며
+//   (연결 불가) 뒤에 남는 byte·절단·손상은 InvalidArgument, large window 확장 스트림(비표준, 첫
+//   byte 0x11)은 Unsupported다. 표준 window는 최대 16MiB(2^24 - 16)다. 해제 작업 메모리는 ring
+//   buffer(출력에 맞춰 2배씩 늘며 window 이하)와 Huffman 표(최악 약 2.6MiB)이고, ring buffer를
+//   늘리는 순간 이전 것과 함께 있어 최악 약 27MiB(1.5 × 16MiB + 표)다. 작은 출력은 작은 ring
+//   buffer만 쓴다. 사전 문맥·블록 컨테이너 형식은 아니다.
+//
+// 사용 예(WOFF2처럼 상위 포맷 헤더가 해제 크기를 알려 주는 경우). WOFF2의 해제 크기는 표
+// 디렉터리의 origLength(변환하지 않은 표)·transformLength(변환한 표)의 합이다(totalSfntSize는
+// 참고값):
+//   // tables는 그 합만큼 확보한 버퍼, compressedTables는 표 디렉터리 뒤의 Brotli stream이다.
+//   auto target = Span<uint8>(tables.Data(), tables.Size());
+//   auto written = TryDecompress(CompressionFormat::Brotli, compressedTables, target, allocator);
+//   // written.Value()가 합과 다르면 상위 포맷 오류로 처리한다.
 enum class CompressionFormat : uint8 {
     Lz4,
     Zstd,
     Deflate,
     Zlib,
     Gzip,
-    Lz4Frame
+    Lz4Frame,
+    Brotli
 };
 
 // 형식별 압축 수준 범위다.
@@ -90,22 +108,24 @@ enum class CompressionFormat : uint8 {
 //   매개변수가 입력에 맞춰 줄지만, 큰 입력·크기를 모르는 스트림은 수백 MiB 작업 메모리를 쓴다(수준
 //   22 약 700MiB). 해제는 DecompressStreamLimits 기본 window 상한(2^27)으로 풀린다.
 // - Deflate·Zlib·Gzip {0, 9, 6}: 0 = 압축하지 않음(stored).
+// - Brotli: 해제 전용이라 범위가 없다(Unsupported).
 struct CompressionLevelRange {
     int32 minimum = 0;
     int32 maximum = 0;
     int32 defaultLevel = 0;
 };
 
-// 모르는 형식 값이면 InvalidArgument다.
+// 모르는 형식 값이면 InvalidArgument, 해제 전용 형식(Brotli)이면 Unsupported다.
 Result<CompressionLevelRange> TryGetCompressionLevelRange(CompressionFormat format) noexcept;
 
 // 검증된 형식·수준 쌍이다. 생성 함수만 만들 수 있어 압축 함수는 항상 유효한 설정을 받는다.
 class CompressionSettings {
 public:
-    // 수준이 GetCompressionLevelRange 범위 밖이거나 모르는 형식이면 InvalidArgument다.
+    // 수준이 GetCompressionLevelRange 범위 밖이거나 모르는 형식이면 InvalidArgument, 해제 전용
+    // 형식(Brotli)이면 Unsupported다.
     static Result<CompressionSettings> TryMake(CompressionFormat format, int32 level) noexcept;
 
-    // 형식의 기본 수준이다. 모르는 형식이면 InvalidArgument다.
+    // 형식의 기본 수준이다. 모르는 형식이면 InvalidArgument, 해제 전용 형식이면 Unsupported다.
     static Result<CompressionSettings> TryDefault(CompressionFormat format) noexcept;
 
     CompressionFormat Format() const noexcept {
@@ -130,9 +150,9 @@ private:
 inline constexpr usize Lz4MaxInputBytes = 0x7E000000;
 
 // sourceBytes를 압축한 결과의 최악 크기다. 이 크기 이상의 destination을 주면 TryCompress는
-// CapacityExceeded로 실패하지 않는다. Lz4 입력 한계 초과·모르는 형식은 InvalidArgument, 계산
-// overflow는 Overflow다. Lz4Frame은 헤더(최대 19byte) + 64KiB 블록마다 4byte + 원본 + 8byte
-// (endmark·checksum)다.
+// CapacityExceeded로 실패하지 않는다. Lz4 입력 한계 초과·모르는 형식은 InvalidArgument, 해제
+// 전용 형식(Brotli)은 Unsupported, 계산 overflow는 Overflow다. Lz4Frame은 헤더(최대 19byte) + 64KiB
+// 블록마다 4byte + 원본 + endmark·checksum 8byte다.
 Result<usize> TryGetCompressBound(CompressionFormat format, usize sourceBytes) noexcept;
 
 // source를 압축해 destination 앞부분에 쓰고 쓴 byte 수를 반환한다. scratch는 코덱 작업 메모리이며
@@ -162,6 +182,7 @@ Result<usize> TryDecompress(CompressionFormat format, Span<const uint8> source,
 // - Deflate·Zlib·Gzip은 출력을 점진적으로 늘린다.
 // - Lz4Frame은 첫 frame에 기록된 크기(없으면 64KiB)를 먼저 확보하고, 출력이 더 나올 때만 두 배씩
 //   늘린다. 먼저 잡는 크기는 상한과 입력 크기 × 256 + 64KiB를 넘지 않는다.
+// - Brotli는 원본 크기가 없어 64KiB(상한 이하)를 먼저 잡고 출력이 더 나올 때만 두 배씩 늘린다.
 // - Lz4는 크기 정보가 없어 출력이 부족하면 두 배로 늘려 처음부터 다시 해제한다(크기를 알면
 // TryDecompress를 쓴다).
 Result<usize> TryDecompressAppend(CompressionFormat format, Span<const uint8> source,

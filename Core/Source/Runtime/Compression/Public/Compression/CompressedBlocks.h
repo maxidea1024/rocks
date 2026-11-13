@@ -354,8 +354,8 @@ public:
     // reader의 형식·블록 크기로 만든다. 실패: 열리지 않은 reader는 StaleHandle, OutOfMemory.
     static Result<CompressedBlocksReadContext> TryCreate(const CompressedBlocksReader& reader,
                                                          Allocator& allocator) noexcept;
-    // 형식·블록 크기로 만든다(여러 컨테이너에 같은 문맥을 쓸 때). 실패: Zlib·Gzip·Lz4Frame·모르는
-    // 형식·blockSizeLog2 범위 밖은 InvalidArgument, OutOfMemory.
+    // 형식·블록 크기로 만든다(여러 컨테이너에 같은 문맥을 쓸 때). 실패: Zlib·Gzip·Lz4Frame·Brotli·
+    // 모르는 형식·blockSizeLog2 범위 밖은 InvalidArgument, OutOfMemory.
     static Result<CompressedBlocksReadContext>
     TryCreate(CompressionFormat format, uint32 blockSizeLog2, Allocator& allocator) noexcept;
 

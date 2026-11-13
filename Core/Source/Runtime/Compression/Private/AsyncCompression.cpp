@@ -257,7 +257,8 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
                                  usize maxOutputBytes, Array<uint8>& output,
                                  Span<const WorkerTaskHandle> dependencies) noexcept {
     // output은 제출 시점에 읽지 않는다(위와 같은 이유). 겹침은 body가 검사한다.
-    if (source.Size() == 0 || !TryGetCompressionLevelRange(format)) {
+    // 해제 전용 형식(Brotli)도 받는다. 모르는 형식만 InvalidArgument다.
+    if (source.Size() == 0 || !detail::ResolveFormat(format).known) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -278,7 +279,7 @@ Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& ta
                                  Span<const WorkerTaskHandle> dependencies) noexcept {
     if (source.Size() == 0 ||
         detail::Overlaps(source.Data(), source.Size(), destination.Data(), destination.Size()) ||
-        !TryGetCompressionLevelRange(format)) {
+        !detail::ResolveFormat(format).known) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

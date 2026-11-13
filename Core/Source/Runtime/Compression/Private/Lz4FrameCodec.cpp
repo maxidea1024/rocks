@@ -31,9 +31,6 @@ static_assert(CompressionChunkBytes % BlockBytes == 0,
 // 무관하게 내용과 flush 위치로만 정해진다. 호출 한 번은 블록을 많아야 하나 끝낸다.
 constexpr usize StreamPieceBytes = BlockBytes - 1;
 
-// Append 해제가 원본 크기를 모를 때 처음 확보하는 출력이다.
-constexpr usize AppendInitialBytes = usize{64} << 10;
-
 // frame 헤더 크기를 알려면 magic(4byte)과 FLG(1byte)가 필요하다(LZ4F_headerSize).
 constexpr usize FrameProbeBytes = LZ4F_MIN_SIZE_TO_KNOW_HEADER_LENGTH;
 static_assert(LZ4F_HEADER_SIZE_MAX <= sizeof(StreamDecodeState::header),
@@ -234,51 +231,6 @@ Result<FrameCompressor*> CreateState(int32 level, Allocator& allocator) noexcept
     return Result<FrameCompressor*>::Success(state);
 }
 
-// 해제 출력 대상이다. fixed면 Span, 아니면 Array 뒤를 상한까지 늘린다.
-struct FrameOutput {
-    uint8* fixed = nullptr;
-    Array<uint8>* array = nullptr;
-    usize base = 0;
-    usize limit = 0;
-    usize produced = 0;
-    usize writable = 0;
-
-    uint8* Cursor() noexcept {
-        if (array != nullptr) {
-            return array->Data() + base + produced;
-        }
-        return fixed + produced;
-    }
-
-    // 쓸 공간을 bytes만큼 늘린다(Array만, 상한 안에서). 늘린 구간은 해제가 채우므로 0으로 채우지
-    // 않는다.
-    Result<void> Grow(usize bytes) noexcept {
-        auto grown = array->TryAppendUninitialized(bytes);
-        if (!grown) {
-            return Result<void>::Failure(grown.Error());
-        }
-        writable += bytes;
-        return Result<void>::Success();
-    }
-
-    // 예비 창에 1byte가 나왔다. 상한 안이면(Append) 출력을 두 배씩(최소 64KiB) 늘리고 그 byte를
-    // 옮긴다.
-    Result<void> AcceptSpare(uint8 spare) noexcept {
-        if (array == nullptr || produced == limit) {
-            return Result<void>::Failure(ErrorCode::CapacityExceeded);
-        }
-
-        auto grown = Grow(Minimum(Maximum(produced, AppendInitialBytes), limit - produced));
-        if (!grown) {
-            return grown;
-        }
-        *Cursor() = spare;
-        ++produced;
-        --writable;
-        return Result<void>::Success();
-    }
-};
-
 // 일회성 해제 공통 루프다.
 // - 입력·출력을 분할 단위로 넣어 취소를 확인한다.
 // - 연속 frame과 skippable frame을 모두 처리한다. frame 시작마다 magic을 확인하고 헤더를 먼저
@@ -290,7 +242,7 @@ struct FrameOutput {
 //   frame 뒤의 쓰레기는 magic 검사나 절단으로 InvalidArgument다.
 // stableOutput: 출력이 호출 사이에 옮겨지지 않아(Span) 이전 출력이 다음 창 바로 앞에 그대로 있다.
 // LZ4F가 history를 내부 버퍼로 복사하지 않아도 된다(stableDst).
-Result<void> Decode(LZ4F_dctx* context, Span<const uint8> source, FrameOutput& output,
+Result<void> Decode(LZ4F_dctx* context, Span<const uint8> source, DecodeOutput& output,
                     bool stableOutput, const CompressionProbe& probe) noexcept {
     LZ4F_resetDecompressionContext(context);
     const uint8* input = NonNullSource(source);
@@ -555,7 +507,7 @@ Result<usize> Compress(void* codec, Span<const uint8> source, Span<uint8> destin
 
 Result<usize> Decompress(void* codec, Span<const uint8> source, Span<uint8> destination,
                          const CompressionProbe& probe) noexcept {
-    FrameOutput output;
+    DecodeOutput output;
     output.fixed = NonNullDestination(destination);
     output.limit = destination.Size();
     output.writable = destination.Size();
@@ -569,7 +521,7 @@ Result<usize> Decompress(void* codec, Span<const uint8> source, Span<uint8> dest
 
 Result<usize> DecompressAppend(void* codec, Span<const uint8> source, usize maxOutputBytes,
                                Array<uint8>& output, const CompressionProbe& probe) noexcept {
-    FrameOutput target;
+    DecodeOutput target;
     target.array = &output;
     target.base = output.Size();
     target.limit = maxOutputBytes;
@@ -578,7 +530,7 @@ Result<usize> DecompressAppend(void* codec, Span<const uint8> source, usize maxO
     // 상한을 넘지 않는다. 이후에는 예비 창에 출력이 더 나올 때만 늘리므로 output이 base + 상한보다
     // 길어지지 않는다.
     const uint64 declared = DeclaredContentSize(source);
-    usize initial = AppendInitialBytes;
+    usize initial = DecodeOutputInitialBytes;
     if (declared != 0) {
         initial = declared < static_cast<uint64>(maxOutputBytes) ? static_cast<usize>(declared)
                                                                  : maxOutputBytes;

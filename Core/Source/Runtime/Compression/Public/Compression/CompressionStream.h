@@ -5,6 +5,7 @@
 
 // 조각 단위 스트리밍 압축·해제다(Godot StreamPeerGZIP 대응, Docs/Design/Compression.ko.md 10·12절).
 // 형식은 Zstd·Deflate·Zlib·Gzip·Lz4Frame이며 Lz4(raw block)는 스트림 형식이 아니라 Unsupported다.
+// Brotli는 해제 전용이다(DecompressStream만 되고 CompressStream은 Unsupported).
 // 빠른 스트림(로그·네트워크 메시지)은 Lz4Frame, 압축률이 중요하면 Zstd를 쓴다.
 //
 // 사용 예(LZ4 frame으로 메시지를 보내며 메시지마다 flush):
@@ -124,9 +125,10 @@ inline constexpr uint32 MaxZstdWindowLog = 31;
 
 // 해제 한계다. maxOutputBytes는 필수(0이면 TryCreate가 InvalidArgument)이며 Create·Reset 이후 모든
 // frame·member 출력의 누계 상한이다(넘으면 CapacityExceeded, 정확히 상한이면 성공). maxWindowLog는
-// zstd window 상한(작업 메모리 ≈ 2^maxWindowLog)이며 MinZstdWindowLog–MaxZstdWindowLog다. zlib
-// 계열은 window가 32KiB로 고정이고, Lz4Frame은 frame 헤더의 블록 크기(64KiB–4MiB)가 작업 메모리를
-// 정하므로(최대 약 8.1MiB) 범위 검사만 하고 쓰지 않는다.
+// zstd window 상한(작업 메모리 ≈ 2^maxWindowLog)이며 MinZstdWindowLog–MaxZstdWindowLog다. Brotli는
+// 스트림 첫 byte의 WBITS(window 2^WBITS - 16, 10–24)를 이 값과 비교한다(작업 메모리 최고 약 1.5 ×
+// 2^WBITS + Huffman 표 약 2.6MiB). zlib 계열은 window가 32KiB로 고정이고, Lz4Frame은 frame 헤더의
+// 블록 크기(64KiB–4MiB)가 작업 메모리를 정하므로(최대 약 8.1MiB) 범위 검사만 하고 쓰지 않는다.
 struct DecompressStreamLimits {
     usize maxOutputBytes = 0;
     uint32 maxWindowLog = 27;
@@ -135,16 +137,22 @@ struct DecompressStreamLimits {
 // 해제 스트림이다. 해제 결과는 입력 조각 나누기와 무관하다. 출력은 frame·member 끝의 체크섬을
 // 확인하기 전까지 미검증이다(검증 시점은 IsAtStreamBoundary·TryFinish 성공).
 // - 스트림이 끝난 뒤의 byte: Gzip은 다음 member, Zstd·Lz4Frame은 다음 frame(skippable 포함),
-//   Deflate·Zlib은 InvalidArgument다. Zstd·Lz4Frame은 frame magic이 아닌 byte를 받은 호출에서 바로
-//   거부한다.
+//   Deflate·Zlib·Brotli는 InvalidArgument다(Brotli 스트림은 연결할 수 없다). Zstd·Lz4Frame은 frame
+//   magic이 아닌 byte를 받은 호출에서 바로 거부한다.
 // - zstd frame의 window(single segment frame은 원본 크기)가 2^31을 넘으면 Unsupported(구현
 //   상한), 2^maxWindowLog만 넘으면 CapacityExceeded(호출자 상한)다. 사전이 필요한 zstd frame·
 //   zlib FDICT·사전 ID를 기록한 LZ4 frame·LZ4 legacy frame(`lz4 -l`)은 Unsupported다. LZ4 frame
 //   헤더(FLG·BD·헤더 checksum)는 사전 ID를 보기 전에 검증하므로 손상된 헤더는 InvalidArgument다.
+// - Brotli: 첫 byte의 WBITS가 maxWindowLog를 넘으면 CapacityExceeded, large window 확장
+//   스트림(비표준, 첫 byte 0x11)은 Unsupported다. checksum이 없어 손상 검출은 형식 오류에 한정된다.
 // - 무결성: LZ4 frame은 content checksum이 있으면 frame 끝에서, 블록 checksum이 있으면 블록마다
 //   확인한다. 원본 크기가 기록된 frame은 frame 끝에서 크기도 확인한다.
 // - 메모리: zlib inflate 약 40KiB, zstd는 window + 블록 버퍼, Lz4Frame은 블록 버퍼(64KiB 블록 약
-//   256KiB, 4MiB 블록 약 8.1MiB). 모두 Reset으로 해제되지 않고 객체 수명 동안 유지한다.
+//   256KiB, 4MiB 블록 약 8.1MiB). 이 셋은 Reset으로 해제되지 않고 객체 수명 동안 유지한다.
+//   Brotli는 ring buffer(출력에 맞춰 2배씩 늘며 최대 window 16MiB)와 metablock마다의 Huffman
+//   표(최악 약 2.6MiB)를 쓰고, ring buffer를 늘리는 순간 이전 것과 함께 있어 최고 약 1.5 × window
+//   + 표다. 해제기 상태를 다시 쓸 수 없어 Reset이 이전 상태를 반환하고 새로 만든다(이때
+//   OutOfMemory가 날 수 있다).
 class DecompressStream {
 public:
     DecompressStream() noexcept = default;
@@ -169,8 +177,9 @@ public:
     // input을 소비하고 만들어진 출력을 output 앞부분에 쓴다. complete는 input을 모두 소비했고 코덱
     // 안에 내보낼 출력이 남지 않았는지다(아니면 출력 공간을 더 주며 다시 부른다. 빈 input도 된다).
     // 상한에 정확히 닿은 뒤에도 블록 끝·체크섬을 처리하려면 1byte 이상의 출력 창이 필요하다.
-    // 실패: 손상·Deflate·Zlib 스트림 뒤 byte·겹침은 InvalidArgument, 상한 초과는 CapacityExceeded
-    // (이때 output에는 상한보다 1byte 많이 써 있을 수 있다. output 범위 안이다), 그 밖은 공통 계약.
+    // 실패: 손상·Deflate·Zlib·Brotli 스트림 뒤 byte·겹침은 InvalidArgument, 상한 초과는
+    // CapacityExceeded(이때 output에는 상한보다 1byte 많이 써 있을 수 있다. output 범위 안이다), 그
+    // 밖은 공통 계약.
     Result<StreamProgress> TryProcess(Span<const uint8> input, Span<uint8> output) noexcept;
 
     // input을 모두 소비하고 출력을 output 뒤에 붙인다. 붙인 byte 수를 반환한다. 오류는 TryProcess와
@@ -184,7 +193,8 @@ public:
     // InvalidArgument다(skippable frame만 받았으면 성공). 실패 상태면 그 오류다.
     Result<void> TryFinish() const noexcept;
 
-    // 새 스트림을 시작한다(누계·실패 상태도 지운다).
+    // 새 스트림을 시작한다(누계·실패 상태도 지운다). Brotli는 해제기 상태를 새로 만들며, 할당에
+    // 실패하면 OutOfMemory가 다음 Reset까지 실패 상태로 남는다.
     void Reset() noexcept;
 
 private:

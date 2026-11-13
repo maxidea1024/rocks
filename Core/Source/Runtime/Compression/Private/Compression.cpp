@@ -11,16 +11,7 @@ namespace {
 uint8 EmptyStorage = 0;
 
 bool IsKnownFormat(CompressionFormat format) noexcept {
-    switch (format) {
-    case CompressionFormat::Lz4:
-    case CompressionFormat::Zstd:
-    case CompressionFormat::Deflate:
-    case CompressionFormat::Zlib:
-    case CompressionFormat::Gzip:
-    case CompressionFormat::Lz4Frame:
-        return true;
-    }
-    return false;
+    return ResolveFormat(format).known;
 }
 
 bool IsZlibFamily(CompressionFormat format) noexcept {
@@ -58,6 +49,54 @@ void DestroyDecompressorCodec(CompressionFormat format, void* codec) noexcept {
 }
 
 } // namespace
+
+FormatSupport ResolveFormat(CompressionFormat format) noexcept {
+    FormatSupport support;
+    switch (format) {
+    case CompressionFormat::Lz4:
+        // raw block에는 끝 표지·크기가 없어 스트림 형식이 아니다.
+        support.known = true;
+        support.compresses = true;
+        break;
+    case CompressionFormat::Zstd:
+    case CompressionFormat::Deflate:
+    case CompressionFormat::Zlib:
+    case CompressionFormat::Gzip:
+    case CompressionFormat::Lz4Frame:
+        support.known = true;
+        support.compresses = true;
+        support.streams = true;
+        break;
+    case CompressionFormat::Brotli:
+        // 해제 전용이다(압축기를 들이지 않았다, 13절).
+        support.known = true;
+        support.streams = true;
+        break;
+    }
+    return support;
+}
+
+ErrorCode CompressFormatError(CompressionFormat format) noexcept {
+    const FormatSupport support = ResolveFormat(format);
+    if (!support.known) {
+        return ErrorCode::InvalidArgument;
+    }
+
+    return support.compresses ? ErrorCode::None : ErrorCode::Unsupported;
+}
+
+ErrorCode StreamFormatError(CompressionFormat format, bool compressing) noexcept {
+    const FormatSupport support = ResolveFormat(format);
+    if (!support.known) {
+        return ErrorCode::InvalidArgument;
+    }
+
+    if (!support.streams || (compressing && !support.compresses)) {
+        return ErrorCode::Unsupported;
+    }
+
+    return ErrorCode::None;
+}
 
 void* CodecAllocate(Allocator& allocator, usize bytes) noexcept {
     auto allocation = allocator.Allocate(bytes == 0 ? 1 : bytes, CodecAlignment);
@@ -110,6 +149,10 @@ CreateCompressorState(CompressionFormat format, int32 level, Allocator& allocato
         format = dictionary->format;
         level = dictionary->level;
     }
+    const ErrorCode formatError = CompressFormatError(format);
+    if (formatError != ErrorCode::None) {
+        return Result<CompressorState*>::Failure(formatError);
+    }
 
     Result<void*> codec = Result<void*>::Failure(ErrorCode::InvalidArgument);
     switch (format) {
@@ -126,6 +169,9 @@ CreateCompressorState(CompressionFormat format, int32 level, Allocator& allocato
         break;
     case CompressionFormat::Lz4Frame:
         codec = lz4frame::CreateCompressor(level, allocator);
+        break;
+    case CompressionFormat::Brotli:
+        // 해제 전용 형식은 위 CompressFormatError가 거른다.
         break;
     }
     if (!codec) {
@@ -245,6 +291,8 @@ Result<usize> CompressInto(CompressorState& state, Span<const uint8> source,
         return zlib::Compress(state.codec, source, destination, probe);
     case CompressionFormat::Lz4Frame:
         return lz4frame::Compress(state.codec, source, destination, probe);
+    case CompressionFormat::Brotli:
+        return Result<usize>::Failure(ErrorCode::Unsupported);
     }
     return Result<usize>::Failure(ErrorCode::InvalidArgument);
 }
@@ -307,6 +355,8 @@ Result<usize> DecompressInto(DecompressorState& state, Span<const uint8> source,
         return zlib::Decompress(state.codec, source, destination, probe);
     case CompressionFormat::Lz4Frame:
         return lz4frame::Decompress(state.codec, source, destination, probe);
+    case CompressionFormat::Brotli:
+        return brotli::Decompress(*state.allocator, source, destination, probe);
     }
     return Result<usize>::Failure(ErrorCode::InvalidArgument);
 }
@@ -336,6 +386,8 @@ Result<usize> DecompressAppend(DecompressorState& state, Span<const uint8> sourc
         return zlib::DecompressAppend(state.codec, source, maxOutputBytes, output, probe);
     case CompressionFormat::Lz4Frame:
         return lz4frame::DecompressAppend(state.codec, source, maxOutputBytes, output, probe);
+    case CompressionFormat::Brotli:
+        return brotli::DecompressAppend(*state.allocator, source, maxOutputBytes, output, probe);
     }
     return Result<usize>::Failure(ErrorCode::InvalidArgument);
 }
@@ -368,8 +420,9 @@ Result<usize> DecompressIntoOnce(CompressionFormat format, Span<const uint8> sou
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
 
-    // Lz4 해제는 코덱 상태가 없으므로 할당하지 않는다(가장 빠른 경로에 OOM 실패를 만들지 않는다).
-    if (format == CompressionFormat::Lz4) {
+    // Lz4 raw block 해제는 코덱 상태가 없으므로 할당하지 않는다(가장 빠른 경로에 OOM 실패를 만들지
+    // 않는다). Brotli는 해제마다 해제기 상태를 새로 만들므로 문맥 상태가 필요 없다.
+    if (format == CompressionFormat::Lz4 || format == CompressionFormat::Brotli) {
         DecompressorState stateless{format, &scratch, nullptr, {}, nullptr};
         return DecompressInto(stateless, source, destination, probe);
     }
@@ -392,7 +445,7 @@ Result<usize> DecompressAppendOnce(CompressionFormat format, Span<const uint8> s
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
 
-    if (format == CompressionFormat::Lz4) {
+    if (format == CompressionFormat::Lz4 || format == CompressionFormat::Brotli) {
         DecompressorState stateless{format, &scratch, nullptr, {}, nullptr};
         return DecompressAppend(stateless, source, maxOutputBytes, output, probe);
     }
@@ -410,6 +463,11 @@ Result<usize> DecompressAppendOnce(CompressionFormat format, Span<const uint8> s
 } // namespace detail
 
 Result<CompressionLevelRange> TryGetCompressionLevelRange(CompressionFormat format) noexcept {
+    const ErrorCode formatError = detail::CompressFormatError(format);
+    if (formatError != ErrorCode::None) {
+        return Result<CompressionLevelRange>::Failure(formatError);
+    }
+
     switch (format) {
     case CompressionFormat::Lz4:
     case CompressionFormat::Lz4Frame:
@@ -420,8 +478,11 @@ Result<CompressionLevelRange> TryGetCompressionLevelRange(CompressionFormat form
     case CompressionFormat::Zlib:
     case CompressionFormat::Gzip:
         return Result<CompressionLevelRange>::Success(CompressionLevelRange{0, 9, 6});
+    case CompressionFormat::Brotli:
+        // 해제 전용 형식은 위 CompressFormatError가 거른다.
+        break;
     }
-    return Result<CompressionLevelRange>::Failure(ErrorCode::InvalidArgument);
+    return Result<CompressionLevelRange>::Failure(ErrorCode::Unsupported);
 }
 
 Result<CompressionSettings> CompressionSettings::TryMake(CompressionFormat format,
@@ -448,6 +509,11 @@ Result<CompressionSettings> CompressionSettings::TryDefault(CompressionFormat fo
 }
 
 Result<usize> TryGetCompressBound(CompressionFormat format, usize sourceBytes) noexcept {
+    const ErrorCode formatError = detail::CompressFormatError(format);
+    if (formatError != ErrorCode::None) {
+        return Result<usize>::Failure(formatError);
+    }
+
     switch (format) {
     case CompressionFormat::Lz4:
         return detail::lz4::Bound(sourceBytes);
@@ -459,8 +525,11 @@ Result<usize> TryGetCompressBound(CompressionFormat format, usize sourceBytes) n
         return detail::zlib::Bound(sourceBytes);
     case CompressionFormat::Lz4Frame:
         return detail::lz4frame::Bound(sourceBytes);
+    case CompressionFormat::Brotli:
+        // 해제 전용 형식은 위 CompressFormatError가 거른다.
+        break;
     }
-    return Result<usize>::Failure(ErrorCode::InvalidArgument);
+    return Result<usize>::Failure(ErrorCode::Unsupported);
 }
 
 Result<usize> TryCompress(const CompressionSettings& settings, Span<const uint8> source,

@@ -1,0 +1,106 @@
+{
+  "schema": 1,
+  "name": "Brotli",
+  "version": "1.1.1",
+  "upstreamDirectory": "brotli-1.1.1",
+  "source": {
+    "url": "https://github.com/google/brotli/archive/refs/tags/v1.1.1.tar.gz",
+    "sha256": "1a84dfaa740994d19254bf78aa7d74a4a8040d1638f3d5f2cdecb188fd520da8",
+    "verification": "GitHub이 만드는 tag source archive라 릴리스 자산 digest·upstream 서명이 없다(v1.1.1 릴리스 자산 없음, commit 서명 없음). GitHub API로 받은 tag v1.1.1 commit db0631dfea829194206d269bc7b25d0908cdb97d의 tree fc76b80f12b03e6fff3328a2e904ff94f354880a와 archive의 135개 파일 git blob hash가 모두 같음을 확인했다(나머지 232개는 upstream .gitattributes export-ignore라 archive에 없다). v1.1.0 archive(sha256 e720a6ca29428b803f4ad165371771f5398faba397edf6778837a18599ea13ff, Homebrew brotli 1.1.0 formula와 같은 값)와 비교하면 CHANGELOG.md·c/common/version.h·c/dec/decode.c·c/include/brotli/decode.h 4개만 다르다."
+  },
+  "licenses": [
+    {
+      "spdx": "MIT",
+      "upstreamExpression": "MIT",
+      "file": "brotli-1.1.1/LICENSE",
+      "binaryNoticeRequired": true
+    }
+  ],
+  "translationUnits": [
+    "brotli-1.1.1/c/common/constants.c",
+    "brotli-1.1.1/c/common/context.c",
+    "brotli-1.1.1/c/common/dictionary.c",
+    "brotli-1.1.1/c/common/platform.c",
+    "brotli-1.1.1/c/common/shared_dictionary.c",
+    "brotli-1.1.1/c/common/transform.c",
+    "brotli-1.1.1/c/dec/bit_reader.c",
+    "brotli-1.1.1/c/dec/decode.c",
+    "brotli-1.1.1/c/dec/huffman.c",
+    "brotli-1.1.1/c/dec/state.c"
+  ],
+  "includeDirectories": [
+    "brotli-1.1.1/c/include"
+  ],
+  "defines": [],
+  "platformDefines": {},
+  "consumerDefines": [],
+  "adapterHeaders": [
+    "brotli-1.1.1/c/include/brotli/decode.h",
+    "brotli-1.1.1/c/include/brotli/port.h",
+    "brotli-1.1.1/c/include/brotli/shared_dictionary.h",
+    "brotli-1.1.1/c/include/brotli/types.h"
+  ],
+  "files": {
+    "LICENSE": "3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94",
+    "c/common/constants.c": "d3bc1f0582e0f9f4f506518b3d1696510669cd6695b036eb72f4c53d6fb3f7fd",
+    "c/common/constants.h": "8824ced468c3771d6daa91cbe935f39bc0e66cda34be30d97e9e4da9b50ed4b5",
+    "c/common/context.c": "ecad01b8542ea42f0f58408cd73ceb2aa24feb814ba2f8c2ace6bb173a8179be",
+    "c/common/context.h": "c7dc4baae59379679c57c9eb7019ac82199c9b42cd73ffba509b29529f5c753c",
+    "c/common/dictionary.c": "03e47c2060c511144045e1cedc0174a8ae076941aaa8060ac3a65bcb33ab392b",
+    "c/common/dictionary.h": "5d1679aea2303fba4ae7afc47f0ab1c5e8b0bb3bba1692ed005da4a6d4c28e49",
+    "c/common/platform.c": "57ee8b0717d6c327abb4c552ecc8e528496f12476fc1e38103e9a5ff79c00732",
+    "c/common/platform.h": "fa154f2834130bff7b1b7ea2e88b0a5f2a386a22f9d640b20f01070b3e3245fa",
+    "c/common/shared_dictionary.c": "eff11f618b7cd5fbd4136c96ee53c8bdb0fe2cbc560cba1bd20bd1a1e9c76b3c",
+    "c/common/shared_dictionary_internal.h": "7f0217075d7ca6e493cc8da885b61449d909a079a617b7bee9d58c719d102899",
+    "c/common/transform.c": "9f91d725dd2e6cbfd886ece385bed079edd2288a610031384f985dba38839486",
+    "c/common/transform.h": "3a28f38539e661f22b8f7cd6478b76f1916903caa5b6ae708577c62ef3559122",
+    "c/common/version.h": "62d936237b496e4f2ea1fc3daf5ee2283998643813a29f695b2ad533941de906",
+    "c/dec/bit_reader.c": "e4c2ec241df651ad5ac61ee29512c70c31d88f11eb03cda2380c398009a5e335",
+    "c/dec/bit_reader.h": "18a8ecd4d00e7f9d5ae923c22492582d82922ec63adc76df24bb7789c53a15e0",
+    "c/dec/decode.c": "79db5a1879540eb7c915ce948e8fb94adc1ff49be87dca01529b9283c6ba343e",
+    "c/dec/huffman.c": "a08c0ed49b694ce33c63b9d8474600f276d06c7d71edce107506a3fcd06c64c0",
+    "c/dec/huffman.h": "38b0c886a45a1832eb84bcca4f76821ec3c02dcfe0699404e3a0d5b8b5958aba",
+    "c/dec/prefix.h": "ade71fcf2f1e1f8b25ffad1144626dd8e52bf70be775e1b5bd252d1ca563d366",
+    "c/dec/state.c": "fe28a87dc5c78ea9963de470ffae271f94f690fb0ced7eaa185486bf989493f1",
+    "c/dec/state.h": "b05b0b8d891698f81fa170702ac2106d7c2351eb238de4c17348c3ca51621eb5",
+    "c/include/brotli/decode.h": "24809ccba4457752434b0987a9e69ca62791e508cb1aaaec3c8030c9cb86a2af",
+    "c/include/brotli/port.h": "d87dae6cce00aff76192a1db4fedc2a817967e14e652829349b8a75088f9e467",
+    "c/include/brotli/shared_dictionary.h": "86230f0aaf533044d85d92f84b5aec8b7e4e231d4b64b098604083e7866e8097",
+    "c/include/brotli/types.h": "96c9330e790aa6fe53f4cdd328d0a4b98e361b82913baa3219db73aadb11272c"
+  },
+  "pragmaDirectives": [
+    {
+      "file": "c/common/platform.h",
+      "line": 133,
+      "text": "#define BROTLI_INLINE BROTLI_MAYBE_INLINE _Pragma(\"FUNC_ALWAYS_INLINE;\")"
+    },
+    {
+      "file": "c/common/platform.h",
+      "line": 135,
+      "text": "#define BROTLI_INLINE BROTLI_MAYBE_INLINE _Pragma(\"inline=forced\")"
+    },
+    {
+      "file": "c/common/platform.h",
+      "line": 151,
+      "text": "#define BROTLI_NOINLINE _Pragma(\"noinline\")"
+    },
+    {
+      "file": "c/common/platform.h",
+      "line": 153,
+      "text": "#define BROTLI_NOINLINE _Pragma(\"FUNC_CANNOT_INLINE;\")"
+    },
+    {
+      "file": "c/common/platform.h",
+      "line": 155,
+      "text": "#define BROTLI_NOINLINE _Pragma(\"inline=never\")"
+    }
+  ],
+  "notes": [
+    "버전: 지시는 1.1.0이었으나 1.1.1을 쓴다. 1.1.1은 해제기 보안 수정(CVE-2026-111497: decode.c가 잘못된 block switch를 오류로 보고하지 않아 범위 밖 쓰기가 가능, upstream 커밋 da98063 \"Detect and report invalid stream earlier\")과 버전 표기만 더한 patch release다. 공개 API는 같고 decode.h에 오류 코드 BROTLI_DECODER_ERROR_FORMAT_BLOCK_SWITCH(-17)가 추가됐다.",
+    "해제기만 들인다: c/common의 .c·.h 전부, c/dec 전부, c/include/brotli의 decode.h·port.h·shared_dictionary.h·types.h. 압축기(c/enc, encode.h), 도구(c/tools), 다른 언어 binding·시험 자료는 넣지 않는다. Godot Compression과 같이 해제만 지원한다(WOFF2 글꼴 등).",
+    "할당: adapter는 BrotliDecoderCreateInstance(alloc_func, free_func, opaque)에 Rocks Allocator 경유 두 함수를 모두 넘기므로 해제기 상태·ring buffer·Huffman 표·shared dictionary 상태의 할당이 모두 그 함수를 거친다. 할당 함수가 없을 때 쓰는 CRT 경로는 오브젝트에 남지만 두 함수를 모두 넘기면 실행되지 않는다: platform.c의 BrotliDefaultAllocFunc·BrotliDefaultFreeFunc와 이를 고르는 state.c의 BrotliDecoderStateInit 분기, decode.c의 BrotliDecoderCreateInstance malloc·free 분기, shared_dictionary.c의 BrotliSharedDictionaryCreateInstance malloc 분기. 공개 일회성 API BrotliDecoderDecompress는 항상 기본 할당기를 쓰므로 adapter는 부르지 않는다. upstream에는 이 경로를 컴파일 단계에서 빼는 설정 지점이 없다(Docs/Design/Compression.ko.md 13.2절). 내장 사전(dictionary.c)은 정적 데이터다.",
+    "정의가 없다: BROTLI_SHARED_COMPILATION을 정의하지 않으면 BROTLI_DEC_API·BROTLI_COMMON_API가 비고 내부 심볼(BROTLI_INTERNAL)은 GNU 계열에서 hidden이다. 외부 심볼 37개는 Brotli·kBrotli·_kBrotli 접두사라 zstd·LZ4·zlib 심볼과 겹치지 않는다(llvm-nm 확인). 외부 헤더는 brotli/ 하위 경로로만 include되므로 이름도 겹치지 않는다.",
+    "large window(BROTLI_DECODER_PARAM_LARGE_WINDOW, 비표준 확장)는 켜지 않는다. 표준 window는 최대 16MiB이고 WOFF2·HTTP Content-Encoding은 표준 window만 쓴다.",
+    "platform.h의 _Pragma 5개는 TI·IAR·PGI 컴파일러용 인라인 지시(BROTLI_INLINE·BROTLI_NOINLINE)이고 진단 지시문이 아니다. clang·GCC 분기에서는 쓰이지 않는다."
+  ]
+}
