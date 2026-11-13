@@ -28,11 +28,12 @@ public sealed class EngineTestsTarget : TargetRules
 
 // 리플렉션 fixture 모듈(과 그 의존 모듈)만 담는 SDK 타깃이다. Rocks.Build.IntegrationTests가 SDK descriptor import —
 // 외부 게임 모듈이 SDK 모듈의 리플렉션 타입을 상속·참조하고 그 모듈을 다시 생성하지 않음 — 을 시험할 때 내보낸다.
+// ObjectSerialization: 게임이 SDK 타입의 배열 필드를 그래프로 저장·복원한다(B5c 통합 시험).
 public sealed class ReflectionFixturesTarget : TargetRules
 {
     public override string Name => "ReflectionFixtures";
 
-    public override IReadOnlyList<string> Modules => ["ReflectionTestFixtures"];
+    public override IReadOnlyList<string> Modules => ["ReflectionTestFixtures", "ObjectSerialization"];
 }
 
 public sealed class CoreTarget : TargetRules

@@ -60,9 +60,29 @@ public static partial class PolicyChecks
         relative.Split('/').Contains("Tests") ||
         relative.StartsWith("Programs/FoundationTests/", StringComparison.Ordinal);
 
+    // 리플렉션 필드 템플릿(rocks::Array·ObjectRefArray·StructRefArray·ObjectRef·SoftObjectRef)의 명시적 인스턴스화·extern
+    // template 선언이다. 그런 선언이 보이면 Clang이 필드 타입을 desugar 정규 철자가 아니라 작성 철자로 출력할 수 있어
+    // MetaCompiler의 원소·대상 해석(Binds 미러 조회 등)이 어긋난다(Docs/Design/ReflectionFoundations.ko.md 5.6절). 명시적
+    // 특수화(template <>)와 부분 특수화는 대상이 아니다. 주석·문자열을 지운 텍스트 전체에 맞추므로 여러 줄에 걸친 선언도 찾고
+    // 주석 안 예시는 잡지 않는다.
+    private static readonly Regex ReflectionTemplateInstantiation = Pattern(
+        "\\btemplate\\s+(?:class|struct)\\s+(?:::\\s*)?(?:rocks\\s*::\\s*)?(?:Array|ObjectRefArray|StructRefArray|ObjectRef|SoftObjectRef)\\s*<");
+
     public static IReadOnlyList<CheckFailure> Runtime(string root)
     {
         List<CheckFailure> failures = [];
+        // 인스턴스화 금지는 리플렉션 헤더가 있을 수 있는 모든 소유 소스(Developer·시험·템플릿 포함)에 건다.
+        foreach (string path in NativeSources(root, OwnedSourceRoots))
+        {
+            string code = WithoutCommentsAndLiterals(File.ReadAllText(path, StrictUtf8));
+            foreach (Match match in ReflectionTemplateInstantiation.Matches(code))
+            {
+                int line = 1 + code.AsSpan(0, match.Index).Count('\n');
+                failures.Add(new(Relative(root, path), line, "reflection-container-instantiation",
+                    "explicit instantiation or extern template of a reflected field template (rocks::Array/ObjectRefArray/StructRefArray/ObjectRef/SoftObjectRef)"));
+            }
+        }
+
         foreach (string path in NativeSources(root, RuntimeRoots))
         {
             string relative = Relative(root, path);
@@ -420,6 +440,61 @@ public static partial class PolicyChecks
     }
 
     private static string Relative(string root, string path) => Path.GetRelativePath(root, path).Replace('\\', '/');
+
+    // C++ 소스에서 주석과 문자열·문자 리터럴(raw 문자열 포함)을 공백으로 바꾼 텍스트다. 줄바꿈은 그대로 두어 위치의 줄 번호가
+    // 원문과 같다. 숫자 구분자(1'000)는 문자 리터럴로 보지 않는다. 전처리 토큰화가 아니라 lexical 검사용 근사다.
+    internal static string WithoutCommentsAndLiterals(string text)
+    {
+        StringBuilder result = new(text.Length);
+        int index = 0;
+        void Blank(int end)
+        {
+            for (; index < end && index < text.Length; ++index)
+            {
+                result.Append(text[index] == '\n' ? '\n' : ' ');
+            }
+        }
+
+        while (index < text.Length)
+        {
+            char c = text[index];
+            char next = index + 1 < text.Length ? text[index + 1] : '\0';
+            if (c == '/' && next == '/')
+            {
+                int end = text.IndexOf('\n', index);
+                Blank(end < 0 ? text.Length : end);
+            }
+            else if (c == '/' && next == '*')
+            {
+                int end = text.IndexOf("*/", index + 2, StringComparison.Ordinal);
+                Blank(end < 0 ? text.Length : end + 2);
+            }
+            else if (c == 'R' && next == '"' && (index == 0 || !(char.IsAsciiLetterOrDigit(text[index - 1]) || text[index - 1] == '_')))
+            {
+                int open = text.IndexOf('(', index + 2);
+                string delimiter = open < 0 ? "" : text[(index + 2)..open];
+                int end = open < 0 ? -1 : text.IndexOf(")" + delimiter + "\"", open, StringComparison.Ordinal);
+                Blank(end < 0 ? text.Length : end + delimiter.Length + 2);
+            }
+            else if (c == '"' || (c == '\'' && (index == 0 || !char.IsAsciiLetterOrDigit(text[index - 1]))))
+            {
+                int end = index + 1;
+                while (end < text.Length && text[end] != c && text[end] != '\n')
+                {
+                    end += text[end] == '\\' ? 2 : 1;
+                }
+
+                Blank(Math.Min(end + 1, text.Length));
+            }
+            else
+            {
+                result.Append(c);
+                ++index;
+            }
+        }
+
+        return result.ToString();
+    }
 
     // compile_commands의 인용된 경로를 토큰화할 뿐 shell 확장·환경 변수·명령 실행을 하지 않는다.
     private static IReadOnlyList<string> SplitCommand(string command)

@@ -22,6 +22,37 @@ internal static class SelfTests
         ProgramsPolicyReviewTests.Register(suite);
         ProcessReviewTests.Register(suite, options);
         ProcessHardTimeoutReviewTests.Register(suite, options);
+        // rocks::Array 인스턴스화 실패의 RMC2304 변환 위치: Core Array.h 오류에 딸린 note 중 이 모듈 입력의 첫 위치를 clang
+        // (file:line:col)과 clang-cl(file(line,col)) 두 형식 모두에서 찾고, 상대 경로는 Clang 작업 디렉터리 기준이다. 입력이
+        // 아닌 note는 건너뛰고, 첫 error가 Array.h가 아니거나 note 앞에 다른 진단(warning 포함)이 끼면 바꾸지 않는다(Docs/Design/
+        // ReflectionFoundations.ko.md 5.6절).
+        suite.Add("Meta.ArrayInstantiationSiteParsesClangAndClangClDiagnostics", () =>
+        {
+            using TemporaryDirectory temporary = new();
+            string input = temporary.FilePath("Probe.h");
+            string other = temporary.FilePath("Other.h");
+            File.WriteAllText(input, "\n");
+            File.WriteAllText(other, "\n");
+            bool IsInput(string path) => string.Equals(Path.GetFullPath(path), Path.GetFullPath(input), StringComparison.OrdinalIgnoreCase);
+            const string arrayHeader = "C:/work/rocks/Core/Source/Runtime/Core/Public/Core/Containers/Array.h";
+            string clang = $"In file included from <stdin>:1:\n" +
+                $"{arrayHeader}:18:19: error: static assertion failed\n{other}:4:5: note: in instantiation of template class 'rocks::Array<Holder>' requested here\n" +
+                $"{input}:15:56: note: in instantiation of template class 'rocks::Array<rocks::ObjectRef<probe::Value>>' requested here\n" +
+                $"{input}:20:3: note: a later note\n";
+            Verify.That(CompilerDriver.ArrayInstantiationSite(clang, temporary.Root, IsInput) is (string file, 15, 56) && IsInput(file), "clang location format");
+            string clangCl = $"{arrayHeader.Replace('/', '\\')}(18,19): error: static assertion failed\r\n" +
+                "Probe.h(18,3): note: in instantiation of template class 'rocks::Array<probe::Holder>' requested here\r\n";
+            Verify.That(CompilerDriver.ArrayInstantiationSite(clangCl, temporary.Root, IsInput) is (string relative, 18, 3) && IsInput(relative),
+                "clang-cl location format with a path relative to the Clang working directory");
+            Verify.That(CompilerDriver.ArrayInstantiationSite($"{other}:3:1: error: x\n{input}:9:9: note: y\n", temporary.Root, IsInput) is null,
+                "notes of errors outside Array.h are not array element failures");
+            Verify.That(CompilerDriver.ArrayInstantiationSite($"{other}:3:1: error: x\n{arrayHeader}:18:19: error: y\n{input}:9:9: note: z\n", temporary.Root, IsInput) is null,
+                "an Array.h failure that is not the first error is not converted");
+            Verify.That(CompilerDriver.ArrayInstantiationSite($"{arrayHeader}:18:19: error: x\n{other}:1:1: warning: y\n{input}:9:9: note: z\n", temporary.Root, IsInput) is null,
+                "a warning ends the notes of the Array.h failure");
+            Verify.That(CompilerDriver.ArrayInstantiationSite($"{arrayHeader}:18:19: error: x\n{other}:4:5: note: y\n", temporary.Root, IsInput) is null,
+                "an array failure without a note in a module input keeps RMC3000");
+        });
         suite.Add("MetaPrefix.CommentLineSpliceIsRejectedDirectly", () =>
         {
             void CheckGap(string gap, bool allowed)
@@ -374,6 +405,36 @@ internal static class SelfTests
             temporary.Write("Engine/Plugins/Sample/Example/Source/Example/Private/Probe.cpp", "#include <vector>\n");
             temporary.Write("Programs/Commandlet/Private/Common/Probe.cpp", "#include <map>\n");
             Verify.Equal(2, PolicyChecks.Runtime(temporary.Root).Count, "plugin or program STL escaped runtime policy");
+        });
+        // 리플렉션 배열 컨테이너의 명시적 인스턴스화·extern template은 Clang이 필드를 작성 철자로 출력하게 할 수 있으므로
+        // 시험·Developer 소스를 포함해 거부한다(Docs/Design/ReflectionFoundations.ko.md 5.6절). 특수화·일반 사용은 받는다.
+        suite.Add("Policy.RuntimeRejectsReflectionContainerInstantiation", () =>
+        {
+            using TemporaryDirectory temporary = new();
+            const string probe = "Core/Source/Developer/Fixtures/Public/Probe.h";
+            // 특수화·부분 특수화·일반 사용, 이름만 비슷한 타입, 주석과 문자열·raw 문자열 안의 예시는 받는다.
+            temporary.Write(probe, "#pragma once\ntemplate <> struct ArrayField<rocks::Array<int>> {};\n" +
+                "template <class T> class Array<T*> {};\nrocks::Array<int> values;\ntemplate class ValueArray<int>;\n" +
+                "// template class rocks::Array<int>;\n/* extern template\n   class rocks::ObjectRef<Node>; */\n" +
+                "const char* text = \"template class rocks::Array<int>;\";\nconst char* raw = R\"x(template class rocks::SoftObjectRef<Node>;)x\";\n" +
+                "constexpr int big = 1'000; const char quote = '\"';\n");
+            NoFailures(PolicyChecks.Runtime(temporary.Root));
+            foreach (string banned in new[] { "template class rocks::Array<int>;", "extern template class rocks::Array<rocks::String>;",
+                "template struct ::rocks::ObjectRefArray<Node>;", "extern  template  class StructRefArray<Slot>;", "template class Array <float>;",
+                "template class rocks::ObjectRef<Node>;", "extern template class rocks::SoftObjectRef<>;",
+                "extern template\n    class\n    rocks::Array<int>;", "template class /* note */ rocks::StructRefArray<Slot>;" })
+            {
+                temporary.Write(probe, "// first line\n" + banned + "\n");
+                var failures = PolicyChecks.Runtime(temporary.Root);
+                Verify.Equal(1, failures.Count, "container instantiation escaped audit: " + banned);
+                Verify.Equal("reflection-container-instantiation", failures[0].Rule, "container instantiation rule");
+                Verify.Equal(2, failures[0].Line, "container instantiation line");
+            }
+
+            // 시험 소스도 검사한다(리플렉션 헤더가 시험 모듈에 있을 수 있다).
+            temporary.Write(probe, "#pragma once\n");
+            temporary.Write("Core/Source/Runtime/Core/Tests/Probe.cpp", "template class rocks::Array<int>;\n");
+            Verify.Equal(1, PolicyChecks.Runtime(temporary.Root).Count, "test source container instantiation escaped audit");
         });
         suite.Add("Policy.RuntimeTupleProtocolAllowanceIsNarrow", () =>
         {

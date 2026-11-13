@@ -155,12 +155,13 @@ internal static class CppEmitter
         {
             Line("#include <Base/Compiler.h>");
         }
-        // 다른 헤더(같은 모듈·다른 모듈)에 선언된 리플렉션 enum·struct를 필드(상속 필드 포함)나 NATIVE 멤버의 직접
-        // 타입으로 쓰면 그 타입의 GeneratedType이 먼저 보여야 한다(생성 접근기가 GeneratedType<T>::Id·IsDeclared·
-        // ContainsStrongReference로 알아본다). 같은 특수화를 두 번 정의하지 않도록 그 타입의 생성 헤더를 include한다.
+        // 다른 헤더(같은 모듈·다른 모듈)에 선언된 리플렉션 enum·struct를 필드(상속 필드·배열 원소 포함)나 NATIVE 멤버의
+        // 직접 타입으로 쓰면 그 타입의 GeneratedType이 먼저 보여야 한다(생성 접근기가 GeneratedType<T>::Id·IsDeclared·
+        // ContainsStrongReference로 알아보고, StructRefArray<S>::Trace가 GeneratedType<S>::Trace를 인스턴스화한다). 같은
+        // 특수화를 두 번 정의하지 않도록 그 타입의 생성 헤더를 include한다.
         ClassModel[] own = schema.Ordered.Where(type => type.Header == include).ToArray();
         IEnumerable<string> valueHeaders = own.SelectMany(type => type.Fields)
-            .Where(field => FieldModel.KindRequiresTargetId(field.Kind) && field.Reference is not null)
+            .Where(field => FieldModel.KindRequiresTargetId(field.TargetKind) && field.Reference is not null)
             .Select(field => field.Reference!)
             .Concat(own.SelectMany(type => type.NativeMembers).Where(native => native.Struct is not null).Select(native => native.Struct!))
             .Select(name => schema.Find(name).Header)
@@ -172,7 +173,8 @@ internal static class CppEmitter
             Line($"#include <{CompilerOptions.GeneratedSpelling(header)}>");
         }
 
-        if (own.Any(type => type.NativeMembers.Count != 0))
+        // NATIVE 멤버 static_assert와 struct 특수화의 멤버 형질 대조(IsNativeStrongReference·RegistryContainer)가 쓴다.
+        if (own.Any(type => type.NativeMembers.Count != 0 || type.IsStruct))
         {
             Line("#include <Object/NativeMemberTraits.h>");
         }
@@ -211,14 +213,17 @@ internal static class CppEmitter
                 EmitNativeStructAsserts(schema, type, member, !type.WorldOnly, Line);
             }
 
-            // WorldOnly가 아닌 클래스는 struct 필드(상속 포함)의 생성 형질을 직접 확인한다(import flags를 믿지 않는다).
+            // WorldOnly가 아닌 클래스는 struct 필드·struct 원소 배열(상속 포함)의 생성 형질을 직접 확인한다(import flags를
+            // 믿지 않는다).
             if (!type.WorldOnly)
             {
-                foreach (string structure in type.Fields.Where(field => field.IsStruct).Select(field => field.Reference!).Distinct(StringComparer.Ordinal))
+                foreach (string structure in type.Fields.Where(field => field.StructTarget).Select(field => field.Reference!).Distinct(StringComparer.Ordinal))
                 {
                     Line($"static_assert(!GeneratedType<::{schema.Find(structure).NativeName}>::RequiresWorldOnlyOwner, \"struct {structure} requires a WorldOnly owner; {type.Name} is not WorldOnly (RMC2206)\");");
                 }
             }
+
+            EmitElementStructAsserts(schema, type, Line);
 
             Line($"static constexpr TypeId Id() noexcept {{ return {GuidValue(type.Id)}; }}");
             Line("static const TypeSchema& Schema() noexcept {");
@@ -236,13 +241,13 @@ internal static class CppEmitter
                 {
                     string member = $"&::{field.Owner}::{field.Name}";
                     Line($"{{{GuidValue(field.Id)},");
-                    if (field.IsStruct)
+                    if (field.IsStruct || field.IsArray)
                     {
-                        // struct 필드는 FieldValue로 표현할 수 없으므로 read·write·writeStaged가 없고(쓰기는 Unsupported —
-                        // 멤버 단위 쓰기는 B6 경로 접근) codec과 struct native 키만 싣는다(Docs/Design/
-                        // ReflectionFoundations.ko.md 4.6절).
+                        // struct·배열 필드는 FieldValue로 표현할 수 없으므로 read·write·writeStaged가 없고(통째 쓰기는
+                        // Unsupported — 멤버·원소 단위 쓰기는 B6 경로 접근) codec과 struct native 키(배열이면 원소 Enum·
+                        // Struct의 native 키, 그 밖은 없음)만 싣는다(Docs/Design/ReflectionFoundations.ko.md 4.6·5.6절).
                         Line("nullptr, {}, nullptr,");
-                        EmitClassCodec(native, member, $", NativeTypeKey<::{schema.Find(field.Reference!).NativeName}>()", Line);
+                        EmitClassCodec(native, member, ValueNativeType(schema, field), Line);
                         continue;
                     }
 
@@ -285,17 +290,17 @@ internal static class CppEmitter
             Line("ops.completeFieldLayout = true;");
             Line("ops.parallelTraceSafe = true;");
             Line("ops.trace = +[](const Object& object, TraceVisitor& visitor) noexcept {");
-            FieldModel[] traced = type.Fields.Where(field => field.IsReference || field.IsStruct).ToArray();
+            FieldModel[] traced = type.Fields.Where(field => field.IsReference || field.IsStruct || field.IsArray).ToArray();
             if (traced.Length != 0)
             {
                 Line($"const auto& typed = static_cast<const {native}&>(object);");
                 // Transient는 영속성 정책이며 strong edge의 GC 도달성에는 영향을 주지 않는다. struct 필드는 모든 struct가
                 // 내는 Trace를 부른다(참조 없는 struct는 빈 본문 — 이 람다는 비템플릿이라 if constexpr로 가를 수 없다).
+                // 배열 필드(상속한 import 필드 포함)는 모두 TraceArrayField를 부른다 — 실제 C++ 타입이 오버로드를 고르므로
+                // 컨테이너를 descriptor에서 잘못 추론해도 Trace가 빠지지 않는다.
                 foreach (FieldModel field in traced)
                 {
-                    Line(field.IsStruct
-                        ? $"GeneratedType<::{schema.Find(field.Reference!).NativeName}>::Trace(typed.*(&::{field.Owner}::{field.Name}), visitor);"
-                        : $"visitor.Visit(typed.*(&::{field.Owner}::{field.Name}));");
+                    Line(TraceStatement(schema, field, "typed", $"::{field.Owner}"));
                 }
             }
             else
@@ -315,6 +320,52 @@ internal static class CppEmitter
 
         Line("} // namespace rocks");
         return output.ToString();
+    }
+
+    // struct 필드·배열 필드 함수표의 valueNativeType 인자다: struct 필드는 그 struct, 배열은 원소가 Enum·Struct면 그
+    // 원소의 native 키(Binds 미러는 실제 타입), 그 밖은 ""(인자 생략 — nullptr)다.
+    private static string ValueNativeType(SchemaModel schema, FieldModel field) => field.TargetKind switch
+    {
+        "Struct" => $", NativeTypeKey<::{schema.Find(field.Reference!).NativeName}>()",
+        "Enum" => $", NativeTypeKey<::{field.Reference}>()",
+        _ => ""
+    };
+
+    // 클래스·참조 struct Trace의 필드 한 줄이다(owner는 typed·value, ownerType은 멤버 포인터의 클래스 철자). ObjectRef는
+    // Visit, struct 필드는 그 struct의 생성 Trace, 배열은 TraceArrayField(Array<E>는 아무것도 하지 않고 ObjectRefArray·
+    // StructRefArray는 원소를 방문한다)다.
+    private static string TraceStatement(SchemaModel schema, FieldModel field, string owner, string ownerType)
+    {
+        string member = $"{owner}.*(&{ownerType}::{field.Name})";
+        if (field.IsArray)
+        {
+            return $"detail::TraceArrayField({member}, visitor);";
+        }
+
+        return field.IsStruct
+            ? $"GeneratedType<::{schema.Find(field.Reference!).NativeName}>::Trace({member}, visitor);"
+            : $"visitor.Visit({member});";
+    }
+
+    // struct 원소 배열 필드(상속 포함)의 원소 struct 형질을 컨테이너와 대조한다(Docs/Design/ReflectionFoundations.ko.md
+    // 5.6절): Array<S>는 S가 강한 참조를 담지 않고, StructRefArray<S>는 S가 참조 struct이며 Registry 컨테이너를 담지
+    // 않는다. 컨테이너는 원소 종류와 원소 struct 형질로 정해지는 파생 컨테이너다(이 모듈 필드는 C++ 철자와 같다 —
+    // 다르면 RMC2304). 생성 static_assert가 import flags를 믿지 않고 원소 struct의 생성 형질로 다시 확인한다.
+    private static void EmitElementStructAsserts(SchemaModel schema, ClassModel type, Action<string> Line)
+    {
+        foreach (FieldModel field in type.Fields.Where(field => field.IsArray && field.StructTarget))
+        {
+            string element = $"GeneratedType<::{schema.Find(field.Reference!).NativeName}>";
+            string symbol = $"{field.Owner}::{field.Name}";
+            if (field.ContainerOf(schema.Find) == ArrayRules.StructRefArray)
+            {
+                Line($"static_assert({element}::ContainsStrongReference && !{element}::ContainsReferenceArray, \"StructRefArray field {symbol} needs a reference struct element without reference arrays; regenerate metadata (RMC2304)\");");
+            }
+            else
+            {
+                Line($"static_assert(!{element}::ContainsStrongReference, \"Array field {symbol} holds reference struct {field.Reference}; use StructRefArray and regenerate metadata (RMC2304)\");");
+            }
+        }
     }
 
     // 클래스 필드의 그래프 저장·복원 codec 두 thunk와 함수표 끝이다(Docs/Design/ReflectionFoundations.ko.md 6.4절).
@@ -393,6 +444,7 @@ internal static class CppEmitter
         Line($"template <> struct GeneratedType<{native}> {{");
         Line($"static constexpr bool ContainsStrongReference = {True(type.ContainsStrongReference)};");
         Line($"static constexpr bool RequiresWorldOnlyOwner = {True(type.RequiresWorldOnlyOwner)};");
+        Line($"static constexpr bool ContainsReferenceArray = {True(type.ContainsReferenceArray)};");
         Line($"static constexpr uint32 Depth = {type.Depth}u;");
         Line($"static_assert(Depth <= ::rocks::MaxStructDepth, \"ROCKS_STRUCT {type.Name} nesting depth exceeds MaxStructDepth (RMC2303)\");");
         if (type.Binds.Length != 0)
@@ -400,12 +452,31 @@ internal static class CppEmitter
             EmitBindsChecks(type, native, Line);
         }
 
-        foreach (string structure in type.Fields.Where(field => field.IsStruct).Select(field => field.Reference!).Distinct(StringComparer.Ordinal))
+        // 멤버 struct와 원소 struct는 깊이(원소 배열 멤버는 원소 깊이 + 1)와 형질을 포함해야 한다.
+        foreach (string structure in type.Fields.Where(field => field.StructTarget).Select(field => field.Reference!).Distinct(StringComparer.Ordinal))
         {
             string member = $"GeneratedType<::{schema.Find(structure).NativeName}>";
             Line($"static_assert({member}::Depth < Depth, \"ROCKS_STRUCT {type.Name} nests {structure} deeper than recorded; regenerate metadata (RMC2303)\");");
             Line($"static_assert(ContainsStrongReference || !{member}::ContainsStrongReference, \"ROCKS_STRUCT {type.Name} holds reference struct {structure}; regenerate metadata\");");
             Line($"static_assert(RequiresWorldOnlyOwner || !{member}::RequiresWorldOnlyOwner, \"ROCKS_STRUCT {type.Name} holds struct {structure} that requires a WorldOnly owner; regenerate metadata\");");
+        }
+
+        foreach (string structure in type.Fields.Where(field => field.IsStruct).Select(field => field.Reference!).Distinct(StringComparer.Ordinal))
+        {
+            Line($"static_assert(ContainsReferenceArray || !GeneratedType<::{schema.Find(structure).NativeName}>::ContainsReferenceArray, \"ROCKS_STRUCT {type.Name} holds struct {structure} with reference arrays; regenerate metadata\");");
+        }
+
+        EmitElementStructAsserts(schema, type, Line);
+
+        // 모델 형질을 C++ 멤버 타입과 직접 대조한다(encode 고정이 ContainsReferenceArray에 기대므로 틀린 모델 값이 고정
+        // 누락이 되지 않게 — Docs/Design/ReflectionFoundations.ko.md 5.6절). 직접 타입만 본다(struct 멤버는 위의 생성 형질).
+        // Binds 미러는 생략한다: VerifyBinds가 실제 타입의 멤버마다 __is_same(decltype(Real::m), 미러 필드 형식)을 확인하고 모델
+        // 형질은 그 미러 필드 형식으로만 계산되므로 같은 보장이 이미 있다.
+        foreach (FieldModel field in type.Binds.Length == 0 ? type.Fields : [])
+        {
+            string memberType = $"decltype({native}::{field.Name})";
+            Line($"static_assert(ContainsStrongReference || !::rocks::IsNativeStrongReference<{memberType}>, \"ROCKS_STRUCT {type.Name}::{field.Name} holds a strong object reference; regenerate metadata\");");
+            Line($"static_assert(ContainsReferenceArray || !::rocks::detail::RegistryContainer<{memberType}>::value, \"ROCKS_STRUCT {type.Name}::{field.Name} is a reference array; regenerate metadata\");");
         }
 
         // NATIVE 멤버는 스키마에 넣지 않는다. 강한 참조 금지(RMC2205)를 직접 타입에 대해 한 번 더 확인하고, WorldOnly
@@ -429,8 +500,10 @@ internal static class CppEmitter
         Line($"static const TypeSchema schema{{Id(), {type.Version}, {fieldSpan}, {View(type.Name)}, Guid{{}}, 0u}};");
         Line("return schema;");
         Line("}");
-        // 참조 struct는 직접 ObjectRef 멤버(Transient 포함 — GC는 추적한다)를 Visit하고 멤버 struct의 Trace를 부른다.
-        FieldModel[] traced = type.ContainsStrongReference ? type.Fields.Where(field => field.IsReference || field.IsStruct).ToArray() : [];
+        // 참조 struct는 직접 ObjectRef 멤버(Transient 포함 — GC는 추적한다)를 Visit하고 멤버 struct의 Trace를, 모든 배열
+        // 멤버에 TraceArrayField를 부른다(인라인 struct 안 ObjectRefArray·StructRefArray). 참조 없는 struct는 빈 본문이다(그
+        // 형질은 위의 static_assert가 C++ 멤버 타입과 대조한다).
+        FieldModel[] traced = type.ContainsStrongReference ? type.Fields.Where(field => field.IsReference || field.IsStruct || field.IsArray).ToArray() : [];
         if (traced.Length == 0)
         {
             Line($"static void Trace(const {native}&, TraceVisitor&) noexcept {{}}");
@@ -440,9 +513,7 @@ internal static class CppEmitter
             Line($"static void Trace(const {native}& value, TraceVisitor& visitor) noexcept {{");
             foreach (FieldModel field in traced)
             {
-                Line(field.IsStruct
-                    ? $"GeneratedType<::{schema.Find(field.Reference!).NativeName}>::Trace(value.*(&{native}::{field.Name}), visitor);"
-                    : $"visitor.Visit(value.*(&{native}::{field.Name}));");
+                Line(TraceStatement(schema, field, "value", native));
             }
 
             Line("}");
@@ -483,7 +554,8 @@ internal static class CppEmitter
         Line("};");
     }
 
-    // 클래스·struct 스키마의 필드 배열이다(필드가 없으면 내지 않는다).
+    // 클래스·struct 스키마의 필드 배열이다(필드가 없으면 내지 않는다). 배열 필드는 value가 {Array, 0}이고 원소 형식
+    // element(원소 대상 ID)와 maxElements를 더 싣는다(Docs/Design/ReflectionFoundations.ko.md 5.6절).
     private static void EmitFieldSchemas(ClassModel type, Action<string> Line)
     {
         if (type.Fields.Count == 0)
@@ -495,8 +567,12 @@ internal static class CppEmitter
         foreach (FieldModel field in type.Fields)
         {
             string? targetId = field.HasTargetType ? field.ReferenceId : null;
-            string kind = field.IsReference ? "ObjectReference" : "Value";
-            Line($"{{{GuidValue(field.Id)}, FieldKind::{kind}, {field.Flags}u, {View(field.Name)}, {{}}, {{ValueKind::{field.Kind}, {GuidValue(targetId)}}}, {View(field.Spec.Category)}, {View(field.Spec.DisplayName)}, {View(field.Spec.ToolName)}}},");
+            string kind = field.IsObjectReferenceFieldKind ? "ObjectReference" : "Value";
+            string head = $"{{{GuidValue(field.Id)}, FieldKind::{kind}, {field.Flags}u, {View(field.Name)}, {{}}, ";
+            string labels = $"{View(field.Spec.Category)}, {View(field.Spec.DisplayName)}, {View(field.Spec.ToolName)}";
+            Line(field.IsArray
+                ? $"{head}{{ValueKind::Array, Guid{{}}}}, {labels}, {{ValueKind::{field.ElementKind}, {GuidValue(targetId)}}}, {field.MaxElements}u}},"
+                : $"{head}{{ValueKind::{field.Kind}, {GuidValue(targetId)}}}, {labels}}},");
         }
 
         Line("};");

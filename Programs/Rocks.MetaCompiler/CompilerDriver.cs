@@ -78,6 +78,11 @@ internal static class CompilerDriver
         ProcessResult compiled = await ProcessRunner.RunAsync(new(compiler, arguments, root, environment, unit, TimeSpan.FromMinutes(2)));
         if (compiled.ExitCode != 0 || compiled.StdErr.Contains("warning:", StringComparison.OrdinalIgnoreCase))
         {
+            if (compiled.ExitCode != 0 && ArrayElementFailure(compiled, options.Inputs, root) is MetadataException converted)
+            {
+                throw converted;
+            }
+
             throw new MetadataException("Clang rejected reflection input:\n" + compiled.StdErr, "RMC3000",
                 "Fix the Clang diagnostic at the reported source location. Place ROCKS_CLASS before class or struct; do not suppress or downgrade warnings.");
         }
@@ -140,11 +145,12 @@ internal static class CompilerDriver
             // public 타입의 enum·struct 필드는 public 타입이어야 한다. public 집계는 private enum·struct를 등록하지 않고
             // (등록이 NotFound가 된다), public 생성 헤더는 private 생성 헤더를 include할 수 없다. NATIVE 멤버의 직접
             // 타입인 struct도 생성 헤더가 include하므로 같다.
-            FieldModel? privateValue = type.Private ? null : type.OwnFields.FirstOrDefault(field => FieldModel.KindRequiresTargetId(field.Kind) &&
+            // 배열 필드의 원소 enum·struct도 같다(대상 종류가 원소 종류다).
+            FieldModel? privateValue = type.Private ? null : type.OwnFields.FirstOrDefault(field => FieldModel.KindRequiresTargetId(field.TargetKind) &&
                 field.Reference is not null && schema.Classes.TryGetValue(field.Reference, out ClassModel? target) && target.Private);
             if (privateValue is not null)
             {
-                string what = privateValue.Kind.ToLowerInvariant();
+                string what = privateValue.TargetKind.ToLowerInvariant();
                 throw new MetadataException($"{type.Name}::{privateValue.Name}: public reflected type uses private {what} {privateValue.Reference}", "RMC2006",
                     $"Move the {what} to a public header or make the using type private.").At(privateValue.Site);
             }
@@ -320,6 +326,148 @@ internal static class CompilerDriver
 
         Console.WriteLine($"Rocks metadata: module {options.Module}: {schema.Ordered.Count} types; {(options.Check ? "checked" : "generated")}");
     }
+
+    // 첫 Clang 실행의 rocks::Array 인스턴스화 실패를 배열 원소 진단으로 바꾼다(Docs/Design/ReflectionFoundations.ko.md 5.6절
+    // MetaCompiler). Array<ObjectRef<T>>·Array<참조 struct>·Array<ObjectRefArray를 담은 struct>는 멤버 선언에서 Array가
+    // 인스턴스화되며 nothrow-move static_assert로 Clang이 먼저 실패한다 — 오류의 주 위치는 Core의 Array.h이고 멤버 선언은
+    // 딸린 note에만 나온다. 첫 error가 Array.h에 있고 그 note 중 이 모듈 입력 헤더 안의 첫 위치를 실패한 AST(오류가 있어도
+    // stdout에 나온다)에서 찾았으며, 그 원소(NATIVE는 필드 형식 전체)가 NATIVE 재귀 검사와 같은 규칙으로 강한 참조를 담을
+    // 때만 바꾼다: PROPERTY 필드면 RMC2304(cv 원소면 RMC2000), NATIVE 멤버면 RMC2205, 둘 다 붙었으면 RMC2204다. 그 밖(참조
+    // 없는 원소의 이동·소멸 noexcept 위반 등)이나 보조 조회가 어떤 이유로든 실패하면 null이다 — 호출자가 Clang 원문을 담은
+    // RMC3000을 낸다(보조 진단이 원래 오류를 가리지 않게). 진단 문구(지역화될 수 있다)는 보지 않고 위치·심각도 형식만 해석한다.
+    private static MetadataException? ArrayElementFailure(ProcessResult compiled, IReadOnlyList<ModuleInput> inputs, string root)
+    {
+        try
+        {
+            return ConvertArrayElementFailure(compiled, inputs, root);
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            return null;
+        }
+    }
+
+    private static MetadataException? ConvertArrayElementFailure(ProcessResult compiled, IReadOnlyList<ModuleInput> inputs, string root)
+    {
+        Dictionary<string, bool> inputCache = new(StringComparer.Ordinal);
+        bool IsInput(string path)
+        {
+            if (!inputCache.TryGetValue(path, out bool found))
+            {
+                found = File.Exists(path) && inputs.Any(input => CanonicalPath.Equals(input.Path, path));
+                inputCache.Add(path, found);
+            }
+
+            return found;
+        }
+
+        if (ArrayInstantiationSite(compiled.StdErr, root, IsInput) is not (string file, int line, int column))
+        {
+            return null;
+        }
+
+        ClangAstParser.FailedArrayField? found = new ClangAstParser(inputs, null, new Dictionary<string, ClassModel>(StringComparer.Ordinal), _ => null)
+            .FindFieldAt(compiled.StdOut, file, line, column);
+        if (found is null)
+        {
+            return null;
+        }
+
+        if (found.Native && found.Property)
+        {
+            return new MetadataException($"{found.Symbol}: a field is either ROCKS_PROPERTY or ROCKS_NATIVE, not both", "RMC2204",
+                "Keep ROCKS_PROPERTY for persistent reflected fields and ROCKS_NATIVE for runtime-only members.").At(found.Site);
+        }
+
+        if (found.StrongPath is null)
+        {
+            return null;
+        }
+
+        string element = ArrayRules.Split(found.Spelling) is (_, string inner) ? inner : found.Spelling;
+        if (found.Native)
+        {
+            return new MetadataException($"{found.Symbol}: ROCKS_NATIVE member '{found.Spelling}' holds a strong object reference ({found.StrongPath})", "RMC2205",
+                "Native members are not traced; store ObjectRef/RootRef/Object pointers in ROCKS_PROPERTY fields (ObjectRefArray, StructRefArray) or use WeakRef/ObjectHandle.").At(found.Site);
+        }
+
+        if (ArrayRules.IsCvQualified(element))
+        {
+            return new MetadataException($"{found.Symbol}: cv-qualified array element '{element}' is unsupported",
+                hint: "Remove const/volatile from the element type; array elements are plain values.").At(found.Site);
+        }
+
+        return new MetadataException($"{found.Symbol}: rocks::Array element '{element}' holds a strong object reference ({found.StrongPath}) and cannot be a nothrow-movable array element",
+            "RMC2304", ArrayRules.ElementHint).At(found.Site);
+    }
+
+    // Clang 진단의 첫 error가 Core Array.h에 있으면 그 error에 딸린 note 중 isInput 파일에 있는 첫 위치를 찾는다(없으면
+    // null). clang의 `file:line:col: note:`와 clang-cl의 `file(line,col): note:` 형식을 모두 해석하고, 상대 경로는 Clang
+    // 작업 디렉터리(root) 기준이다. note가 아닌 줄(warning 포함)은 앞 묶음을 끝내고, 첫 error가 Array.h가 아니면 바꾸지 않는다.
+    internal static (string File, int Line, int Column)? ArrayInstantiationSite(string diagnostics, string root, Func<string, bool> isInput)
+    {
+        bool arrayError = false;
+        bool sawError = false;
+        foreach (string raw in diagnostics.Split('\n'))
+        {
+            string text = raw.TrimEnd('\r');
+            Match match = ClangLocation.Match(text);
+            if (!match.Success)
+            {
+                match = ClangClLocation.Match(text);
+            }
+
+            if (!match.Success)
+            {
+                continue;
+            }
+
+            string severity = match.Groups["severity"].Value;
+            string file = match.Groups["file"].Value;
+            if (severity != "note")
+            {
+                bool error = severity is "error" or "fatal error";
+                if (error && sawError)
+                {
+                    return null;
+                }
+
+                string normalized = file.Replace('\\', '/');
+                arrayError = error && normalized.EndsWith("/Core/Containers/Array.h", OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+                sawError |= error;
+                if (error && !arrayError)
+                {
+                    return null;
+                }
+
+                continue;
+            }
+
+            if (!arrayError)
+            {
+                continue;
+            }
+
+            string path = Path.IsPathRooted(file) ? file : Path.Combine(root, file);
+            if (!int.TryParse(match.Groups["line"].Value, out int line) || !int.TryParse(match.Groups["column"].Value, out int column))
+            {
+                continue;
+            }
+
+            if (isInput(path))
+            {
+                return (Path.GetFullPath(path), line, column);
+            }
+        }
+
+        return null;
+    }
+
+    private static readonly Regex ClangLocation = new(@"^(?<file>.+?):(?<line>\d+):(?<column>\d+): (?<severity>fatal error|error|warning|note):",
+        RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+
+    private static readonly Regex ClangClLocation = new(@"^(?<file>.+?)\((?<line>\d+),(?<column>\d+)\): (?<severity>fatal error|error|warning|note):",
+        RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
     // import descriptor를 읽어 정규 이름 → 타입 모델과, public 타입이 있는 모듈 목록을 만든다. 같은 이름이
     // 두 descriptor에 있으면 RMC2004다.

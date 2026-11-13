@@ -19,8 +19,11 @@ internal static class SchemaValidator
         ["rocks::Sha256Digest"] = "Digest256"
     };
 
-    // descriptor import가 받는 값 종류다(MetaCompiler가 만들 수 있는 종류). Array는 B5에서 더한다.
-    public static bool IsSupportedValueKind(string kind) => Scalars.ContainsValue(kind) || FieldModel.KindHasTargetType(kind);
+    // descriptor import가 받는 값 종류다(MetaCompiler가 만들 수 있는 종류 — 배열 필드의 Array 포함).
+    public static bool IsSupportedValueKind(string kind) => IsSupportedElementKind(kind) || kind == ArrayRules.Array;
+
+    // 배열 원소로 받는 값 종류다(Array 자신은 원소가 될 수 없다 — 중첩 배열은 RMC2304).
+    public static bool IsSupportedElementKind(string kind) => Scalars.ContainsValue(kind) || FieldModel.KindHasTargetType(kind);
 
     // "prefix<T>" 철자의 T를 돌려준다(아니면 null).
     private static string? TemplateTarget(string spelling, string prefix) =>
@@ -81,10 +84,11 @@ internal static class SchemaValidator
 
         foreach (ClassModel external in imported.Values.Where(model => !model.IsEnum))
         {
+            // 대상은 배열이면 원소의 대상이다(원소 enum·struct·참조 대상도 같은 규칙으로 잇고 대조한다).
             foreach (FieldModel field in external.Fields.Where(field => field.HasTargetType && field.ReferenceId is not null))
             {
                 bool found = byId.TryGetValue(field.ReferenceId!, out ClassModel? target);
-                if (!FieldModel.KindRequiresTargetId(field.Kind))
+                if (!FieldModel.KindRequiresTargetId(field.TargetKind))
                 {
                     // 강한·소프트 참조의 대상은 클래스다(import에 없는 대상은 런타임 Acquire가 판정한다).
                     if (found && (target!.IsEnum || target.IsStruct))
@@ -95,14 +99,14 @@ internal static class SchemaValidator
                     continue;
                 }
 
-                string what = field.Kind.ToLowerInvariant();
+                string what = field.TargetKind.ToLowerInvariant();
                 if (!found)
                 {
                     throw new MetadataException($"{external.Name}::{field.Name}: {what} {field.ReferenceId} of the imported field is not in an imported descriptor", "RMC2003",
                         "Import the descriptors of every module the dependency uses; regenerate the dependency metadata.").At(external.Site);
                 }
 
-                if (target!.IsStruct != field.IsStruct || target.IsEnum != (field.Kind == "Enum"))
+                if (target!.IsStruct != field.StructTarget || target.IsEnum != (field.TargetKind == "Enum"))
                 {
                     throw InvalidDescriptor(external, $"{what} field {external.Name}::{field.Name} targets {target.Name}, which is not a reflected {what}");
                 }
@@ -119,23 +123,48 @@ internal static class SchemaValidator
 
         ClassModel[] structs = imported.Values.Where(model => model.IsStruct).ToArray();
         ComputeDepths(structs, name => imported[name]);
+        ClassModel Find(string name) => imported[name];
         foreach (ClassModel model in structs)
         {
-            bool strong = model.Fields.Any(field => field.IsReference || (field.IsStruct && imported[field.Reference!].ContainsStrongReference));
+            bool strong = model.Fields.Any(field => field.IsObjectReferenceFieldKind || (field.StructTarget && Find(field.Reference!).ContainsStrongReference));
             if (strong != model.ContainsStrongReference)
             {
                 throw InvalidDescriptor(model, $"ContainsStrongReference flag of struct {model.Name} disagrees with its fields");
             }
 
-            if (!model.RequiresWorldOnlyOwner && model.Fields.Any(field => field.IsStruct && imported[field.Reference!].RequiresWorldOnlyOwner))
+            if (!model.RequiresWorldOnlyOwner && model.Fields.Any(field => field.StructTarget && Find(field.Reference!).RequiresWorldOnlyOwner))
             {
                 throw InvalidDescriptor(model, $"struct {model.Name} holds a struct that requires a WorldOnly owner but lacks the RequiresWorldOnlyOwner flag");
+            }
+
+            // 형질은 descriptor flags로만 비교한다(멤버 struct의 형질도 그 항목의 flags) — import 순회 순서에 의존하지 않는다.
+            if (ContainsReferenceArray(model, Find) != model.ContainsReferenceArray)
+            {
+                throw InvalidDescriptor(model, $"ContainsReferenceArray flag of struct {model.Name} disagrees with its fields");
+            }
+        }
+
+        // StructRefArray의 원소 struct(배열 필드의 원소 struct가 참조 struct)는 Registry 컨테이너를 담지 않는다(원소 블록이
+        // owner 저장소 밖이라 Registry가 그 컨테이너의 변경을 거부한다 — 이 모듈 선언이면 RMC2304).
+        foreach (ClassModel external in imported.Values.Where(model => !model.IsEnum))
+        {
+            FieldModel? nested = external.Fields.FirstOrDefault(field => field.IsArray && field.StructTarget &&
+                Find(field.Reference!).ContainsStrongReference && Find(field.Reference!).ContainsReferenceArray);
+            if (nested is not null)
+            {
+                throw InvalidDescriptor(external, $"StructRefArray field {external.Name}::{nested.Name} has element struct {nested.Reference} that holds a reference array");
             }
         }
     }
 
-    // struct 필드 간선(값으로 담는 멤버 struct)을 DFS로 돌며 순환(RMC2302)을 찾고 깊이(1 + 멤버 struct 깊이의 최댓값,
-    // 멤버 struct가 없으면 1)를 계산한다. 깊이가 StructRules.MaxDepth를 넘으면 RMC2303이다. 이미 깊이를 계산한
+    // struct의 ContainsReferenceArray 형질을 필드로 계산한다: Registry 컨테이너(ObjectRefArray·StructRefArray) 필드이거나
+    // 그 형질을 가진 struct 멤버(런타임 RegisterStruct와 같은 규칙).
+    private static bool ContainsReferenceArray(ClassModel model, Func<string, ClassModel> find) =>
+        model.Fields.Any(field => field.IsRegistryContainer(find) || (field.IsStruct && find(field.Reference!).ContainsReferenceArray));
+
+    // struct 필드 간선(값으로 담는 멤버 struct와 struct 원소 배열의 원소 struct)을 DFS로 돌며 순환(RMC2302 — 배열을 거친
+    // 자기 참조 StructRefArray<Self> 포함)을 찾고 깊이(1 + 멤버·원소 struct 깊이의 최댓값, 없으면 1)를 계산한다. 깊이가
+    // StructRules.MaxDepth를 넘으면 RMC2303이다. 이미 깊이를 계산한
     // import struct는 다시 돌지 않는다. Order·깊이·생성보다 먼저 실행한다(순환이 있으면 재귀가 끝나지 않는다).
     // Binds(B4c)가 생기면 C++에서도 순환이 생길 수 있으므로 간선은 정규 이름으로 푼 것이다. import struct의 위반은
     // 의존 모듈 descriptor의 문제이므로 그 메타데이터를 다시 만들라고 안내한다.
@@ -156,12 +185,13 @@ internal static class SchemaValidator
             {
                 string cycle = string.Join(" -> ", path.SkipWhile(name => name != model.Name).Append(model.Name));
                 throw new MetadataException($"{model.Name}: reflected struct type cycle ({cycle})", "RMC2302", model.Imported ? regenerate
-                    : "Break the cycle; a struct cannot contain itself by value directly or through nested struct members.").At(model.Site);
+                    : "Break the cycle; a struct cannot contain itself by value directly or through nested struct members or struct element arrays.").At(model.Site);
             }
 
             path.Add(model.Name);
             int depth = 1;
-            foreach (FieldModel field in model.Fields.Where(field => field.IsStruct))
+            // struct 멤버와 struct 원소 배열 멤버(원소 깊이 + 1)가 간선이다.
+            foreach (FieldModel field in model.Fields.Where(field => field.StructTarget))
             {
                 depth = Math.Max(depth, 1 + Depth(find(field.Reference!)));
             }
@@ -206,7 +236,7 @@ internal static class SchemaValidator
                     "Break the cycle; a struct cannot contain itself by value directly or through nested struct members.").At(model.Site);
             }
 
-            IEnumerable<string> used = model.Fields.Where(field => field.IsStruct).Select(field => field.Reference!)
+            IEnumerable<string> used = model.Fields.Where(field => field.StructTarget).Select(field => field.Reference!)
                 .Concat(model.NativeMembers.Where(native => native.Struct is not null).Select(native => native.Struct!));
             int rank = 1;
             foreach (string name in used)
@@ -386,7 +416,93 @@ internal static class SchemaValidator
                 return $"Core value types are reflected by the {StructRules.BindingModule} module: depend on {StructRules.BindingModule} (add it to the module's RequiredModules) so its descriptor is imported.";
             }
 
-            return "Use a supported scalar, Guid, String, AssetId, Sha256Digest, ROCKS_ENUM enum, ROCKS_STRUCT struct, ObjectRef or SoftObjectRef field; raw pointers/containers/cv-qualified fields need an explicit codec extension.";
+            return "Use a supported scalar, Guid, String, AssetId, Sha256Digest, ROCKS_ENUM enum, ROCKS_STRUCT struct, ObjectRef, SoftObjectRef or rocks::Array/ObjectRefArray/StructRefArray field; raw pointers/other containers/cv-qualified fields need an explicit codec extension.";
+        }
+
+        // 단일 값 형식 철자 하나를 (값 종류, 대상 정규 이름, 대상 ID)로 푼다(필드와 Array<T> 원소가 같은 해석을 쓴다).
+        // 지원하지 않는 형식이면 null이다.
+        (string Kind, string? Reference, string? ReferenceId)? ResolveValue(string spelling, string owner, SourceSite site)
+        {
+            if (Scalars.TryGetValue(spelling, out string? kind))
+            {
+                return (kind, null, null);
+            }
+
+            if (ValueType(spelling, false, owner, site) is ClassModel enumeration)
+            {
+                return ("Enum", enumeration.Name, enumeration.Id);
+            }
+
+            if (ValueType(spelling, true, owner, site) is ClassModel structure)
+            {
+                return ("Struct", structure.Name, structure.Id);
+            }
+
+            if (ReferenceSpelling(spelling) is { } reference)
+            {
+                // 강한 참조와 소프트 참조(GC 간선이 아님) 모두 대상이 리플렉션 클래스(또는 Object)여야 한다.
+                string target = Resolve(reference.Target.Length == 0 ? "rocks::Object" : reference.Target, owner, site);
+                return (reference.Kind, target, target == "rocks::Object" ? null : Find(target).Id);
+            }
+
+            return null;
+        }
+
+        // 배열 필드의 원소를 푼다(Docs/Design/ReflectionFoundations.ko.md 5.6절 MetaCompiler). 중첩 배열·컨테이너 인자의 배열은
+        // RMC2304(ObjectRefArray·StructRefArray 인자는 RMC2003보다 먼저), cv 원소는 RMC2000, ObjectRefArray<T>의 T는 클래스
+        // (기본 인자 생략 출력 ObjectRefArray<>는 rocks::Object — 아니면 RMC2003), StructRefArray<S>의 S는 리플렉션 struct
+        // (아니면 RMC2304), Array<T>의 T는 단일 필드와 같은 해석(지원하지 않으면 원소 철자를 담은 RMC2000)이다. 원소
+        // struct 형질에 따른 컨테이너 대조(RMC2304)는 형질을 계산한 뒤 CheckContainer가 한다.
+        void ResolveArray(FieldModel field, string container, string element)
+        {
+            string symbol = $"{field.Owner}::{field.Name}";
+            field.Kind = ArrayRules.Array;
+            field.SpelledContainer = container;
+            field.ElementSpelling = element;
+            if (ArrayRules.IsContainer(element))
+            {
+                throw new MetadataException($"{symbol}: {container} element '{element}' is itself an array", "RMC2304", ArrayRules.ElementHint).At(field.Site);
+            }
+
+            if (ArrayRules.IsCvQualified(element))
+            {
+                throw new MetadataException($"{symbol}: cv-qualified array element '{element}' is unsupported",
+                    hint: "Remove const/volatile from the element type; array elements are plain values.").At(field.Site);
+            }
+
+            if (container == ArrayRules.ObjectRefArray)
+            {
+                string target = Resolve(element.Length == 0 ? "rocks::Object" : element, field.Owner, field.Site);
+                field.ElementKind = "ObjectReference";
+                field.Reference = target;
+                field.ReferenceId = target == "rocks::Object" ? null : Find(target).Id;
+                return;
+            }
+
+            if (container == ArrayRules.StructRefArray)
+            {
+                ClassModel? structure = ValueType(element, true, field.Owner, field.Site);
+                if (structure is null)
+                {
+                    throw new MetadataException($"{symbol}: StructRefArray element '{element}' is not a reflected ROCKS_STRUCT", "RMC2304",
+                        "StructRefArray<S> holds reflected reference structs (ROCKS_STRUCT with ObjectRef members); " + ArrayRules.ElementHint).At(field.Site);
+                }
+
+                field.ElementKind = "Struct";
+                field.Reference = structure.Name;
+                field.ReferenceId = structure.Id;
+                return;
+            }
+
+            if (ResolveValue(element, field.Owner, field.Site) is not { } value)
+            {
+                throw new MetadataException($"{symbol}: unsupported array element type '{element}'",
+                    hint: UnsupportedFieldHint(element) + " If rocks::Array, ObjectRefArray or StructRefArray is explicitly instantiated (template class / extern template), Clang may print the written element spelling; remove the explicit instantiation.").At(field.Site);
+            }
+
+            field.ElementKind = value.Kind;
+            field.Reference = value.Reference;
+            field.ReferenceId = value.ReferenceId;
         }
 
         foreach (ClassModel model in classes.Values.Where(model => !model.IsEnum))
@@ -398,28 +514,15 @@ internal static class SchemaValidator
 
             foreach (FieldModel field in model.OwnFields)
             {
-                if (Scalars.TryGetValue(field.NativeSpelling, out string? kind))
+                if (ArrayRules.Split(field.NativeSpelling) is (string container, string element))
                 {
-                    field.Kind = kind;
+                    ResolveArray(field, container, element);
                 }
-                else if (ValueType(field.NativeSpelling, false, field.Owner, field.Site) is ClassModel enumeration)
+                else if (ResolveValue(field.NativeSpelling, field.Owner, field.Site) is { } value)
                 {
-                    field.Reference = enumeration.Name;
-                    field.ReferenceId = enumeration.Id;
-                    field.Kind = "Enum";
-                }
-                else if (ValueType(field.NativeSpelling, true, field.Owner, field.Site) is ClassModel structure)
-                {
-                    field.Reference = structure.Name;
-                    field.ReferenceId = structure.Id;
-                    field.Kind = "Struct";
-                }
-                else if (ReferenceSpelling(field.NativeSpelling) is { } reference)
-                {
-                    // 강한 참조와 소프트 참조(GC 간선이 아님) 모두 대상이 리플렉션 클래스(또는 Object)여야 한다.
-                    field.Reference = Resolve(reference.Target.Length == 0 ? "rocks::Object" : reference.Target, model.Name, field.Site);
-                    field.ReferenceId = field.Reference == "rocks::Object" ? null : Find(field.Reference).Id;
-                    field.Kind = reference.Kind;
+                    field.Kind = value.Kind;
+                    field.Reference = value.Reference;
+                    field.ReferenceId = value.ReferenceId;
                 }
                 else
                 {
@@ -427,17 +530,28 @@ internal static class SchemaValidator
                     hint: UnsupportedFieldHint(field.NativeSpelling)).At(field.Site);
                 }
 
-                // 지정자를 그 필드 종류에 쓸 수 있는지 본다(RMC2202). 배열 필드는 B5에서 생긴다.
+                // 지정자를 그 필드 종류에 쓸 수 있는지 본다(RMC2202 — 종류를 먼저 판정하고 값 범위는 그 뒤에 본다).
                 if (field.Spec.Required && !field.AcceptsRequired)
                 {
-                    throw new MetadataException($"{field.Owner}::{field.Name}: Required applies only to object or soft object reference fields", "RMC2202",
-                        "Remove Required or change the field to ObjectRef or SoftObjectRef.").At(field.Site);
+                    throw new MetadataException($"{field.Owner}::{field.Name}: Required applies only to object or soft object reference fields and arrays of them", "RMC2202",
+                        "Remove Required or change the field to ObjectRef, SoftObjectRef, ObjectRefArray or Array<SoftObjectRef>.").At(field.Site);
                 }
 
-                if (field.Spec.MaxElements != 0)
+                if (!field.IsArray && field.Spec.MaxElements != 0)
                 {
                     throw new MetadataException($"{field.Owner}::{field.Name}: MaxElements applies only to array fields", "RMC2202",
                         "Remove MaxElements; it limits the length of reflected array fields.").At(field.Site);
+                }
+
+                if (field.IsArray)
+                {
+                    // 0과 2³¹ 이상은 지정자 문법(RMC2000)이 이미 막는다.
+                    field.MaxElements = field.Spec.MaxElements == 0 ? ArrayRules.DefaultMaxElements : field.Spec.MaxElements;
+                    if (field.MaxElements > ArrayRules.MaxArrayElements)
+                    {
+                        throw new MetadataException($"{field.Owner}::{field.Name}: MaxElements={field.MaxElements} exceeds {ArrayRules.MaxArrayElements} (MaxArrayElements)",
+                            hint: $"Use MaxElements between 1 and {ArrayRules.MaxArrayElements}; large byte or numeric data belongs in bulk data.").At(field.Site);
+                    }
                 }
             }
 
@@ -474,8 +588,42 @@ internal static class SchemaValidator
             return fields;
         }
 
-        // struct: 필드 목록 → 순환·깊이(DFS, Order·생성 전 — PROPERTY 멤버만) → 순위(PROPERTY·NATIVE struct 멤버) →
-        // 형질(쓰는 struct가 먼저 계산되도록 순위 순).
+        // 이 모듈 배열 필드의 C++ 철자 컨테이너가 원소 종류·원소 struct 형질로 정해지는 파생 컨테이너와 같아야 한다(RMC2304):
+        // Array<ObjectRef<T>>는 ObjectRefArray<T>, 참조 struct 원소는 StructRefArray<S>(noexcept 이동을 직접 정의해 Clang의
+        // Array static_assert를 지나는 Array<참조 struct>도 여기서 막는다), 참조 없는 struct 원소는 Array<S>다. StructRefArray의
+        // 원소 struct는 Registry 컨테이너를 (중첩까지) 담지 않는다(원소 블록이 owner 저장소 밖이다).
+        void CheckContainer(FieldModel field)
+        {
+            if (!field.IsArray || field.SpelledContainer is null)
+            {
+                return;
+            }
+
+            string symbol = $"{field.Owner}::{field.Name}";
+            string derived = field.ContainerOf(Find)!;
+            // 참조 struct 원소가 Registry 컨테이너를 담으면 어느 컨테이너로도 쓸 수 없으므로 철자 불일치보다 먼저 알린다(StructRefArray로
+            // 바꾸라는 안내가 다음 실행에서 다시 실패하지 않게).
+            if (derived == ArrayRules.StructRefArray && Find(field.Reference!).ContainsReferenceArray)
+            {
+                throw new MetadataException($"{symbol}: {field.SpelledContainer} element struct {field.Reference} holds ObjectRefArray or StructRefArray members", "RMC2304",
+                    "Keep reference containers out of array element structs (directly or nested); store them in the owning class instead.").At(field.Site);
+            }
+
+            if (derived != field.SpelledContainer)
+            {
+                string reason = derived switch
+                {
+                    ArrayRules.ObjectRefArray => $"object reference elements '{field.ElementSpelling}' need rocks::ObjectRefArray<T>",
+                    ArrayRules.StructRefArray => $"element struct {field.Reference} holds strong object references and needs rocks::StructRefArray<S>",
+                    _ => $"element struct {field.Reference} holds no strong object references and needs rocks::Array<S>"
+                };
+                throw new MetadataException($"{symbol}: {field.SpelledContainer} element '{field.ElementSpelling}' cannot be used: {reason}", "RMC2304",
+                    ArrayRules.ElementHint).At(field.Site);
+            }
+        }
+
+        // struct: 필드 목록 → 순환·깊이(DFS, Order·생성 전 — PROPERTY struct 멤버·struct 원소 배열 멤버) → 순위(PROPERTY·
+        // NATIVE struct 멤버와 원소 struct) → 형질(쓰는 struct가 먼저 계산되도록 순위 순)·컨테이너 대조.
         ClassModel[] structs = classes.Values.Where(model => model.IsStruct).OrderBy(model => model.Name, StringComparer.Ordinal).ToArray();
         foreach (ClassModel model in structs)
         {
@@ -487,13 +635,27 @@ internal static class SchemaValidator
         ClassModel[] orderedStructs = structs.OrderBy(model => model.Rank).ThenBy(model => model.Name, StringComparer.Ordinal).ToArray();
         foreach (ClassModel model in orderedStructs)
         {
-            // Transient 참조도 GC가 추적하므로 강한 참조로 센다.
-            model.ContainsStrongReference = model.Fields.Any(field => field.IsReference || (field.IsStruct && Find(field.Reference!).ContainsStrongReference));
+            // Transient 참조도 GC가 추적하므로 강한 참조로 센다. ObjectRefArray 필드와 참조 struct 원소 배열(StructRefArray)도
+            // 강한 참조다.
+            model.ContainsStrongReference = model.Fields.Any(field => field.IsObjectReferenceFieldKind || (field.StructTarget && Find(field.Reference!).ContainsStrongReference));
             // NATIVE 멤버의 WorldOnly 소유자 형질은 struct에서는 오류가 아니라 형질로 전파된다(Docs/Design/
-            // ReflectionFoundations.ko.md 2.4절).
+            // ReflectionFoundations.ko.md 2.4절). 원소 struct의 형질도 전파된다.
             model.RequiresWorldOnlyOwner = model.WorldOnlyNatives.Count != 0 ||
-                model.Fields.Any(field => field.IsStruct && Find(field.Reference!).RequiresWorldOnlyOwner) ||
+                model.Fields.Any(field => field.StructTarget && Find(field.Reference!).RequiresWorldOnlyOwner) ||
                 model.NativeMembers.Any(native => native.Struct is not null && Find(native.Struct).RequiresWorldOnlyOwner);
+            model.ContainsReferenceArray = ContainsReferenceArray(model, Find);
+            foreach (FieldModel field in model.OwnFields)
+            {
+                CheckContainer(field);
+            }
+        }
+
+        foreach (ClassModel model in classes.Values.Where(model => !model.IsEnum && !model.IsStruct).OrderBy(model => model.Name, StringComparer.Ordinal))
+        {
+            foreach (FieldModel field in model.OwnFields)
+            {
+                CheckContainer(field);
+            }
         }
 
         List<ClassModel> ordered = [];
@@ -542,9 +704,9 @@ internal static class SchemaValidator
                 }
             }
 
-            // 그 형질을 가진 struct를 (상속 필드·NATIVE 멤버 포함) 담는 클래스도 WorldOnly여야 한다(RMC2206).
+            // 그 형질을 가진 struct를 (상속 필드·원소 struct·NATIVE 멤버 포함) 담는 클래스도 WorldOnly여야 한다(RMC2206).
             FieldModel? worldOnlyField = model.WorldOnly ? null
-                : model.Fields.FirstOrDefault(field => field.IsStruct && Find(field.Reference!).RequiresWorldOnlyOwner);
+                : model.Fields.FirstOrDefault(field => field.StructTarget && Find(field.Reference!).RequiresWorldOnlyOwner);
             if (worldOnlyField is not null)
             {
                 throw new MetadataException($"{worldOnlyField.Owner}::{worldOnlyField.Name}: struct {worldOnlyField.Reference} requires a WorldOnly owner", "RMC2206",

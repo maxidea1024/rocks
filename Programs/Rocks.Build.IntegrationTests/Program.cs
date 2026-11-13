@@ -188,8 +188,9 @@ try
     var reflectionRulesText = File.ReadAllText(reflectionRules);
     Require(reflectionRulesText.Contains("Dependencies = [\"ObjectRuntime\"]", StringComparison.Ordinal) &&
         reflectionRulesText.Contains("Metadata = [\"GameObject.h\"]", StringComparison.Ordinal), "Game template rules changed; update the SDK descriptor fixture");
+    // ObjectSerialization: 게임이 GameCore의 배열 필드를 그래프로 저장·복원한다(SDK 모듈로 링크만 한다).
     File.WriteAllText(reflectionRules, reflectionRulesText
-        .Replace("Dependencies = [\"ObjectRuntime\"]", "Dependencies = [\"ObjectRuntime\", \"GameCore\"]", StringComparison.Ordinal)
+        .Replace("Dependencies = [\"ObjectRuntime\"]", "Dependencies = [\"ObjectRuntime\", \"GameCore\", \"ObjectSerialization\"]", StringComparison.Ordinal)
         .Replace("Metadata = [\"GameObject.h\"]", "Metadata = [\"GameObject.h\", \"FixtureChild.h\"]", StringComparison.Ordinal));
     var reflectionProject = Path.Combine(reflectionGame, "Game.rocksproject");
     var reflectionProjectText = File.ReadAllText(reflectionProject);
@@ -218,19 +219,44 @@ try
     File.WriteAllText(coreRules, coreRulesText);
     Directory.CreateDirectory(Path.Combine(reflectionGame, "Core/Public/GameCore"));
     var coreHeader = Path.Combine(reflectionGame, "Core/Public/GameCore/CoreThing.h");
+    // B5c: 배열 필드(Array<int32>·ObjectRefArray·Array<rocks::Vec3>·참조 struct의 StructRefArray)를 SDK descriptor import와 함께
+    // 쓰고, 상속한 FixtureChild가 그래프로 저장·복원한다(Docs/Design/ReflectionFoundations.ko.md 5.6절 SDK 시험).
     const string coreHeaderText = """
         #pragma once
 
+        #include <Core/Containers/Array.h>
         #include <Core/Math/Vector3.h>
         #include <Meta/Annotations.h>
+        #include <Object/ObjectRefArray.h>
+        #include <Object/StructRefArray.h>
+        #include <ReflectionTestFixtures/ArrayFixture.h>
         #include <ReflectionTestFixtures/ReflectionFixture.h>
 
         namespace sample {
 
+        ROCKS_STRUCT()
+        struct Socket {
+            explicit Socket(rocks::Allocator& allocator) noexcept : name(allocator) {
+            }
+
+            ROCKS_PROPERTY() rocks::ObjectRef<rocks::reflection_fixture::Node> target;
+            ROCKS_PROPERTY() rocks::String name;
+        };
+
         ROCKS_CLASS()
         struct CoreThing : rocks::reflection_fixture::Base {
+            explicit CoreThing(rocks::Allocator& allocator) noexcept
+                : levels(allocator), links(allocator), path(allocator), sockets(allocator), fixtureSlots(allocator) {
+            }
+
             ROCKS_PROPERTY() rocks::int32 level = 1;
             ROCKS_PROPERTY() rocks::Vec3 offset;
+            ROCKS_PROPERTY() rocks::Array<rocks::int32> levels;
+            ROCKS_PROPERTY() rocks::ObjectRefArray<rocks::reflection_fixture::Node> links;
+            ROCKS_PROPERTY() rocks::Array<rocks::Vec3> path;
+            ROCKS_PROPERTY() rocks::StructRefArray<Socket> sockets;
+            // 설치 SDK의 참조 struct 원소다(SDK 생성 헤더의 GeneratedType<ArraySlot>::Trace가 이 게임에서 인스턴스화된다).
+            ROCKS_PROPERTY() rocks::StructRefArray<rocks::reflection_fixture::ArraySlot> fixtureSlots;
         };
 
         } // namespace sample
@@ -262,6 +288,9 @@ try
 
         ROCKS_CLASS()
         struct FixtureChild final : CoreThing {
+            explicit FixtureChild(rocks::Allocator& allocator) noexcept : CoreThing(allocator) {
+            }
+
             ROCKS_PROPERTY() rocks::ObjectRef<rocks::reflection_fixture::Node> link;
         };
 
@@ -272,6 +301,92 @@ try
     File.WriteAllText(Path.Combine(reflectionGame, "Source/Main.cpp"), """
         #include <SampleGame/SampleGame.module.generated.h>
         #include <Core/Memory/SystemAllocator.h>
+        #include <Object/ConstructionContext.h>
+        #include <ObjectSerialization/ObjectGraph.h>
+
+        // GameCore에서 상속한 배열 필드(Array<int32>·ObjectRefArray·Array<rocks::Vec3>·StructRefArray, 설치 SDK의 참조 struct
+        // 원소 StructRefArray<ArraySlot>)를 source에서 저장해 target으로 복원한다. 배열 원소(ObjectRefArray 원소·StructRefArray
+        // 원소 안 참조)로만 닿는 SDK 객체(Node 둘·ArrayOwner 하나)가 수집에서 살아야 한다. 성공하면 0, 실패하면 단계 번호다(root는
+        // 돌아갈 때 놓는다).
+        int RoundTripArrays(rocks::Allocator& allocator, rocks::TypeRegistry& types, rocks::ObjectRegistry& source, rocks::ObjectRegistry& target) {
+            using rocks::reflection_fixture::ArrayOwner;
+            using rocks::reflection_fixture::Node;
+            rocks::ConstructionContext transaction(source, source.OwnerAccess());
+            auto thing = transaction.Create<sample::FixtureChild>(rocks::TypeIdOf<sample::FixtureChild>());
+            auto first = transaction.Create<Node>(rocks::TypeIdOf<Node>());
+            auto second = transaction.Create<Node>(rocks::TypeIdOf<Node>());
+            auto third = transaction.Create<ArrayOwner>(rocks::TypeIdOf<ArrayOwner>());
+            if (!thing || !first || !second || !third) {
+                return 8;
+            }
+
+            auto value = transaction.Get<sample::FixtureChild>(thing.Value());
+            if (!value) {
+                return 8;
+            }
+
+            sample::FixtureChild& child = *value.Value();
+            const rocks::ObjectHandle links[] = {first.Value(), rocks::ObjectHandle{}};
+            if (!child.levels.TryPushBack(3) || !child.levels.TryPushBack(-4) || !child.path.TryPushBack(rocks::Vec3(1.0f, 2.0f, 3.0f)) ||
+                !transaction.AssignReferences(thing.Value(), child.links, links) || !transaction.AssignElements(thing.Value(), child.sockets, 1) ||
+                !child.sockets[0].name.TryAssign("hand") ||
+                !transaction.SetElementReference(thing.Value(), child.sockets, 0, child.sockets[0].target, second.Value()) ||
+                !transaction.AssignElements(thing.Value(), child.fixtureSlots, 1) || !child.fixtureSlots[0].name.TryAssign("fixture") ||
+                !transaction.SetElementReference(thing.Value(), child.fixtureSlots, 0, child.fixtureSlots[0].material, third.Value())) {
+                return 9;
+            }
+
+            auto root = transaction.Commit();
+            if (!root) {
+                return 10;
+            }
+
+            auto bytes = rocks::SaveObjectGraph(allocator, source, source.OwnerAccess(), root.Value().Handle());
+            if (!bytes) {
+                return 11;
+            }
+
+            auto loaded = rocks::LoadObjectGraph(allocator, target, types, target.OwnerAccess(), bytes.Value().View());
+            if (!loaded) {
+                return 12;
+            }
+
+            {
+                auto borrowed = target.Resolve<sample::FixtureChild>(target.OwnerAccess(), loaded.Value().Handle());
+                if (!borrowed) {
+                    return 13;
+                }
+
+                auto restored = borrowed.Value().Get();
+                if (!restored) {
+                    return 13;
+                }
+
+                const sample::FixtureChild& copy = *restored.Value();
+                if (copy.levels.Size() != 2 || copy.levels[1] != -4 || copy.path.Size() != 1 || copy.path[0].z != 3.0f ||
+                    copy.links.Size() != 2 || copy.links[0] == rocks::ObjectHandle{} || copy.links[1] != rocks::ObjectHandle{} ||
+                    copy.sockets.Size() != 1 || copy.sockets[0].name.View() != rocks::StringView("hand") ||
+                    copy.sockets[0].target.Handle() == rocks::ObjectHandle{} || copy.fixtureSlots.Size() != 1 ||
+                    copy.fixtureSlots[0].name.View() != rocks::StringView("fixture") ||
+                    copy.fixtureSlots[0].material.Handle() == rocks::ObjectHandle{}) {
+                    return 14;
+                }
+            }
+
+            if (!target.Collect(target.OwnerAccess()) || target.Stats().liveObjects != 4) {
+                return 15;
+            }
+
+            return 0;
+        }
+
+        int SaveAndLoadArrays(rocks::Allocator& allocator, rocks::TypeRegistry& types) {
+            rocks::ObjectRegistry source(allocator, types, {0x5347, 1});
+            rocks::ObjectRegistry target(allocator, types, {0x5347, 2});
+            const int status = RoundTripArrays(allocator, types, source, target);
+            const bool closed = source.Shutdown(source.OwnerAccess()) && target.Shutdown(target.OwnerAccess());
+            return status != 0 ? status : closed ? 0 : 16;
+        }
 
         // 게임 집계 헤더가 GameCore와 SDK 모듈(ReflectionTestFixtures)의 RegisterModuleTypes를 먼저 부르고, 게임 타입의
         // schema가 두 모듈 타입의 상속 필드와 SDK 타입을 가리키는 참조 대상 ID를 담는다.
@@ -319,18 +434,25 @@ try
             if (!vectorField) {
                 return 7;
             }
+
+            bool nodeReference = false;
             for (const auto& field : schema.fields) {
-                if (field.value.type == rocks::TypeIdOf<rocks::reflection_fixture::Node>()) {
-                    return 0;
-                }
+                nodeReference = nodeReference || field.value.type == rocks::TypeIdOf<rocks::reflection_fixture::Node>();
             }
-            return 5;
+
+            if (!nodeReference) {
+                return 5;
+            }
+
+            return SaveAndLoadArrays(allocator, types);
         }
 
         """);
     var coreManifest = Path.Combine(reflectionGame, "Core/GameCore.rocksids.json");
     var coreIds = await Ids("add", "--manifest", coreManifest, "--type", "sample::CoreThing", "--field", "sample::CoreThing::level",
-        "--field", "sample::CoreThing::offset", "--type", "sample::Extra");
+        "--field", "sample::CoreThing::offset", "--field", "sample::CoreThing::levels", "--field", "sample::CoreThing::links",
+        "--field", "sample::CoreThing::path", "--field", "sample::CoreThing::sockets", "--field", "sample::CoreThing::fixtureSlots", "--type", "sample::Socket",
+        "--field", "sample::Socket::target", "--field", "sample::Socket::name", "--type", "sample::Extra");
     Require(coreIds.ExitCode == 0, "Could not register the GameCore fixture identities: " + coreIds.StdErr);
     var fixtureIds = await Ids("add", "--manifest", Path.Combine(reflectionGame, "SampleGame.rocksids.json"),
         "--type", "sample::FixtureChild", "--field", "sample::FixtureChild::link");

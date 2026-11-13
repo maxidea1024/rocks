@@ -77,9 +77,11 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
 
     private readonly Dictionary<string, RecordInfo> records = new(StringComparer.Ordinal);
 
+    // 강한 객체 참조를 담는 템플릿이다(StructRefArray는 참조 struct 원소의 목록이다 — Docs/Design/ReflectionFoundations.ko.md
+    // 5.6절).
     private static readonly HashSet<string> StrongReferenceTemplates = new(StringComparer.Ordinal)
     {
-        "rocks::ObjectRef", "rocks::RootRef", "rocks::ObjectRefArray"
+        "rocks::ObjectRef", "rocks::RootRef", "rocks::ObjectRefArray", "rocks::StructRefArray"
     };
 
     // 대상 객체를 담지도 추적하지도 않는 참조 템플릿이다. 인자 타입을 따라가지 않는다(WeakRef<T>는 T의 필드를 담지 않고,
@@ -1500,6 +1502,88 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
     private static MetadataException InvalidPropertySource() => new(
         "ROCKS_PROPERTY must be a direct prefix on one field in the same source file",
         hint: "Write ROCKS_PROPERTY(...) immediately before the field declaration, with no wrapper macro or intervening preprocessor directive.");
+
+    // 실패한 첫 Clang 실행에서 찾은 필드다(CompilerDriver의 rocks::Array 인스턴스화 실패 변환). Symbol은 정규 이름 owner::name,
+    // Spelling은 desugar 철자, StrongPath는 강한 참조 경로(PROPERTY는 배열 원소, NATIVE는 필드 형식 전체 — 없으면 null)다.
+    internal sealed record FailedArrayField(string Symbol, string Spelling, bool Property, bool Native, SourceSite Site, string? StrongPath);
+
+    // 실패한 첫 Clang 실행의 AST(오류가 있어도 stdout에 나온다)에서 이름 위치가 file의 (line, column)인 필드를 찾는다
+    // (Docs/Design/ReflectionFoundations.ko.md 5.6절). PROPERTY·NATIVE annotation이 있는 필드만 돌려주고 없으면 null이다.
+    // column은 Clang처럼 1부터 센 줄 안 byte 위치이며 파일 offset으로 한 번 바꿔 비교한다. 같은 AST로 레코드 색인을 만들어
+    // NATIVE 재귀 검사(RMC2205)와 같은 규칙으로 원소의 강한 참조 경로를 계산한다 — 경로가 없으면 Array 실패의 원인이 참조가
+    // 아니므로(이동·소멸 noexcept 위반 등) 호출자가 Clang 원문을 유지한다.
+    internal FailedArrayField? FindFieldAt(string json, string file, int line, int column)
+    {
+        if (!File.Exists(file) || line < 1 || column < 1)
+        {
+            return null;
+        }
+
+        byte[] target = File.ReadAllBytes(file);
+        int lineStart = 0;
+        for (int current = 1; current < line; ++current)
+        {
+            int next = Array.IndexOf(target, (byte)'\n', lineStart);
+            if (next < 0)
+            {
+                return null;
+            }
+
+            lineStart = next + 1;
+        }
+
+        int offset = lineStart + column - 1;
+        using JsonDocument document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 2048 });
+        IndexLocations(document.RootElement);
+        IndexRecords(document.RootElement, []);
+        Dictionary<string, bool> sameFile = new(StringComparer.Ordinal);
+        bool Matches(string candidate)
+        {
+            if (!sameFile.TryGetValue(candidate, out bool same))
+            {
+                same = File.Exists(candidate) && CanonicalPath.Equals(candidate, file);
+                sameFile.Add(candidate, same);
+            }
+
+            return same;
+        }
+
+        FailedArrayField? Search(JsonElement node, string[] scope)
+        {
+            string kind = Text(node, "kind");
+            string name = Text(node, "name");
+            if (kind == "FieldDecl" && locations.TryGetValue(Text(node, "id"), out var location) && location.File is not null &&
+                location.Offset == offset && Matches(location.File))
+            {
+                bool native = Annotation(node, "rocks.field.native") is not null;
+                bool property = HasFieldAnnotation(node);
+                if (!native && !property)
+                {
+                    return null;
+                }
+
+                string spelling = TypeSpelling(node);
+                string checkedType = !native && ArrayRules.Split(spelling) is (_, string element) ? element : spelling;
+                return new(string.Join("::", scope.Append(name)), spelling, property, native, new SourceSite(location.File, line),
+                    StrongReferencePath(checkedType, []));
+            }
+
+            // 이름 표기는 레코드 색인(IndexRecords)과 같다(익명 namespace는 "(anonymous namespace)").
+            string[] inner = kind == "NamespaceDecl" ? [.. scope, name.Length == 0 ? "(anonymous namespace)" : name]
+                : kind == "CXXRecordDecl" && name.Length != 0 ? [.. scope, name] : scope;
+            foreach (JsonElement child in Children(node))
+            {
+                if (Search(child, inner) is { } result)
+                {
+                    return result;
+                }
+            }
+
+            return null;
+        }
+
+        return Search(document.RootElement, []);
+    }
 
     // 두 Clang 계열이 실제로 출력하는 location 변형과 위조 사례를 프로세스에 독립적으로 검증한다.
     internal void VerifyPropertySourceForTest(JsonElement field)

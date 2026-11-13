@@ -62,6 +62,29 @@ internal static class ModuleMetaTests
     private const string Shape = "#pragma once\n#include <Lower/Parent.h>\nnamespace probe {\n" +
         "ROCKS_STRUCT()\nstruct Shape {\nROCKS_PROPERTY() Point corner;\nROCKS_PROPERTY() Link link;\n};\n}\n";
 
+    // B5c 세 모듈 구성(Docs/Design/ReflectionFoundations.ko.md 5.6절 시험)의 원소 모듈 Elements다: 원소 enum EA, 참조 struct SA,
+    // 참조 없는 struct Plain.
+    private const string ArrayElements = "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n#include <Object/ObjectRefs.h>\nnamespace probe {\n" +
+        "ROCKS_ENUM()\nenum class EA : rocks::uint8 { Off = 0, On = 1 };\n" +
+        "ROCKS_STRUCT()\nstruct SA {\nROCKS_PROPERTY() rocks::ObjectRef<rocks::Object> target;\nROCKS_PROPERTY() rocks::int32 count = 0;\n};\n" +
+        "ROCKS_STRUCT()\nstruct Plain {\nROCKS_PROPERTY() rocks::uint16 x = 0;\n};\n}\n";
+
+    // 세 모듈 구성의 base 모듈 Lower다: 다른 모듈 struct·enum의 배열 필드를 가진 Parent와, 다른 모듈 struct의 배열 멤버를 가진
+    // struct Group(ContainsReferenceArray).
+    private const string ArrayParent = "#pragma once\n#include <Elements/Items.h>\n#include <Core/Containers/Array.h>\n#include <Object/ObjectRefArray.h>\n" +
+        "#include <Object/StructRefArray.h>\nnamespace probe {\n" +
+        "ROCKS_STRUCT()\nstruct Group {\nexplicit Group(rocks::Allocator& allocator) noexcept : slots(allocator), plains(allocator) {}\n" +
+        "ROCKS_PROPERTY() rocks::StructRefArray<SA> slots;\nROCKS_PROPERTY() rocks::Array<Plain> plains;\n};\n" +
+        "ROCKS_CLASS()\nstruct Parent : public rocks::Object {\n" +
+        "explicit Parent(rocks::Allocator& allocator) noexcept : slots(allocator), modes(allocator), plains(allocator), links(allocator) {}\n" +
+        "ROCKS_PROPERTY() rocks::StructRefArray<SA> slots;\nROCKS_PROPERTY() rocks::Array<EA> modes;\nROCKS_PROPERTY(MaxElements = 7) rocks::Array<Plain> plains;\n" +
+        "ROCKS_PROPERTY() rocks::ObjectRefArray<Parent> links;\n};\n}\n";
+
+    // 세 모듈 구성의 파생 모듈 Upper다: Parent의 배열 필드를 상속하고 import struct Group을 필드로 둔다.
+    private const string ArrayValue = "#pragma once\n#include <Lower/Parent.h>\nnamespace probe {\n" +
+        "ROCKS_CLASS()\nstruct Value : public Parent {\nexplicit Value(rocks::Allocator& allocator) noexcept : Parent(allocator), group(allocator) {}\n" +
+        "ROCKS_PROPERTY() rocks::ObjectRef<Parent> next;\nROCKS_PROPERTY() Group group;\n};\n}\n";
+
     public static void Register(TestSuite suite, Options options, IReadOnlyDictionary<string, string?> environment)
     {
         suite.Add("Meta.ModuleGeneratesHeadersAggregatesAndDescriptor", async () =>
@@ -491,9 +514,11 @@ internal static class ModuleMetaTests
             layout.Write("Upper/Private/Upper/Secret.h", "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\nnamespace probe {\n" +
                 "ROCKS_STRUCT()\nstruct Secret {\nROCKS_PROPERTY() rocks::int32 a = 0;\n};\n}\n");
             layout.Manifest("Upper", ["probe::Secret"], ["probe::Secret::a", "probe::Value::secret", "probe::Shape::secret"]);
-            foreach (string member in new[] { "ROCKS_PROPERTY() Secret secret;\n", "ROCKS_NATIVE() Secret secret;\n" })
+            // 배열 원소 struct도 같다(B5c — 대상 종류가 원소 종류다).
+            foreach (string member in new[] { "ROCKS_PROPERTY() Secret secret;\n", "ROCKS_NATIVE() Secret secret;\n", "ROCKS_PROPERTY() rocks::Array<Secret> secret;\n" })
             {
-                layout.Write("Upper/Public/Upper/Value.h", Value.Replace("#include <Object/ObjectRefs.h>\n", "#include <Object/ObjectRefs.h>\n#include <Upper/Secret.h>\n", StringComparison.Ordinal)
+                layout.Write("Upper/Public/Upper/Value.h", Value.Replace("#include <Object/ObjectRefs.h>\n",
+                        "#include <Object/ObjectRefs.h>\n#include <Core/Containers/Array.h>\n#include <Upper/Secret.h>\n", StringComparison.Ordinal)
                     .Replace("ROCKS_PROPERTY() rocks::ObjectRef<Parent> next;\n", "ROCKS_PROPERTY() rocks::ObjectRef<Parent> next;\n" + member, StringComparison.Ordinal));
                 await Reject(layout.RunUpperInputsAsync([(layout.Source("Upper/Public/Upper/Value.h"), "Upper/Value.h", false),
                     (layout.Source("Upper/Private/Upper/Secret.h"), "Upper/Secret.h", true)]), "RMC2006", "private struct");
@@ -729,6 +754,181 @@ internal static class ModuleMetaTests
                 await Reject(layout.RunUpperAsync(imports: [mutated]), "RMC2302", "cycle");
             }
         });
+
+        // B5c 세 모듈 구성: 원소 struct·enum 모듈(Elements) → 그 원소의 StructRefArray<SA>·Array<EA>·Array<Plain>·ObjectRefArray를
+        // 가진 base 모듈(Lower) → 그 배열 필드를 상속하고 다른 모듈 struct의 배열 멤버를 가진 import struct(Group)를 필드로 둔
+        // 파생 모듈(Upper)이 모두 컴파일된다. 상속 배열 필드는 descriptor 항목이 그대로(maxElements 포함) 옮겨지고, 파생 클래스의
+        // 생성 Trace가 import base의 배열 필드를 방문하며, 생성 헤더가 상속 import 필드의 원소 struct 생성 헤더를 include한다
+        // (Docs/Design/ReflectionFoundations.ko.md 5.6절).
+        suite.Add("Meta.ImportedArrayFieldsAcrossThreeModules", async () =>
+        {
+            using Layout layout = new(options, environment);
+            layout.WriteArrayModules();
+            foreach (string module in new[] { "Elements", "Lower", "Upper" })
+            {
+                ProcessResult result = await layout.RunArrayModuleAsync(module);
+                Verify.Equal(0, result.ExitCode, module + " module: " + result.StdErr);
+            }
+
+            using JsonDocument elements = JsonDocument.Parse(File.ReadAllBytes(layout.Descriptor("Elements")));
+            using JsonDocument lower = JsonDocument.Parse(File.ReadAllBytes(layout.Descriptor("Lower")));
+            using JsonDocument upper = JsonDocument.Parse(File.ReadAllBytes(layout.Descriptor("Upper")));
+            string saId = Type(elements, "probe::SA").GetProperty("id").GetString()!;
+            JsonElement slots = FieldNodeOf(lower, "probe::Parent", "slots");
+            Verify.Equal("Value", slots.GetProperty("fieldKind").GetString(), "StructRefArray is a value field");
+            Verify.Equal(saId, slots.GetProperty("element").GetProperty("type").GetString(), "element struct of another module");
+            Verify.Equal("ObjectReference", FieldNodeOf(lower, "probe::Parent", "links").GetProperty("fieldKind").GetString(), "ObjectRefArray field kind");
+            Verify.Equal(7u, FieldNodeOf(lower, "probe::Parent", "plains").GetProperty("maxElements").GetUInt32(), "explicit MaxElements");
+            Verify.That(Type(lower, "probe::Group").GetProperty("flags").EnumerateArray().Select(flag => flag.GetString())
+                .SequenceEqual(["ContainsStrongReference", "ContainsReferenceArray"]), "imported element struct traits propagate");
+            foreach (string name in new[] { "slots", "modes", "plains", "links" })
+            {
+                Verify.Equal(FieldNodeOf(lower, "probe::Parent", name).GetRawText(), FieldNodeOf(upper, "probe::Value", name).GetRawText(),
+                    "inherited array field entry (maxElements included) is preserved: " + name);
+            }
+
+            string value = Compact(File.ReadAllText(layout.Generated("Upper", "Public/Upper/Value.generated.h")));
+            foreach ((string expected, string reason) in new[]
+            {
+                ("#include<Elements/Items.generated.h>", "element struct header of an inherited import field"),
+                ("#include<Lower/Parent.generated.h>", "import struct header"),
+                ("detail::TraceArrayField(typed.*(&::probe::Parent::slots), visitor);", "class Trace visits the import base StructRefArray"),
+                ("detail::TraceArrayField(typed.*(&::probe::Parent::links), visitor);", "class Trace visits the import base ObjectRefArray"),
+                ("GeneratedType<::probe::Group>::Trace(typed.*(&::probe::Value::group), visitor);", "class Trace calls the import struct Trace"),
+                ("NativeTypeKey<::probe::SA>()", "inherited struct element native key"),
+                ("NativeTypeKey<::probe::EA>()", "inherited enum element native key"),
+                ("static_assert(GeneratedType<::probe::SA>::ContainsStrongReference && !GeneratedType<::probe::SA>::ContainsReferenceArray", "inherited StructRefArray element check"),
+                (", 7u}", "inherited maxElements in the derived schema")
+            })
+            {
+                Verify.That(value.Contains(Compact(expected), StringComparison.Ordinal), "generated code missing " + reason + ": " + expected);
+            }
+
+            string aggregate = Compact(File.ReadAllText(layout.Generated("Upper", "Public/Upper/Upper.module.generated.h")));
+            int elementsModule = aggregate.IndexOf("::rocks::generated::Elements::RegisterModuleTypes", StringComparison.Ordinal);
+            int lowerModule = aggregate.IndexOf("::rocks::generated::Lower::RegisterModuleTypes", StringComparison.Ordinal);
+            int own = aggregate.IndexOf("RegisterIfAbsent(::rocks::GeneratedType<::probe::Value>::Schema()", StringComparison.Ordinal);
+            Verify.That(elementsModule >= 0 && lowerModule >= 0 && own > elementsModule && own > lowerModule, "dependency modules are registered first:\n" + aggregate);
+        });
+
+        // descriptor의 배열 필드 항목도 엄격하게 읽는다(Docs/Design/ReflectionFoundations.ko.md 5.6절 descriptor): element·maxElements는
+        // 배열 필드에만, 원소 키는 종류별로 정확히, element.type은 Enum·Struct면 ID 필수, maxElements 1..1,048,576, fieldKind·Required는
+        // 원소 종류와 대응, 원소 대상의 종류(RMC1000)와 존재(RMC2003).
+        suite.Add("Meta.ArrayDescriptorIsReadStrictly", async () =>
+        {
+            using Layout layout = new(options, environment);
+            layout.WriteArrayModules();
+            Verify.Equal(0, (await layout.RunArrayModuleAsync("Elements")).ExitCode, "elements module");
+            Verify.Equal(0, (await layout.RunArrayModuleAsync("Lower")).ExitCode, "lower module");
+            string original = File.ReadAllText(layout.Descriptor("Lower"));
+            using JsonDocument elements = JsonDocument.Parse(File.ReadAllBytes(layout.Descriptor("Elements")));
+            string saId = Type(elements, "probe::SA").GetProperty("id").GetString()!;
+            System.Text.Json.Nodes.JsonObject Element(string kind, string? type = null)
+            {
+                System.Text.Json.Nodes.JsonObject element = new() { ["kind"] = kind };
+                if (type is not null)
+                {
+                    element["type"] = type;
+                }
+
+                return element;
+            }
+
+            foreach ((string name, string code, string reason, Action<System.Text.Json.Nodes.JsonObject> change) in new (string, string, string, Action<System.Text.Json.Nodes.JsonObject>)[]
+            {
+                ("elementOnScalar", "RMC1000", "element or maxElements on a field that is not an array", parent => FieldNode(parent, "slots")["value"] = new System.Text.Json.Nodes.JsonObject { ["kind"] = "Int32" }),
+                ("arrayValueType", "RMC1000", "unexpected or missing properties: type", parent => FieldNode(parent, "modes")["value"]!["type"] = ""),
+                ("missingElement", "RMC1000", "element of an array field", parent => FieldNode(parent, "modes")["element"] = null),
+                ("nestedElement", "RMC1000", "element kind Array", parent => FieldNode(parent, "modes")["element"] = Element("Array")),
+                ("opaqueElement", "RMC1000", "element kind Opaque", parent => FieldNode(parent, "modes")["element"] = Element("Opaque")),
+                ("elementWithoutType", "RMC1000", "unexpected or missing properties: type", parent => FieldNode(parent, "modes")["element"] = Element("Enum")),
+                ("elementEmptyType", "RMC1000", "identifier must be 32 lowercase hex digits", parent => FieldNode(parent, "modes")["element"] = Element("Enum", "")),
+                ("scalarElementType", "RMC1000", "unexpected or missing properties: type", parent => FieldNode(parent, "modes")["element"] = Element("Int32", "")),
+                ("elementExtraKey", "RMC1000", "unexpected or missing properties: extra", parent => FieldNode(parent, "plains")["element"]!["extra"] = 1),
+                ("zeroMaxElements", "RMC1000", "maxElements 0 of an array field", parent => FieldNode(parent, "plains")["maxElements"] = 0),
+                ("largeMaxElements", "RMC1000", "maxElements 1048577 of an array field", parent => FieldNode(parent, "plains")["maxElements"] = 1048577),
+                ("referenceArrayAsValue", "RMC1000", "fieldKind and value kind disagree", parent => FieldNode(parent, "links")["fieldKind"] = "Value"),
+                ("structArrayAsReference", "RMC1000", "fieldKind and value kind disagree", parent => FieldNode(parent, "slots")["fieldKind"] = "ObjectReference"),
+                ("requiredScalarArray", "RMC1000", "Required on a field that is not an object or soft object reference or an array of them", parent => FieldNode(parent, "modes")["flags"] = new System.Text.Json.Nodes.JsonArray("Required")),
+                ("enumElementToStruct", "RMC1000", "targets probe::SA, which is not a reflected enum", parent => FieldNode(parent, "modes")["element"] = Element("Enum", saId)),
+                ("referenceElementToStruct", "RMC1000", "reference field probe::Parent::links targets struct probe::SA", parent => FieldNode(parent, "links")["element"] = Element("ObjectReference", saId)),
+                ("unknownElementStruct", "RMC2003", "not in an imported descriptor", parent => FieldNode(parent, "slots")["element"] = Element("Struct", "0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c01"))
+            })
+            {
+                string mutated = layout.Generated("Mutated", name + ".rocksmeta.json");
+                Directory.CreateDirectory(Path.GetDirectoryName(mutated)!);
+                File.WriteAllText(mutated, MutateType(original, "probe::Parent", change));
+                await Reject(layout.RunArrayModuleAsync("Upper", [mutated, layout.Descriptor("Elements")]), code, reason);
+            }
+        });
+
+        // import struct 형질 대조(ContainsReferenceArray — 필드와 어긋나면 RMC1000)와 StructRefArray 원소 struct 규칙(Registry 컨테이너를
+        // 담는 참조 struct면 RMC1000), 다른 모듈 private 원소 struct(RMC2006 — 이 모듈 선언과 import 필드).
+        suite.Add("Meta.ArrayDescriptorTraitsAndVisibilityAreChecked", async () =>
+        {
+            using Layout layout = new(options, environment);
+            layout.WriteArrayModules();
+            Verify.Equal(0, (await layout.RunArrayModuleAsync("Elements")).ExitCode, "elements module");
+            Verify.Equal(0, (await layout.RunArrayModuleAsync("Lower")).ExitCode, "lower module");
+            string lower = File.ReadAllText(layout.Descriptor("Lower"));
+            string elements = File.ReadAllText(layout.Descriptor("Elements"));
+            string Mutate(string descriptor, string name, string type, Action<System.Text.Json.Nodes.JsonObject> change)
+            {
+                string mutated = layout.Generated("Mutated", name + ".rocksmeta.json");
+                Directory.CreateDirectory(Path.GetDirectoryName(mutated)!);
+                File.WriteAllText(mutated, MutateType(descriptor, type, change));
+                return mutated;
+            }
+
+            string missingTrait = Mutate(lower, "missingReferenceArray", "probe::Group", group => group["flags"] = new System.Text.Json.Nodes.JsonArray("ContainsStrongReference"));
+            await Reject(layout.RunArrayModuleAsync("Upper", [missingTrait, layout.Descriptor("Elements")]), "RMC1000", "ContainsReferenceArray flag");
+            string spuriousTrait = Mutate(elements, "spuriousReferenceArray", "probe::Plain", plain => plain["flags"] = new System.Text.Json.Nodes.JsonArray("ContainsReferenceArray"));
+            await Reject(layout.RunArrayModuleAsync("Upper", [layout.Descriptor("Lower"), spuriousTrait]), "RMC1000", "ContainsReferenceArray flag");
+            string nested = Mutate(elements, "nestedReferenceArray", "probe::SA", sa =>
+            {
+                sa["flags"] = new System.Text.Json.Nodes.JsonArray("ContainsStrongReference", "ContainsReferenceArray");
+                sa["fields"]!.AsArray().Add(new System.Text.Json.Nodes.JsonObject
+                {
+                    ["owner"] = "probe::SA",
+                    ["name"] = "refs",
+                    ["id"] = "0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d01",
+                    ["fieldKind"] = "ObjectReference",
+                    ["value"] = new System.Text.Json.Nodes.JsonObject { ["kind"] = "Array" },
+                    ["element"] = new System.Text.Json.Nodes.JsonObject { ["kind"] = "ObjectReference", ["type"] = "" },
+                    ["flags"] = new System.Text.Json.Nodes.JsonArray(),
+                    ["toolName"] = "refs",
+                    ["category"] = "",
+                    ["displayName"] = "",
+                    ["maxElements"] = 65536
+                });
+            });
+            await Reject(layout.RunArrayModuleAsync("Upper", [layout.Descriptor("Lower"), nested]), "RMC1000", "holds a reference array");
+
+            // import DFS의 간선에 struct 원소 배열이 들어간다: 자기 자신을 원소로 담는 Plain은 RMC2302다.
+            using (JsonDocument parsed = JsonDocument.Parse(elements))
+            {
+                string plainId = Type(parsed, "probe::Plain").GetProperty("id").GetString()!;
+                string cycle = Mutate(elements, "arrayCycle", "probe::Plain", plain => plain["fields"]!.AsArray().Add(new System.Text.Json.Nodes.JsonObject
+                {
+                    ["owner"] = "probe::Plain",
+                    ["name"] = "children",
+                    ["id"] = "0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e01",
+                    ["fieldKind"] = "Value",
+                    ["value"] = new System.Text.Json.Nodes.JsonObject { ["kind"] = "Array" },
+                    ["element"] = new System.Text.Json.Nodes.JsonObject { ["kind"] = "Struct", ["type"] = plainId },
+                    ["flags"] = new System.Text.Json.Nodes.JsonArray(),
+                    ["toolName"] = "children",
+                    ["category"] = "",
+                    ["displayName"] = "",
+                    ["maxElements"] = 65536
+                }));
+                await Reject(layout.RunArrayModuleAsync("Upper", [layout.Descriptor("Lower"), cycle]), "RMC2302", "cycle");
+            }
+
+            string hidden = Mutate(elements, "privateElement", "probe::SA", sa => sa["visibility"] = "private");
+            await Reject(layout.RunArrayModuleAsync("Lower", [hidden]), "RMC2006", "private reflected type");
+            await Reject(layout.RunArrayModuleAsync("Upper", [layout.Descriptor("Lower"), hidden]), "RMC2006", "uses private struct");
+        });
     }
 
     // 공백을 모두 지운 텍스트다(clang-format 줄바꿈과 무관하게 생성 코드 조각을 찾는다).
@@ -806,6 +1006,40 @@ internal static class ModuleMetaTests
             Manifest("Lower", ["probe::Point", "probe::Link", "probe::Mode", "probe::WorldBits", "probe::Outer"],
                 ["probe::Point::x", "probe::Link::target", "probe::Link::at", "probe::Parent::origin", "probe::WorldBits::value", "probe::Outer::inner"]);
             Manifest("Upper", ["probe::Shape"], ["probe::Shape::corner", "probe::Shape::link", "probe::Value::shape", "probe::Value::at"]);
+        }
+
+        // B5c 세 모듈 구성(Elements → Lower → Upper)의 원본과 명세를 쓴다.
+        public void WriteArrayModules()
+        {
+            Write("Elements/Public/Elements/Items.h", ArrayElements);
+            Write("Lower/Public/Lower/Parent.h", ArrayParent);
+            Write("Upper/Public/Upper/Value.h", ArrayValue);
+            Manifest("Elements", ["probe::EA", "probe::SA", "probe::Plain"], ["probe::SA::target", "probe::SA::count", "probe::Plain::x"]);
+            Manifest("Lower", ["probe::Group"], ["probe::Group::slots", "probe::Group::plains", "probe::Parent::slots", "probe::Parent::modes",
+                "probe::Parent::plains", "probe::Parent::links"]);
+            Manifest("Upper", [], ["probe::Value::group"]);
+        }
+
+        // 세 모듈 구성의 한 모듈을 생성한다: Elements는 import가 없고, Lower는 Elements를, Upper는 Lower와 Elements를 import한다(빌드가
+        // 넘기는 닫힌 descriptor 집합). imports를 주면 그 descriptor로 바꾼다.
+        public Task<ProcessResult> RunArrayModuleAsync(string module, IReadOnlyList<string>? imports = null)
+        {
+            (string include, string[] dependencies, string[] defaultImports) = module switch
+            {
+                "Elements" => ("Elements/Items.h", Array.Empty<string>(), Array.Empty<string>()),
+                "Lower" => ("Lower/Parent.h", new[] { "Elements" }, new[] { Descriptor("Elements") }),
+                _ => ("Upper/Value.h", new[] { "Lower", "Elements" }, new[] { Descriptor("Lower"), Descriptor("Elements") })
+            };
+            Directory.CreateDirectory(Generated(module, "Public"));
+            Directory.CreateDirectory(Generated(module, "Private"));
+            List<string> arguments = ["--module", module, "--input", Source($"{module}/Public/{include}"), "--include", include];
+            foreach (string import in imports ?? defaultImports)
+            {
+                arguments.AddRange(["--import", import]);
+            }
+
+            return RunAsync(module, arguments, [Source($"{module}/Public")], [],
+                dependencies.SelectMany(dependency => new[] { Source($"{dependency}/Public"), Generated(dependency, "Public") }).ToList());
         }
 
         // module은 생성할 모듈 이름이다(원본·명세는 Lower 것을 쓴다). extra는 그대로 덧붙인다.

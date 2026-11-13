@@ -12,8 +12,9 @@ internal static class ModuleDescriptor
     private static readonly string[] TypeKeys =
         ["kind", "name", "id", "version", "flags", "base", "header", "visibility", "fields"];
 
-    // struct 항목: base 대신 생성 형질 flags(ContainsStrongReference·RequiresWorldOnlyOwner)와 binds(Binds 실제
-    // 타입의 Clang 정규 철자, 미러가 아니면 "")다(Docs/Design/ReflectionFoundations.ko.md 1.4·4.6절).
+    // struct 항목: base 대신 생성 형질 flags(쓰기 순서 ContainsStrongReference → RequiresWorldOnlyOwner →
+    // ContainsReferenceArray)와 binds(Binds 실제 타입의 Clang 정규 철자, 미러가 아니면 "")다(Docs/Design/
+    // ReflectionFoundations.ko.md 1.4·4.6·5.6절).
     private static readonly string[] StructKeys =
         ["kind", "name", "id", "version", "header", "visibility", "flags", "binds", "fields"];
 
@@ -102,13 +103,20 @@ internal static class ModuleDescriptor
             json.WriteStringValue("RequiresWorldOnlyOwner");
         }
 
+        if (type.ContainsReferenceArray)
+        {
+            json.WriteStringValue("ContainsReferenceArray");
+        }
+
         json.WriteEndArray();
         json.WriteString("binds", type.Binds);
         WriteFields(json, type);
         json.WriteEndObject();
     }
 
-    // 클래스·struct의 fields 배열이다(클래스는 상속 포함 전체, 생성 순서 그대로).
+    // 클래스·struct의 fields 배열이다(클래스는 상속 포함 전체, 생성 순서 그대로). 배열 필드는 value가 {"kind": "Array"}이고
+    // 원소 형식이 element(대상 종류일 때만 type), 길이 상한이 maxElements다(배열이 아니면 element null·maxElements 0).
+    // 컨테이너 키는 두지 않는다(원소 종류와 원소 struct 형질로 정해진다 — Docs/Design/ReflectionFoundations.ko.md 5.6절).
     private static void WriteFields(Utf8JsonWriter json, ClassModel type)
     {
         json.WriteStartArray("fields");
@@ -118,16 +126,31 @@ internal static class ModuleDescriptor
             json.WriteString("owner", field.Owner);
             json.WriteString("name", field.Name);
             json.WriteString("id", field.Id);
-            json.WriteString("fieldKind", field.IsReference ? "ObjectReference" : "Value");
+            json.WriteString("fieldKind", field.IsObjectReferenceFieldKind ? "ObjectReference" : "Value");
             json.WriteStartObject("value");
             json.WriteString("kind", field.Kind);
-            if (field.HasTargetType)
+            if (!field.IsArray && field.HasTargetType)
             {
                 json.WriteString("type", field.ReferenceId ?? "");
             }
 
             json.WriteEndObject();
-            json.WriteNull("element");
+            if (field.IsArray)
+            {
+                json.WriteStartObject("element");
+                json.WriteString("kind", field.ElementKind);
+                if (field.HasTargetType)
+                {
+                    json.WriteString("type", field.ReferenceId ?? "");
+                }
+
+                json.WriteEndObject();
+            }
+            else
+            {
+                json.WriteNull("element");
+            }
+
             json.WriteStartArray("flags");
             if (field.Spec.Transient)
             {
@@ -153,7 +176,7 @@ internal static class ModuleDescriptor
             json.WriteString("toolName", field.EffectiveToolName);
             json.WriteString("category", field.Spec.Category);
             json.WriteString("displayName", field.Spec.DisplayName);
-            json.WriteNumber("maxElements", 0);
+            json.WriteNumber("maxElements", field.IsArray ? field.MaxElements : 0);
             json.WriteEndObject();
         }
 
@@ -285,7 +308,7 @@ internal static class ModuleDescriptor
             string name = Name(type.GetProperty("name"), QualifiedName, "type name");
             string id = Hex(type.GetProperty("id"), Invalid);
             string[] flags = type.GetProperty("flags").EnumerateArray().Select(flag => flag.GetString() ?? "").ToArray();
-            bool KnownFlag(string flag) => isStruct ? flag is "ContainsStrongReference" or "RequiresWorldOnlyOwner" : flag is "Abstract" or "WorldOnly";
+            bool KnownFlag(string flag) => isStruct ? flag is "ContainsStrongReference" or "RequiresWorldOnlyOwner" or "ContainsReferenceArray" : flag is "Abstract" or "WorldOnly";
             if (flags.Any(flag => !KnownFlag(flag)) || flags.Distinct(StringComparer.Ordinal).Count() != flags.Length)
             {
                 throw Invalid("unknown or duplicate type flag in " + name);
@@ -327,6 +350,7 @@ internal static class ModuleDescriptor
                 IsStruct = isStruct,
                 ContainsStrongReference = flags.Contains("ContainsStrongReference"),
                 RequiresWorldOnlyOwner = flags.Contains("RequiresWorldOnlyOwner"),
+                ContainsReferenceArray = flags.Contains("ContainsReferenceArray"),
                 Binds = binds
             };
             List<FieldModel> fields = [];
@@ -352,16 +376,49 @@ internal static class ModuleDescriptor
                     throw Invalid("field value kind " + kind);
                 }
 
-                bool targetType = FieldModel.KindHasTargetType(kind);
-                RequireKeys(value, targetType ? ["kind", "type"] : ["kind"], Invalid);
-                if (reference != (kind == "ObjectReference"))
+                // 배열 필드는 value에 대상이 없고(value.type 0) element가 원소 형식이다. 배열이 아닌 필드는 element가 null이고
+                // maxElements가 0이다(Docs/Design/ReflectionFoundations.ko.md 5.6절 descriptor).
+                bool array = kind == ArrayRules.Array;
+                RequireKeys(value, !array && FieldModel.KindHasTargetType(kind) ? ["kind", "type"] : ["kind"], Invalid);
+                JsonElement element = field.GetProperty("element");
+                if (!field.GetProperty("maxElements").TryGetUInt32(out uint maxElements))
                 {
-                    throw Invalid("fieldKind and value kind disagree");
+                    throw Invalid("maxElements");
                 }
 
-                if (field.GetProperty("element").ValueKind != JsonValueKind.Null || !field.GetProperty("maxElements").TryGetUInt32(out uint maxElements) || maxElements != 0)
+                string? elementKind = null;
+                JsonElement targetHolder = value;
+                if (array)
                 {
-                    throw Invalid("array fields are not supported by schema 1");
+                    if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty("kind", out JsonElement elementKindValue))
+                    {
+                        throw Invalid("element of an array field");
+                    }
+
+                    elementKind = Name(elementKindValue, Identifier, "element kind");
+                    if (!SchemaValidator.IsSupportedElementKind(elementKind))
+                    {
+                        throw Invalid("element kind " + elementKind);
+                    }
+
+                    RequireKeys(element, FieldModel.KindHasTargetType(elementKind) ? ["kind", "type"] : ["kind"], Invalid);
+                    if (maxElements < 1 || maxElements > ArrayRules.MaxArrayElements)
+                    {
+                        throw Invalid($"maxElements {maxElements} of an array field");
+                    }
+
+                    targetHolder = element;
+                }
+                else if (element.ValueKind != JsonValueKind.Null || maxElements != 0)
+                {
+                    throw Invalid("element or maxElements on a field that is not an array");
+                }
+
+                // 대상 종류는 배열이면 원소 종류다. FieldKind::ObjectReference ⇔ 대상이 ObjectReference(ObjectRefArray 포함).
+                string targetKind = elementKind ?? kind;
+                if (reference != (targetKind == "ObjectReference"))
+                {
+                    throw Invalid("fieldKind and value kind disagree");
                 }
 
                 string[] fieldFlags = field.GetProperty("flags").EnumerateArray().Select(flag => flag.GetString() ?? "").ToArray();
@@ -371,18 +428,18 @@ internal static class ModuleDescriptor
                     throw Invalid("unknown or duplicate field flag");
                 }
 
-                // Required는 강한·소프트 참조 필드에만 쓴다(원본 선언의 RMC2202와 같은 규칙).
-                if (!FieldModel.KindAcceptsRequired(kind) && fieldFlags.Contains("Required", StringComparer.Ordinal))
+                // Required는 강한·소프트 참조 필드와 그 원소의 배열에만 쓴다(원본 선언의 RMC2202와 같은 규칙).
+                if (!FieldModel.KindAcceptsRequired(targetKind) && fieldFlags.Contains("Required", StringComparer.Ordinal))
                 {
-                    throw Invalid("Required on a field that is not an object or soft object reference");
+                    throw Invalid("Required on a field that is not an object or soft object reference or an array of them");
                 }
 
                 string? referenceId = null;
-                if (targetType)
+                if (FieldModel.KindHasTargetType(targetKind))
                 {
-                    string target = value.GetProperty("type").GetString() ?? throw Invalid("reference target");
-                    // Enum·Struct 필드는 대상 ID가 있어야 한다(참조의 ""는 Object다).
-                    referenceId = target.Length == 0 && !FieldModel.KindRequiresTargetId(kind) ? null : Hex(value.GetProperty("type"), Invalid);
+                    string target = targetHolder.GetProperty("type").GetString() ?? throw Invalid("reference target");
+                    // Enum·Struct 대상은 ID가 있어야 한다(참조의 ""는 Object다).
+                    referenceId = target.Length == 0 && !FieldModel.KindRequiresTargetId(targetKind) ? null : Hex(targetHolder.GetProperty("type"), Invalid);
                 }
 
                 string fieldName = Name(field.GetProperty("name"), Identifier, "field name");
@@ -408,9 +465,12 @@ internal static class ModuleDescriptor
                     {
                         EditorOnly = fieldFlags.Contains("EditorOnly"),
                         Required = fieldFlags.Contains("Required"),
-                        ToolName = toolName == fieldName ? "" : toolName
+                        ToolName = toolName == fieldName ? "" : toolName,
+                        MaxElements = maxElements
                     },
                     Kind = kind,
+                    ElementKind = elementKind,
+                    MaxElements = maxElements,
                     ReferenceId = referenceId
                 });
             }
