@@ -54,6 +54,12 @@ public sealed class Physics : EngineModuleRules
 
 `Compiler`, `Jobs`, `NativeOutput` 속성으로 컴파일러 경로, 병렬 작업 수, 출력 위치를 지정할 수 있다. `RocksTarget=Core`는 오브젝트 모듈을 제외한 기반 테스트를 선택한다. 출력과 증거는 기본적으로 `out/` 아래에 기록한다.
 
+### 빌드 환경과 빌드 주입 상수
+
+- 빌드는 프로세스 환경을 물려받지 않고 허용 목록(VS·Windows SDK·Xcode 선택·SOURCE_DATE_EPOCH 같은 Keyed 변수와 PATH·TEMP 같은 Runtime 변수)만 컴파일러에 넘긴다. Keyed 변수만 증분 key에 들어가므로 `dotnet msbuild`가 실행마다 바꾸는 세션 변수가 재빌드를 일으키지 않는다. 컴파일러·링커 동작을 바꾸는 변수(`CL`·`_CL_`·`LINK`·`_LINK_`·`CCC_OVERRIDE_OPTIONS`·`COMPILER_PATH`·`CPATH`·`C_INCLUDE_PATH`·`CPLUS_INCLUDE_PATH`·`OBJC_INCLUDE_PATH`·`LIBRARY_PATH`)가 있었으면 `Build environment: removed …` 한 줄로 알린다. 기본 config 파일은 받는 컴파일러면 `--no-default-config`로 끈다(받지 않는 컴파일러가 config 파일을 읽으면 오류).
+- 모듈 인자로 FP 모델(`-ffast-math`·`/fp:*`·`-ffp-*`·ISA 선택 `-m*` 등)·`-mllvm`·`-Xlinker`·`-Ofast`·`-Xclang`·config 파일·링커·대상 선택·절대 경로를 넘길 수 없다. FP 모델은 구성·모듈마다 달라지지 않는다.
+- Core(`ProvidesBuildInfo`)에 닿는 실행 파일마다 `<출력>/BuildInfo/<실행 파일>.BuildInfo.cpp`가 생겨 `rocks::build::ToolchainFingerprint()`(툴체인 지문 — 에셋 너겟 키, 구성 무관)와 `ToolBuildId()`(도구 빌드 ID — 진단·캐시 무효화, 패키지에 쓰지 않음)를 정의한다(`Core/Build/BuildInfo.h`). 원문은 같은 폴더의 `ToolchainFingerprint.txt`·`<실행 파일>.BuildInfo.txt`이고 `action-report.json`의 `ToolchainFingerprint`·`ToolBuildIds`에도 실린다. 실행 파일이 Core에 닿으면 입력 byte가 하나만 바뀌어도 생성 TU와 link가 다시 돈다. 자세한 규칙은 [Rocks.Build](../Programs/Rocks.Build/README.ko.md#빌드-주입-상수buildinfo)와 [ReflectionFoundations](../Docs/Design/ReflectionFoundations.ko.md) 8.1절을 따른다.
+
 MSBuild는 .NET 도구와 C# 규칙을 빌드하고 단계를 조직한다. `Rocks.Build`가 네이티브 작업 그래프, 입력·출력 해시, 증분 여부, 실패 복구를 담당한다. `Build/Rules/*.Build.cs`는 모듈을, `*.Target.cs`는 실행 대상을 정의한다. 규칙은 신뢰된 프로젝트 코드이며 동적으로 읽는 외부 입력은 명시해야 한다.
 
 ## 설치 SDK와 게임 빌드
@@ -90,13 +96,13 @@ dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll id
 dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll ids move --from Old.rocksids.json --to New.rocksids.json --type sample::Character
 ```
 
-빌드는 리플렉션 헤더가 있는 모듈을 의존 순서로 하나씩 생성한다. 생성 헤더는 `<출력>/Generated/<모듈>/Public|Private/<원본 철자의 .h를 .generated.h로>`이며 그 모듈의 public·private include로 전파된다(`#include <Module/Type.generated.h>`). 모듈 집계 헤더 `<모듈>/<모듈>.module.generated.h`의 `rocks::generated::<모듈>::RegisterModuleTypes`가 의존 모듈부터 public 타입을 등록하고, private 헤더의 타입은 `<모듈>/<모듈>.private.module.generated.h`의 `RegisterPrivateModuleTypes`가 등록한다. 다른 모듈의 타입은 그 모듈의 descriptor를 import해 상속·참조한다 — 빌드 중에는 이번 실행의 stage descriptor를 쓰고, 모두 성공하면 `<출력>/Metadata/<모듈>.rocksmeta.json`으로 게시한다. private 헤더의 타입은 그 모듈 안에서만 쓴다. 설치형 SDK는 리플렉션 모듈의 descriptor와 명세를 `Metadata/<모듈>/`에 담고(`rocks-sdk.json` 버전 3), 게임 빌드는 SDK 모듈을 다시 생성하지 않고 그 descriptor를 import한다. 사용 계약과 진단 코드는 [리플렉션 메타데이터](../Docs/Implementation/ReflectionMetadata.ko.md)를 따른다.
+빌드는 리플렉션 헤더가 있는 모듈을 의존 순서로 하나씩 생성한다. 생성 헤더는 `<출력>/Generated/<모듈>/Public|Private/<원본 철자의 .h를 .generated.h로>`이며 그 모듈의 public·private include로 전파된다(`#include <Module/Type.generated.h>`). 모듈 집계 헤더 `<모듈>/<모듈>.module.generated.h`의 `rocks::generated::<모듈>::RegisterModuleTypes`가 의존 모듈부터 public 타입을 등록하고, private 헤더의 타입은 `<모듈>/<모듈>.private.module.generated.h`의 `RegisterPrivateModuleTypes`가 등록한다. 다른 모듈의 타입은 그 모듈의 descriptor를 import해 상속·참조한다 — 빌드 중에는 이번 실행의 stage descriptor를 쓰고, 모두 성공하면 `<출력>/Metadata/<모듈>.rocksmeta.json`으로 게시한다. private 헤더의 타입은 그 모듈 안에서만 쓴다. 설치형 SDK는 리플렉션 모듈의 descriptor와 명세를 `Metadata/<모듈>/`에 담고(`rocks-sdk.json` 버전 4 — 4는 `ProvidesBuildInfo`를 더했고 이전 버전 SDK는 거부한다), 게임 빌드는 SDK 모듈을 다시 생성하지 않고 그 descriptor를 import한다. 사용 계약과 진단 코드는 [리플렉션 메타데이터](../Docs/Implementation/ReflectionMetadata.ko.md)를 따른다.
 
 명세와 코드 변경은 함께 버전 관리한다. CI PR 검사는 실제 공통 조상·양쪽 부모·병합 결과의 모든 명세를 ID 기준으로 합쳐 비교해 이름/ID 충돌, 이력 손실 및 서로 다른 이름 변경을 거부한다(명세를 옮겨도 ID가 사라진 것으로 보지 않는다). 직접 push, 강제 push 또는 이 검사가 필수로 설정되지 않은 저장소는 자동으로 보호되지 않는다. 동일 선언에 두 ID가 이미 발급된 경우 자동으로 하나를 선택하지 않으며 데이터 마이그레이션 도구도 아직 없다. 소스에서 빠진 메타 입력은 자동 탐색하지 않으므로 모든 리플렉션 헤더를 소유 모듈의 `Metadata`에 등록해야 한다.
 
 `Category`와 `DisplayName`은 길이를 별도로 보관하는 UTF-8 바이트 문자열이다. 중간 NUL도 보존하므로 C 문자열 종료 문자로 길이를 추정하지 않는다. 생성 코드는 한글처럼 읽을 수 있는 문자를 그대로 표시하고, 제어 문자는 안전한 escape로 표현한다.
 
-메타컴파일러의 `--clang-arg`는 현재 네이티브 Debug/Development/Release/ASan 프로필(모듈 최적화 재정의 포함)과 붙임형 매크로 정의(`-DNAME=value`, clang-cl의 `/DNAME=value`), macOS의 xcrun 선택 sysroot 및 최소 버전만 허용한다. include 디렉터리는 `--include-dir`에 실제 컴파일 순서대로 지정한다. 미지원 옵션을 추가하려면 네이티브 컴파일과 AST의 동등성을 검토하고 회귀 검사를 먼저 추가해야 한다. 오류는 코드·위치·원인·수정 안내와 함께 출력한다.
+메타컴파일러의 `--clang-arg`는 현재 네이티브 Debug/Development/Release/ASan 프로필(모듈 최적화 재정의와 `--no-default-config` 포함)과 붙임형 매크로 정의(`-DNAME=value`, clang-cl의 `/DNAME=value`), macOS의 xcrun 선택 sysroot 및 최소 버전만 허용한다. include 디렉터리는 `--include-dir`에 실제 컴파일 순서대로 지정한다. 미지원 옵션을 추가하려면 네이티브 컴파일과 AST의 동등성을 검토하고 회귀 검사를 먼저 추가해야 한다. 오류는 코드·위치·원인·수정 안내와 함께 출력한다.
 
 Transient 필드는 GC 참조 추적에는 참여하지만 저장 그래프에 포함되지 않는다. ReadOnly 필드는 일반 쓰기를 거부하고 복원 트랜잭션의 쓰기는 허용한다. Abstract 타입은 등록할 수 있으나 생성할 수 없다. 현재 지원 범위는 단일 공개 비가상 상속과 기본 스칼라·Guid·String·ObjectRef로 제한된다.
 

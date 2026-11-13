@@ -1,6 +1,6 @@
 #include "DeterministicMathReference.generated.h"
 
-#include <Core/Source/Runtime/DeterministicMath/Private/SrgbTables.generated.h>
+#include <DeterministicMath/Private/SrgbTables.generated.h>
 #include <DeterministicMath/DeterministicMath.h>
 #include <Platform/FloatingPointEnvironment.h>
 #include <Platform/Memory.h>

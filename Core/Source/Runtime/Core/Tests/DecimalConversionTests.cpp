@@ -1,4 +1,4 @@
-#include <Core/Source/Runtime/Core/Private/Text/DecimalConversion.h>
+#include <Core/Private/Text/DecimalConversion.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/NumberText.h>
 #include <Core/Text/StringBuilder.h>

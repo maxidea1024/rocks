@@ -14,7 +14,7 @@
 
 // 내부 경계(취소 probe)를 결정적으로 시험한다. 시험은 저장소 루트를 include 경로로 쓴다(PathTests와
 // 같은 방식).
-#include <Core/Source/Runtime/Compression/Private/CompressionInternal.h>
+#include <Compression/Private/CompressionInternal.h>
 
 namespace rocks::test {
 namespace {

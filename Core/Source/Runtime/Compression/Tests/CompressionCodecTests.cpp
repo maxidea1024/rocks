@@ -16,7 +16,7 @@
 
 // 재시도 사이 취소를 결정적으로 시험하려고 내부 경계(취소 probe)를 쓴다. 시험은 저장소 루트를
 // include 경로로 쓴다(AsyncCompressionTests와 같은 방식).
-#include <Core/Source/Runtime/Compression/Private/CompressionInternal.h>
+#include <Compression/Private/CompressionInternal.h>
 
 // 사용자 등록 형식(CompressionCodec.h) 시험이다. 등록 표는 프로세스 전역이고 시험은 이름순으로
 // 한 프로세스에서 실행되므로, 각 시험은 ScopedCodec으로 등록해 REQUIRE로 일찍 끝나도 해제한다.

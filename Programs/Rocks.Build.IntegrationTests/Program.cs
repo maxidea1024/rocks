@@ -81,6 +81,27 @@ try
     Require(!Directory.GetFiles(sdk, "*.cpp", SearchOption.AllDirectories).Concat(Directory.GetFiles(sdk, "*.c", SearchOption.AllDirectories)).Any(), "Installed SDK contains engine or third-party sources");
     Pass("engine-export", timer.Elapsed);
 
+    // MSBuild 경유 빌드를 연속 두 번 하면 두 번째는 0 액션이다. dotnet msbuild는 실행마다 다른 세션 변수
+    // (DOTNET_CLI_TELEMETRY_SESSIONID)를 넘기고, 여기서도 실행마다 다른 변수를 더한다 — 허용 목록 밖 변수는 증분 key가 아니다.
+    timer.Restart();
+    var engineReport = Path.Combine(root, "out", $"dotnet-{(OperatingSystem.IsWindows() ? "windows" : "macos")}-engine-debug", "action-report.json");
+    for (int attempt = 0; attempt < 2; ++attempt)
+    {
+        var inherited = Environment.GetEnvironmentVariables().Cast<System.Collections.DictionaryEntry>()
+            .ToDictionary(entry => (string)entry.Key, entry => (string?)entry.Value,
+                OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        inherited["ROCKS_INTEGRATION_SESSION"] = Guid.NewGuid().ToString("N");
+        var msbuild = await ProcessRunner.RunAsync(new("dotnet", ["msbuild", Path.Combine(root, "Rocks.proj"), "-t:Build", "-p:RocksTarget=Engine",
+            "-p:Configuration=Debug", "-p:Compiler=" + toolchain.CompilerPath, "-nologo"], root, inherited, Timeout: TimeSpan.FromMinutes(20)));
+        File.AppendAllText(Path.Combine(reports, "sdk-integration.log"), "msbuild Engine run " + attempt + "\n" + msbuild.StdOut + msbuild.StdErr + "\n");
+        Require(msbuild.ExitCode == 0, "MSBuild Engine build failed: " + msbuild.StdOut + msbuild.StdErr);
+    }
+
+    var engineSecond = JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(engineReport))!;
+    Require(engineSecond.Succeeded && engineSecond.ExecutedActions == 0,
+        $"The second consecutive MSBuild Engine build executed {engineSecond.ExecutedActions} actions");
+    Pass("msbuild-consecutive-build-no-op", timer.Elapsed);
+
     CopyTree(Path.Combine(root, "Templates/Game/Foundation"), game);
     var originalFiles = Directory.GetFiles(sdk, "*", SearchOption.AllDirectories)
         .ToDictionary(path => path, Hashing.Sha256File, StringComparer.Ordinal);
@@ -98,6 +119,26 @@ try
     var run = await ProcessRunner.RunAsync(new(initial.ModuleOutputs["SampleGame"], [], game, toolchain.Environment));
     Require(run.ExitCode == 0, "External game's generated CLASS/PROPERTY runtime failed");
     Pass("read-only-sdk-external-game-reflection", timer.Elapsed);
+
+    // 빌드 주입 상수(B7): SDK의 Core(ProvidesBuildInfo)에 닿는 게임 실행 파일에 BuildInfo TU가 들어가고, manifest는 SDK 경로를
+    // sdk: 키로 쓰며 SDK·프로젝트 절대 경로를 담지 않는다.
+    timer.Restart();
+    var gameBuildInfo = Path.Combine(output, "BuildInfo/SampleGame.BuildInfo.txt");
+    Require(File.Exists(gameBuildInfo) && File.Exists(Path.Combine(output, "BuildInfo/SampleGame.BuildInfo.cpp")),
+        "Game build did not generate the SampleGame BuildInfo files");
+    var gameManifest = File.ReadAllText(gameBuildInfo);
+    Require(gameManifest.Contains("\ninput: sdk:Headers/", StringComparison.Ordinal) && gameManifest.Contains("\narg: sdk:Libraries/", StringComparison.Ordinal) &&
+        gameManifest.Contains("\nhost-dependent: no\n", StringComparison.Ordinal), "Game BuildInfo manifest lacks sdk: keys:\n" + gameManifest);
+    foreach (var absolute in new[] { sdk, game, fixture })
+    {
+        Require(!gameManifest.Contains(absolute, StringComparison.OrdinalIgnoreCase) &&
+            !gameManifest.Contains(absolute.Replace('\\', '/'), StringComparison.OrdinalIgnoreCase),
+            "Game BuildInfo manifest contains an absolute host path: " + absolute);
+    }
+
+    Require(initial.ToolchainFingerprint is not null && initial.ToolBuildIds.TryGetValue("SampleGame", out var sampleId) &&
+        sampleId == Hashing.Sha256File(gameBuildInfo), "Game action report does not carry the fingerprint and sha256(SampleGame.BuildInfo.txt)");
+    Pass("game-buildinfo-sdk-keys", timer.Elapsed);
 
     // 잘못된 새 ID 발급은 이름 변경을 대체하지 못한다. 실패 시 기존 생성물을 보존한다.
     timer.Restart();
@@ -554,8 +595,9 @@ try
     File.AppendAllText(Path.Combine(game, "Source/Main.cpp"), "\nint RocksBuildGameMarker() noexcept { return 123; }\n");
     Require((await Game()).ExitCode == 0, "Game source edit build failed");
     var edited = ReadActionReport();
-    Require(edited.ExecutedActions == 2 && edited.Actions.Where(action => action.Executed).All(action => action.Module == "SampleGame"),
-        "Game edit must compile one game source and relink without engine actions");
+    // Main.cpp, BuildInfo 생성 TU(도구 빌드 ID가 바뀜), link.
+    Require(edited.ExecutedActions == 3 && edited.Actions.Where(action => action.Executed).All(action => action.Module == "SampleGame"),
+        "Game edit must compile one game source and the BuildInfo TU and relink without engine actions");
     Require(originalFiles.All(pair => Hashing.Sha256File(pair.Key) == pair.Value), "Game build modified installed SDK");
     Pass("game-edit-engine-reuse", timer.Elapsed);
 
@@ -610,6 +652,28 @@ try
     Require(incompatible.ExitCode != 0 && incompatible.StdErr.Contains("mismatch", StringComparison.OrdinalIgnoreCase),
         "Incompatible SDK configuration was silently accepted");
     Pass("sdk-configuration-mismatch", timer.Elapsed);
+
+    // B7 이전 SDK(manifest 버전 3)는 생성 TU의 Core/Build/BuildInfo.h include가 깨지기 전에 버전 불일치로 거부한다.
+    timer.Restart();
+    var sdkManifestPath = Path.Combine(sdk, "rocks-sdk.json");
+    var sdkManifestBytes = File.ReadAllBytes(sdkManifestPath);
+    var sdkManifestText = File.ReadAllText(sdkManifestPath);
+    Require(sdkManifestText.Contains("\"Version\": 4,", StringComparison.Ordinal), "SDK manifest is not version 4:\n" + sdkManifestText);
+    SetReadOnly(sdkManifestPath, false);
+    try
+    {
+        File.WriteAllText(sdkManifestPath, sdkManifestText.Replace("\"Version\": 4,", "\"Version\": 3,", StringComparison.Ordinal));
+        var preB7 = await Game();
+        Require(preB7.ExitCode != 0 && preB7.StdErr.Contains("SDK manifest version mismatch: 3", StringComparison.Ordinal),
+            "A pre-B7 SDK manifest was not rejected: " + preB7.StdErr);
+    }
+    finally
+    {
+        File.WriteAllBytes(sdkManifestPath, sdkManifestBytes);
+        SetReadOnly(sdkManifestPath, true);
+    }
+
+    Pass("sdk-pre-b7-manifest-rejected", timer.Elapsed);
 
     timer.Restart();
     var library = Directory.GetFiles(Path.Combine(sdk, "Libraries"))[0];

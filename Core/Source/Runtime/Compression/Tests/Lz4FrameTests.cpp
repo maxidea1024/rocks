@@ -14,7 +14,7 @@
 
 // 내부 경계(취소 probe)를 결정적으로 시험한다. 시험은 저장소 루트를 include 경로로 쓴다
 // (AsyncCompressionTests와 같은 방식).
-#include <Core/Source/Runtime/Compression/Private/CompressionInternal.h>
+#include <Compression/Private/CompressionInternal.h>
 
 // LZ4 frame(CompressionFormat::Lz4Frame) 시험이다(Docs/Design/Compression.ko.md 12절). 독립 자료는
 // 공식 LZ4 1.11.1 tarball 원본만으로 빌드한 probe(scratchpad, 저장소 밖)가 만들었다:

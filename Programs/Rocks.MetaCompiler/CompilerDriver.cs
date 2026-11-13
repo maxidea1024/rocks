@@ -29,6 +29,9 @@ internal static class CompilerDriver
         Dictionary<string, string?> environment = await NativeEnvironment.CreateAsync(options.Compiler);
         string compiler = NativeEnvironment.FindExecutable(options.Compiler ?? (OperatingSystem.IsWindows() ? "clang-cl" : "clang++"), environment);
         bool clangCl = Path.GetFileNameWithoutExtension(compiler).Contains("clang-cl", StringComparison.OrdinalIgnoreCase);
+        // 기본 config 파일을 끄는 --no-default-config는 고정 인자에 넣지 않는다: 네이티브 프로필(--clang-arg)이 toolchain discovery가 그
+        // 인자를 받는다고 확인한 컴파일러일 때만 그것을 싣고(접두 없음 — clang-cl도 직접 받는다), 아래 명령이 ClangArguments를 그대로
+        // 이어 붙인다. 받지 않는 컴파일러에 무조건 넣으면 MetaCompiler만 실패한다.
         List<string> arguments = clangCl
             ? ["/nologo", "/TP", "/utf-8", "/clang:-std=c++23", "/W4", "/WX", "/GR-", "/EHs-c-", "/Zc:__cplusplus", "/clang:-fsyntax-only", "/clang:-Xclang", "/clang:-ast-dump=json"]
             : ["-x", "c++", "-std=c++23", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-fno-exceptions", "-fno-rtti", "-fsyntax-only", "-Xclang", "-ast-dump=json"];
@@ -609,15 +612,17 @@ internal static class CompilerDriver
     {
         // 허용된 프로필의 의미를 추측해 우회 인자 목록을 계속 추가하지 않는다. 프로필 확장은
         // native compile과 AST의 동등성·회귀 테스트를 함께 검토한 뒤 이 계약에 명시한다.
+        // --no-default-config는 그 인자를 받는 컴파일러면 네이티브 toolchain의 CompileArguments 맨 앞에 있다(기본 config 파일 끄기,
+        // 접두 없음). 받지 않는 컴파일러면 프로필에 없다.
         var windows = new HashSet<string>(StringComparer.Ordinal)
         {
-            "/nologo", "/utf-8", "/W4", "/WX", "/GR-", "/EHs-c-", "/Zc:__cplusplus",
+            "--no-default-config", "/nologo", "/utf-8", "/W4", "/WX", "/GR-", "/EHs-c-", "/Zc:__cplusplus",
             "/clang:-std=c++23", "/clang:-ffp-contract=off", "/MD", "/MDd", "/O2", "/Od", "/Z7",
             "/fsanitize=address"
         };
         var unix = new HashSet<string>(StringComparer.Ordinal)
         {
-            "-std=c++23", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-fno-rtti",
+            "--no-default-config", "-std=c++23", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-fno-rtti",
             "-fno-exceptions", "-ffp-contract=off", "-O2", "-O0", "-g", "-fsanitize=address",
             "-fno-omit-frame-pointer", "-fPIC"
         };

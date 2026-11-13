@@ -1,4 +1,4 @@
-#include <Core/Source/Runtime/PlatformBase/Private/Win64/FileType.h>
+#include <PlatformBase/Private/Win64/FileType.h>
 #include <TestSupport/Test.h>
 
 using namespace rocks;

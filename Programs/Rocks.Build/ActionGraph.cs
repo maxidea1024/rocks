@@ -25,8 +25,9 @@ internal sealed record NativeAction(string Id, string Module, string Kind, strin
     }
 }
 
+// Closures: 계획에 든 모듈마다 도달 집합(자기 자신, 그다음 의존 순서)이다. BuildInfo가 실행 파일의 액션을 고를 때 쓴다.
 internal sealed record NativePlan(IReadOnlyList<NativeAction> Actions,
-    IReadOnlyDictionary<string, string> ModuleOutputs);
+    IReadOnlyDictionary<string, string> ModuleOutputs, IReadOnlyDictionary<string, IReadOnlyList<string>> Closures);
 
 internal static class ActionGraph
 {
@@ -104,7 +105,11 @@ internal static class ActionGraph
         var actions = new List<NativeAction>();
         var outputs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var terminalActions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var closures = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         bool windows = request.Toolchain.Platform == NativePlatform.Windows;
+        // 생성 TU 디렉터리는 header 디렉터리 목록에 넣지 않는다 — 공용 디렉터리의 header 확장자 파일 하나가 모든 실행 파일 TU를
+        // 다시 컴파일하게 만들지 않는다(생성 TU의 key는 cpp 내용이다).
+        string buildInfo = Path.TrimEndingDirectorySeparator(BuildInfoGenerator.DirectoryOf(output));
         foreach (var module in ordered)
         {
             var reachable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -129,6 +134,7 @@ internal static class ActionGraph
 
             Reach(module.Name);
             var dependencies = dependencyOrder.ToArray();
+            closures[module.Name] = [module.Name, .. dependencies.Select(value => value.Name)];
             string[] includes = module.PublicIncludeDirectories.Concat(module.PrivateIncludeDirectories)
                 .Concat(dependencies.SelectMany(value => value.PublicIncludeDirectories)).Select(Absolute)
                 .Distinct(NativeToolchains.PathComparer).ToArray();
@@ -165,6 +171,7 @@ internal static class ActionGraph
             }
 
             string[] headers = includes.Concat(sources.Select(value => Path.GetDirectoryName(value)!))
+                .Where(value => !NativeToolchains.PathComparer.Equals(Path.TrimEndingDirectorySeparator(value), buildInfo))
                 .Distinct(NativeToolchains.PathComparer).ToArray();
             string[] extraInputs = module.AdditionalInputs.Concat(dependencies.SelectMany(value => value.AdditionalInputs))
                 .Select(Absolute).Distinct(NativeToolchains.PathComparer).ToArray();
@@ -346,7 +353,7 @@ internal static class ActionGraph
             }
         }
 
-        return new(actions, outputs);
+        return new(actions, outputs, closures);
     }
 
     /// <summary>구성과 모듈 재정의로 최적화 여부를 정한다. Debug·Asan은 끄고 Development·Release는 켠다.</summary>

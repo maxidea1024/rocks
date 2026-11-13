@@ -9,17 +9,19 @@ namespace Rocks.Build.Cli;
 // SystemLibraries·Frameworks는 정적 라이브러리가 요구하는 플랫폼 링크 의존이다. 외부 게임의 최종 링크가 같은 선언을
 // 받아야 하므로 SDK에 함께 담는다(NativeModuleInput과 같은 의미·검증). Descriptor·IdentityManifest는 리플렉션 헤더가
 // 있는 모듈의 descriptor(<M>.rocksmeta.json)와 identity 명세의 SDK 상대 경로다(없으면 둘 다 null). 게임 빌드는 이 모듈을
-// 다시 생성하지 않고 descriptor를 import하며 명세를 명세 집합 검증에 넣는다.
+// 다시 생성하지 않고 descriptor를 import하며 명세를 명세 집합 검증에 넣는다. ProvidesBuildInfo는 NativeModuleInput과 같은 표지다
+// (엔진 Core — 게임 실행 파일이 이 모듈에 닿으면 빌드가 BuildInfo 정의 TU를 더한다).
 public sealed record SdkModule(string Name, string[] Includes, string[] Defines, string[] Dependencies, string[] Libraries,
-    string[] SystemLibraries, string[] Frameworks, string? Descriptor, string? IdentityManifest);
+    string[] SystemLibraries, string[] Frameworks, string? Descriptor, string? IdentityManifest, bool ProvidesBuildInfo);
 
 public sealed record SdkManifest(int Version, string Configuration, string Platform, string Architecture,
     string CompilerIdentity, string SdkIdentity, SdkModule[] Modules, Dictionary<string, string> Files);
 
 public static class InstalledSdk
 {
-    // 2: SdkModule에 SystemLibraries·Frameworks 추가. 3: Descriptor·IdentityManifest 추가.
-    private const int ManifestVersion = 3;
+    // 2: SdkModule에 SystemLibraries·Frameworks 추가. 3: Descriptor·IdentityManifest 추가. 4: ProvidesBuildInfo 추가, AbiIdentity를
+    // effective triple로 계산(B7 — B7 이전 SDK는 생성 TU의 Core/Build/BuildInfo.h include가 깨지는 대신 버전 불일치로 거부한다).
+    internal const int ManifestVersion = 4;
 
     /// <summary>
     /// SDK 타깃에서 도달하는 모듈만 고른다. 규칙 로더는 모든 모듈 규칙을 읽으므로 타깃이 쓰지 않는(빌드되지 않은)
@@ -110,9 +112,16 @@ public static class InstalledSdk
                     File.Copy(reflected.Manifest, Path.Combine(stage, identityManifest));
                 }
 
+                // BuildInfo 표지 모듈은 생성 TU가 include하는 선언 헤더를 public include로 담아야 한다.
+                if (module.ProvidesBuildInfo &&
+                    !includes.Any(relative => File.Exists(Path.Combine(stage, relative, "Core", "Build", "BuildInfo.h"))))
+                {
+                    throw new InvalidOperationException($"SDK module '{module.Name}' provides BuildInfo but exports no Core/Build/BuildInfo.h.");
+                }
+
                 packaged.Add(new(module.Name, includes.ToArray(), module.PublicDefines.ToArray(),
                     module.Dependencies.ToArray(), libraries.ToArray(), module.SystemLibraries.ToArray(),
-                    module.Frameworks.ToArray(), descriptor, identityManifest));
+                    module.Frameworks.ToArray(), descriptor, identityManifest, module.ProvidesBuildInfo));
             }
             // 고정 버전 외부 라이브러리의 라이선스 원문을 모두 함께 배포한다(BSD 계열은 바이너리 배포 시 고지 의무가 있다).
             // code 라이브러리는 모듈을 담을 때, 데이터 전용 라이브러리(예: Unicode UCD)는 파생물이 들어간 모듈(embeddedIn)을
@@ -162,16 +171,7 @@ public static class InstalledSdk
         await using var invocationLock = await OutputInvocationLock.AcquireAsync(output, cancellationToken);
         var started = BeginGameEvidence(output, sdk, project);
         // 앞 실행의 PASS 보고서가 이번 실패를 성공으로 보이게 하지 않는다. 네이티브 출력 자체는 보존한다.
-        AtomicFile.WriteIfChanged(Path.Combine(output, "action-report.json"), JsonSerializer.Serialize(new NativeBuildResult
-        {
-            Succeeded = false,
-            ExecutedActions = 0,
-            SkippedActions = 0,
-            Actions = [],
-            ModuleOutputs = new Dictionary<string, string>(),
-            CompilationDatabasePath = "",
-            Failure = "Current game build has not completed."
-        }, BuildCommand.JsonOptions));
+        BuildCommand.WritePendingReport(output, "Current game build has not completed.");
         var status = "FAIL";
         string? failure = null;
         try
@@ -226,6 +226,11 @@ public static class InstalledSdk
         }
 
         var toolchain = await NativeToolchains.DiscoverAsync(options.GetValueOrDefault("compiler"), cancellationToken);
+        if (NativeToolchains.EnvironmentNotice(toolchain) is string notice)
+        {
+            Console.WriteLine(notice);
+        }
+
         var manifest = Verify(sdk, configuration, toolchain);
         Directory.CreateDirectory(output);
         Directory.CreateDirectory(Path.Combine(output, "Generated"));
@@ -288,7 +293,8 @@ public static class InstalledSdk
             Frameworks = module.Frameworks,
             ImportedMetadata = module.Descriptor is null
                 ? null
-                : new ImportedMetadata(SafePath(sdk, module.Descriptor), SafePath(sdk, module.IdentityManifest!))
+                : new ImportedMetadata(SafePath(sdk, module.Descriptor), SafePath(sdk, module.IdentityManifest!)),
+            ProvidesBuildInfo = module.ProvidesBuildInfo
         }).Concat(projectModules).ToArray();
         // 켠 플러그인의 모듈도 빌드한다(UE처럼 타깃이 직접 참조하지 않아도 컴파일된다). 메타데이터 생성도 같은 root 집합이다.
         string[] targets = rules.Target.Modules.Concat(moduleSet.IncludedPluginModules).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
@@ -312,7 +318,9 @@ public static class InstalledSdk
             Modules = plan.Modules,
             Targets = targets,
             ContextFingerprint = "rocks-installed-sdk-v1",
-            MaxParallelism = BuildCommand.Jobs(options)
+            MaxParallelism = BuildCommand.Jobs(options),
+            // 도구 빌드 ID의 sdk: 경로 키 기준이다(SDK 헤더·라이브러리가 설치 위치와 무관한 키를 갖는다).
+            SdkDirectory = sdk
         }, cancellationToken);
         BuildCommand.Print(result);
         // 최종 검사 전 성공 보고서를 게시하면 SDK/입력 변경에 따른 실패가 PASS로 보일 수 있다.
@@ -339,7 +347,13 @@ public static class InstalledSdk
     {
         var manifest = JsonSerializer.Deserialize<SdkManifest>(File.ReadAllText(Path.Combine(sdk, "rocks-sdk.json")), new JsonSerializerOptions { UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow })
             ?? throw new InvalidDataException("Empty SDK manifest.");
-        if (manifest.Version != ManifestVersion || manifest.Configuration != configuration.ToString() ||
+        if (manifest.Version != ManifestVersion)
+        {
+            throw new InvalidDataException($"SDK manifest version mismatch: {manifest.Version} (this build tool requires {ManifestVersion}). " +
+                "Re-export the SDK with the current tools.");
+        }
+
+        if (manifest.Configuration != configuration.ToString() ||
             manifest.Platform != toolchain.Platform.ToString() || manifest.CompilerIdentity != toolchain.AbiIdentity ||
             manifest.SdkIdentity != toolchain.AbiIdentity ||
             manifest.Architecture != System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString())

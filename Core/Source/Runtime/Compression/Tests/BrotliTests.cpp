@@ -11,7 +11,7 @@
 
 // 내부 경계(형식 판정·취소 probe·압축 문맥 생성)를 직접 시험한다. 시험은 저장소 루트를 include
 // 경로로 쓴다(AsyncCompressionTests와 같은 방식).
-#include <Core/Source/Runtime/Compression/Private/CompressionInternal.h>
+#include <Compression/Private/CompressionInternal.h>
 
 // Brotli(CompressionFormat::Brotli, 해제 전용) 시험이다(Docs/Design/Compression.ko.md 13절).
 //

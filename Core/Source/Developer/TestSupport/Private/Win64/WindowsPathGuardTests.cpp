@@ -1,4 +1,4 @@
-#include <Core/Source/Runtime/PlatformBase/Private/Win64/WindowsPathGuard.h>
+#include <PlatformBase/Private/Win64/WindowsPathGuard.h>
 #include <Platform/File.h>
 #include <TestSupport/Test.h>
 #include <string.h>

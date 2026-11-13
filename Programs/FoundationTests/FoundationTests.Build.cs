@@ -70,8 +70,9 @@ public abstract class TestsModule : ModuleRules
             Name = ExecutableName,
             Kind = NativeModuleKind.Executable,
             Sources = sources,
-            // 저장소 루트: 시험이 모듈의 Private 헤더를 루트 기준 경로로 include한다.
-            PrivateIncludeDirectories = [context.RootDirectory, context.PathInRoot($"{support}/Public")],
+            // Core/Source/Runtime: 시험이 모듈의 Private 헤더를 <Module/Private/...> 철자로 include한다. 저장소 루트는 include하지 않는다
+            // (gitignore된 출력·사용자 디렉터리·중첩 작업 사본의 헤더가 include inventory에 들어가지 않게).
+            PrivateIncludeDirectories = [context.PathInRoot("Core/Source/Runtime"), context.PathInRoot($"{support}/Public")],
             PrivateDefines = ["ROCKS_TESTING=1"],
             Dependencies = [.. dependencies, .. fixtures]
         };

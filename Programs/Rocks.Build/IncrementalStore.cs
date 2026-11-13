@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Rocks.Tooling.Common;
 
 namespace Rocks.Build;
 
@@ -105,9 +106,17 @@ internal static class Fingerprints
 
     // .c도 포함한다: 외부 C 라이브러리는 다른 .c를 include해 한 번역 단위로 빌드할 수 있다
     // (예: LZ4의 lz4hc.c가 lz4.c를 포함). include된 .c가 바뀌면 그 번역 단위를 다시 컴파일해야 한다.
-    private static readonly HashSet<string> HeaderExtensions = new(StringComparer.OrdinalIgnoreCase)
+    internal static readonly HashSet<string> HeaderExtensions = new(StringComparer.OrdinalIgnoreCase)
         { ".h", ".hh", ".hpp", ".hxx", ".inl", ".inc", ".ipp", ".tpp", ".c" };
 
+    /// <summary>
+    /// root 아래 파일을 결정적 순서로 연다. headersOnly 열거(include 디렉터리 inventory — 액션 key·InputSnapshot·도구 빌드 ID가
+    /// 같은 열거를 쓴다)는 header 확장자 파일만 내고, 다음 하위 디렉터리를 더 뺀다: 점으로 시작하는 디렉터리(.claude·.vs·.idea·
+    /// .native-tmp), .git(파일 또는 디렉터리 — worktree의 .git은 파일이다)을 가진 하위 디렉터리(중첩 작업 사본 — 경로마다 한 번
+    /// 빌드 출력에 알린다), .native-build.lock·.rocks-invocation.lock을 가진 디렉터리(깊이와 무관한 모든 Rocks 출력). 열거 루트
+    /// 자신은 빼지 않는다(out 아래를 직접 선언한
+    /// Generated 같은 루트 포함). headersOnly가 아니면(DeclaredInputs·Toolchain) .git만 뺀다.
+    /// </summary>
     public static IEnumerable<string> TreeFiles(string root, bool headersOnly, string? exclude = null, string? buildRoot = null)
     {
         var pending = new Stack<string>();
@@ -138,12 +147,59 @@ internal static class Fingerprints
 
             foreach (string child in Directory.EnumerateDirectories(directory).OrderDescending(StringComparer.Ordinal))
             {
-                if (Path.GetFileName(child) != ".git" && (!headersOnly || Path.GetFileName(child) != ".native-tmp"))
+                if (!ExcludedChild(child, headersOnly))
                 {
                     pending.Push(child);
                 }
             }
         }
+    }
+
+    private static bool ExcludedChild(string child, bool headersOnly)
+    {
+        string name = Path.GetFileName(child);
+        if (name == ".git")
+        {
+            return true;
+        }
+
+        if (!headersOnly)
+        {
+            return false;
+        }
+        // 실측: .claude/worktrees 아래 헤더가 FoundationTests 액션 key에 들어가 다른 작업 사본의 편집이 이 빌드를 깨뜨렸다.
+        // Rocks 출력 표지는 네이티브 엔진 잠금(.native-build.lock)과 CLI 호출 잠금(.rocks-invocation.lock) 둘이다.
+        if (name.StartsWith('.') || File.Exists(Path.Combine(child, ".native-build.lock")) ||
+            File.Exists(Path.Combine(child, ".rocks-invocation.lock")))
+        {
+            return true;
+        }
+
+        string git = Path.Combine(child, ".git");
+        if (!File.Exists(git) && !Directory.Exists(git))
+        {
+            return false;
+        }
+
+        ReportNestedWorkingCopy(child);
+        return true;
+    }
+
+    private static readonly HashSet<string> ReportedWorkingCopies = new(NativeToolchains.PathComparer);
+
+    // include inventory에서 중첩 작업 사본을 뺄 때 경로마다 프로세스에서 한 번 빌드 출력에 알린다(그 안의 헤더 편집이 이 빌드를
+    // 다시 실행하지 않는 이유를 사용자가 알 수 있게).
+    private static void ReportNestedWorkingCopy(string directory)
+    {
+        lock (ReportedWorkingCopies)
+        {
+            if (!ReportedWorkingCopies.Add(Path.GetFullPath(directory)))
+            {
+                return;
+            }
+        }
+
+        Console.WriteLine($"Build inputs: skipped nested working copy {directory} (has .git) in the include directory inventory.");
     }
 
     public static bool IsUnder(string path, string root)
@@ -153,7 +209,10 @@ internal static class Fingerprints
             path.StartsWith(prefix, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
     }
 
-    public static string Paths(IEnumerable<string> paths, bool headersOnly = false, string? exclude = null, string? buildRoot = null)
+    // memo가 있으면 디렉터리 열거와 원본 byte digest를 그 메모에서 가져온다(BuildInfo Prepare가 읽은 값 — 첫 InputSnapshot).
+    // skip이 참인 파일은 열거 결과에서 뺀다(<out>/BuildInfo — Prepare만 잠금 아래에서 쓰는 생성 파일).
+    public static string Paths(IEnumerable<string> paths, bool headersOnly = false, string? exclude = null, string? buildRoot = null,
+        FileDigests? memo = null, Func<string, bool>? skip = null)
     {
         var files = new SortedSet<string>(NativeToolchains.PathComparer);
         var tokens = new List<string>();
@@ -166,9 +225,12 @@ internal static class Fingerprints
             }
             else if (Directory.Exists(path))
             {
-                foreach (string file in TreeFiles(path, headersOnly, exclude, buildRoot))
+                foreach (string file in memo?.Tree(path, headersOnly, exclude, buildRoot) ?? TreeFiles(path, headersOnly, exclude, buildRoot))
                 {
-                    files.Add(file);
+                    if (skip is null || !skip(file))
+                    {
+                        files.Add(file);
+                    }
                 }
             }
             else
@@ -180,7 +242,7 @@ internal static class Fingerprints
         foreach (string file in files)
         {
             tokens.Add(file);
-            tokens.Add(FileHash(file));
+            tokens.Add(memo?.Raw(file) ?? FileHash(file));
         }
 
         return Strings(tokens);
@@ -196,7 +258,29 @@ internal static class Fingerprints
 
         files.AddRange(toolchain.FingerprintPaths);
         files.AddRange(toolchain.RuntimeFiles);
-        return Strings(new[] { "rocks-native-v1", toolchain.Identity, toolchain.Platform.ToString(), Paths(files) }
-            .Concat(toolchain.Environment.OrderBy(pair => pair.Key, StringComparer.Ordinal).Select(pair => pair.Key + "=" + pair.Value)));
+        // 환경은 대상의 Keyed 변수만 정규 철자·ordinal 순으로 넣는다. PATH·TEMP 같은 Runtime 변수와 허용 목록 밖 변수(실행마다
+        // 바뀌는 DOTNET_CLI_TELEMETRY_SESSIONID 등)는 key가 아니다 — 도구는 절대 경로와 내용 해시로 이미 key에 있다.
+        return Strings(new[] { "rocks-native-v2", toolchain.Identity, toolchain.Platform.ToString(), Paths(files) }
+            .Concat(KeyedEnvironment(toolchain).Select(pair => pair.Key + "=" + pair.Value)));
+    }
+
+    // 대상 플랫폼의 Keyed 변수(NativeEnvironment) 중 toolchain 환경에 있는 것을 (정규 철자, 값)의 ordinal 순으로 돌려준다.
+    internal static IEnumerable<KeyValuePair<string, string?>> KeyedEnvironment(NativeToolchain toolchain)
+    {
+        IReadOnlyList<string> keyed = toolchain.Platform switch
+        {
+            NativePlatform.Windows => NativeEnvironment.WindowsKeyedVariables,
+            NativePlatform.MacOS => NativeEnvironment.MacKeyedVariables,
+            _ => NativeEnvironment.AndroidKeyedVariables
+        };
+        StringComparison comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        foreach (string name in keyed.Order(StringComparer.Ordinal))
+        {
+            KeyValuePair<string, string?> match = toolchain.Environment.FirstOrDefault(pair => string.Equals(pair.Key, name, comparison));
+            if (match.Key is not null)
+            {
+                yield return new(name, match.Value);
+            }
+        }
     }
 }

@@ -1,4 +1,4 @@
-#include <Core/Source/Runtime/Compression/Tests/CompressionDictionaryTestSupport.h>
+#include <Compression/Tests/CompressionDictionaryTestSupport.h>
 
 #include <Compression/Compression.h>
 #include <Compression/CompressionDictionary.h>

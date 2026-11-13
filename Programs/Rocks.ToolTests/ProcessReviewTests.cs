@@ -85,13 +85,18 @@ internal static class ProcessReviewTests
         });
         suite.Add("process-review-vs-environment-unicode-roundtrip", async () =>
         {
-            const string key = "ROCKS_ENV_REVIEW_VALUE";
+            // 빌드 환경은 허용 목록만 넘긴다. 허용 목록의 변수(SOURCE_DATE_EPOCH)로 Visual Studio 환경 출력의 Unicode·'=' 왕복을 보고,
+            // 목록 밖 변수는 빠지는지 확인한다.
+            const string key = "SOURCE_DATE_EPOCH";
+            const string outside = "ROCKS_ENV_REVIEW_VALUE";
             const string expected = "한글 경로🎮=표시값";
             string? oldValue = Environment.GetEnvironmentVariable(key);
+            string? oldOutside = Environment.GetEnvironmentVariable(outside);
             string? oldVc = Environment.GetEnvironmentVariable("VCToolsInstallDir");
             try
             {
                 Environment.SetEnvironmentVariable(key, expected);
+                Environment.SetEnvironmentVariable(outside, expected);
                 if (OperatingSystem.IsWindows())
                 {
                     Environment.SetEnvironmentVariable("VCToolsInstallDir", null);
@@ -99,10 +104,12 @@ internal static class ProcessReviewTests
 
                 Dictionary<string, string?> environment = await NativeEnvironment.CreateAsync();
                 Verify.Equal(expected, environment[key], "Native environment corrupted Unicode or equals in value");
+                Verify.That(!environment.ContainsKey(outside), "Native environment passed a variable outside the allowlist");
             }
             finally
             {
                 Environment.SetEnvironmentVariable(key, oldValue);
+                Environment.SetEnvironmentVariable(outside, oldOutside);
                 Environment.SetEnvironmentVariable("VCToolsInstallDir", oldVc);
             }
         });

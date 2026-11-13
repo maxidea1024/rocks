@@ -1,7 +1,7 @@
 #include <TestSupport/ProcessProbe.h>
 
 // UTF-8·UTF-16 변환은 PlatformBase Win64 backend의 것을 그대로 쓴다(시험 도구에 따로 두지 않는다).
-#include <Core/Source/Runtime/PlatformBase/Private/Win64/WindowsString.h>
+#include <PlatformBase/Private/Win64/WindowsString.h>
 
 #include <Windows.h>
 #include <shellapi.h>

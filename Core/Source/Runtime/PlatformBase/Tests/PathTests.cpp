@@ -1,7 +1,7 @@
 #include <Platform/Generic/Path.h>
 #include <Platform/Path.h>
-#include <Core/Source/Runtime/PlatformBase/Private/Apple/ApplePlatformPath.h>
-#include <Core/Source/Runtime/PlatformBase/Private/Win64/WindowsPlatformPath.h>
+#include <PlatformBase/Private/Apple/ApplePlatformPath.h>
+#include <PlatformBase/Private/Win64/WindowsPlatformPath.h>
 #include <TestSupport/Test.h>
 
 namespace rocks::test {

@@ -108,11 +108,18 @@ namespace Rocks.Build.Cli
             var toolchain = android
                 ? await NativeToolchains.DiscoverAndroidAsync(androidAbi, androidApi, options.GetValueOrDefault("android-ndk"), cancellationToken)
                 : await NativeToolchains.DiscoverAsync(options.GetValueOrDefault("compiler"), cancellationToken);
+            if (NativeToolchains.EnvironmentNotice(toolchain) is string notice)
+            {
+                Console.WriteLine(notice);
+            }
+
             var context = new BuildContext(root, output, toolchain.Platform, configuration);
             var rulesPath = options.GetValueOrDefault("rules", HostTool(root, "Rocks.Engine.Rules"));
             var rules = RuleLoader.Load(rulesPath, targetName, context);
             Directory.CreateDirectory(output);
             await using var invocationLock = await OutputInvocationLock.AcquireAsync(output, cancellationToken);
+            // 앞 실행의 PASS 보고서가 이번 실행의 실패(메타 단계·빌드 예외 포함)를 성공으로 보이게 하지 않는다.
+            WritePendingReport(output, "Current build has not completed.");
             Directory.CreateDirectory(Path.Combine(output, "Generated"));
             var evidence = await BuildEvidence.StartAsync(root, Path.GetRelativePath(Path.Combine(root, "out"), output), toolchain.Environment);
             evidence.SetConfiguration(configuration.ToString(), targetName, configuration == NativeConfiguration.Asan ? "address" : "none", toolchain.CompilerPath, toolchain.Identity);
@@ -173,8 +180,8 @@ namespace Rocks.Build.Cli
                     {
                         Name = "PublicHeaderChecks",
                         Sources = sources,
-                        Dependencies = reached.Where(name => modules.Single(module => module.Name == name).Kind == NativeModuleKind.StaticLibrary).Order(StringComparer.Ordinal).ToArray(),
-                        PrivateIncludeDirectories = [root]
+                        // 저장소 루트를 include하지 않는다: 검사 TU는 의존 모듈의 public include만으로 헤더를 연다.
+                        Dependencies = reached.Where(name => modules.Single(module => module.Name == name).Kind == NativeModuleKind.StaticLibrary).Order(StringComparer.Ordinal).ToArray()
                     });
                     targets.Add("PublicHeaderChecks");
                 }
@@ -307,6 +314,19 @@ namespace Rocks.Build.Cli
         }
 
         internal static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+
+        // 빌드를 시작하기 전에 실패 상태의 action-report.json을 쓴다. 빌드가 끝나야 실제 결과로 바뀐다.
+        internal static void WritePendingReport(string output, string failure) =>
+            AtomicFile.WriteIfChanged(Path.Combine(output, "action-report.json"), JsonSerializer.Serialize(new NativeBuildResult
+            {
+                Succeeded = false,
+                ExecutedActions = 0,
+                SkippedActions = 0,
+                Actions = [],
+                ModuleOutputs = new Dictionary<string, string>(),
+                CompilationDatabasePath = "",
+                Failure = failure
+            }, JsonOptions));
 
         internal static string HostTool(string root, string name) => Path.Combine(root, "out/dotnet/bin", name, "Debug/net10.0", name + ".dll");
 
