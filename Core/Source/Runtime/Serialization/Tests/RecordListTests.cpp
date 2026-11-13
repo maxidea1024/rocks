@@ -1069,3 +1069,321 @@ TEST(RecordList_FailureAtomicity) {
     // 각 단계의 할당 지점을 실제로 실패시켰다(AddItem은 항목 4개 동안 buffer가 여러 번 자란다).
     CHECK(injected[0] >= 2 && injected[1] >= 1 && injected[2] >= 1);
 }
+
+namespace {
+
+// 항목 Record(값 필드 하나, u64)를 out에 제자리로 쓴다(BuildItem과 같은 byte).
+Result<void> WriteItem(ArchiveWriter& out, uint64 value) noexcept {
+    auto record = RecordWriter::Begin(out, ItemSchema, 1);
+    if (!record) {
+        return Result<void>::Failure(record.Error());
+    }
+
+    if (auto begun = record.Value().BeginField(ValueField); !begun) {
+        return begun;
+    }
+
+    if (auto written = out.WriteU64(value); !written) {
+        return written;
+    }
+
+    if (auto ended = record.Value().EndField(WireType::U64); !ended) {
+        return ended;
+    }
+
+    return record.Value().End();
+}
+
+// depth단 중첩 목록: 부모 → 목록 → 항목 → (ChildrenField 목록 → 항목) × (depth - 1) → 잎 항목의
+// Bytes 값(bytes byte).
+Result<Array<uint8>> NestedList(Allocator& allocator, usize depth, usize bytes) noexcept {
+    auto leaf = BuildSizedItem(allocator, bytes + 80);
+    if (!leaf) {
+        return leaf;
+    }
+
+    Array<uint8> current = Move(leaf.Value());
+    for (usize level = 1; level < depth; ++level) {
+        RecordListBuilder list(allocator);
+        if (auto added = list.AddItem(current.View()); !added) {
+            return Result<Array<uint8>>::Failure(added.Error());
+        }
+
+        RecordBuilder branch(allocator, ItemSchema, 1);
+        if (auto finished = list.Finish(branch, ChildrenField); !finished) {
+            return Result<Array<uint8>>::Failure(finished.Error());
+        }
+
+        auto built = branch.Build();
+        if (!built) {
+            return built;
+        }
+
+        current = Move(built.Value());
+    }
+
+    RecordListBuilder outer(allocator);
+    if (auto added = outer.AddItem(current.View()); !added) {
+        return Result<Array<uint8>>::Failure(added.Error());
+    }
+
+    RecordBuilder root(allocator, ParentSchema, 1);
+    if (auto finished = outer.Finish(root, ItemsField); !finished) {
+        return Result<Array<uint8>>::Failure(finished.Error());
+    }
+
+    return root.Build();
+}
+
+// 부모에서 잎 항목까지 내려가 잎의 값 필드를 찾는다. 부모 예산의 work 증가분을 돌려준다.
+Result<uint64> DescendToLeaf(RecordReader& root, usize depth) noexcept {
+    const uint64 before = root.WorkUsed();
+    auto field = root.Find(ItemsField);
+    if (!field) {
+        return Result<uint64>::Failure(field.Error());
+    }
+
+    auto list = RecordListReader::OpenField(root, field.Value(), ItemSchema, 1, 1);
+    if (!list) {
+        return Result<uint64>::Failure(list.Error());
+    }
+
+    auto item = list.Value().OpenItem(0);
+    if (!item) {
+        return Result<uint64>::Failure(item.Error());
+    }
+
+    for (usize level = 1; level < depth; ++level) {
+        auto children = item.Value().Find(ChildrenField);
+        if (!children) {
+            return Result<uint64>::Failure(children.Error());
+        }
+
+        auto nested = RecordListReader::OpenField(item.Value(), children.Value(), ItemSchema, 1, 1);
+        if (!nested) {
+            return Result<uint64>::Failure(nested.Error());
+        }
+
+        auto next = nested.Value().OpenItem(0);
+        if (!next) {
+            return Result<uint64>::Failure(next.Error());
+        }
+
+        item = Move(next);
+    }
+
+    auto value = item.Value().Find(ValueField);
+    if (!value) {
+        return Result<uint64>::Failure(value.Error());
+    }
+
+    return Result<uint64>::Success(root.WorkUsed() - before);
+}
+
+} // namespace
+
+TEST(RecordList_WriterMatchesBuilderBytes) {
+    // 바깥 writer 위에 제자리로 쓴 목록은 RecordListBuilder가 부모에 쓰는 payload와 byte 단위로
+    // 같다(빈 목록 포함).
+    SystemAllocator allocator;
+    RecordListBuilder builder(allocator);
+    for (uint64 value = 30; value < 33; ++value) {
+        auto item = BuildItem(allocator, value);
+        REQUIRE(item && builder.AddItem(item.Value().View()));
+    }
+
+    Array<uint8> parentBytes(allocator);
+    auto expected = FinishAndFind(allocator, builder, parentBytes);
+    REQUIRE(expected);
+    ArchiveWriter out(allocator);
+    REQUIRE(out.WriteU32(0xdeadbeef)); // 바깥 writer의 중간 위치에서 시작한다
+    auto list = RecordListWriter::Begin(out, 3);
+    REQUIRE(list);
+    for (uint64 value = 30; value < 33; ++value) {
+        REQUIRE(list.Value().BeginItem());
+        REQUIRE(WriteItem(out, value));
+        REQUIRE(list.Value().EndItem());
+    }
+
+    CHECK(list.Value().ItemCount() == 3);
+    REQUIRE(list.Value().End());
+    const Span<const uint8> written(out.View().Data() + 4, out.ByteCount() - 4);
+    CHECK(SameBytes(written, expected.Value()));
+
+    RecordListBuilder emptyBuilder(allocator);
+    Array<uint8> emptyParent(allocator);
+    auto emptyExpected = FinishAndFind(allocator, emptyBuilder, emptyParent);
+    REQUIRE(emptyExpected);
+    ArchiveWriter emptyOut(allocator);
+    auto empty = RecordListWriter::Begin(emptyOut, 0);
+    REQUIRE(empty && empty.Value().End());
+    CHECK(SameBytes(emptyOut.View(), emptyExpected.Value()));
+
+    // 쓴 목록을 reader가 그대로 연다.
+    auto items = RecordListReader::Open(allocator, written, ItemSchema, 1, 1);
+    REQUIRE(items && items.Value().ItemCount() == 3);
+    auto last = items.Value().OpenItem(2);
+    REQUIRE(last);
+    auto value = ReadValue(last.Value());
+    CHECK(value && value.Value() == 32);
+}
+
+TEST(RecordList_WriterRejectsMisuseAndLimits) {
+    SystemAllocator allocator;
+    ArchiveWriter out(allocator);
+    // 항목 수 한도, count 자리 + count × 52가 payload 한도를 넘는 경우(쓰기 전에 거부한다).
+    RecordListLimits limits;
+    limits.maxItems = 2;
+    CHECK(RecordListWriter::Begin(out, 3, limits).Error() == ErrorCode::CapacityExceeded);
+    limits = {};
+    limits.maxPayloadBytes = 4 + 2 * 52 - 1;
+    CHECK(RecordListWriter::Begin(out, 2, limits).Error() == ErrorCode::CapacityExceeded);
+    limits.maxPayloadBytes = 3;
+    CHECK(RecordListWriter::Begin(out, 0, limits).Error() == ErrorCode::CapacityExceeded);
+    CHECK(out.ByteCount() == 0);
+
+    // 순서 오용: 항목 없이 EndItem, 항목을 연 채 BeginItem·End, count보다 많은 항목, 모자란 항목.
+    auto list = RecordListWriter::Begin(out, 1);
+    REQUIRE(list);
+    CHECK(list.Value().EndItem().Error() == ErrorCode::InvalidArgument);
+    REQUIRE(list.Value().BeginItem());
+    CHECK(list.Value().BeginItem().Error() == ErrorCode::InvalidArgument);
+    CHECK(list.Value().End().Error() == ErrorCode::InvalidArgument);
+    REQUIRE(WriteItem(out, 1));
+    REQUIRE(list.Value().EndItem());
+    CHECK(list.Value().BeginItem().Error() == ErrorCode::InvalidArgument);
+    CHECK(list.Value().End());
+    ArchiveWriter fewer(allocator);
+    auto missing = RecordListWriter::Begin(fewer, 2);
+    REQUIRE(missing);
+    REQUIRE(missing.Value().BeginItem() && WriteItem(fewer, 1) && missing.Value().EndItem());
+    CHECK(missing.Value().End().Error() == ErrorCode::InvalidArgument);
+
+    // 항목이 Record envelope가 아니면 InvalidArgument, 항목 크기 한도는 CapacityExceeded다.
+    ArchiveWriter raw(allocator);
+    auto notRecord = RecordListWriter::Begin(raw, 1);
+    REQUIRE(notRecord && notRecord.Value().BeginItem());
+    REQUIRE(raw.WriteU64(7));
+    CHECK(notRecord.Value().EndItem().Error() == ErrorCode::InvalidArgument);
+    auto item = BuildItem(allocator, 1);
+    REQUIRE(item);
+    RecordListLimits small;
+    small.maxItemBytes = item.Value().Size() - 1;
+    ArchiveWriter big(allocator);
+    auto oversized = RecordListWriter::Begin(big, 1, small);
+    REQUIRE(oversized && oversized.Value().BeginItem() && WriteItem(big, 1));
+    CHECK(oversized.Value().EndItem().Error() == ErrorCode::CapacityExceeded);
+
+    // payload 전체 한도: 두 항목의 최소 크기는 통과하지만 실제 항목이 더 크다. 넘는 항목의
+    // EndItem이 바로 CapacityExceeded다(End까지 기다리지 않는다).
+    RecordListLimits payload;
+    payload.maxPayloadBytes = 4 + 2 * (8 + item.Value().Size()) - 1;
+    ArchiveWriter total(allocator);
+    auto bounded = RecordListWriter::Begin(total, 2, payload);
+    REQUIRE(bounded);
+    REQUIRE(bounded.Value().BeginItem() && WriteItem(total, 1) && bounded.Value().EndItem());
+    REQUIRE(bounded.Value().BeginItem() && WriteItem(total, 1));
+    CHECK(bounded.Value().EndItem().Error() == ErrorCode::CapacityExceeded);
+    CHECK(bounded.Value().ItemCount() == 1);
+    // 항목 하나짜리도 같다: Begin의 최소 크기(4 + 52)는 통과하지만 실제 항목(80)이 넘는다.
+    RecordListLimits single;
+    single.maxPayloadBytes = 4 + 52;
+    ArchiveWriter one(allocator);
+    auto first = RecordListWriter::Begin(one, 1, single);
+    REQUIRE(first && first.Value().BeginItem() && WriteItem(one, 1));
+    CHECK(first.Value().EndItem().Error() == ErrorCode::CapacityExceeded);
+
+    // out이 길이 자리보다 짧아졌으면(호출자가 buffer를 가져갔다) 버퍼를 읽지 않고
+    // InvalidArgument다.
+    ArchiveWriter taken(allocator);
+    auto stolen = RecordListWriter::Begin(taken, 1);
+    REQUIRE(stolen && stolen.Value().BeginItem());
+    Array<uint8> bytes = taken.TakeBytes();
+    CHECK(taken.ByteCount() == 0 && bytes.Size() == 12);
+    CHECK(stolen.Value().EndItem().Error() == ErrorCode::InvalidArgument);
+}
+
+TEST(RecordList_NestedListsChargeItemBytesOnce) {
+    // 목록 안 struct Record 안 목록을 여러 깊이로 쌓아도, 잎까지 내려가는 작업은 깊이마다 색인
+    // 비용만 늘고 잎 값의 byte를 다시 청구하지 않는다(OpenField는 색인 전용, OpenItem은 언제나
+    // 색인만 — 깊이 배수가 아니다).
+    SystemAllocator allocator;
+    constexpr usize Bytes = 64 * 1024;
+    uint64 work[3] = {};
+    const usize depths[3] = {1, 4, 16};
+    for (usize index = 0; index < 3; ++index) {
+        auto bytes = NestedList(allocator, depths[index], Bytes);
+        REQUIRE(bytes);
+        auto root = RecordReader::Open(allocator, bytes.Value().View(), ParentSchema, 1, 1);
+        REQUIRE(root);
+        CHECK(root.Value().WorkUsed() >= Bytes); // 부모 Open이 payload를 한 번 청구한다
+        auto descended = DescendToLeaf(root.Value(), depths[index]);
+        REQUIRE(descended);
+        work[index] = descended.Value();
+        CHECK(work[index] < Bytes / 4);
+    }
+
+    // 깊이 16과 깊이 1의 차이도 잎 byte보다 훨씬 작다(깊이당 색인 비용만).
+    CHECK(work[2] - work[0] < Bytes / 4);
+    CHECK(work[1] <= work[2]);
+
+    // 단독 Open은 목록을 열 때 항목 byte를 한 번 청구하고, OpenItem은 다시 청구하지 않는다.
+    auto bytes = NestedList(allocator, 2, Bytes);
+    REQUIRE(bytes);
+    auto root = RecordReader::Open(allocator, bytes.Value().View(), ParentSchema, 1, 1);
+    REQUIRE(root);
+    auto field = root.Value().Find(ItemsField);
+    REQUIRE(field);
+    auto standalone = RecordListReader::Open(allocator, field.Value().payload, ItemSchema, 1, 1);
+    REQUIRE(standalone);
+    const uint64 opened = standalone.Value().WorkUsed();
+    CHECK(opened >= Bytes);
+    auto item = standalone.Value().OpenItem(0);
+    REQUIRE(item);
+    CHECK(standalone.Value().WorkUsed() - opened < Bytes / 4);
+    auto children = item.Value().Find(ChildrenField);
+    REQUIRE(children);
+    auto nested = RecordListReader::OpenField(item.Value(), children.Value(), ItemSchema, 1, 1);
+    REQUIRE(nested && nested.Value().OpenItem(0));
+    CHECK(standalone.Value().WorkUsed() - opened < Bytes / 4);
+}
+
+TEST(RecordList_OpenItemFieldLimitAndItemBytes) {
+    SystemAllocator allocator;
+    RecordBuilder twoFields(allocator, ItemSchema, 1);
+    REQUIRE(twoFields.AddField(ValueField, WireType::Bytes, {}));
+    REQUIRE(twoFields.AddField(ChildrenField, WireType::Bytes, {}));
+    auto wide = twoFields.Build();
+    REQUIRE(wide);
+    auto narrow = BuildItem(allocator, 3);
+    REQUIRE(narrow);
+    RecordListBuilder builder(allocator);
+    REQUIRE(builder.AddItem(wide.Value().View()) && builder.AddItem(narrow.Value().View()));
+    Array<uint8> parentBytes(allocator);
+    REQUIRE(FinishAndFind(allocator, builder, parentBytes));
+    auto parent = RecordReader::Open(allocator, parentBytes.View(), ParentSchema, 1, 1);
+    REQUIRE(parent);
+    auto field = parent.Value().Find(ItemsField);
+    REQUIRE(field);
+    auto list = RecordListReader::OpenField(parent.Value(), field.Value(), ItemSchema, 1, 1);
+    REQUIRE(list);
+
+    // 필드 수 한도를 호출마다 바꿔 연다(그래프의 남은 누계). 기본 OpenItem은 항목 한도다.
+    const uint64 before = list.Value().OperationsUsed();
+    CHECK(list.Value().OpenItem(0, 1).Error() == ErrorCode::CapacityExceeded);
+    CHECK(list.Value().OperationsUsed() > before);
+    CHECK(list.Value().OpenItem(0, 2));
+    CHECK(list.Value().OpenItem(0));
+    CHECK(list.Value().OpenItem(1, 1));
+    CHECK(list.Value().OpenItem(2, 8).Error() == ErrorCode::InvalidArgument);
+
+    // 항목 Record 전체 byte(마이그레이션 입력)는 원본을 빌린 view다.
+    auto first = list.Value().ItemBytes(0);
+    auto second = list.Value().ItemBytes(1);
+    REQUIRE(first && second);
+    CHECK(SameBytes(first.Value(), wide.Value().View()));
+    CHECK(SameBytes(second.Value(), narrow.Value().View()));
+    CHECK(first.Value().Data() >= parentBytes.Data() &&
+          first.Value().Data() < parentBytes.Data() + parentBytes.Size());
+    CHECK(list.Value().ItemBytes(2).Error() == ErrorCode::InvalidArgument);
+}

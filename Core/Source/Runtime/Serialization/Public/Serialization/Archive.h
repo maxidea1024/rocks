@@ -19,6 +19,8 @@ struct ArchiveLimits {
 class RecordBuilder;
 class RecordReader;
 class RecordListReader;
+class RecordListWriter;
+class ValueArrayReader;
 
 // 여러 reader가 함께 쓰는 누적 operation·work 예산과 그 한도다. 한 Record 트리(RecordReader와
 // 그것이 연 값 reader·중첩 목록·항목 reader)가 하나를 참조 계수로 공유한다(SharedPtr — 어느
@@ -89,7 +91,8 @@ private:
     Result<void> Append(Span<const uint8> prefix, Span<const uint8> payload,
                         bool utf8 = false) noexcept;
     Result<void> AppendReserved(Span<const uint8>, Span<const uint8>) noexcept;
-    // 이미 쓴 범위 [offset, offset + bytes.Size())를 덮어쓴다(RecordWriter의 길이·개수 채우기).
+    // 이미 쓴 범위 [offset, offset + bytes.Size())를 덮어쓴다(RecordWriter·RecordListWriter의
+    // 길이·개수 채우기).
     Result<void> Patch(usize offset, Span<const uint8> bytes) noexcept;
     Array<uint8> bytes_;
     ArchiveLimits limits_;
@@ -97,6 +100,7 @@ private:
     uint64 work_ = 0;
     friend class RecordBuilder;
     friend class RecordWriter;
+    friend class RecordListWriter;
 };
 
 // 입력을 빌리는 이동 전용 cursor다. 원본 범위는 reader/반환 view보다 오래 살아 있고 변경되지 않아야
@@ -149,6 +153,7 @@ private:
     SharedPtr<ArchiveBudget> shared_;
     friend class RecordReader;
     friend class RecordListReader;
+    friend class ValueArrayReader;
 };
 
 } // namespace rocks

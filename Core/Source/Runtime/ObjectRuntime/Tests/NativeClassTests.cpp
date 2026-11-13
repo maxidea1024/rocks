@@ -132,6 +132,7 @@ TEST(NativeClass_ResolveAcceptsBaseAndRejectsUnrelatedOrNarrower) {
             CHECK(objects.Resolve<NativeOther>(access, derived.Value().Handle()).Error() ==
                   ErrorCode::TypeMismatch);
         }
+
         auto pinned = objects.TryPin<NativeBase>(access, derived.Value().Handle());
         CHECK(pinned.IsOk());
         CHECK(objects.TryPin<NativeDerived>(access, base.Value().Handle()).Error() ==
@@ -142,6 +143,7 @@ TEST(NativeClass_ResolveAcceptsBaseAndRejectsUnrelatedOrNarrower) {
         REQUIRE(objects.Collect(access));
         CHECK(objects.Stats().liveObjects == 0);
     }
+
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
@@ -169,6 +171,7 @@ TEST(NativeClass_SetReferenceAcceptsDerivedTarget) {
                       .Error() == ErrorCode::TypeMismatch);
             CHECK(pointer->single.Handle() == derived.Value().Handle());
         }
+
         // 강한 간선만 남은 파생 객체는 수집 후에도 살아 있다.
         derived.Value().Reset();
         other.Value().Reset();
@@ -178,6 +181,7 @@ TEST(NativeClass_SetReferenceAcceptsDerivedTarget) {
         REQUIRE(objects.Collect(access));
         CHECK(objects.Stats().liveObjects == 0);
     }
+
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
@@ -206,6 +210,7 @@ TEST(ObjectRefArray_AddRemoveGrowAndKeepTargetsAlive) {
                 item = created.Value().Handle();
                 REQUIRE(objects.AddReference(access, owner, pointer->items, item));
             }
+
             CHECK(pointer->items.Size() == 10);
             CHECK(pointer->items[0] == items[0] && pointer->items[9] == items[9]);
             CHECK(pointer->items.Contains(items[5]) && pointer->items.IndexOf(items[5]) == 5);
@@ -213,6 +218,7 @@ TEST(ObjectRefArray_AddRemoveGrowAndKeepTargetsAlive) {
             REQUIRE(objects.AddReference(access, owner, pointer->items, items[0]));
             CHECK(pointer->items.Size() == 11);
         }
+
         // 루트를 모두 놓아도 배열 간선이 대상을 보존한다.
         REQUIRE(objects.Collect(access));
         CHECK(objects.Stats().liveObjects == 11);
@@ -230,6 +236,7 @@ TEST(ObjectRefArray_AddRemoveGrowAndKeepTargetsAlive) {
             CHECK(objects.RemoveReferenceAt(access, owner, pointer->items, 99).Error() ==
                   ErrorCode::InvalidArgument);
         }
+
         // items[3]은 회수되고, items[0]은 끝에 다시 담은 원소가 남아 있어 보존된다.
         REQUIRE(objects.Collect(access));
         CHECK(objects.Stats().liveObjects == 10);
@@ -244,12 +251,14 @@ TEST(ObjectRefArray_AddRemoveGrowAndKeepTargetsAlive) {
             REQUIRE(objects.ClearReferences(access, owner, pointer->items));
             CHECK(pointer->items.IsEmpty());
         }
+
         REQUIRE(objects.Collect(access));
         CHECK(objects.Stats().liveObjects == 1);
         holder.Value().Reset();
         REQUIRE(objects.Collect(access));
         CHECK(objects.Stats().liveObjects == 0);
     }
+
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
@@ -273,8 +282,9 @@ TEST(ObjectRefArray_RejectsInvalidTargetsAndForeignStorage) {
             REQUIRE(borrowed);
             NativeHolder* pointer = Get(borrowed.Value());
             REQUIRE(pointer != nullptr);
-            CHECK(objects.AddReference(access, owner, pointer->items, ObjectHandle{}).Error() ==
-                  ErrorCode::InvalidArgument);
+            // null 원소는 허용한다(간선이 아니다 — ObjectRefArray.h).
+            REQUIRE(objects.AddReference(access, owner, pointer->items, ObjectHandle{}));
+            REQUIRE(objects.RemoveReference(access, owner, pointer->items, ObjectHandle{}));
             CHECK(objects.AddReference(access, owner, pointer->items, other.Value().Handle())
                       .Error() == ErrorCode::TypeMismatch);
             CHECK(objects.AddReference(access, owner, pointer->items, outsider.Value().Handle())
@@ -299,6 +309,7 @@ TEST(ObjectRefArray_RejectsInvalidTargetsAndForeignStorage) {
                 objects.AddReference(access, ObjectHandle{}, pointer->items, valid.Value().Handle())
                     .Error() == ErrorCode::StaleHandle);
         }
+
         // 파괴 요청된 소유자에서는 추가할 수 없지만 정리용 제거는 허용한다.
         auto item = objects.NewObject<NativeBase>(access, NativeTypeIdOf<NativeBase>());
         REQUIRE(item);
@@ -313,6 +324,7 @@ TEST(ObjectRefArray_RejectsInvalidTargetsAndForeignStorage) {
                       .Error() == ErrorCode::StaleHandle);
             CHECK(objects.ClearReferences(access, owner, pointer->items).IsOk());
         }
+
         holder.Value().Reset();
         other.Value().Reset();
         outsider.Value().Reset();
@@ -322,6 +334,7 @@ TEST(ObjectRefArray_RejectsInvalidTargetsAndForeignStorage) {
         REQUIRE(foreign.Collect(foreign.OwnerAccess()));
         CHECK(objects.Stats().liveObjects == 0 && foreign.Stats().liveObjects == 0);
     }
+
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
@@ -345,14 +358,17 @@ TEST(ObjectRefArray_InsertionBarrierPreservesTargetsMovedDuringIncrementalMarkin
             if (pointer == nullptr) {
                 return false;
             }
+
             for (ObjectHandle& target : targets) {
                 auto created = objects.NewObject<NativeBase>(access, NativeTypeIdOf<NativeBase>());
                 if (!created || !objects.AddReference(access, owner, pointer->items,
                                                       created.Value().Handle())) {
                     return false;
                 }
+
                 target = created.Value().Handle();
             }
+
             return true;
         };
         REQUIRE(fill(first.Value().Handle(), inFirst));
@@ -377,21 +393,25 @@ TEST(ObjectRefArray_InsertionBarrierPreservesTargetsMovedDuringIncrementalMarkin
             REQUIRE(move(second.Value().Handle(), first.Value().Handle(), inSecond[index]));
             REQUIRE(move(first.Value().Handle(), second.Value().Handle(), inFirst[index]));
         }
+
         for (uint32 guard = 0; guard < 1000 && objects.CollectionPhase() != GcPhase::Idle;
              ++guard) {
             REQUIRE(objects.StepCollection(access, budget));
         }
+
         CHECK(objects.CollectionPhase() == GcPhase::Idle);
         CHECK(objects.Stats().liveObjects == 18);
         for (uint32 index = 0; index < 8; ++index) {
             CHECK(objects.Resolve<NativeBase>(access, inFirst[index]).IsOk());
             CHECK(objects.Resolve<NativeBase>(access, inSecond[index]).IsOk());
         }
+
         first.Value().Reset();
         second.Value().Reset();
         REQUIRE(objects.Collect(access));
         CHECK(objects.Stats().liveObjects == 0);
     }
+
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
@@ -409,8 +429,10 @@ public:
             if (allowed_ == 0) {
                 return Result<void*>::Failure(ErrorCode::OutOfMemory);
             }
+
             --allowed_;
         }
+
         return backing_.Allocate(bytes, alignment, tag);
     }
 
@@ -469,6 +491,7 @@ TEST(ObjectRefArray_RequiresOwnerBorrow) {
             pointer = Get(borrowed.Value());
             REQUIRE(pointer != nullptr);
         }
+
         // Borrow를 놓은 뒤의 변경은 계약 위반이다(루트가 저장소를 살려 두므로 포인터 자체는 유효).
         CHECK(objects
                   .AddReference(access, holder.Value().Handle(), pointer->items,
@@ -481,6 +504,7 @@ TEST(ObjectRefArray_RequiresOwnerBorrow) {
         item.Value().Reset();
         REQUIRE(objects.Collect(access));
     }
+
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
@@ -502,6 +526,7 @@ TEST(ObjectRefArray_RejectsCutoffTargetDuringSweeping) {
             white = first.Value().Handle();
             other = second.Value().Handle();
         }
+
         REQUIRE(objects.BeginCollection(access));
         GcBudget budget;
         budget.maxObjects = 1;
@@ -510,6 +535,7 @@ TEST(ObjectRefArray_RejectsCutoffTargetDuringSweeping) {
              ++guard) {
             REQUIRE(objects.StepCollection(access, budget));
         }
+
         REQUIRE(objects.CollectionPhase() == GcPhase::Sweeping);
         {
             // cutoff 이후 흰 객체는 간선으로 되살릴 수 없다.
@@ -522,16 +548,19 @@ TEST(ObjectRefArray_RejectsCutoffTargetDuringSweeping) {
             CHECK(pointer->items.IsEmpty());
             CHECK(!objects.Resolve<NativeBase>(access, other).IsOk());
         }
+
         // maxObjects=1이면 sweep이 슬롯마다 한 단위를 쓰므로 chunk(64슬롯)보다 넉넉한 상한을 둔다.
         for (uint32 guard = 0; guard < 1000 && objects.CollectionPhase() != GcPhase::Idle;
              ++guard) {
             REQUIRE(objects.StepCollection(access, budget));
         }
+
         CHECK(objects.CollectionPhase() == GcPhase::Idle);
         CHECK(objects.Stats().liveObjects == 1);
         holder.Value().Reset();
         REQUIRE(objects.Collect(access));
     }
+
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
@@ -556,6 +585,7 @@ TEST(ObjectRefArray_MutationFromTraceIsBusy) {
         item.Value().Reset();
         REQUIRE(objects.Collect(access));
     }
+
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
@@ -574,6 +604,7 @@ TEST(ObjectRefArray_GrowthFailureKeepsExistingElements) {
             REQUIRE(created);
             root = Move(created.Value());
         }
+
         {
             auto borrowed = objects.Resolve<NativeHolder>(access, holder.Value().Handle());
             REQUIRE(borrowed);
@@ -584,6 +615,7 @@ TEST(ObjectRefArray_GrowthFailureKeepsExistingElements) {
                 REQUIRE(objects.AddReference(access, holder.Value().Handle(), pointer->items,
                                              roots[index].Handle()));
             }
+
             CHECK(objects
                       .AddReference(access, holder.Value().Handle(), pointer->items,
                                     roots[4].Handle())
@@ -591,13 +623,16 @@ TEST(ObjectRefArray_GrowthFailureKeepsExistingElements) {
             CHECK(pointer->items.Size() == 4);
             CHECK(pointer->items[0] == roots[0].Handle() && pointer->items[3] == roots[3].Handle());
         }
+
         for (RootRef<NativeBase>& root : roots) {
             root.Reset();
         }
+
         holder.Value().Reset();
         REQUIRE(objects.Collect(access));
         CHECK(objects.Stats().liveObjects == 0);
     }
+
     CHECK(allocator.backing_.Stats().liveAllocations == 0);
 }
 
@@ -656,6 +691,7 @@ TEST(NativeClass_TraceChainVisitsBaseEdgesWithoutSuperCall) {
             REQUIRE(objects.SetReference(access, holder.Value().Handle(), pointer->extra,
                                          inDerived.Value().Handle()));
         }
+
         inBase.Value().Reset();
         inDerived.Value().Reset();
         REQUIRE(objects.Collect(access));
@@ -665,5 +701,6 @@ TEST(NativeClass_TraceChainVisitsBaseEdgesWithoutSuperCall) {
         REQUIRE(objects.Collect(access));
         CHECK(objects.Stats().liveObjects == 0);
     }
+
     CHECK(allocator.Stats().liveAllocations == 0);
 }

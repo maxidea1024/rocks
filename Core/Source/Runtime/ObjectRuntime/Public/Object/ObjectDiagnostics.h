@@ -23,6 +23,8 @@ struct ObjectDiagnosticRecord {
     uint32 roots = 0;
     uint32 borrows = 0;
     uint32 backendHolds = 0;
+    // encode 고정(EncodePin) 계수다.
+    uint32 encodePins = 0;
 };
 
 } // namespace rocks

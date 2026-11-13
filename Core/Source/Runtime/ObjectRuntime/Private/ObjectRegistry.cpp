@@ -33,6 +33,8 @@ struct ObjectRegistry::Slot {
     uint32 roots = 0;
     uint32 borrows = 0;
     uint32 backendHolds = 0;
+    // encode 고정 계수(PinForEncode). 0이 아니면 컨테이너·참조 변경이 Busy이고 회수하지 않는다.
+    uint32 encodePins = 0;
     uint64 transaction = 0;
     uint64 mark = 0;
 };
@@ -59,8 +61,10 @@ ObjectRegistry::ObjectRegistry(Allocator& allocator, TypeRegistry& types, Contex
 ObjectRegistry::~ObjectRegistry() {
     auto stopped = Shutdown(OwnerAccess());
     if (!stopped) {
-        platform::Fatal("ObjectRegistry destroyed before roots/readers/backend leases drained");
+        platform::Fatal(
+            "ObjectRegistry destroyed before roots/readers/backend leases/encode pins drained");
     }
+
     while (chunks_) {
         Chunk* next = chunks_->next;
         chunks_->~Chunk();
@@ -68,6 +72,7 @@ ObjectRegistry::~ObjectRegistry() {
         if (!released) {
             platform::Fatal("Registry chunk allocator mismatch");
         }
+
         chunks_ = next;
     }
 }
@@ -76,9 +81,11 @@ Result<void> ObjectRegistry::CheckAccess(const ObjectAccessContext& access) cons
     if (platform::CurrentThreadId() != ownerThread_) {
         return Result<void>::Failure(ErrorCode::WrongThread);
     }
+
     if (!(access.context == context_)) {
         return Result<void>::Failure(ErrorCode::WrongContext);
     }
+
     return Result<void>::Success();
 }
 
@@ -89,6 +96,7 @@ ObjectRegistry::Slot* ObjectRegistry::SlotAt(uint32 index) const noexcept {
             return &chunk->slots[index - first];
         }
     }
+
     return nullptr;
 }
 
@@ -96,6 +104,7 @@ ObjectRegistry::Slot* ObjectRegistry::FindSlot(ObjectHandle handle) const noexce
     if (handle.registry != domain_ || handle.generation == 0 || handle.slot >= options_.maxSlots) {
         return nullptr;
     }
+
     Slot* slot = SlotAt(handle.slot);
     return slot && slot->generation == handle.generation ? slot : nullptr;
 }
@@ -105,13 +114,16 @@ Result<void> ObjectRegistry::CheckLive(Slot* slot, const void* nativeType) const
         slot->state == SlotState::Reserved) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
+
     if (slot->state != SlotState::Alive || IsCutoff(slot)) {
         return Result<void>::Failure(ErrorCode::Destroyed);
     }
+
     // 요청 타입이거나 그 파생이면 허용한다(단일 비가상 상속 사슬, TypeLease::IsNativeA).
     if (nativeType && !slot->type.IsNativeA(nativeType)) {
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
+
     return Result<void>::Success();
 }
 
@@ -121,44 +133,58 @@ Result<void> ObjectRegistry::AddRoot(const ObjectAccessContext& access, ObjectHa
     if (!valid) {
         return valid;
     }
+
     platform::LockGuard lock(gate_);
     if (closed_ || processing_) {
         return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
     }
+
     Slot* slot = FindSlot(handle);
     auto live = CheckLive(slot, nativeType);
     if (!live) {
         return live;
     }
+
     if (slot->roots == 0xffffffffu) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
+
     const ErrorCode shaded = ShadeLocked(handle);
     if (shaded != ErrorCode::None) {
         return Result<void>::Failure(shaded);
     }
+
     ++slot->roots;
     return Result<void>::Success();
 }
 
 Result<void> ObjectRegistry::AddBorrow(const ObjectAccessContext& access, ObjectHandle handle,
-                                       const void* nativeType) noexcept {
+                                       const void* nativeType, bool rejectEncodePinned) noexcept {
     auto valid = CheckAccess(access);
     if (!valid) {
         return valid;
     }
+
     platform::LockGuard lock(gate_);
     if (closed_ || processing_) {
         return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
     }
+
     Slot* slot = FindSlot(handle);
     auto live = CheckLive(slot, nativeType);
     if (!live) {
         return live;
     }
+
+    // 쓰기용 Borrow는 encode 중인 owner의 값을 바꾸지 못하게 한다(ResolveForWrite).
+    if (rejectEncodePinned && slot->encodePins != 0) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+
     if (totalBorrows_ == 0xffffffffu || slot->borrows == 0xffffffffu) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
+
     ++slot->borrows;
     ++totalBorrows_;
     return Result<void>::Success();
@@ -170,22 +196,27 @@ Result<void> RetainRoot(ObjectRegistry* registry, ObjectHandle handle) noexcept 
     if (!registry) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     platform::LockGuard lock(registry->gate_);
     if (registry->processing_ || registry->closed_) {
         return Result<void>::Failure(registry->closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
     }
+
     auto* slot = registry->FindSlot(handle);
     if (!slot || slot->roots == 0 ||
         !(slot->state == SlotState::Alive || slot->state == SlotState::DestroyRequested)) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
+
     if (slot->roots == 0xffffffffu) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
+
     const ErrorCode shaded = registry->ShadeLocked(handle);
     if (shaded != ErrorCode::None) {
         return Result<void>::Failure(shaded);
     }
+
     ++slot->roots;
     return Result<void>::Success();
 }
@@ -196,6 +227,7 @@ void ReleaseRoot(ObjectRegistry* registry, ObjectHandle handle) noexcept {
     if (!slot || slot->roots == 0) {
         platform::Fatal("RootRef release after lifetime closure");
     }
+
     --slot->roots;
 }
 
@@ -204,24 +236,29 @@ Result<void*> AccessBorrow(ObjectRegistry* registry, ObjectHandle handle,
     if (!registry) {
         return Result<void*>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (platform::CurrentThreadId() != registry->ownerThread_) {
         return Result<void*>::Failure(ErrorCode::WrongThread);
     }
+
     // 명시된 문맥이 있으면 다른 World의 Borrow에서 포인터를 얻을 수 없다.
     // 문맥이 없을 때의 일반 조회와 다른 스레드의 Borrow 반환은 그대로 허용한다.
     auto current = ObjectAccessScope::Current();
     if (current && !(current.Value().context == registry->context_)) {
         return Result<void*>::Failure(ErrorCode::WrongContext);
     }
+
     platform::LockGuard lock(registry->gate_);
     auto* slot = registry->FindSlot(handle);
     auto valid = registry->CheckLive(slot, nativeType);
     if (!valid) {
         return Result<void*>::Failure(valid.Error());
     }
+
     if (slot->borrows == 0) {
         return Result<void*>::Failure(ErrorCode::StaleHandle);
     }
+
     // 항상 Object 하위 객체 주소를 돌려준다. Borrow<T>::Get이 static_cast로 T*를 얻는다(파생 타입의
     // 기반 T 하위 객체 위치는 C++ 변환만 정확히 안다).
     return Result<void*>::Success(static_cast<void*>(slot->object));
@@ -231,10 +268,12 @@ Result<ObjectLifecycle> InspectBorrow(ObjectRegistry* registry, ObjectHandle han
     if (!registry) {
         return Result<ObjectLifecycle>::Failure(ErrorCode::InvalidArgument);
     }
+
     auto access = registry->ScopedAccess();
     if (!access) {
         return Result<ObjectLifecycle>::Failure(access.Error());
     }
+
     return registry->InspectChecked(access.Value(), handle, nullptr, true);
 }
 
@@ -244,6 +283,7 @@ void ReleaseBorrow(ObjectRegistry* registry, ObjectHandle handle) noexcept {
     if (!slot || slot->borrows == 0 || registry->totalBorrows_ == 0) {
         platform::Fatal("Borrow release after lifetime closure");
     }
+
     --slot->borrows;
     --registry->totalBorrows_;
 }
@@ -254,161 +294,374 @@ void ReleaseBackend(ObjectRegistry* registry, ObjectHandle handle) noexcept {
     if (!slot || slot->backendHolds == 0) {
         platform::Fatal("Backend lease release after lifetime closure");
     }
+
     --slot->backendHolds;
+}
+
+void ReleaseEncodePin(ObjectRegistry* registry, ObjectHandle handle) noexcept {
+    platform::LockGuard lock(registry->gate_);
+    auto* slot = registry->FindSlot(handle);
+    if (!slot || slot->encodePins == 0) {
+        platform::Fatal("Encode pin release after lifetime closure");
+    }
+
+    --slot->encodePins;
 }
 
 } // namespace detail
 
+namespace {
+
+constexpr uint32 ObjectRefArrayTag = 0x4f524146u;   // 'ORAF'
+constexpr uint32 StructRefElementTag = 0x53524145u; // 'SRAE'
+constexpr uint32 StructRefIndexTag = 0x53524149u;   // 'SRAI'
+
+// 컨테이너 버퍼의 다음 용량이다(4부터 두 배, uint32 상한에서 포화).
+uint32 GrownCapacity(uint32 capacity) noexcept {
+    return capacity < 4u ? 4u : capacity > 0x7fffffffu ? 0xffffffffu : capacity * 2u;
+}
+
+void ReleaseContainerMemory(Allocator& allocator, void* memory) noexcept {
+    if (memory != nullptr && !allocator.Deallocate(memory)) {
+        platform::Fatal("Registry container deallocation failed");
+    }
+}
+
+// StructRefArray 원소 하나를 소멸하고 블록을 반환한다.
+void DestroyStructElement(Allocator& allocator, const detail::StructElementOps& ops,
+                          void* block) noexcept {
+    ops.destroy(block);
+    ReleaseContainerMemory(allocator, block);
+}
+
+} // namespace
+
+Result<void> ObjectRegistry::CheckContainerOwnerLocked(ObjectHandle owner, const void* storage,
+                                                       usize storageBytes, uint64 transaction,
+                                                       bool allowDestroyRequested) noexcept {
+    Slot* source = FindSlot(owner);
+    if (!source || !source->object || IsCutoff(source)) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    if (transaction != 0) {
+        // staged: 같은 생성 트랜잭션의 Reserved 객체다(Reserved는 Borrow를 얻을 수 없다).
+        if (source->state != SlotState::Reserved || source->transaction != transaction) {
+            return Result<void>::Failure(ErrorCode::StaleHandle);
+        }
+    } else {
+        if (!(source->state == SlotState::Alive ||
+              (allowDestroyRequested && source->state == SlotState::DestroyRequested))) {
+            return Result<void>::Failure(ErrorCode::StaleHandle);
+        }
+
+        // 컨테이너는 owner 객체 안의 멤버이므로 호출자는 owner의 Borrow를 쥔 채 호출해야 한다.
+        // Borrow가 있는 동안은 수집이 Busy이고 회수도 일어나지 않으므로, 잠금 밖 할당·원소 생성 중
+        // allocator·생성자가 Registry에 재진입해도 owner 저장소가 사라지지 않는다.
+        if (source->borrows == 0) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
+    // 컨테이너 객체는 owner 저장소 안에 직접 포함되어야 한다(SetEdge의 필드 위치 검사와 같다).
+    const uptr start = reinterpret_cast<uptr>(source->storage);
+    const uptr location = reinterpret_cast<uptr>(storage);
+    const usize size = source->type.Ops().size;
+    if (size < storageBytes || location < start || location - start > size - storageBytes) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // encode 중인 owner의 버퍼를 바꾸지 않는다(PinForEncode). 호출 오류(InvalidArgument)를 가리지
+    // 않게 마지막에 본다. Reserved 객체는 고정할 수 없다.
+    if (source->encodePins != 0) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> ObjectRegistry::CheckTargetLocked(ObjectHandle target, uint64 transaction,
+                                               const void* nativeType) const noexcept {
+    Slot* destination = FindSlot(target);
+    if (!destination || IsCutoff(destination) ||
+        !(destination->state == SlotState::Alive ||
+          (transaction && destination->state == SlotState::Reserved &&
+           destination->transaction == transaction))) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    if (nativeType && !destination->type.IsNativeA(nativeType)) {
+        return Result<void>::Failure(ErrorCode::TypeMismatch);
+    }
+
+    return Result<void>::Success();
+}
+
 Result<void> ObjectRegistry::SetEdge(const ObjectAccessContext& access, ObjectHandle owner,
                                      ObjectHandle& field, ObjectHandle target, uint64 transaction,
-                                     const void* nativeType) noexcept {
+                                     const void* nativeType,
+                                     const detail::StructElementLocation* element) noexcept {
     auto valid = CheckAccess(access);
     if (!valid) {
         return valid;
     }
+
     platform::LockGuard lock(gate_);
     if (processing_ || closed_) {
         return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
     }
-    Slot* source = FindSlot(owner);
-    if (!source || !source->object || IsCutoff(source) ||
-        (transaction ? source->state != SlotState::Reserved || source->transaction != transaction
-                     : source->state != SlotState::Alive)) {
-        return Result<void>::Failure(ErrorCode::StaleHandle);
-    }
-    const uptr start = reinterpret_cast<uptr>(source->storage);
+
     const uptr location = reinterpret_cast<uptr>(&field);
-    const usize size = source->type.Ops().size;
-    if (location < start || location - start > size - sizeof(ObjectHandle)) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
-    }
-    if (!target.IsNull()) {
-        Slot* destination = FindSlot(target);
-        if (!destination || IsCutoff(destination) ||
-            !(destination->state == SlotState::Alive ||
-              (transaction && destination->state == SlotState::Reserved &&
-               destination->transaction == transaction))) {
+    if (element) {
+        // 원소 모드: 컨테이너가 owner 저장소 안, index < size, field가 그 원소 블록 안(O(1)).
+        // 컨테이너 위치가 owner 저장소 안임을 확인하기 전에는 storage를 역참조하지 않는다.
+        const detail::StructRefArrayStorage* storage = element->storage;
+        auto checked =
+            CheckContainerOwnerLocked(owner, storage, sizeof(*storage), transaction, false);
+        if (!checked) {
+            return checked;
+        }
+
+        if (element->index >= storage->size) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        const uptr block = reinterpret_cast<uptr>(storage->blocks[element->index]);
+        const usize bytes = storage->element->size;
+        if (bytes < sizeof(ObjectHandle) || location < block ||
+            location - block > bytes - sizeof(ObjectHandle)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    } else {
+        Slot* source = FindSlot(owner);
+        if (!source || !source->object || IsCutoff(source) ||
+            (transaction
+                 ? source->state != SlotState::Reserved || source->transaction != transaction
+                 : source->state != SlotState::Alive)) {
             return Result<void>::Failure(ErrorCode::StaleHandle);
         }
-        if (nativeType && !destination->type.IsNativeA(nativeType)) {
-            return Result<void>::Failure(ErrorCode::TypeMismatch);
+
+        const uptr start = reinterpret_cast<uptr>(source->storage);
+        const usize size = source->type.Ops().size;
+        if (location < start || location - start > size - sizeof(ObjectHandle)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
-        // staged 내부 간선은 Commit에서 전체 게시·shade한다. 이미 게시된 대상은 즉시 보존한다.
-        if (destination->state == SlotState::Alive) {
-            const ErrorCode shaded = ShadeLocked(target);
-            if (shaded != ErrorCode::None) {
-                return Result<void>::Failure(shaded);
-            }
+
+        // 위치 오류를 가리지 않게 마지막에 본다(PinForEncode).
+        if (source->encodePins != 0) {
+            return Result<void>::Failure(ErrorCode::Busy);
         }
     }
+
+    if (target.IsNull()) {
+        // 비교·Required 검사·encode가 정규 null만 보게 한다.
+        field = ObjectHandle{};
+        return Result<void>::Success();
+    }
+
+    auto targetChecked = CheckTargetLocked(target, transaction, nativeType);
+    if (!targetChecked) {
+        return targetChecked;
+    }
+
+    // staged 내부 간선은 Commit에서 전체 게시·shade한다. 이미 게시된 대상은 즉시 보존한다.
+    if (FindSlot(target)->state == SlotState::Alive) {
+        const ErrorCode shaded = ShadeLocked(target);
+        if (shaded != ErrorCode::None) {
+            return Result<void>::Failure(shaded);
+        }
+    }
+
     field = target;
     return Result<void>::Success();
 }
 
-Result<void> ObjectRegistry::CheckArrayOwnerLocked(ObjectHandle owner,
-                                                   const detail::ObjectRefArrayStorage& storage,
-                                                   bool allowDestroyRequested) noexcept {
-    if (processing_ || closed_) {
-        return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
-    }
-    Slot* source = FindSlot(owner);
-    if (!source || !source->object || IsCutoff(source) ||
-        !(source->state == SlotState::Alive ||
-          (allowDestroyRequested && source->state == SlotState::DestroyRequested))) {
-        return Result<void>::Failure(ErrorCode::StaleHandle);
-    }
-    // 배열은 owner 객체 안의 멤버이므로 호출자는 owner의 Borrow를 쥔 채 호출해야 한다. Borrow가
-    // 있는 동안은 수집이 Busy이고 회수도 일어나지 않으므로, 잠금 밖 버퍼 확장 중 allocator가
-    // Registry에 재진입해도 owner 저장소가 사라지지 않는다.
-    if (source->borrows == 0) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
-    }
-    // 배열 객체는 owner 저장소 안에 직접 포함되어야 한다(SetEdge의 필드 위치 검사와 같다).
-    const uptr start = reinterpret_cast<uptr>(source->storage);
-    const uptr location = reinterpret_cast<uptr>(&storage);
-    const usize size = source->type.Ops().size;
-    if (size < sizeof(storage) || location < start || location - start > size - sizeof(storage)) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
-    }
-    return Result<void>::Success();
-}
-
-Result<void> ObjectRegistry::AppendArrayEdge(const ObjectAccessContext& access, ObjectHandle owner,
-                                             detail::ObjectRefArrayStorage& storage,
-                                             ObjectHandle target, const void* nativeType) noexcept {
+Result<void> ObjectRegistry::InsertArrayEdge(const ObjectAccessContext& access, ObjectHandle owner,
+                                             detail::ObjectRefArrayStorage& storage, usize index,
+                                             bool append, ObjectHandle target,
+                                             const void* nativeType) noexcept {
     auto valid = CheckAccess(access);
     if (!valid) {
         return valid;
     }
+
     if (target.IsNull()) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        target = ObjectHandle{};
     }
-    auto validateTarget = [&]() noexcept -> Result<void> {
-        Slot* destination = FindSlot(target);
-        if (!destination || IsCutoff(destination) || destination->state != SlotState::Alive) {
-            return Result<void>::Failure(ErrorCode::StaleHandle);
+
+    // owner 검증 뒤에만 부른다(배열이 owner 저장소 안임을 확인한 뒤 size를 읽는다).
+    auto positionLocked = [&]() noexcept -> usize { return append ? storage.size : index; };
+    Allocator& allocator = *storage.allocator;
+    // owner·대상 검증(잠금 보유). 할당 전과 할당 뒤에 같은 검사를 하고, 그 사이 index를 본다.
+    auto ownerLocked = [&]() noexcept -> Result<void> {
+        if (processing_ || closed_) {
+            return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
         }
-        if (nativeType && !destination->type.IsNativeA(nativeType)) {
-            return Result<void>::Failure(ErrorCode::TypeMismatch);
-        }
-        return Result<void>::Success();
+
+        return CheckContainerOwnerLocked(owner, &storage, sizeof(storage), 0, false);
     };
+    auto targetLocked = [&]() noexcept -> Result<void> {
+        return target.IsNull() ? Result<void>::Success() : CheckTargetLocked(target, 0, nativeType);
+    };
+    // position에 target을 넣어 게시한다(잠금 보유, 검증 뒤). buffer는 size + 1을 담는 버퍼(기존
+    // 또는 새 것)이고, 새 버퍼로 바꾸면 잠금 밖에서 반환할 옛 버퍼를 돌려준다. shade 실패면
+    // 불변이다.
+    auto publishLocked = [&](usize position, ObjectHandle* buffer,
+                             uint32 capacity) noexcept -> Result<ObjectHandle*> {
+        if (!target.IsNull()) {
+            const ErrorCode shaded = ShadeLocked(target);
+            if (shaded != ErrorCode::None) {
+                return Result<ObjectHandle*>::Failure(shaded);
+            }
+        }
+
+        ObjectHandle* previous = nullptr;
+        if (buffer != storage.data) {
+            for (usize at = 0; at < position; ++at) {
+                buffer[at] = storage.data[at];
+            }
+
+            for (usize at = storage.size; at > position; --at) {
+                buffer[at] = storage.data[at - 1];
+            }
+
+            previous = storage.data;
+            storage.data = buffer;
+            storage.capacity = capacity;
+        } else {
+            for (usize at = storage.size; at > position; --at) {
+                buffer[at] = buffer[at - 1];
+            }
+        }
+
+        storage.data[position] = target;
+        ++storage.size;
+        return Result<ObjectHandle*>::Success(previous);
+    };
+
+    uint32 grown = 0;
     {
-        // 용량을 늘리기 전에 검증해 잘못된 호출이 할당을 일으키지 않게 한다.
         platform::LockGuard lock(gate_);
-        auto checked = CheckArrayOwnerLocked(owner, storage, false);
+        // 용량을 늘리기 전에 검증해 잘못된 호출이 할당을 일으키지 않게 한다.
+        auto checked = ownerLocked();
         if (!checked) {
             return checked;
         }
-        auto targetChecked = validateTarget();
-        if (!targetChecked) {
-            return targetChecked;
+
+        const usize position = positionLocked();
+        if (position > storage.size) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
-    }
-    if (storage.size == storage.capacity) {
-        // allocator callback은 Registry 잠금 밖에서 실행한다. 원소 버퍼는 소유 스레드만 바꾸며 GC
-        // trace는 slice 안에서만(같은 소유 스레드의 호출 중) 읽으므로 이 재배치와 겹치지 않는다.
-        // owner Borrow가 수집·회수를 막으므로 allocator가 Registry에 재진입해도 owner와 버퍼는 살아
-        // 있다.
-        if (storage.capacity == 0xffffffffu) {
+
+        checked = targetLocked();
+        if (!checked) {
+            return checked;
+        }
+
+        if (storage.size == 0xffffffffu) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }
-        const uint32 grown = storage.capacity < 4u            ? 4u
-                             : storage.capacity > 0x7fffffffu ? 0xffffffffu
-                                                              : storage.capacity * 2u;
-        auto memory = storage.allocator->Allocate(sizeof(ObjectHandle) * grown,
-                                                  alignof(ObjectHandle), 0x4f524146u);
-        if (!memory) {
-            return Result<void>::Failure(memory.Error());
+
+        if (storage.size < storage.capacity) {
+            auto published = publishLocked(position, storage.data, storage.capacity);
+            return published ? Result<void>::Success() : Result<void>::Failure(published.Error());
         }
-        auto* replacement = static_cast<ObjectHandle*>(memory.Value());
-        for (uint32 index = 0; index < storage.size; ++index) {
-            replacement[index] = storage.data[index];
+
+        grown = GrownCapacity(storage.capacity);
+    }
+
+    // allocator callback은 Registry 잠금 밖에서 실행하며, 이 구간에는 할당만 한다. 콜백이 같은
+    // 배열을 바꿀 수 있으므로 복사·삽입·게시는 다시 잠근 뒤 그때의 size·index로 한다. 레지스트리
+    // 전체 처리 표시(processing_)는 세우지 않는다(흔한 런타임 목록 변경이 다른 스레드를 막지 않게).
+    // owner Borrow가 수집·회수를 막으므로 owner와 배열은 살아 있다.
+    auto memory =
+        allocator.Allocate(sizeof(ObjectHandle) * grown, alignof(ObjectHandle), ObjectRefArrayTag);
+    if (!memory) {
+        return Result<void>::Failure(memory.Error());
+    }
+
+    auto* fresh = static_cast<ObjectHandle*>(memory.Value());
+    ObjectHandle* release = fresh;
+    Result<void> result = Result<void>::Success();
+    {
+        platform::LockGuard lock(gate_);
+        result = ownerLocked();
+        const usize position = result ? positionLocked() : 0;
+        if (result && position > storage.size) {
+            // 콜백이 원소를 지워 index가 지금 size를 넘는다.
+            result = Result<void>::Failure(ErrorCode::Busy);
         }
-        ObjectHandle* previous = storage.data;
-        storage.data = replacement;
-        storage.capacity = grown;
-        if (previous != nullptr && !storage.allocator->Deallocate(previous)) {
-            platform::Fatal("ObjectRefArray storage deallocation failed");
+
+        if (result) {
+            result = targetLocked();
+        }
+
+        if (result) {
+            if (storage.size == 0xffffffffu) {
+                result = Result<void>::Failure(ErrorCode::Overflow);
+            } else if (storage.size < storage.capacity) {
+                // 그 사이 용량이 충분해졌다. 기존 버퍼에 넣고 새 버퍼는 반환한다.
+                auto published = publishLocked(position, storage.data, storage.capacity);
+                if (!published) {
+                    result = Result<void>::Failure(published.Error());
+                }
+            } else if (grown > storage.size) {
+                auto published = publishLocked(position, fresh, grown);
+                if (published) {
+                    release = published.Value();
+                } else {
+                    result = Result<void>::Failure(published.Error());
+                }
+            } else {
+                // 콜백이 원소를 늘려 새 버퍼가 size + 1을 담지 못한다.
+                result = Result<void>::Failure(ErrorCode::Busy);
+            }
         }
     }
+
+    ReleaseContainerMemory(allocator, release);
+    return result;
+}
+
+Result<void> ObjectRegistry::ReplaceArrayEdge(const ObjectAccessContext& access, ObjectHandle owner,
+                                              detail::ObjectRefArrayStorage& storage, usize index,
+                                              ObjectHandle target,
+                                              const void* nativeType) noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return valid;
+    }
+
     platform::LockGuard lock(gate_);
-    // 잠금을 놓은 사이 allocator가 같은 스레드에서 Registry를 다시 불렀을 수 있다(대상 파괴 요청
-    // 등). owner Borrow 덕분에 owner는 남아 있지만 대상 상태는 바뀌었을 수 있으므로 게시 직전에
-    // 다시 확인한다.
-    auto checked = CheckArrayOwnerLocked(owner, storage, false);
+    if (processing_ || closed_) {
+        return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
+    }
+
+    auto checked = CheckContainerOwnerLocked(owner, &storage, sizeof(storage), 0, false);
     if (!checked) {
         return checked;
     }
-    auto targetChecked = validateTarget();
+
+    if (index >= storage.size) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (target.IsNull()) {
+        storage.data[index] = ObjectHandle{};
+        return Result<void>::Success();
+    }
+
+    auto targetChecked = CheckTargetLocked(target, 0, nativeType);
     if (!targetChecked) {
         return targetChecked;
     }
+
     const ErrorCode shaded = ShadeLocked(target);
     if (shaded != ErrorCode::None) {
         return Result<void>::Failure(shaded);
     }
-    storage.data[storage.size++] = target;
+
+    storage.data[index] = target;
     return Result<void>::Success();
 }
 
@@ -419,12 +672,23 @@ Result<void> ObjectRegistry::RemoveArrayEdge(const ObjectAccessContext& access, 
     if (!valid) {
         return valid;
     }
+
     platform::LockGuard lock(gate_);
-    auto checked = CheckArrayOwnerLocked(owner, storage, true);
+    if (processing_ || closed_) {
+        return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
+    }
+
+    auto checked = CheckContainerOwnerLocked(owner, &storage, sizeof(storage), 0, true);
     if (!checked) {
         return checked;
     }
+
     if (byHandle) {
+        // 원소 null은 정규 값이므로 비정규 null 인자도 첫 null 원소를 찾는다.
+        if (target.IsNull()) {
+            target = ObjectHandle{};
+        }
+
         index = storage.size;
         for (uint32 position = 0; position < storage.size; ++position) {
             if (storage.data[position] == target) {
@@ -432,17 +696,20 @@ Result<void> ObjectRegistry::RemoveArrayEdge(const ObjectAccessContext& access, 
                 break;
             }
         }
+
         if (index == storage.size) {
             return Result<void>::Failure(ErrorCode::NotFound);
         }
     } else if (index >= storage.size) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     // 삽입 장벽 GC에서 간선 삭제는 장벽이 필요 없다. 지운 대상은 다른 경로로 도달하지 않으면
     // 회수된다.
     for (usize position = index + 1; position < storage.size; ++position) {
         storage.data[position - 1] = storage.data[position];
     }
+
     --storage.size;
     return Result<void>::Success();
 }
@@ -453,13 +720,455 @@ Result<void> ObjectRegistry::ClearArrayEdges(const ObjectAccessContext& access, 
     if (!valid) {
         return valid;
     }
+
     platform::LockGuard lock(gate_);
-    auto checked = CheckArrayOwnerLocked(owner, storage, true);
+    if (processing_ || closed_) {
+        return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
+    }
+
+    auto checked = CheckContainerOwnerLocked(owner, &storage, sizeof(storage), 0, true);
     if (!checked) {
         return checked;
     }
+
     storage.size = 0;
     return Result<void>::Success();
+}
+
+Result<void> ObjectRegistry::AssignArrayEdges(const ObjectAccessContext& access, ObjectHandle owner,
+                                              detail::ObjectRefArrayStorage& storage,
+                                              Span<const ObjectHandle> targets, uint64 transaction,
+                                              const void* nativeType) noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return valid;
+    }
+
+    if (targets.Size() > 0xffffffffu) {
+        return Result<void>::Failure(ErrorCode::Overflow);
+    }
+
+    const auto count = static_cast<uint32>(targets.Size());
+    Allocator& allocator = *storage.allocator;
+    // 모든 원소를 검증한다(잠금 보유). 하나라도 틀리면 불변이다.
+    auto validateLocked = [&]() noexcept -> Result<void> {
+        auto checked =
+            CheckContainerOwnerLocked(owner, &storage, sizeof(storage), transaction, false);
+        if (!checked) {
+            return checked;
+        }
+
+        for (uint32 index = 0; index < count; ++index) {
+            if (!targets[index].IsNull()) {
+                auto targetChecked = CheckTargetLocked(targets[index], transaction, nativeType);
+                if (!targetChecked) {
+                    return targetChecked;
+                }
+            }
+        }
+
+        return Result<void>::Success();
+    };
+    // 생존 대상만 shade한 뒤(ShadeLocked는 Reserved에 StaleHandle을 내므로 Reserved 대상은 Commit이
+    // shade한다) buffer에 정규화해 복사하고 게시한다. 새 버퍼로 바꾸면 옛 버퍼를 돌려준다.
+    auto publishLocked = [&](ObjectHandle* buffer,
+                             uint32 capacity) noexcept -> Result<ObjectHandle*> {
+        for (uint32 index = 0; index < count; ++index) {
+            const ObjectHandle target = targets[index];
+            if (!target.IsNull() && FindSlot(target)->state == SlotState::Alive) {
+                const ErrorCode shaded = ShadeLocked(target);
+                if (shaded != ErrorCode::None) {
+                    return Result<ObjectHandle*>::Failure(shaded);
+                }
+            }
+        }
+
+        for (uint32 index = 0; index < count; ++index) {
+            buffer[index] = targets[index].IsNull() ? ObjectHandle{} : targets[index];
+        }
+
+        ObjectHandle* previous = buffer != storage.data ? storage.data : nullptr;
+        storage.data = buffer;
+        storage.capacity = capacity;
+        storage.size = count;
+        return Result<ObjectHandle*>::Success(previous);
+    };
+
+    {
+        platform::LockGuard lock(gate_);
+        if (closed_ || processing_ || transaction == 0) {
+            return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
+        }
+
+        auto checked = validateLocked();
+        if (!checked) {
+            return checked;
+        }
+
+        if (count <= storage.capacity) {
+            auto published = publishLocked(storage.data, storage.capacity);
+            return published ? Result<void>::Success() : Result<void>::Failure(published.Error());
+        }
+
+        // 생성 트랜잭션 안의 잠금 밖 할당은 CreatePending과 같은 규칙이다: allocator 재진입은 Busy,
+        // Rollback 재진입은 Fatal.
+        processing_ = true;
+    }
+
+    auto finish = [this]() noexcept {
+        platform::LockGuard lock(gate_);
+        processing_ = false;
+    };
+    auto memory =
+        allocator.Allocate(sizeof(ObjectHandle) * count, alignof(ObjectHandle), ObjectRefArrayTag);
+    if (!memory) {
+        finish();
+        return Result<void>::Failure(memory.Error());
+    }
+
+    auto* fresh = static_cast<ObjectHandle*>(memory.Value());
+    ObjectHandle* release = fresh;
+    Result<void> result = Result<void>::Success();
+    {
+        platform::LockGuard lock(gate_);
+        result = validateLocked();
+        if (result) {
+            auto published = publishLocked(fresh, count);
+            if (published) {
+                release = published.Value();
+            } else {
+                result = Result<void>::Failure(published.Error());
+            }
+        }
+    }
+
+    // 옛(또는 쓰이지 않은) 버퍼는 처리 표시 아래 잠금 밖에서 반환한다.
+    ReleaseContainerMemory(allocator, release);
+    finish();
+    return result;
+}
+
+Result<usize> ObjectRegistry::InsertStructElement(const ObjectAccessContext& access,
+                                                  ObjectHandle owner,
+                                                  detail::StructRefArrayStorage& storage,
+                                                  usize index, bool append) noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return Result<usize>::Failure(valid.Error());
+    }
+
+    Allocator& allocator = *storage.allocator;
+    const detail::StructElementOps& ops = *storage.element;
+    auto validateLocked = [&]() noexcept -> Result<void> {
+        if (processing_ || closed_) {
+            return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
+        }
+
+        return CheckContainerOwnerLocked(owner, &storage, sizeof(storage), 0, false);
+    };
+
+    uint32 grown = 0;
+    {
+        platform::LockGuard lock(gate_);
+        auto checked = validateLocked();
+        if (!checked) {
+            return Result<usize>::Failure(checked.Error());
+        }
+
+        const usize position = append ? storage.size : index;
+        if (position > storage.size) {
+            return Result<usize>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (storage.size == 0xffffffffu) {
+            return Result<usize>::Failure(ErrorCode::Overflow);
+        }
+
+        if (storage.size == storage.capacity) {
+            grown = GrownCapacity(storage.capacity);
+        }
+    }
+
+    // 잠금 밖: 원소 블록 할당·기본 생성(참조는 null이라 장벽이 필요 없다)·필요하면 새 색인 할당.
+    // 생성자·allocator 콜백이 같은 배열을 바꿀 수 있으므로 게시는 다시 잠근 뒤 그때 상태로 한다.
+    auto memory = allocator.Allocate(ops.size, ops.alignment, StructRefElementTag);
+    if (!memory) {
+        return Result<usize>::Failure(memory.Error());
+    }
+
+    void* block = memory.Value();
+    ops.construct(block, allocator);
+    void** fresh = nullptr;
+    if (grown != 0) {
+        auto table = allocator.Allocate(sizeof(void*) * grown, alignof(void*), StructRefIndexTag);
+        if (!table) {
+            DestroyStructElement(allocator, ops, block);
+            return Result<usize>::Failure(table.Error());
+        }
+
+        fresh = static_cast<void**>(table.Value());
+    }
+
+    void** release = fresh;
+    bool published = false;
+    usize position = 0;
+    Result<void> result = Result<void>::Success();
+    {
+        platform::LockGuard lock(gate_);
+        result = validateLocked();
+        if (result) {
+            position = append ? storage.size : index;
+            void** target = nullptr;
+            if (position > storage.size) {
+                result = Result<void>::Failure(ErrorCode::Busy);
+            } else if (storage.size == 0xffffffffu) {
+                result = Result<void>::Failure(ErrorCode::Overflow);
+            } else if (storage.size < storage.capacity) {
+                target = storage.blocks;
+            } else if (fresh != nullptr && grown > storage.size) {
+                target = fresh;
+            } else {
+                // 새 색인이 없거나(그 사이 용량이 찼다) 모자라다.
+                result = Result<void>::Failure(ErrorCode::Busy);
+            }
+
+            if (target != nullptr) {
+                if (target != storage.blocks) {
+                    for (usize at = 0; at < position; ++at) {
+                        target[at] = storage.blocks[at];
+                    }
+
+                    for (usize at = storage.size; at > position; --at) {
+                        target[at] = storage.blocks[at - 1];
+                    }
+
+                    release = storage.blocks;
+                    storage.blocks = target;
+                    storage.capacity = grown;
+                } else {
+                    for (usize at = storage.size; at > position; --at) {
+                        target[at] = target[at - 1];
+                    }
+                }
+
+                target[position] = block;
+                ++storage.size;
+                published = true;
+            }
+        }
+    }
+
+    ReleaseContainerMemory(allocator, release);
+    if (!published) {
+        DestroyStructElement(allocator, ops, block);
+        return Result<usize>::Failure(result.Error());
+    }
+
+    return Result<usize>::Success(position);
+}
+
+Result<void> ObjectRegistry::RemoveStructElement(const ObjectAccessContext& access,
+                                                 ObjectHandle owner,
+                                                 detail::StructRefArrayStorage& storage,
+                                                 usize index) noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return valid;
+    }
+
+    Allocator& allocator = *storage.allocator;
+    const detail::StructElementOps& ops = *storage.element;
+    void* block = nullptr;
+    {
+        platform::LockGuard lock(gate_);
+        if (processing_ || closed_) {
+            return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
+        }
+
+        auto checked = CheckContainerOwnerLocked(owner, &storage, sizeof(storage), 0, true);
+        if (!checked) {
+            return checked;
+        }
+
+        if (index >= storage.size) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        // 삭제 장벽은 필요 없다(삽입 장벽과 Sweeping cutoff가 지킨다). 색인에서 먼저 떼므로 소멸
+        // 중 재진입이 이 원소를 다시 건드릴 수 없다.
+        block = storage.blocks[index];
+        for (usize position = index + 1; position < storage.size; ++position) {
+            storage.blocks[position - 1] = storage.blocks[position];
+        }
+
+        --storage.size;
+    }
+
+    DestroyStructElement(allocator, ops, block);
+    return Result<void>::Success();
+}
+
+Result<void> ObjectRegistry::ClearStructElements(const ObjectAccessContext& access,
+                                                 ObjectHandle owner,
+                                                 detail::StructRefArrayStorage& storage) noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return valid;
+    }
+
+    Allocator& allocator = *storage.allocator;
+    const detail::StructElementOps& ops = *storage.element;
+    void** blocks = nullptr;
+    uint32 size = 0;
+    {
+        platform::LockGuard lock(gate_);
+        if (processing_ || closed_) {
+            return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
+        }
+
+        auto checked = CheckContainerOwnerLocked(owner, &storage, sizeof(storage), 0, true);
+        if (!checked) {
+            return checked;
+        }
+
+        // 색인째 떼어 낸다(잠금 밖에서 소멸할 원소를 담으려고 할당하지 않는다).
+        blocks = storage.blocks;
+        size = storage.size;
+        storage.blocks = nullptr;
+        storage.size = 0;
+        storage.capacity = 0;
+    }
+
+    for (uint32 remaining = size; remaining != 0; --remaining) {
+        DestroyStructElement(allocator, ops, blocks[remaining - 1]);
+    }
+
+    ReleaseContainerMemory(allocator, blocks);
+    return Result<void>::Success();
+}
+
+Result<void> ObjectRegistry::AssignStructElements(const ObjectAccessContext& access,
+                                                  ObjectHandle owner,
+                                                  detail::StructRefArrayStorage& storage,
+                                                  usize count, uint64 transaction) noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return valid;
+    }
+
+    if (count > 0xffffffffu) {
+        return Result<void>::Failure(ErrorCode::Overflow);
+    }
+
+    Allocator& allocator = *storage.allocator;
+    const detail::StructElementOps& ops = *storage.element;
+    {
+        platform::LockGuard lock(gate_);
+        if (closed_ || processing_ || transaction == 0) {
+            return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
+        }
+
+        auto checked =
+            CheckContainerOwnerLocked(owner, &storage, sizeof(storage), transaction, false);
+        if (!checked) {
+            return checked;
+        }
+
+        // 블록 할당·원소 생성·옛 원소 소멸은 처리 표시 아래 잠금 밖에서 한다(CreatePending과 같은
+        // 규칙 — 그동안의 Registry 재진입은 Busy, Rollback 재진입은 Fatal).
+        processing_ = true;
+    }
+
+    auto finish = [this]() noexcept {
+        platform::LockGuard lock(gate_);
+        processing_ = false;
+    };
+    void** fresh = nullptr;
+    usize built = 0;
+    auto discard = [&]() noexcept {
+        for (usize remaining = built; remaining != 0; --remaining) {
+            DestroyStructElement(allocator, ops, fresh[remaining - 1]);
+        }
+
+        ReleaseContainerMemory(allocator, fresh);
+    };
+    if (count != 0) {
+        auto table = allocator.Allocate(sizeof(void*) * count, alignof(void*), StructRefIndexTag);
+        if (!table) {
+            finish();
+            return Result<void>::Failure(table.Error());
+        }
+
+        fresh = static_cast<void**>(table.Value());
+    }
+
+    for (; built < count; ++built) {
+        auto memory = allocator.Allocate(ops.size, ops.alignment, StructRefElementTag);
+        if (!memory) {
+            discard();
+            finish();
+            return Result<void>::Failure(memory.Error());
+        }
+
+        ops.construct(memory.Value(), allocator);
+        fresh[built] = memory.Value();
+    }
+
+    void** previous = nullptr;
+    uint32 previousSize = 0;
+    Result<void> result = Result<void>::Success();
+    {
+        platform::LockGuard lock(gate_);
+        result = CheckContainerOwnerLocked(owner, &storage, sizeof(storage), transaction, false);
+        if (result) {
+            previous = storage.blocks;
+            previousSize = storage.size;
+            storage.blocks = fresh;
+            storage.size = static_cast<uint32>(count);
+            storage.capacity = static_cast<uint32>(count);
+        }
+    }
+
+    if (!result) {
+        discard();
+        finish();
+        return result;
+    }
+
+    // 옛 원소는 게시 뒤 역순으로 소멸한다.
+    for (uint32 remaining = previousSize; remaining != 0; --remaining) {
+        DestroyStructElement(allocator, ops, previous[remaining - 1]);
+    }
+
+    ReleaseContainerMemory(allocator, previous);
+    finish();
+    return Result<void>::Success();
+}
+
+Result<EncodePin> ObjectRegistry::PinForEncode(const ObjectAccessContext& access,
+                                               ObjectHandle owner) noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return Result<EncodePin>::Failure(valid.Error());
+    }
+
+    platform::LockGuard lock(gate_);
+    if (closed_ || processing_) {
+        return Result<EncodePin>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
+    }
+
+    Slot* slot = FindSlot(owner);
+    auto live = CheckLive(slot, nullptr);
+    if (!live) {
+        return Result<EncodePin>::Failure(live.Error());
+    }
+
+    if (slot->encodePins == 0xffffffffu) {
+        return Result<EncodePin>::Failure(ErrorCode::Overflow);
+    }
+
+    ++slot->encodePins;
+    return Result<EncodePin>::Success(EncodePin(this, owner));
 }
 
 Result<void> ObjectRegistry::RequestDestroy(const ObjectAccessContext& access,
@@ -471,16 +1180,19 @@ Result<ObjectAccessContext> ObjectRegistry::ScopedAccess() const noexcept {
     if (platform::CurrentThreadId() != ownerThread_) {
         return Result<ObjectAccessContext>::Failure(ErrorCode::WrongThread);
     }
+
     auto current = ObjectAccessScope::Current();
     if (current) {
         // 명시된 실행 문맥은 항상 우선한다. 다른 World라면 CheckAccess가 거부한다.
         return current;
     }
+
     // 실행 문맥이 없으면 객체가 속한 Registry를 사용한다. 이때 호출자의 World는 식별하지
     // 못한다. 등록된 Borrow·슬롯·스레드 검사는 이후에도 그대로 수행한다.
     if (current.Error() == ErrorCode::WrongContext && !options_.requireLifecycleScope) {
         return Result<ObjectAccessContext>::Success(OwnerAccess());
     }
+
     return current;
 }
 
@@ -489,6 +1201,7 @@ Result<void> ObjectRegistry::DestroySelf(ObjectHandle handle, const Object* obje
     if (!access) {
         return Result<void>::Failure(access.Error());
     }
+
     return RequestDestroyChecked(access.Value(), handle, object, true);
 }
 
@@ -499,27 +1212,33 @@ Result<void> ObjectRegistry::RequestDestroyChecked(const ObjectAccessContext& ac
     if (!valid) {
         return valid;
     }
+
     platform::LockGuard lock(gate_);
     if (closed_ || processing_) {
         return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
     }
+
     Slot* slot = FindSlot(handle);
     if (requireBorrow) {
         if (!slot || slot->state == SlotState::Reserved || slot->state == SlotState::Free ||
             slot->state == SlotState::Exhausted || (object && slot->object != object)) {
             return Result<void>::Failure(ErrorCode::StaleHandle);
         }
+
         if (slot->borrows == 0) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
     }
+
     if (slot && (slot->state == SlotState::DestroyRequested || slot->state == SlotState::Retired)) {
         return Result<void>::Success();
     }
+
     auto live = CheckLive(slot, nullptr);
     if (!live) {
         return live;
     }
+
     slot->state = SlotState::DestroyRequested;
     return Result<void>::Success();
 }
@@ -535,6 +1254,7 @@ Result<ObjectLifecycle> ObjectRegistry::InspectSelf(ObjectHandle handle,
     if (!access) {
         return Result<ObjectLifecycle>::Failure(access.Error());
     }
+
     return InspectChecked(access.Value(), handle, object, true);
 }
 
@@ -545,25 +1265,31 @@ Result<ObjectLifecycle> ObjectRegistry::InspectChecked(const ObjectAccessContext
     if (!valid) {
         return Result<ObjectLifecycle>::Failure(valid.Error());
     }
+
     platform::LockGuard lock(gate_);
     if (closed_ || processing_) {
         return Result<ObjectLifecycle>::Failure(closed_ ? ErrorCode::ShuttingDown
                                                         : ErrorCode::Busy);
     }
+
     Slot* slot = FindSlot(handle);
     if (!slot || slot->state == SlotState::Free || slot->state == SlotState::Reserved ||
         slot->state == SlotState::Exhausted) {
         return Result<ObjectLifecycle>::Failure(ErrorCode::StaleHandle);
     }
+
     if (object && slot->object != object) {
         return Result<ObjectLifecycle>::Failure(ErrorCode::StaleHandle);
     }
+
     if (requireBorrow && slot->borrows == 0) {
         return Result<ObjectLifecycle>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (IsCutoff(slot)) {
         return Result<ObjectLifecycle>::Success(ObjectLifecycle::Unreachable);
     }
+
     switch (slot->state) {
     case SlotState::Alive:
         return Result<ObjectLifecycle>::Success(ObjectLifecycle::Alive);
@@ -584,18 +1310,22 @@ Result<BackendLease> ObjectRegistry::AcquireBackendLease(const ObjectAccessConte
     if (!valid) {
         return Result<BackendLease>::Failure(valid.Error());
     }
+
     platform::LockGuard lock(gate_);
     if (closed_ || processing_) {
         return Result<BackendLease>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
     }
+
     Slot* slot = FindSlot(handle);
     auto live = CheckLive(slot, nullptr);
     if (!live) {
         return Result<BackendLease>::Failure(live.Error());
     }
+
     if (slot->backendHolds == 0xffffffffu) {
         return Result<BackendLease>::Failure(ErrorCode::Overflow);
     }
+
     ++slot->backendHolds;
     return Result<BackendLease>::Success(BackendLease(this, handle));
 }
@@ -622,6 +1352,7 @@ Result<TypeLease> ObjectRegistry::AcquireTypeSelf(ObjectHandle handle,
         slot->state == SlotState::Exhausted || slot->object != object) {
         return Result<TypeLease>::Failure(ErrorCode::StaleHandle);
     }
+
     if (slot->borrows == 0) {
         return Result<TypeLease>::Failure(ErrorCode::InvalidArgument);
     }
@@ -630,6 +1361,7 @@ Result<TypeLease> ObjectRegistry::AcquireTypeSelf(ObjectHandle handle,
     if (!live) {
         return Result<TypeLease>::Failure(live.Error());
     }
+
     return slot->type.Clone();
 }
 
@@ -639,15 +1371,18 @@ Result<TypeLease> ObjectRegistry::AcquireType(const ObjectAccessContext& access,
     if (!valid) {
         return Result<TypeLease>::Failure(valid.Error());
     }
+
     platform::LockGuard lock(gate_);
     if (closed_ || processing_) {
         return Result<TypeLease>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
     }
+
     Slot* slot = FindSlot(handle);
     auto live = CheckLive(slot, nullptr);
     if (!live) {
         return Result<TypeLease>::Failure(live.Error());
     }
+
     return slot->type.Clone();
 }
 
@@ -657,10 +1392,12 @@ Result<TypeLease> ObjectRegistry::AcquireRegisteredType(const ObjectAccessContex
     if (!valid) {
         return Result<TypeLease>::Failure(valid.Error());
     }
+
     platform::LockGuard lock(gate_);
     if (closed_ || processing_) {
         return Result<TypeLease>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
     }
+
     return types_.Acquire(type);
 }
 
@@ -669,16 +1406,20 @@ Result<uint64> ObjectRegistry::BeginConstruction(const ObjectAccessContext& acce
     if (!valid) {
         return Result<uint64>::Failure(valid.Error());
     }
+
     platform::LockGuard lock(gate_);
     if (closed_ || processing_) {
         return Result<uint64>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
     }
+
     if (options_.maxSlots == 0 || options_.maxGeneration == 0) {
         return Result<uint64>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (nextTransaction_ == 0 || constructions_ == 0xffffffffu) {
         return Result<uint64>::Failure(ErrorCode::Overflow);
     }
+
     ++constructions_;
     return Result<uint64>::Success(nextTransaction_++);
 }
@@ -690,14 +1431,17 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
     if (!valid) {
         return Result<ObjectHandle>::Failure(valid.Error());
     }
+
     {
         platform::LockGuard lock(gate_);
         if (closed_ || processing_ || transaction == 0) {
             return Result<ObjectHandle>::Failure(closed_ ? ErrorCode::ShuttingDown
                                                          : ErrorCode::Busy);
         }
+
         processing_ = true;
     }
+
     auto finish = [this]() noexcept {
         platform::LockGuard lock(gate_);
         processing_ = false;
@@ -707,10 +1451,12 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
         finish();
         return Result<ObjectHandle>::Failure(typeLease.Error());
     }
+
     if (nativeType && !typeLease.Value().IsNativeA(nativeType)) {
         finish();
         return Result<ObjectHandle>::Failure(ErrorCode::TypeMismatch);
     }
+
     const auto& ops = typeLease.Value().Ops();
     // Abstract 선언은 C++가 생성 가능한 타입이어도 직접 생성할 수 없다.
     // 슬롯/메모리를 예약하기 전에 검사하여 실패가 관찰 가능한 부작용을 남기지 않는다.
@@ -719,6 +1465,7 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
         finish();
         return Result<ObjectHandle>::Failure(ErrorCode::Unsupported);
     }
+
     if (gcPhase_ == GcPhase::Marking) {
         // mutator가 새 객체를 만드는 지점에서만 작업 큐를 확장한다. gate/Trace 안의 barrier는
         // 할당하지 않는다. Marking 동안 공개된 객체는 회수하지 않아 슬롯 수가 큐 상한이 된다.
@@ -726,12 +1473,14 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
         if (capacity > options_.maxSlots) {
             capacity = options_.maxSlots;
         }
+
         auto reserve = gcWork_.TryReserve(static_cast<usize>(capacity));
         if (!reserve) {
             finish();
             return Result<ObjectHandle>::Failure(reserve.Error());
         }
     }
+
     auto memory = allocator_.Allocate(ops.size, ops.alignment, 0x4f424a45u);
     if (!memory) {
         finish();
@@ -750,24 +1499,29 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
             }
         }
     }
+
     if (!freeSlot) {
         if (uint64(chunkCount_) * SlotsPerChunk >= options_.maxSlots) {
             auto released = allocator_.Deallocate(memory.Value());
             if (!released) {
                 platform::Fatal("Object allocation ownership mismatch");
             }
+
             finish();
             return Result<ObjectHandle>::Failure(ErrorCode::CapacityExceeded);
         }
+
         auto block = allocator_.Allocate(sizeof(Chunk), alignof(Chunk), 0x43484e4bu);
         if (!block) {
             auto released = allocator_.Deallocate(memory.Value());
             if (!released) {
                 platform::Fatal("Object allocation ownership mismatch");
             }
+
             finish();
             return Result<ObjectHandle>::Failure(block.Error());
         }
+
         Chunk* chunk = ::new (block.Value()) Chunk();
         for (uint32 index = 0; index < SlotsPerChunk; ++index) {
             const uint64 absolute = uint64(chunkCount_) * SlotsPerChunk + index;
@@ -776,12 +1530,14 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
                 chunk->slots[index].state = SlotState::Exhausted;
             }
         }
+
         {
             platform::LockGuard lock(gate_);
             chunk->next = chunks_;
             chunks_ = chunk;
             ++chunkCount_;
         }
+
         freeSlot = &chunk->slots[0];
     }
 
@@ -794,10 +1550,12 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
         freeSlot->stableType = type;
         freeSlot->type = Move(typeLease.Value());
     }
+
     Object* object = freeSlot->type.Ops().construct(memory.Value(), allocator_);
     if (!object) {
         platform::Fatal("A noexcept object constructor must return its object");
     }
+
     object->registry_ = this;
     object->handle_ = handle;
     {
@@ -805,6 +1563,7 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
         freeSlot->object = object;
         processing_ = false;
     }
+
     return Result<ObjectHandle>::Success(handle);
 }
 
@@ -814,15 +1573,18 @@ Result<void*> ObjectRegistry::GetPending(const ObjectAccessContext& access, Obje
     if (!valid) {
         return Result<void*>::Failure(valid.Error());
     }
+
     platform::LockGuard lock(gate_);
     Slot* slot = FindSlot(handle);
     if (processing_ || !slot || slot->state != SlotState::Reserved ||
         slot->transaction != transaction || !slot->object) {
         return Result<void*>::Failure(ErrorCode::StaleHandle);
     }
+
     if (nativeType && !slot->type.IsNativeA(nativeType)) {
         return Result<void*>::Failure(ErrorCode::TypeMismatch);
     }
+
     return Result<void*>::Success(static_cast<void*>(slot->object));
 }
 
@@ -831,6 +1593,7 @@ void ObjectRegistry::ValidateStagedEdge(void* pointer, ObjectHandle handle) noex
     if (handle.IsNull() || state.error != ErrorCode::None) {
         return;
     }
+
     platform::LockGuard lock(state.registry->gate_);
     Slot* slot = state.registry->FindSlot(handle);
     if (!slot || state.registry->IsCutoff(slot) ||
@@ -847,6 +1610,7 @@ Result<RootRef<Object>> ObjectRegistry::Commit(const ObjectAccessContext& access
     if (!valid) {
         return Result<RootRef<Object>>::Failure(valid.Error());
     }
+
     {
         platform::LockGuard lock(gate_);
         if (closed_ || processing_ || staged.Size() == 0) {
@@ -854,6 +1618,7 @@ Result<RootRef<Object>> ObjectRegistry::Commit(const ObjectAccessContext& access
                                                     : processing_ ? ErrorCode::Busy
                                                                   : ErrorCode::InvalidArgument);
         }
+
         for (usize index = 0; index < staged.Size(); ++index) {
             Slot* slot = FindSlot(staged[index]);
             if (!slot || slot->state != SlotState::Reserved || slot->transaction != transaction ||
@@ -861,19 +1626,23 @@ Result<RootRef<Object>> ObjectRegistry::Commit(const ObjectAccessContext& access
                 return Result<RootRef<Object>>::Failure(ErrorCode::StaleHandle);
             }
         }
+
         processing_ = true;
     }
+
     MarkState state{this, nullptr, transaction};
     TraceVisitor visitor(&state, &ObjectRegistry::ValidateStagedEdge);
     for (usize index = 0; index < staged.Size() && state.error == ErrorCode::None; ++index) {
         Slot* slot = FindSlot(staged[index]);
         slot->type.Ops().trace(*slot->object, visitor);
     }
+
     platform::LockGuard lock(gate_);
     processing_ = false;
     if (state.error != ErrorCode::None) {
         return Result<RootRef<Object>>::Failure(state.error);
     }
+
     for (usize index = 0; index < staged.Size(); ++index) {
         Slot* slot = FindSlot(staged[index]);
         slot->state = SlotState::Alive;
@@ -882,6 +1651,7 @@ Result<RootRef<Object>> ObjectRegistry::Commit(const ObjectAccessContext& access
             if (ShadeLocked(staged[index]) != ErrorCode::None) {
                 platform::Fatal("Preallocated newborn mark queue exhausted");
             }
+
             ++cycleGc_.examined;
         } else if (gcPhase_ == GcPhase::Sweeping) {
             // cutoff 이후 태어난 객체는 이전 cohort의 white 후보가 아니다. Commit 검증이
@@ -889,6 +1659,7 @@ Result<RootRef<Object>> ObjectRegistry::Commit(const ObjectAccessContext& access
             slot->mark = markEpoch_;
         }
     }
+
     ++FindSlot(staged[0])->roots;
     --constructions_;
     return Result<RootRef<Object>>::Success(RootRef<Object>(this, staged[0]));
@@ -898,13 +1669,16 @@ void ObjectRegistry::Rollback(uint64 transaction, Span<const ObjectHandle> stage
     if (platform::CurrentThreadId() != ownerThread_) {
         platform::Fatal("Construction rollback on another thread");
     }
+
     {
         platform::LockGuard lock(gate_);
         if (processing_ || constructions_ == 0) {
             platform::Fatal("Construction rollback while executing a registry callback");
         }
+
         processing_ = true;
     }
+
     // 생성 저널을 역순으로 처리해 나중에 만든 객체를 먼저 정리한다.
     // 소멸자는 Registry 잠금 밖에서 호출하되 processing_으로 변경 재진입을 막는다.
     for (usize remaining = staged.Size(); remaining != 0; --remaining) {
@@ -914,10 +1688,13 @@ void ObjectRegistry::Rollback(uint64 transaction, Span<const ObjectHandle> stage
             if (!slot || slot->state != SlotState::Reserved || slot->transaction != transaction) {
                 platform::Fatal("Corrupt construction journal");
             }
+
             slot->state = SlotState::Retired;
         }
+
         ReclaimEligible();
     }
+
     {
         platform::LockGuard lock(gate_);
         --constructions_;
@@ -930,23 +1707,28 @@ void ObjectRegistry::MarkEdge(void* pointer, ObjectHandle handle) noexcept {
     if (handle.IsNull()) {
         return;
     }
+
     platform::LockGuard lock(state.registry->gate_);
     if (state.error != ErrorCode::None) {
         return;
     }
+
     Slot* slot = state.registry->FindSlot(handle);
     if (!slot || !(slot->state == SlotState::Alive || slot->state == SlotState::DestroyRequested)) {
         state.error = ErrorCode::StaleHandle;
         return;
     }
+
     if (slot->mark == state.registry->markEpoch_) {
         return;
     }
+
     auto pushed = state.work->TryPushBack(handle);
     if (!pushed) {
         state.error = pushed.Error();
         return;
     }
+
     slot->mark = state.registry->markEpoch_;
 }
 
@@ -960,22 +1742,27 @@ ErrorCode ObjectRegistry::ShadeLocked(ObjectHandle handle) noexcept {
     if (gcPhase_ != GcPhase::Marking || handle.IsNull()) {
         return ErrorCode::None;
     }
+
     Slot* slot = FindSlot(handle);
     if (!slot || !(slot->state == SlotState::Alive || slot->state == SlotState::DestroyRequested)) {
         return ErrorCode::StaleHandle;
     }
+
     if (slot->mark == markEpoch_) {
         return ErrorCode::None;
     }
+
     // Reserve는 Begin/CreatePending에서 gate 밖에 수행한다. barrier가 allocator 콜백을 실행하지
     // 않도록 capacity를 먼저 검사하며 불변식 위반은 실패로 반환한다.
     if (gcWork_.Size() == gcWork_.Capacity()) {
         return ErrorCode::CapacityExceeded;
     }
+
     auto pushed = gcWork_.TryPushBack(handle);
     if (!pushed) {
         return pushed.Error();
     }
+
     slot->mark = markEpoch_;
     return ErrorCode::None;
 }
@@ -990,6 +1777,7 @@ Result<void> ObjectRegistry::BeginCollection(const ObjectAccessContext& access) 
     if (!valid) {
         return valid;
     }
+
     const uint64 started = platform::MonotonicNanoseconds();
     usize capacity;
     {
@@ -997,9 +1785,11 @@ Result<void> ObjectRegistry::BeginCollection(const ObjectAccessContext& access) 
         if (processing_ || constructions_ || totalBorrows_ || gcPhase_ != GcPhase::Idle) {
             return Result<void>::Failure(ErrorCode::Busy);
         }
+
         processing_ = true;
         capacity = static_cast<usize>(uint64(chunkCount_) * SlotsPerChunk);
     }
+
     gcWork_.Clear();
     auto reserved = gcWork_.TryReserve(capacity);
     platform::LockGuard lock(gate_);
@@ -1007,6 +1797,7 @@ Result<void> ObjectRegistry::BeginCollection(const ObjectAccessContext& access) 
     if (!reserved) {
         return reserved;
     }
+
     if (++markEpoch_ == 0) {
         markEpoch_ = 1;
         for (Chunk* chunk = chunks_; chunk; chunk = chunk->next) {
@@ -1015,6 +1806,7 @@ Result<void> ObjectRegistry::BeginCollection(const ObjectAccessContext& access) 
             }
         }
     }
+
     gcPhase_ = GcPhase::Marking;
     gcCursor_ = 0;
     cycleGc_ = {};
@@ -1031,6 +1823,7 @@ Result<void> ObjectRegistry::BeginCollection(const ObjectAccessContext& access) 
             }
         }
     }
+
     cycleGc_.durationNanoseconds = platform::MonotonicNanoseconds() - started;
     return Result<void>::Success();
 }
@@ -1040,10 +1833,12 @@ Result<void> ObjectRegistry::CancelCollection(const ObjectAccessContext& access)
     if (!valid) {
         return valid;
     }
+
     platform::LockGuard lock(gate_);
     if (processing_ || gcPhase_ == GcPhase::Sweeping || gcPhase_ == GcPhase::Reclaiming) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
+
     gcPhase_ = GcPhase::Idle;
     gcWork_.Clear();
     gcCursor_ = 0;
@@ -1054,11 +1849,12 @@ bool ObjectRegistry::HasReclaimableLocked() const noexcept {
     for (Chunk* chunk = chunks_; chunk; chunk = chunk->next) {
         for (const auto& slot : chunk->slots) {
             if (slot.state == SlotState::Retired && slot.roots == 0 && slot.borrows == 0 &&
-                slot.backendHolds == 0) {
+                slot.backendHolds == 0 && slot.encodePins == 0) {
                 return true;
             }
         }
     }
+
     return false;
 }
 
@@ -1069,12 +1865,15 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
     if (!valid) {
         return Result<GcProgress>::Failure(valid.Error());
     }
+
     if (budget.maxObjects == 0) {
         return Result<GcProgress>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (scheduler && scheduler->IsCurrentWorker()) {
         return Result<GcProgress>::Failure(ErrorCode::WrongThread);
     }
+
     const uint64 started = platform::MonotonicNanoseconds();
     uint64 deadline = 0;
     if (budget.maxNanoseconds != 0) {
@@ -1082,6 +1881,7 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
         deadline =
             budget.maxNanoseconds > maximum - started ? maximum : started + budget.maxNanoseconds;
     }
+
     auto inBudget = [deadline]() noexcept {
         return deadline == 0 || platform::MonotonicNanoseconds() < deadline;
     };
@@ -1090,9 +1890,11 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
         if (processing_ || constructions_ || totalBorrows_) {
             return Result<GcProgress>::Failure(ErrorCode::Busy);
         }
+
         if (gcPhase_ == GcPhase::Idle) {
             return Result<GcProgress>::Failure(ErrorCode::InvalidArgument);
         }
+
         processing_ = true;
     }
 
@@ -1123,9 +1925,11 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
                 sweepOffset_ = 0;
                 break;
             }
+
             next = gcWork_[gcCursor_];
             parallel = scheduler && FindSlot(next)->type.Ops().parallelTraceSafe;
         }
+
         if (!parallel) {
             ++gcCursor_;
             TraceVisitor visitor(&state, &ObjectRegistry::MarkEdge);
@@ -1146,12 +1950,15 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
                 if (gcCursor_ == gcWork_.Size()) {
                     break;
                 }
+
                 handle = gcWork_[gcCursor_];
                 if (!FindSlot(handle)->type.Ops().parallelTraceSafe) {
                     break;
                 }
+
                 ++gcCursor_;
             }
+
             auto body = Function<void(WorkerTaskContext&)>::TryCreate(
                 allocator_, [this, &state, handle](WorkerTaskContext&) noexcept {
                     TraceVisitor visitor(&state, &ObjectRegistry::MarkEdge);
@@ -1162,20 +1969,24 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
                 setError(body.Error());
                 break;
             }
+
             auto accepted = scheduler->Submit(Move(body.Value()));
             if (!accepted) {
                 setError(accepted.Error());
                 break;
             }
+
             tasks[submitted++] = Move(accepted.Value());
             ++processed;
         }
+
         for (uint32 index = 0; index < submitted; ++index) {
             auto waited = tasks[index].Wait();
             if (!waited || waited.Value() != platform::WaitResult::Signaled) {
                 // stack에 남은 trace context를 사용하는 worker를 버리고 복귀할 수 없다.
                 platform::Fatal("Cannot drain a GC marker task");
             }
+
             auto status = tasks[index].Status();
             if (!status) {
                 setError(status.Error());
@@ -1185,6 +1996,7 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
             }
         }
     }
+
     if (hasError()) {
         platform::LockGuard lock(gate_);
         gcPhase_ = GcPhase::Idle;
@@ -1200,23 +2012,28 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
             gcPhase_ = GcPhase::Reclaiming;
             break;
         }
+
         Slot& slot = sweepChunk_->slots[sweepOffset_++];
         if ((slot.state == SlotState::Alive || slot.state == SlotState::DestroyRequested) &&
             slot.mark != markEpoch_) {
             slot.state = SlotState::Retired;
             ++cycleGc_.retired;
         }
+
         if (sweepOffset_ == SlotsPerChunk) {
             sweepChunk_ = sweepChunk_->next;
             sweepOffset_ = 0;
         }
+
         ++processed;
     }
+
     if (gcPhase_ == GcPhase::Reclaiming && processed < budget.maxObjects && inBudget()) {
         const uint32 reclaimed = ReclaimEligible(budget.maxObjects - processed, deadline);
         cycleGc_.reclaimed += reclaimed;
         processed += reclaimed;
     }
+
     platform::LockGuard lock(gate_);
     cycleGc_.durationNanoseconds += platform::MonotonicNanoseconds() - started;
     if (gcPhase_ == GcPhase::Reclaiming && !HasReclaimableLocked()) {
@@ -1225,6 +2042,7 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
         gcWork_.Clear();
         gcCursor_ = 0;
     }
+
     processing_ = false;
     return Result<GcProgress>::Success({gcPhase_, processed, cycleGc_});
 }
@@ -1234,6 +2052,7 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access) noex
     if (!valid) {
         return Result<GcReport>::Failure(valid.Error());
     }
+
     const uint64 started = platform::MonotonicNanoseconds();
     GcReport report;
     {
@@ -1241,6 +2060,7 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access) noex
         if (processing_ || constructions_ || totalBorrows_ || gcPhase_ != GcPhase::Idle) {
             return Result<GcReport>::Failure(ErrorCode::Busy);
         }
+
         processing_ = true;
         for (Chunk* chunk = chunks_; chunk; chunk = chunk->next) {
             for (auto& slot : chunk->slots) {
@@ -1250,6 +2070,7 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access) noex
             }
         }
     }
+
     // 모든 후보를 담을 용량을 먼저 확보한다. OOM이 발생해도 아직 어떤 객체도 retire하지 않았다.
     // 후보당 한 번만 큐에 넣으므로 이후 순회는 추가 할당 없이 깊은 그래프도 처리한다.
     Array<ObjectHandle> work(allocator_);
@@ -1259,6 +2080,7 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access) noex
         processing_ = false;
         return Result<GcReport>::Failure(reserved.Error());
     }
+
     {
         platform::LockGuard lock(gate_);
         if (++markEpoch_ == 0) {
@@ -1269,6 +2091,7 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access) noex
                 }
             }
         }
+
         for (Chunk* chunk = chunks_; chunk; chunk = chunk->next) {
             for (auto& slot : chunk->slots) {
                 if ((slot.state == SlotState::Alive || slot.state == SlotState::DestroyRequested) &&
@@ -1277,22 +2100,26 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access) noex
                     if (!pushed) {
                         platform::Fatal("Preallocated GC work queue exhausted");
                     }
+
                     slot.mark = markEpoch_;
                 }
             }
         }
     }
+
     MarkState state{this, &work};
     TraceVisitor visitor(&state, &ObjectRegistry::MarkEdge);
     for (usize cursor = 0; cursor < work.Size() && state.error == ErrorCode::None; ++cursor) {
         Slot* slot = FindSlot(work[cursor]);
         slot->type.Ops().trace(*slot->object, visitor);
     }
+
     if (state.error != ErrorCode::None) {
         platform::LockGuard lock(gate_);
         processing_ = false;
         return Result<GcReport>::Failure(state.error);
     }
+
     // 이 지점 이전에는 도달성 판단을 확정하지 않는다. Trace 오류 시 sweep 전체를 생략하고,
     // 다음 시도는 새 epoch를 사용해 부분 표식을 무시한다.
     report.marked = static_cast<uint32>(work.Size());
@@ -1308,6 +2135,7 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access) noex
             }
         }
     }
+
     report.reclaimed = ReclaimEligible();
     report.durationNanoseconds = platform::MonotonicNanoseconds() - started;
     {
@@ -1315,6 +2143,7 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access) noex
         lastGc_ = report;
         processing_ = false;
     }
+
     return Result<GcReport>::Success(report);
 }
 
@@ -1330,15 +2159,17 @@ uint32 ObjectRegistry::ReclaimEligible(uint32 maximum, uint64 deadline) noexcept
             for (Chunk* chunk = chunks_; chunk && !selected; chunk = chunk->next) {
                 for (auto& slot : chunk->slots) {
                     if (slot.state == SlotState::Retired && slot.roots == 0 && slot.borrows == 0 &&
-                        slot.backendHolds == 0) {
+                        slot.backendHolds == 0 && slot.encodePins == 0) {
                         selected = &slot;
                         break;
                     }
                 }
             }
+
             if (!selected) {
                 break;
             }
+
             // 저장소를 큐에서 분리한 뒤 잠금을 푼다. 콜백 중 통계 조회는 가능하지만 재회수는
             // 불가하다. 지역 TypeLease가 소멸자 코드까지 살아 있게 하므로 해제 콜백이 끝난 뒤
             // 반환한다.
@@ -1347,12 +2178,14 @@ uint32 ObjectRegistry::ReclaimEligible(uint32 maximum, uint64 deadline) noexcept
             object = selected->object;
             storage = selected->storage;
         }
+
         // User destructors and allocator callbacks never execute under the registry gate.
         type.Ops().destroy(object);
         auto released = allocator_.Deallocate(storage);
         if (!released) {
             platform::Fatal("Object allocation ownership mismatch");
         }
+
         {
             platform::LockGuard lock(gate_);
             selected->object = nullptr;
@@ -1369,9 +2202,11 @@ uint32 ObjectRegistry::ReclaimEligible(uint32 maximum, uint64 deadline) noexcept
                 selected->state = SlotState::Free;
             }
         }
+
         type.Reset();
         ++reclaimed;
     }
+
     return reclaimed;
 }
 
@@ -1380,18 +2215,22 @@ Result<uint32> ObjectRegistry::DrainRetired(const ObjectAccessContext& access) n
     if (!valid) {
         return Result<uint32>::Failure(valid.Error());
     }
+
     {
         platform::LockGuard lock(gate_);
         if (processing_) {
             return Result<uint32>::Failure(ErrorCode::Busy);
         }
+
         processing_ = true;
     }
+
     uint32 count = ReclaimEligible();
     {
         platform::LockGuard lock(gate_);
         processing_ = false;
     }
+
     return Result<uint32>::Success(count);
 }
 
@@ -1400,13 +2239,16 @@ Result<void> ObjectRegistry::Shutdown(const ObjectAccessContext& access) noexcep
     if (!valid) {
         return valid;
     }
+
     {
         platform::LockGuard lock(gate_);
         if (processing_) {
             return Result<void>::Failure(ErrorCode::Busy);
         }
+
         closed_ = true;
     }
+
     // cutoff를 게시한 cycle은 끝까지 분류해야 한다. 중간 취소로 white 객체를 다시 노출하지 않는다.
     while (CollectionPhase() != GcPhase::Idle) {
         auto advanced = StepCollection(access, {0xffffffffu, 0});
@@ -1414,15 +2256,19 @@ Result<void> ObjectRegistry::Shutdown(const ObjectAccessContext& access) noexcep
             return Result<void>::Failure(advanced.Error());
         }
     }
+
     auto collected = Collect(access);
     if (!collected) {
         return Result<void>::Failure(collected.Error());
     }
+
     auto stats = Stats();
     if (stats.liveObjects || stats.reservedObjects || stats.destroyRequested ||
-        stats.retiredObjects || stats.roots || stats.borrows || stats.backendHolds) {
+        stats.retiredObjects || stats.roots || stats.borrows || stats.backendHolds ||
+        stats.encodePins) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
+
     return Result<void>::Success();
 }
 
@@ -1449,11 +2295,14 @@ ObjectStats ObjectRegistry::Stats() const noexcept {
             default:
                 break;
             }
+
             stats.roots += slot.roots;
             stats.borrows += slot.borrows;
             stats.backendHolds += slot.backendHolds;
+            stats.encodePins += slot.encodePins;
         }
     }
+
     return stats;
 }
 
@@ -1468,9 +2317,11 @@ ObjectRegistry::CaptureDiagnostics(Span<ObjectDiagnosticRecord> output) const no
             }
         }
     }
+
     if (output.Size() < required) {
         return Result<uint32>::Failure(ErrorCode::CapacityExceeded);
     }
+
     uint32 written = 0;
     for (Chunk* chunk = chunks_; chunk; chunk = chunk->next) {
         for (auto& slot : chunk->slots) {
@@ -1494,15 +2345,18 @@ ObjectRegistry::CaptureDiagnostics(Span<ObjectDiagnosticRecord> output) const no
             default:
                 continue;
             }
+
             output[written++] = {{domain_, slot.index, slot.generation},
                                  context_,
                                  slot.stableType,
                                  phase,
                                  slot.roots,
                                  slot.borrows,
-                                 slot.backendHolds};
+                                 slot.backendHolds,
+                                 slot.encodePins};
         }
     }
+
     return Result<uint32>::Success(written);
 }
 

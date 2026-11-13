@@ -265,7 +265,9 @@ Result<void> WriteGeneratedField(ObjectRegistry& registry, const ObjectAccessCon
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
 
-    auto borrowed = registry.Resolve<Owner>(access, handle);
+    // 쓰기용 Borrow: owner가 encode 고정 중이면 Busy다(encode가 순회하는 String·Soft 경로 버퍼를
+    // 이 쓰기가 해제하지 못하게 — ObjectRegistry::PinForEncode).
+    auto borrowed = registry.ResolveForWrite<Owner>(access, handle);
     if (!borrowed) {
         return Result<void>::Failure(borrowed.Error());
     }

@@ -21,7 +21,10 @@ enum class WireType : uint32 {
     // 항목 Record 목록: u32 count + count × (u64 length + 중첩 Record). Serialization/RecordList.h.
     RecordList = 11,
     // 소프트 객체 참조: Guid 16 byte(asset) + String(객체 경로). ObjectRuntime SoftObjectRef.
-    SoftObjectReference = 12
+    SoftObjectReference = 12,
+    // 단일 값 원소 배열: u32 원소 wire tag + u32 count + 원소 payload들.
+    // Serialization/ValueArray.h.
+    ValueArray = 13
 };
 
 struct RecordLimits {
@@ -188,6 +191,7 @@ public:
 
 private:
     friend class RecordListReader;
+    friend class ValueArrayReader;
     RecordReader(Allocator&, ArchiveReader&&, uint32 version, RecordLimits limits) noexcept;
     // shared가 있으면 그 누적 예산을 쓰고, 없으면 limits.archive로 새 예산을 만든다. indexOnly면
     // TLV payload 바이트를 청구하지 않는다(바깥 reader가 이미 청구한 중첩 Record).

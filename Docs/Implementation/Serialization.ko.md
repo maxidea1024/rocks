@@ -40,15 +40,19 @@ unknown nonzero tag는 FieldView로 반환하여 skip할 수 있다. known tag�
 
 ### Record 트리 예산
 
-`RecordReader::Open`은 Record 트리의 누적 예산 `ArchiveBudget`(maxOperations·maxWork, 원자적 누적·포화)을 `SharedPtr`로 만든다. `OpenValue`로 연 값 reader, `RecordListReader::OpenField`로 연 중첩 목록, 그 `OpenItem` 항목 reader가 같은 예산을 공유하므로 값·항목마다 새 예산을 받아 한도를 우회할 수 없다. 실패한 `OpenValue`·`OpenField`·`OpenItem` 호출도 operation 하나를 소비한다. 한도를 예산이 들고 있어 공유자마다 판정이 다르지 않고, 서로 다른 reader를 여러 스레드에서 써도 사용량이 정확히 합산된다.
+`RecordReader::Open`은 Record 트리의 누적 예산 `ArchiveBudget`(maxOperations·maxWork, 원자적 누적·포화)을 `SharedPtr`로 만든다. `OpenValue`로 연 값 reader, `RecordListReader::OpenField`로 연 중첩 목록, 그 `OpenItem` 항목 reader, `ValueArrayReader::OpenField`로 연 배열이 같은 예산을 공유하므로 값·항목마다 새 예산을 받아 한도를 우회할 수 없다. 실패한 `OpenValue`·`OpenField`·`OpenItem` 호출도 operation 하나를 소비한다. 한도를 예산이 들고 있어 공유자마다 판정이 다르지 않고, 서로 다른 reader를 여러 스레드에서 써도 사용량이 정확히 합산된다.
 
 ### RecordList (wire tag 11)
 
-payload는 u32 count + count × (u64 length + 중첩 Record)이며 빈 목록도 count 0으로 기록한다. `RecordListLimits`는 maxItems·maxPayloadBytes(기본 4 MiB)·maxItemBytes(기본 4 MiB − 12)로, 기본값은 기본 maxValueBytes에 맞춰 기본 한도의 목록이 기본 한도의 부모 값 하나에 들어간다. builder는 완성된 payload를 기하 성장 buffer에 쌓고(실패 원자적) Finish가 부모에 한 번 복사한다. reader는 count를 할당 전에 남은 byte / 52와 비교하고, count만큼 work를 항목 파싱 전에 청구한 뒤 모든 length·항목 envelope를 검증하고 index를 게시한다. 목록 archive의 크기 한도는 목록 한도에서 오고 항목 Record 한도와 분리된다.
+payload는 u32 count + count × (u64 length + 중첩 Record)이며 빈 목록도 count 0으로 기록한다. `RecordListLimits`는 maxItems·maxPayloadBytes(기본 4 MiB)·maxItemBytes(기본 4 MiB − 12)로, 기본값은 기본 maxValueBytes에 맞춰 기본 한도의 목록이 기본 한도의 부모 값 하나에 들어간다. builder는 완성된 payload를 기하 성장 buffer에 쌓고(실패 원자적) Finish가 부모에 한 번 복사한다. reader는 count를 할당 전에 남은 byte / 52와 비교하고, count만큼 work를 항목 파싱 전에 청구한 뒤 모든 length·항목 envelope를 검증하고 index를 게시한다. 목록 archive의 크기 한도는 목록 한도에서 오고 항목 Record 한도와 분리된다. 항목 byte는 한 번만 청구한다: 단독 `Open`은 목록을 열 때, `OpenField`는 부모 Record가 이미 청구했으므로 항목마다 operation 하나(색인)만, `OpenItem`은 언제나 항목의 header·TLV 색인만 청구한다(목록 안 struct 안 목록도 작업이 깊이 배수로 불어나지 않는다). `OpenItem(index, maxFields)`는 필드 수 한도를 호출마다 정하고(그래프의 남은 누계), `ItemBytes(index)`는 항목 Record 전체 byte(마이그레이션 입력)를 빌린 view로 준다. `RecordListWriter`는 바깥 writer 위에 목록을 제자리로 쓴다: `Begin(out, count, limits)`가 최종 항목 수를 쓰고(4 + count × 52 > maxPayloadBytes·count > maxItems면 CapacityExceeded), `BeginItem`이 u64 길이 자리만, 항목 Record는 호출자가 `RecordWriter`로 쓰고 `EndItem`이 길이를 채우며(out이 길이 자리보다 짧거나 Record envelope가 아니면 InvalidArgument, maxItemBytes 초과나 지금까지의 payload > maxPayloadBytes는 CapacityExceeded), `End`가 항목 수 == count와 전체 크기를 확인한다. 같은 항목·순서면 `RecordListBuilder::Finish`의 payload와 같은 byte다.
 
 ### SoftObjectReference (wire tag 12)
 
 payload는 Guid 16 bytes(에셋 ID) + String(객체 경로, u64 길이 + UTF-8)이다. 형식만 정의하며 null 규칙과 경로 상한은 ObjectRuntime `SoftObjectRef`와 ObjectSerialization이 검사한다(아래 Object Graph).
+
+### ValueArray (wire tag 13)
+
+단일 값 원소 배열(`Serialization/ValueArray.h`)이다. payload는 u32 원소 wire tag + u32 count + count개의 원소 payload(그 wire tag의 Archive 표현 — Bool 1, U32·F32 4, U64·I64·F64 8, Guid 16, String·Bytes u64 길이 + byte, SoftObjectReference Guid + String)다. Record·RecordList·ValueArray와 모르는 tag는 원소가 될 수 없다. `ValueArrayReader::Open(ArchiveReader&&, elementWire, maxCount, shape)`·`OpenField(parent, field, …)`는 할당 전에 기대 tag 인자·shape(원소 tag가 아니거나 모순 조합 — 고정 폭 wire에 다른 폭, exact인데 wire 최소보다 작은 크기 — 이면 가장 먼저 InvalidArgument) → 저장 tag(원소가 될 수 없으면 InvalidArgument) → 기대 tag(다르면 TypeMismatch) → count > maxCount(CapacityExceeded) → count × max(wire 최소, shape 최소) ≤ 남은 byte(고정 폭·`shape.exact`면 정확히 같아야 함, 아니면 InvalidArgument) 순으로 검사하고 count만큼 work를 청구한다. 가변 wire(String·Bytes·SoftObjectReference)에 `shape.exact`면 원소마다 길이 prefix가 정확히 그 크기를 만드는지도 본다(합계만 맞는 Digest 길이 0·64는 InvalidArgument). 원소는 `Elements()`의 `Read*`로 읽고 `Finish()`가 trailing byte를 거부한다. 이동된 reader는 원소 0개다. `ValueArrayWriter::Begin(out, elementWire, count, maxBytes, maxCount, shape)`·`Check()`·`End()`는 header에 최종 count를 쓰고 원소를 out에 바로 쓰게 한다. Begin은 reader와 같은 tag·shape 검사(InvalidArgument), count > maxCount와 8 + count × 최소 크기 > maxBytes(CapacityExceeded)를 쓰기 전에 하고, End는 전체 > maxBytes면 CapacityExceeded, 원소 byte가 count × 최소 크기보다 작거나 고정 폭·exact인데 정확히 같지 않으면 InvalidArgument다(가변 원소는 합계의 하한만 본다). 원소 tag 인자는 `uint32`와 `WireType` 오버로드가 있다. 리플렉션 배열 필드(B5b)가 이 형식을 쓴다.
 
 ## Object Graph version 1
 

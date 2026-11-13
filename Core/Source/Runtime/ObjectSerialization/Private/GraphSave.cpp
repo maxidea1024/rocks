@@ -141,6 +141,16 @@ Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
                             usize nodeIndex, Budget& budget, usize& fileBytes,
                             GraphEncodeContext& context) noexcept {
     const ObjectHandle handle = nodes[nodeIndex].handle;
+    // 이 노드의 필드를 encode하는 동안 owner를 고정한다(필드마다 잠그지 않는다). 저장 중 콜백이
+    // Registry를 바꾸지 않는다는 계약을 어겨도, encode가 순회하는 owner 밖 버퍼(String·Soft 경로·
+    // 컨테이너 원소)를 컨테이너·참조 변경 API와 등록된 필드 쓰기가 해제하지 못하고 Busy가 된다.
+    // 생존 판정은 AcquireType과 같다(먼저 실패하면 같은 오류다). 실패·성공 모든 경로에서 범위를
+    // 벗어날 때 풀린다.
+    auto pin = registry.PinForEncode(access, handle);
+    if (!pin) {
+        return Result<void>::Failure(pin.Error());
+    }
+
     auto type = registry.AcquireType(access, handle);
     if (!type) {
         return Result<void>::Failure(type.Error());

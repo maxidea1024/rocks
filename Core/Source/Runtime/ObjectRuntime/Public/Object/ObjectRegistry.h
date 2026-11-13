@@ -4,6 +4,7 @@
 #include <Object/ObjectRefArray.h>
 #include <Object/ObjectRefs.h>
 #include <Object/ObjectDiagnostics.h>
+#include <Object/StructRefArray.h>
 #include <Object/TypeRegistry.h>
 
 namespace rocks {
@@ -44,6 +45,8 @@ struct ObjectStats {
     uint32 roots = 0;
     uint32 borrows = 0;
     uint32 backendHolds = 0;
+    // 쥐고 있는 encode 고정(EncodePin)의 합이다. 0이 아니면 Shutdown이 Busy다.
+    uint32 encodePins = 0;
     uint32 chunks = 0;
 };
 
@@ -69,7 +72,7 @@ struct GcProgress {
 // 비이동 객체 저장소와 GC를 소유한다. Allocator/TypeRegistry가 먼저 생성되고 나중에 파괴되어야
 // 한다. 객체 접근·변경·GC는 생성 스레드 전용이다. gate는 통계와 참조 계수를 보호할 뿐, 사용자 객체
 // 필드를 스레드 안전하게 만들지 않는다. 별도 래퍼의 반환/복제 예외는 ObjectRefs 참고. 종료 시 모든
-// 루트·Borrow·BackendLease를 반환한다. 남은 소유권을 무시한 파괴는 즉시 종료한다.
+// 루트·Borrow·BackendLease·EncodePin을 반환한다. 남은 소유권을 무시한 파괴는 즉시 종료한다.
 class ObjectRegistry {
 public:
     ObjectRegistry(Allocator&, TypeRegistry&, ContextId, RegistryOptions = {}) noexcept;
@@ -95,6 +98,7 @@ public:
         if (!root) {
             return Result<RootRef<T>>::Failure(root.Error());
         }
+
         RootRef<T> typed(this, root.Value().handle_);
         root.Value().registry_ = nullptr;
         root.Value().handle_ = {};
@@ -107,6 +111,25 @@ public:
         if (!result) {
             return Result<Borrow<T>>::Failure(result.Error());
         }
+
+        return Result<Borrow<T>>::Success(Borrow<T>(this, handle));
+    }
+
+    // 필드 값을 바꾸려고 쥐는 Borrow다. Resolve와 같고, owner가 encode 고정(PinForEncode) 중이면
+    // Busy다 — encode가 순회하는 owner 밖 버퍼(String·Soft 경로)를 쓰기가 해제하지 못하게 한다.
+    // 생성 필드 쓰기(detail::WriteGeneratedField)가 쓴다.
+    //
+    // 사용 예:
+    //   auto writable = registry.ResolveForWrite<Node>(access, node);
+    //   if (!writable) { return Result<void>::Failure(writable.Error()); }
+    template <class T = Object>
+    Result<Borrow<T>> ResolveForWrite(const ObjectAccessContext& access,
+                                      ObjectHandle handle) noexcept {
+        auto result = AddBorrow(access, handle, NativeTypeKey<T>(), true);
+        if (!result) {
+            return Result<Borrow<T>>::Failure(result.Error());
+        }
+
         return Result<Borrow<T>>::Success(Borrow<T>(this, handle));
     }
 
@@ -116,28 +139,62 @@ public:
         if (!result) {
             return Result<RootRef<T>>::Failure(result.Error());
         }
+
         return Result<RootRef<T>>::Success(RootRef<T>(this, handle));
     }
 
     // owner 저장소 안에 직접 포함된 field만 허용한다. 대상 타입/문맥/생존 검증 실패 시 field는
-    // 불변이다. Marking 동안 대상 shade와 field 게시를 같은 gate 안에서 수행한다.
+    // 불변이다. Marking 동안 대상 shade와 field 게시를 같은 gate 안에서 수행한다. owner가 encode
+    // 고정(PinForEncode) 중이면 Busy다.
     template <class T>
     Result<void> SetReference(const ObjectAccessContext& access, ObjectHandle owner,
                               ObjectRef<T>& field, ObjectHandle target) noexcept {
         return SetEdge(access, owner, field.handle_, target, 0, NativeTypeKey<T>());
     }
 
-    // owner 저장소 안에 직접 포함된 ObjectRefArray에 target을 강한 간선으로 추가한다. owner는
-    // 게시된 생존 객체(Alive)이고 호출자가 owner의 Borrow를 쥐고 있어야 한다(없으면
-    // InvalidArgument). target은 같은 Registry의 생존 T(또는 파생) 객체여야 한다(null 불가). 원소
-    // 버퍼가 가득 차면 Registry 잠금 밖에서 배열의 allocator로 늘린다(실패 시 OutOfMemory, 배열
-    // 불변). Marking 중이면 target을 shade한 뒤 게시한다. 검증 실패 시 배열 내용은 바뀌지
-    // 않는다(용량만 늘었을 수 있다). GC·callback 처리 중에는 Busy, 종료 시작 후에는
-    // ShuttingDown이다.
+    // ObjectRefArray의 live 변경 API다(ObjectRefArray.h). 공통 규칙:
+    // - owner는 게시된 생존 객체(Alive — 제거·비우기는 DestroyRequested도)이고 호출자가 owner의
+    //   Borrow를 쥐고 있어야 한다(없으면 InvalidArgument). 배열은 owner 저장소 안의 멤버여야
+    //   한다(아니면 InvalidArgument). owner가 encode 고정 중이면 Busy다.
+    // - target이 null(IsNull — registry 0 또는 generation 0)이면 검증·장벽 없이 ObjectHandle{}로
+    //   정규화해 넣는다. non-null target은 같은 Registry의 생존 T(또는 파생) 객체여야 하고(아니면
+    //   StaleHandle — GC cutoff 뒤의 white 객체 포함, 타입이 다르면 TypeMismatch), Marking 중이면
+    //   shade한 뒤 게시한다(삽입 장벽).
+    // - 원소 버퍼가 가득 차면 Registry 잠금 밖에서 배열의 allocator로 새 버퍼를 할당만 하고(실패 시
+    //   OutOfMemory), 다시 잠근 뒤 owner·대상을 재검증하며 그때의 size·index로 다시 판단한다. 그
+    //   사이 allocator 콜백이 같은 배열을 바꿔 새 버퍼가 모자라거나 index가 size를 넘으면 Busy,
+    //   용량이 충분해졌으면 기존 버퍼에 넣는다. 레지스트리 전체 처리 표시(processing_)를 세우지
+    //   않으므로 다른 스레드의 RootRef 복제 등을 막지 않는다.
+    // - 실패하면 배열 내용은 바뀌지 않는다. GC·callback 처리 중에는 Busy, 종료 시작 후에는
+    //   ShuttingDown이다. MaxElements(리플렉션 필드 상한)는 여기서 걸지 않는다(저장할 때 검사한다).
+
+    // target을 끝에 추가한다.
+    //
+    // 사용 예:
+    //   registry.AddReference(access, actor, actorPointer->components_, component);
     template <class T>
     Result<void> AddReference(const ObjectAccessContext& access, ObjectHandle owner,
                               ObjectRefArray<T>& array, ObjectHandle target) noexcept {
-        return AppendArrayEdge(access, owner, array.storage_, target, NativeTypeKey<T>());
+        return InsertArrayEdge(access, owner, array.storage_, 0, true, target, NativeTypeKey<T>());
+    }
+
+    // target을 index 위치에 넣고 뒤 원소를 민다(index == Size()면 끝). index > Size()는
+    // InvalidArgument다. 도구 편집용이다.
+    template <class T>
+    Result<void> InsertReferenceAt(const ObjectAccessContext& access, ObjectHandle owner,
+                                   ObjectRefArray<T>& array, usize index,
+                                   ObjectHandle target) noexcept {
+        return InsertArrayEdge(access, owner, array.storage_, index, false, target,
+                               NativeTypeKey<T>());
+    }
+
+    // index 원소를 target으로 바꾼다(null이면 슬롯을 비운다). 할당하지 않는다. index >= Size()는
+    // InvalidArgument다.
+    template <class T>
+    Result<void> SetReferenceAt(const ObjectAccessContext& access, ObjectHandle owner,
+                                ObjectRefArray<T>& array, usize index,
+                                ObjectHandle target) noexcept {
+        return ReplaceArrayEdge(access, owner, array.storage_, index, target, NativeTypeKey<T>());
     }
 
     // index 원소를 지우고 뒤 원소를 당긴다(순서 유지). 범위 밖은 InvalidArgument다. 할당하지
@@ -148,7 +205,7 @@ public:
         return RemoveArrayEdge(access, owner, array.storage_, index, ObjectHandle{}, false);
     }
 
-    // target과 같은 첫 원소를 지운다. 없으면 NotFound다.
+    // target과 같은 첫 원소를 지운다(null이면 첫 null 원소). 없으면 NotFound다.
     template <class T>
     Result<void> RemoveReference(const ObjectAccessContext& access, ObjectHandle owner,
                                  ObjectRefArray<T>& array, ObjectHandle target) noexcept {
@@ -161,6 +218,79 @@ public:
                                  ObjectRefArray<T>& array) noexcept {
         return ClearArrayEdges(access, owner, array.storage_);
     }
+
+    // StructRefArray의 live 변경 API다(StructRefArray.h). owner·Borrow·컨테이너 위치·encode 고정
+    // 규칙은 ObjectRefArray와 같다. 원소 블록 할당·기본 생성(S(Allocator&), 참조는 null이라 장벽이
+    // 필요 없다)·새 색인 할당은 Registry 잠금 밖에서 하고, 다시 잠근 뒤 owner를 재검증하며 그때의
+    // size·index로 다시 판단한다(그 사이 생성자·allocator 콜백이 같은 배열을 바꿔 새 색인이
+    // 모자라거나 index가 size를 넘으면 원소를 소멸·반환하고 Busy). 실패하면 원소를 소멸·반환하고
+    // 배열은 바뀌지 않는다. 원소 주소는 고정이다(색인만 옮긴다).
+
+    // 기본 원소 하나를 끝에 추가하고 그 index를 돌려준다. size가 uint32 상한이면 Overflow다.
+    //
+    // 사용 예:
+    //   auto index = registry.AddElement(access, mesh, meshPointer->materials);
+    template <class S>
+    Result<usize> AddElement(const ObjectAccessContext& access, ObjectHandle owner,
+                             StructRefArray<S>& array) noexcept {
+        return InsertStructElement(access, owner, array.storage_, 0, true);
+    }
+
+    // 기본 원소 하나를 index 위치에 넣는다(index == Size()면 끝). index > Size()는
+    // InvalidArgument다.
+    template <class S>
+    Result<void> InsertElementAt(const ObjectAccessContext& access, ObjectHandle owner,
+                                 StructRefArray<S>& array, usize index) noexcept {
+        auto inserted = InsertStructElement(access, owner, array.storage_, index, false);
+        return inserted ? Result<void>::Success() : Result<void>::Failure(inserted.Error());
+    }
+
+    // index 원소를 색인에서 떼어 잠금 밖에서 소멸·반환한다(뒤 원소의 주소는 그대로다). 범위 밖은
+    // InvalidArgument다. owner는 Alive 또는 DestroyRequested(정리 중)이고 Borrow를 쥐고 있어야
+    // 한다.
+    template <class S>
+    Result<void> RemoveElementAt(const ObjectAccessContext& access, ObjectHandle owner,
+                                 StructRefArray<S>& array, usize index) noexcept {
+        return RemoveStructElement(access, owner, array.storage_, index);
+    }
+
+    // 모든 원소를 떼어 잠금 밖에서 역순으로 소멸·반환한다(색인도 반환한다). owner 규칙은
+    // RemoveElementAt과 같다.
+    template <class S>
+    Result<void> ClearElements(const ObjectAccessContext& access, ObjectHandle owner,
+                               StructRefArray<S>& array) noexcept {
+        return ClearStructElements(access, owner, array.storage_);
+    }
+
+    // index 원소 안의 참조 멤버 field를 target으로 바꾼다(SetReference의 원소판 — null 허용).
+    // owner는 Alive이고 Borrow를 쥐고 있어야 하며(없으면 InvalidArgument), 컨테이너가 owner 저장소
+    // 안이고 index < Size()이며 field가 그 원소 블록 안이어야 한다(아니면 InvalidArgument). 대상
+    // 규칙·shade·encode 고정은 SetReference와 같다.
+    //
+    // 사용 예:
+    //   registry.SetElementReference(access, mesh, meshPointer->materials, 2,
+    //                                meshPointer->materials[2].material, material);
+    template <class S, class T>
+    Result<void> SetElementReference(const ObjectAccessContext& access, ObjectHandle owner,
+                                     StructRefArray<S>& array, usize index, ObjectRef<T>& field,
+                                     ObjectHandle target) noexcept {
+        const detail::StructElementLocation element{&array.storage_, index};
+        return SetEdge(access, owner, field.handle_, target, 0, NativeTypeKey<T>(), &element);
+    }
+
+    // encode thunk를 부르는 쪽이 owner의 필드를 encode하는 동안 쥐는 고정을 얻는다(EncodePin —
+    // ObjectRefs.h). 고정된 owner의 컨테이너·참조 변경 API와 ResolveForWrite(등록된 필드 쓰기)는
+    // Busy다. owner는 Alive여야 한다(아니면 CheckLive 규칙 — StaleHandle·Destroyed). 계수가 넘치면
+    // Overflow, GC·callback 처리 중에는 Busy, 종료 시작 후에는 ShuttingDown이다. 고정은 수명을
+    // 연장하지 않지만(루트가 아니다) 고정 중에는 저장소를 회수하지 않으며, 남은 고정은
+    // ObjectStats::encodePins에 보이고 Shutdown을 Busy로 남긴다.
+    //
+    // 사용 예:
+    //   auto pin = registry.PinForEncode(access, node);
+    //   if (!pin) {
+    //       return Result<void>::Failure(pin.Error());
+    //   }
+    Result<EncodePin> PinForEncode(const ObjectAccessContext& access, ObjectHandle owner) noexcept;
 
     // 논리적 접근을 즉시 닫는다. 기존 루트/간선은 GC에서 추적되어 보관된 자식도 보존한다.
     // 저장소 파괴는 도달성 및 모든 보유 계수 해소 뒤 Collect/DrainRetired에서 수행한다.
@@ -214,6 +344,7 @@ private:
     friend Result<ObjectLifecycle> detail::InspectBorrow(ObjectRegistry*, ObjectHandle) noexcept;
     friend void detail::ReleaseBorrow(ObjectRegistry*, ObjectHandle) noexcept;
     friend void detail::ReleaseBackend(ObjectRegistry*, ObjectHandle) noexcept;
+    friend void detail::ReleaseEncodePin(ObjectRegistry*, ObjectHandle) noexcept;
 
     struct Slot;
     struct Chunk;
@@ -233,20 +364,82 @@ private:
     Result<void> DestroySelf(ObjectHandle, const Object*) noexcept;
     Result<TypeLease> AcquireTypeSelf(ObjectHandle, const Object*) noexcept;
     Result<void> AddRoot(const ObjectAccessContext&, ObjectHandle, const void*) noexcept;
-    Result<void> AddBorrow(const ObjectAccessContext&, ObjectHandle, const void*) noexcept;
-    Result<void> SetEdge(const ObjectAccessContext&, ObjectHandle, ObjectHandle&, ObjectHandle,
-                         uint64, const void*) noexcept;
-    Result<void> AppendArrayEdge(const ObjectAccessContext&, ObjectHandle,
-                                 detail::ObjectRefArrayStorage&, ObjectHandle,
-                                 const void*) noexcept;
+    // rejectEncodePinned면 encode 고정 중인 객체를 Busy로 거부한다(ResolveForWrite).
+    Result<void> AddBorrow(const ObjectAccessContext&, ObjectHandle, const void*,
+                           bool rejectEncodePinned = false) noexcept;
+    // 참조 하나의 쓰기 단일 지점이다. transaction이 0이면 live(owner Alive), 아니면 그 생성
+    // 트랜잭션의 staged 쓰기(owner Reserved)다. element가 없으면 field는 owner 저장소 안이어야
+    // 하고, 있으면 그 컨테이너가 owner 저장소 안·index < size·field가 그 원소 블록 안이어야
+    // 한다(원소 모드는 CheckContainerOwnerLocked — live는 Borrow 필수).
+    Result<void> SetEdge(const ObjectAccessContext&, ObjectHandle owner, ObjectHandle& field,
+                         ObjectHandle target, uint64 transaction, const void* nativeType,
+                         const detail::StructElementLocation* element = nullptr) noexcept;
+    // append면 index를 무시하고 그때(재잠금 시점 포함)의 끝에 넣는다.
+    Result<void> InsertArrayEdge(const ObjectAccessContext&, ObjectHandle,
+                                 detail::ObjectRefArrayStorage&, usize index, bool append,
+                                 ObjectHandle, const void*) noexcept;
+    Result<void> ReplaceArrayEdge(const ObjectAccessContext&, ObjectHandle,
+                                  detail::ObjectRefArrayStorage&, usize index, ObjectHandle,
+                                  const void*) noexcept;
     Result<void> RemoveArrayEdge(const ObjectAccessContext&, ObjectHandle,
                                  detail::ObjectRefArrayStorage&, usize, ObjectHandle,
                                  bool byHandle) noexcept;
     Result<void> ClearArrayEdges(const ObjectAccessContext&, ObjectHandle,
                                  detail::ObjectRefArrayStorage&) noexcept;
-    // owner·저장소 위치 검증(잠금 보유 상태에서 호출). allowDestroyRequested는 제거 연산용이다.
-    Result<void> CheckArrayOwnerLocked(ObjectHandle, const detail::ObjectRefArrayStorage&,
-                                       bool allowDestroyRequested) noexcept;
+    Result<void> AssignArrayEdges(const ObjectAccessContext&, ObjectHandle,
+                                  detail::ObjectRefArrayStorage&, Span<const ObjectHandle>,
+                                  uint64 transaction, const void*) noexcept;
+    Result<usize> InsertStructElement(const ObjectAccessContext&, ObjectHandle,
+                                      detail::StructRefArrayStorage&, usize index,
+                                      bool append) noexcept;
+    Result<void> RemoveStructElement(const ObjectAccessContext&, ObjectHandle,
+                                     detail::StructRefArrayStorage&, usize index) noexcept;
+    Result<void> ClearStructElements(const ObjectAccessContext&, ObjectHandle,
+                                     detail::StructRefArrayStorage&) noexcept;
+    Result<void> AssignStructElements(const ObjectAccessContext&, ObjectHandle,
+                                      detail::StructRefArrayStorage&, usize count,
+                                      uint64 transaction) noexcept;
+    // owner·컨테이너 위치 검증(잠금 보유 상태에서 호출 — processing_·closed_는 호출자가 먼저 본다).
+    // 순서는 상태 → (live면 Borrow) → 위치 → (live면 encode 고정)이다. live: owner Alive
+    // (allowDestroyRequested면 DestroyRequested도)·cutoff 아님(StaleHandle), Borrow 있음
+    // (InvalidArgument). staged: owner가 그 트랜잭션의 Reserved(StaleHandle). 둘 다
+    // [storage, storage + storageBytes)가 owner 저장소 안(InvalidArgument). 마지막으로 live owner가
+    // encode 고정 중이면 Busy다.
+    Result<void> CheckContainerOwnerLocked(ObjectHandle owner, const void* storage,
+                                           usize storageBytes, uint64 transaction,
+                                           bool allowDestroyRequested) noexcept;
+    // non-null 대상 검증(잠금 보유): 생존(transaction이 있으면 그 트랜잭션의 Reserved도)·cutoff
+    // 아님 (StaleHandle), nativeType의 파생(TypeMismatch).
+    Result<void> CheckTargetLocked(ObjectHandle target, uint64 transaction,
+                                   const void* nativeType) const noexcept;
+
+    // ConstructionContext의 staged 컨테이너 API가 거치는 지점이다(컨테이너의 friend는 이 클래스
+    // 하나다).
+    template <class T>
+    Result<void> AssignReferencesStaged(const ObjectAccessContext& access, ObjectHandle owner,
+                                        ObjectRefArray<T>& array, Span<const ObjectHandle> targets,
+                                        uint64 transaction) noexcept {
+        return AssignArrayEdges(access, owner, array.storage_, targets, transaction,
+                                NativeTypeKey<T>());
+    }
+
+    template <class S>
+    Result<void> AssignElementsStaged(const ObjectAccessContext& access, ObjectHandle owner,
+                                      StructRefArray<S>& array, usize count,
+                                      uint64 transaction) noexcept {
+        return AssignStructElements(access, owner, array.storage_, count, transaction);
+    }
+
+    template <class S, class T>
+    Result<void> SetElementReferenceStaged(const ObjectAccessContext& access, ObjectHandle owner,
+                                           StructRefArray<S>& array, usize index,
+                                           ObjectRef<T>& field, ObjectHandle target,
+                                           uint64 transaction) noexcept {
+        const detail::StructElementLocation element{&array.storage_, index};
+        return SetEdge(access, owner, field.handle_, target, transaction, NativeTypeKey<T>(),
+                       &element);
+    }
+
     Result<RootRef<Object>> NewRoot(const ObjectAccessContext&, TypeId, const void*) noexcept;
     Result<uint64> BeginConstruction(const ObjectAccessContext&) noexcept;
     Result<ObjectHandle> CreatePending(const ObjectAccessContext&, TypeId, uint64,

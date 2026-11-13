@@ -70,6 +70,79 @@ private:
     uint32 count_ = 0;
 };
 
+// 바깥 ArchiveWriter 위에 RecordList payload를 제자리로 쓴다(리플렉션 struct 원소 배열). Begin이
+// 최종 항목 수를 쓰고, 항목마다 BeginItem이 u64 길이 자리만 쓰며 항목 Record는 호출자가
+// RecordWriter::Begin으로 out에 바로 쓴 뒤 EndItem이 길이를 채운다. 항목 byte를 builder에 모았다가
+// 다시 복사하지 않으므로 중첩 깊이만큼 복사가 늘지 않는다. 같은 항목을 같은 순서로 쓰면
+// RecordListBuilder::Finish가 부모에 쓰는 payload와 같은 byte다. 작업량은 out의 청구다. 실패하면
+// out의 내용은 정해지지 않으므로 그 writer를 버린다. out은 이 writer보다 오래 살아야 한다.
+//
+// 사용 예:
+//   auto list = RecordListWriter::Begin(out, count, limits);
+//   if (!list) {
+//       return Result<void>::Failure(list.Error());
+//   }
+//
+//   for (uint32 index = 0; index < count; ++index) {
+//       if (auto begun = list.Value().BeginItem(); !begun) {
+//           return begun;
+//       }
+//
+//       auto record = RecordWriter::Begin(out, ItemSchema, 1, itemLimits);
+//       if (!record) {
+//           return Result<void>::Failure(record.Error());
+//       }
+//
+//       // 항목 필드를 record.Value().BeginField·EndField 사이에 out에 바로 쓴다.
+//       if (auto ended = record.Value().End(); !ended) {
+//           return ended;
+//       }
+//
+//       if (auto ended = list.Value().EndItem(); !ended) {
+//           return ended;
+//       }
+//   }
+//
+//   return list.Value().End();
+class RecordListWriter {
+public:
+    // count가 limits.maxItems를 넘거나 count 4 byte + count × 항목 최소 크기(52)가
+    // limits.maxPayloadBytes를 넘으면 CapacityExceeded다(쓰기 전에 거부한다). out의 쓰기 오류를
+    // 그대로 돌려준다.
+    static Result<RecordListWriter> Begin(ArchiveWriter& out, uint32 count,
+                                          RecordListLimits limits = {}) noexcept;
+
+    // 항목 하나의 u64 길이 자리를 쓴다. 열린 항목이 있거나 이미 count개를 썼으면 InvalidArgument다.
+    Result<void> BeginItem() noexcept;
+
+    // 지금 항목의 길이를 채운다. 열린 항목이 없거나 out이 길이 자리보다 짧거나 항목이 Record
+    // envelope(magic·길이 일관성)가 아니면 InvalidArgument, 항목이 limits.maxItemBytes를 넘거나
+    // 지금까지의 payload가 limits.maxPayloadBytes를 넘으면 CapacityExceeded다.
+    Result<void> EndItem() noexcept;
+
+    // 열린 항목이 있거나 쓴 항목 수가 count와 다르면 InvalidArgument, payload 전체가
+    // limits.maxPayloadBytes를 넘으면 CapacityExceeded다.
+    Result<void> End() const noexcept;
+
+    // 지금까지 끝낸 항목 수다.
+    usize ItemCount() const noexcept;
+
+private:
+    static constexpr usize NoItem = ~usize(0);
+
+    RecordListWriter(ArchiveWriter& out, usize start, uint32 count,
+                     RecordListLimits limits) noexcept
+        : out_(&out), start_(start), count_(count), limits_(limits) {
+    }
+
+    ArchiveWriter* out_;
+    usize start_;
+    usize item_ = NoItem;
+    uint32 count_;
+    uint32 written_ = 0;
+    RecordListLimits limits_;
+};
+
 // RecordList payload를 검증하고 항목별 RecordReader를 연다. 열 때 count·모든 length·항목 envelope
 // 경계를 검증한 뒤 index를 게시하고(count는 할당 전에 남은 byte / 52(항목 최소 크기)와 비교한다),
 // 항목은 OpenItem으로 schema·버전 범위를 검사하며 연다.
@@ -81,6 +154,11 @@ private:
 // 포화되어 형제 항목과 목록의 이후 호출도 실패한다(나쁜 항목만 건너뛰고 계속할 수 없다). 같은
 // 예산을 공유하는 서로 다른 reader는 여러 스레드에서 써도 된다. payload 원본은 모든
 // reader·FieldView보다 오래 살아야 한다. 이동만 된다.
+//
+// 청구: 항목 byte는 한 번만 청구한다. 단독 Open은 목록을 열 때 항목 byte를 청구하고, OpenField는
+// 부모 Record가 이미 청구했으므로 항목마다 operation 하나(색인)만 청구한다. OpenItem은 언제나 항목
+// Record의 header·TLV 색인만 청구한다(TLV payload를 다시 청구하지 않는다). 그래서 목록 안 struct 안
+// 목록처럼 중첩해도 작업이 깊이 배수로 불어나지 않는다.
 class RecordListReader {
 public:
     // 새 예산으로 연다(최상위 목록). itemLimits는 항목 Record와 예산(maxOperations·maxWork)의
@@ -102,19 +180,30 @@ public:
 
     usize ItemCount() const noexcept;
     // index번째 항목의 RecordReader(공유 예산). operation 하나를 청구하며 범위 밖 index는
-    // InvalidArgument, schema 불일치는 TypeMismatch, 버전 범위 밖은 Unsupported다.
+    // InvalidArgument, schema 불일치는 TypeMismatch, 버전 범위 밖은 Unsupported(버전 0은
+    // InvalidArgument), 필드 수가 항목 한도(itemLimits·부모의 maxFields)를 넘으면
+    // CapacityExceeded다. OpenItem(index, 항목 한도의 maxFields)와 같다.
     Result<RecordReader> OpenItem(usize index) noexcept;
+    // 필드 수 한도를 maxFields로 바꿔 연다(그래프가 남은 필드 누계로 열 때). 그 밖은
+    // OpenItem(index)와 같다.
+    //
+    // 사용 예:
+    //   auto item = list.OpenItem(index, remainingFields);
+    Result<RecordReader> OpenItem(usize index, uint32 maxFields) noexcept;
+    // index번째 항목 Record의 전체 byte다(예: 마이그레이션 입력). 범위 밖 index는
+    // InvalidArgument다. 반환 view는 payload 원본을 빌린다. 예산을 청구하지 않는다.
+    Result<Span<const uint8>> ItemBytes(usize index) const noexcept;
     // 공유 예산의 지금까지 사용량이다(부모·형제·항목 reader 포함).
     uint64 OperationsUsed() const noexcept;
     uint64 WorkUsed() const noexcept;
 
 private:
     explicit RecordListReader(Allocator&) noexcept;
-    static Result<RecordListReader> OpenShared(Allocator&, Span<const uint8> payload,
-                                               Guid itemSchema, uint32 minItemVersion,
-                                               uint32 maxItemVersion, RecordLimits itemLimits,
-                                               RecordListLimits listLimits,
-                                               SharedPtr<ArchiveBudget> budget) noexcept;
+    // indexOnly면 항목 byte를 청구하지 않는다(부모 Record가 이미 청구한 중첩 목록).
+    static Result<RecordListReader>
+    OpenShared(Allocator&, Span<const uint8> payload, Guid itemSchema, uint32 minItemVersion,
+               uint32 maxItemVersion, RecordLimits itemLimits, RecordListLimits listLimits,
+               SharedPtr<ArchiveBudget> budget, bool indexOnly) noexcept;
 
     Allocator* allocator_;
     Guid schema_;

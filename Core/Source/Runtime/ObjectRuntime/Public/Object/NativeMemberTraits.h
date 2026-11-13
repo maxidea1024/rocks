@@ -3,6 +3,7 @@
 #include <Object/Object.h>
 #include <Object/ObjectRefArray.h>
 #include <Object/ObjectRefs.h>
+#include <Object/StructRefArray.h>
 
 namespace rocks {
 
@@ -40,6 +41,31 @@ struct NativeStrongReference<RootRef<T>> {
 
 template <class T>
 struct NativeStrongReference<ObjectRefArray<T>> {
+    static constexpr bool value = true;
+};
+
+template <class S>
+struct NativeStrongReference<StructRefArray<S>> {
+    static constexpr bool value = true;
+};
+
+// Registry가 관리하는 참조 컨테이너(ObjectRefArray·StructRefArray)면 참이다. 직접 타입만 본다.
+// 생성 코드가 struct의 ContainsReferenceArray 형질을 C++ 멤버 타입과 대조할 때 쓴다(encode 고정이
+// 그 형질에 기대므로 틀린 모델 값이 고정 누락이 되지 않게). 사용 예(생성 코드):
+//   static_assert(GeneratedType<S>::ContainsReferenceArray ||
+//                 !::rocks::detail::RegistryContainer<decltype(S::slots)>::value, "...");
+template <class T>
+struct RegistryContainer {
+    static constexpr bool value = false;
+};
+
+template <class T>
+struct RegistryContainer<ObjectRefArray<T>> {
+    static constexpr bool value = true;
+};
+
+template <class S>
+struct RegistryContainer<StructRefArray<S>> {
     static constexpr bool value = true;
 };
 
@@ -81,10 +107,10 @@ struct RequiresWorldOnlyOwnerOf<T, decltype(void(T::RocksRequiresWorldOnlyOwner)
 
 } // namespace detail
 
-// T(배열이면 원소)가 ObjectRef·RootRef·ObjectRefArray이거나 Object 파생 타입을 가리키는 raw
-// 포인터·참조(대상이 다시 강한 참조인 경우 포함)면 참이다. WeakRef와 ObjectHandle은 추적하지 않는
-// 참조라 거짓이다. ObjectRefArray도 참이다. 직접 타입만 본다 — 멤버를 값으로 담는 타입의
-// 필드·템플릿 인자는 MetaCompiler의 AST 재귀 검사(RMC2205)가 본다.
+// T(배열이면 원소)가 ObjectRef·RootRef·ObjectRefArray·StructRefArray이거나 Object 파생 타입을
+// 가리키는 raw 포인터·참조(대상이 다시 강한 참조인 경우 포함)면 참이다. WeakRef와 ObjectHandle은
+// 추적하지 않는 참조라 거짓이다. 직접 타입만 본다 — 멤버를 값으로 담는 타입의 필드·템플릿 인자는
+// MetaCompiler의 AST 재귀 검사(RMC2205)가 본다.
 template <class T>
 inline constexpr bool IsNativeStrongReference =
     detail::NativeStrongReference<__remove_cv(__remove_all_extents(T))>::value;

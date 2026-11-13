@@ -16,6 +16,7 @@ Result<void*> AccessBorrow(ObjectRegistry*, ObjectHandle, const void*) noexcept;
 Result<ObjectLifecycle> InspectBorrow(ObjectRegistry*, ObjectHandle) noexcept;
 void ReleaseBorrow(ObjectRegistry*, ObjectHandle) noexcept;
 void ReleaseBackend(ObjectRegistry*, ObjectHandle) noexcept;
+void ReleaseEncodePin(ObjectRegistry*, ObjectHandle) noexcept;
 } // namespace detail
 
 // GC의 외부 루트. 포인터 접근권과 구분하며 실제 접근은 Borrow를 사용한다.
@@ -39,6 +40,7 @@ public:
             other.registry_ = nullptr;
             other.handle_ = {};
         }
+
         return *this;
     }
 
@@ -56,6 +58,7 @@ public:
         if (!result) {
             return Result<RootRef>::Failure(result.Error());
         }
+
         return Result<RootRef>::Success(RootRef(registry_, handle_));
     }
 
@@ -110,6 +113,7 @@ public:
             other.registry_ = nullptr;
             other.handle_ = {};
         }
+
         return *this;
     }
 
@@ -131,6 +135,7 @@ public:
         if (!result) {
             return Result<T*>::Failure(result.Error());
         }
+
         // Registry는 Object 하위 객체 주소를 준다. T가 Object의 파생이므로 static_cast가 기반 하위
         // 객체 위치 보정을 정확히 한다(다형 파생 + 비다형 Object 배치 포함).
         return Result<T*>::Success(static_cast<T*>(static_cast<Object*>(result.Value())));
@@ -165,8 +170,10 @@ private:
 
 // 객체 안에 직접 포함하는 강한 GC 간선이다. 자체적으로 루트가 되지는 않는다.
 // Registry/ConstructionContext의 SetReference로만 변경하고 소유자의 Trace에서 방문한다.
-// 복사·이동으로 소유자 검증을 우회하지 못하게 한다. 외부 배열 안의 간선은 아직 미지원이다.
-// 대상은 T 또는 T의 파생 타입 객체다.
+// 복사·이동으로 소유자 검증을 우회하지 못하게 한다. owner 밖 버퍼(Array 원소)에는 둘 수 없다 —
+// 참조 목록은 ObjectRefArray, 참조 struct 목록은 Registry가 관리하는 StructRefArray(원소마다 고정
+// 블록, 원소 안 참조는 SetElementReference로 쓴다)다. 대상은 T 또는 T의 파생 타입 객체이거나
+// null이다.
 template <class T = Object>
 class ObjectRef {
 public:
@@ -226,6 +233,7 @@ public:
             handle_ = other.handle_;
             other.registry_ = nullptr;
         }
+
         return *this;
     }
 
@@ -248,6 +256,79 @@ private:
     friend class ObjectRegistry;
 
     BackendLease(ObjectRegistry* registry, ObjectHandle handle) noexcept
+        : registry_(registry), handle_(handle) {
+    }
+
+    ObjectRegistry* registry_ = nullptr;
+    ObjectHandle handle_;
+};
+
+// encode(필드 값을 Archive에 쓰기) 동안 owner의 Registry 컨테이너·참조 변경과 필드 쓰기를 막는
+// 고정이다(ObjectRegistry::PinForEncode). String·Soft 경로·Array 원소·컨테이너 원소는 owner 밖
+// 버퍼에 있으므로, encode 도중 allocator 콜백이 그 owner를 바꾸면 순회하던 버퍼가 해제된다. 고정된
+// owner의
+// AddReference·InsertReferenceAt·SetReferenceAt·RemoveReference·RemoveReferenceAt·ClearReferences·
+// SetReference·AddElement·InsertElementAt·RemoveElementAt·ClearElements·SetElementReference와
+// 등록된 필드 쓰기(ResolveForWrite를 쓰는 생성 WriteGeneratedField·FieldWriteOperation)는
+// Busy다(저장 중 콜백이 Registry를 바꾸지 않는다는 1차 계약을 어긴 경우를 메모리 오류 대신 오류로
+// 만든다). 호출 오류(owner 밖 컨테이너 등의 InvalidArgument)가 고정 Busy보다 먼저다. 고정은 slot별
+// 계수라 여러 encode가 겹쳐도 되고, ObjectStats::encodePins·진단 레코드에 보인다. 고정 중에는 그
+// 객체 저장소를 회수하지 않고 남은 고정은 Shutdown을 Busy로 남긴다. Registry는 모든 EncodePin보다
+// 오래 살아야 하며, 같은 래퍼의 이동/Reset을 동시에 호출하지 않는다.
+//
+// 사용 예(encode thunk를 부르는 쪽):
+//   auto pin = registry.PinForEncode(access, owner);
+//   if (!pin) {
+//       return Result<void>::Failure(pin.Error());
+//   }
+//
+//   // owner의 필드를 encode한다. 범위를 벗어나면 고정이 풀린다.
+class EncodePin {
+public:
+    EncodePin() noexcept = default;
+
+    EncodePin(EncodePin&& other) noexcept : registry_(other.registry_), handle_(other.handle_) {
+        other.registry_ = nullptr;
+        other.handle_ = {};
+    }
+
+    EncodePin& operator=(EncodePin&& other) noexcept {
+        if (this != &other) {
+            Reset();
+            registry_ = other.registry_;
+            handle_ = other.handle_;
+            other.registry_ = nullptr;
+            other.handle_ = {};
+        }
+
+        return *this;
+    }
+
+    EncodePin(const EncodePin&) = delete;
+    EncodePin& operator=(const EncodePin&) = delete;
+
+    ~EncodePin() {
+        Reset();
+    }
+
+    // 고정을 푼다. 이미 풀렸으면 아무것도 하지 않는다.
+    void Reset() noexcept {
+        if (registry_) {
+            detail::ReleaseEncodePin(registry_, handle_);
+            registry_ = nullptr;
+            handle_ = {};
+        }
+    }
+
+    // 래퍼가 고정을 보유하는지다.
+    bool IsValid() const noexcept {
+        return registry_ != nullptr;
+    }
+
+private:
+    friend class ObjectRegistry;
+
+    EncodePin(ObjectRegistry* registry, ObjectHandle handle) noexcept
         : registry_(registry), handle_(handle) {
     }
 

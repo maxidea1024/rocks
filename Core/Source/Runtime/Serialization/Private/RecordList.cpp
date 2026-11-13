@@ -87,6 +87,80 @@ usize RecordListBuilder::ItemCount() const noexcept {
     return count_;
 }
 
+Result<RecordListWriter> RecordListWriter::Begin(ArchiveWriter& out, uint32 count,
+                                                 RecordListLimits limits) noexcept {
+    // count 자리 + 항목 최소 크기 합이 payload 한도 안이어야 한다(빈 목록도 count 4 byte).
+    if (count > limits.maxItems || limits.maxPayloadBytes < CountBytes ||
+        count > (limits.maxPayloadBytes - CountBytes) / MinimumItemBytes) {
+        return Result<RecordListWriter>::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    const usize start = out.ByteCount();
+    if (auto written = out.WriteU32(count); !written) {
+        return Result<RecordListWriter>::Failure(written.Error());
+    }
+
+    return Result<RecordListWriter>::Success(RecordListWriter(out, start, count, limits));
+}
+
+Result<void> RecordListWriter::BeginItem() noexcept {
+    if (item_ != NoItem || written_ >= count_) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const usize position = out_->ByteCount();
+    if (auto written = out_->WriteU64(0); !written) {
+        return written;
+    }
+
+    item_ = position;
+    return Result<void>::Success();
+}
+
+Result<void> RecordListWriter::EndItem() noexcept {
+    // 열린 항목이 없거나 out이 길이 자리보다 짧으면(호출자가 out을 바꿨다) 버퍼를 읽지 않는다.
+    if (item_ == NoItem || out_->ByteCount() < item_ + LengthBytes) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const usize itemBytes = out_->ByteCount() - item_ - LengthBytes;
+    if (itemBytes > limits_.maxItemBytes || out_->ByteCount() - start_ > limits_.maxPayloadBytes) {
+        return Result<void>::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    // 호출자가 쓴 항목이 Record 하나인지 확인한다(reader와 같은 envelope 검사).
+    const Span<const uint8> item(out_->View().Data() + item_ + LengthBytes, itemBytes);
+    if (!IsRecordEnvelope(item)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    uint8 length[LengthBytes];
+    StoreLittleEndian<uint64>(length, static_cast<uint64>(itemBytes));
+    if (auto patched = out_->Patch(item_, length); !patched) {
+        return patched;
+    }
+
+    item_ = NoItem;
+    ++written_;
+    return Result<void>::Success();
+}
+
+Result<void> RecordListWriter::End() const noexcept {
+    if (item_ != NoItem || written_ != count_) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (out_->ByteCount() - start_ > limits_.maxPayloadBytes) {
+        return Result<void>::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    return Result<void>::Success();
+}
+
+usize RecordListWriter::ItemCount() const noexcept {
+    return written_;
+}
+
 RecordListReader::RecordListReader(Allocator& allocator) noexcept
     : allocator_(&allocator), items_(allocator) {
 }
@@ -107,7 +181,7 @@ Result<RecordListReader> RecordListReader::Open(Allocator& allocator, Span<const
     }
 
     return OpenShared(allocator, payload, itemSchema, minimum, maximum, itemLimits, listLimits,
-                      Move(budget.Value()));
+                      Move(budget.Value()), false);
 }
 
 Result<RecordListReader> RecordListReader::OpenField(const RecordReader& parent,
@@ -135,16 +209,16 @@ Result<RecordListReader> RecordListReader::OpenField(const RecordReader& parent,
         return Result<RecordListReader>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // 부모 Record가 이 payload byte를 이미 청구했으므로 색인만 청구한다(OpenRecordField와 같다).
     return OpenShared(parent.fields_.GetAllocator(), field.payload, itemSchema, minimum, maximum,
-                      parent.limits_, listLimits, parent.archive_.shared_);
+                      parent.limits_, listLimits, parent.archive_.shared_, true);
 }
 
-Result<RecordListReader> RecordListReader::OpenShared(Allocator& allocator,
-                                                      Span<const uint8> payload, Guid itemSchema,
-                                                      uint32 minimum, uint32 maximum,
-                                                      RecordLimits itemLimits,
-                                                      RecordListLimits listLimits,
-                                                      SharedPtr<ArchiveBudget> budget) noexcept {
+Result<RecordListReader>
+RecordListReader::OpenShared(Allocator& allocator, Span<const uint8> payload, Guid itemSchema,
+                             uint32 minimum, uint32 maximum, RecordLimits itemLimits,
+                             RecordListLimits listLimits, SharedPtr<ArchiveBudget> budget,
+                             bool indexOnly) noexcept {
     RecordListReader result(allocator);
     result.schema_ = itemSchema;
     result.minimum_ = minimum;
@@ -203,16 +277,30 @@ Result<RecordListReader> RecordListReader::OpenShared(Allocator& allocator,
             return Result<RecordListReader>::Failure(ErrorCode::InvalidArgument);
         }
 
-        auto item = archive.ReadRaw(static_cast<usize>(length.Value()));
-        if (!item) {
-            return Result<RecordListReader>::Failure(item.Error());
+        Span<const uint8> item;
+        if (indexOnly) {
+            // 부모가 이 범위를 이미 청구했다. operation 하나만 청구하고 경계만 확인해 건너뛴다.
+            if (auto charged = archive.Charge(1); !charged) {
+                return Result<RecordListReader>::Failure(charged.Error());
+            }
+
+            const auto count = static_cast<usize>(length.Value());
+            item = Span<const uint8>(archive.source_.Data() + archive.position_, count);
+            archive.position_ += count;
+        } else {
+            auto read = archive.ReadRaw(static_cast<usize>(length.Value()));
+            if (!read) {
+                return Result<RecordListReader>::Failure(read.Error());
+            }
+
+            item = read.Value();
         }
 
-        if (!IsRecordEnvelope(item.Value())) {
+        if (!IsRecordEnvelope(item)) {
             return Result<RecordListReader>::Failure(ErrorCode::InvalidArgument);
         }
 
-        if (!result.items_.TryPushBack(item.Value())) {
+        if (!result.items_.TryPushBack(item)) {
             platform::Fatal("RecordListReader index reservation invariant failed");
         }
     }
@@ -229,6 +317,10 @@ usize RecordListReader::ItemCount() const noexcept {
 }
 
 Result<RecordReader> RecordListReader::OpenItem(usize index) noexcept {
+    return OpenItem(index, limits_.maxFields);
+}
+
+Result<RecordReader> RecordListReader::OpenItem(usize index, uint32 maxFields) noexcept {
     if (!budget_) {
         return Result<RecordReader>::Failure(ErrorCode::InvalidArgument); // 이동된 reader
     }
@@ -242,8 +334,20 @@ Result<RecordReader> RecordListReader::OpenItem(usize index) noexcept {
         return Result<RecordReader>::Failure(ErrorCode::InvalidArgument);
     }
 
-    return RecordReader::OpenWith(*allocator_, items_[index], schema_, minimum_, maximum_, limits_,
-                                  budget_);
+    // 항목 byte는 목록을 열 때(단독 Open) 또는 부모 Record가(OpenField) 이미 청구했다. 항목
+    // Record는 header·TLV 색인만 청구한다.
+    RecordLimits limits = limits_;
+    limits.maxFields = maxFields;
+    return RecordReader::OpenWith(*allocator_, items_[index], schema_, minimum_, maximum_, limits,
+                                  budget_, true);
+}
+
+Result<Span<const uint8>> RecordListReader::ItemBytes(usize index) const noexcept {
+    if (index >= items_.Size()) {
+        return Result<Span<const uint8>>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return Result<Span<const uint8>>::Success(items_[index]);
 }
 
 uint64 RecordListReader::OperationsUsed() const noexcept {
