@@ -181,6 +181,90 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::StructHolder::flag",
+      "id": "6665b13a74cc43e1bd16b68cd5b33698",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::StructHolder::middle",
+      "id": "35a347776e49414a985b62351f868f00",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::StructHolder::target",
+      "id": "419d9f6b7d184cbf90601f6ecdb4cea1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::StructLeaf::count",
+      "id": "ab81530c89374e2ebd2e54b9bdc2d945",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::StructLeaf::group",
+      "id": "88079daf19654b23a5f911da631fb503",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::StructLeaf::label",
+      "id": "0cd92607290242d8bffc9901a0374996",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::StructMiddle::leaf",
+      "id": "d0713866fa1f4ecda05c817359367a76",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::StructMiddle::note",
+      "id": "e950a70271374e759f2c580f30e0da1b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::StructMiddle::offset",
+      "id": "2834de2d07ce47398e06dff7723d35c6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::StructOwner::extra",
+      "id": "a8a3cb79e6b349a0a854c5c041e9700c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::StructOwner::holder",
+      "id": "aef6c401c5254f088cbcc94b0dc22d7e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::StructOwner::plain",
+      "id": "7d768dbf16a047c8a7829e9aaf2204c7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::WorldChild::depth",
       "id": "a82897e303e74b2c8e817c9f0fb46194",
       "aliases": [],
@@ -276,6 +360,34 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::PropertyNode",
       "id": "ad100000000000000000000000000004",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::StructHolder",
+      "id": "6c43275d5d7f43d58685f506168a23a6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::StructLeaf",
+      "id": "c887ddf988724accba2906dbe5b73550",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::StructMiddle",
+      "id": "d3fbdf21a1644ab7a6ccadf84a077b48",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::StructOwner",
+      "id": "96433d51c80441fcb18c132619c46e5f",
       "aliases": [],
       "retired": false
     },

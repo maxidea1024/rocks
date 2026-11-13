@@ -129,14 +129,24 @@ internal static class CompilerDriver
                     "Move the base to a public header or make the derived type private.").At(type.Site);
             }
 
-            // public 타입의 enum 필드는 public enum이어야 한다. public 집계는 private enum을 등록하지 않고(클래스 등록이
-            // NotFound가 된다), public 생성 헤더는 private 생성 헤더를 include할 수 없다.
-            FieldModel? privateEnum = type.Private ? null : type.OwnFields.FirstOrDefault(field => field.Kind == "Enum" && field.Reference is not null &&
-                schema.Classes.TryGetValue(field.Reference, out ClassModel? target) && target.Private);
-            if (privateEnum is not null)
+            // public 타입의 enum·struct 필드는 public 타입이어야 한다. public 집계는 private enum·struct를 등록하지 않고
+            // (등록이 NotFound가 된다), public 생성 헤더는 private 생성 헤더를 include할 수 없다. NATIVE 멤버의 직접
+            // 타입인 struct도 생성 헤더가 include하므로 같다.
+            FieldModel? privateValue = type.Private ? null : type.OwnFields.FirstOrDefault(field => FieldModel.KindRequiresTargetId(field.Kind) &&
+                field.Reference is not null && schema.Classes.TryGetValue(field.Reference, out ClassModel? target) && target.Private);
+            if (privateValue is not null)
             {
-                throw new MetadataException($"{type.Name}::{privateEnum.Name}: public reflected type uses private enum {privateEnum.Reference}", "RMC2006",
-                    "Move the enum to a public header or make the class private.").At(privateEnum.Site);
+                string what = privateValue.Kind.ToLowerInvariant();
+                throw new MetadataException($"{type.Name}::{privateValue.Name}: public reflected type uses private {what} {privateValue.Reference}", "RMC2006",
+                    $"Move the {what} to a public header or make the using type private.").At(privateValue.Site);
+            }
+
+            NativeMemberModel? privateNative = type.Private ? null : type.NativeMembers.FirstOrDefault(native => native.Struct is not null &&
+                schema.Classes.TryGetValue(native.Struct, out ClassModel? target) && target.Private);
+            if (privateNative is not null)
+            {
+                throw new MetadataException($"{type.Name}::{privateNative.Name}: public reflected type holds private struct {privateNative.Struct}", "RMC2006",
+                    "Move the struct to a public header or make the using type private.").At(privateNative.Site);
             }
         }
 
@@ -339,6 +349,8 @@ internal static class CompilerDriver
             }
         }
 
+        // import 필드의 enum·struct 대상을 잇고 import struct의 순환(RMC2302)·깊이(RMC2303)·형질을 검사한다.
+        SchemaValidator.LinkImported(types);
         return (types, publicModules);
     }
 
@@ -531,7 +543,7 @@ internal static class CompilerDriver
                 continue;
             }
 
-            string label = type.IsEnum ? "ENUM" : "CLASS";
+            string label = type.IsEnum ? "ENUM" : type.IsStruct ? "STRUCT" : "CLASS";
             string description = qualified ? "diagnostic references " + label : "candidate " + label;
             notes.AppendLine($"{type.Site.File}:{type.Site.Line}: note: {description} {type.Name}");
             foreach (FieldModel field in type.Fields)

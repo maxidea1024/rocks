@@ -53,8 +53,9 @@ auto runtimeName = type.Name();
 | `Sha256Digest` | `ValueKind::Digest256`; 32 byte 해시(`Core/Encoding/Sha256.h`). 저장 wire는 정확히 32 byte의 Bytes |
 | `SoftObjectRef<T>` | `ValueKind::SoftObjectReference`; 에셋 ID와 패키지 안 객체 경로(`Object/SoftObjectRef.h`). GC 간선이 아니며 `value.type`이 기대 타입(Object면 0). 저장 wire는 `SoftObjectReference`(12) |
 | `ROCKS_ENUM` enum class | `ValueKind::Enum`; `value.type`이 enum ID. 값은 선언된 값(Flags enum은 선언 값의 OR)만 유효하다. 저장 wire는 I64 (아래 "리플렉션 enum") |
+| `ROCKS_STRUCT` struct | `ValueKind::Struct`(`FieldKind::Value`); `value.type`이 struct ID. 저장 wire는 중첩 Record(10) (아래 "리플렉션 struct") |
 
-스키마의 값 형식은 `FieldSchema::value`(`ValueType { ValueKind kind; TypeId type; }`)다. `type`은 강한 참조와 소프트 참조의 기대 대상 타입(0 = Object)과 Enum의 enum ID(0이면 안 된다)이며 그 밖의 종류에서는 0이어야 한다. `element`·`maxElements`는 배열 필드(B5)용 자리이며 지금은 Opaque·0만 등록된다.
+스키마의 값 형식은 `FieldSchema::value`(`ValueType { ValueKind kind; TypeId type; }`)다. `type`은 강한 참조와 소프트 참조의 기대 대상 타입(0 = Object)과 Enum의 enum ID·Struct의 struct ID(0이면 안 된다)이며 그 밖의 종류에서는 0이어야 한다. `element`·`maxElements`는 배열 필드(B5)용 자리이며 지금은 Opaque·0만 등록된다.
 
 `SoftObjectRef<T>`의 규칙: null은 asset이 0이고 경로가 빈 것이다(asset만 있고 경로가 비면 그 에셋의 대표 객체다). asset이 0인데 경로가 있거나, 경로가 4 KiB(`MaxObjectPathBytes`)를 넘거나 UTF-8이 아니면 InvalidArgument다. 리플렉션 쓰기(`write`·`writeStaged`·등록 전 callback), 그래프 저장(직접 대입한 값도 다시 검사)과 로드가 같은 규칙을 검사한다. 경로 문법(Outer 이름을 `.`로 잇는다)과 기대 타입은 대상을 찾을 때(A0-O·A1) 검사하며 쓰기·저장·로드는 검사하지 않는다. 이동 전용이고 이동하면 원본은 null이 된다. 이동 대입은 원본의 경로 allocator를 넘겨받으므로 객체 필드에 값을 넣을 때는 `TryAssign(other)`(받는 쪽 allocator 유지)를 쓰고, 복제는 실패할 수 있는 `TryClone(allocator)`다. 쓰는 클래스에는 `noexcept T(Allocator&)` 생성자가 필요하다(String 필드와 같다). `AssetId`의 문자열 표기와 해석은 36자 소문자 하이픈 형식 하나뿐이다(`TryParse`는 대문자·32자·중괄호를 거부한다).
 
@@ -117,6 +118,28 @@ public:
 enum은 그 enum을 필드로 쓰는 클래스보다 먼저 등록한다(`TypeRegistry::RegisterEnum`, 모듈 집계 함수는 enum을 먼저 등록한다). 클래스 등록은 Enum 필드의 `value.type`이 등록된 enum 레코드여야 하고(없으면 NotFound, 클래스 레코드면 TypeMismatch), 생성 접근기가 싣는 C++ enum의 native 키(`RuntimeFieldOps::valueNativeType`)가 그 레코드의 키와 같아야 한다(다르면 TypeMismatch). 등록된 클래스는 쓰는 enum을 의존으로 붙잡으므로 그 enum의 `Unregister`는 Busy다(lease가 아니므로 `Shutdown`을 막지 않는다). `Acquire`는 클래스만 돌려주고(enum ID면 TypeMismatch), enum은 `AcquireValueType(id, TypeKind::Enum)`으로 열어 `TypeLease::Enum()`으로 스키마를 읽는다. 클래스 lease의 `FieldEnum(fieldIndex)`는 그 필드가 가리키는 enum의 스키마다.
 
 Enum 필드의 `FieldValue`는 `kind = ValueKind::Enum`, `signedInteger = 값`, `type = enum ID`다. 쓰기(등록된 `write`·`writeStaged`·등록 전 callback)는 `type`이 필드의 enum ID와 다르면 TypeMismatch, 선언되지 않은 값(범위 밖 포함)이면 InvalidArgument이며 값은 그대로다. 그래프 저장은 C++에서 `static_cast`로 넣은 선언되지 않은 값을 InvalidArgument로 거부하고, 복원은 기본 정책에서 저장된 선언되지 않은 값을 객체를 만들기 전에 InvalidArgument로 거부하고, `UndeclaredEnumPolicy::ReportAndDefault`면 `UndeclaredEnumValue`를 진단한 뒤 대체 값을 쓴다([Serialization](Serialization.ko.md) "필드 codec과 문맥").
+
+### 리플렉션 struct(`ROCKS_STRUCT`)
+
+```cpp
+ROCKS_STRUCT(Version = 2)
+struct BulkDataRef {
+    ROCKS_PROPERTY() rocks::uint32 bulkId = 0;
+    ROCKS_PROPERTY() rocks::Sha256Digest digest;
+};
+
+ROCKS_CLASS()
+class TextureSource : public rocks::Object {
+public:
+    ROCKS_PROPERTY() BulkDataRef bulk;
+};
+```
+
+`ROCKS_STRUCT(...)`은 `ROCKS_CLASS`와 같은 규칙으로 바로 뒤의 완전한 `class`/`struct` 정의 하나에 붙는다(한 레코드에 둘을 함께 쓰면 거부한다). 대상은 base가 없는 비템플릿 타입이고(상속은 RMC2301, 템플릿은 RMC2000), 모든 비정적 데이터 멤버는 `ROCKS_PROPERTY` 또는 `ROCKS_NATIVE`이며 `explicit S(Allocator&) noexcept` 또는 `S() noexcept` 생성자와 noexcept 소멸자가 있어야 한다(생성 `MakeRuntimeStructOps<S>`의 `static_assert`). private 멤버는 클래스처럼 `ROCKS_GENERATED_BODY()`를 둔다. 클래스 안에 중첩한 리플렉션 struct(와 클래스)는 public 구역이어야 한다(RMC2000 — 생성 코드가 바깥에서 이름을 쓴다). 지정자는 `Version=N`(없으면 1)이고 `Binds`(Core 값 타입 결합)는 아직 받지 않는다. struct는 클래스의 base나 `ObjectRef<T>`·`SoftObjectRef<T>`의 대상이 될 수 없다(RMC2003). struct 멤버로 다른 struct를 담을 수 있고 중첩 깊이(1 + 멤버 struct 깊이의 최댓값)는 `MaxStructDepth` = 16 이하다(RMC2303). 순환은 RMC2302다 — C++ 값 멤버로는 생기지 않으므로 import한 descriptor에서 검사한다. struct 타입과 필드도 identity 명세의 `type`·`field` 항목이다.
+
+생성 형질: `ObjectRef` 멤버(Transient 포함)나 그런 struct 멤버를 담으면 `ContainsStrongReference`(참조 struct — 소유 클래스의 생성 Trace가 struct의 Trace를 거쳐 방문한다), `RocksRequiresWorldOnlyOwner` 형질 NATIVE 멤버나 그런 struct 멤버를 담으면 `RequiresWorldOnlyOwner`다. struct의 WorldOnly 소유자 형질은 오류가 아니라 전파되며 그 struct를 필드(상속 필드·NATIVE 멤버 포함)로 둔 WorldOnly 아닌 클래스가 RMC2206이다. NATIVE 멤버로 둔 참조 struct는 RMC2205다. 다른 모듈의 private struct, 같은 모듈 public 타입의 private struct 필드·NATIVE 멤버는 RMC2006이다.
+
+생성 헤더는 `GeneratedType<S>`에 `ContainsStrongReference`·`RequiresWorldOnlyOwner`·`Depth`(constexpr), `Id()`, `Schema()`(base·클래스 플래그 없는 `TypeSchema`), `Trace(const S&, TraceVisitor&)`(모든 struct — 참조 없는 struct는 빈 본문), `Ops()`(`RuntimeStructOps` — 멤버마다 `detail::StructFieldOps<&S::m>`, 참조 struct만 `trace`), `Register`를 낸다. 형질과 깊이는 MetaCompiler 모델 값이고 직접 멤버 struct의 생성 값을 포함하는지 `static_assert`로 대조한다(import descriptor의 flags를 믿지 않는다). struct가 `Migrate`라는 이름의 멤버(메서드·함수 템플릿, 접근 무관)를 선언하면 MetaCompiler가 AST에서 그것을 보고 생성 `Ops()`가 `ops.migrate = &S::Migrate;`(타입 마이그레이션)를 낸다. 시그니처는 `static Result<Array<uint8>> Migrate(Allocator&, TypeId, uint32 from, uint32 to, Span<const uint8> record) noexcept`여야 하며 다르면(noexcept 없음·비정적 포함) 생성 코드가 컴파일되지 않는다. private·protected `Migrate`는 `ROCKS_GENERATED_BODY()`가 있어야 한다(없으면 RMC2000 — 생성 특수화가 friend로 주소를 얻는다). 클래스의 struct 필드는 `read`·`write`·`writeStaged` 없이 codec과 struct native 키(`valueNativeType`)만 싣는다(쓰기는 Unsupported — 멤버 단위 쓰기는 경로 접근 B6). 다른 헤더(같은 모듈 포함)나 import base의 상속 필드가 쓰는 struct는 그 생성 헤더를 include하고, 한 헤더 안의 특수화는 쓰는 struct(PROPERTY 멤버와 NATIVE 리플렉션 struct 멤버 — 생성 `static_assert`가 둘 다 쓴다)가 먼저 나온다. 모듈 집계 함수는 enum → struct(`ModuleRegistration::RegisterStructIfAbsent`, 같은 순위 — 1 + 이 모듈의 쓰는 struct 순위 최댓값 — 순·같은 순위는 이름 순) → 클래스 순으로 등록한다. 저장·복원·버전 정책은 [Serialization](Serialization.ko.md)의 "리플렉션 struct 값"이다.
 
 `Category`와 `DisplayName`은 바이트 길이를 가진 UTF-8 데이터이며 중간 NUL(`\u0000`)도 유효하다. `Span<const char>`의 길이를 사용해야 하며 NUL 종료 문자열 함수로 읽으면 값이 잘린다. 등록 시 이 바이트를 깊게 복사한다. 생성 C++은 한글 등 읽을 수 있는 문자를 유지하고 인용부호·역슬래시·제어 문자를 escape한다. 제어 바이트는 정확히 세 자리 8진수로 표현하므로 뒤에 숫자가 와도 서로 합쳐지지 않는다.
 

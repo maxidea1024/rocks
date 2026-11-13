@@ -14,8 +14,11 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
     private readonly string inputFile = inputs[0].Path;
     private readonly Dictionary<string, ClassModel> classes = new(StringComparer.Ordinal);
 
-    private sealed record PrefixBinding(object?[] Arguments, SourceSite Site);
+    // Struct이면 ROCKS_STRUCT 마커, 아니면 ROCKS_CLASS 마커의 결합이다.
+    private sealed record PrefixBinding(object?[] Arguments, SourceSite Site, bool Struct = false);
 
+    // ROCKS_CLASS·ROCKS_STRUCT 마커가 결합한 레코드 정의(AST id → 지정자)다. 필드 annotation의 소유자 판정은 둘을
+    // 같이 본다.
     private readonly Dictionary<string, PrefixBinding> prefixClasses = new(StringComparer.Ordinal);
 
     // ROCKS_ENUM 마커가 결합한 enum 정의(AST id → 지정자)다.
@@ -51,14 +54,14 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
 
         if (classes.Count == 0)
         {
-            throw new MetadataException("no ROCKS_CLASS or ROCKS_ENUM definitions found in the module's reflected headers");
+            throw new MetadataException("no ROCKS_CLASS, ROCKS_STRUCT or ROCKS_ENUM definitions found in the module's reflected headers");
         }
 
         foreach (ModuleInput input in inputs)
         {
             if (!classes.Values.Any(model => model.Header == input.Include))
             {
-                throw new MetadataException($"reflected header declares no ROCKS_CLASS or ROCKS_ENUM: {input.Include}", "RMC2000",
+                throw new MetadataException($"reflected header declares no ROCKS_CLASS, ROCKS_STRUCT or ROCKS_ENUM: {input.Include}", "RMC2000",
                     "Remove the header from the module's Metadata list or declare its reflected types.").At(new(input.Path, 1));
             }
         }
@@ -162,8 +165,8 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
         (Text(node, "kind") == "CXXBoolLiteralExpr" && node.TryGetProperty("value", out JsonElement value) && value.ValueKind == JsonValueKind.True) ||
         Children(node).Any(ContainsTrue);
 
-    // 타입 철자를 cv·elaborated 키워드 없이 다듬는다.
-    private static string CleanType(string type)
+    // 타입 철자를 cv·elaborated 키워드·앞의 ::없이 다듬는다(SchemaValidator가 NATIVE 멤버의 직접 타입을 찾을 때도 쓴다).
+    internal static string CleanType(string type)
     {
         string text = type.Trim();
         foreach (string prefix in new[] { "const ", "volatile ", "struct ", "class ", "union ", "enum " })
@@ -536,16 +539,14 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
             string name = Text(node, "name");
             string qualified = string.Join("::", scope.Append(name));
             prefixClasses.TryGetValue(Text(node, "id"), out PrefixBinding? prefix);
-            object?[]? mark = prefix?.Arguments;
-            if (mark is not null)
+            if (prefix is not null)
             {
+                object?[] mark = prefix.Arguments;
+                bool isStruct = prefix.Struct;
+                string label = isStruct ? "STRUCT" : "CLASS";
                 UpdateSite(node);
                 SourceSite classSite = currentSite;
-                if (prefix is not null)
-                {
-                    currentSite = prefix.Site;
-                }
-
+                currentSite = prefix.Site;
                 if (anonymous || templated || name.Length == 0)
                 {
                     throw new MetadataException($"{qualified}: anonymous/template/invalid reflected type is unsupported");
@@ -553,7 +554,7 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
 
                 if (mark.Length != 1 || mark[0] is not string classSpecifiers)
                 {
-                    throw new MetadataException($"{qualified}: invalid CLASS annotation arguments");
+                    throw new MetadataException($"{qualified}: invalid {label} annotation arguments");
                 }
 
                 // identity 조회보다 먼저 소유 모듈을 가린다: 의존 모듈의 리플렉션 선언을 이 모듈 명세에서 찾지 않는다.
@@ -561,7 +562,7 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
                 ModuleInput? owner = OwningInput(physical);
                 if (owner is null)
                 {
-                    if (!imported.TryGetValue(qualified, out ClassModel? external) || external.IsEnum || physical is null ||
+                    if (!imported.TryGetValue(qualified, out ClassModel? external) || external.IsEnum || external.IsStruct != isStruct || physical is null ||
                         resolveHeader(external.Header) is not string externalFile || !CanonicalPath.Equals(externalFile, physical))
                     {
                         throw new MetadataException($"{qualified}: reflected declaration is neither in this module's Metadata headers nor in an imported descriptor (same name and header)",
@@ -579,28 +580,37 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
                     return;
                 }
 
-                ClassSpec classSpec = Specifiers.Class(classSpecifiers, qualified);
+                ClassSpec? classSpec = isStruct ? null : Specifiers.Class(classSpecifiers, qualified);
+                StructSpec? structSpec = isStruct ? Specifiers.Struct(classSpecifiers, qualified) : null;
                 string id = Identity("type", qualified);
                 currentSite = classSite;
                 JsonElement[] bases = node.TryGetProperty("bases", out JsonElement baseArray) ? baseArray.EnumerateArray().ToArray() : [];
-                if (bases.Length != 1 || Text(bases[0], "access") != "public" || Flag(bases[0], "isVirtual"))
+                if (isStruct && bases.Length != 0)
+                {
+                    // struct 상속은 v1에서 금지다(Docs/Design/ReflectionFoundations.ko.md 4.1절).
+                    throw new MetadataException($"{qualified}: a ROCKS_STRUCT cannot have a base class", "RMC2301",
+                        "Remove the base and hold the shared members as a nested ROCKS_STRUCT field instead.");
+                }
+
+                if (!isStruct && (bases.Length != 1 || Text(bases[0], "access") != "public" || Flag(bases[0], "isVirtual")))
                 {
                     throw new MetadataException($"{qualified}: exactly one public nonvirtual Object/reflected base is required");
                 }
 
-                bool abstractType = node.TryGetProperty("definitionData", out JsonElement definition) && Flag(definition, "isAbstract");
+                bool abstractType = !isStruct && node.TryGetProperty("definitionData", out JsonElement definition) && Flag(definition, "isAbstract");
 
                 ClassModel model = new()
                 {
                     Name = qualified,
                     Id = id,
                     Site = currentSite,
-                    Version = classSpec.Version,
-                    Base = TypeSpelling(bases[0]),
-                    Abstract = abstractType || classSpec.Abstract,
-                    WorldOnly = classSpec.WorldOnly,
+                    Version = classSpec?.Version ?? structSpec!.Version,
+                    Base = isStruct ? "" : TypeSpelling(bases[0]),
+                    Abstract = abstractType || (classSpec?.Abstract ?? false),
+                    WorldOnly = classSpec?.WorldOnly ?? false,
                     Header = owner.Include,
-                    Private = owner.Private
+                    Private = owner.Private,
+                    IsStruct = isStruct
                 };
                 JsonElement[] members = Children(node).ToArray();
                 bool generatedBody = members.Any(member => Annotation(member, "rocks.generated") is not null);
@@ -615,7 +625,9 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
                         access = Text(member, "access");
                     }
 
-                    if (memberKind == "CXXMethodDecl" && memberName == "Trace")
+                    // 클래스의 Trace는 생성 코드가 만든다. struct의 Trace는 GeneratedType<S>::Trace라 struct 자신의
+                    // 멤버 함수와 겹치지 않는다.
+                    if (!isStruct && memberKind == "CXXMethodDecl" && memberName == "Trace")
                     {
                         throw new MetadataException($"{qualified}: manual Trace conflicts with complete generated field tracing");
                     }
@@ -623,6 +635,20 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
                     if (memberKind == "VarDecl" && HasFieldAnnotation(member))
                     {
                         throw new MetadataException($"{qualified}: static fields cannot carry reflected field annotations");
+                    }
+
+                    // struct의 Migrate(메서드·함수 템플릿, 오버로드 포함)는 생성 Ops가 `&S::Migrate`로 연결한다. 접근·
+                    // 시그니처를 추측하지 않고 생성 코드 컴파일이 확인한다 — private이면 friend인 GeneratedType이
+                    // 접근하도록 ROCKS_GENERATED_BODY가 필요하다.
+                    if (isStruct && memberName == "Migrate" && memberKind is ("CXXMethodDecl" or "FunctionTemplateDecl"))
+                    {
+                        if (access != "public" && !generatedBody)
+                        {
+                            throw new MetadataException($"{qualified}::Migrate: private/protected Migrate requires ROCKS_GENERATED_BODY",
+                                hint: "Make Migrate public or add ROCKS_GENERATED_BODY() to the struct so the generated registration can take its address.");
+                        }
+
+                        model.HasMigrate = true;
                     }
 
                     if (memberKind != "FieldDecl")
@@ -668,7 +694,7 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
                             model.WorldOnlyNatives.Add((symbol, worldOnlyPath, currentSite));
                         }
 
-                        model.NativeMembers.Add(memberName);
+                        model.NativeMembers.Add(new NativeMemberModel { Name = memberName, Spelling = nativeType, Site = currentSite });
                         continue;
                     }
 
@@ -697,7 +723,7 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
                 classes.Add(qualified, model);
             }
 
-            // 생성 특수화와 집계 함수가 바깥에서 이름을 쓰므로 클래스 안의 리플렉션 enum은 public이어야 한다.
+            // 생성 특수화와 집계 함수가 바깥에서 이름을 쓰므로 클래스 안의 리플렉션 enum·class·struct는 public이어야 한다.
             string childAccess = Text(node, "tagUsed") == "class" ? "private" : "public";
             foreach (JsonElement child in Children(node))
             {
@@ -712,6 +738,14 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
                     UpdateSite(child);
                     throw new MetadataException($"{qualified}::{Text(child, "name")}: a reflected enum nested in a class must be public", "RMC2401",
                         "Declare the nested ROCKS_ENUM in a public section or move it to namespace scope.");
+                }
+
+                if (childKind == "CXXRecordDecl" && childAccess != "public" && prefixClasses.TryGetValue(Text(child, "id"), out PrefixBinding? nested))
+                {
+                    UpdateSite(child);
+                    string macro = PrefixSourceVerifier.Macro(nested.Struct ? PrefixMarker.Struct : PrefixMarker.Class);
+                    throw new MetadataException($"{qualified}::{Text(child, "name")}: a reflected {PrefixSourceVerifier.Noun(nested.Struct ? PrefixMarker.Struct : PrefixMarker.Class)} nested in a class must be public",
+                        hint: $"Declare the nested {macro} type in a public section or move it to namespace scope.");
                 }
 
                 if (childKind is "CXXRecordDecl" or "ClassTemplateDecl" or "EnumDecl")
@@ -963,7 +997,7 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
         return false;
     }
 
-    // ROCKS_CLASS 마커는 바로 뒤의 완전한 class/struct에, ROCKS_ENUM 마커는 바로 뒤의 enum 정의에만 결합한다. lexical scope·실제 파일과
+    // ROCKS_CLASS·ROCKS_STRUCT 마커는 바로 뒤의 완전한 class/struct에, ROCKS_ENUM 마커는 바로 뒤의 enum 정의에만 결합한다. lexical scope·실제 파일과
     // 비활성 전처리 영역을 확인하지 않은 채 AST 이웃만 믿으면 다른 타입을 리플렉션할 수 있다.
     private void BindPrefixMarkers(JsonElement parent)
     {
@@ -994,44 +1028,63 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
 
                     JsonElement enumTarget = children[index + 1];
                     SourceSite enumMarkerSite = currentSite;
-                    VerifyPrefixSource(enumMarked[0], enumTarget, enumeration: true);
+                    VerifyPrefixSource(enumMarked[0], enumTarget, PrefixMarker.Enum);
                     if (!prefixEnums.TryAdd(Text(enumTarget, "id"), new PrefixBinding(Annotation(enumMarked[0], "rocks.enum.marker")!, enumMarkerSite)))
                     {
                         throw new MetadataException("duplicate ROCKS_ENUM marker for the same enum");
                     }
                 }
 
-                JsonElement[] marked = Children(marker).Where(child =>
-                    Annotation(child, "rocks.class.marker") is not null).ToArray();
-                if (marked.Length != 0)
+                // ROCKS_CLASS·ROCKS_STRUCT 마커는 같은 규칙으로 바로 뒤의 완전한 class/struct 정의에 결합한다. 한
+                // 레코드에는 둘 중 하나만 붙는다.
+                foreach (PrefixMarker kind in new[] { PrefixMarker.Class, PrefixMarker.Struct })
                 {
+                    string annotation = kind == PrefixMarker.Struct ? "rocks.struct.marker" : "rocks.class.marker";
+                    string macro = PrefixSourceVerifier.Macro(kind);
+                    JsonElement[] marked = Children(marker).Where(child =>
+                        Annotation(child, annotation) is not null).ToArray();
+                    if (marked.Length == 0)
+                    {
+                        continue;
+                    }
+
                     UpdateSite(marked[0]);
                     string parentKind = Text(parent, "kind");
                     if (marked.Length != 1 || Text(marker, "name").Length != 0 ||
                         parentKind is not ("TranslationUnitDecl" or "NamespaceDecl" or "CXXRecordDecl"))
                     {
-                        throw new MetadataException("ROCKS_CLASS marker must be a standalone declaration in a namespace or class scope");
+                        throw new MetadataException($"{macro} marker must be a standalone declaration in a namespace or class scope");
+                    }
+
+                    // 마커를 겹쳐 쓰면 첫 마커의 바로 다음 선언이 다른 레코드 마커다.
+                    if (index + 1 < children.Length && IsRecordMarker(children[index + 1]))
+                    {
+                        throw new MetadataException($"{macro} cannot be stacked with another ROCKS_CLASS or ROCKS_STRUCT marker; a record takes exactly one",
+                            hint: "Keep exactly one ROCKS_CLASS (Object type) or ROCKS_STRUCT (value type) immediately before the definition.");
                     }
 
                     if (index + 1 >= children.Length || Text(children[index + 1], "kind") != "CXXRecordDecl" ||
                         !Flag(children[index + 1], "completeDefinition") ||
                         Text(children[index + 1], "tagUsed") is not ("class" or "struct"))
                     {
-                        throw new MetadataException("ROCKS_CLASS must be immediately followed by a complete class or struct definition",
-                            hint: "Place ROCKS_CLASS immediately before its class definition; put both inside the same #if block.");
+                        throw new MetadataException($"{macro} must be immediately followed by a complete class or struct definition",
+                            hint: $"Place {macro} immediately before its class or struct definition; put both inside the same #if block.");
                     }
 
                     JsonElement target = children[index + 1];
                     if (Annotation(target, "rocks.type") is not null)
                     {
-                        throw new MetadataException("ROCKS_CLASS prefix marker and direct rocks.type annotation cannot both annotate the same class");
+                        throw new MetadataException($"{macro} prefix marker and direct rocks.type annotation cannot both annotate the same class");
                     }
 
                     SourceSite markerSite = currentSite;
-                    VerifyPrefixSource(marked[0], target);
-                    if (!prefixClasses.TryAdd(Text(target, "id"), new PrefixBinding(Annotation(marked[0], "rocks.class.marker")!, markerSite)))
+                    VerifyPrefixSource(marked[0], target, kind);
+                    PrefixBinding binding = new(Annotation(marked[0], annotation)!, markerSite, kind == PrefixMarker.Struct);
+                    if (!prefixClasses.TryAdd(Text(target, "id"), binding))
                     {
-                        throw new MetadataException("duplicate ROCKS_CLASS marker for the same class");
+                        throw new MetadataException(prefixClasses[Text(target, "id")].Struct != binding.Struct
+                            ? "a record takes either ROCKS_CLASS or ROCKS_STRUCT, not both"
+                            : $"duplicate {macro} marker for the same record");
                     }
                 }
             }
@@ -1040,10 +1093,15 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
         }
     }
 
-    private void VerifyPrefixSource(JsonElement marker, JsonElement target, bool enumeration = false)
+    // ROCKS_CLASS·ROCKS_STRUCT 마커(마커 enum 정의)인지다.
+    private static bool IsRecordMarker(JsonElement node) =>
+        Text(node, "kind") == "EnumDecl" && Children(node).Any(child =>
+            Annotation(child, "rocks.class.marker") is not null || Annotation(child, "rocks.struct.marker") is not null);
+
+    private void VerifyPrefixSource(JsonElement marker, JsonElement target, PrefixMarker kind = PrefixMarker.Class)
     {
-        string macro = enumeration ? "ROCKS_ENUM" : "ROCKS_CLASS";
-        string noun = enumeration ? "enum" : "class";
+        string macro = PrefixSourceVerifier.Macro(kind);
+        string noun = PrefixSourceVerifier.Noun(kind);
         if (!locations.TryGetValue(Text(marker, "id"), out var markLocation) ||
             !locations.TryGetValue(Text(target, "id"), out var targetLocation) ||
             markLocation.File is null || targetLocation.File is null ||
@@ -1069,7 +1127,7 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
             sourceBytes.Add(markLocation.File, bytes);
         }
 
-        PrefixSourceVerifier.Verify(bytes, markLocation.Offset, end, enumeration);
+        PrefixSourceVerifier.Verify(bytes, markLocation.Offset, end, kind);
     }
 
     private void ValidateAnnotationPlacement(JsonElement node, bool reflectedOwner,
@@ -1087,17 +1145,17 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
         object?[]? generated = Annotation(node, "rocks.generated");
         if (classAnnotation && (kind != "CXXRecordDecl" || !Flag(node, "completeDefinition")))
         {
-            throw new MetadataException("ROCKS_CLASS must annotate a complete class definition");
+            throw new MetadataException("ROCKS_CLASS/ROCKS_STRUCT must annotate a complete class definition");
         }
 
         if (fieldAnnotation && (kind != "FieldDecl" || !reflectedOwner))
         {
-            throw new MetadataException("ROCKS_PROPERTY must annotate a nonstatic data field owned by a reflected CLASS");
+            throw new MetadataException("ROCKS_PROPERTY must annotate a nonstatic data field owned by a reflected CLASS or STRUCT");
         }
 
         if (Annotation(node, "rocks.field.native") is not null && (kind != "FieldDecl" || !reflectedOwner))
         {
-            throw new MetadataException("ROCKS_NATIVE must annotate a nonstatic data field owned by a reflected CLASS");
+            throw new MetadataException("ROCKS_NATIVE must annotate a nonstatic data field owned by a reflected CLASS or STRUCT");
         }
 
         if (Annotation(node, "rocks.enumerator") is not null && (kind != "EnumConstantDecl" || !reflectedEnum))
@@ -1123,8 +1181,8 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
                 Text(node, "name") != "rocksGeneratedAccessMarker" ||
                 Text(node, "storageClass") != "static" || signature != "void () noexcept" || generated.Length != 0)
             {
-                throw new MetadataException("ROCKS_GENERATED_BODY marker must be a static noexcept marker directly owned by a reflected CLASS",
-                    hint: "Place exactly one ROCKS_GENERATED_BODY() directly inside a reflected class; do not hand-write or attach its annotation elsewhere.");
+                throw new MetadataException("ROCKS_GENERATED_BODY marker must be a static noexcept marker directly owned by a reflected CLASS or STRUCT",
+                    hint: "Place exactly one ROCKS_GENERATED_BODY() directly inside a reflected class or struct; do not hand-write or attach its annotation elsewhere.");
             }
 
             VerifyGeneratedBodySource(node, directOwnerFile);

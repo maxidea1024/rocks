@@ -26,20 +26,25 @@ internal static class SelfTests
         {
             void CheckGap(string gap, bool allowed)
             {
-                foreach (string name in new[] { "ROCKS_CLASS" })
+                foreach ((string name, PrefixMarker marker) in new[] { ("ROCKS_CLASS", PrefixMarker.Class), ("ROCKS_STRUCT", PrefixMarker.Struct) })
                 {
                     string source = name + "()" + gap + "class Object {};";
                     byte[] bytes = Encoding.UTF8.GetBytes(source);
                     int end = Encoding.UTF8.GetByteCount(source[..source.IndexOf("class Object", StringComparison.Ordinal)]);
                     if (allowed)
                     {
-                        PrefixSourceVerifier.Verify(bytes, 0, end);
+                        PrefixSourceVerifier.Verify(bytes, 0, end, marker);
                     }
                     else
                     {
-                        Verify.Throws<MetadataException>(() => PrefixSourceVerifier.Verify(bytes, 0, end));
+                        Verify.Throws<MetadataException>(() => PrefixSourceVerifier.Verify(bytes, 0, end, marker));
                     }
                 }
+
+                // 마커 종류와 원문 매크로가 다르면(ROCKS_STRUCT 자리의 ROCKS_CLASS) 거부한다.
+                string mismatched = "ROCKS_CLASS()" + gap + "class Object {};";
+                int mismatchedEnd = Encoding.UTF8.GetByteCount(mismatched[..mismatched.IndexOf("class Object", StringComparison.Ordinal)]);
+                Verify.Throws<MetadataException>(() => PrefixSourceVerifier.Verify(Encoding.UTF8.GetBytes(mismatched), 0, mismatchedEnd, PrefixMarker.Struct));
             }
 
             CheckGap("\n// ordinary \\ path #if\n", true);

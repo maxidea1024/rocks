@@ -1,24 +1,47 @@
 namespace Rocks.MetaCompiler;
 
-// 전처리된 클래스(또는 enum)와 마커 사이 원문에 허용된 토큰만 있는지 보수적으로 확인한다. enumeration이면
-// ROCKS_ENUM 마커와 enum 정의다.
+// 선언 앞 마커의 종류다: ROCKS_CLASS·ROCKS_STRUCT는 class/struct 정의, ROCKS_ENUM은 enum 정의에 결합한다.
+internal enum PrefixMarker
+{
+    Class,
+    Struct,
+    Enum
+}
+
+// 전처리된 클래스(또는 struct·enum)와 마커 사이 원문에 허용된 토큰만 있는지 보수적으로 확인한다.
 internal static class PrefixSourceVerifier
 {
-    internal static void Verify(byte[] bytes, int start, int end, bool enumeration = false)
+    internal static string Macro(PrefixMarker marker) => marker switch
     {
+        PrefixMarker.Struct => "ROCKS_STRUCT",
+        PrefixMarker.Enum => "ROCKS_ENUM",
+        _ => "ROCKS_CLASS"
+    };
+
+    // 마커가 결합하는 선언의 이름(진단용)이다.
+    internal static string Noun(PrefixMarker marker) => marker switch
+    {
+        PrefixMarker.Struct => "struct",
+        PrefixMarker.Enum => "enum",
+        _ => "class"
+    };
+
+    internal static void Verify(byte[] bytes, int start, int end, PrefixMarker marker = PrefixMarker.Class)
+    {
+        bool enumeration = marker == PrefixMarker.Enum;
         int cursor = start;
         if (cursor < 0 || end <= cursor || end > bytes.Length)
         {
-            throw new MetadataException("Class or enum marker location is unknown or ambiguous",
-                hint: "Write ROCKS_CLASS or ROCKS_ENUM directly in the source.");
+            throw new MetadataException("Class, struct or enum marker location is unknown or ambiguous",
+                hint: "Write ROCKS_CLASS, ROCKS_STRUCT or ROCKS_ENUM directly in the source.");
         }
 
         ReadOnlySpan<byte> remainder = bytes.AsSpan(cursor, end - cursor);
-        string macro = enumeration ? "ROCKS_ENUM" : "ROCKS_CLASS";
+        string macro = Macro(marker);
         if (!remainder.StartsWith(System.Text.Encoding.ASCII.GetBytes(macro)))
         {
             throw new MetadataException($"{macro} marker is macro-generated or ambiguous",
-            hint: "Write the class or enum macro directly in the source; do not wrap it in another macro.");
+            hint: "Write the class, struct or enum macro directly in the source; do not wrap it in another macro.");
         }
 
         cursor += macro.Length;
@@ -166,7 +189,7 @@ internal static class PrefixSourceVerifier
             }
         }
 
-        MetadataException InvalidGap() => new($"{macro} is not immediately before its {(enumeration ? "enum" : "class")} in source",
-            hint: "Keep only whitespace and comments between the class macro and class; put both inside the same conditional block. Wrapper macros, raw strings and line splices are unsupported.");
+        MetadataException InvalidGap() => new($"{macro} is not immediately before its {Noun(marker)} in source",
+            hint: $"Keep only whitespace and comments between {macro} and its {Noun(marker)}; put both inside the same conditional block. Wrapper macros, raw strings and line splices are unsupported.");
     }
 }

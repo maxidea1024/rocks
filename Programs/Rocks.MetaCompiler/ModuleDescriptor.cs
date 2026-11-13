@@ -12,6 +12,11 @@ internal static class ModuleDescriptor
     private static readonly string[] TypeKeys =
         ["kind", "name", "id", "version", "flags", "base", "header", "visibility", "fields"];
 
+    // struct 항목: base 대신 생성 형질 flags(ContainsStrongReference·RequiresWorldOnlyOwner)와 binds(Binds 실제
+    // 타입의 Clang 정규 철자 — B4c 전까지 항상 "")다(Docs/Design/ReflectionFoundations.ko.md 1.4·4.6절).
+    private static readonly string[] StructKeys =
+        ["kind", "name", "id", "version", "header", "visibility", "flags", "binds", "fields"];
+
     // enum 항목: 필드·base 대신 underlying·열거자다(Docs/Design/ReflectionFoundations.ko.md 3.4절).
     private static readonly string[] EnumKeys =
         ["kind", "name", "id", "header", "visibility", "underlying", "flags", "toolPrefix", "values"];
@@ -39,6 +44,12 @@ internal static class ModuleDescriptor
                     continue;
                 }
 
+                if (type.IsStruct)
+                {
+                    WriteStruct(json, type);
+                    continue;
+                }
+
                 json.WriteStartObject();
                 json.WriteString("kind", "class");
                 json.WriteString("name", type.Name);
@@ -59,53 +70,7 @@ internal static class ModuleDescriptor
                 json.WriteString("base", type.Base);
                 json.WriteString("header", type.Header);
                 json.WriteString("visibility", type.Private ? "private" : "public");
-                json.WriteStartArray("fields");
-                foreach (FieldModel field in type.Fields)
-                {
-                    json.WriteStartObject();
-                    json.WriteString("owner", field.Owner);
-                    json.WriteString("name", field.Name);
-                    json.WriteString("id", field.Id);
-                    json.WriteString("fieldKind", field.IsReference ? "ObjectReference" : "Value");
-                    json.WriteStartObject("value");
-                    json.WriteString("kind", field.Kind);
-                    if (field.HasTargetType)
-                    {
-                        json.WriteString("type", field.ReferenceId ?? "");
-                    }
-
-                    json.WriteEndObject();
-                    json.WriteNull("element");
-                    json.WriteStartArray("flags");
-                    if (field.Spec.Transient)
-                    {
-                        json.WriteStringValue("Transient");
-                    }
-
-                    if (field.Spec.ReadOnly)
-                    {
-                        json.WriteStringValue("ReadOnly");
-                    }
-
-                    if (field.Spec.EditorOnly)
-                    {
-                        json.WriteStringValue("EditorOnly");
-                    }
-
-                    if (field.Spec.Required)
-                    {
-                        json.WriteStringValue("Required");
-                    }
-
-                    json.WriteEndArray();
-                    json.WriteString("toolName", field.EffectiveToolName);
-                    json.WriteString("category", field.Spec.Category);
-                    json.WriteString("displayName", field.Spec.DisplayName);
-                    json.WriteNumber("maxElements", 0);
-                    json.WriteEndObject();
-                }
-
-                json.WriteEndArray();
+                WriteFields(json, type);
                 json.WriteEndObject();
             }
 
@@ -115,6 +80,84 @@ internal static class ModuleDescriptor
 
         string text = new UTF8Encoding(false, true).GetString(stream.ToArray()).Replace("\r\n", "\n", StringComparison.Ordinal) + "\n";
         return new UTF8Encoding(false, true).GetBytes(text);
+    }
+
+    private static void WriteStruct(Utf8JsonWriter json, ClassModel type)
+    {
+        json.WriteStartObject();
+        json.WriteString("kind", "struct");
+        json.WriteString("name", type.Name);
+        json.WriteString("id", type.Id);
+        json.WriteNumber("version", type.Version);
+        json.WriteString("header", type.Header);
+        json.WriteString("visibility", type.Private ? "private" : "public");
+        json.WriteStartArray("flags");
+        if (type.ContainsStrongReference)
+        {
+            json.WriteStringValue("ContainsStrongReference");
+        }
+
+        if (type.RequiresWorldOnlyOwner)
+        {
+            json.WriteStringValue("RequiresWorldOnlyOwner");
+        }
+
+        json.WriteEndArray();
+        json.WriteString("binds", "");
+        WriteFields(json, type);
+        json.WriteEndObject();
+    }
+
+    // 클래스·struct의 fields 배열이다(클래스는 상속 포함 전체, 생성 순서 그대로).
+    private static void WriteFields(Utf8JsonWriter json, ClassModel type)
+    {
+        json.WriteStartArray("fields");
+        foreach (FieldModel field in type.Fields)
+        {
+            json.WriteStartObject();
+            json.WriteString("owner", field.Owner);
+            json.WriteString("name", field.Name);
+            json.WriteString("id", field.Id);
+            json.WriteString("fieldKind", field.IsReference ? "ObjectReference" : "Value");
+            json.WriteStartObject("value");
+            json.WriteString("kind", field.Kind);
+            if (field.HasTargetType)
+            {
+                json.WriteString("type", field.ReferenceId ?? "");
+            }
+
+            json.WriteEndObject();
+            json.WriteNull("element");
+            json.WriteStartArray("flags");
+            if (field.Spec.Transient)
+            {
+                json.WriteStringValue("Transient");
+            }
+
+            if (field.Spec.ReadOnly)
+            {
+                json.WriteStringValue("ReadOnly");
+            }
+
+            if (field.Spec.EditorOnly)
+            {
+                json.WriteStringValue("EditorOnly");
+            }
+
+            if (field.Spec.Required)
+            {
+                json.WriteStringValue("Required");
+            }
+
+            json.WriteEndArray();
+            json.WriteString("toolName", field.EffectiveToolName);
+            json.WriteString("category", field.Spec.Category);
+            json.WriteString("displayName", field.Spec.DisplayName);
+            json.WriteNumber("maxElements", 0);
+            json.WriteEndObject();
+        }
+
+        json.WriteEndArray();
     }
 
     private static void WriteEnum(Utf8JsonWriter json, ClassModel type)
@@ -232,8 +275,9 @@ internal static class ModuleDescriptor
                 continue;
             }
 
-            RequireKeys(type, TypeKeys, Invalid);
-            if (typeKind.GetString() != "class")
+            bool isStruct = typeKind.GetString() == "struct";
+            RequireKeys(type, isStruct ? StructKeys : TypeKeys, Invalid);
+            if (!isStruct && typeKind.GetString() != "class")
             {
                 throw Invalid("unsupported type kind");
             }
@@ -241,7 +285,8 @@ internal static class ModuleDescriptor
             string name = Name(type.GetProperty("name"), QualifiedName, "type name");
             string id = Hex(type.GetProperty("id"), Invalid);
             string[] flags = type.GetProperty("flags").EnumerateArray().Select(flag => flag.GetString() ?? "").ToArray();
-            if (flags.Any(flag => flag is not ("Abstract" or "WorldOnly")) || flags.Distinct(StringComparer.Ordinal).Count() != flags.Length)
+            bool KnownFlag(string flag) => isStruct ? flag is "ContainsStrongReference" or "RequiresWorldOnlyOwner" : flag is "Abstract" or "WorldOnly";
+            if (flags.Any(flag => !KnownFlag(flag)) || flags.Distinct(StringComparer.Ordinal).Count() != flags.Length)
             {
                 throw Invalid("unknown or duplicate type flag in " + name);
             }
@@ -252,6 +297,12 @@ internal static class ModuleDescriptor
                 throw Invalid("version of " + name);
             }
 
+            // Binds(Core 값 타입 결합)는 B4c에서 받는다. 지금은 빈 문자열만 받는다.
+            if (isStruct && (type.GetProperty("binds").ValueKind != JsonValueKind.String || type.GetProperty("binds").GetString() != ""))
+            {
+                throw Invalid("binds of " + name + " is not supported yet");
+            }
+
             string header = Header(type, name);
             ClassModel model = new()
             {
@@ -259,13 +310,16 @@ internal static class ModuleDescriptor
                 Id = id,
                 Site = new(descriptorPath, 1),
                 Version = version,
-                Base = Name(type.GetProperty("base"), QualifiedName, "base of " + name),
+                Base = isStruct ? "" : Name(type.GetProperty("base"), QualifiedName, "base of " + name),
                 Abstract = flags.Contains("Abstract"),
                 WorldOnly = flags.Contains("WorldOnly"),
                 Header = header,
                 Private = isPrivate,
                 Imported = true,
-                Module = module
+                Module = module,
+                IsStruct = isStruct,
+                ContainsStrongReference = flags.Contains("ContainsStrongReference"),
+                RequiresWorldOnlyOwner = flags.Contains("RequiresWorldOnlyOwner")
             };
             List<FieldModel> fields = [];
             foreach (JsonElement field in type.GetProperty("fields").EnumerateArray())
@@ -319,20 +373,26 @@ internal static class ModuleDescriptor
                 if (targetType)
                 {
                     string target = value.GetProperty("type").GetString() ?? throw Invalid("reference target");
-                    // Enum 필드는 enum ID가 있어야 한다(참조의 ""는 Object다).
-                    referenceId = target.Length == 0 && kind != "Enum" ? null : Hex(value.GetProperty("type"), Invalid);
+                    // Enum·Struct 필드는 대상 ID가 있어야 한다(참조의 ""는 Object다).
+                    referenceId = target.Length == 0 && !FieldModel.KindRequiresTargetId(kind) ? null : Hex(value.GetProperty("type"), Invalid);
                 }
 
                 string fieldName = Name(field.GetProperty("name"), Identifier, "field name");
                 // toolName은 실효 도구 이름이다(지정하지 않았으면 필드 이름).
                 string toolName = Name(field.GetProperty("toolName"), Identifier, "toolName of " + fieldName);
+                string owner = Name(field.GetProperty("owner"), QualifiedName, "field owner");
+                // struct는 상속이 없으므로 모든 필드의 owner가 그 struct다.
+                if (isStruct && owner != name)
+                {
+                    throw Invalid($"owner of struct field {name}::{fieldName}");
+                }
 
                 fields.Add(new FieldModel
                 {
                     Id = Hex(field.GetProperty("id"), Invalid),
                     Site = new(descriptorPath, 1),
                     Name = fieldName,
-                    Owner = Name(field.GetProperty("owner"), QualifiedName, "field owner"),
+                    Owner = owner,
                     NativeSpelling = "",
                     Spec = new(fieldFlags.Contains("Transient"), fieldFlags.Contains("ReadOnly"),
                         field.GetProperty("category").GetString() ?? throw Invalid("category"),

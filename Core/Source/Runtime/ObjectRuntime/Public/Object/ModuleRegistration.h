@@ -61,6 +61,18 @@ public:
     //                                     RuntimeEnumOps{NativeTypeKey<TextureGroup>(), module});
     Result<bool> RegisterEnumIfAbsent(const EnumSchema& schema, RuntimeEnumOps ops) noexcept;
 
+    // 리플렉션 struct에 대한 RegisterIfAbsent다(TypeRegistry::RegisterStruct·AcquireValueType).
+    // 같은 ID가 같은 native struct(ops.nativeType)로 이미 등록되어 있으면 lease를 붙잡고 false,
+    // 다른 native 타입이면 AlreadyExists, 같은 ID의 다른 종류(클래스·enum) 레코드가 있으면
+    // TypeMismatch다. 그 밖의 실패는 할당(OutOfMemory)과 RegisterStruct의 오류(멤버 struct·enum
+    // 미등록 NotFound 등)다. 실패하면 기록과 Registry 상태는 호출 전과 같다. 집계 함수는 enum 다음,
+    // 클래스 전에 struct를 멤버 struct 먼저(의존 위상 순서) 등록한다.
+    //
+    // 사용 예(생성 집계 함수가 내는 형태):
+    //   registration.RegisterStructIfAbsent(GeneratedType<BulkDataRef>::Schema(),
+    //                                       GeneratedType<BulkDataRef>::Ops(module));
+    Result<bool> RegisterStructIfAbsent(const TypeSchema& schema, RuntimeStructOps ops) noexcept;
+
     // mark(Size()로 얻은 값) 이후의 기록을 역순으로 되돌린다: 붙잡은 lease는 놓고, 등록한 타입은
     // 해제한다. 해제가 실패하면(그 타입의 객체나 다른 기록의 lease가 남아 Busy 등) 거기서 멈추고
     // 아직 되돌리지 못한 기록을 보존한 채 오류를 돌려준다(다시 호출할 수 있다). mark가 Size()보다

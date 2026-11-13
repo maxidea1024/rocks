@@ -56,10 +56,11 @@ internal static class CppEmitter
 
     private static string View(string text) => $"Span<const char>({Label(text)}, {Utf8.GetByteCount(text)})";
 
-    // 모듈 집계 헤더다. 의존 모듈(import)의 RegisterModuleTypes를 먼저 부르고 이 모듈 타입을 enum 먼저, 클래스는
-    // base 먼저 등록한다(같은 ID·같은 native 타입이 이미 있으면 건너뛴다). 실패하면 이 호출이 등록한 것을 역순으로
-    // 해제한다. private 집계는 public 집계를(public 헤더가 없으면 의존 모듈 집계를 직접) 먼저 부른 뒤 private
-    // 타입을 등록한다. 모듈 이름이 rocks의 이름(Result 등)을 가리지 않도록 모든 이름을 ::rocks::로 한정한다.
+    // 모듈 집계 헤더다. 의존 모듈(import)의 RegisterModuleTypes를 먼저 부르고 이 모듈 타입을 enum → struct(쓰는
+    // struct 먼저 — 순위·이름 순) → 클래스(base 먼저) 순으로 등록한다(같은 ID·같은 native 타입이 이미 있으면
+    // 건너뛴다). 실패하면 이 호출이 등록한 것을 역순으로 해제한다. private 집계는 public 집계를(public 헤더가
+    // 없으면 의존 모듈 집계를 직접) 먼저 부른 뒤 private 타입을 등록한다. 모듈 이름이 rocks의 이름(Result 등)을
+    // 가리지 않도록 모든 이름을 ::rocks::로 한정한다.
     public static string EmitAggregate(string module, SchemaModel schema, IReadOnlyList<ModuleInput> inputs,
         IReadOnlyList<string> importedModules, bool privateTypes)
     {
@@ -114,6 +115,12 @@ internal static class CppEmitter
                 continue;
             }
 
+            if (type.IsStruct)
+            {
+                Line($"if (auto added = registration.RegisterStructIfAbsent(::rocks::GeneratedType<::{type.Name}>::Schema(), ::rocks::GeneratedType<::{type.Name}>::Ops(module)); !added) return fail(added.Error());");
+                continue;
+            }
+
             Line($"if (auto added = registration.RegisterIfAbsent(::rocks::GeneratedType<::{type.Name}>::Schema(), ::rocks::GeneratedType<::{type.Name}>::Ops(module)); !added) return fail(added.Error());");
         }
 
@@ -142,31 +149,42 @@ internal static class CppEmitter
         Line("#include <Meta/GeneratedType.h>");
         Line("#include <Object/GeneratedFieldAccess.h>");
         Line("#include <Object/GeneratedFieldCodec.h>");
-        // 다른 헤더에 선언된 리플렉션 enum을 필드로 쓰면 그 enum의 GeneratedType이 먼저 보여야 한다(생성 접근기가
-        // GeneratedType<E>::Id·IsDeclared로 enum을 알아본다).
-        IEnumerable<string> enumHeaders = schema.Ordered.Where(type => type.Header == include)
-            .SelectMany(type => type.Fields)
-            .Where(field => field.Kind == "Enum" && field.Reference is not null)
-            .Select(field => schema.Find(field.Reference!).Header)
+        // 다른 헤더(같은 모듈·다른 모듈)에 선언된 리플렉션 enum·struct를 필드(상속 필드 포함)나 NATIVE 멤버의 직접
+        // 타입으로 쓰면 그 타입의 GeneratedType이 먼저 보여야 한다(생성 접근기가 GeneratedType<T>::Id·IsDeclared·
+        // ContainsStrongReference로 알아본다). 같은 특수화를 두 번 정의하지 않도록 그 타입의 생성 헤더를 include한다.
+        ClassModel[] own = schema.Ordered.Where(type => type.Header == include).ToArray();
+        IEnumerable<string> valueHeaders = own.SelectMany(type => type.Fields)
+            .Where(field => FieldModel.KindRequiresTargetId(field.Kind) && field.Reference is not null)
+            .Select(field => field.Reference!)
+            .Concat(own.SelectMany(type => type.NativeMembers).Where(native => native.Struct is not null).Select(native => native.Struct!))
+            .Select(name => schema.Find(name).Header)
             .Where(header => header != include)
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal);
-        foreach (string header in enumHeaders)
+        foreach (string header in valueHeaders)
         {
             Line($"#include <{CompilerOptions.GeneratedSpelling(header)}>");
         }
 
-        if (schema.Ordered.Any(type => type.Header == include && type.NativeMembers.Count != 0))
+        if (own.Any(type => type.NativeMembers.Count != 0))
         {
             Line("#include <Object/NativeMemberTraits.h>");
         }
 
         Line("namespace rocks {");
-        foreach (ClassModel type in schema.Ordered.Where(type => type.Header == include))
+        // 특수화는 schema.Ordered 순서다: enum, struct(PROPERTY·NATIVE로 쓰는 struct 먼저), 클래스(base 먼저). 같은 헤더 안에서도 쓰는
+        // 타입의 특수화가 먼저 나온다.
+        foreach (ClassModel type in own)
         {
             if (type.IsEnum)
             {
                 EmitEnum(type, Line);
+                continue;
+            }
+
+            if (type.IsStruct)
+            {
+                EmitStruct(type, Line);
                 continue;
             }
 
@@ -175,31 +193,30 @@ internal static class CppEmitter
             Line($"template <> struct GeneratedType<{native}> {{");
             // ROCKS_NATIVE 멤버는 스키마에 넣지 않는다. MetaCompiler의 AST 재귀 검사(RMC2205·2206)를 직접 타입에
             // 대해 컴파일러가 한 번 더 확인한다(GeneratedType은 GENERATED_BODY로 private 멤버에도 접근한다).
-            foreach (string member in type.NativeMembers)
+            foreach (NativeMemberModel member in type.NativeMembers)
             {
-                string memberType = $"decltype({native}::{member})";
-                Line($"static_assert(!IsNativeStrongReference<{memberType}>, \"ROCKS_NATIVE member {type.Name}::{member} must not hold a strong object reference (RMC2205)\");");
+                string memberType = $"decltype({native}::{member.Name})";
+                Line($"static_assert(!IsNativeStrongReference<{memberType}>, \"ROCKS_NATIVE member {type.Name}::{member.Name} must not hold a strong object reference (RMC2205)\");");
                 if (!type.WorldOnly)
                 {
-                    Line($"static_assert(!RequiresWorldOnlyOwner<{memberType}>, \"ROCKS_NATIVE member {type.Name}::{member} requires a WorldOnly owner (RMC2206)\");");
+                    Line($"static_assert(!RequiresWorldOnlyOwner<{memberType}>, \"ROCKS_NATIVE member {type.Name}::{member.Name} requires a WorldOnly owner (RMC2206)\");");
+                }
+
+                EmitNativeStructAsserts(type, member, !type.WorldOnly, Line);
+            }
+
+            // WorldOnly가 아닌 클래스는 struct 필드(상속 포함)의 생성 형질을 직접 확인한다(import flags를 믿지 않는다).
+            if (!type.WorldOnly)
+            {
+                foreach (string structure in type.Fields.Where(field => field.IsStruct).Select(field => field.Reference!).Distinct(StringComparer.Ordinal))
+                {
+                    Line($"static_assert(!GeneratedType<::{structure}>::RequiresWorldOnlyOwner, \"struct {structure} requires a WorldOnly owner; {type.Name} is not WorldOnly (RMC2206)\");");
                 }
             }
 
             Line($"static constexpr TypeId Id() noexcept {{ return {GuidValue(type.Id)}; }}");
             Line("static const TypeSchema& Schema() noexcept {");
-            if (type.Fields.Count != 0)
-            {
-                Line("static const FieldSchema fields[] = {");
-                foreach (FieldModel field in type.Fields)
-                {
-                    string? targetId = field.HasTargetType ? field.ReferenceId : null;
-                    string kind = field.IsReference ? "ObjectReference" : "Value";
-                    Line($"{{{GuidValue(field.Id)}, FieldKind::{kind}, {field.Flags}u, {View(field.Name)}, {{}}, {{ValueKind::{field.Kind}, {GuidValue(targetId)}}}, {View(field.Spec.Category)}, {View(field.Spec.DisplayName)}, {View(field.Spec.ToolName)}}},");
-                }
-
-                Line("};");
-            }
-
+            EmitFieldSchemas(type, Line);
             string fieldSpan = type.Fields.Count == 0 ? "Span<const FieldSchema>{}" : $"Span<const FieldSchema>(fields, {type.Fields.Count})";
             Line($"static const TypeSchema schema{{Id(), {type.Version}, {fieldSpan}, {View(type.Name)}, {GuidValue(baseId)}, {type.Flags}u}};");
             Line("return schema;");
@@ -213,6 +230,16 @@ internal static class CppEmitter
                 {
                     string member = $"&::{field.Owner}::{field.Name}";
                     Line($"{{{GuidValue(field.Id)},");
+                    if (field.IsStruct)
+                    {
+                        // struct 필드는 FieldValue로 표현할 수 없으므로 read·write·writeStaged가 없고(쓰기는 Unsupported —
+                        // 멤버 단위 쓰기는 B6 경로 접근) codec과 struct native 키만 싣는다(Docs/Design/
+                        // ReflectionFoundations.ko.md 4.6절).
+                        Line("nullptr, {}, nullptr,");
+                        EmitClassCodec(native, member, $", NativeTypeKey<::{field.Reference}>()", Line);
+                        continue;
+                    }
+
                     Line("+[](ObjectRegistry& registry, const ObjectAccessContext& access, ObjectHandle object, FieldValue& out) noexcept -> Result<void> {");
                     Line($"return detail::ReadGeneratedField<{native}>(registry, access, object, {member}, out); }},");
                     Line("+[](ObjectRegistry& registry, const ObjectAccessContext& access, ObjectHandle object, const FieldValue& value) noexcept -> Result<void> {");
@@ -233,14 +260,8 @@ internal static class CppEmitter
                     Line("},");
                     Line("+[](ConstructionContext& construction, ObjectHandle object, const FieldValue& value) noexcept -> Result<void> {");
                     Line($"return detail::WriteGeneratedStagedField<{native}>(construction, object, {member}, value); }},");
-                    // 그래프 저장·복원 codec(Docs/Design/ReflectionFoundations.ko.md 6.4절)이다. 문맥이 참조 wire·진단·예산을 맡으므로
-                    // 그래프 형식이 바뀌어도 이 코드를 다시 만들지 않는다.
-                    Line("+[](const RuntimeFieldOps&, ObjectRegistry& registry, const ObjectAccessContext& access, ObjectHandle object, ArchiveWriter& payload, FieldEncodeContext& context) noexcept -> Result<uint32> {");
-                    Line($"return detail::EncodeGeneratedField<{native}>(registry, access, object, {member}, payload, context); }},");
-                    Line("+[](const RuntimeFieldOps&, ConstructionContext* construction, ObjectHandle object, const FieldView& field, FieldDecodeContext& context) noexcept -> Result<void> {");
                     // Enum 필드는 정적 thunk의 enum native 키를 싣는다(등록이 value.type의 enum 레코드와 대조한다).
-                    string valueNativeType = field.Kind == "Enum" ? $", NativeTypeKey<::{field.Reference}>()" : "";
-                    Line($"return detail::DecodeGeneratedField<{native}>(construction, object, {member}, field, context); }}{valueNativeType} }},");
+                    EmitClassCodec(native, member, field.Kind == "Enum" ? $", NativeTypeKey<::{field.Reference}>()" : "", Line);
                 }
 
                 Line("};");
@@ -258,14 +279,17 @@ internal static class CppEmitter
             Line("ops.completeFieldLayout = true;");
             Line("ops.parallelTraceSafe = true;");
             Line("ops.trace = +[](const Object& object, TraceVisitor& visitor) noexcept {");
-            FieldModel[] references = type.Fields.Where(field => field.IsReference).ToArray();
-            if (references.Length != 0)
+            FieldModel[] traced = type.Fields.Where(field => field.IsReference || field.IsStruct).ToArray();
+            if (traced.Length != 0)
             {
                 Line($"const auto& typed = static_cast<const {native}&>(object);");
-                // Transient는 영속성 정책이며 strong edge의 GC 도달성에는 영향을 주지 않는다.
-                foreach (FieldModel field in references)
+                // Transient는 영속성 정책이며 strong edge의 GC 도달성에는 영향을 주지 않는다. struct 필드는 모든 struct가
+                // 내는 Trace를 부른다(참조 없는 struct는 빈 본문 — 이 람다는 비템플릿이라 if constexpr로 가를 수 없다).
+                foreach (FieldModel field in traced)
                 {
-                    Line($"visitor.Visit(typed.*(&::{field.Owner}::{field.Name}));");
+                    Line(field.IsStruct
+                        ? $"GeneratedType<::{field.Reference}>::Trace(typed.*(&::{field.Owner}::{field.Name}), visitor);"
+                        : $"visitor.Visit(typed.*(&::{field.Owner}::{field.Name}));");
                 }
             }
             else
@@ -285,6 +309,150 @@ internal static class CppEmitter
 
         Line("} // namespace rocks");
         return output.ToString();
+    }
+
+    // 클래스 필드의 그래프 저장·복원 codec 두 thunk와 함수표 끝이다(Docs/Design/ReflectionFoundations.ko.md 6.4절).
+    // 문맥이 참조 wire·진단·예산을 맡으므로 그래프 형식이 바뀌어도 이 코드를 다시 만들지 않는다. valueNativeType은
+    // Enum·Struct 필드가 싣는 ", NativeTypeKey<T>()"(그 밖은 "")다.
+    private static void EmitClassCodec(string native, string member, string valueNativeType, Action<string> Line)
+    {
+        Line("+[](const RuntimeFieldOps&, ObjectRegistry& registry, const ObjectAccessContext& access, ObjectHandle object, ArchiveWriter& payload, FieldEncodeContext& context) noexcept -> Result<uint32> {");
+        Line($"return detail::EncodeGeneratedField<{native}>(registry, access, object, {member}, payload, context); }},");
+        Line("+[](const RuntimeFieldOps&, ConstructionContext* construction, ObjectHandle object, const FieldView& field, FieldDecodeContext& context) noexcept -> Result<void> {");
+        Line($"return detail::DecodeGeneratedField<{native}>(construction, object, {member}, field, context); }}{valueNativeType} }},");
+    }
+
+    // NATIVE 멤버의 직접 타입이 리플렉션 struct면 그 struct의 생성 형질로 RMC2205(·worldOnlyCheck면 RMC2206)를
+    // 컴파일 시 한 번 더 확인한다(NativeMemberTraits는 직접 타입의 형질만 본다 — GeneratedType 탐지 특수화를 두면
+    // 생성 헤더가 없을 때 조용히 거짓이 되는 ODR 위반이라 생성 코드가 확인한다).
+    private static void EmitNativeStructAsserts(ClassModel type, NativeMemberModel member, bool worldOnlyCheck, Action<string> Line)
+    {
+        if (member.Struct is null)
+        {
+            return;
+        }
+
+        Line($"static_assert(!GeneratedType<::{member.Struct}>::ContainsStrongReference, \"ROCKS_NATIVE member {type.Name}::{member.Name} holds reference struct {member.Struct} (RMC2205)\");");
+        if (worldOnlyCheck)
+        {
+            Line($"static_assert(!GeneratedType<::{member.Struct}>::RequiresWorldOnlyOwner, \"ROCKS_NATIVE member {type.Name}::{member.Name} requires a WorldOnly owner (RMC2206)\");");
+        }
+    }
+
+    // 리플렉션 struct의 GeneratedType 특수화다(Docs/Design/ReflectionFoundations.ko.md 4.6절): 형질
+    // (ContainsStrongReference·RequiresWorldOnlyOwner)과 중첩 깊이, Id, Schema(base·클래스 플래그 없는 TypeSchema),
+    // Trace(모든 struct — 참조 없는 struct는 빈 본문), Ops(RuntimeStructOps — 멤버 codec 함수표, 참조 struct만 trace,
+    // Migrate가 있으면 migrate), Register. 형질과 깊이는 모델 값을 내되 직접 멤버의 생성 값을 포함하는지
+    // static_assert로 대조한다(import descriptor의 flags를 믿지 않는다).
+    private static void EmitStruct(ClassModel type, Action<string> Line)
+    {
+        string native = "::" + type.Name;
+        string True(bool value) => value ? "true" : "false";
+        Line($"template <> struct GeneratedType<{native}> {{");
+        Line($"static constexpr bool ContainsStrongReference = {True(type.ContainsStrongReference)};");
+        Line($"static constexpr bool RequiresWorldOnlyOwner = {True(type.RequiresWorldOnlyOwner)};");
+        Line($"static constexpr uint32 Depth = {type.Depth}u;");
+        Line($"static_assert(Depth <= ::rocks::MaxStructDepth, \"ROCKS_STRUCT {type.Name} nesting depth exceeds MaxStructDepth (RMC2303)\");");
+        foreach (string structure in type.Fields.Where(field => field.IsStruct).Select(field => field.Reference!).Distinct(StringComparer.Ordinal))
+        {
+            string member = $"GeneratedType<::{structure}>";
+            Line($"static_assert({member}::Depth < Depth, \"ROCKS_STRUCT {type.Name} nests {structure} deeper than recorded; regenerate metadata (RMC2303)\");");
+            Line($"static_assert(ContainsStrongReference || !{member}::ContainsStrongReference, \"ROCKS_STRUCT {type.Name} holds reference struct {structure}; regenerate metadata\");");
+            Line($"static_assert(RequiresWorldOnlyOwner || !{member}::RequiresWorldOnlyOwner, \"ROCKS_STRUCT {type.Name} holds struct {structure} that requires a WorldOnly owner; regenerate metadata\");");
+        }
+
+        // NATIVE 멤버는 스키마에 넣지 않는다. 강한 참조 금지(RMC2205)를 직접 타입에 대해 한 번 더 확인하고, WorldOnly
+        // 소유자 형질은 struct에서는 오류가 아니라 RequiresWorldOnlyOwner로 전파되었는지 확인한다.
+        foreach (NativeMemberModel member in type.NativeMembers)
+        {
+            string memberType = $"decltype({native}::{member.Name})";
+            Line($"static_assert(!IsNativeStrongReference<{memberType}>, \"ROCKS_NATIVE member {type.Name}::{member.Name} must not hold a strong object reference (RMC2205)\");");
+            Line($"static_assert(RequiresWorldOnlyOwner || !::rocks::RequiresWorldOnlyOwner<{memberType}>, \"ROCKS_NATIVE member {type.Name}::{member.Name} requires a WorldOnly owner; regenerate metadata\");");
+            EmitNativeStructAsserts(type, member, false, Line);
+            if (member.Struct is not null)
+            {
+                Line($"static_assert(RequiresWorldOnlyOwner || !GeneratedType<::{member.Struct}>::RequiresWorldOnlyOwner, \"ROCKS_NATIVE member {type.Name}::{member.Name} requires a WorldOnly owner; regenerate metadata\");");
+            }
+        }
+
+        Line($"static constexpr TypeId Id() noexcept {{ return {GuidValue(type.Id)}; }}");
+        Line("static const TypeSchema& Schema() noexcept {");
+        EmitFieldSchemas(type, Line);
+        string fieldSpan = type.Fields.Count == 0 ? "Span<const FieldSchema>{}" : $"Span<const FieldSchema>(fields, {type.Fields.Count})";
+        Line($"static const TypeSchema schema{{Id(), {type.Version}, {fieldSpan}, {View(type.Name)}, Guid{{}}, 0u}};");
+        Line("return schema;");
+        Line("}");
+        // 참조 struct는 직접 ObjectRef 멤버(Transient 포함 — GC는 추적한다)를 Visit하고 멤버 struct의 Trace를 부른다.
+        FieldModel[] traced = type.ContainsStrongReference ? type.Fields.Where(field => field.IsReference || field.IsStruct).ToArray() : [];
+        if (traced.Length == 0)
+        {
+            Line($"static void Trace(const {native}&, TraceVisitor&) noexcept {{}}");
+        }
+        else
+        {
+            Line($"static void Trace(const {native}& value, TraceVisitor& visitor) noexcept {{");
+            foreach (FieldModel field in traced)
+            {
+                Line(field.IsStruct
+                    ? $"GeneratedType<::{field.Reference}>::Trace(value.*(&{native}::{field.Name}), visitor);"
+                    : $"visitor.Visit(value.*(&{native}::{field.Name}));");
+            }
+
+            Line("}");
+        }
+
+        Line("static RuntimeStructOps Ops(ModuleLease module = {}) noexcept {");
+        Line($"auto ops = MakeRuntimeStructOps<{native}>(Move(module));");
+        if (type.Fields.Count != 0)
+        {
+            Line("static const RuntimeStructFieldOps fields[] = {");
+            foreach (FieldModel field in type.Fields)
+            {
+                Line($"detail::StructFieldOps<&{native}::{field.Name}>({GuidValue(field.Id)}),");
+            }
+
+            Line("};");
+            Line($"ops.fields = Span<const RuntimeStructFieldOps>(fields, {type.Fields.Count});");
+        }
+
+        if (type.ContainsStrongReference)
+        {
+            Line($"ops.trace = +[](const void* value, TraceVisitor& visitor) noexcept {{ Trace(*static_cast<const {native}*>(value), visitor); }};");
+        }
+
+        // struct가 선언한 Migrate를 타입 마이그레이션으로 연결한다. 시그니처·noexcept가 StructMigration과 다르거나
+        // 접근할 수 없으면(private인데 GENERATED_BODY 없음) 컴파일 오류다 — 조용히 마이그레이션 없이 등록되지 않는다.
+        if (type.HasMigrate)
+        {
+            Line($"ops.migrate = &{native}::Migrate;");
+        }
+
+        Line("ops.requiresWorldOnlyOwner = RequiresWorldOnlyOwner;");
+        Line("return ops;");
+        Line("}");
+        Line("static Result<TypeRegistrationToken> Register(TypeRegistry& registry, ModuleLease module = {}) noexcept {");
+        Line("return registry.RegisterStruct(Schema(), Ops(Move(module)));");
+        Line("}");
+        Line("};");
+    }
+
+    // 클래스·struct 스키마의 필드 배열이다(필드가 없으면 내지 않는다).
+    private static void EmitFieldSchemas(ClassModel type, Action<string> Line)
+    {
+        if (type.Fields.Count == 0)
+        {
+            return;
+        }
+
+        Line("static const FieldSchema fields[] = {");
+        foreach (FieldModel field in type.Fields)
+        {
+            string? targetId = field.HasTargetType ? field.ReferenceId : null;
+            string kind = field.IsReference ? "ObjectReference" : "Value";
+            Line($"{{{GuidValue(field.Id)}, FieldKind::{kind}, {field.Flags}u, {View(field.Name)}, {{}}, {{ValueKind::{field.Kind}, {GuidValue(targetId)}}}, {View(field.Spec.Category)}, {View(field.Spec.DisplayName)}, {View(field.Spec.ToolName)}}},");
+        }
+
+        Line("};");
     }
 
     // 리플렉션 enum의 GeneratedType 특수화다: Id, Schema(EnumSchema), constexpr IsDeclared(쓰기·복원 검증),

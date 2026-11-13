@@ -6,6 +6,10 @@ namespace Rocks.MetaCompiler;
 // SchemaValidator가 base에서 더한다).
 internal sealed record ClassSpec(bool Abstract, uint Version, bool WorldOnly);
 
+// STRUCT 지정자 결과다. Version은 Record schema version(없으면 1)이다. Binds(Core 값 타입 결합 — Docs/Design/
+// ReflectionFoundations.ko.md 4.5절)는 B4c에서 받으므로 지금은 지정하면 오류다.
+internal sealed record StructSpec(uint Version);
+
 // PROPERTY 지정자 결과다. ToolName은 Name="…"의 값이고 필드 이름과 같거나 없으면 ""다(기본 도구 이름은 필드
 // 이름이다). MaxElements는 배열 필드 전용이라 0이 아니면 SchemaValidator가 배열이 아닌 필드에서 거부한다.
 internal sealed record PropertySpec(bool Transient, bool ReadOnly, string Category, string DisplayName)
@@ -47,6 +51,38 @@ internal static class Specifiers
         }
 
         return new(values.ContainsKey("Abstract"), values.GetValueOrDefault("Version")?.Number ?? 1, values.ContainsKey("WorldOnly"));
+    }
+
+    public static StructSpec Struct(string text, string symbol)
+    {
+        const string hint = "ROCKS_STRUCT takes only Version=N (an unsigned decimal integer); CLASS specifiers such as Abstract or WorldOnly do not apply to structs.";
+        Dictionary<string, Value?> values;
+        try
+        {
+            values = Parse(text, symbol);
+        }
+        catch (MetadataException error)
+        {
+            throw new MetadataException(error.Message, error.Code, hint);
+        }
+
+        foreach ((string key, Value? value) in values)
+        {
+            bool number = key is "Version";
+            bool label = key is "Binds";
+            if ((!number && !label) || (number && value?.Number is null) || (label && value?.Text is null))
+            {
+                throw new MetadataException($"{symbol}: unsupported STRUCT specifier/value {key}", hint: hint);
+            }
+        }
+
+        if (values.ContainsKey("Binds"))
+        {
+            throw new MetadataException($"{symbol}: STRUCT specifier Binds is not supported yet (Core value type bindings arrive with CoreTypeBindings)",
+                hint: "Remove Binds; reflect a plain struct with ROCKS_PROPERTY members instead of binding a Core value type.");
+        }
+
+        return new(values.GetValueOrDefault("Version")?.Number ?? 1);
     }
 
     public static PropertySpec Property(string text, string symbol, string fieldName)

@@ -34,7 +34,8 @@ internal sealed class FieldModel
     public string Kind { get; set; } = "Opaque";
 
     // 이 모듈 안에서 해석한 참조 대상의 정규 이름이다(rocks::Object 포함). import 필드는 null이고, import 필드의
-    // Enum 대상만 SchemaValidator가 import enum에서 채운다(상속한 enum 필드를 생성할 때 쓴다).
+    // Enum·Struct 대상만 import를 읽을 때 대상 ID로 채운다(상속한 enum·struct 필드와 import struct의 멤버를
+    // 생성·검사할 때 쓴다 — SchemaValidator.LinkImported).
     public string? Reference { get; set; }
 
     // 참조 대상 타입 ID(32자리 16진, Object는 null)다. import 필드는 descriptor에서 바로 온다.
@@ -42,14 +43,21 @@ internal sealed class FieldModel
 
     public bool IsReference => Kind == "ObjectReference";
 
-    // ValueType.type(대상 타입 ID)을 쓰는 종류다: 강한 참조·소프트 참조의 기대 타입과 Enum의 enum ID.
+    // 리플렉션 struct 값 필드다(중첩 Record).
+    public bool IsStruct => Kind == "Struct";
+
+    // ValueType.type(대상 타입 ID)을 쓰는 종류다: 강한 참조·소프트 참조의 기대 타입, Enum의 enum ID, Struct의
+    // struct ID.
     public bool HasTargetType => KindHasTargetType(Kind);
 
     // Required를 쓸 수 있는 종류다: 강한 참조와 소프트 참조.
     public bool AcceptsRequired => KindAcceptsRequired(Kind);
 
     // descriptor 읽기·쓰기와 생성이 같은 조건을 쓰도록 종류 이름으로도 판정한다.
-    public static bool KindHasTargetType(string kind) => kind is "ObjectReference" or "SoftObjectReference" or "Enum";
+    public static bool KindHasTargetType(string kind) => kind is "ObjectReference" or "SoftObjectReference" or "Enum" or "Struct";
+
+    // 대상 ID가 비어 있으면 안 되는 종류다(참조의 빈 ID는 Object다).
+    public static bool KindRequiresTargetId(string kind) => kind is "Enum" or "Struct";
 
     public static bool KindAcceptsRequired(string kind) => kind is "ObjectReference" or "SoftObjectReference";
 
@@ -97,9 +105,30 @@ internal sealed record EnumeratorModel(string Name, string ToolName, string Disp
     public string EffectiveToolName => ToolName.Length != 0 ? ToolName : Name;
 }
 
-// 리플렉션 타입(ROCKS_CLASS 클래스와 ROCKS_ENUM enum) 모델이다. enum은 IsEnum이고 Base는 "", 필드는 없으며
-// Underlying·FlagsEnum·ToolPrefix·Enumerators를 쓴다. enum도 클래스와 같은 이름·ID 공간과 descriptor·inventory
-// 경로를 쓴다.
+// ROCKS_NATIVE 멤버다. Spelling은 Clang이 desugar한 타입 철자이고, 직접 타입이 리플렉션 struct면 Struct가 그
+// 정규 이름이다(SchemaValidator가 채운다 — 생성 코드가 그 struct의 생성 형질로 RMC2205·2206을 한 번 더 확인한다).
+internal sealed class NativeMemberModel
+{
+    public required string Name { get; init; }
+
+    public required string Spelling { get; init; }
+
+    public required SourceSite Site { get; init; }
+
+    public string? Struct { get; set; }
+}
+
+// 리플렉션 struct 규칙을 한 곳에 둔다(Docs/Design/ReflectionFoundations.ko.md 4.6절). 런타임 MaxStructDepth와
+// 같은 값이다.
+internal static class StructRules
+{
+    public const int MaxDepth = 16;
+}
+
+// 리플렉션 타입(ROCKS_CLASS 클래스, ROCKS_STRUCT struct, ROCKS_ENUM enum) 모델이다. enum은 IsEnum이고 Base는 "",
+// 필드는 없으며 Underlying·FlagsEnum·ToolPrefix·Enumerators를 쓴다. struct는 IsStruct이고 Base는 ""이며
+// 형질(ContainsStrongReference·RequiresWorldOnlyOwner)과 중첩 깊이(Depth)를 갖는다. 셋 모두 같은 이름·ID 공간과
+// descriptor·inventory 경로를 쓴다.
 internal sealed class ClassModel
 {
     public required string Name { get; init; }
@@ -120,11 +149,34 @@ internal sealed class ClassModel
     // TypeFlags 비트: Abstract 1, WorldOnly 2.
     public uint Flags => (Abstract ? 1u : 0u) | (WorldOnly ? 2u : 0u);
 
-    // ROCKS_NATIVE 멤버 이름이다(스키마에 넣지 않고 생성 코드의 static_assert만 받는다).
-    public List<string> NativeMembers { get; } = [];
+    // ROCKS_NATIVE 멤버다(스키마에 넣지 않고 생성 코드의 static_assert만 받는다).
+    public List<NativeMemberModel> NativeMembers { get; } = [];
 
-    // RocksRequiresWorldOnlyOwner 형질을 담는 NATIVE 멤버다. 상속까지 본 WorldOnly가 아니면 RMC2206이다.
+    // RocksRequiresWorldOnlyOwner 형질을 담는 NATIVE 멤버다. 클래스는 상속까지 본 WorldOnly가 아니면 RMC2206이고,
+    // struct는 오류가 아니라 RequiresWorldOnlyOwner 형질이 된다.
     public List<(string Symbol, string Path, SourceSite Site)> WorldOnlyNatives { get; } = [];
+
+    public bool IsStruct { get; init; }
+
+    // struct 형질: 강한 참조(ObjectReference 필드 — Transient 포함 — 또는 그런 struct 멤버)를 담는다. 이 모듈
+    // struct는 SchemaValidator가 계산하고 import struct는 descriptor flags에서 온다(LinkImported가 필드와 대조한다).
+    public bool ContainsStrongReference { get; set; }
+
+    // struct 형질: WorldOnly 소유자를 요구하는 NATIVE 멤버나 그런 struct 멤버를 담는다. import struct는 descriptor
+    // flags에서 온다(NATIVE 멤버는 descriptor에 없으므로 멤버 struct의 형질을 포함하는지만 대조한다).
+    public bool RequiresWorldOnlyOwner { get; set; }
+
+    // struct 중첩 깊이다: 1 + 멤버 struct 깊이의 최댓값(멤버 struct가 없으면 1). StructRules.MaxDepth 이하(RMC2303).
+    // NATIVE 멤버는 저장 Record에 들어가지 않으므로 세지 않는다.
+    public int Depth { get; set; }
+
+    // 이 모듈 struct의 생성·등록 순위다: 1 + (PROPERTY struct 멤버와 NATIVE 리플렉션 struct 멤버 중 이 모듈 struct의
+    // 순위) 최댓값. 생성 특수화가 쓰는 모든 struct의 GeneratedType이 먼저 나오도록 이 순위·이름 순으로 정렬한다.
+    public int Rank { get; set; }
+
+    // struct가 Migrate라는 이름의 멤버(메서드·함수 템플릿, 접근 무관)를 선언했다. 생성 Ops가 `&S::Migrate`를
+    // RuntimeStructOps::migrate에 대입한다(시그니처·noexcept가 다르면 컴파일 오류 — 조용히 빠지지 않는다).
+    public bool HasMigrate { get; set; }
 
     // 선언이 있는 입력 헤더의 include 철자다(import 타입은 descriptor의 header).
     public string Header { get; set; } = "";
@@ -153,8 +205,8 @@ internal sealed class ClassModel
     public List<EnumeratorModel> Enumerators { get; init; } = [];
 }
 
-// Classes는 이 모듈 타입(클래스·enum)만, Imported는 import한 타입(정규 이름 → 모델)이다. Ordered는 이 모듈 타입의
-// 생성·등록 순서다(enum 먼저, 클래스는 base 먼저).
+// Classes는 이 모듈 타입(클래스·struct·enum)만, Imported는 import한 타입(정규 이름 → 모델)이다. Ordered는 이 모듈
+// 타입의 생성·등록 순서다(enum, struct는 쓰는 struct 먼저 — Rank·이름 순, 클래스는 base 먼저).
 internal sealed record SchemaModel(IReadOnlyDictionary<string, ClassModel> Classes, IReadOnlyList<ClassModel> Ordered,
     IReadOnlyDictionary<string, ClassModel> Imported)
 {

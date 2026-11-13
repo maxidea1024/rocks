@@ -96,6 +96,29 @@ Result<bool> ModuleRegistration::RegisterEnumIfAbsent(const EnumSchema& schema,
     return Keep(token.Value());
 }
 
+Result<bool> ModuleRegistration::RegisterStructIfAbsent(const TypeSchema& schema,
+                                                        RuntimeStructOps ops) noexcept {
+    if (auto reserved = ReserveRecord(); !reserved) {
+        return Result<bool>::Failure(reserved.Error());
+    }
+
+    auto existing = registry_->AcquireValueType(schema.id, TypeKind::Struct);
+    if (existing) {
+        return Retain(Move(existing.Value()), ops.nativeType);
+    }
+
+    if (existing.Error() != ErrorCode::NotFound) {
+        return Result<bool>::Failure(existing.Error());
+    }
+
+    auto token = registry_->RegisterStruct(schema, Move(ops));
+    if (!token) {
+        return Result<bool>::Failure(token.Error());
+    }
+
+    return Keep(token.Value());
+}
+
 Result<bool> ModuleRegistration::Retain(TypeLease existing, const void* nativeType) noexcept {
     if (existing.Ops().nativeType != nativeType) {
         return Result<bool>::Failure(ErrorCode::AlreadyExists);

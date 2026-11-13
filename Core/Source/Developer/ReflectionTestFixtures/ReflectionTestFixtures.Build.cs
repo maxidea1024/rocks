@@ -13,5 +13,5 @@ public sealed class ReflectionTestFixtures : CoreModuleRules
     protected override bool HasSources => false;
 
     protected override IReadOnlyList<string> Metadata =>
-        ["ReflectionTestFixtures/ReflectionFixture.h", "ReflectionTestFixtures/AutoIdentityFixture.h"];
+        ["ReflectionTestFixtures/ReflectionFixture.h", "ReflectionTestFixtures/AutoIdentityFixture.h", "ReflectionTestFixtures/StructFixture.h"];
 }

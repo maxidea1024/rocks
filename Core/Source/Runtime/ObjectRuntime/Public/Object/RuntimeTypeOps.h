@@ -330,4 +330,39 @@ RuntimeTypeOps MakeRuntimeTypeOps(ModuleLease module = {}) noexcept {
     return ops;
 }
 
+// 리플렉션 struct 등록 정보(RuntimeStructOps)의 타입 공통 칸을 채운다(Docs/Design/
+// ReflectionFoundations.ko.md 4.6절). MetaCompiler 생성 코드 GeneratedType<S>::Ops가 부르고 trace·
+// migrate·requiresWorldOnlyOwner·fields는 생성 코드가 채운다(migrate는 struct가 Migrate를 선언했을
+// 때
+// `&S::Migrate` — 생성 특수화는 ROCKS_GENERATED_BODY의 friend이므로 private Migrate도 연결되고,
+// 시그니처가 다르면 컴파일 오류다). 채우는 것: size·alignment·nativeType, construct(noexcept
+// S(Allocator&)가 있으면 allocator를 주입하고 없으면 noexcept S()), destroy, module.
+//
+// 사용 예(생성 코드가 내는 형태):
+//   auto ops = MakeRuntimeStructOps<BulkDataRef>(Move(module));
+//   ops.fields = Span<const RuntimeStructFieldOps>(fields, 3);
+template <class S>
+RuntimeStructOps MakeRuntimeStructOps(ModuleLease module = {}) noexcept {
+    static_assert(!__is_base_of(Object, S), "Reflected structs are values, not Object types");
+    static_assert(__is_nothrow_constructible(S, Allocator&) || __is_nothrow_constructible(S),
+                  "Reflected structs need `explicit S(Allocator&) noexcept` or `S() noexcept`");
+    static_assert(__is_nothrow_destructible(S), "Reflected structs need a noexcept destructor");
+
+    RuntimeStructOps ops;
+    ops.size = sizeof(S);
+    ops.alignment = alignof(S);
+    ops.nativeType = NativeTypeKey<S>();
+    ops.construct = [](void* memory, Allocator& allocator) noexcept {
+        if constexpr (__is_constructible(S, Allocator&)) {
+            static_assert(__is_nothrow_constructible(S, Allocator&));
+            ::new (memory) S(allocator);
+        } else {
+            ::new (memory) S();
+        }
+    };
+    ops.destroy = [](void* memory) noexcept { static_cast<S*>(memory)->S::~S(); };
+    ops.module = Move(module);
+    return ops;
+}
+
 } // namespace rocks

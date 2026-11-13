@@ -132,6 +132,56 @@ TEST(ModuleRegistration_SameIdWithDifferentNativeTypeIsRejected) {
     CHECK(types.Shutdown());
 }
 
+// struct 등록: 처음은 등록(true), 같은 ID·같은 native struct는 lease를 붙잡음(false), 같은 ID의
+// 다른 native struct는 AlreadyExists, 같은 ID가 enum·클래스 레코드면 TypeMismatch다. 실패는 기록을
+// 남기지 않는다.
+TEST(ModuleRegistration_RegisterStructIfAbsentRetainsOrRejectsConflicts) {
+    using reflection_fixture::Base;
+    using reflection_fixture::StructLeaf;
+    using reflection_fixture::StructMiddle;
+    using reflection_fixture::TextureGroup;
+    SystemAllocator allocator;
+    TypeRegistry types(allocator);
+    ModuleRegistration registration(types, allocator);
+    REQUIRE(registration.RegisterEnumIfAbsent(
+        GeneratedType<TextureGroup>::Schema(),
+        RuntimeEnumOps{NativeTypeKey<TextureGroup>(), ModuleLease{}}));
+    REQUIRE(
+        registration.RegisterIfAbsent(GeneratedType<Base>::Schema(), GeneratedType<Base>::Ops()));
+    auto added = registration.RegisterStructIfAbsent(GeneratedType<StructLeaf>::Schema(),
+                                                     GeneratedType<StructLeaf>::Ops());
+    REQUIRE(added);
+    CHECK(added.Value());
+    const usize records = registration.Size();
+
+    auto retained = registration.RegisterStructIfAbsent(GeneratedType<StructLeaf>::Schema(),
+                                                        GeneratedType<StructLeaf>::Ops());
+    REQUIRE(retained);
+    CHECK(!retained.Value());
+    CHECK(registration.Size() == records + 1);
+
+    auto conflict = registration.RegisterStructIfAbsent(GeneratedType<StructLeaf>::Schema(),
+                                                        GeneratedType<StructMiddle>::Ops());
+    CHECK(!conflict && conflict.Error() == ErrorCode::AlreadyExists);
+
+    TypeSchema enumId = GeneratedType<StructLeaf>::Schema();
+    enumId.id = TypeIdOf<TextureGroup>();
+    auto enumConflict =
+        registration.RegisterStructIfAbsent(enumId, GeneratedType<StructLeaf>::Ops());
+    CHECK(!enumConflict && enumConflict.Error() == ErrorCode::TypeMismatch);
+
+    TypeSchema classId = GeneratedType<StructLeaf>::Schema();
+    classId.id = TypeIdOf<Base>();
+    auto classConflict =
+        registration.RegisterStructIfAbsent(classId, GeneratedType<StructLeaf>::Ops());
+    CHECK(!classConflict && classConflict.Error() == ErrorCode::TypeMismatch);
+    CHECK(registration.Size() == records + 1);
+
+    REQUIRE(registration.Unregister());
+    CHECK(types.Stats().registeredTypes == 0);
+    CHECK(types.Shutdown());
+}
+
 TEST(ModuleRegistration_EveryAllocationFailureRollsBackOnlyTheFailedCall) {
     SystemAllocator backing;
     test::NFailAllocator failing(backing);

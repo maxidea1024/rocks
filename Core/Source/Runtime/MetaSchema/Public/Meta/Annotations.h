@@ -38,11 +38,39 @@
     };
 #define ROCKS_ENUMERATOR(...) [[clang::annotate("rocks", "rocks.enumerator", #__VA_ARGS__)]]
 
-// 리플렉션 클래스 안의 비영속 런타임 멤버다(GPU 핸들·캐시 등). 저장·리플렉션 대상이 아니며 강한
-// 객체 참조(ObjectRef·RootRef·Object 파생 타입의 raw 포인터 — 담는 타입·배열·템플릿 인자까지)를
-// 담을 수 없다 (RMC2205). RocksRequiresWorldOnlyOwner 형질 타입은 WorldOnly 클래스에만
-// 둔다(RMC2206). 지정자는 받지 않는다. 리플렉션 클래스의 모든 비정적 필드는 ROCKS_PROPERTY 또는
-// ROCKS_NATIVE 중 하나다(둘 다면 RMC2204).
+// 리플렉션 struct다(Docs/Design/ReflectionFoundations.ko.md 4절). 바로 뒤에 base 없는 비템플릿
+// class/struct 정의가 와야 한다(상속은 RMC2301, 템플릿은 RMC2000). 모든 비정적 데이터 멤버는
+// ROCKS_PROPERTY 또는 ROCKS_NATIVE이고, `explicit S(Allocator&) noexcept` 또는 `S() noexcept`
+// 생성자와 noexcept 소멸자가 있어야 한다. 멤버로 다른 리플렉션 struct를 담을 수 있다(중첩 깊이
+// MaxStructDepth = 16 이하 — RMC2303, 순환은 RMC2302). ObjectRef 멤버를 (중첩까지) 담으면 참조
+// struct이고 소유 클래스의 생성 Trace가 그 참조를 방문한다. 저장 wire는 중첩 Record(schema = struct
+// ID, schema version = Version)다. 한 레코드에 ROCKS_CLASS와 함께 쓸 수 없다.
+//
+// 지정자: Version=N(Record schema version, 없으면 1). Binds="…"(Core 값 타입 결합)는 B4c에서
+// 받는다. struct가 `static Result<Array<uint8>> Migrate(Allocator&, TypeId, uint32 from, uint32 to,
+// Span<const uint8> record) noexcept`를 선언하면 옛 버전 Record를 올리는 타입 마이그레이션으로
+// 등록된다. private이면 ROCKS_GENERATED_BODY가 필요하고, Migrate라는 이름의 멤버가 이 시그니처가
+// 아니면 생성 코드가 컴파일되지 않는다(조용히 마이그레이션 없이 등록되지 않는다).
+//
+// 사용 예:
+//   ROCKS_STRUCT(Version = 2)
+//   struct BulkDataRef {
+//       ROCKS_PROPERTY() uint32 bulkId = 0;
+//       ROCKS_PROPERTY() uint64 rawBytes = 0;
+//       ROCKS_PROPERTY() Sha256Digest digest;
+//   };
+#define ROCKS_STRUCT(...)                                                                          \
+    enum {                                                                                         \
+        ROCKS_DETAIL_JOIN(rocksMetaStructMarker_, __COUNTER__)                                     \
+        [[clang::annotate("rocks", "rocks.struct.marker", #__VA_ARGS__)]] = 0                      \
+    };
+
+// 리플렉션 클래스·struct 안의 비영속 런타임 멤버다(GPU 핸들·캐시 등). 저장·리플렉션 대상이 아니며
+// 강한 객체 참조(ObjectRef·RootRef·Object 파생 타입의 raw 포인터 — 담는 타입·배열·템플릿
+// 인자까지)를 담을 수 없다 (RMC2205). RocksRequiresWorldOnlyOwner 형질 타입은 WorldOnly 클래스에만
+// 둔다(RMC2206 — struct에 두면 struct가 RequiresWorldOnlyOwner 형질을 갖고, 그 struct를 필드로 둔
+// 클래스가 WorldOnly여야 한다). 지정자는 받지 않는다. 리플렉션 클래스·struct의 모든 비정적 필드는
+// ROCKS_PROPERTY 또는 ROCKS_NATIVE 중 하나다(둘 다면 RMC2204).
 //
 // 사용 예:
 //   ROCKS_CLASS()
