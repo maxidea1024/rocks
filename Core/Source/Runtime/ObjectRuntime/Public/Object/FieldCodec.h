@@ -2,6 +2,7 @@
 
 #include <Object/AssetId.h>
 #include <Object/RuntimeTypeOps.h>
+#include <Object/TypeLease.h>
 #include <Platform/Fatal.h>
 #include <Serialization/Archive.h>
 #include <Serialization/Record.h>
@@ -83,11 +84,15 @@ struct SoftReferenceInfo {
     Span<const PathStep> path{};
 };
 
+struct FieldCodecFrame;
+class RecordScope;
+
 // 직렬화 관찰 hook 묶음이다. 기본 구현은 아무것도 하지 않는다. 실패를 돌려주면 그 저장·복원이
 // 실패한다(진단 유실로 읽기 전용 판정을 놓치지 않게). 저장·복원이 실패하면 그 호출에서 받은
 // 진단·수집은 무효이고 호출자가 버린다. hook은 소유 객체를 Borrow한 상태에서 불리므로 Registry와
-// 입력 byte를 바꾸지 않는다. 복원의 진단·수집은 1단계에서 한 번만 온다. B4가 struct 관찰·치환을,
-// A0-O가 외부 참조 보고를 같은 묶음에 더한다.
+// 입력 byte를 바꾸지 않는다. 복원의 진단·수집은 1단계에서 한 번만 온다. struct 관찰·치환(B4,
+// Docs/Design/ReflectionFoundations.ko.md 4.6·6.4절)도 같은 묶음이고, A0-O가 외부 참조 보고를
+// 더한다.
 //
 // 사용 예:
 //   struct Collect final : FieldCodecHooks {
@@ -106,6 +111,30 @@ public:
         return Result<void>::Success();
     }
 
+    // 복원 1단계에서 관찰할 struct ID다(로드 시작 때 한 번 읽는다 — 미등록 ID는 NotFound, 참조를
+    // 담는 struct는 InvalidArgument). 반환 span은 그 로드 동안 유효해야 한다.
+    virtual Span<const TypeId> ObservedStructs() noexcept {
+        return {};
+    }
+
+    // 관찰 대상 struct 값 하나를 검증과 같은 한 번의 해석으로 채운 임시 값으로 받는다(value는 호출
+    // 동안만 유효한 nativeKey 타입의 값). 실패하면 객체를 만들기 전에 로드가 실패한다.
+    virtual Result<void> ObserveStruct(const FieldCodecFrame&, TypeId, const void* nativeKey,
+                                       const void* value) noexcept {
+        (void)nativeKey;
+        (void)value;
+        return Result<void>::Success();
+    }
+
+    // 저장할 struct 값 대신 쓸 값을 돌려준다(기본은 in — 저장은 객체를 바꾸지 않는다). 반환값은 그
+    // struct 값의 encode가 끝날 때까지 유효한 같은 native 타입의 값이어야 하고 null은
+    // InvalidArgument다. 참조를 담는 struct에는 부르지 않는다.
+    virtual Result<const void*> SubstituteStruct(const FieldCodecFrame&, TypeId,
+                                                 const void* nativeKey, const void* in) noexcept {
+        (void)nativeKey;
+        return Result<const void*>::Success(in);
+    }
+
 protected:
     FieldCodecHooks() noexcept = default;
     FieldCodecHooks(const FieldCodecHooks&) noexcept = default;
@@ -115,7 +144,8 @@ protected:
 
 // 지금 처리하는 필드 위치 하나다. field는 그 필드(struct 멤버면 멤버), declaringType은 그 필드를
 // 선언한 클래스·struct, effectiveFlags는 PropagateFieldFlags로 전파된 플래그, enumeration은 Enum
-// 필드의 등록된 enum 스키마(그 밖은 nullptr), index는 배열 원소 index(아니면 NoIndex)다.
+// 필드의 등록된 enum 스키마(그 밖은 nullptr), structure는 Struct 필드의 등록 struct(그 밖은 빈
+// view), index는 배열 원소 index(아니면 NoIndex — B5 원소도 새 프레임이 아니라 이 칸을 쓴다)다.
 struct FieldCodecFrame {
     static constexpr uint32 NoIndex = ~0u;
 
@@ -123,6 +153,7 @@ struct FieldCodecFrame {
     TypeId declaringType{};
     uint32 effectiveFlags = 0;
     const EnumSchema* enumeration = nullptr;
+    StructView structure{};
     uint32 index = NoIndex;
     const FieldCodecFrame* parent = nullptr;
 };
@@ -185,6 +216,11 @@ public:
         return referenceWire_;
     }
 
+    // 진단·수집을 기록하는 단계인지다(복원 2단계는 거짓 — 1단계가 이미 판정했다).
+    bool IsRecording() const noexcept {
+        return recording_;
+    }
+
     // 진단을 받을 곳이 있는지다(기록하지 않는 단계는 참이다 — 1단계가 이미 판정했다). 값을 바꾸는
     // 정책(ReportAndDefault)은 이것이 거짓이면 InvalidArgument다(진단 없이 값을 바꾸지 않는다).
     bool CanReport() const noexcept {
@@ -194,16 +230,19 @@ public:
     // 지금 위치로 진단을 만든다. 기록하지 않는 단계(복원 2단계)에서는 아무것도 하지 않는다.
     Result<void> Report(FieldDiagnosticKind kind, int64 value = 0, TypeId valueType = {}) noexcept;
 
-    // 스키마에 없는 필드를 보고한다(필드 ID만 있고 경로는 비어 있다).
+    // 스키마에 없는 필드를 보고한다. 최상위면 경로가 비어 있고, struct 안이면 경로는 감싼 struct
+    // 필드까지다(같은 ID의 최상위 필드와 구별된다).
     Result<void> ReportUnknownField(Guid field) noexcept {
         if (!recording_ || !hooks_) {
             return Result<void>::Success();
         }
 
+        PathStep steps[33];
         FieldDiagnostic diagnostic;
         diagnostic.kind = FieldDiagnosticKind::UnknownField;
         diagnostic.objectType = objectType_;
         diagnostic.objectIndex = objectIndex_;
+        diagnostic.path = BuildPath(steps);
         diagnostic.field = field;
         return hooks_->Report(diagnostic);
     }
@@ -222,6 +261,10 @@ public:
 
     // 값 임시 저장에 쓰는 할당기다(저장·1단계는 예산을 청구한다).
     virtual Allocator& Scratch() noexcept = 0;
+
+    // 중첩 Record(struct 값)의 TLV 수를 그래프 필드 누계(maxTotalFields)에 더한다. 복원 2단계는
+    // 세지 않는다.
+    virtual Result<void> AddFields(usize count) noexcept = 0;
 
 protected:
     FieldCodecContext(FieldCodecHooks* hooks, uint32 referenceWire) noexcept
@@ -273,11 +316,13 @@ class FieldScope {
 public:
     [[nodiscard]] FieldScope(FieldCodecContext& context, const FieldSchema& field,
                              TypeId declaringType, const EnumSchema* enumeration = nullptr,
+                             StructView structure = {},
                              uint32 index = FieldCodecFrame::NoIndex) noexcept
         : context_(context) {
         frame_.field = &field;
         frame_.declaringType = declaringType;
         frame_.enumeration = enumeration;
+        frame_.structure = structure;
         frame_.index = index;
         frame_.parent = context.current_;
         frame_.effectiveFlags =
@@ -342,6 +387,26 @@ public:
         return WriteReferenceWire(out, target, expectation);
     }
 
+    // 중첩 Record(struct 값)의 한도다(그래프 옵션에서 — 전체 크기는 필드 값 한도, 값 하나도 같은
+    // 값 한도).
+    virtual RecordLimits NestedRecordLimits() const noexcept = 0;
+
+    // 지금 위치의 struct 값 대신 저장할 값이다(hook이 없으면 value). null은 InvalidArgument다.
+    Result<const void*> SubstituteStruct(TypeId type, const void* nativeKey,
+                                         const void* value) noexcept {
+        FieldCodecHooks* hooks = Hooks();
+        if (!hooks || !Current()) {
+            return Result<const void*>::Success(value);
+        }
+
+        auto substituted = hooks->SubstituteStruct(*Current(), type, nativeKey, value);
+        if (substituted && substituted.Value() == nullptr) {
+            return Result<const void*>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        return substituted;
+    }
+
 protected:
     FieldEncodeContext(const FieldEncodePolicy& policy, FieldCodecHooks* hooks,
                        uint32 referenceWire) noexcept
@@ -369,9 +434,75 @@ public:
         return policy_.allowMissingFields || (effectiveFlags & policy_.allowMissingFlags) != 0;
     }
 
-    // 필드 payload를 읽는 reader를 연다. 1단계는 그래프 공유 예산, 2단계는 같은 크기 한도와 무제한
+    // 필드 payload를 읽는 reader를 연다. Record 스택(struct 값)이 있으면 맨 위 Record로, 없으면
+    // 직렬화기의 최상위 경로(OpenTopLevelValue)로 연다. 1단계는 그래프 공유 예산, 2단계는 같은 크기
+    // 한도와 무제한 operation·work다.
+    Result<ArchiveReader> OpenValue(const FieldView& field) noexcept {
+        if (depth_ != 0) {
+            return Top().OpenValue(field);
+        }
+
+        return OpenTopLevelValue(field);
+    }
+
+    // 맨 위 Record reader다(struct 값을 해석하는 동안 — 없으면 nullptr). Next()로 순회한다.
+    RecordReader* CurrentRecord() noexcept {
+        return depth_ != 0 ? &Top() : nullptr;
+    }
+
+    // struct 값의 중첩 Record를 열어 Record 스택에 넣는다(wire가 Record가 아니면 TypeMismatch).
+    // 1단계는 맨 위(없으면 객체) Record의 OpenRecordField(공유 예산 — 헤더·색인만 청구, 필드 수
+    // 한도는 남은 그래프 누계)와 AddFields, 2단계는 같은 버전 범위·크기 한도·무제한
     // operation·work다.
-    virtual Result<ArchiveReader> OpenValue(const FieldView& field) noexcept = 0;
+    virtual Result<RecordScope> OpenRecord(const FieldView& field, TypeId expected,
+                                           uint32 minVersion, uint32 maxVersion) noexcept = 0;
+
+    // 마이그레이션 결과 Record를 정확히 version으로 열어 Record 스택에 넣는다(아니면 Unsupported).
+    virtual Result<RecordScope> OpenMigratedRecord(Span<const uint8> record, TypeId expected,
+                                                   uint32 version) noexcept = 0;
+
+    // struct의 옛 버전 Record를 현재 버전으로 올린다. 1단계는 로드 옵션 override(Unsupported면
+    // 다음)·타입이 등록한 마이그레이션 순으로 부르고(둘 다 없으면 Unsupported) 결과를 발생 순서대로
+    // 보관해 view를 돌려준다. 2단계는 같은 순서의 보관본을 대조해 돌려준다(어긋나면 InvalidArgument
+    // — 계약 위반·rollback).
+    virtual Result<Span<const uint8>> MigrateStruct(TypeId type, uint32 fromVersion,
+                                                    uint32 toVersion,
+                                                    Span<const uint8> record) noexcept = 0;
+
+    // 이 struct ID를 1단계에서 관찰하는지다(로드 시작 때 직렬화기가 정한 목록).
+    bool IsObservedStruct(TypeId type) const noexcept {
+        if (!Recording()) {
+            return false;
+        }
+
+        usize low = 0;
+        usize high = observed_.Size();
+        while (low < high) {
+            const usize middle = low + (high - low) / 2;
+            const TypeId id = observed_[middle];
+            if (id == type) {
+                return true;
+            }
+
+            if (id.high < type.high || (id.high == type.high && id.low < type.low)) {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+
+        return false;
+    }
+
+    // 지금 위치의 관찰 대상 struct 값을 hook에 넘긴다.
+    Result<void> ObserveStruct(TypeId type, const void* nativeKey, const void* value) noexcept {
+        FieldCodecHooks* hooks = Hooks();
+        if (!Recording() || !hooks || !Current()) {
+            return Result<void>::Success();
+        }
+
+        return hooks->ObserveStruct(*Current(), type, nativeKey, value);
+    }
 
     // 강한 참조 하나를 읽는다(ReferenceWireType() 형식). 1단계는 token 범위를 검사하고 기대 형식과
     // 함께 기록한다.
@@ -394,11 +525,96 @@ protected:
         : FieldCodecContext(hooks, referenceWire), policy_(policy) {
     }
 
-    ~FieldDecodeContext() = default;
+    ~FieldDecodeContext() {
+        if (depth_ != 0) {
+            platform::Fatal("FieldDecodeContext destroyed with open record scopes");
+        }
+    }
+
+    // Record 스택이 비었을 때의 값 reader다(1단계는 객체 Record, 2단계는 보관한 FieldView).
+    virtual Result<ArchiveReader> OpenTopLevelValue(const FieldView& field) noexcept = 0;
+
+    // 직렬화기가 연 reader를 Record 스택에 넣는다(B5 RecordList 항목 reader도 같은 경로).
+    Result<RecordScope> PushRecord(RecordReader&& reader) noexcept;
+
+    // 관찰할 struct ID다(ID 순으로 정렬된 span — 로드 동안 유효해야 한다).
+    void SetObservedStructs(Span<const TypeId> sorted) noexcept {
+        observed_ = sorted;
+    }
 
 private:
+    friend class RecordScope;
+
+    static constexpr uint32 MaxRecordDepth = MaxStructDepth + 1;
+
+    RecordReader& Top() noexcept {
+        return *slots_[depth_ - 1];
+    }
+
     FieldDecodePolicy policy_;
+    Span<const TypeId> observed_{};
+    alignas(RecordReader) uint8 storage_[MaxRecordDepth * sizeof(RecordReader)];
+    // placement new가 돌려준 포인터다(저장소 주소를 다시 해석하지 않는다).
+    RecordReader* slots_[MaxRecordDepth] = {};
+    uint32 depth_ = 0;
 };
+
+// FieldDecodeContext의 Record 스택 한 칸을 쥔다(RAII). 이동할 수 있고(이동된 원본은 아무것도 하지
+// 않는다) 들어간 순서의 역순으로 끝나야 한다(아니면 Fatal). Close로 일찍 닫을 수 있다(마이그레이션
+// 전에 원본 Record를 닫는다).
+//
+// 사용 예(struct codec):
+//   auto scope = context.OpenRecord(field, structId, 1, ~0u);
+//   if (!scope) { return Result<void>::Failure(scope.Error()); }
+//   RecordReader& record = *context.CurrentRecord();
+class [[nodiscard]] RecordScope {
+public:
+    RecordScope(RecordScope&& other) noexcept : context_(other.context_), depth_(other.depth_) {
+        other.context_ = nullptr;
+    }
+
+    RecordScope& operator=(RecordScope&&) = delete;
+    RecordScope(const RecordScope&) = delete;
+    RecordScope& operator=(const RecordScope&) = delete;
+
+    ~RecordScope() {
+        Close();
+    }
+
+    void Close() noexcept {
+        if (!context_) {
+            return;
+        }
+
+        if (context_->depth_ != depth_) {
+            platform::Fatal("RecordScope ended out of order");
+        }
+
+        context_->Top().~RecordReader();
+        --context_->depth_;
+        context_ = nullptr;
+    }
+
+private:
+    friend class FieldDecodeContext;
+
+    RecordScope(FieldDecodeContext* context, uint32 depth) noexcept
+        : context_(context), depth_(depth) {
+    }
+
+    FieldDecodeContext* context_;
+    uint32 depth_;
+};
+
+inline Result<RecordScope> FieldDecodeContext::PushRecord(RecordReader&& reader) noexcept {
+    if (depth_ == MaxRecordDepth) {
+        return Result<RecordScope>::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    slots_[depth_] = ::new (storage_ + depth_ * sizeof(RecordReader)) RecordReader(Move(reader));
+    ++depth_;
+    return Result<RecordScope>::Success(RecordScope(this, depth_));
+}
 
 inline Span<const PathStep> FieldCodecContext::BuildPath(PathStep (&steps)[33]) const noexcept {
     usize depth = 0;

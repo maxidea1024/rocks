@@ -72,6 +72,57 @@ private:
     Array<Guid> ids_;
 };
 
+// 바깥 ArchiveWriter 뒤에 Record 하나를 제자리로 쓴다(중첩 Record — 리플렉션 struct 값). header와
+// 필드 TLV header 자리를 먼저 쓰고 값은 out에 바로 쓴 뒤 wire·길이·개수를 채우므로, 중첩 깊이만큼
+// 복사가 늘지 않는다(값 byte는 한 번만 쓴다). 같은 필드를 같은 순서로 쓰면 RecordBuilder::Build와
+// 같은 byte다. 필드 ID 중복은 검사하지 않는다(호출자가 스키마 필드처럼 유일한 ID를 보증한다).
+// 작업량은 out의 청구(쓰기·성장·채우기)로 센다. 실패하면 out의 내용은 정해지지 않으므로 그 writer를
+// 버린다.
+//
+// 사용 예:
+//   auto record = RecordWriter::Begin(out, structId, version, limits);
+//   record.Value().BeginField(memberId);
+//   out.WriteU32(value);                        // 값은 out에 바로 쓴다
+//   record.Value().EndField(WireType::U32);
+//   record.Value().End();
+class RecordWriter {
+public:
+    // header 자리를 쓴다. schema 0·version 0은 InvalidArgument, limits.archive.maxTotalBytes가
+    // header보다 작으면 CapacityExceeded다.
+    static Result<RecordWriter> Begin(ArchiveWriter& out, Guid schema, uint32 schemaVersion,
+                                      RecordLimits limits = {}) noexcept;
+
+    // 필드 하나의 TLV header 자리를 쓴다. 앞 필드가 EndField로 끝나지 않았거나 id 0이면
+    // InvalidArgument, 필드 수가 limits.maxFields에 이르렀으면 CapacityExceeded다.
+    Result<void> BeginField(Guid id) noexcept;
+
+    // 지금 필드의 wire tag와 값 길이를 채운다. 열린 필드가 없거나 wire 0이면 InvalidArgument, 값
+    // 길이가 maxValueBytes를 넘으면 CapacityExceeded다.
+    Result<void> EndField(uint32 wireType) noexcept;
+
+    Result<void> EndField(WireType type) noexcept {
+        return EndField(static_cast<uint32>(type));
+    }
+
+    // 필드 수·payload 크기를 채운다. 열린 필드가 있으면 InvalidArgument, 전체가 maxTotalBytes를
+    // 넘으면 CapacityExceeded다.
+    Result<void> End() noexcept;
+    usize FieldCount() const noexcept;
+
+private:
+    static constexpr usize NoField = ~usize(0);
+
+    RecordWriter(ArchiveWriter& out, usize start, RecordLimits limits) noexcept
+        : out_(&out), start_(start), limits_(limits) {
+    }
+
+    ArchiveWriter* out_;
+    usize start_;
+    usize field_ = NoField;
+    uint32 count_ = 0;
+    RecordLimits limits_;
+};
+
 // 전체 envelope와 TLV 경계를 검증한 뒤 index를 게시한다. index만 소유하고 payload 원본은 빌린다.
 // allocator는 reader보다, 원본 buffer는 reader와 모든 FieldView보다 오래 살아야 한다.
 // 같은 reader의 병행 Next/Find/이동은 caller가 동기화한다. allocator 재진입으로 입력을 변경하지
@@ -114,6 +165,20 @@ public:
     // 이 reader가 돌려준 필드의 값을 읽는 ArchiveReader를 연다. 이 Record 트리와 같은 예산·한도를
     // 쓴다. operation 하나를 청구하며, 이 Record 밖의 범위는 InvalidArgument다.
     Result<ArchiveReader> OpenValue(const FieldView& field) const noexcept;
+
+    // 이 reader가 돌려준 Record wire 필드(중첩 Record — 리플렉션 struct 값)를 같은 예산으로 연다.
+    // 범위 검사는 OpenValue와 같고(이 Record 밖이면 InvalidArgument), wire가 Record가 아니면
+    // TypeMismatch다. 크기 한도는 이 reader의 것이고 필드 수 한도는 maxFields다. 바깥 Open이
+    // payload 바이트를 이미 청구했으므로 header·TLV 색인·정렬 비용만 청구한다(중첩 깊이만큼 작업이
+    // 불어나지 않는다). schemaVersion 0은 InvalidArgument, 범위 밖은 Unsupported, schema 불일치는
+    // TypeMismatch다.
+    //
+    // 사용 예:
+    //   auto inner = outer.OpenRecordField(allocator, field, structId, 1, version, maxFields);
+    //   if (inner) { auto member = inner.Value().Next(); ... }
+    Result<RecordReader> OpenRecordField(Allocator&, const FieldView& field, Guid expectedSchema,
+                                         uint32 minSchemaVersion, uint32 maxSchemaVersion,
+                                         uint32 maxFields) const noexcept;
     usize Position() const noexcept;
     usize FieldCount() const noexcept;
     uint32 SchemaVersion() const noexcept;
@@ -124,10 +189,12 @@ public:
 private:
     friend class RecordListReader;
     RecordReader(Allocator&, ArchiveReader&&, uint32 version, RecordLimits limits) noexcept;
-    // shared가 있으면 그 누적 예산을 쓰고, 없으면 limits.archive로 새 예산을 만든다.
+    // shared가 있으면 그 누적 예산을 쓰고, 없으면 limits.archive로 새 예산을 만든다. indexOnly면
+    // TLV payload 바이트를 청구하지 않는다(바깥 reader가 이미 청구한 중첩 Record).
     static Result<RecordReader> OpenWith(Allocator&, Span<const uint8>, Guid expectedSchema,
                                          uint32 minSchemaVersion, uint32 maxSchemaVersion,
-                                         RecordLimits, SharedPtr<ArchiveBudget> shared) noexcept;
+                                         RecordLimits, SharedPtr<ArchiveBudget> shared,
+                                         bool indexOnly = false) noexcept;
     // range가 이 Record 입력 안인지 본다.
     bool Contains(Span<const uint8> range) const noexcept;
     ArchiveReader archive_;

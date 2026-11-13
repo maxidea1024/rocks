@@ -89,11 +89,14 @@ private:
     Result<void> Append(Span<const uint8> prefix, Span<const uint8> payload,
                         bool utf8 = false) noexcept;
     Result<void> AppendReserved(Span<const uint8>, Span<const uint8>) noexcept;
+    // 이미 쓴 범위 [offset, offset + bytes.Size())를 덮어쓴다(RecordWriter의 길이·개수 채우기).
+    Result<void> Patch(usize offset, Span<const uint8> bytes) noexcept;
     Array<uint8> bytes_;
     ArchiveLimits limits_;
     uint64 operations_ = 0;
     uint64 work_ = 0;
     friend class RecordBuilder;
+    friend class RecordWriter;
 };
 
 // 입력을 빌리는 이동 전용 cursor다. 원본 범위는 reader/반환 view보다 오래 살아 있고 변경되지 않아야

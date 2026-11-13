@@ -37,6 +37,16 @@ struct ReflectedEnumField {
     };
 };
 
+// 리플렉션 struct(ROCKS_STRUCT)다: 생성 헤더가 GeneratedType<S>::Id·ContainsStrongReference를 내는
+// 비enum 클래스다(Docs/Design/ReflectionFoundations.ko.md 4.6절).
+template <class T>
+struct ReflectedStructField {
+    static constexpr bool Supported = !__is_enum(T) && __is_class(T) && requires {
+        GeneratedType<T>::Id();
+        GeneratedType<T>::ContainsStrongReference;
+    };
+};
+
 template <class T>
 constexpr ValueKind FieldValueKind() noexcept {
     if constexpr (IsSameV<T, bool>) {
@@ -71,6 +81,8 @@ constexpr ValueKind FieldValueKind() noexcept {
         return ValueKind::SoftObjectReference;
     } else if constexpr (ReflectedEnumField<T>::Supported) {
         return ValueKind::Enum;
+    } else if constexpr (ReflectedStructField<T>::Supported) {
+        return ValueKind::Struct;
     } else {
         return ValueKind::Opaque;
     }
@@ -108,6 +120,7 @@ Result<void> CopyFieldValue(const Member& source, FieldValue& value) noexcept {
     } else {
         value.unsignedInteger = source;
     }
+
     return Result<void>::Success();
 }
 
@@ -127,9 +140,11 @@ Result<void> WriteScalarField(Member& target, const FieldValue& value) noexcept 
         if (value.type != GeneratedType<Member>::Id()) {
             return Result<void>::Failure(ErrorCode::TypeMismatch);
         }
+
         if (!GeneratedType<Member>::IsDeclared(value.signedInteger)) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
+
         target = static_cast<Member>(value.signedInteger);
     } else if constexpr (IsSameV<Member, float>) {
         target = value.float32;
@@ -139,6 +154,7 @@ Result<void> WriteScalarField(Member& target, const FieldValue& value) noexcept 
         if (value.signedInteger < -2147483648ll || value.signedInteger > 2147483647ll) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }
+
         target = static_cast<int32>(value.signedInteger);
     } else if constexpr (IsSameV<Member, int64>) {
         target = value.signedInteger;
@@ -147,8 +163,10 @@ Result<void> WriteScalarField(Member& target, const FieldValue& value) noexcept 
         if (value.unsignedInteger > maximum) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }
+
         target = static_cast<Member>(value.unsignedInteger);
     }
+
     return Result<void>::Success();
 }
 
@@ -163,20 +181,24 @@ Result<void> ReadGeneratedField(ObjectRegistry& registry, const ObjectAccessCont
     if (!borrowed) {
         return Result<void>::Failure(borrowed.Error());
     }
+
     auto target = borrowed.Value().Get();
     if (!target) {
         return Result<void>::Failure(target.Error());
     }
+
     FieldValue candidate(output.GetAllocator());
     auto copied = CopyFieldValue(target.Value()->*member, candidate);
     if (!copied) {
         return copied;
     }
+
     // String 복사 allocator callback이 owner를 논리 파괴했다면 out을 게시하지 않는다.
     auto stillValid = borrowed.Value().Get();
     if (!stillValid) {
         return Result<void>::Failure(stillValid.Error());
     }
+
     output = Move(candidate);
     return Result<void>::Success();
 }
@@ -190,16 +212,19 @@ Result<void> WriteGeneratedValue(Member MemberOwner::* member, const FieldValue&
     if (!target) {
         return Result<void>::Failure(target.Error());
     }
+
     if constexpr (IsSameV<Member, String>) {
         String replacement((target.Value()->*member).GetAllocator());
         auto copied = replacement.TryAssign(value.string.View());
         if (!copied) {
             return copied;
         }
+
         target = get();
         if (!target) {
             return Result<void>::Failure(target.Error());
         }
+
         // 할당/해제 없는 Swap이 commit이다. 이후 old storage 반환 callback의 RequestDestroy는
         // 이미 완료한 성공을 되돌리지 않는다. 호출 측 Borrow는 이 정리까지 물리 수명을 유지한다.
         (target.Value()->*member).Swap(replacement);
@@ -239,15 +264,18 @@ Result<void> WriteGeneratedField(ObjectRegistry& registry, const ObjectAccessCon
     if (value.kind != FieldValueKind<Member>()) {
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
+
     auto borrowed = registry.Resolve<Owner>(access, handle);
     if (!borrowed) {
         return Result<void>::Failure(borrowed.Error());
     }
+
     if constexpr (ObjectReferenceField<Member>::Supported) {
         auto target = borrowed.Value().Get();
         if (!target) {
             return Result<void>::Failure(target.Error());
         }
+
         return registry.SetReference(access, handle, target.Value()->*member, value.reference);
     } else {
         return WriteGeneratedValue<Owner>(member, value,
@@ -262,11 +290,13 @@ Result<void> WriteGeneratedStagedField(ConstructionContext& construction, Object
     if (value.kind != FieldValueKind<Member>()) {
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
+
     if constexpr (ObjectReferenceField<Member>::Supported) {
         auto target = construction.Get<Owner>(handle);
         if (!target) {
             return Result<void>::Failure(target.Error());
         }
+
         return construction.SetReference(handle, target.Value()->*member, value.reference);
     } else {
         return WriteGeneratedValue<Owner>(

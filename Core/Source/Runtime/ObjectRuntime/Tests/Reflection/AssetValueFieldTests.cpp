@@ -154,7 +154,7 @@ TEST(AssetValueFields_ManualRegistrationEnforcesValueTypeRules) {
         {source, [](FieldSchema& field) noexcept { field.element.kind = ValueKind::Bool; }},
         {icon, [](FieldSchema& field) noexcept { field.element.type = Guid{1, 1}; }},
         {source, [](FieldSchema& field) noexcept { field.maxElements = 1; }},
-        // Enum·Struct·Array는 B3b–B5 전까지 받지 않는다.
+        // Enum·Struct는 대상 ID(value.type)가 있어야 하고, Array는 B5 전까지 받지 않는다.
         {source, [](FieldSchema& field) noexcept { field.value.kind = ValueKind::Enum; }},
         {source, [](FieldSchema& field) noexcept { field.value.kind = ValueKind::Struct; }},
         {source, [](FieldSchema& field) noexcept { field.value.kind = ValueKind::Array; }}};

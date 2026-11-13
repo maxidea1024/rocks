@@ -4,7 +4,7 @@
 
 ## 지원 범위
 
-bool, uint8/16/32/64, int32/64, float32/64, Guid, UTF-8 String, 강한 ObjectRef, AssetId(Guid wire), Sha256Digest(Bytes wire, 정확히 32 byte), SoftObjectRef(SoftObjectReference wire), 리플렉션 enum(I64 wire)을 지원한다. enum의 선언되지 않은 값은 저장에서 InvalidArgument이고, 복원은 기본 정책에서 거부하며 `ReportAndDefault`면 진단 후 대체 값을 쓴다. 소프트 참조는 값으로 저장하며 대상을 그래프에 넣거나 찾지 않는다. 저장(C++에서 직접 대입한 값)과 복원 모두 null 규칙(asset 0에 경로가 있으면 안 됨)과 4 KiB 경로 상한을 검사해 InvalidArgument로 거부한다. 좁은 unsigned는 U32, signed는 I64 wire 형식을 사용하고 복원 시 실제 값 폭을 검사한다. unknown GUID field는 기본 진단 후 skip한다(`UnknownFieldPolicy::Reject`면 거부). known field의 wire tag·값·trailing byte는 엄격히 검사한다.
+bool, uint8/16/32/64, int32/64, float32/64, Guid, UTF-8 String, 강한 ObjectRef, AssetId(Guid wire), Sha256Digest(Bytes wire, 정확히 32 byte), SoftObjectRef(SoftObjectReference wire), 리플렉션 enum(I64 wire), 리플렉션 struct(Record wire의 중첩 Record — 버전·마이그레이션·struct hook은 [직렬화 구현 계약](../../../../Docs/Implementation/Serialization.ko.md) "리플렉션 struct 값")를 지원한다. enum의 선언되지 않은 값은 저장에서 InvalidArgument이고, 복원은 기본 정책에서 거부하며 `ReportAndDefault`면 진단 후 대체 값을 쓴다. 소프트 참조는 값으로 저장하며 대상을 그래프에 넣거나 찾지 않는다. 저장(C++에서 직접 대입한 값)과 복원 모두 null 규칙(asset 0에 경로가 있으면 안 됨)과 4 KiB 경로 상한을 검사해 InvalidArgument로 거부한다. 좁은 unsigned는 U32, signed는 I64 wire 형식을 사용하고 복원 시 실제 값 폭을 검사한다. unknown GUID field는 기본 진단 후 skip한다(`UnknownFieldPolicy::Reject`면 거부). known field의 wire tag·값·trailing byte는 엄격히 검사한다.
 
 `RuntimeTypeOps::completeFieldLayout`이 true이고 schema와 필드 codec(`RuntimeFieldOps::encode`·`decode`)이 stable field GUID별 1:1이어야 한다. 값은 등록된 codec이 쓰고 읽으며, 복원은 두 단계(1단계 검증·사전 청구, 2단계 생성·적용)이고 decode 정책·진단 hook·소프트 참조 수집은 `ObjectGraphSaveOptions`·`ObjectGraphLoadOptions`로 정한다(Docs/Implementation/Serialization.ko.md "필드 codec과 문맥"). 이 선언에는 상속 필드를 포함한 모든 영속 필드와 모든 강한 간선이 포함된다(ROCKS_NATIVE 멤버는 영속 필드가 아니고 강한 참조를 담을 수 없어 포함 대상이 아니다). 기본 수동 metadata는 false이며 부분 metadata·Opaque·누락 codec은 Unsupported다(Transient 필드는 codec이 없어도 된다). 수동 작성자가 거짓 완전성을 선언하는 임의 플러그인의 메모리 안전성을 검증하는 기능은 아니다.
 
@@ -32,7 +32,7 @@ String getter 복제에는 임시 bounded forwarding allocator를 사용해 큰 
 
 ## 한도와 한계
 
-기본 한도는 객체 1,024개, 처리한 TLV 총 4,096개, 파일 16MiB, 개별 encoded field 4MiB, work 64Mi 단위, migration 출력 누계 16MiB다. 원본과 migration 결과를 모두 파싱하면 양쪽 field 수를 처리 누계에 포함한다. lookup, index 초기화, codec bytes 복사·검사와 fixup 비용을 bounded budget에 포함한다. migration callback의 자체 CPU/전역 할당·native 생성자와 accessor 내부의 임의 코드는 신뢰 계약이다.
+기본 한도는 객체 1,024개, 처리한 TLV 총 1,048,576개(중첩 struct TLV 포함 — Record 하나의 필드 수 한도도 남은 누계), 파일 16MiB, 개별 encoded field 4MiB, work 64Mi 단위, migration 출력 누계 16MiB다. 원본과 migration 결과를 모두 파싱하면 양쪽 field 수를 처리 누계에 포함한다. lookup, index 초기화, codec bytes 복사·검사와 fixup 비용을 bounded budget에 포함한다. migration callback의 자체 CPU/전역 할당·native 생성자와 accessor 내부의 임의 코드는 신뢰 계약이다.
 
 maxBytes는 전체 RAM peak가 아니다. 저장은 record staging과 최종 output을, 복원은 input·index·decoded 문자열·migration output·staged 객체를 동시에 보유할 수 있다. 각 제한과 객체 수가 이를 제한하며 allocator 자체의 메모리 quota는 별도 정책이다.
 

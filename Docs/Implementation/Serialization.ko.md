@@ -36,6 +36,8 @@ String의 내부 NUL은 U+0000으로 보존하며 파일에 별도 종단 NUL은
 
 unknown nonzero tag는 FieldView로 반환하여 skip할 수 있다. known tag의 의미는 상위 소비자가 기대 tag와 실제 값 표현을 확인하고, `RecordReader::OpenValue(field)`로 연 ArchiveReader로 읽어 `ArchiveReader::AtEnd`로 trailing bytes까지 검증한다. id/tag 0은 InvalidArgument, 중복 ID는 AlreadyExists, 허용되지 않는 envelope/schema version은 Unsupported, 기대 schema GUID 불일치는 TypeMismatch다. checksum/인증이 없으므로 범위 안 payload bit 변경이 반드시 오류로 검출되는 포맷은 아니다.
 
+중첩 Record(wire tag 10 — 리플렉션 struct 값)는 `RecordReader::OpenRecordField(allocator, field, schema, minVersion, maxVersion, maxFields)`로 연다. 바깥 reader가 돌려준 필드여야 하고(범위 밖 InvalidArgument, wire가 Record가 아니면 TypeMismatch) 같은 트리 예산을 쓰되, 바깥 Open이 payload 바이트를 이미 청구했으므로 header·TLV 색인·정렬 비용만 청구한다(중첩 깊이만큼 작업이 불어나지 않는다). schema version 0은 어느 Open에서든 InvalidArgument(범위 밖 Unsupported와 구분)다. `RecordWriter`는 바깥 writer 위에 Record를 제자리로 쓴다: `Begin`이 header 자리를, `BeginField`가 TLV header 자리를 쓰고, 값은 바깥 writer에 바로 쓴 뒤 `EndField(wire)`가 wire·길이를, `End`가 필드 수·payload 크기를 채운다. 값 byte를 한 번만 쓰므로 중첩 깊이만큼 복사가 늘지 않고 같은 필드·순서면 `RecordBuilder::Build`와 같은 byte다. 필드 ID 중복은 호출자가 보증하고(스키마 필드), 실패하면 바깥 writer 내용은 정해지지 않으므로 버린다.
+
 ### Record 트리 예산
 
 `RecordReader::Open`은 Record 트리의 누적 예산 `ArchiveBudget`(maxOperations·maxWork, 원자적 누적·포화)을 `SharedPtr`로 만든다. `OpenValue`로 연 값 reader, `RecordListReader::OpenField`로 연 중첩 목록, 그 `OpenItem` 항목 reader가 같은 예산을 공유하므로 값·항목마다 새 예산을 받아 한도를 우회할 수 없다. 실패한 `OpenValue`·`OpenField`·`OpenItem` 호출도 operation 하나를 소비한다. 한도를 예산이 들고 있어 공유자마다 판정이 다르지 않고, 서로 다른 reader를 여러 스레드에서 써도 사용량이 정확히 합산된다.
@@ -54,7 +56,16 @@ payload는 Guid 16 bytes(에셋 ID) + String(객체 경로, u64 길이 + UTF-8)�
 
 객체 주소나 runtime ObjectHandle의 registry/slot/generation을 저장하지 않는다. ObjectRef는 파일 내부 u64 ID로 표현하며 0은 null이다. metadata 순서 BFS로 객체 ID를 부여하여 cycle·shared identity를 보존한다. 다른 Registry에 복원한 동일 그래프를 다시 저장하는 byte 재현성을 시험한다.
 
-지원 ValueKind는 bool, UInt8/16/32/64, Int32/64, Float32/64, Guid, Utf8String, ObjectReference, AssetId, Digest256, SoftObjectReference, Enum이다. Enum은 I64 wire이며 저장(C++에서 직접 넣은 값)은 선언되지 않은 값(Flags enum은 선언 값의 OR가 아닌 값)을 InvalidArgument로 거부하고, 복원은 기본 정책에서 객체 생성 전에 거부한다(`ReportAndDefault`면 진단 후 대체 값). 값 검사 순서는 wire 종류(TypeMismatch) → 정수 폭(Overflow) → 그 밖의 값과 trailing byte(InvalidArgument)다. UInt8/16/32는 U32 wire, Int32/64는 I64 wire로 저장하고 대상 폭을 넘는 값은 Overflow로 거부한다. AssetId는 Guid wire, Digest256은 Bytes wire(길이가 정확히 32가 아니면 InvalidArgument), SoftObjectReference는 SoftObjectReference wire다. 소프트 참조는 저장 때(C++에서 직접 대입한 값)와 로드 때 모두 null 규칙(asset 0에 경로가 있으면 안 됨)과 4 KiB 경로 상한을 검사하고 어기면 InvalidArgument다. 소프트 참조는 GC 간선이 아니므로 대상 객체를 그래프에 포함하거나 찾지 않는다. Struct·Array는 B4·B5 전까지 Unsupported다. 모든 strong graph 필드가 `completeFieldLayout=true` metadata에 포함되고 schema와 필드 codec(`RuntimeFieldOps::encode`·`decode`)이 stable GUID별 1:1이어야 한다. 이 완전성 선언에는 상속 필드도 포함하며, 등록이 Transient가 아닌 모든 필드에 codec을 요구한다. Opaque·부분 metadata·누락 codec은 Unsupported다.
+지원 ValueKind는 bool, UInt8/16/32/64, Int32/64, Float32/64, Guid, Utf8String, ObjectReference, AssetId, Digest256, SoftObjectReference, Enum, Struct다. Enum은 I64 wire이며 저장(C++에서 직접 넣은 값)은 선언되지 않은 값(Flags enum은 선언 값의 OR가 아닌 값)을 InvalidArgument로 거부하고, 복원은 기본 정책에서 객체 생성 전에 거부한다(`ReportAndDefault`면 진단 후 대체 값). 값 검사 순서는 wire 종류(TypeMismatch) → 정수 폭(Overflow) → 그 밖의 값과 trailing byte(InvalidArgument)다. UInt8/16/32는 U32 wire, Int32/64는 I64 wire로 저장하고 대상 폭을 넘는 값은 Overflow로 거부한다. AssetId는 Guid wire, Digest256은 Bytes wire(길이가 정확히 32가 아니면 InvalidArgument), SoftObjectReference는 SoftObjectReference wire다. 소프트 참조는 저장 때(C++에서 직접 대입한 값)와 로드 때 모두 null 규칙(asset 0에 경로가 있으면 안 됨)과 4 KiB 경로 상한을 검사하고 어기면 InvalidArgument다. 소프트 참조는 GC 간선이 아니므로 대상 객체를 그래프에 포함하거나 찾지 않는다. Struct·Array는 B4·B5 전까지 Unsupported다. 모든 strong graph 필드가 `completeFieldLayout=true` metadata에 포함되고 schema와 필드 codec(`RuntimeFieldOps::encode`·`decode`)이 stable GUID별 1:1이어야 한다. 이 완전성 선언에는 상속 필드도 포함하며, 등록이 Transient가 아닌 모든 필드에 codec을 요구한다. Opaque·부분 metadata·누락 codec은 Unsupported다.
+
+### 리플렉션 struct 값
+
+struct 필드(`ValueKind::Struct`)의 값은 struct ID·버전 헤더의 중첩 Record다(설계 4.4·4.6절). 멤버는 struct 필드 ID TLV이며 struct 안 멤버도 같은 codec·정책을 따른다: 유효 플래그 전파(바깥 EditorOnly·Transient·ReadOnly), 제외 플래그, 모르는 멤버(진단 path는 감싼 struct 필드까지 — Reject 정책이면 InvalidArgument), 누락(허용되지 않으면 NotFound, 허용된 누락 struct 필드는 그 안의 Required 후손마다 전체 path로 `RequiredMissing` 진단), 저장된 Transient(Unsupported), 미선언 enum. 중첩 TLV도 그래프 필드 누계(`maxTotalFields`)에 센다.
+
+- 버전: 같으면 그대로, 낮으면 마이그레이션 — `ObjectGraphLoadOptions.migrateStruct`(override, Unsupported면 다음)를 먼저, 그다음 타입이 등록한 `RuntimeStructOps.migrate`, 둘 다 없으면 Unsupported. 결과는 정확히 현재 버전이어야 하고(아니면 Unsupported) 다시 마이그레이션하지 않는다. 1단계가 결과를 노드에 발생 순서로 보관하고(`maxMigrationBytes` 누계, 원본 + 결과 바이트 작업) 2단계는 같은 순서의 보관본을 (struct ID, 원본 버전)으로 대조해 쓴다 — 콜백은 등장마다 한 번이다. 높으면 `newerVersion` 정책(`LoadNewerSkippingUnknown`이면 path 있는 `NewerVersion` 진단 뒤 현재 스키마로 읽는다).
+- 복원 문맥은 Record 스택(`RecordScope`)을 쓴다: struct 값 안의 멤버 값은 맨 위 Record(마이그레이션 결과 포함)로 연다. 2단계는 같은 버전 범위·크기 한도에 무제한 operation·work로 다시 연다.
+- struct hook(`FieldCodecHooks`): `ObservedStructs`(로드 시작 때 검사 — 미등록 NotFound, 참조 struct InvalidArgument)의 struct는 1단계에서 검증과 같은 한 번의 해석으로 채운 임시 값으로 `ObserveStruct`를 받는다(실패하면 생성 전 로드 실패). 저장은 참조 없는 struct마다 `SubstituteStruct`로 대신 쓸 값을 받는다(그 struct encode 동안 유효, null은 InvalidArgument).
+- 참조 struct(강한 참조 멤버가 있는 struct)의 참조는 2단계에서 소유 객체 안 주소로 `SetReference`한다. 생성 Trace가 struct 안 참조를 방문한다.
 
 ### 필드 codec과 문맥
 
@@ -87,7 +98,7 @@ unknown field는 기본 진단 후 skip한다(`UnknownFieldPolicy::Reject`면 In
 | Archive work | 64Mi 단위 | byte 검사·복사·탐색 비용 |
 | Record fields | 4,096 | 레코드별 TLV 수 |
 | Graph objects | 1,024 | 단일 root 그래프 객체 수 |
-| Graph total fields | 4,096 | 원본 및 migration 재검증 TLV의 누계 |
+| Graph total fields | 1,048,576 | 원본·migration 재검증·중첩 struct TLV의 누계(Record 하나의 필드 수 한도도 남은 누계) |
 | Graph bytes/value bytes | 16MiB/4MiB | 전체 파일/개별 encoded field |
 | Graph migration bytes | 16MiB | callback 반환 buffer 누계 |
 | Graph work | 64Mi 단위 | lookup, codec 처리, index 초기화, fixup 비용 |

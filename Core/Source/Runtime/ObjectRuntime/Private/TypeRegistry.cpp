@@ -1,5 +1,6 @@
 #include <Object/TypeRegistry.h>
 #include <Object/ObjectRegistry.h>
+#include <Core/Algorithms.h>
 #include <Object/SoftObjectRef.h>
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
@@ -11,24 +12,30 @@ namespace rocks {
 Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
                                              const ObjectAccessContext& access, ObjectHandle handle,
                                              const FieldValue& value) const noexcept {
-    if (!callback_) {
+    // 묶인 struct 필드는 callback이 없다(아래에서 문맥·대상 검사 뒤 Unsupported).
+    const bool structField = bound_ && valueKind_ == ValueKind::Struct;
+    if (!callback_ && !structField) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (!bound_) {
         // 등록 전 원본 함수표는 기존 저수준 callback 계약을 유지한다.
         return callback_(registry, access, handle, value);
     }
+
     // 다른 TypeRegistry 또는 같은 native 타입의 별명 스키마도 대상 객체 기준으로 확인한다.
     // callback을 호출할 때는 registry 잠금을 보유하지 않으며 대상 타입 lease는 종료까지 유지한다.
     auto type = registry.AcquireType(access, handle);
     if (!type) {
         return Result<void>::Failure(type.Error());
     }
+
     // 필드를 선언한 타입 또는 그 파생 객체에 쓸 수 있다. 파생 스키마는 상속 필드를 같은 id·kind·
     // flags·참조 타입으로 포함함을 등록 시 강제한다.
     if (!type.Value().IsNativeA(nativeType_)) {
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
+
     const FieldSchema* actual = nullptr;
     usize actualIndex = 0;
     const auto fields = type.Value().Schema().fields;
@@ -39,9 +46,17 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
             break;
         }
     }
+
     if (!actual) {
         return Result<void>::Failure(ErrorCode::NotFound);
     }
+
+    // struct 필드는 FieldValue로 통째 쓰지 않는다(멤버 단위 쓰기는 B6 경로 접근 — 3.6절). 문맥·
+    // 수명·대상 타입·필드 검사 뒤의 정책 오류다.
+    if (structField) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
     // 검증에 쓴 lease(대상 타입·양쪽 기대 타입·참조 대상)는 callback 완료까지 유지한다. 그 전에
     // 해제하면 callback 재진입에서 같은 ID의 타입을 unregister/재등록해 검증과 실제 필드 게시의
     // 기준이 달라질 수 있다.
@@ -61,15 +76,19 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
             if (!expected) {
                 return Result<void>::Failure(expected.Error());
             }
+
             sourceExpected = Move(expected.Value());
         }
+
         if (actual->value.type != TypeId{}) {
             auto expected = registry.AcquireRegisteredType(access, actual->value.type);
             if (!expected) {
                 return Result<void>::Failure(expected.Error());
             }
+
             targetExpected = Move(expected.Value());
         }
+
         target.sourceExpectedNative =
             sourceExpected.IsValid() ? sourceExpected.Ops().nativeType : nullptr;
         target.targetExpectedNative =
@@ -85,20 +104,24 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
             if (value.reference.IsNull()) {
                 return Result<void>::Failure(ErrorCode::StaleHandle);
             }
+
             auto found = registry.AcquireType(access, value.reference);
             if (!found) {
                 return Result<void>::Failure(found.Error());
             }
+
             referenced = Move(found.Value());
             target.referenced = &referenced;
         }
     }
+
     detail::FieldWriteBinding binding;
     binding.value = ValueType{valueKind_, referencedType_};
     binding.readOnly = readOnly_;
     if (auto valid = detail::ValidateFieldWrite(binding, target, value); !valid) {
         return valid;
     }
+
     return callback_(registry, access, handle, value);
 }
 
@@ -169,21 +192,31 @@ uint64 NextRegistryDomain() noexcept {
     if (next == 0) {
         platform::Fatal("Registry domain exhausted");
     }
+
     return next++;
 }
 
 } // namespace detail
 
-// 클래스와 enum 레코드가 같은 목록·ID 공간을 쓴다. enum 레코드는 schema.id·name과
-// ops.nativeType·module만 채우고 enumSchema에 열거자를 둔다. 클래스 레코드의 fieldTypes는
-// schema.fields와 같은 길이이며 Enum 필드가 가리키는 enum 레코드(그 밖은 nullptr)다 — 이 참조는
-// lease가 아니라 dependents 계수로 표시하므로 Shutdown이 영구 Busy가 되지 않는다.
+// 클래스·enum·struct 레코드가 같은 목록·ID 공간을 쓴다. enum 레코드는 schema.id·name과
+// ops.nativeType·module만 채우고 enumSchema에 열거자를 둔다. struct 레코드는 schema(id·version·
+// name·fields)와 ops(size·alignment·nativeType·module)를 채우고 structOps에 멤버 함수표(스키마
+// 순서)·construct·destroy·trace·migrate를, fieldOrder에 필드 ID 순 정렬 색인을 둔다. 클래스·struct
+// 레코드의 fieldTypes는 schema.fields와 같은 길이이며 Enum·Struct 필드가 가리키는 레코드(그 밖은
+// nullptr)다 — 이 참조는 lease가 아니라 dependents 계수로 표시하므로 Shutdown이 영구 Busy가 되지
+// 않는다.
 struct TypeRegistry::Record {
     Record* next = nullptr;
     TypeKind kind = TypeKind::Class;
     TypeSchema schema;
     RuntimeTypeOps ops;
     EnumSchema enumSchema;
+    RuntimeStructOps structOps;
+    uint32* fieldOrder = nullptr;
+    uint32 depth = 0;
+    bool containsStrongReference = false;
+    bool containsRequired = false;
+    bool requiresWorldOnlyOwner = false;
     Record** fieldTypes = nullptr;
     uint32 generation = 0;
     uint32 leases = 0;
@@ -197,6 +230,7 @@ bool AddBytes(usize& total, usize count) noexcept {
     if (count > ~usize(0) - total) {
         return false;
     }
+
     total += count;
     return true;
 }
@@ -207,6 +241,7 @@ Span<const T> CopyBytes(Span<const T> source, uint8*& cursor) noexcept {
     for (usize index = 0; index < source.Size(); ++index) {
         destination[index] = source[index];
     }
+
     cursor += source.Size() * sizeof(T);
     return {destination, source.Size()};
 }
@@ -266,10 +301,9 @@ bool SameBytes(Span<const char> left, Span<const char> right) noexcept {
     return true;
 }
 
-// 지금 등록할 수 있는 값 종류다. Struct·Array는 각 단계(B4·B5)에서 연다.
+// 지금 등록할 수 있는 값 종류다. Array는 B5에서 연다.
 bool SupportedValueKind(ValueKind kind) noexcept {
     switch (kind) {
-    case ValueKind::Struct:
     case ValueKind::Array:
         return false;
     default:
@@ -331,6 +365,99 @@ Span<const char> EffectiveToolName(const FieldSchema& field) noexcept {
     return field.toolName.Size() != 0 ? field.toolName : field.name;
 }
 
+// 클래스·struct가 함께 쓰는 필드 서술 검사다(Docs/Design/ReflectionFoundations.ko.md 4.6절). 필드
+// 하나의 규칙(플래그·값 종류·Required·도구 이름)과 필드 사이 규칙(같은 ID·실효 도구 이름은
+// AlreadyExists)을 본다. typedFields에 Opaque가 아닌 필드 수를 쓴다.
+Result<void> ValidateFieldList(Span<const FieldSchema> fields, usize& typedFields) noexcept {
+    typedFields = 0;
+    if (fields.Size() > 4096) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    for (usize index = 0; index < fields.Size(); ++index) {
+        const auto& field = fields[index];
+        // Required는 typed 참조 필드에만 뜻이 있다(저장이 null을 검사하려면 접근기가 있어야 한다).
+        // 도구 이름은 비어 있거나 ASCII 식별자다.
+        if (field.id == Guid{} || (field.flags & ~KnownFieldFlags) != 0 ||
+            (HasFlag(field.flags, FieldFlags::Required) &&
+             field.value.kind != ValueKind::ObjectReference &&
+             field.value.kind != ValueKind::SoftObjectReference) ||
+            (field.kind != FieldKind::Value && field.kind != FieldKind::ObjectReference) ||
+            !SupportedValueKind(field.value.kind) || field.element.kind != ValueKind::Opaque ||
+            field.element.type != TypeId{} || field.maxElements != 0 ||
+            !StringView(field.name.Data(), field.name.Size()).ValidateUtf8() ||
+            !StringView(field.category.Data(), field.category.Size()).ValidateUtf8() ||
+            !StringView(field.displayName.Data(), field.displayName.Size()).ValidateUtf8() ||
+            (field.toolName.Size() != 0 && !IsAsciiIdentifier(field.toolName))) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        // FieldKind::ObjectReference(강한 GC 간선) ⇔ value.kind == ObjectReference. value.type은
+        // 참조·소프트 참조의 기대 대상과 Enum·Struct의 대상 ID에만 쓴다. Enum·Struct는 ID가
+        // 필요하다.
+        if (field.value.kind != ValueKind::Opaque) {
+            ++typedFields;
+            const bool reference = field.value.kind == ValueKind::ObjectReference;
+            const bool valueType =
+                field.value.kind == ValueKind::Enum || field.value.kind == ValueKind::Struct;
+            const bool typed =
+                reference || valueType || field.value.kind == ValueKind::SoftObjectReference;
+            if (field.name.Size() == 0 || (field.kind == FieldKind::ObjectReference) != reference ||
+                (!typed && field.value.type != TypeId{}) ||
+                (valueType && field.value.type == TypeId{})) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+        } else if (field.value.type != TypeId{}) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        for (usize previous = 0; previous < index; ++previous) {
+            if (field.id == fields[previous].id) {
+                return Result<void>::Failure(ErrorCode::AlreadyExists);
+            }
+
+            // 실효 도구 이름(상속 필드 포함)은 대소문자 무시로 유일하다. 이름 없는 Opaque 필드는
+            // 제외한다.
+            const Span<const char> name = EffectiveToolName(field);
+            if (name.Size() != 0 &&
+                EqualsIgnoringAsciiCase(name, EffectiveToolName(fields[previous]))) {
+                return Result<void>::Failure(ErrorCode::AlreadyExists);
+            }
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+// Enum·Struct 필드만 값의 native 키를 싣는다.
+bool CarriesValueNativeType(ValueKind kind) noexcept {
+    return kind == ValueKind::Enum || kind == ValueKind::Struct;
+}
+
+// 클래스 함수표에서 필드 ID의 valueNativeType을 찾는다(ResolveValueTypes의 thunkType).
+const void* ClassThunkType(const void* context, Guid fieldId) noexcept {
+    const auto& fields = *static_cast<const Span<const RuntimeFieldOps>*>(context);
+    for (const RuntimeFieldOps& field : fields) {
+        if (field.fieldId == fieldId) {
+            return field.valueNativeType;
+        }
+    }
+
+    return nullptr;
+}
+
+// struct 함수표에서 필드 ID의 valueNativeType을 찾는다.
+const void* StructThunkType(const void* context, Guid fieldId) noexcept {
+    const auto& fields = *static_cast<const Span<const RuntimeStructFieldOps>*>(context);
+    for (const RuntimeStructFieldOps& field : fields) {
+        if (field.fieldId == fieldId) {
+            return field.valueNativeType;
+        }
+    }
+
+    return nullptr;
+}
+
 } // namespace
 
 TypeRegistry::TypeRegistry(Allocator& allocator) noexcept
@@ -358,6 +485,7 @@ TypeLease& TypeLease::operator=(TypeLease&& other) noexcept {
         other.owner_ = nullptr;
         other.record_ = nullptr;
     }
+
     return *this;
 }
 
@@ -377,6 +505,7 @@ Result<TypeLease> TypeLease::Clone() const noexcept {
     if (!owner_) {
         return Result<TypeLease>::Failure(ErrorCode::InvalidArgument);
     }
+
     return owner_->Clone(record_);
 }
 
@@ -384,6 +513,7 @@ const TypeSchema& TypeLease::Schema() const& noexcept {
     if (!record_) {
         platform::Fatal("Access to an empty TypeLease");
     }
+
     return static_cast<TypeRegistry::Record*>(record_)->schema;
 }
 
@@ -395,6 +525,7 @@ TypeKind TypeLease::Kind() const noexcept {
     if (!record_) {
         platform::Fatal("Access to an empty TypeLease");
     }
+
     return static_cast<TypeRegistry::Record*>(record_)->kind;
 }
 
@@ -402,6 +533,7 @@ const EnumSchema& TypeLease::Enum() const& noexcept {
     if (Kind() != TypeKind::Enum) {
         platform::Fatal("TypeLease::Enum called on a non-enum lease");
     }
+
     return static_cast<TypeRegistry::Record*>(record_)->enumSchema;
 }
 
@@ -410,10 +542,131 @@ const EnumSchema* TypeLease::FieldEnum(usize fieldIndex) const& noexcept {
     if (!record || fieldIndex >= record->schema.fields.Size()) {
         platform::Fatal("TypeLease::FieldEnum called on an empty lease or out of range");
     }
-    if (!record->fieldTypes || !record->fieldTypes[fieldIndex]) {
+
+    if (!record->fieldTypes || !record->fieldTypes[fieldIndex] ||
+        record->fieldTypes[fieldIndex]->kind != TypeKind::Enum) {
         return nullptr;
     }
+
     return &record->fieldTypes[fieldIndex]->enumSchema;
+}
+
+StructView TypeLease::FieldStruct(usize fieldIndex) const& noexcept {
+    const auto* record = static_cast<TypeRegistry::Record*>(record_);
+    if (!record || fieldIndex >= record->schema.fields.Size()) {
+        platform::Fatal("TypeLease::FieldStruct called on an empty lease or out of range");
+    }
+
+    if (!record->fieldTypes || !record->fieldTypes[fieldIndex] ||
+        record->fieldTypes[fieldIndex]->kind != TypeKind::Struct) {
+        return StructView();
+    }
+
+    return StructView(record->fieldTypes[fieldIndex]);
+}
+
+StructView TypeLease::Struct() const& noexcept {
+    if (Kind() != TypeKind::Struct) {
+        platform::Fatal("TypeLease::Struct called on a non-struct lease");
+    }
+
+    return StructView(record_);
+}
+
+const RuntimeStructOps& TypeLease::StructOps() const& noexcept {
+    if (Kind() != TypeKind::Struct) {
+        platform::Fatal("TypeLease::StructOps called on a non-struct lease");
+    }
+
+    return static_cast<TypeRegistry::Record*>(record_)->structOps;
+}
+
+namespace {
+
+// 레코드 타입 이름(private)은 호출하는 StructView 멤버(TypeRegistry의 friend)에서 접근 검사된다.
+template <class Record>
+const Record& ViewAs(const void* record) noexcept {
+    if (!record) {
+        platform::Fatal("Access to an empty StructView");
+    }
+
+    return *static_cast<const Record*>(record);
+}
+
+} // namespace
+
+const TypeSchema& StructView::Schema() const noexcept {
+    return ViewAs<TypeRegistry::Record>(record_).schema;
+}
+
+const RuntimeStructOps& StructView::StructOps() const noexcept {
+    return ViewAs<TypeRegistry::Record>(record_).structOps;
+}
+
+const RuntimeStructFieldOps& StructView::FieldOps(usize schemaIndex) const noexcept {
+    const auto& record = ViewAs<TypeRegistry::Record>(record_);
+    if (schemaIndex >= record.structOps.fields.Size()) {
+        platform::Fatal("StructView::FieldOps out of range");
+    }
+
+    return record.structOps.fields[schemaIndex];
+}
+
+usize StructView::FieldIndex(Guid fieldId) const noexcept {
+    const auto& record = ViewAs<TypeRegistry::Record>(record_);
+    usize low = 0;
+    usize high = record.schema.fields.Size();
+    while (low < high) {
+        const usize middle = low + (high - low) / 2;
+        const Guid id = record.schema.fields[record.fieldOrder[middle]].id;
+        if (id == fieldId) {
+            return record.fieldOrder[middle];
+        }
+
+        if (id.high < fieldId.high || (id.high == fieldId.high && id.low < fieldId.low)) {
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+
+    return NoField;
+}
+
+const EnumSchema* StructView::FieldEnum(usize schemaIndex) const noexcept {
+    const auto& record = ViewAs<TypeRegistry::Record>(record_);
+    if (schemaIndex >= record.schema.fields.Size()) {
+        platform::Fatal("StructView::FieldEnum out of range");
+    }
+
+    const auto* target = record.fieldTypes[schemaIndex];
+    return target && target->kind == TypeKind::Enum ? &target->enumSchema : nullptr;
+}
+
+StructView StructView::FieldStruct(usize schemaIndex) const noexcept {
+    const auto& record = ViewAs<TypeRegistry::Record>(record_);
+    if (schemaIndex >= record.schema.fields.Size()) {
+        platform::Fatal("StructView::FieldStruct out of range");
+    }
+
+    const auto* target = record.fieldTypes[schemaIndex];
+    return target && target->kind == TypeKind::Struct ? StructView(target) : StructView();
+}
+
+uint32 StructView::Depth() const noexcept {
+    return ViewAs<TypeRegistry::Record>(record_).depth;
+}
+
+bool StructView::ContainsStrongReference() const noexcept {
+    return ViewAs<TypeRegistry::Record>(record_).containsStrongReference;
+}
+
+bool StructView::ContainsRequired() const noexcept {
+    return ViewAs<TypeRegistry::Record>(record_).containsRequired;
+}
+
+bool StructView::RequiresWorldOnlyOwner() const noexcept {
+    return ViewAs<TypeRegistry::Record>(record_).requiresWorldOnlyOwner;
 }
 
 StringView TypeLease::Name() const& noexcept {
@@ -425,6 +678,7 @@ const RuntimeTypeOps& TypeLease::Ops() const& noexcept {
     if (!record_) {
         platform::Fatal("Access to an empty TypeLease");
     }
+
     return static_cast<TypeRegistry::Record*>(record_)->ops;
 }
 
@@ -439,6 +693,7 @@ bool TypeLease::IsA(TypeId expected) const noexcept {
             return true;
         }
     }
+
     return false;
 }
 
@@ -459,6 +714,7 @@ bool TypeLease::IsNativeA(const void* nativeType) const noexcept {
             return true;
         }
     }
+
     return false;
 }
 
@@ -466,10 +722,12 @@ Result<bool> TypeRegistry::IsA(TypeId actual, TypeId expected) noexcept {
     if (expected == TypeId{}) {
         return Result<bool>::Failure(ErrorCode::InvalidArgument);
     }
+
     auto lease = Acquire(actual);
     if (!lease) {
         return Result<bool>::Failure(lease.Error());
     }
+
     return Result<bool>::Success(lease.Value().IsA(expected));
 }
 
@@ -478,6 +736,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     if (platform::CurrentThreadId() != ownerThread_) {
         return Result<TypeRegistrationToken>::Failure(ErrorCode::WrongThread);
     }
+
     if (schema.id == Guid{} || schema.version == 0 || schema.fields.Size() > 4096 ||
         ops.fields.Size() > schema.fields.Size() || schema.baseType == schema.id ||
         (schema.flags & ~KnownTypeFlags) != 0 ||
@@ -487,59 +746,17 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         !StringView(schema.name.Data(), schema.name.Size()).ValidateUtf8()) {
         return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
     }
-    usize typedFields = 0;
-    for (usize index = 0; index < schema.fields.Size(); ++index) {
-        const auto& field = schema.fields[index];
-        // Required는 typed 참조 필드에만 뜻이 있다(저장이 null을 검사하려면 접근기가 있어야 한다).
-        // 도구 이름은 비어 있거나 ASCII 식별자다.
-        if (field.id == Guid{} || (field.flags & ~KnownFieldFlags) != 0 ||
-            (HasFlag(field.flags, FieldFlags::Required) &&
-             field.value.kind != ValueKind::ObjectReference &&
-             field.value.kind != ValueKind::SoftObjectReference) ||
-            (field.kind != FieldKind::Value && field.kind != FieldKind::ObjectReference) ||
-            !SupportedValueKind(field.value.kind) || field.element.kind != ValueKind::Opaque ||
-            field.element.type != TypeId{} || field.maxElements != 0 ||
-            !StringView(field.name.Data(), field.name.Size()).ValidateUtf8() ||
-            !StringView(field.category.Data(), field.category.Size()).ValidateUtf8() ||
-            !StringView(field.displayName.Data(), field.displayName.Size()).ValidateUtf8() ||
-            (field.toolName.Size() != 0 && !IsAsciiIdentifier(field.toolName))) {
-            return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
-        }
-        // FieldKind::ObjectReference(강한 GC 간선) ⇔ value.kind == ObjectReference. value.type은
-        // 참조·소프트 참조의 기대 대상과 Enum의 enum ID에만 쓴다(Struct는 B4). Enum은 ID가
-        // 필요하다.
-        if (field.value.kind != ValueKind::Opaque) {
-            ++typedFields;
-            const bool reference = field.value.kind == ValueKind::ObjectReference;
-            const bool enumeration = field.value.kind == ValueKind::Enum;
-            const bool typed =
-                reference || enumeration || field.value.kind == ValueKind::SoftObjectReference;
-            if (field.name.Size() == 0 || (field.kind == FieldKind::ObjectReference) != reference ||
-                (!typed && field.value.type != TypeId{}) ||
-                (enumeration && field.value.type == TypeId{})) {
-                return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
-            }
-        } else if (field.value.type != TypeId{}) {
-            return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
-        }
-        for (usize previous = 0; previous < index; ++previous) {
-            if (field.id == schema.fields[previous].id) {
-                return Result<TypeRegistrationToken>::Failure(ErrorCode::AlreadyExists);
-            }
 
-            // 실효 도구 이름(상속 필드 포함)은 대소문자 무시로 유일하다. 이름 없는 Opaque 필드는
-            // 제외한다.
-            const Span<const char> name = EffectiveToolName(field);
-            if (name.Size() != 0 &&
-                EqualsIgnoringAsciiCase(name, EffectiveToolName(schema.fields[previous]))) {
-                return Result<TypeRegistrationToken>::Failure(ErrorCode::AlreadyExists);
-            }
-        }
+    usize typedFields = 0;
+    if (auto validated = ValidateFieldList(schema.fields, typedFields); !validated) {
+        return Result<TypeRegistrationToken>::Failure(validated.Error());
     }
+
     if (typedFields != ops.fields.Size() ||
         (ops.completeFieldLayout && typedFields != schema.fields.Size())) {
         return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
     }
+
     // 완전한 필드 배치를 선언한 타입은 그래프에 저장할 수 있어야 하므로 Transient가 아닌 모든
     // 필드에 codec(encode·decode)이 있어야 한다(Docs/Design/ReflectionFoundations.ko.md 6.4절).
     if (ops.completeFieldLayout) {
@@ -562,22 +779,31 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
             }
         }
     }
+
     for (usize index = 0; index < ops.fields.Size(); ++index) {
         const auto& field = ops.fields[index];
-        bool matched = false;
+        const FieldSchema* matched = nullptr;
         for (usize schemaIndex = 0; schemaIndex < schema.fields.Size(); ++schemaIndex) {
             const auto& schemaField = schema.fields[schemaIndex];
-            // Enum 필드만 값의 native 키를 싣는다.
             if (schemaField.id == field.fieldId && schemaField.value.kind != ValueKind::Opaque &&
-                (schemaField.value.kind == ValueKind::Enum) == (field.valueNativeType != nullptr)) {
-                matched = true;
+                CarriesValueNativeType(schemaField.value.kind) ==
+                    (field.valueNativeType != nullptr)) {
+                matched = &schemaField;
                 break;
             }
         }
-        if (!matched || !field.read || !field.write || !field.writeStaged ||
-            (field.encode == nullptr) != (field.decode == nullptr)) {
+
+        // struct 필드는 FieldValue로 통째 읽고 쓰지 않으므로 read·write·writeStaged가 없어야
+        // 하고(멤버 단위는 B6 경로 접근) 그 밖의 필드는 셋 다 있어야 한다.
+        const bool structField = matched && matched->value.kind == ValueKind::Struct;
+        const bool accessors = structField ? (!field.read && !field.write && !field.writeStaged)
+                                           : (field.read && field.write && field.writeStaged);
+        // struct 필드는 Transient가 아니면 codec이 있어야 한다(그 밖은 completeFieldLayout 규칙).
+        if (!matched || !accessors || (field.encode == nullptr) != (field.decode == nullptr) ||
+            (structField && !field.encode && !HasFlag(matched->flags, FieldFlags::Transient))) {
             return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
         }
+
         for (usize previous = 0; previous < index; ++previous) {
             if (field.fieldId == ops.fields[previous].fieldId) {
                 return Result<TypeRegistrationToken>::Failure(ErrorCode::AlreadyExists);
@@ -597,6 +823,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     if (!AddBytes(bytes, schema.name.Size())) {
         return Result<TypeRegistrationToken>::Failure(ErrorCode::Overflow);
     }
+
     for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
         const auto& field = schema.fields[fieldIndex];
         if (!AddBytes(bytes, field.name.Size()) || !AddBytes(bytes, field.attributes.Size()) ||
@@ -605,6 +832,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
             return Result<TypeRegistrationToken>::Failure(ErrorCode::Overflow);
         }
     }
+
     Record* base = nullptr;
     {
         platform::LockGuard lock(gate_);
@@ -613,74 +841,55 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
                                                           : mutating_ ? ErrorCode::Busy
                                                                       : ErrorCode::Overflow);
         }
+
         for (Record* record = records_; record; record = record->next) {
             if (record->schema.id == schema.id) {
                 return Result<TypeRegistrationToken>::Failure(ErrorCode::AlreadyExists);
             }
+
             if (record->schema.id == schema.baseType) {
                 // base는 클래스여야 한다(Acquire의 종류 규칙과 같다).
                 if (record->kind != TypeKind::Class) {
                     return Result<TypeRegistrationToken>::Failure(ErrorCode::TypeMismatch);
                 }
+
                 base = record;
             }
         }
-        // Enum 필드가 가리키는 enum은 먼저 등록되어 있어야 하고, 정적 thunk의 enum과 같은 native
-        // 타입이어야 한다.
-        for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
-            const auto& field = schema.fields[fieldIndex];
-            if (field.value.kind != ValueKind::Enum) {
-                continue;
-            }
 
-            Record* target = nullptr;
-            for (Record* record = records_; record; record = record->next) {
-                if (record->schema.id == field.value.type) {
-                    target = record;
-                    break;
-                }
-            }
-
-            if (!target) {
-                return Result<TypeRegistrationToken>::Failure(ErrorCode::NotFound);
-            }
-
-            const void* thunkType = nullptr;
-            for (usize opsIndex = 0; opsIndex < ops.fields.Size(); ++opsIndex) {
-                if (ops.fields[opsIndex].fieldId == field.id) {
-                    thunkType = ops.fields[opsIndex].valueNativeType;
-                    break;
-                }
-            }
-
-            if (target->kind != TypeKind::Enum || thunkType != target->ops.nativeType) {
-                return Result<TypeRegistrationToken>::Failure(ErrorCode::TypeMismatch);
-            }
-
-            if (target->dependents >= 0xffffffffu - schema.fields.Size()) {
-                return Result<TypeRegistrationToken>::Failure(ErrorCode::Overflow);
-            }
+        // Enum·Struct 필드가 가리키는 레코드는 먼저 등록되어 있어야 하고, 정적 thunk의 C++ 타입과
+        // 같은 native 타입이어야 한다. WorldOnly가 아닌 클래스는 WorldOnly 소유자를 요구하는
+        // struct를 필드로 둘 수 없다.
+        if (auto resolved = ResolveValueTypes(schema.fields, &ClassThunkType, &ops.fields,
+                                              HasFlag(schema.flags, TypeFlags::WorldOnly), nullptr);
+            !resolved) {
+            return Result<TypeRegistrationToken>::Failure(resolved.Error());
         }
+
         if (schema.baseType != TypeId{}) {
             if (!base) {
                 return Result<TypeRegistrationToken>::Failure(ErrorCode::NotFound);
             }
+
             if (ops.nativeBaseType != base->ops.nativeType || base->dependents == 0xffffffffu) {
                 return Result<TypeRegistrationToken>::Failure(base->dependents == 0xffffffffu
                                                                   ? ErrorCode::Overflow
                                                                   : ErrorCode::TypeMismatch);
             }
+
             // nativeBaseType은 Resolve<기반>의 포인터 변환 근거다. C++ 상속 자체는 등록 코드의
             // static_assert(__is_base_of)가 보증하고, 여기서는 명백히 잘못된 수동 함수표(기반보다
             // 작거나 정렬이 약한 파생)를 거부한다.
             if (ops.size < base->ops.size || ops.alignment < base->ops.alignment) {
                 return Result<TypeRegistrationToken>::Failure(ErrorCode::TypeMismatch);
             }
+
             // WorldOnly는 상속되는 플래그다. 수동 등록이 파생에서 빠뜨려도 받아들이지 않는다.
             if (HasFlag(base->schema.flags, TypeFlags::WorldOnly) &&
                 !HasFlag(schema.flags, TypeFlags::WorldOnly)) {
                 return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
             }
+
             // 파생 스키마는 base field를 동일한 안정 ID/표현으로 포함한다. 그래서 기반 타입의 필드
             // 함수(Resolve<기반> 경유)를 파생 객체에 써도 같은 필드를 가리킨다.
             for (usize baseIndex = 0; baseIndex < base->schema.fields.Size(); ++baseIndex) {
@@ -700,6 +909,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
                         break;
                     }
                 }
+
                 if (!matched) {
                     return Result<TypeRegistrationToken>::Failure(ErrorCode::TypeMismatch);
                 }
@@ -707,6 +917,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         } else if (ops.nativeBaseType != nullptr) {
             return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
         }
+
         mutating_ = true;
     }
 
@@ -716,9 +927,11 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         mutating_ = false;
         return Result<TypeRegistrationToken>::Failure(memory.Error());
     }
+
     if (!memory.Value()) {
         platform::Fatal("Allocator returned null TypeRegistry record");
     }
+
     Record* record = ::new (memory.Value()) Record();
     auto* fields =
         reinterpret_cast<FieldSchema*>(static_cast<uint8*>(memory.Value()) + fieldOffset);
@@ -728,26 +941,15 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         reinterpret_cast<Record**>(static_cast<uint8*>(memory.Value()) + typesOffset);
     uint8* cursor = reinterpret_cast<uint8*>(fieldTypes + schema.fields.Size());
     {
-        // mutating_이 등록·해제를 막으므로 위에서 확인한 enum 레코드가 그대로 있다.
+        // mutating_이 등록·해제를 막으므로 위에서 확인한 enum·struct 레코드가 그대로 있다.
         platform::LockGuard lock(gate_);
-        for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
-            fieldTypes[fieldIndex] = nullptr;
-            if (schema.fields[fieldIndex].value.kind != ValueKind::Enum) {
-                continue;
-            }
-
-            for (Record* target = records_; target; target = target->next) {
-                if (target->schema.id == schema.fields[fieldIndex].value.type) {
-                    fieldTypes[fieldIndex] = target;
-                    break;
-                }
-            }
-
-            if (!fieldTypes[fieldIndex]) {
-                platform::Fatal("TypeRegistry enum dependency vanished during registration");
-            }
+        Span<const RuntimeFieldOps> thunks = ops.fields;
+        if (!ResolveValueTypes(schema.fields, &ClassThunkType, &thunks,
+                               HasFlag(schema.flags, TypeFlags::WorldOnly), fieldTypes)) {
+            platform::Fatal("TypeRegistry value type dependency vanished during registration");
         }
     }
+
     record->fieldTypes = fieldTypes;
     record->schema.id = schema.id;
     record->schema.version = schema.version;
@@ -763,6 +965,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         fields[index].displayName = CopyBytes(schema.fields[index].displayName, cursor);
         fields[index].toolName = CopyBytes(schema.fields[index].toolName, cursor);
     }
+
     for (usize index = 0; index < ops.fields.Size(); ++index) {
         ::new (fieldOps + index) RuntimeFieldOps(ops.fields[index]);
         for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
@@ -776,6 +979,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
             }
         }
     }
+
     record->ops = Move(ops);
     record->ops.fields = {fieldOps, record->ops.fields.Size()};
     record->base = base;
@@ -787,11 +991,13 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     if (base) {
         ++base->dependents;
     }
+
     for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
         if (fieldTypes[fieldIndex]) {
             ++fieldTypes[fieldIndex]->dependents;
         }
     }
+
     mutating_ = false;
     return Result<TypeRegistrationToken>::Success({domain_, record->generation, schema.id});
 }
@@ -856,6 +1062,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterEnum(const EnumSchema& schem
                                                           : mutating_ ? ErrorCode::Busy
                                                                       : ErrorCode::Overflow);
         }
+
         // 같은 C++ enum을 다른 ID로 다시 등록하지 않는다. 생성 thunk는 GeneratedType<E>::Id()
         // 하나만 받으므로 별칭 ID를 가리키는 필드는 쓸 수도 저장할 수도 없게 된다.
         for (Record* record = records_; record; record = record->next) {
@@ -864,6 +1071,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterEnum(const EnumSchema& schem
                 return Result<TypeRegistrationToken>::Failure(ErrorCode::AlreadyExists);
             }
         }
+
         mutating_ = true;
     }
 
@@ -873,9 +1081,11 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterEnum(const EnumSchema& schem
         mutating_ = false;
         return Result<TypeRegistrationToken>::Failure(memory.Error());
     }
+
     if (!memory.Value()) {
         platform::Fatal("Allocator returned null TypeRegistry record");
     }
+
     Record* record = ::new (memory.Value()) Record();
     auto* values =
         reinterpret_cast<EnumeratorSchema*>(static_cast<uint8*>(memory.Value()) + valuesOffset);
@@ -894,6 +1104,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterEnum(const EnumSchema& schem
         values[index].toolName = CopyBytes(schema.values[index].toolName, cursor);
         values[index].displayName = CopyBytes(schema.values[index].displayName, cursor);
     }
+
     record->enumSchema.values = {values, schema.values.Size()};
     record->ops.nativeType = ops.nativeType;
     record->ops.module = Move(ops.module);
@@ -906,24 +1117,290 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterEnum(const EnumSchema& schem
     return Result<TypeRegistrationToken>::Success({domain_, record->generation, schema.id});
 }
 
+Result<void> TypeRegistry::ResolveValueTypes(Span<const FieldSchema> fields,
+                                             const void* (*thunkType)(const void*, Guid),
+                                             const void* context, bool ownerWorldOnly,
+                                             Record** targets) noexcept {
+    for (usize index = 0; index < fields.Size(); ++index) {
+        const auto& field = fields[index];
+        if (targets) {
+            targets[index] = nullptr;
+        }
+
+        const bool enumeration = field.value.kind == ValueKind::Enum;
+        if (!enumeration && field.value.kind != ValueKind::Struct) {
+            continue;
+        }
+
+        Record* target = nullptr;
+        for (Record* record = records_; record; record = record->next) {
+            if (record->schema.id == field.value.type) {
+                target = record;
+                break;
+            }
+        }
+
+        if (!target) {
+            return Result<void>::Failure(ErrorCode::NotFound);
+        }
+
+        // 스키마로 해석한 대상과 정적 thunk의 C++ 타입이 어긋나지 않게 한다.
+        const TypeKind expected = enumeration ? TypeKind::Enum : TypeKind::Struct;
+        if (target->kind != expected || thunkType(context, field.id) != target->ops.nativeType) {
+            return Result<void>::Failure(ErrorCode::TypeMismatch);
+        }
+
+        if (!ownerWorldOnly && target->requiresWorldOnlyOwner) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (target->dependents >= 0xffffffffu - fields.Size()) {
+            return Result<void>::Failure(ErrorCode::Overflow);
+        }
+
+        if (targets) {
+            targets[index] = target;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& schema,
+                                                           RuntimeStructOps ops) noexcept {
+    if (platform::CurrentThreadId() != ownerThread_) {
+        return Result<TypeRegistrationToken>::Failure(ErrorCode::WrongThread);
+    }
+
+    if (schema.id == Guid{} || schema.version == 0 || schema.baseType != TypeId{} ||
+        schema.flags != 0 || ops.size == 0 || ops.alignment == 0 ||
+        (ops.alignment & (ops.alignment - 1)) != 0 || !ops.nativeType || !ops.construct ||
+        !ops.destroy || ops.fields.Size() != schema.fields.Size() ||
+        !StringView(schema.name.Data(), schema.name.Size()).ValidateUtf8()) {
+        return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    usize typedFields = 0;
+    if (auto validated = ValidateFieldList(schema.fields, typedFields); !validated) {
+        return Result<TypeRegistrationToken>::Failure(validated.Error());
+    }
+
+    // struct는 부분 metadata를 허용하지 않는다: 모든 필드가 typed이고 함수표는 스키마와 1:1이며
+    // Transient가 아닌 필드는 codec을 가진다.
+    if (typedFields != schema.fields.Size()) {
+        return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    bool strongReference = false;
+    bool required = false;
+    for (const FieldSchema& field : schema.fields) {
+        strongReference = strongReference || field.value.kind == ValueKind::ObjectReference;
+        // Transient 멤버는 저장·복원하지 않으므로 Required 누락 진단 대상이 아니다.
+        required = required || (HasFlag(field.flags, FieldFlags::Required) &&
+                                !HasFlag(field.flags, FieldFlags::Transient));
+        const RuntimeStructFieldOps* match = nullptr;
+        usize found = 0;
+        for (const RuntimeStructFieldOps& candidate : ops.fields) {
+            if (candidate.fieldId == field.id) {
+                match = &candidate;
+                ++found;
+            }
+        }
+
+        if (found != 1 ||
+            CarriesValueNativeType(field.value.kind) != (match->valueNativeType != nullptr) ||
+            (match->encode == nullptr) != (match->decode == nullptr) ||
+            (!HasFlag(field.flags, FieldFlags::Transient) && !match->encode)) {
+            return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
+    constexpr usize fieldOffset =
+        (sizeof(Record) + alignof(FieldSchema) - 1) & ~(alignof(FieldSchema) - 1);
+    const usize fieldEnd = fieldOffset + schema.fields.Size() * sizeof(FieldSchema);
+    const usize opsOffset =
+        (fieldEnd + alignof(RuntimeStructFieldOps) - 1) & ~(alignof(RuntimeStructFieldOps) - 1);
+    const usize opsEnd = opsOffset + schema.fields.Size() * sizeof(RuntimeStructFieldOps);
+    const usize typesOffset = (opsEnd + alignof(Record*) - 1) & ~(alignof(Record*) - 1);
+    const usize typesEnd = typesOffset + schema.fields.Size() * sizeof(Record*);
+    const usize orderOffset = (typesEnd + alignof(uint32) - 1) & ~(alignof(uint32) - 1);
+    usize bytes = orderOffset + schema.fields.Size() * sizeof(uint32);
+    if (!AddBytes(bytes, schema.name.Size())) {
+        return Result<TypeRegistrationToken>::Failure(ErrorCode::Overflow);
+    }
+
+    for (const FieldSchema& field : schema.fields) {
+        if (!AddBytes(bytes, field.name.Size()) || !AddBytes(bytes, field.attributes.Size()) ||
+            !AddBytes(bytes, field.category.Size()) || !AddBytes(bytes, field.displayName.Size()) ||
+            !AddBytes(bytes, field.toolName.Size())) {
+            return Result<TypeRegistrationToken>::Failure(ErrorCode::Overflow);
+        }
+    }
+
+    uint32 depth = 1;
+    bool requiresWorldOnlyOwner = ops.requiresWorldOnlyOwner;
+    {
+        platform::LockGuard lock(gate_);
+        if (closed_ || mutating_ || nextGeneration_ == 0) {
+            return Result<TypeRegistrationToken>::Failure(closed_     ? ErrorCode::ShuttingDown
+                                                          : mutating_ ? ErrorCode::Busy
+                                                                      : ErrorCode::Overflow);
+        }
+
+        // 같은 C++ struct를 다른 ID로 다시 등록하지 않는다(생성 thunk는 생성 ID 하나만 받는다).
+        for (Record* record = records_; record; record = record->next) {
+            if (record->schema.id == schema.id ||
+                (record->kind == TypeKind::Struct && record->ops.nativeType == ops.nativeType)) {
+                return Result<TypeRegistrationToken>::Failure(ErrorCode::AlreadyExists);
+            }
+        }
+
+        // struct는 WorldOnly 형질을 거부하지 않고 전파한다(그것을 필드로 둔 클래스가 판정한다).
+        Span<const RuntimeStructFieldOps> thunks = ops.fields;
+        if (auto resolved =
+                ResolveValueTypes(schema.fields, &StructThunkType, &thunks, true, nullptr);
+            !resolved) {
+            return Result<TypeRegistrationToken>::Failure(resolved.Error());
+        }
+
+        for (const FieldSchema& field : schema.fields) {
+            if (field.value.kind != ValueKind::Struct) {
+                continue;
+            }
+
+            for (Record* record = records_; record; record = record->next) {
+                if (record->schema.id == field.value.type) {
+                    depth = record->depth + 1 > depth ? record->depth + 1 : depth;
+                    strongReference = strongReference || record->containsStrongReference;
+                    required = required || (record->containsRequired &&
+                                            !HasFlag(field.flags, FieldFlags::Transient));
+                    requiresWorldOnlyOwner =
+                        requiresWorldOnlyOwner || record->requiresWorldOnlyOwner;
+                    break;
+                }
+            }
+        }
+
+        // 수동 등록의 깊이 방어(MetaCompiler RMC2303이 먼저 막는다)와 Trace 계약.
+        if (depth > MaxStructDepth || (ops.trace != nullptr) != strongReference) {
+            return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        mutating_ = true;
+    }
+
+    auto memory = allocator_.Allocate(bytes, alignof(Record), 0x54595045u);
+    if (!memory) {
+        platform::LockGuard lock(gate_);
+        mutating_ = false;
+        return Result<TypeRegistrationToken>::Failure(memory.Error());
+    }
+
+    if (!memory.Value()) {
+        platform::Fatal("Allocator returned null TypeRegistry record");
+    }
+
+    Record* record = ::new (memory.Value()) Record();
+    auto* block = static_cast<uint8*>(memory.Value());
+    auto* fields = reinterpret_cast<FieldSchema*>(block + fieldOffset);
+    auto* fieldOps = reinterpret_cast<RuntimeStructFieldOps*>(block + opsOffset);
+    auto* fieldTypes = reinterpret_cast<Record**>(block + typesOffset);
+    auto* fieldOrder = reinterpret_cast<uint32*>(block + orderOffset);
+    uint8* cursor = reinterpret_cast<uint8*>(fieldOrder + schema.fields.Size());
+    {
+        // mutating_이 등록·해제를 막으므로 위에서 확인한 레코드가 그대로 있다.
+        platform::LockGuard lock(gate_);
+        Span<const RuntimeStructFieldOps> thunks = ops.fields;
+        if (!ResolveValueTypes(schema.fields, &StructThunkType, &thunks, true, fieldTypes)) {
+            platform::Fatal("TypeRegistry value type dependency vanished during registration");
+        }
+    }
+
+    record->kind = TypeKind::Struct;
+    record->fieldTypes = fieldTypes;
+    record->schema.id = schema.id;
+    record->schema.version = schema.version;
+    record->schema.name = CopyBytes(schema.name, cursor);
+    record->schema.fields = {fields, schema.fields.Size()};
+    for (usize index = 0; index < schema.fields.Size(); ++index) {
+        ::new (fields + index) FieldSchema(schema.fields[index]);
+        fields[index].name = CopyBytes(schema.fields[index].name, cursor);
+        fields[index].attributes = CopyBytes(schema.fields[index].attributes, cursor);
+        fields[index].category = CopyBytes(schema.fields[index].category, cursor);
+        fields[index].displayName = CopyBytes(schema.fields[index].displayName, cursor);
+        fields[index].toolName = CopyBytes(schema.fields[index].toolName, cursor);
+        // 멤버 함수표는 스키마 순서로 둔다(codec이 index로 바로 찾는다).
+        for (const RuntimeStructFieldOps& candidate : ops.fields) {
+            if (candidate.fieldId == fields[index].id) {
+                ::new (fieldOps + index) RuntimeStructFieldOps(candidate);
+                break;
+            }
+        }
+
+        fieldOrder[index] = static_cast<uint32>(index);
+    }
+
+    algo::Sort(Span<uint32>(fieldOrder, schema.fields.Size()),
+               [fields](uint32 left, uint32 right) noexcept {
+                   const Guid a = fields[left].id;
+                   const Guid b = fields[right].id;
+                   return a.high != b.high ? a.high < b.high : a.low < b.low;
+               });
+    record->fieldOrder = fieldOrder;
+    record->depth = depth;
+    record->containsStrongReference = strongReference;
+    record->containsRequired = required;
+    record->requiresWorldOnlyOwner = requiresWorldOnlyOwner;
+    record->ops.size = ops.size;
+    record->ops.alignment = ops.alignment;
+    record->ops.nativeType = ops.nativeType;
+    record->ops.module = Move(ops.module);
+    record->structOps.size = ops.size;
+    record->structOps.alignment = ops.alignment;
+    record->structOps.nativeType = ops.nativeType;
+    record->structOps.construct = ops.construct;
+    record->structOps.destroy = ops.destroy;
+    record->structOps.trace = ops.trace;
+    record->structOps.migrate = ops.migrate;
+    record->structOps.requiresWorldOnlyOwner = requiresWorldOnlyOwner;
+    record->structOps.fields = {fieldOps, schema.fields.Size()};
+
+    platform::LockGuard lock(gate_);
+    record->generation = nextGeneration_++;
+    record->next = records_;
+    records_ = record;
+    for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
+        if (fieldTypes[fieldIndex]) {
+            ++fieldTypes[fieldIndex]->dependents;
+        }
+    }
+
+    mutating_ = false;
+    return Result<TypeRegistrationToken>::Success({domain_, record->generation, schema.id});
+}
+
 Result<TypeLease> TypeRegistry::Acquire(TypeId type) noexcept {
     platform::LockGuard lock(gate_);
     if (closed_) {
         return Result<TypeLease>::Failure(ErrorCode::ShuttingDown);
     }
+
     for (Record* record = records_; record; record = record->next) {
         if (record->schema.id == type) {
             // 기존 호출자(ObjectRegistry·그래프 저장·복원)는 모두 클래스를 가정한다.
             if (record->kind != TypeKind::Class) {
                 return Result<TypeLease>::Failure(ErrorCode::TypeMismatch);
             }
+
             if (record->leases == 0xffffffffu) {
                 return Result<TypeLease>::Failure(ErrorCode::Overflow);
             }
+
             ++record->leases;
             return Result<TypeLease>::Success(TypeLease(this, record));
         }
     }
+
     return Result<TypeLease>::Failure(ErrorCode::NotFound);
 }
 
@@ -931,22 +1408,27 @@ Result<TypeLease> TypeRegistry::AcquireValueType(TypeId type, TypeKind kind) noe
     if (kind == TypeKind::Class) {
         return Result<TypeLease>::Failure(ErrorCode::InvalidArgument);
     }
+
     platform::LockGuard lock(gate_);
     if (closed_) {
         return Result<TypeLease>::Failure(ErrorCode::ShuttingDown);
     }
+
     for (Record* record = records_; record; record = record->next) {
         if (record->schema.id == type) {
             if (record->kind != kind) {
                 return Result<TypeLease>::Failure(ErrorCode::TypeMismatch);
             }
+
             if (record->leases == 0xffffffffu) {
                 return Result<TypeLease>::Failure(ErrorCode::Overflow);
             }
+
             ++record->leases;
             return Result<TypeLease>::Success(TypeLease(this, record));
         }
     }
+
     return Result<TypeLease>::Failure(ErrorCode::NotFound);
 }
 
@@ -956,6 +1438,7 @@ Result<TypeLease> TypeRegistry::Clone(void* pointer) noexcept {
     if (closed_ || record->leases == 0xffffffffu) {
         return Result<TypeLease>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Overflow);
     }
+
     ++record->leases;
     return Result<TypeLease>::Success(TypeLease(this, record));
 }
@@ -966,22 +1449,26 @@ void TypeRegistry::Release(void* pointer) noexcept {
     if (record->leases == 0) {
         platform::Fatal("TypeLease reference underflow");
     }
+
     --record->leases;
 }
 
 void TypeRegistry::DestroyRecord(Record* record) noexcept {
-    // 의존자(파생 클래스·enum을 쓰는 클래스)는 의존 대상보다 먼저 파괴된다(Unregister는 Busy로
-    // 막고, Shutdown은 등록의 역순으로 파괴한다).
+    // 의존자(파생 클래스·enum·struct를 쓰는 클래스·struct)는 의존 대상보다 먼저
+    // 파괴된다(Unregister는 Busy로 막고, Shutdown은 등록의 역순으로 파괴한다).
     if (record->dependents != 0) {
         platform::Fatal("TypeRegistry record destroyed before its dependents");
     }
+
     if (record->base) {
         platform::LockGuard lock(gate_);
         if (record->base->dependents == 0) {
             platform::Fatal("TypeRegistry base dependency underflow");
         }
+
         --record->base->dependents;
     }
+
     if (record->fieldTypes) {
         platform::LockGuard lock(gate_);
         for (usize index = 0; index < record->schema.fields.Size(); ++index) {
@@ -989,12 +1476,15 @@ void TypeRegistry::DestroyRecord(Record* record) noexcept {
             if (!target) {
                 continue;
             }
+
             if (target->dependents == 0) {
                 platform::Fatal("TypeRegistry value type dependency underflow");
             }
+
             --target->dependents;
         }
     }
+
     record->~Record();
     auto result = allocator_.Deallocate(record);
     if (!result) {
@@ -1006,29 +1496,36 @@ Result<void> TypeRegistry::Unregister(TypeRegistrationToken token) noexcept {
     if (platform::CurrentThreadId() != ownerThread_) {
         return Result<void>::Failure(ErrorCode::WrongThread);
     }
+
     Record* removed = nullptr;
     {
         platform::LockGuard lock(gate_);
         if (mutating_) {
             return Result<void>::Failure(ErrorCode::Busy);
         }
+
         if (token.registry != domain_) {
             return Result<void>::Failure(ErrorCode::StaleHandle);
         }
+
         Record** previous = &records_;
         while (*previous && !((*previous)->schema.id == token.type)) {
             previous = &(*previous)->next;
         }
+
         if (!*previous || (*previous)->generation != token.generation) {
             return Result<void>::Failure(ErrorCode::StaleHandle);
         }
+
         if ((*previous)->leases != 0 || (*previous)->dependents != 0) {
             return Result<void>::Failure(ErrorCode::Busy);
         }
+
         removed = *previous;
         *previous = removed->next;
         mutating_ = true;
     }
+
     // ModuleLease 정리와 할당기 콜백은 재진입할 수 있으므로 Registry 잠금 밖에서 실행한다.
     // mutating_은 콜백이 등록/해제를 다시 시작하지 못하게 한다.
     DestroyRecord(removed);
@@ -1036,6 +1533,7 @@ Result<void> TypeRegistry::Unregister(TypeRegistrationToken token) noexcept {
         platform::LockGuard lock(gate_);
         mutating_ = false;
     }
+
     return Result<void>::Success();
 }
 
@@ -1043,33 +1541,40 @@ Result<void> TypeRegistry::Shutdown() noexcept {
     if (platform::CurrentThreadId() != ownerThread_) {
         return Result<void>::Failure(ErrorCode::WrongThread);
     }
+
     Record* removed = nullptr;
     {
         platform::LockGuard lock(gate_);
         if (mutating_) {
             return Result<void>::Failure(ErrorCode::Busy);
         }
+
         closed_ = true;
         for (Record* record = records_; record; record = record->next) {
             if (record->leases != 0) {
                 return Result<void>::Failure(ErrorCode::Busy);
             }
         }
+
         removed = records_;
         records_ = nullptr;
         mutating_ = true;
     }
-    // base·enum이 먼저 등록되어야 하므로 head 순서는 의존자→의존 대상이다. 외부 lease만 검사하고
-    // 이 순서로 dependent를 반환하여 내부 의존 관계 때문에 Shutdown이 영구 Busy가 되는 일을 피한다.
+
+    // base·enum·struct가 먼저 등록되어야 하므로 head 순서는 의존자→의존 대상이다. 외부 lease만
+    // 검사하고 이 순서로 dependent를 반환하여 내부 의존 관계 때문에 Shutdown이 영구 Busy가 되는
+    // 일을 피한다.
     while (removed) {
         Record* next = removed->next;
         DestroyRecord(removed);
         removed = next;
     }
+
     {
         platform::LockGuard lock(gate_);
         mutating_ = false;
     }
+
     return Result<void>::Success();
 }
 
@@ -1080,6 +1585,7 @@ TypeStats TypeRegistry::Stats() const noexcept {
         ++stats.registeredTypes;
         stats.leases += record->leases;
     }
+
     return stats;
 }
 

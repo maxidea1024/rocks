@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Containers/Array.h>
 #include <Core/Encoding/Sha256.h>
 #include <Core/Lifetime/ModuleLease.h>
 #include <Core/Move.h>
@@ -186,6 +187,38 @@ struct RuntimeEnumOps {
     ModuleLease module;
 };
 
+class TraceVisitor;
+struct RuntimeStructFieldOps;
+
+// 리플렉션 struct 멤버의 codec thunk다(Docs/Design/ReflectionFoundations.ko.md 4.6절, 문맥은
+// Object/FieldCodec.h). encode는 structValue(멤버를 가진 struct 값)의 멤버를 out에 쓰고 wire tag를
+// 돌려준다. decode는 세 방식이다: 검증(construction·structValue null — 값에 손대지 않는다),
+// 관찰(construction null, structValue = scratch 임시 값 — 직접 쓴다), 적용(둘 다 non-null — owner
+// 객체 안의 struct 주소이며 참조 멤버는 construction으로 연결한다).
+using StructFieldEncodeFunction = Result<uint32> (*)(const RuntimeStructFieldOps& self,
+                                                     const void* structValue, ArchiveWriter& out,
+                                                     FieldEncodeContext& context) noexcept;
+using StructFieldDecodeFunction = Result<void> (*)(const RuntimeStructFieldOps& self,
+                                                   ConstructionContext* construction,
+                                                   ObjectHandle owner, void* structValue,
+                                                   const FieldView& field,
+                                                   FieldDecodeContext& context) noexcept;
+
+// struct 멤버 하나의 함수표다. valueNativeType은 Enum·Struct 멤버가 쓰는 C++ 타입의
+// NativeTypeKey다(그 밖은 nullptr — 등록이 대상 레코드의 native 키와 대조한다).
+struct RuntimeStructFieldOps {
+    Guid fieldId{};
+    StructFieldEncodeFunction encode = nullptr;
+    StructFieldDecodeFunction decode = nullptr;
+    const void* valueNativeType = nullptr;
+};
+
+// struct의 옛 버전 Record를 현재 버전으로 올린다(ObjectGraphMigration과 같은 계약 — 전달
+// allocator로 소유 결과를 반환하고, 결과는 정확히 targetVersion이어야 한다).
+using StructMigration = Result<Array<uint8>> (*)(Allocator&, TypeId type, uint32 sourceVersion,
+                                                 uint32 targetVersion,
+                                                 Span<const uint8> sourceRecord) noexcept;
+
 // Trace 호출 동안만 유효한 방문자다. 보관하거나 다른 스레드에 전달하지 않는다.
 // 객체가 가진 모든 강한 ObjectRef를 빠짐없이 Visit해야 한다. WeakRef는 방문하지 않는다.
 class TraceVisitor {
@@ -207,6 +240,26 @@ public:
 private:
     void* state_;
     VisitFn visit_;
+};
+
+// 리플렉션 struct 등록의 실행 정보다(TypeRegistry::RegisterStruct, 4.6절). construct·destroy는
+// struct hook 관찰용 임시 값을 만들고 없앤다(필수). trace는 참조 struct(ObjectRef 멤버가 있는 —
+// Transient 포함 — struct)에만 있어야 한다. migrate는 선택이며 타입이 자기 옛 버전을 올린다(로드
+// 옵션 override가 먼저다). requiresWorldOnlyOwner는 생성 형질(NATIVE 멤버의 WorldOnly 요구)이다.
+// fields는 스키마 필드와 1:1이며 등록이 스키마 순서로 깊게 복사한다. 동적 모듈이면 module로 코드
+// 수명을 유지한다. 등록된 레코드의 StructOps()에서 module은 비어 있고(수명은 lease의 Ops().module이
+// 쥔다) requiresWorldOnlyOwner는 멤버 struct에서 전파된 값이다.
+struct RuntimeStructOps {
+    usize size = 0;
+    usize alignment = 0;
+    const void* nativeType = nullptr;
+    void (*construct)(void*, Allocator&) noexcept = nullptr;
+    void (*destroy)(void*) noexcept = nullptr;
+    void (*trace)(const void*, TraceVisitor&) noexcept = nullptr;
+    StructMigration migrate = nullptr;
+    bool requiresWorldOnlyOwner = false;
+    ModuleLease module;
+    Span<const RuntimeStructFieldOps> fields;
 };
 
 // 생성·추적·소멸 콜백은 noexcept이며 Registry 잠금 밖에서 실행된다.
@@ -265,6 +318,7 @@ RuntimeTypeOps MakeRuntimeTypeOps(ModuleLease module = {}) noexcept {
             }
         };
     }
+
     ops.destroy = [](Object* object) noexcept { static_cast<T*>(object)->T::~T(); };
     ops.trace = [](const Object& object, TraceVisitor& visitor) noexcept {
         if constexpr (requires(const T& value) { value.Trace(visitor); }) {

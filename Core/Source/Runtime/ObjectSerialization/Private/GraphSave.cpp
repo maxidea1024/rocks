@@ -81,6 +81,17 @@ public:
         return scratch_;
     }
 
+    Result<void> AddFields(usize count) noexcept override {
+        return budget_.AddFields(count);
+    }
+
+    // 중첩 Record는 필드 값 하나라 전체 크기도 값 한도 안이어야 한다.
+    RecordLimits NestedRecordLimits() const noexcept override {
+        RecordLimits limits = budget_.Record();
+        limits.archive.maxTotalBytes = budget_.limits.maxValueBytes;
+        return limits;
+    }
+
 protected:
     Result<void> WriteReferenceWire(ArchiveWriter& out, ObjectHandle target,
                                     const ReferenceExpectation& expectation) noexcept override {
@@ -141,18 +152,21 @@ Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
     }
 
     const auto& schema = type.Value().Schema();
+    // builder의 필드 수 한도는 이 객체 필드를 세기 전의 남은 누계다(로드와 같은 기준).
+    const RecordLimits recordLimits = budget.Record();
     auto counted = budget.AddFields(schema.fields.Size());
     if (!counted) {
         return counted;
     }
 
     context.BeginObject(schema.id, static_cast<uint32>(nodeIndex));
-    RecordBuilder record(allocator, schema.id, schema.version, budget.Record());
+    RecordBuilder record(allocator, schema.id, schema.version, recordLimits);
     usize payloadBytes = 0;
     for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
         const auto& field = schema.fields[fieldIndex];
         // 최상위 필드의 declaringType은 객체 타입이다(상속 필드도 펼친 스키마로 다룬다).
-        FieldScope scope(context, field, schema.id, type.Value().FieldEnum(fieldIndex));
+        FieldScope scope(context, field, schema.id, type.Value().FieldEnum(fieldIndex),
+                         type.Value().FieldStruct(fieldIndex));
         // Transient 참조는 GC 수명에는 참여하지만 저장 그래프의 도달 가능성에는 참여하지 않는다.
         if (context.IsExcluded(context.EffectiveFlags())) {
             continue;
@@ -187,21 +201,20 @@ Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
         }
 
         usize appended = 0;
-        usize work = 0;
-        if (!TryAdd(28, encoded.ByteCount(), appended) || !TryAdd(appended, payloadBytes, work) ||
-            !TryAdd(work, 1, work) || !TryAdd(work, fieldIndex, work) ||
-            !TryAdd(work, fieldIndex, work)) {
+        if (!TryAdd(28, encoded.ByteCount(), appended)) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }
 
-        spent = budget.Spend(work);
-        if (!spent) {
-            return spent;
-        }
-
+        // builder의 실제 작업(복사, 성장할 때만 기존 byte 이동, id 중복 검사)을 청구한다.
+        const uint64 builderBefore = record.WorkUsed();
         auto added = record.AddField(field.id, wire.Value(), encoded.View());
         if (!added) {
             return added;
+        }
+
+        spent = budget.Spend(record.WorkUsed() - builderBefore);
+        if (!spent) {
+            return spent;
         }
 
         if (!TryAdd(payloadBytes, appended, payloadBytes)) {

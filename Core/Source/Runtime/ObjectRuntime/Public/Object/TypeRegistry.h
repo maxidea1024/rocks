@@ -59,6 +59,25 @@ public:
     //   auto owner = GeneratedType<TextureSettings>::Register(types); // 그 enum을 쓰는 클래스
     Result<TypeRegistrationToken> RegisterEnum(const EnumSchema&, RuntimeEnumOps) noexcept;
 
+    // 리플렉션 struct를 등록한다(Docs/Design/ReflectionFoundations.ko.md 4.6절, 생성 코드는
+    // GeneratedType<S>::Register). 스키마는 클래스와 같은 TypeSchema(base 없음, 클래스 플래그
+    // 없음)이고 입력 버퍼는 호출 동안 유효해야 하며 깊게 복사한다. 멤버 struct·enum이 먼저 등록되어
+    // 있어야 하고 이 struct가 등록된 동안 의존으로 붙잡힌다. 주요 실패:
+    // - InvalidArgument: id 0, version 0, base, 클래스 플래그, 필드 서술 오류(Register와 같은
+    // 규칙),
+    //   Opaque 필드, 스키마와 1:1이 아닌 함수표, Transient가 아닌 필드의 codec 없음, encode·decode
+    //   한쪽만, size·alignment·nativeType·construct·destroy 없음, trace와 강한 참조 멤버의 유무
+    //   불일치, 깊이 MaxStructDepth 초과.
+    // - AlreadyExists: 같은 ID(다른 종류 포함), 같은 nativeType의 struct, 같은 필드 ID, 대소문자
+    // 무시로
+    //   같은 실효 도구 이름.
+    // - NotFound: 멤버 struct·enum 미등록. TypeMismatch: 종류·native 키가 다른 멤버 대상.
+    //
+    // 사용 예:
+    //   auto inner = GeneratedType<BulkDataRef>::Register(types);   // 멤버 struct 먼저
+    //   auto owner = GeneratedType<TextureSource>::Register(types);  // 그것을 쓰는 타입
+    Result<TypeRegistrationToken> RegisterStruct(const TypeSchema&, RuntimeStructOps) noexcept;
+
     // 클래스(TypeKind::Class) 레코드만 연다. Enum·Struct 레코드의 ID면 TypeMismatch, 없으면
     // NotFound다.
     Result<TypeLease> Acquire(TypeId) noexcept;
@@ -83,10 +102,18 @@ public:
 
 private:
     friend class TypeLease;
+    friend class StructView;
     struct Record;
     Result<TypeLease> Clone(void*) noexcept;
     void Release(void*) noexcept;
     void DestroyRecord(Record*) noexcept;
+    // gate_를 쥔 채 부른다. fields의 Enum·Struct 필드가 가리키는 레코드를 찾아 종류·native
+    // 키(thunkType)·의존 계수 여유를 확인하고, targets가 있으면 필드별 대상(그 밖은 nullptr)을
+    // 쓴다. ownerWorldOnly가 거짓이면 WorldOnly 소유자를 요구하는 struct 필드를 거부한다.
+    Result<void> ResolveValueTypes(Span<const FieldSchema> fields,
+                                   const void* (*thunkType)(const void* context, Guid fieldId),
+                                   const void* context, bool ownerWorldOnly,
+                                   Record** targets) noexcept;
 
     Allocator& allocator_;
     mutable platform::Mutex gate_;

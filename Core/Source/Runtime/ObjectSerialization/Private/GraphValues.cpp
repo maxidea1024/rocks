@@ -47,11 +47,13 @@ Result<void> ValidateLayout(const TypeLease& type, Budget& budget) noexcept {
 
         const bool reference = field.value.kind == ValueKind::ObjectReference;
         const bool typed = field.value.kind == ValueKind::SoftObjectReference ||
-                           field.value.kind == ValueKind::Enum;
+                           field.value.kind == ValueKind::Enum ||
+                           field.value.kind == ValueKind::Struct;
         if ((reference && field.kind != FieldKind::ObjectReference) ||
             (!reference &&
              (field.kind != FieldKind::Value || (!typed && field.value.type != Guid{}))) ||
-            (field.value.kind == ValueKind::Enum && type.FieldEnum(index) == nullptr)) {
+            (field.value.kind == ValueKind::Enum && type.FieldEnum(index) == nullptr) ||
+            (field.value.kind == ValueKind::Struct && type.FieldStruct(index).IsEmpty())) {
             return Result<void>::Failure(ErrorCode::Unsupported);
         }
 

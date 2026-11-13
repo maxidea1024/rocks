@@ -12,8 +12,10 @@ namespace rocks {
 // 변경하지 않아야 한다.
 struct ObjectGraphLimits {
     uint32 maxObjects = 1024;
-    // 원본과 migration 결과를 검증한 TLV 수의 누계다.
-    uint32 maxTotalFields = 4096;
+    // 원본과 migration 결과를 검증한 TLV 수의 누계다(중첩 struct Record의 TLV 포함). Record 하나를
+    // 열 때도 남은 누계를 그 Record의 필드 수 한도로 쓴다(큰 입력이 누계 검사 전에 색인을 할당하지
+    // 않게).
+    uint32 maxTotalFields = 1024 * 1024;
     usize maxBytes = 16 * 1024 * 1024;
     usize maxValueBytes = 4 * 1024 * 1024;
     uint64 maxWork = 64 * 1024 * 1024;
@@ -44,6 +46,10 @@ struct ObjectGraphLoadOptions {
     // allocator로 소유 결과를 반환해야 한다. 반환 record도 현재 schema/version/TLV/값 폭으로 다시
     // 검증한다. callback 자체는 신뢰 경계다.
     ObjectGraphMigration migrate = nullptr;
+    // struct의 옛 버전을 올리는 override다(시험·도구용 — type 인자가 struct ID). Unsupported를
+    // 돌려주거나 없으면 타입이 등록한 마이그레이션(RuntimeStructOps.migrate)을 쓰고, 둘 다 없으면
+    // 그 로드는 Unsupported다. 결과는 정확히 현재 버전이어야 한다.
+    ObjectGraphMigration migrateStruct = nullptr;
     void* migrationUser = nullptr;
     // 진단·소프트 참조 수집을 받는다(1단계에서 한 번). 실패하면 복원이 실패한다.
     FieldCodecHooks* hooks = nullptr;

@@ -1,4 +1,5 @@
 #include "GraphInternal.h"
+#include <Core/Algorithms.h>
 
 namespace rocks {
 namespace {
@@ -138,8 +139,14 @@ class GraphValidateContext final : public FieldDecodeContext {
 public:
     GraphValidateContext(Allocator& allocator, Budget& budget,
                          const ObjectGraphLoadOptions& options, usize objectCount) noexcept
-        : FieldDecodeContext(options.policy, options.hooks, ReferenceWire), budget_(budget),
-          objectCount_(objectCount), scratch_(allocator, budget) {
+        : FieldDecodeContext(options.policy, options.hooks, ReferenceWire), allocator_(allocator),
+          budget_(budget), options_(options), objectCount_(objectCount),
+          scratch_(allocator, budget) {
+    }
+
+    // 관찰할 struct ID(정렬됨, 로드 동안 유효)를 정한다.
+    void Observe(Span<const TypeId> sorted) noexcept {
+        SetObservedStructs(sorted);
     }
 
     void BeginNode(LoadNode& node, const RecordReader* record, uint32 index) noexcept {
@@ -158,12 +165,110 @@ public:
         return charged_;
     }
 
-    Result<ArchiveReader> OpenValue(const FieldView& field) noexcept override {
-        if (!record_) {
-            return Result<ArchiveReader>::Failure(ErrorCode::InvalidArgument);
+    Result<RecordScope> OpenRecord(const FieldView& field, TypeId expected, uint32 minVersion,
+                                   uint32 maxVersion) noexcept override {
+        if (field.wireType != static_cast<uint32>(WireType::Record)) {
+            return Result<RecordScope>::Failure(ErrorCode::TypeMismatch);
         }
 
-        return record_->OpenValue(field);
+        const RecordReader* parent = CurrentRecord() ? CurrentRecord() : record_;
+        if (!parent) {
+            return Result<RecordScope>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        // 최상위 struct는 2단계가 독립 reader로 다시 열며 payload 바이트를 청구하므로 그만큼 미리
+        // 청구한다(1단계는 객체 Record가 이미 청구했다).
+        if (!CurrentRecord()) {
+            if (auto spent = Charge(field.payload.Size()); !spent) {
+                return Result<RecordScope>::Failure(spent.Error());
+            }
+        }
+
+        // 공유 예산으로 열고(header·색인만 청구 — 그 작업은 DecodeNode가 2단계 몫까지 청구한다)
+        // 필드 수 한도는 남은 그래프 누계다.
+        auto opened = parent->OpenRecordField(allocator_, field, expected, minVersion, maxVersion,
+                                              budget_.RemainingFields());
+        if (!opened) {
+            return Result<RecordScope>::Failure(opened.Error());
+        }
+
+        if (auto counted = budget_.AddFields(opened.Value().FieldCount()); !counted) {
+            return Result<RecordScope>::Failure(counted.Error());
+        }
+
+        return PushRecord(Move(opened.Value()));
+    }
+
+    Result<RecordScope> OpenMigratedRecord(Span<const uint8> record, TypeId expected,
+                                           uint32 version) noexcept override {
+        // 콜백 결과는 신뢰하지 않는다. 정확히 현재 버전의 envelope와 모든 TLV를 다시 검사한다.
+        auto opened = RecordReader::Open(allocator_, record, expected, version, version,
+                                         budget_.Record(), budget_.Shared());
+        if (!opened) {
+            return Result<RecordScope>::Failure(opened.Error());
+        }
+
+        if (auto counted = budget_.AddFields(opened.Value().FieldCount()); !counted) {
+            return Result<RecordScope>::Failure(counted.Error());
+        }
+
+        return PushRecord(Move(opened.Value()));
+    }
+
+    Result<Span<const uint8>> MigrateStruct(TypeId type, uint32 fromVersion, uint32 toVersion,
+                                            Span<const uint8> record) noexcept override {
+        const FieldCodecFrame* frame = Current();
+        if (!node_ || !frame || frame->structure.IsEmpty()) {
+            return Result<Span<const uint8>>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        // 원본 byte를 먼저 청구한다(소진된 예산으로 콜백을 실행하지 않는다 — 객체 경로와 같다).
+        if (auto spent = Charge(record.Size()); !spent) {
+            return Result<Span<const uint8>>::Failure(spent.Error());
+        }
+
+        // 로드 옵션 override를 먼저 묻고(Unsupported면 다음), 타입이 등록한 마이그레이션을 쓴다.
+        Result<Array<uint8>> migrated = Result<Array<uint8>>::Failure(ErrorCode::Unsupported);
+        if (options_.migrateStruct) {
+            migrated = options_.migrateStruct(allocator_, type, fromVersion, toVersion, record,
+                                              options_.migrationUser);
+        }
+
+        const StructMigration own = frame->structure.StructOps().migrate;
+        if (!migrated && migrated.Error() == ErrorCode::Unsupported && own) {
+            migrated = own(allocator_, type, fromVersion, toVersion, record);
+        }
+
+        if (!migrated) {
+            return Result<Span<const uint8>>::Failure(migrated.Error());
+        }
+
+        const usize bytes = migrated.Value().Size();
+        if (bytes > budget_.limits.maxBytes ||
+            bytes > budget_.limits.maxMigrationBytes - budget_.migrationBytes) {
+            return Result<Span<const uint8>>::Failure(ErrorCode::CapacityExceeded);
+        }
+
+        // 결과 byte를 이 문맥의 청구로 센다(reader 작업 Δ 청구와 이중이 되지 않게).
+        if (auto spent = Charge(bytes); !spent) {
+            return Result<Span<const uint8>>::Failure(spent.Error());
+        }
+
+        StoredStructMigration stored(allocator_);
+        stored.type = type;
+        stored.from = fromVersion;
+        stored.bytes = Move(migrated.Value());
+        if (!node_->structMigrations.TryPushBack(Move(stored))) {
+            return Result<Span<const uint8>>::Failure(ErrorCode::OutOfMemory);
+        }
+
+        budget_.migrationBytes += bytes;
+        return Result<Span<const uint8>>::Success(
+            node_->structMigrations[node_->structMigrations.Size() - 1].bytes.View());
+    }
+
+    Result<void> AddFields(usize count) noexcept override {
+        return budget_.AddFields(count);
     }
 
     Result<DecodedReference>
@@ -227,6 +332,15 @@ public:
         return scratch_;
     }
 
+protected:
+    Result<ArchiveReader> OpenTopLevelValue(const FieldView& field) noexcept override {
+        if (!record_) {
+            return Result<ArchiveReader>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        return record_->OpenValue(field);
+    }
+
 private:
     static constexpr uint32 NoExpectation = ~0u;
 
@@ -239,7 +353,9 @@ private:
         return spent;
     }
 
+    Allocator& allocator_;
     Budget& budget_;
+    const ObjectGraphLoadOptions& options_;
     usize objectCount_;
     BudgetAllocator scratch_;
     LoadNode* node_ = nullptr;
@@ -261,15 +377,74 @@ public:
 
     void BeginNode(const LoadNode& node, uint32 index) noexcept {
         SetObject(node.type, index);
+        node_ = &node;
+        migration_ = 0;
     }
 
-    Result<ArchiveReader> OpenValue(const FieldView& field) noexcept override {
-        ArchiveLimits limits;
-        limits.maxTotalBytes = limits_.maxBytes;
-        limits.maxValueBytes = limits_.maxValueBytes;
-        limits.maxOperations = ~uint64{0};
-        limits.maxWork = ~uint64{0};
-        return ArchiveReader::Create(field.payload, limits);
+    // 노드의 모든 필드를 적용한 뒤 부른다. 1단계가 보관한 struct 마이그레이션은 모두 소비되어야
+    // 한다(남으면 두 단계의 방문 순서가 어긋난 계약 위반).
+    Result<void> EndNode() noexcept {
+        if (node_ && migration_ != node_->structMigrations.Size()) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        return Result<void>::Success();
+    }
+
+    Result<RecordScope> OpenRecord(const FieldView& field, TypeId expected, uint32 minVersion,
+                                   uint32 maxVersion) noexcept override {
+        if (field.wireType != static_cast<uint32>(WireType::Record)) {
+            return Result<RecordScope>::Failure(ErrorCode::TypeMismatch);
+        }
+
+        // 1단계와 같은 크기 한도·버전 범위, 무제한 operation·work, 필드 수는 그래프 누계 한도.
+        if (RecordReader* parent = CurrentRecord()) {
+            auto opened = parent->OpenRecordField(allocator_, field, expected, minVersion,
+                                                  maxVersion, limits_.maxTotalFields);
+            if (!opened) {
+                return Result<RecordScope>::Failure(opened.Error());
+            }
+
+            return PushRecord(Move(opened.Value()));
+        }
+
+        auto opened = RecordReader::Open(allocator_, field.payload, expected, minVersion,
+                                         maxVersion, {Unlimited(), limits_.maxTotalFields});
+        if (!opened) {
+            return Result<RecordScope>::Failure(opened.Error());
+        }
+
+        return PushRecord(Move(opened.Value()));
+    }
+
+    Result<RecordScope> OpenMigratedRecord(Span<const uint8> record, TypeId expected,
+                                           uint32 version) noexcept override {
+        auto opened = RecordReader::Open(allocator_, record, expected, version, version,
+                                         {Unlimited(), limits_.maxTotalFields});
+        if (!opened) {
+            return Result<RecordScope>::Failure(opened.Error());
+        }
+
+        return PushRecord(Move(opened.Value()));
+    }
+
+    Result<Span<const uint8>> MigrateStruct(TypeId type, uint32 fromVersion, uint32,
+                                            Span<const uint8>) noexcept override {
+        if (!node_ || migration_ >= node_->structMigrations.Size()) {
+            return Result<Span<const uint8>>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        const StoredStructMigration& stored = node_->structMigrations[migration_];
+        if (stored.type != type || stored.from != fromVersion) {
+            return Result<Span<const uint8>>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        ++migration_;
+        return Result<Span<const uint8>>::Success(stored.bytes.View());
+    }
+
+    Result<void> AddFields(usize) noexcept override {
+        return Result<void>::Success();
     }
 
     Result<DecodedReference> ReadReference(ArchiveReader& reader,
@@ -305,10 +480,26 @@ public:
         return allocator_;
     }
 
+protected:
+    Result<ArchiveReader> OpenTopLevelValue(const FieldView& field) noexcept override {
+        return ArchiveReader::Create(field.payload, Unlimited());
+    }
+
 private:
+    ArchiveLimits Unlimited() const noexcept {
+        ArchiveLimits limits;
+        limits.maxTotalBytes = limits_.maxBytes;
+        limits.maxValueBytes = limits_.maxValueBytes;
+        limits.maxOperations = ~uint64{0};
+        limits.maxWork = ~uint64{0};
+        return limits;
+    }
+
     Allocator& allocator_;
     ObjectGraphLimits limits_;
     const Array<LoadNode>& nodes_;
+    const LoadNode* node_ = nullptr;
+    usize migration_ = 0;
 };
 
 Result<RecordReader> OpenRecord(Allocator& allocator, Span<const uint8> source, TypeId type,
@@ -435,8 +626,11 @@ Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& nod
         return spent;
     }
 
-    // 누락 허용 파일이 큰 schema를 가리켜도 없는 필드 수만큼 색인을 선할당하지 않는다.
-    auto reserved = node.fields.TryReserve(record.Value().FieldCount());
+    // 누락 허용 파일이 큰 schema를 가리켜도, 모르는 필드가 많아도 필요 이상으로 선할당하지 않는다.
+    const usize stored = record.Value().FieldCount() < schema.fields.Size()
+                             ? record.Value().FieldCount()
+                             : schema.fields.Size();
+    auto reserved = node.fields.TryReserve(stored);
     if (!reserved) {
         return reserved;
     }
@@ -478,12 +672,8 @@ Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& nod
         }
 
         if (schemaIndex == schema.fields.Size()) {
-            if (options.policy.unknownField == UnknownFieldPolicy::Reject) {
-                return Result<void>::Failure(ErrorCode::InvalidArgument);
-            }
-
-            if (auto reported = context.ReportUnknownField(field.Value().id); !reported) {
-                return reported;
+            if (auto skipped = detail::SkipUnknownField(context, field.Value().id); !skipped) {
+                return skipped;
             }
 
             continue;
@@ -499,7 +689,7 @@ Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& nod
         }
 
         FieldScope scope(context, schema.fields[schemaIndex], schema.id,
-                         node.lease.FieldEnum(schemaIndex));
+                         node.lease.FieldEnum(schemaIndex), node.lease.FieldStruct(schemaIndex));
         context.BeginField();
         const uint64 before = budget.Used();
         auto decoded = accessor.Value()->decode(*accessor.Value(), nullptr, ObjectHandle{},
@@ -515,11 +705,12 @@ Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& nod
             return spent;
         }
 
-        StoredField stored;
-        stored.schemaIndex = schemaIndex;
-        stored.ops = accessor.Value();
-        stored.view = field.Value();
-        if (!node.fields.TryPushBack(stored)) {
+        StoredField kept;
+        kept.schemaIndex = schemaIndex;
+        kept.ops = accessor.Value();
+        kept.view = field.Value();
+        if (!node.fields.TryPushBack(kept)) {
+            // 모르는 필드를 뺀 수만큼 예약했으므로 실패하지 않는다.
             platform::Fatal("Object graph field index reservation failed");
         }
 
@@ -533,13 +724,10 @@ Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& nod
             continue;
         }
 
-        FieldScope scope(context, field, schema.id, node.lease.FieldEnum(schemaIndex));
-        if (!context.IsMissingAllowed(context.EffectiveFlags())) {
-            return Result<void>::Failure(ErrorCode::NotFound);
-        }
-
-        if (auto reported = context.ReportIfRequiredNull(true); !reported) {
-            return reported;
+        FieldScope scope(context, field, schema.id, node.lease.FieldEnum(schemaIndex),
+                         node.lease.FieldStruct(schemaIndex));
+        if (auto missing = detail::CheckMissingField(context); !missing) {
+            return missing;
         }
     }
 
@@ -722,12 +910,17 @@ Result<RootRef<Object>> ConstructGraph(Allocator& allocator, ObjectRegistry& reg
         for (usize fieldIndex = 0; fieldIndex < node.fields.Size(); ++fieldIndex) {
             const StoredField& stored = node.fields[fieldIndex];
             FieldScope scope(context, schema.fields[stored.schemaIndex], schema.id,
-                             node.lease.FieldEnum(stored.schemaIndex));
+                             node.lease.FieldEnum(stored.schemaIndex),
+                             node.lease.FieldStruct(stored.schemaIndex));
             auto written =
                 stored.ops->decode(*stored.ops, &transaction, node.handle, stored.view, context);
             if (!written) {
                 return Result<RootRef<Object>>::Failure(written.Error());
             }
+        }
+
+        if (auto ended = context.EndNode(); !ended) {
+            return Result<RootRef<Object>>::Failure(ended.Error());
         }
     }
 
@@ -762,6 +955,51 @@ Result<RootRef<Object>> LoadObjectGraph(Allocator& allocator, ObjectRegistry& re
     }
 
     GraphValidateContext context(allocator, budget.Value(), options, nodes.Value().Size());
+    // 관찰할 struct ID를 정렬해 둔다(미등록 NotFound, 참조를 담는 struct InvalidArgument).
+    Array<TypeId> observed(allocator);
+    if (options.hooks) {
+        const Span<const TypeId> requested = options.hooks->ObservedStructs();
+        auto reserved = observed.TryReserve(requested.Size());
+        if (!reserved) {
+            return Result<RootRef<Object>>::Failure(reserved.Error());
+        }
+
+        for (TypeId id : requested) {
+            auto spent = budget.Value().Spend(1);
+            if (!spent) {
+                return Result<RootRef<Object>>::Failure(spent.Error());
+            }
+
+            auto lease = types.AcquireValueType(id, TypeKind::Struct);
+            if (!lease) {
+                return Result<RootRef<Object>>::Failure(lease.Error());
+            }
+
+            if (lease.Value().Struct().ContainsStrongReference()) {
+                return Result<RootRef<Object>>::Failure(ErrorCode::InvalidArgument);
+            }
+
+            if (!observed.TryPushBack(id)) {
+                platform::Fatal("Object graph observed struct reservation failed");
+            }
+        }
+
+        uint64 sortWork = 0;
+        if (!TryMultiply(uint64{observed.Size()}, uint64{64}, sortWork)) {
+            return Result<RootRef<Object>>::Failure(ErrorCode::Overflow);
+        }
+
+        auto spent = budget.Value().Spend(sortWork);
+        if (!spent) {
+            return Result<RootRef<Object>>::Failure(spent.Error());
+        }
+
+        algo::Sort(observed.View(), [](TypeId left, TypeId right) noexcept {
+            return left.high != right.high ? left.high < right.high : left.low < right.low;
+        });
+        context.Observe(observed.View());
+    }
+
     usize references = 0;
     for (usize index = 0; index < nodes.Value().Size(); ++index) {
         auto decoded = DecodeNode(allocator, types, nodes.Value()[index],

@@ -52,6 +52,11 @@ constexpr uint32 PropagateFieldFlags(uint32 parent, uint32 own) noexcept {
     return (parent & inherited) | own;
 }
 
+// 리플렉션 struct의 최대 중첩 깊이다(Docs/Design/ReflectionFoundations.ko.md 4.1·4.6절). 깊이는
+// 1 + 멤버 struct 깊이의 최댓값(멤버 struct가 없으면 1)이다. MetaCompiler(RMC2303)·TypeRegistry·
+// 생성 코드가 같은 값을 쓴다. codec 위치 프레임은 최대 1(최상위 필드) + 16개다.
+inline constexpr uint32 MaxStructDepth = 16;
+
 enum class FieldKind : uint8 {
     Value,
     ObjectReference

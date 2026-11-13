@@ -53,8 +53,13 @@ public:
         return result;
     }
 
+    // Record 하나의 한도다. 필드 수 한도는 남은 그래프 누계다.
     RecordLimits Record() const noexcept {
-        return {Archive(), limits.maxTotalFields};
+        return {Archive(), RemainingFields()};
+    }
+
+    uint32 RemainingFields() const noexcept {
+        return limits.maxTotalFields > fields ? limits.maxTotalFields - fields : 0;
     }
 
     SharedPtr<ArchiveBudget> Shared() const noexcept {
@@ -124,9 +129,21 @@ struct ReferenceToken {
     uint32 expectation = 0;
 };
 
+// 1단계가 보관한 struct 마이그레이션 결과 하나다(발생 순서). 2단계가 같은 순서로 (type, from)을
+// 대조해 쓴다. bytes의 heap 블록은 Array 이동에도 그대로라 view가 유효하다.
+struct StoredStructMigration {
+    explicit StoredStructMigration(Allocator& allocator) noexcept : bytes(allocator) {
+    }
+
+    TypeId type{};
+    uint32 from = 0;
+    Array<uint8> bytes;
+};
+
 struct LoadNode {
     explicit LoadNode(Allocator& allocator) noexcept
-        : migrated(allocator), fields(allocator), expectations(allocator), tokens(allocator) {
+        : migrated(allocator), fields(allocator), expectations(allocator), tokens(allocator),
+          structMigrations(allocator) {
     }
 
     TypeId type{};
@@ -137,6 +154,7 @@ struct LoadNode {
     Array<StoredField> fields;
     Array<ReferenceExpectation> expectations;
     Array<ReferenceToken> tokens;
+    Array<StoredStructMigration> structMigrations;
     ObjectHandle handle{};
 };
 

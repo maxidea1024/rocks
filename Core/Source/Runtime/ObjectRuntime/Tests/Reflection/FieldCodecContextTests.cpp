@@ -53,8 +53,26 @@ public:
         SetRecording(false);
     }
 
-    Result<ArchiveReader> OpenValue(const FieldView& field) noexcept override {
+    Result<ArchiveReader> OpenTopLevelValue(const FieldView& field) noexcept override {
         return ArchiveReader::Create(field.payload);
+    }
+
+    // 이 시험은 struct 값을 다루지 않는다.
+    Result<RecordScope> OpenRecord(const FieldView&, TypeId, uint32, uint32) noexcept override {
+        return Result<RecordScope>::Failure(ErrorCode::Unsupported);
+    }
+
+    Result<RecordScope> OpenMigratedRecord(Span<const uint8>, TypeId, uint32) noexcept override {
+        return Result<RecordScope>::Failure(ErrorCode::Unsupported);
+    }
+
+    Result<Span<const uint8>> MigrateStruct(TypeId, uint32, uint32,
+                                            Span<const uint8>) noexcept override {
+        return Result<Span<const uint8>>::Failure(ErrorCode::Unsupported);
+    }
+
+    Result<void> AddFields(usize) noexcept override {
+        return Result<void>::Success();
     }
 
     Result<DecodedReference> ReadReference(ArchiveReader&,
@@ -100,6 +118,14 @@ public:
 
     Allocator& Scratch() noexcept override {
         return allocator_;
+    }
+
+    Result<void> AddFields(usize) noexcept override {
+        return Result<void>::Success();
+    }
+
+    RecordLimits NestedRecordLimits() const noexcept override {
+        return {};
     }
 
     uint64 spent = 0;

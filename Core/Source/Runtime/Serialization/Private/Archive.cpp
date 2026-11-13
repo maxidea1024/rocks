@@ -17,12 +17,14 @@ bool IsSelfRange(Span<const uint8> storage, Span<const uint8> input, usize& offs
     if (storage.Size() == 0 || input.Size() == 0) {
         return false;
     }
+
     const uptr base = reinterpret_cast<uptr>(storage.Data());
     const uptr address = reinterpret_cast<uptr>(input.Data());
     if (address >= base && address - base < storage.Size()) {
         offset = address - base;
         return true;
     }
+
     return false;
 }
 
@@ -36,11 +38,13 @@ Result<void> ArchiveWriter::Charge(uint64 work) noexcept {
     if (operations_ == limits_.maxOperations) {
         return Result<void>::Failure(ErrorCode::CapacityExceeded);
     }
+
     ++operations_;
     if (work > limits_.maxWork - work_) {
         work_ = limits_.maxWork;
         return Result<void>::Failure(ErrorCode::CapacityExceeded);
     }
+
     work_ += work;
     return Result<void>::Success();
 }
@@ -57,13 +61,16 @@ Result<void> ArchiveWriter::Append(Span<const uint8> prefix, Span<const uint8> p
         auto charged = Charge(1);
         return Result<void>::Failure(charged ? ErrorCode::Overflow : charged.Error());
     }
+
     auto charged = Charge(static_cast<uint64>(work));
     if (!charged) {
         return charged;
     }
+
     if (required > limits_.maxTotalBytes || payload.Size() > limits_.maxValueBytes) {
         return Result<void>::Failure(ErrorCode::CapacityExceeded);
     }
+
     if (utf8) {
         auto valid = StringView(reinterpret_cast<const char*>(payload.Data()), payload.Size())
                          .ValidateUtf8();
@@ -71,7 +78,25 @@ Result<void> ArchiveWriter::Append(Span<const uint8> prefix, Span<const uint8> p
             return valid;
         }
     }
+
     return AppendReserved(prefix, payload);
+}
+
+Result<void> ArchiveWriter::Patch(usize offset, Span<const uint8> bytes) noexcept {
+    auto charged = Charge(static_cast<uint64>(bytes.Size()));
+    if (!charged) {
+        return charged;
+    }
+
+    if (offset > bytes_.Size() || bytes.Size() > bytes_.Size() - offset) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    for (usize index = 0; index < bytes.Size(); ++index) {
+        bytes_[offset + index] = bytes[index];
+    }
+
+    return Result<void>::Success();
 }
 
 Result<void> ArchiveWriter::AppendReserved(Span<const uint8> prefix,
@@ -81,6 +106,7 @@ Result<void> ArchiveWriter::AppendReserved(Span<const uint8> prefix,
         !TryAdd(required, bytes_.Size(), required)) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
+
     if (required > limits_.maxTotalBytes) {
         return Result<void>::Failure(ErrorCode::CapacityExceeded);
     }
@@ -99,6 +125,7 @@ Result<void> ArchiveWriter::AppendReserved(Span<const uint8> prefix,
         if (preferred < required) {
             preferred = required;
         }
+
         auto reserved = bytes_.TryReserve(preferred);
         if (!reserved) {
             return reserved;
@@ -113,11 +140,13 @@ Result<void> ArchiveWriter::AppendReserved(Span<const uint8> prefix,
             platform::Fatal("Archive prefix reservation invariant failed");
         }
     }
+
     for (usize index = 0; index < payload.Size(); ++index) {
         if (!bytes_.TryPushBack(data[index])) {
             platform::Fatal("Archive payload reservation invariant failed");
         }
     }
+
     return Result<void>::Success();
 }
 
@@ -264,6 +293,7 @@ ArchiveReader& ArchiveReader::operator=(ArchiveReader&& other) noexcept {
         other.source_ = Span<const uint8>();
         other.position_ = 0;
     }
+
     return *this;
 }
 
@@ -277,6 +307,7 @@ Result<ArchiveReader> ArchiveReader::CreateShared(Span<const uint8> source, Arch
     if (source.Size() > limits.maxTotalBytes) {
         return Result<ArchiveReader>::Failure(ErrorCode::CapacityExceeded);
     }
+
     return Result<ArchiveReader>::Success(ArchiveReader(source, limits, Move(shared)));
 }
 
@@ -284,10 +315,12 @@ Result<void> ArchiveReader::Spend(uint64 work) noexcept {
     if (shared_) {
         return shared_->Spend(work);
     }
+
     if (work > limits_.maxWork - work_) {
         work_ = limits_.maxWork;
         return Result<void>::Failure(ErrorCode::CapacityExceeded);
     }
+
     work_ += work;
     return Result<void>::Success();
 }
@@ -296,9 +329,11 @@ Result<void> ArchiveReader::Charge(uint64 work) noexcept {
     if (shared_) {
         return shared_->Charge(work);
     }
+
     if (operations_ == limits_.maxOperations) {
         return Result<void>::Failure(ErrorCode::CapacityExceeded);
     }
+
     ++operations_;
     return Spend(work);
 }
@@ -308,17 +343,21 @@ Result<Span<const uint8>> ArchiveReader::Fixed(usize count) noexcept {
     if (!charged) {
         return Result<Span<const uint8>>::Failure(charged.Error());
     }
+
     if (count > Remaining()) {
         return Result<Span<const uint8>>::Failure(ErrorCode::InvalidArgument);
     }
+
     auto spent = Spend(static_cast<uint64>(count));
     if (!spent) {
         return Result<Span<const uint8>>::Failure(spent.Error());
     }
+
     const uint8* begin = source_.Data();
     if (position_ != 0) {
         begin += position_;
     }
+
     return Result<Span<const uint8>>::Success({begin, count});
 }
 
@@ -327,29 +366,35 @@ Result<Span<const uint8>> ArchiveReader::Variable(bool utf8, bool ownedCopy) noe
     if (!prefix) {
         return Result<Span<const uint8>>::Failure(prefix.Error());
     }
+
     const uint64 length = LoadLittleEndian<uint64>(prefix.Value().Data());
     if (length > limits_.maxValueBytes) {
         return Result<Span<const uint8>>::Failure(ErrorCode::CapacityExceeded);
     }
+
     if (length > Remaining() - 8) {
         return Result<Span<const uint8>>::Failure(ErrorCode::InvalidArgument);
     }
+
     // borrowed bytes도 크기에 비례한 budget을 청구하여 scan/copy 구현 간 한도가 느슨해지지 않는다.
     auto spent = Spend(length);
     if (!spent) {
         return Result<Span<const uint8>>::Failure(spent.Error());
     }
+
     if (ownedCopy) {
         // String::TryAssign의 validation과 copy도 별도로 선불 청구한다.
         spent = Spend(length);
         if (!spent) {
             return Result<Span<const uint8>>::Failure(spent.Error());
         }
+
         spent = Spend(length);
         if (!spent) {
             return Result<Span<const uint8>>::Failure(spent.Error());
         }
     }
+
     const auto count = static_cast<usize>(length);
     const uint8* data = source_.Data() + position_ + 8;
     if (utf8) {
@@ -358,6 +403,7 @@ Result<Span<const uint8>> ArchiveReader::Variable(bool utf8, bool ownedCopy) noe
             return Result<Span<const uint8>>::Failure(valid.Error());
         }
     }
+
     return Result<Span<const uint8>>::Success({data, count});
 }
 
@@ -366,9 +412,11 @@ Result<bool> ArchiveReader::ReadBool() noexcept {
     if (!bytes) {
         return Result<bool>::Failure(bytes.Error());
     }
+
     if (bytes.Value()[0] > 1) {
         return Result<bool>::Failure(ErrorCode::InvalidArgument);
     }
+
     ++position_;
     return Result<bool>::Success(bytes.Value()[0] != 0);
 }
@@ -378,6 +426,7 @@ Result<uint32> ArchiveReader::ReadU32() noexcept {
     if (!bytes) {
         return Result<uint32>::Failure(bytes.Error());
     }
+
     const uint32 value = LoadLittleEndian<uint32>(bytes.Value().Data());
     position_ += 4;
     return Result<uint32>::Success(value);
@@ -388,6 +437,7 @@ Result<uint64> ArchiveReader::ReadU64() noexcept {
     if (!bytes) {
         return Result<uint64>::Failure(bytes.Error());
     }
+
     const uint64 value = LoadLittleEndian<uint64>(bytes.Value().Data());
     position_ += 8;
     return Result<uint64>::Success(value);
@@ -398,6 +448,7 @@ Result<int64> ArchiveReader::ReadI64() noexcept {
     if (!value) {
         return Result<int64>::Failure(value.Error());
     }
+
     // C++23의 two's-complement 결과를 값 범위 밖 unsigned→signed cast 없이 재현한다.
     const uint64 bits = value.Value();
     const int64 result =
@@ -410,6 +461,7 @@ Result<float> ArchiveReader::ReadF32() noexcept {
     if (!value) {
         return Result<float>::Failure(value.Error());
     }
+
     return Result<float>::Success(platform::BitCast<float>(value.Value()));
 }
 
@@ -418,6 +470,7 @@ Result<double> ArchiveReader::ReadF64() noexcept {
     if (!value) {
         return Result<double>::Failure(value.Error());
     }
+
     return Result<double>::Success(platform::BitCast<double>(value.Value()));
 }
 
@@ -426,6 +479,7 @@ Result<Guid> ArchiveReader::ReadGuid() noexcept {
     if (!bytes) {
         return Result<Guid>::Failure(bytes.Error());
     }
+
     Guid value{LoadLittleEndian<uint64>(bytes.Value().Data()),
                LoadLittleEndian<uint64>(bytes.Value().Data() + 8)};
     position_ += 16;
@@ -437,6 +491,7 @@ Result<Span<const uint8>> ArchiveReader::ReadBytes() noexcept {
     if (value) {
         position_ += 8 + value.Value().Size();
     }
+
     return value;
 }
 
@@ -445,6 +500,7 @@ Result<StringView> ArchiveReader::ReadStringView() noexcept {
     if (!value) {
         return Result<StringView>::Failure(value.Error());
     }
+
     position_ += 8 + value.Value().Size();
     return Result<StringView>::Success(
         {reinterpret_cast<const char*>(value.Value().Data()), value.Value().Size()});
@@ -455,12 +511,14 @@ Result<String> ArchiveReader::ReadString(Allocator& allocator) noexcept {
     if (!value) {
         return Result<String>::Failure(value.Error());
     }
+
     String result(allocator);
     auto assigned = result.TryAssign(
         {reinterpret_cast<const char*>(value.Value().Data()), value.Value().Size()});
     if (!assigned) {
         return Result<String>::Failure(assigned.Error());
     }
+
     position_ += 8 + value.Value().Size();
     return Result<String>::Success(Move(result));
 }
@@ -471,10 +529,12 @@ Result<Span<const uint8>> ArchiveReader::ReadRaw(usize count) noexcept {
         return Result<Span<const uint8>>::Failure(charged ? ErrorCode::CapacityExceeded
                                                           : charged.Error());
     }
+
     auto value = Fixed(count);
     if (value) {
         position_ += count;
     }
+
     return value;
 }
 
