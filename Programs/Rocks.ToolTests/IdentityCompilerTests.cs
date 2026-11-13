@@ -116,7 +116,7 @@ internal static class IdentityCompilerTests
                 await probe.MutationFailure(duringLoad);
                 Verify.Equal("previous output", File.ReadAllText(probe.Output), "changed manifest published generated output");
             }
-        });
+        }, exclusive: true);
     }
 
     private sealed class Probe : IDisposable

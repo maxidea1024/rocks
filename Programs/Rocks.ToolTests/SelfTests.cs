@@ -55,6 +55,67 @@ internal static class SelfTests
             CheckGap("\n/* block splice \\\r\n continuation */\n", false);
             CheckGap("\n/* split terminator *\\\n/ #if 0\n class hidden {};\n#endif\n/* */\n", false);
         });
+        suite.Add("TestSuite.ParallelRunKeepsNameOrderBoundAndExclusiveIsolation", async () =>
+        {
+            using TemporaryDirectory temporary = new();
+            object gate = new();
+            int active = 0;
+            int peak = 0;
+            bool overlapped = false;
+            List<string> exclusiveRuns = [];
+            async Task Body(bool exclusive, bool fail)
+            {
+                lock (gate)
+                {
+                    ++active;
+                    peak = Math.Max(peak, active);
+                    overlapped |= exclusive && active != 1;
+                }
+
+                await Task.Delay(20);
+                lock (gate)
+                {
+                    overlapped |= exclusive && active != 1;
+                    --active;
+                }
+
+                if (fail)
+                {
+                    throw new InvalidOperationException("expected inner failure");
+                }
+            }
+
+            using StringWriter innerOutput = new();
+            using StringWriter innerErrors = new();
+            TestSuite inner = new(innerOutput, innerErrors);
+            foreach (string name in new[] { "g", "c", "e", "a", "f", "b", "d", "h" })
+            {
+                inner.Add("Inner." + name, () => Body(false, name == "e"));
+            }
+
+            inner.Add("Inner.x1", async () =>
+            {
+                await Body(true, false);
+                exclusiveRuns.Add("x1");
+            }, exclusive: true);
+            inner.Add("Inner.x0", async () =>
+            {
+                await Body(true, false);
+                exclusiveRuns.Add("x0");
+            }, exclusive: true);
+            string report = temporary.FilePath("report.json");
+            Verify.Equal(1, await inner.RunAsync(report, 7351, parallelism: 3), "inner failure exit code");
+            Verify.That(peak > 1 && peak <= 3, $"parallel peak out of range: {peak}");
+            Verify.That(!overlapped, "exclusive test overlapped another test");
+            Verify.Equal("x0,x1", string.Join(',', exclusiveRuns), "exclusive tests run one at a time in name order");
+            using JsonDocument document = JsonDocument.Parse(File.ReadAllBytes(report));
+            string[] names = [.. document.RootElement.GetProperty("tests").EnumerateArray().Select(test => test.GetProperty("name").GetString()!)];
+            Verify.Equal("Inner.a,Inner.b,Inner.c,Inner.d,Inner.e,Inner.f,Inner.g,Inner.h,Inner.x0,Inner.x1", string.Join(',', names), "report name order");
+            Verify.Equal(1, document.RootElement.GetProperty("failures").GetInt32(), "report failure count");
+            Verify.Contains("[FAIL] Inner.e", innerOutput.ToString(), "inner result line");
+            Verify.Contains("expected inner failure", innerErrors.ToString(), "inner failure detail");
+            Verify.Throws<ArgumentOutOfRangeException>(() => inner.RunAsync(null, 7351, parallelism: 0).GetAwaiter().GetResult());
+        });
         suite.Add("Process.LargeUnicodePipesDrainWithoutDeadlock", async () =>
         {
             var result = await ProcessRunner.RunAsync(SelfProcess.Command(["child", "--large-output"], options.Root));

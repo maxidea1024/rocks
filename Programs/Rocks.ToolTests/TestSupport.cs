@@ -89,18 +89,37 @@ internal sealed class TemporaryDirectory : IDisposable
 
 internal sealed class TestSuite
 {
-    private readonly SortedDictionary<string, Func<Task>> tests = new(StringComparer.Ordinal);
+    private readonly SortedDictionary<string, TestCase> tests = new(StringComparer.Ordinal);
 
-    public void Add(string name, Action action) => Add(name, () =>
+    private readonly Lock outputLock = new();
+
+    private readonly TextWriter output;
+
+    private readonly TextWriter errorOutput;
+
+    // output·errorOutput은 결과 줄과 실패 내용을 받을 곳이다(기본은 표준 출력·표준 오류). 러너 자체를 시험할
+    // 때 안쪽 [FAIL] 줄이 바깥 로그에 섞이지 않게 바꾼다.
+    public TestSuite(TextWriter? output = null, TextWriter? errorOutput = null)
+    {
+        this.output = output ?? Console.Out;
+        this.errorOutput = errorOutput ?? Console.Error;
+    }
+
+    public void Add(string name, Action action, bool exclusive = false) => Add(name, () =>
     {
         action();
         return Task.CompletedTask;
-    });
+    }, exclusive);
 
-    public void Add(string name, Func<Task> action) => tests.Add(name, action);
+    // exclusive는 프로세스 전역 상태(환경 변수·현재 디렉터리 등)를 바꾸는 시험이다. 병렬 실행에서도
+    // 다른 시험과 겹치지 않게 병렬 묶음이 끝난 뒤 하나씩 돈다.
+    public void Add(string name, Func<Task> action, bool exclusive = false) => tests.Add(name, new TestCase(action, exclusive));
 
-    public async Task<int> RunAsync(string? jsonPath, ulong seed)
+    // parallelism은 동시에 실행할 시험 수다(1이면 이름 순서대로 하나씩). 병렬이면 [PASS]/[FAIL] 줄은 끝난
+    // 순서로 찍히지만 JSON 보고서는 언제나 이름 순서다. 시험마다 자기 임시 디렉터리만 써야 한다.
+    public async Task<int> RunAsync(string? jsonPath, ulong seed, int parallelism = 1)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThan(parallelism, 1);
         if (tests.Count == 0)
         {
             throw new InvalidOperationException("No test cases registered");
@@ -123,42 +142,99 @@ internal sealed class TestSuite
             File.Delete(probe);
         }
 
-        List<object> results = [];
-        int failures = 0;
-        foreach ((string name, Func<Task> action) in tests)
+        string[] names = [.. tests.Keys];
+        TestResult[] results = new TestResult[names.Length];
+        if (parallelism == 1)
         {
-            long started = Stopwatch.GetTimestamp();
-            string? error = null;
-            try
+            for (int index = 0; index < names.Length; ++index)
             {
-                await action();
+                results[index] = await RunOneAsync(names[index]);
             }
-            catch (Exception failure) when (failure is not OutOfMemoryException)
+        }
+        else
+        {
+            using SemaphoreSlim gate = new(parallelism, parallelism);
+            List<Task> running = [];
+            for (int index = 0; index < names.Length; ++index)
             {
-                error = failure.ToString();
-                ++failures;
+                if (tests[names[index]].Exclusive)
+                {
+                    continue;
+                }
+
+                int slot = index;
+                await gate.WaitAsync();
+                running.Add(Task.Run(async () =>
+                {
+                    try
+                    {
+                        results[slot] = await RunOneAsync(names[slot]);
+                    }
+                    finally
+                    {
+                        gate.Release();
+                    }
+                }));
             }
 
-            long duration = checked(Stopwatch.GetElapsedTime(started).Ticks * 100);
-            string status = error is null ? "PASS" : "FAIL";
-            Console.WriteLine($"[{status}] {name}");
-            if (error is not null)
+            await Task.WhenAll(running);
+            for (int index = 0; index < names.Length; ++index)
             {
-                Console.Error.WriteLine(error);
+                if (tests[names[index]].Exclusive)
+                {
+                    results[index] = await RunOneAsync(names[index]);
+                }
             }
-
-            results.Add(new { name, status, failures = error is null ? 0 : 1, duration_ns = duration, error });
         }
 
+        int failures = results.Count(result => result.Error is not null);
         if (jsonPath is not null)
         {
+            var entries = results.Select(result => new
+            {
+                name = result.Name,
+                status = result.Error is null ? "PASS" : "FAIL",
+                failures = result.Error is null ? 0 : 1,
+                duration_ns = result.DurationNs,
+                error = result.Error,
+            }).ToList();
             AtomicFile.WriteIfChanged(jsonPath, JsonSerializer.SerializeToUtf8Bytes(
-                new { schema = 1, seed, repeat = 1, failures, tests = results }, new JsonSerializerOptions { WriteIndented = true }));
+                new { schema = 1, seed, repeat = 1, failures, tests = entries }, new JsonSerializerOptions { WriteIndented = true }));
         }
 
-        Console.WriteLine($"{tests.Count} test cases, {failures} failures");
+        output.WriteLine($"{tests.Count} test cases, {failures} failures");
         return failures == 0 ? 0 : 1;
     }
+
+    private async Task<TestResult> RunOneAsync(string name)
+    {
+        long started = Stopwatch.GetTimestamp();
+        string? error = null;
+        try
+        {
+            await tests[name].Action();
+        }
+        catch (Exception failure) when (failure is not OutOfMemoryException)
+        {
+            error = failure.ToString();
+        }
+
+        long duration = checked(Stopwatch.GetElapsedTime(started).Ticks * 100);
+        lock (outputLock)
+        {
+            output.WriteLine($"[{(error is null ? "PASS" : "FAIL")}] {name}");
+            if (error is not null)
+            {
+                errorOutput.WriteLine(error);
+            }
+        }
+
+        return new TestResult(name, duration, error);
+    }
+
+    private sealed record TestCase(Func<Task> Action, bool Exclusive);
+
+    private sealed record TestResult(string Name, long DurationNs, string? Error);
 }
 
 internal sealed class Options
@@ -178,6 +254,22 @@ internal sealed class Options
 
     public ulong Seed => values.TryGetValue("seed", out string? value) ? ulong.Parse(value, System.Globalization.CultureInfo.InvariantCulture) : 7351;
 
+    // --jobs: 병렬로 돌릴 시험 수(지원하는 명령만 쓴다). 없으면 기본값을 돌려준다.
+    public int Jobs(int fallback)
+    {
+        if (!values.TryGetValue("jobs", out string? value))
+        {
+            return fallback;
+        }
+
+        if (!int.TryParse(value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int jobs) || jobs < 1)
+        {
+            throw new ArgumentException("--jobs must be a positive integer");
+        }
+
+        return jobs;
+    }
+
     public string Required(string key) => values.TryGetValue(key, out string? value) && value.Length != 0 ? value :
         throw new ArgumentException("Missing --" + key);
 
@@ -187,7 +279,7 @@ internal sealed class Options
     {
         Options result = new();
         HashSet<string> allowed = new(StringComparer.Ordinal) { "root", "json", "seed", "native-executable",
-            "compiler", "metacompiler", "formatter", "dotnet", "compile-commands" };
+            "compiler", "metacompiler", "formatter", "dotnet", "compile-commands", "jobs" };
         for (int index = 0; index < arguments.Length; ++index)
         {
             string argument = arguments[index];

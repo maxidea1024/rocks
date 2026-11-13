@@ -224,6 +224,8 @@ dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll --
 dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll meta --root . --compiler clang-cl --metacompiler out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll --clang-arg=-DROCKS_BUILD_DEBUG=1
 ```
 
+ToolTests `meta`는 시험마다 자기 임시 디렉터리에서 MetaCompiler·Clang 프로세스를 띄우므로 기본으로 CPU 수만큼 함께 돌린다(`--jobs N`으로 바꾼다). 결과 줄은 끝난 순서로, JSON 보고서는 이름 순서로 남는다. 프로세스 전역 상태(환경 변수 등)를 바꾸는 시험은 `exclusive`로 등록해 병렬 묶음이 끝난 뒤 하나씩 돈다. 새 meta 시험은 저장소 파일을 읽기만 하고 쓰기는 자기 임시 디렉터리에 한다.
+
 MetaCompiler는 모듈 하나를 한 번에 생성한다. `--module`(모듈 이름), 짝을 이루는 `--input <헤더>`·`--include <철자>`(여러 번), private 헤더 표시 `--private <철자>`, 생성 루트 `--output-root`, descriptor `--descriptor <M>.rocksmeta.json`, 의존 모듈 descriptor `--import`(여러 번)를 받는다. 입력 헤더 전부를 include하는 번역 단위 하나를 Clang에 주므로 같은 모듈의 헤더 사이 base·참조가 풀린다. 생성 헤더는 `<생성 루트>/Public|Private/<철자의 .h를 .generated.h로 바꾼 경로>`에 쓴다. 위 예는 `out/Generated/SampleGame/Public/GameObject.generated.h`, 집계 헤더 `out/Generated/SampleGame/Public/SampleGame/SampleGame.module.generated.h`와 descriptor를 만든다. 실제 빌드에서는 빌드 도구가 이 인자를 모두 구성한다.
 
 컴파일러는 C++23, 예외·RTTI 비활성화와 경고 오류 정책을 적용한다. Windows SDK 환경은 공통 NativeEnvironment가 준비한다. macOS에서 위 예시의 `clang-cl`은 `clang++`로 바꾼다. annotation은 Clang 기능이며 지원하지 않는 컴파일러에서 빈 매크로로 대체하지 않는다.

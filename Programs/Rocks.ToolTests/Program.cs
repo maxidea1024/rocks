@@ -35,6 +35,7 @@ internal static class Program
             }
 
             TestSuite suite = new();
+            int parallelism = 1;
             switch (args[0])
             {
                 case "self":
@@ -49,7 +50,10 @@ internal static class Program
                         options.Required("compile-commands"));
                     break;
                 case "meta":
+                    // meta 시험은 저마다 임시 디렉터리에서 MetaCompiler·Clang 프로세스를 띄우므로 서로 독립이다.
+                    // 직렬로는 CI 러너에서 단계 제한(10분)을 넘으므로 CPU 수만큼 함께 돌린다.
                     MetaTests.Register(suite, options, await NativeEnvironment.CreateAsync(options.Required("compiler")));
+                    parallelism = options.Jobs(Math.Max(1, Environment.ProcessorCount));
                     break;
                 case "policy":
                     var failures = PolicyChecks.Runtime(root).Concat(PolicyChecks.PlatformBoundary(root))
@@ -118,7 +122,7 @@ internal static class Program
                     throw new ArgumentException("Unknown command: " + args[0]);
             }
 
-            return await suite.RunAsync(options.Json, options.Seed);
+            return await suite.RunAsync(options.Json, options.Seed, parallelism);
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
