@@ -116,13 +116,11 @@ public static class ProcessRunner
             await process.WaitForExitAsync(linked.Token);
             await Task.WhenAll(stdout, stderr).WaitAsync(linked.Token);
             var result = new ProcessResult(process.ExitCode, stdout.Result, stderr.Result);
-            // 정상적인 EOF 후에도 OS handle 정리가 예상 밖으로 지연될 수 있으므로 deadline을 둔다.
+            // child가 끝났고 두 pipe의 EOF까지 읽었으므로 결과는 확정이다. 남은 handle 정리가 늦어도(바쁜
+            // CI 러너에서 3초를 넘긴 적이 있다) 결과를 버리지 않는다 — 정리는 예약을 쥔 채 끝까지 진행하고
+            // (finally의 ReleaseAfter), 끝나지 않은 정리가 쌓이면 다음 실행이 용량 부족으로 거부된다.
             cleanupTask = StartBackgroundCleanup([process.StandardOutput, process.StandardError], process);
-            if (!await CompletesWithinAsync(cleanupTask, TimeSpan.FromSeconds(3)))
-            {
-                throw new ProcessCleanupException("Process cleanup incomplete: resource disposal exceeded deadline; cleanup remains pending");
-            }
-
+            _ = await CompletesWithinAsync(cleanupTask, TimeSpan.FromSeconds(3));
             if (cleanupTask.IsFaulted)
             {
                 throw new ProcessCleanupException("Process cleanup incomplete: resource disposal failed", cleanupTask.Exception!.GetBaseException());
@@ -184,7 +182,10 @@ public static class ProcessRunner
     // 프로세스가 종료한 후에도 상속 파이프를 붙잡는 자식은 별도 OS 격리 계층의 책임이다.
     internal static Task StartBackgroundCleanup(IReadOnlyList<IDisposable> resources, IDisposable owner, Task? termination = null)
     {
-        var streams = resources.Select(resource => Task.Run(resource.Dispose)).ToArray();
+        // Dispose는 OS read 완료를 동기적으로 기다릴 수 있으므로 스레드 풀이 아닌 전용 스레드에서 한다
+        // (병렬 compile로 스레드 풀이 밀리면 정리 시작 자체가 늦어진다).
+        var streams = resources.Select(resource => Task.Factory.StartNew(resource.Dispose, CancellationToken.None,
+            TaskCreationOptions.LongRunning, TaskScheduler.Default)).ToArray();
         return FinishAsync();
 
         async Task FinishAsync()
@@ -205,7 +206,8 @@ public static class ProcessRunner
                 }
                 finally
                 {
-                    await Task.Run(owner.Dispose);
+                    await Task.Factory.StartNew(owner.Dispose, CancellationToken.None, TaskCreationOptions.LongRunning,
+                        TaskScheduler.Default);
                 }
             }
         }
