@@ -102,11 +102,8 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
             return Result<void>::Failure(ErrorCode::TypeMismatch);
         }
 
-        if (value.reference != ObjectHandle{}) {
-            if (value.reference.IsNull()) {
-                return Result<void>::Failure(ErrorCode::StaleHandle);
-            }
-
+        // 비정규 null(IsNull인 non-zero handle)은 null이다(B5 컨테이너·SetReference와 같은 정규화).
+        if (!value.reference.IsNull()) {
             auto found = registry.AcquireType(access, value.reference);
             if (!found) {
                 return Result<void>::Failure(found.Error());
@@ -122,6 +119,16 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
     binding.readOnly = readOnly_;
     if (auto valid = detail::ValidateFieldWrite(binding, target, value); !valid) {
         return valid;
+    }
+
+    // 수동 함수표가 비정규 handle을 저장하지 않게 callback에는 정규 null 사본을 넘긴다(참조 값의
+    // 문자열은 비어 있으므로 할당하지 않는다).
+    if (value.kind == ValueKind::ObjectReference && value.reference.IsNull() &&
+        value.reference != ObjectHandle{}) {
+        FieldValue normalized(value.GetAllocator());
+        normalized.kind = value.kind;
+        normalized.reference = ObjectHandle{};
+        return callback_(registry, access, handle, normalized);
     }
 
     return callback_(registry, access, handle, value);
@@ -156,8 +163,9 @@ Result<void> ValidateFieldWrite(const FieldWriteBinding& binding, const FieldWri
             return Result<void>::Failure(ErrorCode::TypeMismatch);
         }
 
-        // null은 단일 참조·ObjectRefArray 원소 모두 받는다(B5 — 원소 null 허용).
-        if (value.reference != ObjectHandle{}) {
+        // null은 단일 참조·ObjectRefArray 원소 모두 받는다(B5 — 원소 null 허용). 비정규
+        // null(IsNull인 non-zero handle)도 null이다(쓰는 쪽이 ObjectHandle{}로 정규화한다).
+        if (!value.reference.IsNull()) {
             // 선언 타입 또는 그 파생 타입 객체를 허용한다(SetReference와 같은 상속 규칙).
             if (!target.referenced || (source && !target.referenced->IsNativeA(source)) ||
                 (expected && !target.referenced->IsNativeA(expected))) {
@@ -206,6 +214,23 @@ Result<void> ValidateArrayLength(const FieldSchema& field, usize newLength) noex
     return Result<void>::Success();
 }
 
+Result<void> ValidateArrayEdit(const FieldWriteTarget& target, ArrayEdit edit) noexcept {
+    if (static_cast<uint8>(edit) > static_cast<uint8>(ArrayEdit::Clear)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (!target.actual || target.actual->value.kind != ValueKind::Array) {
+        return Result<void>::Failure(ErrorCode::TypeMismatch);
+    }
+
+    // 바깥 struct·배열 필드의 ReadOnly가 전파되어 원소 삽입·삭제·비우기를 모두 막는다.
+    if (HasFlag(target.effectiveFlags, FieldFlags::ReadOnly)) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    return Result<void>::Success();
+}
+
 } // namespace detail
 
 namespace detail {
@@ -226,11 +251,15 @@ uint64 NextRegistryDomain() noexcept {
 // 클래스·enum·struct 레코드가 같은 목록·ID 공간을 쓴다. enum 레코드는 schema.id·name과
 // ops.nativeType·module만 채우고 enumSchema에 열거자를 둔다. struct 레코드는 schema(id·version·
 // name·fields)와 ops(size·alignment·nativeType·module)를 채우고 structOps에 멤버 함수표(스키마
-// 순서)·construct·destroy·trace·migrate를, fieldOrder에 필드 ID 순 정렬 색인을 둔다. 클래스·struct
-// 레코드의 fieldTypes는 schema.fields와 같은 길이이며 필드의 대상 형식(배열이면 원소)이 가리키는
-// Enum·Struct 레코드(그 밖은 nullptr)다 — 이 참조는 lease가 아니라 dependents 계수로 표시하므로
-// Shutdown이 영구 Busy가 되지 않는다.
+// 순서)·construct·destroy·trace·migrate를 둔다. 클래스·struct 레코드는 fieldOrder에 필드 ID 순 정렬
+// 색인을 두고(TypeLease·StructView::FieldIndex), 클래스 레코드는 opsIndex에 스키마 위치 →
+// ops.fields 위치 색인(함수표가 없는 Opaque 필드는 NoOps)을 둔다(TypeLease::FieldOps — 클래스
+// ops.fields는 입력 순서다). 클래스·struct 레코드의 fieldTypes는 schema.fields와 같은 길이이며
+// 필드의 대상 형식(배열이면 원소)이 가리키는 Enum·Struct 레코드(그 밖은 nullptr)다 — 이 참조는
+// lease가 아니라 dependents 계수로 표시하므로 Shutdown이 영구 Busy가 되지 않는다.
 struct TypeRegistry::Record {
+    static constexpr uint32 NoOps = 0xffffffffu;
+
     Record* next = nullptr;
     TypeKind kind = TypeKind::Class;
     TypeSchema schema;
@@ -238,6 +267,7 @@ struct TypeRegistry::Record {
     EnumSchema enumSchema;
     RuntimeStructOps structOps;
     uint32* fieldOrder = nullptr;
+    uint32* opsIndex = nullptr;
     uint32 depth = 0;
     bool containsStrongReference = false;
     bool containsRequired = false;
@@ -288,24 +318,6 @@ bool IsAsciiIdentifier(Span<const char> text) noexcept {
         const char c = text[index];
         const bool letter = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_';
         if (!letter && (index == 0 || c < '0' || c > '9')) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-char AsciiLower(char c) noexcept {
-    return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
-}
-
-bool EqualsIgnoringAsciiCase(Span<const char> left, Span<const char> right) noexcept {
-    if (left.Size() != right.Size()) {
-        return false;
-    }
-
-    for (usize index = 0; index < left.Size(); ++index) {
-        if (AsciiLower(left[index]) != AsciiLower(right[index])) {
             return false;
         }
     }
@@ -368,28 +380,17 @@ bool EnumToolNamesCollide(Span<const char> left, Span<const char> right,
         }
 
         for (usize index = 0; index < prefix.Size(); ++index) {
-            if (AsciiLower(prefix[index]) != AsciiLower(longer[index])) {
+            if (detail::AsciiLower(prefix[index]) != detail::AsciiLower(longer[index])) {
                 return false;
             }
         }
 
-        for (usize index = 0; index < shorter.Size(); ++index) {
-            if (AsciiLower(shorter[index]) != AsciiLower(longer[prefix.Size() + index])) {
-                return false;
-            }
-        }
-
-        return true;
+        return detail::EnumNameEquals(shorter, longer, prefix.Size());
     };
     return prefixed(left, right) || prefixed(right, left);
 }
 
 constexpr usize MaxEnumerators = 4096;
-
-// 도구 이름이 없으면 C++ 필드 이름이 도구 이름이다.
-Span<const char> EffectiveToolName(const FieldSchema& field) noexcept {
-    return field.toolName.Size() != 0 ? field.toolName : field.name;
-}
 
 // 클래스·struct가 함께 쓰는 필드 서술 검사다(Docs/Design/ReflectionFoundations.ko.md 4.6절). 필드
 // 하나의 규칙(플래그·값 종류·Required·도구 이름)과 필드 사이 규칙(같은 ID·실효 도구 이름은
@@ -653,8 +654,15 @@ const RuntimeStructFieldOps& StructView::FieldOps(usize schemaIndex) const noexc
     return record.structOps.fields[schemaIndex];
 }
 
-usize StructView::FieldIndex(Guid fieldId) const noexcept {
-    const auto& record = ViewAs<TypeRegistry::Record>(record_);
+namespace {
+
+// 필드 ID 정렬 색인(fieldOrder)의 이진 탐색이다. 없으면(색인이 없는 enum 레코드 포함) ~0.
+template <class Record>
+usize SortedFieldIndex(const Record& record, Guid fieldId) noexcept {
+    if (!record.fieldOrder) {
+        return ~usize(0);
+    }
+
     usize low = 0;
     usize high = record.schema.fields.Size();
     while (low < high) {
@@ -671,7 +679,31 @@ usize StructView::FieldIndex(Guid fieldId) const noexcept {
         }
     }
 
-    return NoField;
+    return ~usize(0);
+}
+
+} // namespace
+
+usize StructView::FieldIndex(Guid fieldId) const noexcept {
+    return SortedFieldIndex(ViewAs<TypeRegistry::Record>(record_), fieldId);
+}
+
+const RuntimeFieldOps* TypeLease::FieldOps(usize schemaIndex) const& noexcept {
+    const auto* record = static_cast<TypeRegistry::Record*>(record_);
+    if (!record || record->kind != TypeKind::Class || schemaIndex >= record->schema.fields.Size()) {
+        platform::Fatal("TypeLease::FieldOps called on a non-class lease or out of range");
+    }
+
+    const uint32 position = record->opsIndex[schemaIndex];
+    return position == TypeRegistry::Record::NoOps ? nullptr : &record->ops.fields[position];
+}
+
+usize TypeLease::FieldIndex(Guid fieldId) const noexcept {
+    if (!record_) {
+        platform::Fatal("TypeLease::FieldIndex called on an empty lease");
+    }
+
+    return SortedFieldIndex(*static_cast<const TypeRegistry::Record*>(record_), fieldId);
 }
 
 const EnumSchema* StructView::FieldEnum(usize schemaIndex) const noexcept {
@@ -843,9 +875,11 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         const bool accessors = aggregateField ? (!field.read && !field.write && !field.writeStaged)
                                               : (field.read && field.write && field.writeStaged);
         // struct·배열 필드는 Transient가 아니면 codec이 있어야 한다(그 밖은 completeFieldLayout
-        // 규칙).
+        // 규칙). 경로 접근 thunk(path)는 struct·배열 필드만 가질 수 있다 — 최상위 단일 값의 경로
+        // 읽기·쓰기는 read·write 한 경로다(7.1절).
         if (!matched || !accessors || (field.encode == nullptr) != (field.decode == nullptr) ||
-            (aggregateField && !field.encode && !HasFlag(matched->flags, FieldFlags::Transient))) {
+            (aggregateField && !field.encode && !HasFlag(matched->flags, FieldFlags::Transient)) ||
+            (!aggregateField && field.path != nullptr)) {
             return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
         }
 
@@ -864,7 +898,11 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         (fieldEnd + alignof(RuntimeFieldOps) - 1) & ~(alignof(RuntimeFieldOps) - 1);
     const usize opsEnd = opsOffset + ops.fields.Size() * sizeof(RuntimeFieldOps);
     const usize typesOffset = (opsEnd + alignof(Record*) - 1) & ~(alignof(Record*) - 1);
-    usize bytes = typesOffset + schema.fields.Size() * sizeof(Record*);
+    const usize typesEnd = typesOffset + schema.fields.Size() * sizeof(Record*);
+    // 필드 ID 정렬 색인과 스키마 위치 → 함수표 위치 색인(경로 접근의 FieldIndex·FieldOps).
+    const usize orderOffset = (typesEnd + alignof(uint32) - 1) & ~(alignof(uint32) - 1);
+    const usize opsIndexOffset = orderOffset + schema.fields.Size() * sizeof(uint32);
+    usize bytes = opsIndexOffset + schema.fields.Size() * sizeof(uint32);
     if (!AddBytes(bytes, schema.name.Size())) {
         return Result<TypeRegistrationToken>::Failure(ErrorCode::Overflow);
     }
@@ -984,7 +1022,10 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         reinterpret_cast<RuntimeFieldOps*>(static_cast<uint8*>(memory.Value()) + opsOffset);
     auto* fieldTypes =
         reinterpret_cast<Record**>(static_cast<uint8*>(memory.Value()) + typesOffset);
-    uint8* cursor = reinterpret_cast<uint8*>(fieldTypes + schema.fields.Size());
+    auto* fieldOrder = reinterpret_cast<uint32*>(static_cast<uint8*>(memory.Value()) + orderOffset);
+    auto* opsIndex =
+        reinterpret_cast<uint32*>(static_cast<uint8*>(memory.Value()) + opsIndexOffset);
+    uint8* cursor = reinterpret_cast<uint8*>(opsIndex + schema.fields.Size());
     {
         // mutating_이 등록·해제를 막으므로 위에서 확인한 enum·struct 레코드가 그대로 있다.
         platform::LockGuard lock(gate_);
@@ -1009,12 +1050,23 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         fields[index].category = CopyBytes(schema.fields[index].category, cursor);
         fields[index].displayName = CopyBytes(schema.fields[index].displayName, cursor);
         fields[index].toolName = CopyBytes(schema.fields[index].toolName, cursor);
+        fieldOrder[index] = static_cast<uint32>(index);
+        opsIndex[index] = Record::NoOps;
     }
 
+    algo::Sort(Span<uint32>(fieldOrder, schema.fields.Size()),
+               [fields](uint32 left, uint32 right) noexcept {
+                   const Guid a = fields[left].id;
+                   const Guid b = fields[right].id;
+                   return a.high != b.high ? a.high < b.high : a.low < b.low;
+               });
+    record->fieldOrder = fieldOrder;
+    record->opsIndex = opsIndex;
     for (usize index = 0; index < ops.fields.Size(); ++index) {
         ::new (fieldOps + index) RuntimeFieldOps(ops.fields[index]);
         for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
             if (fields[fieldIndex].id == fieldOps[index].fieldId) {
+                opsIndex[fieldIndex] = static_cast<uint32>(index);
                 // 원본 입력 함수표는 변경하지 않는다. 등록된 복사본에만 정책을 결합한다.
                 fieldOps[index].write.Bind(*this, ops.nativeType, fields[fieldIndex].id,
                                            fields[fieldIndex].value.kind,

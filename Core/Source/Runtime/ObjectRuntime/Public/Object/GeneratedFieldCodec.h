@@ -1113,16 +1113,6 @@ bool MatchesStructView(const FieldCodecContext& context) noexcept {
            frame->structure.StructOps().nativeType == NativeTypeKey<Member>();
 }
 
-// struct 멤버 포인터의 소유 struct·멤버 형식이다.
-template <class T>
-struct StructMemberPointer;
-
-template <class S, class M>
-struct StructMemberPointer<M S::*> {
-    using Owner = S;
-    using Member = M;
-};
-
 // 참조 멤버의 적용(2단계) 쓰기의 단일 지점이다(4.3·5.6절). 문맥에 StructRefArray 원소 위치가
 // 있으면(StructElementScope 안) 컨테이너 기준 범위 검사의 SetElementReference, 없으면 소유 객체
 // 저장소 안 주소의 SetReference다.
@@ -1828,17 +1818,22 @@ Result<void> DecodeStructMember(const RuntimeStructFieldOps&, ConstructionContex
 }
 
 // struct 멤버 하나의 함수표다(생성 코드·수동 시험 공용). valueNativeType은 Enum·Struct 멤버와
-// Enum·Struct 원소 배열 멤버의 원소 native 키다.
+// Enum·Struct 원소 배열 멤버의 원소 native 키다. path는 경로 접근 thunk(B6 — 생성 코드는
+// &detail::PathStructMember<&S::m, ValueKind::Target>, Object/GeneratedPathAccess.h)이며 주지
+// 않으면 이 멤버로 들어가는 경로 연산은 Unsupported다.
 //
 // 사용 예:
-//   const RuntimeStructFieldOps fields[] = {detail::StructFieldOps<&BulkDataRef::bulkId>(BulkId)};
+//   const RuntimeStructFieldOps fields[] = {detail::StructFieldOps<&BulkDataRef::bulkId>(
+//       BulkId, &detail::PathStructMember<&BulkDataRef::bulkId, ValueKind::UInt32>)};
 template <auto MemberPointer>
-RuntimeStructFieldOps StructFieldOps(Guid fieldId) noexcept {
+RuntimeStructFieldOps StructFieldOps(Guid fieldId,
+                                     StructFieldPathFunction path = nullptr) noexcept {
     using Member = typename StructMemberPointer<decltype(MemberPointer)>::Member;
     RuntimeStructFieldOps ops;
     ops.fieldId = fieldId;
     ops.encode = &EncodeStructMember<MemberPointer>;
     ops.decode = &DecodeStructMember<MemberPointer>;
+    ops.path = path;
     if constexpr (ArrayField<Member>::Supported) {
         using Element = typename ArrayField<Member>::Element;
         if constexpr (ReflectedEnumField<Element>::Supported ||

@@ -11,6 +11,15 @@ namespace rocks {
 
 class WorkerScheduler;
 
+namespace detail {
+class PathCursor;
+
+// 경로 접근의 참조 멤버 쓰기 단일 지점이다(정의는 Object/GeneratedPathAccess.h).
+template <class T>
+Result<void> SetPathMemberReference(PathCursor& cursor, ObjectRef<T>& field,
+                                    ObjectHandle target) noexcept;
+} // namespace detail
+
 enum class GcPhase : uint8 {
     Idle,
     Marking,
@@ -345,6 +354,9 @@ private:
     friend void detail::ReleaseBorrow(ObjectRegistry*, ObjectHandle) noexcept;
     friend void detail::ReleaseBackend(ObjectRegistry*, ObjectHandle) noexcept;
     friend void detail::ReleaseEncodePin(ObjectRegistry*, ObjectHandle) noexcept;
+    template <class T>
+    friend Result<void> detail::SetPathMemberReference(detail::PathCursor&, ObjectRef<T>&,
+                                                       ObjectHandle) noexcept;
 
     struct Slot;
     struct Chunk;
@@ -438,6 +450,19 @@ private:
         const detail::StructElementLocation element{&array.storage_, index};
         return SetEdge(access, owner, field.handle_, target, transaction, NativeTypeKey<T>(),
                        &element);
+    }
+
+    // StructRefArray 원소 위치(detail::StructRefArrayAccess::Location)로 고르는 live 원소 참조
+    // 쓰기다. 경로 접근(B6)의 참조 멤버 쓰기 단일 지점 detail::SetPathMemberReference만 friend로
+    // 부른다 — 경로 thunk는 원소를 고른 단계의 배열 타입을 모르고 위치만 들고 내려온다. 위조한
+    // 위치를 공개 API로 받지 않으려고 private이다. 검사(owner Alive와 Borrow, 컨테이너가 owner
+    // 저장소 안, index < Size(), field가 그 원소 블록 안 — 아니면 InvalidArgument), 대상 규칙,
+    // shade, encode 고정 Busy는 공개 (배열, index) 오버로드와 같다.
+    template <class T>
+    Result<void> SetElementReference(const ObjectAccessContext& access, ObjectHandle owner,
+                                     const detail::StructElementLocation& element,
+                                     ObjectRef<T>& field, ObjectHandle target) noexcept {
+        return SetEdge(access, owner, field.handle_, target, 0, NativeTypeKey<T>(), &element);
     }
 
     Result<RootRef<Object>> NewRoot(const ObjectAccessContext&, TypeId, const void*) noexcept;

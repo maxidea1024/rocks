@@ -16,6 +16,7 @@ Result<TypeRegistrationToken> RegisterNodeAlias(TypeRegistry& types, TypeId id,
     if (schema.fields.Size() > 32) {
         return Result<TypeRegistrationToken>::Failure(ErrorCode::CapacityExceeded);
     }
+
     FieldSchema fields[32];
     bool found = false;
     for (usize index = 0; index < schema.fields.Size(); ++index) {
@@ -25,9 +26,11 @@ Result<TypeRegistrationToken> RegisterNodeAlias(TypeRegistry& types, TypeId id,
             found = true;
         }
     }
+
     if (!found) {
         return Result<TypeRegistrationToken>::Failure(ErrorCode::NotFound);
     }
+
     schema.fields = {fields, schema.fields.Size()};
     schema.id = id;
     return types.Register(schema, GeneratedType<Node>::Ops());
@@ -39,6 +42,7 @@ const RuntimeFieldOps* Next(const TypeLease& lease) noexcept {
             return &lease.Ops().fields[index];
         }
     }
+
     return nullptr;
 }
 
@@ -58,6 +62,7 @@ Result<void> ProbeReferenceTypeLifetimes(ObjectRegistry&, const ObjectAccessCont
     if (!activeProbe) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     activeProbe->sourceResult = activeProbe->source->Unregister(activeProbe->sourceToken).Error();
     activeProbe->targetResult = activeProbe->target->Unregister(activeProbe->targetToken).Error();
     return Result<void>::Success();
@@ -129,12 +134,19 @@ TEST(ReferenceWriteChecksBothSchemasAcrossRegistriesAndNativeAliases) {
                   .Error() == ErrorCode::TypeMismatch);
         REQUIRE(writer->read(target, target.OwnerAccess(), compatible.Value().Handle(), output));
         CHECK(output.reference == ObjectHandle{});
+        // 비정규 null(registry 0인 non-zero handle)은 null로 정규화해 쓴다(B5
+        // 컨테이너·SetReference와 같은 규칙 — Docs/Design/ReflectionFoundations.ko.md 7.1절). 먼저
+        // non-null을 쓴 뒤 덮는다.
+        value.reference = child.Value().Handle();
+        REQUIRE(writer->write(target, target.OwnerAccess(), compatible.Value().Handle(), value));
+        REQUIRE(writer->read(target, target.OwnerAccess(), compatible.Value().Handle(), output));
+        CHECK(output.reference == child.Value().Handle());
         value.reference = {0, 7, 1};
-        CHECK(writer->write(target, target.OwnerAccess(), compatible.Value().Handle(), value)
-                  .Error() == ErrorCode::StaleHandle);
+        REQUIRE(writer->write(target, target.OwnerAccess(), compatible.Value().Handle(), value));
         REQUIRE(writer->read(target, target.OwnerAccess(), compatible.Value().Handle(), output));
         CHECK(output.reference == ObjectHandle{});
     }
+
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
@@ -168,6 +180,7 @@ TEST(ReferenceWriteDoesNotTreatSameTypeIdAcrossRegistriesAsSameNativeType) {
         REQUIRE(writer->read(target, target.OwnerAccess(), owner.Value().Handle(), output));
         CHECK(output.reference == ObjectHandle{});
     }
+
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
@@ -198,10 +211,12 @@ TEST(ReferenceWriteKeepsBothDeclaredTypeLeasesUntilCallbackCompletes) {
             if (fields[index].id == NextId) {
                 fields[index].value.type = sourceReference;
             }
+
             if (accessors[index].fieldId == NextId) {
                 accessors[index].write = &ProbeReferenceTypeLifetimes;
             }
         }
+
         sourceSchema.fields = {fields, sourceSchema.fields.Size()};
         sourceOps.fields = {accessors, sourceOps.fields.Size()};
         REQUIRE(sourceTypes.Register(sourceSchema, Move(sourceOps)));
@@ -226,5 +241,6 @@ TEST(ReferenceWriteKeepsBothDeclaredTypeLeasesUntilCallbackCompletes) {
         REQUIRE(sourceTypes.Unregister(sourceToken.Value()));
         REQUIRE(targetTypes.Unregister(targetToken.Value()));
     }
+
     CHECK(allocator.Stats().liveAllocations == 0);
 }

@@ -150,11 +150,51 @@ constexpr const ValueType& FieldTargetType(const FieldSchema& field) noexcept {
 }
 
 // 필드 경로의 한 단계다(7절 PropertyPath, 6.4절 진단 경로): 필드 ID와, 배열 원소면 그 index.
+// 원소 index는 배열 필드의 단계에 둔다([slots[2], material] — slots 단계가 index 2를 가진다).
 struct PathStep {
     Guid fieldId;
     uint32 index = 0;
     bool indexed = false;
 };
+
+// 속성 경로의 최대 단계 수다(Docs/Design/ReflectionFoundations.ko.md 7.1절): 최상위 필드 1 + struct
+// 중첩 MaxStructDepth(16) — codec 위치 프레임 수와 같다. 원소 index는 단계를 늘리지 않는다.
+inline constexpr uint32 MaxPropertyPathSteps = MaxStructDepth + 1;
+
+// 객체 하나 안의 속성 경로다(7절 — FieldId 체인 + 원소 index). 참조를 따라 다른 객체로 들어가지
+// 않는다(객체 지정은 handle이 맡는다). steps는 비소유 뷰이며 쓰는 동안 유효해야 한다. 문자열 경로
+// ("slots[2].material")는 ParsePropertyPath(Object/PropertyPath.h)가 이 표현으로 바꾼다.
+//
+// 사용 예:
+//   const PathStep steps[] = {{SlotsId, 2, true}, {MaterialId}};
+//   PropertyPath path{steps};
+struct PropertyPath {
+    Span<const PathStep> steps;
+};
+
+// 단계가 정규형인지다: index가 없는 단계(indexed == false)는 index가 0이어야 한다. 경로 연산은
+// 정규형이 아닌 단계를 InvalidArgument로 거부한다 — 같은 위치를 가리키는 경로가 한 표현만 가지므로
+// 경로 동등성(SamePropertyPath)으로 Undo 기록을 병합할 수 있다.
+constexpr bool IsCanonicalPathStep(const PathStep& step) noexcept {
+    return step.indexed || step.index == 0;
+}
+
+// 두 경로가 같은 위치인지다(단계마다 필드 ID·index·indexed가 같다). 정규형 경로끼리의 비교다.
+constexpr bool SamePropertyPath(PropertyPath left, PropertyPath right) noexcept {
+    if (left.steps.Size() != right.steps.Size()) {
+        return false;
+    }
+
+    for (usize index = 0; index < left.steps.Size(); ++index) {
+        const PathStep& a = left.steps[index];
+        const PathStep& b = right.steps[index];
+        if (!(a.fieldId == b.fieldId) || a.index != b.index || a.indexed != b.indexed) {
+            return false;
+        }
+    }
+
+    return true;
+}
 
 // 안정적인 타입 식별자인 id와 스키마 version을 실행 중 native type key와 구분한다.
 // 등록된 스키마는 불변이다. 변경하려면 기존 lease를 정리하고 재등록해야 한다.
@@ -310,11 +350,13 @@ constexpr int64 EnumReplacementValue(const EnumSchema& schema, int64 stored) noe
 
 namespace detail {
 
-constexpr char EnumAsciiLower(char c) noexcept {
+// ASCII 대문자만 소문자로 바꾼다(그 밖의 byte는 그대로다).
+constexpr char AsciiLower(char c) noexcept {
     return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
 }
 
-// left가 right[offset..]과 ASCII 대소문자 무시로 같은지다.
+// left가 right[offset..]과 ASCII 대소문자 무시로 같은지다(도구 이름 조회 — enum 열거자·필드·경로가
+// 같이 쓴다).
 constexpr bool EnumNameEquals(Span<const char> left, Span<const char> right,
                               usize offset = 0) noexcept {
     if (offset > right.Size() || left.Size() != right.Size() - offset) {
@@ -322,7 +364,7 @@ constexpr bool EnumNameEquals(Span<const char> left, Span<const char> right,
     }
 
     for (usize index = 0; index < left.Size(); ++index) {
-        if (EnumAsciiLower(left[index]) != EnumAsciiLower(right[offset + index])) {
+        if (AsciiLower(left[index]) != AsciiLower(right[offset + index])) {
             return false;
         }
     }
@@ -332,9 +374,24 @@ constexpr bool EnumNameEquals(Span<const char> left, Span<const char> right,
 
 } // namespace detail
 
+// 두 이름이 ASCII 대소문자 무시로 같은지다(ASCII가 아닌 byte는 그대로 비교한다). 필드·열거자 도구
+// 이름의 유일성 검사(TypeRegistry)와 경로 이름 조회(ParsePropertyPath)가 같은 규칙을 쓴다.
+//
+// 사용 예:
+//   if (EqualsIgnoringAsciiCase(EffectiveToolName(field), name)) { ... }
+constexpr bool EqualsIgnoringAsciiCase(Span<const char> left, Span<const char> right) noexcept {
+    return detail::EnumNameEquals(left, right);
+}
+
 // 열거자의 실효 도구 이름이다(toolName이 비면 C++ 이름).
 constexpr Span<const char> EffectiveToolName(const EnumeratorSchema& value) noexcept {
     return value.toolName.Size() != 0 ? value.toolName : value.name;
+}
+
+// 필드의 실효 도구 이름이다(toolName이 비면 C++ 이름). toolName이 있으면 도구·경로는 C++ 이름을
+// 받지 않는다(AS 13절의 "Name으로 노출한 이름"). 반환 뷰는 field의 수명을 따른다.
+constexpr Span<const char> EffectiveToolName(const FieldSchema& field) noexcept {
+    return field.toolName.Size() != 0 ? field.toolName : field.name;
 }
 
 // 도구 이름으로 열거자를 찾는다. ASCII 대소문자를 무시하고, toolPrefix가 있으면 접두가 붙은
@@ -346,8 +403,8 @@ constexpr const EnumeratorSchema* FindEnumerator(const EnumSchema& schema,
     const usize prefix = schema.toolPrefix.Size();
     bool prefixed = prefix != 0 && toolName.Size() >= prefix;
     for (usize index = 0; prefixed && index < prefix; ++index) {
-        prefixed = detail::EnumAsciiLower(toolName[index]) ==
-                   detail::EnumAsciiLower(schema.toolPrefix[index]);
+        prefixed =
+            detail::AsciiLower(toolName[index]) == detail::AsciiLower(schema.toolPrefix[index]);
     }
 
     for (usize index = 0; index < schema.values.Size(); ++index) {

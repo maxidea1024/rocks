@@ -7,6 +7,28 @@
 
 namespace rocks {
 
+// Array가 버퍼를 늘릴 때 고르는 새 용량(원소 수)이다. 지금 용량 capacity에서 required개를 담아야 할
+// 때, 빈 배열은 4(required가 더 크면 required), 그 밖은 capacity의 1.5배 + 1(required가 더 크면
+// required)이며 원소 수 × elementSize가 표현 범위를 넘지 않게 MaxSize / elementSize에서 포화한다.
+// Array 밖에서 같은 성장 규칙으로 새 버퍼를 미리 만들 때 쓴다 — 예를 들어 살아 있는 배열의 옛
+// 버퍼를 새 버퍼 게시 뒤에 반환하려고 임시 배열에 예약할 때(리플렉션 경로 삽입). elementSize는 0이
+// 아니어야 한다(sizeof(T)).
+//
+// 사용 예:
+//   Array<E> grown(live.GetAllocator());
+//   auto reserved =
+//       grown.TryReserve(ArrayGrowthCapacity(live.Capacity(), live.Size() + 1, sizeof(E)));
+constexpr usize ArrayGrowthCapacity(usize capacity, usize required, usize elementSize) noexcept {
+    const usize maximum = MaxSize / elementSize;
+    if (capacity == 0) {
+        return maximum < 4 || required > 4 ? required : 4;
+    }
+
+    const usize growth = capacity / 2 + 1;
+    const usize candidate = growth > maximum - capacity ? maximum : capacity + growth;
+    return candidate < required ? required : candidate;
+}
+
 // Allocator를 빌리고 원소·연속 buffer를 소유하는 이동 전용 컨테이너다.
 // Allocator는 buffer의 마지막 사용자보다 오래 살아야 하며 동시 접근의 동기화는 caller 책임이다.
 // 원소 생성·이동·소멸 중 같은 Array를 다시 변경하는 재진입은 지원하지 않는다.
@@ -128,9 +150,11 @@ public:
         if (index > size_) {
             return Result<T*>::Failure(ErrorCode::InvalidArgument);
         }
+
         if (index == size_) {
             return TryEmplaceBack(Forward<Args>(args)...);
         }
+
         if (size_ == MaxSize / sizeof(T)) {
             return Result<T*>::Failure(ErrorCode::Overflow);
         }
@@ -142,6 +166,7 @@ public:
                 ConstructAt<T>(data_ + i, Move(data_[i - 1]));
                 DestroyAt(data_ + i - 1);
             }
+
             T* inserted = ConstructAt<T>(data_ + index, Move(staged));
             ++size_;
             return Result<T*>::Success(inserted);
@@ -152,18 +177,22 @@ public:
         if (!allocation) {
             return Result<T*>::Failure(allocation.Error());
         }
+
         T* replacement = allocation.Value();
         // 원본이 살아 있을 때 새 원소부터 만들어 자기 원소 인자를 보호한다.
         T* inserted = ConstructAt<T>(replacement + index, Forward<Args>(args)...);
         for (usize i = 0; i < index; ++i) {
             ConstructAt<T>(replacement + i, Move(data_[i]));
         }
+
         for (usize i = index; i < size_; ++i) {
             ConstructAt<T>(replacement + i + 1, Move(data_[i]));
         }
+
         for (usize i = size_; i != 0; --i) {
             DestroyAt(data_ + i - 1);
         }
+
         FreeStorage(data_);
         data_ = replacement;
         capacity_ = capacity;
@@ -188,15 +217,18 @@ public:
         if (values.Size() == 0) {
             return Result<void>::Success();
         }
+
         const usize maximum = MaxSize / sizeof(T);
         if (values.Size() > maximum - size_) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }
+
         const usize newSize = size_ + values.Size();
         if (newSize <= capacity_) {
             for (usize i = 0; i < values.Size(); ++i) {
                 ConstructAt<T>(data_ + size_ + i, values[i]);
             }
+
             size_ = newSize;
             return Result<void>::Success();
         }
@@ -206,11 +238,13 @@ public:
         if (!allocation) {
             return Result<void>::Failure(allocation.Error());
         }
+
         T* replacement = allocation.Value();
         // source가 자기 배열일 때도 relocation 전에 새 tail을 복사한다.
         for (usize i = 0; i < values.Size(); ++i) {
             ConstructAt<T>(replacement + size_ + i, values[i]);
         }
+
         RelocateTo(replacement);
         data_ = replacement;
         capacity_ = capacity;
@@ -228,18 +262,22 @@ public:
         if (this == &values) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
+
         if (values.size_ == 0) {
             return Result<void>::Success();
         }
+
         const usize maximum = MaxSize / sizeof(T);
         if (values.size_ > maximum - size_) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }
+
         const usize newSize = size_ + values.size_;
         if (newSize <= capacity_) {
             for (usize i = 0; i < values.size_; ++i) {
                 ConstructAt<T>(data_ + size_ + i, Move(values.data_[i]));
             }
+
             values.Clear();
             size_ = newSize;
             return Result<void>::Success();
@@ -250,10 +288,12 @@ public:
         if (!allocation) {
             return Result<void>::Failure(allocation.Error());
         }
+
         T* replacement = allocation.Value();
         for (usize i = 0; i < values.size_; ++i) {
             ConstructAt<T>(replacement + size_ + i, Move(values.data_[i]));
         }
+
         RelocateTo(replacement);
         values.Clear();
         data_ = replacement;
@@ -269,6 +309,7 @@ public:
         if (newSize > MaxSize / sizeof(T)) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }
+
         if (newSize <= size_) {
             // trivial 소멸 타입은 길이만 줄인다(Debug 빌드에서도 O(1)).
             if constexpr (__is_trivially_destructible(T)) {
@@ -279,12 +320,15 @@ public:
                     DestroyAt(data_ + size_);
                 }
             }
+
             return Result<void>::Success();
         }
+
         if (newSize <= capacity_) {
             for (usize i = size_; i < newSize; ++i) {
                 ConstructAt<T>(data_ + i);
             }
+
             size_ = newSize;
             return Result<void>::Success();
         }
@@ -294,10 +338,12 @@ public:
         if (!allocation) {
             return Result<void>::Failure(allocation.Error());
         }
+
         T* replacement = allocation.Value();
         for (usize i = size_; i < newSize; ++i) {
             ConstructAt<T>(replacement + i);
         }
+
         RelocateTo(replacement);
         data_ = replacement;
         capacity_ = capacity;
@@ -332,6 +378,7 @@ public:
             if (!allocation) {
                 return Result<Span<T>>::Failure(allocation.Error());
             }
+
             T* replacement = allocation.Value();
             RelocateTo(replacement);
             data_ = replacement;
@@ -350,16 +397,20 @@ public:
         if (index > size_ || count > size_ - index) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
+
         if (count == 0) {
             return Result<void>::Success();
         }
+
         for (usize i = index + count; i != index; --i) {
             DestroyAt(data_ + i - 1);
         }
+
         for (usize i = index + count; i < size_; ++i) {
             ConstructAt<T>(data_ + i - count, Move(data_[i]));
             DestroyAt(data_ + i);
         }
+
         size_ -= count;
         return Result<void>::Success();
     }
@@ -368,19 +419,23 @@ public:
         if (index > size_ || count > size_ - index) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
+
         if (count == 0) {
             return Result<void>::Success();
         }
+
         const usize trailing = size_ - index - count;
         const usize moved = trailing < count ? trailing : count;
         for (usize i = index + count; i != index; --i) {
             DestroyAt(data_ + i - 1);
         }
+
         for (usize i = 0; i < moved; ++i) {
             const usize source = size_ - moved + i;
             ConstructAt<T>(data_ + index + i, Move(data_[source]));
             DestroyAt(data_ + source);
         }
+
         size_ -= count;
         return Result<void>::Success();
     }
@@ -390,6 +445,7 @@ public:
         if (size_ == 0) {
             return Result<T>::Failure(ErrorCode::NotFound);
         }
+
         T value(Move(data_[size_ - 1]));
         --size_;
         DestroyAt(data_ + size_);
@@ -419,6 +475,7 @@ public:
                 return i;
             }
         }
+
         return NotFound;
     }
 
@@ -429,6 +486,7 @@ public:
                 return i - 1;
             }
         }
+
         return NotFound;
     }
 
@@ -546,16 +604,19 @@ public:
         if (size_ == capacity_) {
             return Result<void>::Success();
         }
+
         if (size_ == 0) {
             FreeStorage(data_);
             data_ = nullptr;
             capacity_ = 0;
             return Result<void>::Success();
         }
+
         auto allocation = AllocateElements(size_);
         if (!allocation) {
             return Result<void>::Failure(allocation.Error());
         }
+
         T* replacement = allocation.Value();
         RelocateTo(replacement);
         data_ = replacement;
@@ -582,16 +643,10 @@ private:
         return Result<T*>::Success(static_cast<T*>(allocation.Value()));
     }
 
-    // 기하급수적으로 확장하되 원소 수×sizeof(T)가 표현 범위를 넘지 않게 상한을 적용한다.
+    // 기하급수적으로 확장하되 원소 수×sizeof(T)가 표현 범위를 넘지 않게 상한을 적용한다(공개 규칙
+    // ArrayGrowthCapacity).
     usize GrowthCapacity(usize required) const noexcept {
-        const usize maximum = MaxSize / sizeof(T);
-        if (capacity_ == 0) {
-            return maximum < 4 || required > 4 ? required : 4;
-        }
-
-        const usize growth = capacity_ / 2 + 1;
-        const usize candidate = growth > maximum - capacity_ ? maximum : capacity_ + growth;
-        return candidate < required ? required : candidate;
+        return ArrayGrowthCapacity(capacity_, required, sizeof(T));
     }
 
     void FreeStorage(T* storage) noexcept {

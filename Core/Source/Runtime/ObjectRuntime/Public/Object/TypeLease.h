@@ -9,6 +9,7 @@ namespace rocks {
 class TypeRegistry;
 class TypeLease;
 struct RuntimeTypeOps;
+struct RuntimeFieldOps;
 struct RuntimeStructOps;
 struct RuntimeStructFieldOps;
 
@@ -82,6 +83,9 @@ enum class TypeKind : uint8 {
 // 서로 다른 lease의 Clone/Reset은 동시 호출 가능하나 같은 래퍼의 동시 변경은 금지한다.
 class TypeLease {
 public:
+    // FieldIndex가 필드를 찾지 못했을 때의 값이다.
+    static constexpr usize NoField = ~usize(0);
+
     TypeLease() noexcept = default;
     TypeLease(TypeLease&& other) noexcept;
     TypeLease& operator=(TypeLease&& other) noexcept;
@@ -126,6 +130,22 @@ public:
     // view는 이 lease 수명 동안 유효하다. 범위 밖 index나 빈 lease는 Fatal이다.
     StructView FieldStruct(usize fieldIndex) const& noexcept;
     StructView FieldStruct(usize fieldIndex) const&& = delete;
+
+    // Class lease에서 schemaIndex(Schema().fields의 위치) 필드의 등록 함수표다(read·write·codec·
+    // 경로 접근 thunk). 함수표가 없는 필드(Opaque)는 nullptr이다. 반환 포인터는 이 lease 수명 동안
+    // 유효하다. Class가 아닌 lease·빈 lease·범위 밖 index는 Fatal이다(struct 멤버 함수표는
+    // StructView::FieldOps).
+    //
+    // 사용 예(경로 접근이 최상위 필드의 thunk를 찾는다):
+    //   const usize index = lease.FieldIndex(fieldId);
+    //   const RuntimeFieldOps* ops = index != TypeLease::NoField ? lease.FieldOps(index) : nullptr;
+    const RuntimeFieldOps* FieldOps(usize schemaIndex) const& noexcept;
+    const RuntimeFieldOps* FieldOps(usize schemaIndex) const&& = delete;
+
+    // Class·Struct lease에서 필드 ID의 스키마 위치다(필드 ID 정렬 색인의 이진 탐색 — 상속 필드도
+    // 파생 스키마의 같은 ID로 찾는다). 없으면 NoField다(Enum lease는 필드가 없어 항상 NoField). 빈
+    // lease는 Fatal이다.
+    usize FieldIndex(Guid fieldId) const noexcept;
 
     // Struct lease(AcquireValueType(id, TypeKind::Struct))의 view·실행 정보다. Struct가 아니거나 빈
     // lease면 Fatal이다.

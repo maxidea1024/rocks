@@ -18,6 +18,25 @@ struct FieldView;
 class FieldEncodeContext;
 class FieldDecodeContext;
 struct RuntimeFieldOps;
+struct RuntimeStructFieldOps;
+
+namespace detail {
+// 경로 접근 cursor다(선언·인터페이스는 공개 detail 헤더 Object/PathCursor.h, 구현은
+// Private/PropertyPath.cpp — Docs/Design/ReflectionFoundations.ko.md 7.1절).
+class PathCursor;
+} // namespace detail
+
+// 경로 접근(B6) thunk다(Docs/Design/ReflectionFoundations.ko.md 7.1절, 생성 템플릿은
+// Object/GeneratedPathAccess.h). 필드 하나에 thunk 하나이며 자기 단계(멤버 주소·원소 index)만
+// 처리하고, 경로가 끝나지 않았으면 cursor.Descend(struct 값 주소)로 다음 단계 멤버의 thunk를
+// 부른다. 클래스 Struct·Array 필드의 path는 cursor가 소유 객체 주소를 준다. struct 멤버의 path는
+// structValue(멤버를 가진 struct 값)를 받는다. void*는 생성 thunk와 경로 라이브러리 사이에서만
+// 오가며 공개 API는 handle + PropertyPath(Object/PropertyPath.h)뿐이다. 직접 부르지 않는다.
+using FieldPathFunction = Result<void> (*)(const RuntimeFieldOps& self,
+                                           detail::PathCursor& cursor) noexcept;
+using StructFieldPathFunction = Result<void> (*)(const RuntimeStructFieldOps& self,
+                                                 detail::PathCursor& cursor,
+                                                 void* structValue) noexcept;
 
 // 필드 codec thunk다(Docs/Design/ReflectionFoundations.ko.md 6.4절, 문맥은 Object/FieldCodec.h).
 // encode는 필드 값을 payload에 쓰고 wire tag를 돌려준다. decode는 construction이 nullptr이면 1단계
@@ -85,8 +104,9 @@ struct FieldWriteBinding {
 // sourceExpectedNative·targetExpectedNative는 원본·대상 스키마의 참조 기대 타입 native 키(0이면
 // Object), referenced는 non-null 참조 값의 대상 타입 lease, element는 원소 모드(배열 필드의 원소
 // 하나를 쓴다 — actual은 Array여야 하고 binding을 actual->element와 대조한다)다. null 참조는 단일
-// 참조·ObjectRefArray 원소 모두 받는다(B5 — 원소 null 허용). lease는 호출자가 얻어 쓰기 완료까지
-// 쥔다.
+// 참조·ObjectRefArray 원소 모두 받는다(B5 — 원소 null 허용). null 판정은 ObjectHandle::IsNull이다
+// (registry 0 또는 generation 0인 비정규 null도 null — 쓰는 쪽이 ObjectHandle{}로
+// 정규화한다, 7.1절). lease는 호출자가 얻어 쓰기 완료까지 쥔다.
 struct FieldWriteTarget {
     const FieldSchema* actual = nullptr;
     uint32 effectiveFlags = 0;
@@ -122,14 +142,40 @@ Result<void> ValidateFieldWrite(const FieldWriteBinding& binding, const FieldWri
 //   if (auto fits = detail::ValidateArrayLength(field, array.Size() + 1); !fits) { ... }
 Result<void> ValidateArrayLength(const FieldSchema& field, usize newLength) noexcept;
 
+// 배열의 구조 변경 종류다(경로 접근의 원소 삽입·삭제·비우기).
+enum class ArrayEdit : uint8 {
+    Insert,
+    Remove,
+    Clear
+};
+
+// 배열 구조 변경(삽입·삭제·비우기)의 검증 한 곳이다(Docs/Design/ReflectionFoundations.ko.md
+// 7.1절). target.actual이 없거나 Array가 아니면 TypeMismatch, 유효 플래그(target.effectiveFlags —
+// 바깥 struct·배열 필드에서 전파된다)가 ReadOnly면 Unsupported다. lease를 얻지 않는 순수 검사다.
+// 삽입하는 단일 값 원소 자체는 ValidateFieldWrite(원소 모드)가 따로 검사한다. 고정 길이 배열 같은
+// UI 정책(UE EditFixedSize)은 나중에 이 한 곳에 더한다.
+//
+// 사용 예:
+//   detail::FieldWriteTarget target;
+//   target.actual = &field;
+//   target.effectiveFlags = effectiveFlags;
+//   if (auto valid = detail::ValidateArrayEdit(target, detail::ArrayEdit::Clear); !valid) { ... }
+Result<void> ValidateArrayEdit(const FieldWriteTarget& target, ArrayEdit edit) noexcept;
+
 } // namespace detail
 
 // 등록된 필드의 실제 대상 schema, 타입과 값 형식을 검사한다. 오류 순서는 context·수명, 타입·필드,
 // 전달 값 종류(TypeMismatch — enum은 FieldValue::type이 필드의 enum ID와 다를 때도), 읽기
 // 전용(Unsupported), 값 내용(정수 폭 Overflow·소프트 참조의 null 규칙과 경로 상한·선언되지 않은
 // enum 값 InvalidArgument)이다. Struct·Array 필드는 FieldValue로 통째 쓰지 않으므로 문맥·수명·대상
-// 타입·필드 검사 뒤 Unsupported다(멤버·원소 단위는 B6 경로 접근). callback 코드 수명은 TypeLease가
-// 보유하는 ModuleLease에 종속되므로 이 값을 lease보다 오래 보관하거나 호출하지 않는다.
+// 타입·필드 검사 뒤 Unsupported다(멤버·원소 단위는 B6 경로 접근). 참조 값의 비정규 null(IsNull인
+// non-zero handle)은 null로 정규화한다 — 검증은 null로 하고 callback에는 reference를
+// ObjectHandle{}로 바꾼 사본(할당 없음)을 넘긴다(수동 함수표가 비정규 handle을 저장하지
+// 않게, 7.1절). 이 연산 자체는 encode 고정을 쥐지 않는다: 생성 callback(WriteGeneratedField)은
+// String·Soft 새 값 할당부터 게시까지 스스로 고정해 할당 콜백의 재진입 쓰기를 Busy로 막지만, 수동
+// callback은 그렇지 않으므로 할당하는 수동 callback은 같은 규칙을 스스로 지킨다. callback 코드
+// 수명은 TypeLease가 보유하는 ModuleLease에 종속되므로 이 값을 lease보다 오래 보관하거나 호출하지
+// 않는다.
 class FieldWriteOperation {
 public:
     using Callback = Result<void> (*)(ObjectRegistry&, const ObjectAccessContext&, ObjectHandle,
@@ -198,6 +244,10 @@ struct RuntimeFieldOps {
     // native 키와 같은지 확인한다 — 스키마로 해석한 대상과 정적 thunk의 타입이 어긋나지 않게
     // 한다(어긋나면 TypeMismatch).
     const void* valueNativeType = nullptr;
+    // 경로 접근 thunk다(B6 — 생성 코드는 detail::PathClassField). Struct·Array 필드만 가질 수 있고
+    // 선택이다(없으면 그 필드 아래 경로 연산은 Unsupported). 단일 값 필드는 null이어야 한다 —
+    // 최상위 단일 값의 경로 읽기·쓰기는 read·write 한 경로다(등록이 InvalidArgument로 막는다).
+    FieldPathFunction path = nullptr;
 };
 
 // 리플렉션 enum 등록의 실행 정보다(TypeRegistry::RegisterEnum). nativeType은 NativeTypeKey<E>()이며
@@ -209,7 +259,6 @@ struct RuntimeEnumOps {
 };
 
 class TraceVisitor;
-struct RuntimeStructFieldOps;
 
 // 리플렉션 struct 멤버의 codec thunk다(Docs/Design/ReflectionFoundations.ko.md 4.6절, 문맥은
 // Object/FieldCodec.h). encode는 structValue(멤버를 가진 struct 값)의 멤버를 out에 쓰고 wire tag를
@@ -227,12 +276,14 @@ using StructFieldDecodeFunction = Result<void> (*)(const RuntimeStructFieldOps& 
 
 // struct 멤버 하나의 함수표다. valueNativeType은 Enum·Struct 멤버(또는 Enum·Struct 원소 배열
 // 멤버의 원소)가 쓰는 C++ 타입의 NativeTypeKey다(그 밖은 nullptr — 등록이 대상 레코드의 native
-// 키와 대조한다).
+// 키와 대조한다). path는 경로 접근 thunk다(B6, 선택 — 생성 코드는 detail::PathStructMember. 없으면
+// 이 멤버로 들어가는 경로 연산은 Unsupported).
 struct RuntimeStructFieldOps {
     Guid fieldId{};
     StructFieldEncodeFunction encode = nullptr;
     StructFieldDecodeFunction decode = nullptr;
     const void* valueNativeType = nullptr;
+    StructFieldPathFunction path = nullptr;
 };
 
 // struct의 옛 버전 Record를 현재 버전으로 올린다(ObjectGraphMigration과 같은 계약 — 전달
@@ -360,6 +411,11 @@ RuntimeTypeOps MakeRuntimeTypeOps(ModuleLease module = {}) noexcept {
 // `&S::Migrate` — 생성 특수화는 ROCKS_GENERATED_BODY의 friend이므로 private Migrate도 연결되고,
 // 시그니처가 다르면 컴파일 오류다). 채우는 것: size·alignment·nativeType, construct(noexcept
 // S(Allocator&)가 있으면 allocator를 주입하고 없으면 noexcept S()), destroy, module.
+//
+// 리플렉션 struct와 배열 원소의 일반 규칙(7.1절): 이동된(moved-from) 값의 소멸자는 allocator를
+// 부르지 않는다(NATIVE 멤버 포함 — String·Array처럼 버퍼를 넘겨주고 비어야 한다). 경로 연산의 원소
+// 삭제·비우기(원소를 지역으로 옮겨 뺀 뒤 게시하고 소멸), Array::TryEmplaceAt의 용량 안 삽입과
+// TryRemoveAt의 원소 이동이 이것에 기대어 게시 전에 allocator 콜백이 끼지 않게 한다.
 //
 // 사용 예(생성 코드가 내는 형태):
 //   auto ops = MakeRuntimeStructOps<BulkDataRef>(Move(module));

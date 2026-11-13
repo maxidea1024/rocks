@@ -269,12 +269,13 @@ private:
 // owner의
 // AddReference·InsertReferenceAt·SetReferenceAt·RemoveReference·RemoveReferenceAt·ClearReferences·
 // SetReference·AddElement·InsertElementAt·RemoveElementAt·ClearElements·SetElementReference와
-// 등록된 필드 쓰기(ResolveForWrite를 쓰는 생성 WriteGeneratedField·FieldWriteOperation)는
-// Busy다(저장 중 콜백이 Registry를 바꾸지 않는다는 1차 계약을 어긴 경우를 메모리 오류 대신 오류로
-// 만든다). 호출 오류(owner 밖 컨테이너 등의 InvalidArgument)가 고정 Busy보다 먼저다. 고정은 slot별
-// 계수라 여러 encode가 겹쳐도 되고, ObjectStats::encodePins·진단 레코드에 보인다. 고정 중에는 그
-// 객체 저장소를 회수하지 않고 남은 고정은 Shutdown을 Busy로 남긴다. Registry는 모든 EncodePin보다
-// 오래 살아야 하며, 같은 래퍼의 이동/Reset을 동시에 호출하지 않는다.
+// 등록된 필드 쓰기(ResolveForWrite를 쓰는 생성 WriteGeneratedField·FieldWriteOperation)와 경로
+// 쓰기(Object/PropertyPath.h — 경로 연산은 직접 할당하는 동안 이 고정을 스스로 쥔다)는 Busy다(저장
+// 중 콜백이 Registry를 바꾸지 않는다는 1차 계약을 어긴 경우를 메모리 오류 대신 오류로 만든다). 호출
+// 오류(owner 밖 컨테이너 등의 InvalidArgument)가 고정 Busy보다 먼저다. 고정은 slot별 계수라 여러
+// encode가 겹쳐도 되고, ObjectStats::encodePins·진단 레코드에 보인다. 고정 중에는 그 객체 저장소를
+// 회수하지 않고 남은 고정은 Shutdown을 Busy로 남긴다. Registry는 모든 EncodePin보다 오래 살아야
+// 하며, 같은 래퍼의 이동/Reset을 동시에 호출하지 않는다.
 //
 // 사용 예(encode thunk를 부르는 쪽):
 //   auto pin = registry.PinForEncode(access, owner);
