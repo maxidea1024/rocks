@@ -155,6 +155,20 @@ internal static class SelfTests
             Verify.Contains("출력🎮", result.StdOut, "stdout Unicode");
             Verify.Contains("오류🎮", result.StdErr, "stderr Unicode");
         });
+        suite.Add("NativeEnvironment.ResourceDirectoryProbeIsClangClOnly", async () =>
+        {
+            Verify.That(NativeEnvironment.IsClangCl(@"C:\llvm\bin\clang-cl.exe"), "clang-cl with extension");
+            Verify.That(NativeEnvironment.IsClangCl("CLANG-CL"), "clang-cl case-insensitive");
+            Verify.That(!NativeEnvironment.IsClangCl(@"C:\ndk\toolchains\llvm\prebuilt\windows-x86_64\bin\clang++.exe"), "NDK clang++");
+            Verify.That(!NativeEnvironment.IsClangCl("/usr/bin/clang++"), "POSIX clang++");
+            if (OperatingSystem.IsWindows())
+            {
+                // Android 교차 빌드의 NDK clang++에는 clang-cl 전용 resource-dir probe를 하지 않는다(B5 체인 회귀).
+                string missing = Path.Combine(options.Root, "out", "no-such-ndk", "clang++.exe");
+                var environment = await NativeEnvironment.CreateAsync(missing);
+                Verify.That(environment.Count != 0, "environment for a non clang-cl compiler");
+            }
+        });
         suite.Add("Process.StandardInputIsNotShellInterpreted", async () =>
         {
             string input = "한글 🎮 $HOME & | ; \"quotes\"\nline two";

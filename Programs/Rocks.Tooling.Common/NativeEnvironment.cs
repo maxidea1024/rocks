@@ -138,7 +138,9 @@ public static class NativeEnvironment
         // Visual Studio 환경 스크립트의 출력까지 합친 뒤 고른다. 아래 probe도 고른 환경으로 실행한다.
         NativeEnvironmentResult restricted = Restrict(source, HostKeyedVariables);
         Dictionary<string, string?> environment = restricted.Variables;
-        if (compiler is not null && OperatingSystem.IsWindows())
+        // Windows ASan 런타임 DLL 디렉터리를 PATH에 더하는 probe다. clang-cl 전용 철자(/clang:)를 쓰므로 clang-cl일 때만
+        // 한다 — Windows 호스트의 Android NDK clang++는 이 런타임과 무관하고 /clang: 인자를 파일로 읽어 실패한다.
+        if (compiler is not null && OperatingSystem.IsWindows() && IsClangCl(compiler))
         {
             // 기본 config 파일을 끄는 인자는 받는 컴파일러에만 쓴다(discovery와 같은 조건 — 받지 않으면 인자 없이 다시 묻는다).
             var result = await ProcessRunner.RunAsync(new(compiler, ["--no-default-config", "/clang:-print-resource-dir"],
@@ -161,6 +163,16 @@ public static class NativeEnvironment
         }
 
         return restricted;
+    }
+
+    /// <summary>
+    /// compiler가 clang-cl 드라이버(파일 이름 clang-cl, 확장자·대소문자 무시)인지 본다. resource-dir probe처럼 clang-cl 전용 철자를
+    /// 쓰는 동작의 조건이다.
+    /// </summary>
+    public static bool IsClangCl(string compiler)
+    {
+        ArgumentNullException.ThrowIfNull(compiler);
+        return Path.GetFileNameWithoutExtension(compiler).Equals("clang-cl", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
