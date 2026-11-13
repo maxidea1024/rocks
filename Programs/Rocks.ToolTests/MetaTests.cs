@@ -39,6 +39,14 @@ internal static class MetaTests
 
     private const string StructLeaf = "ROCKS_STRUCT()\nstruct Leaf {\nROCKS_PROPERTY() rocks::int32 count = 0;\n};\n";
 
+    // B4c Binds 시험은 CoreTypeBindings 모듈로 실행한다(Binds는 그 모듈에서만 받는다).
+    private const string BindsModule = "CoreTypeBindings";
+
+    private const string BindsPreamble = "#include <Core/Math/Vector3.h>\n" + Preamble;
+
+    private const string BindsVec3 = "ROCKS_STRUCT(Binds = \"rocks::Vec3\")\nstruct Vec3Binding {\n" +
+        "ROCKS_PROPERTY() float x = 0;\nROCKS_PROPERTY() float y = 0;\nROCKS_PROPERTY() float z = 0;\n};\n";
+
     private const string StructWorldBits = "struct Lease { static constexpr bool RocksRequiresWorldOnlyOwner = true; };\n" +
         "ROCKS_STRUCT()\nstruct WorldBits {\nROCKS_NATIVE() Lease lease;\nROCKS_PROPERTY() rocks::int32 value = 0;\n};\n";
 
@@ -512,9 +520,6 @@ internal static class MetaTests
             "RMC2000", "PROPERTY or NATIVE");
         AddRejectGroup("Meta.StructSpecifiersAreRestricted", new[] { "WorldOnly", "Abstract", "Version=0", "Version=\"2\"", "Binds=1" }
             .Select(spec => Preamble + $"ROCKS_STRUCT({spec})\nstruct Leaf {{\nROCKS_PROPERTY() rocks::int32 count = 0;\n}};\n}}\n"), "RMC2000", "specifier");
-        AddRejectGroup("Meta.StructBindsIsNotSupportedYet", [
-            Preamble + "ROCKS_STRUCT(Binds = \"rocks::String\")\nstruct Leaf {\nROCKS_PROPERTY() rocks::int32 count = 0;\n};\n}\n"],
-            "RMC2000", "Binds is not supported yet");
         AddRejectGroup("Meta.StructIsNotABaseOrReferenceTarget", [
             Preamble.Replace("namespace probe {", "#include <Object/SoftObjectRef.h>\nnamespace probe {", StringComparison.Ordinal) + StructLeaf +
                 "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nexplicit Value(rocks::Allocator& allocator) noexcept : next(allocator) {}\n" +
@@ -561,6 +566,103 @@ internal static class MetaTests
             Preamble + "class Outer {\nROCKS_STRUCT()\nstruct Leaf {\nROCKS_PROPERTY() rocks::int32 count = 0;\n};\n};\n" +
                 "ROCKS_CLASS()\nstruct Value : public rocks::Object {};\n}\n"],
             "RMC2000", "must be public");
+        // B4c: Binds 거울은 별칭을 Clang 정규 철자로 풀고(rocks::Vec3 → rocks::Vector3<float>), 생성 코드는 실제 타입의
+        // GeneratedType을 내며, 실제 타입 필드(별칭 포함)가 거울로 풀린다. 다른 거울에 의존하는 거울은 그 뒤에 나온다.
+        suite.Add("Meta.BindsResolveAliasesAndReflectTheRealType", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler, BindsModule);
+            string source = BindsPreamble + BindsVec3 +
+                "ROCKS_STRUCT(Binds = \"rocks::Vector3<double>\")\nstruct Vec3dBinding {\nROCKS_PROPERTY() double x = 0;\nROCKS_PROPERTY() double y = 0;\nROCKS_PROPERTY() double z = 0;\n};\n" +
+                "struct Pair {\nrocks::Vec3 a;\nrocks::Vec3d b;\n};\n" +
+                "ROCKS_STRUCT(Binds = \"probe::Pair\")\nstruct PairBinding {\nROCKS_PROPERTY() rocks::Vec3 a;\nROCKS_PROPERTY() rocks::Vector3<double> b;\n};\n" +
+                "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() rocks::Vec3 position;\nROCKS_PROPERTY() Pair pair;\n};\n}\n";
+            await probe.GenerateAsync(source);
+            using System.Text.Json.JsonDocument descriptor = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(probe.Descriptor));
+            System.Text.Json.JsonElement Type(string name) => descriptor.RootElement.GetProperty("types").EnumerateArray()
+                .Single(type => type.GetProperty("name").GetString() == name);
+            string Target(string type, string field) => Type(type).GetProperty("fields").EnumerateArray()
+                .Single(item => item.GetProperty("name").GetString() == field).GetProperty("value").GetProperty("type").GetString()!;
+            Verify.Equal("rocks::Vector3<float>", Type("probe::Vec3Binding").GetProperty("binds").GetString(), "alias Binds is normalized by Clang");
+            Verify.Equal("rocks::Vector3<double>", Type("probe::Vec3dBinding").GetProperty("binds").GetString(), "template Binds spelling");
+            Verify.Equal("probe::Pair", Type("probe::PairBinding").GetProperty("binds").GetString(), "Binds of a probe type");
+            Verify.Equal(Type("probe::Vec3Binding").GetProperty("id").GetString(), Target("probe::Value", "position"), "alias field resolves to the mirror");
+            Verify.Equal(Type("probe::PairBinding").GetProperty("id").GetString(), Target("probe::Value", "pair"), "real type field resolves to the mirror");
+            Verify.Equal(Type("probe::Vec3dBinding").GetProperty("id").GetString(), Target("probe::PairBinding", "b"), "mirror member resolves to another mirror");
+            string generated = Compact(File.ReadAllText(probe.Output));
+            foreach ((string expected, string reason) in new[]
+            {
+                ("struct GeneratedType<::rocks::Vector3<float>>", "specialization of the real type"),
+                ("Span<const char>(\"probe::Vec3Binding\", 18)", "schema name is the mirror name"),
+                ("using BoundType = ::rocks::Vector3<float>;", "verification alias of the real type"),
+                ("static_assert(__is_same(decltype(BoundType::x), float)", "member type static_assert"),
+                ("static_assert(__is_same(decltype(&BoundType::x), float (BoundType::*))", "member declared in the real type itself"),
+                ("static_assert(__is_standard_layout(BoundType)", "standard layout for the order check"),
+                ("static_assert(ROCKS_OFFSET_OF(BoundType, x) < ROCKS_OFFSET_OF(BoundType, y)", "declaration order check"),
+                ("[[maybe_unused]] const auto& [m0, m1, m2] = value;", "structured binding count check"),
+                ("detail::StructFieldOps<&::probe::Pair::b>", "member thunk of the real type"),
+                ("MakeRuntimeStructOps<::probe::Pair>", "construct and destroy the real type"),
+                ("NativeTypeKey<::rocks::Vector3<float>>()", "class field native key of the real type"),
+                ("GeneratedType<::rocks::Vector3<double>>::Depth < Depth", "mirror member uses the real type specialization")
+            })
+            {
+                Verify.That(generated.Contains(Compact(expected), StringComparison.Ordinal), "generated code missing " + reason + ": " + expected);
+            }
+
+            Verify.That(!generated.Contains("GeneratedType<::probe::Vec3Binding>", StringComparison.Ordinal), "no specialization of the mirror type");
+            Verify.That(generated.IndexOf("structGeneratedType<::rocks::Vector3<double>>", StringComparison.Ordinal) <
+                generated.IndexOf("structGeneratedType<::probe::Pair>", StringComparison.Ordinal), "mirrors used by a mirror come first");
+        });
+        AddRejectGroup("Meta.BindsIsAllowedOnlyInCoreTypeBindings", [BindsPreamble + BindsVec3 + "}\n"], "RMC2004", "allowed only in module CoreTypeBindings");
+        // 별칭·앞의 ::·템플릿 인자 공백은 같은 정규 철자로 모이므로 같은 실제 타입의 두 번째 거울이다.
+        AddRejectGroup("Meta.BindsConflictsAreRejected", [
+            BindsPreamble + BindsVec3 + BindsVec3.Replace("Vec3Binding", "OtherBinding", StringComparison.Ordinal).Replace("rocks::Vec3", "rocks::Vector3<float>", StringComparison.Ordinal) + "}\n",
+            BindsPreamble + BindsVec3.Replace("rocks::Vec3", "::rocks::Vec3", StringComparison.Ordinal) +
+                BindsVec3.Replace("Vec3Binding", "OtherBinding", StringComparison.Ordinal).Replace("rocks::Vec3", "rocks::Vector3< float >", StringComparison.Ordinal) + "}\n",
+            BindsPreamble + StructLeaf + "ROCKS_STRUCT(Binds = \"probe::Leaf\")\nstruct Vec3Binding {\nROCKS_PROPERTY() rocks::int32 count = 0;\n};\n}\n"],
+            "RMC2004", "binds", BindsModule);
+        AddRejectGroup("Meta.BindsTargetMustBeACompleteClass", [
+            BindsPreamble + BindsVec3.Replace("rocks::Vec3", "rocks::uint8", StringComparison.Ordinal) + "}\n",
+            BindsPreamble + BindsVec3.Replace("rocks::Vec3", "probe::Missing", StringComparison.Ordinal) + "}\n",
+            BindsPreamble + "struct Later;\n" + BindsVec3.Replace("rocks::Vec3", "probe::Later", StringComparison.Ordinal) + "}\n"],
+            "RMC3000", "does not name a complete class type", BindsModule);
+        // 철자 문법, 정규 철자가 descriptor binds 문법 밖(별칭으로 묶은 Fixed<-3>), 거울의 NATIVE 멤버·Migrate·필드 없음.
+        AddRejectGroup("Meta.BindsSpellingAndMirrorMembersAreRestricted", [
+            BindsPreamble + BindsVec3.Replace("rocks::Vec3", "rocks::Vec3; int x", StringComparison.Ordinal) + "}\n",
+            BindsPreamble + "template <int N>\nstruct Fixed {\nrocks::int32 v = 0;\n};\nusing FixedAlias = Fixed<-3>;\n" +
+                "ROCKS_STRUCT(Binds = \"probe::FixedAlias\")\nstruct FixedBinding {\nROCKS_PROPERTY() rocks::int32 v = 0;\n};\n}\n",
+            BindsPreamble + BindsVec3.Replace("ROCKS_PROPERTY() float z = 0;", "ROCKS_PROPERTY() float z = 0;\nROCKS_NATIVE() rocks::int32 cache = 0;", StringComparison.Ordinal) + "}\n",
+            BindsPreamble + BindsVec3.Replace("ROCKS_PROPERTY() float z = 0;", "ROCKS_PROPERTY() float z = 0;\nstatic void Migrate() noexcept {}", StringComparison.Ordinal) + "}\n",
+            BindsPreamble + "ROCKS_STRUCT(Binds = \"rocks::Vec3\")\nstruct Vec3Binding {};\n}\n"],
+            "RMC2000", "Binds", BindsModule);
+        // 거울 타입은 필드 형식으로 쓰지 않는다(실제 타입을 쓴다).
+        AddRejectGroup("Meta.BindsMirrorIsNotAFieldType", [
+            BindsPreamble + BindsVec3 + "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() Vec3Binding position;\n};\n}\n"],
+            "RMC2000", "is a Binds mirror declaration", BindsModule);
+        // CoreTypeBindings에 의존하지 않고 Core 값 타입 필드를 쓰면 의존을 더하라고 안내한다.
+        AddRejectGroup("Meta.CoreValueFieldWithoutBindingsHintsTheDependency", [
+            BindsPreamble + "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() rocks::Vec3 position;\n};\n}\n"],
+            "RMC2000", "depend on CoreTypeBindings");
+        // 거울이 자기가 묶는 실제 타입을 값으로 담으면(직접·서로) C++에서도 struct 순환이다(RMC2302).
+        AddRejectGroup("Meta.BindsCycleIsRejected", [
+            BindsPreamble + "struct Real {\nrocks::int32 a = 0;\n};\nROCKS_STRUCT(Binds = \"probe::Real\")\nstruct RealBinding {\nROCKS_PROPERTY() Real inner;\n};\n}\n",
+            BindsPreamble + "struct RealA {\nrocks::int32 a = 0;\n};\nstruct RealB {\nrocks::int32 b = 0;\n};\n" +
+                "ROCKS_STRUCT(Binds = \"probe::RealA\")\nstruct ABinding {\nROCKS_PROPERTY() RealB inner;\n};\n" +
+                "ROCKS_STRUCT(Binds = \"probe::RealB\")\nstruct BBinding {\nROCKS_PROPERTY() RealA inner;\n};\n}\n"],
+            "RMC2302", "cycle", BindsModule);
+        // 거울과 실제 타입의 대조 실패는 생성 코드 검증 컴파일이 거부한다: 멤버 이름·형식·개수·순서(같은 형식 멤버끼리
+        // 바뀐 순서 포함), private 데이터 멤버, base에만 있는 멤버.
+        AddRejectGroup("Meta.BindsMismatchFailsToCompile", new[]
+            {
+                BindsVec3.Replace("float x", "float a", StringComparison.Ordinal),
+                BindsVec3.Replace("float x", "double x", StringComparison.Ordinal),
+                BindsVec3.Replace("ROCKS_PROPERTY() float z = 0;\n", "", StringComparison.Ordinal),
+                BindsVec3.Replace("ROCKS_PROPERTY() float x = 0;\nROCKS_PROPERTY() float y = 0;", "ROCKS_PROPERTY() float y = 0;\nROCKS_PROPERTY() float x = 0;", StringComparison.Ordinal),
+                "struct VecBase {\nfloat x = 0;\nfloat y = 0;\nfloat z = 0;\n};\nstruct Split : VecBase {};\n" +
+                    BindsVec3.Replace("Vec3Binding", "SplitBinding", StringComparison.Ordinal).Replace("rocks::Vec3", "probe::Split", StringComparison.Ordinal),
+                "struct Mixed {\nrocks::int32 a = 0;\nfloat b = 0;\n};\nROCKS_STRUCT(Binds = \"probe::Mixed\")\nstruct MixedBinding {\nROCKS_PROPERTY() float b = 0;\nROCKS_PROPERTY() rocks::int32 a = 0;\n};\n",
+                "struct Hidden {\nrocks::int32 a = 0;\nint Read() const noexcept { return b; }\nprivate:\nrocks::int32 b = 0;\n};\n" +
+                    "ROCKS_STRUCT(Binds = \"probe::Hidden\")\nstruct HiddenBinding {\nROCKS_PROPERTY() rocks::int32 a = 0;\n};\n"
+            }.Select(declaration => BindsPreamble + declaration + "}\n"), "RMC3000", "generated metadata contract rejected", BindsModule);
         AddRejectGroup("Meta.IntegerSpecifierSyntax", new[] { "Version=0", "Version=01", "Version=2147483648", "Version=\"2\"", "Version=1x", "Version", "Version=-1", "Version=+1" }
             .Select(spec => Declaration().Replace("ROCKS_CLASS()", $"ROCKS_CLASS({spec})", StringComparison.Ordinal)), "RMC2000", "specifier");
         AddRejectGroup("Meta.RequiredAndMaxElementsNeedMatchingFieldKinds", [Declaration("ROCKS_PROPERTY(Required) rocks::int32 count = 0;"),
@@ -621,12 +723,12 @@ internal static class MetaTests
         AddRejectGroup("Meta.UnknownTypeSpecifier", [Declaration().Replace("ROCKS_CLASS()",
             "ROCKS_CLASS(UnknownClassFlag)", StringComparison.Ordinal)], "RMC2000", "specifier");
 
-        void AddRejectGroup(string name, IEnumerable<string> sources, string code, string reason)
+        void AddRejectGroup(string name, IEnumerable<string> sources, string code, string reason, string module = MetaCompilerArguments.Module)
         {
             string[] fixedSources = sources.ToArray();
             suite.Add(name, async () =>
             {
-                using Probe probe = new(options, actualEnvironment, generator, compiler);
+                using Probe probe = new(options, actualEnvironment, generator, compiler, module);
                 foreach (string source in fixedSources)
                 {
                     await probe.RejectAsync(source, code, reason);
@@ -642,13 +744,17 @@ internal static class MetaTests
         private readonly IReadOnlyDictionary<string, string?> environment;
         private readonly string generator;
         private readonly string compiler;
+        private readonly string module;
 
-        public Probe(Options options, IReadOnlyDictionary<string, string?> environment, string generator, string compiler)
+        // module은 생성할 모듈 이름이다(Binds는 CoreTypeBindings 모듈에서만 받으므로 Binds 시험은 그 이름으로 실행한다).
+        public Probe(Options options, IReadOnlyDictionary<string, string?> environment, string generator, string compiler,
+            string module = MetaCompilerArguments.Module)
         {
             this.options = options;
             this.environment = environment;
             this.generator = generator;
             this.compiler = compiler;
+            this.module = module;
             MetaProbeIdentity.Create(IdentityPath);
         }
 
@@ -682,7 +788,7 @@ internal static class MetaTests
                 arguments.Add(generator);
             }
 
-            arguments.AddRange([.. MetaCompilerArguments.Single(temporary.Root, input, include), "--compiler", compiler]);
+            arguments.AddRange([.. MetaCompilerArguments.Single(temporary.Root, input, include, module), "--compiler", compiler]);
             AddDefaultIncludes(arguments);
             arguments.AddRange(["--identity-manifest", fixture
                 ? Path.Combine(options.Root, "Core", "Source", "Developer", "ReflectionTestFixtures", "ReflectionTestFixtures.rocksids.json") : IdentityPath]);
@@ -970,7 +1076,9 @@ internal static class MetaProbeIdentity
             foreach (string name in new[] { "probe::Value", "probe::Outer::Inner", "probe::Object", "probe::Parent",
                 "first::Good", "example::Invalid", "a::Thing", "b::Thing", "a::ThingExtended", "probe::Mode", "probe::Value::Nested",
                 "probe::Leaf", "probe::Middle", "probe::Holder", "probe::Outer", "probe::WorldBits", "probe::WorldValue", "probe::Box",
-                "probe::Zeta", "probe::Alpha" }
+                "probe::Zeta", "probe::Alpha", "probe::Vec3Binding", "probe::Vec3dBinding", "probe::PairBinding", "probe::OtherBinding",
+                "probe::RealBinding", "probe::ABinding", "probe::BBinding", "probe::MixedBinding", "probe::HiddenBinding",
+                "probe::FixedBinding", "probe::SplitBinding" }
                 .Concat(Enumerable.Range(1, 17).Select(level => $"probe::Chain{level}")))
             {
                 manifest.Register("type", name);
@@ -983,7 +1091,13 @@ internal static class MetaProbeIdentity
                 "probe::Holder::target", "probe::Holder::middle", "probe::Holder::flag", "probe::Outer::holder", "probe::Outer::inner",
                 "probe::WorldBits::value", "probe::Value::holder", "probe::Value::plain", "probe::Value::extra", "probe::Value::bits",
                 "probe::Value::leaf", "probe::WorldValue::bits", "probe::Box::count", "probe::Chain1::value",
-                "probe::Zeta::v", "probe::Alpha::x", "probe::Value::alpha" }
+                "probe::Zeta::v", "probe::Alpha::x", "probe::Value::alpha",
+                "probe::Vec3Binding::x", "probe::Vec3Binding::y", "probe::Vec3Binding::z", "probe::Vec3Binding::a", "probe::Vec3Binding::count",
+                "probe::Vec3dBinding::x", "probe::Vec3dBinding::y", "probe::Vec3dBinding::z", "probe::PairBinding::a", "probe::PairBinding::b",
+                "probe::OtherBinding::x", "probe::OtherBinding::y", "probe::OtherBinding::z", "probe::RealBinding::inner", "probe::ABinding::inner",
+                "probe::BBinding::inner", "probe::MixedBinding::a", "probe::MixedBinding::b", "probe::HiddenBinding::a",
+                "probe::Value::position", "probe::Value::pair", "probe::FixedBinding::v", "probe::SplitBinding::x", "probe::SplitBinding::y",
+                "probe::SplitBinding::z" }
                 .Concat(Enumerable.Range(2, 16).Select(level => $"probe::Chain{level}::inner")))
             {
                 manifest.Register("field", name);

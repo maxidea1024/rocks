@@ -17,6 +17,7 @@ internal static class MetaCompilerArguments
     public static string AggregatePath(string directory) =>
         Path.Combine(OutputRoot(directory), "Public", Module, Module + ".module.generated.h");
 
-    public static string[] Single(string directory, string input, string include) =>
-        ["--module", Module, "--input", input, "--include", include, "--output-root", OutputRoot(directory), "--descriptor", Descriptor(directory)];
+    // module은 생성할 모듈 이름이다(Binds 시험은 CoreTypeBindings로 실행한다). descriptor 경로는 모듈과 무관하게 같다.
+    public static string[] Single(string directory, string input, string include, string module = Module) =>
+        ["--module", module, "--input", input, "--include", include, "--output-root", OutputRoot(directory), "--descriptor", Descriptor(directory)];
 }

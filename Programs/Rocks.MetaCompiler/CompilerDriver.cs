@@ -105,7 +105,15 @@ internal static class CompilerDriver
         SchemaModel schema;
         try
         {
-            schema = parser.Parse(compiled.StdOut);
+            Dictionary<string, ClassModel> declared = parser.Parse(compiled.StdOut);
+            // Binds 거울의 실제 타입 철자는 문자열로 비교하지 않고 같은 번역 단위에 별칭을 붙인 두 번째 Clang 실행으로
+            // 정규화한다(Docs/Design/ReflectionFoundations.ko.md 4.6절 Binds). 필드 형식 해석이 그 철자를 쓰므로 검증 전에 한다.
+            List<string> bindsArguments = [.. arguments.Take(arguments.Count - 1)];
+            bindsArguments.AddRange(clangCl ? ["/clang:-Xclang", "/clang:-ast-dump-filter=rocksBinds_"] : ["-Xclang", "-ast-dump-filter=rocksBinds_"]);
+            bindsArguments.Add("-");
+            await ResolveBindsAsync(declared, options.Module, options.Inputs.Count,
+                extra => ProcessRunner.RunAsync(new(compiler, bindsArguments, root, environment, unit + extra, TimeSpan.FromMinutes(2))));
+            schema = SchemaValidator.Validate(declared, imported);
         }
         catch (Exception error) when (error is JsonException or KeyNotFoundException or InvalidOperationException or FormatException)
         {
@@ -352,6 +360,81 @@ internal static class CompilerDriver
         // import 필드의 enum·struct 대상을 잇고 import struct의 순환(RMC2302)·깊이(RMC2303)·형질을 검사한다.
         SchemaValidator.LinkImported(types);
         return (types, publicModules);
+    }
+
+    // Binds 거울의 실제 타입 철자를 Clang 정규 철자로 푼다(ClassModel.Binds). Binds는 CoreTypeBindings 모듈에서만
+    // 받는다(RMC2004). 같은 합성 번역 단위 끝에 거울마다 `using rocksBinds_N = <철자>;`와 완전한 class 타입인지 확인하는
+    // static_assert를 붙여 Clang을 한 번 더 실행하고(-ast-dump-filter로 그 별칭만 덤프한다) 별칭의 desugar 철자를 쓴다.
+    // 이 실행의 오류는 그 거울 선언 위치로 보고한다(RMC3000).
+    private static async Task ResolveBindsAsync(Dictionary<string, ClassModel> declared, string module, int baseLines, Func<string, Task<ProcessResult>> run)
+    {
+        ClassModel[] mirrors = declared.Values.Where(model => model.BindsSpelling.Length != 0).OrderBy(model => model.Name, StringComparer.Ordinal).ToArray();
+        if (mirrors.Length == 0)
+        {
+            return;
+        }
+
+        if (!string.Equals(module, StructRules.BindingModule, StringComparison.Ordinal))
+        {
+            throw new MetadataException($"{mirrors[0].Name}: Binds is allowed only in module {StructRules.BindingModule} (this module is {module})", "RMC2004",
+                $"Use the real type through the {StructRules.BindingModule} module (depend on it) instead of binding it again; two modules binding one type would define its metadata twice.")
+                .At(mirrors[0].BindsSite ?? mirrors[0].Site);
+        }
+
+        // 철자는 번역 단위 끝 전역 범위에서 해석하므로 ::로 시작하지 않으면 붙인다(전역 기준 완전 한정 이름 — 같은 이름의
+        // 전역 타입이나 using namespace가 다른 타입을 고르지 않게). 거울 N의 별칭은 합성 단위의 baseLines + 2N + 1번째 줄이다.
+        StringBuilder aliases = new();
+        for (int index = 0; index < mirrors.Length; ++index)
+        {
+            string spelling = mirrors[index].BindsSpelling.StartsWith("::", StringComparison.Ordinal) ? mirrors[index].BindsSpelling : "::" + mirrors[index].BindsSpelling;
+            aliases.Append($"using rocksBinds_{index} = {spelling};\n");
+            aliases.Append($"static_assert(sizeof(rocksBinds_{index}) > 0 && __is_class(rocksBinds_{index}), \"Binds target must be a complete class type\");\n");
+        }
+
+        const string hint = "Spell the real type fully qualified from the global scope as it is declared (e.g. rocks::Vector3<float> or an alias such as rocks::Vec3) and include its header before the mirror declaration.";
+        ProcessResult result = await run(aliases.ToString());
+        if (result.ExitCode != 0 || result.StdErr.Contains("warning:", StringComparison.OrdinalIgnoreCase))
+        {
+            // 진단의 <stdin> 줄로 실패한 거울을 찾는다(없으면 진단에 나온 첫 별칭, 그것도 없으면 첫 거울).
+            Match line = Regex.Match(result.StdErr, @"<stdin>[:(](\d+)", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+            Match named = Regex.Match(result.StdErr, @"rocksBinds_(\d+)", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+            int failed = line.Success && int.TryParse(line.Groups[1].Value, out int number) && number > baseLines ? (number - baseLines - 1) / 2
+                : named.Success && int.TryParse(named.Groups[1].Value, out int alias) ? alias : 0;
+            ClassModel mirror = mirrors[failed >= 0 && failed < mirrors.Length ? failed : 0];
+            throw new MetadataException($"{mirror.Name}: Binds = \"{mirror.BindsSpelling}\" does not name a complete class type visible from the reflected headers:\n" + result.StdErr,
+                "RMC3000", hint).At(mirror.BindsSite ?? mirror.Site);
+        }
+
+        Utf8JsonReader reader = new(Encoding.UTF8.GetBytes(result.StdOut), new JsonReaderOptions { AllowMultipleValues = true, MaxDepth = 2048 });
+        while (reader.Read())
+        {
+            using JsonDocument alias = JsonDocument.ParseValue(ref reader);
+            JsonElement node = alias.RootElement;
+            string name = node.TryGetProperty("name", out JsonElement value) ? value.GetString() ?? "" : "";
+            if (node.TryGetProperty("kind", out JsonElement kind) && kind.GetString() == "TypeAliasDecl" &&
+                name.StartsWith("rocksBinds_", StringComparison.Ordinal) && int.TryParse(name["rocksBinds_".Length..], out int index) &&
+                index >= 0 && index < mirrors.Length)
+            {
+                mirrors[index].Binds = ClangAstParser.CleanType(ClangAstParser.TypeSpelling(node));
+            }
+        }
+
+        ClassModel? unresolved = mirrors.FirstOrDefault(mirror => mirror.Binds.Length == 0);
+        if (unresolved is not null)
+        {
+            throw new MetadataException($"{unresolved.Name}: Clang did not report the Binds alias for \"{unresolved.BindsSpelling}\"", "RMC2001",
+                "Use the supported Clang/toolchain; add a reviewed parser case before accepting a new AST shape.").At(unresolved.Site);
+        }
+
+        // 정규 철자는 descriptor binds로 그대로 나가고 의존 모듈이 같은 문법으로 읽는다(StructRules.IsBindsSpelling). 그
+        // 문법 밖의 정규 철자(음수·문자 템플릿 인자, 포인터 인자 등)는 여기서 거부한다 — 의존 모듈이 모두 RMC1000으로
+        // 실패하지 않게. 문법을 넓히지 않는다(descriptor 철자가 생성 C++에 그대로 들어간다).
+        ClassModel? outside = mirrors.FirstOrDefault(mirror => !StructRules.IsBindsSpelling(mirror.Binds) || mirror.Binds.StartsWith("::", StringComparison.Ordinal));
+        if (outside is not null)
+        {
+            throw new MetadataException($"{outside.Name}: the canonical spelling '{outside.Binds}' of Binds = \"{outside.BindsSpelling}\" is outside the descriptor binds grammar (qualified names and name/integer template arguments)",
+                hint: "Bind a type whose canonical spelling uses only qualified names and non-negative integer or type-name template arguments.").At(outside.BindsSite ?? outside.Site);
+        }
     }
 
     private static byte[] ReadIdentitySnapshot(string path)

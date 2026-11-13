@@ -61,6 +61,24 @@ internal static class SchemaValidator
             byId.TryAdd(external.Id, external);
         }
 
+        // Binds 거울은 CoreTypeBindings만 내고, 한 실제 타입은 거울 하나만 묶으며, 리플렉션 타입이나 거울 자신을 묶을 수
+        // 없다(같은 C++ 타입에 GeneratedType 특수화가 둘이 되거나 리플렉션 타입과 겹친다).
+        Dictionary<string, ClassModel> bound = new(StringComparer.Ordinal);
+        foreach (ClassModel mirror in imported.Values.Where(model => model.Binds.Length != 0).OrderBy(model => model.Name, StringComparer.Ordinal))
+        {
+            string? conflict = !string.Equals(mirror.Module, StructRules.BindingModule, StringComparison.Ordinal)
+                ? $"module {mirror.Module} declares Binds; only {StructRules.BindingModule} binds Core value types"
+                : bound.TryGetValue(mirror.Binds, out ClassModel? other) ? $"{mirror.Name} and {other.Name} both bind {mirror.Binds}"
+                : imported.ContainsKey(mirror.Binds) ? $"{mirror.Name} binds reflected type {mirror.Binds}" : null;
+            if (conflict is not null)
+            {
+                throw new MetadataException($"imported Binds mirror {mirror.Name}: {conflict}", "RMC2004",
+                    "Regenerate the dependency metadata; each Core value type is bound once, by CoreTypeBindings.").At(mirror.Site);
+            }
+
+            bound.Add(mirror.Binds, mirror);
+        }
+
         foreach (ClassModel external in imported.Values.Where(model => !model.IsEnum))
         {
             foreach (FieldModel field in external.Fields.Where(field => field.HasTargetType && field.ReferenceId is not null))
@@ -229,11 +247,58 @@ internal static class SchemaValidator
             return resolved;
         }
 
-        // 리플렉션 enum(structs면 struct) 철자(desugar된 정규 이름)면 그 모델을 돌려준다(아니면 null). 다른 모듈의
-        // private 타입은 RMC2006이다.
+        // Binds 실제 타입의 정규 철자 → 거울이다(이 모듈과 import). 한 실제 타입은 거울 하나만 묶고(RMC2004), 리플렉션
+        // 타입·거울을 묶을 수 없다(RMC2004).
+        Dictionary<string, ClassModel> mirrors = new(StringComparer.Ordinal);
+        foreach (ClassModel mirror in imported.Values.Where(model => model.Binds.Length != 0))
+        {
+            mirrors.TryAdd(mirror.Binds, mirror);
+        }
+
+        foreach (ClassModel mirror in classes.Values.Where(model => model.Binds.Length != 0).OrderBy(model => model.Name, StringComparer.Ordinal))
+        {
+            if (classes.ContainsKey(mirror.Binds) || imported.ContainsKey(mirror.Binds))
+            {
+                throw new MetadataException($"{mirror.Name}: Binds target {mirror.Binds} is itself a reflected type", "RMC2004",
+                    "Bind only non-reflected Core value types; reflected types already have their own metadata.").At(mirror.BindsSite ?? mirror.Site);
+            }
+
+            if (!mirrors.TryAdd(mirror.Binds, mirror))
+            {
+                throw new MetadataException($"{mirror.Name}: {mirrors[mirror.Binds].Name} already binds {mirror.Binds}", "RMC2004",
+                    "Keep exactly one Binds mirror per real type; aliases such as rocks::Vec3 and rocks::Vector3<float> name the same type.").At(mirror.BindsSite ?? mirror.Site);
+            }
+
+            // 거울의 멤버는 실제 타입의 공개 데이터 멤버와 1:1이다(생성 static_assert가 이름·형식·개수·순서를 대조한다).
+            // NATIVE 멤버·Migrate는 실제 타입에 둘 수 없으므로 받지 않는다(그 멤버 위치로 보고한다).
+            (string? invalid, SourceSite site) = mirror.NativeMembers.Count != 0
+                ? ("a Binds mirror lists only persistent members (ROCKS_NATIVE is not allowed)", mirror.NativeMembers[0].Site)
+                : mirror.HasMigrate ? ("a Binds mirror cannot declare Migrate (the real type owns its layout)", mirror.MigrateSite ?? mirror.Site)
+                : mirror.OwnFields.Count == 0 ? ("a Binds mirror needs the real type's public data members as ROCKS_PROPERTY fields", mirror.Site)
+                : ((string?)null, mirror.Site);
+            if (invalid is not null)
+            {
+                throw new MetadataException($"{mirror.Name}: {invalid}",
+                    hint: "Mirror every public data member of the real type, in declaration order, with ROCKS_PROPERTY and the same type.").At(site);
+            }
+        }
+
+        // 리플렉션 enum(structs면 struct) 철자(desugar된 정규 이름)면 그 모델을 돌려준다(아니면 null). struct는 Binds
+        // 실제 타입의 정규 철자로도 거울을 찾고, 거울 타입을 직접 쓰면 거부한다. 다른 모듈의 private 타입은 RMC2006이다.
         ClassModel? ValueType(string spelling, bool structs, string owner, SourceSite site)
         {
             string name = spelling.StartsWith("::", StringComparison.Ordinal) ? spelling[2..] : spelling;
+            if (structs && ((classes.TryGetValue(name, out ClassModel? named) || imported.TryGetValue(name, out named)) && named.Binds.Length != 0))
+            {
+                throw new MetadataException($"{owner}: '{name}' is a Binds mirror declaration; use the real type {named.Binds}", "RMC2000",
+                    $"Declare the field with the real type ({named.Binds}); the mirror only describes it to the metadata compiler.").At(site);
+            }
+
+            if (structs && !classes.ContainsKey(name) && !imported.ContainsKey(name) && mirrors.TryGetValue(name, out ClassModel? mirror))
+            {
+                name = mirror.Name;
+            }
+
             if (classes.TryGetValue(name, out ClassModel? own))
             {
                 return (structs ? own.IsStruct : own.IsEnum) ? own : null;
@@ -303,6 +368,27 @@ internal static class SchemaValidator
 
         ClassModel Find(string name) => classes.TryGetValue(name, out ClassModel? own) ? own : imported[name];
 
+        // 지원하지 않는 필드 형식의 안내다. Core 값 타입(Vector3·Color·Transform 등)은 CoreTypeBindings의 Binds 거울로
+        // 리플렉션된다: 그 descriptor를 import했으면 같은 템플릿의 묶인 인스턴스를 알려 주고(예: Vector3<int>는 묶이지
+        // 않았다), import하지 않았으면 그 모듈에 의존하라고 안내한다.
+        string UnsupportedFieldHint(string spelling)
+        {
+            static string Template(string text) => text.IndexOf('<') is int open and > 0 ? text[..open] : text;
+            string[] bound = imported.Values.Where(model => model.Binds.Length != 0).Select(model => model.Binds).ToArray();
+            string[] siblings = bound.Where(binds => Template(binds) == Template(spelling)).Order(StringComparer.Ordinal).ToArray();
+            if (siblings.Length != 0)
+            {
+                return $"This instantiation is not bound by {StructRules.BindingModule}; use a bound type such as {string.Join(", ", siblings)}.";
+            }
+
+            if (bound.Length == 0 && StructRules.IsCoreValueType(spelling))
+            {
+                return $"Core value types are reflected by the {StructRules.BindingModule} module: depend on {StructRules.BindingModule} (add it to the module's RequiredModules) so its descriptor is imported.";
+            }
+
+            return "Use a supported scalar, Guid, String, AssetId, Sha256Digest, ROCKS_ENUM enum, ROCKS_STRUCT struct, ObjectRef or SoftObjectRef field; raw pointers/containers/cv-qualified fields need an explicit codec extension.";
+        }
+
         foreach (ClassModel model in classes.Values.Where(model => !model.IsEnum))
         {
             if (!model.IsStruct)
@@ -338,7 +424,7 @@ internal static class SchemaValidator
                 else
                 {
                     throw new MetadataException($"{field.Owner}::{field.Name}: unsupported field type '{field.NativeSpelling}'",
-                    hint: "Use a supported scalar, Guid, String, AssetId, Sha256Digest, ROCKS_ENUM enum, ROCKS_STRUCT struct, ObjectRef or SoftObjectRef field; raw pointers/containers/cv-qualified fields need an explicit codec extension.").At(field.Site);
+                    hint: UnsupportedFieldHint(field.NativeSpelling)).At(field.Site);
                 }
 
                 // 지정자를 그 필드 종류에 쓸 수 있는지 본다(RMC2202). 배열 필드는 B5에서 생긴다.

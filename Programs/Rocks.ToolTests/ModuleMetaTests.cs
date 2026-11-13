@@ -42,6 +42,15 @@ internal static class ModuleMetaTests
         "ROCKS_STRUCT()\nstruct Outer {\nROCKS_PROPERTY() WorldBits inner;\n};\n" +
         "ROCKS_CLASS()\nstruct Parent : public rocks::Object {\nROCKS_PROPERTY() rocks::int32 value = 0;\nROCKS_PROPERTY() Point origin;\n};\n}\n";
 
+    // B4c: CoreTypeBindings로 생성하는 Lower다(Vec3·Vec3d Binds 거울과 Parent).
+    private const string BindsParent = "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n#include <Core/Math/Vector3.h>\nnamespace probe {\n" +
+        "ROCKS_STRUCT(Binds = \"rocks::Vec3\")\nstruct Vec3Binding {\nROCKS_PROPERTY() float x = 0;\nROCKS_PROPERTY() float y = 0;\nROCKS_PROPERTY() float z = 0;\n};\n" +
+        "ROCKS_STRUCT(Binds = \"rocks::Vec3d\")\nstruct Vec3dBinding {\nROCKS_PROPERTY() double x = 0;\nROCKS_PROPERTY() double y = 0;\nROCKS_PROPERTY() double z = 0;\n};\n" +
+        "ROCKS_CLASS()\nstruct Parent : public rocks::Object {\nROCKS_PROPERTY() rocks::int32 value = 0;\n};\n}\n";
+
+    // Binds를 받는 유일한 모듈 이름이다(StructRules.BindingModule).
+    private const string BindingsModule = "CoreTypeBindings";
+
     // 깊이 16의 struct 사슬(Chain1 ← … ← Chain16), 위조용 Top(UInt16 필드 하나), Parent를 가진 Lower다.
     private static readonly string ChainParent = "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\nnamespace probe {\n" +
         "ROCKS_STRUCT()\nstruct Chain1 {\nROCKS_PROPERTY() rocks::int32 value = 0;\n};\n" +
@@ -513,7 +522,7 @@ internal static class ModuleMetaTests
             foreach ((string name, string from, string to) in new[]
             {
                 ("extraKey", "\"binds\": \"\"", "\"binds\": \"\",\n      \"base\": \"rocks::Object\""),
-                ("binds", "\"binds\": \"\"", "\"binds\": \"rocks::Vector3<float>\""),
+                ("binds", "\"binds\": \"\"", "\"binds\": \"rocks::Vector3<float\""),
                 ("unknownFlag", "\"ContainsStrongReference\"", "\"Abstract\""),
                 ("missingTrait", "\"ContainsStrongReference\"", ""),
                 ("owner", "\"owner\": \"probe::Point\"", "\"owner\": \"probe::Link\""),
@@ -586,6 +595,90 @@ internal static class ModuleMetaTests
             await Reject(layout.RunUpperAsync(imports: [layout.Descriptor("Lower"), otherPath]), "RMC2006", "of module Lower");
         });
 
+        // B4c: CoreTypeBindings descriptor의 Binds 거울은 실제 타입 철자(binds)로 다른 모듈의 필드 형식을 푼다. 생성 헤더는
+        // 거울의 생성 헤더를 include하고 실제 타입의 native 키를 싣는다. descriptor의 binds는 철자 문법(RMC1000)과 모듈·중복·
+        // 리플렉션 타입 결합 규칙(RMC2004)을 검사하고, 거울 타입을 필드 형식으로 쓰면 거부한다.
+        suite.Add("Meta.ImportedBindsResolveRealTypes", async () =>
+        {
+            using Layout layout = new(options, environment);
+            layout.Write("Lower/Public/Lower/Parent.h", BindsParent);
+            layout.Manifest("Lower", ["probe::Vec3Binding", "probe::Vec3dBinding"],
+                ["probe::Vec3Binding::x", "probe::Vec3Binding::y", "probe::Vec3Binding::z", "probe::Vec3dBinding::x", "probe::Vec3dBinding::y", "probe::Vec3dBinding::z"]);
+            Directory.CreateDirectory(layout.Generated(BindingsModule, "Public"));
+            Directory.CreateDirectory(layout.Generated(BindingsModule, "Private"));
+            ProcessResult lower = await layout.RunLowerAsync(module: BindingsModule);
+            Verify.Equal(0, lower.ExitCode, "bindings module: " + lower.StdErr);
+            layout.Manifest("Upper", [], ["probe::Value::position", "probe::Value::mirror"]);
+            string ValueWith(string member) => Value.Replace("ROCKS_PROPERTY() rocks::ObjectRef<Parent> next;\n",
+                "ROCKS_PROPERTY() rocks::ObjectRef<Parent> next;\n" + member, StringComparison.Ordinal);
+            Task<ProcessResult> RunUpper(string descriptor) => layout.RunUpperInputsAsync([(layout.Source("Upper/Public/Upper/Value.h"), "Upper/Value.h", false)],
+                imports: [descriptor], dependencyModule: BindingsModule);
+            // 묶인 실제 타입을 NATIVE 멤버로 두면 생성 코드가 그 거울의 생성 헤더를 include하고 형질을 확인한다.
+            layout.Write("Upper/Public/Upper/Value.h", ValueWith("ROCKS_PROPERTY() rocks::Vec3 position;\nROCKS_NATIVE() rocks::Vec3 cache;\n"));
+            ProcessResult upper = await RunUpper(layout.Descriptor(BindingsModule));
+            Verify.Equal(0, upper.ExitCode, "consumer module: " + upper.StdErr);
+
+            using JsonDocument bindings = JsonDocument.Parse(File.ReadAllBytes(layout.Descriptor(BindingsModule)));
+            using JsonDocument consumer = JsonDocument.Parse(File.ReadAllBytes(layout.Descriptor("Upper")));
+            Verify.Equal("rocks::Vector3<float>", Type(bindings, "probe::Vec3Binding").GetProperty("binds").GetString(), "descriptor binds");
+            Verify.Equal(Type(bindings, "probe::Vec3Binding").GetProperty("id").GetString(),
+                FieldNodeOf(consumer, "probe::Value", "position").GetProperty("value").GetProperty("type").GetString(), "imported real type resolves to the mirror");
+            string generated = Compact(File.ReadAllText(layout.Generated("Upper", "Public/Upper/Value.generated.h")));
+            Verify.That(generated.Contains("#include<Lower/Parent.generated.h>", StringComparison.Ordinal), "mirror generated header include");
+            Verify.That(generated.Contains(Compact("NativeTypeKey<::rocks::Vector3<float>>()"), StringComparison.Ordinal), "real type native key");
+            Verify.That(generated.Contains(Compact("static_assert(!GeneratedType<::rocks::Vector3<float>>::ContainsStrongReference"), StringComparison.Ordinal),
+                "NATIVE member of a bound real type is checked by its generated trait");
+            Verify.That(Compact(File.ReadAllText(layout.Generated("Upper", "Public/Upper/Upper.module.generated.h")))
+                .Contains("::rocks::generated::CoreTypeBindings::RegisterModuleTypes", StringComparison.Ordinal), "bindings module is registered first");
+
+            string original = File.ReadAllText(layout.Descriptor(BindingsModule));
+            string vec3Id = Type(bindings, "probe::Vec3Binding").GetProperty("id").GetString()!;
+            foreach ((string name, string code, string reason, Func<string> mutate) in new (string, string, string, Func<string>)[]
+            {
+                ("bindsReflected", "RMC2004", "binds reflected type", () => MutateType(original, "probe::Vec3Binding", mirror => mirror["binds"] = "probe::Parent")),
+                ("bindsGlobal", "RMC1000", "invalid descriptor", () => MutateType(original, "probe::Vec3Binding", mirror => mirror["binds"] = "::rocks::Vector3<float>")),
+                ("bindsCycle", "RMC2302", "cycle", () => MutateType(original, "probe::Vec3Binding",
+                    mirror => FieldNode(mirror, "x")["value"] = new System.Text.Json.Nodes.JsonObject { ["kind"] = "Struct", ["type"] = vec3Id })),
+                ("bindsTwice", "RMC2004", "both bind", () => MutateType(original, "probe::Vec3dBinding", mirror => mirror["binds"] = "rocks::Vector3<float>")),
+                ("bindsSpelling", "RMC1000", "invalid descriptor", () => MutateType(original, "probe::Vec3Binding", mirror => mirror["binds"] = "rocks::Vec3; int x")),
+                ("bindsModule", "RMC2004", "only CoreTypeBindings", () => original.Replace($"\"module\": \"{BindingsModule}\"", "\"module\": \"Other\"", StringComparison.Ordinal))
+            })
+            {
+                string mutated = layout.Generated("Mutated", name + ".rocksmeta.json");
+                Directory.CreateDirectory(Path.GetDirectoryName(mutated)!);
+                File.WriteAllText(mutated, mutate());
+                await Reject(RunUpper(mutated), code, reason);
+            }
+
+            layout.Write("Upper/Public/Upper/Value.h", ValueWith("ROCKS_PROPERTY() Vec3Binding mirror;\n"));
+            await Reject(RunUpper(layout.Descriptor(BindingsModule)), "RMC2000", "is a Binds mirror declaration");
+        });
+
+        // CoreTypeBindings를 import했는데 그 모듈이 묶지 않은 인스턴스(여기서는 Vec3만 묶고 Vec3d를 쓴다)를 쓰면 의존을 더하라는
+        // 안내가 아니라 묶인 인스턴스를 알려 준다.
+        suite.Add("Meta.UnboundCoreValueInstantiationHint", async () =>
+        {
+            using Layout layout = new(options, environment);
+            int vec3d = BindsParent.IndexOf("ROCKS_STRUCT(Binds = \"rocks::Vec3d\")", StringComparison.Ordinal);
+            int parent = BindsParent.IndexOf("ROCKS_CLASS()", StringComparison.Ordinal);
+            layout.Write("Lower/Public/Lower/Parent.h", BindsParent[..vec3d] + BindsParent[parent..]);
+            layout.Manifest("Lower", ["probe::Vec3Binding"], ["probe::Vec3Binding::x", "probe::Vec3Binding::y", "probe::Vec3Binding::z"]);
+            Directory.CreateDirectory(layout.Generated(BindingsModule, "Public"));
+            Directory.CreateDirectory(layout.Generated(BindingsModule, "Private"));
+            ProcessResult lower = await layout.RunLowerAsync(module: BindingsModule);
+            Verify.Equal(0, lower.ExitCode, "bindings module: " + lower.StdErr);
+            layout.Manifest("Upper", [], ["probe::Value::precise"]);
+            layout.Write("Upper/Public/Upper/Value.h", Value.Replace("ROCKS_PROPERTY() rocks::ObjectRef<Parent> next;\n",
+                "ROCKS_PROPERTY() rocks::ObjectRef<Parent> next;\nROCKS_PROPERTY() rocks::Vec3d precise;\n", StringComparison.Ordinal));
+            ProcessResult upper = await layout.RunUpperInputsAsync([(layout.Source("Upper/Public/Upper/Value.h"), "Upper/Value.h", false)],
+                imports: [layout.Descriptor(BindingsModule)], dependencyModule: BindingsModule);
+            Verify.That(upper.ExitCode != 0, "unbound Core value instantiation was accepted");
+            Verify.Contains("RMC2000", upper.StdErr, "unsupported field type code");
+            Verify.Contains("not bound by CoreTypeBindings", upper.StdErr, "unbound instantiation hint");
+            Verify.Contains("rocks::Vector3<float>", upper.StdErr, "bound instantiation in the hint");
+            Verify.That(!upper.StdErr.Contains("RequiredModules", StringComparison.Ordinal), "dependency hint is not shown when the descriptor is imported");
+        });
+
         // 깊이는 import struct까지 이어서 센다: 위조한 import 사슬 17단(descriptor), 이 모듈 struct가 import한 깊이 16 사슬을
         // 담는 경우는 RMC2303이고 깊이 15 사슬을 담으면 깊이 16으로 받는다.
         suite.Add("Meta.ImportedStructDepthIsChecked", async () =>
@@ -655,6 +748,9 @@ internal static class ModuleMetaTests
 
     private static System.Text.Json.Nodes.JsonObject FieldNode(System.Text.Json.Nodes.JsonObject type, string name) =>
         type["fields"]!.AsArray().Select(node => node!.AsObject()).Single(node => (string?)node["name"] == name);
+
+    private static JsonElement FieldNodeOf(JsonDocument descriptor, string type, string name) =>
+        Type(descriptor, type).GetProperty("fields").EnumerateArray().Single(field => field.GetProperty("name").GetString() == name);
 
     private static async Task Reject(Task<ProcessResult> run, string code, string reason)
     {

@@ -26,11 +26,13 @@ TEST(ModuleRegistration_SharedModuleIsRegisteredOnceAndRetainedByEveryUser) {
     TypeRegistry types(allocator);
     ModuleRegistration first(types, allocator);
     REQUIRE(generated::ReflectionTestFixtures::RegisterModuleTypes(first));
-    // 기록은 모듈 하나와 타입마다 하나다.
+    // 기록은 모듈마다 하나(fixture 모듈과 그것이 먼저 등록하는 의존 모듈 CoreTypeBindings)와
+    // 타입마다 하나다.
     const usize records = first.Size();
     const uint32 typeCount = types.Stats().registeredTypes;
     CHECK(typeCount >= 2);
-    CHECK(records == usize(typeCount) + 1);
+    CHECK(records == usize(typeCount) + 2);
+    CHECK(static_cast<bool>(types.AcquireValueType(TypeIdOf<Transform>(), TypeKind::Struct)));
 
     // 같은 registration으로 다시 부르면(의존 그래프의 다른 경로) 모듈이 이미 들어와 있어 아무것도
     // 하지 않는다.

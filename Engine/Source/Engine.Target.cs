@@ -6,7 +6,9 @@ public sealed class EngineTarget : TargetRules
 {
     public override string Name => "Engine";
 
-    public override IReadOnlyList<string> Modules => ["ObjectSerialization", "Localization"];
+    // CoreTypeBindings: Core 값 타입 리플렉션 결합(Docs/Design/ReflectionFoundations.ko.md 4.5절) — 게임 모듈이 Core 값
+    // 타입 필드를 리플렉션하려면 SDK에 있어야 한다.
+    public override IReadOnlyList<string> Modules => ["ObjectSerialization", "Localization", "CoreTypeBindings"];
 
     public override bool CheckPublicHeaders => true;
 }

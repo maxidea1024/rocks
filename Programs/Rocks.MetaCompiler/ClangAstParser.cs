@@ -35,7 +35,9 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
     private string? serializedFile;
     private string? serializedParent;
 
-    public SchemaModel Parse(string json)
+    // 이 모듈 입력의 리플렉션 선언을 모은다. 해석·검증(SchemaValidator.Validate)은 호출자가 Binds 정규 철자를 채운
+    // 뒤에 한다(필드 형식이 Binds 실제 타입으로 거울을 찾으므로).
+    public Dictionary<string, ClassModel> Parse(string json)
     {
         using JsonDocument document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 2048 });
         IndexLocations(document.RootElement);
@@ -66,7 +68,7 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
             }
         }
 
-        return SchemaValidator.Validate(classes, imported);
+        return classes;
     }
 
     // ROCKS_NATIVE 재귀 검사용 레코드 색인이다(정규 이름 → 필드·base 타입 철자, WorldOnly 소유자 형질). 클래스
@@ -406,7 +408,8 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
     private static bool Flag(JsonElement node, string property) =>
         node.TryGetProperty(property, out JsonElement value) && value.ValueKind == JsonValueKind.True;
 
-    private static string TypeSpelling(JsonElement node)
+    // 노드 타입의 Clang 정규 철자다(별칭은 desugar한 철자). CompilerDriver가 Binds 별칭을 풀 때도 쓴다.
+    internal static string TypeSpelling(JsonElement node)
     {
         JsonElement type = node.GetProperty("type");
         string resolved = Text(type, "desugaredQualType");
@@ -610,7 +613,9 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
                     WorldOnly = classSpec?.WorldOnly ?? false,
                     Header = owner.Include,
                     Private = owner.Private,
-                    IsStruct = isStruct
+                    IsStruct = isStruct,
+                    BindsSpelling = structSpec?.Binds ?? "",
+                    BindsSite = structSpec is { Binds.Length: > 0 } ? prefix.Site : null
                 };
                 JsonElement[] members = Children(node).ToArray();
                 bool generatedBody = members.Any(member => Annotation(member, "rocks.generated") is not null);
@@ -649,6 +654,7 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
                         }
 
                         model.HasMigrate = true;
+                        model.MigrateSite ??= currentSite;
                     }
 
                     if (memberKind != "FieldDecl")

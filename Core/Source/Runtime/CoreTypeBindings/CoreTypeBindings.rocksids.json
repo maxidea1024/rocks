@@ -1,0 +1,446 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::ColorBinding::a",
+      "id": "dc1f30c985f24333aa3458148d043eb6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::ColorBinding::b",
+      "id": "ab885f48f8fd4016b034c92392429bba",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::ColorBinding::g",
+      "id": "f8237a5e865345d888f87ffb2baddef0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::ColorBinding::r",
+      "id": "97dba917e0a647cca829d674f2cf8bfc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::IntVec2Binding::x",
+      "id": "48e75cf65ef441349947bb9c8c8b352f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::IntVec2Binding::y",
+      "id": "eac2f4dac81a41ef83bfdbabed339512",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::IntVec3Binding::x",
+      "id": "9554189a6eec4e76b3592791fe965f24",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::IntVec3Binding::y",
+      "id": "167b868e08794cf58b0d0a11e16dce69",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::IntVec3Binding::z",
+      "id": "01937238227747fdb92b9987897dec98",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::LinearColorBinding::a",
+      "id": "49aaffbf84774991b8dd3dc9bcb89e64",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::LinearColorBinding::b",
+      "id": "3f9f7cb442004b0abc3ff2f06cacdade",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::LinearColorBinding::g",
+      "id": "992c078f615748b79d4c9cd224a32249",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::LinearColorBinding::r",
+      "id": "3f96d57e35434af3b538fd918fdf94ba",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::QuatBinding::w",
+      "id": "529899dcb9c04d4cbb57cdeea6ac44b2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::QuatBinding::x",
+      "id": "5a709efc847c457abb35f602d4a4026f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::QuatBinding::y",
+      "id": "26bfbfc24cbf4963a7feb8869687acb7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::QuatBinding::z",
+      "id": "f791c127c5d94f50a49cf5d74a69c8bc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::QuatdBinding::w",
+      "id": "3398051d57d1460484db2c0a9bd60fc5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::QuatdBinding::x",
+      "id": "c388c97257074803a56a8db4ecc3c858",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::QuatdBinding::y",
+      "id": "4a82a6f0f8964a8f871446140e1d0c12",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::QuatdBinding::z",
+      "id": "9f69bd6d648e42e29dcb26e8f1b8e678",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::RotatorBinding::pitch",
+      "id": "2623a3c5038242abba749a2324f165c0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::RotatorBinding::roll",
+      "id": "1ca15fc0736941a797d3754c591fca65",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::RotatorBinding::yaw",
+      "id": "41e26ef08b494d8dab9b3115f966545b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::RotatordBinding::pitch",
+      "id": "dc9b4b007bb0491580dbc0a51f952215",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::RotatordBinding::roll",
+      "id": "9c1d62bfd48e47e59571df108a20b516",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::RotatordBinding::yaw",
+      "id": "3a1ed400f9e64625b5ba97d7fdaee140",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::TransformBinding::rotation",
+      "id": "1856cea142534921bbace526a7586cd0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::TransformBinding::scale",
+      "id": "a3a5b8442efc460eab8f5d0fb96aa5dd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::TransformBinding::translation",
+      "id": "07f0731091aa4c0b870223385a87bbfd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::Vec2Binding::x",
+      "id": "28e1d73049f44dbc86aedbd7ff496d24",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::Vec2Binding::y",
+      "id": "e7fcb72be34a4321aa8178c68785e60d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::Vec2dBinding::x",
+      "id": "108f70ccaf3c4a84bd6bc2dbb73e3c6d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::Vec2dBinding::y",
+      "id": "3d55c0e3604d4158bf023e6aea2d69a7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::Vec3Binding::x",
+      "id": "52bb31457ca44aa38e813c1c63f4b3b2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::Vec3Binding::y",
+      "id": "1c9e50adcdb943a589abd83fcdc1b053",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::Vec3Binding::z",
+      "id": "0654572dd71c468c90a53628f7b898d9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::Vec3dBinding::x",
+      "id": "552ca59d7d464433ad43b6ca39b01689",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::Vec3dBinding::y",
+      "id": "077fb4ab8b404ec38e2b78717f7da006",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::Vec3dBinding::z",
+      "id": "fa39569a463043b9ab4b7e9c5424d9d7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::Vec4Binding::w",
+      "id": "21367752b7d348a1a500dd13bac16d7f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::Vec4Binding::x",
+      "id": "7ea0b744bc0d41a4aace6e9873cb4a8b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::Vec4Binding::y",
+      "id": "f89efa9df2574c0da85a14da0772c197",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::Vec4Binding::z",
+      "id": "60e6333d9336472194392d6ec5b18919",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::Vec4dBinding::w",
+      "id": "95a9c830f3ed41dfb4f753d5b3f1de2f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::Vec4dBinding::x",
+      "id": "a44b16a757874275870dc5e157310fd1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::Vec4dBinding::y",
+      "id": "f2867a266d7549469865295789eba362",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::Vec4dBinding::z",
+      "id": "1f34ed6f5e054831a1e137890ac60cb7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::ColorBinding",
+      "id": "e535f8241b9d46c1ab64d11bc975daef",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::IntVec2Binding",
+      "id": "274c7b9fa2e343c29f92f612e6295899",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::IntVec3Binding",
+      "id": "1cdc0fd69fc040e28b222893061edb3b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::LinearColorBinding",
+      "id": "eab0dec00b224f68be6014777013bb25",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::QuatBinding",
+      "id": "d1eba1f86d9448b39d4bfa612f312aed",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::QuatdBinding",
+      "id": "9d8cca4136664c258d1b29c0a9bb38ee",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::RotatorBinding",
+      "id": "8f290014d04642fc808f88c6473d68e8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::RotatordBinding",
+      "id": "ae665448dc7c40529dbe92282b6e96e3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::TransformBinding",
+      "id": "b4bc84d9693c4083a18ec30b70523c87",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::Vec2Binding",
+      "id": "477b6880ac58465c9a357ee4f7d2a247",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::Vec2dBinding",
+      "id": "e32faf0dbf69478f9445a4fb8585650c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::Vec3Binding",
+      "id": "1ac5ead7774e44c49835dda6daac8ee9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::Vec3dBinding",
+      "id": "914e8aa1cf7e401ba48cae20a7835eab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::Vec4Binding",
+      "id": "8c27609d16694a88955d405f7fb2b59b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::Vec4dBinding",
+      "id": "ab6ab76a27ae45e18906c70c2e1bf38e",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

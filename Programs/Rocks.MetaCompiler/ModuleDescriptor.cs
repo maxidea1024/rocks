@@ -13,7 +13,7 @@ internal static class ModuleDescriptor
         ["kind", "name", "id", "version", "flags", "base", "header", "visibility", "fields"];
 
     // struct 항목: base 대신 생성 형질 flags(ContainsStrongReference·RequiresWorldOnlyOwner)와 binds(Binds 실제
-    // 타입의 Clang 정규 철자 — B4c 전까지 항상 "")다(Docs/Design/ReflectionFoundations.ko.md 1.4·4.6절).
+    // 타입의 Clang 정규 철자, 거울이 아니면 "")다(Docs/Design/ReflectionFoundations.ko.md 1.4·4.6절).
     private static readonly string[] StructKeys =
         ["kind", "name", "id", "version", "header", "visibility", "flags", "binds", "fields"];
 
@@ -103,7 +103,7 @@ internal static class ModuleDescriptor
         }
 
         json.WriteEndArray();
-        json.WriteString("binds", "");
+        json.WriteString("binds", type.Binds);
         WriteFields(json, type);
         json.WriteEndObject();
     }
@@ -297,10 +297,17 @@ internal static class ModuleDescriptor
                 throw Invalid("version of " + name);
             }
 
-            // Binds(Core 값 타입 결합)는 B4c에서 받는다. 지금은 빈 문자열만 받는다.
-            if (isStruct && (type.GetProperty("binds").ValueKind != JsonValueKind.String || type.GetProperty("binds").GetString() != ""))
+            // binds는 Binds 실제 타입의 Clang 정규 철자(템플릿 인자 포함)이거나 ""다. 생성 C++에 그대로 들어가므로 철자
+            // 문법을 검사한다(모듈·중복·리플렉션 타입 결합 규칙은 LinkImported가 RMC2004로 본다).
+            string binds = "";
+            if (isStruct)
             {
-                throw Invalid("binds of " + name + " is not supported yet");
+                JsonElement bindsValue = type.GetProperty("binds");
+                binds = bindsValue.ValueKind == JsonValueKind.String ? bindsValue.GetString() ?? "" : throw Invalid("binds of " + name);
+                if (binds.Length != 0 && (!StructRules.IsBindsSpelling(binds) || binds.StartsWith("::", StringComparison.Ordinal)))
+                {
+                    throw Invalid("binds of " + name + ": " + binds);
+                }
             }
 
             string header = Header(type, name);
@@ -319,7 +326,8 @@ internal static class ModuleDescriptor
                 Module = module,
                 IsStruct = isStruct,
                 ContainsStrongReference = flags.Contains("ContainsStrongReference"),
-                RequiresWorldOnlyOwner = flags.Contains("RequiresWorldOnlyOwner")
+                RequiresWorldOnlyOwner = flags.Contains("RequiresWorldOnlyOwner"),
+                Binds = binds
             };
             List<FieldModel> fields = [];
             foreach (JsonElement field in type.GetProperty("fields").EnumerateArray())

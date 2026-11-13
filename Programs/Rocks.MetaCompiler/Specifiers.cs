@@ -6,9 +6,10 @@ namespace Rocks.MetaCompiler;
 // SchemaValidator가 base에서 더한다).
 internal sealed record ClassSpec(bool Abstract, uint Version, bool WorldOnly);
 
-// STRUCT 지정자 결과다. Version은 Record schema version(없으면 1)이다. Binds(Core 값 타입 결합 — Docs/Design/
-// ReflectionFoundations.ko.md 4.5절)는 B4c에서 받으므로 지금은 지정하면 오류다.
-internal sealed record StructSpec(uint Version);
+// STRUCT 지정자 결과다. Version은 Record schema version(없으면 1)이다. Binds는 거울 선언이 결합하는 실제 C++ 타입의
+// 원문 철자다(Core 값 타입 결합 — Docs/Design/ReflectionFoundations.ko.md 4.5절, 없으면 ""). 정규 철자는 Clang이
+// 정한다(문자열로 비교하지 않는다).
+internal sealed record StructSpec(uint Version, string Binds);
 
 // PROPERTY 지정자 결과다. ToolName은 Name="…"의 값이고 필드 이름과 같거나 없으면 ""다(기본 도구 이름은 필드
 // 이름이다). MaxElements는 배열 필드 전용이라 0이 아니면 SchemaValidator가 배열이 아닌 필드에서 거부한다.
@@ -55,7 +56,7 @@ internal static class Specifiers
 
     public static StructSpec Struct(string text, string symbol)
     {
-        const string hint = "ROCKS_STRUCT takes only Version=N (an unsigned decimal integer); CLASS specifiers such as Abstract or WorldOnly do not apply to structs.";
+        const string hint = "ROCKS_STRUCT takes Version=N (an unsigned decimal integer) and, in CoreTypeBindings only, Binds=\"<C++ type>\"; CLASS specifiers such as Abstract or WorldOnly do not apply to structs.";
         Dictionary<string, Value?> values;
         try
         {
@@ -76,13 +77,14 @@ internal static class Specifiers
             }
         }
 
-        if (values.ContainsKey("Binds"))
+        string binds = values.GetValueOrDefault("Binds")?.Text ?? "";
+        if (values.ContainsKey("Binds") && !StructRules.IsBindsSpelling(binds))
         {
-            throw new MetadataException($"{symbol}: STRUCT specifier Binds is not supported yet (Core value type bindings arrive with CoreTypeBindings)",
-                hint: "Remove Binds; reflect a plain struct with ROCKS_PROPERTY members instead of binding a Core value type.");
+            throw new MetadataException($"{symbol}: Binds must be a C++ type spelling (qualified names and template arguments only): \"{binds}\"",
+                hint: "Write the real type fully qualified from the global scope, e.g. Binds = \"rocks::Vector3<float>\" or Binds = \"rocks::Vec3\".");
         }
 
-        return new(values.GetValueOrDefault("Version")?.Number ?? 1);
+        return new(values.GetValueOrDefault("Version")?.Number ?? 1, binds);
     }
 
     public static PropertySpec Property(string text, string symbol, string fieldName)

@@ -62,6 +62,22 @@ try
     var exported = await Cli("sdk", "--root", root, "--target", "Engine", "--configuration", "Debug", "--destination", sdk);
     Require(exported.ExitCode == 0, "SDK export failed: " + exported.StdErr);
     Require(File.Exists(Path.Combine(sdk, "rocks-sdk.json")), "SDK manifest missing");
+    // Engine SDK는 Core 값 타입 결합 모듈(CoreTypeBindings — Metadata 모듈)을 descriptor·identity 명세·생성 헤더와 함께 담는다.
+    using (var engineManifest = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(sdk, "rocks-sdk.json"))))
+    {
+        var bindingsEntry = engineManifest.RootElement.GetProperty("Modules").EnumerateArray()
+            .Single(module => module.GetProperty("Name").GetString() == "CoreTypeBindings");
+        Require(bindingsEntry.GetProperty("Descriptor").GetString() == "Metadata/CoreTypeBindings/CoreTypeBindings.rocksmeta.json" &&
+            bindingsEntry.GetProperty("IdentityManifest").GetString() == "Metadata/CoreTypeBindings/CoreTypeBindings.rocksids.json",
+            "Engine SDK manifest does not name the CoreTypeBindings descriptor and identity manifest");
+    }
+
+    Require(File.Exists(Path.Combine(sdk, "Metadata/CoreTypeBindings/CoreTypeBindings.rocksmeta.json")) &&
+        File.Exists(Path.Combine(sdk, "Metadata/CoreTypeBindings/CoreTypeBindings.rocksids.json")),
+        "Engine SDK is missing the CoreTypeBindings descriptor or identity manifest");
+    Require(Directory.Exists(Path.Combine(sdk, "Headers/CoreTypeBindings")) &&
+        Directory.GetFiles(Path.Combine(sdk, "Headers/CoreTypeBindings"), "CoreValueTypes.generated.h", SearchOption.AllDirectories).Length == 1,
+        "Engine SDK is missing the CoreTypeBindings generated header");
     Require(!Directory.GetFiles(sdk, "*.cpp", SearchOption.AllDirectories).Concat(Directory.GetFiles(sdk, "*.c", SearchOption.AllDirectories)).Any(), "Installed SDK contains engine or third-party sources");
     Pass("engine-export", timer.Elapsed);
 
@@ -151,7 +167,11 @@ try
         Require(fixtureModule.GetProperty("Descriptor").GetString() == "Metadata/ReflectionTestFixtures/ReflectionTestFixtures.rocksmeta.json" &&
             fixtureModule.GetProperty("IdentityManifest").GetString() == "Metadata/ReflectionTestFixtures/ReflectionTestFixtures.rocksids.json",
             "SDK manifest does not name the fixture module's descriptor and identity manifest");
-        Require(sdkModules.Where(module => module.GetProperty("Name").GetString() != "ReflectionTestFixtures")
+        // fixture 모듈은 Core 값 타입 결합 모듈(CoreTypeBindings — 역시 Metadata 모듈)에 의존한다.
+        var bindingsModule = sdkModules.Single(module => module.GetProperty("Name").GetString() == "CoreTypeBindings");
+        Require(bindingsModule.GetProperty("Descriptor").GetString() == "Metadata/CoreTypeBindings/CoreTypeBindings.rocksmeta.json",
+            "SDK manifest does not name the CoreTypeBindings descriptor");
+        Require(sdkModules.Where(module => module.GetProperty("Name").GetString() is not ("ReflectionTestFixtures" or "CoreTypeBindings"))
             .All(module => module.GetProperty("Descriptor").ValueKind == JsonValueKind.Null && module.GetProperty("IdentityManifest").ValueKind == JsonValueKind.Null),
             "SDK module without reflection headers exported metadata");
         Require(File.Exists(Path.Combine(reflectionSdk, "Headers/ReflectionTestFixtures/1/ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h")),
@@ -188,7 +208,7 @@ try
             {
                 Name = "GameCore",
                 PublicIncludeDirectories = [context.PathInRoot("Core/Public")],
-                Dependencies = ["ReflectionTestFixtures"],
+                Dependencies = ["ReflectionTestFixtures", "CoreTypeBindings"],
                 Metadata = ["GameCore/CoreThing.h", "GameCore/Extra.h"],
                 ModuleDirectory = "Core"
             };
@@ -201,6 +221,7 @@ try
     const string coreHeaderText = """
         #pragma once
 
+        #include <Core/Math/Vector3.h>
         #include <Meta/Annotations.h>
         #include <ReflectionTestFixtures/ReflectionFixture.h>
 
@@ -209,6 +230,7 @@ try
         ROCKS_CLASS()
         struct CoreThing : rocks::reflection_fixture::Base {
             ROCKS_PROPERTY() rocks::int32 level = 1;
+            ROCKS_PROPERTY() rocks::Vec3 offset;
         };
 
         } // namespace sample
@@ -285,6 +307,18 @@ try
                     return 4;
                 }
             }
+            // SDK의 CoreTypeBindings가 Core 값 타입을 먼저 등록하고, GameCore의 rocks::Vec3 필드가 그 struct를 가리킨다.
+            const rocks::TypeId vec3 = rocks::TypeIdOf<rocks::Vec3>();
+            if (!types.AcquireValueType(vec3, rocks::TypeKind::Struct)) {
+                return 6;
+            }
+            bool vectorField = false;
+            for (const auto& field : inherited) {
+                vectorField = vectorField || (field.value.kind == rocks::ValueKind::Struct && field.value.type == vec3);
+            }
+            if (!vectorField) {
+                return 7;
+            }
             for (const auto& field : schema.fields) {
                 if (field.value.type == rocks::TypeIdOf<rocks::reflection_fixture::Node>()) {
                     return 0;
@@ -296,7 +330,7 @@ try
         """);
     var coreManifest = Path.Combine(reflectionGame, "Core/GameCore.rocksids.json");
     var coreIds = await Ids("add", "--manifest", coreManifest, "--type", "sample::CoreThing", "--field", "sample::CoreThing::level",
-        "--type", "sample::Extra");
+        "--field", "sample::CoreThing::offset", "--type", "sample::Extra");
     Require(coreIds.ExitCode == 0, "Could not register the GameCore fixture identities: " + coreIds.StdErr);
     var fixtureIds = await Ids("add", "--manifest", Path.Combine(reflectionGame, "SampleGame.rocksids.json"),
         "--type", "sample::FixtureChild", "--field", "sample::FixtureChild::link");
@@ -307,7 +341,8 @@ try
     var reflectionResult = JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(Path.Combine(reflectionOutput, "action-report.json")))!;
     Require(reflectionResult.Succeeded && reflectionResult.Actions.All(action => action.Module is "SampleGame" or "GameCore"),
         "Game importing an SDK descriptor compiled an SDK module");
-    Require(!Directory.Exists(Path.Combine(reflectionOutput, "Generated/ReflectionTestFixtures")),
+    Require(!Directory.Exists(Path.Combine(reflectionOutput, "Generated/ReflectionTestFixtures")) &&
+        !Directory.Exists(Path.Combine(reflectionOutput, "Generated/CoreTypeBindings")),
         "Game build regenerated the SDK module's metadata");
     var reflectionRun = await ProcessRunner.RunAsync(new(reflectionResult.ModuleOutputs["SampleGame"], [], reflectionGame, toolchain.Environment));
     Require(reflectionRun.ExitCode == 0, $"SDK descriptor import runtime check failed with exit code {reflectionRun.ExitCode}");

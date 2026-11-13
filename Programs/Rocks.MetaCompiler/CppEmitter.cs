@@ -117,7 +117,8 @@ internal static class CppEmitter
 
             if (type.IsStruct)
             {
-                Line($"if (auto added = registration.RegisterStructIfAbsent(::rocks::GeneratedType<::{type.Name}>::Schema(), ::rocks::GeneratedType<::{type.Name}>::Ops(module)); !added) return fail(added.Error());");
+                // Binds 거울은 실제 타입의 GeneratedType이다(NativeName).
+                Line($"if (auto added = registration.RegisterStructIfAbsent(::rocks::GeneratedType<::{type.NativeName}>::Schema(), ::rocks::GeneratedType<::{type.NativeName}>::Ops(module)); !added) return fail(added.Error());");
                 continue;
             }
 
@@ -149,6 +150,11 @@ internal static class CppEmitter
         Line("#include <Meta/GeneratedType.h>");
         Line("#include <Object/GeneratedFieldAccess.h>");
         Line("#include <Object/GeneratedFieldCodec.h>");
+        // Binds 거울의 순서 대조(ROCKS_OFFSET_OF)는 Base 매크로를 쓴다(__builtin은 Base 헤더 밖에서 쓰지 않는다).
+        if (schema.Ordered.Any(type => type.Header == include && type.Binds.Length != 0))
+        {
+            Line("#include <Base/Compiler.h>");
+        }
         // 다른 헤더(같은 모듈·다른 모듈)에 선언된 리플렉션 enum·struct를 필드(상속 필드 포함)나 NATIVE 멤버의 직접
         // 타입으로 쓰면 그 타입의 GeneratedType이 먼저 보여야 한다(생성 접근기가 GeneratedType<T>::Id·IsDeclared·
         // ContainsStrongReference로 알아본다). 같은 특수화를 두 번 정의하지 않도록 그 타입의 생성 헤더를 include한다.
@@ -184,11 +190,11 @@ internal static class CppEmitter
 
             if (type.IsStruct)
             {
-                EmitStruct(type, Line);
+                EmitStruct(schema, type, Line);
                 continue;
             }
 
-            string native = "::" + type.Name;
+            string native = "::" + type.NativeName;
             string? baseId = type.Base == "rocks::Object" ? null : schema.Find(type.Base).Id;
             Line($"template <> struct GeneratedType<{native}> {{");
             // ROCKS_NATIVE 멤버는 스키마에 넣지 않는다. MetaCompiler의 AST 재귀 검사(RMC2205·2206)를 직접 타입에
@@ -202,7 +208,7 @@ internal static class CppEmitter
                     Line($"static_assert(!RequiresWorldOnlyOwner<{memberType}>, \"ROCKS_NATIVE member {type.Name}::{member.Name} requires a WorldOnly owner (RMC2206)\");");
                 }
 
-                EmitNativeStructAsserts(type, member, !type.WorldOnly, Line);
+                EmitNativeStructAsserts(schema, type, member, !type.WorldOnly, Line);
             }
 
             // WorldOnly가 아닌 클래스는 struct 필드(상속 포함)의 생성 형질을 직접 확인한다(import flags를 믿지 않는다).
@@ -210,7 +216,7 @@ internal static class CppEmitter
             {
                 foreach (string structure in type.Fields.Where(field => field.IsStruct).Select(field => field.Reference!).Distinct(StringComparer.Ordinal))
                 {
-                    Line($"static_assert(!GeneratedType<::{structure}>::RequiresWorldOnlyOwner, \"struct {structure} requires a WorldOnly owner; {type.Name} is not WorldOnly (RMC2206)\");");
+                    Line($"static_assert(!GeneratedType<::{schema.Find(structure).NativeName}>::RequiresWorldOnlyOwner, \"struct {structure} requires a WorldOnly owner; {type.Name} is not WorldOnly (RMC2206)\");");
                 }
             }
 
@@ -236,7 +242,7 @@ internal static class CppEmitter
                         // 멤버 단위 쓰기는 B6 경로 접근) codec과 struct native 키만 싣는다(Docs/Design/
                         // ReflectionFoundations.ko.md 4.6절).
                         Line("nullptr, {}, nullptr,");
-                        EmitClassCodec(native, member, $", NativeTypeKey<::{field.Reference}>()", Line);
+                        EmitClassCodec(native, member, $", NativeTypeKey<::{schema.Find(field.Reference!).NativeName}>()", Line);
                         continue;
                     }
 
@@ -288,7 +294,7 @@ internal static class CppEmitter
                 foreach (FieldModel field in traced)
                 {
                     Line(field.IsStruct
-                        ? $"GeneratedType<::{field.Reference}>::Trace(typed.*(&::{field.Owner}::{field.Name}), visitor);"
+                        ? $"GeneratedType<::{schema.Find(field.Reference!).NativeName}>::Trace(typed.*(&::{field.Owner}::{field.Name}), visitor);"
                         : $"visitor.Visit(typed.*(&::{field.Owner}::{field.Name}));");
                 }
             }
@@ -325,37 +331,78 @@ internal static class CppEmitter
     // NATIVE 멤버의 직접 타입이 리플렉션 struct면 그 struct의 생성 형질로 RMC2205(·worldOnlyCheck면 RMC2206)를
     // 컴파일 시 한 번 더 확인한다(NativeMemberTraits는 직접 타입의 형질만 본다 — GeneratedType 탐지 특수화를 두면
     // 생성 헤더가 없을 때 조용히 거짓이 되는 ODR 위반이라 생성 코드가 확인한다).
-    private static void EmitNativeStructAsserts(ClassModel type, NativeMemberModel member, bool worldOnlyCheck, Action<string> Line)
+    private static void EmitNativeStructAsserts(SchemaModel schema, ClassModel type, NativeMemberModel member, bool worldOnlyCheck, Action<string> Line)
     {
         if (member.Struct is null)
         {
             return;
         }
 
-        Line($"static_assert(!GeneratedType<::{member.Struct}>::ContainsStrongReference, \"ROCKS_NATIVE member {type.Name}::{member.Name} holds reference struct {member.Struct} (RMC2205)\");");
+        string structure = schema.Find(member.Struct).NativeName;
+        Line($"static_assert(!GeneratedType<::{structure}>::ContainsStrongReference, \"ROCKS_NATIVE member {type.Name}::{member.Name} holds reference struct {member.Struct} (RMC2205)\");");
         if (worldOnlyCheck)
         {
-            Line($"static_assert(!GeneratedType<::{member.Struct}>::RequiresWorldOnlyOwner, \"ROCKS_NATIVE member {type.Name}::{member.Name} requires a WorldOnly owner (RMC2206)\");");
+            Line($"static_assert(!GeneratedType<::{structure}>::RequiresWorldOnlyOwner, \"ROCKS_NATIVE member {type.Name}::{member.Name} requires a WorldOnly owner (RMC2206)\");");
         }
+    }
+
+    // 필드의 C++ 형식 철자를 생성 코드에서 쓸 수 있게 다듬는다(한정 이름은 전역 한정 ::을 붙인다).
+    private static string CppType(string spelling) =>
+        spelling.Contains("::", StringComparison.Ordinal) && !spelling.StartsWith("::", StringComparison.Ordinal) && !spelling.Contains(' ', StringComparison.Ordinal)
+            ? "::" + spelling : spelling;
+
+    // Binds 거울과 실제 타입의 대조다(Docs/Design/ReflectionFoundations.ko.md 4.6절 Binds). 비템플릿 함수 안이라 항상
+    // 검사된다: 멤버마다 실제 타입의 같은 이름 멤버가 같은 형식이고 실제 타입에 직접 선언되었는지(base에 있으면 멤버
+    // 포인터가 T Base::*라 멤버 thunk가 base를 소유자로 본다), 구조적 바인딩으로 공개 데이터 멤버의 개수(private 데이터·
+    // union·base 분할도 컴파일 실패)와 위치별 형식, standard layout과 offset 증가 사슬로 선언 순서(같은 형식 멤버끼리
+    // 바뀐 순서 포함)를 확인한다. 생성·소멸 noexcept는 MakeRuntimeStructOps가 실제 타입에 건다. sizeof는 대조하지
+    // 않는다(꼬리 패딩에 숨은 멤버를 놓친다 — 숨은 멤버는 구조적 바인딩 개수가 잡는다).
+    private static void EmitBindsChecks(ClassModel type, string native, Action<string> Line)
+    {
+        string names = string.Join(", ", type.OwnFields.Select((_, index) => $"m{index}"));
+        Line($"static void VerifyBinds(const {native}& value) noexcept {{");
+        Line($"using BoundType = {native};");
+        Line($"static_assert(__is_standard_layout(BoundType), \"Binds target {type.Binds} must be a standard-layout type\");");
+        Line($"[[maybe_unused]] const auto& [{names}] = value;");
+        for (int index = 0; index < type.OwnFields.Count; ++index)
+        {
+            FieldModel field = type.OwnFields[index];
+            string member = CppType(field.NativeSpelling);
+            Line($"static_assert(__is_same(decltype(BoundType::{field.Name}), {member}), \"Binds mirror {type.Name}::{field.Name} must have the type of {type.Binds}::{field.Name}\");");
+            Line($"static_assert(__is_same(decltype(&BoundType::{field.Name}), {member} (BoundType::*)), \"Binds mirror {type.Name}::{field.Name} must be declared directly in {type.Binds}, not in a base\");");
+            Line($"static_assert(__is_same(__remove_cv(decltype(m{index})), {member}), \"Binds mirror {type.Name}: member {index} of {type.Binds} must be {field.Name} with the mirror's type (same count and order)\");");
+            if (index != 0)
+            {
+                Line($"static_assert(ROCKS_OFFSET_OF(BoundType, {type.OwnFields[index - 1].Name}) < ROCKS_OFFSET_OF(BoundType, {field.Name}), \"Binds mirror {type.Name}: {type.OwnFields[index - 1].Name} must come before {field.Name} as in {type.Binds}\");");
+            }
+        }
+
+        Line("}");
     }
 
     // 리플렉션 struct의 GeneratedType 특수화다(Docs/Design/ReflectionFoundations.ko.md 4.6절): 형질
     // (ContainsStrongReference·RequiresWorldOnlyOwner)과 중첩 깊이, Id, Schema(base·클래스 플래그 없는 TypeSchema),
     // Trace(모든 struct — 참조 없는 struct는 빈 본문), Ops(RuntimeStructOps — 멤버 codec 함수표, 참조 struct만 trace,
     // Migrate가 있으면 migrate), Register. 형질과 깊이는 모델 값을 내되 직접 멤버의 생성 값을 포함하는지
-    // static_assert로 대조한다(import descriptor의 flags를 믿지 않는다).
-    private static void EmitStruct(ClassModel type, Action<string> Line)
+    // static_assert로 대조한다(import descriptor의 flags를 믿지 않는다). Binds 거울은 실제 타입(NativeName)의
+    // 특수화를 내고 멤버 thunk·Trace·생성·소멸이 모두 실제 타입을 쓰며, 스키마 이름만 거울 이름이다.
+    private static void EmitStruct(SchemaModel schema, ClassModel type, Action<string> Line)
     {
-        string native = "::" + type.Name;
+        string native = "::" + type.NativeName;
         string True(bool value) => value ? "true" : "false";
         Line($"template <> struct GeneratedType<{native}> {{");
         Line($"static constexpr bool ContainsStrongReference = {True(type.ContainsStrongReference)};");
         Line($"static constexpr bool RequiresWorldOnlyOwner = {True(type.RequiresWorldOnlyOwner)};");
         Line($"static constexpr uint32 Depth = {type.Depth}u;");
         Line($"static_assert(Depth <= ::rocks::MaxStructDepth, \"ROCKS_STRUCT {type.Name} nesting depth exceeds MaxStructDepth (RMC2303)\");");
+        if (type.Binds.Length != 0)
+        {
+            EmitBindsChecks(type, native, Line);
+        }
+
         foreach (string structure in type.Fields.Where(field => field.IsStruct).Select(field => field.Reference!).Distinct(StringComparer.Ordinal))
         {
-            string member = $"GeneratedType<::{structure}>";
+            string member = $"GeneratedType<::{schema.Find(structure).NativeName}>";
             Line($"static_assert({member}::Depth < Depth, \"ROCKS_STRUCT {type.Name} nests {structure} deeper than recorded; regenerate metadata (RMC2303)\");");
             Line($"static_assert(ContainsStrongReference || !{member}::ContainsStrongReference, \"ROCKS_STRUCT {type.Name} holds reference struct {structure}; regenerate metadata\");");
             Line($"static_assert(RequiresWorldOnlyOwner || !{member}::RequiresWorldOnlyOwner, \"ROCKS_STRUCT {type.Name} holds struct {structure} that requires a WorldOnly owner; regenerate metadata\");");
@@ -368,10 +415,10 @@ internal static class CppEmitter
             string memberType = $"decltype({native}::{member.Name})";
             Line($"static_assert(!IsNativeStrongReference<{memberType}>, \"ROCKS_NATIVE member {type.Name}::{member.Name} must not hold a strong object reference (RMC2205)\");");
             Line($"static_assert(RequiresWorldOnlyOwner || !::rocks::RequiresWorldOnlyOwner<{memberType}>, \"ROCKS_NATIVE member {type.Name}::{member.Name} requires a WorldOnly owner; regenerate metadata\");");
-            EmitNativeStructAsserts(type, member, false, Line);
+            EmitNativeStructAsserts(schema, type, member, false, Line);
             if (member.Struct is not null)
             {
-                Line($"static_assert(RequiresWorldOnlyOwner || !GeneratedType<::{member.Struct}>::RequiresWorldOnlyOwner, \"ROCKS_NATIVE member {type.Name}::{member.Name} requires a WorldOnly owner; regenerate metadata\");");
+                Line($"static_assert(RequiresWorldOnlyOwner || !GeneratedType<::{schema.Find(member.Struct).NativeName}>::RequiresWorldOnlyOwner, \"ROCKS_NATIVE member {type.Name}::{member.Name} requires a WorldOnly owner; regenerate metadata\");");
             }
         }
 
@@ -394,7 +441,7 @@ internal static class CppEmitter
             foreach (FieldModel field in traced)
             {
                 Line(field.IsStruct
-                    ? $"GeneratedType<::{field.Reference}>::Trace(value.*(&{native}::{field.Name}), visitor);"
+                    ? $"GeneratedType<::{schema.Find(field.Reference!).NativeName}>::Trace(value.*(&{native}::{field.Name}), visitor);"
                     : $"visitor.Visit(value.*(&{native}::{field.Name}));");
             }
 

@@ -123,6 +123,51 @@ internal sealed class NativeMemberModel
 internal static class StructRules
 {
     public const int MaxDepth = 16;
+
+    // Binds(Core 값 타입 결합)를 둘 수 있는 유일한 모듈이다(Docs/Design/ReflectionFoundations.ko.md 4.5·4.6절 — 무관한
+    // 두 모듈이 같은 타입을 묶으면 ODR 위반·런타임 AlreadyExists가 된다).
+    public const string BindingModule = "CoreTypeBindings";
+
+    // CoreTypeBindings가 묶는 Core 값 타입(템플릿은 이름)이다. 그 모듈의 descriptor를 import하지 않은 모듈이 이런 필드를
+    // 쓰면 진단에 의존을 더하라는 안내를 붙인다. descriptor가 없을 때는 무엇이 묶였는지 알 수 없어 이 목록을 두며,
+    // 안내 문구에만 쓰이므로(해석에는 쓰지 않는다) CoreValueTypes.h와 어긋나도 안내가 약해질 뿐이다. descriptor를
+    // import한 경우는 그 binds가 기준이다(SchemaValidator의 안내가 묶이지 않은 인스턴스를 알려 준다).
+    private static readonly string[] CoreValueTypes =
+    [
+        "rocks::Vector2<", "rocks::Vector3<", "rocks::Vector4<", "rocks::Quaternion<", "rocks::Rotator<",
+        "rocks::Color", "rocks::LinearColor", "rocks::IntVec2", "rocks::IntVec3", "rocks::Transform"
+    ];
+
+    public static bool IsCoreValueType(string spelling)
+    {
+        string text = spelling.StartsWith("::", StringComparison.Ordinal) ? spelling[2..] : spelling;
+        return CoreValueTypes.Any(name => name.EndsWith('<') ? text.StartsWith(name, StringComparison.Ordinal) : text == name);
+    }
+
+    // Binds 철자(지정자 원문·descriptor binds)의 문법이다: 한정 이름과 템플릿 인자(이름·정수)만, 꺾쇠 짝이 맞고 512자
+    // 이하. 합성 번역 단위에 그대로 넣으므로 문장·주석·전처리 문자를 받지 않는다.
+    public static bool IsBindsSpelling(string text)
+    {
+        if (text.Length == 0 || text.Length > 512 || text.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '_' or ':' or '<' or '>' or ',' or ' ')))
+        {
+            return false;
+        }
+
+        int depth = 0;
+        foreach (char c in text)
+        {
+            depth += c == '<' ? 1 : c == '>' ? -1 : 0;
+            // 공백은 템플릿 인자 안(unsigned int 등)에만 둔다.
+            if (depth < 0 || (depth == 0 && c is ' ' or ','))
+            {
+                return false;
+            }
+        }
+
+        string head = text.StartsWith("::", StringComparison.Ordinal) ? text[2..] : text;
+        return depth == 0 && head.Length != 0 && (char.IsAsciiLetter(head[0]) || head[0] == '_') && !text.Contains(":::", StringComparison.Ordinal) &&
+            !text.EndsWith(':') && text.Replace("::", "", StringComparison.Ordinal).IndexOf(':') < 0;
+    }
 }
 
 // 리플렉션 타입(ROCKS_CLASS 클래스, ROCKS_STRUCT struct, ROCKS_ENUM enum) 모델이다. enum은 IsEnum이고 Base는 "",
@@ -177,6 +222,22 @@ internal sealed class ClassModel
     // struct가 Migrate라는 이름의 멤버(메서드·함수 템플릿, 접근 무관)를 선언했다. 생성 Ops가 `&S::Migrate`를
     // RuntimeStructOps::migrate에 대입한다(시그니처·noexcept가 다르면 컴파일 오류 — 조용히 빠지지 않는다).
     public bool HasMigrate { get; set; }
+
+    // 첫 Migrate 선언 위치다(진단용).
+    public SourceSite? MigrateSite { get; set; }
+
+    // Binds="…" 지정자의 원문 철자다(이 모듈 struct만, 없으면 ""). Clang 두 번째 실행이 정규 철자로 푼다.
+    public string BindsSpelling { get; init; } = "";
+
+    public SourceSite? BindsSite { get; init; }
+
+    // Binds 거울 선언이 결합하는 실제 C++ 타입의 Clang 정규 철자다(예: rocks::Vector3<float>, 없으면 "").
+    // descriptor의 binds 키다(Docs/Design/ReflectionFoundations.ko.md 4.5절).
+    public string Binds { get; set; } = "";
+
+    // 생성 코드가 쓰는 C++ 타입 이름이다: Binds 거울이면 실제 타입의 정규 철자, 아니면 정규 이름. 스키마 이름(Name)은
+    // 거울 이름 그대로다.
+    public string NativeName => Binds.Length != 0 ? Binds : Name;
 
     // 선언이 있는 입력 헤더의 include 철자다(import 타입은 descriptor의 header).
     public string Header { get; set; } = "";
