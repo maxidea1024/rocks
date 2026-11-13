@@ -109,6 +109,51 @@ Engine / Tools / Game         프로젝트·설치 구성과 상위 시스템
 
 검증: Windows x64에서 두 backend로 동시 32개 읽기·EOF·짧은 읽기·0 byte·잘못된 제출·Busy·대량 취소 경합·소멸자 대기, 그리고 동시 쓰기 8개의 역순 제출 후 읽기 대조·열기 모드 3종·끝 너머 확장의 0 채움·0 byte 쓰기·소멸자 대기를 실제 파일로 확인했다(비동기 파일 테스트 10건 100회 반복 실패 0). macOS backend(pwrite·`F_FULLFSYNC` 포함)는 빌드·실행하지 않았다. 디스크 가득 참 같은 쓰기 실패 주입, scatter/gather, 우선순위·deadline, dispatch I/O 평가, 결정적 fake backend interleaving, Android asset·iOS 번들 경로는 후속이다.
 
+## 자식 프로세스와 pipe (2026-11-13 1차 구현)
+
+`Platform/Process.h`는 자식 프로세스의 시작·대기·종료 코드·강제 종료와 표준 입출력 pipe를 제공한다(UE `FGenericPlatformProcess`의 `CreateProc`·`IsProcRunning`·`WaitForProc`·`TerminateProc`·`GetProcReturnCode`·`CreatePipe`·`ReadPipe`·`WritePipe`·`ExecProcess`·`IsApplicationRunning` 대응). 셰이더 컴파일 워커와 외부 도구(Apple `metal` 등) 실행의 선행 기반이다. 공용 입력 검사는 `Private/Common/Process.cpp`, OS 호출은 `Private/<플랫폼>/Process.cpp`가 맡는다. Windows UTF-16 변환·실행 파일 경로·오류 변환은 파일 backend와 같은 `Private/Win64/WindowsString.h`·`WindowsError.h`를 쓴다.
+
+| API | 계약 |
+|---|---|
+| `Process::Start(ProcessStartInfo)` | 실행 파일(UTF-8, PATH 검색 없음, 상대 경로는 부모 현재 디렉터리 기준, 자식의 argv[0]은 받은 문자열 그대로), 인자 배열(byte 그대로 전달), 작업 디렉터리, 표준 스트림 셋의 `Null`·`Inherit`·`Pipe`, 오류의 출력 합치기, 우선순위(`Normal`·`Low`). 실패하면 만든 자원을 모두 정리한다. 작업 디렉터리 없음은 NotFound, 디렉터리 아님은 WrongType, 명령줄이 OS 한도를 넘으면 Overflow(Windows 32767 UTF-16 단위, POSIX `E2BIG`)다. Windows batch 파일(`.bat`·`.cmd`)은 cmd.exe가 인자를 다시 해석하므로(인자 주입) Unsupported, 실행 파일 경로의 `"`는 InvalidArgument다 |
+| `Wait(timeout)`·`GetExit` | 직접 자식의 끝남을 기다린다(`Signaled`·`TimedOut`·`Failed`). 종료는 `Exited`(코드), `Signaled`(POSIX 신호), `Terminated`(부모가 요청). OS 대기 자체가 실패하면 `TimedOut`이 아니라 `Failed`다 |
+| `Terminate` | 자식과 자손을 강제 종료한다. 기다리지 않는다. 먼저 자식이 이미 끝났는지 확인해 그렇다면 종료 종류(`Exited`·`Signaled`)를 그대로 두고 남은 자손만 끝낸다. 성공해야 요청을 기록하므로 실패하면 다시 시도할 수 있다. 중복 호출은 성공이다 |
+| `WriteInput`·`CloseInput`·`Read` | 시간 제한 있는 pipe 입출력이다. 시간 초과는 `NoProgress`이며 `WriteInput`이 돌려주는 바이트 수는 실제로 자식 pipe에 들어간 양과 정확히 같다. 모든 쓰는 쪽이 닫힘은 `EndOfFile`, Pipe가 아니면 `NotOpen`이다 |
+| `Close`·소멸 | 살아 있는 자식·자손을 끝내고 회수한 뒤 모든 handle을 닫는다. 직접 자식이 먼저 끝났어도 남은 자손을 끝낸다. 끝나기를 최대 10초 기다리고, 끝나지 않으면(커널 대기, 종료 중 교착) handle만 놓는다. 분리 실행(detach)은 없다 |
+| `RunProcess` | 입력을 넣고 출력·오류를 한 스레드에서 동시에 모으며(용량을 넘으면 버리면서 끝까지 읽음) 끝날 때까지 기다린다. 시간 초과면 강제 종료한다. 직접 자식이 끝나거나 강제 종료하면 pipe를 잡은 남은 자손을 끝내고 남은 출력을 최대 10초 더 모은다. job·그룹 밖 프로세스가 pipe를 잡고 있으면 그 뒤를 버리고 `*Truncated`를 켠다. 그래서 전체 시간은 timeout + 10초를 넘지 않는다. 한 pipe가 쉬지 않고 출력해도 다른 pipe·입력·시간 초과 확인이 굶지 않는다 |
+| `CurrentProcessId`·`IsProcessRunning`·`GetExecutablePath` | 워커가 부모 PID로 부모 생존을 확인하는 용도와 자기 실행 파일 경로다. `IsProcessRunning`은 Windows에서 끝난 프로세스를 false로, POSIX에서 회수 전 zombie를 true로 본다. PID 재사용 때문에 부모 감시는 입력 pipe EOF(lifeline)를 먼저 쓴다 |
+
+| 플랫폼 | 구현 |
+|---|---|
+| Windows | 자식을 `CREATE_SUSPENDED`로 만들어 Process 전용 job object(`KILL_ON_JOB_CLOSE`·`DIE_ON_UNHANDLED_EXCEPTION`, 탈출 불가)에 넣은 뒤 실행한다. 부모가 비정상 종료해도 job handle이 닫히며 자식·자손이 끝나고, 처리되지 않은 예외는 오류 대화상자 없이 끝난다. 상속 handle은 `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`로 표준 스트림 셋만 넘긴다. `Inherit`는 부모 표준 handle이 실제로 열린 handle일 때만 물려주고(`GetFileType` 확인) 아니면 NUL이다. `CREATE_NO_WINDOW`. pipe는 named pipe(원격 접속 거부, 첫 인스턴스만, 이름에 PID·순번·난수)다. 부모가 읽는 출력·오류 쪽은 overlapped라 시간 제한 읽기와 `WaitForMultipleObjects` 동시 대기가 된다. 부모가 쓰는 입력 쪽은 비차단(`PIPE_NOWAIT`) 동기 handle이다. overlapped 쓰기를 시간 초과로 취소하면 자식이 이미 읽은 일부가 0바이트로 보고되기 때문이다(가득 차면 최대 10 ms 간격으로 다시 쓴다). 명령줄은 MSVC CRT·`CommandLineToArgvW` 규칙으로 인용한다. 작업 디렉터리는 `CreateProcessW` 제약으로 MAX_PATH 미만이어야 한다. UTF-16 변환·`\\?\` 접두사 제거·오류 변환은 파일 backend와 같은 `Private/Win64/WindowsString.h`·`WindowsError.h`를 쓴다 |
+| macOS | `posix_spawn` + 새 프로세스 그룹 + `POSIX_SPAWN_CLOEXEC_DEFAULT`(file action으로 연결한 fd만 물려줌) + 신호 마스크·처리 초기화, `posix_spawn_file_actions_addchdir_np`. 종료는 `waitid(WNOWAIT)`로 회수 없이 관측하고(시간 제한은 kqueue `EVFILT_PROC`, 이벤트·`ESRCH` 뒤 다시 `waitid`로 확인), `Close`에서 그룹을 끝낸 뒤 회수한다. 회수 전에는 PID·그룹 번호가 재사용되지 않으므로 다른 그룹을 죽이지 않는다. 다른 코드가 자식을 회수하면(`ECHILD`) 종료 코드를 0xFFFFFFFF로 두고 이후 신호를 보내지 않는다. 입력 pipe는 `F_SETNOSIGPIPE`로 SIGPIPE 대신 EPIPE다. `RunProcess`는 `poll`로 pipe를 함께 기다리고 50 ms마다 직접 자식의 종료를 확인한다 |
+| Android | `Start`·`RunProcess`는 `Unsupported`다(`posix_spawn`이 API 28부터이며 앱에서 자식 프로세스가 필요 없다). PID·생존 확인·실행 파일 경로만 제공한다 |
+
+UE 5.6 원본(commit `cdda65ce`, 경로는 `Engine/Source/Runtime/Core/Private/` 기준)과 다르게 정한 점:
+
+| 항목 | UE 5.6 | Rocks |
+|---|---|---|
+| 인자 | `CreateProc(URL, Parms)`가 `"\"URL\" Parms"` 문자열을 그대로 넘긴다(`Windows/WindowsPlatformProcess.cpp:470–561`) | 인자 배열을 받아 플랫폼이 인용한다. 호출자가 인용 규칙을 몰라도 된다. 인용으로 막을 수 없는 batch 파일은 거부한다 |
+| 상속 handle | `CreateProc`은 상속 가능한 handle을 모두 넘긴다(`:503–531`). `ExecProcess`만 handle 목록으로 제한한다(`:962–999`) | 항상 표준 스트림 셋으로 제한한다 |
+| 자손 종료 | Windows `TerminateProc(KillTree)`는 Toolhelp 스냅샷 재귀(`:614–681`), Mac은 직계 자식만 SIGTERM(`Mac/MacPlatformProcess.cpp:853–881`), Linux는 STUBBED | Windows job object, macOS 프로세스 그룹 SIGKILL. 직접 자식이 스스로 끝난 뒤에도 남은 자손을 끝낸다 |
+| 부모 사망 | `ExecProcess(bShouldEndWithParentProcess)`만 전역 job에 `KILL_ON_JOB_CLOSE`를 건다(`:941–960`). ShaderCompileWorker는 부모 PID를 스스로 확인한다 | Windows는 모든 Process가 job으로 함께 끝난다. 워커의 부모 감시는 입력 pipe EOF를 먼저 쓰고 `IsProcessRunning(부모 PID)`는 보조다 |
+| 작업 디렉터리 | Linux `CreateProc`은 받지만 쓰지 않는다(`Unix/UnixPlatformProcess.cpp`) | 모든 지원 플랫폼에서 적용하고 없음·디렉터리 아님을 구분한다 |
+| pipe 읽기 | `ReadPipe`는 `PeekNamedPipe` 후 있는 만큼만 읽는다(`:1849–1871`). Metal 셰이더 경로는 프로세스가 끝난 뒤에야 읽는다(`Developer/Apple/MetalShaderFormat/Private/MetalShaderFormat.cpp:1081–1120`) | 시간 제한 `Read`와 출력·오류를 동시에 비우는 `RunProcess`. 출력이 pipe 버퍼보다 커도 멈추지 않는다 |
+| PID 재사용 | Unix 구현 주석에 PID 재사용으로 워커 감시가 끝나지 않은 사례가 남아 있다(`Unix/UnixPlatformProcess.cpp:1184–1191`) | macOS는 회수 전에만 그룹을 끝낸다. `IsProcessRunning`은 같은 한계를 문서화하고 lifeline을 먼저 쓴다 |
+| 우선순위 | `PriorityModifier` -2…2. ShaderCompileWorker는 -1(Windows `BELOW_NORMAL`, Unix nice +5) | `Normal`·`Low`(UE -1과 같은 값) |
+
+한계:
+
+- 자손으로 공유 서버를 띄우는 도구(MSVC cl의 `mspdbsrv`, sccache 서버, 빌드 데몬)는 `Close`·`RunProcess`가 자손을 끝내므로 매 실행마다 서버를 잃는다. 같은 서버를 쓰던 다른 실행이 실패할 수 있다.
+- POSIX에서 그룹을 벗어난 자손(setsid·setpgid)과, 자식이 SIGKILL로 끝났을 때 자식이 자기 Process로 만든 손자(자기 그룹을 가진다)는 남는다(Windows는 중첩 job으로 함께 끝난다). POSIX에서 부모가 비정상 종료하면 자식은 남는다.
+- macOS에서 같은 프로세스의 다른 코드가 자식을 회수하면(SIGCHLD `SIG_IGN`, `waitpid(-1)`) 종료 코드를 잃는다. 입력을 터미널에서 `Inherit`하면 자식이 백그라운드 그룹이라 읽는 순간 SIGTTIN으로 멈춘다.
+- 같은 시각 다른 스레드가 handle 목록 없이 자식을 만들면(CreateProcess `bInheritHandles`, fork) 그 자식이 pipe 끝을 물려받아 EOF가 늦어질 수 있다.
+- 한 Process는 한 스레드에서만 호출한다. Windows 작업 디렉터리는 MAX_PATH 미만이다.
+
+후속(필요한 쪽이 생기면 순서대로): 환경 변수 지정, 분리 실행(detach)·(PID, 시작 시각) 정체·권한 상승 여부(Rockpile R0 자동 실행, [Rockpile.ko.md](Rockpile.ko.md) 15절), 다른 스레드에서의 취소, 정상 종료 요청(SIGTERM·CTRL_BREAK), 숨김 GUI 실행, PATH 검색, Android.
+
+검증(2026-11-13): Windows x64 Debug와 Asan에서 프로세스 시험 21건과 Core 전체 시험 897건이 통과했다. 프로세스 시험은 종료 코드, 입력 검증 음성 대조(NUL·잘못된 UTF-8·`"`·`.BAT`·2 MiB 인자 Overflow·작업 디렉터리 NotFound·WrongType), 인용·UTF-8 인자 왕복(따옴표·역슬래시·빈 인자·줄바꿈·BMP 밖 문자), UTF-8 이름 실행 파일·작업 디렉터리, 상대 경로 실행 파일, 1 MiB 입출력 동시 진행, 출력·오류 동시 용량 초과와 용량 0, 합친 출력 순서, `Inherit`가 손자까지 이어지는지와 `Null`, 시간 초과 강제 종료(쉬지 않고 출력하는 자식 포함), 대기·종료·재시작·이동, 소멸 시 종료, 자손 종료, 자연 종료 뒤 남은 자손 종료, 손자가 pipe를 잡은 경우의 RunProcess 종료, 스트리밍 pipe와 EOF, 입력 시간 초과 때 쓴 양의 정확성과 읽는 쪽이 닫힌 입력, Low 우선순위, 부모 handle 비상속, 비정상 종료(신호·예외), PID·실행 파일 경로를 확인한다. 자식은 테스트 실행 파일을 `--process-probe`로 다시 띄운 probe다(`PlatformBase/Tests/ProcessProbe.cpp`, 플랫폼 도구는 `TestSupport/ProcessProbe.h`). Android x86_64 에뮬레이터(API 35)에서도 프로세스 시험 21건이 통과했다(Unsupported 경로와 PID·생존 확인·실행 파일 경로). 이 교차 빌드가 POSIX 시험 도구의 경고 오류를 잡아 macOS CI 전에 고쳤다. macOS 구현은 이 기계에서 빌드·실행하지 않았다(CI가 맡는다).
+
 ## 모바일 플랫폼 (2026-11-11: desktop + mobile은 우선 Android)
 
 사용자 결정으로 mobile은 Android에 먼저 집중하고 iOS는 보류한다. PlatformBase는 다음 구조다.
@@ -165,7 +210,7 @@ dotnet msbuild Rocks.proj -t:Test -p:RocksPlatform=android -p:AndroidAbi=x86_64
 | P1 | 이벤트와 잠금: `HAL/Event.h`, `HAL/PThreadEvent.h`, `HAL/UESemaphore.h`, `HAL/PThreadsSharedMutex.h` | Rocks는 mutex·condition variable·manual-reset event와 프로세스 내부 semaphore를 제공한다. auto-reset event, event pool/소유형 편의 API, RW/shared mutex와 named interprocess semaphore는 후속이다. | 신호의 보존·소비 횟수, 다수 대기자·시간 제한·spurious wake·중복 reset, 소멸 전 대기 종료, 읽기/쓰기 경합과 굶주림 정책, 프로세스 간 생성·열기·권한·종료를 검증한다. |
 | P1 | TLS: `GenericPlatform/GenericPlatformTLS.h`의 slot 할당·조회·설정·해제 | Rocks 내부에는 `thread_local`을 이용하는 구현이 있으나 UE에 대응하는 공개 동적 TLS slot API는 확인하지 못하였다. | slot 고갈·할당 실패·해제 후 재사용·스레드 간 격리·스레드 종료 정리·모듈 수명과 동시 경쟁을 검증한다. |
 | P1 | 공유 메모리: `GenericPlatform/GenericPlatformMemory.h`의 named shared-memory map/unmap | Rocks에 named shared-memory 공개 API는 확인하지 못하였다. 범위와 읽기/쓰기 권한, 소유권과 플랫폼별 이름 규칙을 설계한다. | 별도 프로세스 간 읽기·쓰기, 중복 생성·열기, 접근 거부, 부분 실패·중도 종료·해제, 이름 충돌과 크기 경계를 검증한다. |
-| P1 | 프로세스와 pipe: `GenericPlatform/GenericPlatformProcess.h`의 생성·대기·종료·반환값·pipe | 엔진 C++ Runtime의 범용 process/pipe API는 확인하지 못하였다. .NET 빌드 도구의 `ProcessRunner`는 별도 호스트 도구이며 Runtime 지원으로 간주하지 않는다. | 실행 실패, stdin/stdout/stderr, 제한된 출력 수집, timeout·취소, 자식 및 자손 회수, 중복 종료·정리 실패와 플랫폼별 동작을 검증한다. |
+| P1 | 프로세스와 pipe: `GenericPlatform/GenericPlatformProcess.h`의 생성·대기·종료·반환값·pipe | **부분 구현(2026-11-13)**: `Platform/Process.h`의 생성·대기·종료 코드·자손까지 강제 종료·시간 제한 pipe·동시 수집 `RunProcess`·PID 생존 확인(위 "자식 프로세스와 pipe" 절). 환경 변수 지정·detach·(PID, 시작 시각) 정체·권한 상승 여부(Rockpile R0)·다른 스레드 취소는 후속이며 Android는 Unsupported다. | 실행 실패, stdin/stdout/stderr, 제한된 출력 수집, timeout·취소, 자식 및 자손 회수, 중복 종료·정리 실패와 플랫폼별 동작을 검증한다. Windows Debug·Asan과 Android 에뮬레이터 21건 통과, macOS는 CI만(로컬 미빌드). |
 | P1 | 동적 모듈: `GenericPlatform/GenericPlatformProcess.h`의 라이브러리 load/export/free | Rocks `ModuleLease`는 이미 확보된 모듈 수명 관리에 사용되며 OS 라이브러리 로더 자체는 아니다. 로드·심볼 조회·해제와 callback 소유권을 별도로 구현한다. | 누락·잘못된 심볼, ABI, 참조 중 unload 거부, 동시 조회와 실패 rollback, Windows/macOS 실행을 검증한다. |
 | P1 | 비동기·매핑 파일: `GenericPlatform/GenericPlatformFile.h`의 async read, mapped file 및 결과 오류 | 비동기 파일 핸들·매핑 파일 backend는 아직 없다. 동기 파일 계약과 task/lifetime 기반 이후에 도입한다. | 취소와 완료의 단일 종결, 사용 중 해제·늦은 completion, EOF·잘못된 범위·매핑 해제, fault injection과 실제 OS 실행을 검증한다. |
 | P2 | 파일 journal 및 플랫폼 부가 기능: `GenericPlatform/GenericPlatformFile.h`의 journal 조회·반복, 파일 특성 | journal, 실제 디스크 이름·링크 및 플랫폼별 부가 메타데이터는 기능별 후속이다. unsupported는 성공이나 빈 결과로 위장하지 않는다. | 기능 가용성, 권한·미지원, 중단/재개와 변경 추적의 중복·누락, 플랫폼별 오류와 resource cleanup을 검증한다. |

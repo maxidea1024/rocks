@@ -9,6 +9,7 @@
 
 namespace rocks::test {
 int RunLoggerFailureProbe() noexcept;
+int RunProcessProbe(int argc, char** argv) noexcept;
 int RunHashTraversalNegativeControl(bool useSet, uint32 operation) noexcept;
 int RunHashOperationsNegativeControl(uint32 operation) noexcept;
 int RunStackAllocatorNegativeControl(uint32 operation) noexcept;
@@ -77,12 +78,14 @@ static bool ParseUnsigned(const char* text, rocks::uint64& value) {
     if (text == nullptr || text[0] == '\0' || text[0] == '-') {
         return false;
     }
+
     errno = 0;
     char* end = nullptr;
     const unsigned long long result = strtoull(text, &end, 10);
     if (errno != 0 || end == text || *end != '\0') {
         return false;
     }
+
     value = static_cast<rocks::uint64>(result);
     return true;
 }
@@ -97,6 +100,11 @@ static void RequireNegativeControl() {
 int main(int argc, char** argv) {
     using namespace rocks;
     test::PrepareAutomatedTestProcess();
+    // Process 시험이 이 실행 파일을 자식으로 다시 띄운 경우다(PlatformBase/Tests/ProcessTests.cpp).
+    if (argc >= 3 && strcmp(argv[1], "--process-probe") == 0) {
+        return test::RunProcessProbe(argc, argv);
+    }
+
     const char* filter = "";
     const char* jsonPath = nullptr;
     uint64 repeat = 1;
@@ -146,6 +154,7 @@ int main(int argc, char** argv) {
                 if (test::objectScopeNegativeControl == nullptr) {
                     return 2;
                 }
+
                 return test::objectScopeNegativeControl(strcmp(control, "object-scope-thread") ==
                                                         0);
             } else if (strcmp(control, "object-status-stale") == 0 ||
@@ -153,6 +162,7 @@ int main(int argc, char** argv) {
                 if (test::destroyRequestedNegativeControl == nullptr) {
                     return 2;
                 }
+
                 return test::destroyRequestedNegativeControl(
                     strcmp(control, "object-status-context") == 0);
             } else if (strcmp(control, "object-type-stale") == 0 ||
@@ -161,6 +171,7 @@ int main(int argc, char** argv) {
                 if (test::typeConvenienceNegativeControl == nullptr) {
                     return 2;
                 }
+
                 const uint32 operation = strcmp(control, "object-type-stale") == 0     ? 0u
                                          : strcmp(control, "object-type-context") == 0 ? 1u
                                                                                        : 2u;
@@ -280,6 +291,7 @@ int main(int argc, char** argv) {
             } else {
                 return 2;
             }
+
             return test::failures == 1 ? 1 : 3;
         } else {
             fprintf(stderr, "Usage: FoundationTests [--list] [--filter text] [--seed N] "
@@ -294,32 +306,39 @@ int main(int argc, char** argv) {
         if (strstr(test->name, filter) == nullptr) {
             continue;
         }
+
         if (count == 4096) {
             fprintf(stderr, "Test registry capacity exceeded\n");
             return 2;
         }
+
         usize position = count;
         while (position > 0 && strcmp(cases[position - 1]->name, test->name) > 0) {
             cases[position] = cases[position - 1];
             --position;
         }
+
         cases[position] = test;
         ++count;
     }
+
     if (count == 0) {
         fprintf(stderr, "No tests matched filter\n");
         return 2;
     }
+
     for (usize i = 1; i < count; ++i) {
         if (strcmp(cases[i - 1]->name, cases[i]->name) == 0) {
             fprintf(stderr, "Duplicate test name: %s\n", cases[i]->name);
             return 2;
         }
     }
+
     if (list) {
         for (usize i = 0; i < count; ++i) {
             puts(cases[i]->name);
         }
+
         return 0;
     }
 
@@ -328,11 +347,13 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Cannot open JSON report\n");
         return 2;
     }
+
     if (json != nullptr) {
         fprintf(json, "{\"schema\":1,\"seed\":%llu,\"repeat\":%llu,\"tests\":[",
                 static_cast<unsigned long long>(test::seed),
                 static_cast<unsigned long long>(repeat));
     }
+
     uint64 failedCases = 0;
     for (usize i = 0; i < count; ++i) {
         const uint64 before = test::failures;
@@ -340,11 +361,13 @@ int main(int argc, char** argv) {
         for (uint64 iteration = 0; iteration < repeat; ++iteration) {
             cases[i]->function();
         }
+
         const uint64 elapsed = platform::MonotonicNanoseconds() - start;
         const uint64 caseFailures = test::failures - before;
         if (caseFailures != 0) {
             ++failedCases;
         }
+
         printf("[%s] %s (%llu ns)\n", caseFailures == 0 ? "PASS" : "FAIL", cases[i]->name,
                static_cast<unsigned long long>(elapsed));
         if (json != nullptr) {
@@ -356,6 +379,7 @@ int main(int argc, char** argv) {
                     static_cast<unsigned long long>(elapsed));
         }
     }
+
     if (json != nullptr) {
         fprintf(json, "],\"failed_tests\":%llu,\"failures\":%llu}\n",
                 static_cast<unsigned long long>(failedCases),
@@ -367,6 +391,7 @@ int main(int argc, char** argv) {
             return 2;
         }
     }
+
     printf("%llu tests, %llu iterations each, %llu failed tests, seed %llu\n",
            static_cast<unsigned long long>(count), static_cast<unsigned long long>(repeat),
            static_cast<unsigned long long>(failedCases),

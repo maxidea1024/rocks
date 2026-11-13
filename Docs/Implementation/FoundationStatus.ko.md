@@ -324,3 +324,12 @@ Rocks.Build에 Android 대상을 정식으로 추가했다(`--platform android`,
 - B01·B02(a67689d)와 위 빌드 변경을 각각 독립 리뷰했다. 반영: 혼합 타입 검사 산술이 음수 인자를 usize로 바꾸던 문제와 usize·uint64 플랫폼 이식성, `[[nodiscard]]`, 곱셈 oracle의 성공 경로 부족, AVX2·FMA의 AVX 의존, archiver·linker를 PATH 대신 compiler 폴더에서 찾기, 최적화 인자 거부 범위(`/Oy-` 허용, `--optimize`·link LTO 인자 거부), Release PDB, 기술자 snapshot 순서, 켠 플러그인 모듈 빌드, 정책의 `optnone`·`#pragma optimize`·커밋된 `CodeOptimization.Never`. 후속으로 남긴 것: 규칙 Configure가 기술자 필터 전에 실행됨, ThinLTO 캐시, CPU bit의 OS 값 대조 oracle, ToolTests 단독 compile probe의 구성 매크로 전달.
 - macOS CI가 처음 실제로 실행되며(저장소 공개 전환 후) `std::to_chars(double)`가 배포 대상 macOS 13.0에서 사용 불가인 테스트 문제를 드러냈다. libc++가 사용 불가로 표시하면 표준 대조를 건너뛰고 왕복만 확인하도록 고쳤다.
 - 검증(Windows x64 clang-cl, 마지막 소스): Debug native 728(BaseTests 포함), Development native 728, Release(ThinLTO) native 728·harness 94·meta 41(구성 4 × 최적화 재정의 3 프로필), ASan native 728·ASan harness 95, 빌드 도구 회귀 20그룹, SDK·외부 게임 통합 16건(Release ThinLTO SDK·게임 실행, 플러그인 필터 포함), Commandlet, policy·format. Android x86_64 에뮬레이터 Debug 725·Release(ThinLTO) 725. 도구 self 검사의 IdentityGit 4건은 `pwsh`가 없어 실행되지 않는다. macOS는 CI 결과로 확인한다.
+
+## 2026-11-13 PlatformBase 자식 프로세스(P06 일부)
+
+셰이더 컴파일 워커·외부 도구 실행의 선행 기반으로 `Platform/Process.h`를 추가했다(상세 계약·UE 5.6 대조: [플랫폼 계층](../Design/PlatformLayer.ko.md) "자식 프로세스와 pipe"). 시작·대기·종료 코드·자손까지 강제 종료(Windows job object, macOS 프로세스 그룹)·시간 제한 pipe·출력·오류 동시 수집 `RunProcess`·PID 생존 확인·실행 파일 경로를 제공한다. Android는 `Unsupported`다. Windows UTF-16 변환·`\?\` 접두사 제거·오류 변환은 파일 backend와 함께 `Private/Win64/WindowsString.h`·`WindowsError.h`로 모았다.
+
+- 독립 리뷰 2회를 반영했다: Windows batch 파일 인자 주입 거부, 출력이 쉬지 않을 때의 굶주림과 남은 출력 수집 상한(전체 시간 ≤ timeout + 10초), pipe 이름 난수, 닫힌 부모 표준 handle, `Terminate` 실패 시 요청 미기록, macOS kqueue 경합·`ECHILD`·대기 실패와 시간 초과 구분·`E2BIG`·argv[0].
+- Windows 입력 pipe는 비차단(`PIPE_NOWAIT`) 동기 handle로 바꿨다. overlapped 쓰기를 시간 초과로 취소하면 자식이 이미 읽은 일부를 0바이트로 보고해 `WriteInput`의 쓴 양이 틀렸다.
+- 검증(Windows x64 clang-cl): 프로세스 시험 21건, Debug native 897, ASan native 897, 정책·형식 검사. 자식은 테스트 실행 파일을 `--process-probe`로 다시 띄운 probe다. Android x86_64 에뮬레이터(API 35) Debug는 894건 중 프로세스 21건을 포함해 889건이 통과했다. 실패 5건(Json·Unicode)은 저장소 시험 데이터 파일을 기기에 올리지 않아 생기며 이번 변경과 무관하다. macOS 구현은 로컬에서 빌드하지 않았으며 CI 결과로 확인한다.
+- Android 실행에서 기존 `FileSystem_StandardDirectories`가 앱 디렉터리를 scratch 경로로 등록한 뒤 지워, 이후 `Temporary`가 없는 경로를 가리키는 것을 확인했다(등록은 프로세스 전역이며 되돌릴 수 없다). 프로세스 시험은 다른 PlatformBase 시험처럼 작업 디렉터리 기준 상대 이름을 쓰도록 바꿨다. 등록 시험의 정리 방식은 후속이다.

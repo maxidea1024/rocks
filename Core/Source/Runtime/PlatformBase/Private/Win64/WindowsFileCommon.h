@@ -3,105 +3,56 @@
 #include <Platform/File.h>
 #include <Platform/Memory.h>
 #include "../Common/FileInternal.h"
+#include "WindowsError.h"
 #include "WindowsPathGuard.h"
+#include "WindowsString.h"
 #include <Windows.h>
 
 // Windows 동기·비동기 파일 backend가 함께 쓰는 비공개 도구다. 공개 헤더에 Windows 타입을 노출하지
-// 않는다.
+// 않는다. 오류 변환은 WindowsError.h, UTF-8·UTF-16 변환은 WindowsString.h에 있다.
 namespace rocks::platform::detail {
-
-inline FileStatus NativeError(DWORD error) noexcept {
-    FileCode code = FileCode::SystemError;
-    switch (error) {
-    case ERROR_FILE_NOT_FOUND:
-    case ERROR_PATH_NOT_FOUND:
-        code = FileCode::NotFound;
-        break;
-    case ERROR_FILE_EXISTS:
-    case ERROR_ALREADY_EXISTS:
-        code = FileCode::AlreadyExists;
-        break;
-    case ERROR_ACCESS_DENIED:
-    case ERROR_SHARING_VIOLATION:
-        code = FileCode::AccessDenied;
-        break;
-    case ERROR_INVALID_NAME:
-    case ERROR_INVALID_PARAMETER:
-        code = FileCode::InvalidArgument;
-        break;
-    case ERROR_NOT_ENOUGH_MEMORY:
-    case ERROR_OUTOFMEMORY:
-        code = FileCode::OutOfMemory;
-        break;
-    case ERROR_NOT_SUPPORTED:
-    case ERROR_NOT_SAME_DEVICE:
-        code = FileCode::Unsupported;
-        break;
-    case ERROR_DIR_NOT_EMPTY:
-        code = FileCode::DirectoryNotEmpty;
-        break;
-    case ERROR_DIRECTORY:
-        code = FileCode::WrongType;
-        break;
-    }
-    return {code, static_cast<uint32>(error)};
-}
 
 // UTF-8 경로를 검증하고 NUL로 끝나는 UTF-16으로 바꾼다. 장치 namespace·레거시 DOS 장치 이름은
 // Unsupported, 잘못된 UTF-8·embedded NUL은 InvalidArgument다. 변환 버퍼는 소멸 시 해제한다.
 class WidePath {
 public:
-    ~WidePath() noexcept {
-        AlignedFree(value_);
-    }
     FileStatus Initialize(const char* path, usize bytes) noexcept {
         if (!detail::ValidFilePath(path, bytes)) {
             return {FileCode::InvalidArgument, 0};
         }
+
         // 일반 파일 인터페이스에서 device namespace나 레거시 DOS 장치를 열지 않는다.
         if (detail::IsWindowsDevicePath(path, bytes)) {
             return {FileCode::Unsupported, 0};
         }
-        if (bytes > 0x7fffffffU) {
-            return {FileCode::Overflow, 0};
+
+        auto status = value_.AssignUtf8(path, bytes);
+        if (!status) {
+            return status;
         }
-        const int required = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path,
-                                                 static_cast<int>(bytes), nullptr, 0);
-        if (required == 0) {
-            return NativeError(GetLastError());
-        }
-        const usize units = static_cast<usize>(required) + 1;
-        if (units > MaxSize / sizeof(wchar_t)) {
-            return {FileCode::Overflow, 0};
-        }
-        value_ = static_cast<wchar_t*>(AlignedAllocate(units * sizeof(wchar_t), alignof(wchar_t)));
-        if (!value_) {
-            return {FileCode::OutOfMemory, 0};
-        }
-        if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, static_cast<int>(bytes),
-                                value_, required) != required) {
-            return NativeError(GetLastError());
-        }
-        value_[required] = L'\0';
+
         // 긴 경로: Win32가 실제로 쓰는 전체 경로가 MAX_PATH(260, 디렉터리 생성은 248) 근처를 넘으면
         // 확장 경로 접두사를 붙인다. 상대 경로("a\b", "\a", "C:a")는 입력이 짧아도 현재
         // 디렉터리를 붙이면 넘을 수 있으므로 전체 경로 길이로 판정한다. 확장 경로는 OS가
         // '/'·'.'·'..'를 해석하지 않으므로 GetFullPathNameW로 먼저 정규화한다. 짧은 경로는 기존
         // Win32 해석을 그대로 쓴다.
-        if (static_cast<usize>(required) >= LongPathThreshold) {
+        if (value_.Units() >= LongPathThreshold) {
             return Extend();
         }
-        if (!IsFullyQualified(value_, static_cast<usize>(required))) {
+
+        if (!IsFullyQualified(value_.Value(), value_.Units())) {
             // 반환값은 NUL을 포함한 필요 단위 수다(0은 실패이며 실패는 아래 열기가 보고한다).
-            const DWORD fullUnits = GetFullPathNameW(value_, 0, nullptr, nullptr);
+            const DWORD fullUnits = GetFullPathNameW(value_.Value(), 0, nullptr, nullptr);
             if (fullUnits != 0 && static_cast<usize>(fullUnits) - 1u >= LongPathThreshold) {
                 return Extend();
             }
         }
+
         return {};
     }
+
     const wchar_t* Value() const noexcept {
-        return value_;
+        return value_.Value();
     }
 
     // 이 길이(UTF-16 단위) 이상이면 확장 경로로 바꾼다.
@@ -114,29 +65,34 @@ private:
         const auto separator = [](wchar_t value) noexcept {
             return value == L'\\' || value == L'/';
         };
+
         if (units >= 2 && separator(path[0]) && separator(path[1])) {
             return true;
         }
+
         const bool letter =
             (path[0] >= L'A' && path[0] <= L'Z') || (path[0] >= L'a' && path[0] <= L'z');
         return units >= 3 && letter && path[1] == L':' && separator(path[2]);
     }
 
     FileStatus Extend() noexcept {
-        const DWORD fullUnits = GetFullPathNameW(value_, 0, nullptr, nullptr);
+        const DWORD fullUnits = GetFullPathNameW(value_.Value(), 0, nullptr, nullptr);
         if (fullUnits == 0) {
             return NativeError(GetLastError());
         }
+
         auto* full =
             static_cast<wchar_t*>(AlignedAllocate(fullUnits * sizeof(wchar_t), alignof(wchar_t)));
         if (full == nullptr) {
             return {FileCode::OutOfMemory, 0};
         }
-        const DWORD written = GetFullPathNameW(value_, fullUnits, full, nullptr);
+
+        const DWORD written = GetFullPathNameW(value_.Value(), fullUnits, full, nullptr);
         if (written == 0 || written >= fullUnits) {
             AlignedFree(full);
             return NativeError(GetLastError());
         }
+
         // "\\server\share\..." → "\\?\UNC\server\share\...", "C:\..." → "\\?\C:\...".
         const bool unc = written >= 2 && full[0] == L'\\' && full[1] == L'\\';
         const wchar_t* prefix = unc ? L"\\\\?\\UNC\\" : L"\\\\?\\";
@@ -149,17 +105,17 @@ private:
             AlignedFree(full);
             return {FileCode::OutOfMemory, 0};
         }
+
         platform::MemoryCopy(extended, prefix, prefixUnits * sizeof(wchar_t));
         platform::MemoryCopy(extended + prefixUnits, full + skip,
                              (written - skip) * sizeof(wchar_t));
         extended[units] = L'\0';
         AlignedFree(full);
-        AlignedFree(value_);
-        value_ = extended;
+        value_.Adopt(extended, units);
         return {};
     }
 
-    wchar_t* value_ = nullptr;
+    WideString value_;
 };
 
 // FILETIME(1601-01-01 UTC부터의 100ns)을 FileInfo tick(0001-01-01 UTC부터의 100ns)으로 바꾼다.
@@ -172,6 +128,7 @@ inline int64 FileTimeToTicks(const FILETIME& time) noexcept {
     if (value == 0 || value > MaxTicks - static_cast<uint64>(Offset)) {
         return 0;
     }
+
     return static_cast<int64>(value) + Offset;
 }
 
@@ -191,6 +148,7 @@ inline bool PathIsLink(const wchar_t* path) noexcept {
     if (handle == INVALID_HANDLE_VALUE) {
         return false;
     }
+
     FILE_ATTRIBUTE_TAG_INFO tag{};
     const bool queried =
         GetFileInformationByHandleEx(handle, FileAttributeTagInfo, &tag, sizeof(tag)) != 0;
@@ -217,6 +175,7 @@ inline bool SameFileObject(const wchar_t* first, const wchar_t* second,
         if (handle == INVALID_HANDLE_VALUE) {
             return false;
         }
+
         hasWide = hasWide &&
                   GetFileInformationByHandleEx(handle, FileIdInfo, &wide[i], sizeof(wide[i])) != 0;
         const bool queried = GetFileInformationByHandle(handle, &identity[i]) != 0;
@@ -225,46 +184,24 @@ inline bool SameFileObject(const wchar_t* first, const wchar_t* second,
             return false;
         }
     }
+
     if (hasWide) {
         if (wide[0].VolumeSerialNumber != wide[1].VolumeSerialNumber) {
             return false;
         }
+
         for (usize i = 0; i < sizeof(wide[0].FileId.Identifier); ++i) {
             if (wide[0].FileId.Identifier[i] != wide[1].FileId.Identifier[i]) {
                 return false;
             }
         }
+
         return true;
     }
+
     return identity[0].dwVolumeSerialNumber == identity[1].dwVolumeSerialNumber &&
            identity[0].nFileIndexHigh == identity[1].nFileIndexHigh &&
            identity[0].nFileIndexLow == identity[1].nFileIndexLow;
-}
-
-// UTF-16을 UTF-8로 바꿔 buffer에 쓴다(NUL 포함). 실패하면 false다.
-inline bool WideToUtf8(const wchar_t* text, int units, char* buffer, usize capacity,
-                       usize& bytes) noexcept {
-    if (units == 0) {
-        if (capacity == 0) {
-            return false;
-        }
-        buffer[0] = '\0';
-        bytes = 0;
-        return true;
-    }
-    const int required = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text, units, nullptr, 0,
-                                             nullptr, nullptr);
-    if (required <= 0 || static_cast<usize>(required) >= capacity) {
-        bytes = required > 0 ? static_cast<usize>(required) : 0;
-        return false;
-    }
-    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text, units, buffer, required, nullptr,
-                            nullptr) != required) {
-        return false;
-    }
-    buffer[required] = '\0';
-    bytes = static_cast<usize>(required);
-    return true;
 }
 
 } // namespace rocks::platform::detail

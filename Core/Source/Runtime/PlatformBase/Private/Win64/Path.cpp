@@ -19,19 +19,8 @@ FileStatus WriteDirectory(const wchar_t* text, usize units, char* buffer, usize 
     while (units > 3 && (text[units - 1] == L'\\' || text[units - 1] == L'/')) {
         --units;
     }
-    if (units > 0x7fffffffu) {
-        return {FileCode::Overflow, 0};
-    }
-    usize written = 0;
-    if (!detail::WideToUtf8(text, static_cast<int>(units), buffer, capacity, written)) {
-        if (written != 0) {
-            bytes = written;
-            return {FileCode::Overflow, 0};
-        }
-        return {FileCode::SystemError, ERROR_NO_UNICODE_TRANSLATION};
-    }
-    bytes = written;
-    return {};
+
+    return detail::WriteUtf8(text, units, buffer, capacity, bytes);
 }
 
 FileStatus KnownFolder(const KNOWNFOLDERID& id, char* buffer, usize capacity,
@@ -42,10 +31,12 @@ FileStatus KnownFolder(const KNOWNFOLDERID& id, char* buffer, usize capacity,
         CoTaskMemFree(path);
         return {FileCode::SystemError, static_cast<uint32>(result)};
     }
+
     usize units = 0;
     while (path[units] != L'\0') {
         ++units;
     }
+
     auto status = WriteDirectory(path, units, buffer, capacity, bytes);
     CoTaskMemFree(path);
     return status;
@@ -70,38 +61,22 @@ FileStatus GetStandardDirectory(StandardDirectory kind, char* buffer, usize capa
     if (buffer == nullptr && capacity != 0) {
         return {FileCode::InvalidArgument, 0};
     }
+
     switch (kind) {
     case StandardDirectory::Executable: {
-        // 긴 경로를 위해 버퍼를 키워 가며 실행 파일 경로를 읽고 파일 이름을 뗀다. 마지막 시도는
-        // Windows 경로 최대 길이(32767 + NUL)다.
-        constexpr DWORD MaxUnits = 32768;
-        for (DWORD size = MAX_PATH;; size = size > MaxUnits / 2 ? MaxUnits : size * 2) {
-            auto* path =
-                static_cast<wchar_t*>(AlignedAllocate(size * sizeof(wchar_t), alignof(wchar_t)));
-            if (path == nullptr) {
-                return {FileCode::OutOfMemory, 0};
-            }
-            const DWORD length = GetModuleFileNameW(nullptr, path, size);
-            if (length == 0) {
-                const DWORD error = GetLastError();
-                AlignedFree(path);
-                return detail::NativeError(error);
-            }
-            if (length < size) {
-                usize units = length;
-                while (units > 0 && path[units - 1] != L'\\' && path[units - 1] != L'/') {
-                    --units;
-                }
-                auto status = WriteDirectory(path, units, buffer, capacity, bytes);
-                AlignedFree(path);
-                return status;
-            }
-            AlignedFree(path);
-            if (size == MaxUnits) {
-                break;
-            }
+        // 실행 파일 경로를 읽고 파일 이름을 뗀다.
+        detail::WideString path;
+        auto status = path.AssignModuleFileName();
+        if (!status) {
+            return status;
         }
-        return {FileCode::SystemError, ERROR_INSUFFICIENT_BUFFER};
+
+        usize units = path.Units();
+        while (units > 0 && path.Value()[units - 1] != L'\\' && path.Value()[units - 1] != L'/') {
+            --units;
+        }
+
+        return WriteDirectory(path.Value(), units, buffer, capacity, bytes);
     }
     case StandardDirectory::Working: {
         // 다른 스레드가 작업 디렉터리를 바꾸면 길이 조회와 읽기 사이에 커질 수 있으므로 다시
@@ -111,24 +86,29 @@ FileStatus GetStandardDirectory(StandardDirectory kind, char* buffer, usize capa
             if (required == 0) {
                 return detail::NativeError(GetLastError());
             }
+
             auto* path = static_cast<wchar_t*>(
                 AlignedAllocate(required * sizeof(wchar_t), alignof(wchar_t)));
             if (path == nullptr) {
                 return {FileCode::OutOfMemory, 0};
             }
+
             const DWORD length = GetCurrentDirectoryW(required, path);
             if (length == 0) {
                 const DWORD error = GetLastError();
                 AlignedFree(path);
                 return detail::NativeError(error);
             }
+
             if (length < required) {
                 auto status = WriteDirectory(path, length, buffer, capacity, bytes);
                 AlignedFree(path);
                 return status;
             }
+
             AlignedFree(path);
         }
+
         return {FileCode::Busy, 0};
     }
     case StandardDirectory::Temporary: {
@@ -137,6 +117,7 @@ FileStatus GetStandardDirectory(StandardDirectory kind, char* buffer, usize capa
         if (length == 0 || length > MAX_PATH + 1) {
             return detail::NativeError(GetLastError());
         }
+
         return WriteDirectory(path, length, buffer, capacity, bytes);
     }
     case StandardDirectory::Home:
@@ -146,6 +127,7 @@ FileStatus GetStandardDirectory(StandardDirectory kind, char* buffer, usize capa
     case StandardDirectory::UserCache:
         return KnownFolder(FOLDERID_LocalAppData, buffer, capacity, bytes);
     }
+
     return {FileCode::InvalidArgument, 0};
 }
 
