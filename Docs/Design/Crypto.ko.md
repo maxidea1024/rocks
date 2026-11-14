@@ -184,7 +184,11 @@ AES-256-GCM 일회성은 libsodium 원본 함수를 그대로 쓴다. 같은 기
 
 ### 5.4 시험 데이터: Wycheproof
 
-Wycheproof는 Apache-2.0 data 라이브러리(`"kind": "data"`)로, commit을 고정해 들인다. 시험 전용이며 바이너리에 들어가지 않는다. AES-GCM·CMAC, (X)ChaCha20-Poly1305, secretstream(`xchacha20_poly1305_secretstream`), AEGIS, HKDF, HMAC, Ed25519, X25519 벡터를 Core `Json` 파서로 읽는다. 어떤 파일이 있는지는 착수 때 manifest `files`로 확정한다.
+Wycheproof는 Apache-2.0 data 라이브러리(`"kind": "data"`)로, commit을 고정해 들인다. 시험 전용이며 바이너리에 들어가지 않는다. Core `Json` 파서로 읽는다(`Crypto/Tests/WycheproofTests.cpp`).
+
+- C1(2026-11-15): commit `65ca494727a5`(릴리스가 없어 GitHub commit archive와 SHA-256으로 고정)의 `testvectors_v1/` 가운데 `aes_gcm`, `chacha20_poly1305`, `xchacha20_poly1305`, `hmac_sha256`·`hmac_sha512`, `hkdf_sha256`·`hkdf_sha512`, `ed25519`, `x25519`, `mlkem_768`과 LICENSE만 들인다. 시험은 파일마다 모든 사례를 세고 갈래별 개수를 고정해, 조용히 건너뛰는 사례가 생기면 실패한다.
+- AEGIS는 들이지 않는다. Wycheproof AEGIS 벡터는 128 bit tag이고 libsodium은 256 bit tag만 내므로 같은 입력을 검증할 수 없다. draft 부록 TV1–TV3(tag256)과 libsodium 표로 대신한다(AeadTests).
+- CMAC·AES-128-GCM은 경량 계층(C2), secretstream은 C3에서 더한다(그때 manifest `files`를 늘린다).
 
 ## 6. AES 하드웨어 가속
 
@@ -951,7 +955,7 @@ KeyBlob v1(Crypto/KeyBlob.h, 2026-11-15 구현, 설계 교차검증 반영)의 �
 
 ## 12. 검증 계획
 
-- **알려진 답.** Wycheproof 사상표에 따른 전 항목(96 bit가 아닌 GCM IV·짧은 tag는 `Unsupported`·`AuthenticationFailed`, Ed25519 "acceptable" 항목은 libsodium 결과를 기대값으로 둔다: 비정규 encoding·small-order는 거부, 혼합 차수 키는 cofactorless 식이 맞으면 수용), RFC 8439(ChaCha20-Poly1305), XChaCha20 초안 벡터, RFC 8032(Ed25519·Ed25519ph), RFC 7748(X25519), RFC 5869(HKDF), RFC 4231(HMAC), RFC 7693(BLAKE2b), RFC 4493(CMAC), NIST SP 800-38A(CTR)·CAVP GCM, X-Wing·ML-KEM768 표준 벡터, 세그먼트 형식 golden(salt 고정).
+- **알려진 답.** Wycheproof 사상표에 따른 전 항목(96 bit가 아닌 GCM IV·짧은 tag는 `Unsupported`·`AuthenticationFailed`, Ed25519 "acceptable" 항목은 libsodium 결과를 기대값으로 둔다: 비정규 encoding·small-order는 거부, 혼합 차수 키는 cofactorless 식이 맞으면 수용). C1 사상표: AEAD는 valid가 봉인 byte와 열기 결과 일치, invalid는 AuthenticationFailed다. AES-GCM은 256 bit 키만 검증하고 128 bit 키는 C2 전까지 Unsupported, 192 bit 키는 열거값이 없어 센다. ChaCha 계열의 nonce 길이 오류는 InvalidArgument다. HMAC의 잘린 tag는 전체 tag 앞부분과 비교한다(검증 함수는 잘린 tag를 받지 않는다). HKDF 출력 상한 초과는 InvalidArgument다. X25519는 crypto_kx로 돌려 공유 비밀 0을 AuthenticationFailed로, 나머지를 BLAKE2b-512(q ‖ client_pk ‖ server_pk)와 비교한다. ML-KEM-768은 seed 길이 오류 InvalidArgument, 암호문 길이 오류 AuthenticationFailed, 그 밖은 공개키와 공유 비밀(암묵적 거부 포함) 일치다. RFC 8439(ChaCha20-Poly1305), XChaCha20 초안 벡터, RFC 8032(Ed25519·Ed25519ph), RFC 7748(X25519), RFC 5869(HKDF), RFC 4231(HMAC), RFC 7693(BLAKE2b), RFC 4493(CMAC), NIST SP 800-38A(CTR)·CAVP GCM, X-Wing·ML-KEM768 표준 벡터, 세그먼트 형식 golden(salt 고정).
 - **차등.** 같은 기기에서 libsodium AES-256-GCM(원본)과 경량 계층 AES-256-GCM을 무작위 입력(길이 0–64 KiB, AD 0–1 KiB, 정렬·비정렬, 제자리)과 무작위 조각 나누기(멀티파트)로 대조한다. 원본이 파생 코드의 기준이다. x64와 arm64 결과는 같은 벡터 파일로 고정한다.
 - **스칼라 참조.** 시험 전용 스칼라 참조(블록 암호화 + 32·64·128 bit 카운터 증가)로 CTR·CMAC·AES-128을 대조한다. 시작 카운터를 2^32−k, 2^64−k, 2^128−k에 두어 carry 전파와 wrap(`CapacityExceeded`)을 확인한다. libsodium 원본에 없는 경로라 원본이 기준이 되지 못하기 때문이다.
 - **경로 범위.** GitHub CI(Windows x64 AES-NI·AVX, macOS arm64 AES·PMULL)와 로컬 Android x86_64 에뮬레이터(adb 실행)에서 돈다. 행마다 `AeadInfo.implementation`이 기대값과 같은지 단언한다. HW 없는 경로는 `CpuFeatures` 시험 주입으로 `Unsupported` 반환을 확인한다. Android arm64 실기기는 아직 실행 경로가 없으므로 결과에서 구분해 적는다.

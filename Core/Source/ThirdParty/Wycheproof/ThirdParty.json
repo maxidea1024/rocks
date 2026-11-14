@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "kind": "data",
+  "name": "Wycheproof",
+  "version": "65ca494727a52944c204441c860b039e6786b99b",
+  "upstreamDirectory": "wycheproof-65ca494727a5",
+  "source": {
+    "url": "https://github.com/C2SP/wycheproof/archive/65ca494727a52944c204441c860b039e6786b99b.zip",
+    "sha256": "5a0cdcbf5550d7a67602bee4690edbd79e6ef7a12b6d3250fbc339d5735e06f2",
+    "verification": "GitHub HTTPS commit archive(2026-11-15, main = 65ca494727a52944c204441c860b039e6786b99b). 릴리스가 없어 commit으로 고정한다. 서명은 없다. 암호 모듈 시험에 쓰는 testvectors_v1 파일만 들인다(AEGIS는 Wycheproof가 128 bit tag라 libsodium의 256 bit tag와 맞지 않아 뺀다)."
+  },
+  "licenses": [
+    {
+      "spdx": "Apache-2.0",
+      "upstreamExpression": "Apache-2.0",
+      "file": "wycheproof-65ca494727a5/LICENSE",
+      "binaryNoticeRequired": false
+    }
+  ],
+  "translationUnits": [],
+  "includeDirectories": [],
+  "defines": [],
+  "platformDefines": {},
+  "consumerDefines": [],
+  "adapterHeaders": [],
+  "files": {
+    "LICENSE": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd",
+    "testvectors_v1/aes_gcm_test.json": "985e5ecc172e181eaf49e89508b9470dcf478002eb7e8559c707eb42dc97dfe7",
+    "testvectors_v1/chacha20_poly1305_test.json": "fe61d25f90e1bde4461d00eafe61049e5f29bd999f36b766df9cda90906ad53d",
+    "testvectors_v1/ed25519_test.json": "ea80ffebac085e21cb9d3e903e7fa2b448d96702da5b31f061d0b83b430b74b3",
+    "testvectors_v1/hkdf_sha256_test.json": "bb2b462a38b251cb52a2aede706d6d4b62b26864f4e80c95497507ddb07c5f1e",
+    "testvectors_v1/hkdf_sha512_test.json": "bb9a21f4e86041caf5d7792b030349f8ff289087f195b2fbc0fc0afc39deca6f",
+    "testvectors_v1/hmac_sha256_test.json": "2d201cfa61d1bf95e6f5d07d96634b4a348b31e8eaa277ad7c8d09677b7a743f",
+    "testvectors_v1/hmac_sha512_test.json": "b6c90477bdb4a6fc8ee3d1f7b2c0b69a8dfffab34718abaa6cabd71cc2ba1207",
+    "testvectors_v1/mlkem_768_test.json": "c59c067ae794c343df575dd90f6f7458f51881b11a22d6e9d8677c8d9ee21e90",
+    "testvectors_v1/x25519_test.json": "35c3f5231cf25cc640b524d403461deee9e49441d5d915a3a25b2c8ff5adbe7d",
+    "testvectors_v1/xchacha20_poly1305_test.json": "a79de072571b90eb40c3a63ce0c7f75dcb4b62323c8870228e1f61dcc61d63a9"
+  },
+  "pragmaDirectives": [],
+  "notes": [
+    "commit archive에서 testvectors_v1/의 C1 암호 시험 파일 10개와 LICENSE만 byte 그대로 꺼냈다(Java·Go 도구와 다른 벡터는 두지 않는다). Crypto 시험(Crypto/Tests/WycheproofTests.cpp)이 Core Json으로 읽는다. 설계는 Docs/Design/Crypto.ko.md 5.4·12절.",
+    "시험 데이터일 뿐 어떤 모듈 바이너리에도 들어가지 않으므로 embeddedIn이 없다(SDK가 라이선스를 배포할 필요 없다).",
+    "AEGIS 벡터는 128 bit tag라 libsodium(256 bit tag)과 맞지 않아 들이지 않았다. CMAC·secretstream 파일은 경량 계층(C2)·스트리밍(C3)에서 더한다."
+  ]
+}
