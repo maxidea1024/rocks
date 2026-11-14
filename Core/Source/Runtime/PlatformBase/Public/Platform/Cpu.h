@@ -26,8 +26,7 @@ struct CpuFeatures {
     bool pclmulqdq = false;
     bool sha = false;
 
-    // ARM64
-    // ARM64 기준 SIMD다(ARM64에서는 항상 true).
+    // ARM64 ARM64 기준 SIMD다(ARM64에서는 항상 true).
     bool neon = false;
     // ARMv8 Crypto Extensions의 선택 기능이다(FEAT_AES·FEAT_PMULL·FEAT_SHA256). 저가 SoC에는 없을
     // 수 있다. Apple Silicon은 모두 갖춘다. 감지: macOS sysctl hw.optional.arm.FEAT_*, Android
@@ -35,6 +34,9 @@ struct CpuFeatures {
     bool armAes = false;
     bool armPmull = false;
     bool armSha2 = false;
+    // FEAT_DIT(Data Independent Timing, ARMv8.4)다. 지금은 macOS만 감지하고(sysctl
+    // hw.optional.arm.FEAT_DIT) 다른 OS는 false다. 켜고 끄기는 Platform/DataIndependentTiming.h다.
+    bool armDit = false;
 };
 
 // 처음 호출할 때 한 번 조사하고 이후 같은 값을 돌려준다. 여러 스레드에서 동시에 불러도 된다.

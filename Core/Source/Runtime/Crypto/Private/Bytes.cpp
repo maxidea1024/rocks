@@ -2,6 +2,8 @@
 
 #include "Sodium/SodiumRuntime.h"
 
+#include <Platform/DataIndependentTiming.h>
+
 #include <sodium.h>
 
 namespace rocks::crypto {
@@ -61,6 +63,7 @@ Result<usize> DecodedBytes(StringView text, Base64Variant variant) noexcept {
 // 포함)를 거친다는 계약을 한 가지로 유지한다(Docs/Design/Crypto.ko.md 5.1절). 초기화 뒤의 비용은
 // 원자적 읽기 하나다.
 bool ConstantTimeEquals(Span<const uint8> left, Span<const uint8> right) noexcept {
+    platform::DataIndependentTimingScope dit;
     detail::EnsureSodium();
     if (left.Size() != right.Size()) {
         return false;
@@ -70,11 +73,13 @@ bool ConstantTimeEquals(Span<const uint8> left, Span<const uint8> right) noexcep
 }
 
 bool IsAllZero(Span<const uint8> bytes) noexcept {
+    platform::DataIndependentTimingScope dit;
     detail::EnsureSodium();
     return bytes.IsEmpty() || sodium_is_zero(bytes.Data(), bytes.Size()) == 1;
 }
 
 void SecureZero(Span<uint8> bytes) noexcept {
+    platform::DataIndependentTimingScope dit;
     detail::EnsureSodium();
     if (!bytes.IsEmpty()) {
         sodium_memzero(bytes.Data(), bytes.Size());
@@ -82,6 +87,7 @@ void SecureZero(Span<uint8> bytes) noexcept {
 }
 
 Result<usize> TryGetHexChars(usize bytes) noexcept {
+    platform::DataIndependentTimingScope dit;
     // NUL 하나를 더 쓸 자리도 있어야 하므로 2 * bytes + 1이 넘치지 않아야 한다. libsodium은
     // bytes >= SIZE_MAX / 2를 misuse로 보므로 같은 경계를 쓴다.
     if (bytes >= MaxSize / 2) {
@@ -92,6 +98,7 @@ Result<usize> TryGetHexChars(usize bytes) noexcept {
 }
 
 Result<usize> TryGetBase64Chars(usize bytes, Base64Variant variant) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (SodiumVariant(variant) < 0) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
@@ -111,6 +118,7 @@ Result<usize> TryGetBase64Chars(usize bytes, Base64Variant variant) noexcept {
 }
 
 Result<usize> TryToHex(Span<const uint8> bytes, Span<char> text) noexcept {
+    platform::DataIndependentTimingScope dit;
     auto chars = TryGetHexChars(bytes.Size());
     if (!chars) {
         return chars;
@@ -135,6 +143,7 @@ Result<usize> TryToHex(Span<const uint8> bytes, Span<char> text) noexcept {
 }
 
 Result<usize> TryFromHex(StringView text, Span<uint8> bytes) noexcept {
+    platform::DataIndependentTimingScope dit;
     const usize length = text.ByteCount();
     if (length % 2 != 0) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
@@ -169,6 +178,7 @@ Result<usize> TryFromHex(StringView text, Span<uint8> bytes) noexcept {
 
 Result<usize> TryToBase64(Span<const uint8> bytes, Base64Variant variant,
                           Span<char> text) noexcept {
+    platform::DataIndependentTimingScope dit;
     auto chars = TryGetBase64Chars(bytes.Size(), variant);
     if (!chars) {
         return chars;
@@ -191,6 +201,7 @@ Result<usize> TryToBase64(Span<const uint8> bytes, Base64Variant variant,
 }
 
 Result<usize> TryFromBase64(StringView text, Base64Variant variant, Span<uint8> bytes) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (SodiumVariant(variant) < 0) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }

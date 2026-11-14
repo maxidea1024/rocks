@@ -8,6 +8,8 @@
 #include <Core/Move.h>
 #include <Platform/Fatal.h>
 
+#include <Platform/DataIndependentTiming.h>
+
 #include <sodium.h>
 
 namespace rocks::crypto {
@@ -332,11 +334,13 @@ void ReleaseState(Allocator* allocator, void* state, usize bytes) noexcept {
 // ---- 일회성 ----
 
 Result<void> TryBlake2b(Span<const uint8> input, Span<uint8> digest) noexcept {
+    platform::DataIndependentTimingScope dit;
     const Span<const uint8> pieces[1] = {input};
     return TryBlake2b(Span<const Span<const uint8>>(pieces), digest);
 }
 
 Result<void> TryBlake2b(Span<const Span<const uint8>> pieces, Span<uint8> digest) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (digest.Size() < Blake2bMinDigestBytes || digest.Size() > Blake2bMaxDigestBytes ||
         detail::OutputOverlaps(pieces, digest)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -348,66 +352,80 @@ Result<void> TryBlake2b(Span<const Span<const uint8>> pieces, Span<uint8> digest
 }
 
 Sha512Digest Sha512(Span<const uint8> input) noexcept {
+    platform::DataIndependentTimingScope dit;
     return FixedHash<Sha512Digest, crypto_hash_sha512_state>(HashAlgorithm::Sha512, input);
 }
 
 Sha512Digest Sha512(Span<const Span<const uint8>> pieces) noexcept {
+    platform::DataIndependentTimingScope dit;
     return FixedHash<Sha512Digest, crypto_hash_sha512_state>(HashAlgorithm::Sha512, pieces);
 }
 
 Sha3_256Digest Sha3_256(Span<const uint8> input) noexcept {
+    platform::DataIndependentTimingScope dit;
     return FixedHash<Sha3_256Digest, crypto_hash_sha3256_state>(HashAlgorithm::Sha3_256, input);
 }
 
 Sha3_256Digest Sha3_256(Span<const Span<const uint8>> pieces) noexcept {
+    platform::DataIndependentTimingScope dit;
     return FixedHash<Sha3_256Digest, crypto_hash_sha3256_state>(HashAlgorithm::Sha3_256, pieces);
 }
 
 Sha3_512Digest Sha3_512(Span<const uint8> input) noexcept {
+    platform::DataIndependentTimingScope dit;
     return FixedHash<Sha3_512Digest, crypto_hash_sha3512_state>(HashAlgorithm::Sha3_512, input);
 }
 
 Sha3_512Digest Sha3_512(Span<const Span<const uint8>> pieces) noexcept {
+    platform::DataIndependentTimingScope dit;
     return FixedHash<Sha3_512Digest, crypto_hash_sha3512_state>(HashAlgorithm::Sha3_512, pieces);
 }
 
 Result<void> TryShake128(Span<const uint8> input, Span<uint8> output) noexcept {
+    platform::DataIndependentTimingScope dit;
     const Span<const uint8> pieces[1] = {input};
     return TryShake128(Span<const Span<const uint8>>(pieces), output);
 }
 
 Result<void> TryShake128(Span<const Span<const uint8>> pieces, Span<uint8> output) noexcept {
+    platform::DataIndependentTimingScope dit;
     return Xof<crypto_xof_shake128_state>(XofAlgorithm::Shake128, pieces, output,
                                           TurboShakeStandardDomain);
 }
 
 Result<void> TryShake256(Span<const uint8> input, Span<uint8> output) noexcept {
+    platform::DataIndependentTimingScope dit;
     const Span<const uint8> pieces[1] = {input};
     return TryShake256(Span<const Span<const uint8>>(pieces), output);
 }
 
 Result<void> TryShake256(Span<const Span<const uint8>> pieces, Span<uint8> output) noexcept {
+    platform::DataIndependentTimingScope dit;
     return Xof<crypto_xof_shake256_state>(XofAlgorithm::Shake256, pieces, output,
                                           TurboShakeStandardDomain);
 }
 
 Result<void> TryTurboShake128(Span<const uint8> input, Span<uint8> output, uint8 domain) noexcept {
+    platform::DataIndependentTimingScope dit;
     const Span<const uint8> pieces[1] = {input};
     return TryTurboShake128(Span<const Span<const uint8>>(pieces), output, domain);
 }
 
 Result<void> TryTurboShake128(Span<const Span<const uint8>> pieces, Span<uint8> output,
                               uint8 domain) noexcept {
+    platform::DataIndependentTimingScope dit;
     return Xof<crypto_xof_turboshake128_state>(XofAlgorithm::TurboShake128, pieces, output, domain);
 }
 
 Result<void> TryTurboShake256(Span<const uint8> input, Span<uint8> output, uint8 domain) noexcept {
+    platform::DataIndependentTimingScope dit;
     const Span<const uint8> pieces[1] = {input};
     return TryTurboShake256(Span<const Span<const uint8>>(pieces), output, domain);
 }
 
 Result<void> TryTurboShake256(Span<const Span<const uint8>> pieces, Span<uint8> output,
                               uint8 domain) noexcept {
+    platform::DataIndependentTimingScope dit;
     return Xof<crypto_xof_turboshake256_state>(XofAlgorithm::TurboShake256, pieces, output, domain);
 }
 
@@ -441,6 +459,7 @@ HashState& HashState::operator=(HashState&& other) noexcept {
 
 Result<HashState> HashState::TryCreate(HashAlgorithm algorithm, usize digestBytes,
                                        Allocator& allocator) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (!IsDefined(algorithm)) {
         return Result<HashState>::Failure(ErrorCode::InvalidArgument);
     }
@@ -473,11 +492,13 @@ Result<HashState> HashState::TryCreate(HashAlgorithm algorithm, usize digestByte
 }
 
 Result<void> HashState::TryUpdate(Span<const uint8> input) noexcept {
+    platform::DataIndependentTimingScope dit;
     const Span<const uint8> pieces[1] = {input};
     return TryUpdate(Span<const Span<const uint8>>(pieces));
 }
 
 Result<void> HashState::TryUpdate(Span<const Span<const uint8>> pieces) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (state_ == nullptr) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
@@ -494,6 +515,7 @@ Result<void> HashState::TryUpdate(Span<const Span<const uint8>> pieces) noexcept
 }
 
 Result<void> HashState::TryFinish(Span<uint8> digest) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (state_ == nullptr) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
@@ -511,6 +533,7 @@ Result<void> HashState::TryFinish(Span<uint8> digest) noexcept {
 }
 
 void HashState::Reset() noexcept {
+    platform::DataIndependentTimingScope dit;
     if (state_ != nullptr) {
         // libsodium SHA-512 init은 입력 버퍼를 지우지 않는다. 앞 입력이 남지 않게 먼저 지운다.
         WipeState(state_, StateBytes(algorithm_));
@@ -520,6 +543,7 @@ void HashState::Reset() noexcept {
 }
 
 void HashState::Release() noexcept {
+    platform::DataIndependentTimingScope dit;
     if (state_ != nullptr) {
         ReleaseState(allocator_, state_, StateBytes(algorithm_));
         state_ = nullptr;
@@ -557,6 +581,7 @@ XofState& XofState::operator=(XofState&& other) noexcept {
 
 Result<XofState> XofState::TryCreate(XofAlgorithm algorithm, uint8 domain,
                                      Allocator& allocator) noexcept {
+    platform::DataIndependentTimingScope dit;
     const bool turbo =
         algorithm == XofAlgorithm::TurboShake128 || algorithm == XofAlgorithm::TurboShake256;
     if (!IsDefined(algorithm) || (turbo && !IsValidTurboShakeDomain(domain)) ||
@@ -580,11 +605,13 @@ Result<XofState> XofState::TryCreate(XofAlgorithm algorithm, uint8 domain,
 }
 
 Result<void> XofState::TryUpdate(Span<const uint8> input) noexcept {
+    platform::DataIndependentTimingScope dit;
     const Span<const uint8> pieces[1] = {input};
     return TryUpdate(Span<const Span<const uint8>>(pieces));
 }
 
 Result<void> XofState::TryUpdate(Span<const Span<const uint8>> pieces) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (state_ == nullptr) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
@@ -601,6 +628,7 @@ Result<void> XofState::TryUpdate(Span<const Span<const uint8>> pieces) noexcept 
 }
 
 Result<void> XofState::TrySqueeze(Span<uint8> output) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (state_ == nullptr) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
@@ -611,6 +639,7 @@ Result<void> XofState::TrySqueeze(Span<uint8> output) noexcept {
 }
 
 void XofState::Reset() noexcept {
+    platform::DataIndependentTimingScope dit;
     if (state_ != nullptr) {
         WipeState(state_, StateBytes(algorithm_));
         InitState(algorithm_, state_, domain_);
@@ -619,6 +648,7 @@ void XofState::Reset() noexcept {
 }
 
 void XofState::Release() noexcept {
+    platform::DataIndependentTimingScope dit;
     if (state_ != nullptr) {
         ReleaseState(allocator_, state_, StateBytes(algorithm_));
         state_ = nullptr;

@@ -47,6 +47,12 @@ void DetectArm64CryptoFeatures(CpuFeatures& features) noexcept {
     features.armAes = aes;
     features.armPmull = pmull;
     features.armSha2 = sha2;
+
+    // DIT는 sysctl 이름이 있을 때만 켠다(없는 구버전 OS에서는 쓰지 않는다).
+    bool dit = false;
+    if (QueryFeature("hw.optional.arm.FEAT_DIT", dit)) {
+        features.armDit = dit;
+    }
 }
 
 } // namespace rocks::platform::detail

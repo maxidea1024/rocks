@@ -9,6 +9,7 @@
 #include "Sodium/SodiumRuntime.h"
 
 #include <Platform/Fatal.h>
+#include <Platform/DataIndependentTiming.h>
 #include <Platform/Memory.h>
 
 #include <sodium.h>
@@ -163,6 +164,7 @@ void ComputeTag(const MacKey& key, Span<const Span<const uint8>> pieces, Span<ui
 } // namespace
 
 Result<usize> TryGetMacTagBytes(MacAlgorithm algorithm) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (!IsDefined(algorithm)) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
@@ -173,6 +175,7 @@ Result<usize> TryGetMacTagBytes(MacAlgorithm algorithm) noexcept {
 // ---- MacKey ----
 
 Result<MacKey> MacKey::TryGenerate(MacAlgorithm algorithm) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (!IsDefined(algorithm)) {
         return Result<MacKey>::Failure(ErrorCode::InvalidArgument);
     }
@@ -186,6 +189,7 @@ Result<MacKey> MacKey::TryGenerate(MacAlgorithm algorithm) noexcept {
 }
 
 Result<MacKey> MacKey::TryImport(MacAlgorithm algorithm, Span<const uint8> keyBytes) noexcept {
+    platform::DataIndependentTimingScope dit;
     auto key = TryCopyKey(algorithm, keyBytes, MinMacKeyBytes);
     if (!key) {
         return Result<MacKey>::Failure(key.Error());
@@ -196,6 +200,7 @@ Result<MacKey> MacKey::TryImport(MacAlgorithm algorithm, Span<const uint8> keyBy
 
 Result<MacKey> hazmat::TryImportShortMacKey(MacAlgorithm algorithm,
                                             Span<const uint8> keyBytes) noexcept {
+    platform::DataIndependentTimingScope dit;
     auto key = TryCopyKey(algorithm, keyBytes, 1);
     if (!key) {
         return Result<MacKey>::Failure(key.Error());
@@ -205,6 +210,7 @@ Result<MacKey> hazmat::TryImportShortMacKey(MacAlgorithm algorithm,
 }
 
 Result<void> hazmat::TryExportKey(const MacKey& key, Span<uint8> output) noexcept {
+    platform::DataIndependentTimingScope dit;
     const Span<const uint8> bytes = detail::KeyAccess::Bytes(key);
     if (bytes.IsEmpty()) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
@@ -221,22 +227,26 @@ Result<void> hazmat::TryExportKey(const MacKey& key, Span<uint8> output) noexcep
 // ---- 모듈 내부(다른 키 파생 경로가 쓴다) ----
 
 bool detail::IsDefinedMacAlgorithm(MacAlgorithm algorithm) noexcept {
+    platform::DataIndependentTimingScope dit;
     return IsDefined(algorithm);
 }
 
 usize detail::DefaultMacKeyBytes(MacAlgorithm algorithm) noexcept {
+    platform::DataIndependentTimingScope dit;
     return DefaultKeyBytes(algorithm);
 }
 
 // ---- 일회성 ----
 
 Result<void> TryMac(const MacKey& key, Span<const uint8> message, Span<uint8> tag) noexcept {
+    platform::DataIndependentTimingScope dit;
     const Span<const uint8> pieces[1] = {message};
     return TryMac(key, Span<const Span<const uint8>>(pieces), tag);
 }
 
 Result<void> TryMac(const MacKey& key, Span<const Span<const uint8>> pieces,
                     Span<uint8> tag) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (key.IsEmpty()) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
@@ -251,12 +261,14 @@ Result<void> TryMac(const MacKey& key, Span<const Span<const uint8>> pieces,
 
 Result<void> TryVerifyMac(const MacKey& key, Span<const uint8> message,
                           Span<const uint8> tag) noexcept {
+    platform::DataIndependentTimingScope dit;
     const Span<const uint8> pieces[1] = {message};
     return TryVerifyMac(key, Span<const Span<const uint8>>(pieces), tag);
 }
 
 Result<void> TryVerifyMac(const MacKey& key, Span<const Span<const uint8>> pieces,
                           Span<const uint8> tag) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (key.IsEmpty()) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
@@ -299,6 +311,7 @@ MacState& MacState::operator=(MacState&& other) noexcept {
 }
 
 Result<MacState> MacState::TryCreate(const MacKey& key) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (key.IsEmpty()) {
         return Result<MacState>::Failure(ErrorCode::StaleHandle);
     }
@@ -318,11 +331,13 @@ Result<MacState> MacState::TryCreate(const MacKey& key) noexcept {
 }
 
 usize MacState::TagBytes() const noexcept {
+    platform::DataIndependentTimingScope dit;
     return rocks::crypto::TagBytes(algorithm_);
 }
 
 // 쓸 수 있는 상태인가. 끝난 뒤에는 검증 실패를 sticky로 돌려준다(9.1절).
 Result<void> MacState::CheckActive() const noexcept {
+    platform::DataIndependentTimingScope dit;
     if (state_ == nullptr) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
@@ -336,11 +351,13 @@ Result<void> MacState::CheckActive() const noexcept {
 }
 
 Result<void> MacState::TryUpdate(Span<const uint8> input) noexcept {
+    platform::DataIndependentTimingScope dit;
     const Span<const uint8> pieces[1] = {input};
     return TryUpdate(Span<const Span<const uint8>>(pieces));
 }
 
 Result<void> MacState::TryUpdate(Span<const Span<const uint8>> pieces) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (auto active = CheckActive(); !active) {
         return active;
     }
@@ -353,6 +370,7 @@ Result<void> MacState::TryUpdate(Span<const Span<const uint8>> pieces) noexcept 
 }
 
 Result<void> MacState::TryFinish(Span<uint8> tag) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (auto active = CheckActive(); !active) {
         return active;
     }
@@ -370,6 +388,7 @@ Result<void> MacState::TryFinish(Span<uint8> tag) noexcept {
 }
 
 Result<void> MacState::TryFinishVerify(Span<const uint8> expectedTag) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (auto active = CheckActive(); !active) {
         return active;
     }
@@ -388,6 +407,7 @@ Result<void> MacState::TryFinishVerify(Span<const uint8> expectedTag) noexcept {
 }
 
 void MacState::Release() noexcept {
+    platform::DataIndependentTimingScope dit;
     if (state_ != nullptr) {
         detail::FreeSecretSlot(state_);
         state_ = nullptr;

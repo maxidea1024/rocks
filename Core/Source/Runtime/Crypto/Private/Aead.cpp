@@ -16,6 +16,7 @@
 #include <Core/Move.h>
 #include <Platform/Cpu.h>
 #include <Platform/Fatal.h>
+#include <Platform/DataIndependentTiming.h>
 #include <Platform/Memory.h>
 
 #include <sodium.h>
@@ -307,10 +308,12 @@ Result<void> CheckHazmat(const AeadKey& key, Span<const uint8> nonce) noexcept {
 // ---- 모듈 내부 진입점 ----
 
 Result<void> detail::CheckAeadUsable(AeadAlgorithm algorithm) noexcept {
+    platform::DataIndependentTimingScope dit;
     return CheckUsable(algorithm);
 }
 
 Result<AeadKey> detail::TryMakeAeadKey(AeadAlgorithm algorithm, SecretBytes&& key) noexcept {
+    platform::DataIndependentTimingScope dit;
     // 다른 TU가 부르는 진입점이다. 전제(정의·사용 가능, 키 길이)가 깨지면 AES-GCM beforenm이 범위
     // 밖을 읽거나 HW 없는 기기에서 죽으므로 결함으로 멈춘다.
     if (!IsDefined(algorithm) || !IsAvailable(algorithm) ||
@@ -324,6 +327,7 @@ Result<AeadKey> detail::TryMakeAeadKey(AeadAlgorithm algorithm, SecretBytes&& ke
 // ---- 정보 ----
 
 Result<AeadInfo> TryGetAeadInfo(AeadAlgorithm algorithm) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (!IsDefined(algorithm)) {
         return Result<AeadInfo>::Failure(ErrorCode::InvalidArgument);
     }
@@ -348,10 +352,12 @@ Result<AeadInfo> TryGetAeadInfo(AeadAlgorithm algorithm) noexcept {
 }
 
 AeadAlgorithm GetPreferredAead() noexcept {
+    platform::DataIndependentTimingScope dit;
     return AeadAlgorithm::XChaCha20Poly1305;
 }
 
 Result<usize> TryGetSealedBytes(AeadAlgorithm algorithm, usize plaintextBytes) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (!IsDefined(algorithm)) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
@@ -389,6 +395,7 @@ AeadKey& AeadKey::operator=(AeadKey&& other) noexcept {
 }
 
 void AeadKey::Release() noexcept {
+    platform::DataIndependentTimingScope dit;
     if (state_ != nullptr) {
         // 키 저장소 슬롯은 해제 때 지워진다(SecretArena).
         detail::FreeSecretSlot(state_);
@@ -399,6 +406,7 @@ void AeadKey::Release() noexcept {
 }
 
 Result<AeadKey> AeadKey::TryGenerate(AeadAlgorithm algorithm) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (auto usable = CheckUsable(algorithm); !usable) {
         return Result<AeadKey>::Failure(usable.Error());
     }
@@ -412,6 +420,7 @@ Result<AeadKey> AeadKey::TryGenerate(AeadAlgorithm algorithm) noexcept {
 }
 
 Result<AeadKey> AeadKey::TryImport(AeadAlgorithm algorithm, Span<const uint8> keyBytes) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (auto usable = CheckUsable(algorithm); !usable) {
         return Result<AeadKey>::Failure(usable.Error());
     }
@@ -430,6 +439,7 @@ Result<AeadKey> AeadKey::TryImport(AeadAlgorithm algorithm, Span<const uint8> ke
 
 Result<AeadKey> TryDeriveAeadKey(const KdfKey& master, uint64 subkeyId, KdfContext context,
                                  AeadAlgorithm algorithm) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (auto usable = CheckUsable(algorithm); !usable) {
         return Result<AeadKey>::Failure(usable.Error());
     }
@@ -448,6 +458,7 @@ Result<AeadKey> TryDeriveAeadKey(const KdfKey& master, uint64 subkeyId, KdfConte
 
 Result<usize> TrySeal(const AeadKey& key, Span<const uint8> associatedData,
                       Span<const uint8> plaintext, Span<uint8> output) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (key.IsEmpty()) {
         return Result<usize>::Failure(ErrorCode::StaleHandle);
     }
@@ -488,6 +499,7 @@ Result<usize> TrySeal(const AeadKey& key, Span<const uint8> associatedData,
 
 Result<usize> TryOpen(const AeadKey& key, Span<const uint8> associatedData,
                       Span<const uint8> sealed, Span<uint8> plaintext) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (key.IsEmpty()) {
         return Result<usize>::Failure(ErrorCode::StaleHandle);
     }
@@ -527,6 +539,7 @@ Result<usize> TryOpen(const AeadKey& key, Span<const uint8> associatedData,
 // ---- hazmat ----
 
 Result<void> hazmat::TryExportKey(const AeadKey& key, Span<uint8> output) noexcept {
+    platform::DataIndependentTimingScope dit;
     const Span<const uint8> bytes = detail::KeyAccess::Bytes(key);
     if (bytes.IsEmpty()) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
@@ -584,6 +597,7 @@ void SealCombined(const AeadKey& key, Span<const uint8> nonce, Span<const uint8>
 Result<usize> hazmat::TrySealWithNonce(const AeadKey& key, Span<const uint8> nonce,
                                        Span<const uint8> associatedData,
                                        Span<const uint8> plaintext, Span<uint8> sealed) noexcept {
+    platform::DataIndependentTimingScope dit;
     auto sealedBytes = CheckSealWithNonce(key, nonce, associatedData, plaintext, sealed);
     if (sealedBytes) {
         SealCombined(key, nonce, associatedData, plaintext, sealed, sealedBytes.Value());
@@ -595,6 +609,7 @@ Result<usize> hazmat::TrySealWithNonce(const AeadKey& key, Span<const uint8> non
 Result<usize> hazmat::TryOpenWithNonce(const AeadKey& key, Span<const uint8> nonce,
                                        Span<const uint8> associatedData, Span<const uint8> sealed,
                                        Span<uint8> plaintext) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (auto valid = CheckHazmat(key, nonce); !valid) {
         return Result<usize>::Failure(valid.Error());
     }
@@ -627,6 +642,7 @@ Result<usize> hazmat::TryOpenWithNonce(const AeadKey& key, Span<const uint8> non
 Result<void> hazmat::TrySealDetached(const AeadKey& key, Span<const uint8> nonce,
                                      Span<const uint8> associatedData, Span<const uint8> plaintext,
                                      Span<uint8> ciphertext, Span<uint8> tag) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (auto valid = CheckHazmat(key, nonce); !valid) {
         return valid;
     }
@@ -654,6 +670,7 @@ Result<void> hazmat::TrySealDetached(const AeadKey& key, Span<const uint8> nonce
 Result<void> hazmat::TryOpenDetached(const AeadKey& key, Span<const uint8> nonce,
                                      Span<const uint8> associatedData, Span<const uint8> ciphertext,
                                      Span<const uint8> tag, Span<uint8> plaintext) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (auto valid = CheckHazmat(key, nonce); !valid) {
         return valid;
     }
@@ -789,6 +806,7 @@ hazmat::AeadSequenceSealer::AeadSequenceSealer(AeadKey&& key, SecretBytes&& iv) 
 
 Result<hazmat::AeadSequenceSealer>
 hazmat::AeadSequenceSealer::TryCreate(AeadKey&& key, Span<const uint8> iv) noexcept {
+    platform::DataIndependentTimingScope dit;
     auto parts = TryMakeSequenceParts(Move(key), iv);
     if (!parts) {
         return Result<AeadSequenceSealer>::Failure(parts.Error());
@@ -801,6 +819,7 @@ hazmat::AeadSequenceSealer::TryCreate(AeadKey&& key, Span<const uint8> iv) noexc
 Result<hazmat::AeadSequenceSealer>
 hazmat::AeadSequenceSealer::TryDerive(const KdfKey& master, uint64 subkeyId, KdfContext context,
                                       AeadAlgorithm algorithm) noexcept {
+    platform::DataIndependentTimingScope dit;
     auto parts = TryDeriveSequenceParts(master, subkeyId, context, algorithm);
     if (!parts) {
         return Result<AeadSequenceSealer>::Failure(parts.Error());
@@ -813,6 +832,7 @@ hazmat::AeadSequenceSealer::TryDerive(const KdfKey& master, uint64 subkeyId, Kdf
 Result<usize> hazmat::AeadSequenceSealer::TrySeal(Span<const uint8> associatedData,
                                                   Span<const uint8> plaintext,
                                                   Span<uint8> sealed) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (key_.IsEmpty()) {
         return Result<usize>::Failure(ErrorCode::StaleHandle);
     }
@@ -854,6 +874,7 @@ hazmat::AeadSequenceOpener::AeadSequenceOpener(AeadKey&& key, SecretBytes&& iv) 
 
 Result<hazmat::AeadSequenceOpener>
 hazmat::AeadSequenceOpener::TryCreate(AeadKey&& key, Span<const uint8> iv) noexcept {
+    platform::DataIndependentTimingScope dit;
     auto parts = TryMakeSequenceParts(Move(key), iv);
     if (!parts) {
         return Result<AeadSequenceOpener>::Failure(parts.Error());
@@ -866,6 +887,7 @@ hazmat::AeadSequenceOpener::TryCreate(AeadKey&& key, Span<const uint8> iv) noexc
 Result<hazmat::AeadSequenceOpener>
 hazmat::AeadSequenceOpener::TryDerive(const KdfKey& master, uint64 subkeyId, KdfContext context,
                                       AeadAlgorithm algorithm) noexcept {
+    platform::DataIndependentTimingScope dit;
     auto parts = TryDeriveSequenceParts(master, subkeyId, context, algorithm);
     if (!parts) {
         return Result<AeadSequenceOpener>::Failure(parts.Error());
@@ -878,6 +900,7 @@ hazmat::AeadSequenceOpener::TryDerive(const KdfKey& master, uint64 subkeyId, Kdf
 Result<usize> hazmat::AeadSequenceOpener::TryOpen(Span<const uint8> associatedData,
                                                   Span<const uint8> sealed,
                                                   Span<uint8> plaintext) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (key_.IsEmpty()) {
         return Result<usize>::Failure(ErrorCode::StaleHandle);
     }

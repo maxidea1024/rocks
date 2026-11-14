@@ -10,6 +10,7 @@
 #include "Sodium/SodiumRuntime.h"
 
 #include <Platform/Fatal.h>
+#include <Platform/DataIndependentTiming.h>
 #include <Platform/Memory.h>
 
 #include <sodium.h>
@@ -74,6 +75,7 @@ void Expand(HkdfAlgorithm algorithm, Span<const uint8> prk, Span<const uint8> in
 
 Result<void> TryHkdf(HkdfAlgorithm algorithm, Span<const uint8> inputKeyMaterial,
                      Span<const uint8> salt, Span<const uint8> info, Span<uint8> output) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (!IsDefined(algorithm) || output.Size() > MaxOutputBytes(algorithm) ||
         Overlaps(output, inputKeyMaterial) || Overlaps(output, salt) || Overlaps(output, info)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -94,6 +96,7 @@ Result<void> TryHkdf(HkdfAlgorithm algorithm, Span<const uint8> inputKeyMaterial
 
 Result<void> TryHkdfExtract(HkdfAlgorithm algorithm, Span<const uint8> salt,
                             Span<const uint8> inputKeyMaterial, Span<uint8> prk) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (!IsDefined(algorithm) || prk.Size() != PrkBytes(algorithm) || Overlaps(prk, salt) ||
         Overlaps(prk, inputKeyMaterial)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -106,6 +109,7 @@ Result<void> TryHkdfExtract(HkdfAlgorithm algorithm, Span<const uint8> salt,
 
 Result<void> TryHkdfExpand(HkdfAlgorithm algorithm, Span<const uint8> prk, Span<const uint8> info,
                            Span<uint8> output) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (!IsDefined(algorithm) || prk.Size() != PrkBytes(algorithm) ||
         output.Size() > MaxOutputBytes(algorithm) || Overlaps(output, prk) ||
         Overlaps(output, info)) {
@@ -120,6 +124,7 @@ Result<void> TryHkdfExpand(HkdfAlgorithm algorithm, Span<const uint8> prk, Span<
 // ---- KdfKey ----
 
 Result<KdfKey> KdfKey::TryGenerate() noexcept {
+    platform::DataIndependentTimingScope dit;
     auto key = SecretBytes::TryGenerate(KdfKeyBytes);
     if (!key) {
         return Result<KdfKey>::Failure(key.Error());
@@ -129,6 +134,7 @@ Result<KdfKey> KdfKey::TryGenerate() noexcept {
 }
 
 Result<KdfKey> KdfKey::TryImport(Span<const uint8> keyBytes) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (keyBytes.Size() != KdfKeyBytes) {
         return Result<KdfKey>::Failure(ErrorCode::InvalidArgument);
     }
@@ -142,6 +148,7 @@ Result<KdfKey> KdfKey::TryImport(Span<const uint8> keyBytes) noexcept {
 }
 
 Result<void> hazmat::TryExportKey(const KdfKey& key, Span<uint8> output) noexcept {
+    platform::DataIndependentTimingScope dit;
     const Span<const uint8> bytes = detail::KeyAccess::Bytes(key);
     if (bytes.IsEmpty()) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
@@ -156,12 +163,14 @@ Result<void> hazmat::TryExportKey(const KdfKey& key, Span<uint8> output) noexcep
 }
 
 void detail::KdfContextNeedsNulTerminatedLiteral() noexcept {
+    platform::DataIndependentTimingScope dit;
 }
 
 // ---- BLAKE2b KDF ----
 
 Result<SecretBytes> TryDeriveSecret(const KdfKey& master, uint64 subkeyId, KdfContext context,
                                     usize bytes) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (master.IsEmpty()) {
         return Result<SecretBytes>::Failure(ErrorCode::StaleHandle);
     }
@@ -186,6 +195,7 @@ Result<SecretBytes> TryDeriveSecret(const KdfKey& master, uint64 subkeyId, KdfCo
 Result<SecretBytes> detail::TryDeriveTypedSecret(const KdfKey& master, uint64 subkeyId,
                                                  KdfContext context, KdfTypeTag tag,
                                                  usize bytes) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (master.IsEmpty()) {
         return Result<SecretBytes>::Failure(ErrorCode::StaleHandle);
     }
@@ -212,6 +222,7 @@ Result<SecretBytes> detail::TryDeriveTypedSecret(const KdfKey& master, uint64 su
 
 Result<MacKey> TryDeriveMacKey(const KdfKey& master, uint64 subkeyId, KdfContext context,
                                MacAlgorithm algorithm) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (!detail::IsDefinedMacAlgorithm(algorithm)) {
         return Result<MacKey>::Failure(ErrorCode::InvalidArgument);
     }
@@ -228,6 +239,7 @@ Result<MacKey> TryDeriveMacKey(const KdfKey& master, uint64 subkeyId, KdfContext
 }
 
 Result<KdfKey> TryDeriveKdfKey(const KdfKey& master, uint64 subkeyId, KdfContext context) noexcept {
+    platform::DataIndependentTimingScope dit;
     auto secret =
         detail::TryDeriveTypedSecret(master, subkeyId, context, detail::KdfKeyTypeTag, KdfKeyBytes);
     if (!secret) {
@@ -239,6 +251,7 @@ Result<KdfKey> TryDeriveKdfKey(const KdfKey& master, uint64 subkeyId, KdfContext
 
 Result<KdfKey> TryDeriveBoundKdfKey(const KdfKey& master, uint64 subkeyId, KdfContext context,
                                     Span<const Span<const uint8>> transcript) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (master.IsEmpty()) {
         return Result<KdfKey>::Failure(ErrorCode::StaleHandle);
     }

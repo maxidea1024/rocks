@@ -210,6 +210,7 @@ PlatformBase `CpuFeatures`에 다음 필드를 더한다. 기존 `avx` 필드(XG
 | `aes`·`pclmulqdq` | CPUID.1:ECX[25]·[1] | — |
 | `sha` | CPUID.7.0:EBX[29] | — |
 | `armAes`·`armPmull`·`armSha2` | — | macOS `sysctlbyname("hw.optional.arm.FEAT_AES")`·`FEAT_PMULL`·`FEAT_SHA256`, Android `getauxval(AT_HWCAP)`의 `HWCAP_AES`·`HWCAP_PMULL`·`HWCAP_SHA2` |
+| `armDit` | — | macOS `sysctlbyname("hw.optional.arm.FEAT_DIT")`(이름이 없는 구버전 OS는 false). 다른 OS는 아직 감지하지 않는다(6.3절 DIT) |
 
 - **일치 시험.** `sodium_runtime_has_aesni`·`_pclmul`·`_avx`가 x86 필드와, `sodium_runtime_has_armcrypto`가 `armAes`와 같아야 한다(libsodium은 HWCAP의 AES bit만 보고 PMULL은 보지 않는다). 다르면 빌드 정의 누락이므로 시험이 실패한다. libsodium이 하드웨어 경로를 오류 없이 끄는 문제를 이 시험이 잡는다.
 - **실행 시점 판정.** 시험이 없는 기기(Android arm64 실기기)를 위해, libsodium 경로의 `available`은 `CpuFeatures`와 `sodium_runtime_has_*`가 모두 참일 때만 참이다. 빌드 정의가 빠져 libsodium이 AEGIS를 soft로 돌리는 기기에서 Rocks가 `available = true`를 보고하지 않게 하기 위해서다. 경량 계층은 `CpuFeatures`와 자가 시험(5.3절)으로 판정한다.
@@ -221,7 +222,7 @@ ARMv8.0의 Crypto Extensions는 선택 기능이어서 저가 SoC에는 없을 �
 
 - `TryGetAeadInfo`는 `available = false`를 돌려주고, `GetPreferredAead()`는 XChaCha20-Poly1305를 돌려준다. AES 명령이 있을 때 무엇을 돌려줄지는 결정 D2다.
 - AES로 봉인한 데이터는 그런 기기에서 열 수 없다. 그래서 형식을 고르는 쪽(쿠커·저장 도구)은 대상 기기군에 HW가 없을 수 있으면 ChaCha20-Poly1305 계열(세그먼트 형식 포함)을 고른다.
-- **ARM DIT.** 공개 연구(GoFetch, 2024)는 Apple M1·M2의 데이터 메모리 의존 prefetcher가 상수 시간 코드에서도 비밀을 흘릴 수 있음을 보였다. M3 이상은 DIT(Data Independent Timing)를 켜면 이 prefetcher가 꺼진다. macOS arm64가 대상이므로, FEAT_DIT가 있으면 암호 연산 구간에서 DIT를 켜는 것을 C1에 넣는다(결정 D12). M1·M2는 끌 방법이 없어 한계로 적는다. libsodium도 DIT 검토를 끝내지 않았다(로드맵).
+- **ARM DIT.** 공개 연구(GoFetch, 2024)는 Apple M1·M2의 데이터 메모리 의존 prefetcher가 상수 시간 코드에서도 비밀을 흘릴 수 있음을 보였다. M3 이상은 DIT(Data Independent Timing)를 켜면 이 prefetcher가 꺼진다. macOS arm64가 대상이므로, FEAT_DIT가 있으면 암호 연산 구간에서 DIT를 켜는 것을 C1에 넣는다(결정 D12). M1·M2는 끌 방법이 없어 한계로 적는다. libsodium도 DIT 검토를 끝내지 않았다(로드맵). 구현(2026-11-15): PlatformBase `Platform/DataIndependentTiming.h`의 `DataIndependentTimingScope`가 FEAT_DIT가 있고 꺼져 있을 때만 PSTATE.DIT를 켜고, 범위가 끝나면 그 범위가 켠 경우에만 끈다(스레드 상태, 겹친 범위는 바깥 범위가 끝날 때까지 유지). 읽기는 범용 시스템 레지스터 이름(`S3_3_C4_C2_5`), 쓰기는 MSR(immediate) 인코딩이라 `+dit` 없이 모든 arm64 대상(macOS·Android·Windows)에서 어셈블된다. Crypto는 비밀을 다루는 모든 공개 진입점(Aead·Mac·Kdf·PasswordHash·Hash·Signature·KeyExchange·Kem·Bytes의 익명 namespace 밖 함수, 생성자·소멸자 제외)에서 범위를 연다. 감지는 지금 macOS만이라 다른 대상에서는 아무 일도 하지 않는다. 실기기 확인은 macOS arm64 CI 몫이다(Windows 호스트에서는 cross 컴파일로 어셈블만 확인했다).
 
 ### 6.4 성능 gate
 

@@ -9,6 +9,7 @@
 #include "Sodium/SodiumRuntime.h"
 
 #include <Core/Move.h>
+#include <Platform/DataIndependentTiming.h>
 #include <Platform/Memory.h>
 
 #include <sodium.h>
@@ -106,6 +107,7 @@ Result<SecretBytes> TryCreateSharedSecret() noexcept {
 } // namespace
 
 Result<KemInfo> TryGetKemInfo(KemAlgorithm algorithm) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (!IsDefined(algorithm)) {
         return Result<KemInfo>::Failure(ErrorCode::InvalidArgument);
     }
@@ -119,6 +121,7 @@ Result<KemInfo> TryGetKemInfo(KemAlgorithm algorithm) noexcept {
 }
 
 KemAlgorithm GetPreferredKem() noexcept {
+    platform::DataIndependentTimingScope dit;
     return KemAlgorithm::XWing;
 }
 
@@ -126,6 +129,7 @@ KemAlgorithm GetPreferredKem() noexcept {
 
 Result<KemPublicKey> KemPublicKey::TryFromBytes(KemAlgorithm algorithm,
                                                 Span<const uint8> bytes) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (!IsDefined(algorithm) || bytes.Size() != TraitsOf(algorithm).publicKeyBytes) {
         return Result<KemPublicKey>::Failure(ErrorCode::InvalidArgument);
     }
@@ -142,6 +146,7 @@ KemKeyPair::KemKeyPair(SecretBytes&& seed, const KemPublicKey& publicKey) noexce
 }
 
 Result<KemKeyPair> KemKeyPair::TryGenerate(KemAlgorithm algorithm) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (!IsDefined(algorithm)) {
         return Result<KemKeyPair>::Failure(ErrorCode::InvalidArgument);
     }
@@ -159,6 +164,7 @@ Result<KemKeyPair> KemKeyPair::TryGenerate(KemAlgorithm algorithm) noexcept {
 
 Result<KemKeyPair> KemKeyPair::TryFromSeed(KemAlgorithm algorithm,
                                            Span<const uint8> seed) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (!IsDefined(algorithm) || seed.Size() != TraitsOf(algorithm).seedBytes) {
         return Result<KemKeyPair>::Failure(ErrorCode::InvalidArgument);
     }
@@ -167,6 +173,7 @@ Result<KemKeyPair> KemKeyPair::TryFromSeed(KemAlgorithm algorithm,
 }
 
 Result<void> hazmat::TryExportSeed(const KemKeyPair& key, Span<uint8> output) noexcept {
+    platform::DataIndependentTimingScope dit;
     const Span<const uint8> seed = detail::KeyAccess::Bytes(key);
     if (seed.IsEmpty()) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
@@ -183,6 +190,7 @@ Result<void> hazmat::TryExportSeed(const KemKeyPair& key, Span<uint8> output) no
 // ---- 캡슐화 ----
 
 Result<KdfKey> TryEncapsulate(const KemPublicKey& recipient, Span<uint8> ciphertext) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (recipient.IsEmpty() ||
         ciphertext.Size() != TraitsOf(recipient.Algorithm()).ciphertextBytes) {
         return Result<KdfKey>::Failure(ErrorCode::InvalidArgument);
@@ -210,6 +218,7 @@ Result<KdfKey> TryEncapsulate(const KemPublicKey& recipient, Span<uint8> ciphert
 }
 
 Result<KdfKey> TryDecapsulate(const KemKeyPair& recipient, Span<const uint8> ciphertext) noexcept {
+    platform::DataIndependentTimingScope dit;
     const Span<const uint8> seed = detail::KeyAccess::Bytes(recipient);
     if (seed.IsEmpty()) {
         return Result<KdfKey>::Failure(ErrorCode::StaleHandle);

@@ -9,6 +9,7 @@
 #include "Sodium/SodiumRuntime.h"
 
 #include <Core/Move.h>
+#include <Platform/DataIndependentTiming.h>
 #include <Platform/Memory.h>
 
 #include <sodium.h>
@@ -160,10 +161,12 @@ Result<KxSessionKeys> TrySessionKeys(bool client, const KxKeyPair& self, const K
 // ---- 공개키·키 쌍 ----
 
 Result<KxPublicKey> KxPublicKey::TryFromBytes(Span<const uint8> bytes) noexcept {
+    platform::DataIndependentTimingScope dit;
     return TryPublicKeyFromBytes<KxPublicKey>(bytes);
 }
 
 Result<BoxPublicKey> BoxPublicKey::TryFromBytes(Span<const uint8> bytes) noexcept {
+    platform::DataIndependentTimingScope dit;
     return TryPublicKeyFromBytes<BoxPublicKey>(bytes);
 }
 
@@ -172,10 +175,12 @@ KxKeyPair::KxKeyPair(SecretBytes&& key, const uint8* publicKey) noexcept : key_(
 }
 
 Result<KxKeyPair> KxKeyPair::TryGenerate() noexcept {
+    platform::DataIndependentTimingScope dit;
     return TryKeyPairFrom<KxKeyPair>(TryGenerateX25519());
 }
 
 Result<KxKeyPair> KxKeyPair::TryImport(Span<const uint8> secretKey) noexcept {
+    platform::DataIndependentTimingScope dit;
     return TryKeyPairFrom<KxKeyPair>(TryMakeX25519(secretKey));
 }
 
@@ -184,18 +189,22 @@ BoxKeyPair::BoxKeyPair(SecretBytes&& key, const uint8* publicKey) noexcept : key
 }
 
 Result<BoxKeyPair> BoxKeyPair::TryGenerate() noexcept {
+    platform::DataIndependentTimingScope dit;
     return TryKeyPairFrom<BoxKeyPair>(TryGenerateX25519());
 }
 
 Result<BoxKeyPair> BoxKeyPair::TryImport(Span<const uint8> secretKey) noexcept {
+    platform::DataIndependentTimingScope dit;
     return TryKeyPairFrom<BoxKeyPair>(TryMakeX25519(secretKey));
 }
 
 Result<void> hazmat::TryExportKey(const KxKeyPair& key, Span<uint8> output) noexcept {
+    platform::DataIndependentTimingScope dit;
     return TryExportSecret(key, output);
 }
 
 Result<void> hazmat::TryExportKey(const BoxKeyPair& key, Span<uint8> output) noexcept {
+    platform::DataIndependentTimingScope dit;
     return TryExportSecret(key, output);
 }
 
@@ -203,17 +212,20 @@ Result<void> hazmat::TryExportKey(const BoxKeyPair& key, Span<uint8> output) noe
 
 Result<KxSessionKeys> TryClientSessionKeys(const KxKeyPair& client, const KxPublicKey& server,
                                            AeadAlgorithm algorithm) noexcept {
+    platform::DataIndependentTimingScope dit;
     return TrySessionKeys(true, client, server, algorithm);
 }
 
 Result<KxSessionKeys> TryServerSessionKeys(const KxKeyPair& server, const KxPublicKey& client,
                                            AeadAlgorithm algorithm) noexcept {
+    platform::DataIndependentTimingScope dit;
     return TrySessionKeys(false, server, client, algorithm);
 }
 
 // ---- sealed box ----
 
 Result<usize> TryGetSealedBoxBytes(usize messageBytes) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (messageBytes > MaxSize - SealedBoxOverheadBytes) {
         return Result<usize>::Failure(ErrorCode::Overflow);
     }
@@ -223,6 +235,7 @@ Result<usize> TryGetSealedBoxBytes(usize messageBytes) noexcept {
 
 Result<usize> TrySealToRecipient(const BoxPublicKey& recipient, Span<const uint8> message,
                                  Span<uint8> output) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (message.Size() > MaxSealedBoxMessageBytes) {
         return Result<usize>::Failure(ErrorCode::CapacityExceeded);
     }
@@ -252,6 +265,7 @@ Result<usize> TrySealToRecipient(const BoxPublicKey& recipient, Span<const uint8
 
 Result<usize> TryOpenSealed(const BoxKeyPair& recipient, Span<const uint8> sealed,
                             Span<uint8> plaintext) noexcept {
+    platform::DataIndependentTimingScope dit;
     const Span<const uint8> secretKey = detail::KeyAccess::Bytes(recipient);
     if (secretKey.IsEmpty()) {
         return Result<usize>::Failure(ErrorCode::StaleHandle);

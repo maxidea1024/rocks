@@ -6,6 +6,7 @@
 #include "Sodium/SodiumRuntime.h"
 
 #include <Core/Move.h>
+#include <Platform/DataIndependentTiming.h>
 #include <Platform/Memory.h>
 
 #include <sodium.h>
@@ -146,6 +147,7 @@ Result<PasswordCost> ParseEncoded(StringView encoded,
 
 Result<SecretBytes> TryDerivePasswordSecret(Span<const uint8> password, Span<const uint8> salt,
                                             PasswordCost cost, usize bytes) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (salt.Size() != PasswordSaltBytes || bytes < MinPasswordSecretBytes ||
         bytes > MaxPasswordSecretBytes || !IsValidPasswordLength(password)) {
         return Result<SecretBytes>::Failure(ErrorCode::InvalidArgument);
@@ -173,6 +175,7 @@ Result<SecretBytes> TryDerivePasswordSecret(Span<const uint8> password, Span<con
 
 Result<KdfKey> TryDeriveKdfKeyFromPassword(Span<const uint8> password, Span<const uint8> salt,
                                            PasswordCost cost) noexcept {
+    platform::DataIndependentTimingScope dit;
     auto secret = TryDerivePasswordSecret(password, salt, cost, KdfKeyBytes);
     if (!secret) {
         return Result<KdfKey>::Failure(secret.Error());
@@ -184,6 +187,7 @@ Result<KdfKey> TryDeriveKdfKeyFromPassword(Span<const uint8> password, Span<cons
 
 Result<usize> TryHashPassword(Span<const uint8> password, PasswordCost cost,
                               Span<char> text) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (!IsValidPasswordLength(password) || Overlaps(password, text)) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
@@ -207,6 +211,7 @@ Result<usize> TryHashPassword(Span<const uint8> password, PasswordCost cost,
 }
 
 Result<void> TryVerifyPassword(StringView encoded, Span<const uint8> password) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (!IsValidPasswordLength(password)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -241,6 +246,7 @@ Result<void> TryVerifyPassword(StringView encoded, Span<const uint8> password) n
 }
 
 Result<bool> TryPasswordNeedsRehash(StringView encoded, PasswordCost cost) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (auto valid = CheckCost(cost); !valid) {
         return Result<bool>::Failure(valid.Error());
     }

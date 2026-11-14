@@ -1,5 +1,6 @@
 #include <Base/Compiler.h>
 #include <Platform/Cpu.h>
+#include <Platform/DataIndependentTiming.h>
 #include <Platform/SecureRandom.h>
 #include <TestSupport/Test.h>
 #include <stdio.h>
@@ -23,7 +24,7 @@ TEST(Platform_CpuFeaturesAreConsistent) {
         }
     } else {
         CHECK(!features.neon);
-        CHECK(!features.armAes && !features.armPmull && !features.armSha2);
+        CHECK(!features.armAes && !features.armPmull && !features.armSha2 && !features.armDit);
         // AVX2·FMA는 OS가 YMM 상태를 저장할 때만 true이므로 AVX 없이 켜질 수 없다.
         CHECK(!features.avx2 || features.avx);
         CHECK(!features.fma || features.avx);
@@ -31,10 +32,32 @@ TEST(Platform_CpuFeaturesAreConsistent) {
 
     printf("  cpu: sse4.2=%d popcnt=%d avx=%d avx2=%d fma=%d bmi2=%d aes=%d pclmulqdq=%d sha=%d "
            "neon=%d "
-           "armAes=%d armPmull=%d armSha2=%d\n",
+           "armAes=%d armPmull=%d armSha2=%d armDit=%d\n",
            features.sse42, features.popcnt, features.avx, features.avx2, features.fma,
            features.bmi2, features.aes, features.pclmulqdq, features.sha, features.neon,
-           features.armAes, features.armPmull, features.armSha2);
+           features.armAes, features.armPmull, features.armSha2, features.armDit);
+}
+
+TEST(Platform_DataIndependentTimingScope) {
+    // FEAT_DIT가 있으면 범위 안에서 켜지고 바깥 범위가 끝날 때 원래대로 돌아온다. 없으면 아무 일도
+    // 하지 않는다.
+    const bool supported = platform::QueryCpuFeatures().armDit;
+    const bool before = platform::IsDataIndependentTimingEnabled();
+    {
+        platform::DataIndependentTimingScope outer;
+        CHECK(platform::IsDataIndependentTimingEnabled() == supported);
+        {
+            platform::DataIndependentTimingScope inner;
+            CHECK(platform::IsDataIndependentTimingEnabled() == supported);
+        }
+
+        CHECK(platform::IsDataIndependentTimingEnabled() == supported);
+    }
+
+    CHECK(platform::IsDataIndependentTimingEnabled() == before);
+    if (!supported) {
+        CHECK(!platform::BeginDataIndependentTiming());
+    }
 }
 
 TEST(Platform_SecureRandomFillsBuffers) {
