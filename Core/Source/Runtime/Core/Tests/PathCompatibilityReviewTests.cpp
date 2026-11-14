@@ -6,7 +6,7 @@ using namespace rocks;
 
 // UE 5.6은 축약 뒤 "./"를 모두 지워 "a..//"가 "a./", "a.../x"가 "a..x"가 되었다. UE 5.8은 이
 // 일괄 제거를 없애고 "/."로 시작하는 구성 요소만 보므로, 축약할 "/."·"/.."가 없으면 이름 안의
-// 점과 그 뒤 구분자를 그대로 둔다.
+// 점을 그대로 둔다. Rocks는 여기에 더해 겹친 구분자만 하나로 줄인다("a..//" → "a../").
 TEST(PathCompatibilityKeepsOverlappingDotsLikeUe58) {
     SystemAllocator allocator;
     struct Case {
@@ -14,7 +14,7 @@ TEST(PathCompatibilityKeepsOverlappingDotsLikeUe58) {
         StringView expected;
     };
     const Case cases[] = {
-        {"a..//", "a..//"}, {"a.../x", "a.../x"},    {"a/b./c", "a/b./c"},
+        {"a..//", "a../"},  {"a.../x", "a.../x"},    {"a/b./c", "a/b./c"},
         {"a/...", "a/..."}, {"a/.../b/..", "a/..."},
     };
     const PathStyle styles[] = {PathStyle::Windows, PathStyle::Posix};

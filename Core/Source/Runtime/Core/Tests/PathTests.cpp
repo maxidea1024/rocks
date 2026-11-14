@@ -567,9 +567,10 @@ TEST(PathUe58FilenameNormalizationIsIndependentFromFullNormalization) {
     CHECK(posix.Value().View() == StringView("a\\b"));
 }
 
-// UE 5.8 FPaths::CollapseRelativeDirectories 결과다(PathViews.cpp 635–829). allCollapsed는
-// RequireAll의 성공 여부(UE 반환값), expected는 AllPossible 결과(UE bCollapseAllPossible=true)이며
-// 모두 축약되면 RequireAll 결과도 같다.
+// UE 5.8 FPaths::CollapseRelativeDirectories 규칙(PathViews.cpp 635–829)의 결과다. 겹친 구분자와
+// 루트 구분자를 지우는 UE 레거시 결과는 Rocks가 고친 값이다(Path.h). allCollapsed는 RequireAll의
+// 성공 여부(UE 반환값), expected는 AllPossible 결과(UE bCollapseAllPossible=true)이며 모두
+// 축약되면 RequireAll 결과도 같다.
 TEST(PathUe58CollapseRelativeDirectoriesAndFailurePreserveInput) {
     SystemAllocator allocator;
     struct Case {
@@ -578,7 +579,8 @@ TEST(PathUe58CollapseRelativeDirectoriesAndFailurePreserveInput) {
         const char* expected;
     };
     const Case cases[] = {
-        // UE 5.8 Tests/Misc/PathTests.h(TestCollapseRelativeDirectories) 표 전체.
+        // UE 5.8 Tests/Misc/PathTests.h(TestCollapseRelativeDirectories) 표 전체. "UE:" 주석이 붙은
+        // 6행은 UE 표가 "incorrect but legacy behavior"로 적은 행이며 Rocks는 루트를 남긴다.
         {"..", false, ".."},
         {"/..", false, "/.."},
         {"./", true, ""},
@@ -587,13 +589,13 @@ TEST(PathUe58CollapseRelativeDirectoriesAndFailurePreserveInput) {
         {"Folder", true, "Folder"},
         {"/Folder", true, "/Folder"},
         {"C:/Folder", true, "C:/Folder"},
-        {"C:/Folder/..", true, "C:"},
+        {"C:/Folder/..", true, "C:/"}, // UE: "C:"
         {"C:/Folder/../", true, "C:/"},
         {"C:/Folder/../file.txt", true, "C:/file.txt"},
         {"Folder/..", true, ""},
         {"Folder/../", true, ""},
         {"Folder/../file.txt", true, "file.txt"},
-        {"/Folder/..", true, ""},
+        {"/Folder/..", true, "/"}, // UE: ""
         {"/Folder/../", true, "/"},
         {"/Folder/../file.txt", true, "/file.txt"},
         {"Folder/../..", false, ".."},
@@ -638,20 +640,20 @@ TEST(PathUe58CollapseRelativeDirectoriesAndFailurePreserveInput) {
          "C:/Folder1/Folder2/..Folder3/Folder5"},
         {"C:/Folder1/..Folder2/Folder3/..Folder4/../Folder5", true,
          "C:/Folder1/..Folder2/Folder3/Folder5"},
-        {"D:/Root/Engine//../..", true, "D:"},
-        {"D:/Root/Engine////////../..", true, "D:"},
+        {"D:/Root/Engine//../..", true, "D:/"},       // UE: "D:"
+        {"D:/Root/Engine////////../..", true, "D:/"}, // UE: "D:"
         {"D:/Root/Engine//../../", true, "D:/"},
         {"D:/Root/Engine////////../../", true, "D:/"},
         {"D:/Root//../..", false, "D:/.."},
         {"D:/Root////////../..", false, "D:/.."},
-        {"//..", true, ""},
-        {"//Root/../..", true, ""},
+        {"//..", false, "//.."},         // UE: (성공, "")
+        {"//Root/../..", false, "//.."}, // UE: (성공, "")
 
         // Rocks 추가: UE 5.6과 결과가 달라진 입력(5.6: 실패, "a..x", "a./", "a/bc", 실패,
-        // 실패, "a").
+        // 실패, "a"). "a..//"는 UE 5.8에서 그대로이고 Rocks는 겹친 구분자만 줄인다.
         {"..hidden/file", true, "..hidden/file"},
         {"a.../x", true, "a.../x"},
-        {"a..//", true, "a..//"},
+        {"a..//", true, "a../"},
         {"a/b./c", true, "a/b./c"},
         {"a/b:c/../d", true, "a/d"},
         {"C:a/../b", true, "C:b"},
@@ -665,20 +667,35 @@ TEST(PathUe58CollapseRelativeDirectoriesAndFailurePreserveInput) {
         {"C:../a", false, "C:../a"},
         {"a/.././b", true, "./b"},
 
-        // Rocks 추가: 남긴 '..' 뒤의 축약과, 지울 범위가 이미 남긴 '..'에 걸치는 경우.
+        // Rocks 추가: 남긴 '..' 뒤의 축약.
         {"../a/./b/../c", false, "../a/c"},
         {"../../Game/./Content", false, "../../Game/Content"},
         {"../game/./assets/../level", false, "../game/level"},
         {"C:/../a/../b", false, "C:/../b"},
-        {"C:/..//../x", false, "C:/..//../x"},
 
-        // Rocks 추가: 겹친 구분자에 대한 UE 레거시 결과(Path.h). 의미가 바뀌어도 UE와 같게 둔다.
-        {"C://..", true, "C:"},
-        {"C://../x", true, "C:x"},
-        {"C:/a/..//../x", true, "C:x"},
-        {"a/..//x", true, "/x"},
-        {"/a/..//x", true, "//x"},
-        {"..//../Game", false, "..Game"},
+        // Rocks 추가: 끝까지 지워도 루트 구분자는 남긴다(UE: "", "C:").
+        {"/a/../.", true, "/"},
+        {"C:/a/../.", true, "C:/"},
+
+        // Rocks 추가: 루트 뒤의 겹친 구분자는 하나로 줄인다. 괄호는 UE 5.8 결과다.
+        {"a//b", true, "a/b"},                // ("a//b")
+        {"a//..", true, ""},                  // ("")
+        {"a/..//x", true, "x"},               // ("/x")
+        {"/a/..//x", true, "/x"},             // ("//x")
+        {".//a", true, "a"},                  // ("/a")
+        {"C:.//a", true, "C:a"},              // ("C:/a")
+        {"C://../x", false, "C://../x"},      // (성공, "C:x")
+        {"C:/a/..//../x", false, "C:/../x"},  // (성공, "C:x")
+        {"C:/..//../x", false, "C:/../../x"}, // ("C:/..//../x")
+        {"..//../Game", false, "../../Game"}, // ("..Game")
+        {"http://host/a/../b", true, "http://host/b"},
+
+        // Rocks 추가: 루트 구분자 연속("//server")은 그대로 두고 그 바로 뒤의 '..'는 축약하지
+        // 않는다.
+        {"C://..", false, "C://.."}, // (성공, "C:")
+        {"//a/..", true, "//"},      // ("/")
+        {"//a/../b", true, "//b"},
+        {"//.", true, "//."}, // ("/")
     };
     const PathStyle styles[] = {PathStyle::Posix, PathStyle::Windows};
     for (PathStyle style : styles) {

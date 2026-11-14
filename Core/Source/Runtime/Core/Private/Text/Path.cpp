@@ -345,8 +345,17 @@ Result<void> ValidateCompatibilityPath(StringView path, PathStyle style) noexcep
     return Result<void>::Success();
 }
 
-// text[start, start + count)를 지우고 뒤를 당긴다. size는 새 길이로 바뀐다.
-void RemoveCollapseRange(char* text, usize& size, usize start, usize count) noexcept {
+// text[start, start + count)를 지우고 뒤를 당긴다. size는 새 길이로 바뀐다. 지울 범위가 문자열
+// 끝까지 이어지면 루트 구분자 연속 [.., rootEnd)는 남긴다. UE 5.8은 이때 루트 구분자도 지워
+// "C:/a/.."가 "C:", "/a/.."가 빈 값이 되는데, UE 시험 표도 이를 잘못된 레거시 동작으로 적는다.
+// 끝까지가 아닌 범위는 뒤의 '/'가 그 자리로 당겨지므로 루트 구분자 수가 그대로 유지된다.
+void RemoveCollapseRange(char* text, usize& size, usize start, usize count,
+                         usize rootEnd) noexcept {
+    if (start < rootEnd && start + count == size) {
+        count -= rootEnd - start;
+        start = rootEnd;
+    }
+
     for (usize index = start + count; index < size; ++index) {
         text[index - count] = text[index];
     }
@@ -376,36 +385,70 @@ usize FindLastSlash(const char* text, usize end) noexcept {
     return IndexNone;
 }
 
-// UE 5.8 CollapseRelativeDirectoriesImplTemplate(PathViews.cpp 635–829)와 같은 규칙으로
-// text[0, size)를 제자리에서 축약하고 새 길이를 반환한다. 축약할 수 없는 '..'가 있으면
-// allCollapsed를 false로 둔다. stopAtUncollapsible이면 그 자리에서 멈추며, 이때 text는 일부만
-// 축약된 중간 상태이므로 호출자가 버린다(UE는 이 중간 상태를 그대로 남긴다).
+// rootEnd 뒤의 '/' 연속을 '/' 하나로 줄이고 새 길이를 반환한다.
+usize CollapseSeparatorRuns(char* text, usize size, usize rootEnd) noexcept {
+    usize write = rootEnd;
+    for (usize read = rootEnd; read < size; ++read) {
+        if (text[read] == '/' && write > rootEnd && text[write - 1] == '/') {
+            continue;
+        }
+
+        text[write] = text[read];
+        ++write;
+    }
+
+    return write;
+}
+
+// UE 5.8 CollapseRelativeDirectoriesImplTemplate(PathViews.cpp 635–829)의 규칙으로 text[0, size)를
+// 제자리에서 축약하고 새 길이를 반환한다. 축약할 수 없는 '..'가 있으면 allCollapsed를 false로
+// 둔다. stopAtUncollapsible이면 그 자리에서 멈추며, 이때 text는 일부만 축약된 중간 상태이므로
+// 호출자가 버린다(UE는 이 중간 상태를 그대로 남긴다).
+//
+// UE 5.8과 다른 점은 뜻이 바뀌는 결과를 막는 두 가지다(겹친 구분자가 없고 루트를 지우지 않는
+// 입력은 UE 5.8과 결과가 같다).
+// - 루트 구분자 연속 뒤의 겹친 구분자는 먼저 하나로 줄인다. UE 주석(PathViews.cpp 755–761)은 겹친
+//   구분자를 "없앤 것처럼" 축약한다고 하지만 실제로는 '..' 앞의 연속만 그렇게 다루어
+//   "C://../x"가 "C:x", "a/..//x"가 "/x"가 된다. 루트 구분자 연속("//server"의 "//")은 개수가 뜻을
+//   가질 수 있으므로 그대로 두고, 그 바로 뒤의 '..'는 축약할 수 없다(UE 5.8은 "//.."를 빈 값으로
+//   만든다).
+// - 문자열 끝까지 지울 때 루트 구분자는 남긴다(RemoveCollapseRange).
 usize CollapseInPlace(char* text, usize size, bool stopAtUncollapsible,
                       bool& allCollapsed) noexcept {
     allCollapsed = true;
 
-    // 축약해도 되는 첫 위치다. 지울 수 없는 앞부분(볼륨, 축약할 수 없는 '..')을 지나면 뒤로 민다.
-    usize start = 0;
-
     // 첫 '/'보다 앞에 ':'가 있으면 볼륨 지정자("C:", "Storage:")로 보고 그 뒤부터 축약한다.
     // 첫 '/' 뒤의 ':'는 일반 문자다.
+    usize volumeEnd = 0;
     for (usize index = 0; index < size; ++index) {
         if (text[index] == '/') {
             break;
         }
 
         if (text[index] == ':') {
-            start = index + 1;
+            volumeEnd = index + 1;
             break;
         }
     }
 
+    // 볼륨 바로 뒤(볼륨이 없으면 맨 앞)의 '/' 연속이 루트다. 축약 중에도 지우거나 줄이지 않는다.
+    usize rootEnd = volumeEnd;
+    while (rootEnd < size && text[rootEnd] == '/') {
+        ++rootEnd;
+    }
+
+    size = CollapseSeparatorRuns(text, size, rootEnd);
+
+    // 축약해도 되는 첫 위치다. 축약할 수 없는 '..'를 지나면 뒤로 민다.
+    usize start = volumeEnd;
+
     // 아래 반복은 "/."를 찾으므로 선행 "./"("C:./" 포함)는 먼저 한 번만 지운다("././a"는 "./a"가
-    // 된다). 정확히 "/."인 나머지는 지우면 루트가 사라지므로 축약 대상에서 뺀다.
+    // 된다). 루트 뒤에 "."만 있는 나머지("/.", "C:/.", "//.")는 UE처럼 그대로 둔다(UE는 정확히
+    // "/."만 보며, Rocks는 루트 구분자 연속까지 넓혔다).
     if (size - start >= 2 && text[start] == '.' && text[start + 1] == '/') {
-        RemoveCollapseRange(text, size, start, 2);
-    } else if (size - start == 2 && text[start] == '/' && text[start + 1] == '.') {
-        start += 2;
+        RemoveCollapseRange(text, size, start, 2, rootEnd);
+    } else if (rootEnd > volumeEnd && size == rootEnd + 1 && text[rootEnd] == '.') {
+        start = size;
     }
 
     usize next = start;
@@ -430,7 +473,7 @@ usize CollapseInPlace(char* text, usize size, bool stopAtUncollapsible,
 
         // "/./"와 끝의 "/."는 "/."만 지운다.
         if (index + 2 == size || text[index + 2] == '/') {
-            RemoveCollapseRange(text, size, index, 2);
+            RemoveCollapseRange(text, size, index, 2, rootEnd);
             continue;
         }
 
@@ -446,8 +489,9 @@ usize CollapseInPlace(char* text, usize size, bool stopAtUncollapsible,
             continue;
         }
 
-        // 여기서 index는 "/../" 또는 끝의 "/.."다. 축약 가능 구간 맨 앞이면 지울 구성 요소가 없다.
-        if (index == start) {
+        // 여기서 index는 "/../" 또는 끝의 "/.."다. 축약 가능 구간 맨 앞이거나 루트 구분자 바로
+        // 뒤이면 지울 구성 요소가 없다.
+        if (index == start || index < rootEnd) {
             start = index + 3;
             next = start;
             allCollapsed = false;
@@ -458,42 +502,18 @@ usize CollapseInPlace(char* text, usize size, bool stopAtUncollapsible,
             continue;
         }
 
-        // 앞 구성 요소를 찾는다. "foo//.."처럼 겹친 구분자는 하나로 보고 구분자 연속의 맨 앞에서
-        // 다시 앞의 '/'를 찾는다. 연속이 문자열 맨 앞까지 이어지면("//..") UE 레거시 동작대로 선행
-        // 구분자부터 지운다.
-        usize previous = FindLastSlash(text, index);
-        if (previous != IndexNone && previous + 1 == index) {
-            while (previous > 0 && text[previous - 1] == '/') {
-                --previous;
-            }
-
-            if (previous != 0) {
-                previous = FindLastSlash(text, previous);
-            }
-        }
-
-        // 앞에 '/'가 없으면 축약 가능 구간의 시작부터 "foo/.."와 뒤따르는 '/'를 함께 지운다.
+        // 겹친 구분자를 줄였으므로 앞의 '/'는 앞 구성 요소 바로 앞의 구분자이고, 볼륨이나 남긴 '..'
+        // 앞으로 가지 않는다. 앞에 '/'가 없으면 축약 가능 구간의 시작부터 "foo/.."와 뒤따르는 '/'를
+        // 함께 지운다.
+        const usize previous = FindLastSlash(text, index);
         const bool leadingSlash = previous != IndexNone;
         const usize removalStart = leadingSlash ? previous : start;
-
-        // 지울 범위가 볼륨이나 이미 지나친 '..'에 걸치면 축약할 수 없다.
-        if (removalStart < start) {
-            start = index + 3;
-            next = start;
-            allCollapsed = false;
-            if (stopAtUncollapsible) {
-                return size;
-            }
-
-            continue;
-        }
-
         usize count = index - removalStart + 3;
         if (!leadingSlash && removalStart + count < size) {
             ++count;
         }
 
-        RemoveCollapseRange(text, size, removalStart, count);
+        RemoveCollapseRange(text, size, removalStart, count, rootEnd);
         next = removalStart;
     }
 

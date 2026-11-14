@@ -60,7 +60,7 @@ Base → PlatformBase → Core → Task / Localization / Serialization / MetaSch
 | T02 P0 | interned `Name`, None·번호·case 비교·표기 **부분**; 실행·pool 독립 영속 key `NameKey`(알고리즘 v1 고정·12 byte little-endian 인코딩·버전 상수, Name 동등성과 1:1 — 독립 리뷰 41,415개 입력) **완료**. Unicode folding·네트워크 이름 표 **후속** | pool/domain 수명·동시 종료·lease·대소문자·번호 경계·hash/equality·unicode 정책, 안정 영속 ID와 네트워크 표현을 런타임 token과 분리한다. |
 | T03 P1 | Unicode validation·UTF-8/16/32 변환, normalization/case folding·locale **후속** | Unicode 버전과 외부 라이브러리/라이선스, invalid sequence 정책, surrogate·분할 스트림·확장 문자·멀티바이트 인덱스 golden/fuzz. ASCII 기능을 Unicode 전체 지원으로 표시하지 않는다. |
 | T04 P1 | `Text` 지역화 catalog·culture snapshot, plural/gender·숫자·통화·날짜 **부분** | fallback·동시 culture 변경·번역 누락·형식 오류·시간대·대형/음수, 에디터 추출 및 쿠킹 연동. 표시용 Text와 내부 식별 Name을 구분한다. |
-| T05 P0 | 공용 경로 lexical 처리·플랫폼 호스트 문법 선택 **부분**; `RootPart`·`Components`(UE IterateComponents)·`PathLeaf`(UE GetPathLeaf)·`MakePlatformFilename`(UE MakePlatformFilename), NT·device namespace 거부, `CollapseRelativeDirectories`의 UE 5.8 규칙(`PathCollapseMode`로 `bCollapseAllPossible` 대응) **완료** | Windows drive/UNC/root-relative·POSIX root, 상대 계산·정규화·확장자·path join·Unicode·embedded NUL·대소문자. 문자열 정규화만으로 symlink 포함 관계·보안 경계·동일 파일을 보증하지 않는다. |
+| T05 P0 | 공용 경로 lexical 처리·플랫폼 호스트 문법 선택 **부분**; `RootPart`·`Components`(UE IterateComponents)·`PathLeaf`(UE GetPathLeaf)·`MakePlatformFilename`(UE MakePlatformFilename), NT·device namespace 거부, `CollapseRelativeDirectories`의 UE 5.8 규칙(`PathCollapseMode`로 `bCollapseAllPossible` 대응, 겹친 구분자·루트 구분자 레거시 결과는 수정) **완료** | Windows drive/UNC/root-relative·POSIX root, 상대 계산·정규화·확장자·path join·Unicode·embedded NUL·대소문자. 문자열 정규화만으로 symlink 포함 관계·보안 경계·동일 파일을 보증하지 않는다. |
 
 ### 3.4 수학·기본 충돌·SIMD
 
