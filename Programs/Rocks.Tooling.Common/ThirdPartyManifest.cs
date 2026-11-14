@@ -82,7 +82,7 @@ public sealed record ThirdPartyManifest(
 
     /// <summary>
     /// 라이브러리만 받는 컴파일 인자다(manifest <c>compileArguments</c>, 예: libsodium의 <c>-fwrapv</c>). 허용 목록
-    /// <see cref="AllowedCompileArguments"/> 안의 GCC형 철자로 적고, 모듈 규칙이 clang-cl에서는 <c>/clang:</c>을 붙여 넘긴다.
+    /// <see cref="AllowedCompileArguments"/> 안의 GCC형 철자로 적는다. clang-cl도 같은 철자를 받으므로 모든 플랫폼에 그대로 넘긴다.
     /// </summary>
     public IReadOnlyList<string> CompileArguments { get; init; } = [];
 

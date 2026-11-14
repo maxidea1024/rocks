@@ -1,0 +1,956 @@
+diff --git a/src/libsodium/crypto_aead/aegis128l/aegis128l_aesni.h b/src/libsodium/crypto_aead/aegis128l/aegis128l_aesni.h
+--- a/src/libsodium/crypto_aead/aegis128l/aegis128l_aesni.h
++++ b/src/libsodium/crypto_aead/aegis128l/aegis128l_aesni.h
+@@ -5,4 +5,4 @@
+ 
+ extern struct aegis128l_implementation aegis128l_aesni_implementation;
+ 
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/src/libsodium/crypto_aead/aegis128l/aegis128l_armcrypto.h b/src/libsodium/crypto_aead/aegis128l/aegis128l_armcrypto.h
+--- a/src/libsodium/crypto_aead/aegis128l/aegis128l_armcrypto.h
++++ b/src/libsodium/crypto_aead/aegis128l/aegis128l_armcrypto.h
+@@ -5,4 +5,4 @@
+ 
+ extern struct aegis128l_implementation aegis128l_armcrypto_implementation;
+ 
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/src/libsodium/crypto_aead/aegis256/aegis256_aesni.h b/src/libsodium/crypto_aead/aegis256/aegis256_aesni.h
+--- a/src/libsodium/crypto_aead/aegis256/aegis256_aesni.h
++++ b/src/libsodium/crypto_aead/aegis256/aegis256_aesni.h
+@@ -5,4 +5,4 @@
+ 
+ extern struct aegis256_implementation aegis256_aesni_implementation;
+ 
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/src/libsodium/crypto_aead/aegis256/aegis256_armcrypto.h b/src/libsodium/crypto_aead/aegis256/aegis256_armcrypto.h
+--- a/src/libsodium/crypto_aead/aegis256/aegis256_armcrypto.h
++++ b/src/libsodium/crypto_aead/aegis256/aegis256_armcrypto.h
+@@ -5,4 +5,4 @@
+ 
+ extern struct aegis256_implementation aegis256_armcrypto_implementation;
+ 
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/src/libsodium/crypto_aead/aes256gcm/aesni/aead_aes256gcm_aesni.c b/src/libsodium/crypto_aead/aes256gcm/aesni/aead_aes256gcm_aesni.c
+--- a/src/libsodium/crypto_aead/aes256gcm/aesni/aead_aes256gcm_aesni.c
++++ b/src/libsodium/crypto_aead/aes256gcm/aesni/aead_aes256gcm_aesni.c
+@@ -63,8 +63,8 @@
+ #define CLMULHI128(a, b)           _mm_clmulepi64_si128((a), (b), 0x11)
+ #define CLMULLOHI128(a, b)         _mm_clmulepi64_si128((a), (b), 0x10)
+ #define CLMULHILO128(a, b)         _mm_clmulepi64_si128((a), (b), 0x01)
+-#define PREFETCH_READ(x)           _mm_prefetch((x), _MM_HINT_T1)
+-#define PREFETCH_WRITE(x)          _mm_prefetch((x), _MM_HINT_T1)
++#define PREFETCH_READ(x)           _mm_prefetch((const char *) (x), _MM_HINT_T1)
++#define PREFETCH_WRITE(x)          _mm_prefetch((const char *) (x), _MM_HINT_T1)
+ 
+ #define ROUNDS 14
+ 
+diff --git a/src/libsodium/crypto_core/ed25519/ref10/ed25519_ref10.c b/src/libsodium/crypto_core/ed25519/ref10/ed25519_ref10.c
+--- a/src/libsodium/crypto_core/ed25519/ref10/ed25519_ref10.c
++++ b/src/libsodium/crypto_core/ed25519/ref10/ed25519_ref10.c
+@@ -487,23 +487,6 @@
+     fe25519_sub(r->YminusX, p->Y, p->X);
+     fe25519_copy(r->Z, p->Z);
+     fe25519_mul(r->T2d, p->T, d2);
+-}
+-
+-static void
+-ge25519_p3_to_precomp(ge25519_precomp *pi, const ge25519_p3 *p)
+-{
+-    fe25519 recip;
+-    fe25519 x;
+-    fe25519 y;
+-    fe25519 xy;
+-
+-    fe25519_invert(recip, p->Z);
+-    fe25519_mul(x, p->X, recip);
+-    fe25519_mul(y, p->Y, recip);
+-    fe25519_add(pi->yplusx, y, x);
+-    fe25519_sub(pi->yminusx, y, x);
+-    fe25519_mul(xy, x, y);
+-    fe25519_mul(pi->xy2d, xy, d2);
+ }
+ 
+ /*
+diff --git a/src/libsodium/crypto_pwhash/argon2/argon2-core.h b/src/libsodium/crypto_pwhash/argon2/argon2-core.h
+--- a/src/libsodium/crypto_pwhash/argon2/argon2-core.h
++++ b/src/libsodium/crypto_pwhash/argon2/argon2-core.h
+@@ -136,7 +136,7 @@
+  * If so we can reference the current segment
+  * @pre All pointers must be valid
+  */
+-static uint32_t index_alpha(const argon2_instance_t *instance,
++static inline uint32_t index_alpha(const argon2_instance_t *instance,
+                             const argon2_position_t *position, uint32_t pseudo_rand,
+                             int same_lane)
+ {
+diff --git a/src/libsodium/crypto_pwhash/argon2/argon2-fill-block-avx2.c b/src/libsodium/crypto_pwhash/argon2/argon2-fill-block-avx2.c
+--- a/src/libsodium/crypto_pwhash/argon2/argon2-fill-block-avx2.c
++++ b/src/libsodium/crypto_pwhash/argon2/argon2-fill-block-avx2.c
+@@ -199,10 +199,14 @@
+         /* 1.2 Computing the index of the reference block */
+         /* 1.2.1 Taking pseudo-random value from the previous block */
+         if (data_independent_addressing) {
++#ifdef _MSC_VER
+ #pragma warning(push)
+ #pragma warning(disable : 6385)
++#endif
+             pseudo_rand = pseudo_rands[i];
++#ifdef _MSC_VER
+ #pragma warning(pop)
++#endif
+         } else {
+             pseudo_rand = instance->region->memory[prev_offset].v[0];
+         }
+diff --git a/src/libsodium/crypto_pwhash/argon2/argon2-fill-block-avx512f.c b/src/libsodium/crypto_pwhash/argon2/argon2-fill-block-avx512f.c
+--- a/src/libsodium/crypto_pwhash/argon2/argon2-fill-block-avx512f.c
++++ b/src/libsodium/crypto_pwhash/argon2/argon2-fill-block-avx512f.c
+@@ -207,10 +207,14 @@
+         /* 1.2 Computing the index of the reference block */
+         /* 1.2.1 Taking pseudo-random value from the previous block */
+         if (data_independent_addressing) {
++#ifdef _MSC_VER
+ #pragma warning(push)
+ #pragma warning(disable : 6385)
++#endif
+             pseudo_rand = pseudo_rands[i];
++#ifdef _MSC_VER
+ #pragma warning(pop)
++#endif
+         } else {
+             pseudo_rand = instance->region->memory[prev_offset].v[0];
+         }
+diff --git a/src/libsodium/crypto_pwhash/argon2/argon2-fill-block-neon.c b/src/libsodium/crypto_pwhash/argon2/argon2-fill-block-neon.c
+--- a/src/libsodium/crypto_pwhash/argon2/argon2-fill-block-neon.c
++++ b/src/libsodium/crypto_pwhash/argon2/argon2-fill-block-neon.c
+@@ -182,10 +182,14 @@
+         }
+ 
+         if (data_independent_addressing) {
++#ifdef _MSC_VER
+ #pragma warning(push)
+ #pragma warning(disable : 6385)
++#endif
+             pseudo_rand = pseudo_rands[i];
++#ifdef _MSC_VER
+ #pragma warning(pop)
++#endif
+         } else {
+             pseudo_rand = instance->region->memory[prev_offset].v[0];
+         }
+diff --git a/src/libsodium/crypto_pwhash/argon2/argon2-fill-block-ref.c b/src/libsodium/crypto_pwhash/argon2/argon2-fill-block-ref.c
+--- a/src/libsodium/crypto_pwhash/argon2/argon2-fill-block-ref.c
++++ b/src/libsodium/crypto_pwhash/argon2/argon2-fill-block-ref.c
+@@ -196,10 +196,14 @@
+         /* 1.2 Computing the index of the reference block */
+         /* 1.2.1 Taking pseudo-random value from the previous block */
+         if (data_independent_addressing) {
++#ifdef _MSC_VER
+ #pragma warning(push)
+ #pragma warning(disable : 6385)
++#endif
+             pseudo_rand = pseudo_rands[i];
++#ifdef _MSC_VER
+ #pragma warning(pop)
++#endif
+         } else {
+             pseudo_rand = instance->region->memory[prev_offset].v[0];
+         }
+diff --git a/src/libsodium/crypto_pwhash/argon2/argon2-fill-block-ssse3.c b/src/libsodium/crypto_pwhash/argon2/argon2-fill-block-ssse3.c
+--- a/src/libsodium/crypto_pwhash/argon2/argon2-fill-block-ssse3.c
++++ b/src/libsodium/crypto_pwhash/argon2/argon2-fill-block-ssse3.c
+@@ -200,10 +200,14 @@
+         /* 1.2 Computing the index of the reference block */
+         /* 1.2.1 Taking pseudo-random value from the previous block */
+         if (data_independent_addressing) {
++#ifdef _MSC_VER
+ #pragma warning(push)
+ #pragma warning(disable : 6385)
++#endif
+             pseudo_rand = pseudo_rands[i];
++#ifdef _MSC_VER
+ #pragma warning(pop)
++#endif
+         } else {
+             pseudo_rand = instance->region->memory[prev_offset].v[0];
+         }
+diff --git a/src/libsodium/include/sodium/crypto_aead_aegis128l.h b/src/libsodium/include/sodium/crypto_aead_aegis128l.h
+--- a/src/libsodium/include/sodium/crypto_aead_aegis128l.h
++++ b/src/libsodium/include/sodium/crypto_aead_aegis128l.h
+@@ -6,9 +6,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-#ifdef __GNUC__
+-#pragma GCC diagnostic ignored "-Wlong-long"
+-#endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_aead_aegis256.h b/src/libsodium/include/sodium/crypto_aead_aegis256.h
+--- a/src/libsodium/include/sodium/crypto_aead_aegis256.h
++++ b/src/libsodium/include/sodium/crypto_aead_aegis256.h
+@@ -6,9 +6,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-#ifdef __GNUC__
+-#pragma GCC diagnostic ignored "-Wlong-long"
+-#endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_aead_aes256gcm.h b/src/libsodium/include/sodium/crypto_aead_aes256gcm.h
+--- a/src/libsodium/include/sodium/crypto_aead_aes256gcm.h
++++ b/src/libsodium/include/sodium/crypto_aead_aes256gcm.h
+@@ -25,9 +25,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_aead_chacha20poly1305.h b/src/libsodium/include/sodium/crypto_aead_chacha20poly1305.h
+--- a/src/libsodium/include/sodium/crypto_aead_chacha20poly1305.h
++++ b/src/libsodium/include/sodium/crypto_aead_chacha20poly1305.h
+@@ -5,9 +5,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_aead_xchacha20poly1305.h b/src/libsodium/include/sodium/crypto_aead_xchacha20poly1305.h
+--- a/src/libsodium/include/sodium/crypto_aead_xchacha20poly1305.h
++++ b/src/libsodium/include/sodium/crypto_aead_xchacha20poly1305.h
+@@ -5,9 +5,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_auth.h b/src/libsodium/include/sodium/crypto_auth.h
+--- a/src/libsodium/include/sodium/crypto_auth.h
++++ b/src/libsodium/include/sodium/crypto_auth.h
+@@ -7,9 +7,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_auth_hmacsha256.h b/src/libsodium/include/sodium/crypto_auth_hmacsha256.h
+--- a/src/libsodium/include/sodium/crypto_auth_hmacsha256.h
++++ b/src/libsodium/include/sodium/crypto_auth_hmacsha256.h
+@@ -6,9 +6,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_auth_hmacsha512.h b/src/libsodium/include/sodium/crypto_auth_hmacsha512.h
+--- a/src/libsodium/include/sodium/crypto_auth_hmacsha512.h
++++ b/src/libsodium/include/sodium/crypto_auth_hmacsha512.h
+@@ -6,9 +6,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_auth_hmacsha512256.h b/src/libsodium/include/sodium/crypto_auth_hmacsha512256.h
+--- a/src/libsodium/include/sodium/crypto_auth_hmacsha512256.h
++++ b/src/libsodium/include/sodium/crypto_auth_hmacsha512256.h
+@@ -6,9 +6,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_box.h b/src/libsodium/include/sodium/crypto_box.h
+--- a/src/libsodium/include/sodium/crypto_box.h
++++ b/src/libsodium/include/sodium/crypto_box.h
+@@ -14,9 +14,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_box_curve25519xchacha20poly1305.h b/src/libsodium/include/sodium/crypto_box_curve25519xchacha20poly1305.h
+--- a/src/libsodium/include/sodium/crypto_box_curve25519xchacha20poly1305.h
++++ b/src/libsodium/include/sodium/crypto_box_curve25519xchacha20poly1305.h
+@@ -7,9 +7,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_box_curve25519xsalsa20poly1305.h b/src/libsodium/include/sodium/crypto_box_curve25519xsalsa20poly1305.h
+--- a/src/libsodium/include/sodium/crypto_box_curve25519xsalsa20poly1305.h
++++ b/src/libsodium/include/sodium/crypto_box_curve25519xsalsa20poly1305.h
+@@ -6,9 +6,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_core_keccak1600.h b/src/libsodium/include/sodium/crypto_core_keccak1600.h
+--- a/src/libsodium/include/sodium/crypto_core_keccak1600.h
++++ b/src/libsodium/include/sodium/crypto_core_keccak1600.h
+@@ -6,9 +6,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_generichash.h b/src/libsodium/include/sodium/crypto_generichash.h
+--- a/src/libsodium/include/sodium/crypto_generichash.h
++++ b/src/libsodium/include/sodium/crypto_generichash.h
+@@ -7,9 +7,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_generichash_blake2b.h b/src/libsodium/include/sodium/crypto_generichash_blake2b.h
+--- a/src/libsodium/include/sodium/crypto_generichash_blake2b.h
++++ b/src/libsodium/include/sodium/crypto_generichash_blake2b.h
+@@ -8,9 +8,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_hash.h b/src/libsodium/include/sodium/crypto_hash.h
+--- a/src/libsodium/include/sodium/crypto_hash.h
++++ b/src/libsodium/include/sodium/crypto_hash.h
+@@ -14,9 +14,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_hash_sha256.h b/src/libsodium/include/sodium/crypto_hash_sha256.h
+--- a/src/libsodium/include/sodium/crypto_hash_sha256.h
++++ b/src/libsodium/include/sodium/crypto_hash_sha256.h
+@@ -15,9 +15,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_hash_sha3.h b/src/libsodium/include/sodium/crypto_hash_sha3.h
+--- a/src/libsodium/include/sodium/crypto_hash_sha3.h
++++ b/src/libsodium/include/sodium/crypto_hash_sha3.h
+@@ -7,9 +7,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_hash_sha512.h b/src/libsodium/include/sodium/crypto_hash_sha512.h
+--- a/src/libsodium/include/sodium/crypto_hash_sha512.h
++++ b/src/libsodium/include/sodium/crypto_hash_sha512.h
+@@ -15,9 +15,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_ipcrypt.h b/src/libsodium/include/sodium/crypto_ipcrypt.h
+--- a/src/libsodium/include/sodium/crypto_ipcrypt.h
++++ b/src/libsodium/include/sodium/crypto_ipcrypt.h
+@@ -6,9 +6,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-#    ifdef __GNUC__
+-#        pragma GCC diagnostic ignored "-Wlong-long"
+-#    endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_kdf.h b/src/libsodium/include/sodium/crypto_kdf.h
+--- a/src/libsodium/include/sodium/crypto_kdf.h
++++ b/src/libsodium/include/sodium/crypto_kdf.h
+@@ -8,9 +8,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_kdf_blake2b.h b/src/libsodium/include/sodium/crypto_kdf_blake2b.h
+--- a/src/libsodium/include/sodium/crypto_kdf_blake2b.h
++++ b/src/libsodium/include/sodium/crypto_kdf_blake2b.h
+@@ -8,9 +8,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_kdf_hkdf_sha256.h b/src/libsodium/include/sodium/crypto_kdf_hkdf_sha256.h
+--- a/src/libsodium/include/sodium/crypto_kdf_hkdf_sha256.h
++++ b/src/libsodium/include/sodium/crypto_kdf_hkdf_sha256.h
+@@ -10,9 +10,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_kdf_hkdf_sha512.h b/src/libsodium/include/sodium/crypto_kdf_hkdf_sha512.h
+--- a/src/libsodium/include/sodium/crypto_kdf_hkdf_sha512.h
++++ b/src/libsodium/include/sodium/crypto_kdf_hkdf_sha512.h
+@@ -10,9 +10,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_kem.h b/src/libsodium/include/sodium/crypto_kem.h
+--- a/src/libsodium/include/sodium/crypto_kem.h
++++ b/src/libsodium/include/sodium/crypto_kem.h
+@@ -14,9 +14,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_kem_mlkem768.h b/src/libsodium/include/sodium/crypto_kem_mlkem768.h
+--- a/src/libsodium/include/sodium/crypto_kem_mlkem768.h
++++ b/src/libsodium/include/sodium/crypto_kem_mlkem768.h
+@@ -6,9 +6,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-#    ifdef __GNUC__
+-#        pragma GCC diagnostic ignored "-Wlong-long"
+-#    endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_kem_xwing.h b/src/libsodium/include/sodium/crypto_kem_xwing.h
+--- a/src/libsodium/include/sodium/crypto_kem_xwing.h
++++ b/src/libsodium/include/sodium/crypto_kem_xwing.h
+@@ -6,9 +6,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-#    ifdef __GNUC__
+-#        pragma GCC diagnostic ignored "-Wlong-long"
+-#    endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_kx.h b/src/libsodium/include/sodium/crypto_kx.h
+--- a/src/libsodium/include/sodium/crypto_kx.h
++++ b/src/libsodium/include/sodium/crypto_kx.h
+@@ -6,9 +6,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_onetimeauth.h b/src/libsodium/include/sodium/crypto_onetimeauth.h
+--- a/src/libsodium/include/sodium/crypto_onetimeauth.h
++++ b/src/libsodium/include/sodium/crypto_onetimeauth.h
+@@ -7,9 +7,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_onetimeauth_poly1305.h b/src/libsodium/include/sodium/crypto_onetimeauth_poly1305.h
+--- a/src/libsodium/include/sodium/crypto_onetimeauth_poly1305.h
++++ b/src/libsodium/include/sodium/crypto_onetimeauth_poly1305.h
+@@ -10,9 +10,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_pwhash.h b/src/libsodium/include/sodium/crypto_pwhash.h
+--- a/src/libsodium/include/sodium/crypto_pwhash.h
++++ b/src/libsodium/include/sodium/crypto_pwhash.h
+@@ -8,9 +8,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_pwhash_argon2i.h b/src/libsodium/include/sodium/crypto_pwhash_argon2i.h
+--- a/src/libsodium/include/sodium/crypto_pwhash_argon2i.h
++++ b/src/libsodium/include/sodium/crypto_pwhash_argon2i.h
+@@ -8,9 +8,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_pwhash_argon2id.h b/src/libsodium/include/sodium/crypto_pwhash_argon2id.h
+--- a/src/libsodium/include/sodium/crypto_pwhash_argon2id.h
++++ b/src/libsodium/include/sodium/crypto_pwhash_argon2id.h
+@@ -8,9 +8,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_pwhash_scryptsalsa208sha256.h b/src/libsodium/include/sodium/crypto_pwhash_scryptsalsa208sha256.h
+--- a/src/libsodium/include/sodium/crypto_pwhash_scryptsalsa208sha256.h
++++ b/src/libsodium/include/sodium/crypto_pwhash_scryptsalsa208sha256.h
+@@ -8,9 +8,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_secretbox.h b/src/libsodium/include/sodium/crypto_secretbox.h
+--- a/src/libsodium/include/sodium/crypto_secretbox.h
++++ b/src/libsodium/include/sodium/crypto_secretbox.h
+@@ -7,9 +7,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_secretbox_xchacha20poly1305.h b/src/libsodium/include/sodium/crypto_secretbox_xchacha20poly1305.h
+--- a/src/libsodium/include/sodium/crypto_secretbox_xchacha20poly1305.h
++++ b/src/libsodium/include/sodium/crypto_secretbox_xchacha20poly1305.h
+@@ -6,9 +6,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_secretbox_xsalsa20poly1305.h b/src/libsodium/include/sodium/crypto_secretbox_xsalsa20poly1305.h
+--- a/src/libsodium/include/sodium/crypto_secretbox_xsalsa20poly1305.h
++++ b/src/libsodium/include/sodium/crypto_secretbox_xsalsa20poly1305.h
+@@ -6,9 +6,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_secretstream_xchacha20poly1305.h b/src/libsodium/include/sodium/crypto_secretstream_xchacha20poly1305.h
+--- a/src/libsodium/include/sodium/crypto_secretstream_xchacha20poly1305.h
++++ b/src/libsodium/include/sodium/crypto_secretstream_xchacha20poly1305.h
+@@ -8,9 +8,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_shorthash.h b/src/libsodium/include/sodium/crypto_shorthash.h
+--- a/src/libsodium/include/sodium/crypto_shorthash.h
++++ b/src/libsodium/include/sodium/crypto_shorthash.h
+@@ -7,9 +7,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_shorthash_siphash24.h b/src/libsodium/include/sodium/crypto_shorthash_siphash24.h
+--- a/src/libsodium/include/sodium/crypto_shorthash_siphash24.h
++++ b/src/libsodium/include/sodium/crypto_shorthash_siphash24.h
+@@ -5,9 +5,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_sign.h b/src/libsodium/include/sodium/crypto_sign.h
+--- a/src/libsodium/include/sodium/crypto_sign.h
++++ b/src/libsodium/include/sodium/crypto_sign.h
+@@ -14,9 +14,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_sign_ed25519.h b/src/libsodium/include/sodium/crypto_sign_ed25519.h
+--- a/src/libsodium/include/sodium/crypto_sign_ed25519.h
++++ b/src/libsodium/include/sodium/crypto_sign_ed25519.h
+@@ -6,9 +6,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_sign_edwards25519sha512batch.h b/src/libsodium/include/sodium/crypto_sign_edwards25519sha512batch.h
+--- a/src/libsodium/include/sodium/crypto_sign_edwards25519sha512batch.h
++++ b/src/libsodium/include/sodium/crypto_sign_edwards25519sha512batch.h
+@@ -16,9 +16,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_stream.h b/src/libsodium/include/sodium/crypto_stream.h
+--- a/src/libsodium/include/sodium/crypto_stream.h
++++ b/src/libsodium/include/sodium/crypto_stream.h
+@@ -15,9 +15,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_stream_chacha20.h b/src/libsodium/include/sodium/crypto_stream_chacha20.h
+--- a/src/libsodium/include/sodium/crypto_stream_chacha20.h
++++ b/src/libsodium/include/sodium/crypto_stream_chacha20.h
+@@ -14,9 +14,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_stream_salsa20.h b/src/libsodium/include/sodium/crypto_stream_salsa20.h
+--- a/src/libsodium/include/sodium/crypto_stream_salsa20.h
++++ b/src/libsodium/include/sodium/crypto_stream_salsa20.h
+@@ -14,9 +14,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_stream_salsa2012.h b/src/libsodium/include/sodium/crypto_stream_salsa2012.h
+--- a/src/libsodium/include/sodium/crypto_stream_salsa2012.h
++++ b/src/libsodium/include/sodium/crypto_stream_salsa2012.h
+@@ -13,9 +13,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_stream_salsa208.h b/src/libsodium/include/sodium/crypto_stream_salsa208.h
+--- a/src/libsodium/include/sodium/crypto_stream_salsa208.h
++++ b/src/libsodium/include/sodium/crypto_stream_salsa208.h
+@@ -13,9 +13,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_stream_xchacha20.h b/src/libsodium/include/sodium/crypto_stream_xchacha20.h
+--- a/src/libsodium/include/sodium/crypto_stream_xchacha20.h
++++ b/src/libsodium/include/sodium/crypto_stream_xchacha20.h
+@@ -14,9 +14,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_stream_xsalsa20.h b/src/libsodium/include/sodium/crypto_stream_xsalsa20.h
+--- a/src/libsodium/include/sodium/crypto_stream_xsalsa20.h
++++ b/src/libsodium/include/sodium/crypto_stream_xsalsa20.h
+@@ -14,9 +14,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/crypto_xof_shake128.h b/src/libsodium/include/sodium/crypto_xof_shake128.h
+--- a/src/libsodium/include/sodium/crypto_xof_shake128.h
++++ b/src/libsodium/include/sodium/crypto_xof_shake128.h
+@@ -6,9 +6,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-#    ifdef __GNUC__
+-#        pragma GCC diagnostic ignored "-Wlong-long"
+-#    endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/private/ed25519_ref10_fe_51.h b/src/libsodium/include/sodium/private/ed25519_ref10_fe_51.h
+--- a/src/libsodium/include/sodium/private/ed25519_ref10_fe_51.h
++++ b/src/libsodium/include/sodium/private/ed25519_ref10_fe_51.h
+@@ -105,7 +105,7 @@
+  Preconditions: b in {0,1}.
+  */
+ 
+-static void
++static inline void
+ fe25519_cmov(fe25519 f, const fe25519 g, unsigned int b)
+ {
+     const uint64_t mask = (uint64_t) (-(int64_t) b);
+@@ -142,7 +142,7 @@
+ Preconditions: b in {0,1}.
+ */
+ 
+-static void
++static inline void
+ fe25519_cswap(fe25519 f, fe25519 g, unsigned int b)
+ {
+     const uint64_t mask = (uint64_t) (-(int64_t) b);
+@@ -229,7 +229,7 @@
+  Can overlap h with f or g.
+  */
+ 
+-static void
++static inline void
+ fe25519_mul(fe25519 h, const fe25519 f, const fe25519 g)
+ {
+     const uint64_t mask = 0x7ffffffffffffULL;
+@@ -320,7 +320,7 @@
+  Can overlap h with f.
+  */
+ 
+-static void
++static inline void
+ fe25519_sq(fe25519 h, const fe25519 f)
+ {
+     const uint64_t mask = 0x7ffffffffffffULL;
+@@ -399,7 +399,7 @@
+  Can overlap h with f.
+ */
+ 
+-static void
++static inline void
+ fe25519_sq2(fe25519 h, const fe25519 f)
+ {
+     const uint64_t mask = 0x7ffffffffffffULL;
+diff --git a/src/libsodium/include/sodium/randombytes.h b/src/libsodium/include/sodium/randombytes.h
+--- a/src/libsodium/include/sodium/randombytes.h
++++ b/src/libsodium/include/sodium/randombytes.h
+@@ -10,9 +10,6 @@
+ #include "export.h"
+ 
+ #ifdef __cplusplus
+-# ifdef __GNUC__
+-#  pragma GCC diagnostic ignored "-Wlong-long"
+-# endif
+ extern "C" {
+ #endif
+ 
+diff --git a/src/libsodium/include/sodium/version.h b/src/libsodium/include/sodium/version.h
+new file mode 100644
+--- /dev/null
++++ b/src/libsodium/include/sodium/version.h
+@@ -0,0 +1,33 @@
++
++#ifndef sodium_version_H
++#define sodium_version_H
++
++#include "export.h"
++
++#define SODIUM_VERSION_STRING "1.0.22"
++
++#define SODIUM_LIBRARY_VERSION_MAJOR 26
++#define SODIUM_LIBRARY_VERSION_MINOR 4
++
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++SODIUM_EXPORT
++const char *sodium_version_string(void);
++
++SODIUM_EXPORT
++int         sodium_library_version_major(void);
++
++SODIUM_EXPORT
++int         sodium_library_version_minor(void);
++
++SODIUM_EXPORT
++int         sodium_library_minimal(void);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif
+diff --git a/src/libsodium/sodium/utils.c b/src/libsodium/sodium/utils.c
+--- a/src/libsodium/sodium/utils.c
++++ b/src/libsodium/sodium/utils.c
+@@ -564,6 +564,7 @@
+ static void
+ _free_aligned(unsigned char *const ptr, const size_t size)
+ {
++    (void) size;
+ # if defined(MAP_ANON) && defined(HAVE_MMAP)
+     (void) munmap(ptr, size);
+ # elif defined(HAVE_POSIX_MEMALIGN)
