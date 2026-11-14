@@ -261,6 +261,7 @@ struct TypeRegistry::Record {
     static constexpr uint32 NoOps = 0xffffffffu;
 
     Record* next = nullptr;
+    Record* previous = nullptr;
     TypeKind kind = TypeKind::Class;
     TypeSchema schema;
     RuntimeTypeOps ops;
@@ -503,8 +504,8 @@ const void* StructThunkType(const void* context, Guid fieldId) noexcept {
 } // namespace
 
 TypeRegistry::TypeRegistry(Allocator& allocator) noexcept
-    : allocator_(allocator), domain_(detail::NextRegistryDomain()),
-      ownerThread_(platform::CurrentThreadId()) {
+    : allocator_(allocator), byId_(allocator), byNative_(allocator),
+      domain_(detail::NextRegistryDomain()), ownerThread_(platform::CurrentThreadId()) {
 }
 
 TypeRegistry::~TypeRegistry() {
@@ -512,6 +513,118 @@ TypeRegistry::~TypeRegistry() {
     if (!result) {
         platform::Fatal("TypeRegistry destroyed with active leases or on wrong thread");
     }
+}
+
+// 등록 한 번의 색인 준비물이다(잠금 밖에서 할당한 새 색인과, 바꾼 뒤 잠금 밖에서 반환할 옛 색인).
+struct TypeRegistry::IndexGrowth {
+    explicit IndexGrowth(Allocator& allocator) noexcept
+        : id(allocator), native(allocator), retiredId(allocator), retiredNative(allocator) {
+    }
+
+    IdIndex id;
+    NativeIndex native;
+    IdIndex retiredId;
+    NativeIndex retiredNative;
+    bool rebuildId = false;
+    bool rebuildNative = false;
+};
+
+namespace {
+
+// lease 계수가 포화하는 값이다.
+constexpr uint32 MaxRecordLeases = 0xffffffffu;
+// 레코드 블록 할당 태그다('TYPE').
+constexpr uint32 RecordTag = 0x54595045u;
+
+} // namespace
+
+Result<TypeLease> TypeRegistry::LeaseLocked(Record* record) noexcept {
+    if (record->leases == MaxRecordLeases) {
+        return Result<TypeLease>::Failure(ErrorCode::Overflow);
+    }
+
+    ++record->leases;
+    return Result<TypeLease>::Success(TypeLease(this, record));
+}
+
+TypeRegistry::Record* TypeRegistry::FindLocked(TypeId type) const noexcept {
+    Record* const* found = byId_.Find(type);
+    return found != nullptr ? *found : nullptr;
+}
+
+TypeRegistry::Record* TypeRegistry::FindNativeLocked(const void* nativeType,
+                                                     TypeKind kind) const noexcept {
+    Record* const* found = byNative_.Find(NativeIndexKey{nativeType, kind});
+    return found != nullptr ? *found : nullptr;
+}
+
+Result<void> TypeRegistry::PrepareIndexes(IndexGrowth& growth, bool native) noexcept {
+    // mutating_ 아래라 색인을 바꾸는 쪽은 이 스레드뿐이다(다른 스레드의 조회는 잠금 안에서 읽기만
+    // 한다) — 크기를 잠금 없이 읽어도 경합이 없다. 새 색인은 아직 아무도 보지 않으므로 잠금 밖에서
+    // 할당한다. 삽입이 할당하지 않으려면 공간이 있고 지운 칸이 없어야 한다(HashMap 삽입은 지운 칸이
+    // 많으면 스스로 재해시한다).
+    growth.rebuildId = idErased_ || byId_.Count() + 1 > byId_.Capacity();
+    if (growth.rebuildId) {
+        if (auto reserved = growth.id.Reserve(byId_.Count() + 1); !reserved) {
+            return reserved;
+        }
+    }
+
+    growth.rebuildNative =
+        native && (nativeErased_ || byNative_.Count() + 1 > byNative_.Capacity());
+    if (growth.rebuildNative) {
+        if (auto reserved = growth.native.Reserve(byNative_.Count() + 1); !reserved) {
+            return reserved;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+void TypeRegistry::PublishLocked(Record* record, IndexGrowth& growth) noexcept {
+    // 새 색인으로 바꿀 때는 지금 내용을 옮긴다(예약했으므로 무할당). 옛 색인은 growth가 쥐고 잠금
+    // 밖에서 반환한다.
+    if (growth.rebuildId) {
+        byId_.ForEach([&](const TypeId& id, Record*& value) noexcept {
+            if (!growth.id.Insert(TypeId(id), static_cast<Record*>(value))) {
+                platform::Fatal("Reserved TypeRegistry id index unexpectedly failed");
+            }
+        });
+        growth.retiredId = Move(byId_);
+        byId_ = Move(growth.id);
+        idErased_ = false;
+    }
+
+    if (!byId_.Insert(TypeId(record->schema.id), static_cast<Record*>(record))) {
+        platform::Fatal("Reserved TypeRegistry id index unexpectedly failed");
+    }
+
+    if (record->kind != TypeKind::Class) {
+        if (growth.rebuildNative) {
+            byNative_.ForEach([&](const NativeIndexKey& key, Record*& value) noexcept {
+                if (!growth.native.Insert(NativeIndexKey(key), static_cast<Record*>(value))) {
+                    platform::Fatal("Reserved TypeRegistry native index unexpectedly failed");
+                }
+            });
+            growth.retiredNative = Move(byNative_);
+            byNative_ = Move(growth.native);
+            nativeErased_ = false;
+        }
+
+        if (!byNative_.Insert(NativeIndexKey{record->ops.nativeType, record->kind},
+                              static_cast<Record*>(record))) {
+            platform::Fatal("Reserved TypeRegistry native index unexpectedly failed");
+        }
+    }
+
+    record->generation = nextGeneration_++;
+    record->previous = nullptr;
+    record->next = records_;
+    if (records_ != nullptr) {
+        records_->previous = record;
+    }
+
+    records_ = record;
 }
 
 TypeLease::TypeLease(TypeLease&& other) noexcept : owner_(other.owner_), record_(other.record_) {
@@ -925,18 +1038,15 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
                                                                       : ErrorCode::Overflow);
         }
 
-        for (Record* record = records_; record; record = record->next) {
-            if (record->schema.id == schema.id) {
-                return Result<TypeRegistrationToken>::Failure(ErrorCode::AlreadyExists);
-            }
+        if (FindLocked(schema.id) != nullptr) {
+            return Result<TypeRegistrationToken>::Failure(ErrorCode::AlreadyExists);
+        }
 
-            if (record->schema.id == schema.baseType) {
-                // base는 클래스여야 한다(Acquire의 종류 규칙과 같다).
-                if (record->kind != TypeKind::Class) {
-                    return Result<TypeRegistrationToken>::Failure(ErrorCode::TypeMismatch);
-                }
-
-                base = record;
+        if (schema.baseType != TypeId{}) {
+            base = FindLocked(schema.baseType);
+            // base는 클래스여야 한다(Acquire의 종류 규칙과 같다).
+            if (base != nullptr && base->kind != TypeKind::Class) {
+                return Result<TypeRegistrationToken>::Failure(ErrorCode::TypeMismatch);
             }
         }
 
@@ -1004,7 +1114,15 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         mutating_ = true;
     }
 
-    auto memory = allocator_.Allocate(bytes, alignof(Record), 0x54595045u);
+    // 색인 공간은 레코드보다 먼저 준비한다(실패하면 아무것도 바꾸지 않는다).
+    IndexGrowth growth(allocator_);
+    if (auto prepared = PrepareIndexes(growth, false); !prepared) {
+        platform::LockGuard lock(gate_);
+        mutating_ = false;
+        return Result<TypeRegistrationToken>::Failure(prepared.Error());
+    }
+
+    auto memory = allocator_.Allocate(bytes, alignof(Record), RecordTag);
     if (!memory) {
         platform::LockGuard lock(gate_);
         mutating_ = false;
@@ -1082,9 +1200,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     record->base = base;
 
     platform::LockGuard lock(gate_);
-    record->generation = nextGeneration_++;
-    record->next = records_;
-    records_ = record;
+    PublishLocked(record, growth);
     if (base) {
         ++base->dependents;
     }
@@ -1162,17 +1278,23 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterEnum(const EnumSchema& schem
 
         // 같은 C++ enum을 다른 ID로 다시 등록하지 않는다. 생성 thunk는 GeneratedType<E>::Id()
         // 하나만 받으므로 별칭 ID를 가리키는 필드는 쓸 수도 저장할 수도 없게 된다.
-        for (Record* record = records_; record; record = record->next) {
-            if (record->schema.id == schema.id ||
-                (record->kind == TypeKind::Enum && record->ops.nativeType == ops.nativeType)) {
-                return Result<TypeRegistrationToken>::Failure(ErrorCode::AlreadyExists);
-            }
+        if (FindLocked(schema.id) != nullptr ||
+            FindNativeLocked(ops.nativeType, TypeKind::Enum) != nullptr) {
+            return Result<TypeRegistrationToken>::Failure(ErrorCode::AlreadyExists);
         }
 
         mutating_ = true;
     }
 
-    auto memory = allocator_.Allocate(bytes, alignof(Record), 0x54595045u);
+    // 색인 공간은 레코드보다 먼저 준비한다(실패하면 아무것도 바꾸지 않는다).
+    IndexGrowth growth(allocator_);
+    if (auto prepared = PrepareIndexes(growth, true); !prepared) {
+        platform::LockGuard lock(gate_);
+        mutating_ = false;
+        return Result<TypeRegistrationToken>::Failure(prepared.Error());
+    }
+
+    auto memory = allocator_.Allocate(bytes, alignof(Record), RecordTag);
     if (!memory) {
         platform::LockGuard lock(gate_);
         mutating_ = false;
@@ -1207,9 +1329,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterEnum(const EnumSchema& schem
     record->ops.module = Move(ops.module);
 
     platform::LockGuard lock(gate_);
-    record->generation = nextGeneration_++;
-    record->next = records_;
-    records_ = record;
+    PublishLocked(record, growth);
     mutating_ = false;
     return Result<TypeRegistrationToken>::Success({domain_, record->generation, schema.id});
 }
@@ -1231,13 +1351,7 @@ Result<void> TypeRegistry::ResolveValueTypes(Span<const FieldSchema> fields,
             continue;
         }
 
-        Record* target = nullptr;
-        for (Record* record = records_; record; record = record->next) {
-            if (record->schema.id == value.type) {
-                target = record;
-                break;
-            }
-        }
+        Record* target = FindLocked(value.type);
 
         if (!target) {
             return Result<void>::Failure(ErrorCode::NotFound);
@@ -1360,11 +1474,9 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
         }
 
         // 같은 C++ struct를 다른 ID로 다시 등록하지 않는다(생성 thunk는 생성 ID 하나만 받는다).
-        for (Record* record = records_; record; record = record->next) {
-            if (record->schema.id == schema.id ||
-                (record->kind == TypeKind::Struct && record->ops.nativeType == ops.nativeType)) {
-                return Result<TypeRegistrationToken>::Failure(ErrorCode::AlreadyExists);
-            }
+        if (FindLocked(schema.id) != nullptr ||
+            FindNativeLocked(ops.nativeType, TypeKind::Struct) != nullptr) {
+            return Result<TypeRegistrationToken>::Failure(ErrorCode::AlreadyExists);
         }
 
         // struct는 WorldOnly 형질을 거부하지 않고 전파한다(그것을 필드로 둔 클래스가 판정한다).
@@ -1385,18 +1497,14 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
             }
 
             const bool array = field.value.kind == ValueKind::Array;
-            for (Record* record = records_; record; record = record->next) {
-                if (record->schema.id == value.type) {
-                    depth = record->depth + 1 > depth ? record->depth + 1 : depth;
-                    strongReference = strongReference || record->containsStrongReference;
-                    required = required || (!array && record->containsRequired &&
-                                            !HasFlag(field.flags, FieldFlags::Transient));
-                    requiresWorldOnlyOwner =
-                        requiresWorldOnlyOwner || record->requiresWorldOnlyOwner;
-                    referenceArray = referenceArray || (array ? record->containsStrongReference
-                                                              : record->containsReferenceArray);
-                    break;
-                }
+            if (const Record* record = FindLocked(value.type)) {
+                depth = record->depth + 1 > depth ? record->depth + 1 : depth;
+                strongReference = strongReference || record->containsStrongReference;
+                required = required || (!array && record->containsRequired &&
+                                        !HasFlag(field.flags, FieldFlags::Transient));
+                requiresWorldOnlyOwner = requiresWorldOnlyOwner || record->requiresWorldOnlyOwner;
+                referenceArray = referenceArray || (array ? record->containsStrongReference
+                                                          : record->containsReferenceArray);
             }
         }
 
@@ -1408,7 +1516,15 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
         mutating_ = true;
     }
 
-    auto memory = allocator_.Allocate(bytes, alignof(Record), 0x54595045u);
+    // 색인 공간은 레코드보다 먼저 준비한다(실패하면 아무것도 바꾸지 않는다).
+    IndexGrowth growth(allocator_);
+    if (auto prepared = PrepareIndexes(growth, true); !prepared) {
+        platform::LockGuard lock(gate_);
+        mutating_ = false;
+        return Result<TypeRegistrationToken>::Failure(prepared.Error());
+    }
+
+    auto memory = allocator_.Allocate(bytes, alignof(Record), RecordTag);
     if (!memory) {
         platform::LockGuard lock(gate_);
         mutating_ = false;
@@ -1486,9 +1602,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     record->structOps.fields = {fieldOps, schema.fields.Size()};
 
     platform::LockGuard lock(gate_);
-    record->generation = nextGeneration_++;
-    record->next = records_;
-    records_ = record;
+    PublishLocked(record, growth);
     for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
         if (fieldTypes[fieldIndex]) {
             ++fieldTypes[fieldIndex]->dependents;
@@ -1505,23 +1619,17 @@ Result<TypeLease> TypeRegistry::Acquire(TypeId type) noexcept {
         return Result<TypeLease>::Failure(ErrorCode::ShuttingDown);
     }
 
-    for (Record* record = records_; record; record = record->next) {
-        if (record->schema.id == type) {
-            // 기존 호출자(ObjectRegistry·그래프 저장·복원)는 모두 클래스를 가정한다.
-            if (record->kind != TypeKind::Class) {
-                return Result<TypeLease>::Failure(ErrorCode::TypeMismatch);
-            }
-
-            if (record->leases == 0xffffffffu) {
-                return Result<TypeLease>::Failure(ErrorCode::Overflow);
-            }
-
-            ++record->leases;
-            return Result<TypeLease>::Success(TypeLease(this, record));
-        }
+    Record* record = FindLocked(type);
+    if (record == nullptr) {
+        return Result<TypeLease>::Failure(ErrorCode::NotFound);
     }
 
-    return Result<TypeLease>::Failure(ErrorCode::NotFound);
+    // 기존 호출자(ObjectRegistry·그래프 저장·복원)는 모두 클래스를 가정한다.
+    if (record->kind != TypeKind::Class) {
+        return Result<TypeLease>::Failure(ErrorCode::TypeMismatch);
+    }
+
+    return LeaseLocked(record);
 }
 
 Result<TypeLease> TypeRegistry::AcquireValueType(TypeId type, TypeKind kind) noexcept {
@@ -1534,28 +1642,41 @@ Result<TypeLease> TypeRegistry::AcquireValueType(TypeId type, TypeKind kind) noe
         return Result<TypeLease>::Failure(ErrorCode::ShuttingDown);
     }
 
-    for (Record* record = records_; record; record = record->next) {
-        if (record->schema.id == type) {
-            if (record->kind != kind) {
-                return Result<TypeLease>::Failure(ErrorCode::TypeMismatch);
-            }
-
-            if (record->leases == 0xffffffffu) {
-                return Result<TypeLease>::Failure(ErrorCode::Overflow);
-            }
-
-            ++record->leases;
-            return Result<TypeLease>::Success(TypeLease(this, record));
-        }
+    Record* record = FindLocked(type);
+    if (record == nullptr) {
+        return Result<TypeLease>::Failure(ErrorCode::NotFound);
     }
 
-    return Result<TypeLease>::Failure(ErrorCode::NotFound);
+    if (record->kind != kind) {
+        return Result<TypeLease>::Failure(ErrorCode::TypeMismatch);
+    }
+
+    return LeaseLocked(record);
+}
+
+Result<TypeLease> TypeRegistry::AcquireStructByNative(const void* nativeType) noexcept {
+    if (nativeType == nullptr) {
+        return Result<TypeLease>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    platform::LockGuard lock(gate_);
+    if (closed_) {
+        return Result<TypeLease>::Failure(ErrorCode::ShuttingDown);
+    }
+
+    // 등록이 struct native 키를 유일하게 하므로 색인의 레코드가 답이다.
+    Record* record = FindNativeLocked(nativeType, TypeKind::Struct);
+    if (record == nullptr) {
+        return Result<TypeLease>::Failure(ErrorCode::NotFound);
+    }
+
+    return LeaseLocked(record);
 }
 
 Result<TypeLease> TypeRegistry::Clone(void* pointer) noexcept {
     platform::LockGuard lock(gate_);
     auto* record = static_cast<Record*>(pointer);
-    if (closed_ || record->leases == 0xffffffffu) {
+    if (closed_ || record->leases == MaxRecordLeases) {
         return Result<TypeLease>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Overflow);
     }
 
@@ -1628,21 +1749,42 @@ Result<void> TypeRegistry::Unregister(TypeRegistrationToken token) noexcept {
             return Result<void>::Failure(ErrorCode::StaleHandle);
         }
 
-        Record** previous = &records_;
-        while (*previous && !((*previous)->schema.id == token.type)) {
-            previous = &(*previous)->next;
-        }
-
-        if (!*previous || (*previous)->generation != token.generation) {
+        Record* found = FindLocked(token.type);
+        if (found == nullptr || found->generation != token.generation) {
             return Result<void>::Failure(ErrorCode::StaleHandle);
         }
 
-        if ((*previous)->leases != 0 || (*previous)->dependents != 0) {
+        if (found->leases != 0 || found->dependents != 0) {
             return Result<void>::Failure(ErrorCode::Busy);
         }
 
-        removed = *previous;
-        *previous = removed->next;
+        // 목록·색인에서 뗀다(삭제는 할당하지 않는다 — 지운 칸은 다음 등록이 새 색인으로 정리한다).
+        removed = found;
+        if (removed->previous != nullptr) {
+            removed->previous->next = removed->next;
+        } else {
+            records_ = removed->next;
+        }
+
+        if (removed->next != nullptr) {
+            removed->next->previous = removed->previous;
+        }
+
+        removed->next = nullptr;
+        removed->previous = nullptr;
+        if (!byId_.Erase(removed->schema.id)) {
+            platform::Fatal("TypeRegistry id index lost a record");
+        }
+
+        idErased_ = true;
+        if (removed->kind != TypeKind::Class) {
+            if (!byNative_.Erase(NativeIndexKey{removed->ops.nativeType, removed->kind})) {
+                platform::Fatal("TypeRegistry native index lost a record");
+            }
+
+            nativeErased_ = true;
+        }
+
         mutating_ = true;
     }
 
@@ -1663,6 +1805,9 @@ Result<void> TypeRegistry::Shutdown() noexcept {
     }
 
     Record* removed = nullptr;
+    // 색인 저장소는 잠금 밖에서 반환한다(잠금 안에서는 빈 색인으로 바꾸기만 한다).
+    IdIndex retiredId(allocator_);
+    NativeIndex retiredNative(allocator_);
     {
         platform::LockGuard lock(gate_);
         if (mutating_) {
@@ -1678,6 +1823,10 @@ Result<void> TypeRegistry::Shutdown() noexcept {
 
         removed = records_;
         records_ = nullptr;
+        retiredId = Move(byId_);
+        retiredNative = Move(byNative_);
+        idErased_ = false;
+        nativeErased_ = false;
         mutating_ = true;
     }
 

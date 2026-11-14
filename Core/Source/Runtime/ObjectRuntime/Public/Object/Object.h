@@ -37,7 +37,9 @@ public:
     // 소유 스레드와 이 객체의 활성 Borrow가 필요하다. 실행 scope가 있으면 해당 문맥을 검사하고,
     // 없으면 기본 설정에서는 이 객체의 Registry 문맥을 사용한다. Registry가 엄격 모드라면 scope
     // 누락은 실패한다. scope가 없을 때 호출자의 World는 검증할 수 없다. 생성자 안과 미공개
-    // 상태는 실패한다. 같은 Borrow 안에서 이미 요청된 파괴의 재요청은 성공한다.
+    // 상태는 실패한다. 같은 Borrow 안에서 이미 요청된 파괴의 재요청은 성공한다. 패키지 정책
+    // Registry(RegistryPolicy::packageNativeType)의 객체는 접근 검사 다음에 언제나 Unsupported다
+    // (재요청 포함 — 소속 객체는 ObjectRegistry::Discard로만 죽는다).
     Result<void> Destroy() noexcept;
 
     // 실제 객체에 등록된 타입을 조회한다. 받은 lease는 스키마와 모듈 코드를 유지하며,

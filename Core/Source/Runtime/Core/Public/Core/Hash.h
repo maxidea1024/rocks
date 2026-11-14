@@ -15,6 +15,15 @@ constexpr uint64 MixHash(uint64 value) noexcept {
     return value ^ (value >> 31);
 }
 
+// 해시 둘을 순서 있게 섞는다(실행 중 해시 표 분포용 — HashCombine(a, b)와 HashCombine(b, a)는
+// 다르다). 복합 키의 해시를 구성 요소 해시로 만들 때 쓴다.
+//
+// 사용 예:
+//   return HashCombine(Hash<Guid>{}(key.type), MixHash(key.index));
+constexpr uint64 HashCombine(uint64 seed, uint64 value) noexcept {
+    return MixHash(seed ^ (value + 0x9e3779b97f4a7c15ull + (seed << 6) + (seed >> 2)));
+}
+
 template <typename T>
 struct Hash {
     uint64 operator()(const T& value) const noexcept {

@@ -206,6 +206,21 @@ internal static class NativeTests
 
         if (string.Equals(Path.GetFileNameWithoutExtension(executable), "FoundationTests", StringComparison.OrdinalIgnoreCase))
         {
+            foreach ((string control, string diagnostic) in new[]
+            {
+                ("object-observer-unpolicied", "ReferenceObserver requires a package-policy ObjectRegistry"),
+                ("object-observer-shared", "ReferenceObserver is already attached to an ObjectRegistry"),
+                ("object-observer-attached", "ReferenceObserver destroyed while attached to an ObjectRegistry")
+            })
+            {
+                suite.Add("Native.Fatal." + control, async () =>
+                {
+                    var result = await Run("--negative-control", control);
+                    Verify.That(result.ExitCode != 0, "invalid reference observer attachment did not fail");
+                    Verify.Contains(diagnostic, result.StdErr, "reference observer fatal diagnostic");
+                });
+            }
+
             suite.Add("Native.Fatal.empty-type-isa", async () =>
             {
                 var result = await Run("--negative-control", "empty-type-isa");

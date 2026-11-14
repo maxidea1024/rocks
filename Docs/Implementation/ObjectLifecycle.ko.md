@@ -98,8 +98,36 @@ if (auto committed = transaction.Commit(roots, held); !committed) {
 - 빈 이름: Outer가 없으면 이름 없는 객체(색인에 넣지 않는다), Outer가 있으면 대표 자식뿐이다(Outer가 outermost이고 이름 있는 Inner가 없을 때). 대표 자식이 있는 Outer에는 이름 있는 자식을 둘 수 없다.
 - 객체 경로는 outermost 아래 이름을 `.`로 이은 것이고 대표 자식의 빈 이름은 건너뛴다. outermost와 대표 자식의 경로는 빈 문자열이고 경로는 4 KiB(`MaxObjectPathBytes`) 이하다(넘는 객체는 CapacityExceeded).
 - 조회: `GetOuter`·`GetOutermost`·`GetName`·`GetObjectPath`(Alive·DestroyRequested), `FindChild`·`FindObject`(공개된 객체만), `IsNameTaken`(Reserved도 점유), `DescribeOuter`(Outer로 쓸 수 있는 객체의 요약), `CollectInners`(Alive Inner를 이름 순으로 — `Direct` 또는 전위 `DepthFirst`). 이름·경로는 잠금 안에서 스택에 복사한 뒤 out의 allocator로 붙이므로 그 할당 콜백이 Registry에 재진입해도 안전하다. `CollectInners`의 할당 구간에는 Registry 변경 재진입이 Busy다.
-- 오류 순서(생성): 트랜잭션 상태 → 접근 → 종료·재진입 → 타입 → Abstract → Outer 상태(StaleHandle — 생존·같은 트랜잭션 Reserved가 아님, 다른 Registry, cutoff white, DestroyRequested) → WorldOnly 정책(Unsupported) → 이름 형식(InvalidArgument) → 패키지·빈 이름·대표 자식(InvalidArgument) → 경로 길이(CapacityExceeded) → 키·이름 기록·색인 할당(OutOfMemory) → 이름 충돌(AlreadyExists) → 객체 할당·슬롯 상한. 생성을 시작하지 못한 트랜잭션(다른 문맥·종료·재진입)의 Create는 그 오류를 돌려준다.
+- 오류 순서(생성): 트랜잭션 상태 → 접근 → 종료·재진입 → 타입 → Abstract·패키지 정책 Registry의 완전한 필드 배치 아닌 타입(Unsupported) → Outer 상태(StaleHandle — 생존·같은 트랜잭션 Reserved가 아님, 다른 Registry, cutoff white, DestroyRequested) → WorldOnly 정책(Unsupported) → 이름 형식(InvalidArgument) → 패키지·빈 이름·대표 자식(InvalidArgument) → 경로 길이(CapacityExceeded) → 키·이름 기록·색인 할당(OutOfMemory) → 이름 충돌(AlreadyExists) → 객체 할당·슬롯 상한. 생성을 시작하지 못한 트랜잭션(다른 문맥·종료·재진입)의 Create는 그 오류를 돌려준다.
 
-`RegistryOptions::policy`(`RegistryPolicy`)는 생성 뒤 바꾸지 않는 객체 정책이다. `packageNativeType`을 주면 그 타입(과 파생)은 Outer·이름이 없어야 하고 그 밖의 객체는 outermost가 그 타입이어야 한다. `rejectWorldOnly`면 WorldOnly 타입 생성이 Unsupported다. 기본값(정책 없음)은 World registry와 시험 Registry이고, 에셋 객체 Registry(A1)가 둘 다 켠다. 패키지 정책의 outer → inner 보존·Discard는 A0-Ob다.
+`RegistryOptions::policy`(`RegistryPolicy`)는 생성 뒤 바꾸지 않는 객체 정책이다. `packageNativeType`을 주면 그 타입(과 파생)은 Outer·이름이 없어야 하고 그 밖의 객체는 outermost가 그 타입이어야 한다. `rejectWorldOnly`면 WorldOnly 타입 생성이 Unsupported다. 기본값(정책 없음)은 World registry와 시험 Registry이고, 에셋 객체 Registry(A1)가 둘 다 켠다. 패키지 정책 Registry에서는 outer → inner도 GC 강한 간선이라(자식 고리가 export 표다) 패키지가 살아 있으면 모든 소속 객체가 살고, 소속 객체는 `Discard`로만 죽는다 — `RequestDestroy`·`Object::Destroy`는 접근 검사 다음에 Unsupported다. Discard 없이 GC로 Retire된 Alive 객체(패키지 포함)는 `ObjectStats::retiredWithoutDiscard`로 세고 `RegistryOptions::assertRetiredWithoutDiscard`(기본 true)면 Debug에서 멈춘다(종료 시작 뒤의 회수는 세지 않는다).
 
 `Commit(roots, out)`은 이 트랜잭션의 객체를 한 번에 공개하고 roots의 객체마다 RootRef를 out의 같은 위치에 돌려준다(같은 handle 두 번이면 RootRef도 둘, 빈 roots 허용). out 크기가 다르거나 비어 있지 않은 원소가 있으면 InvalidArgument, 이 트랜잭션 객체가 아닌 root는 StaleHandle이다. staged 간선과 함께 Outer도 검증하므로(생존 또는 같은 트랜잭션 객체, cutoff 아님) 생성 뒤 Outer가 파괴 요청되면 Commit은 StaleHandle이고 비공개로 남는다. 기존 `Commit()`은 첫 객체 하나를 root로 공개한다. `TransactionId()`는 열린 트랜잭션의 ID(끝나면 0)다.
+
+## Discard
+
+설계는 [객체·그래프 보강](../Design/ObjectFoundations.ko.md) 2절이다(A0-Ob). `ObjectRegistry::Discard(access, handle)`은 handle과 그 자식 고리로 닿는 모든 객체(부분 트리)를 DestroyRequested로 바꾸고 이름 색인·자식 고리에서 바로 뺀다. 이후 `FindChild`·`FindObject`·`CollectInners`·`IsNameTaken`은 그 객체들을 보지 못하므로 같은 이름을 GC 전에 다시 만들 수 있다. `Resolve`·`WeakRef::TryPin`은 Destroyed이고, `GetName`·`GetObjectPath`·`GetOuter`는 GC cutoff white·Retired가 되기 전까지 된다(그 뒤는 Destroyed). 저장소는 남은 RootRef·Borrow·간선이 풀린 뒤 GC가 회수한다. 남은 참조가 Discard된 객체를 붙잡으면 inner → outer로 그 Outer 사슬은 남지만, 형제는 고리에서 빠졌으므로 남지 않는다. 되돌릴 수 없다.
+
+```cpp
+// AssetLoader::Pump의 Closing 처리(AS 11.4): 모두 Discard한 뒤에만 RootRef를 놓는다.
+for (ObjectHandle package : unit.packages) {
+    if (auto discarded = registry.Discard(access, package); !discarded) {
+        return discarded; // Busy면 RootRef를 쥔 채 다음 Pump에서 다시(Discard한 패키지는 무동작)
+    }
+}
+
+unit.roots.Clear();
+```
+
+- 이미 Discard된 객체는 무동작 성공이다(cutoff·Retire 뒤에도). RequestDestroy만 받은 객체도 받는다(이름을 이때 뗀다).
+- 오류 순서: 접근 → 종료·재진입(ShuttingDown·Busy) → handle(무효·다른 Registry·공개 전 StaleHandle, GC cutoff white·Retired Destroyed) → 부분 트리에 공개 전 객체가 있으면 Busy → 할당(부분 트리 목록·간선 집계·관찰자 예약 — OutOfMemory, 관찰자 키 상한 CapacityExceeded) → 적용. 할당은 처리 표시 아래 잠금 밖이라 그동안 Registry 변경 재진입은 Busy이고, 실패하면 아무것도 바뀌지 않는다.
+- GC 단계와 무관하게 부를 수 있다. Marking 중 고리에서 뺀 객체는 다른 참조가 없으면 그 cycle에 회수되고, Sweeping 중 Discard한(이미 표식된) 객체는 다음 cycle에 회수된다.
+
+## 패키지 사이 참조 관찰(ReferenceObserver)
+
+설계는 [객체·그래프 보강](../Design/ObjectFoundations.ko.md) 3절이다(A0-Ob). 패키지 정책 Registry는 `RegistryOptions::referenceObserver`로 받은 `ReferenceObserver`(`Object/ReferenceObserver.h`)에 패키지 사이 강한 간선 다중도의 순 변화를 (소유 패키지, 대상 패키지, 원인, 트랜잭션) 키로 합산한다. 가상 콜백이 아니라 표이고, 소비자(A1 AssetManager)는 `TakeChanges`로 꺼낸 묶음 전체를 더한 뒤에만 판정한다(묶음 안 순서는 키가 처음 생긴 순서라 중간 합은 음수일 수 있다).
+
+- 기록 대상: Alive이고 Outer가 있는 소유자의 `ObjectRef`·`ObjectRefArray` 원소·`StructRefArray` 원소 참조 멤버 중 대상의 패키지가 다른 것. 편집은 Registry API 지점에서, Commit·Discard는 타입 Trace로 세므로 Registry API로 쓰는 모든 참조를 Trace가 방문해야 한다 — 그래서 패키지 정책 Registry는 `RuntimeTypeOps::completeFieldLayout`인 타입만 만든다. StructRefArray 원소 제거는 등록 struct의 trace로 세므로 그 trace도 `GeneratedType<S>::Trace`와 같아야 한다(생성 코드는 같다). 패키지 객체가 소유한 간선과 같은 패키지 안 간선은 기록하지 않는다.
+- 원인: live 쓰기·컨테이너 변경(경로 쓰기 포함)은 `Edit`(transaction 0), 생성 트랜잭션 공개는 `Commit`(transaction = `ConstructionContext::TransactionId()` — staged 쓰기는 따로 기록하지 않는다), Discard는 부분 트리에서 나가는 다중도를 `Discard` 원인의 음수로 한 번(transaction 0). DestroyRequested 소유자의 제거·비우기는 기록하지 않는다.
+- 공간: 단일 간선 변경은 관찰자 공간이 모자라면 잠금 밖에서 관찰자 allocator로 예약하고 다시 잠가 재검증한다(그 사이 공간이 다시 모자라거나 위치가 바뀌면 Busy). 비우기·struct 원소 제거·Commit·Discard는 처리 표시 아래 잠금 밖에서 쌍을 합친 뒤 예약하고 한 잠금 안에서 바꾸고 기록한다(struct 원소는 떼어 낸 원소만 등록 struct trace — `TypeRegistry::AcquireStructByNative`, 등록되지 않았으면 Unsupported). 할당 실패는 OutOfMemory, `maxKeys`(기본 2^20, 0이 된 키도 꺼내기 전까지 센다) 초과는 CapacityExceeded이고 그 변경은 적용되지 않는다. Commit·Discard 하나는 그 작업의 패키지 쌍을 한 번에 기록하므로 `maxKeys`는 단일 Commit·Discard가 만들 수 있는 최대 쌍 수보다 크게 잡는다(아니면 그 작업은 비운 표에서도 언제나 CapacityExceeded다). 관찰자가 없는 Registry는 할당하지 않는다.
+- 수명·스레드: 관찰자는 패키지 정책 Registry 하나에만 붙고(정책 없음·이미 붙은 관찰자는 Registry 생성이 Fatal) Registry보다 오래 산다(붙은 채 소멸하면 Fatal). 붙은 동안 `TakeChanges`·`PendingCount`는 소유 스레드 전용이고, 예약 중(할당 콜백 재진입)의 `TakeChanges`는 Busy다.

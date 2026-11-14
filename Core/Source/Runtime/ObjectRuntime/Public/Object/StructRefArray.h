@@ -2,6 +2,7 @@
 
 #include <Core/Memory/Allocator.h>
 #include <Meta/GeneratedType.h>
+#include <Object/Object.h>
 #include <Object/RuntimeTypeOps.h>
 #include <Platform/Fatal.h>
 #include <new>
@@ -18,7 +19,11 @@ namespace detail {
 // StructRefArray 원소 타입 하나의 생성·소멸 정보다(타입별 정적 값 StructElementOpsOf<S>::Value).
 // trace는 넣지 않는다: owner 생성자에서 이 표가 인스턴스화될 때 GeneratedType<S>::Trace까지
 // 인스턴스화되면 생성 헤더가 없는 곳에서 컴파일이 깨진다(Trace는 StructRefArray::Trace가 직접
-// 부른다).
+// 부른다). 원소를 떼어 낼 때 그 원소만 trace해야 하는 곳(관찰자 Registry의 원소 제거·비우기 —
+// Docs/Design/ObjectFoundations.ko.md 3절)은 nativeType으로 TypeRegistry::AcquireStructByNative의
+// 등록 struct trace를 얻는다. 그래서 등록 struct의 RuntimeStructOps::trace는
+// GeneratedType<S>::Trace와 같은 간선을 방문해야 한다(생성 코드는 trace를 GeneratedType<S>::Trace로
+// 만든다 — 수동 등록이 다르게 주면 관찰자 계수가 어긋난다).
 struct StructElementOps {
     usize size = 0;
     usize alignment = 0;
@@ -26,6 +31,9 @@ struct StructElementOps {
     // 넘기고 없으면 noexcept S()다.
     void (*construct)(void* memory, Allocator& allocator) noexcept = nullptr;
     void (*destroy)(void* memory) noexcept = nullptr;
+    // 원소 타입의 native 키(&NativeTypeIdentity<S> — NativeTypeKey<S>()와 같은 주소)다.
+    // NativeTypeKey는 constexpr가 아니라 변수 주소를 직접 쓴다.
+    const void* nativeType = nullptr;
 };
 
 template <class S>
@@ -48,7 +56,8 @@ struct StructElementOpsOf {
         static_cast<S*>(memory)->~S();
     }
 
-    static constexpr StructElementOps Value{sizeof(S), alignof(S), &Construct, &Destroy};
+    static constexpr StructElementOps Value{sizeof(S), alignof(S), &Construct, &Destroy,
+                                            &NativeTypeIdentity<S>};
 };
 
 // StructRefArray의 타입 없는 저장소다. 원소마다 블록 하나(주소 고정)이고 blocks는 그 포인터
@@ -59,6 +68,9 @@ struct StructRefArrayStorage {
     void** blocks = nullptr;
     uint32 size = 0;
     uint32 capacity = 0;
+    // 원소 추가·삽입·삭제·비우기·통째 배정마다 Registry가 올리는 변경 계수다(겹쳐 돈다). 잠금을 푼
+    // 뒤 다시 잠근 원소 쓰기가 그 사이 원소가 바뀌었는지(같은 블록 주소의 재사용 포함) 가린다.
+    uint32 revision = 0;
 };
 
 // 컨테이너 원소 하나의 위치다(원소 안 참조 쓰기의 범위 검사 — ObjectRegistry::SetEdge). 같은

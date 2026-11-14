@@ -44,6 +44,7 @@ static uint64 seed = 1;
 static int (*objectScopeNegativeControl)(bool) noexcept = nullptr;
 static int (*destroyRequestedNegativeControl)(bool) noexcept = nullptr;
 static int (*typeConvenienceNegativeControl)(uint32) noexcept = nullptr;
+static int (*objectObserverNegativeControl)(uint32) noexcept = nullptr;
 
 // Object 테스트가 포함된 타깃만 음성 대조 callback을 등록한다. Core-only는 링크 의존이 없다.
 void RegisterObjectScopeNegativeControl(int (*function)(bool) noexcept) noexcept {
@@ -56,6 +57,10 @@ void RegisterDestroyRequestedNegativeControl(int (*function)(bool) noexcept) noe
 
 void RegisterTypeConvenienceNegativeControl(int (*function)(uint32) noexcept) noexcept {
     typeConvenienceNegativeControl = function;
+}
+
+void RegisterObjectObserverNegativeControl(int (*function)(uint32) noexcept) noexcept {
+    objectObserverNegativeControl = function;
 }
 
 Registration::Registration(const char* name, void (*function)()) noexcept
@@ -176,6 +181,17 @@ int main(int argc, char** argv) {
                                          : strcmp(control, "object-type-context") == 0 ? 1u
                                                                                        : 2u;
                 return test::typeConvenienceNegativeControl(operation);
+            } else if (strcmp(control, "object-observer-unpolicied") == 0 ||
+                       strcmp(control, "object-observer-shared") == 0 ||
+                       strcmp(control, "object-observer-attached") == 0) {
+                if (test::objectObserverNegativeControl == nullptr) {
+                    return 2;
+                }
+
+                const uint32 operation = strcmp(control, "object-observer-unpolicied") == 0 ? 0u
+                                         : strcmp(control, "object-observer-shared") == 0   ? 1u
+                                                                                            : 2u;
+                return test::objectObserverNegativeControl(operation);
             } else if (strcmp(control, "hash-map-foreach-erase") == 0 ||
                        strcmp(control, "hash-map-foreach-clear") == 0 ||
                        strcmp(control, "hash-map-foreach-reset") == 0 ||

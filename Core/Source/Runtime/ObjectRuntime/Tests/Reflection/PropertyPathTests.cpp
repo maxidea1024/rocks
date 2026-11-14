@@ -612,14 +612,18 @@ bool RegisterStruct(TypeRegistry& types) noexcept {
         types.RegisterStruct(GeneratedType<S>::Schema(), GeneratedType<S>::Ops()));
 }
 
-bool RegisterAll(TypeRegistry& types) noexcept {
+// completeLayout이면 Node를 완전한 필드 배치로 등록한다(패키지 정책 Registry의 생성 조건 — 모든
+// 필드가 함수표에 있고 Transient가 아닌 필드는 codec이 있다).
+bool RegisterAll(TypeRegistry& types, bool completeLayout = false) noexcept {
+    RuntimeTypeOps node = GeneratedType<Node>::Ops();
+    node.completeFieldLayout = completeLayout;
     return GeneratedType<TextureGroup>::Register(types) &&
            GeneratedType<Channels>::Register(types) && GeneratedType<Bias>::Register(types) &&
            GeneratedType<reflection_fixture::Base>::Register(types) &&
            RegisterStruct<Inner>(types) && RegisterStruct<Point>(types) &&
            RegisterStruct<Leaf>(types) && RegisterStruct<Slot>(types) &&
            RegisterStruct<Holder>(types) && RegisterStruct<Odd>(types) &&
-           types.Register(GeneratedType<Node>::Schema(), GeneratedType<Node>::Ops());
+           types.Register(GeneratedType<Node>::Schema(), Move(node));
 }
 
 ErrorCode ErrorOf(const Result<void>& result) noexcept {
@@ -1887,6 +1891,92 @@ TEST(PropertyPath_OperationsAreOwnerThreadOnly) {
         lease.Value().Reset();
         node.Value().Reset();
         REQUIRE(objects.Collect(access));
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+namespace {
+
+// 관찰자 시험의 패키지 타입이다(패키지 정책 Registry의 outermost).
+struct PathPackage final : Object {};
+
+constexpr TypeId PathPackageId{0x505450, 1};
+
+bool IsChange(const ReferenceEdgeDelta& change, ObjectHandle owner, ObjectHandle target,
+              int64 delta, ReferenceChangeCause cause) noexcept {
+    return change.ownerPackage == owner && change.targetPackage == target &&
+           change.delta == delta && change.cause == cause && change.transaction == 0;
+}
+
+} // namespace
+
+// 경로 쓰기(B6)가 바꾼 참조도 관찰자에 기록된다(Docs/Design/ObjectFoundations.ko.md 3절): 최상위
+// 참조 필드(등록 write)·ObjectRefArray 원소·인라인 struct 참조 멤버·StructRefArray 원소 참조 멤버가
+// 모두 Registry의 쓰기 지점을 지나고, 원소 삭제는 떼어 낸 원소만 trace한다.
+TEST(PropertyPath_ReferenceWritesAreObserved) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterAll(types, true));
+        RuntimeTypeOps package = MakeRuntimeTypeOps<PathPackage>();
+        package.completeFieldLayout = true;
+        REQUIRE(types.Register({PathPackageId, 1, {}, {}}, Move(package)));
+        ReferenceObserver observer(allocator);
+        RegistryOptions options;
+        options.policy.packageNativeType = NativeTypeKey<PathPackage>();
+        options.referenceObserver = &observer;
+        ObjectRegistry objects(allocator, types, {0x5054, 9}, options);
+        const auto access = objects.OwnerAccess();
+        auto packageP = objects.NewObject<PathPackage>(access, PathPackageId);
+        auto packageQ = objects.NewObject<PathPackage>(access, PathPackageId);
+        REQUIRE(packageP && packageQ);
+        const ObjectHandle p = packageP.Value().Handle();
+        const ObjectHandle q = packageQ.Value().Handle();
+        auto node = objects.NewObject<Node>(access, NodeId, p, {});
+        auto material = objects.NewObject<Node>(access, NodeId, q, {});
+        REQUIRE(node && material);
+        const ObjectHandle handle = node.Value().Handle();
+        FieldValue target = Reference(allocator, material.Value().Handle());
+        FieldValue null = Reference(allocator, {});
+        const PathStep next[] = {{NextId}};
+        const PathStep ref0[] = {At(RefsId, 0)};
+        const PathStep holderTarget[] = {{HolderFieldId}, {TargetId}};
+        const PathStep slot0[] = {At(SlotsId, 0)};
+        const PathStep slotMaterial[] = {At(SlotsId, 0), {MaterialId}};
+        REQUIRE(PathWrite(objects, access, handle, PathOf(next), target));
+        REQUIRE(PathInsertElement(objects, access, handle, PathOf(ref0), &target));
+        REQUIRE(PathWrite(objects, access, handle, PathOf(holderTarget), target));
+        REQUIRE(PathInsertElement(objects, access, handle, PathOf(slot0), nullptr));
+        REQUIRE(PathWrite(objects, access, handle, PathOf(slotMaterial), target));
+        Array<ReferenceEdgeDelta> added(allocator);
+        REQUIRE(observer.TakeChanges(added));
+        REQUIRE(added.Size() == 1);
+        CHECK(IsChange(added[0], p, q, 4, ReferenceChangeCause::Edit));
+
+        REQUIRE(PathWrite(objects, access, handle, PathOf(next), null));
+        REQUIRE(PathRemoveElement(objects, access, handle, PathOf(ref0)));
+        REQUIRE(PathRemoveElement(objects, access, handle, PathOf(slot0)));
+        Array<ReferenceEdgeDelta> removed(allocator);
+        REQUIRE(observer.TakeChanges(removed));
+        REQUIRE(removed.Size() == 1);
+        CHECK(IsChange(removed[0], p, q, -3, ReferenceChangeCause::Edit));
+
+        // 남은 holder.target은 Discard가 반납한다.
+        REQUIRE(objects.Discard(access, p));
+        REQUIRE(objects.Discard(access, q));
+        Array<ReferenceEdgeDelta> discarded(allocator);
+        REQUIRE(observer.TakeChanges(discarded));
+        REQUIRE(discarded.Size() == 1);
+        CHECK(IsChange(discarded[0], p, q, -1, ReferenceChangeCause::Discard));
+        node.Value().Reset();
+        material.Value().Reset();
+        packageP.Value().Reset();
+        packageQ.Value().Reset();
+        REQUIRE(objects.Collect(access));
+        CHECK(objects.Stats().liveObjects == 0 && objects.Stats().destroyRequested == 0);
+        CHECK(objects.Stats().retiredWithoutDiscard == 0);
+        REQUIRE(objects.Shutdown(access));
     }
 
     CHECK(allocator.Stats().liveAllocations == 0);

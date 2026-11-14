@@ -1,5 +1,6 @@
 #include <Base/Compiler.h>
 #include <Core/Algorithms.h>
+#include <Core/Containers/HashMap.h>
 #include <Core/Hash.h>
 #include <Core/Text/NameComponent.h>
 #include <Core/Text/StringBuilder.h>
@@ -15,6 +16,10 @@ namespace rocks {
 
 namespace {
 constexpr uint32 SlotsPerChunk = 64;
+// 관찰자가 없는 Registry의 남은 새 키 공간이다(제한 없음 — 기록하지 않으므로 예약도 없다).
+constexpr usize UnlimitedObserverKeys = ~usize(0);
+// ObjectStats의 32비트 누계 칸이 포화하는 값이다.
+constexpr uint32 MaxStatCount = 0xffffffffu;
 // chunk 포인터 표의 첫 크기다(1024 슬롯). 이후 두 배로 늘리고 maxSlots가 담는 chunk 수에서 멈춘다.
 constexpr uint32 MinimumChunkCapacity = 16;
 constexpr uint32 ChunkTag = 0x43484e4bu;      // 'CHNK'
@@ -88,8 +93,9 @@ struct ObjectRegistry::Slot {
     // 반환한다.
     NameRecord* name = nullptr;
     uint16 pathBytes = 0;
-    bool indexed = false; // 이름 색인에 있다
-    bool linked = false;  // 부모 고리에 있다
+    bool indexed = false;   // 이름 색인에 있다
+    bool linked = false;    // 부모 고리에 있다
+    bool discarded = false; // Discard됐다(DestroyRequested이고 색인·고리에 없다 — 회수 때 내린다)
 
     // 잠금 보유 상태에서 부른다. tally는 그 Registry의 상태별 통계다.
     void SetState(ObjectStats& tally, SlotState next) noexcept {
@@ -134,6 +140,84 @@ struct ObjectRegistry::MarkState {
     Array<ObjectHandle>* work;
     uint64 transaction = 0;
     ErrorCode error = ErrorCode::None;
+    // 관찰자 쌍 집계(Commit 검증·Discard·다중 간선 지점): tally가 있고 observe면 지금 trace하는
+    // 소유자의 패키지 ownerPackage에서 다른 패키지로 가는 간선을 delta로 합친다.
+    EdgeTally* tally = nullptr;
+    ObjectHandle ownerPackage{};
+    int64 delta = 0;
+    bool observe = false;
+};
+
+// 관찰자 기록 전에 같은 (소유 패키지, 대상 패키지) 쌍을 합치는 작업별 집계 표다. 순서는 발견
+// 순이고(handle 해시 순서를 쓰지 않는다 — 결정성) 쌍 → 위치 색인은 Core HashMap이다. 잠금 밖에서
+// Registry allocator로 자라고(처리 표시 아래 — allocator 콜백의 Registry 변경 재진입은 Busy라 같은
+// 표에 재진입하지 않는다) 소멸도 잠금 밖이다.
+struct ObjectRegistry::EdgeTally {
+    struct Pair {
+        ObjectHandle owner;
+        ObjectHandle target;
+        int64 delta = 0;
+    };
+
+    struct PairKey {
+        ObjectHandle owner;
+        ObjectHandle target;
+
+        bool operator==(const PairKey&) const noexcept = default;
+    };
+
+    struct PairKeyHash {
+        uint64 operator()(const PairKey& key) const noexcept {
+            const Hash<ObjectHandle> hash;
+            return HashCombine(hash(key.owner), hash(key.target));
+        }
+    };
+
+    explicit EdgeTally(Allocator& allocator) noexcept : pairs(allocator), positions(allocator) {
+    }
+
+    EdgeTally(const EdgeTally&) = delete;
+    EdgeTally& operator=(const EdgeTally&) = delete;
+
+    // 같은 쌍이 있으면 더하고 없으면 끝에 붙인다. 할당 실패는 그 오류이고 표는 그대로다.
+    Result<void> Add(ObjectHandle owner, ObjectHandle target, int64 delta) noexcept {
+        const PairKey key{owner, target};
+        if (usize* position = positions.Find(key)) {
+            pairs[*position].delta += delta;
+            return Result<void>::Success();
+        }
+
+        Pair pair;
+        pair.owner = owner;
+        pair.target = target;
+        pair.delta = delta;
+        if (auto pushed = pairs.TryPushBack(pair); !pushed) {
+            return pushed;
+        }
+
+        // 색인에 넣지 못하면 붙인 원소를 되돌린다.
+        if (auto inserted = positions.Insert(key, pairs.Size() - 1); !inserted) {
+            (void)pairs.TryPopBack();
+            return Result<void>::Failure(inserted.Error());
+        }
+
+        return Result<void>::Success();
+    }
+
+    Array<Pair> pairs;
+    HashMap<PairKey, usize, PairKeyHash> positions;
+};
+
+// 단일 간선 지점의 관찰자 기록 계획이다(최대 두 키 — 옛 대상 키가 먼저다).
+struct ObjectRegistry::EdgePlan {
+    struct Change {
+        ObjectHandle owner;
+        ObjectHandle target;
+        int64 delta = 0;
+    };
+
+    Change changes[2];
+    uint32 count = 0;
 };
 
 // 할당 하나에 NFC 이름과 그 뒤 비교 키를 담는다. keyHash는 (outer handle, 비교 키)의 색인 해시다.
@@ -194,9 +278,7 @@ Result<void> OpenState(bool closed, bool processing) noexcept {
 // (outer handle 전체, 비교 키)의 색인 해시다. outer에 generation이 있으므로 회수된 Outer의 옛
 // 항목이 새 객체와 섞이지 않는다.
 uint64 NameKeyHash(ObjectHandle outer, StringView key) noexcept {
-    const uint64 owner =
-        MixHash(outer.registry ^ MixHash((uint64(outer.slot) << 32) | outer.generation));
-    return MixHash(HashStringBytes(key) ^ owner);
+    return HashCombine(Hash<ObjectHandle>{}(outer), HashStringBytes(key));
 }
 
 // outer 아래 이름이 nameBytes byte인 새 객체의 객체 경로 길이다. 경로는 Outer 경로 + (둘 다 비어
@@ -224,6 +306,19 @@ ObjectRegistry::ObjectRegistry(Allocator& allocator, TypeRegistry& types, Contex
     : allocator_(allocator), types_(types), context_(context), options_(options),
       domain_(detail::NextRegistryDomain()), ownerThread_(platform::CurrentThreadId()),
       gcWork_(allocator) {
+    // 관찰자는 패키지 정책 Registry 하나에만 붙는다(생성자는 실패를 돌려줄 수 없다).
+    if (ReferenceObserver* observer = options_.referenceObserver) {
+        if (options_.policy.packageNativeType == nullptr) {
+            platform::Fatal("ReferenceObserver requires a package-policy ObjectRegistry");
+        }
+
+        if (observer->registry_ != nullptr) {
+            platform::Fatal("ReferenceObserver is already attached to an ObjectRegistry");
+        }
+
+        observer->registry_ = this;
+        observer->ownerThread_ = ownerThread_;
+    }
 }
 
 ObjectRegistry::~ObjectRegistry() {
@@ -231,6 +326,12 @@ ObjectRegistry::~ObjectRegistry() {
     if (!stopped) {
         platform::Fatal(
             "ObjectRegistry destroyed before roots/readers/backend leases/encode pins drained");
+    }
+
+    // 관찰자를 떼어 낸다(남은 변화는 관찰자가 계속 갖는다).
+    if (ReferenceObserver* observer = options_.referenceObserver) {
+        observer->registry_ = nullptr;
+        observer->ownerThread_ = 0;
     }
 
     // 종료 회수가 모든 NameRecord를 반환했다. 남은 것은 빈 색인 표다.
@@ -541,6 +642,182 @@ void ObjectRegistry::DetachIdentityLocked(Slot& slot) noexcept {
     if (slot.linked) {
         UnlinkChildLocked(slot);
     }
+}
+
+void ObjectRegistry::VisitIdentityEdges(const Slot& slot, TraceVisitor& visitor) const noexcept {
+    visitor.Visit(slot.outer);
+    // 패키지 정책: 자식 고리가 export 표다. 처리 표시 아래라 고리가 바뀌지 않고 열린 생성
+    // 트랜잭션이 있으면 GC가 진행하지 않으므로 Reserved 자식은 Commit 검증(같은 트랜잭션)에서만
+    // 만난다.
+    if (options_.policy.packageNativeType != nullptr) {
+        for (const Slot* child = slot.firstChild; child != nullptr; child = child->nextSibling) {
+            visitor.Visit(HandleOf(*child));
+        }
+    }
+}
+
+ObjectHandle ObjectRegistry::PackageOfLocked(ObjectHandle target) const noexcept {
+    // 관찰 대상 간선의 대상은 회수 전이다: 대상을 쓰는 지점이 생존(또는 같은 트랜잭션) 대상만 받고,
+    // 소유자가 cutoff 아닌 생존 객체인 동안 그 대상은 표식되어 inner → outer 간선으로 Outer
+    // 사슬까지 회수되지 않는다(그래서 outermost 슬롯도 유효하다). 대상의 GC 색은 보지 않는다.
+    const Slot* slot = FindSlot(target);
+    if (slot == nullptr ||
+        !(slot->state == SlotState::Reserved || slot->state == SlotState::Alive ||
+          slot->state == SlotState::DestroyRequested) ||
+        slot->outermost == nullptr) {
+        platform::Fatal("Observed reference target lost its package");
+    }
+
+    return HandleOf(*slot->outermost);
+}
+
+bool ObjectRegistry::ObservesOwnerLocked(const Slot& owner) const noexcept {
+    // 패키지 객체(Outer 없음)가 소유한 간선과 DestroyRequested 소유자의 제거·비우기(Discard가 이미
+    // 반납했다)는 기록하지 않는다.
+    return options_.referenceObserver != nullptr && owner.state == SlotState::Alive &&
+           !owner.outer.IsNull();
+}
+
+ObjectRegistry::EdgePlan ObjectRegistry::PlanEditLocked(const Slot& owner, ObjectHandle removed,
+                                                        ObjectHandle added) const noexcept {
+    EdgePlan plan;
+    if (!ObservesOwnerLocked(owner)) {
+        return plan;
+    }
+
+    const ObjectHandle package = HandleOf(*owner.outermost);
+    const bool hasRemoved = !removed.IsNull();
+    const bool hasAdded = !added.IsNull();
+    const ObjectHandle removedPackage = hasRemoved ? PackageOfLocked(removed) : ObjectHandle{};
+    const ObjectHandle addedPackage = hasAdded ? PackageOfLocked(added) : ObjectHandle{};
+    if (hasRemoved && hasAdded && removedPackage == addedPackage) {
+        return plan;
+    }
+
+    if (hasRemoved && !(removedPackage == package)) {
+        plan.changes[plan.count++] = {package, removedPackage, -1};
+    }
+
+    if (hasAdded && !(addedPackage == package)) {
+        plan.changes[plan.count++] = {package, addedPackage, 1};
+    }
+
+    return plan;
+}
+
+usize ObjectRegistry::MissingKeysLocked(const EdgePlan& plan) const noexcept {
+    usize missing = 0;
+    for (uint32 index = 0; index < plan.count; ++index) {
+        const EdgePlan::Change& change = plan.changes[index];
+        if (!options_.referenceObserver->Contains(change.owner, change.target,
+                                                  ReferenceChangeCause::Edit, 0)) {
+            ++missing;
+        }
+    }
+
+    return missing;
+}
+
+usize ObjectRegistry::MissingKeysLocked(const EdgeTally& tally, ReferenceChangeCause cause,
+                                        uint64 transaction) const noexcept {
+    usize missing = 0;
+    for (const EdgeTally::Pair& pair : tally.pairs) {
+        if (!options_.referenceObserver->Contains(pair.owner, pair.target, cause, transaction)) {
+            ++missing;
+        }
+    }
+
+    return missing;
+}
+
+usize ObjectRegistry::ObserverFreeLocked() const noexcept {
+    return options_.referenceObserver != nullptr ? options_.referenceObserver->FreeKeys()
+                                                 : UnlimitedObserverKeys;
+}
+
+void ObjectRegistry::ApplyPlanLocked(const EdgePlan& plan) noexcept {
+    for (uint32 index = 0; index < plan.count; ++index) {
+        const EdgePlan::Change& change = plan.changes[index];
+        options_.referenceObserver->Add(change.owner, change.target, change.delta,
+                                        ReferenceChangeCause::Edit, 0);
+    }
+}
+
+void ObjectRegistry::ApplyTallyLocked(const EdgeTally& tally, ReferenceChangeCause cause,
+                                      uint64 transaction) noexcept {
+    for (const EdgeTally::Pair& pair : tally.pairs) {
+        options_.referenceObserver->Add(pair.owner, pair.target, pair.delta, cause, transaction);
+    }
+}
+
+Result<void> ObjectRegistry::ReserveTally(const EdgeTally& tally, ReferenceChangeCause cause,
+                                          uint64 transaction) noexcept {
+    if (tally.pairs.IsEmpty()) {
+        return Result<void>::Success();
+    }
+
+    usize missing = 0;
+    usize free = 0;
+    {
+        platform::LockGuard lock(gate_);
+        missing = MissingKeysLocked(tally, cause, transaction);
+        free = ObserverFreeLocked();
+    }
+
+    return missing <= free ? Result<void>::Success() : options_.referenceObserver->Reserve(missing);
+}
+
+void ObjectRegistry::TallyEdge(void* pointer, ObjectHandle handle) noexcept {
+    auto& state = *static_cast<MarkState*>(pointer);
+    if (handle.IsNull() || state.error != ErrorCode::None) {
+        return;
+    }
+
+    ObjectHandle package;
+    {
+        platform::LockGuard lock(state.registry->gate_);
+        package = state.registry->PackageOfLocked(handle);
+    }
+
+    if (package == state.ownerPackage) {
+        return;
+    }
+
+    if (auto added = state.tally->Add(state.ownerPackage, package, state.delta); !added) {
+        state.error = added.Error();
+    }
+}
+
+Result<void> ObjectRegistry::TallyStructBlocks(const detail::StructElementOps& element,
+                                               void* const* blocks, uint32 count,
+                                               ObjectHandle ownerPackage,
+                                               EdgeTally& tally) noexcept {
+    // 떼어 낼 원소만 trace한다(소유자 Trace는 부르지 않는다). trace 칸은 원소 표에 없으므로 등록
+    // struct의 실행 정보로 얻는다(StructRefArray.h — 생성 헤더 없는 곳의 인스턴스화 문제).
+    auto lease = types_.AcquireStructByNative(element.nativeType);
+    if (!lease) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    const auto trace = lease.Value().StructOps().trace;
+    MarkState state{this, nullptr};
+    state.tally = &tally;
+    state.ownerPackage = ownerPackage;
+    state.delta = -1;
+    TraceVisitor visitor(&state, &ObjectRegistry::TallyEdge);
+    for (uint32 index = 0; trace != nullptr && index < count && state.error == ErrorCode::None;
+         ++index) {
+        trace(blocks[index], visitor);
+    }
+
+    return state.error == ErrorCode::None ? Result<void>::Success()
+                                          : Result<void>::Failure(state.error);
+}
+
+Result<void> ObjectRegistry::EndProcessing(Result<void> result) noexcept {
+    platform::LockGuard lock(gate_);
+    processing_ = false;
+    return result;
 }
 
 namespace detail {
@@ -879,74 +1156,115 @@ Result<void> ObjectRegistry::SetEdge(const ObjectAccessContext& access, ObjectHa
         return valid;
     }
 
-    platform::LockGuard lock(gate_);
-    if (processing_ || closed_) {
-        return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
-    }
-
     const uptr location = reinterpret_cast<uptr>(&field);
-    if (element) {
-        // 원소 모드: 컨테이너가 owner 저장소 안, index < size, field가 그 원소 블록 안(O(1)).
-        // 컨테이너 위치가 owner 저장소 안임을 확인하기 전에는 storage를 역참조하지 않는다.
-        const detail::StructRefArrayStorage* storage = element->storage;
-        auto checked =
-            CheckContainerOwnerLocked(owner, storage, sizeof(*storage), transaction, false);
-        if (!checked) {
-            return checked;
+    // 원소 모드에서 첫 시도 때 본 컨테이너 변경 계수다. 예약 콜백이 원소를 지우고 다시 만들면 같은
+    // 블록 주소가 재사용되어 위치 검사를 통과할 수 있으므로 재시도는 계수로 변경을 가려 Busy다.
+    uint32 revision = 0;
+    // 검증 → (live·관찰자) 기록 계획 → 공간이 있으면 shade·게시·기록이다. 관찰자 공간이 모자라면
+    // 잠금을 풀고 예약한 뒤 처음부터 한 번 더 한다(그래도 모자라면 Busy — 단일 간선 지점의 컨테이너
+    // 성장 규칙, Docs/Design/ObjectFoundations.ko.md 3절).
+    for (uint32 attempt = 0;; ++attempt) {
+        usize reserve = 0;
+        {
+            platform::LockGuard lock(gate_);
+            if (processing_ || closed_) {
+                return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
+            }
+
+            if (element) {
+                // 원소 모드: 컨테이너가 owner 저장소 안, index < size, field가 그 원소 블록
+                // 안(O(1)). 컨테이너 위치가 owner 저장소 안임을 확인하기 전에는 storage를
+                // 역참조하지 않는다.
+                const detail::StructRefArrayStorage* storage = element->storage;
+                auto checked =
+                    CheckContainerOwnerLocked(owner, storage, sizeof(*storage), transaction, false);
+                if (!checked) {
+                    return checked;
+                }
+
+                if (attempt != 0 && storage->revision != revision) {
+                    return Result<void>::Failure(ErrorCode::Busy);
+                }
+
+                revision = storage->revision;
+                if (element->index >= storage->size) {
+                    return Result<void>::Failure(attempt == 0 ? ErrorCode::InvalidArgument
+                                                              : ErrorCode::Busy);
+                }
+
+                const uptr block = reinterpret_cast<uptr>(storage->blocks[element->index]);
+                const usize bytes = storage->element->size;
+                if (bytes < sizeof(ObjectHandle) || location < block ||
+                    location - block > bytes - sizeof(ObjectHandle)) {
+                    return Result<void>::Failure(attempt == 0 ? ErrorCode::InvalidArgument
+                                                              : ErrorCode::Busy);
+                }
+            } else {
+                Slot* source = FindSlot(owner);
+                if (!source || !source->object || IsCutoff(source) ||
+                    (transaction ? source->state != SlotState::Reserved ||
+                                       source->transaction != transaction
+                                 : source->state != SlotState::Alive)) {
+                    return Result<void>::Failure(ErrorCode::StaleHandle);
+                }
+
+                const uptr start = reinterpret_cast<uptr>(source->storage);
+                const usize size = source->type.Ops().size;
+                if (location < start || location - start > size - sizeof(ObjectHandle)) {
+                    return Result<void>::Failure(ErrorCode::InvalidArgument);
+                }
+
+                // 위치 오류를 가리지 않게 마지막에 본다(PinForEncode).
+                if (source->encodePins != 0) {
+                    return Result<void>::Failure(ErrorCode::Busy);
+                }
+            }
+
+            if (!target.IsNull()) {
+                auto targetChecked = CheckTargetLocked(target, transaction, nativeType);
+                if (!targetChecked) {
+                    return targetChecked;
+                }
+            }
+
+            // staged 쓰기는 기록하지 않는다(Commit이 한꺼번에 보고한다).
+            const EdgePlan plan =
+                transaction == 0 ? PlanEditLocked(*FindSlot(owner), field, target) : EdgePlan{};
+            const usize missing = plan.count != 0 ? MissingKeysLocked(plan) : 0;
+            if (missing <= ObserverFreeLocked()) {
+                if (target.IsNull()) {
+                    // 비교·Required 검사·encode가 정규 null만 보게 한다.
+                    field = ObjectHandle{};
+                } else {
+                    // staged 내부 간선은 Commit에서 전체 게시·shade한다. 이미 게시된 대상은 즉시
+                    // 보존한다.
+                    if (FindSlot(target)->state == SlotState::Alive) {
+                        const ErrorCode shaded = ShadeLocked(target);
+                        if (shaded != ErrorCode::None) {
+                            return Result<void>::Failure(shaded);
+                        }
+                    }
+
+                    field = target;
+                }
+
+                ApplyPlanLocked(plan);
+                return Result<void>::Success();
+            }
+
+            if (attempt != 0) {
+                return Result<void>::Failure(ErrorCode::Busy);
+            }
+
+            reserve = missing;
         }
 
-        if (element->index >= storage->size) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
-        }
-
-        const uptr block = reinterpret_cast<uptr>(storage->blocks[element->index]);
-        const usize bytes = storage->element->size;
-        if (bytes < sizeof(ObjectHandle) || location < block ||
-            location - block > bytes - sizeof(ObjectHandle)) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
-        }
-    } else {
-        Slot* source = FindSlot(owner);
-        if (!source || !source->object || IsCutoff(source) ||
-            (transaction
-                 ? source->state != SlotState::Reserved || source->transaction != transaction
-                 : source->state != SlotState::Alive)) {
-            return Result<void>::Failure(ErrorCode::StaleHandle);
-        }
-
-        const uptr start = reinterpret_cast<uptr>(source->storage);
-        const usize size = source->type.Ops().size;
-        if (location < start || location - start > size - sizeof(ObjectHandle)) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
-        }
-
-        // 위치 오류를 가리지 않게 마지막에 본다(PinForEncode).
-        if (source->encodePins != 0) {
-            return Result<void>::Failure(ErrorCode::Busy);
+        // 관찰자 allocator 콜백은 잠금 밖에서 실행한다. 콜백이 같은 field·컨테이너를 바꿀 수 있어
+        // 다시 잠근 뒤 검증부터 다시 한다(owner Borrow가 수집·회수를 막는다 — 원소 모드).
+        if (auto reserved = options_.referenceObserver->Reserve(reserve); !reserved) {
+            return reserved;
         }
     }
-
-    if (target.IsNull()) {
-        // 비교·Required 검사·encode가 정규 null만 보게 한다.
-        field = ObjectHandle{};
-        return Result<void>::Success();
-    }
-
-    auto targetChecked = CheckTargetLocked(target, transaction, nativeType);
-    if (!targetChecked) {
-        return targetChecked;
-    }
-
-    // staged 내부 간선은 Commit에서 전체 게시·shade한다. 이미 게시된 대상은 즉시 보존한다.
-    if (FindSlot(target)->state == SlotState::Alive) {
-        const ErrorCode shaded = ShadeLocked(target);
-        if (shaded != ErrorCode::None) {
-            return Result<void>::Failure(shaded);
-        }
-    }
-
-    field = target;
-    return Result<void>::Success();
 }
 
 Result<void> ObjectRegistry::InsertArrayEdge(const ObjectAccessContext& access, ObjectHandle owner,
@@ -1013,6 +1331,7 @@ Result<void> ObjectRegistry::InsertArrayEdge(const ObjectAccessContext& access, 
     };
 
     uint32 grown = 0;
+    usize reserve = 0;
     {
         platform::LockGuard lock(gate_);
         // 용량을 늘리기 전에 검증해 잘못된 호출이 할당을 일으키지 않게 한다.
@@ -1035,25 +1354,45 @@ Result<void> ObjectRegistry::InsertArrayEdge(const ObjectAccessContext& access, 
             return Result<void>::Failure(ErrorCode::Overflow);
         }
 
-        if (storage.size < storage.capacity) {
+        // 관찰자 기록(새 키 ≤ 1)은 버퍼와 같은 규칙이다: 공간이 모자라면 잠금 밖에서 예약한다.
+        const EdgePlan plan = PlanEditLocked(*FindSlot(owner), ObjectHandle{}, target);
+        const usize missing = plan.count != 0 ? MissingKeysLocked(plan) : 0;
+        const bool keysReady = missing <= ObserverFreeLocked();
+        if (storage.size < storage.capacity && keysReady) {
             auto published = publishLocked(position, storage.data, storage.capacity);
-            return published ? Result<void>::Success() : Result<void>::Failure(published.Error());
+            if (!published) {
+                return Result<void>::Failure(published.Error());
+            }
+
+            ApplyPlanLocked(plan);
+            return Result<void>::Success();
         }
 
-        grown = GrownCapacity(storage.capacity);
+        grown = storage.size < storage.capacity ? 0 : GrownCapacity(storage.capacity);
+        reserve = keysReady ? 0 : missing;
     }
 
-    // allocator callback은 Registry 잠금 밖에서 실행하며, 이 구간에는 할당만 한다. 콜백이 같은
-    // 배열을 바꿀 수 있으므로 복사·삽입·게시는 다시 잠근 뒤 그때의 size·index로 한다. 레지스트리
-    // 전체 처리 표시(processing_)는 세우지 않는다(흔한 런타임 목록 변경이 다른 스레드를 막지 않게).
-    // owner Borrow가 수집·회수를 막으므로 owner와 배열은 살아 있다.
-    auto memory =
-        allocator.Allocate(sizeof(ObjectHandle) * grown, alignof(ObjectHandle), ObjectRefArrayTag);
-    if (!memory) {
-        return Result<void>::Failure(memory.Error());
+    // allocator callback은 Registry 잠금 밖에서 실행하며, 이 구간에는 할당(관찰자 예약 포함)만
+    // 한다. 콜백이 같은 배열을 바꿀 수 있으므로 복사·삽입·게시는 다시 잠근 뒤 그때의 size·index로
+    // 한다. 레지스트리 전체 처리 표시(processing_)는 세우지 않는다(흔한 런타임 목록 변경이 다른
+    // 스레드를 막지 않게). owner Borrow가 수집·회수를 막으므로 owner와 배열은 살아 있다.
+    if (reserve != 0) {
+        if (auto reserved = options_.referenceObserver->Reserve(reserve); !reserved) {
+            return reserved;
+        }
     }
 
-    auto* fresh = static_cast<ObjectHandle*>(memory.Value());
+    ObjectHandle* fresh = nullptr;
+    if (grown != 0) {
+        auto memory = allocator.Allocate(sizeof(ObjectHandle) * grown, alignof(ObjectHandle),
+                                         ObjectRefArrayTag);
+        if (!memory) {
+            return Result<void>::Failure(memory.Error());
+        }
+
+        fresh = static_cast<ObjectHandle*>(memory.Value());
+    }
+
     ObjectHandle* release = fresh;
     Result<void> result = Result<void>::Success();
     {
@@ -1069,16 +1408,26 @@ Result<void> ObjectRegistry::InsertArrayEdge(const ObjectAccessContext& access, 
             result = targetLocked();
         }
 
+        EdgePlan plan;
+        if (result) {
+            plan = PlanEditLocked(*FindSlot(owner), ObjectHandle{}, target);
+            if (plan.count != 0 && MissingKeysLocked(plan) > ObserverFreeLocked()) {
+                // 콜백의 기록이 예약한 공간을 다시 써 버렸다.
+                result = Result<void>::Failure(ErrorCode::Busy);
+            }
+        }
+
         if (result) {
             if (storage.size == 0xffffffffu) {
                 result = Result<void>::Failure(ErrorCode::Overflow);
             } else if (storage.size < storage.capacity) {
-                // 그 사이 용량이 충분해졌다. 기존 버퍼에 넣고 새 버퍼는 반환한다.
+                // 그 사이 용량이 충분해졌다(또는 관찰자 공간만 모자랐다). 기존 버퍼에 넣고 새
+                // 버퍼는 반환한다.
                 auto published = publishLocked(position, storage.data, storage.capacity);
                 if (!published) {
                     result = Result<void>::Failure(published.Error());
                 }
-            } else if (grown > storage.size) {
+            } else if (fresh != nullptr && grown > storage.size) {
                 auto published = publishLocked(position, fresh, grown);
                 if (published) {
                     release = published.Value();
@@ -1086,9 +1435,13 @@ Result<void> ObjectRegistry::InsertArrayEdge(const ObjectAccessContext& access, 
                     result = Result<void>::Failure(published.Error());
                 }
             } else {
-                // 콜백이 원소를 늘려 새 버퍼가 size + 1을 담지 못한다.
+                // 콜백이 원소를 늘려 새 버퍼가 size + 1을 담지 못한다(또는 새 버퍼가 없다).
                 result = Result<void>::Failure(ErrorCode::Busy);
             }
+        }
+
+        if (result) {
+            ApplyPlanLocked(plan);
         }
     }
 
@@ -1105,37 +1458,62 @@ Result<void> ObjectRegistry::ReplaceArrayEdge(const ObjectAccessContext& access,
         return valid;
     }
 
-    platform::LockGuard lock(gate_);
-    if (processing_ || closed_) {
-        return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
-    }
+    // 관찰자 공간이 모자라면 잠금 밖에서 예약한 뒤 한 번 더 한다(SetEdge와 같은 규칙).
+    for (uint32 attempt = 0;; ++attempt) {
+        usize reserve = 0;
+        {
+            platform::LockGuard lock(gate_);
+            if (processing_ || closed_) {
+                return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
+            }
 
-    auto checked = CheckContainerOwnerLocked(owner, &storage, sizeof(storage), 0, false);
-    if (!checked) {
-        return checked;
-    }
+            auto checked = CheckContainerOwnerLocked(owner, &storage, sizeof(storage), 0, false);
+            if (!checked) {
+                return checked;
+            }
 
-    if (index >= storage.size) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
-    }
+            if (index >= storage.size) {
+                // 재시도에서는 예약 콜백이 원소를 지운 것이다.
+                return Result<void>::Failure(attempt == 0 ? ErrorCode::InvalidArgument
+                                                          : ErrorCode::Busy);
+            }
 
-    if (target.IsNull()) {
-        storage.data[index] = ObjectHandle{};
-        return Result<void>::Success();
-    }
+            if (!target.IsNull()) {
+                auto targetChecked = CheckTargetLocked(target, 0, nativeType);
+                if (!targetChecked) {
+                    return targetChecked;
+                }
+            }
 
-    auto targetChecked = CheckTargetLocked(target, 0, nativeType);
-    if (!targetChecked) {
-        return targetChecked;
-    }
+            const EdgePlan plan = PlanEditLocked(*FindSlot(owner), storage.data[index], target);
+            const usize missing = plan.count != 0 ? MissingKeysLocked(plan) : 0;
+            if (missing <= ObserverFreeLocked()) {
+                if (target.IsNull()) {
+                    storage.data[index] = ObjectHandle{};
+                } else {
+                    const ErrorCode shaded = ShadeLocked(target);
+                    if (shaded != ErrorCode::None) {
+                        return Result<void>::Failure(shaded);
+                    }
 
-    const ErrorCode shaded = ShadeLocked(target);
-    if (shaded != ErrorCode::None) {
-        return Result<void>::Failure(shaded);
-    }
+                    storage.data[index] = target;
+                }
 
-    storage.data[index] = target;
-    return Result<void>::Success();
+                ApplyPlanLocked(plan);
+                return Result<void>::Success();
+            }
+
+            if (attempt != 0) {
+                return Result<void>::Failure(ErrorCode::Busy);
+            }
+
+            reserve = missing;
+        }
+
+        if (auto reserved = options_.referenceObserver->Reserve(reserve); !reserved) {
+            return reserved;
+        }
+    }
 }
 
 Result<void> ObjectRegistry::RemoveArrayEdge(const ObjectAccessContext& access, ObjectHandle owner,
@@ -1146,45 +1524,73 @@ Result<void> ObjectRegistry::RemoveArrayEdge(const ObjectAccessContext& access, 
         return valid;
     }
 
-    platform::LockGuard lock(gate_);
-    if (processing_ || closed_) {
-        return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
+    // 원소 null은 정규 값이므로 비정규 null 인자도 첫 null 원소를 찾는다.
+    if (byHandle && target.IsNull()) {
+        target = ObjectHandle{};
     }
 
-    auto checked = CheckContainerOwnerLocked(owner, &storage, sizeof(storage), 0, true);
-    if (!checked) {
-        return checked;
-    }
-
-    if (byHandle) {
-        // 원소 null은 정규 값이므로 비정규 null 인자도 첫 null 원소를 찾는다.
-        if (target.IsNull()) {
-            target = ObjectHandle{};
-        }
-
-        index = storage.size;
-        for (uint32 position = 0; position < storage.size; ++position) {
-            if (storage.data[position] == target) {
-                index = position;
-                break;
+    // 관찰자 공간이 모자라면 잠금 밖에서 예약한 뒤 한 번 더 한다(SetEdge와 같은 규칙).
+    for (uint32 attempt = 0;; ++attempt) {
+        usize reserve = 0;
+        {
+            platform::LockGuard lock(gate_);
+            if (processing_ || closed_) {
+                return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
             }
+
+            auto checked = CheckContainerOwnerLocked(owner, &storage, sizeof(storage), 0, true);
+            if (!checked) {
+                return checked;
+            }
+
+            usize position = index;
+            if (byHandle) {
+                position = storage.size;
+                for (uint32 at = 0; at < storage.size; ++at) {
+                    if (storage.data[at] == target) {
+                        position = at;
+                        break;
+                    }
+                }
+
+                if (position == storage.size) {
+                    // 재시도에서는 예약 콜백이 그 원소를 지운 것이다.
+                    return Result<void>::Failure(attempt == 0 ? ErrorCode::NotFound
+                                                              : ErrorCode::Busy);
+                }
+            } else if (position >= storage.size) {
+                return Result<void>::Failure(attempt == 0 ? ErrorCode::InvalidArgument
+                                                          : ErrorCode::Busy);
+            }
+
+            // DestroyRequested owner의 제거는 기록하지 않는다(PlanEditLocked — Discard가 이미
+            // 반납했다).
+            const EdgePlan plan =
+                PlanEditLocked(*FindSlot(owner), storage.data[position], ObjectHandle{});
+            const usize missing = plan.count != 0 ? MissingKeysLocked(plan) : 0;
+            if (missing <= ObserverFreeLocked()) {
+                // 삽입 장벽 GC에서 간선 삭제는 장벽이 필요 없다. 지운 대상은 다른 경로로 도달하지
+                // 않으면 회수된다.
+                for (usize at = position + 1; at < storage.size; ++at) {
+                    storage.data[at - 1] = storage.data[at];
+                }
+
+                --storage.size;
+                ApplyPlanLocked(plan);
+                return Result<void>::Success();
+            }
+
+            if (attempt != 0) {
+                return Result<void>::Failure(ErrorCode::Busy);
+            }
+
+            reserve = missing;
         }
 
-        if (index == storage.size) {
-            return Result<void>::Failure(ErrorCode::NotFound);
+        if (auto reserved = options_.referenceObserver->Reserve(reserve); !reserved) {
+            return reserved;
         }
-    } else if (index >= storage.size) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
-
-    // 삽입 장벽 GC에서 간선 삭제는 장벽이 필요 없다. 지운 대상은 다른 경로로 도달하지 않으면
-    // 회수된다.
-    for (usize position = index + 1; position < storage.size; ++position) {
-        storage.data[position - 1] = storage.data[position];
-    }
-
-    --storage.size;
-    return Result<void>::Success();
 }
 
 Result<void> ObjectRegistry::ClearArrayEdges(const ObjectAccessContext& access, ObjectHandle owner,
@@ -1194,17 +1600,57 @@ Result<void> ObjectRegistry::ClearArrayEdges(const ObjectAccessContext& access, 
         return valid;
     }
 
-    platform::LockGuard lock(gate_);
-    if (processing_ || closed_) {
-        return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
+    ObjectHandle package;
+    {
+        platform::LockGuard lock(gate_);
+        if (processing_ || closed_) {
+            return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
+        }
+
+        auto checked = CheckContainerOwnerLocked(owner, &storage, sizeof(storage), 0, true);
+        if (!checked) {
+            return checked;
+        }
+
+        const Slot& source = *FindSlot(owner);
+        if (!ObservesOwnerLocked(source) || storage.size == 0) {
+            storage.size = 0;
+            return Result<void>::Success();
+        }
+
+        // 다중 간선 지점(Docs/Design/ObjectFoundations.ko.md 3절): 처리 표시 아래 잠금 밖에서
+        // 떼어 낼 값의 쌍을 합친 뒤 예약하고, 한 잠금 안에서 비우고 기록한다. 처리 표시 동안 다른
+        // 변경은 Busy라 배열·owner를 다시 검증할 필요가 없다.
+        package = HandleOf(*source.outermost);
+        processing_ = true;
     }
 
-    auto checked = CheckContainerOwnerLocked(owner, &storage, sizeof(storage), 0, true);
-    if (!checked) {
-        return checked;
+    EdgeTally tally(allocator_);
+    MarkState state{this, nullptr};
+    state.tally = &tally;
+    state.ownerPackage = package;
+    state.delta = -1;
+    for (uint32 position = 0; position < storage.size && state.error == ErrorCode::None;
+         ++position) {
+        TallyEdge(&state, storage.data[position]);
+    }
+
+    if (state.error != ErrorCode::None) {
+        return EndProcessing(Result<void>::Failure(state.error));
+    }
+
+    if (auto reserved = ReserveTally(tally, ReferenceChangeCause::Edit, 0); !reserved) {
+        return EndProcessing(Move(reserved));
+    }
+
+    platform::LockGuard lock(gate_);
+    processing_ = false;
+    if (MissingKeysLocked(tally, ReferenceChangeCause::Edit, 0) > ObserverFreeLocked()) {
+        return Result<void>::Failure(ErrorCode::Busy);
     }
 
     storage.size = 0;
+    ApplyTallyLocked(tally, ReferenceChangeCause::Edit, 0);
     return Result<void>::Success();
 }
 
@@ -1426,6 +1872,7 @@ Result<usize> ObjectRegistry::InsertStructElement(const ObjectAccessContext& acc
 
                 target[position] = block;
                 ++storage.size;
+                ++storage.revision;
                 published = true;
             }
         }
@@ -1452,6 +1899,18 @@ Result<void> ObjectRegistry::RemoveStructElement(const ObjectAccessContext& acce
     Allocator& allocator = *storage.allocator;
     const detail::StructElementOps& ops = *storage.element;
     void* block = nullptr;
+    // 삭제 장벽은 필요 없다(삽입 장벽과 Sweeping cutoff가 지킨다). 색인에서 먼저 떼므로 소멸 중
+    // 재진입이 이 원소를 다시 건드릴 수 없다.
+    auto detachLocked = [&]() noexcept {
+        block = storage.blocks[index];
+        for (usize position = index + 1; position < storage.size; ++position) {
+            storage.blocks[position - 1] = storage.blocks[position];
+        }
+
+        --storage.size;
+        ++storage.revision;
+    };
+    ObjectHandle package;
     {
         platform::LockGuard lock(gate_);
         if (processing_ || closed_) {
@@ -1467,14 +1926,35 @@ Result<void> ObjectRegistry::RemoveStructElement(const ObjectAccessContext& acce
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
-        // 삭제 장벽은 필요 없다(삽입 장벽과 Sweeping cutoff가 지킨다). 색인에서 먼저 떼므로 소멸
-        // 중 재진입이 이 원소를 다시 건드릴 수 없다.
-        block = storage.blocks[index];
-        for (usize position = index + 1; position < storage.size; ++position) {
-            storage.blocks[position - 1] = storage.blocks[position];
+        const Slot& source = *FindSlot(owner);
+        if (!ObservesOwnerLocked(source)) {
+            detachLocked();
+        } else {
+            // 다중 간선 지점: 떼어 낼 원소만 처리 표시 아래 잠금 밖에서 trace해 합친다.
+            package = HandleOf(*source.outermost);
+            processing_ = true;
+        }
+    }
+
+    if (block == nullptr) {
+        EdgeTally tally(allocator_);
+        void* const target = storage.blocks[index];
+        if (auto tallied = TallyStructBlocks(ops, &target, 1, package, tally); !tallied) {
+            return EndProcessing(Move(tallied));
         }
 
-        --storage.size;
+        if (auto reserved = ReserveTally(tally, ReferenceChangeCause::Edit, 0); !reserved) {
+            return EndProcessing(Move(reserved));
+        }
+
+        platform::LockGuard lock(gate_);
+        processing_ = false;
+        if (MissingKeysLocked(tally, ReferenceChangeCause::Edit, 0) > ObserverFreeLocked()) {
+            return Result<void>::Failure(ErrorCode::Busy);
+        }
+
+        detachLocked();
+        ApplyTallyLocked(tally, ReferenceChangeCause::Edit, 0);
     }
 
     DestroyStructElement(allocator, ops, block);
@@ -1493,6 +1973,17 @@ Result<void> ObjectRegistry::ClearStructElements(const ObjectAccessContext& acce
     const detail::StructElementOps& ops = *storage.element;
     void** blocks = nullptr;
     uint32 size = 0;
+    // 색인째 떼어 낸다(잠금 밖에서 소멸할 원소를 담으려고 할당하지 않는다).
+    auto detachLocked = [&]() noexcept {
+        blocks = storage.blocks;
+        size = storage.size;
+        storage.blocks = nullptr;
+        storage.size = 0;
+        ++storage.revision;
+        storage.capacity = 0;
+    };
+    bool observe = false;
+    ObjectHandle package;
     {
         platform::LockGuard lock(gate_);
         if (processing_ || closed_) {
@@ -1504,12 +1995,36 @@ Result<void> ObjectRegistry::ClearStructElements(const ObjectAccessContext& acce
             return checked;
         }
 
-        // 색인째 떼어 낸다(잠금 밖에서 소멸할 원소를 담으려고 할당하지 않는다).
-        blocks = storage.blocks;
-        size = storage.size;
-        storage.blocks = nullptr;
-        storage.size = 0;
-        storage.capacity = 0;
+        const Slot& source = *FindSlot(owner);
+        observe = ObservesOwnerLocked(source) && storage.size != 0;
+        if (!observe) {
+            detachLocked();
+        } else {
+            // 다중 간선 지점: 떼어 낼 원소를 처리 표시 아래 잠금 밖에서 trace해 합친다.
+            package = HandleOf(*source.outermost);
+            processing_ = true;
+        }
+    }
+
+    if (observe) {
+        EdgeTally tally(allocator_);
+        if (auto tallied = TallyStructBlocks(ops, storage.blocks, storage.size, package, tally);
+            !tallied) {
+            return EndProcessing(Move(tallied));
+        }
+
+        if (auto reserved = ReserveTally(tally, ReferenceChangeCause::Edit, 0); !reserved) {
+            return EndProcessing(Move(reserved));
+        }
+
+        platform::LockGuard lock(gate_);
+        processing_ = false;
+        if (MissingKeysLocked(tally, ReferenceChangeCause::Edit, 0) > ObserverFreeLocked()) {
+            return Result<void>::Failure(ErrorCode::Busy);
+        }
+
+        detachLocked();
+        ApplyTallyLocked(tally, ReferenceChangeCause::Edit, 0);
     }
 
     for (uint32 remaining = size; remaining != 0; --remaining) {
@@ -1598,6 +2113,7 @@ Result<void> ObjectRegistry::AssignStructElements(const ObjectAccessContext& acc
             previousSize = storage.size;
             storage.blocks = fresh;
             storage.size = static_cast<uint32>(count);
+            ++storage.revision;
             storage.capacity = static_cast<uint32>(count);
         }
     }
@@ -1687,6 +2203,11 @@ Result<void> ObjectRegistry::RequestDestroyChecked(const ObjectAccessContext& ac
         return valid;
     }
 
+    // 패키지 정책 Registry의 소속 객체는 Discard로만 죽는다(관찰자 유무와 무관 — 결정 1).
+    if (options_.policy.packageNativeType != nullptr) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
     platform::LockGuard lock(gate_);
     if (closed_ || processing_) {
         return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
@@ -1714,6 +2235,137 @@ Result<void> ObjectRegistry::RequestDestroyChecked(const ObjectAccessContext& ac
     }
 
     slot->SetState(tally_, SlotState::DestroyRequested);
+    return Result<void>::Success();
+}
+
+Result<void> ObjectRegistry::Discard(const ObjectAccessContext& access,
+                                     ObjectHandle handle) noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return valid;
+    }
+
+    // 부분 트리 전위 순회의 다음 노드다(스택 없이 부모 포인터로 되돌아 오른다). 고리로 닿는 객체만
+    // 부분 트리다 — 이미 Discard·Retire된 객체는 고리에서 빠져 있다.
+    auto next = [](const Slot* node, const Slot* root) noexcept -> Slot* {
+        if (node->firstChild != nullptr) {
+            return node->firstChild;
+        }
+
+        while (node != root && node->nextSibling == nullptr) {
+            node = node->parent;
+        }
+
+        return node == root ? nullptr : node->nextSibling;
+    };
+    Slot* root = nullptr;
+    usize count = 0;
+    {
+        platform::LockGuard lock(gate_);
+        if (auto open = OpenState(closed_, processing_); !open) {
+            return open;
+        }
+
+        root = FindSlot(handle);
+        if (!root || root->state == SlotState::Free || root->state == SlotState::Exhausted ||
+            root->state == SlotState::Reserved) {
+            return Result<void>::Failure(ErrorCode::StaleHandle);
+        }
+
+        // 이미 Discard된 객체는 무동작이다(cutoff·Retire 뒤에도 — RequestDestroy 재요청과 같다).
+        if (root->discarded) {
+            return Result<void>::Success();
+        }
+
+        if (IsCutoff(root) ||
+            !(root->state == SlotState::Alive || root->state == SlotState::DestroyRequested)) {
+            return Result<void>::Failure(ErrorCode::Destroyed);
+        }
+
+        // (1) 부분 트리를 센다. 공개 전 객체가 있으면 그 트랜잭션의 Commit이 Outer 검증으로 실패할
+        // 상태를 만들지 않도록 Busy다.
+        for (const Slot* node = root; node != nullptr; node = next(node, root)) {
+            if (node->state == SlotState::Reserved) {
+                return Result<void>::Failure(ErrorCode::Busy);
+            }
+
+            ++count;
+        }
+
+        // (2) 처리 표시 아래 잠금 밖에서 할당한다. 그동안 다른 변경은 Busy라 (1)과 (3) 사이에 부분
+        // 트리가 바뀌지 않는다.
+        processing_ = true;
+    }
+
+    Array<Slot*> nodes(allocator_);
+    if (auto reserved = nodes.TryReserve(count); !reserved) {
+        return EndProcessing(Move(reserved));
+    }
+
+    {
+        platform::LockGuard lock(gate_);
+        for (Slot* node = root; node != nullptr; node = next(node, root)) {
+            if (nodes.Size() == count || !nodes.TryPushBack(node)) {
+                platform::Fatal("Discard subtree changed while processing");
+            }
+        }
+    }
+
+    // 관찰자: 부분 트리의 Alive·Outer 있는 소유자마다 타입 Trace로 다른 패키지로 나가는 강한 간선을
+    // 쌍별로 합친다(목록 순 × trace 순 — handle 해시 순서를 쓰지 않는다). 대상의 GC 색과 무관하다.
+    EdgeTally tally(allocator_);
+    if (options_.referenceObserver != nullptr) {
+        MarkState state{this, nullptr};
+        state.tally = &tally;
+        state.delta = -1;
+        TraceVisitor visitor(&state, &ObjectRegistry::TallyEdge);
+        for (usize position = 0; position < nodes.Size() && state.error == ErrorCode::None;
+             ++position) {
+            const Slot& node = *nodes[position];
+            bool observe = false;
+            {
+                platform::LockGuard lock(gate_);
+                observe = ObservesOwnerLocked(node);
+                if (observe) {
+                    state.ownerPackage = HandleOf(*node.outermost);
+                }
+            }
+
+            if (observe) {
+                node.type.Ops().trace(*node.object, visitor);
+            }
+        }
+
+        if (state.error != ErrorCode::None) {
+            return EndProcessing(Result<void>::Failure(state.error));
+        }
+
+        if (auto reserved = ReserveTally(tally, ReferenceChangeCause::Discard, 0); !reserved) {
+            return EndProcessing(Move(reserved));
+        }
+    }
+
+    // (3) 한 잠금 안에서 상태·색인·고리·관찰자 기록을 바꾼다. 부분 트리 안의 순서는 의미가 없다.
+    platform::LockGuard lock(gate_);
+    processing_ = false;
+    if (options_.referenceObserver != nullptr &&
+        MissingKeysLocked(tally, ReferenceChangeCause::Discard, 0) > ObserverFreeLocked()) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+
+    for (Slot* node : nodes) {
+        if (node->state == SlotState::Alive) {
+            node->SetState(tally_, SlotState::DestroyRequested);
+        }
+
+        node->discarded = true;
+        DetachIdentityLocked(*node);
+    }
+
+    if (options_.referenceObserver != nullptr) {
+        ApplyTallyLocked(tally, ReferenceChangeCause::Discard, 0);
+    }
+
     return Result<void>::Success();
 }
 
@@ -1948,6 +2600,14 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
     // 슬롯/메모리를 예약하기 전에 검사하여 실패가 관찰 가능한 부작용을 남기지 않는다.
     if (HasFlag(typeLease.Value().Schema().flags, TypeFlags::Abstract) ||
         ops.construct == nullptr) {
+        return fail(ErrorCode::Unsupported);
+    }
+
+    // 4. 패키지 정책 Registry는 완전한 필드 배치(completeFieldLayout — 모든 강한 간선이 metadata에
+    // 있고 Trace가 그것을 모두 방문한다는 선언)가 아닌 타입을 만들지 않는다. 관찰자 계수(편집은
+    // Registry API로, Commit·Discard는 Trace로 센다)와 패키지 그래프 저장이 이 선언에 기댄다
+    // (Docs/Design/ObjectFoundations.ko.md 1.5절).
+    if (options_.policy.packageNativeType != nullptr && !ops.completeFieldLayout) {
         return fail(ErrorCode::Unsupported);
     }
 
@@ -2238,12 +2898,29 @@ void ObjectRegistry::ValidateStagedEdge(void* pointer, ObjectHandle handle) noex
         return;
     }
 
-    platform::LockGuard lock(state.registry->gate_);
-    Slot* slot = state.registry->FindSlot(handle);
-    if (!slot || state.registry->IsCutoff(slot) ||
-        !(slot->state == SlotState::Alive ||
-          (slot->state == SlotState::Reserved && slot->transaction == state.transaction))) {
-        state.error = ErrorCode::StaleHandle;
+    ObjectHandle package;
+    {
+        platform::LockGuard lock(state.registry->gate_);
+        Slot* slot = state.registry->FindSlot(handle);
+        if (!slot || state.registry->IsCutoff(slot) ||
+            !(slot->state == SlotState::Alive ||
+              (slot->state == SlotState::Reserved && slot->transaction == state.transaction))) {
+            state.error = ErrorCode::StaleHandle;
+            return;
+        }
+
+        if (!state.observe) {
+            return;
+        }
+
+        package = state.registry->HandleOf(*slot->outermost);
+    }
+
+    // 관찰자 쌍 집계(staged 저널 순 × trace 순). 집계 표 삽입은 잠금 밖이다.
+    if (!(package == state.ownerPackage)) {
+        if (auto added = state.tally->Add(state.ownerPackage, package, state.delta); !added) {
+            state.error = added.Error();
+        }
     }
 }
 
@@ -2286,21 +2963,44 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
         processing_ = true;
     }
 
-    // staged 간선과 Outer를 잠금 밖에서 검증한다(처리 표시 아래라 간선·Outer가 바뀌지 않는다).
-    // Outer는 대상처럼 생존(Alive) 또는 이 트랜잭션 객체이고 cutoff white가 아니어야 한다. A0-Ob는
-    // 같은 trace 순서(staged 저널 순 × trace 순)로 관찰자 쌍을 집계한다(집계 맵 삽입은 gate 밖).
+    // staged 간선과 Outer(패키지 정책이면 자식도 — 같은 트랜잭션 객체다)를 잠금 밖에서 검증한다
+    // (처리 표시 아래라 간선·Outer·고리가 바뀌지 않는다). Outer는 대상처럼 생존(Alive) 또는 이
+    // 트랜잭션 객체이고 cutoff white가 아니어야 한다. 관찰자가 있으면 같은 trace(staged 저널 순 ×
+    // trace 순)로 Outer 있는 소유자의 패키지 사이 쌍을 집계한다(집계 표 삽입은 gate 밖).
+    EdgeTally tally(allocator_);
     MarkState state{this, nullptr, transaction};
+    state.tally = &tally;
+    state.delta = 1;
     TraceVisitor visitor(&state, &ObjectRegistry::ValidateStagedEdge);
     for (usize index = 0; index < staged.Size() && state.error == ErrorCode::None; ++index) {
         Slot* slot = FindSlot(staged[index]);
+        state.observe = options_.referenceObserver != nullptr && !slot->outer.IsNull();
+        if (state.observe) {
+            state.ownerPackage = HandleOf(*slot->outermost);
+        }
+
         slot->type.Ops().trace(*slot->object, visitor);
-        visitor.Visit(slot->outer);
+        state.observe = false;
+        VisitIdentityEdges(*slot, visitor);
     }
 
-    // A0-Ob: 여기서 관찰자 공간을 예약한다(실패하면 아래 공개 없이 비공개 상태로 돌아간다).
+    // 관찰자 공간 예약(처리 표시 아래 잠금 밖). 실패하면 공개 없이 비공개 상태로 돌아간다.
+    if (state.error == ErrorCode::None && options_.referenceObserver != nullptr) {
+        if (auto reserved = ReserveTally(tally, ReferenceChangeCause::Commit, transaction);
+            !reserved) {
+            state.error = reserved.Error();
+        }
+    }
+
     {
         platform::LockGuard lock(gate_);
         processing_ = false;
+        if (state.error == ErrorCode::None && options_.referenceObserver != nullptr &&
+            MissingKeysLocked(tally, ReferenceChangeCause::Commit, transaction) >
+                ObserverFreeLocked()) {
+            state.error = ErrorCode::Busy;
+        }
+
         if (state.error != ErrorCode::None) {
             return Result<void>::Failure(state.error);
         }
@@ -2324,10 +3024,14 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
             }
         }
 
-        // root 증가는 공개와 같은 잠금 안이다(A0-Ob 관찰자 기록도 여기다).
+        // root 증가와 관찰자 기록(transaction = 이 트랜잭션)은 공개와 같은 잠금 안이다.
         for (usize index = 0; index < roots.Size(); ++index) {
             ++FindSlot(roots[index])->roots;
             ++tally_.roots;
+        }
+
+        if (options_.referenceObserver != nullptr) {
+            ApplyTallyLocked(tally, ReferenceChangeCause::Commit, transaction);
         }
 
         --constructions_;
@@ -2604,6 +3308,21 @@ void ObjectRegistry::UnlinkRetiredLocked(Slot& slot) noexcept {
 }
 
 void ObjectRegistry::RetireLocked(Slot& slot) noexcept {
+    // 패키지 정책 Registry의 객체는 Discard로만 죽는다(1.7절). 패키지 정책에서는 RequestDestroy가
+    // 없으므로 Alive는 Discard되지 않았다는 뜻이다. 종료(closed_) 뒤의 회수는 세지 않는다.
+    if (slot.state == SlotState::Alive && options_.policy.packageNativeType != nullptr &&
+        !closed_) {
+        if (tally_.retiredWithoutDiscard != MaxStatCount) {
+            ++tally_.retiredWithoutDiscard;
+        }
+
+        if constexpr (IsDebugBuild) {
+            if (options_.assertRetiredWithoutDiscard) {
+                platform::Fatal("Package-policy object retired without Discard");
+            }
+        }
+    }
+
     slot.SetState(tally_, SlotState::Retired);
     DetachIdentityLocked(slot);
     LinkRetiredLocked(slot, RetiredQueue::Pending);
@@ -2693,9 +3412,9 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
             TraceVisitor visitor(&state, &ObjectRegistry::MarkEdge);
             Slot* slot = FindSlot(next);
             slot->type.Ops().trace(*slot->object, visitor);
-            // inner → outer는 Registry가 방문하는 강한 간선이다(gate_ 없이 — slice 동안 outer는
-            // 불변이고 MarkEdge가 gate_를 잡는다).
-            visitor.Visit(slot->outer);
+            // inner → outer(패키지 정책이면 outer → inner도)는 Registry가 방문하는 강한 간선이다
+            // (gate_ 없이 — slice 동안 outer·고리는 불변이고 MarkEdge가 gate_를 잡는다).
+            VisitIdentityEdges(*slot, visitor);
             ++processed;
             continue;
         }
@@ -2725,8 +3444,9 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
                     TraceVisitor visitor(&state, &ObjectRegistry::MarkEdge);
                     Slot* slot = FindSlot(handle);
                     slot->type.Ops().trace(*slot->object, visitor);
-                    // outer는 공개 전에 정해져 바뀌지 않으므로 worker가 읽어도 경합이 없다.
-                    visitor.Visit(slot->outer);
+                    // outer는 공개 전에 정해져 바뀌지 않고 고리는 slice(처리 표시) 동안 바뀌지
+                    // 않으므로 worker가 읽어도 경합이 없다.
+                    VisitIdentityEdges(*slot, visitor);
                 });
             if (!body) {
                 setError(body.Error());
@@ -2871,7 +3591,7 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access) noex
     for (usize cursor = 0; cursor < work.Size() && state.error == ErrorCode::None; ++cursor) {
         Slot* slot = FindSlot(work[cursor]);
         slot->type.Ops().trace(*slot->object, visitor);
-        visitor.Visit(slot->outer);
+        VisitIdentityEdges(*slot, visitor);
     }
 
     if (state.error != ErrorCode::None) {
@@ -2952,6 +3672,7 @@ void ObjectRegistry::FinishReclaim(ReclaimWork& work) noexcept {
         slot.parent = nullptr;
         slot.lastChild = nullptr;
         slot.pathBytes = 0;
+        slot.discarded = false;
         // 세대를 0/과거 값으로 순환시키면 오래된 WeakRef가 새 객체를 가리킬 수 있다.
         // 한도에 도달한 슬롯은 재사용하지 않고 Exhausted로 남긴다.
         if (slot.generation >= options_.maxGeneration) {

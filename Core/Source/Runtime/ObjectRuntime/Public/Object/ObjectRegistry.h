@@ -6,6 +6,7 @@
 #include <Object/ObjectRefArray.h>
 #include <Object/ObjectRefs.h>
 #include <Object/ObjectDiagnostics.h>
+#include <Object/ReferenceObserver.h>
 #include <Object/StructRefArray.h>
 #include <Object/TypeRegistry.h>
 
@@ -28,7 +29,11 @@ struct RegistryPolicy {
     // null이 아니면 패키지 정책이다: 이 native 타입(과 파생 — TypeLease::IsNativeA)의 객체는
     // Outer와 이름이 없어야 하고, 그 밖의 객체는 Outer가 있어야 하며 outermost가 이 타입이어야
     // 한다(AS 6.1 "패키지 없는 객체 생성은 거부한다"). TypeId가 아니라 native 키로 정하므로 TypeId
-    // 별명도 같은 판정이다. 패키지 정책 Registry의 outer → inner GC 간선은 A0-Ob다.
+    // 별명도 같은 판정이다. 패키지 정책 Registry에서는 outer → inner도 GC 강한 간선이고(자식 고리가
+    // export 표다 — 소속 객체는 Discard로만 죽는다), RequestDestroy·Object::Destroy는 Unsupported다
+    // (Docs/Design/ObjectFoundations.ko.md 1.3·1.7절). 또 완전한 필드 배치(RuntimeTypeOps::
+    // completeFieldLayout)가 아닌 타입의 생성은 Unsupported다(생성 오류 순서 4 — 관찰자 계수와
+    // 패키지 그래프 저장이 그 선언에 기댄다).
     const void* packageNativeType = nullptr;
     // 참이면 WorldOnly 타입(TypeFlags::WorldOnly — 상속됨) 생성을 Unsupported로 거부한다(에셋 객체
     // Registry — RF 2.2·결정 21, AS 11.4의 AssetLease 누수 차단).
@@ -121,6 +126,17 @@ struct RegistryOptions {
     bool requireLifecycleScope = false;
     // 생성 뒤 바꾸지 않는 객체 정책이다(Policy()로 어느 스레드에서나 읽는다).
     RegistryPolicy policy;
+    // 붙이면 패키지 사이 강한 간선 다중도 변화를 이 표에 기록한다(ReferenceObserver.h,
+    // Docs/Design/ObjectFoundations.ko.md 3절). 패키지 정책 Registry에만 붙고, Registry보다 오래
+    // 살아야 하며 Registry 하나에만 붙는다 — 정책 없는 Registry에 주거나 이미 붙은 관찰자를 주면
+    // Registry 생성이 Fatal이다(생성자가 실패를 돌려줄 수 없다). Registry가 소멸하면 떨어진다.
+    // 편집은 Registry API 지점에서, Commit·Discard는 타입 Trace로 세므로 Registry API로 쓰는 모든
+    // 참조를 Trace가 방문해야 한다(패키지 정책 Registry가 완전한 필드 배치 타입만 만드는 이유다).
+    ReferenceObserver* referenceObserver = nullptr;
+    // 패키지 정책 Registry에서 Discard하지 않은(Alive) 객체가 GC로 Retire되면 Debug에서 Fatal로
+    // 멈춘다(그 경로를 시험하는 Registry만 false로 둔다). 계수 ObjectStats::retiredWithoutDiscard는
+    // 언제나 센다.
+    bool assertRetiredWithoutDiscard = true;
 };
 
 struct ObjectStats {
@@ -134,9 +150,13 @@ struct ObjectStats {
     // 쥐고 있는 encode 고정(EncodePin)의 합이다. 0이 아니면 Shutdown이 Busy다.
     uint32 encodePins = 0;
     uint32 chunks = 0;
-    // 이름 색인 항목 수다(이름 있는 객체와 대표 자식 — Reserved 포함). Retire되거나, cutoff white
-    // 객체의 항목을 같은 이름의 새 객체가 대신할 때 빠진다.
+    // 이름 색인 항목 수다(이름 있는 객체와 대표 자식 — Reserved 포함). Retire되거나, Discard되거나,
+    // cutoff white 객체의 항목을 같은 이름의 새 객체가 대신할 때 빠진다.
     uint32 namedObjects = 0;
+    // 패키지 정책 Registry에서 Discard 없이(Alive 상태로 — 패키지 포함) GC로 Retire된 객체 수의
+    // 누계다. 언제나 0이어야 한다(AssetManager가 Discard 없이 패키지 RootRef를 놓은 버그). 종료
+    // (Shutdown 시작) 뒤의 회수는 세지 않는다.
+    uint32 retiredWithoutDiscard = 0;
 };
 
 // 성공한 한 cycle의 결과다. 시간은 실제 collector slice의 합(ns)이며 mutator 시간은 제외한다.
@@ -166,7 +186,8 @@ struct GcProgress {
 // 객체는 생성 때 정한 불변 Outer와 이름을 가진다(Docs/Design/ObjectFoundations.ko.md 1절). 같은
 // Outer 안에서 이름은 대소문자·정규화 형태를 무시하고 유일하며(TryMakeNameComponentKey 키),
 // Registry가 이름 색인과 Outer별 자식 고리를 소유한다. inner → outer는 언제나 GC가 추적하는 강한
-// 간선이고, 정책 없는 Registry에서 outer는 inner를 살리지 않는다.
+// 간선이고, 정책 없는 Registry에서 outer는 inner를 살리지 않는다. 패키지 정책 Registry에서는 outer
+// → inner도 강한 간선이라(자식 고리가 export 표다) 소속 객체는 Discard로만 죽는다.
 class ObjectRegistry {
 public:
     ObjectRegistry(Allocator&, TypeRegistry&, ContextId, RegistryOptions = {}) noexcept;
@@ -359,7 +380,14 @@ public:
 
     // owner 저장소 안에 직접 포함된 field만 허용한다. 대상 타입/문맥/생존 검증 실패 시 field는
     // 불변이다. Marking 동안 대상 shade와 field 게시를 같은 gate 안에서 수행한다. owner가 encode
-    // 고정(PinForEncode) 중이면 Busy다.
+    // 고정(PinForEncode) 중이면 Busy다. Registry API로 쓰는 모든 참조(이 field와 컨테이너 원소)는
+    // owner 타입의 Trace가 방문해야 한다 — GC와 관찰자의 Commit·Discard 계수가 Trace로 센다.
+    //
+    // 관찰자 Registry(RegistryOptions::referenceObserver)에서는 옛 대상·새 대상의 패키지 사이 간선
+    // 변화를 기록한다(옛 대상 키 먼저, 두 패키지가 같으면 기록·예약하지 않는다). 새 키 공간이
+    // 모자라면 잠금을 풀고 관찰자 allocator로 예약한 뒤 다시 잠가 검증부터 다시 한다 — 할당
+    // 실패는 OutOfMemory, 키 상한 초과는 CapacityExceeded, 그 사이 재진입이 공간을 다시 써 버리면
+    // Busy이고 모두 field 불변이다. 관찰자가 없으면 할당하지 않는다.
     template <class T>
     Result<void> SetReference(const ObjectAccessContext& access, ObjectHandle owner,
                               ObjectRef<T>& field, ObjectHandle target) noexcept {
@@ -379,6 +407,16 @@ public:
     //   사이 allocator 콜백이 같은 배열을 바꿔 새 버퍼가 모자라거나 index가 size를 넘으면 Busy,
     //   용량이 충분해졌으면 기존 버퍼에 넣는다. 레지스트리 전체 처리 표시(processing_)를 세우지
     //   않으므로 다른 스레드의 RootRef 복제 등을 막지 않는다.
+    // - 관찰자 Registry(RegistryOptions::referenceObserver)에서는 패키지 사이 간선 변화를 기록한다
+    //   (ReferenceObserver.h — Alive이고 Outer가 있는 owner만, DestroyRequested owner의 제거와
+    //   비우기는 기록하지 않는다). 단일 간선 변경(AddReference·InsertReferenceAt·SetReferenceAt과
+    //   RemoveReferenceAt·RemoveReference)은 새 키 공간이 모자라면 버퍼 성장과 같은 잠금 밖
+    //   구간에서 관찰자 allocator로 예약하고 다시 잠가 재검증한다(그 사이 공간이 다시 모자라거나
+    //   위치가 바뀌면 Busy). ClearReferences는 떼어 낼 원소의 패키지 쌍을 처리 표시(processing_)
+    //   아래 잠금 밖에서 Registry allocator로 합친 뒤 예약하고 한 잠금 안에서 비우고 기록한다
+    //   (그동안 Registry 변경 재진입은 Busy, 다른 스레드의 RootRef 복제도 Busy). 예약·집계 할당
+    //   실패는 OutOfMemory, 키 상한 초과는 CapacityExceeded다. 아래 "할당하지 않는다"는 관찰자
+    //   없는 Registry의 규칙이다.
     // - 실패하면 배열 내용은 바뀌지 않는다. GC·callback 처리 중에는 Busy, 종료 시작 후에는
     //   ShuttingDown이다. MaxElements(리플렉션 필드 상한)는 여기서 걸지 않는다(저장할 때 검사한다).
 
@@ -402,8 +440,8 @@ public:
                                NativeTypeKey<T>());
     }
 
-    // index 원소를 target으로 바꾼다(null이면 슬롯을 비운다). 할당하지 않는다. index >= Size()는
-    // InvalidArgument다.
+    // index 원소를 target으로 바꾼다(null이면 슬롯을 비운다). 할당하지 않는다(관찰자 Registry는
+    // 위 공통 규칙의 예약). index >= Size()는 InvalidArgument다.
     template <class T>
     Result<void> SetReferenceAt(const ObjectAccessContext& access, ObjectHandle owner,
                                 ObjectRefArray<T>& array, usize index,
@@ -412,21 +450,23 @@ public:
     }
 
     // index 원소를 지우고 뒤 원소를 당긴다(순서 유지). 범위 밖은 InvalidArgument다. 할당하지
-    // 않는다. owner는 Alive 또는 DestroyRequested(정리 중)이고 Borrow를 쥐고 있어야 한다.
+    // 않는다(관찰자 Registry는 위 공통 규칙의 예약). owner는 Alive 또는 DestroyRequested(정리
+    // 중)이고 Borrow를 쥐고 있어야 한다.
     template <class T>
     Result<void> RemoveReferenceAt(const ObjectAccessContext& access, ObjectHandle owner,
                                    ObjectRefArray<T>& array, usize index) noexcept {
         return RemoveArrayEdge(access, owner, array.storage_, index, ObjectHandle{}, false);
     }
 
-    // target과 같은 첫 원소를 지운다(null이면 첫 null 원소). 없으면 NotFound다.
+    // target과 같은 첫 원소를 지운다(null이면 첫 null 원소). 없으면 NotFound다. 관찰자 Registry의
+    // 예약 뒤 재검증에서 그 원소가 사라졌으면 Busy다.
     template <class T>
     Result<void> RemoveReference(const ObjectAccessContext& access, ObjectHandle owner,
                                  ObjectRefArray<T>& array, ObjectHandle target) noexcept {
         return RemoveArrayEdge(access, owner, array.storage_, 0, target, true);
     }
 
-    // 모든 원소를 지운다(용량 유지). 할당하지 않는다.
+    // 모든 원소를 지운다(용량 유지). 할당하지 않는다(관찰자 Registry는 위 공통 규칙의 집계·예약).
     template <class T>
     Result<void> ClearReferences(const ObjectAccessContext& access, ObjectHandle owner,
                                  ObjectRefArray<T>& array) noexcept {
@@ -438,7 +478,11 @@ public:
     // 필요 없다)·새 색인 할당은 Registry 잠금 밖에서 하고, 다시 잠근 뒤 owner를 재검증하며 그때의
     // size·index로 다시 판단한다(그 사이 생성자·allocator 콜백이 같은 배열을 바꿔 새 색인이
     // 모자라거나 index가 size를 넘으면 원소를 소멸·반환하고 Busy). 실패하면 원소를 소멸·반환하고
-    // 배열은 바뀌지 않는다. 원소 주소는 고정이다(색인만 옮긴다).
+    // 배열은 바뀌지 않는다. 원소 주소는 고정이다(색인만 옮긴다). 새 원소의 참조는 null이라 추가·
+    // 삽입은 관찰자에 기록하지 않는다. 관찰자 Registry의 제거·비우기는 떼어 낼 원소만 등록 struct
+    // trace(TypeRegistry::AcquireStructByNative — 원소 struct가 등록되어 있지 않으면 Unsupported)로
+    // 훑어 패키지 쌍을 합친다(ClearReferences와 같은 처리 표시·예약 규칙, Alive이고 Outer가 있는
+    // owner만).
 
     // 기본 원소 하나를 끝에 추가하고 그 index를 돌려준다. size가 uint32 상한이면 Overflow다.
     //
@@ -479,7 +523,7 @@ public:
     // index 원소 안의 참조 멤버 field를 target으로 바꾼다(SetReference의 원소판 — null 허용).
     // owner는 Alive이고 Borrow를 쥐고 있어야 하며(없으면 InvalidArgument), 컨테이너가 owner 저장소
     // 안이고 index < Size()이며 field가 그 원소 블록 안이어야 한다(아니면 InvalidArgument). 대상
-    // 규칙·shade·encode 고정은 SetReference와 같다.
+    // 규칙·shade·encode 고정·관찰자 기록과 예약은 SetReference와 같다.
     //
     // 사용 예:
     //   registry.SetElementReference(access, mesh, meshPointer->materials, 2,
@@ -507,8 +551,41 @@ public:
     Result<EncodePin> PinForEncode(const ObjectAccessContext& access, ObjectHandle owner) noexcept;
 
     // 논리적 접근을 즉시 닫는다. 기존 루트/간선은 GC에서 추적되어 보관된 자식도 보존한다.
-    // 저장소 파괴는 도달성 및 모든 보유 계수 해소 뒤 Collect/DrainRetired에서 수행한다.
+    // 저장소 파괴는 도달성 및 모든 보유 계수 해소 뒤 Collect/DrainRetired에서 수행한다. 이름은
+    // 회수 전까지 남는다(이름을 바로 비우려면 Discard). 패키지 정책 Registry에서는 접근 검사 다음에
+    // Unsupported다(소속 객체는 Discard로만 죽는다 — Object::Destroy도 같다).
     Result<void> RequestDestroy(const ObjectAccessContext&, ObjectHandle) noexcept;
+
+    // 설계: Docs/Design/ObjectFoundations.ko.md 2절. handle과 Outer 사슬이 handle을 지나는 모든
+    // 객체(부분 트리 — 자식 고리로 닿는 객체)를 논리 파괴(DestroyRequested)하고 이름 색인과 자식
+    // 고리에서 즉시 뺀다. 이후 FindChild·FindObject·CollectInners·IsNameTaken은 이 객체들을 보지
+    // 못하고 같은 이름의 새 객체를 바로 만들 수 있다. 패키지 정책이면 고리에서 빠졌으므로 패키지가
+    // 더 붙잡지 않는다. 저장소는 남은 RootRef·Borrow·간선이 풀린 뒤 GC가 회수한다(Resolve와
+    // WeakRef::TryPin은 Destroyed다. GetName·GetObjectPath·GetOuter는 GC cutoff white·Retired가
+    // 되기 전까지 되고 그 뒤는 Destroyed다). 남은 참조가 Discard된 객체를 붙잡으면 inner → outer
+    // 간선으로 그 Outer 사슬도 남지만 형제는 고리에서 빠져 남지 않는다. 관찰자가 있으면 부분
+    // 트리에서 다른 패키지로 나가는 강한 간선 다중도를 Discard 원인의 음수 변화로 한 번
+    // 기록한다(Outer가 있는 Alive 소유자만). 이미 Discard된 객체는 성공(무동작)이고,
+    // RequestDestroy만 받은 객체도 받는다(이름을 이때 뗀다). 되돌릴 수 없다(handle은 다시 살지
+    // 않는다). GC 단계와 무관하게 부를 수 있다.
+    //
+    // 순서와 오류: 접근(WrongThread·WrongContext) → 종료·재진입(ShuttingDown·Busy) → handle(무효·
+    // 다른 Registry·공개 전 StaleHandle, 이미 Discard됨은 성공, GC cutoff white·Retired Destroyed)
+    // → 부분 트리에 공개 전(Reserved) 객체가 있으면 Busy → 할당(부분 트리 목록·간선 집계는 Registry
+    // allocator, 관찰자 예약은 관찰자 allocator — OutOfMemory, 키 상한 초과 CapacityExceeded) →
+    // 적용. 할당은 처리 표시(processing_) 아래 잠금 밖이며 그동안 Registry 변경 재진입은 Busy다.
+    // 실패하면 아무것도 바뀌지 않는다.
+    //
+    // 사용 예(AssetLoader::Pump의 Closing 처리 — AS 11.4):
+    //   for (ObjectHandle package : unit.packages) {
+    //       // Busy면 RootRef를 쥔 채 다음 Pump에서 다시 한다(Discard한 패키지는 무동작).
+    //       if (auto discarded = registry.Discard(access, package); !discarded) {
+    //           return discarded;
+    //       }
+    //   }
+    //
+    //   unit.roots.Clear(); // 모두 Discard한 뒤에만 RootRef를 놓는다
+    Result<void> Discard(const ObjectAccessContext&, ObjectHandle) noexcept;
     // 조회는 수명을 연장하지 않으며 반환 후에도 상태가 바뀔 수 있다. 미공개 생성 슬롯,
     // 무효 handle·다른 registry·회수 후 generation은 StaleHandle이다. GC cutoff white는
     // Unreachable이다. 소유 스레드에서 콜백/GC 재진입은 Busy, 종료 시작 후에는 ShuttingDown이다.
@@ -572,6 +649,8 @@ private:
     struct InnerEntry;
     struct ReclaimWork;
     struct ChunkTable;
+    struct EdgeTally;
+    struct EdgePlan;
 
     // Retired 슬롯이 든 회수 대상 목록이다. 슬롯은 셋 중 하나에만 있다(Retired가 아니면 어디에도
     // 없다).
@@ -590,6 +669,12 @@ private:
 
     static void MarkEdge(void*, ObjectHandle) noexcept;
     static void ValidateStagedEdge(void*, ObjectHandle) noexcept;
+    // 떼어 낼 간선의 패키지 쌍을 집계한다(MarkState의 tally·ownerPackage·delta — 대상 패키지 조회는
+    // 간선마다 잠금, 집계 삽입은 잠금 밖).
+    static void TallyEdge(void*, ObjectHandle) noexcept;
+    // Registry가 직접 방문하는 간선이다: inner → outer, 패키지 정책이면 outer → inner(자식 고리의
+    // 모든 자식). gate_를 쥐지 않고 부른다(처리 표시 아래라 Outer·고리가 바뀌지 않는다).
+    void VisitIdentityEdges(const Slot&, TraceVisitor&) const noexcept;
     Slot* FindSlot(ObjectHandle) const noexcept;
     Slot* SlotAt(uint32) const noexcept;
     Result<void> CheckAccess(const ObjectAccessContext&) const noexcept;
@@ -761,6 +846,32 @@ private:
     void UnlinkChildLocked(Slot& child) noexcept;
     // Retire(sweep·rollback)가 같은 잠금 안에서 이름 색인 항목과 자기 고리를 뗀다.
     void DetachIdentityLocked(Slot&) noexcept;
+
+    // ---- 관찰자(Docs/Design/ObjectFoundations.ko.md 3절 — 잠금 보유 상태에서 부른다) ----
+    // 관찰 대상 간선의 대상(Reserved·Alive·DestroyRequested — 회수 전이라 outermost 슬롯이
+    // 유효하다, GC 색과 무관)의 소속 패키지다(그 밖이면 불변식 위반으로 Fatal).
+    ObjectHandle PackageOfLocked(ObjectHandle target) const noexcept;
+    // owner의 간선 변화를 기록하는지다(관찰자가 있고 owner가 Alive이며 Outer가 있다).
+    bool ObservesOwnerLocked(const Slot& owner) const noexcept;
+    // 단일 간선 지점의 기록 계획이다(옛 대상 removed → 새 대상 added, 옛 대상 키 먼저 — 두 패키지가
+    // 같으면 없다).
+    EdgePlan PlanEditLocked(const Slot& owner, ObjectHandle removed,
+                            ObjectHandle added) const noexcept;
+    // 관찰자에 아직 없는 키 수다.
+    usize MissingKeysLocked(const EdgePlan&) const noexcept;
+    usize MissingKeysLocked(const EdgeTally&, ReferenceChangeCause, uint64) const noexcept;
+    // 관찰자의 남은 새 키 공간이다(관찰자가 없으면 최대값).
+    usize ObserverFreeLocked() const noexcept;
+    void ApplyPlanLocked(const EdgePlan&) noexcept;
+    void ApplyTallyLocked(const EdgeTally&, ReferenceChangeCause, uint64) noexcept;
+    // 잠금 밖·처리 표시 아래: tally의 새 키 공간을 관찰자에 예약한다(모자랄 때만).
+    Result<void> ReserveTally(const EdgeTally&, ReferenceChangeCause, uint64) noexcept;
+    // 잠금 밖·처리 표시 아래: StructRefArray 원소 블록들을 등록 struct trace로 훑어 (ownerPackage,
+    // 대상 패키지, -1)을 tally에 합친다. 원소 struct 조회 실패는 Unsupported다.
+    Result<void> TallyStructBlocks(const detail::StructElementOps&, void* const* blocks,
+                                   uint32 count, ObjectHandle ownerPackage, EdgeTally&) noexcept;
+    // 처리 표시를 내리고 result를 돌려준다.
+    Result<void> EndProcessing(Result<void> result) noexcept;
 
     Allocator& allocator_;
     TypeRegistry& types_;

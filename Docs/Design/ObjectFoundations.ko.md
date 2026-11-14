@@ -1,6 +1,6 @@
 # 객체·그래프 보강(A0-O) 설계
 
-기준일: 2026-11-14, 확정안(설계 교차검증 2건 — 구현 가능성, 적대적 반례와 UE 5.6 대조 — 과 최종 검토 1건 반영, 사용자 승인 권고안으로 진행). [에셋 시스템 설계](AssetSystem.ko.md)(이하 AS) 1절 A0-O 단계의 상세다(기준 코드 `5ee4dc5` — A0-B B1–B8 구현 완료). 구현: A0-Oa(Outer·Name·정책·다중 root Commit — 구현하며 구체화한 점은 각 절에 반영했다). A0-Ob–Oe는 구현 전이다.
+기준일: 2026-11-14, 확정안(설계 교차검증 2건 — 구현 가능성, 적대적 반례와 UE 5.6 대조 — 과 최종 검토 1건 반영, 사용자 승인 권고안으로 진행). [에셋 시스템 설계](AssetSystem.ko.md)(이하 AS) 1절 A0-O 단계의 상세다(기준 코드 `5ee4dc5` — A0-B B1–B8 구현 완료). 구현: A0-Oa(Outer·Name·정책·다중 root Commit), A0-Ob(Discard·ReferenceObserver·패키지 소속 보존) — 구현하며 구체화한 점은 각 절에 반영했다. A0-Oc–Oe는 구현 전이다.
 
 근거: AS 1절 A0-O 행과 3·5·6·7·11절, [리플렉션·빌드 보강 설계](ReflectionFoundations.ko.md)(이하 RF)의 A0-O 언급(2.2·2.3·3.3·5.5·6.1–6.4절, 결정 16·21·22), [런타임 클래스 메타데이터](RuntimeClassMetadata.ko.md)(이하 RCM) '클래스 기본값 결정', [엔진 구현 계획](EngineImplementationPlan.ko.md)(이하 EIP) §5.2 "Outer와 객체 경로", 현재 코드(`Core/Source/Runtime/ObjectRuntime`·`ObjectSerialization`). UE 대조는 모두 `EpicGames/UnrealEngine` 5.6 브랜치 원본으로 확인했다(10절).
 
@@ -195,7 +195,7 @@ const RegistryPolicy& ObjectRegistry::Policy() const noexcept;   // 생성 뒤 �
 - 판정 위치: `CreatePending`(1.5절 5·8단계), 그래프 1단계 노드 검사(5.4절 — 정책 사본으로), 그래프 `CreateObjects`의 사전 확인(실제 Registry 정책과 사본이 같은지 — 다르면 WrongContext).
 - 정책 검사는 `NewObject`(NewRoot)에도 그대로 적용된다 — 패키지 정책 Registry에서 Outer 없는 `NewObject`는 이름 없는 패키지 타입만 된다.
 - AssetManager(A1)는 `{packageNativeType = NativeTypeKey<Package>(), rejectWorldOnly = true}`와 관찰자로 에셋 객체 Registry를 만든다. World registry와 시험 Registry는 기본값(정책 없음)이다.
-- 패키지 정책 Registry의 `RequestDestroy`·`Object::Destroy`는 관찰자 유무와 무관하게 Unsupported다(A0-Ob, 11절 결정 1) — "소속 객체는 Discard로만 죽는다"(1.7절)가 정책 전체의 불변식이다. 관찰자는 패키지 정책 Registry에만 붙는다.
+- 패키지 정책 Registry의 `RequestDestroy`·`Object::Destroy`는 관찰자 유무와 무관하게 Unsupported다(A0-Ob, 11절 결정 1) — "소속 객체는 Discard로만 죽는다"(1.7절)가 정책 전체의 불변식이다. 판정 위치는 접근 검사(WrongThread·WrongContext) 바로 다음이다(정적인 Registry 성질이라 종료·재진입·handle보다 먼저 — 구현에서 정함). 관찰자는 패키지 정책 Registry에만 붙는다(Registry 생성자가 정책 없음·이미 붙은 관찰자를 Fatal로 거부하고, 소멸자가 떼어 낸다. 붙은 채 관찰자가 소멸하면 Fatal).
 - **후속 자리(World 정책)**: `RegistryPolicy::worldOnlyCreationKey`(불투명 키 — World API만 가진 키를 Create에 함께 줄 때만 WorldOnly 타입 생성을 허용)로 EngineRuntime 4절 134행 "World registry의 외부 생성 거부"를 구현한다. A0-O는 이름과 뜻만 정하고 구현은 World 정책 단계다(EngineRuntime 134행을 이 절로 연결 — 12절).
 
 ### 1.4 자료구조(`ObjectRegistry.cpp` 내부)
@@ -215,7 +215,9 @@ const RegistryPolicy& ObjectRegistry::Policy() const noexcept;   // 생성 뒤 �
 - Retire(sweep — 2017·2130행, rollback — 1692행): 같은 잠금 안에서 이름 색인 항목과 자기 고리를 뗀다(1.4절). Discard로 이미 뗀 객체는 건너뛴다.
 - Registry의 Outer·자식 방문은 `gate_`를 쥐지 않고 한다 — `MarkEdge`(1711행)·`ValidateStagedEdge`(1597행)가 같은 `gate_`를 잡으므로 쥔 채 부르면 자기 교착이다. 그래도 안전한 이유는 GC 슬라이스·Commit 검증이 `processing_` 아래라 그동안 `outer`·고리가 바뀌지 않기 때문이다.
 
-오류 순서(Create·NewObject): 0. 트랜잭션 상태(끝난 트랜잭션 InvalidArgument, 고정된 오류는 그 오류 — 시작하지 못한 트랜잭션의 시작 오류 포함, 그래서 다른 접근 문맥의 `NewObject`는 WrongContext다)·저널 예약(OutOfMemory) → 1. 접근(WrongThread·WrongContext) → 2. 종료·재진입(ShuttingDown·Busy) → 3. 타입(NotFound·TypeMismatch) → 4. Abstract·생성 함수 없음(Unsupported) → 5. Outer 상태(StaleHandle — 생존·같은 트랜잭션 Reserved가 아님, 다른 Registry의 handle(FindSlot의 domain 불일치), cutoff white, Discard됨) → 6. WorldOnly 정책(Unsupported) → 7. 이름 형식(InvalidArgument, NFC 판정 scratch OutOfMemory) → 8. 패키지 정책·패키지 이름·빈 이름·대표 자식 규칙(InvalidArgument) → 9. 경로 길이(CapacityExceeded) → 10. 비교 키·이름 기록·색인 성장 할당(OutOfMemory — 색인이 더 자랄 수 없으면(2^30칸 초과) CapacityExceeded) → 11. 이름 충돌(AlreadyExists) → 12. 객체 할당(OutOfMemory)·슬롯 상한(CapacityExceeded). 지금처럼 Create 실패는 트랜잭션을 오류 상태로 고정한다(도구는 `IsNameTaken`으로 먼저 확인한다). WrongContext는 접근 문맥 불일치에서만 나온다.
+오류 순서(Create·NewObject): 0. 트랜잭션 상태(끝난 트랜잭션 InvalidArgument, 고정된 오류는 그 오류 — 시작하지 못한 트랜잭션의 시작 오류 포함, 그래서 다른 접근 문맥의 `NewObject`는 WrongContext다)·저널 예약(OutOfMemory) → 1. 접근(WrongThread·WrongContext) → 2. 종료·재진입(ShuttingDown·Busy) → 3. 타입(NotFound·TypeMismatch) → 4. Abstract·생성 함수 없음·패키지 정책 Registry에서 완전한 필드 배치(`RuntimeTypeOps::completeFieldLayout`)가 아닌 타입(Unsupported — A0-Ob 리뷰 반영, 아래) → 5. Outer 상태(StaleHandle — 생존·같은 트랜잭션 Reserved가 아님, 다른 Registry의 handle(FindSlot의 domain 불일치), cutoff white, Discard됨) → 6. WorldOnly 정책(Unsupported) → 7. 이름 형식(InvalidArgument, NFC 판정 scratch OutOfMemory) → 8. 패키지 정책·패키지 이름·빈 이름·대표 자식 규칙(InvalidArgument) → 9. 경로 길이(CapacityExceeded) → 10. 비교 키·이름 기록·색인 성장 할당(OutOfMemory — 색인이 더 자랄 수 없으면(2^30칸 초과) CapacityExceeded) → 11. 이름 충돌(AlreadyExists) → 12. 객체 할당(OutOfMemory)·슬롯 상한(CapacityExceeded). 지금처럼 Create 실패는 트랜잭션을 오류 상태로 고정한다(도구는 `IsNameTaken`으로 먼저 확인한다). WrongContext는 접근 문맥 불일치에서만 나온다.
+
+규칙 4의 완전한 필드 배치 조건(A0-Ob 리뷰 반영): 관찰자는 편집을 Registry API 지점(owner 저장소 안의 `ObjectRef`·컨테이너)에서, Commit·Discard를 타입 Trace로 센다. Trace가 덮지 않는 참조 필드(수동 함수표의 "Trace 없는 타입은 강한 간선 없음", 리플렉션 base를 둔 native 파생 등)를 Registry API로 쓰면 계수가 새고, 대상이 회수된 뒤 다음 편집이 불변식 Fatal에 닿는다. 그래서 패키지 정책 Registry는 `completeFieldLayout`(모든 강한 간선이 metadata에 있고 Trace가 모두 방문한다는 선언 — 생성 타입은 언제나 참)인 타입만 만든다. 에셋 객체는 패키지 그래프로 저장되어야 하므로(그래프 저장도 같은 선언을 요구한다 — `ValidateLayout`) 이 조건과 맞고, 패키지 타입 자신에게도 같다. 정책 없는 Registry는 지금처럼 만든다. 계약 문구는 `RegistryOptions::referenceObserver`·`SetReference`·`RuntimeTypeOps::completeFieldLayout` 주석에 적었다.
 
 규칙 6–9는 순수 함수 하나로 둔다: `detail::CheckNewObjectIdentity(const RegistryPolicy&, const TypeLease& type, const OuterSummary* outer, StringView name, Allocator& scratch) -> Result<void>`. 규칙 5는 호출자가 Outer 요약을 만들 때 판정한다(Registry는 슬롯 상태로, 그래프 1단계는 노드 표로). Create와 그래프 1단계·`CreateObjects` 사전 확인(5.4절)이 같이 쓴다 — 규칙이 갈라지지 않게.
 
@@ -228,7 +230,9 @@ public:
     // out의 원소는 비어 있어야 한다 — 아니면 InvalidArgument). roots는 이 트랜잭션의 객체여야 한다
     // (아니면 StaleHandle). 같은 handle을 두 번 주면 RootRef도 둘이다. roots가 비어도 된다 — 공개한
     // 객체는 다른 생존 객체(패키지 정책이면 생존 Outer)가 붙잡지 않으면 다음 GC에서 회수된다. 만든
-    // 객체가 없는 트랜잭션도 빈 roots로 끝낼 수 있다(Commit()은 지금처럼 InvalidArgument).
+    // 객체가 없는 트랜잭션도 빈 roots로 끝낼 수 있다(Commit()은 지금처럼 InvalidArgument). 패키지
+    // 정책 Registry에서 새 패키지를 root 없이 공개하면 다음 GC가 Discard 없이 회수해
+    // retiredWithoutDiscard가 오르고 Debug에서 멈춘다(1.7절 — 새 패키지는 root로 붙잡는다).
     // 순서: 트랜잭션 상태·out 검사(InvalidArgument) → 접근·종료·재진입 → roots(StaleHandle, uint32 개수 초과 Overflow) → staged 간선·Outer 검증과 관찰자
     // 쌍 집계(잠금 밖, processing_ 아래) → 관찰자 예약 → 한 잠금 안에서 공개·root 증가·관찰자 기록. 공개 전 단계의 실패는 비공개 상태를 유지한다(호출자가
     // Rollback하거나 소멸자가 한다).
@@ -256,7 +260,7 @@ public:
 - 병렬 안전: `StepCollection` 슬라이스는 `processing_` 아래라 슬라이스 동안 Create·Discard·고리 변경이 Busy다. 그래서 worker trace가 `gate_` 없이 고리를 읽고 자식마다 `visitor.Visit(handle)`을 불러도 경합·교착이 없다(1.5절). 열린 ConstructionContext가 있으면 GC가 진행하지 않으므로 Reserved 자식을 만나지 않는다.
 - 장벽: 슬라이스 사이에 생긴 자식은 새 객체이고 Commit이 shade한다(Marking) 또는 epoch를 찍는다(Sweeping). 슬라이스 사이 Discard로 고리에서 빠진 자식은 다른 참조가 없으면 회수된다(의도한 동작).
 - 결과: 패키지가 살아 있으면(AssetManager RootRef, 또는 어느 소속 객체든 외부에서 참조되면 inner → outer → 패키지 → 자손) 모든 소속 객체가 산다. 패키지 소속 객체는 **Discard로만 죽는다**. 저장 집합(`CollectInners`)이 GC 시점과 무관해진다.
-- 지킴: 패키지 정책 Registry에서 Alive 소속 객체가 Discard 없이 Retire되면 `ObjectStats::retiredWithoutDiscard`를 올리고, `RegistryOptions::assertRetiredWithoutDiscard`(기본 true)면 Debug에서 assert한다(값은 언제나 0이어야 한다 — AssetManager가 Discard 없이 패키지 RootRef를 놓은 버그). 이 경로의 시험은 그 칸을 false로 둔 Registry에서 계수만 본다. 종료(`closed_`) 뒤의 회수는 세지 않는다.
+- 지킴: 패키지 정책 Registry에서 Alive 소속 객체가 Discard 없이 Retire되면 `ObjectStats::retiredWithoutDiscard`를 올리고, `RegistryOptions::assertRetiredWithoutDiscard`(기본 true)면 Debug에서 assert한다(값은 언제나 0이어야 한다 — AssetManager가 Discard 없이 패키지 RootRef를 놓은 버그). 이 경로의 시험은 그 칸을 false로 둔 Registry에서 계수만 본다. 종료(`closed_`) 뒤의 회수는 세지 않는다. 구현: sweep의 Retire(`RetireLocked`)가 Retire 직전 상태가 Alive인 객체를 센다 — 패키지 정책에는 RequestDestroy가 없어 Alive는 Discard되지 않았다는 뜻이고, 패키지 객체 자신도 센다(패키지 RootRef를 Discard 없이 놓으면 패키지와 모든 소속 객체가 함께 센다). rollback의 Retire(Reserved)는 세지 않는다. Debug assert는 `platform::Fatal`이다(assert 매크로가 없다).
 - 근거: 지금 API로는 공개된 Package가 같은 트랜잭션 밖의 Reserved 하위 객체를 목록에 넣을 수 없고(`CheckTargetLocked`·`SetEdge`의 owner 검사 — `ObjectRegistry.cpp` 383–398·436–442행), 목록 편집은 패키지 소유 간선이라 관찰되지 않아(3절 구조 규칙) 계수가 새며, 목록에 빠진 소속 객체는 GC 시점에 따라 저장 집합에서 사라진다. UE는 패키지가 export를 붙잡지 않는다(에디터는 GC된 export가 있는 패키지를 다시 로드한다 — 10절) — Rocks는 저장 결정성을 위해 다르게 정한다.
 - 비용: 소속 객체마다 부모 고리에서 한 번 방문된다(전체 O(객체 수)). 비정책 Registry에는 비용이 없다.
 
@@ -285,8 +289,9 @@ public:
 };
 ```
 
-- 오류 순서: 접근 → 종료·재진입(ShuttingDown·Busy) → handle(StaleHandle — 무효·다른 Registry·Reserved, Destroyed — cutoff white·Retired) → 부분 트리에 공개 전(Reserved) 객체가 있으면 Busy(그 트랜잭션의 Commit이 Outer 검증으로 실패할 상태를 만들지 않게) → 할당(부분 트리 목록·간선 집계·관찰자 예약 — OutOfMemory) → 적용.
-- 단계: (1) 잠금 안에서 부분 트리 슬롯을 센다 → (2) `processing_` 아래 잠금 밖에서 목록을 할당하고, 관찰자가 있으면 부분 트리 객체마다 타입 Trace로 패키지 밖 강한 간선을 쌍별로 집계하고(Outer가 있는 소유자만 — 3절) 관찰자 공간을 예약한다 → (3) 한 잠금 안에서 상태 변경·색인 해제·고리 해제·관찰자 기록. `processing_` 동안 다른 변경은 Busy이므로 (1)과 (3) 사이에 부분 트리가 바뀌지 않는다.
+- 오류 순서: 접근 → 종료·재진입(ShuttingDown·Busy) → handle(StaleHandle — 무효·다른 Registry·Reserved, 이미 Discard된 객체는 여기서 성공(무동작 — cutoff white·Retired가 된 뒤에도, RequestDestroy 재요청과 같다), Destroyed — cutoff white·Retired) → 부분 트리에 공개 전(Reserved) 객체가 있으면 Busy(그 트랜잭션의 Commit이 Outer 검증으로 실패할 상태를 만들지 않게) → 할당(부분 트리 목록·간선 집계는 Registry allocator, 관찰자 예약은 관찰자 allocator — OutOfMemory, 키 상한 초과 CapacityExceeded) → 적용.
+- 단계: (1) 잠금 안에서 부분 트리 슬롯을 센다 → (2) `processing_` 아래 잠금 밖에서 목록을 할당하고(채우기는 짧은 재잠금), 관찰자가 있으면 부분 트리 객체마다 타입 Trace로 패키지 밖 강한 간선을 쌍별로 집계하고(Outer가 있는 Alive 소유자만 — 3절) 관찰자 공간을 예약한다 → (3) 한 잠금 안에서 상태 변경·색인 해제·고리 해제·관찰자 기록. `processing_` 동안 다른 변경은 Busy이므로 (1)과 (3) 사이에 부분 트리가 바뀌지 않는다. (3)은 관찰자 공간을 다시 확인하고 모자라면 Busy다(계약상 일어나지 않는다 — 방어).
+- 부분 트리는 자식 고리로 닿는 객체다(구현에서 정함): 이미 Discard·Retire된 객체는 고리에서 빠져 있어 들어가지 않고, 정책 없는 Registry에서 Sweeping 중 고리에 남은 cutoff white 자손은 들어간다(DestroyRequested·discarded가 되고 그 sweep이 Retire한다 — 이름·조회 결과는 같고 sweep이 Retire할 때까지 `Stats().destroyRequested`가 잠깐 다를 뿐이다). 패키지 정책에서는 생존 객체 아래 cutoff white 자손이 없다(1.7절). 고리를 부분 트리 안쪽까지 모두 떼므로 Discard된 부모는 자식이 남아 있어도 `firstChild == nullptr`일 수 있다 — 그래도 Discard된 자식이 사는 동안 inner → outer가 부모를 표식하므로 부모가 먼저 회수되지 않고, 함께 white가 된 sweep 사이 `DrainRetired`가 부모를 먼저 회수해도 cutoff·Retired 자식의 `parent`·`outermost`는 읽히지 않는다(조회는 cutoff·Retired를 거부한다).
 - 음수 보고는 trace가 본 간선 값 전부다 — 대상의 GC 색과 무관하다. 덧붙여, Sweeping 중 cutoff가 아닌 소유자의 대상은 표식 불변식과 삽입 장벽(cutoff 대상 연결 거부) 때문에 cutoff white일 수 없고, 1.7절 보존으로 생존 패키지의 소속 객체는 white가 되지 않는다(시험으로 확인).
 - 부분 트리 안의 순서는 의미가 없다(같은 잠금에서 한 번에 바뀐다). 부분 트리 밖 같은 패키지 객체에서 안으로 오는 간선은 같은 패키지라 계수에 없다. 다른 패키지에서 안으로 오는 간선은 AssetManager의 불변식(보유 수 0일 때만 Discard — AS 11.4)이 막는다(Registry는 검사하지 않는다).
 - 패키지를 다시 로드할 때 이름 충돌은 원래 없다: 패키지는 이름이 없고 하위 이름은 새 패키지 handle 아래다. Discard의 즉시 이름 해제가 필요한 곳은 살아 있는 패키지 안의 부분 Discard(도구가 하위 객체를 지우고 같은 이름으로 다시 만들 때)와 조회 차단이다(AS 11.4 문구 정정 — 12절).
@@ -339,9 +344,10 @@ public:
 
 private:
     friend class ObjectRegistry;
-    // 잠금 밖 — 새 키 newKeys개를 받을 공간(합산 표 색인 + 항목 배열)을 반환 시점에 보장한다. 새 표·배열을
-    // 모두 할당한 뒤 옮기며, 그 할당 콜백 중 Add로 옛 표에 들어간 항목도 옮긴다. 할당 콜백 안에서 다시
-    // 부르면(중첩 예약) Busy, maxKeys를 넘으면 CapacityExceeded다.
+    // 잠금 밖 — 새 키 newKeys개를 받을 공간(합산 표 색인 + 항목 배열)을 반환 시점에 보장한다. 판정 순서는
+    // maxKeys 초과 CapacityExceeded → 공간이 있으면 할당 없이 성공 → 할당 콜백 안에서 다시 부른 것(중첩
+    // 예약)이면 Busy → 새 표·배열을 모두 할당한 뒤 옮긴다(그 할당 콜백 중 Add로 옛 표에 들어간 항목도
+    // 옮긴다).
     Result<void> Reserve(usize newKeys) noexcept;
     // 잠금 안 — 무할당. 키가 있으면 더하고, 없으면 예약한 공간에 넣는다.
     void Add(ObjectHandle owner, ObjectHandle target, int64 delta, ReferenceChangeCause,
@@ -362,6 +368,16 @@ private:
 - **예약 규칙 — 다중 간선 지점**(`ClearArrayEdges`, `RemoveStructElement`, `ClearStructElements`): Commit·Discard와 같은 규칙이다 — 잠금 안에서 owner·위치를 검증한 뒤 `processing_`을 세운다 → 잠금 밖에서 떼어 낼 값의 쌍을 집계한다(`ObjectRefArray`는 handle을 읽고, struct 원소는 `AcquireStructByNative`의 `RuntimeStructOps::trace`로 원소 블록을 trace, 대상 패키지 조회는 간선마다 잠금, 집계 표 삽입은 잠금 밖) → `Reserve` → 한 잠금 안에서 떼기·`Add`·`processing_` 내림 → 잠금 밖에서 원소 소멸. `processing_` 동안 다른 변경이 Busy라 재검증이 필요 없다(관찰자 Registry에서는 이 구간에 다른 스레드의 RootRef 복제도 Busy다).
 - 예약·집계 할당 실패는 그 변경의 OutOfMemory, `maxKeys` 초과는 CapacityExceeded이고 아무것도 바뀌지 않는다. 관찰자 없는 Registry는 지금 경로 그대로다.
 - 지킴: 1.7절 `retiredWithoutDiscard`.
+
+**구현에서 정한 점(A0-Ob)**
+
+- 새 키 수는 정확히 센다(관찰자의 비공개 `Contains`로 이미 있는 키를 뺀다) — 상한 근처에서 있는 키만 더하는 변경이 CapacityExceeded로 잘못 거부되지 않게. 공개 API에 `DefaultMaxKeys`(= 2^20)·`MaxKeysLimit`(2^30 — 색인 위치가 uint32라 maxKeys가 여기서 포화)·`MaxKeys()`를 더했다.
+- `Reserve`: 항목 배열(기하 성장, 상한 maxKeys)과 색인(적재율 1/2의 2의 거듭제곱)을 새로 받아 옮긴다. 판정 순서는 maxKeys 초과 CapacityExceeded → 이미 공간이 있으면 할당 없이 성공 → 예약 중 다시 부르면 Busy다. 할당 콜백의 재진입 기록이 새 배열보다 많아지면(계약상 없다 — 단일 간선 지점은 키 둘까지) 옛 표를 그대로 두고 Busy다. 관찰자 표는 Core HashMap을 쓰지 않는다: 잠금 안 `Add`는 예약한 공간에 무할당으로 들어가야 하고 예약(할당) 콜백 중 옛 표에 들어간 항목을 옮겨야 하는데, HashMap은 할당 콜백의 같은 Map 재진입을 금지하고 삽입 때 스스로 할당한다. maxKeys는 단일 Commit·Discard가 만드는 최대 쌍 수보다 커야 한다(아니면 그 작업은 비운 표에서도 언제나 CapacityExceeded — 생성자 주석·ObjectLifecycle 지침). 새 표를 게시한 뒤 옛 저장소를 반환한다(반환 콜백이 재진입해도 일관된 표를 본다).
+- 단일 간선 지점은 예약 뒤 한 번만 다시 시도한다: 재잠금 뒤 검증부터 다시 하고 그때의 옛 대상으로 계획을 다시 세우며, 공간이 여전히 모자라거나 위치가 사라졌으면(index ≥ size, `RemoveReference`의 원소가 없어짐, 원소 모드의 범위 밖) Busy다(첫 시도에서만 InvalidArgument·NotFound). 원소 모드(`SetElementReference`)는 예약 콜백이 원소를 지우고 다시 만들어 같은 블록 주소가 재사용되면(ABA) 위치 검사를 통과하므로, `StructRefArrayStorage::revision`(원소 추가·삽입·삭제·비우기·통째 배정마다 Registry가 올리는 변경 계수)이 첫 시도와 다르면 Busy다(리뷰 반영). 다중 간선 지점·Commit·Discard도 마지막 잠금에서 공간을 다시 확인하고 모자라면 Busy다(방어 — `processing_`이 재진입 기록을 막는다).
+- 다중 간선 지점의 집계 표(`EdgeTally`)는 Registry allocator로 잠금 밖에서 자란다(그 할당 콜백의 Registry 변경 재진입은 `processing_`으로 Busy). struct 원소 조회(`AcquireStructByNative`)와 trace도 그 구간이고, 조회는 기록하는 owner(관찰자가 있고 Alive이며 Outer가 있음)일 때만 한다 — 패키지 객체 owner·DestroyRequested owner·관찰자 없는 Registry는 등록되지 않은 원소 struct도 그대로 지운다. 조회 실패는 사유와 무관하게 Unsupported다. 집계 표는 Core HashMap(쌍 → 위치)과 발견 순 배열이다. 원소만 trace하는 등록 struct trace와 Commit·Discard가 쓰는 소유자 Trace 안의 `GeneratedType<S>::Trace`는 같은 간선을 방문해야 한다 — 생성 코드는 등록 trace를 `GeneratedType<S>::Trace`로 만들어 같고, 수동 등록의 계약으로 둔다(`RuntimeStructOps`·`StructRefArray.h` 주석). 원소 표(`StructElementOps`)에 trace 함수를 직접 넣는 방법은 owner 생성자에서 `GeneratedType<S>::Trace`가 인스턴스화되어 생성 헤더 없는 곳의 컴파일을 깨므로 택하지 않았고, 등록 때 두 함수가 같은지는 TypeRegistry가 `GeneratedType<S>`를 모르므로 검사할 수 없다.
+- `TypeRegistry`는 N3 권고대로 색인을 둔다(리뷰 반영): TypeId → 레코드(모든 종류)와 (native 키, 종류) → 레코드(Enum·Struct — 종류마다 native 키가 유일하다. 클래스는 같은 native 타입의 별칭 ID를 허용하므로 넣지 않는다) Core HashMap 둘. `Acquire`·`AcquireValueType`·`AcquireStructByNative`, 등록의 ID·native 중복 확인과 base·enum·struct 대상 찾기, `Unregister`가 이 색인을 쓴다(레코드 목록은 이중 연결로 바꿔 해제도 O(1)). 할당은 잠금 밖이다: `mutating_` 아래에서 공간이 모자라거나 지운 칸이 있는 색인은 새 색인을 할당해 두고, 마지막 잠금에서 내용을 옮겨 바꾼 뒤(무할당) 옛 색인은 잠금 밖에서 반환한다. 해제의 삭제는 무할당이고 지운 칸은 다음 등록이 새 색인으로 정리한다. 색인 준비 실패(OutOfMemory)는 레코드를 만들기 전이라 등록 상태가 그대로다. `Shutdown`은 잠금 안에서 빈 색인으로 바꾸고 저장소는 잠금 밖에서 반환한다.
+- `TakeChanges`의 오류 순서는 WrongThread → InvalidArgument(out 비어 있지 않음·allocator 다름) → Busy(예약 중)다. 붙은 Registry가 없으면(소멸 뒤) 스레드 검사 없이 꺼낸다 — 남은 변화(예: 종료 직전 Discard의 반납)를 잃지 않게. 맞바꾼 뒤 관찰자는 out의 빈 배열(그 용량)을 쓰고 색인은 비운다(유지).
+- 관찰자 표의 접근은 소유 스레드에서만 일어난다(기록 지점·`TakeChanges`·`PendingCount`가 모두 소유 스레드 전용) — `Add`는 Registry `gate_` 안에서 부르지만 관찰자 자신은 잠금을 두지 않는다.
 
 ## 4. 누락 = 기준·실효 값 Required 진단 (A0-Oc)
 
@@ -707,7 +723,7 @@ return transaction.Commit(roots, held);
 | `ConstructionContext.h/.cpp` | `Create(type, outer, name)`, `Commit(roots, out)`, `DescribeOuter`, `Registry()`·`Access()`·`TransactionId()`, `FindObject`, Required 검사 중 표시(표시 동안 쓰기·Commit Busy) |
 | `Object/ReferenceObserver.h`(새) | 관찰자 합산 표 |
 | `StructRefArray.h` | `StructElementOps::nativeType`(`&NativeTypeIdentity<S>`) |
-| `TypeRegistry.h/.cpp` | `AcquireStructByNative(const void*)`(native 키 색인 — 등록 규칙이 이미 struct native 키를 유일하게 한다) |
+| `TypeRegistry.h/.cpp` | `AcquireStructByNative(const void*)`, TypeId·(native 키, 종류) Core HashMap 색인(등록·해제·Shutdown이 유지 — `Acquire` 류·등록 중복 확인·대상 찾기가 쓴다, 3절 구현에서 정한 점) |
 | `FieldCodec.h` | `FieldDecodePolicy`에서 `allowMissingFields`·`allowMissingFlags` 삭제·`excludedFlags` 추가, `IsMissingAllowed`·`ReportIfRequiredNull` 삭제, `NotePresent` 자리, `FieldEncodeContext` 검사 모드·`StagedSource`, `FieldCodecHooks::AdmitExternalReference`·`ExternalAdmission`, `FieldDiagnosticKind::ExternalReference`, 주석(hook 계약·objectIndex) |
 | `RuntimeTypeOps.h` | `RuntimeFieldOps::readStaged`(선택, 끝 칸) |
 | `GeneratedFieldCodec.h` | `CheckMissingField`·`ReportMissingRequired` 삭제, `DecodeStructRecord` 누락 순회 삭제(present bitset은 `NotePresent`로 유지)·`excludedFlags` 존재 거부, `ReportParsedValue`의 Required 보고 삭제, `EncodeGeneratedField` staged 분기, `EncodeArrayField` 검사 모드의 MaxElements 생략, `EncodeStructRecord` 검사 모드의 치환 생략, `EncodeThroughFieldValue`의 `readStaged` |
@@ -841,7 +857,7 @@ MetaCompiler·생성 헤더 형식·TypeRegistry 등록 규칙은 바꾸지 않�
 **열린 결정(권고안 포함 — 권고안으로 진행한다)**
 
 - **N1·N2** — 결정 1·17로 정했다.
-- **N3. `AcquireStructByNative`의 범위** — 관찰자 기록에만 필요한 TypeRegistry 조회를 새로 둔다. 권고: TypeRegistry에 native 키 → struct 레코드 색인(등록·해제 때 유지)을 두고 lease를 돌려준다. 호출 위치는 다중 간선 지점의 `processing_` 구간이고(3절), 키는 `&NativeTypeIdentity<S>`다. 대안: `StructRefArrayStorage`에 원소 struct `TypeId`를 staged 배정 때 기록 — 수동으로 만든 컨테이너(live `AddElement`만 쓴 경우)에서 비어 있을 수 있어 택하지 않는다.
+- **N3. `AcquireStructByNative`의 범위** — 관찰자 기록에만 필요한 TypeRegistry 조회를 새로 둔다. 권고: TypeRegistry에 native 키 → struct 레코드 색인(등록·해제 때 유지)을 두고 lease를 돌려준다. A0-Ob에서 권고대로 했다(TypeId 색인도 같이 두어 `Acquire`의 O(타입 수)도 없앴다 — 3절 구현에서 정한 점). 호출 위치는 다중 간선 지점의 `processing_` 구간이고(3절), 키는 `&NativeTypeIdentity<S>`다. 대안: `StructRefArrayStorage`에 원소 struct `TypeId`를 staged 배정 때 기록 — 수동으로 만든 컨테이너(live `AddElement`만 쓴 경우)에서 비어 있을 수 있어 택하지 않는다.
 - **N4. present 판정 공개 방식** — A0-O는 보호 가상 `NotePresent`만 둔다. 권고: 공개 hook(`FieldCodecHooks::ObservePresentValue`)과 Stage 출력 중 선택은 A5가 override 집합 자료구조와 함께 정한다(지금 정하면 자료구조를 미리 고정하게 된다).
 - **N5. Discard와 편집 도구** — Discard 대상을 가리키는 다른 패키지 참조의 저장 정책(null·진단·거부), 강제 삭제·consolidate의 참조 재작성, undo의 삭제 취소(새 handle로 다시 만들기와 참조 재연결)는 A2(asset-delete `--force` — AS 4.4)·CU4(Transaction)의 열린 문제다. 권고: A2·CU4 확정안에서 정하고, A0-O는 "Discard는 되돌릴 수 없고 handle은 다시 살지 않는다"만 보장한다.
 - **N6. 관찰자 표의 키에 transaction을 넣은 결과** — 같은 패키지 쌍이라도 Commit 기록은 트랜잭션마다 따로 남아 키 수가 "Pump 사이 Commit 수 × 쌍"이 된다. 권고: 받아들인다(AssetManager가 Pump마다 비운다). 상한은 `maxKeys`(결정 16)이고, Pump 안 Commit 수는 로드 예산(AS 11.5 1번)이 묶는다.
@@ -893,9 +909,9 @@ ReflectionMetadata(`Docs/Implementation/ReflectionMetadata.ko.md` — A0-O 계�
 
 **(나) 코드 주석·구현 문서 — 구현 커밋에서 고친다**(지금 고치면 현재 코드와 어긋난다)
 
-22. `ObjectRegistry.h` 컨테이너 API 주석(200·209·224행 "할당하지 않는다") — Ob(7절 표).
+22. `ObjectRegistry.h` 컨테이너 API 주석(200·209·224행 "할당하지 않는다") — Ob(7절 표). Ob에서 고쳤다(SetReference·ObjectRefArray 공통 규칙·StructRefArray 공통 규칙에 관찰자 예약·오류를 적었다).
 23. `FieldCodec.h`의 `FieldDecodePolicy` 주석(47–48행)·objectIndex(71행)·hook 계약(96–102행) — Oc·Od1.
 24. `ObjectGraph.h` 주석, `ObjectSerialization/README.ko.md`("고아 객체 거부"·`allowMissingFields`·한도·형식) — Oc·Od1·Od2·Oe.
-25. Docs/Implementation `Serialization.ko.md`(graph 형식·필드 codec)·`ObjectLifecycle.ko.md`(Outer·Name·Discard·다중 root Commit)·`IncrementalGarbageCollection.ko.md`(outer 간선·패키지 정책의 자식 방문·회수 조건) — Oa·Ob·Oc·Od.
+25. Docs/Implementation `Serialization.ko.md`(graph 형식·필드 codec)·`ObjectLifecycle.ko.md`(Outer·Name·Discard·다중 root Commit)·`IncrementalGarbageCollection.ko.md`(outer 간선·패키지 정책의 자식 방문·회수 조건) — Oa·Ob·Oc·Od. Oa·Ob 몫(`ObjectLifecycle`의 Outer·Name·Discard·관찰자, `IncrementalGarbageCollection`의 outer 간선·자식 방문·`retiredWithoutDiscard`)은 고쳤다.
 26. `GcBudget` 주석 — 결정 15(고리 해체 없음)로 바꿀 것이 없다.
 

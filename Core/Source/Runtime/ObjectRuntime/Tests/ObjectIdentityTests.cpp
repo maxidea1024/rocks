@@ -32,22 +32,31 @@ struct IdentityWorld : Object {};
 
 struct IdentityWorldDerived final : IdentityWorld {};
 
+// 완전한 필드 배치를 선언한 함수표다(Trace가 모든 참조 멤버를 방문한다 — 패키지 정책 Registry의
+// 생성 조건).
+template <class T>
+RuntimeTypeOps CompleteOps() noexcept {
+    RuntimeTypeOps ops = MakeRuntimeTypeOps<T>();
+    ops.completeFieldLayout = true;
+    return ops;
+}
+
 bool RegisterTypes(TypeRegistry& types) noexcept {
-    if (!types.Register({NodeType, 1, {}, {}}, MakeRuntimeTypeOps<IdentityNode>())) {
+    if (!types.Register({NodeType, 1, {}, {}}, CompleteOps<IdentityNode>())) {
         return false;
     }
 
-    if (!types.Register({PackageType, 1, {}, {}}, MakeRuntimeTypeOps<IdentityPackage>())) {
+    if (!types.Register({PackageType, 1, {}, {}}, CompleteOps<IdentityPackage>())) {
         return false;
     }
 
-    if (!types.Register({AssetType, 1, {}, {}}, MakeRuntimeTypeOps<IdentityAsset>())) {
+    if (!types.Register({AssetType, 1, {}, {}}, CompleteOps<IdentityAsset>())) {
         return false;
     }
 
     TypeSchema world{WorldType, 1, {}, {}};
     world.flags = static_cast<uint32>(TypeFlags::WorldOnly);
-    if (!types.Register(world, MakeRuntimeTypeOps<IdentityWorld>())) {
+    if (!types.Register(world, CompleteOps<IdentityWorld>())) {
         return false;
     }
 
@@ -55,7 +64,7 @@ bool RegisterTypes(TypeRegistry& types) noexcept {
     TypeSchema derived{WorldDerivedType, 1, {}, {}};
     derived.baseType = WorldType;
     derived.flags = static_cast<uint32>(TypeFlags::WorldOnly);
-    RuntimeTypeOps derivedOps = MakeRuntimeTypeOps<IdentityWorldDerived>();
+    RuntimeTypeOps derivedOps = CompleteOps<IdentityWorldDerived>();
     derivedOps.nativeBaseType = NativeTypeKey<IdentityWorld>();
     return static_cast<bool>(types.Register(derived, Move(derivedOps)));
 }

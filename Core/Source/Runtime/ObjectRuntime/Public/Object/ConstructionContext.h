@@ -32,7 +32,8 @@ public:
     //
     // 오류 순서: 0. 트랜잭션 상태(클래스 주석의 규칙), 저널 예약 OutOfMemory
     // → 1. 접근(WrongThread·WrongContext) → 2. 종료·재진입(ShuttingDown·Busy) → 3. 타입(NotFound·
-    // TypeMismatch) → 4. Abstract·생성 함수 없음(Unsupported) → 5. Outer 상태(StaleHandle — 생존·이
+    // TypeMismatch) → 4. Abstract·생성 함수 없음·패키지 정책 Registry의 완전한 필드 배치 아닌
+    // 타입(Unsupported) → 5. Outer 상태(StaleHandle — 생존·이
     // 트랜잭션의 공개 전 객체가 아님, 다른 Registry의 handle, GC cutoff white, DestroyRequested)
     // → 6. WorldOnly 정책(Unsupported) → 7. 이름 형식(InvalidArgument, NFC 판정 OutOfMemory) → 8.
     // 패키지 정책·빈 이름·대표 자식 규칙(InvalidArgument) → 9. 경로 길이(CapacityExceeded) → 10.
@@ -66,8 +67,8 @@ public:
         return access_;
     }
 
-    // 이 트랜잭션의 ID다(A0-Ob 관찰자 Commit 기록의 transaction과 같다). 끝났거나 시작하지 못한
-    // 트랜잭션은 0이다.
+    // 이 트랜잭션의 ID다(관찰자 Commit 기록 ReferenceEdgeDelta::transaction과 같다 — Commit 뒤에는
+    // 0이 되므로 소비자는 Commit 전에 읽어 둔다). 끝났거나 시작하지 못한 트랜잭션은 0이다.
     uint64 TransactionId() const noexcept {
         return finished_ ? 0 : transaction_;
     }
@@ -185,10 +186,16 @@ public:
     // 순서와 오류: 트랜잭션 상태(클래스 주석의 규칙)·out 검사
     // (out.Size() != roots.Size()이거나 비어 있지 않은 원소가 있으면 InvalidArgument) → 접근
     // (WrongThread·WrongContext) → 종료·재진입(ShuttingDown·Busy) → roots(이 트랜잭션의 객체가
-    // 아니면 StaleHandle, roots가 uint32 개수를 넘으면 Overflow) → staged 간선·Outer 검증(잠금 밖,
-    // 처리 표시 아래 — 대상·Outer가 생존 또는 이 트랜잭션 객체가 아니거나 cutoff white면
-    // StaleHandle) → 한 잠금 안에서 공개·root 증가. 실패하면 비공개 상태와 out을 그대로 두며
-    // 호출자가 Rollback하거나 소멸자가 한다. 관찰자 기록은 A0-Ob다.
+    // 아니면 StaleHandle, roots가 uint32 개수를 넘으면 Overflow) → staged 간선·Outer 검증과 관찰자
+    // 쌍 집계(잠금 밖, 처리 표시 아래 — 대상·Outer가 생존 또는 이 트랜잭션 객체가 아니거나 cutoff
+    // white면 StaleHandle, 집계 할당 실패 OutOfMemory) → 관찰자 예약(관찰자 allocator —
+    // OutOfMemory, 키 상한 초과 CapacityExceeded) → 한 잠금 안에서 공개·root 증가·관찰자 기록.
+    // 실패하면 비공개 상태와 out을 그대로 두며 호출자가 Rollback하거나 소멸자가 한다.
+    //
+    // 관찰자 Registry(RegistryOptions::referenceObserver)에서는 공개하는 객체 중 Outer가 있는 것의
+    // 다른 패키지로 가는 강한 간선을 (소유 패키지, 대상 패키지) 쌍별로 합쳐 Commit 원인·transaction
+    // = TransactionId()로 한 번 기록한다(staged 쓰기는 따로 기록하지 않는다 — 키는 staged 저널 순 ×
+    // trace 순으로 처음 생긴다).
     //
     // 사용 예(패키지 둘을 한 트랜잭션으로 공개 — 하드 순환 SCC):
     //   const ObjectHandle roots[] = {packageA, packageB};

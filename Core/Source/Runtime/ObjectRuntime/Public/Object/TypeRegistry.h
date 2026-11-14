@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Containers/HashMap.h>
 #include <Core/Memory/Allocator.h>
 #include <Meta/TypeSchema.h>
 #include <Object/RuntimeTypeOps.h>
@@ -99,6 +100,23 @@ public:
     //       const EnumeratorSchema* value = FindEnumerator(schema, toolName);   // 도구 이름 조회
     //   }
     Result<TypeLease> AcquireValueType(TypeId, TypeKind kind) noexcept;
+
+    // 리플렉션 struct 레코드를 native 키(NativeTypeKey<S>() — StructRefArray 원소 표의
+    // StructElementOps::nativeType과 같은 주소)로 연다. 등록 규칙이 struct native 키를 유일하게
+    // 하므로(같은 nativeType의 두 번째 struct는 AlreadyExists) 결과는 하나다. 관찰자 Registry가
+    // StructRefArray 원소를 떼어 낼 때 그 원소만 trace하려고 RuntimeStructOps::trace를 얻는 데
+    // 쓴다(Docs/Design/ObjectFoundations.ko.md 3절). lease가 있는 동안 그 레코드의 Unregister는
+    // Busy다.
+    //
+    // 오류: nativeType이 null이면 InvalidArgument, 종료 뒤 ShuttingDown, 그 키의 struct가
+    // 없으면(클래스· enum의 키 포함) NotFound, lease 계수 포화는 Overflow다.
+    //
+    // 사용 예:
+    //   auto lease = types.AcquireStructByNative(storage.element->nativeType);
+    //   if (lease && lease.Value().StructOps().trace != nullptr) {
+    //       lease.Value().StructOps().trace(block, visitor);
+    //   }
+    Result<TypeLease> AcquireStructByNative(const void* nativeType) noexcept;
     Result<bool> IsA(TypeId actual, TypeId expected) noexcept;
     Result<void> Unregister(TypeRegistrationToken) noexcept;
     // 신규 Acquire/Clone을 닫는다. lease가 남으면 Busy이며, 반환 후 다시 호출한다.
@@ -110,6 +128,39 @@ private:
     friend class TypeLease;
     friend class StructView;
     struct Record;
+    struct IndexGrowth;
+
+    // Enum·Struct 레코드의 native 키 색인 키다(종류마다 native 키가 유일하다 — 클래스는 같은 native
+    // 타입의 별칭 ID를 허용하므로 넣지 않는다).
+    struct NativeIndexKey {
+        const void* nativeType = nullptr;
+        TypeKind kind = TypeKind::Struct;
+
+        bool operator==(const NativeIndexKey&) const noexcept = default;
+    };
+
+    struct NativeIndexKeyHash {
+        uint64 operator()(const NativeIndexKey& key) const noexcept {
+            return HashCombine(MixHash(reinterpret_cast<uptr>(key.nativeType)),
+                               static_cast<uint64>(key.kind));
+        }
+    };
+
+    using IdIndex = HashMap<TypeId, Record*>;
+    using NativeIndex = HashMap<NativeIndexKey, Record*, NativeIndexKeyHash>;
+
+    // 잠금 보유: 레코드 하나에 lease를 더해 돌려준다(계수 포화는 Overflow).
+    Result<TypeLease> LeaseLocked(Record*) noexcept;
+    // 잠금 보유: ID·native 키 색인 조회다(없으면 nullptr).
+    Record* FindLocked(TypeId) const noexcept;
+    Record* FindNativeLocked(const void* nativeType, TypeKind kind) const noexcept;
+    // mutating_ 아래 잠금 밖: 레코드 하나를 색인에 무할당으로 넣을 수 있게 준비한다(공간이
+    // 모자라거나 지운 칸이 있는 색인은 새 색인을 할당해 둔다). 할당 실패는 그 오류이고 색인은
+    // 그대로다. native가 참이면 native 키 색인도 준비한다.
+    Result<void> PrepareIndexes(IndexGrowth&, bool native) noexcept;
+    // 잠금 보유: record를 목록 머리와 색인에 게시한다(무할당 — 새 색인이 있으면 내용을 옮겨 바꾸고
+    // 옛 색인은 growth로 넘겨 잠금 밖에서 반환한다).
+    void PublishLocked(Record* record, IndexGrowth&) noexcept;
     Result<TypeLease> Clone(void*) noexcept;
     void Release(void*) noexcept;
     void DestroyRecord(Record*) noexcept;
@@ -125,7 +176,17 @@ private:
 
     Allocator& allocator_;
     mutable platform::Mutex gate_;
+    // 등록 레코드의 이중 연결 목록이다(머리가 가장 최근 등록 — Shutdown이 이 순서로 의존자부터
+    // 파괴한다).
     Record* records_ = nullptr;
+    // TypeId → 레코드(모든 종류)와 (native 키, 종류) → 레코드(Enum·Struct) 색인이다. 조회는 잠금
+    // 안이고, 할당은 mutating_ 아래 잠금 밖에서 새 색인으로 한다(잠금 안 삽입·삭제는 무할당 —
+    // 할당기 콜백을 잠금 안에서 부르지 않는다). 삭제가 남긴 칸이 있으면 다음 등록이 새 색인으로
+    // 정리한다.
+    IdIndex byId_;
+    NativeIndex byNative_;
+    bool idErased_ = false;
+    bool nativeErased_ = false;
     uint64 domain_ = 0;
     uint64 ownerThread_ = 0;
     uint32 nextGeneration_ = 1;

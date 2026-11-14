@@ -318,7 +318,10 @@ private:
 // 리플렉션 struct 등록의 실행 정보다(TypeRegistry::RegisterStruct, 4.6절). construct·destroy는
 // struct hook 관찰용 임시 값을 만들고 없앤다(필수). trace는 참조 struct(ObjectRef·ObjectRefArray·
 // StructRefArray 멤버가 있는 — Transient 포함, 중첩 struct 포함 — struct)에만 있어야 하고 생성
-// Trace는 모든 배열 멤버에 detail::TraceArrayField를 부른다. migrate는 선택이며 타입이 자기 옛
+// Trace는 모든 배열 멤버에 detail::TraceArrayField를 부른다. trace는 GeneratedType<S>::Trace와 같은
+// 간선을 방문해야 한다: 관찰자 Registry는 StructRefArray 원소를 떼어 낼 때 이 trace로, Commit·
+// Discard는 소유자 Trace 안의 GeneratedType<S>::Trace로 세므로 둘이 다르면 계수가 어긋난다(생성
+// 코드는 trace를 GeneratedType<S>::Trace로 만든다). migrate는 선택이며 타입이 자기 옛
 // 버전을 올린다(로드 옵션 override가 먼저다). requiresWorldOnlyOwner는 생성 형질(NATIVE 멤버의
 // WorldOnly 요구)이다. fields는 스키마 필드와 1:1이며 등록이 스키마 순서로 깊게 복사한다. 동적
 // 모듈이면 module로 코드 수명을 유지한다. 등록된 레코드의 StructOps()에서 module은 비어 있고(수명은
@@ -361,7 +364,9 @@ struct RuntimeTypeOps {
     // 모든 영속 필드와 모든 강한 간선이 typed metadata에 포함된 경우만 true다. ROCKS_NATIVE 멤버는
     // 영속 필드가 아니고 강한 참조를 담을 수 없으므로(MetaCompiler RMC2205·생성 static_assert) 생성
     // 타입은 계속 true다. graph serializer는 이 선언 없는 수동/부분 metadata를 완전한 객체로
-    // 저장하지 않는다.
+    // 저장하지 않는다. true면 trace도 Registry API로 쓰는 모든 참조(ObjectRef·컨테이너 원소)를
+    // 방문해야 한다 — 패키지 정책 ObjectRegistry는 이 선언이 있는 타입만 만든다(관찰자 계수가
+    // 편집은 Registry API로, Commit·Discard는 trace로 센다).
     bool completeFieldLayout = false;
 };
 

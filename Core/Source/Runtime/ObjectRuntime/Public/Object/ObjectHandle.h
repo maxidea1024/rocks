@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Base/Types.h>
+#include <Core/Hash.h>
 
 namespace rocks {
 
@@ -17,6 +18,16 @@ struct ObjectHandle {
     }
 
     bool operator==(const ObjectHandle&) const noexcept = default;
+};
+
+// handle 전체(registry·slot·generation)의 실행 중 해시다(Core HashMap 키·Registry 내부 색인이 같이
+// 쓴다 — 회수된 세대의 옛 handle은 새 객체와 다른 값이다).
+template <>
+struct Hash<ObjectHandle> {
+    uint64 operator()(ObjectHandle handle) const noexcept {
+        return HashCombine(MixHash(handle.registry),
+                           MixHash((uint64(handle.slot) << 32) | handle.generation));
+    }
 };
 
 } // namespace rocks
