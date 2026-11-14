@@ -4,6 +4,8 @@
 #include <Core/Text/String.h>
 #include <Core/Time/GameClock.h>
 #include <Core/Traits.h>
+#include <Object/ModuleRegistration.h>
+#include <Object/NativeClass.h>
 #include <Object/ObjectRegistry.h>
 #include <World/Actor.h>
 #include <World/Component.h>
@@ -37,9 +39,24 @@ public:
 
 using WorldSubsystemType = SubsystemType<WorldSubsystem>;
 
-// World 모듈의 기본 타입(Actor·Component·SceneComponent·Level)을 등록한다. 게임 타입보다 먼저 한 번
-// 호출한다. 이미 등록된 타입이 있으면 AlreadyExists다.
-Result<void> RegisterWorldTypes(TypeRegistry& types) noexcept;
+// World 모듈의 리플렉션 타입(Level·Actor·Component·SceneComponent — WorldOnly)을 registration에
+// 등록한다(rocks::generated::World::RegisterModuleTypes — 의존 모듈 CoreTypeBindings의 struct를
+// 먼저, 그다음 base 먼저 클래스). 같은 registration에 다시 부르거나, 다른 registration이 같은 C++
+// 타입을 이미 등록했으면 새로 등록하지 않고 lease를 붙잡아 성공한다(멱등). 같은 ID가 다른 C++
+// 타입이면 AlreadyExists다. 실패하면 이 호출이 남긴 기록은 되돌려진다. 게임 타입(리플렉션
+// 모듈·native 파생)보다 먼저 부른다 — native 파생은 리플렉션 base가 등록된 뒤에만 등록된다.
+//
+// 수명: registration이 등록한 타입은 registration이 파괴돼도 해제되지 않는다(붙잡은 lease만
+// 놓는다). 해제하려면 native 파생을 먼저 Unregister한 뒤 registration.Unregister()를 부르거나(남은
+// 파생이 있으면 Busy), Engine처럼 Unregister하지 않고 registration 파괴 -> TypeRegistry::Shutdown
+// 순서로 끝낸다(Shutdown은 남은 lease만 검사하고 dependent 순서로 반납한다).
+//
+// 사용 예:
+//   TypeRegistry types(allocator);
+//   ModuleRegistration modules(types, allocator);       // types 뒤에 선언해 먼저 파괴한다
+//   if (auto registered = RegisterWorldTypes(modules); !registered) { ... }
+//   auto spinner = RegisterNativeClass<Spinner>(types);  // World.module.generated.h를 include한 TU
+Result<void> RegisterWorldTypes(ModuleRegistration& registration) noexcept;
 
 // Actor Spawn 옵션이다.
 struct SpawnParams {
@@ -96,11 +113,11 @@ inline constexpr bool IsSpanV<Span<R>> = true;
 // Actor의 실행 환경이다. 자기 ObjectRegistry(독립 실행 문맥), Level(Actor 소유 묶음), Actor 수명
 // 기록, TickScheduler, 게임 시계, WorldSubsystem을 소유한다. GameDirector 없이도 동작한다.
 //
-// 소유 사슬: World → Level(RootRef) → Actor(Level의 ObjectRefArray) → Component(Actor의
+// 소유 사슬: World -> Level(RootRef) -> Actor(Level의 ObjectRefArray) -> Component(Actor의
 // ObjectRefArray). World가 보유하는 객체 루트는 Level 루트뿐이다.
 //
 // 사용 예:
-//   RegisterWorldTypes(types);                         // 기본 타입 → 게임 타입 순서로 등록
+//   RegisterWorldTypes(modules);                       // 기본 타입 -> 게임 타입 순서로 등록
 //   RegisterNativeClass<Spinner>(types);
 //   auto created = UniquePtr<World>::TryMake(allocator, allocator, types, desc);
 //   World& world = *created.Value();
@@ -112,15 +129,15 @@ inline constexpr bool IsSpanV<Span<R>> = true;
 //   if (!world.Shutdown()) { ... }                     // 모든 Actor 정리·Registry 종료
 //
 // 프레임(Tick) 순서:
-//   1) 게임 시계 진행 → 2) 시작 대기 Actor/Component의 OnStart(Playing·활성일 때) → 3) Tick 단계:
-//   PrePhysics → Physics(고정 스텝 수만큼) → PostPhysics → LateUpdate → PreRender →
-//   4) 파괴 대기 객체 정리(OnDisable·OnDestroy·OnUnregister·회수 요청) → 5) 증분 GC 한 조각.
+//   1) 게임 시계 진행 -> 2) 시작 대기 Actor/Component의 OnStart(Playing·활성일 때) -> 3) Tick 단계:
+//   PrePhysics -> Physics(고정 스텝 수만큼) -> PostPhysics -> LateUpdate -> PreRender ->
+//   4) 파괴 대기 객체 정리(OnDisable·OnDestroy·OnUnregister·회수 요청) -> 5) 증분 GC 한 조각.
 //
 // hook 순서(Actor A, Component C):
-//   생성: C.OnRegister → A.OnAwake → C.OnAwake → A.OnEnable → C.OnEnable
-//   시작: C.OnStart → A.OnStart(BeginPlay 전 Spawn은 BeginPlay 안, 이후 Spawn은 다음 프레임 시작)
+//   생성: C.OnRegister -> A.OnAwake -> C.OnAwake -> A.OnEnable -> C.OnEnable
+//   시작: C.OnStart -> A.OnStart(BeginPlay 전 Spawn은 BeginPlay 안, 이후 Spawn은 다음 프레임 시작)
 //   Tick: 같은 단계에서 A의 Tick 뒤에 C의 Tick
-//   정리: C.OnDisable → A.OnDisable → C.OnDestroy → A.OnDestroy → C.OnUnregister
+//   정리: C.OnDisable -> A.OnDisable -> C.OnDestroy -> A.OnDestroy -> C.OnUnregister
 //   비활성 객체는 활성화될 때까지 OnStart를 미룬다. OnDestroy는 OnAwake가 성공한 객체만 받는다.
 //
 // 소유·수명 규약:
@@ -134,6 +151,19 @@ inline constexpr bool IsSpanV<Span<R>> = true;
 // - Objects()로 Registry를 직접 조작해 Actor·Component·Level을 파괴하지 않는다. 그런 객체를 Tick이
 //   만나면 World가 레코드를 정리하지만 hook은 받지 못한다.
 // - Initialize·BeginPlay·Tick·Shutdown과 소멸은 hook 밖에서만 한다(hook 안에서 호출하면 Busy).
+// - World registry에는 World API(SpawnActor·AddComponent·CreateLevel)로만 Actor·Component·Level을
+//   만든다. 그 밖에서 만든 객체(직접 NewObject, 그래프 로드)는 World 장부 밖이다 — 수명 기록이 없어
+//   Tick·hook을 받지 않는다. 그 객체의 계층 API(Actor::SetRootComponent·Destroy,
+//   Component::Destroy, SceneComponent::AttachTo(그 객체를 부모로 쓰는 경우 포함)·Detach)와
+//   DestroyComponent는 InvalidArgument이고, 수명 기록이 필요한 World API(DestroyActor·AddComponent·
+//   GetComponents)는 StaleHandle이다(편입·외부 생성 거부 정책은 EngineRuntime 문서 4.6절). 컨테이너
+//   순회는 원소 수 기준이고 null 원소를 건너뛴다.
+//
+// 생성 헤더 규약: 이 헤더는 리플렉션 생성 헤더를 include하지 않는다(Engine.h 소비자 전체로 컴파일
+// 비용이 번지지 않게). native 파생 T의 SpawnActor<T>·AddComponent<T>는 T::StaticTypeId만 쓰지만,
+// 리플렉션 World 타입(Actor·SceneComponent 등)을 템플릿 인자로 쓰는 TU와 RegisterNativeClass<T>를
+// 부르는 TU는 <World/World.module.generated.h>(또는 그 타입의 <World/<Type>.generated.h>)를
+// include한다 — 없으면 ObjectTypeIdOf·RegisterNativeClass의 static_assert가 안내한다.
 //
 // 스레드: 생성한 게임 스레드에서만 사용한다.
 class World final : private TickExecutor {
@@ -180,7 +210,7 @@ public:
     template <class T>
     Result<ObjectHandle> SpawnActorDeferred(const SpawnParams& params = {}) noexcept {
         static_assert(__is_base_of(Actor, T));
-        return SpawnActorDeferred(NativeTypeIdOf<T>(), params);
+        return SpawnActorDeferred(ObjectTypeIdOf<T>(), params);
     }
 
     // 런타임 TypeId로 만든다. 등록된 Actor 파생 타입이 아니면 TypeMismatch다.
@@ -197,7 +227,7 @@ public:
     template <class T>
     Result<ObjectHandle> SpawnActor(const SpawnParams& params = {}) noexcept {
         static_assert(__is_base_of(Actor, T));
-        return SpawnActor(NativeTypeIdOf<T>(), params);
+        return SpawnActor(ObjectTypeIdOf<T>(), params);
     }
 
     Result<ObjectHandle> SpawnActor(TypeId type, const SpawnParams& params = {}) noexcept;
@@ -260,28 +290,32 @@ public:
     template <class T>
     Result<ObjectHandle> AddComponent(ObjectHandle actor) noexcept {
         static_assert(__is_base_of(Component, T));
-        return AddComponent(actor, NativeTypeIdOf<T>());
+        return AddComponent(actor, ObjectTypeIdOf<T>());
     }
 
     Result<ObjectHandle> AddComponent(ObjectHandle actor, TypeId type) noexcept;
 
-    // Component 파괴를 요청한다. 이미 요청됐으면 성공이다.
+    // Component 파괴를 요청한다. 이미 요청됐으면 성공이다. 이 World의 Component가 아니면
+    // StaleHandle, 이 World registry에 있지만 World 장부 밖(AddComponent 밖에서 만든) 객체면
+    // InvalidArgument다.
     Result<void> DestroyComponent(ObjectHandle component) noexcept;
 
     Result<ComponentState> GetComponentState(ObjectHandle component) noexcept;
 
-    // actor가 가진 Component 중 T(또는 파생)인 첫 번째다. 없으면 null handle이다.
+    // actor가 가진 Component 중 T(또는 파생)인 첫 번째다. 없으면 null handle이다. null 원소는
+    // 건너뛴다.
     template <class T>
     ObjectHandle FindComponent(ObjectHandle actor) noexcept {
         static_assert(__is_base_of(Component, T));
         ObjectAccessScope scope(Access());
         for (usize index = 0;; ++index) {
-            const ObjectHandle component = ComponentAt(actor, index);
-            if (component.IsNull()) {
+            const ComponentSlot slot = ComponentSlotAt(actor, index);
+            if (index >= slot.count) {
                 return {};
             }
-            if (objects_.Resolve<T>(Access(), component).IsOk()) {
-                return component;
+
+            if (!slot.component.IsNull() && objects_.Resolve<T>(Access(), slot.component).IsOk()) {
+                return slot.component;
             }
         }
     }
@@ -316,10 +350,12 @@ public:
         if (!borrowed) {
             return Output::Failure(borrowed.Error());
         }
+
         auto pointer = borrowed.Value().Get();
         if (!pointer) {
             return Output::Failure(pointer.Error());
         }
+
         if constexpr (__is_same(Returned, void)) {
             function(*pointer.Value());
             return Output::Success();
@@ -434,8 +470,17 @@ private:
     // 모든 Actor를 파괴 대기로 만들고 정리한다(hook 포함). 종료·초기화 실패 경로에서 쓴다.
     void DestroyAllActors() noexcept;
 
+    // actor의 index번째 Component와 지금의 Component 수다. 순회는 count로 끝을 판정하고 null
+    // component(로드된 목록의 null 원소)는 건너뛴다 — null을 끝 표지로 쓰지 않는다. hook이 목록을
+    // 바꿀 수 있으므로 원소마다 다시 얻는다. Actor에 접근할 수 없으면 count는 0이다.
+    struct ComponentSlot {
+        ObjectHandle component;
+        usize count = 0;
+    };
+
     ActorRecord* FindActorRecord(ObjectHandle actor) noexcept;
     const ActorRecord* FindActorRecord(ObjectHandle actor) const noexcept;
+    ComponentSlot ComponentSlotAt(ObjectHandle actor, usize index) noexcept;
     // actor의 index번째 Component다. 범위 밖이거나 Actor에 접근할 수 없으면 null handle이다.
     ObjectHandle ComponentAt(ObjectHandle actor, usize index) noexcept;
     usize ComponentCountOf(ObjectHandle actor) noexcept;
@@ -460,12 +505,16 @@ private:
     // 소유 Actor가 아직 Playing이 아니면 아무것도 하지 않는다(Actor 시작 때 등록된다).
     void RegisterComponentTicks(ObjectHandle component) noexcept;
     void SetTicksEnabled(TickHandle (&handles)[detail::TickHookCount], bool enabled) noexcept;
-    // Component를 시작한다(OnStart → Playing → Tick 등록). 시작 대상이 아니면 아무것도 하지 않는다.
+    // Component를 시작한다(OnStart -> Playing -> Tick 등록). 시작 대상이 아니면 아무것도 하지
+    // 않는다.
     void StartComponent(ObjectHandle component) noexcept;
     // 다음 프레임 시작에 시작하도록 큐에 넣는다(중복 없이).
     void QueueComponentStart(ObjectHandle component) noexcept;
     void ProcessStarts() noexcept;
     void FlushDestroys() noexcept;
+    // owner(actor의 Borrow 안)의 대표가 component면 Registry SetReference로 비운다. component가
+    // null이면 아무것도 하지 않는다.
+    void ClearRootComponent(ObjectHandle actor, Actor& owner, ObjectHandle component) noexcept;
     void DestroyComponentNow(ObjectHandle actor, ObjectHandle component,
                              bool ownerDestroyed) noexcept;
     void DestroyActorNow(ObjectHandle actor) noexcept;

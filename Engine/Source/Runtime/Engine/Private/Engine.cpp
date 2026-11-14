@@ -52,6 +52,7 @@ ObjectRegistry& Engine::Objects() noexcept {
     if (!objects_) {
         platform::Fatal("Engine::Objects called before initialization");
     }
+
     return *objects_;
 }
 
@@ -72,16 +73,32 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
     if (!types) {
         return fail(types.Error());
     }
+
     types_ = Move(types.Value());
     initializedSteps_ = StepTypes;
 
-    auto registered = RegisterWorldTypes(*types_);
+    auto modules = UniquePtr<ModuleRegistration>::TryMake(allocator_, *types_, allocator_);
+    if (!modules) {
+        return fail(modules.Error());
+    }
+
+    modules_ = Move(modules.Value());
+
+    // World 리플렉션 타입 -> 게임 리플렉션 모듈(같은 ModuleRegistration) -> native 타입 순서다.
+    // native 파생은 리플렉션 base가 등록된 뒤에만 등록된다.
+    auto registered = RegisterWorldTypes(*modules_);
+    if (registered && config_.registerModuleTypes != nullptr) {
+        registered = config_.registerModuleTypes(*modules_);
+    }
+
     if (registered && config_.registerTypes != nullptr) {
         registered = config_.registerTypes(*types_);
     }
+
     if (!registered) {
         return fail(registered.Error());
     }
+
     initializedSteps_ = StepTypesRegistered;
 
     auto objects =
@@ -89,6 +106,7 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
     if (!objects) {
         return fail(objects.Error());
     }
+
     objects_ = Move(objects.Value());
     initializedSteps_ = StepObjects;
 
@@ -99,6 +117,7 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
             return fail(subsystems.Error());
         }
     }
+
     initializedSteps_ = StepSubsystems;
 
     if (config_.client != nullptr) {
@@ -108,6 +127,7 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
             return fail(started.Error());
         }
     }
+
     initializedSteps_ = StepClient;
 
     state_ = EngineState::Running;
@@ -132,15 +152,20 @@ void Engine::Teardown(uint32 completedSteps) noexcept {
             platform::Fatal(
                 "Engine object registry could not shut down after initialization failure");
         }
+
         objects_.Reset();
     }
 
+    // 타입은 Unregister하지 않는다(Shutdown 설명). 붙잡은 lease를 놓은 뒤 TypeRegistry가 등록 기록
+    // (등록 함수가 버린 native 토큰 포함)을 dependent 순서로 반납한다.
+    modules_.Reset();
     if (completedSteps >= StepTypes && types_) {
         auto closed = types_->Shutdown();
         if (!closed) {
             platform::Fatal(
                 "Engine type registry could not shut down after initialization failure");
         }
+
         types_.Reset();
     }
 
@@ -174,6 +199,7 @@ Result<World*> Engine::CreateWorld(const WorldCreateDesc& desc) noexcept {
     if (initialized && desc.beginPlay) {
         initialized = world->BeginPlay();
     }
+
     if (!initialized) {
         auto finished = world->Shutdown();
         (void)finished;
@@ -207,10 +233,12 @@ Result<void> Engine::DestroyWorld(World* world) noexcept {
         if (worlds_[index].world.Get() != world) {
             continue;
         }
+
         if (inFrame_) {
             worlds_[index].pendingDestroy = true;
             return Result<void>::Success();
         }
+
         return DestroyWorldNow(index);
     }
 
@@ -240,12 +268,12 @@ Result<void> Engine::RunFrame() noexcept {
     // hook은 Registry scope 없이 부른다(World 객체는 World::With가 자기 scope를 세운다). 엔진
     // Registry를 다루는 Subsystem·client 호출 구간에만 엔진 scope를 세운다.
 
-    // ① 이벤트 펌프.
+    // 1) 이벤트 펌프.
     if (config_.hooks != nullptr) {
         config_.hooks->PumpEvents(*this);
     }
 
-    // ② 시간 갱신.
+    // 2) 시간 갱신.
     const uint64 now = platform::MonotonicNanoseconds();
     const double measured = static_cast<double>(now - lastClock_) * 1.0e-9;
     lastClock_ = now;
@@ -257,46 +285,51 @@ Result<void> Engine::RunFrame() noexcept {
                                     ? time_.deltaSeconds
                                     : time_.averageFrameSeconds * 0.9 + time_.deltaSeconds * 0.1;
 
-    // ③ 프레임 시작.
+    // 3) 프레임 시작.
     if (config_.hooks != nullptr) {
         config_.hooks->BeginFrame(*this);
     }
+
     {
         ObjectAccessScope scope(objects_->OwnerAccess());
         for (usize index = 0; index < subsystems_.Count(); ++index) {
             subsystems_.At(index)->OnFrameBegin(*this);
         }
+
         if (config_.client != nullptr) {
             config_.client->OnEngineTick(*this);
         }
     }
 
-    // ④ World Tick. hook이 World를 추가·파괴 요청해도 index로 다시 읽는다.
+    // 4) World Tick. hook이 World를 추가·파괴 요청해도 index로 다시 읽는다.
     Result<void> outcome = Result<void>::Success();
     const uint64 worldStart = platform::MonotonicNanoseconds();
     for (usize index = 0; index < worlds_.Size(); ++index) {
         if (worlds_[index].pendingDestroy) {
             continue;
         }
+
         auto ticked = worlds_[index].world->Tick(time_.deltaSeconds);
         if (!ticked && outcome) {
             outcome = Move(ticked);
         }
     }
+
     worldTickNanoseconds_ = platform::MonotonicNanoseconds() - worldStart;
 
-    // ⑤ 지연 작업.
+    // 5) 지연 작업.
     inFrame_ = false;
     ProcessDeferred();
     inFrame_ = true;
 
-    // ⑥ 프레임 끝.
+    // 6) 프레임 끝.
     {
         ObjectAccessScope scope(objects_->OwnerAccess());
         for (usize index = 0; index < subsystems_.Count(); ++index) {
             subsystems_.At(index)->OnFrameEnd(*this);
         }
     }
+
     if (config_.hooks != nullptr) {
         config_.hooks->EndFrame(*this);
     }
@@ -348,6 +381,7 @@ Result<void> Engine::Shutdown() noexcept {
             ObjectAccessScope scope(objects_->OwnerAccess());
             config_.client->OnEngineShutdown(*this);
         }
+
         initializedSteps_ = StepSubsystems;
     }
 
@@ -371,22 +405,30 @@ Result<void> Engine::Shutdown() noexcept {
             if (!collected) {
                 return Result<void>::Failure(collected.Error());
             }
+
             if (collected.Value().reclaimed == 0) {
                 break;
             }
         }
+
         auto closed = objects_->Shutdown(objects_->OwnerAccess());
         if (!closed) {
             return closed;
         }
+
         objects_.Reset();
     }
 
+    // World·게임 타입은 Unregister하지 않는다 — 게임이 토큰을 버린 native 파생이 리플렉션 base의
+    // dependent로 남아 Unregister가 Busy로 멈춘다. ModuleRegistration 파괴로 붙잡은 lease만 놓고
+    // TypeRegistry::Shutdown이 남은 레코드를 dependent 순서로 반납한다.
+    modules_.Reset();
     if (types_) {
         auto closed = types_->Shutdown();
         if (!closed) {
             return closed;
         }
+
         types_.Reset();
     }
 

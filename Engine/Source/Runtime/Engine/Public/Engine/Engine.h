@@ -2,6 +2,7 @@
 
 #include <Core/Containers/Array.h>
 #include <Core/Memory/UniquePtr.h>
+#include <Object/ModuleRegistration.h>
 #include <Object/ObjectRegistry.h>
 #include <World/Subsystem.h>
 #include <World/World.h>
@@ -50,16 +51,16 @@ using EngineSubsystemType = SubsystemType<EngineSubsystem>;
 // Engine이 직접 의존하지 않는 시스템을 연결한다. 헤드리스 실행은 hook 없이 돈다.
 class EngineLoopHooks {
 public:
-    // ① 프레임의 첫 단계다. 창 메시지·입력을 펌프한다. 종료가 필요하면 engine.RequestExit()를
-    // 호출한다.
+    // 1단계: 프레임의 첫 단계다. 창 메시지·입력을 펌프한다. 종료가 필요하면
+    // engine.RequestExit()를 호출한다.
     virtual void PumpEvents(Engine&) noexcept {
     }
 
-    // ③ 시간 갱신 뒤, World Tick 전이다.
+    // 3단계: 시간 갱신 뒤, World Tick 전이다.
     virtual void BeginFrame(Engine&) noexcept {
     }
 
-    // ⑥ 프레임의 마지막 단계다. World 상태로 렌더를 추출·제출한다.
+    // 6단계: 프레임의 마지막 단계다. World 상태로 렌더를 추출·제출한다.
     virtual void EndFrame(Engine&) noexcept {
     }
 
@@ -100,7 +101,20 @@ struct EngineConfig {
     double fixedFrameDeltaSeconds = 0.0;
     // 0이 아니면 Run이 이 프레임 수를 실행한 뒤 스스로 종료 요청한다.
     uint64 maxFrames = 0;
-    // 엔진 TypeRegistry에 World 기본 타입 다음으로 등록할 게임 타입 등록 함수다(선택).
+    // 엔진 ModuleRegistration에 World 타입 다음으로 등록할 리플렉션 모듈 등록 함수다(선택). 게임
+    // 모듈의 생성 집계 함수(rocks::generated::<Module>::RegisterModuleTypes)를 부른다. 같은
+    // ModuleRegistration이라 이미 등록된 의존 모듈(World 등)은 다시 등록하지 않는다. 실패하면 엔진
+    // 초기화가 실패한다.
+    //
+    // 사용 예:
+    //   config.registerModuleTypes = [](ModuleRegistration& modules) noexcept {
+    //       return generated::MyGame::RegisterModuleTypes(modules);
+    //   };
+    Result<void> (*registerModuleTypes)(ModuleRegistration&) noexcept = nullptr;
+    // 엔진 TypeRegistry에 마지막으로 등록할 native 타입(ROCKS_NATIVE_TYPE) 등록 함수다(선택).
+    // native 파생은 리플렉션 타입을 base로 둘 수 있으므로 World·리플렉션 모듈 뒤에 부른다. 받은
+    // 등록 토큰은 버려도 된다 — Engine은 종료할 때 타입을 Unregister하지 않고
+    // TypeRegistry::Shutdown이 모두 반납한다.
     Result<void> (*registerTypes)(TypeRegistry&) noexcept = nullptr;
 };
 
@@ -145,17 +159,22 @@ struct EngineStats {
 //   engine.Run();                                    // RequestExit 또는 maxFrames까지
 //   engine.Shutdown();                               // 여러 번 호출해도 안전
 //
-// 프레임 순서(RunFrame): ① hooks.PumpEvents → ② 시간 갱신 → ③
-// hooks.BeginFrame·Subsystem.OnFrameBegin· client.OnEngineTick → ④ World마다 Tick → ⑤ 지연
-// 작업(World 파괴) → ⑥ Subsystem.OnFrameEnd·hooks.EndFrame.
+// 프레임 순서(RunFrame): 1) hooks.PumpEvents -> 2) 시간 갱신 -> 3) hooks.BeginFrame·
+// Subsystem.OnFrameBegin·client.OnEngineTick -> 4) World마다 Tick -> 5) 지연 작업(World 파괴)
+// -> 6) Subsystem.OnFrameEnd·hooks.EndFrame.
 //
 // 수명 규약:
-// - 초기화 순서: TypeRegistry → World 기본 타입·게임 타입 등록 → 엔진 Registry → EngineSubsystem →
-//   EngineClient. 어느 단계든 실패하면 이미 한 단계를 역순으로 정리하고 Failed가 된다.
-// - 종료 순서: client.OnEngineShutdown → 모든 World Shutdown·파괴 → Subsystem 역순 정리 → 엔진
-// Registry →
-//   TypeRegistry. 프레임 실행 중(hook 안)에는 Busy이므로 RequestExit 후 Run이 돌아온 뒤 호출한다.
-// - World는 Engine이 소유한다. 프레임 안에서 DestroyWorld를 호출하면 ⑤에서 파괴된다.
+// - 초기화 순서: TypeRegistry·ModuleRegistration -> 타입 등록(World 리플렉션 타입 ->
+//   EngineConfig.registerModuleTypes -> EngineConfig.registerTypes(native, 마지막)) -> 엔진
+//   Registry -> EngineSubsystem -> EngineClient. 어느 단계든 실패하면 이미 한 단계를 역순으로
+//   정리하고 Failed가 된다.
+// - 종료 순서: client.OnEngineShutdown -> 모든 World Shutdown·파괴 -> Subsystem 역순 정리 -> 엔진
+//   Registry -> ModuleRegistration 파괴(붙잡은 lease 해제) -> TypeRegistry::Shutdown. 타입은
+//   Unregister하지 않는다 — 게임이 토큰을 버린 native 파생이 리플렉션 base의 dependent로 남아
+//   Unregister가 Busy로 멈추기 때문이다. Shutdown은 남은 lease만 검사하고 dependent 순서로 레코드를
+//   반납한다. 초기화 실패 경로도 같은 순서다. 프레임 실행 중(hook 안)에는 Busy이므로 RequestExit 후
+//   Run이 돌아온 뒤 호출한다.
+// - World는 Engine이 소유한다. 프레임 안에서 DestroyWorld를 호출하면 5단계(지연 작업)에서 파괴된다.
 //
 // 스레드: 생성한 게임 스레드에서만 사용한다.
 class Engine {
@@ -202,8 +221,8 @@ public:
     // 포인터는 DestroyWorld·Shutdown까지 유효하다.
     Result<World*> CreateWorld(const WorldCreateDesc& desc) noexcept;
 
-    // World 파괴를 요청한다. 프레임 밖이면 즉시, 프레임 안이면 ⑤ 지연 작업에서 파괴한다. 모르는
-    // World는 NotFound다. 파괴가 Busy로 실패하면(외부 Borrow) 다음 프레임에 다시 시도한다.
+    // World 파괴를 요청한다. 프레임 밖이면 즉시, 프레임 안이면 5단계(지연 작업)에서 파괴한다.
+    // 모르는 World는 NotFound다. 파괴가 Busy로 실패하면(외부 Borrow) 다음 프레임에 다시 시도한다.
     Result<void> DestroyWorld(World* world) noexcept;
 
     usize WorldCount() const noexcept {
@@ -252,6 +271,8 @@ private:
     Allocator& allocator_;
     EngineConfig config_;
     UniquePtr<TypeRegistry> types_;
+    // TypeRegistry 뒤에 선언해 먼저 소멸시킨다(붙잡은 lease를 TypeRegistry::Shutdown 전에 놓는다).
+    UniquePtr<ModuleRegistration> modules_;
     UniquePtr<ObjectRegistry> objects_;
     SubsystemCollection<EngineSubsystem, Engine> subsystems_;
     Array<WorldContext> worlds_;

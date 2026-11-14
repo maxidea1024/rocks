@@ -1,0 +1,82 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::Actor::components_",
+      "id": "ca55b362bf6e41618d6f9a0999bfdee4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Actor::enabled_",
+      "id": "8e378c55aa4a4659b3c44b77cfea7644",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Actor::rootComponent_",
+      "id": "06236ce14a9d469c8b716839fa781447",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Component::enabled_",
+      "id": "c5074d28e80b4e6992d165e099cf8ee7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Level::actors_",
+      "id": "4240bd36297543b892729764cc878248",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Level::name_",
+      "id": "fe7c50c7abfe4d1d9bd6cd4c02ed009f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SceneComponent::relative_",
+      "id": "1713d9606fad4c06b1796784725b290c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::Actor",
+      "id": "390b007f97694694a6348a88ff0afe0f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::Component",
+      "id": "7fc3644ef61c4d0883a9a76cd1893955",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::Level",
+      "id": "89bc060c498a4459862422d6f0867062",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SceneComponent",
+      "id": "15541c1170f742ab9e8beacde7ab7926",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

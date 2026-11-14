@@ -51,7 +51,7 @@ internal static class ModuleMetaTests
     // Binds를 받는 유일한 모듈 이름이다(StructRules.BindingModule).
     private const string BindingsModule = "CoreTypeBindings";
 
-    // 깊이 16의 struct 사슬(Chain1 ← … ← Chain16), 위조용 Top(UInt16 필드 하나), Parent를 가진 Lower다.
+    // 깊이 16의 struct 사슬(Chain1 <- … <- Chain16), 위조용 Top(UInt16 필드 하나), Parent를 가진 Lower다.
     private static readonly string ChainParent = "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\nnamespace probe {\n" +
         "ROCKS_STRUCT()\nstruct Chain1 {\nROCKS_PROPERTY() rocks::int32 value = 0;\n};\n" +
         string.Concat(Enumerable.Range(2, 15).Select(level => $"ROCKS_STRUCT()\nstruct Chain{level} {{\nROCKS_PROPERTY() Chain{level - 1} inner;\n}};\n")) +
@@ -85,8 +85,28 @@ internal static class ModuleMetaTests
         "ROCKS_CLASS()\nstruct Value : public Parent {\nexplicit Value(rocks::Allocator& allocator) noexcept : Parent(allocator), group(allocator) {}\n" +
         "ROCKS_PROPERTY() rocks::ObjectRef<Parent> next;\nROCKS_PROPERTY() Group group;\n};\n}\n";
 
+    // B8b: 모듈 이름과 같은 이름의 rocks 클래스(World 모듈의 rocks::World처럼)를 담는 Lower다. probe::Parent는 Lower 명세를 그대로 쓴다.
+    private const string SameNameParent = Parent + "namespace rocks {\nROCKS_CLASS()\nstruct Lower : public Object {\n" +
+        "ROCKS_PROPERTY() int32 value = 0;\n};\ninline int32 ReadLower(const Lower& lower) noexcept { return lower.value; }\n}\n";
+
     public static void Register(TestSuite suite, Options options, IReadOnlyDictionary<string, string?> environment)
     {
+        suite.Add("Meta.ModuleNameMayEqualAReflectedClassName", async () =>
+        {
+            // 집계 함수 이름공간 rocks::generated::Lower와 클래스 rocks::Lower가 서로 가리지 않는다(생성 코드는 이름을 ::rocks::로 한정한다 —
+            // 검증 컴파일이 생성 헤더와 집계 헤더를 함께 컴파일한다). World 모듈과 rocks::World의 관계와 같다.
+            using Layout layout = new(options, environment);
+            layout.Write("Lower/Public/Lower/Parent.h", SameNameParent);
+            layout.Manifest("Lower", ["rocks::Lower"], ["rocks::Lower::value"]);
+            ProcessResult lower = await layout.RunLowerAsync();
+            Verify.Equal(0, lower.ExitCode, "module named like its reflected class: " + lower.StdErr);
+            string aggregate = File.ReadAllText(layout.Generated("Lower", "Public/Lower/Lower.module.generated.h"));
+            Verify.Contains("namespace rocks::generated::Lower", aggregate, "aggregate namespace");
+            Verify.Contains("GeneratedType<::rocks::Lower>", aggregate, "aggregate registers the same-named class");
+            string generated = File.ReadAllText(layout.Generated("Lower", "Public/Lower/Parent.generated.h"));
+            Verify.Contains("struct GeneratedType<::rocks::Lower>", generated, "generated specialization is fully qualified");
+        });
+
         suite.Add("Meta.ModuleGeneratesHeadersAggregatesAndDescriptor", async () =>
         {
             using Layout layout = new(options, environment);
@@ -455,7 +475,7 @@ internal static class ModuleMetaTests
             }
         });
 
-        // B4b: 의존 모듈의 ROCKS_STRUCT를 descriptor로 import해 클래스·struct 필드로 쓴다. Lower 집계는 enum → struct →
+        // B4b: 의존 모듈의 ROCKS_STRUCT를 descriptor로 import해 클래스·struct 필드로 쓴다. Lower 집계는 enum -> struct ->
         // 클래스로 등록하고, Upper 생성 헤더는 import struct(상속 필드 포함)와 같은 모듈 다른 헤더 struct의 생성 헤더를
         // include하며, 참조 형질이 import struct에서 전파된다(Docs/Design/ReflectionFoundations.ko.md 4.6절).
         suite.Add("Meta.ImportedStructsResolveAsFieldTypes", async () =>
@@ -561,7 +581,7 @@ internal static class ModuleMetaTests
                 await Reject(layout.RunUpperAsync(imports: [mutated]), "RMC1000", "invalid descriptor");
             }
 
-            // 대상 ID가 다른 종류의 타입을 가리키거나(Struct 필드 → enum, 참조 → struct) 멤버 struct의 WorldOnly 소유자 형질이
+            // 대상 ID가 다른 종류의 타입을 가리키거나(Struct 필드 -> enum, 참조 -> struct) 멤버 struct의 WorldOnly 소유자 형질이
             // 전파되지 않은 descriptor도 망가진 것이다.
             string modeId = Type(parsed, "probe::Mode").GetProperty("id").GetString()!;
             foreach ((string name, string type, Action<System.Text.Json.Nodes.JsonObject> change) in new (string, string, Action<System.Text.Json.Nodes.JsonObject>)[]
@@ -743,7 +763,7 @@ internal static class ModuleMetaTests
             using JsonDocument parsed = JsonDocument.Parse(original);
             string linkId = Type(parsed, "probe::Link").GetProperty("id").GetString()!;
             string pointId = Type(parsed, "probe::Point").GetProperty("id").GetString()!;
-            // Point → Link → Point, 그리고 Point → Point(자기 자신).
+            // Point -> Link -> Point, 그리고 Point -> Point(자기 자신).
             foreach ((string name, string target) in new[] { ("mutual", linkId), ("self", pointId) })
             {
                 string mutatedText = original.Replace("\"kind\": \"UInt16\"", $"\"kind\": \"Struct\", \"type\": \"{target}\"", StringComparison.Ordinal);
@@ -755,8 +775,8 @@ internal static class ModuleMetaTests
             }
         });
 
-        // B5c 세 모듈 구성: 원소 struct·enum 모듈(Elements) → 그 원소의 StructRefArray<SA>·Array<EA>·Array<Plain>·ObjectRefArray를
-        // 가진 base 모듈(Lower) → 그 배열 필드를 상속하고 다른 모듈 struct의 배열 멤버를 가진 import struct(Group)를 필드로 둔
+        // B5c 세 모듈 구성: 원소 struct·enum 모듈(Elements) -> 그 원소의 StructRefArray<SA>·Array<EA>·Array<Plain>·ObjectRefArray를
+        // 가진 base 모듈(Lower) -> 그 배열 필드를 상속하고 다른 모듈 struct의 배열 멤버를 가진 import struct(Group)를 필드로 둔
         // 파생 모듈(Upper)이 모두 컴파일된다. 상속 배열 필드는 descriptor 항목이 그대로(maxElements 포함) 옮겨지고, 파생 클래스의
         // 생성 Trace가 import base의 배열 필드를 방문하며, 생성 헤더가 상속 import 필드의 원소 struct 생성 헤더를 include한다
         // (Docs/Design/ReflectionFoundations.ko.md 5.6절).
@@ -1050,7 +1070,7 @@ internal static class ModuleMetaTests
             Manifest("Upper", ["probe::Shape"], ["probe::Shape::corner", "probe::Shape::link", "probe::Value::shape", "probe::Value::at"]);
         }
 
-        // B5c 세 모듈 구성(Elements → Lower → Upper)의 원본과 명세를 쓴다.
+        // B5c 세 모듈 구성(Elements -> Lower -> Upper)의 원본과 명세를 쓴다.
         public void WriteArrayModules()
         {
             Write("Elements/Public/Elements/Items.h", ArrayElements);

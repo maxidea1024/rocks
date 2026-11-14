@@ -7,6 +7,7 @@ World& Component::GetWorld() const noexcept {
     if (world_ == nullptr) {
         platform::Fatal("Component::GetWorld called before the component was added to an actor");
     }
+
     return *world_;
 }
 

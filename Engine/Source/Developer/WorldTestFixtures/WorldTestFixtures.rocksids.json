@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::world_fixture::SaveActor::asset",
+      "id": "3c26e0afd09349a2900c53d3e3e50119",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::world_fixture::SaveActor::label",
+      "id": "9ac5757e31774595b3d81cc8575c7739",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::world_fixture::SaveActor::score",
+      "id": "a11b7c03a1744e1b9db673ee500d1922",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::world_fixture::SaveComponent::sibling",
+      "id": "499ad4cb15cc4c60aafde3572f7bd838",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::world_fixture::SaveComponent::values",
+      "id": "51a2fc977cbb48e59d51b40f367c1c86",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::world_fixture::SaveActor",
+      "id": "97e5577857f34e8fbb7f65c81891e444",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::world_fixture::SaveComponent",
+      "id": "274f35a0692c4e8bbdcf0ef8653c4034",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

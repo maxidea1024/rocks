@@ -46,7 +46,8 @@ void SceneComponent::MarkDirty() noexcept {
     }
 
     worldDirty_ = true;
-    if (children_.Size() == 0) {
+    // 자식은 World가 붙인 경우에만 있다(장부 밖 객체는 children이 비어 있다).
+    if (children_.Size() == 0 || !HasWorld()) {
         return;
     }
 
@@ -60,11 +61,12 @@ void SceneComponent::MarkDirty() noexcept {
 
 Mat4d SceneComponent::WorldMatrix() const noexcept {
     if (!worldDirty_) {
-        return world_;
+        return worldMatrix_;
     }
 
     Mat4d parentMatrix;
-    if (!parent_.IsNull()) {
+    // 부모는 World가 붙인 경우에만 있다(장부 밖 객체는 루트로 계산한다).
+    if (!parent_.IsNull() && HasWorld()) {
         auto parentWorld = GetWorld().With<SceneComponent>(
             parent_, [](SceneComponent& parent) noexcept { return parent.WorldMatrix(); });
         if (parentWorld) {
@@ -72,9 +74,9 @@ Mat4d SceneComponent::WorldMatrix() const noexcept {
         }
     }
 
-    world_ = parentMatrix * relative_.ToMatrix();
+    worldMatrix_ = parentMatrix * relative_.ToMatrix();
     worldDirty_ = false;
-    return world_;
+    return worldMatrix_;
 }
 
 Result<Transform> SceneComponent::TryWorldTransform() const noexcept {
@@ -101,7 +103,8 @@ void SceneComponent::RemoveChild(ObjectHandle child) noexcept {
 
 Result<void> SceneComponent::AttachTo(ObjectHandle parent) noexcept {
     const ObjectHandle self = Handle();
-    if (parent.IsNull() || parent == self) {
+    // World 장부 밖 객체(그래프 로드 등)는 계층을 관리할 World가 없다.
+    if (!HasWorld() || parent.IsNull() || parent == self) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -111,17 +114,22 @@ Result<void> SceneComponent::AttachTo(ObjectHandle parent) noexcept {
 
     World& world = GetWorld();
     // 새 부모의 조상 사슬에 자신이 있으면 순환이다. 부모가 SceneComponent가 아니거나 다른 World면
-    // With가 TypeMismatch·StaleHandle을 돌려준다.
+    // With가 TypeMismatch·StaleHandle을 돌려준다. 같은 registry에 있어도 World 장부 밖 객체(직접
+    // 생성 등)는 부모가 될 수 없다(그 객체의 자식 목록을 World가 정리하지 못한다).
     ObjectHandle current = parent;
     for (uint32 depth = 0; !current.IsNull(); ++depth) {
         if (current == self || depth >= MaxHierarchyDepth) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
-        auto next = world.With<SceneComponent>(
-            current, [](SceneComponent& component) noexcept { return component.parent_; });
+
+        auto next = world.With<SceneComponent>(current, [](SceneComponent& component) noexcept {
+            return component.HasWorld() ? Result<ObjectHandle>::Success(component.parent_)
+                                        : Result<ObjectHandle>::Failure(ErrorCode::InvalidArgument);
+        });
         if (!next) {
             return Result<void>::Failure(next.Error());
         }
+
         current = next.Value();
     }
 
@@ -146,6 +154,10 @@ Result<void> SceneComponent::AttachTo(ObjectHandle parent) noexcept {
 }
 
 Result<void> SceneComponent::Detach() noexcept {
+    if (!HasWorld()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
     if (parent_.IsNull()) {
         return Result<void>::Success();
     }
@@ -161,6 +173,11 @@ Result<void> SceneComponent::Detach() noexcept {
 }
 
 void SceneComponent::DetachForDestroy() noexcept {
+    // World가 정리하는 Component만 부른다(장부 밖 객체는 DestroyComponent가 거부한다).
+    if (!HasWorld()) {
+        return;
+    }
+
     auto detached = Detach();
     (void)detached;
     // 자식은 루트가 된다(상대 Transform 유지). 이미 계산된 월드 행렬은 죽은 부모를 포함하므로 다시

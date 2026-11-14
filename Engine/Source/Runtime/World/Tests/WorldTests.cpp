@@ -1,8 +1,10 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Memory/UniquePtr.h>
+#include <ObjectSerialization/ObjectGraph.h>
 #include <TestSupport/Test.h>
 #include <World/SceneComponent.h>
 #include <World/World.h>
+#include <World/World.module.generated.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -34,11 +36,13 @@ bool EventsAre(const char* const (&expected)[Count]) noexcept {
     for (uint32 index = 0; same && index < Count; ++index) {
         same = strcmp(events[index], expected[index]) == 0;
     }
+
     if (!same) {
         for (uint32 index = 0; index < eventCount; ++index) {
             printf("  event[%u] = %s\n", index, events[index]);
         }
     }
+
     return same;
 }
 
@@ -47,6 +51,7 @@ uint32 CountEvent(const char* text) noexcept {
     for (uint32 index = 0; index < eventCount; ++index) {
         count += strcmp(events[index], text) == 0 ? 1u : 0u;
     }
+
     return count;
 }
 
@@ -109,6 +114,7 @@ public:
         if (failAwake) {
             return Result<void>::Failure(ErrorCode::DependencyFailed);
         }
+
         return Result<void>::Success();
     }
 
@@ -127,6 +133,7 @@ public:
             CHECK(GetWorld().DestroyActor(victim).IsOk());
             victim = {};
         }
+
         if (destroySelf) {
             CHECK(Destroy().IsOk());
         }
@@ -199,6 +206,16 @@ public:
     double lastDelta = 0.0;
 };
 
+// 시작하면 Tick하는 SceneComponent다(우회 파괴된 root의 수리 경로 시험용).
+class TickingScene final : public SceneComponent {
+    ROCKS_NATIVE_TYPE(TickingScene, SceneComponent, 0xd61e180bbd6a41e4ull, 0x82ed25723bf13553ull)
+
+public:
+    explicit TickingScene(Allocator& allocator) noexcept : SceneComponent(allocator) {
+        PrimaryTick().tick = true;
+    }
+};
+
 struct OrderLog {
     char names[8] = {};
     uint32 count = 0;
@@ -236,19 +253,19 @@ public:
     }
 };
 
-bool RegisterTestTypes(TypeRegistry& types) noexcept {
-    return RegisterWorldTypes(types).IsOk() &&
-           RegisterNativeClass<LoggingComponent>(types).IsOk() &&
-           RegisterNativeClass<LoggingActor>(types).IsOk() &&
-           RegisterNativeClass<PhaseActor>(types).IsOk() &&
-           RegisterNativeClass<PausedTicker>(types).IsOk();
-}
-
-// 시험마다 같은 순서로 만드는 환경이다. World는 TypeRegistry보다 먼저 파괴된다.
+// 시험마다 같은 순서로 만드는 환경이다. 수명 순서는 Engine과 같다(Docs/Design/
+// ReflectionFoundations.ko.md 9.1절): World(ObjectRegistry) -> native 토큰 해제 ->
+// ModuleRegistration -> TypeRegistry. 멤버 선언 역순으로 소멸하므로 ModuleRegistration을
+// TypeRegistry 뒤에 둔다. native 파생은 리플렉션 base(Actor·Component)의 dependent이므로 등록
+// 역순으로 먼저 해제해야 World 타입의 Unregister가 Busy로 멈추지 않는다.
 struct Fixture {
+    static constexpr uint32 MaxTokens = 16;
+
     explicit Fixture(uint64 context = 1, Span<const WorldSubsystemType> subsystems = {}) noexcept
-        : types(allocator) {
-        registered = RegisterTestTypes(types);
+        : types(allocator), modules(types, allocator) {
+        registered = RegisterWorldTypes(modules).IsOk() && Register<LoggingComponent>() &&
+                     Register<LoggingActor>() && Register<PhaseActor>() &&
+                     Register<PausedTicker>() && Register<TickingScene>();
         WorldDesc desc;
         desc.name = "Test";
         desc.context = {0x574f524c44ull, context};
@@ -262,6 +279,27 @@ struct Fixture {
 
     ~Fixture() {
         world.Reset();
+        while (tokenCount != 0) {
+            CHECK(types.Unregister(tokens[--tokenCount]).IsOk());
+        }
+
+        CHECK(modules.Unregister().IsOk());
+    }
+
+    // native 시험 타입을 등록하고 토큰을 남긴다(소멸자가 역순으로 해제한다).
+    template <class T>
+    bool Register() noexcept {
+        if (tokenCount == MaxTokens) {
+            return false;
+        }
+
+        auto token = RegisterNativeClass<T>(types);
+        if (!token) {
+            return false;
+        }
+
+        tokens[tokenCount++] = token.Value();
+        return true;
     }
 
     template <class T>
@@ -270,6 +308,7 @@ struct Fixture {
         if (!resolved) {
             return nullptr;
         }
+
         borrow = Move(resolved.Value());
         auto pointer = borrow.Get();
         return pointer ? pointer.Value() : nullptr;
@@ -277,6 +316,9 @@ struct Fixture {
 
     SystemAllocator allocator;
     TypeRegistry types;
+    ModuleRegistration modules;
+    TypeRegistrationToken tokens[MaxTokens];
+    uint32 tokenCount = 0;
     bool registered = false;
     UniquePtr<World> world;
 };
@@ -353,6 +395,7 @@ TEST(World_DestroyDuringTickSkipsLaterTicksAndReclaimsStorage) {
         REQUIRE(self != nullptr);
         self->destroySelf = true;
     }
+
     REQUIRE(world.Tick(0.016));
     // killer가 먼저 등록되어 먼저 실행되고, 같은 단계의 뒤쪽 victim은 Tick하지 않는다.
     CHECK(CountEvent("a.tick") == 2);
@@ -363,6 +406,7 @@ TEST(World_DestroyDuringTickSkipsLaterTicksAndReclaimsStorage) {
     for (int frame = 0; frame < 20; ++frame) {
         REQUIRE(world.Tick(0.016));
     }
+
     // 영구 Level과 killer만 남는다.
     CHECK(world.Objects().Stats().liveObjects == 2);
     CHECK(world.Resolve<Actor>(victim.Value()).Error() == ErrorCode::StaleHandle);
@@ -449,10 +493,12 @@ TEST(World_NotReadyActorWaitsWithoutBlocking) {
         REQUIRE(pointer != nullptr);
         pointer->ready = false;
     }
+
     REQUIRE(world.FinishSpawning(actor.Value()));
     for (int frame = 0; frame < 3; ++frame) {
         REQUIRE(world.Tick(0.016));
     }
+
     CHECK(CountEvent("a.start") == 0 && world.Stats().waitingToStart == 1);
     {
         Borrow<LoggingActor> borrow;
@@ -460,6 +506,7 @@ TEST(World_NotReadyActorWaitsWithoutBlocking) {
         REQUIRE(pointer != nullptr);
         pointer->ready = true;
     }
+
     REQUIRE(world.Tick(0.016));
     CHECK(CountEvent("a.start") == 1 && world.Stats().waitingToStart == 0);
     REQUIRE(world.Shutdown());
@@ -509,6 +556,7 @@ TEST(World_PauseRunsOnlyPausedTickersAndSingleStepRunsGameplay) {
         CHECK(phase->updates == 1 && phase->fixedUpdates == 0);
         CHECK(paused->ticks == 3 && paused->lastDelta > 0.0159);
     }
+
     // 단일 스텝 프레임은 pause가 아닌 것처럼 일반 Tick과 고정 스텝 한 번을 실행한다.
     REQUIRE(world.Clock().RequestSingleStep());
     REQUIRE(world.Tick(0.016));
@@ -518,6 +566,7 @@ TEST(World_PauseRunsOnlyPausedTickersAndSingleStepRunsGameplay) {
         REQUIRE(phase != nullptr);
         CHECK(phase->updates == 2 && phase->fixedUpdates == 1);
     }
+
     REQUIRE(world.Shutdown());
 }
 
@@ -660,6 +709,7 @@ TEST(World_ShutdownRejectsSpawnAndReleasesAllMemory) {
             REQUIRE(actor);
             REQUIRE(world.AddComponent<SceneComponent>(actor.Value()));
         }
+
         REQUIRE(world.Tick(0.016));
         REQUIRE(world.Shutdown());
         CHECK(world.State() == WorldState::Destroyed);
@@ -669,6 +719,7 @@ TEST(World_ShutdownRejectsSpawnAndReleasesAllMemory) {
         fixture.world.Reset();
         CHECK(fixture.allocator.Stats().liveAllocations != 0); // TypeRegistry는 아직 살아 있다
     }
+
     (void)outer;
 }
 
@@ -714,6 +765,7 @@ TEST(World_LevelsOwnActorsAndDestroyingLevelDestroysItsActors) {
     for (int frame = 0; frame < 20; ++frame) {
         REQUIRE(world.Tick(0.016));
     }
+
     // 영구 Level 루트 하나와 Level·hero만 남는다.
     CHECK(world.Objects().Stats().roots == 1);
     CHECK(world.Objects().Stats().liveObjects == 2);
@@ -749,6 +801,7 @@ public:
         if (!added) {
             return Result<void>::Failure(added.Error());
         }
+
         awakeComponent = added.Value();
         return Result<void>::Success();
     }
@@ -788,9 +841,8 @@ public:
     }
 };
 
-bool RegisterExtraTypes(TypeRegistry& types) noexcept {
-    return RegisterNativeClass<BuilderActor>(types).IsOk() &&
-           RegisterNativeClass<BadTickActor>(types).IsOk();
+bool RegisterExtraTypes(Fixture& fixture) noexcept {
+    return fixture.Register<BuilderActor>() && fixture.Register<BadTickActor>();
 }
 
 } // namespace
@@ -798,7 +850,7 @@ bool RegisterExtraTypes(TypeRegistry& types) noexcept {
 TEST(World_ComponentsAddedInsideAwakeAndStartRunFullLifecycle) {
     ResetEvents();
     Fixture fixture;
-    REQUIRE(RegisterExtraTypes(fixture.types));
+    REQUIRE(RegisterExtraTypes(fixture));
     World& world = *fixture.world;
     REQUIRE(world.Initialize());
     REQUIRE(world.BeginPlay());
@@ -809,7 +861,7 @@ TEST(World_ComponentsAddedInsideAwakeAndStartRunFullLifecycle) {
     CHECK(EventsAre(spawned));
     ResetEvents();
     REQUIRE(world.Tick(0.016));
-    // 시작 단계: 기존 Component → Actor OnStart → OnStart 안에서 추가한 Component가 같은 프레임에
+    // 시작 단계: 기존 Component -> Actor OnStart -> OnStart 안에서 추가한 Component가 같은 프레임에
     // 시작. Tick은 Actor 뒤에 두 Component(선행 의존).
     const char* const started[] = {"c.start", "b.start", "c.register", "c.awake", "c.enable",
                                    "c.start", "b.tick",  "c.tick",     "c.tick"};
@@ -827,7 +879,7 @@ TEST(World_ComponentsAddedInsideAwakeAndStartRunFullLifecycle) {
 
 TEST(World_HooksCannotReenterTickShutdownOrBeginPlay) {
     Fixture fixture;
-    REQUIRE(RegisterExtraTypes(fixture.types));
+    REQUIRE(RegisterExtraTypes(fixture));
     World& world = *fixture.world;
     REQUIRE(world.Initialize());
     REQUIRE(world.BeginPlay());
@@ -839,6 +891,7 @@ TEST(World_HooksCannotReenterTickShutdownOrBeginPlay) {
         REQUIRE(builder != nullptr);
         builder->tryReenter = true;
     }
+
     REQUIRE(world.Tick(0.016));
     CHECK(world.State() == WorldState::Playing);
     REQUIRE(world.Shutdown());
@@ -900,7 +953,7 @@ TEST(World_UnregisteredSceneParentDestructionOrphansChildren) {
 
 TEST(World_InvalidTickSettingsFailSpawn) {
     Fixture fixture;
-    REQUIRE(RegisterExtraTypes(fixture.types));
+    REQUIRE(RegisterExtraTypes(fixture));
     World& world = *fixture.world;
     REQUIRE(world.Initialize());
     CHECK(world.SpawnActor<BadTickActor>().Error() == ErrorCode::InvalidArgument);
@@ -940,6 +993,7 @@ TEST(World_MassShutdownReleasesThousandsOfActors) {
         REQUIRE(actor);
         REQUIRE(world.AddComponent<SceneComponent>(actor.Value()));
     }
+
     REQUIRE(world.Tick(0.016));
     CHECK(world.Stats().actors == 3000 && world.Stats().components == 3000);
     REQUIRE(world.DestroyLevel(level.Value()));
@@ -947,4 +1001,177 @@ TEST(World_MassShutdownReleasesThousandsOfActors) {
     CHECK(world.Stats().actors == 1500 && !world.HasLevel(level.Value()));
     REQUIRE(world.Shutdown());
     CHECK(world.Stats().actors == 0 && world.Stats().components == 0);
+}
+
+namespace {
+
+// Trace가 방문한 handle 수를 센다.
+struct TraceCount {
+    ObjectHandle target;
+    uint32 total = 0;
+    uint32 hits = 0;
+
+    static void Record(void* state, ObjectHandle handle) noexcept {
+        auto& count = *static_cast<TraceCount*>(state);
+        ++count.total;
+        count.hits += handle == count.target ? 1u : 0u;
+    }
+};
+
+// 진행 중인 증분 수집을 끝내고 회수할 것이 없을 때까지 전체 수집한다.
+bool CollectNow(World& world) noexcept {
+    ObjectRegistry& objects = world.Objects();
+    if (objects.CollectionPhase() == GcPhase::Marking &&
+        !objects.CancelCollection(world.Access())) {
+        return false;
+    }
+
+    for (uint32 attempt = 0; attempt < 64 && objects.CollectionPhase() != GcPhase::Idle;
+         ++attempt) {
+        if (!objects.StepCollection(world.Access(), GcBudget{1u << 20, 0})) {
+            return false;
+        }
+    }
+
+    for (uint32 attempt = 0; attempt < 8; ++attempt) {
+        auto collected = objects.Collect(world.Access());
+        if (!collected) {
+            return false;
+        }
+
+        if (collected.Value().reclaimed == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+} // namespace
+
+// native 시험 파생(ROCKS_NATIVE_TYPE)은 리플렉션 base(Actor·Component·SceneComponent)를 B8a 경로로
+// 등록한다: base의 WorldOnly와 필드를 물려받고, 자기 C++ 상태를 모르므로 completeFieldLayout·
+// parallelTraceSafe는 거짓이다(Docs/Design/ReflectionFoundations.ko.md 9.1절).
+TEST(World_NativeDerivedTypesInheritReflectedBase) {
+    Fixture fixture;
+    REQUIRE(fixture.registered);
+    REQUIRE(RegisterExtraTypes(fixture));
+    struct Expected {
+        TypeId id;
+        TypeId base;
+        usize fields;
+    };
+
+    const Expected expected[] = {
+        {NativeTypeIdOf<LoggingComponent>(), ObjectTypeIdOf<Component>(), 1},
+        {NativeTypeIdOf<LoggingActor>(), ObjectTypeIdOf<Actor>(), 3},
+        {NativeTypeIdOf<PhaseActor>(), ObjectTypeIdOf<Actor>(), 3},
+        {NativeTypeIdOf<PausedTicker>(), ObjectTypeIdOf<Actor>(), 3},
+        {NativeTypeIdOf<BuilderActor>(), ObjectTypeIdOf<Actor>(), 3},
+        {NativeTypeIdOf<BadTickActor>(), ObjectTypeIdOf<Actor>(), 3},
+        {NativeTypeIdOf<TickingScene>(), ObjectTypeIdOf<SceneComponent>(), 2},
+    };
+    for (const Expected& entry : expected) {
+        auto lease = fixture.types.Acquire(entry.id);
+        REQUIRE(lease);
+        const TypeSchema& schema = lease.Value().Schema();
+        CHECK(HasFlag(schema.flags, TypeFlags::WorldOnly));
+        CHECK(schema.baseType == entry.base);
+        CHECK(schema.fields.Size() == entry.fields);
+        CHECK(!lease.Value().Ops().completeFieldLayout);
+        CHECK(!lease.Value().Ops().parallelTraceSafe);
+    }
+}
+
+// native 파생 Actor의 Component는 리플렉션 base의 생성 Trace(RegisterNativeClass 사슬이 Actor에서
+// 멈춘다)로 살아 있다: World 루트(Level) 외에 아무것도 붙잡지 않아도 전체 수집에서 회수되지 않고,
+// 등록된 trace가 components와 root를 방문한다.
+TEST(World_NativeDerivedActorKeepsComponentsAliveThroughGeneratedTrace) {
+    Fixture fixture;
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    auto actor = world.SpawnActorDeferred<LoggingActor>();
+    REQUIRE(actor);
+    auto scene = world.AddComponent<TickingScene>(actor.Value());
+    auto logging = world.AddComponent<LoggingComponent>(actor.Value());
+    REQUIRE(scene && logging);
+    auto rooted = world.With<Actor>(actor.Value(), [&](Actor& value) noexcept {
+        return value.SetRootComponent(scene.Value());
+    });
+    REQUIRE(rooted);
+    REQUIRE(CollectNow(world));
+    CHECK(world.Objects().Stats().liveObjects == 4);
+    CHECK(world.Resolve<TickingScene>(scene.Value()).IsOk());
+    CHECK(world.Resolve<LoggingComponent>(logging.Value()).IsOk());
+    {
+        auto lease = fixture.types.Acquire(NativeTypeIdOf<LoggingActor>());
+        Borrow<LoggingActor> borrow;
+        LoggingActor* pointer = fixture.Pointer(actor.Value(), borrow);
+        REQUIRE(lease && pointer != nullptr);
+        TraceCount count;
+        count.target = scene.Value();
+        TraceVisitor visitor(&count, &TraceCount::Record);
+        lease.Value().Ops().trace(*pointer, visitor);
+        // root 한 번 + components 둘(root는 components 안에도 있다).
+        CHECK(count.total == 3 && count.hits == 2);
+    }
+
+    REQUIRE(world.Shutdown());
+}
+
+// native 파생 Actor·Component가 든 Level 그래프는 저장할 수 없다(native 파생의 C++ 상태를 모른다 —
+// Actor별 저장 제외는 레벨 패키지 단계). native 파생을 정리하면 같은 Level을 저장한다.
+TEST(World_NativeDerivedActorMakesLevelSaveUnsupported) {
+    Fixture fixture;
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    auto level = world.CreateLevel("Mixed");
+    REQUIRE(level);
+    SpawnParams params;
+    params.level = level.Value();
+    auto reflected = world.SpawnActorDeferred<Actor>(params);
+    auto native = world.SpawnActorDeferred<LoggingActor>(params);
+    REQUIRE(reflected && native);
+    CHECK(SaveObjectGraph(fixture.allocator, world.Objects(), world.Access(), level.Value())
+              .Error() == ErrorCode::Unsupported);
+    REQUIRE(world.DestroyActor(native.Value()));
+    REQUIRE(world.Tick(0.016));
+    CHECK(
+        SaveObjectGraph(fixture.allocator, world.Objects(), world.Access(), level.Value()).IsOk());
+    REQUIRE(world.AddComponent<LoggingComponent>(reflected.Value()));
+    CHECK(SaveObjectGraph(fixture.allocator, world.Objects(), world.Access(), level.Value())
+              .Error() == ErrorCode::Unsupported);
+    REQUIRE(world.Shutdown());
+}
+
+// Registry로 직접 파괴(우회)된 root Component는 Tick의 수리 경로가 목록 간선과 함께 대표도 비운다:
+// 강한 참조 root가 파괴된 객체의 저장소를 붙잡지 않아 회수된다(좀비가 남지 않는다).
+TEST(World_BypassedRootComponentDestroyClearsRoot) {
+    Fixture fixture;
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    REQUIRE(world.BeginPlay());
+    auto actor = world.SpawnActorDeferred<Actor>();
+    REQUIRE(actor);
+    auto scene = world.AddComponent<TickingScene>(actor.Value());
+    REQUIRE(scene);
+    auto rooted = world.With<Actor>(actor.Value(), [&](Actor& value) noexcept {
+        return value.SetRootComponent(scene.Value());
+    });
+    REQUIRE(rooted);
+    REQUIRE(world.FinishSpawning(actor.Value()));
+    REQUIRE(world.Tick(0.016));
+    REQUIRE(world.GetComponentState(scene.Value()).Value() == ComponentState::Playing);
+    REQUIRE(world.Objects().RequestDestroy(world.Access(), scene.Value()));
+    REQUIRE(world.Tick(0.016));
+    CHECK(world.Stats().repairedTicks == 1);
+    auto root = world.With<Actor>(actor.Value(),
+                                  [](Actor& value) noexcept { return value.RootComponent(); });
+    CHECK(root && root.Value().IsNull());
+    ObjectHandle listed[2];
+    auto count = world.GetComponents(actor.Value(), listed);
+    CHECK(count && count.Value() == 0);
+    REQUIRE(CollectNow(world));
+    CHECK(world.Resolve<SceneComponent>(scene.Value()).Error() == ErrorCode::StaleHandle);
+    REQUIRE(world.Shutdown());
 }

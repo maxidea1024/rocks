@@ -3,6 +3,7 @@
 #include <Platform/Fatal.h>
 #include <World/SceneComponent.h>
 #include <World/World.h>
+#include <World/World.module.generated.h>
 
 namespace rocks {
 
@@ -77,24 +78,10 @@ const char* ComponentStateName(ComponentState state) noexcept {
     return "Unknown";
 }
 
-Result<void> RegisterWorldTypes(TypeRegistry& types) noexcept {
-    auto actor = RegisterNativeClass<Actor>(types);
-    if (!actor) {
-        return Result<void>::Failure(actor.Error());
-    }
-    auto component = RegisterNativeClass<Component>(types);
-    if (!component) {
-        return Result<void>::Failure(component.Error());
-    }
-    auto scene = RegisterNativeClass<SceneComponent>(types);
-    if (!scene) {
-        return Result<void>::Failure(scene.Error());
-    }
-    auto level = RegisterNativeClass<Level>(types);
-    if (!level) {
-        return Result<void>::Failure(level.Error());
-    }
-    return Result<void>::Success();
+Result<void> RegisterWorldTypes(ModuleRegistration& registration) noexcept {
+    // 생성 집계 함수가 의존 모듈(CoreTypeBindings)부터 base 먼저 등록하고, 이미 들어온 모듈·이미
+    // 등록된 같은 C++ 타입은 lease로 붙잡아 성공한다(멱등). 실패하면 이 호출의 기록을 되돌린다.
+    return generated::World::RegisterModuleTypes(registration);
 }
 
 World::World(Allocator& allocator, TypeRegistry& types, const WorldDesc& desc) noexcept
@@ -142,6 +129,7 @@ Result<void> World::Initialize() noexcept {
     if (!persistent) {
         return Result<void>::Failure(persistent.Error());
     }
+
     persistentLevel_ = persistent.Value();
 
     // Subsystem Initialize가 Actor를 Spawn할 수 있도록 먼저 Initialized로 둔다.
@@ -151,6 +139,7 @@ Result<void> World::Initialize() noexcept {
         HookScope hooks(*this);
         initialized = subsystems_.Initialize(subsystemTypes_, *this);
     }
+
     if (!initialized) {
         // 그동안 Spawn된 Actor와 Level을 정리하고 Created로 되돌린다.
         DestroyAllActors();
@@ -159,6 +148,7 @@ Result<void> World::Initialize() noexcept {
         while (levels_.Size() != 0) {
             ReleaseLevel(levels_.Size() - 1);
         }
+
         persistentLevel_ = {};
         state_ = WorldState::Created;
         return initialized;
@@ -208,6 +198,19 @@ const World::ActorRecord* World::FindActorRecord(ObjectHandle actor) const noexc
 
     const ActorRecord* record = actors_.Find(*slot);
     return record != nullptr && record->handle == actor ? record : nullptr;
+}
+
+World::ComponentSlot World::ComponentSlotAt(ObjectHandle actor, usize index) noexcept {
+    auto found = With<Actor>(actor, [index](Actor& owner) noexcept {
+        ComponentSlot slot;
+        slot.count = owner.components_.Size();
+        if (index < slot.count) {
+            slot.component = owner.components_[index];
+        }
+
+        return slot;
+    });
+    return found ? found.Value() : ComponentSlot{};
 }
 
 ObjectHandle World::ComponentAt(ObjectHandle actor, usize index) noexcept {
@@ -262,6 +265,7 @@ Result<uint32> World::GetComponents(ObjectHandle actor, Span<ObjectHandle> out) 
         for (usize index = 0; index < count && index < out.Size(); ++index) {
             out[index] = owner.components_[index];
         }
+
         return static_cast<uint32>(count);
     });
 }
@@ -274,6 +278,7 @@ World::LevelRecord* World::FindLevelRecord(ObjectHandle level) noexcept {
             return &record;
         }
     }
+
     return nullptr;
 }
 
@@ -283,6 +288,7 @@ const World::LevelRecord* World::FindLevelRecord(ObjectHandle level) const noexc
             return &record;
         }
     }
+
     return nullptr;
 }
 
@@ -296,7 +302,7 @@ Result<ObjectHandle> World::CreateLevelInternal(StringView name, bool persistent
         return Result<ObjectHandle>::Failure(reserved.Error());
     }
 
-    auto created = objects_.NewObject<Level>(Access(), NativeTypeIdOf<Level>());
+    auto created = objects_.NewObject<Level>(Access(), ObjectTypeIdOf<Level>());
     if (!created) {
         return Result<ObjectHandle>::Failure(created.Error());
     }
@@ -403,6 +409,7 @@ Result<ObjectHandle> World::SpawnActorDeferred(TypeId type, const SpawnParams& p
     if (levelRecord == nullptr) {
         return Result<ObjectHandle>::Failure(ErrorCode::StaleHandle);
     }
+
     if (levelRecord->pendingDestroy) {
         return Result<ObjectHandle>::Failure(ErrorCode::Destroyed);
     }
@@ -512,21 +519,30 @@ Result<void> World::FinishSpawning(ObjectHandle actor) noexcept {
         if (current != nullptr) {
             current->finishing = false;
         }
+
         return outcome;
     };
 
-    // 1) 이미 추가된 Component의 엔진 등록(OnRegister). 실패한 Component만 정리한다.
+    // 1) 이미 추가된 Component의 엔진 등록(OnRegister). 실패한 Component만 정리한다. hook이 목록을
+    //    바꿀 수 있으므로 원소마다 개수를 다시 읽고 null 원소는 건너뛴다.
     for (usize index = 0;; ++index) {
-        const ObjectHandle component = ComponentAt(actor, index);
-        if (component.IsNull()) {
+        const ComponentSlot slot = ComponentSlotAt(actor, index);
+        if (index >= slot.count) {
             break;
         }
+
+        const ObjectHandle component = slot.component;
+        if (component.IsNull()) {
+            continue;
+        }
+
         auto pending = With<Component>(component, [](Component& value) noexcept {
             return !value.registered_ && value.state_ == ComponentState::Constructed;
         });
         if (!pending || !pending.Value()) {
             continue;
         }
+
         auto registered = With<Component>(
             component, [](Component& value) noexcept { return value.OnRegister(); });
         if (registered) {
@@ -582,7 +598,7 @@ Result<void> World::FinishSpawning(ObjectHandle actor) noexcept {
 
     record->state = ActorState::Initialized;
 
-    // 4) 활성이면 OnEnable(Actor → Component).
+    // 4) 활성이면 OnEnable(Actor -> Component).
     auto enabled = With<Actor>(actor, [](Actor& value) noexcept { return value.enabled_; });
     if (enabled && enabled.Value()) {
         EnableActor(actor, true);
@@ -616,10 +632,16 @@ Result<void> World::DestroyActor(ObjectHandle actor) noexcept {
     // 실행 중 Tick에서도 즉시 빠진다(스케줄러가 저장소 정리를 단계 경계까지 미룬다).
     UnregisterTicks(record->ticks);
     for (usize index = 0;; ++index) {
-        const ObjectHandle component = ComponentAt(actor, index);
-        if (component.IsNull()) {
+        const ComponentSlot slot = ComponentSlotAt(actor, index);
+        if (index >= slot.count) {
             break;
         }
+
+        const ObjectHandle component = slot.component;
+        if (component.IsNull()) {
+            continue;
+        }
+
         auto marked = With<Component>(component, [this](Component& value) noexcept {
             value.state_ = ComponentState::PendingDestroy;
             UnregisterTicks(value.ticks_);
@@ -720,6 +742,7 @@ Result<void> World::AdvanceComponent(ObjectHandle actor, ObjectHandle component)
     if (!needsRegister) {
         return Result<void>::Failure(needsRegister.Error());
     }
+
     if (needsRegister.Value()) {
         auto registered = With<Component>(
             component, [](Component& value) noexcept { return value.OnRegister(); });
@@ -728,6 +751,7 @@ Result<void> World::AdvanceComponent(ObjectHandle actor, ObjectHandle component)
             (void)destroyed;
             return registered;
         }
+
         auto marked =
             With<Component>(component, [](Component& value) noexcept { value.registered_ = true; });
         (void)marked;
@@ -740,6 +764,7 @@ Result<void> World::AdvanceComponent(ObjectHandle actor, ObjectHandle component)
     if (!needsAwake || !needsAwake.Value()) {
         return Result<void>::Success();
     }
+
     auto awoke =
         With<Component>(component, [](Component& value) noexcept { return value.OnAwake(); });
     if (!awoke) {
@@ -753,9 +778,11 @@ Result<void> World::AdvanceComponent(ObjectHandle actor, ObjectHandle component)
         if (value.state_ == ComponentState::PendingDestroy) {
             return Result<bool>::Success(false);
         }
+
         if (!IsValidTickSettings(value.tickSettings_)) {
             return Result<bool>::Failure(ErrorCode::InvalidArgument);
         }
+
         value.state_ = ComponentState::Initialized;
         return Result<bool>::Success(value.enabled_);
     });
@@ -780,17 +807,23 @@ Result<void> World::AdvanceComponent(ObjectHandle actor, ObjectHandle component)
 }
 
 void World::AdvanceComponents(ObjectHandle actor) noexcept {
-    // hook이 Component를 추가하면 배열이 길어지므로 크기를 매번 다시 읽는다.
+    // hook이 Component를 추가하면 배열이 길어지므로 크기를 매번 다시 읽는다. null 원소는 건너뛴다.
     for (usize index = 0;; ++index) {
         const ActorRecord* record = FindActorRecord(actor);
         if (record == nullptr || record->state == ActorState::PendingDestroy) {
             return;
         }
-        const ObjectHandle component = ComponentAt(actor, index);
-        if (component.IsNull()) {
+
+        const ComponentSlot slot = ComponentSlotAt(actor, index);
+        if (index >= slot.count) {
             return;
         }
-        auto advanced = AdvanceComponent(actor, component);
+
+        if (slot.component.IsNull()) {
+            continue;
+        }
+
+        auto advanced = AdvanceComponent(actor, slot.component);
         (void)advanced;
     }
 }
@@ -801,6 +834,14 @@ Result<void> World::DestroyComponent(ObjectHandle component) noexcept {
     if (!state) {
         return Result<void>::Failure(
             state.Error() == ErrorCode::Destroyed ? ErrorCode::Destroyed : ErrorCode::StaleHandle);
+    }
+
+    // 이 registry에 있지만 AddComponent를 거치지 않은 객체(직접 생성·그래프 로드)는 수명 기록과
+    // 소유 Actor가 없어 정리할 수 없다(정리 단계의 계층 분리가 World를 요구한다).
+    auto ledger = With<Component>(
+        component, [this](Component& value) noexcept { return value.world_ == this; });
+    if (!ledger || !ledger.Value()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     if (state.Value() == ComponentState::PendingDestroy) {
@@ -839,10 +880,16 @@ void World::EnableActor(ObjectHandle actor, bool enabled) noexcept {
         auto called = With<Actor>(actor, [](Actor& value) noexcept { value.OnEnable(); });
         (void)called;
         for (usize index = 0;; ++index) {
-            const ObjectHandle component = ComponentAt(actor, index);
-            if (component.IsNull()) {
+            const ComponentSlot slot = ComponentSlotAt(actor, index);
+            if (index >= slot.count) {
                 break;
             }
+
+            const ObjectHandle component = slot.component;
+            if (component.IsNull()) {
+                continue;
+            }
+
             auto wants = With<Component>(component, [](Component& value) noexcept {
                 return value.awake_ && value.enabled_ &&
                        value.state_ != ComponentState::PendingDestroy;
@@ -852,18 +899,20 @@ void World::EnableActor(ObjectHandle actor, bool enabled) noexcept {
             }
         }
     } else {
-        // 비활성화는 Component(역순) → Actor 순이다.
+        // 비활성화는 Component(역순) -> Actor 순이다.
         for (usize index = ComponentCountOf(actor); index > 0; --index) {
             const ObjectHandle component = ComponentAt(actor, index - 1);
             if (!component.IsNull()) {
                 EnableComponent(component, false);
             }
         }
+
         record = FindActorRecord(actor);
         if (record != nullptr) {
             record->enabledApplied = false;
             SetTicksEnabled(record->ticks, false);
         }
+
         auto called = With<Actor>(actor, [](Actor& value) noexcept { value.OnDisable(); });
         (void)called;
     }
@@ -880,6 +929,7 @@ void World::EnableComponent(ObjectHandle component, bool enabled) noexcept {
         if (value.enabledApplied_ == enabled || !value.awake_) {
             return false;
         }
+
         value.enabledApplied_ = enabled;
         SetTicksEnabled(value.ticks_, enabled && value.tickEnabled_);
         return true;
@@ -928,10 +978,12 @@ Result<void> World::SetActorEnabled(ObjectHandle actor, bool enabled) noexcept {
         if (record == nullptr || record->transitioning) {
             break;
         }
+
         auto wanted = With<Actor>(actor, [](Actor& value) noexcept { return value.enabled_; });
         if (!wanted || wanted.Value() == record->enabledApplied) {
             break;
         }
+
         EnableActor(actor, wanted.Value());
     }
 
@@ -987,6 +1039,7 @@ void World::RegisterTicks(ObjectHandle object, uint8 kind, const TickSettings& s
         if (!handles[hook].IsNull() || !HookWanted(hook, settings)) {
             continue;
         }
+
         TickRegistration registration;
         registration.target = {object, kind, hook};
         registration.phase = HookPhase(hook, settings);
@@ -1034,6 +1087,7 @@ void World::RegisterComponentTicks(ObjectHandle component) noexcept {
         for (uint32 hook = 0; hook < detail::TickHookCount; ++hook) {
             handles[hook] = value.ticks_[hook];
         }
+
         return value.state_ == ComponentState::Playing;
     });
     const ActorRecord* record = FindActorRecord(owner);
@@ -1053,6 +1107,7 @@ void World::RegisterComponentTicks(ObjectHandle component) noexcept {
         if (handles[hook].IsNull() || actorTicks[hook].IsNull()) {
             continue;
         }
+
         auto ordered = ticks_.AddPrerequisite(handles[hook], actorTicks[hook]);
         (void)ordered;
     }
@@ -1074,6 +1129,7 @@ void World::QueueComponentStart(ObjectHandle component) noexcept {
         if (value.startQueued_) {
             return false;
         }
+
         value.startQueued_ = true;
         return true;
     });
@@ -1103,6 +1159,7 @@ void World::StartComponent(ObjectHandle component) noexcept {
         if (value.state_ != ComponentState::Initialized) {
             return false;
         }
+
         value.state_ = ComponentState::Playing;
         return true;
     });
@@ -1127,44 +1184,53 @@ void World::ProcessStarts() noexcept {
         if (record == nullptr || record->state != ActorState::Initialized) {
             continue;
         }
+
         // 비활성 Actor는 활성화될 때까지 시작을 미룬다(Unity와 같은 의미).
         if (!record->enabledApplied) {
             pendingStart_[kept++] = actor;
             continue;
         }
+
         auto ready =
             With<Actor>(actor, [](Actor& value) noexcept { return value.IsReadyToStart(); });
         if (!ready) {
             continue;
         }
+
         if (!ready.Value()) {
             pendingStart_[kept++] = actor;
             continue;
         }
 
-        // Component(추가 순서) → Actor 순으로 OnStart한다.
+        // Component(추가 순서) -> Actor 순으로 OnStart한다.
         for (usize componentIndex = 0;; ++componentIndex) {
             record = FindActorRecord(actor);
             if (record == nullptr || record->state != ActorState::Initialized) {
                 break;
             }
-            const ObjectHandle component = ComponentAt(actor, componentIndex);
-            if (component.IsNull()) {
+
+            const ComponentSlot slot = ComponentSlotAt(actor, componentIndex);
+            if (componentIndex >= slot.count) {
                 break;
             }
-            StartComponent(component);
+
+            if (!slot.component.IsNull()) {
+                StartComponent(slot.component);
+            }
         }
 
         record = FindActorRecord(actor);
         if (record == nullptr || record->state != ActorState::Initialized) {
             continue;
         }
+
         auto started = With<Actor>(actor, [](Actor& value) noexcept { value.OnStart(); });
         (void)started;
         ActorRecord* updated = FindActorRecord(actor);
         if (updated == nullptr || updated->state != ActorState::Initialized) {
             continue;
         }
+
         updated->state = ActorState::Playing;
         TickSettings settings;
         bool tickEnabled = false;
@@ -1177,15 +1243,19 @@ void World::ProcessStarts() noexcept {
             RegisterTicks(actor, detail::TickKindActor, settings,
                           updated->enabledApplied && tickEnabled, updated->ticks);
         }
+
         // Actor OnStart 안에서 추가된 Component를 시작하고, 먼저 시작한 Component의 Tick을
         // 등록한다.
         for (usize componentIndex = 0;; ++componentIndex) {
-            const ObjectHandle component = ComponentAt(actor, componentIndex);
-            if (component.IsNull()) {
+            const ComponentSlot slot = ComponentSlotAt(actor, componentIndex);
+            if (componentIndex >= slot.count) {
                 break;
             }
-            StartComponent(component);
-            RegisterComponentTicks(component);
+
+            if (!slot.component.IsNull()) {
+                StartComponent(slot.component);
+                RegisterComponentTicks(slot.component);
+            }
         }
     }
 
@@ -1207,6 +1277,7 @@ void World::ProcessStarts() noexcept {
         if (record == nullptr || record->state != ActorState::Playing) {
             continue;
         }
+
         StartComponent(component);
     }
 
@@ -1225,6 +1296,7 @@ void World::ExecuteTick(const TickTarget& target, const TickContext& context) no
             ++skippedTicks_;
             return;
         }
+
         auto called = With<Actor>(target.object, [&](Actor& actor) noexcept {
             switch (target.hook) {
             case detail::TickHookFixed:
@@ -1248,6 +1320,7 @@ void World::ExecuteTick(const TickTarget& target, const TickContext& context) no
             auto destroyed = DestroyActor(target.object);
             (void)destroyed;
         }
+
         return;
     }
 
@@ -1258,6 +1331,7 @@ void World::ExecuteTick(const TickTarget& target, const TickContext& context) no
             owner == nullptr || owner->state != ActorState::Playing || !owner->enabledApplied) {
             return false;
         }
+
         switch (target.hook) {
         case detail::TickHookFixed:
             component.OnFixedTick(context);
@@ -1269,6 +1343,7 @@ void World::ExecuteTick(const TickTarget& target, const TickContext& context) no
             component.OnTick(context);
             break;
         }
+
         return true;
     });
     if (!called) {
@@ -1279,6 +1354,7 @@ void World::ExecuteTick(const TickTarget& target, const TickContext& context) no
         auto queued = destroyComponents_.TryPushBack(target.object);
         (void)queued;
     }
+
     if (!called || !called.Value()) {
         ++skippedTicks_;
     }
@@ -1339,6 +1415,7 @@ Result<void> World::Tick(double realDeltaSeconds) noexcept {
                 outcome = Move(ran);
             }
         }
+
         phaseNanoseconds_[phaseIndex] += platform::MonotonicNanoseconds() - phaseStart;
     }
 
@@ -1350,6 +1427,17 @@ Result<void> World::Tick(double realDeltaSeconds) noexcept {
 }
 
 // --- 파괴 ---
+
+void World::ClearRootComponent(ObjectHandle actor, Actor& owner, ObjectHandle component) noexcept {
+    if (component.IsNull() || owner.rootComponent_.Handle() != component) {
+        return;
+    }
+
+    // null 대입은 대상 검증·장벽이 없고 Borrow를 쥔 Alive owner면 실패하지 않는다. owner가 이미
+    // 파괴 요청됐으면 실패하지만 그 Actor도 회수되므로 root가 살릴 생존 경로가 없다.
+    auto cleared = objects_.SetReference(Access(), actor, owner.rootComponent_, ObjectHandle{});
+    (void)cleared;
+}
 
 void World::DestroyComponentNow(ObjectHandle actor, ObjectHandle component,
                                 bool ownerDestroyed) noexcept {
@@ -1384,14 +1472,14 @@ void World::DestroyComponentNow(ObjectHandle actor, ObjectHandle component,
         component, [](SceneComponent& scene) noexcept { scene.DetachForDestroy(); });
     (void)detachedScene;
 
-    // 대표였다면 비운다. 소유 Actor도 정리 중이면 간선은 Actor 정리 끝에 한 번에 비운다(O(n) 회피).
+    // 대표였다면 비운다(강한 참조가 파괴된 객체의 저장소를 붙잡지 않게 — 좀비 방지). 소유 Actor도
+    // 정리 중이면 목록 간선은 Actor 정리 끝에 한 번에 비운다(O(n) 회피).
     auto detached = With<Actor>(actor, [&](Actor& owner) noexcept {
-        if (owner.rootComponent_ == component) {
-            owner.rootComponent_ = {};
-        }
+        ClearRootComponent(actor, owner, component);
         if (ownerDestroyed) {
             return Result<void>::Success();
         }
+
         return objects_.RemoveReference(Access(), actor, owner.components_, component);
     });
     if (detached && componentCount_ != 0) {
@@ -1411,17 +1499,18 @@ void World::DestroyActorNow(ObjectHandle actor) noexcept {
         return;
     }
 
-    // 1) 비활성화: Component(역순) → Actor.
+    // 1) 비활성화: Component(역순) -> Actor.
     if (record->enabledApplied) {
         EnableActor(actor, false);
     }
 
-    // 2) OnDestroy: Component(역순) → Actor. OnAwake가 성공한 객체만 받는다.
+    // 2) OnDestroy: Component(역순) -> Actor. OnAwake가 성공한 객체만 받는다.
     for (usize index = ComponentCountOf(actor); index > 0; --index) {
         const ObjectHandle component = ComponentAt(actor, index - 1);
         if (component.IsNull()) {
             continue;
         }
+
         auto destroying = With<Component>(component, [](Component& value) noexcept {
             const bool awake = value.awake_;
             value.awake_ = false;
@@ -1452,6 +1541,7 @@ void World::DestroyActorNow(ObjectHandle actor) noexcept {
     }
 
     auto cleared = With<Actor>(actor, [&](Actor& owner) noexcept {
+        ClearRootComponent(actor, owner, owner.rootComponent_.Handle());
         return objects_.ClearReferences(Access(), actor, owner.components_);
     });
     (void)cleared;
@@ -1473,6 +1563,7 @@ void World::DestroyActorNow(ObjectHandle actor) noexcept {
             });
             (void)detached;
         }
+
         if (levelRecord->actorCount != 0) {
             --levelRecord->actorCount;
         }
@@ -1504,8 +1595,10 @@ void World::FlushDestroys() noexcept {
                 if (record == nullptr || record->state != ActorState::PendingDestroy) {
                     DestroyComponentNow(owner.Value(), component, false);
                 }
+
                 continue;
             }
+
             // Object::Destroy로 우회 파괴되어 접근할 수 없으면 소유 Actor를 찾아 간선만 정리한다.
             for (const ActorRecord& record : actors_) {
                 auto contains = With<Actor>(record.handle, [component](Actor& actor) noexcept {
@@ -1513,22 +1606,27 @@ void World::FlushDestroys() noexcept {
                 });
                 if (contains && contains.Value()) {
                     const ObjectHandle actor = record.handle;
+                    // 대표였다면 함께 비운다(우회 파괴된 객체를 root가 붙잡아 좀비로 남지 않게).
                     auto detached = With<Actor>(actor, [&](Actor& value) noexcept {
+                        ClearRootComponent(actor, value, component);
                         return objects_.RemoveReference(Access(), actor, value.components_,
                                                         component);
                     });
                     if (detached && componentCount_ != 0) {
                         --componentCount_;
                     }
+
                     break;
                 }
             }
         }
+
         destroyComponents_.Clear();
 
         for (usize index = 0; index < destroyActors_.Size(); ++index) {
             DestroyActorNow(destroyActors_[index]);
         }
+
         destroyActors_.Clear();
     }
 
@@ -1546,6 +1644,7 @@ void World::StepGarbageCollection() noexcept {
         if (!begun) {
             return;
         }
+
         destroyedDuringCycle_ = false;
     }
 
@@ -1577,10 +1676,12 @@ Result<void> World::Shutdown() noexcept {
             HookScope hooks(*this);
             subsystems_.Deinitialize(*this);
         }
+
         // 모든 Actor가 정리됐으므로 영구 Level을 포함한 모든 Level 루트를 반환한다.
         while (levels_.Size() != 0) {
             ReleaseLevel(levels_.Size() - 1);
         }
+
         persistentLevel_ = {};
     }
 
@@ -1603,6 +1704,7 @@ Result<void> World::Shutdown() noexcept {
         if (!collected) {
             return Result<void>::Failure(collected.Error());
         }
+
         if (collected.Value().reclaimed == 0) {
             break;
         }

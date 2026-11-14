@@ -63,8 +63,14 @@ public abstract class TestsModule : ModuleRules
         };
 
         // Object 계열 시험은 리플렉션 fixture 모듈에 의존한다. 생성 헤더(<ReflectionTestFixtures/*.generated.h>)는
-        // 그 모듈의 public include로 전파된다.
-        string[] fixtures = objects ? ["ReflectionTestFixtures"] : [];
+        // 그 모듈의 public include로 전파된다. 엔진 계층 시험은 World 리플렉션 fixture(WorldTestFixtures — World 타입을
+        // 상속한 저장·경로 시험 타입)에도 의존한다.
+        string[] fixtures = Layer switch
+        {
+            TestLayer.Core => [],
+            TestLayer.Foundation => ["ReflectionTestFixtures"],
+            _ => ["ReflectionTestFixtures", "WorldTestFixtures"]
+        };
         return new()
         {
             Name = ExecutableName,
