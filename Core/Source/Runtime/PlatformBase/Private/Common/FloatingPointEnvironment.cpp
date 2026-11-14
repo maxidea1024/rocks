@@ -1,13 +1,14 @@
+#include <Base/Compiler.h>
 #include <Platform/FloatingPointEnvironment.h>
 
-#if defined(__x86_64__) || defined(_M_X64)
+#if ROCKS_ARCH_X64
 #include <xmmintrin.h>
 #endif
 
 namespace rocks::platform {
 namespace detail {
 
-#if defined(__x86_64__) || defined(_M_X64)
+#if ROCKS_ARCH_X64
 
 // MXCSR: bit 0–5 상태 플래그, 6 DAZ, 7–12 예외 mask(1 = trap 꺼짐), 13–14 반올림 모드, 15 FTZ.
 // 기대 값은 상태 플래그를 뺀 0x1F80(모든 mask, nearest, DAZ·FTZ 끔)이다.
@@ -51,7 +52,7 @@ uint64 MakeExpected(uint64 control) noexcept {
     return Expected | (control & StatusFlags);
 }
 
-#elif defined(__aarch64__) || defined(_M_ARM64)
+#elif ROCKS_ARCH_ARM64
 
 // FPCR: bit 0 FIZ, 1 AH, 2 NEP, 8–12·15 예외 trap enable, 13 EBF, 19 FZ16, 22–23 RMode, 24 FZ, 25
 // DN, 26 AHP. 모두 0이어야 한다(nearest, 비정규 수 보존, 기본 NaN 끔, 대체 처리·IEEE half 대체 형식

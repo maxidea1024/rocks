@@ -188,6 +188,13 @@ dotnet msbuild Rocks.proj -t:Test -p:RocksPlatform=android -p:AndroidAbi=x86_64
 - Generic 또는 플랫폼 대체 구현의 선택은 기능별로 한 번만 이루어져야 한다. 누락·중복 정의, 단독 공개 헤더 컴파일, 타깃별 source inventory를 검사한다. optional 기능은 지원 여부와 실패 원인을 명시한다.
 - 강제 오류·실패 주입은 지원하지 않는 성공값, 소유권 유실 또는 무한 대기로 전환되지 않아야 한다. opaque native storage의 크기·정렬 검사는 각 대상에서 실시한다. 경고는 오류다.
 - GUI·렌더러 없이 headless 실행이 가능해야 한다. OS 리소스 사용과 thread affinity, 접근 권한, callback 재진입, shutdown 및 모듈 수명을 문서화한다.
+- **대상 CPU·OS 판별은 `Base/Compiler.h` 한 곳에서 한다(2026-11-14).** 컴파일러 원시 매크로(`__x86_64__`·`_M_X64`·
+  `__aarch64__`·`_M_ARM64`·`_WIN32`·`__APPLE__`·`__ANDROID__`·`__linux__`)는 이 헤더만 쓰고, `ROCKS_ARCH_X64`·
+  `ROCKS_ARCH_ARM64`를 정한다. 빌드가 넘기는 `ROCKS_PLATFORM_WINDOWS`·`ROCKS_PLATFORM_MAC`·`ROCKS_PLATFORM_ANDROID`
+  (`NativeConfigurations.PlatformMacro`, 일반 컴파일과 MetaCompiler 검사 시험이 같은 값)는 정확히 하나가 1인지, 컴파일
+  대상과 맞는지 검증한다. 다른 소스는 전처리기 분기에 `ROCKS_ARCH_*`를, 함수 안에서는 `rocks::IsX64`·`IsArm64`·
+  `IsWindows`·`IsMac`·`IsAndroid`를 쓴다(정책 검사 `target-macro`). OS API를 쓰는 `#if ROCKS_PLATFORM_*` 분기는 지금처럼
+  native backend 디렉터리에만 둔다(정책 검사 `platform-boundary`). 테스트의 플랫폼별 기대값은 `if constexpr`로 쓴다.
 
 ## 전환 순서와 검증
 

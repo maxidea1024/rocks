@@ -1,7 +1,9 @@
 #pragma once
 
+#include <Base/Compiler.h>
+
 // ARM64 전용 구현이다. 다른 CPU에서 단독 include하면 아무 선언도 만들지 않는다.
-#if defined(_M_ARM64) || defined(__aarch64__)
+#if ROCKS_ARCH_ARM64
 
 #include <Base/Types.h>
 

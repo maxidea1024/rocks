@@ -182,6 +182,7 @@ internal static class SelfTests
         suite.Add("Policy.RepositoryReflectionAnnotations", () => NoFailures(PolicyChecks.ReflectionAnnotations(options.Root)));
         ThirdPartyPolicyTests.Register(suite, options);
         suite.Add("Policy.RepositoryPlatform", () => NoFailures(PolicyChecks.PlatformBoundary(options.Root)));
+        suite.Add("Policy.RepositoryTargetMacros", () => NoFailures(PolicyChecks.TargetMacros(options.Root)));
         suite.Add("Policy.RepositoryWarnings", () => NoFailures(PolicyChecks.SourceWarnings(options.Root)));
         suite.Add("Policy.RepositoryOptimizationOverrides", () => NoFailures(PolicyChecks.OptimizationOverrides(options.Root)));
         suite.Add("Policy.OptimizationOverrideControls", () =>
@@ -577,6 +578,31 @@ internal static class SelfTests
             NoFailures(PolicyChecks.PlatformBoundary(temporary.Root));
             temporary.Write("Core/Source/Runtime/PlatformBase/Private/Win64Wrong/Probe.cpp", "#include <Windows.h>\n");
             Verify.Equal(1, PolicyChecks.PlatformBoundary(temporary.Root).Count, "prefix lookalike must not be allowlisted");
+        });
+        suite.Add("Policy.TargetMacroControls", () =>
+        {
+            using TemporaryDirectory temporary = new();
+            // 정의 헤더는 원시 매크로로 ROCKS_ARCH_*·ROCKS_PLATFORM_*를 정하고 검증한다. 두 검사 모두 허용한다.
+            temporary.Write("Core/Source/Runtime/Base/Public/Base/Compiler.h",
+                "#if defined(__x86_64__) || defined(_M_X64)\n#endif\n#if ROCKS_PLATFORM_MAC && !defined(__APPLE__)\n#endif\n");
+            // ROCKS_ARCH_*·기능 매크로·if constexpr 상수는 어디서나 쓸 수 있다.
+            temporary.Write("Core/Source/Runtime/Core/Tests/Probe.cpp",
+                "#if ROCKS_ARCH_ARM64\n#endif\n#if defined(__ARM_FEATURE_AES)\n#endif\nif constexpr (rocks::IsMac) {}\n");
+            NoFailures(PolicyChecks.TargetMacros(temporary.Root));
+            NoFailures(PolicyChecks.PlatformBoundary(temporary.Root));
+
+            foreach (string source in new[] { "#if defined(__aarch64__)\n#endif", "#ifdef _M_X64\n#endif", "#elif defined(__APPLE__)",
+                "#if !defined(_WIN32)\n#endif", "#if __ANDROID__ && 1\n#endif", "#ifndef __linux__\n#endif" })
+            {
+                // native backend도 원시 매크로 대신 ROCKS_ARCH_*·ROCKS_PLATFORM_*를 쓴다.
+                temporary.Write("Core/Source/Runtime/PlatformBase/Private/Android/Probe.cpp", source + "\n");
+                Verify.Equal(1, PolicyChecks.TargetMacros(temporary.Root).Count, "raw target macro accepted: " + source);
+            }
+
+            // 정의 헤더와 이름만 비슷한 경로는 예외가 아니다.
+            temporary.Write("Core/Source/Runtime/PlatformBase/Private/Android/Probe.cpp", "#pragma once\n");
+            temporary.Write("Core/Source/Runtime/Base/Public/Base/CompilerExtra.h", "#if defined(__x86_64__)\n#endif\n");
+            Verify.Equal(1, PolicyChecks.TargetMacros(temporary.Root).Count, "definition header allowance too wide");
         });
         suite.Add("Policy.CompilerFlagsAndResponseFileControls", () =>
         {

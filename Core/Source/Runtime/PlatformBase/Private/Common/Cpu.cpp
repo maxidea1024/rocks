@@ -1,6 +1,6 @@
 #include <Platform/Cpu.h>
 
-#if defined(__x86_64__) || defined(_M_X64)
+#if ROCKS_ARCH_X64
 #include <cpuid.h>
 #endif
 
@@ -9,7 +9,7 @@ namespace {
 
 CpuFeatures Detect() noexcept {
     CpuFeatures features;
-#if defined(__x86_64__) || defined(_M_X64)
+#if ROCKS_ARCH_X64
     unsigned eax = 0;
     unsigned ebx = 0;
     unsigned ecx = 0;

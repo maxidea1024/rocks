@@ -20,8 +20,62 @@
 #error "Rocks는 C++23(concepts, if consteval)이 필요하다."
 #endif
 
-#if !defined(__x86_64__) && !defined(_M_X64) && !defined(__aarch64__) && !defined(_M_ARM64)
+// 대상 CPU 아키텍처 매크로다. 둘 중 정확히 하나가 1이다. 컴파일러가 정하는 원시
+// 매크로(__x86_64__·_M_X64·
+// __aarch64__·_M_ARM64)는 이 파일에서만 쓰고, 다른 코드는 전처리기 분기에 ROCKS_ARCH_*를, 함수
+// 안에서는 if constexpr로 rocks::IsX64·IsArm64를 쓴다(정책 검사 target-macro).
+//
+// 사용 예:
+//   #if ROCKS_ARCH_X64
+//   #include <immintrin.h>
+//   #endif
+#if defined(__x86_64__) || defined(_M_X64)
+#define ROCKS_ARCH_X64 1
+#define ROCKS_ARCH_ARM64 0
+#elif defined(__aarch64__) || defined(_M_ARM64)
+#define ROCKS_ARCH_X64 0
+#define ROCKS_ARCH_ARM64 1
+#else
 #error "Rocks는 64-bit x64 또는 ARM64만 지원한다."
+#endif
+
+// 대상 OS 매크로다. 빌드 시스템(Rocks.Build)이 정확히 하나를 1로 정의한다(ROCKS_PLATFORM_WINDOWS·
+// ROCKS_PLATFORM_MAC·ROCKS_PLATFORM_ANDROID). 정의되지 않은 매크로는 0으로 본다. 합이 1이 아니거나
+// 컴파일러가 정하는 대상(_WIN32·__APPLE__·__ANDROID__)과 어긋나면 빌드 오류다.
+// - OS API를 쓰는 분기(#if ROCKS_PLATFORM_*)는 native backend
+// 디렉터리(PlatformBase/Private/<플랫폼> 등)에만
+//   둔다(정책 검사 platform-boundary). OS별 구현은 디렉터리로 나누는 것이 기본이다.
+// - 테스트·공통 코드의 플랫폼별 기대값은 if constexpr로 rocks::IsWindows·IsMac·IsAndroid를 쓴다.
+// - 원시 OS 매크로(_WIN32·__APPLE__·__ANDROID__·__linux__)는 이 파일에서만 쓴다(정책 검사
+// target-macro).
+//
+// 사용 예:
+//   if constexpr (rocks::IsMac && rocks::IsArm64) {
+//       CHECK(features.armAes);   // Apple Silicon은 모두 AES 명령이 있다
+//   }
+#ifndef ROCKS_PLATFORM_WINDOWS
+#define ROCKS_PLATFORM_WINDOWS 0
+#endif
+
+#ifndef ROCKS_PLATFORM_MAC
+#define ROCKS_PLATFORM_MAC 0
+#endif
+
+#ifndef ROCKS_PLATFORM_ANDROID
+#define ROCKS_PLATFORM_ANDROID 0
+#endif
+
+#if (ROCKS_PLATFORM_WINDOWS != 0 && ROCKS_PLATFORM_WINDOWS != 1) ||                                \
+    (ROCKS_PLATFORM_MAC != 0 && ROCKS_PLATFORM_MAC != 1) ||                                        \
+    (ROCKS_PLATFORM_ANDROID != 0 && ROCKS_PLATFORM_ANDROID != 1) ||                                \
+    ROCKS_PLATFORM_WINDOWS + ROCKS_PLATFORM_MAC + ROCKS_PLATFORM_ANDROID != 1
+#error                                                                                             \
+    "ROCKS_PLATFORM_WINDOWS·ROCKS_PLATFORM_MAC·ROCKS_PLATFORM_ANDROID 중 정확히 하나가 1이어야 한다(Rocks.Build가 정의한다)."
+#endif
+
+#if (ROCKS_PLATFORM_WINDOWS && !defined(_WIN32)) || (ROCKS_PLATFORM_MAC && !defined(__APPLE__)) || \
+    (ROCKS_PLATFORM_ANDROID && !defined(__ANDROID__))
+#error "ROCKS_PLATFORM_*가 컴파일 대상 OS와 다르다."
 #endif
 
 // 빌드 구성 매크로다(UE5.6 UE_BUILD_DEBUG·UE_BUILD_DEVELOPMENT·UE_BUILD_SHIPPING 대응). 빌드
@@ -96,20 +150,14 @@
 
 namespace rocks {
 
-// 컴파일 대상 CPU 아키텍처다.
-inline constexpr bool IsX64 =
-#if defined(__x86_64__) || defined(_M_X64)
-    true;
-#else
-    false;
-#endif
+// 컴파일 대상 CPU 아키텍처다(위 ROCKS_ARCH_* 매크로와 같다).
+inline constexpr bool IsX64 = ROCKS_ARCH_X64 != 0;
+inline constexpr bool IsArm64 = ROCKS_ARCH_ARM64 != 0;
 
-inline constexpr bool IsArm64 =
-#if defined(__aarch64__) || defined(_M_ARM64)
-    true;
-#else
-    false;
-#endif
+// 컴파일 대상 OS다(위 ROCKS_PLATFORM_* 매크로와 같다). 함수 안에서는 if constexpr로 분기한다.
+inline constexpr bool IsWindows = ROCKS_PLATFORM_WINDOWS != 0;
+inline constexpr bool IsMac = ROCKS_PLATFORM_MAC != 0;
+inline constexpr bool IsAndroid = ROCKS_PLATFORM_ANDROID != 0;
 
 // 빌드 구성이다(위 ROCKS_BUILD_* 매크로와 같다). 함수 안에서는 if constexpr로 분기한다.
 inline constexpr bool IsDebugBuild = ROCKS_BUILD_DEBUG != 0;

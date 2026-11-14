@@ -412,7 +412,7 @@ internal static class ActionGraph
             yield return "/D_WINDOWS";
             yield return "/DNOMINMAX";
             yield return "/DWIN32_LEAN_AND_MEAN";
-            yield return "/DROCKS_PLATFORM_WINDOWS=1";
+            yield return "/D" + NativeConfigurations.PlatformMacro(NativePlatform.Windows);
             yield return "/D" + buildMacro;
             // 디버그 CRT는 Debug에서만 쓴다. 모듈 재정의는 CRT를 바꾸지 않는다(링크 시 CRT 불일치 방지).
             yield return configuration == NativeConfiguration.Debug ? "/MDd" : "/MD";
@@ -443,12 +443,9 @@ internal static class ActionGraph
             {
                 // Android 실행 파일·공유 라이브러리는 PIE/PIC가 필수다.
                 yield return "-fPIC";
-                yield return "-DROCKS_PLATFORM_ANDROID=1";
             }
-            else
-            {
-                yield return "-DROCKS_PLATFORM_MAC=1";
-            }
+
+            yield return "-D" + NativeConfigurations.PlatformMacro(toolchain.Platform);
 
             yield return "-D" + buildMacro;
             yield return optimize ? "-O2" : "-O0";

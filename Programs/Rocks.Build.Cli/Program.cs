@@ -289,9 +289,11 @@ namespace Rocks.Build.Cli
 
                     if (plan.Generated.Count != 0)
                     {
-                        // 생성 헤더 검증 컴파일은 Core 헤더를 include하므로 이 구성의 매크로가 필요하다.
+                        // 생성 헤더 검증 컴파일은 Core 헤더를 include하므로 이 구성·대상 OS의 매크로가 필요하다.
                         checks.Add(["meta", "--root", root, "--compiler", toolchain.CompilerPath, "--metacompiler", HostTool(root, "Rocks.MetaCompiler"),
-                            "--clang-arg", "-D" + NativeConfigurations.BuildMacro(configuration), "--json", Path.Combine(output, "tool-meta-report.json")]);
+                            "--clang-arg", "-D" + NativeConfigurations.BuildMacro(configuration),
+                            "--clang-arg", "-D" + NativeConfigurations.PlatformMacro(toolchain.Platform),
+                            "--json", Path.Combine(output, "tool-meta-report.json")]);
                     }
 
                     foreach (var check in checks)

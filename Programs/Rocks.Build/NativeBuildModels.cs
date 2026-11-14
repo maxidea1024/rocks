@@ -33,6 +33,18 @@ public static class NativeConfigurations
         NativeConfiguration.Release => "ROCKS_BUILD_RELEASE=1",
         _ => throw new ArgumentException($"Invalid native configuration: {configuration}")
     };
+
+    /// <summary>
+    /// 대상 OS의 매크로 정의(<c>NAME=1</c>)다. <c>Base/Compiler.h</c>가 정확히 하나만 1인지, 컴파일 대상과 맞는지
+    /// 검증하므로 Core 헤더를 컴파일하는 모든 경로(일반 컴파일·MetaCompiler 검사 시험)가 같은 값을 넘긴다.
+    /// </summary>
+    public static string PlatformMacro(NativePlatform platform) => platform switch
+    {
+        NativePlatform.Windows => "ROCKS_PLATFORM_WINDOWS=1",
+        NativePlatform.MacOS => "ROCKS_PLATFORM_MAC=1",
+        NativePlatform.Android => "ROCKS_PLATFORM_ANDROID=1",
+        _ => throw new ArgumentException($"Invalid native platform: {platform}")
+    };
 }
 
 public enum NativeModuleKind { StaticLibrary, Executable }

@@ -171,7 +171,8 @@ public static partial class PolicyChecks
         foreach (string path in NativeSources(root, OwnedSourceRoots))
         {
             string relative = Relative(root, path);
-            if (IsNativeBackend(relative))
+            // Base/Compiler.h는 ROCKS_PLATFORM_*를 정의하고 컴파일 대상과 맞는지 검증하는 정의 지점이다(OS API는 쓰지 않는다).
+            if (IsNativeBackend(relative) || relative == TargetMacroDefinitionHeader)
             {
                 continue;
             }
