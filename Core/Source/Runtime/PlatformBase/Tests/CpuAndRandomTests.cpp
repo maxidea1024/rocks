@@ -14,16 +14,27 @@ TEST(Platform_CpuFeaturesAreConsistent) {
     CHECK(&features == &platform::QueryCpuFeatures());
     if constexpr (IsArm64) {
         CHECK(features.neon && !features.avx && !features.sse42);
+        CHECK(!features.aes && !features.pclmulqdq && !features.sha);
+        // FEAT_PMULL은 FEAT_AES가 있어야 정의된다(Arm ARM). 반대 방향은 보장하지 않는다.
+        CHECK(!features.armPmull || features.armAes);
+        if constexpr (IsMac) {
+            // Apple Silicon은 모두 AES·PMULL·SHA2를 갖춘다.
+            CHECK(features.armAes && features.armPmull && features.armSha2);
+        }
     } else {
         CHECK(!features.neon);
+        CHECK(!features.armAes && !features.armPmull && !features.armSha2);
         // AVX2·FMA는 OS가 YMM 상태를 저장할 때만 true이므로 AVX 없이 켜질 수 없다.
         CHECK(!features.avx2 || features.avx);
         CHECK(!features.fma || features.avx);
     }
 
-    printf("  cpu: sse4.2=%d popcnt=%d avx=%d avx2=%d fma=%d bmi2=%d neon=%d\n", features.sse42,
-           features.popcnt, features.avx, features.avx2, features.fma, features.bmi2,
-           features.neon);
+    printf("  cpu: sse4.2=%d popcnt=%d avx=%d avx2=%d fma=%d bmi2=%d aes=%d pclmulqdq=%d sha=%d "
+           "neon=%d "
+           "armAes=%d armPmull=%d armSha2=%d\n",
+           features.sse42, features.popcnt, features.avx, features.avx2, features.fma,
+           features.bmi2, features.aes, features.pclmulqdq, features.sha, features.neon,
+           features.armAes, features.armPmull, features.armSha2);
 }
 
 TEST(Platform_SecureRandomFillsBuffers) {

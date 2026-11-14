@@ -1,3 +1,5 @@
+#include "CpuInternal.h"
+
 #include <Platform/Cpu.h>
 
 #if ROCKS_ARCH_X64
@@ -20,6 +22,8 @@ CpuFeatures Detect() noexcept {
 
     features.sse42 = (ecx & (1u << 20)) != 0;
     features.popcnt = (ecx & (1u << 23)) != 0;
+    features.aes = (ecx & (1u << 25)) != 0;
+    features.pclmulqdq = (ecx & (1u << 1)) != 0;
     const bool cpuAvx = (ecx & (1u << 28)) != 0;
     const bool cpuFma = (ecx & (1u << 12)) != 0;
     const bool osSaves = (ecx & (1u << 27)) != 0; // OSXSAVE
@@ -42,10 +46,12 @@ CpuFeatures Detect() noexcept {
         __cpuid_count(7, 0, eax, ebx, ecx, edx);
         features.avx2 = (ebx & (1u << 5)) != 0 && features.avx;
         features.bmi2 = (ebx & (1u << 8)) != 0;
+        features.sha = (ebx & (1u << 29)) != 0;
     }
 #else
-    // ARM64는 Advanced SIMD(NEON)가 기본 명령이다.
+    // ARM64는 Advanced SIMD(NEON)가 기본 명령이다. Crypto Extensions는 선택 기능이라 OS에 묻는다.
     features.neon = true;
+    detail::DetectArm64CryptoFeatures(features);
 #endif
     return features;
 }
