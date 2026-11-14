@@ -9,7 +9,8 @@
 #include <TestSupport/Test.h>
 
 // A0-Ob Discard·패키지 소속 보존 시험이다(Docs/Design/ObjectFoundations.ko.md 1.7·2절, 9절 Ob).
-// 관찰자 기록은 ReferenceObserverTests.cpp, 무작위 대조는 ObjectRegistryModelTests.cpp가 본다.
+// 관찰자 기록은 ReferenceObserverTests.cpp, 무작위 대조는 ObjectRegistryModelTests.cpp·
+// ReferenceObserverModelTests.cpp가 본다.
 using namespace rocks;
 
 namespace {

@@ -9,7 +9,7 @@
 // A0-Ob ReferenceObserver 시험이다(Docs/Design/ObjectFoundations.ko.md 3절, 9절 Ob "관찰자"). 편집
 // (단일·다중 간선 지점)·Commit·Discard 기록, 합산·순서, 예약 규칙(실패 원자성·재진입 재검증·중첩
 // Busy), TakeChanges 계약, maxKeys, AcquireStructByNative를 본다. 경로 쓰기 기록은
-// Reflection/PropertyPathTests.cpp, 무작위 대조는 ObjectRegistryModelTests.cpp다.
+// Reflection/PropertyPathTests.cpp, 무작위 대조는 ReferenceObserverModelTests.cpp다.
 namespace observer_fixture {
 
 using namespace rocks;
