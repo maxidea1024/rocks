@@ -16,6 +16,12 @@ struct KeyAccess {
         return key.key_.View();
     }
 
+    // 키에 딸린 libsodium 상태(AES-256-GCM 키 확장 등) 주소다. 상태가 없는 키는 nullptr다.
+    template <typename Key>
+    static const void* State(const Key& key) noexcept {
+        return key.state_;
+    }
+
     // 파생 결과 같은 SecretBytes를 복사 없이 넘겨 키를 만든다(키 타입의 private 생성자).
     template <typename Key, typename... Args>
     static Key Make(Args&&... args) noexcept {

@@ -4,6 +4,7 @@
 #include <Crypto/Bytes.h>
 
 #include "AdapterCommon.h"
+#include "KdfInternal.h"
 #include "KeyAccess.h"
 #include "MacInternal.h"
 #include "Sodium/SodiumRuntime.h"
@@ -182,23 +183,9 @@ Result<SecretBytes> TryDeriveSecret(const KdfKey& master, uint64 subkeyId, KdfCo
     return secret;
 }
 
-namespace {
-
-// 타입 파생의 BLAKE2b 입력이다. crypto_kdf와 같은 키·salt(LE64(id) ‖ 0⁸)를 쓰고, personal 뒤 8
-// byte에 키 타입·알고리즘 tag를 넣는다. crypto_kdf(TryDeriveSecret)는 그 자리가 0이라 서로 겹치지
-// 않는다. 이 byte는 파생 결과를 정하므로 바꾸지 않는다(바꾸면 저장된 키 계층이 모두 달라진다).
-struct TypeTag {
-    uint8 bytes[8];
-};
-
-constexpr TypeTag KdfKeyTag = {{'R', 'k', 'K', 'd', 'f', 'K', 'e', 'y'}};
-
-TypeTag MacKeyTag(MacAlgorithm algorithm) noexcept {
-    return TypeTag{{'R', 'k', 'M', 'a', 'c', 'K', 0x00, static_cast<uint8>(algorithm)}};
-}
-
-Result<SecretBytes> TryDeriveTyped(const KdfKey& master, uint64 subkeyId, KdfContext context,
-                                   TypeTag tag, usize bytes) noexcept {
+Result<SecretBytes> detail::TryDeriveTypedSecret(const KdfKey& master, uint64 subkeyId,
+                                                 KdfContext context, KdfTypeTag tag,
+                                                 usize bytes) noexcept {
     if (master.IsEmpty()) {
         return Result<SecretBytes>::Failure(ErrorCode::StaleHandle);
     }
@@ -223,16 +210,15 @@ Result<SecretBytes> TryDeriveTyped(const KdfKey& master, uint64 subkeyId, KdfCon
     return secret;
 }
 
-} // namespace
-
 Result<MacKey> TryDeriveMacKey(const KdfKey& master, uint64 subkeyId, KdfContext context,
                                MacAlgorithm algorithm) noexcept {
     if (!detail::IsDefinedMacAlgorithm(algorithm)) {
         return Result<MacKey>::Failure(ErrorCode::InvalidArgument);
     }
 
-    auto secret = TryDeriveTyped(master, subkeyId, context, MacKeyTag(algorithm),
-                                 detail::DefaultMacKeyBytes(algorithm));
+    auto secret = detail::TryDeriveTypedSecret(master, subkeyId, context,
+                                               detail::MacKeyTypeTag(static_cast<uint8>(algorithm)),
+                                               detail::DefaultMacKeyBytes(algorithm));
     if (!secret) {
         return Result<MacKey>::Failure(secret.Error());
     }
@@ -242,7 +228,8 @@ Result<MacKey> TryDeriveMacKey(const KdfKey& master, uint64 subkeyId, KdfContext
 }
 
 Result<KdfKey> TryDeriveKdfKey(const KdfKey& master, uint64 subkeyId, KdfContext context) noexcept {
-    auto secret = TryDeriveTyped(master, subkeyId, context, KdfKeyTag, KdfKeyBytes);
+    auto secret =
+        detail::TryDeriveTypedSecret(master, subkeyId, context, detail::KdfKeyTypeTag, KdfKeyBytes);
     if (!secret) {
         return Result<KdfKey>::Failure(secret.Error());
     }

@@ -344,7 +344,7 @@ enum class AeadAlgorithm : uint8 {
     XChaCha20Poly1305 = 1,     // nonce 24, tag 16
     ChaCha20Poly1305Ietf = 2,  // nonce 12, tag 16 (RFC 8439)
     Aes256Gcm = 3,             // nonce 12, tag 16
-    Aes128Gcm = 4,
+    Aes128Gcm = 4,             // nonce 12, tag 16 (AES 경량 계층 C2 전까지 Unsupported)
     Aegis256 = 5,              // nonce 32, tag 32
     Aegis128L = 6,             // nonce 16, tag 32
 };
@@ -363,15 +363,20 @@ struct AeadInfo {
 AeadAlgorithm GetPreferredAead() noexcept;   // 6.3절, 결정 D2
 [[nodiscard]] Result<usize> TryGetSealedBytes(AeadAlgorithm algorithm, usize plaintextBytes) noexcept; // Overflow
 
-// 알고리즘에 묶인 키다. move-only, 잠금 메모리, 소멸 시 소거(10절).
-// 생성 뒤에는 바뀌지 않으므로 여러 스레드가 동시에 Seal·Open에 써도 된다.
+// 알고리즘에 묶인 키다. move-only, 키 저장소(10.2절), 소멸 시 소거.
+// 생성 뒤에는 바뀌지 않으므로 여러 스레드가 동시에 Seal·Open에 써도 된다. AES-256-GCM 키는 만들 때
+// libsodium 키 확장 상태(beforenm)를 한 번 계산해 키 저장소 슬롯에 함께 둔다.
+// 이 기기에서 쓸 수 없는 알고리즘은 Unsupported, 열거값이 아니면 InvalidArgument다.
 class AeadKey {
 public:
     static Result<AeadKey> TryGenerate(AeadAlgorithm algorithm) noexcept;
     static Result<AeadKey> TryImport(AeadAlgorithm algorithm, Span<const uint8> keyBytes) noexcept;
     AeadAlgorithm Algorithm() const noexcept;
-    Result<void> TryExport(Span<uint8> output) const noexcept;   // 명시적 내보내기만 있다
+    bool IsEmpty() const noexcept;   // 기본 생성·이동 뒤. 모든 연산이 StaleHandle이다
 };
+
+Result<AeadKey> TryDeriveAeadKey(const KdfKey& master, uint64 subkeyId, KdfContext context,
+                                 AeadAlgorithm algorithm) noexcept;   // 10.1절 타입 파생
 
 // 고수준: nonce를 만들어 앞에 붙인다. 출력 = nonce ‖ 암호문 ‖ tag.
 // randomNonceSafe가 아닌 알고리즘은 Unsupported다(96bit nonce는 9.5절 세그먼트나 hazmat 카운터로).
@@ -386,7 +391,9 @@ public:
 
 namespace rocks::crypto::hazmat {
 
-// nonce를 호출자가 책임진다. 결합 형식(암호문 ‖ tag)과 분리 형식이 있다.
+Result<void> TryExportKey(const AeadKey& key, Span<uint8> output) noexcept;   // 10.4절
+
+// nonce를 호출자가 책임진다. 결합 형식(암호문 ‖ tag)과 분리 형식이 있다. 모든 알고리즘을 받는다.
 Result<usize> TrySealWithNonce(const AeadKey& key, Span<const uint8> nonce, Span<const uint8> associatedData,
                                Span<const uint8> plaintext, Span<uint8> sealed) noexcept;
 Result<usize> TryOpenWithNonce(const AeadKey& key, Span<const uint8> nonce, Span<const uint8> associatedData,
@@ -403,6 +410,13 @@ class AeadSequenceSealer { /* TryCreate(AeadKey&&, Span<const uint8> prefix), Tr
 
 } // namespace rocks::crypto::hazmat
 ```
+
+AEAD 규칙(2026-11-15 구현, AeadSequenceSealer는 이후):
+
+- 오류 순서는 빈 키 `StaleHandle` → 알고리즘(`Unsupported`) → 호출자 버퍼(길이·겹침 `InvalidArgument`, 출력 부족 `CapacityExceeded`) → 메시지 검사다. 메시지에서 온 길이(nonce + tag보다 짧은 입력, 분리 형식의 틀린 tag 길이, 상한을 넘는 암호문)와 tag 불일치는 모두 `AuthenticationFailed`이고 plaintext 전체를 0으로 지운다(결정 D5). 호출자 버퍼 오류는 쓰기 전에 돌려준다.
+- 제자리(7절): 고수준은 `plaintext.Data() == output.Data() + nonceBytes`(봉인), `plaintext.Data() == sealed.Data() + nonceBytes`(열기)만, hazmat은 입력과 출력의 시작 주소가 같을 때만 겹침을 허용한다. AD·nonce·tag가 출력과 겹치면 `InvalidArgument`다.
+- AEGIS 사용 가능 조건은 libsodium 구현 선택과 같다(ARM crypto 확장, 또는 x86 AES-NI + AVX). AES-256-GCM은 `crypto_aead_aes256gcm_is_available()`(AES-NI·PCLMUL·AVX, ARM crypto)를 따른다. 조건이 아니면 libsodium soft 경로로 내려가지 않고 `Unsupported`다(결정 D3).
+- 시험: RFC 8439 2.8.2, XChaCha draft A.3.1 입력, AES-256-GCM(cryptography로 계산), AEGIS draft 벡터(libsodium 시험 표), 변조·절단·다른 키·AD, 제자리, 겹침, 타입 파생 KAT.
 
 **Crypto/Signature.h · KeyExchange.h (요약)**
 
@@ -747,11 +761,12 @@ public:
 // 마스터 키에서 용도별 키를 타입으로 파생한다(BLAKE2b KDF). 결과가 일반 Span에 쓰이지 않는다.
 // context는 컴파일 시간 8 문자 상수(KdfContext, consteval 생성)만 받는다. 런타임·외부 입력으로 context를
 // 고르지 못하게 하려는 것이다. 엔진이 쓰는 context는 Crypto/Labels.h에 모아 중복을 시험으로 막는다(첫 엔진
-// context와 함께 둔다). 타입 파생(TryDeriveMacKey·TryDeriveKdfKey)은 BLAKE2b personal 뒤 8 byte에 키 타입·알고리즘
-// tag를 넣어, 같은 (id, context)라도 타입·알고리즘마다 독립인 키를 낸다(2026-11-15 리뷰 반영). TryDeriveSecret은 libsodium
+// context와 함께 둔다). 타입 파생(TryDeriveMacKey·TryDeriveKdfKey·TryDeriveAeadKey)은 BLAKE2b personal 뒤 8 byte에
+// 키 타입·알고리즘 tag("RkKdfKey", "RkMacK" 0 alg, "RkAead" 0 alg; 모듈 내부 KdfInternal.h 한 곳에 모은다)를 넣어,
+// 같은 (id, context)라도 타입·알고리즘마다 독립인 키를 낸다(2026-11-15 리뷰 반영). TryDeriveSecret은 libsodium
 // crypto_kdf와 같은 byte다. 구현(Kdf.h): KdfKey, TryDeriveSecret(16–64 byte)·TryDeriveMacKey·TryDeriveKdfKey(키 계층),
-// HKDF-SHA-256/512(TryHkdf·TryHkdfExtract·TryHkdfExpand, 상호운용용 Span 출력). AEAD·세그먼트 키 파생은 그
-// 단계에서 더한다.
+// HKDF-SHA-256/512(TryHkdf·TryHkdfExtract·TryHkdfExpand, 상호운용용 Span 출력). TryDeriveAeadKey는 Aead.h에 있다.
+// 세그먼트 키 파생은 그 단계에서 더한다.
 Result<AeadKey> TryDeriveAeadKey(const KdfKey& master, uint64 subkeyId, KdfContext context,
                                  AeadAlgorithm algorithm) noexcept;
 Result<SegmentStreamKey> TryDeriveSegmentStreamKey(const KdfKey& master, uint64 subkeyId, KdfContext context,
@@ -812,7 +827,7 @@ public:
 
 - `KeyBlob` v1 = magic `"RKEY"` ‖ 버전 ‖ 키 타입·알고리즘 ‖ keyId ‖ 타입별 매개변수 ‖ wrap된 키 byte다.
 - wrap은 wrap 키 아래 XChaCha20-Poly1305(무작위 nonce)이고, 앞 필드 전체를 AD로 묶는다. wrap 키는 KeyRing의 키이거나 Argon2id로 얻은 키다.
-- 평문 키 내보내기(`TryExport`)는 hazmat이고, 시험·상호운용 도구에서만 쓴다.
+- 평문 키 내보내기(`hazmat::TryExportKey`, 키 타입마다 overload)는 hazmat이고, 시험·상호운용 도구에서만 쓴다.
 
 ## 11. 오류·한도·스레드
 
