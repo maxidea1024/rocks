@@ -185,7 +185,9 @@ internal static class ActionGraph
                 NativeLanguage language = LanguageOf(source);
                 var arguments = new List<string>();
                 arguments.AddRange(module.AdditionalCompileArguments);
-                arguments.AddRange(NativeCompileProfile.Arguments(request.Toolchain, request.Configuration, module.Optimization, language));
+                IEnumerable<string> profile = NativeCompileProfile.Arguments(request.Toolchain, request.Configuration, module.Optimization, language);
+                // 계측을 끈 모듈은 sanitizer 인자만 뺀다(프레임 포인터 등 나머지 Asan 프로필은 같다).
+                arguments.AddRange(module.SanitizerInstrumentation ? profile : profile.Where(argument => !IsSanitizerArgument(argument)));
                 // ThinLTO는 코드 생성 옵션이라 AST 프로필(NativeCompileProfile)에 넣지 않는다. 모듈이 끄면(LinkTimeOptimization)
                 // Release에서도 일반 object로 남는다.
                 if (module.LinkTimeOptimization && UsesThinLto(request.Configuration, module.Optimization))
@@ -369,6 +371,10 @@ internal static class ActionGraph
     /// <summary>Release의 최적화된 모듈만 ThinLTO bitcode로 만든다. 최적화를 끈 모듈은 일반 object로 남는다.</summary>
     internal static bool UsesThinLto(NativeConfiguration configuration, CodeOptimization optimization) =>
         configuration == NativeConfiguration.Release && Optimizes(configuration, optimization);
+
+    /// <summary>Asan 프로필의 계측 인자다(<see cref="CompileFlags"/>가 내는 철자).</summary>
+    internal static bool IsSanitizerArgument(string argument) =>
+        argument is "-fsanitize=address" or "/fsanitize=address";
 
     /// <summary>확장자가 정확히 소문자 <c>.c</c>인 소스만 C다. 대문자 <c>.C</c>는 관례상 C++이므로 C로 보지 않는다.</summary>
     internal static NativeLanguage LanguageOf(string source) =>

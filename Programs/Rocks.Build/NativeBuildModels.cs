@@ -197,6 +197,11 @@ public sealed record NativeModuleInput
     // 않으며 링크는 bitcode와 일반 object를 함께 받는다.
     public bool LinkTimeOptimization { get; init; } = true;
 
+    // false이면 Asan 구성에서도 이 모듈 소스에 sanitizer 계측(-fsanitize=address)을 넣지 않는다. 계측한 모듈과 함께 링크되며
+    // runtime은 그대로다. sanitizer 계측을 지원하지 않는다고 밝힌 외부 라이브러리(libsodium, ThirdParty.json
+    // sanitizerInstrumentation)에 쓴다. dependency로 전파하지 않는다.
+    public bool SanitizerInstrumentation { get; init; } = true;
+
     // 리플렉션 메타데이터 헤더의 include 철자다(이 모듈의 public 또는 private include 디렉터리 기준,
     // Docs/Design/ReflectionFoundations.ko.md 1.1절). 비어 있지 않으면 ModuleDirectory가 필요하다.
     // 빌드는 생성 include 디렉터리(<out>/Generated/<Name>/Public·Private)를 이 모듈에 더한다.

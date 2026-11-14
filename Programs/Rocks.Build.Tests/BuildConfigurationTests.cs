@@ -95,6 +95,21 @@ internal static class BuildConfigurationTests
             "LinkTimeOptimization=false in Release");
         Check(CompileArguments(withoutLto, "Game").Contains("-flto=thin"), "LinkTimeOptimization=false leaked to another module");
 
+        // SanitizerInstrumentation=false(ThirdParty.json sanitizerInstrumentation): Asan에서 이 모듈만 계측 인자를 뺀다. 나머지
+        // Asan 프로필(최적화 끔, 구성 매크로)은 같다.
+        if (request.Toolchain.Platform != NativePlatform.Android)
+        {
+            NativeBuildRequest uninstrumented = request with
+            {
+                Configuration = NativeConfiguration.Asan,
+                Modules = request.Modules.Select(module => module.Name == "Engine" ? module with { SanitizerInstrumentation = false } : module).ToArray()
+            };
+            var plain = CompileArguments(uninstrumented, "Engine");
+            Check(!plain.Any(ActionGraph.IsSanitizerArgument) && plain.Contains(Unoptimized()) && plain.Contains(Define("ROCKS_BUILD_DEBUG=1")),
+                "SanitizerInstrumentation=false in Asan");
+            Check(CompileArguments(uninstrumented, "Game").Any(ActionGraph.IsSanitizerArgument), "SanitizerInstrumentation=false leaked to another module");
+        }
+
         // 모듈 인자(외부 라이브러리 compileArguments)는 프로필보다 앞에 붙는다. 프로필이 반대 인자를 가지면 라이브러리 인자가
         // 소리 없이 덮이므로, 모든 구성·최적화·언어의 프로필에 허용 인자의 반대가 없어야 한다. 허용 목록이 늘면 이 표도 늘린다.
         var inverses = new Dictionary<string, string[]>(StringComparer.Ordinal)

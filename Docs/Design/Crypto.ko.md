@@ -867,7 +867,7 @@ public:
 | D6 | 세그먼트 크기 기본값 | 64 KiB(임의 접근 단위와 병렬 분할의 균형). 프리셋 4 KiB·64 KiB·1 MiB | 1 MiB(순차 처리량 우선) |
 | D7 | SHA-256 공개 API | Core `Sha256` 하나만 둔다. libsodium SHA-256은 HMAC·HKDF 내부에서만 쓴다 | Crypto에도 SHA-256 공개(중복) |
 | D8 | 고정 길이 인자 | 값 타입 + `View()`, 입력은 Span 길이 검사 | 정적 extent Span(`Span<const uint8, 32>`) 도입 |
-| D9 | sanitizer 구성의 libsodium | libsodium 번역 단위는 sanitizer 계측에서 뺀다(설치 문서가 sanitizer 전체를 금지하고 upstream CI에도 sanitizer 작업이 없다). 어댑터·경량 계층·형식 코드는 ASan으로 돈다 | 포함해서 돌리고 결과를 기록 |
+| D9 | sanitizer 구성의 libsodium | libsodium 번역 단위는 sanitizer 계측에서 뺀다(설치 문서가 sanitizer 전체를 금지하고 upstream CI에도 sanitizer 작업이 없다). 어댑터·경량 계층·형식 코드는 ASan으로 돈다. 구현: manifest `sanitizerInstrumentation: false` → 모듈의 Asan 계측 인자만 뺀다(2026-11-14) | 포함해서 돌리고 결과를 기록 |
 | D10 | 착수 시점 | 2026-11-14 착수(별도 워크트리, 브랜치 `feature/crypto`) |  |
 | D11 | 세그먼트 형식 | Rocks 헤더(알고리즘·크기·키 ID·commitment를 키 파생에 결합) + STREAM 세그먼트 | Tink AES-GCM-HKDF wire 호환(commitment 없음, AES-GCM 고정, HW 없는 기기에서 못 읽음) |
 | D12 | ARM DIT 적용 시점 | C1에 포함(macOS arm64, FEAT_DIT가 있을 때 암호 구간에서 켬) | 후속 검토(libsodium 로드맵을 기다림) |

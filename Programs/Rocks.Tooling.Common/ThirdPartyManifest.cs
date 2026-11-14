@@ -93,6 +93,13 @@ public sealed record ThirdPartyManifest(
     /// </summary>
     public bool LinkTimeOptimization { get; init; } = true;
 
+    /// <summary>
+    /// Asan 구성에서 이 라이브러리를 sanitizer로 계측할지 여부다(manifest <c>sanitizerInstrumentation</c>, 생략하면 true).
+    /// false이면 계측 없이 컴파일해 계측한 엔진 코드와 링크한다. upstream이 sanitizer 계측을 지원하지 않는다고 밝힌
+    /// 라이브러리(libsodium 설치 문서)에 쓴다. 라이브러리 안의 메모리 오류는 잡지 못하므로 사유를 notes에 적는다.
+    /// </summary>
+    public bool SanitizerInstrumentation { get; init; } = true;
+
     /// <summary>원본 디렉터리에 적용한 추적 가능한 수정 목록이다(manifest <c>modifications</c>). 비어 있으면 원본 그대로다.</summary>
     public IReadOnlyList<ThirdPartyModification> Modifications { get; init; } = [];
 
@@ -182,7 +189,8 @@ public sealed record ThirdPartyManifest(
     ];
 
     // 생략할 수 있는 최상위 필드다(기존 code manifest는 쓰지 않는다).
-    private static readonly string[] OptionalTopLevel = ["kind", "embeddedIn", "compileArguments", "linkTimeOptimization", "modifications", "patch"];
+    private static readonly string[] OptionalTopLevel =
+        ["kind", "embeddedIn", "compileArguments", "linkTimeOptimization", "sanitizerInstrumentation", "modifications", "patch"];
 
     // licenses 항목의 필수·선택 필드다.
     private static readonly string[] LicenseFields = ["spdx", "upstreamExpression", "file", "binaryNoticeRequired"];
@@ -509,16 +517,8 @@ public sealed record ThirdPartyManifest(
             }
         }
 
-        bool linkTimeOptimization = true;
-        if (fields.TryGetValue("linkTimeOptimization", out JsonElement ltoElement))
-        {
-            if (ltoElement.ValueKind != JsonValueKind.False)
-            {
-                throw new FormatException("linkTimeOptimization: only false is allowed (omit the field for the default)");
-            }
-
-            linkTimeOptimization = false;
-        }
+        bool linkTimeOptimization = OptionalFalse(fields, "linkTimeOptimization");
+        bool sanitizerInstrumentation = OptionalFalse(fields, "sanitizerInstrumentation");
 
         var modifications = new List<ThirdPartyModification>();
         if (fields.TryGetValue("modifications", out JsonElement modificationsElement))
@@ -578,9 +578,10 @@ public sealed record ThirdPartyManifest(
             throw new FormatException("modifications and patch must be declared together");
         }
 
-        if (data && (compileArguments.Count != 0 || modifications.Count != 0 || !linkTimeOptimization))
+        if (data && (compileArguments.Count != 0 || modifications.Count != 0 || !linkTimeOptimization || !sanitizerInstrumentation))
         {
-            throw new FormatException("compileArguments, linkTimeOptimization and modifications are not allowed for a data library");
+            throw new FormatException(
+                "compileArguments, linkTimeOptimization, sanitizerInstrumentation and modifications are not allowed for a data library");
         }
         // adapter와 라이브러리가 같은 이름을 쓰면 값도 같아야 한다(예: Z_U4가 다르면 ABI가 소리 없이 어긋난다).
         foreach (string define in consumerDefines)
@@ -611,9 +612,26 @@ public sealed record ThirdPartyManifest(
             EmbeddedIn = embeddedIn,
             CompileArguments = compileArguments,
             LinkTimeOptimization = linkTimeOptimization,
+            SanitizerInstrumentation = sanitizerInstrumentation,
             Modifications = modifications,
             Patch = patch
         };
+    }
+
+    // 기본이 true인 선택 bool 필드다. 기본값을 적는 것은 의미가 없어 false만 받는다. 없으면 true다.
+    private static bool OptionalFalse(Dictionary<string, JsonElement> fields, string name)
+    {
+        if (!fields.TryGetValue(name, out JsonElement element))
+        {
+            return true;
+        }
+
+        if (element.ValueKind != JsonValueKind.False)
+        {
+            throw new FormatException($"{name}: only false is allowed (omit the field for the default)");
+        }
+
+        return false;
     }
 
     // licenses: 비어 있지 않은 배열이다. 항목마다 필수 4필드와 선택 licenseSource만 허용하고, 같은 원문 파일을 두 번 적지

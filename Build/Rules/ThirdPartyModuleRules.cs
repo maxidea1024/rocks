@@ -17,7 +17,8 @@ using Rocks.Tooling.Common;
 /// <item>외부 헤더는 전파하지 않는다. PublicIncludeDirectories가 비어 있고, 소비 모듈은 <see cref="ConsumerIncludeDirectories"/>와
 /// <see cref="ConsumerDefines"/>를 private으로 받는다. 엔진 공개 헤더는 외부 헤더를 포함하지 않는다.</item>
 /// <item>항상 최적화한다(<see cref="CodeOptimization.Always"/>). Debug 빌드의 에셋 해제가 크게 느려지는 것을 막는다.
-/// CRT·구성 매크로·NDEBUG는 구성을 따른다. manifest <c>linkTimeOptimization: false</c>이면 Release에서도 ThinLTO에서 뺀다.</item>
+/// CRT·구성 매크로·NDEBUG는 구성을 따른다. manifest <c>linkTimeOptimization: false</c>이면 Release에서도 ThinLTO에서 빼고,
+/// <c>sanitizerInstrumentation: false</c>이면 Asan에서도 계측하지 않는다.</item>
 /// <item>규칙 로더는 모든 규칙의 Configure를 매 빌드 실행하므로 manifest 오류는 즉시 빌드 오류가 된다.</item>
 /// </list>
 /// 사용 예(Core/Source/ThirdParty/Zstd/Zstd.Build.cs):
@@ -50,7 +51,8 @@ public abstract class ThirdPartyModuleRules : ModuleRules
             // /clang: 우회 경로는 빌드 입력 검증이 막으므로 쓰지 않는다.
             AdditionalCompileArguments = manifest.CompileArguments,
             Optimization = CodeOptimization.Always,
-            LinkTimeOptimization = manifest.LinkTimeOptimization
+            LinkTimeOptimization = manifest.LinkTimeOptimization,
+            SanitizerInstrumentation = manifest.SanitizerInstrumentation
         };
     }
 

@@ -464,18 +464,20 @@ internal static class ThirdPartyPolicyTests
                             manifest.DefinesFor("Android", "Arm64").SequenceEqual(["FAKE_CONFIG=1", "FAKE_ANDROID", "FAKE_ARM64"]) &&
                             manifest.DefinesFor("Windows", "X64").SequenceEqual(["FAKE_CONFIG=1", "FAKE_WINDOWS"]), "platform·architecture defines merged");
                 Verify.That(manifest.CompileArguments.SequenceEqual(["-fwrapv", "-fno-strict-aliasing"]), "compile arguments parsed");
-                Verify.That(manifest.LinkTimeOptimization, "linkTimeOptimization defaults to true when omitted");
+                Verify.That(manifest.LinkTimeOptimization && manifest.SanitizerInstrumentation, "optional bool fields default to true when omitted");
             }
 
             using (TemporaryDirectory fixture = new())
             {
                 WriteFixture(fixture);
                 WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":",
-                    "\"compileArguments\": [\"-fno-strict-aliasing\", \"-fno-strict-overflow\"], \"linkTimeOptimization\": false, \"notes\":"));
+                    "\"compileArguments\": [\"-fno-strict-aliasing\", \"-fno-strict-overflow\"], \"linkTimeOptimization\": false, " +
+                    "\"sanitizerInstrumentation\": false, \"notes\":"));
                 NoFailures(PolicyChecks.ThirdParty(fixture.Root));
                 var manifest = ThirdPartyManifest.Read(fixture.FilePath(Library));
                 Verify.That(manifest.CompileArguments.SequenceEqual(["-fno-strict-aliasing", "-fno-strict-overflow"]) &&
-                            !manifest.LinkTimeOptimization, "-fno-strict-overflow and linkTimeOptimization false parsed");
+                            !manifest.LinkTimeOptimization && !manifest.SanitizerInstrumentation,
+                    "-fno-strict-overflow, linkTimeOptimization false and sanitizerInstrumentation false parsed");
             }
 
             // clang은 -fno-strict-overflow를 -fwrapv로 바꾸므로 둘을 함께 주면 하나가 unused 경고(-Werror)가 된다.
@@ -486,6 +488,8 @@ internal static class ThirdPartyPolicyTests
                 WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":", "\"linkTimeOptimization\": true, \"notes\":")));
             ExpectFailure("linkTimeOptimization string", fixture =>
                 WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":", "\"linkTimeOptimization\": \"false\", \"notes\":")));
+            ExpectFailure("sanitizerInstrumentation true", fixture =>
+                WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":", "\"sanitizerInstrumentation\": true, \"notes\":")));
             ExpectFailure("unknown architecture key", fixture =>
                 WriteManifest(fixture, manifest => Replace(manifest, "\"Windows\": [", "\"Android.X86\": [\"FAKE_X86\"], \"Windows\": [")));
             ExpectFailure("architecture define repeats the platform define", fixture =>
