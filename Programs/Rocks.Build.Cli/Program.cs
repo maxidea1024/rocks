@@ -112,6 +112,11 @@ namespace Rocks.Build.Cli
                 throw new ArgumentException($"--output must be under {Path.Combine(root, "out")} (build evidence location): {output}");
             }
 
+            // 엔진 버전의 단일 출처(Build/Build.version)를 이 실행에서 한 번만 읽는다(Docs/Design/ReflectionFoundations.ko.md 8.2절).
+            // 값은 NativeBuildRequest.EngineVersion(BuildInfo 생성 TU)과 SDK manifest로만 가고 action key·ContextFingerprint에는 넣지
+            // 않는다 — 넣으면 버전을 올릴 때마다 모든 compile key가 바뀐다.
+            var engineVersion = EngineVersion.Read(EngineVersion.PathIn(root));
+
             var toolchain = android
                 ? await NativeToolchains.DiscoverAndroidAsync(androidAbi, androidApi, options.GetValueOrDefault("android-ndk"), cancellationToken)
                 : await NativeToolchains.DiscoverAsync(options.GetValueOrDefault("compiler"), cancellationToken);
@@ -203,7 +208,8 @@ namespace Rocks.Build.Cli
                     Modules = modules,
                     Targets = targets,
                     MaxParallelism = Jobs(options),
-                    ContextFingerprint = "rocks-build-rules-v1"
+                    ContextFingerprint = "rocks-build-rules-v1",
+                    EngineVersion = engineVersion
                 }, cancellationToken);
                 Print(result);
                 AtomicFile.WriteIfChanged(Path.Combine(output, "action-report.json"), JsonSerializer.Serialize(result, JsonOptions));
@@ -216,8 +222,8 @@ namespace Rocks.Build.Cli
 
                 if (args[0] == "sdk")
                 {
-                    await InstalledSdk.ExportAsync(root, options["destination"], configuration, toolchain, InstalledSdk.Reachable(plan.Modules, targets),
-                        plan.Generated, result, cancellationToken);
+                    await InstalledSdk.ExportAsync(root, options["destination"], configuration, toolchain, engineVersion,
+                        InstalledSdk.Reachable(plan.Modules, targets), plan.Generated, result, cancellationToken);
                 }
 
                 if (args[0] == "test")

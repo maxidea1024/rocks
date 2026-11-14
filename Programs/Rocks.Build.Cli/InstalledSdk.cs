@@ -14,14 +14,20 @@ namespace Rocks.Build.Cli;
 public sealed record SdkModule(string Name, string[] Includes, string[] Defines, string[] Dependencies, string[] Libraries,
     string[] SystemLibraries, string[] Frameworks, string? Descriptor, string? IdentityManifest, bool ProvidesBuildInfo);
 
-public sealed record SdkManifest(int Version, string Configuration, string Platform, string Architecture,
+// SDK를 만든 엔진 버전이다(Build/Build.version 값 — 그 파일은 SDK에 복사하지 않는다, Docs/Design/ReflectionFoundations.ko.md 8.2절).
+// 게임 빌드는 저장소 파일을 읽지 않고 이 값만 쓴다(BuildInfo 생성 TU·.rocksproject engineVersion 대조). 위치 record는 JSON에서 빠진
+// 인자를 null로 채우므로 칸을 int?로 두고 Verify가 null·범위·0.0을 직접 검사한다.
+public sealed record SdkEngineVersion(int? Major, int? Minor, int? Patch);
+
+public sealed record SdkManifest(int Version, SdkEngineVersion? EngineVersion, string Configuration, string Platform, string Architecture,
     string CompilerIdentity, string SdkIdentity, SdkModule[] Modules, Dictionary<string, string> Files);
 
 public static class InstalledSdk
 {
     // 2: SdkModule에 SystemLibraries·Frameworks 추가. 3: Descriptor·IdentityManifest 추가. 4: ProvidesBuildInfo 추가, AbiIdentity를
     // effective triple로 계산(B7 — B7 이전 SDK는 생성 TU의 Core/Build/BuildInfo.h include가 깨지는 대신 버전 불일치로 거부한다).
-    internal const int ManifestVersion = 4;
+    // 5: EngineVersion {Major, Minor, Patch} 추가(엔진 버전 단일 출처 — 생성 TU의 CurrentEngineVersion 정의에 필요하다).
+    internal const int ManifestVersion = 5;
 
     /// <summary>
     /// SDK 타깃에서 도달하는 모듈만 고른다. 규칙 로더는 모든 모듈 규칙을 읽으므로 타깃이 쓰지 않는(빌드되지 않은)
@@ -49,10 +55,19 @@ public static class InstalledSdk
         return modules.Where(module => reached.Contains(module.Name)).ToArray();
     }
 
+    /// <summary>
+    /// 빌드한 모듈을 새 SDK 디렉터리로 내보낸다. engineVersion은 CLI가 Build/Build.version에서 한 번 읽은 값이며 manifest의
+    /// EngineVersion으로 기록한다(파일은 복사하지 않는다).
+    /// </summary>
     public static async Task ExportAsync(string root, string destination, NativeConfiguration configuration,
-        NativeToolchain toolchain, IReadOnlyList<NativeModuleInput> modules, IReadOnlyList<MetadataModule> metadata,
-        NativeBuildResult build, CancellationToken cancellationToken)
+        NativeToolchain toolchain, EngineVersion engineVersion, IReadOnlyList<NativeModuleInput> modules,
+        IReadOnlyList<MetadataModule> metadata, NativeBuildResult build, CancellationToken cancellationToken)
     {
+        if (engineVersion.IsEmpty)
+        {
+            throw new ArgumentException("SDK export requires the engine version (0.0.x is the empty value).", nameof(engineVersion));
+        }
+
         // 끝 구분자를 떼야 stage가 destination 옆(같은 부모 아래)에 생긴다(C:\sdk\v1\이면 stage가 destination 안에 생겨 Move가
         // 실패했다). TrimEndingDirectorySeparator는 루트를 그대로 두므로 루트는 따로 거부한다.
         destination = Path.TrimEndingDirectorySeparator(Path.GetFullPath(destination));
@@ -145,7 +160,9 @@ public static class InstalledSdk
             File.Copy(Path.Combine(root, ".clang-format"), Path.Combine(stage, ".clang-format"));
             var hashes = Directory.GetFiles(stage, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal)
                 .ToDictionary(file => Path.GetRelativePath(stage, file).Replace('\\', '/'), Hashing.Sha256File, StringComparer.Ordinal);
-            var manifest = new SdkManifest(ManifestVersion, configuration.ToString(), toolchain.Platform.ToString(),
+            var manifest = new SdkManifest(ManifestVersion,
+                new SdkEngineVersion(engineVersion.Major, engineVersion.Minor, engineVersion.Patch),
+                configuration.ToString(), toolchain.Platform.ToString(),
                 System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(), toolchain.AbiIdentity,
                 toolchain.AbiIdentity, packaged.ToArray(), hashes);
             AtomicFile.WriteIfChanged(Path.Combine(stage, "rocks-sdk.json"), JsonSerializer.Serialize(manifest, BuildCommand.JsonOptions));
@@ -251,6 +268,16 @@ public static class InstalledSdk
         }
 
         var projectDescriptor = DescriptorReader.ReadProject(projectFiles[0]);
+        // 게임은 SDK manifest의 엔진 버전만 쓴다(저장소 Build/Build.version을 읽지 않는다). 프로젝트 연결은 주·부가 같아야 한다.
+        var engineVersion = EngineVersionOf(manifest);
+        ProjectEngineVersion projectEngine = projectDescriptor.EngineVersion;
+        if (!engineVersion.CanLinkProject(projectEngine.Major, projectEngine.Minor))
+        {
+            throw new DescriptorException(projectDescriptor.FilePath,
+                $"engineVersion {projectEngine} does not match the installed SDK engine {engineVersion}; " +
+                $"set engineVersion to {engineVersion.Major}.{engineVersion.Minor} to upgrade the project.");
+        }
+
         var moduleSet = DescriptorModuleSet.Resolve(projectDescriptor,
             PluginCatalog.Discover([Path.Combine(project, "Plugins")]), toolchain.Platform, configuration);
         var rulesFiles = Directory.GetFiles(project, "*.cs", SearchOption.AllDirectories)
@@ -327,7 +354,8 @@ public static class InstalledSdk
             ContextFingerprint = "rocks-installed-sdk-v1",
             MaxParallelism = BuildCommand.Jobs(options),
             // 도구 빌드 ID의 sdk: 경로 키 기준이다(SDK 헤더·라이브러리가 설치 위치와 무관한 키를 갖는다).
-            SdkDirectory = sdk
+            SdkDirectory = sdk,
+            EngineVersion = engineVersion
         }, cancellationToken);
         BuildCommand.Print(result);
         // 최종 검사 전 성공 보고서를 게시하면 SDK/입력 변경에 따른 실패가 PASS로 보일 수 있다.
@@ -359,6 +387,9 @@ public static class InstalledSdk
             throw new InvalidDataException($"SDK manifest version mismatch: {manifest.Version} (this build tool requires {ManifestVersion}). " +
                 "Re-export the SDK with the current tools.");
         }
+
+        // 엔진 버전 칸을 직접 검사한다(빠진 칸이 null·0으로 채워져 조용히 통과하지 않게).
+        _ = EngineVersionOf(manifest);
 
         if (manifest.Configuration != configuration.ToString() ||
             manifest.Platform != toolchain.Platform.ToString() || manifest.CompilerIdentity != toolchain.AbiIdentity ||
@@ -454,6 +485,24 @@ public static class InstalledSdk
         }
 
         return manifest;
+    }
+
+    /// <summary>
+    /// manifest의 엔진 버전이다. EngineVersion이나 그 칸이 없거나, 0–65535 밖이거나, 주·부가 모두 0이면 InvalidDataException이다 —
+    /// 다른 값(저장소 Build/Build.version 등)으로 대신하지 않고 SDK를 다시 내보내게 한다.
+    /// </summary>
+    public static EngineVersion EngineVersionOf(SdkManifest manifest)
+    {
+        static bool InRange(int value) => value is >= 0 and <= ushort.MaxValue;
+
+        if (manifest.EngineVersion is not { Major: int major, Minor: int minor, Patch: int patch } ||
+            !InRange(major) || !InRange(minor) || !InRange(patch) || (major == 0 && minor == 0))
+        {
+            throw new InvalidDataException("SDK manifest has no valid EngineVersion { Major, Minor, Patch } " +
+                $"(each 0-{ushort.MaxValue}, not 0.0). Re-export the SDK with the current tools.");
+        }
+
+        return new EngineVersion(major, minor, patch);
     }
 
     private static string SafePath(string root, string relative)

@@ -60,7 +60,19 @@ public sealed class Physics : EngineModuleRules
 
 - 빌드는 프로세스 환경을 물려받지 않고 허용 목록(VS·Windows SDK·Xcode 선택·SOURCE_DATE_EPOCH 같은 Keyed 변수와 PATH·TEMP 같은 Runtime 변수)만 컴파일러에 넘긴다. Keyed 변수만 증분 key에 들어가므로 `dotnet msbuild`가 실행마다 바꾸는 세션 변수가 재빌드를 일으키지 않는다. 컴파일러·링커 동작을 바꾸는 변수(`CL`·`_CL_`·`LINK`·`_LINK_`·`CCC_OVERRIDE_OPTIONS`·`COMPILER_PATH`·`CPATH`·`C_INCLUDE_PATH`·`CPLUS_INCLUDE_PATH`·`OBJC_INCLUDE_PATH`·`LIBRARY_PATH`)가 있었으면 `Build environment: removed …` 한 줄로 알린다. 기본 config 파일은 받는 컴파일러면 `--no-default-config`로 끈다(받지 않는 컴파일러가 config 파일을 읽으면 오류).
 - 모듈 인자로 FP 모델(`-ffast-math`·`/fp:*`·`-ffp-*`·ISA 선택 `-m*` 등)·`-mllvm`·`-Xlinker`·`-Ofast`·`-Xclang`·config 파일·링커·대상 선택·절대 경로를 넘길 수 없다. FP 모델은 구성·모듈마다 달라지지 않는다.
-- Core(`ProvidesBuildInfo`)에 닿는 실행 파일마다 `<출력>/BuildInfo/<실행 파일>.BuildInfo.cpp`가 생겨 `rocks::build::ToolchainFingerprint()`(툴체인 지문 — 에셋 너겟 키, 구성 무관)와 `ToolBuildId()`(도구 빌드 ID — 진단·캐시 무효화, 패키지에 쓰지 않음)를 정의한다(`Core/Build/BuildInfo.h`). 원문은 같은 폴더의 `ToolchainFingerprint.txt`·`<실행 파일>.BuildInfo.txt`이고 `action-report.json`의 `ToolchainFingerprint`·`ToolBuildIds`에도 실린다. 실행 파일이 Core에 닿으면 입력 byte가 하나만 바뀌어도 생성 TU와 link가 다시 돈다. 자세한 규칙은 [Rocks.Build](../Programs/Rocks.Build/README.ko.md#빌드-주입-상수buildinfo)와 [ReflectionFoundations](../Docs/Design/ReflectionFoundations.ko.md) 8.1절을 따른다.
+- Core(`ProvidesBuildInfo`)에 닿는 실행 파일마다 `<출력>/BuildInfo/<실행 파일>.BuildInfo.cpp`가 생겨 `rocks::build::ToolchainFingerprint()`(툴체인 지문 — 에셋 너겟 키, 구성 무관)·`ToolBuildId()`(도구 빌드 ID — 진단·캐시 무효화, 패키지에 쓰지 않음)·`CurrentEngineVersion()`(엔진 버전 — 아래 [엔진 버전](#엔진-버전))을 정의한다(`Core/Build/BuildInfo.h`). 원문은 같은 폴더의 `ToolchainFingerprint.txt`·`<실행 파일>.BuildInfo.txt`이고 `action-report.json`의 `ToolchainFingerprint`·`ToolBuildIds`에도 실린다. 실행 파일이 Core에 닿으면 입력 byte가 하나만 바뀌어도 생성 TU와 link가 다시 돈다. 자세한 규칙은 [Rocks.Build](../Programs/Rocks.Build/README.ko.md#빌드-주입-상수buildinfo)와 [ReflectionFoundations](../Docs/Design/ReflectionFoundations.ko.md) 8.1절을 따른다.
+
+### 엔진 버전
+
+엔진 버전의 단일 출처는 `Build/Build.version`이다(UE `Engine/Build/Build.version` 대응, 0.1.0에서 시작). 형식은 UTF-8 한 줄 `{ "MajorVersion": 0, "MinorVersion": 1, "PatchVersion": 0 }`과 LF이며, 세 키만 정확히 한 번씩 0–65535 정수로 적고 주·부를 모두 0으로 두지 않는다. 다른 키·중복·주석·후행 쉼표·1 KiB 초과는 빌드 오류다. 빌드 CLI가 실행마다 한 번 읽어 생성 TU의 `rocks::build::CurrentEngineVersion()`과 도구 빌드 ID manifest의 `engine-version:` 줄, 설치 SDK manifest(`rocks-sdk.json`의 `EngineVersion`)에만 넣는다. 버전 헤더·매크로·compile 정의는 두지 않으므로 버전을 올려도 각 실행 파일의 생성 TU와 link만 다시 돈다. 설치 SDK 게임 빌드는 저장소 파일 대신 SDK manifest의 값을 쓰고, 게임 `.rocksproject`의 `engineVersion`("주.부")이 그 주·부와 다르면 멈춘다. 자세한 규칙은 [ReflectionFoundations](../Docs/Design/ReflectionFoundations.ko.md) 8.2절을 따른다.
+
+올리는 규칙:
+
+- **Patch**: 데이터 축(패키지 formatVersion·섹션 schemaVersion·타입 스키마·커스텀 버전·클래스 기본값 지문·쿠커 버전)과 공개 API를 바꾸지 않는 수정만 담은 릴리스. 같은 주·부의 모든 패치는 서로의 에디터 패키지를 읽는다(호환 판정은 패치를 보지 않는다).
+- **Minor**: 릴리스 경계 — 데이터 축이나 공개 API가 바뀐 뒤의 첫 릴리스에 올린다(개발 중 변경마다 올리지 않는다). 더 새 부 버전이 저장한 에디터 패키지는 이전 엔진이 `NewerVersion`으로 거부하고, 게임 프로젝트는 `engineVersion`을 새 주·부로 바꿔야 연결된다.
+- **Major**: 1.0 이후에 쓴다.
+- 올릴 때 `Build/Build.version`과 게임 템플릿 `Templates/Game/Foundation/Game.rocksproject`의 `engineVersion`(주·부)을 같은 변경에서 함께 바꾼다(`Rocks.Build.Tests`가 둘의 일치와 파일의 한 줄 정규형을 확인한다).
+- 엔진 버전은 쿠킹 패키지·cookKey·에셋 너겟 키에 들어가지 않는다. 쿠커 출력의 의미가 바뀌면 엔진 버전이 아니라 쿠커 버전을 올린다.
 
 MSBuild는 .NET 도구와 C# 규칙을 빌드하고 단계를 조직한다. `Rocks.Build`가 네이티브 작업 그래프, 입력·출력 해시, 증분 여부, 실패 복구를 담당한다. `Build/Rules/*.Build.cs`는 모듈을, `*.Target.cs`는 실행 대상을 정의한다. 규칙은 신뢰된 프로젝트 코드이며 동적으로 읽는 외부 입력은 명시해야 한다.
 
@@ -71,7 +83,7 @@ dotnet msbuild Rocks.proj /t:InstalledSdk /p:SdkDestination=C:/work/rocks-sdk/de
 dotnet msbuild Rocks.proj /t:Game /p:SdkDirectory=C:/work/rocks-sdk/debug /p:GameDirectory=C:/work/my-game /p:Configuration=Debug
 ```
 
-SDK 대상 디렉터리는 새 경로여야 한다. SDK의 파일 목록과 내용, 플랫폼·아키텍처·컴파일러 및 SDK ABI·구성이 일치하지 않으면 게임 빌드를 중단한다. 게임 소스와 출력은 SDK 밖에 둔다. `Templates/Game/Foundation`은 C# 모듈·타깃 규칙과 생성된 CLASS/PROPERTY를 사용하는 예제다. 현재 SDK 내보내기는 외부 라이브러리와 임의 컴파일·링크 옵션이 있는 모듈을 지원하지 않으며 해당 선언을 오류로 거부한다.
+SDK 대상 디렉터리는 새 경로여야 한다. SDK의 파일 목록과 내용, 플랫폼·아키텍처·컴파일러 및 SDK ABI·구성이 일치하지 않거나, 게임 `.rocksproject`의 `engineVersion`이 SDK 엔진 버전의 주·부와 다르면 게임 빌드를 중단한다. 게임 소스와 출력은 SDK 밖에 둔다. `Templates/Game/Foundation`은 C# 모듈·타깃 규칙과 생성된 CLASS/PROPERTY를 사용하는 예제다. 현재 SDK 내보내기는 외부 라이브러리와 임의 컴파일·링크 옵션이 있는 모듈을 지원하지 않으며 해당 선언을 오류로 거부한다.
 
 SDK는 타깃에서 도달하는 모듈만 내보낸다. 고정 버전 외부 라이브러리(`Core/Source/ThirdParty`) 모듈은 정적 라이브러리로 들어가며 manifest `licenses`의 모든 라이선스 원문을 `Licenses/<모듈>/<원본 디렉터리 기준 경로>`에 함께 복사한다(예: `Licenses/Zstd/LICENSE`와 사전 생성기의 MIT 고지 `Licenses/Zstd/lib/dictBuilder/divsufsort.h`). 원본 안 경로를 유지하므로 이름이 같은 원문도 겹치지 않는다. BSD 계열(LZ4·zstd)과 MIT(zstd divsufsort)는 바이너리 배포 시 고지 의무가 있으므로 게임 배포 패키지에도 이 고지를 포함한다.
 
@@ -98,7 +110,7 @@ dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll id
 dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll ids move --from Old.rocksids.json --to New.rocksids.json --type sample::Character
 ```
 
-빌드는 리플렉션 헤더가 있는 모듈을 의존 순서로 하나씩 생성한다. 생성 헤더는 `<출력>/Generated/<모듈>/Public|Private/<원본 철자의 .h를 .generated.h로>`이며 그 모듈의 public·private include로 전파된다(`#include <Module/Type.generated.h>`). 모듈 집계 헤더 `<모듈>/<모듈>.module.generated.h`의 `rocks::generated::<모듈>::RegisterModuleTypes`가 의존 모듈부터 public 타입을 등록하고, private 헤더의 타입은 `<모듈>/<모듈>.private.module.generated.h`의 `RegisterPrivateModuleTypes`가 등록한다. 다른 모듈의 타입은 그 모듈의 descriptor를 import해 상속·참조한다 — 빌드 중에는 이번 실행의 stage descriptor를 쓰고, 모두 성공하면 `<출력>/Metadata/<모듈>.rocksmeta.json`으로 게시한다. private 헤더의 타입은 그 모듈 안에서만 쓴다. 설치형 SDK는 리플렉션 모듈의 descriptor와 명세를 `Metadata/<모듈>/`에 담고(`rocks-sdk.json` 버전 4 — 4는 `ProvidesBuildInfo`를 더했고 이전 버전 SDK는 거부한다), 게임 빌드는 SDK 모듈을 다시 생성하지 않고 그 descriptor를 import한다. 사용 계약과 진단 코드는 [리플렉션 메타데이터](../Docs/Implementation/ReflectionMetadata.ko.md)를 따른다.
+빌드는 리플렉션 헤더가 있는 모듈을 의존 순서로 하나씩 생성한다. 생성 헤더는 `<출력>/Generated/<모듈>/Public|Private/<원본 철자의 .h를 .generated.h로>`이며 그 모듈의 public·private include로 전파된다(`#include <Module/Type.generated.h>`). 모듈 집계 헤더 `<모듈>/<모듈>.module.generated.h`의 `rocks::generated::<모듈>::RegisterModuleTypes`가 의존 모듈부터 public 타입을 등록하고, private 헤더의 타입은 `<모듈>/<모듈>.private.module.generated.h`의 `RegisterPrivateModuleTypes`가 등록한다. 다른 모듈의 타입은 그 모듈의 descriptor를 import해 상속·참조한다 — 빌드 중에는 이번 실행의 stage descriptor를 쓰고, 모두 성공하면 `<출력>/Metadata/<모듈>.rocksmeta.json`으로 게시한다. private 헤더의 타입은 그 모듈 안에서만 쓴다. 설치형 SDK는 리플렉션 모듈의 descriptor와 명세를 `Metadata/<모듈>/`에 담고(`rocks-sdk.json` 버전 5 — 4는 `ProvidesBuildInfo`를, 5는 `EngineVersion`을 더했고 이전 버전 SDK는 거부한다), 게임 빌드는 SDK 모듈을 다시 생성하지 않고 그 descriptor를 import한다. 사용 계약과 진단 코드는 [리플렉션 메타데이터](../Docs/Implementation/ReflectionMetadata.ko.md)를 따른다.
 
 명세와 코드 변경은 함께 버전 관리한다. CI PR 검사는 실제 공통 조상·양쪽 부모·병합 결과의 모든 명세를 ID 기준으로 합쳐 비교해 이름/ID 충돌, 이력 손실 및 서로 다른 이름 변경을 거부한다(명세를 옮겨도 ID가 사라진 것으로 보지 않는다). 직접 push, 강제 push 또는 이 검사가 필수로 설정되지 않은 저장소는 자동으로 보호되지 않는다. 동일 선언에 두 ID가 이미 발급된 경우 자동으로 하나를 선택하지 않으며 데이터 마이그레이션 도구도 아직 없다. 소스에서 빠진 메타 입력은 자동 탐색하지 않으므로 모든 리플렉션 헤더를 소유 모듈의 `Metadata`에 등록해야 한다.
 

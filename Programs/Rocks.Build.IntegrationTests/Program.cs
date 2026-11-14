@@ -39,6 +39,8 @@ for (var index = 0; index < args.Length; index += 2)
 
 var root = Path.GetFullPath(options.GetValueOrDefault("--root", "."));
 var toolchain = await NativeToolchains.DiscoverAsync(options.GetValueOrDefault("--compiler"));
+// 저장소 엔진 버전(단일 출처)이다. SDK manifest·게임 생성 TU·게임 실행 파일이 이 값을 가져야 한다.
+var engineVersion = EngineVersion.Read(EngineVersion.PathIn(root));
 var cli = Path.Combine(root, "out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks.Build.Cli.dll");
 var fixture = Path.Combine(Path.GetTempPath(), "Rocks SDK 게임 " + Guid.NewGuid().ToString("N"));
 var sdk = Path.Combine(fixture, "installed");
@@ -70,7 +72,15 @@ try
         Require(bindingsEntry.GetProperty("Descriptor").GetString() == "Metadata/CoreTypeBindings/CoreTypeBindings.rocksmeta.json" &&
             bindingsEntry.GetProperty("IdentityManifest").GetString() == "Metadata/CoreTypeBindings/CoreTypeBindings.rocksids.json",
             "Engine SDK manifest does not name the CoreTypeBindings descriptor and identity manifest");
+        // manifest 버전 5는 Build/Build.version 값을 EngineVersion {Major, Minor, Patch}로 담고, 그 파일 자체는 SDK에 없다.
+        var sdkEngine = engineManifest.RootElement.GetProperty("EngineVersion");
+        Require(engineManifest.RootElement.GetProperty("Version").GetInt32() == 5 &&
+            sdkEngine.GetProperty("Major").GetInt32() == engineVersion.Major && sdkEngine.GetProperty("Minor").GetInt32() == engineVersion.Minor &&
+            sdkEngine.GetProperty("Patch").GetInt32() == engineVersion.Patch && sdkEngine.EnumerateObject().Count() == 3,
+            "Engine SDK manifest version 5 does not carry the Build/Build.version engine version: " + sdkEngine.GetRawText());
     }
+
+    Require(!Directory.GetFiles(sdk, "Build.version", SearchOption.AllDirectories).Any(), "Installed SDK copied Build/Build.version");
 
     Require(File.Exists(Path.Combine(sdk, "Metadata/CoreTypeBindings/CoreTypeBindings.rocksmeta.json")) &&
         File.Exists(Path.Combine(sdk, "Metadata/CoreTypeBindings/CoreTypeBindings.rocksids.json")),
@@ -138,6 +148,11 @@ try
 
     Require(initial.ToolchainFingerprint is not null && initial.ToolBuildIds.TryGetValue("SampleGame", out var sampleId) &&
         sampleId == Hashing.Sha256File(gameBuildInfo), "Game action report does not carry the fingerprint and sha256(SampleGame.BuildInfo.txt)");
+    // 게임은 SDK manifest의 엔진 버전을 주입한다(저장소 파일을 읽지 않는다 — 여기서는 같은 저장소에서 내보낸 SDK라 값이 같다).
+    var gameSource = File.ReadAllText(Path.Combine(output, "BuildInfo/SampleGame.BuildInfo.cpp"));
+    Require(gameManifest.StartsWith($"rocks-tool-build-id 2\nexecutable: SampleGame\nengine-version: {engineVersion}\n", StringComparison.Ordinal) &&
+        gameSource.Contains($"    return {{{engineVersion.Major}, {engineVersion.Minor}, {engineVersion.Patch}}};\n", StringComparison.Ordinal),
+        "Game BuildInfo does not carry the SDK engine version:\n" + gameSource);
     Pass("game-buildinfo-sdk-keys", timer.Elapsed);
 
     // 잘못된 새 ID 발급은 이름 변경을 대체하지 못한다. 실패 시 기존 생성물을 보존한다.
@@ -341,10 +356,16 @@ try
     File.WriteAllText(childHeader, childHeaderText);
     File.WriteAllText(Path.Combine(reflectionGame, "Source/Main.cpp"), """
         #include <SampleGame/SampleGame.module.generated.h>
+        #include <Core/Build/BuildInfo.h>
         #include <Core/Memory/SystemAllocator.h>
         #include <Object/ConstructionContext.h>
         #include <Object/PropertyPath.h>
         #include <ObjectSerialization/ObjectGraph.h>
+
+        // 이 실행 파일에 주입한 엔진 버전이 SDK manifest의 EngineVersion과 같다(시험이 기대 값을 소스에 넣는다).
+        bool HasSdkEngineVersion() noexcept {
+            return rocks::build::CurrentEngineVersion() == rocks::EngineVersion{ROCKS_SDK_ENGINE_VERSION};
+        }
 
         // 경로 편집 종류다.
         enum class PathEdit { Write, Insert, Remove };
@@ -523,6 +544,10 @@ try
         // 게임 집계 헤더가 GameCore와 SDK 모듈(ReflectionTestFixtures)의 RegisterModuleTypes를 먼저 부르고, 게임 타입의
         // schema가 두 모듈 타입의 상속 필드와 SDK 타입을 가리키는 참조 대상 ID를 담는다.
         int main() {
+            if (!HasSdkEngineVersion()) {
+                return 19;
+            }
+
             rocks::SystemAllocator allocator;
             rocks::TypeRegistry types(allocator);
             rocks::ModuleRegistration registration(types, allocator);
@@ -579,7 +604,7 @@ try
             return SaveAndLoadArrays(allocator, types);
         }
 
-        """);
+        """.Replace("ROCKS_SDK_ENGINE_VERSION", $"{engineVersion.Major}, {engineVersion.Minor}, {engineVersion.Patch}", StringComparison.Ordinal));
     var coreManifest = Path.Combine(reflectionGame, "Core/GameCore.rocksids.json");
     var coreIds = await Ids("add", "--manifest", coreManifest, "--type", "sample::CoreThing", "--field", "sample::CoreThing::level",
         "--field", "sample::CoreThing::offset", "--field", "sample::CoreThing::levels", "--field", "sample::CoreThing::links",
@@ -599,6 +624,7 @@ try
         !Directory.Exists(Path.Combine(reflectionOutput, "Generated/CoreTypeBindings")),
         "Game build regenerated the SDK module's metadata");
     var reflectionRun = await ProcessRunner.RunAsync(new(reflectionResult.ModuleOutputs["SampleGame"], [], reflectionGame, toolchain.Environment));
+    // 19는 주입한 엔진 버전이 SDK manifest의 EngineVersion과 다르다는 뜻이다.
     Require(reflectionRun.ExitCode == 0, $"SDK descriptor import runtime check failed with exit code {reflectionRun.ExitCode}");
 
     // 상위 모듈(SampleGame)이 실패하면 하위 모듈(GameCore)의 새 생성물도 게시하지 않는다.
@@ -744,19 +770,38 @@ try
         "Incompatible SDK configuration was silently accepted");
     Pass("sdk-configuration-mismatch", timer.Elapsed);
 
-    // B7 이전 SDK(manifest 버전 3)는 생성 TU의 Core/Build/BuildInfo.h include가 깨지기 전에 버전 불일치로 거부한다.
+    // 엔진 버전 이전 SDK(manifest 버전 4 — 생성 TU의 CurrentEngineVersion 값이 없다)는 버전 불일치로 거부하고, 버전 5인데
+    // EngineVersion이 없거나 칸이 빠진 manifest는 다른 값(저장소 Build/Build.version 등)으로 대신하지 않고 다시 내보내라고 거부한다.
     timer.Restart();
     var sdkManifestPath = Path.Combine(sdk, "rocks-sdk.json");
     var sdkManifestBytes = File.ReadAllBytes(sdkManifestPath);
     var sdkManifestText = File.ReadAllText(sdkManifestPath);
-    Require(sdkManifestText.Contains("\"Version\": 4,", StringComparison.Ordinal), "SDK manifest is not version 4:\n" + sdkManifestText);
+    Require(sdkManifestText.Contains("\"Version\": 5,", StringComparison.Ordinal), "SDK manifest is not version 5:\n" + sdkManifestText);
     SetReadOnly(sdkManifestPath, false);
     try
     {
-        File.WriteAllText(sdkManifestPath, sdkManifestText.Replace("\"Version\": 4,", "\"Version\": 3,", StringComparison.Ordinal));
-        var preB7 = await Game();
-        Require(preB7.ExitCode != 0 && preB7.StdErr.Contains("SDK manifest version mismatch: 3", StringComparison.Ordinal),
-            "A pre-B7 SDK manifest was not rejected: " + preB7.StdErr);
+        File.WriteAllText(sdkManifestPath, sdkManifestText.Replace("\"Version\": 5,", "\"Version\": 4,", StringComparison.Ordinal));
+        var previous = await Game();
+        Require(previous.ExitCode != 0 && previous.StdErr.Contains("SDK manifest version mismatch: 4", StringComparison.Ordinal),
+            "A version 4 SDK manifest was not rejected: " + previous.StdErr);
+        foreach ((string name, Action<System.Text.Json.Nodes.JsonObject> edit) in new (string, Action<System.Text.Json.Nodes.JsonObject>)[]
+                 {
+                     ("missing EngineVersion", manifestJson => manifestJson.Remove("EngineVersion")),
+                     ("missing Patch", manifestJson => manifestJson["EngineVersion"]!.AsObject().Remove("Patch")),
+                     ("0.0 EngineVersion", manifestJson =>
+                     {
+                         manifestJson["EngineVersion"]!["Major"] = 0;
+                         manifestJson["EngineVersion"]!["Minor"] = 0;
+                     })
+                 })
+        {
+            var manifestNode = System.Text.Json.Nodes.JsonNode.Parse(sdkManifestText)!.AsObject();
+            edit(manifestNode);
+            File.WriteAllText(sdkManifestPath, manifestNode.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            var rejected = await Game();
+            Require(rejected.ExitCode != 0 && rejected.StdErr.Contains("SDK manifest has no valid EngineVersion", StringComparison.Ordinal) &&
+                rejected.StdErr.Contains("Re-export", StringComparison.Ordinal), $"An SDK manifest with {name} was not rejected: " + rejected.StdErr);
+        }
     }
     finally
     {
@@ -764,7 +809,7 @@ try
         SetReadOnly(sdkManifestPath, true);
     }
 
-    Pass("sdk-pre-b7-manifest-rejected", timer.Elapsed);
+    Pass("sdk-manifest-version-and-engine-version-required", timer.Elapsed);
 
     timer.Restart();
     var library = Directory.GetFiles(Path.Combine(sdk, "Libraries"))[0];
@@ -830,7 +875,7 @@ try
     Require((await Game()).ExitCode == 0, "Build failed after correcting the author typo");
     Pass("author-error-and-recovery", timer.Elapsed);
 
-    // 프로젝트 기술자(.rocksproject)가 없거나 규칙 모듈을 선언하지 않으면 빌드를 시작하지 않는다.
+    // 프로젝트 기술자(.rocksproject)가 없거나, 규칙 모듈을 선언하지 않거나, 대상 플랫폼·SDK 엔진 버전과 맞지 않으면 빌드를 시작하지 않는다.
     timer.Restart();
     var descriptor = Path.Combine(game, "Game.rocksproject");
     var descriptorText = File.ReadAllText(descriptor);
@@ -849,6 +894,20 @@ try
         var untargeted = await Game();
         Require(untargeted.ExitCode != 0 && (untargeted.StdOut + untargeted.StdErr).Contains("does not target", StringComparison.Ordinal),
             "Game built for a platform outside targetPlatforms: " + untargeted.StdErr);
+
+        // 프로젝트 engineVersion이 SDK 엔진의 주·부와 다르면(오래된 프로젝트·더 새 프로젝트 모두) 연결하지 않는다.
+        string templateEngine = $"\"engineVersion\": \"{engineVersion.Major}.{engineVersion.Minor}\"";
+        Require(descriptorText.Contains(templateEngine, StringComparison.Ordinal),
+            "Game template engineVersion does not match Build/Build.version: " + descriptorText);
+        foreach (string other in new[] { $"{engineVersion.Major}.{engineVersion.Minor + 1}", $"{engineVersion.Major + 1}.{engineVersion.Minor}" })
+        {
+            File.WriteAllText(descriptor, descriptorText.Replace(templateEngine, $"\"engineVersion\": \"{other}\"", StringComparison.Ordinal));
+            var mismatched = await Game();
+            string expected = $"Game.rocksproject: engineVersion {other} does not match the installed SDK engine {engineVersion}; " +
+                $"set engineVersion to {engineVersion.Major}.{engineVersion.Minor} to upgrade the project.";
+            Require(mismatched.ExitCode != 0 && (mismatched.StdOut + mismatched.StdErr).Contains(expected, StringComparison.Ordinal),
+                $"Game with engineVersion {other} was not rejected against the SDK engine {engineVersion}: " + mismatched.StdErr);
+        }
     }
     finally
     {
@@ -856,7 +915,7 @@ try
     }
 
     Require((await Game()).ExitCode == 0, "Build failed after restoring the project descriptor");
-    Pass("project-descriptor-validates-modules-and-platforms", timer.Elapsed);
+    Pass("project-descriptor-validates-modules-platforms-and-engine-version", timer.Elapsed);
 
     // 프로젝트 플러그인: 꺼진 플러그인과 Editor 모듈은 컴파일하지 않고, 켜면 타깃이 참조하지 않아도 빌드한다.
     timer.Restart();

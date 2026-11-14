@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -47,12 +48,22 @@ public sealed record ModuleDescriptor(string Name, ModuleType Type, LoadingPhase
 /// <summary>다른 플러그인 참조다. 프로젝트에서는 켜거나 끄고, 플러그인에서는 의존(enabled는 true)을 뜻한다.</summary>
 public sealed record PluginReference(string Name, bool Enabled);
 
+/// <summary>
+/// 프로젝트가 대상으로 하는 엔진의 주·부 버전이다(engineVersion "주.부", 각 0–65535). 설치 SDK 게임 빌드가 SDK manifest의 엔진
+/// 버전과 주·부가 같은지 본다(<see cref="EngineVersion.CanLinkProject"/>, Docs/Design/ReflectionFoundations.ko.md 8.2절).
+/// </summary>
+public readonly record struct ProjectEngineVersion(ushort Major, ushort Minor)
+{
+    /// <summary>기술자 표기 "주.부"다(예: "0.1").</summary>
+    public override string ToString() => string.Create(CultureInfo.InvariantCulture, $"{Major}.{Minor}");
+}
+
 /// <summary>.rocksproject를 읽은 결과다. Name은 파일 이름(확장자 제외)이다.</summary>
 public sealed record ProjectDescriptor(
     string Name,
     string FilePath,
     int FileVersion,
-    string EngineVersion,
+    ProjectEngineVersion EngineVersion,
     string Description,
     IReadOnlyList<ModuleDescriptor> Modules,
     IReadOnlyList<PluginReference> Plugins,
@@ -101,13 +112,16 @@ public static class DescriptorReader
     private static readonly Regex Identifier = new("^[A-Za-z][A-Za-z0-9_]{0,63}$",
         RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
-    private static readonly Regex VersionText = new("^[0-9]+\\.[0-9]+$",
+    // 정규 10진 "주.부"다(앞자리 0 없음, ASCII 숫자만). 각 값의 범위(0–65535)는 ReadProject가 따로 본다. 끝은 \z다(.NET의 $는 마지막
+    // 줄바꿈 앞에서도 맞아 "0.1\n"을 받는다).
+    private static readonly Regex VersionText = new("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\z",
         RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
     /// <summary>
     /// 프로젝트 기술자를 읽는다.
-    /// 필수: fileVersion(=1), engineVersion("주.부", 예: "0.1"). 선택: description, modules, plugins,
-    /// targetPlatforms(생략하면 모든 플랫폼). 오류는 DescriptorException이다.
+    /// 필수: fileVersion(=1), engineVersion("주.부", 예: "0.1" — 앞자리 0 없는 10진, 각 0–65535). 선택: description, modules,
+    /// plugins, targetPlatforms(생략하면 모든 플랫폼). 오류는 DescriptorException이다. engineVersion이 엔진과 맞는지는 게임 빌드가
+    /// 설치 SDK의 엔진 버전과 대조한다(여기서는 형식만 본다).
     /// </summary>
     public static ProjectDescriptor ReadProject(string path)
     {
@@ -118,12 +132,17 @@ public static class DescriptorReader
             "targetPlatforms"]);
         int fileVersion = ReadFileVersion(path, root);
 
-        string engineVersion = RequiredString(path, root, "engineVersion");
-        if (!VersionText.IsMatch(engineVersion))
+        string engineText = RequiredString(path, root, "engineVersion");
+        Match version = VersionText.Match(engineText);
+        if (!version.Success ||
+            !ushort.TryParse(version.Groups[1].ValueSpan, NumberStyles.None, CultureInfo.InvariantCulture, out ushort major) ||
+            !ushort.TryParse(version.Groups[2].ValueSpan, NumberStyles.None, CultureInfo.InvariantCulture, out ushort minor))
         {
-            throw new DescriptorException(path, $"engineVersion '{engineVersion}' must look like '0.1'.");
+            throw new DescriptorException(path,
+                $"engineVersion '{engineText}' must be '<major>.<minor>' in decimal without leading zeros, each 0-{ushort.MaxValue} (e.g. '0.1').");
         }
 
+        var engineVersion = new ProjectEngineVersion(major, minor);
         IReadOnlyList<NativePlatform> platforms = root.TryGetProperty("targetPlatforms", out JsonElement value)
             ? ReadPlatforms(path, value, "targetPlatforms")
             : Enum.GetValues<NativePlatform>();

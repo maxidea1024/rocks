@@ -96,8 +96,24 @@ try
     await PlatformSelectionTests.RunAsync(request, root);
     Pass("platform routing rejects unknown and mismatched targets");
 
-    DescriptorTests.Run(root, args.Contains("--root") ? args[Array.IndexOf(args, "--root") + 1] : null);
+    // 저장소 루트다(--root, 없으면 현재 디렉터리부터 위로 Rocks.proj와 Build/Build.version이 있는 곳). 게임 템플릿·엔진 버전 파일처럼
+    // 저장소 파일을 보는 시험이 쓴다. 찾지 못하면 그 확인만 건너뛴다.
+    string? repository = args.Contains("--root") ? Path.GetFullPath(args[Array.IndexOf(args, "--root") + 1]) : null;
+    for (var candidate = new DirectoryInfo(Directory.GetCurrentDirectory()); repository is null && candidate is not null; candidate = candidate.Parent)
+    {
+        if (File.Exists(Path.Combine(candidate.FullName, "Rocks.proj")) && File.Exists(EngineVersion.PathIn(candidate.FullName)))
+        {
+            repository = candidate.FullName;
+        }
+    }
+
+    DescriptorTests.Run(root, repository);
     Pass("project and plugin descriptors parse strictly and resolve plugins");
+
+    EngineVersionTests.Run(root, repository);
+    Pass(repository is null
+        ? "engine version file parses strictly, project link predicate (repository checks skipped)"
+        : "engine version file parses strictly, project link predicate, repository file canonical and template engineVersion matches");
 
     await ExecutorCleanupTests.RunAsync(request, root);
     Pass("cleanup failures preserve diagnostics, cancellation, and cache safety");

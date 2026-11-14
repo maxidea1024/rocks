@@ -33,7 +33,8 @@ rocks/
     Commandlet/               headless 명령 실행기(C++)
     Rocks.Build …             빌드·메타 컴파일·검사·scaffold 도구(C#/.NET)
     Scaffold/Templates/       새 모듈 템플릿
-  Build/                      규칙 어셈블리(Rules/)·C# 서식 검사 작업 영역(Format/)·공통 빌드 설정·CI 스크립트
+  Build/                      규칙 어셈블리(Rules/)·C# 서식 검사 작업 영역(Format/)·공통 빌드 설정·CI 스크립트,
+                              Build.version(엔진 버전 단일 출처 — ReflectionFoundations 8.2절)
   Templates/                  게임 프로젝트 템플릿
   Assets/Branding/            엔진 브랜드 자산(로고 SVG·PNG, 시각 아이덴티티 가이드라인)
   Docs/                       설계·구현·검토 문서
@@ -102,7 +103,7 @@ public sealed class Core : CoreModuleRules
 | 필드 | 프로젝트 | 플러그인 | 뜻 |
 |---|---|---|---|
 | fileVersion | 필수 | 필수 | 기술자 형식 버전(지금 1). 다른 값은 오류 |
-| engineVersion | 필수 | — | 대상 엔진 버전 "주.부" |
+| engineVersion | 필수 | — | 대상 엔진 버전 "주.부"(앞자리 0 없는 10진, 각 0–65535). 게임 빌드가 설치 SDK 엔진의 주·부와 같은지 본다 |
 | version·versionName·friendlyName | — | 필수 | 플러그인 버전(정수 1 이상)·표시 버전·표시 이름 |
 | description·category | 선택 | 선택 | 설명·분류 |
 | enabledByDefault | — | 선택(false) | 프로젝트가 따로 적지 않을 때 켤지 |
@@ -122,7 +123,9 @@ public sealed class Core : CoreModuleRules
 설치 SDK로 게임을 빌드할 때(`Rocks.proj /t:Game`) `DescriptorModuleSet`이 기술자로 빌드할 모듈을 정한다.
 
 1. 프로젝트 루트에 `.rocksproject`가 정확히 하나 있어야 한다. 이번 플랫폼이 `targetPlatforms`에 없으면 빌드하지
-   않는다.
+   않는다. `engineVersion`의 주·부가 설치 SDK manifest의 `EngineVersion`과 다르면(오래된 프로젝트·더 새 프로젝트
+   모두) `<경로>: engineVersion X.Y does not match the installed SDK engine A.B.C; set engineVersion to A.B to upgrade
+   the project.`로 멈춘다(패치는 보지 않는다 — [ReflectionFoundations](ReflectionFoundations.ko.md) 8.2절).
 2. `<프로젝트>/Plugins/`의 플러그인을 찾고 위 규칙으로 켤 플러그인을 정한다.
 3. 프로젝트와 모든 플러그인(켜지지 않은 것 포함)의 모듈을 C# 규칙 모듈과 이름으로 대조한다. 규칙은 있는데
    기술자가 선언하지 않은 모듈, 선언은 있는데 규칙이 없는 모듈, 대소문자만 다른 이름, 여러 기술자의 같은 모듈
@@ -146,7 +149,9 @@ public sealed class Core : CoreModuleRules
 - 규칙 이름을 `Configure` 전에 알 수 있게 해(UBT처럼 파일·클래스 이름 규약) 빠질 모듈의 규칙을 실행하지 않는다.
 - 엔진 저장소 빌드(`Foundation`·`Engine` 타깃)의 `Engine/Plugins` 연동: 지금은 엔진 플러그인이 없어 게임 빌드만
   기술자를 적용한다. 설치 SDK는 엔진 플러그인을 내보내지 않는다.
-- `loadingPhase`의 런타임 반영(모듈 로더가 생기면), engineVersion 호환 판정(지금은 형식만 검사).
+- `loadingPhase`의 런타임 반영(모듈 로더가 생기면).
+- 소스 트리 프로젝트 빌드가 생기면 그 `.rocksproject`의 engineVersion을 `Build/Build.version`과 대조한다(지금 기술자는
+  설치 SDK 게임 빌드에서만 읽고, 그때 SDK manifest의 엔진 버전과 대조한다).
 - 2026-11-12 이전 구조(`Engine/<Module>`, 최상위 `Tests/`·`Tools/`)를 가리키는 과거 검토·배포 문서
   (`Docs/Reviews`, `Docs/Releases`)는 기록이므로 경로를 고치지 않는다. 계획 데이터
   (`CoreObjectInputData.json`, `CoreObjectInputFiles.ko.csv`, `CoreObjectInputTasks.ko.csv`)의 예정 파일

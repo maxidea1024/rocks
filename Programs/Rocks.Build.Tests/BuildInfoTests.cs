@@ -5,15 +5,19 @@ using Rocks.Build;
 using Rocks.Tooling.Common;
 
 /// <summary>
-/// 빌드 주입 상수(Docs/Design/ReflectionFoundations.ko.md 8.1절)를 검사한다: 툴체인 지문 정규 텍스트와 조합 동일, 툴체인 신원
-/// discovery, 빌드 환경 위생, FP 모델 인자와 모듈 인자 거부, 실제 빌드의 주입(가짜 Core ← Engine ← Game), 증분·줄 끝·호스트 무관,
-/// 구성 사이 지문 동일, 외부 경로 키, include inventory 제외, 실패한 link.
+/// 빌드 주입 상수(Docs/Design/ReflectionFoundations.ko.md 8.1·8.2절)를 검사한다: 툴체인 지문 정규 텍스트와 조합 동일, 툴체인 신원
+/// discovery, 빌드 환경 위생, FP 모델 인자와 모듈 인자 거부, 실제 빌드의 주입(가짜 Core ← Engine ← Game — 지문·ID·엔진 버전),
+/// 증분(엔진 버전만 바꾸면 생성 TU·link만)·줄 끝·호스트 무관, 구성 사이 지문 동일, 외부 경로 키, include inventory 제외, 실패한 link,
+/// 빈 신원·엔진 버전 거부.
 /// </summary>
 internal static class BuildInfoTests
 {
     private static readonly string LowerA = new('a', 64);
 
     private static readonly string LowerB = new('b', 64);
+
+    // 픽스처 빌드의 엔진 버전이다. 저장소 Build/Build.version과 일부러 다르게 두어 요청 값만 주입됨을 본다.
+    private static readonly EngineVersion FixtureVersion = new(3, 7, 11);
 
     public static async Task RunAsync(NativeBuildRequest request, string root, Action<string> pass)
     {
@@ -36,13 +40,13 @@ internal static class BuildInfoTests
         pass("BuildInfo: FileDigests line-ending normalization by extension, buffer-boundary CR carry");
 
         await InjectionAndIncrementalAsync(request, root);
-        pass("BuildInfo: injected digests equal C# fingerprint/manifest, marker required, incremental and line endings");
+        pass("BuildInfo: injected digests and engine version equal C# values, marker required, incremental, version-only change, line endings");
 
         await HostIndependenceAsync(request, root);
         pass("BuildInfo: ID and generated TU are identical across roots, output names, subst, 8.3 and junction");
 
         await ConfigurationsAndFailuresAsync(request, root);
-        pass("BuildInfo: configurations share the fingerprint, ext keys, inventory exclusions, failed link, empty identity");
+        pass("BuildInfo: configurations share the fingerprint, ext keys, inventory exclusions, failed link, empty identity and engine version");
 
         await PathAndRootRulesAsync(request, root);
         pass("BuildInfo: host path boundaries, single percent-encoding, owned roots inside sources, absolute roots, argument layout");
@@ -525,8 +529,8 @@ internal static class BuildInfoTests
             "lone CR at the buffer boundary must be kept");
     }
 
-    // 6. 실제 빌드: 가짜 Core(표지·BuildInfo.h·최소 Sha256Digest) ← Engine ← Game(TU 2개). 출력한 digest가 C# 계산과 같고, 표지 없는
-    // Core에는 주입하지 않으며, 증분·줄 끝 규칙을 지킨다.
+    // 6. 실제 빌드: 가짜 Core(표지·BuildInfo.h·최소 Sha256Digest·EngineVersion) ← Engine ← Game(TU 2개). 출력한 digest·엔진 버전이
+    // C# 계산·요청 값과 같고, 표지 없는 Core에는 주입하지 않으며, 증분(엔진 버전만 바꾸면 생성 TU·link만)·줄 끝 규칙을 지킨다.
     private static async Task InjectionAndIncrementalAsync(NativeBuildRequest request, string root)
     {
         string fixture = Directory.CreateDirectory(Path.Combine(root, "buildinfo-injection")).FullName;
@@ -544,19 +548,25 @@ internal static class BuildInfoTests
             "result fingerprint/ID must equal the C# fingerprint and sha256(Game.BuildInfo.txt)");
         Check(File.ReadAllText(Path.Combine(directory, "ToolchainFingerprint.txt")) == ToolchainFingerprint.CanonicalText(request.Toolchain),
             "ToolchainFingerprint.txt must hold the canonical text");
-        if (request.Toolchain.Platform != NativePlatform.Android)
+        async Task ExpectPrinted(NativeBuildResult result, string expectedId, EngineVersion expectedVersion)
         {
-            var run = await ProcessRunner.RunAsync(new(cold.ModuleOutputs["Game"], [], fixture, request.Toolchain.Environment));
+            if (request.Toolchain.Platform == NativePlatform.Android)
+            {
+                return;
+            }
+
+            var run = await ProcessRunner.RunAsync(new(result.ModuleOutputs["Game"], [], fixture, request.Toolchain.Environment));
             Check(run.ExitCode == 0, "BuildInfo game returned " + run.ExitCode + ": " + run.StdErr);
-            Check(run.StdOut.Replace("\r", "", StringComparison.Ordinal) == $"fingerprint={fingerprint}\nid={id}\n",
-                "printed digests differ from the C# fingerprint and manifest digest:\n" + run.StdOut);
+            Check(run.StdOut.Replace("\r", "", StringComparison.Ordinal) == $"fingerprint={fingerprint}\nid={expectedId}\nversion={expectedVersion}\n",
+                "printed values differ from the C# fingerprint, manifest digest and request engine version:\n" + run.StdOut);
         }
 
+        await ExpectPrinted(cold, id, FixtureVersion);
         string manifest = File.ReadAllText(manifestPath);
         bool windows = request.Toolchain.Platform == NativePlatform.Windows;
-        Check(manifest.StartsWith("rocks-tool-build-id 1\nexecutable: Game\ntoolchain-fingerprint: " + fingerprint + "\ntoolchain-target: " +
-            request.Toolchain.TargetTriple + "\ntoolchain-abi: " + string.Join(';', request.Toolchain.AbiFields) + "\nhost-dependent: no\n",
-            StringComparison.Ordinal), "manifest header:\n" + manifest);
+        Check(manifest.StartsWith("rocks-tool-build-id 2\nexecutable: Game\nengine-version: 3.7.11\ntoolchain-fingerprint: " + fingerprint +
+            "\ntoolchain-target: " + request.Toolchain.TargetTriple + "\ntoolchain-abi: " + string.Join(';', request.Toolchain.AbiFields) +
+            "\nhost-dependent: no\n", StringComparison.Ordinal), "manifest header:\n" + manifest);
         foreach (string expected in new[]
                  {
                      "action: Archive Engine\n", "action: Compile src:engine/src/engine.cpp\n", "action: Compile src:game/helper.cpp\n",
@@ -582,8 +592,9 @@ internal static class BuildInfoTests
         Check(inputKeys.SequenceEqual(inputKeys.Order(StringComparer.Ordinal)) && inputKeys.Distinct().Count() == inputKeys.Length,
             "manifest inputs must be sorted and unique");
         string source = File.ReadAllText(sourcePath);
-        Check(source.StartsWith("// Generated by Rocks.Build BuildInfo 1 for module Game. Do not edit.\n#include <Core/Build/BuildInfo.h>\n", StringComparison.Ordinal) &&
-            !source.Contains('\r') && source.All(char.IsAscii) && source.Contains("0x" + fingerprint[..2] + ", 0x" + fingerprint[2..4], StringComparison.Ordinal),
+        Check(source.StartsWith("// Generated by Rocks.Build BuildInfo 2 for module Game. Do not edit.\n#include <Core/Build/BuildInfo.h>\n", StringComparison.Ordinal) &&
+            !source.Contains('\r') && source.All(char.IsAscii) && source.Contains("0x" + fingerprint[..2] + ", 0x" + fingerprint[2..4], StringComparison.Ordinal) &&
+            source.Contains("\n\nEngineVersion CurrentEngineVersion() noexcept {\n    return {3, 7, 11};\n}\n\n} // namespace rocks::build\n", StringComparison.Ordinal),
             "generated TU shape:\n" + source);
 
         // no-op: 실행 액션 0, 생성 파일을 다시 쓰지 않는다.
@@ -592,12 +603,34 @@ internal static class BuildInfoTests
         Check(warm.ExecutedActions == 0 && File.GetLastWriteTimeUtc(sourcePath) == written && warm.ToolBuildIds["Game"] == id,
             "no-op must execute nothing and keep the generated TU: " + Describe(warm));
 
+        // 엔진 버전만 바꾸면 생성 TU와 link만 실행되고 다른 compile·archive는 0이다(버전은 action key·ContextFingerprint·compile 정의에
+        // 없다). 같은 값으로 다시 빌드하면 no-op이고, 원래 값으로 돌아가면 ID도 원래 값이다.
+        string generatedId = "Game:compile:" + Fingerprints.Strings([sourcePath])[..20];
+        string[] GeneratedAndLink(NativeBuildResult result) => result.Actions
+            .Where(action => action.Id == generatedId || action.Kind == "Link").Select(action => action.Id).Order(StringComparer.Ordinal).ToArray();
+        string[] Executed(NativeBuildResult result) => result.Actions
+            .Where(action => action.Executed).Select(action => action.Id).Order(StringComparer.Ordinal).ToArray();
+        var bumpedVersion = new EngineVersion(3, 8, 0);
+        NativeBuildRequest bumped = game with { EngineVersion = bumpedVersion };
+        NativeBuildResult versionChanged = await Succeeded(builder, bumped, "BuildInfo engine version change");
+        Check(Executed(versionChanged).SequenceEqual(GeneratedAndLink(versionChanged)) && versionChanged.ExecutedActions == 2,
+            "an engine version change must rerun only the generated TU and link: " + Describe(versionChanged));
+        Check(versionChanged.ToolBuildIds["Game"] != id && versionChanged.ToolBuildIds["Game"] == Hashing.Sha256File(manifestPath) &&
+            File.ReadAllText(manifestPath).Contains("\nengine-version: 3.8.0\n", StringComparison.Ordinal) &&
+            File.ReadAllText(sourcePath).Contains("    return {3, 8, 0};\n", StringComparison.Ordinal),
+            "an engine version change must reach the manifest, the tool build ID and the generated TU");
+        await ExpectPrinted(versionChanged, versionChanged.ToolBuildIds["Game"], bumpedVersion);
+        NativeBuildResult versionSame = await Succeeded(builder, bumped, "BuildInfo same engine version");
+        Check(versionSame.ExecutedActions == 0, "the same engine version must be a no-op: " + Describe(versionSame));
+        NativeBuildResult versionBack = await Succeeded(builder, game, "BuildInfo engine version restored");
+        Check(Executed(versionBack).SequenceEqual(GeneratedAndLink(versionBack)) && versionBack.ToolBuildIds["Game"] == id,
+            "restoring the engine version must rerun only the generated TU and link and restore the ID: " + Describe(versionBack));
+
         // Engine 소스 편집: Engine compile·archive, 생성 TU, link만 다시 돈다(Game의 다른 TU는 재사용).
         string engineSource = Path.Combine(fixture, "engine", "src", "engine.cpp");
         File.AppendAllText(engineSource, "int EngineExtra() noexcept { return 1; }\n");
         NativeBuildResult edited = await Succeeded(builder, game, "BuildInfo engine edit");
-        string generatedId = "Game:compile:" + Fingerprints.Strings([sourcePath])[..20];
-        string[] executed = edited.Actions.Where(action => action.Executed).Select(action => action.Id).Order(StringComparer.Ordinal).ToArray();
+        string[] executed = Executed(edited);
         string[] expectedIds = edited.Actions.Where(action => action.Module == "Engine" || action.Id == generatedId || action.Kind == "Link")
             .Select(action => action.Id).Order(StringComparer.Ordinal).ToArray();
         Check(executed.SequenceEqual(expectedIds) && executed.Length == 4, "engine edit must rerun only Engine, the generated TU, and link: " + Describe(edited));
@@ -703,7 +736,7 @@ internal static class BuildInfoTests
         }
     }
 
-    // 8. 구성(Debug·Release·Asan 지문 같고 ID 다름), 외부 include·prebuilt의 ext 키, include inventory 제외, 실패한 link, 빈 신원 거부.
+    // 8. 구성(Debug·Release·Asan 지문 같고 ID 다름), 외부 include·prebuilt의 ext 키, include inventory 제외, 실패한 link, 빈 신원·엔진 버전 거부.
     private static async Task ConfigurationsAndFailuresAsync(NativeBuildRequest request, string root)
     {
         string fixture = Directory.CreateDirectory(Path.Combine(root, "buildinfo-more")).FullName;
@@ -834,9 +867,26 @@ internal static class BuildInfoTests
 
             Check(!Directory.Exists(Path.Combine(invalidOutput, "BuildInfo")), "rejected identity wrote BuildInfo: " + name);
         }
+
+        // 요청에 엔진 버전이 없거나 빈 값(0.0.x)이면 BuildInfo 대상 빌드는 출력을 쓰기 전에 거부한다(다른 값을 지어내지 않는다).
+        // BuildInfo 대상이 없는 빌드는 엔진 버전을 요구하지 않는다(6번의 Core 없는 기존 픽스처가 값 없이 빌드된다).
+        foreach ((string name, EngineVersion? missing) in new (string, EngineVersion?)[] { ("null", null), ("empty", default(EngineVersion)) })
+        {
+            string invalidOutput = Path.Combine(fixture, "out-engine-version-" + name);
+            try
+            {
+                await builder.BuildAsync(game with { EngineVersion = missing, OutputDirectory = invalidOutput });
+                throw new InvalidOperationException("a BuildInfo build without an engine version was accepted: " + name);
+            }
+            catch (ArgumentException error) when (error.Message.Contains("EngineVersion", StringComparison.Ordinal))
+            {
+            }
+
+            Check(!Directory.Exists(Path.Combine(invalidOutput, "BuildInfo")), "a rejected engine version wrote BuildInfo: " + name);
+        }
     }
 
-    // 가짜 Core(header-only, 표지·BuildInfo.h·최소 Sha256Digest) ← Engine(정적 라이브러리) ← Game(실행 파일, TU 2개).
+    // 가짜 Core(header-only, 표지·BuildInfo.h·최소 Sha256Digest·EngineVersion) ← Engine(정적 라이브러리) ← Game(실행 파일, TU 2개).
     private static void WriteFixture(string fixture)
     {
         void Write(string relative, string text)
@@ -853,9 +903,15 @@ internal static class BuildInfoTests
             "    static constexpr unsigned Bytes = 32;\n" +
             "    unsigned char bytes[Bytes] = {};\n" +
             "};\n" +
+            "struct EngineVersion {\n" +
+            "    unsigned short majorVersion = 0;\n" +
+            "    unsigned short minorVersion = 0;\n" +
+            "    unsigned short patchVersion = 0;\n" +
+            "};\n" +
             "namespace build {\n" +
             "Sha256Digest ToolchainFingerprint() noexcept;\n" +
             "Sha256Digest ToolBuildId() noexcept;\n" +
+            "EngineVersion CurrentEngineVersion() noexcept;\n" +
             "} // namespace build\n" +
             "} // namespace rocks\n");
         Write("engine/include/engine.h", "#pragma once\nint EngineValue() noexcept;\n");
@@ -878,6 +934,9 @@ internal static class BuildInfoTests
             "int main() {\n" +
             "    Print(\"fingerprint\", rocks::build::ToolchainFingerprint());\n" +
             "    Print(\"id\", rocks::build::ToolBuildId());\n" +
+            "    const rocks::EngineVersion version = rocks::build::CurrentEngineVersion();\n" +
+            "    printf(\"version=%u.%u.%u\\n\", static_cast<unsigned>(version.majorVersion),\n" +
+            "           static_cast<unsigned>(version.minorVersion), static_cast<unsigned>(version.patchVersion));\n" +
             "    return EngineValue() + Helper() == 10 ? 0 : 1;\n" +
             "}\n");
     }
@@ -887,6 +946,7 @@ internal static class BuildInfoTests
         RootDirectory = fixture,
         OutputDirectory = output,
         Configuration = NativeConfiguration.Debug,
+        EngineVersion = FixtureVersion,
         Targets = ["Game"],
         Modules =
         [

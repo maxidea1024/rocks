@@ -164,7 +164,7 @@ public sealed record NativeModuleInput
     // Metadata와 함께 쓸 수 없다.
     public ImportedMetadata? ImportedMetadata { get; init; }
 
-    // 이 모듈이 Core/Build/BuildInfo.h(rocks::build::ToolchainFingerprint·ToolBuildId 선언)를 제공한다는 표지다. 이 모듈에
+    // 이 모듈이 Core/Build/BuildInfo.h(rocks::build::ToolchainFingerprint·ToolBuildId·CurrentEngineVersion 선언)를 제공한다는 표지다. 이 모듈에
     // 닿는 실행 파일마다 빌드가 정의 TU(<out>/BuildInfo/<실행 파일>.BuildInfo.cpp)를 만들어 그 실행 파일 소스에 더한다
     // (Docs/Design/ReflectionFoundations.ko.md 8.1절). 엔진 Core 규칙이 켜고 설치 SDK가 함께 나른다. 이름 "Core"로 판정하지
     // 않으므로 엔진 밖 프로젝트의 같은 이름 모듈은 대상이 아니다.
@@ -195,6 +195,13 @@ public sealed record NativeBuildRequest
 
     // 설치 SDK 게임 빌드의 SDK 루트다(그 밖에는 null). 도구 빌드 ID의 경로 키 `sdk:`의 기준이다.
     public string? SdkDirectory { get; init; }
+
+    // 엔진 버전이다(Docs/Design/ReflectionFoundations.ko.md 8.2절). Rocks.Build.Cli가 build·test·sdk에서는 Build/Build.version을 한 번
+    // 읽어, game에서는 SDK manifest의 EngineVersion을 넘긴다. BuildInfo 생성 TU(rocks::build::CurrentEngineVersion)와 manifest의
+    // `engine-version:` 줄에만 쓰고 action key·ContextFingerprint·compile 정의에는 넣지 않는다 — 바꾸면 BuildInfo 대상 실행 파일의
+    // 생성 TU와 link만 다시 돈다. BuildInfo 대상 실행 파일이 있는데 null이거나 빈 값(0.0.x)이면 ArgumentException이다. 대상이 없으면
+    // 쓰지 않는다.
+    public EngineVersion? EngineVersion { get; init; }
 
     // response file 사용 방식이다(NativeCommandLine). 기본 Auto이며 시험만 Always·Never로 경로를 강제한다. key에 들어가지 않는다.
     internal ResponseFileMode ResponseFiles { get; init; } = ResponseFileMode.Auto;

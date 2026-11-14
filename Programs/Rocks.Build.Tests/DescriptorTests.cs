@@ -41,7 +41,8 @@ internal static class DescriptorTests
             }
             """);
         ProjectDescriptor read = DescriptorReader.ReadProject(project);
-        Check(read.Name == "MyGame" && read.FileVersion == 1 && read.EngineVersion == "0.1", "project header");
+        Check(read.Name == "MyGame" && read.FileVersion == 1 && read.EngineVersion == new ProjectEngineVersion(0, 1) &&
+              read.EngineVersion.ToString() == "0.1", "project header");
         Check(read.Modules.Count == 2 && read.Modules[0].LoadingPhase == LoadingPhase.Default &&
               read.Modules[0].Platforms is null, "default module fields");
         Check(read.Modules[1].Type == ModuleType.Editor && read.Modules[1].LoadingPhase == LoadingPhase.PostDefault &&
@@ -55,6 +56,10 @@ internal static class DescriptorTests
         string minimal = Write(directory, "Minimal/Minimal.rocksproject", """{ "fileVersion": 1, "engineVersion": "1.2" }""");
         Check(DescriptorReader.ReadProject(minimal).TargetPlatforms.Count == Enum.GetValues<NativePlatform>().Length,
             "omitted target platforms must mean every platform");
+
+        // engineVersion 경계: 0과 65535는 받는다.
+        string largest = Write(directory, "Largest/Largest.rocksproject", """{ "fileVersion": 1, "engineVersion": "65535.0" }""");
+        Check(DescriptorReader.ReadProject(largest).EngineVersion == new ProjectEngineVersion(ushort.MaxValue, 0), "engineVersion 65535.0");
 
         string plugin = Write(directory, "Plugins/Water/Water.rocksplugin", """
             {
@@ -98,6 +103,18 @@ internal static class DescriptorTests
         {
             ExpectFailure(() => DescriptorReader.ReadProject(Write(directory, $"Bad{index}/Bad{index}.rocksproject",
                 badProjects[index])), "bad project " + index);
+        }
+
+        // engineVersion은 앞자리 0 없는 10진 "주.부"이고 각 값은 0–65535다(패치·공백·끝 줄바꿈·부호·전각 숫자·빈 칸은 받지 않는다).
+        // 배열 값은 JSON 문자열 안에 그대로 넣으므로 "\\n"은 JSON escape 줄바꿈이다.
+        string[] badEngineVersions = ["01.1", "0.01", "00.1", "65536.0", "0.65536", "0.1.0", "0", " 0.1", "0.1 ", "0.1\\n", "+0.1", "-0.1",
+            "0.", ".1", "0x1.0", "1,0", "０.１", "1e1.0", ""];
+        for (int index = 0; index < badEngineVersions.Length; ++index)
+        {
+            string text = badEngineVersions[index];
+            ExpectFailure(() => DescriptorReader.ReadProject(Write(directory, $"BadEngine{index}/BadEngine{index}.rocksproject",
+                $"{{ \"fileVersion\": 1, \"engineVersion\": \"{text}\" }}")), "bad engineVersion '" + text + "'",
+                text.Length == 0 ? "'engineVersion' is required" : "must be '<major>.<minor>' in decimal without leading zeros");
         }
 
         ExpectFailure(() => DescriptorReader.ReadProject(Write(directory, "Bad-Name/Bad-Name.rocksproject",
