@@ -52,12 +52,19 @@ enum class AeadAlgorithm : uint8 {
     Aegis128L = 6,            // key 16, nonce 16, tag 32
 };
 
+// 모든 AEAD 알고리즘의 nonce 길이 상한(AEGIS-256)이다.
+inline constexpr usize AeadMaxNonceBytes = 32;
+
 struct AeadInfo {
     usize keyBytes = 0;
     usize nonceBytes = 0;
     usize tagBytes = 0;
     // (key, nonce) 한 쌍으로 봉인할 수 있는 평문 상한이다(11절 표).
     uint64 maxMessageBytes = 0;
+    // 키 하나로 봉인할 수 있는 16 byte 블록 수 상한이다(모든 메시지의 평문 블록 + AD 블록 +
+    // 메시지당 1). AES-GCM만 있고(2^36 - 1, 기밀성 이점 2^-57, 11절), 0이면 키당 데이터 한도가
+    // 없다. AeadSequenceSealer가 이 값으로 막는다. hazmat nonce 지정 API는 호출자가 센다.
+    uint64 maxBlocksPerKey = 0;
     // 무작위 nonce를 써도 되는가(XChaCha20-Poly1305, AEGIS-256). 고수준 TrySeal은 이 알고리즘만
     // 받는다.
     bool randomNonceSafe = false;
@@ -146,6 +153,10 @@ private:
 [[nodiscard]] Result<usize> TryOpen(const AeadKey& key, Span<const uint8> associatedData,
                                     Span<const uint8> sealed, Span<uint8> plaintext) noexcept;
 
+namespace detail {
+struct SequenceAccess;
+} // namespace detail
+
 namespace hazmat {
 
 // 키 byte를 평문으로 output에 복사한다(10.4절). output.Size()는 키 길이와 같아야 한다.
@@ -179,36 +190,68 @@ namespace hazmat {
                                            Span<const uint8> ciphertext, Span<const uint8> tag,
                                            Span<uint8> plaintext) noexcept;
 
-// 순번 nonce 봉인기다. 키를 소유하고 nonce = prefix ‖ 64 bit 카운터(big-endian)를 스스로 만든다.
-// 전송 채널처럼 한 방향 순서가 있는 경우에 쓴다. 출력은 암호문 ‖ tag이고 nonce는 싣지 않는다(받는
-// 쪽 AeadSequenceOpener가 같은 카운터를 센다).
+// 순번 봉인기가 다 썼다는 표지다(NextSequence()). 쓸 수 있는 순번은 0부터 이 값 - 1까지다.
+inline constexpr uint64 AeadSequenceExhausted = static_cast<uint64>(-1);
+
+// 순번 nonce 봉인기다. 키를 소유하고 seq번째 메시지의 nonce를 iv XOR (0 ‖ BE64(seq))로 스스로
+// 만든다(TLS 1.3 5.3절·QUIC·HPKE와 같은 레코드 nonce 구성). 출력은 암호문 ‖ tag이고 nonce는 싣지
+// 않는다(받는 쪽 AeadSequenceOpener가 같은 순서를 센다).
 //
-// - prefix 길이는 nonce 길이 - 8이다(ChaCha20-IETF·AES-GCM 4, AEGIS-128L 8, XChaCha20 16, AEGIS-256
-//   24). 같은 키를 두 방향에 쓰면 방향마다 prefix를 다르게 둔다. 키를 방향마다 따로 파생하는 편이
-//   낫다.
-// - 카운터는 0부터 성공한 봉인마다 1씩 오른다. 실패한 호출(InvalidArgument·CapacityExceeded)은
-//   카운터를 쓰지 않는다. 2^64개를 봉인하면 CapacityExceeded이고, 키를 소유하므로 그 키로 더
-//   봉인하는 경로가 남지 않는다.
-// - 알고리즘별 키당 데이터 한도(AES-GCM은 RFC 8446 5.5절 기준 약 2^24.5개 full-size 레코드)는
-//   프로토콜이 키 갱신으로 지킨다. 이 객체는 카운터 소진만 막는다.
-// - 한 스레드에서 쓴다(카운터를 바꾼다). move-only이고 옮겨 간 객체는 StaleHandle이다.
+// 쓰는 곳: 신뢰할 수 있고 순서가 보장되는 전송에서 AES-GCM·AEGIS의 HW 처리량이 필요하거나 nonce를
+// 싣지 않아야 할 때, 또는 TLS 1.3·QUIC·HPKE형 레코드 nonce와 맞춰야 할 때다. 그 밖의 레코드 채널은
+// secretstream(9.4절)이 낫다(데이터 한도·재키잉·끝 표시를 스스로 처리한다).
+//
+// 계약(어기면 nonce가 다시 쓰인다):
+// - 키 하나는 평생 sealer 하나(한 방향)만 쓴다. 두 방향은 키를 따로 둔다(kx의 rx·tx 키처럼 역할이
+//   묶인 키가 좋다). 같은 키 byte를 다시 가져오거나 같은 (master, subkeyId, context)로 다시 파생해
+//   새 sealer를 만들면 seq 0부터 같은 nonce가 나온다. 파생한다면 subkeyId는 저장된 단조 값으로
+//   둔다(무작위 64 bit는 2^32 세션 규모에서 충돌한다).
+// - iv는 nonce 길이(AeadInfo::nonceBytes)이고 키와 같은 키 스케줄에서 파생한다. 전송하지 않고 상수
+//   라벨로 두지 않는다. 키가 세션·방향마다 새것이면 0이어도 되지만 다중 사용자 보강(키마다 다른
+//   nonce 오프셋, GCM·AEGIS-128L처럼 128 bit 키에서 의미가 크다)을 잃는다.
+// - 재시작은 새 키로 한다. 같은 키로 순번을 이어 가는 길은 두지 않는다(봉인 뒤 저장 전에 죽으면
+//   nonce가 다시 쓰인다, NIST SP 800-38D 9.1절).
+//
+// 한도: seq는 0부터 AeadSequenceExhausted - 1까지 쓴다. 다 쓰거나, AES-GCM에서 키당 블록
+// 한도(AeadInfo::maxBlocksPerKey, 11절)를 넘을 메시지가 오면 IsExhausted()가 true가 되고 이후
+// TrySeal은 CapacityExceeded다. 새 키로 바꾼다. 같은 CapacityExceeded라도 IsExhausted()가 false면
+// 출력 버퍼가 작은 것이다.
+//
+// 한 스레드에서 쓴다(봉인과 전송 큐 넣기를 함께 직렬화한다). move-only이고 옮겨 간 객체는
+// StaleHandle이다.
+//
+// 사용 예:
+//   auto sealer = hazmat::AeadSequenceSealer::TryCreate(Move(txKey), txIv.View());
+//   if (!sealer) { return sealer.Error(); }
+//   auto written = sealer.Value().TrySeal(header, payload, record);
+//   if (!written && sealer.Value().IsExhausted()) { /* 새 키로 바꾼다 */ }
 class AeadSequenceSealer {
 public:
     AeadSequenceSealer() noexcept = default;
 
-    // key를 소유한다. firstSequence는 첫 카운터다(저장해 둔 채널을 이어 갈 때). 빈 키는
-    // StaleHandle, prefix 길이가 틀리면 InvalidArgument이고, 실패하면 key는 그대로 남는다.
-    [[nodiscard]] static Result<AeadSequenceSealer>
-    TryCreate(AeadKey&& key, Span<const uint8> prefix, uint64 firstSequence = 0) noexcept;
+    // key를 소유한다. 빈 키는 StaleHandle, iv 길이가 nonce 길이와 다르면 InvalidArgument이고,
+    // 실패하면 key는 그대로 남는다. iv는 복사한다.
+    [[nodiscard]] static Result<AeadSequenceSealer> TryCreate(AeadKey&& key,
+                                                              Span<const uint8> iv) noexcept;
 
-    // 다음 카운터로 봉인한다. 출력 = 암호문 ‖ tag이고 쓴 byte 수를 돌려준다. 오류는
-    // TrySealWithNonce와 같고, 카운터를 다 쓰면 CapacityExceeded다.
+    // 다음 seq로 봉인한다. 출력 = 암호문 ‖ tag이고 쓴 byte 수를 돌려준다. 오류는 TrySealWithNonce와
+    // 같다. 실패한 호출은 쓰기 전에 돌아오므로 seq를 쓰지 않는다. 다 썼으면 CapacityExceeded다.
     [[nodiscard]] Result<usize> TrySeal(Span<const uint8> associatedData,
                                         Span<const uint8> plaintext, Span<uint8> sealed) noexcept;
 
-    // 다음 봉인에 쓸 카운터다.
+    // 다음 봉인에 쓸 seq다. 다 썼으면 AeadSequenceExhausted다.
     [[nodiscard]] uint64 NextSequence() const noexcept {
         return next_;
+    }
+
+    [[nodiscard]] bool IsExhausted() const noexcept {
+        return next_ == AeadSequenceExhausted;
+    }
+
+    // 지금까지 봉인한 16 byte 블록 수다(메시지마다 평문 블록 + AD 블록 + 1). AES-GCM은 이 값이
+    // AeadInfo::maxBlocksPerKey를 넘지 않게 막는다. 다른 알고리즘은 진단용이다.
+    [[nodiscard]] uint64 UsedBlocks() const noexcept {
+        return usedBlocks_;
     }
 
     [[nodiscard]] AeadAlgorithm Algorithm() const noexcept {
@@ -220,37 +263,49 @@ public:
     }
 
 private:
-    AeadSequenceSealer(AeadKey&& key, Span<const uint8> prefix, uint64 firstSequence) noexcept;
+    friend struct detail::SequenceAccess;
+
+    AeadSequenceSealer(AeadKey&& key, Span<const uint8> iv) noexcept;
 
     AeadKey key_;
-    uint8 prefix_[24] = {};
+    uint8 iv_[AeadMaxNonceBytes] = {};
     uint64 next_ = 0;
-    bool exhausted_ = false;
+    uint64 usedBlocks_ = 0;
 };
 
-// AeadSequenceSealer의 받는 쪽이다. 같은 키·prefix로 만들고, 같은 순서로 연다.
+// AeadSequenceSealer의 받는 쪽이다. 같은 키·iv로 만들고 같은 순서로 연다. 계약(키 하나 = opener
+// 하나, 재시작은 새 키)은 sealer와 같다. 같은 키로 opener를 다시 만들면 이미 받은 메시지의 재전송을
+// 받아들인다.
 //
-// - 성공한 열기마다 카운터가 1씩 오른다. 빠지거나 바뀐 순서·재전송·변조는 모두 tag 불일치라
-//   AuthenticationFailed이고 plaintext 전체를 지운다. 이 실패는 sticky다: 이후 모든 TryOpen이
-//   AuthenticationFailed다(순서를 잃은 채널은 다시 맞출 수 없다, 11절). 카운터를 다 쓴 뒤 온
-//   메시지도 같다(보내는 쪽은 더 봉인할 수 없다).
-// - 호출자 버퍼 오류(InvalidArgument·CapacityExceeded)는 카운터와 상태를 바꾸지 않는다.
+// - 신뢰할 수 있고 순서가 보장되는 전송에서만 쓴다. 빠지거나 바뀐 순서·재전송·변조·잘린 입력·다른
+//   AD는 모두 AuthenticationFailed이고 plaintext 전체를 지운다. 이 실패는 sticky다: 이후 모든
+//   TryOpen이 AuthenticationFailed다(HasFailed). 세션과 키를 버린다(11절). 순번을 다 쓴 뒤 온
+//   메시지도 같다.
+// - 허용되지 않은 겹침은 실패 뒤에도 쓰기 전에 InvalidArgument다. plaintext가 sealed 길이로
+//   정해지는 평문보다 작으면 인증 전에 CapacityExceeded다(상태 불변). 길이는 전송로에 보이는 값이라
+//   새 정보는 아니지만, 프레이밍 계층이 최대 레코드 길이를 먼저 막는다.
+// - 스트림 끝(절단) 인증은 프로토콜 몫이다(TLS close_notify처럼). 이 객체에는 끝 표시가 없다.
 // - 한 스레드에서 쓴다. move-only이고 옮겨 간 객체는 StaleHandle이다.
 class AeadSequenceOpener {
 public:
     AeadSequenceOpener() noexcept = default;
 
     // 인자와 오류는 AeadSequenceSealer::TryCreate와 같다.
-    [[nodiscard]] static Result<AeadSequenceOpener>
-    TryCreate(AeadKey&& key, Span<const uint8> prefix, uint64 firstSequence = 0) noexcept;
+    [[nodiscard]] static Result<AeadSequenceOpener> TryCreate(AeadKey&& key,
+                                                              Span<const uint8> iv) noexcept;
 
-    // 다음 카운터로 연다. 평문 byte 수를 돌려준다. 오류는 TryOpenWithNonce와 같고, 앞선 인증 실패
-    // 뒤에는 늘 AuthenticationFailed(plaintext 소거)다.
+    // 다음 seq로 연다. 평문 byte 수를 돌려준다. 오류는 TryOpenWithNonce와 같고, 앞선 인증 실패나
+    // 소진 뒤에는 늘 AuthenticationFailed(plaintext 소거)다.
     [[nodiscard]] Result<usize> TryOpen(Span<const uint8> associatedData, Span<const uint8> sealed,
                                         Span<uint8> plaintext) noexcept;
 
+    // 다음 열기에 쓸 seq다. 다 썼으면 AeadSequenceExhausted다.
     [[nodiscard]] uint64 NextSequence() const noexcept {
         return next_;
+    }
+
+    [[nodiscard]] bool IsExhausted() const noexcept {
+        return next_ == AeadSequenceExhausted;
     }
 
     // 인증 실패로 멈췄는가.
@@ -267,12 +322,13 @@ public:
     }
 
 private:
-    AeadSequenceOpener(AeadKey&& key, Span<const uint8> prefix, uint64 firstSequence) noexcept;
+    friend struct detail::SequenceAccess;
+
+    AeadSequenceOpener(AeadKey&& key, Span<const uint8> iv) noexcept;
 
     AeadKey key_;
-    uint8 prefix_[24] = {};
+    uint8 iv_[AeadMaxNonceBytes] = {};
     uint64 next_ = 0;
-    bool exhausted_ = false;
     bool failed_ = false;
 };
 

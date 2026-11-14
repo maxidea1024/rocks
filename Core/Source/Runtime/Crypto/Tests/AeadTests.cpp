@@ -2,6 +2,7 @@
 #include <Crypto/Aead.h>
 #include <Crypto/Bytes.h>
 #include <Crypto/Kdf.h>
+#include <Crypto/Private/AeadSequenceAccess.h>
 #include <Crypto/Secret.h>
 #include <Platform/Cpu.h>
 #include <TestSupport/Test.h>
@@ -942,56 +943,86 @@ TEST(CryptoAeadKeyLifetime) {
     }
 }
 
+namespace {
+
+namespace sequence = rocks::crypto::detail;
+
+// seq번째 nonce = iv XOR (0 ‖ BE64(seq))를 구현과 따로 만든다.
+void MakeReferenceNonce(Span<const uint8> iv, uint64 seq, Span<uint8> nonce) {
+    memcpy(nonce.Data(), iv.Data(), iv.Size());
+    for (usize i = 0; i < 8; ++i) {
+        nonce[iv.Size() - 8 + i] ^= static_cast<uint8>(seq >> (56 - 8 * i));
+    }
+}
+
+// ChaCha20-Poly1305-IETF 순번 시험 키(FillPattern 0x31)·iv(FillPattern 0x70)다.
+struct IetfSequence {
+    uint8 key[32];
+    uint8 iv[12];
+
+    IetfSequence(uint8 keySeed, uint8 ivSeed) {
+        FillPattern(Span<uint8>(key), keySeed);
+        FillPattern(Span<uint8>(iv), ivSeed);
+    }
+
+    AeadKey MakeKey() const {
+        auto made = AeadKey::TryImport(AeadAlgorithm::ChaCha20Poly1305Ietf, Span<const uint8>(key));
+        return made ? Move(made.Value()) : AeadKey();
+    }
+};
+
+} // namespace
+
 TEST(CryptoAeadSequenceRoundTrip) {
-    // nonce는 prefix ‖ BE64(카운터)다. 같은 키로 hazmat::TrySealWithNonce에 직접 만든 nonce를 주어
-    // byte가 같은지 본다.
+    // 모든 사용 가능한 알고리즘에서 seq번째 출력이 hazmat::TrySealWithNonce(iv XOR BE64(seq))와
+    // 같다. iv의 끝 8 byte가 0이 아니므로 XOR 구성(이어 붙이기가 아니다)을 고정한다.
     for (AeadAlgorithm algorithm : AllAlgorithms) {
         if (!IsAvailable(algorithm)) {
             continue;
         }
 
         const AeadInfo info = TryGetAeadInfo(algorithm).Value();
-        const usize prefixBytes = info.nonceBytes - 8;
         uint8 keyBytes[32];
         FillPattern(Span<uint8>(keyBytes), 0x31);
         const Span<const uint8> keyView = Span<const uint8>(keyBytes).Left(info.keyBytes);
-        uint8 prefix[24];
-        FillPattern(Span<uint8>(prefix), 0x70);
-        const Span<const uint8> prefixView = Span<const uint8>(prefix).Left(prefixBytes);
+        uint8 iv[AeadMaxNonceBytes];
+        FillPattern(Span<uint8>(iv), 0x70);
+        uint8 referenceIv[AeadMaxNonceBytes];
+        memcpy(referenceIv, iv, sizeof(iv));
+        const Span<const uint8> ivView = Span<const uint8>(iv).Left(info.nonceBytes);
 
         auto sealerKey = AeadKey::TryImport(algorithm, keyView);
         auto openerKey = AeadKey::TryImport(algorithm, keyView);
         auto referenceKey = AeadKey::TryImport(algorithm, keyView);
         REQUIRE(sealerKey && openerKey && referenceKey);
-        auto sealer = hazmat::AeadSequenceSealer::TryCreate(Move(sealerKey.Value()), prefixView);
-        auto opener = hazmat::AeadSequenceOpener::TryCreate(Move(openerKey.Value()), prefixView);
+        auto sealer = hazmat::AeadSequenceSealer::TryCreate(Move(sealerKey.Value()), ivView);
+        auto opener = hazmat::AeadSequenceOpener::TryCreate(Move(openerKey.Value()), ivView);
         REQUIRE(sealer && opener);
         CHECK(sealerKey.Value().IsEmpty());
         CHECK(sealer.Value().Algorithm() == algorithm);
         CHECK(sealer.Value().NextSequence() == 0);
+        CHECK(!sealer.Value().IsExhausted());
+        // 만든 뒤 호출자의 iv를 바꿔도 영향이 없다(복사한다).
+        memset(iv, 0xEE, sizeof(iv));
 
         const Span<const uint8> associatedData = Text("channel");
-        for (uint64 sequence = 0; sequence < 3; ++sequence) {
+        for (uint64 seq = 0; seq < 3; ++seq) {
             uint8 message[20];
-            FillPattern(Span<uint8>(message), static_cast<uint8>(sequence));
+            FillPattern(Span<uint8>(message), static_cast<uint8>(seq));
             uint8 sealed[64];
             auto written = sealer.Value().TrySeal(associatedData, Span<const uint8>(message),
                                                   Span<uint8>(sealed));
             REQUIRE(written);
             CHECK(written.Value() == sizeof(message) + info.tagBytes);
-            CHECK(sealer.Value().NextSequence() == sequence + 1);
+            CHECK(sealer.Value().NextSequence() == seq + 1);
 
-            uint8 nonce[32];
-            memcpy(nonce, prefix, prefixBytes);
-            for (usize i = 0; i < 8; ++i) {
-                nonce[prefixBytes + i] = static_cast<uint8>(sequence >> (56 - 8 * i));
-            }
-
+            uint8 nonce[AeadMaxNonceBytes];
+            MakeReferenceNonce(Span<const uint8>(referenceIv).Left(info.nonceBytes), seq,
+                               Span<uint8>(nonce));
             uint8 reference[64];
-            auto referenceWritten = hazmat::TrySealWithNonce(
+            REQUIRE(hazmat::TrySealWithNonce(
                 referenceKey.Value(), Span<const uint8>(nonce).Left(info.nonceBytes),
-                associatedData, Span<const uint8>(message), Span<uint8>(reference));
-            REQUIRE(referenceWritten);
+                associatedData, Span<const uint8>(message), Span<uint8>(reference)));
             CHECK(ConstantTimeEquals(Span<const uint8>(sealed).Left(written.Value()),
                                      Span<const uint8>(reference).Left(written.Value())));
 
@@ -1002,101 +1033,71 @@ TEST(CryptoAeadSequenceRoundTrip) {
             REQUIRE(openedBytes);
             CHECK(ConstantTimeEquals(Span<const uint8>(opened).Left(sizeof(message)),
                                      Span<const uint8>(message)));
-            CHECK(opener.Value().NextSequence() == sequence + 1);
+            CHECK(opener.Value().NextSequence() == seq + 1);
         }
+
+        // 블록 집계: 메시지마다 평문 2 + AD 1 + 1 = 4 블록이다.
+        CHECK(sealer.Value().UsedBlocks() == 12);
     }
 }
 
-TEST(CryptoAeadSequenceRejectsReorderAndReplay) {
-    uint8 keyBytes[32];
-    FillPattern(Span<uint8>(keyBytes), 0x44);
-    const uint8 prefix[4] = {'c', '2', 's', 0};
-    const Span<const uint8> prefixView = Span<const uint8>(prefix);
-    const auto makeOpener = [&]() {
-        auto key =
-            AeadKey::TryImport(AeadAlgorithm::ChaCha20Poly1305Ietf, Span<const uint8>(keyBytes));
-        return hazmat::AeadSequenceOpener::TryCreate(Move(key.Value()), prefixView);
-    };
-
-    auto key = AeadKey::TryImport(AeadAlgorithm::ChaCha20Poly1305Ietf, Span<const uint8>(keyBytes));
-    REQUIRE(key);
-    auto sealer = hazmat::AeadSequenceSealer::TryCreate(Move(key.Value()), prefixView);
+TEST(CryptoAeadSequenceKnownAnswers) {
+    // 구현과 독립된 값(Python cryptography·pycryptodome)으로 nonce 배치를 고정한다. 카운터 상위
+    // byte가 모두 다른 seq(0x0102030405060708)는 32 bit 잘림·LE64 회귀를 가른다.
+    const IetfSequence fixture(0x31, 0x70);
+    auto sealer =
+        hazmat::AeadSequenceSealer::TryCreate(fixture.MakeKey(), Span<const uint8>(fixture.iv));
     REQUIRE(sealer);
-    uint8 sealed[2][32];
-    usize sealedBytes[2] = {};
-    for (usize i = 0; i < 2; ++i) {
-        auto written =
-            sealer.Value().TrySeal(Span<const uint8>(), Text("ping"), Span<uint8>(sealed[i]));
+    const char* expected[] = {
+        "a69579ce4b0ac16b2a2d197be958e0cb69361bd7415ef1cdb5cc65750572438186d08b5e",
+        "10b9f904126695862fd60131b5cb958a0859aba200d67ba9b0035c0dd56cea05d4c187f2",
+        "a4353fa99205f7737b25d6822aca41b96514c9fe9fbd74d3a70456fa0cccfbad07b96fee",
+    };
+    uint8 sealed[64];
+    for (uint64 seq = 0; seq < 3; ++seq) {
+        uint8 message[20];
+        FillPattern(Span<uint8>(message), static_cast<uint8>(seq));
+        auto written = sealer.Value().TrySeal(Text("channel"), Span<const uint8>(message),
+                                              Span<uint8>(sealed));
         REQUIRE(written);
-        sealedBytes[i] = written.Value();
+        CHECK(Equals(Span<const uint8>(sealed).Left(written.Value()), expected[seq]));
     }
 
-    uint8 opened[32];
-    const auto expectSticky = [&](hazmat::AeadSequenceOpener& opener, usize index) {
-        memset(opened, 0xAA, sizeof(opened));
-        auto result = opener.TryOpen(Span<const uint8>(),
-                                     Span<const uint8>(sealed[index]).Left(sealedBytes[index]),
-                                     Span<uint8>(opened));
-        CHECK(result.Error() == ErrorCode::AuthenticationFailed);
-        CHECK(AllZero(Span<const uint8>(opened)));
-        CHECK(opener.HasFailed());
-    };
-
-    // 순서가 바뀌면 실패하고, 실패는 sticky라 원래 순서의 메시지도 더 열지 않는다.
-    auto reordered = makeOpener();
-    REQUIRE(reordered);
-    expectSticky(reordered.Value(), 1);
-    expectSticky(reordered.Value(), 0);
-    CHECK(reordered.Value().NextSequence() == 0);
-
-    // 재전송(같은 메시지 두 번)도 실패한다.
-    auto replayed = makeOpener();
-    REQUIRE(replayed);
-    REQUIRE(replayed.Value().TryOpen(Span<const uint8>(),
-                                     Span<const uint8>(sealed[0]).Left(sealedBytes[0]),
-                                     Span<uint8>(opened)));
-    expectSticky(replayed.Value(), 0);
-
-    // 호출자 버퍼 오류는 카운터와 상태를 바꾸지 않는다.
-    auto careful = makeOpener();
-    REQUIRE(careful);
-    CHECK(careful.Value()
-              .TryOpen(Span<const uint8>(), Span<const uint8>(sealed[0]).Left(sealedBytes[0]),
-                       Span<uint8>(opened).Left(3))
-              .Error() == ErrorCode::CapacityExceeded);
-    CHECK(!careful.Value().HasFailed());
-    CHECK(careful.Value().NextSequence() == 0);
-    REQUIRE(careful.Value().TryOpen(Span<const uint8>(),
-                                    Span<const uint8>(sealed[0]).Left(sealedBytes[0]),
-                                    Span<uint8>(opened)));
-    REQUIRE(careful.Value().TryOpen(Span<const uint8>(),
-                                    Span<const uint8>(sealed[1]).Left(sealedBytes[1]),
-                                    Span<uint8>(opened)));
-    CHECK(careful.Value().NextSequence() == 2);
-
-    uint8 small[8];
-    CHECK(sealer.Value().TrySeal(Span<const uint8>(), Text("ping"), Span<uint8>(small)).Error() ==
-          ErrorCode::CapacityExceeded);
-    CHECK(sealer.Value().NextSequence() == 2);
+    uint8 message[20];
+    FillPattern(Span<uint8>(message), 0);
+    sequence::SequenceAccess::SetNextSequence(sealer.Value(), 0x0102030405060708);
+    auto written =
+        sealer.Value().TrySeal(Text("channel"), Span<const uint8>(message), Span<uint8>(sealed));
+    REQUIRE(written);
+    CHECK(Equals(Span<const uint8>(sealed).Left(written.Value()),
+                 "24c77c10433c2319a29474dd69eb94eaa48ad245f33440da55fb4d2e4a65709779b06d98"));
 }
 
-TEST(CryptoAeadSequenceLimitsAndMisuse) {
-    uint8 keyBytes[32];
-    FillPattern(Span<uint8>(keyBytes), 0x55);
-    const uint8 prefix[4] = {1, 2, 3, 4};
-    constexpr uint64 Last = static_cast<uint64>(-1);
+TEST(CryptoAeadSequenceExhaustion) {
+    // 마지막 두 seq(2^64 - 3, 2^64 - 2)까지 봉인하고 그다음은 소진이다. 값은 Python으로 고정했다.
+    const IetfSequence fixture(0x55, 0);
+    uint8 iv[12];
+    for (usize i = 0; i < sizeof(iv); ++i) {
+        iv[i] = static_cast<uint8>(i + 1);
+    }
 
-    // 마지막 카운터까지 봉인하고 그다음은 CapacityExceeded다.
-    auto sealerKey =
-        AeadKey::TryImport(AeadAlgorithm::ChaCha20Poly1305Ietf, Span<const uint8>(keyBytes));
-    auto openerKey =
-        AeadKey::TryImport(AeadAlgorithm::ChaCha20Poly1305Ietf, Span<const uint8>(keyBytes));
-    REQUIRE(sealerKey && openerKey);
-    auto sealer = hazmat::AeadSequenceSealer::TryCreate(Move(sealerKey.Value()),
-                                                        Span<const uint8>(prefix), Last - 1);
-    auto opener = hazmat::AeadSequenceOpener::TryCreate(Move(openerKey.Value()),
-                                                        Span<const uint8>(prefix), Last - 1);
+    auto sealerKey = fixture.MakeKey();
+    auto sealer = hazmat::AeadSequenceSealer::TryCreate(Move(sealerKey), Span<const uint8>(iv));
+    auto opener = hazmat::AeadSequenceOpener::TryCreate(fixture.MakeKey(), Span<const uint8>(iv));
     REQUIRE(sealer && opener);
+    sequence::SequenceAccess::SetNextSequence(sealer.Value(), hazmat::AeadSequenceExhausted - 2);
+    sequence::SequenceAccess::SetNextSequence(opener.Value(), hazmat::AeadSequenceExhausted - 2);
+
+    // 마지막 seq에서 출력이 작아 실패해도 seq를 쓰지 않고 소진되지 않는다.
+    sequence::SequenceAccess::SetNextSequence(sealer.Value(), hazmat::AeadSequenceExhausted - 1);
+    uint8 small[8];
+    CHECK(sealer.Value().TrySeal(Span<const uint8>(), Text("tail"), Span<uint8>(small)).Error() ==
+          ErrorCode::CapacityExceeded);
+    CHECK(!sealer.Value().IsExhausted());
+    sequence::SequenceAccess::SetNextSequence(sealer.Value(), hazmat::AeadSequenceExhausted - 2);
+
+    const char* expected[] = {"0b78aa4acc33517ed8b464576fb8b3fb6893cee4",
+                              "b4970a8d3798abda11a0213aebddfcbd9210a324"};
     uint8 sealed[2][32];
     usize sealedBytes[2] = {};
     for (usize i = 0; i < 2; ++i) {
@@ -1104,52 +1105,246 @@ TEST(CryptoAeadSequenceLimitsAndMisuse) {
             sealer.Value().TrySeal(Span<const uint8>(), Text("tail"), Span<uint8>(sealed[i]));
         REQUIRE(written);
         sealedBytes[i] = written.Value();
+        CHECK(Equals(Span<const uint8>(sealed[i]).Left(sealedBytes[i]), expected[i]));
     }
 
+    CHECK(sealer.Value().IsExhausted());
+    CHECK(sealer.Value().NextSequence() == hazmat::AeadSequenceExhausted);
     uint8 extra[32];
     CHECK(sealer.Value().TrySeal(Span<const uint8>(), Text("tail"), Span<uint8>(extra)).Error() ==
           ErrorCode::CapacityExceeded);
-    CHECK(sealer.Value().NextSequence() == Last);
 
     uint8 opened[32];
-    REQUIRE(opener.Value().TryOpen(Span<const uint8>(),
-                                   Span<const uint8>(sealed[0]).Left(sealedBytes[0]),
-                                   Span<uint8>(opened)));
-    REQUIRE(opener.Value().TryOpen(Span<const uint8>(),
-                                   Span<const uint8>(sealed[1]).Left(sealedBytes[1]),
-                                   Span<uint8>(opened)));
-    // 소진 뒤에 온 메시지는 받지 않는다.
+    for (usize i = 0; i < 2; ++i) {
+        REQUIRE(opener.Value().TryOpen(Span<const uint8>(),
+                                       Span<const uint8>(sealed[i]).Left(sealedBytes[i]),
+                                       Span<uint8>(opened)));
+    }
+
+    CHECK(opener.Value().IsExhausted());
+    CHECK(!opener.Value().HasFailed());
+    // 소진 뒤에 온 메시지는 받지 않고 plaintext를 지운다(sticky).
+    memset(opened, 0xAA, sizeof(opened));
     CHECK(opener.Value()
               .TryOpen(Span<const uint8>(), Span<const uint8>(sealed[1]).Left(sealedBytes[1]),
                        Span<uint8>(opened))
               .Error() == ErrorCode::AuthenticationFailed);
+    CHECK(AllZero(Span<const uint8>(opened)));
     CHECK(opener.Value().HasFailed());
+}
 
-    // 만들기 오류: 빈 키, prefix 길이. 실패하면 키를 가져가지 않는다.
-    CHECK(hazmat::AeadSequenceSealer::TryCreate(AeadKey(), Span<const uint8>(prefix)).Error() ==
-          ErrorCode::StaleHandle);
-    auto key = AeadKey::TryImport(AeadAlgorithm::XChaCha20Poly1305, Span<const uint8>(keyBytes));
+TEST(CryptoAeadSequenceGcmBlockLimit) {
+    // AES-GCM은 키당 블록 한도를 넘을 메시지를 받지 않고 소진된다. ChaCha20 계열은 한도가 없다.
+    const uint64 limit = TryGetAeadInfo(AeadAlgorithm::Aes256Gcm).Value().maxBlocksPerKey;
+    CHECK(limit == (uint64{1} << 36) - 1);
+    CHECK(TryGetAeadInfo(AeadAlgorithm::Aes128Gcm).Value().maxBlocksPerKey == limit);
+    CHECK(TryGetAeadInfo(AeadAlgorithm::XChaCha20Poly1305).Value().maxBlocksPerKey == 0);
+    CHECK(TryGetAeadInfo(AeadAlgorithm::ChaCha20Poly1305Ietf).Value().maxBlocksPerKey == 0);
+    CHECK(TryGetAeadInfo(AeadAlgorithm::Aegis256).Value().maxBlocksPerKey == 0);
+    CHECK(TryGetAeadInfo(AeadAlgorithm::Aegis128L).Value().maxBlocksPerKey == 0);
+
+    const IetfSequence fixture(0x31, 0x70);
+    auto unlimited =
+        hazmat::AeadSequenceSealer::TryCreate(fixture.MakeKey(), Span<const uint8>(fixture.iv));
+    REQUIRE(unlimited);
+    sequence::SequenceAccess::SetUsedBlocks(unlimited.Value(), limit);
+    uint8 sealed[64];
+    CHECK(unlimited.Value().TrySeal(Span<const uint8>(), Text("0123456789abcdef"),
+                                    Span<uint8>(sealed)));
+
+    if (!IsAvailable(AeadAlgorithm::Aes256Gcm)) {
+        return;
+    }
+
+    auto key = AeadKey::TryGenerate(AeadAlgorithm::Aes256Gcm);
     REQUIRE(key);
-    CHECK(hazmat::AeadSequenceSealer::TryCreate(Move(key.Value()), Span<const uint8>(prefix))
-              .Error() == ErrorCode::InvalidArgument);
-    CHECK(!key.Value().IsEmpty());
-    uint8 prefix16[16] = {};
-    CHECK(hazmat::AeadSequenceOpener::TryCreate(Move(key.Value()),
-                                                Span<const uint8>(prefix16).Left(15))
-              .Error() == ErrorCode::InvalidArgument);
-    auto xchacha =
-        hazmat::AeadSequenceSealer::TryCreate(Move(key.Value()), Span<const uint8>(prefix16));
-    REQUIRE(xchacha);
-    CHECK(key.Value().IsEmpty());
+    uint8 iv[12] = {};
+    auto sealer = hazmat::AeadSequenceSealer::TryCreate(Move(key.Value()), Span<const uint8>(iv));
+    REQUIRE(sealer);
+    // 16 byte 평문 + 빈 AD = 2 블록. 남은 3 블록에 한 번 들어가고, 남은 1 블록에는 들어가지 않는다.
+    sequence::SequenceAccess::SetUsedBlocks(sealer.Value(), limit - 3);
+    REQUIRE(
+        sealer.Value().TrySeal(Span<const uint8>(), Text("0123456789abcdef"), Span<uint8>(sealed)));
+    CHECK(sealer.Value().UsedBlocks() == limit - 1);
+    CHECK(sealer.Value()
+              .TrySeal(Span<const uint8>(), Text("0123456789abcdef"), Span<uint8>(sealed))
+              .Error() == ErrorCode::CapacityExceeded);
+    CHECK(sealer.Value().IsExhausted());
+    CHECK(sealer.Value().NextSequence() == hazmat::AeadSequenceExhausted);
+    // 소진 뒤에는 한도 안의 작은 메시지도 받지 않는다(새 키로 바꾼다).
+    CHECK(sealer.Value()
+              .TrySeal(Span<const uint8>(), Span<const uint8>(), Span<uint8>(sealed))
+              .Error() == ErrorCode::CapacityExceeded);
+}
 
-    // 옮겨 간 객체와 기본 객체는 StaleHandle이다.
-    hazmat::AeadSequenceSealer moved = Move(xchacha.Value());
-    CHECK(xchacha.Value().IsEmpty());
-    CHECK(xchacha.Value().TrySeal(Span<const uint8>(), Text("x"), Span<uint8>(extra)).Error() ==
+TEST(CryptoAeadSequenceRejectsReorderAndReplay) {
+    const IetfSequence fixture(0x44, 0x12);
+    const Span<const uint8> iv = Span<const uint8>(fixture.iv);
+    auto sealer = hazmat::AeadSequenceSealer::TryCreate(fixture.MakeKey(), iv);
+    REQUIRE(sealer);
+    uint8 sealed[2][32];
+    usize sealedBytes[2] = {};
+    for (usize i = 0; i < 2; ++i) {
+        auto written = sealer.Value().TrySeal(Text("ad"), Text("ping"), Span<uint8>(sealed[i]));
+        REQUIRE(written);
+        sealedBytes[i] = written.Value();
+    }
+
+    const auto message = [&](usize index) {
+        return Span<const uint8>(sealed[index]).Left(sealedBytes[index]);
+    };
+    uint8 opened[32];
+    const auto expectSticky = [&](hazmat::AeadSequenceOpener& opener, Span<const uint8> ad,
+                                  Span<const uint8> input) {
+        memset(opened, 0xAA, sizeof(opened));
+        auto result = opener.TryOpen(ad, input, Span<uint8>(opened));
+        CHECK(result.Error() == ErrorCode::AuthenticationFailed);
+        CHECK(AllZero(Span<const uint8>(opened)));
+        CHECK(opener.HasFailed());
+    };
+
+    // 순서가 바뀌면 실패하고, 실패는 sticky라 원래 순서의 메시지도 더 열지 않는다.
+    auto reordered = hazmat::AeadSequenceOpener::TryCreate(fixture.MakeKey(), iv);
+    REQUIRE(reordered);
+    expectSticky(reordered.Value(), Text("ad"), message(1));
+    expectSticky(reordered.Value(), Text("ad"), message(0));
+    CHECK(reordered.Value().NextSequence() == 0);
+
+    // 재전송, 잘린 입력, 다른 AD도 sticky 실패다.
+    auto replayed = hazmat::AeadSequenceOpener::TryCreate(fixture.MakeKey(), iv);
+    REQUIRE(replayed);
+    REQUIRE(replayed.Value().TryOpen(Text("ad"), message(0), Span<uint8>(opened)));
+    expectSticky(replayed.Value(), Text("ad"), message(0));
+    auto truncated = hazmat::AeadSequenceOpener::TryCreate(fixture.MakeKey(), iv);
+    REQUIRE(truncated);
+    expectSticky(truncated.Value(), Text("ad"), message(0).Left(15));
+    auto otherAd = hazmat::AeadSequenceOpener::TryCreate(fixture.MakeKey(), iv);
+    REQUIRE(otherAd);
+    expectSticky(otherAd.Value(), Text("ae"), message(0));
+
+    // iv가 다른 opener(다른 방향·세션)는 열지 못한다.
+    uint8 otherIv[12];
+    memcpy(otherIv, fixture.iv, sizeof(otherIv));
+    otherIv[0] ^= 0x01;
+    auto otherDirection =
+        hazmat::AeadSequenceOpener::TryCreate(fixture.MakeKey(), Span<const uint8>(otherIv));
+    REQUIRE(otherDirection);
+    expectSticky(otherDirection.Value(), Text("ad"), message(0));
+
+    // 호출자 버퍼 오류는 seq와 상태를 바꾸지 않는다. 실패 뒤에도 겹침은 쓰기 전에
+    // InvalidArgument다.
+    auto careful = hazmat::AeadSequenceOpener::TryCreate(fixture.MakeKey(), iv);
+    REQUIRE(careful);
+    CHECK(careful.Value().TryOpen(Text("ad"), message(0), Span<uint8>(opened).Left(3)).Error() ==
+          ErrorCode::CapacityExceeded);
+    uint8 overlap[32];
+    memcpy(overlap, sealed[0], sealedBytes[0]);
+    CHECK(careful.Value()
+              .TryOpen(Text("ad"), Span<const uint8>(overlap).Left(sealedBytes[0]),
+                       Span<uint8>(overlap).RightChop(1))
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(!careful.Value().HasFailed());
+    CHECK(careful.Value().NextSequence() == 0);
+    REQUIRE(careful.Value().TryOpen(Text("ad"), message(0), Span<uint8>(opened)));
+    REQUIRE(careful.Value().TryOpen(Text("ad"), message(1), Span<uint8>(opened)));
+    CHECK(careful.Value().NextSequence() == 2);
+
+    CHECK(reordered.Value()
+              .TryOpen(Text("ad"), Span<const uint8>(overlap).Left(sealedBytes[0]),
+                       Span<uint8>(overlap).RightChop(1))
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(ConstantTimeEquals(Span<const uint8>(overlap).Left(sealedBytes[0]), message(0)));
+    CHECK(reordered.Value()
+              .TryOpen(Span<const uint8>(opened).Left(4), message(0), Span<uint8>(opened))
+              .Error() == ErrorCode::InvalidArgument);
+
+    // 봉인 쪽도 실패한 호출(출력 부족, 겹침)은 seq를 쓰지 않는다: 다음 성공이 같은 seq다.
+    auto retry = hazmat::AeadSequenceSealer::TryCreate(fixture.MakeKey(), iv);
+    REQUIRE(retry);
+    uint8 small[8];
+    CHECK(retry.Value().TrySeal(Text("ad"), Text("ping"), Span<uint8>(small)).Error() ==
+          ErrorCode::CapacityExceeded);
+    uint8 inPlace[32];
+    memcpy(inPlace + 1, "ping", 4);
+    CHECK(retry.Value()
+              .TrySeal(Text("ad"), Span<const uint8>(inPlace).Mid(1, 4), Span<uint8>(inPlace))
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(retry.Value().NextSequence() == 0);
+    uint8 again[32];
+    auto written = retry.Value().TrySeal(Text("ad"), Text("ping"), Span<uint8>(again));
+    REQUIRE(written);
+    CHECK(ConstantTimeEquals(Span<const uint8>(again).Left(written.Value()), message(0)));
+}
+
+TEST(CryptoAeadSequenceLifetimeAndMisuse) {
+    const IetfSequence fixture(0x66, 0x21);
+    const Span<const uint8> iv = Span<const uint8>(fixture.iv);
+
+    const usize used = GetSecretMemoryStatus().arenaUsedBytes;
+
+    // 만들기 오류: 빈 키는 StaleHandle, iv 길이(nonce 길이와 다름)는 InvalidArgument다. 실패하면
+    // 키를 가져가지 않는다.
+    CHECK(hazmat::AeadSequenceSealer::TryCreate(AeadKey(), iv).Error() == ErrorCode::StaleHandle);
+    CHECK(hazmat::AeadSequenceOpener::TryCreate(AeadKey(), iv).Error() == ErrorCode::StaleHandle);
+    AeadKey key = fixture.MakeKey();
+    REQUIRE(!key.IsEmpty());
+    CHECK(hazmat::AeadSequenceSealer::TryCreate(Move(key), iv.Left(11)).Error() ==
+          ErrorCode::InvalidArgument);
+    CHECK(hazmat::AeadSequenceOpener::TryCreate(Move(key), iv.Left(4)).Error() ==
+          ErrorCode::InvalidArgument);
+    CHECK(!key.IsEmpty());
+
+    // 기본 객체는 StaleHandle이다.
+    uint8 buffer[64];
+    hazmat::AeadSequenceSealer emptySealer;
+    hazmat::AeadSequenceOpener emptyOpener;
+    CHECK(emptySealer.TrySeal(Span<const uint8>(), Text("x"), Span<uint8>(buffer)).Error() ==
           ErrorCode::StaleHandle);
-    CHECK(moved.TrySeal(Span<const uint8>(), Text("x"), Span<uint8>(extra)));
-    hazmat::AeadSequenceOpener empty;
-    CHECK(
-        empty.TryOpen(Span<const uint8>(), Span<const uint8>(extra), Span<uint8>(opened)).Error() ==
-        ErrorCode::StaleHandle);
+    CHECK(emptyOpener
+              .TryOpen(Span<const uint8>(), Span<const uint8>(buffer).Left(20),
+                       Span<uint8>(buffer).RightChop(32))
+              .Error() == ErrorCode::StaleHandle);
+
+    // 이동은 seq를 함께 옮긴다(0부터 다시 시작하면 nonce가 다시 쓰인다). 옮겨 간 객체는
+    // StaleHandle이다.
+    {
+        auto created = hazmat::AeadSequenceSealer::TryCreate(Move(key), iv);
+        REQUIRE(created);
+        CHECK(key.IsEmpty());
+        uint8 first[32];
+        REQUIRE(created.Value().TrySeal(Span<const uint8>(), Text("one"), Span<uint8>(first)));
+        hazmat::AeadSequenceSealer moved = Move(created.Value());
+        CHECK(created.Value().IsEmpty());
+        CHECK(
+            created.Value().TrySeal(Span<const uint8>(), Text("x"), Span<uint8>(buffer)).Error() ==
+            ErrorCode::StaleHandle);
+        CHECK(moved.NextSequence() == 1);
+        uint8 second[32];
+        auto written = moved.TrySeal(Span<const uint8>(), Text("two"), Span<uint8>(second));
+        REQUIRE(written);
+
+        auto opener = hazmat::AeadSequenceOpener::TryCreate(fixture.MakeKey(), iv);
+        REQUIRE(opener);
+        uint8 opened[32];
+        REQUIRE(opener.Value().TryOpen(Span<const uint8>(), Span<const uint8>(first).Left(19),
+                                       Span<uint8>(opened)));
+        hazmat::AeadSequenceOpener movedOpener = Move(opener.Value());
+        CHECK(opener.Value().IsEmpty());
+        CHECK(movedOpener.NextSequence() == 1);
+        auto openedBytes = movedOpener.TryOpen(Span<const uint8>(),
+                                               Span<const uint8>(second).Left(written.Value()),
+                                               Span<uint8>(opened));
+        REQUIRE(openedBytes);
+        CHECK(ConstantTimeEquals(Span<const uint8>(opened).Left(3), Text("two")));
+
+        // 살아 있는 sealer 위로 이동 대입하면 이전 키를 돌려준다.
+        const usize twoKeys = GetSecretMemoryStatus().arenaUsedBytes;
+        auto replacement = hazmat::AeadSequenceSealer::TryCreate(fixture.MakeKey(), iv);
+        REQUIRE(replacement);
+        moved = Move(replacement.Value());
+        CHECK(GetSecretMemoryStatus().arenaUsedBytes == twoKeys);
+        CHECK(moved.NextSequence() == 0);
+    }
+
+    CHECK(GetSecretMemoryStatus().arenaUsedBytes == used);
 }

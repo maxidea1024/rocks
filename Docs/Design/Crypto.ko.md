@@ -354,6 +354,7 @@ struct AeadInfo {
     usize nonceBytes;
     usize tagBytes;
     uint64 maxMessageBytes;     // (key, nonce) 한 쌍의 평문 상한(11절 표)
+    uint64 maxBlocksPerKey;     // 키당 16 byte 블록 상한(AES-GCM 2^36 − 1, 그 밖은 0 = 없음, 11절)
     bool randomNonceSafe;       // 무작위 nonce를 쓸 수 있는가(XChaCha20, AEGIS-256)
     bool available;             // 이 기기에서 쓸 수 있는가. AES·AEGIS는 HW 명령이 있을 때만 true
     StringView implementation;  // 진단용. 예: "libsodium/aesni", "rocks-aes/arm64"
@@ -403,21 +404,32 @@ Result<void> TrySealDetached(const AeadKey& key, Span<const uint8> nonce, Span<c
 Result<void> TryOpenDetached(const AeadKey& key, Span<const uint8> nonce, Span<const uint8> associatedData,
                              Span<const uint8> ciphertext, Span<const uint8> tag, Span<uint8> plaintext) noexcept;
 
-// 순번 nonce 봉인기: 키를 소유하고 nonce = prefix ‖ 64bit 카운터(big-endian)를 스스로 만든다.
-// 전송 채널처럼 한 방향 순서가 있는 경우에 쓴다. 카운터가 끝에 닿으면 CapacityExceeded이고,
-// 키를 소유하므로 그 키로 더 봉인하는 경로가 남지 않는다.
-class AeadSequenceSealer { /* TryCreate(AeadKey&&, Span<const uint8> prefix), TrySeal(ad, plaintext, sealed) */ };
+// 순번 nonce 봉인기와 받는 쪽: 키를 소유하고 seq번째 nonce = iv XOR (0 ‖ BE64(seq))를 스스로 만든다
+// (TLS 1.3 5.3절·QUIC·HPKE와 같은 구성). 출력은 암호문 ‖ tag이고 nonce는 싣지 않는다.
+class AeadSequenceSealer {   // TryCreate(AeadKey&&, iv), TrySeal(ad, plaintext, sealed),
+                             // NextSequence, IsExhausted, UsedBlocks
+};
+class AeadSequenceOpener {   // TryCreate(AeadKey&&, iv), TryOpen(ad, sealed, plaintext),
+                             // NextSequence, IsExhausted, HasFailed
+};
 
 } // namespace rocks::crypto::hazmat
 ```
 
-AEAD 규칙(2026-11-15 구현, AeadSequenceSealer는 이후):
+AEAD 규칙(2026-11-15 구현):
 
 - 오류 순서는 빈 키 `StaleHandle` → 알고리즘(`Unsupported`) → 호출자 버퍼(길이·겹침 `InvalidArgument`, 출력 부족 `CapacityExceeded`) → 메시지 검사다. 메시지에서 온 길이(nonce + tag보다 짧은 입력, 분리 형식의 틀린 tag 길이, 상한을 넘는 암호문)와 tag 불일치는 모두 `AuthenticationFailed`이고 plaintext 전체를 0으로 지운다(결정 D5). 호출자 버퍼 오류는 쓰기 전에 돌려준다.
 - 제자리(7절): 고수준은 `plaintext.Data() == output.Data() + nonceBytes`(봉인), `plaintext.Data() == sealed.Data() + nonceBytes`(열기)만, hazmat은 입력과 출력의 시작 주소가 같을 때만 겹침을 허용한다. AD·nonce·tag가 출력과 겹치면 `InvalidArgument`다.
 - AES-256-GCM과 AEGIS는 6.1절의 HW 조건 하나를 함께 쓴다: `CpuFeatures`(x86-64 AES-NI·PCLMULQDQ·AVX, ARM64 AES·PMULL)와 libsodium 실행 감지가 모두 참이고 `crypto_aead_aes256gcm_is_available()`이 참일 때다. 마지막 값은 ARM에서 `HAVE_ARMCRYPTO` 빌드 정의를 확인한다(ARM 실행 감지는 빌드 정의와 무관하다). 조건이 아니면 libsodium soft 경로로 내려가지 않고 `Unsupported`다(결정 D3). PMULL 없는 ARM64에서 AES-256-GCM 키를 만들면 libsodium `beforenm`이 PMULL 명령에서 죽으므로 이 확인이 필요하다(2026-11-15 리뷰 반영).
 - hazmat의 GCM nonce는 96 bit만 받고 그 밖은 `Unsupported`, 다른 알고리즘의 nonce 길이 오류는 `InvalidArgument`다.
 - AES-GCM·AEGIS 복호는 libsodium이 검증 전 평문을 호출자 버퍼에 잠시 쓴다. 실패하면 반환 전에 지우므로 "검증 전 평문을 내보내지 않는다"(2절)는 API 경계에서 성립한다. 호출 중 같은 버퍼를 다른 스레드가 읽지 않게 한다.
+- 순번 봉인기(2026-11-15 설계 리뷰 반영). 신뢰할 수 있고 순서가 보장되는 전송에서 AES-GCM·AEGIS의 HW 처리량이 필요하거나 nonce를 싣지 않아야 할 때, 또는 TLS 1.3·QUIC·HPKE형 레코드 nonce와 맞출 때 쓴다. 그 밖의 레코드 채널은 secretstream(9.4절)이 낫다.
+  - nonce 구성은 prefix ‖ 카운터가 아니라 nonce 길이 iv와의 XOR이다. prefix 구성은 iv = prefix ‖ 0⁸인 특수한 경우이고, XOR 구성은 키마다 다른 nonce 오프셋(다중 사용자 보강, aead-limits의 GCM 다중 키 bound와 AEGIS draft가 전제한다)을 준다. iv는 키와 같은 키 스케줄에서 파생하고 전송하지 않으며 상수 라벨로 두지 않는다. 키가 세션·방향마다 새것이면 0이어도 된다(보강만 잃는다).
+  - 키 하나는 평생 sealer 하나(한 방향)만 쓴다. 방향을 prefix·라벨로 나누면 역할을 착각했을 때 양쪽이 같은 nonce로 봉인한다(fail-open). 두 방향은 kx의 rx·tx처럼 역할이 묶인 키로 나눈다(fail-closed). 같은 키 byte를 다시 가져오거나 같은 (master, subkeyId, context)로 다시 파생하면 seq 0부터 같은 nonce가 나오므로, 파생할 때 subkeyId는 저장된 단조 값이어야 한다. 두 방향을 함께 만드는 편의 생성은 후속 "전송 채널 보호" 계층에 둔다.
+  - 순번을 이어 가는 길(시작 seq 지정)은 두지 않는다. 봉인 뒤 저장 전에 죽으면 nonce가 다시 쓰이고(SP 800-38D 9.1절), 받는 쪽이 뒤처진 seq로 다시 만들면 재전송을 받아들인다. 재시작은 새 키(kx, 또는 쓰기 전에 durable하게 올린 epoch로 파생)로 한다. 경계 시험은 모듈 내부 접근점(`detail::SequenceAccess`, Private 헤더)으로 seq를 옮긴다.
+  - seq는 0부터 2^64 − 2까지 쓴다. `NextSequence() == 2^64 − 1`이 소진 표지이고 `IsExhausted()`가 이를 알린다. AES-GCM은 sealer가 키당 블록(메시지마다 평문 블록 + AD 블록 + 1)을 세어 `maxBlocksPerKey`를 넘을 메시지가 오면 소진으로 바꾼다. 소진 뒤 `TrySeal`은 `CapacityExceeded`이고, 출력 부족의 `CapacityExceeded`와는 `IsExhausted()`로 구분한다. 실패한 호출은 쓰기 전에 돌아오므로 seq를 쓰지 않는다.
+  - opener는 순서를 고정하고 인증 실패(순서 바뀜·빠짐·재전송·변조·절단·다른 AD)와 소진 뒤 메시지를 `AuthenticationFailed`(plaintext 소거, sticky)로 받는다(TLS 1.3 5.2절 bad_record_mac과 같다). sticky라서 키당 위조 시도가 한 번이므로 받는 쪽 integrity limit을 셀 필요가 없다(같은 키로 opener를 다시 만들지 않을 때). 겹침은 실패 뒤에도 쓰기 전에 `InvalidArgument`다. sealed 길이로 정해지는 평문보다 plaintext가 작으면 인증 전에 `CapacityExceeded`(상태 불변)이고, 길이는 전송로에 보이는 값이라 새 정보가 아니지만 프레이밍 계층이 최대 레코드 길이를 먼저 막는다. 스트림 끝(절단) 인증은 프로토콜 몫이다(TLS close_notify처럼).
+  - 명시적 순번 변형(DTLS·QUIC형)은 후속 "전송 채널 보호"에 둔다. 그 변형은 sticky가 아니고, 재전송 창(RFC 4303 3.4.3)을 두며, 인증 실패 수를 세어 integrity limit(RFC 9001 6.6절)을 지켜야 한다.
 - 시험: RFC 8439 2.8.2, XChaCha draft A.3.1 출력, AES-256-GCM과 빈 평문 tag(cryptography·pycryptodome로 계산), AEGIS draft 부록 TV1–TV3(tag256)과 libsodium 무작위 표 행(독립 Python 구현으로 재현). 모든 알고리즘의 hazmat 결합·분리 형식 변조(어댑터 소거가 관찰되는 AES-GCM 포함)·길이가 틀린 tag, 절단·다른 키·AD, 제자리와 시작 주소 ±1, 겹침 우선 순서, 출력 부족 시 무쓰기, GCM nonce 길이, `AeadInfo` 정확한 상한과 `CpuFeatures`로 정한 HW 사용 가능 여부·구현 이름, 타입 파생 KAT.
 
 **Crypto/Signature.h · KeyExchange.h (요약)**
@@ -854,8 +866,11 @@ public:
 | ChaCha20-Poly1305-IETF | 32 | 12 | 16 | 64 × (2^32 − 1) ≈ 256 GiB |
 | AES-256-GCM / AES-128-GCM | 32 / 16 | 12 | 16 | 2^36 − 32 B ≈ 64 GiB(NIST). libsodium AES-256-GCM은 구현이 한 블록 적게 받아 16 × (2^32 − 3) byte를 쓴다(헤더 상수 16 × (2^32 − 2)) |
 | AEGIS-256 / AEGIS-128L | 32 / 16 | 32 / 16 | 32 | 2^61 − 1. 무작위 nonce는 256이 사실상 무제한, 128L은 2^48개 |
+| 순번 봉인기(키당) | — | — | — | seq 2^64 − 1개. AES-GCM은 키당 2^36 − 1 블록(약 1 TiB): draft-irtf-cfrg-aead-limits의 기밀성 이점 (s + q + 1)^2 / 2^129를 TLS 1.3 5.5절과 같은 2^-57 아래로 둔다. ChaCha20-Poly1305·AEGIS는 nonce를 지키면 키당 데이터 한도가 없다 |
 | secretstream | 32 | header 24 | 17 | 메시지당 ≈ 256 GiB, 스트림은 무제한 |
 | 세그먼트 스트림 | 32 | header 88 | 16/세그먼트 | 2^32 세그먼트(64 KiB 세그먼트면 약 256 TiB) |
+
+키당 데이터 한도의 목표 확률은 2^-57(TLS 1.3 5.5절)로 둔다. 9.5절 AES 세그먼트 스트림의 2^48 B(약 2^-41)는 C3에서 같은 목표로 다시 정한다.
 
 - **스레드.** 자유 함수는 재진입 가능하다. 키 객체는 생성 뒤 불변이라 여러 스레드가 동시에 읽어도 된다. 연산 상태는 호출마다(일회성) 또는 스트림 객체마다 따로 있다. AES 라운드 키와 H 거듭제곱은 키를 만들 때 한 번 계산해 키 객체에 두고, 이후 바꾸지 않는다(5.3절).
 - **결정성.** 고수준 API는 무작위 nonce·salt를 쓰므로 출력이 실행마다 다르다. 시험은 hazmat의 nonce 지정 API와 고정 salt·`CpuFeatures` 주입 hook으로 재현한다. 이 hook은 시험 빌드에서만 컴파일되고 출하 빌드에서는 제외된다. 남아 있으면 salt 재사용으로 (키, nonce)가 재사용되기 때문이다. 정책 검사로 확인한다.
