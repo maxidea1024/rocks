@@ -86,10 +86,10 @@ public:
 |---|---|---|
 | `Abstract` | CLASS | 등록할 수 있으나 생성할 수 없다(`TypeFlags::Abstract`). |
 | `Version=N` | CLASS | 스키마·Record 버전(없으면 1). |
-| `WorldOnly` | CLASS | `TypeFlags::WorldOnly`. **상속된다** — base가 WorldOnly면 파생도 자동으로 WorldOnly다(TypeRegistry도 수동 등록에서 확인). 에셋 객체 Registry의 생성 거부는 패키지 단계(A0-O)의 정책이다. |
+| `WorldOnly` | CLASS | `TypeFlags::WorldOnly`. **상속된다** — base가 WorldOnly면 파생도 자동으로 WorldOnly다(TypeRegistry도 수동 등록에서 확인). 에셋 객체 Registry의 생성 거부는 패키지 단계(A0-O)의 정책이다([ObjectFoundations](../Design/ObjectFoundations.ko.md) 1.3절). |
 | `Transient` | PROPERTY | GC에서 추적하지만 저장 그래프에서 뺀다. |
 | `ReadOnly` | PROPERTY | 일반 write는 거부하고 생성·복원의 staged write만 허용한다. |
-| `EditorOnly` | PROPERTY | 플래그만 단다(항상 컴파일). 쿠킹 데이터에서 빼는 것은 graph v2(A0-O)이며 지금 graph는 보통 필드처럼 저장한다. |
+| `EditorOnly` | PROPERTY | 플래그만 단다(항상 컴파일). 쿠킹 데이터에서 빼는 것은 graph v2(A0-O — [ObjectFoundations](../Design/ObjectFoundations.ko.md) 4절)이며 지금 graph는 보통 필드처럼 저장한다. |
 | `Required` | PROPERTY | `ObjectRef<T>`·`SoftObjectRef<T>` 필드와 그 원소의 배열(`ObjectRefArray<T>`·`Array<SoftObjectRef<T>>` — 원소마다 non-null)에만 쓴다(그 밖은 RMC2202). 패키지 저장·쿠킹이 null을 거부한다(A1). 로드는 거부하지 않는다. |
 | `Name="…"` | PROPERTY | 도구·명령행 이름(`FieldSchema::toolName`). ASCII 식별자이며, 없으면 C++ 필드 이름이다. 상속 필드를 포함해 대소문자 무시로 유일해야 한다(RMC2203). 직렬화는 필드 ID를 쓰므로 이름과 무관하다. |
 | `Category="…"`·`DisplayName="…"` | PROPERTY | 표시용 UTF-8 문자열(아래). |

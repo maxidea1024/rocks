@@ -468,16 +468,16 @@ ObjectHandle의 index 0 또는 별도 예약값은 null이다. generation wrap �
 
 **Free → Reserved → Constructing → Published → DestroyRequested → Retiring → Free**를 기본 상태로 사용한다. 생성 중에는 private root를 유지하며 TypeInfo, 본체 생성, 초기 필드, handle을 완성한 뒤 release publication한다. 조회는 acquire로 상태와 주소를 관찰한다. 생성 실패 시 역순 정리하며 미완성 객체를 GC·에디터·네트워크에 공개하지 않는다.
 
-NewObject가 반환하는 RootRef는 첫 소유자의 추적 가능한 필드에 연결될 때까지 수명을 유지한다. Outer는 이름·패키지 계층이며 GC 소유권을 자동 의미하지 않는다. Entity가 Component를 유지하려면 명시적 ObjectRef/GcArray edge가 있어야 한다. 패키지 로더, 월드, editor selection, native subsystem도 root token을 등록한다.
+NewObject가 반환하는 RootRef는 첫 소유자의 추적 가능한 필드에 연결될 때까지 수명을 유지한다. Outer는 이름·패키지 계층이며 GC 소유권을 자동 의미하지 않는다(단 패키지 정책 Registry(에셋 객체 Registry)에서는 outer가 자손을 붙잡는다 — [ObjectFoundations](ObjectFoundations.ko.md) 1.7절). Entity가 Component를 유지하려면 명시적 ObjectRef/GcArray edge가 있어야 한다. 패키지 로더, 월드, editor selection, native subsystem도 root token을 등록한다.
 
-**Outer와 객체 경로(2026-11-11 결정, 미구현).** Outer는 에셋·패키지 계층(AssetRuntime·ObjectSerialization)을 구현할 때 아래의 좁은 의미로 도입한다. 현재 ObjectRuntime에는 Outer가 없다.
+**Outer와 객체 경로(2026-11-11 결정, 미구현).** Outer는 에셋·패키지 계층(AssetRuntime·ObjectSerialization)을 구현할 때 아래의 좁은 의미로 도입한다. 현재 ObjectRuntime에는 Outer가 없다. 구현 API는 [ObjectFoundations](ObjectFoundations.ko.md)(A0-O)다.
 
-- 역할은 객체 경로(이름 계층)와 패키지 소속 두 가지뿐이다. 소유·수명 관리는 Outer로 표현하지 않는다.
+- 역할은 객체 경로(이름 계층)와 패키지 소속 두 가지뿐이다. 소유·수명 관리는 Outer로 표현하지 않는다. 단 패키지 정책 Registry에서는 outer가 자손을 붙잡는다(저장 집합 결정성 — ObjectFoundations 1.7절).
 - 패키지에 저장되는 객체에는 필수이고 런타임 임시 객체는 null이다. UE의 transient package 같은 가짜 Outer는 두지 않는다.
-- inner → outer는 GC가 추적하는 강한 edge다. inner가 살아 있으면 outer도 살아 있지만, outer가 inner를 암묵적으로 살리지는 않는다. inner를 유지하려면 소유자가 명시적 `ObjectRef`/`GcArray` edge나 패키지 export table로 붙잡는다.
-- 같은 Outer 안에서 이름은 유일하다. Outer 변경(Rename/이동)은 Game lane에서 순환(자기 자신·자손을 outer로 지정), 패키지 간 이동, 이름 충돌을 검증한 뒤에만 허용하며 실패하면 아무것도 바꾸지 않는다.
+- inner → outer는 GC가 추적하는 강한 edge다. inner가 살아 있으면 outer도 살아 있지만, outer가 inner를 암묵적으로 살리지는 않는다. inner를 유지하려면 소유자가 명시적 `ObjectRef`/`GcArray` edge나 패키지 export table로 붙잡는다. 단 패키지 정책 Registry(에셋 객체 Registry)에서는 outer가 자손을 붙잡는다 — Registry의 자식 고리가 export table이라 저장 집합이 GC 시점과 무관하다.
+- 같은 Outer 안에서 이름은 유일하다. Outer 변경(Rename/이동)은 Game lane에서 순환(자기 자신·자손을 outer로 지정), 패키지 간 이동, 이름 충돌을 검증한 뒤에만 허용하며 실패하면 아무것도 바꾸지 않는다. A0-O는 Outer·이름을 생성 때 정하고 바꾸지 않는다(Rename·이동은 범위 밖 — ObjectFoundations 결정 2).
 - 게임플레이 소유(Entity → Component 등)는 Outer가 아니라 명시적 `ObjectRef` edge로 표현한다. default subobject의 안정 식별은 SubobjectGuid가 맡는다(§5.3).
-- 근거: UE의 Outer는 경로·패키지 소속·GC 효과를 한 필드에 섞어 "outer가 inner를 소유한다"는 오해와 rename 시 경로 변경 버그를 낳는다. 이 설명은 UE 일반 동작 기준이며 5.6 소스(`UObjectBase::OuterPrivate`, GC 참조 수집)로 대조하지 않았다.
+- 근거: UE의 Outer는 경로·패키지 소속·GC 효과를 한 필드에 섞어 "outer가 inner를 소유한다"는 오해와 rename 시 경로 변경 버그를 낳는다. 5.6 소스에서 GC가 Outer를 참조로 방문함을 확인했다(`FastReferenceCollector.h` 995행 — ObjectFoundations 10절). UE 패키지는 export를 붙잡지 않는다(에디터는 GC된 export가 있는 패키지를 다시 로드한다) — Rocks의 패키지 정책은 이 점에서 UE와 다르다.
 
 RequestDestroy는 논리적 사용 종료이며 즉시 delete가 아니다. owner Game lane에서 DestroyRequested 전이와 신규 사용·일반 task/activation admission 차단을 먼저 선형화한다. 그 뒤 기존 소유자의 짧은 teardown 전용 권한으로 Deactivate/EndPlay 순서의 필요한 종료 hook을 수행한다. 일반 Resolve/TryPin은 계속 실패하며 hook은 no-yield/no-safepoint이며 재진입 RequestDestroy는 idempotent다. 다른 lane의 요청은 Game lane commit 전까지 취소 요청 상태이며 즉시 파괴 완료로 보고하지 않는다.
 

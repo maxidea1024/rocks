@@ -53,6 +53,7 @@ dotnet msbuild Rocks.proj /t:Test /p:Configuration=Debug /p:RocksTarget=Foundati
 - [Core·Object·Input 상세 구현 계획](Docs/Design/CoreObjectInputDetailedPlan.ko.md)
 - [UI 툴킷 설계(게임 UI·에디터)](Docs/Design/UiToolkit.ko.md)
 - [압축 헬퍼 설계(코덱 선정·외부 라이브러리 통합·동기/비동기 API)](Docs/Design/Compression.ko.md)
+- [객체·그래프 보강(A0-O) 설계 — Outer·Name·Discard·관찰자·graph v2](Docs/Design/ObjectFoundations.ko.md)
 - [작업 목록](Docs/Design/CoreObjectInputTasks.ko.csv)
 - [예정 파일 구조](Docs/Design/CoreObjectInputFiles.ko.csv)
 - [다회차 설계 검증 결과](Docs/Reviews/DesignReview.ko.md)
