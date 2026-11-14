@@ -1196,7 +1196,8 @@ internal static class MetaTests
                 ("WithBase<int>* cache = nullptr;", objectPointer + "probe::WithBase<int"),
                 ("Multi<Plain, rocks::Object>* cache = nullptr;", objectPointer + "probe::Multi<probe::Plain, rocks::Object>)"),
                 ("Node* __restrict cache = nullptr;", objectPointer + "probe::Node)"),
-                ("rocks::ObjectRef<Node>* __restrict cache = nullptr;", "probe::Value::cache: ROCKS_NATIVE member holds a strong object reference (rocks::ObjectRef<probe::Node> *)")
+                // 래퍼 포인터는 Clang 철자에 따라 AST 검사(macOS)나 탐침(clang-cl)이 거부하므로 공통 앞부분만 대조한다.
+                ("rocks::ObjectRef<Node>* __restrict cache = nullptr;", "probe::Value::cache: ROCKS_NATIVE member holds a strong object reference (rocks::ObjectRef<")
             })
             {
                 await probe.RejectAsync(ProbeSource(member), "RMC2205", reason);
