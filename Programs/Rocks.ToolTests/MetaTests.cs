@@ -10,6 +10,11 @@ internal static class MetaTests
 {
     private const string Preamble = "#include <Meta/Annotations.h>\n#include <Object/ObjectRefs.h>\n#include <Object/Object.h>\n#include <Core/Text/String.h>\nnamespace probe {\n";
 
+    // MetaCompiler·Clang probe 프로세스 하나의 제한 시간이다. meta 시험은 CPU 수만큼 병렬로 돌고, 코어가 적은
+    // CI 러너(macOS)에서는 Binds 모듈처럼 무거운 probe가 60초를 넘을 수 있어 넉넉히 둔다. 멈춘 프로세스는 단계
+    // 제한(meta 30분)보다 훨씬 먼저 이 제한에 걸린다.
+    internal static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(300);
+
     private static string Declaration(string? field = null,
         string bases = "public rocks::Object", string extra = "") =>
         Preamble + $"ROCKS_CLASS()\nstruct Value : {bases} {{\n" +
@@ -1422,7 +1427,7 @@ internal static class MetaTests
                 arguments.AddRange(extra);
             }
 
-            var result = await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: TimeSpan.FromSeconds(60)));
+            var result = await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: ProbeTimeout));
             if (expectedCode is null)
             {
                 Verify.Equal(0, result.ExitCode, result.StdErr);
@@ -1486,7 +1491,7 @@ internal static class MetaTests
                     arguments.Add("--clang-arg=" + argument);
                 }
 
-                return await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: TimeSpan.FromSeconds(60)));
+                return await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: ProbeTimeout));
             }
 
             bool ValidationLeaked() => Directory.EnumerateDirectories(temporary.Root, ".rocks-meta-validation-*").Any();
@@ -1554,7 +1559,7 @@ internal static class MetaTests
                     arguments.Add("--clang-arg=" + argument);
                 }
 
-                return await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: TimeSpan.FromSeconds(60)));
+                return await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: ProbeTimeout));
             }
 
             var valid = await Run(aliasInput, MetaCompilerArguments.OutputRoot(temporary.Root), real);
@@ -1595,7 +1600,7 @@ internal static class MetaTests
                 arguments.Add("--clang-arg=" + argument);
             }
 
-            var result = await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: TimeSpan.FromSeconds(60)));
+            var result = await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: ProbeTimeout));
             Verify.That(result.ExitCode != 0, "throwing constructor was accepted");
             Verify.Contains("RMC3000", result.StdErr, "generated contract failure");
             Verify.Contains("diagnostic references CLASS a::Thing", result.StdErr, "qualified class reference");
@@ -1645,7 +1650,7 @@ internal static class MetaTests
                     arguments.Add("--clang-arg=" + argument);
                 }
 
-                var result = await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: TimeSpan.FromSeconds(60)));
+                var result = await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: ProbeTimeout));
                 Verify.That(result.ExitCode != 0, "invalid nested declaration was accepted");
                 Verify.Contains($"{bad}:{line}: error RMC2000".Replace('\\', '/'), result.StdErr.Replace('\\', '/'), "nested source file and physical line");
                 Verify.Contains("hint:", result.StdErr, "nested declaration correction guidance");
@@ -1671,7 +1676,7 @@ internal static class MetaTests
             }
 
             arguments.AddRange(options.ClangArguments);
-            return await ProcessRunner.RunAsync(new(compiler, arguments, options.Root, environment, Timeout: TimeSpan.FromSeconds(60)));
+            return await ProcessRunner.RunAsync(new(compiler, arguments, options.Root, environment, Timeout: ProbeTimeout));
         }
 
         public async Task RejectAsync(string source, string code, string reason)

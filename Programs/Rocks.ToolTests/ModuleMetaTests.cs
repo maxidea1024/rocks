@@ -1221,7 +1221,7 @@ internal static class ModuleMetaTests
                 arguments.Add("--clang-arg=" + argument);
             }
 
-            return await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: TimeSpan.FromSeconds(120)));
+            return await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: MetaTests.ProbeTimeout));
         }
 
         public void Dispose() => temporary.Dispose();
