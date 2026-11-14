@@ -4,7 +4,7 @@ namespace rocks::detail {
 
 Result<void> RetainText(TextNode* node) noexcept {
     platform::LockGuard lock(node->gate);
-    if (node->references == ~uint64(0)) {
+    if (node->references == NumericLimits<uint64>::Max()) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
     ++node->references;

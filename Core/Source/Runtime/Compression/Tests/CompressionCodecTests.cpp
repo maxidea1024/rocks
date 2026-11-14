@@ -83,7 +83,7 @@ Result<void> BorrowScratch(Allocator& scratch) noexcept {
 class XorCodec final : public CompressionCodec {
 public:
     Result<usize> TryGetCompressBound(usize sourceBytes) const noexcept override {
-        if (sourceBytes == static_cast<usize>(-1)) {
+        if (sourceBytes == MaxSize) {
             return Result<usize>::Failure(ErrorCode::Overflow);
         }
         return Result<usize>::Success(sourceBytes + 1);
@@ -129,7 +129,7 @@ public:
     mutable uint32 decompressCalls = 0;
 
     Result<usize> TryGetCompressBound(usize sourceBytes) const noexcept override {
-        if (sourceBytes > static_cast<usize>(-1) / 2) {
+        if (sourceBytes > MaxSize / 2) {
             return Result<usize>::Failure(ErrorCode::Overflow);
         }
         return Result<usize>::Success(sourceBytes * 2);
@@ -441,7 +441,7 @@ TEST(CompressionCodec_RoundTripThroughPublicApi) {
     const CompressionSettings settings = Settings(format, 7);
     CHECK(DefaultSettings(format).Level() == 5);
     CHECK(TryGetCompressBound(format, 10).Value() == 11);
-    CHECK(TryGetCompressBound(format, static_cast<usize>(-1)).Error() == ErrorCode::Overflow);
+    CHECK(TryGetCompressBound(format, MaxSize).Error() == ErrorCode::Overflow);
 
     Array<uint8> packed(allocator);
     static constexpr uint8 Base[] = {'k', 'e', 'e', 'p'};

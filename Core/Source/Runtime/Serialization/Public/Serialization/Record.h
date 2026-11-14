@@ -113,7 +113,7 @@ public:
     usize FieldCount() const noexcept;
 
 private:
-    static constexpr usize NoField = ~usize(0);
+    static constexpr usize NoField = IndexNone;
 
     RecordWriter(ArchiveWriter& out, usize start, RecordLimits limits) noexcept
         : out_(&out), start_(start), limits_(limits) {

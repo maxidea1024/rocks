@@ -232,7 +232,7 @@ Result<WorkerTaskHandle> WorkerTaskHandle::Clone() const noexcept {
         return Result<WorkerTaskHandle>::Failure(ErrorCode::StaleHandle);
     }
     platform::LockGuard lock(record_->state->gate);
-    if (record_->references == static_cast<uint64>(-1)) {
+    if (record_->references == NumericLimits<uint64>::Max()) {
         return Result<WorkerTaskHandle>::Failure(ErrorCode::Overflow);
     }
     ++record_->references;
@@ -438,7 +438,7 @@ Result<void> WorkerScheduler::Start(WorkerSchedulerConfig config) noexcept {
         platform::LockGuard lock(state->gate);
         if (state->workers != nullptr || state->accepting) {
             validation = ErrorCode::AlreadyExists;
-        } else if (state->generation == static_cast<uint64>(-1)) {
+        } else if (state->generation == NumericLimits<uint64>::Max()) {
             validation = ErrorCode::Overflow;
         }
     }
@@ -546,7 +546,7 @@ WorkerScheduler::Submit(Function<void(WorkerTaskContext&)>&& body,
         if (state->inFlight + state->reservations >= state->capacity) {
             return Result<WorkerTaskHandle>::Failure(ErrorCode::CapacityExceeded);
         }
-        if (state->references == static_cast<uint64>(-1)) {
+        if (state->references == NumericLimits<uint64>::Max()) {
             return Result<WorkerTaskHandle>::Failure(ErrorCode::Overflow);
         }
         for (usize index = 0; index < dependencies.Size(); ++index) {
@@ -557,7 +557,7 @@ WorkerScheduler::Submit(Function<void(WorkerTaskContext&)>&& body,
             if (dependency->state != state || dependency->generation != state->generation) {
                 return Result<WorkerTaskHandle>::Failure(ErrorCode::WrongContext);
             }
-            if (dependency->references == static_cast<uint64>(-1)) {
+            if (dependency->references == NumericLimits<uint64>::Max()) {
                 return Result<WorkerTaskHandle>::Failure(ErrorCode::Overflow);
             }
             for (usize earlier = 0; earlier < index; ++earlier) {
@@ -634,7 +634,7 @@ Result<WorkerTaskEvent> WorkerScheduler::TryCreateEvent() noexcept {
         if (state->inFlight + state->reservations >= state->capacity) {
             return Result<WorkerTaskEvent>::Failure(ErrorCode::CapacityExceeded);
         }
-        if (state->references == static_cast<uint64>(-1)) {
+        if (state->references == NumericLimits<uint64>::Max()) {
             return Result<WorkerTaskEvent>::Failure(ErrorCode::Overflow);
         }
         ++state->references; // 예약에서 record로 이전할 control 수명

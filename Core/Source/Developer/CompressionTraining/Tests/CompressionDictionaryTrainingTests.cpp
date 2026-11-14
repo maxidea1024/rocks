@@ -377,12 +377,13 @@ TEST(CompressionDictionaryTraining_Boundaries) {
     {
         Array<uint8> output(allocator);
         static const uint8 Probe[16] = {};
-        const usize overflow[] = {~usize{0} - 1, ~usize{0} - 1, 1, 1, 1};
+        const usize overflow[] = {MaxSize - 1, MaxSize - 1, 1, 1, 1};
         CHECK(TrainError(Span<const uint8>(Probe, 16), Span<const usize>(overflow, 5),
                          FixedSettings(), output) == ErrorCode::InvalidArgument);
-        const usize atLimit[] = {0xFFFFFFFFull - 4, 1, 1, 1, 1};
-        CHECK(TrainError(Span<const uint8>(Probe, 0xFFFFFFFFull), Span<const usize>(atLimit, 5),
-                         FixedSettings(), output) == ErrorCode::InvalidArgument);
+        const usize atLimit[] = {NumericLimits<uint32>::Max() - 4, 1, 1, 1, 1};
+        CHECK(TrainError(Span<const uint8>(Probe, NumericLimits<uint32>::Max()),
+                         Span<const usize>(atLimit, 5), FixedSettings(),
+                         output) == ErrorCode::InvalidArgument);
         CHECK(output.Size() == 0);
 
         Array<uint8> samples(allocator);

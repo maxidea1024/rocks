@@ -99,7 +99,7 @@ bool ExternalAllocator::IsAvailable() const noexcept {
 
 Result<void> ExternalAllocator::BeginFlight() noexcept {
     platform::LockGuard lock(gate_);
-    if (inFlight_ == static_cast<uint64>(-1)) {
+    if (inFlight_ == NumericLimits<uint64>::Max()) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
     ++inFlight_;
@@ -220,7 +220,7 @@ Result<void*> ExternalAllocator::Allocate(usize bytes, usize alignment, uint32 t
             }
         }
 
-        constexpr uint64 maximum = static_cast<uint64>(-1);
+        constexpr uint64 maximum = NumericLimits<uint64>::Max();
         overflow = stats_.liveAllocations == maximum || stats_.totalAllocations == maximum ||
                    static_cast<uint64>(bytes) > maximum - stats_.liveBytes;
         if (!overflow) {

@@ -128,7 +128,7 @@ public:
     usize ItemCount() const noexcept;
 
 private:
-    static constexpr usize NoItem = ~usize(0);
+    static constexpr usize NoItem = IndexNone;
 
     RecordListWriter(ArchiveWriter& out, usize start, uint32 count,
                      RecordListLimits limits) noexcept

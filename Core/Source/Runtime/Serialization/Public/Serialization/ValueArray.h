@@ -137,11 +137,13 @@ public:
     // maxBytes를 넘으면 CapacityExceeded다(쓰기 전에 거부한다). maxCount·shape는 reader에 넘길 값과
     // 같게 준다(기본값은 개수 제한 없음·wire 크기). out의 쓰기 오류를 그대로 돌려준다.
     static Result<ValueArrayWriter> Begin(ArchiveWriter& out, uint32 elementWire, uint32 count,
-                                          usize maxBytes, uint32 maxCount = 0xffffffffu,
+                                          usize maxBytes,
+                                          uint32 maxCount = NumericLimits<uint32>::Max(),
                                           ValueArrayShape shape = {}) noexcept;
 
     static Result<ValueArrayWriter> Begin(ArchiveWriter& out, WireType elementWire, uint32 count,
-                                          usize maxBytes, uint32 maxCount = 0xffffffffu,
+                                          usize maxBytes,
+                                          uint32 maxCount = NumericLimits<uint32>::Max(),
                                           ValueArrayShape shape = {}) noexcept {
         return Begin(out, static_cast<uint32>(elementWire), count, maxBytes, maxCount, shape);
     }

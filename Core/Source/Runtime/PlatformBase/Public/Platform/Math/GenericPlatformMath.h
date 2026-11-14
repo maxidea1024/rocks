@@ -476,7 +476,8 @@ struct GenericPlatformMath {
 protected:
     // 이미 정수로 반올림된 값이 int32에 정확히 들어가는지 검사한다. NaN은 비교가 false다.
     static bool TryToInt32(double rounded, int32& output) noexcept {
-        if (!(rounded >= -2147483648.0 && rounded <= 2147483647.0)) {
+        if (!(rounded >= static_cast<double>(NumericLimits<int32>::Min()) &&
+              rounded <= static_cast<double>(NumericLimits<int32>::Max()))) {
             return false;
         }
         output = static_cast<int32>(rounded);

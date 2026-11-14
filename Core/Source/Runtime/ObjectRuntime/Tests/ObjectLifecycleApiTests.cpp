@@ -296,7 +296,8 @@ TEST(ObjectLifecycleAutomaticContextAndStrictPolicy) {
         REQUIRE(types.Register({LifecycleType, 1, {}, {}}, MakeRuntimeTypeOps<LifecycleProbe>()));
         ObjectRegistry first(allocator, types, {306, 1});
         ObjectRegistry second(allocator, types, {306, 2});
-        ObjectRegistry strict(allocator, types, {306, 3}, {8, 0xffffffffu, true, {}});
+        ObjectRegistry strict(allocator, types, {306, 3},
+                              {8, NumericLimits<uint32>::Max(), true, {}});
         const auto firstAccess = first.OwnerAccess();
         const auto secondAccess = second.OwnerAccess();
         const auto strictAccess = strict.OwnerAccess();

@@ -165,7 +165,7 @@ FileStatus AsyncPositionalRead(uptr handle, uint64 offset, void* destination, us
     auto* output = static_cast<unsigned char*>(destination);
     while (transferred < bytes) {
         const uint64 position = offset + transferred;
-        if (position > static_cast<uint64>(0x7fffffffffffffffll)) {
+        if (position > static_cast<uint64>(NumericLimits<off_t>::Max())) {
             return {FileCode::Overflow, 0};
         }
         const usize remaining = bytes - transferred;
@@ -192,7 +192,7 @@ FileStatus AsyncPositionalWrite(uptr handle, uint64 offset, const void* source, 
     const auto* input = static_cast<const unsigned char*>(source);
     while (transferred < bytes) {
         const uint64 position = offset + transferred;
-        if (position > static_cast<uint64>(0x7fffffffffffffffll)) {
+        if (position > static_cast<uint64>(NumericLimits<off_t>::Max())) {
             return {FileCode::Overflow, 0};
         }
         const usize remaining = bytes - transferred;

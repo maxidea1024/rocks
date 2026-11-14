@@ -16,7 +16,7 @@ namespace rocks {
 // 필드의 대상 형식(배열이면 원소)이 가리키는 Enum·Struct 레코드(그 밖은 nullptr)다 — 이 참조는
 // lease가 아니라 dependents 계수로 표시하므로 Shutdown이 영구 Busy가 되지 않는다.
 struct TypeRegistry::Record {
-    static constexpr uint32 NoOps = 0xffffffffu;
+    static constexpr uint32 NoOps = NumericLimits<uint32>::Max();
 
     Record* next = nullptr;
     Record* previous = nullptr;

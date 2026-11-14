@@ -28,7 +28,7 @@ class SparseArray {
     static_assert(IsNothrowMoveConstructibleV<T>);
     static_assert(IsNothrowDestructibleV<T>);
 
-    static constexpr uint32 NoIndex = 0xffffffffu;
+    static constexpr uint32 NoIndex = NumericLimits<uint32>::Max();
 
     struct FreeLink {
         uint32 previous;
@@ -48,7 +48,7 @@ class SparseArray {
 
 public:
     static constexpr usize MaxSlots = 0xfffffffeu;
-    static constexpr usize NotFound = MaxSize;
+    static constexpr usize NotFound = IndexNone;
 
     explicit SparseArray(Allocator& allocator) noexcept
         : allocator_(&allocator), allocated_(allocator) {

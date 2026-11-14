@@ -448,7 +448,8 @@ Result<void*> CreateStreamCompressor(int32 level, uint64 sizeHint, Allocator& al
     // 선택에만 쓰고 frame에 기록하지 않는다(원본 크기는 모름). 사전 스트림은 원본 크기를 모르는
     // ZSTD_createCDict(L) 경로처럼 사전을 붙여(attach) 쓰고, 그 수준·힌트의 매개변수를 명시한다
     // (사전 크기는 attach 매개변수 선택에 들어가지 않는다).
-    const int hint = sizeHint > 0x7fffffffull ? 0x7fffffff : static_cast<int>(sizeHint);
+    constexpr int MaxHint = NumericLimits<int>::Max();
+    const int hint = sizeHint > static_cast<uint64>(MaxHint) ? MaxHint : static_cast<int>(sizeHint);
     const bool configured =
         SetCompressionParameter(context, ZSTD_c_compressionLevel, level) &&
         SetCompressionParameter(context, ZSTD_c_checksumFlag, 1) &&

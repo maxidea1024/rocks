@@ -441,7 +441,8 @@ TEST(PropertyPathParse_GrammarTable) {
         REQUIRE(ParsePropertyPath(lease.Value(), "numbers[0]", out));
         CHECK(out.count == 1 && out.steps[0].indexed && out.steps[0].index == 0);
         REQUIRE(ParsePropertyPath(lease.Value(), "numbers[4294967295]", out));
-        CHECK(out.steps[0].index == 4294967295u && out.steps[0].fieldId == NumbersId);
+        CHECK(out.steps[0].index == NumericLimits<uint32>::Max() &&
+              out.steps[0].fieldId == NumbersId);
         REQUIRE(ParsePropertyPath(lease.Value(), "parts[10].label", out));
         CHECK(out.count == 2 && out.steps[0].fieldId == PartsId && out.steps[0].index == 10 &&
               out.steps[0].indexed && out.steps[1].fieldId == LabelId && !out.steps[1].indexed &&

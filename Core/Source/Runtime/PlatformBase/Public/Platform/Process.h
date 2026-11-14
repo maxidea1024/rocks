@@ -77,6 +77,10 @@ enum class ProcessExitKind : uint8 {
 };
 
 struct ProcessExit {
+    // 종료 코드를 알 수 없을 때의 code다(POSIX에서 다른 코드가 자식을 회수함, Windows에서
+    // GetExitCodeProcess 실패). 실제로 이 값으로 끝난 자식(Windows exit(-1) 등)과 구별되지 않는다.
+    static constexpr uint32 UnknownCode = NumericLimits<uint32>::Max();
+
     ProcessExitKind kind = ProcessExitKind::Exited;
     uint32 code = 0;
 };
@@ -121,7 +125,8 @@ struct ProcessRunResult;
 //   회수하지 않고 관측만 하다가(WNOWAIT) Close에서 그룹을 끝낸 뒤 회수한다. 회수 전에는 PID·그룹
 //   번호가 다른 프로세스에 재사용되지 않으므로 다른 그룹을 죽이지 않는다. 이 보장의 전제는 같은
 //   프로세스의 다른 코드가 자식을 회수하지 않는 것이다(SIGCHLD를 SIG_IGN으로 두거나 waitpid(-1)을
-//   부르면 안 된다). 다른 코드가 회수했으면 종료 코드는 0xFFFFFFFF이고 이후 신호를 보내지 않는다.
+//   부르면 안 된다). 다른 코드가 회수했으면 종료 코드는 ProcessExit::UnknownCode이고 이후 신호를
+//   보내지 않는다.
 // - 부모 생존 감시: 오래 도는 워커는 입력을 Pipe로 받아 EOF를 부모 사망 신호로 쓴다(부모가 어떻게
 //   끝나도 OS가 pipe를 닫는다). IsProcessRunning(부모 PID)는 PID 재사용 때문에 보조 수단이다.
 // - 자식은 콘솔 창을 띄우지 않는다(Windows CREATE_NO_WINDOW). 자식은 이 객체가 만든 handle·fd만

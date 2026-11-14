@@ -12,8 +12,9 @@ struct NamePoolConfig {
     // 게시된 entry와 아직 게시되지 않은 후보 예약의 합에 적용하여 경합 시 임시 할당도 제한한다.
     usize maxStorageBytes = 16 * 1024 * 1024;
     // 충돌 회귀를 위한 축소 mask다. 0이면 모든 이름이 같은 hash이며 비교 규칙으로 구분한다.
-    // 기본값을 성능/보안 보장으로 해석하지 않는다. hash와 id는 공개 저장 형식이 아니다.
-    uint64 hashMask = static_cast<uint64>(-1);
+    // 기본값은 모든 bit(축소 없음)다. 기본값을 성능/보안 보장으로 해석하지 않는다. hash와 id는
+    // 공개 저장 형식이 아니다.
+    uint64 hashMask = NumericLimits<uint64>::Max();
 };
 
 // gate에서 복사한 bookkeeping snapshot이다. pending은 실제 할당 전 예약도 포함한다.

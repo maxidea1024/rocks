@@ -20,7 +20,7 @@ constexpr usize EntryBytes = 8;
 constexpr usize CrcCoveredHeaderBytes = 44;
 // flags bit0: 블록이 사전으로 압축되었다(헤더 32의 dictionaryFingerprint가 그 사전이다).
 constexpr uint32 FlagDictionary = 1;
-constexpr uint64 MaxBlockCount = 0xffffffffull;
+constexpr uint64 MaxBlockCount = NumericLimits<uint32>::Max();
 // 블록 수가 이 값 이하이거나 원본이 ParallelMinimumBytes보다 작으면 병렬 API도 순차로 처리한다
 // (helper 제출·worker 깨우기 비용이 일보다 크다).
 constexpr uint64 SequentialBlockLimit = 4;
@@ -445,7 +445,7 @@ Result<usize> TryGetCompressedBlocksBound(uint32 blockSizeLog2, uint64 rawSize) 
     }
 
     const uint64 index = IndexBytesFor(static_cast<uint32>(count));
-    if (rawSize > static_cast<uint64>(static_cast<usize>(-1)) - index) {
+    if (rawSize > static_cast<uint64>(MaxSize) - index) {
         return Result<usize>::Failure(ErrorCode::Overflow);
     }
 

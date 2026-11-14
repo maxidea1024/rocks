@@ -5,7 +5,7 @@ namespace rocks::detail {
 
 Result<void> RetainCatalog(CatalogData* data) noexcept {
     platform::LockGuard lock(data->gate);
-    if (data->references == ~uint64(0)) {
+    if (data->references == NumericLimits<uint64>::Max()) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
     ++data->references;

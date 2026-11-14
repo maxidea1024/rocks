@@ -21,7 +21,7 @@ int RunMathNegativeControl(uint32 operation) noexcept {
         // 반올림 결과 2^31은 int32 밖이다. SSE 보정 단계의 overflow 경로를 거친다.
         return math::RoundToInt32(static_cast<double>(justAboveInt32));
     case 2:
-        return (IntVec2(2147483647, 0) + IntVec2(1, 0)).x;
+        return (IntVec2(NumericLimits<int32>::Max(), 0) + IntVec2(1, 0)).x;
     case 3:
         math::TransformPoints(Mat4(), Span<const Vec3>(values, 2), Span<Vec3>(values, 3));
         return 0;

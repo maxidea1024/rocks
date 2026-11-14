@@ -371,7 +371,7 @@ Result<usize> CompressAppend(CompressorState& state, Span<const uint8> source, A
     }
 
     const usize base = output.Size();
-    if (bound.Value() > static_cast<usize>(-1) - base) {
+    if (bound.Value() > MaxSize - base) {
         return Result<usize>::Failure(ErrorCode::Overflow);
     }
 
@@ -428,7 +428,7 @@ Result<usize> DecompressAppend(DecompressorState& state, Span<const uint8> sourc
     if (source.Size() == 0 || OverlapsArrayStorage(source, output)) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
-    if (maxOutputBytes > static_cast<usize>(-1) - output.Size()) {
+    if (maxOutputBytes > MaxSize - output.Size()) {
         return Result<usize>::Failure(ErrorCode::Overflow);
     }
     if (state.plugin.Codec() != nullptr) {

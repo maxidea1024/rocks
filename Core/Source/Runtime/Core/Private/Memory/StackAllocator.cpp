@@ -133,7 +133,7 @@ Result<void*> StackAllocator::Allocate(usize bytes, usize alignment, uint32 tag)
         return Result<void*>::Success(nullptr);
     }
 
-    constexpr uint64 maximum = static_cast<uint64>(-1);
+    constexpr uint64 maximum = NumericLimits<uint64>::Max();
     if (stats_.allocations.liveAllocations == maximum ||
         stats_.allocations.totalAllocations == maximum ||
         bytes > maximum - stats_.allocations.liveBytes) {
@@ -293,7 +293,7 @@ Result<void> StackAllocator::Reset() noexcept {
     if (stats_.allocations.liveAllocations != 0) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
-    if (epoch_ == static_cast<uint64>(-1)) {
+    if (epoch_ == NumericLimits<uint64>::Max()) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
 
@@ -316,7 +316,7 @@ Result<void> StackAllocator::Trim() noexcept {
     if (stats_.allocations.liveAllocations != 0) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
-    if (epoch_ == static_cast<uint64>(-1)) {
+    if (epoch_ == NumericLimits<uint64>::Max()) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
 

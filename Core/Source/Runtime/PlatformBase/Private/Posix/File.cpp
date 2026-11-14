@@ -79,6 +79,9 @@ FileInfo InfoFromStat(const struct stat& state, bool isLink) noexcept {
     return info;
 }
 
+// read·write 한 번이 옮길 수 있는 최대 byte다(반환형 ssize_t의 범위).
+constexpr usize MaxTransferBytes = static_cast<usize>(NumericLimits<ssize_t>::Max());
+
 class PosixFileHandle final : public FileHandle {
 public:
     explicit PosixFileHandle(int handle) noexcept : handle_(handle) {
@@ -87,8 +90,7 @@ public:
         if (bytes == 0) {
             return {{}, 0};
         }
-        const usize amount =
-            bytes > static_cast<usize>(SSIZE_MAX) ? static_cast<usize>(SSIZE_MAX) : bytes;
+        const usize amount = bytes > MaxTransferBytes ? MaxTransferBytes : bytes;
         ssize_t count;
         do {
             count = read(handle_, destination, amount);
@@ -102,8 +104,7 @@ public:
         if (bytes == 0) {
             return {{}, 0};
         }
-        const usize amount =
-            bytes > static_cast<usize>(SSIZE_MAX) ? static_cast<usize>(SSIZE_MAX) : bytes;
+        const usize amount = bytes > MaxTransferBytes ? MaxTransferBytes : bytes;
         ssize_t count;
         do {
             count = write(handle_, source, amount);

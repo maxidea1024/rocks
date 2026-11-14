@@ -241,7 +241,8 @@ public:
         RecordListLimits limits = ArrayLoadLimits(budget_.limits);
         const uint32 remaining = budget_.RemainingElements();
         limits.maxItems = remaining < limits.maxItems ? remaining : limits.maxItems;
-        return RecordListReader::OpenField(*parent, field, itemSchema, 1, ~0u, limits);
+        return RecordListReader::OpenField(*parent, field, itemSchema, 1,
+                                           NumericLimits<uint32>::Max(), limits);
     }
 
     Result<RecordScope> OpenListItem(RecordListReader& list, usize index) noexcept override {
@@ -405,7 +406,7 @@ protected:
     }
 
 private:
-    static constexpr uint32 NoExpectation = ~0u;
+    static constexpr uint32 NoExpectation = NumericLimits<uint32>::Max();
 
     // 관찰 임시 값(관찰 struct 안 배열의 원소 버퍼 포함)의 할당기다. 단일 할당 한도 없이 바이트를
     // 이 문맥의 Charge로 청구한다 — 2단계는 관찰하지 않으므로 DecodeNode의 reader 작업 Δ 2배
@@ -527,13 +528,14 @@ public:
         // 1단계와 같은 목록 한도·항목 버전 범위, 무제한 operation·work. 스택이 비면 단독 Open(항목
         // Record 크기 한도는 1단계 객체 Record와 같다), 있으면 맨 위 Record의 OpenField다.
         if (RecordReader* parent = CurrentRecord()) {
-            return RecordListReader::OpenField(*parent, field, itemSchema, 1, ~0u,
+            return RecordListReader::OpenField(*parent, field, itemSchema, 1,
+                                               NumericLimits<uint32>::Max(),
                                                ArrayLoadLimits(limits_));
         }
 
-        return RecordListReader::Open(allocator_, field.payload, itemSchema, 1, ~0u,
-                                      {Unlimited(), limits_.maxTotalFields},
-                                      ArrayLoadLimits(limits_));
+        return RecordListReader::Open(
+            allocator_, field.payload, itemSchema, 1, NumericLimits<uint32>::Max(),
+            {Unlimited(), limits_.maxTotalFields}, ArrayLoadLimits(limits_));
     }
 
     Result<RecordScope> OpenListItem(RecordListReader& list, usize index) noexcept override {
@@ -616,8 +618,8 @@ private:
         ArchiveLimits limits;
         limits.maxTotalBytes = limits_.maxBytes;
         limits.maxValueBytes = limits_.maxValueBytes;
-        limits.maxOperations = ~uint64{0};
-        limits.maxWork = ~uint64{0};
+        limits.maxOperations = NumericLimits<uint64>::Max();
+        limits.maxWork = NumericLimits<uint64>::Max();
         return limits;
     }
 

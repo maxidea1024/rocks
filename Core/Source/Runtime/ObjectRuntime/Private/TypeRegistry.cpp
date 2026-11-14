@@ -38,15 +38,8 @@ TypeRegistry::~TypeRegistry() {
     }
 }
 
-namespace {
-
-// lease 계수가 포화하는 값이다.
-constexpr uint32 MaxRecordLeases = 0xffffffffu;
-
-} // namespace
-
 Result<TypeLease> TypeRegistry::LeaseLocked(Record* record) noexcept {
-    if (record->leases == MaxRecordLeases) {
+    if (record->leases == NumericLimits<uint32>::Max()) {
         return Result<TypeLease>::Failure(ErrorCode::Overflow);
     }
 
@@ -210,7 +203,7 @@ Result<TypeLease> TypeRegistry::AcquireStructByNative(const void* nativeType) no
 Result<TypeLease> TypeRegistry::Clone(void* pointer) noexcept {
     platform::LockGuard lock(gate_);
     auto* record = static_cast<Record*>(pointer);
-    if (closed_ || record->leases == MaxRecordLeases) {
+    if (closed_ || record->leases == NumericLimits<uint32>::Max()) {
         return Result<TypeLease>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Overflow);
     }
 

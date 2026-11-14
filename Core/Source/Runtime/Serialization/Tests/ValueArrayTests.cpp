@@ -334,21 +334,21 @@ TEST(ValueArray_SizePrecheckRunsBeforeAnyAllocation) {
     counting.DisableFailure();
     // count가 uint32 최대이고 maxCount를 풀어도 남은 byte 검사가 원소 할당 전에 끊는다. 부모를
     // 연 뒤의 OpenField·Open은 아무것도 할당하지 않는다.
-    auto huge = Header(backing, Wire(WireType::String), 0xffffffffu, 16);
+    auto huge = Header(backing, Wire(WireType::String), NumericLimits<uint32>::Max(), 16);
     RecordBuilder builder(backing, ParentSchema, 1);
     REQUIRE(builder.AddField(ArrayField, WireType::ValueArray, huge.View()));
     auto bytes = builder.Build();
     REQUIRE(bytes);
     RecordLimits generous;
-    generous.archive.maxOperations = ~0ull;
-    generous.archive.maxWork = ~0ull;
+    generous.archive.maxOperations = NumericLimits<uint64>::Max();
+    generous.archive.maxWork = NumericLimits<uint64>::Max();
     auto parent = RecordReader::Open(counting, bytes.Value().View(), ParentSchema, 1, 1, generous);
     REQUIRE(parent);
     auto field = parent.Value().Find(ArrayField);
     REQUIRE(field);
     counting.DisableFailure();
     auto opened = ValueArrayReader::OpenField(parent.Value(), field.Value(), Wire(WireType::String),
-                                              0xffffffffu);
+                                              NumericLimits<uint32>::Max());
     CHECK(!opened && opened.Error() == ErrorCode::InvalidArgument);
     CHECK(counting.Attempts() == 0);
 }
@@ -494,8 +494,8 @@ TEST(ValueArray_WriterLimitsAndMisuse) {
           ErrorCode::CapacityExceeded);
     CHECK(ValueArrayWriter::Begin(out, Wire(WireType::U32), 0, 7).Error() ==
           ErrorCode::CapacityExceeded);
-    CHECK(ValueArrayWriter::Begin(out, Wire(WireType::String), 0xffffffffu, 1024).Error() ==
-          ErrorCode::CapacityExceeded);
+    CHECK(ValueArrayWriter::Begin(out, Wire(WireType::String), NumericLimits<uint32>::Max(), 1024)
+              .Error() == ErrorCode::CapacityExceeded);
     CHECK(out.ByteCount() == 0);
 
     // 정확히 맞으면 통과한다.

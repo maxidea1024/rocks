@@ -187,8 +187,8 @@ uint64 DeclaredContentSize(Span<const uint8> source) noexcept {
 // 먼저 잡는다).
 usize MaximumExpansion(usize sourceBytes) noexcept {
     const usize slack = usize{64} << 10;
-    if (sourceBytes > (static_cast<usize>(-1) - slack) / 256) {
-        return static_cast<usize>(-1);
+    if (sourceBytes > (MaxSize - slack) / 256) {
+        return MaxSize;
     }
     return sourceBytes * 256 + slack;
 }
@@ -365,7 +365,7 @@ Result<usize> Bound(usize sourceBytes) noexcept {
     const usize blocks = sourceBytes / BlockBytes + (sourceBytes % BlockBytes != 0 ? 1 : 0);
     const usize overhead = LZ4F_HEADER_SIZE_MAX + blocks * LZ4F_BLOCK_HEADER_SIZE +
                            LZ4F_ENDMARK_SIZE + LZ4F_CONTENT_CHECKSUM_SIZE;
-    if (sourceBytes > static_cast<usize>(-1) - overhead) {
+    if (sourceBytes > MaxSize - overhead) {
         return Result<usize>::Failure(ErrorCode::Overflow);
     }
 

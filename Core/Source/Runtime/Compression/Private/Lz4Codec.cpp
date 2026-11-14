@@ -10,7 +10,7 @@ namespace rocks::detail::lz4 {
 namespace {
 
 constexpr int32 FastLevel = 1;
-constexpr usize IntMaximum = 0x7FFFFFFF;
+constexpr usize IntMaximum = static_cast<usize>(NumericLimits<int>::Max());
 constexpr usize AppendInitialBytes = usize{64} << 10;
 
 // LZ4 sequence는 match 길이를 255 단위 byte로 늘리므로 압축 byte당 원본은 255byte를 넘지 못한다.

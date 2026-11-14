@@ -31,6 +31,15 @@
 
 엔진 소유 Runtime과 공개 API에는 STL 컨테이너·문자열·알고리즘을 사용하지 않는다. 문자열은 자체 `String`/`StringView`, 번역 가능한 표시 문구는 별도 `Text` 계층으로 구분한다. 각 타입의 실제 구현 여부는 구현 상태 문서를 따른다. 외부 SDK와 호스트 도구는 설계에 명시한 경계에서 격리한다.
 
+## 형식 한계와 "없음" 표지
+
+형식의 한계를 `0xffffffffu`·`UINT32_MAX`·`SIZE_MAX`·`INT_MAX`·`FLT_MAX`·`static_cast<usize>(-1)`·`~0u`·`2147483647` 같은 날 숫자나 C 매크로로 쓰지 않는다. 값이 무엇을 뜻하는지(상한인지, 비어 있다는 표지인지)를 이름으로 드러낸다.
+
+- **최대·최소 검사**(계수 포화, 합의 상한, 좁히기 전 범위, "제한 없음" 한도 인자): `Base/NumericLimits.h`의 `NumericLimits<T>::Max()`·`Min()`·`Lowest()`(UE5.8 `TNumericLimits` 대응, constexpr, STL·CRT 비의존)를 쓴다. usize 최대값은 `MaxSize`다. T는 비교·대입하는 값의 형식과 같게 쓴다. `uint32` 칸을 `MaxSize`와 비교하면 항상 거짓이고, 부호가 다른 형식끼리는 명시 변환 뒤 비교한다(`static_cast<uint64>(NumericLimits<int32>::Max())`). 부동소수 `Min()`은 가장 작은 양의 정규 값이며 가장 작은 유한값은 `Lowest()`다.
+- **"없음" 표지**(찾지 못한 색인, 빈 슬롯, 아직 정하지 않은 값): 이름 있는 상수로 쓴다. 공용 표지는 usize 색인·위치용 `IndexNone`(UE5.8 `INDEX_NONE` 대응. 부호 없는 색인이라 -1이 아니라 최대값이다) 하나만 둔다. 공개 검색 API의 `NotFound`·`NoField` 같은 영역 이름은 `IndexNone`으로 정의한다. uint32 같은 다른 폭의 칸이나 색인이 아닌 값은 그 형식으로 선언한 영역 상수(`SlotArray::EndOfList`·`FieldCodecFrame::NoIndex`·`InfiniteTimeout`·`ProcessExit::UnknownCode` 등)를 그 형식의 최대값(`NumericLimits<T>::Max()`, usize는 `MaxSize`)으로 정의해 쓴다. 공용 상수를 폭별로 늘리지 않는 이유는 폭이 다른 공용 표지를 잘못 골라 비교가 항상 거짓이 되는 실수를 막고, 칸 선언 옆에서 형식과 뜻을 함께 보이기 위해서다. 최대값 이름(`MaxSize`·`NumericLimits<T>::Max()`)을 "없음"·실패 표지로 직접 반환·비교하지 않고 이름을 붙인다.
+- **예외(값 자체가 의미인 상수)**: 해시·CRC·FNV 초기값, 비트 마스크(`x & 0xffffffffu`, 부호 bit 마스크), 파일·wire 형식이나 알고리즘이 정한 값(zstd 사전 ID 범위, Linux 단일 read 한도 등. 이름 있는 형식 상수가 있으면 그것을 쓴다), 외부 API가 문서로 정한 값(`(DWORD)-1`, `D3D12_DEFAULT_SAMPLE_MASK` 같은 SDK 이름을 우선), 시험의 경계 입력(비트 패턴·10진 철자 자체를 검사하는 데이터)은 그대로 둔다. 시험도 한도 인자·"없음" 표지는 위 규칙을 따른다.
+- 정책 검사 `raw-limit-literal`(`PolicyChecks.RawLimitLiterals`)이 런타임·도구 C++ 소스(모듈 `Tests/`·테스트 runner 제외)의 C 한계 매크로, 부호 없는 형식의 -1 변환, 0의 비트 반전을 항상 거부하고, 32·64-bit 모든 bit·부호 있는 최대값과 같은 정수 리터럴은 `&`·`|`·`^`의 피연산자(비트 마스크)가 아니면 거부한다. 그 밖의 값 자체가 의미인 자리는 검사의 허용 목록에 파일과 철자로 등록하고 이유를 적는다.
+
 ## 컴파일러 진단
 
 **컴파일러 경고는 허용하지 않고 오류로 처리한다.** 로컬·CI와 모든 빌드 구성의 엔진 소유 코드에 같은 기준을 적용한다. `/W4 /WX` 또는 `-Wall -Wextra -Wpedantic -Werror`를 필수로 사용하며 경고 억제·강등으로 해결하지 않는다. 생성 코드·테스트도 예외가 아니다. 실제 컴파일 실패 하네스와 상세 규약은 [컴파일러 경고 정책](Design/CompilerDiagnostics.ko.md)을 따른다.
@@ -43,6 +52,6 @@
 
 C#(빌드 도구·검사 도구·모듈·타깃 규칙·게임 템플릿 규칙)은 Microsoft C# 규칙을 따른다(Allman 중괄호, 본문이 한 줄이어도 중괄호, 블록 뒤 빈 줄, 한 줄에 문장 하나). 같은 `format` 명령이 `global.json`이 고정한 .NET SDK의 `dotnet format`으로 `Build/Format/Rocks.Format.slnx`(저장소의 C# 프로젝트 전부)를 한 번에 검사하며 규칙은 `.editorconfig`의 `[*.cs]` 절이다. 저장소의 `.cs`(외부 라이브러리 원본·bin·obj 제외)가 모두 그 솔루션의 프로젝트에 속하는지도 확인해, 어느 프로젝트에도 속하지 않아 검사에서 빠지는 파일을 알린다. 위반은 `경로:행: 규칙 ID: 내용`으로 출력하고 `--write`를 붙이면 두 포매터가 고친다. 멤버 사이 빈 줄은 이 검사에 해당 규칙이 없어 리뷰에서 확인한다.
 
-빌드 시 공개 헤더를 각각 단독 include한 번역 단위로 컴파일한다. `dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll policy --root .`(PolicyChecks.Runtime)는 런타임 소스(Core·Engine·플러그인·프로그램, 모듈 `Tests/` 제외)의 금지 include와 `std::` 사용을 검사한다. 이 검사는 외부 SDK 내부나 최종 바이너리의 모든 의존성을 증명하는 검사는 아니다.
+빌드 시 공개 헤더를 각각 단독 include한 번역 단위로 컴파일한다. `dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll policy --root .`(PolicyChecks.Runtime)는 런타임 소스(Core·Engine·플러그인·프로그램, 모듈 `Tests/` 제외)의 금지 include와 `std::` 사용, 날 형식 한계 리터럴(`raw-limit-literal`)을 검사한다. 이 검사는 외부 SDK 내부나 최종 바이너리의 모든 의존성을 증명하는 검사는 아니다.
 
 포맷터는 책임 분리, 명명 품질, 주석의 정확성, 수명과 동시성 규약의 이해 가능성을 판정하지 않는다. 이 항목들은 코드 리뷰와 하네스 검증을 함께 요구한다.

@@ -187,8 +187,8 @@ TEST(Format_FieldsEscapesAndErrors) {
 }
 
 TEST(Format_Integers) {
-    CHECK(Formats("-9223372036854775808", "{}", static_cast<int64>(-0x7fffffffffffffffll - 1)));
-    CHECK(Formats("18446744073709551615", "{}", ~0ull));
+    CHECK(Formats("-9223372036854775808", "{}", NumericLimits<int64>::Min()));
+    CHECK(Formats("18446744073709551615", "{}", NumericLimits<uint64>::Max()));
     CHECK(Formats("255 ff FF 11111111 377", "{0} {0:x} {0:X} {0:b} {0:o}", 255));
     CHECK(Formats("0xff 0XFF 0b101 017 0", "{:#x} {:#X} {:#b} {:#o} {:#o}", 255, 255, 5, 15, 0));
     CHECK(Formats("+5 -5  5 5", "{:+} {:+} {: } {:-}", 5, -5, 5, 5));
@@ -359,8 +359,8 @@ TEST(Format_WorksWithLifoAllocatorAfterReserve) {
 TEST(NumberText_StrictIntegers) {
     CHECK(TryParseInt64("123").Value() == 123 && TryParseInt64("-123").Value() == -123);
     CHECK(TryParseInt64("+7").Value() == 7 && TryParseInt64("0").Value() == 0);
-    CHECK(TryParseInt64("9223372036854775807").Value() == 0x7fffffffffffffffll);
-    CHECK(TryParseInt64("-9223372036854775808").Value() == -0x7fffffffffffffffll - 1);
+    CHECK(TryParseInt64("9223372036854775807").Value() == NumericLimits<int64>::Max());
+    CHECK(TryParseInt64("-9223372036854775808").Value() == NumericLimits<int64>::Min());
     CHECK(TryParseInt64("9223372036854775808").Error() == ErrorCode::Overflow);
     CHECK(TryParseInt64("-9223372036854775809").Error() == ErrorCode::Overflow);
     CHECK(TryParseInt64("99999999999999999999999x").Error() == ErrorCode::InvalidArgument);
@@ -368,7 +368,7 @@ TEST(NumberText_StrictIntegers) {
     for (const char* text : invalid) {
         CHECK(TryParseInt64(text).Error() == ErrorCode::InvalidArgument);
     }
-    CHECK(TryParseUInt64("18446744073709551615").Value() == ~0ull);
+    CHECK(TryParseUInt64("18446744073709551615").Value() == NumericLimits<uint64>::Max());
     CHECK(TryParseUInt64("18446744073709551616").Error() == ErrorCode::Overflow);
     CHECK(TryParseUInt64("-1").Error() == ErrorCode::InvalidArgument);
     CHECK(TryParseUInt64("ff", 16).Value() == 255 && TryParseUInt64("FF", 16).Value() == 255);
@@ -376,10 +376,10 @@ TEST(NumberText_StrictIntegers) {
     CHECK(TryParseUInt64("102", 2).Error() == ErrorCode::InvalidArgument);
     CHECK(TryParseUInt64("1", 1).Error() == ErrorCode::InvalidArgument);
     CHECK(TryParseUInt64("1", 37).Error() == ErrorCode::InvalidArgument);
-    CHECK(TryParseInt32("2147483647").Value() == 2147483647);
-    CHECK(TryParseInt32("-2147483648").Value() == -2147483647 - 1);
+    CHECK(TryParseInt32("2147483647").Value() == NumericLimits<int32>::Max());
+    CHECK(TryParseInt32("-2147483648").Value() == NumericLimits<int32>::Min());
     CHECK(TryParseInt32("2147483648").Error() == ErrorCode::Overflow);
-    CHECK(TryParseUInt32("4294967295").Value() == 4294967295u);
+    CHECK(TryParseUInt32("4294967295").Value() == NumericLimits<uint32>::Max());
     CHECK(TryParseUInt32("4294967296").Error() == ErrorCode::Overflow);
 }
 

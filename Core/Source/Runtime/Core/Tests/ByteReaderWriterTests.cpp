@@ -90,7 +90,7 @@ TEST(ByteReader_CursorBoundsAndViews) {
 
     // Skip은 크기 계산이 넘치지 않는다.
     ByteReader huge{Span<const uint8>(Golden)};
-    CHECK(huge.Skip(1) && !huge.Skip(~usize(0)) && huge.Failed() && huge.Position() == 1);
+    CHECK(huge.Skip(1) && !huge.Skip(MaxSize) && huge.Failed() && huge.Position() == 1);
 
     // Take는 원본을 빌리고, Peek은 나아가지도 실패시키지도 않는다.
     ByteReader views{Span<const uint8>(Golden)};
@@ -247,14 +247,14 @@ TEST(ByteWriter_AppendsPatchesAndAliases) {
     Array<uint8> small(allocator);
     REQUIRE(small.TryPushBack(1));
     ByteWriter overflow(small);
-    overflow.PatchLittleEndian<uint64>(~usize(0) - 6, 0);
+    overflow.PatchLittleEndian<uint64>(MaxSize - 6, 0);
     CHECK(overflow.Error() == ErrorCode::InvalidArgument && small.Size() == 1 && small[0] == 1);
 
     // 크기가 표현 범위를 넘는 WriteZeros는 Overflow이며 target은 그대로다.
     Array<uint8> zeros(allocator);
     REQUIRE(zeros.TryPushBack(7));
     ByteWriter zeroWriter(zeros);
-    zeroWriter.WriteZeros(~usize(0));
+    zeroWriter.WriteZeros(MaxSize);
     CHECK(zeroWriter.Error() == ErrorCode::Overflow && zeros.Size() == 1 && zeros[0] == 7);
 
     // target 자신의 범위를 써도 된다: 재할당하며 전체를 붙이는 경우와 용량 안에서 부분을 붙이는

@@ -29,7 +29,7 @@ struct Name {
 
     // 발급 여부가 아니라 토큰의 구조만 검사한다. 실제 수명과 소유권은 Acquire로 확인한다.
     constexpr bool IsValid() const noexcept {
-        if (number > 2147483647u) {
+        if (number > static_cast<uint32>(NumericLimits<int32>::Max())) {
             return false;
         }
         if (kind == NameKind::None) {

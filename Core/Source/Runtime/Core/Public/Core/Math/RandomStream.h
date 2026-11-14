@@ -171,7 +171,7 @@ public:
         // 2의 보수 차이를 uint32에서 계산하면 최대 폭 2^32 - 1도 overflow 없이 표현된다.
         const uint32 span = static_cast<uint32>(maximum) - static_cast<uint32>(minimum);
         uint32 offset = 0;
-        if (span == 0xffffffffu) {
+        if (span == NumericLimits<uint32>::Max()) {
             // 값 개수 2^32는 uint32 bound로 표현할 수 없고, 모든 32bit 출력이 그대로 유효하다.
             offset = NextUInt32();
         } else {

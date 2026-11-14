@@ -115,9 +115,10 @@ Sha256Digest TestDigest() noexcept {
 // 값 배열(참조 없는 부분)을 채운다. names는 nameCount개다(MaxElements 시험이 4를 넘긴다).
 Result<void> FillValues(ArrayChild& value, usize nameCount) noexcept {
     bool ok = value.flags.TryPushBack(true) && value.flags.TryPushBack(false) &&
-              value.longs.TryPushBack(~uint64{0}) && value.longs.TryPushBack(uint64{0}) &&
-              value.doubles.TryPushBack(-0.5) && value.guids.TryPushBack(Guid{1, 2}) &&
-              value.guids.TryPushBack(Guid{}) && value.assets.TryPushBack(AssetId{Guid{9, 9}}) &&
+              value.longs.TryPushBack(NumericLimits<uint64>::Max()) &&
+              value.longs.TryPushBack(uint64{0}) && value.doubles.TryPushBack(-0.5) &&
+              value.guids.TryPushBack(Guid{1, 2}) && value.guids.TryPushBack(Guid{}) &&
+              value.assets.TryPushBack(AssetId{Guid{9, 9}}) &&
               value.digests.TryPushBack(TestDigest()) && value.ints.TryPushBack(int32{-7}) &&
               value.ints.TryPushBack(int32{0}) && value.ints.TryPushBack(int32{2147483647}) &&
               value.groups.TryPushBack(TextureGroup::EightBitData) &&
@@ -257,12 +258,12 @@ Result<Array<uint8>> SaveGraph(Allocator& allocator, ObjectRegistry& objects,
 bool CheckFilled(const ArrayChild& value, ObjectHandle self, ObjectHandle (&reached)[5]) noexcept {
     const Sha256Digest digest = TestDigest();
     bool ok = value.flags.Size() == 2 && value.flags[0] && !value.flags[1] &&
-              value.longs.Size() == 2 && value.longs[0] == ~uint64{0} && value.longs[1] == 0 &&
-              value.doubles.Size() == 1 && value.doubles[0] == -0.5 && value.guids.Size() == 2 &&
-              value.guids[0] == (Guid{1, 2}) && value.guids[1] == Guid{} &&
-              value.assets.Size() == 1 && value.assets[0] == AssetId{Guid{9, 9}} &&
-              value.digests.Size() == 1 && value.anySofts.Size() == 1 &&
-              value.anySofts[0].asset == AssetId{Guid{6, 6}} &&
+              value.longs.Size() == 2 && value.longs[0] == NumericLimits<uint64>::Max() &&
+              value.longs[1] == 0 && value.doubles.Size() == 1 && value.doubles[0] == -0.5 &&
+              value.guids.Size() == 2 && value.guids[0] == (Guid{1, 2}) &&
+              value.guids[1] == Guid{} && value.assets.Size() == 1 &&
+              value.assets[0] == AssetId{Guid{9, 9}} && value.digests.Size() == 1 &&
+              value.anySofts.Size() == 1 && value.anySofts[0].asset == AssetId{Guid{6, 6}} &&
               value.anySofts[0].objectPath.ByteCount() == 0;
     for (usize index = 0; ok && index < Sha256Digest::Bytes; ++index) {
         ok = value.digests[0].bytes[index] == digest.bytes[index];

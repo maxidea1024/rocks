@@ -42,7 +42,7 @@ Result<uint64> ObjectRegistry::BeginConstruction(const ObjectAccessContext& acce
         return Result<uint64>::Failure(ErrorCode::InvalidArgument);
     }
 
-    if (nextTransaction_ == 0 || constructions_ == 0xffffffffu) {
+    if (nextTransaction_ == 0 || constructions_ == NumericLimits<uint32>::Max()) {
         return Result<uint64>::Failure(ErrorCode::Overflow);
     }
 
@@ -181,7 +181,7 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
         if (growth.Value() != 0) {
             // 새 표(같은 크기 rebuild 또는 두 배)를 잠금 밖에서 받고 게시할 때 잠금 안에서 옮긴다.
             const uint64 tableBytes = uint64(growth.Value()) * sizeof(NameEntry);
-            if (tableBytes > static_cast<usize>(-1)) {
+            if (tableBytes > MaxSize) {
                 return fail(ErrorCode::CapacityExceeded);
             }
 
@@ -455,7 +455,7 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
             }
         }
 
-        if (roots.Size() > 0xffffffffu) {
+        if (roots.Size() > NumericLimits<uint32>::Max()) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }
 

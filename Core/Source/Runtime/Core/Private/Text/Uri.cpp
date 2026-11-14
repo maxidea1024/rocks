@@ -248,7 +248,7 @@ bool ParseAuthority(const char* data, usize begin, usize end, UriView& uri) noex
                 return false;
             }
             value = value * 10 + static_cast<uint32>(data[index] - '0');
-            if (value > 65535) {
+            if (value > NumericLimits<uint16>::Max()) {
                 return false;
             }
         }

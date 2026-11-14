@@ -5,7 +5,7 @@ namespace rocks {
 
 namespace {
 
-constexpr uint32 NoIndex = 0xffffffffu;
+constexpr uint32 NoIndex = NumericLimits<uint32>::Max();
 
 // interval 판정의 상대 허용오차다. 1/60초를 여러 번 더한 값이 0.1초에 아주 조금 못 미쳐 한 프레임
 // 늦게 실행되는 일을 막는다(GameClock의 고정 스텝 판정과 같은 값).

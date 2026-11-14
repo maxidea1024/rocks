@@ -79,7 +79,7 @@ uint32 CurrentProcessId() noexcept {
 }
 
 bool IsProcessRunning(uint32 processId) noexcept {
-    if (processId == 0 || processId > static_cast<uint32>(INT_MAX)) {
+    if (processId == 0 || processId > static_cast<uint32>(NumericLimits<pid_t>::Max())) {
         return false;
     }
 

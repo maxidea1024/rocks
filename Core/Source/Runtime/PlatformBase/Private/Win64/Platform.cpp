@@ -55,7 +55,7 @@ uint64 MonotonicNanoseconds() noexcept {
     // 정수 tick×10^9 중간 곱의 overflow를 피한다. 단위 변환은 해상도 향상을 뜻하지 않는다.
     const long double nanoseconds = static_cast<long double>(counter.QuadPart) * 1000000000.0L /
                                     static_cast<long double>(frequency.QuadPart);
-    if (nanoseconds >= static_cast<long double>(static_cast<uint64>(-1))) {
+    if (nanoseconds >= static_cast<long double>(NumericLimits<uint64>::Max())) {
         Fatal("Monotonic clock overflow");
     }
 

@@ -13,7 +13,7 @@ namespace rocks {
 namespace {
 
 bool AddBytes(usize& total, usize count) noexcept {
-    if (count > ~usize(0) - total) {
+    if (count > MaxSize - total) {
         return false;
     }
 
@@ -382,10 +382,10 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
                 return Result<TypeRegistrationToken>::Failure(ErrorCode::NotFound);
             }
 
-            if (ops.nativeBaseType != base->ops.nativeType || base->dependents == 0xffffffffu) {
-                return Result<TypeRegistrationToken>::Failure(base->dependents == 0xffffffffu
-                                                                  ? ErrorCode::Overflow
-                                                                  : ErrorCode::TypeMismatch);
+            const bool dependentsFull = base->dependents == NumericLimits<uint32>::Max();
+            if (ops.nativeBaseType != base->ops.nativeType || dependentsFull) {
+                return Result<TypeRegistrationToken>::Failure(
+                    dependentsFull ? ErrorCode::Overflow : ErrorCode::TypeMismatch);
             }
 
             // nativeBaseType은 Resolve<기반>의 포인터 변환 근거다. C++ 상속 자체는 등록 코드의
@@ -692,7 +692,7 @@ Result<void> TypeRegistry::ResolveValueTypes(Span<const FieldSchema> fields,
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
-        if (target->dependents >= 0xffffffffu - fields.Size()) {
+        if (target->dependents >= NumericLimits<uint32>::Max() - fields.Size()) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }
 

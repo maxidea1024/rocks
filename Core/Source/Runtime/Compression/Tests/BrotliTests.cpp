@@ -567,7 +567,7 @@ TEST(Brotli_DecodeOnlyFormatRejectsCompression) {
 
     CHECK(TryGetCompressBound(Format, 0).Error() == ErrorCode::Unsupported);
     CHECK(TryGetCompressBound(Format, usize{1} << 20).Error() == ErrorCode::Unsupported);
-    CHECK(TryGetCompressBound(Format, static_cast<usize>(-1)).Error() == ErrorCode::Unsupported);
+    CHECK(TryGetCompressBound(Format, MaxSize).Error() == ErrorCode::Unsupported);
 
     // 모르는 형식은 InvalidArgument다(해제 전용과 구분한다).
     CHECK(TryGetCompressionLevelRange(UnknownFormat).Error() == ErrorCode::InvalidArgument);

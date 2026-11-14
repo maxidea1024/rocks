@@ -14,13 +14,6 @@ namespace rocks {
 
 using namespace registry_detail;
 
-namespace {
-
-// ObjectStats의 32비트 누계 칸이 포화하는 값이다.
-constexpr uint32 MaxStatCount = 0xffffffffu;
-
-} // namespace
-
 void ObjectRegistry::VisitIdentityEdges(const Slot& slot, TraceVisitor& visitor) const noexcept {
     visitor.Visit(slot.outer);
     // 패키지 정책: 자식 고리가 export 표다. 처리 표시 아래라 고리가 바뀌지 않고 열린 생성
@@ -252,7 +245,7 @@ void ObjectRegistry::RetireLocked(Slot& slot) noexcept {
     // 없으므로 Alive는 Discard되지 않았다는 뜻이다. 종료(closed_) 뒤의 회수는 세지 않는다.
     if (slot.state == SlotState::Alive && options_.policy.packageNativeType != nullptr &&
         !closed_) {
-        if (tally_.retiredWithoutDiscard != MaxStatCount) {
+        if (tally_.retiredWithoutDiscard != NumericLimits<uint32>::Max()) {
             ++tally_.retiredWithoutDiscard;
         }
 
@@ -294,7 +287,7 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
     const uint64 started = platform::MonotonicNanoseconds();
     uint64 deadline = 0;
     if (budget.maxNanoseconds != 0) {
-        const uint64 maximum = static_cast<uint64>(-1);
+        const uint64 maximum = NumericLimits<uint64>::Max();
         deadline =
             budget.maxNanoseconds > maximum - started ? maximum : started + budget.maxNanoseconds;
     }

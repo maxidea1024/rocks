@@ -56,11 +56,11 @@ public:
     }
 
     static constexpr TimeSpan MinValue() noexcept {
-        return FromTicks(-0x7fffffffffffffffll - 1);
+        return FromTicks(NumericLimits<int64>::Min());
     }
 
     static constexpr TimeSpan MaxValue() noexcept {
-        return FromTicks(0x7fffffffffffffffll);
+        return FromTicks(NumericLimits<int64>::Max());
     }
 
     // 정수 단위 값으로 만든다. 예: TryFromMinutes(90)은 1시간 30분. 범위를 넘으면 Overflow다.

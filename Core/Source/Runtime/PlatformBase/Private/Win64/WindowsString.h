@@ -28,7 +28,7 @@ public:
     // OutOfMemory다. NUL 문자 검사는 하지 않는다(경로·인자 검사는 호출자가 먼저 한다).
     FileStatus AssignUtf8(const char* text, usize bytes) noexcept {
         Reset();
-        if (bytes > 0x7fffffffu) {
+        if (bytes > static_cast<usize>(NumericLimits<int>::Max())) {
             return {FileCode::Overflow, 0};
         }
 
@@ -204,7 +204,7 @@ inline bool WideToUtf8(const wchar_t* text, int units, char* buffer, usize capac
 // (ERROR_NO_UNICODE_TRANSLATION)다.
 inline FileStatus WriteUtf8(const wchar_t* text, usize units, char* buffer, usize capacity,
                             usize& bytes) noexcept {
-    if (units > 0x7fffffffu) {
+    if (units > static_cast<usize>(NumericLimits<int>::Max())) {
         return {FileCode::Overflow, 0};
     }
 

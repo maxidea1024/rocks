@@ -349,7 +349,8 @@ TryRegisterCompressionCodec(const CompressionCodecDescription& description,
             return Result<CompressionFormat>::Failure(ErrorCode::AlreadyExists);
         }
     }
-    constexpr uint64 MaxIssued = uint64{0xFFFFFFFF} - detail::FirstPluginFormatValue;
+    constexpr uint64 MaxIssued =
+        uint64{NumericLimits<uint32>::Max()} - detail::FirstPluginFormatValue;
     if (free == nullptr || registry.issued > MaxIssued) {
         return Result<CompressionFormat>::Failure(ErrorCode::CapacityExceeded);
     }

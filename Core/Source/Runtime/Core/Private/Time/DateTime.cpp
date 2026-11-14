@@ -186,15 +186,15 @@ Result<TimeSpan> TryParseTimeSpan(StringView text) noexcept {
                              static_cast<uint64>(minutes) * TimeSpan::TicksPerMinute +
                              static_cast<uint64>(seconds) * TimeSpan::TicksPerSecond +
                              static_cast<uint64>(fraction);
-    constexpr uint64 Limit = 0x8000000000000000ull;
+    // int64 최소값의 크기(2^63)다.
+    constexpr uint64 Limit = static_cast<uint64>(NumericLimits<int64>::Max()) + 1;
     if (magnitude > (negative ? Limit : Limit - 1)) {
         return Result<TimeSpan>::Failure(ErrorCode::Overflow);
     }
 
-    const int64 ticks = negative
-                            ? (magnitude == Limit ? static_cast<int64>(-0x7fffffffffffffffll - 1)
-                                                  : -static_cast<int64>(magnitude))
-                            : static_cast<int64>(magnitude);
+    const int64 ticks = negative ? (magnitude == Limit ? NumericLimits<int64>::Min()
+                                                       : -static_cast<int64>(magnitude))
+                                 : static_cast<int64>(magnitude);
     return Result<TimeSpan>::Success(TimeSpan::FromTicks(ticks));
 }
 

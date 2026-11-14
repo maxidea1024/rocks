@@ -64,7 +64,7 @@ uint64 MonotonicNanoseconds() noexcept {
 
     // 초를 ns로 바꾸기 전에 상한을 검사한다. 실패 시 wrap된 deadline을 반환하지 않는다.
     const uint64 seconds = static_cast<uint64>(time.tv_sec);
-    if (seconds > (static_cast<uint64>(-1) - 999999999) / 1000000000) {
+    if (seconds > (NumericLimits<uint64>::Max() - 999999999) / 1000000000) {
         Fatal("Monotonic clock overflow");
     }
 

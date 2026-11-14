@@ -36,7 +36,7 @@ inline int32 CheckedMultiply(int32 a, int32 b) noexcept {
 }
 
 inline int32 CheckedDivide(int32 a, int32 b) noexcept {
-    if (b == 0 || (a == -2147483647 - 1 && b == -1)) {
+    if (b == 0 || (a == NumericLimits<int32>::Min() && b == -1)) {
         platform::Fatal("IntVector division by zero or overflow");
     }
     return a / b;

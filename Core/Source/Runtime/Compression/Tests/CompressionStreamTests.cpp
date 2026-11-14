@@ -883,9 +883,8 @@ TEST(CompressionStream_LargeWindowsAndLimitEdges) {
                   ErrorCode::CapacityExceeded);
             CHECK(output.Size() == 4 && output.Capacity() >= size - 1);
 
-            // 상한 SIZE_MAX도 overflow 없이 동작한다.
-            auto unlimited =
-                DecompressStream::TryCreate(format, Limits(static_cast<usize>(-1)), allocator);
+            // 상한 MaxSize도 overflow 없이 동작한다.
+            auto unlimited = DecompressStream::TryCreate(format, Limits(MaxSize), allocator);
             REQUIRE(unlimited);
             Array<uint8> restored(allocator);
             CHECK(unlimited.Value().TryWriteAppend(View(packed), restored));

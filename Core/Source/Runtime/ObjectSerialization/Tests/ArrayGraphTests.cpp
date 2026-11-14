@@ -753,20 +753,20 @@ Result<void> Push(Array<String>& target, const char* text) noexcept {
 
 // 값 배열(참조 없는 부분)을 채운다. small이면 원소를 줄인다.
 Result<void> FillValues(Node& node, bool small) noexcept {
-    bool ok = node.flags.TryPushBack(true) && node.flags.TryPushBack(false) &&
-              node.bytes.TryPushBack(uint8{0}) && node.bytes.TryPushBack(uint8{7}) &&
-              node.bytes.TryPushBack(uint8{255}) && node.shorts.TryPushBack(uint16{65535}) &&
-              node.ints.TryPushBack(int32{-2147483647 - 1}) && node.ints.TryPushBack(int32{5}) &&
-              node.longs.TryPushBack(~uint64{0}) && node.doubles.TryPushBack(1.5) &&
-              node.guids.TryPushBack(Guid{1, 2}) && node.guids.TryPushBack(Guid{}) &&
-              node.assets.TryPushBack(AssetId{Guid{9, 9}}) &&
-              node.channels.TryPushBack(static_cast<Channels>(5)) &&
-              node.channels.TryPushBack(Channels::Alpha) &&
-              node.channels.TryPushBack(Channels::None) &&
-              node.groups.TryPushBack(TextureGroup::EightBitData) &&
-              node.points.TryPushBack(Vec3(1.5f, -2.0f, 0.25f)) &&
-              node.points.TryPushBack(Vec3()) && Push(node.names, "") && Push(node.names, "배열") &&
-              Push(node.single.notes, "x") && node.single.codes.TryPushBack(uint32{9});
+    bool ok =
+        node.flags.TryPushBack(true) && node.flags.TryPushBack(false) &&
+        node.bytes.TryPushBack(uint8{0}) && node.bytes.TryPushBack(uint8{7}) &&
+        node.bytes.TryPushBack(uint8{255}) && node.shorts.TryPushBack(uint16{65535}) &&
+        node.ints.TryPushBack(NumericLimits<int32>::Min()) && node.ints.TryPushBack(int32{5}) &&
+        node.longs.TryPushBack(NumericLimits<uint64>::Max()) && node.doubles.TryPushBack(1.5) &&
+        node.guids.TryPushBack(Guid{1, 2}) && node.guids.TryPushBack(Guid{}) &&
+        node.assets.TryPushBack(AssetId{Guid{9, 9}}) &&
+        node.channels.TryPushBack(static_cast<Channels>(5)) &&
+        node.channels.TryPushBack(Channels::Alpha) && node.channels.TryPushBack(Channels::None) &&
+        node.groups.TryPushBack(TextureGroup::EightBitData) &&
+        node.points.TryPushBack(Vec3(1.5f, -2.0f, 0.25f)) && node.points.TryPushBack(Vec3()) &&
+        Push(node.names, "") && Push(node.names, "배열") && Push(node.single.notes, "x") &&
+        node.single.codes.TryPushBack(uint32{9});
     if (!ok) {
         return Result<void>::Failure(ErrorCode::OutOfMemory);
     }
@@ -887,10 +887,10 @@ bool CheckFilled(const Node& node, ObjectHandle self, ObjectHandle other) noexce
     bool ok =
         node.flags.Size() == 2 && node.flags[0] && !node.flags[1] && node.bytes.Size() == 3 &&
         node.bytes[2] == 255 && node.shorts.Size() == 1 && node.shorts[0] == 65535 &&
-        node.ints.Size() == 2 && node.ints[0] == -2147483647 - 1 && node.ints[1] == 5 &&
-        node.longs.Size() == 1 && node.longs[0] == ~uint64{0} && node.doubles.Size() == 1 &&
-        node.doubles[0] == 1.5 && node.guids.Size() == 2 && node.guids[0] == (Guid{1, 2}) &&
-        node.guids[1] == Guid{} && node.names.Size() == 2 &&
+        node.ints.Size() == 2 && node.ints[0] == NumericLimits<int32>::Min() && node.ints[1] == 5 &&
+        node.longs.Size() == 1 && node.longs[0] == NumericLimits<uint64>::Max() &&
+        node.doubles.Size() == 1 && node.doubles[0] == 1.5 && node.guids.Size() == 2 &&
+        node.guids[0] == (Guid{1, 2}) && node.guids[1] == Guid{} && node.names.Size() == 2 &&
         node.names[0].View() == StringView("") && node.names[1].View() == StringView("배열") &&
         node.assets.Size() == 1 && node.assets[0] == AssetId{Guid{9, 9}} &&
         node.digests.Size() == 1 && node.digests[0].bytes[31] == 93 && node.softs.Size() == 3 &&
@@ -955,7 +955,7 @@ void Write32(Array<uint8>& bytes, usize at, uint32 value) noexcept {
     }
 }
 
-// 저장 byte에서 필드 ID·wire의 첫 TLV payload 위치다(없으면 ~0).
+// 저장 byte에서 필드 ID·wire의 첫 TLV payload 위치다(없으면 IndexNone).
 usize FindPayload(Span<const uint8> bytes, Guid field, WireType wire) noexcept {
     for (usize at = 0; at + 28 <= bytes.Size(); ++at) {
         if (Read64(bytes, at) == field.high && Read64(bytes, at + 8) == field.low &&
@@ -964,7 +964,7 @@ usize FindPayload(Span<const uint8> bytes, Guid field, WireType wire) noexcept {
         }
     }
 
-    return ~usize(0);
+    return IndexNone;
 }
 
 // 로드 결과 root가 가리키는 Node를 빌려 검사한다.
@@ -1145,7 +1145,7 @@ TEST(ArrayGraph_RequiredNullElementsAndElementDiagnosticPaths) {
             // 미선언 enum 원소(Flags enum에 없는 비트 16).
             const usize channels =
                 FindPayload(bytes.Value().View(), ChannelsId, WireType::ValueArray);
-            REQUIRE(channels != ~usize(0));
+            REQUIRE(channels != IndexNone);
             REQUIRE(Read32(bytes.Value().View(), channels + 4) == 3);
             Write64(bytes.Value(), channels + 8 + 8, 16);
             const uint32 constructed = Node::Constructed;
@@ -1366,6 +1366,9 @@ TEST(ArrayGraph_ObservationFillsArrayMembersAndSubstitutionSeesElementIndex) {
 
 namespace {
 
+// FirstLoadLimit·FirstSaveLimit이 성공하는 한도를 찾지 못했을 때의 값이다.
+constexpr uint32 NoPassingLimit = NumericLimits<uint32>::Max();
+
 // 한도 하나(원소·필드 누계, byte·객체·마이그레이션 한도)를 0부터 올려 처음 성공하는 값을 찾는다
 // (저장·로드 각각, last까지). 실패는 모두 CapacityExceeded이고 로드 실패는 생성자 전이다. base는
 // 다른 로드 옵션(마이그레이션 등)이다.
@@ -1388,7 +1391,7 @@ uint32 FirstLoadLimit(Allocator& allocator, ObjectRegistry& target, TypeRegistry
     }
 
     clean = false;
-    return ~0u;
+    return NoPassingLimit;
 }
 
 template <class Configure>
@@ -1406,7 +1409,7 @@ uint32 FirstSaveLimit(Allocator& allocator, ObjectRegistry& source, ObjectHandle
     }
 
     clean = false;
-    return ~0u;
+    return NoPassingLimit;
 }
 
 // 배열 필드 하나짜리 보조 클래스(링크·넓은 값·큰 원소·깊은 사슬)다.
@@ -1574,7 +1577,7 @@ TEST(ArrayGraph_PerFieldMaxElementsAndGraphTotals) {
             const uint32 saveElements =
                 FirstSaveLimit(allocator, source, root.Value().Handle(), elements, clean);
             CHECK(clean);
-            CHECK(loadElements != ~0u && loadElements > 40);
+            CHECK(loadElements != NoPassingLimit && loadElements > 40);
             CHECK(loadElements == saveElements);
 
             auto fields = [](ObjectGraphLimits& limits, uint32 value) noexcept {
@@ -1585,7 +1588,7 @@ TEST(ArrayGraph_PerFieldMaxElementsAndGraphTotals) {
             const uint32 saveFields =
                 FirstSaveLimit(allocator, source, root.Value().Handle(), fields, clean);
             CHECK(clean);
-            CHECK(loadFields != ~0u && loadFields == saveFields);
+            CHECK(loadFields != NoPassingLimit && loadFields == saveFields);
         }
 
         REQUIRE(source.Shutdown(source.OwnerAccess()));
@@ -1668,7 +1671,7 @@ TEST(ArrayGraph_ValueBytesAndMaxArrayElements) {
             REQUIRE(bitsLoaded);
             bitsLoaded.Value().Reset();
             const usize payload = FindPayload(bits.Value().View(), BitsId, WireType::ValueArray);
-            REQUIRE(payload != ~usize(0));
+            REQUIRE(payload != IndexNone);
             REQUIRE(Read32(bits.Value().View(), payload + 4) == MaxArrayElements);
             Write32(bits.Value(), payload + 4, MaxArrayElements + 1);
             const uint32 constructed = Wide::Constructed;
@@ -2143,7 +2146,7 @@ TEST(ArrayGraph_TargetTypeMismatchAndReachability) {
             CHECK(strict.Stats().liveObjects == 0);
 
             const usize payload = FindPayload(bytes.Value().View(), LinksId, WireType::ValueArray);
-            REQUIRE(payload != ~usize(0));
+            REQUIRE(payload != IndexNone);
             REQUIRE(Read32(bytes.Value().View(), payload + 4) == 2);
             Write64(bytes.Value(), payload + 8 + 8, 9);
             CHECK(LoadObjectGraph(allocator, loose, looseTypes, loose.OwnerAccess(),
@@ -2309,7 +2312,7 @@ TEST(ArrayGraph_ByteObjectMigrationAndValueLimitSweeps) {
                     limits.maxValueBytes = value;
                 },
                 clean, fileBytes + 1);
-            CHECK(firstValue != ~0u && firstValue < fileBytes);
+            CHECK(firstValue != NoPassingLimit && firstValue < fileBytes);
             TaggedMigrations = 0;
             const uint32 firstMigration = FirstLoadLimit(
                 allocator, migrated, newFixture.types, bytes.Value().View(),
@@ -2317,7 +2320,7 @@ TEST(ArrayGraph_ByteObjectMigrationAndValueLimitSweeps) {
                     limits.maxMigrationBytes = value;
                 },
                 clean, fileBytes + 1);
-            CHECK(firstMigration != ~0u && firstMigration > 0);
+            CHECK(firstMigration != NoPassingLimit && firstMigration > 0);
             CHECK(TaggedMigrations > 0);
             CHECK(clean);
             REQUIRE(target.Collect(target.OwnerAccess()));
@@ -2477,7 +2480,7 @@ TEST(ArrayGraph_UndeclaredEnumElementInsideStructElement) {
             auto bytes = SaveGraph(allocator, source);
             REQUIRE(bytes);
             const usize masks = FindPayload(bytes.Value().View(), MasksId, WireType::ValueArray);
-            REQUIRE(masks != ~usize(0));
+            REQUIRE(masks != IndexNone);
             REQUIRE(Read32(bytes.Value().View(), masks + 4) == 2);
             REQUIRE(Read64(bytes.Value().View(), masks + 16) == 4);
             Write64(bytes.Value(), masks + 16, 16 | 4);

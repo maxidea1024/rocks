@@ -77,8 +77,8 @@ TEST(ArchivePreservesFloatBitsAndSignedIntegerExtremes) {
         memcpy(&value, &bits, sizeof(value));
         REQUIRE(writer.WriteF64(value));
     }
-    constexpr int64 maximum = 0x7fffffffffffffffLL;
-    constexpr int64 minimum = -maximum - 1;
+    constexpr int64 maximum = NumericLimits<int64>::Max();
+    constexpr int64 minimum = NumericLimits<int64>::Min();
     REQUIRE(writer.WriteI64(minimum));
     REQUIRE(writer.WriteI64(maximum));
     auto reader = ArchiveReader::Create(writer.View());

@@ -154,7 +154,7 @@ template <typename T, typename V, typename A>
     }
 
     const T mask = static_cast<T>(convertedAlignment - 1);
-    if (convertedValue > static_cast<T>(static_cast<T>(~T{}) - mask)) {
+    if (convertedValue > static_cast<T>(NumericLimits<T>::Max() - mask)) {
         return false;
     }
 

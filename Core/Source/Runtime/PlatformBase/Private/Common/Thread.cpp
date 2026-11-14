@@ -83,7 +83,7 @@ WaitResult Thread::WaitForCompletion(uint32 timeoutMs) noexcept {
     auto& state = *reinterpret_cast<detail::ThreadState*>(storage_);
     LockGuard lock(state.gate);
     if (!state.joinable || detail::IsExecutingThread(state) ||
-        state.waiters == static_cast<uint64>(-1)) {
+        state.waiters == NumericLimits<uint64>::Max()) {
         return WaitResult::Failed;
     }
     ++state.waiters;

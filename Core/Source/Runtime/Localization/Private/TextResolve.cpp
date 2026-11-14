@@ -55,7 +55,7 @@ private:
                     if (entry.sourceRevision == node.sourceRevision) {
                         return Result<StringView>::Success(entry.translation.View());
                     }
-                    if (diagnostics_.staleTranslations == ~uint64(0)) {
+                    if (diagnostics_.staleTranslations == NumericLimits<uint64>::Max()) {
                         return Result<StringView>::Failure(ErrorCode::Overflow);
                     }
                     ++diagnostics_.staleTranslations;
@@ -63,7 +63,7 @@ private:
                 }
             }
         }
-        if (diagnostics_.missingTranslations == ~uint64(0)) {
+        if (diagnostics_.missingTranslations == NumericLimits<uint64>::Max()) {
             return Result<StringView>::Failure(ErrorCode::Overflow);
         }
         ++diagnostics_.missingTranslations;

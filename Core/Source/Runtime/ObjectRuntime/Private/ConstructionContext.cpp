@@ -103,9 +103,9 @@ Result<ObjectHandle> ConstructionContext::CreateImpl(TypeId type, const void* na
     // 가득 찼을 때만 두 배로 늘려(기하 성장) 생성마다 저널 전체를 다시 할당·복사하지 않는다.
     if (staged_.Size() == staged_.Capacity()) {
         const usize current = staged_.Capacity();
-        const usize grown = current > static_cast<usize>(-1) / 2 ? staged_.Size() + 1
-                            : current * 2 > staged_.Size() + 1   ? current * 2
-                                                                 : staged_.Size() + 1;
+        const usize grown = current > MaxSize / 2              ? staged_.Size() + 1
+                            : current * 2 > staged_.Size() + 1 ? current * 2
+                                                               : staged_.Size() + 1;
         auto reserve = staged_.TryReserve(grown);
         if (!reserve) {
             error_ = reserve.Error();

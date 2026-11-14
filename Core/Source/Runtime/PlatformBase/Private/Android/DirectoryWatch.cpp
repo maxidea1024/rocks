@@ -543,8 +543,10 @@ bool WatchWait(WatchBackend& backend, uint32 timeoutMilliseconds) noexcept {
         return false;
     }
     pollfd descriptor{backend.fd, POLLIN, 0};
-    const int timeout =
-        timeoutMilliseconds > 0x7FFFFFFFu ? 0x7FFFFFFF : static_cast<int>(timeoutMilliseconds);
+    constexpr int MaxTimeout = NumericLimits<int>::Max();
+    const int timeout = timeoutMilliseconds > static_cast<uint32>(MaxTimeout)
+                            ? MaxTimeout
+                            : static_cast<int>(timeoutMilliseconds);
     for (;;) {
         const int ready = poll(&descriptor, 1, timeout);
         if (ready < 0 && errno == EINTR) {

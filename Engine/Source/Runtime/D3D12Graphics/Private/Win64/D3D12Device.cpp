@@ -24,6 +24,9 @@ constexpr uint32 MaxMipLevels = 16;
 constexpr uint32 ConstantCount = sizeof(DrawConstants) / sizeof(uint32);
 // 스왑체인 하나가 파괴될 때 retire 목록에 넣는 항목 수(스왑체인 + 버퍼마다 하나)다.
 constexpr usize SwapChainRetireEntries = 1 + SwapChainBufferCount;
+// 소멸 때까지 놓지 않을 retire 항목의 fence 값이다. 정상 동작 중의 완료 값은 이 값에 닿지
+// 않는다.
+constexpr uint64 RetainUntilDestructionFence = NumericLimits<uint64>::Max();
 // dxgidebug.h의 DXGI_DEBUG_DXGI다(dxguid.lib 없이 쓰려고 값을 직접 둔다).
 constexpr GUID DxgiDebugDxgi = {
     0x25cddaa4, 0xb1c6, 0x47e1, {0xac, 0x3e, 0x98, 0x87, 0x5b, 0x5a, 0x2e, 0x2a}};
@@ -722,7 +725,7 @@ public:
         blend.BlendOpAlpha = D3D12_BLEND_OP_ADD;
         blend.LogicOp = D3D12_LOGIC_OP_NOOP;
         blend.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
-        state.SampleMask = 0xffffffffu;
+        state.SampleMask = D3D12_DEFAULT_SAMPLE_MASK;
         state.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
         state.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
         state.RasterizerState.DepthClipEnable = TRUE;
@@ -835,7 +838,7 @@ public:
         const uint64 value = ++fenceValue_;
         if (FAILED(queue_->Signal(fence_.Get(), value))) {
             // 장치 제거 등으로 완료를 알 수 없다. 이 프레임이 쓴 자원은 소멸 때까지 놓지 않는다.
-            AssignPendingRetires(UINT64_MAX);
+            AssignPendingRetires(RetainUntilDestructionFence);
             DrainValidationMessages();
             return Fail("queue signal failed");
         }
@@ -1304,7 +1307,7 @@ private:
 
     void KeepUntilDestruction(ComRef<ID3D12Resource>&& object) noexcept {
         Retired entry;
-        entry.fenceValue = UINT64_MAX;
+        entry.fenceValue = RetainUntilDestructionFence;
         entry.object.Attach(object.Detach());
         auto pushed = retired_.TryPushBack(Move(entry));
         if (!pushed) {

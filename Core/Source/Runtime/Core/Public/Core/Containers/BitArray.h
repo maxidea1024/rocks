@@ -54,7 +54,7 @@ enum class BitOperation {
 // 그 용량 안에서 사용한다. 기존 storage를 유지한 상태의 성장은 반환 순서 위반이 된다.
 class BitArray final {
 public:
-    static constexpr usize NotFound = MaxSize;
+    static constexpr usize NotFound = IndexNone;
 
     explicit BitArray(Allocator& allocator) noexcept : allocator_(&allocator) {
     }

@@ -119,7 +119,7 @@ struct GcBudget {
 // 한도는 생성 시 고정한다. maxGeneration을 낮추면 슬롯 고갈 회귀 시험을 할 수 있다.
 struct RegistryOptions {
     uint32 maxSlots = 1048576;
-    uint32 maxGeneration = 0xffffffffu;
+    uint32 maxGeneration = NumericLimits<uint32>::Max();
     // 기본값은 scope 없는 객체 자체 호출에 Registry의 문맥을 사용한다. World/PIE dispatcher가
     // 실행 문맥을 설정하는 구성은 true로 하여 무인자 생명주기·타입 조회 API의 scope 누락을
     // 거부한다. 명시적 ObjectAccessContext를 받는 Registry API의 검증에는 영향을 주지 않는다.
@@ -806,7 +806,8 @@ private:
     Slot* NextReclaimableLocked() noexcept;
     // 회수할 수 있는 슬롯을 차례로 회수한다(최대 maximum개, deadline이 지나면 멈춘다). 호출자는
     // 처리 표시(processing_)를 세운 상태다.
-    uint32 ReclaimEligible(uint32 maximum = 0xffffffffu, uint64 deadline = 0) noexcept;
+    uint32 ReclaimEligible(uint32 maximum = NumericLimits<uint32>::Max(),
+                           uint64 deadline = 0) noexcept;
     // 잠금 보유: Alive·DestroyRequested 슬롯을 Retired로 바꾸고 이름 색인·부모 고리에서 떼어 분류
     // 전 목록 끝에 붙인다(sweep).
     void RetireLocked(Slot&) noexcept;

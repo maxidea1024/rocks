@@ -19,7 +19,7 @@ namespace rocks {
 // Patch(InvalidArgument)가 나면 그 호출은 target을 바꾸지 않고, 그 뒤의 쓰기는 아무것도 하지
 // 않는다. 그러므로 target은 언제나 실패 전까지 성공한 쓰기들의 결과 그대로이며, 마지막에 Status()로
 // 한 번 확인하면 된다:
-//   if (body.Size() > 0xFFFFFFFFu) {             // 형식의 길이 필드가 u32다
+//   if (body.Size() > NumericLimits<uint32>::Max()) { // 형식의 길이 필드가 u32다
 //       return Result<void>::Failure(ErrorCode::CapacityExceeded);
 //   }
 //   Array<uint8> bytes(allocator);

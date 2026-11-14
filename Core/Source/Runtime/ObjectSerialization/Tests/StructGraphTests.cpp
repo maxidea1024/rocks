@@ -312,10 +312,10 @@ public:
         return Result<void>::Success();
     }
 
-    usize Count(FieldDiagnosticKind kind, usize pathSize = ~usize(0)) const noexcept {
+    usize Count(FieldDiagnosticKind kind, usize pathSize = IndexNone) const noexcept {
         usize found = 0;
         for (usize index = 0; index < count; ++index) {
-            found += kinds[index] == kind && (pathSize == ~usize(0) || paths[index] == pathSize);
+            found += kinds[index] == kind && (pathSize == IndexNone || paths[index] == pathSize);
         }
 
         return found;

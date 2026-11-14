@@ -121,7 +121,9 @@ int PollTimeout(uint32 milliseconds) noexcept {
         return -1;
     }
 
-    return milliseconds > static_cast<uint32>(INT_MAX) ? INT_MAX : static_cast<int>(milliseconds);
+    constexpr int MaxTimeout = NumericLimits<int>::Max();
+    return milliseconds > static_cast<uint32>(MaxTimeout) ? MaxTimeout
+                                                          : static_cast<int>(milliseconds);
 }
 
 uint64 DeadlineAfter(uint32 milliseconds) noexcept {
@@ -175,7 +177,8 @@ void RecordExit(Process::State& state, const siginfo_t& info) noexcept {
 }
 
 // 자식의 종료를 회수하지 않고 관측한다. block이면 끝날 때까지 기다린다. 다른 코드가 이미
-// 회수했으면(ECHILD) 결과를 알 수 없으므로 code 0xFFFFFFFF인 종료로 기록하고 이후 신호를 막는다.
+// 회수했으면(ECHILD) 결과를 알 수 없으므로 code ProcessExit::UnknownCode인 종료로 기록하고 이후
+// 신호를 막는다.
 ExitObservation ObserveExit(Process::State& state, bool block) noexcept {
     if (state.exited) {
         return ExitObservation::Exited;
@@ -201,7 +204,7 @@ ExitObservation ObserveExit(Process::State& state, bool block) noexcept {
         if (errno == ECHILD) {
             state.exit.kind =
                 state.terminateRequested ? ProcessExitKind::Terminated : ProcessExitKind::Exited;
-            state.exit.code = 0xFFFFFFFFu;
+            state.exit.code = ProcessExit::UnknownCode;
             state.exited = true;
             state.reapedElsewhere = true;
             return ExitObservation::Exited;
@@ -989,7 +992,7 @@ uint32 CurrentProcessId() noexcept {
 }
 
 bool IsProcessRunning(uint32 processId) noexcept {
-    if (processId == 0 || processId > static_cast<uint32>(INT_MAX)) {
+    if (processId == 0 || processId > static_cast<uint32>(NumericLimits<pid_t>::Max())) {
         return false;
     }
 

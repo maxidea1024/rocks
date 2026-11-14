@@ -266,19 +266,19 @@ constexpr bool EnumUnderlyingRange(ValueKind underlying, int64& minimum, int64& 
     switch (underlying) {
     case ValueKind::UInt8:
         minimum = 0;
-        maximum = 0xff;
+        maximum = NumericLimits<uint8>::Max();
         return true;
     case ValueKind::UInt16:
         minimum = 0;
-        maximum = 0xffff;
+        maximum = NumericLimits<uint16>::Max();
         return true;
     case ValueKind::UInt32:
         minimum = 0;
-        maximum = 0xffffffffll;
+        maximum = NumericLimits<uint32>::Max();
         return true;
     case ValueKind::Int32:
-        minimum = -0x80000000ll;
-        maximum = 0x7fffffffll;
+        minimum = NumericLimits<int32>::Min();
+        maximum = NumericLimits<int32>::Max();
         return true;
     default:
         return false;

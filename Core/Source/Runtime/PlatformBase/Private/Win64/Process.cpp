@@ -433,7 +433,7 @@ FileStatus PrepareStream(ProcessStreamMode mode, DWORD standard, bool parentRead
 void RecordExit(Process::State& state) noexcept {
     DWORD code = 0;
     if (!GetExitCodeProcess(state.process, &code)) {
-        code = static_cast<DWORD>(-1);
+        code = ProcessExit::UnknownCode;
     }
 
     state.exit.kind =

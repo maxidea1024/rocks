@@ -779,7 +779,7 @@ Result<void> ParsePropertyPath(const TypeLease& type, StringView text, PropertyP
             uint64 value = 0;
             while (position < size && IsDigit(data[position])) {
                 value = value * 10 + static_cast<uint64>(data[position] - '0');
-                if (value > 0xffffffffull) {
+                if (value > NumericLimits<uint32>::Max()) {
                     return fail(ErrorCode::InvalidArgument, PropertyPathError::Syntax, stepIndex,
                                 digitsStart);
                 }

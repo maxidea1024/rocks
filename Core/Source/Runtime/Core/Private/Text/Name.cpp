@@ -54,7 +54,7 @@ ParsedName ParseName(StringView source) noexcept {
         value = value * 10 + static_cast<uint64>(source.Data()[index] - '0');
     }
     // UE5.8은 MAX_int32 미만의 외부 번호만 접미사로 해석한다(NameTypes.h ParseNumberFromName).
-    if (value >= 2147483647ull) {
+    if (value >= static_cast<uint64>(NumericLimits<int32>::Max())) {
         return {size, 0};
     }
     return {firstDigit - 1, static_cast<uint32>(value + 1)};
@@ -258,7 +258,7 @@ Result<void> NamePool::Initialize(NamePoolConfig config) noexcept {
 }
 
 Result<Name> NamePool::TryIntern(StringView source) noexcept {
-    constexpr uint64 maximum = static_cast<uint64>(-1);
+    constexpr uint64 maximum = NumericLimits<uint64>::Max();
     constexpr uint64 maximumSerial = maximum >> BucketBits;
     {
         platform::LockGuard lock(gate_);
@@ -423,7 +423,7 @@ Result<NameLease> NamePool::Acquire(Name name) noexcept {
     }
     // 기본 None은 pool 저장소를 사용하지 않지만 lease 수명·shutdown 규약은 동일하다.
     if (name.kind == NameKind::None) {
-        if (stats_.activeLeases == static_cast<uint64>(-1)) {
+        if (stats_.activeLeases == NumericLimits<uint64>::Max()) {
             return Result<NameLease>::Failure(ErrorCode::Overflow);
         }
         ++stats_.activeLeases;
@@ -441,7 +441,7 @@ Result<NameLease> NamePool::Acquire(Name name) noexcept {
             continue;
         }
 
-        if (stats_.activeLeases == static_cast<uint64>(-1)) {
+        if (stats_.activeLeases == NumericLimits<uint64>::Max()) {
             return Result<NameLease>::Failure(ErrorCode::Overflow);
         }
 

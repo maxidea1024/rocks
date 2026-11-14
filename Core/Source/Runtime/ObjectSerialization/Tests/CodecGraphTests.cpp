@@ -890,7 +890,7 @@ TEST(Codec_ThroughFieldValueRoundTripsEveryValueKind) {
                 REQUIRE(borrowed);
                 Node& node = *borrowed.Value().Get().Value();
                 node.key = Guid{0x0102030405060708ull, 0x090a0b0c0d0e0f10ull};
-                node.count = -2147483647 - 1;
+                node.count = NumericLimits<int32>::Min();
                 REQUIRE(node.label.TryAssign("가나다"));
                 node.enabled = true;
                 node.small = 0xff;

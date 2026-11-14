@@ -13,7 +13,7 @@ using namespace registry_detail;
 namespace {
 
 // 관찰자가 없는 Registry의 남은 새 키 공간이다(제한 없음 — 기록하지 않으므로 예약도 없다).
-constexpr usize UnlimitedObserverKeys = ~usize(0);
+constexpr usize UnlimitedObserverKeys = MaxSize;
 
 } // namespace
 

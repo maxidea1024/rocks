@@ -458,29 +458,30 @@ void CheckStructOwner(const StructOwner& value, ObjectHandle self) noexcept {
 // 삽입과 원소 멤버 쓰기만으로 채운다. other는 다른 ArrayOwner다.
 void FillArrayChild(const Paths& paths, Allocator& allocator, ObjectHandle self,
                     ObjectHandle other) noexcept {
-    Entry elements[] = {{"flags[0]", Boolean(allocator, true)},
-                        {"flags[1]", Boolean(allocator, false)},
-                        {"longs[0]", Unsigned(allocator, ValueKind::UInt64, ~uint64{0})},
-                        {"doubles[0]", Float64(allocator, -0.5)},
-                        {"guids[0]", Identifier(allocator, ValueKind::Guid, Guid{1, 2})},
-                        {"assets[0]", Identifier(allocator, ValueKind::AssetId, Guid{9, 9})},
-                        {"digests[0]", Digest(allocator, 0)},
-                        {"ints[0]", Signed(allocator, ValueKind::Int32, -7)},
-                        {"ints[1]", Signed(allocator, ValueKind::Int32, 2147483647)},
-                        {"names[0]", Text(allocator, "경로")},
-                        {"names[1]", Text(allocator, "")},
-                        {"groups[0]", EnumValue(allocator, TypeIdOf<TextureGroup>(), 7)},
-                        {"channels[0]", EnumValue(allocator, TypeIdOf<Channels>(), 5)},
-                        {"softs[0]", Soft(allocator, Guid{5, 5}, "Mesh.Socket")},
-                        {"anySofts[0]", Soft(allocator, Guid{6, 6}, "")},
-                        {"links[0]", Reference(allocator, other)},
-                        {"links[1]", Reference(allocator, ObjectHandle{})},
-                        {"links[2]", Reference(allocator, self)},
-                        {"required[0]", Reference(allocator, other)},
-                        {"bundle.refs[0]", Reference(allocator, ObjectHandle{})},
-                        {"bundle.refs[1]", Reference(allocator, other)},
-                        {"extra[0]", Unsigned(allocator, ValueKind::UInt8, 0)},
-                        {"extra[1]", Unsigned(allocator, ValueKind::UInt8, 255)}};
+    Entry elements[] = {
+        {"flags[0]", Boolean(allocator, true)},
+        {"flags[1]", Boolean(allocator, false)},
+        {"longs[0]", Unsigned(allocator, ValueKind::UInt64, NumericLimits<uint64>::Max())},
+        {"doubles[0]", Float64(allocator, -0.5)},
+        {"guids[0]", Identifier(allocator, ValueKind::Guid, Guid{1, 2})},
+        {"assets[0]", Identifier(allocator, ValueKind::AssetId, Guid{9, 9})},
+        {"digests[0]", Digest(allocator, 0)},
+        {"ints[0]", Signed(allocator, ValueKind::Int32, -7)},
+        {"ints[1]", Signed(allocator, ValueKind::Int32, 2147483647)},
+        {"names[0]", Text(allocator, "경로")},
+        {"names[1]", Text(allocator, "")},
+        {"groups[0]", EnumValue(allocator, TypeIdOf<TextureGroup>(), 7)},
+        {"channels[0]", EnumValue(allocator, TypeIdOf<Channels>(), 5)},
+        {"softs[0]", Soft(allocator, Guid{5, 5}, "Mesh.Socket")},
+        {"anySofts[0]", Soft(allocator, Guid{6, 6}, "")},
+        {"links[0]", Reference(allocator, other)},
+        {"links[1]", Reference(allocator, ObjectHandle{})},
+        {"links[2]", Reference(allocator, self)},
+        {"required[0]", Reference(allocator, other)},
+        {"bundle.refs[0]", Reference(allocator, ObjectHandle{})},
+        {"bundle.refs[1]", Reference(allocator, other)},
+        {"extra[0]", Unsigned(allocator, ValueKind::UInt8, 0)},
+        {"extra[1]", Unsigned(allocator, ValueKind::UInt8, 255)}};
     for (const Entry& entry : elements) {
         REQUIRE(paths.Insert(entry.path, &entry.value));
     }
@@ -522,7 +523,7 @@ void CheckArrayChild(const ArrayChild& value, ObjectHandle self) noexcept {
     CHECK(value.links[1] == ObjectHandle{} && value.links[2] == self);
     CHECK(value.required.Size() == 1 && value.required[0] == other);
     CHECK(value.flags.Size() == 2 && value.flags[0] && !value.flags[1]);
-    CHECK(value.longs.Size() == 1 && value.longs[0] == ~uint64{0});
+    CHECK(value.longs.Size() == 1 && value.longs[0] == NumericLimits<uint64>::Max());
     CHECK(value.doubles.Size() == 1 && value.doubles[0] == -0.5);
     CHECK(value.guids.Size() == 1 && value.guids[0] == (Guid{1, 2}));
     CHECK(value.assets.Size() == 1 && value.assets[0] == (AssetId{Guid{9, 9}}));
@@ -810,7 +811,7 @@ TEST(GeneratedPath_ArrayFixtureElements) {
                     {"flags", Boolean(allocator, true), Boolean(allocator, false),
                      Boolean(allocator, true)},
                     {"longs", Unsigned(allocator, ValueKind::UInt64, 1),
-                     Unsigned(allocator, ValueKind::UInt64, ~uint64{0}),
+                     Unsigned(allocator, ValueKind::UInt64, NumericLimits<uint64>::Max()),
                      Unsigned(allocator, ValueKind::UInt64, 7)},
                     {"doubles", Float64(allocator, -0.5), Float64(allocator, 2.25),
                      Float64(allocator, 0.0)},

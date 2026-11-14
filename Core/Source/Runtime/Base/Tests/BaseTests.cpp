@@ -1,8 +1,12 @@
 #include <Base/Checked.h>
 #include <Base/Compiler.h>
 #include <Base/Endian.h>
+#include <Base/NumericLimits.h>
 #include <Core/Math/RandomStream.h>
 #include <TestSupport/Test.h>
+#include <float.h>
+#include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 
 using namespace rocks;
@@ -15,6 +19,42 @@ static_assert([] {
 }());
 static_assert(ByteSwap<uint32>(0x11223344u) == 0x44332211u);
 static_assert(IsX64 != IsArm64 && IsLittleEndian);
+
+// NumericLimits는 CRT 한계 매크로(독립 기준)와 같다. 플랫폼마다 폭·부호가 다른 형식(long·wchar_t·
+// char·usize)도 그 플랫폼의 값과 같아야 한다.
+static_assert(NumericLimits<uint8>::Min() == 0 && NumericLimits<uint8>::Max() == UINT8_MAX);
+static_assert(NumericLimits<uint16>::Max() == UINT16_MAX &&
+              NumericLimits<uint32>::Max() == UINT32_MAX);
+static_assert(NumericLimits<uint64>::Min() == 0 && NumericLimits<uint64>::Max() == UINT64_MAX);
+static_assert(NumericLimits<int8>::Min() == INT8_MIN && NumericLimits<int8>::Max() == INT8_MAX);
+static_assert(NumericLimits<int16>::Min() == INT16_MIN && NumericLimits<int16>::Max() == INT16_MAX);
+static_assert(NumericLimits<int32>::Min() == INT32_MIN && NumericLimits<int32>::Max() == INT32_MAX);
+static_assert(NumericLimits<int64>::Min() == INT64_MIN && NumericLimits<int64>::Max() == INT64_MAX);
+static_assert(NumericLimits<int64>::Lowest() == INT64_MIN && NumericLimits<uint32>::Lowest() == 0);
+static_assert(NumericLimits<usize>::Max() == SIZE_MAX &&
+              NumericLimits<isize>::Min() == PTRDIFF_MIN &&
+              NumericLimits<isize>::Max() == PTRDIFF_MAX);
+static_assert(NumericLimits<long>::Min() == LONG_MIN && NumericLimits<long>::Max() == LONG_MAX &&
+              NumericLimits<unsigned long>::Max() == ULONG_MAX);
+static_assert(NumericLimits<char>::Min() == CHAR_MIN && NumericLimits<char>::Max() == CHAR_MAX);
+static_assert(NumericLimits<wchar_t>::Min() == WCHAR_MIN &&
+              NumericLimits<wchar_t>::Max() == WCHAR_MAX);
+static_assert(NumericLimits<char8_t>::Max() == UCHAR_MAX &&
+              NumericLimits<char16_t>::Max() == UINT_LEAST16_MAX &&
+              NumericLimits<char32_t>::Max() == UINT_LEAST32_MAX);
+// 부동소수 Min()은 가장 작은 양의 정규 값이고, 가장 작은 유한값은 Lowest()다.
+static_assert(NumericLimits<float>::Max() == FLT_MAX && NumericLimits<float>::Min() == FLT_MIN &&
+              NumericLimits<float>::Lowest() == -FLT_MAX);
+static_assert(NumericLimits<double>::Max() == DBL_MAX && NumericLimits<double>::Min() == DBL_MIN &&
+              NumericLimits<double>::Lowest() == -DBL_MAX);
+// 한정 형식은 한정을 뗀 형식과 같고, 반환 형식은 승격하지 않은 T다.
+static_assert(NumericLimits<const uint32>::Max() == UINT32_MAX &&
+              NumericLimits<volatile int8>::Min() == INT8_MIN &&
+              NumericLimits<const volatile double>::Max() == DBL_MAX);
+static_assert(__is_same(decltype(NumericLimits<uint8>::Max()), uint8) &&
+              __is_same(decltype(NumericLimits<int16>::Min()), int16));
+// "없음" 표지와 usize 최대값은 같은 값이지만 다른 이름이다.
+static_assert(MaxSize == SIZE_MAX && IndexNone == MaxSize);
 
 TEST(Base_CheckedArithmeticBoundaries) {
     // 실패하면 output을 바꾸지 않는다.

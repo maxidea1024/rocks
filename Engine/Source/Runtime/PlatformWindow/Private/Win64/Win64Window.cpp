@@ -239,8 +239,10 @@ void ToWide(StringView text, wchar_t (&buffer)[MaxTitleCharacters]) noexcept {
     if (text.ByteCount() == 0) {
         return;
     }
-    const int bytes =
-        text.ByteCount() > 0x7fffffff ? 0x7fffffff : static_cast<int>(text.ByteCount());
+    constexpr int MaxBytes = NumericLimits<int>::Max();
+    const int bytes = text.ByteCount() > static_cast<usize>(MaxBytes)
+                          ? MaxBytes
+                          : static_cast<int>(text.ByteCount());
     int written = MultiByteToWideChar(CP_UTF8, 0, text.Data(), bytes, buffer,
                                       static_cast<int>(MaxTitleCharacters - 1));
     if (written <= 0) {

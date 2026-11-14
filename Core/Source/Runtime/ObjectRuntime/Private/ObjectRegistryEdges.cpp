@@ -18,7 +18,8 @@ constexpr uint32 StructRefIndexTag = 0x53524149u;   // 'SRAI'
 
 // 컨테이너 버퍼의 다음 용량이다(4부터 두 배, uint32 상한에서 포화).
 uint32 GrownCapacity(uint32 capacity) noexcept {
-    return capacity < 4u ? 4u : capacity > 0x7fffffffu ? 0xffffffffu : capacity * 2u;
+    constexpr uint32 Maximum = NumericLimits<uint32>::Max();
+    return capacity < 4u ? 4u : capacity > Maximum / 2 ? Maximum : capacity * 2u;
 }
 
 void ReleaseContainerMemory(Allocator& allocator, void* memory) noexcept {
@@ -300,7 +301,7 @@ Result<void> ObjectRegistry::InsertArrayEdge(const ObjectAccessContext& access, 
             return checked;
         }
 
-        if (storage.size == 0xffffffffu) {
+        if (storage.size == NumericLimits<uint32>::Max()) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }
 
@@ -368,7 +369,7 @@ Result<void> ObjectRegistry::InsertArrayEdge(const ObjectAccessContext& access, 
         }
 
         if (result) {
-            if (storage.size == 0xffffffffu) {
+            if (storage.size == NumericLimits<uint32>::Max()) {
                 result = Result<void>::Failure(ErrorCode::Overflow);
             } else if (storage.size < storage.capacity) {
                 // 그 사이 용량이 충분해졌다(또는 관찰자 공간만 모자랐다). 기존 버퍼에 넣고 새
@@ -613,7 +614,7 @@ Result<void> ObjectRegistry::AssignArrayEdges(const ObjectAccessContext& access,
         return valid;
     }
 
-    if (targets.Size() > 0xffffffffu) {
+    if (targets.Size() > NumericLimits<uint32>::Max()) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
 
@@ -749,7 +750,7 @@ Result<usize> ObjectRegistry::InsertStructElement(const ObjectAccessContext& acc
             return Result<usize>::Failure(ErrorCode::InvalidArgument);
         }
 
-        if (storage.size == 0xffffffffu) {
+        if (storage.size == NumericLimits<uint32>::Max()) {
             return Result<usize>::Failure(ErrorCode::Overflow);
         }
 
@@ -790,7 +791,7 @@ Result<usize> ObjectRegistry::InsertStructElement(const ObjectAccessContext& acc
             void** target = nullptr;
             if (position > storage.size) {
                 result = Result<void>::Failure(ErrorCode::Busy);
-            } else if (storage.size == 0xffffffffu) {
+            } else if (storage.size == NumericLimits<uint32>::Max()) {
                 result = Result<void>::Failure(ErrorCode::Overflow);
             } else if (storage.size < storage.capacity) {
                 target = storage.blocks;
@@ -994,7 +995,7 @@ Result<void> ObjectRegistry::AssignStructElements(const ObjectAccessContext& acc
         return valid;
     }
 
-    if (count > 0xffffffffu) {
+    if (count > NumericLimits<uint32>::Max()) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
 

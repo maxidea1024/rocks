@@ -397,6 +397,58 @@ internal static class SelfTests
                 }
             }
         });
+        suite.Add("Policy.RepositoryRawLimitLiterals", () => NoFailures(PolicyChecks.RawLimitLiterals(options.Root)));
+        suite.Add("Policy.RawLimitLiteralControls", () =>
+        {
+            using TemporaryDirectory temporary = new();
+            const string probe = "Core/Source/Runtime/Core/Private/Probe.cpp";
+
+            // 이름 있는 한계, 비트 연산자 피연산자(마스크), 작은 폭 마스크, 해시 초기값, 실수 경계, 이름이 비슷한 매크로,
+            // 주석·문자열 안의 철자, 외부 API 형식의 -1, 0이 아닌 값의 비트 반전, 시험 소스, 등록한 허용 철자는 허용한다.
+            temporary.Write(probe, string.Join('\n',
+                "if (slot->roots == NumericLimits<uint32>::Max()) { return; }",
+                "const usize end = IndexNone; const usize top = MaxSize;",
+                "const uint64 low = value & 0xFFFFFFFFu; bits |= 0x7fffffffu; x = 0xffffffffu ^ y;",
+                "mask &= 0xffffffffffffffffull; const uint32 m = (a & 0x7fffffff) | 0xffffffffu & b;",
+                "const uint32 b = 0xffffu; const uint8 c = 0xff; const uint64 seed = 0xcbf29ce484222325ull;",
+                "const uint64 near = 0xfffffffff0ull; const uint64 high = 0xFFFFFFFF00000000ull;",
+                "if (value >= -2147483648.0 && value <= 2147483647.0) { }",
+                "static_assert(LZ4F_HEADER_SIZE_MAX <= 19 && FLT_MAX_EXP == 128 && PATH_MAX > 0);",
+                "// UINT32_MAX·0xffffffffu·~0u·static_cast<usize>(-1)는 주석이다.",
+                "const char* text = \"SIZE_MAX 4294967295\";",
+                "if (ResumeThread(thread) == static_cast<DWORD>(-1)) { }",
+                "const uint32 notAll = ~mask; const int64 n = ~static_cast<int64>(value); const auto f = ~0x0fu;",
+                "const usize at = (end + alignof(uint32) - 1) & ~(alignof(uint32) - 1); usize s = sizeof (uint64) - 1;",
+                ""));
+            temporary.Write("Core/Source/Runtime/Core/Tests/ProbeTests.cpp", "uint32 x = 0xffffffffu; usize y = SIZE_MAX;\n");
+            temporary.Write("Core/Source/Runtime/PlatformBase/Public/Platform/Math/VectorRegisterSse.h",
+                "return _mm_and_ps(a, _mm_castsi128_ps(_mm_set1_epi32(0x7fffffff)));\n");
+            NoFailures(PolicyChecks.RawLimitLiterals(temporary.Root));
+
+            // 날 철자는 런타임·도구 소스 어디서든 위반이다. 허용 파일이라도 등록하지 않은 철자는 위반이다. &&·||의
+            // 피연산자는 비트 마스크가 아니다.
+            foreach (string source in new[] { "if (slot->roots == 0xffffffffu) { }", "x = 0xFFFFFFFF;",
+                "const uint64 max = 0xffffffffffffffffull;", "if (n > 0x7fffffff) { }", "y = 0x7FFFFFFFFFFFFFFFLL;",
+                "if (v >= 2147483647ll) { }", "z = 4294967295u;", "w = 18446744073709551615ull;", "q = 9223372036854775807;",
+                "if (a && 0x7fffffff) { }", "if (a || 0xffffffffu) { }", "u = UINT32_MAX;", "s = SIZE_MAX;", "i = INT_MAX;",
+                "j = INT32_MIN;", "f = FLT_MAX;", "d = -DBL_MAX;", "p = SSIZE_MAX;", "l = LLONG_MIN;",
+                "k = static_cast<usize>(-1);", "k = static_cast< uint64 >( - 1 );", "k = static_cast<unsigned long long>(-1);",
+                "k = usize(-1);", "k = uint32{-1};", "k = (size_t)-1;", "k = ~0u;", "k = ~0ULL;", "k = ~0;", "k = ~usize(0);",
+                "k = ~uint64{0};", "k = ~uint32{};", "k = ~static_cast<uint32>(0);" })
+            {
+                foreach (string file in new[] { probe, "Engine/Source/Runtime/Probe/Private/Probe.h",
+                    "Programs/Sandbox/Private/Probe.cpp", "Core/Source/Developer/Probe/Private/Probe.cpp",
+                    "Core/Source/Runtime/PlatformBase/Public/Platform/Math/VectorRegisterSse.h" })
+                {
+                    temporary.Write(file, "// first line\n" + source + "\n");
+                    var failures = PolicyChecks.RawLimitLiterals(temporary.Root);
+                    Verify.That(failures.Count == 1 && failures[0].Line == 2 &&
+                        failures[0].ToString().Contains("raw-limit-literal", StringComparison.Ordinal),
+                        $"raw limit literal escaped audit in {file}: {source}");
+                    temporary.Write(file, "// clean\n");
+                }
+            }
+        });
         suite.Add("Policy.RepositoryPythonFreeMainPath", () => NoFailures(PolicyChecks.PythonFreeMainPath(options.Root)));
         suite.Add("Policy.RuntimePositiveAndNegativeControls", () =>
         {

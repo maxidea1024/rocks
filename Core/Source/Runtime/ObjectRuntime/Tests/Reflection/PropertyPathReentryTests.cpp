@@ -516,7 +516,7 @@ void ReadDuringRelease(void* raw) noexcept {
     const auto access = objects.OwnerAccess();
     const PathStep names[] = {{NamesId}};
     auto length = PathArrayLength(objects, access, probe.owner, PathOf(names));
-    probe.length = length ? length.Value() : ~usize(0);
+    probe.length = length ? length.Value() : MaxSize;
     const PathStep at[] = {At(NamesId, probe.index)};
     probe.readResult = ErrorOf(PathRead(objects, access, probe.owner, PathOf(at), *probe.read));
 }

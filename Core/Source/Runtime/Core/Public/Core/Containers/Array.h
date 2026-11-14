@@ -453,7 +453,7 @@ public:
     }
 
     // 일치하는 첫/마지막 위치 또는 NotFound를 반환한다. 비교는 noexcept여야 한다.
-    static constexpr usize NotFound = MaxSize;
+    static constexpr usize NotFound = IndexNone;
 
     // 추가 할당 없이 제자리에서 정렬한다. 동등한 원소의 기존 순서는 보장하지 않는다.
     // 원소의 논리적 정체성은 바뀌며 보관한 참조의 사용에 주의한다. 포인터 원소는 자동으로

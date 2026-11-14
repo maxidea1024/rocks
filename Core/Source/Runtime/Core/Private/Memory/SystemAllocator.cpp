@@ -46,7 +46,7 @@ Result<void*> SystemAllocator::Allocate(usize bytes, usize alignment, uint32 tag
     auto* record = ConstructAt<Record>(recordStorage, Record{address, bytes, tag, nullptr});
     {
         platform::LockGuard lock(mutex_);
-        constexpr uint64 maximum = static_cast<uint64>(-1);
+        constexpr uint64 maximum = NumericLimits<uint64>::Max();
         if (stats_.liveBytes > maximum - bytes || stats_.liveAllocations == maximum ||
             stats_.totalAllocations == maximum) {
             platform::AlignedFree(address);

@@ -25,7 +25,7 @@ struct ObjectRegistry::InnerEntry {
 
 namespace {
 
-constexpr uint32 NoInnerParent = 0xffffffffu;
+constexpr uint32 NoInnerParent = NumericLimits<uint32>::Max();
 constexpr uint32 MinimumNameCapacity = 16;
 
 // NFC UTF-8 byte 순(빈 이름이 먼저)이다.
@@ -771,7 +771,7 @@ Result<void> ObjectRegistry::CollectInners(const ObjectAccessContext& access, Ob
     }
 
     const usize before = out.Size();
-    if (count > static_cast<usize>(-1) - before) {
+    if (count > MaxSize - before) {
         return finish(ErrorCode::Overflow);
     }
 

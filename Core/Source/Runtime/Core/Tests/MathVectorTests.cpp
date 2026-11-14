@@ -126,7 +126,8 @@ TEST(Vector3_TryNormalizeContract) {
     auto tiny = Vec3(1.0e-40f, 0.0f, 0.0f).TryNormalize(); // subnormal
     REQUIRE(tiny);
     CHECK(tiny.Value() == Vec3::UnitX());
-    auto maximum = Vec3(FLT_MAX, FLT_MAX, FLT_MAX).TryNormalize();
+    constexpr float Highest = NumericLimits<float>::Max();
+    auto maximum = Vec3(Highest, Highest, Highest).TryNormalize();
     REQUIRE(maximum);
     CHECK(maximum.Value().IsNormalized(1.0e-6f));
     // minimumLength는 길이 단위다. 길이 2인 벡터는 2 이하 기준에서 실패한다.
@@ -225,13 +226,14 @@ TEST(IntVector_CheckedArithmetic) {
     CHECK(a - IntVec2(5, 5) == IntVec2(-2, -9));
     CHECK(a * -2 == IntVec2(-6, 8));
     CHECK(IntVec3(7, -7, 9) / 2 == IntVec3(3, -3, 4)); // 0 방향 절사
-    CHECK(IntVec3(2147483646, 0, 0) + IntVec3(1, 0, 0) == IntVec3(2147483647, 0, 0));
+    CHECK(IntVec3(NumericLimits<int32>::Max() - 1, 0, 0) + IntVec3(1, 0, 0) ==
+          IntVec3(NumericLimits<int32>::Max(), 0, 0));
     // overflow·0 나눗셈은 Fatal이다. 프로세스 음성 대조(math-int-overflow)에서 확인한다.
 }
 
 TEST(MathUtility_LerpOverflowAndNaNPropagation) {
-    const float lowest = -3.40282347e+38f;
-    const float highest = 3.40282347e+38f;
+    const float lowest = NumericLimits<float>::Lowest();
+    const float highest = NumericLimits<float>::Max();
     CHECK(math::Lerp(lowest, highest, 0.0f) == lowest);
     CHECK(math::Lerp(lowest, highest, 1.0f) == highest);
     CHECK(math::Lerp(lowest, highest, 0.5f) == 0.0f);
@@ -262,7 +264,7 @@ TEST(MathUtility_NamedTolerancesAndUlpComparison) {
     const float tinyNegative = platform::BitCast<float>(0x80000001u);
     CHECK(math::IsNearlyEqualByUlps(tinyPositive, tinyNegative, 2));
     CHECK(!math::IsNearlyEqualByUlps(tinyPositive, tinyNegative, 1));
-    CHECK(!math::IsNearlyEqualByUlps(FLT_MAX, InfinityF, 1000000));
+    CHECK(!math::IsNearlyEqualByUlps(NumericLimits<float>::Max(), InfinityF, 1000000));
     CHECK(math::IsNearlyEqualByUlps(InfinityF, InfinityF, 0));
     CHECK(!math::IsNearlyEqualByUlps(NaNF, NaNF, 1000000));
     const double d = 1.0;

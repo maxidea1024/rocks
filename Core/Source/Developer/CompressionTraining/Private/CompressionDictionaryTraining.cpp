@@ -25,7 +25,7 @@ constexpr unsigned SearchSteps = 4;
 // 학습 결과에 붙는 헤더의 최대 크기다(magic·ID 8byte + 엔트로피 표 ≤ 248, zdict.c).
 constexpr usize MaxHeaderBytes = 256;
 // 표본 길이 합의 상한(미만)이다(COVER_MAX_SAMPLES_SIZE와 32bit 계산).
-constexpr uint64 MaxSampleBytes = 0xFFFFFFFFull;
+constexpr uint64 MaxSampleBytes = NumericLimits<uint32>::Max();
 // fastCover가 학습할 수 있는 최소 표본 수다(fastcover.c FASTCOVER_ctx_init).
 constexpr usize MinTrainingSamples = 5;
 
@@ -58,7 +58,7 @@ bool ValidSamples(Span<const uint8> samples, Span<const usize> sampleSizes) noex
         total += size;
     }
     return total == samples.Size() && total < MaxSampleBytes &&
-           sampleSizes.Size() < static_cast<usize>(0xFFFFFFFFu);
+           sampleSizes.Size() < NumericLimits<uint32>::Max();
 }
 
 // finalizing: finalize는 래퍼가 헤더 최대 크기 + 내용을 확보하므로 dstSize_tooSmall은 인자 탓이

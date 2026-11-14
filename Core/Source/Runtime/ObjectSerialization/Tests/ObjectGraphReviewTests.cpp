@@ -151,12 +151,12 @@ TEST(ObjectGraphGeneratedInheritanceRoundTripOutlivesSourceAndScratchAllocator) 
                     auto bv = b.Value().Get();
                     REQUIRE(av && bv);
                     av.Value()->key = {0xfedcba9876543210ull, 0x0123456789abcdefull};
-                    av.Value()->count = -2147483647 - 1;
+                    av.Value()->count = NumericLimits<int32>::Min();
                     av.Value()->enabled = true;
                     av.Value()->small = 255;
                     av.Value()->medium = 65535;
                     av.Value()->flags = 0xffffffffu;
-                    av.Value()->wide = 0xffffffffffffffffull;
+                    av.Value()->wide = NumericLimits<uint64>::Max();
                     av.Value()->signedWide = -9223372036854775807ll - 1;
                     av.Value()->weight = -1.25f;
                     av.Value()->precision = 0.125;
@@ -192,11 +192,11 @@ TEST(ObjectGraphGeneratedInheritanceRoundTripOutlivesSourceAndScratchAllocator) 
             auto value = borrowed.Value().Get();
             REQUIRE(value);
             CHECK((value.Value()->key == Guid{0xfedcba9876543210ull, 0x0123456789abcdefull}));
-            CHECK(value.Value()->count == -2147483647 - 1);
+            CHECK(value.Value()->count == NumericLimits<int32>::Min());
             CHECK(value.Value()->enabled && value.Value()->small == 255 &&
                   value.Value()->medium == 65535);
             CHECK(value.Value()->flags == 0xffffffffu &&
-                  value.Value()->wide == 0xffffffffffffffffull);
+                  value.Value()->wide == NumericLimits<uint64>::Max());
             CHECK(value.Value()->signedWide == -9223372036854775807ll - 1);
             CHECK(value.Value()->weight == -1.25f && value.Value()->precision == 0.125);
             CHECK(value.Value()->label.View() == StringView(label, sizeof(label) - 1));

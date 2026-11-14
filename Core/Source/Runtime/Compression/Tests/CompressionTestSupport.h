@@ -83,7 +83,7 @@ public:
 
     Result<void*> Allocate(usize bytes, usize alignment, uint32 tag = 0) noexcept override {
         const usize offset = alignment > Header ? alignment : Header;
-        if (bytes > static_cast<usize>(-1) - offset) {
+        if (bytes > MaxSize - offset) {
             return Result<void*>::Failure(ErrorCode::Overflow);
         }
         auto allocation = inner_.Allocate(bytes + offset, offset, tag);

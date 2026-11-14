@@ -156,7 +156,7 @@ protected:
 // view), index는 배열 필드에서 지금 처리하는 원소 index(아니면 NoIndex — 원소마다 새 프레임을
 // 만들지 않고 ElementIndexScope가 이 칸을 쓴다, 진단 경로는 [배열[i], 멤버])다.
 struct FieldCodecFrame {
-    static constexpr uint32 NoIndex = ~0u;
+    static constexpr uint32 NoIndex = NumericLimits<uint32>::Max();
 
     const FieldSchema* field = nullptr;
     TypeId declaringType{};
@@ -684,7 +684,7 @@ private:
 // 전에 원본 Record를 닫는다).
 //
 // 사용 예(struct codec):
-//   auto scope = context.OpenRecord(field, structId, 1, ~0u);
+//   auto scope = context.OpenRecord(field, structId, 1, NumericLimits<uint32>::Max());
 //   if (!scope) { return Result<void>::Failure(scope.Error()); }
 //   RecordReader& record = *context.CurrentRecord();
 class [[nodiscard]] RecordScope {

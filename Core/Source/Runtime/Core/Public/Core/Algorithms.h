@@ -7,7 +7,7 @@
 namespace rocks::algo {
 
 // BinarySearch가 찾지 못한 결과다. LowerBound/UpperBound는 대신 삽입 위치 Size()를 반환한다.
-inline constexpr usize NotFound = MaxSize;
+inline constexpr usize NotFound = IndexNone;
 
 struct Less {
     template <typename A, typename B>

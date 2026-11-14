@@ -564,14 +564,14 @@ TEST(ObjectRefArray_GrowthReentrancyRejudgesCurrentState) {
 
         struct Case {
             usize initial;  // 시작 원소 수(용량 4가 꽉 찬다)
-            usize insertAt; // ~0이면 AddReference
+            usize insertAt; // Append면 AddReference
             uint32 adds;    // 콜백이 더하는 원소
             uint32 removes; // 콜백이 지우는 원소
             ErrorCode expected;
             usize finalSize;
         };
 
-        constexpr usize Append = ~usize(0);
+        constexpr usize Append = IndexNone;
         const Case cases[] = {
             {4, Append, 12, 0, ErrorCode::Busy, 16}, // 콜백이 16칸을 채웠다: 새 버퍼(8) 부족
             {4, Append, 5, 0, ErrorCode::None, 10},  // 콜백 성장으로 용량 16: 기존 버퍼에 넣는다
@@ -1178,14 +1178,14 @@ TEST(StructRefArray_ReentrancyRejudgesCurrentState) {
         struct Case {
             bool allocatorHook; // 거짓이면 원소 생성자 hook
             usize initial;
-            usize insertAt; // ~0이면 AddElement
+            usize insertAt; // Append면 AddElement
             uint32 adds;
             uint32 removes;
             ErrorCode expected;
             usize finalSize;
         };
 
-        constexpr usize Append = ~usize(0);
+        constexpr usize Append = IndexNone;
         const Case cases[] = {
             {false, 4, Append, 5, 0, ErrorCode::None, 10},  // 그 사이 용량 16: 기존 색인에 넣는다
             {false, 4, Append, 12, 0, ErrorCode::Busy, 16}, // 새 색인(8)이 17을 못 담는다

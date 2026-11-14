@@ -42,6 +42,9 @@ struct TemporaryFile {
 
 class FakeHandle final : public FileHandle {
 public:
+    // successfulWritesBeforeFailure가 이 값이면 쓰기가 실패하지 않는다(줄지 않는다).
+    static constexpr uint32 NeverFail = NumericLimits<uint32>::Max();
+
     File* owner = nullptr;
     bool reenter = false;
     bool reenteredBusy = false;
@@ -50,7 +53,7 @@ public:
     bool failClose = false;
     bool zeroWrite = false;
     uint32 successfulReadsBeforeFailure = 0;
-    uint32 successfulWritesBeforeFailure = 0xffffffffU;
+    uint32 successfulWritesBeforeFailure = NeverFail;
     uint8 writtenValues[16]{};
     uint32 writtenCount = 0;
     uint32 readCount = 0;
@@ -81,7 +84,7 @@ public:
         if (successfulWritesBeforeFailure == 0) {
             return {{FileCode::SystemError, 124}, bytes ? 1u : 0u};
         }
-        if (successfulWritesBeforeFailure != 0xffffffffU) {
+        if (successfulWritesBeforeFailure != NeverFail) {
             --successfulWritesBeforeFailure;
         }
         return {{}, !zeroWrite && bytes ? 1u : 0u};

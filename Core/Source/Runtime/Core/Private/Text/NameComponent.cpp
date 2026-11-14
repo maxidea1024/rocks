@@ -196,7 +196,7 @@ Result<void> TryMakeNameComponentKey(StringView component, StringBuilderBase& ou
 
     // ASCII의 단순 case folding은 A–Z → a–z뿐이고 NFD·NFC는 그대로다(TryMakeCaselessKey와 같은 키).
     const usize start = out.ByteCount();
-    if (component.ByteCount() > static_cast<usize>(-1) - start) {
+    if (component.ByteCount() > MaxSize - start) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
 

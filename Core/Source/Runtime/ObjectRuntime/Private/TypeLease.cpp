@@ -149,11 +149,12 @@ const RuntimeStructFieldOps& StructView::FieldOps(usize schemaIndex) const noexc
 
 namespace {
 
-// 필드 ID 정렬 색인(fieldOrder)의 이진 탐색이다. 없으면(색인이 없는 enum 레코드 포함) ~0.
+// 필드 ID 정렬 색인(fieldOrder)의 이진 탐색이다. 없으면(색인이 없는 enum 레코드 포함) IndexNone
+// (TypeLease::NoField·StructView::NoField와 같다).
 template <class Record>
 usize SortedFieldIndex(const Record& record, Guid fieldId) noexcept {
     if (!record.fieldOrder) {
-        return ~usize(0);
+        return IndexNone;
     }
 
     usize low = 0;
@@ -172,7 +173,7 @@ usize SortedFieldIndex(const Record& record, Guid fieldId) noexcept {
         }
     }
 
-    return ~usize(0);
+    return IndexNone;
 }
 
 } // namespace

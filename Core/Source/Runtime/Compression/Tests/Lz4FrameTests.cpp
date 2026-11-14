@@ -260,7 +260,7 @@ bool FailsEverywhere(Span<const uint8> encoded, ErrorCode expected,
 
 // input을 chunk 단위로 붙여 쓰고(flushAt에서 flush) 스트림을 끝낸다.
 bool CompressInChunks(CompressStream& stream, Span<const uint8> input, usize chunk,
-                      Array<uint8>& output, usize flushAt = static_cast<usize>(-1)) {
+                      Array<uint8>& output, usize flushAt = IndexNone) {
     usize offset = 0;
     while (offset < input.Size()) {
         const usize limit = offset < flushAt && flushAt < input.Size() ? flushAt : input.Size();
@@ -306,8 +306,7 @@ bool RepeatUntilComplete(Request&& request, Span<uint8> window, Array<uint8>& ou
 // TryProcess·TryFlush·TryFinish만으로 압축한다. 입력은 inputChunk, 출력 창은 window byte씩이고
 // flushAt에서 flush한다.
 bool CompressWithBackpressure(CompressStream& stream, Span<const uint8> input, usize inputChunk,
-                              usize window, Array<uint8>& output,
-                              usize flushAt = static_cast<usize>(-1)) {
+                              usize window, Array<uint8>& output, usize flushAt = IndexNone) {
     Array<uint8> scratch(output.GetAllocator());
     if (!scratch.TryResize(window)) {
         return false;
@@ -443,9 +442,8 @@ TEST(Lz4Frame_LevelsBoundAndUnsupportedUses) {
         CHECK(TryGetCompressBound(Frame, item.size).Value() == item.bound);
     }
     CHECK(TryGetCompressBound(Frame, Lz4MaxInputBytes + 1));
-    CHECK(TryGetCompressBound(Frame, static_cast<usize>(-1)).Error() == ErrorCode::Overflow);
-    CHECK(TryGetCompressBound(Frame, static_cast<usize>(-1) - (usize{1} << 20)).Error() ==
-          ErrorCode::Overflow);
+    CHECK(TryGetCompressBound(Frame, MaxSize).Error() == ErrorCode::Overflow);
+    CHECK(TryGetCompressBound(Frame, MaxSize - (usize{1} << 20)).Error() == ErrorCode::Overflow);
 
     SystemAllocator allocator;
     {
@@ -1724,7 +1722,7 @@ TEST(Lz4Frame_StreamLevelsAreChunkIndependent) {
 }
 
 // 분할 단위(1MiB)를 넘는 창, 상한에 정확히 닿는 TryProcess, 상한 직후의 빈 frame·1byte frame, 여러
-// 번 늘린 뒤의 길이 복원, 상한 SIZE_MAX, 이동 대입.
+// 번 늘린 뒤의 길이 복원, 상한 MaxSize, 이동 대입.
 TEST(Lz4Frame_StreamLargeWindowsAndLimitEdges) {
     SystemAllocator allocator;
     {
@@ -1782,9 +1780,8 @@ TEST(Lz4Frame_StreamLargeWindowsAndLimitEdges) {
               ErrorCode::CapacityExceeded);
         CHECK(output.Size() == 4 && output.Capacity() >= size - 1);
 
-        // 상한 SIZE_MAX도 overflow 없이 동작한다.
-        auto unlimited =
-            DecompressStream::TryCreate(Frame, Limits(static_cast<usize>(-1)), allocator);
+        // 상한 MaxSize도 overflow 없이 동작한다.
+        auto unlimited = DecompressStream::TryCreate(Frame, Limits(MaxSize), allocator);
         REQUIRE(unlimited);
         Array<uint8> restored(allocator);
         CHECK(unlimited.Value().TryWriteAppend(View(packed), restored));

@@ -148,7 +148,7 @@ Result<void*> DebugAllocator::Allocate(usize bytes, usize alignment, uint32 tag)
     }
 
     platform::LockGuard lock(gate_);
-    constexpr uint64 maximum = static_cast<uint64>(-1);
+    constexpr uint64 maximum = NumericLimits<uint64>::Max();
     if (stats_.allocations.liveAllocations == maximum ||
         stats_.allocations.totalAllocations == maximum ||
         static_cast<uint64>(bytes) > maximum - stats_.allocations.liveBytes) {

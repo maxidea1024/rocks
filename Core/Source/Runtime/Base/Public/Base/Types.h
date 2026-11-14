@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Base/NumericLimits.h>
+
 namespace rocks {
 
 // OS 헤더나 할당기에 의존하지 않는 공통 정수 타입이다.
@@ -28,6 +30,17 @@ static_assert(sizeof(int32) == 4 && sizeof(int64) == 8);
 static_assert(sizeof(uptr) == sizeof(void*));
 static_assert(sizeof(isize) == sizeof(usize) && static_cast<isize>(-1) < 0);
 
-inline constexpr usize MaxSize = static_cast<usize>(-1);
+// usize의 최대값(NumericLimits<usize>::Max())이다. 크기·byte 수 계산의 상한·포화 검사에 쓴다.
+inline constexpr usize MaxSize = NumericLimits<usize>::Max();
+
+// usize 색인·위치의 "없음" 표지다(UE5.8 INDEX_NONE 대응. UE는 int32 -1이지만 Rocks의 색인은 부호
+// 없는 usize라 최대값이다). 찾지 못한 검색 결과, 아직 정하지 않은 색인 칸에 쓴다. 값은 MaxSize와
+// 같지만 뜻이 다르다. 상한 검사와 "가능한 만큼"을 뜻하는 개수 인자(TryMidBytes의 count 기본값 등)는
+// MaxSize를 쓴다.
+// - uint32 같은 다른 폭의 칸에는 쓰지 않는다. 그 형식으로 선언한 영역 상수
+//   (예: SlotArray::EndOfList)를 NumericLimits<T>::Max()로 정의해 쓴다. 폭이 다른 IndexNone과
+//   비교하면 항상 거짓이다.
+// - 공개 검색 API의 결과 표지(Array::NotFound·StringView::NotFound 등)는 이 값과 같다.
+inline constexpr usize IndexNone = MaxSize;
 
 } // namespace rocks

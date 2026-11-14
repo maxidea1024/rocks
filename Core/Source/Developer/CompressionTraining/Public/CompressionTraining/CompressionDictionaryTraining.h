@@ -39,7 +39,7 @@ namespace rocks {
 
 // 직접 줄 수 있는 사전 ID 범위다(zdict.h: 32767 이하와 2^31 이상은 예약).
 inline constexpr uint32 MinExplicitDictionaryId = 32768;
-inline constexpr uint32 MaxExplicitDictionaryId = 0x7FFFFFFF;
+inline constexpr uint32 MaxExplicitDictionaryId = (uint32{1} << 31) - 1;
 
 // 학습 결과 사전의 최소 용량(ZDICT_DICTSIZE_MIN)이다.
 inline constexpr usize MinTrainingCapacity = 256;

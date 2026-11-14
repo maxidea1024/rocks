@@ -593,7 +593,7 @@ Result<void> AppendFloating(StringBuilderBase& out, uint64 bits, bool single,
         length = FormatFloatingPoint(doubleBits, type, precision, buffer, sizeof(buffer));
     }
 
-    if (length == MaxSize || length >= sizeof(buffer)) {
+    if (length == FormatFailed || length >= sizeof(buffer)) {
         return Fail();
     }
 

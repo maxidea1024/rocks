@@ -117,7 +117,8 @@ TEST(CompressedBlocks_SettingsAndBound) {
     CHECK(TryGetCompressedBlocksBound(11, 1).Error() == ErrorCode::InvalidArgument);
     // 블록 수가 u32를 넘는다.
     CHECK(TryGetCompressedBlocksBound(12, uint64{1} << 44).Error() == ErrorCode::InvalidArgument);
-    CHECK(TryGetCompressedBlocksBound(24, ~uint64{0} - 8).Error() == ErrorCode::InvalidArgument);
+    CHECK(TryGetCompressedBlocksBound(24, NumericLimits<uint64>::Max() - 8).Error() ==
+          ErrorCode::InvalidArgument);
 }
 
 TEST(CompressedBlocks_RoundTripAcrossCodecsAndSizes) {
@@ -324,9 +325,9 @@ TEST(CompressedBlocks_HeaderValidation) {
                   .Value() == 48 + 8 * 4);
         Array<uint8> huge(allocator);
         REQUIRE(huge.TryAppend(Slice(View(good), 0, 48)));
-        StoreLittleEndian<uint64>(huge.Data() + 8, uint64{0xffffffff} << 12);
-        StoreLittleEndian<uint32>(huge.Data() + 16, 0xffffffffu);
-        StoreLittleEndian<uint64>(huge.Data() + 24, 0xffffffffull);
+        StoreLittleEndian<uint64>(huge.Data() + 8, uint64{NumericLimits<uint32>::Max()} << 12);
+        StoreLittleEndian<uint32>(huge.Data() + 16, NumericLimits<uint32>::Max());
+        StoreLittleEndian<uint64>(huge.Data() + 24, NumericLimits<uint32>::Max());
         CHECK(CompressedBlocksReader::TryGetIndexBytes(View(huge), huge.Size()).Error() ==
               ErrorCode::InvalidArgument);
         CountingAllocator counting(allocator);
@@ -887,12 +888,13 @@ TEST(CompressedBlocks_HeaderRulesAndFileFlow) {
         CHECK(CompressedBlocksReader::TryGetIndexBytes(Span<const uint8>(good.data, 47), 61)
                   .Error() == ErrorCode::InvalidArgument);
         // 최대 블록 수(2^32 − 1)는 길이만 맞으면 된다. rawSize 2^64 − 1은 블록 수가 u32를 넘는다.
-        const uint64 maxCount = 0xffffffffull;
+        constexpr uint32 MaxBlocks = NumericLimits<uint32>::Max();
+        const uint64 maxCount = MaxBlocks;
+        CHECK(indexBytes(header(maxCount << 12, MaxBlocks, maxCount), 48 + 9 * maxCount).Value() ==
+              48 + 8 * maxCount);
         CHECK(
-            indexBytes(header(maxCount << 12, 0xffffffffu, maxCount), 48 + 9 * maxCount).Value() ==
-            48 + 8 * maxCount);
-        CHECK(indexBytes(header(~uint64{0}, 0xffffffffu, maxCount), 48 + 9 * maxCount).Error() ==
-              ErrorCode::InvalidArgument);
+            indexBytes(header(NumericLimits<uint64>::Max(), MaxBlocks, maxCount), 48 + 9 * maxCount)
+                .Error() == ErrorCode::InvalidArgument);
 
         // 파일 흐름: 헤더 → 인덱스만 → TryLocate → 필요한 저장 byte만 읽는다.
         Array<uint8> original(allocator);
@@ -945,7 +947,8 @@ TEST(CompressedBlocks_HeaderRulesAndFileFlow) {
         CHECK(reader.Value().TryLocate(size + 1, 0).Error() == ErrorCode::InvalidArgument);
         uint8 one = 0;
         CHECK(reader.Value()
-                  .TryRead(0, Span<uint8>(&one, 1), View(container), ~uint64{0}, context.Value())
+                  .TryRead(0, Span<uint8>(&one, 1), View(container), NumericLimits<uint64>::Max(),
+                           context.Value())
                   .Error() == ErrorCode::InvalidArgument);
     }
     CHECK(allocator.Stats().liveAllocations == 0);

@@ -255,7 +255,7 @@ TEST(Json_ValuesNumbersAndLookup) {
     CHECK(root.Find("i").Type() == JsonType::Integer &&
           root.Find("i").TryGetInt64().Value() == -12);
     CHECK(root.Find("u").Type() == JsonType::Unsigned &&
-          root.Find("u").TryGetUInt64().Value() == ~0ull);
+          root.Find("u").TryGetUInt64().Value() == NumericLimits<uint64>::Max());
     CHECK(!root.Find("u").TryGetInt64());
     CHECK(root.Find("big").Type() == JsonType::Double &&
           root.Find("big").TryGetDouble().Value() == 18446744073709551616.0);

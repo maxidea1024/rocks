@@ -42,9 +42,9 @@ class SlotArray {
     static_assert(IsNothrowMoveConstructibleV<T>);
     static_assert(IsNothrowDestructibleV<T>);
 
-    static constexpr uint32 EndOfList = 0xffffffffu;
-    static constexpr uint32 Occupied = 0xfffffffeu;
-    static constexpr uint32 Retired = 0xfffffffdu;
+    static constexpr uint32 EndOfList = NumericLimits<uint32>::Max();
+    static constexpr uint32 Occupied = EndOfList - 1;
+    static constexpr uint32 Retired = EndOfList - 2;
 
     // next가 Occupied면 value가 살아 있다. 그 밖에는 free list의 다음 slot(EndOfList 포함) 또는
     // Retired다. generation은 살아 있으면 현재 세대, 비어 있으면 다음 원소가 받을 세대다.
@@ -63,7 +63,7 @@ class SlotArray {
 
 public:
     static constexpr usize MaxSlots = Retired;
-    static constexpr uint32 DefaultMaxGeneration = 0xffffffffu;
+    static constexpr uint32 DefaultMaxGeneration = NumericLimits<uint32>::Max();
 
     // maxGeneration은 slot 하나가 받을 수 있는 최대 generation이며 0이면 Fatal이다. 낮추면 slot
     // 폐기 경로를 시험할 수 있다.
@@ -332,7 +332,7 @@ public:
         }
 
         Owner* owner_ = nullptr;
-        usize index_ = MaxSize;
+        usize index_ = IndexNone;
         uint32 generation_ = 0;
     };
 
@@ -348,13 +348,13 @@ public:
         return Iterator(this, NextOccupied(0));
     }
     Iterator end() noexcept {
-        return Iterator(this, MaxSize);
+        return Iterator(this, IndexNone);
     }
     ConstIterator begin() const noexcept {
         return ConstIterator(this, NextOccupied(0));
     }
     ConstIterator end() const noexcept {
-        return ConstIterator(this, MaxSize);
+        return ConstIterator(this, IndexNone);
     }
     ConstIterator cbegin() const noexcept {
         return begin();
@@ -436,7 +436,7 @@ private:
                 return index;
             }
         }
-        return MaxSize;
+        return IndexNone;
     }
 
     static constexpr usize Limit() noexcept {

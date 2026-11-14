@@ -43,8 +43,8 @@ TEST(TimeSpan_FactoriesComponentsAndOverflow) {
           span.Minutes() == 30);
     CHECK(TimeSpan::TryFromDays(2).Value().TotalHours() == 48.0);
     CHECK(TimeSpan::TryFromMilliseconds(1500).Value().TotalSeconds() == 1.5);
-    CHECK(TimeSpan::TryFromDays(0x7fffffffffffffffll).Error() == ErrorCode::Overflow);
-    CHECK(TimeSpan::TryFromSeconds(-0x7fffffffffffffffll).Error() == ErrorCode::Overflow);
+    CHECK(TimeSpan::TryFromDays(NumericLimits<int64>::Max()).Error() == ErrorCode::Overflow);
+    CHECK(TimeSpan::TryFromSeconds(-NumericLimits<int64>::Max()).Error() == ErrorCode::Overflow);
 
     // 음수 간격의 구성 요소는 모두 0 이하다.
     const TimeSpan negative =

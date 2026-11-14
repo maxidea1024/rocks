@@ -215,7 +215,7 @@ Result<void> Inflate(ZlibState& state, Span<const uint8> source, InflateOutput& 
 Result<usize> Bound(usize sourceBytes) noexcept {
     // 스트림 없이 구한 보수적 상한이다: raw·zlib·gzip(확장 필드 없는 헤더) 래퍼를 모두 덮는다.
     const z_size_t bound = deflateBound_z(Z_NULL, static_cast<z_size_t>(sourceBytes));
-    if (bound == static_cast<z_size_t>(-1) || bound < sourceBytes) {
+    if (bound == NumericLimits<z_size_t>::Max() || bound < sourceBytes) {
         return Result<usize>::Failure(ErrorCode::Overflow);
     }
 
@@ -228,7 +228,7 @@ Result<usize> StreamBound(void* codec, usize sourceBytes) noexcept {
     // zlib이 stored 기준 상한을 쓴다.
     auto* state = static_cast<ZlibState*>(codec);
     const z_size_t bound = deflateBound_z(&state->stream, static_cast<z_size_t>(sourceBytes));
-    if (bound == static_cast<z_size_t>(-1) || bound < sourceBytes) {
+    if (bound == NumericLimits<z_size_t>::Max() || bound < sourceBytes) {
         return Result<usize>::Failure(ErrorCode::Overflow);
     }
 

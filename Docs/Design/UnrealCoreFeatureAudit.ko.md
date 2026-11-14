@@ -25,7 +25,7 @@
 
 | ID | 기능 요소와 확장 요구 | 현재 근거와 상태 | 검증·의존 관계 |
 |---|---|---|---|
-| UE-C01 | 고정폭·플랫폼 폭·부호·정렬·overflow·비트/바이트 순서·ABI 표현 | `Core/Source/Runtime/Base/Public/Base/Types.h`, `Checked.h`(동일·혼합 타입 검사 산술·변환·정렬·shift), `Endian.h`, `Guid.h`·`Core/Guid.h`(v4·해석·서식) **완료** | 32/64비트 경계·overflow·endianness·플랫폼 ABI 대조. 플랫폼 폭 값을 영속 포맷에 쓰지 않는다. |
+| UE-C01 | 고정폭·플랫폼 폭·부호·정렬·overflow·비트/바이트 순서·ABI 표현 | `Core/Source/Runtime/Base/Public/Base/Types.h`(`MaxSize`·`IndexNone` — UE `INDEX_NONE` 대응), `NumericLimits.h`(UE `TNumericLimits` 대응), `Checked.h`(동일·혼합 타입 검사 산술·변환·정렬·shift), `Endian.h`, `Guid.h`·`Core/Guid.h`(v4·해석·서식) **완료** | 32/64비트 경계·overflow·endianness·플랫폼 ABI 대조. 플랫폼 폭 값을 영속 포맷에 쓰지 않는다. |
 | UE-C02 | 컴파일러·CPU·OS capability, attributes, diagnostics, branch/inline, atomic 기본 경계, 경고 정책 | `Base/Compiler.h`(지원 환경 확인·속성 매크로·`ROCKS_BUILD_*`·`ROCKS_DISABLE_OPTIMIZATION`), `Platform/Cpu.h`, `Platform/SecureRandom.h`, 빌드 경고 정책 **부분** | 컴파일러 버전별 capability 및 단독 헤더, 미지원 기능 명시, warnings-as-errors·실제 음성 대조. |
 | UE-C03 | 공통 메모리 allocator 인터페이스·alignment·크기·tag·오류·수명·통계 | `Core/Memory/Allocator.h`, `SystemAllocator`, `ArenaAllocator`, `StackAllocator`, `PoolAllocator`, `BinnedAllocator`, `BudgetAllocator`, `DebugAllocator`, 외부 callback 연결 경계 **부분** | alignment/0/overflow/OOM, allocator 소유권·스레드, live allocation/bytes 0, 실패 전 상태·참조 보존. |
 | UE-C04 | page reserve/commit/decommit/release, 보호, 주소 공간·페이지 크기·가상 메모리 pool | `Platform/VirtualMemory.h`와 Windows/macOS backend의 단일 영역 reserve/commit/decommit/release **부분**; Windows Core·Foundation 검사 PASS, macOS는 미검증 | macOS 빌드·실행, page 경계·OS 실패/부분 변경 fault injection·poison 및 release 재시도·주소와 자원 회계. OS 전용 코드는 플랫폼 경계에 둔다. |

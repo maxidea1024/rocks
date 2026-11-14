@@ -88,7 +88,7 @@ uint64 ReferenceToBinary(const decimal::DecimalNumber& number,
 }
 
 // 해석 결과 비트. Overflow는 무한대 비트, 그 밖의 오류는 InvalidBits로 구별한다.
-constexpr uint64 InvalidBits = ~0ull;
+constexpr uint64 InvalidBits = NumericLimits<uint64>::Max();
 
 uint64 ParseBits(const char* text) noexcept {
     auto parsed = TryParseDouble(text);

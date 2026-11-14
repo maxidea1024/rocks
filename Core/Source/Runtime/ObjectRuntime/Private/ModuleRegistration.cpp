@@ -19,9 +19,9 @@ Result<void> ModuleRegistration::ReserveRecord() noexcept {
         return Result<void>::Success();
     }
 
-    const usize grown = capacity < 8               ? 8
-                        : capacity > usize(-1) / 2 ? capacity + 1
-                                                   : capacity + capacity / 2;
+    const usize grown = capacity < 8             ? 8
+                        : capacity > MaxSize / 2 ? capacity + 1
+                                                 : capacity + capacity / 2;
     return records_.TryReserve(grown);
 }
 

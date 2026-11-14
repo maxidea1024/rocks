@@ -277,7 +277,7 @@ TEST(PlatformSemaphoreOverflowAndZeroReleaseLeaveAllPermitsUnchanged) {
     CHECK(semaphore.Wait(1) == WaitResult::TimedOut);
     CHECK(semaphore.Release(3));
     CHECK(!semaphore.Release());
-    CHECK(!semaphore.Release(static_cast<uint32>(-1)));
+    CHECK(!semaphore.Release(NumericLimits<uint32>::Max()));
     CHECK(semaphore.Wait(0) == WaitResult::Signaled);
     CHECK(semaphore.Wait(0) == WaitResult::Signaled);
     CHECK(semaphore.Wait(0) == WaitResult::Signaled);

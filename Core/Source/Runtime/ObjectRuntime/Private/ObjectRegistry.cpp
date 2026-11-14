@@ -144,7 +144,7 @@ Result<void> ObjectRegistry::AddRoot(const ObjectAccessContext& access, ObjectHa
         return live;
     }
 
-    if (slot->roots == 0xffffffffu) {
+    if (slot->roots == NumericLimits<uint32>::Max()) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
 
@@ -181,7 +181,8 @@ Result<void> ObjectRegistry::AddBorrow(const ObjectAccessContext& access, Object
         return Result<void>::Failure(ErrorCode::Busy);
     }
 
-    if (totalBorrows_ == 0xffffffffu || slot->borrows == 0xffffffffu) {
+    if (totalBorrows_ == NumericLimits<uint32>::Max() ||
+        slot->borrows == NumericLimits<uint32>::Max()) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
 
@@ -208,7 +209,7 @@ Result<void> RetainRoot(ObjectRegistry* registry, ObjectHandle handle) noexcept 
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (slot->roots == 0xffffffffu) {
+    if (slot->roots == NumericLimits<uint32>::Max()) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
 
@@ -336,7 +337,7 @@ Result<EncodePin> ObjectRegistry::PinForEncode(const ObjectAccessContext& access
         return Result<EncodePin>::Failure(live.Error());
     }
 
-    if (slot->encodePins == 0xffffffffu) {
+    if (slot->encodePins == NumericLimits<uint32>::Max()) {
         return Result<EncodePin>::Failure(ErrorCode::Overflow);
     }
 
@@ -501,7 +502,7 @@ Result<BackendLease> ObjectRegistry::AcquireBackendLease(const ObjectAccessConte
         return Result<BackendLease>::Failure(live.Error());
     }
 
-    if (slot->backendHolds == 0xffffffffu) {
+    if (slot->backendHolds == NumericLimits<uint32>::Max()) {
         return Result<BackendLease>::Failure(ErrorCode::Overflow);
     }
 
@@ -598,7 +599,7 @@ Result<void> ObjectRegistry::Shutdown(const ObjectAccessContext& access) noexcep
 
     // cutoff를 게시한 cycle은 끝까지 분류해야 한다. 중간 취소로 white 객체를 다시 노출하지 않는다.
     while (CollectionPhase() != GcPhase::Idle) {
-        auto advanced = StepCollection(access, {0xffffffffu, 0});
+        auto advanced = StepCollection(access, {NumericLimits<uint32>::Max(), 0});
         if (!advanced) {
             return Result<void>::Failure(advanced.Error());
         }

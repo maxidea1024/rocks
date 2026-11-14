@@ -367,7 +367,7 @@ usize WriteGeneral(const decimal::ExactDecimal& value, int32 precision, bool upp
 
     usize length = out.Finish();
     if (length >= sizeof(scratch)) {
-        return MaxSize; // 정밀도 상한 안에서는 일어나지 않는다
+        return detail::FormatFailed; // 정밀도 상한 안에서는 일어나지 않는다
     }
 
     // 소수점이 있으면 가수 부분 끝의 0과 소수점을 지우고 지수 부분을 앞으로 당긴다.
@@ -407,21 +407,21 @@ usize WriteGeneral(const decimal::ExactDecimal& value, int32 precision, bool upp
 } // namespace
 
 Result<int64> TryParseInt64(StringView text, uint32 base) noexcept {
-    return ParseSigned(text, base, -0x7fffffffffffffffll - 1, 0x7fffffffffffffffll);
+    return ParseSigned(text, base, NumericLimits<int64>::Min(), NumericLimits<int64>::Max());
 }
 
 Result<uint64> TryParseUInt64(StringView text, uint32 base) noexcept {
-    return ParseUnsigned(text, base, ~0ull);
+    return ParseUnsigned(text, base, NumericLimits<uint64>::Max());
 }
 
 Result<int32> TryParseInt32(StringView text, uint32 base) noexcept {
-    auto parsed = ParseSigned(text, base, -0x7fffffffll - 1, 0x7fffffffll);
+    auto parsed = ParseSigned(text, base, NumericLimits<int32>::Min(), NumericLimits<int32>::Max());
     return parsed ? Result<int32>::Success(static_cast<int32>(parsed.Value()))
                   : Result<int32>::Failure(parsed.Error());
 }
 
 Result<uint32> TryParseUInt32(StringView text, uint32 base) noexcept {
-    auto parsed = ParseUnsigned(text, base, 0xffffffffull);
+    auto parsed = ParseUnsigned(text, base, NumericLimits<uint32>::Max());
     return parsed ? Result<uint32>::Success(static_cast<uint32>(parsed.Value()))
                   : Result<uint32>::Failure(parsed.Error());
 }
@@ -444,7 +444,7 @@ namespace detail {
 usize FormatFloatingPoint(uint64 doubleBits, char type, int precision, char* buffer,
                           usize capacity) noexcept {
     if (precision < 0 || precision > MaxPrecision) {
-        return MaxSize;
+        return FormatFailed;
     }
 
     decimal::ExactDecimal exact;
@@ -465,13 +465,13 @@ usize FormatFloatingPoint(uint64 doubleBits, char type, int precision, char* buf
     case 'G':
         return WriteGeneral(exact, precision, type == 'G', buffer, capacity);
     default:
-        return MaxSize;
+        return FormatFailed;
     }
 }
 
 usize FormatShortestFloatingPoint(uint64 bits, bool single, char* buffer, usize capacity) noexcept {
     if (capacity < 32) {
-        return MaxSize;
+        return FormatFailed;
     }
 
     // 0 판정도 비트로 한다(DAZ 환경의 비정규 수를 0으로 보지 않는다).
@@ -541,7 +541,7 @@ usize FormatShortestFloatingPoint(uint64 bits, bool single, char* buffer, usize 
     }
 
     const usize length = out.Finish();
-    return length >= capacity ? MaxSize : length;
+    return length >= capacity ? FormatFailed : length;
 }
 
 } // namespace detail

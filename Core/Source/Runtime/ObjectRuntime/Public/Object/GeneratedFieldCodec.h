@@ -74,9 +74,9 @@ inline Result<uint32> FieldWireType(const FieldSchema& field, uint32 referenceWi
 
 // 좁은 정수 종류의 상한이다(그 밖은 0 — 검사하지 않는다).
 constexpr uint64 UnsignedLimit(ValueKind kind) noexcept {
-    return kind == ValueKind::UInt8    ? 0xffull
-           : kind == ValueKind::UInt16 ? 0xffffull
-           : kind == ValueKind::UInt32 ? 0xffffffffull
+    return kind == ValueKind::UInt8    ? uint64{NumericLimits<uint8>::Max()}
+           : kind == ValueKind::UInt16 ? uint64{NumericLimits<uint16>::Max()}
+           : kind == ValueKind::UInt32 ? uint64{NumericLimits<uint32>::Max()}
                                        : 0;
 }
 
@@ -260,7 +260,8 @@ inline Result<void> WriteValueWire(ArchiveWriter& out, FieldEncodeContext& conte
     case ValueKind::UInt64:
         return out.WriteU64(value.unsignedInteger);
     case ValueKind::Int32:
-        if (value.signedInteger < -2147483648ll || value.signedInteger > 2147483647ll) {
+        if (value.signedInteger < NumericLimits<int32>::Min() ||
+            value.signedInteger > NumericLimits<int32>::Max()) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }
 
@@ -434,8 +435,8 @@ inline Result<void> ReadValueWire(ArchiveReader& reader, FieldDecodeContext& con
             return Result<void>::Failure(decoded.Error());
         }
 
-        if (type.kind == ValueKind::Int32 &&
-            (decoded.Value() < -2147483648ll || decoded.Value() > 2147483647ll)) {
+        if (type.kind == ValueKind::Int32 && (decoded.Value() < NumericLimits<int32>::Min() ||
+                                              decoded.Value() > NumericLimits<int32>::Max())) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }
 
@@ -1030,8 +1031,9 @@ inline Result<void> DecodeStructValue(StructView view, ConstructionContext* cons
         return spent;
     }
 
-    auto scope = source.list ? context.OpenListItem(*source.list, source.index)
-                             : context.OpenRecord(*source.field, schema.id, 1, ~0u);
+    auto scope =
+        source.list ? context.OpenListItem(*source.list, source.index)
+                    : context.OpenRecord(*source.field, schema.id, 1, NumericLimits<uint32>::Max());
     if (!scope) {
         return Result<void>::Failure(scope.Error());
     }

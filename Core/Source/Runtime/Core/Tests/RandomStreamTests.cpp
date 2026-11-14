@@ -35,8 +35,8 @@ constexpr uint32 ThirdOutputAfterZeroSeed = 0xe4c14788u;
 // 만족하도록 (다음 상태 - state * M)으로 골랐다(홀수).
 constexpr RandomStreamState AllOnesState{0, 0x657f2c0000000000ull, 0x07fffe0000000000ull};
 
-constexpr int32 Int32Min = -2147483647 - 1;
-constexpr int32 Int32Max = 2147483647;
+constexpr int32 Int32Min = NumericLimits<int32>::Min();
+constexpr int32 Int32Max = NumericLimits<int32>::Max();
 
 float FloatFromBits(uint32 bits) noexcept {
     return platform::BitCast<float>(bits);

@@ -129,7 +129,7 @@ Result<void*> PoolAllocator::Allocate(usize bytes, usize alignment, uint32 tag) 
     if (closed_) {
         return Result<void*>::Failure(ErrorCode::ShuttingDown);
     }
-    constexpr uint64 maximum = static_cast<uint64>(-1);
+    constexpr uint64 maximum = NumericLimits<uint64>::Max();
     if (stats_.liveAllocations == maximum || stats_.totalAllocations == maximum ||
         stats_.liveBytes > maximum - bytes) {
         return Result<void*>::Failure(ErrorCode::Overflow);

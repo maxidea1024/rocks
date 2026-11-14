@@ -473,14 +473,14 @@ TEST(RecordList_CountPrechecksRunBeforeAllocationAndParsing) {
     // InvalidArgument로 끊는다(할당은 공유 예산 하나뿐). 예산을 풀어 두므로 work 청구가 대신 끊어
     // 주는 경우와 구분된다.
     Array<uint8> huge(backing);
-    AppendU32(huge, 0xFFFFFFFFu);
+    AppendU32(huge, NumericLimits<uint32>::Max());
     AppendU64(huge, item.Value().Size());
     AppendBytes(huge, item.Value().View());
     RecordListLimits unlimitedCount;
-    unlimitedCount.maxItems = 0xFFFFFFFFu;
+    unlimitedCount.maxItems = NumericLimits<uint32>::Max();
     RecordLimits unlimitedBudget;
-    unlimitedBudget.archive.maxOperations = ~0ull;
-    unlimitedBudget.archive.maxWork = ~0ull;
+    unlimitedBudget.archive.maxOperations = NumericLimits<uint64>::Max();
+    unlimitedBudget.archive.maxWork = NumericLimits<uint64>::Max();
     test::NFailAllocator counting(backing);
     counting.DisableFailure();
     auto opened = RecordListReader::Open(counting, huge.View(), ItemSchema, 1, 1, unlimitedBudget,
@@ -871,8 +871,8 @@ TEST(RecordList_SharedBudgetIsThreadSafe) {
         RecordReader::Open(allocator, parentBytes.Value().View(), ParentSchema, 1, 1);
     REQUIRE(parentReader);
     RecordLimits generous;
-    generous.archive.maxOperations = ~0ull;
-    generous.archive.maxWork = ~0ull;
+    generous.archive.maxOperations = NumericLimits<uint64>::Max();
+    generous.archive.maxWork = NumericLimits<uint64>::Max();
     auto list =
         RecordListReader::Open(allocator, parentReader.Value().Find(ItemsField).Value().payload,
                                ItemSchema, 1, 1, generous);

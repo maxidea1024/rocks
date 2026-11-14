@@ -188,7 +188,7 @@ public:
     void Finish() noexcept {
         for (uint32 guard = 0; guard < 1000000 && registry_.CollectionPhase() != GcPhase::Idle;
              ++guard) {
-            if (!registry_.StepCollection(access_, {0xffffffffu, 0})) {
+            if (!registry_.StepCollection(access_, {NumericLimits<uint32>::Max(), 0})) {
                 break;
             }
         }

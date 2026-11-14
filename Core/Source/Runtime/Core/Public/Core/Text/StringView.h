@@ -98,7 +98,7 @@ public:
     // 제한된 시작 위치, 뒤 검색은 직전 byte 위치이며 시작이 0이면 NotFound다.
     // 위치 단위는 UE의 TCHAR code unit이 아닌 UTF-8 byte다.
     // 없으면 NotFound다. 알 수 없는 비교/방향 enum은 계약 위반으로 Fatal이다.
-    static constexpr usize NotFound = MaxSize;
+    static constexpr usize NotFound = IndexNone;
     usize Find(StringView needle, StringComparison comparison = StringComparison::IgnoreAsciiCase,
                StringSearchDirection direction = StringSearchDirection::FromStart,
                usize startByte = NotFound) const noexcept;

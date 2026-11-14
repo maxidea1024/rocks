@@ -56,7 +56,9 @@ TEST(IntRect_HalfOpenPixelContracts) {
     CHECK(IntRect(IntVec2(2, 2), IntVec2(2, 9)).IsEmpty());
     CHECK(!IntRect(IntVec2(3, 0), IntVec2(2, 1)).IsValid());
     // int32 전체 폭의 넓이도 int64로 정확히 계산한다.
-    const IntRect huge(IntVec2(-2147483647 - 1, 0), IntVec2(2147483647, 2));
+    constexpr int32 Lowest = NumericLimits<int32>::Min();
+    constexpr int32 Highest = NumericLimits<int32>::Max();
+    const IntRect huge(IntVec2(Lowest, 0), IntVec2(Highest, 2));
     CHECK(huge.Area() == 2ll * 4294967295ll);
 }
 
@@ -81,7 +83,9 @@ TEST(Interval_ClosedRangeContracts) {
 
 TEST(Rect_ReviewRegressions) {
     // 검토에서 확인한 반례: 전체 int32 범위 넓이는 int64를 넘는다(이전 구현은 부호 overflow UB).
-    const IntRect full(IntVec2(-2147483647 - 1, -2147483647 - 1), IntVec2(2147483647, 2147483647));
+    constexpr int32 Lowest = NumericLimits<int32>::Min();
+    constexpr int32 Highest = NumericLimits<int32>::Max();
+    const IntRect full(IntVec2(Lowest, Lowest), IntVec2(Highest, Highest));
     CHECK(full.Area() == 18446744065119617025ull);
     // 빈·뒤집힌 사각형은 겹치지 않는다.
     const IntRect square(IntVec2(0, 0), IntVec2(10, 10));

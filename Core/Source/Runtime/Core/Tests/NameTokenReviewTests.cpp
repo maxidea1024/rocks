@@ -67,7 +67,7 @@ TEST(NameTokenRejectsForgedIdentityAndDisplayFields) {
         broken.number = 0;
         CHECK(pool.Acquire(broken).Error() == ErrorCode::StaleHandle);
         broken = original;
-        broken.number = static_cast<uint32>(-1);
+        broken.number = NumericLimits<uint32>::Max();
         CHECK(pool.Acquire(broken).Error() == ErrorCode::StaleHandle);
         broken = original;
         broken.displayId = differentNumber.Value().displayId;

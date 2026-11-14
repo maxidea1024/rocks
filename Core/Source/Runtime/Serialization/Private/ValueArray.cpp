@@ -8,7 +8,7 @@ constexpr usize HeaderBytes = 8; // u32 원소 tag + u32 count
 
 // count개의 원소가 차지하는 최소 byte다. usize를 넘으면 false다.
 bool ElementBytes(uint32 count, usize elementBytes, usize& total) noexcept {
-    if (elementBytes != 0 && count > static_cast<usize>(-1) / elementBytes) {
+    if (elementBytes != 0 && count > MaxSize / elementBytes) {
         return false;
     }
 

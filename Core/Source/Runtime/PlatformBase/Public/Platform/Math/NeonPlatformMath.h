@@ -133,7 +133,8 @@ private:
     }
 
     static int32 NarrowInt32(double value, int64 converted) noexcept {
-        if (Base::IsNaN(value) || converted < -2147483648ll || converted > 2147483647ll) {
+        if (Base::IsNaN(value) || converted < NumericLimits<int32>::Min() ||
+            converted > NumericLimits<int32>::Max()) {
             Fatal("PlatformMath int32 conversion is NaN or out of range");
         }
         return static_cast<int32>(converted);

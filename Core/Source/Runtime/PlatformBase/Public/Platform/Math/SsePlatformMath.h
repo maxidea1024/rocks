@@ -190,9 +190,9 @@ struct SsePlatformMath : Base {
     }
 
 private:
-    static constexpr int32 Int32Min = -2147483647 - 1;
-    static constexpr int32 Int32Max = 2147483647;
-    static constexpr int64 Int64Min = -9223372036854775807ll - 1;
+    static constexpr int32 Int32Min = NumericLimits<int32>::Min();
+    static constexpr int32 Int32Max = NumericLimits<int32>::Max();
+    static constexpr int64 Int64Min = NumericLimits<int64>::Min();
 
     // 보정 결과가 int32 범위를 넘으면 Base와 같은 Fatal 진단으로 끝낸다.
     // 예: double 2147483647.5의 Ceil/Round 결과 2^31은 표현할 수 없다.

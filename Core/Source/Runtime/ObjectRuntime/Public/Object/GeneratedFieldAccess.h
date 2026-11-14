@@ -269,7 +269,8 @@ Result<void> WriteTargetValue(T& target, const FieldValue& value) noexcept {
     } else if constexpr (Target == ValueKind::Float64) {
         target = value.float64;
     } else if constexpr (Target == ValueKind::Int32) {
-        if (value.signedInteger < -2147483648ll || value.signedInteger > 2147483647ll) {
+        if (value.signedInteger < NumericLimits<int32>::Min() ||
+            value.signedInteger > NumericLimits<int32>::Max()) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }
 
@@ -277,7 +278,7 @@ Result<void> WriteTargetValue(T& target, const FieldValue& value) noexcept {
     } else if constexpr (Target == ValueKind::Int64) {
         target = value.signedInteger;
     } else {
-        const uint64 maximum = static_cast<uint64>(static_cast<T>(~T(0)));
+        const uint64 maximum = static_cast<uint64>(NumericLimits<T>::Max());
         if (value.unsignedInteger > maximum) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }

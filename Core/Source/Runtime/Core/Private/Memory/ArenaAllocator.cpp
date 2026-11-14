@@ -106,7 +106,7 @@ Result<void*> ArenaAllocator::Allocate(usize bytes, usize alignment, uint32 tag)
         return Result<void*>::Success(nullptr);
     }
 
-    constexpr uint64 maximum = static_cast<uint64>(-1);
+    constexpr uint64 maximum = NumericLimits<uint64>::Max();
     if (stats_.allocations.liveAllocations == maximum ||
         stats_.allocations.totalAllocations == maximum ||
         bytes > maximum - stats_.allocations.liveBytes) {

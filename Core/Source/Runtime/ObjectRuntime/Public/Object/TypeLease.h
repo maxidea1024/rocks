@@ -25,7 +25,7 @@ struct RuntimeStructFieldOps;
 //   }
 class StructView {
 public:
-    static constexpr usize NoField = ~usize(0);
+    static constexpr usize NoField = IndexNone;
 
     constexpr StructView() noexcept = default;
 
@@ -84,7 +84,7 @@ enum class TypeKind : uint8 {
 class TypeLease {
 public:
     // FieldIndex가 필드를 찾지 못했을 때의 값이다.
-    static constexpr usize NoField = ~usize(0);
+    static constexpr usize NoField = IndexNone;
 
     TypeLease() noexcept = default;
     TypeLease(TypeLease&& other) noexcept;

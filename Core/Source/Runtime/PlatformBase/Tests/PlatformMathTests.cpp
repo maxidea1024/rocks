@@ -1,7 +1,6 @@
 #include <TestSupport/Test.h>
 #include <Platform/PlatformMath.h>
 
-#include <float.h>
 #include <Platform/Memory.h>
 
 // CPU별 PlatformMath·simd 구현이 Generic/scalar 기준 구현과 같은 계약을 지키는지 차등 검사한다.
@@ -54,12 +53,16 @@ bool SameDouble(double a, double b) {
 constexpr float Infinity = platform::PlatformMath::Infinity<float>();
 const float QuietNaN = FloatBits(0x7fc00000u);
 
+// 가장 작은 양의 정규 값과 가장 큰 유한값이다.
+constexpr float FloatMin = NumericLimits<float>::Min();
+constexpr float FloatMax = NumericLimits<float>::Max();
+
 const float SpecialFloats[] = {
     0.0f,           -0.0f,         0.5f,           -0.5f,        1.5f,        -1.5f,
     2.5f,           -2.5f,         0.49999997f,    -0.49999997f, 0.50000006f, 1.0f,
     -1.0f,          8388607.5f,    -8388607.5f,    8388608.0f,   16777217.0f, 2147483520.0f,
-    -2147483648.0f, 2147483648.0f, -2147483904.0f, 1.0e-45f,     -1.0e-45f,   FLT_MIN,
-    FLT_MAX,        -FLT_MAX,      Infinity,       -Infinity};
+    -2147483648.0f, 2147483648.0f, -2147483904.0f, 1.0e-45f,     -1.0e-45f,   FloatMin,
+    FloatMax,       -FloatMax,     Infinity,       -Infinity};
 
 const double SpecialDoubles[] = {0.0,
                                  -0.0,
@@ -83,8 +86,8 @@ const double SpecialDoubles[] = {0.0,
                                  9223372036854775808.0,
                                  -9223372036854775808.0,
                                  4.9e-324,
-                                 DBL_MAX,
-                                 -DBL_MAX};
+                                 NumericLimits<double>::Max(),
+                                 NumericLimits<double>::Lowest()};
 
 // 범위 밖·NaN은 Fatal 경로이므로 Try로 유효성을 먼저 판정하고, 유효할 때만 두 구현을 비교한다.
 void CompareInt32Conversions(double value) {
@@ -144,14 +147,14 @@ TEST(PlatformMath_ClassificationUsesBitPatterns) {
     CHECK(!PlatformMath::IsNaN(Infinity));
     CHECK(!PlatformMath::IsFinite(Infinity));
     CHECK(!PlatformMath::IsFinite(QuietNaN));
-    CHECK(PlatformMath::IsFinite(FLT_MAX));
+    CHECK(PlatformMath::IsFinite(NumericLimits<float>::Max()));
     CHECK(PlatformMath::IsFinite(1.0e-45f));
     CHECK(PlatformMath::IsInfinite(-Infinity));
     CHECK(PlatformMath::SignBit(-0.0f));
     CHECK(!PlatformMath::SignBit(0.0f));
     CHECK(PlatformMath::IsNaN(DoubleBits(0x7ff8000000000000ull)));
     CHECK(!PlatformMath::IsFinite(DoubleBits(0x7ff0000000000000ull)));
-    CHECK(PlatformMath::IsFinite(DBL_MIN));
+    CHECK(PlatformMath::IsFinite(NumericLimits<double>::Min()));
     static_assert(GenericPlatformMath::IsNaN(platform::PlatformMath::QuietNaN<float>()));
     static_assert(!GenericPlatformMath::IsFinite(platform::PlatformMath::Infinity<double>()));
 }
@@ -252,9 +255,9 @@ TEST(PlatformMath_RoundingDirectionContract) {
     CHECK(PlatformMath::FloorToInt32(-0.0f) == 0);
     CHECK(PlatformMath::FloorToInt32(-1.0e-45f) == -1);
     CHECK(PlatformMath::CeilToInt32(1.0e-45f) == 1);
-    CHECK(PlatformMath::FloorToInt32(-2147483648.0f) == -2147483647 - 1);
-    CHECK(PlatformMath::CeilToInt32(2147483647.0) == 2147483647);
-    CHECK(PlatformMath::TruncToInt32(-2147483648.9) == -2147483647 - 1);
+    CHECK(PlatformMath::FloorToInt32(-2147483648.0f) == NumericLimits<int32>::Min());
+    CHECK(PlatformMath::CeilToInt32(2147483647.0) == NumericLimits<int32>::Max());
+    CHECK(PlatformMath::TruncToInt32(-2147483648.9) == NumericLimits<int32>::Min());
 }
 
 TEST(PlatformMath_TryConversionsRejectWithoutChangingOutput) {
@@ -268,7 +271,7 @@ TEST(PlatformMath_TryConversionsRejectWithoutChangingOutput) {
     int64 wide = 5;
     CHECK(!PlatformMath::TryRoundToInt64(9223372036854775808.0, wide));
     CHECK(PlatformMath::TryFloorToInt64(-9223372036854775808.0, wide));
-    CHECK(wide == -9223372036854775807ll - 1);
+    CHECK(wide == NumericLimits<int64>::Min());
 }
 
 TEST(PlatformMath_BitOperationsMatchGeneric) {
