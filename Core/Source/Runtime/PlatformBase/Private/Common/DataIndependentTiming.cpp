@@ -25,7 +25,8 @@ bool IsDataIndependentTimingEnabled() noexcept {
 }
 
 bool BeginDataIndependentTiming() noexcept {
-    if (!QueryCpuFeatures().armDit || ReadDit()) {
+    const CpuFeatures& features = QueryCpuFeatures();
+    if (!features.armDit || ReadDit()) {
         return false;
     }
 
@@ -34,7 +35,7 @@ bool BeginDataIndependentTiming() noexcept {
     // DIT 절). 없으면 뒤따르는 비밀 의존 명령이 DIT가 꺼진 상태로 투기 실행될 수 있다. Arm ARM은
     // PSTATE 쓰기에 barrier를 요구하지 않지만 감지가 macOS뿐이라 언제나 넣는다. 끌 때는 넣지
     // 않는다.
-    if (QueryCpuFeatures().armSb) {
+    if (features.armSb) {
         __asm__ volatile(".inst 0xd50330ff" ::: "memory"); // sb
     } else {
         __asm__ volatile("dsb nsh\n\tisb" ::: "memory");

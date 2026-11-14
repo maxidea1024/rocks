@@ -91,9 +91,11 @@ struct KeyBlobInfo {
 };
 
 // 헤더만 읽는다(인증하지 않는다). 헤더(Key 방식 42 byte, Password 방식 50 byte)만 있으면 되고 뒤에
-// 다른 byte가 붙어 있어도 받는다. magic·version(5 byte)을 먼저 보고 모르는 버전은 길이와 관계없이
-// Unsupported다. 헤더보다 짧거나 형식이 틀리면 AuthenticationFailed, 모르는 타입·방식·알고리즘은
-// Unsupported다. 비용 상한은 보지 않는다(호출자가 passwordCost로 정책을 정한다).
+// 다른 byte가 붙어 있어도 받는다. byte 순서대로 판정한다: magic·version 5 byte 미만이나 magic
+// 불일치는 AuthenticationFailed, 모르는 버전은 (길이와 관계없이) Unsupported, 앞 26 byte가 모자라면
+// AuthenticationFailed, 모르는 타입·(타입, 알고리즘)·방식은 Unsupported, 그 뒤 keyId·길이·방식
+// 매개변수의 형식 오류는 AuthenticationFailed다. 비용 상한은 보지 않는다(호출자가 passwordCost로
+// 정책을 정한다).
 [[nodiscard]] Result<KeyBlobInfo> TryPeekKeyBlob(Span<const uint8> blob) noexcept;
 
 // KeyBlob에 담을 수 있는 키 타입이다(닫힌 목록).

@@ -621,6 +621,16 @@ TEST(CryptoKeyBlobRejectsMisuse) {
     CHECK(TryWrapKeyWithPassword(Text("pw"), PasswordCost{MaxPasswordOperations + 1, 8 * 1024},
                                  key.Value(), id, Span<uint8>(blob))
               .Error() == ErrorCode::CapacityExceeded);
+
+    // Argon2id 상한(2^32 - 1 byte)보다 긴 비밀번호는 InvalidArgument다. 길이 검사가 내용을 읽기
+    // 전이므로 길이만 큰 view로 확인한다(가리키는 byte는 읽지 않는다). unwrap은 blob을 보기 전에
+    // 거부한다(blob이 형식 오류여도 InvalidArgument).
+    const uint8 single = 0;
+    const Span<const uint8> hugePassword(&single, usize{1} << 32);
+    CHECK(TryWrapKeyWithPassword(hugePassword, SmallCost, key.Value(), id, Span<uint8>(blob))
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(TryUnwrapKeyWithPassword<AeadKey>(hugePassword, Span<const uint8>(blob)).Error() ==
+          ErrorCode::InvalidArgument);
     CHECK(untouched());
 
     // 메모리 비용은 1 KiB 단위로 내려 기록하고 계산도 그 값으로 한다(같은 비용에 인코딩이 하나).

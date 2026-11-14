@@ -101,7 +101,8 @@ private:
                                                Span<const uint8> message) noexcept;
 
 // 서명을 확인한다. 맞으면 성공이다. 서명이 64 byte가 아니거나, 맞지 않거나, 공개키가 올바른 점이
-// 아니면 AuthenticationFailed다(어느 검사인지는 알리지 않는다).
+// 아니면 AuthenticationFailed다(어느 검사인지는 알리지 않는다). message는 기밀 평문이어도 된다(DIT
+// 구간에서 해시한다, 6.3절).
 [[nodiscard]] Result<void> TryVerify(const Ed25519PublicKey& key, Span<const uint8> message,
                                      Span<const uint8> signature) noexcept;
 
