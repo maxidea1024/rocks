@@ -5,6 +5,7 @@
 #include <Crypto/Random.h>
 
 #include "AdapterCommon.h"
+#include "AeadInternal.h"
 #include "KdfInternal.h"
 #include "KeyAccess.h"
 #include "SecretArena.h"
@@ -151,12 +152,6 @@ bool IsAvailable(AeadAlgorithm algorithm) noexcept {
     }
 
     return false;
-}
-
-// first가 second의 offset byte 뒤에서 시작하는가. 범위를 벗어난 포인터 산술을 피하려고 주소로
-// 비교한다.
-bool StartsAt(const void* first, const void* second, usize offset) noexcept {
-    return reinterpret_cast<uptr>(first) == reinterpret_cast<uptr>(second) + offset;
 }
 
 // 키·nonce·평문 길이와 겹침은 호출 전에 검사한다. libsodium 실패는 어댑터 결함이다.
@@ -309,6 +304,16 @@ Result<void> CheckHazmat(const AeadKey& key, Span<const uint8> nonce) noexcept {
 
 } // namespace
 
+// ---- 모듈 내부 진입점 ----
+
+Result<void> detail::CheckAeadUsable(AeadAlgorithm algorithm) noexcept {
+    return CheckUsable(algorithm);
+}
+
+Result<AeadKey> detail::TryMakeAeadKey(AeadAlgorithm algorithm, SecretBytes&& key) noexcept {
+    return TryMakeKey(algorithm, Move(key));
+}
+
 // ---- 정보 ----
 
 Result<AeadInfo> TryGetAeadInfo(AeadAlgorithm algorithm) noexcept {
@@ -459,7 +464,7 @@ Result<usize> TrySeal(const AeadKey& key, Span<const uint8> associatedData,
     }
 
     const Span<uint8> sealed = output.Left(sealedBytes.Value());
-    const bool inPlace = StartsAt(plaintext.Data(), sealed.Data(), traits.nonceBytes);
+    const bool inPlace = detail::StartsAt(plaintext.Data(), sealed.Data(), traits.nonceBytes);
     if ((Overlaps(plaintext, sealed) && !inPlace) || Overlaps(associatedData, sealed)) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
@@ -486,7 +491,7 @@ Result<usize> TryOpen(const AeadKey& key, Span<const uint8> associatedData,
     }
 
     // 겹침은 길이 검사 전에 본다. 실패 때 plaintext를 지우므로 입력을 덮지 않게 한다.
-    const bool inPlace = StartsAt(plaintext.Data(), sealed.Data(), traits.nonceBytes);
+    const bool inPlace = detail::StartsAt(plaintext.Data(), sealed.Data(), traits.nonceBytes);
     if ((Overlaps(sealed, plaintext) && !inPlace) || Overlaps(associatedData, plaintext)) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }

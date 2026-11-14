@@ -11,8 +11,9 @@
 //
 // - 서명은 결정적이다. 같은 키·메시지는 늘 같은 서명이다(RFC 8032).
 // - 검증 규칙은 libsodium이 정본이다: 비정규 S, small-order R, 비정규·small-order 공개키를
-//   거부한다. 다른 구현이 받아들이는 서명("acceptable" 경계 사례)을 거부할 수 있으므로, 서명을
-//   만드는 도구도 같은 Rocks 경로로 검증한다(4절).
+//   거부하고, 검증식은 cofactorless([S]B = R + [k]A)다. 다른 구현이 받아들이는 서명("acceptable"
+//   경계 사례, ZIP-215식 cofactored 검증)을 거부할 수 있으므로, 서명을 만드는 도구도 같은 Rocks
+//   경로로 검증한다(4절).
 // - Ed25519ph는 메시지의 SHA-512를 서명한다. 큰 메시지를 조각으로 넣을 때 쓴다(Ed25519phSigner·
 //   Ed25519phVerifier). 순수 Ed25519(m) 서명과 호환되지 않으므로 형식은 SignatureAlgorithm으로
 //   구분해 적는다.

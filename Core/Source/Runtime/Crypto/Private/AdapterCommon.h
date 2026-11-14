@@ -28,6 +28,12 @@ inline uint8* OutputPointer(Span<uint8> bytes, uint8* scratch) noexcept {
     return bytes.IsEmpty() ? scratch : bytes.Data();
 }
 
+// first가 second의 offset byte 뒤에서 시작하는가. 범위를 벗어난 포인터 산술을 피하려고 주소로
+// 비교한다(제자리 규칙 검사).
+inline bool StartsAt(const void* first, const void* second, usize offset) noexcept {
+    return reinterpret_cast<uptr>(first) == reinterpret_cast<uptr>(second) + offset;
+}
+
 // 출력이 입력 조각이나 조각 배열 자체와 한 byte라도 겹치는가(7절 제자리 규칙).
 inline bool OutputOverlaps(Span<const Span<const uint8>> pieces, Span<uint8> output) noexcept {
     if (Overlaps(pieces, output)) {
