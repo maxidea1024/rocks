@@ -672,7 +672,8 @@ deflate 스트림은 zlib 래퍼라 Rocks `Zlib`에 대응한다). 형식은 Zst
 형식이 아니라 Unsupported다. Brotli는 해제 스트림만 있다(압축 스트림 Unsupported). LZ4 frame 스트림의 세부 사항은 12.4절,
 Brotli는 13.4절이다. 헤더는 `Compression/CompressionStream.h`다.
 
-- 기본 API는 역압이 있는 `TryProcess(input, output) → StreamProgress{consumed, produced, complete}`다. 출력이 모자라면
+- 기본 API는 역압이 있는 `TryProcess(input, output) → StreamProgress{consumed, produced, complete}`다(`StreamProgress`는
+  Crypto 스트림과 함께 쓰도록 2026-11-14 Core `Core/StreamProgress.h`로 옮겼다). 출력이 모자라면
   오류가 아니라 일부만 소비하고 돌아오므로, 작은 입력 하나가 큰 출력을 한꺼번에 만들지 않는다. `TryWriteAppend`
   (입력을 모두 소비하고 Array 뒤에 붙임)는 편의 함수다.
 - 압축: `TryProcess`, `TryFlush`(네트워크용 동기 flush: Z_SYNC_FLUSH·ZSTD_e_flush), `TryFinish`(complete까지 반복),
