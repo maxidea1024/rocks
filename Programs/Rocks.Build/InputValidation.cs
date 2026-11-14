@@ -151,10 +151,12 @@ internal static class InputValidation
                 {
                     throw new ArgumentException($"Module {module.Name}: invalid define '{define}'.");
                 }
-                // 구성 매크로는 빌드 시스템만 정의한다(모듈이 바꾸면 구성 판정이 모듈마다 달라진다).
-                if (name.StartsWith("ROCKS_BUILD_", StringComparison.Ordinal))
+                // 구성·대상 매크로는 빌드 시스템과 Base/Compiler.h만 정의한다(모듈이 바꾸면 구성·대상 판정이 모듈마다 달라지고,
+                // MetaCompiler가 프로필과 모듈 정의를 함께 받아 중복 오류를 낸다).
+                if (name.StartsWith("ROCKS_BUILD_", StringComparison.Ordinal) || name.StartsWith("ROCKS_PLATFORM_", StringComparison.Ordinal) ||
+                    name.StartsWith("ROCKS_ARCH_", StringComparison.Ordinal))
                 {
-                    throw new ArgumentException($"Module {module.Name}: define '{define}' is reserved for the build configuration.");
+                    throw new ArgumentException($"Module {module.Name}: define '{define}' is reserved for the build configuration and target.");
                 }
                 // 경로를 담은 define 값은 호스트마다 달라 도구 빌드 ID와 바이너리 신원을 호스트에 묶는다. 외부 파일은 선언 입력으로 둔다.
                 int equals = define.IndexOf('=');

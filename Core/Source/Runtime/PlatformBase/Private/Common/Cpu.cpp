@@ -1,5 +1,6 @@
 #include "CpuInternal.h"
 
+#include <Base/Compiler.h>
 #include <Platform/Cpu.h>
 
 #if ROCKS_ARCH_X64

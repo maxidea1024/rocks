@@ -1,5 +1,7 @@
 #include "../Common/CpuInternal.h"
 
+#include <Base/Compiler.h>
+
 #if ROCKS_ARCH_ARM64
 
 #include <asm/hwcap.h>

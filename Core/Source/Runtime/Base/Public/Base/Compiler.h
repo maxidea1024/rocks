@@ -20,10 +20,12 @@
 #error "Rocks는 C++23(concepts, if consteval)이 필요하다."
 #endif
 
-// 대상 CPU 아키텍처 매크로다. 둘 중 정확히 하나가 1이다. 컴파일러가 정하는 원시
-// 매크로(__x86_64__·_M_X64·
-// __aarch64__·_M_ARM64)는 이 파일에서만 쓰고, 다른 코드는 전처리기 분기에 ROCKS_ARCH_*를, 함수
-// 안에서는 if constexpr로 rocks::IsX64·IsArm64를 쓴다(정책 검사 target-macro).
+// 대상 CPU 아키텍처 매크로다. 둘 중 정확히 하나가 1이다. 컴파일러가 정하는 원시 매크로
+// (__x86_64__·_M_X64·__aarch64__·_M_ARM64 등)는 이 파일에서만 쓴다. 다른 코드는 전처리기
+// 분기에 ROCKS_ARCH_*를, 함수 안에서는 if constexpr로 rocks::IsX64·IsArm64를 쓴다.
+// 주의: 이 헤더가 정의하므로 쓰는 파일은 그보다 앞에 #include <Base/Compiler.h>를 둔다(정의
+// 전에 쓰면 경고 없이 0이다). #ifdef·defined()로 묻지 않는다(항상 정의된다). 정책 검사
+// target-macro·target-macro-order·target-macro-defined가 확인한다.
 //
 // 사용 예:
 //   #if ROCKS_ARCH_X64
@@ -42,12 +44,12 @@
 // 대상 OS 매크로다. 빌드 시스템(Rocks.Build)이 정확히 하나를 1로 정의한다(ROCKS_PLATFORM_WINDOWS·
 // ROCKS_PLATFORM_MAC·ROCKS_PLATFORM_ANDROID). 정의되지 않은 매크로는 0으로 본다. 합이 1이 아니거나
 // 컴파일러가 정하는 대상(_WIN32·__APPLE__·__ANDROID__)과 어긋나면 빌드 오류다.
-// - OS API를 쓰는 분기(#if ROCKS_PLATFORM_*)는 native backend
-// 디렉터리(PlatformBase/Private/<플랫폼> 등)에만
-//   둔다(정책 검사 platform-boundary). OS별 구현은 디렉터리로 나누는 것이 기본이다.
+// - OS API를 쓰는 분기(#if ROCKS_PLATFORM_*)는 native backend 디렉터리
+//   (PlatformBase/Private/<플랫폼> 등)에만 둔다(정책 검사 platform-boundary). OS별 구현은
+//   디렉터리로 나누는 것이 기본이다.
 // - 테스트·공통 코드의 플랫폼별 기대값은 if constexpr로 rocks::IsWindows·IsMac·IsAndroid를 쓴다.
-// - 원시 OS 매크로(_WIN32·__APPLE__·__ANDROID__·__linux__)는 이 파일에서만 쓴다(정책 검사
-// target-macro).
+// - 원시 OS 매크로(_WIN32·__APPLE__·__ANDROID__·__linux__ 등)는 이 파일에서만 쓴다.
+// - ROCKS_PLATFORM_MAC은 macOS 대상만이다. iOS 같은 다른 Apple 대상은 아직 지원하지 않아 거부한다.
 //
 // 사용 예:
 //   if constexpr (rocks::IsMac && rocks::IsArm64) {
@@ -73,9 +75,11 @@
     "ROCKS_PLATFORM_WINDOWS·ROCKS_PLATFORM_MAC·ROCKS_PLATFORM_ANDROID 중 정확히 하나가 1이어야 한다(Rocks.Build가 정의한다)."
 #endif
 
-#if (ROCKS_PLATFORM_WINDOWS && !defined(_WIN32)) || (ROCKS_PLATFORM_MAC && !defined(__APPLE__)) || \
+#if (ROCKS_PLATFORM_WINDOWS && !defined(_WIN32)) ||                                                \
+    (ROCKS_PLATFORM_MAC &&                                                                         \
+     (!defined(__APPLE__) || !defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__))) ||          \
     (ROCKS_PLATFORM_ANDROID && !defined(__ANDROID__))
-#error "ROCKS_PLATFORM_*가 컴파일 대상 OS와 다르다."
+#error "ROCKS_PLATFORM_*가 컴파일 대상 OS와 다르다(ROCKS_PLATFORM_MAC은 macOS 대상만이다)."
 #endif
 
 // 빌드 구성 매크로다(UE5.6 UE_BUILD_DEBUG·UE_BUILD_DEVELOPMENT·UE_BUILD_SHIPPING 대응). 빌드

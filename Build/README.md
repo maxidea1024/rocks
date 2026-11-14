@@ -28,6 +28,7 @@ UE5.6 Debug·Development·Shipping에 대응한다. 구성마다 `ROCKS_BUILD_DE
 | Asan | 끔 | 있음(PDB) | `/MD` | 없음 | 없음 | `ROCKS_BUILD_DEBUG` | 메모리 오류 검출 |
 
 - 계약 위반 검사(Fatal)는 모든 구성에서 유지한다. 구성 매크로로 빼는 것은 디버그 표시·치트·통계 같은 개발용 기능뿐이다.
+- 대상 OS 매크로 `ROCKS_PLATFORM_WINDOWS`·`ROCKS_PLATFORM_MAC`·`ROCKS_PLATFORM_ANDROID`도 빌드가 정확히 하나를 1로 정의하고, `Base/Compiler.h`가 컴파일 대상과 맞는지 검증한다. 아키텍처 매크로 `ROCKS_ARCH_X64`·`ROCKS_ARCH_ARM64`는 `Compiler.h`가 정한다. 모듈은 `ROCKS_BUILD_*`·`ROCKS_PLATFORM_*`·`ROCKS_ARCH_*`를 정의할 수 없다. 사용 규칙(원시 컴파일러 매크로 금지, include 순서, `defined()` 금지)은 [플랫폼 계층](../Docs/Design/PlatformLayer.ko.md)의 "플랫폼 선택과 실패 정책"을 따른다.
 - Release는 최적화된 모듈을 ThinLTO bitcode로 컴파일한다. 도구 탐색은 archiver·linker를 compiler와 같은 폴더에서 먼저 찾으며, Windows Release는 compiler 폴더의 `llvm-lib`·`lld-link`만 받는다(MSVC `lib.exe`·`link.exe`나 다른 LLVM 설치의 도구는 빌드 전에 거부). macOS는 compiler 옆에 `llvm-ar`가 없으면 Xcode `ar`(libLTO)를 쓴다. POSIX link driver에는 `-flto=thin`을 넘긴다.
 - 모든 구성이 디버그 정보를 만든다. Release PDB는 UE Shipping처럼 배포 파일과 분리해 크래시 덤프 심볼화에 쓴다.
 - 후속: ThinLTO 캐시(`/lldltocache`·`--thinlto-cache-dir`)가 없어 Release relink는 backend를 모두 다시 생성한다. 병렬 link 수와 LTO thread 수 조정도 측정 후 정한다.

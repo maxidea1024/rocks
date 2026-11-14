@@ -192,9 +192,17 @@ dotnet msbuild Rocks.proj -t:Test -p:RocksPlatform=android -p:AndroidAbi=x86_64
   `__aarch64__`·`_M_ARM64`·`_WIN32`·`__APPLE__`·`__ANDROID__`·`__linux__`)는 이 헤더만 쓰고, `ROCKS_ARCH_X64`·
   `ROCKS_ARCH_ARM64`를 정한다. 빌드가 넘기는 `ROCKS_PLATFORM_WINDOWS`·`ROCKS_PLATFORM_MAC`·`ROCKS_PLATFORM_ANDROID`
   (`NativeConfigurations.PlatformMacro`, 일반 컴파일과 MetaCompiler 검사 시험이 같은 값)는 정확히 하나가 1인지, 컴파일
-  대상과 맞는지 검증한다. 다른 소스는 전처리기 분기에 `ROCKS_ARCH_*`를, 함수 안에서는 `rocks::IsX64`·`IsArm64`·
-  `IsWindows`·`IsMac`·`IsAndroid`를 쓴다(정책 검사 `target-macro`). OS API를 쓰는 `#if ROCKS_PLATFORM_*` 분기는 지금처럼
-  native backend 디렉터리에만 둔다(정책 검사 `platform-boundary`). 테스트의 플랫폼별 기대값은 `if constexpr`로 쓴다.
+  대상과 맞는지 검증한다(`ROCKS_PLATFORM_MAC`은 macOS 대상만, iOS는 아직 거부). 다른 소스는 전처리기 분기에 `ROCKS_ARCH_*`를,
+  함수 안에서는 `rocks::IsX64`·`IsArm64`·`IsWindows`·`IsMac`·`IsAndroid`를 쓴다. OS API를 쓰는 `#if ROCKS_PLATFORM_*` 분기는
+  지금처럼 native backend 디렉터리에만 둔다(정책 검사 `platform-boundary`). 테스트의 플랫폼별 기대값은 `if constexpr`로 쓴다.
+  - 정책 검사 `target-macro`: 원시 매크로 토큰(변형 철자·32 bit·`__MACH__`·`TARGET_OS_*`·빌드가 넣는 `WIN32`·`_WINDOWS` 포함)을
+    주석·리터럴을 지운 코드 어디서든 거부한다. 줄 이음·`#elifdef`·`#define` 별칭도 잡힌다.
+  - `target-macro-order`: `ROCKS_ARCH_*`·`ROCKS_PLATFORM_*`를 쓰는 전처리기 줄보다 앞에 `#include <Base/Compiler.h>`를 직접
+    둔다. 정의 전에 쓰면 경고 없이 0으로 읽히기 때문이다(`-Wundef`는 켜지 않는다).
+  - `target-macro-defined`: `ROCKS_BUILD_*`·`ROCKS_PLATFORM_*`·`ROCKS_ARCH_*`는 항상 0 또는 1로 정의되므로 `#ifdef`·`defined()`로
+    묻지 않는다.
+  - 모듈은 이 세 접두의 매크로를 정의할 수 없다(빌드 입력 검증). 소유 C 파일(`.c`, 예: `Lz4Unity.c`)은 C++ 전용 `Compiler.h`를
+    쓸 수 없으므로 대상별 분기를 두지 않는다.
 
 ## 전환 순서와 검증
 

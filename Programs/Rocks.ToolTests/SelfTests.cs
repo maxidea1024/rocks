@@ -585,24 +585,42 @@ internal static class SelfTests
             // 정의 헤더는 원시 매크로로 ROCKS_ARCH_*·ROCKS_PLATFORM_*를 정하고 검증한다. 두 검사 모두 허용한다.
             temporary.Write("Core/Source/Runtime/Base/Public/Base/Compiler.h",
                 "#if defined(__x86_64__) || defined(_M_X64)\n#endif\n#if ROCKS_PLATFORM_MAC && !defined(__APPLE__)\n#endif\n");
-            // ROCKS_ARCH_*·기능 매크로·if constexpr 상수는 어디서나 쓸 수 있다.
-            temporary.Write("Core/Source/Runtime/Core/Tests/Probe.cpp",
-                "#if ROCKS_ARCH_ARM64\n#endif\n#if defined(__ARM_FEATURE_AES)\n#endif\nif constexpr (rocks::IsMac) {}\n");
+            // Compiler.h를 먼저 포함하면 ROCKS_ARCH_*·기능 매크로·if constexpr 상수는 어디서나 쓸 수 있다. 주석의 언급은 코드가 아니다.
+            const string probe = "Core/Source/Runtime/Core/Tests/Probe.cpp";
+            temporary.Write(probe, "#include <Base/Compiler.h>\n// __APPLE__ is decided by Compiler.h\n#if ROCKS_ARCH_ARM64 && \\\n" +
+                "    ROCKS_PLATFORM_MAC\n#endif\n#if defined(__ARM_FEATURE_AES)\n#endif\nif constexpr (rocks::IsMac) {}\n");
             NoFailures(PolicyChecks.TargetMacros(temporary.Root));
             NoFailures(PolicyChecks.PlatformBoundary(temporary.Root));
 
             foreach (string source in new[] { "#if defined(__aarch64__)\n#endif", "#ifdef _M_X64\n#endif", "#elif defined(__APPLE__)",
-                "#if !defined(_WIN32)\n#endif", "#if __ANDROID__ && 1\n#endif", "#ifndef __linux__\n#endif" })
+                "#if !defined(_WIN32)\n#endif", "#if __ANDROID__ && 1\n#endif", "#ifndef __linux__\n#endif",
+                // 줄 이음·C++23 #elifdef·변형 철자·빌드가 넣는 WIN32·Apple SDK 매크로·#define 별칭도 잡는다.
+                "#if ROCKS_PLATFORM_MAC && \\\n    defined(__aarch64__)\n#endif", "#if 0\n#elifdef __APPLE__\n#endif", "#if __arm64\n#endif",
+                "#ifdef WIN32\n#endif", "#if TARGET_OS_IPHONE\n#endif", "#define IS_APPLE __APPLE__", "#if __MACH__\n#endif" })
             {
                 // native backend도 원시 매크로 대신 ROCKS_ARCH_*·ROCKS_PLATFORM_*를 쓴다.
-                temporary.Write("Core/Source/Runtime/PlatformBase/Private/Android/Probe.cpp", source + "\n");
+                temporary.Write("Core/Source/Runtime/PlatformBase/Private/Android/Probe.cpp", "#include <Base/Compiler.h>\n" + source + "\n");
                 Verify.Equal(1, PolicyChecks.TargetMacros(temporary.Root).Count, "raw target macro accepted: " + source);
             }
 
-            // 정의 헤더와 이름만 비슷한 경로는 예외가 아니다.
             temporary.Write("Core/Source/Runtime/PlatformBase/Private/Android/Probe.cpp", "#pragma once\n");
+            // 항상 정의된 Rocks 매크로를 정의 여부로 묻는 형태와, Compiler.h보다 앞선 사용은 거부한다.
+            foreach (string source in new[] { "#include <Base/Compiler.h>\n#ifdef ROCKS_PLATFORM_MAC\n#endif",
+                "#include <Base/Compiler.h>\n#if defined(ROCKS_BUILD_DEBUG)\n#endif", "#include <Base/Compiler.h>\n#if 1 && \\\n defined ROCKS_ARCH_X64\n#endif",
+                "#if ROCKS_ARCH_X64\n#endif\n#include <Base/Compiler.h>", "#include <Base/Types.h>\n#if ROCKS_PLATFORM_ANDROID\n#endif" })
+            {
+                temporary.Write(probe, source + "\n");
+                Verify.Equal(1, PolicyChecks.TargetMacros(temporary.Root).Count, "Rocks target macro misuse accepted: " + source);
+            }
+
+            // 정의 헤더와 이름만 비슷한 경로는 예외가 아니다.
+            temporary.Write(probe, "#pragma once\n");
             temporary.Write("Core/Source/Runtime/Base/Public/Base/CompilerExtra.h", "#if defined(__x86_64__)\n#endif\n");
             Verify.Equal(1, PolicyChecks.TargetMacros(temporary.Root).Count, "definition header allowance too wide");
+
+            // 정의 헤더라도 OS 헤더·API는 platform-boundary가 막는다(모든 번역 단위가 포함한다).
+            temporary.Write("Core/Source/Runtime/Base/Public/Base/Compiler.h", "#if ROCKS_PLATFORM_WINDOWS && !defined(_WIN32)\n#endif\n#include <Windows.h>\n");
+            Verify.Equal(1, PolicyChecks.PlatformBoundary(temporary.Root).Count, "OS header accepted in Compiler.h");
         });
         suite.Add("Policy.CompilerFlagsAndResponseFileControls", () =>
         {

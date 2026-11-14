@@ -31,10 +31,17 @@ public static partial class PolicyChecks
             "#\\s*include\\s*<utility>|\\bstd\\s*::\\s*(?:tuple_size|tuple_element)\\b"),
     };
 
-    private static readonly Regex BannedPlatform = Pattern(
-        "#\\s*(?:if|ifdef|ifndef|elif)\\b[^\\n]*(?:_WIN32|_WIN64|__APPLE__|__linux__|ROCKS_PLATFORM_)" +
-        "|#\\s*include\\s*[<\"](?:[Ww]indows|windowsx|synchapi|processthreadsapi|pthread|semaphore|unistd|mach/[^>\"]+)\\.h[>\"]" +
-        "|\\b(?:CreateThread|WaitForSingleObject|pthread_create|pthread_join|pthread_mutex_lock|pthread_cond_wait|Sleep|nanosleep)\\s*\\(");
+    // OS별 전처리기 분기다(C++23 #elifdef·#elifndef 포함). Base/Compiler.h만 ROCKS_PLATFORM_* 정의·검증을 위해 쓸 수 있다.
+    private const string BannedPlatformBranch =
+        "#\\s*(?:if|ifdef|ifndef|elif|elifdef|elifndef)\\b[^\\n]*(?:_WIN32|_WIN64|__APPLE__|__linux__|ROCKS_PLATFORM_)";
+
+    // OS 헤더·OS API 호출이다. Compiler.h를 포함해 native backend 밖 어디에도 둘 수 없다.
+    private const string BannedPlatformDependency =
+        "#\\s*include\\s*[<\"](?:[Ww]indows|windowsx|synchapi|processthreadsapi|pthread|semaphore|unistd|mach/[^>\"]+)\\.h[>\"]" +
+        "|\\b(?:CreateThread|WaitForSingleObject|pthread_create|pthread_join|pthread_mutex_lock|pthread_cond_wait|Sleep|nanosleep)\\s*\\(";
+
+    private static readonly Regex BannedPlatform = Pattern(BannedPlatformBranch + "|" + BannedPlatformDependency);
+    private static readonly Regex BannedPlatformDependencyOnly = Pattern(BannedPlatformDependency);
 
     // #pragma와 같은 억제를 매크로 형태(_Pragma("..."), MSVC __pragma(...))로 쓰는 경우도 거부한다.
     private static readonly Regex BannedSuppression = Pattern(
@@ -171,14 +178,15 @@ public static partial class PolicyChecks
         foreach (string path in NativeSources(root, OwnedSourceRoots))
         {
             string relative = Relative(root, path);
-            // Base/Compiler.h는 ROCKS_PLATFORM_*를 정의하고 컴파일 대상과 맞는지 검증하는 정의 지점이다(OS API는 쓰지 않는다).
-            if (IsNativeBackend(relative) || relative == TargetMacroDefinitionHeader)
+            if (IsNativeBackend(relative))
             {
                 continue;
             }
 
-            ScanFile(path, relative, BannedPlatform, "platform-boundary",
-                "OS dependency outside native backend", failures);
+            // Base/Compiler.h는 ROCKS_PLATFORM_*를 정의하고 컴파일 대상과 맞는지 검증하는 정의 지점이라 OS 분기만 허용한다. 모든
+            // 번역 단위가 포함하는 헤더이므로 OS 헤더·API는 여전히 막는다.
+            ScanFile(path, relative, relative == TargetMacroDefinitionHeader ? BannedPlatformDependencyOnly : BannedPlatform,
+                "platform-boundary", "OS dependency outside native backend", failures);
         }
 
         return failures;

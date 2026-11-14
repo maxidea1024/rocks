@@ -108,8 +108,12 @@ internal static class BuildConfigurationTests
         {
             Modules = request.Modules.Select(module => module.Name == "Engine" ? change(module) : module).ToArray()
         };
-        await Rejects(WithEngineModule(module => module with { PrivateDefines = ["ROCKS_BUILD_RELEASE=1"] }), "module defined a build macro",
-            "reserved for the build configuration");
+        foreach (string define in new[] { "ROCKS_BUILD_RELEASE=1", "ROCKS_PLATFORM_WINDOWS=1", "ROCKS_ARCH_ARM64=1" })
+        {
+            await Rejects(WithEngineModule(module => module with { PrivateDefines = [define] }), "module defined a reserved macro " + define,
+                "reserved for the build configuration");
+        }
+
         foreach (string argument in new[] { "-O", "-O3", "-Os", "-Ofast", "--optimize=2", "/O1", "/O2", "/Ox", "/Od", "/Ob2",
                      "-flto", "-flto=full", "-fno-lto" })
         {

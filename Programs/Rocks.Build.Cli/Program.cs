@@ -280,7 +280,10 @@ namespace Rocks.Build.Cli
 
                     var checks = new List<string[]> {
                         new[] { "self", "--root", root, "--json", Path.Combine(output, "tool-self-report.json") },
-                        new[] { "native", "--root", root, "--native-executable", executable, "--compiler", toolchain.CompilerPath, "--compile-commands", result.CompilationDatabasePath, "--json", Path.Combine(output, "tool-native-report.json") }
+                        // native 검사의 컴파일 시험(AlgorithmsCompilerTests 등)도 Core 헤더를 include하므로 구성·대상 OS 매크로를 받는다.
+                        new[] { "native", "--root", root, "--native-executable", executable, "--compiler", toolchain.CompilerPath, "--compile-commands", result.CompilationDatabasePath,
+                            "--clang-arg", "-D" + NativeConfigurations.BuildMacro(configuration), "--clang-arg", "-D" + NativeConfigurations.PlatformMacro(toolchain.Platform),
+                            "--json", Path.Combine(output, "tool-native-report.json") }
                     };
                     if (configuration == NativeConfiguration.Asan)
                     {
