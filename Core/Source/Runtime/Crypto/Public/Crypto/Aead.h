@@ -203,25 +203,32 @@ inline constexpr uint64 AeadSequenceExhausted = static_cast<uint64>(-1);
 //
 // 계약(어기면 nonce가 다시 쓰인다):
 // - 키 하나는 평생 sealer 하나(한 방향)만 쓴다. 두 방향은 키를 따로 둔다(kx의 rx·tx 키처럼 역할이
-//   묶인 키가 좋다). 같은 키 byte를 다시 가져오거나 같은 (master, subkeyId, context)로 다시 파생해
-//   새 sealer를 만들면 seq 0부터 같은 nonce가 나온다. 파생한다면 subkeyId는 저장된 단조 값으로
-//   둔다(무작위 64 bit는 2^32 세션 규모에서 충돌한다).
-// - iv는 nonce 길이(AeadInfo::nonceBytes)이고 키와 같은 키 스케줄에서 파생한다. 전송하지 않고 상수
-//   라벨로 두지 않는다. 키가 세션·방향마다 새것이면 0이어도 되지만 다중 사용자 보강(키마다 다른
-//   nonce 오프셋, GCM·AEGIS-128L처럼 128 bit 키에서 의미가 크다)을 잃는다.
+//   묶인 키가 좋다). 같은 키 byte를 다시 가져오거나 같은 인자로 다시 파생해 새 sealer를 만들면 seq
+//   0부터 같은 nonce가 나온다.
+// - 키는 세션마다 새것이어야 한다. - kx로 얻는다면 적어도 한쪽 키 쌍이 세션마다 새로 만든 것이어야
+//   한다. kx 세션 키는 두 공개키에서 결정적으로 나오므로, 양쪽이 장기 키 쌍이면 재접속마다 같은
+//   키가 된다. kx 키에는 iv를 0으로 둔다. - TryDerive로 얻는다면 subkeyId는 쓰기 전에 durable하게
+//   올린 값이고, 같은 master를 쓰는 다른 프로세스·기기와 카운터를 공유하지 않는다. 상태를 둘 수
+//   없으면 128 bit 이상 무작위 salt의 HKDF(Kdf.h)로 세션 master를 먼저 만든다. 무작위 64 bit
+//   subkeyId는 2^32 세션 규모에서 충돌한다.
+// - iv는 nonce 길이(AeadInfo::nonceBytes)의 비밀 값이고 키와 같은 키 스케줄에서 나온다(TryDerive가
+//   함께 뽑는다). 전송하지 않고 상수 라벨로 두지 않는다. 0이어도 nonce는 겹치지 않지만 다중 사용자
+//   보강(키마다 다른 nonce 오프셋, AES-128-GCM·AEGIS-128L처럼 128 bit 키에서 의미가 크다)을 잃는다.
 // - 재시작은 새 키로 한다. 같은 키로 순번을 이어 가는 길은 두지 않는다(봉인 뒤 저장 전에 죽으면
 //   nonce가 다시 쓰인다, NIST SP 800-38D 9.1절).
 //
-// 한도: seq는 0부터 AeadSequenceExhausted - 1까지 쓴다. 다 쓰거나, AES-GCM에서 키당 블록
-// 한도(AeadInfo::maxBlocksPerKey, 11절)를 넘을 메시지가 오면 IsExhausted()가 true가 되고 이후
-// TrySeal은 CapacityExceeded다. 새 키로 바꾼다. 같은 CapacityExceeded라도 IsExhausted()가 false면
-// 출력 버퍼가 작은 것이다.
+// 한도: seq는 0부터 AeadSequenceExhausted - 1까지 쓴다. 다 쓰거나, AES-GCM에서 정상 메시지가 키당
+// 블록 한도(AeadInfo::maxBlocksPerKey, 11절)를 넘으면 IsExhausted()가 true가 되고 이후 TrySeal은
+// CapacityExceeded다. 이 한도는 마지막 방어선이다. 키 교체 메시지를 옛 키로 보낼 자리가 남도록
+// 프로토콜은 그 전(예: UsedBlocks()가 한도의 절반)에 새 키로 바꾼다. IsExhausted()가 false인
+// CapacityExceeded는 출력 버퍼가 작거나 평문이 메시지 상한(maxMessageBytes)을 넘은 것이다.
 //
 // 한 스레드에서 쓴다(봉인과 전송 큐 넣기를 함께 직렬화한다). move-only이고 옮겨 간 객체는
-// StaleHandle이다.
+// StaleHandle이다. 키와 iv는 키 저장소에 있고 소멸 때 지운다.
 //
 // 사용 예:
-//   auto sealer = hazmat::AeadSequenceSealer::TryCreate(Move(txKey), txIv.View());
+//   auto sealer = hazmat::AeadSequenceSealer::TryDerive(sessionMaster, epoch, ChannelContext,
+//                                                        AeadAlgorithm::Aes256Gcm);
 //   if (!sealer) { return sealer.Error(); }
 //   auto written = sealer.Value().TrySeal(header, payload, record);
 //   if (!written && sealer.Value().IsExhausted()) { /* 새 키로 바꾼다 */ }
@@ -229,13 +236,22 @@ class AeadSequenceSealer {
 public:
     AeadSequenceSealer() noexcept = default;
 
-    // key를 소유한다. 빈 키는 StaleHandle, iv 길이가 nonce 길이와 다르면 InvalidArgument이고,
-    // 실패하면 key는 그대로 남는다. iv는 복사한다.
+    // key를 소유한다. 빈 키는 StaleHandle, iv 길이가 nonce 길이와 다르면 InvalidArgument, 키
+    // 저장소가 찼으면 OutOfMemory이고, 실패하면 key는 그대로 남는다. iv는 복사한다.
     [[nodiscard]] static Result<AeadSequenceSealer> TryCreate(AeadKey&& key,
                                                               Span<const uint8> iv) noexcept;
 
+    // master에서 키와 iv를 함께 뽑아 만든다(Kdf.h 타입 파생, 키·iv에 서로 다른 타입 tag). 받는 쪽은
+    // 같은 인자로 AeadSequenceOpener::TryDerive를 부른다. 방향마다 subkeyId나 context를 다르게
+    // 둔다. 알고리즘 오류는 AeadKey::TryGenerate와 같고 먼저 검사한다. 빈 master는 StaleHandle, 키
+    // 저장소가 찼으면 OutOfMemory다.
+    [[nodiscard]] static Result<AeadSequenceSealer> TryDerive(const KdfKey& master, uint64 subkeyId,
+                                                              KdfContext context,
+                                                              AeadAlgorithm algorithm) noexcept;
+
     // 다음 seq로 봉인한다. 출력 = 암호문 ‖ tag이고 쓴 byte 수를 돌려준다. 오류는 TrySealWithNonce와
-    // 같다. 실패한 호출은 쓰기 전에 돌아오므로 seq를 쓰지 않는다. 다 썼으면 CapacityExceeded다.
+    // 같고 쓰기 전에 돌아오며 seq·블록 집계를 바꾸지 않는다. 다 썼거나 정상 메시지가 블록 한도를
+    // 넘으면 CapacityExceeded(소진)다.
     [[nodiscard]] Result<usize> TrySeal(Span<const uint8> associatedData,
                                         Span<const uint8> plaintext, Span<uint8> sealed) noexcept;
 
@@ -248,8 +264,8 @@ public:
         return next_ == AeadSequenceExhausted;
     }
 
-    // 지금까지 봉인한 16 byte 블록 수다(메시지마다 평문 블록 + AD 블록 + 1). AES-GCM은 이 값이
-    // AeadInfo::maxBlocksPerKey를 넘지 않게 막는다. 다른 알고리즘은 진단용이다.
+    // 지금까지 봉인한 16 byte 블록 수다(메시지마다 평문 블록 + AD 블록 + 1, 넘치면 포화). AES-GCM은
+    // 이 값이 AeadInfo::maxBlocksPerKey를 넘지 않게 막는다. 다른 알고리즘은 진단용이다.
     [[nodiscard]] uint64 UsedBlocks() const noexcept {
         return usedBlocks_;
     }
@@ -265,17 +281,17 @@ public:
 private:
     friend struct detail::SequenceAccess;
 
-    AeadSequenceSealer(AeadKey&& key, Span<const uint8> iv) noexcept;
+    AeadSequenceSealer(AeadKey&& key, SecretBytes&& iv) noexcept;
 
     AeadKey key_;
-    uint8 iv_[AeadMaxNonceBytes] = {};
+    SecretBytes iv_;
     uint64 next_ = 0;
     uint64 usedBlocks_ = 0;
 };
 
 // AeadSequenceSealer의 받는 쪽이다. 같은 키·iv로 만들고 같은 순서로 연다. 계약(키 하나 = opener
-// 하나, 재시작은 새 키)은 sealer와 같다. 같은 키로 opener를 다시 만들면 이미 받은 메시지의 재전송을
-// 받아들인다.
+// 하나, 세션마다 새 키, 재시작은 새 키)은 sealer와 같다. 같은 키로 opener를 다시 만들면 이미 받은
+// 메시지의 재전송을 받아들인다.
 //
 // - 신뢰할 수 있고 순서가 보장되는 전송에서만 쓴다. 빠지거나 바뀐 순서·재전송·변조·잘린 입력·다른
 //   AD는 모두 AuthenticationFailed이고 plaintext 전체를 지운다. 이 실패는 sticky다: 이후 모든
@@ -294,6 +310,11 @@ public:
     [[nodiscard]] static Result<AeadSequenceOpener> TryCreate(AeadKey&& key,
                                                               Span<const uint8> iv) noexcept;
 
+    // 인자와 오류는 AeadSequenceSealer::TryDerive와 같다. 같은 인자면 같은 키·iv가 나온다.
+    [[nodiscard]] static Result<AeadSequenceOpener> TryDerive(const KdfKey& master, uint64 subkeyId,
+                                                              KdfContext context,
+                                                              AeadAlgorithm algorithm) noexcept;
+
     // 다음 seq로 연다. 평문 byte 수를 돌려준다. 오류는 TryOpenWithNonce와 같고, 앞선 인증 실패나
     // 소진 뒤에는 늘 AuthenticationFailed(plaintext 소거)다.
     [[nodiscard]] Result<usize> TryOpen(Span<const uint8> associatedData, Span<const uint8> sealed,
@@ -308,7 +329,7 @@ public:
         return next_ == AeadSequenceExhausted;
     }
 
-    // 인증 실패로 멈췄는가.
+    // 멈췄는가(인증 실패, 또는 소진 뒤 메시지를 받음). 멈춘 뒤 TryOpen은 늘 AuthenticationFailed다.
     [[nodiscard]] bool HasFailed() const noexcept {
         return failed_;
     }
@@ -324,10 +345,10 @@ public:
 private:
     friend struct detail::SequenceAccess;
 
-    AeadSequenceOpener(AeadKey&& key, Span<const uint8> iv) noexcept;
+    AeadSequenceOpener(AeadKey&& key, SecretBytes&& iv) noexcept;
 
     AeadKey key_;
-    uint8 iv_[AeadMaxNonceBytes] = {};
+    SecretBytes iv_;
     uint64 next_ = 0;
     bool failed_ = false;
 };

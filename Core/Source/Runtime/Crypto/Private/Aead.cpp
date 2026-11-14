@@ -37,9 +37,10 @@ struct Traits {
 constexpr uint64 MaxAes256GcmMessageBytes = 16 * ((uint64{1} << 32) - 3);
 static_assert(MaxAes256GcmMessageBytes <= crypto_aead_aes256gcm_MESSAGEBYTES_MAX);
 
-// AES-GCM 키 하나로 봉인할 블록 상한이다. draft-irtf-cfrg-aead-limits의 기밀성 이점 (s + q + 1)^2 /
-// 2^129(s = 평문·AD 블록 합, q = 메시지 수)를 TLS 1.3 5.5절과 같은 2^-57 아래로 두면 s + q + 1 <=
-// 2^36이다. 메시지마다 평문 블록 + AD 블록 + 1을 세므로 합은 s + q다.
+// AES-GCM 키 하나로 봉인할 블록 상한이다. draft-irtf-cfrg-aead-limits-13 6.2절의 기밀성 이점 (s + q
+// + 1)^2 / 2^129(s = 평문·AD 블록 합, q = 메시지 수)를 2^-57(QUIC RFC 9001 B.1.1의 기밀성 목표와
+// 같은 값) 아래로 두면 s + q + 1 <= 2^36이다. 메시지마다 평문 블록 + AD 블록 + 1을 세므로 합은 s +
+// q다(GCM은 AD에 AES를 돌리지 않으므로 AD를 세는 쪽이 보수적이다).
 constexpr uint64 MaxGcmBlocksPerKey = (uint64{1} << 36) - 1;
 
 // GCM nonce는 96 bit만 받는다. 표준은 다른 길이도 허용하므로 그 밖은 Unsupported다(5.2·11절).
@@ -538,9 +539,13 @@ Result<void> hazmat::TryExportKey(const AeadKey& key, Span<uint8> output) noexce
     return Result<void>::Success();
 }
 
-Result<usize> hazmat::TrySealWithNonce(const AeadKey& key, Span<const uint8> nonce,
-                                       Span<const uint8> associatedData,
-                                       Span<const uint8> plaintext, Span<uint8> sealed) noexcept {
+namespace {
+
+// 결합 형식 봉인의 인자 검사다(nonce 길이 → 평문 상한 → 출력 길이 → 겹침). 쓰지 않는다. 성공하면
+// 출력 길이(평문 + tag)다.
+Result<usize> CheckSealWithNonce(const AeadKey& key, Span<const uint8> nonce,
+                                 Span<const uint8> associatedData, Span<const uint8> plaintext,
+                                 Span<uint8> sealed) noexcept {
     if (auto valid = CheckHazmat(key, nonce); !valid) {
         return Result<usize>::Failure(valid.Error());
     }
@@ -562,9 +567,28 @@ Result<usize> hazmat::TrySealWithNonce(const AeadKey& key, Span<const uint8> non
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
 
-    SealDetachedRaw(key, nonce, associatedData, plaintext, output.Left(plaintext.Size()),
-                    output.Right(traits.tagBytes));
     return Result<usize>::Success(sealedBytes);
+}
+
+// CheckSealWithNonce를 통과한 인자로 봉인한다.
+void SealCombined(const AeadKey& key, Span<const uint8> nonce, Span<const uint8> associatedData,
+                  Span<const uint8> plaintext, Span<uint8> sealed, usize sealedBytes) noexcept {
+    const Span<uint8> output = sealed.Left(sealedBytes);
+    SealDetachedRaw(key, nonce, associatedData, plaintext, output.Left(plaintext.Size()),
+                    output.Right(TraitsOf(key.Algorithm()).tagBytes));
+}
+
+} // namespace
+
+Result<usize> hazmat::TrySealWithNonce(const AeadKey& key, Span<const uint8> nonce,
+                                       Span<const uint8> associatedData,
+                                       Span<const uint8> plaintext, Span<uint8> sealed) noexcept {
+    auto sealedBytes = CheckSealWithNonce(key, nonce, associatedData, plaintext, sealed);
+    if (sealedBytes) {
+        SealCombined(key, nonce, associatedData, plaintext, sealed, sealedBytes.Value());
+    }
+
+    return sealedBytes;
 }
 
 Result<usize> hazmat::TryOpenWithNonce(const AeadKey& key, Span<const uint8> nonce,
@@ -666,31 +690,82 @@ namespace {
 constexpr usize SequenceBytes = 8;
 constexpr uint64 SaturatedBlocks = static_cast<uint64>(-1);
 
+// 모든 nonce가 iv 저장 공간에 들어가고 끝 8 byte에 seq를 XOR할 수 있다.
 static_assert(crypto_aead_xchacha20poly1305_ietf_NPUBBYTES <= AeadMaxNonceBytes &&
               crypto_aead_chacha20poly1305_ietf_NPUBBYTES <= AeadMaxNonceBytes &&
               crypto_aead_aes256gcm_NPUBBYTES <= AeadMaxNonceBytes &&
               crypto_aead_aegis256_NPUBBYTES <= AeadMaxNonceBytes &&
               crypto_aead_aegis128l_NPUBBYTES <= AeadMaxNonceBytes &&
               GcmNonceBytes <= AeadMaxNonceBytes);
+static_assert(crypto_aead_xchacha20poly1305_ietf_NPUBBYTES >= SequenceBytes &&
+              crypto_aead_chacha20poly1305_ietf_NPUBBYTES >= SequenceBytes &&
+              crypto_aead_aes256gcm_NPUBBYTES >= SequenceBytes &&
+              crypto_aead_aegis256_NPUBBYTES >= SequenceBytes &&
+              crypto_aead_aegis128l_NPUBBYTES >= SequenceBytes && GcmNonceBytes >= SequenceBytes);
 
-// 빈 키는 StaleHandle, iv 길이가 nonce 길이와 다르면 InvalidArgument다.
-Result<void> CheckSequenceArguments(const AeadKey& key, Span<const uint8> iv) noexcept {
+// 순번 봉인기의 키와 iv다(TryCreate·TryDerive가 만든다).
+struct SequenceParts {
+    AeadKey key;
+    SecretBytes iv;
+};
+
+// 빈 키는 StaleHandle, iv 길이가 nonce 길이와 다르면 InvalidArgument, iv 복사 공간이 없으면
+// OutOfMemory다. 실패하면 key를 가져가지 않는다.
+Result<SequenceParts> TryMakeSequenceParts(AeadKey&& key, Span<const uint8> iv) noexcept {
     if (key.IsEmpty()) {
-        return Result<void>::Failure(ErrorCode::StaleHandle);
+        return Result<SequenceParts>::Failure(ErrorCode::StaleHandle);
     }
 
     if (iv.Size() != TraitsOf(key.Algorithm()).nonceBytes) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<SequenceParts>::Failure(ErrorCode::InvalidArgument);
     }
 
-    return Result<void>::Success();
+    auto copied = SecretBytes::TryCopyFrom(iv);
+    if (!copied) {
+        return Result<SequenceParts>::Failure(copied.Error());
+    }
+
+    return Result<SequenceParts>::Success(SequenceParts{Move(key), Move(copied.Value())});
 }
 
-// nonce = iv XOR (0 ‖ BE64(sequence))를 nonce에 쓰고 그 view를 돌려준다.
-Span<const uint8> MakeSequenceNonce(const AeadKey& key, const uint8* iv, uint64 sequence,
+// master에서 키와 iv를 서로 다른 타입 tag로 뽑는다. iv는 BLAKE2b 최소 출력(16 byte) 이상으로 뽑아
+// nonce 길이만큼 쓴다.
+Result<SequenceParts> TryDeriveSequenceParts(const KdfKey& master, uint64 subkeyId,
+                                             KdfContext context, AeadAlgorithm algorithm) noexcept {
+    if (auto usable = CheckUsable(algorithm); !usable) {
+        return Result<SequenceParts>::Failure(usable.Error());
+    }
+
+    const Traits traits = TraitsOf(algorithm);
+    const uint8 id = static_cast<uint8>(algorithm);
+    auto keyBytes = detail::TryDeriveTypedSecret(
+        master, subkeyId, context, detail::AeadSequenceKeyTypeTag(id), traits.keyBytes);
+    if (!keyBytes) {
+        return Result<SequenceParts>::Failure(keyBytes.Error());
+    }
+
+    const usize ivSource =
+        traits.nonceBytes < KdfMinDerivedBytes ? KdfMinDerivedBytes : traits.nonceBytes;
+    auto ivBytes = detail::TryDeriveTypedSecret(master, subkeyId, context,
+                                                detail::AeadSequenceIvTypeTag(id), ivSource);
+    if (!ivBytes) {
+        return Result<SequenceParts>::Failure(ivBytes.Error());
+    }
+
+    auto key = TryMakeKey(algorithm, Move(keyBytes.Value()));
+    if (!key) {
+        return Result<SequenceParts>::Failure(key.Error());
+    }
+
+    return TryMakeSequenceParts(Move(key.Value()), ivBytes.Value().View().Left(traits.nonceBytes));
+}
+
+// nonce = iv XOR (0 ‖ BE64(sequence))를 nonce에 쓰고 그 view를 돌려준다. 호출자는 쓴 뒤 지운다(iv가
+// 드러난다).
+Span<const uint8> MakeSequenceNonce(const SecretBytes& iv, uint64 sequence,
                                     Span<uint8> nonce) noexcept {
-    const usize nonceBytes = TraitsOf(key.Algorithm()).nonceBytes;
-    platform::MemoryCopy(nonce.Data(), iv, nonceBytes);
+    const usize nonceBytes = iv.Size();
+    platform::MemoryCopy(nonce.Data(), iv.View().Data(), nonceBytes);
     uint8 counter[SequenceBytes];
     StoreBigEndian<uint64>(counter, sequence);
     for (usize i = 0; i < SequenceBytes; ++i) {
@@ -707,18 +782,31 @@ uint64 CountBlocks(usize bytes) noexcept {
 
 } // namespace
 
-hazmat::AeadSequenceSealer::AeadSequenceSealer(AeadKey&& key, Span<const uint8> iv) noexcept
-    : key_(Move(key)) {
-    platform::MemoryCopy(iv_, iv.Data(), iv.Size());
+hazmat::AeadSequenceSealer::AeadSequenceSealer(AeadKey&& key, SecretBytes&& iv) noexcept
+    : key_(Move(key)), iv_(Move(iv)) {
 }
 
 Result<hazmat::AeadSequenceSealer>
 hazmat::AeadSequenceSealer::TryCreate(AeadKey&& key, Span<const uint8> iv) noexcept {
-    if (auto valid = CheckSequenceArguments(key, iv); !valid) {
-        return Result<AeadSequenceSealer>::Failure(valid.Error());
+    auto parts = TryMakeSequenceParts(Move(key), iv);
+    if (!parts) {
+        return Result<AeadSequenceSealer>::Failure(parts.Error());
     }
 
-    return Result<AeadSequenceSealer>::Success(AeadSequenceSealer(Move(key), iv));
+    return Result<AeadSequenceSealer>::Success(
+        AeadSequenceSealer(Move(parts.Value().key), Move(parts.Value().iv)));
+}
+
+Result<hazmat::AeadSequenceSealer>
+hazmat::AeadSequenceSealer::TryDerive(const KdfKey& master, uint64 subkeyId, KdfContext context,
+                                      AeadAlgorithm algorithm) noexcept {
+    auto parts = TryDeriveSequenceParts(master, subkeyId, context, algorithm);
+    if (!parts) {
+        return Result<AeadSequenceSealer>::Failure(parts.Error());
+    }
+
+    return Result<AeadSequenceSealer>::Success(
+        AeadSequenceSealer(Move(parts.Value().key), Move(parts.Value().iv)));
 }
 
 Result<usize> hazmat::AeadSequenceSealer::TrySeal(Span<const uint8> associatedData,
@@ -732,41 +820,58 @@ Result<usize> hazmat::AeadSequenceSealer::TrySeal(Span<const uint8> associatedDa
         return Result<usize>::Failure(ErrorCode::CapacityExceeded);
     }
 
-    // 키당 블록 한도(AES-GCM)를 넘을 메시지면 이 키로는 더 봉인하지 않는다. 평문은 알고리즘 상한
-    // 아래이고 AD 블록은 2^60 아래라 합이 넘치지 않는다.
+    // 호출자 버퍼 오류(평문 상한·출력 길이·겹침)를 먼저 본다. 이 실패는 상태를 바꾸지 않는다.
+    uint8 nonceBytes[AeadMaxNonceBytes];
+    const Span<const uint8> nonce = MakeSequenceNonce(iv_, next_, Span<uint8>(nonceBytes));
+    auto sealedBytes = CheckSealWithNonce(key_, nonce, associatedData, plaintext, sealed);
+    if (!sealedBytes) {
+        SecureZero(Span<uint8>(nonceBytes));
+        return sealedBytes;
+    }
+
+    // 정상 메시지가 키당 블록 한도(AES-GCM)를 넘으면 이 키로는 더 봉인하지 않는다. 평문은 알고리즘
+    // 상한 아래이고 AD 블록은 2^60 아래라 합이 넘치지 않는다.
     const uint64 blocks = CountBlocks(plaintext.Size()) + CountBlocks(associatedData.Size()) + 1;
     const uint64 limit = TraitsOf(key_.Algorithm()).maxBlocksPerKey;
     if (limit != 0 && blocks > limit - usedBlocks_) {
+        SecureZero(Span<uint8>(nonceBytes));
         next_ = AeadSequenceExhausted;
         return Result<usize>::Failure(ErrorCode::CapacityExceeded);
     }
 
-    uint8 nonceBytes[AeadMaxNonceBytes];
-    const Span<const uint8> nonce = MakeSequenceNonce(key_, iv_, next_, Span<uint8>(nonceBytes));
-    auto written = TrySealWithNonce(key_, nonce, associatedData, plaintext, sealed);
-    if (written) {
-        // 실패한 호출은 쓰기 전에 돌아오므로 seq를 쓰지 않은 것으로 본다. 마지막 seq를 쓰면 next_가
-        // 소진 표지가 된다.
-        ++next_;
-        usedBlocks_ =
-            blocks > SaturatedBlocks - usedBlocks_ ? SaturatedBlocks : usedBlocks_ + blocks;
-    }
-
-    return written;
+    SealCombined(key_, nonce, associatedData, plaintext, sealed, sealedBytes.Value());
+    SecureZero(Span<uint8>(nonceBytes));
+    // 마지막 seq를 쓰면 next_가 소진 표지가 된다.
+    ++next_;
+    usedBlocks_ = blocks > SaturatedBlocks - usedBlocks_ ? SaturatedBlocks : usedBlocks_ + blocks;
+    return sealedBytes;
 }
 
-hazmat::AeadSequenceOpener::AeadSequenceOpener(AeadKey&& key, Span<const uint8> iv) noexcept
-    : key_(Move(key)) {
-    platform::MemoryCopy(iv_, iv.Data(), iv.Size());
+hazmat::AeadSequenceOpener::AeadSequenceOpener(AeadKey&& key, SecretBytes&& iv) noexcept
+    : key_(Move(key)), iv_(Move(iv)) {
 }
 
 Result<hazmat::AeadSequenceOpener>
 hazmat::AeadSequenceOpener::TryCreate(AeadKey&& key, Span<const uint8> iv) noexcept {
-    if (auto valid = CheckSequenceArguments(key, iv); !valid) {
-        return Result<AeadSequenceOpener>::Failure(valid.Error());
+    auto parts = TryMakeSequenceParts(Move(key), iv);
+    if (!parts) {
+        return Result<AeadSequenceOpener>::Failure(parts.Error());
     }
 
-    return Result<AeadSequenceOpener>::Success(AeadSequenceOpener(Move(key), iv));
+    return Result<AeadSequenceOpener>::Success(
+        AeadSequenceOpener(Move(parts.Value().key), Move(parts.Value().iv)));
+}
+
+Result<hazmat::AeadSequenceOpener>
+hazmat::AeadSequenceOpener::TryDerive(const KdfKey& master, uint64 subkeyId, KdfContext context,
+                                      AeadAlgorithm algorithm) noexcept {
+    auto parts = TryDeriveSequenceParts(master, subkeyId, context, algorithm);
+    if (!parts) {
+        return Result<AeadSequenceOpener>::Failure(parts.Error());
+    }
+
+    return Result<AeadSequenceOpener>::Success(
+        AeadSequenceOpener(Move(parts.Value().key), Move(parts.Value().iv)));
 }
 
 Result<usize> hazmat::AeadSequenceOpener::TryOpen(Span<const uint8> associatedData,
@@ -789,8 +894,9 @@ Result<usize> hazmat::AeadSequenceOpener::TryOpen(Span<const uint8> associatedDa
     }
 
     uint8 nonceBytes[AeadMaxNonceBytes];
-    const Span<const uint8> nonce = MakeSequenceNonce(key_, iv_, next_, Span<uint8>(nonceBytes));
+    const Span<const uint8> nonce = MakeSequenceNonce(iv_, next_, Span<uint8>(nonceBytes));
     auto opened = TryOpenWithNonce(key_, nonce, associatedData, sealed, plaintext);
+    SecureZero(Span<uint8>(nonceBytes));
     if (opened) {
         ++next_;
     } else if (opened.Error() == ErrorCode::AuthenticationFailed) {

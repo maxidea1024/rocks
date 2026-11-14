@@ -29,6 +29,16 @@ constexpr KdfTypeTag AeadKeyTypeTag(uint8 algorithm) noexcept {
     return KdfTypeTag{{'R', 'k', 'A', 'e', 'a', 'd', 0x00, algorithm}};
 }
 
+// 순번 봉인기(AeadSequenceSealer·Opener::TryDerive)의 키와 iv다. algorithm은 AeadAlgorithm
+// 열거값이다.
+constexpr KdfTypeTag AeadSequenceKeyTypeTag(uint8 algorithm) noexcept {
+    return KdfTypeTag{{'R', 'k', 'S', 'e', 'q', 'K', 0x00, algorithm}};
+}
+
+constexpr KdfTypeTag AeadSequenceIvTypeTag(uint8 algorithm) noexcept {
+    return KdfTypeTag{{'R', 'k', 'S', 'e', 'q', 'I', 0x00, algorithm}};
+}
+
 // master·subkeyId·context·tag에서 bytes 길이의 비밀을 뽑는다. bytes는 호출자가 키 타입 길이로
 // 맞춘다(16–64). 빈 master는 StaleHandle, 키 저장소가 찼으면 OutOfMemory다.
 [[nodiscard]] Result<SecretBytes> TryDeriveTypedSecret(const KdfKey& master, uint64 subkeyId,
