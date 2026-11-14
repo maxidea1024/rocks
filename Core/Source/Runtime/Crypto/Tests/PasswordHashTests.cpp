@@ -212,6 +212,6 @@ TEST(CryptoPasswordArgumentContract) {
         TryDerivePasswordSecret(Text("pw"), Span<const uint8>(salt), FastCost, KdfKeyBytes);
     REQUIRE(key && secret);
     uint8 exported[KdfKeyBytes];
-    REQUIRE(key.Value().TryExport(Span<uint8>(exported)));
+    REQUIRE(hazmat::TryExportKey(key.Value(), Span<uint8>(exported)));
     CHECK(ConstantTimeEquals(Span<const uint8>(exported), secret.Value().View()));
 }

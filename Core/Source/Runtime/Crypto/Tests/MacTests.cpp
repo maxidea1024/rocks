@@ -431,9 +431,9 @@ TEST(CryptoMacKeyContract) {
     REQUIRE(generated);
     CHECK(generated.Value().Algorithm() == MacAlgorithm::HmacSha512);
     uint8 exported[64];
-    REQUIRE(generated.Value().TryExport(Span<uint8>(exported)));
+    REQUIRE(hazmat::TryExportKey(generated.Value(), Span<uint8>(exported)));
     CHECK(!IsAllZero(Span<const uint8>(exported)));
-    CHECK(generated.Value().TryExport(Span<uint8>(exported).Left(63)).Error() ==
+    CHECK(hazmat::TryExportKey(generated.Value(), Span<uint8>(exported).Left(63)).Error() ==
           ErrorCode::InvalidArgument);
     const MacKey copy = Import(MacAlgorithm::HmacSha512, Span<const uint8>(exported));
     uint8 tagA[64];
@@ -448,7 +448,7 @@ TEST(CryptoMacKeyContract) {
     CHECK(TryVerifyMac(empty, Text("x"), Span<const uint8>(tagA)).Error() ==
           ErrorCode::StaleHandle);
     CHECK(MacState::TryCreate(empty).Error() == ErrorCode::StaleHandle);
-    CHECK(empty.TryExport(Span<uint8>(exported)).Error() == ErrorCode::StaleHandle);
+    CHECK(hazmat::TryExportKey(empty, Span<uint8>(exported)).Error() == ErrorCode::StaleHandle);
     CHECK(TryMac(copy, Text("x"), Span<uint8>(tagA).Left(32)).Error() ==
           ErrorCode::InvalidArgument);
     Span<const uint8> pieceArray[4] = {};

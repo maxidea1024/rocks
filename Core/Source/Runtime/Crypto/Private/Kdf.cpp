@@ -1,9 +1,11 @@
 #include <Crypto/Kdf.h>
 
+#include <Base/Endian.h>
 #include <Crypto/Bytes.h>
 
 #include "AdapterCommon.h"
 #include "KeyAccess.h"
+#include "MacInternal.h"
 #include "Sodium/SodiumRuntime.h"
 
 #include <Platform/Fatal.h>
@@ -138,17 +140,21 @@ Result<KdfKey> KdfKey::TryImport(Span<const uint8> keyBytes) noexcept {
     return Result<KdfKey>::Success(KdfKey(Move(key.Value())));
 }
 
-Result<void> KdfKey::TryExport(Span<uint8> output) const noexcept {
-    if (key_.IsEmpty()) {
+Result<void> hazmat::TryExportKey(const KdfKey& key, Span<uint8> output) noexcept {
+    const Span<const uint8> bytes = detail::KeyAccess::Bytes(key);
+    if (bytes.IsEmpty()) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (output.Size() != KdfKeyBytes || Overlaps(output, key_.View())) {
+    if (output.Size() != KdfKeyBytes || Overlaps(output, bytes)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    platform::MemoryCopy(output.Data(), key_.View().Data(), KdfKeyBytes);
+    platform::MemoryCopy(output.Data(), bytes.Data(), KdfKeyBytes);
     return Result<void>::Success();
+}
+
+void detail::KdfContextNeedsNulTerminatedLiteral() noexcept {
 }
 
 // ---- BLAKE2b KDF ----
@@ -176,27 +182,72 @@ Result<SecretBytes> TryDeriveSecret(const KdfKey& master, uint64 subkeyId, KdfCo
     return secret;
 }
 
+namespace {
+
+// 타입 파생의 BLAKE2b 입력이다. crypto_kdf와 같은 키·salt(LE64(id) ‖ 0⁸)를 쓰고, personal 뒤 8
+// byte에 키 타입·알고리즘 tag를 넣는다. crypto_kdf(TryDeriveSecret)는 그 자리가 0이라 서로 겹치지
+// 않는다. 이 byte는 파생 결과를 정하므로 바꾸지 않는다(바꾸면 저장된 키 계층이 모두 달라진다).
+struct TypeTag {
+    uint8 bytes[8];
+};
+
+constexpr TypeTag KdfKeyTag = {{'R', 'k', 'K', 'd', 'f', 'K', 'e', 'y'}};
+
+TypeTag MacKeyTag(MacAlgorithm algorithm) noexcept {
+    return TypeTag{{'R', 'k', 'M', 'a', 'c', 'K', 0x00, static_cast<uint8>(algorithm)}};
+}
+
+Result<SecretBytes> TryDeriveTyped(const KdfKey& master, uint64 subkeyId, KdfContext context,
+                                   TypeTag tag, usize bytes) noexcept {
+    if (master.IsEmpty()) {
+        return Result<SecretBytes>::Failure(ErrorCode::StaleHandle);
+    }
+
+    auto secret = SecretBytes::TryCreate(bytes);
+    if (!secret) {
+        return secret;
+    }
+
+    uint8 salt[crypto_generichash_blake2b_SALTBYTES] = {};
+    StoreLittleEndian<uint64>(salt, subkeyId);
+    uint8 personal[crypto_generichash_blake2b_PERSONALBYTES] = {};
+    platform::MemoryCopy(personal, context.Data(), KdfContext::Bytes);
+    platform::MemoryCopy(personal + KdfContext::Bytes, tag.bytes, sizeof(tag.bytes));
+
+    detail::EnsureSodium();
+    const Span<const uint8> key = detail::KeyAccess::Bytes(master);
+    detail::RequireSodium(crypto_generichash_blake2b_salt_personal(
+                              secret.Value().MutableView().Data(), bytes, nullptr, 0, key.Data(),
+                              key.Size(), salt, personal),
+                          "Crypto: crypto_generichash_blake2b_salt_personal failed");
+    return secret;
+}
+
+} // namespace
+
 Result<MacKey> TryDeriveMacKey(const KdfKey& master, uint64 subkeyId, KdfContext context,
                                MacAlgorithm algorithm) noexcept {
-    // 권장 키 길이(HMAC-SHA-512 64, 나머지 32 byte)로 뽑는다. 열거값이 아니면 아래 TryImport가
-    // InvalidArgument를 돌려준다.
-    const usize bytes = algorithm == MacAlgorithm::HmacSha512 ? 64 : 32;
-    auto secret = TryDeriveSecret(master, subkeyId, context, bytes);
+    if (!detail::IsDefinedMacAlgorithm(algorithm)) {
+        return Result<MacKey>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto secret = TryDeriveTyped(master, subkeyId, context, MacKeyTag(algorithm),
+                                 detail::DefaultMacKeyBytes(algorithm));
     if (!secret) {
         return Result<MacKey>::Failure(secret.Error());
     }
 
-    // 중간 SecretBytes는 소멸하며 지워진다.
-    return MacKey::TryImport(algorithm, secret.Value().View());
+    return Result<MacKey>::Success(
+        detail::KeyAccess::Make<MacKey>(algorithm, Move(secret.Value())));
 }
 
 Result<KdfKey> TryDeriveKdfKey(const KdfKey& master, uint64 subkeyId, KdfContext context) noexcept {
-    auto secret = TryDeriveSecret(master, subkeyId, context, KdfKeyBytes);
+    auto secret = TryDeriveTyped(master, subkeyId, context, KdfKeyTag, KdfKeyBytes);
     if (!secret) {
         return Result<KdfKey>::Failure(secret.Error());
     }
 
-    return Result<KdfKey>::Success(KdfKey(Move(secret.Value())));
+    return Result<KdfKey>::Success(detail::KeyAccess::Make<KdfKey>(Move(secret.Value())));
 }
 
 } // namespace rocks::crypto

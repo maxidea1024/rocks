@@ -3,6 +3,7 @@
 #include <Crypto/Bytes.h>
 
 #include "KeyAccess.h"
+#include "MacInternal.h"
 #include "SecretArena.h"
 #include "AdapterCommon.h"
 #include "Sodium/SodiumRuntime.h"
@@ -200,20 +201,31 @@ Result<MacKey> hazmat::TryImportShortMacKey(MacAlgorithm algorithm,
         return Result<MacKey>::Failure(key.Error());
     }
 
-    return Result<MacKey>::Success(MacKey(algorithm, Move(key.Value())));
+    return Result<MacKey>::Success(detail::KeyAccess::Make<MacKey>(algorithm, Move(key.Value())));
 }
 
-Result<void> MacKey::TryExport(Span<uint8> output) const noexcept {
-    if (key_.IsEmpty()) {
+Result<void> hazmat::TryExportKey(const MacKey& key, Span<uint8> output) noexcept {
+    const Span<const uint8> bytes = detail::KeyAccess::Bytes(key);
+    if (bytes.IsEmpty()) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (output.Size() != key_.Size() || Overlaps(output, key_.View())) {
+    if (output.Size() != bytes.Size() || Overlaps(output, bytes)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    platform::MemoryCopy(output.Data(), key_.View().Data(), key_.Size());
+    platform::MemoryCopy(output.Data(), bytes.Data(), bytes.Size());
     return Result<void>::Success();
+}
+
+// ---- 모듈 내부(다른 키 파생 경로가 쓴다) ----
+
+bool detail::IsDefinedMacAlgorithm(MacAlgorithm algorithm) noexcept {
+    return IsDefined(algorithm);
+}
+
+usize detail::DefaultMacKeyBytes(MacAlgorithm algorithm) noexcept {
+    return DefaultKeyBytes(algorithm);
 }
 
 // ---- 일회성 ----

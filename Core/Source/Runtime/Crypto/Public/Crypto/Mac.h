@@ -42,14 +42,6 @@ enum class MacAlgorithm : uint8 {
     Blake2bKeyed = 3,
 };
 
-class MacKey;
-
-namespace hazmat {
-// 아래(파일 끝)에서 설명한다. MacKey가 friend로 두려고 먼저 선언한다.
-[[nodiscard]] Result<MacKey> TryImportShortMacKey(MacAlgorithm algorithm,
-                                                  Span<const uint8> keyBytes) noexcept;
-} // namespace hazmat
-
 inline constexpr usize HmacSha256TagBytes = 32;
 inline constexpr usize HmacSha512TagBytes = 64;
 inline constexpr usize Blake2bKeyedTagBytes = 32;
@@ -85,15 +77,15 @@ public:
         return key_.IsEmpty();
     }
 
-    // 키 byte를 output에 복사한다(명시적 내보내기만 있다). output.Size()는 키 길이와 같아야
-    // 한다(아니면 InvalidArgument). 빈 키는 StaleHandle이다.
-    [[nodiscard]] Result<void> TryExport(Span<uint8> output) const noexcept;
+    // 키 byte 수다(내보내기 버퍼 크기). 빈 키는 0이다.
+    [[nodiscard]] usize KeyBytes() const noexcept {
+        return key_.Size();
+    }
 
 private:
-    // 키 byte는 모듈 내부(detail::KeyAccess)만 읽는다. 공개 경로는 TryExport 하나다.
+    // 키 byte와 생성자는 모듈 내부(detail::KeyAccess)만 쓴다. 평문 내보내기는
+    // hazmat::TryExportKey 하나다(10.4절).
     friend struct detail::KeyAccess;
-    friend Result<MacKey> hazmat::TryImportShortMacKey(MacAlgorithm algorithm,
-                                                       Span<const uint8> keyBytes) noexcept;
 
     MacKey(MacAlgorithm algorithm, SecretBytes&& key) noexcept
         : algorithm_(algorithm), key_(Move(key)) {
@@ -166,6 +158,11 @@ namespace hazmat {
 // 하한 16 byte가 그대로다. 나머지 규칙은 MacKey::TryImport와 같다.
 [[nodiscard]] Result<MacKey> TryImportShortMacKey(MacAlgorithm algorithm,
                                                   Span<const uint8> keyBytes) noexcept;
+
+// 키 byte를 평문으로 output에 복사한다(10.4절: 시험·상호운용 도구 전용, 저장은 KeyBlob).
+// output.Size()는 key.KeyBytes()와 같아야 한다(아니면 InvalidArgument). 빈 키는 StaleHandle이다.
+// output은 호출자가 지운다.
+[[nodiscard]] Result<void> TryExportKey(const MacKey& key, Span<uint8> output) noexcept;
 
 } // namespace hazmat
 

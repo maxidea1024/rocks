@@ -482,7 +482,7 @@ class Ed25519phVerifier { /* TryUpdate, TryFinish(const Ed25519PublicKey&, Span<
 } // namespace rocks::crypto
 ```
 
-HKDF는 extract만 증분이고 expand는 일회성이다(libsodium API 그대로). SHA-2·SHA-3·SHAKE 증분 객체는 같은 형태다.
+HKDF는 증분 extract를 두지 않는다(IKM은 공유 비밀처럼 짧다). extract·expand는 일회성이다. SHA-2·SHA-3·SHAKE 증분 객체는 같은 형태다.
 
 ### 9.3 AES-GCM 멀티파트 (hazmat)
 
@@ -747,7 +747,9 @@ public:
 // 마스터 키에서 용도별 키를 타입으로 파생한다(BLAKE2b KDF). 결과가 일반 Span에 쓰이지 않는다.
 // context는 컴파일 시간 8 문자 상수(KdfContext, consteval 생성)만 받는다. 런타임·외부 입력으로 context를
 // 고르지 못하게 하려는 것이다. 엔진이 쓰는 context는 Crypto/Labels.h에 모아 중복을 시험으로 막는다(첫 엔진
-// context와 함께 둔다). 구현(Kdf.h): KdfKey, TryDeriveSecret(16–64 byte)·TryDeriveMacKey·TryDeriveKdfKey(키 계층),
+// context와 함께 둔다). 타입 파생(TryDeriveMacKey·TryDeriveKdfKey)은 BLAKE2b personal 뒤 8 byte에 키 타입·알고리즘
+// tag를 넣어, 같은 (id, context)라도 타입·알고리즘마다 독립인 키를 낸다(2026-11-15 리뷰 반영). TryDeriveSecret은 libsodium
+// crypto_kdf와 같은 byte다. 구현(Kdf.h): KdfKey, TryDeriveSecret(16–64 byte)·TryDeriveMacKey·TryDeriveKdfKey(키 계층),
 // HKDF-SHA-256/512(TryHkdf·TryHkdfExtract·TryHkdfExpand, 상호운용용 Span 출력). AEAD·세그먼트 키 파생은 그
 // 단계에서 더한다.
 Result<AeadKey> TryDeriveAeadKey(const KdfKey& master, uint64 subkeyId, KdfContext context,

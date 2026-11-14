@@ -197,22 +197,95 @@ TEST(CryptoKdfBlake2bKnownAnswers) {
     CHECK(TryDeriveSecret(master, 65, TestContext, 65).Error() == ErrorCode::InvalidArgument);
 }
 
+TEST(CryptoHkdfBoundaries) {
+    const uint8 ikm[32] = {7};
+    uint8 buffer[256] = {};
+    uint8 prk[64] = {};
+
+    // 출력이 salt·info와 겹치면 쓰기 전에 거부한다. extract도 같다.
+    CHECK(TryHkdf(HkdfAlgorithm::Sha256, Span<const uint8>(ikm), Span<const uint8>(buffer).Left(16),
+                  {}, Span<uint8>(buffer).Mid(8, 32))
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(TryHkdf(HkdfAlgorithm::Sha256, Span<const uint8>(ikm), {},
+                  Span<const uint8>(buffer).Mid(100, 16), Span<uint8>(buffer).Mid(90, 32))
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(TryHkdfExtract(HkdfAlgorithm::Sha256, Span<const uint8>(prk).Left(16),
+                         Span<const uint8>(ikm), Span<uint8>(prk).Left(32))
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(TryHkdfExtract(static_cast<HkdfAlgorithm>(9), {}, Span<const uint8>(ikm),
+                         Span<uint8>(prk).Left(32))
+              .Error() == ErrorCode::InvalidArgument);
+
+    // expand 상한 + 1과 빈 출력.
+    REQUIRE(TryHkdfExtract(HkdfAlgorithm::Sha256, {}, Span<const uint8>(ikm),
+                           Span<uint8>(prk).Left(32)));
+    uint8 large[HkdfSha256MaxOutputBytes + 1];
+    CHECK(TryHkdfExpand(HkdfAlgorithm::Sha256, Span<const uint8>(prk).Left(32), {},
+                        Span<uint8>(large))
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(TryHkdfExpand(HkdfAlgorithm::Sha256, Span<const uint8>(prk).Left(32), {}, Span<uint8>()));
+
+    // RFC 5869: 비어 있는 salt는 해시 길이의 0 byte salt와 같다.
+    const uint8 zeros[64] = {};
+    uint8 implicitSalt[42];
+    uint8 explicitSalt[42];
+    REQUIRE(
+        TryHkdf(HkdfAlgorithm::Sha256, Span<const uint8>(ikm), {}, {}, Span<uint8>(implicitSalt)));
+    REQUIRE(TryHkdf(HkdfAlgorithm::Sha256, Span<const uint8>(ikm),
+                    Span<const uint8>(zeros).Left(32), {}, Span<uint8>(explicitSalt)));
+    CHECK(ConstantTimeEquals(Span<const uint8>(implicitSalt), Span<const uint8>(explicitSalt)));
+    REQUIRE(
+        TryHkdf(HkdfAlgorithm::Sha512, Span<const uint8>(ikm), {}, {}, Span<uint8>(implicitSalt)));
+    REQUIRE(TryHkdf(HkdfAlgorithm::Sha512, Span<const uint8>(ikm), Span<const uint8>(zeros), {},
+                    Span<uint8>(explicitSalt)));
+    CHECK(ConstantTimeEquals(Span<const uint8>(implicitSalt), Span<const uint8>(explicitSalt)));
+}
+
 TEST(CryptoKdfTypedDerivation) {
     const KdfKey master = TestMaster();
 
-    // 타입 파생은 같은 id·context의 비밀과 같은 byte다. id·context가 다르면 다른 키다.
-    auto macKey = TryDeriveMacKey(master, 7, TestContext, MacAlgorithm::HmacSha256);
-    auto secret = TryDeriveSecret(master, 7, TestContext, 32);
-    REQUIRE(macKey && secret);
-    CHECK(macKey.Value().Algorithm() == MacAlgorithm::HmacSha256);
+    // 타입 파생은 BLAKE2b(key = master, salt = LE64(id) ‖ 0⁸, personal = context ‖ 타입 tag)다.
+    // 값은 Python hashlib.blake2b로 계산했다. 이 byte가 바뀌면 저장된 키 계층이 달라지므로 형식으로
+    // 고정한다.
+    struct Typed {
+        MacAlgorithm algorithm;
+        usize bytes;
+        const char* expected;
+    };
+
+    const Typed macCases[] = {
+        {MacAlgorithm::HmacSha256, 32,
+         "0ab2f8c82c5b1705bdfe63c20c193cc9638e08fabb9951723e7a566901cfe3f3"},
+        {MacAlgorithm::HmacSha512, 64,
+         "0d5a063eb2b0311cadaf2500ea99bcc67ebbd0f87497c39698911523d8b39b5c"
+         "2b243ef8d41e5adcfed33fe6eb0b084efdd5cfa83aaf1907c6c41c6a3336ec5e"},
+        {MacAlgorithm::Blake2bKeyed, 32,
+         "4d478a80f0e8b3a8504cb81756039b03c4045695ab184871528c393902b78674"},
+    };
     uint8 exported[64];
-    REQUIRE(macKey.Value().TryExport(Span<uint8>(exported).Left(32)));
-    CHECK(ConstantTimeEquals(Span<const uint8>(exported).Left(32), secret.Value().View()));
+    for (const Typed& item : macCases) {
+        auto macKey = TryDeriveMacKey(master, 7, TestContext, item.algorithm);
+        REQUIRE(macKey);
+        CHECK(macKey.Value().Algorithm() == item.algorithm);
+        REQUIRE(macKey.Value().KeyBytes() == item.bytes);
+        REQUIRE(hazmat::TryExportKey(macKey.Value(), Span<uint8>(exported).Left(item.bytes)));
+        CHECK(Equals(Span<const uint8>(exported).Left(item.bytes), item.expected));
+    }
 
-    auto mac512 = TryDeriveMacKey(master, 7, TestContext, MacAlgorithm::HmacSha512);
-    REQUIRE(mac512);
-    REQUIRE(mac512.Value().TryExport(Span<uint8>(exported)));
+    auto child = TryDeriveKdfKey(master, 7, TestContext);
+    REQUIRE(child);
+    REQUIRE(hazmat::TryExportKey(child.Value(), Span<uint8>(exported).Left(KdfKeyBytes)));
+    CHECK(Equals(Span<const uint8>(exported).Left(KdfKeyBytes),
+                 "43cbcbfa680c9d93c5a1dc84246d54c0258f437e5d277836c67f50693bd29950"));
 
+    // 같은 (id, context)의 TryDeriveSecret(crypto_kdf 호환)은 타입 파생 어느 것과도 다르다.
+    auto secret = TryDeriveSecret(master, 7, TestContext, 32);
+    REQUIRE(secret);
+    CHECK(Equals(secret.Value().View(),
+                 "cd49ce518f09d9c0c8b41cc9e199da9b93447895af2405b7a003226c848991ce"));
+    CHECK(!ConstantTimeEquals(secret.Value().View(), Span<const uint8>(exported).Left(32)));
+
+    // id·context가 다르면 다른 키다.
     constexpr KdfContext Other("Other ct");
     auto other = TryDeriveSecret(master, 7, Other, 32);
     auto otherId = TryDeriveSecret(master, 8, TestContext, 32);
@@ -223,28 +296,31 @@ TEST(CryptoKdfTypedDerivation) {
     CHECK(TestContext == KdfContext("KDF test"));
 
     // 키 계층: 하위 마스터에서 다시 뽑아도 결정적이다.
-    auto child = TryDeriveKdfKey(master, 1, TestContext);
-    auto again = TryDeriveKdfKey(master, 1, TestContext);
-    REQUIRE(child && again);
+    auto again = TryDeriveKdfKey(master, 7, TestContext);
+    REQUIRE(again);
     auto leafA = TryDeriveSecret(child.Value(), 2, TestContext, 32);
     auto leafB = TryDeriveSecret(again.Value(), 2, TestContext, 32);
     REQUIRE(leafA && leafB);
     CHECK(ConstantTimeEquals(leafA.Value().View(), leafB.Value().View()));
 
-    // 키 계약: 32 byte만 받고, 빈 키는 StaleHandle이다.
+    // 키 계약: 32 byte만 받고, 빈 키는 StaleHandle, 알고리즘 검사는 파생보다 먼저다.
     uint8 bytes[33] = {};
     CHECK(KdfKey::TryImport(Span<const uint8>(bytes)).Error() == ErrorCode::InvalidArgument);
     CHECK(KdfKey::TryImport(Span<const uint8>(bytes).Left(31)).Error() ==
           ErrorCode::InvalidArgument);
     auto generated = KdfKey::TryGenerate();
     REQUIRE(generated);
-    REQUIRE(generated.Value().TryExport(Span<uint8>(bytes).Left(32)));
+    REQUIRE(hazmat::TryExportKey(generated.Value(), Span<uint8>(bytes).Left(32)));
     CHECK(!IsAllZero(Span<const uint8>(bytes).Left(32)));
+    CHECK(hazmat::TryExportKey(generated.Value(), Span<uint8>(bytes)).Error() ==
+          ErrorCode::InvalidArgument);
     const KdfKey empty;
     CHECK(TryDeriveSecret(empty, 0, TestContext, 32).Error() == ErrorCode::StaleHandle);
     CHECK(TryDeriveMacKey(empty, 0, TestContext, MacAlgorithm::HmacSha256).Error() ==
           ErrorCode::StaleHandle);
-    CHECK(empty.TryExport(Span<uint8>(bytes).Left(32)).Error() == ErrorCode::StaleHandle);
-    CHECK(TryDeriveMacKey(master, 0, TestContext, static_cast<MacAlgorithm>(9)).Error() ==
+    CHECK(TryDeriveKdfKey(empty, 0, TestContext).Error() == ErrorCode::StaleHandle);
+    CHECK(hazmat::TryExportKey(empty, Span<uint8>(bytes).Left(32)).Error() ==
+          ErrorCode::StaleHandle);
+    CHECK(TryDeriveMacKey(empty, 0, TestContext, static_cast<MacAlgorithm>(9)).Error() ==
           ErrorCode::InvalidArgument);
 }
