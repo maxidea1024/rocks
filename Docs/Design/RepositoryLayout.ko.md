@@ -35,6 +35,7 @@ rocks/
     Scaffold/Templates/       새 모듈 템플릿
   Build/                      규칙 어셈블리(Rules/)·C# 서식 검사 작업 영역(Format/)·공통 빌드 설정·CI 스크립트
   Templates/                  게임 프로젝트 템플릿
+  Assets/Branding/            엔진 브랜드 자산(로고 SVG·PNG, 시각 아이덴티티 가이드라인)
   Docs/                       설계·구현·검토 문서
   Rocks.proj                  MSBuild 진입점(Build·Test·InstalledSdk·Game)
 ```

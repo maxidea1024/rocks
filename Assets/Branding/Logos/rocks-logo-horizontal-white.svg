@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="688" height="192" viewBox="0 0 688 192" role="img" aria-labelledby="title desc">
+    <title id="title">Rocks Engine horizontal logo</title>
+    <desc id="desc">Rocks Engine Core identity, C2 vector interpretation. Three solid segments surrounding an angular central opening. Transparent background; all lettering is outlined.</desc>
+    <g fill="#FFFFFF">
+    <g transform="translate(0 0) scale(0.42857142857142855) translate(-32 -32)">
+        <path d="M120 116L156 67C185 45 220 32 256 32C359 32 447 101 473 193L313 182Q305 181 299 184L199 226Q193 229 189 222Z"/>
+        <path d="M85 142L157 260L255 316L188 435C168 439 142 438 120 433C66 394 32 331 32 260C32 216 51 173 85 142Z"/>
+        <path d="M317 221L463 232C475 254 481 280 477 305C455 405 366 480 261 480C239 480 219 478 201 472L286 327Z"/>
+    </g>
+    <g transform="translate(240 29) scale(0.8175182481751825) translate(0 2)" fill-rule="evenodd">
+        <path transform="translate(0 0)" d="M0 0H62C86 0 100 13 100 36C100 52 92 63 78 68L104 100H72L49 71H28V100H0ZM28 22V49H59C67 49 72 45 72 36C72 27 67 22 59 22Z"/>
+        <path transform="translate(112 0)" d="M0 50C0 18 18 -2 50 -2C82 -2 100 18 100 50C100 82 82 102 50 102C18 102 0 82 0 50ZM29 50C29 69 36 79 50 79C64 79 71 69 71 50C71 31 64 21 50 21C36 21 29 31 29 50Z"/>
+        <path transform="translate(224 0)" d="M100 12L87 35C79 26 70 22 58 22C40 22 29 33 29 50C29 67 40 78 58 78C70 78 79 74 87 65L100 88C89 98 75 102 56 102C22 102 0 82 0 50C0 18 22 -2 56 -2C75 -2 89 2 100 12Z"/>
+        <path transform="translate(336 0)" d="M0 0H28V39L63 0H98L59 46L100 100H66L40 65L28 78V100H0Z"/>
+        <path transform="translate(448 0)" d="M98 7L87 30C77 24 65 21 53 21C40 21 33 24 33 30C33 36 42 38 58 42C85 48 100 55 100 73C100 91 83 102 53 102C33 102 14 97 1 88L12 66C24 74 40 79 54 79C66 79 73 76 73 71C73 65 64 63 48 60C21 54 5 47 5 29C5 10 23 -2 52 -2C70 -2 85 1 98 7Z"/>
+    </g>
+    <g transform="translate(310 138.4)">
+        <path transform="translate(0 0) scale(0.3)" d="M0 0H60V12H13V33H52V45H13V68H60V80H0Z"/>
+        <path transform="translate(58 0) scale(0.3)" d="M0 80V0H13L47 57V0H60V80H47L13 23V80Z"/>
+        <path transform="translate(116 0) scale(0.3)" d="M60 8L53 19C47 14 40 11 32 11C19 11 12 22 12 40C12 58 19 69 33 69C39 69 44 67 48 64V48H32V36H60V71C52 78 43 82 32 82C11 82 0 67 0 40C0 13 11 -2 32 -2C43 -2 52 1 60 8Z"/>
+        <path transform="translate(174 0) scale(0.3)" d="M23 0H37V80H23Z"/>
+        <path transform="translate(232 0) scale(0.3)" d="M0 80V0H13L47 57V0H60V80H47L13 23V80Z"/>
+        <path transform="translate(290 0) scale(0.3)" d="M0 0H60V12H13V33H52V45H13V68H60V80H0Z"/>
+    </g>
+    </g>
+</svg>

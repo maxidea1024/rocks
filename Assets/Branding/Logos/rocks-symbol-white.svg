@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="448" height="448" viewBox="0 0 448 448" role="img" aria-labelledby="title desc">
+    <title id="title">Rocks Engine symbol</title>
+    <desc id="desc">Rocks Engine Core identity, C2 vector interpretation. Three solid segments surrounding an angular central opening. Transparent background; all lettering is outlined.</desc>
+    <g fill="#FFFFFF">
+    <g transform="translate(0 0) scale(1) translate(-32 -32)">
+        <path d="M120 116L156 67C185 45 220 32 256 32C359 32 447 101 473 193L313 182Q305 181 299 184L199 226Q193 229 189 222Z"/>
+        <path d="M85 142L157 260L255 316L188 435C168 439 142 438 120 433C66 394 32 331 32 260C32 216 51 173 85 142Z"/>
+        <path d="M317 221L463 232C475 254 481 280 477 305C455 405 366 480 261 480C239 480 219 478 201 472L286 327Z"/>
+    </g>
+    </g>
+</svg>
