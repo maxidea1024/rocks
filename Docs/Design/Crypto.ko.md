@@ -308,24 +308,28 @@ enum class Base64Variant : uint8 { Standard, StandardNoPadding, UrlSafe, UrlSafe
 ```cpp
 namespace rocks::crypto {
 
-// BLAKE2b. digest.Size()가 출력 길이다(16–64 byte). key는 비어 있거나 16–64 byte다.
-[[nodiscard]] Result<void> TryBlake2b(Span<const uint8> input, Span<uint8> digest, Span<const uint8> key = {}) noexcept;
+// BLAKE2b. digest.Size()가 출력 길이다(16–64 byte). 키를 주는 BLAKE2b keyed는 MAC이므로 Mac.h에 있다.
+[[nodiscard]] Result<void> TryBlake2b(Span<const uint8> input, Span<uint8> digest) noexcept;
 
-// 조각 입력. pieces를 이어 붙인 것과 같은 결과다.
-[[nodiscard]] Result<void> TryBlake2b(Span<const Span<const uint8>> pieces, Span<uint8> digest,
-                                      Span<const uint8> key = {}) noexcept;
+// 조각 입력. pieces를 이어 붙인 것과 같은 결과다(모든 해시·MAC에 같은 형태로 있다).
+[[nodiscard]] Result<void> TryBlake2b(Span<const Span<const uint8>> pieces, Span<uint8> digest) noexcept;
 
-struct Sha512Digest {
-    static constexpr usize Bytes = 64;
-    uint8 bytes[Bytes] = {};
+// 알고리즘마다 Tag가 다른 고정 길이 값 타입이다(D8). Sha3_256Digest·Sha3_512Digest도 같은 형태다.
+template <typename Tag, usize N>
+struct FixedDigest {
+    static constexpr usize Bytes = N;
+    uint8 bytes[N] = {};
     Span<const uint8> View() const noexcept;
 };
 
 Sha512Digest Sha512(Span<const uint8> input) noexcept;
-Sha3Digest256 Sha3_256(Span<const uint8> input) noexcept;
+Sha3_256Digest Sha3_256(Span<const uint8> input) noexcept;
+Sha3_512Digest Sha3_512(Span<const uint8> input) noexcept;
 
-// XOF: output.Size()만큼 짜낸다.
-void Shake256(Span<const uint8> input, Span<uint8> output) noexcept;
+// XOF: output.Size()만큼 짜낸다. TurboSHAKE domain은 0x01–0x7F(RFC 9861, 기본 0x1F)다. 출력이 입력과 겹치면
+// InvalidArgument다.
+Result<void> TryShake128(Span<const uint8> input, Span<uint8> output) noexcept;           // TryShake256도 같다
+Result<void> TryTurboShake128(Span<const uint8> input, Span<uint8> output, uint8 domain = 0x1F) noexcept;
 
 } // namespace rocks::crypto
 ```
@@ -439,15 +443,21 @@ Result<usize> TrySealToRecipient(const KxPublicKey& recipient, Span<const uint8>
 ```cpp
 namespace rocks::crypto {
 
-class Blake2bHasher {
+// 키 없는 증분 해시(BLAKE2b·SHA-512·SHA3-256/512). 상태는 allocator에서 할당한다(9.1절). 키를 쓰는
+// BLAKE2b keyed는 MacState다(상태가 키 저장소에 있다).
+class HashState {
 public:
-    // key가 비어 있지 않으면 상태를 SecretArena에 두고, 비어 있으면 allocator에서 할당한다(9.1절).
-    static Result<Blake2bHasher> TryCreate(usize digestBytes, Span<const uint8> key, Allocator& allocator) noexcept;
+    static Result<HashState> TryCreate(HashAlgorithm algorithm, usize digestBytes = 0,
+                                       Allocator& allocator = GetSecretAllocator()) noexcept;
     Result<void> TryUpdate(Span<const uint8> input) noexcept;
     Result<void> TryUpdate(Span<const Span<const uint8>> pieces) noexcept;
     Result<void> TryFinish(Span<uint8> digest) noexcept;   // 뒤에는 Reset 전까지 Update가 InvalidArgument
-    void Reset() noexcept;                                 // 같은 키·길이로 처음 상태
+    void Reset() noexcept;                                 // 같은 알고리즘·길이로 처음 상태
 };
+
+// 증분 XOF(SHAKE128/256, TurboSHAKE128/256). TrySqueeze를 여러 번 불러 이어지는 출력을 얻는다. 첫 Squeeze
+// 뒤에는 Reset 전까지 Update가 InvalidArgument다.
+class XofState { /* TryCreate(algorithm, domain, allocator), TryUpdate, TrySqueeze, Reset */ };
 
 // HMAC-SHA-256/512, BLAKE2b keyed를 같은 형태로 둔다. 검증은 상수 시간이다.
 class MacState {
