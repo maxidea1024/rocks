@@ -236,7 +236,7 @@ ARMv8.0의 Crypto Extensions는 선택 기능이어서 저가 SoC에는 없을 �
 - **비밀은 view로만 노출한다.** `SecretBytes::View()`는 `Span<const uint8>`이고 수명은 객체와 같다. 쓰기 view는 생성·가져오기 경로에만 있다.
 - **제자리 처리는 함수마다 정한다.** nonce 지정·분리 형식은 입력과 출력이 같은 주소에서 시작할 때(`m == c`)만 허용한다. nonce를 앞에 붙이는 고수준 `TrySeal`은 `plaintext.Data() == output.Data() + NonceBytes`, `TryOpen`은 `plaintext.Data() == sealed.Data() + NonceBytes`일 때만 허용한다. 그 밖의 겹침은 쓰기 전에 `InvalidArgument`로 거부한다. 검사에는 Core `Overlaps`를 쓴다.
 
-지금 Core `Span`에는 `Data`·`Size`·`operator[]`와 반복자만 있고, 하위 범위·byte 변환·겹침 검사가 없다. 위 원칙을 지키려면 다음 보강이 먼저 필요하다(선행 P1). Left·Right 계열은 기존 `StringView`처럼 범위를 넘으면 길이로 잘라 낸다. 범위 밖을 오류로 다뤄야 하는 파싱에는 `TrySlice`를 쓴다.
+Core `Span`에는 위 원칙에 필요한 하위 범위·byte 변환·겹침 검사를 더했다(선행 P1, 2026-11-14 `ca4e2cb`와 리뷰 반영). Left·Right 계열은 기존 `StringView`처럼 범위를 넘으면 길이로 잘라 낸다. 범위 밖을 오류로 다뤄야 하는 파싱에는 `TrySlice`를 쓴다. `TrySlice`의 오류는 `InvalidArgument`이므로, 메시지에서 온 byte를 자르는 복호 경로 어댑터는 이 실패를 `AuthenticationFailed`로 바꿔 돌려준다(2·11절). `AsBytes`는 값마다 byte 표현이 하나뿐인 원소(패딩 없는 정수·구조체)만 받는다. 패딩 있는 구조체나 float를 해시에 넣으면 미정 byte·여러 표현 때문에 결과가 실행마다 달라질 수 있기 때문이다.
 
 ```cpp
 template <typename T>
@@ -265,7 +265,8 @@ template <typename T>
 Span<uint8> AsWritableBytes(Span<T> values) noexcept;   // T가 const면 컴파일 오류
 
 // 두 view가 한 byte라도 겹치면 true다. 함수별 제자리 규칙(위)과 함께 쓴다.
-bool Overlaps(Span<const uint8> a, Span<const uint8> b) noexcept;
+template <typename T, typename U>
+bool Overlaps(Span<T> a, Span<U> b) noexcept;   // 원소 타입이 달라도 byte 범위로 판정한다
 ```
 
 ## 8. 일회성 API

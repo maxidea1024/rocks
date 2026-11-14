@@ -23,6 +23,12 @@ public:
         if (data == nullptr && count != 0) {
             platform::Fatal("A nonempty Span requires storage");
         }
+
+        // 존재할 수 있는 저장소는 주소 공간을 넘지 않는다. 넘는 count는 호출자 산술 오류이며,
+        // ByteCount()가 감겨 짧은 byte view·잘못된 겹침 판정이 되지 않게 여기서 막는다.
+        if (count > MaxSize / sizeof(T)) {
+            platform::Fatal("Span element count exceeds the address space");
+        }
     }
 
     constexpr Span(decltype(nullptr), usize count) noexcept : count_(count) {
@@ -49,8 +55,8 @@ public:
         return count_;
     }
 
-    // 원소가 차지하는 byte 수(Size() * sizeof(T))다. 실제로 존재하는 저장소를 가리키므로 넘치지
-    // 않는다.
+    // 원소가 차지하는 byte 수(Size() * sizeof(T))다. 생성자가 count를 주소 공간 안으로 제한하므로
+    // 넘치지 않는다.
     constexpr usize ByteCount() const noexcept {
         return count_ * sizeof(T);
     }
@@ -162,17 +168,19 @@ private:
 };
 
 // ---- byte view ----
-// 원소 배열을 같은 저장소의 byte view로 본다(UE MakeMemoryView 대응). T는 trivially copyable이어야
-// 하며(표현이 byte로 정해지는 타입), 결과의 수명은 원본과 같다. 해시·암호 입력처럼 byte Span을 받는
-// API에 구조체 배열을 복사 없이 넘길 때 쓴다.
+// 원소 배열을 같은 저장소의 byte view로 본다(UE MakeMemoryView 대응). 결과의 수명은 원본과 같다.
+// 해시· 암호 입력처럼 byte Span을 받는 API에 정수·구조체 배열을 복사 없이 넘길 때 쓴다. T는 값마다
+// byte 표현이 하나뿐이어야 한다(__has_unique_object_representations). 그래서 패딩이 있는
+// 구조체(미정 byte가 끼어 해시가 실행마다 달라진다)와 float·double(+0/-0, NaN 표현이 여럿)은 컴파일
+// 오류다. 그런 값은 필드를 직렬화해 넘긴다.
 //
 // 사용 예:
 //   const uint32 words[4] = {...};
 //   hasher.TryUpdate(AsBytes(Span<const uint32>(words)));   // 16 byte
 template <typename T>
 Span<const uint8> AsBytes(Span<T> values) noexcept {
-    static_assert(__is_trivially_copyable(RemoveConstT<T>),
-                  "AsBytes requires a trivially copyable element type");
+    static_assert(__has_unique_object_representations(RemoveConstT<T>),
+                  "AsBytes requires an element type without padding or multiple representations");
     return Span<const uint8>(reinterpret_cast<const uint8*>(values.Data()), values.ByteCount());
 }
 

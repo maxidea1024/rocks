@@ -5,8 +5,9 @@
 
 using namespace rocks;
 
-// 모든 열거자가 고유한 진단 이름을 가진다. 새 열거자를 끝에 더하고 이름을 빠뜨리면 "Unknown"으로
-// 드러난다.
+// 모든 열거자가 고유한 진단 이름을 가진다. 새 열거자의 이름 누락은 ErrorCodeName switch의
+// -Wswitch가 먼저 잡는다. 이 시험은 이름의 고유성과 마지막 열거자 다음 값의 "Unknown"을 확인한다(새
+// 열거자를 더하면 last도 그 값으로 옮긴다).
 TEST(ErrorCodeNamesAreCompleteAndUnique) {
     constexpr uint32 last = static_cast<uint32>(ErrorCode::AuthenticationFailed);
     for (uint32 i = 0; i <= last; ++i) {

@@ -13,13 +13,16 @@ namespace rocks {
 // - complete: 뜻은 API마다 다르다(예: Finish 계열은 "더 낼 출력이 없다", 해제 스트림은
 //   "스트림 경계에 도달"). 각 함수 설명을 따른다.
 //
-// 사용 예(입력을 모두 흘려보내는 반복):
+// 사용 예(입력을 모두 흘려보내는 반복). 입력을 다 소비해도 스트림 안에 출력이 남을 수 있으므로
+// (예: 해제 스트림의 complete == false) complete가 될 때까지 빈 입력으로 더 부른다:
 //   Span<const uint8> pending = input;
-//   while (!pending.IsEmpty()) {
+//   bool complete = false;
+//   while (!pending.IsEmpty() || !complete) {
 //       auto step = stream.TryProcess(pending, output);
 //       if (!step) { return step.Error(); }
 //       Consume(output.Left(step.Value().produced));
 //       pending = pending.RightChop(step.Value().consumed);
+//       complete = step.Value().complete;
 //   }
 struct StreamProgress {
     usize consumed = 0;
