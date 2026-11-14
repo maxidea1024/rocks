@@ -13,13 +13,17 @@
 //
 // - 기본은 XChaCha20-Poly1305다(GetPreferredAead, 결정 D2). 모든 CPU에서 상수 시간이고 nonce가 24
 //   byte라 무작위로 만들어도 안전하다.
-// - AES-256-GCM·AEGIS는 HW 명령(x86 AES-NI·PCLMUL·AVX, ARM crypto 확장)이 있을 때만 쓴다. 없으면
-//   Unsupported다(소프트웨어 AES와 AEGIS soft 경로는 상수 시간이 아니라서 쓰지 않는다, 결정 D3).
+// - AES-256-GCM·AEGIS는 HW 명령(x86-64 AES-NI·PCLMULQDQ·AVX, ARM64 AES·PMULL)이 있을 때만 쓴다. 두
+//   알고리즘은 같은 조건이라 함께 쓸 수 있거나 함께 Unsupported다(소프트웨어 AES와 AEGIS soft
+//   경로는 상수 시간이 아니라서 쓰지 않는다, 결정 D3).
 // - 고수준 TrySeal·TryOpen은 nonce를 만들어 앞에 붙인다(출력 = nonce ‖ 암호문 ‖ tag). 무작위
-//   nonce가 안전한 알고리즘(XChaCha20-Poly1305, AEGIS-256)만 받고, 나머지는 Unsupported다. 96 bit
-//   nonce 알고리즘은 세그먼트 스트림이나 hazmat 순번 봉인기(카운터 nonce)로 쓴다.
+//   nonce가 안전한 알고리즘(XChaCha20-Poly1305, AEGIS-256)만 받고, 나머지(ChaCha20-IETF·AES-GCM의
+//   96 bit, AEGIS-128L의 128 bit nonce)는 Unsupported다. 그 알고리즘은 hazmat nonce 지정 API(카운터
+//   nonce)나 세그먼트 스트림으로 쓴다.
 // - 복호 실패(tag 불일치, 잘린 입력, 다른 키·AD)는 모두 AuthenticationFailed이고 평문 출력 전체를
-//   0으로 지운다. 어느 검사가 실패했는지는 알리지 않는다(결정 D5).
+//   0으로 지운다. 어느 검사가 실패했는지는 알리지 않는다(결정 D5). AES-GCM·AEGIS는 검증 전에 복호한
+//   byte를 plaintext에 잠시 쓰고 실패하면 지운다(ChaCha20 계열은 검증 뒤에 쓴다). 호출 중에 다른
+//   스레드나 프로세스가 같은 버퍼를 읽지 않게 한다.
 // - 키는 알고리즘에 묶인 AeadKey이고 키 저장소에 있다. 생성 뒤 바뀌지 않으므로 여러 스레드가 동시에
 //   써도 된다. GCM·ChaCha20-Poly1305·AEGIS는 key commitment가 없다. 한 암호문이 다른 키로도 열릴 수
 //   있으므로 형식은 키 ID를 기록하고 시도 복호를 하지 않는다(2절).
@@ -117,8 +121,9 @@ private:
     void* state_ = nullptr;
 };
 
-// master에서 AEAD 키를 뽑는다(Kdf.h 타입 파생, 키 타입·알고리즘을 섞는다). 오류는
-// AeadKey::TryGenerate와 같다.
+// master에서 AEAD 키를 뽑는다(Kdf.h 타입 파생, 키 타입·알고리즘을 섞는다). 알고리즘 오류는
+// AeadKey::TryGenerate와 같고 먼저 검사한다. 빈 master는 StaleHandle, 키 저장소가 찼으면
+// OutOfMemory다.
 [[nodiscard]] Result<AeadKey> TryDeriveAeadKey(const KdfKey& master, uint64 subkeyId,
                                                KdfContext context,
                                                AeadAlgorithm algorithm) noexcept;
@@ -148,7 +153,8 @@ namespace hazmat {
 // nonce를 호출자가 책임진다. 같은 키로 같은 nonce를 두 번 쓰면 기밀성과 무결성이 모두
 // 깨진다(AEGIS-256·XChaCha20-Poly1305가 아니면 무작위 nonce도 쓰지 않는다). 결합 형식은 암호문 ‖
 // tag다. 이 함수들은 모든 알고리즘을 받는다.
-// - nonce 길이가 틀리거나 허용되지 않은 겹침이면 InvalidArgument, 빈 키는 StaleHandle이다.
+// - nonce 길이가 틀리거나 허용되지 않은 겹침이면 InvalidArgument, 빈 키는 StaleHandle이다. GCM의 96
+//   bit가 아닌 nonce는 Unsupported다(표준은 허용하지만 지원하지 않는다).
 // - 출력이 작거나 평문이 상한을 넘으면 CapacityExceeded다.
 // - 여는 쪽은 tag 불일치·잘린 입력이 AuthenticationFailed이고 plaintext 전체를 0으로 지운다.
 [[nodiscard]] Result<usize> TrySealWithNonce(const AeadKey& key, Span<const uint8> nonce,

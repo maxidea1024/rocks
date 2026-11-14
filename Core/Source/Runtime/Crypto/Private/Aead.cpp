@@ -10,7 +10,9 @@
 #include "SecretArena.h"
 #include "Sodium/SodiumRuntime.h"
 
+#include <Base/Compiler.h>
 #include <Core/Move.h>
+#include <Platform/Cpu.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
 
@@ -26,6 +28,15 @@ struct Traits {
     uint64 maxMessageBytes;
     bool randomNonceSafe;
 };
+
+// libsodium AES-256-GCM이 실제로 받는 평문 상한이다. 헤더 상수 MESSAGEBYTES_MAX는 16 × (2^32 - 2)
+// (NIST SP 800-38D의 2^36 - 32 byte)이지만 aesni·armcrypto 구현의 required_blocks()는 평문 블록 수
+// 2^32 - 2를 거부한다. 상수를 그대로 쓰면 마지막 한 블록 길이에서 봉인이 -1을 돌려 Fatal이 된다.
+constexpr uint64 MaxAes256GcmMessageBytes = 16 * ((uint64{1} << 32) - 3);
+static_assert(MaxAes256GcmMessageBytes <= crypto_aead_aes256gcm_MESSAGEBYTES_MAX);
+
+// GCM nonce는 96 bit만 받는다. 표준은 다른 길이도 허용하므로 그 밖은 Unsupported다(5.2·11절).
+constexpr usize GcmNonceBytes = 12;
 
 static_assert(alignof(crypto_aead_aes256gcm_state) <= 64);
 static_assert(sizeof(crypto_aead_aes256gcm_state) <= detail::SecretSlotMaxBytes);
@@ -60,9 +71,9 @@ Traits TraitsOf(AeadAlgorithm algorithm) noexcept {
                 crypto_aead_chacha20poly1305_ietf_MESSAGEBYTES_MAX, false};
     case AeadAlgorithm::Aes256Gcm:
         return {crypto_aead_aes256gcm_KEYBYTES, crypto_aead_aes256gcm_NPUBBYTES,
-                crypto_aead_aes256gcm_ABYTES, crypto_aead_aes256gcm_MESSAGEBYTES_MAX, false};
+                crypto_aead_aes256gcm_ABYTES, MaxAes256GcmMessageBytes, false};
     case AeadAlgorithm::Aes128Gcm:
-        return {16, 12, 16, crypto_aead_aes256gcm_MESSAGEBYTES_MAX, false};
+        return {16, GcmNonceBytes, 16, crypto_aead_aes256gcm_MESSAGEBYTES_MAX, false};
     case AeadAlgorithm::Aegis256:
         return {crypto_aead_aegis256_KEYBYTES, crypto_aead_aegis256_NPUBBYTES,
                 crypto_aead_aegis256_ABYTES, crypto_aead_aegis256_MESSAGEBYTES_MAX, true};
@@ -74,18 +85,31 @@ Traits TraitsOf(AeadAlgorithm algorithm) noexcept {
     return {};
 }
 
-// AEGIS가 libsodium HW 경로를 타는가. libsodium의 구현 선택(_pick_best_implementation)과 같은
-// 조건이다: ARM은 crypto 확장, x86은 AES-NI와 AVX. 컴파일 조건(HAVE_ARMCRYPTO·HAVE_AVXINTRIN_H·
-// HAVE_WMMINTRIN_H)은 모든 대상 플랫폼에서 켜져 있다(ThirdParty.json·Windows는 common.h). 이 조건이
-// 아니면 libsodium은 soft 구현으로 내려가므로 쓰지 않는다(결정 D3).
+// AES-256-GCM·AEGIS의 HW 조건이다. 두 알고리즘이 같은 조건을 쓴다(6.1절 "HW 조건은 하나다").
+// - x86-64: AES-NI·PCLMULQDQ·AVX. ARM64: AES·PMULL. PlatformBase CpuFeatures와 libsodium 실행
+//   감지가 모두 참이어야 한다(6.2절). libsodium은 ARM에서 AES bit 하나만 보므로 PMULL은
+//   CpuFeatures로 본다. PMULL 없이 AES-256-GCM 키를 만들면 beforenm이 PMULL 명령에서 죽는다.
+// - crypto_aead_aes256gcm_is_available()은 libsodium이 HW 구현으로 빌드되었을 때만 참이다.
+//   ARM에서는 HAVE_ARMCRYPTO 빌드 정의를 뜻하고, 이는 AEGIS armcrypto 구현의 컴파일 조건과
+//   같다(ARM의 실행 감지는 빌드 정의와 무관해서 따로 확인해야 한다). x86의 실행 감지 값은 빌드
+//   정의가 있을 때만 켜진다.
+// 조건이 아니면 libsodium soft 경로로 내려가지 않고 Unsupported다(결정 D3).
 bool HasAesHardware() noexcept {
+    const platform::CpuFeatures& cpu = platform::QueryCpuFeatures();
     const CryptoRuntimeInfo& info = GetCryptoRuntimeInfo();
-    return info.sodiumArmCrypto || (info.sodiumAesni && info.sodiumAvx);
+    bool hardware = false;
+    if constexpr (IsX64) {
+        hardware = cpu.aes && cpu.pclmulqdq && cpu.avx && info.sodiumAesni && info.sodiumPclmul &&
+                   info.sodiumAvx;
+    } else {
+        hardware = cpu.armAes && cpu.armPmull && info.sodiumArmCrypto;
+    }
+
+    return hardware && crypto_aead_aes256gcm_is_available() != 0;
 }
 
 StringView HardwareName() noexcept {
-    return GetCryptoRuntimeInfo().sodiumArmCrypto ? StringView("libsodium/armcrypto")
-                                                  : StringView("libsodium/aesni");
+    return IsX64 ? StringView("libsodium/aesni") : StringView("libsodium/armcrypto");
 }
 
 bool IsAvailable(AeadAlgorithm algorithm) noexcept {
@@ -94,13 +118,11 @@ bool IsAvailable(AeadAlgorithm algorithm) noexcept {
     case AeadAlgorithm::ChaCha20Poly1305Ietf:
         return true;
     case AeadAlgorithm::Aes256Gcm:
-        // libsodium은 HW 구현만 있다(x86 AES-NI·PCLMUL·AVX, ARM crypto 확장).
-        return crypto_aead_aes256gcm_is_available() != 0;
-    case AeadAlgorithm::Aes128Gcm:
-        return false;
     case AeadAlgorithm::Aegis256:
     case AeadAlgorithm::Aegis128L:
         return HasAesHardware();
+    case AeadAlgorithm::Aes128Gcm:
+        return false;
     }
 
     return false;
@@ -245,14 +267,18 @@ Result<AeadKey> TryMakeKey(AeadAlgorithm algorithm, SecretBytes&& key) noexcept 
     return Result<AeadKey>::Success(detail::KeyAccess::Make<AeadKey>(algorithm, Move(key), state));
 }
 
-// hazmat 공통 검사다. 빈 키는 StaleHandle, nonce 길이가 틀리면 InvalidArgument다.
+// hazmat 공통 검사다. 빈 키는 StaleHandle, GCM의 96 bit가 아닌 nonce는 Unsupported, 그 밖의 nonce
+// 길이 오류는 InvalidArgument다.
 Result<void> CheckHazmat(const AeadKey& key, Span<const uint8> nonce) noexcept {
     if (key.IsEmpty()) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (nonce.Size() != TraitsOf(key.Algorithm()).nonceBytes) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    const usize expected = TraitsOf(key.Algorithm()).nonceBytes;
+    if (nonce.Size() != expected) {
+        const bool gcm = key.Algorithm() == AeadAlgorithm::Aes256Gcm ||
+                         key.Algorithm() == AeadAlgorithm::Aes128Gcm;
+        return Result<void>::Failure(gcm ? ErrorCode::Unsupported : ErrorCode::InvalidArgument);
     }
 
     return Result<void>::Success();

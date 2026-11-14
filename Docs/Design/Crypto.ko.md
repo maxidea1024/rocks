@@ -415,8 +415,10 @@ AEAD 규칙(2026-11-15 구현, AeadSequenceSealer는 이후):
 
 - 오류 순서는 빈 키 `StaleHandle` → 알고리즘(`Unsupported`) → 호출자 버퍼(길이·겹침 `InvalidArgument`, 출력 부족 `CapacityExceeded`) → 메시지 검사다. 메시지에서 온 길이(nonce + tag보다 짧은 입력, 분리 형식의 틀린 tag 길이, 상한을 넘는 암호문)와 tag 불일치는 모두 `AuthenticationFailed`이고 plaintext 전체를 0으로 지운다(결정 D5). 호출자 버퍼 오류는 쓰기 전에 돌려준다.
 - 제자리(7절): 고수준은 `plaintext.Data() == output.Data() + nonceBytes`(봉인), `plaintext.Data() == sealed.Data() + nonceBytes`(열기)만, hazmat은 입력과 출력의 시작 주소가 같을 때만 겹침을 허용한다. AD·nonce·tag가 출력과 겹치면 `InvalidArgument`다.
-- AEGIS 사용 가능 조건은 libsodium 구현 선택과 같다(ARM crypto 확장, 또는 x86 AES-NI + AVX). AES-256-GCM은 `crypto_aead_aes256gcm_is_available()`(AES-NI·PCLMUL·AVX, ARM crypto)를 따른다. 조건이 아니면 libsodium soft 경로로 내려가지 않고 `Unsupported`다(결정 D3).
-- 시험: RFC 8439 2.8.2, XChaCha draft A.3.1 입력, AES-256-GCM(cryptography로 계산), AEGIS draft 벡터(libsodium 시험 표), 변조·절단·다른 키·AD, 제자리, 겹침, 타입 파생 KAT.
+- AES-256-GCM과 AEGIS는 6.1절의 HW 조건 하나를 함께 쓴다: `CpuFeatures`(x86-64 AES-NI·PCLMULQDQ·AVX, ARM64 AES·PMULL)와 libsodium 실행 감지가 모두 참이고 `crypto_aead_aes256gcm_is_available()`이 참일 때다. 마지막 값은 ARM에서 `HAVE_ARMCRYPTO` 빌드 정의를 확인한다(ARM 실행 감지는 빌드 정의와 무관하다). 조건이 아니면 libsodium soft 경로로 내려가지 않고 `Unsupported`다(결정 D3). PMULL 없는 ARM64에서 AES-256-GCM 키를 만들면 libsodium `beforenm`이 PMULL 명령에서 죽으므로 이 확인이 필요하다(2026-11-15 리뷰 반영).
+- hazmat의 GCM nonce는 96 bit만 받고 그 밖은 `Unsupported`, 다른 알고리즘의 nonce 길이 오류는 `InvalidArgument`다.
+- AES-GCM·AEGIS 복호는 libsodium이 검증 전 평문을 호출자 버퍼에 잠시 쓴다. 실패하면 반환 전에 지우므로 "검증 전 평문을 내보내지 않는다"(2절)는 API 경계에서 성립한다. 호출 중 같은 버퍼를 다른 스레드가 읽지 않게 한다.
+- 시험: RFC 8439 2.8.2, XChaCha draft A.3.1 출력, AES-256-GCM과 빈 평문 tag(cryptography·pycryptodome로 계산), AEGIS draft 부록 TV1–TV3(tag256)과 libsodium 무작위 표 행(독립 Python 구현으로 재현). 모든 알고리즘의 hazmat 결합·분리 형식 변조(어댑터 소거가 관찰되는 AES-GCM 포함)·길이가 틀린 tag, 절단·다른 키·AD, 제자리와 시작 주소 ±1, 겹침 우선 순서, 출력 부족 시 무쓰기, GCM nonce 길이, `AeadInfo` 정확한 상한과 `CpuFeatures`로 정한 HW 사용 가능 여부·구현 이름, 타입 파생 KAT.
 
 **Crypto/Signature.h · KeyExchange.h (요약)**
 
@@ -850,7 +852,7 @@ public:
 |---|---|---|---|---|
 | XChaCha20-Poly1305 | 32 | 24 | 16 | SIZE_MAX − 16(사실상 무제한) |
 | ChaCha20-Poly1305-IETF | 32 | 12 | 16 | 64 × (2^32 − 1) ≈ 256 GiB |
-| AES-256-GCM / AES-128-GCM | 32 / 16 | 12 | 16 | 2^36 − 32 B ≈ 64 GiB(libsodium 상수 16 × (2^32 − 2)) |
+| AES-256-GCM / AES-128-GCM | 32 / 16 | 12 | 16 | 2^36 − 32 B ≈ 64 GiB(NIST). libsodium AES-256-GCM은 구현이 한 블록 적게 받아 16 × (2^32 − 3) byte를 쓴다(헤더 상수 16 × (2^32 − 2)) |
 | AEGIS-256 / AEGIS-128L | 32 / 16 | 32 / 16 | 32 | 2^61 − 1. 무작위 nonce는 256이 사실상 무제한, 128L은 2^48개 |
 | secretstream | 32 | header 24 | 17 | 메시지당 ≈ 256 GiB, 스트림은 무제한 |
 | 세그먼트 스트림 | 32 | header 88 | 16/세그먼트 | 2^32 세그먼트(64 KiB 세그먼트면 약 256 TiB) |
