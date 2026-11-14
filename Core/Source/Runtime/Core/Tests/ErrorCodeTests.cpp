@@ -5,7 +5,8 @@
 
 using namespace rocks;
 
-// 모든 열거자가 고유한 진단 이름을 가진다. 새 열거자를 끝에 더하고 이름을 빠뜨리면 "Unknown"으로 드러난다.
+// 모든 열거자가 고유한 진단 이름을 가진다. 새 열거자를 끝에 더하고 이름을 빠뜨리면 "Unknown"으로
+// 드러난다.
 TEST(ErrorCodeNamesAreCompleteAndUnique) {
     constexpr uint32 last = static_cast<uint32>(ErrorCode::AuthenticationFailed);
     for (uint32 i = 0; i <= last; ++i) {

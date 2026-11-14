@@ -25,9 +25,10 @@ enum class ErrorCode : uint32 {
     Cancelled,
     ShuttingDown,
     TypeMismatch,
-    // 인증·무결성 검증 실패다. 메시지에서 온 byte의 tag·MAC·서명·commitment 불일치, 잘린 스트림, 잘못된 키,
-    // 복호 경로의 형식 위반이 모두 이 값 하나다(어느 검사가 실패했는지 드러내지 않는다). 호출자가 소유한
-    // 버퍼의 길이 오류 같은 API 오용은 InvalidArgument로 구분한다(Docs/Design/Crypto.ko.md 2·11절).
+    // 인증·무결성 검증 실패다. 메시지에서 온 byte의 tag·MAC·서명·commitment 불일치, 잘린 스트림,
+    // 잘못된 키, 복호 경로의 형식 위반이 모두 이 값 하나다(어느 검사가 실패했는지 드러내지 않는다).
+    // 호출자가 소유한 버퍼의 길이 오류 같은 API 오용은 InvalidArgument로
+    // 구분한다(Docs/Design/Crypto.ko.md 2·11절).
     AuthenticationFailed
 };
 

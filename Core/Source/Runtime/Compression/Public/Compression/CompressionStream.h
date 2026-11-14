@@ -49,8 +49,8 @@ namespace detail {
 struct StreamState;
 } // namespace detail
 
-// 한 번의 스트림 호출 결과는 Core StreamProgress(Core/StreamProgress.h)다. Crypto 스트림과 같은 타입이다.
-// complete의 뜻은 호출마다 다르다(각 함수 설명 참고).
+// 한 번의 스트림 호출 결과는 Core StreamProgress(Core/StreamProgress.h)다. Crypto 스트림과 같은
+// 타입이다. complete의 뜻은 호출마다 다르다(각 함수 설명 참고).
 
 // 압축 스트림이다. 결과 byte는 같은 호출 순서(입력 조각·출력 용량)일 때만 같다. 일회성
 // API와 byte가 같다고 약속하지 않는다(해제 결과는 같다). Deflate 수준 0은 출력 용량에 따라
