@@ -205,10 +205,8 @@ TEST(ReflectionTransientWireAndAbstractGraphAreRejectedBeforeConstructors) {
         auto graph = SingleRecordGraph(allocator, GeneratedType<PropertyNode>::Id(),
                                        {record.Value().Data(), record.Value().Size()});
         REQUIRE(graph);
-        ObjectGraphLoadOptions options;
-        options.policy.allowMissingFields = true;
         CHECK(LoadObjectGraph(allocator, objects, types, objects.OwnerAccess(),
-                              {graph.Value().Data(), graph.Value().Size()}, options)
+                              {graph.Value().Data(), graph.Value().Size()})
                   .Error() == ErrorCode::Unsupported);
         CHECK(AbstractBase::constructions == 0 && AbstractByPolicy::constructions == 0);
         CHECK(objects.Stats().liveObjects == 0 && objects.Stats().reservedObjects == 0);

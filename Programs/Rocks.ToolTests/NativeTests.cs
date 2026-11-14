@@ -221,6 +221,20 @@ internal static class NativeTests
                 });
             }
 
+            foreach ((string control, string diagnostic) in new[]
+            {
+                ("required-check-rollback", "ConstructionContext rolled back during a required check"),
+                ("required-check-twice", "Required check started twice")
+            })
+            {
+                suite.Add("Native.Fatal." + control, async () =>
+                {
+                    var result = await Run("--negative-control", control);
+                    Verify.That(result.ExitCode != 0, "required check contract violation did not fail");
+                    Verify.Contains(diagnostic, result.StdErr, "required check fatal diagnostic");
+                });
+            }
+
             suite.Add("Native.Fatal.empty-type-isa", async () =>
             {
                 var result = await Run("--negative-control", "empty-type-isa");

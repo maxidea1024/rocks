@@ -1092,8 +1092,9 @@ TEST(ArrayGraph_EveryElementKindRoundTripsAndResavesIdentically) {
 }
 
 // Required 배열(원소마다 non-null): 저장은 rejectMissingRequired면 첫 null 원소에서 경로
-// [refs[1]]의 RequiredMissing 뒤 InvalidArgument, 로드는 진단만 낸다 — [refs[1]], [slots[1],
-// material](원소 struct 멤버), [bundle, refs[0]](인라인 struct 안 배열). 미선언 enum 원소는 기본
+// [refs[1]]의 RequiredMissing 뒤 InvalidArgument, 로드는 적용 뒤 실효 값으로 진단만 낸다 —
+// [refs[1]], [slots[1], material](원소 struct 멤버), [bundle, refs[0]](인라인 struct 안 배열 — 그
+// struct의 ContainsRequired가 배열 멤버를 센다). 미선언 enum 원소는 기본
 // 거부(생성 전), ReportAndDefault면 경로 [channels[1]]의 진단 뒤 대체 값이다.
 TEST(ArrayGraph_RequiredNullElementsAndElementDiagnosticPaths) {
     SystemAllocator allocator;
@@ -1182,8 +1183,9 @@ TEST(ArrayGraph_RequiredNullElementsAndElementDiagnosticPaths) {
     CHECK(fixture.Close());
 }
 
-// 누락된 배열 필드는 생성자 값을 유지하며 Required여도 진단하지 않는다. 누락된 struct(bundle)
-// 안의 Required 배열 멤버(refs)도 진단하지 않는다(누락 struct 안 배열은 생성자 값이다).
+// 빠진 배열 필드는 생성자 값(빈 배열)을 유지하고(누락 = 기준 — NotFound 없음), 실효 값에 null
+// 원소가 없으므로 Required여도 진단하지 않는다. 빠진 struct(bundle) 안의 Required 배열 멤버(refs)도
+// 생성자 값(빈 배열)이라 진단하지 않는다.
 TEST(ArrayGraph_MissingArraysKeepConstructorValuesWithoutDiagnostics) {
     SystemAllocator allocator;
     const Guid omitted[] = {RefsId, SlotsId, BundleFieldId};
@@ -1204,12 +1206,8 @@ TEST(ArrayGraph_MissingArraysKeepConstructorValuesWithoutDiagnostics) {
             auto bytes =
                 SaveObjectGraph(allocator, source, source.OwnerAccess(), root.Value().Handle());
             REQUIRE(bytes);
-            CHECK(LoadObjectGraph(allocator, target, targetFixture.types, target.OwnerAccess(),
-                                  bytes.Value().View())
-                      .Error() == ErrorCode::NotFound);
             ArrayHooks hooks(allocator);
             ObjectGraphLoadOptions allow;
-            allow.policy.allowMissingFields = true;
             allow.hooks = &hooks;
             auto loaded = LoadObjectGraph(allocator, target, targetFixture.types,
                                           target.OwnerAccess(), bytes.Value().View(), allow);

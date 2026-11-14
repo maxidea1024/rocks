@@ -230,7 +230,6 @@ TEST(ObjectGraphDerivedReferenceIntoBaseFieldIsAccepted) {
         REQUIRE(source);
         ObjectRegistry target(allocator, types, {921, 1});
         ObjectGraphLoadOptions options;
-        options.policy.allowMissingFields = true;
         ConstructedForReview = 0;
         auto loaded = LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
                                       source.Value().View(), options);
@@ -264,7 +263,6 @@ TEST(ObjectGraphUnrelatedReferenceTypeIsRejectedBeforeAnyConstructor) {
         REQUIRE(source);
         ObjectRegistry target(allocator, types, {923, 1});
         ObjectGraphLoadOptions options;
-        options.policy.allowMissingFields = true;
         ConstructedForReview = 0;
         const auto before = allocator.Stats();
         const auto leases = types.Stats().leases;
@@ -294,7 +292,6 @@ TEST(ObjectGraphReferenceToNativeAliasTypePreservesAliasSchemaOnResave) {
         REQUIRE(source);
         ObjectRegistry target(allocator, types, {922, 1});
         ObjectGraphLoadOptions options;
-        options.policy.allowMissingFields = true;
         auto loaded = LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
                                       source.Value().View(), options);
         REQUIRE(loaded);

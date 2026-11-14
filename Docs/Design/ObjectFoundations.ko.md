@@ -1,6 +1,6 @@
 # 객체·그래프 보강(A0-O) 설계
 
-기준일: 2026-11-14, 확정안(설계 교차검증 2건 — 구현 가능성, 적대적 반례와 UE 대조(당시 기준 UE 5.6) — 과 최종 검토 1건 반영, 사용자 승인 권고안으로 진행). [에셋 시스템 설계](AssetSystem.ko.md)(이하 AS) 1절 A0-O 단계의 상세다(기준 코드 `5ee4dc5` — A0-B B1–B8 구현 완료). 구현: A0-Oa(Outer·Name·정책·다중 root Commit), A0-Ob(Discard·ReferenceObserver·패키지 소속 보존) — 구현하며 구체화한 점은 각 절에 반영했다. A0-Oc–Oe는 구현 전이다.
+기준일: 2026-11-14, 확정안(설계 교차검증 2건 — 구현 가능성, 적대적 반례와 UE 대조(당시 기준 UE 5.6) — 과 최종 검토 1건 반영, 사용자 승인 권고안으로 진행). [에셋 시스템 설계](AssetSystem.ko.md)(이하 AS) 1절 A0-O 단계의 상세다(기준 코드 `5ee4dc5` — A0-B B1–B8 구현 완료). 구현: A0-Oa(Outer·Name·정책·다중 root Commit), A0-Ob(Discard·ReferenceObserver·패키지 소속 보존), A0-Oc(누락 = 기준·실효 값 Required — graph v1 envelope 위) — 구현하며 구체화한 점은 각 절에 반영했다. A0-Od1–Oe는 구현 전이다.
 
 근거: AS 1절 A0-O 행과 3·5·6·7·11절, [리플렉션·빌드 보강 설계](ReflectionFoundations.ko.md)(이하 RF)의 A0-O 언급(2.2·2.3·3.3·5.5·6.1–6.4절, 결정 16·21·22), [런타임 클래스 메타데이터](RuntimeClassMetadata.ko.md)(이하 RCM) '클래스 기본값 결정', [엔진 구현 계획](EngineImplementationPlan.ko.md)(이하 EIP) §5.2 "Outer와 객체 경로", 현재 코드(`Core/Source/Runtime/ObjectRuntime`·`ObjectSerialization`). UE 대조는 UE 5.8(5.8.4, commit `f45729c0b6f0`) 원본으로 다시 확인했다(10절, 2026-11-15 — 처음 대조는 당시 기준 UE 5.6 브랜치).
 
@@ -16,7 +16,7 @@
 | Registry 정책 | `requireLifecycleScope`만 | `RegistryPolicy`(패키지 정책·WorldOnly 거부) |
 | 패키지 사이 간선 | 관찰 없음 | `ReferenceObserver`(순 다중도 합산 표 — 편집·Commit·Discard) |
 | Commit | 첫 staged 객체 하나에 RootRef(`ObjectRegistry.cpp` 1663행) | 호출자가 고른 root마다 RootRef(다중 root), 공개 객체의 패키지 사이 간선 다중도 보고 |
-| 누락 필드 | 정책(`FieldDecodePolicy::allowMissingFields`·`allowMissingFlags`, 기본 NotFound) | 형식 규칙: 빠진 필드·멤버 = 기준 값(NotFound 없음). present 판정 구조는 A5 override 집합용으로 남긴다 |
+| 누락 필드 | 정책(`FieldDecodePolicy::allowMissingFields`·`allowMissingFlags`, 기본 NotFound) | 형식 규칙: 빠진 필드·멤버 = 기준 값(NotFound 없음). present 판정 지점은 A5 override 집합용으로 남긴다 |
 | Required 진단(로드) | 1단계에서 파일 값·누락으로 판정(누락은 null로 간주) | 적용 뒤(Commit 전) staged 객체의 실효 값으로 판정 |
 | 그래프 형식 | v1: 단일 root, BFS local ID, U64 참조, 외곽에 타입·버전, 고아 거부, 내부 Commit | v2: 호출자 저장 집합·순서 = localId, U32 참조 + 외부 참조 비트, 노드 타입은 노드 표(export 표) 기준, 단계형 복원(호출자 Commit), 외부 참조 목록·번호 재배정 |
 | 한도 | 객체 1024, 바이트 16 MiB, 작업량 64Mi | 객체 4096, 외부 참조 65536, 바이트 64 MiB, 작업량 식(5.6절) |
@@ -215,7 +215,7 @@ const RegistryPolicy& ObjectRegistry::Policy() const noexcept;   // 생성 뒤 �
 - Retire(sweep — 2017·2130행, rollback — 1692행): 같은 잠금 안에서 이름 색인 항목과 자기 고리를 뗀다(1.4절). Discard로 이미 뗀 객체는 건너뛴다.
 - Registry의 Outer·자식 방문은 `gate_`를 쥐지 않고 한다 — `MarkEdge`(1711행)·`ValidateStagedEdge`(1597행)가 같은 `gate_`를 잡으므로 쥔 채 부르면 자기 교착이다. 그래도 안전한 이유는 GC 슬라이스·Commit 검증이 `processing_` 아래라 그동안 `outer`·고리가 바뀌지 않기 때문이다.
 
-오류 순서(Create·NewObject): 0. 트랜잭션 상태(끝난 트랜잭션 InvalidArgument, 고정된 오류는 그 오류 — 시작하지 못한 트랜잭션의 시작 오류 포함, 그래서 다른 접근 문맥의 `NewObject`는 WrongContext다)·저널 예약(OutOfMemory) → 1. 접근(WrongThread·WrongContext) → 2. 종료·재진입(ShuttingDown·Busy) → 3. 타입(NotFound·TypeMismatch) → 4. Abstract·생성 함수 없음·패키지 정책 Registry에서 완전한 필드 배치(`RuntimeTypeOps::completeFieldLayout`)가 아닌 타입(Unsupported — A0-Ob 리뷰 반영, 아래) → 5. Outer 상태(StaleHandle — 생존·같은 트랜잭션 Reserved가 아님, 다른 Registry의 handle(FindSlot의 domain 불일치), cutoff white, Discard됨) → 6. WorldOnly 정책(Unsupported) → 7. 이름 형식(InvalidArgument, NFC 판정 scratch OutOfMemory) → 8. 패키지 정책·패키지 이름·빈 이름·대표 자식 규칙(InvalidArgument) → 9. 경로 길이(CapacityExceeded) → 10. 비교 키·이름 기록·색인 성장 할당(OutOfMemory — 색인이 더 자랄 수 없으면(2^30칸 초과) CapacityExceeded) → 11. 이름 충돌(AlreadyExists) → 12. 객체 할당(OutOfMemory)·슬롯 상한(CapacityExceeded). 지금처럼 Create 실패는 트랜잭션을 오류 상태로 고정한다(도구는 `IsNameTaken`으로 먼저 확인한다). WrongContext는 접근 문맥 불일치에서만 나온다.
+오류 순서(Create·NewObject): 0. 트랜잭션 상태(끝난 트랜잭션 InvalidArgument, 고정된 오류는 그 오류 — 시작하지 못한 트랜잭션의 시작 오류 포함, 그래서 다른 접근 문맥의 `NewObject`는 WrongContext다)·저널 예약(OutOfMemory) → 1. 접근(WrongThread·WrongContext) → 2. 종료·재진입(ShuttingDown·Busy) → 3. 타입(NotFound·TypeMismatch) → 4. Abstract·생성 함수 없음·패키지 정책 Registry에서 완전한 필드 배치(`RuntimeTypeOps::completeFieldLayout`)가 아닌 타입(Unsupported — A0-Ob 리뷰 반영, 아래) → 5. Outer 상태(StaleHandle — 생존·같은 트랜잭션 Reserved가 아님, 다른 Registry의 handle(FindSlot의 domain 불일치), cutoff white, Discard됨) → 6. WorldOnly 정책(Unsupported) → 7. 이름 형식(InvalidArgument, NFC 판정 scratch OutOfMemory) → 8. 패키지 정책·패키지 이름·빈 이름·대표 자식 규칙(InvalidArgument) → 9. 경로 길이(CapacityExceeded) → 10. 비교 키·이름 기록·색인 성장 할당(OutOfMemory — 색인이 더 자랄 수 없으면(2^30칸 초과) CapacityExceeded) → 11. 이름 충돌(AlreadyExists) → 12. 객체 할당(OutOfMemory)·슬롯 상한(CapacityExceeded). 지금처럼 Create 실패는 트랜잭션을 오류 상태로 고정한다(도구는 `IsNameTaken`으로 먼저 확인한다). A0-Oc가 더한 예외: 0단계의 트랜잭션 상태 다음에 Required 검사 중 표시면 Busy이고(4절), 이 Busy는 아무것도 바꾸지 않았으므로 트랜잭션을 고정하지 않는다. WrongContext는 접근 문맥 불일치에서만 나온다.
 
 규칙 4의 완전한 필드 배치 조건(A0-Ob 리뷰 반영): 관찰자는 편집을 Registry API 지점(owner 저장소 안의 `ObjectRef`·컨테이너)에서, Commit·Discard를 타입 Trace로 센다. Trace가 덮지 않는 참조 필드(수동 함수표의 "Trace 없는 타입은 강한 간선 없음", 리플렉션 base를 둔 native 파생 등)를 Registry API로 쓰면 계수가 새고, 대상이 회수된 뒤 다음 편집이 불변식 Fatal에 닿는다. 그래서 패키지 정책 Registry는 `completeFieldLayout`(모든 강한 간선이 metadata에 있고 Trace가 모두 방문한다는 선언 — 생성 타입은 언제나 참)인 타입만 만든다. 에셋 객체는 패키지 그래프로 저장되어야 하므로(그래프 저장도 같은 선언을 요구한다 — `ValidateLayout`) 이 조건과 맞고, 패키지 타입 자신에게도 같다. 정책 없는 Registry는 지금처럼 만든다. 계약 문구는 `RegistryOptions::referenceObserver`·`SetReference`·`RuntimeTypeOps::completeFieldLayout` 주석에 적었다.
 
@@ -385,9 +385,9 @@ RCM 결정 22를 그래프 형식 규칙으로 고정한다. 레코드가 없어
 
 **누락 = 기준**
 
-- Record에 없는 영속 필드·struct 멤버는 오류가 아니며 그 위치의 값은 **기준 값**이다. A0-O의 기준은 생성 직후 값이다: 최상위 필드와 struct 필드의 멤버는 소유 객체 생성자가 만든 값(struct는 제자리 decode — `DecodeStructRecord`가 생성자 값 위에 있는 멤버만 쓴다), 배열 원소 struct의 멤버는 원소 기본 생성자(`S(Allocator&)`·`S()`) 값, 빠진 배열은 생성자가 만든 배열이다. 이는 지금의 "누락 필드는 생성자 값 유지"(`allowMissingFields`)와 같은 값이다. A5 뒤에도 C++ 타입은 생성자가 레코드와 같은 값을 만들므로 같고, Sparks 타입은 초기값 덮기 뒤의 값이 기준이다(RCM 적용 순서).
+- Record에 없는 영속 필드·struct 멤버는 오류가 아니며 그 위치의 값은 **기준 값**이다. A0-O의 기준은 생성 직후 값이다: 최상위 필드와 struct 필드의 멤버는 소유 객체 생성자가 만든 값(struct는 제자리 decode — `DecodeStructRecord`가 생성자 값 위에 있는 멤버만 쓴다), 배열 원소 struct의 멤버는 원소 기본 생성자(`S(Allocator&)`·`S()`) 값, 빠진 배열은 생성자가 만든 배열이다. 이는 A0-B의 누락 허용 정책(Oc에서 없앤 `allowMissingFields`)이 남기던 "누락 필드는 생성자 값 유지"와 같은 값이다. A5 뒤에도 C++ 타입은 생성자가 레코드와 같은 값을 만들므로 같고, Sparks 타입은 초기값 덮기 뒤의 값이 기준이다(RCM 적용 순서).
 - 지우는 것: `FieldDecodePolicy::allowMissingFields`·`allowMissingFlags`, `FieldDecodeContext::IsMissingAllowed`, `detail::CheckMissingField`·`ReportMissingRequired`, `DecodeNode`의 누락 순회(`GraphLoad.cpp` 846–858행)와 `DecodeStructRecord`의 누락 순회(`GeneratedFieldCodec.h` 957–969행). NotFound는 그래프 로드에서 사라진다.
-- **남기는 것 — override 집합 자리**: present 판정(`DecodeNode`의 `present` 배열, `DecodeStructRecord`의 present bitset — `GeneratedFieldCodec.h` 921·954행)은 지우지 않는다. 1단계가 필드·멤버마다 "파일에 있음"을 판정하는 지점을 문맥의 보호 가상 함수 `FieldDecodeContext::NotePresent(const FieldCodecFrame&)`(A0-O 기본 무동작)로 모아 둔다. A5는 이것으로 차이 형식 로드의 override 집합("파일에 있는 값 경로 = 집합" — RCM)을 채우고(공개 hook `FieldCodecHooks::ObservePresentValue` 또는 Stage 출력 중 A5가 정한다), 형식은 바뀌지 않는다. 덧붙여 정한다: (b) 전부 저장(undo·스냅샷·복제)의 override 집합은 graph v2 바이트 밖 — 그 컨테이너가 노드별 값 경로 목록으로 담는다. (c) "차이 형식인지"는 형식 비트가 아니라 호출자 옵션이다(같은 바이트 규칙 — 누락 = 기준 — 으로 둘 다 읽힌다). 그래서 "A5에서 형식 버전을 다시 올리지 않는다"(RCM)가 유지된다.
+- **남기는 것 — override 집합 자리**: present 판정 지점(`DecodeNode`가 필드마다, `DecodeStructRecord`가 멤버마다 값 검증을 마친 자리)은 지우지 않는다. 1단계가 필드·멤버마다 "파일에 있음"을 판정하는 지점을 문맥의 보호 가상 함수 `FieldDecodeContext::NotePresent(const FieldCodecFrame&)`(A0-O 기본 무동작)로 모아 둔다(공개 진입점 `MarkPresent()` — 아래 구현에서 정한 점). A5는 이것으로 차이 형식 로드의 override 집합("파일에 있는 값 경로 = 집합" — RCM)을 채우고(공개 hook `FieldCodecHooks::ObservePresentValue` 또는 Stage 출력 중 A5가 정한다), 형식은 바뀌지 않는다. 덧붙여 정한다: (b) 전부 저장(undo·스냅샷·복제)의 override 집합은 graph v2 바이트 밖 — 그 컨테이너가 노드별 값 경로 목록으로 담는다. (c) "차이 형식인지"는 형식 비트가 아니라 호출자 옵션이다(같은 바이트 규칙 — 누락 = 기준 — 으로 둘 다 읽힌다). 그래서 "A5에서 형식 버전을 다시 올리지 않는다"(RCM)가 유지된다.
 - 새 정책 칸 `FieldDecodePolicy::excludedFlags`(저장의 `FieldEncodePolicy::excludedFlags`와 짝): 이 데이터에 없어야 하는 유효 플래그다(쿠킹 로드 = EditorOnly). 그런 필드·멤버·원소가 있으면 InvalidArgument(쿠킹 데이터는 정확히 일치 — AS 5.3), 없으면 기준 값이며 Required 진단에서도 뺀다. RF 2.3의 "쿠킹 데이터 로드에서 EditorOnly 필드 누락은 NotFound가 아니다"는 이것으로 성립한다.
 
 **실효 값 Required 진단(2c 단계)**
@@ -408,7 +408,7 @@ public:
 
 protected:
     // staged 트랜잭션에 검사 중 표시를 세운다(문맥이 끝날 때 내린다). 표시 동안 그 트랜잭션의 Create·
-    // SetReference·AssignReferences·AssignElements·SetElementReference·Commit은 Busy다 — encode 고정의
+    // SetReference·AssignReferences·AssignElements·SetElementReference·GetForWrite(writeStaged)·Commit은 Busy다 — encode 고정의
     // staged판이라 hook·allocator 콜백이 검사 중인 값을 바꾸지 못한다.
     void BeginRequiredCheck(ConstructionContext& staged) noexcept;
 };
@@ -416,11 +416,25 @@ protected:
 
 - `CheckRequired(isNull)`: Required이고 null이면 검사 모드는 `Report(RequiredMissing)` 뒤 성공, 아니면 지금처럼 `rejectMissingRequired`일 때 보고 뒤 InvalidArgument. 검사 모드의 `Report` hook은 Borrow 없이 불린다(staged 객체는 Borrow를 얻을 수 없다 — 대신 검사 중 표시가 값을 지킨다).
 - 검사 문맥의 `WriteReferenceWire`는 대상을 검사하지 않고 자리값만 쓴다(대상은 같은 트랜잭션 객체이거나 이미 검증한 import). `IsExcluded`는 로드 정책의 `excludedFlags`와 Transient를 쓴다.
-- 출력: 필드마다 같은 writer를 `Clear`해 다시 쓰고 크기 한도는 두지 않는다(값 한도·그래프 바이트 한도는 1단계가 파일 값에 걸었고, 생성자 값은 신뢰 상태다). 작업량도 무제한이다(2단계처럼 예산으로 실패하지 않는다 — 실패는 할당·계약 위반뿐이며 호출자가 rollback). 이 버퍼의 피크는 가장 큰 Required 품은 필드 하나다(11절 결정 4의 피크 문서화에 넣는다).
+- 출력: 필드마다 같은 writer를 `Clear`해 다시 쓰고 크기 한도는 두지 않는다(값 한도·그래프 바이트 한도는 1단계가 파일 값에 걸었고, 생성자 값은 신뢰 상태다). 작업량도 무제한이다(2단계처럼 예산으로 실패하지 않는다 — 실패는 할당·hook 실패·계약 위반, 그리고 Required 위치 자체의 저장 불가 값뿐이며 호출자가 rollback). 이 버퍼의 피크는 Required를 품은 가장 큰 필드 하나다 — writer를 파일에 있는 Required를 품은 가장 큰 필드의 payload 크기로 미리 잡는다(검사 출력은 같은 값을 같은 형식으로 쓰고 struct 값은 Required를 품지 않는 멤버를 건너뛰므로 payload를 넘지 않는다 — 1단계가 maxValueBytes로 검증한 크기). 그보다 큰 출력(빠진 필드의 기준 값)만 기하 성장하고, 성장하는 동안 옛 버퍼와 1.5배 새 버퍼가 잠깐 함께 있다(그 출력 크기의 최대 약 2.5배 — 11절 결정 4의 피크 문서화에 넣는다).
 - 수동 함수표(`detail::EncodeThroughFieldValue`)는 `read`가 Registry Resolve를 쓰므로 staged 객체를 읽지 못한다. `RuntimeFieldOps` 끝에 선택 칸 `Result<void> (*readStaged)(ConstructionContext&, ObjectHandle, FieldValue&) noexcept = nullptr`를 더하고, 검사 모드에서 그것이 없으면 Unsupported다(Required를 품은 수동 필드에만 해당 — 11절 결정 9). 생성 코드는 바꾸지 않는다(생성 thunk는 멤버 포인터로 직접 읽는다).
 - 진단 경로·`objectIndex`는 encode 프레임으로 만든다(배열은 `[f[i]]`, struct는 멤버 경로). `objectIndex`는 노드 위치(0부터) = localId − 1 = export index − 1이다(12절 14번).
 - hook 계약 개정: "복원의 진단·수집은 1단계에서 한 번만 온다" → "RequiredMissing은 2c에서 한 번, 그 밖의 진단·Soft 수집은 1단계에서 한 번". Soft 수집은 파일 값만이다(A1 Dependencies 대조가 파일 내용과 맞다 — 기준 값의 Soft 참조를 Dependencies에 넣는 것은 RCM의 L2 이후 일).
 - A0-Oc는 이 규칙을 지금의 graph v1 envelope 위에서 먼저 넣는다(형식 변경과 규칙 변경을 따로 검증하려고). `LoadObjectGraph`의 단계는 1단계 → 생성 → 적용 → Required 검사 → Commit이 된다.
+
+**구현에서 정한 점(A0-Oc)**
+
+- present 판정의 진입점: 공개 `FieldDecodeContext::MarkPresent()`(1단계이고 위치 안일 때만 `NotePresent(*Current())`를 부른다 — 2단계는 무동작)와 보호 가상 `NotePresent(const FieldCodecFrame&) -> Result<void>`(기본 무동작)다. 공개 래퍼를 둔 이유: struct 멤버의 판정 지점이 직렬화기 밖 자유 함수 `DecodeStructRecord`라 보호 가상을 직접 부를 수 없다. 반환을 `Result<void>`로 둔 이유: A5가 override 집합을 채울 때 할당 실패를 서명 변경 없이 전하게. 읽는 곳이 없어진 `DecodeNode`의 present 배열(노드마다 스키마 크기의 heap 할당 — 실패 지점이기도 했다)과 `DecodeStructRecord`의 512 byte 스택 bitset은 지웠다 — 같은 정보가 `MarkPresent` 호출로 남는다(위 "남기는 것"을 이렇게 구체화했다). 최상위 필드의 판정 지점은 `detail::DecodeRecordField`(해석 성공 뒤 `MarkPresent` — `DecodeNode`가 필드마다 부른다)로 모았다(리뷰 반영 — 그래프 내부 문맥 없이 단위 시험할 자리).
+- `StructView::ContainsRequired`(등록 계산 `containsRequired`)의 뜻을 넓혔다: 배열 멤버의 Required와 원소 struct(`Array<S>`·`StructRefArray<S>` 멤버)의 Required 후손도 센다(Transient 멤버 아래는 여전히 뺀다). B4·B5에서는 누락 struct 진단의 가지치기라 배열을 뺐지만, 2c가 이 값으로 검사할 최상위 필드를 고르므로 그대로 두면 인라인 struct 안 Required `ObjectRefArray`(`[bundle, refs[0]]`)나 struct 필드 안 `StructRefArray` 원소의 Required 참조를 놓친다(이전 1단계 파일 값 진단보다 후퇴). 형질 시험(ArrayRegistry)의 기대를 고쳤다.
+- hooks가 없으면 2c를 하지 않는다 — 검사는 진단만 하므로 받을 곳이 없으면 할 일이 없다(이전 1단계의 누락 struct 순회도 `CanReport`일 때만 돌았다). 그래서 readStaged 없는 수동 Required 필드의 Unsupported도 hooks가 있을 때만 난다. 등록 때 미리 거부·진단하는 방법은 택하지 않았다(리뷰 검토): 등록은 encode thunk가 read를 거치는 범용 codec인지 멤버를 직접 읽는 생성 thunk인지 알 수 없고, 생성 코드는 readStaged를 채우지 않으므로(MetaCompiler 출력 불변) "Required 단일 값 필드에 readStaged 필수"로 정하면 생성 타입이 모두 거부된다 — 이 조건은 `RuntimeFieldOps::readStaged` 주석에 적었다. Od2의 Stage `CheckRequired`도 같은 규칙을 권고한다.
+- 검사 중 표시: `ConstructionContext`의 비공개 칸이고 `FieldEncodeContext`가 friend로 세운다(문맥 소멸자가 내린다). 표시의 Busy는 트랜잭션 상태를 바꾸지 않는다(아무것도 바꾸지 않았으므로 오류로 고정하지 않는다). 판정 위치: Create는 트랜잭션 상태 다음·저널 예약 전, Commit은 상태·out 검사 다음, staged 쓰기(SetReference·AssignReferences·AssignElements·SetElementReference)는 상태 다음이다. 표시 중의 `Rollback`(소멸자 포함)은 검사가 읽는 staged 객체를 없애므로 Fatal이고, 같은 트랜잭션에 검사를 겹쳐 세워도 Fatal이다. `Get`·`DescribeOuter`는 읽기라 된다(수동 함수표의 readStaged가 `Get`으로 읽는다) — `Get`이 준 포인터로 값을 바꾸는 것은 막지 못하며, 콜백 계약(저장·복원 중 콜백은 입력을 바꾸지 않는다 — `ObjectGraph.h`)이 1차 방어다.
+- 검사 문맥 `RequiredCheckContext`는 `ObjectSerialization/Private/GraphRequired.cpp`다(기능 단위 파일). 진단의 objectType은 노드 타입(1단계와 같은 값), objectIndex는 노드 위치다. 참조는 대상을 검사하지 않고 그래프 wire 형식의 자리값(graph v1 = U64 0·1)을 쓴다. 최상위 필드 함수표는 `TypeLease::FieldOps(index)`로 얻는다(1단계 `ValidateLayout`이 codec을 확인했다). writer 재사용을 위해 Serialization에 `ArchiveWriter::Clear()`(byte만 비우고 용량·누적 예산 유지)와 `Reserve(capacity)`(용량을 미리 잡음 — 파일에 있는 Required를 품은 가장 큰 필드의 payload)를 더했다(리뷰 반영 — probe의 100만 원소 Required 배열에서 검사가 더하는 피크가 약 18 MiB에서 약 8 MiB로 줄었다).
+- 검사 모드의 `EncodeStructRecord`는 Required를 품지 않는 멤버(`detail::CarriesRequired`가 거짓 — 최상위 필드 선택과 같은 술어)를 쓰지 않는다(리뷰 반영). 출력은 버리므로 형식과 무관하고, 검사와 무관한 기준 값의 저장 검증(생성자의 미선언 enum·Soft 규칙, MaxArrayElements)이 hooks가 있을 때만 로드를 실패시키던 경로와 비용·버퍼가 준다. 남는 2c 실패는 Required 위치 자체의 저장 불가 값(예: 생성자가 둔 Required Soft의 규칙 위반·`MaxArrayElements`를 넘는 Required 배열)이며 `ObjectGraph.h`·`GraphInternal.h`의 실패 목록에 적었다.
+- 등록된 생성 staged 쓰기(`detail::WriteGeneratedStagedField` — writeStaged)와 그래프 적용 codec의 struct·배열 쓰기는 owner를 `ConstructionContext::GetForWrite`로 얻는다(리뷰 반영). 검사 중 표시 동안 Busy라 hook이 검사 중인 값을 등록 쓰기로 바꾸지 못한다(encode 고정의 staged판과 대칭 — Od2에서 호출자가 트랜잭션을 쥘 때도 같다). `Get`은 읽기용으로 남는다(readStaged·staged encode).
+- 1단계 작업량 청구에서 지운 누락 순회 몫(`DecodeNode`의 스키마 필드 수, `DecodeStructRecord`의 스키마 필드 수)도 뺐다(리뷰 반영 — 그 순회가 없어졌다).
+- `excludedFlags` 판정 위치: 객체 Record는 모르는 필드 → Transient(Unsupported) → excludedFlags(InvalidArgument — 최상위 필드의 유효 플래그 = 필드 플래그) → codec, struct 멤버는 Transient → 위치 진입 → excludedFlags(전파된 유효 플래그) → codec이다.
+- `RuntimeFieldOps::readStaged`는 단일 값 필드만 가질 수 있다(struct·배열 필드에 주면 등록이 InvalidArgument — read·write·writeStaged와 같은 규칙).
+- 클래스 필드·struct 멤버의 encode 본문을 `detail::EncodeMemberValue`로 모았다(생성 thunk의 Resolve 경로·staged 경로와 struct 멤버 thunk가 같이 쓴다 — 생성 코드 형식은 그대로다).
 
 ## 5. graph v2 (A0-Od1·A0-Od2·A0-Oe)
 
@@ -697,7 +711,7 @@ return transaction.Commit(roots, held);
 | `maxWork` | 64Mi | 8 × (maxTotalFields + maxTotalElements) + 4 × maxBytes(11절 결정 5) |
 | `maxMigrationBytes` | 16 MiB | 64 MiB(바이트 상한과 맞춘다) |
 
-- `maxValueBytes` 64 MiB의 결과(결정 4 조건): `BudgetAllocator`의 단일 할당 한도도 64 MiB가 되고(`GraphInternal.h` 108–111행), 저장 피크는 필드 writer + Record builder + 출력으로 최대 약 3배(약 192 MiB), 로드는 원본을 view로 빌리므로 피크가 staged 값 복사와 2c 검사 버퍼(가장 큰 Required 품은 필드 하나)다. README와 Serialization 구현 문서에 적는다.
+- `maxValueBytes` 64 MiB의 결과(결정 4 조건): `BudgetAllocator`의 단일 할당 한도도 64 MiB가 되고(`GraphInternal.h` 108–111행), 저장 피크는 필드 writer + Record builder + 출력으로 최대 약 3배(약 192 MiB), 로드는 원본을 view로 빌리므로 피크가 staged 값 복사와 2c 검사 버퍼(Required를 품은 가장 큰 필드 하나의 검사 출력 — 성장 중에는 그 약 2.5배, 4절)다. README와 Serialization 구현 문서에 적는다.
 - 이름(64 byte)·객체 경로(4 KiB)는 Registry 규칙(1.1절)이고 Soft 경로 4 KiB는 B3 그대로다. 일반 String 필드 값에는 4 KiB를 걸지 않는다(11절 결정 6).
 
 ### 5.7 오류 순서
@@ -723,16 +737,17 @@ return transaction.Commit(roots, held);
 | `ConstructionContext.h/.cpp` | `Create(type, outer, name)`, `Commit(roots, out)`, `DescribeOuter`, `Registry()`·`Access()`·`TransactionId()`, `FindObject`, Required 검사 중 표시(표시 동안 쓰기·Commit Busy) |
 | `Object/ReferenceObserver.h`(새) | 관찰자 합산 표 |
 | `StructRefArray.h` | `StructElementOps::nativeType`(`&NativeTypeIdentity<S>`) |
-| `TypeRegistry.h/.cpp` | `AcquireStructByNative(const void*)`, TypeId·(native 키, 종류) Core HashMap 색인(등록·해제·Shutdown이 유지 — `Acquire` 류·등록 중복 확인·대상 찾기가 쓴다, 3절 구현에서 정한 점) |
+| `TypeRegistry.h/.cpp` | `AcquireStructByNative(const void*)`, TypeId·(native 키, 종류) Core HashMap 색인(등록·해제·Shutdown이 유지 — `Acquire` 류·등록 중복 확인·대상 찾기가 쓴다, 3절 구현에서 정한 점), `containsRequired`가 배열 멤버·원소 struct도 셈과 readStaged 등록 규칙(Oc — 4절 구현에서 정한 점) |
 | `FieldCodec.h` | `FieldDecodePolicy`에서 `allowMissingFields`·`allowMissingFlags` 삭제·`excludedFlags` 추가, `IsMissingAllowed`·`ReportIfRequiredNull` 삭제, `NotePresent` 자리, `FieldEncodeContext` 검사 모드·`StagedSource`, `FieldCodecHooks::AdmitExternalReference`·`ExternalAdmission`, `FieldDiagnosticKind::ExternalReference`, 주석(hook 계약·objectIndex) |
 | `RuntimeTypeOps.h` | `RuntimeFieldOps::readStaged`(선택, 끝 칸) |
-| `GeneratedFieldCodec.h` | `CheckMissingField`·`ReportMissingRequired` 삭제, `DecodeStructRecord` 누락 순회 삭제(present bitset은 `NotePresent`로 유지)·`excludedFlags` 존재 거부, `ReportParsedValue`의 Required 보고 삭제, `EncodeGeneratedField` staged 분기, `EncodeArrayField` 검사 모드의 MaxElements 생략, `EncodeStructRecord` 검사 모드의 치환 생략, `EncodeThroughFieldValue`의 `readStaged` |
+| `GeneratedFieldCodec.h` | `CheckMissingField`·`ReportMissingRequired` 삭제, `DecodeStructRecord` 누락 순회 삭제(present 판정은 `MarkPresent` → `NotePresent`로 유지 — Oc에서 bitset은 지웠다)·`excludedFlags` 존재 거부, `ReportParsedValue`의 Required 보고 삭제, `EncodeGeneratedField` staged 분기, `EncodeArrayField` 검사 모드의 MaxElements 생략, `EncodeStructRecord` 검사 모드의 치환 생략, `EncodeThroughFieldValue`의 `readStaged` |
 | `ObjectGraph.h`·`GraphSave.cpp`·`GraphLoad.cpp`·`GraphInternal.h` | v2 형식·`SaveObjectGraphSet`·`ObjectGraphSaveResult`·`GraphExternalPolicy`·`ObjectGraphStage`·편의 API(도달 검사)·한도, v1 envelope·내부 Commit 삭제 |
 | Serialization `Record.h` | `RecordBuilder`의 마지막 필드 payload offset 조회(외부 번호 위치 기록용) |
+| Serialization `Archive.h` | `ArchiveWriter::Clear()`(Oc — Required 검사 writer 재사용) |
 | 시험 | allowMissing* 사용 시험, v1 byte를 직접 만드는 시험, Required 진단 시점 기대, ObjectRuntime 쪽 그래프 사용 시험(`ClassPropertyTests.cpp`, `AutoIdentityCompatibilityTests.cpp` 91행 근처), World 시험의 Level 저장(편의 API로) |
 | 문서 | `ObjectSerialization/README.ko.md`, Docs/Implementation `Serialization.ko.md`·`ObjectLifecycle.ko.md`·`IncrementalGarbageCollection.ko.md`(outer 간선·자식 방문)·`ReflectionMetadata.ko.md`(WorldOnly·EditorOnly 행), 12절 정정 대상 |
 
-MetaCompiler·생성 헤더 형식·TypeRegistry 등록 규칙은 바꾸지 않는다.
+MetaCompiler·생성 헤더 형식·TypeRegistry 등록 규칙은 바꾸지 않는다. 예외: Oc의 readStaged 등록 규칙(struct·배열 필드 거부)과 `containsRequired` 확장(4절 구현에서 정한 점).
 
 ## 8. 커밋 분할과 검증
 
@@ -743,7 +758,7 @@ MetaCompiler·생성 헤더 형식·TypeRegistry 등록 규칙은 바꾸지 않�
 | A0-O0 [Docs] | 이 문서와 12절 (가) 정정 | 문서 검사 |
 | A0-Oa [Core] Outer·Name·정책·다중 root Commit | `ValidateNameComponent`, Slot 칸(`Slot*`)·이름 색인·자식 고리, `Create/NewObject(outer, name)`, 조회 6종·`IsNameTaken`·`DescribeOuter`·`CollectInners`·`TransactionId`, inner → outer GC 간선, Retire·Rollback 해제, `RegistryPolicy` 타입과 규칙 5·8(패키지 이름 없음 포함), 다중 root Commit(관찰자 집계 자리까지) | 9절 Oa 시험 + 기존 ObjectRuntime 시험 전부 |
 | A0-Ob [Core] Discard·관찰자·소속 보존 | `Discard`, `ReferenceObserver`(합산 표·transaction)와 모든 기록 지점(`StructElementOps::nativeType`·`AcquireStructByNative` 포함), 관찰자 Registry의 RequestDestroy Unsupported, 패키지 정책의 outer → inner 강한 간선(자식 고리 GC 방문), `retiredWithoutDiscard` | 9절 Ob 시험 |
-| A0-Oc [Core] 누락 = 기준·실효 값 Required | 4절 전부(v1 envelope 위 — present 판정 유지, 누락 순회만 제거), allowMissing* 시험 개정 | 9절 Oc 시험 + ObjectSerialization·ObjectRuntime 그래프 시험 전부 |
+| A0-Oc [Core] 누락 = 기준·실효 값 Required | 4절 전부(v1 envelope 위 — present 판정 지점 유지, 누락 순회만 제거), allowMissing* 시험 개정 | 9절 Oc 시험 + ObjectSerialization·ObjectRuntime 그래프 시험 전부 |
 | A0-Od1 [Core] graph v2 형식·저장 | 5.1·5.2(Reject·Include·Outer 순서)·5.5·5.6·5.7, v1 삭제, byte 시험 재작성, World Level 저장 시험 | 9절 Od1 시험 + World·Engine 시험 |
 | A0-Od2 [Core] 단계형 복원 | 5.4(외부 참조 없이), 2a 사전 확인, `ConstructionContext::FindObject`, 편의 복원을 Stage 위로 | 9절 Od2 시험 |
 | A0-Oe [Core] 외부 참조 | wire 외부 비트, Admit hook·`ExternalAdmission`·진단, `GraphExternal`·위치 표·`AssignExternalIndices`, Stage의 imports·`ExternalUses`·기록한 기대 형식 기준 검사 | 9절 Oe 시험 + 전체 체인(Release·Asan·Android·policy) |
@@ -781,6 +796,7 @@ MetaCompiler·생성 헤더 형식·TypeRegistry 등록 규칙은 바꾸지 않�
 - excludedFlags: EditorOnly 필드가 있으면 InvalidArgument, 없으면 기준 값·Required 무진단(쿠킹 로드 모의).
 - 검사 중 표시: hook·allocator 콜백이 그 트랜잭션에 Create·SetReference·Commit을 부르면 Busy, 표시는 검사 뒤 내려간다.
 - 검사 모드: MaxElements 넘은 배열을 가진 파일 로드 성공(검사가 ArrayTooLong을 내지 않음), SubstituteStruct hook 미호출, Soft 수집 1단계 한 번, 수동 함수표 Required 필드(`readStaged` 있음 성공·없음 Unsupported), staged encode가 Registry 상태를 바꾸지 않음, 검사 writer가 필드마다 재사용되고 값 한도를 넘는 생성자 배열도 통과.
+- (Oc 구현에서 더함) present 판정: 최상위 필드는 판정 지점을 `detail::DecodeRecordField`(DecodeNode가 필드마다 부른다)로 모아 단위 시험으로 "해석 뒤 한 번·실패하면 없음·2단계 없음"을 확인하고, 그래프 수준에서 필드마다 한 번인지는 A5의 공개 hook과 함께 시험한다. 검사 모드는 Required를 품지 않는 struct 멤버를 건너뛰어 그 기준 값의 저장 검증(예: 생성자의 미선언 enum)이 hooks 유무로 결과를 가르지 않는다. 표시 중 Rollback·검사 겹침은 자식 프로세스 음성 대조(`required-check-rollback`·`required-check-twice`)로 Fatal을 확인한다.
 
 **Od1 — graph v2 형식·저장**
 
@@ -858,7 +874,7 @@ MetaCompiler·생성 헤더 형식·TypeRegistry 등록 규칙은 바꾸지 않�
 
 - **N1·N2** — 결정 1·17로 정했다.
 - **N3. `AcquireStructByNative`의 범위** — 관찰자 기록에만 필요한 TypeRegistry 조회를 새로 둔다. 권고: TypeRegistry에 native 키 → struct 레코드 색인(등록·해제 때 유지)을 두고 lease를 돌려준다. A0-Ob에서 권고대로 했다(TypeId 색인도 같이 두어 `Acquire`의 O(타입 수)도 없앴다 — 3절 구현에서 정한 점). 호출 위치는 다중 간선 지점의 `processing_` 구간이고(3절), 키는 `&NativeTypeIdentity<S>`다. 대안: `StructRefArrayStorage`에 원소 struct `TypeId`를 staged 배정 때 기록 — 수동으로 만든 컨테이너(live `AddElement`만 쓴 경우)에서 비어 있을 수 있어 택하지 않는다.
-- **N4. present 판정 공개 방식** — A0-O는 보호 가상 `NotePresent`만 둔다. 권고: 공개 hook(`FieldCodecHooks::ObservePresentValue`)과 Stage 출력 중 선택은 A5가 override 집합 자료구조와 함께 정한다(지금 정하면 자료구조를 미리 고정하게 된다).
+- **N4. present 판정 공개 방식** — A0-O는 보호 가상 `NotePresent`와 그것을 부르는 공개 진입점 `MarkPresent()`(직렬화기·struct codec이 부른다 — 4절 구현에서 정한 점)만 둔다. 권고: 공개 hook(`FieldCodecHooks::ObservePresentValue`)과 Stage 출력 중 선택은 A5가 override 집합 자료구조와 함께 정한다(지금 정하면 자료구조를 미리 고정하게 된다).
 - **N5. Discard와 편집 도구** — Discard 대상을 가리키는 다른 패키지 참조의 저장 정책(null·진단·거부), 강제 삭제·consolidate의 참조 재작성, undo의 삭제 취소(새 handle로 다시 만들기와 참조 재연결)는 A2(asset-delete `--force` — AS 4.4)·CU4(Transaction)의 열린 문제다. 권고: A2·CU4 확정안에서 정하고, A0-O는 "Discard는 되돌릴 수 없고 handle은 다시 살지 않는다"만 보장한다.
 - **N6. 관찰자 표의 키에 transaction을 넣은 결과** — 같은 패키지 쌍이라도 Commit 기록은 트랜잭션마다 따로 남아 키 수가 "Pump 사이 Commit 수 × 쌍"이 된다. 권고: 받아들인다(AssetManager가 Pump마다 비운다). 상한은 `maxKeys`(결정 16)이고, Pump 안 Commit 수는 로드 예산(AS 11.5 1번)이 묶는다.
 - **N7. `worldOnlyCreationKey`의 시점** — 권고: World 정책 단계(EngineRuntime 134행)에서 구현하고 A0-O는 이름·뜻만 둔다. 지금 두면 쓰는 곳 없는 칸이 생긴다.
@@ -910,8 +926,8 @@ ReflectionMetadata(`Docs/Implementation/ReflectionMetadata.ko.md` — A0-O 계�
 **(나) 코드 주석·구현 문서 — 구현 커밋에서 고친다**(지금 고치면 현재 코드와 어긋난다)
 
 22. `ObjectRegistry.h` 컨테이너 API 주석(200·209·224행 "할당하지 않는다") — Ob(7절 표). Ob에서 고쳤다(SetReference·ObjectRefArray 공통 규칙·StructRefArray 공통 규칙에 관찰자 예약·오류를 적었다).
-23. `FieldCodec.h`의 `FieldDecodePolicy` 주석(47–48행)·objectIndex(71행)·hook 계약(96–102행) — Oc·Od1.
-24. `ObjectGraph.h` 주석, `ObjectSerialization/README.ko.md`("고아 객체 거부"·`allowMissingFields`·한도·형식) — Oc·Od1·Od2·Oe.
-25. Docs/Implementation `Serialization.ko.md`(graph 형식·필드 codec)·`ObjectLifecycle.ko.md`(Outer·Name·Discard·다중 root Commit)·`IncrementalGarbageCollection.ko.md`(outer 간선·패키지 정책의 자식 방문·회수 조건) — Oa·Ob·Oc·Od. Oa·Ob 몫(`ObjectLifecycle`의 Outer·Name·Discard·관찰자, `IncrementalGarbageCollection`의 outer 간선·자식 방문·`retiredWithoutDiscard`)은 고쳤다.
+23. `FieldCodec.h`의 `FieldDecodePolicy` 주석(47–48행)·objectIndex(71행)·hook 계약(96–102행) — Oc·Od1. Oc에서 정책 주석·hook 계약·objectIndex(노드 위치 = local ID − 1)를 고쳤다(v2의 export index 문구는 Od1).
+24. `ObjectGraph.h` 주석, `ObjectSerialization/README.ko.md`("고아 객체 거부"·`allowMissingFields`·한도·형식) — Oc·Od1·Od2·Oe. Oc 몫(누락 = 기준·excludedFlags·Required 검사 단계·hook 시점)은 고쳤다.
+25. Docs/Implementation `Serialization.ko.md`(graph 형식·필드 codec)·`ObjectLifecycle.ko.md`(Outer·Name·Discard·다중 root Commit)·`IncrementalGarbageCollection.ko.md`(outer 간선·패키지 정책의 자식 방문·회수 조건) — Oa·Ob·Oc·Od. Oa·Ob 몫(`ObjectLifecycle`의 Outer·Name·Discard·관찰자, `IncrementalGarbageCollection`의 outer 간선·자식 방문·`retiredWithoutDiscard`)과 Oc 몫(`Serialization`의 누락 = 기준·excludedFlags·2c Required 검사·검사 버퍼 피크)은 고쳤다. RF의 graph v1 누락·Required 서술(12절 (가) 10번 — 4.6절·5.6절·6.2절·6.4절)도 Oc에서 지웠다.
 26. `GcBudget` 주석 — 결정 15(고리 해체 없음)로 바꿀 것이 없다.
 

@@ -41,7 +41,10 @@ using StructFieldPathFunction = Result<void> (*)(const RuntimeStructFieldOps& se
 // 필드 codec thunk다(Docs/Design/ReflectionFoundations.ko.md 6.4절, 문맥은 Object/FieldCodec.h).
 // encode는 필드 값을 payload에 쓰고 wire tag를 돌려준다. decode는 construction이 nullptr이면 1단계
 // (검증·참조 기록·진단, 값을 게시하지 않음), 아니면 2단계(staged 객체에 게시)다. self는 이 thunk를
-// 가진 함수표다(같은 표의 read·writeStaged를 쓰는 범용 codec용).
+// 가진 함수표다(같은 표의 read·writeStaged를 쓰는 범용 codec용). encode는 context.StagedSource()가
+// 있으면(그래프 로드의 Required 실효 값 검사) handle이 그 트랜잭션의 공개 전 객체이므로 Registry
+// Resolve(Reserved 객체는 StaleHandle) 대신 ConstructionContext::Get으로 읽는다(생성 thunk는 그렇게
+// 하고, 범용 codec은 readStaged를 쓴다). 2단계 decode가 owner에 값을 쓸 때는 GetForWrite로 얻는다.
 using FieldEncodeFunction = Result<uint32> (*)(const RuntimeFieldOps& self, ObjectRegistry&,
                                                const ObjectAccessContext&, ObjectHandle,
                                                ArchiveWriter& payload,
@@ -248,6 +251,30 @@ struct RuntimeFieldOps {
     // 선택이다(없으면 그 필드 아래 경로 연산은 Unsupported). 단일 값 필드는 null이어야 한다 —
     // 최상위 단일 값의 경로 읽기·쓰기는 read·write 한 경로다(등록이 InvalidArgument로 막는다).
     FieldPathFunction path = nullptr;
+    // 공개 전(staged) 객체의 값을 읽는다(선택 — Docs/Design/ObjectFoundations.ko.md 4절). 그래프
+    // 로드의 Required 실효 값 검사(적용 뒤·Commit 전)가 수동 함수표의 범용 encode
+    // (detail::EncodeThroughFieldValue)로 staged 객체를 읽을 때 read(Registry Resolve — 공개된
+    // 객체만) 대신 쓴다. 없으면 Required를 품은 이 필드의 검사가 Unsupported다(그 로드는 rollback).
+    // 검사는 로드에 진단 hook이 있을 때만 돌므로 이 Unsupported도 그때만 난다 — 등록은 이 칸이
+    // 필요한지 판정할 수 없다(encode thunk가 read를 거치는 범용 codec인지 멤버를 직접 읽는 생성
+    // thunk인지 모르고, 생성 코드는 이 칸을 채우지 않는다). 생성 코드는 쓰지 않는다(생성 encode
+    // thunk는 멤버를 직접 읽는다). 단일 값 필드만 가질 수 있다 (struct·배열 필드는 등록이
+    // InvalidArgument로 막는다). 실패하면 out은 정해지지 않는다. 검사 중 표시가 그 트랜잭션의
+    // 쓰기를 막으므로 같은 트랜잭션에 쓰지 않는다.
+    //
+    // 사용 예(수동 함수표):
+    //   ops.readStaged = [](ConstructionContext& transaction, ObjectHandle object,
+    //                       FieldValue& out) noexcept -> Result<void> {
+    //       auto owner = transaction.Get<Mesh>(object);
+    //       if (!owner) {
+    //           return Result<void>::Failure(owner.Error());
+    //       }
+    //
+    //       out.kind = ValueKind::ObjectReference;
+    //       out.reference = owner.Value()->material.Handle();
+    //       return Result<void>::Success();
+    //   };
+    Result<void> (*readStaged)(ConstructionContext&, ObjectHandle, FieldValue&) noexcept = nullptr;
 };
 
 // 리플렉션 enum 등록의 실행 정보다(TypeRegistry::RegisterEnum). nativeType은 NativeTypeKey<E>()이며

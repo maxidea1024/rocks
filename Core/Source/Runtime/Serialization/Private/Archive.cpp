@@ -222,6 +222,22 @@ Array<uint8> ArchiveWriter::TakeBytes() noexcept {
     return Move(bytes_);
 }
 
+void ArchiveWriter::Clear() noexcept {
+    bytes_.Clear();
+}
+
+Result<void> ArchiveWriter::Reserve(usize capacity) noexcept {
+    if (capacity > limits_.maxTotalBytes) {
+        return Result<void>::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    if (capacity <= bytes_.Capacity()) {
+        return Result<void>::Success();
+    }
+
+    return bytes_.TryReserve(capacity);
+}
+
 Result<void> ArchiveBudget::Spend(uint64 work) noexcept {
     // 원자적 누적: 한도를 넘으면 사용량을 한도로 포화한다(줄이지 않는다).
     uint64 current = platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&work_);

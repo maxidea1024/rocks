@@ -710,7 +710,11 @@ Result<RecordReader> CurrentRecord(Allocator& allocator, LoadNode& node, Budget&
     return OpenRecord(allocator, node.migrated.View(), node.type, target, budget);
 }
 
-// 1단계: 노드 하나를 검증하고 필드 색인·참조 token을 보관한다. 생성자를 실행하지 않는다.
+// 1단계: 노드 하나를 검증하고 필드 색인·참조 token을 보관한다. 생성자를 실행하지 않는다. Record에
+// 없는 영속 필드는 오류가 아니며 생성자 값(기준)을 유지한다(누락 = 기준 — Docs/Design/
+// ObjectFoundations.ko.md 4절). 파일에 있는 필드마다 검증 뒤 MarkPresent를 한 번 부른다(A5 override
+// 집합 자리 — detail::DecodeRecordField). Required 진단은 여기서 하지 않는다(적용 뒤
+// CheckRequiredFields).
 Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& node, uint32 index,
                         Budget& budget, const ObjectGraphLoadOptions& options,
                         GraphValidateContext& context) noexcept {
@@ -749,30 +753,20 @@ Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& nod
     } binding{context, node, index};
     context.BeginNode(node, &record.Value(), index);
     const auto& schema = node.lease.Schema();
-    auto spent = budget.Spend(record.Value().FieldCount() + schema.fields.Size());
+    // Record 필드 순회 몫이다(빠진 필드를 도는 일은 없다 — 누락 = 기준).
+    auto spent = budget.Spend(record.Value().FieldCount());
     if (!spent) {
         return spent;
     }
 
-    // 누락 허용 파일이 큰 schema를 가리켜도, 모르는 필드가 많아도 필요 이상으로 선할당하지 않는다.
+    // 빠진 필드가 많은 파일이 큰 schema를 가리켜도, 모르는 필드가 많아도 필요 이상으로 선할당하지
+    // 않는다.
     const usize stored = record.Value().FieldCount() < schema.fields.Size()
                              ? record.Value().FieldCount()
                              : schema.fields.Size();
     auto reserved = node.fields.TryReserve(stored);
     if (!reserved) {
         return reserved;
-    }
-
-    Array<uint8> present(allocator);
-    reserved = present.TryReserve(schema.fields.Size());
-    if (!reserved) {
-        return reserved;
-    }
-
-    for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
-        if (!present.TryPushBack(uint8{0})) {
-            platform::Fatal("Object graph field presence reservation failed");
-        }
     }
 
     for (usize fieldIndex = 0; fieldIndex < record.Value().FieldCount(); ++fieldIndex) {
@@ -811,6 +805,12 @@ Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& nod
             return Result<void>::Failure(ErrorCode::Unsupported);
         }
 
+        // 이 데이터에 없어야 하는 플래그(쿠킹 로드의 EditorOnly)의 필드가 있으면 거부한다(최상위
+        // 필드의 유효 플래그는 필드 플래그다 — struct 안 멤버는 DecodeStructRecord가 본다).
+        if (context.IsExcluded(schema.fields[schemaIndex].flags)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
         auto accessor = FindOps(node.lease, field.Value().id, budget);
         if (!accessor) {
             return Result<void>::Failure(accessor.Error());
@@ -820,8 +820,9 @@ Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& nod
                          node.lease.FieldEnum(schemaIndex), node.lease.FieldStruct(schemaIndex));
         context.BeginField();
         const uint64 before = budget.Used();
-        auto decoded = accessor.Value()->decode(*accessor.Value(), nullptr, ObjectHandle{},
-                                                field.Value(), context);
+        // 해석과 present 판정(override 집합 자리 — 지금은 무동작)을 한 곳에서 한다.
+        auto decoded = detail::DecodeRecordField(*accessor.Value(), nullptr, ObjectHandle{},
+                                                 field.Value(), context);
         if (!decoded) {
             return decoded;
         }
@@ -840,22 +841,6 @@ Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& nod
         if (!node.fields.TryPushBack(kept)) {
             // 모르는 필드를 뺀 수만큼 예약했으므로 실패하지 않는다.
             platform::Fatal("Object graph field index reservation failed");
-        }
-
-        present[schemaIndex] = 1;
-    }
-
-    // Record에 없는 영속 필드: 누락이 허용되지 않으면 NotFound, 허용된 Required 누락은 진단한다.
-    for (usize schemaIndex = 0; schemaIndex < schema.fields.Size(); ++schemaIndex) {
-        const auto& field = schema.fields[schemaIndex];
-        if (present[schemaIndex] != 0 || HasFlag(field.flags, FieldFlags::Transient)) {
-            continue;
-        }
-
-        FieldScope scope(context, field, schema.id, node.lease.FieldEnum(schemaIndex),
-                         node.lease.FieldStruct(schemaIndex));
-        if (auto missing = detail::CheckMissingField(context); !missing) {
-            return missing;
         }
     }
 
@@ -998,8 +983,8 @@ Result<void> ValidateReachability(Allocator& allocator, TypeRegistry& types,
     return Result<void>::Success();
 }
 
-// 2단계: 모든 객체를 만들고 보관한 필드를 staged 객체에 쓴 뒤 Commit한다. 그래프 예산에 접근하지
-// 않는다.
+// 2단계: 모든 객체를 만들고 보관한 필드를 staged 객체에 쓴 뒤, Required 실효 값을 진단하고(2c —
+// CheckRequiredFields) Commit한다. 그래프 예산에 접근하지 않는다.
 Result<RootRef<Object>> ConstructGraph(Allocator& allocator, ObjectRegistry& registry,
                                        const ObjectAccessContext& access, Array<LoadNode>& nodes,
                                        const ObjectGraphLoadOptions& options) noexcept {
@@ -1033,6 +1018,10 @@ Result<RootRef<Object>> ConstructGraph(Allocator& allocator, ObjectRegistry& reg
         if (auto ended = context.EndNode(); !ended) {
             return Result<RootRef<Object>>::Failure(ended.Error());
         }
+    }
+
+    if (auto checked = CheckRequiredFields(allocator, transaction, nodes, options); !checked) {
+        return Result<RootRef<Object>>::Failure(checked.Error());
     }
 
     return transaction.Commit();

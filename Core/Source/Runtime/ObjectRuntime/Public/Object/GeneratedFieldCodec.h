@@ -234,9 +234,11 @@ private:
 // 대신 쓴다 — 생성 thunk가 멤버를 복사하지 않게), staticNative는 강한 참조의 정적 대상 타입이다.
 // 다시 검증하는 것: 정수 폭(Overflow), enum ID(TypeMismatch)·선언 값(InvalidArgument —
 // enumeration이 없으면 Unsupported), SoftObjectRef null 규칙·경로 상한(InvalidArgument), 지금
-// 위치가 Required이고 rejectMissingRequired일 때 null 소프트·강한 참조(RequiredMissing 진단 +
-// InvalidArgument). non-null 소프트 참조는 쓴 뒤 수집한다. set이 있으면 enum 판정을 그 집합으로
-// 하고 청구하지 않으며(배열 codec이 원소 수만큼 미리 청구한다), 없으면 열거자 수만큼 Spend한다.
+// 위치가 Required일 때 null 소프트·강한 참조(FieldEncodeContext::CheckRequired —
+// rejectMissingRequired면 RequiredMissing 진단 + InvalidArgument, Required 검사 모드면 진단만).
+// non-null 소프트 참조는 쓴 뒤 수집한다(검사 모드는 수집하지 않는다 — Soft 수집은 복원 1단계의 파일
+// 값만). set이 있으면 enum 판정을 그 집합으로 하고 청구하지 않으며(배열 codec이 원소 수만큼 미리
+// 청구한다), 없으면 열거자 수만큼 Spend한다.
 inline Result<void> WriteValueWire(ArchiveWriter& out, FieldEncodeContext& context,
                                    const ValueType& type, const EnumSchema* enumeration,
                                    const FieldValue& value, StringView text,
@@ -299,7 +301,7 @@ inline Result<void> WriteValueWire(ArchiveWriter& out, FieldEncodeContext& conte
             return written;
         }
 
-        if (!isNull) {
+        if (!isNull && !context.IsRequiredCheck()) {
             return context.CollectSoftReference(asset, text, type.type);
         }
 
@@ -578,9 +580,9 @@ inline Result<void> ResolveUndeclaredEnum(FieldDecodeContext& context, const Enu
 }
 
 // 검증을 마친 값 하나의 진단·수집을 지금 위치로 보고한다(복원 2단계에서는 문맥이 버린다): 선언되지
-// 않은 enum(UndeclaredEnumValue — value = 저장 값), Required인 위치의 null 소프트·강한
-// 참조(RequiredMissing), non-null 소프트 참조 수집. 배열은 원소마다 원소 검증 직후 부른다(경로
-// [f[i]]).
+// 않은 enum(UndeclaredEnumValue — value = 저장 값), non-null 소프트 참조 수집. 배열은 원소마다 원소
+// 검증 직후 부른다(경로 [f[i]]). Required null은 여기서 보고하지 않는다 — 복원은 적용 뒤 staged
+// 객체의 실효 값으로 한 번 진단한다(Docs/Design/ObjectFoundations.ko.md 4절).
 inline Result<void> ReportParsedValue(FieldDecodeContext& context, const ValueType& type,
                                       const ParsedValue& parsed) noexcept {
     if (parsed.undeclared) {
@@ -591,19 +593,9 @@ inline Result<void> ReportParsedValue(FieldDecodeContext& context, const ValueTy
         }
     }
 
-    if (type.kind == ValueKind::SoftObjectReference) {
-        const bool isNull = parsed.guid == Guid{} && parsed.text.ByteCount() == 0;
-        if (auto reported = context.ReportIfRequiredNull(isNull); !reported) {
-            return reported;
-        }
-
-        if (!isNull) {
-            return context.CollectSoftReference(AssetId{parsed.guid}, parsed.text, type.type);
-        }
-    }
-
-    if (type.kind == ValueKind::ObjectReference) {
-        return context.ReportIfRequiredNull(parsed.reference.isNull);
+    if (type.kind == ValueKind::SoftObjectReference &&
+        (parsed.guid != Guid{} || parsed.text.ByteCount() != 0)) {
+        return context.CollectSoftReference(AssetId{parsed.guid}, parsed.text, type.type);
     }
 
     return Result<void>::Success();
@@ -745,83 +737,24 @@ inline Result<void> SkipUnknownField(FieldDecodeContext& context, Guid fieldId) 
     return context.ReportUnknownField(fieldId);
 }
 
-// 누락된 struct 값 안의 Required 후손(중첩 포함)을 지금 위치 아래 경로로 진단한다. Required 후손이
-// 없는 가지는 건너뛰고(등록이 계산한 ContainsRequired) 방문마다 작업량 1을 청구한다. struct
-// 멤버로만 내려가고(배열 원소 struct는 아님) 배열 멤버의 Required는 진단하지 않는다 — 누락 struct
-// 안의 배열은 생성자 값이다(5.6절).
-inline Result<void> ReportMissingRequired(StructView view, FieldDecodeContext& context) noexcept {
-    const TypeSchema& schema = view.Schema();
-    for (usize index = 0; index < schema.fields.Size(); ++index) {
-        if (auto spent = context.Spend(1); !spent) {
-            return spent;
-        }
-
-        const FieldSchema& member = schema.fields[index];
-        const StructView nested = view.FieldStruct(index);
-        const bool required =
-            HasFlag(member.flags, FieldFlags::Required) && member.value.kind != ValueKind::Array;
-        const bool descend = member.value.kind == ValueKind::Struct && !nested.IsEmpty() &&
-                             nested.ContainsRequired();
-        if (!required && !descend) {
-            continue;
-        }
-
-        FieldScope scope(context, member, schema.id, view.FieldEnum(index), nested);
-        // Transient 멤버(유효 플래그 — 바깥에서 전파된 것 포함)는 저장·복원하지 않으므로 누락도
-        // 아니다.
-        if (HasFlag(context.EffectiveFlags(), FieldFlags::Transient)) {
-            continue;
-        }
-
-        if (required) {
-            if (auto reported = context.Report(FieldDiagnosticKind::RequiredMissing); !reported) {
-                return reported;
-            }
-        }
-
-        if (descend) {
-            if (auto reported = ReportMissingRequired(nested, context); !reported) {
-                return reported;
-            }
-        }
-    }
-
-    return Result<void>::Success();
-}
-
-// 지금 위치(context.Field())가 저장 데이터에 없다: 누락이 허용되지 않으면 NotFound, 허용되면
-// Required 진단(struct 필드면 그 안의 Required 후손까지 — 2단계는 생략). 누락된 배열 필드는 생성자
-// 값을 유지하며 Required 진단도 원소 struct 순회도 하지 않는다(Required 배열의 뜻은 원소마다
-// non-null이다). 객체·struct가 같이 쓴다.
-inline Result<void> CheckMissingField(FieldDecodeContext& context) noexcept {
-    if (!context.IsMissingAllowed(context.EffectiveFlags())) {
-        return Result<void>::Failure(ErrorCode::NotFound);
-    }
-
-    if (context.Field().value.kind == ValueKind::Array) {
-        return Result<void>::Success();
-    }
-
-    if (auto reported = context.ReportIfRequiredNull(true); !reported) {
-        return reported;
-    }
-
-    // 진단을 받을 곳이 있을 때만 Required 후손을 돈다(받을 곳이 없으면 작업만 쓴다).
-    const FieldCodecFrame* frame = context.Current();
-    if (context.IsRecording() && context.CanReport() && frame &&
-        frame->field->value.kind == ValueKind::Struct && !frame->structure.IsEmpty() &&
-        frame->structure.ContainsRequired()) {
-        return ReportMissingRequired(frame->structure, context);
-    }
-
-    return Result<void>::Success();
+// 필드(또는 struct 멤버) 값이 Required 위치를 품는지다: 필드 자신이 Required이거나(단일 참조·
+// 참조 배열), struct 필드·struct 원소 배열의 struct가 Required 후손을 담는다(StructView::
+// ContainsRequired — 중첩 struct·배열 멤버·원소 struct 포함). 그래프 로드의 Required 실효 값
+// 검사(Docs/Design/ObjectFoundations.ko.md 4절)가 검사할 최상위 필드와 struct 멤버를 이것으로
+// 고른다. structure는 그 필드의 등록 struct(TypeLease·StructView::FieldStruct — 아니면 빈 view)다.
+inline bool CarriesRequired(const FieldSchema& field, StructView structure) noexcept {
+    return HasFlag(field.flags, FieldFlags::Required) ||
+           (!structure.IsEmpty() && structure.ContainsRequired());
 }
 
 // struct 값(value)을 struct ID·버전 헤더의 중첩 Record로 out에 제자리로 쓴다(Docs/Design/
 // ReflectionFoundations.ko.md 4.6절 — RecordWriter, 값 byte를 한 번만 쓰므로 중첩 깊이만큼 복사가
 // 늘지 않는다). 참조를 담지 않는 struct는 먼저 SubstituteStruct hook을 거친다(배열 원소면 지금
 // 위치의 index가 원소다). 멤버는 스키마 순서로 FieldScope 안에서 멤버 thunk가 out에 바로 쓰고, 유효
-// 플래그가 제외(IsExcluded)인 멤버는 쓰지 않는다. thunk가 쓴 wire는 필드 단위
+// 플래그가 제외(IsExcluded)인 멤버는 쓰지 않는다. Required 검사 모드는 Required 위치를 품지 않는
+// 멤버(CarriesRequired가 거짓)도 쓰지 않는다 — 출력은 버리므로 형식과 무관하고, 검사와 무관한 기준
+// 값(예: 생성자의 미선언 enum)의 저장 검증이 검사를 실패시키지 않으며 비용·버퍼가 준다. thunk가 쓴
+// wire는 필드 단위
 // FieldWireType으로 다시 확인한다(TypeMismatch). 쓴 TLV 수를 AddFields로 그래프 누계에 더한다.
 // 작업량은 out의 청구로 센다(호출자가 out의 WorkUsed를 청구한다). 실패하면 out의 내용은 정해지지
 // 않는다.
@@ -848,8 +781,12 @@ inline Result<uint32> EncodeStructRecord(StructView view, const void* value, Arc
 
     for (usize index = 0; index < schema.fields.Size(); ++index) {
         const FieldSchema& member = schema.fields[index];
-        FieldScope scope(context, member, schema.id, view.FieldEnum(index),
-                         view.FieldStruct(index));
+        const StructView nested = view.FieldStruct(index);
+        if (context.IsRequiredCheck() && !CarriesRequired(member, nested)) {
+            continue;
+        }
+
+        FieldScope scope(context, member, schema.id, view.FieldEnum(index), nested);
         if (context.IsExcluded(context.EffectiveFlags())) {
             continue;
         }
@@ -892,8 +829,11 @@ inline Result<uint32> EncodeStructRecord(StructView view, const void* value, Arc
 }
 
 // 맨 위 Record(context.CurrentRecord())를 struct 값 하나로 해석한다. 저장 필드마다 스키마 위치를
-// 찾아(정렬 색인) 멤버 thunk를 부르고, 모르는 필드·저장된 Transient·누락은 객체 Record와 같은
-// 규칙이다. construction·value는 멤버 thunk의 세 방식(검증·관찰·적용)을 정한다.
+// 찾아(정렬 색인) 멤버 thunk를 부르고, 모르는 필드·저장된 Transient(Unsupported)·excludedFlags
+// 멤버(InvalidArgument)는 객체 Record와 같은 규칙이다. Record에 없는 멤버는 그 자리의 값(기준 값 —
+// 소유 객체 생성자나 원소 기본 생성자가 만든 값)을 그대로 둔다(누락 = 기준, Docs/Design/
+// ObjectFoundations.ko.md 4절). 검증한 멤버마다 MarkPresent를 한 번 부른다(1단계만 — override 집합
+// 자리). construction·value는 멤버 thunk의 세 방식(검증·관찰·적용)을 정한다.
 inline Result<void> DecodeStructRecord(StructView view, ConstructionContext* construction,
                                        ObjectHandle owner, void* value,
                                        FieldDecodeContext& context) noexcept {
@@ -908,9 +848,9 @@ inline Result<void> DecodeStructRecord(StructView view, ConstructionContext* con
         ++searchWork;
     }
 
+    // 저장 필드마다 정렬 색인 이진 탐색 한 번이다(빠진 멤버를 도는 일은 없다 — 누락 = 기준).
     uint64 indexWork = 0;
-    if (!TryMultiply(uint64{record->FieldCount()}, searchWork, indexWork) ||
-        !TryAdd(indexWork, uint64{schema.fields.Size()}, indexWork)) {
+    if (!TryMultiply(uint64{record->FieldCount()}, searchWork, indexWork)) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
 
@@ -918,8 +858,6 @@ inline Result<void> DecodeStructRecord(StructView view, ConstructionContext* con
         return spent;
     }
 
-    // 스키마 필드는 4096개 이하다(등록 규칙).
-    uint64 present[4096 / 64] = {};
     for (usize stored = 0; stored < record->FieldCount(); ++stored) {
         auto field = record->Next();
         if (!field) {
@@ -942,6 +880,12 @@ inline Result<void> DecodeStructRecord(StructView view, ConstructionContext* con
 
         FieldScope scope(context, member, schema.id, view.FieldEnum(index),
                          view.FieldStruct(index));
+        // 이 데이터에 없어야 하는 플래그(바깥에서 전파된 것 포함 — 쿠킹 로드의 EditorOnly)의
+        // 멤버다.
+        if (context.IsExcluded(context.EffectiveFlags())) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
         const RuntimeStructFieldOps& ops = view.FieldOps(index);
         if (!ops.decode) {
             return Result<void>::Failure(ErrorCode::Unsupported);
@@ -952,24 +896,40 @@ inline Result<void> DecodeStructRecord(StructView view, ConstructionContext* con
             return decoded;
         }
 
-        present[index / 64] |= uint64{1} << (index % 64);
-    }
-
-    for (usize index = 0; index < schema.fields.Size(); ++index) {
-        const FieldSchema& member = schema.fields[index];
-        if ((present[index / 64] & (uint64{1} << (index % 64))) != 0 ||
-            HasFlag(member.flags, FieldFlags::Transient)) {
-            continue;
-        }
-
-        FieldScope scope(context, member, schema.id, view.FieldEnum(index),
-                         view.FieldStruct(index));
-        if (auto missing = CheckMissingField(context); !missing) {
-            return missing;
+        if (auto noted = context.MarkPresent(); !noted) {
+            return noted;
         }
     }
 
     return Result<void>::Success();
+}
+
+// 객체 Record의 아는 필드 하나(지금 위치 — context.Field())를 등록 함수표 ops로 해석한다.
+// 직렬화기가 필드마다 FieldScope 안에서 부르며, 해석이 성공하면 present 판정 MarkPresent를 한 번
+// 부른다(1단계만 — 2단계는 문맥이 기록하지 않아 무동작, A5 override 집합 자리 —
+// Docs/Design/ObjectFoundations.ko.md 4절). 실패한 필드는 알리지 않는다. 모르는 필드·저장된
+// Transient·excludedFlags 판정은 호출자가 먼저 한다(그런 필드는 여기에 오지 않는다). decode가
+// 없으면 Unsupported다.
+//
+// 사용 예(직렬화기 1단계):
+//   FieldScope scope(context, schema.fields[index], schema.id, lease.FieldEnum(index),
+//                    lease.FieldStruct(index));
+//   if (auto decoded = detail::DecodeRecordField(*ops, nullptr, ObjectHandle{}, view, context);
+//       !decoded) {
+//       return decoded;
+//   }
+inline Result<void> DecodeRecordField(const RuntimeFieldOps& ops, ConstructionContext* construction,
+                                      ObjectHandle owner, const FieldView& field,
+                                      FieldDecodeContext& context) noexcept {
+    if (!ops.decode) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    if (auto decoded = ops.decode(ops, construction, owner, field, context); !decoded) {
+        return decoded;
+    }
+
+    return context.MarkPresent();
 }
 
 // struct 값 하나의 저장 출처다: 필드 값(field — 중첩 Record TLV) 또는 struct 원소 배열의 목록
@@ -1197,7 +1157,8 @@ inline RecordListLimits ArrayRecordListLimits(usize valueBytes) noexcept {
 
 // 지금 위치(배열 필드 — context.Field())의 컨테이너 array를 out에 제자리로 쓰고 wire tag를
 // 돌려준다(5.6절). 순서: MatchesSchema(struct 원소는 MatchesStructView도 — TypeMismatch) →
-// Size ≤ maxElements(넘으면 배열 필드 경로의 ArrayTooLong 진단 뒤 CapacityExceeded) →
+// Size ≤ maxElements(넘으면 배열 필드 경로의 ArrayTooLong 진단 뒤 CapacityExceeded — Required 검사
+// 모드는 보지 않는다: 로드가 필드별 상한을 걸지 않으므로 넘친 배열도 열려야 한다) →
 // AddElements(Size) → writer Begin(ValueArray — maxBytes·maxCount = 값 한도·MaxArrayElements,
 // struct 원소는 RecordList — ArrayRecordListLimits(값 한도)) → 원소마다 ElementIndexScope::Set(i)
 // 뒤 원소 → End. 원소마다 다시 검증한다: enum 선언 값(비어 있지 않은 배열마다 EnumValueSet 한 번 +
@@ -1229,7 +1190,7 @@ Result<uint32> EncodeArrayField(const Container& array, ArchiveWriter& out,
 
     // 필드별 상한은 저장(과 경로 쓰기)에서만 건다 — 넘친 배열은 그 경로로 진단한 뒤 거부한다.
     const usize count = array.Size();
-    if (count > field.maxElements) {
+    if (count > field.maxElements && !context.IsRequiredCheck()) {
         if (auto reported =
                 context.Report(FieldDiagnosticKind::ArrayTooLong, static_cast<int64>(count));
             !reported) {
@@ -1482,9 +1443,10 @@ Result<void> DecodeValueArray(Array<Element>* target, const FieldView& field,
 }
 
 // ObjectRefArray decode다(원소 tag = ReferenceWireType(), null 원소 허용). 1단계는 원소마다
-// ReadReference — null은 token을 남기지 않고 Required면 [f[i]] 진단, non-null은 (token, 필드 기대
-// 형식 {element.type, NativeTypeKey<T>()})을 남긴다. 2단계는 handle(null 포함)을 Scratch
-// Array<ObjectHandle>(count 예약)에 모아 AssignReferences를 한 번 부른다.
+// ReadReference — null은 token을 남기지 않고(Required null 진단은 적용 뒤 실효 값 검사가 [f[i]]로
+// 낸다), non-null은 (token, 필드 기대 형식 {element.type, NativeTypeKey<T>()})을 남긴다. 2단계는
+// handle(null 포함)을 Scratch Array<ObjectHandle>(count 예약)에 모아 AssignReferences를 한 번
+// 부른다.
 template <class T>
 Result<void> DecodeReferenceArray(ConstructionContext* construction, ObjectHandle owner,
                                   ObjectRefArray<T>* target, const FieldView& field,
@@ -1712,19 +1674,15 @@ void TraceArrayField(const StructRefArray<S>& array, TraceVisitor& visitor) noex
     array.Trace(visitor);
 }
 
-// 생성(또는 수동) struct 멤버 encode thunk다. 멤버를 복사하지 않고 직접 쓴다.
-template <auto MemberPointer>
-Result<uint32> EncodeStructMember(const RuntimeStructFieldOps&, const void* structValue,
-                                  ArchiveWriter& out, FieldEncodeContext& context) noexcept {
-    using Traits = StructMemberPointer<decltype(MemberPointer)>;
-    using S = typename Traits::Owner;
-    using Member = typename Traits::Member;
-    static_assert(FieldValueKind<Member>() != ValueKind::Opaque);
-    if (!MatchesSchema<Member>(context.Field())) {
-        return Result<uint32>::Failure(ErrorCode::TypeMismatch);
-    }
-
-    const Member& source = static_cast<const S*>(structValue)->*MemberPointer;
+// 지금 위치(context.Field())의 멤버 값 source를 out에 쓰고 wire tag를 돌려준다(클래스 필드·struct
+// 멤버 공용 — 호출자가 MatchesSchema를 확인했다). 배열은 컨테이너를 제자리로(ValueArray·
+// RecordList), struct는 등록 struct(지금 위치의 structure — MatchesStructView가 아니면
+// TypeMismatch)로 중첩 Record를, 단일 값은 EncodeFieldWire로 쓴다. String·경로·배열 원소는 복사하지
+// 않는다(ArchiveWriter가 성장 전에 크기 한도를 검사하고, owner 밖 버퍼는 encode 고정 또는 Required
+// 검사 중 표시가 지킨다).
+template <class Member>
+Result<uint32> EncodeMemberValue(const Member& source, ArchiveWriter& out,
+                                 FieldEncodeContext& context) noexcept {
     if constexpr (ArrayField<Member>::Supported) {
         return EncodeArrayField(source, out, context);
     } else if constexpr (ReflectedStructField<Member>::Supported) {
@@ -1750,6 +1708,21 @@ Result<uint32> EncodeStructMember(const RuntimeStructFieldOps&, const void* stru
 
         return EncodeFieldWire(out, context, value, text, StaticReferenceNative<Member>());
     }
+}
+
+// 생성(또는 수동) struct 멤버 encode thunk다. 멤버를 복사하지 않고 직접 쓴다.
+template <auto MemberPointer>
+Result<uint32> EncodeStructMember(const RuntimeStructFieldOps&, const void* structValue,
+                                  ArchiveWriter& out, FieldEncodeContext& context) noexcept {
+    using Traits = StructMemberPointer<decltype(MemberPointer)>;
+    using S = typename Traits::Owner;
+    using Member = typename Traits::Member;
+    static_assert(FieldValueKind<Member>() != ValueKind::Opaque);
+    if (!MatchesSchema<Member>(context.Field())) {
+        return Result<uint32>::Failure(ErrorCode::TypeMismatch);
+    }
+
+    return EncodeMemberValue(static_cast<const S*>(structValue)->*MemberPointer, out, context);
 }
 
 // 생성(또는 수동) struct 멤버 decode thunk다. 검증 방식(structValue null)은 값에 손대지 않고, 관찰·
@@ -1852,7 +1825,10 @@ RuntimeStructFieldOps StructFieldOps(Guid fieldId,
 
 // 생성 encode thunk다. owner를 Borrow하고 멤버를 직접 읽어 쓴다(String·경로·배열 원소를 복사하지
 // 않는다 — ArchiveWriter가 성장 전에 크기 한도를 검사하고, owner 밖 버퍼는 호출자가 쥔 encode
-// 고정이 지킨다). 쓰기 뒤 owner의 논리 수명을 다시 확인한다.
+// 고정이 지킨다). 쓰기 뒤 owner의 논리 수명을 다시 확인한다. 문맥이 staged 객체를 읽는 Required
+// 검사 모드면(FieldEncodeContext::StagedSource) Registry Resolve 대신 그 트랜잭션의
+// ConstructionContext::Get으로 owner를 얻는다(Borrow·encode 고정 없음 — 검사 중 표시가 그
+// 트랜잭션의 쓰기를 막고 Commit 전이라 회수되지 않는다).
 template <class Owner, class MemberOwner, class Member>
 Result<uint32> EncodeGeneratedField(ObjectRegistry& registry, const ObjectAccessContext& access,
                                     ObjectHandle handle, Member MemberOwner::* member,
@@ -1861,6 +1837,16 @@ Result<uint32> EncodeGeneratedField(ObjectRegistry& registry, const ObjectAccess
     static_assert(FieldValueKind<Member>() != ValueKind::Opaque);
     if (!MatchesSchema<Member>(context.Field())) {
         return Result<uint32>::Failure(ErrorCode::TypeMismatch);
+    }
+
+    if (ConstructionContext* staged = context.StagedSource()) {
+        auto owner = staged->Get<Owner>(handle);
+        if (!owner) {
+            return Result<uint32>::Failure(owner.Error());
+        }
+
+        const Owner& source = *owner.Value();
+        return EncodeMemberValue(source.*member, out, context);
     }
 
     auto borrowed = registry.Resolve<Owner>(access, handle);
@@ -1873,36 +1859,7 @@ Result<uint32> EncodeGeneratedField(ObjectRegistry& registry, const ObjectAccess
         return Result<uint32>::Failure(target.Error());
     }
 
-    const Member& source = target.Value()->*member;
-    Result<uint32> wire = Result<uint32>::Failure(ErrorCode::Unsupported);
-    if constexpr (ArrayField<Member>::Supported) {
-        // 배열 필드는 컨테이너를 제자리로 쓴다(ValueArray·RecordList).
-        wire = EncodeArrayField(source, out, context);
-    } else if constexpr (ReflectedStructField<Member>::Supported) {
-        // struct 필드는 등록 struct(지금 위치의 structure)로 중첩 Record를 쓴다.
-        if (!MatchesStructView<Member>(context)) {
-            return Result<uint32>::Failure(ErrorCode::TypeMismatch);
-        }
-
-        wire = EncodeStructRecord(context.Current()->structure, &source, out, context);
-    } else {
-        FieldValue value(context.Scratch());
-        StringView text;
-        value.kind = FieldValueKind<Member>();
-        if constexpr (IsSameV<Member, String>) {
-            text = source.View();
-        } else if constexpr (SoftReferenceField<Member>::Supported) {
-            value.guid = source.asset.value;
-            text = source.objectPath.View();
-        } else {
-            if (auto copied = CopyFieldValue(source, value); !copied) {
-                return Result<uint32>::Failure(copied.Error());
-            }
-        }
-
-        wire = EncodeFieldWire(out, context, value, text, StaticReferenceNative<Member>());
-    }
-
+    auto wire = EncodeMemberValue(target.Value()->*member, out, context);
     if (!wire) {
         return wire;
     }
@@ -1932,7 +1889,7 @@ Result<void> DecodeGeneratedField(ConstructionContext* construction, ObjectHandl
             return DecodeArrayField<Member>(nullptr, handle, nullptr, field, context);
         }
 
-        auto owner = construction->Get<Owner>(handle);
+        auto owner = construction->GetForWrite<Owner>(handle);
         if (!owner) {
             return Result<void>::Failure(owner.Error());
         }
@@ -1949,7 +1906,7 @@ Result<void> DecodeGeneratedField(ConstructionContext* construction, ObjectHandl
                                      context);
         }
 
-        auto owner = construction->Get<Owner>(handle);
+        auto owner = construction->GetForWrite<Owner>(handle);
         if (!owner) {
             return Result<void>::Failure(owner.Error());
         }
@@ -1989,24 +1946,35 @@ Result<void> DecodeGeneratedField(ConstructionContext* construction, ObjectHandl
     }
 }
 
-// 수동 함수표·실행 중 정의되는 필드용 범용 encode다(같은 표의 read로 값을 얻는다). 강한 참조의 정적
-// 대상 타입을 모르므로 스키마 기대 타입만 검사한다. 단일 값 필드만 지원한다(struct·배열은
-// Unsupported).
+// 수동 함수표·실행 중 정의되는 필드용 범용 encode다(같은 표의 read로 값을 얻는다 — staged 객체를
+// 읽는 Required 검사 모드에서는 readStaged, 없으면 Unsupported). 강한 참조의 정적 대상 타입을
+// 모르므로 스키마 기대 타입만 검사한다. 단일 값 필드만 지원한다(struct·배열은 Unsupported).
 //
 // 사용 예:
 //   RuntimeFieldOps ops{id, read, write, writeStaged, &detail::EncodeThroughFieldValue,
 //                       &detail::DecodeThroughFieldValue};
+//   ops.readStaged = readStaged;   // Required 필드면(그래프 로드의 Required 실효 값 검사)
 inline Result<uint32> EncodeThroughFieldValue(const RuntimeFieldOps& self, ObjectRegistry& registry,
                                               const ObjectAccessContext& access,
                                               ObjectHandle handle, ArchiveWriter& out,
                                               FieldEncodeContext& context) noexcept {
-    if (!self.read) {
-        return Result<uint32>::Failure(ErrorCode::Unsupported);
-    }
-
     FieldValue value(context.Scratch());
-    if (auto read = self.read(registry, access, handle, value); !read) {
-        return Result<uint32>::Failure(read.Error());
+    if (ConstructionContext* staged = context.StagedSource()) {
+        if (!self.readStaged) {
+            return Result<uint32>::Failure(ErrorCode::Unsupported);
+        }
+
+        if (auto read = self.readStaged(*staged, handle, value); !read) {
+            return Result<uint32>::Failure(read.Error());
+        }
+    } else {
+        if (!self.read) {
+            return Result<uint32>::Failure(ErrorCode::Unsupported);
+        }
+
+        if (auto read = self.read(registry, access, handle, value); !read) {
+            return Result<uint32>::Failure(read.Error());
+        }
     }
 
     return EncodeFieldWire(out, context, value, value.string.View(), nullptr);

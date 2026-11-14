@@ -197,9 +197,10 @@ TEST(CoreValueGraph_BoundCoreTypesRoundTripThroughGeneratedCode) {
     CHECK(types.Shutdown());
 }
 
-// EditorOnly Core 값 필드(debugColor)는 쿠킹 저장에서 빠지고 누락 허용 플래그로만 다시 읽히며
-// 생성자 기본값이 남는다. 나머지 Core 값 필드는 그대로다.
-TEST(CoreValueGraph_EditorOnlyCoreValueFieldIsExcludedAndAllowedMissing) {
+// EditorOnly Core 값 필드(debugColor)는 쿠킹 저장에서 빠지고, 쿠킹 로드(excludedFlags =
+// EditorOnly)로 다시 읽으면 생성자 기본값이 남는다(누락 = 기준). 나머지 Core 값 필드는 그대로다.
+// 쿠킹 로드는 EditorOnly 필드가 있는 편집기 저장을 InvalidArgument로 거부한다.
+TEST(CoreValueGraph_EditorOnlyCoreValueFieldIsExcludedAndKeepsDefault) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
     {
@@ -213,23 +214,28 @@ TEST(CoreValueGraph_EditorOnlyCoreValueFieldIsExcludedAndAllowedMissing) {
                 save.policy.excludedFlags = EditorOnly;
                 auto bytes = SaveFilled(allocator, source, save);
                 REQUIRE(bytes);
-                CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
-                                      bytes.Value().View())
-                          .Error() == ErrorCode::NotFound);
                 ObjectGraphLoadOptions load;
-                load.policy.allowMissingFlags = EditorOnly;
+                load.policy.excludedFlags = EditorOnly;
                 auto loaded = LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
                                               bytes.Value().View(), load);
                 REQUIRE(loaded);
-                auto borrowed =
-                    target.Resolve<CoreValueFields>(target.OwnerAccess(), loaded.Value().Handle());
-                REQUIRE(borrowed);
-                auto value = borrowed.Value().Get();
-                REQUIRE(value);
-                const CoreValueFields& fields = *value.Value();
-                CHECK(Filled(fields));
-                CHECK(fields.debugColor.r == 0.0f && fields.debugColor.g == 0.0f &&
-                      fields.debugColor.b == 0.0f && fields.debugColor.a == 0.0f);
+                {
+                    auto borrowed = target.Resolve<CoreValueFields>(target.OwnerAccess(),
+                                                                    loaded.Value().Handle());
+                    REQUIRE(borrowed);
+                    auto value = borrowed.Value().Get();
+                    REQUIRE(value);
+                    const CoreValueFields& fields = *value.Value();
+                    CHECK(Filled(fields));
+                    CHECK(fields.debugColor.r == 0.0f && fields.debugColor.g == 0.0f &&
+                          fields.debugColor.b == 0.0f && fields.debugColor.a == 0.0f);
+                }
+
+                auto editor = SaveFilled(allocator, source);
+                REQUIRE(editor);
+                CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
+                                      editor.Value().View(), load)
+                          .Error() == ErrorCode::InvalidArgument);
             }
 
             REQUIRE(source.Shutdown(source.OwnerAccess()));

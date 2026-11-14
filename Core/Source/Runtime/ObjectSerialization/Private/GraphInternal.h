@@ -195,4 +195,19 @@ struct LoadNode {
     ObjectHandle handle{};
 };
 
+// 적용을 마친 staged 노드들의 Required 실효 값을 진단한다(Docs/Design/ObjectFoundations.ko.md 4절
+// — 2c 단계, GraphRequired.cpp). Required를 품은 최상위 필드(필드 자신이 Required이거나 struct
+// 필드·struct 원소 배열의 struct가 ContainsRequired — detail::CarriesRequired)만 encode 경로의
+// 검사 모드로 staged 객체에서 읽고 출력은 버린다(struct 값은 Required를 품지 않는 멤버를 쓰지
+// 않는다). null인 Required 위치마다 options.hooks->Report(RequiredMissing)가 한 번 온다
+// (거부하지 않는다). hooks가 없으면 진단을 받을 곳이 없으므로 아무것도 하지 않는다. 작업량·크기
+// 한도는 걸지 않는다(파일 값은 1단계가 한도로 검증했고 생성자 값은 신뢰 상태다). writer는 파일에
+// 있는 Required를 품은 가장 큰 필드의 payload로 미리 잡는다. 실패는 hook 실패·할당·readStaged 없는
+// 수동 Required 필드(Unsupported)·Required 위치 자체의 저장 불가 값(예: 생성자가 둔 Required Soft의
+// 규칙 위반, MaxArrayElements를 넘는 Required 배열)·계약 위반뿐이며 호출자가 rollback한다. 검사
+// 동안 transaction에 검사 중 표시가 선다(그 트랜잭션의 쓰기·GetForWrite·Commit Busy).
+Result<void> CheckRequiredFields(Allocator& allocator, ConstructionContext& transaction,
+                                 const Array<LoadNode>& nodes,
+                                 const ObjectGraphLoadOptions& options) noexcept;
+
 } // namespace rocks::graph_detail

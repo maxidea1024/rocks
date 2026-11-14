@@ -26,15 +26,17 @@ String getter 복제에는 임시 bounded forwarding allocator를 사용해 큰 
 2. 모든 타입을 Acquire하고 typed layout을 확인한다. 전체 field 값을 소유 형태로 미리 decode한다.
 3. version 불일치는 기본 Unsupported다. 옵션 migration callback이 있으면 생성 전에 호출하고 반환 record를 현재 schema/version으로 다시 검증한다. callback은 전달 allocator로 소유 Array를 반환한다.
 4. local reference 범위/대상 native type와 root로부터의 도달성을 검사한다. 파일에 고아 객체가 있으면 거부한다. unknown field를 skip한 결과 객체가 고아가 되는 경우도 같은 규칙을 적용한다.
-5. ConstructionContext에서 모든 객체를 생성한 뒤 scalar와 local-reference fixup을 적용하고 첫 root를 한 번에 Commit한다.
+5. ConstructionContext에서 모든 객체를 생성한 뒤 scalar와 local-reference fixup을 적용한다.
+6. Required 실효 값을 진단한다(hooks가 있을 때 — Docs/Design/ObjectFoundations.ko.md 4절): Required를 품은 최상위 필드만 저장과 같은 encode 경로의 검사 모드로 staged 객체에서 읽어(출력은 버린다) null인 Required 위치마다 `RequiredMissing`을 한 번 보고한다. 이 검사 동안 트랜잭션에 검사 중 표시가 서서 그 트랜잭션의 쓰기·Commit은 Busy다. 검사 writer는 필드마다 비워 다시 쓰고(`ArchiveWriter::Clear` — 파일에 있는 Required를 품은 가장 큰 필드 크기로 `Reserve`해 둔다) 크기·작업량 한도가 없다. struct 값은 Required를 품지 않는 멤버를 쓰지 않는다.
+7. 첫 root를 한 번에 Commit한다.
 
-어느 단계든 실패하면 root를 반환하지 않고 생성 역순으로 rollback한다. 이는 allocator 누적 통계나 slot generation을 이전 수치로 되돌린다는 뜻이 아니다. `allowMissingFields=false`가 기본이며 누락 known field는 NotFound다. true이면 해당 필드의 native 기본값을 유지한다. 사용자가 전달한 TypeRegistry가 ObjectRegistry의 등록 저장소와 다르면 WrongContext다. 참조의 native type 제한은 기존 staged setter의 정확한 타입 검사를 따른다.
+어느 단계든 실패하면 root를 반환하지 않고 생성 역순으로 rollback한다. 이는 allocator 누적 통계나 slot generation을 이전 수치로 되돌린다는 뜻이 아니다. Record에 없는 known field·struct 멤버는 정책 없이 생성자 값(기준)을 유지한다(누락 = 기준 — NotFound 없음). `policy.excludedFlags`(쿠킹 로드의 EditorOnly)의 필드·멤버가 있으면 생성자 전에 InvalidArgument다. Required는 로드에서 거부하지 않고 6단계의 실효 값으로만 진단한다(빠졌다고 null로 보지 않으므로 생성자가 non-null로 둔 Soft 참조가 빠져도 진단하지 않는다). 사용자가 전달한 TypeRegistry가 ObjectRegistry의 등록 저장소와 다르면 WrongContext다. 참조의 native type 제한은 기존 staged setter의 정확한 타입 검사를 따른다.
 
 ## 한도와 한계
 
 기본 한도는 객체 1,024개, 처리한 TLV 총 1,048,576개(중첩 struct TLV 포함 — Record 하나의 필드 수 한도도 남은 누계), 배열 원소 총 4,194,304개(배열 하나는 1,048,576개 이하 — 로드는 필드별 MaxElements를 걸지 않는다), 파일 16MiB, 개별 encoded field 4MiB(배열 payload 전체 포함), work 64Mi 단위, migration 출력 누계 16MiB다. 원본과 migration 결과를 모두 파싱하면 양쪽 field 수를 처리 누계에 포함한다. lookup, index 초기화, codec bytes 복사·검사와 fixup 비용을 bounded budget에 포함한다. migration callback의 자체 CPU/전역 할당·native 생성자와 accessor 내부의 임의 코드는 신뢰 계약이다.
 
-maxBytes는 전체 RAM peak가 아니다. 저장은 record staging과 최종 output을, 복원은 input·index·decoded 문자열·migration output·staged 객체를 동시에 보유할 수 있다. 각 제한과 객체 수가 이를 제한하며 allocator 자체의 메모리 quota는 별도 정책이다.
+maxBytes는 전체 RAM peak가 아니다. 저장은 record staging과 최종 output을, 복원은 input·index·decoded 문자열·migration output·staged 객체와 Required 검사 버퍼(Required를 품은 가장 큰 필드 하나의 검사 출력 — 성장 중에는 옛·새 버퍼가 함께 있어 그 약 2.5배)를 동시에 보유할 수 있다. 각 제한과 객체 수가 이를 제한하며 allocator 자체의 메모리 quota는 별도 정책이다.
 
 소프트 참조의 해석·로드(대상 에셋 찾기), 다중 root, 임의 컨테이너/숨은 native field, 외부 IO, 압축·암호화, 비동기 저장, 실행 중 graph mutation snapshot은 후속 범위다. 이 기능들을 암묵적으로 raw memory 저장이나 부분 성공으로 대체하지 않는다.
 

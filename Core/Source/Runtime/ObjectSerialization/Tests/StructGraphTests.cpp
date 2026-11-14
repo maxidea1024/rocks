@@ -651,9 +651,10 @@ TEST(StructGraph_NestedReferenceStructRoundTrips) {
     CHECK(types.Shutdown());
 }
 
-// EditorOnly는 최상위 struct 필드(extra)와 struct 안 멤버(Middle::note) 모두 제외되고, 누락 허용
-// 플래그로 다시 읽는다.
-TEST(StructGraph_EditorOnlyExclusionAndAllowedMissing) {
+// EditorOnly는 최상위 struct 필드(extra)와 struct 안 멤버(Middle::note) 모두 제외되고, 쿠킹
+// 로드(excludedFlags = EditorOnly)로 다시 읽으면 생성자 값이 남는다(누락 = 기준). 쿠킹 로드는
+// EditorOnly 값이 있는 편집기 저장을 생성자 전에 InvalidArgument로 거부한다.
+TEST(StructGraph_EditorOnlyExclusionAndCookedLoad) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
     REQUIRE(RegisterFixture(types));
@@ -665,22 +666,28 @@ TEST(StructGraph_EditorOnlyExclusionAndAllowedMissing) {
             save.policy.excludedFlags = EditorOnly;
             auto bytes = SaveFixture(allocator, source, save);
             REQUIRE(bytes);
-            const uint32 constructed = Owner::Constructed;
-            CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
-                                  bytes.Value().View())
-                      .Error() == ErrorCode::NotFound);
-            CHECK(Owner::Constructed == constructed);
             ObjectGraphLoadOptions load;
-            load.policy.allowMissingFlags = EditorOnly;
+            load.policy.excludedFlags = EditorOnly;
             auto loaded = LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
                                           bytes.Value().View(), load);
             REQUIRE(loaded);
-            auto borrowed = target.Resolve<Owner>(target.OwnerAccess(), loaded.Value().Handle());
-            REQUIRE(borrowed);
-            const Owner& owner = *borrowed.Value().Get().Value();
-            CHECK(owner.holder.middle.leaf.count == 42);
-            CHECK(owner.holder.middle.note == 0);
-            CHECK(owner.extra.count == 0);
+            {
+                auto borrowed =
+                    target.Resolve<Owner>(target.OwnerAccess(), loaded.Value().Handle());
+                REQUIRE(borrowed);
+                const Owner& owner = *borrowed.Value().Get().Value();
+                CHECK(owner.holder.middle.leaf.count == 42);
+                CHECK(owner.holder.middle.note == 0);
+                CHECK(owner.extra.count == 0);
+            }
+
+            auto editor = SaveFixture(allocator, source);
+            REQUIRE(editor);
+            const uint32 constructed = Owner::Constructed;
+            CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
+                                  editor.Value().View(), load)
+                      .Error() == ErrorCode::InvalidArgument);
+            CHECK(Owner::Constructed == constructed);
         }
 
         REQUIRE(source.Shutdown(source.OwnerAccess()));
@@ -794,8 +801,8 @@ TEST(StructGraph_NewerStructVersionPolicy) {
     CHECK(newTypes.Shutdown());
 }
 
-// struct 안의 모르는 필드(path 포함 진단·Reject), 누락 필드(NotFound·허용), 누락된 struct 필드 안의
-// Required 후손 진단.
+// struct 안의 모르는 필드(path 포함 진단·Reject), 빠진 멤버(기준 값 — NotFound 없음), 빠진 struct
+// 필드 안의 Required 후손 진단(적용 뒤 실효 값).
 TEST(StructGraph_UnknownAndMissingMembers) {
     SystemAllocator allocator;
     TypeRegistry plainTypes(allocator);
@@ -828,11 +835,7 @@ TEST(StructGraph_UnknownAndMissingMembers) {
 
             auto plainBytes = SaveFixture(allocator, plain);
             REQUIRE(plainBytes);
-            CHECK(LoadObjectGraph(allocator, shadow, shadowTypes, shadow.OwnerAccess(),
-                                  plainBytes.Value().View())
-                      .Error() == ErrorCode::NotFound);
             ObjectGraphLoadOptions allow;
-            allow.policy.allowMissingFields = true;
             CHECK(LoadObjectGraph(allocator, shadow, shadowTypes, shadow.OwnerAccess(),
                                   plainBytes.Value().View(), allow));
 
@@ -1212,7 +1215,7 @@ TEST(StructGraph_NestedObservationAndSubstitution) {
             StructHooks missing;
             ObjectGraphLoadOptions allow;
             allow.hooks = &missing;
-            allow.policy.allowMissingFlags = EditorOnly;
+            allow.policy.excludedFlags = EditorOnly;
             CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
                                   excluded.Value().View(), allow));
             // B의 null target(값 있는 Required null) 하나뿐이고, 누락된 Leaf(Required 후손 없음)는

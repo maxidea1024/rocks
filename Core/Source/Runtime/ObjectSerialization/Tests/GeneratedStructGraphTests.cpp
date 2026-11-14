@@ -289,8 +289,9 @@ TEST(GeneratedStructGraph_ObservedStructsUseGeneratedConstructAndDestroy) {
 }
 
 // EditorOnly는 클래스의 struct 필드(extra)와 struct 안 멤버(StructMiddle::note) 모두 저장에서
-// 빠지고, 누락 허용 플래그로만 다시 읽힌다(값은 생성자 기본값).
-TEST(GeneratedStructGraph_EditorOnlyMembersAreExcludedAndAllowedMissing) {
+// 빠지고, 다시 읽으면 생성자 기본값이 남는다(누락 = 기준 — 쿠킹 로드 정책 excludedFlags로도 같다).
+// 쿠킹 로드는 EditorOnly 값이 있는 편집기 저장을 생성자 전에 InvalidArgument로 거부한다.
+TEST(GeneratedStructGraph_EditorOnlyMembersAreExcludedAndKeepDefaults) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
     {
@@ -304,25 +305,32 @@ TEST(GeneratedStructGraph_EditorOnlyMembersAreExcludedAndAllowedMissing) {
                 save.policy.excludedFlags = EditorOnly;
                 auto bytes = SaveFixture(allocator, source, save);
                 REQUIRE(bytes);
+                ObjectGraphLoadOptions load;
+                load.policy.excludedFlags = EditorOnly;
+                const ObjectGraphLoadOptions plain;
+                const ObjectGraphLoadOptions* variants[] = {&plain, &load};
+                for (const ObjectGraphLoadOptions* options : variants) {
+                    auto loaded = LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
+                                                  bytes.Value().View(), *options);
+                    REQUIRE(loaded);
+                    auto borrowed =
+                        target.Resolve<StructOwner>(target.OwnerAccess(), loaded.Value().Handle());
+                    REQUIRE(borrowed);
+                    const StructOwner& owner = *borrowed.Value().Get().Value();
+                    CHECK(owner.holder.middle.leaf.count == 42);
+                    CHECK(owner.holder.middle.offset == -5);
+                    CHECK(owner.holder.middle.note == 0);
+                    CHECK(owner.extra.count == 0);
+                    CHECK(owner.extra.label.ByteCount() == 0);
+                }
+
+                auto editor = SaveFixture(allocator, source);
+                REQUIRE(editor);
                 const uint32 constructed = StructOwner::constructed;
                 CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
-                                      bytes.Value().View())
-                          .Error() == ErrorCode::NotFound);
+                                      editor.Value().View(), load)
+                          .Error() == ErrorCode::InvalidArgument);
                 CHECK(StructOwner::constructed == constructed);
-                ObjectGraphLoadOptions load;
-                load.policy.allowMissingFlags = EditorOnly;
-                auto loaded = LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
-                                              bytes.Value().View(), load);
-                REQUIRE(loaded);
-                auto borrowed =
-                    target.Resolve<StructOwner>(target.OwnerAccess(), loaded.Value().Handle());
-                REQUIRE(borrowed);
-                const StructOwner& owner = *borrowed.Value().Get().Value();
-                CHECK(owner.holder.middle.leaf.count == 42);
-                CHECK(owner.holder.middle.offset == -5);
-                CHECK(owner.holder.middle.note == 0);
-                CHECK(owner.extra.count == 0);
-                CHECK(owner.extra.label.ByteCount() == 0);
             }
 
             REQUIRE(source.Shutdown(source.OwnerAccess()));

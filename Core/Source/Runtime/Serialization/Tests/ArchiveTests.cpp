@@ -224,6 +224,46 @@ TEST(ArchiveSelfAppendSurvivesGrowthAndTakeBytesRetainsOwnership) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+// Clear는 byte만 비우고 용량·누적 예산은 남긴다 — 같은 크기까지 다시 쓰면 재할당하지 않는다(그래프
+// 로드의 Required 검사가 필드마다 같은 writer를 다시 쓴다). Reserve는 용량을 미리 잡고(작은 요청은
+// 무동작) maxTotalBytes를 넘으면 CapacityExceeded다.
+TEST(ArchiveWriterClearAndReserveKeepCapacityAndBudget) {
+    SystemAllocator allocator;
+    {
+        ArchiveWriter writer(allocator);
+        const uint8 payload[96] = {7};
+        REQUIRE(writer.WriteBytes(payload));
+        const usize written = writer.ByteCount();
+        const uint64 operations = writer.OperationsUsed();
+        const uint64 work = writer.WorkUsed();
+        const uint64 allocations = allocator.Stats().totalAllocations;
+        writer.Clear();
+        CHECK(writer.ByteCount() == 0);
+        CHECK(writer.OperationsUsed() == operations && writer.WorkUsed() == work);
+        REQUIRE(writer.WriteBytes(payload));
+        CHECK(writer.ByteCount() == written);
+        CHECK(allocator.Stats().totalAllocations == allocations);
+        CHECK(writer.View()[8] == 7);
+        // Reserve는 그 크기까지 다시 할당하지 않게 미리 잡는다(쓴 byte·예산은 그대로).
+        writer.Clear();
+        REQUIRE(writer.Reserve(4096));
+        const uint64 reserved = allocator.Stats().totalAllocations;
+        CHECK(writer.ByteCount() == 0 && writer.WorkUsed() == work * 2);
+        const uint8 large[4000] = {};
+        REQUIRE(writer.WriteBytes(large));
+        CHECK(allocator.Stats().totalAllocations == reserved);
+        REQUIRE(writer.Reserve(16));
+        CHECK(allocator.Stats().totalAllocations == reserved);
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+    ArchiveLimits small;
+    small.maxTotalBytes = 64;
+    ArchiveWriter bounded(allocator, small);
+    CHECK(bounded.Reserve(65).Error() == ErrorCode::CapacityExceeded);
+    CHECK(bounded.Reserve(64));
+}
+
 TEST(ArchiveWriterOutOfMemoryPreservesBytesAndReaderOutOfMemoryPreservesCursor) {
     SystemAllocator allocator;
     {

@@ -189,7 +189,6 @@ TEST(EnumGraph_LoadRejectsUndeclaredValuesAndWrongWire) {
     {
         ObjectRegistry target(allocator, types, {0x4547, 4});
         ObjectGraphLoadOptions options;
-        options.policy.allowMissingFields = true;
         const TypeSchema& schema = TypeOf<EnumFields>();
         struct Case {
             StringView field;

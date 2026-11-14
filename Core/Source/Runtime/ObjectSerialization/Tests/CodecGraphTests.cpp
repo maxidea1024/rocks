@@ -7,8 +7,9 @@
 #include <TestSupport/Test.h>
 
 // B3c 필드 codec 시험이다(Docs/Design/ReflectionFoundations.ko.md 6.1–6.4절): decode 정책(미선언
-// enum의 대체 값, 모르는 필드, 높은 Record 버전, 누락 허용 플래그), 진단·소프트 참조 hook(한 번만,
-// 실패 전파), Required의 저장 거부·복원 진단, 제외 플래그, 스키마와 정적 thunk의 어긋남 거부.
+// enum의 대체 값, 모르는 필드, 높은 Record 버전, 쿠킹 로드의 excludedFlags), 진단·소프트 참조
+// hook(한 번만, 실패 전파), Required의 저장 거부·복원 진단, 제외 플래그, 스키마와 정적 thunk의
+// 어긋남 거부.
 using namespace rocks;
 using reflection_fixture::AssetFields;
 using reflection_fixture::Base;
@@ -510,8 +511,10 @@ TEST(Codec_RequiredReferencesReportOnLoadAndRejectOnPackageSave) {
     CHECK(types.Shutdown());
 }
 
-// 제외 플래그(쿠킹의 EditorOnly)의 필드는 저장하지 않고, 누락 허용 플래그로만 그 누락을 받는다.
-TEST(Codec_ExcludedFlagsAndAllowedMissingFlags) {
+// 제외 플래그(쿠킹의 EditorOnly)의 필드는 저장하지 않고, 그 누락은 기준 값(생성자 값)으로 읽는다
+// (누락 = 기준 — 일반 로드·쿠킹 로드 모두). 쿠킹 로드(excludedFlags)는 그 필드가 있는 데이터를
+// InvalidArgument로 거부한다.
+TEST(Codec_ExcludedFlagsOnSaveAndCookedLoad) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
     REQUIRE(RegisterWorldFixture(types));
@@ -535,15 +538,13 @@ TEST(Codec_ExcludedFlagsAndAllowedMissingFlags) {
             auto cooked = SaveObjectGraph(allocator, source, source.OwnerAccess(),
                                           created.Value().Handle(), saveOptions);
             REQUIRE(cooked);
+            ObjectGraphLoadOptions plainOptions;
             ObjectGraphLoadOptions loadOptions;
-            CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
-                                  cooked.Value().View(), loadOptions)
-                      .Error() == ErrorCode::NotFound);
-            CHECK(target.Stats().liveObjects == 0);
-            loadOptions.policy.allowMissingFlags = static_cast<uint32>(FieldFlags::EditorOnly);
-            {
+            loadOptions.policy.excludedFlags = static_cast<uint32>(FieldFlags::EditorOnly);
+            const ObjectGraphLoadOptions* variants[] = {&plainOptions, &loadOptions};
+            for (const ObjectGraphLoadOptions* options : variants) {
                 auto loaded = LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
-                                              cooked.Value().View(), loadOptions);
+                                              cooked.Value().View(), *options);
                 REQUIRE(loaded);
                 auto borrowed =
                     target.Resolve<WorldChild>(target.OwnerAccess(), loaded.Value().Handle());
@@ -551,6 +552,15 @@ TEST(Codec_ExcludedFlagsAndAllowedMissingFlags) {
                 CHECK(borrowed.Value().Get().Value()->note == 0);
                 CHECK(borrowed.Value().Get().Value()->depth == 3);
             }
+
+            REQUIRE(target.Collect(target.OwnerAccess()));
+            auto editor =
+                SaveObjectGraph(allocator, source, source.OwnerAccess(), created.Value().Handle());
+            REQUIRE(editor);
+            CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
+                                  editor.Value().View(), loadOptions)
+                      .Error() == ErrorCode::InvalidArgument);
+            CHECK(target.Stats().liveObjects == 0 && target.Stats().reservedObjects == 0);
         }
 
         REQUIRE(source.Shutdown(source.OwnerAccess()));
@@ -743,7 +753,6 @@ TEST(Codec_StaticReferenceTargetIsCheckedBeforeConstruction) {
                                     second.Value().View());
         REQUIRE(graph);
         ObjectGraphLoadOptions options;
-        options.policy.allowMissingFields = true;
         CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(), graph.Value().View(),
                               options)
                   .Error() == ErrorCode::TypeMismatch);
@@ -798,7 +807,8 @@ TEST(Codec_SoftReferenceCollectorFailurePropagates) {
     CHECK(types.Shutdown());
 }
 
-// Required 소프트 참조: 패키지 저장은 null을 거부하고, 복원은 null·허용된 누락을 진단한다.
+// Required 소프트 참조: 패키지 저장은 null을 거부하고, 복원은 실효 값이 null이면(파일 null이든
+// 누락의 기준 값 null이든) 진단한다.
 TEST(Codec_RequiredSoftReferencePolicies) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
@@ -823,7 +833,8 @@ TEST(Codec_RequiredSoftReferencePolicies) {
             REQUIRE(missing);
             CHECK(missing->field == iconField);
 
-            // 아이콘 필드가 없는 Record를 누락 허용으로 복원하면 RequiredMissing을 보고한다.
+            // 아이콘 필드가 없는 Record를 복원하면 생성자 값(null)이 남으므로 RequiredMissing을
+            // 보고한다.
             ArchiveWriter payload(allocator);
             REQUIRE(payload.WriteGuid(Guid{1, 2}));
             auto record = OneFieldRecord(allocator, TypeIdOf<AssetFields>(),
@@ -834,7 +845,6 @@ TEST(Codec_RequiredSoftReferencePolicies) {
             REQUIRE(graph);
             RecordingHooks loadHooks;
             ObjectGraphLoadOptions loadOptions;
-            loadOptions.policy.allowMissingFields = true;
             loadOptions.hooks = &loadHooks;
             {
                 auto loaded = LoadObjectGraph(allocator, target, types, target.OwnerAccess(),

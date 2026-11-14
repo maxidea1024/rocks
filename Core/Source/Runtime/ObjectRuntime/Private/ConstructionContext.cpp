@@ -48,6 +48,11 @@ Result<void> ConstructionContext::Commit(Span<const ObjectHandle> roots,
         }
     }
 
+    // Required 검사 중에는 공개하지 않는다(검사가 읽는 staged 값을 지킨다 — 상태는 그대로다).
+    if (requiredCheck_) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+
     auto result =
         registry_.Commit(access_, transaction_, {staged_.Data(), staged_.Size()}, roots, out);
     if (result) {
@@ -78,6 +83,11 @@ Result<RootRef<Object>> ConstructionContext::Commit() noexcept {
 }
 
 void ConstructionContext::Rollback() noexcept {
+    // 검사 중 표시 동안의 rollback은 검사가 읽는 staged 객체를 없앤다(계약 위반 — 소멸자 포함).
+    if (requiredCheck_) {
+        platform::Fatal("ConstructionContext rolled back during a required check");
+    }
+
     if (!finished_) {
         registry_.Rollback(transaction_, {staged_.Data(), staged_.Size()});
         finished_ = true;
@@ -97,6 +107,12 @@ Result<ObjectHandle> ConstructionContext::CreateImpl(TypeId type, const void* na
                                                      ObjectHandle outer, StringView name) noexcept {
     if (auto state = CheckOpen(); !state) {
         return Result<ObjectHandle>::Failure(state.Error());
+    }
+
+    // Required 검사 중 표시 동안의 Busy는 아무것도 바꾸지 않았으므로 트랜잭션을 오류로 고정하지
+    // 않는다.
+    if (requiredCheck_) {
+        return Result<ObjectHandle>::Failure(ErrorCode::Busy);
     }
 
     // 객체 생성에 앞서 롤백 저널 공간을 확보한다. 생성 성공 후 저널 OOM으로 객체를 잃지 않는다.

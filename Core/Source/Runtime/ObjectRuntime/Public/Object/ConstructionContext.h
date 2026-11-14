@@ -13,6 +13,15 @@ namespace rocks {
 // 시작 실패(생성자의 접근 WrongThread·WrongContext, 종료 ShuttingDown, 재진입 Busy 등)와 실패한
 // Create의 오류이며, Rollback 뒤에도 남는다. 고정된 오류가 없고 끝난(Commit·Rollback) 트랜잭션이면
 // InvalidArgument다.
+//
+// Required 검사 중 표시(Docs/Design/ObjectFoundations.ko.md 4절): 그래프 로드가 적용 뒤·Commit 전에
+// staged 객체의 실효 값을 encode 경로로 검사하는 동안(FieldEncodeContext::BeginRequiredCheck부터 그
+// 문맥이 끝날 때까지) Create·SetReference·AssignReferences·AssignElements·SetElementReference·
+// GetForWrite(등록된 생성 staged 쓰기 writeStaged와 그래프 적용의 쓰기가 이것으로 owner를 얻는다)·
+// Commit은 Busy다(encode 고정의 staged판 — hook·allocator 콜백이 검사 중인 값을 바꾸지 못한다). 이
+// Busy는 트랜잭션 상태를 바꾸지 않는다(오류로 고정하지 않는다). Get·DescribeOuter 같은 읽기는 된다
+// (Get이 준 포인터로 값을 바꾸는 것은 막지 못한다 — 콜백 계약이 1차 방어다). 표시 중의
+// Rollback·소멸은 검사가 읽는 객체를 없애므로 Fatal이다(계약 위반).
 class ConstructionContext {
 public:
     ConstructionContext(ObjectRegistry&, const ObjectAccessContext&) noexcept;
@@ -30,10 +39,10 @@ public:
     //   있으면 대표 자식이다(Outer가 outermost이고 이름 있는 Inner가 없을 때만). 이름 규칙은
     //   ValidateNameComponent(Core/Text/NameComponent.h)이고 Registry는 정규화하지 않는다.
     //
-    // 오류 순서: 0. 트랜잭션 상태(클래스 주석의 규칙), 저널 예약 OutOfMemory
-    // → 1. 접근(WrongThread·WrongContext) → 2. 종료·재진입(ShuttingDown·Busy) → 3. 타입(NotFound·
-    // TypeMismatch) → 4. Abstract·생성 함수 없음·패키지 정책 Registry의 완전한 필드 배치 아닌
-    // 타입(Unsupported) → 5. Outer 상태(StaleHandle — 생존·이
+    // 오류 순서: 0. 트랜잭션 상태(클래스 주석의 규칙), Required 검사 중 표시(Busy — 상태를 고정하지
+    // 않는다), 저널 예약 OutOfMemory → 1. 접근(WrongThread·WrongContext) → 2. 종료·재진입
+    // (ShuttingDown·Busy) → 3. 타입(NotFound·TypeMismatch) → 4. Abstract·생성 함수 없음·패키지
+    // 정책 Registry의 완전한 필드 배치 아닌 타입(Unsupported) → 5. Outer 상태(StaleHandle — 생존·이
     // 트랜잭션의 공개 전 객체가 아님, 다른 Registry의 handle, GC cutoff white, DestroyRequested)
     // → 6. WorldOnly 정책(Unsupported) → 7. 이름 형식(InvalidArgument, NFC 판정 OutOfMemory) → 8.
     // 패키지 정책·빈 이름·대표 자식 규칙(InvalidArgument) → 9. 경로 길이(CapacityExceeded) → 10.
@@ -91,11 +100,34 @@ public:
         return Result<T*>::Success(static_cast<T*>(static_cast<Object*>(result.Value())));
     }
 
+    // staged 객체에 값을 쓰려고 얻는 Get이다(등록된 생성 staged 쓰기
+    // detail::WriteGeneratedStagedField와 그래프 적용 codec의 struct·배열 쓰기가 쓴다). 끝난
+    // 트랜잭션은 InvalidArgument, Required 검사 중 표시 동안은 Busy(상태를 고정하지 않는다)이고 그
+    // 밖은 Get과 같다. 반환 포인터 규칙도 Get과 같다.
+    //
+    // 사용 예(수동 writeStaged):
+    //   auto owner = transaction.GetForWrite<Mesh>(object);
+    //   if (!owner) {
+    //       return Result<void>::Failure(owner.Error());
+    //   }
+    //
+    //   owner.Value()->lodCount = static_cast<uint32>(value.unsignedInteger);
+    template <class T>
+    Result<T*> GetForWrite(ObjectHandle handle) noexcept {
+        if (!finished_ && requiredCheck_) {
+            return Result<T*>::Failure(ErrorCode::Busy);
+        }
+
+        return Get<T>(handle);
+    }
+
+    // staged owner의 ObjectRef field에 target을 쓴다. 트랜잭션이 끝났거나 오류 상태면
+    // InvalidArgument, Required 검사 중 표시 동안 Busy다(아래 컨테이너 쓰기도 같다).
     template <class T>
     Result<void> SetReference(ObjectHandle owner, ObjectRef<T>& field,
                               ObjectHandle target) noexcept {
-        if (finished_ || error_ != ErrorCode::None) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        if (auto writable = CheckStagedWrite(); !writable) {
+            return writable;
         }
 
         return registry_.SetEdge(access_, owner, field.handle_, target, transaction_,
@@ -121,8 +153,8 @@ public:
     template <class T>
     Result<void> AssignReferences(ObjectHandle owner, ObjectRefArray<T>& array,
                                   Span<const ObjectHandle> targets) noexcept {
-        if (finished_ || error_ != ErrorCode::None) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        if (auto writable = CheckStagedWrite(); !writable) {
+            return writable;
         }
 
         return registry_.AssignReferencesStaged(access_, owner, array, targets, transaction_);
@@ -143,8 +175,8 @@ public:
     template <class S>
     Result<void> AssignElements(ObjectHandle owner, StructRefArray<S>& array,
                                 usize count) noexcept {
-        if (finished_ || error_ != ErrorCode::None) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        if (auto writable = CheckStagedWrite(); !writable) {
+            return writable;
         }
 
         return registry_.AssignElementsStaged(access_, owner, array, count, transaction_);
@@ -158,8 +190,8 @@ public:
     Result<void> SetElementReference(ObjectHandle owner,
                                      const detail::StructElementLocation& element,
                                      ObjectRef<T>& field, ObjectHandle target) noexcept {
-        if (finished_ || error_ != ErrorCode::None) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        if (auto writable = CheckStagedWrite(); !writable) {
+            return writable;
         }
 
         return registry_.SetEdge(access_, owner, field.handle_, target, transaction_,
@@ -170,8 +202,8 @@ public:
     template <class S, class T>
     Result<void> SetElementReference(ObjectHandle owner, StructRefArray<S>& array, usize index,
                                      ObjectRef<T>& field, ObjectHandle target) noexcept {
-        if (finished_ || error_ != ErrorCode::None) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        if (auto writable = CheckStagedWrite(); !writable) {
+            return writable;
         }
 
         return registry_.SetElementReferenceStaged(access_, owner, array, index, field, target,
@@ -184,7 +216,8 @@ public:
     // → outer 간선이 있으므로 살아 있는 Inner는 Outer를 붙잡는다).
     //
     // 순서와 오류: 트랜잭션 상태(클래스 주석의 규칙)·out 검사
-    // (out.Size() != roots.Size()이거나 비어 있지 않은 원소가 있으면 InvalidArgument) → 접근
+    // (out.Size() != roots.Size()이거나 비어 있지 않은 원소가 있으면 InvalidArgument) → Required
+    // 검사 중 표시(Busy — 상태를 고정하지 않는다) → 접근
     // (WrongThread·WrongContext) → 종료·재진입(ShuttingDown·Busy) → roots(이 트랜잭션의 객체가
     // 아니면 StaleHandle, roots가 uint32 개수를 넘으면 Overflow) → staged 간선·Outer 검증과 관찰자
     // 쌍 집계(잠금 밖, 처리 표시 아래 — 대상·Outer가 생존 또는 이 트랜잭션 객체가 아니거나 cutoff
@@ -209,12 +242,31 @@ public:
     // InvalidArgument다. 나머지는 이 루트에서 도달하거나 별도로 Pin해야 다음 GC에서 생존한다. 실패
     // 시 비공개 상태를 유지한다. Create 실패는 트랜잭션을 오류 상태로 고정한다.
     Result<RootRef<Object>> Commit() noexcept;
+    // 끝나지 않은 트랜잭션의 객체를 생성 역순으로 되돌린다(끝났으면 무동작). Required 검사 중
+    // 표시 동안 부르면 Fatal이다(클래스 주석).
     void Rollback() noexcept;
 
 private:
     friend class ObjectRegistry;
+    // 검사 중 표시를 세우고 내린다(BeginRequiredCheck·문맥 소멸).
+    friend class FieldEncodeContext;
     // 클래스 주석의 트랜잭션 상태 규칙이다.
     Result<void> CheckOpen() const noexcept;
+
+    // staged 쓰기(SetReference·컨테이너 쓰기)의 공통 판정이다: 끝났거나 오류 상태면
+    // InvalidArgument, Required 검사 중 표시 동안 Busy다.
+    Result<void> CheckStagedWrite() const noexcept {
+        if (finished_ || error_ != ErrorCode::None) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (requiredCheck_) {
+            return Result<void>::Failure(ErrorCode::Busy);
+        }
+
+        return Result<void>::Success();
+    }
+
     Result<ObjectHandle> CreateImpl(TypeId type, const void* nativeType, ObjectHandle outer,
                                     StringView name) noexcept;
 
@@ -224,6 +276,8 @@ private:
     uint64 transaction_ = 0;
     ErrorCode error_ = ErrorCode::None;
     bool finished_ = false;
+    // Required 검사 중 표시다(클래스 주석).
+    bool requiredCheck_ = false;
 };
 
 } // namespace rocks

@@ -300,10 +300,12 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
             }
         }
 
-        // struct·배열 필드는 FieldValue로 통째 읽고 쓰지 않으므로 read·write·writeStaged가 없어야
-        // 하고(멤버·원소 단위는 B6 경로 접근) 그 밖의 필드는 셋 다 있어야 한다.
+        // struct·배열 필드에는 read·write·writeStaged·readStaged가 없어야 하고(FieldValue로 통째
+        // 읽고 쓰지 않는다 — 멤버·원소 단위는 B6 경로 접근) 그 밖의 필드는 read·write·writeStaged가
+        // 다 있어야 한다(readStaged는 선택 — Required 실효 값 검사용).
         const bool aggregateField = matched && IsAggregateField(*matched);
-        const bool accessors = aggregateField ? (!field.read && !field.write && !field.writeStaged)
+        const bool accessors = aggregateField ? (!field.read && !field.write &&
+                                                 !field.writeStaged && !field.readStaged)
                                               : (field.read && field.write && field.writeStaged);
         // struct·배열 필드는 Transient가 아니면 codec이 있어야 한다(그 밖은 completeFieldLayout
         // 규칙). 경로 접근 thunk(path)는 struct·배열 필드만 가질 수 있다 — 최상위 단일 값의 경로
@@ -738,11 +740,11 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
         strongReference = strongReference || referenceTarget;
         referenceArray =
             referenceArray || (field.value.kind == ValueKind::Array && referenceTarget);
-        // Transient 멤버는 저장·복원하지 않으므로 Required 누락 진단 대상이 아니다. 배열 멤버의
-        // Required는 원소마다 non-null이라는 뜻이고 누락된 배열은 생성자 값이므로 세지 않는다.
+        // Transient 멤버는 저장·복원하지 않으므로 Required 실효 값 검사 대상이 아니다. 배열 멤버의
+        // Required(원소마다 non-null)도 센다 — 검사는 누락 여부와 무관하게 실효 값을 본다
+        // (Docs/Design/ObjectFoundations.ko.md 4절).
         required = required || (HasFlag(field.flags, FieldFlags::Required) &&
-                                !HasFlag(field.flags, FieldFlags::Transient) &&
-                                field.value.kind != ValueKind::Array);
+                                !HasFlag(field.flags, FieldFlags::Transient));
         const RuntimeStructFieldOps* match = nullptr;
         usize found = 0;
         for (const RuntimeStructFieldOps& candidate : ops.fields) {
@@ -806,8 +808,9 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
         }
 
         // 멤버 struct와 struct 원소 배열 멤버의 형질을 전파한다(원소 배열 멤버의 깊이도 원소 깊이 +
-        // 1). 누락 struct 안 Required 후손 진단은 struct 멤버로만 내려가고(배열 원소 제외), 참조
-        // struct 원소 배열(StructRefArray) 멤버는 그 자체가 Registry 컨테이너다.
+        // 1). Required 후손은 struct 멤버와 원소 struct 모두에서 전파한다(Required 실효 값 검사의
+        // 가지치기 — Transient 멤버 아래는 저장하지 않으므로 뺀다). 참조 struct 원소 배열
+        // (StructRefArray) 멤버는 그 자체가 Registry 컨테이너다.
         for (const FieldSchema& field : schema.fields) {
             const ValueType& value = FieldTargetType(field);
             if (value.kind != ValueKind::Struct) {
@@ -818,7 +821,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
             if (const Record* record = FindLocked(value.type)) {
                 depth = record->depth + 1 > depth ? record->depth + 1 : depth;
                 strongReference = strongReference || record->containsStrongReference;
-                required = required || (!array && record->containsRequired &&
+                required = required || (record->containsRequired &&
                                         !HasFlag(field.flags, FieldFlags::Transient));
                 requiresWorldOnlyOwner = requiresWorldOnlyOwner || record->requiresWorldOnlyOwner;
                 referenceArray = referenceArray || (array ? record->containsStrongReference

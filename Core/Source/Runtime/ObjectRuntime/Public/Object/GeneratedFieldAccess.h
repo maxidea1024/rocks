@@ -470,8 +470,10 @@ Result<void> WriteGeneratedStagedField(ConstructionContext& construction, Object
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
 
+    // owner는 쓰기용 GetForWrite로 얻는다 — Required 검사 중 표시 동안 Busy다(검사가 읽는 값을
+    // hook이 이 staged 쓰기로 바꾸지 못하게, Docs/Design/ObjectFoundations.ko.md 4절).
     if constexpr (ObjectReferenceField<Member>::Supported) {
-        auto target = construction.Get<Owner>(handle);
+        auto target = construction.GetForWrite<Owner>(handle);
         if (!target) {
             return Result<void>::Failure(target.Error());
         }
@@ -479,7 +481,7 @@ Result<void> WriteGeneratedStagedField(ConstructionContext& construction, Object
         return construction.SetReference(handle, target.Value()->*member, value.reference);
     } else {
         return WriteGeneratedValue<Owner>(
-            member, value, [&]() noexcept { return construction.Get<Owner>(handle); });
+            member, value, [&]() noexcept { return construction.GetForWrite<Owner>(handle); });
     }
 }
 

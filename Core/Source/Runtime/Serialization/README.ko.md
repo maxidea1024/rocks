@@ -4,7 +4,7 @@
 
 ## 값과 수명
 
-- `ArchiveWriter`는 전달 allocator로 byte buffer를 소유한다. `TakeBytes()`는 같은 allocator를 빌리는 `Array<uint8>`로 소유권을 이전한다. allocator가 결과보다 먼저 파괴되면 안 된다.
+- `ArchiveWriter`는 전달 allocator로 byte buffer를 소유한다. `TakeBytes()`는 같은 allocator를 빌리는 `Array<uint8>`로 소유권을 이전한다. `Clear()`는 쓴 byte만 비우고 용량·누적 예산을 남기고(값마다 같은 writer를 다시 쓴다), `Reserve(capacity)`는 용량을 미리 잡는다(maxTotalBytes 초과 CapacityExceeded). allocator가 결과보다 먼저 파괴되면 안 된다.
 - `ArchiveReader`는 caller의 불변 byte 범위를 빌린다. `ReadStringView`/`ReadBytes`/`ReadRaw` 결과도 원본 수명에 종속된다. `ReadString(allocator)`만 문자열을 깊게 복사한다.
 - 고정 폭 값은 little-endian이다. bool은 0/1, i64는 two's complement, float32/64는 IEEE bit 표현이다. Guid는 high u64 다음 low u64다. bytes/string은 u64 byte 길이와 payload이며 종단 NUL을 파일에 쓰지 않는다. UTF-8 string의 내부 U+0000은 보존한다.
 - 모든 실패는 reader cursor 또는 writer의 기존 bytes/길이를 보존한다. 소비한 operation/work 예산은 환급하지 않으므로 같은 실패를 반복하여 한도를 우회할 수 없다. OOM 재시도에도 남은 예산이 필요하다.

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Object/AssetId.h>
+#include <Object/ConstructionContext.h>
 #include <Object/RuntimeTypeOps.h>
 #include <Object/StructRefArray.h>
 #include <Object/TypeLease.h>
@@ -43,21 +44,29 @@ struct FieldEncodePolicy {
     uint32 excludedFlags = 0;
 };
 
-// 복원 정책이다. 기본은 미선언 enum·높은 버전·누락 필드 거부, 모르는 필드는 진단 후 건너뛰기다.
-// allowMissingFields면 Record에 없는 필드는 native 기본값으로
-// 두고, allowMissingFlags의 비트(쿠킹 로드의 EditorOnly)를 가진 필드만 누락을 허용할 수도 있다.
+// 복원 정책이다. 기본은 미선언 enum·높은 버전 거부, 모르는 필드는 진단 후 건너뛰기다. Record에 없는
+// 영속 필드·struct 멤버는 정책이 아니라 형식 규칙으로 기준 값(생성 직후 값)을 유지한다(누락 = 기준
+// — Docs/Design/ObjectFoundations.ko.md 4절). excludedFlags는 이 데이터에 없어야 하는 유효 플래그다
+// (저장의 FieldEncodePolicy::excludedFlags와 짝 — 쿠킹 로드 = EditorOnly): 그런 필드·멤버(배열이면
+// 그 원소 포함)가 있으면 InvalidArgument이고, 없으면 기준 값이며 Required 실효 값 검사에서도 뺀다.
+//
+// 사용 예(쿠킹 데이터 로드):
+//   ObjectGraphLoadOptions options;
+//   options.policy.unknownField = UnknownFieldPolicy::Reject;
+//   options.policy.excludedFlags = static_cast<uint32>(FieldFlags::EditorOnly);
 struct FieldDecodePolicy {
     UndeclaredEnumPolicy undeclaredEnum = UndeclaredEnumPolicy::Reject;
     NewerVersionPolicy newerVersion = NewerVersionPolicy::Reject;
     UnknownFieldPolicy unknownField = UnknownFieldPolicy::SkipAndReport;
-    bool allowMissingFields = false;
-    uint32 allowMissingFlags = 0;
+    uint32 excludedFlags = 0;
 };
 
 enum class FieldDiagnosticKind : uint8 {
     // field는 모르는 필드 ID다.
     UnknownField,
-    // Required 필드가 null이거나 저장 데이터에 없다.
+    // Required 위치의 값이 null이다(배열이면 원소 — path는 [f[i]]). 저장은 rejectMissingRequired일
+    // 때 이 진단 뒤 InvalidArgument이고, 복원은 거부하지 않고 적용 뒤·Commit 전에 staged 객체의
+    // 실효 값(파일 값이든 기준 값이든)으로 한 번 보고한다.
     RequiredMissing,
     // value는 저장된 값, valueType은 enum ID다.
     UndeclaredEnumValue,
@@ -68,8 +77,8 @@ enum class FieldDiagnosticKind : uint8 {
     ArrayTooLong
 };
 
-// 진단 하나다. objectIndex는 그래프 안 객체 위치(graph v1 local ID − 1, v2 export index), path는
-// 필드 경로(호출 동안만 유효)다.
+// 진단 하나다. objectIndex는 그래프 안 노드 위치(0부터 — local ID − 1), path는 필드 경로(호출
+// 동안만 유효)다.
 struct FieldDiagnostic {
     FieldDiagnosticKind kind = FieldDiagnosticKind::UnknownField;
     TypeId objectType{};
@@ -95,11 +104,14 @@ class RecordScope;
 
 // 직렬화 관찰 hook 묶음이다. 기본 구현은 아무것도 하지 않는다. 실패를 돌려주면 그 저장·복원이
 // 실패한다(진단 유실로 읽기 전용 판정을 놓치지 않게). 저장·복원이 실패하면 그 호출에서 받은
-// 진단·수집은 무효이고 호출자가 버린다. hook은 소유 객체를 Borrow한 상태에서 불리므로 Registry와
-// 입력 byte를 바꾸지 않는다. 복원의 진단·수집은 1단계에서 한 번만 온다. struct 관찰·치환(B4,
-// Docs/Design/ReflectionFoundations.ko.md 4.6·6.4절)도 같은 묶음이고, A0-O가 외부 참조 보고를
-// 더한다. 배열 원소 struct의 Observe·Substitute에 오는 frame은 배열 필드의 frame이다(field의
-// value.kind == Array, structure = 원소 struct, index = 원소 index — 원소마다 새 frame이 아니다).
+// 진단·수집은 무효이고 호출자가 버린다. hook은 소유 객체를 Borrow한 상태에서 불리므로(복원의
+// Required 실효 값 진단은 staged 객체라 Borrow 없이 불리고 ConstructionContext의 검사 중 표시가
+// 값을 지킨다) Registry와 입력 byte를 바꾸지 않는다. 복원의 RequiredMissing은 적용 뒤 Required
+// 검사에서 한 번, 그 밖의 진단·Soft 수집은 1단계에서 한 번 온다(Soft 수집은 파일 값만). struct
+// 관찰·치환(B4, Docs/Design/ReflectionFoundations.ko.md 4.6·6.4절)도 같은 묶음이고, A0-O가 외부
+// 참조 보고를 더한다. 배열 원소 struct의 Observe·Substitute에 오는 frame은 배열 필드의
+// frame이다(field의 value.kind == Array, structure = 원소 struct, index = 원소 index — 원소마다 새
+// frame이 아니다).
 //
 // 사용 예:
 //   struct Collect final : FieldCodecHooks {
@@ -419,7 +431,8 @@ private:
     FieldCodecFrame* frame_;
 };
 
-// 저장 문맥이다(그래프 저장이 구현한다).
+// 저장 문맥이다(그래프 저장이 구현한다). 그래프 로드의 Required 실효 값 검사(Docs/Design/
+// ObjectFoundations.ko.md 4절)도 이 문맥의 검사 모드로 같은 encode 경로를 쓴다.
 class FieldEncodeContext : public FieldCodecContext {
 public:
     const FieldEncodePolicy& Policy() const noexcept {
@@ -432,11 +445,34 @@ public:
                (effectiveFlags & policy_.excludedFlags) != 0;
     }
 
-    // 지금 위치가 Required이고 값이 null이며 rejectMissingRequired면 RequiredMissing을 보고하고
-    // InvalidArgument다. 그 밖은 성공이다.
+    // Required 실효 값 검사 문맥인지다. 이 모드에서는 Required null을 거부하지 않고(정책과 무관)
+    // RequiredMissing으로 보고하며, 필드별 MaxElements(ArrayTooLong)·SubstituteStruct hook·Soft
+    // 수집을 하지 않는다.
+    bool IsRequiredCheck() const noexcept {
+        return staged_ != nullptr;
+    }
+
+    // staged 객체를 읽는 문맥이면 그 트랜잭션이다(아니면 nullptr). 생성 encode thunk
+    // (detail::EncodeGeneratedField)는 이것이 있으면 Registry Resolve 대신
+    // ConstructionContext::Get으로 소유자를 얻고, 수동 함수표의 범용 encode는
+    // RuntimeFieldOps::readStaged로 읽는다(encode 고정을 쥐지 않는다 — 검사 중 표시가 대신한다).
+    ConstructionContext* StagedSource() const noexcept {
+        return staged_;
+    }
+
+    // 지금 위치가 Required이고 값이 null일 때: 검사 모드면 RequiredMissing을 보고한 뒤 성공(hook
+    // 실패는 그 오류), 아니면 rejectMissingRequired일 때 보고 뒤 InvalidArgument다. 그 밖은
+    // 성공이다.
     Result<void> CheckRequired(bool isNull) noexcept {
-        if (!isNull || !policy_.rejectMissingRequired ||
-            !HasFlag(EffectiveFlags(), FieldFlags::Required)) {
+        if (!isNull || !HasFlag(EffectiveFlags(), FieldFlags::Required)) {
+            return Result<void>::Success();
+        }
+
+        if (IsRequiredCheck()) {
+            return Report(FieldDiagnosticKind::RequiredMissing);
+        }
+
+        if (!policy_.rejectMissingRequired) {
             return Result<void>::Success();
         }
 
@@ -462,11 +498,12 @@ public:
     // 값 한도).
     virtual RecordLimits NestedRecordLimits() const noexcept = 0;
 
-    // 지금 위치의 struct 값 대신 저장할 값이다(hook이 없으면 value). null은 InvalidArgument다.
+    // 지금 위치의 struct 값 대신 저장할 값이다(hook이 없거나 검사 모드면 value). null은
+    // InvalidArgument다.
     Result<const void*> SubstituteStruct(TypeId type, const void* nativeKey,
                                          const void* value) noexcept {
         FieldCodecHooks* hooks = Hooks();
-        if (!hooks || !Current()) {
+        if (!hooks || !Current() || IsRequiredCheck()) {
             return Result<const void*>::Success(value);
         }
 
@@ -484,13 +521,40 @@ protected:
         : FieldCodecContext(hooks, referenceWire), policy_(policy) {
     }
 
-    ~FieldEncodeContext() = default;
+    // 검사 모드였으면 staged 트랜잭션의 검사 중 표시를 내린다.
+    ~FieldEncodeContext() {
+        if (staged_) {
+            staged_->requiredCheck_ = false;
+        }
+    }
+
+    // 이 문맥을 staged 트랜잭션의 Required 실효 값 검사 모드로 바꾸고 그 트랜잭션에 검사 중 표시를
+    // 세운다(문맥이 끝날 때 내린다). 표시 동안 그 트랜잭션의 Create·SetReference·AssignReferences·
+    // AssignElements·SetElementReference·GetForWrite(등록된 writeStaged·적용 쓰기)·Commit은 Busy다
+    // (encode 고정의 staged판 — hook·allocator 콜백이 검사 중인 값을 바꾸지 못한다). 문맥 하나에 한
+    // 번만 부르고, 이미 표시가 선 트랜잭션에 부르면 Fatal이다(검사는 겹치지 않는다). 트랜잭션은
+    // 문맥보다 오래 살아야 한다.
+    //
+    // 사용 예(직렬화기의 검사 문맥 생성자):
+    //   RequiredCheckContext(..., ConstructionContext& transaction) noexcept
+    //       : FieldEncodeContext(policy, hooks, wire) {
+    //       BeginRequiredCheck(transaction);
+    //   }
+    void BeginRequiredCheck(ConstructionContext& staged) noexcept {
+        if (staged_ || staged.requiredCheck_) {
+            platform::Fatal("Required check started twice");
+        }
+
+        staged.requiredCheck_ = true;
+        staged_ = &staged;
+    }
 
     virtual Result<void> WriteReferenceWire(ArchiveWriter& out, ObjectHandle target,
                                             const ReferenceExpectation& expectation) noexcept = 0;
 
 private:
     FieldEncodePolicy policy_;
+    ConstructionContext* staged_ = nullptr;
 };
 
 // 복원 문맥이다(그래프 복원이 1단계·2단계로 구현한다).
@@ -500,9 +564,24 @@ public:
         return policy_;
     }
 
-    // Record에 없는 이 필드를 native 기본값으로 둘 수 있는지다.
-    bool IsMissingAllowed(uint32 effectiveFlags) const noexcept {
-        return policy_.allowMissingFields || (effectiveFlags & policy_.allowMissingFlags) != 0;
+    // 이 유효 플래그의 필드·멤버가 이 데이터에 없어야 하는지다(policy.excludedFlags — 쿠킹 로드의
+    // EditorOnly). 있으면 직렬화기·struct codec이 InvalidArgument로 거부한다.
+    bool IsExcluded(uint32 effectiveFlags) const noexcept {
+        return (effectiveFlags & policy_.excludedFlags) != 0;
+    }
+
+    // 지금 위치(Current())의 필드·멤버가 저장 데이터에 있음을 알린다. 복원 1단계가 필드·멤버마다 그
+    // 값을 검증한 뒤 한 번 부른다(객체 Record는 직렬화기, struct 멤버는 DecodeStructRecord).
+    // 기록하지 않는 단계(복원 2단계)나 위치 밖에서는 아무것도 하지 않는다. A5 override 집합("파일에
+    // 있는 값 경로 = 집합" — Docs/Design/RuntimeClassMetadata.ko.md '클래스 기본값 결정')의
+    // 자리이며 지금은 NotePresent의 기본 구현이 아무것도 하지 않는다. 실패를 돌려주면 그 복원이
+    // 실패한다.
+    Result<void> MarkPresent() noexcept {
+        if (!Recording() || !Current()) {
+            return Result<void>::Success();
+        }
+
+        return NotePresent(*Current());
     }
 
     // 필드 payload를 읽는 reader를 연다. Record 스택(struct 값)이 있으면 맨 위 Record로, 없으면
@@ -627,16 +706,6 @@ public:
     virtual Result<DecodedReference>
     ReadReference(ArchiveReader& reader, const ReferenceExpectation& expectation) noexcept = 0;
 
-    // 지금 위치가 Required이고 값이 null이면 RequiredMissing을 보고한다(거부하지 않는다 — 기존
-    // 필드에 Required를 붙여도 null을 가진 데이터를 열어 고칠 수 있게). 필드 검증이 끝난 뒤 부른다.
-    Result<void> ReportIfRequiredNull(bool isNull) noexcept {
-        if (!isNull || !HasFlag(EffectiveFlags(), FieldFlags::Required)) {
-            return Result<void>::Success();
-        }
-
-        return Report(FieldDiagnosticKind::RequiredMissing);
-    }
-
 protected:
     FieldDecodeContext(const FieldDecodePolicy& policy, FieldCodecHooks* hooks,
                        uint32 referenceWire) noexcept
@@ -658,6 +727,14 @@ protected:
     // 관찰할 struct ID다(ID 순으로 정렬된 span — 로드 동안 유효해야 한다).
     void SetObservedStructs(Span<const TypeId> sorted) noexcept {
         observed_ = sorted;
+    }
+
+    // MarkPresent가 부르는 present 판정 hook이다(frame = 파일에 있는 필드·멤버의 위치, 호출 동안만
+    // 유효). 기본은 아무것도 하지 않는다 — A5가 override 집합을 채울 때 직렬화기 문맥이 구현한다
+    // (Docs/Design/ObjectFoundations.ko.md 4절, 공개 hook 여부는 A5가 정한다).
+    virtual Result<void> NotePresent(const FieldCodecFrame& frame) noexcept {
+        (void)frame;
+        return Result<void>::Success();
     }
 
 private:

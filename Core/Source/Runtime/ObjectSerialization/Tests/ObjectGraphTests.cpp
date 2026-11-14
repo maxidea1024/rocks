@@ -319,7 +319,9 @@ TEST(ObjectGraphRoundTripPreservesCycleSharedIdentityAndTypedValues) {
     CHECK(gc.Value().reclaimed == 2);
 }
 
-TEST(ObjectGraphUnknownFieldsSkipAndMissingFieldsNeedExplicitDefaultPolicy) {
+// 모르는 필드는 건너뛰고, Record에 없는 필드는 정책 없이 생성자 값(기준)을 유지한다(누락 = 기준 —
+// Docs/Design/ObjectFoundations.ko.md 4절, NotFound 없음).
+TEST(ObjectGraphUnknownFieldsSkipAndMissingFieldsKeepConstructorValues) {
     SourceGraph source;
     REQUIRE(source.Initialize());
     ArchiveWriter value(source.allocator);
@@ -333,15 +335,8 @@ TEST(ObjectGraphUnknownFieldsSkipAndMissingFieldsNeedExplicitDefaultPolicy) {
     auto bytes = SingleGraph(source.allocator, recordBytes.Value().View());
     REQUIRE(bytes);
     ObjectRegistry target(source.allocator, source.types, {101, 201});
-    auto strict = LoadObjectGraph(source.allocator, target, source.types, target.OwnerAccess(),
-                                  bytes.Value().View());
-    CHECK(!strict);
-    CHECK(strict.Error() == ErrorCode::NotFound);
-    CHECK(target.Stats().liveObjects == 0);
-    ObjectGraphLoadOptions options;
-    options.policy.allowMissingFields = true;
     auto permissive = LoadObjectGraph(source.allocator, target, source.types, target.OwnerAccess(),
-                                      bytes.Value().View(), options);
+                                      bytes.Value().View());
     REQUIRE(permissive);
     auto object = target.Resolve<GraphNode>(target.OwnerAccess(), permissive.Value().Handle());
     REQUIRE(object);
@@ -429,7 +424,6 @@ TEST(ObjectGraphMalformedKnownFieldsNeverPublishObjects) {
                           {BoolId, WireType::Bool, {2}, 1, ErrorCode::InvalidArgument},
                           {LeftId, WireType::U64, {2}, 8, ErrorCode::InvalidArgument}};
     ObjectGraphLoadOptions options;
-    options.policy.allowMissingFields = true;
     for (const auto& example : cases) {
         RecordBuilder record(source.allocator, NodeType, 1);
         REQUIRE(record.AddField(example.id, example.type, {example.bytes, example.size}));

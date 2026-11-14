@@ -45,9 +45,11 @@ struct ObjectGraphSaveOptions {
 
 struct ObjectGraphLoadOptions {
     ObjectGraphLimits limits;
-    // 미선언 enum·높은 버전·모르는 필드·누락 필드의 처리다(기본은 모두 거부, 모르는 필드는 진단 후
-    // 건너뛰기). ReportAndDefault·LoadNewerSkippingUnknown은 hooks가 있어야 한다(없으면
-    // InvalidArgument — 진단 없이 값을 바꾸지 않는다).
+    // 미선언 enum·높은 버전·모르는 필드의 처리와 이 데이터에 없어야 하는 플래그(excludedFlags —
+    // 쿠킹 로드의 EditorOnly, 있으면 InvalidArgument)다(기본은 미선언 enum·높은 버전 거부, 모르는
+    // 필드는 진단 후 건너뛰기). Record에 없는 필드·멤버는 정책이 아니라 형식 규칙으로 기준
+    // 값(생성자 값)을 유지한다. ReportAndDefault·LoadNewerSkippingUnknown은 hooks가 있어야
+    // 한다(없으면 InvalidArgument — 진단 없이 값을 바꾸지 않는다).
     FieldDecodePolicy policy;
     // 저장 버전이 현재보다 낮을 때만 한 번 호출한다(높으면 policy.newerVersion). callback은 전달
     // allocator로 소유 결과를 반환해야 한다. 반환 record도 현재 schema/version/TLV/값 폭으로 다시
@@ -58,7 +60,9 @@ struct ObjectGraphLoadOptions {
     // 그 로드는 Unsupported다. 결과는 정확히 현재 버전이어야 한다.
     ObjectGraphMigration migrateStruct = nullptr;
     void* migrationUser = nullptr;
-    // 진단·소프트 참조 수집을 받는다(1단계에서 한 번). 실패하면 복원이 실패한다.
+    // 진단·소프트 참조 수집을 받는다(RequiredMissing은 적용 뒤 Required 검사에서 한 번, 그 밖은
+    // 1단계에서 한 번). 실패하면 복원이 실패한다(Required 검사의 실패는 rollback — 객체를 공개하지
+    // 않는다). 없으면 Required 검사를 하지 않는다(진단을 받을 곳이 없다).
     FieldCodecHooks* hooks = nullptr;
 };
 
@@ -74,21 +78,28 @@ struct ObjectGraphLoadOptions {
 Result<Array<uint8>> SaveObjectGraph(Allocator&, ObjectRegistry&, const ObjectAccessContext&,
                                      ObjectHandle root, ObjectGraphSaveOptions = {}) noexcept;
 
-// 두 단계로 복원한다(Docs/Design/ReflectionFoundations.ko.md 6.2·6.4절). 1단계는 전체 구조/값/참조/
-// 도달성을 검증하고(생성자를 실행하지 않는다) 2단계 몫의 작업량을 미리 청구하며, 2단계는 모든
-// 객체를 비공개 생성해 값을 쓰고 한번에 Commit한다. 2단계는 입력 내용이나 예산 때문에 실패하지
-// 않으며 실패(할당·Registry 상태)는 부분 객체 공개 없이 역순 rollback한다. 할당기 통계/slot
+// 두 단계로 복원한다(Docs/Design/ReflectionFoundations.ko.md 6.2·6.4절, Docs/Design/
+// ObjectFoundations.ko.md 4절). 1단계는 전체 구조/값/참조/도달성을 검증하고(생성자를 실행하지
+// 않는다) 2단계 몫의 작업량을 미리 청구하며, 2단계는 모든 객체를 비공개 생성해 값을 쓰고 Required
+// 실효 값을 진단한 뒤 한번에 Commit한다. 2단계는 입력 내용이나 예산 때문에 실패하지 않으며
+// 실패(할당·Registry 상태·Required 진단 hook 실패·readStaged 없는 수동 Required 필드의
+// Unsupported·Required 위치 자체의 저장 불가 값 — 예: 생성자가 둔 Required Soft의 규칙 위반,
+// MaxArrayElements를 넘는 Required 배열)는 부분 객체 공개 없이 역순 rollback한다. 할당기 통계/slot
 // generation이 rollback 전 값으로 돌아간다는 뜻은 아니다. 원본 bytes는 호출 동안 유효하고
 // 불변이어야 하며 결과는 원본을 빌리지 않는다. registry와 types는 같은 등록 저장소여야 한다. 모르는
 // 필드는 policy.unknownField, orphan/dangling local ID는 거부다. nonnull 강한 참조의 대상은
 // value.type 등록 타입과 생성 thunk의 정적 대상 타입의 native 타입이거나 그 파생이어야 하며 TypeId
 // 별명은 허용한다. value.type=0은 기반 Object다. nonnull의 명시 대상 타입 미등록은 NotFound다.
-// 소프트 참조는 값(에셋 ID + 객체 경로)으로 복원하며 대상을 그래프에 넣거나 찾지 않는다. Required
-// 필드의 null·누락은 거부하지 않고 RequiredMissing을 보고한다(Required 배열은 null 원소마다 [f[i]],
-// 누락 배열은 진단 없이 생성자 값). 배열 필드는 필드별 maxElements를 걸지 않고 배열마다
-// MaxArrayElements와 그래프 한도(maxValueBytes·maxTotalElements·maxTotalFields·work)로만
-// 막는다(상한을 낮춰도 기존 데이터가 열린다). 압축·async IO·다중 root는 이 format에서 지원하지
-// 않으며 암묵적으로 ObjectHandle byte를 보존하지 않는다.
+// 소프트 참조는 값(에셋 ID + 객체 경로)으로 복원하며 대상을 그래프에 넣거나 찾지 않는다. Record에
+// 없는 영속 필드·struct 멤버(배열 원소 struct의 멤버 포함)는 오류가 아니며 생성자 값(기준)을
+// 유지한다(누락 = 기준). policy.excludedFlags의 필드·멤버가 있으면 InvalidArgument다(생성자 전).
+// Required 위치는 거부하지 않고, 적용 뒤·Commit 전에 staged 객체의 실효 값(파일 값이든 기준
+// 값이든)이 null이면 RequiredMissing을 한 번 보고한다(Required 배열은 null 원소마다 [f[i]],
+// 생성자가 non-null로 둔 Soft 참조가 빠지면 진단하지 않는다 — hooks가 없으면 검사하지 않는다). 그
+// 검사는 필드별 MaxElements·SubstituteStruct·Soft 수집을 하지 않고 작업량·크기 한도도 걸지 않는다.
+// 배열 필드는 필드별 maxElements를 걸지 않고 배열마다 MaxArrayElements와 그래프 한도(maxValueBytes·
+// maxTotalElements·maxTotalFields·work)로만 막는다(상한을 낮춰도 기존 데이터가 열린다). 압축·async
+// IO·다중 root는 이 format에서 지원하지 않으며 암묵적으로 ObjectHandle byte를 보존하지 않는다.
 Result<RootRef<Object>> LoadObjectGraph(Allocator&, ObjectRegistry&, TypeRegistry&,
                                         const ObjectAccessContext&, Span<const uint8>,
                                         ObjectGraphLoadOptions = {}) noexcept;

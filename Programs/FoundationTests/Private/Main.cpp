@@ -45,6 +45,7 @@ static int (*objectScopeNegativeControl)(bool) noexcept = nullptr;
 static int (*destroyRequestedNegativeControl)(bool) noexcept = nullptr;
 static int (*typeConvenienceNegativeControl)(uint32) noexcept = nullptr;
 static int (*objectObserverNegativeControl)(uint32) noexcept = nullptr;
+static int (*requiredCheckNegativeControl)(uint32) noexcept = nullptr;
 
 // Object 테스트가 포함된 타깃만 음성 대조 callback을 등록한다. Core-only는 링크 의존이 없다.
 void RegisterObjectScopeNegativeControl(int (*function)(bool) noexcept) noexcept {
@@ -61,6 +62,10 @@ void RegisterTypeConvenienceNegativeControl(int (*function)(uint32) noexcept) no
 
 void RegisterObjectObserverNegativeControl(int (*function)(uint32) noexcept) noexcept {
     objectObserverNegativeControl = function;
+}
+
+void RegisterRequiredCheckNegativeControl(int (*function)(uint32) noexcept) noexcept {
+    requiredCheckNegativeControl = function;
 }
 
 Registration::Registration(const char* name, void (*function)()) noexcept
@@ -192,6 +197,14 @@ int main(int argc, char** argv) {
                                          : strcmp(control, "object-observer-shared") == 0   ? 1u
                                                                                             : 2u;
                 return test::objectObserverNegativeControl(operation);
+            } else if (strcmp(control, "required-check-rollback") == 0 ||
+                       strcmp(control, "required-check-twice") == 0) {
+                if (test::requiredCheckNegativeControl == nullptr) {
+                    return 2;
+                }
+
+                return test::requiredCheckNegativeControl(
+                    strcmp(control, "required-check-rollback") == 0 ? 0u : 1u);
             } else if (strcmp(control, "hash-map-foreach-erase") == 0 ||
                        strcmp(control, "hash-map-foreach-clear") == 0 ||
                        strcmp(control, "hash-map-foreach-reset") == 0 ||

@@ -50,7 +50,8 @@ public:
 
     // 등록이 계산한 값: 중첩 깊이(1 이상, MaxStructDepth 이하 — struct 원소 배열 멤버는 원소 깊이 +
     // 1), 강한 참조 멤버가 있는지(Transient 포함·중첩 포함·ObjectRefArray·StructRefArray 포함),
-    // Required 멤버가 있는지(중첩 포함, 배열 멤버 제외 — 누락 struct 안 배열은 생성자 값이다), 소유
+    // Required 멤버가 있는지(중첩 struct·배열 멤버·원소 struct 포함, Transient 멤버 아래 제외 —
+    // 그래프 로드의 Required 실효 값 검사가 이것으로 검사할 최상위 필드를 고른다), 소유
     // 객체가 WorldOnly여야 하는지(원소 struct 포함), Registry 컨테이너(ObjectRefArray·
     // StructRefArray) 멤버를 (중첩 struct까지) 담는지. 마지막 값이 참인 참조 struct는
     // StructRefArray의 원소가 될 수 없다.

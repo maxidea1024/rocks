@@ -321,7 +321,8 @@ TEST(ArrayRegistry_DepthThroughArrays) {
 
 // 계산 형질: ObjectRefArray·StructRefArray 멤버는 강한 참조이자 Registry 컨테이너이고(trace 필요),
 // inline struct 멤버로 전파된다. Array<참조 없는 struct>는 어느 쪽도 아니다. 배열 멤버의 Required와
-// 원소 struct의 Required 후손은 ContainsRequired에 세지 않는다. Registry 컨테이너를 담은 참조
+// 원소 struct의 Required 후손도 ContainsRequired에 센다(Required 실효 값 검사가 그 struct를 품은
+// 최상위 필드를 고른다 — Docs/Design/ObjectFoundations.ko.md 4절). Registry 컨테이너를 담은 참조
 // struct는 StructRefArray 원소가 될 수 없다(struct·클래스 모두 InvalidArgument).
 TEST(ArrayRegistry_ComputedTraitsAndElementRules) {
     SystemAllocator allocator;
@@ -329,13 +330,12 @@ TEST(ArrayRegistry_ComputedTraitsAndElementRules) {
     REQUIRE(RegisterPlain(types, 0));
     REQUIRE(RegisterReference(types, 1, true));
 
-    // ObjectRefArray 멤버(Required): trace가 필요하고, 형질은 강한 참조·Registry 컨테이너, Required
-    // 아님.
+    // ObjectRefArray 멤버(Required): trace가 필요하고, 형질은 강한 참조·Registry 컨테이너·Required.
     const FieldSchema refs = ArrayFieldSchema(ItemsId, "items", 5, ValueKind::ObjectReference, {},
                                               DefaultMaxElements, Flag(FieldFlags::Required));
     CHECK(RegisterOne(types, 2, refs, nullptr, false).Error() == ErrorCode::InvalidArgument);
     REQUIRE(RegisterOne(types, 2, refs, nullptr, true));
-    // StructRefArray 멤버(원소 = 참조 struct 1 — Required 후손이 있어도 세지 않는다).
+    // StructRefArray 멤버(원소 = 참조 struct 1 — 그 Required 후손을 센다).
     REQUIRE(RegisterOne(types, 3,
                         ArrayFieldSchema(ItemsId, "items", 5, ValueKind::Struct, StructId(1)),
                         Key(1), true));
@@ -354,10 +354,10 @@ TEST(ArrayRegistry_ComputedTraitsAndElementRules) {
     };
 
     const Expected cases[] = {{1, true, false, true, 1},
-                              {2, true, true, false, 1},
-                              {3, true, true, false, 2},
+                              {2, true, true, true, 1},
+                              {3, true, true, true, 2},
                               {4, false, false, false, 2},
-                              {5, true, true, false, 2}};
+                              {5, true, true, true, 2}};
     for (const Expected& expected : cases) {
         auto lease = types.AcquireValueType(StructId(expected.index), TypeKind::Struct);
         REQUIRE(lease);

@@ -85,6 +85,28 @@ public:
     uint64 WorkUsed() const noexcept;
     // buffer 소유권만 이전하고 누적 예산은 유지한다. 반환 Array도 같은 allocator를 빌린다.
     Array<uint8> TakeBytes() noexcept;
+    // 쓴 byte를 모두 비운다. 용량은 남기므로 같은 writer로 다시 쓸 때 그 크기까지 재할당하지
+    // 않는다. 누적 operation/work 예산은 유지한다(환급하지 않는다). 할당·실패가 없다. Clear 전에
+    // 얻은 View의 내용은 무효다(다음 쓰기가 같은 저장소를 덮어쓴다).
+    //
+    // 사용 예(값마다 같은 writer를 다시 쓴다 — 그래프 로드의 Required 검사):
+    //   ArchiveWriter writer(allocator, unbounded);
+    //   for (...) {
+    //       writer.Clear();
+    //       // writer에 값 하나를 쓰고 버린다
+    //   }
+    void Clear() noexcept;
+    // 용량을 적어도 capacity byte로 미리 늘린다(이미 그 이상이면 할당 없이 성공). 그 크기까지의
+    // 쓰기는 다시 할당하지 않으므로 성장 중 옛·새 버퍼가 함께 있는 피크를 피한다. 쓴 byte·예산은
+    // 바꾸지 않고 작업량을 청구하지 않는다(쓰기가 청구한다). capacity가 maxTotalBytes를 넘으면
+    // CapacityExceeded, 할당 실패는 OutOfMemory이며 실패하면 아무것도 바뀌지 않는다. 성공하면 이전
+    // View는 보관하지 않는다(저장소가 옮겨질 수 있다).
+    //
+    // 사용 예:
+    //   if (auto reserved = writer.Reserve(expectedBytes); !reserved) {
+    //       return reserved;
+    //   }
+    Result<void> Reserve(usize capacity) noexcept;
 
 private:
     Result<void> Charge(uint64 work) noexcept;
