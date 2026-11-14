@@ -45,7 +45,11 @@ public abstract class ThirdPartyModuleRules : ModuleRules
             Name = ModuleName,
             Sources = manifest.TranslationUnits.Select(unit => context.PathInRoot($"{library}/{unit}")).ToArray(),
             PrivateIncludeDirectories = manifest.IncludeDirectories.Select(directory => context.PathInRoot($"{library}/{directory}")).ToArray(),
-            PrivateDefines = manifest.DefinesFor(context.Platform.ToString()),
+            PrivateDefines = manifest.DefinesFor(context.Platform.ToString(), context.Architecture.ToString()),
+            // manifest compileArguments는 GCC형 철자다. clang-cl은 /clang:로 감싸 driver 인자로 넘긴다.
+            AdditionalCompileArguments = context.Platform == NativePlatform.Windows
+                ? manifest.CompileArguments.Select(argument => "/clang:" + argument).ToArray()
+                : manifest.CompileArguments,
             Optimization = CodeOptimization.Always
         };
     }

@@ -284,7 +284,7 @@ public static class InstalledSdk
         }
 
         var rulesPath = Path.Combine(rulesDirectory, "bin/Debug/net10.0/Rocks.Game.Rules.dll");
-        var context = new BuildContext(project, output, toolchain.Platform, configuration, sdk);
+        var context = new BuildContext(project, output, toolchain.Platform, toolchain.Architecture, configuration, sdk);
         var rules = RuleLoader.Load(rulesPath, options.GetValueOrDefault("target", "Game"), context);
         // 규칙 모듈을 기술자와 대조하고, 켜지지 않은 플러그인·Editor·플랫폼 미지원 모듈 등을 뺀다.
         var projectModules = moduleSet.Apply(rules.Modules, rules.Target.Modules);

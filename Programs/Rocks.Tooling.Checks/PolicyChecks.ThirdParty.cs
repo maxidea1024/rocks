@@ -65,6 +65,78 @@ public static partial class PolicyChecks
         return failures;
     }
 
+    /// <summary>
+    /// 추적 가능한 수정(manifest <c>modifications</c>·<c>patch</c>)을 확인한다. patch가 다루는 파일 집합과 manifest 목록이
+    /// 같아야 하고, 현재 파일에 patch를 거꾸로 적용한 결과의 SHA-256이 <c>upstreamSha256</c>과 같아야 한다. 추가된 파일
+    /// (<c>upstreamSha256: null</c>)은 patch의 새 파일 내용과 현재 내용이 정확히 같아야 한다.
+    /// </summary>
+    private static void CheckModifications(ThirdPartyManifest manifest, string library, string relativeLibrary, string relativeUpstream,
+        IReadOnlyDictionary<string, byte[]> actual, Action<string, int, string> fail)
+    {
+        if (manifest.Patch is null)
+        {
+            return;
+        }
+
+        string patchPath = Path.Combine(library, manifest.Patch);
+        if (!File.Exists(patchPath) || IsLink(patchPath))
+        {
+            fail($"{relativeLibrary}/{manifest.Patch}", 0, "patch file is missing or is a link");
+            return;
+        }
+
+        IReadOnlyList<ThirdPartyPatch.FilePatch> patches;
+        try
+        {
+            patches = ThirdPartyPatch.Parse(new System.Text.UTF8Encoding(false, true).GetString(File.ReadAllBytes(patchPath)));
+        }
+        catch (Exception error) when (error is FormatException or System.Text.DecoderFallbackException)
+        {
+            fail($"{relativeLibrary}/{manifest.Patch}", 0, error.Message);
+            return;
+        }
+
+        var byPath = patches.ToDictionary(item => item.Path, StringComparer.Ordinal);
+        foreach (ThirdPartyModification modification in manifest.Modifications)
+        {
+            string path = $"{relativeUpstream}/{modification.File}";
+            if (!byPath.TryGetValue(modification.File, out ThirdPartyPatch.FilePatch? filePatch))
+            {
+                fail(path, 0, "modified file has no entry in the patch");
+                continue;
+            }
+
+            if (filePatch.Added != (modification.UpstreamSha256 is null))
+            {
+                fail(path, 0, "patch and manifest disagree on whether the file was added");
+                continue;
+            }
+
+            if (!actual.TryGetValue(modification.File, out byte[]? current))
+            {
+                continue; // 파일 집합 검사가 이미 보고했다.
+            }
+
+            try
+            {
+                byte[]? original = ThirdPartyPatch.Reverse(filePatch, current);
+                if (original is not null && Convert.ToHexStringLower(SHA256.HashData(original)) != modification.UpstreamSha256)
+                {
+                    fail(path, 0, "reverting the patch does not reproduce upstreamSha256");
+                }
+            }
+            catch (Exception error) when (error is FormatException or System.Text.DecoderFallbackException)
+            {
+                fail(path, 0, "patch does not apply in reverse to the current file: " + error.Message);
+            }
+        }
+
+        foreach (string file in byPath.Keys.Where(file => manifest.Modifications.All(item => item.File != file)).Order(StringComparer.Ordinal))
+        {
+            fail($"{relativeUpstream}/{file}", 0, "patch touches a file that is not listed in manifest modifications");
+        }
+    }
+
     private static ThirdPartyManifest? CheckLibrary(string root, string library, List<CheckFailure> failures)
     {
         string name = Path.GetFileName(library);
@@ -109,7 +181,8 @@ public static partial class PolicyChecks
         {
             string child = Path.GetFileName(entry);
             bool allowed = child == ThirdPartyManifest.FileName || child == name + ".Build.cs" ||
-                           child == manifest.UpstreamDirectory || glue.Contains(child) || SystemMetadataFiles.Contains(child);
+                           child == manifest.UpstreamDirectory || glue.Contains(child) || SystemMetadataFiles.Contains(child) ||
+                           child == manifest.Patch;
             if (!allowed)
             {
                 Fail(Relative(root, entry), 0, "unregistered file or directory in third-party library folder");
@@ -176,6 +249,8 @@ public static partial class PolicyChecks
         {
             Fail($"{relativeUpstream}/{file}", 0, "file is not listed in manifest");
         }
+
+        CheckModifications(manifest, library, relativeLibrary, relativeUpstream, actual, Fail);
 
         // 경로 참조.
         bool InUpstream(string path) => path.StartsWith(manifest.UpstreamDirectory + "/", StringComparison.Ordinal) &&

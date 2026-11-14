@@ -34,6 +34,14 @@ public sealed record ThirdPartyFileSource(string Url, string Sha256);
 public sealed record ThirdPartyPragma(string File, int Line, string Text);
 
 /// <summary>
+/// 원본 디렉터리 파일의 추적 가능한 수정 한 건이다(manifest <c>modifications</c>). <see cref="File"/>은 원본 디렉터리 기준
+/// 경로, <see cref="UpstreamSha256"/>은 수정 전 upstream 내용의 SHA-256이다. null이면 upstream에 없던 파일을 더한 것이다
+/// (예: 생성 헤더를 미리 만든 판으로 둔 경우). <see cref="Reason"/>은 수정 이유다. 실제 차이는 manifest <c>patch</c>가 가리키는
+/// git diff 형식 파일이 담고, 정책 검사가 거꾸로 적용해 upstream 해시와 대조한다(<see cref="ThirdPartyPatch"/>).
+/// </summary>
+public sealed record ThirdPartyModification(string File, string? UpstreamSha256, string Reason);
+
+/// <summary>
 /// 고정 버전 외부 라이브러리 manifest(<c>Core/Source/ThirdParty/&lt;Lib&gt;/ThirdParty.json</c>)다. 모듈 규칙과 정책 검사가
 /// 같은 파일을 읽는 단일 출처다.
 /// <list type="bullet">
@@ -72,11 +80,38 @@ public sealed record ThirdPartyManifest(
     /// </summary>
     public IReadOnlyList<string> EmbeddedIn { get; init; } = [];
 
+    /// <summary>
+    /// 라이브러리만 받는 컴파일 인자다(manifest <c>compileArguments</c>, 예: libsodium의 <c>-fwrapv</c>). 허용 목록
+    /// <see cref="AllowedCompileArguments"/> 안의 GCC형 철자로 적고, 모듈 규칙이 clang-cl에서는 <c>/clang:</c>을 붙여 넘긴다.
+    /// </summary>
+    public IReadOnlyList<string> CompileArguments { get; init; } = [];
+
+    /// <summary>원본 디렉터리에 적용한 추적 가능한 수정 목록이다(manifest <c>modifications</c>). 비어 있으면 원본 그대로다.</summary>
+    public IReadOnlyList<ThirdPartyModification> Modifications { get; init; } = [];
+
+    /// <summary>
+    /// <see cref="Modifications"/>의 차이를 담은 git diff 형식 파일이다(라이브러리 폴더 바로 아래, <c>.patch</c>). 수정이 있으면
+    /// 반드시 있고, 없으면 null이다.
+    /// </summary>
+    public string? Patch { get; init; }
+
     /// <summary>외부 라이브러리 폴더의 부모다(저장소 루트 기준).</summary>
     public const string ThirdPartyRoot = "Core/Source/ThirdParty";
 
     /// <summary>platformDefines의 키로 허용하는 플랫폼 이름이다(NativePlatform 열거자 이름과 같다).</summary>
     public static readonly IReadOnlyList<string> PlatformNames = ["Windows", "MacOS", "Android"];
+
+    /// <summary>
+    /// platformDefines의 아키텍처 키 이름이다(NativeArchitecture 열거자 이름과 같다). 키는 <c>"Android.X64"</c>처럼
+    /// 플랫폼 이름 뒤에 붙인다. 한 플랫폼이 여러 ABI를 빌드할 때(Android) SIMD 경로 정의를 나눈다.
+    /// </summary>
+    public static readonly IReadOnlyList<string> ArchitectureNames = ["X64", "Arm64"];
+
+    /// <summary>compileArguments가 받는 인자다. 경고·대상·최적화·FP 모델을 바꾸지 않는 코드 생성 의미 인자만 둔다.</summary>
+    public static readonly IReadOnlyList<string> AllowedCompileArguments = ["-fno-strict-aliasing", "-fwrapv"];
+
+    private static readonly IReadOnlyList<string> PlatformDefineKeys =
+        [.. PlatformNames, .. PlatformNames.SelectMany(platform => ArchitectureNames.Select(architecture => $"{platform}.{architecture}"))];
 
     /// <summary>
     /// 원본에서 기록해야 하는 컴파일러 지시문이다. 진단에 영향을 줄 수 있는 모든 형태를 기록한다:
@@ -136,7 +171,7 @@ public sealed record ThirdPartyManifest(
     ];
 
     // 생략할 수 있는 최상위 필드다(기존 code manifest는 쓰지 않는다).
-    private static readonly string[] OptionalTopLevel = ["kind", "embeddedIn"];
+    private static readonly string[] OptionalTopLevel = ["kind", "embeddedIn", "compileArguments", "modifications", "patch"];
 
     // licenses 항목의 필수·선택 필드다.
     private static readonly string[] LicenseFields = ["spdx", "upstreamExpression", "file", "binaryNoticeRequired"];
@@ -187,15 +222,26 @@ public sealed record ThirdPartyManifest(
         }
     }
 
-    /// <summary>모든 플랫폼 공통 정의 뒤에 해당 플랫폼 정의를 붙인다. 모르는 플랫폼 이름은 오류다.</summary>
-    public IReadOnlyList<string> DefinesFor(string platform)
+    /// <summary>
+    /// 모든 플랫폼 공통 정의, 해당 플랫폼 정의(<c>"Android"</c>), 플랫폼·아키텍처 정의(<c>"Android.X64"</c>) 순으로 붙인다.
+    /// 모르는 플랫폼·아키텍처 이름은 오류다. 세 단계 사이에 같은 이름은 없다(리더가 거부한다).
+    /// </summary>
+    public IReadOnlyList<string> DefinesFor(string platform, string architecture)
     {
         if (!PlatformNames.Contains(platform, StringComparer.Ordinal))
         {
             throw new ArgumentException($"Unknown platform '{platform}'.", nameof(platform));
         }
 
-        return PlatformDefines.TryGetValue(platform, out IReadOnlyList<string>? extra) ? [.. Defines, .. extra] : Defines;
+        if (!ArchitectureNames.Contains(architecture, StringComparer.Ordinal))
+        {
+            throw new ArgumentException($"Unknown architecture '{architecture}'.", nameof(architecture));
+        }
+
+        IReadOnlyList<string> platformExtra = PlatformDefines.TryGetValue(platform, out IReadOnlyList<string>? extra) ? extra : [];
+        IReadOnlyList<string> architectureExtra =
+            PlatformDefines.TryGetValue($"{platform}.{architecture}", out IReadOnlyList<string>? specific) ? specific : [];
+        return [.. Defines, .. platformExtra, .. architectureExtra];
     }
 
     /// <summary>SDK 안에서 외부 라이브러리 라이선스 원문을 두는 폴더다(<c>Licenses/&lt;Lib&gt;/</c>의 부모).</summary>
@@ -304,7 +350,7 @@ public sealed record ThirdPartyManifest(
         }
 
         var platformDefines = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
-        Dictionary<string, JsonElement> platforms = Object(fields["platformDefines"], "platformDefines", PlatformNames, optional: true);
+        Dictionary<string, JsonElement> platforms = Object(fields["platformDefines"], "platformDefines", PlatformDefineKeys, optional: true);
         foreach ((string platform, JsonElement value) in platforms)
         {
             platformDefines.Add(platform, DefineList(value, "platformDefines." + platform));
@@ -411,13 +457,102 @@ public sealed record ThirdPartyManifest(
         var libraryValues = defines.ToDictionary(DefineNameOf, define => define, StringComparer.Ordinal);
         foreach ((string platform, IReadOnlyList<string> extra) in platformDefines)
         {
+            // "Android.X64"는 공통 정의와 "Android" 정의 모두와 겹치면 안 된다(DefinesFor가 셋을 이어 붙인다).
+            int dot = platform.IndexOf('.');
+            IReadOnlyList<string> parent = dot > 0 && platformDefines.TryGetValue(platform[..dot], out IReadOnlyList<string>? found) ? found : [];
             foreach (string define in extra)
             {
                 if (libraryValues.ContainsKey(DefineNameOf(define)))
                 {
                     throw new FormatException($"platformDefines.{platform}: '{DefineNameOf(define)}' is already in defines");
                 }
+
+                if (parent.Any(item => DefineNameOf(item) == DefineNameOf(define)))
+                {
+                    throw new FormatException($"platformDefines.{platform}: '{DefineNameOf(define)}' is already in platformDefines.{platform[..dot]}");
+                }
             }
+        }
+
+        IReadOnlyList<string> compileArguments = [];
+        if (fields.TryGetValue("compileArguments", out JsonElement argumentsElement))
+        {
+            compileArguments = Strings(argumentsElement, "compileArguments");
+            foreach (string argument in compileArguments)
+            {
+                if (!AllowedCompileArguments.Contains(argument, StringComparer.Ordinal))
+                {
+                    throw new FormatException($"compileArguments: '{argument}' is not allowed (allowed: {string.Join(", ", AllowedCompileArguments)})");
+                }
+            }
+
+            if (compileArguments.Distinct(StringComparer.Ordinal).Count() != compileArguments.Count)
+            {
+                throw new FormatException("compileArguments: duplicate entry");
+            }
+        }
+
+        var modifications = new List<ThirdPartyModification>();
+        if (fields.TryGetValue("modifications", out JsonElement modificationsElement))
+        {
+            var modified = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (JsonElement entry in Array(modificationsElement, "modifications"))
+            {
+                Dictionary<string, JsonElement> item = Object(entry, "modifications[]", ["file", "upstreamSha256", "reason"]);
+                string file = RelativePath(Text(item["file"], "modifications[].file"), "modifications[].file");
+                string? upstreamHash = null;
+                if (item["upstreamSha256"].ValueKind != JsonValueKind.Null)
+                {
+                    upstreamHash = Text(item["upstreamSha256"], "modifications[].upstreamSha256");
+                    if (!Sha256Text.IsMatch(upstreamHash))
+                    {
+                        throw new FormatException($"modifications[].upstreamSha256: '{file}' must be 64 lowercase hex digits or null (added file)");
+                    }
+                }
+
+                string reason = Text(item["reason"], "modifications[].reason");
+                if (reason.Trim().Length == 0)
+                {
+                    throw new FormatException($"modifications[].reason: '{file}' needs a reason");
+                }
+
+                if (!files.ContainsKey(file))
+                {
+                    throw new FormatException($"modifications[].file: '{file}' is not listed in files");
+                }
+
+                if (!modified.Add(file))
+                {
+                    throw new FormatException($"modifications[].file: '{file}' appears twice");
+                }
+
+                modifications.Add(new(file, upstreamHash, reason));
+            }
+
+            if (modifications.Count == 0)
+            {
+                throw new FormatException("modifications: omit the field instead of listing no modification");
+            }
+        }
+
+        string? patch = null;
+        if (fields.TryGetValue("patch", out JsonElement patchElement))
+        {
+            patch = RelativePath(Text(patchElement, "patch"), "patch");
+            if (patch.Contains('/') || !patch.EndsWith(".patch", StringComparison.Ordinal))
+            {
+                throw new FormatException("patch: must be a .patch file directly in the library folder");
+            }
+        }
+
+        if ((modifications.Count != 0) != (patch is not null))
+        {
+            throw new FormatException("modifications and patch must be declared together");
+        }
+
+        if (data && (compileArguments.Count != 0 || modifications.Count != 0))
+        {
+            throw new FormatException("compileArguments and modifications are not allowed for a data library");
         }
         // adapter와 라이브러리가 같은 이름을 쓰면 값도 같아야 한다(예: Z_U4가 다르면 ABI가 소리 없이 어긋난다).
         foreach (string define in consumerDefines)
@@ -445,7 +580,10 @@ public sealed record ThirdPartyManifest(
             Strings(fields["notes"], "notes"))
         {
             Kind = kind,
-            EmbeddedIn = embeddedIn
+            EmbeddedIn = embeddedIn,
+            CompileArguments = compileArguments,
+            Modifications = modifications,
+            Patch = patch
         };
     }
 

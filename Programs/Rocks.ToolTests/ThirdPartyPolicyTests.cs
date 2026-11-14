@@ -32,6 +32,7 @@ internal static class ThirdPartyPolicyTests
                         zstd.Licenses[1] is { File: "zstd-1.5.7/lib/dictBuilder/divsufsort.h", BinaryNoticeRequired: true },
                 "Zstd: the MIT divsufsort notice must be listed after the BSD-3-Clause license");
         });
+        RegisterModifications(suite);
         suite.Add("Policy.ThirdPartyPositiveFixture", () =>
         {
             using TemporaryDirectory temporary = new();
@@ -359,6 +360,120 @@ internal static class ThirdPartyPolicyTests
                 new { file = cFile, arguments = new[] { "clang-cl", "/W4", "/WX", "/clang:-std=c17", "/c", "/TP", cFile } }
             }));
             Verify.That(PolicyChecks.CompilationDatabase(database).Count != 0, "C entry compiled as C++ accepted");
+        });
+    }
+
+    // ---- 추적 가능한 수정(modifications·patch)과 아키텍처별 정의·라이브러리 컴파일 인자 ----
+
+    private const string PatchedLine = "int FakePatched(void) { return 2; }";
+    private const string AddedHeader = "#define FAKE_GENERATED 1\n";
+
+    // fake.c 끝에 한 줄을 더하고 upstream에 없던 generated.h를 추가한 fixture다. patch는 git diff 형식이다.
+    private static string FixturePatch()
+    {
+        int lines = FakeSource.Count(value => value == '\n');
+        return $"diff --git a/fake.c b/fake.c\nindex 1111111..2222222 100644\n--- a/fake.c\n+++ b/fake.c\n" +
+               $"@@ -{lines},0 +{lines + 1} @@\n+{PatchedLine}\n" +
+               "diff --git a/generated.h b/generated.h\nnew file mode 100644\nindex 0000000..3333333\n--- /dev/null\n" +
+               "+++ b/generated.h\n@@ -0,0 +1 @@\n+#define FAKE_GENERATED 1\n";
+    }
+
+    private static string ModificationFields(string fakeUpstreamSha) =>
+        "\"modifications\": [" +
+        $"{{\"file\": \"fake.c\", \"upstreamSha256\": \"{fakeUpstreamSha}\", \"reason\": \"fixture warning fix\"}}, " +
+        "{\"file\": \"generated.h\", \"upstreamSha256\": null, \"reason\": \"pre-generated header\"}], \"patch\": \"Rocks.patch\", ";
+
+    internal static void WriteModifiedFixture(TemporaryDirectory fixture, string? patch = null, string? upstreamSha = null)
+    {
+        WriteFixture(fixture);
+        fixture.Write(Upstream + "/fake.c", FakeSource + PatchedLine + "\n");
+        fixture.Write(Upstream + "/generated.h", AddedHeader);
+        fixture.Write(Library + "/Rocks.patch", patch ?? FixturePatch());
+        WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":", ModificationFields(upstreamSha ?? Sha(FakeSource)) + "\"notes\":"));
+    }
+
+    internal static void RegisterModifications(TestSuite suite)
+    {
+        suite.Add("Policy.ThirdPartyModificationsReverseToUpstream", () =>
+        {
+            using (TemporaryDirectory fixture = new())
+            {
+                WriteModifiedFixture(fixture);
+                NoFailures(PolicyChecks.ThirdParty(fixture.Root));
+                var manifest = ThirdPartyManifest.Read(fixture.FilePath(Library));
+                Verify.That(manifest.Patch == "Rocks.patch" && manifest.Modifications.Count == 2 &&
+                            manifest.Modifications[1] is { File: "generated.h", UpstreamSha256: null }, "modifications parsed");
+            }
+
+            void Expect(string label, Action<TemporaryDirectory> inject)
+            {
+                using TemporaryDirectory fixture = new();
+                WriteModifiedFixture(fixture);
+                inject(fixture);
+                Verify.That(PolicyChecks.ThirdParty(fixture.Root).Count != 0, "modification defect escaped audit: " + label);
+            }
+
+            // 현재 파일만 더 바꾸고 files 해시를 맞춘다: patch 역적용만이 잡아야 한다.
+            Expect("extra change outside the patch", fixture =>
+            {
+                fixture.Write(Upstream + "/fake.c", "// extra\n" + FakeSource + PatchedLine + "\n");
+                WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":", ModificationFields(Sha(FakeSource)) + "\"notes\":"));
+            });
+            Expect("wrong upstream hash", fixture =>
+                WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":", ModificationFields(new string('a', 64)) + "\"notes\":")));
+            Expect("patch touches an unlisted file", fixture =>
+                fixture.Write(Library + "/Rocks.patch", FixturePatch() +
+                    "diff --git a/fake.h b/fake.h\nindex 1..2 100644\n--- a/fake.h\n+++ b/fake.h\n@@ -1 +1 @@\n-#pragma once\n+#pragma once\n"));
+            Expect("added file content differs", fixture => fixture.Write(Upstream + "/generated.h", "#define FAKE_GENERATED 2\n"));
+            Expect("patch file missing", fixture => File.Delete(fixture.FilePath(Library + "/Rocks.patch")));
+            Expect("modifications without patch", fixture =>
+                WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":",
+                    $"\"modifications\": [{{\"file\": \"fake.c\", \"upstreamSha256\": \"{Sha(FakeSource)}\", \"reason\": \"x\"}}], \"notes\":")));
+            Expect("CRLF patch", fixture => fixture.Write(Library + "/Rocks.patch", FixturePatch().Replace("\n", "\r\n", StringComparison.Ordinal)));
+        });
+        suite.Add("Policy.ThirdPartyPatchFinalNewline", () =>
+        {
+            // 원본 "a\nb"(끝 줄바꿈 없음)에 줄바꿈만 더한 수정을 거꾸로 적용하면 원본 byte가 그대로 나와야 한다.
+            string patch = "diff --git a/x.h b/x.h\nindex 1..2 100644\n--- a/x.h\n+++ b/x.h\n@@ -1,2 +1,2 @@\n a\n-b\n" +
+                           "\\ No newline at end of file\n+b\n";
+            ThirdPartyPatch.FilePatch file = ThirdPartyPatch.Parse(patch).Single();
+            byte[]? original = ThirdPartyPatch.Reverse(file, Encoding.UTF8.GetBytes("a\nb\n"));
+            Verify.That(original is not null && Encoding.UTF8.GetString(original) == "a\nb", "missing final newline restored");
+            foreach (string mismatch in new[] { "a\nb", "a\nc\n", "a\n" })
+            {
+                try
+                {
+                    ThirdPartyPatch.Reverse(file, Encoding.UTF8.GetBytes(mismatch));
+                    throw new InvalidOperationException("mismatching file reversed: " + mismatch.Replace("\n", "\\n", StringComparison.Ordinal));
+                }
+                catch (FormatException)
+                {
+                }
+            }
+        });
+        suite.Add("Policy.ThirdPartyArchitectureDefinesAndCompileArguments", () =>
+        {
+            using (TemporaryDirectory fixture = new())
+            {
+                WriteFixture(fixture);
+                WriteManifest(fixture, manifest => Replace(Replace(manifest, "\"Windows\": [", "\"Android\": [\"FAKE_ANDROID\"], \"Android.X64\": [\"FAKE_X64\"], \"Android.Arm64\": [\"FAKE_ARM64\"], \"Windows\": ["),
+                    "\"notes\":", "\"compileArguments\": [\"-fwrapv\", \"-fno-strict-aliasing\"], \"notes\":"));
+                NoFailures(PolicyChecks.ThirdParty(fixture.Root));
+                var manifest = ThirdPartyManifest.Read(fixture.FilePath(Library));
+                Verify.That(manifest.DefinesFor("Android", "X64").SequenceEqual(["FAKE_CONFIG=1", "FAKE_ANDROID", "FAKE_X64"]) &&
+                            manifest.DefinesFor("Android", "Arm64").SequenceEqual(["FAKE_CONFIG=1", "FAKE_ANDROID", "FAKE_ARM64"]) &&
+                            manifest.DefinesFor("Windows", "X64").SequenceEqual(["FAKE_CONFIG=1", "FAKE_WINDOWS"]), "platform·architecture defines merged");
+                Verify.That(manifest.CompileArguments.SequenceEqual(["-fwrapv", "-fno-strict-aliasing"]), "compile arguments parsed");
+            }
+
+            ExpectFailure("unknown architecture key", fixture =>
+                WriteManifest(fixture, manifest => Replace(manifest, "\"Windows\": [", "\"Android.X86\": [\"FAKE_X86\"], \"Windows\": [")));
+            ExpectFailure("architecture define repeats the platform define", fixture =>
+                WriteManifest(fixture, manifest => Replace(manifest, "\"Windows\": [", "\"Android\": [\"FAKE_A=1\"], \"Android.X64\": [\"FAKE_A=2\"], \"Windows\": [")));
+            ExpectFailure("disallowed compile argument", fixture =>
+                WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":", "\"compileArguments\": [\"-Wno-unused-function\"], \"notes\":")));
+            ExpectFailure("duplicate compile argument", fixture =>
+                WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":", "\"compileArguments\": [\"-fwrapv\", \"-fwrapv\"], \"notes\":")));
         });
     }
 

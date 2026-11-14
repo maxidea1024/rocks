@@ -4,6 +4,31 @@ namespace Rocks.Build;
 public enum NativePlatform { Windows, MacOS, Android }
 
 /// <summary>
+/// 대상 CPU 아키텍처다. 컴파일러가 보고한 실제 대상 triple(<see cref="NativeToolchain.TargetTriple"/>)에서 정한다.
+/// 규칙은 <c>BuildContext.Architecture</c>로 아키텍처별 소스·정의를 고른다(예: 외부 라이브러리의 SIMD 경로 정의).
+/// </summary>
+public enum NativeArchitecture { X64, Arm64 }
+
+public static class NativeArchitectures
+{
+    /// <summary>
+    /// 대상 triple의 첫 조각으로 아키텍처를 정한다. <c>x86_64</c>·<c>amd64</c>는 X64, <c>aarch64</c>·<c>arm64</c>(<c>arm64e</c> 포함)는
+    /// Arm64다. 빈 값이나 지원하지 않는 아키텍처(32 bit 포함)는 <see cref="ArgumentException"/>이다.
+    /// </summary>
+    public static NativeArchitecture FromTriple(string triple)
+    {
+        string first = triple.Split('-')[0];
+        return first switch
+        {
+            "x86_64" or "amd64" => NativeArchitecture.X64,
+            "aarch64" or "arm64" or "arm64e" => NativeArchitecture.Arm64,
+            _ => throw new ArgumentException($"Unsupported target architecture in triple '{triple}' (Rocks supports x64 and ARM64).",
+                nameof(triple))
+        };
+    }
+}
+
+/// <summary>
 /// 빌드 구성이다(UE5.6 Debug·Development·Shipping 대응).
 /// <list type="bullet">
 /// <item>Debug: 최적화 없음, 디버그 CRT(Windows /MDd), 디버그 정보. 단계 실행·변수 확인용.</item>
@@ -105,6 +130,9 @@ public sealed record NativeToolchain
     // `-print-effective-triple`로 얻은 실제 대상 triple이다(compile 인자의 --target·배포 대상 반영).
     // 예: "x86_64-pc-windows-msvc19.29.30159", "arm64-apple-macosx13.0.0", "aarch64-unknown-linux-android26".
     public string TargetTriple { get; init; } = "";
+
+    // 대상 아키텍처다(TargetTriple에서 정한다). discovery를 거치지 않아 TargetTriple이 빈 툴체인은 ArgumentException이다.
+    public NativeArchitecture Architecture => NativeArchitectures.FromTriple(TargetTriple);
 
     // 컴파일러 드라이버 바이너리 내용의 SHA-256(소문자 hex 64자)이다. 같은 버전 줄을 내는 다른 벤더 빌드를 구별한다.
     public string CompilerDigest { get; init; } = "";

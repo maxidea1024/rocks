@@ -162,7 +162,7 @@ internal static class MetadataLayoutTests
         public Fixture()
         {
             Root = Directory.CreateTempSubdirectory("rocks-meta-layout-").FullName;
-            Context = new BuildContext(Root, System.IO.Path.Combine(Root, "out"), NativePlatform.Windows, NativeConfiguration.Debug);
+            Context = new BuildContext(Root, System.IO.Path.Combine(Root, "out"), NativePlatform.Windows, NativeArchitecture.X64, NativeConfiguration.Debug);
         }
 
         public string Root { get; }

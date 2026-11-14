@@ -120,7 +120,7 @@ namespace Rocks.Build.Cli
                 Console.WriteLine(notice);
             }
 
-            var context = new BuildContext(root, output, toolchain.Platform, configuration);
+            var context = new BuildContext(root, output, toolchain.Platform, toolchain.Architecture, configuration);
             var rulesPath = options.GetValueOrDefault("rules", HostTool(root, "Rocks.Engine.Rules"));
             var rules = RuleLoader.Load(rulesPath, targetName, context);
             Directory.CreateDirectory(output);

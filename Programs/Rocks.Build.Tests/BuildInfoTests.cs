@@ -250,9 +250,33 @@ internal static class BuildInfoTests
             }
         }
 
+        // 대상 아키텍처는 triple의 첫 조각으로 정한다. 32 bit·모르는 아키텍처와 빈 triple은 거부한다.
+        foreach ((string triple, NativeArchitecture expected) in new[] {
+            ("x86_64-pc-windows-msvc19.29.30159", NativeArchitecture.X64), ("amd64-unknown-freebsd", NativeArchitecture.X64),
+            ("arm64-apple-macosx13.0.0", NativeArchitecture.Arm64), ("aarch64-unknown-linux-android26", NativeArchitecture.Arm64),
+            ("arm64e-apple-ios17.0", NativeArchitecture.Arm64) })
+        {
+            Check(NativeArchitectures.FromTriple(triple) == expected, "architecture of " + triple);
+        }
+
+        foreach (string invalid in new[] { "", "i686-pc-windows-msvc", "armv7-none-linux-androideabi26", "riscv64-unknown-linux" })
+        {
+            try
+            {
+                NativeArchitectures.FromTriple(invalid);
+                throw new InvalidOperationException("unsupported architecture accepted: " + invalid);
+            }
+            catch (ArgumentException)
+            {
+            }
+        }
+
         // 실제 discovery: 신원 필드가 채워지고, 지문 텍스트에 컴파일러 디렉터리 경로가 없다.
         Check(toolchain.CompilerVersion.Contains("clang version", StringComparison.Ordinal), "discovered CompilerVersion: " + toolchain.CompilerVersion);
         Check(NativeToolchains.ParseTargetTriple(toolchain.TargetTriple) == toolchain.TargetTriple, "discovered TargetTriple: " + toolchain.TargetTriple);
+        Check(toolchain.Architecture == (System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture ==
+            System.Runtime.InteropServices.Architecture.Arm64 ? NativeArchitecture.Arm64 : NativeArchitecture.X64),
+            "host toolchain architecture follows the host process: " + toolchain.TargetTriple);
         Check(toolchain.CompileArguments.FirstOrDefault() == NativeToolchains.NoDefaultConfig &&
             toolchain.LinkArguments.FirstOrDefault() == NativeToolchains.NoDefaultConfig,
             "discovery must put --no-default-config first in compile and link arguments");
