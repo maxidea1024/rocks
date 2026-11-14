@@ -16,12 +16,6 @@ struct KeyAccess {
         return key.key_.View();
     }
 
-    // 키를 만든 seed view다(seed를 따로 두는 키 타입, 예: KemKeyPair). 수명은 key 객체와 같다.
-    template <typename Key>
-    static Span<const uint8> Seed(const Key& key) noexcept {
-        return key.seed_.View();
-    }
-
     // 키에 딸린 libsodium 상태(AES-256-GCM 키 확장 등) 주소다. 상태가 없는 키는 nullptr다.
     template <typename Key>
     static const void* State(const Key& key) noexcept {

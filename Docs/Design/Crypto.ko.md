@@ -113,7 +113,7 @@ Core/Source/Runtime/Crypto/
 | KDF | HKDF-SHA-256 | HKDF-SHA-512, BLAKE2b KDF(64bit id + 8 byte context) | [libsodium] | libsodium HKDF의 상태 API는 extract에만 있고 expand는 일회성이다. 출력 상한은 255 × 해시 길이다. |
 | 비밀번호 | Argon2id | — | [libsodium] | INTERACTIVE(2, 64 MiB) / MODERATE(3, 256 MiB) / SENSITIVE(4, 1 GiB) 프리셋을 쓰고, 입력 매개변수에 상한을 둔다. |
 | 서명 | Ed25519 | Ed25519ph(스트리밍) | [libsodium] | ph 서명(dom2 접두 + SHA-512(m))은 Ed25519(m)과도, SHA-512(m)에 대한 순수 서명과도 호환되지 않으므로 서명 알고리즘 ID를 따로 둔다. 검증 규칙(비정규 S·small-order R·비정규/small-order 공개키 거부, cofactorless 검증식, `ED25519_COMPAT` 미정의)은 libsodium이 정본이며, 도구도 같은 Rocks 경로로 검증한다. 혼합 차수(torsion이 섞인) 공개키·R은 거부하지 않는다(부분군 검사가 필요하면 키 등록 때 따로 한다). |
-| 키 캡슐화(PQ) | X-Wing | ML-KEM768 | [libsodium] | 1.0.22에 들어왔다. libsodium은 대부분의 용도에 X-Wing(ML-KEM768 + X25519 하이브리드)을 권한다. |
+| 키 캡슐화(PQ) | X-Wing | ML-KEM768 | [libsodium] | 1.0.22에 들어왔다. libsodium은 대부분의 용도에 X-Wing(ML-KEM768 + X25519 하이브리드)을 권한다. 1.0.22 구성은 draft-connolly-cfrg-xwing-kem-11과 같다(draft 부록 벡터로 고정, TLS X25519MLKEM768과는 호환되지 않는다). ML-KEM768 단독은 FIPS 203 전용 환경·상호운용에만 쓰고, 공유 비밀이 암호문·공개키에 묶이지 않으므로(MAL-BIND) 서명 기반 AKE 등에서는 transcript 묶기 파생(`TryDeriveBoundKdfKey`)으로 세션 키를 뽑는다. |
 | 키 교환 · 공개키 암호화 | X25519(crypto_kx) · sealed box | box | [libsodium] | kx는 rx/tx 키를 분리하고 역할을 묶는다(세션 난수가 없어 같은 키 쌍이면 같은 키다). sealed box는 epk ‖ box 구조이고 오버헤드가 48 byte다. 키 쌍 타입을 용도별로 나눈다(KxKeyPair·BoxKeyPair, byte 형식은 libsodium과 같다). |
 | 키 해시 | SipHash-2-4 | SipHash-2-4 128bit | [libsodium] | hash flooding 방어용이다. 128bit 출력판은 full 빌드에만 있다. |
 | 키 wrap | XChaCha20-Poly1305(키 ID를 AD로) | AES-KW/KWP(RFC 3394/5649, 후속) | [libsodium] | KW는 상호운용 요구가 생기면 경량 계층에 더한다. |
@@ -472,6 +472,31 @@ Result<usize> TrySealToRecipient(const BoxPublicKey& recipient, Span<const uint8
 Result<usize> TryOpenSealed(const BoxKeyPair& recipient, Span<const uint8> sealed, Span<uint8> plaintext) noexcept;
 ```
 
+**Crypto/Kem.h (요약, 2026-11-15 구현·교차검증)**
+
+```cpp
+enum class KemAlgorithm : uint8 { XWing = 1, MlKem768 = 2 };   // 영속 형식에 기록한다. 기본은 X-Wing
+class KemPublicKey {   // 알고리즘을 품은 값 타입(최대 1216 byte). TryFromBytes는 알고리즘·길이만 본다
+public:
+    static Result<KemPublicKey> TryFromBytes(KemAlgorithm algorithm, Span<const uint8> bytes) noexcept;
+};
+class KemKeyPair {     // move-only. 키 저장소에 seed만 둔다(X-Wing 32, ML-KEM d ‖ z 64, FIPS 203 seed 형식)
+public:
+    static Result<KemKeyPair> TryGenerate(KemAlgorithm algorithm) noexcept;
+    static Result<KemKeyPair> TryFromSeed(KemAlgorithm algorithm, Span<const uint8> seed) noexcept;
+    const KemPublicKey& PublicKey() const noexcept;
+};
+// 공유 비밀은 KdfKey로 준다(용도별 키는 타입 파생으로 뽑는다). 올바르지 않은 공개키(ML-KEM 계수 ≥ q, X-Wing X25519
+// small-order)는 AuthenticationFailed와 암호문 소거. 캡슐 해제의 암호문 길이 오류와 X-Wing ct_X small-order(RFC 7748 6.1이
+// 허용하는 엄격화, 공개 술어라 oracle 아님)는 AuthenticationFailed, ML-KEM 변조는 암묵적 거부(다른 공유 비밀).
+Result<KdfKey> TryEncapsulate(const KemPublicKey& recipient, Span<uint8> ciphertext) noexcept;
+Result<KdfKey> TryDecapsulate(const KemKeyPair& recipient, Span<const uint8> ciphertext) noexcept;
+Result<void> hazmat::TryExportSeed(const KemKeyPair& key, Span<uint8> output) noexcept;
+```
+
+- KEM은 보낸 사람을 인증하지 않는다. 보내는 쪽은 수신자 공개키의 진위(서명·고정 키)를 먼저 확인한다.
+- ML-KEM 캡슐 해제는 호출마다 seed를 확장 비밀키(2400 byte)로 펼쳐 키 저장소 임시 슬롯에 두었다가 지운다(libsodium X-Wing과 같은 방식). 확장 키를 들이거나 내보내는 경로가 없으므로 FIPS 203 7.3절 hash check가 구성상 성립한다. 키 쌍 하나는 작은 슬롯 하나만 쓴다(확장 키를 계속 두면 4 KiB 슬롯을 차지해 동시 키 쌍이 1000개 아래로 묶인다).
+
 ## 9. 스트리밍 API
 
 ### 9.1 공통 계약
@@ -800,7 +825,7 @@ public:
 // context와 함께 둔다). 타입 파생(TryDeriveMacKey·TryDeriveKdfKey·TryDeriveAeadKey)은 BLAKE2b personal 뒤 8 byte에
 // 키 타입·알고리즘 tag("RkKdfKey", "RkMacK" 0 alg, "RkAead" 0 alg; 모듈 내부 KdfInternal.h 한 곳에 모은다)를 넣어,
 // 같은 (id, context)라도 타입·알고리즘마다 독립인 키를 낸다(2026-11-15 리뷰 반영). TryDeriveSecret은 libsodium
-// crypto_kdf와 같은 byte다. 구현(Kdf.h): KdfKey, TryDeriveSecret(16–64 byte)·TryDeriveMacKey·TryDeriveKdfKey(키 계층),
+// crypto_kdf와 같은 byte다. 구현(Kdf.h): KdfKey, TryDeriveSecret(16–64 byte)·TryDeriveMacKey·TryDeriveKdfKey(키 계층)·TryDeriveBoundKdfKey(transcript 조각을 길이 접두로 묶은 하위 마스터, KEM 공유 비밀을 맥락에 묶을 때),
 // HKDF-SHA-256/512(TryHkdf·TryHkdfExtract·TryHkdfExpand, 상호운용용 Span 출력). TryDeriveAeadKey는 Aead.h에 있다.
 // 세그먼트 키 파생은 그 단계에서 더한다.
 Result<AeadKey> TryDeriveAeadKey(const KdfKey& master, uint64 subkeyId, KdfContext context,

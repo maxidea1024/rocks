@@ -19,6 +19,9 @@ struct KdfTypeTag {
 
 inline constexpr KdfTypeTag KdfKeyTypeTag = {{'R', 'k', 'K', 'd', 'f', 'K', 'e', 'y'}};
 
+// transcript에 묶인 하위 마스터 키(TryDeriveBoundKdfKey)다.
+inline constexpr KdfTypeTag KdfBoundTypeTag = {{'R', 'k', 'K', 'd', 'f', 'B', 'n', 'd'}};
+
 // algorithm은 MacAlgorithm 열거값이다.
 constexpr KdfTypeTag MacKeyTypeTag(uint8 algorithm) noexcept {
     return KdfTypeTag{{'R', 'k', 'M', 'a', 'c', 'K', 0x00, algorithm}};

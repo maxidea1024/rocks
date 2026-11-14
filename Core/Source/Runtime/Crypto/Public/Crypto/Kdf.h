@@ -17,8 +17,8 @@
 // 도메인 분리 지침:
 // - HKDF info는 버전이 붙은 고유 label로 시작한다(예: "rocks.segment.v1" ‖ 헤더).
 // - BLAKE2b KDF context는 용도(기능)마다 하나를 쓰고, id는 그 용도 안의 항목 번호로만 쓴다.
-// - 타입 파생(TryDeriveMacKey·TryDeriveKdfKey)은 키 타입·알고리즘을 파생 입력에 섞으므로, 같은
-//   (id, context)라도 타입·알고리즘이 다르면 독립인 키가 나온다. TryDeriveSecret은 libsodium
+// - 타입 파생(TryDeriveMacKey·TryDeriveKdfKey)은 키 타입·알고리즘을 파생 입력에 섞으므로, 같은 (id,
+//   context)라도 타입·알고리즘이 다르면 독립인 키가 나온다. TryDeriveSecret은 libsodium
 //   crypto_kdf_derive_from_key와 byte가 같아(상호운용) 타입 파생과도 겹치지 않는다.
 //
 // 사용 예:
@@ -140,6 +140,20 @@ private:
 // 섞는다.
 [[nodiscard]] Result<KdfKey> TryDeriveKdfKey(const KdfKey& master, uint64 subkeyId,
                                              KdfContext context) noexcept;
+
+// transcript(조각 목록)에 묶인 하위 마스터 키(32 byte)를 뽑는다. KEM 공유 비밀처럼 맥락(공개키·
+// 암호문·역할·협상 값)에 묶어야 하는 비밀에서 세션 키를 만들 때 쓴다(예: 서명 기반 AKE의 ML-KEM
+// 단독 사용, MAL-BIND). 조각마다 길이(LE64)를 앞에 붙여 넣으므로 조각 경계가 다르면 다른 키다. 키
+// 타입 tag가 TryDeriveKdfKey와 달라 같은 (id, context)라도 겹치지 않는다. 빈 master는 StaleHandle,
+// 키 저장소가 찼으면 OutOfMemory다.
+//
+// 사용 예:
+//   const Span<const uint8> transcript[] = {recipientKey.View(), ciphertext, role};
+//   auto session = crypto::TryDeriveBoundKdfKey(shared.Value(), 1, HandshakeContext,
+//                                               Span<const Span<const uint8>>(transcript));
+[[nodiscard]] Result<KdfKey>
+TryDeriveBoundKdfKey(const KdfKey& master, uint64 subkeyId, KdfContext context,
+                     Span<const Span<const uint8>> transcript) noexcept;
 
 namespace hazmat {
 

@@ -14,9 +14,11 @@ using namespace rocks::crypto;
 // 알려진 답의 출처:
 // - ML-KEM-768: seed 00..3f(d ‖ z)와 캡슐화 난수 m = 80..9f를 kyber-py(FIPS 203 순수 Python)로
 //   계산하고 Python cryptography(OpenSSL)로 공개키·캡슐 해제·암묵적 거부 값을 대조했다.
-// - X-Wing: libsodium 1.0.22-stable test/default/kem_xwing.c tv0(seed 0, 난수 64…)이다. 같은 구성을
-//   Python에서 조립해(SHAKE256 키 확장, ML-KEM은 kyber-py, X25519는 cryptography, SHA3-256
-//   combiner) 표의 공개키·암호문 앞부분과 공유 비밀을 재현했다. 공개키는 SHA3-256으로 비교한다.
+// - X-Wing: draft-connolly-cfrg-xwing-kem-11 부록 C 벡터 1(seed·eseed는 draft 값, 공유 비밀을 draft
+//   값과 대조)과 libsodium 1.0.22-stable test/default/kem_xwing.c tv0(seed 0, 난수 64…)이다. 같은
+//   구성을 Python에서 조립해(SHAKE256 키 확장, ML-KEM은 kyber-py, X25519는 cryptography, SHA3-256
+//   combiner) 공개키·암호문을 계산했다. 공개키는 SHA3-256으로 비교한다.
+// - transcript 묶기 파생은 Python hashlib.blake2b로 계산했다.
 namespace {
 
 struct HexBytes {
@@ -120,6 +122,46 @@ constexpr const char* XWingCiphertext =
 constexpr const char* XWingShared =
     "e5ba94031ea6efd69c09c254f6d9783136ba6037e2d4c43bcccf19d6f3f4343a";
 
+// draft-11 부록 C 벡터 1(seed 7f9c…, eseed 3cb1…)이다.
+constexpr const char* DraftPublicKeySha3 =
+    "5121745904643ad9dfacca7869292c19a8a69533b53e60666b7db910b4ad6367";
+constexpr const char* DraftCiphertext =
+    "b83aa828d4d62b9a83ceffe1d3d3bb1ef31264643c070c5798927e41fb07914a273f8f96e7826cd5375a283d7da8"
+    "85304c5de0516a0f0654243dc5b97f8bfeb831f68251219aabdd723bc6512041acbaef8af44265524942b902e68f"
+    "fd23221cda70b1b55d776a92d1143ea3a0c475f63ee6890157c7116dae3f62bf72f60acd2bb8cc31ce2ba0de364f"
+    "52b8ed38c79d719715963a5dd3842d8e8b43ab704e4759b5327bf027c63c8fa857c4908d5a8a7b88ac7f2be394d9"
+    "3c3706ddd4e698cc6ce370101f4d0213254238b4a2e8821b6e414a1cf20f6c1244b699046f5a01caa0a1a5551630"
+    "0b40d2048c77cc73afba79afeea9d2c0118bdf2adb8870dc328c5516cc45b1a2058141039e2c90a110a9e16b318d"
+    "fb53bd49a126d6b73f215787517b8917cc01cabd107d06859854ee8b4f9861c226d3764c87339ab16c3667d2f493"
+    "84e55456dd40414b70a6af841585f4c90c68725d57704ee8ee7ce6e2f9be582dbee985e038ffc346ebfb4e22158b"
+    "6c84374a9ab4a44e1f91de5aac5197f89bc5e5442f51f9a5937b102ba3beaebf6e1c58380a4a5fedce4a4e5026f8"
+    "8f528f59ffd2db41752b3a3d90efabe463899b7d40870c530c8841e8712b733668ed033adbfafb2d49d37a44d406"
+    "4e5863eb0af0a08d47b3cc888373bc05f7a33b841bc2587c57eb69554e8a3767b7506917b6b70498727f16eac1a3"
+    "6ec8d8cfaf751549f2277db277e8a55a9a5106b23a0206b4721fa9b3048552c5bd5b594d6e247f38c18c591aea7f"
+    "56249c72ce7b117afcc3a8621582f9cf71787e183dee09367976e98409ad9217a497df888042384d7707a6b78f5f"
+    "7fb8409e3b535175373461b776002d799cbad62860be70573ecbe13b246e0da7e93a52168e0fb6a9756b895ef7f0"
+    "147a0dc81bfa644b088a9228160c0f9acf1379a2941cd28c06ebc80e44e17aa2f8177010afd78a97ce0868d1629e"
+    "bb294c5151812c583daeb88685220f4da9118112e07041fcc24d5564a99fdbde28869fe0722387d7a9a4d16e1cc8"
+    "555917e09944aa5ebaaaec2cf62693afad42a3f518fce67d273cc6c9fb5472b380e8573ec7de06a3ba2fd5f931d7"
+    "25b493026cb0acbd3fe62d00e4c790d965d7a03a3c0b4222ba8c2a9a16e2ac658f572ae0e746eafc4feba023576f"
+    "08942278a041fb82a70a595d5bacbf297ce2029898a71e5c3b0d1c6228b485b1ade509b35fbca7eca97b2132e7cb"
+    "6bc465375146b7dceac969308ac0c2ac89e7863eb8943015b24314cafb9c7c0e85fe543d56658c213632599efabf"
+    "c1ec49dd8c88547bb2cc40c9d38cbd3099b4547840560531d0188cd1e9c23a0ebee0a03d5577d66b1d2bcb4baaf2"
+    "1cc7fef1e03806ca96299df0dfbc56e1b2b43e4fc20c37f834c4af62127e7dae86c3c25a2f696ac8b589dec71d59"
+    "5bfbe94b5ed4bc07d800b330796fda89edb77be0294136139354eb8cd37591578f9c600dd9be8ec6219fdd507adf"
+    "3397ed4d68707b8d13b24ce4cd8fb22851bfe9d632407f31ed6f7cb1600de56f17576740ce2a32fc5145030145cf"
+    "b97e63e0e41d354274a079d3e6fb2e15";
+constexpr const char* DraftShared =
+    "d2df0522128f09dd8e2c92b1e905c793d8f57a54c3da25861f10bf4ca613e384";
+
+// X25519 small-order u 값이다: 0, 1(위수 4), 위수 8 점, 최상위 bit만 켠 0.
+constexpr const char* SmallOrderX25519[] = {
+    "0000000000000000000000000000000000000000000000000000000000000000",
+    "0100000000000000000000000000000000000000000000000000000000000000",
+    "e0eb7a7c3b41b8ae1656e3faf19fc46ada098deb9c32b1fd866205165f49b800",
+    "0000000000000000000000000000000000000000000000000000000000000080",
+};
+
 constexpr KdfContext TestContext("KEM test");
 
 } // namespace
@@ -183,17 +225,34 @@ TEST(CryptoXWingKnownAnswers) {
     REQUIRE(shared);
     CHECK(KdfKeyEquals(shared.Value(), XWingShared));
 
-    // ML-KEM 부분이 바뀌면 다른 공유 비밀(암묵적 거부), X25519 부분이 small-order 점이면 거부다.
+    // ML-KEM 부분이 바뀌면 정해진 다른 공유 비밀(암묵적 거부)이고, X25519 부분이 small-order 점이면
+    // 거부다.
     uint8 tampered[1120];
     memcpy(tampered, ciphertext.bytes, sizeof(tampered));
     tampered[0] ^= 0x01;
     auto other = TryDecapsulate(key.Value(), Span<const uint8>(tampered));
     REQUIRE(other);
-    CHECK(!KdfKeyEquals(other.Value(), XWingShared));
-    memcpy(tampered, ciphertext.bytes, sizeof(tampered));
-    memset(tampered + 1088, 0, 32);
-    CHECK(TryDecapsulate(key.Value(), Span<const uint8>(tampered)).Error() ==
-          ErrorCode::AuthenticationFailed);
+    CHECK(KdfKeyEquals(other.Value(),
+                       "cdaeaabde37f873928d46a6ce18af3ea8e2cb1a675650a684ff33506cea7e75b"));
+    for (const char* hex : SmallOrderX25519) {
+        const HexBytes point(hex);
+        REQUIRE(point.size == 32);
+        memcpy(tampered, ciphertext.bytes, sizeof(tampered));
+        memcpy(tampered + 1088, point.bytes, 32);
+        CHECK(TryDecapsulate(key.Value(), Span<const uint8>(tampered)).Error() ==
+              ErrorCode::AuthenticationFailed);
+    }
+
+    // draft-11 부록 C 벡터 1이다.
+    const HexBytes draftSeed("7f9c2ba4e88f827d616045507605853ed73b8093f6efbc88eb1a6eacfa66ef26");
+    auto draft = KemKeyPair::TryFromSeed(KemAlgorithm::XWing, draftSeed.View());
+    REQUIRE(draft);
+    CHECK(PublicKeyHashEquals(draft.Value().PublicKey(), DraftPublicKeySha3));
+    const HexBytes draftCiphertext(DraftCiphertext);
+    REQUIRE(draftCiphertext.size == 1120);
+    auto draftShared = TryDecapsulate(draft.Value(), draftCiphertext.View());
+    REQUIRE(draftShared);
+    CHECK(KdfKeyEquals(draftShared.Value(), DraftShared));
 }
 
 TEST(CryptoKemRoundTrip) {
@@ -293,39 +352,73 @@ TEST(CryptoKemRejectsMisuse) {
     CHECK(hazmat::TryExportSeed(key.Value(), Span<uint8>(seed)).Error() ==
           ErrorCode::InvalidArgument);
 
-    // 올바르지 않은 공개키: X-Wing의 X25519 부분이 0(small-order), ML-KEM 계수가 q 이상(첫 계수
-    // 0xfff). 캡슐화하지 않고 암호문을 지운다.
-    memcpy(bytes, key.Value().PublicKey().View().Data(), 1216);
-    memset(bytes + 1184, 0, 32);
-    auto badXWing =
-        KemPublicKey::TryFromBytes(KemAlgorithm::XWing, Span<const uint8>(bytes).Left(1216));
-    REQUIRE(badXWing);
-    memset(ciphertext, 0x5A, sizeof(ciphertext));
-    CHECK(TryEncapsulate(badXWing.Value(), Span<uint8>(ciphertext).Left(1120)).Error() ==
-          ErrorCode::AuthenticationFailed);
-    bool cleared = true;
-    for (usize i = 0; i < 1120; ++i) {
-        cleared = cleared && ciphertext[i] == 0;
+    // 올바르지 않은 공개키는 캡슐화하지 않고 암호문을 지운다.
+    const auto expectRejectedKey = [&](KemAlgorithm algorithm, Span<const uint8> publicKey) {
+        auto bad = KemPublicKey::TryFromBytes(algorithm, publicKey);
+        REQUIRE(bad);
+        const usize ciphertextBytes = TryGetKemInfo(algorithm).Value().ciphertextBytes;
+        memset(ciphertext, 0x5A, sizeof(ciphertext));
+        CHECK(TryEncapsulate(bad.Value(), Span<uint8>(ciphertext).Left(ciphertextBytes)).Error() ==
+              ErrorCode::AuthenticationFailed);
+        bool cleared = true;
+        for (usize i = 0; i < ciphertextBytes; ++i) {
+            cleared = cleared && ciphertext[i] == 0;
+        }
+
+        CHECK(cleared);
+    };
+    const auto expectAcceptedKey = [&](KemAlgorithm algorithm, Span<const uint8> publicKey) {
+        auto good = KemPublicKey::TryFromBytes(algorithm, publicKey);
+        REQUIRE(good);
+        const usize ciphertextBytes = TryGetKemInfo(algorithm).Value().ciphertextBytes;
+        CHECK(TryEncapsulate(good.Value(), Span<uint8>(ciphertext).Left(ciphertextBytes)));
+    };
+
+    // X-Wing의 X25519 부분이 small-order 점이다.
+    for (const char* hex : SmallOrderX25519) {
+        const HexBytes point(hex);
+        REQUIRE(point.size == 32);
+        memcpy(bytes, key.Value().PublicKey().View().Data(), 1216);
+        memcpy(bytes + 1184, point.bytes, 32);
+        expectRejectedKey(KemAlgorithm::XWing, Span<const uint8>(bytes).Left(1216));
     }
 
-    CHECK(cleared);
+    // ML-KEM 계수 경계(12 bit little-endian 묶음): 첫 계수 3328은 받고 3329(q)는 거부하며, 둘째
+    // 계수 3329도 거부한다. X-Wing의 ML-KEM 부분에도 같은 검사가 걸린다.
     auto mlkem = KemKeyPair::TryGenerate(KemAlgorithm::MlKem768);
     REQUIRE(mlkem);
-    memcpy(bytes, mlkem.Value().PublicKey().View().Data(), 1184);
-    bytes[0] = 0xFF;
-    bytes[1] |= 0x0F;
-    auto badMlKem =
-        KemPublicKey::TryFromBytes(KemAlgorithm::MlKem768, Span<const uint8>(bytes).Left(1184));
-    REQUIRE(badMlKem);
-    CHECK(TryEncapsulate(badMlKem.Value(), Span<uint8>(ciphertext).Left(1088)).Error() ==
-          ErrorCode::AuthenticationFailed);
+    struct Coefficients {
+        uint8 bytes[3];
+        bool accepted;
+    };
 
-    // 키 쌍은 키 저장소를 쓰고 소멸·이동 때 돌려준다.
+    const Coefficients boundaries[] = {
+        {{0x00, 0x8d, 0xa1}, true},  // 계수0 = 3328, 계수1 = 2584
+        {{0x01, 0x8d, 0xa1}, false}, // 계수0 = 3329
+        {{0x29, 0x1a, 0xd0}, false}, // 계수0 = 2601, 계수1 = 3329
+    };
+    for (const Coefficients& item : boundaries) {
+        memcpy(bytes, mlkem.Value().PublicKey().View().Data(), 1184);
+        memcpy(bytes, item.bytes, 3);
+        if (item.accepted) {
+            expectAcceptedKey(KemAlgorithm::MlKem768, Span<const uint8>(bytes).Left(1184));
+        } else {
+            expectRejectedKey(KemAlgorithm::MlKem768, Span<const uint8>(bytes).Left(1184));
+        }
+    }
+
+    memcpy(bytes, key.Value().PublicKey().View().Data(), 1216);
+    memcpy(bytes, boundaries[1].bytes, 3);
+    expectRejectedKey(KemAlgorithm::XWing, Span<const uint8>(bytes).Left(1216));
+
+    // 키 쌍은 키 저장소에 seed만 둔다(ML-KEM도 작은 슬롯 하나, 확장 비밀키는 캡슐 해제 때만 잠깐
+    // 쓴다). 소멸·이동 때 돌려준다.
     const usize used = GetSecretMemoryStatus().arenaUsedBytes;
     {
         auto generated = KemKeyPair::TryGenerate(KemAlgorithm::MlKem768);
         REQUIRE(generated);
         CHECK(GetSecretMemoryStatus().arenaUsedBytes > used);
+        CHECK(GetSecretMemoryStatus().arenaUsedBytes - used <= 64);
         KemKeyPair moved = Move(generated.Value());
         CHECK(generated.Value().IsEmpty());
         CHECK(TryDecapsulate(generated.Value(), Span<const uint8>(ciphertext).Left(1088)).Error() ==
@@ -334,4 +427,45 @@ TEST(CryptoKemRejectsMisuse) {
     }
 
     CHECK(GetSecretMemoryStatus().arenaUsedBytes == used);
+}
+
+TEST(CryptoKdfBoundDerivation) {
+    // transcript 묶기 파생은 BLAKE2b(key = master, salt = LE64(id) ‖ 0⁸, personal = context ‖
+    // "RkKdfBnd", 입력 = 조각마다 LE64(길이) ‖ byte)다. 조각 경계가 다르면 다른 키다.
+    uint8 masterBytes[32];
+    for (usize i = 0; i < sizeof(masterBytes); ++i) {
+        masterBytes[i] = static_cast<uint8>(i);
+    }
+
+    auto master = KdfKey::TryImport(Span<const uint8>(masterBytes));
+    REQUIRE(master);
+    const auto text = [](const char* value) {
+        return Span<const uint8>(reinterpret_cast<const uint8*>(value), strlen(value));
+    };
+    const Span<const uint8> pieces[] = {text("pk-bytes"), Span<const uint8>(), text("ciphertext")};
+    auto bound =
+        TryDeriveBoundKdfKey(master.Value(), 7, TestContext, Span<const Span<const uint8>>(pieces));
+    REQUIRE(bound);
+    CHECK(KdfKeyEquals(bound.Value(),
+                       "d8f3d6f77c97842289acd88c3439fdf4f3b57db1af7fc4660ae4820dfbbc06f7"));
+
+    const Span<const uint8> shifted[] = {text("pk-byte"), text("s"), text("ciphertext")};
+    auto other = TryDeriveBoundKdfKey(master.Value(), 7, TestContext,
+                                      Span<const Span<const uint8>>(shifted));
+    REQUIRE(other);
+    CHECK(KdfKeyEquals(other.Value(),
+                       "c639b18621acc9e6086943cbaa3f454df42de60d6d4aae57351f8acaf7225940"));
+
+    auto empty =
+        TryDeriveBoundKdfKey(master.Value(), 7, TestContext, Span<const Span<const uint8>>());
+    REQUIRE(empty);
+    CHECK(KdfKeyEquals(empty.Value(),
+                       "0d5d2e69766bb9837c8f4c1f0b1586590974c08647e3990cc703f96c5548b659"));
+
+    // 같은 (id, context)의 TryDeriveKdfKey와 다르다(타입 tag가 다르다).
+    auto plain = TryDeriveKdfKey(master.Value(), 7, TestContext);
+    REQUIRE(plain);
+    CHECK(!SameKdfKey(plain.Value(), empty.Value()));
+    CHECK(TryDeriveBoundKdfKey(KdfKey(), 7, TestContext, Span<const Span<const uint8>>()).Error() ==
+          ErrorCode::StaleHandle);
 }

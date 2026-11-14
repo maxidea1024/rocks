@@ -237,4 +237,49 @@ Result<KdfKey> TryDeriveKdfKey(const KdfKey& master, uint64 subkeyId, KdfContext
     return Result<KdfKey>::Success(detail::KeyAccess::Make<KdfKey>(Move(secret.Value())));
 }
 
+Result<KdfKey> TryDeriveBoundKdfKey(const KdfKey& master, uint64 subkeyId, KdfContext context,
+                                    Span<const Span<const uint8>> transcript) noexcept {
+    if (master.IsEmpty()) {
+        return Result<KdfKey>::Failure(ErrorCode::StaleHandle);
+    }
+
+    auto secret = SecretBytes::TryCreate(KdfKeyBytes);
+    if (!secret) {
+        return Result<KdfKey>::Failure(secret.Error());
+    }
+
+    // 타입 파생과 같은 key·salt·personal 배치에 transcript를 BLAKE2b 입력으로 넣는다. 상태는 키에서
+    // 나온 비밀이라 끝나면 지운다.
+    uint8 salt[crypto_generichash_blake2b_SALTBYTES] = {};
+    StoreLittleEndian<uint64>(salt, subkeyId);
+    uint8 personal[crypto_generichash_blake2b_PERSONALBYTES] = {};
+    platform::MemoryCopy(personal, context.Data(), KdfContext::Bytes);
+    platform::MemoryCopy(personal + KdfContext::Bytes, detail::KdfBoundTypeTag.bytes,
+                         sizeof(detail::KdfBoundTypeTag.bytes));
+
+    detail::EnsureSodium();
+    const Span<const uint8> key = detail::KeyAccess::Bytes(master);
+    crypto_generichash_blake2b_state state;
+    detail::RequireSodium(crypto_generichash_blake2b_init_salt_personal(
+                              &state, key.Data(), key.Size(), KdfKeyBytes, salt, personal),
+                          "Crypto: crypto_generichash_blake2b_init_salt_personal failed");
+    for (Span<const uint8> piece : transcript) {
+        uint8 length[8];
+        StoreLittleEndian<uint64>(length, static_cast<uint64>(piece.Size()));
+        detail::RequireSodium(crypto_generichash_blake2b_update(&state, length, sizeof(length)),
+                              "Crypto: crypto_generichash_blake2b_update failed");
+        if (!piece.IsEmpty()) {
+            detail::RequireSodium(
+                crypto_generichash_blake2b_update(&state, piece.Data(), piece.Size()),
+                "Crypto: crypto_generichash_blake2b_update failed");
+        }
+    }
+
+    detail::RequireSodium(
+        crypto_generichash_blake2b_final(&state, secret.Value().MutableView().Data(), KdfKeyBytes),
+        "Crypto: crypto_generichash_blake2b_final failed");
+    SecureZero(Span<uint8>(reinterpret_cast<uint8*>(&state), sizeof(state)));
+    return Result<KdfKey>::Success(detail::KeyAccess::Make<KdfKey>(Move(secret.Value())));
+}
+
 } // namespace rocks::crypto
