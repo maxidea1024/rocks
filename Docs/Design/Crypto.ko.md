@@ -435,19 +435,28 @@ AEAD 규칙(2026-11-15 구현):
 **Crypto/Signature.h · KeyExchange.h (요약)**
 
 ```cpp
-struct Ed25519PublicKey { uint8 bytes[32] = {}; Span<const uint8> View() const noexcept; };
+enum class SignatureAlgorithm : uint8 { Ed25519 = 1, Ed25519ph = 2 };   // 영속 형식에 기록한다
+
+struct Ed25519PublicKey {   // 일반 값 타입. TryFromBytes는 길이만 본다(점 검사는 검증 때)
+    uint8 bytes[32] = {};
+    static Result<Ed25519PublicKey> TryFromBytes(Span<const uint8> bytes) noexcept;   // InvalidArgument
+    Span<const uint8> View() const noexcept;
+};
 struct Ed25519Signature { uint8 bytes[64] = {}; Span<const uint8> View() const noexcept; };
 
-class Ed25519SigningKey {   // move-only 비밀 객체. seed 32 byte에서 만들거나 생성한다
+class Ed25519SigningKey {   // move-only, 키 저장소에 libsodium 비밀키(seed ‖ 공개키) 64 byte
 public:
-    static Result<Ed25519SigningKey> TryGenerate() noexcept;
+    static Result<Ed25519SigningKey> TryGenerate() noexcept;   // OS 난수 실패 DependencyFailed
     static Result<Ed25519SigningKey> TryFromSeed(Span<const uint8> seed) noexcept;
     Ed25519PublicKey PublicKey() const noexcept;
+    bool IsEmpty() const noexcept;
 };
 
 Result<Ed25519Signature> TrySign(const Ed25519SigningKey& key, Span<const uint8> message) noexcept;
+// 불일치·길이가 틀린 서명·올바르지 않은 공개키 점은 모두 AuthenticationFailed다.
 Result<void> TryVerify(const Ed25519PublicKey& key, Span<const uint8> message,
-                       Span<const uint8> signature) noexcept;     // 불일치는 AuthenticationFailed
+                       Span<const uint8> signature) noexcept;
+Result<void> hazmat::TryExportSeed(const Ed25519SigningKey& key, Span<uint8> output) noexcept;
 
 // kx: 클라이언트·서버 역할에 따라 rx/tx 세션 키를 각각 AeadKey로 돌려준다.
 Result<KxSessionKeys> TryClientSessionKeys(const KxKeyPair& client, const KxPublicKey& server) noexcept;
@@ -497,15 +506,18 @@ public:
     Result<void> TryFinishVerify(Span<const uint8> expectedTag) noexcept;   // 불일치 AuthenticationFailed
 };
 
-// Ed25519ph. 순수 Ed25519(m) 서명과 호환되지 않는다(알고리즘 ID가 다르다).
+// Ed25519ph(RFC 8032, context 없음). 순수 Ed25519(m) 서명과 호환되지 않는다(알고리즘 ID가 다르다).
+// SHA-512 상태는 키가 없으므로 allocator에서 할당한다. Finish 뒤에는 Reset 전까지 InvalidArgument다.
 class Ed25519phSigner {
 public:
-    static Result<Ed25519phSigner> TryCreate() noexcept;
-    Result<void> TryUpdate(Span<const uint8> input) noexcept;
-    Result<Ed25519Signature> TryFinish(const Ed25519SigningKey& key) noexcept;
+    static Result<Ed25519phSigner> TryCreate(Allocator& allocator = GetSecretAllocator()) noexcept;
+    Result<void> TryUpdate(Span<const uint8> input) noexcept;        // 조각 overload도 있다
+    Result<Ed25519Signature> TryFinish(const Ed25519SigningKey& key) noexcept;   // 빈 키는 상태 불변
+    void Reset() noexcept;
 };
 
-class Ed25519phVerifier { /* TryUpdate, TryFinish(const Ed25519PublicKey&, Span<const uint8> signature) */ };
+// 검증 실패·길이가 틀린 서명은 AuthenticationFailed이고, 결과와 관계없이 상태를 끝낸다.
+class Ed25519phVerifier { /* TryCreate, TryUpdate, TryFinish(const Ed25519PublicKey&, Span<const uint8> signature), Reset */ };
 
 } // namespace rocks::crypto
 ```

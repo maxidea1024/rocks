@@ -153,17 +153,6 @@ bool IsAvailable(AeadAlgorithm algorithm) noexcept {
     return false;
 }
 
-// 빈 Span의 Data()는 null일 수 있다. libsodium 일부 경로는 길이 0이어도 포인터를 쓰므로 유효한
-// 주소를 준다.
-const uint8* InputPointer(Span<const uint8> bytes) noexcept {
-    static const uint8 empty = 0;
-    return bytes.IsEmpty() ? &empty : bytes.Data();
-}
-
-uint8* OutputPointer(Span<uint8> bytes, uint8* scratch) noexcept {
-    return bytes.IsEmpty() ? scratch : bytes.Data();
-}
-
 // first가 second의 offset byte 뒤에서 시작하는가. 범위를 벗어난 포인터 산술을 피하려고 주소로
 // 비교한다.
 bool StartsAt(const void* first, const void* second, usize offset) noexcept {
@@ -176,10 +165,10 @@ void SealDetachedRaw(const AeadKey& key, Span<const uint8> nonce, Span<const uin
                      Span<uint8> tag) noexcept {
     uint8 scratch = 0;
     const Span<const uint8> k = detail::KeyAccess::Bytes(key);
-    const uint8* m = InputPointer(plaintext);
+    const uint8* m = detail::InputPointer(plaintext);
     const usize mlen = plaintext.Size();
-    uint8* c = OutputPointer(ciphertext, &scratch);
-    const uint8* ad = InputPointer(associatedData);
+    uint8* c = detail::OutputPointer(ciphertext, &scratch);
+    const uint8* ad = detail::InputPointer(associatedData);
     const usize adlen = associatedData.Size();
     switch (key.Algorithm()) {
     case AeadAlgorithm::XChaCha20Poly1305:
@@ -226,10 +215,10 @@ bool OpenDetachedRaw(const AeadKey& key, Span<const uint8> nonce, Span<const uin
                      Span<uint8> plaintext) noexcept {
     uint8 scratch = 0;
     const Span<const uint8> k = detail::KeyAccess::Bytes(key);
-    const uint8* c = InputPointer(ciphertext);
+    const uint8* c = detail::InputPointer(ciphertext);
     const usize clen = ciphertext.Size();
-    uint8* m = OutputPointer(plaintext, &scratch);
-    const uint8* ad = InputPointer(associatedData);
+    uint8* m = detail::OutputPointer(plaintext, &scratch);
+    const uint8* ad = detail::InputPointer(associatedData);
     const usize adlen = associatedData.Size();
     switch (key.Algorithm()) {
     case AeadAlgorithm::XChaCha20Poly1305:
