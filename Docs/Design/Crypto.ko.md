@@ -459,10 +459,11 @@ public:
 // 뒤에는 Reset 전까지 Update가 InvalidArgument다.
 class XofState { /* TryCreate(algorithm, domain, allocator), TryUpdate, TrySqueeze, Reset */ };
 
-// HMAC-SHA-256/512, BLAKE2b keyed를 같은 형태로 둔다. 검증은 상수 시간이다.
+// HMAC-SHA-256/512, BLAKE2b keyed를 같은 형태로 둔다. 알고리즘은 키(MacKey)가 정한다. 상태는 키에서 파생된
+// 비밀이라 키 저장소 슬롯에 둔다. 검증은 상수 시간이고 결과와 관계없이 상태를 끝낸다.
 class MacState {
 public:
-    static Result<MacState> TryCreate(MacAlgorithm algorithm, const MacKey& key) noexcept;
+    static Result<MacState> TryCreate(const MacKey& key) noexcept;
     Result<void> TryUpdate(Span<const uint8> input) noexcept;
     Result<void> TryFinish(Span<uint8> tag) noexcept;
     Result<void> TryFinishVerify(Span<const uint8> expectedTag) noexcept;   // 불일치 AuthenticationFailed
