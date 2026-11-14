@@ -25,8 +25,9 @@
 //   crypto::Sha512Digest sha = crypto::Sha512(content);
 //
 //   auto state = crypto::HashState::TryCreate(crypto::HashAlgorithm::Sha3_256);
-//   state.Value().TryUpdate(header); state.Value().TryUpdate(body);
-//   state.Value().TryFinish(Span<uint8>(digest));
+//   if (!state) { return state.Error(); }
+//   if (auto updated = state.Value().TryUpdate(body); !updated) { return updated.Error(); }
+//   if (auto done = state.Value().TryFinish(Span<uint8>(digest)); !done) { return done.Error(); }
 namespace rocks::crypto {
 
 inline constexpr usize Blake2bMinDigestBytes = 16;
@@ -67,11 +68,19 @@ using Sha3_512Digest = FixedDigest<Sha3_512Tag, 64>;
 // XOF: output.Size()만큼 짜낸다(0이면 아무것도 하지 않는 성공). TurboSHAKE의 domain은
 // 0x01–0x7F다(기본 0x1F, 밖이면 InvalidArgument). 같은 입력에서 짧은 출력은 긴 출력의 앞부분이다.
 [[nodiscard]] Result<void> TryShake128(Span<const uint8> input, Span<uint8> output) noexcept;
+[[nodiscard]] Result<void> TryShake128(Span<const Span<const uint8>> pieces,
+                                       Span<uint8> output) noexcept;
 [[nodiscard]] Result<void> TryShake256(Span<const uint8> input, Span<uint8> output) noexcept;
+[[nodiscard]] Result<void> TryShake256(Span<const Span<const uint8>> pieces,
+                                       Span<uint8> output) noexcept;
 [[nodiscard]] Result<void> TryTurboShake128(Span<const uint8> input, Span<uint8> output,
                                             uint8 domain = 0x1F) noexcept;
+[[nodiscard]] Result<void> TryTurboShake128(Span<const Span<const uint8>> pieces,
+                                            Span<uint8> output, uint8 domain = 0x1F) noexcept;
 [[nodiscard]] Result<void> TryTurboShake256(Span<const uint8> input, Span<uint8> output,
                                             uint8 domain = 0x1F) noexcept;
+[[nodiscard]] Result<void> TryTurboShake256(Span<const Span<const uint8>> pieces,
+                                            Span<uint8> output, uint8 domain = 0x1F) noexcept;
 
 enum class HashAlgorithm : uint8 {
     Blake2b,
@@ -83,10 +92,10 @@ enum class HashAlgorithm : uint8 {
 // 증분 해시다. 큰 입력을 조각으로 넣는다. move-only이며 한 번에 한 스레드만 쓴다.
 //
 // - 상태는 allocator에서 할당한다(기본 GetSecretAllocator: 평문이 지나간 상태이므로 해제 때
-//   지운다). 키 없는 해시라 키 저장소는 쓰지 않는다.
-// - TryFinish 뒤에는 Reset 전까지 TryUpdate·TryFinish가 InvalidArgument다. 이동된 객체는
-//   StaleHandle이다.
-// - 소멸·Reset 때 상태를 지운다.
+//   지운다). 키 없는 해시라 키 저장소는 쓰지 않는다. allocator는 이 객체보다 오래 살아야 한다.
+// - TryFinish 뒤에는 Reset 전까지 TryUpdate·TryFinish가 InvalidArgument다. 기본 생성한 객체와
+//   이동된 객체는 StaleHandle이다(Algorithm()·DigestBytes()는 이전 값을 그대로 돌려준다).
+// - TryFinish 직후, Reset 전, 소멸 때 상태를 지운다.
 class HashState {
 public:
     HashState() noexcept = default;
@@ -156,7 +165,10 @@ public:
               Allocator& allocator = GetSecretAllocator()) noexcept;
 
     [[nodiscard]] Result<void> TryUpdate(Span<const uint8> input) noexcept;
+    [[nodiscard]] Result<void> TryUpdate(Span<const Span<const uint8>> pieces) noexcept;
     [[nodiscard]] Result<void> TrySqueeze(Span<uint8> output) noexcept;
+
+    // 같은 알고리즘·domain의 처음 상태로 되돌린다(앞 상태를 먼저 지운다).
     void Reset() noexcept;
 
 private:

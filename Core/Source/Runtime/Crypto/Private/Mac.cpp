@@ -322,7 +322,9 @@ Result<void> MacState::TryFinish(Span<uint8> tag) noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // 끝난 상태는 다시 쓰지 않으므로 바로 지운다(키에서 파생된 내부 상태가 남지 않게).
     FinishState(algorithm_, static_cast<AnyMacState*>(state_), tag);
+    sodium_memzero(state_, sizeof(AnyMacState));
     finished_ = true;
     return Result<void>::Success();
 }
@@ -341,6 +343,7 @@ Result<void> MacState::TryFinishVerify(Span<const uint8> expectedTag) noexcept {
     const usize bytes = TagBytes(algorithm_);
     uint8 computed[HmacSha512TagBytes];
     FinishState(algorithm_, static_cast<AnyMacState*>(state_), Span<uint8>(computed, bytes));
+    sodium_memzero(state_, sizeof(AnyMacState));
     const bool equal = expectedTag.Size() == bytes &&
                        ConstantTimeEquals(Span<const uint8>(computed, bytes), expectedTag);
     sodium_memzero(computed, sizeof(computed));

@@ -299,40 +299,34 @@ Digest FixedHash(HashAlgorithm algorithm, Span<const uint8> input) noexcept {
     return FixedHash<Digest, State>(algorithm, Span<const Span<const uint8>>(pieces));
 }
 
+// 스택 상태로 조각 입력을 짜낸다. domain은 TurboSHAKE만 쓴다(SHAKE에는 표준 값을 넘긴다). 끝나면
+// 상태를 지운다.
 template <typename State>
-Result<void> TurboShake(XofAlgorithm algorithm, Span<const uint8> input, Span<uint8> output,
-                        uint8 domain) noexcept {
-    if (!IsValidTurboShakeDomain(domain) || Overlaps(input, output)) {
+Result<void> Xof(XofAlgorithm algorithm, Span<const Span<const uint8>> pieces, Span<uint8> output,
+                 uint8 domain) noexcept {
+    if (!IsValidTurboShakeDomain(domain) || OutputOverlaps(pieces, output)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     detail::EnsureSodium();
     State state;
     InitState(algorithm, &state, domain);
-    UpdateState(algorithm, &state, input);
+    for (Span<const uint8> piece : pieces) {
+        UpdateState(algorithm, &state, piece);
+    }
+
     SqueezeState(algorithm, &state, output);
     sodium_memzero(&state, sizeof(state));
     return Result<void>::Success();
 }
 
-template <typename State>
-Result<void> Shake(XofAlgorithm algorithm, Span<const uint8> input, Span<uint8> output) noexcept {
-    if (Overlaps(input, output)) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
-    }
-
-    detail::EnsureSodium();
-    State state;
-    InitState(algorithm, &state, TurboShakeStandardDomain);
-    UpdateState(algorithm, &state, input);
-    SqueezeState(algorithm, &state, output);
-    sodium_memzero(&state, sizeof(state));
-    return Result<void>::Success();
+void WipeState(void* state, usize bytes) noexcept {
+    SecureZero(Span<uint8>(static_cast<uint8*>(state), bytes));
 }
 
 // 할당한 상태를 지우고 돌려준다. 해제 실패는 상태가 그 allocator 것이 아니라는 결함이다.
 void ReleaseState(Allocator* allocator, void* state, usize bytes) noexcept {
-    SecureZero(Span<uint8>(static_cast<uint8*>(state), bytes));
+    WipeState(state, bytes);
     if (!allocator->Deallocate(state)) {
         platform::Fatal("Crypto: hash state was not owned by its allocator");
     }
@@ -383,21 +377,43 @@ Sha3_512Digest Sha3_512(Span<const Span<const uint8>> pieces) noexcept {
 }
 
 Result<void> TryShake128(Span<const uint8> input, Span<uint8> output) noexcept {
-    return Shake<crypto_xof_shake128_state>(XofAlgorithm::Shake128, input, output);
+    const Span<const uint8> pieces[1] = {input};
+    return TryShake128(Span<const Span<const uint8>>(pieces), output);
+}
+
+Result<void> TryShake128(Span<const Span<const uint8>> pieces, Span<uint8> output) noexcept {
+    return Xof<crypto_xof_shake128_state>(XofAlgorithm::Shake128, pieces, output,
+                                          TurboShakeStandardDomain);
 }
 
 Result<void> TryShake256(Span<const uint8> input, Span<uint8> output) noexcept {
-    return Shake<crypto_xof_shake256_state>(XofAlgorithm::Shake256, input, output);
+    const Span<const uint8> pieces[1] = {input};
+    return TryShake256(Span<const Span<const uint8>>(pieces), output);
+}
+
+Result<void> TryShake256(Span<const Span<const uint8>> pieces, Span<uint8> output) noexcept {
+    return Xof<crypto_xof_shake256_state>(XofAlgorithm::Shake256, pieces, output,
+                                          TurboShakeStandardDomain);
 }
 
 Result<void> TryTurboShake128(Span<const uint8> input, Span<uint8> output, uint8 domain) noexcept {
-    return TurboShake<crypto_xof_turboshake128_state>(XofAlgorithm::TurboShake128, input, output,
-                                                      domain);
+    const Span<const uint8> pieces[1] = {input};
+    return TryTurboShake128(Span<const Span<const uint8>>(pieces), output, domain);
+}
+
+Result<void> TryTurboShake128(Span<const Span<const uint8>> pieces, Span<uint8> output,
+                              uint8 domain) noexcept {
+    return Xof<crypto_xof_turboshake128_state>(XofAlgorithm::TurboShake128, pieces, output, domain);
 }
 
 Result<void> TryTurboShake256(Span<const uint8> input, Span<uint8> output, uint8 domain) noexcept {
-    return TurboShake<crypto_xof_turboshake256_state>(XofAlgorithm::TurboShake256, input, output,
-                                                      domain);
+    const Span<const uint8> pieces[1] = {input};
+    return TryTurboShake256(Span<const Span<const uint8>>(pieces), output, domain);
+}
+
+Result<void> TryTurboShake256(Span<const Span<const uint8>> pieces, Span<uint8> output,
+                              uint8 domain) noexcept {
+    return Xof<crypto_xof_turboshake256_state>(XofAlgorithm::TurboShake256, pieces, output, domain);
 }
 
 // ---- HashState ----
@@ -491,13 +507,18 @@ Result<void> HashState::TryFinish(Span<uint8> digest) noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // 끝난 상태는 Reset 전까지 쓰지 않으므로 바로 지운다. SHA-3 상태는 순열이 가역이라 남겨 두면
+    // rate보다 짧은 입력을 되살릴 수 있다.
     FinishState(algorithm_, state_, digest);
+    WipeState(state_, StateBytes(algorithm_));
     finished_ = true;
     return Result<void>::Success();
 }
 
 void HashState::Reset() noexcept {
     if (state_ != nullptr) {
+        // libsodium SHA-512 init은 입력 버퍼를 지우지 않는다. 앞 입력이 남지 않게 먼저 지운다.
+        WipeState(state_, StateBytes(algorithm_));
         InitState(algorithm_, state_, digestBytes_);
         finished_ = false;
     }
@@ -564,6 +585,11 @@ Result<XofState> XofState::TryCreate(XofAlgorithm algorithm, uint8 domain,
 }
 
 Result<void> XofState::TryUpdate(Span<const uint8> input) noexcept {
+    const Span<const uint8> pieces[1] = {input};
+    return TryUpdate(Span<const Span<const uint8>>(pieces));
+}
+
+Result<void> XofState::TryUpdate(Span<const Span<const uint8>> pieces) noexcept {
     if (state_ == nullptr) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
@@ -572,7 +598,10 @@ Result<void> XofState::TryUpdate(Span<const uint8> input) noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    UpdateState(algorithm_, state_, input);
+    for (Span<const uint8> piece : pieces) {
+        UpdateState(algorithm_, state_, piece);
+    }
+
     return Result<void>::Success();
 }
 
@@ -588,6 +617,7 @@ Result<void> XofState::TrySqueeze(Span<uint8> output) noexcept {
 
 void XofState::Reset() noexcept {
     if (state_ != nullptr) {
+        WipeState(state_, StateBytes(algorithm_));
         InitState(algorithm_, state_, domain_);
         squeezing_ = false;
     }

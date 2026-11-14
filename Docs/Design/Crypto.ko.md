@@ -230,7 +230,7 @@ ARMv8.0의 Crypto Extensions는 선택 기능이어서 저가 SoC에는 없을 �
 ## 7. API 원칙: Span
 
 - **byte 입력은 모두 `Span<const uint8>`이다.** 포인터와 길이를 따로 받지 않는다. C 배열은 Span으로 암시 변환되고, `Array`는 `View()`로 넘긴다.
-- **출력은 호출자가 준 `Span<uint8>`이다.** 반환값은 쓴 byte 수(`Result<usize>`)다. 필요한 크기는 `TryGetSealedBytes`·`TagBytes` 같은 함수와 constexpr 상수로 미리 구한다. `Array<uint8>&`를 받는 Append 변형은 편의 함수일 뿐이며 내부에서 Span 경로를 부른다.
+- **출력은 호출자가 준 `Span<uint8>`이다.** 반환값은 쓴 byte 수(`Result<usize>`)다. 출력 길이를 호출자가 정하는 함수(해시·XOF·MAC tag·KDF처럼 `output.Size()`만큼 정확히 채우는 함수)는 `Result<void>`다. 필요한 크기는 `TryGetSealedBytes`·`TagBytes` 같은 함수와 constexpr 상수로 미리 구한다. `Array<uint8>&`를 받는 Append 변형은 편의 함수일 뿐이며 내부에서 Span 경로를 부른다.
 - **조각 입력은 `Span<const Span<const uint8>>`이다.** 해시·MAC·서명처럼 라이브러리가 증분 입력을 받는 곳에만 둔다. 헤더와 본문을 복사하지 않고 넣을 수 있다. AEAD의 AD는 libsodium이 연속 버퍼만 받으므로 조각 입력을 두지 않는다(복사를 숨기지 않는다).
 - **고정 길이 값은 값 타입이다.** digest·서명·공개키·nonce는 `Ed25519Signature`처럼 할당 없는 값 타입으로 돌려준다. 값 타입은 `View()`로 `Span<const uint8>`을 내준다. 받을 때는 Span에 길이 검사를 하며, 길이가 틀리면 `InvalidArgument`다(결정 D8).
 - **비밀은 view로만 노출한다.** `SecretBytes::View()`는 `Span<const uint8>`이고 수명은 객체와 같다. 쓰기 view는 생성·가져오기 경로에만 있다.

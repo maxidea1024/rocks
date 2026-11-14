@@ -23,7 +23,7 @@ Span<const uint8> Text(const char* text) {
 
 // actual이 hex 문자열과 같은 byte인가.
 bool Equals(Span<const uint8> actual, const char* hex) {
-    uint8 expected[128];
+    uint8 expected[512];
     auto decoded = TryFromHex(StringView(hex), Span<uint8>(expected));
     return decoded && decoded.Value() == actual.Size() &&
            ConstantTimeEquals(actual, Span<const uint8>(expected, decoded.Value()));
@@ -53,6 +53,27 @@ constexpr const char* LongShake256_100 = "34833f03ed88bb5f083ce590c7ae5af93ede33
                                          "59fe75441bd548dda9114aca1da7180231fc22b353327cd25e00749aa"
                                          "277ae0fb1103ffd454d17ae8334090a8f3fb2a5"
                                          "6df10ec6";
+
+constexpr const char* LongSha3_512 =
+    "b8030d306ae990bc794bfb3a6100f67851889d6c272257afac7d1077a18660d6"
+    "ea8d0da5d2299c3ebaa0d34baf62cc58ac1fd4476506cf512a4897bb083a6fc4";
+constexpr const char* LongBlake2b32 =
+    "b372d0608f720c8c3dd41e9c8eecb10143b41abe520b616607e754bf79c08331";
+constexpr const char* LongShake256_337 = "34833f03ed88bb5f083ce590c7ae5af93ede33e11f53c70e47916c704"
+                                         "4746acbdca19a73ff13905e91f8dc25ce6e41ae"
+                                         "59fe75441bd548dda9114aca1da7180231fc22b353327cd25e00749aa"
+                                         "277ae0fb1103ffd454d17ae8334090a8f3fb2a5"
+                                         "6df10ec63f46c91ef1d877d559b5a57b4ba9abbe4a38ef7fece7abff8"
+                                         "61c8d8554b87fd45dc83f6e41c0e2b4dc62718e"
+                                         "0d4c20d619494947308d652f47c6db1c79d2e805989f71cfa0e79ebe5"
+                                         "4006cb264db8d31562676c89ae69c8096688764"
+                                         "b7aa6860d89cd4034f525349661911cad72e9a924e5573ab73cd2df07"
+                                         "f46bbfe646961dd8f9cf076176ad6b1ac6822ac"
+                                         "6384e969edd9de60d116abf05f0baba3c79ce276461698b7eca119fe0"
+                                         "73c6bdad4492c1d44c3eb5c7da93d8323d0f494"
+                                         "8d66aa50b27e78840e0637358e830c9953c9c3231422480bd8552ba55"
+                                         "5a74465d887fb16cd599efe2d3ec69950615499"
+                                         "dd";
 
 template <usize N>
 bool Blake2bEquals(Span<const uint8> input, const char* hex) {
@@ -102,21 +123,28 @@ TEST(CryptoHashKnownAnswers) {
                  "01dedd5de4ef14642445ba5f5b97c15e47b9ad931326e4b0727cd94cefc44fff"
                  "23f07bf543139939b49128caf436dc1bdee54fcb24023a08d9403f9b4bf0d450"));
 
-    CHECK(XofEquals<32>(TryShake128, Text(""),
+    // XOF 함수는 조각 입력 오버로드가 있어 함수 이름 대신 람다로 넘긴다.
+    auto shake128 = [](Span<const uint8> input, Span<uint8> output) {
+        return TryShake128(input, output);
+    };
+    auto shake256 = [](Span<const uint8> input, Span<uint8> output) {
+        return TryShake256(input, output);
+    };
+    CHECK(XofEquals<32>(shake128, Text(""),
                         "7f9c2ba4e88f827d616045507605853ed73b8093f6efbc88eb1a6eacfa66ef26"));
-    CHECK(XofEquals<32>(TryShake128, Text(Fox),
+    CHECK(XofEquals<32>(shake128, Text(Fox),
                         "f4202e3c5852f9182a0430fd8144f0a74b95e7417ecae17db0f8cfeed0e3e66e"));
-    CHECK(XofEquals<32>(TryShake128, Span<const uint8>(rate168),
+    CHECK(XofEquals<32>(shake128, Span<const uint8>(rate168),
                         "7c00ff4748870cb26da4dc078aff74477ab153fa1191c7b636fea6c01ecc1fab"));
-    CHECK(XofEquals<64>(TryShake256, Text(""),
+    CHECK(XofEquals<64>(shake256, Text(""),
                         "46b9dd2b0ba88d13233b3feb743eeb243fcd52ea62b81b82b50c27646ed5762f"
                         "d75dc4ddd8c0f200cb05019d67b592f6fc821c49479ab48640292eacb3b7c4be"));
-    CHECK(XofEquals<32>(TryShake256, Text("abc"),
+    CHECK(XofEquals<32>(shake256, Text("abc"),
                         "483366601360a8771c6863080cc4114d8db44530f8f1e1ee4f94ea37e78b5739"));
-    CHECK(XofEquals<64>(TryShake256, Text(Fox),
+    CHECK(XofEquals<64>(shake256, Text(Fox),
                         "2f671343d9b2e1604dc9dcf0753e5fe15c7c64a0d283cbbf722d411a0e36f6ca"
                         "1d01d1369a23539cd80f7c054b6e5daf9c962cad5b8ed5bd11998b40d5734442"));
-    CHECK(XofEquals<32>(TryShake256, Span<const uint8>(rate136),
+    CHECK(XofEquals<32>(shake256, Span<const uint8>(rate136),
                         "ea947b835fec1f9b0a7eabba901deb7881fd9999a1cbd5ccbb5a9afab7f6fe70"));
 
     auto turbo128 = [](Span<const uint8> input, Span<uint8> output) {
@@ -258,6 +286,74 @@ TEST(CryptoHashStateUsesTheGivenAllocator) {
     }
 
     CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+TEST(CryptoHashBoundariesAndDomains) {
+    const LongInput input;
+    const Span<const uint8> all(input.bytes);
+
+    // rate(136 byte)를 넘는 나눠 짜내기: 1 + 135 + 1 + 200 byte가 한 번에 짜낸 337 byte와
+    // 같다(hashlib 값).
+    auto xof = XofState::TryCreate(XofAlgorithm::Shake256);
+    REQUIRE(xof);
+    REQUIRE(xof.Value().TryUpdate(all));
+    uint8 squeezed[337];
+    const Span<uint8> out(squeezed);
+    REQUIRE(xof.Value().TrySqueeze(out.Left(1)));
+    REQUIRE(xof.Value().TrySqueeze(out.Mid(1, 135)));
+    REQUIRE(xof.Value().TrySqueeze(out.Mid(136, 1)));
+    REQUIRE(xof.Value().TrySqueeze(out.Mid(137, 200)));
+    CHECK(Equals(Span<const uint8>(squeezed), LongShake256_337));
+    uint8 oneShot[337];
+    REQUIRE(TryShake256(all, Span<uint8>(oneShot)));
+    CHECK(ConstantTimeEquals(Span<const uint8>(oneShot), Span<const uint8>(squeezed)));
+
+    // SHA3-512 rate(72 byte)를 넘는 입력, BLAKE2b 기본 길이(0 → 32).
+    CHECK(Equals(Sha3_512(all).View(), LongSha3_512));
+    auto blake = HashState::TryCreate(HashAlgorithm::Blake2b);
+    REQUIRE(blake);
+    CHECK(blake.Value().DigestBytes() == Blake2bDefaultDigestBytes);
+    REQUIRE(blake.Value().TryUpdate(all));
+    uint8 digest[32];
+    REQUIRE(blake.Value().TryFinish(Span<uint8>(digest)));
+    CHECK(Equals(Span<const uint8>(digest), LongBlake2b32));
+
+    // RFC 9861 TurboSHAKE128(M = FF FF FF, D = 0x01, 32). domain 경계 0x01·0x7F를 받는다.
+    const uint8 message[3] = {0xFF, 0xFF, 0xFF};
+    uint8 turbo[32];
+    REQUIRE(TryTurboShake128(Span<const uint8>(message), Span<uint8>(turbo), 0x01));
+    CHECK(Equals(Span<const uint8>(turbo),
+                 "bf323f940494e88ee1c540fe660be8a0c93f43d15ec006998462fa994eed5dab"));
+    auto domain1 = XofState::TryCreate(XofAlgorithm::TurboShake128, 0x01);
+    REQUIRE(domain1);
+    REQUIRE(domain1.Value().TryUpdate(Span<const uint8>(message)));
+    uint8 incremental[32];
+    REQUIRE(domain1.Value().TrySqueeze(Span<uint8>(incremental)));
+    CHECK(ConstantTimeEquals(Span<const uint8>(incremental), Span<const uint8>(turbo)));
+    CHECK(TryTurboShake256(Span<const uint8>(message), Span<uint8>(turbo), 0x7F));
+    CHECK(XofState::TryCreate(XofAlgorithm::TurboShake256, 0x7F));
+
+    // XOF 조각 입력은 이어 붙인 입력과 같다.
+    const Span<const uint8> pieces[] = {all.Left(100), Span<const uint8>(), all.RightChop(100)};
+    uint8 piecewise[337];
+    REQUIRE(TryShake256(Span<const Span<const uint8>>(pieces), Span<uint8>(piecewise)));
+    CHECK(ConstantTimeEquals(Span<const uint8>(piecewise), Span<const uint8>(oneShot)));
+    auto piecesState = XofState::TryCreate(XofAlgorithm::Shake256);
+    REQUIRE(piecesState);
+    REQUIRE(piecesState.Value().TryUpdate(Span<const Span<const uint8>>(pieces)));
+    REQUIRE(piecesState.Value().TrySqueeze(Span<uint8>(piecewise)));
+    CHECK(ConstantTimeEquals(Span<const uint8>(piecewise), Span<const uint8>(oneShot)));
+
+    // Reset은 앞 입력을 남기지 않는다: 일부 입력 뒤 Reset하고 끝내면 빈 입력의 SHA-512다.
+    auto sha = HashState::TryCreate(HashAlgorithm::Sha512);
+    REQUIRE(sha);
+    REQUIRE(sha.Value().TryUpdate(all.Left(50)));
+    sha.Value().Reset();
+    uint8 sha512[64];
+    REQUIRE(sha.Value().TryFinish(Span<uint8>(sha512)));
+    CHECK(Equals(Span<const uint8>(sha512),
+                 "cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce"
+                 "47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e"));
 }
 
 TEST(CryptoHashRejectsMisuse) {

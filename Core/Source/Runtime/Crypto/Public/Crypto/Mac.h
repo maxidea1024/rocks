@@ -94,8 +94,8 @@ private:
 
 // 증분 MAC이다. 큰 메시지를 조각으로 넣는다. 상태는 키에서 파생된 비밀이므로 키 저장소 슬롯에 둔다.
 // move-only이며 한 번에 한 스레드만 쓴다. 키 객체는 만든 뒤 필요 없다(상태가 키를 복사해 둔다).
-// TryFinish·TryFinishVerify 뒤에는 모든 호출이 InvalidArgument이고, 이동된 객체는 StaleHandle이다.
-// 소멸 때 상태를 지운다.
+// TryFinish·TryFinishVerify 뒤에는 모든 호출이 InvalidArgument이고, 기본 생성한 객체와 이동된
+// 객체는 StaleHandle이다. 끝난 직후와 소멸 때 상태를 지운다.
 class MacState {
 public:
     MacState() noexcept = default;
