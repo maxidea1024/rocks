@@ -1,4 +1,6 @@
+#include <Core/Memory/SystemAllocator.h>
 #include <Crypto/Bytes.h>
+#include <Crypto/Hash.h>
 #include <Crypto/Secret.h>
 #include <Crypto/Signature.h>
 #include <TestSupport/Test.h>
@@ -8,8 +10,10 @@
 using namespace rocks;
 using namespace rocks::crypto;
 
-// 알려진 답의 출처: RFC 8032 7.1 TEST 1–3(Ed25519)과 7.3 TEST abc(Ed25519ph)다. Python
-// cryptography(OpenSSL)와 pycryptodome으로 다시 계산해 같음을 확인했다.
+// 알려진 답의 출처: RFC 8032 7.1 TEST 1–3(Ed25519, Python cryptography·pycryptodome으로 재계산)과
+// 7.3 TEST abc(Ed25519ph, pycryptodome으로 재계산)다. 경계·음성 벡터는 RFC 8032 순수 Python
+// 구현으로 만들고 OpenSSL·pycryptodome·실제 libsodium(PyNaCl) 결과로 어느 검사가 거부하는지
+// 확인했다.
 namespace {
 
 struct HexBytes {
@@ -133,8 +137,11 @@ TEST(CryptoEd25519phRfc8032) {
     REQUIRE(verifier.Value().TryUpdate(Text("c")));
     CHECK(verifier.Value().TryFinish(publicKey, signature.Value().View()));
 
-    // Ed25519ph와 순수 Ed25519는 서로의 서명을 받지 않는다.
+    // Ed25519ph와 순수 Ed25519는 서로의 서명을 받지 않는다. ph 서명은 dom2 접두를 붙이므로
+    // SHA-512(m)에 대한 순수 서명으로도 확인되지 않는다.
     CHECK(TryVerify(publicKey, Text("abc"), signature.Value().View()).Error() ==
+          ErrorCode::AuthenticationFailed);
+    CHECK(TryVerify(publicKey, Sha512(Text("abc")).View(), signature.Value().View()).Error() ==
           ErrorCode::AuthenticationFailed);
     auto pure = TrySign(key, Text("abc"));
     REQUIRE(pure);
@@ -158,16 +165,21 @@ TEST(CryptoEd25519RejectsForgeries) {
     REQUIRE(signature.size == 64);
     CHECK(TryVerify(publicKey, message.View(), signature.View()));
 
-    // R·S 어느 bit를 바꿔도, 메시지·키가 달라도 실패한다.
-    const usize positions[] = {0, 31, 32, 63};
-    for (usize position : positions) {
+    // R·S의 bit를 37 간격으로 훑어 바꾸고, S의 최상위 bit(바꾸면 S >= L이라 비정규 S 경로)와 R의
+    // 부호 bit도 바꾼다. 메시지·키가 달라도 실패한다.
+    const auto expectRejected = [&](usize bit) {
         uint8 tampered[64];
         memcpy(tampered, signature.bytes, sizeof(tampered));
-        tampered[position] ^= 0x01;
+        tampered[bit / 8] ^= static_cast<uint8>(1u << (bit % 8));
         CHECK(TryVerify(publicKey, message.View(), Span<const uint8>(tampered)).Error() ==
               ErrorCode::AuthenticationFailed);
+    };
+    for (usize bit = 0; bit < 512; bit += 37) {
+        expectRejected(bit);
     }
 
+    expectRejected(31 * 8 + 7);
+    expectRejected(63 * 8 + 7);
     CHECK(TryVerify(publicKey, Text("s"), signature.View()).Error() ==
           ErrorCode::AuthenticationFailed);
     CHECK(TryVerify(PublicKeyFromHex(Rfc8032Cases[0].publicKey), message.View(), signature.View())
@@ -183,22 +195,51 @@ TEST(CryptoEd25519RejectsForgeries) {
     CHECK(TryVerify(publicKey, message.View(), Span<const uint8>()).Error() ==
           ErrorCode::AuthenticationFailed);
 
-    // 비정규 S(RFC 8032 TEST 1 서명의 S + L): 같은 점을 뜻하지만 libsodium은 거부한다(서명 가변성).
-    const Rfc8032Case& empty = Rfc8032Cases[0];
-    CHECK(TryVerify(PublicKeyFromHex(empty.publicKey), Span<const uint8>(),
-                    HexBytes("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e06522490155"
-                             "4c8c7872aa064e049dbb3013fbf29380d25bf5f0595bbe24655141438e7a101b")
-                        .View())
+    // 아래 음성 벡터는 각각 다른 검사가 모두 통과하는 상태에서 libsodium 검사 하나만 거부한다.
+    // - 비정규 S(TEST 1의 R ‖ (S + L)): S + L은 mod L로 같은 scalar라 [S]B가 같다. S < L을 보지
+    //   않는 검증(libsodium ED25519_COMPAT 빌드, S를 줄이는 구현)은 받는다. 최상위 3 bit가 0이라
+    //   COMPAT의 상위 bit 검사도 통과하므로 ED25519_COMPAT 미정의를 고정한다.
+    const HexBytes noncanonical("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e06522490155"
+                                "4c8c7872aa064e049dbb3013fbf29380d25bf5f0595bbe24655141438e7a101b");
+    REQUIRE(noncanonical.size == 64);
+    CHECK(TryVerify(PublicKeyFromHex(Rfc8032Cases[0].publicKey), Span<const uint8>(),
+                    noncanonical.View())
               .Error() == ErrorCode::AuthenticationFailed);
 
-    // small-order 공개키(항등원)와 R = B, S = 1: 허용적인 cofactorless 검증은 어떤 메시지든
-    // 받아들이지만 libsodium은 small-order 공개키를 거부한다.
-    const Ed25519PublicKey identity =
-        PublicKeyFromHex("0100000000000000000000000000000000000000000000000000000000000000");
+    // - small-order 공개키(항등원)와 R = B, S = 1: 허용적 검증(OpenSSL·pycryptodome 포함)은 어떤
+    //   메시지든 받는다. libsodium은 small-order 공개키 검사 하나로 거부한다.
+    auto identity = Ed25519PublicKey::TryFromBytes(
+        HexBytes("0100000000000000000000000000000000000000000000000000000000000000").View());
+    REQUIRE(identity);
     const HexBytes forged("5866666666666666666666666666666666666666666666666666666666666666"
                           "0100000000000000000000000000000000000000000000000000000000000000");
-    CHECK(TryVerify(identity, Text("any message"), forged.View()).Error() ==
+    REQUIRE(forged.size == 64);
+    CHECK(TryVerify(identity.Value(), Text("any message"), forged.View()).Error() ==
           ErrorCode::AuthenticationFailed);
+
+    // - small-order R(항등원)과 S = k·a(TEST 2 키): cofactorless 식이 성립해 OpenSSL·pycryptodome은
+    //   받지만 libsodium은 small-order R 검사로 거부한다.
+    const HexBytes smallOrderR("0100000000000000000000000000000000000000000000000000000000000000"
+                               "675d054595fa17cb6a44e3ada6ca385e55667e41a63fdab0ac22d10000354002");
+    REQUIRE(smallOrderR.size == 64);
+    CHECK(TryVerify(publicKey, message.View(), smallOrderR.View()).Error() ==
+          ErrorCode::AuthenticationFailed);
+
+    // - 혼합 차수 공개키(a·B + 차수 8 점): cofactored 식만 성립하는 서명은 거부하고(검증식이
+    //   cofactorless), 두 식이 모두 성립하는 서명은 받는다(혼합 차수 키 자체는 거부하지 않는다).
+    auto mixed = Ed25519PublicKey::TryFromBytes(
+        HexBytes("0169d3c02f3edd121cafbe1dfd45c4cf4aac216a79e36e6326419f2a654d2d46").View());
+    REQUIRE(mixed);
+    const HexBytes cofactoredOnly(
+        "fc9a6fd4133c19c2757d8c2fe80131f4a290ed892eefff11d5280879fdb5d7fd"
+        "249af2277de10d5d5ed23293bcc60fbd1cdbdd357961a6f49f42151823fcb401");
+    const HexBytes bothEquations(
+        "7c9854c4f604c5fdc5d11ccc1b7d6a3fe999098a3f1ee2b39d4a77541eed44b8"
+        "91a9780c1197743860edf821c3e8b830152e9e70a23e3a288e824294e6795e01");
+    REQUIRE(cofactoredOnly.size == 64 && bothEquations.size == 64);
+    CHECK(TryVerify(mixed.Value(), Text("mixed-order key 0"), cofactoredOnly.View()).Error() ==
+          ErrorCode::AuthenticationFailed);
+    CHECK(TryVerify(mixed.Value(), Text("mixed-order key 1"), bothEquations.View()));
 }
 
 TEST(CryptoEd25519KeyLifetimeAndMisuse) {
@@ -284,21 +325,37 @@ TEST(CryptoEd25519phStateRules) {
     CHECK(signer.Value().TryUpdate(Text("x")).Error() == ErrorCode::StaleHandle);
     CHECK(signer.Value().TryFinish(key).Error() == ErrorCode::StaleHandle);
     signer.Value().Reset();
+    CHECK(signer.Value().TryUpdate(Text("x")).Error() == ErrorCode::StaleHandle);
+    Ed25519phSigner defaulted;
+    CHECK(defaulted.TryUpdate(Text("x")).Error() == ErrorCode::StaleHandle);
+    CHECK(defaulted.TryFinish(key).Error() == ErrorCode::StaleHandle);
     moved.Reset();
     REQUIRE(moved.TryUpdate(Text("abc")));
     auto movedSignature = moved.TryFinish(key);
     REQUIRE(movedSignature);
     CHECK(Equals(movedSignature.Value().View(), PhSignature));
 
-    // 검증은 결과와 관계없이 끝난다. 길이가 틀린 서명도 AuthenticationFailed다.
+    // 검증은 결과와 관계없이 끝난다. 실패(길이가 틀린 서명, 64 byte 불일치)는 Reset 전까지
+    // AuthenticationFailed로 남고(sticky), 성공 뒤에는 InvalidArgument다.
     auto verifier = Ed25519phVerifier::TryCreate();
     REQUIRE(verifier);
     REQUIRE(verifier.Value().TryUpdate(Text("abc")));
     CHECK(verifier.Value().TryFinish(key.PublicKey(), signature.Value().View().Left(63)).Error() ==
           ErrorCode::AuthenticationFailed);
     CHECK(verifier.Value().TryFinish(key.PublicKey(), signature.Value().View()).Error() ==
-          ErrorCode::InvalidArgument);
-    CHECK(verifier.Value().TryUpdate(Text("x")).Error() == ErrorCode::InvalidArgument);
+          ErrorCode::AuthenticationFailed);
+    CHECK(verifier.Value().TryUpdate(Text("x")).Error() == ErrorCode::AuthenticationFailed);
+    verifier.Value().Reset();
+    REQUIRE(verifier.Value().TryUpdate(Text("abd")));
+    CHECK(verifier.Value().TryFinish(key.PublicKey(), signature.Value().View()).Error() ==
+          ErrorCode::AuthenticationFailed);
+    CHECK(verifier.Value().TryUpdate(Text("x")).Error() == ErrorCode::AuthenticationFailed);
+    const Span<const uint8> verifierPieces[] = {Text("x")};
+    CHECK(verifier.Value().TryUpdate(Span<const Span<const uint8>>(verifierPieces)).Error() ==
+          ErrorCode::AuthenticationFailed);
+    Ed25519phVerifier failedMoved = Move(verifier.Value());
+    CHECK(failedMoved.TryUpdate(Text("x")).Error() == ErrorCode::AuthenticationFailed);
+    verifier.Value() = Move(failedMoved);
     verifier.Value().Reset();
     REQUIRE(verifier.Value().TryUpdate(Text("abc")));
     CHECK(verifier.Value().TryFinish(key.PublicKey(), signature.Value().View()));
@@ -306,13 +363,106 @@ TEST(CryptoEd25519phStateRules) {
     CHECK(verifier.Value().TryUpdate(Text("x")).Error() == ErrorCode::StaleHandle);
     CHECK(movedVerifier.TryUpdate(Text("x")).Error() == ErrorCode::InvalidArgument);
 
-    // 버퍼 할당기를 쓰고 소멸 때 돌려준다.
+    // 기본은 버퍼 할당기이고, 다른 allocator를 주면 그 allocator에서 할당하고
+    // 돌려준다(SystemAllocator는 소멸 때 남은 할당이 있으면 Fatal). 이동 대입은 대상의 이전 상태를
+    // 그 allocator로 돌려준다.
     const usize allocations = GetSecretMemoryStatus().bufferAllocations;
     {
         auto scoped = Ed25519phSigner::TryCreate();
-        REQUIRE(scoped);
-        CHECK(GetSecretMemoryStatus().bufferAllocations == allocations + 1);
+        auto scopedVerifier = Ed25519phVerifier::TryCreate();
+        REQUIRE(scoped && scopedVerifier);
+        CHECK(GetSecretMemoryStatus().bufferAllocations == allocations + 2);
     }
 
     CHECK(GetSecretMemoryStatus().bufferAllocations == allocations);
+    SystemAllocator allocator;
+    {
+        auto first = Ed25519phSigner::TryCreate(allocator);
+        auto second = Ed25519phSigner::TryCreate(allocator);
+        auto checker = Ed25519phVerifier::TryCreate(allocator);
+        auto other = Ed25519phVerifier::TryCreate(allocator);
+        REQUIRE(first && second && checker && other);
+        CHECK(allocator.Stats().liveAllocations == 4);
+        first.Value() = Move(second.Value());
+        checker.Value() = Move(other.Value());
+        CHECK(allocator.Stats().liveAllocations == 2);
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+TEST(CryptoEd25519phBoundaries) {
+    const Ed25519SigningKey key = KeyFromSeed(PhSeed);
+    REQUIRE(!key.IsEmpty());
+    const Ed25519PublicKey publicKey = key.PublicKey();
+
+    // 빈 메시지(E1): 넣은 뒤 Reset하면 쌓인 입력을 버리므로 빈 메시지 서명과 같다.
+    constexpr const char* EmptyPhSignature =
+        "5b88ce227bf28bdef4c66ae9608c8bc15e81148386849110d2ad76abab768949"
+        "342afe5a477ac0c41fd211a6dfc36dd5e57b6d26c1fb7a92187ed72e6997d304";
+    auto signer = Ed25519phSigner::TryCreate();
+    REQUIRE(signer);
+    REQUIRE(signer.Value().TryUpdate(Text("x")));
+    signer.Value().Reset();
+    auto empty = signer.Value().TryFinish(key);
+    REQUIRE(empty);
+    CHECK(Equals(empty.Value().View(), EmptyPhSignature));
+
+    // 여러 블록 조각(E2): 777 byte(byte i = (7i + 3) mod 256)를 5·0·128·644 byte로 나눠 넣는다.
+    // 같은 메시지의 순수 Ed25519(F)도 고정한다.
+    uint8 message[777];
+    for (usize i = 0; i < sizeof(message); ++i) {
+        message[i] = static_cast<uint8>(i * 7 + 3);
+    }
+
+    const Span<const uint8> whole = Span<const uint8>(message);
+    const Span<const uint8> pieces[] = {whole.Left(5), whole.Mid(5, 0), whole.Mid(5, 128),
+                                        whole.Mid(133, 644)};
+    signer.Value().Reset();
+    REQUIRE(signer.Value().TryUpdate(Span<const Span<const uint8>>(pieces)));
+    auto chunked = signer.Value().TryFinish(key);
+    REQUIRE(chunked);
+    CHECK(Equals(chunked.Value().View(),
+                 "6a19f770e2336068f0a04a0e1988ccc1f78f932a124e0ff44ad358827493c4b6"
+                 "f1c2e9a295da96cc3dbf62cc9d0f455d274a8da64bc0c9c1d29e992e0ef22a0f"));
+    auto pure = TrySign(key, whole);
+    REQUIRE(pure);
+    CHECK(Equals(pure.Value().View(),
+                 "cd7c52d2821864171026454f438042669aa331360da751f33c8ed064c77cba34"
+                 "0d57f1f9f11587c3b27da538c2666064b970b7d7988a9a2de69cd980940f0208"));
+    auto verifier = Ed25519phVerifier::TryCreate();
+    REQUIRE(verifier);
+    REQUIRE(verifier.Value().TryUpdate(Span<const Span<const uint8>>(pieces)));
+    CHECK(verifier.Value().TryFinish(publicKey, chunked.Value().View()));
+
+    // 신뢰 공개키 여러 개(키 회전): 스트림을 다시 해시하지 않고 맞는 키의 순번을 돌려준다.
+    const Ed25519PublicKey other = PublicKeyFromHex(Rfc8032Cases[0].publicKey);
+    const Ed25519PublicKey trusted[] = {other, publicKey};
+    verifier.Value().Reset();
+    REQUIRE(verifier.Value().TryUpdate(whole));
+    auto index = verifier.Value().TryFinishAny(Span<const Ed25519PublicKey>(trusted),
+                                               chunked.Value().View());
+    REQUIRE(index);
+    CHECK(index.Value() == 1);
+    verifier.Value().Reset();
+    REQUIRE(verifier.Value().TryUpdate(whole));
+    CHECK(verifier.Value()
+              .TryFinishAny(Span<const Ed25519PublicKey>(), chunked.Value().View())
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(verifier.Value()
+              .TryFinishAny(Span<const Ed25519PublicKey>(trusted).Left(1), chunked.Value().View())
+              .Error() == ErrorCode::AuthenticationFailed);
+    CHECK(verifier.Value().TryUpdate(whole).Error() == ErrorCode::AuthenticationFailed);
+
+    // ph 경로에서도 small-order 공개키 위조(R = B, S = 1)를 거부한다(허용적 구현은 받는다).
+    auto identity = Ed25519PublicKey::TryFromBytes(
+        HexBytes("0100000000000000000000000000000000000000000000000000000000000000").View());
+    REQUIRE(identity);
+    const HexBytes forged("5866666666666666666666666666666666666666666666666666666666666666"
+                          "0100000000000000000000000000000000000000000000000000000000000000");
+    REQUIRE(forged.size == 64);
+    verifier.Value().Reset();
+    REQUIRE(verifier.Value().TryUpdate(Text("any message")));
+    CHECK(verifier.Value().TryFinish(identity.Value(), forged.View()).Error() ==
+          ErrorCode::AuthenticationFailed);
 }

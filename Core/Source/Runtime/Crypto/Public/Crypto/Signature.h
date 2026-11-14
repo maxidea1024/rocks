@@ -13,12 +13,15 @@
 // - 검증 규칙은 libsodium이 정본이다: 비정규 S, small-order R, 비정규·small-order 공개키를
 //   거부하고, 검증식은 cofactorless([S]B = R + [k]A)다. 다른 구현이 받아들이는 서명("acceptable"
 //   경계 사례, ZIP-215식 cofactored 검증)을 거부할 수 있으므로, 서명을 만드는 도구도 같은 Rocks
-//   경로로 검증한다(4절).
-// - Ed25519ph는 메시지의 SHA-512를 서명한다. 큰 메시지를 조각으로 넣을 때 쓴다(Ed25519phSigner·
-//   Ed25519phVerifier). 순수 Ed25519(m) 서명과 호환되지 않으므로 형식은 SignatureAlgorithm으로
-//   구분해 적는다.
+//   경로로 검증한다(4절). 비정규 R encoding은 계산한 R과의 byte 비교에서 거부된다.
+// - 혼합 차수(torsion 성분이 있는) 공개키·R은 거부하지 않고 cofactorless 식이 맞으면 받는다. 키를
+//   등록할 때 소수 차수 부분군 검사가 필요하면 따로 한다(libsodium
+//   crypto_core_ed25519_is_valid_point).
+// - Ed25519ph(RFC 8032 5.1, context 없음)는 메시지의 SHA-512에 dom2 접두(phflag 1)를 붙여 서명한다.
+//   큰 메시지를 조각으로 넣을 때 쓴다(Ed25519phSigner·Ed25519phVerifier). 순수 Ed25519(m)와도,
+//   SHA-512(m)에 대한 순수 서명과도 호환되지 않으므로 형식은 SignatureAlgorithm으로 구분해 적는다.
 // - 서명 키는 키 저장소에 있고 생성 뒤 바뀌지 않으므로 여러 스레드가 동시에 서명해도 된다. 공개키와
-//   서명은 일반 값 타입이다. 키 byte 내보내기는 hazmat::TryExportSeed다.
+//   서명은 일반 값 타입이다. 키 byte 내보내기는 hazmat::TryExportSeed다(서명 키의 정본은 seed다).
 //
 // 사용 예:
 //   auto key = crypto::Ed25519SigningKey::TryGenerate();
@@ -105,7 +108,7 @@ private:
 // Ed25519ph 서명(RFC 8032 5.1, context 없음)이다. 메시지를 조각으로 넣고 TryFinish로 서명한다.
 // - SHA-512 상태는 allocator에서 할당한다(키가 없는 상태라 키 저장소를 쓰지 않는다, 9.1절).
 // - TryFinish 뒤에는 Reset 전까지 TryUpdate·TryFinish가 InvalidArgument다.
-// - 한 스레드에서 쓴다. move-only이고 옮겨 간 객체는 StaleHandle이다.
+// - 한 스레드에서 쓴다. move-only이고 기본 생성한 객체와 옮겨 간 객체는 StaleHandle이다.
 class Ed25519phSigner {
 public:
     Ed25519phSigner() noexcept = default;
@@ -137,7 +140,8 @@ private:
     bool finished_ = false;
 };
 
-// Ed25519ph 검증이다. 상태·수명 규칙은 Ed25519phSigner와 같다.
+// Ed25519ph 검증이다. 상태·수명 규칙은 Ed25519phSigner와 같다. 검증 실패는 sticky다(9.1절): 실패한
+// 뒤에는 Reset 전까지 TryUpdate·TryFinish가 AuthenticationFailed다(성공한 뒤에는 InvalidArgument).
 class Ed25519phVerifier {
 public:
     Ed25519phVerifier() noexcept = default;
@@ -158,6 +162,12 @@ public:
     [[nodiscard]] Result<void> TryFinish(const Ed25519PublicKey& key,
                                          Span<const uint8> signature) noexcept;
 
+    // 신뢰하는 공개키 여러 개(키 회전) 중 서명을 확인하는 첫 키의 순번을 돌려준다. 상태를 키마다
+    // 복사해 확인하므로 스트림을 다시 해시하지 않는다. trusted가 비면 InvalidArgument(상태
+    // 불변)이고, 나머지 오류는 TryFinish와 같다.
+    [[nodiscard]] Result<usize> TryFinishAny(Span<const Ed25519PublicKey> trusted,
+                                             Span<const uint8> signature) noexcept;
+
     void Reset() noexcept;
 
 private:
@@ -166,11 +176,14 @@ private:
     Allocator* allocator_ = nullptr;
     void* state_ = nullptr;
     bool finished_ = false;
+    bool verifyFailed_ = false;
 };
 
 namespace hazmat {
 
-// 서명 키의 seed(32 byte)를 평문으로 output에 복사한다(10.4절). output.Size()는 32여야 한다.
+// 서명 키의 seed(32 byte)를 평문으로 output에 복사한다(10.4절, 서명 키의 정본이 seed라 이름이
+// TryExportKey가 아니다). 빈 키는 StaleHandle, output.Size()가 32가 아니면 InvalidArgument다.
+// output은 호출자가 지운다.
 [[nodiscard]] Result<void> TryExportSeed(const Ed25519SigningKey& key, Span<uint8> output) noexcept;
 
 } // namespace hazmat

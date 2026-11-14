@@ -112,7 +112,7 @@ Core/Source/Runtime/Crypto/
 | MAC | BLAKE2b keyed | HMAC-SHA-256/512, AES-CMAC | [libsodium] [경량 계층] | 임의 길이 HMAC 키는 증분 API(`_init`)만 받는다. 일회성 `crypto_auth_hmacsha256`·`512`는 키가 32 byte로 고정이므로, 어댑터는 항상 증분 API를 쓴다. |
 | KDF | HKDF-SHA-256 | HKDF-SHA-512, BLAKE2b KDF(64bit id + 8 byte context) | [libsodium] | libsodium HKDF의 상태 API는 extract에만 있고 expand는 일회성이다. 출력 상한은 255 × 해시 길이다. |
 | 비밀번호 | Argon2id | — | [libsodium] | INTERACTIVE(2, 64 MiB) / MODERATE(3, 256 MiB) / SENSITIVE(4, 1 GiB) 프리셋을 쓰고, 입력 매개변수에 상한을 둔다. |
-| 서명 | Ed25519 | Ed25519ph(스트리밍) | [libsodium] | ph 서명은 Ed25519(m)과 호환되지 않으므로 서명 알고리즘 ID를 따로 둔다. 검증 규칙(비정규 S·small-order R·비정규/small-order 공개키 거부, `ED25519_COMPAT` 미정의)은 libsodium이 정본이며, 도구도 같은 Rocks 경로로 검증한다. |
+| 서명 | Ed25519 | Ed25519ph(스트리밍) | [libsodium] | ph 서명(dom2 접두 + SHA-512(m))은 Ed25519(m)과도, SHA-512(m)에 대한 순수 서명과도 호환되지 않으므로 서명 알고리즘 ID를 따로 둔다. 검증 규칙(비정규 S·small-order R·비정규/small-order 공개키 거부, cofactorless 검증식, `ED25519_COMPAT` 미정의)은 libsodium이 정본이며, 도구도 같은 Rocks 경로로 검증한다. 혼합 차수(torsion이 섞인) 공개키·R은 거부하지 않는다(부분군 검사가 필요하면 키 등록 때 따로 한다). |
 | 키 캡슐화(PQ) | X-Wing | ML-KEM768 | [libsodium] | 1.0.22에 들어왔다. libsodium은 대부분의 용도에 X-Wing(ML-KEM768 + X25519 하이브리드)을 권한다. |
 | 키 교환 · 공개키 암호화 | X25519(crypto_kx) · sealed box | box | [libsodium] | kx는 rx/tx 키를 분리한다. sealed box는 epk ‖ box 구조이고 오버헤드가 48 byte다. |
 | 키 해시 | SipHash-2-4 | SipHash-2-4 128bit | [libsodium] | hash flooding 방어용이다. 128bit 출력판은 full 빌드에만 있다. |
@@ -516,8 +516,11 @@ public:
     void Reset() noexcept;
 };
 
-// 검증 실패·길이가 틀린 서명은 AuthenticationFailed이고, 결과와 관계없이 상태를 끝낸다.
-class Ed25519phVerifier { /* TryCreate, TryUpdate, TryFinish(const Ed25519PublicKey&, Span<const uint8> signature), Reset */ };
+// 검증 실패·길이가 틀린 서명은 AuthenticationFailed이고, 결과와 관계없이 상태를 끝낸다. 실패는 sticky다(Reset 전까지
+// TryUpdate·TryFinish가 AuthenticationFailed, MacState와 같다). TryFinishAny는 신뢰 공개키 여러 개(키 회전) 중 맞는 키의
+// 순번을 돌려준다. 상태를 키마다 복사해 확인하므로 스트림을 다시 해시하지 않는다.
+class Ed25519phVerifier { /* TryCreate, TryUpdate, TryFinish(const Ed25519PublicKey&, Span<const uint8> signature),
+                             TryFinishAny(Span<const Ed25519PublicKey> trusted, Span<const uint8> signature), Reset */ };
 
 } // namespace rocks::crypto
 ```
@@ -853,7 +856,7 @@ public:
 
 - `KeyBlob` v1 = magic `"RKEY"` ‖ 버전 ‖ 키 타입·알고리즘 ‖ keyId ‖ 타입별 매개변수 ‖ wrap된 키 byte다.
 - wrap은 wrap 키 아래 XChaCha20-Poly1305(무작위 nonce)이고, 앞 필드 전체를 AD로 묶는다. wrap 키는 KeyRing의 키이거나 Argon2id로 얻은 키다.
-- 평문 키 내보내기(`hazmat::TryExportKey`, 키 타입마다 overload)는 hazmat이고, 시험·상호운용 도구에서만 쓴다.
+- 평문 키 내보내기(`hazmat::TryExportKey`, 키 타입마다 overload)는 hazmat이고, 시험·상호운용 도구에서만 쓴다. 정본이 seed인 키(Ed25519 서명 키, KEM 키 쌍)는 `hazmat::TryExportSeed`로 seed를 내보낸다.
 
 ## 11. 오류·한도·스레드
 
@@ -889,7 +892,7 @@ public:
 
 ## 12. 검증 계획
 
-- **알려진 답.** Wycheproof 사상표에 따른 전 항목(96 bit가 아닌 GCM IV·짧은 tag는 `Unsupported`·`AuthenticationFailed`, Ed25519 "acceptable" 항목은 libsodium 규칙대로 거부를 기대값으로 둔다), RFC 8439(ChaCha20-Poly1305), XChaCha20 초안 벡터, RFC 8032(Ed25519·Ed25519ph), RFC 7748(X25519), RFC 5869(HKDF), RFC 4231(HMAC), RFC 7693(BLAKE2b), RFC 4493(CMAC), NIST SP 800-38A(CTR)·CAVP GCM, X-Wing·ML-KEM768 표준 벡터, 세그먼트 형식 golden(salt 고정).
+- **알려진 답.** Wycheproof 사상표에 따른 전 항목(96 bit가 아닌 GCM IV·짧은 tag는 `Unsupported`·`AuthenticationFailed`, Ed25519 "acceptable" 항목은 libsodium 결과를 기대값으로 둔다: 비정규 encoding·small-order는 거부, 혼합 차수 키는 cofactorless 식이 맞으면 수용), RFC 8439(ChaCha20-Poly1305), XChaCha20 초안 벡터, RFC 8032(Ed25519·Ed25519ph), RFC 7748(X25519), RFC 5869(HKDF), RFC 4231(HMAC), RFC 7693(BLAKE2b), RFC 4493(CMAC), NIST SP 800-38A(CTR)·CAVP GCM, X-Wing·ML-KEM768 표준 벡터, 세그먼트 형식 golden(salt 고정).
 - **차등.** 같은 기기에서 libsodium AES-256-GCM(원본)과 경량 계층 AES-256-GCM을 무작위 입력(길이 0–64 KiB, AD 0–1 KiB, 정렬·비정렬, 제자리)과 무작위 조각 나누기(멀티파트)로 대조한다. 원본이 파생 코드의 기준이다. x64와 arm64 결과는 같은 벡터 파일로 고정한다.
 - **스칼라 참조.** 시험 전용 스칼라 참조(블록 암호화 + 32·64·128 bit 카운터 증가)로 CTR·CMAC·AES-128을 대조한다. 시작 카운터를 2^32−k, 2^64−k, 2^128−k에 두어 carry 전파와 wrap(`CapacityExceeded`)을 확인한다. libsodium 원본에 없는 경로라 원본이 기준이 되지 못하기 때문이다.
 - **경로 범위.** GitHub CI(Windows x64 AES-NI·AVX, macOS arm64 AES·PMULL)와 로컬 Android x86_64 에뮬레이터(adb 실행)에서 돈다. 행마다 `AeadInfo.implementation`이 기대값과 같은지 단언한다. HW 없는 경로는 `CpuFeatures` 시험 주입으로 `Unsupported` 반환을 확인한다. Android arm64 실기기는 아직 실행 경로가 없으므로 결과에서 구분해 적는다.

@@ -99,6 +99,15 @@ Result<void> CheckPhUpdate(const void* state, bool finished) noexcept {
     return Result<void>::Success();
 }
 
+// 검증기 입력 검사다. 실패한 뒤에는 AuthenticationFailed로 남는다(sticky, 9.1절).
+Result<void> CheckPhVerifier(const void* state, bool finished, bool verifyFailed) noexcept {
+    if (state != nullptr && verifyFailed) {
+        return Result<void>::Failure(ErrorCode::AuthenticationFailed);
+    }
+
+    return CheckPhUpdate(state, finished);
+}
+
 } // namespace
 
 // ---- 공개키·서명 키 ----
@@ -293,7 +302,8 @@ Ed25519phVerifier::~Ed25519phVerifier() noexcept {
 }
 
 Ed25519phVerifier::Ed25519phVerifier(Ed25519phVerifier&& other) noexcept
-    : allocator_(other.allocator_), state_(other.state_), finished_(other.finished_) {
+    : allocator_(other.allocator_), state_(other.state_), finished_(other.finished_),
+      verifyFailed_(other.verifyFailed_) {
     other.allocator_ = nullptr;
     other.state_ = nullptr;
 }
@@ -304,6 +314,7 @@ Ed25519phVerifier& Ed25519phVerifier::operator=(Ed25519phVerifier&& other) noexc
         allocator_ = other.allocator_;
         state_ = other.state_;
         finished_ = other.finished_;
+        verifyFailed_ = other.verifyFailed_;
         other.allocator_ = nullptr;
         other.state_ = nullptr;
     }
@@ -324,7 +335,7 @@ Result<Ed25519phVerifier> Ed25519phVerifier::TryCreate(Allocator& allocator) noe
 }
 
 Result<void> Ed25519phVerifier::TryUpdate(Span<const uint8> input) noexcept {
-    if (auto valid = CheckPhUpdate(state_, finished_); !valid) {
+    if (auto valid = CheckPhVerifier(state_, finished_, verifyFailed_); !valid) {
         return valid;
     }
 
@@ -333,7 +344,7 @@ Result<void> Ed25519phVerifier::TryUpdate(Span<const uint8> input) noexcept {
 }
 
 Result<void> Ed25519phVerifier::TryUpdate(Span<const Span<const uint8>> pieces) noexcept {
-    if (auto valid = CheckPhUpdate(state_, finished_); !valid) {
+    if (auto valid = CheckPhVerifier(state_, finished_, verifyFailed_); !valid) {
         return valid;
     }
 
@@ -346,21 +357,48 @@ Result<void> Ed25519phVerifier::TryUpdate(Span<const Span<const uint8>> pieces) 
 
 Result<void> Ed25519phVerifier::TryFinish(const Ed25519PublicKey& key,
                                           Span<const uint8> signature) noexcept {
-    if (auto valid = CheckPhUpdate(state_, finished_); !valid) {
-        return valid;
-    }
-
-    finished_ = true;
-    if (signature.Size() != Ed25519SignatureBytes) {
-        WipePhState(state_);
-        return Result<void>::Failure(ErrorCode::AuthenticationFailed);
-    }
-
-    if (crypto_sign_ed25519ph_final_verify(AsPhState(state_), signature.Data(), key.bytes) != 0) {
-        return Result<void>::Failure(ErrorCode::AuthenticationFailed);
+    auto index = TryFinishAny(Span<const Ed25519PublicKey>(&key, 1), signature);
+    if (!index) {
+        return Result<void>::Failure(index.Error());
     }
 
     return Result<void>::Success();
+}
+
+Result<usize> Ed25519phVerifier::TryFinishAny(Span<const Ed25519PublicKey> trusted,
+                                              Span<const uint8> signature) noexcept {
+    if (auto valid = CheckPhVerifier(state_, finished_, verifyFailed_); !valid) {
+        return Result<usize>::Failure(valid.Error());
+    }
+
+    if (trusted.IsEmpty()) {
+        return Result<usize>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 여기부터는 결과와 관계없이 끝난다. 서명 길이는 메시지에서 온 값이다(결정 D5).
+    finished_ = true;
+    bool found = false;
+    usize index = 0;
+    if (signature.Size() == Ed25519SignatureBytes) {
+        for (usize i = 0; i < trusted.Size() && !found; ++i) {
+            // final_verify가 상태를 끝내므로 사본으로 확인한다. 사본은 메시지 해시 상태라 비밀이
+            // 아니지만 끝나면 지운다.
+            crypto_sign_ed25519ph_state copy;
+            platform::MemoryCopy(&copy, state_, PhStateBytes);
+            found =
+                crypto_sign_ed25519ph_final_verify(&copy, signature.Data(), trusted[i].bytes) == 0;
+            index = i;
+            SecureZero(Span<uint8>(reinterpret_cast<uint8*>(&copy), PhStateBytes));
+        }
+    }
+
+    WipePhState(state_);
+    if (!found) {
+        verifyFailed_ = true;
+        return Result<usize>::Failure(ErrorCode::AuthenticationFailed);
+    }
+
+    return Result<usize>::Success(index);
 }
 
 void Ed25519phVerifier::Reset() noexcept {
@@ -368,6 +406,7 @@ void Ed25519phVerifier::Reset() noexcept {
         WipePhState(state_);
         InitPhState(state_);
         finished_ = false;
+        verifyFailed_ = false;
     }
 }
 
