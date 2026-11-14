@@ -11,6 +11,7 @@
 #include "Sodium/SodiumRuntime.h"
 
 #include <Base/Compiler.h>
+#include <Base/Endian.h>
 #include <Core/Move.h>
 #include <Platform/Cpu.h>
 #include <Platform/Fatal.h>
@@ -625,6 +626,133 @@ Result<void> hazmat::TryOpenDetached(const AeadKey& key, Span<const uint8> nonce
     }
 
     return Result<void>::Success();
+}
+
+// ---- 순번 봉인기 ----
+
+namespace {
+
+constexpr usize SequenceCounterBytes = 8;
+constexpr usize MaxSequencePrefixBytes = 24;
+// 마지막으로 쓸 수 있는 카운터다. 이 값으로 봉인·열기한 뒤에는 소진이다.
+constexpr uint64 LastSequence = static_cast<uint64>(-1);
+
+static_assert(crypto_aead_aegis256_NPUBBYTES - SequenceCounterBytes == MaxSequencePrefixBytes);
+
+// 빈 키는 StaleHandle, prefix 길이(nonce 길이 - 8)가 틀리면 InvalidArgument다.
+Result<void> CheckSequenceArguments(const AeadKey& key, Span<const uint8> prefix) noexcept {
+    if (key.IsEmpty()) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    if (prefix.Size() != TraitsOf(key.Algorithm()).nonceBytes - SequenceCounterBytes) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return Result<void>::Success();
+}
+
+// nonce = prefix ‖ BE64(sequence)를 nonce에 쓰고 그 view를 돌려준다.
+Span<const uint8> MakeSequenceNonce(const AeadKey& key, const uint8* prefix, uint64 sequence,
+                                    Span<uint8> nonce) noexcept {
+    const usize prefixBytes = TraitsOf(key.Algorithm()).nonceBytes - SequenceCounterBytes;
+    platform::MemoryCopy(nonce.Data(), prefix, prefixBytes);
+    StoreBigEndian<uint64>(nonce.Data() + prefixBytes, sequence);
+    return nonce.Left(prefixBytes + SequenceCounterBytes);
+}
+
+} // namespace
+
+hazmat::AeadSequenceSealer::AeadSequenceSealer(AeadKey&& key, Span<const uint8> prefix,
+                                               uint64 firstSequence) noexcept
+    : key_(Move(key)), next_(firstSequence) {
+    platform::MemoryCopy(prefix_, prefix.Data(), prefix.Size());
+}
+
+Result<hazmat::AeadSequenceSealer>
+hazmat::AeadSequenceSealer::TryCreate(AeadKey&& key, Span<const uint8> prefix,
+                                      uint64 firstSequence) noexcept {
+    if (auto valid = CheckSequenceArguments(key, prefix); !valid) {
+        return Result<AeadSequenceSealer>::Failure(valid.Error());
+    }
+
+    return Result<AeadSequenceSealer>::Success(
+        AeadSequenceSealer(Move(key), prefix, firstSequence));
+}
+
+Result<usize> hazmat::AeadSequenceSealer::TrySeal(Span<const uint8> associatedData,
+                                                  Span<const uint8> plaintext,
+                                                  Span<uint8> sealed) noexcept {
+    if (key_.IsEmpty()) {
+        return Result<usize>::Failure(ErrorCode::StaleHandle);
+    }
+
+    if (exhausted_) {
+        return Result<usize>::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    uint8 nonceBytes[MaxSequencePrefixBytes + SequenceCounterBytes];
+    const Span<const uint8> nonce =
+        MakeSequenceNonce(key_, prefix_, next_, Span<uint8>(nonceBytes));
+    auto written = TrySealWithNonce(key_, nonce, associatedData, plaintext, sealed);
+    if (written) {
+        // 실패한 호출은 쓰기 전에 돌아오므로 카운터를 쓰지 않은 것으로 본다.
+        if (next_ == LastSequence) {
+            exhausted_ = true;
+        } else {
+            ++next_;
+        }
+    }
+
+    return written;
+}
+
+hazmat::AeadSequenceOpener::AeadSequenceOpener(AeadKey&& key, Span<const uint8> prefix,
+                                               uint64 firstSequence) noexcept
+    : key_(Move(key)), next_(firstSequence) {
+    platform::MemoryCopy(prefix_, prefix.Data(), prefix.Size());
+}
+
+Result<hazmat::AeadSequenceOpener>
+hazmat::AeadSequenceOpener::TryCreate(AeadKey&& key, Span<const uint8> prefix,
+                                      uint64 firstSequence) noexcept {
+    if (auto valid = CheckSequenceArguments(key, prefix); !valid) {
+        return Result<AeadSequenceOpener>::Failure(valid.Error());
+    }
+
+    return Result<AeadSequenceOpener>::Success(
+        AeadSequenceOpener(Move(key), prefix, firstSequence));
+}
+
+Result<usize> hazmat::AeadSequenceOpener::TryOpen(Span<const uint8> associatedData,
+                                                  Span<const uint8> sealed,
+                                                  Span<uint8> plaintext) noexcept {
+    if (key_.IsEmpty()) {
+        return Result<usize>::Failure(ErrorCode::StaleHandle);
+    }
+
+    // 인증 실패 뒤와 카운터를 다 쓴 뒤의 메시지는 받아들이지 않는다(sticky).
+    if (failed_ || exhausted_) {
+        failed_ = true;
+        SecureZero(plaintext);
+        return Result<usize>::Failure(ErrorCode::AuthenticationFailed);
+    }
+
+    uint8 nonceBytes[MaxSequencePrefixBytes + SequenceCounterBytes];
+    const Span<const uint8> nonce =
+        MakeSequenceNonce(key_, prefix_, next_, Span<uint8>(nonceBytes));
+    auto opened = TryOpenWithNonce(key_, nonce, associatedData, sealed, plaintext);
+    if (opened) {
+        if (next_ == LastSequence) {
+            exhausted_ = true;
+        } else {
+            ++next_;
+        }
+    } else if (opened.Error() == ErrorCode::AuthenticationFailed) {
+        failed_ = true;
+    }
+
+    return opened;
 }
 
 } // namespace rocks::crypto

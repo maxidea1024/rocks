@@ -18,8 +18,9 @@
 //   경로는 상수 시간이 아니라서 쓰지 않는다, 결정 D3).
 // - 고수준 TrySeal·TryOpen은 nonce를 만들어 앞에 붙인다(출력 = nonce ‖ 암호문 ‖ tag). 무작위
 //   nonce가 안전한 알고리즘(XChaCha20-Poly1305, AEGIS-256)만 받고, 나머지(ChaCha20-IETF·AES-GCM의
-//   96 bit, AEGIS-128L의 128 bit nonce)는 Unsupported다. 그 알고리즘은 hazmat nonce 지정 API(카운터
-//   nonce)나 세그먼트 스트림으로 쓴다.
+//   96 bit, AEGIS-128L의 128 bit nonce)는 Unsupported다. 그 알고리즘은 hazmat 순번
+//   봉인기(AeadSequenceSealer·AeadSequenceOpener, 카운터 nonce)나 nonce 지정 API, 세그먼트
+//   스트림으로 쓴다.
 // - 복호 실패(tag 불일치, 잘린 입력, 다른 키·AD)는 모두 AuthenticationFailed이고 평문 출력 전체를
 //   0으로 지운다. 어느 검사가 실패했는지는 알리지 않는다(결정 D5). AES-GCM·AEGIS는 검증 전에 복호한
 //   byte를 plaintext에 잠시 쓰고 실패하면 지운다(ChaCha20 계열은 검증 뒤에 쓴다). 호출 중에 다른
@@ -177,6 +178,103 @@ namespace hazmat {
                                            Span<const uint8> associatedData,
                                            Span<const uint8> ciphertext, Span<const uint8> tag,
                                            Span<uint8> plaintext) noexcept;
+
+// 순번 nonce 봉인기다. 키를 소유하고 nonce = prefix ‖ 64 bit 카운터(big-endian)를 스스로 만든다.
+// 전송 채널처럼 한 방향 순서가 있는 경우에 쓴다. 출력은 암호문 ‖ tag이고 nonce는 싣지 않는다(받는
+// 쪽 AeadSequenceOpener가 같은 카운터를 센다).
+//
+// - prefix 길이는 nonce 길이 - 8이다(ChaCha20-IETF·AES-GCM 4, AEGIS-128L 8, XChaCha20 16, AEGIS-256
+//   24). 같은 키를 두 방향에 쓰면 방향마다 prefix를 다르게 둔다. 키를 방향마다 따로 파생하는 편이
+//   낫다.
+// - 카운터는 0부터 성공한 봉인마다 1씩 오른다. 실패한 호출(InvalidArgument·CapacityExceeded)은
+//   카운터를 쓰지 않는다. 2^64개를 봉인하면 CapacityExceeded이고, 키를 소유하므로 그 키로 더
+//   봉인하는 경로가 남지 않는다.
+// - 알고리즘별 키당 데이터 한도(AES-GCM은 RFC 8446 5.5절 기준 약 2^24.5개 full-size 레코드)는
+//   프로토콜이 키 갱신으로 지킨다. 이 객체는 카운터 소진만 막는다.
+// - 한 스레드에서 쓴다(카운터를 바꾼다). move-only이고 옮겨 간 객체는 StaleHandle이다.
+class AeadSequenceSealer {
+public:
+    AeadSequenceSealer() noexcept = default;
+
+    // key를 소유한다. firstSequence는 첫 카운터다(저장해 둔 채널을 이어 갈 때). 빈 키는
+    // StaleHandle, prefix 길이가 틀리면 InvalidArgument이고, 실패하면 key는 그대로 남는다.
+    [[nodiscard]] static Result<AeadSequenceSealer>
+    TryCreate(AeadKey&& key, Span<const uint8> prefix, uint64 firstSequence = 0) noexcept;
+
+    // 다음 카운터로 봉인한다. 출력 = 암호문 ‖ tag이고 쓴 byte 수를 돌려준다. 오류는
+    // TrySealWithNonce와 같고, 카운터를 다 쓰면 CapacityExceeded다.
+    [[nodiscard]] Result<usize> TrySeal(Span<const uint8> associatedData,
+                                        Span<const uint8> plaintext, Span<uint8> sealed) noexcept;
+
+    // 다음 봉인에 쓸 카운터다.
+    [[nodiscard]] uint64 NextSequence() const noexcept {
+        return next_;
+    }
+
+    [[nodiscard]] AeadAlgorithm Algorithm() const noexcept {
+        return key_.Algorithm();
+    }
+
+    [[nodiscard]] bool IsEmpty() const noexcept {
+        return key_.IsEmpty();
+    }
+
+private:
+    AeadSequenceSealer(AeadKey&& key, Span<const uint8> prefix, uint64 firstSequence) noexcept;
+
+    AeadKey key_;
+    uint8 prefix_[24] = {};
+    uint64 next_ = 0;
+    bool exhausted_ = false;
+};
+
+// AeadSequenceSealer의 받는 쪽이다. 같은 키·prefix로 만들고, 같은 순서로 연다.
+//
+// - 성공한 열기마다 카운터가 1씩 오른다. 빠지거나 바뀐 순서·재전송·변조는 모두 tag 불일치라
+//   AuthenticationFailed이고 plaintext 전체를 지운다. 이 실패는 sticky다: 이후 모든 TryOpen이
+//   AuthenticationFailed다(순서를 잃은 채널은 다시 맞출 수 없다, 11절). 카운터를 다 쓴 뒤 온
+//   메시지도 같다(보내는 쪽은 더 봉인할 수 없다).
+// - 호출자 버퍼 오류(InvalidArgument·CapacityExceeded)는 카운터와 상태를 바꾸지 않는다.
+// - 한 스레드에서 쓴다. move-only이고 옮겨 간 객체는 StaleHandle이다.
+class AeadSequenceOpener {
+public:
+    AeadSequenceOpener() noexcept = default;
+
+    // 인자와 오류는 AeadSequenceSealer::TryCreate와 같다.
+    [[nodiscard]] static Result<AeadSequenceOpener>
+    TryCreate(AeadKey&& key, Span<const uint8> prefix, uint64 firstSequence = 0) noexcept;
+
+    // 다음 카운터로 연다. 평문 byte 수를 돌려준다. 오류는 TryOpenWithNonce와 같고, 앞선 인증 실패
+    // 뒤에는 늘 AuthenticationFailed(plaintext 소거)다.
+    [[nodiscard]] Result<usize> TryOpen(Span<const uint8> associatedData, Span<const uint8> sealed,
+                                        Span<uint8> plaintext) noexcept;
+
+    [[nodiscard]] uint64 NextSequence() const noexcept {
+        return next_;
+    }
+
+    // 인증 실패로 멈췄는가.
+    [[nodiscard]] bool HasFailed() const noexcept {
+        return failed_;
+    }
+
+    [[nodiscard]] AeadAlgorithm Algorithm() const noexcept {
+        return key_.Algorithm();
+    }
+
+    [[nodiscard]] bool IsEmpty() const noexcept {
+        return key_.IsEmpty();
+    }
+
+private:
+    AeadSequenceOpener(AeadKey&& key, Span<const uint8> prefix, uint64 firstSequence) noexcept;
+
+    AeadKey key_;
+    uint8 prefix_[24] = {};
+    uint64 next_ = 0;
+    bool exhausted_ = false;
+    bool failed_ = false;
+};
 
 } // namespace hazmat
 
