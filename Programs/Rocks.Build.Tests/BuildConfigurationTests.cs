@@ -105,9 +105,11 @@ internal static class BuildConfigurationTests
                 Modules = request.Modules.Select(module => module.Name == "Engine" ? module with { SanitizerInstrumentation = false } : module).ToArray()
             };
             var plain = CompileArguments(uninstrumented, "Engine");
-            Check(!plain.Any(ActionGraph.IsSanitizerArgument) && plain.Contains(Unoptimized()) && plain.Contains(Define("ROCKS_BUILD_DEBUG=1")),
+            // 판정은 구현(NativeCompileProfile.IsSanitizerArgument)과 따로 "sanitize"가 든 모든 인자로 한다.
+            static bool Sanitizes(string argument) => argument.Contains("sanitize", StringComparison.OrdinalIgnoreCase);
+            Check(!plain.Any(Sanitizes) && plain.Contains(Unoptimized()) && plain.Contains(Define("ROCKS_BUILD_DEBUG=1")),
                 "SanitizerInstrumentation=false in Asan");
-            Check(CompileArguments(uninstrumented, "Game").Any(ActionGraph.IsSanitizerArgument), "SanitizerInstrumentation=false leaked to another module");
+            Check(CompileArguments(uninstrumented, "Game").Any(Sanitizes), "SanitizerInstrumentation=false leaked to another module");
         }
 
         // 모듈 인자(외부 라이브러리 compileArguments)는 프로필보다 앞에 붙는다. 프로필이 반대 인자를 가지면 라이브러리 인자가
@@ -170,13 +172,15 @@ internal static class BuildConfigurationTests
         }
 
         foreach (string argument in new[] { "-O", "-O3", "-Os", "-Ofast", "--optimize=2", "/O1", "/O2", "/Ox", "/Od", "/Ob2",
-                     "-flto", "-flto=full", "-fno-lto" })
+                     "-flto", "-flto=full", "-fno-lto", "-fsanitize=address", "-fsanitize=undefined", "-fno-sanitize=address",
+                     "/fsanitize=address" })
         {
             await Rejects(WithEngineModule(module => module with { AdditionalCompileArguments = [argument] }), "accepted " + argument,
                 "overrides owned output/policy");
         }
 
-        foreach (string argument in new[] { "-flto=thin", "-fno-lto", "/opt:lldlto=0", "-Wl,--lto-O0", "-Wl,--thinlto-jobs=1" })
+        foreach (string argument in new[] { "-flto=thin", "-fno-lto", "/opt:lldlto=0", "-Wl,--lto-O0", "-Wl,--thinlto-jobs=1",
+                     "-fsanitize=address" })
         {
             await Rejects(WithEngineModule(module => module with { AdditionalLinkArguments = [argument] }), "accepted link " + argument,
                 "overrides owned output/policy");

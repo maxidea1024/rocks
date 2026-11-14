@@ -21,7 +21,7 @@
 //   덧붙인다(최대 64개). chunk(4 KiB)가 처음 쓸 때 크기 등급 하나를 맡고, 슬롯 사용을 64 bit
 //   마스크로 기록한다. 슬롯은 등급 크기로 정렬된다. 버퍼가 이 저장소를 쓰지 않으므로 큰 평문 버퍼가
 //   키 자리를 차지해 키가 잠금 없는 메모리로 밀려나는 일이 없다.
-// - 버퍼 할당기(GetSecretAllocator): 평문이 지나가는 버퍼용. 일반 힙에서 할당하고 해제 때 블록
+// - 버퍼 할당기(GetSecretAllocator): 평문이 지나가는 버퍼용. 일반 힙에서 할당하고 해제 때 요청 크기
 //   전체를 지운다. 블록 크기는 블록 밖 표(주소 → 크기)에 두므로, 버퍼 앞을 넘겨 쓰는 결함이 할당기
 //   자료 구조를 망가뜨리지 않고 남의 주소도 역참조하지 않는다.
 namespace rocks::crypto {
@@ -148,8 +148,15 @@ private:
             return false;
         }
 
+        // commit 실패는 OutOfMemory로 돌려주고 레코드를 다음 시도에 다시 쓴다. 예약을 풀지 못하면
+        // 레코드가 예약을 쥔 채 남아 이후 arena 증가가 모두 막히므로 결함으로
+        // 멈춘다(VirtualMemoryRegion 소멸의 해제 실패와 같은 규칙).
         if (!arena.region.Commit(guard, committed)) {
-            (void)arena.region.Release();
+            if (!arena.region.Release()) {
+                platform::Fatal(
+                    "Crypto: could not release a secret arena reservation after a failed commit");
+            }
+
             return false;
         }
 

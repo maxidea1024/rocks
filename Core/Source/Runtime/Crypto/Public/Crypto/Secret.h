@@ -14,12 +14,15 @@
 //   보고한다. 버퍼는 이 저장소를 쓰지 않으므로 큰 평문 버퍼가 키 자리를 차지하지 않는다. 4 KiB
 //   이하의 SecretBytes와 키 타입이 여기에 있다.
 // - 버퍼 할당기(GetSecretAllocator): 평문이 지나가는 버퍼용 Allocator다. 일반 힙에서 할당하고
-//   해제할 때 블록 전체를 지운다. 잠금·덤프 제외는 없다. 4 KiB를 넘는 SecretBytes도 여기에 있다.
+//   해제할 때 요청 크기 전체를 지운다. 잠금·덤프 제외는 없다. 4 KiB를 넘는 SecretBytes도 여기에
+//   있다.
 //
 // 한계: 프로세스 메모리를 직접 읽는 공격자, 레지스터·라이브러리 스택 잔재, 하이버네이트 파일은 막지
 // 못한다. 이 장치는 스왑·덤프·해제 뒤 잔존 데이터를 줄이는 것이 목적이다. guard page는 arena 양
-// 끝의 넘침만 잡고, 같은 arena 안의 슬롯끼리 넘치는 것은 잡지 못한다(ASan 구성은 슬롯 꼬리를
-// poison해 잡는다). macOS에는 덤프 제외가 없고, Windows minidump 제외는 crash reporter 몫이다.
+// 끝의 넘침만 잡고, 같은 arena 안의 슬롯끼리 넘치는 것은 잡지 못한다. Asan 구성은 빈 슬롯과 요청
+// 크기 뒤 꼬리를 poison해 해제 뒤 접근과 꼬리 넘침을 잡지만, 요청 크기가 등급 크기와 같은 슬롯에서
+// 이웃 슬롯으로 넘치는 것은 잡지 못한다. macOS에는 덤프 제외가 없고, Windows minidump 제외는 crash
+// reporter 몫이다.
 //
 // 사용 예:
 //   auto key = crypto::SecretBytes::TryGenerate(32);   // OS 난수 32 byte, 키 저장소
@@ -33,7 +36,8 @@ namespace rocks::crypto {
 // 비밀 메모리의 한 시점 상태다. 시험·진단용이며 값은 다른 스레드의 할당으로 곧 바뀔 수 있다.
 struct SecretMemoryStatus {
     // 키 저장소의 arena 수와 전체 byte, 그중 페이지 잠금(스왑 방지)에 성공한 byte다. 잠금 한도가
-    // 작은 기기에서는 일부 arena만 잠긴다.
+    // 작은 기기에서는 일부 arena만 잠긴다. macOS·Android의 Asan 구성에서는 sanitizer runtime이
+    // mlock을 가로채 실제로 잠그지 않고 성공을 돌려주므로 이 값을 믿지 않는다.
     usize arenaCount = 0;
     usize arenaCapacityBytes = 0;
     usize arenaLockedBytes = 0;
@@ -62,9 +66,11 @@ struct SecretMemoryStatus {
 //   성공이다.
 [[nodiscard]] Allocator& GetSecretAllocator() noexcept;
 
-// 비밀 byte를 소유하는 move-only 값이다. 복사할 수 없고, 이동하면 원본은 비며, 소멸·Reset 때
-// 지운다. 4 KiB 이하는 키 저장소 슬롯(64 byte 정렬, guard page·잠금 시도), 그보다 크면 버퍼
-// 할당기(소거만)에 둔다. 키는 모두 4 KiB 이하다(가장 큰 ML-KEM-768 비밀키가 2400 byte).
+// 키와 키 재료(seed·비밀번호에서 얻은 키 등)를 소유하는 move-only 값이다. 복사할 수 없고, 이동하면
+// 원본은 비며, 소멸·Reset 때 지운다. 4 KiB 이하는 키 저장소 슬롯(64 byte 정렬, guard page·잠금
+// 시도), 그보다 크면 버퍼 할당기(소거만)에 둔다. 키는 모두 4 KiB 이하다(가장 큰 ML-KEM-768 비밀키가
+// 2400 byte). 키 저장소는 모든 키가 함께 쓰는 4 MiB 한도가 있으므로, 평문처럼 키가 아닌 비밀
+// 데이터는 SecretBytes 대신 GetSecretAllocator를 쓰는 Array<uint8>에 둔다.
 class SecretBytes {
 public:
     SecretBytes() noexcept = default;

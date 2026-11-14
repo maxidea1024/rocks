@@ -478,6 +478,22 @@ internal static class NativeTests
             }
         });
 
+        // 키 슬롯 꼬리(요청 크기 뒤, 등급 크기 안) 읽기: Asan은 꼬리를 poison하므로 보고로 끝나야 하고, 그 밖의 구성은
+        // 0을 읽어 성공한다.
+        suite.Add("Native.SecretArena.slot-tail-overflow", async () =>
+        {
+            var result = await Run("--negative-control", "secret-slot-tail-overflow");
+            if (options.Asan)
+            {
+                Verify.That(result.ExitCode != 0, "reading a secret slot tail was not reported");
+                Verify.Contains("AddressSanitizer: use-after-poison", result.StdErr, "secret slot tail poison report");
+            }
+            else
+            {
+                Verify.Equal(0, result.ExitCode, "an unused secret slot tail must read back as zero");
+            }
+        });
+
         if (options.Optional("compiler") is string compiler)
         {
             suite.Add("Native.CompilerRejectsIntentionalWarning", () => WarningProbe.VerifyAsync(compiler, options.Root, environment));

@@ -123,8 +123,8 @@ public sealed record ThirdPartyManifest(
 
     /// <summary>
     /// compileArguments가 받는 인자다. 경고·대상·최적화·FP 모델을 바꾸지 않는 코드 생성 의미 인자만 둔다.
-    /// <c>-fno-strict-overflow</c>는 clang에서 <c>-fwrapv</c>(clang 21부터 <c>-fwrapv-pointer</c>도)로 바뀐다. 둘을 함께 주면
-    /// 하나가 "unused" 경고(-Werror)가 되므로 manifest는 하나만 고른다.
+    /// <c>-fno-strict-overflow</c>는 clang에서 <c>-fwrapv</c>(clang 21부터 <c>-fwrapv-pointer</c>도)로 바뀐다. clang 20
+    /// 이하(Android NDK)는 둘을 함께 주면 하나를 -Wunused-command-line-argument(-Werror)로 거부하므로 manifest는 하나만 고른다.
     /// </summary>
     public static readonly IReadOnlyList<string> AllowedCompileArguments = ["-fno-strict-aliasing", "-fno-strict-overflow", "-fwrapv"];
 
@@ -513,7 +513,8 @@ public sealed record ThirdPartyManifest(
             if (compileArguments.Contains("-fno-strict-overflow", StringComparer.Ordinal) &&
                 compileArguments.Contains("-fwrapv", StringComparer.Ordinal))
             {
-                throw new FormatException("compileArguments: '-fno-strict-overflow' already implies '-fwrapv' (clang rejects the pair as unused)");
+                throw new FormatException(
+                    "compileArguments: '-fno-strict-overflow' already implies '-fwrapv' (clang 20 and older reject the pair as unused)");
             }
         }
 

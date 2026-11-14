@@ -194,6 +194,12 @@ internal static class InputValidation
         "-fdebug-prefix-map=", "-fprofile-instr-use=", "-fprofile-use=", "/LIBPATH:", "-LIBPATH:", "/I", "/FI", "-include"
     ];
 
+    // sanitizer 계측·runtime은 구성(Asan)과 NativeModuleInput.SanitizerInstrumentation이 정한다. 모듈 인자로 켜거나 끄면
+    // 같은 실행 파일 안에서 계측과 runtime이 어긋난다. lower는 소문자로 바꾼 인자다.
+    private static bool IsSanitizerSetting(string lower) =>
+        lower.StartsWith("-fsanitize", StringComparison.Ordinal) || lower.StartsWith("-fno-sanitize", StringComparison.Ordinal) ||
+        lower.StartsWith("/fsanitize", StringComparison.Ordinal);
+
     private static bool MatchesCl(string argument, string[] exact, string[] prefixes)
     {
         if (argument.Length < 2 || argument[0] is not ('/' or '-'))
@@ -254,12 +260,13 @@ internal static class InputValidation
                 // 최적화 수준·LTO는 구성과 NativeModuleInput.Optimization이 정한다. 수준을 바꾸지 않는
                 // /Oy-(frame pointer 유지)·/Oi(intrinsic) 등은 허용한다.
                 OptimizationLevel.IsMatch(argument) || lower.StartsWith("-flto", StringComparison.Ordinal) ||
-                lower.StartsWith("-fno-lto", StringComparison.Ordinal);
+                lower.StartsWith("-fno-lto", StringComparison.Ordinal) || IsSanitizerSetting(lower);
         }
         else
         {
-            // link 단계에서 LTO를 끄거나 backend 최적화 수준을 바꾸는 인자도 구성이 정한다.
-            invalid |= lower.StartsWith("-flto", StringComparison.Ordinal) || lower.StartsWith("-fno-lto", StringComparison.Ordinal) ||
+            // link 단계에서 LTO를 끄거나 backend 최적화 수준을 바꾸는 인자도 구성이 정한다. sanitizer runtime도 구성이 고른다.
+            invalid |= IsSanitizerSetting(lower) ||
+                lower.StartsWith("-flto", StringComparison.Ordinal) || lower.StartsWith("-fno-lto", StringComparison.Ordinal) ||
                 lower.StartsWith("/opt:lldlto", StringComparison.Ordinal) || lower.StartsWith("/lldlto", StringComparison.Ordinal) ||
                 lower.StartsWith("-wl,--lto", StringComparison.Ordinal) || lower.StartsWith("-wl,--thinlto", StringComparison.Ordinal) ||
                 lower.StartsWith("-wl,-lto", StringComparison.Ordinal) || lower.StartsWith("--lto", StringComparison.Ordinal);

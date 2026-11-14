@@ -128,8 +128,9 @@ TEST(CryptoSecretMemoryStatusReportsLocking) {
     CHECK(status.arenaUsedBytes <= status.arenaCapacityBytes);
     CHECK(status.dumpExclusionRequested == IsAndroid);
     // Windows(작업 집합 최소값)와 macOS는 첫 arena 64 KiB를 잠글 수 있어야 한다. Android는
-    // RLIMIT_MEMLOCK이 작은 기기가 있어 단언하지 않는다(best-effort).
-    if constexpr (IsWindows || IsMac) {
+    // RLIMIT_MEMLOCK이 작은 기기가 있어 단언하지 않는다(best-effort). macOS Asan은 sanitizer
+    // runtime이 mlock을 가로채 잠그지 않고 성공을 돌려주므로 이 단언이 의미가 없어 뺀다.
+    if constexpr (IsWindows || (IsMac && !ROCKS_ADDRESS_SANITIZER)) {
         CHECK(status.arenaLockedBytes >= secret::SecretArenaBytes);
     }
 

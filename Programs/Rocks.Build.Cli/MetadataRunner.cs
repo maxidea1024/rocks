@@ -123,7 +123,7 @@ public static class MetadataRunner
                 }
 
                 // native compile과 같은 순서/프로필을 사용한다. 다른 모듈의 private 설정을 누출하지 않는다.
-                foreach (string argument in owner.AdditionalCompileArguments.Concat(NativeCompileProfile.Arguments(toolchain, context.Configuration, owner.Optimization)))
+                foreach (string argument in owner.AdditionalCompileArguments.Concat(NativeCompileProfile.ModuleArguments(toolchain, context.Configuration, owner)))
                 {
                     arguments.Add("--clang-arg=" + argument);
                 }

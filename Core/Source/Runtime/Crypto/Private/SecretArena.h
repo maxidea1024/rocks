@@ -26,7 +26,8 @@ inline constexpr usize MaxSecretArenas = 64;
 [[nodiscard]] Result<void*> TryAllocateSecretSlot(usize bytes, usize alignment) noexcept;
 
 // 슬롯 전체를 지우고 돌려준다. nullptr는 아무 일도 하지 않는다. 이 저장소가 준 살아 있는 슬롯이
-// 아니면 Fatal이다(키 저장소의 이중 해제·남의 주소는 결함이므로 계속하지 않는다).
+// 아니면 Fatal이다(키 저장소의 이중 해제·남의 주소는 결함이므로 계속하지 않는다). 단 그 사이 같은
+// 슬롯이 다시 할당되었다면 두 번째 해제를 구분할 수 없다(주소만으로는 세대를 모른다).
 void FreeSecretSlot(void* slot) noexcept;
 
 // 시험용: index번째 arena의 사용 영역 [begin, begin + bytes)다. 앞뒤 바로 옆은 guard page다. 없으면

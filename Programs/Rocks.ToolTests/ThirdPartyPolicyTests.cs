@@ -193,6 +193,9 @@ internal static class ThirdPartyPolicyTests
                      {
                          ("translation unit in data library", "\"translationUnits\": []", "\"translationUnits\": [ \"fakedata-1.0/table.txt\" ]"),
                          ("define in data library", "\"defines\": []", "\"defines\": [ \"X=1\" ]"),
+                         ("linkTimeOptimization in data library", "\"kind\": \"data\"", "\"kind\": \"data\", \"linkTimeOptimization\": false"),
+                         ("sanitizerInstrumentation in data library", "\"kind\": \"data\"",
+                          "\"kind\": \"data\", \"sanitizerInstrumentation\": false"),
                          ("unknown kind", "\"kind\": \"data\"", "\"kind\": \"binary\""),
                          ("invalid embedding module", "\"Core\"", "\"Core Module\""),
                          ("licenseSource without https", "https://example.invalid/license.txt", "http://example.invalid/license.txt"),

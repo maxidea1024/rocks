@@ -62,4 +62,19 @@ int RunSecretSlotUseAfterFreeProbe() noexcept {
     return 0;
 }
 
+// 독립 프로세스 전용이다. 32 byte 요청(64 byte 등급 슬롯)의 요청 크기 바로 뒤 byte를 읽는다. Asan
+// 구성에서는 꼬리를 poison하므로 use-after-poison 보고로 끝나야 한다. 그 밖의 구성에서는 꼬리가
+// 0이므로 0을 돌려준다.
+int RunSecretSlotTailOverflowProbe() noexcept {
+    auto slot = crypto::detail::TryAllocateSecretSlot(32, 64);
+    if (!slot) {
+        return 3;
+    }
+
+    const volatile uint8* bytes = static_cast<const uint8*>(slot.Value());
+    const uint8 tail = bytes[32];
+    crypto::detail::FreeSecretSlot(slot.Value());
+    return tail == 0 ? 0 : 7;
+}
+
 } // namespace rocks::test

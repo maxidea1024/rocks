@@ -39,6 +39,7 @@ int RunDebugAllocatorNegativeControl(uint32 operation) noexcept;
 int RunVirtualMemoryAccessProbe(uint32 state, bool write) noexcept;
 int RunSecretArenaGuardProbe(bool after) noexcept;
 int RunSecretSlotUseAfterFreeProbe() noexcept;
+int RunSecretSlotTailOverflowProbe() noexcept;
 int RunNumberCorpus(const char* path) noexcept;
 static TestCase* first = nullptr;
 static uint64 failures = 0;
@@ -295,6 +296,8 @@ int main(int argc, char** argv) {
                                                       0);
             } else if (strcmp(control, "secret-slot-use-after-free") == 0) {
                 return test::RunSecretSlotUseAfterFreeProbe();
+            } else if (strcmp(control, "secret-slot-tail-overflow") == 0) {
+                return test::RunSecretSlotTailOverflowProbe();
             } else if (strcmp(control, "asan-uaf") == 0) {
                 return test::RunAsanNegativeControl();
             } else if (strcmp(control, "assert-stderr-lock") == 0) {
