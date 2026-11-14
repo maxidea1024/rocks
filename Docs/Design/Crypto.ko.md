@@ -428,7 +428,7 @@ Result<usize> TrySealToRecipient(const KxPublicKey& recipient, Span<const uint8>
 
 ### 9.1 공통 계약
 
-- **객체 형태와 할당.** 스트림 객체는 move-only다. 키와 키에 의존하는 라이브러리 상태(키 확장 결과, keyed 해시·MAC 상태)는 SecretArena 슬롯에 고정한다(정렬 요구 5.1절, 10.2절). 키 없는 해시 상태와 세그먼트 버퍼·비트맵 같은 큰 버퍼는 `Allocator&` 인자로 받고, 기본값은 `GetSecretAllocator()`다(평문이 지나가는 버퍼이므로 해제 때 지운다). arena가 차면 `OutOfMemory`다. 이동된 뒤에 호출하면 `StaleHandle`이다. 한 객체는 한 번에 한 스레드만 쓴다.
+- **객체 형태와 할당.** 스트림 객체는 move-only다. 키와 키에 의존하는 라이브러리 상태(키 확장 결과, keyed 해시·MAC 상태)는 SecretArena 슬롯에 고정한다(정렬 요구 5.1절, 10.2절). 키 없는 해시 상태와 세그먼트 버퍼·비트맵 같은 큰 버퍼는 `Allocator&` 인자로 받고, 기본값은 `GetSecretAllocator()`다(평문이 지나가는 버퍼이므로 해제 때 지운다). arena가 차면 힙으로 넘어가고(잠금 없음, 해제 때 소거는 같다), 힙도 모자라면 `OutOfMemory`다. 이동된 뒤에 호출하면 `StaleHandle`이다. 한 객체는 한 번에 한 스레드만 쓴다.
 - **소거.** Reset·소멸·실패 때 내부 상태와 버퍼를 `SecureZero`로 지운다.
 - **sticky 오류.** 라이브러리 상태를 건드린 뒤의 실패는 Reset 전까지 같은 오류로 남는다. 라이브러리를 부르기 전에 거부한 경우(길이·겹침·잘못된 단계)는 상태를 바꾸지 않는다.
 - **역압.** byte 스트림 형태는 `TryProcess(Span<const uint8> input, Span<uint8> output) → StreamProgress{consumed, produced, complete`}다. 출력이 모자라면 일부만 소비하고 돌아온다. `StreamProgress`는 Compression과 같은 타입이며 Core로 옮긴다(선행 P2).
@@ -715,7 +715,8 @@ while (!pending.IsEmpty()) {
 ```cpp
 namespace rocks::crypto {
 
-// 비밀 byte다. 복사할 수 없고 이동만 된다. 소멸·Reset 때 0으로 지운다. 저장소는 SecretArena 슬롯이다.
+// 비밀 byte다. 복사할 수 없고 이동만 된다. 소멸·Reset 때 0으로 지운다. 저장소는 GetSecretAllocator다
+// (4 KiB 이하는 SecretArena 슬롯, 그보다 크거나 arena가 차면 소거하는 힙).
 class SecretBytes {
 public:
     static Result<SecretBytes> TryCreate(usize bytes) noexcept;                 // 0으로 채운다
@@ -740,11 +741,11 @@ Result<SegmentStreamKey> TryDeriveSegmentStreamKey(const KdfKey& master, uint64 
 
 ### 10.2 SecretArena
 
-`sodium_malloc`은 쓰지 않는다. 할당마다 페이지를 3–4개 더 쓰고, 정렬을 보장하지 않으며, Rocks 할당 추적 밖에 있기 때문이다. 키처럼 작은 비밀이 많은 엔진에는 맞지 않는다. 대신 PlatformBase에 `SecureMemory`를 더하고 그 위에 슬롯 할당기를 둔다.
+`sodium_malloc`은 쓰지 않는다. 할당마다 페이지를 3–4개 더 쓰고, 정렬을 보장하지 않으며, Rocks 할당 추적 밖에 있기 때문이다. 키처럼 작은 비밀이 많은 엔진에는 맞지 않는다. 대신 PlatformBase `VirtualMemoryRegion`(예약·부분 commit) 위에 슬롯 할당기를 둔다. 계획했던 PlatformBase `SecureMemory`(선행 P5)는 기존 `VirtualMemoryRegion`과 `sodium_mlock`으로 충족되어 두지 않는다(2026-11-14 구현).
 
-- `VirtualMemory`로 영역을 예약하고 앞뒤에 commit하지 않은 guard page를 둔다. 슬롯은 64 B–4 KiB 크기 등급이고 16·64 byte 정렬을 보장한다. 해제하면 즉시 지운다. libsodium 상태, AES 라운드 키·H 거듭제곱, 키가 모두 이 arena에 있다.
-- `GetSecretAllocator()`는 같은 arena 위의 `Allocator`다. 평문 비밀을 담는 `Array<uint8>`에 이 할당기를 주면, 성장 재할당 때 버려지는 이전 버퍼도 지워진다. 큰 버퍼는 잠금 한도를 넘을 수 있어 잠금 없이 소거만 보장한다.
-- 잠금과 덤프 제외는 `sodium_mlock`/`sodium_munlock`에 맡긴다. mlock·VirtualLock에 더해 `MADV_DONTDUMP`까지 이미 처리하므로, 직접 짜는 OS 호출을 줄인다. 잠금 한도가 작은 기기가 있으므로 arena는 작게 잡고, 한도에 걸려도 동작은 계속하며 `SecretMemoryStatus{locked, excludedFromDump`}로 보고한다(best-effort).
+- 배치는 [guard page][arena 64 KiB][guard page]다. guard page는 예약만 하고 commit하지 않는다. arena는 4 KiB chunk 16개이고, chunk는 처음 쓸 때 크기 등급(64 B–4 KiB, 2의 거듭제곱) 하나를 맡아 슬롯 사용을 64 bit 마스크로 기록한다. 슬롯은 등급 크기로 정렬된다(최소 64 byte). 해제하면 슬롯 전체를 즉시 지운다. libsodium 상태, AES 라운드 키·H 거듭제곱, 키가 모두 이 arena에 있다.
+- `GetSecretAllocator()`는 같은 arena 위의 `Allocator`다. 평문 비밀을 담는 `Array<uint8>`에 이 할당기를 주면, 성장 재할당 때 버려지는 이전 버퍼도 지워진다. 4 KiB를 넘는 크기·정렬, arena가 찬 경우, arena를 만들지 못한 경우는 힙으로 넘긴다. 힙 블록은 잠그지 않고 해제 때 블록 전체를 지운다. 힙 블록은 header의 이중 연결 목록으로 추적하고, 해제 때 목록에서 주소를 찾은 뒤에만 역참조한다(이 할당기 것이 아닌 주소는 읽지 않고 `NotFound`). 할당기는 프로세스 끝까지 파괴하지 않는다(정적 객체 소멸 순서와 무관하게 마지막 해제까지 쓸 수 있게).
+- 잠금과 덤프 제외는 `sodium_mlock`/`sodium_munlock`에 맡긴다. mlock·VirtualLock에 더해 `MADV_DONTDUMP`까지 이미 처리하므로, 직접 짜는 OS 호출을 줄인다. 잠금 한도가 작은 기기가 있으므로 arena는 작게 잡고, 한도에 걸려도 동작은 계속한다. 상태는 `SecretMemoryStatus{arenaAvailable, arenaLocked, dumpExclusionRequested, 사용량}`으로 보고한다(best-effort). libsodium은 `madvise` 결과를 확인하지 않으므로 덤프 제외는 "요청함"까지만 보고한다.
 - 비밀 타입은 이동할 때 원본을 지운다. 레지스터, 라이브러리 내부 스택 잔재, 하이버네이트 파일은 막을 수 없다는 한계를 문서에 적는다.
 - macOS에는 `MADV_DONTDUMP`에 해당하는 것이 없다. Windows minidump 제외는 crash reporter의 콜백 몫이다(후속, crash reporter가 아직 없다).
 - 프로세스 메모리를 직접 읽는 공격자는 막지 못한다. 이 장치는 스왑·덤프·해제 뒤 잔존 데이터를 줄이는 것이 목적이다.
@@ -799,7 +800,7 @@ public:
 | `TryFillRandom`의 OS 난수 실패 | `DependencyFailed` | 출력 전체 소거 |
 | (key, nonce)당 상한 초과, nonce 카운터 소진, 세그먼트 수 2^32 초과 | `CapacityExceeded` | 그 키·스트림으로는 더 봉인하지 않음 |
 | HW 명령이 없는 기기의 AES·AEGIS, 무작위 nonce가 안전하지 않은 알고리즘의 고수준 Seal, 96 bit가 아닌 GCM nonce, 헤더의 모르는 버전·알고리즘 | `Unsupported` | 입력·출력·상태 불변 |
-| SecretArena 소진 | `OutOfMemory` | 상태 불변 |
+| 비밀 메모리 할당 실패(arena가 차면 힙으로 넘어가므로 힙 부족일 때) | `OutOfMemory` | 상태 불변 |
 | 크기 계산 overflow | `Overflow` | — |
 | libsodium 초기화 실패·Crypto 밖 초기화, libsodium 내부 난수 경로의 OS 난수 실패(`randombytes_buf`는 실패를 돌려줄 수 없다), misuse handler | Fatal | 암호 기능 없이 계속하지 않음 |
 
@@ -837,7 +838,7 @@ public:
 | P2 | `StreamProgress`를 Core로 옮기고 Compression이 그 타입을 쓰게 바꾼다 | Core, Compression |
 | P3 | `ErrorCode::AuthenticationFailed` | Core |
 | P4 | `CpuFeatures` 확장(6.2절). Rockpile R0과 공유한다 | PlatformBase |
-| P5 | `SecureMemory`(guard page 예약·잠금 연결 지점) | PlatformBase |
+| P5 | `SecureMemory`(guard page 예약·잠금 연결 지점). 구현 결과 기존 `VirtualMemoryRegion`과 `sodium_mlock`으로 충족해 새 API를 두지 않았다(10.2절) | PlatformBase |
 | P6 | ThirdParty Sodium·Wycheproof manifest, 컴파일 인자 허용 목록, target pragma 기록, 라이선스 고지 | Build, Tools |
 | P7 | 함수 단위 target 매크로(`ROCKS_TARGET_X64_AES`·`ROCKS_TARGET_ARM64_AES`)와, 이 매크로·AES·carry-less·SHA intrinsics를 디렉터리 허용 목록에서만 쓰게 하는 정책 검사. 시험 hook의 출하 빌드 제외 검사 | Base, Tools |
 | P8 | libsodium 빌드 정의의 경고 정책 승인(Compression 3.4·3.6절 선례), 대상별 configure 결과 고정, 파생 파일 출처 SHA-256 기록 | Docs, Tools |
