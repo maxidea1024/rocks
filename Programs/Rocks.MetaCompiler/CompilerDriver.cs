@@ -73,6 +73,7 @@ internal static class CompilerDriver
 
         // 검증 컴파일은 같은 플래그에 include만 바꿔 쓴다(AST dump 제외).
         List<string> validationArguments = arguments.Where(argument => argument is not ("/clang:-Xclang" or "/clang:-ast-dump=json" or "-Xclang" or "-ast-dump=json")).ToList();
+        List<string> probeArguments = [.. arguments];
         AddIncludes(arguments, includes);
         arguments.AddRange(options.ClangArguments);
         arguments.Add("-");
@@ -166,6 +167,20 @@ internal static class CompilerDriver
                     "Move the struct to a public header or make the using type private.").At(privateNative.Site);
             }
         }
+
+        // ROCKS_NATIVE 멤버의 직접 타입이 Object 파생 클래스를 가리키는지는 같은 번역 단위 끝에 탐침을 붙인 Clang 실행이
+        // 판정한다(NativeMemberProbe — Binds 해석처럼 탐침 선언만 덤프한다). 탐침 실행은 경고를 끈다: 경고는 첫 실행과 실제
+        // 빌드가 이미 강제하고, 탐침 코드의 경고가 판정을 막지 않게 한다. include 검색 순서에서 이 모듈의 출력(생성) 루트는
+        // 뺀다 — 이번 실행이 만드는 중인 생성 헤더가 깨끗한 빌드에서는 없고 출력을 유지한 빌드에서는 낡은 채 있어, 그것을
+        // (public 헤더를 거쳐) include하는 헤더의 판정이 빌드 상태에 따라 갈리지 않게 한다.
+        StringComparer probePathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        string[] ownOutputRoots = [Path.Combine(options.OutputRoot, "Public"), Path.Combine(options.OutputRoot, "Private")];
+        AddIncludes(probeArguments, includes.Where(directory => !ownOutputRoots.Contains(Path.TrimEndingDirectorySeparator(directory), probePathComparer)));
+        probeArguments.AddRange(options.ClangArguments);
+        probeArguments.AddRange(clangCl ? ["/w", "/clang:-Xclang", "/clang:-ast-dump-filter=rocksProbe_"] : ["-w", "-Xclang", "-ast-dump-filter=rocksProbe_"]);
+        probeArguments.Add("-");
+        await NativeMemberProbe.VerifyAsync(schema.Ordered, options.Inputs.Count, () => ModulePublicHeaders(options),
+            extra => ProcessRunner.RunAsync(new(compiler, probeArguments, root, environment, unit + extra, TimeSpan.FromMinutes(2))));
 
         // 생성물: 입력 헤더마다 하나, public·private 집계 헤더, descriptor.
         List<(string Path, string Text, bool Private)> outputs = [];
@@ -466,10 +481,11 @@ internal static class CompilerDriver
         return null;
     }
 
-    private static readonly Regex ClangLocation = new(@"^(?<file>.+?):(?<line>\d+):(?<column>\d+): (?<severity>fatal error|error|warning|note):",
+    // NativeMemberProbe도 탐침 실행의 첫 error 줄을 이 두 형식으로 찾는다.
+    internal static readonly Regex ClangLocation = new(@"^(?<file>.+?):(?<line>\d+):(?<column>\d+): (?<severity>fatal error|error|warning|note):",
         RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
-    private static readonly Regex ClangClLocation = new(@"^(?<file>.+?)\((?<line>\d+),(?<column>\d+)\): (?<severity>fatal error|error|warning|note):",
+    internal static readonly Regex ClangClLocation = new(@"^(?<file>.+?)\((?<line>\d+),(?<column>\d+)\): (?<severity>fatal error|error|warning|note):",
         RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
     // import descriptor를 읽어 정규 이름 → 타입 모델과, public 타입이 있는 모듈 목록을 만든다. 같은 이름이
@@ -585,6 +601,78 @@ internal static class CompilerDriver
         {
             throw new MetadataException($"{outside.Name}: the canonical spelling '{outside.Binds}' of Binds = \"{outside.BindsSpelling}\" is outside the descriptor binds grammar (qualified names and name/integer template arguments)",
                 hint: "Bind a type whose canonical spelling uses only qualified names and non-negative integer or type-name template arguments.").At(outside.BindsSite ?? outside.Site);
+        }
+    }
+
+    // 탐침이 불완전한 대상을 다시 판정할 때 더하는 이 모듈 자신의 public 헤더다(NativeMemberProbe). public 입력 헤더마다
+    // include 루트(입력 경로에서 include 철자를 뺀 곳)를 구해, 철자의 첫 디렉터리 아래 .h를 모두(World/Level.h → <루트>/World
+    // 아래 전부), 철자에 디렉터리가 없으면 루트 바로 아래 .h만 고른다(private 헤더는 넣지 않는다). 입력 헤더(이미 번역 단위에
+    // 있다), 생성 헤더(출력 루트 아래와 .generated.h), 이 모듈의 생성 헤더 철자를 직접 include하는 헤더는 뺀다 — 탐침은 이
+    // 모듈의 출력 루트를 include 검색 순서에서 빼므로 그런 헤더는 어차피 컴파일되지 않는다(간접 include는 탐침이 헤더를 하나씩
+    // 컴파일해 걸러 낸다). 경로 순서로 결정적이며 상한은 없다(두 번째 탐침은 불완전한 대상이 있을 때만 돈다).
+    private static List<string> ModulePublicHeaders(CompilerOptions options)
+    {
+        StringComparison comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        StringComparer comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        string outputRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(options.OutputRoot)) + Path.DirectorySeparatorChar;
+        HashSet<string> inputs = options.Inputs.Select(input => Path.GetFullPath(input.Path)).ToHashSet(comparer);
+        HashSet<string> ownGenerated = options.Inputs.Select(input => CompilerOptions.GeneratedSpelling(input.Include))
+            .Append(CompilerOptions.AggregateSpelling(options.Module, false)).Append(CompilerOptions.AggregateSpelling(options.Module, true))
+            .ToHashSet(comparer);
+        HashSet<string> directories = new(comparer);
+        SortedSet<string> headers = new(StringComparer.Ordinal);
+        foreach (ModuleInput input in options.Inputs.Where(input => !input.Private))
+        {
+            string path = Path.GetFullPath(input.Path);
+            string relative = input.Include.Replace('/', Path.DirectorySeparatorChar);
+            if (!path.EndsWith(Path.DirectorySeparatorChar + relative, comparison))
+            {
+                continue;
+            }
+
+            string includeRoot = path[..^relative.Length];
+            int slash = input.Include.IndexOf('/');
+            string directory = slash < 0 ? includeRoot : Path.Combine(includeRoot, input.Include[..slash]);
+            if (!directories.Add(directory))
+            {
+                continue;
+            }
+
+            EnumerationOptions enumeration = new()
+            {
+                RecurseSubdirectories = slash >= 0,
+                AttributesToSkip = FileAttributes.ReparsePoint,
+                IgnoreInaccessible = true
+            };
+            foreach (string file in Directory.EnumerateFiles(directory, "*.h", enumeration))
+            {
+                string full = Path.GetFullPath(file);
+                if (!full.EndsWith(".h", comparison) || full.EndsWith(".generated.h", comparison) || full.StartsWith(outputRoot, comparison) ||
+                    inputs.Contains(full) || full.IndexOfAny(['"', '\r', '\n']) >= 0 || IncludesOwnGeneratedHeader(full, ownGenerated))
+                {
+                    continue;
+                }
+
+                headers.Add(full);
+            }
+        }
+
+        return [.. headers];
+    }
+
+    private static readonly Regex IncludeDirective = new(@"^[ \t]*#[ \t]*include[ \t]*[<""](?<spelling>[^<>""\r\n]+)[>""]",
+        RegexOptions.CultureInvariant | RegexOptions.Multiline, TimeSpan.FromSeconds(1));
+
+    // 헤더가 이 모듈의 생성 헤더 철자(ownGenerated)를 직접 include하면 참이다. 읽을 수 없는 헤더도 참이다(탐침에 넣지 않는다).
+    private static bool IncludesOwnGeneratedHeader(string path, HashSet<string> ownGenerated)
+    {
+        try
+        {
+            return IncludeDirective.Matches(File.ReadAllText(path)).Any(match => ownGenerated.Contains(match.Groups["spelling"].Value.Replace('\\', '/')));
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or RegexMatchTimeoutException)
+        {
+            return true;
         }
     }
 

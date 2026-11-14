@@ -33,12 +33,16 @@ const FieldSchema* FindField(const TypeSchema& schema, StringView name) noexcept
 // 생성 코드의 static_assert가 쓰는 형질이다.
 static_assert(IsNativeStrongReference<ObjectRef<Node>>);
 static_assert(IsNativeStrongReference<RootRef<Node>[2]>);
-static_assert(IsNativeStrongReference<const Node*>);
-static_assert(IsNativeStrongReference<Object*>);
 static_assert(IsNativeStrongReference<ObjectRefArray<Node>>);
-static_assert(IsNativeStrongReference<Node&>);
-static_assert(IsNativeStrongReference<Node**>);
 static_assert(IsNativeStrongReference<ObjectRef<Node>*>);
+static_assert(IsNativeStrongReference<const RootRef<Node>&>);
+static_assert(IsNativeStrongReference<ObjectRef<Node>**>);
+// Object 파생 타입을 가리키는 raw 포인터·참조는 형질이 아니라 MetaCompiler 탐침(RMC2205)이
+// 거부한다(대상의 완전성에 기대는 판정은 TU마다 달라질 수 있는 ODR 위반이다).
+static_assert(!IsNativeStrongReference<Object*>);
+static_assert(!IsNativeStrongReference<const Node*>);
+static_assert(!IsNativeStrongReference<Node&>);
+static_assert(!IsNativeStrongReference<Node**>);
 static_assert(!IsNativeStrongReference<WeakRef<Node>>);
 static_assert(!IsNativeStrongReference<int32*>);
 static_assert(!IsNativeStrongReference<Opaque*>);

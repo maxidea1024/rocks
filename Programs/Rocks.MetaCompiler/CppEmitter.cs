@@ -202,8 +202,11 @@ internal static class CppEmitter
             string native = "::" + type.NativeName;
             string? baseId = type.Base == "rocks::Object" ? null : schema.Find(type.Base).Id;
             Line($"template <> struct GeneratedType<{native}> {{");
-            // ROCKS_NATIVE 멤버는 스키마에 넣지 않는다. MetaCompiler의 AST 재귀 검사(RMC2205·2206)를 직접 타입에
-            // 대해 컴파일러가 한 번 더 확인한다(GeneratedType은 GENERATED_BODY로 private 멤버에도 접근한다).
+            // ROCKS_NATIVE 멤버는 스키마에 넣지 않는다. 생성 static_assert는 직접 타입의 강한 참조 래퍼(ObjectRef·RootRef·
+            // ObjectRefArray·StructRefArray와 그것을 가리키는 포인터·참조 — RMC2205)와 WorldOnly 소유자 형질(RMC2206)만 컴파일러가
+            // 한 번 더 확인한다. Object 파생 타입을 가리키는 raw 포인터·참조는 대상의 완전성이 TU마다 달라 형질로 보지 않고
+            // MetaCompiler의 탐침(NativeMemberProbe — 자신의 번역 단위 하나에서 Clang이 판정)이 거부한다(GeneratedType은
+            // GENERATED_BODY로 private 멤버에도 접근한다).
             foreach (NativeMemberModel member in type.NativeMembers)
             {
                 string memberType = $"decltype({native}::{member.Name})";
