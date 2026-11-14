@@ -745,7 +745,11 @@ public:
 // Ed25519SigningKey, KxKeyPair. 공개 값(Ed25519PublicKey, KxPublicKey)은 일반 값 타입이다.
 
 // 마스터 키에서 용도별 키를 타입으로 파생한다(BLAKE2b KDF). 결과가 일반 Span에 쓰이지 않는다.
-// context는 Crypto/Labels.h에 등록된 8 byte 상수만 받는다(도메인 분리 label 등록부, 중복은 시험이 거부).
+// context는 컴파일 시간 8 문자 상수(KdfContext, consteval 생성)만 받는다. 런타임·외부 입력으로 context를
+// 고르지 못하게 하려는 것이다. 엔진이 쓰는 context는 Crypto/Labels.h에 모아 중복을 시험으로 막는다(첫 엔진
+// context와 함께 둔다). 구현(Kdf.h): KdfKey, TryDeriveSecret(16–64 byte)·TryDeriveMacKey·TryDeriveKdfKey(키 계층),
+// HKDF-SHA-256/512(TryHkdf·TryHkdfExtract·TryHkdfExpand, 상호운용용 Span 출력). AEAD·세그먼트 키 파생은 그
+// 단계에서 더한다.
 Result<AeadKey> TryDeriveAeadKey(const KdfKey& master, uint64 subkeyId, KdfContext context,
                                  AeadAlgorithm algorithm) noexcept;
 Result<SegmentStreamKey> TryDeriveSegmentStreamKey(const KdfKey& master, uint64 subkeyId, KdfContext context,
