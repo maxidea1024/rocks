@@ -21,6 +21,7 @@ namespace {
 // (L + 16)
 constexpr uint8 Magic[4] = {'R', 'K', 'E', 'Y'};
 constexpr uint8 Version = 1;
+constexpr usize VersionedPrefixBytes = 5; // magic ‖ version
 constexpr usize FixedHeaderBytes = 26;
 constexpr usize KeyParamsBytes = 16;      // wrapKeyId
 constexpr usize PasswordParamsBytes = 24; // ops LE32 ‖ memKiB LE32 ‖ salt 16
@@ -28,6 +29,7 @@ constexpr usize NonceBytes = 24;
 constexpr usize CommitmentBytes = 32;
 constexpr usize TagBytes = 16;
 constexpr usize OverheadBytes = FixedHeaderBytes + NonceBytes + CommitmentBytes + TagBytes;
+constexpr usize MaxHeaderBytes = FixedHeaderBytes + PasswordParamsBytes; // Peek이 읽는 최대 길이
 constexpr usize MaxSecretBytes = MaxHmacKeyBytes;
 static_assert(KeyBlobMaxBytes == OverheadBytes + PasswordParamsBytes + MaxSecretBytes);
 static_assert(PasswordSaltBytes == 16);
@@ -104,6 +106,13 @@ bool TryGetSecretRule(KeyBlobType type, uint8 algorithm, SecretRule& rule) noexc
     return false;
 }
 
+// secret이 (type, algorithm)에 허용된 길이인가.
+bool IsAllowedSecret(KeyBlobType type, uint8 algorithm, Span<const uint8> secret) noexcept {
+    SecretRule rule{};
+    return TryGetSecretRule(type, algorithm, rule) && secret.Size() >= rule.minBytes &&
+           secret.Size() <= rule.maxBytes;
+}
+
 bool IsDefinedType(uint8 value) noexcept {
     return value >= static_cast<uint8>(KeyBlobType::Aead) &&
            value <= static_cast<uint8>(KeyBlobType::Kem);
@@ -114,18 +123,25 @@ bool IsDefinedMethod(uint8 value) noexcept {
            value == static_cast<uint8>(KeyBlobWrapMethod::Password);
 }
 
-// 헤더를 byte 순서대로 읽는다. 구조 위반은 AuthenticationFailed, 식별 실패는 Unsupported다.
+// 헤더를 byte 순서대로 읽는다. 구조 위반은 AuthenticationFailed, 식별 실패는 Unsupported다. 버전은
+// magic 다음 byte만으로 판정한다(모르는 버전은 길이와 관계없이 Unsupported, 뒤를 해석하지 않는다).
+// blob은 호출자가 만든 지역 사본이다(한 번만 읽는다).
 Result<KeyBlobInfo> TryParseHeader(Span<const uint8> blob) noexcept {
-    if (blob.Size() < FixedHeaderBytes) {
+    if (blob.Size() < VersionedPrefixBytes ||
+        !ConstantTimeEquals(blob.Left(4), Span<const uint8>(Magic))) {
         return Result<KeyBlobInfo>::Failure(ErrorCode::AuthenticationFailed);
     }
 
     const uint8* bytes = blob.Data();
-    if (!ConstantTimeEquals(blob.Left(4), Span<const uint8>(Magic))) {
+    if (bytes[4] != Version) {
+        return Result<KeyBlobInfo>::Failure(ErrorCode::Unsupported);
+    }
+
+    if (blob.Size() < FixedHeaderBytes) {
         return Result<KeyBlobInfo>::Failure(ErrorCode::AuthenticationFailed);
     }
 
-    if (bytes[4] != Version || !IsDefinedType(bytes[5])) {
+    if (!IsDefinedType(bytes[5])) {
         return Result<KeyBlobInfo>::Failure(ErrorCode::Unsupported);
     }
 
@@ -280,9 +296,7 @@ Result<usize> TryWrapSecret(const WrapInput& input, KeyBlobType type, uint8 algo
         return Result<usize>::Failure(ErrorCode::StaleHandle);
     }
 
-    SecretRule rule{};
-    if (keyId.IsNil() || !TryGetSecretRule(type, algorithm, rule) ||
-        secret.Size() < rule.minBytes || secret.Size() > rule.maxBytes) {
+    if (keyId.IsNil() || !IsAllowedSecret(type, algorithm, secret)) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -292,7 +306,8 @@ Result<usize> TryWrapSecret(const WrapInput& input, KeyBlobType type, uint8 algo
             return Result<usize>::Failure(ErrorCode::InvalidArgument);
         }
     } else {
-        if (input.password.IsEmpty() || Overlaps(input.password, blob)) {
+        if (input.password.IsEmpty() || !detail::IsPasswordLengthValid(input.password) ||
+            Overlaps(input.password, blob)) {
             return Result<usize>::Failure(ErrorCode::InvalidArgument);
         }
 
@@ -369,15 +384,33 @@ Result<usize> TryWrapSecret(const WrapInput& input, KeyBlobType type, uint8 algo
     return Result<usize>::Success(total);
 }
 
+// blob 앞부분(최대 capacity byte)을 지역 버퍼에 한 번 복사한다. 검사·파생·복호는 이 사본만 보므로
+// 호출 중 다른 주체가 원본(공유 메모리, 쓰기 가능한 매핑)을 바꿔도 한 시점의 byte로 판정한다.
+Span<const uint8> CopyPrefix(Span<const uint8> blob, Span<uint8> buffer) noexcept {
+    const usize bytes = blob.Size() < buffer.Size() ? blob.Size() : buffer.Size();
+    if (bytes != 0) {
+        platform::MemoryCopy(buffer.Data(), blob.Data(), bytes);
+    }
+
+    return Span<const uint8>(buffer.Data(), bytes);
+}
+
 template <typename TKey>
 Result<UnwrappedKey<TKey>> TryUnwrapSecret(KeyBlobWrapMethod method, const KdfKey* wrapKey,
                                            Span<const uint8> password,
-                                           Span<const uint8> blob) noexcept {
+                                           Span<const uint8> source) noexcept {
     using Unwrapped = UnwrappedKey<TKey>;
     if (method == KeyBlobWrapMethod::Key && wrapKey->IsEmpty()) {
         return Result<Unwrapped>::Failure(ErrorCode::StaleHandle);
     }
 
+    if (method == KeyBlobWrapMethod::Password && !detail::IsPasswordLengthValid(password)) {
+        return Result<Unwrapped>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 상한보다 긴 blob은 길이 비교에서 거부되므로 상한까지만 복사한다(헤더 판정은 그 전에 끝난다).
+    uint8 buffer[KeyBlobMaxBytes];
+    const Span<const uint8> blob = CopyPrefix(source, Span<uint8>(buffer));
     auto header = TryParseHeader(blob);
     if (!header) {
         return Result<Unwrapped>::Failure(header.Error());
@@ -385,7 +418,7 @@ Result<UnwrappedKey<TKey>> TryUnwrapSecret(KeyBlobWrapMethod method, const KdfKe
 
     const KeyBlobInfo& info = header.Value();
     // 길이·타입·방식은 blob에서 온 값이다. 기대와 다르면 AuthenticationFailed다.
-    if (blob.Size() != info.blobBytes || info.type != KeyBlobTraits<TKey>::Type ||
+    if (source.Size() != info.blobBytes || info.type != KeyBlobTraits<TKey>::Type ||
         info.method != method) {
         return Result<Unwrapped>::Failure(ErrorCode::AuthenticationFailed);
     }
@@ -457,7 +490,8 @@ Result<KeyId> TryNewKeyId() noexcept {
 }
 
 Result<KeyBlobInfo> TryPeekKeyBlob(Span<const uint8> blob) noexcept {
-    return TryParseHeader(blob);
+    uint8 buffer[MaxHeaderBytes];
+    return TryParseHeader(CopyPrefix(blob, Span<uint8>(buffer)));
 }
 
 template <KeyBlobKey TKey>
@@ -467,7 +501,9 @@ Result<usize> TryGetKeyBlobBytes(const TKey& key, KeyBlobWrapMethod method) noex
         return Result<usize>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (!IsDefinedMethod(static_cast<uint8>(method))) {
+    // wrap과 같은 규칙이다(16 byte보다 짧은 MAC 키는 크기도 주지 않는다).
+    if (!IsDefinedMethod(static_cast<uint8>(method)) ||
+        !IsAllowedSecret(KeyBlobTraits<TKey>::Type, AlgorithmOf(key), secret)) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
 

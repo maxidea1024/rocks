@@ -894,7 +894,7 @@ KeyBlob v1(Crypto/KeyBlob.h, 2026-11-15 구현, 설계 교차검증 반영)의 �
 | off | 길이 | 필드 | 규칙 |
 |---|---|---|---|
 | 0 | 4 | magic "RKEY" | 다르면 AuthenticationFailed |
-| 4 | 1 | version = 1 | 모르면 Unsupported(뒤를 해석하지 않는다) |
+| 4 | 1 | version = 1 | 모르면 Unsupported(magic과 이 byte만 보고 판정하며 뒤를 해석하지 않는다) |
 | 5 | 1 | KeyBlobType | Aead 1·Mac 2·Kdf 3·Ed25519 4·Kx 5·Box 6·Kem 7. 모르면 Unsupported |
 | 6 | 1 | algorithm | 클래스가 품는 열거값(Aead·Mac·Kem), 없으면 0(Ed25519 서명 키는 Ed25519·ph 공용이라 0). 표 밖이면 Unsupported |
 | 7 | 1 | method | 1 = Key(KdfKey KEK), 2 = Password(Argon2id v1.3, lane 1, salt 16, 출력 32). 모르면 Unsupported |
@@ -911,7 +911,9 @@ KeyBlob v1(Crypto/KeyBlob.h, 2026-11-15 구현, 설계 교차검증 반영)의 �
 - 담는 비밀: AEAD·MAC·KDF 키 byte, Ed25519 seed(sk ‖ pk를 담지 않아 pk 불일치로 비밀키가 새는 double-public-key 문제를 구조적으로 피한다), X25519 비밀키(Kx·Box), KEM seed(FIPS 203 형식). hazmat 짧은 MAC 키(16 byte 미만)는 wrap하지 않는다. 순번 봉인기 상태와 세션 비밀(kx 세션 키, KEM 공유 비밀)은 담지 않고, blob에서 푼 AeadKey로 순번 봉인기를 만들지 않는다(복원할 때마다 seq 0부터 같은 nonce).
 - 비밀번호 방식: 비용은 명시 인자(도구·데스크톱 MODERATE, 모바일 INTERACTIVE 이상 권장), 기록은 KiB 단위(정규 인코딩), 하한 위반은 AuthenticationFailed, 상한(PasswordHash.h와 같은 검사, 내부 PasswordInternal.h 공유) 초과는 Argon2id 전에 CapacityExceeded다. 기기별 정책은 호출자가 TryPeekKeyBlob의 passwordCost로 먼저 정한다. 비밀번호 하나로 키 여러 개를 보관하면 비밀번호로 KdfKey blob 하나(KEK)를 만들고 나머지는 그 KEK 아래 Key 방식으로 둔다.
 - API: TryPeekKeyBlob(인증 전 헤더, 헤더만 있으면 된다), 닫힌 타입 목록(`KeyBlobTraits`, 7개 타입)의 템플릿 TryGetKeyBlobBytes·TryWrapKey(wrapKey, wrapKeyId, key, keyId, blob)·TryWrapKeyWithPassword·`TryUnwrapKey<TKey>`·`TryUnwrapKeyWithPassword<TKey>`(결과 `UnwrappedKey<TKey>{id, key}`). 정의는 KeyBlob.cpp에서 7개 타입으로 명시 인스턴스화한다.
-- 오류: 빈 키 StaleHandle → 호출자 인자 InvalidArgument(Nil ID, 짧은 MAC 키, cost 범위, 빈 password, password·blob 겹침) → 출력 부족·cost 상한 CapacityExceeded → 헤더(구조 위반 AuthenticationFailed, 식별 실패 Unsupported) → 기대한 타입·방식과 다름 AuthenticationFailed → 이 기기에 없는 AEAD 알고리즘 Unsupported → 계산(OutOfMemory) → commitment·tag AuthenticationFailed. 공격자 입력에서는 InvalidArgument가 나오지 않는다. 쓰기 시작한 뒤 실패하면 blob 전체를 지운다.
+- 오류(wrap): 빈 키 StaleHandle → 호출자 인자 InvalidArgument(Nil ID, 짧은 MAC 키, cost 범위, 빈 password, Argon2id 상한보다 긴 password, password·blob 겹침) → cost 상한·출력 부족 CapacityExceeded → 쓰기 시작 → 계산(DependencyFailed·OutOfMemory). 쓰기 시작한 뒤 실패하면 blob 전체를 지운다. TryGetKeyBlobBytes도 같은 비밀 길이 규칙을 쓴다(짧은 MAC 키는 InvalidArgument).
+- 오류(unwrap): 빈 KEK StaleHandle → 긴 password InvalidArgument → 헤더(magic 5 byte 미만·불일치 AuthenticationFailed, 모르는 version Unsupported, 구조 위반 AuthenticationFailed, 모르는 타입·방식·알고리즘 Unsupported) → 길이·타입·방식이 기대와 다름 AuthenticationFailed → 비용 상한 CapacityExceeded(Password) → 이 기기에 없는 AEAD 알고리즘 Unsupported → 계산(OutOfMemory) → commitment·tag AuthenticationFailed. 공격자 입력에서는 InvalidArgument가 나오지 않는다.
+- 한 번 읽기: Peek·unwrap은 blob을 지역 버퍼(Peek 50 byte, unwrap `KeyBlobMaxBytes`)로 한 번 복사하고 그 사본으로만 검사·파생·복호한다. blob이 공유 메모리나 쓰기 가능한 파일 매핑이라 호출 중 바뀌어도 헤더를 두 번 읽어 생기는 틈(첫 읽기에서 다른 타입으로 보이고 파생 때 원래 헤더로 돌아오면 KdfKey byte가 AeadKey로 나온다)이 없다. Peek와 unwrap 사이의 변경은 호출자 몫이다(같은 자기 버퍼를 넘긴다).
 - 막지 않는 것: 같은 KEK 아래 롤백(비밀번호 변경은 키 회전이 아니다)·통째 교체·삭제(저장소 몫, 통째 교체는 공급자가 id 비교로 막는다), 출처, 메타데이터 기밀성. 생성 시각·용도 flag·만료와 공개키 동봉은 미룬다(필요하면 v2의 인증되는 영역). 수신자 공개키로 wrap하는 method(X-Wing 공유 비밀을 M으로)는 후속이다.
 - 평문 키 내보내기(`hazmat::TryExportKey`, 키 타입마다 overload)는 hazmat이고, 시험·상호운용 도구에서만 쓴다. 정본이 seed인 키(Ed25519 서명 키, KEM 키 쌍)는 `hazmat::TryExportSeed`로 seed를 내보낸다.
 

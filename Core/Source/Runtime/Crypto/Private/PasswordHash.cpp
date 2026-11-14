@@ -100,8 +100,7 @@ bool StartsWith(StringView text, StringView prefix) noexcept {
 Result<PasswordCost> ParseEncoded(StringView encoded,
                                   char (&copy)[PasswordHashStringBytes]) noexcept {
     // "$<id>$" 꼴의 다른 형식(argon2i, v=16, scrypt, bcrypt 등)은 Unsupported다(옮겨 갈 때 구분할
-    // 수 있게).
-    // "$"로 시작하지도 않으면 형식 오류다.
+    // 수 있게). "$"로 시작하지도 않으면 형식 오류다.
     if (encoded.IsEmpty() || encoded.Data()[0] != '$') {
         return Result<PasswordCost>::Failure(ErrorCode::AuthenticationFailed);
     }
@@ -152,6 +151,10 @@ bool detail::IsPasswordCostOverCap(PasswordCost cost) noexcept {
 
 Result<void> detail::CheckPasswordCost(PasswordCost cost) noexcept {
     return CheckCost(cost);
+}
+
+bool detail::IsPasswordLengthValid(Span<const uint8> password) noexcept {
+    return IsValidPasswordLength(password);
 }
 
 Result<SecretBytes> TryDerivePasswordSecret(Span<const uint8> password, Span<const uint8> salt,

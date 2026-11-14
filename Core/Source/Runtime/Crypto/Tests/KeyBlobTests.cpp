@@ -137,6 +137,10 @@ void CheckRoundTrip(const KdfKey& kek, const TKey& key) {
     CHECK(info.Value().keyId == keyId.Value());
     CHECK(info.Value().wrapKeyId == kekId.Value());
     CHECK(info.Value().blobBytes == written.Value());
+    // 담긴 비밀 길이는 키 타입의 정본 길이다(Ed25519는 sk ‖ pk가 아니라 seed 32 byte).
+    uint8 exported[4096];
+    const usize secretBytes = ExportSecret(key, Span<uint8>(exported));
+    CHECK(secretBytes != 0 && info.Value().secretBytes == secretBytes);
 
     auto restored = TryUnwrapKey<TKey>(kek, stored);
     REQUIRE(restored);
@@ -149,11 +153,51 @@ void CheckRoundTrip(const KdfKey& kek, const TKey& key) {
                                                   keyId.Value(), Span<uint8>(blob));
     REQUIRE(passwordWritten);
     CHECK(passwordWritten.Value() == passwordBytes.Value());
+    auto passwordInfo = TryPeekKeyBlob(Span<const uint8>(blob).Left(passwordWritten.Value()));
+    REQUIRE(passwordInfo);
+    CHECK(passwordInfo.Value().method == KeyBlobWrapMethod::Password);
+    CHECK(passwordInfo.Value().keyId == keyId.Value());
+    CHECK(passwordInfo.Value().wrapKeyId.IsNil());
+    CHECK(passwordInfo.Value().passwordCost.operations == SmallCost.operations);
+    CHECK(passwordInfo.Value().passwordCost.memoryBytes == SmallCost.memoryBytes);
+    CHECK(passwordInfo.Value().secretBytes == secretBytes);
+    CHECK(passwordInfo.Value().blobBytes == passwordWritten.Value());
     auto fromPassword = TryUnwrapKeyWithPassword<TKey>(
         Text("pass phrase"), Span<const uint8>(blob).Left(passwordWritten.Value()));
     REQUIRE(fromPassword);
     CHECK(fromPassword.Value().id == keyId.Value());
     CHECK(SameSecret(fromPassword.Value().key, key));
+}
+
+// 헤더만 맞춘 blob을 out에 만들고 길이를 돌려준다(nonce·commitment·암호문은 0). 거부가 KDF·Argon2id
+// 전에 끝나는 경로를 보는 데 쓴다. keyId는 고정 값, Key 방식 wrapKeyId는 0x01 반복이다.
+usize BuildHeaderOnlyBlob(uint8 type, uint8 algorithm, KeyBlobWrapMethod method, uint16 secretBytes,
+                          uint32 operations, uint32 memoryKiB, Span<uint8> out) {
+    const bool keyMethod = method == KeyBlobWrapMethod::Key;
+    const usize params = keyMethod ? 16 : 24;
+    const usize total = 98 + params + secretBytes;
+    memset(out.Data(), 0, total);
+    memcpy(out.Data(), "RKEY", 4);
+    out[4] = 1;
+    out[5] = type;
+    out[6] = algorithm;
+    out[7] = static_cast<uint8>(method);
+    for (usize i = 0; i < 16; ++i) {
+        out[8 + i] = static_cast<uint8>(0x11 + i);
+    }
+
+    out[24] = static_cast<uint8>(secretBytes);
+    out[25] = static_cast<uint8>(secretBytes >> 8);
+    if (keyMethod) {
+        memset(out.Data() + 26, 0x01, 16);
+    } else {
+        for (usize i = 0; i < 4; ++i) {
+            out[26 + i] = static_cast<uint8>(operations >> (8 * i));
+            out[30 + i] = static_cast<uint8>(memoryKiB >> (8 * i));
+        }
+    }
+
+    return total;
 }
 
 } // namespace
@@ -275,15 +319,16 @@ TEST(CryptoKeyBlobRejectsTampering) {
     const HexBytes source(KeyMethodBlob);
     REQUIRE(source.size == 146);
 
-    // 모든 byte의 bit 하나를 바꾸면 거부된다. 식별 byte(버전·타입·알고리즘·방식)는 Unsupported일 수
-    // 있고 나머지는 AuthenticationFailed다.
+    // 모든 byte의 bit 하나를 바꾸면 거부된다. 식별 byte(버전·타입·알고리즘·방식)는 Unsupported(버전
+    // 0, Mac 타입의 알고리즘 0, Kdf의 알고리즘 1, 방식 3이 모두 표 밖)이고 나머지는
+    // AuthenticationFailed다.
     for (usize offset = 0; offset < source.size; ++offset) {
         uint8 tampered[146];
         memcpy(tampered, source.bytes, sizeof(tampered));
         tampered[offset] ^= 0x01;
         const ErrorCode error = TryUnwrapKey<KdfKey>(kek, Span<const uint8>(tampered)).Error();
         if (offset >= 4 && offset <= 7) {
-            CHECK(error == ErrorCode::Unsupported || error == ErrorCode::AuthenticationFailed);
+            CHECK(error == ErrorCode::Unsupported);
         } else {
             CHECK(error == ErrorCode::AuthenticationFailed);
         }
@@ -362,6 +407,157 @@ TEST(CryptoKeyBlobPeekAndHeaderRules) {
     CHECK(TryPeekKeyBlob(Span<const uint8>(costly)).Error() == ErrorCode::AuthenticationFailed);
 }
 
+TEST(CryptoKeyBlobRejectsPasswordTampering) {
+    const HexBytes source(PasswordMethodBlob);
+    REQUIRE(source.size == 154);
+    const Span<const uint8> password = Text("correct horse");
+
+    // 모든 byte의 bit 하나를 바꾼다. 식별 byte(4–7)는 Unsupported, 비용 상한을 넘기는 byte(ops
+    // 27–29, memKiB 최상위 33)는 Argon2id 전에 CapacityExceeded, 나머지는
+    // AuthenticationFailed다(ops 0은 하한 위반, memKiB 30–32는 Argon2id를 돌린 뒤 commitment에서
+    // 걸린다. 32는 64 MiB를 한 번 쓴다).
+    for (usize offset = 0; offset < source.size; ++offset) {
+        uint8 tampered[154];
+        memcpy(tampered, source.bytes, sizeof(tampered));
+        tampered[offset] ^= 0x01;
+        const ErrorCode error =
+            TryUnwrapKeyWithPassword<KdfKey>(password, Span<const uint8>(tampered)).Error();
+        if (offset >= 4 && offset <= 7) {
+            CHECK(error == ErrorCode::Unsupported);
+        } else if (offset == 27 || offset == 28 || offset == 29 || offset == 33) {
+            CHECK(error == ErrorCode::CapacityExceeded);
+        } else {
+            CHECK(error == ErrorCode::AuthenticationFailed);
+        }
+    }
+
+    // 모든 길이로 자르거나 꼬리 byte를 붙여도 거부된다.
+    for (usize length = 0; length < source.size; ++length) {
+        CHECK(TryUnwrapKeyWithPassword<KdfKey>(password, source.View().Left(length)).Error() ==
+              ErrorCode::AuthenticationFailed);
+    }
+
+    uint8 longer[155] = {};
+    memcpy(longer, source.bytes, source.size);
+    CHECK(TryUnwrapKeyWithPassword<KdfKey>(password, Span<const uint8>(longer)).Error() ==
+          ErrorCode::AuthenticationFailed);
+}
+
+TEST(CryptoKeyBlobAuthenticatesTypeAndAlgorithm) {
+    // 헤더의 타입·알고리즘을 길이가 같은 다른 값으로 바꾸고 그 타입으로 열면 commitment에서
+    // 거부된다(헤더가 파생 transcript에 묶여 있다).
+    auto kek = KdfKey::TryGenerate();
+    REQUIRE(kek);
+    const KeyId id = TryNewKeyId().Value();
+    const KeyId kekId = TryNewKeyId().Value();
+    uint8 blob[KeyBlobMaxBytes];
+
+    auto aead = AeadKey::TryGenerate(AeadAlgorithm::XChaCha20Poly1305);
+    REQUIRE(aead);
+    auto aeadWritten = TryWrapKey(kek.Value(), kekId, aead.Value(), id, Span<uint8>(blob));
+    REQUIRE(aeadWritten);
+    const AeadAlgorithm others[] = {AeadAlgorithm::ChaCha20Poly1305Ietf, AeadAlgorithm::Aes256Gcm,
+                                    AeadAlgorithm::Aegis256};
+    for (AeadAlgorithm other : others) {
+        uint8 changed[KeyBlobMaxBytes];
+        memcpy(changed, blob, aeadWritten.Value());
+        changed[6] = static_cast<uint8>(other);
+        const ErrorCode expected = TryGetAeadInfo(other).Value().available
+                                       ? ErrorCode::AuthenticationFailed
+                                       : ErrorCode::Unsupported;
+        CHECK(
+            TryUnwrapKey<AeadKey>(kek.Value(), Span<const uint8>(changed).Left(aeadWritten.Value()))
+                .Error() == expected);
+    }
+
+    auto kx = KxKeyPair::TryGenerate();
+    REQUIRE(kx);
+    auto kxWritten = TryWrapKey(kek.Value(), kekId, kx.Value(), id, Span<uint8>(blob));
+    REQUIRE(kxWritten);
+    blob[5] = static_cast<uint8>(KeyBlobType::Box);
+    CHECK(TryUnwrapKey<BoxKeyPair>(kek.Value(), Span<const uint8>(blob).Left(kxWritten.Value()))
+              .Error() == ErrorCode::AuthenticationFailed);
+
+    // Kdf blob(KAT)을 32 byte 비밀의 다른 타입으로 바꾼다.
+    const KdfKey fixture = FixtureKek();
+    const HexBytes source(KeyMethodBlob);
+    uint8 retyped[146];
+    memcpy(retyped, source.bytes, sizeof(retyped));
+    retyped[5] = static_cast<uint8>(KeyBlobType::Ed25519);
+    CHECK(TryUnwrapKey<Ed25519SigningKey>(fixture, Span<const uint8>(retyped)).Error() ==
+          ErrorCode::AuthenticationFailed);
+    retyped[5] = static_cast<uint8>(KeyBlobType::Kx);
+    CHECK(TryUnwrapKey<KxKeyPair>(fixture, Span<const uint8>(retyped)).Error() ==
+          ErrorCode::AuthenticationFailed);
+    retyped[5] = static_cast<uint8>(KeyBlobType::Box);
+    CHECK(TryUnwrapKey<BoxKeyPair>(fixture, Span<const uint8>(retyped)).Error() ==
+          ErrorCode::AuthenticationFailed);
+}
+
+TEST(CryptoKeyBlobRejectsBeforeKeyDerivation) {
+    const KdfKey kek = FixtureKek();
+    uint8 blob[KeyBlobMaxBytes];
+    const auto aead = static_cast<uint8>(KeyBlobType::Aead);
+    const auto aes128 = static_cast<uint8>(AeadAlgorithm::Aes128Gcm);
+    const bool aes128Available = TryGetAeadInfo(AeadAlgorithm::Aes128Gcm).Value().available;
+    const ErrorCode aes128Error =
+        aes128Available ? ErrorCode::AuthenticationFailed : ErrorCode::Unsupported;
+
+    // 이 기기에서 쓸 수 없는 AEAD 알고리즘: Peek는 되고 unwrap은 KDF 전에 Unsupported다.
+    const usize keyBytes =
+        BuildHeaderOnlyBlob(aead, aes128, KeyBlobWrapMethod::Key, 16, 0, 0, Span<uint8>(blob));
+    REQUIRE(keyBytes == 130);
+    auto info = TryPeekKeyBlob(Span<const uint8>(blob).Left(keyBytes));
+    REQUIRE(info);
+    CHECK(info.Value().secretBytes == 16 && info.Value().blobBytes == 130);
+    CHECK(TryUnwrapKey<AeadKey>(kek, Span<const uint8>(blob).Left(keyBytes)).Error() ==
+          aes128Error);
+
+    // 비용 상한은 알고리즘 판정보다 먼저다(상한 검사가 빠지면 Unsupported가 나온다).
+    const Span<const uint8> password = Text("pw");
+    usize passwordBytes = BuildHeaderOnlyBlob(aead, aes128, KeyBlobWrapMethod::Password, 16, 33, 8,
+                                              Span<uint8>(blob));
+    REQUIRE(passwordBytes == 138);
+    CHECK(TryUnwrapKeyWithPassword<AeadKey>(password, Span<const uint8>(blob).Left(passwordBytes))
+              .Error() == ErrorCode::CapacityExceeded);
+    if (!aes128Available) {
+        passwordBytes = BuildHeaderOnlyBlob(aead, aes128, KeyBlobWrapMethod::Password, 16, 1, 8,
+                                            Span<uint8>(blob));
+        CHECK(
+            TryUnwrapKeyWithPassword<AeadKey>(password, Span<const uint8>(blob).Left(passwordBytes))
+                .Error() == ErrorCode::Unsupported);
+    }
+
+    // blob에서 온 비용이 상한(메모리 1 GiB, 반복 × 메모리 4 GiB)을 넘으면 CapacityExceeded다.
+    const auto kdf = static_cast<uint8>(KeyBlobType::Kdf);
+    const struct {
+        uint32 operations;
+        uint32 memoryKiB;
+    } costs[] = {{1, 0x00100001}, {5, 0x00100000}, {1, 0xFFFFFFFF}};
+    for (const auto& cost : costs) {
+        passwordBytes = BuildHeaderOnlyBlob(kdf, 0, KeyBlobWrapMethod::Password, 32,
+                                            cost.operations, cost.memoryKiB, Span<uint8>(blob));
+        auto costInfo = TryPeekKeyBlob(Span<const uint8>(blob).Left(passwordBytes));
+        REQUIRE(costInfo);
+        CHECK(costInfo.Value().passwordCost.operations == cost.operations);
+        CHECK(costInfo.Value().passwordCost.memoryBytes == usize{cost.memoryKiB} * 1024);
+        CHECK(
+            TryUnwrapKeyWithPassword<KdfKey>(password, Span<const uint8>(blob).Left(passwordBytes))
+                .Error() == ErrorCode::CapacityExceeded);
+    }
+
+    // Password 방식 헤더는 50 byte다. 모르는 버전은 magic 다음 byte만으로 Unsupported다.
+    const HexBytes passwordBlob(PasswordMethodBlob);
+    CHECK(TryPeekKeyBlob(passwordBlob.View().Left(50)));
+    CHECK(TryPeekKeyBlob(passwordBlob.View().Left(49)).Error() == ErrorCode::AuthenticationFailed);
+    const uint8 futureVersion[] = {'R', 'K', 'E', 'Y', 2};
+    CHECK(TryPeekKeyBlob(Span<const uint8>(futureVersion)).Error() == ErrorCode::Unsupported);
+    CHECK(TryUnwrapKey<KdfKey>(kek, Span<const uint8>(futureVersion)).Error() ==
+          ErrorCode::Unsupported);
+    CHECK(TryPeekKeyBlob(Span<const uint8>(futureVersion).Left(4)).Error() ==
+          ErrorCode::AuthenticationFailed);
+}
+
 TEST(CryptoKeyBlobRejectsMisuse) {
     const KdfKey kek = FixtureKek();
     auto key = AeadKey::TryGenerate(AeadAlgorithm::XChaCha20Poly1305);
@@ -369,6 +565,18 @@ TEST(CryptoKeyBlobRejectsMisuse) {
     const KeyId id = TryNewKeyId().Value();
     const KeyId kekId = TryNewKeyId().Value();
     uint8 blob[KeyBlobMaxBytes];
+    // 아래 거부(StaleHandle·InvalidArgument·CapacityExceeded)는 모두 쓰기 전이다. 끝에서 blob이
+    // 그대로인지 본다.
+    memset(blob, 0x5A, sizeof(blob));
+    const auto untouched = [&]() {
+        for (uint8 value : blob) {
+            if (value != 0x5A) {
+                return false;
+            }
+        }
+
+        return true;
+    };
 
     // 빈 키·KEK는 StaleHandle, Nil ID는 InvalidArgument다.
     CHECK(TryWrapKey(KdfKey(), kekId, key.Value(), id, Span<uint8>(blob)).Error() ==
@@ -385,23 +593,20 @@ TEST(CryptoKeyBlobRejectsMisuse) {
     CHECK(TryGetKeyBlobBytes(key.Value(), static_cast<KeyBlobWrapMethod>(9)).Error() ==
           ErrorCode::InvalidArgument);
 
-    // hazmat 짧은 MAC 키는 일반 저장 경로로 내보내지 않는다.
+    // hazmat 짧은 MAC 키는 일반 저장 경로로 내보내지 않는다(크기 질의도 같은 규칙).
     auto shortKey = hazmat::TryImportShortMacKey(MacAlgorithm::HmacSha256, Text("short"));
     REQUIRE(shortKey);
     CHECK(TryWrapKey(kek, kekId, shortKey.Value(), id, Span<uint8>(blob)).Error() ==
           ErrorCode::InvalidArgument);
+    CHECK(TryWrapKeyWithPassword(Text("pw"), SmallCost, shortKey.Value(), id, Span<uint8>(blob))
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(TryGetKeyBlobBytes(shortKey.Value(), KeyBlobWrapMethod::Key).Error() ==
+          ErrorCode::InvalidArgument);
 
-    // 출력이 작으면 CapacityExceeded이고 쓰지 않는다.
+    // 출력이 작으면 CapacityExceeded다.
     const usize needed = TryGetKeyBlobBytes(key.Value(), KeyBlobWrapMethod::Key).Value();
-    memset(blob, 0x5A, sizeof(blob));
     CHECK(TryWrapKey(kek, kekId, key.Value(), id, Span<uint8>(blob).Left(needed - 1)).Error() ==
           ErrorCode::CapacityExceeded);
-    bool untouched = true;
-    for (uint8 value : blob) {
-        untouched = untouched && value == 0x5A;
-    }
-
-    CHECK(untouched);
 
     // 비밀번호 인자: 빈 비밀번호, blob과 겹친 비밀번호, 범위 밖 cost는 InvalidArgument, 상한 초과는
     // CapacityExceeded다.
@@ -416,6 +621,19 @@ TEST(CryptoKeyBlobRejectsMisuse) {
     CHECK(TryWrapKeyWithPassword(Text("pw"), PasswordCost{MaxPasswordOperations + 1, 8 * 1024},
                                  key.Value(), id, Span<uint8>(blob))
               .Error() == ErrorCode::CapacityExceeded);
+    CHECK(untouched());
+
+    // 메모리 비용은 1 KiB 단위로 내려 기록하고 계산도 그 값으로 한다(같은 비용에 인코딩이 하나).
+    auto rounded = TryWrapKeyWithPassword(Text("pw"), PasswordCost{1, 8 * 1024 + 1023}, key.Value(),
+                                          id, Span<uint8>(blob));
+    REQUIRE(rounded);
+    const Span<const uint8> roundedBlob = Span<const uint8>(blob).Left(rounded.Value());
+    auto roundedInfo = TryPeekKeyBlob(roundedBlob);
+    REQUIRE(roundedInfo);
+    CHECK(roundedInfo.Value().passwordCost.memoryBytes == 8 * 1024);
+    auto roundedKey = TryUnwrapKeyWithPassword<AeadKey>(Text("pw"), roundedBlob);
+    REQUIRE(roundedKey);
+    CHECK(SameSecret(roundedKey.Value().key, key.Value()));
 }
 
 TEST(CryptoLabelsAndTypeTags) {

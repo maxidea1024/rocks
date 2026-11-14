@@ -13,4 +13,7 @@ namespace rocks::crypto::detail {
 // 범위 밖(0회·8 KiB 미만)은 InvalidArgument, 상한 초과는 CapacityExceeded다.
 [[nodiscard]] Result<void> CheckPasswordCost(PasswordCost cost) noexcept;
 
+// 비밀번호 길이가 Argon2id 상한(libsodium PASSWD_MAX) 이하인가. 넘으면 호출자 인자 오류다.
+[[nodiscard]] bool IsPasswordLengthValid(Span<const uint8> password) noexcept;
+
 } // namespace rocks::crypto::detail
