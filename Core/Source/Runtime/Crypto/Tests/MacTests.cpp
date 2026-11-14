@@ -81,6 +81,29 @@ MacKey Import(MacAlgorithm algorithm, Span<const uint8> bytes) {
     return key ? Move(key.Value()) : MacKey();
 }
 
+// RFC 4231 사례 2처럼 16 byte보다 짧은 HMAC 키는 hazmat 경로로만 받는다.
+MacKey ImportHmac(MacAlgorithm algorithm, Span<const uint8> bytes) {
+    if (bytes.Size() >= MinMacKeyBytes) {
+        return Import(algorithm, bytes);
+    }
+
+    auto key = hazmat::TryImportShortMacKey(algorithm, bytes);
+    return key ? Move(key.Value()) : MacKey();
+}
+
+// 경계 시험 입력: 키 byte i % 251, 메시지 byte (i * 7 + 3) % 256.
+void FillKey(Span<uint8> key) {
+    for (usize i = 0; i < key.Size(); ++i) {
+        key[i] = static_cast<uint8>(i % 251);
+    }
+}
+
+void FillMessage(Span<uint8> message) {
+    for (usize i = 0; i < message.Size(); ++i) {
+        message[i] = static_cast<uint8>(i * 7 + 3);
+    }
+}
+
 } // namespace
 
 TEST(CryptoMacHmacRfc4231) {
@@ -99,8 +122,8 @@ TEST(CryptoMacHmacRfc4231) {
         REQUIRE(hexKey.size != MaxSize && data.size != MaxSize && sha256.size == 32 &&
                 sha512.size == 64);
 
-        const MacKey key256 = Import(MacAlgorithm::HmacSha256, keyBytes);
-        const MacKey key512 = Import(MacAlgorithm::HmacSha512, keyBytes);
+        const MacKey key256 = ImportHmac(MacAlgorithm::HmacSha256, keyBytes);
+        const MacKey key512 = ImportHmac(MacAlgorithm::HmacSha512, keyBytes);
         REQUIRE(!key256.IsEmpty() && !key512.IsEmpty());
 
         uint8 tag256[HmacSha256TagBytes];
@@ -156,7 +179,129 @@ TEST(CryptoMacBlake2bKeyedKnownAnswers) {
     }
 }
 
+TEST(CryptoMacBoundaryKnownAnswers) {
+    // HMAC 키 길이 경계: 16(하한), 64·65(SHA-256 블록), 128·129(SHA-512 블록), 4096(상한). 메시지는
+    // 100 byte다. 값은 Python hmac으로 계산했다.
+    struct KeyCase {
+        usize keyBytes;
+        const char* sha256;
+        const char* sha512;
+    };
+
+    const KeyCase keyCases[] = {
+        {16, "a3ab48ff57f3ec22152892bf6043dd7e30a8babb65e94fe5a545700f3dcf0e11",
+         "93df5c9fedd9d805cff93ed4607433c5119736e2a6aa16054c87bc24ad880a2f"
+         "33028cbed2b6e59301bd970c84ea89252a3d61288553fded62a6de90b47da7f7"},
+        {64, "05889c552cc7accc8012e09bc442fab2e4eea4f1423dda065a88341b92f624da",
+         "b6b4b5dc08452e7c7ba5c31c7c55718e3f1f85096f945b86ba95651ea7700b90"
+         "49db83b0b5ce4a4f6f44a4a8f82f8d84b0ff70ac83ab6aea0e0a06d6554f4482"},
+        {65, "af6249e93181d713c3037483211f698f5a392f015e01a04cbe403cbbdf1552d7",
+         "bea71b2b3fac4efbb4122f6b061558fc0404e6780b7ae331026faca29966d4a8"
+         "1103f43f3da2587a0bfac896eaac62eba72911eaef29128dde7252a3d6821acb"},
+        {128, "6d70b40b9e48bb462693e53fdd716277677a14ca69b9e3837545216e7ba8e5a7",
+         "47806324862501c52540df5925db3d6a23d9bad7fd073f0503869a3d5da2a8f2"
+         "54595469486ad26ee61e5b65f2571d75d25625e27931c79cc8214eeec70e6fd9"},
+        {129, "06239a76432b711fbde4b79699a2f191b99027298561881bb9780247d1ce786a",
+         "0af18b86428d1bd72ad3132ec1ffae6113d541c3291141fe27fef84c2690dff9"
+         "3685d1e3f5b62943b4f9fae904dd258a0ace40a7eedd02b75a79338cf706e6a3"},
+        {4096, "e802d3512c71b45bc6aee8e07684b1264608e7ba5913522b5829caed44811dac",
+         "7d4701f7b031bb2a66fde8a783aaab69801305c2e36d2b2c82d11097ed73c094"
+         "64370018d7fde5c122a35d2f0ccafd6c78adb4a12d046d46f4dacf44d117baa2"},
+    };
+    uint8 keyBytes[4096];
+    FillKey(Span<uint8>(keyBytes));
+    uint8 message[256];
+    FillMessage(Span<uint8>(message));
+    for (const KeyCase& item : keyCases) {
+        const Span<const uint8> key = Span<const uint8>(keyBytes).Left(item.keyBytes);
+        const MacKey key256 = Import(MacAlgorithm::HmacSha256, key);
+        const MacKey key512 = Import(MacAlgorithm::HmacSha512, key);
+        REQUIRE(!key256.IsEmpty() && !key512.IsEmpty());
+        uint8 tag256[HmacSha256TagBytes];
+        uint8 tag512[HmacSha512TagBytes];
+        REQUIRE(TryMac(key256, Span<const uint8>(message).Left(100), Span<uint8>(tag256)));
+        REQUIRE(TryMac(key512, Span<const uint8>(message).Left(100), Span<uint8>(tag512)));
+        CHECK(ConstantTimeEquals(Span<const uint8>(tag256), HexBytes(item.sha256).View()));
+        CHECK(ConstantTimeEquals(Span<const uint8>(tag512), HexBytes(item.sha512).View()));
+    }
+
+    // BLAKE2b keyed 블록(128 byte) 경계: 128·129·256 byte 메시지, 키는 0..31(Python hashlib).
+    uint8 key32[32];
+    for (usize i = 0; i < 32; ++i) {
+        key32[i] = static_cast<uint8>(i);
+    }
+
+    const MacKey blake = Import(MacAlgorithm::Blake2bKeyed, Span<const uint8>(key32));
+    REQUIRE(!blake.IsEmpty());
+    struct MessageCase {
+        usize bytes;
+        const char* tag;
+    };
+
+    const MessageCase messageCases[] = {
+        {128, "45b27f69ea3c381242d369fafdfc8cbd54e710c242bea80d0372c8df23776cda"},
+        {129, "b0534a69d4c565fa8c962fb05d0f2ce99f70dddad00a95a220abf0b2ea4f41c8"},
+        {256, "80408e16e6976cfa903a875c075c9affc55d71dd0674fd02a279cab70a312a96"},
+    };
+    for (const MessageCase& item : messageCases) {
+        uint8 tag[Blake2bKeyedTagBytes];
+        REQUIRE(TryMac(blake, Span<const uint8>(message).Left(item.bytes), Span<uint8>(tag)));
+        CHECK(ConstantTimeEquals(Span<const uint8>(tag), HexBytes(item.tag).View()));
+    }
+}
+
+TEST(CryptoMacStateErrorPaths) {
+    auto key = MacKey::TryGenerate(MacAlgorithm::Blake2bKeyed);
+    REQUIRE(key);
+    const Span<const uint8> message = Text("incremental message");
+    uint8 expected[Blake2bKeyedTagBytes];
+    REQUIRE(TryMac(key.Value(), message, Span<uint8>(expected)));
+
+    // 길이가 틀린 TryFinish는 상태를 바꾸지 않는다. 맞는 버퍼로 다시 부르면 끝난다.
+    auto state = MacState::TryCreate(key.Value());
+    REQUIRE(state);
+    CHECK(state.Value().Algorithm() == MacAlgorithm::Blake2bKeyed);
+    CHECK(state.Value().TagBytes() == Blake2bKeyedTagBytes);
+    const Span<const uint8> pieces[] = {message.Left(5), message.RightChop(5)};
+    REQUIRE(state.Value().TryUpdate(Span<const Span<const uint8>>(pieces)));
+    uint8 wrong[Blake2bKeyedTagBytes + 1];
+    CHECK(state.Value().TryFinish(Span<uint8>(wrong)).Error() == ErrorCode::InvalidArgument);
+
+    // 이동 대입한 객체가 이어서 맞는 tag를 낸다.
+    MacState moved;
+    moved = Move(state.Value());
+    CHECK(state.Value().TryUpdate(message).Error() == ErrorCode::StaleHandle);
+    uint8 tag[Blake2bKeyedTagBytes];
+    REQUIRE(moved.TryFinish(Span<uint8>(tag)));
+    CHECK(ConstantTimeEquals(Span<const uint8>(tag), Span<const uint8>(expected)));
+    CHECK(moved.TryUpdate(message).Error() == ErrorCode::InvalidArgument);
+
+    // 검증 실패는 상태를 끝내고 sticky다. 길이가 틀린 tag도 AuthenticationFailed다.
+    auto failing = MacState::TryCreate(key.Value());
+    REQUIRE(failing);
+    REQUIRE(failing.Value().TryUpdate(message));
+    CHECK(failing.Value().TryFinishVerify(Span<const uint8>(expected).Left(16)).Error() ==
+          ErrorCode::AuthenticationFailed);
+    CHECK(failing.Value().TryUpdate(message).Error() == ErrorCode::AuthenticationFailed);
+    CHECK(failing.Value().TryFinishVerify(Span<const uint8>(expected)).Error() ==
+          ErrorCode::AuthenticationFailed);
+}
+
 TEST(CryptoMacVerifyRejectsTamperingAndWrongLength) {
+    // 세 알고리즘 모두 tag bit 하나를 바꾸면 거부한다.
+    const MacAlgorithm algorithms[] = {MacAlgorithm::HmacSha256, MacAlgorithm::HmacSha512,
+                                       MacAlgorithm::Blake2bKeyed};
+    for (MacAlgorithm algorithm : algorithms) {
+        auto any = MacKey::TryGenerate(algorithm);
+        REQUIRE(any);
+        uint8 anyTag[MaxMacTagBytes];
+        const Span<uint8> anyView = Span<uint8>(anyTag).Left(TryGetMacTagBytes(algorithm).Value());
+        REQUIRE(TryMac(any.Value(), Text("m"), anyView));
+        anyTag[anyView.Size() - 1] ^= 0x80;
+        CHECK(TryVerifyMac(any.Value(), Text("m"), anyView).Error() ==
+              ErrorCode::AuthenticationFailed);
+    }
+
     auto key = MacKey::TryGenerate(MacAlgorithm::HmacSha256);
     REQUIRE(key);
     const Span<const uint8> message = Text("authenticated message");
@@ -254,9 +399,18 @@ TEST(CryptoMacIncrementalAndPiecesMatchOneShot) {
 
 TEST(CryptoMacKeyContract) {
     uint8 bytes[4097] = {};
-    // 키 길이: HMAC 1–4096, BLAKE2b keyed 16–64.
+    // 키 길이: HMAC 16–4096(hazmat 경로는 1–4096), BLAKE2b keyed 16–64.
     CHECK(MacKey::TryImport(MacAlgorithm::HmacSha256, Span<const uint8>()).Error() ==
           ErrorCode::InvalidArgument);
+    CHECK(MacKey::TryImport(MacAlgorithm::HmacSha256, Span<const uint8>(bytes).Left(15)).Error() ==
+          ErrorCode::InvalidArgument);
+    CHECK(MacKey::TryImport(MacAlgorithm::HmacSha256, Span<const uint8>(bytes).Left(16)));
+    CHECK(hazmat::TryImportShortMacKey(MacAlgorithm::HmacSha256, Span<const uint8>(bytes).Left(1)));
+    CHECK(hazmat::TryImportShortMacKey(MacAlgorithm::HmacSha512, Span<const uint8>()).Error() ==
+          ErrorCode::InvalidArgument);
+    CHECK(
+        hazmat::TryImportShortMacKey(MacAlgorithm::Blake2bKeyed, Span<const uint8>(bytes).Left(15))
+            .Error() == ErrorCode::InvalidArgument);
     CHECK(MacKey::TryImport(MacAlgorithm::HmacSha256, Span<const uint8>(bytes)).Error() ==
           ErrorCode::InvalidArgument);
     CHECK(MacKey::TryImport(MacAlgorithm::HmacSha512, Span<const uint8>(bytes).Left(4096)));
@@ -297,6 +451,10 @@ TEST(CryptoMacKeyContract) {
     CHECK(empty.TryExport(Span<uint8>(exported)).Error() == ErrorCode::StaleHandle);
     CHECK(TryMac(copy, Text("x"), Span<uint8>(tagA).Left(32)).Error() ==
           ErrorCode::InvalidArgument);
+    Span<const uint8> pieceArray[4] = {};
+    CHECK(TryMac(copy, Span<const Span<const uint8>>(pieceArray),
+                 AsWritableBytes(Span<Span<const uint8>>(pieceArray)).Left(64))
+              .Error() == ErrorCode::InvalidArgument);
     uint8 shared[128] = {};
     CHECK(
         TryMac(copy, Span<const uint8>(shared).Left(70), Span<uint8>(shared).Mid(64, 64)).Error() ==

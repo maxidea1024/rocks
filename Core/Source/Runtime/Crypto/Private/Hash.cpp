@@ -2,6 +2,7 @@
 
 #include <Crypto/Bytes.h>
 
+#include "AdapterCommon.h"
 #include "Sodium/SodiumRuntime.h"
 
 #include <Core/Move.h>
@@ -27,21 +28,6 @@ static_assert(alignof(crypto_xof_turboshake256_state) <= StateAlignment);
 static_assert(Blake2bMinDigestBytes == crypto_generichash_BYTES_MIN &&
               Blake2bMaxDigestBytes == crypto_generichash_BYTES_MAX &&
               Blake2bDefaultDigestBytes == crypto_generichash_BYTES);
-
-// 출력이 입력 조각이나 조각 배열과 한 byte라도 겹치는가(7절 제자리 규칙).
-bool OutputOverlaps(Span<const Span<const uint8>> pieces, Span<uint8> output) noexcept {
-    if (Overlaps(pieces, output)) {
-        return true;
-    }
-
-    for (Span<const uint8> piece : pieces) {
-        if (Overlaps(piece, output)) {
-            return true;
-        }
-    }
-
-    return false;
-}
 
 bool IsValidTurboShakeDomain(uint8 domain) noexcept {
     return domain >= 0x01 && domain <= 0x7F;
@@ -105,31 +91,27 @@ usize FixedDigestBytes(HashAlgorithm algorithm) noexcept {
     return 0;
 }
 
-// 인자는 TryCreate가 이미 검사했으므로 libsodium이 실패하면 어댑터 결함이다.
-void Require(int status, const char* message) noexcept {
-    if (status != 0) {
-        platform::Fatal(message);
-    }
-}
-
 void InitState(HashAlgorithm algorithm, void* state, usize digestBytes) noexcept {
     switch (algorithm) {
     case HashAlgorithm::Blake2b:
-        Require(crypto_generichash_init(static_cast<crypto_generichash_state*>(state), nullptr, 0,
-                                        digestBytes),
-                "Crypto: crypto_generichash_init failed");
+        detail::RequireSodium(crypto_generichash_init(static_cast<crypto_generichash_state*>(state),
+                                                      nullptr, 0, digestBytes),
+                              "Crypto: crypto_generichash_init failed");
         return;
     case HashAlgorithm::Sha512:
-        Require(crypto_hash_sha512_init(static_cast<crypto_hash_sha512_state*>(state)),
-                "Crypto: crypto_hash_sha512_init failed");
+        detail::RequireSodium(
+            crypto_hash_sha512_init(static_cast<crypto_hash_sha512_state*>(state)),
+            "Crypto: crypto_hash_sha512_init failed");
         return;
     case HashAlgorithm::Sha3_256:
-        Require(crypto_hash_sha3256_init(static_cast<crypto_hash_sha3256_state*>(state)),
-                "Crypto: crypto_hash_sha3256_init failed");
+        detail::RequireSodium(
+            crypto_hash_sha3256_init(static_cast<crypto_hash_sha3256_state*>(state)),
+            "Crypto: crypto_hash_sha3256_init failed");
         return;
     case HashAlgorithm::Sha3_512:
-        Require(crypto_hash_sha3512_init(static_cast<crypto_hash_sha3512_state*>(state)),
-                "Crypto: crypto_hash_sha3512_init failed");
+        detail::RequireSodium(
+            crypto_hash_sha3512_init(static_cast<crypto_hash_sha3512_state*>(state)),
+            "Crypto: crypto_hash_sha3512_init failed");
         return;
     }
 }
@@ -141,24 +123,28 @@ void UpdateState(HashAlgorithm algorithm, void* state, Span<const uint8> input) 
 
     switch (algorithm) {
     case HashAlgorithm::Blake2b:
-        Require(crypto_generichash_update(static_cast<crypto_generichash_state*>(state),
-                                          input.Data(), input.Size()),
-                "Crypto: crypto_generichash_update failed");
+        detail::RequireSodium(
+            crypto_generichash_update(static_cast<crypto_generichash_state*>(state), input.Data(),
+                                      input.Size()),
+            "Crypto: crypto_generichash_update failed");
         return;
     case HashAlgorithm::Sha512:
-        Require(crypto_hash_sha512_update(static_cast<crypto_hash_sha512_state*>(state),
-                                          input.Data(), input.Size()),
-                "Crypto: crypto_hash_sha512_update failed");
+        detail::RequireSodium(
+            crypto_hash_sha512_update(static_cast<crypto_hash_sha512_state*>(state), input.Data(),
+                                      input.Size()),
+            "Crypto: crypto_hash_sha512_update failed");
         return;
     case HashAlgorithm::Sha3_256:
-        Require(crypto_hash_sha3256_update(static_cast<crypto_hash_sha3256_state*>(state),
-                                           input.Data(), input.Size()),
-                "Crypto: crypto_hash_sha3256_update failed");
+        detail::RequireSodium(
+            crypto_hash_sha3256_update(static_cast<crypto_hash_sha3256_state*>(state), input.Data(),
+                                       input.Size()),
+            "Crypto: crypto_hash_sha3256_update failed");
         return;
     case HashAlgorithm::Sha3_512:
-        Require(crypto_hash_sha3512_update(static_cast<crypto_hash_sha3512_state*>(state),
-                                           input.Data(), input.Size()),
-                "Crypto: crypto_hash_sha3512_update failed");
+        detail::RequireSodium(
+            crypto_hash_sha3512_update(static_cast<crypto_hash_sha3512_state*>(state), input.Data(),
+                                       input.Size()),
+            "Crypto: crypto_hash_sha3512_update failed");
         return;
     }
 }
@@ -166,24 +152,25 @@ void UpdateState(HashAlgorithm algorithm, void* state, Span<const uint8> input) 
 void FinishState(HashAlgorithm algorithm, void* state, Span<uint8> digest) noexcept {
     switch (algorithm) {
     case HashAlgorithm::Blake2b:
-        Require(crypto_generichash_final(static_cast<crypto_generichash_state*>(state),
-                                         digest.Data(), digest.Size()),
-                "Crypto: crypto_generichash_final failed");
+        detail::RequireSodium(
+            crypto_generichash_final(static_cast<crypto_generichash_state*>(state), digest.Data(),
+                                     digest.Size()),
+            "Crypto: crypto_generichash_final failed");
         return;
     case HashAlgorithm::Sha512:
-        Require(
+        detail::RequireSodium(
             crypto_hash_sha512_final(static_cast<crypto_hash_sha512_state*>(state), digest.Data()),
             "Crypto: crypto_hash_sha512_final failed");
         return;
     case HashAlgorithm::Sha3_256:
-        Require(crypto_hash_sha3256_final(static_cast<crypto_hash_sha3256_state*>(state),
-                                          digest.Data()),
-                "Crypto: crypto_hash_sha3256_final failed");
+        detail::RequireSodium(crypto_hash_sha3256_final(
+                                  static_cast<crypto_hash_sha3256_state*>(state), digest.Data()),
+                              "Crypto: crypto_hash_sha3256_final failed");
         return;
     case HashAlgorithm::Sha3_512:
-        Require(crypto_hash_sha3512_final(static_cast<crypto_hash_sha3512_state*>(state),
-                                          digest.Data()),
-                "Crypto: crypto_hash_sha3512_final failed");
+        detail::RequireSodium(crypto_hash_sha3512_final(
+                                  static_cast<crypto_hash_sha3512_state*>(state), digest.Data()),
+                              "Crypto: crypto_hash_sha3512_final failed");
         return;
     }
 }
@@ -191,22 +178,24 @@ void FinishState(HashAlgorithm algorithm, void* state, Span<uint8> digest) noexc
 void InitState(XofAlgorithm algorithm, void* state, uint8 domain) noexcept {
     switch (algorithm) {
     case XofAlgorithm::Shake128:
-        Require(crypto_xof_shake128_init(static_cast<crypto_xof_shake128_state*>(state)),
-                "Crypto: crypto_xof_shake128_init failed");
+        detail::RequireSodium(
+            crypto_xof_shake128_init(static_cast<crypto_xof_shake128_state*>(state)),
+            "Crypto: crypto_xof_shake128_init failed");
         return;
     case XofAlgorithm::Shake256:
-        Require(crypto_xof_shake256_init(static_cast<crypto_xof_shake256_state*>(state)),
-                "Crypto: crypto_xof_shake256_init failed");
+        detail::RequireSodium(
+            crypto_xof_shake256_init(static_cast<crypto_xof_shake256_state*>(state)),
+            "Crypto: crypto_xof_shake256_init failed");
         return;
     case XofAlgorithm::TurboShake128:
-        Require(crypto_xof_turboshake128_init_with_domain(
-                    static_cast<crypto_xof_turboshake128_state*>(state), domain),
-                "Crypto: crypto_xof_turboshake128_init_with_domain failed");
+        detail::RequireSodium(crypto_xof_turboshake128_init_with_domain(
+                                  static_cast<crypto_xof_turboshake128_state*>(state), domain),
+                              "Crypto: crypto_xof_turboshake128_init_with_domain failed");
         return;
     case XofAlgorithm::TurboShake256:
-        Require(crypto_xof_turboshake256_init_with_domain(
-                    static_cast<crypto_xof_turboshake256_state*>(state), domain),
-                "Crypto: crypto_xof_turboshake256_init_with_domain failed");
+        detail::RequireSodium(crypto_xof_turboshake256_init_with_domain(
+                                  static_cast<crypto_xof_turboshake256_state*>(state), domain),
+                              "Crypto: crypto_xof_turboshake256_init_with_domain failed");
         return;
     }
 }
@@ -218,24 +207,28 @@ void UpdateState(XofAlgorithm algorithm, void* state, Span<const uint8> input) n
 
     switch (algorithm) {
     case XofAlgorithm::Shake128:
-        Require(crypto_xof_shake128_update(static_cast<crypto_xof_shake128_state*>(state),
-                                           input.Data(), input.Size()),
-                "Crypto: crypto_xof_shake128_update failed");
+        detail::RequireSodium(
+            crypto_xof_shake128_update(static_cast<crypto_xof_shake128_state*>(state), input.Data(),
+                                       input.Size()),
+            "Crypto: crypto_xof_shake128_update failed");
         return;
     case XofAlgorithm::Shake256:
-        Require(crypto_xof_shake256_update(static_cast<crypto_xof_shake256_state*>(state),
-                                           input.Data(), input.Size()),
-                "Crypto: crypto_xof_shake256_update failed");
+        detail::RequireSodium(
+            crypto_xof_shake256_update(static_cast<crypto_xof_shake256_state*>(state), input.Data(),
+                                       input.Size()),
+            "Crypto: crypto_xof_shake256_update failed");
         return;
     case XofAlgorithm::TurboShake128:
-        Require(crypto_xof_turboshake128_update(static_cast<crypto_xof_turboshake128_state*>(state),
-                                                input.Data(), input.Size()),
-                "Crypto: crypto_xof_turboshake128_update failed");
+        detail::RequireSodium(
+            crypto_xof_turboshake128_update(static_cast<crypto_xof_turboshake128_state*>(state),
+                                            input.Data(), input.Size()),
+            "Crypto: crypto_xof_turboshake128_update failed");
         return;
     case XofAlgorithm::TurboShake256:
-        Require(crypto_xof_turboshake256_update(static_cast<crypto_xof_turboshake256_state*>(state),
-                                                input.Data(), input.Size()),
-                "Crypto: crypto_xof_turboshake256_update failed");
+        detail::RequireSodium(
+            crypto_xof_turboshake256_update(static_cast<crypto_xof_turboshake256_state*>(state),
+                                            input.Data(), input.Size()),
+            "Crypto: crypto_xof_turboshake256_update failed");
         return;
     }
 }
@@ -247,23 +240,25 @@ void SqueezeState(XofAlgorithm algorithm, void* state, Span<uint8> output) noexc
 
     switch (algorithm) {
     case XofAlgorithm::Shake128:
-        Require(crypto_xof_shake128_squeeze(static_cast<crypto_xof_shake128_state*>(state),
-                                            output.Data(), output.Size()),
-                "Crypto: crypto_xof_shake128_squeeze failed");
+        detail::RequireSodium(
+            crypto_xof_shake128_squeeze(static_cast<crypto_xof_shake128_state*>(state),
+                                        output.Data(), output.Size()),
+            "Crypto: crypto_xof_shake128_squeeze failed");
         return;
     case XofAlgorithm::Shake256:
-        Require(crypto_xof_shake256_squeeze(static_cast<crypto_xof_shake256_state*>(state),
-                                            output.Data(), output.Size()),
-                "Crypto: crypto_xof_shake256_squeeze failed");
+        detail::RequireSodium(
+            crypto_xof_shake256_squeeze(static_cast<crypto_xof_shake256_state*>(state),
+                                        output.Data(), output.Size()),
+            "Crypto: crypto_xof_shake256_squeeze failed");
         return;
     case XofAlgorithm::TurboShake128:
-        Require(
+        detail::RequireSodium(
             crypto_xof_turboshake128_squeeze(static_cast<crypto_xof_turboshake128_state*>(state),
                                              output.Data(), output.Size()),
             "Crypto: crypto_xof_turboshake128_squeeze failed");
         return;
     case XofAlgorithm::TurboShake256:
-        Require(
+        detail::RequireSodium(
             crypto_xof_turboshake256_squeeze(static_cast<crypto_xof_turboshake256_state*>(state),
                                              output.Data(), output.Size()),
             "Crypto: crypto_xof_turboshake256_squeeze failed");
@@ -304,7 +299,7 @@ Digest FixedHash(HashAlgorithm algorithm, Span<const uint8> input) noexcept {
 template <typename State>
 Result<void> Xof(XofAlgorithm algorithm, Span<const Span<const uint8>> pieces, Span<uint8> output,
                  uint8 domain) noexcept {
-    if (!IsValidTurboShakeDomain(domain) || OutputOverlaps(pieces, output)) {
+    if (!IsValidTurboShakeDomain(domain) || detail::OutputOverlaps(pieces, output)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -343,7 +338,7 @@ Result<void> TryBlake2b(Span<const uint8> input, Span<uint8> digest) noexcept {
 
 Result<void> TryBlake2b(Span<const Span<const uint8>> pieces, Span<uint8> digest) noexcept {
     if (digest.Size() < Blake2bMinDigestBytes || digest.Size() > Blake2bMaxDigestBytes ||
-        OutputOverlaps(pieces, digest)) {
+        detail::OutputOverlaps(pieces, digest)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
