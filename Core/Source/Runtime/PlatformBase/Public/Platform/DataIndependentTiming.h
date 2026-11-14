@@ -1,10 +1,12 @@
 #pragma once
 
-// ARMv8.4 FEAT_DIT(Data Independent Timing)를 켜는 범위다. DIT를 켜면 CPU가 데이터 값에 따라 명령
-// 시간을 바꾸지 않고, Apple M3 이상에서는 데이터 메모리 의존 prefetcher(DMP)도 꺼진다(GoFetch,
-// 2024). 암호 모듈이 비밀을 다루는 구간에서만 켠다(Docs/Design/Crypto.ko.md 6.3절, 결정 D12).
+// ARMv8.4 FEAT_DIT(Data Independent Timing)를 켜는 범위다. DIT를 켜면 Arm ARM이 정한 명령(정수
+// 산술·논리, load·store 등)의 시간이 데이터 값에 따라 달라지지 않고, Apple M3에서는 데이터 메모리
+// 의존 prefetcher(DMP)도 꺼진다(GoFetch, 2024. M4 이후는 공개 확인이 없다). 암호 모듈이 비밀을
+// 다루는 구간에서만 켠다(Docs/Design/Crypto.ko.md 6.3절, 결정 D12).
 //
 // - PSTATE.DIT는 스레드 상태다(문맥 전환 때 보존된다). 범위 객체는 만든 스레드에서만 효과가 있다.
+// - 켠 직후 speculation barrier(FEAT_SB가 있으면 SB, 없으면 DSB NSH·ISB)를 둔다(Apple 지침).
 // - 지금은 macOS arm64에서만 감지한다(CpuFeatures::armDit). 다른 대상에서는 아무 일도 하지 않는다.
 // - Apple M1·M2는 DIT를 켜도 DMP가 꺼지지 않는다(끌 방법이 없는 한계).
 //

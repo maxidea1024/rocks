@@ -48,10 +48,15 @@ void DetectArm64CryptoFeatures(CpuFeatures& features) noexcept {
     features.armPmull = pmull;
     features.armSha2 = sha2;
 
-    // DIT는 sysctl 이름이 있을 때만 켠다(없는 구버전 OS에서는 쓰지 않는다).
+    // DIT·SB는 sysctl이 지원한다고 답할 때만 쓴다(조회가 실패하면 없는 것으로 다룬다).
     bool dit = false;
     if (QueryFeature("hw.optional.arm.FEAT_DIT", dit)) {
         features.armDit = dit;
+    }
+
+    bool sb = false;
+    if (QueryFeature("hw.optional.arm.FEAT_SB", sb)) {
+        features.armSb = sb;
     }
 }
 

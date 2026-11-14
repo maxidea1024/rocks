@@ -163,7 +163,6 @@ Result<void> hazmat::TryExportKey(const KdfKey& key, Span<uint8> output) noexcep
 }
 
 void detail::KdfContextNeedsNulTerminatedLiteral() noexcept {
-    platform::DataIndependentTimingScope dit;
 }
 
 // ---- BLAKE2b KDF ----

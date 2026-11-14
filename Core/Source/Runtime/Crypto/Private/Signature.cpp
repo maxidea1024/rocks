@@ -114,7 +114,6 @@ Result<void> CheckPhVerifier(const void* state, bool finished, bool verifyFailed
 // ---- 공개키·서명 키 ----
 
 Result<Ed25519PublicKey> Ed25519PublicKey::TryFromBytes(Span<const uint8> bytes) noexcept {
-    platform::DataIndependentTimingScope dit;
     if (bytes.Size() != Ed25519PublicKeyBytes) {
         return Result<Ed25519PublicKey>::Failure(ErrorCode::InvalidArgument);
     }
@@ -196,7 +195,6 @@ Result<Ed25519Signature> TrySign(const Ed25519SigningKey& key, Span<const uint8>
 
 Result<void> TryVerify(const Ed25519PublicKey& key, Span<const uint8> message,
                        Span<const uint8> signature) noexcept {
-    platform::DataIndependentTimingScope dit;
     // 서명 길이는 메시지에서 온 값이다. 틀리면 잘린 서명으로 본다(결정 D5).
     if (signature.Size() != Ed25519SignatureBytes) {
         return Result<void>::Failure(ErrorCode::AuthenticationFailed);
@@ -337,7 +335,6 @@ Ed25519phVerifier& Ed25519phVerifier::operator=(Ed25519phVerifier&& other) noexc
 }
 
 Result<Ed25519phVerifier> Ed25519phVerifier::TryCreate(Allocator& allocator) noexcept {
-    platform::DataIndependentTimingScope dit;
     auto state = TryAllocatePhState(allocator);
     if (!state) {
         return Result<Ed25519phVerifier>::Failure(state.Error());
@@ -350,7 +347,6 @@ Result<Ed25519phVerifier> Ed25519phVerifier::TryCreate(Allocator& allocator) noe
 }
 
 Result<void> Ed25519phVerifier::TryUpdate(Span<const uint8> input) noexcept {
-    platform::DataIndependentTimingScope dit;
     if (auto valid = CheckPhVerifier(state_, finished_, verifyFailed_); !valid) {
         return valid;
     }
@@ -360,7 +356,6 @@ Result<void> Ed25519phVerifier::TryUpdate(Span<const uint8> input) noexcept {
 }
 
 Result<void> Ed25519phVerifier::TryUpdate(Span<const Span<const uint8>> pieces) noexcept {
-    platform::DataIndependentTimingScope dit;
     if (auto valid = CheckPhVerifier(state_, finished_, verifyFailed_); !valid) {
         return valid;
     }
@@ -374,7 +369,6 @@ Result<void> Ed25519phVerifier::TryUpdate(Span<const Span<const uint8>> pieces) 
 
 Result<void> Ed25519phVerifier::TryFinish(const Ed25519PublicKey& key,
                                           Span<const uint8> signature) noexcept {
-    platform::DataIndependentTimingScope dit;
     auto index = TryFinishAny(Span<const Ed25519PublicKey>(&key, 1), signature);
     if (!index) {
         return Result<void>::Failure(index.Error());
@@ -385,7 +379,6 @@ Result<void> Ed25519phVerifier::TryFinish(const Ed25519PublicKey& key,
 
 Result<usize> Ed25519phVerifier::TryFinishAny(Span<const Ed25519PublicKey> trusted,
                                               Span<const uint8> signature) noexcept {
-    platform::DataIndependentTimingScope dit;
     if (auto valid = CheckPhVerifier(state_, finished_, verifyFailed_); !valid) {
         return Result<usize>::Failure(valid.Error());
     }
@@ -421,7 +414,6 @@ Result<usize> Ed25519phVerifier::TryFinishAny(Span<const Ed25519PublicKey> trust
 }
 
 void Ed25519phVerifier::Reset() noexcept {
-    platform::DataIndependentTimingScope dit;
     if (state_ != nullptr) {
         WipePhState(state_);
         InitPhState(state_);
@@ -431,7 +423,6 @@ void Ed25519phVerifier::Reset() noexcept {
 }
 
 void Ed25519phVerifier::Release() noexcept {
-    platform::DataIndependentTimingScope dit;
     if (state_ != nullptr) {
         ReleasePhState(allocator_, state_);
         state_ = nullptr;

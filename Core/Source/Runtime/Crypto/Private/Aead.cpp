@@ -308,7 +308,6 @@ Result<void> CheckHazmat(const AeadKey& key, Span<const uint8> nonce) noexcept {
 // ---- 모듈 내부 진입점 ----
 
 Result<void> detail::CheckAeadUsable(AeadAlgorithm algorithm) noexcept {
-    platform::DataIndependentTimingScope dit;
     return CheckUsable(algorithm);
 }
 
@@ -327,7 +326,6 @@ Result<AeadKey> detail::TryMakeAeadKey(AeadAlgorithm algorithm, SecretBytes&& ke
 // ---- 정보 ----
 
 Result<AeadInfo> TryGetAeadInfo(AeadAlgorithm algorithm) noexcept {
-    platform::DataIndependentTimingScope dit;
     if (!IsDefined(algorithm)) {
         return Result<AeadInfo>::Failure(ErrorCode::InvalidArgument);
     }
@@ -352,12 +350,10 @@ Result<AeadInfo> TryGetAeadInfo(AeadAlgorithm algorithm) noexcept {
 }
 
 AeadAlgorithm GetPreferredAead() noexcept {
-    platform::DataIndependentTimingScope dit;
     return AeadAlgorithm::XChaCha20Poly1305;
 }
 
 Result<usize> TryGetSealedBytes(AeadAlgorithm algorithm, usize plaintextBytes) noexcept {
-    platform::DataIndependentTimingScope dit;
     if (!IsDefined(algorithm)) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }

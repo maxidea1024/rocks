@@ -87,7 +87,6 @@ void SecureZero(Span<uint8> bytes) noexcept {
 }
 
 Result<usize> TryGetHexChars(usize bytes) noexcept {
-    platform::DataIndependentTimingScope dit;
     // NUL 하나를 더 쓸 자리도 있어야 하므로 2 * bytes + 1이 넘치지 않아야 한다. libsodium은
     // bytes >= SIZE_MAX / 2를 misuse로 보므로 같은 경계를 쓴다.
     if (bytes >= MaxSize / 2) {
@@ -98,7 +97,6 @@ Result<usize> TryGetHexChars(usize bytes) noexcept {
 }
 
 Result<usize> TryGetBase64Chars(usize bytes, Base64Variant variant) noexcept {
-    platform::DataIndependentTimingScope dit;
     if (SodiumVariant(variant) < 0) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }

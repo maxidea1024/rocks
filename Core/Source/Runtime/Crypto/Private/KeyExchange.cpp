@@ -161,12 +161,10 @@ Result<KxSessionKeys> TrySessionKeys(bool client, const KxKeyPair& self, const K
 // ---- 공개키·키 쌍 ----
 
 Result<KxPublicKey> KxPublicKey::TryFromBytes(Span<const uint8> bytes) noexcept {
-    platform::DataIndependentTimingScope dit;
     return TryPublicKeyFromBytes<KxPublicKey>(bytes);
 }
 
 Result<BoxPublicKey> BoxPublicKey::TryFromBytes(Span<const uint8> bytes) noexcept {
-    platform::DataIndependentTimingScope dit;
     return TryPublicKeyFromBytes<BoxPublicKey>(bytes);
 }
 
@@ -225,7 +223,6 @@ Result<KxSessionKeys> TryServerSessionKeys(const KxKeyPair& server, const KxPubl
 // ---- sealed box ----
 
 Result<usize> TryGetSealedBoxBytes(usize messageBytes) noexcept {
-    platform::DataIndependentTimingScope dit;
     if (messageBytes > MaxSize - SealedBoxOverheadBytes) {
         return Result<usize>::Failure(ErrorCode::Overflow);
     }

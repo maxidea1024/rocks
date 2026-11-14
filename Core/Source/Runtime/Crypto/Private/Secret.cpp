@@ -4,6 +4,7 @@
 #include "SecretArena.h"
 
 #include <Core/Move.h>
+#include <Platform/DataIndependentTiming.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
 
@@ -83,6 +84,7 @@ Result<SecretBytes> SecretBytes::TryCreate(usize bytes) noexcept {
 }
 
 Result<SecretBytes> SecretBytes::TryGenerate(usize bytes) noexcept {
+    platform::DataIndependentTimingScope dit;
     auto secret = TryCreate(bytes);
     if (!secret) {
         return secret;
@@ -97,6 +99,7 @@ Result<SecretBytes> SecretBytes::TryGenerate(usize bytes) noexcept {
 }
 
 Result<SecretBytes> SecretBytes::TryCopyFrom(Span<const uint8> source) noexcept {
+    platform::DataIndependentTimingScope dit;
     auto secret = TryCreate(source.Size());
     if (!secret) {
         return secret;

@@ -107,7 +107,6 @@ Result<SecretBytes> TryCreateSharedSecret() noexcept {
 } // namespace
 
 Result<KemInfo> TryGetKemInfo(KemAlgorithm algorithm) noexcept {
-    platform::DataIndependentTimingScope dit;
     if (!IsDefined(algorithm)) {
         return Result<KemInfo>::Failure(ErrorCode::InvalidArgument);
     }
@@ -121,7 +120,6 @@ Result<KemInfo> TryGetKemInfo(KemAlgorithm algorithm) noexcept {
 }
 
 KemAlgorithm GetPreferredKem() noexcept {
-    platform::DataIndependentTimingScope dit;
     return KemAlgorithm::XWing;
 }
 
@@ -129,7 +127,6 @@ KemAlgorithm GetPreferredKem() noexcept {
 
 Result<KemPublicKey> KemPublicKey::TryFromBytes(KemAlgorithm algorithm,
                                                 Span<const uint8> bytes) noexcept {
-    platform::DataIndependentTimingScope dit;
     if (!IsDefined(algorithm) || bytes.Size() != TraitsOf(algorithm).publicKeyBytes) {
         return Result<KemPublicKey>::Failure(ErrorCode::InvalidArgument);
     }

@@ -1,11 +1,13 @@
 #include <Crypto/Random.h>
 
 #include <Crypto/Bytes.h>
+#include <Platform/DataIndependentTiming.h>
 #include <Platform/SecureRandom.h>
 
 namespace rocks::crypto {
 
 Result<void> TryFillRandom(Span<uint8> output) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (output.IsEmpty()) {
         return Result<void>::Success();
     }
@@ -21,6 +23,7 @@ Result<void> TryFillRandom(Span<uint8> output) noexcept {
 }
 
 Result<uint32> TryRandomUniform(uint32 upperBound) noexcept {
+    platform::DataIndependentTimingScope dit;
     if (upperBound == 0) {
         return Result<uint32>::Failure(ErrorCode::InvalidArgument);
     }

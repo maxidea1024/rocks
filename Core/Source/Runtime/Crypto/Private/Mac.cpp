@@ -164,7 +164,6 @@ void ComputeTag(const MacKey& key, Span<const Span<const uint8>> pieces, Span<ui
 } // namespace
 
 Result<usize> TryGetMacTagBytes(MacAlgorithm algorithm) noexcept {
-    platform::DataIndependentTimingScope dit;
     if (!IsDefined(algorithm)) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
@@ -227,12 +226,10 @@ Result<void> hazmat::TryExportKey(const MacKey& key, Span<uint8> output) noexcep
 // ---- 모듈 내부(다른 키 파생 경로가 쓴다) ----
 
 bool detail::IsDefinedMacAlgorithm(MacAlgorithm algorithm) noexcept {
-    platform::DataIndependentTimingScope dit;
     return IsDefined(algorithm);
 }
 
 usize detail::DefaultMacKeyBytes(MacAlgorithm algorithm) noexcept {
-    platform::DataIndependentTimingScope dit;
     return DefaultKeyBytes(algorithm);
 }
 
@@ -331,13 +328,11 @@ Result<MacState> MacState::TryCreate(const MacKey& key) noexcept {
 }
 
 usize MacState::TagBytes() const noexcept {
-    platform::DataIndependentTimingScope dit;
     return rocks::crypto::TagBytes(algorithm_);
 }
 
 // 쓸 수 있는 상태인가. 끝난 뒤에는 검증 실패를 sticky로 돌려준다(9.1절).
 Result<void> MacState::CheckActive() const noexcept {
-    platform::DataIndependentTimingScope dit;
     if (state_ == nullptr) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
