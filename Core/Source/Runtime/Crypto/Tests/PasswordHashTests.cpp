@@ -122,11 +122,13 @@ TEST(CryptoPasswordHashAndVerify) {
     // 비용이 바뀌면 다시 해시할 때다.
     CHECK(TryPasswordNeedsRehash(encoded, FastCost).Value() == false);
     CHECK(TryPasswordNeedsRehash(encoded, PasswordCost{2, 64 * 1024}).Value() == true);
+    CHECK(TryPasswordNeedsRehash(encoded, PasswordCost{1, 128 * 1024}).Value() == true);
 
     // 변조한 문자열은 AuthenticationFailed다(hash 끝 문자 바꾸기, 잘라 내기).
     char tampered[PasswordHashStringBytes];
     memcpy(tampered, stored, sizeof(stored));
-    tampered[written.Value() - 1] = tampered[written.Value() - 1] == 'A' ? 'B' : 'A';
+    const usize middle = written.Value() - 10;
+    tampered[middle] = tampered[middle] == 'A' ? 'B' : 'A';
     CHECK(TryVerifyPassword(StringView(tampered, written.Value()),
                             Text("correct horse battery staple"))
               .Error() == ErrorCode::AuthenticationFailed);
@@ -135,41 +137,63 @@ TEST(CryptoPasswordHashAndVerify) {
 }
 
 TEST(CryptoPasswordRejectsUntrustedParameters) {
-    // 상한을 넘는 비용(메모리 2 GiB, 반복 33회)은 계산하지 않고 CapacityExceeded다.
-    CHECK(TryVerifyPassword(
-              StringView(
-                  "$argon2id$v=19$m=2097152,t=2,p=1$bA81arsiXysd3WbTRzmEOw$Nm8QBM+7RH1DXo9rvp5cwKEO"
-                  "OOfD2g6JuxlXihoNcpE"),
-              Span<const uint8>())
-              .Error() == ErrorCode::CapacityExceeded);
-    CHECK(TryVerifyPassword(
-              StringView(
-                  "$argon2id$v=19$m=4096,t=33,p=1$bA81arsiXysd3WbTRzmEOw$Nm8QBM+7RH1DXo9rvp5cwKEOO"
-                  "OfD2g6JuxlXihoNcpE"),
-              Span<const uint8>())
-              .Error() == ErrorCode::CapacityExceeded);
-    // 숫자가 매우 큰 값도 넘치지 않고 거부한다.
+    // 상한을 넘는 비용(메모리 2 GiB, 반복 33회, 반복 × 메모리 5 GiB·pass, 10 자리 4 TiB)은 계산하지
+    // 않고 CapacityExceeded다.
+    const char* overCap[] = {
+        "$argon2id$v=19$m=2097152,t=2,p=1$bA81arsiXysd3WbTRzmEOw$Nm8QBM+"
+        "7RH1DXo9rvp5cwKEOOOfD2g6JuxlXihoNcpE",
+        "$argon2id$v=19$m=4096,t=33,p=1$bA81arsiXysd3WbTRzmEOw$Nm8QBM+"
+        "7RH1DXo9rvp5cwKEOOOfD2g6JuxlXihoNcpE",
+        "$argon2id$v=19$m=1048576,t=5,p=1$bA81arsiXysd3WbTRzmEOw$Nm8QBM+"
+        "7RH1DXo9rvp5cwKEOOOfD2g6JuxlXihoNcpE",
+        "$argon2id$v=19$m=4294967296,t=1,p=1$bA81arsiXysd3WbTRzmEOw$Nm8QBM+"
+        "7RH1DXo9rvp5cwKEOOOfD2g6JuxlXihoNcpE",
+    };
+    for (const char* text : overCap) {
+        CHECK(TryVerifyPassword(StringView(text), Span<const uint8>()).Error() ==
+              ErrorCode::CapacityExceeded);
+    }
+
+    // 11 자리 숫자, 선행 0, 문자열 안의 NUL, "$"로 시작하지 않는 문자열은 형식 오류다.
     CHECK(TryVerifyPassword(StringView("$argon2id$v=19$m=99999999999,t=2,p=1$bA81$Nm8Q"),
                             Span<const uint8>())
               .Error() == ErrorCode::AuthenticationFailed);
-
-    // Argon2id가 아닌 문자열은 Unsupported, 형식이 틀리면 AuthenticationFailed다.
+    CHECK(TryVerifyPassword(
+              StringView("$argon2id$v=19$m=04882,t=2,p=1$bA81arsiXysd3WbTRzmEOw$Nm8QBM+7RH1DXo9rvp5"
+                         "cwKEOOOfD2g6JuxlXihoNcpE"),
+              Span<const uint8>())
+              .Error() == ErrorCode::AuthenticationFailed);
+    const char withNul[] =
+        "$argon2id$v=19$m=4882,t=2,p=1$bA81arsiXy\0d3WbTRzmEOw$Nm8QBM+7RH1DXo9rvp5cwKEOOOfD2g6J";
     CHECK(
-        TryVerifyPassword(StringView("$argon2i$v=19$m=4096,t=3,p=1$c29tZXNhbHQ$aGFzaA"), Text("x"))
-            .Error() == ErrorCode::Unsupported);
-    CHECK(
-        TryVerifyPassword(StringView("$argon2id$v=16$m=4096,t=3,p=1$c29tZXNhbHQ$aGFzaA"), Text("x"))
-            .Error() == ErrorCode::Unsupported);
-    CHECK(TryVerifyPassword(StringView("$scrypt$ln=14"), Text("x")).Error() ==
-          ErrorCode::AuthenticationFailed);
+        TryVerifyPassword(StringView(withNul, sizeof(withNul) - 1), Span<const uint8>()).Error() ==
+        ErrorCode::AuthenticationFailed);
+    CHECK(TryVerifyPassword(StringView("argon2id$v=19$m=4096,t=3,p=1$c29tZQ$aGFzaA"), Text("x"))
+              .Error() == ErrorCode::AuthenticationFailed);
     CHECK(TryVerifyPassword(StringView("$argon2id$v=19$m=4096,t=,p=1$c29tZQ$aGFzaA"), Text("x"))
               .Error() == ErrorCode::AuthenticationFailed);
     CHECK(TryVerifyPassword(StringView(""), Text("x")).Error() == ErrorCode::AuthenticationFailed);
-    char longText[200];
+
+    // "$<id>$" 꼴의 다른 형식은 Unsupported다: argon2i, v=16, v 없는 Argon2 1.0, scrypt.
+    const char* unsupported[] = {
+        "$argon2i$v=19$m=4096,t=3,p=1$c29tZXNhbHQ$aGFzaA",
+        "$argon2id$v=16$m=4096,t=3,p=1$c29tZXNhbHQ$aGFzaA",
+        "$argon2id$m=4096,t=3,p=1$c29tZXNhbHQ$aGFzaA",
+        "$scrypt$ln=14",
+    };
+    for (const char* text : unsupported) {
+        CHECK(TryVerifyPassword(StringView(text), Text("x")).Error() == ErrorCode::Unsupported);
+    }
+
+    // 길이 경계: 127자는 libsodium까지 가서 형식 오류, 128자는 libsodium 형식보다 길어
+    // Unsupported다.
+    char longText[128];
     memset(longText, 'a', sizeof(longText));
     memcpy(longText, "$argon2id$v=19$m=4096,t=3,p=1$", 30);
-    CHECK(TryVerifyPassword(StringView(longText, sizeof(longText)), Text("x")).Error() ==
+    CHECK(TryVerifyPassword(StringView(longText, 127), Text("x")).Error() ==
           ErrorCode::AuthenticationFailed);
+    CHECK(TryVerifyPassword(StringView(longText, 128), Text("x")).Error() ==
+          ErrorCode::Unsupported);
     CHECK(TryPasswordNeedsRehash(StringView("$argon2i$v=19$m=4096,t=3,p=1$c29tZXNhbHQ$aGFzaA"),
                                  FastCost)
               .Error() == ErrorCode::Unsupported);
@@ -191,6 +215,15 @@ TEST(CryptoPasswordArgumentContract) {
     CHECK(TryDerivePasswordSecret(Text("pw"), Span<const uint8>(salt),
                                   PasswordCost{1, (usize{1} << 30) + 1024}, 32)
               .Error() == ErrorCode::CapacityExceeded);
+    CHECK(TryDerivePasswordSecret(Text("pw"), Span<const uint8>(salt),
+                                  PasswordCost{5, usize{1} << 30}, 32)
+              .Error() == ErrorCode::CapacityExceeded);
+    CHECK(TryPasswordNeedsRehash(StringView("$argon2id$v=19$m=64,t=1,p=1$c29tZQ$aGFzaA"),
+                                 PasswordCost{0, 65536})
+              .Error() == ErrorCode::InvalidArgument);
+
+    // 빈 비밀번호도 파생한다(null이 아닌 주소로 넘긴다).
+    CHECK(TryDerivePasswordSecret(Span<const uint8>(), Span<const uint8>(salt), FastCost, 32));
 
     // salt 16 byte, 출력 16–4096 byte.
     CHECK(TryDerivePasswordSecret(Text("pw"), Span<const uint8>(salt).Left(15), FastCost, 32)

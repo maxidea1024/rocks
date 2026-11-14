@@ -18,13 +18,17 @@
 //
 // 비용(PasswordCost)은 반복 횟수와 메모리다. 프리셋은 libsodium과 같다(INTERACTIVE 2회·64 MiB,
 // MODERATE 3회·256 MiB, SENSITIVE 4회·1 GiB). 저장된 문자열·파일처럼 신뢰할 수 없는 곳에서 온
-// 비용은 상한(반복 32회, 메모리 1 GiB)으로 먼저 검사해 자원 고갈을 막는다(넘으면 CapacityExceeded,
-// 계산하지 않는다).
+// 비용은 상한(반복 32회, 메모리 1 GiB, 반복 × 메모리 4 GiB = SENSITIVE)으로 먼저 검사해 자원 고갈을
+// 막는다(넘으면 CapacityExceeded, 계산하지 않는다).
+//
+// 비밀번호는 byte 그대로 쓴다. 플랫폼마다 입력 정규화가 다를 수 있으므로(macOS 파일 이름은 NFD)
+// UTF-8로 바꾸고 NFC로 정규화한 byte를 넘기기를 권한다(RFC 8265 OpaqueString).
 //
 // Argon2id는 일부러 느리고 메모리를 많이 쓴다(INTERACTIVE 기준 수십–수백 ms, 64 MiB). 작업 메모리는
-// libsodium이 직접 할당한다(Rocks 할당기 밖, 5.1절 예외). 게임 스레드에서 부르지 않는다. 여러
-// 스레드에서 동시에 불러도 된다. Argon2id는 첫 pass 뒤 데이터에 따라 메모리를 읽는 설계라 완전한
-// 상수 시간이 아니다(2절).
+// libsodium이 직접 할당하고 해제 때 지우지 않는다(Rocks 할당기 밖, 5.1절 예외). 게임 스레드에서
+// 부르지 않는다. 여러 스레드에서 동시에 불러도 된다. Argon2id는 첫 pass의 세 번째 slice부터
+// 데이터에 따라 메모리를 읽는 설계라 완전한 상수 시간이 아니다(2절). salt와 Argon2 내부 초기화는 OS
+// 난수를 쓰며, OS 난수가 실패하면 libsodium 난수 경로 규칙대로 Fatal이다(11절).
 //
 // 사용 예:
 //   using namespace rocks::crypto;
@@ -54,6 +58,8 @@ inline constexpr PasswordCost PasswordCostSensitive{4, usize{1} << 30};
 inline constexpr uint32 MaxPasswordOperations = 32;
 inline constexpr usize MinPasswordMemoryBytes = 8 * 1024;
 inline constexpr usize MaxPasswordMemoryBytes = usize{1} << 30;
+// 반복 × 메모리(byte·pass) 상한이다. SENSITIVE 프리셋과 같다.
+inline constexpr uint64 MaxPasswordWorkBytes = uint64{4} << 30;
 
 inline constexpr usize MinPasswordSecretBytes = 16;
 inline constexpr usize MaxPasswordSecretBytes = 4096;
@@ -78,15 +84,17 @@ inline constexpr usize MaxPasswordSecretBytes = 4096;
 
 // 저장된 문자열로 비밀번호를 확인한다. 맞으면 성공이다.
 // - 비밀번호가 다르거나 문자열 형식이 틀리면 AuthenticationFailed다(저장소에서 온 byte다).
-//   libsodium이 구분하지 않으므로 Argon2 작업 메모리를 얻지 못한 경우도 AuthenticationFailed로
-//   돌아온다.
-// - Argon2id가 아닌 문자열(예: "$argon2i$")은 Unsupported다.
+// - "$<id>$"로 시작하지만 Argon2id v19가 아닌 문자열(argon2i, v=16, scrypt, bcrypt 등)과
+//   libsodium 형식(salt 16·hash 32 byte, 127자 이하)보다 긴 문자열은 Unsupported다.
 // - 문자열의 비용이 상한을 넘으면 계산하지 않고 CapacityExceeded다.
+// - Argon2 작업 메모리를 얻지 못하면 OutOfMemory다(비밀번호 불일치와 구분한다).
 [[nodiscard]] Result<void> TryVerifyPassword(StringView encoded,
                                              Span<const uint8> password) noexcept;
 
-// 저장된 문자열의 비용이 cost와 다르면 true다(다음 로그인 때 다시 해시해 저장할 때가 되었다).
-// 문자열 형식이 틀리면 AuthenticationFailed, Argon2id가 아니면 Unsupported다.
+// 저장된 문자열의 반복·메모리가 cost와 다르면 true다(다음 로그인 때 다시 해시해 저장할 때가
+// 되었다). lane 수와 salt·hash 길이는 비교하지 않는다(libsodium 규칙). cost가 범위 밖이면
+// InvalidArgument, 상한을 넘으면 CapacityExceeded, 문자열 형식이 틀리면 AuthenticationFailed,
+// Argon2id v19가 아니면 Unsupported다.
 [[nodiscard]] Result<bool> TryPasswordNeedsRehash(StringView encoded, PasswordCost cost) noexcept;
 
 } // namespace rocks::crypto

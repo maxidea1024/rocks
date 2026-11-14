@@ -10,6 +10,8 @@
 
 #include <sodium.h>
 
+#include <errno.h>
+
 namespace rocks::crypto {
 namespace {
 
@@ -19,9 +21,23 @@ static_assert(MinPasswordMemoryBytes >= crypto_pwhash_argon2id_MEMLIMIT_MIN);
 static_assert(MaxPasswordOperations <= crypto_pwhash_argon2id_OPSLIMIT_MAX);
 static_assert(MinPasswordSecretBytes >= crypto_pwhash_argon2id_BYTES_MIN);
 static_assert(crypto_pwhash_argon2id_OPSLIMIT_MIN == 1);
+static_assert(PasswordCostInteractive.operations == crypto_pwhash_argon2id_OPSLIMIT_INTERACTIVE &&
+              PasswordCostInteractive.memoryBytes == crypto_pwhash_argon2id_MEMLIMIT_INTERACTIVE);
+static_assert(PasswordCostModerate.operations == crypto_pwhash_argon2id_OPSLIMIT_MODERATE &&
+              PasswordCostModerate.memoryBytes == crypto_pwhash_argon2id_MEMLIMIT_MODERATE);
+static_assert(PasswordCostSensitive.operations == crypto_pwhash_argon2id_OPSLIMIT_SENSITIVE &&
+              PasswordCostSensitive.memoryBytes == crypto_pwhash_argon2id_MEMLIMIT_SENSITIVE);
+static_assert(MaxPasswordWorkBytes ==
+              uint64{PasswordCostSensitive.operations} * PasswordCostSensitive.memoryBytes);
 
-constexpr StringView Argon2Prefix("$argon2");
 constexpr StringView Argon2idPrefix("$argon2id$v=19$m=");
+
+// 반복·메모리를 따로 막아도 둘을 함께 키우면 SENSITIVE의 8배가 된다. 곱(작업량)도 SENSITIVE로
+// 막는다.
+bool IsOverCap(PasswordCost cost) noexcept {
+    return cost.operations > MaxPasswordOperations || cost.memoryBytes > MaxPasswordMemoryBytes ||
+           uint64{cost.operations} * cost.memoryBytes > MaxPasswordWorkBytes;
+}
 
 // 신뢰할 수 없는 곳에서 온 비용인지와 관계없이 같은 규칙으로 검사한다. 범위 밖(0회·8 KiB 미만)은
 // InvalidArgument, 상한 초과는 CapacityExceeded다.
@@ -30,7 +46,7 @@ Result<void> CheckCost(PasswordCost cost) noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    if (cost.operations > MaxPasswordOperations || cost.memoryBytes > MaxPasswordMemoryBytes) {
+    if (IsOverCap(cost)) {
         return Result<void>::Failure(ErrorCode::CapacityExceeded);
     }
 
@@ -81,7 +97,10 @@ bool StartsWith(StringView text, StringView prefix) noexcept {
 // Unsupported다.
 Result<PasswordCost> ParseEncoded(StringView encoded,
                                   char (&copy)[PasswordHashStringBytes]) noexcept {
-    if (!StartsWith(encoded, Argon2Prefix)) {
+    // "$<id>$" 꼴의 다른 형식(argon2i, v=16, scrypt, bcrypt 등)은 Unsupported다(옮겨 갈 때 구분할
+    // 수 있게).
+    // "$"로 시작하지도 않으면 형식 오류다.
+    if (encoded.IsEmpty() || encoded.Data()[0] != '$') {
         return Result<PasswordCost>::Failure(ErrorCode::AuthenticationFailed);
     }
 
@@ -89,8 +108,10 @@ Result<PasswordCost> ParseEncoded(StringView encoded,
         return Result<PasswordCost>::Failure(ErrorCode::Unsupported);
     }
 
+    // libsodium 형식(salt 16·hash 32 byte)은 127자를 넘지 않는다. 더 긴 salt·hash로 만든 다른
+    // 라이브러리의 문자열은 받지 않는다.
     if (encoded.ByteCount() >= PasswordHashStringBytes) {
-        return Result<PasswordCost>::Failure(ErrorCode::AuthenticationFailed);
+        return Result<PasswordCost>::Failure(ErrorCode::Unsupported);
     }
 
     usize offset = Argon2idPrefix.ByteCount();
@@ -196,18 +217,27 @@ Result<void> TryVerifyPassword(StringView encoded, Span<const uint8> password) n
         return Result<void>::Failure(cost.Error());
     }
 
-    // 상한을 넘는 비용은 계산하지 않는다(저장소를 조작한 자원 고갈 방지). 범위 밖 하한은
-    // libsodium이 거부한다.
-    if (cost.Value().operations > MaxPasswordOperations ||
-        cost.Value().memoryBytes > MaxPasswordMemoryBytes) {
+    // 상한을 넘는 비용은 계산하지 않는다(저장소를 조작한 자원 고갈 방지). 범위 밖 하한(0회·8 KiB
+    // 미만)은 libsodium이 거부해 AuthenticationFailed가 된다.
+    if (IsOverCap(cost.Value())) {
+        SecureZero(AsWritableBytes(Span<char>(copy)));
         return Result<void>::Failure(ErrorCode::CapacityExceeded);
     }
 
     detail::EnsureSodium();
-    // libsodium은 불일치·형식 오류·작업 메모리 부족을 구분하지 않고 -1을 돌려준다.
+    // libsodium은 실패를 모두 -1로 돌려준다. 불일치는 errno = EINVAL을 두고, 작업 메모리 할당
+    // 실패는 posix_memalign·malloc의 ENOMEM이 남는다(argon2-core.c). 메모리 부족을 "비밀번호
+    // 틀림"으로 돌려주지 않게 구분한다.
+    errno = 0;
     const int status = crypto_pwhash_str_verify(copy, PasswordPointer(password), password.Size());
-    return status == 0 ? Result<void>::Success()
-                       : Result<void>::Failure(ErrorCode::AuthenticationFailed);
+    const int error = errno;
+    SecureZero(AsWritableBytes(Span<char>(copy)));
+    if (status == 0) {
+        return Result<void>::Success();
+    }
+
+    return Result<void>::Failure(error == ENOMEM ? ErrorCode::OutOfMemory
+                                                 : ErrorCode::AuthenticationFailed);
 }
 
 Result<bool> TryPasswordNeedsRehash(StringView encoded, PasswordCost cost) noexcept {
@@ -223,6 +253,7 @@ Result<bool> TryPasswordNeedsRehash(StringView encoded, PasswordCost cost) noexc
 
     detail::EnsureSodium();
     const int status = crypto_pwhash_str_needs_rehash(copy, cost.operations, cost.memoryBytes);
+    SecureZero(AsWritableBytes(Span<char>(copy)));
     if (status < 0) {
         return Result<bool>::Failure(ErrorCode::AuthenticationFailed);
     }
