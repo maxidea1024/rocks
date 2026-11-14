@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Rocks.Tooling.Common;
 
 namespace Rocks.Tooling.Checks;
 
@@ -144,8 +145,9 @@ public static class ScaffoldService
             throw new InvalidDataException("Unsupported template schema");
         }
 
+        // 끝 구분자가 있는 대상(루트 포함)은 부모가 자기 자신이 되어 staging이 대상 안에 생기므로 거부한다.
         if (string.IsNullOrWhiteSpace(plan.Target) || !Path.IsPathFullyQualified(plan.Target) ||
-            !PathsEqual(Path.GetFullPath(plan.Target), plan.Target))
+            !PathsEqual(Path.GetFullPath(plan.Target), plan.Target) || Path.EndsInDirectorySeparator(plan.Target))
         {
             throw new InvalidDataException("Target must be an absolute normalized path");
         }
@@ -214,8 +216,7 @@ public static class ScaffoldService
     private static string ContainedPath(string directory, string relative)
     {
         string path = Path.GetFullPath(Path.Combine(directory, relative));
-        string prefix = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory)) + Path.DirectorySeparatorChar;
-        if (!path.StartsWith(prefix, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+        if (!DirectoryPath.IsStrictlyUnder(path, directory))
         {
             throw new InvalidDataException("Unsafe template path");
         }

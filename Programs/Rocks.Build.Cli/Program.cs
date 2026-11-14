@@ -103,8 +103,14 @@ namespace Rocks.Build.Cli
             int androidApi = int.TryParse(options.GetValueOrDefault("android-api", "26"), out var api) ? api
                 : throw new ArgumentException("android-api must be an integer.");
             string platformName = android ? "android-" + androidAbi : OperatingSystem.IsWindows() ? "windows" : "macos";
-            var output = Path.GetFullPath(options.GetValueOrDefault("output",
-                Path.Combine(root, "out", $"dotnet-{platformName}-{targetName.ToLowerInvariant()}-{configuration.ToString().ToLowerInvariant()}")));
+            // 끝 구분자를 뗀다(out\custom\이면 아래 증거 preset이 빈 조각을 가져 거부됐다).
+            var output = Path.TrimEndingDirectorySeparator(Path.GetFullPath(options.GetValueOrDefault("output",
+                Path.Combine(root, "out", $"dotnet-{platformName}-{targetName.ToLowerInvariant()}-{configuration.ToString().ToLowerInvariant()}"))));
+            // build·test·sdk의 증거는 <root>/out/<preset>에 쓰므로 출력은 그 아래여야 한다. 출력·잠금을 만들기 전에 알린다.
+            if (!DirectoryPath.IsStrictlyUnder(output, Path.Combine(root, "out")))
+            {
+                throw new ArgumentException($"--output must be under {Path.Combine(root, "out")} (build evidence location): {output}");
+            }
             var toolchain = android
                 ? await NativeToolchains.DiscoverAndroidAsync(androidAbi, androidApi, options.GetValueOrDefault("android-ndk"), cancellationToken)
                 : await NativeToolchains.DiscoverAsync(options.GetValueOrDefault("compiler"), cancellationToken);

@@ -10,6 +10,13 @@ if (args.Contains("--fake-child"))
     return 0;
 }
 
+// response file 시험: Windows가 이 프로세스에 넘긴 명령줄(GetCommandLineW)의 길이를 출력한다.
+if (args.Length != 0 && args[0] == "--print-command-line")
+{
+    Console.WriteLine(CommandLineProbe.Length().ToString(System.Globalization.CultureInfo.InvariantCulture));
+    return 0;
+}
+
 if (args.Contains("--fake-compiler"))
 {
     string marker = args[Array.IndexOf(args, "--fake-compiler") + 1];
@@ -255,6 +262,10 @@ try
 
     // 빌드 주입 상수(B7): 툴체인 지문·도구 빌드 ID·환경 위생·FP 인자 거부·입력 열거 정리. 하위 묶음마다 PASS를 센다.
     await BuildInfoTests.RunAsync(request, root, Pass);
+
+    // 긴 명령줄의 response file과 드라이브 루트 경로 포함 판정. 하위 묶음마다 PASS를 센다.
+    await ResponseFileTests.RunAsync(request, root, Pass);
+    await DirectoryPathTests.RunAsync(request, root, Pass);
 
     string marker = Path.Combine(root, "child.pid");
     string dotnet = NativeEnvironment.FindExecutable("dotnet", toolchain.Environment);

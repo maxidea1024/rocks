@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Rocks.Build.Rules;
+using Rocks.Tooling.Common;
 
 namespace Rocks.Build.Cli;
 
@@ -44,7 +45,7 @@ public static class GameInputSnapshot
                 return;
             }
             // 빈 디렉터리와 파일 목록의 변화도 규칙 평가 결과를 바꿀 수 있다.
-            inputs.Add(path + Path.DirectorySeparatorChar);
+            inputs.Add(DirectoryPath.WithTrailingSeparator(path));
             foreach (var child in Directory.EnumerateFileSystemEntries(path))
             {
                 if (Directory.Exists(child) && Path.GetFileName(child) == ".git")
@@ -83,9 +84,5 @@ public static class GameInputSnapshot
             .Concat(plan.Generated.SelectMany(module => module.Headers.Select(header => header.Path).Append(module.Manifest)))
             .Select(context.PathInRoot).Distinct().ToArray();
 
-    private static bool Inside(string root, string path)
-    {
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        return string.Equals(root, path, comparison) || path.StartsWith(Path.TrimEndingDirectorySeparator(root) + Path.DirectorySeparatorChar, comparison);
-    }
+    private static bool Inside(string root, string path) => DirectoryPath.IsAtOrUnder(path, root);
 }

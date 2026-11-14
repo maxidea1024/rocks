@@ -1,3 +1,5 @@
+using Rocks.Tooling.Common;
+
 namespace Rocks.MetaCompiler;
 
 // 모듈 하나의 리플렉션 헤더를 한 번에 생성한다(Docs/Design/ReflectionFoundations.ko.md 1.3절).
@@ -167,7 +169,15 @@ internal sealed class CompilerOptions
             }
         }
 
-        string outputRoot = Path.GetFullPath(single["--output-root"]);
+        // 끝 구분자를 뗀다. 검증 디렉터리는 출력 루트의 부모 아래에 만들므로(CompilerDriver) 끝 구분자가 있으면 출력 루트 안에
+        // 생기고, 파일시스템 루트면 부모가 없다.
+        string outputRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(single["--output-root"]));
+        if (Path.GetDirectoryName(outputRoot) is null)
+        {
+            throw new MetadataException("output root must not be a filesystem root: " + outputRoot, "RMC1000",
+                "Use a dedicated directory such as <out>/Generated/<Module>; validation staging is created next to it.");
+        }
+
         string descriptor = Path.GetFullPath(single["--descriptor"]);
         if (!descriptor.EndsWith(".rocksmeta.json", StringComparison.Ordinal))
         {
@@ -175,11 +185,10 @@ internal sealed class CompilerOptions
         }
 
         // symlink 별칭으로 출력 루트가 입력을 담는 경우도 막도록 정규 경로로 비교한다.
-        string canonicalRoot = CanonicalPath.Resolve(outputRoot) + Path.DirectorySeparatorChar;
-        StringComparison comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        string canonicalRoot = CanonicalPath.Resolve(outputRoot);
         foreach (ModuleInput input in pairs)
         {
-            if (CanonicalPath.Equals(input.Path, descriptor) || CanonicalPath.Resolve(input.Path).StartsWith(canonicalRoot, comparison))
+            if (CanonicalPath.Equals(input.Path, descriptor) || DirectoryPath.IsStrictlyUnder(CanonicalPath.Resolve(input.Path), canonicalRoot))
             {
                 throw new MetadataException("input header must be outside the output root and descriptor", "RMC1000",
                     "Never overwrite an author header with generated output.");
@@ -191,7 +200,7 @@ internal sealed class CompilerOptions
         // 출력 루트의 파일은 모두 생성 헤더다(--check가 잉여 파일로 본다). descriptor·inventory는 그 밖에 둔다.
         foreach ((string what, string? path) in new[] { ("descriptor", (string?)descriptor), ("identity inventory", inventory) })
         {
-            if (path is not null && (CanonicalPath.Resolve(Path.GetFullPath(path)) + Path.DirectorySeparatorChar).StartsWith(canonicalRoot, comparison))
+            if (path is not null && DirectoryPath.IsAtOrUnder(CanonicalPath.Resolve(Path.GetFullPath(path)), canonicalRoot))
             {
                 throw new MetadataException($"{what} must be outside the output root: {path}", "RMC1000",
                     "Keep only generated headers under --output-root; place the descriptor and inventory next to it.");

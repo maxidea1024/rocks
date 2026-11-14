@@ -54,6 +54,8 @@ public sealed class Physics : EngineModuleRules
 
 `Compiler`, `Jobs`, `NativeOutput` 속성으로 컴파일러 경로, 병렬 작업 수, 출력 위치를 지정할 수 있다. `RocksTarget=Core`는 오브젝트 모듈을 제외한 기반 테스트를 선택한다. 출력과 증거는 기본적으로 `out/` 아래에 기록한다.
 
+작업 사본은 깊은 경로나 드라이브 루트(`subst X: <경로>` 뒤 `X:\`)에 두어도 된다. 명령줄이 Windows 한계(32,767자)를 넘는 compile·archive·link는 빌드 도구가 response file(`@파일`)로 넘기며, 증분 key·`compile_commands.json`·도구 빌드 ID는 펼친 인자를 그대로 쓴다. `-p:GameDirectory=X:\`처럼 끝이 역슬래시인 디렉터리 속성도 그대로 쓸 수 있다. `NativeOutput`은 증거 위치 때문에 작업 사본의 `out/` 아래여야 한다. 자세한 규칙은 [Rocks.Build](../Programs/Rocks.Build/README.ko.md#긴-명령줄response-file)를 따른다.
+
 ### 빌드 환경과 빌드 주입 상수
 
 - 빌드는 프로세스 환경을 물려받지 않고 허용 목록(VS·Windows SDK·Xcode 선택·SOURCE_DATE_EPOCH 같은 Keyed 변수와 PATH·TEMP 같은 Runtime 변수)만 컴파일러에 넘긴다. Keyed 변수만 증분 key에 들어가므로 `dotnet msbuild`가 실행마다 바꾸는 세션 변수가 재빌드를 일으키지 않는다. 컴파일러·링커 동작을 바꾸는 변수(`CL`·`_CL_`·`LINK`·`_LINK_`·`CCC_OVERRIDE_OPTIONS`·`COMPILER_PATH`·`CPATH`·`C_INCLUDE_PATH`·`CPLUS_INCLUDE_PATH`·`OBJC_INCLUDE_PATH`·`LIBRARY_PATH`)가 있었으면 `Build environment: removed …` 한 줄로 알린다. 기본 config 파일은 받는 컴파일러면 `--no-default-config`로 끈다(받지 않는 컴파일러가 config 파일을 읽으면 오류).

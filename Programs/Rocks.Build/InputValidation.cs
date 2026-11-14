@@ -87,6 +87,16 @@ internal static class InputValidation
             throw new ArgumentException("Toolchain.Identity must not be empty.");
         }
 
+        // 빈 인자는 GNU 규칙 response file로 옮길 수 없다(LLVM이 빈 토큰을 버린다). 모듈 인자처럼 빌드 전에 거부한다.
+        foreach ((string name, IReadOnlyList<string> arguments) in new[] { ("CompileArguments", request.Toolchain.CompileArguments),
+                     ("LinkArguments", request.Toolchain.LinkArguments) })
+        {
+            if (arguments.Any(argument => string.IsNullOrEmpty(argument) || argument.Contains('\0')))
+            {
+                throw new ArgumentException($"Toolchain.{name}: arguments must be non-empty and must not contain NUL characters.");
+            }
+        }
+
         foreach (var module in request.Modules)
         {
             if (!Enum.IsDefined(module.Kind))

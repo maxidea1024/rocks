@@ -6,14 +6,26 @@
     <SdkTarget Condition="'$(SdkTarget)' == ''">Engine</SdkTarget>
     <GameTarget Condition="'$(GameTarget)' == ''">Game</GameTarget>
     <Jobs Condition="'$(Jobs)' == ''">8</Jobs>
+    <!-- 따옴표로 감싸 넘기는 디렉터리 값은 끝 역슬래시를 두 개로 맞춘다. 드라이브 루트(Z:\)를 "Z:\"로 넘기면 \"가 따옴표 escape로
+         읽혀(CommandLineToArgvW 규칙) 뒤 인자가 모두 한 인자로 붙는다. "Z:\\"는 Z:\ 하나로 읽힌다. -->
+    <NativeOutputText>$(NativeOutput)</NativeOutputText>
+    <NativeOutputText Condition="$(NativeOutput.EndsWith('\'))">$(NativeOutput.TrimEnd('\'))\\</NativeOutputText>
+    <AndroidNdkText>$(AndroidNdk)</AndroidNdkText>
+    <AndroidNdkText Condition="$(AndroidNdk.EndsWith('\'))">$(AndroidNdk.TrimEnd('\'))\\</AndroidNdkText>
+    <SdkDestinationText>$(SdkDestination)</SdkDestinationText>
+    <SdkDestinationText Condition="$(SdkDestination.EndsWith('\'))">$(SdkDestination.TrimEnd('\'))\\</SdkDestinationText>
+    <SdkDirectoryText>$(SdkDirectory)</SdkDirectoryText>
+    <SdkDirectoryText Condition="$(SdkDirectory.EndsWith('\'))">$(SdkDirectory.TrimEnd('\'))\\</SdkDirectoryText>
+    <GameDirectoryText>$(GameDirectory)</GameDirectoryText>
+    <GameDirectoryText Condition="$(GameDirectory.EndsWith('\'))">$(GameDirectory.TrimEnd('\'))\\</GameDirectoryText>
     <CompilerArgument Condition="'$(Compiler)' != ''">--compiler &quot;$(Compiler)&quot;</CompilerArgument>
-    <OutputArgument Condition="'$(NativeOutput)' != ''">--output &quot;$(NativeOutput)&quot;</OutputArgument>
+    <OutputArgument Condition="'$(NativeOutput)' != ''">--output &quot;$(NativeOutputText)&quot;</OutputArgument>
     <Tool>dotnet &quot;$(RocksRoot)out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks.Build.Cli.dll&quot;</Tool>
     <!-- Android 교차 빌드: -p:RocksPlatform=android [-p:AndroidAbi=arm64|x86_64] [-p:AndroidApi=26] [-p:AndroidNdk=경로] [-p:Adb=경로] -->
     <PlatformArgument Condition="'$(RocksPlatform)' != ''">--platform $(RocksPlatform)</PlatformArgument>
     <PlatformArgument Condition="'$(AndroidAbi)' != ''">$(PlatformArgument) --android-abi $(AndroidAbi)</PlatformArgument>
     <PlatformArgument Condition="'$(AndroidApi)' != ''">$(PlatformArgument) --android-api $(AndroidApi)</PlatformArgument>
-    <PlatformArgument Condition="'$(AndroidNdk)' != ''">$(PlatformArgument) --android-ndk &quot;$(AndroidNdk)&quot;</PlatformArgument>
+    <PlatformArgument Condition="'$(AndroidNdk)' != ''">$(PlatformArgument) --android-ndk &quot;$(AndroidNdkText)&quot;</PlatformArgument>
     <PlatformArgument Condition="'$(Adb)' != ''">$(PlatformArgument) --adb &quot;$(Adb)&quot;</PlatformArgument>
     <CommonArguments>--root &quot;$(RocksRoot).&quot; --configuration $(Configuration) --jobs $(Jobs) $(CompilerArgument) $(OutputArgument) $(PlatformArgument)</CommonArguments>
   </PropertyGroup>
@@ -29,10 +41,10 @@
   </Target>
   <Target Name="InstalledSdk" DependsOnTargets="BootstrapTools">
     <Error Condition="'$(SdkDestination)' == ''" Text="SdkDestination is required; use a new versioned directory." />
-    <Exec Command="$(Tool) sdk $(CommonArguments) --target $(SdkTarget) --destination &quot;$(SdkDestination)&quot;" />
+    <Exec Command="$(Tool) sdk $(CommonArguments) --target $(SdkTarget) --destination &quot;$(SdkDestinationText)&quot;" />
   </Target>
   <Target Name="Game" DependsOnTargets="BootstrapTools">
     <Error Condition="'$(SdkDirectory)' == '' Or '$(GameDirectory)' == ''" Text="SdkDirectory and GameDirectory are required." />
-    <Exec Command="$(Tool) game --target $(GameTarget) --sdk &quot;$(SdkDirectory)&quot; --project &quot;$(GameDirectory)&quot; --configuration $(Configuration) --jobs $(Jobs) $(CompilerArgument) $(OutputArgument)" />
+    <Exec Command="$(Tool) game --target $(GameTarget) --sdk &quot;$(SdkDirectoryText)&quot; --project &quot;$(GameDirectoryText)&quot; --configuration $(Configuration) --jobs $(Jobs) $(CompilerArgument) $(OutputArgument)" />
   </Target>
 </Project>

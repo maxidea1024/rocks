@@ -53,7 +53,14 @@ public static class InstalledSdk
         NativeToolchain toolchain, IReadOnlyList<NativeModuleInput> modules, IReadOnlyList<MetadataModule> metadata,
         NativeBuildResult build, CancellationToken cancellationToken)
     {
-        destination = Path.GetFullPath(destination);
+        // 끝 구분자를 떼야 stage가 destination 옆(같은 부모 아래)에 생긴다(C:\sdk\v1\이면 stage가 destination 안에 생겨 Move가
+        // 실패했다). TrimEndingDirectorySeparator는 루트를 그대로 두므로 루트는 따로 거부한다.
+        destination = Path.TrimEndingDirectorySeparator(Path.GetFullPath(destination));
+        if (Path.GetDirectoryName(destination) is null)
+        {
+            throw new IOException("SDK destination must not be a filesystem root. Use a new versioned directory.");
+        }
+
         if (Directory.Exists(destination) || File.Exists(destination))
         {
             throw new IOException("SDK destination already exists. Use a new versioned directory.");
@@ -460,10 +467,7 @@ public static class InstalledSdk
         return full;
     }
 
-    private static bool Inside(string root, string candidate) => Path.GetFullPath(candidate)
-        .StartsWith(Path.TrimEndingDirectorySeparator(Path.GetFullPath(root)) + Path.DirectorySeparatorChar,
-            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal) ||
-        string.Equals(Path.GetFullPath(candidate), Path.GetFullPath(root), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+    private static bool Inside(string root, string candidate) => DirectoryPath.IsAtOrUnder(candidate, root);
 
     private static void CopyTree(string source, string destination)
     {

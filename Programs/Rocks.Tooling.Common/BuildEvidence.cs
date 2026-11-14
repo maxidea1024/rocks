@@ -283,8 +283,7 @@ public sealed class BuildEvidence
 
         string output = Path.GetFullPath(OutputDirectory);
         runnerReport = Path.GetFullPath(reportPath ?? Path.Combine(output, "foundation-report.json"));
-        string prefix = Path.TrimEndingDirectorySeparator(output) + Path.DirectorySeparatorChar;
-        if (!runnerReport.StartsWith(prefix, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+        if (!DirectoryPath.IsStrictlyUnder(runnerReport, output))
         {
             throw new ArgumentException("Runner report must remain inside this evidence output directory", nameof(reportPath));
         }

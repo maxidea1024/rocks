@@ -195,6 +195,9 @@ public sealed record NativeBuildRequest
 
     // 설치 SDK 게임 빌드의 SDK 루트다(그 밖에는 null). 도구 빌드 ID의 경로 키 `sdk:`의 기준이다.
     public string? SdkDirectory { get; init; }
+
+    // response file 사용 방식이다(NativeCommandLine). 기본 Auto이며 시험만 Always·Never로 경로를 강제한다. key에 들어가지 않는다.
+    internal ResponseFileMode ResponseFiles { get; init; } = ResponseFileMode.Auto;
 }
 
 public sealed record NativeActionResult(string Id, string Module, string Kind, bool Executed,

@@ -202,12 +202,8 @@ internal static class Fingerprints
         Console.WriteLine($"Build inputs: skipped nested working copy {directory} (has .git) in the include directory inventory.");
     }
 
-    public static bool IsUnder(string path, string root)
-    {
-        string prefix = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root)) + Path.DirectorySeparatorChar;
-        return NativeToolchains.PathComparer.Equals(Path.GetFullPath(path), Path.TrimEndingDirectorySeparator(root)) ||
-            path.StartsWith(prefix, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
-    }
+    // path가 root 자신이거나 그 아래인지다. 드라이브 루트(W:\)도 root가 될 수 있다(DirectoryPath).
+    public static bool IsUnder(string path, string root) => DirectoryPath.IsAtOrUnder(path, root);
 
     // memo가 있으면 디렉터리 열거와 원본 byte digest를 그 메모에서 가져온다(BuildInfo Prepare가 읽은 값 — 첫 InputSnapshot).
     // skip이 참인 파일은 열거 결과에서 뺀다(<out>/BuildInfo — Prepare만 잠금 아래에서 쓰는 생성 파일).

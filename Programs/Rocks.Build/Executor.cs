@@ -22,6 +22,10 @@ internal static class Executor
         string temporaryRoot = Path.Combine(outputRoot, ".native-tmp", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(temporaryRoot);
         string[] stagedOutputs = action.Outputs.Select(path => Path.Combine(temporaryRoot, Path.GetFileName(path))).ToArray();
+        // 펼친 인자다. key는 위에서 자리 표시 인자로 이미 계산했으므로 아래 response file 경로는 key에 들어가지 않는다.
+        string[] arguments = action.ResolveArguments(stagedOutputs);
+        ResponseFileQuoting? quoting = NativeCommandLine.QuotingOf(request.Toolchain, action);
+        ResponseFileQuoting? syntax = NativeCommandLine.ResponseFileSyntax(request.ResponseFiles, quoting, action.Tool, arguments);
         NativeActionResult? result = null;
         Exception? pending = null;
         bool unsafeToDelete = false;
@@ -35,14 +39,30 @@ internal static class Executor
             }
             else
             {
+                IReadOnlyList<string> processArguments = arguments;
+                if (syntax is ResponseFileQuoting responseQuoting)
+                {
+                    // 이 invocation만의 임시 디렉터리에 두므로 병렬 action끼리 이름이 겹치지 않고, 아래 임시 디렉터리 정리가 성공·실패·
+                    // 취소 모두에서 함께 지운다(자식 정리가 끝나지 않으면 자식이 아직 읽을 수 있어 함께 보존한다).
+                    string path = Path.Combine(temporaryRoot, NativeCommandLine.ResponseFileName);
+                    if (stagedOutputs.Contains(path, NativeToolchains.PathComparer))
+                    {
+                        throw new InvalidOperationException($"Action {action.Id}: an output is named like the response file {path}.");
+                    }
+
+                    File.WriteAllBytes(path, ResponseFile.Encode(arguments, responseQuoting));
+                    processArguments = ["@" + path];
+                }
+
                 process = await (runProcess ?? ProcessRunner.RunAsync)(new ProcessSpec(action.Tool,
-                    action.ResolveArguments(stagedOutputs), request.RootDirectory, request.Toolchain.Environment), cancellationToken);
+                    processArguments, request.RootDirectory, request.Toolchain.Environment), cancellationToken);
             }
 
             cancellationToken.ThrowIfCancellationRequested();
             if (process.ExitCode != 0)
             {
-                result = Result(action, true, false, process.ExitCode, process.StdOut, process.StdErr);
+                result = Result(action, true, false, process.ExitCode, process.StdOut,
+                    process.StdErr + CommandDiagnostic(action, arguments, quoting, syntax is not null, false));
             }
             else if (stagedOutputs.Any(path => !File.Exists(path)))
             {
@@ -80,7 +100,8 @@ internal static class Executor
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or Win32Exception)
         {
             store.Forget(action.Id);
-            result = Result(action, true, false, -1, "", error.Message);
+            result = Result(action, true, false, -1, "",
+                error.Message + CommandDiagnostic(action, arguments, quoting, syntax is not null, error is Win32Exception));
         }
         catch (Exception error)
         {
@@ -169,6 +190,38 @@ internal static class Executor
 
             throw;
         }
+    }
+
+    // 실패 진단에 더하는 명령 정보다. response file을 쓴 action은 @파일 대신 펼친 명령을(출력은 compile_commands.json처럼 최종
+    // 경로로) 보인다. 그대로 넘긴 명령이 시작조차 못 했고 호스트 한계를 넘었으면 그 사실과 response file을 쓰지 않은 이유를 알린다
+    // (종료 코드 실패에는 붙이지 않는다 — POSIX 기준은 실제 한계가 아니라 전환 기준이다). 그 밖에는 도구의 출력만 둔다.
+    // executed는 실제로 실행한(staged 출력 경로의) 인자다.
+    private static string CommandDiagnostic(NativeAction action, IReadOnlyList<string> executed, ResponseFileQuoting? quoting,
+        bool responseFile, bool startFailed)
+    {
+        if (action.Kind == "Copy")
+        {
+            return "";
+        }
+
+        if (responseFile)
+        {
+            return $"\nCommand (arguments passed in {NativeCommandLine.ResponseFileName}; shown expanded with final output paths): " +
+                NativeCommandLine.Display(action.Tool, action.ResolveArguments(action.Outputs));
+        }
+
+        if (startFailed && NativeCommandLine.ExceedsHostLimit(action.Tool, executed))
+        {
+            string reason = quoting is null
+                ? $"{Path.GetFileName(action.Tool)} has no known response file syntax"
+                : "response files are disabled for this build";
+            string size = OperatingSystem.IsWindows()
+                ? $"{ResponseFile.WindowsCommandLineLength(action.Tool, executed)} characters"
+                : $"{ResponseFile.PosixArgumentBytes(action.Tool, executed)} argument bytes";
+            return $"\nThe command line is {size} ({NativeCommandLine.LimitText(action.Tool)}) and {reason}.";
+        }
+
+        return "";
     }
 
     private static NativeActionResult Result(NativeAction action, bool executed, bool succeeded,

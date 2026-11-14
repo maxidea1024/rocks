@@ -228,11 +228,13 @@ internal static class CompilerDriver
         string outputPublic = Path.Combine(options.OutputRoot, "Public");
         string outputPrivate = Path.Combine(options.OutputRoot, "Private");
         StringComparer pathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        // 끝 구분자가 붙은 --include-dir도 같은 디렉터리로 본다(탐침의 출력 루트 제외와 같은 비교).
         List<string> validationIncludes = includes.Select(directory =>
-            pathComparer.Equals(directory, outputPublic) ? Path.Combine(validationRoot, "Public")
-            : pathComparer.Equals(directory, outputPrivate) ? Path.Combine(validationRoot, "Private")
+            pathComparer.Equals(Path.TrimEndingDirectorySeparator(directory), outputPublic) ? Path.Combine(validationRoot, "Public")
+            : pathComparer.Equals(Path.TrimEndingDirectorySeparator(directory), outputPrivate) ? Path.Combine(validationRoot, "Private")
             : directory).ToList();
-        if (!includes.Contains(outputPublic, pathComparer) && !includes.Contains(outputPrivate, pathComparer))
+        if (!includes.Any(directory => pathComparer.Equals(Path.TrimEndingDirectorySeparator(directory), outputPublic) ||
+                pathComparer.Equals(Path.TrimEndingDirectorySeparator(directory), outputPrivate)))
         {
             validationIncludes.InsertRange(0, [Path.Combine(validationRoot, "Public"), Path.Combine(validationRoot, "Private")]);
         }
@@ -614,7 +616,7 @@ internal static class CompilerDriver
     {
         StringComparison comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         StringComparer comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
-        string outputRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(options.OutputRoot)) + Path.DirectorySeparatorChar;
+        string outputRoot = DirectoryPath.WithTrailingSeparator(options.OutputRoot);
         HashSet<string> inputs = options.Inputs.Select(input => Path.GetFullPath(input.Path)).ToHashSet(comparer);
         HashSet<string> ownGenerated = options.Inputs.Select(input => CompilerOptions.GeneratedSpelling(input.Include))
             .Append(CompilerOptions.AggregateSpelling(options.Module, false)).Append(CompilerOptions.AggregateSpelling(options.Module, true))

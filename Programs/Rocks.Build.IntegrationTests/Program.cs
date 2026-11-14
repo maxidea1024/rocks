@@ -917,6 +917,72 @@ try
     Require((await Game()).ExitCode == 0, "Build failed after removing the project plugin");
     Pass("project-plugins-enable-and-filter-modules", timer.Elapsed);
 
+    // 드라이브 루트(Windows subst): SDK가 드라이브 루트여도 SDK 경로 검사가 통과하고(예전 "SDK path escapes its root"), 게임 프로젝트가
+    // 드라이브 루트여도 MSBuild 경유 인자가 깨지지 않는다(예전 "Z:\"의 \"가 따옴표 escape로 읽혀 뒤 인자가 한 인자로 붙었다).
+    if (OperatingSystem.IsWindows())
+    {
+        timer.Restart();
+        var driveGame = Path.Combine(fixture, "drive-root-game");
+        CopyTree(Path.Combine(root, "Templates/Game/Foundation"), driveGame);
+        var used = DriveInfo.GetDrives().Select(drive => char.ToUpperInvariant(drive.Name[0])).ToHashSet();
+        var letters = Enumerable.Range('K', 'Z' - 'K' + 1).Select(value => (char)value).Where(value => !used.Contains(value)).Take(2).ToArray();
+        Require(letters.Length == 2, "No free drive letters for the drive-root test");
+        string sdkDrive = letters[0] + ":\\";
+        string gameDrive = letters[1] + ":\\";
+        var mapped = new List<string>();
+        try
+        {
+            foreach ((string drive, string target) in new[] { (sdkDrive, sdk), (gameDrive, driveGame) })
+            {
+                var created = await ProcessRunner.RunAsync(new("cmd.exe", ["/d", "/c", "subst", drive[..2], target], root));
+                Require(created.ExitCode == 0, "subst failed: " + created.StdOut + created.StdErr);
+                mapped.Add(drive[..2]);
+            }
+
+            var direct = await Cli("game", "--sdk", sdkDrive, "--project", gameDrive, "--configuration", "Debug");
+            Require(direct.ExitCode == 0, "Game build with a drive-root SDK and project failed: " + direct.StdOut + direct.StdErr);
+            var msbuildGame = await ProcessRunner.RunAsync(new("dotnet", ["msbuild", Path.Combine(root, "Rocks.proj"), "-t:Game", "-p:Configuration=Debug",
+                "-p:SdkDirectory=" + sdkDrive, "-p:GameDirectory=" + gameDrive, "-p:Compiler=" + toolchain.CompilerPath, "-nologo"], root,
+                Timeout: TimeSpan.FromMinutes(10)));
+            File.AppendAllText(Path.Combine(reports, "sdk-integration.log"), "msbuild drive-root game\n" + msbuildGame.StdOut + msbuildGame.StdErr + "\n");
+            Require(msbuildGame.ExitCode == 0, "MSBuild game build with drive-root paths failed: " + msbuildGame.StdOut + msbuildGame.StdErr);
+            var driveReport = JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(Path.Combine(gameDrive, "out", "Debug", "action-report.json")))!;
+            Require(driveReport.Succeeded && driveReport.ExecutedActions == 0,
+                $"The MSBuild drive-root game build after the CLI build executed {driveReport.ExecutedActions} actions");
+            var driveRun = await ProcessRunner.RunAsync(new(driveReport.ModuleOutputs["SampleGame"], [], gameDrive, toolchain.Environment));
+            Require(driveRun.ExitCode == 0, "Drive-root game failed at runtime");
+        }
+        finally
+        {
+            foreach (string drive in mapped)
+            {
+                await ProcessRunner.RunAsync(new("cmd.exe", ["/d", "/c", "subst", drive, "/D"], root));
+            }
+        }
+
+        Pass("drive-root-sdk-and-game", timer.Elapsed);
+    }
+
+    // 끝 구분자가 붙은 디렉터리 인자: MSBuild NativeOutput은 같은 출력으로 빌드되고(예전에는 증거 preset이 빈 조각을 가져 거부됐다),
+    // sdk --destination은 그 디렉터리에 설치된다(예전에는 stage가 destination 안에 생겨 Move가 실패하고 빈 디렉터리가 남았다).
+    timer.Restart();
+    var trailingOutput = engineReport[..^"action-report.json".Length];
+    var trailingBuild = await ProcessRunner.RunAsync(new("dotnet", ["msbuild", Path.Combine(root, "Rocks.proj"), "-t:Build", "-p:RocksTarget=Engine",
+        "-p:Configuration=Debug", "-p:Compiler=" + toolchain.CompilerPath, "-p:NativeOutput=" + trailingOutput, "-nologo"], root,
+        Timeout: TimeSpan.FromMinutes(20)));
+    File.AppendAllText(Path.Combine(reports, "sdk-integration.log"), "msbuild trailing NativeOutput\n" + trailingBuild.StdOut + trailingBuild.StdErr + "\n");
+    Require(trailingBuild.ExitCode == 0, "MSBuild with a trailing-separator NativeOutput failed: " + trailingBuild.StdOut + trailingBuild.StdErr);
+    var trailingReport = JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(engineReport))!;
+    Require(trailingReport.Succeeded && trailingReport.ExecutedActions == 0,
+        $"A trailing-separator NativeOutput did not reuse the same output ({trailingReport.ExecutedActions} actions)");
+    var trailingSdk = Path.Combine(fixture, "installed-trailing");
+    var trailingExport = await Cli("sdk", "--root", root, "--target", "Engine", "--configuration", "Debug",
+        "--destination", trailingSdk + Path.DirectorySeparatorChar);
+    Require(trailingExport.ExitCode == 0 && File.Exists(Path.Combine(trailingSdk, "rocks-sdk.json")) &&
+        !Directory.EnumerateDirectories(trailingSdk, "*.staging-*").Any(),
+        "SDK export to a trailing-separator destination failed: " + trailingExport.StdOut + trailingExport.StdErr);
+    Pass("trailing-separator-directory-arguments", timer.Elapsed);
+
     // Release SDK: 엔진 라이브러리는 ThinLTO bitcode이고, 게임 Release가 같은 LLVM으로 link해 실행된다.
     timer.Restart();
     var releaseSdk = Path.Combine(fixture, "installed-release");
