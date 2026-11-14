@@ -110,6 +110,7 @@ internal static class MetaTests
 
         GeneratedBodyReviewTests.Register(suite, options, actualEnvironment);
         TypeConvenienceCompilerTests.Register(suite, options, actualEnvironment);
+        NativeClassCompilerTests.Register(suite, options, actualEnvironment);
         IdentityCompilerTests.Register(suite, options, actualEnvironment);
         IdentityCliReviewTests.Register(suite, options, actualEnvironment);
         ModuleMetaTests.Register(suite, options, actualEnvironment);
@@ -476,7 +477,7 @@ internal static class MetaTests
                 ("static void Trace(const ::probe::Leaf&, TraceVisitor&) noexcept {}", "plain struct has an empty Trace"),
                 ("visitor.Visit(value.*(&::probe::Holder::target));", "reference struct visits its ObjectRef member"),
                 ("GeneratedType<::probe::Middle>::Trace(value.*(&::probe::Holder::middle), visitor);", "reference struct traces member structs"),
-                ("GeneratedType<::probe::Holder>::Trace(typed.*(&::probe::Value::holder), visitor);", "class Trace calls struct Trace"),
+                ("GeneratedType<::probe::Holder>::Trace(value.*(&::probe::Value::holder), visitor);", "class Trace calls struct Trace"),
                 ("registry.RegisterStruct(Schema(), Ops(Move(module)))", "struct Register"),
                 ("MakeRuntimeStructOps<::probe::Leaf>(Move(module))", "struct ops helper (Migrate detection)"),
                 ("detail::StructFieldOps<&::probe::Holder::flag>", "private member thunk through GENERATED_BODY"),
@@ -506,6 +507,47 @@ internal static class MetaTests
             Verify.That(Registered("Mode") >= 0 && Registered("Mode") < Registered("Leaf") && Registered("Leaf") < Registered("WorldBits") &&
                 Registered("WorldBits") < Registered("Middle") && Registered("Middle") < Registered("Holder") && Registered("Holder") < Registered("Outer") &&
                 Registered("Outer") < Registered("Value") && Registered("Value") < Registered("WorldValue"), "aggregate registration order:\n" + aggregate);
+        });
+        // B8a: 클래스 GeneratedType은 상속 필드까지 방문하는 static Trace를 내고 ops.trace는 그것을 감싼다(리플렉션 base를 둔
+        // native 파생의 Trace 사슬이 리플렉션 조상에서 부른다 — Docs/Design/ReflectionFoundations.ko.md 9.1절). 방문할 필드가 없는
+        // 클래스는 매개변수 이름 없는 빈 본문이다(MetaCompiler 검증 컴파일이 경고 오류로 사용하지 않는 매개변수를 잡는다).
+        suite.Add("Meta.ClassStaticTraceWrapsOpsTrace", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            string source = Preamble + "ROCKS_CLASS()\nstruct Box : public rocks::Object {\nROCKS_PROPERTY() rocks::int32 count = 0;\n};\n" +
+                "ROCKS_CLASS()\nstruct Node : public rocks::Object {\nROCKS_PROPERTY() rocks::ObjectRef<Node> target;\n};\n" +
+                "ROCKS_CLASS()\nstruct Value : public Node {\nROCKS_PROPERTY() rocks::ObjectRef<Box> plain;\n};\n}\n";
+            await probe.GenerateAsync(source);
+            string generated = Compact(File.ReadAllText(probe.Output));
+            foreach ((string expected, string reason) in new[]
+            {
+                ("static void Trace(const ::probe::Box&, TraceVisitor&) noexcept {}", "class without traced fields has an unnamed empty Trace"),
+                ("ops.trace = +[](const Object& object, TraceVisitor& visitor) noexcept { Trace(static_cast<const ::probe::Box&>(object), visitor); };",
+                    "ops.trace wraps the empty Trace"),
+                ("static void Trace(const ::probe::Node& value, TraceVisitor& visitor) noexcept { visitor.Visit(value.*(&::probe::Node::target)); }",
+                    "base class Trace visits its reference field"),
+                ("ops.trace = +[](const Object& object, TraceVisitor& visitor) noexcept { Trace(static_cast<const ::probe::Value&>(object), visitor); };",
+                    "derived ops.trace wraps its Trace")
+            })
+            {
+                Verify.That(generated.Contains(Compact(expected), StringComparison.Ordinal), "generated code missing " + reason + ": " + expected);
+            }
+
+            int Count(string text, string needle) => (text.Length - text.Replace(needle, "", StringComparison.Ordinal).Length) / needle.Length;
+            // 파생 클래스 Trace는 상속 필드와 자기 필드를 한 번씩 방문한다(필드 순서는 모델 순서를 따른다).
+            string derivedHead = Compact("static void Trace(const ::probe::Value& value, TraceVisitor& visitor) noexcept {");
+            int derivedStart = generated.IndexOf(derivedHead, StringComparison.Ordinal);
+            Verify.That(derivedStart >= 0, "derived class Trace missing");
+            int bodyStart = derivedStart + derivedHead.Length;
+            string derivedBody = generated[bodyStart..generated.IndexOf('}', bodyStart)];
+            Verify.Equal(2, Count(derivedBody, "visitor.Visit("), "derived class Trace visits two references: " + derivedBody);
+            Verify.That(derivedBody.Contains(Compact("visitor.Visit(value.*(&::probe::Node::target));"), StringComparison.Ordinal) &&
+                derivedBody.Contains(Compact("visitor.Visit(value.*(&::probe::Value::plain));"), StringComparison.Ordinal),
+                "derived class Trace visits the inherited field too: " + derivedBody);
+            Verify.Equal(3, Count(generated, Compact("static void Trace(const ::probe::")), "one static Trace per class");
+            Verify.Equal(3, Count(generated, Compact("ops.trace = +[](const Object& object, TraceVisitor& visitor) noexcept { Trace(")), "every ops.trace wraps the static Trace");
+            Verify.That(!generated.Contains("(void)object;", StringComparison.Ordinal) && !generated.Contains("constauto&typed", StringComparison.Ordinal),
+                "no inline trace body remains in Ops()");
         });
         // NATIVE 멤버로 둔 리플렉션 struct도 생성 특수화가 static_assert로 쓰므로 먼저 나와야 한다(이름 순이면 Alpha가
         // 앞이지만 Zeta가 먼저 — 깊이는 둘 다 1이다). private Migrate는 GENERATED_BODY의 friend로 연결된다.
@@ -753,10 +795,10 @@ internal static class MetaTests
                 ("NativeTypeKey<::probe::Mode>()", "enum element native key"),
                 ("NativeTypeKey<::probe::Leaf>()", "struct element native key"),
                 ("NativeTypeKey<::probe::Holder>()", "reference struct element native key"),
-                ("detail::TraceArrayField(typed.*(&::probe::Value::ints), visitor);", "class Trace visits every array field"),
-                ("detail::TraceArrayField(typed.*(&::probe::Value::refs), visitor);", "class Trace visits ObjectRefArray"),
-                ("detail::TraceArrayField(typed.*(&::probe::Value::holders), visitor);", "class Trace visits StructRefArray"),
-                ("GeneratedType<::probe::Bundle>::Trace(typed.*(&::probe::Value::bundle), visitor);", "class Trace calls the inline struct Trace"),
+                ("detail::TraceArrayField(value.*(&::probe::Value::ints), visitor);", "class Trace visits every array field"),
+                ("detail::TraceArrayField(value.*(&::probe::Value::refs), visitor);", "class Trace visits ObjectRefArray"),
+                ("detail::TraceArrayField(value.*(&::probe::Value::holders), visitor);", "class Trace visits StructRefArray"),
+                ("GeneratedType<::probe::Bundle>::Trace(value.*(&::probe::Value::bundle), visitor);", "class Trace calls the inline struct Trace"),
                 ("detail::TraceArrayField(value.*(&::probe::Bundle::refs), visitor);", "reference struct Trace visits its ObjectRefArray"),
                 ("detail::TraceArrayField(value.*(&::probe::Bundle::holders), visitor);", "reference struct Trace visits its StructRefArray"),
                 ("detail::TraceArrayField(value.*(&::probe::Holder::weights), visitor);", "reference struct Trace visits plain arrays too"),

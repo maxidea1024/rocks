@@ -178,6 +178,7 @@ internal static class SelfTests
             Verify.Equal(input, result.StdOut, "stdin bytes/text changed");
         });
         suite.Add("Policy.RepositoryRuntime", () => NoFailures(PolicyChecks.Runtime(options.Root)));
+        suite.Add("Policy.RepositoryReflectionAnnotations", () => NoFailures(PolicyChecks.ReflectionAnnotations(options.Root)));
         ThirdPartyPolicyTests.Register(suite, options);
         suite.Add("Policy.RepositoryPlatform", () => NoFailures(PolicyChecks.PlatformBoundary(options.Root)));
         suite.Add("Policy.RepositoryWarnings", () => NoFailures(PolicyChecks.SourceWarnings(options.Root)));
@@ -450,6 +451,95 @@ internal static class SelfTests
             temporary.Write(probe, "#pragma once\n");
             temporary.Write("Core/Source/Runtime/Core/Tests/Probe.cpp", "template class rocks::Array<int>;\n");
             Verify.Equal(1, PolicyChecks.Runtime(temporary.Root).Count, "test source container instantiation escaped audit");
+        });
+        // MetaCompiler가 보지 않는 리플렉션 필드 annotation — ROCKS_NATIVE_TYPE 클래스 안, 어느 모듈 Metadata에도 없는 파일 — 은
+        // attribute로만 남아 GC가 추적하지도 저장하지도 않으므로 거부하고, 읽을 수 없는(리터럴이 아닌) Metadata 목록은 규칙 파일
+        // 위치에 보고한다(Docs/Design/ReflectionFoundations.ko.md 9.1절 B8a).
+        suite.Add("Policy.ReflectionAnnotationsRejectNativeTypeAndUnlisted", () =>
+        {
+            using TemporaryDirectory temporary = new();
+            const string module = "Core/Source/Developer/Fixtures";
+            const string game = "Templates/Game/Sample";
+            const string automatic = "Core/Source/Developer/AutoProperty";
+            const string dynamic = "Core/Source/Developer/Dynamic";
+            // 목록은 SourceModuleRules의 `Metadata =>`, 게임 모듈 초기화의 `Metadata =`, 자동 프로퍼티 `{ get; } =`의 문자열
+            // 리터럴이다. 규칙 파일 주석 안 목록, 목록 안 줄·블록 주석 항목, ImportedMetadata는 항목이 아니다.
+            temporary.Write(module + "/Fixtures.Build.cs",
+                "public sealed class Fixtures : CoreModuleRules\n{\n    // Metadata => [\"Fixtures/Commented.h\"];\n" +
+                "    protected override IReadOnlyList<string> Metadata =>\n        [\"Fixtures/Listed.h\", // \"Fixtures/LineComment.h\"\n" +
+                "            /* \"Fixtures/BlockComment.h\" */ \"Fixtures/Native.h\"];\n}\n");
+            temporary.Write(game + "/Game.Build.cs", "Metadata = [\"GameObject.h\"],\nImportedMetadata = [\"Other.h\"],\n");
+            temporary.Write(automatic + "/AutoProperty.Build.cs",
+                "protected override IReadOnlyList<string> Metadata { get; } = [\"AutoProperty/Auto.h\",];\n");
+            const string dynamicRules = dynamic + "/Dynamic.Build.cs";
+            void WriteDynamic(string definition) => temporary.Write(dynamicRules,
+                "public sealed class Dynamic : CoreModuleRules\n{\n    protected override IReadOnlyList<string> Metadata" + definition + "\n}\n");
+            WriteDynamic(" => [\"Dynamic/Value.h\"];");
+            // 목록에 있는 헤더의 리플렉션 클래스·중첩 struct, 매크로 정의(이어진 줄 포함)·주석·문자열 안의 이름은 받는다.
+            const string reflected = "#pragma once\nROCKS_CLASS()\nstruct Listed : rocks::Object {\n    ROCKS_PROPERTY() int value = 0;\n" +
+                "    ROCKS_NATIVE() int cache = 0;\n    ROCKS_STRUCT()\n    struct Inner {\n        ROCKS_PROPERTY() int x = 0;\n    };\n};\n";
+            foreach (string file in new[] { module + "/Public/Fixtures/Listed.h", game + "/Source/GameObject.h",
+                automatic + "/Public/AutoProperty/Auto.h", dynamic + "/Public/Dynamic/Value.h" })
+            {
+                temporary.Write(file, reflected);
+            }
+
+            temporary.Write("Core/Source/Runtime/MetaSchema/Public/Meta/Annotations.h",
+                "#define ROCKS_PROPERTY(...) [[clang::annotate(\"rocks\")]]\n#define ROCKS_NATIVE(...) \\\n    ROCKS_PROPERTY()\n" +
+                "// 사용 예: ROCKS_PROPERTY() int x;\nconst char* text = \"ROCKS_NATIVE()\";\n");
+            // native 클래스의 일반 멤버, native 클래스 안 중첩 struct의 멤버(중첩 struct로 판정), 같은 파일에서 native 클래스 본문
+            // 밖의 리플렉션 클래스, 본문 주석에만 ROCKS_NATIVE_TYPE이 있는 클래스는 받는다.
+            const string native = "#pragma once\nclass Native : public rocks::Object {\n    ROCKS_NATIVE_TYPE(Native, rocks::Object, 1ull, 2ull)\n\n" +
+                "public:\n    void Trace(rocks::TraceVisitor&) const noexcept {\n    }\n\n    int state = 0;\n};\n";
+            string nested = native.Replace("    int state = 0;\n",
+                "    int state = 0;\n    struct Inner {\n        ROCKS_PROPERTY() int x = 0;\n    };\n", StringComparison.Ordinal);
+            temporary.Write(module + "/Public/Fixtures/Native.h", nested +
+                "ROCKS_CLASS()\nstruct Reflected : rocks::Object {\n    ROCKS_PROPERTY() int value = 0;\n};\n" +
+                "struct Commented : rocks::Object {\n    // ROCKS_NATIVE_TYPE(Commented, rocks::Object, 3ull, 4ull)\n    ROCKS_PROPERTY() int value = 0;\n};\n");
+            NoFailures(PolicyChecks.ReflectionAnnotations(temporary.Root));
+
+            // native 클래스 본문 안(멤버 함수 본문 뒤 포함)의 annotation은 목록에 있는 헤더여도 native-type이다.
+            temporary.Write(module + "/Public/Fixtures/Native.h", native.Replace("    int state = 0;\n",
+                "    int state = 0;\n    ROCKS_PROPERTY() rocks::ObjectRef<Native> next;\n    ROCKS_NATIVE() int cache = 0;\n", StringComparison.Ordinal));
+            var nativeType = PolicyChecks.ReflectionAnnotations(temporary.Root);
+            Verify.That(nativeType.Count == 2 && nativeType.All(failure => failure.Rule == "reflection-annotation-native-type") &&
+                nativeType[0].Line == 10 && nativeType[1].Line == 11, "native class annotations: " + string.Join("; ", nativeType));
+            temporary.Write(module + "/Public/Fixtures/Native.h", native);
+
+            // 목록 밖 파일: 시험 .cpp의 리플렉션 클래스, 같은 모듈의 목록에 없는 헤더, 규칙 파일 주석·목록 안 주석에만 있는 철자,
+            // 다른 모듈 폴더의 같은 철자, ImportedMetadata 철자. .cpp 안 native 클래스의 annotation은 native-type 하나로만 보고하고
+            // 그 안 중첩 struct의 annotation은 (목록 밖이므로) unlisted다.
+            string[] unlisted = [module + "/Public/Fixtures/Unlisted.h", module + "/Public/Fixtures/Commented.h",
+                module + "/Public/Fixtures/LineComment.h", module + "/Public/Fixtures/BlockComment.h",
+                "Core/Source/Developer/Other/Public/Fixtures/Listed.h", game + "/Source/Other.h", "Core/Source/Runtime/Core/Tests/ProbeTests.cpp"];
+            foreach (string file in unlisted)
+            {
+                temporary.Write(file, "// first line\n" + reflected[reflected.IndexOf("ROCKS_CLASS", StringComparison.Ordinal)..]);
+            }
+
+            const string probe = "Engine/Source/Runtime/Probe/Tests/ProbeTests.cpp";
+            temporary.Write(probe, nested.Replace("    int state = 0;\n", "    ROCKS_PROPERTY() int state = 0;\n", StringComparison.Ordinal));
+            var expected = unlisted.SelectMany(file => new[] { 4, 5, 8 }.Select(line => (file, line, "reflection-annotation-unlisted")))
+                .Append((probe, 9, "reflection-annotation-native-type")).Append((probe, 11, "reflection-annotation-unlisted")).ToHashSet();
+            void Expect(HashSet<(string, int, string)> wanted, string label)
+            {
+                var failures = PolicyChecks.ReflectionAnnotations(temporary.Root);
+                var actual = failures.Select(failure => (failure.Path, failure.Line, failure.Rule)).ToHashSet();
+                Verify.That(failures.Count == wanted.Count && actual.SetEquals(wanted), label + ": " + string.Join("; ", failures));
+            }
+
+            Expect(expected, "reflection annotation failures");
+
+            // 리터럴 목록이 아닌 Metadata는 규칙 파일의 Metadata 줄에 보고하고, 그 모듈 헤더는 unlisted로 오해하지 않는다.
+            foreach (string definition in new[] { " => Headers;", " => new[] { \"Dynamic/Value.h\" };", " => [.. Shared, \"Dynamic/Value.h\"];",
+                " => [\"Dynamic/Value.h\"].ToArray();", " => [$\"{Name}/Value.h\"];", " { get => Headers; }", " => MetadataOf(\"Dynamic\");" })
+            {
+                WriteDynamic(definition);
+                Expect([.. expected, (dynamicRules, 3, "reflection-metadata-not-literal")], "non-literal Metadata" + definition);
+            }
+
+            WriteDynamic(" { get; init; } = [\"Dynamic/Value.h\"];");
+            Expect(expected, "auto-property literal Metadata");
         });
         suite.Add("Policy.RuntimeTupleProtocolAllowanceIsNarrow", () =>
         {

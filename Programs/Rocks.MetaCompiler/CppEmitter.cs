@@ -235,6 +235,29 @@ internal static class CppEmitter
             Line($"static const TypeSchema schema{{Id(), {type.Version}, {fieldSpan}, {View(type.Name)}, {GuidValue(baseId)}, {type.Flags}u}};");
             Line("return schema;");
             Line("}");
+            // 클래스 생성 Trace다(Docs/Design/ReflectionFoundations.ko.md 9.1절 B8a). 상속 필드를 포함한 모든 참조·struct·배열
+            // 필드를 방문하고 ops.trace는 이것을 감싼다. 리플렉션 base를 둔 native 파생(RegisterNativeClass)의 Trace 사슬이
+            // 리플렉션 조상에서 이 함수를 부르고 멈춘다(ROCKS_CLASS는 손 Trace를 금지하므로 이중 방문·누락이 없다). Transient는
+            // 영속성 정책이며 strong edge의 GC 도달성에는 영향을 주지 않는다. struct 필드는 모든 struct가 내는 Trace를 부른다(참조
+            // 없는 struct는 빈 본문 — 비템플릿 함수라 if constexpr로 가를 수 없다). 배열 필드(상속한 import 필드 포함)는 모두
+            // TraceArrayField를 부른다 — 실제 C++ 타입이 오버로드를 고르므로 컨테이너를 descriptor에서 잘못 추론해도 Trace가 빠지지
+            // 않는다. 방문할 필드가 없으면 매개변수 이름 없는 빈 본문이다(사용하지 않는 매개변수 경고를 피한다).
+            FieldModel[] traced = type.Fields.Where(field => field.IsReference || field.IsStruct || field.IsArray).ToArray();
+            if (traced.Length == 0)
+            {
+                Line($"static void Trace(const {native}&, TraceVisitor&) noexcept {{}}");
+            }
+            else
+            {
+                Line($"static void Trace(const {native}& value, TraceVisitor& visitor) noexcept {{");
+                foreach (FieldModel field in traced)
+                {
+                    Line(TraceStatement(schema, field, "value", $"::{field.Owner}"));
+                }
+
+                Line("}");
+            }
+
             Line("static RuntimeTypeOps Ops(ModuleLease module = {}) noexcept {");
             Line($"auto ops = MakeRuntimeTypeOps<{native}, {(type.Abstract ? "true" : "false")}>(Move(module));");
             if (type.Fields.Count != 0)
@@ -294,27 +317,7 @@ internal static class CppEmitter
 
             Line("ops.completeFieldLayout = true;");
             Line("ops.parallelTraceSafe = true;");
-            Line("ops.trace = +[](const Object& object, TraceVisitor& visitor) noexcept {");
-            FieldModel[] traced = type.Fields.Where(field => field.IsReference || field.IsStruct || field.IsArray).ToArray();
-            if (traced.Length != 0)
-            {
-                Line($"const auto& typed = static_cast<const {native}&>(object);");
-                // Transient는 영속성 정책이며 strong edge의 GC 도달성에는 영향을 주지 않는다. struct 필드는 모든 struct가
-                // 내는 Trace를 부른다(참조 없는 struct는 빈 본문 — 이 람다는 비템플릿이라 if constexpr로 가를 수 없다).
-                // 배열 필드(상속한 import 필드 포함)는 모두 TraceArrayField를 부른다 — 실제 C++ 타입이 오버로드를 고르므로
-                // 컨테이너를 descriptor에서 잘못 추론해도 Trace가 빠지지 않는다.
-                foreach (FieldModel field in traced)
-                {
-                    Line(TraceStatement(schema, field, "typed", $"::{field.Owner}"));
-                }
-            }
-            else
-            {
-                Line("(void)object;");
-                Line("(void)visitor;");
-            }
-
-            Line("};");
+            Line($"ops.trace = +[](const Object& object, TraceVisitor& visitor) noexcept {{ Trace(static_cast<const {native}&>(object), visitor); }};");
             Line("return ops;");
             Line("}");
             Line("static Result<TypeRegistrationToken> Register(TypeRegistry& registry, ModuleLease module = {}) noexcept {");
@@ -353,7 +356,7 @@ internal static class CppEmitter
         return $"detail::StructFieldOps<{member}>({GuidValue(field.Id)}, &detail::PathStructMember<{member}, ValueKind::{field.TargetKind}>),";
     }
 
-    // 클래스·참조 struct Trace의 필드 한 줄이다(owner는 typed·value, ownerType은 멤버 포인터의 클래스 철자). ObjectRef는
+    // 클래스·참조 struct Trace의 필드 한 줄이다(owner는 Trace 매개변수 value, ownerType은 멤버 포인터의 클래스 철자). ObjectRef는
     // Visit, struct 필드는 그 struct의 생성 Trace, 배열은 TraceArrayField(Array<E>는 아무것도 하지 않고 ObjectRefArray·
     // StructRefArray는 원소를 방문한다)다.
     private static string TraceStatement(SchemaModel schema, FieldModel field, string owner, string ownerType)

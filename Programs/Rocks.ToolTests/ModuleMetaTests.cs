@@ -491,7 +491,7 @@ internal static class ModuleMetaTests
             string value = Compact(File.ReadAllText(layout.Generated("Upper", "Public/Upper/Value.generated.h")));
             Verify.That(value.Contains("#include<Lower/Parent.generated.h>", StringComparison.Ordinal), "imported struct generated header include");
             Verify.That(value.Contains("#include<Upper/Shape.generated.h>", StringComparison.Ordinal), "same-module struct generated header include");
-            Verify.That(value.Contains(Compact("GeneratedType<::probe::Point>::Trace(typed.*(&::probe::Parent::origin), visitor);"), StringComparison.Ordinal), "inherited struct field Trace");
+            Verify.That(value.Contains(Compact("GeneratedType<::probe::Point>::Trace(value.*(&::probe::Parent::origin), visitor);"), StringComparison.Ordinal), "inherited struct field Trace");
             Verify.That(value.Contains(Compact("NativeTypeKey<::probe::Shape>()"), StringComparison.Ordinal), "same-module struct field native key");
             Verify.That(!value.Contains("structGeneratedType<::probe::Shape>", StringComparison.Ordinal), "struct specialization is defined once (in its own header)");
             string shape = Compact(File.ReadAllText(layout.Generated("Upper", "Public/Upper/Shape.generated.h")));
@@ -792,9 +792,9 @@ internal static class ModuleMetaTests
             {
                 ("#include<Elements/Items.generated.h>", "element struct header of an inherited import field"),
                 ("#include<Lower/Parent.generated.h>", "import struct header"),
-                ("detail::TraceArrayField(typed.*(&::probe::Parent::slots), visitor);", "class Trace visits the import base StructRefArray"),
-                ("detail::TraceArrayField(typed.*(&::probe::Parent::links), visitor);", "class Trace visits the import base ObjectRefArray"),
-                ("GeneratedType<::probe::Group>::Trace(typed.*(&::probe::Value::group), visitor);", "class Trace calls the import struct Trace"),
+                ("detail::TraceArrayField(value.*(&::probe::Parent::slots), visitor);", "class Trace visits the import base StructRefArray"),
+                ("detail::TraceArrayField(value.*(&::probe::Parent::links), visitor);", "class Trace visits the import base ObjectRefArray"),
+                ("GeneratedType<::probe::Group>::Trace(value.*(&::probe::Value::group), visitor);", "class Trace calls the import struct Trace"),
                 ("NativeTypeKey<::probe::SA>()", "inherited struct element native key"),
                 ("NativeTypeKey<::probe::EA>()", "inherited enum element native key"),
                 ("static_assert(GeneratedType<::probe::SA>::ContainsStrongReference && !GeneratedType<::probe::SA>::ContainsReferenceArray", "inherited StructRefArray element check"),

@@ -443,7 +443,13 @@ public static partial class PolicyChecks
 
     // C++ 소스에서 주석과 문자열·문자 리터럴(raw 문자열 포함)을 공백으로 바꾼 텍스트다. 줄바꿈은 그대로 두어 위치의 줄 번호가
     // 원문과 같다. 숫자 구분자(1'000)는 문자 리터럴로 보지 않는다. 전처리 토큰화가 아니라 lexical 검사용 근사다.
-    internal static string WithoutCommentsAndLiterals(string text)
+    internal static string WithoutCommentsAndLiterals(string text) => Blanked(text, keepLiterals: false);
+
+    // 주석만 공백으로 바꾸고 문자열·문자 리터럴은 그대로 둔 텍스트다(길이·줄 번호는 원문과 같다). 리터럴 안의 // 나 /* 는 주석으로
+    // 보지 않는다.
+    internal static string WithoutComments(string text) => Blanked(text, keepLiterals: true);
+
+    private static string Blanked(string text, bool keepLiterals)
     {
         StringBuilder result = new(text.Length);
         int index = 0;
@@ -452,6 +458,14 @@ public static partial class PolicyChecks
             for (; index < end && index < text.Length; ++index)
             {
                 result.Append(text[index] == '\n' ? '\n' : ' ');
+            }
+        }
+
+        void Keep(int end)
+        {
+            for (; index < end && index < text.Length; ++index)
+            {
+                result.Append(text[index]);
             }
         }
 
@@ -474,7 +488,15 @@ public static partial class PolicyChecks
                 int open = text.IndexOf('(', index + 2);
                 string delimiter = open < 0 ? "" : text[(index + 2)..open];
                 int end = open < 0 ? -1 : text.IndexOf(")" + delimiter + "\"", open, StringComparison.Ordinal);
-                Blank(end < 0 ? text.Length : end + delimiter.Length + 2);
+                int stop = end < 0 ? text.Length : end + delimiter.Length + 2;
+                if (keepLiterals)
+                {
+                    Keep(stop);
+                }
+                else
+                {
+                    Blank(stop);
+                }
             }
             else if (c == '"' || (c == '\'' && (index == 0 || !char.IsAsciiLetterOrDigit(text[index - 1]))))
             {
@@ -484,7 +506,15 @@ public static partial class PolicyChecks
                     end += text[end] == '\\' ? 2 : 1;
                 }
 
-                Blank(Math.Min(end + 1, text.Length));
+                int stop = Math.Min(end + 1, text.Length);
+                if (keepLiterals)
+                {
+                    Keep(stop);
+                }
+                else
+                {
+                    Blank(stop);
+                }
             }
             else
             {

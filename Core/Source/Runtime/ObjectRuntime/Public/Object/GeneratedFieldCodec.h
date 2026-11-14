@@ -1695,7 +1695,7 @@ Result<void> DecodeArrayField(ConstructionContext* construction, ObjectHandle ow
 // 없어 아무것도 하지 않고, ObjectRefArray·StructRefArray는 모든 원소를 방문한다.
 //
 // 사용 예(생성 Trace):
-//   detail::TraceArrayField(typed.*(&::Mesh::materials), visitor);
+//   detail::TraceArrayField(value.*(&::Mesh::materials), visitor);
 template <class E>
 void TraceArrayField(const Array<E>&, TraceVisitor&) noexcept {
 }

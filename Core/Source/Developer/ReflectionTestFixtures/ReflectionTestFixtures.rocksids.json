@@ -538,6 +538,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::SceneFixture::relative",
+      "id": "3df48c7fcbdc4a1ab6cd18440b28898b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::StructHolder::flag",
       "id": "6665b13a74cc43e1bd16b68cd5b33698",
       "aliases": [],
@@ -780,6 +787,13 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::PropertyNode",
       "id": "ad100000000000000000000000000004",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::SceneFixture",
+      "id": "8b12e84f72fd456ab92aecdf51a66685",
       "aliases": [],
       "retired": false
     },

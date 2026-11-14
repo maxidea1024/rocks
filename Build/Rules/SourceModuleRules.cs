@@ -50,6 +50,9 @@ public abstract class SourceModuleRules : ModuleRules
     /// protected override IReadOnlyList&lt;string&gt; Metadata =&gt; ["ReflectionTestFixtures/ReflectionFixture.h"];
     /// </code>
     /// 생성 헤더는 <c>&lt;ReflectionTestFixtures/ReflectionFixture.generated.h&gt;</c>로 include한다.
+    /// 문자열 리터럴만 나열한 목록으로 쓴다(식별자·<c>new[] { }</c>·도우미 호출·spread·보간 문자열 금지). 정책 검사가 이 목록을
+    /// 문자 그대로 읽어 목록 밖 파일의 ROCKS_PROPERTY·ROCKS_NATIVE를 거부하므로, 리터럴이 아니면
+    /// <c>reflection-metadata-not-literal</c>로 보고한다.
     /// </summary>
     protected virtual IReadOnlyList<string> Metadata => [];
 

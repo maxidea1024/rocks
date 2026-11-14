@@ -56,7 +56,7 @@ internal static class Program
                     parallelism = options.Jobs(Math.Max(1, Environment.ProcessorCount));
                     break;
                 case "policy":
-                    var failures = PolicyChecks.Runtime(root).Concat(PolicyChecks.PlatformBoundary(root))
+                    var failures = PolicyChecks.Runtime(root).Concat(PolicyChecks.ReflectionAnnotations(root)).Concat(PolicyChecks.PlatformBoundary(root))
                         .Concat(PolicyChecks.SourceWarnings(root)).Concat(PolicyChecks.OptimizationOverrides(root))
                         .Concat(PolicyChecks.CompilerBuiltins(root)).Concat(PolicyChecks.DeterministicMathSources(root)).Concat(PolicyChecks.CrtNumberConversions(root)).Concat(UnicodeTables.Check(root)).Concat(MathTables.Check(root)).Concat(NumberTables.Check(root))
                         .Concat(PolicyChecks.PythonFreeMainPath(root)).Concat(PolicyChecks.ThirdParty(root)).ToList();
