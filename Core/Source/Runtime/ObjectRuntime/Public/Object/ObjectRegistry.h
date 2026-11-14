@@ -68,6 +68,8 @@ enum class InnerOrder : uint8 {
 
 namespace detail {
 class PathCursor;
+// 시험 전용 내부 계수 통로다(정의는 ObjectRuntime/Private/ObjectRegistryAccess.h).
+struct ObjectRegistryAccess;
 
 // 경로 접근의 참조 멤버 쓰기 단일 지점이다(정의는 Object/GeneratedPathAccess.h).
 template <class T>
@@ -560,6 +562,7 @@ private:
     template <class T>
     friend Result<void> detail::SetPathMemberReference(detail::PathCursor&, ObjectRef<T>&,
                                                        ObjectHandle) noexcept;
+    friend struct detail::ObjectRegistryAccess;
 
     struct Slot;
     struct Chunk;
@@ -567,6 +570,24 @@ private:
     struct NameRecord;
     struct NameEntry;
     struct InnerEntry;
+    struct ReclaimWork;
+    struct ChunkTable;
+
+    // Retired 슬롯이 든 회수 대상 목록이다. 슬롯은 셋 중 하나에만 있다(Retired가 아니면 어디에도
+    // 없다).
+    enum class RetiredQueue : uint8 {
+        None,
+        Pending,  // 아직 분류 전(Retire 순서)
+        Deferred, // 보유 계수·남은 자식으로 지금은 회수할 수 없다(분류 뒤 다시 걷지 않는다)
+        Ready     // 지연이 풀려 회수할 수 있다(풀린 순서)
+    };
+
+    // Slot의 nextInList·prevInList로 잇는 이중 연결 목록이다.
+    struct RetiredList {
+        Slot* head = nullptr;
+        Slot* tail = nullptr;
+    };
+
     static void MarkEdge(void*, ObjectHandle) noexcept;
     static void ValidateStagedEdge(void*, ObjectHandle) noexcept;
     Slot* FindSlot(ObjectHandle) const noexcept;
@@ -691,8 +712,32 @@ private:
     ErrorCode ShadeLocked(ObjectHandle) noexcept;
     bool IsCutoff(const Slot*) const noexcept;
     bool IsReclaimable(const Slot&) const noexcept;
-    bool HasReclaimableLocked() const noexcept;
+    // 지금 회수할 수 있는 슬롯이 있는지다(NextReclaimableLocked와 같은 분류 — 슬롯 전체를 훑지
+    // 않는다).
+    bool HasReclaimableLocked() noexcept;
+    // 잠금 보유: 다음에 회수할 슬롯(목록에 둔 채)이다. 풀린(Ready) 목록 맨 앞, 없으면 분류
+    // 전(Pending) 목록을 앞에서부터 분류해 회수할 수 없는 슬롯은 지연(Deferred) 목록으로 옮긴다.
+    // 슬롯마다 분류는 한 번이라 회수 한 개당 분할 상환 O(1)이다. 없으면 nullptr.
+    Slot* NextReclaimableLocked() noexcept;
+    // 회수할 수 있는 슬롯을 차례로 회수한다(최대 maximum개, deadline이 지나면 멈춘다). 호출자는
+    // 처리 표시(processing_)를 세운 상태다.
     uint32 ReclaimEligible(uint32 maximum = 0xffffffffu, uint64 deadline = 0) noexcept;
+    // 잠금 보유: Alive·DestroyRequested 슬롯을 Retired로 바꾸고 이름 색인·부모 고리에서 떼어 분류
+    // 전 목록 끝에 붙인다(sweep).
+    void RetireLocked(Slot&) noexcept;
+    // 잠금 보유: 어느 목록에도 없는 Retired 슬롯을 queue 목록 끝에 붙인다.
+    void LinkRetiredLocked(Slot&, RetiredQueue) noexcept;
+    // 잠금 보유: 슬롯을 지금 든 회수 대상 목록에서 뗀다.
+    void UnlinkRetiredLocked(Slot&) noexcept;
+    // 잠금 보유: 지연 목록의 슬롯이 회수 가능해졌으면(보유 계수 반환·마지막 자식이 떨어짐) 풀린
+    // 목록 끝으로 옮긴다. 그 밖의 슬롯에는 아무것도 하지 않는다.
+    void WakeDeferredLocked(Slot&) noexcept;
+    // 잠금 보유: 회수 가능하고 어느 목록에도 없는 slot을 Reclaiming으로 바꾸고, 잠금 밖에서 소멸·
+    // 반환할 것을 넘긴다.
+    ReclaimWork TakeForReclaimLocked(Slot&) noexcept;
+    // 잠금 밖에서 부른다: work의 객체를 소멸·반환한 뒤 다시 잠가 슬롯을 비우고 빈 슬롯 목록에
+    // 넣는다(세대 한도면 Exhausted로 격리한다).
+    void FinishReclaim(ReclaimWork&) noexcept;
 
     // ---- Outer·이름(잠금 보유 상태에서 부른다) ----
     ObjectHandle HandleOf(const Slot&) const noexcept;
@@ -724,8 +769,29 @@ private:
     uint64 domain_ = 0;
     uint64 ownerThread_ = 0;
     mutable platform::Mutex gate_;
-    Chunk* chunks_ = nullptr;
+    // chunk 포인터 표(chunk 번호 = 슬롯 번호 / chunk 크기로 색인해 handle → 슬롯이 O(1))의 칸이다.
+    // 표는 가득 찰 때 두 배로 잠금 밖에서 받아 잠금 안에서 바꾼다. 옛 표는 chunkTables_ 사슬로
+    // Registry 소멸 때까지 보관한다(잠금 없이 표를 읽는 경로가 교체와 겹쳐도 해제된 표를 읽지 않게
+    // — 두 배씩이라 합은 최종 표의 두 배 이하). chunk 자체도 소멸 전까지 이동·반환하지 않으므로
+    // Slot*는 안정하다.
+    Chunk** chunks_ = nullptr;
     uint32 chunkCount_ = 0;
+    uint32 chunkCapacity_ = 0;
+    ChunkTable* chunkTables_ = nullptr; // 지금 표(옛 표는 그 previous 사슬)
+    // 빈(Free) 슬롯 목록이다. 가장 최근에 회수한 슬롯부터 재사용한다(새 chunk는 낮은 번호부터).
+    Slot* freeSlots_ = nullptr;
+    // 회수 대상 목록(RetiredQueue): sweep이 분류 전 목록 끝에 붙이고, 회수가 분류하며 지연 목록으로
+    // 옮기고, 보유 계수 반환·마지막 자식 분리가 지연 목록에서 풀린 목록으로 옮긴다.
+    RetiredList retiredPending_;
+    RetiredList retiredDeferred_;
+    RetiredList retiredReady_;
+    // 상태별 슬롯 수와 보유 계수 합이다(상태 전이·계수 변경마다 갱신 — Stats가 슬롯을 훑지 않는다).
+    // borrows·chunks·namedObjects는 totalBorrows_·chunkCount_·nameLive_에서 채운다.
+    ObjectStats tally_;
+    // 잠금 안 탐색 계수(성능 회귀 시험용 — detail::ObjectRegistryAccess): 빈 슬롯을 고르며 본 슬롯
+    // 수, 회수 대상 목록에서 본 슬롯 수.
+    uint64 freeSlotProbes_ = 0;
+    uint64 reclaimProbes_ = 0;
     uint32 totalBorrows_ = 0;
     uint32 constructions_ = 0;
     uint64 nextTransaction_ = 1;
@@ -735,7 +801,9 @@ private:
     usize gcCursor_ = 0;
     GcPhase gcPhase_ = GcPhase::Idle;
     GcReport cycleGc_;
-    Chunk* sweepChunk_ = nullptr;
+    // 증분 sweep 위치: 남은 chunk 수(다음은 sweepChunk_ - 1번 chunk — 새 chunk부터 옛 chunk로)와
+    // 그 chunk 안 슬롯 위치다. 0이면 끝났다.
+    uint32 sweepChunk_ = 0;
     uint32 sweepOffset_ = 0;
     // 이름 색인: 개방 주소 표(2의 거듭제곱 크기, (live + tombstone) ≤ 1/2). 표 할당·반환은 잠금 밖.
     NameEntry* names_ = nullptr;

@@ -40,7 +40,7 @@
 | C05 | Array·Span·BitArray·HashMap·HashSet의 부분 구현과 STL 호환 반복자(contiguous·random-access·forward, HashMap 구조 변경 후 반복자 사용은 Fatal), 배열 삽입·삭제·크기 조절·추가·검색, 비트 단위 검색·집합 연산 및 실패 시 상태 유지 | queue·inline·sparse/stable-slot, 범용 알고리즘·추가 범위 연산, Map/Set 정책, 내부 콜백 재진입 완전 진단 및 장시간 성능 검증 |
 | C06 | Function, ModuleLease, InlineExecutor와 WorkerScheduler, 의존성·취소·drain, 고정 용량 로그·프로파일 scope, assert, 음성 대조군 | priority/lane/work-stealing/fiber scheduler, 비동기 로그 writer·viewer |
 | C07 | C# Clang AST 메타 생성·선언 검증, CLASS/PROPERTY·typed 필드 접근·자동 Trace, 상속 metadata IsA, 깊은 복사·revision/module lease, Archive/Record·객체 그래프 직렬화 | 자동 메타 unit 발견·프로젝트 전역 ID 검증, 범용 native 상속 cast, method/enum/container reflection, compile DB 입력 재구성·생성 캐시·외부 에셋 참조 |
-| C08 | 비이동 64-slot chunk, registry domain·generation, 고갈 슬롯 격리, 진단 캡처 | 빠른 인덱스 조회, 대규모 벤치마크 |
+| C08 | 비이동 64-slot chunk, registry domain·generation, 고갈 슬롯 격리, 진단 캡처, chunk 포인터 표 O(1) handle 조회·빈 슬롯 목록(LIFO)·회수 대상 목록·상태 전이 갱신 통계 | 대규모 벤치마크(pause percentile) |
 | C09 | RootRef/WeakRef/ObjectRef/Borrow/BackendLease, 문맥·스레드 검사 | root owner chain, 전체 safepoint 시스템 |
 | C10 | 비공개 생성 트랜잭션, 간선 검증 후 일괄 공개, 역순 롤백 | ClassDefaults·instancing, 트랜잭션 활성 중 GC, 전체 lifecycle hook |
 | C11 | full STW와 점진 mark/sweep, 삽입 장벽·cutoff, 선택적 병렬 mark, soft 시간·작업량 예산, OOM 시 sweep 금지·독립 oracle | 다중 mutator·동시 필드 스캔, hard deadline, 병렬 sweep·cluster·대규모 성능 검증 |

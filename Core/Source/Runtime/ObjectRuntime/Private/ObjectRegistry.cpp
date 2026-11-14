@@ -1,3 +1,4 @@
+#include <Base/Compiler.h>
 #include <Core/Algorithms.h>
 #include <Core/Hash.h>
 #include <Core/Text/NameComponent.h>
@@ -14,6 +15,10 @@ namespace rocks {
 
 namespace {
 constexpr uint32 SlotsPerChunk = 64;
+// chunk 포인터 표의 첫 크기다(1024 슬롯). 이후 두 배로 늘리고 maxSlots가 담는 chunk 수에서 멈춘다.
+constexpr uint32 MinimumChunkCapacity = 16;
+constexpr uint32 ChunkTag = 0x43484e4bu;      // 'CHNK'
+constexpr uint32 ChunkTableTag = 0x43484e54u; // 'CHNT'
 enum class SlotState : uint8 {
     Free,
     Reserved,
@@ -23,6 +28,24 @@ enum class SlotState : uint8 {
     Reclaiming,
     Exhausted
 };
+
+// state 슬롯을 세는 통계 칸이다(Free·Exhausted는 세지 않아 null). Retired와 Reclaiming은 같이 센다.
+uint32* StateTally(ObjectStats& tally, SlotState state) noexcept {
+    switch (state) {
+    case SlotState::Reserved:
+        return &tally.reservedObjects;
+    case SlotState::Alive:
+        return &tally.liveObjects;
+    case SlotState::DestroyRequested:
+        return &tally.destroyRequested;
+    case SlotState::Retired:
+    case SlotState::Reclaiming:
+        return &tally.retiredObjects;
+    default:
+        return nullptr;
+    }
+}
+
 } // namespace
 
 // 슬롯과 객체 저장소를 이동하지 않는다. 슬롯 재사용 시 세대를 올리고 wrap 대신 영구 격리한다.
@@ -30,7 +53,14 @@ enum class SlotState : uint8 {
 struct ObjectRegistry::Slot {
     uint32 generation = 1;
     uint32 index = 0;
+    // 상태는 SetState로만 바꾼다(Registry의 상태별 통계를 같이 맞춘다).
     SlotState state = SlotState::Free;
+    // Retired 슬롯이 든 회수 대상 목록이다(그 밖의 상태는 None).
+    RetiredQueue queue = RetiredQueue::None;
+    // Free면 빈 슬롯 목록(단일 연결 — prevInList는 null), Retired면 queue 목록(이중 연결)의 이웃
+    // 슬롯이다. 두 목록은 상태로 배타적이다.
+    Slot* nextInList = nullptr;
+    Slot* prevInList = nullptr;
     Object* object = nullptr;
     void* storage = nullptr;
     TypeLease type;
@@ -43,10 +73,10 @@ struct ObjectRegistry::Slot {
     uint64 transaction = 0;
     uint64 mark = 0;
     // Outer·이름(생성 때 고정 — Docs/Design/ObjectFoundations.ko.md 1.4절). 고리는 슬롯 번호가
-    // 아니라 Slot*다: chunk는 Registry 소멸 전까지 이동·반환되지 않으므로 포인터가 안정하고, 슬롯
-    // 번호로 이으면 SlotAt의 chunk 선형 탐색 때문에 순회가 O(n·chunks)가 된다. Reclaiming·Free
-    // 슬롯의 이 칸은 읽지 않는다. Retired 슬롯은 자기를 부모 고리에서 이미 뗐지만, Retired 부모의
-    // firstChild는 그 자식들이 스스로 뗄 때까지 유효하다(그동안 회수하지 않는다 — IsReclaimable).
+    // 아니라 Slot*다: chunk는 Registry 소멸 전까지 이동·반환되지 않으므로 포인터가 안정하고, 순회가
+    // 슬롯 번호 → chunk 표 조회를 거치지 않고 바로 따라간다. Reclaiming·Free 슬롯의 이 칸은 읽지
+    // 않는다. Retired 슬롯은 자기를 부모 고리에서 이미 뗐지만, Retired 부모의 firstChild는 그
+    // 자식들이 스스로 뗄 때까지 유효하다(그동안 회수하지 않는다 — IsReclaimable).
     ObjectHandle outer;
     Slot* outermost = nullptr;
     Slot* parent = nullptr;
@@ -60,11 +90,43 @@ struct ObjectRegistry::Slot {
     uint16 pathBytes = 0;
     bool indexed = false; // 이름 색인에 있다
     bool linked = false;  // 부모 고리에 있다
+
+    // 잠금 보유 상태에서 부른다. tally는 그 Registry의 상태별 통계다.
+    void SetState(ObjectStats& tally, SlotState next) noexcept {
+        if (uint32* from = StateTally(tally, state)) {
+            --*from;
+        }
+
+        if (uint32* to = StateTally(tally, next)) {
+            ++*to;
+        }
+
+        state = next;
+    }
 };
 
 struct ObjectRegistry::Chunk {
-    Chunk* next = nullptr;
     Slot slots[SlotsPerChunk];
+};
+
+// chunk 포인터 표 하나의 머리다. Chunk* 칸이 바로 뒤에 이어진다(할당 하나). 표를 키우면 옛 표를
+// previous로 이어 Registry 소멸 때까지 보관한다. 옛 표의 칸은 그 표에 있던 chunk를 그대로
+// 가리키므로, 잠금 없이 옛 표를 들고 있던 조회도 해제된 메모리를 읽지 않는다.
+struct ObjectRegistry::ChunkTable {
+    ChunkTable* previous = nullptr;
+
+    Chunk** Entries() noexcept {
+        return reinterpret_cast<Chunk**>(this + 1);
+    }
+};
+
+// 회수할 슬롯에서 잠금 안에 떼어 낸 것이다. 사용자 소멸자·allocator 콜백은 잠금 밖에서 부른다.
+struct ObjectRegistry::ReclaimWork {
+    Slot* slot = nullptr;
+    TypeLease type;
+    Object* object = nullptr;
+    void* storage = nullptr;
+    NameRecord* record = nullptr;
 };
 
 struct ObjectRegistry::MarkState {
@@ -174,16 +236,27 @@ ObjectRegistry::~ObjectRegistry() {
     // 종료 회수가 모든 NameRecord를 반환했다. 남은 것은 빈 색인 표다.
     ReleaseRegistryMemory(allocator_, names_);
     names_ = nullptr;
-    while (chunks_) {
-        Chunk* next = chunks_->next;
-        chunks_->~Chunk();
-        auto released = allocator_.Deallocate(chunks_);
+    for (uint32 index = chunkCount_; index-- != 0;) {
+        Chunk* chunk = chunks_[index];
+        chunk->~Chunk();
+        auto released = allocator_.Deallocate(chunk);
         if (!released) {
             platform::Fatal("Registry chunk allocator mismatch");
         }
-
-        chunks_ = next;
     }
+
+    for (ChunkTable* table = chunkTables_; table != nullptr;) {
+        ChunkTable* previous = table->previous;
+        table->~ChunkTable();
+        ReleaseRegistryMemory(allocator_, table);
+        table = previous;
+    }
+
+    chunkTables_ = nullptr;
+    chunks_ = nullptr;
+    chunkCount_ = 0;
+    chunkCapacity_ = 0;
+    freeSlots_ = nullptr;
 }
 
 Result<void> ObjectRegistry::CheckAccess(const ObjectAccessContext& access) const noexcept {
@@ -198,15 +271,13 @@ Result<void> ObjectRegistry::CheckAccess(const ObjectAccessContext& access) cons
     return Result<void>::Success();
 }
 
+// chunk 표 색인이라 O(1)이다. 다른 스레드의 계수 반환도 잠금 안에서 부르므로 표 교체(잠금 안)와
+// 겹치지 않고, 처리 표시 아래 잠금 없이 부를 때(소유 스레드와 병렬 trace worker)는 표가 바뀌지
+// 않는다(교체는 생성의 처리 표시 아래에서만 한다). 옛 표는 소멸 때까지 보관하므로 이 규칙 밖의 잠금
+// 없는 조회가 생겨도 해제된 표를 읽지는 않는다.
 ObjectRegistry::Slot* ObjectRegistry::SlotAt(uint32 index) const noexcept {
-    for (Chunk* chunk = chunks_; chunk; chunk = chunk->next) {
-        const uint32 first = chunk->slots[0].index;
-        if (index >= first && index - first < SlotsPerChunk) {
-            return &chunk->slots[index - first];
-        }
-    }
-
-    return nullptr;
+    const uint32 chunk = index / SlotsPerChunk;
+    return chunk < chunkCount_ ? &chunks_[chunk]->slots[index % SlotsPerChunk] : nullptr;
 }
 
 ObjectRegistry::Slot* ObjectRegistry::FindSlot(ObjectHandle handle) const noexcept {
@@ -454,6 +525,10 @@ void ObjectRegistry::UnlinkChildLocked(Slot& child) noexcept {
     child.prevSibling = nullptr;
     child.nextSibling = nullptr;
     child.linked = false;
+    // 마지막 자식이 떨어진 Retired 부모는 회수 가능해졌을 수 있다(지연 목록이면 풀린 목록으로).
+    if (parent.firstChild == nullptr) {
+        WakeDeferredLocked(parent);
+    }
 }
 
 void ObjectRegistry::DetachIdentityLocked(Slot& slot) noexcept {
@@ -544,6 +619,7 @@ Result<void> ObjectRegistry::AddRoot(const ObjectAccessContext& access, ObjectHa
     }
 
     ++slot->roots;
+    ++tally_.roots;
     return Result<void>::Success();
 }
 
@@ -607,6 +683,7 @@ Result<void> RetainRoot(ObjectRegistry* registry, ObjectHandle handle) noexcept 
     }
 
     ++slot->roots;
+    ++registry->tally_.roots;
     return Result<void>::Success();
 }
 
@@ -618,6 +695,8 @@ void ReleaseRoot(ObjectRegistry* registry, ObjectHandle handle) noexcept {
     }
 
     --slot->roots;
+    --registry->tally_.roots;
+    registry->WakeDeferredLocked(*slot);
 }
 
 Result<void*> AccessBorrow(ObjectRegistry* registry, ObjectHandle handle,
@@ -675,6 +754,7 @@ void ReleaseBorrow(ObjectRegistry* registry, ObjectHandle handle) noexcept {
 
     --slot->borrows;
     --registry->totalBorrows_;
+    registry->WakeDeferredLocked(*slot);
 }
 
 void ReleaseBackend(ObjectRegistry* registry, ObjectHandle handle) noexcept {
@@ -685,6 +765,8 @@ void ReleaseBackend(ObjectRegistry* registry, ObjectHandle handle) noexcept {
     }
 
     --slot->backendHolds;
+    --registry->tally_.backendHolds;
+    registry->WakeDeferredLocked(*slot);
 }
 
 void ReleaseEncodePin(ObjectRegistry* registry, ObjectHandle handle) noexcept {
@@ -695,6 +777,8 @@ void ReleaseEncodePin(ObjectRegistry* registry, ObjectHandle handle) noexcept {
     }
 
     --slot->encodePins;
+    --registry->tally_.encodePins;
+    registry->WakeDeferredLocked(*slot);
 }
 
 } // namespace detail
@@ -1557,6 +1641,7 @@ Result<EncodePin> ObjectRegistry::PinForEncode(const ObjectAccessContext& access
     }
 
     ++slot->encodePins;
+    ++tally_.encodePins;
     return Result<EncodePin>::Success(EncodePin(this, owner));
 }
 
@@ -1628,7 +1713,7 @@ Result<void> ObjectRegistry::RequestDestroyChecked(const ObjectAccessContext& ac
         return live;
     }
 
-    slot->state = SlotState::DestroyRequested;
+    slot->SetState(tally_, SlotState::DestroyRequested);
     return Result<void>::Success();
 }
 
@@ -1716,6 +1801,7 @@ Result<BackendLease> ObjectRegistry::AcquireBackendLease(const ObjectAccessConte
     }
 
     ++slot->backendHolds;
+    ++tally_.backendHolds;
     return Result<BackendLease>::Success(BackendLease(this, handle));
 }
 
@@ -1833,12 +1919,14 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
         processing_ = true;
     }
 
-    // 실패하면 잠금 밖에서 반환할 할당이다. 게시에 성공하면 슬롯·색인이 소유한다.
+    // 실패하면 잠금 밖에서 반환할 할당이다. 게시에 성공하면 슬롯·색인·chunk 표가 소유한다.
     NameRecord* record = nullptr;
     NameEntry* grown = nullptr;
+    ChunkTable* grownChunks = nullptr;
     void* storage = nullptr;
     auto fail = [&](ErrorCode error) noexcept -> Result<ObjectHandle> {
         ReleaseRegistryMemory(allocator_, storage);
+        ReleaseRegistryMemory(allocator_, grownChunks);
         ReleaseRegistryMemory(allocator_, grown);
         ReleaseRegistryMemory(allocator_, record);
         platform::LockGuard lock(gate_);
@@ -1960,18 +2048,31 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
         }
     }
 
-    // 12. 객체 할당·슬롯.
+    // 12. 객체 할당·슬롯. 처리 표시 아래라 그동안 다른 생성·회수가 chunk 표·빈 슬롯 목록을 바꾸지
+    // 않는다(다른 스레드의 계수 반환은 목록·표를 바꾸지 않는다).
     if (gcPhase_ == GcPhase::Marking) {
         // mutator가 새 객체를 만드는 지점에서만 작업 큐를 확장한다. gate/Trace 안의 barrier는
         // 할당하지 않는다. Marking 동안 공개된 객체는 회수하지 않아 슬롯 수가 큐 상한이 된다.
-        uint64 capacity = (uint64(chunkCount_) + 1) * SlotsPerChunk;
-        if (capacity > options_.maxSlots) {
-            capacity = options_.maxSlots;
+        // 모자랄 때만 두 배(상한 maxSlots)로 늘려 새 chunk마다 큐 전체를 다시 할당·복사하지 않는다.
+        uint64 needed = (uint64(chunkCount_) + 1) * SlotsPerChunk;
+        if (needed > options_.maxSlots) {
+            needed = options_.maxSlots;
         }
 
-        auto reserve = gcWork_.TryReserve(static_cast<usize>(capacity));
-        if (!reserve) {
-            return fail(reserve.Error());
+        if (needed > gcWork_.Capacity()) {
+            uint64 capacity = uint64(gcWork_.Capacity()) * 2;
+            if (capacity > options_.maxSlots) {
+                capacity = options_.maxSlots;
+            }
+
+            if (capacity < needed) {
+                capacity = needed;
+            }
+
+            auto reserve = gcWork_.TryReserve(static_cast<usize>(capacity));
+            if (!reserve) {
+                return fail(reserve.Error());
+            }
         }
     }
 
@@ -1981,25 +2082,39 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
     }
 
     storage = memory.Value();
-    Slot* freeSlot = nullptr;
+    bool needChunk = false;
     {
         platform::LockGuard lock(gate_);
-        for (Chunk* chunk = chunks_; chunk && !freeSlot; chunk = chunk->next) {
-            for (auto& slot : chunk->slots) {
-                if (slot.index < options_.maxSlots && slot.state == SlotState::Free) {
-                    freeSlot = &slot;
-                    break;
-                }
-            }
-        }
+        needChunk = freeSlots_ == nullptr;
     }
 
-    if (!freeSlot) {
+    if (needChunk) {
         if (uint64(chunkCount_) * SlotsPerChunk >= options_.maxSlots) {
             return fail(ErrorCode::CapacityExceeded);
         }
 
-        auto block = allocator_.Allocate(sizeof(Chunk), alignof(Chunk), 0x43484e4bu);
+        // chunk 표가 가득 찼으면 두 배 표(상한은 maxSlots를 담는 chunk 수)를 잠금 밖에서 받는다.
+        uint32 grownChunkCapacity = 0;
+        if (chunkCount_ == chunkCapacity_) {
+            const uint64 limit = (uint64(options_.maxSlots) + SlotsPerChunk - 1) / SlotsPerChunk;
+            uint64 capacity =
+                chunkCapacity_ == 0 ? MinimumChunkCapacity : uint64(chunkCapacity_) * 2;
+            if (capacity > limit) {
+                capacity = limit;
+            }
+
+            auto table = allocator_.Allocate(sizeof(ChunkTable) +
+                                                 static_cast<usize>(capacity) * sizeof(Chunk*),
+                                             alignof(ChunkTable), ChunkTableTag);
+            if (!table) {
+                return fail(table.Error());
+            }
+
+            grownChunks = ::new (table.Value()) ChunkTable();
+            grownChunkCapacity = static_cast<uint32>(capacity);
+        }
+
+        auto block = allocator_.Allocate(sizeof(Chunk), alignof(Chunk), ChunkTag);
         if (!block) {
             return fail(block.Error());
         }
@@ -2015,20 +2130,45 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
 
         {
             platform::LockGuard lock(gate_);
-            chunk->next = chunks_;
-            chunks_ = chunk;
-            ++chunkCount_;
+            if (grownChunks != nullptr) {
+                // 옛 표는 반환하지 않고 사슬로 보관한다(ChunkTable 주석).
+                Chunk** entries = grownChunks->Entries();
+                for (uint32 index = 0; index < chunkCount_; ++index) {
+                    entries[index] = chunks_[index];
+                }
+
+                grownChunks->previous = chunkTables_;
+                chunkTables_ = grownChunks;
+                chunks_ = entries;
+                chunkCapacity_ = grownChunkCapacity;
+            }
+
+            chunks_[chunkCount_++] = chunk;
+            // 낮은 번호부터 쓰도록 거꾸로 넣는다. 상한 밖(Exhausted) 슬롯은 넣지 않는다.
+            for (uint32 index = SlotsPerChunk; index-- != 0;) {
+                Slot& slot = chunk->slots[index];
+                if (slot.state == SlotState::Free) {
+                    slot.nextInList = freeSlots_;
+                    freeSlots_ = &slot;
+                }
+            }
         }
 
-        freeSlot = &chunk->slots[0];
+        grownChunks = nullptr;
     }
 
-    ObjectHandle handle{domain_, freeSlot->index, freeSlot->generation};
+    Slot* freeSlot = nullptr;
+    ObjectHandle handle;
     NameEntry* previousTable = nullptr;
     {
         // 상태·이름 색인·부모 고리를 한 잠금 안에서 게시한다(공개 전 객체도 이름을 점유한다).
         platform::LockGuard lock(gate_);
-        freeSlot->state = SlotState::Reserved;
+        freeSlot = freeSlots_;
+        freeSlots_ = freeSlot->nextInList;
+        freeSlot->nextInList = nullptr;
+        ++freeSlotProbes_;
+        handle = HandleOf(*freeSlot);
+        freeSlot->SetState(tally_, SlotState::Reserved);
         freeSlot->storage = memory.Value();
         freeSlot->transaction = transaction;
         freeSlot->stableType = type;
@@ -2168,7 +2308,7 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
         // 이름 색인 항목은 Create 때 이미 들어 있으므로 상태만 바꾼다(조회가 Alive부터 보게 된다).
         for (usize index = 0; index < staged.Size(); ++index) {
             Slot* slot = FindSlot(staged[index]);
-            slot->state = SlotState::Alive;
+            slot->SetState(tally_, SlotState::Alive);
             slot->transaction = 0;
             if (gcPhase_ == GcPhase::Marking) {
                 if (ShadeLocked(staged[index]) != ErrorCode::None) {
@@ -2187,6 +2327,7 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
         // root 증가는 공개와 같은 잠금 안이다(A0-Ob 관찰자 기록도 여기다).
         for (usize index = 0; index < roots.Size(); ++index) {
             ++FindSlot(roots[index])->roots;
+            ++tally_.roots;
         }
 
         --constructions_;
@@ -2213,9 +2354,11 @@ void ObjectRegistry::Rollback(uint64 transaction, Span<const ObjectHandle> stage
         processing_ = true;
     }
 
-    // 생성 저널을 역순으로 처리해 나중에 만든 객체를 먼저 정리한다.
+    // 생성 저널을 역순으로 처리해 나중에 만든 객체를 먼저 정리한다. 저널의 슬롯만 회수한다(다른
+    // Retired 슬롯은 DrainRetired·GC가 회수한다).
     // 소멸자는 Registry 잠금 밖에서 호출하되 processing_으로 변경 재진입을 막는다.
     for (usize remaining = staged.Size(); remaining != 0; --remaining) {
+        ReclaimWork work;
         {
             platform::LockGuard lock(gate_);
             Slot* slot = FindSlot(staged[remaining - 1]);
@@ -2224,11 +2367,19 @@ void ObjectRegistry::Rollback(uint64 transaction, Span<const ObjectHandle> stage
             }
 
             // 역순이라 같은 트랜잭션 자식이 먼저 떨어지므로 부모는 자식이 없을 때 회수된다.
-            slot->state = SlotState::Retired;
+            slot->SetState(tally_, SlotState::Retired);
             DetachIdentityLocked(*slot);
+            if (!IsReclaimable(*slot)) {
+                // 공개 전 객체는 보유 계수가 없고 자식(같은 트랜잭션)은 먼저 회수되어 여기에 오지
+                // 않는다. 그래도 남으면 회수 대상 목록에 넣어 DrainRetired·GC가 회수하게 한다.
+                LinkRetiredLocked(*slot, RetiredQueue::Pending);
+                continue;
+            }
+
+            work = TakeForReclaimLocked(*slot);
         }
 
-        ReclaimEligible();
+        FinishReclaim(work);
     }
 
     {
@@ -2336,8 +2487,8 @@ Result<void> ObjectRegistry::BeginCollection(const ObjectAccessContext& access) 
 
     if (++markEpoch_ == 0) {
         markEpoch_ = 1;
-        for (Chunk* chunk = chunks_; chunk; chunk = chunk->next) {
-            for (auto& slot : chunk->slots) {
+        for (uint32 chunk = chunkCount_; chunk-- != 0;) {
+            for (auto& slot : chunks_[chunk]->slots) {
                 slot.mark = 0;
             }
         }
@@ -2346,10 +2497,11 @@ Result<void> ObjectRegistry::BeginCollection(const ObjectAccessContext& access) 
     gcPhase_ = GcPhase::Marking;
     gcCursor_ = 0;
     cycleGc_ = {};
-    sweepChunk_ = nullptr;
+    sweepChunk_ = 0;
     sweepOffset_ = 0;
-    for (Chunk* chunk = chunks_; chunk; chunk = chunk->next) {
-        for (auto& slot : chunk->slots) {
+    // 슬롯 순회는 새 chunk부터 옛 chunk로, chunk 안은 낮은 번호부터다(root 표식·sweep·통계 순서).
+    for (uint32 chunk = chunkCount_; chunk-- != 0;) {
+        for (auto& slot : chunks_[chunk]->slots) {
             if (slot.state == SlotState::Alive || slot.state == SlotState::DestroyRequested) {
                 ++cycleGc_.examined;
                 if (slot.roots != 0 &&
@@ -2383,22 +2535,85 @@ Result<void> ObjectRegistry::CancelCollection(const ObjectAccessContext& access)
 
 bool ObjectRegistry::IsReclaimable(const Slot& slot) const noexcept {
     // 고리에 남은 자식이 있으면 부모 슬롯을 재사용하지 않는다. white 부모가 자식보다 먼저
-    // Retire되면 자식들이 같은 sweep에서 스스로 떨어질 때까지 기다린다(그 사이
-    // DrainRetired·rollback 회수 포함).
+    // Retire되면 자식들이 같은 sweep에서 스스로 떨어질 때까지 기다린다(그 사이 DrainRetired 회수
+    // 포함 — rollback은 저널의 슬롯만 회수하고, 그 자식은 같은 저널의 뒤쪽이라 먼저 떨어진다).
     return slot.state == SlotState::Retired && slot.roots == 0 && slot.borrows == 0 &&
            slot.backendHolds == 0 && slot.encodePins == 0 && slot.firstChild == nullptr;
 }
 
-bool ObjectRegistry::HasReclaimableLocked() const noexcept {
-    for (Chunk* chunk = chunks_; chunk; chunk = chunk->next) {
-        for (const auto& slot : chunk->slots) {
-            if (IsReclaimable(slot)) {
-                return true;
-            }
-        }
+ObjectRegistry::Slot* ObjectRegistry::NextReclaimableLocked() noexcept {
+    // 지연 목록의 슬롯은 회수할 수 없다는 불변식이 있다(회수 가능해지는 순간 WakeDeferredLocked가
+    // 풀린 목록으로 옮긴다). 그래서 지연 슬롯은 다시 걷지 않는다.
+    if (retiredReady_.head != nullptr) {
+        ++reclaimProbes_;
+        return retiredReady_.head;
     }
 
-    return false;
+    while (Slot* slot = retiredPending_.head) {
+        ++reclaimProbes_;
+        if (IsReclaimable(*slot)) {
+            return slot;
+        }
+
+        UnlinkRetiredLocked(*slot);
+        LinkRetiredLocked(*slot, RetiredQueue::Deferred);
+    }
+
+    return nullptr;
+}
+
+bool ObjectRegistry::HasReclaimableLocked() noexcept {
+    return NextReclaimableLocked() != nullptr;
+}
+
+void ObjectRegistry::LinkRetiredLocked(Slot& slot, RetiredQueue queue) noexcept {
+    RetiredList& list = queue == RetiredQueue::Pending    ? retiredPending_
+                        : queue == RetiredQueue::Deferred ? retiredDeferred_
+                                                          : retiredReady_;
+    slot.queue = queue;
+    slot.nextInList = nullptr;
+    slot.prevInList = list.tail;
+    if (list.tail != nullptr) {
+        list.tail->nextInList = &slot;
+    } else {
+        list.head = &slot;
+    }
+
+    list.tail = &slot;
+}
+
+void ObjectRegistry::UnlinkRetiredLocked(Slot& slot) noexcept {
+    RetiredList& list = slot.queue == RetiredQueue::Pending    ? retiredPending_
+                        : slot.queue == RetiredQueue::Deferred ? retiredDeferred_
+                                                               : retiredReady_;
+    if (slot.prevInList != nullptr) {
+        slot.prevInList->nextInList = slot.nextInList;
+    } else {
+        list.head = slot.nextInList;
+    }
+
+    if (slot.nextInList != nullptr) {
+        slot.nextInList->prevInList = slot.prevInList;
+    } else {
+        list.tail = slot.prevInList;
+    }
+
+    slot.queue = RetiredQueue::None;
+    slot.nextInList = nullptr;
+    slot.prevInList = nullptr;
+}
+
+void ObjectRegistry::RetireLocked(Slot& slot) noexcept {
+    slot.SetState(tally_, SlotState::Retired);
+    DetachIdentityLocked(slot);
+    LinkRetiredLocked(slot, RetiredQueue::Pending);
+}
+
+void ObjectRegistry::WakeDeferredLocked(Slot& slot) noexcept {
+    if (slot.queue == RetiredQueue::Deferred && IsReclaimable(slot)) {
+        UnlinkRetiredLocked(slot);
+        LinkRetiredLocked(slot, RetiredQueue::Ready);
+    }
 }
 
 Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& access,
@@ -2464,7 +2679,7 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
                 // 아직 slot을 Retired로 바꾸기 전에도 white 객체의 Resolve/Pin/연결을 차단한다.
                 cycleGc_.marked = static_cast<uint32>(gcWork_.Size());
                 gcPhase_ = GcPhase::Sweeping;
-                sweepChunk_ = chunks_;
+                sweepChunk_ = chunkCount_;
                 sweepOffset_ = 0;
                 break;
             }
@@ -2554,23 +2769,24 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
         return Result<GcProgress>::Failure(state.error);
     }
 
+    // cutoff 뒤 Sweeping 중 생성이 붙인 새 chunk(더 큰 번호)는 방문하지 않는다. 그 객체는 현재
+    // epoch로 표식되어 이번 cycle의 white 후보가 아니다.
     while (gcPhase_ == GcPhase::Sweeping && processed < budget.maxObjects && inBudget()) {
         platform::LockGuard lock(gate_);
-        if (!sweepChunk_) {
+        if (sweepChunk_ == 0) {
             gcPhase_ = GcPhase::Reclaiming;
             break;
         }
 
-        Slot& slot = sweepChunk_->slots[sweepOffset_++];
+        Slot& slot = chunks_[sweepChunk_ - 1]->slots[sweepOffset_++];
         if ((slot.state == SlotState::Alive || slot.state == SlotState::DestroyRequested) &&
             slot.mark != markEpoch_) {
-            slot.state = SlotState::Retired;
-            DetachIdentityLocked(slot);
+            RetireLocked(slot);
             ++cycleGc_.retired;
         }
 
         if (sweepOffset_ == SlotsPerChunk) {
-            sweepChunk_ = sweepChunk_->next;
+            --sweepChunk_;
             sweepOffset_ = 0;
         }
 
@@ -2611,13 +2827,7 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access) noex
         }
 
         processing_ = true;
-        for (Chunk* chunk = chunks_; chunk; chunk = chunk->next) {
-            for (auto& slot : chunk->slots) {
-                if (slot.state == SlotState::Alive || slot.state == SlotState::DestroyRequested) {
-                    ++report.examined;
-                }
-            }
-        }
+        report.examined = tally_.liveObjects + tally_.destroyRequested;
     }
 
     // 모든 후보를 담을 용량을 먼저 확보한다. OOM이 발생해도 아직 어떤 객체도 retire하지 않았다.
@@ -2634,15 +2844,15 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access) noex
         platform::LockGuard lock(gate_);
         if (++markEpoch_ == 0) {
             markEpoch_ = 1;
-            for (Chunk* chunk = chunks_; chunk; chunk = chunk->next) {
-                for (auto& slot : chunk->slots) {
+            for (uint32 chunk = chunkCount_; chunk-- != 0;) {
+                for (auto& slot : chunks_[chunk]->slots) {
                     slot.mark = 0;
                 }
             }
         }
 
-        for (Chunk* chunk = chunks_; chunk; chunk = chunk->next) {
-            for (auto& slot : chunk->slots) {
+        for (uint32 chunk = chunkCount_; chunk-- != 0;) {
+            for (auto& slot : chunks_[chunk]->slots) {
                 if ((slot.state == SlotState::Alive || slot.state == SlotState::DestroyRequested) &&
                     slot.roots != 0) {
                     auto pushed = work.TryPushBack({domain_, slot.index, slot.generation});
@@ -2675,12 +2885,11 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access) noex
     report.marked = static_cast<uint32>(work.Size());
     {
         platform::LockGuard lock(gate_);
-        for (Chunk* chunk = chunks_; chunk; chunk = chunk->next) {
-            for (auto& slot : chunk->slots) {
+        for (uint32 chunk = chunkCount_; chunk-- != 0;) {
+            for (auto& slot : chunks_[chunk]->slots) {
                 if ((slot.state == SlotState::Alive || slot.state == SlotState::DestroyRequested) &&
                     slot.mark != markEpoch_) {
-                    slot.state = SlotState::Retired;
-                    DetachIdentityLocked(slot);
+                    RetireLocked(slot);
                     ++report.retired;
                 }
             }
@@ -2698,75 +2907,85 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access) noex
     return Result<GcReport>::Success(report);
 }
 
+ObjectRegistry::ReclaimWork ObjectRegistry::TakeForReclaimLocked(Slot& slot) noexcept {
+    if (slot.indexed || slot.linked) {
+        platform::Fatal("Reclaiming an object still in the name index or child ring");
+    }
+
+    if (slot.queue != RetiredQueue::None) {
+        platform::Fatal("Reclaiming an object still in a retired queue");
+    }
+
+    // 저장소를 목록에서 분리한 뒤 잠금을 푼다. 콜백 중 통계 조회는 가능하지만 재회수는 불가하다.
+    // 지역 TypeLease가 소멸자 코드까지 살아 있게 하므로 해제 콜백이 끝난 뒤 반환한다. 이름 기록도
+    // 잠금 밖에서 반환한다(조회는 잠금 안에서 복사해 두었다).
+    slot.SetState(tally_, SlotState::Reclaiming);
+    ReclaimWork work;
+    work.slot = &slot;
+    work.type = Move(slot.type);
+    work.object = slot.object;
+    work.storage = slot.storage;
+    work.record = slot.name;
+    slot.name = nullptr;
+    return work;
+}
+
+void ObjectRegistry::FinishReclaim(ReclaimWork& work) noexcept {
+    // User destructors and allocator callbacks never execute under the registry gate.
+    work.type.Ops().destroy(work.object);
+    auto released = allocator_.Deallocate(work.storage);
+    if (!released) {
+        platform::Fatal("Object allocation ownership mismatch");
+    }
+
+    ReleaseRegistryMemory(allocator_, work.record);
+    {
+        platform::LockGuard lock(gate_);
+        Slot& slot = *work.slot;
+        slot.object = nullptr;
+        slot.storage = nullptr;
+        slot.transaction = 0;
+        slot.stableType = {};
+        slot.mark = 0;
+        slot.outer = {};
+        slot.outermost = nullptr;
+        slot.parent = nullptr;
+        slot.lastChild = nullptr;
+        slot.pathBytes = 0;
+        // 세대를 0/과거 값으로 순환시키면 오래된 WeakRef가 새 객체를 가리킬 수 있다.
+        // 한도에 도달한 슬롯은 재사용하지 않고 Exhausted로 남긴다.
+        if (slot.generation >= options_.maxGeneration) {
+            slot.SetState(tally_, SlotState::Exhausted);
+        } else {
+            ++slot.generation;
+            slot.SetState(tally_, SlotState::Free);
+            slot.nextInList = freeSlots_;
+            freeSlots_ = &slot;
+        }
+    }
+
+    work.type.Reset();
+}
+
 uint32 ObjectRegistry::ReclaimEligible(uint32 maximum, uint64 deadline) noexcept {
+    // 회수 사이에 잠금을 풀고 사용자 소멸자를 부른다. 그 사이 소멸자(또는 다른 스레드)가 지연
+    // 슬롯의 보유 계수를 반환하면 그 슬롯이 풀린 목록으로 옮겨져 다음 차례에 회수된다(목록을
+    // 처음부터 다시 걷지 않는다).
     uint32 reclaimed = 0;
     while (reclaimed < maximum && (deadline == 0 || platform::MonotonicNanoseconds() < deadline)) {
-        Slot* selected = nullptr;
-        TypeLease type;
-        Object* object = nullptr;
-        void* storage = nullptr;
-        NameRecord* record = nullptr;
+        ReclaimWork work;
         {
             platform::LockGuard lock(gate_);
-            for (Chunk* chunk = chunks_; chunk && !selected; chunk = chunk->next) {
-                for (auto& slot : chunk->slots) {
-                    if (IsReclaimable(slot)) {
-                        selected = &slot;
-                        break;
-                    }
-                }
-            }
-
-            if (!selected) {
+            Slot* selected = NextReclaimableLocked();
+            if (selected == nullptr) {
                 break;
             }
 
-            if (selected->indexed || selected->linked) {
-                platform::Fatal("Reclaiming an object still in the name index or child ring");
-            }
-
-            // 저장소를 큐에서 분리한 뒤 잠금을 푼다. 콜백 중 통계 조회는 가능하지만 재회수는
-            // 불가하다. 지역 TypeLease가 소멸자 코드까지 살아 있게 하므로 해제 콜백이 끝난 뒤
-            // 반환한다. 이름 기록도 잠금 밖에서 반환한다(조회는 잠금 안에서 복사해 두었다).
-            selected->state = SlotState::Reclaiming;
-            type = Move(selected->type);
-            object = selected->object;
-            storage = selected->storage;
-            record = selected->name;
-            selected->name = nullptr;
+            UnlinkRetiredLocked(*selected);
+            work = TakeForReclaimLocked(*selected);
         }
 
-        // User destructors and allocator callbacks never execute under the registry gate.
-        type.Ops().destroy(object);
-        auto released = allocator_.Deallocate(storage);
-        if (!released) {
-            platform::Fatal("Object allocation ownership mismatch");
-        }
-
-        ReleaseRegistryMemory(allocator_, record);
-        {
-            platform::LockGuard lock(gate_);
-            selected->object = nullptr;
-            selected->storage = nullptr;
-            selected->transaction = 0;
-            selected->stableType = {};
-            selected->mark = 0;
-            selected->outer = {};
-            selected->outermost = nullptr;
-            selected->parent = nullptr;
-            selected->lastChild = nullptr;
-            selected->pathBytes = 0;
-            // 세대를 0/과거 값으로 순환시키면 오래된 WeakRef가 새 객체를 가리킬 수 있다.
-            // 한도에 도달한 슬롯은 재사용하지 않고 Exhausted로 남긴다.
-            if (selected->generation >= options_.maxGeneration) {
-                selected->state = SlotState::Exhausted;
-            } else {
-                ++selected->generation;
-                selected->state = SlotState::Free;
-            }
-        }
-
-        type.Reset();
+        FinishReclaim(work);
         ++reclaimed;
     }
 
@@ -3413,58 +3632,96 @@ Result<void> ObjectRegistry::CollectInners(const ObjectAccessContext& access, Ob
 
 ObjectStats ObjectRegistry::Stats() const noexcept {
     platform::LockGuard lock(gate_);
-    ObjectStats stats;
+    // 상태 전이·계수 변경마다 맞춘 합이라 슬롯을 훑지 않는다(O(1)).
+    ObjectStats stats = tally_;
+    stats.borrows = totalBorrows_;
     stats.chunks = chunkCount_;
-    for (Chunk* chunk = chunks_; chunk; chunk = chunk->next) {
-        for (auto& slot : chunk->slots) {
-            switch (slot.state) {
-            case SlotState::Alive:
-                ++stats.liveObjects;
-                break;
-            case SlotState::Reserved:
-                ++stats.reservedObjects;
-                break;
-            case SlotState::DestroyRequested:
-                ++stats.destroyRequested;
-                break;
-            case SlotState::Retired:
-            case SlotState::Reclaiming:
-                ++stats.retiredObjects;
-                break;
-            default:
-                break;
+    stats.namedObjects = nameLive_;
+    if constexpr (IsDebugBuild) {
+        // Debug 회계: 슬롯 전체를 다시 세어 갱신 누락을 바로 잡아내고, 빈 슬롯·회수 대상 목록이 그
+        // 상태의 슬롯을 빠짐없이 한 번씩 담는지(지연 목록에는 회수 가능한 슬롯이 없는지) 본다.
+        ObjectStats counted;
+        uint64 freeCount = 0;
+        uint64 retiredCount = 0;
+        for (uint32 chunk = chunkCount_; chunk-- != 0;) {
+            for (const auto& slot : chunks_[chunk]->slots) {
+                if (uint32* counter = StateTally(counted, slot.state)) {
+                    ++*counter;
+                }
+
+                freeCount += slot.state == SlotState::Free ? 1u : 0u;
+                retiredCount += slot.state == SlotState::Retired ? 1u : 0u;
+                counted.roots += slot.roots;
+                counted.borrows += slot.borrows;
+                counted.backendHolds += slot.backendHolds;
+                counted.encodePins += slot.encodePins;
+            }
+        }
+
+        if (counted.liveObjects != stats.liveObjects ||
+            counted.reservedObjects != stats.reservedObjects ||
+            counted.destroyRequested != stats.destroyRequested ||
+            counted.retiredObjects != stats.retiredObjects || counted.roots != stats.roots ||
+            counted.borrows != stats.borrows || counted.backendHolds != stats.backendHolds ||
+            counted.encodePins != stats.encodePins) {
+            platform::Fatal("Object registry statistics diverged from its slots");
+        }
+
+        const uint64 limit = uint64(chunkCount_) * SlotsPerChunk;
+        uint64 listed = 0;
+        for (const Slot* slot = freeSlots_; slot != nullptr; slot = slot->nextInList) {
+            if (slot->state != SlotState::Free || slot->queue != RetiredQueue::None ||
+                ++listed > limit) {
+                platform::Fatal("Object registry free list is corrupt");
+            }
+        }
+
+        if (listed != freeCount) {
+            platform::Fatal("Object registry free list lost a slot");
+        }
+
+        listed = 0;
+        const RetiredList* lists[] = {&retiredPending_, &retiredDeferred_, &retiredReady_};
+        const RetiredQueue queues[] = {RetiredQueue::Pending, RetiredQueue::Deferred,
+                                       RetiredQueue::Ready};
+        for (uint32 at = 0; at < 3; ++at) {
+            const Slot* previous = nullptr;
+            for (const Slot* slot = lists[at]->head; slot != nullptr; slot = slot->nextInList) {
+                if (slot->state != SlotState::Retired || slot->queue != queues[at] ||
+                    slot->prevInList != previous || ++listed > limit ||
+                    (queues[at] == RetiredQueue::Deferred && IsReclaimable(*slot))) {
+                    platform::Fatal("Object registry retired queue is corrupt");
+                }
+
+                previous = slot;
             }
 
-            stats.roots += slot.roots;
-            stats.borrows += slot.borrows;
-            stats.backendHolds += slot.backendHolds;
-            stats.encodePins += slot.encodePins;
+            if (lists[at]->tail != previous) {
+                platform::Fatal("Object registry retired queue tail is corrupt");
+            }
+        }
+
+        if (listed != retiredCount) {
+            platform::Fatal("Object registry retired queue lost a slot");
         }
     }
 
-    stats.namedObjects = nameLive_;
     return stats;
 }
 
 Result<uint32>
 ObjectRegistry::CaptureDiagnostics(Span<ObjectDiagnosticRecord> output) const noexcept {
     platform::LockGuard lock(gate_);
-    uint32 required = 0;
-    for (Chunk* chunk = chunks_; chunk; chunk = chunk->next) {
-        for (auto& slot : chunk->slots) {
-            if (slot.state != SlotState::Free && slot.state != SlotState::Exhausted) {
-                ++required;
-            }
-        }
-    }
-
+    // Free·Exhausted가 아닌 슬롯 수다(상태별 통계의 합).
+    const uint32 required = tally_.liveObjects + tally_.reservedObjects + tally_.destroyRequested +
+                            tally_.retiredObjects;
     if (output.Size() < required) {
         return Result<uint32>::Failure(ErrorCode::CapacityExceeded);
     }
 
     uint32 written = 0;
-    for (Chunk* chunk = chunks_; chunk; chunk = chunk->next) {
-        for (auto& slot : chunk->slots) {
+    for (uint32 chunk = chunkCount_; chunk-- != 0;) {
+        for (auto& slot : chunks_[chunk]->slots) {
             ObjectPhase phase;
             switch (slot.state) {
             case SlotState::Reserved:
