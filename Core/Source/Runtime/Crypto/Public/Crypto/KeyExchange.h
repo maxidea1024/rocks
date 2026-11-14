@@ -145,7 +145,8 @@ struct KxSessionKeys {
 // iv가 0이라 128 bit 키에서 다중 사용자 보강을 잃는다.
 // - 빈 키 쌍은 StaleHandle, 열거값이 아니거나 키가 32 byte가 아닌 알고리즘은 InvalidArgument(기기와
 //   관계없이 같다), 이 기기에서 쓸 수 없는 알고리즘은 Unsupported다.
-// - 상대 공개키가 올바른 점이 아니면(small-order, 공유 비밀이 0) AuthenticationFailed다.
+// - 상대 공개키가 small-order 점이면(공유 비밀이 0) AuthenticationFailed다. 그 밖의 32 byte는 RFC
+//   7748대로 받는다(최상위 bit는 무시하고, twist 점과 p 이상인 비정규 u도 계산한다).
 // - 키 저장소가 찼으면 OutOfMemory다.
 [[nodiscard]] Result<KxSessionKeys> TryClientSessionKeys(const KxKeyPair& client,
                                                          const KxPublicKey& server,

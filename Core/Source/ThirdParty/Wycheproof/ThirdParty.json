@@ -7,7 +7,7 @@
   "source": {
     "url": "https://github.com/C2SP/wycheproof/archive/65ca494727a52944c204441c860b039e6786b99b.zip",
     "sha256": "5a0cdcbf5550d7a67602bee4690edbd79e6ef7a12b6d3250fbc339d5735e06f2",
-    "verification": "GitHub HTTPS commit archive(2026-11-15, main = 65ca494727a52944c204441c860b039e6786b99b). 릴리스가 없어 commit으로 고정한다. 서명은 없다. 암호 모듈 시험에 쓰는 testvectors_v1 파일만 들인다(AEGIS는 Wycheproof가 128 bit tag라 libsodium의 256 bit tag와 맞지 않아 뺀다)."
+    "verification": "GitHub HTTPS commit archive(2026-11-15, main = 65ca494727a52944c204441c860b039e6786b99b). 릴리스가 없어 commit으로 고정한다. 서명은 없다. 암호 모듈 시험에 쓰는 testvectors_v1 파일만 들인다(AEGIS는 Wycheproof가 128 bit tag라 libsodium의 256 bit tag로 tag·invalid 사례를 검증할 수 없어 뺀다)."
   },
   "licenses": [
     {
@@ -40,6 +40,6 @@
   "notes": [
     "commit archive에서 testvectors_v1/의 C1 암호 시험 파일 10개와 LICENSE만 byte 그대로 꺼냈다(Java·Go 도구와 다른 벡터는 두지 않는다). Crypto 시험(Crypto/Tests/WycheproofTests.cpp)이 Core Json으로 읽는다. 설계는 Docs/Design/Crypto.ko.md 5.4·12절.",
     "시험 데이터일 뿐 어떤 모듈 바이너리에도 들어가지 않으므로 embeddedIn이 없다(SDK가 라이선스를 배포할 필요 없다).",
-    "AEGIS 벡터는 128 bit tag라 libsodium(256 bit tag)과 맞지 않아 들이지 않았다. CMAC·secretstream 파일은 경량 계층(C2)·스트리밍(C3)에서 더한다."
+    "AEGIS 벡터는 128 bit tag라 libsodium(256 bit tag)으로 tag·invalid 사례를 검증할 수 없어 들이지 않았다. CMAC·secretstream 파일은 경량 계층(C2)·스트리밍(C3)에서 더한다."
   ]
 }

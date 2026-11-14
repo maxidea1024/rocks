@@ -13,6 +13,7 @@
 #include <TestSupport/Test.h>
 
 #include <stdio.h>
+#include <string.h>
 
 using namespace rocks;
 using namespace rocks::crypto;
@@ -20,19 +21,23 @@ using namespace rocks::crypto;
 // Wycheproof(C2SP, Apache-2.0, 데이터 전용 ThirdParty) 시험 벡터를 사상표대로 돌린다
 // (Docs/Design/Crypto.ko.md 12절). 모든 사례를 세고 갈래별 개수를 고정해 조용히 건너뛰는 사례가
 // 없게 한다. 사상:
-// - AEAD: valid는 봉인 byte와 열기 결과가 같고 invalid는 열기가 AuthenticationFailed다. AES-GCM은
-//   256 bit 키·96 bit nonce만 검증한다. 128 bit 키는 AES 경량 계층(C2) 전까지 Unsupported, 96 bit가
-//   아닌 nonce는 Unsupported, 192 bit 키는 열거값이 없어 세기만 한다. ChaCha20-Poly1305·
+// - AEAD: valid는 봉인 byte와 열기 결과가 같고, invalid는 열기가 AuthenticationFailed이고 평문
+//   출력을 0으로 지운다. AES-GCM은 256 bit 키·96 bit nonce만 검증한다. 128 bit 키는 AES 경량
+//   계층(C2) 전까지 Unsupported, 96 bit가 아닌 nonce는 Unsupported, 192 bit 키는 열거값이 없어
+//   세기만 한다. AES HW가 없는 기기에서는 256 bit 키도 Unsupported로 센다. ChaCha20-Poly1305·
 //   XChaCha20-Poly1305의 nonce 길이 오류는 InvalidArgument다.
-// - HMAC: 잘린 tag는 전체 tag의 앞부분과 비교한다(Rocks 검증 함수는 잘린 tag를 받지 않는다).
+// - HMAC: 잘린 tag는 전체 tag의 앞부분과 비교하고, 검증 함수는 잘린 tag를 AuthenticationFailed로
+//   거부한다.
 // - HKDF: valid는 출력이 같고 invalid(출력 길이 상한 초과)는 InvalidArgument다.
 // - Ed25519: valid는 수용, invalid는 AuthenticationFailed다. acceptable은 libsodium 판정(혼합 차수
 //   공개키는 수용, small-order 공개키는 거부)을 기대값으로 둔다.
-// - X25519: crypto_kx로 돌린다. 공유 비밀이 0이면 AuthenticationFailed이고, 그 밖에는 rx ‖ tx가
-//   BLAKE2b-512(공유 비밀 ‖ client_pk ‖ server_pk)와 같다.
+// - X25519: crypto_kx로 클라이언트·서버 양쪽을 돌린다. 공유 비밀이 0이면(small-order 점)
+//   AuthenticationFailed이고, 그 밖에는(twist 점·비정규 u 포함) 세션 키가 BLAKE2b-512(공유 비밀 ‖
+//   client_pk ‖ server_pk)와 같다.
 // - ML-KEM-768: seed로 만든 공개키가 ek와 같고 캡슐 해제 결과가 K와 같다(암묵적 거부 포함). seed
 //   길이 오류는 InvalidArgument, 암호문 길이 오류는 AuthenticationFailed다.
-// - AEGIS는 Wycheproof가 128 bit tag라 libsodium(256 bit tag)과 맞지 않아 들이지 않았다.
+// - AEGIS는 들이지 않았다. Wycheproof는 128 bit tag라 libsodium(256 bit tag)으로는 tag와 invalid
+//   사례를 검증할 수 없다(암호문 부분은 tag 길이와 무관하지만 tag256 draft 벡터로 대신한다).
 namespace {
 
 constexpr const char* VectorDirectory =
@@ -69,12 +74,23 @@ struct VectorFile {
     }
 };
 
-// hex 문자열 필드를 byte로 푼다. 필드가 없으면 빈 byte다.
-bool Decode(JsonValue object, const char* field, Array<uint8>& out) noexcept {
+enum class Field : uint8 {
+    Required,
+    Optional, // 없으면 빈 byte다
+};
+
+// hex 문자열 필드를 byte로 푼다. 필수 필드가 없거나(필드 이름 오타·schema 변경을 invalid 갈래가
+// 우연히 통과하지 않게), 문자열이 아니거나, hex가 아니면 실패다.
+bool Decode(JsonValue object, const char* field, Array<uint8>& out,
+            Field kind = Field::Required) noexcept {
     const JsonValue value = object.Find(field);
     if (!value.IsValid()) {
         out.Clear();
-        return true;
+        return kind == Field::Optional;
+    }
+
+    if (!value.IsString()) {
+        return false;
     }
 
     const StringView hex = value.GetString();
@@ -86,9 +102,20 @@ bool Decode(JsonValue object, const char* field, Array<uint8>& out) noexcept {
     return decoded && decoded.Value() == out.Size();
 }
 
-usize IntegerField(JsonValue object, const char* field) noexcept {
-    auto value = object.Find(field).TryGetUInt64();
-    return value ? static_cast<usize>(value.Value()) : 0;
+// 정수 필드를 읽는다. 없거나 정수가 아니면 실패다.
+bool IntegerField(JsonValue object, const char* field, usize& out) noexcept {
+    const JsonValue value = object.Find(field);
+    if (!value.IsNumber()) {
+        return false;
+    }
+
+    auto number = value.TryGetUInt64();
+    if (!number) {
+        return false;
+    }
+
+    out = static_cast<usize>(number.Value());
+    return true;
 }
 
 bool ResultIs(JsonValue test, const char* expected) noexcept {
@@ -148,7 +175,8 @@ void RunAead(const char* name, AeadAlgorithm algorithm, AeadCounts& counts) {
     counts.total = ForEachTest(file, [&](JsonValue group, JsonValue test) {
         REQUIRE(Decode(test, "key", key) && Decode(test, "iv", iv) && Decode(test, "aad", aad) &&
                 Decode(test, "msg", msg) && Decode(test, "ct", ct) && Decode(test, "tag", tag));
-        const usize keyBits = IntegerField(group, "keySize");
+        usize keyBits = 0;
+        REQUIRE(IntegerField(group, "keySize", keyBits));
         if (gcm && keyBits == 128) {
             CHECK(AeadKey::TryImport(AeadAlgorithm::Aes128Gcm, key.View()).Error() ==
                   ErrorCode::Unsupported);
@@ -188,10 +216,13 @@ void RunAead(const char* name, AeadAlgorithm algorithm, AeadCounts& counts) {
                                           tag.View(), out.View()));
             CHECK(ConstantTimeEquals(out.View(), msg.View()));
         } else {
+            // 실패한 열기는 평문 출력 전체를 0으로 지운다(Aead.h 계약).
             CHECK(ResultIs(test, "invalid"));
+            memset(out.Data(), 0xA5, out.Size());
             CHECK(hazmat::TryOpenDetached(aeadKey.Value(), iv.View(), aad.View(), ct.View(),
                                           tag.View(), out.View())
                       .Error() == ErrorCode::AuthenticationFailed);
+            CHECK(IsAllZero(out.View()));
         }
 
         ++counts.verified;
@@ -248,10 +279,12 @@ TEST(CryptoWycheproofHmac) {
             const bool same =
                 ConstantTimeEquals(Span<const uint8>(full).Left(tag.Size()), tag.View());
             CHECK(same == ResultIs(test, "valid"));
+            const auto verified = TryVerifyMac(macKey.Value(), msg.View(), tag.View());
             if (tag.Size() == item.tagBytes) {
-                const auto verified = TryVerifyMac(macKey.Value(), msg.View(), tag.View());
                 CHECK(static_cast<bool>(verified) == same);
             } else {
+                // 검증 함수는 잘린 tag를 받지 않는다(맞는 앞부분이어도 거부).
+                CHECK(verified.Error() == ErrorCode::AuthenticationFailed);
                 ++truncated;
             }
         });
@@ -280,7 +313,8 @@ TEST(CryptoWycheproofHkdf) {
         const usize total = ForEachTest(file, [&](JsonValue, JsonValue test) {
             REQUIRE(Decode(test, "ikm", ikm) && Decode(test, "salt", salt) &&
                     Decode(test, "info", info) && Decode(test, "okm", okm));
-            REQUIRE(out.TryResize(IntegerField(test, "size")));
+            usize size = 0;
+            REQUIRE(IntegerField(test, "size", size) && out.TryResize(size));
             const auto derived =
                 TryHkdf(item.algorithm, ikm.View(), salt.View(), info.View(), out.View());
             if (ResultIs(test, "valid")) {
@@ -326,6 +360,34 @@ TEST(CryptoWycheproofEd25519) {
     CHECK(accepted == 117 + 21); // valid + 혼합 차수 공개키
 }
 
+namespace {
+
+// kx 세션 키(32 byte 두 개)가 BLAKE2b-512(q ‖ client_pk ‖ server_pk)의 앞·뒤 절반과 같은지 본다.
+// receiveFirst면 receive가 앞 절반이다(클라이언트), 아니면 transmit이 앞 절반이다(서버).
+constexpr usize SessionKeyBytes = 32;
+
+bool SessionKeysMatch(const KxSessionKeys& keys, Span<const uint8> shared,
+                      Span<const uint8> clientPublic, Span<const uint8> serverPublic,
+                      bool receiveFirst) {
+    const Span<const uint8> pieces[] = {shared, clientPublic, serverPublic};
+    uint8 expected[2 * SessionKeyBytes];
+    static_assert(sizeof(expected) == Blake2bMaxDigestBytes);
+    uint8 receive[SessionKeyBytes];
+    uint8 transmit[SessionKeyBytes];
+    if (!TryBlake2b(Span<const Span<const uint8>>(pieces), Span<uint8>(expected)) ||
+        !hazmat::TryExportKey(keys.receive, Span<uint8>(receive)) ||
+        !hazmat::TryExportKey(keys.transmit, Span<uint8>(transmit))) {
+        return false;
+    }
+
+    const Span<const uint8> first = Span<const uint8>(expected).Left(SessionKeyBytes);
+    const Span<const uint8> second = Span<const uint8>(expected).Right(SessionKeyBytes);
+    return ConstantTimeEquals(Span<const uint8>(receive), receiveFirst ? first : second) &&
+           ConstantTimeEquals(Span<const uint8>(transmit), receiveFirst ? second : first);
+}
+
+} // namespace
+
 TEST(CryptoWycheproofX25519) {
     VectorFile file;
     REQUIRE(file.Load("x25519_test.json"));
@@ -336,29 +398,26 @@ TEST(CryptoWycheproofX25519) {
     const usize total = ForEachTest(file, [&](JsonValue, JsonValue test) {
         REQUIRE(Decode(test, "private", secret) && Decode(test, "public", peer) &&
                 Decode(test, "shared", shared));
+        // 이 파일에는 invalid가 없다(valid·acceptable뿐). 데이터가 바뀌면 사상을 다시 정한다.
+        CHECK(!ResultIs(test, "invalid"));
         auto pair = KxKeyPair::TryImport(secret.View());
         auto peerKey = KxPublicKey::TryFromBytes(peer.View());
         REQUIRE(pair && peerKey);
-        auto keys =
-            TryClientSessionKeys(pair.Value(), peerKey.Value(), AeadAlgorithm::XChaCha20Poly1305);
+        const AeadAlgorithm algorithm = AeadAlgorithm::XChaCha20Poly1305;
+        auto client = TryClientSessionKeys(pair.Value(), peerKey.Value(), algorithm);
+        auto server = TryServerSessionKeys(pair.Value(), peerKey.Value(), algorithm);
         if (IsAllZero(shared.View())) {
-            CHECK(keys.Error() == ErrorCode::AuthenticationFailed);
+            CHECK(client.Error() == ErrorCode::AuthenticationFailed);
+            CHECK(server.Error() == ErrorCode::AuthenticationFailed);
             ++rejected;
             return;
         }
 
-        REQUIRE(keys);
-        const KxPublicKey clientPublic = pair.Value().PublicKey();
-        const Span<const uint8> pieces[] = {shared.View(), clientPublic.View(), peer.View()};
-        uint8 expected[64];
-        REQUIRE(TryBlake2b(Span<const Span<const uint8>>(pieces), Span<uint8>(expected)));
-        uint8 receive[32];
-        uint8 transmit[32];
-        REQUIRE(hazmat::TryExportKey(keys.Value().receive, Span<uint8>(receive)));
-        REQUIRE(hazmat::TryExportKey(keys.Value().transmit, Span<uint8>(transmit)));
-        CHECK(ConstantTimeEquals(Span<const uint8>(receive), Span<const uint8>(expected).Left(32)));
-        CHECK(
-            ConstantTimeEquals(Span<const uint8>(transmit), Span<const uint8>(expected).Right(32)));
+        // 자기 키 쌍을 클라이언트로 쓰면 (own, peer), 서버로 쓰면 (peer, own) 순서로 해시한다.
+        REQUIRE(client && server);
+        const KxPublicKey own = pair.Value().PublicKey();
+        CHECK(SessionKeysMatch(client.Value(), shared.View(), own.View(), peer.View(), true));
+        CHECK(SessionKeysMatch(server.Value(), shared.View(), peer.View(), own.View(), false));
     });
     CHECK(total == 518 && rejected == 31);
 }
@@ -373,11 +432,13 @@ TEST(CryptoWycheproofMlKem768) {
     usize valid = 0;
     usize badSeed = 0;
     usize badCiphertext = 0;
+    const KemInfo info = TryGetKemInfo(KemAlgorithm::MlKem768).Value();
     const usize total = ForEachTest(file, [&](JsonValue, JsonValue test) {
-        REQUIRE(Decode(test, "seed", seed) && Decode(test, "ek", ek) && Decode(test, "c", c) &&
-                Decode(test, "K", k));
+        // seed 길이가 틀린 사례에는 ek가 없다.
+        REQUIRE(Decode(test, "seed", seed) && Decode(test, "ek", ek, Field::Optional) &&
+                Decode(test, "c", c) && Decode(test, "K", k));
         auto key = KemKeyPair::TryFromSeed(KemAlgorithm::MlKem768, seed.View());
-        if (seed.Size() != 64) {
+        if (seed.Size() != info.seedBytes) {
             CHECK(key.Error() == ErrorCode::InvalidArgument);
             CHECK(ResultIs(test, "invalid"));
             ++badSeed;
