@@ -32,6 +32,7 @@ int RunDelegateRebindDuringTargetDestructionControl() noexcept;
 int RunUniquePtrNullDeleterControl() noexcept;
 int RunDelegateExecuteUnboundControl() noexcept;
 int RunDelegateRebindDuringExecutionControl() noexcept;
+int RunSpanSliceOutOfBoundsControl() noexcept;
 int RunRandomStreamPreconditionControl(uint32 operation) noexcept;
 int RunExternalAllocatorNegativeControl(uint32 operation) noexcept;
 int RunDebugAllocatorNegativeControl(uint32 operation) noexcept;
@@ -261,6 +262,8 @@ int main(int argc, char** argv) {
                 return test::RunDelegateExecuteUnboundControl();
             } else if (strcmp(control, "delegate-rebind-during-execution") == 0) {
                 return test::RunDelegateRebindDuringExecutionControl();
+            } else if (strcmp(control, "span-slice-out-of-bounds") == 0) {
+                return test::RunSpanSliceOutOfBoundsControl();
             } else if (strncmp(control, "random-invalid-", 15) == 0 && control[15] >= '0' &&
                        control[15] <= '2' && control[16] == '\0') {
                 return test::RunRandomStreamPreconditionControl(

@@ -399,6 +399,7 @@ internal static class NativeTests
                 ("unique-ptr-null-deleter", "UniquePtr adopted an object with a null deleter"),
                 ("delegate-execute-unbound", "Delegate::Execute called on an unbound delegate"),
                 ("delegate-rebind-during-execution", "Delegate rebound during its own execution"),
+                ("span-slice-out-of-bounds", "Span slice out of bounds"),
                 ("random-invalid-0", "RandomStream::NextUInt32Below requires bound > 0"),
                 ("random-invalid-1", "RandomStream::NextInt32InRange requires minimum <= maximum"),
                 ("random-invalid-2", "RandomStream::NextFloatInRange requires finite minimum < maximum") })
