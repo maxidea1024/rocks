@@ -46,7 +46,7 @@ TEST(DestroyRequestedTryPreservesErrorsAndOutput) {
         TypeRegistry types(allocator);
         REQUIRE(types.Register({StatusProbeType, 1, {}, {}}, MakeRuntimeTypeOps<StatusProbe>()));
         ObjectRegistry registry(allocator, types, {510, 1});
-        ObjectRegistry strict(allocator, types, {510, 2}, {8, 0xffffffffu, true});
+        ObjectRegistry strict(allocator, types, {510, 2}, {8, 0xffffffffu, true, {}});
         const auto access = registry.OwnerAccess();
         const auto strictAccess = strict.OwnerAccess();
         auto root = registry.NewObject<StatusProbe>(access, StatusProbeType);

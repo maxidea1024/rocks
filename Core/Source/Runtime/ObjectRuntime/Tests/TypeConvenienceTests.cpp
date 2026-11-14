@@ -226,7 +226,7 @@ TEST(ObjectTypeConvenienceHonorsStrictScopeAndShutdown) {
     {
         TypeRegistry types(allocator);
         REQUIRE(types.Register({ProbeType, 1, {}, {}}, MakeRuntimeTypeOps<TypeConvenienceProbe>()));
-        ObjectRegistry objects(allocator, types, {934, 1}, {8, 0xffffffffu, true});
+        ObjectRegistry objects(allocator, types, {934, 1}, {8, 0xffffffffu, true, {}});
         const auto access = objects.OwnerAccess();
         auto root = objects.NewObject<TypeConvenienceProbe>(access, ProbeType);
         REQUIRE(root);

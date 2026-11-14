@@ -118,7 +118,7 @@ TEST(ObjectRegistryQuarantinesGenerationExhaustion) {
         auto registration = types.Register(TypeSchema{IdentityType, 1, {}, {}},
                                            MakeRuntimeTypeOps<IdentityProbe>());
         REQUIRE(registration.IsOk());
-        ObjectRegistry registry(allocator, types, Guid{83, 1}, RegistryOptions{1, 2});
+        ObjectRegistry registry(allocator, types, Guid{83, 1}, RegistryOptions{1, 2, false, {}});
         auto access = registry.OwnerAccess();
         auto first = registry.NewObject<IdentityProbe>(access, IdentityType);
         REQUIRE(first.IsOk());

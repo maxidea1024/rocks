@@ -13,7 +13,8 @@ using ContextId = Guid;
 // TypeFlags:
 //   Abstract  — 등록할 수 있으나 생성할 수 없다(construct가 null).
 //   WorldOnly — World 쪽에서만 쓰는 타입이다. 상속된다(base가 WorldOnly면 파생도 이 플래그가
-//               있어야 등록된다). 에셋 객체 Registry의 생성 거부 정책은 패키지 단계(A0-O)다.
+//               있어야 등록된다). 에셋 객체 Registry의 생성 거부는
+//               RegistryPolicy::rejectWorldOnly(Object/ObjectRegistry.h)다.
 enum class TypeFlags : uint32 {
     None = 0,
     Abstract = 1,

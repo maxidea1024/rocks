@@ -25,6 +25,8 @@ Marking 중 공개하는 newborn은 모든 staged 객체를 grey로 넣어 자�
 
 Marking 큐가 비었음을 확인하고 Sweeping으로의 전환은 gate 안에서 원자적으로 수행한다. 아직 slot cursor가 방문하지 않은 흰 객체도 cutoff 검사로 접근을 거부한다. Sweeping 중 태어난 객체는 현재 epoch로 표식하고 cutoff 대상에 연결하지 못하게 하므로 이번 cycle에 보존된다.
 
+inner → outer는 언제나 강한 간선이다([객체·그래프 보강](../Design/ObjectFoundations.ko.md) 1.5절). 타입 Trace가 아니라 Registry가 객체를 trace하는 모든 곳(full Collect, Step의 순차·병렬 trace, Commit의 staged 검증)에서 Trace 뒤에 그 객체의 Outer를 방문한다. Outer는 공개 전에 정해져 바뀌지 않으므로 worker가 `gate_` 없이 읽어도 경합이 없다. Marking 중 공개한 newborn의 trace가 Outer를 표식하고, Sweeping 중에는 cutoff white Outer 아래 생성이 StaleHandle이며 Commit 검증이 Outer도 대상처럼 검사한다. 정책 없는 Registry에서 outer는 inner를 살리지 않는다. Retire(sweep·rollback)는 같은 잠금 안에서 그 객체를 이름 색인과 부모의 자식 고리에서 뗀다. 고리는 해체하지 않는다: white 부모의 자식은 모두 white라 같은 sweep에서 스스로 떨어지므로, 부모가 먼저 Retire되어도 자식이 남은 동안(`firstChild != nullptr`)은 회수하지 않는다(sweep 사이의 `DrainRetired`·rollback 회수 포함). 회수가 이름 기록을 잠금 밖에서 반환한다.
+
 Trace 오류나 작업 제출 실패는 수락한 모든 worker를 정리한 후 cycle을 중단한다. 마감 전 실패에서는 sweep을 하지 않는다. 마지막 성공한 `LastGcReport`도 덮어쓰지 않는다. 네이티브 대기 자체가 실패하여 worker의 stack context 사용 종료를 확인할 수 없으면, 그 context를 해제하고 계속하지 않고 fatal 계약을 적용한다.
 
 ## 병렬 실행 계약

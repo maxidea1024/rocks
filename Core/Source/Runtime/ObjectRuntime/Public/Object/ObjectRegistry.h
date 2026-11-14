@@ -1,6 +1,8 @@
 #pragma once
 
 #include <Core/Containers/Array.h>
+#include <Core/Text/String.h>
+#include <Core/Text/StringView.h>
 #include <Object/ObjectRefArray.h>
 #include <Object/ObjectRefs.h>
 #include <Object/ObjectDiagnostics.h>
@@ -11,6 +13,59 @@ namespace rocks {
 
 class WorkerScheduler;
 
+// 객체 경로(Outer 사슬 이름을 '.'로 이은 것 — Docs/Design/ObjectFoundations.ko.md 1.1절)의 byte
+// 상한이다(AS 5.1 문자열 상한). 경로가 이것을 넘는 객체는 만들 수 없다(CapacityExceeded). 이름이 1
+// byte 이상이므로 Outer 깊이도 이것으로 묶인다(최대 2048).
+inline constexpr usize MaxObjectPathBytes = 4096;
+
+// Registry 생성 때 고정하는 객체 정책이다(Docs/Design/ObjectFoundations.ko.md 1.3절). 기본값은 정책
+// 없음이다(World registry·시험 Registry). 에셋 객체 Registry(A1 AssetManager)는
+// {packageNativeType = NativeTypeKey<Package>(), rejectWorldOnly = true}로 만든다.
+//
+// 판정은 생성(ConstructionContext::Create·NewObject)의 오류 순서 6·8단계다: WorldOnly는
+// Unsupported, 패키지 규칙은 InvalidArgument다.
+struct RegistryPolicy {
+    // null이 아니면 패키지 정책이다: 이 native 타입(과 파생 — TypeLease::IsNativeA)의 객체는
+    // Outer와 이름이 없어야 하고, 그 밖의 객체는 Outer가 있어야 하며 outermost가 이 타입이어야
+    // 한다(AS 6.1 "패키지 없는 객체 생성은 거부한다"). TypeId가 아니라 native 키로 정하므로 TypeId
+    // 별명도 같은 판정이다. 패키지 정책 Registry의 outer → inner GC 간선은 A0-Ob다.
+    const void* packageNativeType = nullptr;
+    // 참이면 WorldOnly 타입(TypeFlags::WorldOnly — 상속됨) 생성을 Unsupported로 거부한다(에셋 객체
+    // Registry — RF 2.2·결정 21, AS 11.4의 AssetLease 누수 차단).
+    bool rejectWorldOnly = false;
+
+    bool operator==(const RegistryPolicy&) const noexcept = default;
+};
+
+// Outer로 쓸 객체의 요약이다(Docs/Design/ObjectFoundations.ko.md 1.2절). 생성 규칙(이름·대표 자식·
+// 패키지·경로 길이)을 판정하는 입력이며, 그래프 1단계가 아직 없는 Outer를 기술할 때도 쓴다(A0-Od2).
+// 조회 시점의 값이며 수명이나 접근권을 보존하지 않는다.
+struct OuterSummary {
+    ObjectHandle outermost{};        // Outer 사슬 끝(자기 자신이 outermost면 자기)
+    bool isOutermost = false;        // 이 객체에 Outer가 없는지
+    bool outermostIsPackage = false; // outermost가 정책의 패키지 타입인지(정책이 없으면 false)
+    // Inner 유무는 이름 점유와 같은 기준이다(다른 트랜잭션의 Reserved는 세고, GC cutoff white는
+    // 세지 않는다).
+    bool hasRepresentative = false; // 대표 자식(빈 이름 Inner)이 있는지
+    bool hasNamedInners = false;    // 이름 있는 Inner가 있는지
+    uint32 pathBytes = 0;           // 이 객체의 객체 경로 byte 수
+
+    // 아직 만들지 않은 outermost(예: 로더가 곧 만들 Package)의 요약이다. isPackage는 그 객체가
+    // 정책의 패키지 타입인지다.
+    static constexpr OuterSummary ForNewOutermost(bool isPackage) noexcept {
+        OuterSummary summary;
+        summary.isOutermost = true;
+        summary.outermostIsPackage = isPackage;
+        return summary;
+    }
+};
+
+// CollectInners가 Inner를 모으는 순서다.
+enum class InnerOrder : uint8 {
+    Direct,    // 직계 Inner만(이름 순, 빈 이름이 먼저)
+    DepthFirst // 전위 깊이 우선(각 Inner 바로 뒤에 그 부분 트리) — AS 5.1 export 순서
+};
+
 namespace detail {
 class PathCursor;
 
@@ -18,6 +73,24 @@ class PathCursor;
 template <class T>
 Result<void> SetPathMemberReference(PathCursor& cursor, ObjectRef<T>& field,
                                     ObjectHandle target) noexcept;
+
+// 새 객체 정체성 규칙 6–9(Docs/Design/ObjectFoundations.ko.md 1.5절)를 판정하는 순수 함수다.
+// Registry 생성과 그래프 1단계·CreateObjects 사전 확인(A0-Od2)이 같이 써서 규칙이 갈라지지 않게
+// 한다. 규칙 5(Outer 상태)는 호출자가 outer 요약을 만들 때 판정한다.
+//
+// 인자: policy는 Registry 정책(또는 그 사본), type은 만들 타입, outer는 Outer 요약(Outer가 없으면
+// null), name은 이름(빈 문자열은 이름 없음 또는 대표 자식), scratch는 NFC 판정 임시 저장소다.
+//
+// 순서와 오류: 6. policy.rejectWorldOnly이고 WorldOnly 타입이면 Unsupported → 7. 이름 형식
+// (ValidateNameComponent — InvalidArgument, scratch 할당 실패는 OutOfMemory) → 8. 패키지
+// 정책(패키지 타입에 Outer·이름, 비패키지에 Outer 없음·outermost가 패키지 아님), 빈 이름(Outer가
+// 있으면 대표 자식뿐 — Outer가 outermost이고 이름 있는 Inner가 없어야 한다), 대표 자식이 있는
+// Outer의 이름 있는 자식은 InvalidArgument → 9. 새 객체 경로가 MaxObjectPathBytes를 넘으면
+// CapacityExceeded. 같은 대표 자식 둘은 여기서 거부하지 않는다(이름 충돌 — 생성이 AlreadyExists로
+// 낸다).
+Result<void> CheckNewObjectIdentity(const RegistryPolicy& policy, const TypeLease& type,
+                                    const OuterSummary* outer, StringView name,
+                                    Allocator& scratch) noexcept;
 } // namespace detail
 
 enum class GcPhase : uint8 {
@@ -44,6 +117,8 @@ struct RegistryOptions {
     // 실행 문맥을 설정하는 구성은 true로 하여 무인자 생명주기·타입 조회 API의 scope 누락을
     // 거부한다. 명시적 ObjectAccessContext를 받는 Registry API의 검증에는 영향을 주지 않는다.
     bool requireLifecycleScope = false;
+    // 생성 뒤 바꾸지 않는 객체 정책이다(Policy()로 어느 스레드에서나 읽는다).
+    RegistryPolicy policy;
 };
 
 struct ObjectStats {
@@ -57,6 +132,9 @@ struct ObjectStats {
     // 쥐고 있는 encode 고정(EncodePin)의 합이다. 0이 아니면 Shutdown이 Busy다.
     uint32 encodePins = 0;
     uint32 chunks = 0;
+    // 이름 색인 항목 수다(이름 있는 객체와 대표 자식 — Reserved 포함). Retire되거나, cutoff white
+    // 객체의 항목을 같은 이름의 새 객체가 대신할 때 빠진다.
+    uint32 namedObjects = 0;
 };
 
 // 성공한 한 cycle의 결과다. 시간은 실제 collector slice의 합(ns)이며 mutator 시간은 제외한다.
@@ -82,6 +160,11 @@ struct GcProgress {
 // 한다. 객체 접근·변경·GC는 생성 스레드 전용이다. gate는 통계와 참조 계수를 보호할 뿐, 사용자 객체
 // 필드를 스레드 안전하게 만들지 않는다. 별도 래퍼의 반환/복제 예외는 ObjectRefs 참고. 종료 시 모든
 // 루트·Borrow·BackendLease·EncodePin을 반환한다. 남은 소유권을 무시한 파괴는 즉시 종료한다.
+//
+// 객체는 생성 때 정한 불변 Outer와 이름을 가진다(Docs/Design/ObjectFoundations.ko.md 1절). 같은
+// Outer 안에서 이름은 대소문자·정규화 형태를 무시하고 유일하며(TryMakeNameComponentKey 키),
+// Registry가 이름 색인과 Outer별 자식 고리를 소유한다. inner → outer는 언제나 GC가 추적하는 강한
+// 간선이고, 정책 없는 Registry에서 outer는 inner를 살리지 않는다.
 class ObjectRegistry {
 public:
     ObjectRegistry(Allocator&, TypeRegistry&, ContextId, RegistryOptions = {}) noexcept;
@@ -99,11 +182,31 @@ public:
         return &types_ == &registry;
     }
 
+    // 생성 때 받은 객체 정책이다. 생성 뒤 바뀌지 않으므로 어느 스레드에서나 읽을 수 있다.
+    const RegistryPolicy& Policy() const noexcept {
+        return options_.policy;
+    }
+
     // 기본 생성과 공개를 한 트랜잭션으로 실행한다. 실패 가능한 별도 초기화에는 ConstructionContext
-    // 사용.
+    // 사용. Outer·이름 없는 객체다(패키지 정책 Registry에서는 패키지 타입만 된다).
     template <class T>
     Result<RootRef<T>> NewObject(const ObjectAccessContext& access, TypeId type) noexcept {
-        auto root = NewRoot(access, type, NativeTypeKey<T>());
+        return NewObject<T>(access, type, ObjectHandle{}, StringView{});
+    }
+
+    // outer 아래 name으로 만들고 공개한다(ConstructionContext::Create(type, outer, name) +
+    // Commit()과 같다). outer는 생존(Alive) 객체이거나 null이고, 오류 순서·규칙은
+    // ConstructionContext::Create와 같다.
+    //
+    // 사용 예:
+    //   auto socket = registry.NewObject<Socket>(access, SocketType, body, "Socket");
+    //   if (!socket) {
+    //       return Result<void>::Failure(socket.Error());   // AlreadyExists면 이름이 이미 있다
+    //   }
+    template <class T>
+    Result<RootRef<T>> NewObject(const ObjectAccessContext& access, TypeId type, ObjectHandle outer,
+                                 StringView name) noexcept {
+        auto root = NewRoot(access, type, NativeTypeKey<T>(), outer, name);
         if (!root) {
             return Result<RootRef<T>>::Failure(root.Error());
         }
@@ -113,6 +216,106 @@ public:
         root.Value().handle_ = {};
         return Result<RootRef<T>>::Success(Move(typed));
     }
+
+    // ---- Outer·이름 조회(Docs/Design/ObjectFoundations.ko.md 1.2절) ----
+    // 공통 규칙: 소유 스레드 전용(WrongThread), 접근 문맥이 다르면 WrongContext, 종료 시작 뒤
+    // ShuttingDown, GC·callback 처리 중(재진입) Busy. 조회는 수명을 연장하지 않으며 결과는 반환 뒤
+    // 바뀔 수 있다. handle 규칙(따로 적지 않으면): 무효·다른 Registry·회수된 generation·공개 전
+    // (Reserved)은 StaleHandle, GC cutoff white·Retired는 Destroyed다. Alive와
+    // DestroyRequested(논리 정체성은 회수 전까지 남는다)를 받는다.
+
+    // handle의 Outer다. Outer가 없으면 ObjectHandle{}이다.
+    //
+    // 사용 예:
+    //   auto outer = registry.GetOuter(access, socket);
+    //   if (outer && outer.Value().IsNull()) { /* outermost */ }
+    Result<ObjectHandle> GetOuter(const ObjectAccessContext&, ObjectHandle) const noexcept;
+
+    // handle의 Outer 사슬 끝(소속 패키지)이다. Outer가 없으면 handle 자신이다.
+    Result<ObjectHandle> GetOutermost(const ObjectAccessContext&, ObjectHandle) const noexcept;
+
+    // handle의 이름을 out 뒤에 붙인다(Outer 없는 이름 없는 객체와 대표 자식은 빈 문자열). 잠금
+    // 안에서 64 byte 스택 버퍼로 복사한 뒤 잠금 밖에서 out의 allocator로 붙이므로, 그 할당 콜백이
+    // Registry에 재진입해 그 객체를 파괴·회수해도 해제된 이름을 읽지 않는다. out의 할당 실패는 그
+    // 오류이고 out은 그대로다.
+    //
+    // 사용 예:
+    //   String name(allocator);
+    //   if (auto got = registry.GetName(access, socket, name); !got) { return got; }
+    Result<void> GetName(const ObjectAccessContext&, ObjectHandle, String& out) const noexcept;
+
+    // handle의 객체 경로(outermost 아래 이름을 '.'로 이은 것, 대표 자식의 빈 이름은 건너뛴다 — 예:
+    // 대표 에셋 아래 Body 아래 Socket = "Body.Socket")를 out 뒤에 붙인다. outermost와 대표 자식은
+    // 빈 문자열이다. GetName과 같은 방식으로 4 KiB 스택 버퍼에 만든 뒤 붙인다(경로 상한이 4 KiB라
+    // 넘치지 않는다).
+    Result<void> GetObjectPath(const ObjectAccessContext&, ObjectHandle,
+                               String& out) const noexcept;
+
+    // 이름 색인 조회다. outer 아래 이름이 name인 공개된 객체(Alive, RequestDestroy만 받은
+    // DestroyRequested)를 돌려준다 — 공개 전(Reserved)·cutoff white는 NotFound다. outer가 null이면
+    // Outer 없는 이름 있는 객체의 최상위 이름 공간이다. outer가 있고 name이 비면 대표 자식을
+    // 찾는다. 비교는 대소문자·정규화 형태를 무시한다(TryMakeNameComponentKey).
+    //
+    // 순서와 오류: 접근 → 종료·재진입 → outer(handle 규칙) → 이름 형식(ValidateNameComponent —
+    // InvalidArgument, outer 없는 빈 이름도 InvalidArgument, 애매한 결합 문자의 NFC 판정 할당
+    // 실패는 OutOfMemory) → 비교 키 생성 할당(비ASCII 이름만 — OutOfMemory) → 없으면 NotFound.
+    //
+    // 사용 예:
+    //   auto body = registry.FindChild(access, asset, "Body");
+    //   if (!body) { /* NotFound면 없다 */ }
+    Result<ObjectHandle> FindChild(const ObjectAccessContext&, ObjectHandle outer,
+                                   StringView name) const noexcept;
+
+    // outermost 아래 객체 경로를 푼다. outermost에 공개된 대표 자식이 있으면 경로는 그 아래에서
+    // 시작하고, 빈 경로는 대표 자식이다(대표 자식이 없으면 NotFound — outermost 자신을 돌려주지
+    // 않는다). 구성 요소마다 FindChild와 같은 규칙으로 찾는다.
+    //
+    // 순서와 오류: 접근 → 종료·재진입 → outermost(handle 규칙, Outer가 있으면 InvalidArgument) →
+    // 경로 형식(4 KiB 초과·빈 구성 요소·이름 형식 위반 InvalidArgument, NFC 판정 할당 실패
+    // OutOfMemory — 조회 전에 모든 구성 요소를 검사한다) → 비교 키 할당(OutOfMemory) → 없는 구성
+    // 요소 NotFound.
+    //
+    // 사용 예(A1 Soft 참조 해석):
+    //   auto target = registry.FindObject(access, package, softRef.objectPath.View());
+    //   if (!target) { /* NotFound면 MissingDependency 진단 */ }
+    Result<ObjectHandle> FindObject(const ObjectAccessContext&, ObjectHandle outermost,
+                                    StringView objectPath) const noexcept;
+
+    // outer 아래 name이 이미 점유되었는지(그 이름의 생성이 AlreadyExists가 될지)다. 어느 트랜잭션의
+    // 공개 전(Reserved) 객체든 점유로 보고, outer도 어느 트랜잭션의 공개 전 객체여도 된다. 빈
+    // name은 대표 자식 자리다(outer가 null이면 InvalidArgument). 오류 순서는 FindChild와 같다. 대표
+    // 자식· 패키지 같은 구조 규칙은 보지 않는다(DescribeOuter로 확인한다). 도구는 생성 실패가
+    // 트랜잭션을 오류 상태로 고정하므로 이것으로 먼저 확인한다.
+    Result<bool> IsNameTaken(const ObjectAccessContext&, ObjectHandle outer,
+                             StringView name) const noexcept;
+
+    // outer를 Outer로 쓸 때의 요약이다. outer는 생존(Alive, cutoff 아님) 객체여야 한다(null은
+    // InvalidArgument, 그 밖은 생성 규칙 5와 같이 StaleHandle — DestroyRequested 포함). 공개 전
+    // 객체는 ConstructionContext::DescribeOuter로 본다.
+    Result<OuterSummary> DescribeOuter(const ObjectAccessContext&,
+                                       ObjectHandle outer) const noexcept;
+
+    // outer의 Inner를 이름 순(같은 Outer 안 NFC UTF-8 byte 순 — 빈 이름이 먼저)으로 out 끝에
+    // 붙인다. Alive 객체만 모은다(공개 전·DestroyRequested·cutoff white는 그 부분 트리째 뺀다 —
+    // DepthFirst도 Outer가 언제나 Inner보다 앞이다). outer는 handle 규칙을 따른다. out은 자기
+    // allocator로 늘린다.
+    //
+    // 처리: 잠금 안에서 개수를 센 뒤 처리 표시(그동안 Registry 변경 재진입은 Busy)를 세우고 잠금
+    // 밖에서 out 용량과 보조 배열(Registry allocator)을 할당한다. 다시 잠가 수준 순서로 모은 뒤
+    // 잠금 밖에서 같은 Outer 구간마다 정렬하고 순서를 만든다. 재귀·스택 배열이 없어 깊은 트리(2048
+    // 수준)에서도 스택 사용이 일정하다.
+    //
+    // 오류: 할당 실패는 그 오류(OutOfMemory 등)이고, 실패하면 out은 호출 전 길이로 돌아간다.
+    //
+    // 사용 예(A1 writer의 export 순서):
+    //   Array<ObjectHandle> exports(allocator);
+    //   auto collected =
+    //       registry.CollectInners(access, package, InnerOrder::DepthFirst, exports);
+    //   if (!collected) {
+    //       return collected;
+    //   }
+    Result<void> CollectInners(const ObjectAccessContext&, ObjectHandle outer, InnerOrder,
+                               Array<ObjectHandle>& out) noexcept;
 
     template <class T = Object>
     Result<Borrow<T>> Resolve(const ObjectAccessContext& access, ObjectHandle handle) noexcept {
@@ -361,6 +564,9 @@ private:
     struct Slot;
     struct Chunk;
     struct MarkState;
+    struct NameRecord;
+    struct NameEntry;
+    struct InnerEntry;
     static void MarkEdge(void*, ObjectHandle) noexcept;
     static void ValidateStagedEdge(void*, ObjectHandle) noexcept;
     Slot* FindSlot(ObjectHandle) const noexcept;
@@ -465,19 +671,51 @@ private:
         return SetEdge(access, owner, field.handle_, target, 0, NativeTypeKey<T>(), &element);
     }
 
-    Result<RootRef<Object>> NewRoot(const ObjectAccessContext&, TypeId, const void*) noexcept;
+    Result<RootRef<Object>> NewRoot(const ObjectAccessContext&, TypeId, const void*,
+                                    ObjectHandle outer, StringView name) noexcept;
     Result<uint64> BeginConstruction(const ObjectAccessContext&) noexcept;
-    Result<ObjectHandle> CreatePending(const ObjectAccessContext&, TypeId, uint64,
-                                       const void*) noexcept;
+    // 생성 오류 순서 1–12(Docs/Design/ObjectFoundations.ko.md 1.5절)를 따른다. 0단계(트랜잭션
+    // 상태·저널 예약)는 ConstructionContext가 먼저 한다.
+    Result<ObjectHandle> CreatePending(const ObjectAccessContext&, TypeId, uint64, const void*,
+                                       ObjectHandle outer, StringView name) noexcept;
     Result<void*> GetPending(const ObjectAccessContext&, ObjectHandle, uint64,
                              const void*) noexcept;
-    Result<RootRef<Object>> Commit(const ObjectAccessContext&, uint64,
-                                   Span<const ObjectHandle>) noexcept;
+    // ConstructionContext::Commit(roots, out)의 Registry 몫이다. roots는 이 트랜잭션 객체여야 하고
+    // (StaleHandle), out은 roots와 크기가 같고 비어 있다(호출자가 확인한다).
+    Result<void> Commit(const ObjectAccessContext&, uint64, Span<const ObjectHandle> staged,
+                        Span<const ObjectHandle> roots, Span<RootRef<Object>> out) noexcept;
     void Rollback(uint64, Span<const ObjectHandle>) noexcept;
+    // transaction이 0이 아니면 그 트랜잭션의 공개 전 객체도 받는다(ConstructionContext 판).
+    Result<OuterSummary> DescribeOuterChecked(const ObjectAccessContext&, ObjectHandle outer,
+                                              uint64 transaction) const noexcept;
     ErrorCode ShadeLocked(ObjectHandle) noexcept;
     bool IsCutoff(const Slot*) const noexcept;
+    bool IsReclaimable(const Slot&) const noexcept;
     bool HasReclaimableLocked() const noexcept;
     uint32 ReclaimEligible(uint32 maximum = 0xffffffffu, uint64 deadline = 0) noexcept;
+
+    // ---- Outer·이름(잠금 보유 상태에서 부른다) ----
+    ObjectHandle HandleOf(const Slot&) const noexcept;
+    // 공개된 객체(Alive·DestroyRequested, cutoff 아님)의 슬롯이다. 아니면 StaleHandle·Destroyed다.
+    Result<Slot*> FindPublishedLocked(ObjectHandle) const noexcept;
+    // scanNamedInners가 거짓이면 hasNamedInners를 구하지 않는다(자식 고리를 훑지 않는다 — 이름 있는
+    // 객체 생성은 그 값을 쓰지 않는다).
+    OuterSummary DescribeSlotLocked(const Slot&, bool scanNamedInners = true) const noexcept;
+    // (outer, 비교 키)의 색인 항목 슬롯이다. published면 공개된 객체만, 아니면 점유 기준(Reserved
+    // 포함)이다. cutoff white 항목은 건너뛴다. 없으면 nullptr.
+    Slot* FindNamedLocked(ObjectHandle outer, uint64 hash, StringView key,
+                          bool published) const noexcept;
+    // 다음 삽입 한 번에 필요한 새 색인 표 크기다(0이면 지금 표로 충분하다).
+    Result<uint32> NameIndexGrowthLocked() const noexcept;
+    // 색인을 table(capacity 칸, 0으로 채워짐)로 옮기고 옛 표를 돌려준다(잠금 밖에서 반환한다).
+    NameEntry* RehashNamesLocked(NameEntry* table, uint32 capacity) noexcept;
+    // slot을 색인에 넣는다. 같은 키의 cutoff white 항목은 그 자리에서 뺀다.
+    void InsertNameLocked(Slot&, uint64 hash, StringView key) noexcept;
+    void RemoveNameLocked(Slot&) noexcept;
+    void LinkChildLocked(Slot& parent, Slot& child) noexcept;
+    void UnlinkChildLocked(Slot& child) noexcept;
+    // Retire(sweep·rollback)가 같은 잠금 안에서 이름 색인 항목과 자기 고리를 뗀다.
+    void DetachIdentityLocked(Slot&) noexcept;
 
     Allocator& allocator_;
     TypeRegistry& types_;
@@ -499,6 +737,11 @@ private:
     GcReport cycleGc_;
     Chunk* sweepChunk_ = nullptr;
     uint32 sweepOffset_ = 0;
+    // 이름 색인: 개방 주소 표(2의 거듭제곱 크기, (live + tombstone) ≤ 1/2). 표 할당·반환은 잠금 밖.
+    NameEntry* names_ = nullptr;
+    uint32 nameCapacity_ = 0;
+    uint32 nameLive_ = 0;
+    uint32 nameTombstones_ = 0;
     // 잠금을 풀고 사용자 코드를 호출하는 구간에도 변경 재진입을 차단하는 상태다.
     // worker trace 실행 구간도 포함한다. phase 자체와 달리 slice 사이에는 false다.
     bool processing_ = false;

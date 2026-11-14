@@ -1,6 +1,11 @@
+#include <Core/Algorithms.h>
+#include <Core/Hash.h>
+#include <Core/Text/NameComponent.h>
+#include <Core/Text/StringBuilder.h>
 #include <Object/ObjectRegistry.h>
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
+#include <Platform/Memory.h>
 #include <Task/WorkerScheduler.h>
 #include "RegistryIdentity.h"
 #include <new>
@@ -37,6 +42,24 @@ struct ObjectRegistry::Slot {
     uint32 encodePins = 0;
     uint64 transaction = 0;
     uint64 mark = 0;
+    // Outer·이름(생성 때 고정 — Docs/Design/ObjectFoundations.ko.md 1.4절). 고리는 슬롯 번호가
+    // 아니라 Slot*다: chunk는 Registry 소멸 전까지 이동·반환되지 않으므로 포인터가 안정하고, 슬롯
+    // 번호로 이으면 SlotAt의 chunk 선형 탐색 때문에 순회가 O(n·chunks)가 된다. Reclaiming·Free
+    // 슬롯의 이 칸은 읽지 않는다. Retired 슬롯은 자기를 부모 고리에서 이미 뗐지만, Retired 부모의
+    // firstChild는 그 자식들이 스스로 뗄 때까지 유효하다(그동안 회수하지 않는다 — IsReclaimable).
+    ObjectHandle outer;
+    Slot* outermost = nullptr;
+    Slot* parent = nullptr;
+    Slot* firstChild = nullptr;
+    Slot* lastChild = nullptr;
+    Slot* nextSibling = nullptr;
+    Slot* prevSibling = nullptr;
+    // 이름이 있거나 대표 자식이면 있다(Outer 없는 이름 없는 객체는 null). 회수 때 잠금 밖에서
+    // 반환한다.
+    NameRecord* name = nullptr;
+    uint16 pathBytes = 0;
+    bool indexed = false; // 이름 색인에 있다
+    bool linked = false;  // 부모 고리에 있다
 };
 
 struct ObjectRegistry::Chunk {
@@ -50,6 +73,89 @@ struct ObjectRegistry::MarkState {
     uint64 transaction = 0;
     ErrorCode error = ErrorCode::None;
 };
+
+// 할당 하나에 NFC 이름과 그 뒤 비교 키를 담는다. keyHash는 (outer handle, 비교 키)의 색인 해시다.
+struct ObjectRegistry::NameRecord {
+    uint64 keyHash = 0;
+    uint16 nameBytes = 0;
+    uint16 keyBytes = 0;
+
+    const char* Data() const noexcept {
+        return reinterpret_cast<const char*>(this + 1);
+    }
+
+    StringView Name() const noexcept {
+        return StringView(Data(), nameBytes);
+    }
+
+    StringView Key() const noexcept {
+        return StringView(Data() + nameBytes, keyBytes);
+    }
+};
+
+// 이름 색인 항목이다. slot이 null이면 빈 칸(keyHash 0) 또는 tombstone(keyHash 1)이다. 해시를 항목에
+// 두어 rehash가 슬롯을 읽지 않는다.
+struct ObjectRegistry::NameEntry {
+    Slot* slot = nullptr;
+    uint64 keyHash = 0;
+};
+
+// CollectInners 보조 배열 원소다. 수준 순서로 모은 뒤 같은 Outer 구간마다 정렬한다.
+struct ObjectRegistry::InnerEntry {
+    Slot* slot = nullptr;
+    uint32 parent = 0;     // 부모 원소 위치(직계면 NoInnerParent)
+    uint32 childStart = 0; // 자식 구간 시작(DepthFirst)
+    uint32 childCount = 0;
+};
+
+namespace {
+
+constexpr uint32 NameTableTag = 0x4e414d54u;  // 'NAMT'
+constexpr uint32 NameRecordTag = 0x4e414d52u; // 'NAMR'
+constexpr uint32 NoInnerParent = 0xffffffffu;
+constexpr uint32 MinimumNameCapacity = 16;
+
+void ReleaseRegistryMemory(Allocator& allocator, void* memory) noexcept {
+    if (memory != nullptr && !allocator.Deallocate(memory)) {
+        platform::Fatal("Registry allocation ownership mismatch");
+    }
+}
+
+Result<void> OpenState(bool closed, bool processing) noexcept {
+    if (closed || processing) {
+        return Result<void>::Failure(closed ? ErrorCode::ShuttingDown : ErrorCode::Busy);
+    }
+
+    return Result<void>::Success();
+}
+
+// (outer handle 전체, 비교 키)의 색인 해시다. outer에 generation이 있으므로 회수된 Outer의 옛
+// 항목이 새 객체와 섞이지 않는다.
+uint64 NameKeyHash(ObjectHandle outer, StringView key) noexcept {
+    const uint64 owner =
+        MixHash(outer.registry ^ MixHash((uint64(outer.slot) << 32) | outer.generation));
+    return MixHash(HashStringBytes(key) ^ owner);
+}
+
+// outer 아래 이름이 nameBytes byte인 새 객체의 객체 경로 길이다. 경로는 Outer 경로 + (둘 다 비어
+// 있지 않으면 '.') + 이름이다(outermost·대표 자식은 빈 경로).
+usize ChildPathBytes(const OuterSummary* outer, usize nameBytes) noexcept {
+    if (outer == nullptr) {
+        return 0;
+    }
+
+    return outer->pathBytes + (outer->pathBytes != 0 && nameBytes != 0 ? 1u : 0u) + nameBytes;
+}
+
+// NFC UTF-8 byte 순(빈 이름이 먼저)이다.
+bool NameLess(StringView left, StringView right) noexcept {
+    const usize common =
+        left.ByteCount() < right.ByteCount() ? left.ByteCount() : right.ByteCount();
+    const int order = platform::MemoryCompare(left.Data(), right.Data(), common);
+    return order != 0 ? order < 0 : left.ByteCount() < right.ByteCount();
+}
+
+} // namespace
 
 ObjectRegistry::ObjectRegistry(Allocator& allocator, TypeRegistry& types, ContextId context,
                                RegistryOptions options) noexcept
@@ -65,6 +171,9 @@ ObjectRegistry::~ObjectRegistry() {
             "ObjectRegistry destroyed before roots/readers/backend leases/encode pins drained");
     }
 
+    // 종료 회수가 모든 NameRecord를 반환했다. 남은 것은 빈 색인 표다.
+    ReleaseRegistryMemory(allocator_, names_);
+    names_ = nullptr;
     while (chunks_) {
         Chunk* next = chunks_->next;
         chunks_->~Chunk();
@@ -126,6 +235,286 @@ Result<void> ObjectRegistry::CheckLive(Slot* slot, const void* nativeType) const
 
     return Result<void>::Success();
 }
+
+ObjectHandle ObjectRegistry::HandleOf(const Slot& slot) const noexcept {
+    return {domain_, slot.index, slot.generation};
+}
+
+Result<ObjectRegistry::Slot*>
+ObjectRegistry::FindPublishedLocked(ObjectHandle handle) const noexcept {
+    Slot* slot = FindSlot(handle);
+    if (!slot || slot->state == SlotState::Free || slot->state == SlotState::Exhausted ||
+        slot->state == SlotState::Reserved) {
+        return Result<Slot*>::Failure(ErrorCode::StaleHandle);
+    }
+
+    if (IsCutoff(slot) ||
+        !(slot->state == SlotState::Alive || slot->state == SlotState::DestroyRequested)) {
+        return Result<Slot*>::Failure(ErrorCode::Destroyed);
+    }
+
+    return Result<Slot*>::Success(slot);
+}
+
+OuterSummary ObjectRegistry::DescribeSlotLocked(const Slot& slot,
+                                                bool scanNamedInners) const noexcept {
+    OuterSummary summary;
+    const Slot& outermost = *slot.outermost;
+    summary.outermost = HandleOf(outermost);
+    summary.isOutermost = slot.outer.IsNull();
+    summary.outermostIsPackage = options_.policy.packageNativeType != nullptr &&
+                                 outermost.type.IsNativeA(options_.policy.packageNativeType);
+    // Inner 유무는 이름 점유와 같은 기준이다(다른 트랜잭션의 Reserved는 세고 cutoff white는 세지
+    // 않는다). 대표 자식은 색인으로 O(1)에 찾고, 이름 있는 Inner는 고리에서 처음 만나는 것까지
+    // 본다.
+    const ObjectHandle self = HandleOf(slot);
+    summary.hasRepresentative = FindNamedLocked(self, NameKeyHash(self, {}), {}, false) != nullptr;
+    for (const Slot* child = scanNamedInners ? slot.firstChild : nullptr; child;
+         child = child->nextSibling) {
+        if (!IsCutoff(child) && child->name != nullptr && child->name->nameBytes != 0) {
+            summary.hasNamedInners = true;
+            break;
+        }
+    }
+
+    summary.pathBytes = slot.pathBytes;
+    return summary;
+}
+
+ObjectRegistry::Slot* ObjectRegistry::FindNamedLocked(ObjectHandle outer, uint64 hash,
+                                                      StringView key,
+                                                      bool published) const noexcept {
+    if (nameCapacity_ == 0) {
+        return nullptr;
+    }
+
+    // 적재율이 1/2 이하라 빈 칸이 반드시 있어 탐사가 끝난다.
+    const uint32 mask = nameCapacity_ - 1;
+    for (uint32 index = static_cast<uint32>(hash) & mask;; index = (index + 1) & mask) {
+        const NameEntry& entry = names_[index];
+        if (entry.slot == nullptr) {
+            if (entry.keyHash == 0) {
+                return nullptr;
+            }
+
+            continue;
+        }
+
+        Slot* slot = entry.slot;
+        if (entry.keyHash != hash || !(slot->outer == outer) || !(slot->name->Key() == key)) {
+            continue;
+        }
+
+        // cutoff white 객체는 이름을 점유하지 않는다(같은 키의 새 항목이 뒤에 있을 수 있다).
+        if (IsCutoff(slot) || (published && slot->state != SlotState::Alive &&
+                               slot->state != SlotState::DestroyRequested)) {
+            continue;
+        }
+
+        return slot;
+    }
+}
+
+Result<uint32> ObjectRegistry::NameIndexGrowthLocked() const noexcept {
+    const uint64 used = uint64(nameLive_) + nameTombstones_ + 1;
+    if (nameCapacity_ != 0 && used * 2 <= nameCapacity_) {
+        return Result<uint32>::Success(0);
+    }
+
+    if (nameCapacity_ == 0) {
+        return Result<uint32>::Success(MinimumNameCapacity);
+    }
+
+    // live가 1/4 이하면 tombstone만 정리하는 같은 크기 rebuild, 넘으면 두 배다.
+    if ((uint64(nameLive_) + 1) * 4 <= nameCapacity_) {
+        return Result<uint32>::Success(nameCapacity_);
+    }
+
+    if (nameCapacity_ > 0x40000000u) {
+        return Result<uint32>::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    return Result<uint32>::Success(nameCapacity_ * 2);
+}
+
+ObjectRegistry::NameEntry* ObjectRegistry::RehashNamesLocked(NameEntry* table,
+                                                             uint32 capacity) noexcept {
+    const uint32 mask = capacity - 1;
+    for (uint32 index = 0; index < nameCapacity_; ++index) {
+        const NameEntry& entry = names_[index];
+        if (entry.slot == nullptr) {
+            continue;
+        }
+
+        uint32 position = static_cast<uint32>(entry.keyHash) & mask;
+        while (table[position].slot != nullptr) {
+            position = (position + 1) & mask;
+        }
+
+        table[position] = entry;
+    }
+
+    NameEntry* previous = names_;
+    names_ = table;
+    nameCapacity_ = capacity;
+    nameTombstones_ = 0;
+    return previous;
+}
+
+void ObjectRegistry::InsertNameLocked(Slot& slot, uint64 hash, StringView key) noexcept {
+    const uint32 mask = nameCapacity_ - 1;
+    uint32 target = NoInnerParent;
+    for (uint32 index = static_cast<uint32>(hash) & mask;; index = (index + 1) & mask) {
+        NameEntry& entry = names_[index];
+        if (entry.slot == nullptr) {
+            if (target == NoInnerParent) {
+                target = index;
+            }
+
+            if (entry.keyHash == 0) {
+                break;
+            }
+
+            continue;
+        }
+
+        // 같은 키의 cutoff white 항목은 이름을 점유하지 않으므로 이 자리에서 뺀다(그 객체의
+        // Retire는 indexed가 꺼져 있어 색인을 다시 보지 않는다).
+        if (entry.keyHash == hash && entry.slot->outer == slot.outer &&
+            entry.slot->name->Key() == key && IsCutoff(entry.slot)) {
+            entry.slot->indexed = false;
+            entry.slot = nullptr;
+            entry.keyHash = 1;
+            --nameLive_;
+            ++nameTombstones_;
+            if (target == NoInnerParent) {
+                target = index;
+            }
+        }
+    }
+
+    NameEntry& chosen = names_[target];
+    if (chosen.keyHash == 1) {
+        --nameTombstones_;
+    }
+
+    chosen.slot = &slot;
+    chosen.keyHash = hash;
+    ++nameLive_;
+    slot.indexed = true;
+}
+
+void ObjectRegistry::RemoveNameLocked(Slot& slot) noexcept {
+    const uint32 mask = nameCapacity_ - 1;
+    for (uint32 index = static_cast<uint32>(slot.name->keyHash) & mask;;
+         index = (index + 1) & mask) {
+        NameEntry& entry = names_[index];
+        if (entry.slot == &slot) {
+            entry.slot = nullptr;
+            entry.keyHash = 1;
+            --nameLive_;
+            ++nameTombstones_;
+            slot.indexed = false;
+            return;
+        }
+
+        if (entry.slot == nullptr && entry.keyHash == 0) {
+            platform::Fatal("Object name index lost an entry");
+        }
+    }
+}
+
+void ObjectRegistry::LinkChildLocked(Slot& parent, Slot& child) noexcept {
+    child.prevSibling = parent.lastChild;
+    child.nextSibling = nullptr;
+    if (parent.lastChild != nullptr) {
+        parent.lastChild->nextSibling = &child;
+    } else {
+        parent.firstChild = &child;
+    }
+
+    parent.lastChild = &child;
+    child.linked = true;
+}
+
+void ObjectRegistry::UnlinkChildLocked(Slot& child) noexcept {
+    Slot& parent = *child.parent;
+    if (child.prevSibling != nullptr) {
+        child.prevSibling->nextSibling = child.nextSibling;
+    } else {
+        parent.firstChild = child.nextSibling;
+    }
+
+    if (child.nextSibling != nullptr) {
+        child.nextSibling->prevSibling = child.prevSibling;
+    } else {
+        parent.lastChild = child.prevSibling;
+    }
+
+    child.prevSibling = nullptr;
+    child.nextSibling = nullptr;
+    child.linked = false;
+}
+
+void ObjectRegistry::DetachIdentityLocked(Slot& slot) noexcept {
+    // 고리 해체는 하지 않는다: white 부모에 연결된 자식은 모두 white라 같은 sweep에서 스스로
+    // 떨어지고, rollback은 생성 역순이라 자식이 먼저다(결정 15).
+    if (slot.indexed) {
+        RemoveNameLocked(slot);
+    }
+
+    if (slot.linked) {
+        UnlinkChildLocked(slot);
+    }
+}
+
+namespace detail {
+
+Result<void> CheckNewObjectIdentity(const RegistryPolicy& policy, const TypeLease& type,
+                                    const OuterSummary* outer, StringView name,
+                                    Allocator& scratch) noexcept {
+    // 6. 에셋 객체 Registry는 WorldOnly 타입을 만들지 않는다(상속 플래그라 자기 플래그만 본다).
+    if (policy.rejectWorldOnly && HasFlag(type.Schema().flags, TypeFlags::WorldOnly)) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    // 7. 이름 형식(빈 이름은 이름 없음 또는 대표 자식이라 형식 검사 대상이 아니다).
+    if (!name.IsEmpty()) {
+        if (auto valid = ValidateNameComponent(name, scratch); !valid) {
+            return valid;
+        }
+    }
+
+    // 8. 패키지 정책·빈 이름·대표 자식.
+    if (policy.packageNativeType != nullptr) {
+        if (type.IsNativeA(policy.packageNativeType)) {
+            if (outer != nullptr || !name.IsEmpty()) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+        } else if (outer == nullptr || !outer->outermostIsPackage) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
+    if (outer != nullptr) {
+        if (name.IsEmpty()) {
+            if (!outer->isOutermost || outer->hasNamedInners) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+        } else if (outer->hasRepresentative) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
+    // 9. 경로 길이.
+    if (ChildPathBytes(outer, name.ByteCount()) > MaxObjectPathBytes) {
+        return Result<void>::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    return Result<void>::Success();
+}
+
+} // namespace detail
 
 Result<void> ObjectRegistry::AddRoot(const ObjectAccessContext& access, ObjectHandle handle,
                                      const void* nativeType) noexcept {
@@ -1425,8 +1814,8 @@ Result<uint64> ObjectRegistry::BeginConstruction(const ObjectAccessContext& acce
 }
 
 Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& access, TypeId type,
-                                                   uint64 transaction,
-                                                   const void* nativeType) noexcept {
+                                                   uint64 transaction, const void* nativeType,
+                                                   ObjectHandle outer, StringView name) noexcept {
     auto valid = CheckAccess(access);
     if (!valid) {
         return Result<ObjectHandle>::Failure(valid.Error());
@@ -1439,33 +1828,139 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
                                                          : ErrorCode::Busy);
         }
 
+        // 이후 잠금 밖 할당·사용자 콜백 동안 Registry 변경 재진입은 Busy다. 그래서 아래에서 확인한
+        // Outer 상태·이름 색인은 게시할 때까지 바뀌지 않는다.
         processing_ = true;
     }
 
-    auto finish = [this]() noexcept {
+    // 실패하면 잠금 밖에서 반환할 할당이다. 게시에 성공하면 슬롯·색인이 소유한다.
+    NameRecord* record = nullptr;
+    NameEntry* grown = nullptr;
+    void* storage = nullptr;
+    auto fail = [&](ErrorCode error) noexcept -> Result<ObjectHandle> {
+        ReleaseRegistryMemory(allocator_, storage);
+        ReleaseRegistryMemory(allocator_, grown);
+        ReleaseRegistryMemory(allocator_, record);
         platform::LockGuard lock(gate_);
         processing_ = false;
+        return Result<ObjectHandle>::Failure(error);
     };
+    // 3. 타입
     auto typeLease = types_.Acquire(type);
     if (!typeLease) {
-        finish();
-        return Result<ObjectHandle>::Failure(typeLease.Error());
+        return fail(typeLease.Error());
     }
 
     if (nativeType && !typeLease.Value().IsNativeA(nativeType)) {
-        finish();
-        return Result<ObjectHandle>::Failure(ErrorCode::TypeMismatch);
+        return fail(ErrorCode::TypeMismatch);
     }
 
     const auto& ops = typeLease.Value().Ops();
-    // Abstract 선언은 C++가 생성 가능한 타입이어도 직접 생성할 수 없다.
+    // 4. Abstract 선언은 C++가 생성 가능한 타입이어도 직접 생성할 수 없다.
     // 슬롯/메모리를 예약하기 전에 검사하여 실패가 관찰 가능한 부작용을 남기지 않는다.
     if (HasFlag(typeLease.Value().Schema().flags, TypeFlags::Abstract) ||
         ops.construct == nullptr) {
-        finish();
-        return Result<ObjectHandle>::Failure(ErrorCode::Unsupported);
+        return fail(ErrorCode::Unsupported);
     }
 
+    // 5. Outer 상태: 생존(Alive, cutoff 아님) 또는 이 트랜잭션의 공개 전 객체다. 다른 Registry의
+    // handle은 FindSlot이 domain 불일치로 찾지 않는다.
+    const bool hasOuter = !outer.IsNull();
+    const ObjectHandle outerKey = hasOuter ? outer : ObjectHandle{};
+    Slot* parent = nullptr;
+    OuterSummary summary;
+    bool outerValid = true;
+    if (hasOuter) {
+        platform::LockGuard lock(gate_);
+        parent = FindSlot(outer);
+        outerValid = parent != nullptr && !IsCutoff(parent) &&
+                     (parent->state == SlotState::Alive ||
+                      (parent->state == SlotState::Reserved && parent->transaction == transaction &&
+                       parent->object != nullptr));
+        if (outerValid) {
+            // hasNamedInners는 대표 자식(빈 이름) 생성에만 쓰인다. 이름 있는 생성은 고리를 훑지
+            // 않는다 (Sweeping 중 cutoff white 형제가 많아도 잠금 시간이 늘지 않게).
+            summary = DescribeSlotLocked(*parent, name.IsEmpty());
+        }
+    }
+
+    if (!outerValid) {
+        return fail(ErrorCode::StaleHandle);
+    }
+
+    // 6–9. WorldOnly 정책·이름 형식·패키지·대표 자식·경로 길이(NFC 판정 scratch는 잠금 밖).
+    const OuterSummary* outerSummary = hasOuter ? &summary : nullptr;
+    auto identity = detail::CheckNewObjectIdentity(options_.policy, typeLease.Value(), outerSummary,
+                                                   name, allocator_);
+    if (!identity) {
+        return fail(identity.Error());
+    }
+
+    const usize pathBytes = ChildPathBytes(outerSummary, name.ByteCount());
+    // 10·11. 이름 있는 객체와 대표 자식은 색인에 넣는다(Outer 없는 이름 없는 객체는 넣지 않는다).
+    const bool named = hasOuter || !name.IsEmpty();
+    uint64 hash = 0;
+    uint32 grownCapacity = 0;
+    if (named) {
+        StringBuilder<128> key(allocator_);
+        if (auto made = TryMakeNameComponentKey(name, key); !made) {
+            return fail(made.Error());
+        }
+
+        hash = NameKeyHash(outerKey, key.View());
+        const usize bytes = sizeof(NameRecord) + name.ByteCount() + key.ByteCount();
+        auto allocated = allocator_.Allocate(bytes, alignof(NameRecord), NameRecordTag);
+        if (!allocated) {
+            return fail(allocated.Error());
+        }
+
+        record = ::new (allocated.Value()) NameRecord();
+        record->keyHash = hash;
+        record->nameBytes = static_cast<uint16>(name.ByteCount());
+        record->keyBytes = static_cast<uint16>(key.ByteCount());
+        char* data = reinterpret_cast<char*>(record + 1);
+        platform::MemoryCopy(data, name.Data(), name.ByteCount());
+        platform::MemoryCopy(data + name.ByteCount(), key.View().Data(), key.ByteCount());
+        Result<uint32> growth = Result<uint32>::Success(0);
+        {
+            platform::LockGuard lock(gate_);
+            growth = NameIndexGrowthLocked();
+        }
+
+        if (!growth) {
+            return fail(growth.Error());
+        }
+
+        if (growth.Value() != 0) {
+            // 새 표(같은 크기 rebuild 또는 두 배)를 잠금 밖에서 받고 게시할 때 잠금 안에서 옮긴다.
+            const uint64 tableBytes = uint64(growth.Value()) * sizeof(NameEntry);
+            if (tableBytes > static_cast<usize>(-1)) {
+                return fail(ErrorCode::CapacityExceeded);
+            }
+
+            auto table = allocator_.Allocate(static_cast<usize>(tableBytes), alignof(NameEntry),
+                                             NameTableTag);
+            if (!table) {
+                return fail(table.Error());
+            }
+
+            grown = static_cast<NameEntry*>(table.Value());
+            platform::MemoryZero(grown, static_cast<usize>(tableBytes));
+            grownCapacity = growth.Value();
+        }
+
+        bool taken = false;
+        {
+            platform::LockGuard lock(gate_);
+            taken = FindNamedLocked(outerKey, hash, record->Key(), false) != nullptr;
+        }
+
+        if (taken) {
+            return fail(ErrorCode::AlreadyExists);
+        }
+    }
+
+    // 12. 객체 할당·슬롯.
     if (gcPhase_ == GcPhase::Marking) {
         // mutator가 새 객체를 만드는 지점에서만 작업 큐를 확장한다. gate/Trace 안의 barrier는
         // 할당하지 않는다. Marking 동안 공개된 객체는 회수하지 않아 슬롯 수가 큐 상한이 된다.
@@ -1476,17 +1971,16 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
 
         auto reserve = gcWork_.TryReserve(static_cast<usize>(capacity));
         if (!reserve) {
-            finish();
-            return Result<ObjectHandle>::Failure(reserve.Error());
+            return fail(reserve.Error());
         }
     }
 
     auto memory = allocator_.Allocate(ops.size, ops.alignment, 0x4f424a45u);
     if (!memory) {
-        finish();
-        return Result<ObjectHandle>::Failure(memory.Error());
+        return fail(memory.Error());
     }
 
+    storage = memory.Value();
     Slot* freeSlot = nullptr;
     {
         platform::LockGuard lock(gate_);
@@ -1502,24 +1996,12 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
 
     if (!freeSlot) {
         if (uint64(chunkCount_) * SlotsPerChunk >= options_.maxSlots) {
-            auto released = allocator_.Deallocate(memory.Value());
-            if (!released) {
-                platform::Fatal("Object allocation ownership mismatch");
-            }
-
-            finish();
-            return Result<ObjectHandle>::Failure(ErrorCode::CapacityExceeded);
+            return fail(ErrorCode::CapacityExceeded);
         }
 
         auto block = allocator_.Allocate(sizeof(Chunk), alignof(Chunk), 0x43484e4bu);
         if (!block) {
-            auto released = allocator_.Deallocate(memory.Value());
-            if (!released) {
-                platform::Fatal("Object allocation ownership mismatch");
-            }
-
-            finish();
-            return Result<ObjectHandle>::Failure(block.Error());
+            return fail(block.Error());
         }
 
         Chunk* chunk = ::new (block.Value()) Chunk();
@@ -1542,15 +2024,37 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
     }
 
     ObjectHandle handle{domain_, freeSlot->index, freeSlot->generation};
+    NameEntry* previousTable = nullptr;
     {
+        // 상태·이름 색인·부모 고리를 한 잠금 안에서 게시한다(공개 전 객체도 이름을 점유한다).
         platform::LockGuard lock(gate_);
         freeSlot->state = SlotState::Reserved;
         freeSlot->storage = memory.Value();
         freeSlot->transaction = transaction;
         freeSlot->stableType = type;
         freeSlot->type = Move(typeLease.Value());
+        freeSlot->outer = outerKey;
+        freeSlot->parent = parent;
+        freeSlot->outermost = parent != nullptr ? parent->outermost : freeSlot;
+        freeSlot->pathBytes = static_cast<uint16>(pathBytes);
+        freeSlot->name = record;
+        if (named) {
+            if (grown != nullptr) {
+                previousTable = RehashNamesLocked(grown, grownCapacity);
+            }
+
+            InsertNameLocked(*freeSlot, hash, record->Key());
+        }
+
+        if (parent != nullptr) {
+            LinkChildLocked(*parent, *freeSlot);
+        }
     }
 
+    record = nullptr;
+    grown = nullptr;
+    storage = nullptr;
+    ReleaseRegistryMemory(allocator_, previousTable);
     Object* object = freeSlot->type.Ops().construct(memory.Value(), allocator_);
     if (!object) {
         platform::Fatal("A noexcept object constructor must return its object");
@@ -1603,66 +2107,96 @@ void ObjectRegistry::ValidateStagedEdge(void* pointer, ObjectHandle handle) noex
     }
 }
 
-Result<RootRef<Object>> ObjectRegistry::Commit(const ObjectAccessContext& access,
-                                               uint64 transaction,
-                                               Span<const ObjectHandle> staged) noexcept {
+Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 transaction,
+                                    Span<const ObjectHandle> staged, Span<const ObjectHandle> roots,
+                                    Span<RootRef<Object>> out) noexcept {
     auto valid = CheckAccess(access);
     if (!valid) {
-        return Result<RootRef<Object>>::Failure(valid.Error());
+        return valid;
     }
 
     {
         platform::LockGuard lock(gate_);
-        if (closed_ || processing_ || staged.Size() == 0) {
-            return Result<RootRef<Object>>::Failure(closed_       ? ErrorCode::ShuttingDown
-                                                    : processing_ ? ErrorCode::Busy
-                                                                  : ErrorCode::InvalidArgument);
+        if (auto open = OpenState(closed_, processing_); !open) {
+            return open;
         }
 
         for (usize index = 0; index < staged.Size(); ++index) {
             Slot* slot = FindSlot(staged[index]);
             if (!slot || slot->state != SlotState::Reserved || slot->transaction != transaction ||
                 !slot->object) {
-                return Result<RootRef<Object>>::Failure(ErrorCode::StaleHandle);
+                return Result<void>::Failure(ErrorCode::StaleHandle);
             }
+        }
+
+        // root는 이 트랜잭션의 객체여야 한다. 공개 전 객체의 root 계수는 0이므로(Reserved는 Pin할
+        // 수 없다) 중복 root도 roots 크기가 uint32 안이면 넘치지 않는다.
+        for (usize index = 0; index < roots.Size(); ++index) {
+            Slot* slot = FindSlot(roots[index]);
+            if (!slot || slot->state != SlotState::Reserved || slot->transaction != transaction ||
+                !slot->object) {
+                return Result<void>::Failure(ErrorCode::StaleHandle);
+            }
+        }
+
+        if (roots.Size() > 0xffffffffu) {
+            return Result<void>::Failure(ErrorCode::Overflow);
         }
 
         processing_ = true;
     }
 
+    // staged 간선과 Outer를 잠금 밖에서 검증한다(처리 표시 아래라 간선·Outer가 바뀌지 않는다).
+    // Outer는 대상처럼 생존(Alive) 또는 이 트랜잭션 객체이고 cutoff white가 아니어야 한다. A0-Ob는
+    // 같은 trace 순서(staged 저널 순 × trace 순)로 관찰자 쌍을 집계한다(집계 맵 삽입은 gate 밖).
     MarkState state{this, nullptr, transaction};
     TraceVisitor visitor(&state, &ObjectRegistry::ValidateStagedEdge);
     for (usize index = 0; index < staged.Size() && state.error == ErrorCode::None; ++index) {
         Slot* slot = FindSlot(staged[index]);
         slot->type.Ops().trace(*slot->object, visitor);
+        visitor.Visit(slot->outer);
     }
 
-    platform::LockGuard lock(gate_);
-    processing_ = false;
-    if (state.error != ErrorCode::None) {
-        return Result<RootRef<Object>>::Failure(state.error);
-    }
-
-    for (usize index = 0; index < staged.Size(); ++index) {
-        Slot* slot = FindSlot(staged[index]);
-        slot->state = SlotState::Alive;
-        slot->transaction = 0;
-        if (gcPhase_ == GcPhase::Marking) {
-            if (ShadeLocked(staged[index]) != ErrorCode::None) {
-                platform::Fatal("Preallocated newborn mark queue exhausted");
-            }
-
-            ++cycleGc_.examined;
-        } else if (gcPhase_ == GcPhase::Sweeping) {
-            // cutoff 이후 태어난 객체는 이전 cohort의 white 후보가 아니다. Commit 검증이
-            // 기존 white 대상 연결을 거부하므로 새 객체를 이번 cycle에서 trace할 필요가 없다.
-            slot->mark = markEpoch_;
+    // A0-Ob: 여기서 관찰자 공간을 예약한다(실패하면 아래 공개 없이 비공개 상태로 돌아간다).
+    {
+        platform::LockGuard lock(gate_);
+        processing_ = false;
+        if (state.error != ErrorCode::None) {
+            return Result<void>::Failure(state.error);
         }
+
+        // 이름 색인 항목은 Create 때 이미 들어 있으므로 상태만 바꾼다(조회가 Alive부터 보게 된다).
+        for (usize index = 0; index < staged.Size(); ++index) {
+            Slot* slot = FindSlot(staged[index]);
+            slot->state = SlotState::Alive;
+            slot->transaction = 0;
+            if (gcPhase_ == GcPhase::Marking) {
+                if (ShadeLocked(staged[index]) != ErrorCode::None) {
+                    platform::Fatal("Preallocated newborn mark queue exhausted");
+                }
+
+                ++cycleGc_.examined;
+            } else if (gcPhase_ == GcPhase::Sweeping) {
+                // cutoff 이후 태어난 객체는 이전 cohort의 white 후보가 아니다. Commit 검증이
+                // 기존 white 대상·Outer 연결을 거부하므로 새 객체를 이번 cycle에서 trace할 필요가
+                // 없다.
+                slot->mark = markEpoch_;
+            }
+        }
+
+        // root 증가는 공개와 같은 잠금 안이다(A0-Ob 관찰자 기록도 여기다).
+        for (usize index = 0; index < roots.Size(); ++index) {
+            ++FindSlot(roots[index])->roots;
+        }
+
+        --constructions_;
     }
 
-    ++FindSlot(staged[0])->roots;
-    --constructions_;
-    return Result<RootRef<Object>>::Success(RootRef<Object>(this, staged[0]));
+    for (usize index = 0; index < roots.Size(); ++index) {
+        out[index] = RootRef<Object>(this, roots[index]);
+    }
+
+    return Result<void>::Success();
 }
 
 void ObjectRegistry::Rollback(uint64 transaction, Span<const ObjectHandle> staged) noexcept {
@@ -1689,7 +2223,9 @@ void ObjectRegistry::Rollback(uint64 transaction, Span<const ObjectHandle> stage
                 platform::Fatal("Corrupt construction journal");
             }
 
+            // 역순이라 같은 트랜잭션 자식이 먼저 떨어지므로 부모는 자식이 없을 때 회수된다.
             slot->state = SlotState::Retired;
+            DetachIdentityLocked(*slot);
         }
 
         ReclaimEligible();
@@ -1845,11 +2381,18 @@ Result<void> ObjectRegistry::CancelCollection(const ObjectAccessContext& access)
     return Result<void>::Success();
 }
 
+bool ObjectRegistry::IsReclaimable(const Slot& slot) const noexcept {
+    // 고리에 남은 자식이 있으면 부모 슬롯을 재사용하지 않는다. white 부모가 자식보다 먼저
+    // Retire되면 자식들이 같은 sweep에서 스스로 떨어질 때까지 기다린다(그 사이
+    // DrainRetired·rollback 회수 포함).
+    return slot.state == SlotState::Retired && slot.roots == 0 && slot.borrows == 0 &&
+           slot.backendHolds == 0 && slot.encodePins == 0 && slot.firstChild == nullptr;
+}
+
 bool ObjectRegistry::HasReclaimableLocked() const noexcept {
     for (Chunk* chunk = chunks_; chunk; chunk = chunk->next) {
         for (const auto& slot : chunk->slots) {
-            if (slot.state == SlotState::Retired && slot.roots == 0 && slot.borrows == 0 &&
-                slot.backendHolds == 0 && slot.encodePins == 0) {
+            if (IsReclaimable(slot)) {
                 return true;
             }
         }
@@ -1935,6 +2478,9 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
             TraceVisitor visitor(&state, &ObjectRegistry::MarkEdge);
             Slot* slot = FindSlot(next);
             slot->type.Ops().trace(*slot->object, visitor);
+            // inner → outer는 Registry가 방문하는 강한 간선이다(gate_ 없이 — slice 동안 outer는
+            // 불변이고 MarkEdge가 gate_를 잡는다).
+            visitor.Visit(slot->outer);
             ++processed;
             continue;
         }
@@ -1964,6 +2510,8 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
                     TraceVisitor visitor(&state, &ObjectRegistry::MarkEdge);
                     Slot* slot = FindSlot(handle);
                     slot->type.Ops().trace(*slot->object, visitor);
+                    // outer는 공개 전에 정해져 바뀌지 않으므로 worker가 읽어도 경합이 없다.
+                    visitor.Visit(slot->outer);
                 });
             if (!body) {
                 setError(body.Error());
@@ -2017,6 +2565,7 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
         if ((slot.state == SlotState::Alive || slot.state == SlotState::DestroyRequested) &&
             slot.mark != markEpoch_) {
             slot.state = SlotState::Retired;
+            DetachIdentityLocked(slot);
             ++cycleGc_.retired;
         }
 
@@ -2112,6 +2661,7 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access) noex
     for (usize cursor = 0; cursor < work.Size() && state.error == ErrorCode::None; ++cursor) {
         Slot* slot = FindSlot(work[cursor]);
         slot->type.Ops().trace(*slot->object, visitor);
+        visitor.Visit(slot->outer);
     }
 
     if (state.error != ErrorCode::None) {
@@ -2130,6 +2680,7 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access) noex
                 if ((slot.state == SlotState::Alive || slot.state == SlotState::DestroyRequested) &&
                     slot.mark != markEpoch_) {
                     slot.state = SlotState::Retired;
+                    DetachIdentityLocked(slot);
                     ++report.retired;
                 }
             }
@@ -2154,12 +2705,12 @@ uint32 ObjectRegistry::ReclaimEligible(uint32 maximum, uint64 deadline) noexcept
         TypeLease type;
         Object* object = nullptr;
         void* storage = nullptr;
+        NameRecord* record = nullptr;
         {
             platform::LockGuard lock(gate_);
             for (Chunk* chunk = chunks_; chunk && !selected; chunk = chunk->next) {
                 for (auto& slot : chunk->slots) {
-                    if (slot.state == SlotState::Retired && slot.roots == 0 && slot.borrows == 0 &&
-                        slot.backendHolds == 0 && slot.encodePins == 0) {
+                    if (IsReclaimable(slot)) {
                         selected = &slot;
                         break;
                     }
@@ -2170,13 +2721,19 @@ uint32 ObjectRegistry::ReclaimEligible(uint32 maximum, uint64 deadline) noexcept
                 break;
             }
 
+            if (selected->indexed || selected->linked) {
+                platform::Fatal("Reclaiming an object still in the name index or child ring");
+            }
+
             // 저장소를 큐에서 분리한 뒤 잠금을 푼다. 콜백 중 통계 조회는 가능하지만 재회수는
             // 불가하다. 지역 TypeLease가 소멸자 코드까지 살아 있게 하므로 해제 콜백이 끝난 뒤
-            // 반환한다.
+            // 반환한다. 이름 기록도 잠금 밖에서 반환한다(조회는 잠금 안에서 복사해 두었다).
             selected->state = SlotState::Reclaiming;
             type = Move(selected->type);
             object = selected->object;
             storage = selected->storage;
+            record = selected->name;
+            selected->name = nullptr;
         }
 
         // User destructors and allocator callbacks never execute under the registry gate.
@@ -2186,6 +2743,7 @@ uint32 ObjectRegistry::ReclaimEligible(uint32 maximum, uint64 deadline) noexcept
             platform::Fatal("Object allocation ownership mismatch");
         }
 
+        ReleaseRegistryMemory(allocator_, record);
         {
             platform::LockGuard lock(gate_);
             selected->object = nullptr;
@@ -2193,6 +2751,11 @@ uint32 ObjectRegistry::ReclaimEligible(uint32 maximum, uint64 deadline) noexcept
             selected->transaction = 0;
             selected->stableType = {};
             selected->mark = 0;
+            selected->outer = {};
+            selected->outermost = nullptr;
+            selected->parent = nullptr;
+            selected->lastChild = nullptr;
+            selected->pathBytes = 0;
             // 세대를 0/과거 값으로 순환시키면 오래된 WeakRef가 새 객체를 가리킬 수 있다.
             // 한도에 도달한 슬롯은 재사용하지 않고 Exhausted로 남긴다.
             if (selected->generation >= options_.maxGeneration) {
@@ -2272,6 +2835,582 @@ Result<void> ObjectRegistry::Shutdown(const ObjectAccessContext& access) noexcep
     return Result<void>::Success();
 }
 
+Result<ObjectHandle> ObjectRegistry::GetOuter(const ObjectAccessContext& access,
+                                              ObjectHandle handle) const noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return Result<ObjectHandle>::Failure(valid.Error());
+    }
+
+    platform::LockGuard lock(gate_);
+    if (auto open = OpenState(closed_, processing_); !open) {
+        return Result<ObjectHandle>::Failure(open.Error());
+    }
+
+    auto found = FindPublishedLocked(handle);
+    if (!found) {
+        return Result<ObjectHandle>::Failure(found.Error());
+    }
+
+    return Result<ObjectHandle>::Success(found.Value()->outer);
+}
+
+Result<ObjectHandle> ObjectRegistry::GetOutermost(const ObjectAccessContext& access,
+                                                  ObjectHandle handle) const noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return Result<ObjectHandle>::Failure(valid.Error());
+    }
+
+    platform::LockGuard lock(gate_);
+    if (auto open = OpenState(closed_, processing_); !open) {
+        return Result<ObjectHandle>::Failure(open.Error());
+    }
+
+    auto found = FindPublishedLocked(handle);
+    if (!found) {
+        return Result<ObjectHandle>::Failure(found.Error());
+    }
+
+    // 공개된 객체의 Outer 사슬은 모두 회수 전이다(살아 있는 Inner가 inner → outer로 Outer를
+    // 표식하고, cutoff white 객체는 위에서 거부했다).
+    return Result<ObjectHandle>::Success(HandleOf(*found.Value()->outermost));
+}
+
+Result<void> ObjectRegistry::GetName(const ObjectAccessContext& access, ObjectHandle handle,
+                                     String& out) const noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return valid;
+    }
+
+    // 잠금 안에서 스택에 복사하고 잠금 밖에서 붙인다. out의 할당 콜백이 그 객체를 회수해도 해제된
+    // 이름을 읽지 않는다.
+    char buffer[MaxNameComponentBytes];
+    usize bytes = 0;
+    {
+        platform::LockGuard lock(gate_);
+        if (auto open = OpenState(closed_, processing_); !open) {
+            return open;
+        }
+
+        auto found = FindPublishedLocked(handle);
+        if (!found) {
+            return Result<void>::Failure(found.Error());
+        }
+
+        if (const NameRecord* record = found.Value()->name) {
+            bytes = record->nameBytes;
+            platform::MemoryCopy(buffer, record->Data(), bytes);
+        }
+    }
+
+    return out.TryAppend(StringView(buffer, bytes));
+}
+
+Result<void> ObjectRegistry::GetObjectPath(const ObjectAccessContext& access, ObjectHandle handle,
+                                           String& out) const noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return valid;
+    }
+
+    char buffer[MaxObjectPathBytes];
+    usize bytes = 0;
+    {
+        platform::LockGuard lock(gate_);
+        if (auto open = OpenState(closed_, processing_); !open) {
+            return open;
+        }
+
+        auto found = FindPublishedLocked(handle);
+        if (!found) {
+            return Result<void>::Failure(found.Error());
+        }
+
+        // 경로 길이를 생성 때 계산해 두었으므로 끝에서부터 채운다. 대표 자식의 빈 이름은 건너뛰고,
+        // 앞쪽 경로가 남아 있을 때만 '.'을 넣는다.
+        const Slot* slot = found.Value();
+        bytes = slot->pathBytes;
+        usize position = bytes;
+        for (const Slot* current = slot; !current->outer.IsNull(); current = current->parent) {
+            const NameRecord& record = *current->name;
+            if (record.nameBytes == 0) {
+                continue;
+            }
+
+            if (record.nameBytes > position) {
+                platform::Fatal("Corrupt object path length");
+            }
+
+            position -= record.nameBytes;
+            platform::MemoryCopy(buffer + position, record.Data(), record.nameBytes);
+            if (position != 0) {
+                buffer[--position] = '.';
+            }
+        }
+
+        if (position != 0) {
+            platform::Fatal("Corrupt object path length");
+        }
+    }
+
+    return out.TryAppend(StringView(buffer, bytes));
+}
+
+Result<ObjectHandle> ObjectRegistry::FindChild(const ObjectAccessContext& access,
+                                               ObjectHandle outer, StringView name) const noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return Result<ObjectHandle>::Failure(valid.Error());
+    }
+
+    const bool hasOuter = !outer.IsNull();
+    const ObjectHandle outerKey = hasOuter ? outer : ObjectHandle{};
+    // 이름 형식 검사·키 생성(할당)을 잠금 밖에서 하므로 그 앞뒤로 같은 검사를 한다.
+    auto checkLocked = [&]() noexcept -> Result<void> {
+        if (auto open = OpenState(closed_, processing_); !open) {
+            return open;
+        }
+
+        if (hasOuter) {
+            auto found = FindPublishedLocked(outer);
+            if (!found) {
+                return Result<void>::Failure(found.Error());
+            }
+        }
+
+        return Result<void>::Success();
+    };
+    {
+        platform::LockGuard lock(gate_);
+        if (auto checked = checkLocked(); !checked) {
+            return Result<ObjectHandle>::Failure(checked.Error());
+        }
+    }
+
+    if (name.IsEmpty()) {
+        if (!hasOuter) {
+            return Result<ObjectHandle>::Failure(ErrorCode::InvalidArgument);
+        }
+    } else if (auto format = ValidateNameComponent(name, allocator_); !format) {
+        return Result<ObjectHandle>::Failure(format.Error());
+    }
+
+    StringBuilder<128> key(allocator_);
+    if (auto made = TryMakeNameComponentKey(name, key); !made) {
+        return Result<ObjectHandle>::Failure(made.Error());
+    }
+
+    const uint64 hash = NameKeyHash(outerKey, key.View());
+    platform::LockGuard lock(gate_);
+    if (auto checked = checkLocked(); !checked) {
+        return Result<ObjectHandle>::Failure(checked.Error());
+    }
+
+    const Slot* found = FindNamedLocked(outerKey, hash, key.View(), true);
+    if (found == nullptr) {
+        return Result<ObjectHandle>::Failure(ErrorCode::NotFound);
+    }
+
+    return Result<ObjectHandle>::Success(HandleOf(*found));
+}
+
+Result<ObjectHandle> ObjectRegistry::FindObject(const ObjectAccessContext& access,
+                                                ObjectHandle outermost,
+                                                StringView objectPath) const noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return Result<ObjectHandle>::Failure(valid.Error());
+    }
+
+    ObjectHandle current{};
+    {
+        platform::LockGuard lock(gate_);
+        if (auto open = OpenState(closed_, processing_); !open) {
+            return Result<ObjectHandle>::Failure(open.Error());
+        }
+
+        auto found = FindPublishedLocked(outermost);
+        if (!found) {
+            return Result<ObjectHandle>::Failure(found.Error());
+        }
+
+        if (!found.Value()->outer.IsNull()) {
+            return Result<ObjectHandle>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        current = HandleOf(*found.Value());
+    }
+
+    if (objectPath.ByteCount() > MaxObjectPathBytes) {
+        return Result<ObjectHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 구성 요소는 '.'로 나눈다('.'은 ASCII라 UTF-8 sequence 안에 나오지 않는다). 조회 전에 모든
+    // 구성 요소의 형식을 검사해 결과가 앞 구성 요소의 존재 여부에 따라 달라지지 않게 한다.
+    const char* data = objectPath.Data();
+    const usize size = objectPath.ByteCount();
+    auto forEachComponent = [&](auto&& visit) noexcept -> Result<void> {
+        usize start = 0;
+        for (usize position = 0; position <= size; ++position) {
+            if (position == size || data[position] == '.') {
+                if (auto visited = visit(StringView(data + start, position - start)); !visited) {
+                    return visited;
+                }
+
+                start = position + 1;
+            }
+        }
+
+        return Result<void>::Success();
+    };
+    if (size != 0) {
+        auto formatted = forEachComponent([&](StringView component) noexcept -> Result<void> {
+            return ValidateNameComponent(component, allocator_);
+        });
+        if (!formatted) {
+            return Result<ObjectHandle>::Failure(formatted.Error());
+        }
+    }
+
+    // 공개된 대표 자식이 있으면 경로는 그 아래에서 시작한다(빈 경로 = 대표 자식).
+    {
+        platform::LockGuard lock(gate_);
+        if (auto open = OpenState(closed_, processing_); !open) {
+            return Result<ObjectHandle>::Failure(open.Error());
+        }
+
+        auto found = FindPublishedLocked(current);
+        if (!found) {
+            return Result<ObjectHandle>::Failure(found.Error());
+        }
+
+        const Slot* representative = FindNamedLocked(current, NameKeyHash(current, {}), {}, true);
+        if (representative != nullptr) {
+            current = HandleOf(*representative);
+        } else if (size == 0) {
+            return Result<ObjectHandle>::Failure(ErrorCode::NotFound);
+        }
+    }
+
+    if (size == 0) {
+        return Result<ObjectHandle>::Success(current);
+    }
+
+    auto walked = forEachComponent([&](StringView component) noexcept -> Result<void> {
+        StringBuilder<128> key(allocator_);
+        if (auto made = TryMakeNameComponentKey(component, key); !made) {
+            return made;
+        }
+
+        const uint64 hash = NameKeyHash(current, key.View());
+        platform::LockGuard lock(gate_);
+        if (auto open = OpenState(closed_, processing_); !open) {
+            return open;
+        }
+
+        // 키 생성 할당 콜백이 그 사이 Registry를 바꿨을 수 있어 현재 객체를 다시 확인한다.
+        auto found = FindPublishedLocked(current);
+        if (!found) {
+            return Result<void>::Failure(found.Error());
+        }
+
+        const Slot* child = FindNamedLocked(current, hash, key.View(), true);
+        if (child == nullptr) {
+            return Result<void>::Failure(ErrorCode::NotFound);
+        }
+
+        current = HandleOf(*child);
+        return Result<void>::Success();
+    });
+    if (!walked) {
+        return Result<ObjectHandle>::Failure(walked.Error());
+    }
+
+    return Result<ObjectHandle>::Success(current);
+}
+
+Result<bool> ObjectRegistry::IsNameTaken(const ObjectAccessContext& access, ObjectHandle outer,
+                                         StringView name) const noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return Result<bool>::Failure(valid.Error());
+    }
+
+    const bool hasOuter = !outer.IsNull();
+    const ObjectHandle outerKey = hasOuter ? outer : ObjectHandle{};
+    // outer는 공개 전 객체여도 된다(공개 전 Inner도 이름을 점유하므로 같은 기준이다).
+    auto checkLocked = [&]() noexcept -> Result<void> {
+        if (auto open = OpenState(closed_, processing_); !open) {
+            return open;
+        }
+
+        if (!hasOuter) {
+            return Result<void>::Success();
+        }
+
+        const Slot* slot = FindSlot(outer);
+        if (!slot || slot->state == SlotState::Free || slot->state == SlotState::Exhausted) {
+            return Result<void>::Failure(ErrorCode::StaleHandle);
+        }
+
+        if (IsCutoff(slot) ||
+            !(slot->state == SlotState::Reserved || slot->state == SlotState::Alive ||
+              slot->state == SlotState::DestroyRequested)) {
+            return Result<void>::Failure(ErrorCode::Destroyed);
+        }
+
+        return Result<void>::Success();
+    };
+    {
+        platform::LockGuard lock(gate_);
+        if (auto checked = checkLocked(); !checked) {
+            return Result<bool>::Failure(checked.Error());
+        }
+    }
+
+    if (name.IsEmpty()) {
+        if (!hasOuter) {
+            return Result<bool>::Failure(ErrorCode::InvalidArgument);
+        }
+    } else if (auto format = ValidateNameComponent(name, allocator_); !format) {
+        return Result<bool>::Failure(format.Error());
+    }
+
+    StringBuilder<128> key(allocator_);
+    if (auto made = TryMakeNameComponentKey(name, key); !made) {
+        return Result<bool>::Failure(made.Error());
+    }
+
+    const uint64 hash = NameKeyHash(outerKey, key.View());
+    platform::LockGuard lock(gate_);
+    if (auto checked = checkLocked(); !checked) {
+        return Result<bool>::Failure(checked.Error());
+    }
+
+    return Result<bool>::Success(FindNamedLocked(outerKey, hash, key.View(), false) != nullptr);
+}
+
+Result<OuterSummary> ObjectRegistry::DescribeOuter(const ObjectAccessContext& access,
+                                                   ObjectHandle outer) const noexcept {
+    return DescribeOuterChecked(access, outer, 0);
+}
+
+Result<OuterSummary> ObjectRegistry::DescribeOuterChecked(const ObjectAccessContext& access,
+                                                          ObjectHandle outer,
+                                                          uint64 transaction) const noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return Result<OuterSummary>::Failure(valid.Error());
+    }
+
+    platform::LockGuard lock(gate_);
+    if (auto open = OpenState(closed_, processing_); !open) {
+        return Result<OuterSummary>::Failure(open.Error());
+    }
+
+    if (outer.IsNull()) {
+        return Result<OuterSummary>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 생성 규칙 5와 같은 기준이다: 생존(Alive, cutoff 아님) 또는 이 트랜잭션의 공개 전 객체.
+    const Slot* slot = FindSlot(outer);
+    if (!slot || IsCutoff(slot) ||
+        !(slot->state == SlotState::Alive ||
+          (transaction != 0 && slot->state == SlotState::Reserved &&
+           slot->transaction == transaction && slot->object != nullptr))) {
+        return Result<OuterSummary>::Failure(ErrorCode::StaleHandle);
+    }
+
+    return Result<OuterSummary>::Success(DescribeSlotLocked(*slot));
+}
+
+Result<void> ObjectRegistry::CollectInners(const ObjectAccessContext& access, ObjectHandle outer,
+                                           InnerOrder order, Array<ObjectHandle>& out) noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return valid;
+    }
+
+    const bool depthFirst = order == InnerOrder::DepthFirst;
+    // Alive 객체만 모으고, 모으지 않는 객체(공개 전·파괴 요청·cutoff white)의 부분 트리는 내려가지
+    // 않는다. 그래서 DepthFirst에서도 Outer가 언제나 Inner보다 앞이다.
+    auto collectable = [this](const Slot* slot) noexcept {
+        return slot->state == SlotState::Alive && !IsCutoff(slot);
+    };
+    Slot* root = nullptr;
+    usize count = 0;
+    {
+        platform::LockGuard lock(gate_);
+        if (auto open = OpenState(closed_, processing_); !open) {
+            return open;
+        }
+
+        auto found = FindPublishedLocked(outer);
+        if (!found) {
+            return Result<void>::Failure(found.Error());
+        }
+
+        root = found.Value();
+        // (1) 개수를 센다. 스택 없이 부모 포인터로 되돌아 오르는 전위 순회다.
+        const Slot* node = root->firstChild;
+        while (node != nullptr) {
+            const bool take = collectable(node);
+            if (take) {
+                ++count;
+            }
+
+            if (take && depthFirst && node->firstChild != nullptr) {
+                node = node->firstChild;
+                continue;
+            }
+
+            while (node != root && node->nextSibling == nullptr) {
+                node = node->parent;
+            }
+
+            node = node == root ? nullptr : node->nextSibling;
+        }
+
+        // (2) 처리 표시 아래 잠금 밖에서 할당한다(그 사이 재진입 변경은 Busy라 트리가 바뀌지
+        // 않는다).
+        processing_ = true;
+    }
+
+    auto finish = [this](ErrorCode error) noexcept -> Result<void> {
+        platform::LockGuard lock(gate_);
+        processing_ = false;
+        return error == ErrorCode::None ? Result<void>::Success() : Result<void>::Failure(error);
+    };
+    if (count == 0) {
+        return finish(ErrorCode::None);
+    }
+
+    const usize before = out.Size();
+    if (count > static_cast<usize>(-1) - before) {
+        return finish(ErrorCode::Overflow);
+    }
+
+    if (auto reserved = out.TryReserve(before + count); !reserved) {
+        return finish(reserved.Error());
+    }
+
+    Array<InnerEntry> entries(allocator_);
+    if (auto reserved = entries.TryReserve(count); !reserved) {
+        return finish(reserved.Error());
+    }
+
+    // (3) 수준 순서로 모은다: 직계, 이어서 각 원소의 자식(같은 Outer의 자식이 연속 구간이다).
+    usize direct = 0;
+    bool grew = false;
+    {
+        platform::LockGuard lock(gate_);
+        auto appendChildren = [&](const Slot& parent, uint32 parentPosition) noexcept {
+            for (Slot* child = parent.firstChild; child != nullptr; child = child->nextSibling) {
+                if (!collectable(child)) {
+                    continue;
+                }
+
+                if (entries.Size() == count) {
+                    grew = true;
+                    return;
+                }
+
+                InnerEntry entry;
+                entry.slot = child;
+                entry.parent = parentPosition;
+                if (!entries.TryPushBack(entry)) {
+                    platform::Fatal("Reserved inner collection unexpectedly failed");
+                }
+            }
+        };
+        appendChildren(*root, NoInnerParent);
+        direct = entries.Size();
+        if (depthFirst) {
+            for (usize position = 0; position < entries.Size() && !grew; ++position) {
+                const auto start = static_cast<uint32>(entries.Size());
+                appendChildren(*entries[position].slot, static_cast<uint32>(position));
+                entries[position].childStart = start;
+                entries[position].childCount = static_cast<uint32>(entries.Size()) - start;
+            }
+        }
+    }
+
+    // 처리 표시 동안 트리가 바뀔 수 없으므로 개수가 다르면 계약 위반이다.
+    if (grew || entries.Size() != count) {
+        return finish(ErrorCode::Busy);
+    }
+
+    // (4) 잠금 밖에서 같은 Outer 구간마다 이름 순으로 제자리 정렬한다. 이 구간에는 할당·사용자
+    // 콜백이 없고 회수는 소유 스레드의 명시 호출뿐이라 NameRecord가 사라지지 않는다. 같은 Outer 안
+    // 이름은 서로 달라 순서가 결정적이다.
+    auto byName = [](const InnerEntry& left, const InnerEntry& right) noexcept {
+        return NameLess(left.slot->name->Name(), right.slot->name->Name());
+    };
+    algo::Sort(Span<InnerEntry>(entries.Data(), direct), byName);
+    if (depthFirst) {
+        // 원소는 자기 자식 구간(childStart, childCount)을 들고 움직이고, 자식 구간은 부모보다 뒤에
+        // 있어 부모 구간을 정렬한 뒤에 방문된다.
+        for (usize position = 0; position < entries.Size(); ++position) {
+            const InnerEntry& entry = entries[position];
+            if (entry.childCount > 1) {
+                algo::Sort(Span<InnerEntry>(entries.Data() + entry.childStart, entry.childCount),
+                           byName);
+            }
+        }
+
+        for (usize position = 0; position < entries.Size(); ++position) {
+            const InnerEntry& entry = entries[position];
+            for (uint32 child = 0; child < entry.childCount; ++child) {
+                entries[entry.childStart + child].parent = static_cast<uint32>(position);
+            }
+        }
+    }
+
+    // (5) Direct는 그대로, DepthFirst는 부모 위치·자식 구간으로 스택 없이 전위 순서를 만든다.
+    auto push = [&](const InnerEntry& entry) noexcept {
+        if (!out.TryPushBack(HandleOf(*entry.slot))) {
+            platform::Fatal("Reserved inner output unexpectedly failed");
+        }
+    };
+    if (!depthFirst) {
+        for (usize position = 0; position < direct; ++position) {
+            push(entries[position]);
+        }
+    } else {
+        usize current = 0;
+        bool done = false;
+        while (!done) {
+            push(entries[current]);
+            if (entries[current].childCount != 0) {
+                current = entries[current].childStart;
+                continue;
+            }
+
+            for (;;) {
+                const uint32 parent = entries[current].parent;
+                const usize end = parent == NoInnerParent
+                                      ? direct
+                                      : entries[parent].childStart + entries[parent].childCount;
+                if (current + 1 < end) {
+                    ++current;
+                    break;
+                }
+
+                if (parent == NoInnerParent) {
+                    done = true;
+                    break;
+                }
+
+                current = parent;
+            }
+        }
+    }
+
+    return finish(ErrorCode::None);
+}
+
 ObjectStats ObjectRegistry::Stats() const noexcept {
     platform::LockGuard lock(gate_);
     ObjectStats stats;
@@ -2303,6 +3442,7 @@ ObjectStats ObjectRegistry::Stats() const noexcept {
         }
     }
 
+    stats.namedObjects = nameLive_;
     return stats;
 }
 

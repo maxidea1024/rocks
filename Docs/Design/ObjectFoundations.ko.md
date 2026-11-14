@@ -1,6 +1,6 @@
 # 객체·그래프 보강(A0-O) 설계
 
-기준일: 2026-11-14, 확정안(설계 교차검증 2건 — 구현 가능성, 적대적 반례와 UE 5.6 대조 — 과 최종 검토 1건 반영, 사용자 승인 권고안으로 진행). [에셋 시스템 설계](AssetSystem.ko.md)(이하 AS) 1절 A0-O 단계의 상세이며 아직 구현 전이다(기준 코드 `5ee4dc5` — A0-B B1–B8 구현 완료).
+기준일: 2026-11-14, 확정안(설계 교차검증 2건 — 구현 가능성, 적대적 반례와 UE 5.6 대조 — 과 최종 검토 1건 반영, 사용자 승인 권고안으로 진행). [에셋 시스템 설계](AssetSystem.ko.md)(이하 AS) 1절 A0-O 단계의 상세다(기준 코드 `5ee4dc5` — A0-B B1–B8 구현 완료). 구현: A0-Oa(Outer·Name·정책·다중 root Commit — 구현하며 구체화한 점은 각 절에 반영했다). A0-Ob–Oe는 구현 전이다.
 
 근거: AS 1절 A0-O 행과 3·5·6·7·11절, [리플렉션·빌드 보강 설계](ReflectionFoundations.ko.md)(이하 RF)의 A0-O 언급(2.2·2.3·3.3·5.5·6.1–6.4절, 결정 16·21·22), [런타임 클래스 메타데이터](RuntimeClassMetadata.ko.md)(이하 RCM) '클래스 기본값 결정', [엔진 구현 계획](EngineImplementationPlan.ko.md)(이하 EIP) §5.2 "Outer와 객체 경로", 현재 코드(`Core/Source/Runtime/ObjectRuntime`·`ObjectSerialization`). UE 대조는 모두 `EpicGames/UnrealEngine` 5.6 브랜치 원본으로 확인했다(10절).
 
@@ -29,8 +29,8 @@
 
 - **이름 형식**: 이름은 AS 4.2절 경로 구성 요소 규칙을 따른다 — UTF-8 NFC, 1–64 byte, 허용 문자 General_Category L\*·N\*·M\*와 `_`·`-`(첫 문자는 L\*·N\*), Default_Ignorable_Code_Point 거부, Windows 예약 이름(대소문자 무시 `CON PRN AUX NUL COM0-9 LPT0-9 COM¹²³ LPT¹²³`) 거부. 따라서 `.`·`/`가 들어갈 수 없다(AS 4.1). Registry는 정규화하지 않고 검사만 한다(비 NFC 입력은 InvalidArgument — 조회 결과가 입력과 달라지지 않게). 정규화는 입력 계층(A2 경로 정책·명령행)이 한다.
 - **비교 키**: 같은 Outer 안 유일성과 조회는 `TryMakeCaselessKey`(AS 4.2 — NFC(simple case folding(NFD(x))))로 비교한다. 키 생성은 정규화 버퍼(Normalizer segment)를 할당하므로 조회 API도 OutOfMemory를 돌려줄 수 있다 — ASCII만으로 된 이름은 할당 없는 빠른 경로(ASCII 소문자화)로 만든다(같은 결과임을 시험으로 고정). 정렬은 원래 이름의 NFC UTF-8 byte 순이다(AS 4.2). Core `Name`(NamePool)은 쓰지 않는다 — ASCII만 대소문자를 무시하고 `None`·번호 접미 규칙이 있어 AS 4.2와 맞지 않는다(Docs/Implementation/Name.ko.md).
-- **빈 이름**: (a) Outer가 없는 객체는 빈 이름이어도 된다(지금 모든 객체가 이렇다 — 이름 색인에 넣지 않는다). (b) Outer가 있는 객체의 빈 이름은 **대표 자식**뿐이다: 그 Outer는 Outer가 없는 객체(outermost)여야 하고, 대표 자식이 있는 Outer는 다른 자식을 가질 수 없으며 그 반대도 같다. 패키지 정책에서는 대표 자식이 대표 에셋이다(AS 4.1·5.1 "export 1만 빈 이름·outerIndex 0"). (c) 그 밖의 빈 이름은 InvalidArgument다. 이 규칙의 "Inner가 있다"는 이름 점유와 같은 기준이다 — 다른 트랜잭션의 Reserved도 세고, cutoff white·Discard된 객체는 세지 않는다.
-- **유일성**: (Outer, 비교 키)가 같은 객체는 하나다. Outer가 없는 이름 있는 객체는 최상위 이름 공간에서 유일하다. 클래스는 키가 아니다(UE도 같다 — 10절). 공개 전(Reserved) 객체도 생성 때부터 이름을 점유하므로 동시에 열린 두 트랜잭션이 같은 이름을 만들 수 없다(뒤의 Create가 AlreadyExists). GC cutoff white(Unreachable) 객체는 이름을 점유하지 않는다 — 충돌 검사에서 만나면 그 항목을 그 자리에서 뺀다(UE의 기본 조회가 Unreachable을 빼는 것과 같은 효과).
+- **빈 이름**: (a) Outer가 없는 객체는 빈 이름이어도 된다(지금 모든 객체가 이렇다 — 이름 색인에 넣지 않는다). (b) Outer가 있는 객체의 빈 이름은 **대표 자식**뿐이다: 그 Outer는 Outer가 없는 객체(outermost)여야 하고, 대표 자식이 있는 Outer는 다른 자식을 가질 수 없으며 그 반대도 같다. 대표 자식은 빈 비교 키로 이름 색인에 들어가므로 같은 Outer의 두 번째 대표 자식은 이름 충돌(AlreadyExists)이다. 패키지 정책에서는 대표 자식이 대표 에셋이다(AS 4.1·5.1 "export 1만 빈 이름·outerIndex 0"). (c) 그 밖의 빈 이름은 InvalidArgument다. 이 규칙의 "Inner가 있다"는 이름 점유와 같은 기준이다 — 다른 트랜잭션의 Reserved도 세고, cutoff white·Discard된 객체는 세지 않는다.
+- **유일성**: (Outer, 비교 키)가 같은 객체는 하나다. Outer가 없는 이름 있는 객체는 최상위 이름 공간에서 유일하다. 클래스는 키가 아니다(UE도 같다 — 10절). 공개 전(Reserved) 객체도 생성 때부터 이름을 점유하므로 동시에 열린 두 트랜잭션이 같은 이름을 만들 수 없다(뒤의 Create가 AlreadyExists). GC cutoff white(Unreachable) 객체는 이름을 점유하지 않는다 — 충돌 검사·조회는 그 항목을 건너뛰고, 같은 키의 새 객체를 색인에 넣을 때 그 항목을 그 자리에서 뺀다(실패한 생성은 색인을 바꾸지 않는다. UE의 기본 조회가 Unreachable을 빼는 것과 같은 효과).
 - **객체 경로**: outermost 아래에서 그 객체까지의 이름을 `.`로 이은 것이고 대표 자식의 빈 이름은 건너뛴다(AS 4.1 예: 대표 에셋 아래 `Body` 아래 `Socket` = `Body.Socket`). outermost와 대표 자식의 경로는 빈 문자열이다(SoftObjectRef의 빈 경로 = 대표 에셋, RF 3.3). 경로는 4 KiB 이하다(AS 5.1 문자열 상한) — 넘는 객체는 만들 수 없다(CapacityExceeded). 따라서 Outer 깊이도 경로로 묶인다(최대 2048).
 - **불변**: Outer와 이름은 생성 때 정하고 바꾸지 않는다(Rename은 11절 결정 2 — UE는 대소문자만 바꾸는 Rename을 허용하지만 Rocks는 이름 자체가 불변이다). 그래서 소속 패키지(outermost)도 객체 수명 동안 고정이다 — `ReferenceObserver`(3절)가 이것에 기댄다.
 - **GC**: inner → outer는 언제나 GC가 추적하는 강한 간선이다(EIP §5.2, UE도 같다 — 10절). outer → inner는 정책 없는 Registry에서는 간선이 아니고(EIP §5.2 "outer가 inner를 암묵적으로 살리지 않는다"), 패키지 정책 Registry에서는 강한 간선이다(1.7절 — 결정 8).
@@ -38,7 +38,7 @@
 
 ### 1.2 공개 API
 
-Core(`Core/Text/NameComponent.h`, 할당은 NFC 검사 scratch뿐):
+Core(`Core/Text/NameComponent.h`, `ValidateNameComponent`의 할당은 NFC 검사 scratch뿐이고 `TryMakeNameComponentKey`는 비ASCII 이름에서 out의 allocator로 정규화 임시 저장소를 할당한다):
 
 ```cpp
 inline constexpr usize MaxNameComponentBytes = 64;
@@ -58,7 +58,13 @@ enum class NameComponentError : uint8 {
 Result<void> ValidateNameComponent(StringView component, Allocator& scratch,
                                    NameComponentError* reason = nullptr,
                                    usize* offset = nullptr) noexcept;
+
+// 비교 키(= TryMakeCaselessKey)를 out 뒤에 붙인다. ASCII만으로 된 이름은 ASCII 소문자화로 할당 없이
+// 만든다(같은 결과임을 Core 시험으로 고정 — Registry와 A2 경로 구성 요소가 같이 쓴다).
+Result<void> TryMakeNameComponentKey(StringView component, StringBuilderBase& out) noexcept;
 ```
+
+검사 순서는 할당 없는 검사(Empty → TooLong → UTF-8·문자(DefaultIgnorable → InvalidFirst → InvalidCharacter) → ReservedDeviceName)를 먼저 하고 NFC(NotNfc)를 마지막에 본다. 잘못된 UTF-8은 InvalidCharacter(offset = 유효한 앞부분 길이), NotNfc의 offset은 NFC 결과와 처음 달라지는 code point의 시작이다.
 
 ObjectRuntime(`Object/ObjectRegistry.h`·`ConstructionContext.h` — 모두 소유 스레드 전용, 접근 검사 순서는 기존 API와 같다):
 
@@ -70,7 +76,8 @@ struct OuterSummary {
     bool outermostIsPackage = false;  // outermost가 정책의 패키지 타입인지(정책이 없으면 false)
     // Inner 유무는 이름 점유와 같은 기준이다(다른 트랜잭션의 Reserved는 세고, cutoff white·Discard된
     // 객체는 세지 않는다).
-    bool hasRepresentative = false;   // 대표 자식(빈 이름 Inner)이 있는지
+    bool hasRepresentative = false;   // 대표 자식(빈 이름 Inner)이 있는지(이름 있는 자식 거부에만 쓴다 —
+                                      // 두 번째 대표 자식은 빈 키 점유로 AlreadyExists)
     bool hasNamedInners = false;      // 이름 있는 Inner가 있는지
     uint32 pathBytes = 0;             // 이 객체의 객체 경로 byte 수
 
@@ -120,16 +127,20 @@ public:
     // 비교 키 생성 할당 실패는 OutOfMemory다.
     Result<ObjectHandle> FindChild(const ObjectAccessContext&, ObjectHandle outer,
                                    StringView name) const noexcept;
-    // outermost 아래 객체 경로(1.1절)를 푼다. 빈 경로는 대표 자식이다. 경로는 4 KiB 이하.
+    // outermost 아래 객체 경로(1.1절)를 푼다. 빈 경로는 대표 자식이다(없으면 NotFound — outermost
+    // 자신을 돌려주지 않는다). 경로는 4 KiB 이하. 조회 전에 모든 구성 요소의 형식을 검사한다.
     //
     // 사용 예(A1 Soft 참조 해석):
     //   auto target = registry.FindObject(access, package, softRef.objectPath.View());
     //   if (!target) { /* NotFound면 MissingDependency 진단 */ }
     Result<ObjectHandle> FindObject(const ObjectAccessContext&, ObjectHandle outermost,
                                     StringView objectPath) const noexcept;
-    // Create가 AlreadyExists가 될지다(Reserved도 점유로 본다). 형식 오류는 InvalidArgument.
+    // Create가 AlreadyExists가 될지다(Reserved도 점유로 본다 — outer도 공개 전 객체여도 된다). 빈 name은
+    // 대표 자식 자리. 형식 오류는 InvalidArgument. 대표 자식·패키지 같은 구조 규칙은 보지 않는다.
     Result<bool> IsNameTaken(const ObjectAccessContext&, ObjectHandle outer,
                              StringView name) const noexcept;
+    // outer는 생성 규칙 5와 같이 생존(Alive, cutoff 아님) 객체여야 한다(아니면 StaleHandle, null은
+    // InvalidArgument). 공개 전 객체는 ConstructionContext::DescribeOuter로 본다.
     Result<OuterSummary> DescribeOuter(const ObjectAccessContext&, ObjectHandle outer) const noexcept;
 
     // outer의 Inner를 이름 순(빈 이름이 먼저)으로 out 끝에 붙인다. Alive 객체만(공개 전·파괴 요청·
@@ -146,7 +157,8 @@ public:
 };
 ```
 
-- **`CollectInners` 순서**: (1) 잠금 안에서 부분 트리(Direct면 직계) 개수 n을 센다 → (2) `processing_`을 세우고 잠금 밖에서 `out.TryReserve(기존 + n)`과 보조 배열(n × `{Slot*, uint32 부모 위치, uint32 자식 시작}`)을 할당한다(그 사이 재진입 변경은 Busy) → (3) 재잠금해 보조 배열을 큐로 써서 수준 순서(같은 Outer의 자식이 연속)로 `Slot*`를 모으고, 개수가 늘었으면 계약 위반으로 Busy → (4) 잠금 밖에서 같은 Outer 구간마다 `NameRecord`로 제자리 정렬(`Slot*`로 비교 — `FindSlot`의 선형 탐색 없음) → (5) Direct는 그대로, DepthFirst는 부모 위치·자식 시작으로 스택 없이 전위 순서를 만들어 out에 handle로 붙인다 → `processing_`을 내리고 보조 배열을 반환한다. 정렬·순서 구간에는 할당·사용자 콜백이 없으므로 `NameRecord`가 회수될 수 없다(회수는 소유 스레드의 명시 호출뿐이다).
+- **`CollectInners` 순서**: (1) 잠금 안에서 부분 트리(Direct면 직계) 개수 n을 센다(모으지 않는 객체 — 공개 전·DestroyRequested·cutoff white — 의 부분 트리는 내려가지 않는다. 그래서 DepthFirst에서도 Outer가 언제나 Inner보다 앞이다) → (2) `processing_`을 세우고 잠금 밖에서 `out.TryReserve(기존 + n)`과 보조 배열(n × `{Slot*, uint32 부모 위치, uint32 자식 시작, uint32 자식 수}`)을 할당한다(그 사이 재진입 변경은 Busy) → (3) 재잠금해 보조 배열을 큐로 써서 수준 순서(같은 Outer의 자식이 연속)로 `Slot*`를 모으고, 개수가 다르면 계약 위반으로 Busy → (4) 잠금 밖에서 같은 Outer 구간마다 `NameRecord`로 제자리 정렬(`Slot*`로 비교 — `FindSlot`의 선형 탐색 없음). 원소는 자기 자식 구간(자식 시작·자식 수)을 들고 움직이므로 정렬 뒤 위치 인접으로 구간 끝을 알 수 없어 자식 수를 둔다. 정렬 뒤 한 번 훑어 부모 위치를 다시 쓴다 → (5) Direct는 그대로, DepthFirst는 부모 위치·자식 구간으로 스택 없이 전위 순서를 만들어 out에 handle로 붙인다 → `processing_`을 내리고 보조 배열을 반환한다. 정렬·순서 구간에는 할당·사용자 콜백이 없으므로 `NameRecord`가 회수될 수 없다(회수는 소유 스레드의 명시 호출뿐이다).
+- **조회의 오류 순서**(`FindChild`·`IsNameTaken`): 접근 → 종료·재진입 → outer(handle) → 이름 형식(InvalidArgument, 애매한 결합 문자의 NFC 판정 scratch 할당 실패는 OutOfMemory) → 비교 키 할당(비ASCII만 — OutOfMemory) → 결과. 키 생성 할당은 잠금 밖이라 그 앞뒤로 종료·재진입·outer를 다시 확인한다. `FindObject`도 같고(outermost가 아니면 InvalidArgument) 구성 요소마다 잠금을 다시 잡는다. `GetOuter`·`GetOutermost`·`GetName`·`GetObjectPath`는 cutoff white·Retired를 Destroyed, 공개 전·무효 handle을 StaleHandle로 거부한다.
 - **이름 도우미 자리(A2)**: `Result<void> MakeUniqueName(const ObjectAccessContext&, ObjectHandle outer, StringView base, String& out)`(UE `MakeUniqueObjectName` 대응 — `base`, `base_1`, …)와 표시 이름 정제(허용 문자만 남기기)는 A2 임포트·복제가 필요할 때 이 헤더에 더한다. A0-O는 이름만 정한다.
 
 ### 1.3 Registry 정책(타입·규칙은 A0-Oa, 관찰자 관련 규칙은 A0-Ob)
@@ -188,7 +200,7 @@ const RegistryPolicy& ObjectRegistry::Policy() const noexcept;   // 생성 뒤 �
 
 ### 1.4 자료구조(`ObjectRegistry.cpp` 내부)
 
-- `Slot`에 더한다: `ObjectHandle outer`(생성 때 고정), `Slot* outermost`(자기면 자기), `Slot* parent·firstChild·nextSibling·prevSibling`, `NameRecord* name`(이름이 있거나 대표 자식이면), `uint16 pathBytes`, 상태 비트 `indexed`(이름 색인에 있음)·`linked`(부모 고리에 있음)·`discarded`. 고리는 슬롯 번호가 아니라 `Slot*`다 — chunk는 Registry 소멸 전까지 이동·반환되지 않으므로 포인터가 안정하고, 슬롯 번호로 이으면 `SlotAt`의 chunk 선형 탐색(92–101행) 때문에 순회가 O(n·chunks)가 된다.
+- `Slot`에 더한다: `ObjectHandle outer`(생성 때 고정), `Slot* outermost`(자기면 자기), `Slot* parent·firstChild·lastChild·nextSibling·prevSibling`(`lastChild`는 고리 끝에 O(1)로 붙이려고), `NameRecord* name`(이름이 있거나 대표 자식이면), `uint16 pathBytes`, 상태 비트 `indexed`(이름 색인에 있음)·`linked`(부모 고리에 있음)·`discarded`(A0-Ob가 더한다). 고리는 슬롯 번호가 아니라 `Slot*`다 — chunk는 Registry 소멸 전까지 이동·반환되지 않으므로 포인터가 안정하고, 슬롯 번호로 이으면 `SlotAt`의 chunk 선형 탐색(92–101행) 때문에 순회가 O(n·chunks)가 된다.
 - 불변식: Reclaiming·Free 슬롯의 `outer`·`outermost`·고리 칸은 읽지 않는다. Retired 슬롯은 자기를 부모 고리에서 이미 뗐지만, Retired 부모의 `firstChild`는 그 자식들이 스스로 뗄 때까지 유효하다(아래 회수 조건). 트랜잭션 저널·sweep·회수만 슬롯 상태로 걸러 접근한다.
 - `NameRecord`: 할당 하나에 `{uint64 keyHash; uint16 nameBytes; uint16 keyBytes; char data[]}`(NFC 이름 뒤에 비교 키). Create가 잠금 밖에서 만들고(`processing_` 아래 — 지금 `CreatePending`의 할당 방식), 회수(`ReclaimEligible`)가 잠금 밖에서 반환한다. 잠금 안에서는 할당·반환하지 않는다(지금 "User destructors and allocator callbacks never execute under the registry gate" 규칙).
 - 이름 색인: 개방 주소 표, 항목 `{Slot* slot; uint64 keyHash}`(rehash가 슬롯을 읽지 않는다), 2의 거듭제곱 크기, 적재율 (live + tombstone) ≤ 1/2, 삭제는 tombstone. 키는 (outer handle 전체 — domain·slot·generation, keyHash, 비교 키 byte)이며 비교는 슬롯의 `outer`·`NameRecord`로 한다. 성장과 tombstone 정리는 Create의 잠금 밖 할당 구간에서 새 표(live가 1/4를 넘으면 두 배, 아니면 같은 크기 rebuild)를 받아 잠금 안에서 옮긴다(옛 표 반환은 잠금 밖). Outer handle에 generation이 있으므로 회수된 Outer를 가리키는 옛 항목이 새 객체와 섞이지 않는다.
@@ -203,7 +215,7 @@ const RegistryPolicy& ObjectRegistry::Policy() const noexcept;   // 생성 뒤 �
 - Retire(sweep — 2017·2130행, rollback — 1692행): 같은 잠금 안에서 이름 색인 항목과 자기 고리를 뗀다(1.4절). Discard로 이미 뗀 객체는 건너뛴다.
 - Registry의 Outer·자식 방문은 `gate_`를 쥐지 않고 한다 — `MarkEdge`(1711행)·`ValidateStagedEdge`(1597행)가 같은 `gate_`를 잡으므로 쥔 채 부르면 자기 교착이다. 그래도 안전한 이유는 GC 슬라이스·Commit 검증이 `processing_` 아래라 그동안 `outer`·고리가 바뀌지 않기 때문이다.
 
-오류 순서(Create·NewObject): 0. 트랜잭션 상태(끝난 트랜잭션 InvalidArgument, 고정된 오류는 그 오류)·저널 예약(OutOfMemory) → 1. 접근(WrongThread·WrongContext) → 2. 종료·재진입(ShuttingDown·Busy) → 3. 타입(NotFound·TypeMismatch) → 4. Abstract·생성 함수 없음(Unsupported) → 5. Outer 상태(StaleHandle — 생존·같은 트랜잭션 Reserved가 아님, 다른 Registry의 handle(FindSlot의 domain 불일치), cutoff white, Discard됨) → 6. WorldOnly 정책(Unsupported) → 7. 이름 형식(InvalidArgument, NFC 판정 scratch OutOfMemory) → 8. 패키지 정책·패키지 이름·빈 이름·대표 자식 규칙(InvalidArgument) → 9. 경로 길이(CapacityExceeded) → 10. 비교 키·이름 기록·색인 성장 할당(OutOfMemory) → 11. 이름 충돌(AlreadyExists) → 12. 객체 할당(OutOfMemory)·슬롯 상한(CapacityExceeded). 지금처럼 Create 실패는 트랜잭션을 오류 상태로 고정한다(도구는 `IsNameTaken`으로 먼저 확인한다). WrongContext는 접근 문맥 불일치에서만 나온다.
+오류 순서(Create·NewObject): 0. 트랜잭션 상태(끝난 트랜잭션 InvalidArgument, 고정된 오류는 그 오류 — 시작하지 못한 트랜잭션의 시작 오류 포함, 그래서 다른 접근 문맥의 `NewObject`는 WrongContext다)·저널 예약(OutOfMemory) → 1. 접근(WrongThread·WrongContext) → 2. 종료·재진입(ShuttingDown·Busy) → 3. 타입(NotFound·TypeMismatch) → 4. Abstract·생성 함수 없음(Unsupported) → 5. Outer 상태(StaleHandle — 생존·같은 트랜잭션 Reserved가 아님, 다른 Registry의 handle(FindSlot의 domain 불일치), cutoff white, Discard됨) → 6. WorldOnly 정책(Unsupported) → 7. 이름 형식(InvalidArgument, NFC 판정 scratch OutOfMemory) → 8. 패키지 정책·패키지 이름·빈 이름·대표 자식 규칙(InvalidArgument) → 9. 경로 길이(CapacityExceeded) → 10. 비교 키·이름 기록·색인 성장 할당(OutOfMemory — 색인이 더 자랄 수 없으면(2^30칸 초과) CapacityExceeded) → 11. 이름 충돌(AlreadyExists) → 12. 객체 할당(OutOfMemory)·슬롯 상한(CapacityExceeded). 지금처럼 Create 실패는 트랜잭션을 오류 상태로 고정한다(도구는 `IsNameTaken`으로 먼저 확인한다). WrongContext는 접근 문맥 불일치에서만 나온다.
 
 규칙 6–9는 순수 함수 하나로 둔다: `detail::CheckNewObjectIdentity(const RegistryPolicy&, const TypeLease& type, const OuterSummary* outer, StringView name, Allocator& scratch) -> Result<void>`. 규칙 5는 호출자가 Outer 요약을 만들 때 판정한다(Registry는 슬롯 상태로, 그래프 1단계는 노드 표로). Create와 그래프 1단계·`CreateObjects` 사전 확인(5.4절)이 같이 쓴다 — 규칙이 갈라지지 않게.
 
@@ -215,8 +227,9 @@ public:
     // roots의 객체마다 RootRef를 out의 같은 위치에 하나씩 돌려준다(out.Size() == roots.Size()이고
     // out의 원소는 비어 있어야 한다 — 아니면 InvalidArgument). roots는 이 트랜잭션의 객체여야 한다
     // (아니면 StaleHandle). 같은 handle을 두 번 주면 RootRef도 둘이다. roots가 비어도 된다 — 공개한
-    // 객체는 다른 생존 객체(패키지 정책이면 생존 Outer)가 붙잡지 않으면 다음 GC에서 회수된다.
-    // 순서: 트랜잭션 상태·roots·out 검사(InvalidArgument·StaleHandle) → staged 간선·Outer 검증과 관찰자
+    // 객체는 다른 생존 객체(패키지 정책이면 생존 Outer)가 붙잡지 않으면 다음 GC에서 회수된다. 만든
+    // 객체가 없는 트랜잭션도 빈 roots로 끝낼 수 있다(Commit()은 지금처럼 InvalidArgument).
+    // 순서: 트랜잭션 상태·out 검사(InvalidArgument) → 접근·종료·재진입 → roots(StaleHandle, uint32 개수 초과 Overflow) → staged 간선·Outer 검증과 관찰자
     // 쌍 집계(잠금 밖, processing_ 아래) → 관찰자 예약 → 한 잠금 안에서 공개·root 증가·관찰자 기록. 공개 전 단계의 실패는 비공개 상태를 유지한다(호출자가
     // Rollback하거나 소멸자가 한다).
     //
@@ -583,7 +596,7 @@ public:
 
 - 상태 기계: 생성 → Validate → CreateObjects → ApplyFields → CheckRequired. 순서를 어기거나 앞 단계가 실패한 뒤 부르면 InvalidArgument. 2a 이후 실패는 그 트랜잭션을 버려야 한다(호출자 Rollback — 부분 공개 없음).
 - **1단계 노드 검사**(노드 k마다): 타입 Acquire(NotFound) → Abstract·생성 함수 없음(Unsupported) → `ValidateLayout` → outer 값(0·1..k−1) → `CheckNewObjectIdentity`(정책 사본, 앞 노드들로 계산한 Outer 요약 또는 outer 0이면 `hasBase ? input.base : Outer 없음`) → 그래프 안 형제 유일성((outer, 비교 키) 해시 — 중복은 InvalidArgument, 파일 손상이므로). 이어서 지금 `DecodeNode`의 Record 검증(버전·마이그레이션·필드·`excludedFlags` 존재 거부), 참조 검사(노드 참조의 범위·기대 형식, 외부 참조의 범위와 `importTypes`로 기대 형식 — 고아 검사는 없다). 외부 참조 token은 지금처럼 (대상 번호, 기대 형식 위치)로 남긴다.
-- **2a 사전 확인**(만들기 전): 정책 사본 일치(WrongContext) → `hasBase`면 `baseOuter`가 생존 객체 또는 이 트랜잭션 객체이고 `DescribeOuter` 결과의 `isOutermost`·`outermostIsPackage`·`pathBytes`가 `input.base`와 같음(InvalidArgument — handle·Inner 유무는 비교하지 않는다) → 기준 Outer 노드마다 실제 요약으로 `CheckNewObjectIdentity`를 다시 실행(대표 자식 규칙이 실제 Inner 상태로 판정된다) → 기준 Outer 노드 이름의 Registry 점유(AlreadyExists), `hasBase`가 아니면 outer 0 이름 있는 노드의 최상위 이름 공간 점유(AlreadyExists). 이후 실제 Create가 실패할 수 있는 이유는 할당·슬롯 상한·종료·재진입뿐이다.
+- **2a 사전 확인**(만들기 전): 정책 사본 일치(WrongContext) → `hasBase`면 `baseOuter`가 생존 객체 또는 이 트랜잭션 객체이고 `DescribeOuter` 결과의 `isOutermost`·`outermostIsPackage`·`pathBytes`가 `input.base`와 같음(InvalidArgument — handle·Inner 유무는 비교하지 않는다) → 기준 Outer 노드마다 실제 요약으로 `CheckNewObjectIdentity`를 다시 실행(대표 자식 규칙이 실제 Inner 상태로 판정된다) → 기준 Outer 노드 이름의 Registry 점유(AlreadyExists — 대표 노드는 빈 비교 키로 점유를 확인하므로 기준 Outer에 이미 대표 자식이 있으면 AlreadyExists), `hasBase`가 아니면 outer 0 이름 있는 노드의 최상위 이름 공간 점유(AlreadyExists). 이후 실제 Create가 실패할 수 있는 이유는 할당·슬롯 상한·종료·재진입뿐이다.
 - **2b 확인**(쓰기 전): `imports.Size() == importTypes.Size()`(InvalidArgument), import마다 생존 객체 또는 이 트랜잭션 객체(StaleHandle), 실제 타입이 선언 타입의 native 파생(InvalidArgument — 호출자 계약), 그리고 1단계가 기록한 (import i, 기대 형식) 쌍마다 실제 대상이 그 기대를 만족(TypeMismatch). `importTypes`는 1단계 형식 검사와 A1의 `expectedTypeId` 대조에만 쓰이고, 실제 연결의 판정은 기록한 쌍이다. 이어서 지금 `ConstructGraph`의 적용 루프다(외부 참조 token을 `imports`의 handle로 바꾼다).
 - 1단계가 청구하는 2단계 몫: 노드 생성(노드 수 + 이름 byte) + Commit 몫 1 + staged 간선 수 + 적용 몫(지금과 같다). 2c(Required)는 작업량 무제한이다(4절).
 
@@ -688,7 +701,7 @@ return transaction.Commit(roots, held);
 
 | 위치 | 바꾸는 것 |
 |---|---|
-| Core `Text/NameComponent.h`(새) | `ValidateNameComponent`·`NameComponentError` |
+| Core `Text/NameComponent.h`(새) | `ValidateNameComponent`·`NameComponentError`·`TryMakeNameComponentKey`(ASCII 빠른 경로) |
 | `ObjectRegistry.h/.cpp` | `RegistryPolicy`·`RegistryOptions.policy·referenceObserver·assertRetiredWithoutDiscard`, Slot 칸(`Slot*` 고리), 이름 색인, Outer·Name 조회, `CollectInners`, `Discard`, `NewObject(outer, name)`, `CreatePending(outer, name)`, 다중 root `Commit`, Outer 방문과 패키지 정책의 자식 방문(3곳, `gate_` 밖), Retire의 자기 고리 해제, 회수 조건 `firstChild == nullptr`, Reclaim의 `NameRecord` 반환, 관찰자 기록(단일·다중 간선 예약 규칙), 패키지 정책 Registry의 `RequestDestroy` Unsupported, `ObjectStats` 칸 |
 | `ObjectRegistry.h` 컨테이너 API 주석 | 지금 200·209·224행 "할당하지 않는다" — 관찰자 Registry에서는 `SetReference`·`SetElementReference`·`SetReferenceAt`·`RemoveReferenceAt`·`RemoveReference`·`ClearReferences`·`RemoveElementAt`·`ClearElements`가 관찰자 allocator로 할당할 수 있고 OutOfMemory·Busy·CapacityExceeded를 돌려준다고 고친다(Ob) |
 | `ConstructionContext.h/.cpp` | `Create(type, outer, name)`, `Commit(roots, out)`, `DescribeOuter`, `Registry()`·`Access()`·`TransactionId()`, `FindObject`, Required 검사 중 표시(표시 동안 쓰기·Commit Busy) |
@@ -730,11 +743,11 @@ MetaCompiler·생성 헤더 형식·TypeRegistry 등록 규칙은 바꾸지 않�
 - 경로: `GetObjectPath`(대표 에셋 아래 `Body.Socket`), `FindObject`(빈 경로 = 대표, 대소문자 무시, 없는 구성 요소 NotFound, 4 KiB 초과 InvalidArgument), 4 KiB 경로 경계(4096 성공·4097 CapacityExceeded).
 - 조회 상태: `FindChild`가 Reserved·cutoff white에 NotFound, `IsNameTaken`이 Reserved에 true, DestroyRequested 객체의 `GetName`·`GetObjectPath` 성공.
 - 재진입: `GetName`·`GetObjectPath`의 out allocator 콜백이 그 객체를 `RequestDestroy`하고 `Collect`해도 ASan 무결(Discard판은 Ob), `CollectInners`의 예약 중 재진입 변경 Busy.
-- `CollectInners`: Direct·DepthFirst 순서가 AS 5.1 export 순서와 같음(대표 먼저, 이름 byte 순), Reserved·DestroyRequested 제외, 실패 시 out 길이 불변, 깊은 트리(2048 수준)에서 스택 사용 일정.
+- `CollectInners`: Direct·DepthFirst 순서가 AS 5.1 export 순서와 같음(대표 먼저, 이름 byte 순), Reserved·DestroyRequested 제외, 실패 시 out 길이 불변, 깊은 트리(2048 수준)에서의 정확성(스택 사용 일정은 재귀 없는 구조로 보장).
 - Outer 상태: Reserved Outer(같은 트랜잭션 성공·다른 트랜잭션 StaleHandle), DestroyRequested·Discard된 Outer StaleHandle, 다른 Registry의 Outer handle StaleHandle, 다른 접근 문맥 WrongContext.
 - 정책(Oa로 옮김): 패키지 타입 Outer 거부, 패키지 이름 거부, 비패키지 Outer 없음 거부, outermost가 패키지가 아님 거부, `NewObject`, WorldOnly(상속 포함) Unsupported, 정책 없는 Registry는 지금과 같음.
 - GC: inner만 root여도 outer 생존(Collect·증분 Step·병렬 trace), 정책 없는 Registry에서 outer만 root면 inner 회수, Marking 중 생성·Commit 뒤 outer 생존, Sweeping 중 cutoff Outer 거부, 부모가 자식보다 먼저 Retire되는 경우 자식이 떨어질 때까지 부모 미회수(`firstChild` 조건 — sweep 중 `DrainRetired`·rollback 회수가 끼어도 ASan 무결), 회수 뒤 `NameRecord` 반환(할당 통계 0).
-- 이름 색인: tombstone이 많은 상태에서 같은 크기 rebuild, 성장 중 할당 실패 시 색인 불변, 슬롯 1만 개에서 고리 순회가 chunk 수에 비례하지 않음(H2).
+- 이름 색인: tombstone이 많은 상태에서 같은 크기 rebuild, 성장 중 할당 실패 시 색인 불변, 슬롯 1만 개 규모에서의 정확성(고리 순회가 chunk 수에 비례하지 않음은 `Slot*` 고리 구조로 보장 — H2, 시험은 시간을 재지 않는다).
 - 다중 root Commit: root 둘·중복 root·빈 roots(다음 GC 회수)·out 크기 불일치·비어 있지 않은 out InvalidArgument·다른 트랜잭션 handle StaleHandle, 실패 후 비공개 유지·Rollback, 기존 `Commit()` 동작 유지.
 - 할당 실패 스윕: Create의 모든 할당 지점(비교 키·이름 기록·색인 성장·저널) 실패 시 슬롯·색인·통계 불변.
 
@@ -766,7 +779,7 @@ MetaCompiler·생성 헤더 형식·TypeRegistry 등록 규칙은 바꾸지 않�
 **Od2 — 단계형 복원**
 
 - 노드 표(A1 모의): 타입이 Record schema와 다르면 InvalidArgument, 형제 중복, 정책 위반(WorldOnly·패키지 규칙·패키지 이름)이 생성자 실행 전에 거부(생성 계수 0).
-- 사전 확인: base 요약 불일치(isOutermost·outermostIsPackage·pathBytes) InvalidArgument, 기준 Outer에 이미 대표 자식이 있으면 대표 노드 거부(실제 요약으로 재판정), 기준 Outer 아래 이름 점유 AlreadyExists, outer 0 이름 있는 노드의 최상위 이름 점유 AlreadyExists, 정책 사본 불일치 WrongContext.
+- 사전 확인: base 요약 불일치(isOutermost·outermostIsPackage·pathBytes) InvalidArgument, 기준 Outer에 이미 대표 자식이 있으면 대표 노드 AlreadyExists(점유 단계), 기준 Outer에 이름 있는 Inner가 있으면 대표 노드 InvalidArgument(실제 요약으로 재판정), 기준 Outer 아래 이름 점유 AlreadyExists, outer 0 이름 있는 노드의 최상위 이름 점유 AlreadyExists, 정책 사본 불일치 WrongContext.
 - 단계: 순서 위반 InvalidArgument, Validate를 worker 스레드에서 실행(ObjectRegistry 미접근, hook이 그 스레드에서 불림), 한 트랜잭션에 그래프 둘과 다중 root Commit(Od2는 그래프 사이 참조 없이 — 서로 참조는 Oe), prepare가 Transient 필드 설정·실패 시 rollback, `ConstructionContext::FindObject`가 같은 트랜잭션 Reserved와 생존 객체를 찾고 다른 트랜잭션 Reserved는 NotFound.
 
 **Oe — 외부 참조**

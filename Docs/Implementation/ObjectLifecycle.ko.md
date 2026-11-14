@@ -60,3 +60,46 @@ scope 객체의 주소를 범위 밖에 보관하거나 `longjmp` 등으로 소�
 외부에서 핸들의 상태를 확인할 때는 `registry.InspectLifecycle(access, handle)`을 사용한다. `RequestDestroy`는 기존 `DestroyRequested` 또는 `Retired` 슬롯에 다시 요청하면 성공한다. 이미 파괴 요청된 객체가 cutoff에 걸려 `Unreachable`로 조회되어도 이 재요청은 성공한다. 반면 파괴를 요청하지 않았던 cutoff white 객체에 새 파괴 요청은 `Destroyed`다.
 
 객체 생성자가 실행되는 동안 registry 연결은 아직 없어 오류 처리 API는 `StaleHandle`을 반환하고 `IsDestroyRequested`는 해당 원인을 진단하며 중단한다. 생성자는 반환한 뒤 Registry에 연결되지만 `ConstructionContext`의 미공개 슬롯도 일반 수명 조회 및 파괴 요청을 허용하지 않는다. 생성자 실행 중에는 앞서 설명한 `StaleHandle`이며, 그 외 소유 스레드에서 유효한 scope를 유지한 채 Registry의 생성 처리·trace·소멸 callback에 재진입하면 `Busy`, shutdown 시작 이후에는 `ShuttingDown`이다. 기본 설정에서는 scope가 없어도 같은 소유 스레드와 Registry 문맥으로 검사한다. 엄격 모드에서는 scope가 없으면 먼저 `WrongContext`가 반환된다. 병렬 trace worker에서는 재진입 상태보다 소유 스레드 검사가 먼저이므로 `WrongThread`다. 정상 종료 전에 모든 root·borrow·backend lease를 반환하고 Registry가 그보다 오래 살아야 한다.
+
+## Outer와 이름
+
+설계는 [객체·그래프 보강](../Design/ObjectFoundations.ko.md) 1절이다(A0-Oa). 객체는 생성 때 Outer와 이름을 정하고 수명 동안 바꾸지 않는다(Rename·Outer 변경은 없다). `ConstructionContext::Create<T>(type, outer, name)`과 `ObjectRegistry::NewObject<T>(access, type, outer, name)`이 받으며, 인자를 생략하면 지금처럼 Outer·이름 없는 객체다.
+
+```cpp
+ConstructionContext transaction(registry, access);
+// 실패한 Create는 트랜잭션을 오류 상태로 고정한다 — 반환하면 소멸자가 롤백한다.
+auto package = transaction.Create<Package>(PackageType);           // outermost
+if (!package) {
+    return;
+}
+
+auto asset = transaction.Create<Mesh>(MeshType, package.Value());   // 대표 자식(빈 이름)
+if (!asset) {
+    return;
+}
+
+auto body = transaction.Create<Part>(PartType, asset.Value(), "Body");
+if (!body) {
+    return;
+}
+
+const ObjectHandle roots[] = {package.Value(), body.Value()};
+RootRef<Object> held[2];
+if (auto committed = transaction.Commit(roots, held); !committed) {
+    return;
+}
+// registry.GetObjectPath(access, body.Value(), path) → "Body"
+// registry.FindObject(access, package.Value(), "body") → body
+```
+
+- 이름 규칙은 `ValidateNameComponent`(Core/Text/NameComponent.h)다: NFC UTF-8 1–64 byte, L\*·N\*·M\*와 `_`·`-`(첫 문자는 L\*·N\*), Default_Ignorable·Windows 예약 이름 거부. Registry는 정규화하지 않는다(비 NFC는 InvalidArgument).
+- 같은 Outer 안 유일성과 조회는 대소문자·정규화 형태를 무시한 비교 키(`TryMakeNameComponentKey` = NFC(simple case folding(NFD)))로 본다. ASCII 이름은 할당 없이 키를 만들고, 비ASCII 이름은 키 생성이 할당하므로 조회도 OutOfMemory를 낼 수 있다. Outer 없는 이름 있는 객체는 최상위 이름 공간에서 유일하다. 클래스는 키가 아니다. 같은 이름의 생성은 AlreadyExists다(UE처럼 교체하지 않는다).
+- 공개 전(Reserved) 객체도 생성 때부터 이름을 점유하므로 동시에 열린 다른 트랜잭션이 같은 이름을 만들 수 없다. 롤백하면 이름이 바로 빈다. `RequestDestroy`한 객체는 회수 전까지 이름을 유지하고 계속 찾힌다(UE의 MarkAsGarbage와 같다). GC cutoff white 객체는 이름을 점유하지 않는다 — Sweeping 중에도 같은 이름을 바로 만들 수 있다.
+- 빈 이름: Outer가 없으면 이름 없는 객체(색인에 넣지 않는다), Outer가 있으면 대표 자식뿐이다(Outer가 outermost이고 이름 있는 Inner가 없을 때). 대표 자식이 있는 Outer에는 이름 있는 자식을 둘 수 없다.
+- 객체 경로는 outermost 아래 이름을 `.`로 이은 것이고 대표 자식의 빈 이름은 건너뛴다. outermost와 대표 자식의 경로는 빈 문자열이고 경로는 4 KiB(`MaxObjectPathBytes`) 이하다(넘는 객체는 CapacityExceeded).
+- 조회: `GetOuter`·`GetOutermost`·`GetName`·`GetObjectPath`(Alive·DestroyRequested), `FindChild`·`FindObject`(공개된 객체만), `IsNameTaken`(Reserved도 점유), `DescribeOuter`(Outer로 쓸 수 있는 객체의 요약), `CollectInners`(Alive Inner를 이름 순으로 — `Direct` 또는 전위 `DepthFirst`). 이름·경로는 잠금 안에서 스택에 복사한 뒤 out의 allocator로 붙이므로 그 할당 콜백이 Registry에 재진입해도 안전하다. `CollectInners`의 할당 구간에는 Registry 변경 재진입이 Busy다.
+- 오류 순서(생성): 트랜잭션 상태 → 접근 → 종료·재진입 → 타입 → Abstract → Outer 상태(StaleHandle — 생존·같은 트랜잭션 Reserved가 아님, 다른 Registry, cutoff white, DestroyRequested) → WorldOnly 정책(Unsupported) → 이름 형식(InvalidArgument) → 패키지·빈 이름·대표 자식(InvalidArgument) → 경로 길이(CapacityExceeded) → 키·이름 기록·색인 할당(OutOfMemory) → 이름 충돌(AlreadyExists) → 객체 할당·슬롯 상한. 생성을 시작하지 못한 트랜잭션(다른 문맥·종료·재진입)의 Create는 그 오류를 돌려준다.
+
+`RegistryOptions::policy`(`RegistryPolicy`)는 생성 뒤 바꾸지 않는 객체 정책이다. `packageNativeType`을 주면 그 타입(과 파생)은 Outer·이름이 없어야 하고 그 밖의 객체는 outermost가 그 타입이어야 한다. `rejectWorldOnly`면 WorldOnly 타입 생성이 Unsupported다. 기본값(정책 없음)은 World registry와 시험 Registry이고, 에셋 객체 Registry(A1)가 둘 다 켠다. 패키지 정책의 outer → inner 보존·Discard는 A0-Ob다.
+
+`Commit(roots, out)`은 이 트랜잭션의 객체를 한 번에 공개하고 roots의 객체마다 RootRef를 out의 같은 위치에 돌려준다(같은 handle 두 번이면 RootRef도 둘, 빈 roots 허용). out 크기가 다르거나 비어 있지 않은 원소가 있으면 InvalidArgument, 이 트랜잭션 객체가 아닌 root는 StaleHandle이다. staged 간선과 함께 Outer도 검증하므로(생존 또는 같은 트랜잭션 객체, cutoff 아님) 생성 뒤 Outer가 파괴 요청되면 Commit은 StaleHandle이고 비공개로 남는다. 기존 `Commit()`은 첫 객체 하나를 root로 공개한다. `TransactionId()`는 열린 트랜잭션의 ID(끝나면 0)다.
