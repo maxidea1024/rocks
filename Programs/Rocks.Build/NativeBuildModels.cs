@@ -192,6 +192,11 @@ public sealed record NativeModuleInput
     // 이 모듈 소스에만 적용하는 최적화 재정의다. dependency로 전파하지 않는다.
     public CodeOptimization Optimization { get; init; } = CodeOptimization.Default;
 
+    // false이면 Release에서도 이 모듈 소스를 ThinLTO bitcode로 만들지 않는다(최적화는 Optimization을 따른다). upstream이
+    // LTO 없이 검증한 외부 라이브러리(libsodium 등, ThirdParty.json linkTimeOptimization)에 쓴다. dependency로 전파하지
+    // 않으며 링크는 bitcode와 일반 object를 함께 받는다.
+    public bool LinkTimeOptimization { get; init; } = true;
+
     // 리플렉션 메타데이터 헤더의 include 철자다(이 모듈의 public 또는 private include 디렉터리 기준,
     // Docs/Design/ReflectionFoundations.ko.md 1.1절). 비어 있지 않으면 ModuleDirectory가 필요하다.
     // 빌드는 생성 include 디렉터리(<out>/Generated/<Name>/Public·Private)를 이 모듈에 더한다.

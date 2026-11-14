@@ -643,7 +643,7 @@
     "src/libsodium/include/sodium/private/common.h": "82907ab4d9beb29c632fe55522635bdfd79ab3939a7776c73214d9cde81c4578",
     "src/libsodium/include/sodium/private/ed25519_ref10.h": "0acea90b49b5e8a0b83fe1757ef95f55c6b9c78fc63e8cc94e42ab5f6f222a14",
     "src/libsodium/include/sodium/private/ed25519_ref10_fe_25_5.h": "58826a2dc2d33a8998a911aba05d2c0adcf78c2c764ad96c394026c5e052cdc8",
-    "src/libsodium/include/sodium/private/ed25519_ref10_fe_51.h": "edc5bfa5060a3eb9ba45f7a5cbe7e96891678136d7de9abed9190fa454d4886c",
+    "src/libsodium/include/sodium/private/ed25519_ref10_fe_51.h": "491eda302c6de6fbf9e02deb54218fec8dc7d80dc80a359da77f2aa50f5db90a",
     "src/libsodium/include/sodium/private/implementations.h": "03698de77646893a1150ee2f94c685270fbe6c78a2048fc63e4274bad15af2f1",
     "src/libsodium/include/sodium/private/mutex.h": "ee045978cbd074c695e8e0b4ec074b84e768c9557c8b4d69ebccc0710bbc422c",
     "src/libsodium/include/sodium/private/quirks.h": "e48c5643bc8fec53ec79eac06fc4246beb9810cbfa687a043ef922ef0653eae4",
@@ -1214,13 +1214,17 @@
     "자체 빌드 정의: libsodium은 configure 없는 빌드를 공식 지원하지 않는다(설치 문서 'untested and unsupported'). 정의는 upstream build.zig의 대상별 정의를 따르고, Windows(clang-cl)는 _MSC_VER로 common.h가 HAVE_*INTRIN_H·HAVE_ARMCRYPTO를 스스로 정한다. 경고 정책 승인: Docs/Design/Crypto.ko.md 5.1절.",
     "asm 끔: HAVE_AMD64_ASM·HAVE_AVX_ASM을 정의하지 않는다(.S 미지원, Windows x64 ABI 불일치). stable의 HAVE_XGETBV_ASM이 있어야 Windows 밖 x86-64에서 AVX를 감지한다(1.0.22 point release에는 없다).",
     "Android는 API 26을 지원하므로 getrandom 선언이 없는 HAVE_SYS_RANDOM_H를 정의하지 않는다. Rocks는 sodium_init 전에 randombytes_set_implementation으로 OS 난수(PlatformBase SecureRandom)를 연결하므로 내부 RNG(randombytes_internal_random.c)는 반입하지 않는다.",
-    "-fno-strict-aliasing·-fwrapv: upstream build.zig·configure와 같은 코드 생성 의미. -fno-strict-overflow는 clang이 받지 않아 뺀다.",
+    "-fno-strict-aliasing·-fno-strict-overflow: upstream configure와 같다(-fno-strict-overflow를 받으면 -fwrapv를 따로 주지 않는다). clang은 -fno-strict-overflow를 -fwrapv(clang 21부터 -fwrapv-pointer 포함)로 바꾸고, 둘을 함께 주면 하나가 unused 경고(-Werror)가 된다. build.zig의 -flax-vector-conversions(configure는 gcc 4.3 미만에서만)와 -Werror=vla(경고 정책을 바꾸는 인자, upstream CI가 VLA 없음을 보장)는 넣지 않는다.",
+    "linkTimeOptimization false: configure·upstream CI는 LTO 없이 빌드·시험한다. Rocks Release의 ThinLTO에서 빼서 상수 시간 장벽과 CPU 클래스별 target 함수의 코드 생성을 upstream과 같게 둔다(Docs/Design/Crypto.ko.md 5.1절).",
+    "build.zig의 HAVE_WEAK_SYMBOLS·-fvisibility=hidden은 넣지 않는다. 약한 심볼이 없으면 sodium_memzero·sodium_memcmp는 volatile 경로를 쓴다(약한 심볼 경로보다 LTO에 안전). visibility는 정적 라이브러리를 실행 파일에 링크할 때 의미가 없고, 공유 라이브러리로 배포할 때의 심볼 노출은 엔진 전체 visibility 정책을 따른다.",
+    "Windows(clang-cl)는 upstream MSVC 빌드처럼 HAVE_INLINE_ASM·HAVE_GCC_MEMORY_FENCES 없이 volatile optblocker 경로와 (void)0 ACQUIRE_FENCE를 쓴다. clang-cl은 둘 다 지원하고 build.zig는 Windows에도 정의하므로, 원시 함수 KAT(Wycheproof·RFC)가 세 플랫폼에서 돈 뒤 켜고 검증한다(후속).",
     "추적 가능한 수정(사용자 결정 2026-11-14): 저장소 경고 프로필(/W4 /WX, -Wall -Wextra -Wpedantic -Werror)에서 남는 경고만 고친다. 동작 변경은 없다. 차이는 Rocks.patch, 사유는 modifications."
   ],
   "compileArguments": [
     "-fno-strict-aliasing",
-    "-fwrapv"
+    "-fno-strict-overflow"
   ],
+  "linkTimeOptimization": false,
   "modifications": [
     {
       "file": "src/libsodium/crypto_aead/aegis128l/aegis128l_aesni.h",
@@ -1255,7 +1259,7 @@
     {
       "file": "src/libsodium/crypto_pwhash/argon2/argon2-core.h",
       "upstreamSha256": "5598c4415862857dd63267009445575b4ff0a7008443595885de75bdb75fcde9",
-      "reason": "헤더의 static 함수 index_alpha에 inline을 붙임: -Wunused-function"
+      "reason": "헤더의 static 함수 index_alpha에 inline을 붙임: -Wunused-function(clang-cl /O2 역어셈블이 원본과 같음을 확인)"
     },
     {
       "file": "src/libsodium/crypto_pwhash/argon2/argon2-fill-block-avx2.c",
@@ -1540,7 +1544,7 @@
     {
       "file": "src/libsodium/include/sodium/private/ed25519_ref10_fe_51.h",
       "upstreamSha256": "5945d563b602a6ef1efdcd3a542cbfe0a316dd0b58d29f6cc6a231aac12fe8d0",
-      "reason": "헤더의 static 함수 fe25519_cmov·cswap·mul·sq·sq2에 inline을 붙임: 쓰지 않는 번역 단위마다 -Wunused-function"
+      "reason": "헤더의 static 함수 fe25519_cmov·cswap·mul·sq·sq2에 __attribute__((unused))(GNU·clang 가드 매크로 FE25519_UNUSED)를 붙임: 쓰지 않는 번역 단위마다 -Wunused-function. inline은 clang의 인라인 판단을 바꿔(mul·sq 전부 인라인) 코드 생성이 달라지므로 쓰지 않는다"
     },
     {
       "file": "src/libsodium/include/sodium/randombytes.h",

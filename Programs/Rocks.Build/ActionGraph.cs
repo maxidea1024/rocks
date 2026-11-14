@@ -186,8 +186,9 @@ internal static class ActionGraph
                 var arguments = new List<string>();
                 arguments.AddRange(module.AdditionalCompileArguments);
                 arguments.AddRange(NativeCompileProfile.Arguments(request.Toolchain, request.Configuration, module.Optimization, language));
-                // ThinLTO는 코드 생성 옵션이라 AST 프로필(NativeCompileProfile)에 넣지 않는다.
-                if (UsesThinLto(request.Configuration, module.Optimization))
+                // ThinLTO는 코드 생성 옵션이라 AST 프로필(NativeCompileProfile)에 넣지 않는다. 모듈이 끄면(LinkTimeOptimization)
+                // Release에서도 일반 object로 남는다.
+                if (module.LinkTimeOptimization && UsesThinLto(request.Configuration, module.Optimization))
                 {
                     arguments.Add("-flto=thin");
                 }

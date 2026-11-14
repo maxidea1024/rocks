@@ -81,10 +81,17 @@ public sealed record ThirdPartyManifest(
     public IReadOnlyList<string> EmbeddedIn { get; init; } = [];
 
     /// <summary>
-    /// 라이브러리만 받는 컴파일 인자다(manifest <c>compileArguments</c>, 예: libsodium의 <c>-fwrapv</c>). 허용 목록
+    /// 라이브러리만 받는 컴파일 인자다(manifest <c>compileArguments</c>, 예: libsodium의 <c>-fno-strict-overflow</c>). 허용 목록
     /// <see cref="AllowedCompileArguments"/> 안의 GCC형 철자로 적는다. clang-cl도 같은 철자를 받으므로 모든 플랫폼에 그대로 넘긴다.
     /// </summary>
     public IReadOnlyList<string> CompileArguments { get; init; } = [];
+
+    /// <summary>
+    /// Release에서 이 라이브러리를 ThinLTO bitcode로 만들지 여부다(manifest <c>linkTimeOptimization</c>, 생략하면 true).
+    /// false이면 일반 최적화 object로 남아 다른 번역 단위와 링크 때 섞여 최적화되지 않는다. upstream이 LTO 없이 검증한
+    /// 코드 생성 형태를 지켜야 하는 라이브러리(상수 시간 암호 구현 등)에 쓴다.
+    /// </summary>
+    public bool LinkTimeOptimization { get; init; } = true;
 
     /// <summary>원본 디렉터리에 적용한 추적 가능한 수정 목록이다(manifest <c>modifications</c>). 비어 있으면 원본 그대로다.</summary>
     public IReadOnlyList<ThirdPartyModification> Modifications { get; init; } = [];
@@ -107,8 +114,12 @@ public sealed record ThirdPartyManifest(
     /// </summary>
     public static readonly IReadOnlyList<string> ArchitectureNames = ["X64", "Arm64"];
 
-    /// <summary>compileArguments가 받는 인자다. 경고·대상·최적화·FP 모델을 바꾸지 않는 코드 생성 의미 인자만 둔다.</summary>
-    public static readonly IReadOnlyList<string> AllowedCompileArguments = ["-fno-strict-aliasing", "-fwrapv"];
+    /// <summary>
+    /// compileArguments가 받는 인자다. 경고·대상·최적화·FP 모델을 바꾸지 않는 코드 생성 의미 인자만 둔다.
+    /// <c>-fno-strict-overflow</c>는 clang에서 <c>-fwrapv</c>(clang 21부터 <c>-fwrapv-pointer</c>도)로 바뀐다. 둘을 함께 주면
+    /// 하나가 "unused" 경고(-Werror)가 되므로 manifest는 하나만 고른다.
+    /// </summary>
+    public static readonly IReadOnlyList<string> AllowedCompileArguments = ["-fno-strict-aliasing", "-fno-strict-overflow", "-fwrapv"];
 
     private static readonly IReadOnlyList<string> PlatformDefineKeys =
         [.. PlatformNames, .. PlatformNames.SelectMany(platform => ArchitectureNames.Select(architecture => $"{platform}.{architecture}"))];
@@ -171,7 +182,7 @@ public sealed record ThirdPartyManifest(
     ];
 
     // 생략할 수 있는 최상위 필드다(기존 code manifest는 쓰지 않는다).
-    private static readonly string[] OptionalTopLevel = ["kind", "embeddedIn", "compileArguments", "modifications", "patch"];
+    private static readonly string[] OptionalTopLevel = ["kind", "embeddedIn", "compileArguments", "linkTimeOptimization", "modifications", "patch"];
 
     // licenses 항목의 필수·선택 필드다.
     private static readonly string[] LicenseFields = ["spdx", "upstreamExpression", "file", "binaryNoticeRequired"];
@@ -490,6 +501,23 @@ public sealed record ThirdPartyManifest(
             {
                 throw new FormatException("compileArguments: duplicate entry");
             }
+
+            if (compileArguments.Contains("-fno-strict-overflow", StringComparer.Ordinal) &&
+                compileArguments.Contains("-fwrapv", StringComparer.Ordinal))
+            {
+                throw new FormatException("compileArguments: '-fno-strict-overflow' already implies '-fwrapv' (clang rejects the pair as unused)");
+            }
+        }
+
+        bool linkTimeOptimization = true;
+        if (fields.TryGetValue("linkTimeOptimization", out JsonElement ltoElement))
+        {
+            if (ltoElement.ValueKind != JsonValueKind.False)
+            {
+                throw new FormatException("linkTimeOptimization: only false is allowed (omit the field for the default)");
+            }
+
+            linkTimeOptimization = false;
         }
 
         var modifications = new List<ThirdPartyModification>();
@@ -550,9 +578,9 @@ public sealed record ThirdPartyManifest(
             throw new FormatException("modifications and patch must be declared together");
         }
 
-        if (data && (compileArguments.Count != 0 || modifications.Count != 0))
+        if (data && (compileArguments.Count != 0 || modifications.Count != 0 || !linkTimeOptimization))
         {
-            throw new FormatException("compileArguments and modifications are not allowed for a data library");
+            throw new FormatException("compileArguments, linkTimeOptimization and modifications are not allowed for a data library");
         }
         // adapter와 라이브러리가 같은 이름을 쓰면 값도 같아야 한다(예: Z_U4가 다르면 ABI가 소리 없이 어긋난다).
         foreach (string define in consumerDefines)
@@ -582,6 +610,7 @@ public sealed record ThirdPartyManifest(
             Kind = kind,
             EmbeddedIn = embeddedIn,
             CompileArguments = compileArguments,
+            LinkTimeOptimization = linkTimeOptimization,
             Modifications = modifications,
             Patch = patch
         };

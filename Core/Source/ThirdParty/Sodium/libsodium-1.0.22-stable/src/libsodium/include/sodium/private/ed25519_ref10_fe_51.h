@@ -3,6 +3,12 @@
 #include "private/common.h"
 #include "utils.h"
 
+#if defined(__GNUC__) || defined(__clang__)
+# define FE25519_UNUSED __attribute__((unused))
+#else
+# define FE25519_UNUSED
+#endif
+
 /*
  h = 0
  */
@@ -105,7 +111,7 @@ fe25519_neg(fe25519 h, const fe25519 f)
  Preconditions: b in {0,1}.
  */
 
-static inline void
+static FE25519_UNUSED void
 fe25519_cmov(fe25519 f, const fe25519 g, unsigned int b)
 {
     const uint64_t mask = (uint64_t) (-(int64_t) b);
@@ -142,7 +148,7 @@ replace (f,g) with (f,g) if b == 0.
 Preconditions: b in {0,1}.
 */
 
-static inline void
+static FE25519_UNUSED void
 fe25519_cswap(fe25519 f, fe25519 g, unsigned int b)
 {
     const uint64_t mask = (uint64_t) (-(int64_t) b);
@@ -229,7 +235,7 @@ fe25519_iszero(const fe25519 f)
  Can overlap h with f or g.
  */
 
-static inline void
+static FE25519_UNUSED void
 fe25519_mul(fe25519 h, const fe25519 f, const fe25519 g)
 {
     const uint64_t mask = 0x7ffffffffffffULL;
@@ -320,7 +326,7 @@ fe25519_mul(fe25519 h, const fe25519 f, const fe25519 g)
  Can overlap h with f.
  */
 
-static inline void
+static FE25519_UNUSED void
 fe25519_sq(fe25519 h, const fe25519 f)
 {
     const uint64_t mask = 0x7ffffffffffffULL;
@@ -399,7 +405,7 @@ fe25519_sq(fe25519 h, const fe25519 f)
  Can overlap h with f.
 */
 
-static inline void
+static FE25519_UNUSED void
 fe25519_sq2(fe25519 h, const fe25519 f)
 {
     const uint64_t mask = 0x7ffffffffffffULL;

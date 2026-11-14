@@ -847,48 +847,61 @@ diff --git a/src/libsodium/include/sodium/crypto_xof_shake128.h b/src/libsodium/
 diff --git a/src/libsodium/include/sodium/private/ed25519_ref10_fe_51.h b/src/libsodium/include/sodium/private/ed25519_ref10_fe_51.h
 --- a/src/libsodium/include/sodium/private/ed25519_ref10_fe_51.h
 +++ b/src/libsodium/include/sodium/private/ed25519_ref10_fe_51.h
-@@ -105,7 +105,7 @@
+@@ -2,6 +2,12 @@
+ 
+ #include "private/common.h"
+ #include "utils.h"
++
++#if defined(__GNUC__) || defined(__clang__)
++# define FE25519_UNUSED __attribute__((unused))
++#else
++# define FE25519_UNUSED
++#endif
+ 
+ /*
+  h = 0
+@@ -105,7 +111,7 @@
   Preconditions: b in {0,1}.
   */
  
 -static void
-+static inline void
++static FE25519_UNUSED void
  fe25519_cmov(fe25519 f, const fe25519 g, unsigned int b)
  {
      const uint64_t mask = (uint64_t) (-(int64_t) b);
-@@ -142,7 +142,7 @@
+@@ -142,7 +148,7 @@
  Preconditions: b in {0,1}.
  */
  
 -static void
-+static inline void
++static FE25519_UNUSED void
  fe25519_cswap(fe25519 f, fe25519 g, unsigned int b)
  {
      const uint64_t mask = (uint64_t) (-(int64_t) b);
-@@ -229,7 +229,7 @@
+@@ -229,7 +235,7 @@
   Can overlap h with f or g.
   */
  
 -static void
-+static inline void
++static FE25519_UNUSED void
  fe25519_mul(fe25519 h, const fe25519 f, const fe25519 g)
  {
      const uint64_t mask = 0x7ffffffffffffULL;
-@@ -320,7 +320,7 @@
+@@ -320,7 +326,7 @@
   Can overlap h with f.
   */
  
 -static void
-+static inline void
++static FE25519_UNUSED void
  fe25519_sq(fe25519 h, const fe25519 f)
  {
      const uint64_t mask = 0x7ffffffffffffULL;
-@@ -399,7 +399,7 @@
+@@ -399,7 +405,7 @@
   Can overlap h with f.
  */
  
 -static void
-+static inline void
++static FE25519_UNUSED void
  fe25519_sq2(fe25519 h, const fe25519 f)
  {
      const uint64_t mask = 0x7ffffffffffffULL;
