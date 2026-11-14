@@ -17,7 +17,7 @@ enum class NameKind : uint8 {
 // 기본값·빈 문자열·"None"과 대소문자 변형은 모두 None이다. None_N은 번호 있는 이름이다.
 // 일반 이름의 domain은 pool 세션을 구별한다. 표시를 보존하는 None도 Acquire 시 해당
 // pool의 domain을 확인하지만 동등 비교는 domain과 표시 차이를 무시한다.
-// ASCII 대소문자 비교와 UE5.6 번호 접미사만 지원한다. 비ASCII Unicode case folding과
+// ASCII 대소문자 비교와 UE5.8 번호 접미사만 지원한다. 비ASCII Unicode case folding과
 // 정규화는 아직 지원하지 않는다. 비교는 발급·stale 여부를 검증하지 않는다.
 struct Name {
     uint64 domain = 0;

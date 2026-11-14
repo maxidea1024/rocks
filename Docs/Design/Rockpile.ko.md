@@ -1,6 +1,6 @@
 # Rockpile — 에셋 너겟 서버
 
-기준일: 2026-11-13, 개정 2(1차 교차검증 — 독립 설계 1·반례 검토 3·사실 확인 3 — 과 2차 최종 검증 2를 반영, 19절). UE 5.6 Zen Storage Server에 대응하는 Rocks의 에셋 너겟 서버를 정한다. 에디터·쿠커·명령행이 함께 쓰는 사용자별 로컬 캐시 프로세스이고, 같은 프로그램을 팀 공유 서버로도 띄운다. 구현은 .NET 10·C#이다(사용자 결정 — 13절). 너겟 키·값의 의미는 [에셋 시스템](AssetSystem.ko.md) 9절, 계층 구조는 [구현 계획](EngineImplementationPlan.ko.md) 9.1·27.2절을 따른다. 이 문서가 바꾸는 다른 문서의 내용은 17절에 모은다(아직 반영하지 않았다).
+기준일: 2026-11-13, 개정 2(1차 교차검증 — 독립 설계 1·반례 검토 3·사실 확인 3 — 과 2차 최종 검증 2를 반영, 19절). UE 대조 기준: UE 5.8(5.8.4, commit `f45729c0b6f0`) 대조(2026-11-15에 5.6에서 옮겨 3절·19.3절을 다시 확인했다). UE Zen Storage Server에 대응하는 Rocks의 에셋 너겟 서버를 정한다. 에디터·쿠커·명령행이 함께 쓰는 사용자별 로컬 캐시 프로세스이고, 같은 프로그램을 팀 공유 서버로도 띄운다. 구현은 .NET 10·C#이다(사용자 결정 — 13절). 너겟 키·값의 의미는 [에셋 시스템](AssetSystem.ko.md) 9절, 계층 구조는 [구현 계획](EngineImplementationPlan.ko.md) 9.1·27.2절을 따른다. 이 문서가 바꾸는 다른 문서의 내용은 17절에 모은다(아직 반영하지 않았다).
 
 원칙: 기반이 부족하면 우회하지 않고 보강한다. 동작하지 않는 기능을 완성처럼 표시하지 않는다. 상태 표기는 AssetSystem과 같다 — **구현**(동작·시험), **계약**(API·형식이 있고 호출하면 `Unsupported`·`UnsupportedCapability`), **후속**(API도 없음). 지금은 설계 단계이며 구현은 없다.
 
@@ -38,28 +38,28 @@ R-0을 이루는 갈래와 각각을 보장하는 쪽:
 
 로컬을 먼저 한다. 여러 프로세스 공유와 중복 제거만으로 이득이 있고, 네트워크 지연이 섞이기 전에 저장 엔진 결함을 분리해 시험할 수 있으며, NuggetFileSystemBackend를 정답 기준(oracle)으로 대조할 수 있다.
 
-## 3. UE 5.6 Zen과의 대조
+## 3. UE 5.8 Zen과의 대조
 
-근거는 UE 5.6 브랜치와 거기 포함된 zen v5.6.6 소스, Epic 공식 문서다(1차, 19.3절).
+근거는 UE 5.8 원본(5.8.4, commit `f45729c0b6f0`), 거기 포함된 zenserver v5.8.13(`Engine/Build/Commit.gitdeps.xml`의 바이너리 — 커밋 "Update zenserver to v5.8.13", 5.6은 v5.6.6), Epic 공식 문서다(1차, 19.3절). zen 서버 내부 동작(CAS·GC 절차·scrub·첨부 전달)은 처음 zen v5.6.6 소스로 확인했고 v5.8.13 소스는 UE 클론 밖이라 다시 확인하지 못했다 — 해당 칸에 "5.8 포함 zen 판 미확인"으로 적는다. Epic 문서로만 확인한 칸도 5.8 판 문서는 다시 확인하지 않았다(19.3절).
 
-| 항목 | Zen(UE 5.6) | Rockpile | 차이의 이유 |
+| 항목 | Zen(UE 5.8) | Rockpile | 차이의 이유 |
 |---|---|---|---|
-| 위치 | 5.4부터 로컬 기본 저장소. 공유 Zen은 5.5에서 Windows 호스트 production ready[S1][S2][S6] | 같음(로컬 기본 + 공유) | — |
-| 구현 | C++ zenserver(별도 저장소). 공유·클라우드의 Unreal Cloud DDC와 Horde 서버는 C# ASP.NET Core(net8.0)[S3][S7] | C#(.NET 10) 하나로 로컬·공유 | 저장소의 기존 C# 도구 체계·형식 구현 공유(13절) |
-| 로컬 전송 | loopback HTTP/1.1, 기본 포트 8558, 인증 없음[S2][S4] | named pipe(Windows)·UDS(POSIX) + 길이 프레임, OS 권한 + 클라이언트의 서버 정체 확인 | 같은 기계의 다른 사용자가 포트를 가로채 틀린 값을 주입하는 경로를 막는다(11.2절) |
-| 공유 보안 | 인증 없음, namespace 권한 강제 없음, LAN 전용[S2]. Cloud DDC는 OIDC·namespace ACL[S3] | 토큰 인증·namespace 권한·출처·purge(11.3·11.4절) | 공유 캐시 오염이 팀 전체의 틀린 적중이 된다 |
-| 해시 | IoHash = BLAKE3-256 앞 20 byte[S5] | SHA-256 32 byte 전체 | Rocks 키·원본·쿠킹 해시가 모두 SHA-256. 해시를 자르지 않는다 |
-| 값 식별 | CompressedBuffer의 원본(raw) 해시. 헤더에 raw hash, 서버가 코덱을 앎[S5] | 저장 byte의 해시(ContentHash). 원본 해시는 Record 정보이고 클라이언트가 검사 | 사용자 등록 압축 형식(Compression 14절)을 서버가 가질 수 없고, 코덱·컨테이너를 C#에 중복 구현하지 않는다(5.4절) |
+| 위치 | 5.4부터 로컬 기본 저장소(5.8 기본 캐시 그래프 `Default=(ProjectPak, EnginePak, ZenLocal, Local, ZenShared, Shared, Cloud)` — BaseEngine.ini 2771). 공유 Zen은 5.5에서 Windows 호스트 production ready[S1][S2][S6] | 같음(로컬 기본 + 공유) | — |
+| 구현 | C++ zenserver(별도 저장소). 공유·클라우드의 Unreal Cloud DDC와 Horde 서버는 C# ASP.NET Core(.NET 10 — 5.8에서 바뀜: 5.6은 net8.0)[S3][S7] | C#(.NET 10) 하나로 로컬·공유 | 저장소의 기존 C# 도구 체계·형식 구현 공유(13절) |
+| 로컬 전송 | HTTP/1.1, 기본 포트 8558(ZenServerInterface.cpp 1689, BaseEngine.ini 2734)[S2][S4]. 5.8에서 바뀜: 자동 실행 기본값 `RemoteNetworkService=GeneratedStaticKey`(BaseEngine.ini 2725)는 loopback 강제(`--http-forceloopback`)를 하지 않고, 사용자별로 생성·보관한 정적 키(사용자 `ue`, password 방식)를 `--security-config-path`로 넘긴다(ZenServerInterface.cpp 374–420·2085–2097). 5.6은 `AllowRemoteNetworkService=false`라 loopback 강제·인증 없음이었다. loopback 요청에도 키를 요구하는지는 5.8 포함 zen 판 미확인 | named pipe(Windows)·UDS(POSIX) + 길이 프레임, OS 권한 + 클라이언트의 서버 정체 확인 | 같은 기계의 다른 사용자가 포트를 가로채 틀린 값을 주입하는 경로를 막는다(11.2절) |
+| 공유 보안 | 인증 없음, namespace 권한 강제 없음, LAN 전용[S2](5.6 문서 기준, 5.8 미확인). Cloud DDC는 OIDC·namespace ACL[S3](5.8 원본 `Jupiter.Common/Authentication/NamespaceAuthorizationHandler.cs`·`BaseStartup.cs`로 확인) | 토큰 인증·namespace 권한·출처·purge(11.3·11.4절) | 공유 캐시 오염이 팀 전체의 틀린 적중이 된다 |
+| 해시 | IoHash = BLAKE3-256 앞 20 byte(IoHash.h 18)[S5] | SHA-256 32 byte 전체 | Rocks 키·원본·쿠킹 해시가 모두 SHA-256. 해시를 자르지 않는다 |
+| 값 식별 | CompressedBuffer의 원본(raw) 해시. 헤더에 raw hash(CompressedBuffer.cpp 73), 서버가 코덱을 앎[S5] | 저장 byte의 해시(ContentHash). 원본 해시는 Record 정보이고 클라이언트가 검사 | 사용자 등록 압축 형식(Compression 14절)을 서버가 가질 수 없고, 코덱·컨테이너를 C#에 중복 구현하지 않는다(5.4절) |
 | 직렬화 | Compact Binary·CbPackage[S5] | Rocks Record TLV + RCPK Package(8절) | 엔진의 기존 구조화 형식 |
-| 같은 키 재기록 | Record는 "같은 키 = 같은 값"을 요구, 메타는 달라도 됨[S5] | 논리 digest 기준 첫 쓰기 우선 + Conflict 진단(6.9절) | 결정성 버그·키 누락을 드러낸다 |
-| CachePolicy | QueryLocal·QueryRemote·StoreLocal·StoreRemote·SkipData·SkipMeta·PartialRecord·KeepAlive[S5] | 같은 비트 + 조합 의미표(5.6절) | 조합의 빈틈을 명시한다 |
-| RPC | `POST /z$/$rpc`, Put/Get CacheRecords·Get/Put CacheValues·GetCacheChunks. UE 클라이언트 일괄 8개[S4] | 일괄 RPC(8.4절), byte 예산 기반 일괄 | — |
-| CAS | tiny < 1 KiB(256 MiB 블록), small < 1 MiB(1 GiB 블록), large ≥ 1 MiB 개별 파일. 인덱스 snapshot + append log[S4] | 블록 < 1 MiB(256 MiB 블록), large ≥ 1 MiB. 메모리 인덱스 + WAL + snapshot(6절) | 같은 방향. 블록 계층은 하나로 둔다 |
-| GC | 접근 기준 만료(캐시 14일), 참조 수집 → 미참조 CAS 정리 → 사용률 60% 미만 블록 압축, 디스크 여유 하한, 예비 파일 `reserve.gc`[S4] | 같은 구성 + lease·epoch로 동시 Put과의 경합을 막는다(7절) | — |
-| scrub | v5.6.6 compact CAS scrub은 헤더 raw hash만 대조(내용 재해시는 TODO)[S4] | 모든 읽기에서 내용 검증, scrub은 전체 재해시(6.7·7.5절) | R-0 |
-| 로컬 최적화 | 큰 첨부를 `DuplicateHandle`로 넘긴 파일 handle 또는 경로·offset으로 전달[S4] | 후속(측정 뒤, 18절) | 서버 밖 handle이 삭제·압축 규칙(6.8절)을 바꾼다 |
-| 프로세스 | 에디터 자동 실행, `%LOCALAPPDATA%/UnrealEngine/Common/Zen/Install`에 설치·버전 비교 뒤 교체, 공유 메모리의 sponsor pid 목록, `CREATE_BREAKAWAY_FROM_JOB`(CI에서 종료되지 않게)[S4] | 자동 실행·설치 사본·sponsor·breakaway 같음. major마다 인스턴스를 따로 둔다(10절) | 두 엔진 버전이 한 기계에서 서로를 끄지 않게 한다 |
-| Project store | 쿠킹 출력 저장 5.6 production ready, Zen Streaming 5.6 Beta[S6] | R3 후속 | — |
+| 같은 키 재기록 | Record는 "같은 키 = 같은 값"을 요구, 메타는 달라도 됨(DerivedDataCacheRecord.h 118–119), Put(Default)는 기존 유효 값을 덮지 않음(DerivedDataCachePolicy.h 39–43)[S5]. 5.8에서 바뀜: Put 응답이 덮어쓰기를 막은 충돌 Record·Value를 돌려주고(DerivedDataCache.h 167–173·256–262), 비결정 값의 Put 보고·검증을 끄는 `NonDeterministic` 비트가 생겼다(DerivedDataCachePolicy.h 105–113). 자동 실행 인자에 `--cache-bucket-limit-overwrites`가 더해졌다(BaseEngine.ini 2729 — 의미는 5.8 포함 zen 판 미확인) | 논리 digest 기준 첫 쓰기 우선 + Conflict 진단(6.9절) | 결정성 버그·키 누락을 드러낸다 |
+| CachePolicy | QueryLocal·QueryRemote·StoreLocal·StoreRemote·SkipData·SkipMeta·PartialRecord·KeepAlive(DerivedDataCachePolicy.h 53–102)[S5]. 5.8에서 바뀜: `NonDeterministic`(1 << 8)이 더해졌다 — Rockpile의 "같은 비트"는 5.6의 8비트 기준이다 | 같은 비트 + 조합 의미표(5.6절) | 조합의 빈틈을 명시한다 |
+| RPC | `POST /z$/$rpc`(5.8에서 바뀜: 설정 `NamespacedRpcEndpoint`로 `/z$/<namespace>/$rpc`도 쓸 수 있다, 기본 꺼짐 — ZenCacheStore.cpp 1958–1964), Put/Get CacheRecords·Get/Put CacheValues·GetCacheChunks. UE 클라이언트 일괄 8개(ZenCacheStore.cpp 287–288)[S4] | 일괄 RPC(8.4절), byte 예산 기반 일괄 | — |
+| CAS | tiny < 1 KiB(256 MiB 블록), small < 1 MiB(1 GiB 블록), large ≥ 1 MiB 개별 파일. 인덱스 snapshot + append log[S4](zen v5.6.6 소스, 5.8 포함 zen 판 미확인) | 블록 < 1 MiB(256 MiB 블록), large ≥ 1 MiB. 메모리 인덱스 + WAL + snapshot(6절) | 같은 방향. 블록 계층은 하나로 둔다 |
+| GC | 접근 기준 만료(캐시 14일), 참조 수집 → 미참조 CAS 정리 → 사용률 60% 미만 블록 압축, 디스크 여유 하한, 예비 파일 `reserve.gc`[S4]. UE 자동 실행 인자(14일·GC 주기 6시간·디스크 여유 하한 2 GiB)는 5.8 BaseEngine.ini 2729로 확인, 서버 쪽 절차는 zen v5.6.6 소스(5.8 포함 zen 판 미확인) | 같은 구성 + lease·epoch로 동시 Put과의 경합을 막는다(7절) | — |
+| scrub | zen v5.6.6 compact CAS scrub은 헤더 raw hash만 대조(내용 재해시는 TODO)[S4] — 5.8 포함 zen 판(v5.8.13) 미확인 | 모든 읽기에서 내용 검증, scrub은 전체 재해시(6.7·7.5절) | R-0 |
+| 로컬 최적화 | 큰 첨부를 `DuplicateHandle`로 넘긴 파일 handle 또는 경로·offset으로 전달[S4](zen v5.6.6 소스, 5.8 포함 zen 판 미확인) | 후속(측정 뒤, 18절) | 서버 밖 handle이 삭제·압축 규칙(6.8절)을 바꾼다 |
+| 프로세스 | 에디터 자동 실행, `%LOCALAPPDATA%/UnrealEngine/Common/Zen/Install`에 설치·버전 비교 뒤 교체(ZenServerInterface.cpp 162–165·252–255·819–850), 공유 메모리의 sponsor pid 목록(ZenServerState.cpp 243–267, ZenServerInterface.cpp 2765), `CREATE_BREAKAWAY_FROM_JOB`(CI에서 종료되지 않게 — ZenServerInterface.cpp 2260)[S4]. 5.8에서 바뀜: 시스템 서비스 설치 모드(`[Zen.SystemService]` 설정, BaseEngine.ini에 없어 기본은 자동 실행)가 더해졌다(ZenServerInterface.cpp 1433–1435) | 자동 실행·설치 사본·sponsor·breakaway 같음. major마다 인스턴스를 따로 둔다(10절) | 두 엔진 버전이 한 기계에서 서로를 끄지 않게 한다 |
+| Project store | 쿠킹 출력 저장 5.6 production ready, Zen Streaming 5.6 Beta[S6](5.6 release notes 기준 — 5.7·5.8에서의 상태 미확인) | R3 후속 | — |
 
 ## 4. 구성
 
@@ -705,13 +705,13 @@ Programs/
 - 의존: 공유 프레임워크(`Microsoft.NETCore.App`·`Microsoft.AspNetCore.App`)만 쓴다. NuGet이 필요해지면 `packages.lock.json` + `RestoreLockedMode`, NuGetAudit(net10 기본 `all`), 라이선스 고지 묶음에 넣는다[S12].
 - 시험 도구: 속성 기반·결정적 동시성·퍼징 패키지는 R1a 착수 때 유지 상태를 보고 정한다(후보: CsCheck Apache-2.0, Coyote MIT — NuGet 최신판이 2024-03에 멈춰 있다, SharpFuzz MIT). 결정적 동시성 시험이 패키지 없이도 되도록 저장 엔진에 스케줄 주입 지점을 둔다.
 - CI: 기존 Windows·macOS 작업에 `Rocks.Rockpile.Tests` 실행 단계를 더하고(시험 프로젝트마다 단계를 두는 기존 방식), Linux 작업(공유 서버 시험·다른 사용자 권한 행렬 컨테이너)을 더한다.
-- 선례: UE 5.6의 Unreal Cloud DDC(`Jupiter.csproj`)와 Horde 서버는 `Microsoft.NET.Sdk.Web`(ASP.NET Core)이다[S3][S7].
+- 선례: UE 5.8의 Unreal Cloud DDC(`Jupiter.csproj`)와 Horde 서버는 `Microsoft.NET.Sdk.Web`(ASP.NET Core)이고 .NET 10이다(Jupiter `net10.0`, Horde Dockerfile의 `dotnet/sdk:10.0`·`dotnet/aspnet:10.0` — 5.8에서 바뀜: 5.6은 둘 다 net8.0)[S3][S7].
 
 ## 14. 관측
 
 - 로그: 구조화 로그(JSON lines), `<제어>/logs/` 일 단위 회전·범주별 속도 제한. 토큰은 기록하지 않는다. 요청 상관 id(로컬 프레임 `requestId`, 공유 `X-Rocks-Request-Id`)로 Rocks Lens 로그와 잇는다.
 - 지표(namespace·bucket별): 요청·적중(로컬·upstream)·미적중·byte·지연 분포, `conflict`·`corrupt`·`hash_mismatch`·`digest_changed`·`dropped_put`, GC 실행·회수·소요, 블록 압축, scrub 진행, 살아 있는 byte·빈 byte, 인덱스 메모리, WAL 크기, 저장소 재시작·저하 모드, upstream 큐·실패·circuit 상태, 연결 수, 인증 실패.
-- 조회: `rockpile status`·`stats --bucket=…`·`conflicts`(로컬), `GET /metrics`(공유). 웹 대시보드는 후속(zen은 5.5.8 판부터 내장[S4]).
+- 조회: `rockpile status`·`stats --bucket=…`·`conflicts`(로컬), `GET /metrics`(공유). 웹 대시보드는 후속(zen은 5.5.8 판부터 내장[S4] — zen CHANGELOG v5.6.6 기준).
 - 미적중 이유(없음·손상·upstream 불가·Conflict·DigestChanged·소비 입력 불일치)는 NuggetCache가 Rocks Lens에 보고한다. 어느 입력이 바뀌었는지는 클라이언트의 키 기록 비교 몫이다 — 선택 기능으로 디버그 모드에서 KeyWriter 원상 byte를 로컬 진단 표에 남긴다.
 
 ## 15. 시험
@@ -868,15 +868,15 @@ R3 project store, R4 BuildArtifactCache, OIDC, 로컬 파일 참조(큰 blob을 
 | 반례·정합성 | 경미 | 상태 목록 누락, 정책 합집합의 Skip 비트, 명령 목록, `backend=auto`, `SyncDirectory` 위치, `TryOpen` 인자, `CachePolicy` 충돌 대상, LocalChannel 구현 모순, C# 정체 확인 범위, 유휴 종료와 큐, 골든 소유(Core↔Engine), [S6] URL, 옵션 문법·종료 코드, `Codec` 머리 형식, 공유 blob 용량 회계, flags 의미, large 경로용 전체 해시, drain 손실 보고, `$TMPDIR` 소켓 정리, Put 상한 동작, SCC 세부, writer 왕복 검증 | 각 절에 반영(5–15절) |
 | 정합성 | — | 17절 누락(계획 2.4·3.2 종료 순서·28.3·28.4·27.7, Compression, AssetSystem 8·13, RepositoryLayout C# 관례, CI 단계) | 17절에 추가, C# 프로젝트는 `Programs/Rocks.Rockpile.*`(13.1절) |
 
-### 19.3 사실 출처(2026-11-13 확인, 모두 1차)
+### 19.3 사실 출처(2026-11-13 확인, 모두 1차. UE 원본 쪽은 2026-11-15에 UE 5.8 — 5.8.4, commit `f45729c0b6f0` — 로 다시 확인)
 
-- [S1] UE 5.6 문서, Using Derived Data Cache — https://dev.epicgames.com/documentation/en-us/unreal-engine/using-derived-data-cache-in-unreal-engine?application_version=5.6 (5.4부터 로컬 기본 Zen)
-- [S2] UE 5.6 문서, Set up Zen Storage Server as Shared DDC — https://dev.epicgames.com/documentation/en-us/unreal-engine/set-up-zen-storage-server-as-shared-ddc-for-unreal-engine?application_version=5.6 (계층 배치, 인증·권한 없음, 공유 템플릿 GC 값, 포트 8558)
-- [S3] UE 5.6 문서, Cloud type DDC — https://dev.epicgames.com/documentation/en-us/unreal-engine/how-to-set-up-a-cloud-type-derived-data-cache-for-unreal-engine?application_version=5.6 (Unreal Cloud DDC, OIDC·namespace ACL, `Engine/Source/Programs/UnrealCloudDDC`)
-- [S4] EpicGames/zen 소스 v5.6.6(UE 5.6 포함 판, Epic 연동 계정 필요) — `src/zenstore/cas.cpp`·`compactcas.cpp`·`cache/cachedisklayer.cpp`·`gc.cpp`, `src/zenserver/config.cpp`·`cache/httpstructuredcache.cpp`, `src/zenhttp/packageformat.cpp`, `CHANGELOG.md`; UE 5.6 `Engine/Config/BaseEngine.ini`, `Engine/Source/Developer/Zen/Private/ZenServerInterface.cpp`, `Engine/Source/Developer/DerivedDataCache/Private/ZenCacheStore.cpp`
-- [S5] UE 5.6 소스 — `Engine/Source/Runtime/Core/Public/IO/IoHash.h`, `Serialization/CompactBinary.h`·`CompactBinaryPackage.h`, `Private/Compression/CompressedBuffer.cpp`, `Engine/Source/Developer/DerivedDataCache/Public/DerivedDataCacheRecord.h`·`DerivedDataCachePolicy.h`·`DerivedDataValueId.h`
-- [S6] UE release notes — https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-engine-5-5-release-notes?application_version=5.5 , https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-engine-5-6-release-notes?application_version=5.6 (공유 Zen Windows production ready(5.5), 쿠킹 출력 저장소 production ready·Zen Streaming Beta(5.6))
-- [S7] UE 5.6 소스 — `Engine/Source/Programs/UnrealCloudDDC/Jupiter/Jupiter.csproj`, `Engine/Source/Programs/Horde/HordeServer/HordeServer.csproj`(`Microsoft.NET.Sdk.Web`, net8.0)
+- [S1] UE 5.8 문서, Using Derived Data Cache — https://dev.epicgames.com/documentation/en-us/unreal-engine/using-derived-data-cache-in-unreal-engine?application_version=5.8 (5.4부터 로컬 기본 Zen — 처음에는 5.6 판 문서로 확인했고 5.8 판 본문은 미확인. 5.8에서 로컬 Zen이 기본 그래프에 있는 것은 BaseEngine.ini 2771로 확인)
+- [S2] UE 5.8 문서, Set up Zen Storage Server as Shared DDC — https://dev.epicgames.com/documentation/en-us/unreal-engine/set-up-zen-storage-server-as-shared-ddc-for-unreal-engine?application_version=5.8 (계층 배치, 인증·권한 없음, 공유 템플릿 GC 값 — 5.6 판 문서로 확인, 5.8 판 미확인. 포트 8558은 5.8 원본 BaseEngine.ini 2734·ZenServerInterface.cpp 1689로 확인)
+- [S3] UE 5.8 문서, Cloud type DDC — https://dev.epicgames.com/documentation/en-us/unreal-engine/how-to-set-up-a-cloud-type-derived-data-cache-for-unreal-engine?application_version=5.8 (Unreal Cloud DDC, OIDC·namespace ACL, `Engine/Source/Programs/UnrealCloudDDC` — 5.8 판 문서 미확인, ACL·OIDC는 5.8 원본 `Jupiter.Common/Authentication/`·`BaseStartup.cs`로 확인)
+- [S4] EpicGames/zen 소스 v5.6.6(UE 5.6 포함 판, Epic 연동 계정 필요) — `src/zenstore/cas.cpp`·`compactcas.cpp`·`cache/cachedisklayer.cpp`·`gc.cpp`, `src/zenserver/config.cpp`·`cache/httpstructuredcache.cpp`, `src/zenhttp/packageformat.cpp`, `CHANGELOG.md`. UE 5.8 포함 판은 v5.8.13(`Engine/Build/Commit.gitdeps.xml`, 커밋 "Update zenserver to v5.8.13")이며 그 소스는 미확인. UE 쪽은 5.8 `Engine/Config/BaseEngine.ini`, `Engine/Source/Developer/Zen/Private/ZenServerInterface.cpp`·`ZenServerState.cpp`, `Engine/Source/Developer/DerivedDataCache/Private/ZenCacheStore.cpp`
+- [S5] UE 5.8 소스 — `Engine/Source/Runtime/Core/Public/IO/IoHash.h`, `Serialization/CompactBinary.h`·`CompactBinaryPackage.h`, `Private/Compression/CompressedBuffer.cpp`, `Engine/Source/Developer/DerivedDataCache/Public/DerivedDataCache.h`·`DerivedDataCacheRecord.h`·`DerivedDataCachePolicy.h`·`DerivedDataValueId.h`
+- [S6] UE release notes — https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-engine-5-5-release-notes?application_version=5.5 , https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-engine-5-6-release-notes?application_version=5.6 (공유 Zen Windows production ready(5.5), 쿠킹 출력 저장소 production ready·Zen Streaming Beta(5.6) — 해당 판의 기록이라 그대로 둔다. 5.7·5.8 release notes는 미대조)
+- [S7] UE 5.8 소스 — `Engine/Source/Programs/UnrealCloudDDC/Jupiter/Jupiter.csproj`(`Microsoft.NET.Sdk.Web`, `net10.0`), `Engine/Source/Programs/Horde/HordeServer/HordeServer.csproj`(`Microsoft.NET.Sdk.Web`, csproj에 TargetFramework가 없고 정하는 파일은 공개 저장소에서 미확인)·`HordeServer/Dockerfile`(`dotnet/sdk:10.0`·`dotnet/aspnet:10.0`). 5.6은 둘 다 `net8.0`
 - [S8] Kestrel — https://learn.microsoft.com/aspnet/core/grpc/interprocess-namedpipes?view=aspnetcore-10.0 , https://learn.microsoft.com/aspnet/core/grpc/interprocess-uds?view=aspnetcore-10.0 , https://learn.microsoft.com/aspnet/core/fundamentals/servers/kestrel/options?view=aspnetcore-10.0 ; dotnet/aspnetcore `release/10.0` `Transport.NamedPipes/src/NamedPipeTransportOptions.cs`·`Internal/NamedPipeConnectionListener.cs`, `Transport.Sockets/src/SocketConnectionListener.cs`, `Core/src/KestrelServerLimits.cs`
 - [S9] .NET TLS(macOS) — https://devblogs.microsoft.com/dotnet/dotnet-10-networking-improvements/ , dotnet/runtime `SslStreamPal.OSX.cs`, https://support.apple.com/guide/security/sec100a75d12
 - [S10] GC·배포 — https://learn.microsoft.com/aspnet/core/performance/memory?view=aspnetcore-10.0 , https://learn.microsoft.com/dotnet/standard/garbage-collection/datas , https://learn.microsoft.com/dotnet/core/runtime-config/garbage-collector , https://learn.microsoft.com/dotnet/core/deploying/native-aot/ , https://learn.microsoft.com/aspnet/core/fundamentals/native-aot?view=aspnetcore-10.0

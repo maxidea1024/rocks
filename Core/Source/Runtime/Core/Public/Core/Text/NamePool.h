@@ -34,7 +34,7 @@ struct NamePoolStats {
 // 유효 UTF-8 원문을 immutable entry로 intern한다. ASCII 문자만 대소문자를 구분하지 않고
 // 비교하며 비ASCII는 byte 단위로 비교한다. Unicode folding·정규화는 제공하지 않는다.
 // 동일 비교 이름의 서로 다른 원문은 별도 표시 entry를 사용하므로 예산을 추가로 소비한다.
-// 숫자 접미사 `_N`은 UE5.6 규칙으로 분리한다. 빈 base의 유효 번호는 기본 None이다.
+// 숫자 접미사 `_N`은 UE5.8 규칙으로 분리한다. 빈 base의 유효 번호는 기본 None이다.
 // 빈 문자열과 "None"은 기본 None과 같고, None의 표시 변형도 필요한 경우 entry를 사용한다.
 // 64 bucket/단일 gate의 기준 구현이다. bucket 분리는 후속 shard화 여지를 남기지만 현재 병렬 shard
 // 잠금은 구현하지 않았다. hash 충돌은 원문과 ASCII 대소문자 비교로 해결하며 성능 우위를 보장하지

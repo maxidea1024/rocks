@@ -143,8 +143,10 @@ public:
     // 입력은 유효 UTF-8이고 NUL이 없어야 하며 실패해도 입력은 바뀌지 않는다.
     static Result<String> NormalizeFilename(Allocator& allocator, StringView path,
                                             PathStyle style = HostStyle()) noexcept;
-    // 사전에 '/' 구분자로 바꾼 경로의 상대 디렉터리를 축약한다. UE5.6과 같이 선행 '..'·
+    // 사전에 '/' 구분자로 바꾼 경로의 상대 디렉터리를 축약한다. UE5.6 규칙대로 선행 '..'·
     // '/..' 및 드라이브 제거 시도는 InvalidArgument다. 입력을 변경하지 않으며 빈 결과를 허용한다.
+    // UE5.8은 이 알고리즘을 새로 써서 "..name/x"처럼 '..'로 시작하는 이름을 받고, 이름 안의
+    // "./"(예: "a.../x")를 지우지 않는다. 이 함수는 5.6 결과를 유지한다.
     // 이 함수는 역슬래시를 자동 변환하지 않는다. 필요하면 NormalizeFilename을 먼저 호출한다.
     static Result<String> CollapseRelativeDirectories(Allocator& allocator, StringView path,
                                                       PathStyle style = HostStyle()) noexcept;

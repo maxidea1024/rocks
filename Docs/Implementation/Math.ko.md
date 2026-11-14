@@ -4,7 +4,7 @@
 
 ## 1. 구조 — 플랫폼별 최적화 함수의 선택
 
-UE 5.6 Core는 `FGenericPlatformMath` 위에 `TUnrealPlatformMathSSEBase<Base>`(x64 SSE 재정의)를 얹고 `FWindowsPlatformMath`·`FMacPlatformMath`를 `FPlatformMath`로 선택하며, 벡터 연산은 `VectorRegister`가 SSE·NEON·FPU 구현 중 하나를 고른다(고정 커밋 `cdda65cecacd9a1278020925c357bf4cc0b17e8c`의 `GenericPlatformMath.h`, `UnrealPlatformMathSSE.h`, `Windows/WindowsPlatformMath.h`, `HAL/PlatformMath.h`, `Math/VectorRegister.h`에서 확인). Rocks도 같은 계층을 쓰되 CPU 명령 계층을 기준으로 선택한다.
+UE 5.8 Core는 `FGenericPlatformMath` 위에 `TUnrealPlatformMathSSEBase<Base>`(x64 SSE 재정의)와 그 위의 `TUnrealPlatformMathSSE4Base<Base>`를 얹고 `FWindowsPlatformMath`(= `FMicrosoftPlatformMathBase`)·`FMacPlatformMath`를 `FPlatformMath`로 선택하며, 벡터 연산은 `VectorRegister`가 SSE·NEON·FPU 구현 중 하나를 고른다(UE 5.8(5.8.4, commit `f45729c0b6f0`) 대조 — `Engine/Source/Runtime/Core/Public/`의 `GenericPlatform/GenericPlatformMath.h`, `Math/UnrealPlatformMathSSE.h`, `Math/UnrealPlatformMathSSE4.h`, `Microsoft/MicrosoftPlatformMath.h`, `Windows/WindowsPlatformMath.h`, `Mac/MacPlatformMath.h`, `HAL/PlatformMath.h`, `Math/VectorRegister.h`에서 확인. 처음 확인은 UE 5.6 commit `cdda65ce`이며 이 계층은 5.8에서도 같다). Rocks도 같은 계층을 쓰되 CPU 명령 계층을 기준으로 선택한다.
 
 ```text
 PlatformBase/Public/Platform/Math
@@ -26,7 +26,7 @@ Core/Public/Core/Math        Vec·Quat·Mat4·Transform·Rotator·Rect·Color·R
 
 ### UE와 의도적으로 다른 플랫폼 수학 규약
 
-| 항목 | UE 5.6 (원본 확인) | Rocks |
+| 항목 | UE 5.8 (원본 확인, `Math/UnrealPlatformMathSSE.h` 86–127 — 5.6과 같은 파일) | Rocks |
 |---|---|---|
 | SSE `FloorToInt32` | `_mm_cvt_ss2si(F + F - 0.5f) >> 1` — 현재 반올림 모드 의존, 큰 값에서 범위 축소 | 절사 명령 + 정확한 보정. 범위 밖·NaN은 Fatal(`Try*`는 false) |
 | `RoundToInt` | +무한대 방향(`F + F + 0.5` 기법) | 0에서 멀어지는 방향(C `round`, AArch64 `fcvtas`) |
@@ -72,7 +72,7 @@ Core/Public/Core/Math        Vec·Quat·Mat4·Transform·Rotator·Rect·Color·R
 
 계약: 모든 도형은 닫힌 집합이며 경계 접촉은 Hit이다. `OrientedBox`는 `IsValid`가 회전 길이 오차(`ShapeUnitTolerance`)를 허용하므로 축·좌표 변환과 모든 판정이 `UnitRotation()`(정규화한 회전)을 쓴다. 평면 광선 판정은 거의 평행해 거리가 overflow하면 Miss다. 광선·선분의 시작점이 삼각형 위(평면 위 정확 판정)면 방향과 무관하게 거리 0 Hit(공면 포함, FrontOnly는 앞면 진입일 때만)이고, 시작점이 삼각형 밖인 공면 광선·선분은 Miss다. 선분 끝점이 삼각형 위면 계산된 t가 1을 넘어도 t = 1 Hit(들어오는 면은 시작점 쪽), capsule 옆면 위에서 출발한 광선은 거리 0 Hit다. OBB 판정은 매 호출 회전을 정규화하므로 `ContainsPoint(OBB)`가 약 9 ns → 16 ns(x64 /O2)로 느려졌다(정확성 우선). 시작 접촉 거리는 +0이다. `maxDistance`는 T로 변환된 뒤 검사한다(float 도형에 double을 넘기면 −1e-50은 −0으로, float 범위 밖은 +Inf로 바뀜). 겹침 판정에 숨은 epsilon이 없고, 유일한 허용치는 OrientedBox 분리축의 평행 축 보정 `ObbParallelEpsilon`(float 1e-6, double 1e-12, 인자로 변경 가능)이다. 비유한 값·음수 반지름·뒤집힌 box·비단위 방향/회전·NaN 또는 음수 `maxDistance`는 Miss/Hit로 숨기지 않고 `InvalidInput`이다. 광선 방향은 단위 벡터가 전제(`Ray::TryMake`가 정규화)이며 거리는 실제 거리다. 고체 안에서 시작한 광선은 거리 0, `startedInside=true`, 법선 0 벡터다. 퇴화 삼각형은 mesh에 흔하므로 광선·선분에서 Miss로 처리하고 최근접·구 겹침에서는 선분·점으로 다룬다. 공유 변을 가진 삼각형 집합의 watertight 판정은 보장하지 않는다.
 
-UE 5.6 원본과의 차이(원본 확인): `TSphere::Intersects/IsInside`와 `FCapsuleShape::IsInside`는 기본 1e-4 허용치를, `LineBoxIntersection`·`LineExtentBoxIntersection`은 `BOX_SIDE_THRESHOLD=0.1`을, `SegmentPlaneIntersection`은 ±1e-4 t 허용치를, `SegmentDistToSegment*`는 절대 1e-4 임계값을 쓴다. UE `TPlane(A,B,C)`는 일직선 점에서 영 법선 평면을 만들지만 Rocks `TryFromPoints`는 실패한다. UE `TRay` 기본 방향은 +Z, Rocks는 +X다. UE `FOrientedBox`에는 교차 함수가 없다.
+UE 5.8 원본과의 차이(원본 확인 — `Math/Sphere.h`·`CapsuleShape.h`·`Box.h`·`Plane.h`·`Ray.h`·`OrientedBox.h`·`Private/Math/UnrealMath.cpp`, 5.6과 견줘 인라인 지시어·로그 매크로만 바뀌었다): `TSphere::Intersects/IsInside`와 `FCapsuleShape::IsInside`는 기본 1e-4 허용치를, `LineBoxIntersection`·`LineExtentBoxIntersection`은 `BOX_SIDE_THRESHOLD=0.1`을, `SegmentPlaneIntersection`은 ±1e-4 t 허용치를, `SegmentDistToSegment*`는 절대 1e-4 임계값을 쓴다. UE `TPlane(A,B,C)`는 일직선 점에서 영 법선 평면을 만들지만 Rocks `TryFromPoints`는 실패한다. UE `TRay` 기본 방향은 +Z, Rocks는 +X다. UE `FOrientedBox`에는 교차 함수가 없다.
 
 검증: 13개 도형 테스트와 33개 판정 테스트(리뷰 회귀 5개 포함)가 고정 seed 무작위 사례를 독립 double oracle(축별 최소화·황금분할 탐색·조밀 표본·해석해·SDF 근 찾기·독립 15축 분리축)과 비교하고 모든 겹침 쌍의 대칭을 확인한다. 미구현: frustum, swept shape, 접촉 깊이·manifold, Segment–Capsule/OBB, OBB–Sphere/Box, Capsule–Box/Triangle.
 
@@ -80,7 +80,7 @@ UE 5.6 원본과의 차이(원본 확인): `TSphere::Intersects/IsInside`와 `FC
 
 `Color`는 채널당 UNorm8, `LinearColor`는 선형 sRGB 원색·D65·straight alpha이며 HDR 값을 허용한다. sRGB 변환은 IEC 61966-2-1 식을 double로 정확히 계산하고 alpha에는 적용하지 않는다. 256개 byte 모두 왕복한다. 저장 양자화는 NaN·음수→0, 1 이상·+Inf→255(D3D float→UNORM 규칙과 같은 방향)이며, `GetClamped`는 NaN을 숨기지 않는다. 16진 문자열은 `#` 선택, 3/4/6/8자리를 받고 잘못된 입력에서는 false와 함께 출력값을 바꾸지 않는다. 휘도는 Rec.709 가중치(0.2126, 0.7152, 0.0722)다.
 
-UE 5.6 `Color.h`/`Color.cpp`와의 차이(원본 확인): UE sRGB 디코딩은 표 기반으로 256개 중 25개가 정확 반올림보다 1 ulp 낮다. UE `ToFColorSRGB`는 표 보간 인코더로 [2^-13, 1) 구간에서 547,648개 float가 정확 반올림과 ±1 차이 난다. UE `QuantizeRound`는 float 연산으로 반올림 경계 바로 아래 128개 값이 1 크다. UE `ReinterpretAsLinear`는 `1/255` 곱으로 256개 중 126개가 1 ulp 크다. UE `FromHex`는 4자리를 지원하지 않고 잘못된 글자를 검증하지 않는다. UE `GetLuminance`는 설정에 따라 0.3/0.59/0.11 또는 작업 색 공간 계수를 쓴다. UE `FLinearColor(FColor)`는 암묵적으로 sRGB를 디코딩하지만 Rocks는 `FromSRGB`/`ReinterpretAsLinear` 중 하나를 명시해야 한다. 메모리 배치(UE little-endian BGRA, Rocks RGBA)는 포맷 계약이 아니며 외부 형식은 `ToPacked*`를 쓴다.
+UE 5.8 `Color.h`/`Color.cpp`와의 차이(원본 확인 — 아래 개수는 5.6에서 잰 값이며 5.8에서 같은 코드다. 5.8은 sRGB 디코딩 표를 `Color.cpp`에서 `Color.h`의 `constexpr` 배열로 옮겼으나 값 256개가 같고, `ToFColorSRGB`·`QuantizeRound`·`ReinterpretAsLinear`·`FromHex`·`GetLuminance`·`FLinearColor(FColor)` 본문은 인라인 지시어만 바뀌었다): UE sRGB 디코딩은 표 기반으로 256개 중 25개가 정확 반올림보다 1 ulp 낮다. UE `ToFColorSRGB`는 표 보간 인코더로 [2^-13, 1) 구간에서 547,648개 float가 정확 반올림과 ±1 차이 난다. UE `QuantizeRound`는 float 연산으로 반올림 경계 바로 아래 128개 값이 1 크다. UE `ReinterpretAsLinear`는 `1/255` 곱으로 256개 중 126개가 1 ulp 크다. UE `FromHex`는 4자리를 지원하지 않고 잘못된 글자를 검증하지 않는다. UE `GetLuminance`는 설정에 따라 0.3/0.59/0.11 또는 작업 색 공간 계수를 쓴다. UE `FLinearColor(FColor)`는 암묵적으로 sRGB를 디코딩하지만 Rocks는 `FromSRGB`/`ReinterpretAsLinear` 중 하나를 명시해야 한다. 메모리 배치(UE little-endian BGRA, Rocks RGBA)는 포맷 계약이 아니며 외부 형식은 `ToPacked*`를 쓴다.
 
 ## 4. 결정적 난수
 
@@ -99,4 +99,4 @@ UE 5.6 `Color.h`/`Color.cpp`와의 차이(원본 확인): UE sRGB 디코딩은 �
 - macOS(x64·ARM64) 빌드·실행, ARM64 NEON 실행 결과와 `ScalarSimdBitExact`의 실제 성립 여부, Apple libm의 초월 함수·`pow` 결과 차이.
 - 성능 측정(scalar 대 SIMD, batch 크기·정렬)은 실행하지 않았다. SIMD 경로가 항상 빠르다고 주장하지 않는다.
 - double 4-lane 레지스터(`VectorRegister4Double` 대응), AVX2/FMA 선택 kernel과 CPU 기능 dispatch, SoA batch kernel.
-- UE 5.6 `Core/Public/Math` 99개 헤더 중 미구현: Float16Color·PackedVector(반정밀 색·패킹 벡터), BoxSphereBounds, DualQuat, Range·RangeSet(정수·열린 경계 범위), InterpCurve·CurveEd, Int128·BigInt·GuardedInt, NumericLimits, Halton·Sobol·LFSR, SHMath, ConvexHull2d·PolynomialRootSolver, GenericOctree, UnitConversion, TwoVectors, TransformCalculus, BasicMathExpressionEvaluator, IntVector4·UInt 변형, ColorList(이름 색 목록), ISPC(`*.isph`) 경로. 우선순위는 [Core 상세 명세](../Design/CoreDetailedSpec.ko.md) §3.4를 따른다.
+- UE 5.8 `Core/Public/Math` 101개 파일(`.h`·`.inl`·`.isph`, 5.6은 99개 — 5.8에서 `SpringMath.h`가 새로 생기고 `StaticSpatialIndex.h`가 Engine WorldPartition에서 옮겨 왔다) 중 미구현: SpringMath(스프링 감쇠)·StaticSpatialIndex(정적 공간 색인, 5.8 추가분), Float16Color·PackedVector(반정밀 색·패킹 벡터), BoxSphereBounds, DualQuat, Range·RangeSet(정수·열린 경계 범위), InterpCurve·CurveEd, Int128·BigInt·GuardedInt, NumericLimits, Halton·Sobol·LFSR, SHMath, ConvexHull2d·PolynomialRootSolver, GenericOctree, UnitConversion, TwoVectors, TransformCalculus, BasicMathExpressionEvaluator, IntVector4·UInt 변형, ColorList(이름 색 목록), ISPC(`*.isph`) 경로. 우선순위는 [Core 상세 명세](../Design/CoreDetailedSpec.ko.md) §3.4를 따른다.

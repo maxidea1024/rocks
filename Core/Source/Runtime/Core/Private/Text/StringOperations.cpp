@@ -57,7 +57,7 @@ usize StringView::Find(StringView needle, StringComparison comparison,
     }
 
     const usize size = ByteCount();
-    // UE5.6의 명시적 앞 검색 시작점은 비어 있지 않을 때 마지막 위치로 제한한다.
+    // UE5.8의 명시적 앞 검색 시작점은 비어 있지 않을 때 마지막 위치로 제한한다.
     // Rocks의 위치는 TCHAR code unit이 아니라 byte offset이다.
     const usize start = startByte == NotFound
                             ? (direction == StringSearchDirection::FromStart ? 0 : size)
@@ -227,7 +227,7 @@ Result<usize> String::TryReplace(StringView from, StringView to,
     if (!ValidComparison(comparison) || !from.ValidateUtf8() || !to.ValidateUtf8()) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
-    // UE5.6과 같이 대소문자 구분 치환의 검색어와 결과가 같으면 변경하지 않는다.
+    // UE5.8과 같이 대소문자 구분 치환의 검색어와 결과가 같으면 변경하지 않는다.
     // view가 자기 문자열을 빌린 경우에도 비교만 하며 allocation이나 invalidation이 없다.
     if (from.IsEmpty() || IsEmpty() ||
         (comparison == StringComparison::CaseSensitive && from == to)) {

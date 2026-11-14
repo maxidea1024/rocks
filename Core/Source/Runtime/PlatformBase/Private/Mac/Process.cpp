@@ -563,7 +563,7 @@ FileStatus Process::Start(const ProcessStartInfo& info) noexcept {
     cleanup();
     state->pid = pid;
     if (info.priority == ProcessPriority::Low) {
-        // posix_spawn은 nice를 정할 수 없어 시작 직후 올린다(UE 5.6 Unix CreateProc도 같은 방식이며
+        // posix_spawn은 nice를 정할 수 없어 시작 직후 올린다(UE 5.8 Unix CreateProc도 같은 방식이며
         // 경합을 주석으로 남겼다). 실패해도 실행에는 영향이 없으므로 무시한다.
         errno = 0;
         const int current = getpriority(PRIO_PROCESS, 0);

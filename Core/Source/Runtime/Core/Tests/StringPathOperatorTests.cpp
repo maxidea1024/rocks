@@ -11,7 +11,7 @@ TEST(StringPathOperatorsPreserveUnrealAppendRules) {
         const char* right;
         const char* expected;
     };
-    // UE 5.6 PathAppend의 구분자 경계다. 정규화나 절대 경로 치환은 하지 않는다.
+    // UE 5.8 PathAppend의 구분자 경계다. 정규화나 절대 경로 치환은 하지 않는다.
     const Case cases[] = {{"", "", ""},
                           {"", "item", "item"},
                           {"dir", "", "dir/"},

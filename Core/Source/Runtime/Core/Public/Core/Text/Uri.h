@@ -10,7 +10,7 @@ namespace rocks {
 // 빌리므로 입력 문자열보다 오래 쓰지 않는다. 각 view는 구분자(':', '//', '@', '?', '#')를 포함하지
 // 않으며 percent-encoding을 해제하지 않은 원문이다. 해제가 필요하면 TryPercentDecode를 쓴다.
 //
-// UE 5.6에서는 같은 용도의 함수(GetUrlDomain/Port/Path/Parameter, UrlEncode/Decode)가 Core가 아닌
+// UE 5.8에서는 같은 용도의 함수(GetUrlDomain/Port/Path/Parameter, UrlEncode/Decode)가 Core가 아닌
 // HTTP 모듈의 FGenericPlatformHttp에 있다. Rocks는 네트워크 계층이 공용으로 쓰도록 Core에 둔다.
 struct UriView {
     StringView scheme; // 비어 있으면 상대 참조다. 대소문자는 원문 그대로다.

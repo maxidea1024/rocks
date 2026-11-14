@@ -369,7 +369,7 @@ public:
         return Result<void>::Success();
     }
 
-    // UE5.6 BitArray처럼 원래 Size()-count에서 시작하는 bit로 빈 자리를 메운다.
+    // UE5.8 BitArray처럼 원래 Size()-count에서 시작하는 bit로 빈 자리를 메운다.
     // 제거 범위와 끝 범위가 겹치면 Array의 RemoveAtSwap과 결과가 다를 수 있다.
     Result<void> TryRemoveAtSwap(usize index, usize count = 1) noexcept {
         if (index > size_ || count > size_ - index) {

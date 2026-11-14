@@ -4,9 +4,9 @@
 
 ## 1. 기준과 범위
 
-- 대조 기준은 **UE 5.6 Core**다. 기준 버전의 공개 헤더와 공식 문서를 고정 커밋 단위로 비교한다. Rocks는 이름이나 ABI를 복제하지 않지만 기능 단위로 대응 경로가 있어야 한다. Blueprint는 제외하며 자체 언어는 상위 계층에서 연결한다.
-- 기존 감사표의 UE-C01~C33을 출발점으로 삼되 미기재 기능을 제외하지 않는다. 공개 헤더/심볼 전체를 기계적으로 추출·분류해 별도 인벤토리를 만들고, 중복·deprecated·플랫폼 전용·상위 모듈과 대응 불필요 사유를 검토한다. 이 명세 자체는 UE5.6 전수 목록이 아니며 최종 누락 없음의 증거가 아니다.
-- 이 환경의 `work/ue5-reference`에 있는 고정 커밋 `cdda65cecacd9a1278020925c357bf4cc0b17e8c`의 제한된 5.6 참조 파일(예: `Array.h`, `BitArray.h`, `GenericPlatformFile.h`, `Paths.h`) 및 기존 감사표의 링크를 참고했다. Epic 원본은 접근 권한·라이선스 확인이 필요하다. 아래 기능 중 원본 확인이 안 된 항목은 **Rocks 목표 또는 검토 후보**이며 해당 기능을 UE5.6에서 확인했다고 주장하지 않는다. 공개 API 웹 페이지가 다른 버전을 표시하면 5.6 근거로 취급하지 않는다.
+- 대조 기준은 **UE 5.8 Core**다(UE 5.8(5.8.4, commit `f45729c0b6f0`) 대조, 2026-11-15 사용자 지시로 5.6에서 바꿨다). 기준 버전의 공개 헤더와 공식 문서를 고정 커밋 단위로 비교한다. Rocks는 이름이나 ABI를 복제하지 않지만 기능 단위로 대응 경로가 있어야 한다. Blueprint는 제외하며 자체 언어는 상위 계층에서 연결한다.
+- 기존 감사표의 UE-C01~C33을 출발점으로 삼되 미기재 기능을 제외하지 않는다. 공개 헤더/심볼 전체를 기계적으로 추출·분류해 별도 인벤토리를 만들고, 중복·deprecated·플랫폼 전용·상위 모듈과 대응 불필요 사유를 검토한다. 이 명세 자체는 UE 5.8 전수 목록이 아니며 최종 누락 없음의 증거가 아니다.
+- 로컬 클론 5.8.4-release(commit `f45729c0b6f097038e72b52d366a62baeca3275b`, `C:\github\UnrealEngine`, 읽기 전용) 원본 및 기존 감사표의 링크를 참고한다. 처음 작성 때는 `work/ue5-reference`에 있던 UE 5.6 commit `cdda65ce`의 제한된 참조 파일(예: `Array.h`, `BitArray.h`, `GenericPlatformFile.h`, `Paths.h`)만 썼다. Epic 원본은 접근 권한·라이선스 확인이 필요하다. 아래 기능 중 원본 확인이 안 된 항목은 **Rocks 목표 또는 검토 후보**이며 해당 기능을 UE 5.8에서 확인했다고 주장하지 않는다. 공개 API 웹 페이지가 다른 버전을 표시하면 5.8 근거로 취급하지 않는다.
 - 책임 범위: `Base`(표현·checked 산술) → `PlatformBase`(OS/compiler/CPU 경계) → `Core`(allocator·컨테이너·유틸·수학) → `Task`/`Localization`/`Serialization`/`MetaSchema`/`ObjectRuntime`. 물리 엔진과 충돌 질의 중 월드·동역학·broadphase는 상위 계층이고 Core는 순수 기하 프리미티브와 명시된 접촉/교차 함수부터 제공한다.
 - 사용자 요구: C++23, 엔진 소유 Runtime과 공개 API의 STL 비사용, 예외·RTTI 없는 경로, 컴파일러 경고를 오류로 처리, 한국어 사용·주의 주석, clang-format 4-space, 직관적인 API, Windows/macOS 개발 환경, 향후 다른 플랫폼 확장. 안정성·정확성 우선, 확장성 다음, 성능은 계측을 근거로 개선한다. 메모리 누수 0은 검증 목표이며 모든 상황에 대한 선험적 보증이 아니다.
 
@@ -64,7 +64,7 @@ Base → PlatformBase → Core → Task / Localization / Serialization / MetaSch
 
 ### 3.4 수학·기본 충돌·SIMD
 
-2026-11-11 기준 `PlatformBase/Public/Platform/Math`(Generic→Clang→SSE2/NEON 상속, 4-lane scalar/SSE2/NEON 레지스터)와 `Core/Public/Core/Math`(벡터·행렬·투영·quaternion·Rotator·Transform·Rect·색·난수·일괄 변환)를 구현했다. 상세 계약·UE 5.6 차이·검증 범위는 [수학 구현](../Implementation/Math.ko.md)을 따른다. 사용자 지시에 따라 UE처럼 CPU별 최적화 함수를 선택하는 자체 구현을 먼저 두고, 공개 구현(UE 5.6 고정 커밋)은 의미 대조에만 쓰며 코드를 복제하지 않는다. 외부 backend 후보 평가는 batch·고급 kernel의 측정 기반 교체 기준으로 유지한다. 아래 표의 상태는 구현 범위이며 macOS·ARM64 실행과 성능은 미검증이다.
+2026-11-11 기준 `PlatformBase/Public/Platform/Math`(Generic→Clang→SSE2/NEON 상속, 4-lane scalar/SSE2/NEON 레지스터)와 `Core/Public/Core/Math`(벡터·행렬·투영·quaternion·Rotator·Transform·Rect·색·난수·일괄 변환)를 구현했다. 상세 계약·UE 5.8 차이·검증 범위는 [수학 구현](../Implementation/Math.ko.md)을 따른다. 사용자 지시에 따라 UE처럼 CPU별 최적화 함수를 선택하는 자체 구현을 먼저 두고, 공개 구현(UE 5.8 고정 커밋 `f45729c0b6f0`)은 의미 대조에만 쓰며 코드를 복제하지 않는다. 외부 backend 후보 평가는 batch·고급 kernel의 측정 기반 교체 기준으로 유지한다. 아래 표의 상태는 구현 범위이며 macOS·ARM64 실행과 성능은 미검증이다.
 
 | ID/우선 | 기능 | 계약·검증 |
 |---|---|---|
@@ -81,7 +81,7 @@ Base → PlatformBase → Core → Task / Localization / Serialization / MetaSch
 
 기존 전체 계획의 오른손 좌표계에서는 +X 전방과 +Z 위에 따라 +Y는 왼쪽이며 `Cross(+X,+Y)=+Z`다. 월드 위치 double과 카메라 상대 float의 변환은 double 원점 차감 후 수행한다. renderer·physics·asset 입출력의 좌표·단위 변환은 명시적으로 검사한다. 표현 타입과 수치 연산은 검증된 상용 공개 backend의 라이선스·버전·지원 플랫폼·STL/예외 의존성을 확인하고 adapter로 연결한다. backend가 지원하지 않는 기능은 다른 후보나 독립 구현을 별도 심사한다.
 
-벡터는 차원·float/double별 저장과 정밀도를 명시한다. `TryNormalize` 등 checked 연산은 영벡터·비유한 입력·길이 제곱 overflow·근접 영값의 실패와 입력 보존을 정하고, fallback은 호출자가 명시한다. tolerance가 길이인지 제곱 길이인지 분명하게 구분한다. UE 5.6 Vector2와 Vector3의 정규화 실패 동작은 서로 다르므로 그대로 혼합하지 않고 Rocks에서 차원 공통 계약을 정해 검증한다. SIMD/scalar 차이와 정확도·근사 경로는 별도로 검사한다.
+벡터는 차원·float/double별 저장과 정밀도를 명시한다. `TryNormalize` 등 checked 연산은 영벡터·비유한 입력·길이 제곱 overflow·근접 영값의 실패와 입력 보존을 정하고, fallback은 호출자가 명시한다. tolerance가 길이인지 제곱 길이인지 분명하게 구분한다. UE 5.8 Vector2와 Vector3의 정규화 실패 동작은 서로 다르므로(`TVector2::Normalize`는 실패 때 0 벡터로 만들고 `TVector::Normalize`는 값을 그대로 둔다 — `Math/Vector2D.h` 1150–1163, `Math/Vector.h` 1765–1775) 그대로 혼합하지 않고 Rocks에서 차원 공통 계약을 정해 검증한다. SIMD/scalar 차이와 정확도·근사 경로는 별도로 검사한다.
 
 기본 shape은 빈 상태와 잘못된 상태, 유한 좌표와 음수 반지름, 정렬되지 않은 min/max를 정의한다. 접촉 포함 여부, ray의 시작점이 내부인 경우, 평행·0 방향·퇴화 삼각형·유효 `t` 구간과 epsilon을 각 쌍별로 명시한다. 정규화되지 않은 ray에서 `t`와 실제 거리를 혼동하지 않는다. bool 접촉 결과와 입력 오류를 구분한다. 서로 바뀐 shape의 대칭성, 고정밀 기준·seeded property·접선·극단 크기·signed zero·NaN/Inf를 테스트한다. 비균일 scale과 회전의 shear, 음수 determinant와 normal 변환은 Transform 단계에서 별도로 다룬다.
 
@@ -152,11 +152,11 @@ Base → PlatformBase → Core → Task / Localization / Serialization / MetaSch
 | 단계 | 선행 조건과 구현 범위 | 종료 게이트 |
 |---|---|---|
 | 0 · 실패 원인/시험 신뢰성 | ASan 스레드 종료 시간 초과의 단계별 증거 수집, 거짓 PASS 차단, setup 실패·timeout·stderr 수거 음성대조. **2026-11-11 사용자 지시로 누락 구현보다 후순위로 보류**(확보 증거는 §7-5) | 재현 방법과 원인/한계를 분리 기록. 정상·음성·반복 및 기존 harness 회귀. 단순 재시도 성공만으로 원인 해결 판정 금지. |
-| 1 · 기준·기반 보호 | UE5.6 공개 헤더/공개 API 인벤토리와 Rocks 담당 모듈 자동 대조, uncommitted 변경 보존, Base·allocator·수명·플랫폼 계약 | 각 심볼/기능의 버전·출처·상태·예외·테스트를 기록. 허위 완료 0, 라이선스 검토, CI 경고 오류·header 단독 컴파일. |
+| 1 · 기준·기반 보호 | UE 5.8 공개 헤더/공개 API 인벤토리와 Rocks 담당 모듈 자동 대조, uncommitted 변경 보존, Base·allocator·수명·플랫폼 계약 | 각 심볼/기능의 버전·출처·상태·예외·테스트를 기록. 허위 완료 0, 라이선스 검토, CI 경고 오류·header 단독 컴파일. |
 | 2 · 범용 자료구조·공용 유틸 | Array/Span/Map/Set/BitArray 미완과 sparse/queue, traits·optional·scope guard, 문자열·Name/Unicode 및 경로. 운영체제 디렉터리·stat과 함께 사용 시나리오 우선 | API 사용 예, alias/move-only/OOM/property/negative harness, 플랫폼 접근 가능 범위 기록. 상호 의존 재진입·allocator/LIFO 실패 검증. |
 | 3 · 수학·기본 충돌 | 좌표/정밀도/타입 계약 → CPU별 PlatformMath·4-lane 레지스터 → scalar·vector·matrix·투영·quaternion·Rotator·transform·색·난수 → 기본 shape 및 교차 → batch/추가 ISA. 외부 backend는 측정 기반 교체 후보로 유지. **진행 중**(구현 범위는 [수학 구현](../Implementation/Math.ko.md)) | double/golden oracle, 경계/NaN/degenerate/property, 실제 x64/ARM64와 scalar/SIMD 대조. 각 shape pair 지원 여부와 실패 계약을 열거. 전체 물리 엔진 완료로 표기하지 않는다. |
 | 4 · 플랫폼·동시성·진단 | 파일: ① 디렉터리·stat·`ReadAt`/`WriteAt`·flush·truncate(동기 positional I/O) → ② **비동기 파일 I/O**: 결정적 fake backend로 공통 계약(제출·완료 1회·취소 경합·버퍼/핸들 수명·종료) 고정 → Windows overlapped+IOCP backend → macOS worker 기반 positional I/O와 dispatch I/O 평가 → ③ wrapper chain·mapping·watch. 이후 thread 옵션·atomic·task 연동, structured logging·tracing·config | Windows/macOS 각 실제 OS·권한·IO 오류·동시성·shutdown. ASan/가능한 race detector와 장시간 stress. 미지원 capability의 음성 테스트. |
-| 5 · 완성·확장 | 수학 고급 shape, native smart pointer, shared cache·프로파일러, compression·통계·외부 allocator, 직렬화/GC/상위 Engine 연결 | 지표·예산·API 안정성·라이선스·플랫폼별 실행 증거를 만족한 항목만 완료로 변경. UE5.6 Core 차이·미지원 목록과 이유 유지. |
+| 5 · 완성·확장 | 수학 고급 shape, native smart pointer, shared cache·프로파일러, compression·통계·외부 allocator, 직렬화/GC/상위 Engine 연결 | 지표·예산·API 안정성·라이선스·플랫폼별 실행 증거를 만족한 항목만 완료로 변경. UE 5.8 Core 차이·미지원 목록과 이유 유지. |
 
 단계 간 가능한 병렬 작업은 허용하되 기반 수명·오류 계약과 기준 구현을 우회하지 않는다. 사용자가 Core 안정화 전 상위 기능 진행을 요청하지 않았으므로 Renderer·Editor·Gameplay는 이 명세의 구현 대상이 아니다.
 
@@ -173,7 +173,7 @@ Base → PlatformBase → Core → Task / Localization / Serialization / MetaSch
 
 1. 수학: 자체 구현과 CPU별 PlatformMath(SSE2/NEON)를 채택했고 float/double 저장은 padding 없는 성분 순서, 행렬은 열 우선, quaternion은 (x,y,z,w)로 결정했다(2026-11-11). 컴파일러의 FMA 축약은 모든 native 대상에서 금지(`-ffp-contract=off`)하기로 결정했다(2026-11-11, 근거: 축약이 ARM64에서만 일어나 같은 소스의 행렬 역행렬 성공 여부까지 달라지는 것을 리뷰가 재현). 외부 backend 교체 여부, AVX2/FMA 등 선택 ISA의 runtime dispatch(명시적 FMA kernel 포함), 플랫폼 간 부동소수점 결정성 범위(libm 초월 함수 차이 포함)는 아직 결정하지 않았다.
 2. 기존 [전체 구현 계획](EngineImplementationPlan.ko.md)의 기본 좌표 규약은 오른손·+Z 위·+X 전방·미터·라디안·초, column vector와 `world=parent×local`, reversed-Z 깊이 [0,1], 월드 위치 double/렌더 상대 float다. UE의 좌표·단위와는 가져오기/내보내기 경계에서 변환한다. matrix 메모리 배치(열 우선)·quaternion 순서((x,y,z,w))·Rocks view 공간(카메라 +X 전방)과 NDC 규약은 결정했다. 기본 collision 접촉 기준(닫힌 집합)과 함수별 epsilon은 도형 구현 문서에 함수별로 기록한다.
-3. UE5.6 공개 Core 전체 원본/심볼을 아직 기계적으로 대조하지 않았다. 공개되지 않은 내부 기능과 상위 모듈을 Core와 혼동하지 않으며, 5.8 참고 사례는 5.6 증거로 취급하지 않는다.
+3. UE 5.8 공개 Core 전체 원본/심볼을 아직 기계적으로 대조하지 않았다. 공개되지 않은 내부 기능과 상위 모듈을 Core와 혼동하지 않으며, 다른 버전(5.6 등)의 사례는 5.8 증거로 취급하지 않는다.
 4. 실제 macOS x64/ARM64, 다른 OS/콘솔, 실제 외부 allocator 제품 배포 및 성능 동등성은 실행 증거가 없다. 계측 가능한 목표와 대상 하드웨어를 별도로 정한다.
 5. ASan thread-unjoined timeout은 최초 실행에서 관찰됐으나 기록된 timeout만으로 정확한 교착 원인은 확정되지 않았다. 2026-11-11 현재 소스(준비 마커 포함)의 ASan 빌드를 2초 정지 감지 하네스로 반복하자 22회 중 3회 정지했고, 두 사례는 65초 이상 지속된 **영구 정지**였다. 유일하게 남은 메인 스레드의 스택은 `Fatal → abort → ExitProcess → LdrShutdownProcess → ASan 런타임 DLL_PROCESS_DETACH의 onexit 표 해제 → ASan 할당기 → WaitOnAddress`였다. 테스트의 `_set_abort_behavior`가 `_CALL_REPORTFAULT`를 끄므로 abort가 `__fastfail` 대신 `_exit(3)`→`ExitProcess`로 진행하고, `ExitProcess`가 종료 중이던 worker를 강제 종료한 뒤 DLL 분리 코드가 고아가 된 ASan 내부 잠금을 기다린다는 해석이 증거와 일치한다(Microsoft ExitProcess 문서의 교착 경고와 같은 형태). 정확한 ASan 잠금 이름은 런타임 PDB가 없어 미확정이며, 원래 20초 실패가 같은 원인인지도 당시 증거가 없어 확정하지 않는다. 종료 코드가 이미 설정된 이 상태의 프로세스는 외부 TerminateProcess로 제거되지 않아 `ProcessRunner`의 timeout 정리도 끝나지 않는다. 제안 수정(Windows `Fatal`이 진단 출력 후 `TerminateProcess`로 종료, EXE TLS callback 기반 결정적 회귀, ProcessRunner의 부분 출력·종료 상태 보존)은 사용자 지시로 보류했고 아직 적용하지 않았다.
 6. 객체 Outer와 에셋 rename(2026-11-11 결정, 미구현): Outer는 객체 경로·패키지 소속만 뜻하고 소유·수명은 명시적 edge로 표현한다(inner → outer는 강한 edge, 반대는 아님, 임시 객체는 null, 같은 outer 안 이름 유일, Rename은 Game lane 검증 후). 에셋 참조는 AssetId로 저장하므로 UE식 redirector 패키지를 두지 않고, 텍스트 경로는 AssetRegistry의 옛 경로 별칭으로, 타입·필드 rename은 고정 ID·alias·tombstone으로 처리한다. 상세는 [전체 구현 계획](EngineImplementationPlan.ko.md) §5.2와 §9.1. 에셋·패키지 계층을 구현할 때 적용하며 그 전에는 Core 완료 판정에 포함하지 않는다.

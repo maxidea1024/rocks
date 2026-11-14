@@ -8,7 +8,7 @@
 
 namespace rocks {
 
-// 원소를 지워도 다른 원소의 index가 바뀌지 않는 배열이다(UE5.6 TSparseArray 대응). 지운 자리는
+// 원소를 지워도 다른 원소의 index가 바뀌지 않는 배열이다(UE5.8 TSparseArray 대응). 지운 자리는
 // free list에 들어가 다음 추가에 재사용되며, 사용 여부는 BitArray로 표시한다.
 // - index는 Compact·CompactStable 전까지 안정적이다. 원소 주소는 용량 확장(Add·Emplace·Reserve·
 //   Shrink)에서 바뀔 수 있다.

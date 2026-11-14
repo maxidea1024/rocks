@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 
 namespace Rocks.Build.Descriptors;
 
-// 프로젝트·플러그인 기술자(.rocksproject·.rocksplugin)다. UE5.6의 .uproject·.uplugin과 같은 역할을 하며
+// 프로젝트·플러그인 기술자(.rocksproject·.rocksplugin)다. UE5.8의 .uproject·.uplugin과 같은 역할을 하며
 // 필드 이름은 Rocks 규칙(camelCase)을 쓴다. 기술자는 UTF-8 JSON이며 다음을 엄격하게 검사한다.
 // - 모르는 필드, 잘못된 타입, 중복 이름, 지원하지 않는 fileVersion은 오류다(조용히 무시하지 않는다).
 // - 주석과 끝 쉼표는 받지 않는다. 1 MiB를 넘는 파일은 받지 않는다.

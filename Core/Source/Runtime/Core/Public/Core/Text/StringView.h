@@ -93,7 +93,7 @@ public:
     // 비교하며 Unicode 정규화·case folding은 하지 않는다. 이 view/needle의 UTF-8은
     // 자동 검증하지 않으므로 임의 byte도 검색할 수 있고 반환 위치는 byte offset이다.
     // startByte가 NotFound이거나 생략된 경우 앞에서는 0, 뒤에서는 ByteCount()다.
-    // UE5.6과 같이 명시적 앞 검색 시작은 비어 있지 않으면 마지막 byte까지 제한하고,
+    // UE5.8과 같이 명시적 앞 검색 시작은 비어 있지 않으면 마지막 byte까지 제한하고,
     // 뒤 검색은 ByteCount()까지 제한한 배타적 끝으로 사용한다. 빈 needle의 앞 검색은
     // 제한된 시작 위치, 뒤 검색은 직전 byte 위치이며 시작이 0이면 NotFound다.
     // 위치 단위는 UE의 TCHAR code unit이 아닌 UTF-8 byte다.

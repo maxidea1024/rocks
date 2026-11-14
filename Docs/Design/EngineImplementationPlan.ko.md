@@ -14,7 +14,7 @@ STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-d
 
 **1.5 공간 인덱스:** World의 런타임 공간 인덱스를 Unreal의 분담 방식으로 정의한다. 렌더 판정은 평면 SoA와 SceneCulling 유사 계층 공간 해시, 충돌 질의는 물리 scene query, 비충돌 게임플레이 질의는 2D 계층 공간 해시로 구분한다. 10.4절에 규약과 수용 시험 SI01–SI10을, 33.10절에 교차 검증 결과와 개정 범위를 기록한다.
 
-**1.6 물리 middleware:** Jolt 기본안을 PhysX 5로 전환한다. 모든 대상 플랫폼에서 O3DE 관리 fork의 플랫폼 patch를 기반으로 동일 commit의 PhysX 5를 source 빌드하며, UE 5.6 Chaos는 통합 구조의 참고로만 사용한다. 16.4·16.5절에 버전·빌드·결정성 범위·큰 월드 규약과 수용 시험 PC01–PC08을, 33.11절에 교차 검증 결과와 개정 범위를 기록한다.
+**1.6 물리 middleware:** Jolt 기본안을 PhysX 5로 전환한다. 모든 대상 플랫폼에서 O3DE 관리 fork의 플랫폼 patch를 기반으로 동일 commit의 PhysX 5를 source 빌드하며, UE 5.8 Chaos는 통합 구조의 참고로만 사용한다. 16.4·16.5절에 버전·빌드·결정성 범위·큰 월드 규약과 수용 시험 PC01–PC08을, 33.11절에 교차 검증 결과와 개정 범위를 기록한다.
 
 **1.7 게임플레이 언어 Sparks:** 자체 게임플레이 언어의 이름을 Sparks(소스 `.spark`, 모듈 `.sparkc`)로 정하고, 프로그래머가 아닌 사용자를 위한 방어적·단순한 설계, Unity 체계의 수명 hook, 메모리·리소스 누수 0, 비동기 로딩, 런타임 eval·AOT를 반영한다. 23절을 엔진 계약 중심으로 개정하고 전체 설계는 [Sparks 언어 설계](SparksLanguage.ko.md)에 둔다. 스크립트 단계의 파괴 지연(5.2절), 수명 hook 이름(20.2절), 로딩 계약 연결(9.2절), 누수 Gate NL09(29.6절)를 함께 개정한다. 교차 검증 결과와 개정 범위는 33.12절에 기록한다.
 
@@ -272,7 +272,7 @@ Core는 엔진이 아니라 엔진·도구·게임이 함께 쓰는 기반 라�
 
 **Rocks의 수학은 검증된 라이브러리를 채택하고, 공개 API와 데이터 규약을 자체 코드 스타일로 제공한다.** 벡터·행렬·쿼터니언 연산, 역행렬, 분해, 보간, 초월함수와 SIMD 근사 알고리즘을 처음부터 작성하지 않는다. 저장형 wrapper, 좌표·행렬 규약 변환, 오류 정책, 선택 라이브러리 호출 adapter와 batch 실행 구성은 자체 구현 범위다. 기능이 부족하면 검증된 추가 라이브러리를 평가하며 임시 자체 수학 구현으로 보충하지 않는다.
 
-> **2026-11-11 개정 메모:** 사용자 지시에 따라 Core 수학 기반을 외부 라이브러리 선정 전에 자체 구현으로 먼저 제공한다. 구조는 UE의 `GenericPlatformMath` → CPU별(SSE2·NEON) 구현 → 벡터 레지스터 계층을 따라 플랫폼별로 최적화된 함수를 선택하고, 같은 연산 순서의 scalar 기준 구현을 항상 함께 두어 차등 검증한다. 공개 구현(UE 5.6 고정 커밋 등)은 의미 대조에만 사용하고 코드를 복제하지 않으며, 행렬 역·분해·교차 판정은 Laplace 전개·Shepperd 방식·slab 검사처럼 교과서적 알고리즘으로 작성한다. 아래 외부 backend 후보 평가와 batch kernel 채택 기준(MX01–MX08)은 유지하며, 측정 결과로 특정 연산을 외부 구현으로 교체할 수 있다. 실제 구현 범위와 검증 상태는 [수학 구현](../Implementation/Math.ko.md)에 기록한다.
+> **2026-11-11 개정 메모:** 사용자 지시에 따라 Core 수학 기반을 외부 라이브러리 선정 전에 자체 구현으로 먼저 제공한다. 구조는 UE의 `GenericPlatformMath` → CPU별(SSE2·NEON) 구현 → 벡터 레지스터 계층을 따라 플랫폼별로 최적화된 함수를 선택하고, 같은 연산 순서의 scalar 기준 구현을 항상 함께 두어 차등 검증한다. 공개 구현(UE 5.8 고정 커밋 — 5.8.4, `f45729c0b6f0` 등)은 의미 대조에만 사용하고 코드를 복제하지 않으며, 행렬 역·분해·교차 판정은 Laplace 전개·Shepperd 방식·slab 검사처럼 교과서적 알고리즘으로 작성한다. 아래 외부 backend 후보 평가와 batch kernel 채택 기준(MX01–MX08)은 유지하며, 측정 결과로 특정 연산을 외부 구현으로 교체할 수 있다. 실제 구현 범위와 검증 상태는 [수학 구현](../Implementation/Math.ko.md)에 기록한다.
 
 라이브러리의 품질·성능 평가와 공개 API의 명명·코드 스타일은 별도 기준으로 관리한다. 공개 API는 `rocks::Vec3`, `rocks::Quat`, `rocks::Mat4`, `rocks::WorldPosition`처럼 의미가 명확한 이름을 사용한다. `XMVECTOR`·`XMVector…`와 vendor 호출 규약을 게임 코드에 노출하지 않는다. RTM도 C 스타일 API를 사용하므로 원형을 그대로 공개하지 않는다. 코드 가독성·일관성·디버깅·유지보수 비용을 성능과 함께 선정 기준에 포함한다.
 
@@ -477,7 +477,7 @@ NewObject가 반환하는 RootRef는 첫 소유자의 추적 가능한 필드에
 - inner → outer는 GC가 추적하는 강한 edge다. inner가 살아 있으면 outer도 살아 있지만, outer가 inner를 암묵적으로 살리지는 않는다. inner를 유지하려면 소유자가 명시적 `ObjectRef`/`GcArray` edge나 패키지 export table로 붙잡는다. 단 패키지 정책 Registry(에셋 객체 Registry)에서는 outer가 자손을 붙잡는다 — Registry의 자식 고리가 export table이라 저장 집합이 GC 시점과 무관하다.
 - 같은 Outer 안에서 이름은 유일하다. Outer 변경(Rename/이동)은 Game lane에서 순환(자기 자신·자손을 outer로 지정), 패키지 간 이동, 이름 충돌을 검증한 뒤에만 허용하며 실패하면 아무것도 바꾸지 않는다. A0-O는 Outer·이름을 생성 때 정하고 바꾸지 않는다(Rename·이동은 범위 밖 — ObjectFoundations 결정 2).
 - 게임플레이 소유(Entity → Component 등)는 Outer가 아니라 명시적 `ObjectRef` edge로 표현한다. default subobject의 안정 식별은 SubobjectGuid가 맡는다(§5.3).
-- 근거: UE의 Outer는 경로·패키지 소속·GC 효과를 한 필드에 섞어 "outer가 inner를 소유한다"는 오해와 rename 시 경로 변경 버그를 낳는다. 5.6 소스에서 GC가 Outer를 참조로 방문함을 확인했다(`FastReferenceCollector.h` 995행 — ObjectFoundations 10절). UE 패키지는 export를 붙잡지 않는다(에디터는 GC된 export가 있는 패키지를 다시 로드한다) — Rocks의 패키지 정책은 이 점에서 UE와 다르다.
+- 근거: UE의 Outer는 경로·패키지 소속·GC 효과를 한 필드에 섞어 "outer가 inner를 소유한다"는 오해와 rename 시 경로 변경 버그를 낳는다. UE 5.8(5.8.4, commit `f45729c0b6f0`) 소스에서 GC가 Outer를 참조로 방문함을 확인했다(`CoreUObject/Public/UObject/FastReferenceCollector.h` 1019행 — ObjectFoundations 10절). UE 패키지는 export를 붙잡지 않는다(에디터는 GC된 export가 있는 패키지를 다시 로드한다 — `s.ReloadPackagesWithGCedExports`, `AsyncLoading2.cpp` 597·1757행) — Rocks의 패키지 정책은 이 점에서 UE와 다르다.
 
 RequestDestroy는 논리적 사용 종료이며 즉시 delete가 아니다. owner Game lane에서 DestroyRequested 전이와 신규 사용·일반 task/activation admission 차단을 먼저 선형화한다. 그 뒤 기존 소유자의 짧은 teardown 전용 권한으로 Deactivate/EndPlay 순서의 필요한 종료 hook을 수행한다. 일반 Resolve/TryPin은 계속 실패하며 hook은 no-yield/no-safepoint이며 재진입 RequestDestroy는 idempotent다. 다른 lane의 요청은 Game lane commit 전까지 취소 요청 상태이며 즉시 파괴 완료로 보고하지 않는다.
 
@@ -743,7 +743,7 @@ AssetId는 위치와 독립된 128-bit GUID로 부여한다. source asset, impor
 
 **rename·move와 redirect(2026-11-11 결정, 미구현).** 에셋 참조를 경로가 아닌 AssetId로 저장하므로 UE의 ObjectRedirector 같은 에셋별 redirector 패키지를 두지 않는다.
 
-- 배경(UE 일반 동작, 5.6 소스 미대조): UE는 패키지 안 참조를 경로 문자열로 저장하므로 rename·move 때 옛 경로에 redirector 패키지를 남기고 나중에 "Fix Up Redirectors"로 참조자를 다시 저장한다. 이 방식은 redirector 파일 누적, fixup 시 참조 에셋이 한꺼번에 바뀌어 생기는 소스 관리 충돌, fixup 전 redirector 삭제로 인한 참조 깨짐, 폴더 rename 때의 대량 생성 문제를 낳는다.
+- 배경(UE 동작): UE는 패키지 안 참조를 경로 문자열로 저장하므로 rename·move 때 옛 경로에 redirector 패키지를 남기고 나중에 "Fix Up Redirectors"로 참조자를 다시 저장한다. 생성·정리 경로는 UE 5.8(5.8.4) 소스로 확인했다 — 에셋 rename은 `ObjectTools::RenameSingleObject(…, bLeaveRedirector)`가 `REN_DontCreateRedirectors` 없이 `Rename`해 `UObjectRedirector`를 남기고(Editor/UnrealEd/Private/ObjectTools.cpp 4635행, CoreUObject/Private/UObject/Obj.cpp 455행), 정리는 `IAssetTools::FixupReferencers`(Developer/AssetTools/Private/AssetFixUpRedirectors.h)다. 콘텐츠 브라우저 메뉴 표시 이름은 "Update Redirector References"다(명령 키는 `FixUpRedirectorsInFolder`, 5.6도 같다). 아래 문제점은 운영 경험에 따른 일반 서술이며 소스로 확인할 대상이 아니다. 이 방식은 redirector 파일 누적, fixup 시 참조 에셋이 한꺼번에 바뀌어 생기는 소스 관리 충돌, fixup 전 redirector 삭제로 인한 참조 깨짐, 폴더 rename 때의 대량 생성 문제를 낳는다.
 - Rocks: AssetId(128-bit GUID)를 각 에셋 파일 헤더에 저장하고 AssetIndex는 ID → 현재 경로 색인이며 콘텐츠를 다시 검색하면 복원되는 캐시다(별칭 표는 아래처럼 별도 사용자 데이터라 복원 대상이 아니다). rename·move는 해당 에셋 파일·인덱스·별칭 표만 바꾸며 참조하는 에셋은 다시 저장하지 않는다.
 - 사람이 쓴 텍스트 경로(config, 스크립트 문자열, 명령행)는 `Config/AssetAliases.json`의 "옛 경로 → AssetId" 별칭 표(버전 관리하는 사용자 데이터)로 해석한다. 별칭으로 해석될 때마다 경고하고, 텍스트 참조를 일괄 수정한 뒤 별칭을 지우는 명령을 제공한다. 별칭은 콘텐츠 트리의 파일이 아니다.
 - 타입·클래스·필드 이름 변경(UE CoreRedirects에 해당)은 경로가 아니라 TypeGuid·FieldId 고정 ID, rename alias와 삭제 필드 tombstone으로 처리한다(§7.1·§7.2).
@@ -1427,7 +1427,7 @@ M6의 basic rig·morph/facial editor → M7의 retarget·full-body IK·동작 �
 
 ### 16.1 통합 구조
 
-물리 middleware는 모든 대상 플랫폼에서 단일 버전의 PhysX 5를 사용하고 자체 PhysicsWorld·CharacterMovement와 통합한다. [S87](https://github.com/NVIDIA-Omniverse/PhysX) PhysX는 게임 객체와 별도 native 수명으로 관리하며 vendor 타입을 adapter 밖으로 노출하지 않는다. UE 5.6 Chaos의 통합 구조(game·physics 데이터 전달, 질의 전용 acceleration structure, 서버 권한 보정)는 참고로만 사용하고 Chaos 고유 기능은 재현 대상에 포함하지 않는다. 버전·플랫폼·빌드·결정성 범위는 16.4절, 큰 월드는 16.5절에 둔다.
+물리 middleware는 모든 대상 플랫폼에서 단일 버전의 PhysX 5를 사용하고 자체 PhysicsWorld·CharacterMovement와 통합한다. [S87](https://github.com/NVIDIA-Omniverse/PhysX) PhysX는 게임 객체와 별도 native 수명으로 관리하며 vendor 타입을 adapter 밖으로 노출하지 않는다. UE 5.8 Chaos의 통합 구조(game·physics 데이터 전달, 질의 전용 acceleration structure, 서버 권한 보정)는 참고로만 사용하고 Chaos 고유 기능은 재현 대상에 포함하지 않는다. 버전·플랫폼·빌드·결정성 범위는 16.4절, 큰 월드는 16.5절에 둔다.
 
 Collision은 raycast·sweep·overlap·trigger·filter, Dynamics는 rigid body·constraint·sleep·CCD를 담당한다. query-only collider를 지원한다. Sphere·Capsule·Box·Convex·Compound·TriangleMesh·Heightfield를 우선하며 dynamic body는 convex/compound를 기본으로 한다. 고밀도 virtual geometry와 collision mesh·nav geometry는 별도 cook 산출물이다.
 
@@ -1470,7 +1470,7 @@ CharacterMovement는 경사·계단·ground snap·jump·moving platform·crouch�
 
 ### 16.3 Query·필터·물리 재질
 
-QueryReadScope는 해당 physics world가 step·구조 변경을 수행하지 않는 읽기 phase의 gate다. 외부 worker는 gate 안에서만 live broadphase를 조회하고 scope를 저장·yield하지 않는다. step과 겹쳐야 하는 async query는 step 경계에 batch 실행하여 값 결과를 전달한다. PhysX에서 QueryReadScope는 `fetchResults`와 `flushQueryUpdates` 이후 열리고 다음 command 적용·`simulate`·`shiftOrigin` 전에 닫힌다. 쓰기는 Physics lane의 command 단계에서만 수행하며 debug build는 `eREQUIRE_RW_LOCK`으로 위반을 검출한다. UE 5.6 Chaos는 game thread 질의를 위한 별도 acceleration structure를 frame 끝에 physics 결과로 갱신한다. [S92](https://github.com/EpicGames/UnrealEngine/tree/5.6.1-release) immutable QuerySnapshot이라는 이름만으로 vendor broadphase가 복제되어 있다고 가정하지 않는다. 독립 snapshot broadphase는 필요 시 별도 메모리·정합 비용을 검증한다.
+QueryReadScope는 해당 physics world가 step·구조 변경을 수행하지 않는 읽기 phase의 gate다. 외부 worker는 gate 안에서만 live broadphase를 조회하고 scope를 저장·yield하지 않는다. step과 겹쳐야 하는 async query는 step 경계에 batch 실행하여 값 결과를 전달한다. PhysX에서 QueryReadScope는 `fetchResults`와 `flushQueryUpdates` 이후 열리고 다음 command 적용·`simulate`·`shiftOrigin` 전에 닫힌다. 쓰기는 Physics lane의 command 단계에서만 수행하며 debug build는 `eREQUIRE_RW_LOCK`으로 위반을 검출한다. UE 5.8 Chaos는 game thread 질의를 위한 별도 acceleration structure를 frame 끝에 physics 결과로 갱신한다(`FChaosScene::EndFrame`이 `CopySolverAccelerationStructure`로 solver 구조를 통째 복사 — PhysicsCore/Private/ChaosScene.cpp 559행). [S92](https://github.com/EpicGames/UnrealEngine/tree/5.8.4-release) immutable QuerySnapshot이라는 이름만으로 vendor broadphase가 복제되어 있다고 가정하지 않는다. 독립 snapshot broadphase는 필요 시 별도 메모리·정합 비용을 검증한다.
 
 collision channel·object type·query filter·trigger·ignore pair·physical material/surface·friction combine·complex/simple collision을 data schema로 제공한다. body mass/inertia·COM·constraint editor·physics asset·debug recorder를 포함한다. fracture·vehicle·cloth·rope·buoyancy는 지원표와 sample을 갖고 rigid-body 지원으로 완료 처리하지 않는다. PhysX 5의 cloth·deformable·particle은 CUDA 전용이므로 선택 capability로 두고, vehicle은 PhysX 5 vehicle SDK(CPU)를 gameplay 계층 뒤에 둔다. fracture 구현 방식은 별도 모듈 단계에서 결정한다.
 
@@ -1484,7 +1484,7 @@ collision channel·object type·query filter·trigger·ignore pair·physical mat
 
 **cook.** 같은 SDK 버전에서는 endianness가 같아 하나의 cook 결과를 모든 플랫폼에서 사용한다. 너겟 key에 PhysX version·commit·cook parameter·adapter cook schema를 포함하고, blob header 불일치는 load 시 거부한다. 플랫폼 tag와 version GUID의 완전 일치를 요구하는 `PxSerialization` binary는 asset에 사용하지 않고 cooked mesh stream을 사용한다. runtime cooking은 editor·개발 build에 한정한다. navigation은 PhysX blob이 아니라 중립 collision source에서 생성한다.
 
-**결과 차이의 범위.** NVIDIA는 같은 release·같은 platform에서만 결과 반복을 보장한다. [S90](https://nvidia-omniverse.github.io/PhysX/physx/5.6.1/docs/RigidBodyDynamics.html) PhysX의 NEON 경로는 나눗셈·제곱근을 추정 명령과 Newton 반복으로 계산하므로, 같은 버전·같은 설정에서도 x64와 ARM64의 결과는 bit 단위로 일치하지 않는다. 결정성 범위는 동일 binary·동일 platform·동일 command 순서로 한정하며 로컬 replay와 회귀 시험에 사용한다. 플랫폼 간 결과 정합은 서버 권한과 field별 보정(17.2절)으로 확보한다. UE 5.6 Chaos도 플랫폼 간 결정성을 명시하지 않으며, 오차가 임계값을 넘을 때 보정하고 표시 상태를 보간한다. [S91](https://dev.epicgames.com/documentation/en-us/unreal-engine/networked-physics-overview?application_version=5.6)
+**결과 차이의 범위.** NVIDIA는 같은 release·같은 platform에서만 결과 반복을 보장한다. [S90](https://nvidia-omniverse.github.io/PhysX/physx/5.6.1/docs/RigidBodyDynamics.html) PhysX의 NEON 경로는 나눗셈·제곱근을 추정 명령과 Newton 반복으로 계산하므로, 같은 버전·같은 설정에서도 x64와 ARM64의 결과는 bit 단위로 일치하지 않는다. 결정성 범위는 동일 binary·동일 platform·동일 command 순서로 한정하며 로컬 replay와 회귀 시험에 사용한다. 플랫폼 간 결과 정합은 서버 권한과 field별 보정(17.2절)으로 확보한다. UE 5.8 Chaos도 플랫폼 간 결정성을 명시하지 않으며, 오차가 임계값을 넘을 때 보정하고 표시 상태를 보간한다(5.8 소스: `UPhysicsSettings`의 `ResimulationErrorPositionThreshold` — Engine/Classes/PhysicsEngine/PhysicsSettings.h 100행, 표시 보간 `p.RenderInterp.*` — Chaos/Private/Framework/PhysicsProxyBase.cpp 9·12행). [S91](https://dev.epicgames.com/documentation/en-us/unreal-engine/networked-physics-overview?application_version=5.8)
 
 **차이 축소 검토(PXD).** Rocks fork에서 NEON 추정 경로를 정확 연산으로 대체한 build와 원본 build의 플랫폼 간 상태 hash를 비교하여 차이 축소 효과와 성능 비용을 측정한다. 측정 전에는 플랫폼 간 결정성으로 표기하지 않는다.
 
@@ -1507,7 +1507,7 @@ M4 물리 착수 전 gate(PXG)는 PC01·PC02·PC05·PC06 통과와 manifest·lic
 
 ### 16.5 큰 월드와 PhysicsRegion
 
-PhysX simulation은 float 전용이다. UE 5.6 Chaos는 `FReal`을 double로 정의하고 constraint solver는 float로 계산한다. [S92](https://github.com/EpicGames/UnrealEngine/tree/5.6.1-release) Rocks는 double 월드 좌표(2.2절)를 PhysicsRegion 지역 원점으로 변환한다.
+PhysX simulation은 float 전용이다. UE 5.8 Chaos는 `FReal`을 double로 정의하고(ChaosCore/Public/Chaos/Real.h 22행) constraint solver는 float로 계산한다(`CHAOS_CONSTRAINTSOLVER_LOWPRECISION 1`이면 `FSolverReal = FRealSingle` — Chaos/Public/Chaos/Evolution/SolverBody.h 15·38행). [S92](https://github.com/EpicGames/UnrealEngine/tree/5.8.4-release) Rocks는 double 월드 좌표(2.2절)를 PhysicsRegion 지역 원점으로 변환한다.
 
 - region은 고정 grid이며 한 변 R은 World Partition cell 한 변의 2의 거듭제곱 배다(제안 8,192 m).
 - client는 단일 scene을 사용하고 region 원점으로만 `shiftOrigin`을 수행한다. 전환은 hysteresis를 두고 tick 경계에서 수행하며, 전환마다 physicsOriginEpoch를 증가시켜 world epoch(10.2절)에 포함한다. 이전 epoch의 질의·event·command는 거부한다.
@@ -2825,13 +2825,13 @@ Godot 코드는 이식하지 않고 구조와 동작 계약을 재구현하며, 
 
 물리 middleware를 모든 플랫폼 단일 버전의 PhysX 5로 정한다. 검토 초기에는 플랫폼별 허용 최신 버전(Windows·Linux는 PhysX 5, macOS·iOS·Android는 PhysX 4.1)을 전제로 하였다. 사실 확인에서 O3DE 관리 fork가 macOS(x64·ARM64)·iOS·Android에 PhysX 5를 제공하고(5.6.1 병합, 5.12 port 진행), O3DE가 2026-05에 PhysX 4를 제거하였음을 확인하였다. 4.1과 5는 cook 형식(5.x는 4.1 convex를 거부)·API·마찰 기본값·질의 동작이 달라 혼용 시 플랫폼 간 결과 차이가 확대되므로 단일 버전으로 결정하였다.
 
-서브에이전트 2개가 공개 자료 사실 확인(1차 출처·2차 출처·미확인 구분)과 스펙 영향 반례 검토를 수행하였다. Unreal 비교 기준은 UE 5.6이며 Chaos 고유 기능은 참고로만 사용한다.
+서브에이전트 2개가 공개 자료 사실 확인(1차 출처·2차 출처·미확인 구분)과 스펙 영향 반례 검토를 수행하였다. 당시 Unreal 비교 기준은 UE 5.6이었고, 아래 표의 UE 사실은 2026-11-15에 UE 5.8(5.8.4, commit `f45729c0b6f0`)로 다시 확인하였다. Chaos 고유 기능은 참고로만 사용한다.
 
 | 지적 | 조치 |
 |---|---|
 | 4.1·5 혼용의 cook·API·동작 차이 | 단일 버전·단일 cook(16.4절) |
 | 같은 버전에서도 x64·ARM64 결과의 bit 불일치(NEON 추정 명령, upstream Windows `/fp:fast` 기본값) | 빌드 설정 통일, 결정성 범위 한정, 서버 권한 보정(17.2절), PXD 측정 |
-| float 전용 simulation(UE 5.6 Chaos는 `FReal` double) | PhysicsRegion·origin epoch·서버 다중 scene(16.5절) |
+| float 전용 simulation(UE 5.8 Chaos는 `FReal` double) | PhysicsRegion·origin epoch·서버 다중 scene(16.5절) |
 | `PxCpuDispatcher`의 제출 실패 표현 불가·task 취소 불가 | 예약 node pool·포화 시 즉시 실행·종료 시 완료 대기 |
 | `PxController` 상태 되감기 불가 | 자체 CharacterMovement |
 | `PxSerialization` binary의 플랫폼 tag 일치 요구 | cooked mesh stream 사용 |
@@ -2982,8 +2982,8 @@ Verse 조사에서 Epic의 "The road to UE6"(2026-06-17)는 게임플레이 프�
 | S88 | [NVIDIA · PhysX discussion #58](https://github.com/NVIDIA-Omniverse/PhysX/discussions/58) | 플랫폼 build 설정 PR 미수용 |
 | S89 | [O3DE · PhysX fork](https://github.com/o3de/PhysX) | macOS·iOS·Android용 PhysX 5 patch |
 | S90 | [NVIDIA · PhysX 5.6.1 Rigid Body Dynamics](https://nvidia-omniverse.github.io/PhysX/physx/5.6.1/docs/RigidBodyDynamics.html) | 결정성 보장 범위 |
-| S91 | [Epic · Networked Physics Overview (5.6)](https://dev.epicgames.com/documentation/en-us/unreal-engine/networked-physics-overview?application_version=5.6) | 서버 권한 보정·재시뮬레이션 참고 |
-| S92 | [Epic · UE 5.6.1-release 소스](https://github.com/EpicGames/UnrealEngine/tree/5.6.1-release) | Chaos `FReal`·질의 acceleration structure 참고. Epic 계정 연결 필요 |
+| S91 | [Epic · Networked Physics Overview (5.8)](https://dev.epicgames.com/documentation/en-us/unreal-engine/networked-physics-overview?application_version=5.8) | 서버 권한 보정·재시뮬레이션 참고(2026-11-15 5.8 문서 확인: 차이가 충분히 크면 재시뮬레이션, 표시 상태 보간, 플랫폼 간 결정성 언급 없음) |
+| S92 | [Epic · UE 5.8.4-release 소스](https://github.com/EpicGames/UnrealEngine/tree/5.8.4-release) | Chaos `FReal`·`FSolverReal`·질의 acceleration structure 참고(commit `f45729c0b6f0`). Epic 계정 연결 필요 |
 | S93 | [Go · FAQ](https://go.dev/doc/faq) | 경고 없는 오류·암묵 변환 금지·한 가지 방법의 설계 근거 |
 | S94 | [The Book of Verse](https://verselang.github.io/book/) | failure context·구조적 동시성·persistable 호환성 검사 |
 | S95 | [Epic · The road to UE6 (2026-06-17)](https://www.unrealengine.com/news/the-road-to-ue-6) | Verse 전환·Blueprint deprecate 계획. 원문 접근 거부로 재게재 인용 확인 |

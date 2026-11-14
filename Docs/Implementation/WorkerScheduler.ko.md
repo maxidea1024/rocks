@@ -12,7 +12,7 @@
 | 대기 | `Wait(timeoutMs)` → `Result<platform::WaitResult>`; timeout은 작업 취소가 아니다 |
 | 취소 | `RequestCancel`; 실행 중 body는 `WorkerTaskContext::IsCancellationRequested`로 관측 |
 | 회수 | `TryRevoke` → `Result<bool>`; 아직 worker가 꺼내지 않은 Pending 작업을 호출 스레드에서 바로 Cancelled로 끝낸다 |
-| 외부 완료 이벤트 | `TryCreateEvent` → `Result<WorkerTaskEvent>`; body 없이 `TryTrigger`·`TryFail`로 완료하는 작업(UE 5.6 `UE::Tasks::FTaskEvent` 대응). `Task/AsyncIoEvent.h`의 `TrySubmitReadEvent`·`TrySubmitWriteEvent`가 AsyncFile 완료를 이벤트로 잇는다 |
+| 외부 완료 이벤트 | `TryCreateEvent` → `Result<WorkerTaskEvent>`; body 없이 `TryTrigger`·`TryFail`로 완료하는 작업(UE 5.8 `UE::Tasks::FTaskEvent` 대응). `Task/AsyncIoEvent.h`의 `TrySubmitReadEvent`·`TrySubmitWriteEvent`가 AsyncFile 완료를 이벤트로 잇는다 |
 | 실패 | body의 `WorkerTaskContext::Fail(ErrorCode)`; 최종 상태의 `error`로 관측 |
 | 종료 | `Shutdown(Drain 또는 Cancel)`; native Join까지 회수 |
 | 실행 문맥 검사 | `IsCurrentWorker`; body와 capture/dependency 정리 문맥을 포함 |

@@ -1,10 +1,10 @@
 # 리플렉션·빌드 보강(A0-B) 설계
 
-기준일: 2026-11-13, 초안 3(교차검증 3건 — 빌드 실현성·런타임 값 모델·소비자 적합성 — 과 최종 검증 반영). [에셋 시스템 설계](AssetSystem.ko.md) 1절 A0-B 단계와 5.6절의 상세다. 현재 구현은 [리플렉션 메타데이터](../Implementation/ReflectionMetadata.ko.md)·[직렬화](../Implementation/Serialization.ko.md)에 있다. 패키지 형식(A1)·텍스처 설정(12.4절)·graph v2(A0-O)·World 객체·UI·Sparks가 이 기반을 쓴다.
+기준일: 2026-11-13, 초안 3(교차검증 3건 — 빌드 실현성·런타임 값 모델·소비자 적합성 — 과 최종 검증 반영). [에셋 시스템 설계](AssetSystem.ko.md) 1절 A0-B 단계와 5.6절의 상세다. 현재 구현은 [리플렉션 메타데이터](../Implementation/ReflectionMetadata.ko.md)·[직렬화](../Implementation/Serialization.ko.md)에 있다. 패키지 형식(A1)·텍스처 설정(12.4절)·graph v2(A0-O)·World 객체·UI·Sparks가 이 기반을 쓴다. UE 대조 기준은 UE 5.8(5.8.4, commit `f45729c0b6f0`)이다 — 본문의 UE 사실 서술은 2026-11-15에 5.8 원본으로 다시 확인했고, 날짜를 적은 설계 교차검증 기록(4.6·5.6·7.1·9.1절 확정안 머리)의 UE 대조는 당시 기준 UE 5.6이다.
 
 원칙:
 
-- UE 5.6 대응: UHT → MetaCompiler, `FProperty` → `FieldSchema` + 생성 typed thunk, `UENUM`(`UMETA(DisplayName)` 포함)·`USTRUCT`·`TArray`·`TSoftObjectPtr`·상속되는 클래스 플래그. UE의 클래스명과 메모리 offset 기반 property 접근은 복제하지 않는다 — 필드 접근은 생성 코드의 멤버 포인터 thunk만 쓴다(raw offset·주소 공개 없음).
+- UE 5.8 대응: UHT → MetaCompiler, `FProperty` → `FieldSchema` + 생성 typed thunk, `UENUM`(`UMETA(DisplayName)` 포함)·`USTRUCT`·`TArray`·`TSoftObjectPtr`·상속되는 클래스 플래그. UE의 클래스명과 메모리 offset 기반 property 접근은 복제하지 않는다 — 필드 접근은 생성 코드의 멤버 포인터 thunk만 쓴다(raw offset·주소 공개 없음).
 - 실패 원자성(읽기 실패는 출력 불변, 쓰기 실패는 미게시, 로드는 전부 공개 또는 전부 rollback), 결정성(같은 입력 → 같은 byte), 모든 길이·개수·작업량에 한도.
 - 하위호환을 두지 않는다(초기 단계). `FieldSchema`·graph 필드 인코딩·생성 코드 형식을 바로 바꾸고 시험을 고친다.
 
@@ -265,7 +265,7 @@ struct BulkDataRef {
 
 ### 4.6 B4 구현 API(확정안)
 
-4.1–4.5절을 구현하는 구체 형태다. 설계 교차검증(2026-11-13 — 1차: 구현 적합성·반례·MetaCompiler와 UE 5.6 대조, 2차 최종: 런타임·MetaCompiler/Binds)의 지적과 사용자 결정(4.3·4.4절)을 반영했다. 세 커밋으로 나눈다: **B4a** 런타임, **B4b** MetaCompiler, **B4c** Binds.
+4.1–4.5절을 구현하는 구체 형태다. 설계 교차검증(2026-11-13 — 1차: 구현 적합성·반례·MetaCompiler와 UE 5.6 대조(당시 기준), 2차 최종: 런타임·MetaCompiler/Binds)의 지적과 사용자 결정(4.3·4.4절)을 반영했다. 세 커밋으로 나눈다: **B4a** 런타임, **B4b** MetaCompiler, **B4c** Binds.
 
 **상수·스키마**
 
@@ -406,7 +406,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema&, Ru
 
 ### 5.6 B5 구현 API(확정안)
 
-5.1–5.5절과 4.3절의 사용자 결정(참조 struct 목록 지원)을 구현하는 구체 형태다. 설계 교차검증(2026-11-13 — 구현 적합성·반례·MetaCompiler와 UE 5.6 대조)의 지적과 사용자 결정(ObjectRefArray 원소 null 허용, 5.2절)을 반영했다. B4의 규칙을 그대로 따른다: 2단계는 입력 때문에 실패하지 않고(원소 형식·정적 enum·참조 기대는 1단계), 2단계 몫은 1단계가 한 번 선청구하며, 값 byte는 바깥 writer에 제자리로 한 번 쓰고, Record·목록 한도는 남은 누계로 연다. 생성 static_assert는 전체 특수화 안에만 두고(`if constexpr`는 라이브러리 템플릿에만), requires 탐지 형질은 쓰지 않는다. 세 커밋으로 나눈다: **B5a** Serialization과 Registry 컨테이너, **B5b** 레지스트리·문맥·codec·그래프·Trace(손으로 쓴 특수화 시험), **B5c** MetaCompiler·fixture·SDK.
+5.1–5.5절과 4.3절의 사용자 결정(참조 struct 목록 지원)을 구현하는 구체 형태다. 설계 교차검증(2026-11-13 — 구현 적합성·반례·MetaCompiler와 UE 5.6 대조(당시 기준))의 지적과 사용자 결정(ObjectRefArray 원소 null 허용, 5.2절)을 반영했다. B4의 규칙을 그대로 따른다: 2단계는 입력 때문에 실패하지 않고(원소 형식·정적 enum·참조 기대는 1단계), 2단계 몫은 1단계가 한 번 선청구하며, 값 byte는 바깥 writer에 제자리로 한 번 쓰고, Record·목록 한도는 남은 누계로 연다. 생성 static_assert는 전체 특수화 안에만 두고(`if constexpr`는 라이브러리 템플릿에만), requires 탐지 형질은 쓰지 않는다. 세 커밋으로 나눈다: **B5a** Serialization과 Registry 컨테이너, **B5b** 레지스트리·문맥·codec·그래프·Trace(손으로 쓴 특수화 시험), **B5c** MetaCompiler·fixture·SDK.
 
 **상수·스키마**
 
@@ -584,7 +584,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema&, Ru
 
 **모듈과 헤더**
 
-- ObjectRuntime이 Serialization에 의존한다(Serialization은 Core에만 의존하므로 순환이 없다 — UE 5.6의 FArchive(Core)와 `FProperty::SerializeItem`(CoreUObject) 관계와 같다). `RuntimeTypeOps.h`는 `ArchiveWriter`·`FieldView`·두 문맥을 전방 선언만 하고, Serialization 헤더는 `Object/FieldCodec.h`(문맥·정책·hook)와 `Object/GeneratedFieldCodec.h`(생성 codec 템플릿)만 include한다. 이 둘은 생성 헤더와 직렬화기만 include하므로 Engine·Sparks VM·Inspector 번역 단위에 Archive가 퍼지지 않는다.
+- ObjectRuntime이 Serialization에 의존한다(Serialization은 Core에만 의존하므로 순환이 없다 — UE 5.8의 FArchive(Core)와 `FProperty::SerializeItem`(CoreUObject) 관계와 같다). `RuntimeTypeOps.h`는 `ArchiveWriter`·`FieldView`·두 문맥을 전방 선언만 하고, Serialization 헤더는 `Object/FieldCodec.h`(문맥·정책·hook)와 `Object/GeneratedFieldCodec.h`(생성 codec 템플릿)만 include한다. 이 둘은 생성 헤더와 직렬화기만 include하므로 Engine·Sparks VM·Inspector 번역 단위에 Archive가 퍼지지 않는다.
 
 **위치(프레임)와 플래그 전파**
 
@@ -644,7 +644,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema&, Ru
 
 ### 7.1 B6 구현 API(확정안)
 
-7절을 구현하는 구체 형태다. 설계 교차검증(2026-11-14 — 구현 적합성, 반례와 UE 5.6 대조)의 지적을 반영했다. B5의 규칙을 그대로 따른다: 경로 템플릿은 생성 헤더 안에서만 인스턴스화하고, requires 탐지 형질은 쓰지 않으며, 할당은 게시 전에 끝내고 게시 단계는 할당·반환을 하지 않는다(옛 값·옛 버퍼는 게시 뒤에 반환). 두 커밋으로 나눈다: **B6a** 런타임·문자열 앞단·손으로 쓴 특수화 시험(+ 현행 결함 정정), **B6b** MetaCompiler·fixture·생성 시험.
+7절을 구현하는 구체 형태다. 설계 교차검증(2026-11-14 — 구현 적합성, 반례와 UE 5.6 대조(당시 기준))의 지적을 반영했다. B5의 규칙을 그대로 따른다: 경로 템플릿은 생성 헤더 안에서만 인스턴스화하고, requires 탐지 형질은 쓰지 않으며, 할당은 게시 전에 끝내고 게시 단계는 할당·반환을 하지 않는다(옛 값·옛 버퍼는 게시 뒤에 반환). 두 커밋으로 나눈다: **B6a** 런타임·문자열 앞단·손으로 쓴 특수화 시험(+ 현행 결함 정정), **B6b** MetaCompiler·fixture·생성 시험.
 
 **표현(MetaSchema `TypeSchema.h`)**
 
@@ -748,7 +748,7 @@ Result<void> PathStructMember(const RuntimeStructFieldOps&, detail::PathCursor&,
 
 **B6이 하지 않는 것**
 
-Transaction·Undo 기록·병합(CU4 — B6은 옛 값 출력까지), 변경 통지·setter 호출(CU5·UD7 — 다만 규칙은 지금 정한다: 하위 경로 쓰기는 `steps[0]` 필드의 setter·통지 hook을 거친다. UE의 `CallParentSetters`·`PostEditChangeProperty` 대응이며, hook 칸은 그 단계에서 `RuntimeFieldOps` 끝에 더하고 `FieldPathFunction`은 바꾸지 않는다), 동적 속성 내부 경로(CU6), 명령행 값 표기(A6), 통째 Record 복사, 원소 안정 ID(prefab — UE 5.6 `FPropertyPathName`은 연관 컨테이너를 key가 아니라 원소 ID로 가리킨다, map 도입 때 참고), map key, Resize·이동·복제, 다른 객체 역참조, 해석 결과 캐시(UE `FCachedPropertyPath` — UI 바인딩·애니메이션 트랙이 매 프레임 쓰게 되면 해석과 연산을 분리해 lease를 쥔 동안 재사용하는 API를 더한다), 로드 MaxElements(5.5절 그대로).
+Transaction·Undo 기록·병합(CU4 — B6은 옛 값 출력까지), 변경 통지·setter 호출(CU5·UD7 — 다만 규칙은 지금 정한다: 하위 경로 쓰기는 `steps[0]` 필드의 setter·통지 hook을 거친다. UE의 `CallParentSetters`·`PostEditChangeProperty` 대응이며, hook 칸은 그 단계에서 `RuntimeFieldOps` 끝에 더하고 `FieldPathFunction`은 바꾸지 않는다), 동적 속성 내부 경로(CU6), 명령행 값 표기(A6), 통째 Record 복사, 원소 안정 ID(prefab — UE 5.8 `FPropertyPathName`은 연관 컨테이너(Set·Map)를 key가 아니라 빈칸을 건너뛴 순번(N번째 유효 원소)으로 가리킨다(CoreUObject/Public/UObject/PropertyPathName.h 28–29·54, Private/UObject/PropertyPathFunctions.cpp 264·292의 `FindNthElementPtr`·`FindNthKeyPtr`) — 5.8에서 바뀜: 5.6은 원소 ID(ElementId)로 가리켰다. 순번은 원소를 지우면 바뀌므로 안정 ID의 선례가 아니다, map 도입 때 참고), map key, Resize·이동·복제, 다른 객체 역참조, 해석 결과 캐시(UE `FCachedPropertyPath` — UI 바인딩·애니메이션 트랙이 매 프레임 쓰게 되면 해석과 연산을 분리해 lease를 쥔 동안 재사용하는 API를 더한다), 로드 MaxElements(5.5절 그대로).
 
 **MetaCompiler(B6b)**
 
@@ -883,7 +883,7 @@ Sha256Digest ToolBuildId() noexcept {
 
 ### 9.1 B8 구현 API(확정안)
 
-9절을 구현하는 구체 형태다. 설계 교차검증(2026-11-14 — 구현 적합성, 반례와 UE 5.6 대조)의 지적을 반영했다. 두 커밋으로 나눈다: **B8a** ObjectRuntime·MetaCompiler에서 리플렉션 base를 둔 native 파생 지원, **B8b** World 이전·시험·문서. B8b는 World·Engine 공개 API(`RegisterWorldTypes`·`EngineConfig`·종료 순서)를 바꾸므로 착수 전에 조율한다 — 2026-11-14에 열린 세션 둘(셰이더·프로세스 API, 에셋 너겟 서버 설계)이 World·Engine 담당이 아니고 진행 중인 변경·이견이 없음을 확인했다(World·Engine을 만든 [Engine] 세션은 열려 있지 않다).
+9절을 구현하는 구체 형태다. 설계 교차검증(2026-11-14 — 구현 적합성, 반례와 UE 5.6 대조(당시 기준))의 지적을 반영했다. 두 커밋으로 나눈다: **B8a** ObjectRuntime·MetaCompiler에서 리플렉션 base를 둔 native 파생 지원, **B8b** World 이전·시험·문서. B8b는 World·Engine 공개 API(`RegisterWorldTypes`·`EngineConfig`·종료 순서)를 바꾸므로 착수 전에 조율한다 — 2026-11-14에 열린 세션 둘(셰이더·프로세스 API, 에셋 너겟 서버 설계)이 World·Engine 담당이 아니고 진행 중인 변경·이견이 없음을 확인했다(World·Engine을 만든 [Engine] 세션은 열려 있지 않다).
 
 **막는 점(B8a가 푼다)**: `RegisterNativeClass`의 base는 Object·native만 받고, native 등록은 WorldOnly를 달지 않으며(WorldOnly base의 파생에 플래그가 없으면 TypeRegistry가 InvalidArgument), 파생 스키마는 base 필드를 같은 ID로 담아야 하고, `TraceNativeChain`은 손 Trace만 불러 생성 base의 간선이 빠지며(GC 구멍), `NativeTypeIdOf`는 `NativeClassType` 전용이다. World 시험의 native 파생 7종(.cpp 안)은 Metadata 입력이 될 수 없으므로 이것이 필요하다.
 

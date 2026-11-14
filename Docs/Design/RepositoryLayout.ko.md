@@ -1,7 +1,7 @@
 # 저장소 구성
 
 Rocks 저장소는 **Core(기반 라이브러리)**와 **Engine(게임 엔진 계층)**을 최상위에서 분리한다. Core는
-엔진이 아니라 엔진·도구·게임이 함께 쓰는 바탕이다. 모듈 단위 구성과 규칙 파일 배치는 UE5.6
+엔진이 아니라 엔진·도구·게임이 함께 쓰는 바탕이다. 모듈 단위 구성과 규칙 파일 배치는 UE 5.8(5.8.4, commit `f45729c0b6f0`)
 (`Engine/Source/<그룹>/<모듈>/<모듈>.Build.cs`, `Engine/Plugins/<분류>/<플러그인>`)을 따르되, UE에서
 `Engine/Source/Runtime/Core`에 해당하는 기반 계층을 별도 최상위 `Core/`로 둔 점이 다르다.
 
@@ -135,7 +135,7 @@ public sealed class Core : CoreModuleRules
 |---|---|
 | 켜지지 않은 플러그인의 모듈 | 프로젝트가 끄거나 `enabledByDefault`가 false이고 아무도 요구하지 않음 |
 | `type: Editor` | 에디터 타깃이 아직 없음 |
-| `type: Developer`이고 Release | 배포 빌드에 개발 도구를 넣지 않음. UE 5.6의 `DeveloperTool`과 같은 의미다(UE `Developer`는 에디터·프로그램 타깃 전용) |
+| `type: Developer`이고 Release | 배포 빌드에 개발 도구를 넣지 않음. UE 5.8의 `DeveloperTool`과 같은 의미다(`bBuildDeveloperTools` 기본값 — 에디터·프로그램 타깃이거나 Test·Shipping이 아닌 구성. UE `Developer`는 에디터·프로그램 타깃 전용. UnrealBuildTool `Configuration/Descriptors/ModuleDescriptor.cs` 794–797행, `Configuration/Rules/TargetRules.cs` 1212행) |
 | `platforms`에 이번 플랫폼이 없음 | 플랫폼 전용 모듈 |
 
 규칙 계약: 규칙 로더는 모듈 이름을 알기 위해 모든 모듈 규칙의 `Configure`를 먼저 실행한 뒤 위 필터를 적용한다.

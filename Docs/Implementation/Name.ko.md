@@ -28,7 +28,7 @@ if (!name.IsNone() && name.GetNumber() == 7) {
 
 기본 `Name{}`, 빈 입력, 대소문자를 무시한 `None`은 같은 None이다. `Name{}.IsValid()`와 `IsNone()`은 모두 true이며 번호가 없다. 기본 None이나 `None` 원문은 별도 entry를 할당하지 않고 `Acquire(Name{})`로 얻은 lease의 표기는 `None`이다. `none` 등의 다른 대소문자 표기는 원문 보존을 위해 해당 pool의 display entry에 저장될 수 있으므로 예산과 할당 오류가 적용된다. 동일한 None은 pool이 달라도 동등하고 해시도 같다. 표시 entry의 `Acquire`는 해당 pool과 세션을 검증한다. stale 표시 토큰이 기본 None과 같다고 해서 `Acquire` 검증을 통과하는 것은 아니다.
 
-UE5.6의 기본 번호 접미사 규칙에 따라 `Actor_0`의 번호는 0이고 `Actor_2147483646`까지 숫자로 인식한다. `Actor_00`, `Actor_2147483647` 등은 원문 전체가 이름이며 번호가 없다. `_0`처럼 유효 번호만 있고 base가 비면 기본 None이 된다. `None_7`은 번호가 7인 이름이므로 `IsNone()`이 false이며 `none_7`과 동등하지만 각 표기는 유지한다. `View()`는 번호를 포함한 원문이고 `BaseView()`는 인식된 번호 접미사를 제외한다. embedded NUL은 길이 기반 이름의 일부이며 C 문자열처럼 조기에 잘리지 않는다.
+UE 5.8의 기본 번호 접미사 규칙(`UObject/NameTypes.h`의 `UE::Core::Private::ParseNumberFromName` — 5.6의 `UnrealNames.cpp` `FNameHelper::ParseNumber`에서 옮겨졌고 규칙은 같다)에 따라 `Actor_0`의 번호는 0이고 `Actor_2147483646`까지 숫자로 인식한다. `Actor_00`, `Actor_2147483647` 등은 원문 전체가 이름이며 번호가 없다. `_0`처럼 유효 번호만 있고 base가 비면 기본 None이 된다. `None_7`은 번호가 7인 이름이므로 `IsNone()`이 false이며 `none_7`과 동등하지만 각 표기는 유지한다. `View()`는 번호를 포함한 원문이고 `BaseView()`는 인식된 번호 접미사를 제외한다. embedded NUL은 길이 기반 이름의 일부이며 C 문자열처럼 조기에 잘리지 않는다.
 
 기본 None의 문자열은 정적 저장소에 있지만 `Acquire`로 얻은 lease는 다른 이름과 동일하게 pool 수명을 지킨다. lease가 살아 있으면 `Shutdown()`은 admission을 닫고 `Busy`를 반환한다. 반환 후 재시도해야 한다. 닫힌 pool은 `TryIntern`·`Acquire`·lease 복제를 거부한다. 문자열 view는 살아 있는 lease보다 오래 보관하지 않는다. pool 객체 파괴 전 모든 호출과 lease를 종료하며 pool의 allocator는 pool보다 오래 살아야 한다.
 

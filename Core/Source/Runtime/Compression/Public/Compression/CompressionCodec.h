@@ -3,7 +3,7 @@
 #include <Compression/Compression.h>
 #include <Core/Text/StringView.h>
 
-// 사용자 압축 형식(플러그인) 등록이다. UE 5.6 ICompressionFormat·IModularFeatures
+// 사용자 압축 형식(플러그인) 등록이다. UE 5.8 ICompressionFormat·IModularFeatures
 // ("CompressionFormat")에 대응한다. 설계·근거는 Docs/Design/Compression.ko.md 14절을 따른다.
 //
 // 사용 예(쿠커 플러그인이 외부 코덱을 등록하고 내장 형식과 같은 API로 쓴다):

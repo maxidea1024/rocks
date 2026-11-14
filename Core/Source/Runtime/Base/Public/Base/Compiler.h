@@ -24,7 +24,7 @@
 #error "Rocks는 64-bit x64 또는 ARM64만 지원한다."
 #endif
 
-// 빌드 구성 매크로다(UE5.6 UE_BUILD_DEBUG·UE_BUILD_DEVELOPMENT·UE_BUILD_SHIPPING 대응). 빌드
+// 빌드 구성 매크로다(UE5.8 UE_BUILD_DEBUG·UE_BUILD_DEVELOPMENT·UE_BUILD_SHIPPING 대응). 빌드
 // 시스템(Rocks.Build)이 구성에 따라 정확히 하나를 1로 정의한다. 모듈이 직접 정의할 수 없다.
 //   ROCKS_BUILD_DEBUG        Debug·Asan 구성. 기본은 최적화 없음.
 //   ROCKS_BUILD_DEVELOPMENT  Development 구성. 최적화와 디버그 정보, 개발용 기능을 모두 쓴다.
@@ -75,7 +75,7 @@
 // 표준 배치 타입 Type 안에서 member의 byte offset이다(offsetof 대응, 상수 식).
 #define ROCKS_OFFSET_OF(Type, member) __builtin_offsetof(Type, member)
 
-// 이 지점부터 ROCKS_ENABLE_OPTIMIZATION까지 정의하는 함수의 최적화를 끈다(UE5.6
+// 이 지점부터 ROCKS_ENABLE_OPTIMIZATION까지 정의하는 함수의 최적화를 끈다(UE5.8
 // UE_DISABLE_OPTIMIZATION·UE_ENABLE_OPTIMIZATION 대응). Development 빌드에서 파일 일부만 단계
 // 실행하려고 임시로 쓴다. 모듈 전체는 규칙의 Optimization => CodeOptimization.Never로 끈다.
 // - 제품 소스에 커밋하지 않는다(정책 검사가 거부한다. 테스트 소스는 예외).

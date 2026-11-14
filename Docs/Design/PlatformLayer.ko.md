@@ -12,16 +12,16 @@ UE 5.8 공개 문서에서 확인한 구조는 기능마다 다르다.
 - 운영체제 기능의 일반 기반으로 [FGenericPlatformProcess](https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Runtime/Core/FGenericPlatformProcess), [FGenericPlatformMemory](https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Runtime/Core/FGenericPlatformMemory), [FGenericPlatformMisc](https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Runtime/Core/FGenericPlatformMisc)를 확인하였다. [FPosixOSPlatformProcess](https://dev.epicgames.com/documentation/unreal-engine/API/Runtime/Core/FPosixOSPlatformProcess)는 Generic에서 파생되는 공통 계층으로, 공식 설명은 Linux와 Mac의 플랫폼 계층이 다를 수 있음을 명시한다. 모든 Generic 기능이 실제로 구현되어 있다는 뜻은 아니다.
 - 파일 I/O는 [IPlatformFile](https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Runtime/Core/IPlatformFile), 그 물리 기반 [IPhysicalPlatformFile](https://dev.epicgames.com/documentation/unreal-engine/API/Runtime/Core/IPhysicalPlatformFile), 그리고 파일 래퍼 체인을 관리하는 [FPlatformFileManager](https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Runtime/Core/FPlatformFileManager)로 구분된다. 이 경계는 정적 플랫폼 유틸리티의 상속 구조와 동일하지 않다.
 
-### UE 5.6 소스 확인
+### UE 5.8 소스 확인
 
-추가로 UE 5.6 branch commit `cdda65cecacd9a1278020925c357bf4cc0b17e8c`의 제한된 소스 사본을 확인하였다. 검토한 원본 경로는 `Core/Source/Runtime/Core/Public/GenericPlatform/GenericPlatformMisc.h`, `GenericPlatformFile.h`, `Windows/WindowsPlatformMisc.h`, `Windows/WindowsPlatformFile.h`, `Apple/ApplePlatformFile.h`, `Mac/MacPlatformFile.h`, `Misc/Paths.h`, `Misc/PathViews.h`와 대응 `Paths.cpp`, `PathViews.cpp`다. 검토용 사본은 현재 작업 공간의 `work/ue5-reference/`에 있으며 엔진 저장소에 포함하지 않는다. 이는 UE 5.6의 해당 파일 확인 결과다. UE 5.8의 전체 플랫폼 구현이 같다는 증거는 아니며 실제 플랫폼 소스 전수 감사는 남아 있다.
+UE 5.8(5.8.4, commit `f45729c0b6f0`) 대조. 로컬 클론 5.8.4-release(commit `f45729c0b6f097038e72b52d366a62baeca3275b`) 원본을 확인하였다(이전 판은 UE 5.6 commit `cdda65ce`의 제한된 사본 `work/ue5-reference/`로 확인했다). 검토한 원본 경로는 `Engine/Source/Runtime/Core/Public/GenericPlatform/GenericPlatformMisc.h`, `GenericPlatformFile.h`, `Windows/WindowsPlatformMisc.h`, `Windows/WindowsPlatformFile.h`, `Apple/ApplePlatformFile.h`, `Mac/MacPlatformFile.h`, `Misc/Paths.h`, `Misc/PathViews.h`와 대응 `Paths.cpp`, `PathViews.cpp`, 그리고 전체 클론이라 함께 확인한 `Private/Windows/WindowsPlatformMisc.cpp`, `Private/Unix/UnixPlatformMisc.cpp`, `Private/Mac/MacPlatformMisc.cpp`, `Private/Windows/WindowsPlatformFilePrivate.h`다. UE 소스는 엔진 저장소에 포함하지 않는다. 이는 해당 파일 확인 결과이며 실제 플랫폼 소스 전수 감사는 남아 있다.
 
-- `FGenericPlatformMisc`는 `NormalizePath` 기본 구현 두 종류와 절대 경로 형식 판정 `IsValidAbsolutePathFormat`을 제공한다. 해당 5.6 소스의 기본 경로 보정은 아무 동작도 하지 않고, 기본 절대 형식 판정은 참을 반환한다. `FWindowsPlatformMisc`는 Generic에서 파생하고 절대 형식 판정을 별도로 선언한다. 실제 Windows 구현 내용은 확보한 헤더만으로 확인하지 않았다.
-- `FPaths::NormalizeFilename`과 `FPathViews::NormalizeFilename`은 구분자 처리 후 선택된 `FPlatformMisc::NormalizePath`를 호출한다. Generic 주석에는 Unix의 홈 디렉터리 확장 예가 있지만, 확인한 사본에 해당 Unix 구현은 포함되지 않는다. 플랫폼 보정은 순수 문자열 정규화와 OS 정보 조회가 함께 필요할 수 있다.
-- 파일은 `IPlatformFile`의 물리 파일 획득·하위 래퍼 연결 인터페이스, `IPhysicalPlatformFile`의 물리 기본 구현, Apple의 `FApplePlatformFile` 구체 구현이 분리되어 있다. 확인한 5.6 `MacPlatformFile.h`는 Apple 파일 헤더를 포함하고, 확인한 `WindowsPlatformFile.h`는 선언 없이 비어 있다. Windows 물리 파일 구현의 실제 정의 위치는 이 헤더만으로 확정하지 않는다. `FPaths::FileExists`는 `IFileManager`에 위임한다.
-- Unreal의 해당 경로 정규화는 백슬래시를 슬래시로 바꾸고, 확장자 조회는 `.gitignore`를 `gitignore`로 해석한다. 현재 Rocks POSIX 문법의 백슬래시 보존 정책과 차이가 있다. Rocks의 확장자 조회는 현재 `.gitignore`에서 `gitignore`를 반환한다. 구조 참고와 동작 동일성은 별도로 검증한다.
+- `FGenericPlatformMisc`는 `NormalizePath` 기본 구현 두 종류와 절대 경로 형식 판정 `IsValidAbsolutePathFormat`을 제공한다(`GenericPlatformMisc.h` 1155–1174). 기본 경로 보정은 아무 동작도 하지 않고, 기본 절대 형식 판정은 참을 반환한다. `FWindowsPlatformMisc`는 Generic에서 파생하고 절대 형식 판정을 별도로 선언하며(`WindowsPlatformMisc.h` 172), 구현은 드라이브 문자·`:/` 또는 `:\`·연속 구분자·공백만 있는 폴더 이름·두 번째 `:`를 검사한다(`WindowsPlatformMisc.cpp` 2483–2523).
+- `FPaths::NormalizeFilename`과 `FPathViews::NormalizeFilename`은 구분자 처리 후 선택된 `FPlatformMisc::NormalizePath`를 호출한다(`Paths.cpp` 1332–1339, `PathViews.cpp` 580–584). Unix와 Mac 구현은 `~`로 시작하는 경로의 `~`를 사용자 홈 디렉터리로 바꾼다(`Unix/UnixPlatformMisc.cpp` 91–107, `Mac/MacPlatformMisc.cpp` 830–846). 플랫폼 보정은 순수 문자열 정규화와 OS 정보 조회가 함께 필요하다.
+- 파일은 `IPlatformFile`의 물리 파일 획득·하위 래퍼 연결 인터페이스, `IPhysicalPlatformFile`의 물리 기본 구현, Apple의 `FApplePlatformFile` 구체 구현이 분리되어 있다. `MacPlatformFile.h`는 Apple 파일 헤더를 포함하고, `WindowsPlatformFile.h`는 선언 없이 비어 있다. Windows 물리 파일 구현은 Private 헤더 `Windows/WindowsPlatformFilePrivate.h`의 `FWindowsPlatformFile : IPhysicalPlatformFile`이다. `FPaths::FileExists`는 `IFileManager`에 위임한다(`Paths.cpp` 1147–1150).
+- Unreal의 해당 경로 정규화는 백슬래시를 슬래시로 바꾸고, 확장자 조회는 `.gitignore`를 `gitignore`로 해석한다(기본은 마지막 `.`부터다. 5.8은 첫 `.`부터 자르는 `UE::Paths::EFlags::AllowCompoundExtension` 선택을 더했다 — `Paths.cpp` 942–956, 5.6에는 없었다). 현재 Rocks POSIX 문법의 백슬래시 보존 정책과 차이가 있다. Rocks의 확장자 조회는 현재 `.gitignore`에서 `gitignore`를 반환한다. 구조 참고와 동작 동일성은 별도로 검증한다.
 
-로컬 `C:/work/uwo/engine`은 UE 4.27.2이며 UE5 구현의 기준으로 사용하지 않는다. `FPlatformPath`라는 별도 UE5 타입의 존재·구현은 확보한 범위에서 확인하지 못하였다.
+로컬 `C:/work/uwo/engine`은 UE 4.27.2이며 UE5 구현의 기준으로 사용하지 않는다. `FPlatformPath`라는 별도 UE5 타입은 UE 5.8 원본 `Engine/Source` 전체에 없다(git grep).
 
 ## Rocks 목표 구조
 
@@ -47,7 +47,7 @@ Engine / Tools / Game         프로젝트·설치 구성과 상위 시스템
 
 경로 문자열의 root·join·normalize·relative·이름 분리는 공통 Core 유틸리티에 둔다. Windows와 POSIX 문법은 실제 호스트와 독립적으로 선택할 수 있어야 하며 Windows 대상 콘텐츠를 macOS에서 처리할 수 있도록 두 문법을 함께 빌드한다. 백슬래시, 드라이브 상대 경로, UNC와 POSIX root의 규칙은 분리하여 검증한다. 문자열 정규화나 포함 관계는 심볼릭 링크·junction·실제 파일 동일성·접근 권한을 검증하지 않는다. 에셋 가상 경로와 OS 파일 경로도 구분한다.
 
-플랫폼 경로 보정 및 절대 형식 판정은 위 Generic/플랫폼 계층의 별도 hook으로 설계한다. 기존 `Path::Normalize`는 입력으로 선택한 Windows/POSIX 문법의 순수 문자열 연산으로 유지하고, 실제 호스트 환경을 조회하거나 `~` 등을 적용하는 연산은 그 의존성과 실패를 드러내는 별도 경로로 제공한다. 필요하면 상위 편의 API가 문법 정규화 후 호스트 hook을 호출한다. hook을 모든 대상에 지원한다고 가정하지 않으며, 현재 Rocks에는 이 경로 보정 및 형식 검증 hook이 구현되어 있지 않다. Unreal 5.6의 Generic 기본 형식 판정이 항상 참인 사실을 Rocks의 검증 성공 보장으로 사용하지 않는다. 파일 존재·권한 검사와 실제 경로 접근은 hook과 별도다.
+플랫폼 경로 보정 및 절대 형식 판정은 위 Generic/플랫폼 계층의 별도 hook으로 설계한다. 기존 `Path::Normalize`는 입력으로 선택한 Windows/POSIX 문법의 순수 문자열 연산으로 유지하고, 실제 호스트 환경을 조회하거나 `~` 등을 적용하는 연산은 그 의존성과 실패를 드러내는 별도 경로로 제공한다. 필요하면 상위 편의 API가 문법 정규화 후 호스트 hook을 호출한다. hook을 모든 대상에 지원한다고 가정하지 않으며, 현재 Rocks에는 이 경로 보정 및 형식 검증 hook이 구현되어 있지 않다. Unreal 5.8의 Generic 기본 형식 판정이 항상 참인 사실을 Rocks의 검증 성공 보장으로 사용하지 않는다. 파일 존재·권한 검사와 실제 경로 접근은 hook과 별도다.
 
 플랫폼 파일 I/O는 `Platform/File.h`의 `FileSystem`·`FileHandle` 인터페이스와 소유형 `File`, Windows/macOS 물리 backend로 초기 구현하였다. `File::Open(path, mode)`는 물리 파일 시스템을 사용하며 `File::Open(system, path, mode)`는 지정한 파일 시스템을 사용한다. 두 편의 overload의 경로는 NUL로 끝나는 UTF-8이며 첫 NUL 이후를 읽지 않는다. embedded NUL을 검증해야 하는 입력은 파일 시스템과 길이를 명시하는 overload를 사용한다. 파일 열기·닫기·부분 읽기/쓰기·seek·크기·파일 존재 여부·삭제를 제공한다. `Read`/`Write`는 한 호출의 부분 전송량과 오류를 함께 반환하며 읽기 0바이트 성공은 EOF다. `ReadExact`/`WriteAll`은 전체 요청 중 같은 `File`의 위치를 직렬화하고 EOF·진행 없음·부분 실패를 구분한다. 독립된 `File` 간의 파일 내용·위치 일관성은 보장하지 않는다. `FileSystem`의 직접 호출자는 핸들의 직렬화·닫기·소멸과 backend 수명을 관리한다.
 
@@ -129,18 +129,18 @@ Engine / Tools / Game         프로젝트·설치 구성과 상위 시스템
 | macOS | `posix_spawn` + 새 프로세스 그룹 + `POSIX_SPAWN_CLOEXEC_DEFAULT`(file action으로 연결한 fd만 물려줌) + 신호 마스크·처리 초기화, `posix_spawn_file_actions_addchdir_np`. 종료는 `waitid(WNOWAIT)`로 회수 없이 관측하고(시간 제한은 kqueue `EVFILT_PROC`, 이벤트·`ESRCH` 뒤 다시 `waitid`로 확인), `Close`에서 그룹을 끝낸 뒤 회수한다. 회수 전에는 PID·그룹 번호가 재사용되지 않으므로 다른 그룹을 죽이지 않는다. 다른 코드가 자식을 회수하면(`ECHILD`) 종료 코드를 0xFFFFFFFF로 두고 이후 신호를 보내지 않는다. 입력 pipe는 `F_SETNOSIGPIPE`로 SIGPIPE 대신 EPIPE다. `RunProcess`는 `poll`로 pipe를 함께 기다리고 50 ms마다 직접 자식의 종료를 확인한다 |
 | Android | `Start`·`RunProcess`는 `Unsupported`다(`posix_spawn`이 API 28부터이며 앱에서 자식 프로세스가 필요 없다). PID·생존 확인·실행 파일 경로만 제공한다 |
 
-UE 5.6 원본(commit `cdda65ce`, 경로는 `Engine/Source/Runtime/Core/Private/` 기준)과 다르게 정한 점:
+UE 5.8(5.8.4, commit `f45729c0b6f0`) 원본(경로는 `Engine/Source/Runtime/Core/Private/` 기준, 행 번호는 5.8)과 다르게 정한 점:
 
-| 항목 | UE 5.6 | Rocks |
+| 항목 | UE 5.8 | Rocks |
 |---|---|---|
-| 인자 | `CreateProc(URL, Parms)`가 `"\"URL\" Parms"` 문자열을 그대로 넘긴다(`Windows/WindowsPlatformProcess.cpp:470–561`) | 인자 배열을 받아 플랫폼이 인용한다. 호출자가 인용 규칙을 몰라도 된다. 인용으로 막을 수 없는 batch 파일은 거부한다 |
-| 상속 handle | `CreateProc`은 상속 가능한 handle을 모두 넘긴다(`:503–531`). `ExecProcess`만 handle 목록으로 제한한다(`:962–999`) | 항상 표준 스트림 셋으로 제한한다 |
-| 자손 종료 | Windows `TerminateProc(KillTree)`는 Toolhelp 스냅샷 재귀(`:614–681`), Mac은 직계 자식만 SIGTERM(`Mac/MacPlatformProcess.cpp:853–881`), Linux는 STUBBED | Windows job object, macOS 프로세스 그룹 SIGKILL. 직접 자식이 스스로 끝난 뒤에도 남은 자손을 끝낸다 |
-| 부모 사망 | `ExecProcess(bShouldEndWithParentProcess)`만 전역 job에 `KILL_ON_JOB_CLOSE`를 건다(`:941–960`). ShaderCompileWorker는 부모 PID를 스스로 확인한다 | Windows는 모든 Process가 job으로 함께 끝난다. 워커의 부모 감시는 입력 pipe EOF를 먼저 쓰고 `IsProcessRunning(부모 PID)`는 보조다 |
-| 작업 디렉터리 | Linux `CreateProc`은 받지만 쓰지 않는다(`Unix/UnixPlatformProcess.cpp`) | 모든 지원 플랫폼에서 적용하고 없음·디렉터리 아님을 구분한다 |
-| pipe 읽기 | `ReadPipe`는 `PeekNamedPipe` 후 있는 만큼만 읽는다(`:1849–1871`). Metal 셰이더 경로는 프로세스가 끝난 뒤에야 읽는다(`Developer/Apple/MetalShaderFormat/Private/MetalShaderFormat.cpp:1081–1120`) | 시간 제한 `Read`와 출력·오류를 동시에 비우는 `RunProcess`. 출력이 pipe 버퍼보다 커도 멈추지 않는다 |
-| PID 재사용 | Unix 구현 주석에 PID 재사용으로 워커 감시가 끝나지 않은 사례가 남아 있다(`Unix/UnixPlatformProcess.cpp:1184–1191`) | macOS는 회수 전에만 그룹을 끝낸다. `IsProcessRunning`은 같은 한계를 문서화하고 lifeline을 먼저 쓴다 |
-| 우선순위 | `PriorityModifier` -2…2. ShaderCompileWorker는 -1(Windows `BELOW_NORMAL`, Unix nice +5) | `Normal`·`Low`(UE -1과 같은 값) |
+| 인자 | `CreateProc(URL, Parms)`가 `CreateProcInternal`에서 `"\"URL\" Parms"` 문자열을 그대로 넘긴다(`Windows/WindowsPlatformProcess.cpp:511–698`, 조립은 669행). 5.8에 더해진 `CreateProc(UE::HAL::FProcessStartInfo)`도 `Arguments`가 문자열 하나다(`Public/GenericPlatform/GenericPlatformProcess.h:196–209`) | 인자 배열을 받아 플랫폼이 인용한다. 호출자가 인용 규칙을 몰라도 된다. 인용으로 막을 수 없는 batch 파일은 거부한다 |
+| 상속 handle | `CreateProc`은 넘긴 표준 pipe handle만 `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`로 물려준다(`:612–664`, `CreateProcess` 684행). `FProcessStartInfo::bInheritHandles`를 켜야 상속 가능한 handle을 모두 넘긴다. `ExecProcess`도 handle 목록으로 제한한다(`:1114–1139`). (5.8에서 바뀜: 5.6 `CreateProc`은 pipe를 넘기면 상속 가능한 handle을 모두 넘겼다) | 항상 표준 스트림 셋으로 제한한다(5.8 기본과 같다) |
+| 자손 종료 | Windows `TerminateProc(KillTree)`는 Toolhelp 스냅샷 재귀(`:751–818`). Mac과 Linux는 자손 전체를 찾아 SIGSTOP으로 멈춘 뒤(두 번 훑기) SIGTERM, SIGCONT를 보낸다(`Mac/MacPlatformProcess.cpp:931–1016`, `Unix/UnixPlatformProcess.cpp:1579–1718`). (5.8에서 바뀜: 5.6은 Mac이 직계 자식만 SIGTERM, Linux는 STUBBED였다) | Windows job object, macOS 프로세스 그룹 SIGKILL. 직접 자식이 스스로 끝난 뒤에도 남은 자손을 끝낸다 |
+| 부모 사망 | `ExecProcess(bShouldEndWithParentProcess)`만 전역 job에 `KILL_ON_JOB_CLOSE`를 건다(`:1078–1097`, 배정 1168–1175). ShaderCompileWorker는 부모 PID를 스스로 확인한다(`Programs/ShaderCompileWorker/Private/ShaderCompileWorker.cpp:461–468`) | Windows는 모든 Process가 job으로 함께 끝난다. 워커의 부모 감시는 입력 pipe EOF를 먼저 쓰고 `IsProcessRunning(부모 PID)`는 보조다 |
+| 작업 디렉터리 | Linux `CreateProcInternal`은 받지만 쓰지 않는다(`Unix/UnixPlatformProcess.cpp:933–1215`) | 모든 지원 플랫폼에서 적용하고 없음·디렉터리 아님을 구분한다 |
+| pipe 읽기 | `ReadPipe`는 `PeekNamedPipe` 후 있는 만큼만 읽는다(`:1996–2012`). Metal 셰이더 경로는 프로세스가 끝난 뒤에야 읽는다(`Developer/Apple/MetalShaderFormat/Private/MetalShaderFormat.cpp:1226–1267`) | 시간 제한 `Read`와 출력·오류를 동시에 비우는 `RunProcess`. 출력이 pipe 버퍼보다 커도 멈추지 않는다 |
+| PID 재사용 | Linux는 `OpenProcess` handle에 `/proc/<pid>/stat`의 시작 시각을 저장해 PID 재사용을 검출한다(`Unix/UnixPlatformProcess.cpp:1217–1325`). (5.8에서 바뀜: 5.6에는 이 검출이 없고 PID 재사용으로 워커 감시가 끝나지 않은 사례 주석만 있었다) | macOS는 회수 전에만 그룹을 끝낸다. `IsProcessRunning`은 같은 한계를 문서화하고 lifeline을 먼저 쓴다. (PID, 시작 시각) 정체는 후속이다 |
+| 우선순위 | `PriorityModifier` -2…2(`GenericPlatformProcess.h:598`). ShaderCompileWorker는 -1(`Runtime/Engine/Private/ShaderCompiler/ShaderCompiler.cpp:1760`, Windows `BELOW_NORMAL`, Unix nice +5 — `Unix/UnixPlatformProcess.cpp:1178–1181`) | `Normal`·`Low`(UE -1과 같은 값) |
 
 한계:
 
@@ -197,11 +197,11 @@ dotnet msbuild Rocks.proj -t:Test -p:RocksPlatform=android -p:AndroidAbi=x86_64
 4. 초기 파일 I/O의 부분·정확 전송, Unicode, OS 권한·오류·링크, 소유권과 실패 주입을 보강한다. 플랫폼 디렉터리 조회, 파일 wrapper 관리자와 디렉터리 순회·동기 나머지 기능, async/mapped는 단계적으로 추가한다.
 5. Windows/macOS 각각에서 경고 오류 빌드, 공개 헤더 단독 컴파일, 정상·경계·음성 대조와 sanitizer 가능 범위를 확인한다. 실기기 및 검증되지 않은 플랫폼은 미검증으로 남긴다. 추가 플랫폼은 필수 구현과 공통 계약 테스트를 통과한 뒤 지원 대상으로 표시한다.
 
-## UE 5.6 원본 기준 기반 기능 후속 목록
+## UE 5.8 원본 기준 기반 기능 후속 목록
 
-다음 항목은 UE 5.6 commit `cdda65cecacd9a1278020925c357bf4cc0b17e8c`의 지정 헤더 선언과 Rocks `Core/Source/Runtime/PlatformBase`, `Core/Source/Runtime/Core` 공개 API를 대조한 결과다. UE 헤더의 선언은 기능 범위의 근거이며, 해당 기능이 모든 UE 플랫폼에서 동일하게 구현된다는 뜻은 아니다. Rocks의 기존 일부 구현은 부분 지원으로 기록하고 나머지는 후속으로 분류한다.
+다음 항목은 UE 5.8(5.8.4, commit `f45729c0b6f0`)의 지정 헤더(`Engine/Source/Runtime/Core/Public/` 아래) 선언과 Rocks `Core/Source/Runtime/PlatformBase`, `Core/Source/Runtime/Core` 공개 API를 대조한 결과다. 처음 대조는 UE 5.6 commit `cdda65ce`로 했고, 표의 헤더와 심볼(메모리 기본 연산·통계·`PageProtect`·가상 메모리 블록·named shared memory, `IFileHandle`·`IPlatformFile`·`IPhysicalPlatformFile`·async read·mapped file·journal, `FThread::Detach`·`FRunnableThread::Suspend`·`Kill`, TLS slot 네 함수, DLL load·export·free)이 5.8에도 모두 있음을 다시 확인했다. UE 헤더의 선언은 기능 범위의 근거이며, 해당 기능이 모든 UE 플랫폼에서 동일하게 구현된다는 뜻은 아니다. Rocks의 기존 일부 구현은 부분 지원으로 기록하고 나머지는 후속으로 분류한다.
 
-| 우선순위 | 영역과 UE 5.6 확인 근거 | Rocks 현황과 후속 기능 | 검증 기준 |
+| 우선순위 | 영역과 UE 5.8 확인 근거 | Rocks 현황과 후속 기능 | 검증 기준 |
 |---|---|---|---|
 | P0 | 메모리 기본 연산: `GenericPlatform/GenericPlatformMemory.h`의 `Memmove`, `Memset`, `Memzero`, `Memcpy`, `Memcmp`, `Memswap`, unaligned read/write | Rocks 내부에는 일부 C 메모리 연산 사용이 있으나, 전체를 일관되게 제공하는 공개 플랫폼 메모리 유틸리티는 확인하지 못하였다. 겹침 허용 여부와 alignment·타입 수명 규약을 정한다. | 길이 0, 동일 주소, 서로 겹치는 범위, 정렬되지 않은 주소, 표현 범위 경계, 실제 기대 바이트, sanitizer 및 플랫폼별 테스트 |
 | P0 | 메모리 진단·페이지: 같은 헤더의 `GetStats`, `GetStatsRaw`, `GetConstants`, `PageProtect`, 가상 메모리 블록 | Rocks의 단일 영역 reserve/commit/decommit/release는 부분 구현이다. 읽기·쓰기 권한을 독립적으로 지정하는 보호 API와 물리·가용·프로세스·피크 메모리 및 압력 상태를 일관되게 조회하는 플랫폼 API는 후속이다. | 실제 페이지 접근 허용·차단을 양성·자식 프로세스 음성 대조로 확인한다. 범위·정렬·overflow, 실패 후 소유권과 재시도, OS 실패 주입, Windows/macOS 실기기 검증을 포함한다. |

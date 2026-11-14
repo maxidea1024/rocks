@@ -492,7 +492,7 @@ TEST(PathSplitAndBaseFileNameReturnUnmodifiedBorrowedViews) {
     CHECK(!Path::BaseFileName(StringView("a\xFF", 2), PathStyle::Windows));
 }
 
-TEST(PathUe56DirectoryAndSplitSeparateFromParent) {
+TEST(PathUe58DirectoryAndSplitSeparateFromParent) {
     const PathStyle styles[] = {PathStyle::Posix, PathStyle::Windows};
     for (PathStyle style : styles) {
         auto directory = Path::Directory("/file", style);
@@ -528,7 +528,7 @@ TEST(PathUe56DirectoryAndSplitSeparateFromParent) {
     CHECK(driveRelativeName.Value() == StringView("C:foo"));
 }
 
-TEST(PathUe56DotExtensionAndDirectoryName) {
+TEST(PathUe58DotExtensionAndDirectoryName) {
     SystemAllocator allocator;
     const PathStyle styles[] = {PathStyle::Posix, PathStyle::Windows};
     for (PathStyle style : styles) {
@@ -547,7 +547,7 @@ TEST(PathUe56DotExtensionAndDirectoryName) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
-TEST(PathUe56FilenameNormalizationIsIndependentFromFullNormalization) {
+TEST(PathUe58FilenameNormalizationIsIndependentFromFullNormalization) {
     SystemAllocator allocator;
     const PathStyle styles[] = {PathStyle::Posix, PathStyle::Windows};
     for (PathStyle style : styles) {
@@ -563,6 +563,8 @@ TEST(PathUe56FilenameNormalizationIsIndependentFromFullNormalization) {
     CHECK(posix.Value().View() == StringView("a\\b"));
 }
 
+// UE 5.6 FPaths::CollapseRelativeDirectories 결과다. UE 5.8은 알고리즘을 새로 써서 "a.../x"를
+// 그대로 두고 "..hidden/file"을 받는다(성공). Rocks는 5.6 결과를 유지한다(Path.h).
 TEST(PathUe56CollapseRelativeDirectoriesAndFailurePreserveInput) {
     SystemAllocator allocator;
     struct Case {

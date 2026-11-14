@@ -50,7 +50,7 @@
 
 ### 경로와 파일 I/O의 초기 구현
 
-`Core/Text/Path.h`는 Windows·POSIX 문법을 선택해 루트·정규화·결합·절대/상대 변환·포함 판정, 파일명·디렉터리·부모·확장자 분리와 설정을 제공한다. `Directory`는 마지막 구분자 기준 분리이고 `Parent`는 루트 보존을 우선한다. `Split(".")`의 이름은 빈 값, `Split("..")`의 이름은 `..`이며, `BaseFileName("..")`은 `.`이다. `ChangeExtension`은 구분점 없는 이름을 유지하고 `SetExtension`은 추가한다. `NormalizeFilename`은 역슬래시를 슬래시로 바꾸며 별도의 `CollapseRelativeDirectories`는 UE5.6 스타일 축약을 수행한다. OS별 `NormalizePath` 보정 hook은 아직 연결되지 않았다.
+`Core/Text/Path.h`는 Windows·POSIX 문법을 선택해 루트·정규화·결합·절대/상대 변환·포함 판정, 파일명·디렉터리·부모·확장자 분리와 설정을 제공한다. `Directory`는 마지막 구분자 기준 분리이고 `Parent`는 루트 보존을 우선한다. `Split(".")`의 이름은 빈 값, `Split("..")`의 이름은 `..`이며, `BaseFileName("..")`은 `.`이다. `ChangeExtension`은 구분점 없는 이름을 유지하고 `SetExtension`은 추가한다. `NormalizeFilename`은 역슬래시를 슬래시로 바꾸며 별도의 `CollapseRelativeDirectories`는 UE 5.6 규칙의 축약을 수행한다(5.8에서 바뀜: UE 5.8은 이 알고리즘을 새로 써서 `..name/x`처럼 `..`로 시작하는 이름을 받고 이름 안의 `./`(예: `a.../x`)를 지우지 않는다. Rocks는 5.6 결과를 유지한다). OS별 `NormalizePath` 보정 hook은 아직 연결되지 않았다.
 
 `String`의 `/`와 `/=`는 `Path::Combine`·`Append`에 연결되며 원문을 결합하고 `Result`로 실패를 전달한다. `/=`는 실제 변경이 없거나 capacity가 충분하면 기존 저장소를 재사용하며 입력 별칭을 처리한다. 재할당이 필요한 연산에는 기존 `String`과 할당기의 반환 순서 계약이 적용된다. 정규화·포함 판정은 문자열 연산일 뿐 실제 파일 접근 가능성, 링크 해석이나 보안 경계를 보장하지 않는다.
 
@@ -100,7 +100,7 @@
 - `String`과 `StringView`는 앞/뒤 `Find`, `Contains`, `StartsWith`, `EndsWith`, `Split`, byte 범위 부분 문자열, ASCII 공백 제거와 대소문자 변환을 제공한다. `String::TryReplace`는 겹치지 않는 일치를 치환한다. 검색 기본값은 ASCII 대소문자 무시이며 비ASCII는 바이트를 그대로 비교한다. 결과 인덱스는 UTF-8 byte 단위로 UE의 `TCHAR` 단위와 다르다. byte 부분 문자열 API는 UTF-8 코드 포인트 경계를 검사한다. `StringView` 검색과 분리는 비소유 byte view에 대한 연산이므로 호출자가 유효한 UTF-8과 원본 수명을 관리한다. 치환은 자기 별칭과 할당 실패를 고려하며 실패 시 기존 문자열을 보존한다. format, Unicode folding·정규화 등 전체 UE 문자열 기능은 아직 미구현이다.
 - `Name{}`은 유효한 None이며 빈 문자열 및 ASCII 대소문자와 무관한 `None`도 None과 비교된다. 정상 이름은 ASCII case-insensitive 비교 ID와 원래 표기의 표시 ID를 분리하고 숫자 접미사를 지원한다. 번호가 있는 `None_N`은 None이 아니다. `GetNumber()`는 외부 표기의 N을 반환하고 번호가 없으면 -1을 반환한다. 이는 UE의 내부 번호 표현과 다르다. 보통 이름은 pool domain이 다르면 동일하지 않으며 발급 token과 view의 실제 유효성은 해당 pool의 `Acquire`와 `NameLease`로 확인한다. token은 영속·네트워크 식별자가 아니다. 비ASCII case folding은 제공하지 않는다.
 - `Array`는 단일 원소 삽입·emplace, span/배열 append, resize, 순서 보존/교환 삭제, pop, 앞/뒤 검색, reset·empty·shrink를 제공한다. 이동 전용 원소, 자기 별칭과 할당 실패 시 원상 보존을 고려한다. 재할당·삽입·삭제 시 포인터와 view의 무효화 및 할당기의 반환 순서 계약을 따라야 한다. 정렬·heap과 추가 범위 API는 후속이다.
-- `BitArray`는 bit 단위 크기 조절·삽입·삭제·검색·설정·개수 및 AND/OR/XOR 조합을 제공한다. 자동 크기 증가는 기하 성장하고 명시적 reserve는 워드 경계로 반올림한다. 실패하면 기존 내용과 저장소를 보존한다. UE5.6과 같이 겹치는 구간의 교환 삭제는 `Array`와 `BitArray`가 서로 다른 원본 구간에서 채울 수 있으므로 두 연산의 결과를 동일하다고 가정하지 않는다. 동시 변경에는 외부 동기화가 필요하다.
+- `BitArray`는 bit 단위 크기 조절·삽입·삭제·검색·설정·개수 및 AND/OR/XOR 조합을 제공한다. 자동 크기 증가는 기하 성장하고 명시적 reserve는 워드 경계로 반올림한다. 실패하면 기존 내용과 저장소를 보존한다. UE 5.8과 같이 겹치는 구간의 교환 삭제는 `Array`와 `BitArray`가 서로 다른 원본 구간에서 채울 수 있으므로 두 연산의 결과를 동일하다고 가정하지 않는다. 동시 변경에는 외부 동기화가 필요하다.
 
 관련 테스트는 `Core/Source/Runtime/Core/Tests`의 `StringOperationsTests`, `NameNoneTests`·`NameTokenReviewTests`·`NameEqualityPropertyTests`, `ArrayFeatureTests`·`ArrayGrowthReviewTests`·`ArrayStackReviewTests`, `BitArrayTests`·`BitArrayBoundaryTests`·`BitArrayGrowthTests` 및 실패 대조군에 있다. 존재하는 테스트와 해당 소스의 실제 플랫폼별 실행 결과는 별도로 구분한다.
 
@@ -267,7 +267,7 @@ Windows 개발자 모드를 활성화한 뒤 기존 빌드의 파일 링크 fixt
 
 ## 2026-11-11 Core 정렬·검색 구현과 검증
 
-`Core/Algorithms.h`에 할당 없는 비안정 정렬, lower/upper bound와 이진 탐색을 추가하고 `Array::Sort()`와 비교기 오버로드를 제공한다. 상세 계약과 사용 예는 [정렬·이진 탐색](Algorithms.ko.md)을 따른다. UE 5.6 `TArray` 정렬 기능과 비교하되 포인터 자동 역참조 정책은 다르며, UE 5.6 별도 `Algo` 헤더 전수 대조는 아직 하지 않았다.
+`Core/Algorithms.h`에 할당 없는 비안정 정렬, lower/upper bound와 이진 탐색을 추가하고 `Array::Sort()`와 비교기 오버로드를 제공한다. 상세 계약과 사용 예는 [정렬·이진 탐색](Algorithms.ko.md)을 따른다. UE 5.8 `TArray` 정렬 기능과 비교하되 포인터 자동 역참조 정책은 다르며, UE 5.8 별도 `Algo` 헤더 전수 대조는 아직 하지 않았다.
 
 Windows Foundation Debug는 native 415건, harness 67건, meta 41건이 통과했다. 이후 C# 하네스에 양방향 이종 키 컴파일 음성 대조와 컴파일러 미지정 시 생략 표시를 보강했으며, 동일한 Debug native 바이너리로 보강된 harness 67건을 다시 실행해 통과했다. 컴파일러 미지정 직접 실행에서는 `[SKIP]` 표시를 확인했다. Debug 전체 실행 결과는 `out/core-algorithms-debug.log`, 보강 후 harness는 `out/core-algorithms-debug-harness-recheck.log`에 있다.
 
@@ -327,7 +327,7 @@ Rocks.Build에 Android 대상을 정식으로 추가했다(`--platform android`,
 
 ## 2026-11-13 PlatformBase 자식 프로세스(P06 일부)
 
-셰이더 컴파일 워커·외부 도구 실행의 선행 기반으로 `Platform/Process.h`를 추가했다(상세 계약·UE 5.6 대조: [플랫폼 계층](../Design/PlatformLayer.ko.md) "자식 프로세스와 pipe"). 시작·대기·종료 코드·자손까지 강제 종료(Windows job object, macOS 프로세스 그룹)·시간 제한 pipe·출력·오류 동시 수집 `RunProcess`·PID 생존 확인·실행 파일 경로를 제공한다. Android는 `Unsupported`다. Windows UTF-16 변환·`\?\` 접두사 제거·오류 변환은 파일 backend와 함께 `Private/Win64/WindowsString.h`·`WindowsError.h`로 모았다.
+셰이더 컴파일 워커·외부 도구 실행의 선행 기반으로 `Platform/Process.h`를 추가했다(상세 계약·UE 5.8 대조: [플랫폼 계층](../Design/PlatformLayer.ko.md) "자식 프로세스와 pipe"). 시작·대기·종료 코드·자손까지 강제 종료(Windows job object, macOS 프로세스 그룹)·시간 제한 pipe·출력·오류 동시 수집 `RunProcess`·PID 생존 확인·실행 파일 경로를 제공한다. Android는 `Unsupported`다. Windows UTF-16 변환·`\?\` 접두사 제거·오류 변환은 파일 backend와 함께 `Private/Win64/WindowsString.h`·`WindowsError.h`로 모았다.
 
 - 독립 리뷰 2회를 반영했다: Windows batch 파일 인자 주입 거부, 출력이 쉬지 않을 때의 굶주림과 남은 출력 수집 상한(전체 시간 ≤ timeout + 10초), pipe 이름 난수, 닫힌 부모 표준 handle, `Terminate` 실패 시 요청 미기록, macOS kqueue 경합·`ECHILD`·대기 실패와 시간 초과 구분·`E2BIG`·argv[0].
 - Windows 입력 pipe는 비차단(`PIPE_NOWAIT`) 동기 handle로 바꿨다. overlapped 쓰기를 시간 초과로 취소하면 자식이 이미 읽은 일부를 0바이트로 보고해 `WriteInput`의 쓴 양이 틀렸다.

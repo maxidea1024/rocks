@@ -5,7 +5,7 @@
 #include <Core/Text/StringBuilder.h>
 
 // Guid(128-bit 고유 식별자) 발급과 텍스트 표기다(UE FGuid::NewGuid·ToString·Parse 대응). 기본
-// 표기는 UE와 다르다: UE 5.6 ToString() 기본(EGuidFormats::Digits)은 구분자 없는 32자 대문자이고,
+// 표기는 UE와 다르다: UE 5.8 ToString() 기본(EGuidFormats::Digits)은 구분자 없는 32자 대문자이고,
 // Rocks "{}"는 RFC 9562 36자 소문자다. 해석은 두 형식을 모두 받는다.
 //
 // 사용 예:

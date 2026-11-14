@@ -23,7 +23,7 @@
 //   조정으로 뒤로 갈 수 있다.
 namespace rocks {
 
-// 요일이다(UE5.6 EDayOfWeek와 같이 월요일이 0).
+// 요일이다(UE5.8 EDayOfWeek와 같이 월요일이 0).
 enum class DayOfWeek : uint8 {
     Monday,
     Tuesday,
@@ -34,7 +34,7 @@ enum class DayOfWeek : uint8 {
     Sunday
 };
 
-// 0001-01-01 00:00:00 UTC부터의 100ns tick으로 나타낸 시각이다(UE5.6 FDateTime 대응).
+// 0001-01-01 00:00:00 UTC부터의 100ns tick으로 나타낸 시각이다(UE5.8 FDateTime 대응).
 // - 범위는 0001-01-01 00:00:00부터 9999-12-31 23:59:59.9999999까지, 달력은 역산
 // 그레고리력이다(1582년
 //   이전에도 그레고리력 규칙을 그대로 적용한다).

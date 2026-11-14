@@ -28,7 +28,8 @@ public sealed record DescribedModule(ModuleDescriptor Descriptor, string OwnerNa
 /// <list type="bullet">
 /// <item>켜지지 않은 플러그인의 모듈(PluginCatalog.ResolveEnabled 기준).</item>
 /// <item>Editor 모듈: 아직 에디터 타깃이 없으므로 항상 뺀다.</item>
-/// <item>Developer 모듈: Release(배포)에서 뺀다. UE 5.6의 DeveloperTool(Shipping 외 모든 타깃)과 같은 의미다.
+/// <item>Developer 모듈: Release(배포)에서 뺀다. UE 5.8의 DeveloperTool(기본은 에디터·프로그램 타깃이거나
+/// Test·Shipping이 아닌 구성 — Rocks에는 Test 구성이 없다)과 같은 의미다.
 /// UE의 Developer(에디터·프로그램 타깃 전용)와는 다르다.</item>
 /// <item>platforms에 이번 플랫폼이 없는 모듈.</item>
 /// </list>

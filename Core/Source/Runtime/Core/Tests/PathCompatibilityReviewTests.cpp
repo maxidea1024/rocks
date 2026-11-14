@@ -4,6 +4,8 @@
 
 using namespace rocks;
 
+// UE 5.6은 축약 뒤 "./"를 모두 지워 "a..//"가 "a./"가 된다. UE 5.8은 이 일괄 제거가 없어
+// "a..//"를 그대로 둔다. Rocks는 5.6 결과를 유지한다(Path.h).
 TEST(PathCompatibilityCollapsesOverlappingDotsLikeUe56) {
     SystemAllocator allocator;
     const PathStyle styles[] = {PathStyle::Windows, PathStyle::Posix};

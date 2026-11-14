@@ -332,7 +332,7 @@ TEST(BitArrayDeterministicMixedOperationsMatchReferenceModel) {
                     }
                 } else {
                     REQUIRE(bits.TryRemoveAtSwap(index, amount));
-                    // UE5.6은 제거 전 끝의 count비트를 앞의 제거 영역으로 복사한다.
+                    // UE5.8은 제거 전 끝의 count비트를 앞의 제거 영역으로 복사한다.
                     // 원본 snapshot으로 기대값을 구성해 구현과 독립적으로 비교한다.
                     bool before[384]{};
                     for (usize i = 0; i < count; ++i) {

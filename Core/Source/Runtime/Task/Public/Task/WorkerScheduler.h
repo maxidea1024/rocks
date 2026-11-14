@@ -90,7 +90,7 @@ private:
     friend class WorkerTaskEvent;
 };
 
-// 외부 완료 이벤트다(UE 5.6 UE::Tasks::FTaskEvent 대응). body가 없고 worker가 실행하지 않으며,
+// 외부 완료 이벤트다(UE 5.8 UE::Tasks::FTaskEvent 대응). body가 없고 worker가 실행하지 않으며,
 // 호출자가 TryTrigger·TryFail로 완료한다. 파일 IO 완료 콜백·다른 시스템의 신호를 scheduler 작업의
 // dependency로 잇는다(예: 비동기 읽기가 끝나면 해제 작업 실행, Task/AsyncIoEvent.h).
 //

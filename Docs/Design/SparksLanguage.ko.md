@@ -9,7 +9,7 @@
 | 항목 | 내용 |
 |---|---|
 | 기준 문서 | 전체 계획 개정 1.8 §23 · [입력 상세안](CoreObjectInputDetailedPlan.ko.md) · [UI 툴킷](UiToolkit.ko.md) CU2·CU3·CU5·CU8 · [Clang 생성 Reflection](../Implementation/ReflectionMetadata.ko.md)(구현 상태) |
-| Unity·Verse 비교 기준 | Unity 수명 hook 체계(종류·호출 순서·의미). Verse는 The Book of Verse[R19] 기준이며 언어 설계의 참고 대상이다. Rocks의 Unreal 기준은 UE 5.6 |
+| Unity·Verse 비교 기준 | Unity 수명 hook 체계(종류·호출 순서·의미). Verse는 The Book of Verse[R19] 기준이며 언어 설계의 참고 대상이다. Rocks의 Unreal 기준은 UE 5.8(5.8.4, commit `f45729c0b6f0`) |
 | Rocks 상태 | Sparks 언어·VM·컴파일러 미구현 |
 | 식별자 | 도입 단계 L0–L4, Core 변경 C1–C5, 리플렉션 확장 CU9, Gate G1–G4, 결정 SD1–SD21, 부록 A, 참고 자료 R1–R31 |
 
@@ -1120,7 +1120,7 @@ class Chest : ScriptComponent {
 
 ## 16. Verse 검토와 차용
 
-Epic의 "The road to UE6"(2026-06-17)는 게임플레이 프로그래밍 모델의 Verse 전환을 밝히고, Actor·Blueprint는 초기 UE6에 남았다가 새 framework가 성숙하면 deprecate된다고 기재하였다. Blueprint 즉시 제거는 2차 보도다.[R18] Rocks의 Unreal 기준은 UE 5.6이며 Verse는 언어 설계의 참고 대상이다.
+Epic의 "The road to UE6"(2026-06-17)는 게임플레이 프로그래밍 모델의 Verse 전환을 밝히고, Actor·Blueprint는 초기 UE6에 남았다가 새 framework가 성숙하면 deprecate된다고 기재하였다. Blueprint 즉시 제거는 2차 보도다.[R18] Rocks의 Unreal 기준은 UE 5.8이며 Verse는 언어 설계의 참고 대상이다.
 
 | Verse 기능 | 판정 | Sparks 반영 |
 |---|---|---|

@@ -24,7 +24,7 @@
 //   생기지 않는다.
 namespace rocks {
 
-// 100ns tick 단위의 부호 있는 시간 간격이다(UE5.6 FTimespan 대응). 범위는 int64 tick 전체(약
+// 100ns tick 단위의 부호 있는 시간 간격이다(UE5.8 FTimespan 대응). 범위는 int64 tick 전체(약
 // ±29,227년)다.
 // - 연산자(+, -, 단항 -, +=, -=, Duration)는 overflow를 Fatal로 끝낸다. 외부 데이터에서 온 값은
 // 같은 일을

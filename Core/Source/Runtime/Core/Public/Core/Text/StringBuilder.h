@@ -210,7 +210,7 @@ Result<void> FormatTo(StringBuilderBase& out, StringView format,
 
 } // namespace detail
 
-// UTF-8 문자열을 이어 붙이는 builder의 공통 부분이다(UE5.6 TStringBuilderBase 대응). 직접 만들지
+// UTF-8 문자열을 이어 붙이는 builder의 공통 부분이다(UE5.8 TStringBuilderBase 대응). 직접 만들지
 // 않고 StringBuilder<N>을 만든 뒤, 받는 함수는 StringBuilderBase&로 받는다.
 //
 // 보장:

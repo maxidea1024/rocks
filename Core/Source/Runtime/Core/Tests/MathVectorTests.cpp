@@ -243,7 +243,7 @@ TEST(MathUtility_LerpOverflowAndNaNPropagation) {
 }
 
 TEST(MathUtility_NamedTolerancesAndUlpComparison) {
-    // UE 5.6 UE_SMALL_NUMBER·UE_KINDA_SMALL_NUMBER와 같은 값이다.
+    // UE 5.8 UE_SMALL_NUMBER·UE_KINDA_SMALL_NUMBER와 같은 값이다.
     CHECK(math::SmallNumber<float> == 1.0e-8f && math::KindaSmallNumber<double> == 1.0e-4);
     CHECK(math::MachineEpsilon<float> == FLT_EPSILON &&
           math::MachineEpsilon<double> == DBL_EPSILON);

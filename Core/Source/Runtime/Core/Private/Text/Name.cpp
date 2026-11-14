@@ -53,7 +53,7 @@ ParsedName ParseName(StringView source) noexcept {
     for (usize index = firstDigit; index < size; ++index) {
         value = value * 10 + static_cast<uint64>(source.Data()[index] - '0');
     }
-    // UE5.6은 MAX_int32 미만의 외부 번호만 접미사로 해석한다.
+    // UE5.8은 MAX_int32 미만의 외부 번호만 접미사로 해석한다(NameTypes.h ParseNumberFromName).
     if (value >= 2147483647ull) {
         return {size, 0};
     }

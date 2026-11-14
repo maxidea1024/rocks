@@ -4,7 +4,7 @@ namespace Rocks.Build;
 public enum NativePlatform { Windows, MacOS, Android }
 
 /// <summary>
-/// 빌드 구성이다(UE5.6 Debug·Development·Shipping 대응).
+/// 빌드 구성이다(UE5.8 Debug·Development·Shipping 대응).
 /// <list type="bullet">
 /// <item>Debug: 최적화 없음, 디버그 CRT(Windows /MDd), 디버그 정보. 단계 실행·변수 확인용.</item>
 /// <item>Development: 최적화(-O2)와 디버그 정보를 함께 쓰고 검사(Fatal·ROCKS_BUILD_DEVELOPMENT 분기)를

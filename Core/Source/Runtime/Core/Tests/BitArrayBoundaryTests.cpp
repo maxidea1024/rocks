@@ -16,7 +16,7 @@ bool RightBit(usize index) noexcept {
 
 } // namespace
 
-TEST(BitArrayRemoveAtSwapUe56GoldenCrossesWordBoundary) {
+TEST(BitArrayRemoveAtSwapUe58GoldenCrossesWordBoundary) {
     SystemAllocator allocator;
     {
         BitArray overlapping(allocator);
@@ -26,7 +26,7 @@ TEST(BitArrayRemoveAtSwapUe56GoldenCrossesWordBoundary) {
         REQUIRE(overlapping.TrySet(63, true));
         REQUIRE(overlapping.TrySet(65, true));
         REQUIRE(overlapping.TrySet(67, true));
-        // UE 5.6의 `NumBits - NumBitsToRemove` 위치에서 읽는다. tail이 count보다
+        // UE 5.8의 `NumBits - NumBitsToRemove` 위치에서 읽는다. tail이 count보다
         // 짧으므로 65, 66, 67이 유지되는 제거 위치 62, 63, 64에 들어간다.
         REQUIRE(overlapping.TryRemoveAtSwap(62, 67));
         REQUIRE(overlapping.Size() == 65);

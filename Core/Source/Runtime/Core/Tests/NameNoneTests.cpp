@@ -67,7 +67,7 @@ void InternDuringShutdown(void* raw) noexcept {
 
 } // namespace
 
-TEST(NameNoneDefaultAndValidEmptyBaseMatchUe56) {
+TEST(NameNoneDefaultAndValidEmptyBaseMatchUe58) {
     const Name none;
     NameLease emptyLease;
     CHECK(!emptyLease && emptyLease.Identifier().IsNone());

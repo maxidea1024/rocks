@@ -234,7 +234,7 @@ TEST(StringReplaceIsAtomicHandlesAliasAndEmbeddedNull) {
     CHECK(system.Stats().liveAllocations == 0);
 }
 
-TEST(StringFindBoundaryMatchesUe56ByteEquivalent) {
+TEST(StringFindBoundaryMatchesUe58ByteEquivalent) {
     const StringView text("abc");
     CHECK(text.Find("c", StringComparison::CaseSensitive, StringSearchDirection::FromStart, 3) ==
           2);

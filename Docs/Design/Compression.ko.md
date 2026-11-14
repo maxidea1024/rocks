@@ -1,6 +1,7 @@
 # 압축 헬퍼 — 코덱 선정·빌드 통합·동기/비동기 API
 
-기준일: 2026-11-12. Godot `Compression`(core/io/compression.h)과 UE 5.6 `FCompression`을 참고해, 엔진·도구·게임이 함께
+기준일: 2026-11-12(UE 대조는 2026-11-15에 UE 5.8(5.8.4, commit `f45729c0b6f0`) 대조로 옮겼다). Godot
+`Compression`(core/io/compression.h)과 UE 5.8 `FCompression`을 참고해, 엔진·도구·게임이 함께
 쓰는 압축 헬퍼를 Core 계층에 둔다. 요구 조건은 **성능**, **라이선스 문제 없음**, **포팅 문제 없음**이다. 이 문서는 네 관점
 (라이선스·포팅, API 계약·악성 입력, 빌드·정책 통합, 비동기)의 병렬 교차검증을 거친 설계다. 구현·실행 검증 결과는
 [구현 상태](../Implementation/FoundationStatus.ko.md)와 별도 검증 기록을 따른다.
@@ -715,8 +716,9 @@ Brotli는 13.4절이다. 헤더는 `Compression/CompressionStream.h`다.
 ## 11. 압축 사전 (3차, 교차검증 반영)
 
 작은 입력(수십 byte–수십 KiB의 에셋·JSON·네트워크 메시지)이 많을 때 공통 내용을 미리 알려 압축률을 높인다. 헤더는
-`Compression/CompressionDictionary.h`다. Godot `Compression`과 UE 5.6 `FCompression`·`FCompressedBuffer`에는 범용 압축의
-사전 인자가 없다. UE에서 학습 사전을 쓰는 곳은 OodleNetwork 플러그인의 패킷 압축이며 학습은 commandlet(도구 단계)이
+`Compression/CompressionDictionary.h`다. Godot `Compression`과 UE 5.8 `FCompression`·`FCompressedBuffer`에는 범용 압축의
+사전 인자가 없다(`Misc/Compression.h`·`Compression/CompressedBuffer.h`). UE에서 학습 사전을 쓰는 곳은 OodleNetwork 플러그인의
+패킷 압축이며 학습은 commandlet(도구 단계, `Engine/Plugins/Compression/OodleNetwork`의 `OodleNetworkTrainerCommandlet`)이
 맡는다. 그래서 사용은 Core 런타임에, 학습은 도구 계층에 둔다(11.6절). 설계 초안은 교차검증 3건(zstd 1.5.7 원본·실측,
 API·계약·형식, dictBuilder 조사)을 반영했다.
 
@@ -1249,9 +1251,11 @@ brotli==1.1.0`, google/brotli 1.1.0의 공식 binding)가 만든 13개(합 4,107
 
 ## 14. 형식 플러그인 등록 (7차, 교차검증 반영)
 
-UE 5.6 `ICompressionFormat` 대응이다. UE는 `IModularFeatures`("CompressionFormat")에 형식을 등록하고
-`FCompression::GetCompressionFormat(FName)`이 내장 형식(Zlib·Gzip·LZ4·Oodle) 다음으로 찾는다. 형식은 `FName`으로 식별하고
-`GetVersion`·`GetDDCKeySuffix`를 너겟 키에 넣는다. Rocks도 저장소에 넣지 않는 외부 코덱(라이선스상 프로젝트가 따로
+UE 5.8 `ICompressionFormat` 대응이다. UE는 `IModularFeatures`("CompressionFormat")에 형식을 등록하고
+`FCompression`이 내장 형식(Zlib·Gzip·LZ4)을 먼저 처리하고 그 밖의 이름은 `FCompression::GetCompressionFormat(FName)`이
+등록 목록에서 찾는다(내장 Oodle도 처음 쓸 때 이 목록에 스스로 등록한다 — `Misc/ICompressionFormat.h` 12·70–71,
+`Private/Misc/Compression.cpp` 500–544·1215, `Private/Compression/OodleDataCompressionFormat.cpp` 516, 5.6과 같다). 형식은 `FName`으로 식별하고 `GetVersion`·
+`GetDDCKeySuffix`를 너겟 키에 넣는다. Rocks도 저장소에 넣지 않는 외부 코덱(라이선스상 프로젝트가 따로
 가져오는 코덱 등)을 프로젝트·플러그인이 등록해 내장 형식과 같은 API로 쓰게 한다. 헤더는 `Compression/CompressionCodec.h`,
 구현은 `Private/CompressionCodec.cpp`다. 설계 초안은 교차검증(값 인코딩·수명·비동기 연동·거부 표면)을 거쳤다.
 

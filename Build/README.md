@@ -18,7 +18,7 @@ dotnet msbuild Rocks.proj /t:Build /p:Configuration=Release /p:RocksTarget=Engin
 
 ### 빌드 구성
 
-UE5.6 Debug·Development·Shipping에 대응한다. 구성마다 `ROCKS_BUILD_DEBUG`·`ROCKS_BUILD_DEVELOPMENT`·`ROCKS_BUILD_RELEASE` 중 정확히 하나를 1로 정의하며(`Base/Compiler.h`가 확인), 모듈은 이 매크로를 직접 정의할 수 없다.
+UE5.8 Debug·Development·Shipping에 대응한다. 구성마다 `ROCKS_BUILD_DEBUG`·`ROCKS_BUILD_DEVELOPMENT`·`ROCKS_BUILD_RELEASE` 중 정확히 하나를 1로 정의하며(`Base/Compiler.h`가 확인), 모듈은 이 매크로를 직접 정의할 수 없다.
 
 | 구성 | 최적화 | 디버그 정보 | Windows CRT | NDEBUG | ThinLTO | 구성 매크로 | 용도 |
 |---|---|---|---|---|---|---|---|

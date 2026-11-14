@@ -77,7 +77,7 @@ TEST(NameCasePreservesEachSpellingAndHashIdentity) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
-TEST(NameNumberSuffixMatchesDocumentedUe56Bounds) {
+TEST(NameNumberSuffixMatchesDocumentedUe58Bounds) {
     SystemAllocator allocator;
     {
         NamePool pool(allocator);
@@ -98,7 +98,7 @@ TEST(NameNumberSuffixMatchesDocumentedUe56Bounds) {
             {"Rocket_-1", -1, "Rocket_-1"},
             {"Rocket_", -1, "Rocket_"},
             {"Rocket__7", 7, "Rocket_"},
-            {"_0", -1, "None"}, // 빈 base의 유효 번호는 UE5.6처럼 기본 None이다.
+            {"_0", -1, "None"}, // 빈 base의 유효 번호는 UE5.8처럼 기본 None이다.
         };
         for (const Case& sample : cases) {
             auto name = pool.TryIntern(sample.input);
