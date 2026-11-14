@@ -826,6 +826,136 @@ internal static class MetaTests
                 Verify.Contains(diagnostic, rejected.StdOut + rejected.StdErr, "trait static_assert diagnostic");
             }
         });
+        // B6b: 클래스 Struct·Array 필드의 함수표는 valueNativeType(없으면 nullptr 명시) 뒤에 PathClassField 경로 thunk를, 모든 struct
+        // 멤버는 StructFieldOps의 둘째 인자로 PathStructMember를 내며 대상 종류는 TargetKind(배열이면 원소 종류)다. 단일 값 클래스
+        // 필드에는 path가 없다(Docs/Design/ReflectionFoundations.ko.md 7.1절 MetaCompiler).
+        suite.Add("Meta.PathThunksReachStructAndArrayFields", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            await probe.GenerateAsync(ArraySource);
+            string generated = Compact(File.ReadAllText(probe.Output));
+            const string lambda = "+[](const ::rocks::RuntimeFieldOps&, ::rocks::detail::PathCursor& cursor) noexcept -> ::rocks::Result<void> { return ::rocks::detail::PathClassField<";
+            foreach ((string expected, string reason) in new[]
+            {
+                ("#include <Object/GeneratedPathAccess.h>", "generated header includes the path thunk templates"),
+                ("&::probe::Value::ints, field, context); }, nullptr, " + lambda + "::probe::Value, ::rocks::ValueKind::Int32>(cursor, &::probe::Value::ints); } }",
+                    "array without an Enum/Struct element spells nullptr before its path thunk"),
+                ("NativeTypeKey<::probe::Mode>(), " + lambda + "::probe::Value, ::rocks::ValueKind::Enum>(cursor, &::probe::Value::modes); } }",
+                    "enum element array path thunk follows the element native key"),
+                (lambda + "::probe::Value, ::rocks::ValueKind::Utf8String>(cursor, &::probe::Value::names)", "string element target kind"),
+                (lambda + "::probe::Value, ::rocks::ValueKind::SoftObjectReference>(cursor, &::probe::Value::softs)", "soft reference element target kind"),
+                ("NativeTypeKey<::probe::Leaf>(), " + lambda + "::probe::Value, ::rocks::ValueKind::Struct>(cursor, &::probe::Value::leaves)", "Array<S> target kind"),
+                (lambda + "::probe::Value, ::rocks::ValueKind::ObjectReference>(cursor, &::probe::Value::refs)", "ObjectRefArray target kind"),
+                (lambda + "::probe::Value, ::rocks::ValueKind::ObjectReference>(cursor, &::probe::Value::anyRefs)", "ObjectRefArray<> target kind"),
+                ("NativeTypeKey<::probe::Holder>(), " + lambda + "::probe::Value, ::rocks::ValueKind::Struct>(cursor, &::probe::Value::holders)", "StructRefArray target kind"),
+                ("NativeTypeKey<::probe::Bundle>(), " + lambda + "::probe::Value, ::rocks::ValueKind::Struct>(cursor, &::probe::Value::bundle)", "struct field target kind"),
+                (lambda + "::probe::WorldValue, ::rocks::ValueKind::Struct>(cursor, &::probe::WorldValue::bundle)", "owner is the class that emits the table"),
+                ("detail::StructFieldOps<&::probe::Leaf::count>(", "member codec is unchanged"),
+                ("&detail::PathStructMember<&::probe::Leaf::count, ValueKind::UInt32>)", "scalar member path thunk"),
+                ("&detail::PathStructMember<&::probe::Leaf::codes, ValueKind::UInt16>)", "array member path thunk uses the element kind"),
+                ("&detail::PathStructMember<&::probe::Holder::target, ValueKind::ObjectReference>)", "reference member path thunk"),
+                ("&detail::PathStructMember<&::probe::Holder::weights, ValueKind::Float32>)", "float array member path thunk"),
+                ("&detail::PathStructMember<&::probe::Bundle::refs, ValueKind::ObjectReference>)", "ObjectRefArray member path thunk"),
+                ("&detail::PathStructMember<&::probe::Bundle::holders, ValueKind::Struct>)", "StructRefArray member path thunk"),
+                ("&detail::PathStructMember<&::probe::WorldBundle::inner, ValueKind::Struct>)", "struct member path thunk")
+            })
+            {
+                Verify.That(generated.Contains(Compact(expected), StringComparison.Ordinal), "generated code missing " + reason + ": " + expected);
+            }
+
+            int Count(string text, string needle) => (text.Length - text.Replace(needle, "", StringComparison.Ordinal).Length) / needle.Length;
+            Verify.Equal(9, Count(generated, "PathClassField<::probe::Value,"), "every Value array and struct field has a path thunk");
+            Verify.Equal(1, Count(generated, "PathClassField<::probe::WorldValue,"), "WorldValue struct field has a path thunk");
+            Verify.Equal(Count(generated, "detail::StructFieldOps<"), Count(generated, "&detail::PathStructMember<"), "every struct member has a path thunk");
+            Verify.Equal(7, Count(generated, "&detail::PathStructMember<"), "struct member count");
+            Verify.That(!generated.Contains("PathStructMember<&::probe::WorldBundle::lease", StringComparison.Ordinal), "NATIVE members have no path thunk");
+
+            // 단일 값 클래스 필드(plain)에는 path가 없고(함수표가 decode 뒤에 끝난다) private 멤버·enum·String·EditorOnly 멤버에도 thunk가
+            // 나온다.
+            await probe.GenerateAsync(StructSource);
+            string structs = Compact(File.ReadAllText(probe.Output));
+            foreach ((string expected, string reason) in new[]
+            {
+                ("&::probe::Value::plain, field, context); } },", "scalar class field table ends after decode"),
+                (lambda + "::probe::Value, ::rocks::ValueKind::Struct>(cursor, &::probe::Value::holder)", "struct field path thunk"),
+                (lambda + "::probe::Value, ::rocks::ValueKind::Struct>(cursor, &::probe::Value::extra)", "EditorOnly struct field path thunk"),
+                (lambda + "::probe::WorldValue, ::rocks::ValueKind::Struct>(cursor, &::probe::WorldValue::bits)", "WorldOnly class struct field path thunk"),
+                ("&detail::PathStructMember<&::probe::Holder::flag, ValueKind::UInt8>)", "private member path thunk through GENERATED_BODY"),
+                ("&detail::PathStructMember<&::probe::Leaf::mode, ValueKind::Enum>)", "enum member path thunk"),
+                ("&detail::PathStructMember<&::probe::Leaf::label, ValueKind::Utf8String>)", "string member path thunk"),
+                ("&detail::PathStructMember<&::probe::Middle::offset, ValueKind::Int64>)", "EditorOnly member path thunk"),
+                ("&detail::PathStructMember<&::probe::Middle::leaf, ValueKind::Struct>)", "nested struct member path thunk"),
+                ("&detail::PathStructMember<&::probe::Holder::target, ValueKind::ObjectReference>)", "Required reference member path thunk")
+            })
+            {
+                Verify.That(structs.Contains(Compact(expected), StringComparison.Ordinal), "generated code missing " + reason + ": " + expected);
+            }
+
+            Verify.Equal(2, Count(structs, "PathClassField<::probe::Value,"), "only the struct fields of Value have path thunks");
+            Verify.That(!structs.Contains("(cursor,&::probe::Value::plain)", StringComparison.Ordinal), "scalar class field has no path thunk");
+            Verify.That(!structs.Contains("PathStructMember<&::probe::Middle::cache", StringComparison.Ordinal), "NATIVE struct member has no path thunk");
+            Verify.Equal(Count(structs, "detail::StructFieldOps<"), Count(structs, "&detail::PathStructMember<"), "every struct member has a path thunk");
+        });
+        // Binds 미러 멤버의 path thunk는 미러가 아니라 실제 타입의 멤버 포인터를 쓴다(멤버가 다른 미러인 struct 멤버 포함).
+        suite.Add("Meta.PathThunksOfBindsMirrorsUseTheRealType", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler, BindsModule);
+            string source = "#include <Core/Containers/Array.h>\n" + BindsPreamble + BindsVec3 +
+                "ROCKS_STRUCT(Binds = \"rocks::Vector3<double>\")\nstruct Vec3dBinding {\nROCKS_PROPERTY() double x = 0;\nROCKS_PROPERTY() double y = 0;\nROCKS_PROPERTY() double z = 0;\n};\n" +
+                "struct Pair {\nrocks::Vec3 a;\nrocks::Vec3d b;\n};\n" +
+                "ROCKS_STRUCT(Binds = \"probe::Pair\")\nstruct PairBinding {\nROCKS_PROPERTY() rocks::Vec3 a;\nROCKS_PROPERTY() rocks::Vector3<double> b;\n};\n" +
+                "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nexplicit Value(rocks::Allocator& allocator) noexcept : points(allocator) {}\n" +
+                "ROCKS_PROPERTY() rocks::Vec3 position;\nROCKS_PROPERTY() Pair pair;\nROCKS_PROPERTY() rocks::Array<rocks::Vec3> points;\n};\n}\n";
+            await probe.GenerateAsync(source);
+            string generated = Compact(File.ReadAllText(probe.Output));
+            foreach ((string expected, string reason) in new[]
+            {
+                ("&detail::PathStructMember<&::rocks::Vector3<float>::x, ValueKind::Float32>)", "mirror member of the real type"),
+                ("&detail::PathStructMember<&::rocks::Vector3<double>::z, ValueKind::Float64>)", "template mirror member of the real type"),
+                ("&detail::PathStructMember<&::probe::Pair::a, ValueKind::Struct>)", "mirror member that is another mirror"),
+                ("&detail::PathStructMember<&::probe::Pair::b, ValueKind::Struct>)", "mirror member spelled as the real template"),
+                ("NativeTypeKey<::rocks::Vector3<float>>(), +[](const ::rocks::RuntimeFieldOps&, ::rocks::detail::PathCursor& cursor) noexcept -> ::rocks::Result<void> { " +
+                    "return ::rocks::detail::PathClassField<::probe::Value, ::rocks::ValueKind::Struct>(cursor, &::probe::Value::position); }",
+                    "class field of a Core value type"),
+                ("::rocks::detail::PathClassField<::probe::Value, ::rocks::ValueKind::Struct>(cursor, &::probe::Value::pair)", "class field of a Binds probe type"),
+                ("::rocks::detail::PathClassField<::probe::Value, ::rocks::ValueKind::Struct>(cursor, &::probe::Value::points)", "array of a Core value type")
+            })
+            {
+                Verify.That(generated.Contains(Compact(expected), StringComparison.Ordinal), "generated code missing " + reason + ": " + expected);
+            }
+
+            Verify.That(!generated.Contains("&::probe::Vec3Binding::", StringComparison.Ordinal) && !generated.Contains("&::probe::Vec3dBinding::", StringComparison.Ordinal) &&
+                !generated.Contains("&::probe::PairBinding::", StringComparison.Ordinal), "no member pointer of a mirror declaration");
+        });
+        // 대상 종류가 C++ 멤버 형식과 다르면(오래된 생성 헤더·잘못된 descriptor) TargetValueCheck static_assert가 컴파일을 실패시킨다:
+        // 생성 헤더의 대상 종류를 바꾸면 클래스 배열·enum 원소 배열·struct 필드·ObjectRefArray·struct 멤버 모두 거부된다.
+        suite.Add("Meta.PathThunkTargetMismatchFailsToCompile", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            await probe.GenerateAsync(ArraySource);
+            string original = File.ReadAllText(probe.Output);
+            ProcessResult control = await probe.CompileGeneratedAsync();
+            Verify.Equal(0, control.ExitCode, "generated header compiles: " + control.StdOut + control.StdErr);
+            foreach ((string anchor, bool before, string from, string to) in new[]
+            {
+                ("&::probe::Value::ints);", true, "ValueKind::Int32>", "ValueKind::UInt32>"),
+                ("&::probe::Value::modes);", true, "ValueKind::Enum>", "ValueKind::UInt8>"),
+                ("&::probe::Value::bundle);", true, "ValueKind::Struct>", "ValueKind::Enum>"),
+                ("&::probe::Value::refs);", true, "ValueKind::ObjectReference>", "ValueKind::Struct>"),
+                ("PathStructMember<&::probe::Leaf::count,", false, "ValueKind::UInt32>", "ValueKind::Int32>"),
+                ("PathStructMember<&::probe::Holder::weights,", false, "ValueKind::Float32>", "ValueKind::Float64>")
+            })
+            {
+                int site = original.IndexOf(anchor, StringComparison.Ordinal);
+                Verify.That(site >= 0, "generated path thunk missing: " + anchor);
+                int at = before ? original.LastIndexOf(from, site, StringComparison.Ordinal) : original.IndexOf(from, site, StringComparison.Ordinal);
+                Verify.That(at >= 0 && Math.Abs(at - site) < 200, "path thunk target kind missing near " + anchor);
+                File.WriteAllText(probe.Output, original[..at] + to + original[(at + from.Length)..]);
+                ProcessResult rejected = await probe.CompileGeneratedAsync();
+                Verify.That(rejected.ExitCode != 0, "path thunk with a mismatched target kind compiled: " + anchor + " " + to);
+                Verify.Contains("path thunk target kind does not match the C++ member type", rejected.StdOut + rejected.StdErr, "target kind static_assert diagnostic");
+            }
+        });
         // Array<ObjectRef<T>>·Array<참조 struct>·Array<ObjectRefArray를 담은 struct>는 멤버 선언에서 Array의 nothrow-move
         // static_assert로 Clang이 먼저 실패한다. 그 진단을 멤버 선언 위치의 RMC2304로(필드 이름·원소 철자), NATIVE 멤버는 RMC2205로
         // 바꾼다(clang과 clang-cl 위치 형식 해석은 Meta.ArrayInstantiationSiteParsesClangAndClangClDiagnostics).

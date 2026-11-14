@@ -454,6 +454,69 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::PathEntry::caption",
+      "id": "2c1bb3b77554429a83bf3dfbad156027",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::PathEntry::serial",
+      "id": "0417ab46ab7b499198fb9e8d1aa023b7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::PathEntry::weight",
+      "id": "24fad847b1144ac6b9b861d495dde889",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::PathOwner::entries",
+      "id": "42159f67c7f94ec4bc769c5fd6d83d2c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::PathOwner::frozen",
+      "id": "da11e9b0f90446439e452b8f0969e341",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::PathOwner::frozenEntries",
+      "id": "fa1f57bb0cdf4c2a9b90830d19e5663b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::PathOwner::frozenLinks",
+      "id": "8709f93d98e74797a3eb60c6ab4d87ab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::PathOwner::locked",
+      "id": "e1d98fb4f2b543a1982eb31afc8035df",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::PathOwner::primary",
+      "id": "4204c1940cc64e85a7558ac490082a92",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::PropertyNode::label",
       "id": "ad100000000000000000000000000042",
       "aliases": [],
@@ -696,6 +759,20 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::Node",
       "id": "ad100000000000000000000000000002",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::PathEntry",
+      "id": "8025510f72184f05ae5c22c435295f3f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::PathOwner",
+      "id": "75d1044f467a408b98b5285618277117",
       "aliases": [],
       "retired": false
     },

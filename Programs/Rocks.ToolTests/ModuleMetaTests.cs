@@ -798,11 +798,36 @@ internal static class ModuleMetaTests
                 ("NativeTypeKey<::probe::SA>()", "inherited struct element native key"),
                 ("NativeTypeKey<::probe::EA>()", "inherited enum element native key"),
                 ("static_assert(GeneratedType<::probe::SA>::ContainsStrongReference && !GeneratedType<::probe::SA>::ContainsReferenceArray", "inherited StructRefArray element check"),
-                (", 7u}", "inherited maxElements in the derived schema")
+                (", 7u}", "inherited maxElements in the derived schema"),
+                // B6b: 상속 import 필드의 path thunk는 소유자가 파생 클래스(함수표를 내는 Value), 멤버 포인터가 선언 클래스(Parent)다.
+                // 이 생성 헤더는 MetaCompiler 검증 컴파일을 통과해야 게시된다.
+                ("::rocks::detail::PathClassField<::probe::Value, ::rocks::ValueKind::Struct>(cursor, &::probe::Parent::slots)", "inherited StructRefArray path thunk"),
+                ("::rocks::detail::PathClassField<::probe::Value, ::rocks::ValueKind::Enum>(cursor, &::probe::Parent::modes)", "inherited enum element array path thunk"),
+                ("::rocks::detail::PathClassField<::probe::Value, ::rocks::ValueKind::Struct>(cursor, &::probe::Parent::plains)", "inherited Array<S> path thunk"),
+                ("::rocks::detail::PathClassField<::probe::Value, ::rocks::ValueKind::ObjectReference>(cursor, &::probe::Parent::links)", "inherited ObjectRefArray path thunk"),
+                ("NativeTypeKey<::probe::Group>(), +[](const ::rocks::RuntimeFieldOps&, ::rocks::detail::PathCursor& cursor) noexcept -> ::rocks::Result<void> { " +
+                    "return ::rocks::detail::PathClassField<::probe::Value, ::rocks::ValueKind::Struct>(cursor, &::probe::Value::group); }", "import struct field path thunk")
             })
             {
                 Verify.That(value.Contains(Compact(expected), StringComparison.Ordinal), "generated code missing " + reason + ": " + expected);
             }
+
+            Verify.That(!value.Contains("(cursor,&::probe::Value::next)", StringComparison.Ordinal), "single reference field has no path thunk");
+            Verify.That(!value.Contains("PathStructMember<", StringComparison.Ordinal), "import struct members are not regenerated in the derived module");
+            string parent = Compact(File.ReadAllText(layout.Generated("Lower", "Public/Lower/Parent.generated.h")));
+            foreach ((string expected, string reason) in new[]
+            {
+                ("::rocks::detail::PathClassField<::probe::Parent, ::rocks::ValueKind::Struct>(cursor, &::probe::Parent::slots)", "base class path thunk"),
+                ("&detail::PathStructMember<&::probe::Group::slots, ValueKind::Struct>)", "struct member StructRefArray of another module's element"),
+                ("&detail::PathStructMember<&::probe::Group::plains, ValueKind::Struct>)", "struct member Array<S> of another module's element")
+            })
+            {
+                Verify.That(parent.Contains(Compact(expected), StringComparison.Ordinal), "generated code missing " + reason + ": " + expected);
+            }
+
+            string items = Compact(File.ReadAllText(layout.Generated("Elements", "Public/Elements/Items.generated.h")));
+            Verify.That(items.Contains(Compact("&detail::PathStructMember<&::probe::SA::target, ValueKind::ObjectReference>)"), StringComparison.Ordinal) &&
+                items.Contains(Compact("&detail::PathStructMember<&::probe::Plain::x, ValueKind::UInt16>)"), StringComparison.Ordinal), "element module struct member path thunks");
 
             string aggregate = Compact(File.ReadAllText(layout.Generated("Upper", "Public/Upper/Upper.module.generated.h")));
             int elementsModule = aggregate.IndexOf("::rocks::generated::Elements::RegisterModuleTypes", StringComparison.Ordinal);
@@ -860,6 +885,23 @@ internal static class ModuleMetaTests
                 File.WriteAllText(mutated, MutateType(original, "probe::Parent", change));
                 await Reject(layout.RunArrayModuleAsync("Upper", [mutated, layout.Descriptor("Elements")]), code, reason);
             }
+        });
+
+        // B6b: descriptor 문법으로는 맞지만 상속 필드의 원소 종류를 C++ 형식과 다르게 위조하면(Array<EA>를 UInt8 원소로) 파생 모듈의
+        // 생성 path thunk가 그 종류를 명시하므로 TargetValueCheck static_assert로 검증 컴파일이 실패하고 출력을 게시하지 않는다(RMC3000).
+        suite.Add("Meta.ForgedInheritedTargetKindFailsPathThunkCompile", async () =>
+        {
+            using Layout layout = new(options, environment);
+            layout.WriteArrayModules();
+            Verify.Equal(0, (await layout.RunArrayModuleAsync("Elements")).ExitCode, "elements module");
+            Verify.Equal(0, (await layout.RunArrayModuleAsync("Lower")).ExitCode, "lower module");
+            string mutated = layout.Generated("Mutated", "byteModes.rocksmeta.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(mutated)!);
+            File.WriteAllText(mutated, MutateType(File.ReadAllText(layout.Descriptor("Lower")), "probe::Parent",
+                parent => FieldNode(parent, "modes")["element"] = new System.Text.Json.Nodes.JsonObject { ["kind"] = "UInt8" }));
+            await Reject(layout.RunArrayModuleAsync("Upper", [mutated, layout.Descriptor("Elements")]), "RMC3000",
+                "path thunk target kind does not match the C++ member type");
+            Verify.That(!File.Exists(layout.Generated("Upper", "Public/Upper/Value.generated.h")), "rejected module published a generated header");
         });
 
         // import struct 형질 대조(ContainsReferenceArray — 필드와 어긋나면 RMC1000)와 StructRefArray 원소 struct 규칙(Registry 컨테이너를

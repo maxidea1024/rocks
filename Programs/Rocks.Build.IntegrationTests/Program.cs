@@ -343,12 +343,92 @@ try
         #include <SampleGame/SampleGame.module.generated.h>
         #include <Core/Memory/SystemAllocator.h>
         #include <Object/ConstructionContext.h>
+        #include <Object/PropertyPath.h>
         #include <ObjectSerialization/ObjectGraph.h>
+
+        // 경로 편집 종류다.
+        enum class PathEdit { Write, Insert, Remove };
+
+        // 문자열 경로 text를 type 스키마로 해석해 편집한다: Write는 value를 쓰고, Insert는 value를 넣으며(nullptr이면 기본 원소),
+        // Remove는 원소를 지우고 단일 값 원소면 value(FieldValue*로 받는다)에 지운 값을 담는다. 성공하면 true다.
+        bool EditPath(rocks::ObjectRegistry& objects, const rocks::TypeLease& type, rocks::ObjectHandle handle, const char* text,
+            rocks::FieldValue* value, PathEdit edit) {
+            rocks::PropertyPathBuffer path;
+            if (!rocks::ParsePropertyPath(type, rocks::StringView(text), path)) {
+                return false;
+            }
+
+            switch (edit) {
+            case PathEdit::Write:
+                return static_cast<bool>(rocks::PathWrite(objects, objects.OwnerAccess(), handle, path.View(), *value));
+            case PathEdit::Insert:
+                return static_cast<bool>(rocks::PathInsertElement(objects, objects.OwnerAccess(), handle, path.View(), value));
+            default:
+                return static_cast<bool>(rocks::PathRemoveElement(objects, objects.OwnerAccess(), handle, path.View(), value));
+            }
+        }
+
+        bool SameBytes(rocks::Span<const rocks::uint8> left, rocks::Span<const rocks::uint8> right) {
+            if (left.Size() != right.Size()) {
+                return false;
+            }
+
+            for (rocks::usize index = 0; index < left.Size(); ++index) {
+                if (left[index] != right[index]) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        // B6b: 다른 모듈(GameCore)에서 상속한 필드를 이 게임 모듈의 생성 path thunk로 쓴다 — 상속 배열 원소 교체, StructRefArray
+        // 원소의 멤버, SDK Binds 미러(Vec3) 멤버, 설치 SDK struct(ArraySlot) 원소의 멤버, ObjectRefArray 원소, Array<Vec3> 기본 원소
+        // 삽입과 그 멤버, 상속 Array<int32> 원소 삭제(removed). 성공하면 true다.
+        bool EditInheritedFields(rocks::Allocator& allocator, rocks::TypeRegistry& types, rocks::ObjectRegistry& objects,
+            rocks::ObjectHandle handle, rocks::ObjectHandle node) {
+            auto type = types.Acquire(rocks::TypeIdOf<sample::FixtureChild>());
+            if (!type) {
+                return false;
+            }
+
+            rocks::FieldValue level(allocator);
+            level.kind = rocks::ValueKind::Int32;
+            level.signedInteger = -9;
+            rocks::FieldValue hand(allocator);
+            hand.kind = rocks::ValueKind::Utf8String;
+            rocks::FieldValue slot(allocator);
+            slot.kind = rocks::ValueKind::Utf8String;
+            rocks::FieldValue y(allocator);
+            y.kind = rocks::ValueKind::Float32;
+            y.float32 = 2.5f;
+            rocks::FieldValue x(allocator);
+            x.kind = rocks::ValueKind::Float32;
+            x.float32 = 7.0f;
+            rocks::FieldValue link(allocator);
+            link.kind = rocks::ValueKind::ObjectReference;
+            link.reference = node;
+            if (!hand.string.TryAssign("path hand") || !slot.string.TryAssign("path fixture")) {
+                return false;
+            }
+
+            rocks::FieldValue removed(allocator);
+            const rocks::TypeLease& lease = type.Value();
+            return EditPath(objects, lease, handle, "levels[1]", &level, PathEdit::Write) &&
+                EditPath(objects, lease, handle, "sockets[0].name", &hand, PathEdit::Write) &&
+                EditPath(objects, lease, handle, "offset.y", &y, PathEdit::Write) &&
+                EditPath(objects, lease, handle, "fixtureSlots[0].name", &slot, PathEdit::Write) &&
+                EditPath(objects, lease, handle, "links[1]", &link, PathEdit::Write) &&
+                EditPath(objects, lease, handle, "path[1]", nullptr, PathEdit::Insert) &&
+                EditPath(objects, lease, handle, "path[1].x", &x, PathEdit::Write) &&
+                EditPath(objects, lease, handle, "levels[0]", &removed, PathEdit::Remove) &&
+                removed.kind == rocks::ValueKind::Int32 && removed.signedInteger == 3;
+        }
 
         // GameCore에서 상속한 배열 필드(Array<int32>·ObjectRefArray·Array<rocks::Vec3>·StructRefArray, 설치 SDK의 참조 struct
         // 원소 StructRefArray<ArraySlot>)를 source에서 저장해 target으로 복원한다. 배열 원소(ObjectRefArray 원소·StructRefArray
-        // 원소 안 참조)로만 닿는 SDK 객체(Node 둘·ArrayOwner 하나)가 수집에서 살아야 한다. 성공하면 0, 실패하면 단계 번호다(root는
-        // 돌아갈 때 놓는다).
+        // 원소 안 참조)로만 닿는 SDK 객체(Node 둘·ArrayOwner 하나)가 수집에서 살아야 한다. 저장 전에 일부 필드를 경로로 바꾼다
+        // (EditInheritedFields). 성공하면 0, 실패하면 단계 번호다(root는 돌아갈 때 놓는다).
         int RoundTripArrays(rocks::Allocator& allocator, rocks::TypeRegistry& types, rocks::ObjectRegistry& source, rocks::ObjectRegistry& target) {
             using rocks::reflection_fixture::ArrayOwner;
             using rocks::reflection_fixture::Node;
@@ -382,6 +462,10 @@ try
                 return 10;
             }
 
+            if (!EditInheritedFields(allocator, types, source, root.Value().Handle(), first.Value())) {
+                return 17;
+            }
+
             auto bytes = rocks::SaveObjectGraph(allocator, source, source.OwnerAccess(), root.Value().Handle());
             if (!bytes) {
                 return 11;
@@ -403,15 +487,22 @@ try
                     return 13;
                 }
 
+                // levels는 경로로 [3, -9]를 만든 뒤 앞 원소를 지웠고, links[1]은 links[0]과 같은 Node를 가리키게 바꿨다.
                 const sample::FixtureChild& copy = *restored.Value();
-                if (copy.levels.Size() != 2 || copy.levels[1] != -4 || copy.path.Size() != 1 || copy.path[0].z != 3.0f ||
-                    copy.links.Size() != 2 || copy.links[0] == rocks::ObjectHandle{} || copy.links[1] != rocks::ObjectHandle{} ||
-                    copy.sockets.Size() != 1 || copy.sockets[0].name.View() != rocks::StringView("hand") ||
-                    copy.sockets[0].target.Handle() == rocks::ObjectHandle{} || copy.fixtureSlots.Size() != 1 ||
-                    copy.fixtureSlots[0].name.View() != rocks::StringView("fixture") ||
+                if (copy.levels.Size() != 1 || copy.levels[0] != -9 || copy.path.Size() != 2 || copy.path[0].z != 3.0f ||
+                    copy.path[1].x != 7.0f || copy.path[1].y != 0.0f || copy.offset.y != 2.5f || copy.links.Size() != 2 ||
+                    copy.links[0] == rocks::ObjectHandle{} || copy.links[1] != copy.links[0] || copy.sockets.Size() != 1 ||
+                    copy.sockets[0].name.View() != rocks::StringView("path hand") || copy.sockets[0].target.Handle() == rocks::ObjectHandle{} ||
+                    copy.fixtureSlots.Size() != 1 || copy.fixtureSlots[0].name.View() != rocks::StringView("path fixture") ||
                     copy.fixtureSlots[0].material.Handle() == rocks::ObjectHandle{}) {
                     return 14;
                 }
+            }
+
+            // 복원한 그래프를 다시 저장한 byte가 경로로 편집해 저장한 byte와 같다.
+            auto resaved = rocks::SaveObjectGraph(allocator, target, target.OwnerAccess(), loaded.Value().Handle());
+            if (!resaved || !SameBytes(bytes.Value().View(), resaved.Value().View())) {
+                return 18;
             }
 
             if (!target.Collect(target.OwnerAccess()) || target.Stats().liveObjects != 4) {

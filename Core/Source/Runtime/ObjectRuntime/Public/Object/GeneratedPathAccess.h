@@ -190,7 +190,9 @@ Result<void> RemoveArrayElement(PathCursor& cursor, Array<E>& array) noexcept {
     }
 
     if constexpr (Target == ValueKind::Struct) {
-        E element(Move(array[index]));
+        // 소멸을 게시 뒤로 미루려고 붙잡는다(소멸자가 자명한 원소 — Binds Vec3 등 — 도
+        // 경고 없이).
+        [[maybe_unused]] E element(Move(array[index]));
         if (!array.TryRemoveAt(index)) {
             platform::Fatal("path array removal failed");
         }
@@ -219,7 +221,8 @@ Result<void> RemoveArrayElement(PathCursor& cursor, Array<E>& array) noexcept {
             }
         }
 
-        E element(Move(array[index]));
+        // String·Soft만 아래에서 쓴다(스칼라 원소는 게시 뒤 소멸을 위해 붙잡을 뿐이다).
+        [[maybe_unused]] E element(Move(array[index]));
         if (!array.TryRemoveAt(index)) {
             platform::Fatal("path array removal failed");
         }

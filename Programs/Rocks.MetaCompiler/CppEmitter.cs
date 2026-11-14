@@ -150,6 +150,9 @@ internal static class CppEmitter
         Line("#include <Meta/GeneratedType.h>");
         Line("#include <Object/GeneratedFieldAccess.h>");
         Line("#include <Object/GeneratedFieldCodec.h>");
+        // 경로 접근 thunk 템플릿(PathClassField·PathStructMember — Docs/Design/ReflectionFoundations.ko.md 7.1절)이다. 생성
+        // 헤더 안에서만 인스턴스화한다.
+        Line("#include <Object/GeneratedPathAccess.h>");
         // Binds 미러의 순서 대조(ROCKS_OFFSET_OF)는 Base 매크로를 쓴다(__builtin은 Base 헤더 밖에서 쓰지 않는다).
         if (schema.Ordered.Any(type => type.Header == include && type.Binds.Length != 0))
         {
@@ -244,10 +247,12 @@ internal static class CppEmitter
                     if (field.IsStruct || field.IsArray)
                     {
                         // struct·배열 필드는 FieldValue로 표현할 수 없으므로 read·write·writeStaged가 없고(통째 쓰기는
-                        // Unsupported — 멤버·원소 단위 쓰기는 B6 경로 접근) codec과 struct native 키(배열이면 원소 Enum·
-                        // Struct의 native 키, 그 밖은 없음)만 싣는다(Docs/Design/ReflectionFoundations.ko.md 4.6·5.6절).
+                        // Unsupported) codec, struct native 키(배열이면 원소 Enum·Struct의 native 키, 그 밖은 nullptr을
+                        // 명시)와 경로 접근 thunk를 싣는다(Docs/Design/ReflectionFoundations.ko.md 4.6·5.6·7.1절). 멤버·원소
+                        // 단위 접근은 경로 thunk가 한다.
                         Line("nullptr, {}, nullptr,");
-                        EmitClassCodec(native, member, ValueNativeType(schema, field), Line);
+                        string valueNative = ValueNativeType(schema, field);
+                        EmitClassCodec(native, member, (valueNative.Length == 0 ? ", nullptr" : valueNative) + ClassPathThunk(native, member, field), Line);
                         continue;
                     }
 
@@ -323,13 +328,30 @@ internal static class CppEmitter
     }
 
     // struct 필드·배열 필드 함수표의 valueNativeType 인자다: struct 필드는 그 struct, 배열은 원소가 Enum·Struct면 그
-    // 원소의 native 키(Binds 미러는 실제 타입), 그 밖은 ""(인자 생략 — nullptr)다.
+    // 원소의 native 키(Binds 미러는 실제 타입), 그 밖은 ""다(뒤에 path 칸이 오므로 호출하는 쪽이 ", nullptr"을 명시한다).
     private static string ValueNativeType(SchemaModel schema, FieldModel field) => field.TargetKind switch
     {
         "Struct" => $", NativeTypeKey<::{schema.Find(field.Reference!).NativeName}>()",
         "Enum" => $", NativeTypeKey<::{field.Reference}>()",
         _ => ""
     };
+
+    // 클래스 Struct·Array 필드 함수표의 path 칸(valueNativeType 뒤)이다(Docs/Design/ReflectionFoundations.ko.md 7.1절
+    // MetaCompiler). 소유자 Owner는 함수표를 내는 클래스(파생 — 함수표가 실제 타입 레코드에서 온다)이고 멤버 포인터는 선언
+    // 클래스의 것이다(상속 import 필드 포함). 대상 종류는 FieldModel.TargetKind(배열이면 원소 종류)를 명시한다 — C++ 멤버
+    // 형식과 다르면 TargetValueCheck static_assert가 컴파일을 실패시킨다(requires 탐지를 쓰지 않는다). 단일 값 필드는 path가
+    // 없다(최상위 단일 값의 경로 접근은 read·write 한 경로 — 등록이 path를 거부한다).
+    private static string ClassPathThunk(string native, string member, FieldModel field) =>
+        ", +[](const ::rocks::RuntimeFieldOps&, ::rocks::detail::PathCursor& cursor) noexcept -> ::rocks::Result<void> { " +
+        $"return ::rocks::detail::PathClassField<{native}, ::rocks::ValueKind::{field.TargetKind}>(cursor, {member}); }}";
+
+    // struct 멤버 함수표다(Docs/Design/ReflectionFoundations.ko.md 4.6·7.1절): codec과 경로 접근 thunk(모든 멤버 — struct
+    // 멤버의 단일 값도 경로가 이 thunk로 접근한다). Binds 미러는 실제 타입(native)의 멤버 포인터를 쓴다.
+    private static string StructMemberOps(string native, FieldModel field)
+    {
+        string member = $"&{native}::{field.Name}";
+        return $"detail::StructFieldOps<{member}>({GuidValue(field.Id)}, &detail::PathStructMember<{member}, ValueKind::{field.TargetKind}>),";
+    }
 
     // 클래스·참조 struct Trace의 필드 한 줄이다(owner는 typed·value, ownerType은 멤버 포인터의 클래스 철자). ObjectRef는
     // Visit, struct 필드는 그 struct의 생성 Trace, 배열은 TraceArrayField(Array<E>는 아무것도 하지 않고 ObjectRefArray·
@@ -369,14 +391,15 @@ internal static class CppEmitter
     }
 
     // 클래스 필드의 그래프 저장·복원 codec 두 thunk와 함수표 끝이다(Docs/Design/ReflectionFoundations.ko.md 6.4절).
-    // 문맥이 참조 wire·진단·예산을 맡으므로 그래프 형식이 바뀌어도 이 코드를 다시 만들지 않는다. valueNativeType은
-    // Enum·Struct 필드가 싣는 ", NativeTypeKey<T>()"(그 밖은 "")다.
-    private static void EmitClassCodec(string native, string member, string valueNativeType, Action<string> Line)
+    // 문맥이 참조 wire·진단·예산을 맡으므로 그래프 형식이 바뀌어도 이 코드를 다시 만들지 않는다. tail은 decode 뒤의
+    // 칸이다: Enum 단일 값 필드는 ", NativeTypeKey<T>()", 그 밖의 단일 값 필드는 ""(valueNativeType·path 생략),
+    // Struct·Array 필드는 valueNativeType(없으면 ", nullptr")과 경로 접근 thunk(ClassPathThunk)다.
+    private static void EmitClassCodec(string native, string member, string tail, Action<string> Line)
     {
         Line("+[](const RuntimeFieldOps&, ObjectRegistry& registry, const ObjectAccessContext& access, ObjectHandle object, ArchiveWriter& payload, FieldEncodeContext& context) noexcept -> Result<uint32> {");
         Line($"return detail::EncodeGeneratedField<{native}>(registry, access, object, {member}, payload, context); }},");
         Line("+[](const RuntimeFieldOps&, ConstructionContext* construction, ObjectHandle object, const FieldView& field, FieldDecodeContext& context) noexcept -> Result<void> {");
-        Line($"return detail::DecodeGeneratedField<{native}>(construction, object, {member}, field, context); }}{valueNativeType} }},");
+        Line($"return detail::DecodeGeneratedField<{native}>(construction, object, {member}, field, context); }}{tail} }},");
     }
 
     // NATIVE 멤버의 직접 타입이 리플렉션 struct면 그 struct의 생성 형질로 RMC2205(·worldOnlyCheck면 RMC2206)를
@@ -526,7 +549,7 @@ internal static class CppEmitter
             Line("static const RuntimeStructFieldOps fields[] = {");
             foreach (FieldModel field in type.Fields)
             {
-                Line($"detail::StructFieldOps<&{native}::{field.Name}>({GuidValue(field.Id)}),");
+                Line(StructMemberOps(native, field));
             }
 
             Line("};");
