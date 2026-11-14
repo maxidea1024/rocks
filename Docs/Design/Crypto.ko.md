@@ -141,7 +141,7 @@ Core/Source/Runtime/Crypto/
 | SIMD 번역 단위 | 원본의 `#pragma clang attribute push(__attribute__((target("aes,avx,pclmul"))), apply_to = function)` | 함수 단위 target이라 전역 `-maes`가 필요 없다. 진단 지시문이 아니므로 manifest `pragmaDirectives`에 기록만 한다(Brotli `_Pragma`와 같은 처리). |
 | version.h | Rocks 글루 `Glue/sodium/version.h`를 둔다. 내용은 `builds/msvc/version.h`(MINIMAL 미정의)와 같고, 원본 SHA-256을 manifest에 기록한다 | tree에 생성본이 없고, 헤더가 `sodium/version.h` 경로로 include하므로 include 경로 추가만으로는 안 된다. zig 빌드는 같은 파일을 그 위치로 복사한다. 원본 디렉터리는 byte 그대로 둔다. |
 
-- **초기화.** 모든 공개 진입점이 대기하는 한 번 실행(blocking once)을 거친다. 기다리지 않는 test-and-set이면 다른 스레드가 init 전에 AEGIS·BLAKE2b·ChaCha의 기본(soft) 구현을 탈 수 있다. 구현 선택이 `sodium_init`에서 일어나기 때문이다. 순서는 `randombytes_set_implementation(Rocks)` → `sodium_init()` → `sodium_set_misuse_handler(Fatal)`이다. RNG 교체는 init 전에 한 번만 할 수 있다. `sodium_init`이 -1을 돌려주면 Fatal이다. 암호 기능 없이 계속 진행하지 않는다.
+- **초기화.** 모든 공개 진입점이 대기하는 한 번 실행(blocking once)을 거친다. 기다리지 않는 test-and-set이면 다른 스레드가 init 전에 AEGIS·BLAKE2b·ChaCha의 기본(soft) 구현을 탈 수 있다. 구현 선택이 `sodium_init`에서 일어나기 때문이다. 순서는 `randombytes_set_implementation(Rocks)` → `sodium_set_misuse_handler(Fatal)` → `sodium_init()`이다. RNG 교체는 init 전에 한 번만 할 수 있다. handler는 libsodium의 정적 잠금만 쓰므로 init 전에 설치할 수 있고, 먼저 두어야 init 안의 misuse(페이지 크기 확인 등)도 기본 handler(`abort`)가 아닌 Fatal로 간다. `sodium_init`이 -1을 돌려주면 Fatal이다. 1(이미 초기화)도 Fatal이다. libsodium은 Crypto만 쓰므로, 다른 경로가 먼저 init했다면 RNG 교체 순서가 깨졌을 수 있기 때문이다. 비교·소거처럼 init과 무관한 함수도 진입점에서 같은 once를 거쳐 계약을 하나로 둔다(2026-11-14 리뷰 반영). 암호 기능 없이 계속 진행하지 않는다.
 - **난수 단일 경로.** Rocks 구현은 구조체의 모든 함수(`implementation_name`·`random`·`stir`·`uniform`·`buf`·`close`)를 채운다. libsodium이 `random`·`implementation_name`을 NULL 검사 없이 부르기 때문이다. `buf`는 `platform::TryFillSecureRandom`(BCryptGenRandom / arc4random_buf)을 직접 부르고, 실패하면 Fatal이다(`randombytes_buf`는 실패를 돌려줄 수 없다). `sodium_init` 안에서 `stir`·`buf`가 불리므로, 이 구현은 Crypto 초기화에 의존하지 않는다(재귀 방지). 사용자 공간 DRBG는 두지 않는다. 이렇게 libsodium과 Rocks Guid·SecureRandom이 같은 OS 경로를 쓴다.
 - **misuse handler 도달 금지.** handler는 Fatal이지만, 신뢰할 수 없는 길이로 원격에서 Fatal을 일으킬 수 있으면 안 된다. 예를 들어 secretstream pull은 `mlen > MESSAGEBYTES_MAX`일 때 misuse를 부른다. 그래서 어댑터가 misuse 조건을 모두 먼저 걸러 `AuthenticationFailed`·`CapacityExceeded`로 돌려준다. 음성 시험이 이 계약을 고정한다.
 - **복호 실패 출력.** libsodium AES-GCM 복호는 실패하면 출력을 `0xd0`으로 채운다. 어댑터가 0으로 다시 지운다. 복호 출력은 프로세스 전용 메모리여야 한다. mmap 파일이나 공유 메모리면 검증 전 평문이 잠시 보일 수 있다.
@@ -277,21 +277,28 @@ bool Overlaps(Span<T> a, Span<U> b) noexcept;   // 원소 타입이 달라도 by
 namespace rocks::crypto {
 
 // 길이가 다르면 false다(길이는 비밀이 아니다). 같은 길이면 내용과 무관하게 같은 시간이 걸린다(sodium_memcmp).
-[[nodiscard]] bool ConstantTimeEquals(Span<const uint8> a, Span<const uint8> b) noexcept;
+[[nodiscard]] bool ConstantTimeEquals(Span<const uint8> left, Span<const uint8> right) noexcept;
+[[nodiscard]] bool IsAllZero(Span<const uint8> bytes) noexcept;   // 상수 시간(sodium_is_zero)
 
 // 컴파일러가 없애지 않는 소거다(sodium_memzero).
 void SecureZero(Span<uint8> bytes) noexcept;
 
 // OS CSPRNG로 채운다(PlatformBase SecureRandom, libsodium randombytes와 같은 경로).
+// OS 난수 실패는 DependencyFailed이고 출력 전체를 지운다.
 [[nodiscard]] Result<void> TryFillRandom(Span<uint8> output) noexcept;
 
 // [0, upperBound) 균등 분포다. upperBound가 0이면 InvalidArgument.
 [[nodiscard]] Result<uint32> TryRandomUniform(uint32 upperBound) noexcept;
 
 // 비밀을 담은 byte의 상수 시간 hex·base64 변환(sodium_bin2hex·bin2base64·hex2bin·base642bin).
-// Core Base64는 상수 시간이 아니므로 키·토큰에는 이 함수를 쓴다.
-[[nodiscard]] Result<usize> TryToHexConstantTime(Span<const uint8> bytes, Span<char> text) noexcept;
-[[nodiscard]] Result<usize> TryFromBase64ConstantTime(StringView text, Span<uint8> bytes) noexcept;
+// Core Base64는 상수 시간이 아니므로 키·토큰에는 이 함수를 쓴다. text 출력은 문자 + NUL만 쓴다.
+enum class Base64Variant : uint8 { Standard, StandardNoPadding, UrlSafe, UrlSafeNoPadding };
+[[nodiscard]] Result<usize> TryGetHexChars(usize bytes) noexcept;                          // NUL 제외, Overflow
+[[nodiscard]] Result<usize> TryGetBase64Chars(usize bytes, Base64Variant variant) noexcept;
+[[nodiscard]] Result<usize> TryToHex(Span<const uint8> bytes, Span<char> text) noexcept;
+[[nodiscard]] Result<usize> TryFromHex(StringView text, Span<uint8> bytes) noexcept;
+[[nodiscard]] Result<usize> TryToBase64(Span<const uint8> bytes, Base64Variant variant, Span<char> text) noexcept;
+[[nodiscard]] Result<usize> TryFromBase64(StringView text, Base64Variant variant, Span<uint8> bytes) noexcept;
 
 } // namespace rocks::crypto
 ```
@@ -788,11 +795,13 @@ public:
 | 복호·검증 경로의 신뢰할 수 없는 입력: tag·MAC·서명·commitment 불일치, 절단·순서 위반, 잘못된 키, 헤더 형식 위반 | `AuthenticationFailed` [신설] | 출력 전체 소거, 스트림 sticky |
 | 호출자의 API 오용: 키·nonce·context·출력 버퍼 길이 오류, 함수 규칙 밖의 겹침, 잘못된 단계 호출 | `InvalidArgument` | 입력·출력·상태 불변 |
 | 출력 Span 부족 | `CapacityExceeded` | 상태 불변(메시지형), 역압(스트림형) |
+| hex·base64 디코딩: 길이·끝 `'='`만으로 알 수 있는 형식 오류 / 디코딩 중에 찾은 형식 오류(알파벳·끝 bit·중간 패딩) | `InvalidArgument` | 앞은 출력 불변, 뒤는 출력 전체 소거. 크기 검사가 내용 검사보다 먼저다 |
+| `TryFillRandom`의 OS 난수 실패 | `DependencyFailed` | 출력 전체 소거 |
 | (key, nonce)당 상한 초과, nonce 카운터 소진, 세그먼트 수 2^32 초과 | `CapacityExceeded` | 그 키·스트림으로는 더 봉인하지 않음 |
 | HW 명령이 없는 기기의 AES·AEGIS, 무작위 nonce가 안전하지 않은 알고리즘의 고수준 Seal, 96 bit가 아닌 GCM nonce, 헤더의 모르는 버전·알고리즘 | `Unsupported` | 입력·출력·상태 불변 |
 | SecretArena 소진 | `OutOfMemory` | 상태 불변 |
 | 크기 계산 overflow | `Overflow` | — |
-| libsodium 초기화 실패, OS 난수 실패(난수 경로 안), misuse handler | Fatal | 암호 기능 없이 계속하지 않음 |
+| libsodium 초기화 실패·Crypto 밖 초기화, libsodium 내부 난수 경로의 OS 난수 실패(`randombytes_buf`는 실패를 돌려줄 수 없다), misuse handler | Fatal | 암호 기능 없이 계속하지 않음 |
 
 `AuthenticationFailed`를 새로 두는 이유가 있다. 변조·잘못된 키와 API 오용(`InvalidArgument`)을 호출자가 구분해야 하기 때문이다. 다만 어느 검사가 실패했는지(tag인지 길이 표시인지)는 오류에 담지 않는다(결정 D5).
 
