@@ -120,6 +120,19 @@
     "ROCKS_BUILD_DEBUG·ROCKS_BUILD_DEVELOPMENT·ROCKS_BUILD_RELEASE 중 정확히 하나가 1이어야 한다(Rocks.Build가 정의한다)."
 #endif
 
+// AddressSanitizer 계측 여부다. Asan 구성에서 계측하는 번역 단위만 1이다(계측을 끈 외부
+// 라이브러리는 0). 자체 할당기의 수동 poison(Core/Memory/AddressSanitizer.h)이 쓴다. 기능 선택에는
+// 쓰지 않는다.
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define ROCKS_ADDRESS_SANITIZER 1
+#endif
+#endif
+
+#ifndef ROCKS_ADDRESS_SANITIZER
+#define ROCKS_ADDRESS_SANITIZER 0
+#endif
+
 // 인라인하지 않는다. 드문 오류 경로·큰 진단 함수를 hot path 밖으로 뺄 때 쓴다.
 #define ROCKS_NOINLINE __attribute__((noinline))
 

@@ -1,6 +1,8 @@
 #include <Crypto/Random.h>
 #include <Crypto/Secret.h>
 
+#include "SecretArena.h"
+
 #include <Core/Move.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
@@ -8,8 +10,13 @@
 namespace rocks::crypto {
 namespace {
 
-// 키 확장 상태·SIMD 접근이 정렬을 기대할 수 있어 arena 슬롯 최소 정렬과 같게 둔다.
+// 키 확장 상태·SIMD 접근이 정렬을 기대할 수 있어 슬롯 최소 정렬과 같게 둔다.
 constexpr usize SecretAlignment = 64;
+
+// 크기가 저장소를 정한다. 할당과 해제가 같은 규칙을 쓰므로 따로 기록하지 않는다.
+bool UsesSecretArena(usize bytes) noexcept {
+    return bytes <= detail::SecretSlotMaxBytes;
+}
 
 } // namespace
 
@@ -39,10 +46,11 @@ void SecretBytes::Reset() noexcept {
         return;
     }
 
-    // 해제가 내용을 지운다(GetSecretAllocator 계약). 실패는 저장소가 이 할당기 것이 아니라는
-    // 뜻이므로 결함이다.
-    if (!GetSecretAllocator().Deallocate(data_)) {
-        platform::Fatal("Crypto: SecretBytes storage was not owned by the secret allocator");
+    // 두 저장소 모두 해제가 내용을 지운다. 키 저장소는 남의 주소면 스스로 Fatal이다.
+    if (UsesSecretArena(size_)) {
+        detail::FreeSecretSlot(data_);
+    } else if (!GetSecretAllocator().Deallocate(data_)) {
+        platform::Fatal("Crypto: SecretBytes storage was not owned by the secret buffer allocator");
     }
 
     data_ = nullptr;
@@ -54,12 +62,21 @@ Result<SecretBytes> SecretBytes::TryCreate(usize bytes) noexcept {
         return Result<SecretBytes>::Success(SecretBytes());
     }
 
+    if (UsesSecretArena(bytes)) {
+        // 키 저장소의 새 슬롯은 이미 0이다(새로 commit한 페이지이거나 해제 때 지운 슬롯).
+        auto slot = detail::TryAllocateSecretSlot(bytes, SecretAlignment);
+        if (!slot) {
+            return Result<SecretBytes>::Failure(slot.Error());
+        }
+
+        return Result<SecretBytes>::Success(SecretBytes(static_cast<uint8*>(slot.Value()), bytes));
+    }
+
     auto memory = GetSecretAllocator().Allocate(bytes, SecretAlignment);
     if (!memory) {
         return Result<SecretBytes>::Failure(memory.Error());
     }
 
-    // arena 슬롯은 이미 0이지만 힙으로 간 할당은 아니다.
     uint8* const data = static_cast<uint8*>(memory.Value());
     platform::MemoryZero(data, bytes);
     return Result<SecretBytes>::Success(SecretBytes(data, bytes));

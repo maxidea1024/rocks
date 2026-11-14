@@ -79,6 +79,34 @@ internal static class NativeTests
                 });
             }
         }
+
+        // Crypto 키 저장소(SecretArena) 양 끝의 guard page: arena 바로 앞·뒤 byte를 읽으면 접근 위반으로 끝나야 한다
+        // (Docs/Design/Crypto.ko.md 10.2절). 돌아오면(종료 코드 6) guard page가 없다는 뜻이다.
+        foreach (string side in new[] { "before", "after" })
+        {
+            string control = "secret-arena-guard-" + side;
+            suite.Add("Native.SecretArena.guard-" + side, async () =>
+            {
+                var probeEnvironment = new Dictionary<string, string?>(environment);
+                probeEnvironment.TryGetValue("ASAN_OPTIONS", out string? asanOptions);
+                probeEnvironment["ASAN_OPTIONS"] = (asanOptions ?? "") + ":handle_segv=0:handle_sigbus=0";
+                var result = await ProcessRunner.RunAsync(new(executable, ["--negative-control", control], options.Root,
+                    probeEnvironment, Timeout: TimeSpan.FromSeconds(20)));
+                Verify.Contains("VM_ACCESS_READY", result.StdErr, "secret arena probe setup did not finish");
+                if (OperatingSystem.IsWindows())
+                {
+                    Verify.Equal(unchecked((int)0xC0000005), result.ExitCode, "expected access violation at the secret arena guard page");
+                }
+                else if (OperatingSystem.IsMacOS())
+                {
+                    Verify.That(result.ExitCode is 139 or 138, $"expected SIGSEGV/SIGBUS at the secret arena guard page, got {result.ExitCode}");
+                }
+                else
+                {
+                    throw new PlatformNotSupportedException("Secret arena guard probe supports Windows and macOS");
+                }
+            });
+        }
         // CRT 없는 숫자 변환을 .NET(Core 3.0+, 최단 왕복 "R"·IEEE 정확 Parse)과 고정 시드 사례 수십만 개로 대조한다
         // (CoreDataFoundations.ko.md 3.2절).
         suite.Add("Native.NumberConversionMatchesDotNet", async () =>
@@ -433,6 +461,22 @@ internal static class NativeTests
                 Verify.Contains("AddressSanitizer: heap-use-after-free", result.StdErr, "actual ASan report");
             });
         }
+
+        // Crypto 키 저장소의 해제한 슬롯 읽기: Asan은 poison한 슬롯이므로 use-after-poison 보고로 끝나야 하고, 그 밖의
+        // 구성은 해제 때 지운 0을 읽어 성공해야 한다(소거 확인, Docs/Design/Crypto.ko.md 10.2절).
+        suite.Add("Native.SecretArena.slot-use-after-free", async () =>
+        {
+            var result = await Run("--negative-control", "secret-slot-use-after-free");
+            if (options.Asan)
+            {
+                Verify.That(result.ExitCode != 0, "reading a freed secret slot was not reported");
+                Verify.Contains("AddressSanitizer: use-after-poison", result.StdErr, "secret slot poison report");
+            }
+            else
+            {
+                Verify.Equal(0, result.ExitCode, "a freed secret slot must read back as zero");
+            }
+        });
 
         if (options.Optional("compiler") is string compiler)
         {
