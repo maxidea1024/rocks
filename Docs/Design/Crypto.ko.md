@@ -802,7 +802,7 @@ public:
 
 - 형식은 키 ID를 기록하고, 복호는 ID로 키를 고른다. 키 회전은 "암호화는 현재 키, 복호는 등록된 키 전체(ID로)"다. 제거한 키라도 이미 받은 lease는 끝날 때까지 유효하다.
 - KeyRing은 키 타입별 템플릿이다. 하나의 ID가 두 알고리즘에 쓰이는 일을 타입으로 막는다.
-- 비밀번호에서 키를 얻을 때는 Argon2id(salt 16 byte)를 쓴다. 입력 매개변수는 상한으로 검사해 자원 고갈을 막는다.
+- 비밀번호에서 키를 얻을 때는 Argon2id(salt 16 byte)를 쓴다. 입력 매개변수는 상한으로 검사해 자원 고갈을 막는다. 구현(PasswordHash.h): TryDeriveKdfKeyFromPassword·TryDerivePasswordSecret, 저장 문자열 TryHashPassword·TryVerifyPassword·TryPasswordNeedsRehash. 비용 상한은 반복 32회·메모리 1 GiB이고 넘으면 계산하지 않고 `CapacityExceeded`다. Argon2id v19가 아닌 문자열은 `Unsupported`, 형식 오류·불일치는 `AuthenticationFailed`다(libsodium이 구분하지 않아 작업 메모리 부족도 검증에서는 `AuthenticationFailed`로 보인다).
 
 ### 10.4 키 직렬화
 
