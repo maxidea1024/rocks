@@ -11,7 +11,7 @@ namespace rocks::crypto::detail {
 [[nodiscard]] Result<void> CheckAeadUsable(AeadAlgorithm algorithm) noexcept;
 
 // 길이를 맞춘 키 byte로 AeadKey를 만든다(AES-256-GCM은 키 확장 상태를 키 저장소에 둔다). 호출자가
-// CheckAeadUsable과 키 길이를 먼저 검사한다. 키 저장소가 찼으면 OutOfMemory다.
+// CheckAeadUsable과 키 길이를 먼저 검사한다(어기면 Fatal). 키 저장소가 찼으면 OutOfMemory다.
 [[nodiscard]] Result<AeadKey> TryMakeAeadKey(AeadAlgorithm algorithm, SecretBytes&& key) noexcept;
 
 } // namespace rocks::crypto::detail

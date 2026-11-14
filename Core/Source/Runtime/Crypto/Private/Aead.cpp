@@ -311,6 +311,13 @@ Result<void> detail::CheckAeadUsable(AeadAlgorithm algorithm) noexcept {
 }
 
 Result<AeadKey> detail::TryMakeAeadKey(AeadAlgorithm algorithm, SecretBytes&& key) noexcept {
+    // 다른 TU가 부르는 진입점이다. 전제(정의·사용 가능, 키 길이)가 깨지면 AES-GCM beforenm이 범위
+    // 밖을 읽거나 HW 없는 기기에서 죽으므로 결함으로 멈춘다.
+    if (!IsDefined(algorithm) || !IsAvailable(algorithm) ||
+        key.Size() != TraitsOf(algorithm).keyBytes) {
+        platform::Fatal("Crypto: TryMakeAeadKey precondition violated");
+    }
+
     return TryMakeKey(algorithm, Move(key));
 }
 

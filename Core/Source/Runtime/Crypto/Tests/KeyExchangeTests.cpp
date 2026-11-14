@@ -90,6 +90,19 @@ bool KeyEquals(const AeadKey& key, const char* hex) {
            Equals(Span<const uint8>(exported), hex);
 }
 
+// sealed box는 BoxKeyPair로만 열고 kx는 KxKeyPair로만 한다(용도별 키 타입).
+template <typename KeyPair>
+concept CanOpenSealed = requires(const KeyPair& key, Span<const uint8> sealed,
+                                 Span<uint8> plaintext) { TryOpenSealed(key, sealed, plaintext); };
+
+template <typename KeyPair>
+concept CanDeriveSessionKeys = requires(const KeyPair& key, const KxPublicKey& peer) {
+    TryClientSessionKeys(key, peer, AeadAlgorithm::XChaCha20Poly1305);
+};
+
+static_assert(CanOpenSealed<BoxKeyPair> && !CanOpenSealed<KxKeyPair>);
+static_assert(CanDeriveSessionKeys<KxKeyPair> && !CanDeriveSessionKeys<BoxKeyPair>);
+
 } // namespace
 
 TEST(CryptoKxRfc7748) {
@@ -134,6 +147,20 @@ TEST(CryptoKxRfc7748) {
               Span<const uint8>(sealed).Left(written.Value()), Span<uint8>(opened))
               .Error() == ErrorCode::AuthenticationFailed);
 
+    // 양쪽이 모두 서버로 착각해도 키가 맞지 않는다.
+    auto aliceServer =
+        TryServerSessionKeys(alice, bob.PublicKey(), AeadAlgorithm::ChaCha20Poly1305Ietf);
+    REQUIRE(aliceServer);
+    uint8 serverSealed[64];
+    auto serverWritten = hazmat::TrySealWithNonce(aliceServer.Value().transmit,
+                                                  Span<const uint8>(nonce), Span<const uint8>(),
+                                                  Text("both servers"), Span<uint8>(serverSealed));
+    REQUIRE(serverWritten);
+    CHECK(hazmat::TryOpenWithNonce(
+              server.Value().receive, Span<const uint8>(nonce), Span<const uint8>(),
+              Span<const uint8>(serverSealed).Left(serverWritten.Value()), Span<uint8>(opened))
+              .Error() == ErrorCode::AuthenticationFailed);
+
     // 32 byte 키 알고리즘이면 키 byte는 알고리즘과 관계없이 crypto_kx 출력과 같다.
     const AeadAlgorithm algorithms[] = {AeadAlgorithm::XChaCha20Poly1305, AeadAlgorithm::Aes256Gcm,
                                         AeadAlgorithm::Aegis256};
@@ -148,6 +175,23 @@ TEST(CryptoKxRfc7748) {
         CHECK(keys.Value().transmit.Algorithm() == algorithm);
         CHECK(KeyEquals(keys.Value().receive, ClientReceive));
         CHECK(KeyEquals(keys.Value().transmit, ClientTransmit));
+
+        // 같은 byte로 가져온 키와 같은 결과를 낸다(AES-256-GCM 키 확장 상태 포함).
+        auto imported = AeadKey::TryImport(algorithm, HexBytes(ClientTransmit).View());
+        REQUIRE(imported);
+        const usize nonceBytes = TryGetAeadInfo(algorithm).Value().nonceBytes;
+        const uint8 zeroNonce[32] = {};
+        uint8 fromKx[64];
+        uint8 fromImport[64];
+        auto a = hazmat::TrySealWithNonce(
+            keys.Value().transmit, Span<const uint8>(zeroNonce).Left(nonceBytes),
+            Span<const uint8>(), Text("same key"), Span<uint8>(fromKx));
+        auto b = hazmat::TrySealWithNonce(
+            imported.Value(), Span<const uint8>(zeroNonce).Left(nonceBytes), Span<const uint8>(),
+            Text("same key"), Span<uint8>(fromImport));
+        REQUIRE(a && b);
+        CHECK(ConstantTimeEquals(Span<const uint8>(fromKx).Left(a.Value()),
+                                 Span<const uint8>(fromImport).Left(b.Value())));
     }
 }
 
@@ -155,8 +199,8 @@ TEST(CryptoKxRejectsMisuse) {
     const KxKeyPair alice = Import<KxKeyPair>(AliceSecret);
     const KxPublicKey bob = KxPublicKey::TryFromBytes(HexBytes(BobPublic).View()).Value();
 
-    // 빈 키 쌍과 알고리즘 검사다. AES-128-GCM은 쓸 수 없고, 키가 16 byte인 AEGIS-128L은 받지
-    // 않는다.
+    // 빈 키 쌍과 알고리즘 검사다. 키가 16 byte인 알고리즘(AES-128-GCM·AEGIS-128L)은 HW 유무와
+    // 관계없이 InvalidArgument다.
     CHECK(TryClientSessionKeys(KxKeyPair(), bob, AeadAlgorithm::XChaCha20Poly1305).Error() ==
           ErrorCode::StaleHandle);
     CHECK(TryServerSessionKeys(KxKeyPair(), bob, AeadAlgorithm::XChaCha20Poly1305).Error() ==
@@ -164,16 +208,17 @@ TEST(CryptoKxRejectsMisuse) {
     CHECK(TryClientSessionKeys(alice, bob, static_cast<AeadAlgorithm>(0)).Error() ==
           ErrorCode::InvalidArgument);
     CHECK(TryClientSessionKeys(alice, bob, AeadAlgorithm::Aes128Gcm).Error() ==
-          ErrorCode::Unsupported);
-    if (IsAvailable(AeadAlgorithm::Aegis128L)) {
-        CHECK(TryClientSessionKeys(alice, bob, AeadAlgorithm::Aegis128L).Error() ==
-              ErrorCode::InvalidArgument);
-    }
+          ErrorCode::InvalidArgument);
+    CHECK(TryClientSessionKeys(alice, bob, AeadAlgorithm::Aegis128L).Error() ==
+          ErrorCode::InvalidArgument);
 
-    // 상대 공개키가 small-order 점(0, 항등원 1)이면 공유 비밀이 0이라 AuthenticationFailed다.
+    // 상대 공개키가 small-order 점이면 공유 비밀이 0이라 AuthenticationFailed다: u = 0, u = 1(위수
+    // 4), 위수 8 점, 최상위 bit만 켠 0(X25519는 최상위 bit를 무시한다).
     const char* smallOrder[] = {
         "0000000000000000000000000000000000000000000000000000000000000000",
         "0100000000000000000000000000000000000000000000000000000000000000",
+        "e0eb7a7c3b41b8ae1656e3faf19fc46ada098deb9c32b1fd866205165f49b800",
+        "0000000000000000000000000000000000000000000000000000000000000080",
     };
     for (const char* hex : smallOrder) {
         const KxPublicKey peer = KxPublicKey::TryFromBytes(HexBytes(hex).View()).Value();
@@ -216,6 +261,8 @@ TEST(CryptoKxKeyPairLifetime) {
         // 이동한 키 쌍은 원본이 비어 StaleHandle이다.
         KxKeyPair moved = Move(first.Value());
         CHECK(first.Value().IsEmpty());
+        CHECK(first.Value().PublicKey() == KxPublicKey());
+        CHECK(!(moved.PublicKey() == KxPublicKey()));
         CHECK(hazmat::TryExportKey(first.Value(), Span<uint8>(secret).Left(32)).Error() ==
               ErrorCode::StaleHandle);
         auto keys = TryClientSessionKeys(moved, second.Value().PublicKey(),
@@ -253,8 +300,8 @@ TEST(CryptoSealedBoxKnownAnswer) {
     REQUIRE(emptyOpened);
     CHECK(emptyOpened.Value() == 0);
 
-    // 같은 비밀키라도 kx 키 쌍으로는 sealed box를 열 수 없다(타입이 다르다, 컴파일 시간). 다른
-    // 수신자는 열지 못한다.
+    // 다른 수신자는 열지 못한다. kx 키 쌍으로는 sealed box를 열 수 없다(타입이 다르다, 아래
+    // static_assert).
     const BoxKeyPair alice = Import<BoxKeyPair>(AliceSecret);
     memset(opened, 0xAA, sizeof(opened));
     CHECK(TryOpenSealed(alice, sealed.View(), Span<uint8>(opened)).Error() ==
@@ -269,6 +316,7 @@ TEST(CryptoSealedBoxRoundTripAndTampering) {
     const Span<const uint8> message = Text("anonymous report");
     REQUIRE(TryGetSealedBoxBytes(message.Size()).Value() == message.Size() + 48);
     CHECK(TryGetSealedBoxBytes(MaxSize - 47).Error() == ErrorCode::Overflow);
+    CHECK(TryGetSealedBoxBytes(MaxSize - 48).Value() == MaxSize);
 
     uint8 sealed[128] = {};
     auto written = TrySealToRecipient(publicKey, message, Span<uint8>(sealed));
@@ -342,15 +390,22 @@ TEST(CryptoSealedBoxRoundTripAndTampering) {
               .Error() == ErrorCode::CapacityExceeded);
     CHECK(small[0] == 0x5A);
 
-    // small-order 수신자 공개키로는 봉인하지 않고 출력을 지운다.
-    const BoxPublicKey identity =
+    // small-order 수신자 공개키(u = 1, 위수 4)로는 봉인하지 않는다. libsodium이 쓴 임시 공개키
+    // 자리만 지우고 나머지는 쓰지 않는다.
+    const BoxPublicKey orderFour =
         BoxPublicKey::TryFromBytes(
             HexBytes("0100000000000000000000000000000000000000000000000000000000000000").View())
             .Value();
     memset(small, 0x5A, sizeof(small));
-    CHECK(TrySealToRecipient(identity, message, Span<uint8>(small)).Error() ==
+    CHECK(TrySealToRecipient(orderFour, message, Span<uint8>(small)).Error() ==
           ErrorCode::AuthenticationFailed);
-    CHECK(AllZero(Span<const uint8>(small).Left(written.Value())));
+    CHECK(AllZero(Span<const uint8>(small).Left(32)));
+    bool untouched = true;
+    for (usize i = 32; i < sizeof(small); ++i) {
+        untouched = untouched && small[i] == 0x5A;
+    }
+
+    CHECK(untouched);
 
     // 빈 키 쌍과 내보내기다.
     CHECK(TryOpenSealed(BoxKeyPair(), good, Span<uint8>(opened)).Error() == ErrorCode::StaleHandle);
@@ -363,4 +418,89 @@ TEST(CryptoSealedBoxRoundTripAndTampering) {
     REQUIRE(restored);
     CHECK(restored.Value().PublicKey() == publicKey);
     CHECK(TryOpenSealed(restored.Value(), good, Span<uint8>(opened)));
+}
+
+TEST(CryptoSealedBoxInPlaceAndEdgeCases) {
+    auto recipient = BoxKeyPair::TryGenerate();
+    REQUIRE(recipient);
+    const BoxPublicKey publicKey = recipient.Value().PublicKey();
+
+    // 제자리 봉인·열기를 libsodium secretbox의 겹침 처리 경계(16·17 byte, block0 32·33 byte)를
+    // 지나는 길이로 확인한다. 빈 메시지도 포함한다.
+    const usize lengths[] = {0, 1, 16, 17, 32, 33, 100};
+    for (usize length : lengths) {
+        uint8 message[100];
+        for (usize i = 0; i < length; ++i) {
+            message[i] = static_cast<uint8>(i * 13 + 5);
+        }
+
+        uint8 buffer[160] = {};
+        memcpy(buffer + 32, message, length);
+        auto sealed = TrySealToRecipient(publicKey, Span<const uint8>(buffer).Mid(32, length),
+                                         Span<uint8>(buffer));
+        REQUIRE(sealed);
+        CHECK(sealed.Value() == length + SealedBoxOverheadBytes);
+        auto opened =
+            TryOpenSealed(recipient.Value(), Span<const uint8>(buffer).Left(sealed.Value()),
+                          Span<uint8>(buffer).RightChop(32));
+        REQUIRE(opened);
+        CHECK(opened.Value() == length);
+        CHECK(ConstantTimeEquals(Span<const uint8>(buffer).Mid(32, length),
+                                 Span<const uint8>(message).Left(length)));
+    }
+
+    // 제자리 시작 주소가 한 byte라도 어긋나면 겹침이다.
+    uint8 shifted[96] = {};
+    CHECK(
+        TrySealToRecipient(publicKey, Span<const uint8>(shifted).Mid(31, 10), Span<uint8>(shifted))
+            .Error() == ErrorCode::InvalidArgument);
+    CHECK(
+        TrySealToRecipient(publicKey, Span<const uint8>(shifted).Mid(33, 10), Span<uint8>(shifted))
+            .Error() == ErrorCode::InvalidArgument);
+
+    // 제자리 열기가 실패하면(변조) 평문 자리 전체를 지운다.
+    uint8 buffer[96] = {};
+    memcpy(buffer + 32, "in place", 8);
+    auto sealed =
+        TrySealToRecipient(publicKey, Span<const uint8>(buffer).Mid(32, 8), Span<uint8>(buffer));
+    REQUIRE(sealed);
+    buffer[sealed.Value() - 1] ^= 0x01;
+    CHECK(TryOpenSealed(recipient.Value(), Span<const uint8>(buffer).Left(sealed.Value()),
+                        Span<uint8>(buffer).RightChop(32))
+              .Error() == ErrorCode::AuthenticationFailed);
+    CHECK(AllZero(Span<const uint8>(buffer).RightChop(32)));
+
+    // 열기: 임시 공개키가 small-order(0, 1)면 거부한다. 임시 공개키의 최상위 bit는 X25519가
+    // 무시하지만 nonce(BLAKE2b(epk ‖ pk))에 들어가므로 바꾸면 거부된다.
+    uint8 good[64];
+    auto written = TrySealToRecipient(publicKey, Text("edge"), Span<uint8>(good));
+    REQUIRE(written);
+    uint8 opened[16];
+    const uint8 smallOrder[2][32] = {{0}, {1}};
+    for (const auto& epk : smallOrder) {
+        uint8 forged[64];
+        memcpy(forged, good, written.Value());
+        memcpy(forged, epk, 32);
+        CHECK(TryOpenSealed(recipient.Value(), Span<const uint8>(forged).Left(written.Value()),
+                            Span<uint8>(opened))
+                  .Error() == ErrorCode::AuthenticationFailed);
+    }
+
+    uint8 highBit[64];
+    memcpy(highBit, good, written.Value());
+    highBit[31] ^= 0x80;
+    CHECK(TryOpenSealed(recipient.Value(), Span<const uint8>(highBit).Left(written.Value()),
+                        Span<uint8>(opened))
+              .Error() == ErrorCode::AuthenticationFailed);
+
+    // small-order 수신자로의 제자리 봉인이 실패해도 평문 자리는 그대로이고 임시 공개키 자리만
+    // 지운다.
+    const BoxPublicKey zero = BoxPublicKey();
+    uint8 keep[64];
+    memset(keep, 0x5A, sizeof(keep));
+    memcpy(keep + 32, "keep me", 7);
+    CHECK(TrySealToRecipient(zero, Span<const uint8>(keep).Mid(32, 7), Span<uint8>(keep)).Error() ==
+          ErrorCode::AuthenticationFailed);
+    CHECK(AllZero(Span<const uint8>(keep).Left(32)));
+    CHECK(ConstantTimeEquals(Span<const uint8>(keep).Mid(32, 7), Text("keep me")));
 }

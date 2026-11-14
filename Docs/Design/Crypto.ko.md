@@ -59,7 +59,7 @@
 - **nonce는 고수준 API가 관리한다.** 무작위 nonce는 192bit 이상인 알고리즘(XChaCha20-Poly1305, AEGIS-256)에만 쓴다. 96bit nonce 알고리즘은 스트림별로 파생한 키에 카운터 nonce를 붙여서만 쓴다. 호출자가 nonce를 직접 주는 API는 `rocks::crypto::hazmat`에 둔다.
 - **검증 전 평문을 내보내지 않는다.** 예외는 이름에 `Unverified`가 붙은 hazmat API(AES-GCM 멀티파트 복호) 하나다.
 - **쓰기 시작한 뒤 실패하면 지운다.** 출력에 쓰기 시작한 뒤의 실패는 출력 Span 전체를 0으로 지우고, Append 변형은 길이를 되돌리면서 붙였던 영역도 지운다. 쓰기 전에 거부한 경우(길이·겹침·Unsupported)는 입력과 출력을 건드리지 않는다. 스트림 객체는 Reset 전까지 같은 오류를 유지한다.
-- **키는 알고리즘에 묶인 move-only 객체다.** 같은 키 byte를 다른 알고리즘이나 용도에 쓰려면 KDF로 파생한다. 복사 생성자는 없고, 리플렉션·직렬화·서식 출력 경로에 들어가지 않는다.
+- **키는 알고리즘에 묶인 move-only 객체다.** 같은 키 byte를 다른 알고리즘이나 용도에 쓰려면 KDF로 파생한다. 예외는 kx 세션 키다: libsodium crypto_kx와 byte가 같아야 해서 알고리즘이 키 byte에 묶이지 않으므로, 프로토콜이 알고리즘을 고정하거나 협상을 인증한다(8절). 복사 생성자는 없고, 리플렉션·직렬화·서식 출력 경로에 들어가지 않는다.
 - **키는 ID로 찾는다.** GCM·ChaCha20-Poly1305·AEGIS 모두 key commitment를 가정하지 않는다. 그래서 형식은 키 ID를 기록하고, 키는 KeyRing에서 ID로 찾으며 기본적으로 시도 복호를 하지 않는다. 비밀번호 후보처럼 여러 키를 시도할 수밖에 없는 형식은 commitment를 둔다(9.5절).
 - **비밀에 의존하는 분기·메모리 주소를 두지 않는다.** AES·AEGIS는 HW 명령이 있을 때만 쓰고, 소프트웨어 AES와 AEGIS soft 경로는 쓰지 않는다(HW가 없으면 `Unsupported`). 예외는 Argon2id다. 첫 pass 후반부터 데이터 의존 주소로 메모리를 읽는 것이 알고리즘 설계다. CPU 쪽 한계(Apple M1·M2의 데이터 메모리 의존 prefetcher)는 6.3절에서 다룬다.
 - **암호 연산은 libsodium이 맡는다.** 예외는 AES 경량 계층 하나다. 이 계층은 libsodium의 AES-GCM 구현에서 파생하고 HW 명령만 쓴다(5.2절). 나머지 자체 코드는 길이 검사·디스패치·형식 조립·메모리 관리이고, 비교·소거도 `sodium_memcmp`·`sodium_memzero`를 쓴다.
@@ -114,7 +114,7 @@ Core/Source/Runtime/Crypto/
 | 비밀번호 | Argon2id | — | [libsodium] | INTERACTIVE(2, 64 MiB) / MODERATE(3, 256 MiB) / SENSITIVE(4, 1 GiB) 프리셋을 쓰고, 입력 매개변수에 상한을 둔다. |
 | 서명 | Ed25519 | Ed25519ph(스트리밍) | [libsodium] | ph 서명(dom2 접두 + SHA-512(m))은 Ed25519(m)과도, SHA-512(m)에 대한 순수 서명과도 호환되지 않으므로 서명 알고리즘 ID를 따로 둔다. 검증 규칙(비정규 S·small-order R·비정규/small-order 공개키 거부, cofactorless 검증식, `ED25519_COMPAT` 미정의)은 libsodium이 정본이며, 도구도 같은 Rocks 경로로 검증한다. 혼합 차수(torsion이 섞인) 공개키·R은 거부하지 않는다(부분군 검사가 필요하면 키 등록 때 따로 한다). |
 | 키 캡슐화(PQ) | X-Wing | ML-KEM768 | [libsodium] | 1.0.22에 들어왔다. libsodium은 대부분의 용도에 X-Wing(ML-KEM768 + X25519 하이브리드)을 권한다. |
-| 키 교환 · 공개키 암호화 | X25519(crypto_kx) · sealed box | box | [libsodium] | kx는 rx/tx 키를 분리한다. sealed box는 epk ‖ box 구조이고 오버헤드가 48 byte다. |
+| 키 교환 · 공개키 암호화 | X25519(crypto_kx) · sealed box | box | [libsodium] | kx는 rx/tx 키를 분리하고 역할을 묶는다(세션 난수가 없어 같은 키 쌍이면 같은 키다). sealed box는 epk ‖ box 구조이고 오버헤드가 48 byte다. 키 쌍 타입을 용도별로 나눈다(KxKeyPair·BoxKeyPair, byte 형식은 libsodium과 같다). |
 | 키 해시 | SipHash-2-4 | SipHash-2-4 128bit | [libsodium] | hash flooding 방어용이다. 128bit 출력판은 full 빌드에만 있다. |
 | 키 wrap | XChaCha20-Poly1305(키 ID를 AD로) | AES-KW/KWP(RFC 3394/5649, 후속) | [libsodium] | KW는 상호운용 요구가 생기면 경량 계층에 더한다. |
 | 저수준 AES(hazmat) | CTR | CMAC. CBC·CCM은 요구 시 | [경량 계층] | 상호운용 전용이다. CBC 복호와 KW unwrap은 역방향 라운드(AESDEC·AESIMC / AESD·AESIMC)가 필요해 요구가 생길 때 더한다. |
@@ -234,7 +234,7 @@ ARMv8.0의 Crypto Extensions는 선택 기능이어서 저가 SoC에는 없을 �
 - **조각 입력은 `Span<const Span<const uint8>>`이다.** 해시·MAC·서명처럼 라이브러리가 증분 입력을 받는 곳에만 둔다. 헤더와 본문을 복사하지 않고 넣을 수 있다. AEAD의 AD는 libsodium이 연속 버퍼만 받으므로 조각 입력을 두지 않는다(복사를 숨기지 않는다).
 - **고정 길이 값은 값 타입이다.** digest·서명·공개키·nonce는 `Ed25519Signature`처럼 할당 없는 값 타입으로 돌려준다. 값 타입은 `View()`로 `Span<const uint8>`을 내준다. 받을 때는 Span에 길이 검사를 하며, 길이가 틀리면 `InvalidArgument`다(결정 D8).
 - **비밀은 view로만 노출한다.** `SecretBytes::View()`는 `Span<const uint8>`이고 수명은 객체와 같다. 쓰기 view는 생성·가져오기 경로에만 있다.
-- **제자리 처리는 함수마다 정한다.** nonce 지정·분리 형식은 입력과 출력이 같은 주소에서 시작할 때(`m == c`)만 허용한다. nonce를 앞에 붙이는 고수준 `TrySeal`은 `plaintext.Data() == output.Data() + NonceBytes`, `TryOpen`은 `plaintext.Data() == sealed.Data() + NonceBytes`일 때만 허용한다. 그 밖의 겹침은 쓰기 전에 `InvalidArgument`로 거부한다. 검사에는 Core `Overlaps`를 쓴다.
+- **제자리 처리는 함수마다 정한다.** nonce 지정·분리 형식은 입력과 출력이 같은 주소에서 시작할 때(`m == c`)만 허용한다. nonce를 앞에 붙이는 고수준 `TrySeal`은 `plaintext.Data() == output.Data() + NonceBytes`, `TryOpen`은 `plaintext.Data() == sealed.Data() + NonceBytes`일 때만 허용한다. sealed box는 임시 공개키 자리 뒤(`+ 32`)에서만 허용한다. 그 밖의 겹침은 쓰기 전에 `InvalidArgument`로 거부한다. 검사에는 Core `Overlaps`를 쓴다.
 
 Core `Span`에는 위 원칙에 필요한 하위 범위·byte 변환·겹침 검사를 더했다(선행 P1, 2026-11-14 `ca4e2cb`와 리뷰 반영). Left·Right 계열은 기존 `StringView`처럼 범위를 넘으면 길이로 잘라 낸다. 범위 밖을 오류로 다뤄야 하는 파싱에는 `TrySlice`를 쓴다. `TrySlice`의 오류는 `InvalidArgument`이므로, 메시지에서 온 byte를 자르는 복호 경로 어댑터는 이 실패를 `AuthenticationFailed`로 바꿔 돌려준다(2·11절). `AsBytes`는 값마다 byte 표현이 하나뿐인 원소(패딩 없는 정수·구조체)만 받는다. 패딩 있는 구조체나 float를 해시에 넣으면 미정 byte·여러 표현 때문에 결과가 실행마다 달라질 수 있기 때문이다.
 
@@ -425,7 +425,7 @@ AEAD 규칙(2026-11-15 구현):
 - AES-GCM·AEGIS 복호는 libsodium이 검증 전 평문을 호출자 버퍼에 잠시 쓴다. 실패하면 반환 전에 지우므로 "검증 전 평문을 내보내지 않는다"(2절)는 API 경계에서 성립한다. 호출 중 같은 버퍼를 다른 스레드가 읽지 않게 한다.
 - 순번 봉인기(2026-11-15 설계 리뷰 반영). 신뢰할 수 있고 순서가 보장되는 전송에서 AES-GCM·AEGIS의 HW 처리량이 필요하거나 nonce를 싣지 않아야 할 때, 또는 TLS 1.3·QUIC·HPKE형 레코드 nonce와 맞출 때 쓴다. 그 밖의 레코드 채널은 secretstream(9.4절)이 낫다.
   - nonce 구성은 prefix ‖ 카운터가 아니라 nonce 길이 iv와의 XOR이다. prefix 구성은 iv = prefix ‖ 0⁸인 특수한 경우이고, XOR 구성은 키마다 다른 비밀 nonce 오프셋으로 다중 사용자 보강을 준다(aead-limits-13 7.1·7.2절의 GCM·ChaCha20-Poly1305 다중 사용자 bound가 nonce 무작위화를 전제한다. AEGIS는 RFC 10032 10.1.3절이 nonce의 남는 bit에 키 식별자를 넣기를 권하며 효과가 비슷하다). iv는 키와 같은 키 스케줄에서 나오고(`TryDerive`가 키와 다른 타입 tag로 함께 뽑는다) 전송하지 않으며 상수 라벨로 두지 않는다. 0이어도 nonce는 겹치지 않고 보강만 잃는다. kx로 얻은 키에는 iv를 0으로 둔다(kx는 키만 준다). iv는 키 저장소에 두고, 봉인·열기에 쓴 스택 nonce도 지운다.
-  - 키 하나는 평생 sealer 하나(한 방향)만 쓴다. 방향을 prefix·라벨로 나누면 역할을 착각했을 때 양쪽이 같은 nonce로 봉인한다(fail-open). 두 방향은 kx의 rx·tx처럼 역할이 묶인 키로 나눈다(fail-closed). 같은 키 byte를 다시 가져오거나 같은 인자로 다시 파생하면 seq 0부터 같은 nonce가 나오므로 키는 세션마다 새것이어야 한다. kx 세션 키는 두 공개키에서 결정적으로 나오므로(BLAKE2b(X25519 ‖ client_pk ‖ server_pk)) 적어도 한쪽 키 쌍이 세션마다 새 ephemeral이어야 한다(양쪽이 장기 키 쌍이면 재접속마다 같은 키다, 2026-11-15 재검증 반영). `TryDerive`의 subkeyId는 쓰기 전에 durable하게 올린 값이고 같은 master를 쓰는 다른 프로세스·기기와 카운터를 공유하지 않는다. 상태를 둘 수 없으면 128 bit 이상 무작위 salt의 HKDF로 세션 master를 먼저 만든다. 두 방향을 함께 만드는 편의 생성은 후속 "전송 채널 보호" 계층에 둔다.
+  - 키 하나는 평생 sealer 하나(한 방향)만 쓴다. 방향을 prefix·라벨로 나누면 역할을 착각했을 때 양쪽이 같은 nonce로 봉인한다(fail-open). 두 방향은 kx의 rx·tx처럼 역할이 묶인 키로 나눈다(fail-closed). 같은 키 byte를 다시 가져오거나 같은 인자로 다시 파생하면 seq 0부터 같은 nonce가 나오므로 키는 세션마다 새것이어야 한다. kx 세션 키는 두 공개키에서 결정적으로 나오므로(BLAKE2b(X25519 ‖ client_pk ‖ server_pk)) 봉인하는 쪽 자기 키 쌍이 세션마다 새 ephemeral이어야 한다(2026-11-15 재검증 반영: 상대만 ephemeral이면 공격자가 상대의 이전 공개키와 레코드를 재전송해 장기 키 쪽이 같은 세션 키로 seq 0부터 다시 봉인하게 만든다). 장기 키 쪽은 무작위 nonce AEAD만 쓰고 상대의 첫 메시지는 재전송될 수 있다고 본다(0-RTT). 신원은 장기 Ed25519 키가 세션 공개키와 맥락(양쪽 공개키·역할)을 함께 서명해 확인한다. `TryDerive`의 subkeyId는 쓰기 전에 durable하게 올린 값이고 같은 master를 쓰는 다른 프로세스·기기와 카운터를 공유하지 않는다. 상태를 둘 수 없으면 128 bit 이상 무작위 salt의 HKDF로 세션 master를 먼저 만든다. 두 방향을 함께 만드는 편의 생성은 후속 "전송 채널 보호" 계층에 둔다.
   - 순번을 이어 가는 길(시작 seq 지정)은 두지 않는다. 봉인 뒤 저장 전에 죽으면 nonce가 다시 쓰이고(SP 800-38D 9.1절), 받는 쪽이 뒤처진 seq로 다시 만들면 재전송을 받아들인다. 재시작은 새 키(세션마다 새 ephemeral kx, 또는 쓰기 전에 durable하게 올린 epoch로 파생)로 한다. 경계 시험은 모듈 내부 접근점(`detail::SequenceAccess`, Private/AeadSequenceAccess.h)으로 seq·블록 집계를 옮긴다. 이 헤더는 사실상 이어 가기 API이므로 Tests 밖에서 include하지 않는다(P7 정책 검사).
   - seq는 0부터 2^64 − 2까지 쓴다. `NextSequence() == 2^64 − 1`이 소진 표지이고 `IsExhausted()`가 이를 알린다. 봉인은 호출자 버퍼 오류(nonce·평문 상한·출력 길이·겹침)를 먼저 보고, 이 실패는 seq·블록 집계를 바꾸지 않는다. 그다음 AES-GCM은 정상 메시지가 키당 블록(메시지마다 평문 블록 + AD 블록 + 1) 한도 `maxBlocksPerKey`를 넘으면 소진으로 바꾼다(2026-11-15 재검증 반영: 너무 큰 메시지 하나가 키를 소진시키지 않는다). 소진 뒤 `TrySeal`은 `CapacityExceeded`이고, `IsExhausted()`가 false인 `CapacityExceeded`는 출력 부족이나 메시지 상한 초과다. 블록 한도는 마지막 방어선이고, 키 교체 메시지를 옛 키로 보낼 자리가 남도록 프로토콜은 그 전(예: 한도의 절반)에 재키잉한다.
   - opener는 순서를 고정하고 인증 실패(순서 바뀜·빠짐·재전송·변조·절단·다른 AD)와 소진 뒤 메시지를 `AuthenticationFailed`(plaintext 소거, sticky)로 받는다(TLS 1.3 5.2절 bad_record_mac과 같다). sticky라서 키당 위조 시도가 한 번이므로 받는 쪽 integrity limit을 셀 필요가 없다(같은 키로 opener를 다시 만들지 않을 때). 겹침은 실패 뒤에도 쓰기 전에 `InvalidArgument`다. sealed 길이로 정해지는 평문보다 plaintext가 작으면 인증 전에 `CapacityExceeded`(상태 불변)이고, 길이는 전송로에 보이는 값이라 새 정보가 아니지만 프레이밍 계층이 최대 레코드 길이를 먼저 막는다. 스트림 끝(절단) 인증은 프로토콜 몫이다(TLS close_notify처럼).
@@ -458,11 +458,18 @@ Result<void> TryVerify(const Ed25519PublicKey& key, Span<const uint8> message,
                        Span<const uint8> signature) noexcept;
 Result<void> hazmat::TryExportSeed(const Ed25519SigningKey& key, Span<uint8> output) noexcept;
 
-// kx: 클라이언트·서버 역할에 따라 rx/tx 세션 키를 각각 AeadKey로 돌려준다.
-Result<KxSessionKeys> TryClientSessionKeys(const KxKeyPair& client, const KxPublicKey& server) noexcept;
+// kx: 클라이언트·서버 역할에 따라 rx/tx 세션 키를 각각 AeadKey로 돌려준다(2026-11-15 구현·교차검증).
+// algorithm은 키가 32 byte인 AEAD만 받고(16 byte는 기기와 관계없이 InvalidArgument), 키 byte는 crypto_kx와 같다.
+// 상대 공개키가 small-order면 AuthenticationFailed다. 알고리즘은 키 byte에 묶이지 않는다(2절의 예외).
+Result<KxSessionKeys> TryClientSessionKeys(const KxKeyPair& client, const KxPublicKey& server,
+                                           AeadAlgorithm algorithm) noexcept;
+Result<KxSessionKeys> TryServerSessionKeys(const KxKeyPair& server, const KxPublicKey& client,
+                                           AeadAlgorithm algorithm) noexcept;
 
-// sealed box: 수신자 공개키만으로 봉인한다. output.Size() == message.Size() + 48.
-Result<usize> TrySealToRecipient(const KxPublicKey& recipient, Span<const uint8> message, Span<uint8> output) noexcept;
+// sealed box: 수신자 공개키만으로 봉인한다. output.Size() >= message.Size() + 48(TryGetSealedBoxBytes).
+// 수신자 키는 kx와 다른 타입이다(BoxKeyPair·BoxPublicKey). 제자리는 message가 output + 32에서 시작할 때만이다.
+Result<usize> TrySealToRecipient(const BoxPublicKey& recipient, Span<const uint8> message, Span<uint8> output) noexcept;
+Result<usize> TryOpenSealed(const BoxKeyPair& recipient, Span<const uint8> sealed, Span<uint8> plaintext) noexcept;
 ```
 
 ## 9. 스트리밍 API
@@ -784,7 +791,7 @@ public:
     void Reset() noexcept;                     // 지우고 빈 값이 된다
 };
 
-// 알고리즘에 묶인 키 타입은 SecretBytes를 품는다: AeadKey, MacKey, SecretStreamKey, SegmentStreamKey,
+// 알고리즘에 묶인 키 타입은 SecretBytes를 품는다: AeadKey, MacKey, SecretStreamKey, SegmentStreamKey, BoxKeyPair, KemKeyPair,
 // Ed25519SigningKey, KxKeyPair. 공개 값(Ed25519PublicKey, KxPublicKey)은 일반 값 타입이다.
 
 // 마스터 키에서 용도별 키를 타입으로 파생한다(BLAKE2b KDF). 결과가 일반 Span에 쓰이지 않는다.
@@ -862,7 +869,7 @@ public:
 
 | 상황 | ErrorCode | 출력·상태 |
 |---|---|---|
-| 복호·검증 경로의 신뢰할 수 없는 입력: tag·MAC·서명·commitment 불일치, 절단·순서 위반, 잘못된 키, 헤더 형식 위반 | `AuthenticationFailed` [신설] | 출력 전체 소거, 스트림 sticky |
+| 복호·검증 경로의 신뢰할 수 없는 입력: tag·MAC·서명·commitment 불일치, 절단·순서 위반, 잘못된 키, 헤더 형식 위반. 상대에게서 받은 공개키(kx 상대, 봉인·캡슐화 수신자)가 올바른 점이 아닌 경우도 같다(봉인 쪽은 libsodium이 쓴 자리만 지운다) | `AuthenticationFailed` [신설] | 출력 전체 소거, 스트림 sticky |
 | 호출자의 API 오용: 키·nonce·context·출력 버퍼 길이 오류, 함수 규칙 밖의 겹침, 잘못된 단계 호출 | `InvalidArgument` | 입력·출력·상태 불변 |
 | 출력 Span 부족 | `CapacityExceeded` | 상태 불변(메시지형), 역압(스트림형) |
 | hex·base64 디코딩: 길이·끝 `'='`만으로 알 수 있는 형식 오류 / 디코딩 중에 찾은 형식 오류(알파벳·끝 bit·중간 패딩) | `InvalidArgument` | 앞은 출력 불변, 뒤는 출력 전체 소거. 크기 검사가 내용 검사보다 먼저다 |

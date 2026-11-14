@@ -38,13 +38,8 @@ struct X25519Parts {
     uint8 publicKey[X25519PublicKeyBytes];
 };
 
-// 비밀키를 키 저장소로 복사하고 공개키를 계산한다. 길이가 다르면 InvalidArgument다.
-Result<X25519Parts> TryMakeX25519(Span<const uint8> secretKey) noexcept {
-    if (secretKey.Size() != X25519SecretKeyBytes) {
-        return Result<X25519Parts>::Failure(ErrorCode::InvalidArgument);
-    }
-
-    auto key = SecretBytes::TryCopyFrom(secretKey);
+// 키 저장소의 비밀키로 공개키를 계산한다.
+Result<X25519Parts> TryFinishX25519(Result<SecretBytes>&& key) noexcept {
     if (!key) {
         return Result<X25519Parts>::Failure(key.Error());
     }
@@ -57,16 +52,19 @@ Result<X25519Parts> TryMakeX25519(Span<const uint8> secretKey) noexcept {
     return Result<X25519Parts>::Success(Move(parts));
 }
 
-// OS 난수 비밀키로 만든다(crypto_kx_keypair·crypto_box_keypair와 같은 방식).
-Result<X25519Parts> TryGenerateX25519() noexcept {
-    uint8 secretKey[X25519SecretKeyBytes];
-    if (auto filled = TryFillRandom(Span<uint8>(secretKey)); !filled) {
-        return Result<X25519Parts>::Failure(filled.Error());
+// 비밀키를 키 저장소로 복사하고 공개키를 계산한다. 길이가 다르면 InvalidArgument다.
+Result<X25519Parts> TryMakeX25519(Span<const uint8> secretKey) noexcept {
+    if (secretKey.Size() != X25519SecretKeyBytes) {
+        return Result<X25519Parts>::Failure(ErrorCode::InvalidArgument);
     }
 
-    auto parts = TryMakeX25519(Span<const uint8>(secretKey));
-    SecureZero(Span<uint8>(secretKey));
-    return parts;
+    return TryFinishX25519(SecretBytes::TryCopyFrom(secretKey));
+}
+
+// OS 난수 비밀키로 만든다(crypto_kx_keypair·crypto_box_keypair와 같은 방식). 비밀키를 키 저장소에
+// 바로 만들어 스택 사본을 남기지 않는다.
+Result<X25519Parts> TryGenerateX25519() noexcept {
+    return TryFinishX25519(SecretBytes::TryGenerate(X25519SecretKeyBytes));
 }
 
 template <typename PublicKey>
@@ -113,12 +111,15 @@ Result<KxSessionKeys> TrySessionKeys(bool client, const KxKeyPair& self, const K
         return Result<KxSessionKeys>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (auto usable = detail::CheckAeadUsable(algorithm); !usable) {
-        return Result<KxSessionKeys>::Failure(usable.Error());
+    // 열거값·키 길이를 HW 사용 가능 여부보다 먼저 본다(정적 오용은 기기와 관계없이
+    // InvalidArgument).
+    auto info = TryGetAeadInfo(algorithm);
+    if (!info || info.Value().keyBytes != SessionKeyBytes) {
+        return Result<KxSessionKeys>::Failure(ErrorCode::InvalidArgument);
     }
 
-    if (TryGetAeadInfo(algorithm).Value().keyBytes != SessionKeyBytes) {
-        return Result<KxSessionKeys>::Failure(ErrorCode::InvalidArgument);
+    if (auto usable = detail::CheckAeadUsable(algorithm); !usable) {
+        return Result<KxSessionKeys>::Failure(usable.Error());
     }
 
     auto receive = SecretBytes::TryCreate(SessionKeyBytes);
@@ -238,11 +239,11 @@ Result<usize> TrySealToRecipient(const BoxPublicKey& recipient, Span<const uint8
     }
 
     detail::EnsureSodium();
-    // 수신자 공개키가 small-order 점이면 공유 비밀이 0이라 libsodium이 거부한다. 임시 공개키가 이미
-    // 쓰였을 수 있으므로 출력을 지운다.
+    // 수신자 공개키가 small-order 점이면 공유 비밀이 0이라 libsodium이 거부한다. 이때 libsodium은
+    // 임시 공개키 32 byte만 쓰므로 그 자리만 지운다(제자리 평문은 그대로 둔다).
     if (crypto_box_seal(sealed.Data(), detail::InputPointer(message), message.Size(),
                         recipient.bytes) != 0) {
-        SecureZero(sealed);
+        SecureZero(sealed.Left(EphemeralKeyBytes));
         return Result<usize>::Failure(ErrorCode::AuthenticationFailed);
     }
 

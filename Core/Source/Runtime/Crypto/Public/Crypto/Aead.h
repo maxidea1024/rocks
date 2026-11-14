@@ -205,12 +205,13 @@ inline constexpr uint64 AeadSequenceExhausted = static_cast<uint64>(-1);
 // - 키 하나는 평생 sealer 하나(한 방향)만 쓴다. 두 방향은 키를 따로 둔다(kx의 rx·tx 키처럼 역할이
 //   묶인 키가 좋다). 같은 키 byte를 다시 가져오거나 같은 인자로 다시 파생해 새 sealer를 만들면 seq
 //   0부터 같은 nonce가 나온다.
-// - 키는 세션마다 새것이어야 한다. - kx로 얻는다면 적어도 한쪽 키 쌍이 세션마다 새로 만든 것이어야
-//   한다. kx 세션 키는 두 공개키에서 결정적으로 나오므로, 양쪽이 장기 키 쌍이면 재접속마다 같은
-//   키가 된다. kx 키에는 iv를 0으로 둔다. - TryDerive로 얻는다면 subkeyId는 쓰기 전에 durable하게
-//   올린 값이고, 같은 master를 쓰는 다른 프로세스·기기와 카운터를 공유하지 않는다. 상태를 둘 수
-//   없으면 128 bit 이상 무작위 salt의 HKDF(Kdf.h)로 세션 master를 먼저 만든다. 무작위 64 bit
-//   subkeyId는 2^32 세션 규모에서 충돌한다.
+// - 키는 세션마다 새것이어야 한다. kx로 얻는다면 봉인하는 쪽 자기 키 쌍이 세션마다 새로 만든
+//   것이어야 한다. kx 세션 키에는 세션 난수가 없어 같은 두 키 쌍이면 늘 같은 키이므로, 상대만 새 키
+//   쌍이면 공격자가 상대의 이전 공개키를 재전송해 같은 키를 다시 만들게 하고 seq 0부터 같은 nonce를
+//   얻는다(KeyExchange.h). kx 키에는 iv를 0으로 둔다.
+// - TryDerive로 얻는다면 subkeyId는 쓰기 전에 durable하게 올린 값이고, 같은 master를 쓰는 다른
+//   프로세스·기기와 카운터를 공유하지 않는다. 상태를 둘 수 없으면 128 bit 이상 무작위 salt의
+//   HKDF(Kdf.h)로 세션 master를 먼저 만든다. 무작위 64 bit subkeyId는 2^32 세션 규모에서 충돌한다.
 // - iv는 nonce 길이(AeadInfo::nonceBytes)의 비밀 값이고 키와 같은 키 스케줄에서 나온다(TryDerive가
 //   함께 뽑는다). 전송하지 않고 상수 라벨로 두지 않는다. 0이어도 nonce는 겹치지 않지만 다중 사용자
 //   보강(키마다 다른 nonce 오프셋, AES-128-GCM·AEGIS-128L처럼 128 bit 키에서 의미가 크다)을 잃는다.
