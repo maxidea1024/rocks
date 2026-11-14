@@ -26,7 +26,7 @@ auto runtimeName = type.Name();
 
 ## 클래스 메타객체의 범위
 
-현재 `TypeSchema`, `RuntimeTypeOps`, `TypeRegistry`, `TypeLease`는 등록된 타입에 관한 정보, 추상 여부·상속 메타데이터 및 모듈 수명 보호의 기반을 제공한다. 등록된 `TypeId`를 쓰는 `ObjectRegistry::NewObject<Object>(access, typeId)`는 런타임 타입을 지정하는 낮은 수준의 객체 생성 경로다. 이 경로를 타입 제한 클래스 참조나 자동 에디터 선택, 클래스 기본 객체와 동일한 완성 기능으로 해석하지 않는다.
+현재 `TypeSchema`, `RuntimeTypeOps`, `TypeRegistry`, `TypeLease`는 등록된 타입에 관한 정보, 추상 여부·상속 메타데이터 및 모듈 수명 보호의 기반을 제공한다. 등록된 `TypeId`를 쓰는 `ObjectRegistry::NewObject<Object>(access, typeId)`는 런타임 타입을 지정하는 낮은 수준의 객체 생성 경로다. 이 경로를 타입 제한 클래스 참조나 자동 에디터 선택, 클래스 기본값 레코드([RuntimeClassMetadata](../Design/RuntimeClassMetadata.ko.md) '클래스 기본값 결정' — A5)와 동일한 완성 기능으로 해석하지 않는다.
 
 클래스 자체를 데이터로 전달·저장하고 기반 타입 제한, 동적 생성, 기본값·필드·함수와 에디터·에셋 연결을 지원하는 기능은 [런타임 클래스 메타데이터 설계](../Design/RuntimeClassMetadata.ko.md)의 후속 목표다. 실제 C++ 구현·사용 예제·플랫폼별 테스트가 완료된 부분만 이 문서의 현재 상태로 기록한다.
 

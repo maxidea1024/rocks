@@ -26,7 +26,7 @@
 
 ## 런타임 클래스 기능의 현재 범위
 
-현재 타입 메타데이터와 `TypeLease`, `TypeRegistry`는 클래스 정보와 수명을 관리하는 기초다. 등록된 `TypeId`는 `ObjectRegistry::NewObject<Object>(access, typeId)`를 통해 낮은 수준의 런타임 객체 생성 경로에 전달할 수 있다. 타입 제한 클래스 참조, 클래스 기본 객체, 함수 리플렉션, 에디터 클래스 선택과 모듈 reload 대응을 포함한 전체 메타클래스 기능은 별도 후속 범위다. 요구·수명 규약·검증 계획은 [런타임 클래스 메타데이터 설계](../Design/RuntimeClassMetadata.ko.md)에 정리한다.
+현재 타입 메타데이터와 `TypeLease`, `TypeRegistry`는 클래스 정보와 수명을 관리하는 기초다. 등록된 `TypeId`는 `ObjectRegistry::NewObject<Object>(access, typeId)`를 통해 낮은 수준의 런타임 객체 생성 경로에 전달할 수 있다. 타입 제한 클래스 참조, 클래스 기본값 레코드(UE CDO 대신 불변 레코드 — 아래 설계 문서의 '클래스 기본값 결정', A5), 함수 리플렉션, 에디터 클래스 선택과 모듈 reload 대응을 포함한 전체 메타클래스 기능은 별도 후속 범위다. 요구·수명 규약·검증 계획은 [런타임 클래스 메타데이터 설계](../Design/RuntimeClassMetadata.ko.md)에 정리한다.
 
 ## 2. 모듈·파일과 구현 범위
 

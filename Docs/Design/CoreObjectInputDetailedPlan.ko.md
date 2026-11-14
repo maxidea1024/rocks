@@ -594,7 +594,7 @@ publication 전 Initialize는 값 계산과 ConstructionContext journal이 소�
 
 ### 12.2 ClassDefaults·instancing
 
-ClassDefaults는 TypeId/revision별 불변 archetype이다. 순서는 native default → class default → prefab/variant → instance override → 명시 spawn parameter다. Foundation은 class default와 instance override까지 테스트하고 prefab importer는 후속으로 연결한다. default subobject는 SubobjectGuid와 인스턴스별 clone/remap을 갖는다. 가변 component를 모든 instance가 공유하지 않는다.
+ClassDefaults는 TypeId/revision별 불변 기본값 레코드다(객체가 아니다 — [RuntimeClassMetadata](RuntimeClassMetadata.ko.md) '클래스 기본값 결정'). 순서는 native default → script field 초기값(이 둘의 결과가 class default 레코드다) → prefab/variant → instance override → 명시 spawn parameter다. Foundation은 class default와 instance override까지 테스트하고 prefab importer는 후속으로 연결한다. default subobject는 SubobjectGuid와 인스턴스별 clone/remap을 갖는다 — 레코드 밖이며 prefab과 함께 후속으로 들어온다. 가변 component를 모든 instance가 공유하지 않는다.
 
 ~~~cpp
 Result<OwnedObjectGraph> AllocateObjectGraph(const GraphPlan&);
@@ -603,9 +603,11 @@ Result<void> RemapReferences(ConstructionContext&, const RemapTable&);
 Result<PublishedGraph> CommitObjectGraph(ConstructionContext&);
 ~~~
 
+`ApplyDefaults`는 C++ 타입에 레코드를 다시 적용하지 않는다(생성자가 같은 값을 만든다 — Debug에서 대조만 한다). Sparks 타입은 필드 초기값 덮기만 적용하고, 그 위에 prefab/variant·instance override·spawn parameter를 쓴다. default subobject의 SubobjectGuid·인스턴스별 remap은 prefab과 함께 후속이다.
+
 OwnedObjectGraph와 ConstructionContext는 move-only다. Commit은 context를 참조로 받아 먼저 검증하고 성공할 때만 ownership을 PublishedGraph로 이전한다. 실패하면 caller의 context에 cleanup ownership이 그대로 남으며 재시도 또는 rollback할 수 있다. moved-from context가 실패 cleanup의 유일 정보를 잃는 API를 구현하지 않는다.
 
-원본 GUID·Outer·transient/editor-only·soft external reference 복사 정책을 type/schema가 선언한다. 기본값/TypeInfo는 ModuleLease를 유지한다. 특정 World actor를 ClassDefaults가 강하게 보존하지 않게 검증한다.
+원본 GUID·Outer·transient/editor-only·soft external reference 복사 정책을 type/schema가 선언한다. 기본값/TypeInfo는 ModuleLease를 유지한다. 특정 World actor를 ClassDefaults가 강하게 보존하지 않게 검증한다(C++ 레코드의 강한 참조는 구조적으로 null이고, 레코드의 World 객체 참조는 거부한다).
 
 ## 13. GC의 단계별 구현과 수거 규약
 
@@ -730,7 +732,7 @@ C06에서 move-only Function과 loader 비의존 ModuleLease를 먼저 도입한
 | C20 | R2-A / C19 | Clang 메타 생성기 — AST schema·trace 생성·재생성 최소화 | CT10;CT12 |
 | C21 | R2-B / C12;C14;C20 | managed field/container — owner-aware edge·GcArray·구조 mutation version | CT18 |
 | C22 | R2-B / C17;C21 | 점진 GC phase — barrier·root flush·cutoff·epoch·bounded queue | CT18;CT19 |
-| C23 | R2-B / C19;C21 | 기본값·복제 — ClassDefaults·SubobjectGuid·cycle remap·Archive bridge | CT16 |
+| C23 | R2-B / C19;C21 | 기본값·복제 — ClassDefaults(불변 기본값 레코드·override 집합·차이 저장, 구현은 A5 — RuntimeClassMetadata '클래스 기본값 결정')·SubobjectGuid(default subobject·인스턴스별 remap — prefab과 함께 후속)·cycle remap·Archive bridge | CT16 |
 | C24 | R2-B / C18;C22;C23 | 수명 통합 — task/IO/backend/type lease·재진입·정상 retire·scope ledger | CT20;CT21;CT22;NL03;NL06–08 |
 | C25 | R2-B / C20;C23 | schema migration — unknown field·version·golden fixtures | CT11;CT16 |
 | C26 | R2-B / C15;C24;C25 | Foundation 필수 Gate — CF01–12·Win/Mac·누수/하네스·CPU/Task/GC/memory viewer·report | CT01–24;MX01–08;TK01–06;NL01–03/06–08(CPU);HT01–06;OB01–06(CPU) |

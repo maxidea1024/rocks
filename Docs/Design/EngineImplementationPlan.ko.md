@@ -489,7 +489,7 @@ BeginDestroy는 정확히 1회 실행하여 추적 edge를 정리하고 render/p
 
 ### 5.3 클래스 기본값·서브오브젝트·컨텍스트
 
-ClassDefaults는 TypeId별 불변 기본값과 default subobject graph를 보관하는 archetype이다. native 생성·script field 기본값 → class archetype → prefab/variant → instance override → 명시 spawn parameter 순서를 고정한다. default subobject는 stable SubobjectGuid를 가지며 생성 시 반드시 인스턴스별 복제·내부 참조 remap을 수행한다. 가변 component를 모든 instance가 공유하지 않는다. 기본값의 변경 전파도 prefab과 같은 old/new/local 비교를 사용한다. Object 기본값·참조 갱신 개념은 공식 자료로 대조하였다. [S26](https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-object-handling-in-unreal-engine)
+ClassDefaults는 TypeId별 불변 기본값 레코드다(객체가 아니다 — [런타임 클래스 메타데이터 설계](RuntimeClassMetadata.ko.md) '클래스 기본값 결정'). native 생성 → script field 초기값(이 둘의 결과가 레코드다) → prefab/variant → instance override → 명시 spawn parameter 순서를 고정한다. default subobject graph는 레코드 밖이며 prefab과 함께 후속으로 들어온다. default subobject는 stable SubobjectGuid를 가지며 생성 시 반드시 인스턴스별 복제·내부 참조 remap을 수행한다. 가변 component를 모든 instance가 공유하지 않는다. 기본값의 변경 전파는 prefab과 같은 old/new/local 비교를 명시 override 집합과 기준(base) 차이 저장으로 표현한다 — override하지 않은 값은 새 기본값을 따르고 override한 값은 유지된다(prefab이 생기면 기준이 archetype 사슬이 된다). Object 기본값·참조 갱신 개념은 공식 자료로 대조하였다. [S26](https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-object-handling-in-unreal-engine)
 
 ClassDefaults와 TypeInfo는 module revision lease와 함께 유지한다. 기본값은 asset·불변 value만 참조하고 특정 PIE World의 Entity를 강하게 유지하지 않는다. editor 재구성 hook은 side effect가 제한된 C++/자체 언어 함수이며 preview world에서 실행한다. 게임 spawn·IO·RPC를 수행하는 범용 construction graph는 제공하지 않는다.
 
@@ -602,9 +602,9 @@ TypeId·FieldId·RpcId는 선언 이름 hash만으로 결정하지 않는다. �
 
 클래스의 정적 선언 정보를 조회하는 기능에 더해, 등록된 클래스를 런타임 데이터로 참조하고 전달·검사·선택·생성하는 기능을 필수 범위로 둔다. Epic의 공개 [UClass API](https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Runtime/CoreUObject/UClass), [객체 생성 설명](https://dev.epicgames.com/documentation/unreal-engine/creating-objects-in-unreal-engine)과 [TSubclassOf 설명](https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Runtime/CoreUObject/TSubclassOf)은 기능 범위의 비교 기준이다. Rocks의 명명·수명과 구현은 독립적으로 정의하며 Blueprint는 도입하지 않는다.
 
-런타임 클래스 핸들은 정적 생성 schema와 다르게 특정 Registry의 등록 상태, 버전·모듈 코드의 수명을 보유 또는 안전하게 검증해야 한다. 클래스 참조는 타입 제한을 지원하고, 선언된 기반 타입과 실제 등록 타입의 상속·추상 여부·생성 가능성을 검사한다. 객체에 대한 정적·동적 타입 조회, 클래스별 기본값·서브오브젝트, 필드·함수 메타데이터, 에디터 선택, 에셋·직렬화·쿠킹 및 자체 언어 연결을 단계별로 제공한다. World·PIE마다 객체와 기본값 인스턴스의 소유권을 분리하며 모듈 reload나 Registry 폐쇄 뒤 이전 핸들을 새 클래스로 오인하지 않는다. 필요한 내부 Registry 조합은 기본 사용 경로에 반복 노출하지 않는다.
+런타임 클래스 핸들은 정적 생성 schema와 다르게 특정 Registry의 등록 상태, 버전·모듈 코드의 수명을 보유 또는 안전하게 검증해야 한다. 클래스 참조는 타입 제한을 지원하고, 선언된 기반 타입과 실제 등록 타입의 상속·추상 여부·생성 가능성을 검사한다. 객체에 대한 정적·동적 타입 조회, 클래스별 기본값·서브오브젝트, 필드·함수 메타데이터, 에디터 선택, 에셋·직렬화·쿠킹 및 자체 언어 연결을 단계별로 제공한다. World·PIE마다 객체의 소유권을 분리하고 클래스 기본값은 World와 무관한 불변 레코드로 두며 모듈 reload나 Registry 폐쇄 뒤 이전 핸들을 새 클래스로 오인하지 않는다. 필요한 내부 Registry 조합은 기본 사용 경로에 반복 노출하지 않는다.
 
-현재 `TypeSchema`, `RuntimeTypeOps`, `TypeRegistry`와 `TypeLease`는 타입 식별·등록·메타데이터·수명 보호의 기초를 제공한다. 등록된 `TypeId`를 이용한 `ObjectRegistry::NewObject<Object>(access, typeId)`는 낮은 수준의 런타임 타입 생성 경로다. 타입 제한 클래스 참조, 클래스 기본 객체, 반영 함수·에디터 클래스 선택 및 안전한 동적 생성 편의 API까지 구현됐다는 뜻은 아니다. 세부 모델·구현 순서·완료 기준은 [런타임 클래스 메타데이터 설계](RuntimeClassMetadata.ko.md)를 따른다.
+현재 `TypeSchema`, `RuntimeTypeOps`, `TypeRegistry`와 `TypeLease`는 타입 식별·등록·메타데이터·수명 보호의 기초를 제공한다. 등록된 `TypeId`를 이용한 `ObjectRegistry::NewObject<Object>(access, typeId)`는 낮은 수준의 런타임 타입 생성 경로다. 타입 제한 클래스 참조, 클래스 기본값 레코드(UE CDO 대신 불변 레코드 — A5), 반영 함수·에디터 클래스 선택 및 안전한 동적 생성 편의 API까지 구현됐다는 뜻은 아니다. 세부 모델·구현 순서·완료 기준은 [런타임 클래스 메타데이터 설계](RuntimeClassMetadata.ko.md)를 따른다.
 
 ### 7.2 런타임 메타와 데이터 진화
 

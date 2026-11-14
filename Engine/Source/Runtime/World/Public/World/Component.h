@@ -126,8 +126,8 @@ private:
 
     ROCKS_NATIVE() World* world_ = nullptr;
     ROCKS_NATIVE() ObjectHandle owner_;
-    // Tick 설정은 클래스 기본값(생성자)이 정한다 — CDO가 없어 인스턴스 저장값이 기본값 변경을
-    // 가리므로 저장하지 않는다(9.1절).
+    // Tick 설정은 클래스 기본값(생성자)이 정한다. 기본값 레코드와 차이 저장이 아직 없어 인스턴스
+    // 저장값이 기본값 변경을 가리므로 저장하지 않는다. A5에서 리플렉션으로 옮긴다(9.1절).
     ROCKS_NATIVE() TickSettings tickSettings_;
     ROCKS_PROPERTY(ReadOnly, Name = "enabled") bool enabled_ = true;
     ROCKS_NATIVE() bool tickEnabled_ = true;

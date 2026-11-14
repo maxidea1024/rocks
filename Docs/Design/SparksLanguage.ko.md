@@ -271,7 +271,7 @@ class DoorLogic : ScriptComponent {
 | `fn`, `async fn` | 함수와 기다리는 함수 | `fn Lerp(a: float, b: float, t: float): float` |
 | `const` | 컴파일 시 상수. 타입은 `bool`·`int`·`float`·`string`·enum·`Tag`·수학 타입 | `const MaxStack: int = 99;` |
 
-- **기본값(zero value):** 초기값이 없는 필드는 `0`, `0.0`, `false`, `""`, `null`, 빈 컨테이너, enum의 첫 case로 시작한다. `?` 없는 객체·에셋·`Soft<T>`·`Row<T>` 필드에는 기본값이 없으므로 `@edit`로 지정하거나 초기값(소유 component 생성식, `Asset(...)`·`Row(...)` 리터럴)을 두어야 하며 지정이 누락되면 쿡 오류다(SD19). 선택 값은 `T?`로 선언한다. 지역 변수는 선언할 때 초기화해야 한다.
+- **기본값(zero value):** 초기값이 없는 필드는 `0`, `0.0`, `false`, `""`, `null`, 빈 컨테이너, enum의 첫 case로 시작한다. `?` 없는 객체·에셋·`Soft<T>`·`Row<T>` 필드에는 기본값이 없으므로 `@edit`로 지정하거나 초기값(소유 component 생성식, `Asset(...)`·`Row(...)` 리터럴)을 두어야 하며 지정이 누락되면 쿡 오류다(SD19). 필드 초기값은 클래스 기본값 레코드에 들어가므로, non-null 참조 초기값(`Asset(...)`·`Soft<T>`·`Row(...)`)은 레코드의 참조 의존 수집(대상 정체성 비교, override하지 않은 값의 레코드 참조를 패키지 의존에 포함)이, 소유 component 생성식은 default subobject가 선행 조건이며 둘 다 해당 도입 단계(L2) 전에 갖춘다([RuntimeClassMetadata](RuntimeClassMetadata.ko.md) '클래스 기본값 결정'). 선택 값은 `T?`로 선언한다. 지역 변수는 선언할 때 초기화해야 한다.
 - **struct 필드:** struct의 객체 필드는 `T?`만 허용한다. `?` 없는 에셋·`Soft<T>`·`Row<T>` 필드는 생성할 때 이름 인자로 반드시 지정한다.
 - **필드 쓰기:** class의 Sparks 필드는 자기 instance의 코드(파생 클래스 포함)에서만 쓸 수 있고 다른 객체의 Sparks 필드는 읽기만 가능하다. 엔진 객체의 쓰기 가능한 native 속성(`ScriptWritable`)은 밖에서도 쓸 수 있다. struct 필드는 대입할 수 있는 경로(§4.4)를 통해 어디서나 쓴다.
 - **`let`:** 재대입할 수 없다. 값 타입이면 내부 필드·원소 수정과 변경 메서드 호출도 금지된다. 객체 handle을 담은 `let`은 handle만 고정되며 대상 객체의 속성은 쓸 수 있다(`let PickupRange = ...` 뒤의 `PickupRange.RelativeLocation = ...`). 지역과 필드에 같은 규칙을 적용하며, `let` 필드의 값은 spawn parameter 적용(§4.5)까지 정해진다. `@save let`·`@net let`은 오류다.
@@ -524,8 +524,8 @@ other.Current = 0;                        // 오류(other: Health): 다른 객�
 ### 4.5 생성과 기본값 순서
 
 - struct와 component는 필드 이름으로 생성한다(`HitInfo(Point: p)`). 지정하지 않은 필드는 기본값을 사용하며 기본값이 없는 필드(§3.2)는 반드시 지정한다.
-- component는 `let` 필드의 초기값으로만 생성한다(실행 중 추가는 full). 필드 초기값은 상수식과 component 생성만 허용하고 ClassDefaults archetype에 반영한다. 상수식은 리터럴, 검증 리터럴, enum 값, const 이름, 이들의 산술·비교, 수학 타입·struct 생성, 배열·Map 리터럴, `Math.Radians`이며 그 밖의 함수 호출과 필드 참조는 포함하지 않는다. 컴파일 시 overflow는 오류다. C++ 생성자 안에서 스크립트 코드를 실행하지 않는다.
-- 기본값 순서는 전체 계획 §5.3을 따른다: native → Sparks 필드 초기값 → archetype → prefab·variant → instance override → spawn parameter. 코드의 기본값 변경은 override하지 않은 instance에 반영하고 override한 instance를 편집기에 표시한다.
+- component는 `let` 필드의 초기값으로만 생성한다(실행 중 추가는 full). 필드 초기값은 상수식과 component 생성만 허용하고 클래스 기본값 레코드에 반영한다 — 레코드는 가장 가까운 C++ base의 생성자 결과 위에 컴파일된 초기값을 덮어 합성한다([RuntimeClassMetadata](RuntimeClassMetadata.ko.md) '클래스 기본값 결정'). component 생성 초기값은 default subobject(prefab과 함께 들어온다)가 선행 조건이며 그때까지 미지원이다. 상수식은 리터럴, 검증 리터럴, enum 값, const 이름, 이들의 산술·비교, 수학 타입·struct 생성, 배열·Map 리터럴, `Math.Radians`이며 그 밖의 함수 호출과 필드 참조는 포함하지 않는다. 컴파일 시 overflow는 오류다. C++ 생성자 안에서 스크립트 코드를 실행하지 않는다.
+- 기본값 순서는 전체 계획 §5.3을 따른다: native → Sparks 필드 초기값(이 둘의 결과가 클래스 기본값 레코드다) → prefab·variant → instance override → spawn parameter. 코드의 기본값 변경은 override하지 않은 instance에 반영하고 override한 instance를 편집기에 표시한다.
 - 소유 component 필드에도 안정 ID(SubobjectGuid)를 부여하므로 이름을 바꿔도 prefab override가 유지된다(전체 계획 §5.3).
 
 ## 5. 수명 hook과 이벤트
@@ -722,7 +722,7 @@ fn Quiet() { Hum?.Pause(); }                                      // 담긴 자�
 
 ### 7.2 에셋 참조
 
-- **하드 참조** `@edit var OpenSound: SoundCue = Asset("...")`: 이 클래스를 사용하는 prefab·셀의 의존성으로 함께 로드된다(스크립트 모듈의 의존성이 아니다). 함수 본문의 하드 `Asset(...)` 리터럴도 같은 방식으로 클래스의 의존성이 된다. instance override가 값을 바꾸면 바뀐 에셋이 의존성이 된다. null이 아니다.
+- **하드 참조** `@edit var OpenSound: SoundCue = Asset("...")`: 이 클래스를 사용하는 prefab·셀의 의존성으로 함께 로드된다(스크립트 모듈의 의존성이 아니다). 함수 본문의 하드 `Asset(...)` 리터럴도 같은 방식으로 클래스의 의존성이 된다. instance override가 값을 바꾸면 바뀐 에셋이 의존성이 된다. null이 아니다. 필드 초기값의 참조는 클래스 기본값 레코드에 들어가며, override하지 않은 값의 레코드 참조도 패키지 Dependencies에 넣고 로드 대조도 기준 적용 결과로 한다 — 이 의존 수집이 L2의 선행 조건이며 그 전에는 레코드의 참조 기본값(Soft 포함)이 null만 허용된다([RuntimeClassMetadata](RuntimeClassMetadata.ko.md) '클래스 기본값 결정').
 - **소프트 참조** `Soft<T>`: AssetId만 가진다. 빈 값이 없으므로 선택 값은 `Soft<T>?`로 쓴다(SD19). `T`가 필요한 자리에 쓰면 오류이며 빠른 수정이 `try await X.Load()`를 삽입한다.
 - prefab·PrimaryAsset별 하드 의존 크기 예산을 두고 초과하면 쿡 오류다. 셀 경계를 넘는 하드 edge도 쿡이 진단한다(전체 계획 §10.2).
 - 로드한 결과 `T`는 lease를 공유하는 복사 가능한 값이며, 보관하는 동안 상주를 유지한다. `@net`·RPC·`@save`에는 `T`를 둘 수 없고 `Soft<T>`를 쓴다(빠른 수정 제공).
