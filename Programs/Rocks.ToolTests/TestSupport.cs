@@ -245,7 +245,7 @@ internal sealed class Options
 
     public bool Asan { get; private set; }
 
-    // third-party 명령: manifest를 실제로 고친다(없으면 차이만 보고).
+    // third-party·표 생성·format 명령: 대상을 실제로 고친다(없으면 차이만 보고).
     public bool Write { get; private set; }
 
     public string Root => Path.GetFullPath(Required("root"));

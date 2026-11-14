@@ -115,8 +115,11 @@ internal static class Program
 
                     return writeNumbers || !numbersChanged ? 0 : 1;
                 case "format":
+                    // C++은 clang-format 21.1.6(--formatter, 없으면 ROCKS_CLANG_FORMAT), C#은 dotnet format(--dotnet, 작업 영역
+                    // FormatCheck.CSharpWorkspace)으로 검사한다. 기본은 차이만 보고(종료 코드 2), --write면 고친다.
                     await FormatCheck.CheckAsync(root, options.Optional("formatter") ??
-                        Environment.GetEnvironmentVariable("ROCKS_CLANG_FORMAT") ?? "clang-format");
+                        Environment.GetEnvironmentVariable("ROCKS_CLANG_FORMAT") ?? "clang-format",
+                        options.Optional("dotnet") ?? "dotnet", options.Write);
                     return 0;
                 default:
                     throw new ArgumentException("Unknown command: " + args[0]);

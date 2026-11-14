@@ -122,7 +122,10 @@ internal static class ResponseFileTests
     {
         NativeToolchain Toolchain(NativePlatform platform, string compiler, string archiver) => new()
         {
-            Platform = platform, CompilerPath = compiler, ArchiverPath = archiver, Identity = "fixture"
+            Platform = platform,
+            CompilerPath = compiler,
+            ArchiverPath = archiver,
+            Identity = "fixture"
         };
         NativeAction Action(string kind, string tool) => new("fixture:" + kind, "Fixture", kind, tool, [], ["out"], [], [], [], [], []);
         ResponseFileQuoting hostArchiver = OperatingSystem.IsWindows() ? ResponseFileQuoting.Windows : ResponseFileQuoting.Gnu;

@@ -31,7 +31,8 @@ jobs:
           $executable = if ($IsWindows) { 'out/ci-commandlet/bin/RocksCommandlet.exe' } else { 'out/ci-commandlet/bin/RocksCommandlet' }
           dotnet run --project Programs/Rocks.Commandlet.Tests -- --executable $executable
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Verify pinned native formatting
+      # C++은 위에서 설치한 clang-format 21.1.6, C#은 global.json이 고정한 SDK의 dotnet format(Build/Format/Rocks.Format.slnx)이다.
+      - name: Verify C++ and C# formatting
         run: dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll format --root .
       - name: Verify native action graph and incremental failures
         run: dotnet run --project Programs/Rocks.Build.Tests -- --root .

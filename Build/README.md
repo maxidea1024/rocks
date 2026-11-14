@@ -3,7 +3,7 @@
 ## 요구 사항
 
 - .NET 10 SDK `10.0.302` (`global.json`, 최신 패치 롤포워드), Windows/macOS의 Clang C++23 도구 체인.
-- `clang-format` 21.1.6. `ROCKS_CLANG_FORMAT`에 실행 파일 경로를 지정한다. `pwsh Build/InstallFormatter.ps1`은 고정 SHA-256을 확인한 후 네이티브 바이너리를 설치한다.
+- `clang-format` 21.1.6. `ROCKS_CLANG_FORMAT`에 실행 파일 경로를 지정한다. `pwsh Build/InstallFormatter.ps1`은 고정 SHA-256을 확인한 후 네이티브 바이너리를 설치한다. C# 서식 검사의 `dotnet format`은 위 .NET SDK에 들어 있어 따로 설치하지 않는다.
 - Windows는 Visual Studio C++ 도구와 Windows SDK가 필요하다. macOS는 Xcode 도구와 macOS SDK가 필요하며 기본 배포 대상은 macOS 13.0이다.
 - C++ 컴파일러와 C# 컴파일러의 경고, MSBuild 경고는 오류로 취급한다. 경고 비활성화나 단계 축소는 허용하지 않는다.
 
@@ -115,5 +115,7 @@ dotnet run --project Programs/Rocks.Build.Tests
 dotnet run --project Programs/Rocks.Build.IntegrationTests -- --root .
 dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll format --root .
 ```
+
+`format`은 C++ 소스를 clang-format 21.1.6으로, C# 소스를 `dotnet format Build/Format/Rocks.Format.slnx --verify-no-changes --severity warn`(규칙은 `.editorconfig`)으로 검사하고, 저장소의 `.cs`가 모두 그 솔루션의 프로젝트에 속하는지 확인한다. 게임 템플릿 규칙(`Templates/**/*.Build.cs`·`*.Target.cs`)은 게임 빌드가 SDK를 참조해 따로 컴파일하므로 `Build/Format/Rocks.Template.Rules.csproj`가 서식 검사에 넣는다. 새 C# 프로젝트는 그 솔루션에 더한다. `--write`를 붙이면 고친다.
 
 이전 CMake/Python 경로는 2026-11-12 저장소 구성 개편 때 제거했다(git 이력에 남아 있다). 빌드와 검증은 C#/.NET 경로만 쓴다. 구현된 기능과 후속 과제는 실제 검증 범위와 구분하여 관리한다.

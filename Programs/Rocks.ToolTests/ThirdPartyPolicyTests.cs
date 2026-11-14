@@ -12,8 +12,8 @@ namespace Rocks.ToolTests;
 /// </summary>
 internal static class ThirdPartyPolicyTests
 {
-    private const string Library = "Core/Source/ThirdParty/Fake";
-    private const string Upstream = Library + "/fake-1.0";
+    internal const string Library = "Core/Source/ThirdParty/Fake";
+    internal const string Upstream = Library + "/fake-1.0";
 
     public static void Register(TestSuite suite, Options options)
     {
@@ -368,7 +368,7 @@ internal static class ThirdPartyPolicyTests
     private const string FakeHeader = "#pragma once\n#pragma clang diagnostic push\n#pragma clang diagnostic ignored \"-Wshadow\"\n" +
                                       "int Fake(void);\n#pragma clang diagnostic pop\n";
 
-    private static void WriteFixture(TemporaryDirectory fixture)
+    internal static void WriteFixture(TemporaryDirectory fixture)
     {
         fixture.Write(Upstream + "/LICENSE", "Fake license\n");
         fixture.Write(Upstream + "/fake.c", FakeSource);

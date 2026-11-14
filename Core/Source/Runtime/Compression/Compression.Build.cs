@@ -10,6 +10,7 @@ public sealed class CompressionModule : CoreModuleRules
     private static readonly string[] Codecs = ["Lz4", "Zstd", "Zlib", "Brotli"];
 
     protected override string ModuleName => "Compression";
+
     protected override string[] RequiredModules => ["Core", "Task", .. Codecs];
 
     protected override IReadOnlyList<string> PrivateIncludeDirectories(BuildContext context) =>

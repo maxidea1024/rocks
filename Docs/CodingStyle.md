@@ -41,6 +41,8 @@
 
 **clang-format 21.1.6**을 사용한다. 버전을 고정하고 버전 변경은 독립 변경으로 검토한다. `dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll format --root .`(`Programs/Rocks.Tooling.Checks`의 FormatCheck)가 Core·Engine·Programs·Templates의 C++ 소스 서식을 검사한다. CI에도 같은 검사를 연결한다.
 
+C#(빌드 도구·검사 도구·모듈·타깃 규칙·게임 템플릿 규칙)은 Microsoft C# 규칙을 따른다(Allman 중괄호, 본문이 한 줄이어도 중괄호, 블록 뒤 빈 줄, 한 줄에 문장 하나). 같은 `format` 명령이 `global.json`이 고정한 .NET SDK의 `dotnet format`으로 `Build/Format/Rocks.Format.slnx`(저장소의 C# 프로젝트 전부)를 한 번에 검사하며 규칙은 `.editorconfig`의 `[*.cs]` 절이다. 저장소의 `.cs`(외부 라이브러리 원본·bin·obj 제외)가 모두 그 솔루션의 프로젝트에 속하는지도 확인해, 어느 프로젝트에도 속하지 않아 검사에서 빠지는 파일을 알린다. 위반은 `경로:행: 규칙 ID: 내용`으로 출력하고 `--write`를 붙이면 두 포매터가 고친다. 멤버 사이 빈 줄은 이 검사에 해당 규칙이 없어 리뷰에서 확인한다.
+
 빌드 시 공개 헤더를 각각 단독 include한 번역 단위로 컴파일한다. `dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll policy --root .`(PolicyChecks.Runtime)는 런타임 소스(Core·Engine·플러그인·프로그램, 모듈 `Tests/` 제외)의 금지 include와 `std::` 사용을 검사한다. 이 검사는 외부 SDK 내부나 최종 바이너리의 모든 의존성을 증명하는 검사는 아니다.
 
 포맷터는 책임 분리, 명명 품질, 주석의 정확성, 수명과 동시성 규약의 이해 가능성을 판정하지 않는다. 이 항목들은 코드 리뷰와 하네스 검증을 함께 요구한다.

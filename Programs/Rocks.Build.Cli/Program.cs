@@ -111,6 +111,7 @@ namespace Rocks.Build.Cli
             {
                 throw new ArgumentException($"--output must be under {Path.Combine(root, "out")} (build evidence location): {output}");
             }
+
             var toolchain = android
                 ? await NativeToolchains.DiscoverAndroidAsync(androidAbi, androidApi, options.GetValueOrDefault("android-ndk"), cancellationToken)
                 : await NativeToolchains.DiscoverAsync(options.GetValueOrDefault("compiler"), cancellationToken);

@@ -10,8 +10,10 @@ insert_final_newline = true
 trim_trailing_whitespace = true
 
 # C#(빌드 도구·MetaCompiler·도구 시험·모듈 규칙)은 Microsoft C# 코딩 규칙(.NET 런타임 스타일)을 따른다.
-# Allman 중괄호, 본문이 한 줄이어도 중괄호, 블록 뒤 빈 줄, 한 줄에 문장 하나. 검사는
-# `dotnet format <project> --verify-no-changes --severity warn`이다(Rocks.ToolTests format이 실행한다).
+# Allman 중괄호, 본문이 한 줄이어도 중괄호, 블록 뒤 빈 줄, 한 줄에 문장 하나. 검사는 Rocks.ToolTests format이
+# `dotnet format Build/Format/Rocks.Format.slnx --verify-no-changes --severity warn`으로 저장소의 C# 프로젝트를 한 번에 본다
+# (공백 서식은 WHITESPACE, 아래 스타일 규칙은 IDE ID로 알린다). 저장소의 .cs가 모두 그 솔루션의 프로젝트에 속하는지도 확인하며
+# (모듈·타깃 규칙은 Build/Rules, 게임 템플릿 규칙은 Build/Format의 프로젝트), `--write`면 고친다.
 [*.cs]
 csharp_new_line_before_open_brace = all
 csharp_new_line_before_else = true

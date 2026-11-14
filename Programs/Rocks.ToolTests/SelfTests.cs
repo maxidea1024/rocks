@@ -20,6 +20,7 @@ internal static class SelfTests
         StableIdMergeTests.Register(suite);
         IdentityGitMergeTests.Register(suite, options);
         ProgramsPolicyReviewTests.Register(suite);
+        FormatCheckTests.Register(suite, options);
         ProcessReviewTests.Register(suite, options);
         ProcessHardTimeoutReviewTests.Register(suite, options);
         // rocks::Array 인스턴스화 실패의 RMC2304 변환 위치: Core Array.h 오류에 딸린 note 중 이 모듈 입력의 첫 위치를 clang

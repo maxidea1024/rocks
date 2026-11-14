@@ -33,7 +33,7 @@ rocks/
     Commandlet/               headless 명령 실행기(C++)
     Rocks.Build …             빌드·메타 컴파일·검사·scaffold 도구(C#/.NET)
     Scaffold/Templates/       새 모듈 템플릿
-  Build/                      규칙 어셈블리(Rules/)·공통 빌드 설정·CI 스크립트
+  Build/                      규칙 어셈블리(Rules/)·C# 서식 검사 작업 영역(Format/)·공통 빌드 설정·CI 스크립트
   Templates/                  게임 프로젝트 템플릿
   Docs/                       설계·구현·검토 문서
   Rocks.proj                  MSBuild 진입점(Build·Test·InstalledSdk·Game)
