@@ -116,7 +116,7 @@ Core/Source/Runtime/Crypto/
 | 키 캡슐화(PQ) | X-Wing | ML-KEM768 | [libsodium] | 1.0.22에 들어왔다. libsodium은 대부분의 용도에 X-Wing(ML-KEM768 + X25519 하이브리드)을 권한다. 1.0.22 구성은 draft-connolly-cfrg-xwing-kem-11과 같다(draft 부록 벡터로 고정, TLS X25519MLKEM768과는 호환되지 않는다). ML-KEM768 단독은 FIPS 203 전용 환경·상호운용에만 쓰고, 공유 비밀이 암호문·공개키에 묶이지 않으므로(MAL-BIND) 서명 기반 AKE 등에서는 transcript 묶기 파생(`TryDeriveBoundKdfKey`)으로 세션 키를 뽑는다. |
 | 키 교환 · 공개키 암호화 | X25519(crypto_kx) · sealed box | box | [libsodium] | kx는 rx/tx 키를 분리하고 역할을 묶는다(세션 난수가 없어 같은 키 쌍이면 같은 키다). sealed box는 epk ‖ box 구조이고 오버헤드가 48 byte다. 키 쌍 타입을 용도별로 나눈다(KxKeyPair·BoxKeyPair, byte 형식은 libsodium과 같다). |
 | 키 해시 | SipHash-2-4 | SipHash-2-4 128bit | [libsodium] | hash flooding 방어용이다. 128bit 출력판은 full 빌드에만 있다. |
-| 키 wrap | XChaCha20-Poly1305(키 ID를 AD로) | AES-KW/KWP(RFC 3394/5649, 후속) | [libsodium] | KW는 상호운용 요구가 생기면 경량 계층에 더한다. |
+| 키 wrap | XChaCha20-Poly1305(헤더 transcript에 묶은 파생 + commitment, keyId·wrapKeyId 기록, 10.4절) | AES-KW/KWP(RFC 3394/5649, 후속) | [libsodium] | KW는 상호운용 요구가 생기면 경량 계층에 더한다. |
 | 저수준 AES(hazmat) | CTR | CMAC. CBC·CCM은 요구 시 | [경량 계층] | 상호운용 전용이다. CBC 복호와 KW unwrap은 역방향 라운드(AESDEC·AESIMC / AESD·AESIMC)가 필요해 요구가 생길 때 더한다. |
 | 넣지 않음 | SHA-1·MD5(보안 용도), 소프트웨어 AES, AES-XTS·AES-GCM-SIV(libsodium에 없고 경량 계층 범위 밖), RC4·DES·3DES, scrypt |  |  |  |
 
@@ -822,7 +822,7 @@ public:
 
 // 마스터 키에서 용도별 키를 타입으로 파생한다(BLAKE2b KDF). 결과가 일반 Span에 쓰이지 않는다.
 // context는 컴파일 시간 8 문자 상수(KdfContext, consteval 생성)만 받는다. 런타임·외부 입력으로 context를
-// 고르지 못하게 하려는 것이다. 엔진이 쓰는 context는 Crypto/Labels.h에 모아 중복을 시험으로 막는다(첫 엔진
+// 고르지 못하게 하려는 것이다. 엔진이 쓰는 context는 Crypto/Labels.h에 모아 중복을 시험으로 막는다("Rk" 접두는 엔진 예약, 첫 등록은 KeyBlob의 "RkKeyBlb"; 첫 엔진
 // context와 함께 둔다). 타입 파생(TryDeriveMacKey·TryDeriveKdfKey·TryDeriveAeadKey)은 BLAKE2b personal 뒤 8 byte에
 // 키 타입·알고리즘 tag("RkKdfKey", "RkMacK" 0 alg, "RkAead" 0 alg; 모듈 내부 KdfInternal.h 한 곳에 모은다)를 넣어,
 // 같은 (id, context)라도 타입·알고리즘마다 독립인 키를 낸다(2026-11-15 리뷰 반영). TryDeriveSecret은 libsodium
@@ -857,7 +857,7 @@ Result<SegmentStreamKey> TryDeriveSegmentStreamKey(const KdfKey& master, uint64 
 ```cpp
 namespace rocks::crypto {
 
-struct KeyId {
+struct KeyId {   // Crypto/KeyId.h(KeyBlob이 C1에서 먼저 쓴다). 형식에는 RFC 9562 순서, Nil은 받지 않는다
     Guid value;
 };
 
@@ -866,7 +866,7 @@ struct KeyId {
 template <typename TKey>
 class KeyRing {
 public:
-    Result<void> TryAdd(TKey&& key) noexcept;                     // key.Id()로 등록. 이미 있으면 AlreadyExists
+    Result<void> TryAdd(KeyId id, TKey&& key) noexcept;           // 이미 있으면 AlreadyExists(키 클래스는 Id를 품지 않는다)
     Result<KeyLease<TKey>> TryAcquire(KeyId id) noexcept;         // 없으면 공급자를 부르고, 그래도 없으면 NotFound
     Result<void> TryRemove(KeyId id) noexcept;                    // 마지막 lease가 끝나면 소거
     void SetCurrent(KeyId id) noexcept;                           // 암호화에 쓸 현재 키
@@ -879,6 +879,7 @@ public:
 } // namespace rocks::crypto
 ```
 
+- 공급자가 KeyBlob에서 키를 꺼낼 때는 TryPeekKeyBlob로 wrapKeyId를 읽어 KEK(`KeyRing<KdfKey>`)를 lease하고, `TryUnwrapKey<TKey>`가 돌려준 id가 요청한 id와 같은지 확인한다(다르면 AuthenticationFailed, 같은 KEK 아래 blob 통째 교체 방어).
 - 형식은 키 ID를 기록하고, 복호는 ID로 키를 고른다. 키 회전은 "암호화는 현재 키, 복호는 등록된 키 전체(ID로)"다. 제거한 키라도 이미 받은 lease는 끝날 때까지 유효하다.
 - KeyRing은 키 타입별 템플릿이다. 하나의 ID가 두 알고리즘에 쓰이는 일을 타입으로 막는다.
 - 비밀번호에서 키를 얻을 때는 Argon2id(salt 16 byte)를 쓴다. 입력 매개변수는 상한으로 검사해 자원 고갈을 막는다. 구현(PasswordHash.h): TryDeriveKdfKeyFromPassword·TryDerivePasswordSecret, 저장 문자열 TryHashPassword·TryVerifyPassword·TryPasswordNeedsRehash. 비용 상한은 반복 32회·메모리 1 GiB·반복 × 메모리 4 GiB(SENSITIVE)이고 넘으면 계산하지 않고 `CapacityExceeded`다. "$<id>$" 꼴의 다른 형식과 libsodium 형식보다 긴 문자열은 `Unsupported`, 형식 오류·불일치는 `AuthenticationFailed`, Argon2 작업 메모리 부족은 `OutOfMemory`다(errno ENOMEM으로 불일치와 구분한다, 2026-11-15 리뷰 반영). libsodium은 작업 메모리를 해제 때 지우지 않는다(동작을 바꾸는 패치는 하지 않는다).
@@ -887,15 +888,37 @@ public:
 
 키를 저장하거나 옮기는 형식은 하나로 정한다. 키를 그대로 내보내면 알고리즘·ID·매개변수를 잃기 때문이다.
 
-- `KeyBlob` v1 = magic `"RKEY"` ‖ 버전 ‖ 키 타입·알고리즘 ‖ keyId ‖ 타입별 매개변수 ‖ wrap된 키 byte다.
-- wrap은 wrap 키 아래 XChaCha20-Poly1305(무작위 nonce)이고, 앞 필드 전체를 AD로 묶는다. wrap 키는 KeyRing의 키이거나 Argon2id로 얻은 키다.
+KeyBlob v1(Crypto/KeyBlob.h, 2026-11-15 구현, 설계 교차검증 반영)의 배치는 다음과 같다(정수는 little-endian, ID는 RFC 9562 순서 BE64(high) ‖ BE64(low)).
+
+| off | 길이 | 필드 | 규칙 |
+|---|---|---|---|
+| 0 | 4 | magic "RKEY" | 다르면 AuthenticationFailed |
+| 4 | 1 | version = 1 | 모르면 Unsupported(뒤를 해석하지 않는다) |
+| 5 | 1 | KeyBlobType | Aead 1·Mac 2·Kdf 3·Ed25519 4·Kx 5·Box 6·Kem 7. 모르면 Unsupported |
+| 6 | 1 | algorithm | 클래스가 품는 열거값(Aead·Mac·Kem), 없으면 0(Ed25519 서명 키는 Ed25519·ph 공용이라 0). 표 밖이면 Unsupported |
+| 7 | 1 | method | 1 = Key(KdfKey KEK), 2 = Password(Argon2id v1.3, lane 1, salt 16, 출력 32). 모르면 Unsupported |
+| 8 | 16 | keyId | Nil이면 AuthenticationFailed |
+| 24 | 2 | L | (type, algorithm)의 허용 길이(AEAD 키 길이, HMAC 16–4096, BLAKE2b keyed 16–64, 32, KEM seed) |
+| 26 | P | 방식 매개변수 | Key: wrapKeyId 16(Nil 거부). Password: ops LE32 ‖ memKiB LE32 ‖ salt 16(P = 24, 하한 위반은 AuthenticationFailed) |
+| 26+P | 24 | nonce | OS 난수. AEAD nonce이면서 파생 transcript에도 들어간다 |
+| 50+P | 32 | commitment C | AEAD 전에 상수 시간 비교 |
+| 82+P | L+16 | 암호문 ‖ tag | XChaCha20-Poly1305, AD = T |
+
+- 길이는 98 + P + L(Key 114 + L, Password 122 + L), 상한 `KeyBlobMaxBytes` = 4218이다. blob이 자기 길이를 담고, unwrap은 정확한 길이만 받는다.
+- 파생: M = KEK(Key) 또는 TryDeriveKdfKeyFromPassword(pw, salt, {ops, memKiB × 1024})(Password), T = blob[0, 50 + P), B = TryDeriveBoundKdfKey(M, 0, labels::KeyBlob, {T}), K = TryDeriveAeadKey(B, 0, labels::KeyBlob, XChaCha20Poly1305), C = TryDeriveSecret(B, 1, labels::KeyBlob, 32). 다른 KEK·비밀번호와 헤더 변조는 AEAD 전에 C 비교에서 걸린다. C는 키에 대한 commitment(CMT-1)라 비밀번호 후보를 여러 개 시도하는 흐름(2절)에도 partitioning oracle이 없다. 키 wrap에는 메시지 commitment가 필요 없다((K, nonce, AD)가 정해지면 평문이 하나다).
+- wrap 키를 AeadKey가 아니라 KdfKey로 받는다: 2절 "같은 키 byte를 다른 용도에 쓰지 않는다", 무작위 nonce XChaCha20만 쓰므로 이식성, commitment·blob별 파생에 PRF 키가 필요하다. 결정적 wrap(AES-KW·SIV)은 쓰지 않는다(HW 전용·자체 구성·같은 키 재wrap이 드러남). KEK 하나로 2^48개를 wrap해도 nonce 충돌은 약 2^-97이다.
+- 담는 비밀: AEAD·MAC·KDF 키 byte, Ed25519 seed(sk ‖ pk를 담지 않아 pk 불일치로 비밀키가 새는 double-public-key 문제를 구조적으로 피한다), X25519 비밀키(Kx·Box), KEM seed(FIPS 203 형식). hazmat 짧은 MAC 키(16 byte 미만)는 wrap하지 않는다. 순번 봉인기 상태와 세션 비밀(kx 세션 키, KEM 공유 비밀)은 담지 않고, blob에서 푼 AeadKey로 순번 봉인기를 만들지 않는다(복원할 때마다 seq 0부터 같은 nonce).
+- 비밀번호 방식: 비용은 명시 인자(도구·데스크톱 MODERATE, 모바일 INTERACTIVE 이상 권장), 기록은 KiB 단위(정규 인코딩), 하한 위반은 AuthenticationFailed, 상한(PasswordHash.h와 같은 검사, 내부 PasswordInternal.h 공유) 초과는 Argon2id 전에 CapacityExceeded다. 기기별 정책은 호출자가 TryPeekKeyBlob의 passwordCost로 먼저 정한다. 비밀번호 하나로 키 여러 개를 보관하면 비밀번호로 KdfKey blob 하나(KEK)를 만들고 나머지는 그 KEK 아래 Key 방식으로 둔다.
+- API: TryPeekKeyBlob(인증 전 헤더, 헤더만 있으면 된다), 닫힌 타입 목록(`KeyBlobTraits`, 7개 타입)의 템플릿 TryGetKeyBlobBytes·TryWrapKey(wrapKey, wrapKeyId, key, keyId, blob)·TryWrapKeyWithPassword·`TryUnwrapKey<TKey>`·`TryUnwrapKeyWithPassword<TKey>`(결과 `UnwrappedKey<TKey>{id, key}`). 정의는 KeyBlob.cpp에서 7개 타입으로 명시 인스턴스화한다.
+- 오류: 빈 키 StaleHandle → 호출자 인자 InvalidArgument(Nil ID, 짧은 MAC 키, cost 범위, 빈 password, password·blob 겹침) → 출력 부족·cost 상한 CapacityExceeded → 헤더(구조 위반 AuthenticationFailed, 식별 실패 Unsupported) → 기대한 타입·방식과 다름 AuthenticationFailed → 이 기기에 없는 AEAD 알고리즘 Unsupported → 계산(OutOfMemory) → commitment·tag AuthenticationFailed. 공격자 입력에서는 InvalidArgument가 나오지 않는다. 쓰기 시작한 뒤 실패하면 blob 전체를 지운다.
+- 막지 않는 것: 같은 KEK 아래 롤백(비밀번호 변경은 키 회전이 아니다)·통째 교체·삭제(저장소 몫, 통째 교체는 공급자가 id 비교로 막는다), 출처, 메타데이터 기밀성. 생성 시각·용도 flag·만료와 공개키 동봉은 미룬다(필요하면 v2의 인증되는 영역). 수신자 공개키로 wrap하는 method(X-Wing 공유 비밀을 M으로)는 후속이다.
 - 평문 키 내보내기(`hazmat::TryExportKey`, 키 타입마다 overload)는 hazmat이고, 시험·상호운용 도구에서만 쓴다. 정본이 seed인 키(Ed25519 서명 키, KEM 키 쌍)는 `hazmat::TryExportSeed`로 seed를 내보낸다.
 
 ## 11. 오류·한도·스레드
 
 | 상황 | ErrorCode | 출력·상태 |
 |---|---|---|
-| 복호·검증 경로의 신뢰할 수 없는 입력: tag·MAC·서명·commitment 불일치, 절단·순서 위반, 잘못된 키, 헤더 형식 위반. 상대에게서 받은 공개키(kx 상대, 봉인·캡슐화 수신자)가 올바른 점이 아닌 경우도 같다(봉인 쪽은 libsodium이 쓴 자리만 지운다) | `AuthenticationFailed` [신설] | 출력 전체 소거, 스트림 sticky |
+| 복호·검증 경로의 신뢰할 수 없는 입력: tag·MAC·서명·commitment 불일치, 절단·순서 위반, 잘못된 키, 헤더 형식 위반, 기대한 타입·방식과 다른 blob(KeyBlob). 상대에게서 받은 공개키(kx 상대, 봉인·캡슐화 수신자)가 올바른 점이 아닌 경우도 같다(봉인 쪽은 libsodium이 쓴 자리만 지운다) | `AuthenticationFailed` [신설] | 출력 전체 소거, 스트림 sticky |
 | 호출자의 API 오용: 키·nonce·context·출력 버퍼 길이 오류, 함수 규칙 밖의 겹침, 잘못된 단계 호출 | `InvalidArgument` | 입력·출력·상태 불변 |
 | 출력 Span 부족 | `CapacityExceeded` | 상태 불변(메시지형), 역압(스트림형) |
 | hex·base64 디코딩: 길이·끝 `'='`만으로 알 수 있는 형식 오류 / 디코딩 중에 찾은 형식 오류(알파벳·끝 bit·중간 패딩) | `InvalidArgument` | 앞은 출력 불변, 뒤는 출력 전체 소거. 크기 검사가 내용 검사보다 먼저다 |

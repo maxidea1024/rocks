@@ -3,6 +3,7 @@
 #include <Crypto/Bytes.h>
 
 #include "AdapterCommon.h"
+#include "PasswordInternal.h"
 #include "Sodium/SodiumRuntime.h"
 
 #include <Core/Move.h>
@@ -144,6 +145,14 @@ Result<PasswordCost> ParseEncoded(StringView encoded,
 }
 
 } // namespace
+
+bool detail::IsPasswordCostOverCap(PasswordCost cost) noexcept {
+    return IsOverCap(cost);
+}
+
+Result<void> detail::CheckPasswordCost(PasswordCost cost) noexcept {
+    return CheckCost(cost);
+}
 
 Result<SecretBytes> TryDerivePasswordSecret(Span<const uint8> password, Span<const uint8> salt,
                                             PasswordCost cost, usize bytes) noexcept {

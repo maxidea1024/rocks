@@ -215,6 +215,7 @@ inline constexpr uint64 AeadSequenceExhausted = static_cast<uint64>(-1);
 // - iv는 nonce 길이(AeadInfo::nonceBytes)의 비밀 값이고 키와 같은 키 스케줄에서 나온다(TryDerive가
 //   함께 뽑는다). 전송하지 않고 상수 라벨로 두지 않는다. 0이어도 nonce는 겹치지 않지만 다중 사용자
 //   보강(키마다 다른 nonce 오프셋, AES-128-GCM·AEGIS-128L처럼 128 bit 키에서 의미가 크다)을 잃는다.
+// - KeyBlob에서 푼 AeadKey로 만들지 않는다(복원할 때마다 seq 0부터 같은 nonce가 나온다).
 // - 재시작은 새 키로 한다. 같은 키로 순번을 이어 가는 길은 두지 않는다(봉인 뒤 저장 전에 죽으면
 //   nonce가 다시 쓰인다, NIST SP 800-38D 9.1절).
 //

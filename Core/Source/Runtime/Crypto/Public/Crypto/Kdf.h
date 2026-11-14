@@ -16,7 +16,9 @@
 //
 // 도메인 분리 지침:
 // - HKDF info는 버전이 붙은 고유 label로 시작한다(예: "rocks.segment.v1" ‖ 헤더).
-// - BLAKE2b KDF context는 용도(기능)마다 하나를 쓰고, id는 그 용도 안의 항목 번호로만 쓴다.
+// - BLAKE2b KDF context는 용도(기능)마다 하나를 쓰고, id는 그 용도 안의 항목 번호로만 쓴다. "Rk"로
+//   시작하는 context는 엔진 예약이고 엔진 context는 Crypto/Labels.h에 모은다. 앱은 다른 접두를
+//   쓴다.
 // - 타입 파생(TryDeriveMacKey·TryDeriveKdfKey)은 키 타입·알고리즘을 파생 입력에 섞으므로, 같은 (id,
 //   context)라도 타입·알고리즘이 다르면 독립인 키가 나온다. TryDeriveSecret은 libsodium
 //   crypto_kdf_derive_from_key와 byte가 같아(상호운용) 타입 파생과도 겹치지 않는다.

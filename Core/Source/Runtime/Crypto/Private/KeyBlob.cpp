@@ -1,0 +1,529 @@
+#include <Crypto/KeyBlob.h>
+
+#include <Base/Endian.h>
+#include <Core/Guid.h>
+#include <Crypto/Bytes.h>
+#include <Crypto/Labels.h>
+#include <Crypto/Random.h>
+
+#include "KeyAccess.h"
+#include "PasswordInternal.h"
+
+#include <Core/Move.h>
+#include <Platform/DataIndependentTiming.h>
+#include <Platform/Memory.h>
+
+namespace rocks::crypto {
+namespace {
+
+// ---- 배치(10.4절) ---- 0 magic 4 | 4 version 1 | 5 type 1 | 6 algorithm 1 | 7 method 1 | 8 keyId
+// 16 | 24 L(LE16) 2 | 26 방식 매개변수 P | 26+P nonce 24 | 50+P commitment 32 | 82+P 암호문 ‖ tag
+// (L + 16)
+constexpr uint8 Magic[4] = {'R', 'K', 'E', 'Y'};
+constexpr uint8 Version = 1;
+constexpr usize FixedHeaderBytes = 26;
+constexpr usize KeyParamsBytes = 16;      // wrapKeyId
+constexpr usize PasswordParamsBytes = 24; // ops LE32 ‖ memKiB LE32 ‖ salt 16
+constexpr usize NonceBytes = 24;
+constexpr usize CommitmentBytes = 32;
+constexpr usize TagBytes = 16;
+constexpr usize OverheadBytes = FixedHeaderBytes + NonceBytes + CommitmentBytes + TagBytes;
+constexpr usize MaxSecretBytes = MaxHmacKeyBytes;
+static_assert(KeyBlobMaxBytes == OverheadBytes + PasswordParamsBytes + MaxSecretBytes);
+static_assert(PasswordSaltBytes == 16);
+
+// 파생 id다. B = TryDeriveBoundKdfKey(M, 0, ...), K = TryDeriveAeadKey(B, 0, ...), C =
+// TryDeriveSecret(B, 1, ...). K와 C는 타입 tag와 id가 모두 다르다.
+constexpr uint64 BoundId = 0;
+constexpr uint64 WrapKeyId = 0;
+constexpr uint64 CommitmentId = 1;
+
+usize ParamsBytes(KeyBlobWrapMethod method) noexcept {
+    return method == KeyBlobWrapMethod::Key ? KeyParamsBytes : PasswordParamsBytes;
+}
+
+void StoreKeyId(uint8* out, KeyId id) noexcept {
+    StoreBigEndian<uint64>(out, id.value.high);
+    StoreBigEndian<uint64>(out + 8, id.value.low);
+}
+
+KeyId LoadKeyId(const uint8* in) noexcept {
+    KeyId id;
+    id.value.high = LoadBigEndian<uint64>(in);
+    id.value.low = LoadBigEndian<uint64>(in + 8);
+    return id;
+}
+
+// (type, algorithm)에 허용된 비밀 길이다. 표에 없으면 false다.
+struct SecretRule {
+    usize minBytes;
+    usize maxBytes;
+};
+
+bool TryGetSecretRule(KeyBlobType type, uint8 algorithm, SecretRule& rule) noexcept {
+    switch (type) {
+    case KeyBlobType::Aead: {
+        auto info = TryGetAeadInfo(static_cast<AeadAlgorithm>(algorithm));
+        if (!info) {
+            return false;
+        }
+
+        rule = {info.Value().keyBytes, info.Value().keyBytes};
+        return true;
+    }
+    case KeyBlobType::Mac:
+        if (algorithm == static_cast<uint8>(MacAlgorithm::HmacSha256) ||
+            algorithm == static_cast<uint8>(MacAlgorithm::HmacSha512)) {
+            rule = {MinMacKeyBytes, MaxHmacKeyBytes};
+            return true;
+        }
+
+        if (algorithm == static_cast<uint8>(MacAlgorithm::Blake2bKeyed)) {
+            rule = {MinMacKeyBytes, 64};
+            return true;
+        }
+
+        return false;
+    case KeyBlobType::Kdf:
+    case KeyBlobType::Ed25519:
+    case KeyBlobType::Kx:
+    case KeyBlobType::Box:
+        rule = {32, 32};
+        return algorithm == 0;
+    case KeyBlobType::Kem: {
+        auto info = TryGetKemInfo(static_cast<KemAlgorithm>(algorithm));
+        if (!info) {
+            return false;
+        }
+
+        rule = {info.Value().seedBytes, info.Value().seedBytes};
+        return true;
+    }
+    }
+
+    return false;
+}
+
+bool IsDefinedType(uint8 value) noexcept {
+    return value >= static_cast<uint8>(KeyBlobType::Aead) &&
+           value <= static_cast<uint8>(KeyBlobType::Kem);
+}
+
+bool IsDefinedMethod(uint8 value) noexcept {
+    return value == static_cast<uint8>(KeyBlobWrapMethod::Key) ||
+           value == static_cast<uint8>(KeyBlobWrapMethod::Password);
+}
+
+// 헤더를 byte 순서대로 읽는다. 구조 위반은 AuthenticationFailed, 식별 실패는 Unsupported다.
+Result<KeyBlobInfo> TryParseHeader(Span<const uint8> blob) noexcept {
+    if (blob.Size() < FixedHeaderBytes) {
+        return Result<KeyBlobInfo>::Failure(ErrorCode::AuthenticationFailed);
+    }
+
+    const uint8* bytes = blob.Data();
+    if (!ConstantTimeEquals(blob.Left(4), Span<const uint8>(Magic))) {
+        return Result<KeyBlobInfo>::Failure(ErrorCode::AuthenticationFailed);
+    }
+
+    if (bytes[4] != Version || !IsDefinedType(bytes[5])) {
+        return Result<KeyBlobInfo>::Failure(ErrorCode::Unsupported);
+    }
+
+    KeyBlobInfo info;
+    info.type = static_cast<KeyBlobType>(bytes[5]);
+    info.algorithm = bytes[6];
+    SecretRule rule{};
+    if (!TryGetSecretRule(info.type, info.algorithm, rule) || !IsDefinedMethod(bytes[7])) {
+        return Result<KeyBlobInfo>::Failure(ErrorCode::Unsupported);
+    }
+
+    info.method = static_cast<KeyBlobWrapMethod>(bytes[7]);
+    info.keyId = LoadKeyId(bytes + 8);
+    info.secretBytes = LoadLittleEndian<uint16>(bytes + 24);
+    if (info.keyId.IsNil() || info.secretBytes < rule.minBytes ||
+        info.secretBytes > rule.maxBytes) {
+        return Result<KeyBlobInfo>::Failure(ErrorCode::AuthenticationFailed);
+    }
+
+    const usize params = ParamsBytes(info.method);
+    if (blob.Size() < FixedHeaderBytes + params) {
+        return Result<KeyBlobInfo>::Failure(ErrorCode::AuthenticationFailed);
+    }
+
+    if (info.method == KeyBlobWrapMethod::Key) {
+        info.wrapKeyId = LoadKeyId(bytes + FixedHeaderBytes);
+        if (info.wrapKeyId.IsNil()) {
+            return Result<KeyBlobInfo>::Failure(ErrorCode::AuthenticationFailed);
+        }
+    } else {
+        const uint32 operations = LoadLittleEndian<uint32>(bytes + FixedHeaderBytes);
+        const uint32 memoryKiB = LoadLittleEndian<uint32>(bytes + FixedHeaderBytes + 4);
+        info.passwordCost.operations = operations;
+        info.passwordCost.memoryBytes = static_cast<usize>(memoryKiB) * 1024;
+        // 하한 위반은 blob에서 온 값의 형식 오류다(InvalidArgument로 새지 않게 여기서 거른다).
+        if (operations < 1 || info.passwordCost.memoryBytes < MinPasswordMemoryBytes) {
+            return Result<KeyBlobInfo>::Failure(ErrorCode::AuthenticationFailed);
+        }
+    }
+
+    info.blobBytes = OverheadBytes + params + info.secretBytes;
+    return Result<KeyBlobInfo>::Success(info);
+}
+
+// ---- 키 타입별 비밀·생성 ----
+
+template <typename TKey>
+struct TypeTag {};
+
+uint8 AlgorithmOf(const AeadKey& key) noexcept {
+    return static_cast<uint8>(key.Algorithm());
+}
+
+uint8 AlgorithmOf(const MacKey& key) noexcept {
+    return static_cast<uint8>(key.Algorithm());
+}
+
+uint8 AlgorithmOf(const KemKeyPair& key) noexcept {
+    return static_cast<uint8>(key.Algorithm());
+}
+
+template <typename TKey>
+uint8 AlgorithmOf(const TKey&) noexcept {
+    return 0;
+}
+
+template <typename TKey>
+Span<const uint8> SecretOf(const TKey& key) noexcept {
+    return detail::KeyAccess::Bytes(key);
+}
+
+// 서명 키의 libsodium 비밀키는 seed ‖ 공개키다. seed만 담는다(공개키는 seed에서 다시 계산한다).
+Span<const uint8> SecretOf(const Ed25519SigningKey& key) noexcept {
+    return detail::KeyAccess::Bytes(key).Left(Ed25519SeedBytes);
+}
+
+Result<AeadKey> TryMakeKey(TypeTag<AeadKey>, uint8 algorithm, Span<const uint8> secret) noexcept {
+    return AeadKey::TryImport(static_cast<AeadAlgorithm>(algorithm), secret);
+}
+
+Result<MacKey> TryMakeKey(TypeTag<MacKey>, uint8 algorithm, Span<const uint8> secret) noexcept {
+    return MacKey::TryImport(static_cast<MacAlgorithm>(algorithm), secret);
+}
+
+Result<KdfKey> TryMakeKey(TypeTag<KdfKey>, uint8, Span<const uint8> secret) noexcept {
+    return KdfKey::TryImport(secret);
+}
+
+Result<Ed25519SigningKey> TryMakeKey(TypeTag<Ed25519SigningKey>, uint8,
+                                     Span<const uint8> secret) noexcept {
+    return Ed25519SigningKey::TryFromSeed(secret);
+}
+
+Result<KxKeyPair> TryMakeKey(TypeTag<KxKeyPair>, uint8, Span<const uint8> secret) noexcept {
+    return KxKeyPair::TryImport(secret);
+}
+
+Result<BoxKeyPair> TryMakeKey(TypeTag<BoxKeyPair>, uint8, Span<const uint8> secret) noexcept {
+    return BoxKeyPair::TryImport(secret);
+}
+
+Result<KemKeyPair> TryMakeKey(TypeTag<KemKeyPair>, uint8 algorithm,
+                              Span<const uint8> secret) noexcept {
+    return KemKeyPair::TryFromSeed(static_cast<KemAlgorithm>(algorithm), secret);
+}
+
+// ---- 파생 ----
+
+// M과 헤더 transcript T(nonce까지)에서 wrap AEAD 키 K와 commitment C를 뽑는다.
+struct WrapKeys {
+    AeadKey key;
+    SecretBytes commitment;
+};
+
+Result<WrapKeys> TryDeriveWrapKeys(const KdfKey& master, Span<const uint8> transcript) noexcept {
+    const Span<const uint8> pieces[] = {transcript};
+    auto bound = TryDeriveBoundKdfKey(master, BoundId, labels::KeyBlob,
+                                      Span<const Span<const uint8>>(pieces));
+    if (!bound) {
+        return Result<WrapKeys>::Failure(bound.Error());
+    }
+
+    auto key = TryDeriveAeadKey(bound.Value(), WrapKeyId, labels::KeyBlob,
+                                AeadAlgorithm::XChaCha20Poly1305);
+    if (!key) {
+        return Result<WrapKeys>::Failure(key.Error());
+    }
+
+    auto commitment =
+        TryDeriveSecret(bound.Value(), CommitmentId, labels::KeyBlob, CommitmentBytes);
+    if (!commitment) {
+        return Result<WrapKeys>::Failure(commitment.Error());
+    }
+
+    return Result<WrapKeys>::Success(WrapKeys{Move(key.Value()), Move(commitment.Value())});
+}
+
+// ---- wrap·unwrap 공통 ----
+
+// 방식별 입력이다. Key 방식은 wrapKey·wrapKeyId, Password 방식은 password·cost를 쓴다.
+struct WrapInput {
+    KeyBlobWrapMethod method;
+    const KdfKey* wrapKey;
+    KeyId wrapKeyId;
+    Span<const uint8> password;
+    PasswordCost cost;
+};
+
+Result<usize> TryWrapSecret(const WrapInput& input, KeyBlobType type, uint8 algorithm,
+                            Span<const uint8> secret, KeyId keyId, Span<uint8> blob) noexcept {
+    if ((input.method == KeyBlobWrapMethod::Key && input.wrapKey->IsEmpty()) || secret.IsEmpty()) {
+        return Result<usize>::Failure(ErrorCode::StaleHandle);
+    }
+
+    SecretRule rule{};
+    if (keyId.IsNil() || !TryGetSecretRule(type, algorithm, rule) ||
+        secret.Size() < rule.minBytes || secret.Size() > rule.maxBytes) {
+        return Result<usize>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    PasswordCost cost = input.cost;
+    if (input.method == KeyBlobWrapMethod::Key) {
+        if (input.wrapKeyId.IsNil()) {
+            return Result<usize>::Failure(ErrorCode::InvalidArgument);
+        }
+    } else {
+        if (input.password.IsEmpty() || Overlaps(input.password, blob)) {
+            return Result<usize>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (auto valid = detail::CheckPasswordCost(cost); !valid) {
+            return Result<usize>::Failure(valid.Error());
+        }
+
+        // 기록은 KiB 단위다. 계산도 기록한 값으로 해서 같은 비용에 인코딩이 하나만 있게 한다.
+        cost.memoryBytes = cost.memoryBytes / 1024 * 1024;
+    }
+
+    const usize params = ParamsBytes(input.method);
+    const usize total = OverheadBytes + params + secret.Size();
+    if (blob.Size() < total) {
+        return Result<usize>::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    // 헤더를 쓴다. 여기부터 실패하면 blob을 지운다.
+    const Span<uint8> out = blob.Left(total);
+    uint8* bytes = out.Data();
+    platform::MemoryCopy(bytes, Magic, sizeof(Magic));
+    bytes[4] = Version;
+    bytes[5] = static_cast<uint8>(type);
+    bytes[6] = algorithm;
+    bytes[7] = static_cast<uint8>(input.method);
+    StoreKeyId(bytes + 8, keyId);
+    StoreLittleEndian<uint16>(bytes + 24, static_cast<uint16>(secret.Size()));
+    const auto fail = [&](ErrorCode error) {
+        SecureZero(out);
+        return Result<usize>::Failure(error);
+    };
+
+    const Span<uint8> nonce = out.Mid(FixedHeaderBytes + params, NonceBytes);
+    if (auto filled = TryFillRandom(nonce); !filled) {
+        return fail(filled.Error());
+    }
+
+    Result<KdfKey> passwordKey = Result<KdfKey>::Failure(ErrorCode::InvalidArgument);
+    const KdfKey* master = input.wrapKey;
+    if (input.method == KeyBlobWrapMethod::Key) {
+        StoreKeyId(bytes + FixedHeaderBytes, input.wrapKeyId);
+    } else {
+        StoreLittleEndian<uint32>(bytes + FixedHeaderBytes, cost.operations);
+        StoreLittleEndian<uint32>(bytes + FixedHeaderBytes + 4,
+                                  static_cast<uint32>(cost.memoryBytes / 1024));
+        const Span<uint8> salt = out.Mid(FixedHeaderBytes + 8, PasswordSaltBytes);
+        if (auto filled = TryFillRandom(salt); !filled) {
+            return fail(filled.Error());
+        }
+
+        passwordKey = TryDeriveKdfKeyFromPassword(input.password, salt, cost);
+        if (!passwordKey) {
+            return fail(passwordKey.Error());
+        }
+
+        master = &passwordKey.Value();
+    }
+
+    const Span<const uint8> transcript = out.Left(FixedHeaderBytes + params + NonceBytes);
+    auto keys = TryDeriveWrapKeys(*master, transcript);
+    if (!keys) {
+        return fail(keys.Error());
+    }
+
+    platform::MemoryCopy(bytes + FixedHeaderBytes + params + NonceBytes,
+                         keys.Value().commitment.View().Data(), CommitmentBytes);
+    auto sealed = hazmat::TrySealWithNonce(
+        keys.Value().key, nonce, transcript, secret,
+        out.RightChop(FixedHeaderBytes + params + NonceBytes + CommitmentBytes));
+    if (!sealed) {
+        return fail(sealed.Error());
+    }
+
+    return Result<usize>::Success(total);
+}
+
+template <typename TKey>
+Result<UnwrappedKey<TKey>> TryUnwrapSecret(KeyBlobWrapMethod method, const KdfKey* wrapKey,
+                                           Span<const uint8> password,
+                                           Span<const uint8> blob) noexcept {
+    using Unwrapped = UnwrappedKey<TKey>;
+    if (method == KeyBlobWrapMethod::Key && wrapKey->IsEmpty()) {
+        return Result<Unwrapped>::Failure(ErrorCode::StaleHandle);
+    }
+
+    auto header = TryParseHeader(blob);
+    if (!header) {
+        return Result<Unwrapped>::Failure(header.Error());
+    }
+
+    const KeyBlobInfo& info = header.Value();
+    // 길이·타입·방식은 blob에서 온 값이다. 기대와 다르면 AuthenticationFailed다.
+    if (blob.Size() != info.blobBytes || info.type != KeyBlobTraits<TKey>::Type ||
+        info.method != method) {
+        return Result<Unwrapped>::Failure(ErrorCode::AuthenticationFailed);
+    }
+
+    if (method == KeyBlobWrapMethod::Password && detail::IsPasswordCostOverCap(info.passwordCost)) {
+        return Result<Unwrapped>::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    if (info.type == KeyBlobType::Aead &&
+        !TryGetAeadInfo(static_cast<AeadAlgorithm>(info.algorithm)).Value().available) {
+        return Result<Unwrapped>::Failure(ErrorCode::Unsupported);
+    }
+
+    const usize params = ParamsBytes(method);
+    Result<KdfKey> passwordKey = Result<KdfKey>::Failure(ErrorCode::InvalidArgument);
+    const KdfKey* master = wrapKey;
+    if (method == KeyBlobWrapMethod::Password) {
+        passwordKey = TryDeriveKdfKeyFromPassword(
+            password, blob.Mid(FixedHeaderBytes + 8, PasswordSaltBytes), info.passwordCost);
+        if (!passwordKey) {
+            return Result<Unwrapped>::Failure(passwordKey.Error());
+        }
+
+        master = &passwordKey.Value();
+    }
+
+    const Span<const uint8> transcript = blob.Left(FixedHeaderBytes + params + NonceBytes);
+    auto keys = TryDeriveWrapKeys(*master, transcript);
+    if (!keys) {
+        return Result<Unwrapped>::Failure(keys.Error());
+    }
+
+    // 다른 KEK·비밀번호와 헤더 변조는 AEAD 전에 commitment에서 걸린다.
+    if (!ConstantTimeEquals(keys.Value().commitment.View(),
+                            blob.Mid(FixedHeaderBytes + params + NonceBytes, CommitmentBytes))) {
+        return Result<Unwrapped>::Failure(ErrorCode::AuthenticationFailed);
+    }
+
+    auto secret = SecretBytes::TryCreate(info.secretBytes);
+    if (!secret) {
+        return Result<Unwrapped>::Failure(secret.Error());
+    }
+
+    auto opened = hazmat::TryOpenWithNonce(
+        keys.Value().key, blob.Mid(FixedHeaderBytes + params, NonceBytes), transcript,
+        blob.RightChop(FixedHeaderBytes + params + NonceBytes + CommitmentBytes),
+        secret.Value().MutableView());
+    if (!opened) {
+        return Result<Unwrapped>::Failure(opened.Error());
+    }
+
+    auto key = TryMakeKey(TypeTag<TKey>{}, info.algorithm, secret.Value().View());
+    if (!key) {
+        return Result<Unwrapped>::Failure(key.Error());
+    }
+
+    return Result<Unwrapped>::Success(Unwrapped{info.keyId, Move(key.Value())});
+}
+
+} // namespace
+
+Result<KeyId> TryNewKeyId() noexcept {
+    auto guid = TryNewGuid();
+    if (!guid) {
+        return Result<KeyId>::Failure(ErrorCode::DependencyFailed);
+    }
+
+    return Result<KeyId>::Success(KeyId{guid.Value()});
+}
+
+Result<KeyBlobInfo> TryPeekKeyBlob(Span<const uint8> blob) noexcept {
+    return TryParseHeader(blob);
+}
+
+template <KeyBlobKey TKey>
+Result<usize> TryGetKeyBlobBytes(const TKey& key, KeyBlobWrapMethod method) noexcept {
+    const Span<const uint8> secret = SecretOf(key);
+    if (secret.IsEmpty()) {
+        return Result<usize>::Failure(ErrorCode::StaleHandle);
+    }
+
+    if (!IsDefinedMethod(static_cast<uint8>(method))) {
+        return Result<usize>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return Result<usize>::Success(OverheadBytes + ParamsBytes(method) + secret.Size());
+}
+
+template <KeyBlobKey TKey>
+Result<usize> TryWrapKey(const KdfKey& wrapKey, KeyId wrapKeyId, const TKey& key, KeyId keyId,
+                         Span<uint8> blob) noexcept {
+    platform::DataIndependentTimingScope dit;
+    const WrapInput input{KeyBlobWrapMethod::Key, &wrapKey, wrapKeyId, Span<const uint8>(), {}};
+    return TryWrapSecret(input, KeyBlobTraits<TKey>::Type, AlgorithmOf(key), SecretOf(key), keyId,
+                         blob);
+}
+
+template <KeyBlobKey TKey>
+Result<usize> TryWrapKeyWithPassword(Span<const uint8> password, PasswordCost cost, const TKey& key,
+                                     KeyId keyId, Span<uint8> blob) noexcept {
+    platform::DataIndependentTimingScope dit;
+    const WrapInput input{KeyBlobWrapMethod::Password, nullptr, KeyId(), password, cost};
+    return TryWrapSecret(input, KeyBlobTraits<TKey>::Type, AlgorithmOf(key), SecretOf(key), keyId,
+                         blob);
+}
+
+template <KeyBlobKey TKey>
+Result<UnwrappedKey<TKey>> TryUnwrapKey(const KdfKey& wrapKey, Span<const uint8> blob) noexcept {
+    platform::DataIndependentTimingScope dit;
+    return TryUnwrapSecret<TKey>(KeyBlobWrapMethod::Key, &wrapKey, Span<const uint8>(), blob);
+}
+
+template <KeyBlobKey TKey>
+Result<UnwrappedKey<TKey>> TryUnwrapKeyWithPassword(Span<const uint8> password,
+                                                    Span<const uint8> blob) noexcept {
+    platform::DataIndependentTimingScope dit;
+    return TryUnwrapSecret<TKey>(KeyBlobWrapMethod::Password, nullptr, password, blob);
+}
+
+#define ROCKS_CRYPTO_KEYBLOB_INSTANTIATE(TKey)                                                     \
+    template Result<usize> TryGetKeyBlobBytes<TKey>(const TKey&, KeyBlobWrapMethod) noexcept;      \
+    template Result<usize> TryWrapKey<TKey>(const KdfKey&, KeyId, const TKey&, KeyId,              \
+                                            Span<uint8>) noexcept;                                 \
+    template Result<usize> TryWrapKeyWithPassword<TKey>(Span<const uint8>, PasswordCost,           \
+                                                        const TKey&, KeyId, Span<uint8>) noexcept; \
+    template Result<UnwrappedKey<TKey>> TryUnwrapKey<TKey>(const KdfKey&,                          \
+                                                           Span<const uint8>) noexcept;            \
+    template Result<UnwrappedKey<TKey>> TryUnwrapKeyWithPassword<TKey>(                            \
+        Span<const uint8>, Span<const uint8>) noexcept;
+
+ROCKS_CRYPTO_KEYBLOB_INSTANTIATE(AeadKey)
+ROCKS_CRYPTO_KEYBLOB_INSTANTIATE(MacKey)
+ROCKS_CRYPTO_KEYBLOB_INSTANTIATE(KdfKey)
+ROCKS_CRYPTO_KEYBLOB_INSTANTIATE(Ed25519SigningKey)
+ROCKS_CRYPTO_KEYBLOB_INSTANTIATE(KxKeyPair)
+ROCKS_CRYPTO_KEYBLOB_INSTANTIATE(BoxKeyPair)
+ROCKS_CRYPTO_KEYBLOB_INSTANTIATE(KemKeyPair)
+
+#undef ROCKS_CRYPTO_KEYBLOB_INSTANTIATE
+
+} // namespace rocks::crypto
