@@ -345,28 +345,159 @@ Result<void> ValidateCompatibilityPath(StringView path, PathStyle style) noexcep
     return Result<void>::Success();
 }
 
-Result<void> EraseCompatibilityRange(String& text, usize start, usize count) noexcept {
-    const StringView input = text.View();
-    if (start > input.ByteCount() || count > input.ByteCount() - start) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+// text[start, start + count)를 지우고 뒤를 당긴다. size는 새 길이로 바뀐다.
+void RemoveCollapseRange(char* text, usize& size, usize start, usize count) noexcept {
+    for (usize index = start + count; index < size; ++index) {
+        text[index - count] = text[index];
     }
 
-    String replacement(text.GetAllocator());
-    auto reserved = replacement.TryReserve(input.ByteCount() - count);
-    if (!reserved) {
-        return reserved;
+    size -= count;
+}
+
+// from부터 찾은 첫 "/."의 위치다. 없으면 IndexNone이다.
+usize FindSlashDot(const char* text, usize size, usize from) noexcept {
+    for (usize index = from; index + 1 < size; ++index) {
+        if (text[index] == '/' && text[index + 1] == '.') {
+            return index;
+        }
     }
-    auto prefix = replacement.TryAppend(Slice(input, 0, start));
-    if (!prefix) {
-        return prefix;
+
+    return IndexNone;
+}
+
+// end 앞의 마지막 '/' 위치다. 없으면 IndexNone이다.
+usize FindLastSlash(const char* text, usize end) noexcept {
+    for (usize index = end; index != 0; --index) {
+        if (text[index - 1] == '/') {
+            return index - 1;
+        }
     }
-    auto suffix =
-        replacement.TryAppend(Slice(input, start + count, input.ByteCount() - start - count));
-    if (!suffix) {
-        return suffix;
+
+    return IndexNone;
+}
+
+// UE 5.8 CollapseRelativeDirectoriesImplTemplate(PathViews.cpp 635–829)와 같은 규칙으로
+// text[0, size)를 제자리에서 축약하고 새 길이를 반환한다. 축약할 수 없는 '..'가 있으면
+// allCollapsed를 false로 둔다. stopAtUncollapsible이면 그 자리에서 멈추며, 이때 text는 일부만
+// 축약된 중간 상태이므로 호출자가 버린다(UE는 이 중간 상태를 그대로 남긴다).
+usize CollapseInPlace(char* text, usize size, bool stopAtUncollapsible,
+                      bool& allCollapsed) noexcept {
+    allCollapsed = true;
+
+    // 축약해도 되는 첫 위치다. 지울 수 없는 앞부분(볼륨, 축약할 수 없는 '..')을 지나면 뒤로 민다.
+    usize start = 0;
+
+    // 첫 '/'보다 앞에 ':'가 있으면 볼륨 지정자("C:", "Storage:")로 보고 그 뒤부터 축약한다.
+    // 첫 '/' 뒤의 ':'는 일반 문자다.
+    for (usize index = 0; index < size; ++index) {
+        if (text[index] == '/') {
+            break;
+        }
+
+        if (text[index] == ':') {
+            start = index + 1;
+            break;
+        }
     }
-    text.Swap(replacement);
-    return Result<void>::Success();
+
+    // 아래 반복은 "/."를 찾으므로 선행 "./"("C:./" 포함)는 먼저 한 번만 지운다("././a"는 "./a"가
+    // 된다). 정확히 "/."인 나머지는 지우면 루트가 사라지므로 축약 대상에서 뺀다.
+    if (size - start >= 2 && text[start] == '.' && text[start + 1] == '/') {
+        RemoveCollapseRange(text, size, start, 2);
+    } else if (size - start == 2 && text[start] == '/' && text[start + 1] == '.') {
+        start += 2;
+    }
+
+    usize next = start;
+    while (next != size) {
+        // 축약할 수 있는 구간이 ".." 구성 요소로 시작하면 지울 앞 구성 요소가 없다. "..name"처럼
+        // ".."로 시작하는 이름은 일반 이름이다. next는 그대로 두어 뒤쪽 "/."를 계속 찾는다.
+        if (next == start && size - start >= 2 && text[start] == '.' && text[start + 1] == '.' &&
+            (size - start == 2 || text[start + 2] == '/')) {
+            start += 2;
+            allCollapsed = false;
+            if (stopAtUncollapsible) {
+                return size;
+            }
+
+            continue;
+        }
+
+        const usize index = FindSlashDot(text, size, next);
+        if (index == IndexNone) {
+            break;
+        }
+
+        // "/./"와 끝의 "/."는 "/."만 지운다.
+        if (index + 2 == size || text[index + 2] == '/') {
+            RemoveCollapseRange(text, size, index, 2);
+            continue;
+        }
+
+        // ".git"처럼 '.'로 시작하는 이름은 건너뛴다.
+        if (text[index + 2] != '.') {
+            next = index + 3;
+            continue;
+        }
+
+        // "..name"처럼 ".."로 시작하는 이름도 건너뛴다.
+        if (index + 3 < size && text[index + 3] != '/') {
+            next = index + 4;
+            continue;
+        }
+
+        // 여기서 index는 "/../" 또는 끝의 "/.."다. 축약 가능 구간 맨 앞이면 지울 구성 요소가 없다.
+        if (index == start) {
+            start = index + 3;
+            next = start;
+            allCollapsed = false;
+            if (stopAtUncollapsible) {
+                return size;
+            }
+
+            continue;
+        }
+
+        // 앞 구성 요소를 찾는다. "foo//.."처럼 겹친 구분자는 하나로 보고 구분자 연속의 맨 앞에서
+        // 다시 앞의 '/'를 찾는다. 연속이 문자열 맨 앞까지 이어지면("//..") UE 레거시 동작대로 선행
+        // 구분자부터 지운다.
+        usize previous = FindLastSlash(text, index);
+        if (previous != IndexNone && previous + 1 == index) {
+            while (previous > 0 && text[previous - 1] == '/') {
+                --previous;
+            }
+
+            if (previous != 0) {
+                previous = FindLastSlash(text, previous);
+            }
+        }
+
+        // 앞에 '/'가 없으면 축약 가능 구간의 시작부터 "foo/.."와 뒤따르는 '/'를 함께 지운다.
+        const bool leadingSlash = previous != IndexNone;
+        const usize removalStart = leadingSlash ? previous : start;
+
+        // 지울 범위가 볼륨이나 이미 지나친 '..'에 걸치면 축약할 수 없다.
+        if (removalStart < start) {
+            start = index + 3;
+            next = start;
+            allCollapsed = false;
+            if (stopAtUncollapsible) {
+                return size;
+            }
+
+            continue;
+        }
+
+        usize count = index - removalStart + 3;
+        if (!leadingSlash && removalStart + count < size) {
+            ++count;
+        }
+
+        RemoveCollapseRange(text, size, removalStart, count);
+        next = removalStart;
+    }
+
+    return size;
 }
 
 } // namespace
@@ -406,84 +537,40 @@ Result<String> Path::NormalizeFilename(Allocator& allocator, StringView path,
 }
 
 Result<String> Path::CollapseRelativeDirectories(Allocator& allocator, StringView path,
-                                                 PathStyle style) noexcept {
+                                                 PathStyle style, PathCollapseMode mode) noexcept {
     auto valid = ValidateCompatibilityPath(path, style);
     if (!valid) {
         return Result<String>::Failure(valid.Error());
     }
 
+    if (mode != PathCollapseMode::RequireAll && mode != PathCollapseMode::AllPossible) {
+        return Result<String>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 축약은 길이를 줄이기만 하므로 입력 크기의 작업 buffer 하나에서 제자리로 처리한다.
+    Array<char> work(allocator);
+    auto sized = work.TryResize(path.ByteCount());
+    if (!sized) {
+        return Result<String>::Failure(sized.Error());
+    }
+
+    for (usize index = 0; index < path.ByteCount(); ++index) {
+        work[index] = path.Data()[index];
+    }
+
+    bool allCollapsed = true;
+    const usize size = CollapseInPlace(work.Data(), work.Size(),
+                                       mode == PathCollapseMode::RequireAll, allCollapsed);
+    if (!allCollapsed && mode == PathCollapseMode::RequireAll) {
+        return Result<String>::Failure(ErrorCode::InvalidArgument);
+    }
+
     String output(allocator);
-    auto copied = output.TryAssign(path);
+    auto copied = output.TryAssign(size == 0 ? StringView() : StringView(work.Data(), size));
     if (!copied) {
         return Result<String>::Failure(copied.Error());
     }
-    for (;;) {
-        const StringView value = output.View();
-        const usize size = value.ByteCount();
-        if ((size >= 2 && value.Data()[0] == '.' && value.Data()[1] == '.') ||
-            (size >= 3 && value.Data()[0] == '/' && value.Data()[1] == '.' &&
-             value.Data()[2] == '.')) {
-            return Result<String>::Failure(ErrorCode::InvalidArgument);
-        }
-        usize parent = size;
-        for (usize i = 0; i + 2 < size; ++i) {
-            if (value.Data()[i] == '/' && value.Data()[i + 1] == '.' &&
-                value.Data()[i + 2] == '.' && (i + 3 == size || value.Data()[i + 3] == '/')) {
-                parent = i;
-                break;
-            }
-        }
-        if (parent == size) {
-            break;
-        }
 
-        usize previous = parent;
-        for (;;) {
-            usize search = previous;
-            while (search > 0 && value.Data()[search - 1] != '/') {
-                --search;
-            }
-            if (search == 0) {
-                previous = 0;
-                break;
-            }
-            previous = search - 1;
-            if (previous + 2 >= size || value.Data()[previous + 1] != '.' ||
-                value.Data()[previous + 2] != '/') {
-                break;
-            }
-        }
-        for (usize i = previous; i < parent + 3; ++i) {
-            if (value.Data()[i] == ':') {
-                return Result<String>::Failure(ErrorCode::InvalidArgument);
-            }
-        }
-        auto removed = EraseCompatibilityRange(output, previous, parent + 3 - previous);
-        if (!removed) {
-            return Result<String>::Failure(removed.Error());
-        }
-    }
-
-    // 원본처럼 이전 일치 지점 앞만 다시 찾는다. 제거로 새로 생긴 중첩은 재처리하지 않는다.
-    usize searchEnd = output.ByteCount();
-    for (;;) {
-        const StringView value = output.View();
-        usize match = value.ByteCount();
-        for (usize i = searchEnd; i > 1; --i) {
-            if (value.Data()[i - 2] == '.' && value.Data()[i - 1] == '/') {
-                match = i - 2;
-                break;
-            }
-        }
-        if (match == value.ByteCount()) {
-            break;
-        }
-        auto removed = EraseCompatibilityRange(output, match, 2);
-        if (!removed) {
-            return Result<String>::Failure(removed.Error());
-        }
-        searchEnd = match;
-    }
     return Result<String>::Success(Move(output));
 }
 

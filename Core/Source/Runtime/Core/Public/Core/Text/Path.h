@@ -111,6 +111,19 @@ private:
     bool windows_ = false;
 };
 
+// Path::CollapseRelativeDirectories가 축약할 수 없는 '..'(앞에 지울 구성 요소가 없는
+// '..')를 만났을 때의 처리다(UE 5.8 bCollapseAllPossible 대응).
+// - RequireAll: InvalidArgument로 실패한다(UE 기본값 false). 모두 축약되는지 확인할 때
+//   쓴다.
+// - AllPossible: 그 '..'는 남기고 나머지 '.'·'..'를 모두 축약한 결과로 성공한다(UE
+//   true). 앞의 '..'가 정상인 상대 경로("../../Game/./Content")를 정리할 때 쓴다. 모두
+//   축약되었는지는 알려 주지 않는다. 필요하면 RequireAll로 확인한다.
+// 모두 축약되는 입력이면 두 방식의 결과가 같다.
+enum class PathCollapseMode : uint8 {
+    RequireAll,
+    AllPossible
+};
+
 // Split의 결과는 원본 저장소를 빌린다. 원본이 변경·파괴되면 사용하지 않는다.
 struct PathParts {
     StringView directory;
@@ -143,13 +156,51 @@ public:
     // 입력은 유효 UTF-8이고 NUL이 없어야 하며 실패해도 입력은 바뀌지 않는다.
     static Result<String> NormalizeFilename(Allocator& allocator, StringView path,
                                             PathStyle style = HostStyle()) noexcept;
-    // 사전에 '/' 구분자로 바꾼 경로의 상대 디렉터리를 축약한다. UE5.6 규칙대로 선행 '..'·
-    // '/..' 및 드라이브 제거 시도는 InvalidArgument다. 입력을 변경하지 않으며 빈 결과를 허용한다.
-    // UE5.8은 이 알고리즘을 새로 써서 "..name/x"처럼 '..'로 시작하는 이름을 받고, 이름 안의
-    // "./"(예: "a.../x")를 지우지 않는다. 이 함수는 5.6 결과를 유지한다.
-    // 이 함수는 역슬래시를 자동 변환하지 않는다. 필요하면 NormalizeFilename을 먼저 호출한다.
-    static Result<String> CollapseRelativeDirectories(Allocator& allocator, StringView path,
-                                                      PathStyle style = HostStyle()) noexcept;
+    // '/' 구분자 경로의 '.'·'..' 디렉터리를 문자열에서 축약한 사본을 만든다(UE 5.8
+    // FPaths::CollapseRelativeDirectories와 같은 규칙). 파일 시스템에 접근하지 않는다.
+    // UE 호환 유틸이므로 아래 레거시 결과도 그대로 따른다. 루트 이탈 거부와 반복 구분자
+    // 정리가 필요한 일반 경로 정리에는 Normalize를 쓴다.
+    //
+    //   "Game/Maps/../Content/./Hero.mesh" → "Game/Content/Hero.mesh"
+    //   "C:/Game/../Saved"                 → "C:/Saved"
+    //   "a/../../b"                        → InvalidArgument(AllPossible이면 "../b")
+    //
+    //   auto collapsed = Path::CollapseRelativeDirectories(allocator, "a/../../b",
+    //                                                      PathStyle::Posix,
+    //                                                      PathCollapseMode::AllPossible);
+    //
+    // 규칙:
+    // - 역슬래시는 구분자로 보지 않는다. 필요하면 NormalizeFilename을 먼저 호출한다.
+    // - 첫 '/'보다 앞에 있는 첫 ':'까지("C:", "Storage:")는 볼륨으로 보고 지우지 않는다.
+    //   그 뒤의 ':'는 일반 문자다("a/b:c/../d" → "a/d", "C:D:a/../b" → "C:b").
+    //   드라이브 상대 "C:a/../b"는 "C:b"다.
+    // - 선행 "./" 하나와 중간·끝의 "/."를 지운다. 선행 "./"는 처음에 한 번만 지우므로
+    //   "././a"는 "./a", 축약 뒤 맨 앞에 생긴 "./"도 남는다("a/.././b" → "./b").
+    //   정확히 "/."·"C:/."인 입력은 그대로 둔다.
+    // - "name/.."는 앞 구성 요소와 함께 지운다. '..' 앞의 겹친 구분자("a//..")는 하나로
+    //   본다. '..' 뒤의 겹친 구분자는 정리하지 않는다.
+    // - '.'·'..'로 시작하거나 '.'로 끝나는 이름(".git", "..name", "a..")은 일반 이름이다.
+    //   이름 안의 "./"도 지우지 않는다("a.../x"·"a..//"는 그대로).
+    // - 앞에 지울 구성 요소가 없는 '..'(선행 "..", 볼륨·루트 바로 뒤의 "/..", 남긴 '..'
+    //   뒤의 '..')는 축약할 수 없다. 처리는 mode가 정한다(PathCollapseMode).
+    // - UE 레거시: 끝의 "/.."는 루트 구분자까지 지운다("C:/a/.." → "C:", "/a/.."·"//.." →
+    //   빈 결과). 끝에 '/'가 더 있으면 루트가 남는다("C:/a/../" → "C:/").
+    // - UE 레거시: 겹친 구분자가 볼륨 바로 뒤나 '..' 뒤에 있으면 의미가 바뀐 결과가
+    //   나온다. "C://../x"·"C:/a/..//../x" → "C:x"(성공), "a/..//x" → "/x",
+    //   "/a/..//x" → "//x", AllPossible의 "..//../Game" → "..Game".
+    // mode: 기본 RequireAll은 축약할 수 없는 '..'가 있으면 InvalidArgument다. UE의 false
+    //   모드는 이때 일부만 축약한 문자열을 남기지만 Rocks는 결과를 내지 않는다.
+    //   AllPossible은 축약할 수 없는 '..'로는 실패하지 않고 그 '..'를 남긴 결과를 돌려준다.
+    //   정의되지 않은 mode 값은 InvalidArgument다.
+    // 오류: 무효 UTF-8·NUL은 InvalidArgument, Windows 문법의 device namespace("//?/",
+    //   "//./", "\\\\?\\", "\\\\.\\")는 Unsupported, 할당 실패는 allocator 오류다.
+    //   문법(style)은 이 검증에만 쓰며 축약 규칙은 두 문법이 같다. 빈 결과도 성공이다.
+    // 수명: 반환 String은 allocator를 쓰는 독립 사본이고 입력은 바꾸지 않는다. 입력 view는
+    //   호출이 끝날 때까지 살아 있으면 된다.
+    static Result<String>
+    CollapseRelativeDirectories(Allocator& allocator, StringView path,
+                                PathStyle style = HostStyle(),
+                                PathCollapseMode mode = PathCollapseMode::RequireAll) noexcept;
     // UE PathAppend처럼 구분자만 보충해 원본 경로 표기를 결합한다. Join과 달리
     // 루트 검증·'.'/'..' 정규화는 수행하지 않는다. NUL·무효 UTF-8은 InvalidArgument다.
     // 두 입력은 호출이 끝날 때까지 살아 있어야 하며 반환 String은 allocator를 빌린다.

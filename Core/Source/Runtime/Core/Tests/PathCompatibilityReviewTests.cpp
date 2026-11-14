@@ -4,16 +4,33 @@
 
 using namespace rocks;
 
-// UE 5.6은 축약 뒤 "./"를 모두 지워 "a..//"가 "a./"가 된다. UE 5.8은 이 일괄 제거가 없어
-// "a..//"를 그대로 둔다. Rocks는 5.6 결과를 유지한다(Path.h).
-TEST(PathCompatibilityCollapsesOverlappingDotsLikeUe56) {
+// UE 5.6은 축약 뒤 "./"를 모두 지워 "a..//"가 "a./", "a.../x"가 "a..x"가 되었다. UE 5.8은 이
+// 일괄 제거를 없애고 "/."로 시작하는 구성 요소만 보므로, 축약할 "/."·"/.."가 없으면 이름 안의
+// 점과 그 뒤 구분자를 그대로 둔다.
+TEST(PathCompatibilityKeepsOverlappingDotsLikeUe58) {
     SystemAllocator allocator;
+    struct Case {
+        StringView input;
+        StringView expected;
+    };
+    const Case cases[] = {
+        {"a..//", "a..//"}, {"a.../x", "a.../x"},    {"a/b./c", "a/b./c"},
+        {"a/...", "a/..."}, {"a/.../b/..", "a/..."},
+    };
     const PathStyle styles[] = {PathStyle::Windows, PathStyle::Posix};
+    const PathCollapseMode modes[] = {PathCollapseMode::RequireAll, PathCollapseMode::AllPossible};
     for (PathStyle style : styles) {
-        auto value = Path::CollapseRelativeDirectories(allocator, "a..//", style);
-        REQUIRE(value);
-        CHECK(value.Value().View() == StringView("a./"));
+        for (PathCollapseMode mode : modes) {
+            for (const Case& sample : cases) {
+                auto value =
+                    Path::CollapseRelativeDirectories(allocator, sample.input, style, mode);
+                REQUIRE(value);
+                CHECK(value.Value().View() == sample.expected);
+            }
+        }
     }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
 }
 
 TEST(PathCompatibilityRejectsWindowsDeviceNamespace) {

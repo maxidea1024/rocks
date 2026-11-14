@@ -59,8 +59,12 @@ Result<String> RunOwnedPathOperation(Allocator& allocator, StringView source, Pa
         return Path::SetExtension(allocator, source, "texture", style);
     case 6:
         return Path::NormalizeFilename(allocator, source, style);
-    default:
+    case 7:
         return Path::CollapseRelativeDirectories(allocator, source, style);
+    default:
+        // 축약할 수 없는 '..'를 남기는 경로도 할당 실패를 같은 방식으로 전달해야 한다.
+        return Path::CollapseRelativeDirectories(allocator, "../game/./assets/../level", style,
+                                                 PathCollapseMode::AllPossible);
     }
 }
 
@@ -191,7 +195,7 @@ TEST(PathAllocationFailuresKeepSourceAndReleaseEveryAllocation) {
         const char* original = source.Data();
         const StringView originalView = source.View();
         const auto baseline = system.Stats().liveAllocations;
-        for (uint32 operation = 0; operation < 8; ++operation) {
+        for (uint32 operation = 0; operation < 9; ++operation) {
             failing.DisableFailure();
             {
                 auto completed = RunOwnedPathOperation(failing, source.View(), style, operation);
@@ -563,34 +567,146 @@ TEST(PathUe58FilenameNormalizationIsIndependentFromFullNormalization) {
     CHECK(posix.Value().View() == StringView("a\\b"));
 }
 
-// UE 5.6 FPaths::CollapseRelativeDirectories 결과다. UE 5.8은 알고리즘을 새로 써서 "a.../x"를
-// 그대로 두고 "..hidden/file"을 받는다(성공). Rocks는 5.6 결과를 유지한다(Path.h).
-TEST(PathUe56CollapseRelativeDirectoriesAndFailurePreserveInput) {
+// UE 5.8 FPaths::CollapseRelativeDirectories 결과다(PathViews.cpp 635–829). allCollapsed는
+// RequireAll의 성공 여부(UE 반환값), expected는 AllPossible 결과(UE bCollapseAllPossible=true)이며
+// 모두 축약되면 RequireAll 결과도 같다.
+TEST(PathUe58CollapseRelativeDirectoriesAndFailurePreserveInput) {
     SystemAllocator allocator;
     struct Case {
         const char* input;
+        bool allCollapsed;
         const char* expected;
     };
-    const Case valid[] = {{"", ""},           {"a/./b", "a/b"},      {"a/b/../c", "a/c"},
-                          {"/a/..", ""},      {"a/..", ""},          {"C:/a/..", "C:"},
-                          {"a.../x", "a..x"}, {"a/..foo", "a/..foo"}};
-    const char* invalid[] = {"../file", "/../file", "..hidden/file", "C:/..", "a/../../file"};
+    const Case cases[] = {
+        // UE 5.8 Tests/Misc/PathTests.h(TestCollapseRelativeDirectories) 표 전체.
+        {"..", false, ".."},
+        {"/..", false, "/.."},
+        {"./", true, ""},
+        {"./file.txt", true, "file.txt"},
+        {"/.", true, "/."},
+        {"Folder", true, "Folder"},
+        {"/Folder", true, "/Folder"},
+        {"C:/Folder", true, "C:/Folder"},
+        {"C:/Folder/..", true, "C:"},
+        {"C:/Folder/../", true, "C:/"},
+        {"C:/Folder/../file.txt", true, "C:/file.txt"},
+        {"Folder/..", true, ""},
+        {"Folder/../", true, ""},
+        {"Folder/../file.txt", true, "file.txt"},
+        {"/Folder/..", true, ""},
+        {"/Folder/../", true, "/"},
+        {"/Folder/../file.txt", true, "/file.txt"},
+        {"Folder/../..", false, ".."},
+        {"Folder/../../", false, "../"},
+        {"Folder/../../file.txt", false, "../file.txt"},
+        {"C:/..", false, "C:/.."},
+        {"C:/.", true, "C:/."},
+        {"C:/./", true, "C:/"},
+        {"C:/./file.txt", true, "C:/file.txt"},
+        {"C:/Folder1/../Folder2", true, "C:/Folder2"},
+        {"C:/Folder1/../Folder2/", true, "C:/Folder2/"},
+        {"C:/Folder1/../Folder2/file.txt", true, "C:/Folder2/file.txt"},
+        {"C:/Folder1/../Folder2/../..", false, "C:/.."},
+        {"C:/Folder1/../Folder2/../Folder3", true, "C:/Folder3"},
+        {"C:/Folder1/../Folder2/../Folder3/", true, "C:/Folder3/"},
+        {"C:/Folder1/../Folder2/../Folder3/file.txt", true, "C:/Folder3/file.txt"},
+        {"C:/Folder1/Folder2/../../Folder3", true, "C:/Folder3"},
+        {"C:/Folder1/Folder2/../../Folder3/", true, "C:/Folder3/"},
+        {"C:/Folder1/Folder2/../../Folder3/file.txt", true, "C:/Folder3/file.txt"},
+        {"C:/Folder1/Folder2/../../Folder3/../Folder4", true, "C:/Folder4"},
+        {"C:/Folder1/Folder2/../../Folder3/../Folder4/", true, "C:/Folder4/"},
+        {"C:/Folder1/Folder2/../../Folder3/../Folder4/file.txt", true, "C:/Folder4/file.txt"},
+        {"C:/Folder1/Folder2/../Folder3/../../Folder4", true, "C:/Folder4"},
+        {"C:/Folder1/Folder2/../Folder3/../../Folder4/", true, "C:/Folder4/"},
+        {"C:/Folder1/Folder2/../Folder3/../../Folder4/file.txt", true, "C:/Folder4/file.txt"},
+        {"C:/Folder1/Folder2/.././../Folder4", true, "C:/Folder4"},
+        {"C:/Folder1/Folder2/.././../Folder4/", true, "C:/Folder4/"},
+        {"C:/Folder1/Folder2/.././../Folder4/file.txt", true, "C:/Folder4/file.txt"},
+        {"C:/A/B/.././../C", true, "C:/C"},
+        {"C:/A/B/.././../C/", true, "C:/C/"},
+        {"C:/A/B/.././../C/file.txt", true, "C:/C/file.txt"},
+        {".svn", true, ".svn"},
+        {"/.svn", true, "/.svn"},
+        {"./Folder/.svn", true, "Folder/.svn"},
+        {"./.svn/../.svn", true, ".svn"},
+        {".svn/./.svn/.././../.svn", true, ".svn"},
+        {"C:/Folder1/./Folder2/..Folder3", true, "C:/Folder1/Folder2/..Folder3"},
+        {"C:/Folder1/./Folder2/..Folder3/Folder4", true, "C:/Folder1/Folder2/..Folder3/Folder4"},
+        {"C:/Folder1/./Folder2/..Folder3/..Folder4", true,
+         "C:/Folder1/Folder2/..Folder3/..Folder4"},
+        {"C:/Folder1/./Folder2/..Folder3/Folder4/../Folder5", true,
+         "C:/Folder1/Folder2/..Folder3/Folder5"},
+        {"C:/Folder1/..Folder2/Folder3/..Folder4/../Folder5", true,
+         "C:/Folder1/..Folder2/Folder3/Folder5"},
+        {"D:/Root/Engine//../..", true, "D:"},
+        {"D:/Root/Engine////////../..", true, "D:"},
+        {"D:/Root/Engine//../../", true, "D:/"},
+        {"D:/Root/Engine////////../../", true, "D:/"},
+        {"D:/Root//../..", false, "D:/.."},
+        {"D:/Root////////../..", false, "D:/.."},
+        {"//..", true, ""},
+        {"//Root/../..", true, ""},
+
+        // Rocks 추가: UE 5.6과 결과가 달라진 입력(5.6: 실패, "a..x", "a./", "a/bc", 실패,
+        // 실패, "a").
+        {"..hidden/file", true, "..hidden/file"},
+        {"a.../x", true, "a.../x"},
+        {"a..//", true, "a..//"},
+        {"a/b./c", true, "a/b./c"},
+        {"a/b:c/../d", true, "a/d"},
+        {"C:a/../b", true, "C:b"},
+        {"././a", true, "./a"},
+
+        // Rocks 추가: 볼륨과 선행 "./".
+        {"", true, ""},
+        {"Storage:/x/../y", true, "Storage:/y"},
+        {"C:D:a/../b", true, "C:b"},
+        {"C:./a", true, "C:a"},
+        {"C:../a", false, "C:../a"},
+        {"a/.././b", true, "./b"},
+
+        // Rocks 추가: 남긴 '..' 뒤의 축약과, 지울 범위가 이미 남긴 '..'에 걸치는 경우.
+        {"../a/./b/../c", false, "../a/c"},
+        {"../../Game/./Content", false, "../../Game/Content"},
+        {"../game/./assets/../level", false, "../game/level"},
+        {"C:/../a/../b", false, "C:/../b"},
+        {"C:/..//../x", false, "C:/..//../x"},
+
+        // Rocks 추가: 겹친 구분자에 대한 UE 레거시 결과(Path.h). 의미가 바뀌어도 UE와 같게 둔다.
+        {"C://..", true, "C:"},
+        {"C://../x", true, "C:x"},
+        {"C:/a/..//../x", true, "C:x"},
+        {"a/..//x", true, "/x"},
+        {"/a/..//x", true, "//x"},
+        {"..//../Game", false, "..Game"},
+    };
     const PathStyle styles[] = {PathStyle::Posix, PathStyle::Windows};
     for (PathStyle style : styles) {
-        for (const Case& sample : valid) {
-            auto value = Path::CollapseRelativeDirectories(allocator, sample.input, style);
-            REQUIRE(value);
-            CHECK(value.Value().View() == StringView(sample.expected));
-        }
-        for (const char* sample : invalid) {
+        for (const Case& sample : cases) {
             String source(allocator);
-            REQUIRE(source.TryAssign(sample));
+            REQUIRE(source.TryAssign(sample.input));
             const char* before = source.Data();
             const StringView view = source.View();
-            auto failed = Path::CollapseRelativeDirectories(allocator, source.View(), style);
-            CHECK(!failed && failed.Error() == ErrorCode::InvalidArgument);
+
+            auto possible = Path::CollapseRelativeDirectories(allocator, source.View(), style,
+                                                              PathCollapseMode::AllPossible);
+            REQUIRE(possible);
+            CHECK(possible.Value().View() == StringView(sample.expected));
+
+            auto required = Path::CollapseRelativeDirectories(allocator, source.View(), style);
+            if (sample.allCollapsed) {
+                REQUIRE(required);
+                CHECK(required.Value().View() == StringView(sample.expected));
+            } else {
+                CHECK(!required && required.Error() == ErrorCode::InvalidArgument);
+            }
+
             CHECK(source.Data() == before && source.View() == view);
         }
     }
+
+    auto unknown = Path::CollapseRelativeDirectories(allocator, "a/../b", PathStyle::Posix,
+                                                     static_cast<PathCollapseMode>(2));
+    CHECK(!unknown && unknown.Error() == ErrorCode::InvalidArgument);
     CHECK(allocator.Stats().liveAllocations == 0);
 }
