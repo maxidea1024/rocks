@@ -32,6 +32,7 @@ internal static class ThirdPartyPolicyTests
                         zstd.Licenses[1] is { File: "zstd-1.5.7/lib/dictBuilder/divsufsort.h", BinaryNoticeRequired: true },
                 "Zstd: the MIT divsufsort notice must be listed after the BSD-3-Clause license");
         });
+        RegisterModifications(suite);
         suite.Add("Policy.ThirdPartyPositiveFixture", () =>
         {
             using TemporaryDirectory temporary = new();
@@ -43,6 +44,61 @@ internal static class ThirdPartyPolicyTests
             NoFailures(PolicyChecks.PlatformBoundary(temporary.Root));
             Verify.That(PolicyChecks.NativeSources(temporary.Root).Any(path => path.EndsWith("Glue.c", StringComparison.Ordinal)),
                 "Rocks glue .c must remain an owned native source");
+        });
+        suite.Add("Policy.RepositoryDerivedSources", () => NoFailures(PolicyChecks.DerivedSources(options.Root)));
+        suite.Add("Policy.DerivedSourceControls", () =>
+        {
+            const string directory = "Core/Source/Runtime/Probe/Private/Derived/";
+            const string upstream = Upstream + "/fake.c";
+            const string derived = "// Derived from fake.c (Fake 1.0).\nvoid Kernel();\n";
+            static string Entry(string path, string sha) => $"{{ \"path\": \"{path}\", \"sha256\": \"{sha}\" }}";
+            static string Record(string derivations) => $"{{ \"schema\": 1, \"derivations\": [ {derivations} ] }}";
+            static string Derivation(string file, string entries) => $"{{ \"file\": \"{file}\", \"upstream\": [ {entries} ] }}";
+            using TemporaryDirectory temporary = new();
+            WriteFixture(temporary);
+            string sha = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(temporary.FilePath(upstream))));
+            string valid = Record(Derivation("Kernel.cpp", Entry(upstream, sha)));
+            temporary.Write(directory + "Kernel.cpp", derived);
+            temporary.Write(directory + PolicyChecks.DerivationRecordName, valid);
+            // 하위 디렉터리의 파생 파일과 upstream 여러 개, 다른 디렉터리의 두 번째 기록도 받는다.
+            string Hash(string path) => Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(temporary.FilePath(path))));
+            temporary.Write("Engine/Source/Runtime/Other/Private/Sub/Both.cpp", "// fake.h, LICENSE\n");
+            temporary.Write("Engine/Source/Runtime/Other/Private/" + PolicyChecks.DerivationRecordName,
+                Record(Derivation("Sub/Both.cpp", Entry(Upstream + "/fake.h", Hash(Upstream + "/fake.h")) + ", " +
+                    Entry(Upstream + "/LICENSE", Hash(Upstream + "/LICENSE")))));
+            NoFailures(PolicyChecks.DerivedSources(temporary.Root));
+
+            void ExpectOne(string label, string record, Action? inject = null, Action? restore = null)
+            {
+                temporary.Write(directory + PolicyChecks.DerivationRecordName, record);
+                inject?.Invoke();
+                var failures = PolicyChecks.DerivedSources(temporary.Root);
+                Verify.That(failures.Count == 1 && failures[0].Rule == "derived-source",
+                    $"derived source defect escaped audit: {label}\n{string.Join('\n', failures)}");
+                restore?.Invoke();
+                temporary.Write(directory + PolicyChecks.DerivationRecordName, valid);
+            }
+
+            string fakeSource = File.ReadAllText(temporary.FilePath(upstream));
+            ExpectOne("upstream changed", valid, () => File.AppendAllText(temporary.FilePath(upstream), " "),
+                () => temporary.Write(upstream, fakeSource));
+            ExpectOne("derived file does not name its upstream", valid, () => temporary.Write(directory + "Kernel.cpp", "void Kernel();\n"),
+                () => temporary.Write(directory + "Kernel.cpp", derived));
+            ExpectOne("uppercase sha", Record(Derivation("Kernel.cpp", Entry(upstream, sha.ToUpperInvariant()))));
+            ExpectOne("upstream outside third-party", Record(Derivation("Kernel.cpp", Entry(directory + "Kernel.cpp", sha))));
+            ExpectOne("upstream path escapes", Record(Derivation("Kernel.cpp", Entry(Upstream + "/../fake-1.0/fake.c", sha))));
+            ExpectOne("upstream missing", Record(Derivation("Kernel.cpp", Entry(Upstream + "/missing.c", sha))));
+            ExpectOne("derived file missing", Record(Derivation("Missing.cpp", Entry(upstream, sha))));
+            ExpectOne("derived path escapes", Record(Derivation("../Kernel.cpp", Entry(upstream, sha))));
+            ExpectOne("duplicate derived file", Record(Derivation("Kernel.cpp", Entry(upstream, sha)) + ", " +
+                Derivation("Kernel.cpp", Entry(upstream, sha))));
+            ExpectOne("empty upstream", Record(Derivation("Kernel.cpp", "")));
+            ExpectOne("unknown entry field", Record(Derivation("Kernel.cpp", $"{{ \"path\": \"{upstream}\", \"sha256\": \"{sha}\", \"x\": 1 }}")));
+            ExpectOne("unknown derivation field", Record($"{{ \"file\": \"Kernel.cpp\", \"upstream\": [ {Entry(upstream, sha)} ], \"note\": \"\" }}"));
+            ExpectOne("unknown record field", $"{{ \"schema\": 1, \"derivations\": [ {Derivation("Kernel.cpp", Entry(upstream, sha))} ], \"x\": 0 }}");
+            ExpectOne("schema 2", $"{{ \"schema\": 2, \"derivations\": [ {Derivation("Kernel.cpp", Entry(upstream, sha))} ] }}");
+            ExpectOne("no derivations", "{ \"schema\": 1, \"derivations\": [] }");
+            ExpectOne("invalid JSON", "{");
         });
         suite.Add("Policy.ThirdPartyNegativeControls", () =>
         {
@@ -192,6 +248,9 @@ internal static class ThirdPartyPolicyTests
                      {
                          ("translation unit in data library", "\"translationUnits\": []", "\"translationUnits\": [ \"fakedata-1.0/table.txt\" ]"),
                          ("define in data library", "\"defines\": []", "\"defines\": [ \"X=1\" ]"),
+                         ("linkTimeOptimization in data library", "\"kind\": \"data\"", "\"kind\": \"data\", \"linkTimeOptimization\": false"),
+                         ("sanitizerInstrumentation in data library", "\"kind\": \"data\"",
+                          "\"kind\": \"data\", \"sanitizerInstrumentation\": false"),
                          ("unknown kind", "\"kind\": \"data\"", "\"kind\": \"binary\""),
                          ("invalid embedding module", "\"Core\"", "\"Core Module\""),
                          ("licenseSource without https", "https://example.invalid/license.txt", "http://example.invalid/license.txt"),
@@ -359,6 +418,144 @@ internal static class ThirdPartyPolicyTests
                 new { file = cFile, arguments = new[] { "clang-cl", "/W4", "/WX", "/clang:-std=c17", "/c", "/TP", cFile } }
             }));
             Verify.That(PolicyChecks.CompilationDatabase(database).Count != 0, "C entry compiled as C++ accepted");
+        });
+    }
+
+    // ---- 추적 가능한 수정(modifications·patch)과 아키텍처별 정의·라이브러리 컴파일 인자 ----
+
+    private const string PatchedLine = "int FakePatched(void) { return 2; }";
+    private const string AddedHeader = "#define FAKE_GENERATED 1\n";
+
+    // fake.c 끝에 한 줄을 더하고 upstream에 없던 generated.h를 추가한 fixture다. patch는 git diff 형식이다.
+    private static string FixturePatch()
+    {
+        int lines = FakeSource.Count(value => value == '\n');
+        return $"diff --git a/fake.c b/fake.c\nindex 1111111..2222222 100644\n--- a/fake.c\n+++ b/fake.c\n" +
+               $"@@ -{lines},0 +{lines + 1} @@\n+{PatchedLine}\n" +
+               "diff --git a/generated.h b/generated.h\nnew file mode 100644\nindex 0000000..3333333\n--- /dev/null\n" +
+               "+++ b/generated.h\n@@ -0,0 +1 @@\n+#define FAKE_GENERATED 1\n";
+    }
+
+    private static string ModificationFields(string fakeUpstreamSha) =>
+        "\"modifications\": [" +
+        $"{{\"file\": \"fake.c\", \"upstreamSha256\": \"{fakeUpstreamSha}\", \"reason\": \"fixture warning fix\"}}, " +
+        "{\"file\": \"generated.h\", \"upstreamSha256\": null, \"reason\": \"pre-generated header\"}], \"patch\": \"Rocks.patch\", ";
+
+    internal static void WriteModifiedFixture(TemporaryDirectory fixture, string? patch = null, string? upstreamSha = null)
+    {
+        WriteFixture(fixture);
+        fixture.Write(Upstream + "/fake.c", FakeSource + PatchedLine + "\n");
+        fixture.Write(Upstream + "/generated.h", AddedHeader);
+        fixture.Write(Library + "/Rocks.patch", patch ?? FixturePatch());
+        WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":", ModificationFields(upstreamSha ?? Sha(FakeSource)) + "\"notes\":"));
+    }
+
+    internal static void RegisterModifications(TestSuite suite)
+    {
+        suite.Add("Policy.ThirdPartyModificationsReverseToUpstream", () =>
+        {
+            using (TemporaryDirectory fixture = new())
+            {
+                WriteModifiedFixture(fixture);
+                NoFailures(PolicyChecks.ThirdParty(fixture.Root));
+                var manifest = ThirdPartyManifest.Read(fixture.FilePath(Library));
+                Verify.That(manifest.Patch == "Rocks.patch" && manifest.Modifications.Count == 2 &&
+                            manifest.Modifications[1] is { File: "generated.h", UpstreamSha256: null }, "modifications parsed");
+            }
+
+            void Expect(string label, Action<TemporaryDirectory> inject)
+            {
+                using TemporaryDirectory fixture = new();
+                WriteModifiedFixture(fixture);
+                inject(fixture);
+                Verify.That(PolicyChecks.ThirdParty(fixture.Root).Count != 0, "modification defect escaped audit: " + label);
+            }
+
+            // 현재 파일만 더 바꾸고 files 해시를 맞춘다: patch 역적용만이 잡아야 한다.
+            Expect("extra change outside the patch", fixture =>
+            {
+                fixture.Write(Upstream + "/fake.c", "// extra\n" + FakeSource + PatchedLine + "\n");
+                WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":", ModificationFields(Sha(FakeSource)) + "\"notes\":"));
+            });
+            Expect("wrong upstream hash", fixture =>
+                WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":", ModificationFields(new string('a', 64)) + "\"notes\":")));
+            Expect("patch touches an unlisted file", fixture =>
+                fixture.Write(Library + "/Rocks.patch", FixturePatch() +
+                    "diff --git a/fake.h b/fake.h\nindex 1..2 100644\n--- a/fake.h\n+++ b/fake.h\n@@ -1 +1 @@\n-#pragma once\n+#pragma once\n"));
+            Expect("added file content differs", fixture => fixture.Write(Upstream + "/generated.h", "#define FAKE_GENERATED 2\n"));
+            Expect("patch file missing", fixture => File.Delete(fixture.FilePath(Library + "/Rocks.patch")));
+            Expect("modifications without patch", fixture =>
+                WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":",
+                    $"\"modifications\": [{{\"file\": \"fake.c\", \"upstreamSha256\": \"{Sha(FakeSource)}\", \"reason\": \"x\"}}], \"notes\":")));
+            Expect("CRLF patch", fixture => fixture.Write(Library + "/Rocks.patch", FixturePatch().Replace("\n", "\r\n", StringComparison.Ordinal)));
+        });
+        suite.Add("Policy.ThirdPartyPatchFinalNewline", () =>
+        {
+            // 원본 "a\nb"(끝 줄바꿈 없음)에 줄바꿈만 더한 수정을 거꾸로 적용하면 원본 byte가 그대로 나와야 한다.
+            string patch = "diff --git a/x.h b/x.h\nindex 1..2 100644\n--- a/x.h\n+++ b/x.h\n@@ -1,2 +1,2 @@\n a\n-b\n" +
+                           "\\ No newline at end of file\n+b\n";
+            ThirdPartyPatch.FilePatch file = ThirdPartyPatch.Parse(patch).Single();
+            byte[]? original = ThirdPartyPatch.Reverse(file, Encoding.UTF8.GetBytes("a\nb\n"));
+            Verify.That(original is not null && Encoding.UTF8.GetString(original) == "a\nb", "missing final newline restored");
+            foreach (string mismatch in new[] { "a\nb", "a\nc\n", "a\n" })
+            {
+                try
+                {
+                    ThirdPartyPatch.Reverse(file, Encoding.UTF8.GetBytes(mismatch));
+                    throw new InvalidOperationException("mismatching file reversed: " + mismatch.Replace("\n", "\\n", StringComparison.Ordinal));
+                }
+                catch (FormatException)
+                {
+                }
+            }
+        });
+        suite.Add("Policy.ThirdPartyArchitectureDefinesAndCompileArguments", () =>
+        {
+            using (TemporaryDirectory fixture = new())
+            {
+                WriteFixture(fixture);
+                WriteManifest(fixture, manifest => Replace(Replace(manifest, "\"Windows\": [", "\"Android\": [\"FAKE_ANDROID\"], \"Android.X64\": [\"FAKE_X64\"], \"Android.Arm64\": [\"FAKE_ARM64\"], \"Windows\": ["),
+                    "\"notes\":", "\"compileArguments\": [\"-fwrapv\", \"-fno-strict-aliasing\"], \"notes\":"));
+                NoFailures(PolicyChecks.ThirdParty(fixture.Root));
+                var manifest = ThirdPartyManifest.Read(fixture.FilePath(Library));
+                Verify.That(manifest.DefinesFor("Android", "X64").SequenceEqual(["FAKE_CONFIG=1", "FAKE_ANDROID", "FAKE_X64"]) &&
+                            manifest.DefinesFor("Android", "Arm64").SequenceEqual(["FAKE_CONFIG=1", "FAKE_ANDROID", "FAKE_ARM64"]) &&
+                            manifest.DefinesFor("Windows", "X64").SequenceEqual(["FAKE_CONFIG=1", "FAKE_WINDOWS"]), "platform·architecture defines merged");
+                Verify.That(manifest.CompileArguments.SequenceEqual(["-fwrapv", "-fno-strict-aliasing"]), "compile arguments parsed");
+                Verify.That(manifest.LinkTimeOptimization && manifest.SanitizerInstrumentation, "optional bool fields default to true when omitted");
+            }
+
+            using (TemporaryDirectory fixture = new())
+            {
+                WriteFixture(fixture);
+                WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":",
+                    "\"compileArguments\": [\"-fno-strict-aliasing\", \"-fno-strict-overflow\"], \"linkTimeOptimization\": false, " +
+                    "\"sanitizerInstrumentation\": false, \"notes\":"));
+                NoFailures(PolicyChecks.ThirdParty(fixture.Root));
+                var manifest = ThirdPartyManifest.Read(fixture.FilePath(Library));
+                Verify.That(manifest.CompileArguments.SequenceEqual(["-fno-strict-aliasing", "-fno-strict-overflow"]) &&
+                            !manifest.LinkTimeOptimization && !manifest.SanitizerInstrumentation,
+                    "-fno-strict-overflow, linkTimeOptimization false and sanitizerInstrumentation false parsed");
+            }
+
+            // clang은 -fno-strict-overflow를 -fwrapv로 바꾸므로 둘을 함께 주면 하나가 unused 경고(-Werror)가 된다.
+            ExpectFailure("-fno-strict-overflow together with -fwrapv", fixture =>
+                WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":", "\"compileArguments\": [\"-fno-strict-overflow\", \"-fwrapv\"], \"notes\":")));
+            // 기본값(true)을 적는 것은 의미가 없어 받지 않는다. 문자열 "false" 같은 다른 형식도 거부한다.
+            ExpectFailure("linkTimeOptimization true", fixture =>
+                WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":", "\"linkTimeOptimization\": true, \"notes\":")));
+            ExpectFailure("linkTimeOptimization string", fixture =>
+                WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":", "\"linkTimeOptimization\": \"false\", \"notes\":")));
+            ExpectFailure("sanitizerInstrumentation true", fixture =>
+                WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":", "\"sanitizerInstrumentation\": true, \"notes\":")));
+            ExpectFailure("unknown architecture key", fixture =>
+                WriteManifest(fixture, manifest => Replace(manifest, "\"Windows\": [", "\"Android.X86\": [\"FAKE_X86\"], \"Windows\": [")));
+            ExpectFailure("architecture define repeats the platform define", fixture =>
+                WriteManifest(fixture, manifest => Replace(manifest, "\"Windows\": [", "\"Android\": [\"FAKE_A=1\"], \"Android.X64\": [\"FAKE_A=2\"], \"Windows\": [")));
+            ExpectFailure("disallowed compile argument", fixture =>
+                WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":", "\"compileArguments\": [\"-Wno-unused-function\"], \"notes\":")));
+            ExpectFailure("duplicate compile argument", fixture =>
+                WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":", "\"compileArguments\": [\"-fwrapv\", \"-fwrapv\"], \"notes\":")));
         });
     }
 

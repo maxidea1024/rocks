@@ -26,4 +26,21 @@ public static class NativeCompileProfile
 
         return toolchain.CompileArguments.Concat(ActionGraph.CompileFlags(toolchain, configuration, optimization, language)).ToArray();
     }
+
+    /// <summary>
+    /// 모듈 하나의 compile 프로필이다. 모듈의 최적화 재정의를 따르고, 모듈이 sanitizer 계측을 끄면
+    /// (<see cref="NativeModuleInput.SanitizerInstrumentation"/>) 계측 인자를 뺀다. native compile(ActionGraph)과 AST 생성
+    /// (MetadataRunner)이 같은 인자를 쓰도록 둘 다 이 함수를 거친다.
+    /// </summary>
+    public static IReadOnlyList<string> ModuleArguments(NativeToolchain toolchain, NativeConfiguration configuration,
+        NativeModuleInput module, NativeLanguage language = NativeLanguage.Cpp)
+    {
+        IReadOnlyList<string> profile = Arguments(toolchain, configuration, module.Optimization, language);
+        return module.SanitizerInstrumentation ? profile : profile.Where(argument => !IsSanitizerArgument(argument)).ToArray();
+    }
+
+    /// <summary>sanitizer 계측 인자인가(<c>-fsanitize</c>·<c>/fsanitize</c>로 시작하는 모든 철자, 예: <c>-fsanitize=address</c>,
+    /// <c>-fsanitize-address-use-after-scope</c>).</summary>
+    public static bool IsSanitizerArgument(string argument) =>
+        argument.StartsWith("-fsanitize", StringComparison.Ordinal) || argument.StartsWith("/fsanitize", StringComparison.Ordinal);
 }

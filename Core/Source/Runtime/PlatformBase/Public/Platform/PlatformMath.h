@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Base/Compiler.h>
+
 #include <Platform/Math/ClangPlatformMath.h>
 #include <Platform/Math/GenericPlatformMath.h>
 #include <Platform/Math/NeonPlatformMath.h>
@@ -22,12 +24,12 @@ namespace rocks::platform {
 //   NaN 여부만 같고 부호·payload는 다를 수 있다). x64 baseline에는 FMA 명령이 없어 true다.
 //   빌드는 -ffp-contract=off로 compiler의 FMA 축약을 금지하지만, ARM64는 실기기로 확인하기
 //   전까지 false로 두며 허용 오차로 비교한다.
-#if defined(_M_X64) || defined(__x86_64__)
+#if ROCKS_ARCH_X64
 using PlatformMath = SsePlatformMath<ClangPlatformMath>;
 namespace simd = sse;
 inline constexpr const char* MathBackendName = "x64-SSE2";
 inline constexpr bool ScalarSimdBitExact = true;
-#elif defined(_M_ARM64) || defined(__aarch64__)
+#elif ROCKS_ARCH_ARM64
 using PlatformMath = NeonPlatformMath<ClangPlatformMath>;
 namespace simd = neon;
 inline constexpr const char* MathBackendName = "arm64-NEON";

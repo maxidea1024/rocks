@@ -4,6 +4,31 @@ namespace Rocks.Build;
 public enum NativePlatform { Windows, MacOS, Android }
 
 /// <summary>
+/// 대상 CPU 아키텍처다. 컴파일러가 보고한 실제 대상 triple(<see cref="NativeToolchain.TargetTriple"/>)에서 정한다.
+/// 규칙은 <c>BuildContext.Architecture</c>로 아키텍처별 소스·정의를 고른다(예: 외부 라이브러리의 SIMD 경로 정의).
+/// </summary>
+public enum NativeArchitecture { X64, Arm64 }
+
+public static class NativeArchitectures
+{
+    /// <summary>
+    /// 대상 triple의 첫 조각으로 아키텍처를 정한다. <c>x86_64</c>·<c>amd64</c>는 X64, <c>aarch64</c>·<c>arm64</c>(<c>arm64e</c> 포함)는
+    /// Arm64다. 빈 값이나 지원하지 않는 아키텍처(32 bit 포함)는 <see cref="ArgumentException"/>이다.
+    /// </summary>
+    public static NativeArchitecture FromTriple(string triple)
+    {
+        string first = triple.Split('-')[0];
+        return first switch
+        {
+            "x86_64" or "amd64" => NativeArchitecture.X64,
+            "aarch64" or "arm64" or "arm64e" => NativeArchitecture.Arm64,
+            _ => throw new ArgumentException($"Unsupported target architecture in triple '{triple}' (Rocks supports x64 and ARM64).",
+                nameof(triple))
+        };
+    }
+}
+
+/// <summary>
 /// 빌드 구성이다(UE5.8 Debug·Development·Shipping 대응).
 /// <list type="bullet">
 /// <item>Debug: 최적화 없음, 디버그 CRT(Windows /MDd), 디버그 정보. 단계 실행·변수 확인용.</item>
@@ -32,6 +57,18 @@ public static class NativeConfigurations
         NativeConfiguration.Development => "ROCKS_BUILD_DEVELOPMENT=1",
         NativeConfiguration.Release => "ROCKS_BUILD_RELEASE=1",
         _ => throw new ArgumentException($"Invalid native configuration: {configuration}")
+    };
+
+    /// <summary>
+    /// 대상 OS의 매크로 정의(<c>NAME=1</c>)다. <c>Base/Compiler.h</c>가 정확히 하나만 1인지, 컴파일 대상과 맞는지
+    /// 검증하므로 Core 헤더를 컴파일하는 모든 경로(일반 컴파일·MetaCompiler 검사 시험)가 같은 값을 넘긴다.
+    /// </summary>
+    public static string PlatformMacro(NativePlatform platform) => platform switch
+    {
+        NativePlatform.Windows => "ROCKS_PLATFORM_WINDOWS=1",
+        NativePlatform.MacOS => "ROCKS_PLATFORM_MAC=1",
+        NativePlatform.Android => "ROCKS_PLATFORM_ANDROID=1",
+        _ => throw new ArgumentException($"Invalid native platform: {platform}")
     };
 }
 
@@ -94,6 +131,9 @@ public sealed record NativeToolchain
     // 예: "x86_64-pc-windows-msvc19.29.30159", "arm64-apple-macosx13.0.0", "aarch64-unknown-linux-android26".
     public string TargetTriple { get; init; } = "";
 
+    // 대상 아키텍처다(TargetTriple에서 정한다). discovery를 거치지 않아 TargetTriple이 빈 툴체인은 ArgumentException이다.
+    public NativeArchitecture Architecture => NativeArchitectures.FromTriple(TargetTriple);
+
     // 컴파일러 드라이버 바이너리 내용의 SHA-256(소문자 hex 64자)이다. 같은 버전 줄을 내는 다른 벤더 빌드를 구별한다.
     public string CompilerDigest { get; init; } = "";
 
@@ -151,6 +191,16 @@ public sealed record NativeModuleInput
 
     // 이 모듈 소스에만 적용하는 최적화 재정의다. dependency로 전파하지 않는다.
     public CodeOptimization Optimization { get; init; } = CodeOptimization.Default;
+
+    // false이면 Release에서도 이 모듈 소스를 ThinLTO bitcode로 만들지 않는다(최적화는 Optimization을 따른다). upstream이
+    // LTO 없이 검증한 외부 라이브러리(libsodium 등, ThirdParty.json linkTimeOptimization)에 쓴다. dependency로 전파하지
+    // 않으며 링크는 bitcode와 일반 object를 함께 받는다.
+    public bool LinkTimeOptimization { get; init; } = true;
+
+    // false이면 Asan 구성에서도 이 모듈 소스에 sanitizer 계측(-fsanitize=address)을 넣지 않는다. 계측한 모듈과 함께 링크되며
+    // runtime은 그대로다. sanitizer 계측을 지원하지 않는다고 밝힌 외부 라이브러리(libsodium, ThirdParty.json
+    // sanitizerInstrumentation)에 쓴다. dependency로 전파하지 않는다.
+    public bool SanitizerInstrumentation { get; init; } = true;
 
     // 리플렉션 메타데이터 헤더의 include 철자다(이 모듈의 public 또는 private include 디렉터리 기준,
     // Docs/Design/ReflectionFoundations.ko.md 1.1절). 비어 있지 않으면 ModuleDirectory가 필요하다.

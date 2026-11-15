@@ -20,8 +20,66 @@
 #error "Rocks는 C++23(concepts, if consteval)이 필요하다."
 #endif
 
-#if !defined(__x86_64__) && !defined(_M_X64) && !defined(__aarch64__) && !defined(_M_ARM64)
+// 대상 CPU 아키텍처 매크로다. 둘 중 정확히 하나가 1이다. 컴파일러가 정하는 원시 매크로
+// (__x86_64__·_M_X64·__aarch64__·_M_ARM64 등)는 이 파일에서만 쓴다. 다른 코드는 전처리기
+// 분기에 ROCKS_ARCH_*를, 함수 안에서는 if constexpr로 rocks::IsX64·IsArm64를 쓴다.
+// 주의: 이 헤더가 정의하므로 쓰는 파일은 그보다 앞에 #include <Base/Compiler.h>를 둔다(정의
+// 전에 쓰면 경고 없이 0이다). #ifdef·defined()로 묻지 않는다(항상 정의된다). 정책 검사
+// target-macro·target-macro-order·target-macro-defined가 확인한다.
+//
+// 사용 예:
+//   #if ROCKS_ARCH_X64
+//   #include <immintrin.h>
+//   #endif
+#if defined(__x86_64__) || defined(_M_X64)
+#define ROCKS_ARCH_X64 1
+#define ROCKS_ARCH_ARM64 0
+#elif defined(__aarch64__) || defined(_M_ARM64)
+#define ROCKS_ARCH_X64 0
+#define ROCKS_ARCH_ARM64 1
+#else
 #error "Rocks는 64-bit x64 또는 ARM64만 지원한다."
+#endif
+
+// 대상 OS 매크로다. 빌드 시스템(Rocks.Build)이 정확히 하나를 1로 정의한다(ROCKS_PLATFORM_WINDOWS·
+// ROCKS_PLATFORM_MAC·ROCKS_PLATFORM_ANDROID). 정의되지 않은 매크로는 0으로 본다. 합이 1이 아니거나
+// 컴파일러가 정하는 대상(_WIN32·__APPLE__·__ANDROID__)과 어긋나면 빌드 오류다.
+// - OS API를 쓰는 분기(#if ROCKS_PLATFORM_*)는 native backend 디렉터리
+//   (PlatformBase/Private/<플랫폼> 등)에만 둔다(정책 검사 platform-boundary). OS별 구현은
+//   디렉터리로 나누는 것이 기본이다.
+// - 테스트·공통 코드의 플랫폼별 기대값은 if constexpr로 rocks::IsWindows·IsMac·IsAndroid를 쓴다.
+// - 원시 OS 매크로(_WIN32·__APPLE__·__ANDROID__·__linux__ 등)는 이 파일에서만 쓴다.
+// - ROCKS_PLATFORM_MAC은 macOS 대상만이다. iOS 같은 다른 Apple 대상은 아직 지원하지 않아 거부한다.
+//
+// 사용 예:
+//   if constexpr (rocks::IsMac && rocks::IsArm64) {
+//       CHECK(features.armAes);   // Apple Silicon은 모두 AES 명령이 있다
+//   }
+#ifndef ROCKS_PLATFORM_WINDOWS
+#define ROCKS_PLATFORM_WINDOWS 0
+#endif
+
+#ifndef ROCKS_PLATFORM_MAC
+#define ROCKS_PLATFORM_MAC 0
+#endif
+
+#ifndef ROCKS_PLATFORM_ANDROID
+#define ROCKS_PLATFORM_ANDROID 0
+#endif
+
+#if (ROCKS_PLATFORM_WINDOWS != 0 && ROCKS_PLATFORM_WINDOWS != 1) ||                                \
+    (ROCKS_PLATFORM_MAC != 0 && ROCKS_PLATFORM_MAC != 1) ||                                        \
+    (ROCKS_PLATFORM_ANDROID != 0 && ROCKS_PLATFORM_ANDROID != 1) ||                                \
+    ROCKS_PLATFORM_WINDOWS + ROCKS_PLATFORM_MAC + ROCKS_PLATFORM_ANDROID != 1
+#error                                                                                             \
+    "ROCKS_PLATFORM_WINDOWS·ROCKS_PLATFORM_MAC·ROCKS_PLATFORM_ANDROID 중 정확히 하나가 1이어야 한다(Rocks.Build가 정의한다)."
+#endif
+
+#if (ROCKS_PLATFORM_WINDOWS && !defined(_WIN32)) ||                                                \
+    (ROCKS_PLATFORM_MAC &&                                                                         \
+     (!defined(__APPLE__) || !defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__))) ||          \
+    (ROCKS_PLATFORM_ANDROID && !defined(__ANDROID__))
+#error "ROCKS_PLATFORM_*가 컴파일 대상 OS와 다르다(ROCKS_PLATFORM_MAC은 macOS 대상만이다)."
 #endif
 
 // 빌드 구성 매크로다(UE5.8 UE_BUILD_DEBUG·UE_BUILD_DEVELOPMENT·UE_BUILD_SHIPPING 대응). 빌드
@@ -62,6 +120,19 @@
     "ROCKS_BUILD_DEBUG·ROCKS_BUILD_DEVELOPMENT·ROCKS_BUILD_RELEASE 중 정확히 하나가 1이어야 한다(Rocks.Build가 정의한다)."
 #endif
 
+// AddressSanitizer 계측 여부다. Asan 구성에서 계측하는 번역 단위만 1이다(계측을 끈 외부
+// 라이브러리는 0). 자체 할당기의 수동 poison(Core/Memory/AddressSanitizer.h)이 쓴다. 기능 선택에는
+// 쓰지 않는다.
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define ROCKS_ADDRESS_SANITIZER 1
+#endif
+#endif
+
+#ifndef ROCKS_ADDRESS_SANITIZER
+#define ROCKS_ADDRESS_SANITIZER 0
+#endif
+
 // 인라인하지 않는다. 드문 오류 경로·큰 진단 함수를 hot path 밖으로 뺄 때 쓴다.
 #define ROCKS_NOINLINE __attribute__((noinline))
 
@@ -94,22 +165,49 @@
 
 #define ROCKS_ENABLE_OPTIMIZATION _Pragma("clang optimize on")
 
+// AES 명령 경로를 함수 하나에만 켜는 target 속성이다(Docs/Design/Crypto.ko.md 5.3절). 전역 -maes·
+// -march 없이 이 속성을 붙인 함수만 AES·carry-less 곱셈 명령으로 컴파일한다.
+//   ROCKS_TARGET_X64_AES    AES-NI·PCLMULQDQ·AVX. libsodium aesni 원본과 같다. avx가 SSSE3·SSE4.1을
+//                           함께 켜고(_mm_shuffle_epi8) 속성 함수 안의 SSE 명령을 모두 VEX로
+//                           바꾼다. ROCKS_ARCH_X64에서만 정의한다.
+//   ROCKS_TARGET_ARM64_AES  NEON·AES(AESE·AESMC·PMULL)와 AESE·AESMC 융합 조율. libsodium armcrypto
+//                           원본의 crypto(SHA2까지 켠다)는 빼서 감지 조건과 같은 범위만 켠다.
+//                           ROCKS_ARCH_ARM64에서만 정의한다.
+// - PlatformBase CpuFeatures가 다음을 보고할 때만 부른다. 아니면 잘못된 명령 예외로 죽는다. x64:
+//   aes && pclmulqdq && avx(avx는 OS의 YMM 상태 저장 확인 포함), arm64: armAes && armPmull. 그래서
+//   이 속성 함수는 감지한 뒤 고른 커널 표를 거쳐서만 부른다.
+// - 속성이 없는 호출자로 inline된다고 기대하지 않는다(대상 기본 CPU가 기능을 이미 포함할 때만
+//   inline될 수 있다. 예: macOS arm64). 블록 하나가 아니라 버퍼 단위로 경계를 둔다.
+// - 다른 아키텍처에서는 정의하지 않으므로 쓰는 파일은 #if ROCKS_ARCH_*로 감싼다(잘못 쓰면 컴파일
+//   오류다).
+// - 정책 검사 target-intrinsics: 이 매크로와 AES·carry-less 곱셈 intrinsics는 Crypto/Private/Aes/
+//   에서만 쓴다. target-attribute: target 속성(__attribute__((target(...)))·#pragma clang attribute
+//   등)은 이 파일 밖에서 직접 쓰지 않는다.
+//
+// 사용 예(Crypto/Private/Aes/AesX64.cpp):
+//   #include <Base/Compiler.h>
+//   #if ROCKS_ARCH_X64
+//   #include <immintrin.h>
+//   ROCKS_TARGET_X64_AES static __m128i EncryptRound(__m128i block, __m128i key) noexcept {
+//       return _mm_aesenc_si128(block, key);
+//   }
+//   #endif
+#if ROCKS_ARCH_X64
+#define ROCKS_TARGET_X64_AES __attribute__((target("aes,avx,pclmul")))
+#elif ROCKS_ARCH_ARM64
+#define ROCKS_TARGET_ARM64_AES __attribute__((target("neon,aes,fuse-aes")))
+#endif
+
 namespace rocks {
 
-// 컴파일 대상 CPU 아키텍처다.
-inline constexpr bool IsX64 =
-#if defined(__x86_64__) || defined(_M_X64)
-    true;
-#else
-    false;
-#endif
+// 컴파일 대상 CPU 아키텍처다(위 ROCKS_ARCH_* 매크로와 같다).
+inline constexpr bool IsX64 = ROCKS_ARCH_X64 != 0;
+inline constexpr bool IsArm64 = ROCKS_ARCH_ARM64 != 0;
 
-inline constexpr bool IsArm64 =
-#if defined(__aarch64__) || defined(_M_ARM64)
-    true;
-#else
-    false;
-#endif
+// 컴파일 대상 OS다(위 ROCKS_PLATFORM_* 매크로와 같다). 함수 안에서는 if constexpr로 분기한다.
+inline constexpr bool IsWindows = ROCKS_PLATFORM_WINDOWS != 0;
+inline constexpr bool IsMac = ROCKS_PLATFORM_MAC != 0;
+inline constexpr bool IsAndroid = ROCKS_PLATFORM_ANDROID != 0;
 
 // 빌드 구성이다(위 ROCKS_BUILD_* 매크로와 같다). 함수 안에서는 if constexpr로 분기한다.
 inline constexpr bool IsDebugBuild = ROCKS_BUILD_DEBUG != 0;

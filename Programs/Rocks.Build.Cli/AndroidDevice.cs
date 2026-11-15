@@ -5,13 +5,18 @@ namespace Rocks.Build.Cli;
 /// <summary>
 /// adb로 Android 기기·에뮬레이터에서 테스트 실행 파일을 돌린다. 실행 파일은 /data/local/tmp 아래의
 /// 전용 디렉터리에 올리고, 보고서(JSON)를 host로 회수한다. 연결된 기기가 정확히 하나가 아니면
-/// ANDROID_SERIAL로 고르도록 adb가 실패를 알린다.
+/// ANDROID_SERIAL로 고르도록 adb가 실패를 알린다. 시험은 저장소 루트 기준 상대 경로로 data 라이브러리
+/// 파일(Wycheproof·JSONTestSuite·UCD 등)을 읽고 기기에서는 작업 디렉터리가 전용 디렉터리이므로, data
+/// 라이브러리 manifest의 원본 파일을 같은 상대 경로로 함께 올린다.
 /// </summary>
 internal static class AndroidDevice
 {
     private const string DeviceDirectory = "/data/local/tmp/rocks-test";
 
-    public static async Task<int> RunTestsAsync(string executable, string report, string? adb,
+    // adb push 한 번에 넘기는 파일 수다(Windows 명령줄 길이 제한 안에 머물게 한다).
+    private const int PushBatchFiles = 64;
+
+    public static async Task<int> RunTestsAsync(string root, string executable, string report, string? adb,
         IReadOnlyDictionary<string, string?> environment, CancellationToken cancellationToken)
     {
         string tool = adb ?? FindAdb() ?? throw new FileNotFoundException(
@@ -25,6 +30,17 @@ internal static class AndroidDevice
             new[] { "push", executable, deviceExecutable },
             new[] { "shell", "chmod 755 " + deviceExecutable },
         };
+        foreach (var directory in DataFiles(root).GroupBy(file => file[..file.LastIndexOf('/')], StringComparer.Ordinal)
+                     .OrderBy(group => group.Key, StringComparer.Ordinal))
+        {
+            string remote = DeviceDirectory + "/" + directory.Key;
+            steps.Add(["shell", "mkdir -p '" + remote + "'"]);
+            foreach (string[] batch in directory.Chunk(PushBatchFiles))
+            {
+                steps.Add(["push", .. batch.Select(file => Path.Combine(root, file)), remote + "/"]);
+            }
+        }
+
         foreach (string[] step in steps)
         {
             var prepared = await ProcessRunner.RunAsync(new(tool, step, Directory.GetCurrentDirectory(), environment,
@@ -60,6 +76,43 @@ internal static class AndroidDevice
         }
 
         return exit;
+    }
+
+    /// <summary>
+    /// 시험이 읽는 data 라이브러리(manifest <c>"kind": "data"</c>)의 manifest와 원본 파일의 저장소 상대 경로다. 원본은
+    /// manifest의 <c>files</c>를 그대로 쓰므로 정책 검사가 확인한 파일만 올린다. manifest가 없는 디렉터리는 건너뛰고, 읽을 수
+    /// 없는 manifest는 예외로 드러낸다.
+    /// </summary>
+    internal static IReadOnlyList<string> DataFiles(string root)
+    {
+        string thirdParty = Path.Combine(root, ThirdPartyManifest.ThirdPartyRoot);
+        if (!Directory.Exists(thirdParty))
+        {
+            return [];
+        }
+
+        List<string> files = [];
+        foreach (string library in Directory.EnumerateDirectories(thirdParty).Order(StringComparer.Ordinal))
+        {
+            if (!File.Exists(Path.Combine(library, "ThirdParty.json")))
+            {
+                continue;
+            }
+
+            ThirdPartyManifest manifest = ThirdPartyManifest.Read(library);
+            if (manifest.Kind != ThirdPartyKind.Data)
+            {
+                continue;
+            }
+
+            // 시험이 manifest로 파일 목록을 읽기도 하므로(JsonTests) manifest도 함께 올린다.
+            string libraryPrefix = $"{ThirdPartyManifest.ThirdPartyRoot}/{Path.GetFileName(library)}/";
+            files.Add(libraryPrefix + "ThirdParty.json");
+            string prefix = libraryPrefix + manifest.UpstreamDirectory + "/";
+            files.AddRange(manifest.Files.Keys.Order(StringComparer.Ordinal).Select(file => prefix + file));
+        }
+
+        return files;
     }
 
     private static string? FindAdb()

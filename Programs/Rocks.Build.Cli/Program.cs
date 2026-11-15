@@ -125,7 +125,7 @@ namespace Rocks.Build.Cli
                 Console.WriteLine(notice);
             }
 
-            var context = new BuildContext(root, output, toolchain.Platform, configuration);
+            var context = new BuildContext(root, output, toolchain.Platform, toolchain.Architecture, configuration);
             var rulesPath = options.GetValueOrDefault("rules", HostTool(root, "Rocks.Engine.Rules"));
             var rules = RuleLoader.Load(rulesPath, targetName, context);
             Directory.CreateDirectory(output);
@@ -242,7 +242,7 @@ namespace Rocks.Build.Cli
                         // 프로세스를 띄우는 harness(Fatal 음성 대조 등)와 self·meta 검사는 Android에서 아직
                         // 실행하지 않는다.
                         var deviceStart = System.Diagnostics.Stopwatch.GetTimestamp();
-                        int deviceExit = await AndroidDevice.RunTestsAsync(executable, report, options.GetValueOrDefault("adb"),
+                        int deviceExit = await AndroidDevice.RunTestsAsync(root, executable, report, options.GetValueOrDefault("adb"),
                             toolchain.Environment, cancellationToken);
                         evidence.RecordStep("foundation-android", [executable, "--seed", "7351", "--json", report], deviceExit,
                             System.Diagnostics.Stopwatch.GetElapsedTime(deviceStart), tests: true);
@@ -290,7 +290,10 @@ namespace Rocks.Build.Cli
 
                     var checks = new List<string[]> {
                         new[] { "self", "--root", root, "--json", Path.Combine(output, "tool-self-report.json") },
-                        new[] { "native", "--root", root, "--native-executable", executable, "--compiler", toolchain.CompilerPath, "--compile-commands", result.CompilationDatabasePath, "--json", Path.Combine(output, "tool-native-report.json") }
+                        // native 검사의 컴파일 시험(AlgorithmsCompilerTests 등)도 Core 헤더를 include하므로 구성·대상 OS 매크로를 받는다.
+                        new[] { "native", "--root", root, "--native-executable", executable, "--compiler", toolchain.CompilerPath, "--compile-commands", result.CompilationDatabasePath,
+                            "--clang-arg", "-D" + NativeConfigurations.BuildMacro(configuration), "--clang-arg", "-D" + NativeConfigurations.PlatformMacro(toolchain.Platform),
+                            "--json", Path.Combine(output, "tool-native-report.json") }
                     };
                     if (configuration == NativeConfiguration.Asan)
                     {
@@ -299,9 +302,11 @@ namespace Rocks.Build.Cli
 
                     if (plan.Generated.Count != 0)
                     {
-                        // 생성 헤더 검증 컴파일은 Core 헤더를 include하므로 이 구성의 매크로가 필요하다.
+                        // 생성 헤더 검증 컴파일은 Core 헤더를 include하므로 이 구성·대상 OS의 매크로가 필요하다.
                         checks.Add(["meta", "--root", root, "--compiler", toolchain.CompilerPath, "--metacompiler", HostTool(root, "Rocks.MetaCompiler"),
-                            "--clang-arg", "-D" + NativeConfigurations.BuildMacro(configuration), "--json", Path.Combine(output, "tool-meta-report.json")]);
+                            "--clang-arg", "-D" + NativeConfigurations.BuildMacro(configuration),
+                            "--clang-arg", "-D" + NativeConfigurations.PlatformMacro(toolchain.Platform),
+                            "--json", Path.Combine(output, "tool-meta-report.json")]);
                     }
 
                     foreach (var check in checks)

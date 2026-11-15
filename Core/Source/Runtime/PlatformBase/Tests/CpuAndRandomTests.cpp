@@ -1,5 +1,6 @@
 #include <Base/Compiler.h>
 #include <Platform/Cpu.h>
+#include <Platform/DataIndependentTiming.h>
 #include <Platform/SecureRandom.h>
 #include <TestSupport/Test.h>
 #include <stdio.h>
@@ -14,16 +15,51 @@ TEST(Platform_CpuFeaturesAreConsistent) {
     CHECK(&features == &platform::QueryCpuFeatures());
     if constexpr (IsArm64) {
         CHECK(features.neon && !features.avx && !features.sse42);
+        CHECK(!features.aes && !features.pclmulqdq && !features.sha);
+        // FEAT_PMULL은 FEAT_AES가 있어야 정의된다(Arm ARM). 반대 방향은 보장하지 않는다.
+        CHECK(!features.armPmull || features.armAes);
+        if constexpr (IsMac) {
+            // Apple Silicon은 모두 AES·PMULL·SHA2·DIT를 갖춘다. DIT 감지가 조용히 실패하면 암호
+            // 모듈의 DIT 범위가 아무 일도 하지 않으므로 여기서 잡는다.
+            CHECK(features.armAes && features.armPmull && features.armSha2 && features.armDit);
+        }
     } else {
         CHECK(!features.neon);
+        CHECK(!features.armAes && !features.armPmull && !features.armSha2 && !features.armDit &&
+              !features.armSb);
         // AVX2·FMA는 OS가 YMM 상태를 저장할 때만 true이므로 AVX 없이 켜질 수 없다.
         CHECK(!features.avx2 || features.avx);
         CHECK(!features.fma || features.avx);
     }
 
-    printf("  cpu: sse4.2=%d popcnt=%d avx=%d avx2=%d fma=%d bmi2=%d neon=%d\n", features.sse42,
-           features.popcnt, features.avx, features.avx2, features.fma, features.bmi2,
-           features.neon);
+    printf("  cpu: sse4.2=%d popcnt=%d avx=%d avx2=%d fma=%d bmi2=%d aes=%d pclmulqdq=%d sha=%d "
+           "neon=%d "
+           "armAes=%d armPmull=%d armSha2=%d armDit=%d armSb=%d\n",
+           features.sse42, features.popcnt, features.avx, features.avx2, features.fma,
+           features.bmi2, features.aes, features.pclmulqdq, features.sha, features.neon,
+           features.armAes, features.armPmull, features.armSha2, features.armDit, features.armSb);
+}
+
+TEST(Platform_DataIndependentTimingScope) {
+    // FEAT_DIT가 있으면 범위 안에서 켜지고 바깥 범위가 끝날 때 원래대로 돌아온다. 없으면 아무 일도
+    // 하지 않는다.
+    const bool supported = platform::QueryCpuFeatures().armDit;
+    const bool before = platform::IsDataIndependentTimingEnabled();
+    {
+        platform::DataIndependentTimingScope outer;
+        CHECK(platform::IsDataIndependentTimingEnabled() == supported);
+        {
+            platform::DataIndependentTimingScope inner;
+            CHECK(platform::IsDataIndependentTimingEnabled() == supported);
+        }
+
+        CHECK(platform::IsDataIndependentTimingEnabled() == supported);
+    }
+
+    CHECK(platform::IsDataIndependentTimingEnabled() == before);
+    if (!supported) {
+        CHECK(!platform::BeginDataIndependentTiming());
+    }
 }
 
 TEST(Platform_SecureRandomFillsBuffers) {

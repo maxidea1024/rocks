@@ -83,6 +83,63 @@ internal static class BuildConfigurationTests
             .Single(action => action.Kind == "Compile" && action.Module == "Engine").Identity;
         Check(!defaultIdentity.SequenceEqual(neverIdentity), "Optimization override must change the compile identity");
 
+        // LinkTimeOptimization=false(ThirdParty.json linkTimeOptimization): Release에서도 최적화는 하되 ThinLTO bitcode로
+        // 만들지 않는다. 다른 모듈에는 번지지 않는다.
+        NativeBuildRequest withoutLto = request with
+        {
+            Configuration = NativeConfiguration.Release,
+            Modules = request.Modules.Select(module => module.Name == "Engine" ? module with { LinkTimeOptimization = false } : module).ToArray()
+        };
+        var noLto = CompileArguments(withoutLto, "Engine");
+        Check(noLto.Contains(Optimized()) && !noLto.Contains("-flto=thin") && noLto.Contains(Define("NDEBUG")),
+            "LinkTimeOptimization=false in Release");
+        Check(CompileArguments(withoutLto, "Game").Contains("-flto=thin"), "LinkTimeOptimization=false leaked to another module");
+
+        // SanitizerInstrumentation=false(ThirdParty.json sanitizerInstrumentation): Asan에서 이 모듈만 계측 인자를 뺀다. 나머지
+        // Asan 프로필(최적화 끔, 구성 매크로)은 같다.
+        if (request.Toolchain.Platform != NativePlatform.Android)
+        {
+            NativeBuildRequest uninstrumented = request with
+            {
+                Configuration = NativeConfiguration.Asan,
+                Modules = request.Modules.Select(module => module.Name == "Engine" ? module with { SanitizerInstrumentation = false } : module).ToArray()
+            };
+            var plain = CompileArguments(uninstrumented, "Engine");
+            // 판정은 구현(NativeCompileProfile.IsSanitizerArgument)과 따로 "sanitize"가 든 모든 인자로 한다.
+            static bool Sanitizes(string argument) => argument.Contains("sanitize", StringComparison.OrdinalIgnoreCase);
+            Check(!plain.Any(Sanitizes) && plain.Contains(Unoptimized()) && plain.Contains(Define("ROCKS_BUILD_DEBUG=1")),
+                "SanitizerInstrumentation=false in Asan");
+            Check(CompileArguments(uninstrumented, "Game").Any(Sanitizes), "SanitizerInstrumentation=false leaked to another module");
+        }
+
+        // 모듈 인자(외부 라이브러리 compileArguments)는 프로필보다 앞에 붙는다. 프로필이 반대 인자를 가지면 라이브러리 인자가
+        // 소리 없이 덮이므로, 모든 구성·최적화·언어의 프로필에 허용 인자의 반대가 없어야 한다. 허용 목록이 늘면 이 표도 늘린다.
+        var inverses = new Dictionary<string, string[]>(StringComparer.Ordinal)
+        {
+            ["-fno-strict-aliasing"] = ["-fstrict-aliasing"],
+            ["-fno-strict-overflow"] = ["-fstrict-overflow", "-fno-wrapv", "-fno-wrapv-pointer"],
+            ["-fwrapv"] = ["-fno-wrapv", "-fstrict-overflow"]
+        };
+        Check(inverses.Keys.Order(StringComparer.Ordinal).SequenceEqual(ThirdPartyManifest.AllowedCompileArguments.Order(StringComparer.Ordinal)),
+            "every allowed third-party compile argument needs its inverse list here");
+        foreach (NativeConfiguration configuration in Enum.GetValues<NativeConfiguration>())
+        {
+            if (configuration == NativeConfiguration.Asan && request.Toolchain.Platform == NativePlatform.Android)
+            {
+                continue;
+            }
+
+            foreach (CodeOptimization optimization in Enum.GetValues<CodeOptimization>())
+            {
+                foreach (NativeLanguage language in Enum.GetValues<NativeLanguage>())
+                {
+                    var profile = NativeCompileProfile.Arguments(request.Toolchain, configuration, optimization, language);
+                    string? conflict = profile.FirstOrDefault(argument => inverses.Values.Any(list => list.Contains(argument, StringComparer.Ordinal)));
+                    Check(conflict is null, $"{configuration}/{optimization}/{language}: profile argument {conflict} would override a third-party compile argument");
+                }
+            }
+        }
+
         // 잘못된 입력: 구성 매크로 정의, 최적화·LTO 인자 직접 지정, 정의되지 않은 enum 값.
         var builder = new NativeBuildEngine();
         async Task Rejects(NativeBuildRequest input, string message, string? diagnostic = null)
@@ -108,16 +165,22 @@ internal static class BuildConfigurationTests
         {
             Modules = request.Modules.Select(module => module.Name == "Engine" ? change(module) : module).ToArray()
         };
-        await Rejects(WithEngineModule(module => module with { PrivateDefines = ["ROCKS_BUILD_RELEASE=1"] }), "module defined a build macro",
-            "reserved for the build configuration");
+        foreach (string define in new[] { "ROCKS_BUILD_RELEASE=1", "ROCKS_PLATFORM_WINDOWS=1", "ROCKS_ARCH_ARM64=1", "ROCKS_TARGET_X64_AES=" })
+        {
+            await Rejects(WithEngineModule(module => module with { PrivateDefines = [define] }), "module defined a reserved macro " + define,
+                "reserved for the build configuration");
+        }
+
         foreach (string argument in new[] { "-O", "-O3", "-Os", "-Ofast", "--optimize=2", "/O1", "/O2", "/Ox", "/Od", "/Ob2",
-                     "-flto", "-flto=full", "-fno-lto" })
+                     "-flto", "-flto=full", "-fno-lto", "-fsanitize=address", "-fsanitize=undefined", "-fno-sanitize=address",
+                     "/fsanitize=address" })
         {
             await Rejects(WithEngineModule(module => module with { AdditionalCompileArguments = [argument] }), "accepted " + argument,
                 "overrides owned output/policy");
         }
 
-        foreach (string argument in new[] { "-flto=thin", "-fno-lto", "/opt:lldlto=0", "-Wl,--lto-O0", "-Wl,--thinlto-jobs=1" })
+        foreach (string argument in new[] { "-flto=thin", "-fno-lto", "/opt:lldlto=0", "-Wl,--lto-O0", "-Wl,--thinlto-jobs=1",
+                     "-fsanitize=address" })
         {
             await Rejects(WithEngineModule(module => module with { AdditionalLinkArguments = [argument] }), "accepted link " + argument,
                 "overrides owned output/policy");

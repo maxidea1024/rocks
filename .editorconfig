@@ -47,3 +47,8 @@ indent_size = unset
 tab_width = unset
 insert_final_newline = unset
 trim_trailing_whitespace = unset
+
+# 추적 가능한 수정의 patch(Core/Source/ThirdParty/<Lib>/*.patch)는 빈 문맥 줄이 공백 하나라 줄 끝 공백을 지우면 깨진다.
+# 줄끝은 LF로 두고(검사가 CR을 거부한다) 공백 정리만 끈다.
+[Core/Source/ThirdParty/*/*.patch]
+trim_trailing_whitespace = false

@@ -238,6 +238,9 @@ private:
     template <typename>
     friend class MulticastDelegate;
 
+    // invokeIfAlive는 ExecuteIfBound(void 반환 전용)의 경로지만 표는 모든 Return에 만들어진다.
+    // 그래서 CallIfAlive는 반환값을 명시적으로 버린다(Result 같은 [[nodiscard]] 타입 반환 대상도
+    // 컴파일된다).
     struct Ops {
         Return (*invoke)(void* storage, Args&&... args) noexcept;
         bool (*invokeIfAlive)(void* storage, Args&&... args) noexcept;
@@ -257,7 +260,7 @@ private:
         }
 
         bool CallIfAlive(Args&&... args) noexcept {
-            function(Forward<Args>(args)...);
+            static_cast<void>(function(Forward<Args>(args)...));
             return true;
         }
 
@@ -283,7 +286,7 @@ private:
         }
 
         bool CallIfAlive(Args&&... args) noexcept {
-            callable(Forward<Args>(args)...);
+            static_cast<void>(callable(Forward<Args>(args)...));
             return true;
         }
 
@@ -324,7 +327,7 @@ private:
         }
 
         bool CallIfAlive(Args&&... args) noexcept {
-            (*callable)(Forward<Args>(args)...);
+            static_cast<void>((*callable)(Forward<Args>(args)...));
             return true;
         }
 
@@ -351,7 +354,7 @@ private:
         }
 
         bool CallIfAlive(Args&&... args) noexcept {
-            (object->*method)(Forward<Args>(args)...);
+            static_cast<void>((object->*method)(Forward<Args>(args)...));
             return true;
         }
 
@@ -391,7 +394,7 @@ private:
             if (!locked) {
                 return false;
             }
-            (locked.Get()->*method)(Forward<Args>(args)...);
+            static_cast<void>((locked.Get()->*method)(Forward<Args>(args)...));
             return true;
         }
 
@@ -428,7 +431,7 @@ private:
             if (!locked) {
                 return false;
             }
-            callable(Forward<Args>(args)...);
+            static_cast<void>(callable(Forward<Args>(args)...));
             return true;
         }
 

@@ -333,3 +333,13 @@ Rocks.Build에 Android 대상을 정식으로 추가했다(`--platform android`,
 - Windows 입력 pipe는 비차단(`PIPE_NOWAIT`) 동기 handle로 바꿨다. overlapped 쓰기를 시간 초과로 취소하면 자식이 이미 읽은 일부를 0바이트로 보고해 `WriteInput`의 쓴 양이 틀렸다.
 - 검증(Windows x64 clang-cl): 프로세스 시험 21건, Debug native 897, ASan native 897, 정책·형식 검사. 자식은 테스트 실행 파일을 `--process-probe`로 다시 띄운 probe다. Android x86_64 에뮬레이터(API 35) Debug는 894건 중 프로세스 21건을 포함해 889건이 통과했다. 실패 5건(Json·Unicode)은 저장소 시험 데이터 파일을 기기에 올리지 않아 생기며 이번 변경과 무관하다. macOS 구현은 로컬에서 빌드하지 않았으며 CI 결과로 확인한다. 첫 macOS CI(run 43372088377)에서 빌드와 프로세스 시험 20건이 통과했고, 1건(`Process_WaitTerminateCloseAndRestart`)은 스스로 끝난 자식의 `Terminate`가 실패했다. macOS는 zombie만 남은 프로세스 그룹에 신호를 보내면 ESRCH가 아니라 EPERM을 돌려주기 때문이며, 직접 자식이 끝난 뒤의 EPERM을 성공으로 보도록 고쳤다.
 - Android 실행에서 기존 `FileSystem_StandardDirectories`가 앱 디렉터리를 scratch 경로로 등록한 뒤 지워, 이후 `Temporary`가 없는 경로를 가리키는 것을 확인했다(등록은 프로세스 전역이며 되돌릴 수 없다). 프로세스 시험은 다른 PlatformBase 시험처럼 작업 디렉터리 기준 상대 이름을 쓰도록 바꿨다. 등록 시험의 정리 방식은 후속이다.
+
+## 2026-11-15 Crypto 모듈(C1–C4)
+
+libsodium 1.0.22-stable 기반 범용 암호 모듈 `Crypto`를 추가했다(설계: [Crypto](../Design/Crypto.ko.md), 세그먼트 형식: [CryptoSegmentFormat](../Design/CryptoSegmentFormat.ko.md)). 브랜치 `feature/crypto`.
+
+- C1 기반과 일회성: SecretArena 키 저장소, 키 타입·KeyBlob 직렬화·label 등록부, 난수·상수 시간 hex·base64, 해시·MAC·KDF·Argon2id, AEAD(XChaCha20·ChaCha20-IETF·AES-256-GCM·AEGIS), Ed25519·Ed25519ph, kx·sealed box, X-Wing·ML-KEM-768, macOS arm64 DIT.
+- C2 HW 전용 AES 경량 계층(libsodium aesni·armcrypto 파생, `Derivation.json`): AES-128-GCM, GCM 멀티파트, CTR(32·64·128 bit 카운터), AES-CMAC. 소프트웨어 AES는 없다.
+- C3 스트리밍: secretstream, 세그먼트 스트림(순차·임의 접근·병렬 writer), 고정 seed 변형 fuzz 시험. C4: KeyRing·공급자, AsyncCrypto(Task 모듈).
+- 정책 검사: target 속성·AES/SHA intrinsics 디렉터리 허용 목록, 시험 접근점·`ROCKS_TESTING`·libsodium 전역 설정 위치, 파생 소스 출처. Android 기기 runner가 data 라이브러리 파일을 올린다.
+- 검증(Windows x64 clang-cl): Debug native 1352, Asan·Release, Android x86_64·arm64 빌드, x86_64 에뮬레이터 1349, Wycheproof(AES-GCM·ChaCha·XChaCha·HMAC·HKDF·Ed25519·X25519·ML-KEM·AES-CMAC·secretstream). macOS arm64 CI(run 43686796858, macos-15)에서 `armAes·armPmull·armDit·armSb`가 모두 감지되고 arm64 AES 커널 스칼라 대조·자가 시험을 포함해 Debug·Asan·Release 각 1349건이 통과했다(Windows job도 통과). macOS의 DIT 범위 비용 측정(6.4절)은 아직이다.

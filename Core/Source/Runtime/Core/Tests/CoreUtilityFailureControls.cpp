@@ -1,5 +1,6 @@
 #include <Core/Containers/HashMap.h>
 #include <Core/Containers/SlotArray.h>
+#include <Core/Containers/Span.h>
 #include <Core/Containers/SparseArray.h>
 #include <Core/Delegate.h>
 #include <Core/Math/RandomStream.h>
@@ -50,6 +51,15 @@ int RunSharedPtrEmptyControl() noexcept {
     PrepareFatalTestProcess();
     SharedPtr<int> empty;
     return *empty;
+}
+
+// 길이를 검사했다고 가정한 Slice가 범위를 넘으면 잘라 내지 않고 Fatal로 드러낸다. 끝 + 1에서 0개를
+// 자르는 경계도 범위 밖이다.
+int RunSpanSliceOutOfBoundsControl() noexcept {
+    PrepareFatalTestProcess();
+    int values[4] = {1, 2, 3, 4};
+    const Span<int> view(values);
+    return view.Slice(5, 0).IsEmpty() ? 0 : 1;
 }
 
 int RunDelegateExecuteUnboundControl() noexcept {

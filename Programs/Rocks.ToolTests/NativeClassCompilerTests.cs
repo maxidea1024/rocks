@@ -5,7 +5,7 @@ namespace Rocks.ToolTests;
 // native 클래스 등록(Object/NativeClass.h)의 컴파일 시 계약을 실제 컴파일러로 확인한다(Docs/Design/ReflectionFoundations.ko.md
 // 9.1절 B8a): 손 Trace는 접근 지정과 무관하게 정확히 `void Trace(TraceVisitor&) const noexcept`여야 하고(다른 모양은 조용히
 // 건너뛰지 않고 컴파일 오류), 매크로를 빠뜨린 파생과 native도 리플렉션도 아닌 기반은 안내 static_assert로 멈춘다. 생성 헤더
-// 검증과 같이 구성 매크로가 필요하므로 meta 검사(--clang-arg로 ROCKS_BUILD_*를 받는다)에서 돈다.
+// 검증과 같이 구성·대상 OS 매크로가 필요하므로 meta 검사(--clang-arg로 ROCKS_BUILD_*·ROCKS_PLATFORM_*를 받는다)에서 돈다.
 internal static class NativeClassCompilerTests
 {
     public static void Register(TestSuite suite, Options options, IReadOnlyDictionary<string, string?> environment)

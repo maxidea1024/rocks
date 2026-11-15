@@ -151,10 +151,13 @@ internal static class InputValidation
                 {
                     throw new ArgumentException($"Module {module.Name}: invalid define '{define}'.");
                 }
-                // 구성 매크로는 빌드 시스템만 정의한다(모듈이 바꾸면 구성 판정이 모듈마다 달라진다).
-                if (name.StartsWith("ROCKS_BUILD_", StringComparison.Ordinal))
+                // 구성·대상 매크로는 빌드 시스템과 Base/Compiler.h만 정의한다(모듈이 바꾸면 구성·대상 판정이 모듈마다 달라지고,
+                // MetaCompiler가 프로필과 모듈 정의를 함께 받아 중복 오류를 낸다). 함수 단위 target 매크로(ROCKS_TARGET_*)도
+                // Compiler.h만 정의한다(정책 검사 target-intrinsics가 계열별로 가둔다).
+                if (name.StartsWith("ROCKS_BUILD_", StringComparison.Ordinal) || name.StartsWith("ROCKS_PLATFORM_", StringComparison.Ordinal) ||
+                    name.StartsWith("ROCKS_ARCH_", StringComparison.Ordinal) || name.StartsWith("ROCKS_TARGET_", StringComparison.Ordinal))
                 {
-                    throw new ArgumentException($"Module {module.Name}: define '{define}' is reserved for the build configuration.");
+                    throw new ArgumentException($"Module {module.Name}: define '{define}' is reserved for the build configuration and target.");
                 }
                 // 경로를 담은 define 값은 호스트마다 달라 도구 빌드 ID와 바이너리 신원을 호스트에 묶는다. 외부 파일은 선언 입력으로 둔다.
                 int equals = define.IndexOf('=');
@@ -191,6 +194,12 @@ internal static class InputValidation
         "-iwithsysroot", "-isysroot", "--sysroot=", "--sysroot", "-rpath", "-fmacro-prefix-map=", "-ffile-prefix-map=",
         "-fdebug-prefix-map=", "-fprofile-instr-use=", "-fprofile-use=", "/LIBPATH:", "-LIBPATH:", "/I", "/FI", "-include"
     ];
+
+    // sanitizer 계측·runtime은 구성(Asan)과 NativeModuleInput.SanitizerInstrumentation이 정한다. 모듈 인자로 켜거나 끄면
+    // 같은 실행 파일 안에서 계측과 runtime이 어긋난다. lower는 소문자로 바꾼 인자다.
+    private static bool IsSanitizerSetting(string lower) =>
+        lower.StartsWith("-fsanitize", StringComparison.Ordinal) || lower.StartsWith("-fno-sanitize", StringComparison.Ordinal) ||
+        lower.StartsWith("/fsanitize", StringComparison.Ordinal);
 
     private static bool MatchesCl(string argument, string[] exact, string[] prefixes)
     {
@@ -252,12 +261,13 @@ internal static class InputValidation
                 // 최적화 수준·LTO는 구성과 NativeModuleInput.Optimization이 정한다. 수준을 바꾸지 않는
                 // /Oy-(frame pointer 유지)·/Oi(intrinsic) 등은 허용한다.
                 OptimizationLevel.IsMatch(argument) || lower.StartsWith("-flto", StringComparison.Ordinal) ||
-                lower.StartsWith("-fno-lto", StringComparison.Ordinal);
+                lower.StartsWith("-fno-lto", StringComparison.Ordinal) || IsSanitizerSetting(lower);
         }
         else
         {
-            // link 단계에서 LTO를 끄거나 backend 최적화 수준을 바꾸는 인자도 구성이 정한다.
-            invalid |= lower.StartsWith("-flto", StringComparison.Ordinal) || lower.StartsWith("-fno-lto", StringComparison.Ordinal) ||
+            // link 단계에서 LTO를 끄거나 backend 최적화 수준을 바꾸는 인자도 구성이 정한다. sanitizer runtime도 구성이 고른다.
+            invalid |= IsSanitizerSetting(lower) ||
+                lower.StartsWith("-flto", StringComparison.Ordinal) || lower.StartsWith("-fno-lto", StringComparison.Ordinal) ||
                 lower.StartsWith("/opt:lldlto", StringComparison.Ordinal) || lower.StartsWith("/lldlto", StringComparison.Ordinal) ||
                 lower.StartsWith("-wl,--lto", StringComparison.Ordinal) || lower.StartsWith("-wl,--thinlto", StringComparison.Ordinal) ||
                 lower.StartsWith("-wl,-lto", StringComparison.Ordinal) || lower.StartsWith("--lto", StringComparison.Ordinal);

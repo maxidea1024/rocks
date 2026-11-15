@@ -1,7 +1,9 @@
 #pragma once
 
+#include <Base/Compiler.h>
+
 // x64 전용 구현이다. 다른 CPU에서 단독 include하면 아무 선언도 만들지 않는다.
-#if defined(_M_X64) || defined(__x86_64__)
+#if ROCKS_ARCH_X64
 
 #include <Base/Types.h>
 

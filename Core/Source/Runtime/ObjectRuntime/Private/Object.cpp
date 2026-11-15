@@ -62,6 +62,8 @@ namespace {
         platform::Fatal("Object::GetType failed: ShuttingDown");
     case ErrorCode::TypeMismatch:
         platform::Fatal("Object::GetType failed: TypeMismatch");
+    case ErrorCode::AuthenticationFailed:
+        platform::Fatal("Object::GetType failed: AuthenticationFailed");
     case ErrorCode::None:
         platform::Fatal("Object::GetType failed: unexpected success code");
     }
@@ -103,6 +105,8 @@ namespace {
         platform::Fatal("Object::IsDestroyRequested failed: ShuttingDown");
     case ErrorCode::TypeMismatch:
         platform::Fatal("Object::IsDestroyRequested failed: TypeMismatch");
+    case ErrorCode::AuthenticationFailed:
+        platform::Fatal("Object::IsDestroyRequested failed: AuthenticationFailed");
     case ErrorCode::None:
         platform::Fatal("Object::IsDestroyRequested failed: unexpected success code");
     }

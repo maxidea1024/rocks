@@ -33,7 +33,7 @@ internal static class PlatformPrivateHeaderTests
 
         // 실제 Mac rule을 평가하지만 OS API는 사용하지 않는다. 따라서 Windows에서도 의존 추적을
         // 검증할 수 있으며, 이것이 macOS 컴파일이나 실행을 검증했다는 뜻은 아니다.
-        var context = new BuildContext(root, output, NativePlatform.MacOS, NativeConfiguration.Debug);
+        var context = new BuildContext(root, output, NativePlatform.MacOS, NativeArchitecture.Arm64, NativeConfiguration.Debug);
         NativeModuleInput platform = new global::PlatformBase().Configure(context);
         NativeModuleInput baseModule = new global::Base().Configure(context);
         Require(platform.PrivateIncludeDirectories.Contains(Path.GetFullPath(apple), StringComparer.OrdinalIgnoreCase),

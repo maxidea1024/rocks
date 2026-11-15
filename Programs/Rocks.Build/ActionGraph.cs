@@ -185,9 +185,11 @@ internal static class ActionGraph
                 NativeLanguage language = LanguageOf(source);
                 var arguments = new List<string>();
                 arguments.AddRange(module.AdditionalCompileArguments);
-                arguments.AddRange(NativeCompileProfile.Arguments(request.Toolchain, request.Configuration, module.Optimization, language));
-                // ThinLTO는 코드 생성 옵션이라 AST 프로필(NativeCompileProfile)에 넣지 않는다.
-                if (UsesThinLto(request.Configuration, module.Optimization))
+                // 계측을 끈 모듈은 sanitizer 인자만 빠진다(프레임 포인터 등 나머지 Asan 프로필은 같다).
+                arguments.AddRange(NativeCompileProfile.ModuleArguments(request.Toolchain, request.Configuration, module, language));
+                // ThinLTO는 코드 생성 옵션이라 AST 프로필(NativeCompileProfile)에 넣지 않는다. 모듈이 끄면(LinkTimeOptimization)
+                // Release에서도 일반 object로 남는다.
+                if (module.LinkTimeOptimization && UsesThinLto(request.Configuration, module.Optimization))
                 {
                     arguments.Add("-flto=thin");
                 }
@@ -412,7 +414,7 @@ internal static class ActionGraph
             yield return "/D_WINDOWS";
             yield return "/DNOMINMAX";
             yield return "/DWIN32_LEAN_AND_MEAN";
-            yield return "/DROCKS_PLATFORM_WINDOWS=1";
+            yield return "/D" + NativeConfigurations.PlatformMacro(NativePlatform.Windows);
             yield return "/D" + buildMacro;
             // 디버그 CRT는 Debug에서만 쓴다. 모듈 재정의는 CRT를 바꾸지 않는다(링크 시 CRT 불일치 방지).
             yield return configuration == NativeConfiguration.Debug ? "/MDd" : "/MD";
@@ -443,12 +445,9 @@ internal static class ActionGraph
             {
                 // Android 실행 파일·공유 라이브러리는 PIE/PIC가 필수다.
                 yield return "-fPIC";
-                yield return "-DROCKS_PLATFORM_ANDROID=1";
             }
-            else
-            {
-                yield return "-DROCKS_PLATFORM_MAC=1";
-            }
+
+            yield return "-D" + NativeConfigurations.PlatformMacro(toolchain.Platform);
 
             yield return "-D" + buildMacro;
             yield return optimize ? "-O2" : "-O0";

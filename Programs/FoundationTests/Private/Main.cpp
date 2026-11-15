@@ -32,10 +32,14 @@ int RunDelegateRebindDuringTargetDestructionControl() noexcept;
 int RunUniquePtrNullDeleterControl() noexcept;
 int RunDelegateExecuteUnboundControl() noexcept;
 int RunDelegateRebindDuringExecutionControl() noexcept;
+int RunSpanSliceOutOfBoundsControl() noexcept;
 int RunRandomStreamPreconditionControl(uint32 operation) noexcept;
 int RunExternalAllocatorNegativeControl(uint32 operation) noexcept;
 int RunDebugAllocatorNegativeControl(uint32 operation) noexcept;
 int RunVirtualMemoryAccessProbe(uint32 state, bool write) noexcept;
+int RunSecretArenaGuardProbe(bool after) noexcept;
+int RunSecretSlotUseAfterFreeProbe() noexcept;
+int RunSecretSlotTailOverflowProbe() noexcept;
 int RunNumberCorpus(const char* path) noexcept;
 static TestCase* first = nullptr;
 static uint64 failures = 0;
@@ -290,6 +294,8 @@ int main(int argc, char** argv) {
                 return test::RunDelegateExecuteUnboundControl();
             } else if (strcmp(control, "delegate-rebind-during-execution") == 0) {
                 return test::RunDelegateRebindDuringExecutionControl();
+            } else if (strcmp(control, "span-slice-out-of-bounds") == 0) {
+                return test::RunSpanSliceOutOfBoundsControl();
             } else if (strncmp(control, "random-invalid-", 15) == 0 && control[15] >= '0' &&
                        control[15] <= '2' && control[16] == '\0') {
                 return test::RunRandomStreamPreconditionControl(
@@ -313,6 +319,14 @@ int main(int argc, char** argv) {
                                                                                     : 2u;
                 return test::RunVirtualMemoryAccessProbe(state,
                                                          strstr(control, "-write") != nullptr);
+            } else if (strcmp(control, "secret-arena-guard-before") == 0 ||
+                       strcmp(control, "secret-arena-guard-after") == 0) {
+                return test::RunSecretArenaGuardProbe(strcmp(control, "secret-arena-guard-after") ==
+                                                      0);
+            } else if (strcmp(control, "secret-slot-use-after-free") == 0) {
+                return test::RunSecretSlotUseAfterFreeProbe();
+            } else if (strcmp(control, "secret-slot-tail-overflow") == 0) {
+                return test::RunSecretSlotTailOverflowProbe();
             } else if (strcmp(control, "asan-uaf") == 0) {
                 return test::RunAsanNegativeControl();
             } else if (strcmp(control, "assert-stderr-lock") == 0) {

@@ -6,7 +6,7 @@ internal static class PlatformSelectionTests
     public static async Task RunAsync(NativeBuildRequest request, string root)
     {
         var context = new BuildContext(root, Path.Combine(root, "platform-output"),
-            NativePlatform.Windows, NativeConfiguration.Debug);
+            NativePlatform.Windows, NativeArchitecture.X64, NativeConfiguration.Debug);
         Check(context.PlatformDirectory == "Win64", "Windows must select Win64 sources.");
         Check((context with { Platform = NativePlatform.MacOS }).PlatformDirectory == "Mac",
             "macOS must select Mac sources.");

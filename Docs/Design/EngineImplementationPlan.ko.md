@@ -799,7 +799,7 @@ Sparks의 로드(23.3절)는 이 계약 위에 구현한다. 스크립트의 로
 
 Package는 header/version, export/import table, dependency manifest, chunk table, codec, checksum, bulk payload를 갖는다. mmap 가능한 불변 데이터와 고정·변환이 필요한 데이터를 분리한다. atomic rename으로 cook output을 publish하고 중단된 임시 파일은 유효 산출물로 인식하지 않는다. compression·IO block 크기는 SSD 접근 패턴과 임계 메모리로 측정한다.
 
-배포 manifest는 콘텐츠 hash와 명시 버전을 사용한다. 패치는 변경 chunk만 교체하고 구 manifest로 rollback할 수 있어야 한다. 잘린 파일, checksum 오류, 해제 크기 폭증, dependency 누락을 오류 주입으로 검증한다. 최종 패키지는 editor, importer, LLVM, 원본 source asset 없이 실행할 수 있어야 한다.
+배포 manifest는 콘텐츠 hash와 명시 버전을 사용한다. 패치는 변경 chunk만 교체한다. 배포 manifest는 서명하고 contentVersion이 낮아지는 교체를 거부하므로, 구 콘텐츠로 되돌릴 때는 구 manifest를 더 높은 버전으로 다시 서명해 낸다([콘텐츠 서명](ContentSigning.ko.md)). 잘린 파일, checksum 오류, 해제 크기 폭증, dependency 누락을 오류 주입으로 검증한다. 최종 패키지는 editor, importer, LLVM, 원본 source asset 없이 실행할 수 있어야 한다.
 
 ### 9.4 Virtual Asset·원본 bulk·재임포트
 
@@ -1518,7 +1518,7 @@ PhysX simulation은 float 전용이다. UE 5.8 Chaos는 `FReal`을 double로 정
 
 ### 17.1 프로토콜과 객체 ID
 
-NetCore는 socket/transport·connection·packet IO·channel·암호화된 transport adapter를 담당하고, Replication은 schema·interest·snapshot·RPC를 담당한다. 자체 암호 알고리즘을 설계하지 않고 유지되는 보안 transport 구현을 사용한다. 초기 대상은 dedicated server와 16 client이며 listen server는 후속 지원이다.
+NetCore는 socket/transport·connection·packet IO·channel·암호화된 transport adapter를 담당하고, Replication은 schema·interest·snapshot·RPC를 담당한다. 자체 암호 알고리즘·프로토콜을 설계하지 않는다. 채널 보호는 표준 Noise NK를 libsodium 기반 Crypto 모듈로 구현한 부품을 쓰고, 패킷 형식·쿠키·증폭 방지는 NetCore가 맡는다([보안 채널](SecureChannel.ko.md), 2026-11-15). 초기 대상은 dedicated server와 16 client이며 listen server는 후속 지원이다.
 
 ~~~cpp
 struct NetObjectId {
