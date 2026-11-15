@@ -342,4 +342,4 @@ libsodium 1.0.22-stable 기반 범용 암호 모듈 `Crypto`를 추가했다(설
 - C2 HW 전용 AES 경량 계층(libsodium aesni·armcrypto 파생, `Derivation.json`): AES-128-GCM, GCM 멀티파트, CTR(32·64·128 bit 카운터), AES-CMAC. 소프트웨어 AES는 없다.
 - C3 스트리밍: secretstream, 세그먼트 스트림(순차·임의 접근·병렬 writer), 고정 seed 변형 fuzz 시험. C4: KeyRing·공급자, AsyncCrypto(Task 모듈).
 - 정책 검사: target 속성·AES/SHA intrinsics 디렉터리 허용 목록, 시험 접근점·`ROCKS_TESTING`·libsodium 전역 설정 위치, 파생 소스 출처. Android 기기 runner가 data 라이브러리 파일을 올린다.
-- 검증(Windows x64 clang-cl): Debug native 1352, Asan·Release, Android x86_64·arm64 빌드, x86_64 에뮬레이터 1349, Wycheproof(AES-GCM·ChaCha·XChaCha·HMAC·HKDF·Ed25519·X25519·ML-KEM·AES-CMAC·secretstream). arm64 AES 커널과 DIT는 macOS arm64 CI로만 확인된다. macOS의 DIT 범위 비용 측정(6.4절)은 아직이다.
+- 검증(Windows x64 clang-cl): Debug native 1352, Asan·Release, Android x86_64·arm64 빌드, x86_64 에뮬레이터 1349, Wycheproof(AES-GCM·ChaCha·XChaCha·HMAC·HKDF·Ed25519·X25519·ML-KEM·AES-CMAC·secretstream). macOS arm64 CI(run 43686796858, macos-15)에서 `armAes·armPmull·armDit·armSb`가 모두 감지되고 arm64 AES 커널 스칼라 대조·자가 시험을 포함해 Debug·Asan·Release 각 1349건이 통과했다(Windows job도 통과). macOS의 DIT 범위 비용 측정(6.4절)은 아직이다.
