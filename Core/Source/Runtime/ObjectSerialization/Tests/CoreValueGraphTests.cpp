@@ -4,11 +4,12 @@
 #include <TestSupport/Test.h>
 
 // B4c Core 값 타입 필드의 그래프 저장·복원 시험이다(Docs/Design/ReflectionFoundations.ko.md 4.5절).
-// CoreTypeBindings의 Binds 미러가 생성한 실제 타입의 GeneratedType(Vector2·3·4<float|double>,
-// Quaternion<float|double>, Rotator<float|double>, Color, LinearColor, IntVec2·3, Transform)을 모듈
-// 집계 등록(fixture 모듈이 CoreTypeBindings를 먼저 등록한다)으로 등록하고 태그형 중첩 Record로
-// 왕복한다. 사용자 리플렉션 struct(CoreValueBundle)가 다른 모듈의 미러 struct를 멤버로 담는 경로도
-// 거친다.
+// CoreTypeBindings의 Binds 미러 17종이 생성한 실제 타입의 GeneratedType(Vector2·3·4<float|double>,
+// Quaternion<float|double>, Rotator<float|double>, Color, LinearColor, IntVec2·3, Transform,
+// Transform3<float|double> — 마지막 둘은 리플렉션 B9b2)을 모듈 집계 등록(fixture 모듈이
+// CoreTypeBindings를 먼저 등록한다)으로 등록하고 태그형 중첩 Record로 왕복한다. 사용자 리플렉션
+// struct(CoreValueBundle)가 다른 모듈의 미러 struct를 멤버로 담는 경로도 거친다. Atomic은 저장
+// 형식을 바꾸지 않으므로 Atomic 미러도 같은 Record다.
 using namespace rocks;
 using reflection_fixture::CoreValueBundle;
 using reflection_fixture::CoreValueFields;
@@ -19,6 +20,9 @@ static_assert(GeneratedType<Transform>::Depth == 2);
 static_assert(GeneratedType<CoreValueBundle>::Depth == 2);
 static_assert(!GeneratedType<Transform>::ContainsStrongReference);
 static_assert(TypeIdOf<Vec3>() != TypeIdOf<Vec3d>());
+static_assert(GeneratedType<Transform3f>::Depth == 2 && GeneratedType<Transform3d>::Depth == 2);
+static_assert(TypeIdOf<Transform3f>() != TypeIdOf<Transform3d>() &&
+              TypeIdOf<Transform3d>() != TypeIdOf<Transform>());
 
 namespace {
 
@@ -80,6 +84,12 @@ void Fill(CoreValueFields& fields) noexcept {
     bundle.headingPrecise.roll = 3.0;
     bundle.size.x = -7;
     bundle.size.y = 9;
+    fields.pose.translation = Vec3(-8.5f, 0.25f, 1.0e30f);
+    fields.pose.rotation = Quat(0.5f, -0.5f, 0.5f, -0.5f);
+    fields.pose.scale = Vec3(0.5f, 2.0f, -3.0f);
+    fields.precisePose.translation = Vec3d(1.0e15 + 0.5, -2.0e-300, 7.0);
+    fields.precisePose.rotation = Quatd(0.0, 0.0, -0.5, 0.75);
+    fields.precisePose.scale = Vec3d(4.0, 1.0e-9, 0.125);
 }
 
 // Fill의 값이 그대로인지다(EditorOnly debugColor는 따로 본다).
@@ -104,7 +114,18 @@ bool Filled(const CoreValueFields& fields) noexcept {
            bundle.orientation.w == -0.5 && bundle.heading.yaw == 0.25f &&
            bundle.heading.pitch == -0.5f && bundle.heading.roll == 1.0f &&
            bundle.headingPrecise.yaw == -2.0 && bundle.headingPrecise.pitch == 0.0625 &&
-           bundle.headingPrecise.roll == 3.0 && bundle.size.x == -7 && bundle.size.y == 9;
+           bundle.headingPrecise.roll == 3.0 && bundle.size.x == -7 && bundle.size.y == 9 &&
+           fields.pose.translation.x == -8.5f && fields.pose.translation.y == 0.25f &&
+           fields.pose.translation.z == 1.0e30f && fields.pose.rotation.x == 0.5f &&
+           fields.pose.rotation.y == -0.5f && fields.pose.rotation.z == 0.5f &&
+           fields.pose.rotation.w == -0.5f && fields.pose.scale.x == 0.5f &&
+           fields.pose.scale.y == 2.0f && fields.pose.scale.z == -3.0f &&
+           fields.precisePose.translation.x == 1.0e15 + 0.5 &&
+           fields.precisePose.translation.y == -2.0e-300 &&
+           fields.precisePose.translation.z == 7.0 && fields.precisePose.rotation.x == 0.0 &&
+           fields.precisePose.rotation.y == 0.0 && fields.precisePose.rotation.z == -0.5 &&
+           fields.precisePose.rotation.w == 0.75 && fields.precisePose.scale.x == 4.0 &&
+           fields.precisePose.scale.y == 1.0e-9 && fields.precisePose.scale.z == 0.125;
 }
 
 // 채운 CoreValueFields 하나를 저장한다.
@@ -159,6 +180,14 @@ TEST(CoreValueGraph_BoundCoreTypesRoundTripThroughGeneratedCode) {
             auto thresholds = types.AcquireValueType(TypeIdOf<Vec4d>(), TypeKind::Struct);
             REQUIRE(thresholds);
             CHECK(thresholds.Value().StructOps().nativeType == NativeTypeKey<Vector4<double>>());
+            // 별칭 Binds("rocks::Transform3f")는 실제 템플릿 인스턴스로 풀리고 Atomic이다.
+            auto pose = types.AcquireValueType(TypeIdOf<Transform3f>(), TypeKind::Struct);
+            REQUIRE(pose);
+            CHECK(pose.Value().Name() ==
+                  StringView("rocks::core_type_bindings::Transform3fBinding"));
+            CHECK(pose.Value().StructOps().nativeType == NativeTypeKey<Transform3<float>>());
+            CHECK(pose.Value().Struct().IsAtomic());
+            CHECK(!transform.Value().Struct().IsAtomic());
         }
 
         {

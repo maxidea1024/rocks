@@ -352,8 +352,12 @@ internal sealed class ClassModel
     // TypeFlags::WorldOnly. 선언이 직접 쓰거나 base에서 상속된다(SchemaValidator가 base를 보고 채운다).
     public bool WorldOnly { get; set; }
 
-    // TypeFlags 비트: Abstract 1, WorldOnly 2.
-    public uint Flags => (Abstract ? 1u : 0u) | (WorldOnly ? 2u : 0u);
+    // TypeFlags::Atomic(struct 전용 — ROCKS_STRUCT(Atomic), import struct는 descriptor flags의 Atomic). 값이 통째
+    // 단위다(Docs/Design/ReflectionExtensions.ko.md 3.1절). 형질과 달리 선언 값이라 멤버에서 계산하거나 대조하지 않는다.
+    public bool Atomic { get; init; }
+
+    // TypeFlags 비트: Abstract 1, WorldOnly 2(클래스), Atomic 16(struct). 생성 스키마의 flags다.
+    public uint Flags => (Abstract ? 1u : 0u) | (WorldOnly ? 2u : 0u) | (Atomic ? 16u : 0u);
 
     // ROCKS_NATIVE 멤버다(스키마에 넣지 않고 생성 코드의 static_assert만 받는다).
     public List<NativeMemberModel> NativeMembers { get; } = [];

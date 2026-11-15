@@ -240,6 +240,10 @@ bool StructView::ContainsReferenceArray() const noexcept {
     return ViewAs<TypeRegistry::Record>(record_).containsReferenceArray;
 }
 
+bool StructView::IsAtomic() const noexcept {
+    return HasFlag(ViewAs<TypeRegistry::Record>(record_).schema.flags, TypeFlags::Atomic);
+}
+
 StringView TypeLease::Name() const& noexcept {
     const auto& name = Schema().name;
     return StringView(name.Data(), name.Size());

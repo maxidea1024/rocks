@@ -12,9 +12,9 @@ internal static class ModuleDescriptor
     private static readonly string[] TypeKeys =
         ["kind", "name", "id", "version", "flags", "base", "header", "visibility", "fields"];
 
-    // struct 항목: base 대신 생성 형질 flags(쓰기 순서 ContainsStrongReference → RequiresWorldOnlyOwner →
-    // ContainsReferenceArray)와 binds(Binds 실제 타입의 Clang 정규 철자, 미러가 아니면 "")다(Docs/Design/
-    // ReflectionFoundations.ko.md 1.4·4.6·5.6절).
+    // struct 항목: base 대신 flags(선언 플래그 Atomic 다음 생성 형질 — 쓰기 순서 Atomic → ContainsStrongReference →
+    // RequiresWorldOnlyOwner → ContainsReferenceArray)와 binds(Binds 실제 타입의 Clang 정규 철자, 미러가 아니면 "")다
+    // (Docs/Design/ReflectionFoundations.ko.md 1.4·4.6·5.6절, Atomic은 ReflectionExtensions.ko.md 1.8·3.1절).
     private static readonly string[] StructKeys =
         ["kind", "name", "id", "version", "header", "visibility", "flags", "binds", "fields"];
 
@@ -93,6 +93,11 @@ internal static class ModuleDescriptor
         json.WriteString("header", type.Header);
         json.WriteString("visibility", type.Private ? "private" : "public");
         json.WriteStartArray("flags");
+        if (type.Atomic)
+        {
+            json.WriteStringValue("Atomic");
+        }
+
         if (type.ContainsStrongReference)
         {
             json.WriteStringValue("ContainsStrongReference");
@@ -308,7 +313,9 @@ internal static class ModuleDescriptor
             string name = Name(type.GetProperty("name"), QualifiedName, "type name");
             string id = Hex(type.GetProperty("id"), Invalid);
             string[] flags = type.GetProperty("flags").EnumerateArray().Select(flag => flag.GetString() ?? "").ToArray();
-            bool KnownFlag(string flag) => isStruct ? flag is "ContainsStrongReference" or "RequiresWorldOnlyOwner" or "ContainsReferenceArray" : flag is "Abstract" or "WorldOnly";
+            // struct는 선언 플래그 Atomic과 생성 형질, 클래스는 Abstract·WorldOnly만 받는다(struct 전용 Atomic이 클래스에
+            // 있거나 클래스 플래그가 struct에 있으면 모르는 플래그다).
+            bool KnownFlag(string flag) => isStruct ? flag is "Atomic" or "ContainsStrongReference" or "RequiresWorldOnlyOwner" or "ContainsReferenceArray" : flag is "Abstract" or "WorldOnly";
             if (flags.Any(flag => !KnownFlag(flag)) || flags.Distinct(StringComparer.Ordinal).Count() != flags.Length)
             {
                 throw Invalid("unknown or duplicate type flag in " + name);
@@ -348,6 +355,7 @@ internal static class ModuleDescriptor
                 Imported = true,
                 Module = module,
                 IsStruct = isStruct,
+                Atomic = flags.Contains("Atomic"),
                 ContainsStrongReference = flags.Contains("ContainsStrongReference"),
                 RequiresWorldOnlyOwner = flags.Contains("RequiresWorldOnlyOwner"),
                 ContainsReferenceArray = flags.Contains("ContainsReferenceArray"),

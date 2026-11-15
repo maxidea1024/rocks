@@ -8,8 +8,9 @@ internal sealed record ClassSpec(bool Abstract, uint Version, bool WorldOnly);
 
 // STRUCT 지정자 결과다. Version은 Record schema version(없으면 1)이다. Binds는 미러 선언이 결합하는 실제 C++ 타입의
 // 원문 철자다(Core 값 타입 결합 — Docs/Design/ReflectionFoundations.ko.md 4.5절, 없으면 ""). 정규 철자는 Clang이
-// 정한다(문자열로 비교하지 않는다).
-internal sealed record StructSpec(uint Version, string Binds);
+// 정한다(문자열로 비교하지 않는다). Atomic은 TypeFlags::Atomic(값이 통째 단위 — Docs/Design/ReflectionExtensions.ko.md
+// 3.1절)이고 struct 전용이다(CLASS 지정자 표에는 없으므로 ROCKS_CLASS(Atomic)은 모르는 지정자다).
+internal sealed record StructSpec(uint Version, string Binds, bool Atomic);
 
 // PROPERTY 지정자 결과다. ToolName은 Name="…"의 값이고 필드 이름과 같거나 없으면 ""다(기본 도구 이름은 필드
 // 이름이다). MaxElements는 배열 필드 전용이라 0이 아니면 SchemaValidator가 배열이 아닌 필드에서 거부한다.
@@ -56,7 +57,7 @@ internal static class Specifiers
 
     public static StructSpec Struct(string text, string symbol)
     {
-        const string hint = "ROCKS_STRUCT takes Version=N (an unsigned decimal integer) and, in CoreTypeBindings only, Binds=\"<C++ type>\"; CLASS specifiers such as Abstract or WorldOnly do not apply to structs.";
+        const string hint = "ROCKS_STRUCT takes Version=N (an unsigned decimal integer), Atomic (no value) and, in CoreTypeBindings only, Binds=\"<C++ type>\"; CLASS specifiers such as Abstract or WorldOnly do not apply to structs.";
         Dictionary<string, Value?> values;
         try
         {
@@ -69,9 +70,10 @@ internal static class Specifiers
 
         foreach ((string key, Value? value) in values)
         {
+            bool flag = key is "Atomic";
             bool number = key is "Version";
             bool label = key is "Binds";
-            if ((!number && !label) || (number && value?.Number is null) || (label && value?.Text is null))
+            if ((!flag && !number && !label) || (flag && value is not null) || (number && value?.Number is null) || (label && value?.Text is null))
             {
                 throw new MetadataException($"{symbol}: unsupported STRUCT specifier/value {key}", hint: hint);
             }
@@ -84,7 +86,7 @@ internal static class Specifiers
                 hint: "Write the real type fully qualified from the global scope, e.g. Binds = \"rocks::Vector3<float>\" or Binds = \"rocks::Vec3\".");
         }
 
-        return new(values.GetValueOrDefault("Version")?.Number ?? 1, binds);
+        return new(values.GetValueOrDefault("Version")?.Number ?? 1, binds, values.ContainsKey("Atomic"));
     }
 
     public static PropertySpec Property(string text, string symbol, string fieldName)

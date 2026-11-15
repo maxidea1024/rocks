@@ -11,15 +11,25 @@ using ContextId = Guid;
 
 // flags는 저장 형식과 별개인 메타데이터 정책이다. 알 수 없는 비트는 등록 단계에서 거부한다.
 //
-// TypeFlags:
-//   Abstract  — 등록할 수 있으나 생성할 수 없다(construct가 null).
-//   WorldOnly — World 쪽에서만 쓰는 타입이다. 상속된다(base가 WorldOnly면 파생도 이 플래그가
-//               있어야 등록된다). 에셋 객체 Registry의 생성 거부는
+// TypeFlags(클래스는 Abstract·WorldOnly, struct는 Atomic만 — 대상이 아닌 비트는 등록에서
+// 거부된다):
+//   Abstract  — 클래스. 등록할 수 있으나 생성할 수 없다(construct가 null).
+//   WorldOnly — 클래스. World 쪽에서만 쓰는 타입이다. 상속된다(base가 WorldOnly면 파생도 이
+//               플래그가 있어야 등록된다). 에셋 객체 Registry의 생성 거부는
 //               RegistryPolicy::rejectWorldOnly(Object/ObjectRegistry.h)다.
+//   Atomic    — struct(ROCKS_STRUCT(Atomic)). 값이 통째 단위다: 차이 저장은 멤버 하나라도
+//               기준과 다르면 모든 멤버를 쓰고, override 집합·되돌리기의 단위가 그 struct 필드
+//               경로다(Docs/Design/ReflectionExtensions.ko.md 3.1절 — 차이 쓰기·override·
+//               되돌리기 구현은 A5, 되돌리기는 RuntimeClassMetadata 'struct 통째 되돌리기' 후속과
+//               함께). 로드·경로 접근·저장 형식은 바뀌지 않는다. Atomic struct 안의 비Atomic
+//               멤버도 통째로 쓰이고, 비Atomic struct 안의 Atomic 멤버는 그 멤버 경로가 단위다.
+//               Core 값 타입 미러는 혼합 정밀도 Transform을 뺀 16종이 Atomic이다. 값 16은 클래스
+//               플래그 예약 비트(4·8)를 비켜 둔다(ReflectionExtensions.ko.md 1.4절).
 enum class TypeFlags : uint32 {
     None = 0,
     Abstract = 1,
-    WorldOnly = 2
+    WorldOnly = 2,
+    Atomic = 16
 };
 
 // FieldFlags:

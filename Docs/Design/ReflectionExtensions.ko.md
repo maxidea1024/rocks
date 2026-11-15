@@ -238,7 +238,7 @@ struct PropertyPath { Span<const PathStep> steps; Span<const PathKey> keys{}; };
 - **뜻: Atomic struct 값은 통째 단위다.**
   - 차이 저장(A5): 멤버 하나라도 기준과 다르면 struct Record를 쓰고 모든 멤버를 넣는다. 같으면 쓰지 않는다. 비교 대상은 struct Record 전체의 wire byte다.
   - override 집합(RCM 62행)의 단위는 그 struct 필드 경로다. 경로 쓰기로 멤버 하나를 바꿔도 struct 경로가 기록된다(10.2절의 override 경로 정규화).
-  - 되돌리기 단위도 struct 통째다. 구현은 RCM 70행의 "struct 통째 되돌리기" 후속과 함께 하고, 이 단계는 단위만 정한다.
+  - 되돌리기 단위도 struct 통째다. 구현은 A5가 RCM 70행의 "struct 통째 되돌리기" 후속과 함께 하고, 이 단계는 단위만 정한다.
   - 텍스트 출력은 모든 멤버를 쓴다(기준 차이 출력이 생겨도).
   - SaveGame 포함 필터는 Atomic struct 안의 멤버에 적용하지 않는다(통째 — 9.1절).
   - 중첩: Atomic 안의 비Atomic 멤버도 통째로 쓴다. 비Atomic struct 안의 Atomic 멤버는 그 멤버 경로에서 멈춘다.
@@ -276,6 +276,15 @@ Core 수학(`CORE/Math/Transform.h`)에 둘을 더한다(사용자 결정 U4).
 - UE 대조(경로는 Engine/Source/Runtime 기준 — 코드 주석에는 파일 이름만 두고 행 번호는 여기 둔다): `Multiply`는 음수 scale이 없으면 성분별 곱으로 shear를 버린다(Core/Private/Math/TransformVectorized.cpp:294-345). `Inverse`는 세 축 scale이 모두 SMALL_NUMBER 이하일 때만 항등이고(Core/Public/Math/TransformVectorized.h:363-374), 그 밖은 `InverseFast`가 거의 0인 축의 역수를 0으로 두며(`GetSafeScaleReciprocal` 1404-1419) 비균일 scale과 회전의 shear도 버린다(1423-1454). `InverseTransformPosition`도 거의 0인 축의 역수를 0으로 둔다(1747-1768). float↔double 변환은 explicit 생성자다(1492-1503). Rocks는 이 경우들을 실패로 드러낸다. 멤버 선언 순서는 Rotation·Translation·Scale3D다(TransformVectorized.h:75-79, NET:2081·2085·2089·2101·2105·2109).
 - UE 데이터 반입 메모(B9b2·반입 단계에 넘김): UE FTransform3f·3d는 immutable이라 태그 없이 UE 선언 순서(Rotation·Translation·Scale3D)로 이진 저장된다(CC:3338-3343·3415, NET:2076·2096). 반입은 그 순서로 읽어 멤버 이름으로 대응시킨다(Scale3D → scale — 위치 대응은 안 된다). UE는 3f↔3d 불일치 태그를 `WithSerializeFromMismatchedTag`로 변환하므로(PR:491) 반입 도구는 이를 `To…`·`RoundTo…`로 대신한다.
 - 시험(Core `MathTransform3Tests.cpp`): `Transform3_PointOrderIsScaleRotateTranslate`·`Transform3_MatrixRoundTripKeepsTrs`·`Transform3_ComposeAndInverseMatchAffineProduct`·`Transform3_ShearIsUnsupportedAndZeroScaleIsInvalid`(float·double 둘 다), `Transform3_WideningConversionsAreExact`·`Transform3_NarrowingConversionsRoundToNearestEven`·`Transform3_NarrowingOverflowAndUnderflowAreVisible`·`Transform3_FloatAndDoubleBoundariesFollowComputePrecision`·`Transform3_ExtremeScalesInvertAndDecompose`(극단 scale 역변환·분해, float 1e20 왕복)·`Transform3_DecompositionAgreesAcrossPrecisions`, `Matrix4_PrecisionConversionIsExplicit`(MathMatrixTests.cpp).
+
+구현(B9b2)에서 정한 점(Atomic 스키마·플래그·조회와 미러 — 차이 쓰기·override 단위·되돌리기는 A5, 되돌리기는 RCM 70행 "struct 통째 되돌리기" 후속과 함께):
+
+- 런타임: `TypeFlags::Atomic = 16`(`MS/TypeSchema.h` — 3.1절의 뜻을 열거자 주석에 적었다). TypeRegistry는 받는 비트를 `KnownClassFlags`(Abstract·WorldOnly)와 `KnownStructFlags`(Atomic)로 나눴다: 클래스의 Atomic, struct의 Abstract·WorldOnly·예약 비트(4·8)·그 밖의 비트는 InvalidArgument다(Atomic과 함께여도). 지금까지 struct 레코드는 스키마 flags를 복사하지 않았으므로(늘 0이라 차이가 없었다) RegisterStruct가 flags를 레코드에 남기게 했다. `StructView::IsAtomic()`은 그 스키마 비트를 읽는다 — 등록이 계산하는 형질(`ContainsStrongReference` 등)이 아니라 선언 값이라 멤버 struct의 Atomic을 바깥으로 전파하지 않는다(3.1절 중첩 규칙: 바깥이 비Atomic이면 Atomic 멤버 경로에서 멈추고, 바깥이 Atomic이면 바깥이 통째를 정한다).
+- MetaCompiler: `StructSpec.Atomic`(값 없는 지정자 — `Atomic=1`·중복은 RMC2000), `ClassModel.Atomic`과 `Flags`의 16. 생성 struct 스키마는 `TypeSchema{…, Guid{}, Flags}`로 flags를 싣는다(지금까지 `0u` 고정). CLASS 지정자 표에는 Atomic이 없어 `ROCKS_CLASS(Atomic)`은 지금의 "unsupported CLASS specifier"(RMC2000)다. 생성 `GeneratedType<S>`에 Atomic 상수는 두지 않았다(쓰는 곳이 없다 — B9k가 상속 대조에 필요하면 더한다).
+- descriptor: struct `flags`의 쓰기 순서는 선언 플래그 Atomic 다음 생성 형질이다(Atomic → ContainsStrongReference → RequiresWorldOnlyOwner → ContainsReferenceArray). 읽기는 struct 항목만 Atomic을 받고(클래스 항목의 Atomic과 중복은 모르는·중복 flag RMC1000), import 모델의 Atomic이 된다. 형질과 달리 필드에서 계산할 수 없는 선언 값이라 LinkImported가 대조하지 않는다 — import descriptor의 Atomic은 대조 없이 믿는다. 지금은 MetaCompiler에서 import 모델의 Atomic을 쓰는 곳이 없고 런타임 스키마 flags는 소유 모듈의 생성 코드가 정하므로 영향이 없다. **B9k(Atomic 상속)나 A5가 의존 모듈에서 이 값을 쓰기 시작하면 생성 `GeneratedType<S>::Atomic` 상수와 의존 모듈 생성 코드의 static_assert 대조(예: `static_assert(GeneratedType<Base>::Atomic == …)`)를 함께 넣는다** — 형질의 "import descriptor flags를 믿지 않는다" 원칙과 같게 한다. Atomic 상속(12절)은 B9k가 SchemaValidator·TypeRegistry에 WorldOnly 상속처럼 더한다.
+- 미러: `Transform3fBinding`(`Binds = "rocks::Transform3f"` → Clang 정규 철자 `rocks::Transform3<float>`, 멤버 `Vec3 translation`·`Quat rotation`·`Vec3 scale = Vec3::One()`)과 `Transform3dBinding`(`rocks::Transform3<double>`, `Vec3d`·`Quatd`·`Vec3d`)을 Core 선언 순서로 더했고, 안정 ID는 `ids add`로 CoreTypeBindings 명세에 발급했다(타입 2·필드 6). 미러 선언마다 `Atomic`을 명시했다(16종 — `TransformBinding`만 없다). `TransformBinding` 멤버의 `SaveGame`은 필드 플래그 단계(B9h1)가 단다. Transform3 미러의 멤버 대조는 생성 `VerifyBinds`(이름·형식·개수·선언 순서)가 하고, 시험이 미러 선언과 Core 선언을 static_assert로 한 번 더 맞춘다.
+- 3.3절 정정 문구(RCM 62·64·70행, RF 결정 22)는 이 문서를 넣을 때 이미 반영되어 있어 바꾸지 않았다.
+- 시험: ObjectRuntime `AtomicStruct_RegisterStructAcceptsOnlyTheAtomicFlag`·`AtomicStruct_IsAtomicIsDeclaredPerStructAndNotPropagated`(클래스 필드의 struct view 포함)·`AtomicStruct_ClassRegistrationRejectsTheAtomicBit`·`AtomicStruct_CoreValueMirrorsAreAtomicExceptTransform`(CoreTypeBindings 모듈 등록 = 17종, 16종 Atomic, Transform 멤버 셋은 각각 Atomic)·`AtomicStruct_Transform3MirrorsMatchCoreTypes`(멤버 이름·대상 미러·크기·정렬 — 스키마 필드 순서는 필드 ID 순이라 선언 순서는 파일 머리의 static_assert와 생성 `VerifyBinds`가 고정한다, `AtomicStructTests.cpp`), ToolTests `Meta.StructSpecifiersAreRestricted`(Atomic 값·중복 행)·`Meta.ClassAtomicSpecifierIsUnknown`·`Meta.StructAtomicReachesDescriptorAndSchemaFlags`(descriptor flags 순서·Version과 함께·멤버에서 전파 없음·생성 스키마 16u)·`Meta.StructAtomicDescriptorRoundTrips`(Read → Write byte 동일, 의존 모듈 import, 클래스 Atomic·중복 Atomic RMC1000).
 
 ### 3.3 RCM·RF 정정 문구
 
@@ -768,7 +777,7 @@ Core 커밋(B9b1·B9c1·B9f1·B9i1)은 다른 단계와 독립이라 먼저 해�
 
 **B9a**: 성질 표 단위 시험(모든 종류 × 성질이 1.3절 표와 같음), 대조 헤더 양방향(C# 표를 바꿔 넣은 사례가 컴파일 실패), int8·int16 그래프 왕복·범위 밖 I64 거부, enum 8종 왕복, uint64 값 상한 RMC2401, 평범한 `char` 거부, 경로 쓰기 범위 검사, wire 14–18 reader의 잘림·count 사전 검사·원소 tag 거부·present byte 범위.
 
-**B9b**: Transform3f·3d — 점·벡터·방향 변환, 역변환, `ToMatrix`·`TryFromMatrix` 왕복, shear Unsupported·0 scale InvalidArgument, 변환 함수(넓힘 정확·좁힘 반올림). Atomic — STRUCT에만(CLASS는 모르는 지정자), descriptor 왕복, RegisterStruct mask(클래스 비트 거부), 미러 16종 Atomic·Transform 비Atomic 등록, `IsAtomic`. A5 시험 목록에 넘길 것: Atomic 차이 쓰기·override 단위·Transform 멤버 단위.
+**B9b**: Transform3f·3d — 점·벡터·방향 변환, 역변환, `ToMatrix`·`TryFromMatrix` 왕복, shear Unsupported·0 scale InvalidArgument, 변환 함수(넓힘 정확·좁힘 반올림). Atomic — STRUCT에만(CLASS는 모르는 지정자), descriptor 왕복, RegisterStruct mask(클래스 비트 거부), 미러 16종 Atomic·Transform 비Atomic 등록, `IsAtomic`. A5 시험 목록에 넘길 것: Atomic 차이 쓰기·override 단위·Transform 멤버 단위·Atomic 되돌리기 통째(RCM 70행 "struct 통째 되돌리기" 후속과 함께).
 
 **B9c**: Core `TryFind`(없으면 NotFound·할당 없음·표시 변형은 비교 토큰)·`NameTextEquals`(번호 접미·대소문자), 그래프 왕복(번호 접미·None·대소문자 표시 보존), pool 없는 Registry의 Unsupported, 다른 pool 토큰 WrongContext, NFC·UTF-8·3,072 byte·NUL 거부, 2a intern의 CapacityExceeded(생성자 미실행·Registry 불변·이미 들어간 entry는 남음), 1단계 청구가 2a 몫을 덮음(작업량 한도 fixture), 관찰 struct의 Name 거부, Array<Name> 왕복, 경로 쓰기.
 
@@ -978,7 +987,7 @@ Core 커밋(B9b1·B9c1·B9f1·B9i1)은 다른 단계와 독립이라 먼저 해�
 | A2 | Map 항목 대입·제거(`prop[k]=v`, `--erase`) | B9f3·B9i3 | 1.5·10.4절 |
 | A2·A4 | 타입 도구 이름(`asset-new <Type>`, `--type`) | B9d2 | AS 571·573행 |
 | A4 | TargetProfile·CookSettings JSON 로드(위치 진단, 재정의 병합) | B9i4 | AS 301-302행 |
-| A5 | Atomic 차이 단위(미러 16종), Transform 멤버 단위 | B9b | RCM 62·64행 |
+| A5 | Atomic 차이 단위(미러 16종), Transform 멤버 단위, Atomic 되돌리기 통째(struct 통째 되돌리기 후속과 함께) | B9b | RCM 62·64·70행 |
 | A5 | `Downscale` 플랫폼별 값(`OrderedMap<Name, float>`) | B9f2·B9c2 | AS 451행 |
 | A5 | `OodleTextureSdkVersion`(UE FName, 계약) | B9c2 | AS 453행 |
 | A5 | SRGB 함께 저장(묶음 들여다보기·덧붙이기), override 경로 기록 | B9i3 | AS 408행, RCM 62행 |

@@ -34,9 +34,10 @@ public:
 
     // 입력 버퍼는 호출 동안 유효해야 한다. 실패하면 기존 등록 상태를 유지한다.
     // ops는 값으로 소유권을 넘기므로 등록 실패 시에도 그 ModuleLease는 정리된다.
-    // 주요 실패: 알 수 없는 플래그 비트·참조(ObjectReference·SoftObjectReference — 배열이면 원소)가
-    // 아닌 필드의 Required·참조·Enum·Struct가 아닌 대상 형식의 type·type이 없는 Enum·Struct 필드·
-    // 범위 밖 값 종류·배열이 아닌 필드의 비어 있지 않은 element·maxElements·FieldKind와 대상 형식의
+    // 주요 실패: 클래스 플래그(Abstract·WorldOnly)가 아닌 비트(struct 전용 Atomic 포함)·참조
+    // (ObjectReference·SoftObjectReference — 배열이면 원소)가 아닌 필드의 Required·참조·Enum·
+    // Struct가 아닌 대상 형식의 type·type이 없는 Enum·Struct 필드·범위 밖 값 종류·배열이 아닌
+    // 필드의 비어 있지 않은 element·maxElements·FieldKind와 대상 형식의
     // 불일치(소프트 참조·Enum·Struct는 FieldKind::Value)·Enum·Struct 대상에 없거나 그 밖의 필드에
     // 있는 valueNativeType·ASCII 식별자가 아닌 도구 이름·WorldOnly base의 파생에 WorldOnly 없음·
     // WorldOnly 소유자를 요구하는 struct(원소 포함)를 WorldOnly가 아닌 클래스에 둠·Struct·Array
@@ -68,14 +69,17 @@ public:
     Result<TypeRegistrationToken> RegisterEnum(const EnumSchema&, RuntimeEnumOps) noexcept;
 
     // 리플렉션 struct를 등록한다(Docs/Design/ReflectionFoundations.ko.md 4.6절, 생성 코드는
-    // GeneratedType<S>::Register). 스키마는 클래스와 같은 TypeSchema(base 없음, 클래스 플래그
-    // 없음)이고 입력 버퍼는 호출 동안 유효해야 하며 깊게 복사한다. 멤버 struct·enum이 먼저 등록되어
-    // 있어야 하고 이 struct가 등록된 동안 의존으로 붙잡힌다. 주요 실패:
-    // - InvalidArgument: id 0, version 0, base, 클래스 플래그, 필드 서술 오류(Register와 같은
-    //   규칙 — 배열 멤버 포함), Opaque 필드, 스키마와 1:1이 아닌 함수표, Transient가 아닌 필드의
-    //   codec 없음, encode·decode 한쪽만, size·alignment·nativeType·construct·destroy 없음, trace와
-    //   강한 참조 멤버(ObjectRefArray·StructRefArray 포함)의 유무 불일치, 깊이 MaxStructDepth
-    //   초과(struct 원소 배열 멤버는 원소 깊이 + 1), Registry 컨테이너를 담는 참조 struct 원소.
+    // GeneratedType<S>::Register). 스키마는 클래스와 같은 TypeSchema(base 없음)이고 flags는 struct
+    // 플래그 TypeFlags::Atomic만 받는다(ROCKS_STRUCT(Atomic) — 뜻은 Meta/TypeSchema.h TypeFlags,
+    // 조회는 StructView::IsAtomic). 입력 버퍼는 호출 동안 유효해야 하며 깊게 복사한다. 멤버
+    // struct·enum이 먼저 등록되어 있어야 하고 이 struct가 등록된 동안 의존으로 붙잡힌다.
+    // 주요 실패:
+    // - InvalidArgument: id 0, version 0, base, Atomic이 아닌 플래그 비트(클래스 플래그 Abstract·
+    //   WorldOnly 포함), 필드 서술 오류(Register와 같은 규칙 — 배열 멤버 포함), Opaque 필드,
+    //   스키마와 1:1이 아닌 함수표, Transient가 아닌 필드의 codec 없음, encode·decode 한쪽만,
+    //   size·alignment·nativeType·construct·destroy 없음, trace와 강한 참조 멤버
+    //   (ObjectRefArray·StructRefArray 포함)의 유무 불일치, 깊이 MaxStructDepth 초과(struct 원소
+    //   배열 멤버는 원소 깊이 + 1), Registry 컨테이너를 담는 참조 struct 원소.
     // - AlreadyExists: 같은 ID(다른 종류 포함), 같은 nativeType의 struct, 같은 필드 ID, 대소문자
     // 무시로
     //   같은 실효 도구 이름.

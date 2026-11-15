@@ -598,6 +598,49 @@ internal static class ModuleMetaTests
             }
         });
 
+        // 리플렉션 B9b2: struct flags의 Atomic(Docs/Design/ReflectionExtensions.ko.md 1.8절)은 descriptor를 왕복한다 — import 모델의
+        // Atomic이 되고(뒤의 형질도 그대로 읽힌다) 그 모델을 다시 쓰면 같은 byte이며, 의존 모듈이 Atomic struct를 import해 생성한다.
+        // Atomic은 struct 전용이라 클래스 항목의 Atomic과 중복 Atomic은 모르는·중복 flag(RMC1000)다.
+        suite.Add("Meta.StructAtomicDescriptorRoundTrips", async () =>
+        {
+            using Layout layout = new(options, environment);
+            layout.WriteStructModules();
+            layout.Write("Lower/Public/Lower/Parent.h", StructParent
+                .Replace("ROCKS_STRUCT()\nstruct Point {", "ROCKS_STRUCT(Atomic)\nstruct Point {", StringComparison.Ordinal)
+                .Replace("ROCKS_STRUCT()\nstruct Link {", "ROCKS_STRUCT(Atomic)\nstruct Link {", StringComparison.Ordinal));
+            ProcessResult lower = await layout.RunLowerAsync();
+            Verify.Equal(0, lower.ExitCode, "lower module: " + lower.StdErr);
+            byte[] original = File.ReadAllBytes(layout.Descriptor("Lower"));
+            (string module, List<ClassModel> types) = ModuleDescriptor.Read(layout.Descriptor("Lower"));
+            ClassModel Find(string name) => types.Single(type => type.Name == name);
+            Verify.That(Find("probe::Point").Atomic && Find("probe::Link").Atomic, "imported Atomic structs");
+            Verify.That(!Find("probe::Outer").Atomic && !Find("probe::WorldBits").Atomic && !Find("probe::Parent").Atomic, "imported types without Atomic");
+            Verify.That(Find("probe::Link").ContainsStrongReference && Find("probe::Outer").RequiresWorldOnlyOwner, "generated traits are read next to Atomic");
+            Verify.Equal(16u, Find("probe::Point").Flags, "imported Atomic is TypeFlags::Atomic");
+            Verify.That(ModuleDescriptor.Write(module, types).AsSpan().SequenceEqual(original), "descriptor written from the imported models must keep its bytes");
+            using (JsonDocument parsed = JsonDocument.Parse(original))
+            {
+                Verify.Equal("Atomic", Type(parsed, "probe::Link").GetProperty("flags")[0].GetString(), "Atomic is written before generated traits");
+            }
+
+            ProcessResult upper = await layout.RunUpperInputsAsync([(layout.Source("Upper/Public/Upper/Value.h"), "Upper/Value.h", false),
+                (layout.Source("Upper/Public/Upper/Shape.h"), "Upper/Shape.h", false)]);
+            Verify.Equal(0, upper.ExitCode, "upper module imports Atomic structs: " + upper.StdErr);
+
+            string text = System.Text.Encoding.UTF8.GetString(original);
+            foreach ((string name, string type, Action<System.Text.Json.Nodes.JsonObject> change) in new (string, string, Action<System.Text.Json.Nodes.JsonObject>)[]
+            {
+                ("classAtomic", "probe::Parent", parent => parent["flags"] = new System.Text.Json.Nodes.JsonArray("Atomic")),
+                ("duplicateAtomic", "probe::Point", point => point["flags"] = new System.Text.Json.Nodes.JsonArray("Atomic", "Atomic"))
+            })
+            {
+                string mutated = layout.Generated("Mutated", name + ".rocksmeta.json");
+                Directory.CreateDirectory(Path.GetDirectoryName(mutated)!);
+                File.WriteAllText(mutated, MutateType(text, type, change));
+                await Reject(layout.RunUpperAsync(imports: [mutated]), "RMC1000", "invalid descriptor");
+            }
+        });
+
         // import한 struct의 형질: Lower의 WorldBits(RequiresWorldOnlyOwner)를 필드로 둔 WorldOnly 아닌 Upper 클래스는 RMC2206이고,
         // descriptor가 public struct에서 private struct를 쓰거나 다른 모듈의 private struct를 쓰면 RMC2006이다.
         suite.Add("Meta.ImportedStructTraitsAndVisibilityAreEnforced", async () =>

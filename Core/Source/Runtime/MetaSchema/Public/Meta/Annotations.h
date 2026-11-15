@@ -47,8 +47,15 @@
 // struct이고 소유 클래스의 생성 Trace가 그 참조를 방문한다. 저장 wire는 중첩 Record(schema = struct
 // ID, schema version = Version)다. 한 레코드에 ROCKS_CLASS와 함께 쓸 수 없다.
 //
-// 지정자: Version=N(Record schema version, 없으면 1). Binds="…"(Core 값 타입 결합)는 B4c에서
-// 받는다. struct가 `static Result<Array<uint8>> Migrate(Allocator&, TypeId, uint32 from, uint32 to,
+// 지정자: Version=N(Record schema version, 없으면 1). Atomic(값 없음 — TypeFlags::Atomic): 값이
+// 통째 단위다. 차이 저장은 멤버 하나라도 기준과 다르면 모든 멤버를 쓰고 override 집합·되돌리기의
+// 단위가 그 struct 필드 경로다(Docs/Design/ReflectionExtensions.ko.md 3.1절 — 차이 쓰기·override·
+// 되돌리기 구현은 A5, 되돌리기는 RuntimeClassMetadata 'struct 통째 되돌리기' 후속과 함께).
+// 로드·경로 접근은 멤버 단위 그대로이고 조회는 StructView::IsAtomic이다. Binds="…"(Core 값 타입
+// 결합 — 미러 선언)는 CoreTypeBindings 모듈에서만 받는다(다른 모듈은 RMC2004). CLASS 지정자
+// Abstract·WorldOnly는 받지 않는다.
+//
+// struct가 `static Result<Array<uint8>> Migrate(Allocator&, TypeId, uint32 from, uint32 to,
 // Span<const uint8> record) noexcept`를 선언하면 옛 버전 Record를 올리는 타입 마이그레이션으로
 // 등록된다. private이면 ROCKS_GENERATED_BODY가 필요하고, Migrate라는 이름의 멤버가 이 시그니처가
 // 아니면 생성 코드가 컴파일되지 않는다(조용히 마이그레이션 없이 등록되지 않는다).
@@ -59,6 +66,12 @@
 //       ROCKS_PROPERTY() uint32 bulkId = 0;
 //       ROCKS_PROPERTY() uint64 rawBytes = 0;
 //       ROCKS_PROPERTY() Sha256Digest digest;
+//   };
+//
+//   ROCKS_STRUCT(Atomic)      // 두 끝을 한 단위로 기준과 비교·저장·덮어쓴다
+//   struct LodRange {
+//       ROCKS_PROPERTY() float minScreenSize = 0;
+//       ROCKS_PROPERTY() float maxScreenSize = 1;
 //   };
 #define ROCKS_STRUCT(...)                                                                          \
     enum {                                                                                         \

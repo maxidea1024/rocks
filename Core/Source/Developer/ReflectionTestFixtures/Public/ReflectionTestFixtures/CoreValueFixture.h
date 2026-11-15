@@ -30,7 +30,8 @@ struct CoreValueBundle {
 // B4c Core 값 타입 필드 fixture다(Docs/Design/ReflectionFoundations.ko.md 4.5절). 필드 형식은 실제
 // Core 타입(별칭 포함)이고 CoreTypeBindings의 Binds 미러로 리플렉션된다: 별칭 Vec3·Quat, 비템플릿
 // Color·IntVec3, 다른 미러에 의존하는 Transform, EditorOnly LinearColor, Core 값 멤버를 담는 사용자
-// struct.
+// struct, 별칭 Binds의 Atomic 미러 Transform3f·Transform3d(리플렉션 B9b2 —
+// Docs/Design/ReflectionExtensions.ko.md 3.2절). CoreValueBundle과 함께 미러 17종을 모두 덮는다.
 ROCKS_CLASS()
 struct CoreValueFields final : Object {
     ROCKS_PROPERTY() Vec3 position;
@@ -40,6 +41,8 @@ struct CoreValueFields final : Object {
     ROCKS_PROPERTY() IntVec3 cell;
     ROCKS_PROPERTY(EditorOnly) LinearColor debugColor;
     ROCKS_PROPERTY() CoreValueBundle bundle;
+    ROCKS_PROPERTY() Transform3f pose;
+    ROCKS_PROPERTY() Transform3d precisePose;
 };
 
 // B8a native 파생 시험의 SceneComponent형 리플렉션 base다(Docs/Design/ReflectionFoundations.ko.md

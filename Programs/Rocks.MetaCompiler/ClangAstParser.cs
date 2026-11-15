@@ -616,6 +616,7 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
                     Header = owner.Include,
                     Private = owner.Private,
                     IsStruct = isStruct,
+                    Atomic = structSpec?.Atomic ?? false,
                     BindsSpelling = structSpec?.Binds ?? "",
                     BindsSite = structSpec is { Binds.Length: > 0 } ? prefix.Site : null
                 };

@@ -579,14 +579,18 @@ void FillCoreValues(const Paths& paths, Allocator& allocator) noexcept {
                        {"bundle.orientation.w", Float64(allocator, -0.5)},
                        {"bundle.heading.pitch", Float32(allocator, -0.5f)},
                        {"bundle.headingPrecise.roll", Float64(allocator, 3.0)},
-                       {"bundle.size.y", Signed(allocator, ValueKind::Int32, 9)}};
+                       {"bundle.size.y", Signed(allocator, ValueKind::Int32, 9)},
+                       {"pose.translation.y", Float32(allocator, 0.25f)},
+                       {"pose.scale.z", Float32(allocator, -3.0f)},
+                       {"precisePose.rotation.x", Float64(allocator, 0.5)},
+                       {"precisePose.translation.z", Float64(allocator, 1.0e15 + 0.5)}};
     for (const Entry& entry : entries) {
         REQUIRE(paths.Write(entry.path, entry.value));
     }
 }
 
-// FillCoreValues가 쓴 값인지 본다(쓰지 않은 멤버는 생성자 기본값 — Quat w = 1, Transform scale =
-// 1).
+// FillCoreValues가 쓴 값인지 본다(쓰지 않은 멤버는 생성자 기본값 — Quat w = 1, Transform·
+// Transform3 scale = 1). Atomic 미러(Transform3f·3d)도 경로 접근은 멤버 단위다.
 void CheckCoreValues(const CoreValueFields& value, ObjectHandle) noexcept {
     CHECK(value.position.x == 1.5f && value.position.y == -2.25f && value.position.z == 3.0f);
     CHECK(value.rotation.x == 0.0f && value.rotation.z == 0.75f && value.rotation.w == -0.5f);
@@ -601,6 +605,11 @@ void CheckCoreValues(const CoreValueFields& value, ObjectHandle) noexcept {
     CHECK(value.bundle.uvPrecise.x == 1.0e12 + 0.5 && value.bundle.weights.w == 4.0f);
     CHECK(value.bundle.orientation.w == -0.5 && value.bundle.heading.pitch == -0.5f);
     CHECK(value.bundle.headingPrecise.roll == 3.0 && value.bundle.size.y == 9);
+    CHECK(value.pose.translation.x == 0.0f && value.pose.translation.y == 0.25f);
+    CHECK(value.pose.rotation.w == 1.0f && value.pose.scale.x == 1.0f &&
+          value.pose.scale.z == -3.0f);
+    CHECK(value.precisePose.rotation.x == 0.5 && value.precisePose.rotation.w == 1.0);
+    CHECK(value.precisePose.translation.z == 1.0e15 + 0.5 && value.precisePose.scale.y == 1.0);
 }
 
 // root를 저장해 target에 복원하고 check(복원 객체, 그 handle)로 값을 본 뒤, target에서 다시 저장한
@@ -656,8 +665,10 @@ TEST(GeneratedPath_ModuleRegistrationAttachesPathThunks) {
         //                + extra의 StructLeaf 3 = 12
         //   ArrayOwner: 배열 17 + bundle, 멤버 Vec3 3 + ArrayTag 3 + ArraySlot 3 + ArrayBundle 2
         //               + 그 안 ArraySlot 3 = 14 (ArrayChild는 상속 18 + extra)
-        //   CoreValueFields: 7, 멤버 Vec3 3 + Quat 4 + Color 4 + Transform 3·Vec3d 3·Quat 4·Vec3 3
-        //                    + IntVec3 3 + LinearColor 4 + CoreValueBundle 8·미러 24 = 63
+        //   CoreValueFields: 9, 멤버 Vec3 3 + Quat 4 + Color 4 + Transform 3·Vec3d 3·Quat 4·Vec3 3
+        //                    + IntVec3 3 + LinearColor 4 + CoreValueBundle 8·미러 24
+        //                    + Transform3f 3·Vec3 3·Quat 4·Vec3 3
+        //                    + Transform3d 3·Vec3d 3·Quatd 4·Vec3d 3 = 89
         //   PathOwner: 6, 멤버 PathEntry 3 × 4(primary·frozen·entries·frozenEntries) = 12
         //   PropertyNode 4·Node 12·EnumFields 3·AssetFields 4는 단일 값 필드뿐이다.
         struct Expected {
@@ -670,7 +681,7 @@ TEST(GeneratedPath_ModuleRegistrationAttachesPathThunks) {
         const Expected expected[] = {{TypeIdOf<StructOwner>(), 2, 1, 12},
                                      {TypeIdOf<ArrayOwner>(), 18, 0, 14},
                                      {TypeIdOf<ArrayChild>(), 19, 0, 14},
-                                     {TypeIdOf<CoreValueFields>(), 7, 0, 63},
+                                     {TypeIdOf<CoreValueFields>(), 9, 0, 89},
                                      {TypeIdOf<PathOwner>(), 6, 0, 12},
                                      {TypeIdOf<PropertyNode>(), 0, 4, 0},
                                      {TypeIdOf<reflection_fixture::Node>(), 0, 12, 0},

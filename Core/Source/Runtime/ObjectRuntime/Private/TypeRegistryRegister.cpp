@@ -32,8 +32,12 @@ Span<const T> CopyBytes(Span<const T> source, uint8*& cursor) noexcept {
     return {destination, source.Size()};
 }
 
-constexpr uint32 KnownTypeFlags =
+// 클래스·struct가 받는 TypeFlags 비트다. 그 밖의 비트(클래스의 Atomic, struct의 Abstract·
+// WorldOnly 포함)는 InvalidArgument다.
+constexpr uint32 KnownClassFlags =
     static_cast<uint32>(TypeFlags::Abstract) | static_cast<uint32>(TypeFlags::WorldOnly);
+
+constexpr uint32 KnownStructFlags = static_cast<uint32>(TypeFlags::Atomic);
 
 constexpr uint32 KnownFieldFlags =
     static_cast<uint32>(FieldFlags::Transient) | static_cast<uint32>(FieldFlags::ReadOnly) |
@@ -246,7 +250,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
 
     if (schema.id == Guid{} || schema.version == 0 || schema.fields.Size() > 4096 ||
         ops.fields.Size() > schema.fields.Size() || schema.baseType == schema.id ||
-        (schema.flags & ~KnownTypeFlags) != 0 ||
+        (schema.flags & ~KnownClassFlags) != 0 ||
         (HasFlag(schema.flags, TypeFlags::Abstract) != (ops.construct == nullptr)) ||
         !ops.destroy || !ops.trace || !ops.nativeType || ops.size < sizeof(Object) ||
         ops.alignment < alignof(Object) || (ops.alignment & (ops.alignment - 1)) != 0 ||
@@ -712,7 +716,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     }
 
     if (schema.id == Guid{} || schema.version == 0 || schema.baseType != TypeId{} ||
-        schema.flags != 0 || ops.size == 0 || ops.alignment == 0 ||
+        (schema.flags & ~KnownStructFlags) != 0 || ops.size == 0 || ops.alignment == 0 ||
         (ops.alignment & (ops.alignment - 1)) != 0 || !ops.nativeType || !ops.construct ||
         !ops.destroy || ops.fields.Size() != schema.fields.Size() ||
         !StringView(schema.name.Data(), schema.name.Size()).ValidateUtf8()) {
@@ -875,6 +879,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     record->fieldTypes = fieldTypes;
     record->schema.id = schema.id;
     record->schema.version = schema.version;
+    record->schema.flags = schema.flags;
     record->schema.name = CopyBytes(schema.name, cursor);
     record->schema.fields = {fields, schema.fields.Size()};
     for (usize index = 0; index < schema.fields.Size(); ++index) {

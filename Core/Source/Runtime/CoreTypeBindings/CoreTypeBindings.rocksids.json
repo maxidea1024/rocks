@@ -192,6 +192,48 @@
     },
     {
       "kind": "field",
+      "name": "rocks::core_type_bindings::Transform3dBinding::rotation",
+      "id": "9c0b3f1099394c66836676551ecd86e7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::Transform3dBinding::scale",
+      "id": "527cd2b186e94e248659b4ce8138631b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::Transform3dBinding::translation",
+      "id": "7a546fd4e002461ea80846bad3638aea",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::Transform3fBinding::rotation",
+      "id": "da72debc5b034266867cc3d602767ba6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::Transform3fBinding::scale",
+      "id": "78088389d7df4bceb781f1b522cdc43d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::Transform3fBinding::translation",
+      "id": "b0b2d6c3518549a790366059006ac0a6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::core_type_bindings::TransformBinding::rotation",
       "id": "1856cea142534921bbace526a7586cd0",
       "aliases": [],
@@ -390,6 +432,20 @@
       "kind": "type",
       "name": "rocks::core_type_bindings::RotatordBinding",
       "id": "ae665448dc7c40529dbe92282b6e96e3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::Transform3dBinding",
+      "id": "c22abe582f8a42ffbc1854085be65be4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::Transform3fBinding",
+      "id": "4b93c2a63f3c4491b90e0e25f2583679",
       "aliases": [],
       "retired": false
     },

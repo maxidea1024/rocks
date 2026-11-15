@@ -678,8 +678,44 @@ internal static class MetaTests
         AddRejectGroup("Meta.StructMembersNeedPropertyOrNative", [
             Preamble + "ROCKS_STRUCT()\nstruct Leaf {\nROCKS_PROPERTY() rocks::int32 count = 0;\nrocks::int32 hidden = 0;\n};\n}\n"],
             "RMC2000", "PROPERTY or NATIVE");
-        AddRejectGroup("Meta.StructSpecifiersAreRestricted", new[] { "WorldOnly", "Abstract", "Version=0", "Version=\"2\"", "Binds=1" }
+        AddRejectGroup("Meta.StructSpecifiersAreRestricted", new[] { "WorldOnly", "Abstract", "Version=0", "Version=\"2\"", "Binds=1", "Atomic=1", "Atomic=\"yes\"", "Atomic, Atomic" }
             .Select(spec => Preamble + $"ROCKS_STRUCT({spec})\nstruct Leaf {{\nROCKS_PROPERTY() rocks::int32 count = 0;\n}};\n}}\n"), "RMC2000", "specifier");
+        // 리플렉션 B9b2: Atomic은 STRUCT 전용 지정자다(Docs/Design/ReflectionExtensions.ko.md 3.1·15절). CLASS 지정자 표에는 없으므로
+        // ROCKS_CLASS(Atomic)은 모르는 지정자 오류다.
+        AddRejectGroup("Meta.ClassAtomicSpecifierIsUnknown", new[] { "Atomic", "WorldOnly, Atomic" }
+            .Select(spec => Preamble + $"ROCKS_CLASS({spec})\nstruct Value : public rocks::Object {{\nROCKS_PROPERTY() rocks::int32 count = 0;\n}};\n}}\n"),
+            "RMC2000", "unsupported CLASS specifier/value Atomic");
+        // 리플렉션 B9b2: ROCKS_STRUCT(Atomic)은 descriptor struct flags의 Atomic(형질보다 앞)과 생성 스키마 flags 16u에 닿고, Version·
+        // 형질과 함께 쓸 수 있다. Atomic은 멤버에서 바깥으로 전파되지 않는다(Atomic 멤버를 담은 Plain은 flags 0).
+        suite.Add("Meta.StructAtomicReachesDescriptorAndSchemaFlags", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            string source = Preamble + "struct Value;\n" +
+                "ROCKS_STRUCT(Atomic)\nstruct Point {\nROCKS_PROPERTY() rocks::int32 x = 0;\nROCKS_PROPERTY() rocks::int32 y = 0;\n};\n" +
+                "ROCKS_STRUCT(Version = 3, Atomic)\nstruct Segment {\nROCKS_PROPERTY() Point from;\nROCKS_PROPERTY() rocks::ObjectRef<Value> owner;\n};\n" +
+                "ROCKS_STRUCT()\nstruct Plain {\nROCKS_PROPERTY() Point at;\n};\n" +
+                "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() Point point;\nROCKS_PROPERTY() Segment segment;\nROCKS_PROPERTY() Plain plain;\n};\n}\n";
+            await probe.GenerateAsync(source);
+            using System.Text.Json.JsonDocument descriptor = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(probe.Descriptor));
+            System.Text.Json.JsonElement Type(string name) => descriptor.RootElement.GetProperty("types").EnumerateArray()
+                .Single(type => type.GetProperty("name").GetString() == name);
+            string Flags(string name) => string.Join(",", Type(name).GetProperty("flags").EnumerateArray().Select(flag => flag.GetString()));
+            Verify.Equal("Atomic", Flags("probe::Point"), "Atomic struct flag");
+            Verify.Equal("Atomic,ContainsStrongReference", Flags("probe::Segment"), "Atomic comes before generated traits");
+            Verify.Equal(3, Type("probe::Segment").GetProperty("version").GetInt32(), "Version with Atomic");
+            Verify.Equal("", Flags("probe::Plain"), "Atomic is not propagated from a member");
+            Verify.Equal("", Flags("probe::Value"), "class flags");
+            string generated = Compact(File.ReadAllText(probe.Output));
+            foreach ((string expected, string reason) in new[]
+            {
+                ("Span<const char>(\"probe::Point\", 12), Guid{}, 16u};", "Atomic struct schema flags"),
+                ("Span<const char>(\"probe::Segment\", 14), Guid{}, 16u};", "Atomic reference struct schema flags"),
+                ("Span<const char>(\"probe::Plain\", 12), Guid{}, 0u};", "plain struct schema flags")
+            })
+            {
+                Verify.That(generated.Contains(Compact(expected), StringComparison.Ordinal), "generated code missing " + reason + ": " + expected);
+            }
+        });
         AddRejectGroup("Meta.StructIsNotABaseOrReferenceTarget", [
             Preamble.Replace("namespace probe {", "#include <Object/SoftObjectRef.h>\nnamespace probe {", StringComparison.Ordinal) + StructLeaf +
                 "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nexplicit Value(rocks::Allocator& allocator) noexcept : next(allocator) {}\n" +
@@ -1799,7 +1835,8 @@ internal static class MetaProbeIdentity
                 "probe::Zeta", "probe::Alpha", "probe::Vec3Binding", "probe::Vec3dBinding", "probe::PairBinding", "probe::OtherBinding",
                 "probe::RealBinding", "probe::ABinding", "probe::BBinding", "probe::MixedBinding", "probe::HiddenBinding",
                 "probe::FixedBinding", "probe::SplitBinding", "probe::Bundle", "probe::WorldBundle", "probe::Movable", "probe::Node", "probe::MovableBundle",
-                "probe::Tiny", "probe::Signed", "probe::Short", "probe::Wide", "probe::Huge", "probe::Bits" }
+                "probe::Tiny", "probe::Signed", "probe::Short", "probe::Wide", "probe::Huge", "probe::Bits",
+                "probe::Point", "probe::Segment", "probe::Plain" }
                 .Concat(Enumerable.Range(1, 17).Select(level => $"probe::Chain{level}")))
             {
                 manifest.Register("type", name);
@@ -1827,7 +1864,9 @@ internal static class MetaProbeIdentity
                 "probe::Value::points", "probe::Box::refs", "probe::MovableBundle::refs",
                 "probe::Value::tiny", "probe::Value::signedValue", "probe::Value::shortValue", "probe::Value::wide", "probe::Value::huge",
                 "probe::Value::narrow", "probe::Value::tinies", "probe::Value::narrows", "probe::Leaf::tiny", "probe::Leaf::narrow",
-                "probe::Value::letter", "probe::Value::letters" }
+                "probe::Value::letter", "probe::Value::letters",
+                "probe::Point::x", "probe::Point::y", "probe::Segment::from", "probe::Segment::owner", "probe::Plain::at",
+                "probe::Value::point", "probe::Value::segment" }
                 .Concat(Enumerable.Range(2, 16).Select(level => $"probe::Chain{level}::inner")))
             {
                 manifest.Register("field", name);

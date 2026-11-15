@@ -461,7 +461,8 @@ internal static class CppEmitter
     }
 
     // 리플렉션 struct의 GeneratedType 특수화다(Docs/Design/ReflectionFoundations.ko.md 4.6절): 형질
-    // (ContainsStrongReference·RequiresWorldOnlyOwner)과 중첩 깊이, Id, Schema(base·클래스 플래그 없는 TypeSchema),
+    // (ContainsStrongReference·RequiresWorldOnlyOwner)과 중첩 깊이, Id, Schema(base 없는 TypeSchema — flags는 struct
+    // 플래그 Atomic 16뿐이다, Docs/Design/ReflectionExtensions.ko.md 3.1절),
     // Trace(모든 struct — 참조 없는 struct는 빈 본문), Ops(RuntimeStructOps — 멤버 codec 함수표, 참조 struct만 trace,
     // Migrate가 있으면 migrate), Register. 형질과 깊이는 모델 값을 내되 직접 멤버의 생성 값을 포함하는지
     // static_assert로 대조한다(import descriptor의 flags를 믿지 않는다). Binds 미러는 실제 타입(NativeName)의
@@ -526,7 +527,7 @@ internal static class CppEmitter
         Line("static const TypeSchema& Schema() noexcept {");
         EmitFieldSchemas(type, Line);
         string fieldSpan = type.Fields.Count == 0 ? "Span<const FieldSchema>{}" : $"Span<const FieldSchema>(fields, {type.Fields.Count})";
-        Line($"static const TypeSchema schema{{Id(), {type.Version}, {fieldSpan}, {View(type.Name)}, Guid{{}}, 0u}};");
+        Line($"static const TypeSchema schema{{Id(), {type.Version}, {fieldSpan}, {View(type.Name)}, Guid{{}}, {type.Flags}u}};");
         Line("return schema;");
         Line("}");
         // 참조 struct는 직접 ObjectRef 멤버(Transient 포함 — GC는 추적한다)를 Visit하고 멤버 struct의 Trace를, 모든 배열

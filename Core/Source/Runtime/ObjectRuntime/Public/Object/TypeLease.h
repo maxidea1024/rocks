@@ -33,7 +33,7 @@ public:
         return record_ == nullptr;
     }
 
-    // struct 스키마다(base 없음, id·version·name·fields).
+    // struct 스키마다(base 없음, id·version·name·fields·flags — flags는 TypeFlags::Atomic만).
     const TypeSchema& Schema() const noexcept;
     const RuntimeStructOps& StructOps() const noexcept;
 
@@ -60,6 +60,19 @@ public:
     bool ContainsRequired() const noexcept;
     bool RequiresWorldOnlyOwner() const noexcept;
     bool ContainsReferenceArray() const noexcept;
+
+    // 선언된 struct 플래그 TypeFlags::Atomic(ROCKS_STRUCT(Atomic))이 있는지다 — 값이 통째
+    // 단위다(Docs/Design/ReflectionExtensions.ko.md 3.1절: 차이 저장은 멤버 하나라도 기준과
+    // 다르면 모든 멤버를 쓰고, override 집합·되돌리기 단위가 그 struct 필드 경로다). 차이 쓰기·
+    // override 기록(A5)과 텍스트 출력이 멤버로 내려갈지 정할 때 이것을 본다. 로드·경로 접근은
+    // Atomic과 무관하게 멤버 단위다. 등록이 계산한 형질이 아니라 스키마 flags의 비트이며, 멤버
+    // struct의 Atomic을 바깥으로 전파하지 않는다(비Atomic struct 안의 Atomic 멤버는 그 멤버
+    // 경로에서 멈춘다). 빈 view는 Fatal이다.
+    //
+    // 사용 예(차이 저장이 멤버로 내려갈지 고른다):
+    //   const StructView view = lease.FieldStruct(fieldIndex);
+    //   if (view.IsAtomic()) { /* 기준과 다르면 struct Record 전체를 쓴다 */ }
+    bool IsAtomic() const noexcept;
 
 private:
     friend class TypeRegistry;
@@ -107,7 +120,7 @@ public:
 
     // 레코드 종류다. Acquire는 Class만, AcquireValueType은 Enum·Struct만 돌려준다. 빈 lease는
     // Fatal이다. Enum lease의 Schema()는 id·name만 있고 필드가 없으며 Ops()는 nativeType·module만
-    // 있다. Struct lease의 Schema()는 id·version·name·fields이고 Ops()는 size·alignment·
+    // 있다. Struct lease의 Schema()는 id·version·name·fields·flags이고 Ops()는 size·alignment·
     // nativeType·module이다(멤버 함수표 등은 StructOps()).
     TypeKind Kind() const noexcept;
 

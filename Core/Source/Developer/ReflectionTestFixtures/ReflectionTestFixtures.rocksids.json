@@ -342,8 +342,22 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::CoreValueFields::pose",
+      "id": "cc8df577a3834502ba5d6183aed7822e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::CoreValueFields::position",
       "id": "8d7bba820df24e56a3747abe0180ad43",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::CoreValueFields::precisePose",
+      "id": "eb44338f0e484c0d8ed302ef3be92539",
       "aliases": [],
       "retired": false
     },

@@ -67,7 +67,7 @@
 ```
 
 - 클래스 `fields`는 상속 포함 전체(정렬 순서 그대로)이고 각 필드에 선언 owner를 적는다. 생성 thunk는 `&::<owner>::<name>`을 쓰며 private 기반 필드는 owner의 `ROCKS_GENERATED_BODY`(모든 `GeneratedType` 특수화에 friend)로 접근한다 — 모듈 경계와 무관하다.
-- struct의 `flags`는 `ContainsStrongReference`·`RequiresWorldOnlyOwner`(생성 형질, 4.6절)·`ContainsReferenceArray`(B5, 5.6절), `binds`는 Binds 실제 타입의 Clang 정규 철자(없으면 빈 문자열)다.
+- struct의 `flags`는 선언 플래그 `Atomic`(리플렉션 B9b2 — [RX](ReflectionExtensions.ko.md) 1.8·3.1절, 쓰기 순서는 형질보다 앞)과 `ContainsStrongReference`·`RequiresWorldOnlyOwner`(생성 형질, 4.6절)·`ContainsReferenceArray`(B5, 5.6절), `binds`는 Binds 실제 타입의 Clang 정규 철자(없으면 빈 문자열)다.
 - 읽기는 모르는 속성을 거부하고 schema 1만 받는다. 출력은 결정적이다(이름 순, 고정 서식, LF).
 
 ### 1.5 import와 파서의 수집 범위
@@ -308,9 +308,9 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema&, Ru
 ```
 
 - decode의 세 방식: **검증**(construction·structValue null — 멤버 주소를 만들지 않는다), **관찰**(construction null, structValue = scratch 임시 값 — 직접 쓴다), **적용**(둘 다 non-null — 소유 객체 안 주소).
-- 레코드는 `RegisterEnum`처럼 기존 칸을 채운다: `record->schema`(id·version·name·fields), `record->ops`(size·alignment·nativeType·module — `ModuleRegistration::Retain`의 native 대조가 그대로 동작). 추가 칸: 스키마 순서로 정렬해 깊게 복사한 멤버 함수표, 필드 ID 정렬 색인, construct·destroy·trace·migrate, 계산 값 `depth`·`containsStrongReference`(Transient 참조 포함 — GC는 추적한다)·`requiresWorldOnlyOwner`(입력 OR 멤버 struct)·`containsRequired`(Required 후손이 있는지 — 처음에는 누락 진단 가지치기였고, A0-Oc부터 Required 실효 값 검사가 검사할 최상위 필드를 고르는 데 쓴다 — 5.6절 배열 멤버·원소 struct 포함).
+- 레코드는 `RegisterEnum`처럼 기존 칸을 채운다: `record->schema`(id·version·name·fields·flags — flags는 리플렉션 B9b2부터 Atomic), `record->ops`(size·alignment·nativeType·module — `ModuleRegistration::Retain`의 native 대조가 그대로 동작). 추가 칸: 스키마 순서로 정렬해 깊게 복사한 멤버 함수표, 필드 ID 정렬 색인, construct·destroy·trace·migrate, 계산 값 `depth`·`containsStrongReference`(Transient 참조 포함 — GC는 추적한다)·`requiresWorldOnlyOwner`(입력 OR 멤버 struct)·`containsRequired`(Required 후손이 있는지 — 처음에는 누락 진단 가지치기였고, A0-Oc부터 Required 실효 값 검사가 검사할 최상위 필드를 고르는 데 쓴다 — 5.6절 배열 멤버·원소 struct 포함).
 - 필드 검증은 `Register`와 공유하는 함수로 뽑는다(4096 필드 상한·플래그·값 종류·도구 이름·Required 규칙). Struct 필드를 위해 지원 값 종류·typed 판정·`valueNativeType` 대조(Enum|Struct)·의존 탐색과 `fieldTypes`를 일반화한다. `FieldEnum`은 의존 레코드의 종류를 확인한다.
-- `RegisterStruct` 규칙: version ≥ 1, base 없음·클래스 플래그 없음, Transient가 아닌 모든 필드에 encode·decode 둘 다(Transient는 둘 다 없거나 둘 다), 멤버 함수표는 스키마 필드와 1:1(같은 ID 둘·없는 ID는 InvalidArgument), size·alignment·nativeType·construct·destroy 필수, `trace != null ⇔ containsStrongReference`, depth > `MaxStructDepth`는 InvalidArgument, 같은 nativeType의 다른 ID는 AlreadyExists, 멤버 struct·enum이 미등록이면 NotFound·종류가 다르면 TypeMismatch·native 키가 다르면 TypeMismatch. 순환은 의존이 먼저 등록돼야 하므로 레지스트리에서는 생기지 않는다.
+- `RegisterStruct` 규칙: version ≥ 1, base 없음, flags는 struct 플래그 `TypeFlags::Atomic`만(`KnownStructFlags` — 클래스 플래그·그 밖의 비트는 InvalidArgument, 리플렉션 B9b2 — [RX](ReflectionExtensions.ko.md) 3.1절. 조회는 `StructView::IsAtomic`), Transient가 아닌 모든 필드에 encode·decode 둘 다(Transient는 둘 다 없거나 둘 다), 멤버 함수표는 스키마 필드와 1:1(같은 ID 둘·없는 ID는 InvalidArgument), size·alignment·nativeType·construct·destroy 필수, `trace != null ⇔ containsStrongReference`, depth > `MaxStructDepth`는 InvalidArgument, 같은 nativeType의 다른 ID는 AlreadyExists, 멤버 struct·enum이 미등록이면 NotFound·종류가 다르면 TypeMismatch·native 키가 다르면 TypeMismatch. 순환은 의존이 먼저 등록돼야 하므로 레지스트리에서는 생기지 않는다.
 - 클래스의 Struct 필드: `read`·`writeStaged`는 null, `write`는 Struct 종류로 묶어 호출하면 **Unsupported**(3.6절 — 멤버 단위 쓰기는 B6 경로 접근), encode·decode 필수, `valueNativeType` = struct native 키. 클래스가 WorldOnly가 아닌데 struct의 `requiresWorldOnlyOwner`가 참이면 InvalidArgument(MetaCompiler RMC2206이 먼저 막는다).
 - `TypeLease::FieldStruct(usize) const&`(`const&& = delete`) → `StructView`. struct 레코드 lease는 `AcquireValueType(id, TypeKind::Struct)`로 열고 `Schema()`·`Ops()`·`StructOps()`.
 - `StructView`(비소유 — 얻어 온 lease가 사는 동안 유효하다. 의존 사슬이 대상 레코드를 살린다): `Schema()`, `StructOps()`, `FieldOps(i)`(스키마 순서), `FieldIndex(Guid)`(정렬 색인 이진 탐색), `FieldEnum(i)`, `FieldStruct(i)`, `Depth()`, `ContainsStrongReference()`, `ContainsRequired()`, `IsEmpty()`.
