@@ -263,4 +263,16 @@ inline uint64 NameKeyHash(ObjectHandle outer, StringView key) noexcept {
 // 새 객체의 객체 경로 길이다(공개 detail::ChildPathBytes — 그래프 1단계와 같이 쓴다).
 using detail::ChildPathBytes;
 
+// 컨테이너 버퍼의 다음 용량이다(4부터 두 배, uint32 상한에서 포화).
+inline uint32 GrownCapacity(uint32 capacity) noexcept {
+    constexpr uint32 Maximum = NumericLimits<uint32>::Max();
+    return capacity < 4u ? 4u : capacity > Maximum / 2 ? Maximum : capacity * 2u;
+}
+
+inline void ReleaseContainerMemory(Allocator& allocator, void* memory) noexcept {
+    if (memory != nullptr && !allocator.Deallocate(memory)) {
+        platform::Fatal("Registry container deallocation failed");
+    }
+}
+
 } // namespace rocks::registry_detail

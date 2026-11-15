@@ -9,8 +9,10 @@
 // ObjectRegistry 기반부다. 생성·소멸·종료(Shutdown), 슬롯 조회(chunk 표 색인 SlotAt·FindSlot)와
 // 접근·생존 검사, root·Borrow·backend lease·encode 고정 보유와 반환, 파괴 요청·수명·타입 조회,
 // 통계·진단을 둔다. 생성 트랜잭션은 ObjectRegistryCreate.cpp, Outer·이름은
-// ObjectRegistryNames.cpp, 참조 간선 쓰기는 ObjectRegistryEdges.cpp, GC는 ObjectRegistryGc.cpp,
-// 관찰자 기록과 Discard는 ObjectRegistryObserver.cpp, 공용 내부 정의는 ObjectRegistryInternal.h다.
+// ObjectRegistryNames.cpp, 참조 간선 쓰기는 ObjectRegistryEdges.cpp(단일 참조·검증)·
+// ObjectRegistryArrayEdges.cpp(ObjectRefArray)·ObjectRegistryStructElements.cpp(StructRefArray),
+// GC는 ObjectRegistryGc.cpp, 관찰자 기록과 Discard는 ObjectRegistryObserver.cpp, 공용 내부 정의는
+// ObjectRegistryInternal.h다.
 namespace rocks {
 
 using namespace registry_detail;

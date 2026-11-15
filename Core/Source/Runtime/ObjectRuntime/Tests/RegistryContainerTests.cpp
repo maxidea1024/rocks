@@ -101,8 +101,8 @@ static_assert(detail::RegistryContainer<StructRefArray<MaterialSlot>>::value);
 static_assert(!detail::RegistryContainer<ObjectRef<Item>>::value);
 static_assert(!detail::RegistryContainer<Array<uint32>>::value);
 
-// Registry 컨테이너 할당 태그(ObjectRegistryEdges.cpp): ObjectRefArray 버퍼, StructRefArray
-// 원소 블록·색인.
+// Registry 컨테이너 할당 태그: ObjectRefArray 버퍼(ObjectRegistryArrayEdges.cpp), StructRefArray
+// 원소 블록·색인(ObjectRegistryStructElements.cpp).
 constexpr uint32 RefArrayTag = 0x4f524146u;
 constexpr uint32 ElementTag = 0x53524145u;
 constexpr uint32 IndexTag = 0x53524149u;
