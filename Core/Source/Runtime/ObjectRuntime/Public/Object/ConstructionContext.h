@@ -9,18 +9,18 @@ namespace rocks {
 // Commit하지 않고 범위를 벗어나면 생성 역순으로 롤백한다. 객체 포인터를 외부에 유출하지 않는다.
 // Registry보다 먼저 파괴해야 한다. 현재 활성 트랜잭션이 있으면 Collect는 Busy다.
 //
-// 트랜잭션 상태 규칙(Create·Commit·DescribeOuter 공통): 고정된 오류가 있으면 그 오류를 돌려준다 —
-// 시작 실패(생성자의 접근 WrongThread·WrongContext, 종료 ShuttingDown, 재진입 Busy 등)와 실패한
-// Create의 오류이며, Rollback 뒤에도 남는다. 고정된 오류가 없고 끝난(Commit·Rollback) 트랜잭션이면
-// InvalidArgument다.
+// 트랜잭션 상태 규칙(Create·Commit·DescribeOuter·FindObject 공통): 고정된 오류가 있으면 그 오류를
+// 돌려준다 — 시작 실패(생성자의 접근 WrongThread·WrongContext, 종료 ShuttingDown, 재진입 Busy
+// 등)와 실패한 Create의 오류이며, Rollback 뒤에도 남는다. 고정된 오류가 없고 끝난(Commit·Rollback)
+// 트랜잭션이면 InvalidArgument다.
 //
 // Required 검사 중 표시(Docs/Design/ObjectFoundations.ko.md 4절): 그래프 로드가 적용 뒤·Commit 전에
 // staged 객체의 실효 값을 encode 경로로 검사하는 동안(FieldEncodeContext::BeginRequiredCheck부터 그
 // 문맥이 끝날 때까지) Create·SetReference·AssignReferences·AssignElements·SetElementReference·
 // GetForWrite(등록된 생성 staged 쓰기 writeStaged와 그래프 적용의 쓰기가 이것으로 owner를 얻는다)·
 // Commit은 Busy다(encode 고정의 staged판 — hook·allocator 콜백이 검사 중인 값을 바꾸지 못한다). 이
-// Busy는 트랜잭션 상태를 바꾸지 않는다(오류로 고정하지 않는다). Get·DescribeOuter 같은 읽기는 된다
-// (Get이 준 포인터로 값을 바꾸는 것은 막지 못한다 — 콜백 계약이 1차 방어다). 표시 중의
+// Busy는 트랜잭션 상태를 바꾸지 않는다(오류로 고정하지 않는다). Get·DescribeOuter·FindObject 같은
+// 읽기는 된다(Get이 준 포인터로 값을 바꾸는 것은 막지 못한다 — 콜백 계약이 1차 방어다). 표시 중의
 // Rollback·소멸은 검사가 읽는 객체를 없애므로 Fatal이다(계약 위반).
 class ConstructionContext {
 public:
@@ -67,6 +67,30 @@ public:
     // 객체도 받는다). 트랜잭션 상태(클래스 주석의 규칙) → outer가 null이면 InvalidArgument →
     // 생존·이 트랜잭션의 공개 전 객체가 아니면 StaleHandle이다.
     Result<OuterSummary> DescribeOuter(ObjectHandle outer) noexcept;
+
+    // outermost 아래 객체 경로를 이 트랜잭션의 공개 전 객체와 공개된 객체 모두에서 푼다
+    // (Docs/Design/ObjectFoundations.ko.md 5.4절 — A1 SCC 로드가 같은 트랜잭션에 올린 다른 패키지의
+    // 객체를 import 대상으로 해석할 때 쓴다). 규칙은 ObjectRegistry::FindObject와 같고(빈 경로 =
+    // 대표 자식, 대소문자·정규화 형태 무시, 조회 전에 모든 구성 요소의 형식 검사) 보이는 객체만
+    // 넓힌다: outermost와 경로의 각 객체는 공개된 객체(Alive, RequestDestroy만 받은
+    // DestroyRequested)이거나 이 트랜잭션의 공개 전 객체다. 다른 트랜잭션의 공개 전 객체는
+    // outermost면 StaleHandle, 경로 구성 요소면 NotFound다(그 이름을 점유하지만 이 트랜잭션에는
+    // 보이지 않는다). 읽기라 Required 검사 중 표시 동안에도 된다. 소유 스레드 전용이다. 결과
+    // handle은 공개 전 객체일 수 있으므로 Commit 전에는 Resolve할 수 없고 이 트랜잭션의 참조
+    // 대상(SetReference·그래프 imports)으로만 쓴다.
+    //
+    // 순서와 오류: 트랜잭션 상태(클래스 주석의 규칙) → 접근(WrongThread·WrongContext) → 종료·재진입
+    // (ShuttingDown·Busy) → outermost(무효·다른 Registry·다른 트랜잭션의 공개 전 StaleHandle, GC
+    // cutoff white·Retired Destroyed, Outer가 있으면 InvalidArgument) → 경로 형식(4 KiB 초과·빈
+    // 구성 요소·이름 형식 위반 InvalidArgument, NFC 판정 할당 실패 OutOfMemory) → 비교 키 할당
+    // (OutOfMemory) → 없는 구성 요소 NotFound.
+    //
+    // 사용 예(SCC 두 패키지를 한 트랜잭션에 올린 뒤 B의 import를 A의 객체로 해석):
+    //   auto target = transaction.FindObject(packageA, "Body.Socket");
+    //   if (!target) {
+    //       return Result<void>::Failure(target.Error());   // NotFound면 MissingDependency
+    //   }
+    Result<ObjectHandle> FindObject(ObjectHandle outermost, StringView objectPath) noexcept;
 
     ObjectRegistry& Registry() const noexcept {
         return registry_;
@@ -246,12 +270,43 @@ public:
     // 표시 동안 부르면 Fatal이다(클래스 주석).
     void Rollback() noexcept;
 
+    // 클래스 주석의 트랜잭션 상태 규칙을 판정한다: 고정된 오류가 있으면 그 오류, 고정된 오류 없이
+    // 끝났으면(Commit·Rollback) InvalidArgument, 열려 있으면 성공이다. 상태를 바꾸지 않고
+    // Registry를 부르지 않는다(Required 검사 중 표시와 무관하다). 단계형 그래프
+    // 복원(ObjectGraphStage)처럼 트랜잭션을 받아 일하는 쪽이 일을 시작하기 전에 확인할 때 쓴다.
+    //
+    // 사용 예:
+    //   if (auto open = transaction.CheckOpen(); !open) {
+    //       return open; // 고정된 오류 또는 InvalidArgument
+    //   }
+    Result<void> CheckOpen() const noexcept;
+
+    // 이 트랜잭션을 reason 오류로 고정한다(공개 전 객체를 지금 되돌리지 않고 공개만 막는다). 이후
+    // Create·Commit·DescribeOuter·FindObject·CheckOpen은 그 오류를, staged 쓰기는 InvalidArgument를
+    // 돌려주고, 객체는 Rollback 또는 소멸자가 생성 역순으로 되돌린다 — 같은 트랜잭션에 올린 다른
+    // 단계(예: SCC의 다른 그래프)가 handle을 쥐고 있어도 지금 객체를 없애지 않으면서 "전부 공개
+    // 또는 전부 rollback"을 보장한다. 단계형 그래프 복원이 객체를 만든 뒤 실패할 때
+    // 부르고(ApplyFields· CheckRequired), 호출자가 자기 단계(import 해석·prepare 등)의 실패로
+    // 트랜잭션을 버릴 때도 쓴다. Rollback과 달리 Required 검사 중 표시 동안에도 된다(값을 바꾸지
+    // 않는다).
+    //
+    // 순서와 오류: reason이 None이면 InvalidArgument(아무것도 바꾸지 않는다) → 접근(WrongThread·
+    // WrongContext — 소유 스레드 전용) → 이미 고정된 오류가 있으면 그 오류를 유지하고 성공(먼저 난
+    // 오류가 원인이다) → 고정된 오류 없이 끝난(Commit·Rollback) 트랜잭션은
+    // InvalidArgument(공개했거나 되돌린 뒤라 고정할 것이 없다) → 고정하고 성공.
+    //
+    // 사용 예(import 해석 실패로 SCC 트랜잭션 전체를 버린다):
+    //   auto target = transaction.FindObject(packageA, path);
+    //   if (!target) {
+    //       (void)transaction.Fail(target.Error()); // 이후 Commit은 실패하고 소멸자가 되돌린다
+    //       return Result<void>::Failure(target.Error());
+    //   }
+    Result<void> Fail(ErrorCode reason) noexcept;
+
 private:
     friend class ObjectRegistry;
     // 검사 중 표시를 세우고 내린다(BeginRequiredCheck·문맥 소멸).
     friend class FieldEncodeContext;
-    // 클래스 주석의 트랜잭션 상태 규칙이다.
-    Result<void> CheckOpen() const noexcept;
 
     // staged 쓰기(SetReference·컨테이너 쓰기)의 공통 판정이다: 끝났거나 오류 상태면
     // InvalidArgument, Required 검사 중 표시 동안 Busy다.

@@ -98,6 +98,21 @@ Result<void> SetPathMemberReference(PathCursor& cursor, ObjectRef<T>& field,
 Result<void> CheckNewObjectIdentity(const RegistryPolicy& policy, const TypeLease& type,
                                     const OuterSummary* outer, StringView name,
                                     Allocator& scratch) noexcept;
+
+// outer 아래 이름이 nameBytes byte인 새 객체의 객체 경로 길이다(outer가 null이면 outermost라 0).
+// 경로는 Outer 경로 + (둘 다 비어 있지 않으면 '.') + 이름이다(outermost·대표 자식은 빈 경로).
+// Registry 생성과 그래프 1단계(아직 없는 노드의 경로 길이 — Docs/Design/ObjectFoundations.ko.md
+// 5.4절)가 같이 쓴다. 덧셈은 usize로 한다 — 호출자가 준 요약의 pathBytes가 uint32 최대값이어도
+// 넘쳐 작은 값이 되지 않는다(호출자는 결과를 MaxObjectPathBytes와 비교한다).
+inline usize ChildPathBytes(const OuterSummary* outer, usize nameBytes) noexcept {
+    if (outer == nullptr) {
+        return 0;
+    }
+
+    const usize separator = outer->pathBytes != 0 && nameBytes != 0 ? 1 : 0;
+    return static_cast<usize>(outer->pathBytes) + separator + nameBytes;
+}
+
 } // namespace detail
 
 enum class GcPhase : uint8 {
@@ -208,6 +223,19 @@ public:
     // 생성 때 받은 객체 정책이다. 생성 뒤 바뀌지 않으므로 어느 스레드에서나 읽을 수 있다.
     const RegistryPolicy& Policy() const noexcept {
         return options_.policy;
+    }
+
+    // 호출 스레드와 access가 이 Registry의 소유 스레드·문맥인지 본다. 다른 API의 1단계 접근 검사와
+    // 같다(소유 스레드가 아니면 WrongThread, 문맥이 다르면 WrongContext). Registry 상태를 읽거나
+    // 바꾸지 않으므로 종료·재진입과 무관하다. Registry를 부르지 않을 수도 있는 소유 스레드 전용
+    // 단계(단계형 그래프 복원 — ObjectGraphStage)가 계약을 먼저 확인할 때 쓴다.
+    //
+    // 사용 예:
+    //   if (auto owned = registry.VerifyAccess(access); !owned) {
+    //       return owned;
+    //   }
+    Result<void> VerifyAccess(const ObjectAccessContext& access) const noexcept {
+        return CheckAccess(access);
     }
 
     // 기본 생성과 공개를 한 트랜잭션으로 실행한다. 실패 가능한 별도 초기화에는 ConstructionContext
@@ -794,6 +822,12 @@ private:
     // transaction이 0이 아니면 그 트랜잭션의 공개 전 객체도 받는다(ConstructionContext 판).
     Result<OuterSummary> DescribeOuterChecked(const ObjectAccessContext&, ObjectHandle outer,
                                               uint64 transaction) const noexcept;
+    // FindObject의 본문이다. transaction이 0이 아니면 outermost와 경로의 객체로 그 트랜잭션의 공개
+    // 전 객체도 받는다(ConstructionContext::FindObject — 다른 트랜잭션의 공개 전 객체는 outermost면
+    // StaleHandle, 경로 구성 요소면 NotFound).
+    Result<ObjectHandle> FindObjectChecked(const ObjectAccessContext&, ObjectHandle outermost,
+                                           StringView objectPath,
+                                           uint64 transaction) const noexcept;
     ErrorCode ShadeLocked(ObjectHandle) noexcept;
     bool IsCutoff(const Slot*) const noexcept;
     bool IsReclaimable(const Slot&) const noexcept;
@@ -829,6 +863,9 @@ private:
     ObjectHandle HandleOf(const Slot&) const noexcept;
     // 공개된 객체(Alive·DestroyRequested, cutoff 아님)의 슬롯이다. 아니면 StaleHandle·Destroyed다.
     Result<Slot*> FindPublishedLocked(ObjectHandle) const noexcept;
+    // FindPublishedLocked에 transaction(0이 아니면)의 공개 전 객체(생성자 실행 뒤, cutoff 아님)를
+    // 더한다.
+    Result<Slot*> FindVisibleLocked(ObjectHandle, uint64 transaction) const noexcept;
     // scanNamedInners가 거짓이면 hasNamedInners를 구하지 않는다(자식 고리를 훑지 않는다 — 이름 있는
     // 객체 생성은 그 값을 쓰지 않는다).
     OuterSummary DescribeSlotLocked(const Slot&, bool scanNamedInners = true) const noexcept;
@@ -836,6 +873,10 @@ private:
     // 포함)이다. cutoff white 항목은 건너뛴다. 없으면 nullptr.
     Slot* FindNamedLocked(ObjectHandle outer, uint64 hash, StringView key,
                           bool published) const noexcept;
+    // 조회 기준의 색인 항목이다: 공개된 객체와 transaction(0이 아니면)의 공개 전 객체만 돌려주고,
+    // 다른 트랜잭션의 공개 전 객체가 그 이름을 점유하면 nullptr다.
+    Slot* FindVisibleNamedLocked(ObjectHandle outer, uint64 hash, StringView key,
+                                 uint64 transaction) const noexcept;
     // 다음 삽입 한 번에 필요한 새 색인 표 크기다(0이면 지금 표로 충분하다).
     Result<uint32> NameIndexGrowthLocked() const noexcept;
     // 색인을 table(capacity 칸, 0으로 채워짐)로 옮기고 옛 표를 돌려준다(잠금 밖에서 반환한다).

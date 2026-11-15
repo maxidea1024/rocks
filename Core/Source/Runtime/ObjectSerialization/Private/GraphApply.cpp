@@ -1,7 +1,8 @@
 #include "GraphInternal.h"
 
-// 그래프 복원 2단계다: 노드 생성·필드 적용(2단계 문맥)·Required 검사·prepare·Commit
-// (Docs/Design/ObjectFoundations.ko.md 5.4·5.5절).
+// 그래프 복원 2단계의 생성(2a)·필드 적용(2b — 2단계 문맥)이다(Docs/Design/ObjectFoundations.ko.md
+// 5.4절). 단계형 복원(ObjectGraphStage)이 사전 확인(GraphIdentity.cpp) 뒤에 부르고, Required
+// 검사(2c)는 GraphRequired.cpp, Commit은 호출자다.
 namespace rocks::graph_detail {
 namespace {
 
@@ -182,26 +183,35 @@ private:
 
 } // namespace
 
-// 2단계: 모든 노드를 노드 표의 Outer·이름으로 만들고 보관한 필드를 staged 객체에 쓴 뒤, Required
-// 실효 값을 진단하고(2c — CheckRequiredFields) prepare를 부르고 노드 1을 root로 Commit한다. 그래프
-// 예산에 접근하지 않는다. 노드 표의 이름·정책 규칙 위반은 여기서 Create가 거부한다(rollback — 생성
-// 전 판정은 단계형 복원 A0-Od2).
-Result<RootRef<Object>> ConstructGraph(Allocator& allocator, ObjectRegistry& registry,
-                                       const ObjectAccessContext& access, Array<LoadNode>& nodes,
-                                       const ObjectGraphLoadOptions& options) noexcept {
-    ConstructionContext transaction(registry, access);
+Result<void> CreateNodes(ConstructionContext& transaction, Array<LoadNode>& nodes,
+                         ObjectHandle baseOuter, Array<ObjectHandle>& handles) noexcept {
+    handles.Clear();
+    if (auto reserved = handles.TryReserve(nodes.Size()); !reserved) {
+        return reserved;
+    }
+
+    // 노드 표의 정체성 규칙은 1단계와 사전 확인이 끝냈으므로 Create는 할당·슬롯
+    // 상한·종료·재진입으로만 실패한다. Outer는 언제나 앞 노드이거나 기준 Outer다.
     for (usize index = 0; index < nodes.Size(); ++index) {
         const uint32 outerIndex = nodes[index].outer;
-        const ObjectHandle outer =
-            outerIndex == 0 ? options.baseOuter : nodes[outerIndex - 1].handle;
+        const ObjectHandle outer = outerIndex == 0 ? baseOuter : nodes[outerIndex - 1].handle;
         auto created = transaction.Create<Object>(nodes[index].type, outer, nodes[index].name);
         if (!created) {
-            return Result<RootRef<Object>>::Failure(created.Error());
+            return Result<void>::Failure(created.Error());
         }
 
         nodes[index].handle = created.Value();
+        if (!handles.TryPushBack(created.Value())) {
+            platform::Fatal("Object graph node handle reservation failed");
+        }
     }
 
+    return Result<void>::Success();
+}
+
+Result<void> ApplyNodeFields(Allocator& allocator, ConstructionContext& transaction,
+                             const Array<LoadNode>& nodes,
+                             const ObjectGraphLoadOptions& options) noexcept {
     GraphApplyContext context(allocator, options, nodes);
     for (usize index = 0; index < nodes.Size(); ++index) {
         const auto& node = nodes[index];
@@ -215,38 +225,16 @@ Result<RootRef<Object>> ConstructGraph(Allocator& allocator, ObjectRegistry& reg
             auto written =
                 stored.ops->decode(*stored.ops, &transaction, node.handle, stored.view, context);
             if (!written) {
-                return Result<RootRef<Object>>::Failure(written.Error());
+                return written;
             }
         }
 
         if (auto ended = context.EndNode(); !ended) {
-            return Result<RootRef<Object>>::Failure(ended.Error());
+            return ended;
         }
     }
 
-    if (auto checked = CheckRequiredFields(allocator, transaction, nodes, options); !checked) {
-        return Result<RootRef<Object>>::Failure(checked.Error());
-    }
-
-    if (options.prepare) {
-        Array<ObjectHandle> handles(allocator);
-        if (auto reserved = handles.TryReserve(nodes.Size()); !reserved) {
-            return Result<RootRef<Object>>::Failure(reserved.Error());
-        }
-
-        for (const LoadNode& node : nodes) {
-            if (!handles.TryPushBack(node.handle)) {
-                platform::Fatal("Object graph prepare handle reservation failed");
-            }
-        }
-
-        if (auto prepared = options.prepare(transaction, handles.View(), options.prepareUser);
-            !prepared) {
-            return Result<RootRef<Object>>::Failure(prepared.Error());
-        }
-    }
-
-    return transaction.Commit();
+    return Result<void>::Success();
 }
 
 } // namespace rocks::graph_detail

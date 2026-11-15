@@ -112,7 +112,10 @@ class RecordScope;
 // 진단·수집은 무효이고 호출자가 버린다. hook은 소유 객체를 Borrow한 상태에서 불리므로(복원의
 // Required 실효 값 진단은 staged 객체라 Borrow 없이 불리고 ConstructionContext의 검사 중 표시가
 // 값을 지킨다) Registry와 입력 byte를 바꾸지 않는다. 복원의 RequiredMissing은 적용 뒤 Required
-// 검사에서 한 번, 그 밖의 진단·Soft 수집은 1단계에서 한 번 온다(Soft 수집은 파일 값만). struct
+// 검사에서 한 번, 그 밖의 진단·Soft 수집은 1단계에서 한 번 온다(Soft 수집은 파일 값만). 단계형
+// 복원(ObjectGraphStage)의 1단계 hook(진단·Soft 수집·struct 관찰·ObservedStructs)은 Validate를 부른
+// 스레드(worker일 수 있다)에서, RequiredMissing은 소유 스레드에서 불린다 — worker 검증에 주는
+// hook은 그 스레드에서 안전해야 하고 다른 스레드와 동시에 쓰이면 스레드 안전해야 한다. struct
 // 관찰·치환(B4, Docs/Design/ReflectionFoundations.ko.md 4.6·6.4절)도 같은 묶음이고, A0-O가 외부
 // 참조 보고를 더한다. 배열 원소 struct의 Observe·Substitute에 오는 frame은 배열 필드의
 // frame이다(field의 value.kind == Array, structure = 원소 struct, index = 원소 index — 원소마다 새

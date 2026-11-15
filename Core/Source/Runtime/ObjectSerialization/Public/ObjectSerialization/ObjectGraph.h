@@ -1,12 +1,14 @@
 #pragma once
 
+#include <Core/Memory/UniquePtr.h>
 #include <Object/ConstructionContext.h>
 #include <Object/FieldCodec.h>
 #include <Serialization/Record.h>
 
 // 객체 그래프 저장·복원이다(graph v2 — Docs/Design/ObjectFoundations.ko.md 5절). 저장은 호출자가
-// 고른 노드 집합(순서 = local ID)을 쓰고, 복원은 NodeTable이 있는 그래프를 한 트랜잭션으로
-// 공개한다.
+// 고른 노드 집합(순서 = local ID)을 쓰고, 복원은 단계형(ObjectGraphStage — 검증은 어느 스레드나,
+// 생성·적용·Required 검사는 소유 스레드, Commit은 호출자)과 그 위의 편의 API(LoadObjectGraph —
+// NodeTable이 있는 그래프를 한 트랜잭션으로 공개)다.
 namespace rocks {
 
 // byte 한도는 파일/필드와 migration 결과 누계다. peak RAM은 소유 index·필드 색인·참조 token·output
@@ -179,6 +181,10 @@ Result<ObjectGraphSaveResult> SaveObjectGraphSet(Allocator&, ObjectRegistry&,
 Result<Array<uint8>> SaveObjectGraph(Allocator&, ObjectRegistry&, const ObjectAccessContext&,
                                      ObjectHandle root, ObjectGraphSaveOptions = {}) noexcept;
 
+// 복원 옵션이다. limits·policy·migrate·migrateStruct·migrationUser·hooks는 단계형 복원
+// (ObjectGraphStage)과 편의 복원(LoadObjectGraph)이 같이 쓰고, baseOuter·prepare·prepareUser는 편의
+// 복원 전용이다(단계형 복원은 무시한다 — 기준 Outer는 CreateObjects 인자, prepare는 호출자가 Commit
+// 전에 직접 한다).
 struct ObjectGraphLoadOptions {
     ObjectGraphLimits limits;
     // 미선언 enum·높은 버전·모르는 필드의 처리와 이 데이터에 없어야 하는 플래그(excludedFlags —
@@ -198,14 +204,17 @@ struct ObjectGraphLoadOptions {
     void* migrationUser = nullptr;
     // 진단·소프트 참조 수집을 받는다(RequiredMissing은 적용 뒤 Required 검사에서 한 번, 그 밖은
     // 1단계에서 한 번). 실패하면 복원이 실패한다(Required 검사의 실패는 rollback — 객체를 공개하지
-    // 않는다). 없으면 Required 검사를 하지 않는다(진단을 받을 곳이 없다).
+    // 않는다). 없으면 Required 검사를 하지 않는다(진단을 받을 곳이 없다). 단계형 복원에서 1단계
+    // hook은 Validate를 부른 스레드에서, RequiredMissing은 소유 스레드(CheckRequired)에서 불린다
+    // (ObjectGraphStage 주석의 스레드 계약).
     FieldCodecHooks* hooks = nullptr;
-    // BaseOuter 비트가 있는 그래프의 기준 Outer다(생존 객체 — outer 0 노드의 Outer가 된다).
-    // null이면 BaseOuter 비트가 없는 그래프여야 한다(비트와 다르면 InvalidArgument). 외부 참조
-    // 대상(imports)은 A0-Oe가 더한다.
+    // 편의 복원 전용: BaseOuter 비트가 있는 그래프의 기준 Outer다(생존 객체 — outer 0 노드의
+    // Outer가 된다). null이면 BaseOuter 비트가 없는 그래프여야 한다(비트와 다르면 InvalidArgument).
+    // 외부 참조 대상(imports)은 A0-Oe가 더한다.
     ObjectHandle baseOuter{};
-    // 적용·Required 진단 뒤, Commit 전에 부른다(AS 6.1 prepare — Transient 필드·AssetId 설정).
-    // nodes는 노드 handle(local ID − 1 위치, 호출 동안 유효)이다. 실패하면 그 오류로 rollback한다.
+    // 편의 복원 전용: 적용·Required 진단 뒤, Commit 전에 부른다(AS 6.1 prepare — Transient 필드·
+    // AssetId 설정). nodes는 노드 handle(local ID − 1 위치, 호출 동안 유효)이다. 실패하면 그 오류로
+    // rollback한다.
     // staged 객체만 바꾸고(Registry의 다른 객체를 바꾸지 않는다) 도달성을 깨지 않는다 — 노드 1에서
     // 닿게 하는 staged 참조를 끊지 않고 그 트랜잭션의 Commit·Rollback을 부르지 않는다(도달 검사는
     // 1단계에 끝났으므로 끊긴 노드는 다음 GC가 회수한다).
@@ -214,23 +223,262 @@ struct ObjectGraphLoadOptions {
     void* prepareUser = nullptr;
 };
 
+// 단계형 복원의 노드 설명 하나다(A1이 패키지 Exports 표에서 만든다 — NodeTable이 없는 그래프의
+// 노드 표, Docs/Design/ObjectFoundations.ko.md 5.4절).
+struct GraphNodeDesc {
+    // 노드 객체의 등록 타입이다(0이면 InvalidArgument). 노드 Record의 schema와 같아야 한다.
+    TypeId type{};
+    // 0 = 그래프 밖(hasBase면 기준 Outer, 아니면 Outer 없음 — AS 5.1 Exports outerIndex 0과 같다),
+    // 1..자기 번호 − 1 = 노드(Outer가 Inner보다 앞이다).
+    uint32 outer = 0;
+    // 이름이다(빈 문자열은 이름 없음 또는 대표 자식 — 1.1절 규칙). byte는 Stage 수명 동안 유효해야
+    // 한다(Stage가 빌린다).
+    StringView name{};
+};
+
+// 단계형 복원 입력이다(ObjectGraphStage::Validate 인자).
+struct ObjectGraphInput {
+    // graph v2 byte다. Stage 수명 동안 유효하고 불변이어야 한다(ApplyFields가 1단계의 필드 view로
+    // 다시 읽는다 — 복원한 객체는 빌리지 않는다).
+    Span<const uint8> bytes;
+    // 노드 표다(local ID − 1 위치, 크기 = nodeCount). 비면 그래프의 NodeTable을 쓴다(둘 다 있거나
+    // 둘 다 없으면 InvalidArgument). 배열은 Validate 동안, 이름 byte는 Stage 수명 동안 유효해야
+    // 한다.
+    Span<const GraphNodeDesc> nodes;
+    // outer 0 노드의 Outer가 기준 Outer인지다. NodeTable이면 BaseOuter 비트와 같아야 하고(아니면
+    // InvalidArgument), CreateObjects의 baseOuter 유무와도 같아야 한다.
+    bool hasBase = false;
+    // 기준 Outer의 요약이다(hasBase일 때만 쓴다 — 이미 있는 객체면 DescribeOuter 결과, 곧 만들
+    // 패키지면 OuterSummary::ForNewOutermost(true)). 1단계 정체성 규칙의 입력이고 CreateObjects가
+    // 실제 기준 Outer의 isOutermost·outermostIsPackage·pathBytes와 대조한다. pathBytes가
+    // MaxObjectPathBytes를 넘으면 InvalidArgument다. 외부 참조 i의 선언 타입(importTypes)은 A0-Oe가
+    // 더한다(지금은 externalCount가 0이어야 한다).
+    OuterSummary base;
+};
+
+namespace graph_detail {
+struct StageData;
+struct StageAccess;
+} // namespace graph_detail
+
+// 단계형 그래프 복원이다(Docs/Design/ObjectFoundations.ko.md 5.4절 — A1 SCC 로드의 allocate-all →
+// deserialize-all → fixup-all → publish와 worker 해석). 그래프 하나를 Validate(1단계 — 어느
+// 스레드나) → CreateObjects(2a) → ApplyFields(2b) → CheckRequired(2c) 순서로 한 번씩 진행하고,
+// Commit은 호출자가 ConstructionContext::Commit(roots, out)으로 한다. 여러 Stage(그래프)를 한
+// 트랜잭션에 올려 함께 공개할 수 있고(하드 순환 SCC), 같은 트랜잭션에 올린 다른 그래프의 객체는
+// ConstructionContext::FindObject로 찾는다. 고아 노드를 허용한다(도달 검사는 편의 복원만 — 호출자가
+// root·Outer로 붙잡는다).
+//
+// 상태 기계: 단계마다 먼저 호출 검사(생성자가 기억한 오류, 진행 중인 같은 Stage에 다시 들어오면
+// Busy, 순서 위반 InvalidArgument, 소유 스레드·Registry·접근 문맥, 트랜잭션 일치·상태)를 하고, 그
+// 실패는 아무 상태도 바꾸지 않는다(잘못된 호출 하나가 유효한 Stage를 망치지 않는다 — 올바른 호출로
+// 계속할 수 있다). 호출 검사를 통과하면 Stage는 진행 중이 되고(그동안 생성자·hook·allocator 콜백이
+// 같은 Stage의 단계를 부르면 Busy), 성공하면 다음 단계로, 실패하면 실패 상태가 되어 이후 모든
+// 단계가 InvalidArgument다(다시 시도하지 않는다 — 새 Stage를 만든다). 트랜잭션에 객체를 넣은 뒤의
+// 실패(CreateObjects 도중의 Create 실패, ApplyFields·CheckRequired의 실패)는 그 트랜잭션을 그
+// 오류로 고정한다(ConstructionContext::Fail — 이후 Commit이 실패하고 Rollback·소멸자가 되돌린다,
+// 부분 공개 없음). 그래서 한 트랜잭션에 올린 Stage 하나의 실패가 트랜잭션 전체를 실패시킨다.
+// CreateObjects의 사전 확인 실패는 객체를 만들지 않았으므로 트랜잭션을 고정하지 않는다. registry와
+// types가 같은 등록 저장소가 아니거나 생성자를 소유 스레드·문맥 밖에서 부르면 모든 단계가 그
+// 오류(WrongContext·WrongThread)다.
+//
+// 스레드: 생성자·CreateObjects·ApplyFields·CheckRequired는 Registry 소유 스레드 전용이다
+// (WrongThread). Validate는 ObjectRegistry에 닿지 않으므로 어느 스레드에서나 부를 수 있다(Registry
+// 정책은 생성자가 사본으로 두고, TypeRegistry 조회·lease 계수는 잠금으로 보호된다). Validate를 부른
+// 스레드에서 hooks(진단·Soft 수집·관찰)·마이그레이션 콜백(migrate·migrateStruct·등록 struct
+// 마이그레이션)·등록 codec의 1단계 해석(객체·Registry에 닿지 않는 검증)이 실행되고 allocator가
+// 쓰인다. 그래서 worker에서 부르는 호출자는 그 스레드에서 안전한 hook·마이그레이션·allocator를
+// 준다(소유 스레드나 다른 worker와 동시에 쓰일 수 있으면 스레드 안전해야 한다). RequiredMissing
+// 진단은 CheckRequired에서 소유 스레드로 온다. 한 Stage의 단계를 동시에 부르지 않으며, 단계 사이의
+// 스레드 넘김(worker 완료 → 소유 스레드)은 호출자가 동기화한다(작업 완료 대기 등).
+//
+// 수명: Stage는 입력 byte·노드 이름을 빌리고 노드 타입·기대 타입 lease를 쥔다(소멸 때 반환).
+// allocator·registry·types는 Stage보다 오래 살아야 한다. options가 가리키는 hooks·migrationUser
+// (와 그 사용자 데이터)는 Stage의 마지막 단계(CheckRequired)까지 살아야 한다 — worker 지역 hooks를
+// Validate 뒤에 버리면 안 된다(RequiredMissing이 CheckRequired에서 온다). allocator는 스레드 사이의
+// 할당·해제를 지원해야 한다(Validate가 worker에서 할당한 노드 상태를 소유 스레드가 2a–2c에서 쓰고
+// Stage 소멸 때 해제한다 — worker 전용 arena는 안 된다). 트랜잭션이 열려 있는 동안 GC가 진행하지
+// 않으므로 Nodes()의 handle은 그 트랜잭션의 Commit·Rollback까지 공개 전 객체로 유효하다.
+//
+// 사용 예(A1 로더 — 5.5절 흐름):
+//   ObjectGraphStage stage(allocator, registry, types, access, options); // 소유 스레드
+//   ObjectGraphInput input;
+//   input.bytes = objectsSection;
+//   input.nodes = exportNodes;                        // Exports 표에서 만든 노드 설명
+//   input.hasBase = true;
+//   input.base = OuterSummary::ForNewOutermost(true); // 곧 만들 Package
+//   if (auto valid = stage.Validate(input); !valid) { // worker에서 불러도 된다
+//       return valid;                                 // A1이 CorruptPackage 등으로 바꾼다
+//   }
+//
+//   ConstructionContext transaction(registry, access); // Game 스레드(한 Pump 안)
+//   auto package = transaction.Create<Package>(PackageType);
+//   if (!package) {
+//       return Result<void>::Failure(package.Error());
+//   }
+//
+//   if (auto created = stage.CreateObjects(transaction, package.Value()); !created) {
+//       return created;
+//   }
+//
+//   if (auto applied = stage.ApplyFields(transaction); !applied) {
+//       return applied;
+//   }
+//
+//   if (auto checked = stage.CheckRequired(transaction); !checked) {
+//       return checked;
+//   }
+//
+//   // prepare: 대표 에셋의 AssetId(Transient) 등을 Commit 전에 쓴다
+//   const ObjectHandle roots[] = {package.Value()};
+//   RootRef<Object> held[1];
+//   return transaction.Commit(roots, held);
+class ObjectGraphStage {
+public:
+    // Registry 정책을 사본으로 두고 options를 보관한다(baseOuter·prepare·prepareUser는 쓰지
+    // 않는다). 실패를 돌려줄 수 없으므로 registry와 types가 같은 등록 저장소가 아니면
+    // WrongContext를, 그 밖에 소유 스레드·접근 문맥이 아니면 그 접근
+    // 오류(WrongThread·WrongContext)를 기억해 이후 모든 단계가 먼저 돌려준다.
+    ObjectGraphStage(Allocator& allocator, ObjectRegistry& registry, TypeRegistry& types,
+                     const ObjectAccessContext& access,
+                     ObjectGraphLoadOptions options = {}) noexcept;
+    ~ObjectGraphStage();
+    ObjectGraphStage(const ObjectGraphStage&) = delete;
+    ObjectGraphStage& operator=(const ObjectGraphStage&) = delete;
+
+    // 1단계: envelope·노드 표·Record·값·참조를 검증하고 이후 단계의 작업량을 미리 청구한다(2단계는
+    // 예산으로 실패하지 않는다). 생성자를 실행하지 않고 ObjectRegistry에 닿지 않는다(어느 스레드나
+    // — 클래스 주석의 스레드 계약). 노드마다 노드 표의 정체성 규칙(Registry 정책 사본으로
+    // detail::CheckNewObjectIdentity — Outer 요약은 앞 노드들로 계산하고 outer 0이면 hasBase ?
+    // input.base : Outer 없음, 어느 쪽이든 앞서 나온 같은 Outer의 형제(대표 자식·이름 있는 Inner)를
+    // 더한다)과 그래프 안 형제 유일성을 생성 전에 판정한다.
+    //
+    // 순서와 오류: 호출 검사(생성자가 기억한 오류 → 진행 중 Busy → 순서 InvalidArgument — 상태
+    // 불변) → 옵션(hook 없는 ReportAndDefault·
+    // LoadNewerSkippingUnknown, maxObjects 2^31 − 1 초과 InvalidArgument) → envelope(magic
+    // InvalidArgument, formatVersion이 2가 아니면 Unsupported, 정의되지 않은 flags·NodeTable 없는
+    // BaseOuter·nodeCount 0·길이 부족 InvalidArgument, nodeCount·externalCount 상한
+    // CapacityExceeded, NodeTable 노드 타입 0·남는 byte InvalidArgument) → 노드 출처(NodeTable과
+    // input.nodes가 둘 다 있거나 둘 다 없음, NodeTable의 BaseOuter 비트와 hasBase 불일치,
+    // input.nodes 수가 nodeCount와 다름·타입 0, externalCount가 0이 아님 — 외부 참조는 A0-Oe —,
+    // hasBase인데 base.pathBytes가 MaxObjectPathBytes 초과 — InvalidArgument) → 노드 k마다(타입
+    // 미등록 NotFound → Abstract·생성 함수 없음 Unsupported → 배치 Unsupported → outer가 자기 번호
+    // 이상 InvalidArgument → 정체성 규칙(WorldOnly Unsupported, 이름 형식·패키지 규칙·패키지
+    // 이름·빈 이름·대표 자식 InvalidArgument, 객체 경로 4 KiB 초과 CapacityExceeded) → 형제 중복
+    // InvalidArgument(파일 손상) → Record(schema가 노드 타입과 다름 InvalidArgument, 버전
+    // Unsupported, 마이그레이션, 모르는 필드 정책, Transient 존재 Unsupported, excludedFlags 존재
+    // InvalidArgument, 값)) → 참조(범위 — nodeCount 초과·외부 비트 InvalidArgument, 형식
+    // TypeMismatch, 기대 타입 미등록 NotFound) → 예산(CapacityExceeded). 할당 실패는 OutOfMemory다.
+    Result<void> Validate(const ObjectGraphInput& input) noexcept;
+
+    // 2a: 노드 객체를 local ID 순서로 transaction에 만든다(노드 표의 Outer·이름 — outer 0은
+    // baseOuter, hasBase가 아니면 Outer 없음). 만들기 전에 Registry 상태를 확인하므로 이후 Create가
+    // 실패할 수 있는 이유는 할당·슬롯 상한·종료·재진입뿐이다. baseOuter는 생존 객체이거나 이
+    // 트랜잭션의 객체(예: 같은 트랜잭션에서 방금 만든 Package)다.
+    //
+    // 순서와 오류: 호출 검사(상태 불변 — 생성자가 기억한 오류 → 진행 중 Busy → Validate 뒤가
+    // 아니면 InvalidArgument → 접근 WrongThread·WrongContext → transaction이 이 Registry·접근
+    // 문맥의 것이 아니면 WrongContext → 트랜잭션 상태 규칙(ConstructionContext::CheckOpen —
+    // 끝났으면 InvalidArgument, 고정된 오류면 그 오류 — 이름 점유 확인보다 먼저)) → 사전
+    // 확인(실패하면 실패 상태, 트랜잭션은 고정하지 않는다): hasBase와 baseOuter 유무 불일치
+    // InvalidArgument → (hasBase) transaction.DescribeOuter(baseOuter)의 오류(StaleHandle 등)와 그
+    // isOutermost·outermostIsPackage·pathBytes가 input.base와 다름 InvalidArgument(handle·Inner
+    // 유무는 비교하지 않는다) → 기준 Outer 노드마다 실제 요약으로 정체성 규칙 재판정(기준 Outer에
+    // 이름 있는 Inner가 있는데 대표 노드, 대표 자식이 있는데 이름 있는 노드 — InvalidArgument) →
+    // 기준 Outer 노드 이름의 점유(대표 노드는 빈 비교 키 — 기준 Outer에 이미 대표 자식이 있으면
+    // AlreadyExists), hasBase가 아니면 outer 0 이름 있는 노드의 최상위 이름 공간 점유
+    // (AlreadyExists) → 생성(Create의 오류 — 할당 OutOfMemory·슬롯 CapacityExceeded·ShuttingDown·
+    // Busy, 트랜잭션은 그 오류로 고정된다). 사전 확인 실패는 아무것도 만들지 않는다. 실패하면
+    // Nodes()는 비어 있다.
+    Result<void> CreateObjects(ConstructionContext& transaction,
+                               ObjectHandle baseOuter = {}) noexcept;
+
+    // 2a 뒤의 노드 handle이다(local ID − 1 위치). 공개 전 객체라 Commit 전에는 그 트랜잭션의 Get·
+    // GetForWrite·참조 대상·Commit roots로만 쓴다. CreateObjects가 성공하기 전에는 비어 있고,
+    // Stage가 살아 있는 동안 유효하다.
+    Span<const ObjectHandle> Nodes() const noexcept {
+        return nodes_.View();
+    }
+
+    // node 위치(local ID − 1)의 Record 저장 버전이다(A1 Summary 대조). Validate가 성공한 뒤에만
+    // 되고(그 전이나 범위 밖은 InvalidArgument) 이후 단계의 실패와 무관하다.
+    Result<uint32> StoredVersion(usize node) const noexcept;
+
+    // 2b: 1단계가 보관한 필드를 staged 객체에 쓴다(노드 참조는 2a의 handle로 바꾼다). 작업량은
+    // 1단계가 청구했다. 순서와 오류: 호출 검사(상태 불변 — 생성자가 기억한 오류 → 진행 중 Busy →
+    // CreateObjects 뒤가 아니면 InvalidArgument → 접근 WrongThread·WrongContext → transaction의
+    // Registry·접근 문맥 WrongContext → CreateObjects와 다른 트랜잭션이거나 끝난 트랜잭션
+    // InvalidArgument → 다른 단계의 실패로 고정된 트랜잭션은 그 오류) → 쓰기(staged 쓰기·codec의
+    // 오류 — 할당 OutOfMemory 등 — 트랜잭션을 그 오류로 고정한다). 외부 참조 대상(imports)은
+    // A0-Oe가 더한다.
+    Result<void> ApplyFields(ConstructionContext& transaction) noexcept;
+
+    // 2c: Required 실효 값 진단이다(4절 — 적용을 마친 staged 객체의 실효 값이 null인 Required
+    // 위치마다 options.hooks->Report(RequiredMissing)가 소유 스레드에서 한 번 온다. hooks가 없으면
+    // 아무것도 하지 않는다). 작업량·크기 한도를 걸지 않는다. 순서와 오류: 호출 검사(ApplyFields와
+    // 같다 — ApplyFields 뒤가 아니면 InvalidArgument) → 검사(hook 실패, 할당, readStaged 없는 수동
+    // Required 필드 Unsupported, Required 위치 자체의 저장 불가 값 — 예: 생성자가 둔 Required
+    // Soft의 규칙 위반, MaxArrayElements를 넘는 Required 배열 — 트랜잭션을 그 오류로 고정한다).
+    // 검사 동안 transaction에 Required 검사 중 표시가 선다(그 트랜잭션의 쓰기·GetForWrite·Commit
+    // Busy).
+    Result<void> CheckRequired(ConstructionContext& transaction) noexcept;
+
+private:
+    friend struct graph_detail::StageAccess;
+
+    enum class Phase : uint8 {
+        Constructed,
+        Validated,
+        Created,
+        Applied,
+        Checked,
+        // 호출 검사를 통과한 단계가 일하는 중이다(같은 Stage의 다른 호출은 Busy).
+        Running,
+        Failed
+    };
+
+    // 모든 단계의 첫 호출 검사(생성자가 기억한 오류 → 진행 중 Busy → expected가 아니면
+    // InvalidArgument)다. 상태를 바꾸지 않는다.
+    Result<void> CheckCall(Phase expected) const noexcept;
+    // 소유 스레드 단계의 공통 판정(접근 → transaction의 Registry·접근 문맥)이다.
+    Result<void> CheckOwnerStage(const ConstructionContext& transaction) const noexcept;
+    // ApplyFields·CheckRequired 공통: CheckOwnerStage → CreateObjects의 트랜잭션인지 → 트랜잭션
+    // 상태 규칙(고정된 오류).
+    Result<void> CheckSameTransaction(const ConstructionContext& transaction) const noexcept;
+
+    Allocator& allocator_;
+    ObjectRegistry& registry_;
+    TypeRegistry& types_;
+    ObjectAccessContext access_;
+    ObjectGraphLoadOptions options_;
+    RegistryPolicy policy_;
+    ErrorCode contextError_ = ErrorCode::None;
+    Phase phase_ = Phase::Constructed;
+    bool hasBase_ = false;
+    OuterSummary base_;
+    uint64 transaction_ = 0;
+    UniquePtr<graph_detail::StageData> data_;
+    Array<ObjectHandle> nodes_;
+};
+
 // NodeTable이 있는 graph v2를 한 트랜잭션으로 복원하고 노드 1을 root로 Commit한다(Docs/Design/
-// ObjectFoundations.ko.md 5.5절). 1단계는 envelope·노드 표·Record·값·참조와 도달성을 검증하고
-// (생성자를 실행하지 않는다) 2단계 몫의 작업량을 미리 청구하며, 2단계는 모든 노드를 노드 표의
-// Outer·이름으로 비공개 생성해 값을 쓰고 Required 실효 값을 진단한 뒤 prepare를 부르고 한번에
-// Commit한다. 2단계 실패(할당·Registry 상태·Create의 이름·정책 규칙·Required 진단 hook 실패·
-// readStaged 없는 수동 Required 필드의 Unsupported·Required 위치 자체의 저장 불가 값 — 예: 생성자가
-// 둔 Required Soft의 규칙 위반, MaxArrayElements를 넘는 Required 배열·prepare 실패)는 부분 객체
-// 공개 없이 역순 rollback한다(노드 표의 이름·정책 규칙을 생성 전에 판정하는 것은 단계형 복원
-// A0-Od2다). 할당기 통계/slot generation이 rollback 전 값으로 돌아간다는 뜻은 아니다. 원본 bytes는
-// 호출 동안 유효하고 불변이어야 하며 결과는 원본을 빌리지 않는다. registry와 types는 같은 등록
-// 저장소여야 한다.
+// ObjectFoundations.ko.md 5.5절). ObjectGraphStage 위의 편의 API다: Validate(기준 Outer 요약 =
+// DescribeOuter(baseOuter)) → 도달 검사 → ConstructionContext → CreateObjects → ApplyFields →
+// CheckRequired → prepare → Commit(). 1단계는 생성자를 실행하지 않고 노드 표의 이름·정책 규칙까지
+// 생성 전에 판정하며 2단계 몫의 작업량을 미리 청구한다. 2단계 실패(할당·Registry 상태·이름 점유
+// AlreadyExists·Required 진단 hook 실패·readStaged 없는 수동 Required 필드의 Unsupported·Required
+// 위치 자체의 저장 불가 값 — 예: 생성자가 둔 Required Soft의 규칙 위반, MaxArrayElements를 넘는
+// Required 배열·prepare 실패)는 부분 객체 공개 없이 역순 rollback한다(이름 점유는 생성 전에
+// 확인하므로 생성자를 실행하지 않는다). 할당기 통계/slot generation이 rollback 전 값으로 돌아간다는
+// 뜻은 아니다. 원본 bytes는 호출 동안 유효하고 불변이어야 하며 결과는 원본을 빌리지 않는다.
+// registry와 types는 같은 등록 저장소여야 한다. 다중 root·여러 그래프·호출자 Commit은
+// ObjectGraphStage를 직접 쓴다.
 //
 // 도달 검사: 노드 1에서 영속 강한 참조, inner → outer(노드 표의 outer), 패키지 정책 Registry면
 // outer → inner와 기준 Outer 아래 보존으로 닿지 않는 노드가 있으면 생성 전에 InvalidArgument다(공개
 // 뒤 다음 GC가 조용히 지우지 않게). 패키지 정책 Registry에서 기준 Outer가 없으면 노드 1이 아닌
 // outer 0 노드(다른 패키지 — root 없이 공개되어 Discard 없이 회수된다)도 InvalidArgument다(여러
-// 패키지는 단계형 복원과 Commit(roots) — A0-Od2). 편의 저장이 만든 그래프는 언제나 통과한다.
+// 패키지는 ObjectGraphStage와 Commit(roots)). 편의 저장이 만든 그래프는 언제나 통과한다.
 //
 // 값 규칙: 모르는 필드는 policy.unknownField다. nonnull 강한 참조의 대상은 value.type 등록 타입과
 // 생성 thunk의 정적 대상 타입의 native 타입이거나 그 파생이어야 하며 TypeId 별명은 허용한다.
@@ -247,16 +495,16 @@ struct ObjectGraphLoadOptions {
 //
 // 오류 순서(5.7절): 저장소 불일치 WrongContext → 옵션(hook 없는 ReportAndDefault·
 // LoadNewerSkippingUnknown·maxObjects 2^31 − 1 초과 InvalidArgument) → baseOuter(DescribeOuter —
-// 접근·StaleHandle) → envelope(magic InvalidArgument, formatVersion이 2가 아니면 Unsupported,
-// 정의되지 않은 flags·NodeTable 없는 BaseOuter·nodeCount 0·길이 부족 InvalidArgument,
-// nodeCount·externalCount 상한 CapacityExceeded, NodeTable 노드 타입 0·남는 byte InvalidArgument) →
-// 노드 출처(NodeTable 없음·BaseOuter 비트와 baseOuter 불일치·externalCount가 0이 아님 — 외부 참조
-// 대상을 줄 수 없다 — InvalidArgument) → 노드(타입 미등록 NotFound → Abstract·생성 함수 없음
-// Unsupported → 배치 Unsupported → outer가 자기 번호 이상 InvalidArgument → Record schema가 노드
-// 타입과 다름 InvalidArgument, 버전 Unsupported, 마이그레이션, 모르는 필드 정책, Transient 존재
-// Unsupported, excludedFlags 존재 InvalidArgument, 값) → 참조(범위 — nodeCount 초과·외부 비트
-// InvalidArgument, 형식 TypeMismatch, 기대 타입 미등록 NotFound) → 예산(CapacityExceeded) → 도달
-// 검사(패키지 정책의 다른 패키지 포함 InvalidArgument) → 2단계.
+// 접근·StaleHandle) → 소유 스레드·접근 문맥(WrongThread·WrongContext — Stage 생성자) →
+// envelope(magic InvalidArgument, formatVersion이 2가 아니면 Unsupported, 정의되지 않은 flags·
+// NodeTable 없는 BaseOuter·nodeCount 0·길이 부족 InvalidArgument, nodeCount·externalCount 상한
+// CapacityExceeded, NodeTable 노드 타입 0·남는 byte InvalidArgument) → 노드 출처(NodeTable 없음·
+// BaseOuter 비트와 baseOuter 불일치·externalCount가 0이 아님 — 외부 참조 대상을 줄 수 없다 —
+// InvalidArgument) → 노드(ObjectGraphStage::Validate의 노드 순서 — 정체성 규칙·형제 중복 포함) →
+// 참조(범위 — nodeCount 초과·외부 비트 InvalidArgument, 형식 TypeMismatch, 기대 타입 미등록
+// NotFound) → 예산(CapacityExceeded) → 도달 검사(패키지 정책의 다른 패키지 포함 InvalidArgument) →
+// 트랜잭션 시작 → 2a 사전 확인(기준 Outer 요약 불일치·실제 요약 재판정 InvalidArgument, 이름 점유
+// AlreadyExists) → 2단계(생성·적용·Required 검사·prepare·Commit).
 //
 // 사용 예:
 //   ObjectGraphLoadOptions options;

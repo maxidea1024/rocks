@@ -260,14 +260,7 @@ inline uint64 NameKeyHash(ObjectHandle outer, StringView key) noexcept {
     return HashCombine(Hash<ObjectHandle>{}(outer), HashStringBytes(key));
 }
 
-// outer 아래 이름이 nameBytes byte인 새 객체의 객체 경로 길이다. 경로는 Outer 경로 + (둘 다 비어
-// 있지 않으면 '.') + 이름이다(outermost·대표 자식은 빈 경로).
-inline usize ChildPathBytes(const OuterSummary* outer, usize nameBytes) noexcept {
-    if (outer == nullptr) {
-        return 0;
-    }
-
-    return outer->pathBytes + (outer->pathBytes != 0 && nameBytes != 0 ? 1u : 0u) + nameBytes;
-}
+// 새 객체의 객체 경로 길이다(공개 detail::ChildPathBytes — 그래프 1단계와 같이 쓴다).
+using detail::ChildPathBytes;
 
 } // namespace rocks::registry_detail

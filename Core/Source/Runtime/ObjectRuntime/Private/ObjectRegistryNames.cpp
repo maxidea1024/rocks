@@ -54,6 +54,20 @@ ObjectRegistry::FindPublishedLocked(ObjectHandle handle) const noexcept {
     return Result<Slot*>::Success(slot);
 }
 
+Result<ObjectRegistry::Slot*> ObjectRegistry::FindVisibleLocked(ObjectHandle handle,
+                                                                uint64 transaction) const noexcept {
+    // 생성 규칙 5·DescribeOuterChecked와 같은 기준의 공개 전 객체다(생성자 실행이 끝난 것).
+    if (transaction != 0) {
+        Slot* slot = FindSlot(handle);
+        if (slot != nullptr && slot->state == SlotState::Reserved &&
+            slot->transaction == transaction && slot->object != nullptr && !IsCutoff(slot)) {
+            return Result<Slot*>::Success(slot);
+        }
+    }
+
+    return FindPublishedLocked(handle);
+}
+
 OuterSummary ObjectRegistry::DescribeSlotLocked(const Slot& slot,
                                                 bool scanNamedInners) const noexcept {
     OuterSummary summary;
@@ -111,6 +125,19 @@ ObjectRegistry::Slot* ObjectRegistry::FindNamedLocked(ObjectHandle outer, uint64
 
         return slot;
     }
+}
+
+ObjectRegistry::Slot* ObjectRegistry::FindVisibleNamedLocked(ObjectHandle outer, uint64 hash,
+                                                             StringView key,
+                                                             uint64 transaction) const noexcept {
+    // (outer, 키)는 점유 기준으로 유일하므로 점유 항목 하나를 찾아 보이는지만 가린다.
+    Slot* slot = FindNamedLocked(outer, hash, key, transaction == 0);
+    if (slot != nullptr && slot->state == SlotState::Reserved &&
+        (slot->transaction != transaction || slot->object == nullptr)) {
+        return nullptr;
+    }
+
+    return slot;
 }
 
 Result<uint32> ObjectRegistry::NameIndexGrowthLocked() const noexcept {
@@ -502,6 +529,13 @@ Result<ObjectHandle> ObjectRegistry::FindChild(const ObjectAccessContext& access
 Result<ObjectHandle> ObjectRegistry::FindObject(const ObjectAccessContext& access,
                                                 ObjectHandle outermost,
                                                 StringView objectPath) const noexcept {
+    return FindObjectChecked(access, outermost, objectPath, 0);
+}
+
+Result<ObjectHandle> ObjectRegistry::FindObjectChecked(const ObjectAccessContext& access,
+                                                       ObjectHandle outermost,
+                                                       StringView objectPath,
+                                                       uint64 transaction) const noexcept {
     auto valid = CheckAccess(access);
     if (!valid) {
         return Result<ObjectHandle>::Failure(valid.Error());
@@ -514,7 +548,7 @@ Result<ObjectHandle> ObjectRegistry::FindObject(const ObjectAccessContext& acces
             return Result<ObjectHandle>::Failure(open.Error());
         }
 
-        auto found = FindPublishedLocked(outermost);
+        auto found = FindVisibleLocked(outermost, transaction);
         if (!found) {
             return Result<ObjectHandle>::Failure(found.Error());
         }
@@ -557,19 +591,20 @@ Result<ObjectHandle> ObjectRegistry::FindObject(const ObjectAccessContext& acces
         }
     }
 
-    // 공개된 대표 자식이 있으면 경로는 그 아래에서 시작한다(빈 경로 = 대표 자식).
+    // 보이는 대표 자식이 있으면 경로는 그 아래에서 시작한다(빈 경로 = 대표 자식).
     {
         platform::LockGuard lock(gate_);
         if (auto open = OpenState(closed_, processing_); !open) {
             return Result<ObjectHandle>::Failure(open.Error());
         }
 
-        auto found = FindPublishedLocked(current);
+        auto found = FindVisibleLocked(current, transaction);
         if (!found) {
             return Result<ObjectHandle>::Failure(found.Error());
         }
 
-        const Slot* representative = FindNamedLocked(current, NameKeyHash(current, {}), {}, true);
+        const Slot* representative =
+            FindVisibleNamedLocked(current, NameKeyHash(current, {}), {}, transaction);
         if (representative != nullptr) {
             current = HandleOf(*representative);
         } else if (size == 0) {
@@ -594,12 +629,12 @@ Result<ObjectHandle> ObjectRegistry::FindObject(const ObjectAccessContext& acces
         }
 
         // 키 생성 할당 콜백이 그 사이 Registry를 바꿨을 수 있어 현재 객체를 다시 확인한다.
-        auto found = FindPublishedLocked(current);
+        auto found = FindVisibleLocked(current, transaction);
         if (!found) {
             return Result<void>::Failure(found.Error());
         }
 
-        const Slot* child = FindNamedLocked(current, hash, key.View(), true);
+        const Slot* child = FindVisibleNamedLocked(current, hash, key.View(), transaction);
         if (child == nullptr) {
             return Result<void>::Failure(ErrorCode::NotFound);
         }

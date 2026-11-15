@@ -1,6 +1,10 @@
 #include "GraphInternal.h"
 #include <Core/Algorithms.h>
 
+// 그래프 복원 1단계(검증)다(Docs/Design/ObjectFoundations.ko.md 5.4절 — ObjectGraphStage::
+// Validate의 본문 ValidateGraph): envelope 뒤 노드 출처·노드 정체성(GraphIdentity.cpp)·Record·값을
+// 검증하고 참조 token의 형식을 검사하며 2단계 몫의 작업량을 미리 청구한다. ObjectRegistry에 닿지
+// 않는다.
 namespace rocks {
 namespace {
 
@@ -431,14 +435,15 @@ Result<RecordReader> CurrentRecord(Allocator& allocator, LoadNode& node, Budget&
     return OpenRecord(allocator, node.migrated.View(), node.type, target, budget);
 }
 
-// 1단계: 노드 하나를 검증하고 필드 색인·참조 token을 보관한다. 생성자를 실행하지 않는다. Record에
-// 없는 영속 필드는 오류가 아니며 생성자 값(기준)을 유지한다(누락 = 기준 — Docs/Design/
-// ObjectFoundations.ko.md 4절). 파일에 있는 필드마다 검증 뒤 MarkPresent를 한 번 부른다(A5 override
-// 집합 자리 — detail::DecodeRecordField). Required 진단은 여기서 하지 않는다(적용 뒤
-// CheckRequiredFields).
+// 1단계: 노드 하나를 검증하고 필드 색인·참조 token을 보관한다. 생성자를 실행하지 않는다. 노드 표의
+// 정체성 규칙(CheckNewObjectIdentity·형제 유일성 — identity)은 Record보다 먼저 본다(5.4절 노드 검사
+// 순서). Record에 없는 영속 필드는 오류가 아니며 생성자 값(기준)을 유지한다(누락 = 기준 —
+// Docs/Design/ObjectFoundations.ko.md 4절). 파일에 있는 필드마다 검증 뒤 MarkPresent를 한 번
+// 부른다(A5 override 집합 자리 — detail::DecodeRecordField). Required 진단은 여기서 하지
+// 않는다(적용 뒤 CheckRequiredFields).
 Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& node, uint32 index,
                         Budget& budget, const ObjectGraphLoadOptions& options,
-                        GraphValidateContext& context) noexcept {
+                        GraphValidateContext& context, NodeIdentityCheck& identity) noexcept {
     auto type = types.Acquire(node.type);
     if (!type) {
         return Result<void>::Failure(type.Error());
@@ -457,10 +462,15 @@ Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& nod
     }
 
     // 노드 표의 outer는 0(그래프 밖) 또는 자기보다 앞의 노드(1..자기 번호 − 1)다 — index는 0부터라
-    // outer ≤ index다. 노드 표의 이름·정책 규칙은 생성(2단계 Create)이 판정한다(생성 전 판정은
-    // 단계형 복원 A0-Od2).
+    // outer ≤ index다.
     if (node.outer > index) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 노드 표의 이름·정책·대표 자식·경로 규칙과 형제 유일성을 생성 전에 판정한다(Registry 정책
+    // 사본 — 2a의 Create는 노드 표 때문에 실패하지 않는다).
+    if (auto identified = identity.Check(node, budget); !identified) {
+        return identified;
     }
 
     context.BeginNode(node, nullptr, index);
@@ -675,31 +685,28 @@ Result<void> ValidateReferenceTypes(Allocator& allocator, TypeRegistry& types,
 
 } // namespace
 
-Result<RootRef<Object>> LoadObjectGraph(Allocator& allocator, ObjectRegistry& registry,
-                                        TypeRegistry& types, const ObjectAccessContext& access,
-                                        Span<const uint8> source,
-                                        ObjectGraphLoadOptions options) noexcept {
-    using Output = Result<RootRef<Object>>;
-    if (!registry.UsesTypeRegistry(types)) {
-        return Output::Failure(ErrorCode::WrongContext);
-    }
+namespace graph_detail {
 
+Result<void> CheckLoadOptions(const ObjectGraphLoadOptions& options) noexcept {
     // 값을 바꾸거나 모르는 내용을 건너뛰는 정책은 진단을 받을 곳이 있어야 한다. 노드 수 상한은
     // local ID가 외부 참조 비트와 겹치지 않게 MaxNodeCount 이하다.
     if ((!options.hooks &&
          (options.policy.undeclaredEnum == UndeclaredEnumPolicy::ReportAndDefault ||
           options.policy.newerVersion == NewerVersionPolicy::LoadNewerSkippingUnknown)) ||
         options.limits.maxObjects > MaxNodeCount) {
-        return Output::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    // 기준 Outer는 생존 객체여야 한다(단계형 복원 입력의 base 요약 — 접근·종료·handle 오류는
-    // DescribeOuter의 것).
-    const bool hasBase = options.baseOuter != ObjectHandle{};
-    if (hasBase) {
-        if (auto described = registry.DescribeOuter(access, options.baseOuter); !described) {
-            return Output::Failure(described.Error());
-        }
+    return Result<void>::Success();
+}
+
+Result<UniquePtr<StageData>> ValidateGraph(Allocator& allocator, TypeRegistry& types,
+                                           const RegistryPolicy& policy,
+                                           const ObjectGraphLoadOptions& options,
+                                           const ObjectGraphInput& input) noexcept {
+    using Output = Result<UniquePtr<StageData>>;
+    if (auto checked = CheckLoadOptions(options); !checked) {
+        return Output::Failure(checked.Error());
     }
 
     auto budget = Budget::Create(allocator, options.limits);
@@ -707,21 +714,56 @@ Result<RootRef<Object>> LoadObjectGraph(Allocator& allocator, ObjectRegistry& re
         return Output::Failure(budget.Error());
     }
 
-    auto envelope = ReadEnvelope(allocator, source, budget.Value());
+    auto envelope = ReadEnvelope(allocator, input.bytes, budget.Value());
     if (!envelope) {
         return Output::Failure(envelope.Error());
     }
 
-    // 노드 출처: 편의 복원은 그래프의 NodeTable로 노드를 만든다. BaseOuter 비트는 baseOuter 유무와
-    // 같아야 하고, 외부 참조 대상(imports — A0-Oe)을 줄 수 없으므로 externalCount는 0이어야 한다.
+    // 노드 출처: 그래프의 NodeTable과 호출자 노드 표 중 정확히 하나다. NodeTable이면 BaseOuter
+    // 비트가 hasBase와 같아야 하고, 호출자 노드 표는 nodeCount개다. 외부 참조 대상의 선언
+    // 타입(importTypes — A0-Oe)을 받지 않으므로 externalCount는 0이어야 한다.
     const uint32 flags = envelope.Value().flags;
-    if ((flags & NodeTableFlag) == 0 || ((flags & BaseOuterFlag) != 0) != hasBase ||
-        envelope.Value().externalCount != 0) {
+    const bool nodeTable = (flags & NodeTableFlag) != 0;
+    const usize count = envelope.Value().nodes.Size();
+    // 기준 Outer 요약의 경로 길이도 Registry 규칙(4 KiB) 안이어야 한다(호출자가 준 값 — 넘으면 어떤
+    // 기준 Outer와도 맞지 않는다).
+    if ((nodeTable && input.nodes.Size() != 0) || (!nodeTable && input.nodes.Size() == 0) ||
+        (nodeTable && ((flags & BaseOuterFlag) != 0) != input.hasBase) ||
+        (!nodeTable && input.nodes.Size() != count) || envelope.Value().externalCount != 0 ||
+        (input.hasBase && input.base.pathBytes > MaxObjectPathBytes)) {
         return Output::Failure(ErrorCode::InvalidArgument);
     }
 
-    Array<LoadNode>& nodes = envelope.Value().nodes;
-    GraphValidateContext context(allocator, budget.Value(), options, nodes.Size());
+    if (!nodeTable) {
+        // 호출자 노드 표를 노드에 옮긴다(이름은 호출자 byte를 빌린다). 타입 0은 NodeTable과 같이
+        // 손상이다.
+        if (auto spent = budget.Value().Spend(count); !spent) {
+            return Output::Failure(spent.Error());
+        }
+
+        for (usize index = 0; index < count; ++index) {
+            const GraphNodeDesc& desc = input.nodes[index];
+            if (desc.type == TypeId{}) {
+                return Output::Failure(ErrorCode::InvalidArgument);
+            }
+
+            LoadNode& node = envelope.Value().nodes[index];
+            node.type = desc.type;
+            node.outer = desc.outer;
+            node.name = desc.name;
+        }
+    }
+
+    // 노드는 여기서 자리를 잡은 뒤 옮기지 않는다(FieldView가 node.migrated를 가리킨다).
+    auto made = UniquePtr<StageData>::TryMake(allocator, allocator, Move(budget.Value()),
+                                              Move(envelope.Value()));
+    if (!made) {
+        return Output::Failure(made.Error());
+    }
+
+    StageData& data = *made.Value();
+    Array<LoadNode>& nodes = data.envelope.nodes;
+    GraphValidateContext context(allocator, data.budget, options, nodes.Size());
     // 관찰할 struct ID를 정렬해 둔다(미등록 NotFound, 참조를 담는 struct InvalidArgument).
     Array<TypeId> observed(allocator);
     if (options.hooks) {
@@ -732,7 +774,7 @@ Result<RootRef<Object>> LoadObjectGraph(Allocator& allocator, ObjectRegistry& re
         }
 
         for (TypeId id : requested) {
-            auto spent = budget.Value().Spend(1);
+            auto spent = data.budget.Spend(1);
             if (!spent) {
                 return Output::Failure(spent.Error());
             }
@@ -756,7 +798,7 @@ Result<RootRef<Object>> LoadObjectGraph(Allocator& allocator, ObjectRegistry& re
             return Output::Failure(ErrorCode::Overflow);
         }
 
-        auto spent = budget.Value().Spend(sortWork);
+        auto spent = data.budget.Spend(sortWork);
         if (!spent) {
             return Output::Failure(spent.Error());
         }
@@ -767,11 +809,16 @@ Result<RootRef<Object>> LoadObjectGraph(Allocator& allocator, ObjectRegistry& re
         context.Observe(observed.View());
     }
 
+    NodeIdentityCheck identity(allocator, policy, input.hasBase, input.base);
+    if (auto reserved = identity.Reserve(nodes.Size()); !reserved) {
+        return Output::Failure(reserved.Error());
+    }
+
     usize references = 0;
     usize nameBytes = 0;
     for (usize index = 0; index < nodes.Size(); ++index) {
         auto decoded = DecodeNode(allocator, types, nodes[index], static_cast<uint32>(index),
-                                  budget.Value(), options, context);
+                                  data.budget, options, context, identity);
         if (!decoded) {
             return Output::Failure(decoded.Error());
         }
@@ -780,9 +827,8 @@ Result<RootRef<Object>> LoadObjectGraph(Allocator& allocator, ObjectRegistry& re
         nameBytes += nodes[index].name.ByteCount();
     }
 
-    HashMap<TypeId, TypeLease> expectedLeases(allocator);
     if (auto typed =
-            ValidateReferenceTypes(allocator, types, nodes, budget.Value(), expectedLeases);
+            ValidateReferenceTypes(allocator, types, nodes, data.budget, data.expectedLeases);
         !typed) {
         return Output::Failure(typed.Error());
     }
@@ -795,17 +841,13 @@ Result<RootRef<Object>> LoadObjectGraph(Allocator& allocator, ObjectRegistry& re
         return Output::Failure(ErrorCode::Overflow);
     }
 
-    if (auto spent = budget.Value().Spend(phaseTwo); !spent) {
+    if (auto spent = data.budget.Spend(phaseTwo); !spent) {
         return Output::Failure(spent.Error());
     }
 
-    const bool packagePolicy = registry.Policy().packageNativeType != nullptr;
-    if (auto reachable = CheckReachable(allocator, nodes, packagePolicy, hasBase, budget.Value());
-        !reachable) {
-        return Output::Failure(reachable.Error());
-    }
-
-    return ConstructGraph(allocator, registry, access, nodes, options);
+    return Output::Success(Move(made.Value()));
 }
+
+} // namespace graph_detail
 
 } // namespace rocks

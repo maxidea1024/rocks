@@ -95,12 +95,44 @@ void ConstructionContext::Rollback() noexcept {
     }
 }
 
+Result<void> ConstructionContext::Fail(ErrorCode reason) noexcept {
+    if (reason == ErrorCode::None) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (auto owned = registry_.VerifyAccess(access_); !owned) {
+        return owned;
+    }
+
+    // 먼저 고정된 오류(시작 실패·Create 실패·앞선 Fail)가 원인이므로 덮어쓰지 않는다.
+    if (error_ != ErrorCode::None) {
+        return Result<void>::Success();
+    }
+
+    if (finished_) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 객체는 그대로 두고 공개만 막는다(Rollback·소멸자가 생성 역순으로 되돌린다).
+    error_ = reason;
+    return Result<void>::Success();
+}
+
 Result<OuterSummary> ConstructionContext::DescribeOuter(ObjectHandle outer) noexcept {
     if (auto state = CheckOpen(); !state) {
         return Result<OuterSummary>::Failure(state.Error());
     }
 
     return registry_.DescribeOuterChecked(access_, outer, transaction_);
+}
+
+Result<ObjectHandle> ConstructionContext::FindObject(ObjectHandle outermost,
+                                                     StringView objectPath) noexcept {
+    if (auto state = CheckOpen(); !state) {
+        return Result<ObjectHandle>::Failure(state.Error());
+    }
+
+    return registry_.FindObjectChecked(access_, outermost, objectPath, transaction_);
 }
 
 Result<ObjectHandle> ConstructionContext::CreateImpl(TypeId type, const void* nativeType,
@@ -151,6 +183,7 @@ Result<RootRef<Object>> ObjectRegistry::NewRoot(const ObjectAccessContext& acces
     if (!pending) {
         return Result<RootRef<Object>>::Failure(pending.Error());
     }
+
     return transaction.Commit();
 }
 

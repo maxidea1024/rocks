@@ -786,8 +786,8 @@ TEST(GraphSet_NodeTableOuterOrderAndBaseOuterRules) {
 
             CHECK(ConstructedLinks == constructed);
             CHECK(target.Stats().liveObjects == 0);
-            // 노드 표의 이름 규칙 위반은 생성(2단계)이 거부하고 rollback한다(생성 전 판정은
-            // A0-Od2).
+            // 노드 표의 이름 규칙 위반은 1단계가 생성자 전에 거부한다(A0-Od2 — 노드 표 정체성
+            // 규칙).
             const test::graph::Node named[] = {{LinkType, 0, {}, first.Value().View()},
                                                {LinkType, 1, "a.b", empty.Value().View()}};
             auto invalid = test::graph::Build(allocator, named);
@@ -795,6 +795,7 @@ TEST(GraphSet_NodeTableOuterOrderAndBaseOuterRules) {
             CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
                                   invalid.Value().View())
                       .Error() == ErrorCode::InvalidArgument);
+            CHECK(ConstructedLinks == constructed);
             CHECK(target.Stats().liveObjects == 0 && target.Stats().reservedObjects == 0);
         }
 

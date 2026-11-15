@@ -231,6 +231,109 @@ struct Envelope {
 Result<Envelope> ReadEnvelope(Allocator& allocator, Span<const uint8> source,
                               Budget& budget) noexcept;
 
+// 단계형 복원(ObjectGraphStage)이 Validate에서 만들어 이후 단계까지 쥐는 상태다. 노드(필드 색인·
+// 참조 token·노드 타입 lease·마이그레이션 결과)와 그래프 예산, 참조 형식 검사에 쓴 기대 타입
+// lease를 소유하고 입력 byte·노드 이름은 빌린다. 노드 원소는 만든 뒤 옮기지 않는다(FieldView가
+// node.migrated를 가리킨다).
+struct StageData {
+    StageData(Allocator& allocator, Budget&& graphBudget, Envelope&& graphEnvelope) noexcept
+        : budget(Move(graphBudget)), envelope(Move(graphEnvelope)), expectedLeases(allocator) {
+    }
+
+    Budget budget;
+    Envelope envelope;
+    HashMap<TypeId, TypeLease> expectedLeases;
+};
+
+// ObjectGraphStage 내부 통로다(편의 복원의 도달 검사가 1단계 결과를 읽는다).
+struct StageAccess {
+    static StageData* Data(ObjectGraphStage& stage) noexcept {
+        return stage.data_.Get();
+    }
+};
+
+// 복원 옵션 검사다: 값을 바꾸거나 모르는 내용을 건너뛰는 정책(ReportAndDefault·
+// LoadNewerSkippingUnknown)에 hooks가 없거나 maxObjects가 MaxNodeCount를 넘으면 InvalidArgument다.
+Result<void> CheckLoadOptions(const ObjectGraphLoadOptions& options) noexcept;
+
+// 1단계(GraphLoad.cpp): envelope·노드 출처·노드 정체성·Record·값·참조를 검증하고 2단계 몫의
+// 작업량을 미리 청구한 상태를 돌려준다. ObjectRegistry에 닿지 않는다(policy는 Registry 정책의
+// 사본이다). 순서와 오류는 ObjectGraphStage::Validate 주석이다.
+Result<UniquePtr<StageData>> ValidateGraph(Allocator& allocator, TypeRegistry& types,
+                                           const RegistryPolicy& policy,
+                                           const ObjectGraphLoadOptions& options,
+                                           const ObjectGraphInput& input) noexcept;
+
+// 1단계 노드 정체성 검사다(GraphIdentity.cpp, Docs/Design/ObjectFoundations.ko.md 5.4절). 노드를
+// local ID 순서로 Check에 넘기면 앞 노드들로 계산한 Outer 요약(outer 0이면 hasBase ? base : Outer
+// 없음 — 앞서 나온 outer 0 형제의 대표 자식·이름 있는 Inner 여부를 더한다)으로
+// detail::CheckNewObjectIdentity를 판정하고, 그래프 안 형제 유일성((outer, 비교 키) — 중복은 파일
+// 손상이라 InvalidArgument)을 본다. 그래서 2a의 실제 Create는 노드 표 때문에 실패하지 않는다.
+class NodeIdentityCheck {
+public:
+    NodeIdentityCheck(Allocator& allocator, const RegistryPolicy& policy, bool hasBase,
+                      const OuterSummary& base) noexcept;
+
+    // 노드 count개분 상태를 미리 잡는다(할당 실패 OutOfMemory).
+    Result<void> Reserve(usize count) noexcept;
+
+    // 다음 노드(local ID = 지금까지 Check한 수 + 1)를 판정하고 기록한다. node.lease·outer·name이
+    // 정해져 있어야 하고 outer는 이미 범위를 검사한 값이다. 오류: CheckNewObjectIdentity의 것
+    // (WorldOnly Unsupported, 이름 형식·패키지·빈 이름·대표 자식 InvalidArgument, 경로 길이
+    // CapacityExceeded, NFC 판정 할당 OutOfMemory) → 작업량(이름 byte + 1, 같은 해시 비교마다 키
+    // byte + 1) CapacityExceeded → 형제 중복 InvalidArgument. 비교 키·표 할당 실패는 OutOfMemory,
+    // 키 저장소 누계가 uint32를 넘으면 CapacityExceeded다.
+    Result<void> Check(const LoadNode& node, Budget& budget) noexcept;
+
+private:
+    // 노드 하나를 Outer로 볼 때의 요약 재료와 형제 색인 사슬이다.
+    struct NodeShape {
+        uint32 outer = 0;
+        uint32 pathBytes = 0;
+        uint32 keyOffset = 0;
+        uint32 keyBytes = 0;
+        uint32 nextSameHash = 0; // 같은 해시의 앞 노드(local ID, 0 = 없음)
+        bool isOutermost = false;
+        bool outermostIsPackage = false;
+        bool hasRepresentative = false;
+        bool hasNamedInners = false;
+    };
+
+    // outer 값의 요약이다(Outer 없음이면 nullptr, 아니면 summary를 채워 그 주소).
+    const OuterSummary* OuterOf(uint32 outer, OuterSummary& summary) const noexcept;
+
+    Allocator& allocator_;
+    const RegistryPolicy& policy_;
+    bool hasBase_;
+    OuterSummary base_;
+    Array<NodeShape> shapes_;
+    Array<char> keys_;
+    HashMap<uint64, uint32> heads_;
+};
+
+// 2a 사전 확인이다(GraphIdentity.cpp, 5.4절): hasBase와 baseOuter 유무가 다르면 InvalidArgument →
+// hasBase면 transaction.DescribeOuter(baseOuter)(트랜잭션 상태·접근·StaleHandle)의 isOutermost·
+// outermostIsPackage·pathBytes가 base와 다르면 InvalidArgument(handle·Inner 유무는 비교하지 않는다)
+// → 기준 Outer 노드마다 실제 요약(앞선 기준 Outer 노드를 더한 것)으로 CheckNewObjectIdentity 재판정
+// → 기준 Outer 노드 이름의 Registry 점유(대표 노드는 빈 비교 키 — AlreadyExists), hasBase가 아니면
+// outer 0 이름 있는 노드의 최상위 이름 공간 점유(AlreadyExists). 조회 실패는 IsNameTaken의 오류다.
+Result<void> CheckCreatePreconditions(Allocator& allocator, ConstructionContext& transaction,
+                                      const RegistryPolicy& policy, const Array<LoadNode>& nodes,
+                                      bool hasBase, const OuterSummary& base,
+                                      ObjectHandle baseOuter) noexcept;
+
+// 2a 생성이다(GraphApply.cpp): 노드를 local ID 순으로 노드 표의 Outer(outer 0은 baseOuter —
+// null이면 Outer 없음)·이름으로 만들고 node.handle과 handles(비운 뒤 채운다)에 둔다. 실패는
+// Create의 오류이고 만든 객체는 트랜잭션에 남는다(호출자 Rollback).
+Result<void> CreateNodes(ConstructionContext& transaction, Array<LoadNode>& nodes,
+                         ObjectHandle baseOuter, Array<ObjectHandle>& handles) noexcept;
+
+// 2b 적용이다(GraphApply.cpp): 1단계가 보관한 필드를 staged 객체에 쓴다(그래프 예산에 접근하지
+// 않는다). 실패는 쓰기 codec·Registry의 오류이고 호출자가 트랜잭션을 버린다.
+Result<void> ApplyNodeFields(Allocator& allocator, ConstructionContext& transaction,
+                             const Array<LoadNode>& nodes,
+                             const ObjectGraphLoadOptions& options) noexcept;
+
 // 적용을 마친 staged 노드들의 Required 실효 값을 진단한다(Docs/Design/ObjectFoundations.ko.md 4절
 // — 2c 단계, GraphRequired.cpp). Required를 품은 최상위 필드(필드 자신이 Required이거나 struct
 // 필드·struct 원소 배열의 struct가 ContainsRequired — detail::CarriesRequired)만 encode 경로의
@@ -249,10 +352,5 @@ Result<void> CheckRequiredFields(Allocator& allocator, ConstructionContext& tran
 // 편의 복원의 도달 검사다(GraphReachability.cpp).
 Result<void> CheckReachable(Allocator& allocator, const Array<LoadNode>& nodes, bool packagePolicy,
                             bool hasBase, Budget& budget) noexcept;
-
-// 2단계: 생성·적용·Required 검사·prepare·Commit이다(GraphApply.cpp).
-Result<RootRef<Object>> ConstructGraph(Allocator& allocator, ObjectRegistry& registry,
-                                       const ObjectAccessContext& access, Array<LoadNode>& nodes,
-                                       const ObjectGraphLoadOptions& options) noexcept;
 
 } // namespace rocks::graph_detail
