@@ -473,8 +473,8 @@ void AesGcmStreamFinish(AesGcmStream& stream, Span<uint8> tag) noexcept {
 
 namespace {
 
-constexpr uint32 AllOnes32 = static_cast<uint32>(-1);
-constexpr uint64 AllOnes64 = static_cast<uint64>(-1);
+constexpr uint32 AllOnes32 = NumericLimits<uint32>::Max();
+constexpr uint64 AllOnes64 = NumericLimits<uint64>::Max();
 
 // 폭 안에서 현재 값 뒤에 남은 카운터 값 수(= 폭의 모든 bit가 1인 값 - c)다. 128 bit에서 앞 64 bit가
 // 모두 1이 아니면 2^64개 이상 남았으므로 AllOnes64로 포화한다.

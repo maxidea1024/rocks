@@ -35,7 +35,7 @@ constexpr uint8 FreeChunk = 0xFF;
 static_assert((usize{1} << MaximumSlotShift) == ChunkBytes &&
               ChunkBytes == detail::SecretSlotMaxBytes);
 static_assert(ChunkBytes >> MinimumSlotShift == 64,
-              "가장 작은 등급의 슬롯 수가 64 bit 마스크와 같아야 한다");
+              "the smallest slot class must have exactly 64 slots (one 64-bit mask)");
 static_assert(ChunkCount * ChunkBytes == detail::SecretArenaBytes);
 
 // 버퍼 할당기의 최소 정렬이다. SIMD 경로와 키 확장 상태가 기대할 수 있는 정렬을 슬롯과 같게 준다.
@@ -179,7 +179,7 @@ private:
     void* TryAllocateSlot(Arena& arena, uint32 shift, usize bytes) noexcept {
         const usize slotBytes = usize{1} << shift;
         const usize slots = ChunkBytes >> shift;
-        const uint64 full = slots == 64 ? ~uint64{0} : (uint64{1} << slots) - 1;
+        const uint64 full = slots == 64 ? NumericLimits<uint64>::Max() : (uint64{1} << slots) - 1;
         usize chosen = ChunkCount;
         usize firstFree = ChunkCount;
         for (usize chunk = 0; chunk < ChunkCount; ++chunk) {

@@ -13,11 +13,11 @@
 // 검사가 거부한다. 성능 문제는 측정한 뒤 알고리즘·데이터 배치·모듈 최적화 설정으로 다룬다.
 
 #if !defined(__clang__)
-#error "Rocks는 Clang 계열 컴파일러만 지원한다(clang, clang-cl, Apple Clang, NDK clang)."
+#error "Rocks supports only Clang-family compilers (clang, clang-cl, Apple Clang, NDK clang)."
 #endif
 
 #if !defined(__cpp_concepts) || __cpp_concepts < 202002L || !defined(__cpp_if_consteval)
-#error "Rocks는 C++23(concepts, if consteval)이 필요하다."
+#error "Rocks requires C++23 (concepts, if consteval)."
 #endif
 
 // 대상 CPU 아키텍처 매크로다. 둘 중 정확히 하나가 1이다. 컴파일러가 정하는 원시 매크로
@@ -38,7 +38,7 @@
 #define ROCKS_ARCH_X64 0
 #define ROCKS_ARCH_ARM64 1
 #else
-#error "Rocks는 64-bit x64 또는 ARM64만 지원한다."
+#error "Rocks supports only 64-bit x64 or ARM64."
 #endif
 
 // 대상 OS 매크로다. 빌드 시스템(Rocks.Build)이 정확히 하나를 1로 정의한다(ROCKS_PLATFORM_WINDOWS·
@@ -72,14 +72,14 @@
     (ROCKS_PLATFORM_ANDROID != 0 && ROCKS_PLATFORM_ANDROID != 1) ||                                \
     ROCKS_PLATFORM_WINDOWS + ROCKS_PLATFORM_MAC + ROCKS_PLATFORM_ANDROID != 1
 #error                                                                                             \
-    "ROCKS_PLATFORM_WINDOWS·ROCKS_PLATFORM_MAC·ROCKS_PLATFORM_ANDROID 중 정확히 하나가 1이어야 한다(Rocks.Build가 정의한다)."
+    "Exactly one of ROCKS_PLATFORM_WINDOWS, ROCKS_PLATFORM_MAC and ROCKS_PLATFORM_ANDROID must be 1 (set by Rocks.Build)."
 #endif
 
 #if (ROCKS_PLATFORM_WINDOWS && !defined(_WIN32)) ||                                                \
     (ROCKS_PLATFORM_MAC &&                                                                         \
      (!defined(__APPLE__) || !defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__))) ||          \
     (ROCKS_PLATFORM_ANDROID && !defined(__ANDROID__))
-#error "ROCKS_PLATFORM_*가 컴파일 대상 OS와 다르다(ROCKS_PLATFORM_MAC은 macOS 대상만이다)."
+#error "ROCKS_PLATFORM_* does not match the target OS (ROCKS_PLATFORM_MAC is macOS only)."
 #endif
 
 // 빌드 구성 매크로다(UE5.8 UE_BUILD_DEBUG·UE_BUILD_DEVELOPMENT·UE_BUILD_SHIPPING 대응). 빌드
@@ -117,7 +117,7 @@
     (ROCKS_BUILD_RELEASE != 0 && ROCKS_BUILD_RELEASE != 1) ||                                      \
     ROCKS_BUILD_DEBUG + ROCKS_BUILD_DEVELOPMENT + ROCKS_BUILD_RELEASE != 1
 #error                                                                                             \
-    "ROCKS_BUILD_DEBUG·ROCKS_BUILD_DEVELOPMENT·ROCKS_BUILD_RELEASE 중 정확히 하나가 1이어야 한다(Rocks.Build가 정의한다)."
+    "Exactly one of ROCKS_BUILD_DEBUG, ROCKS_BUILD_DEVELOPMENT and ROCKS_BUILD_RELEASE must be 1 (set by Rocks.Build)."
 #endif
 
 // AddressSanitizer 계측 여부다. Asan 구성에서 계측하는 번역 단위만 1이다(계측을 끈 외부

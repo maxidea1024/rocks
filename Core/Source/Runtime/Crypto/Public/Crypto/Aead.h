@@ -196,7 +196,7 @@ namespace hazmat {
                                            Span<uint8> plaintext) noexcept;
 
 // 순번 봉인기가 다 썼다는 표지다(NextSequence()). 쓸 수 있는 순번은 0부터 이 값 - 1까지다.
-inline constexpr uint64 AeadSequenceExhausted = static_cast<uint64>(-1);
+inline constexpr uint64 AeadSequenceExhausted = NumericLimits<uint64>::Max();
 
 // 순번 nonce 봉인기다. 키를 소유하고 seq번째 메시지의 nonce를 iv XOR (0 ‖ BE64(seq))로 스스로
 // 만든다(TLS 1.3 5.3절·QUIC·HPKE와 같은 레코드 nonce 구성). 출력은 암호문 ‖ tag이고 nonce는 싣지

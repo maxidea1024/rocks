@@ -452,6 +452,43 @@ internal static class SelfTests
                 }
             }
         });
+        suite.Add("Policy.RepositoryCompileTimeMessages", () => NoFailures(PolicyChecks.CompileTimeMessages(options.Root)));
+        suite.Add("Policy.CompileTimeMessageControls", () =>
+        {
+            using TemporaryDirectory temporary = new();
+            const string probe = "Core/Source/Runtime/Core/Private/Probe.cpp";
+
+            // 영어 메시지, 메시지 없는 static_assert, 한국어 주석(문장 안·위·#error 줄 끝), 괄호를 담은 영어 문자열,
+            // 다른 문자열 안의 한국어는 허용한다.
+            temporary.Write(probe, string.Join('\n',
+                "static_assert(sizeof(int) == 4, \"int must be 32-bit\");",
+                "static_assert(IsTrivialV<T>); // 한국어 주석",
+                "// static_assert(false, \"한국어\")는 주석이다.",
+                "static_assert(Check(\")\"), \"English (with parentheses)\"); /* 설명 */",
+                "#error \"Rocks requires C++23\" // 한국어 주석",
+                "const char* text = \"한국어 문자열\";",
+                "static_assert(sizeof(long) == 8,",
+                "              \"long must be 64-bit\");",
+                ""));
+            NoFailures(PolicyChecks.CompileTimeMessages(temporary.Root));
+
+            // 한국어 메시지는 static_assert(여러 줄 포함)·#error(줄 이음 포함) 어디서든 위반이다.
+            foreach (string source in new[] { "static_assert(A, \"한국어 메시지\");",
+                "static_assert(sizeof(T) > 0, \"T는 완전한 타입이어야 한다\");", "#error \"Rocks는 Clang만 지원한다\"",
+                "#  error 한국어 문구", "#error \\\n    \"정확히 하나가 1이어야 한다\"" })
+            {
+                foreach (string file in new[] { probe, "Core/Source/Runtime/Core/Tests/ProbeTests.cpp",
+                    "Engine/Source/Runtime/Probe/Public/Probe.h", "Programs/Sandbox/Private/Probe.cpp" })
+                {
+                    temporary.Write(file, "// first line\n" + source + "\n");
+                    var failures = PolicyChecks.CompileTimeMessages(temporary.Root);
+                    Verify.That(failures.Count == 1 && failures[0].Line == 2 &&
+                        failures[0].ToString().Contains("compile-time-message-english", StringComparison.Ordinal),
+                        $"Korean compile-time message escaped audit in {file}: {source}");
+                    temporary.Write(file, "// clean\n");
+                }
+            }
+        });
         suite.Add("Policy.RepositoryInitializerListDeductions",
             () => NoFailures(PolicyChecks.InitializerListDeductions(options.Root)));
         suite.Add("Policy.InitializerListDeductionControls", () =>

@@ -760,7 +760,7 @@ Result<void> hazmat::TryOpenDetached(const AeadKey& key, Span<const uint8> nonce
 namespace {
 
 constexpr usize SequenceBytes = 8;
-constexpr uint64 SaturatedBlocks = static_cast<uint64>(-1);
+constexpr uint64 SaturatedBlocks = NumericLimits<uint64>::Max();
 
 // 모든 nonce가 iv 저장 공간에 들어가고 끝 8 byte에 seq를 XOR할 수 있다.
 static_assert(crypto_aead_xchacha20poly1305_ietf_NPUBBYTES <= AeadMaxNonceBytes &&
