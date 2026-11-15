@@ -2,11 +2,13 @@
 #include <Base/Endian.h>
 #include <Core/Algorithms.h>
 
+#include "WireInternal.h"
+
 namespace rocks {
 namespace {
 
 constexpr uint8 Magic[] = {'R', 'O', 'C', 'K', 'S', 'R', 'E', 'C'};
-constexpr usize HeaderBytes = 44;
+constexpr usize HeaderBytes = detail::RecordHeaderBytes;
 constexpr usize FieldHeaderBytes = 28;
 
 ArchiveLimits PayloadLimits(ArchiveLimits limits) noexcept {
@@ -35,6 +37,37 @@ uint64 BitWidth(uint64 value) noexcept {
 }
 
 } // namespace
+
+Result<RecordHeader> ReadRecordHeader(Span<const uint8> record) noexcept {
+    if (record.Size() < HeaderBytes) {
+        return Result<RecordHeader>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const uint8* bytes = record.Data();
+    for (usize index = 0; index < sizeof(Magic); ++index) {
+        if (bytes[index] != Magic[index]) {
+            return Result<RecordHeader>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
+    if (LoadLittleEndian<uint32>(bytes + 8) != 1) {
+        return Result<RecordHeader>::Failure(ErrorCode::Unsupported);
+    }
+
+    RecordHeader header;
+    header.schema =
+        Guid{LoadLittleEndian<uint64>(bytes + 12), LoadLittleEndian<uint64>(bytes + 20)};
+    header.schemaVersion = LoadLittleEndian<uint32>(bytes + 28);
+    header.fieldCount = LoadLittleEndian<uint32>(bytes + 32);
+    const uint64 payloadBytes = LoadLittleEndian<uint64>(bytes + 36);
+    if (IsZero(header.schema) || header.schemaVersion == 0 ||
+        payloadBytes != static_cast<uint64>(record.Size() - HeaderBytes) ||
+        static_cast<uint64>(header.fieldCount) * FieldHeaderBytes > payloadBytes) {
+        return Result<RecordHeader>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return Result<RecordHeader>::Success(header);
+}
 
 RecordBuilder::RecordBuilder(Allocator& allocator, Guid schema, uint32 schemaVersion,
                              RecordLimits limits) noexcept
@@ -555,10 +588,10 @@ Result<ArchiveReader> RecordReader::OpenValue(const FieldView& field) const noex
     return ArchiveReader::CreateShared(field.payload, limits_.archive, archive_.shared_);
 }
 
-Result<RecordReader> RecordReader::OpenRecordField(Allocator& allocator, const FieldView& field,
-                                                   Guid expectedSchema, uint32 minimum,
-                                                   uint32 maximum,
-                                                   uint32 maxFields) const noexcept {
+Result<RecordReader> RecordReader::OpenContained(Allocator& allocator, Span<const uint8> record,
+                                                 bool wireMatches, Guid expectedSchema,
+                                                 uint32 minimum, uint32 maximum,
+                                                 uint32 maxFields) const noexcept {
     if (!archive_.shared_) {
         return Result<RecordReader>::Failure(ErrorCode::InvalidArgument); // 이동된 reader
     }
@@ -568,18 +601,36 @@ Result<RecordReader> RecordReader::OpenRecordField(Allocator& allocator, const F
         return Result<RecordReader>::Failure(charged.Error());
     }
 
-    if (field.wireType != static_cast<uint32>(WireType::Record)) {
+    if (!wireMatches) {
         return Result<RecordReader>::Failure(ErrorCode::TypeMismatch);
     }
 
-    if (!Contains(field.payload)) {
+    // 이 Record 입력 안의 범위만 받는다. 그 byte는 이 트리의 Open이 이미 청구했으므로 색인만
+    // 청구한다.
+    if (record.Size() == 0 || !Contains(record)) {
         return Result<RecordReader>::Failure(ErrorCode::InvalidArgument);
     }
 
     RecordLimits nested = limits_;
     nested.maxFields = maxFields;
-    return OpenWith(allocator, field.payload, expectedSchema, minimum, maximum, nested,
-                    archive_.shared_, true);
+    return OpenWith(allocator, record, expectedSchema, minimum, maximum, nested, archive_.shared_,
+                    true);
+}
+
+Result<RecordReader> RecordReader::OpenRecordField(Allocator& allocator, const FieldView& field,
+                                                   Guid expectedSchema, uint32 minimum,
+                                                   uint32 maximum,
+                                                   uint32 maxFields) const noexcept {
+    return OpenContained(allocator, field.payload,
+                         field.wireType == static_cast<uint32>(WireType::Record), expectedSchema,
+                         minimum, maximum, maxFields);
+}
+
+Result<RecordReader> RecordReader::OpenNestedRecord(Allocator& allocator, Span<const uint8> record,
+                                                    Guid expectedSchema, uint32 minimum,
+                                                    uint32 maximum,
+                                                    uint32 maxFields) const noexcept {
+    return OpenContained(allocator, record, true, expectedSchema, minimum, maximum, maxFields);
 }
 
 usize RecordReader::Position() const noexcept {

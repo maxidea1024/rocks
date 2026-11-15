@@ -20,7 +20,12 @@ class RecordBuilder;
 class RecordReader;
 class RecordListReader;
 class RecordListWriter;
-class ValueArrayReader;
+
+namespace detail {
+// Serialization 모듈 안의 wire reader·writer(Private/WireInternal.h)가 Archive·Record 내부에 닿는
+// 통로다.
+struct WireAccess;
+} // namespace detail
 
 // 여러 reader가 함께 쓰는 누적 operation·work 예산과 그 한도다. 한 Record 트리(RecordReader와
 // 그것이 연 값 reader·중첩 목록·항목 reader)가 하나를 참조 계수로 공유한다(SharedPtr — 어느
@@ -68,6 +73,8 @@ public:
     // 자기 View의 전체/부분 입력도 허용한다. 성공한 성장·TakeBytes·소멸 뒤 이전 뷰는 보관하지
     // 않는다.
     Result<void> WriteBool(bool) noexcept;
+    // byte 하나다(Text 형태처럼 0·1 밖의 값도 쓰는 u8 칸).
+    Result<void> WriteU8(uint8) noexcept;
     Result<void> WriteU32(uint32) noexcept;
     Result<void> WriteU64(uint64) noexcept;
     Result<void> WriteI64(int64) noexcept;
@@ -123,6 +130,7 @@ private:
     friend class RecordBuilder;
     friend class RecordWriter;
     friend class RecordListWriter;
+    friend struct detail::WireAccess;
 };
 
 // 입력을 빌리는 이동 전용 cursor다. 원본 범위는 reader/반환 view보다 오래 살아 있고 변경되지 않아야
@@ -141,6 +149,8 @@ public:
     // 실패는 cursor를 전혀 이동하지 않는다. 예산은 실패 시에도 이미 소비한 비용을 유지한다.
     // truncation/잘못된 bool/UTF-8은 InvalidArgument, 크기·작업 한도는 CapacityExceeded다.
     Result<bool> ReadBool() noexcept;
+    // byte 하나를 그대로 읽는다(값 범위는 호출자가 본다 — ReadBool과 달리 0·1로 제한하지 않는다).
+    Result<uint8> ReadU8() noexcept;
     Result<uint32> ReadU32() noexcept;
     Result<uint64> ReadU64() noexcept;
     Result<int64> ReadI64() noexcept;
@@ -175,7 +185,7 @@ private:
     SharedPtr<ArchiveBudget> shared_;
     friend class RecordReader;
     friend class RecordListReader;
-    friend class ValueArrayReader;
+    friend struct detail::WireAccess;
 };
 
 } // namespace rocks

@@ -61,6 +61,44 @@ TEST(ArchivePrimitiveEncodingMatchesIndependentLittleEndianGolden) {
     CHECK(reader.Value().AtEnd());
 }
 
+// u8은 byte 하나를 그대로 쓰고 읽는다(ReadBool과 달리 0·1로 제한하지 않는다 — Text 형태 칸).
+TEST(ArchiveU8RoundTripsEveryByteValueAndTruncationKeepsCursor) {
+    SystemAllocator allocator;
+    ArchiveWriter writer(allocator);
+    for (uint32 value = 0; value < 256; ++value) {
+        REQUIRE(writer.WriteU8(static_cast<uint8>(value)));
+    }
+
+    REQUIRE(writer.ByteCount() == 256);
+    for (uint32 value = 0; value < 256; ++value) {
+        CHECK(writer.View()[value] == value);
+    }
+
+    auto reader = ArchiveReader::Create(writer.View());
+    REQUIRE(reader);
+    for (uint32 value = 0; value < 256; ++value) {
+        ExpectValue(reader.Value().ReadU8(), static_cast<uint8>(value));
+    }
+
+    CHECK(reader.Value().AtEnd());
+    auto truncated = reader.Value().ReadU8();
+    CHECK(!truncated && truncated.Error() == ErrorCode::InvalidArgument);
+    CHECK(reader.Value().Position() == 256);
+
+    // 한도: operation 한도에 이르면 쓰기·읽기 모두 CapacityExceeded이고 byte·cursor는 그대로다.
+    ArchiveLimits single;
+    single.maxOperations = 1;
+    ArchiveWriter limited(allocator, single);
+    REQUIRE(limited.WriteU8(7));
+    CHECK(limited.WriteU8(8).Error() == ErrorCode::CapacityExceeded);
+    CHECK(limited.ByteCount() == 1);
+    auto limitedReader = ArchiveReader::Create(writer.View(), single);
+    REQUIRE(limitedReader);
+    REQUIRE(limitedReader.Value().ReadU8());
+    CHECK(limitedReader.Value().ReadU8().Error() == ErrorCode::CapacityExceeded);
+    CHECK(limitedReader.Value().Position() == 1);
+}
+
 TEST(ArchivePreservesFloatBitsAndSignedIntegerExtremes) {
     SystemAllocator allocator;
     constexpr uint32 floatBits[] = {0x80000000u, 0x7f800000u, 0xff800000u, 0x7fc12345u};

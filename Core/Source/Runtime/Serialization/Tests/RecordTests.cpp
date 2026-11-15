@@ -759,3 +759,128 @@ TEST(RecordOpenRecordFieldSharesBudgetWithoutRechargingPayload) {
     CHECK(current->OpenRecordField(allocator, nested.Value(), Inner, 1, 1, 16).Error() ==
           ErrorCode::InvalidArgument);
 }
+
+// ReadRecordHeader는 envelope header만 Open과 같은 순서로 검사하고 schema·버전·필드 수를 돌려준다
+// (InstancedStruct처럼 schema를 먼저 알아야 할 때).
+TEST(RecordReadHeaderChecksEnvelopeOnly) {
+    auto valid = ReadRecordHeader(OneFieldGolden);
+    REQUIRE(valid);
+    CHECK(valid.Value().schema == Schema);
+    CHECK(valid.Value().schemaVersion == 1);
+    CHECK(valid.Value().fieldCount == 1);
+
+    // 필드 TLV는 보지 않는다: payload를 바꿔도 header가 맞으면 성공한다.
+    uint8 bytes[sizeof(OneFieldGolden)];
+    for (usize index = 0; index < sizeof(bytes); ++index) {
+        bytes[index] = OneFieldGolden[index];
+    }
+
+    bytes[44 + 16] = 0; // 필드 wire tag 0(Open은 InvalidArgument)
+    CHECK(ReadRecordHeader(bytes));
+    bytes[44 + 16] = 2;
+    struct Mutation {
+        usize offset;
+        uint8 value;
+        ErrorCode expected;
+    };
+
+    const Mutation mutations[] = {
+        {0, 'X', ErrorCode::InvalidArgument}, // magic
+        {8, 2, ErrorCode::Unsupported},       // envelope version
+        {28, 0, ErrorCode::InvalidArgument},  // schema version 0
+        {36, 33, ErrorCode::InvalidArgument}, // payloadBytes ≠ 크기 − 44
+        {32, 2, ErrorCode::InvalidArgument}}; // fieldCount × 28 > payloadBytes
+    for (const Mutation& mutation : mutations) {
+        const uint8 original = bytes[mutation.offset];
+        bytes[mutation.offset] = mutation.value;
+        CHECK(ReadRecordHeader(bytes).Error() == mutation.expected);
+        bytes[mutation.offset] = original;
+    }
+
+    // schema 0(두 u64 모두 0).
+    for (usize index = 12; index < 28; ++index) {
+        bytes[index] = 0;
+    }
+
+    CHECK(ReadRecordHeader(bytes).Error() == ErrorCode::InvalidArgument);
+
+    // 44 byte보다 짧은 모든 접두.
+    for (usize length = 0; length < 44; ++length) {
+        CHECK(ReadRecordHeader(Span<const uint8>(OneFieldGolden, length)).Error() ==
+              ErrorCode::InvalidArgument);
+    }
+
+    // 뒤에 byte가 붙으면 payloadBytes가 맞지 않는다.
+    uint8 trailing[sizeof(OneFieldGolden) + 1] = {};
+    for (usize index = 0; index < sizeof(OneFieldGolden); ++index) {
+        trailing[index] = OneFieldGolden[index];
+    }
+
+    CHECK(ReadRecordHeader(trailing).Error() == ErrorCode::InvalidArgument);
+}
+
+// OpenNestedRecord는 이 Record 입력 안의 범위만 받고, 같은 예산으로 열되 그 byte를 다시 청구하지
+// 않는다(필드 값 안 Optional·Map 값·InstancedStruct의 Record 내용).
+TEST(RecordOpenNestedRecordRequiresContainedRangeAndSharesBudget) {
+    SystemAllocator allocator;
+    constexpr usize Bytes = 64 * 1024;
+    auto inner = NestedRecord(allocator, 1, Bytes);
+    REQUIRE(inner);
+    // 바깥 필드 값 = u32 머리 4 byte + 안쪽 Record(값 안에 놓인 Record 내용을 흉내 낸다).
+    ArchiveWriter value(allocator);
+    REQUIRE(value.WriteU32(0xabcdef01u));
+    REQUIRE(value.WriteRaw(inner.Value().View()));
+    RecordBuilder outer(allocator, Schema, 1);
+    REQUIRE(outer.AddField(First, 0x7777u, value.View()));
+    auto outerBytes = outer.Build();
+    REQUIRE(outerBytes);
+    auto reader = RecordReader::Open(allocator, outerBytes.Value().View(), Schema, 1, 1);
+    REQUIRE(reader);
+    auto field = reader.Value().Next();
+    REQUIRE(field);
+    const Span<const uint8> nested(field.Value().payload.Data() + 4,
+                                   field.Value().payload.Size() - 4);
+    const uint64 afterOpen = reader.Value().WorkUsed();
+    const uint64 operations = reader.Value().OperationsUsed();
+    auto opened = reader.Value().OpenNestedRecord(allocator, nested, Inner, 1, 1, 16);
+    REQUIRE(opened);
+    CHECK(reader.Value().WorkUsed() - afterOpen < 4096); // payload 64 KiB를 다시 청구하지 않는다
+    CHECK(reader.Value().OperationsUsed() > operations);
+    auto leaf = opened.Value().Next();
+    REQUIRE(leaf);
+    CHECK(leaf.Value().id == Leaf);
+    auto leafValue = opened.Value().OpenValue(leaf.Value());
+    REQUIRE(leafValue);
+    auto read = leafValue.Value().ReadBytes();
+    CHECK(read && read.Value().Size() == Bytes);
+
+    // 오류: 다른 버퍼의 범위·빈 범위·이 입력 끝을 넘는 범위는 InvalidArgument, schema 불일치
+    // TypeMismatch, 범위 밖 버전 Unsupported, 필드 수 한도 CapacityExceeded, 이동된 reader
+    // InvalidArgument. 실패한 호출도 operation을 소비한다.
+    uint64 before = reader.Value().OperationsUsed();
+    CHECK(
+        reader.Value().OpenNestedRecord(allocator, inner.Value().View(), Inner, 1, 1, 16).Error() ==
+        ErrorCode::InvalidArgument);
+    CHECK(reader.Value().OperationsUsed() == before + 1);
+    CHECK(reader.Value()
+              .OpenNestedRecord(allocator, Span<const uint8>(nested.Data(), 0), Inner, 1, 1, 16)
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(reader.Value()
+              .OpenNestedRecord(allocator, Span<const uint8>(nested.Data(), nested.Size() + 1),
+                                Inner, 1, 1, 16)
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(reader.Value().OpenNestedRecord(allocator, nested, Schema, 1, 1, 16).Error() ==
+          ErrorCode::TypeMismatch);
+    CHECK(reader.Value().OpenNestedRecord(allocator, nested, Inner, 2, 3, 16).Error() ==
+          ErrorCode::Unsupported);
+    CHECK(reader.Value().OpenNestedRecord(allocator, nested, Inner, 1, 1, 0).Error() ==
+          ErrorCode::CapacityExceeded);
+    // 범위 안이지만 Record가 아닌 곳(머리 4 byte부터)은 envelope 검사가 거부한다.
+    CHECK(reader.Value()
+              .OpenNestedRecord(allocator, field.Value().payload, Inner, 1, 1, 16)
+              .Error() == ErrorCode::InvalidArgument);
+    RecordReader moved = Move(reader.Value());
+    CHECK(reader.Value().OpenNestedRecord(allocator, nested, Inner, 1, 1, 16).Error() ==
+          ErrorCode::InvalidArgument);
+    CHECK(moved.OpenNestedRecord(allocator, nested, Inner, 1, 1, 16));
+}

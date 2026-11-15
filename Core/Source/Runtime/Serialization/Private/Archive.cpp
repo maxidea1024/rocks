@@ -151,6 +151,11 @@ Result<void> ArchiveWriter::WriteBool(bool value) noexcept {
     return Append(bytes, {});
 }
 
+Result<void> ArchiveWriter::WriteU8(uint8 value) noexcept {
+    const uint8 bytes[] = {value};
+    return Append(bytes, {});
+}
+
 Result<void> ArchiveWriter::WriteU32(uint32 value) noexcept {
     uint8 bytes[4];
     StoreLittleEndian<uint32>(bytes, value);
@@ -431,6 +436,17 @@ Result<bool> ArchiveReader::ReadBool() noexcept {
 
     ++position_;
     return Result<bool>::Success(bytes.Value()[0] != 0);
+}
+
+Result<uint8> ArchiveReader::ReadU8() noexcept {
+    auto bytes = Fixed(1);
+    if (!bytes) {
+        return Result<uint8>::Failure(bytes.Error());
+    }
+
+    const uint8 value = bytes.Value()[0];
+    ++position_;
+    return Result<uint8>::Success(value);
 }
 
 Result<uint32> ArchiveReader::ReadU32() noexcept {

@@ -1,4 +1,6 @@
 #include <Core/Memory/SystemAllocator.h>
+#include <Serialization/InstancedStructWire.h>
+#include <Serialization/TextWire.h>
 #include <Serialization/ValueArray.h>
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
@@ -37,7 +39,7 @@ bool SameBytes(Span<const uint8> left, Span<const uint8> right) noexcept {
 
 // payload를 새 예산의 ArchiveReader로 열어 header를 검사한다.
 Result<ValueArrayReader> OpenPayload(Span<const uint8> payload, uint32 elementWire, uint32 maxCount,
-                                     ValueArrayShape shape = {},
+                                     WireValueShape shape = {},
                                      ArchiveLimits limits = {}) noexcept {
     auto archive = ArchiveReader::Create(payload, limits);
     if (!archive) {
@@ -48,7 +50,7 @@ Result<ValueArrayReader> OpenPayload(Span<const uint8> payload, uint32 elementWi
 }
 
 ErrorCode OpenError(Span<const uint8> payload, uint32 elementWire, uint32 maxCount,
-                    ValueArrayShape shape = {}, ArchiveLimits limits = {}) noexcept {
+                    WireValueShape shape = {}, ArchiveLimits limits = {}) noexcept {
     auto opened = OpenPayload(payload, elementWire, maxCount, shape, limits);
     return opened ? ErrorCode::None : opened.Error();
 }
@@ -227,10 +229,19 @@ TEST(ValueArray_RoundTripEveryElementWire) {
     CHECK(ValueArrayElementShape(WireType::String).Value().minElementBytes == 8 &&
           !ValueArrayElementShape(WireType::String).Value().exact);
     CHECK(ValueArrayElementShape(WireType::SoftObjectReference).Value().minElementBytes == 24);
+    // 리플렉션 B9a3: InstancedStruct(u64 길이 + 내용)·Text(형태 byte + 내용)는 가변 원소다.
+    CHECK(ValueArrayElementShape(WireType::InstancedStruct).Value().minElementBytes == 8 &&
+          !ValueArrayElementShape(WireType::InstancedStruct).Value().exact);
+    CHECK(ValueArrayElementShape(WireType::Text).Value().minElementBytes == 1 &&
+          !ValueArrayElementShape(WireType::Text).Value().exact);
     CHECK(ValueArrayElementShape(WireType::Record).Error() == ErrorCode::InvalidArgument);
     CHECK(ValueArrayElementShape(WireType::RecordList).Error() == ErrorCode::InvalidArgument);
     CHECK(ValueArrayElementShape(WireType::ValueArray).Error() == ErrorCode::InvalidArgument);
+    CHECK(ValueArrayElementShape(WireType::Optional).Error() == ErrorCode::InvalidArgument);
+    CHECK(ValueArrayElementShape(WireType::Set).Error() == ErrorCode::InvalidArgument);
+    CHECK(ValueArrayElementShape(WireType::Map).Error() == ErrorCode::InvalidArgument);
     CHECK(ValueArrayElementShape(0u).Error() == ErrorCode::InvalidArgument);
+    CHECK(ValueArrayElementShape(19u).Error() == ErrorCode::InvalidArgument);
     CHECK(ValueArrayElementShape(99u).Error() == ErrorCode::InvalidArgument);
 }
 
@@ -273,9 +284,16 @@ TEST(ValueArray_HeaderChecksRunInOrder) {
     CHECK(OpenError(valid.View(), Wire(WireType::U32), 1) == ErrorCode::None);
     CHECK(OpenError(valid.View(), Wire(WireType::Record), 1) == ErrorCode::InvalidArgument);
 
-    // 저장 tag가 Record·RecordList·ValueArray·모르는 값·0이면(기대 tag와 달라도) InvalidArgument다.
-    const uint32 invalidTags[] = {Wire(WireType::Record), Wire(WireType::RecordList),
-                                  Wire(WireType::ValueArray), 0u, 99u};
+    // 저장 tag가 Record·RecordList·ValueArray·Optional·Set·Map·모르는 값·0이면(기대 tag와 달라도)
+    // InvalidArgument다.
+    const uint32 invalidTags[] = {Wire(WireType::Record),
+                                  Wire(WireType::RecordList),
+                                  Wire(WireType::ValueArray),
+                                  Wire(WireType::Optional),
+                                  Wire(WireType::Set),
+                                  Wire(WireType::Map),
+                                  0u,
+                                  99u};
     for (uint32 tag : invalidTags) {
         auto bytes = Header(allocator, tag, 1, 4);
         CHECK(OpenError(bytes.View(), Wire(WireType::U32), 1) == ErrorCode::InvalidArgument);
@@ -302,7 +320,7 @@ TEST(ValueArray_HeaderChecksRunInOrder) {
     CHECK(OpenError(extra.View(), Wire(WireType::U32), 10) == ErrorCode::InvalidArgument);
 
     // 스키마 최소 크기가 wire 최소보다 크면 그것을 쓴다(Digest = Bytes 40 exact).
-    const ValueArrayShape digest{40, true};
+    const WireValueShape digest{40, true};
     auto digestShort = Header(allocator, Wire(WireType::Bytes), 1, 39);
     CHECK(OpenError(digestShort.View(), Wire(WireType::Bytes), 10, digest) ==
           ErrorCode::InvalidArgument);
@@ -548,7 +566,7 @@ TEST(ValueArray_ExactVariableElementsCheckEachLength) {
     // 가변 wire에 exact shape를 주면 합계만 맞고 원소 경계가 어긋난 입력도 Open이 거부한다: Digest
     // {40, true} 두 원소의 길이 0·64(합 80)는 count × 40과 같지만 InvalidArgument다.
     SystemAllocator allocator;
-    const ValueArrayShape digest{40, true};
+    const WireValueShape digest{40, true};
     const usize skewed[] = {0, 64};
     auto bad = BytesElements(allocator, skewed);
     CHECK(bad.Size() == 8 + 80);
@@ -621,7 +639,19 @@ TEST(ValueArray_ContradictoryShapesAreRejected) {
           ErrorCode::InvalidArgument);
     CHECK(ValueArrayWriter::Begin(out, WireType::Bytes, 1, 64, 1, {4, true}).Error() ==
           ErrorCode::InvalidArgument);
+    // 내용이 길이 prefix 하나로 정해지지 않는 InstancedStruct·Text에 exact는 모순이다(크기를 올리는
+    // 최소 크기만은 받는다).
+    CHECK(ValueArrayWriter::Begin(out, WireType::InstancedStruct, 1, 64, 1, {8, true}).Error() ==
+          ErrorCode::InvalidArgument);
+    CHECK(ValueArrayWriter::Begin(out, WireType::Text, 1, 64, 1, {1, true}).Error() ==
+          ErrorCode::InvalidArgument);
     CHECK(out.ByteCount() == 0);
+    auto texts = Header(allocator, Wire(WireType::Text), 1, 1);
+    CHECK(OpenError(texts.View(), Wire(WireType::Text), 1, {1, true}) ==
+          ErrorCode::InvalidArgument);
+    CHECK(OpenError(texts.View(), Wire(WireType::Text), 1, {1, false}) == ErrorCode::None);
+    CHECK(OpenError(texts.View(), Wire(WireType::Text), 1, {2, false}) ==
+          ErrorCode::InvalidArgument);
 }
 
 TEST(ValueArray_WriterMatchesReaderCountAndShape) {
@@ -636,7 +666,7 @@ TEST(ValueArray_WriterMatchesReaderCountAndShape) {
 
     // exact shape: header + count × 최소 크기가 maxBytes를 넘으면 Begin에서, 원소 byte가 정확히
     // count × 크기가 아니면 End에서 거부한다.
-    const ValueArrayShape digest{40, true};
+    const WireValueShape digest{40, true};
     ArchiveWriter small(allocator);
     CHECK(ValueArrayWriter::Begin(small, WireType::Bytes, 2, 8 + 79, 10, digest).Error() ==
           ErrorCode::CapacityExceeded);
@@ -671,4 +701,142 @@ TEST(ValueArray_WriterMatchesReaderCountAndShape) {
     CHECK(moved.Count() == 0 && other.Value().Count() == 1);
     auto element = other.Value().Elements().ReadBytes();
     CHECK(element && element.Value().Size() == 32 && other.Value().Finish());
+}
+
+namespace {
+
+constexpr Guid ElementStruct{13, 7};
+constexpr Guid ElementMember{13, 8};
+
+// 원소 자리 InstancedStruct 하나(u64 길이 + 내용)를 쓴다. value가 0이면 비어 있음, 아니면 U32 멤버
+// 하나의 Record다.
+Result<void> WriteInstancedElement(ArchiveWriter& out, uint32 value) noexcept {
+    auto element = PrefixedRecordWriter::Begin(out, Wire(WireType::InstancedStruct));
+    if (!element) {
+        return Result<void>::Failure(element.Error());
+    }
+
+    if (value != 0) {
+        auto record = RecordWriter::Begin(out, ElementStruct, 3);
+        if (!record) {
+            return Result<void>::Failure(record.Error());
+        }
+
+        if (auto begun = record.Value().BeginField(ElementMember); !begun) {
+            return begun;
+        }
+
+        if (auto written = out.WriteU32(value); !written) {
+            return written;
+        }
+
+        if (auto ended = record.Value().EndField(WireType::U32); !ended) {
+            return ended;
+        }
+
+        if (auto ended = record.Value().End(); !ended) {
+            return ended;
+        }
+    }
+
+    return element.Value().End();
+}
+
+} // namespace
+
+// 리플렉션 B9a3이 더한 원소 tag: InstancedStruct(u64 길이 + 0 byte 또는 Record)와 Text(형태 byte +
+// 내용)를 ValueArray 원소로 쓰고 읽는다. 원소 Record는 부모 Record의 OpenNestedRecord로 같은
+// 예산에서 연다.
+TEST(ValueArray_InstancedStructAndTextElements) {
+    SystemAllocator allocator;
+    ArchiveWriter structs(allocator);
+    auto structArray = ValueArrayWriter::Begin(structs, Wire(WireType::InstancedStruct), 3, 4096);
+    REQUIRE(structArray);
+    REQUIRE(WriteInstancedElement(structs, 0));
+    REQUIRE(WriteInstancedElement(structs, 0x01020304u));
+    REQUIRE(WriteInstancedElement(structs, 0));
+    REQUIRE(structArray.Value().End());
+    // 빈 원소는 길이 0 하나다(header 8 + 8 + (8 + Record 76) + 8).
+    CHECK(structs.ByteCount() == 8 + 8 + 8 + 76 + 8);
+
+    ArchiveWriter texts(allocator);
+    auto textArray = ValueArrayWriter::Begin(texts, Wire(WireType::Text), 3, 4096);
+    REQUIRE(textArray);
+    TextWireValue invariant;
+    invariant.form = TextWireForm::Invariant;
+    invariant.source = "원문";
+    TextWireValue localized;
+    localized.form = TextWireForm::Localized;
+    localized.textId = Guid{5, 6};
+    localized.sourceRevision = 9;
+    localized.source = "fallback";
+    REQUIRE(WriteTextWire(texts, TextWireValue{}));
+    REQUIRE(WriteTextWire(texts, invariant));
+    REQUIRE(WriteTextWire(texts, localized));
+    REQUIRE(textArray.Value().End());
+
+    RecordBuilder builder(allocator, ParentSchema, 1);
+    REQUIRE(builder.AddField(ArrayField, WireType::ValueArray, structs.View()));
+    REQUIRE(builder.AddField(OtherField, WireType::ValueArray, texts.View()));
+    auto bytes = builder.Build();
+    REQUIRE(bytes);
+    auto parent = RecordReader::Open(allocator, bytes.Value().View(), ParentSchema, 1, 1);
+    REQUIRE(parent);
+
+    auto structField = parent.Value().Find(ArrayField);
+    REQUIRE(structField);
+    auto structReader = ValueArrayReader::OpenField(parent.Value(), structField.Value(),
+                                                    Wire(WireType::InstancedStruct), 16);
+    REQUIRE(structReader && structReader.Value().Count() == 3);
+    const uint32 expected[] = {0, 0x01020304u, 0};
+    for (uint32 index = 0; index < 3; ++index) {
+        auto content = ReadInstancedStructElement(structReader.Value().Elements());
+        REQUIRE(content);
+        CHECK(content.Value().IsEmpty() == (expected[index] == 0));
+        if (expected[index] == 0) {
+            CHECK(content.Value().schema == Guid{} && content.Value().schemaVersion == 0);
+            continue;
+        }
+
+        CHECK(content.Value().schema == ElementStruct && content.Value().schemaVersion == 3);
+        auto record = parent.Value().OpenNestedRecord(allocator, content.Value().record,
+                                                      ElementStruct, 1, 3, 16);
+        REQUIRE(record);
+        auto member = record.Value().Find(ElementMember);
+        REQUIRE(member);
+        auto value = record.Value().OpenValue(member.Value());
+        REQUIRE(value);
+        auto number = value.Value().ReadU32();
+        CHECK(number && number.Value() == expected[index]);
+    }
+
+    CHECK(structReader.Value().Finish());
+
+    auto textField = parent.Value().Find(OtherField);
+    REQUIRE(textField);
+    auto textReader =
+        ValueArrayReader::OpenField(parent.Value(), textField.Value(), Wire(WireType::Text), 16);
+    REQUIRE(textReader && textReader.Value().Count() == 3);
+    auto empty = ReadTextWire(textReader.Value().Elements());
+    CHECK(empty && empty.Value().form == TextWireForm::Empty);
+    auto readInvariant = ReadTextWire(textReader.Value().Elements());
+    CHECK(readInvariant && readInvariant.Value().form == TextWireForm::Invariant &&
+          readInvariant.Value().source == StringView("원문"));
+    auto readLocalized = ReadTextWire(textReader.Value().Elements());
+    CHECK(readLocalized && readLocalized.Value().form == TextWireForm::Localized &&
+          readLocalized.Value().textId == (Guid{5, 6}) &&
+          readLocalized.Value().sourceRevision == 9 &&
+          readLocalized.Value().source == StringView("fallback"));
+    CHECK(textReader.Value().Finish());
+
+    // count 사전 검사는 원소 최소 크기(InstancedStruct 8·Text 1)로 한다.
+    auto shortStructs = Header(allocator, Wire(WireType::InstancedStruct), 2, 15);
+    CHECK(OpenError(shortStructs.View(), Wire(WireType::InstancedStruct), 10) ==
+          ErrorCode::InvalidArgument);
+    auto enoughStructs = Header(allocator, Wire(WireType::InstancedStruct), 2, 16);
+    CHECK(OpenError(enoughStructs.View(), Wire(WireType::InstancedStruct), 10) == ErrorCode::None);
+    auto shortTexts = Header(allocator, Wire(WireType::Text), 3, 2);
+    CHECK(OpenError(shortTexts.View(), Wire(WireType::Text), 10) == ErrorCode::InvalidArgument);
+    // 원소 tag끼리 다르면 TypeMismatch다.
+    CHECK(OpenError(enoughStructs.View(), Wire(WireType::Text), 10) == ErrorCode::TypeMismatch);
 }

@@ -552,7 +552,7 @@ public:
     //                                       MaxArrayElements);
     //   if (!array) { return Result<void>::Failure(array.Error()); }
     Result<ValueArrayReader> OpenValueArray(const FieldView& field, uint32 elementWire,
-                                            uint32 maxCount, ValueArrayShape shape = {}) noexcept {
+                                            uint32 maxCount, WireValueShape shape = {}) noexcept {
         if (field.wireType != static_cast<uint32>(WireType::ValueArray)) {
             return Result<ValueArrayReader>::Failure(ErrorCode::TypeMismatch);
         }

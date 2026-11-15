@@ -6,7 +6,7 @@
 
 - `ArchiveWriter`는 전달 allocator로 byte buffer를 소유한다. `TakeBytes()`는 같은 allocator를 빌리는 `Array<uint8>`로 소유권을 이전한다. `Clear()`는 쓴 byte만 비우고 용량·누적 예산을 남기고(값마다 같은 writer를 다시 쓴다), `Reserve(capacity)`는 용량을 미리 잡는다(maxTotalBytes 초과 CapacityExceeded). allocator가 결과보다 먼저 파괴되면 안 된다.
 - `ArchiveReader`는 caller의 불변 byte 범위를 빌린다. `ReadStringView`/`ReadBytes`/`ReadRaw` 결과도 원본 수명에 종속된다. `ReadString(allocator)`만 문자열을 깊게 복사한다.
-- 고정 폭 값은 little-endian이다. bool은 0/1, i64는 two's complement, float32/64는 IEEE bit 표현이다. Guid는 high u64 다음 low u64다. bytes/string은 u64 byte 길이와 payload이며 종단 NUL을 파일에 쓰지 않는다. UTF-8 string의 내부 U+0000은 보존한다.
+- 고정 폭 값은 little-endian이다. bool은 0/1, u8은 byte 하나 그대로(값 범위는 호출자), i64는 two's complement, float32/64는 IEEE bit 표현이다. Guid는 high u64 다음 low u64다. bytes/string은 u64 byte 길이와 payload이며 종단 NUL을 파일에 쓰지 않는다. UTF-8 string의 내부 U+0000은 보존한다.
 - 모든 실패는 reader cursor 또는 writer의 기존 bytes/길이를 보존한다. 소비한 operation/work 예산은 환급하지 않으므로 같은 실패를 반복하여 한도를 우회할 수 없다. OOM 재시도에도 남은 예산이 필요하다.
 - maxTotalBytes는 archive 전체, maxValueBytes는 가변 값/raw 범위, maxOperations/maxWork는 호출 및 처리 비용 한도다. work는 byte 검사·복사와 탐색 비교의 보수적인 비용이며 외부 allocator 실행 시간을 제한하는 타이머가 아니다.
 - 동일 wrapper의 동시 변경과 allocator callback에서 해당 wrapper/input의 변경은 지원하지 않는다. writer 자기 View의 전체/부분 append는 성장해도 지원한다.
@@ -37,9 +37,21 @@ unknown nonzero wire tag는 그대로 열거하고 skip할 수 있다. 알려진
 
 ## ValueArray (wire tag 13)
 
-`WireType::ValueArray`는 단일 값 원소 배열이다(`Serialization/ValueArray.h`). payload는 u32 원소 wire tag, u32 count, count개의 원소 payload(그 wire tag의 Archive 표현을 이어 붙인다 — Bool 1, U32·F32 4, U64·I64·F64 8, Guid 16, String·Bytes u64 길이 + byte, SoftObjectReference Guid + String)다. Record·RecordList·ValueArray와 모르는 tag는 원소가 될 수 없다. 원소마다 Record envelope(최소 52 byte)를 쓰지 않으므로 원소 수가 많아도 값 하나의 byte 한도 안에 든다.
+`WireType::ValueArray`는 단일 값 원소 배열이다(`Serialization/ValueArray.h`). payload는 u32 원소 wire tag, u32 count, count개의 원소 payload(그 wire tag의 Archive 표현을 이어 붙인다 — Bool 1, U32·F32 4, U64·I64·F64 8, Guid 16, String·Bytes u64 길이 + byte, SoftObjectReference Guid + String, InstancedStruct u64 길이 + 내용, Text 형태 byte + 내용)다. 원소 tag는 `WireSlot::ArrayElement` 자리의 것이고 Record·RecordList·ValueArray·Optional·Set·Map과 모르는 tag는 원소가 될 수 없다. 원소마다 Record envelope(최소 52 byte)를 쓰지 않으므로 원소 수가 많아도 값 하나의 byte 한도 안에 든다.
 
-`ValueArrayReader::Open(ArchiveReader&&, elementWire, maxCount, shape)`·`OpenField(parent, field, …)`는 할당 전에 header를 검사한다: 기대 tag 인자가 원소 tag가 아니거나 shape와 모순이면(고정 폭 wire에 다른 폭, exact인데 wire 최소보다 작은 크기) 먼저 InvalidArgument, 원소가 될 수 없는 저장 tag는 InvalidArgument, 기대 tag와 다르면 TypeMismatch, count > maxCount면 CapacityExceeded, count × max(wire 최소 크기, shape 최소 크기)가 남은 byte보다 크면 InvalidArgument(고정 폭이나 `shape.exact`면 남은 byte가 정확히 같아야 한다 — Digest는 `{40, true}`), 그 뒤 count만큼 work를 먼저 청구한다. 가변 wire에 `shape.exact`면 원소마다 길이 prefix가 정확히 그 크기를 만드는지도 본다(합계만 맞고 경계가 어긋난 입력을 거부한다). 원소는 `Elements()`의 `Read*`로 읽고(원소마다 operation 1 + byte, bool·UTF-8·길이는 그 `Read*`가 검사), `Finish()`가 남은 byte를 거부한다. `OpenField`로 열거나 `OpenValue`로 연 reader를 넘기면 Record 트리 예산을 공유한다. `ValueArrayWriter::Begin(out, elementWire, count, maxBytes, maxCount, shape)`는 reader와 같은 tag·shape 검사를 하고 header를 쓰며(count > maxCount나 8 + count × 최소 크기 > maxBytes면 쓰기 전에 CapacityExceeded), 호출자가 원소를 out에 바로 쓴 뒤 `End`가 전체 ≤ maxBytes와 원소 byte(고정 폭·exact는 정확히 count × 크기, 가변은 하한)를 확인한다. `Check()`는 가변 원소를 쓰는 동안 일찍 끊는 데 쓴다.
+`ValueArrayReader::Open(ArchiveReader&&, elementWire, maxCount, shape)`·`OpenField(parent, field, …)`는 할당 전에 header를 검사한다: 기대 tag 인자가 원소 tag가 아니거나 shape와 모순이면(고정 폭 wire에 다른 폭, exact인데 wire 최소보다 작은 크기, InstancedStruct·Text의 exact) 먼저 InvalidArgument(이때는 payload를 옮기지 않는다), 원소가 될 수 없는 저장 tag는 InvalidArgument, 기대 tag와 다르면 TypeMismatch, count > maxCount면 CapacityExceeded, count × max(wire 최소 크기, shape 최소 크기)가 남은 byte보다 크면 InvalidArgument(고정 폭이나 `shape.exact`면 남은 byte가 정확히 같아야 한다 — Digest는 `{40, true}`), 그 뒤 count만큼 work를 먼저 청구한다. 가변 wire에 `shape.exact`면 원소마다 길이 prefix가 정확히 그 크기를 만드는지도 본다(합계만 맞고 경계가 어긋난 입력을 거부한다). 원소는 `Elements()`의 `Read*`로 읽고(원소마다 operation 1 + byte, bool·UTF-8·길이는 그 `Read*`가 검사), `Finish()`가 남은 byte를 거부한다. `OpenField`로 열거나 `OpenValue`로 연 reader를 넘기면 Record 트리 예산을 공유한다. `ValueArrayWriter::Begin(out, elementWire, count, maxBytes, maxCount, shape)`는 reader와 같은 tag·shape 검사를 하고 header를 쓰며(count > maxCount나 8 + count × 최소 크기 > maxBytes면 쓰기 전에 CapacityExceeded), 호출자가 원소를 out에 바로 쓴 뒤 `End`가 전체 ≤ maxBytes와 원소 byte(고정 폭·exact는 정확히 count × 크기, 가변은 하한)를 확인한다(out이 Begin 위치보다 짧아졌으면 `Check`·`End` 모두 InvalidArgument). `Check()`는 가변 원소를 쓰는 동안 일찍 끊는 데 쓴다.
+
+## 리플렉션 B9 wire (tag 14–18)
+
+리플렉션 B9a3이 더한 형식이다(`Docs/Design/ReflectionExtensions.ko.md` 1.2절). 이 계층은 형식만 보고, 그 wire를 쓰는 값 종류의 codec 연결은 뒤 단계(B9c2·B9e·B9f2·B9j·B9l)다.
+
+- 자리(`WireSlot.h`): 컨테이너 안 단일 값 자리마다 받는 tag와 최소 크기를 `WireSlotShape(slot, wire)`가 정한다. ValueArray 원소는 단일 값 tag + InstancedStruct·Text, Set 원소·Map 키는 Bool·U32·U64·I64·Guid·String·Bytes·SoftObjectReference(실수·InstancedStruct·Text 없음), Map 값은 원소 tag + Record(u64 길이 + Record), Optional 내부는 Bool·정수·실수·Guid·String·Bytes + Record(남은 byte 전부)다. `WireValueShape`(지금까지의 `ValueArrayShape`)도 이 헤더에 있다(exact는 고정 폭과 String·Bytes·SoftObjectReference만, 열들의 최소 크기 합이 넘치면 InvalidArgument). 같은 wire의 다른 종류(Optional 내부 ClassRef·WeakRef, 키 WeakRef·ObjectRef)는 codec이 schema로 거른다. wire 인자는 `uint32`·`WireType` 오버로드가 있다. 원소·Map 값 자리의 길이 prefix Record는 `PrefixedRecordWriter`·`ReadPrefixedRecord`로 쓰고 읽는다.
+- Optional(14, `OptionalWire.h`): u8 present(0·1) + (1이면) u32 내부 tag + 내부 payload. `OptionalWireReader`(`Open`·`OpenField`·`IsSet`·`Inner`·`RecordBytes`·`Finish`)·`OptionalWireWriter`(`WriteUnset`·`BeginSet`·`End`).
+- Set(15, `SetWire.h`)·Map(16, `MapWire.h`): Set은 ValueArray 배치에 키 자리 tag, Map은 키 tag + 값 tag + count + (키, 값)들이다. reader·writer 규약(검사 순서·count 사전 검사·work 선청구·exact 검사·`Begin`/`Check`/`End`)은 ValueArray와 같다.
+- InstancedStruct(17, `InstancedStructWire.h`): 필드 값은 0 byte(비어 있음) 또는 Record 하나, 원소·Map 값 자리는 u64 길이 + 같은 내용. `ReadInstancedStructField`·`ReadInstancedStructElement`가 Record byte와 header의 schema·버전을 돌려준다.
+- Text(18, `TextWire.h`): u8 형태(0 비어 있음, 1 Invariant String, 2 Localized Guid + U64 + String). Localized의 textId·revision 0은 InvalidArgument다. `WriteTextWire`(고정 칸과 원문을 한 번에 붙인다 — 원문이 out 자신의 View를 가리켜도 된다)·`ReadTextWire`.
+- 중첩 Record: `ReadRecordHeader`는 envelope header만 검사한다(44 byte 미만은 magic보다 먼저 InvalidArgument, schema는 0만 본다 — 그 밖의 순서는 Open과 같다). 내용 Record는 `RecordReader::OpenNestedRecord`(이 Record 입력 안의 범위만, 같은 예산에 색인만 청구)로 연다. 내용을 넘길 때 그 byte는 Record 트리 안이면 다시 청구하지 않으므로 중첩해도 작업이 깊이 배수로 불어나지 않는다.
+- 복합 읽기는 실패하면 cursor를 되돌리고 `WriteTextWire`는 실패하면 out을 되돌린다. 제자리 writer는 실패하면 out을 버린다.
 
 ## 예산 공유(Record 트리)
 
@@ -51,4 +63,4 @@ unknown nonzero wire tag는 그대로 열거하고 skip할 수 있다. 알려진
 
 ## 검증 구성
 
-독립 golden endian bytes, float bit 보존, UTF-8/NUL, compound cursor 불변, self-alias 성장, 크기·예산 경계, 모든 할당 지점 N-fail, 중복·truncation·version·unknown tag, 결정적 mutation fixture를 둔다. 테스트 소스 작성과 실제 Windows/macOS 실행 증거는 구분한다.
+독립 golden endian bytes, float bit 보존, UTF-8/NUL, compound cursor 불변, self-alias 성장, 크기·예산 경계, 모든 할당 지점 N-fail, 중복·truncation·version·unknown tag, 결정적 mutation fixture를 둔다. wire 14–18은 자리 표 전체, header 검사 순서, present byte 범위, 내용 Record header 손상, 중첩 Record 청구 1회, 14–18을 섞은 Record 트리의 모든 byte 변경 손상 입력 시험을 둔다. 테스트 소스 작성과 실제 Windows/macOS 실행 증거는 구분한다.

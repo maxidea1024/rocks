@@ -5,12 +5,14 @@
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
 
+#include "WireInternal.h"
+
 namespace rocks {
 namespace {
 
 constexpr uint8 Magic[] = {'R', 'O', 'C', 'K', 'S', 'R', 'E', 'C'};
-constexpr usize RecordHeaderBytes = 44;
-constexpr usize LengthBytes = 8;
+constexpr usize RecordHeaderBytes = detail::RecordHeaderBytes;
+constexpr usize LengthBytes = detail::LengthPrefixBytes;
 constexpr usize CountBytes = 4;
 constexpr usize MinimumItemBytes = LengthBytes + RecordHeaderBytes; // 52
 

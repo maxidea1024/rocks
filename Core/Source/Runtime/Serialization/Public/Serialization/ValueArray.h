@@ -1,15 +1,17 @@
 #pragma once
 
-#include <Serialization/Record.h>
+#include <Serialization/WireSlot.h>
 
 // 단일 값 원소 배열 필드(WireType::ValueArray = 13)다(설계: Docs/Design/ReflectionFoundations.ko.md
-// 5.4·5.6절).
+// 5.4·5.6절, 원소 tag 확장은 Docs/Design/ReflectionExtensions.ko.md 1.2절).
 //
 // 형식: payload = u32 원소 wire tag + u32 count + count개의 원소 payload. 원소 payload는 그 wire
 // tag의 Archive 표현을 그대로 이어 붙인다(Bool 1, U32·F32 4, U64·I64·F64 8, Guid 16, String·Bytes
-// u64 길이 + byte, SoftObjectReference Guid + String). Record·RecordList·ValueArray와 모르는 tag는
-// 원소가 될 수 없다(struct 원소 배열은 RecordList다). 원소마다 Record envelope(최소 52 byte)를 쓰지
-// 않으므로 큰 배열도 값 하나의 byte 한도 안에 든다. 빈 배열도 count 0으로 기록한다.
+// u64 길이 + byte, SoftObjectReference Guid + String, InstancedStruct u64 길이 + 내용 —
+// InstancedStructWire.h, Text u8 형태 + 형태별 내용 — TextWire.h). 원소 tag는
+// WireSlot::ArrayElement 자리의 것이다: Record·RecordList·ValueArray·Optional·Set·Map과 모르는
+// tag는 원소가 될 수 없다(struct 원소 배열은 RecordList다). 원소마다 Record envelope(최소 52
+// byte)를 쓰지 않으므로 큰 배열도 값 하나의 byte 한도 안에 든다. 빈 배열도 count 0으로 기록한다.
 //
 // 사용 예(쓰기 — 원소는 out에 바로 쓴다):
 //   auto array = ValueArrayWriter::Begin(out, WireType::U32, count, maxBytes);
@@ -44,26 +46,16 @@
 // tag와 다른 저장 tag는 TypeMismatch, 개수·크기 한도 초과는 CapacityExceeded다.
 namespace rocks {
 
-// 스키마 원소 하나의 wire 크기다(reader·writer가 wire 크기와 합쳐 쓴다). minElementBytes는 원소
-// 하나의 최소 byte(0이면 wire 최소만 쓴다), exact면 모든 원소가 정확히 그 크기다. 고정 폭 wire는
-// 언제나 exact이고, 가변 wire(String·Bytes·SoftObjectReference)에 exact를 주면 원소마다 길이
-// prefix가 정확히 그 크기를 만드는지까지 검사한다(예: Digest = Bytes {40, true} — 길이 prefix 8 +
-// 32 byte). 모순 조합(고정 폭 wire에 다른 폭, exact인데 wire 최소보다 작은 크기)은
-// InvalidArgument다.
-struct ValueArrayShape {
-    usize minElementBytes = 0;
-    bool exact = false;
-};
-
-// 원소 wire tag의 크기다: Bool 1·U32·F32 4·U64·I64·F64 8·Guid 16은 고정 폭(exact), String·Bytes 8과
-// SoftObjectReference 24는 최소 크기다. 그 밖의 tag(Record·RecordList·ValueArray·모르는 값·0)는
-// InvalidArgument다.
+// 원소 wire tag의 크기다(WireSlotShape(WireSlot::ArrayElement, wire)와 같다 — WireValueShape는
+// WireSlot.h): Bool 1·U32·F32 4·U64·I64·F64 8·Guid 16은 고정 폭(exact), String·Bytes 8,
+// SoftObjectReference 24, InstancedStruct 8(u64 길이), Text 1(형태 byte)은 최소 크기다. 그 밖의
+// tag(Record·RecordList·ValueArray·Optional·Set·Map·모르는 값·0)는 InvalidArgument다.
 //
 // 사용 예:
 //   auto shape = ValueArrayElementShape(WireType::Guid); // {16, true}
-Result<ValueArrayShape> ValueArrayElementShape(uint32 elementWire) noexcept;
+Result<WireValueShape> ValueArrayElementShape(uint32 elementWire) noexcept;
 
-inline Result<ValueArrayShape> ValueArrayElementShape(WireType elementWire) noexcept {
+inline Result<WireValueShape> ValueArrayElementShape(WireType elementWire) noexcept {
     return ValueArrayElementShape(static_cast<uint32>(elementWire));
 }
 
@@ -74,19 +66,20 @@ inline Result<ValueArrayShape> ValueArrayElementShape(WireType elementWire) noex
 class ValueArrayReader {
 public:
     // payload(값 하나의 ArchiveReader, 위치 0)의 header를 읽고 검사한다. 검사 순서(모두 할당 전):
-    // elementWire 자체가 원소 tag가 아니거나 shape가 elementWire와 모순이면 InvalidArgument → 저장
-    // tag가 Record·RecordList·ValueArray·모르는 값이면 InvalidArgument → 저장 tag가 elementWire와
-    // 다르면 TypeMismatch → count > maxCount면 CapacityExceeded → count × max(wire 최소, shape
-    // 최소)가 남은 byte보다 크면 InvalidArgument(wire가 고정 폭이거나 shape.exact면 남은 byte가
-    // 정확히 count × 크기가 아닐 때도 InvalidArgument) → count만큼 work를 청구한다(한도면
-    // CapacityExceeded) → 가변 wire에 shape.exact면 원소마다 길이 prefix가 그 크기를 만드는지 본다
-    // (아니면 InvalidArgument — 남은 byte를 크기 간격으로 훑으며 할당하지 않는다). shape 기본값은
-    // wire 크기만 쓴다.
+    // elementWire 자체가 원소 tag가 아니거나 shape가 elementWire와 모순이면 InvalidArgument(이때는
+    // payload를 옮기지 않아 호출자 reader가 그대로다) → 저장 tag가 원소 tag가
+    // 아니면(Record·RecordList·ValueArray·Optional·Set·Map·모르는 값) InvalidArgument → 저장 tag가
+    // elementWire와 다르면 TypeMismatch → count > maxCount면 CapacityExceeded → count × max(wire
+    // 최소, shape 최소)가 남은 byte보다 크면 InvalidArgument(wire가 고정 폭이거나 shape.exact면
+    // 남은 byte가 정확히 count × 크기가 아닐 때도) → count만큼 work를 청구한다(한도면
+    // CapacityExceeded) → 가변 wire에 shape.exact면 원소마다 길이 prefix가 그 크기를 만드는지
+    // 본다(아니면 InvalidArgument — 남은 byte를 크기 간격으로 훑으며 할당하지 않는다). shape
+    // 기본값은 wire 크기만 쓴다.
     static Result<ValueArrayReader> Open(ArchiveReader&& payload, uint32 elementWire,
-                                         uint32 maxCount, ValueArrayShape shape = {}) noexcept;
+                                         uint32 maxCount, WireValueShape shape = {}) noexcept;
 
     static Result<ValueArrayReader> Open(ArchiveReader&& payload, WireType elementWire,
-                                         uint32 maxCount, ValueArrayShape shape = {}) noexcept {
+                                         uint32 maxCount, WireValueShape shape = {}) noexcept {
         return Open(Move(payload), static_cast<uint32>(elementWire), maxCount, shape);
     }
 
@@ -95,11 +88,11 @@ public:
     // TypeMismatch다. 그 뒤는 Open과 같다.
     static Result<ValueArrayReader> OpenField(const RecordReader& parent, const FieldView& field,
                                               uint32 elementWire, uint32 maxCount,
-                                              ValueArrayShape shape = {}) noexcept;
+                                              WireValueShape shape = {}) noexcept;
 
     static Result<ValueArrayReader> OpenField(const RecordReader& parent, const FieldView& field,
                                               WireType elementWire, uint32 maxCount,
-                                              ValueArrayShape shape = {}) noexcept {
+                                              WireValueShape shape = {}) noexcept {
         return OpenField(parent, field, static_cast<uint32>(elementWire), maxCount, shape);
     }
 
@@ -113,7 +106,8 @@ public:
 
     // 원소를 읽는 reader다(header 바로 뒤에 놓여 있다). 원소 tag에 맞는 Read*를 원소마다 부른다
     // (String은 ReadStringView 또는 ReadString, SoftObjectReference는 ReadGuid 다음 문자열,
-    // Digest는 ReadBytes). 원소 내용(bool 0/1·UTF-8·길이)은 그 Read*가 검사한다.
+    // Digest는 ReadBytes, InstancedStruct는 ReadInstancedStructElement, Text는 ReadTextWire). 원소
+    // 내용(bool 0/1·UTF-8·길이·Text 형태·Record header)은 그 Read*가 검사한다.
     ArchiveReader& Elements() noexcept;
 
     // 모든 원소를 읽은 뒤 부른다. 남은 byte가 있으면 InvalidArgument다.
@@ -139,20 +133,22 @@ public:
     static Result<ValueArrayWriter> Begin(ArchiveWriter& out, uint32 elementWire, uint32 count,
                                           usize maxBytes,
                                           uint32 maxCount = NumericLimits<uint32>::Max(),
-                                          ValueArrayShape shape = {}) noexcept;
+                                          WireValueShape shape = {}) noexcept;
 
     static Result<ValueArrayWriter> Begin(ArchiveWriter& out, WireType elementWire, uint32 count,
                                           usize maxBytes,
                                           uint32 maxCount = NumericLimits<uint32>::Max(),
-                                          ValueArrayShape shape = {}) noexcept {
+                                          WireValueShape shape = {}) noexcept {
         return Begin(out, static_cast<uint32>(elementWire), count, maxBytes, maxCount, shape);
     }
 
     // 지금까지 쓴 payload가 maxBytes 안인지 본다(넘으면 CapacityExceeded). 가변 원소를 쓰는 동안
-    // 큰 배열을 일찍 끊는 데 쓴다.
+    // 큰 배열을 일찍 끊는 데 쓴다. out이 Begin 위치보다 짧아졌으면(호출자가 out을 줄였다)
+    // InvalidArgument다.
     Result<void> Check() const noexcept;
 
-    // payload가 maxBytes를 넘으면 CapacityExceeded, 쓴 원소 byte가 count × 원소 최소 크기보다
+    // out이 Begin 위치보다 짧아졌으면 InvalidArgument, payload가 maxBytes를 넘으면
+    // CapacityExceeded, 쓴 원소 byte가 count × 원소 최소 크기보다
     // 작거나 고정 폭·exact shape인데 정확히 같지 않으면 InvalidArgument다(원소 수를 잘못 쓴 호출자
     // 오류). 가변 원소는 byte 합계의 하한만 잡으며 원소 하나하나의 경계는 검사하지 않는다(reader의
     // exact 검사가 본다).
@@ -160,7 +156,7 @@ public:
 
 private:
     ValueArrayWriter(ArchiveWriter& out, usize start, uint32 count, usize maxBytes,
-                     ValueArrayShape shape) noexcept
+                     WireValueShape shape) noexcept
         : out_(&out), start_(start), count_(count), maxBytes_(maxBytes), shape_(shape) {
     }
 
@@ -168,7 +164,7 @@ private:
     usize start_;
     uint32 count_;
     usize maxBytes_;
-    ValueArrayShape shape_; // wire와 합친 크기
+    WireValueShape shape_; // wire와 합친 크기
 };
 
 } // namespace rocks

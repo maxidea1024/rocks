@@ -24,7 +24,25 @@ enum class WireType : uint32 {
     SoftObjectReference = 12,
     // 단일 값 원소 배열: u32 원소 wire tag + u32 count + 원소 payload들.
     // Serialization/ValueArray.h.
-    ValueArray = 13
+    ValueArray = 13,
+    // 14–18은 리플렉션 B9의 wire다(Docs/Design/ReflectionExtensions.ko.md 1.2절). 컨테이너 안
+    // 자리마다 받는 tag는 Serialization/WireSlot.h가 정한다.
+    //
+    // Optional 값: u8 present(0·1) + (1이면) u32 내부 wire tag + 내부 payload. 내부가 Record면
+    // payload의 남은 byte 전부가 Record 하나다. Serialization/OptionalWire.h.
+    Optional = 14,
+    // 키 원소 집합: u32 원소 wire tag + u32 count + 원소 payload들(삽입 순서).
+    // Serialization/SetWire.h.
+    Set = 15,
+    // 키·값 맵: u32 키 wire tag + u32 값 wire tag + u32 count + (키 payload + 값 payload)들(삽입
+    // 순서). 값이 Record·InstancedStruct면 u64 길이 + 내용이다. Serialization/MapWire.h.
+    Map = 16,
+    // 담긴 struct 값: 필드 값 자리에서는 0 byte(비어 있음) 또는 Record 하나(schema = 담긴 struct
+    // ID), 원소·Map 값 자리에서는 u64 길이 + 같은 내용. Serialization/InstancedStructWire.h.
+    InstancedStruct = 17,
+    // 지역화 문구: u8 형태(0 비어 있음, 1 Invariant + String, 2 Localized + Guid + U64 + String).
+    // Serialization/TextWire.h.
+    Text = 18
 };
 
 struct RecordLimits {
@@ -39,6 +57,31 @@ struct FieldView {
     uint32 wireType = 0;
     Span<const uint8> payload;
 };
+
+// Record envelope header에서 읽은 값이다(ReadRecordHeader).
+struct RecordHeader {
+    Guid schema;
+    uint32 schemaVersion = 0;
+    uint32 fieldCount = 0;
+};
+
+// record(Record 하나의 전체 byte)의 envelope header만 검사해 읽는다. 담긴 struct ID를 미리 알 수
+// 없는 InstancedStruct처럼 schema를 먼저 알아야 Record를 열 수 있을 때 쓴다. 검사 순서: 44 byte보다
+// 짧으면 먼저 InvalidArgument(RecordReader::Open은 잘린 입력도 앞에서부터 읽으므로 magic·envelope가
+// 맞는 짧은 입력에서 오류 코드가 다를 수 있다) → magic이 다르면 InvalidArgument → envelope
+// version이 1이 아니면 Unsupported → schema 0·schema version 0, payloadBytes ≠ 크기 − 44,
+// fieldCount × 28 > payloadBytes면 InvalidArgument(schema는 0만 본다 — 기대 schema와의 비교는
+// Open의 TypeMismatch다). 필드 TLV 경계·중복 ID·필드 수 한도는 보지 않는다(Record를 열 때
+// RecordReader::Open· OpenNestedRecord가 본다). 할당·예산 청구가 없고 record는 호출 동안만 빌린다.
+//
+// 사용 예:
+//   auto header = ReadRecordHeader(bytes);
+//   if (!header) {
+//       return Result<void>::Failure(header.Error());
+//   }
+//
+//   // header.Value().schema로 담긴 타입을 찾고, 그 버전 범위로 Record를 연다.
+Result<RecordHeader> ReadRecordHeader(Span<const uint8> record) noexcept;
 
 // magic 'ROCKSREC'(8), envelopeVersion u32=1, schema Guid(16), schemaVersion u32,
 // fieldCount u32, payloadBytes u64의 44-byte header다. TLV는
@@ -197,6 +240,26 @@ public:
     Result<RecordReader> OpenRecordField(Allocator&, const FieldView& field, Guid expectedSchema,
                                          uint32 minSchemaVersion, uint32 maxSchemaVersion,
                                          uint32 maxFields) const noexcept;
+
+    // 이 Record 입력 안에 놓인 중첩 Record를 같은 예산으로 연다. 필드 값 안의 Record 내용 —
+    // Optional 내부(OptionalWireReader::RecordBytes), Map 값(ReadPrefixedRecord), InstancedStruct
+    // (InstancedStructWire::record) — 을 여는 데 쓴다. OpenRecordField와 같은 모델이다: operation
+    // 하나를 청구하고, record가 이 Record 입력 밖이면(빈 범위 포함) InvalidArgument, 바깥 Open이 그
+    // byte를 이미 청구했으므로 header·TLV 색인·정렬 비용만 청구한다(중첩 깊이만큼 작업이 불어나지
+    // 않는다). 크기 한도는 이 reader의 것이고 필드 수 한도는 maxFields다. 그 밖의 오류는 Open과
+    // 같다(schema version 0은 InvalidArgument, 범위 밖 버전은 Unsupported, schema 불일치는
+    // TypeMismatch). 이동된 reader는 InvalidArgument다. 반환 reader는 이 reader의 원본 byte를
+    // 빌린다.
+    //
+    // 사용 예(Optional<struct> 필드):
+    //   auto optional = OptionalWireReader::OpenField(parent, field, recordWire);
+    //   if (optional && optional.Value().IsSet()) {
+    //       auto inner = parent.OpenNestedRecord(allocator, optional.Value().RecordBytes(),
+    //                                            structId, 1, version, maxFields);
+    //   }
+    Result<RecordReader> OpenNestedRecord(Allocator&, Span<const uint8> record, Guid expectedSchema,
+                                          uint32 minSchemaVersion, uint32 maxSchemaVersion,
+                                          uint32 maxFields) const noexcept;
     usize Position() const noexcept;
     usize FieldCount() const noexcept;
     uint32 SchemaVersion() const noexcept;
@@ -206,7 +269,7 @@ public:
 
 private:
     friend class RecordListReader;
-    friend class ValueArrayReader;
+    friend struct detail::WireAccess;
     RecordReader(Allocator&, ArchiveReader&&, uint32 version, RecordLimits limits) noexcept;
     // shared가 있으면 그 누적 예산을 쓰고, 없으면 limits.archive로 새 예산을 만든다. indexOnly면
     // TLV payload 바이트를 청구하지 않는다(바깥 reader가 이미 청구한 중첩 Record).
@@ -214,6 +277,12 @@ private:
                                          uint32 minSchemaVersion, uint32 maxSchemaVersion,
                                          RecordLimits, SharedPtr<ArchiveBudget> shared,
                                          bool indexOnly = false) noexcept;
+    // OpenRecordField·OpenNestedRecord의 공통 본문이다: 이동된 reader InvalidArgument → operation
+    // 청구 → wireMatches가 거짓이면 TypeMismatch → record가 비었거나 이 입력 밖이면 InvalidArgument
+    // → 같은 예산으로 색인만 청구해 연다(필드 수 한도 maxFields).
+    Result<RecordReader> OpenContained(Allocator&, Span<const uint8> record, bool wireMatches,
+                                       Guid expectedSchema, uint32 minSchemaVersion,
+                                       uint32 maxSchemaVersion, uint32 maxFields) const noexcept;
     // range가 이 Record 입력 안인지 본다.
     bool Contains(Span<const uint8> range) const noexcept;
     ArchiveReader archive_;

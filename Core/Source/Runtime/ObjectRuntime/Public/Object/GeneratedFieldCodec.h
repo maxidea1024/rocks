@@ -15,7 +15,12 @@ namespace rocks::detail {
 // 값 종류의 wire tag다. 강한 참조는 문맥의 referenceWire다. Array·Opaque는 Unsupported다(배열
 // 필드는 아래 필드 단위 FieldWireType). 종류의 다른 성질은 MetaSchema 성질
 // 표(ValueKindProperties)에 있고, wire 대응만 MetaSchema가 Serialization에 의존하지 않도록 이
-// switch 하나에 둔다.
+// switch 하나에 둔다. Serialization에는 리플렉션 B9a3이 wire Optional 14·Set 15·Map 16·
+// InstancedStruct 17·Text 18(Serialization/OptionalWire.h·SetWire.h·MapWire.h·
+// InstancedStructWire.h·TextWire.h, 자리별 tag는 WireSlot.h)을 더했다. 그 값 종류를 더하는
+// 단계(Name B9c2 = String, Optional B9e, Map·Set B9f2, InstancedStruct B9j, Text B9l —
+// Docs/Design/ReflectionExtensions.ko.md 1.1·1.2절)가 이 switch와 아래 필드 단위 FieldWireType에
+// 대응을 넣는다.
 inline Result<uint32> FieldWireType(ValueKind kind, uint32 referenceWire) noexcept {
     switch (kind) {
     case ValueKind::Bool:
@@ -1132,7 +1137,7 @@ Result<void> ElementWireValue(const Element& element, FieldValue& value,
 
 // 단일 값 원소의 schema 최소 크기 shape다(Digest는 길이 prefix 8 + 32 byte exact, 그 밖은 wire
 // 크기).
-inline ValueArrayShape ElementArrayShape(ValueKind kind) noexcept {
+inline WireValueShape ElementArrayShape(ValueKind kind) noexcept {
     if (kind == ValueKind::Digest256) {
         return {8 + Sha256Digest::Bytes, true};
     }
