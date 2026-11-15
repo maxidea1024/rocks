@@ -6,6 +6,7 @@
 #include <Object/ConstructionContext.h>
 #include <Object/NameField.h>
 #include <Object/SoftObjectRef.h>
+#include <Core/Optional.h>
 #include <Core/ScopeExit.h>
 
 namespace rocks::detail {
@@ -108,6 +109,36 @@ struct ArrayField<StructRefArray<S>> {
     using Element = S;
 };
 
+// 리플렉션 Optional 필드(Optional<T> — 리플렉션 B9e, Docs/Design/ReflectionExtensions.ko.md 6절)다.
+// 부분 특수화로만 고르며 Inner는 내부 C++ 형식(단일 값·String·Name·enum·값 struct)이다.
+template <class T>
+struct OptionalField {
+    static constexpr bool Supported = false;
+};
+
+template <class T>
+struct OptionalField<Optional<T>> {
+    static constexpr bool Supported = true;
+    using Inner = T;
+};
+
+// 빈 자리에 새로 만드는 값이다: noexcept E(Allocator&)가 있으면 allocator를 넘기고 없으면 E()다
+// (Optional의 새 내부 값·경로가 넣는 원소 — MakeRuntimeStructOps와 같은 규칙). allocator는 보통
+// 객체 allocator(ObjectRegistry::ObjectAllocator)다.
+//
+// 사용 예:
+//   Point point = detail::MakeAllocatedValue<Point>(registry.ObjectAllocator());
+template <class E>
+E MakeAllocatedValue(Allocator& allocator) noexcept {
+    if constexpr (__is_constructible(E, Allocator&)) {
+        static_assert(__is_nothrow_constructible(E, Allocator&));
+        return E(allocator);
+    } else {
+        static_assert(__is_nothrow_constructible(E));
+        return E();
+    }
+}
+
 // struct 멤버 포인터의 소유 struct·멤버 형식이다(생성 codec·경로 thunk가 같이 쓴다 — 경로 헤더가
 // Serialization에 의존하지 않도록 여기에 둔다).
 template <class T>
@@ -170,13 +201,15 @@ constexpr ValueKind ScalarValueKind() noexcept {
     }
 }
 
-// C++ 멤버 형식의 필드 값 종류다: 리플렉션 배열 컨테이너는 Array, 단일 값은 ScalarValueKind,
-// 리플렉션 enum·struct는 Enum·Struct, 그 밖은 Opaque다(단일 값 형식 대응은 ScalarValueKind 한 곳에
-// 있다).
+// C++ 멤버 형식의 필드 값 종류다: 리플렉션 배열 컨테이너는 Array, Optional<T>는 Optional, 단일
+// 값은 ScalarValueKind, 리플렉션 enum·struct는 Enum·Struct, 그 밖은 Opaque다(단일 값 형식 대응은
+// ScalarValueKind 한 곳에 있다).
 template <class T>
 constexpr ValueKind FieldValueKind() noexcept {
     if constexpr (ArrayField<T>::Supported) {
         return ValueKind::Array;
+    } else if constexpr (OptionalField<T>::Supported) {
+        return ValueKind::Optional;
     } else if constexpr (ScalarValueKind<T>() != ValueKind::Opaque) {
         return ScalarValueKind<T>();
     } else if constexpr (ReflectedEnumField<T>::Supported) {
@@ -188,24 +221,37 @@ constexpr ValueKind FieldValueKind() noexcept {
     }
 }
 
-// 대상 종류 Target과 C++ 대상 형식 T(배열이면 원소)가 맞는지의 컴파일 시 대조다(경로 thunk는
-// MetaCompiler가 명시한 TargetKind — 틀리면 컴파일 오류, 기존 생성 접근기는 FieldValueKind<T>()).
+// C++ 멤버 형식을 FieldValue로 읽고 쓸 때의 값 종류(FieldValue::kind)다: Optional<T>는 내부 종류
+// (FieldValueKind<T>), 그 밖은 FieldValueKind다(Docs/Design/ReflectionExtensions.ko.md 1.1절 —
+// Optional 단일 값의 kind는 내부 종류이고 present가 set 여부다).
+template <class T>
+constexpr ValueKind FieldAccessKind() noexcept {
+    if constexpr (OptionalField<T>::Supported) {
+        return FieldValueKind<typename OptionalField<T>::Inner>();
+    } else {
+        return FieldValueKind<T>();
+    }
+}
+
+// 대상 종류 Target과 C++ 대상 형식 T(배열이면 원소, Optional이면 내부)가 맞는지의 컴파일 시
+// 대조다(경로 thunk는 MetaCompiler가 명시한 TargetKind — 틀리면 컴파일 오류, 기존 생성 접근기는
+// FieldValueKind<T>()).
 template <ValueKind Target, class T>
 struct TargetValueCheck {
-    static constexpr bool Valid = Target == ValueKind::Enum ? __is_enum(T)
-                                  : Target == ValueKind::Struct
-                                      ? __is_class(T) &&
-                                            ScalarValueKind<T>() == ValueKind::Opaque &&
-                                            !ArrayField<T>::Supported
-                                      : Target != ValueKind::Opaque && Target != ValueKind::Array &&
-                                            ScalarValueKind<T>() == Target;
+    static constexpr bool Valid =
+        Target == ValueKind::Enum ? __is_enum(T)
+        : Target == ValueKind::Struct
+            ? __is_class(T) && ScalarValueKind<T>() == ValueKind::Opaque &&
+                  !ArrayField<T>::Supported && !OptionalField<T>::Supported
+            : Target != ValueKind::Opaque && Target != ValueKind::Array &&
+                  ScalarValueKind<T>() == Target;
     static_assert(Valid, "path thunk target kind does not match the C++ member type");
 };
 
 // 단일 값 하나를 Target 종류로 FieldValue에 복사한다(String·Soft 경로는 value의 allocator로 할당 —
 // OutOfMemory). enum은 정수와 GeneratedType<E>::Id()를 싣는다. 참조(강한·weak)는 handle을, Name은
 // 토큰을, ClassRef는 클래스 TypeId를 guid에 싣는다(할당 없음 — weak는 대상이 죽었어도 저장된 handle
-// 그대로, ClassRef는 클래스가 해제됐어도 저장된 ID 그대로다).
+// 그대로, ClassRef는 클래스가 해제됐어도 저장된 ID 그대로다). present는 true로 둔다.
 //
 // 사용 예:
 //   FieldValue value(allocator);
@@ -215,6 +261,8 @@ Result<void> CopyTargetValue(const T& source, FieldValue& value) noexcept {
     static_assert(TargetValueCheck<Target, T>::Valid);
     static_assert(Target != ValueKind::Struct, "struct values are not FieldValue");
     value.kind = Target;
+    // 값을 담았으므로 present다(재사용한 FieldValue에 앞선 unset 읽기의 false가 남지 않게).
+    value.present = true;
     if constexpr (Target == ValueKind::Utf8String) {
         return value.string.TryAssign(source.View());
     } else if constexpr (Target == ValueKind::SoftObjectReference) {
@@ -252,7 +300,8 @@ Result<void> CopyTargetValue(const T& source, FieldValue& value) noexcept {
     return Result<void>::Success();
 }
 
-// FieldValue를 Target 종류의 단일 값 target에 쓴다. 정수 폭이 넘치면 Overflow(Int8·Int16·Int32는
+// FieldValue를 Target 종류의 단일 값 target에 쓴다. value.present가 거짓이면(unset — Optional만의
+// 값) 종류 대조 뒤 InvalidArgument다. 정수 폭이 넘치면 Overflow(Int8·Int16·Int32는
 // signedInteger, 부호 없는 정수는 unsignedInteger가 대상 폭 밖일 때), enum은 값의 enum
 // ID가 GeneratedType<E>::Id()가 아니면 TypeMismatch·선언되지 않은 값이면 InvalidArgument, Soft는
 // null 규칙·경로 상한 위반이 InvalidArgument다(실패하면 target은 그대로다). String·Soft는 target의
@@ -273,6 +322,12 @@ Result<void> WriteTargetValue(T& target, const FieldValue& value) noexcept {
                   "struct values and references are not written through FieldValue");
     if (value.kind != Target) {
         return Result<void>::Failure(ErrorCode::TypeMismatch);
+    }
+
+    // unset(present = false)은 Optional 필드만의 값이다 — Optional 쓰기는 set일 때만 내부 값을 이
+    // 함수로 쓴다(WriteOptionalValue).
+    if (!value.present) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     if constexpr (Target == ValueKind::Utf8String) {
@@ -334,10 +389,143 @@ Result<void> WriteTargetValue(T& target, const FieldValue& value) noexcept {
 // String·Soft 경로는 value의 allocator로 새 버퍼를 할당한 뒤 원본을 읽으므로, owner 객체의 멤버를
 // 복사하는 호출자는 owner를 encode 고정해 할당 콜백이 원본을 바꾸거나 해제하지 못하게
 // 한다(ReadGeneratedField — 고정 중 재진입 쓰기는 Busy).
+// Optional<T>(내부가 단일 값 — 리플렉션 B9e)는 kind가 내부 종류이고 present가 set 여부다(unset이면
+// 값 칸은 기본값이고 enum이면 type만 그 enum ID다).
 template <class Member>
 Result<void> CopyFieldValue(const Member& source, FieldValue& value) noexcept {
     static_assert(FieldValueKind<Member>() != ValueKind::Opaque);
-    return CopyTargetValue<FieldValueKind<Member>()>(source, value);
+    if constexpr (OptionalField<Member>::Supported) {
+        using Inner = typename OptionalField<Member>::Inner;
+        constexpr ValueKind kind = FieldValueKind<Inner>();
+        static_assert(kind != ValueKind::Struct, "Optional struct values are not FieldValue");
+        value.kind = kind;
+        value.present = source.HasValue();
+        if (!source.HasValue()) {
+            if constexpr (kind == ValueKind::Enum) {
+                value.type = GeneratedType<Inner>::Id();
+            }
+
+            return Result<void>::Success();
+        }
+
+        return CopyTargetValue<kind>(source.Value(), value);
+    } else {
+        return CopyTargetValue<FieldValueKind<Member>()>(source, value);
+    }
+}
+
+// FieldValue(kind = 내부 종류, present)를 Optional<T> slot에 쓴다(리플렉션 B9e — 소유 객체 재확인·
+// 고정이 필요 없는 자리: 복원 2단계·관찰 임시 값·경로가 고정을 쥔 뒤의 게시). present가 거짓이면
+// 옛 값을 지역으로 옮긴 뒤 비우고(게시 뒤 소멸), 참이면 내부 값을 쓴다: String은 slot이 set이면 그
+// 값의 allocator, unset이면 allocator로 새 값을 만든 뒤 할당 없는 Swap·이동으로 게시하고, 그 밖의
+// 단일 값은 WriteTargetValue 규칙(정수 폭 Overflow, enum ID TypeMismatch·미선언
+// InvalidArgument)으로 새 값을 만든 뒤 대입한다. 실패하면 slot은 그대로다. Name 토큰·내용 검사는
+// 호출 경로의 몫이다.
+//
+// 사용 예(복원 2단계):
+//   Allocator& objects = construction.ObjectAllocator();
+//   auto written = detail::AssignOptionalValue(owner->ratio, value, objects);
+template <class T>
+Result<void> AssignOptionalValue(Optional<T>& slot, const FieldValue& value,
+                                 Allocator& allocator) noexcept {
+    constexpr ValueKind kind = FieldValueKind<T>();
+    static_assert(kind != ValueKind::Struct, "Optional struct values are not FieldValue");
+    if (value.kind != kind) {
+        return Result<void>::Failure(ErrorCode::TypeMismatch);
+    }
+
+    if (!value.present) {
+        Optional<T> previous(Move(slot));
+        slot.Reset();
+        return Result<void>::Success();
+    }
+
+    if constexpr (IsSameV<T, String>) {
+        String replacement(slot.HasValue() ? slot.Value().GetAllocator() : allocator);
+        if (auto copied = replacement.TryAssign(value.string.View()); !copied) {
+            return copied;
+        }
+
+        if (slot.HasValue()) {
+            slot.Value().Swap(replacement);
+        } else {
+            slot.Emplace(Move(replacement));
+        }
+
+        return Result<void>::Success();
+    } else {
+        T candidate{};
+        if (auto written = WriteTargetValue<kind>(candidate, value); !written) {
+            return written;
+        }
+
+        slot.Emplace(candidate);
+        return Result<void>::Success();
+    }
+}
+
+// Optional<T> 멤버 쓰기의 공통 본체다(살아 있는 객체 WriteGeneratedField, staged 쓰기). 규칙은
+// AssignOptionalValue와 같고, String은 새 값을 만든 뒤 get()으로 owner를 다시 확인하고 게시한다.
+// pin은 살아 있는 객체 쓰기가 할당 전에 쥔 encode 고정이다(staged는 nullptr — WriteGeneratedValue와
+// 같은 규칙: 게시 또는 실패 직후 풀고 옛 값·실패한 새 값은 고정 밖에서 반환한다). allocator는 unset
+// 자리에 새 String을 만들 객체 allocator(ObjectRegistry·ConstructionContext::ObjectAllocator)다.
+template <class Owner, class MemberOwner, class T, class Getter>
+Result<void> WriteOptionalValue(Optional<T> MemberOwner::* member, const FieldValue& value,
+                                Getter&& get, Allocator& allocator,
+                                EncodePin* pin = nullptr) noexcept {
+    static_assert(__is_base_of(MemberOwner, Owner));
+    constexpr ValueKind kind = FieldValueKind<T>();
+    static_assert(kind != ValueKind::Struct, "Optional struct values are not FieldValue");
+    auto target = get();
+    if (!target) {
+        return Result<void>::Failure(target.Error());
+    }
+
+    if (value.kind != kind) {
+        return Result<void>::Failure(ErrorCode::TypeMismatch);
+    }
+
+    if constexpr (IsSameV<T, String>) {
+        Optional<T>& current = target.Value()->*member;
+        if (!value.present) {
+            // 옛 값은 고정을 푼 뒤(이 함수를 나갈 때) 반환한다.
+            Optional<T> previous(Move(current));
+            current.Reset();
+            if (pin) {
+                pin->Reset();
+            }
+
+            return Result<void>::Success();
+        }
+
+        String replacement(current.HasValue() ? current.Value().GetAllocator() : allocator);
+        // replacement보다 뒤에 선언하므로 모든 경로에서 replacement 반환보다 먼저 고정을 푼다.
+        auto release = MakeScopeExit([pin]() noexcept {
+            if (pin) {
+                pin->Reset();
+            }
+        });
+        if (auto copied = replacement.TryAssign(value.string.View()); !copied) {
+            return copied;
+        }
+
+        target = get();
+        if (!target) {
+            return Result<void>::Failure(target.Error());
+        }
+
+        // 할당·반환 없는 Swap·이동이 commit이다(옛 버퍼는 replacement가 고정 밖에서 반환한다).
+        Optional<T>& live = target.Value()->*member;
+        if (live.HasValue()) {
+            live.Value().Swap(replacement);
+        } else {
+            live.Emplace(Move(replacement));
+        }
+
+        return Result<void>::Success();
+    } else {
+        return AssignOptionalValue(target.Value()->*member, value, allocator);
+    }
 }
 
 // 단일 값(String·Soft·참조 제외) 멤버에 FieldValue를 쓴다(변환 규칙은 WriteTargetValue 한 벌).
@@ -471,8 +659,13 @@ template <class Owner, class MemberOwner, class Member>
 Result<void> WriteGeneratedField(ObjectRegistry& registry, const ObjectAccessContext& access,
                                  ObjectHandle handle, Member MemberOwner::* member,
                                  const FieldValue& value) noexcept {
-    if (value.kind != FieldValueKind<Member>()) {
+    if (value.kind != FieldAccessKind<Member>()) {
         return Result<void>::Failure(ErrorCode::TypeMismatch);
+    }
+
+    // unset(present = false)은 Optional 필드만의 값이다.
+    if (!value.present && !OptionalField<Member>::Supported) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     // 쓰기용 Borrow: owner가 encode 고정 중이면 Busy다(encode가 순회하는 String·Soft 경로 버퍼를
@@ -482,7 +675,22 @@ Result<void> WriteGeneratedField(ObjectRegistry& registry, const ObjectAccessCon
         return Result<void>::Failure(borrowed.Error());
     }
 
-    if constexpr (ObjectReferenceField<Member>::Supported) {
+    if constexpr (OptionalField<Member>::Supported) {
+        // Optional<T>(리플렉션 B9e): unset 자리의 새 String은 객체 allocator로 만든다. String은
+        // 할당부터 게시까지 owner를 encode 고정한다(재진입 쓰기 Busy).
+        auto get = [&]() noexcept { return borrowed.Value().Get(); };
+        if constexpr (IsSameV<typename OptionalField<Member>::Inner, String>) {
+            auto pin = registry.PinForEncode(access, handle);
+            if (!pin) {
+                return Result<void>::Failure(pin.Error());
+            }
+
+            return WriteOptionalValue<Owner>(member, value, get, registry.ObjectAllocator(),
+                                             &pin.Value());
+        } else {
+            return WriteOptionalValue<Owner>(member, value, get, registry.ObjectAllocator());
+        }
+    } else if constexpr (ObjectReferenceField<Member>::Supported) {
         auto target = borrowed.Value().Get();
         if (!target) {
             return Result<void>::Failure(target.Error());
@@ -531,13 +739,38 @@ template <class Owner, class MemberOwner, class Member>
 Result<void> WriteGeneratedStagedField(ConstructionContext& construction, ObjectHandle handle,
                                        Member MemberOwner::* member,
                                        const FieldValue& value) noexcept {
-    if (value.kind != FieldValueKind<Member>()) {
+    if (value.kind != FieldAccessKind<Member>()) {
         return Result<void>::Failure(ErrorCode::TypeMismatch);
+    }
+
+    // unset(present = false)은 Optional 필드만의 값이다.
+    if (!value.present && !OptionalField<Member>::Supported) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     // owner는 쓰기용 GetForWrite로 얻는다 — Required 검사 중 표시 동안 Busy다(검사가 읽는 값을
     // hook이 이 staged 쓰기로 바꾸지 못하게, Docs/Design/ObjectFoundations.ko.md 4절).
-    if constexpr (ObjectReferenceField<Member>::Supported) {
+    if constexpr (OptionalField<Member>::Supported) {
+        // Optional<Name>의 set 쓰기는 Name 필드와 같은 토큰 검사를 owner 확인 뒤에 한다. unset
+        // 자리의 새 String은 트랜잭션 Registry의 객체 allocator로 만든다(리플렉션 B9e).
+        if (auto target = construction.GetForWrite<Owner>(handle); !target) {
+            return Result<void>::Failure(target.Error());
+        }
+
+        if constexpr (IsSameV<typename OptionalField<Member>::Inner, Name>) {
+            if (value.present) {
+                if (auto valid = ValidateNameFieldToken(construction.Registry().Names(), value.name,
+                                                        value.GetAllocator());
+                    !valid) {
+                    return valid;
+                }
+            }
+        }
+
+        return WriteOptionalValue<Owner>(
+            member, value, [&]() noexcept { return construction.GetForWrite<Owner>(handle); },
+            construction.ObjectAllocator());
+    } else if constexpr (ObjectReferenceField<Member>::Supported) {
         auto target = construction.GetForWrite<Owner>(handle);
         if (!target) {
             return Result<void>::Failure(target.Error());

@@ -253,6 +253,45 @@ internal static partial class ModuleMetaTests
             Verify.Contains("ValueKind::SoftObjectReference", generated, "generated soft reference schema");
             Verify.Contains("ValueKind::Digest256", generated, "generated digest schema");
         });
+
+        // 리플렉션 B9e: Optional 필드(단일 값·enum·값 struct 내부, struct 안 Optional<String> 멤버)가 descriptor로 전해지고, import한
+        // base의 Optional 필드가 파생 descriptor와 생성 스키마·함수표(Optional<struct>는 경로 thunk, 단일 값은 read·write)에 같은
+        // 형식으로 펼쳐져 컴파일된다(descriptor 읽기의 element·maxElements 규칙).
+        suite.Add("Meta.OptionalFieldsRoundTripThroughImportedDescriptors", async () =>
+        {
+            using Layout layout = new(options, environment);
+            layout.Write("Lower/Public/Lower/Parent.h", "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n" +
+                "#include <Core/Optional.h>\n#include <Core/Text/String.h>\nnamespace probe {\n" +
+                "ROCKS_ENUM()\nenum class Mode : rocks::uint8 { First = 1, Second = 2 };\n" +
+                "ROCKS_STRUCT()\nstruct Leaf {\nROCKS_PROPERTY() rocks::Optional<rocks::String> note;\n};\n" +
+                "ROCKS_CLASS()\nstruct Parent : public rocks::Object {\n" +
+                "ROCKS_PROPERTY() rocks::int32 value = 0;\nROCKS_PROPERTY() rocks::Optional<rocks::int32> count;\n" +
+                "ROCKS_PROPERTY() rocks::Optional<Mode> mode;\nROCKS_PROPERTY() rocks::Optional<Leaf> leaf;\n};\n}\n");
+            layout.Manifest("Lower", ["probe::Mode", "probe::Leaf"], ["probe::Leaf::note", "probe::Parent::count", "probe::Parent::mode", "probe::Parent::leaf"]);
+            ProcessResult lower = await layout.RunLowerAsync();
+            Verify.Equal(0, lower.ExitCode, "lower module: " + lower.StdErr);
+            ProcessResult upper = await layout.RunUpperInputsAsync([(layout.Source("Upper/Public/Upper/Value.h"), "Upper/Value.h", false)]);
+            Verify.Equal(0, upper.ExitCode, "upper module: " + upper.StdErr);
+
+            using JsonDocument lowerDescriptor = JsonDocument.Parse(File.ReadAllBytes(layout.Descriptor("Lower")));
+            using JsonDocument upperDescriptor = JsonDocument.Parse(File.ReadAllBytes(layout.Descriptor("Upper")));
+            JsonElement Field(JsonDocument descriptor, string type, string name) => Type(descriptor, type).GetProperty("fields").EnumerateArray()
+                .Single(field => field.GetProperty("name").GetString() == name);
+            string leafId = Type(lowerDescriptor, "probe::Leaf").GetProperty("id").GetString()!;
+            JsonElement inherited = Field(upperDescriptor, "probe::Value", "leaf");
+            Verify.Equal("Optional", inherited.GetProperty("value").GetProperty("kind").GetString(), "inherited optional kind");
+            Verify.Equal("Struct", inherited.GetProperty("element").GetProperty("kind").GetString(), "inherited optional inner kind");
+            Verify.Equal(leafId, inherited.GetProperty("element").GetProperty("type").GetString(), "inherited optional inner target");
+            Verify.Equal(0, inherited.GetProperty("maxElements").GetInt32(), "inherited optional maxElements");
+            Verify.Equal("Enum", Field(upperDescriptor, "probe::Value", "mode").GetProperty("element").GetProperty("kind").GetString(), "inherited optional enum");
+            Verify.Equal("Utf8String", Field(lowerDescriptor, "probe::Leaf", "note").GetProperty("element").GetProperty("kind").GetString(), "optional struct member");
+            string generated = Compact(File.ReadAllText(layout.Generated("Upper", "Public/Upper/Value.generated.h")));
+            Verify.Contains("{ValueKind::Optional,Guid{}}", generated, "generated inherited optional schema");
+            Verify.Contains("PathClassField<::probe::Value,::rocks::ValueKind::Struct>(cursor,&::probe::Parent::leaf)", generated,
+                "inherited Optional<struct> field path thunk");
+            Verify.Contains("ReadGeneratedField<::probe::Value>(registry,access,object,&::probe::Parent::count,out)", generated,
+                "inherited Optional<scalar> field read thunk");
+        });
     }
 
     // private 전용 모듈 등록·모듈 재선언·자기 import와 모듈 descriptor 엄격 읽기 시험이다(enum 시험 뒤에 등록한다).

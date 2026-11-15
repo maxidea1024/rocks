@@ -8,7 +8,8 @@
 #include <new>
 
 // TypeRegistry struct 등록(RegisterStruct)과 클래스·struct 필드의 값 타입 레코드 해석
-// (ResolveValueTypes — Enum·Struct 대상의 native 대조·WorldOnly 소유자·의존 계수 한도)이다
+// (ResolveValueTypes — Enum·Struct 대상의 native 대조·WorldOnly 소유자·Optional 내부의 값 struct·
+// 의존 계수 한도)이다
 // (Docs/Design/ReflectionFoundations.ko.md 4.6절). 필드 서술 검사는 TypeRegistryRegister.cpp,
 // 등록 파일이 함께 쓰는 도우미 선언은 TypeRegistryRegisterInternal.h다.
 namespace rocks {
@@ -76,6 +77,13 @@ Result<void> TypeRegistry::ResolveValueTypes(Span<const FieldSchema> fields,
         // 블록이 owner 저장소 밖이라 Registry가 그 컨테이너의 변경을 거부한다 — 5.6절 결정 15).
         if (field.value.kind == ValueKind::Array && target->containsStrongReference &&
             target->containsReferenceArray) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        // Optional의 내부 struct는 값 struct다(참조 struct는 null이 이미 "없음"이고, Optional 안의
+        // 간선은 GC·관찰자 계수가 따라가지 않는다 —
+        // Docs/Design/ReflectionExtensions.ko.md 1.3·6절).
+        if (field.value.kind == ValueKind::Optional && target->containsStrongReference) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 

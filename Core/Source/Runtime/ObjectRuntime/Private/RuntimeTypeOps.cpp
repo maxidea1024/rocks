@@ -12,8 +12,9 @@ namespace rocks {
 Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
                                              const ObjectAccessContext& access, ObjectHandle handle,
                                              const FieldValue& value) const noexcept {
-    // 묶인 struct·배열(aggregate) 필드는 callback이 없다(아래에서 문맥·대상 검사 뒤 Unsupported).
-    const bool aggregateField = bound_ && ValueKindIsAggregate(valueKind_);
+    // 묶인 aggregate 필드(struct·배열·Optional<값 struct>)는 callback이 없다(아래에서 문맥·대상
+    // 검사 뒤 Unsupported).
+    const bool aggregateField = bound_ && aggregate_;
     if (!callback_ && !aggregateField) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -124,6 +125,7 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
 
     detail::FieldWriteBinding binding;
     binding.value = ValueType{valueKind_, referencedType_};
+    binding.optional = optional_;
     binding.readOnly = readOnly_;
     if (auto valid = detail::ValidateFieldWrite(binding, target, value); !valid) {
         return valid;
@@ -132,7 +134,8 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
     // Name 토큰은 이 Registry의 pool 것이고 표시 문자열이 내용 규칙을 지켜야 한다(수동 callback도
     // 지키도록 여기서 검사한다 — pool 없음 Unsupported, 다른 pool WrongContext, 게시되지 않은 토큰
     // StaleHandle, 내용 InvalidArgument). 순서는 소프트 참조 규칙처럼 읽기 전용 정책 뒤다.
-    if (value.kind == ValueKind::Name) {
+    // Optional<Name>을 unset으로 되돌리는 쓰기는 토큰을 보지 않는다.
+    if (value.kind == ValueKind::Name && value.present) {
         if (auto valid = ValidateNameFieldToken(registry.Names(), value.name, value.GetAllocator());
             !valid) {
             return valid;
@@ -182,14 +185,25 @@ Result<void> ValidateFieldWrite(const FieldWriteBinding& binding, const FieldWri
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
 
-    const ValueType& actual = target.element ? target.actual->element : target.actual->value;
+    // Optional 필드(리플렉션 B9e)는 내부 형식과 대조한다. 원본·대상 스키마의 Optional 여부가 다르면
+    // 같은 값이라도 다른 필드다.
+    const bool optional = !target.element && target.actual->value.kind == ValueKind::Optional;
+    if (optional != binding.optional) {
+        return Result<void>::Failure(ErrorCode::TypeMismatch);
+    }
+
+    const ValueType& actual =
+        target.element || optional ? target.actual->element : target.actual->value;
     if (actual.kind != kind || value.kind != kind) {
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
 
     // enum 값은 필드가 가리키는 enum의 ID를 싣는다(원본·대상 스키마가 같은 enum을 가리켜야 한다).
+    // unset으로 되돌리는 Optional 쓰기는 값 칸을 보지 않으므로 값의 ID도 보지 않는다(Optional이
+    // 아닌 자리의 present = false는 ID를 먼저 본 뒤 값 내용 검사에서 InvalidArgument — 오류 순서).
     if (kind == ValueKind::Enum &&
-        (value.type != binding.value.type || actual.type != binding.value.type)) {
+        (((!optional || value.present) && value.type != binding.value.type) ||
+         actual.type != binding.value.type)) {
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
 
@@ -213,15 +227,21 @@ Result<void> ValidateFieldWrite(const FieldWriteBinding& binding, const FieldWri
         }
     }
 
-    // struct 값·배열(aggregate — 원소 모드의 struct 원소 포함)은 FieldValue로 통째 쓰지 않는다 —
-    // 종류 대조 뒤의 정책 오류다(멤버·원소 단위 쓰기는 경로 접근이 단일 값으로 내려가 이 함수를
-    // 다시 거친다).
-    if (ValueKindIsAggregate(kind)) {
+    // struct 값·배열(aggregate — 원소 모드의 struct 원소, Optional<값 struct> 포함)은 FieldValue로
+    // 통째 쓰지 않는다 — 종류 대조 뒤의 정책 오류다(멤버·원소 단위 쓰기는 경로 접근이 단일 값으로
+    // 내려가 이 함수를 다시 거친다).
+    if (optional ? !ValueKindIsWholeFieldValue(kind) : ValueKindIsAggregate(kind)) {
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
     if (binding.readOnly || HasFlag(target.effectiveFlags, FieldFlags::ReadOnly)) {
         return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    // unset은 Optional 필드만의 값이다(값 내용 검사 없이 받는다).
+    if (!value.present) {
+        return optional ? Result<void>::Success()
+                        : Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     // 값 내용 검사는 읽기 전용 정책 뒤다(정수 폭 Overflow를 callback이 검사하는 것과 같은 순서).
@@ -264,6 +284,20 @@ Result<void> ValidateArrayEdit(const FieldWriteTarget& target, ArrayEdit edit) n
     }
 
     // 바깥 struct·배열 필드의 ReadOnly가 전파되어 원소 삽입·삭제·비우기를 모두 막는다.
+    if (HasFlag(target.effectiveFlags, FieldFlags::ReadOnly)) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> ValidateOptionalEdit(const FieldWriteTarget& target) noexcept {
+    if (!target.actual || target.actual->value.kind != ValueKind::Optional ||
+        target.actual->element.kind != ValueKind::Struct) {
+        return Result<void>::Failure(ErrorCode::TypeMismatch);
+    }
+
+    // 바깥 struct·배열 필드의 ReadOnly가 전파되어 Optional<struct>의 값 만들기·비우기를 막는다.
     if (HasFlag(target.effectiveFlags, FieldFlags::ReadOnly)) {
         return Result<void>::Failure(ErrorCode::Unsupported);
     }

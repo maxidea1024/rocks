@@ -118,15 +118,19 @@ enum class ValueKind : uint8 {
     WeakObjectReference, // rocks::WeakRef<T>(Object/ObjectRefs.h — GC가 추적하지 않는다), wire는
                          // 강한 참조와 같은 문맥 참조 wire(graph v2 U32 — 같은 그래프 안 노드만,
                          // Docs/Design/ReflectionExtensions.ko.md 5.1절)
-    ClassReference       // rocks::ClassRef<Base>(Object/ClassRef.h — 클래스 TypeId, 0 = null), wire
+    ClassReference,      // rocks::ClassRef<Base>(Object/ClassRef.h — 클래스 TypeId, 0 = null), wire
                          // Guid. value.type은 Base 클래스 ID(필수)다(같은 문서 5.2절)
+    // rocks::Optional<T>(Core/Optional.h — 클래스 필드·struct 멤버만), wire Optional(present byte +
+    // 내부 wire). value.type은 0이고 내부 형식은 FieldSchema::element다(같은 문서 6절 — 내부가 단일
+    // 값이면 FieldValue로 읽고 쓰고, 값 struct면 aggregate).
+    Optional
 };
 
 // ValueKind 열거자 수(마지막 열거자 + 1)다. 열거자 값은 schema·descriptor 계약이므로 새 종류는 끝에
 // 붙이고, 이 식의 마지막 열거자와 성질 표의 행을 함께 고친다. 아래 static_assert가 성질 표와,
 // MetaCompiler 대조 헤더가 C# 표의 종류 수와 이 값을 비교한다. 근거는
 // Docs/Design/ReflectionExtensions.ko.md 1.3절이다.
-inline constexpr uint32 ValueKindCount = static_cast<uint32>(ValueKind::ClassReference) + 1;
+inline constexpr uint32 ValueKindCount = static_cast<uint32>(ValueKind::Optional) + 1;
 
 // 값 종류의 성질이다(종류 성질 표 — Docs/Design/ReflectionExtensions.ko.md 1.3절).
 // ValueKindProperties가 종류마다 이 비트의 OR를 돌려주고, 런타임의 등록 검증(TypeRegistry)·쓰기
@@ -143,7 +147,7 @@ inline constexpr uint32 ValueKindCount = static_cast<uint32>(ValueKind::ClassRef
 //   - 직접 중첩만 막는다. 컨테이너 종류는 다른 컨테이너의 원소·키·값·내부가 아니지만,
 //     컨테이너 멤버를 담은 값 struct는 원소가 될 수 있다.
 //   - aggregate 여부(WholeFieldValue)는 종류 단위다. 내부에 따라 달라지는 종류(Optional)는 필드
-//     단위 판정이 따로 필요하다.
+//     단위 판정(FieldIsAggregate)을 쓴다.
 // Required·대상 타입 성질은 필드의 대상 종류(FieldTargetType — 컨테이너면 원소 종류)로 판정한다.
 //
 //   Field                  — 클래스 필드
@@ -160,8 +164,8 @@ inline constexpr uint32 ValueKindCount = static_cast<uint32>(ValueKind::ClassRef
 //   Container              — 원소 형식(FieldSchema::element)을 갖는 컨테이너다
 //   WholeFieldValue        — FieldValue로 통째 읽고 쓴다(아니면 aggregate — read·write가 없고 멤버·
 //                            원소 단위 경로 연산으로만 쓴다)
-// StaticArray·Map·Set·Optional·InstancedStruct 자리는 리플렉션 B9 뒤 단계가 연다. 이 표는 그 자리의
-// 허용 여부를 미리 정해 두며, 그 단계 전에는 쓰는 곳이 없다.
+// StaticArray·Map·Set·InstancedStruct 자리는 리플렉션 B9 뒤 단계가 연다(Optional 내부는 B9e가
+// 열었다). 이 표는 그 자리의 허용 여부를 미리 정해 두며, 그 단계 전에는 쓰는 곳이 없다.
 enum class ValueKindProperty : uint32 {
     None = 0,
     Field = 1u << 0,
@@ -270,6 +274,9 @@ constexpr ValueKindEntry ValueKindTableEntry(ValueKind kind) noexcept {
                           ValueKindBit(ValueKindProperty::HasTargetType) |
                           ValueKindBit(ValueKindProperty::RequiresTargetId)};
     case ValueKind::Array:
+    case ValueKind::Optional:
+        // Optional은 내부 형식(element)을 갖는 컨테이너이고 필드·멤버 자리에만 둔다. 통째
+        // FieldValue 여부는 내부에 따라 다르므로 이 칸은 비우고 FieldIsAggregate가 필드로 판정한다.
         return {true, ValueKindBit(ValueKindProperty::Field) |
                           ValueKindBit(ValueKindProperty::StructMember) |
                           ValueKindBit(ValueKindProperty::Container)};
@@ -285,6 +292,30 @@ constexpr ValueKindEntry ValueKindTableEntry(ValueKind kind) noexcept {
 static_assert(detail::ValueKindTableEntry(static_cast<ValueKind>(ValueKindCount - 1)).enumerator &&
                   !detail::ValueKindTableEntry(static_cast<ValueKind>(ValueKindCount)).enumerator,
               "ValueKindCount must be the last ValueKind enumerator + 1");
+
+namespace detail {
+
+// Optional 내부 종류 가운데 Required를 받는 종류가 없는지다. Optional 필드는 unset이 정상 값이라
+// Required를 받지 않는데, 등록·descriptor 검사는 Optional의 대상 종류(내부)로 Required를 판정하므로
+// 이 불변식이 그 거부를 보장한다(리플렉션 B9e). 새 종류가 둘을 함께 가지면 아래 static_assert가
+// 실패한다 — 그때는 Optional 필드의 Required 거부를 따로 둔다.
+constexpr bool NoOptionalInnerAcceptsRequired() noexcept {
+    const uint32 both = ValueKindBit(ValueKindProperty::OptionalInner) |
+                        ValueKindBit(ValueKindProperty::AcceptsRequired);
+    for (uint32 value = 0; value < ValueKindCount; ++value) {
+        if ((ValueKindTableEntry(static_cast<ValueKind>(value)).properties & both) == both) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+} // namespace detail
+
+static_assert(
+    detail::NoOptionalInnerAcceptsRequired(),
+    "an Optional inner value kind must not accept Required (Optional fields reject Required)");
 
 // 값 종류의 성질 비트(ValueKindProperty의 OR)다. 아래 질의 함수가 모두 이것을 읽는다.
 // Opaque(비typed 수동 메타데이터)와 열거자 밖의 값은 0이다.
@@ -375,11 +406,11 @@ constexpr bool ValueKindIsWholeFieldValue(ValueKind kind) noexcept {
     return HasValueKindProperty(kind, ValueKindProperty::WholeFieldValue);
 }
 
-// typed 필드 값 종류 가운데 FieldValue로 통째 읽고 쓰지 않는 aggregate(지금은 Struct·Array)인지다
+// typed 필드 값 종류 가운데 FieldValue로 통째 읽고 쓰지 않는 aggregate(Struct·Array·Optional)인지다
 // (클래스 필드가 될 수 있고 WholeFieldValue가 아니다 — 표를 한 번 읽는다). aggregate 필드는 read·
 // write·writeStaged가 없고 멤버·원소 단위 경로 연산으로만 쓴다. Opaque와 열거자 밖의 값은
-// aggregate가 아니다. 종류 단위 판정이므로 내부에 따라 달라지는 종류(Optional — 리플렉션 B9e)는
-// 필드 단위 판정으로 넓혀야 한다.
+// aggregate가 아니다. 종류 단위 판정이라 Optional은 늘 참이다 — 필드는 내부에 따라 달라지므로
+// 필드 하나를 판정할 때는 FieldIsAggregate를 쓴다(Optional<단일 값>은 aggregate가 아니다).
 constexpr bool ValueKindIsAggregate(ValueKind kind) noexcept {
     const uint32 properties = ValueKindProperties(kind);
     return (properties & detail::ValueKindBit(ValueKindProperty::Field)) != 0 &&
@@ -419,20 +450,38 @@ struct FieldSchema {
     // MaxArrayElements 이하, 저장·경로 쓰기에서 건다). 원소는 스칼라(Int8·Int16 포함), Guid,
     // Utf8String, Name, ObjectReference, WeakObjectReference, ClassReference, Enum, Struct,
     // AssetId, SoftObjectReference, Digest256이고 element.type은 Enum·Struct·ClassReference면 필수,
-    // 세 참조는 기대 타입(선택), 그 밖은 0이다. 배열이 아닌 필드는 Opaque·0이어야 한다.
+    // 세 참조는 기대 타입(선택), 그 밖은 0이다. Optional 필드(value = {Optional, 0} — 리플렉션
+    // B9e)는 element가 내부 형식(성질 표의 Optional 내부 종류 — 단일 값·String·Name·값 struct)이고
+    // maxElements는 0이다. 그 밖의 필드는 Opaque·0이어야 한다.
     ValueType element{};
     uint32 maxElements = 0;
 };
 
-// 필드 값의 대상 형식이다: 컨테이너 종류(ValueKindIsContainer — 지금은 Array) 필드면 원소
+// 필드 값의 대상 형식이다: 컨테이너 종류(ValueKindIsContainer — Array·Optional) 필드면 원소·내부
 // 형식(element), 아니면 값 형식(value). enum·struct·참조 대상 해석(TypeRegistry의 의존·FieldEnum·
 // FieldStruct, codec 검증, 그래프 기대 타입)이 같은 규칙을 쓴다. 반환 참조는 field의 수명을 따른다.
 //
 // 사용 예:
 //   const ValueType& target = FieldTargetType(field);
-//   if (target.kind == ValueKind::Enum) { ... }   // Enum 필드이거나 enum 원소 배열
+//   if (target.kind == ValueKind::Enum) { ... }   // Enum 필드이거나 enum 원소 배열·Optional<enum>
 constexpr const ValueType& FieldTargetType(const FieldSchema& field) noexcept {
     return ValueKindIsContainer(field.value.kind) ? field.element : field.value;
+}
+
+// 필드가 FieldValue로 통째 읽고 쓰지 않는 aggregate인지다(필드 단위 판정 — Docs/Design/
+// ReflectionExtensions.ko.md 1.3절). Optional은 내부가 통째 FieldValue 종류(단일 값·String·Name)면
+// aggregate가 아니고(FieldValue::kind = 내부 종류, present = set 여부로 읽고 쓴다) 값 struct면
+// aggregate다. 그 밖은 ValueKindIsAggregate(value.kind)다. TypeRegistry 등록(read·write 유무)·
+// FieldWriteOperation·경로 끝 분류가 이 판정을 쓴다.
+//
+// 사용 예:
+//   if (FieldIsAggregate(field)) { return Result<void>::Failure(ErrorCode::Unsupported); }
+constexpr bool FieldIsAggregate(const FieldSchema& field) noexcept {
+    if (field.value.kind == ValueKind::Optional) {
+        return !ValueKindIsWholeFieldValue(field.element.kind);
+    }
+
+    return ValueKindIsAggregate(field.value.kind);
 }
 
 // 필드 경로의 한 단계다(7절 PropertyPath, 6.4절 진단 경로): 필드 ID와, 배열 원소면 그 index.

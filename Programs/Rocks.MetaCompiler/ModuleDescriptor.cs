@@ -124,7 +124,8 @@ internal static class ModuleDescriptor
     }
 
     // 클래스·struct의 fields 배열이다(클래스는 상속 포함 전체, 생성 순서 그대로). 배열 필드는 value가 {"kind": "Array"}이고
-    // 원소 형식이 element(대상 종류일 때만 type), 길이 상한이 maxElements다(배열이 아니면 element null·maxElements 0).
+    // 원소 형식이 element(대상 종류일 때만 type), 길이 상한이 maxElements다. Optional 필드(리플렉션 B9e)는 value가
+    // {"kind": "Optional"}이고 내부 형식이 element, maxElements는 0이다(그 밖의 필드는 element null·maxElements 0).
     // 컨테이너 키는 두지 않는다(원소 종류와 원소 struct 형질로 정해진다 — Docs/Design/ReflectionFoundations.ko.md 5.6절).
     private static void WriteFields(Utf8JsonWriter json, ClassModel type)
     {
@@ -138,13 +139,13 @@ internal static class ModuleDescriptor
             json.WriteString("fieldKind", field.IsObjectReferenceFieldKind ? "ObjectReference" : "Value");
             json.WriteStartObject("value");
             json.WriteString("kind", field.Kind);
-            if (!field.IsArray && field.HasTargetType)
+            if (!field.IsArray && !field.IsOptional && field.HasTargetType)
             {
                 json.WriteString("type", field.ReferenceId ?? "");
             }
 
             json.WriteEndObject();
-            if (field.IsArray)
+            if (field.IsArray || field.IsOptional)
             {
                 json.WriteStartObject("element");
                 json.WriteString("kind", field.ElementKind);
@@ -398,10 +399,12 @@ internal static class ModuleDescriptor
                     throw Invalid("field value kind " + kind);
                 }
 
-                // 배열 필드는 value에 대상이 없고(value.type 0) element가 원소 형식이다. 배열이 아닌 필드는 element가 null이고
+                // 배열 필드는 value에 대상이 없고(value.type 0) element가 원소 형식이다. Optional 필드(리플렉션 B9e)도 value에 대상이
+                // 없고 element가 내부 형식(성질 표의 Optional 내부 종류)이며 maxElements가 0이다. 그 밖의 필드는 element가 null이고
                 // maxElements가 0이다(Docs/Design/ReflectionFoundations.ko.md 5.6절 descriptor).
                 bool array = kind == ArrayRules.Array;
-                RequireKeys(value, !array && ValueKindTable.Has(kind, ValueKindProperty.HasTargetType) ? ["kind", "type"] : ["kind"], Invalid);
+                bool optional = kind == OptionalRules.Optional;
+                RequireKeys(value, !array && !optional && ValueKindTable.Has(kind, ValueKindProperty.HasTargetType) ? ["kind", "type"] : ["kind"], Invalid);
                 JsonElement element = field.GetProperty("element");
                 if (!field.GetProperty("maxElements").TryGetUInt32(out uint maxElements))
                 {
@@ -431,12 +434,33 @@ internal static class ModuleDescriptor
 
                     targetHolder = element;
                 }
+                else if (optional)
+                {
+                    if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty("kind", out JsonElement innerKindValue))
+                    {
+                        throw Invalid("element of an Optional field");
+                    }
+
+                    elementKind = Name(innerKindValue, Identifier, "Optional inner kind");
+                    if (!ValueKindTable.Has(elementKind, ValueKindProperty.OptionalInner))
+                    {
+                        throw Invalid("Optional inner kind " + elementKind);
+                    }
+
+                    RequireKeys(element, ValueKindTable.Has(elementKind, ValueKindProperty.HasTargetType) ? ["kind", "type"] : ["kind"], Invalid);
+                    if (maxElements != 0)
+                    {
+                        throw Invalid($"maxElements {maxElements} of an Optional field");
+                    }
+
+                    targetHolder = element;
+                }
                 else if (element.ValueKind != JsonValueKind.Null || maxElements != 0)
                 {
-                    throw Invalid("element or maxElements on a field that is not an array");
+                    throw Invalid("element or maxElements on a field that is not an array or Optional");
                 }
 
-                // 대상 종류는 배열이면 원소 종류다. FieldKind::ObjectReference ⇔ 대상이 ObjectReference(ObjectRefArray 포함).
+                // 대상 종류는 배열이면 원소, Optional이면 내부 종류다. FieldKind::ObjectReference ⇔ 대상이 ObjectReference(ObjectRefArray 포함).
                 string targetKind = elementKind ?? kind;
                 if (reference != (targetKind == "ObjectReference"))
                 {

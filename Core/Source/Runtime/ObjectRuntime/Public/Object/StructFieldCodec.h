@@ -194,26 +194,31 @@ inline Result<void> DecodeRecordField(const RuntimeFieldOps& ops, ConstructionCo
     return context.MarkPresent();
 }
 
-// struct 값 하나의 저장 출처다: 필드 값(field — 중첩 Record TLV) 또는 struct 원소 배열의 목록
-// 항목(list·index). 둘 중 하나만 쓴다.
+// struct 값 하나의 저장 출처다: 필드 값(field — 중첩 Record TLV), struct 원소 배열의 목록
+// 항목(list·index), 필드 값 안의 Record 내용(record — Optional<값 struct>의 내부, 리플렉션 B9e). 셋
+// 중 하나만 쓴다.
 struct StructRecordSource {
     const FieldView* field = nullptr;
     RecordListReader* list = nullptr;
     usize index = 0;
+    Span<const uint8> record{};
 };
 
-// struct 값 하나(중첩 Record — 필드 값 또는 목록 항목)를 해석한다(4.6·5.6절): Record 스택에
-// 열고(필드는 OpenRecord, 항목은 OpenListItem — 둘 다 버전 범위 (1, UINT32_MAX)) 버전을 판정해
-// 같으면 그대로, 낮으면 원본 Record byte(필드 payload·항목 ItemBytes)로 MigrateStruct한 결과를 원본
-// scope를 닫은 뒤 현재 버전으로만 다시 열고, 높으면 newerVersion 정책(LoadNewerSkippingUnknown이면
-// 지금 위치 경로의 NewerVersion 진단 — 배열 원소면 [f[i]])을 따른 뒤 DecodeStructRecord. 1단계에서
-// 관찰 대상 struct면 검증과 같은 한 번의 해석으로 값을 채워(value가 있으면 그 자리 — 관찰 중인
-// 조상이나 관찰 배열의 원소, 없으면 ObservationScratch 임시 값, 모든 경로에서 소멸) ObserveStruct를
-// 부른다. 마이그레이션 보관과 2단계 커서는 방문 순서다.
+// struct 값 하나(중첩 Record — 필드 값·목록 항목·Record 내용)를 해석한다(4.6·5.6절): Record 스택에
+// 열고(필드는 OpenRecord, 항목은 OpenListItem, Record 내용은 OpenRecordBytes — 모두 버전 범위 (1,
+// UINT32_MAX)) 버전을 판정해 같으면 그대로, 낮으면 원본 Record byte(필드 payload·항목 ItemBytes·
+// Record 내용)로 MigrateStruct한 결과를 원본 scope를 닫은 뒤 현재 버전으로만 다시 열고, 높으면
+// newerVersion 정책(LoadNewerSkippingUnknown이면 지금 위치 경로의 NewerVersion 진단 — 배열 원소면
+// [f[i]])을 따른 뒤 DecodeStructRecord. 1단계에서 관찰 대상 struct면 검증과 같은 한 번의 해석으로
+// 값을 채워(value가 있으면 그 자리 — 관찰 중인 조상이나 관찰 배열의 원소, 없으면 ObservationScratch
+// 임시 값, 모든 경로에서 소멸) ObserveStruct를 부른다. 마이그레이션 보관과 2단계 커서는 방문
+// 순서다.
 inline Result<void> DecodeStructValue(StructView view, ConstructionContext* construction,
                                       ObjectHandle owner, void* value, StructRecordSource source,
                                       FieldDecodeContext& context) noexcept {
-    if (view.IsEmpty() || (source.field == nullptr) == (source.list == nullptr)) {
+    const bool nested = source.record.Data() != nullptr;
+    const usize sources = (source.field ? 1u : 0u) + (source.list ? 1u : 0u) + (nested ? 1u : 0u);
+    if (view.IsEmpty() || sources != 1) {
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
@@ -255,7 +260,9 @@ inline Result<void> DecodeStructValue(StructView view, ConstructionContext* cons
 
     auto scope =
         source.list ? context.OpenListItem(*source.list, source.index)
-                    : context.OpenRecord(*source.field, schema.id, 1, NumericLimits<uint32>::Max());
+        : nested
+            ? context.OpenRecordBytes(source.record, schema.id, 1, NumericLimits<uint32>::Max())
+            : context.OpenRecord(*source.field, schema.id, 1, NumericLimits<uint32>::Max());
     if (!scope) {
         return Result<void>::Failure(scope.Error());
     }
@@ -272,6 +279,8 @@ inline Result<void> DecodeStructValue(StructView view, ConstructionContext* cons
             }
 
             original = bytes.Value();
+        } else if (nested) {
+            original = source.record;
         } else {
             original = source.field->payload;
         }

@@ -125,6 +125,18 @@ public:
         return access_;
     }
 
+    // 이 트랜잭션의 Registry가 객체 생성자에 주입하는 allocator(ObjectRegistry::ObjectAllocator)다
+    // (리플렉션 B9e — Docs/Design/ReflectionExtensions.ko.md 1.7절). staged 쓰기와 그래프 복원
+    // 2단계가 공개 전 객체의 빈 자리(unset Optional의 String·값 struct 등)에 새 값을 만들 때 쓴다.
+    // 수명은 Registry와 같고(트랜잭션이 끝나도 유효하다 — rollback은 그 값을 담은 객체와 함께
+    // 없앤다), 소유 스레드 계약은 다른 트랜잭션 API와 같다. 오류는 없다.
+    //
+    // 사용 예:
+    //   String text(transaction.ObjectAllocator());
+    Allocator& ObjectAllocator() const noexcept {
+        return registry_.ObjectAllocator();
+    }
+
     // 이 트랜잭션의 ID다(관찰자 Commit 기록 ReferenceEdgeDelta::transaction과 같다 — Commit 뒤에는
     // 0이 되므로 소비자는 Commit 전에 읽어 둔다). 끝났거나 시작하지 못한 트랜잭션은 0이다.
     uint64 TransactionId() const noexcept {

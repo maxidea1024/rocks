@@ -94,6 +94,19 @@ struct FieldValue {
     Name name{};
     // Enum 값의 enum 스키마 ID다(B3b).
     TypeId type{};
+    // 값이 있는지다(리플렉션 B9e — Docs/Design/ReflectionExtensions.ko.md 6절). Optional<T>
+    // 필드(내부가 단일 값·String·Name)는 kind가 내부 종류이고 이 칸이 set 여부다: 읽기는 unset이면
+    // false(값 칸은 기본값 — enum이면 type은 그 enum ID), 쓰기는 false면 unset으로 되돌린다(값 칸은
+    // 보지 않는다 — enum ID도). 기본은 true라 Optional이 아닌 필드는 이 칸을 신경 쓰지 않아도 된다.
+    // Optional이 아닌 필드·배열 원소에 false를 쓰면 InvalidArgument다(unset은 Optional만의 값이다).
+    // 생성 읽기·경로 읽기·복원 해석은 이 칸을 늘 정한다(값을 담으면 true — 재사용한 FieldValue에
+    // 앞선 unset 읽기의 false가 남지 않는다). 수동 read callback도 같은 규칙을 지킨다.
+    //
+    // 사용 예(Optional<uint32> 필드를 unset으로):
+    //   FieldValue value(allocator);
+    //   value.kind = ValueKind::UInt32;
+    //   value.present = false;
+    bool present = true;
 
 private:
     Allocator* allocator_;
@@ -104,9 +117,11 @@ class TypeLease;
 
 namespace detail {
 
-// 필드 쓰기의 바인딩(등록된 원본 스키마 쪽)이다: 값 형식, 읽기 전용 정책.
+// 필드 쓰기의 바인딩(등록된 원본 스키마 쪽)이다: FieldValue로 쓰는 값 형식(Optional 필드면 내부
+// 형식), Optional 필드인지, 읽기 전용 정책.
 struct FieldWriteBinding {
     ValueType value{};
+    bool optional = false;
     bool readOnly = false;
 };
 
@@ -131,11 +146,13 @@ struct FieldWriteTarget {
 
 // 필드 쓰기 검증의 한 곳이다(Docs/Design/ReflectionFoundations.ko.md 3.6·5.6·6.4절).
 // FieldWriteOperation과 경로 쓰기(B6)가 같이 쓴다. lease를 얻지 않는 순수 검사이며 오류 순서는 값
-// 종류(원소 모드면 actual이 Array가 아니어도)·enum ID·참조 대상 타입(TypeMismatch) → Struct·Array
-// 종류의 통째 쓰기(Unsupported — 원소 모드의 struct 원소 포함) → 읽기 전용(Unsupported) → 값
-// 내용(소프트 참조 규칙·선언되지 않은 enum 값 InvalidArgument; 정수 폭 Overflow는 thunk가
-// 검사한다)이다. 그래프 복원의 staged 쓰기는 이 검사를 거치지 않는다(읽기 전용은 복원을 막지
-// 않는다).
+// 종류(원소 모드면 actual이 Array가 아니어도, Optional 여부가 binding.optional과 다르면)·enum
+// ID·참조 대상 타입(TypeMismatch) → aggregate 통째 쓰기(Unsupported — Struct·Array, Optional<값
+// struct>, 원소 모드의 struct 원소) → 읽기 전용(Unsupported) → 값 내용(Optional이 아닌 자리의
+// present = false·소프트 참조 규칙·선언되지 않은 enum 값 InvalidArgument; 정수 폭 Overflow는
+// thunk가 검사한다)이다. Optional 필드(리플렉션 B9e)는 actual->element(내부 형식)와 대조하고
+// present = false(unset)면 enum ID와 값 내용을 보지 않는다. 그래프 복원의 staged 쓰기는 이 검사를
+// 거치지 않는다(읽기 전용은 복원을 막지 않는다).
 //
 // 사용 예(B6 경로 쓰기가 배열 원소 하나를 쓸 때):
 //   detail::FieldWriteTarget target;
@@ -173,6 +190,19 @@ enum class ArrayEdit : uint8 {
 //   target.effectiveFlags = effectiveFlags;
 //   if (auto valid = detail::ValidateArrayEdit(target, detail::ArrayEdit::Clear); !valid) { ... }
 Result<void> ValidateArrayEdit(const FieldWriteTarget& target, ArrayEdit edit) noexcept;
+
+// Optional<값 struct> 필드의 기본 값 만들기(EmplaceOptional)·비우기(ResetOptional)의 검증 한
+// 곳이다(리플렉션 B9e — Docs/Design/ReflectionExtensions.ko.md 6절). target.actual이 없거나
+// Optional<struct>가 아니면 TypeMismatch(단일 값 Optional은 FieldValue::present로 쓴다), 유효
+// 플래그(target.effectiveFlags — 바깥 struct·배열 필드에서 전파된다)가 ReadOnly면 Unsupported다.
+// lease를 얻지 않는 순수 검사다.
+//
+// 사용 예:
+//   detail::FieldWriteTarget target;
+//   target.actual = &field;
+//   target.effectiveFlags = effectiveFlags;
+//   if (auto valid = detail::ValidateOptionalEdit(target); !valid) { ... }
+Result<void> ValidateOptionalEdit(const FieldWriteTarget& target) noexcept;
 
 // weak 참조 값(WeakObjectReference — 리플렉션 B9d1)의 대상을 검사한다(Docs/Design/
 // ReflectionExtensions.ko.md 5.1절 쓰기 검증). target이 null(IsNull — 비정규 null 포함)이면 성공,
@@ -221,8 +251,11 @@ Result<void> ValidateClassReference(ObjectRegistry& registry, const ObjectAccess
 // 타입의 파생, ClassRef 값은 detail::ValidateClassReference — 등록된 클래스이고 스키마 Base의 파생,
 // 미등록 NotFound·그 밖 InvalidArgument, Name 토큰은 Object/NameField.h의 ValidateNameFieldToken —
 // 이 Registry의 pool이 없으면 None 말고 Unsupported, 다른 pool의 토큰 WrongContext, 게시되지 않은
-// 토큰 StaleHandle, 표시 문자열 규칙 InvalidArgument)이다. Struct·Array 필드는 FieldValue로 통째
-// 쓰지 않으므로 문맥·수명·대상 타입·필드 검사 뒤 Unsupported다(멤버·원소 단위는 B6 경로 접근). 참조
+// 토큰 StaleHandle, 표시 문자열 규칙 InvalidArgument)이다. Optional 필드(내부가 단일 값 — 리플렉션
+// B9e)는 value.kind가 내부 종류이고 present = false면 unset으로 되돌린다(값 내용 검사 없음).
+// Optional이 아닌 필드에 present = false는 InvalidArgument다. aggregate 필드(FieldIsAggregate —
+// Struct·Array·Optional<값 struct>)는 FieldValue로 통째 쓰지 않으므로 문맥·수명·대상 타입·필드
+// 검사 뒤 Unsupported다(멤버·원소 단위는 B6 경로 접근). 참조
 // 값의 비정규 null(IsNull인 non-zero handle)은 null로 정규화한다 — 검증은 null로 하고 callback에는
 // reference를 ObjectHandle{}로 바꾼 사본(할당 없음)을 넘긴다(수동 함수표가 비정규 handle을 저장하지
 // 않게, 7.1절). 이 연산 자체는 encode 고정을 쥐지 않는다: 생성 callback(WriteGeneratedField)은
@@ -257,14 +290,19 @@ public:
 private:
     friend class TypeRegistry;
 
-    void Bind(TypeRegistry& registry, const void* nativeType, Guid fieldId, ValueKind valueKind,
-              TypeId referencedType, bool readOnly) noexcept {
+    // 등록된 필드(field — 원본 스키마)의 쓰기 정책을 묶는다. FieldValue로 쓰는 값 형식은 Optional
+    // 필드면 내부 형식(element), 아니면 값 형식이다.
+    void Bind(TypeRegistry& registry, const void* nativeType, const FieldSchema& field) noexcept {
+        const bool optional = field.value.kind == ValueKind::Optional;
+        const ValueType& written = optional ? field.element : field.value;
         registry_ = &registry;
         nativeType_ = nativeType;
-        fieldId_ = fieldId;
-        referencedType_ = referencedType;
-        valueKind_ = valueKind;
-        readOnly_ = readOnly;
+        fieldId_ = field.id;
+        referencedType_ = written.type;
+        valueKind_ = written.kind;
+        optional_ = optional;
+        aggregate_ = FieldIsAggregate(field);
+        readOnly_ = HasFlag(field.flags, FieldFlags::ReadOnly);
         bound_ = true;
     }
 
@@ -274,6 +312,8 @@ private:
     const void* nativeType_ = nullptr;
     Guid fieldId_{};
     ValueKind valueKind_ = ValueKind::Opaque;
+    bool optional_ = false;
+    bool aggregate_ = false;
     bool readOnly_ = false;
     bool bound_ = false;
 };
@@ -298,8 +338,9 @@ struct RuntimeFieldOps {
     // native 키와 같은지 확인한다 — 스키마로 해석한 대상과 정적 thunk의 타입이 어긋나지 않게
     // 한다(어긋나면 TypeMismatch).
     const void* valueNativeType = nullptr;
-    // 경로 접근 thunk다(B6 — 생성 코드는 detail::PathClassField). Struct·Array 필드만 가질 수 있고
-    // 선택이다(없으면 그 필드 아래 경로 연산은 Unsupported). 단일 값 필드는 null이어야 한다 —
+    // 경로 접근 thunk다(B6 — 생성 코드는 detail::PathClassField). aggregate 필드(FieldIsAggregate —
+    // Struct·Array·Optional<값 struct>)만 가질 수 있고 선택이다(없으면 그 필드 아래 경로 연산은
+    // Unsupported). 단일 값 필드(Optional<단일 값> 포함)는 null이어야 한다 —
     // 최상위 단일 값의 경로 읽기·쓰기는 read·write 한 경로다(등록이 InvalidArgument로 막는다).
     FieldPathFunction path = nullptr;
     // 공개 전(staged) 객체의 값을 읽는다(선택 — Docs/Design/ObjectFoundations.ko.md 4절). 그래프

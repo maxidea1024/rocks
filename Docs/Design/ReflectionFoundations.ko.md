@@ -215,7 +215,7 @@ struct FieldSchema {
 (멤버 순서는 기존 집합 초기화 순서를 유지하려고 새 멤버를 끝에 붙인 것이다 — B3a 구현.)
 
 - `ValueKind` 끝에 `Enum`·`Struct`·`Array`·`AssetId`·`SoftObjectReference`·`Digest256`를 붙이고 TypeRegistry의 상한 검사를 바꾼다.
-- 규칙(등록 때 검사): `kind == ObjectReference` ⇔ (`value.kind == ObjectReference`) 또는 (`value.kind == Array`이고 `element.kind == ObjectReference`). `value.type`은 Enum·Struct·ObjectReference·SoftObjectReference에서만 쓴다. Array 원소는 Array일 수 없다. 리플렉션 B9가 ValueKind 19–29(Int8·Int16·Name·WeakObjectReference·ClassReference·Optional·Map·Set·StaticArray·InstancedStruct·Text), `FieldSchema.key`·Map 키 대상 칸과 이 규칙의 확장(StaticArray·ObjectRefMap)을 더한다(RX 1.1·1.3절).
+- 규칙(등록 때 검사): `kind == ObjectReference` ⇔ (`value.kind == ObjectReference`) 또는 (`value.kind == Array`이고 `element.kind == ObjectReference`). `value.type`은 Enum·Struct·ObjectReference·SoftObjectReference에서만 쓴다. Array 원소는 Array일 수 없다. 리플렉션 B9가 ValueKind 19–29(Int8·Int16·Name·WeakObjectReference·ClassReference·Optional·Map·Set·StaticArray·InstancedStruct·Text — 24 Optional까지 구현, Optional은 `value.type` 0·`element` = 내부 형식), `FieldSchema.key`·Map 키 대상 칸과 이 규칙의 확장(StaticArray·ObjectRefMap)을 더한다(RX 1.1·1.3절).
 - **TypeRegistry 종류 구분**: 레코드에 종류(Class·Struct·Enum)를 둔다. 기존 `Acquire(TypeId)`는 **클래스만** 돌려준다(다른 종류는 TypeMismatch — ObjectRegistry·GraphSave·GraphLoad의 기존 호출자는 모두 클래스를 가정한다). struct·enum은 `AcquireValueType(TypeId, TypeKind)`으로 연다. 등록은 `RegisterStruct(const StructSchema&, RuntimeStructOps)`·`RegisterEnum(const EnumSchema&, RuntimeEnumOps)`(`RuntimeEnumOps{nativeType, module}` — B3b 구현).
 - **의존 계수**: 클래스(또는 struct)가 가리키는 enum·struct가 등록 때 이미 있어야 하고(없으면 NotFound), 참조는 lease가 아니라 base와 같은 `dependents` 계수로 표시한다 — 가리키는 레코드 포인터 목록을 등록 단일 할당 안에 두고 `DestroyRecord`에서 각각 줄인다(lease로 쥐면 Shutdown이 영구 Busy가 된다). 의존자가 남은 레코드의 Unregister는 Busy다.
 - **native 타입 대조**: struct 필드의 생성 ops는 정적 타입 `S`의 `NativeTypeKey<S>()`를 싣고, 등록이 그 필드가 가리키는 struct 레코드의 native 키와 같은지 확인한다(schema로 해석한 경로와 정적 thunk가 어긋나 엉뚱한 멤버에 쓰지 않게). enum도 같다.
@@ -491,7 +491,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema&, Ru
 - 누락: 빠진 배열 필드·멤버는 생성자 값을 유지한다(단일 값과 같다 — 누락 = 기준). B5가 두었던 누락 순회(`CheckMissingField`·`ReportMissingRequired`)의 배열 규칙은 A0-Oc에서 그 순회와 함께 지웠고, Required 배열은 적용 뒤 실효 값의 null 원소로 진단한다([ObjectFoundations](ObjectFoundations.ko.md) 4절).
 - Required 배열의 뜻: 원소마다 non-null. `ObjectRefArray`·`Array<SoftObjectRef<T>>`의 null 원소는 저장에서 `rejectMissingRequired`면 진단 + InvalidArgument, 로드는 진단만 낸다(경로 [f[i]] — A0-Oc부터 적용 뒤 실효 값으로). "비어 있지 않아야"라는 뜻은 없다.
 
-**codec(B5b, 값 wire `Object/FieldValueWire.h`·`Object/FieldValueParse.h`, 배열 `Object/ArrayFieldCodec.h` — 모두 `Object/GeneratedFieldCodec.h`로 include한다)**
+**codec(B5b, 값 wire `Object/FieldValueWire.h`·`Object/FieldValueParse.h`, 배열 `Object/ArrayFieldCodec.h`, 리플렉션 B9e의 Optional `Object/OptionalFieldCodec.h` — 모두 `Object/GeneratedFieldCodec.h`로 include한다)**
 
 - 값 wire 읽기·쓰기를 `ValueType` 인자로 분리한다: `WriteValueWire(out, ctx, ValueType, const EnumSchema*, FieldValue, text, staticNative)`, `ReadValueWire(reader, ctx, ValueType, const EnumSchema*, const EnumValueSet*, staticNative, ParsedValue&)`(검증만 — 진단·청구 없음, `ParsedValue`는 할당 없는 view), `ReportParsedValue(ctx, ValueType, const ParsedValue&)`(미선언 enum·Required null·Soft 수집). `EncodeFieldWire`·`ParseFieldValue`는 이것을 감싸고 단일 값 동작은 바뀌지 않는다.
 - 필드 단위 `FieldWireType(const FieldSchema&, referenceWire)`: Array는 원소가 Struct면 RecordList, 아니면 ValueArray. `EncodeStructRecord`의 wire 재확인·GraphSave·`ValidateLayout`이 쓴다.
@@ -690,9 +690,13 @@ Result<void>  PathInsertElement(…, PropertyPath /*마지막 단계 indexed: �
 Result<void>  PathRemoveElement(…, PropertyPath /*마지막 단계 indexed*/, FieldValue* removed = nullptr,
                                 PropertyPathFailure* = nullptr) noexcept;
 Result<void>  PathClearArray(…, PropertyPath, PropertyPathFailure* = nullptr) noexcept;
+// 리플렉션 B9e: Optional<값 struct> 필드의 기본 값 만들기·비우기·set 여부 조회(RX 6절 "구현(B9e)에서 정한 점")
+Result<void>  PathEmplaceOptional(…, PropertyPath, PropertyPathFailure* = nullptr) noexcept;
+Result<void>  PathResetOptional(…, PropertyPath, PropertyPathFailure* = nullptr) noexcept;
+Result<bool>  PathIsOptionalSet(…, PropertyPath, PropertyPathFailure* = nullptr) noexcept;
 ```
 
-- 모든 연산이 `PropertyPathFailure`로 실패 단계와 사유를 돌려준다 — 도구가 모르는 속성·범위 오류·값 오류를 나눠 보고한다. 사유와 코드: UnknownProperty(문자열 앞단의 모르는 이름, NotFound), UnknownField(FieldId 체인의 없는 필드 — 스키마가 바뀐 옛 경로, NotFound), NotArray·NotStruct(모양 불일치, TypeMismatch), IndexRequired(index가 있어야 하는 단계에 없음, InvalidArgument), IndexNotAllowed(index가 없어야 하는 단계에 있음, InvalidArgument), IndexOutOfRange(InvalidArgument), InvalidValue(값 내용, InvalidArgument), ReadOnly(Unsupported), AggregateValue(통째 struct·배열, Unsupported), NoPathAccess(path thunk 없음, Unsupported), TooManyElements(MaxElements, CapacityExceeded), StaticTypeMismatch(정적 타입과 스키마 불일치, TypeMismatch). 사유가 없는 오류(문맥·수명·Busy·OutOfMemory·Overflow)는 None이고 step만 채운다.
+- 모든 연산이 `PropertyPathFailure`로 실패 단계와 사유를 돌려준다 — 도구가 모르는 속성·범위 오류·값 오류를 나눠 보고한다. 사유와 코드: UnknownProperty(문자열 앞단의 모르는 이름, NotFound), UnknownField(FieldId 체인의 없는 필드 — 스키마가 바뀐 옛 경로, NotFound), NotArray·NotStruct(모양 불일치, TypeMismatch), IndexRequired(index가 있어야 하는 단계에 없음, InvalidArgument), IndexNotAllowed(index가 없어야 하는 단계에 있음, InvalidArgument), IndexOutOfRange(InvalidArgument), InvalidValue(값 내용, InvalidArgument), ReadOnly(Unsupported), AggregateValue(통째 struct·배열, Unsupported), NoPathAccess(path thunk 없음, Unsupported), TooManyElements(MaxElements, CapacityExceeded), StaticTypeMismatch(정적 타입과 스키마 불일치, TypeMismatch), 리플렉션 B9e의 OptionalUnset(unset Optional<struct>의 멤버로 들어감, NotFound)·NotOptional(Optional<값 struct> 연산의 끝이 그 필드가 아님, TypeMismatch). 사유가 없는 오류(문맥·수명·Busy·OutOfMemory·Overflow)는 None이고 step만 채운다.
 - **옛 값 출력(CU4용)**: `PathWrite`의 `previous`는 쓰기 전 값이고, `PathRemoveElement`의 `removed`는 단일 값 원소의 값이다(struct 원소에 `removed`를 주면 InvalidArgument). String·Soft 경로는 `previous`·`removed`의 FieldValue allocator와 원본 allocator가 같을 때만 Swap·이동으로 옮기고(추가 할당 없음), 다르면 고정 아래 게시 전에 그 FieldValue의 allocator로 복사한다(CU4 Undo 기록이 객체 allocator의 버퍼를 쥐지 않게). `previous`가 쥐던 옛 버퍼는 고정을 푼 뒤 반환하고, 연산이 실패하면 `previous`·`removed`는 바뀌지 않는다. 최상위 단일 값 필드는 write 직전에 등록된 read로 `previous`를 얻는다(read와 write 사이의 재진입 변경은 계약 밖). 비우기와 struct 원소 제거의 옛 값은 CU4가 연산 전 `PathRead`로 만들고, struct 원소 제거의 복원은 "기본 원소 삽입 + 잎 단위 쓰기" 재생으로 충분함을 시험으로 고정한다(제거 → 재생 → encode byte 동일). 캡처한 참조 handle은 약한 참조이므로 CU4가 RootRef로 붙잡는다.
 - 끝 지점별 동작:
 

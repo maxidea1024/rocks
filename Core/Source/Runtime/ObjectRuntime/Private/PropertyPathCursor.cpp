@@ -65,10 +65,11 @@ Result<Object*> PathCursor::Owner(const void* ownerNative) noexcept {
     return Result<Object*>::Success(object_);
 }
 
-Result<void> PathCursor::CheckTarget(ValueKind target, bool container) noexcept {
+Result<void> PathCursor::CheckTarget(ValueKind target, bool container, bool optional) noexcept {
     const FieldSchema& field = *Frame().field;
     if (FieldTargetType(field).kind != target ||
-        (field.value.kind == ValueKind::Array) != container) {
+        (field.value.kind == ValueKind::Array) != container ||
+        (field.value.kind == ValueKind::Optional) != optional) {
         return Fail(ErrorCode::TypeMismatch, PropertyPathError::StaticTypeMismatch);
     }
 

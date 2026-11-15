@@ -53,10 +53,10 @@ bool SupportedFieldKind(ValueKind kind, bool structMember) noexcept {
            (structMember ? ValueKindCanBeStructMember(kind) : ValueKindCanBeField(kind));
 }
 
-// FieldValue로 통째 읽고 쓰지 않는 필드다(성질 표의 aggregate — struct 값·배열: read·write·
-// writeStaged가 없어야 하고 Transient가 아니면 codec이 필수다).
+// FieldValue로 통째 읽고 쓰지 않는 필드다(필드 단위 aggregate — struct 값·배열·Optional<값 struct>:
+// read·write·writeStaged가 없어야 하고 Transient가 아니면 codec이 필수다).
 bool IsAggregateField(const FieldSchema& field) noexcept {
-    return ValueKindIsAggregate(field.value.kind);
+    return FieldIsAggregate(field);
 }
 
 // 클래스 함수표에서 필드 ID의 valueNativeType을 찾는다(ResolveValueTypes의 thunkType).
@@ -100,21 +100,28 @@ Result<void> ValidateFieldList(Span<const FieldSchema> fields, bool structMember
 
     for (usize index = 0; index < fields.Size(); ++index) {
         const auto& field = fields[index];
-        // 대상 형식은 배열이면 원소, 아니면 값이다(Docs/Design/ReflectionFoundations.ko.md 5.6절).
-        // Array 필드는 value.type 0, 원소 종류는 성질 표의 Array 원소 종류(Opaque·Array 거부),
-        // maxElements는 [1, MaxArrayElements]이고, 배열이 아닌 필드는 element = {Opaque, 0}·
-        // maxElements 0이다.
+        // 대상 형식은 배열이면 원소, Optional이면 내부, 아니면 값이다(Docs/Design/
+        // ReflectionFoundations.ko.md 5.6절, ReflectionExtensions.ko.md 6절). Array 필드는
+        // value.type 0, 원소 종류는 성질 표의 Array 원소 종류(Opaque·Array 거부), maxElements는 [1,
+        // MaxArrayElements]이다. Optional 필드는 value.type 0, 내부 종류는 성질 표의 Optional 내부
+        // 종류(참조·컨테이너·Optional 거부 — 참조 struct는 ResolveValueTypes가 거부한다),
+        // maxElements 0이다. 그 밖의 필드는 element = {Opaque, 0}·maxElements 0이다.
         const bool array = field.value.kind == ValueKind::Array;
+        const bool optional = field.value.kind == ValueKind::Optional;
         const ValueType& target = FieldTargetType(field);
         const bool arrayShape =
             array
                 ? field.value.type == TypeId{} && ValueKindCanBeArrayElement(field.element.kind) &&
                       field.maxElements >= 1 && field.maxElements <= MaxArrayElements
+            : optional
+                ? field.value.type == TypeId{} && ValueKindCanBeOptionalInner(field.element.kind) &&
+                      field.maxElements == 0
                 : field.element.kind == ValueKind::Opaque && field.element.type == TypeId{} &&
                       field.maxElements == 0;
         // Required는 성질 표가 허용하는 대상 종류(typed 참조·소프트 참조, 배열이면 원소)에만 뜻이
-        // 있다(저장이 null을 검사하려면 접근기·codec이 있어야 한다). 도구 이름은 비어 있거나 ASCII
-        // 식별자다.
+        // 있다(저장이 null을 검사하려면 접근기·codec이 있어야 한다). Optional은 대상 종류가 내부
+        // 종류이고 Optional 내부 종류는 모두 Required를 받지 않으므로 같은 판정이 거부한다(성질
+        // 표의 불변식 — Meta/TypeSchema.h static_assert). 도구 이름은 비어 있거나 ASCII 식별자다.
         if (field.id == Guid{} || (field.flags & ~KnownFieldFlags) != 0 ||
             (HasFlag(field.flags, FieldFlags::Required) &&
              !ValueKindAcceptsRequired(target.kind)) ||
@@ -437,10 +444,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
             if (fields[fieldIndex].id == fieldOps[index].fieldId) {
                 opsIndex[fieldIndex] = static_cast<uint32>(index);
                 // 원본 입력 함수표는 변경하지 않는다. 등록된 복사본에만 정책을 결합한다.
-                fieldOps[index].write.Bind(*this, ops.nativeType, fields[fieldIndex].id,
-                                           fields[fieldIndex].value.kind,
-                                           fields[fieldIndex].value.type,
-                                           HasFlag(fields[fieldIndex].flags, FieldFlags::ReadOnly));
+                fieldOps[index].write.Bind(*this, ops.nativeType, fields[fieldIndex]);
                 break;
             }
         }

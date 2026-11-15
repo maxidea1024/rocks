@@ -5,7 +5,7 @@
 
 // 경로 연산의 실행(detail::PathRunner — 입력 형식·문맥·단계 해석·끝 지점 분류·참조 lease·검증
 // 지점·Borrow·생성 thunk 실행)과 공개 연산 진입점(PathRead·PathWrite·PathArrayLength·
-// PathInsertElement·PathRemoveElement·PathClearArray)이다.
+// PathInsertElement·PathRemoveElement·PathClearArray·PathEmplaceOptional·PathResetOptional·PathIsOptionalSet)이다.
 namespace rocks {
 
 namespace detail {
@@ -13,8 +13,15 @@ namespace detail {
 namespace {
 
 // 경로 thunk가 FieldValue로 표현할 수 없는 값 종류다(성질 표의 aggregate — struct 값·배열 통째).
+// 끝 지점의 종류(원소·Optional 내부 포함)에 쓴다 — 필드 하나는 FieldIsAggregate로 판정한다.
 bool IsAggregateKind(ValueKind kind) noexcept {
     return ValueKindIsAggregate(kind);
+}
+
+// 단계의 값이 FieldValue·struct로 접근하는 형식이다: 배열 원소 단계면 원소, Optional 필드면
+// 내부(리플렉션 B9e), 아니면 값 형식.
+const ValueType& StepValueType(const FieldSchema& field, bool indexed) noexcept {
+    return indexed || field.value.kind == ValueKind::Optional ? field.element : field.value;
 }
 
 // 쓰기 검증(ValidateFieldWrite·등록된 write) 오류의 사유다: Unsupported는 유효 플래그에 ReadOnly가
@@ -190,7 +197,7 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         }
 
         if (index < last) {
-            const ValueKind kind = step.indexed ? field->element.kind : field->value.kind;
+            const ValueKind kind = StepValueType(*field, step.indexed).kind;
             if (kind != ValueKind::Struct || frame.target.IsEmpty()) {
                 return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::NotStruct);
             }
@@ -204,9 +211,20 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::NotArray);
     }
 
+    // Optional<값 struct> 값 만들기·비우기·set 여부 조회의 끝은 그 필드여야 한다(단일 값 Optional은
+    // PathRead·PathWrite의 present로 다룬다 — 리플렉션 B9e).
+    const bool optionalEdit =
+        operation == PathOperation::EmplaceOptional || operation == PathOperation::ResetOptional;
+    const bool optionalStructOperation = optionalEdit || operation == PathOperation::QueryOptional;
+    if (optionalStructOperation && (end.field->value.kind != ValueKind::Optional ||
+                                    end.field->element.kind != ValueKind::Struct)) {
+        return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::NotOptional);
+    }
+
     // 4. 끝 지점 분류: struct·배열 통째 접근, 값 유무, thunk 유무(Unsupported).
-    const ValueKind kind = end.indexed ? end.field->element.kind : end.field->value.kind;
-    const bool topValue = steps.Size() == 1 && !IsAggregateKind(end.field->value.kind);
+    const ValueType& endType = StepValueType(*end.field, end.indexed);
+    const ValueKind kind = endType.kind;
+    const bool topValue = steps.Size() == 1 && !FieldIsAggregate(*end.field);
     switch (operation) {
     case PathOperation::Read:
     case PathOperation::Write:
@@ -269,7 +287,7 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
     const bool referenceKind =
         kind == ValueKind::ObjectReference || kind == ValueKind::WeakObjectReference;
     if (value && referenceKind && value->kind == kind) {
-        const TypeId expected = end.indexed ? end.field->element.type : end.field->value.type;
+        const TypeId expected = endType.type;
         if (expected != TypeId{}) {
             auto lease = cursor.registry_.AcquireRegisteredType(cursor.access_, expected);
             if (!lease) {
@@ -306,14 +324,16 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
     target.element = end.indexed;
     if (value) {
         FieldWriteBinding binding;
-        binding.value = end.indexed ? end.field->element : end.field->value;
+        binding.value = endType;
+        binding.optional = !end.indexed && end.field->value.kind == ValueKind::Optional;
         if (auto valid = ValidateFieldWrite(binding, target, *value); !valid) {
             return cursor.Fail(valid.Error(), WriteReason(valid.Error(), end.effectiveFlags));
         }
 
         // Name 토큰은 이 Registry의 pool 것이어야 한다(FieldWriteOperation과 같은 검사 — struct
-        // 멤버·배열 원소의 생성 thunk는 토큰을 그대로 대입하므로 여기가 검사 지점이다).
-        if (value->kind == ValueKind::Name) {
+        // 멤버·배열 원소의 생성 thunk는 토큰을 그대로 대입하므로 여기가 검사 지점이다). Optional을
+        // unset으로 되돌리는 쓰기는 토큰을 보지 않는다.
+        if (value->kind == ValueKind::Name && value->present) {
             if (auto valid = ValidateNameFieldToken(cursor.registry_.Names(), value->name,
                                                     value->GetAllocator());
                 !valid) {
@@ -325,7 +345,7 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         // (FieldWriteOperation과 같은 검사 — 리플렉션 B9d2). 그 lease는 완료까지 쥐고 생성 thunk가
         // 정적 Base를 대조한다(CheckClassTarget).
         if (value->kind == ValueKind::ClassReference && value->guid != Guid{}) {
-            const TypeId base = end.indexed ? end.field->element.type : end.field->value.type;
+            const TypeId base = endType.type;
             auto found = CheckClassReferenceLease(
                 cursor.registry_.AcquireRegisteredType(cursor.access_, value->guid), base, nullptr);
             if (!found) {
@@ -348,6 +368,14 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         }
     }
 
+    if (optionalEdit) {
+        if (auto valid = ValidateOptionalEdit(target); !valid) {
+            return cursor.Fail(valid.Error(), valid.Error() == ErrorCode::Unsupported
+                                                  ? PropertyPathError::ReadOnly
+                                                  : PropertyPathError::NotOptional);
+        }
+    }
+
     // 최상위 단일 값은 등록된 read·write 한 경로다(수동 함수표·동적 필드도 같다). 쓰기는 위
     // 검증(5·6단계)을 previous read·할당보다 먼저 거친다 — 오류 순서상 ValidateFieldWrite가
     // OutOfMemory보다 먼저다(등록된 write는 같은 검증을 다시 한다).
@@ -357,7 +385,8 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
 
     // 7. Borrow(쓰기는 ResolveForWrite — encode 고정 중이면 Busy)와 읽기 고정.
     cursor.current_ = 0;
-    const bool reading = operation == PathOperation::Read || operation == PathOperation::Length;
+    const bool reading = operation == PathOperation::Read || operation == PathOperation::Length ||
+                         operation == PathOperation::QueryOptional;
     auto borrowed = reading
                         ? cursor.registry_.Resolve<Object>(cursor.access_, cursor.owner_)
                         : cursor.registry_.ResolveForWrite<Object>(cursor.access_, cursor.owner_);
@@ -456,6 +485,33 @@ Result<void> PathClearArray(ObjectRegistry& registry, const ObjectAccessContext&
                             PropertyPathFailure* failure) noexcept {
     return RunOperation(registry, access, handle, path, PathOperation::Clear, nullptr, nullptr,
                         failure, nullptr);
+}
+
+Result<void> PathEmplaceOptional(ObjectRegistry& registry, const ObjectAccessContext& access,
+                                 ObjectHandle handle, PropertyPath path,
+                                 PropertyPathFailure* failure) noexcept {
+    return RunOperation(registry, access, handle, path, PathOperation::EmplaceOptional, nullptr,
+                        nullptr, failure, nullptr);
+}
+
+Result<void> PathResetOptional(ObjectRegistry& registry, const ObjectAccessContext& access,
+                               ObjectHandle handle, PropertyPath path,
+                               PropertyPathFailure* failure) noexcept {
+    return RunOperation(registry, access, handle, path, PathOperation::ResetOptional, nullptr,
+                        nullptr, failure, nullptr);
+}
+
+Result<bool> PathIsOptionalSet(ObjectRegistry& registry, const ObjectAccessContext& access,
+                               ObjectHandle handle, PropertyPath path,
+                               PropertyPathFailure* failure) noexcept {
+    usize set = 0;
+    auto result = RunOperation(registry, access, handle, path, PathOperation::QueryOptional,
+                               nullptr, nullptr, failure, &set);
+    if (!result) {
+        return Result<bool>::Failure(result.Error());
+    }
+
+    return Result<bool>::Success(set != 0);
 }
 
 } // namespace rocks

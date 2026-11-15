@@ -48,6 +48,17 @@ internal static class ValueKindTableTests
                 !ValueKindTable.Has("ClassReference", ValueKindProperty.OptionalInner) &&
                 !ValueKindTable.Has("ClassReference", ValueKindProperty.InstancedStructContent),
                 "B9d2 ClassReference is a keyed class id with a required base, Required and no Optional inner");
+            Verify.That(ValueKindTable.Has("Optional", ValueKindProperty.Field) &&
+                ValueKindTable.Has("Optional", ValueKindProperty.StructMember) &&
+                ValueKindTable.Has("Optional", ValueKindProperty.Container) &&
+                !ValueKindTable.Has("Optional", ValueKindProperty.ArrayElement) &&
+                !ValueKindTable.Has("Optional", ValueKindProperty.OptionalInner) &&
+                !ValueKindTable.Has("Optional", ValueKindProperty.AcceptsRequired) &&
+                !ValueKindTable.Has("Optional", ValueKindProperty.WholeFieldValue),
+                "B9e Optional is a field-only container whose aggregate shape depends on its inner kind");
+            // Optional 필드의 Required 거부는 이 불변식에 기댄다(대상 종류 = 내부 종류 — 런타임 static_assert NoOptionalInnerAcceptsRequired와 같다).
+            Verify.That(!ValueKindTable.Rows.Any(row => (row.Properties & ValueKindProperty.OptionalInner) != 0 && (row.Properties & ValueKindProperty.AcceptsRequired) != 0),
+                "no Optional inner kind accepts Required");
             Verify.That(ValueKindTable.Has("SoftObjectReference", ValueKindProperty.MapKey), "single property query");
             Verify.Throws<ArgumentException>(() => ValueKindTable.Has("SoftObjectReference", ValueKindProperty.MapKey | ValueKindProperty.AcceptsRequired));
             Verify.Throws<ArgumentException>(() => ValueKindTable.Has("Bool", ValueKindProperty.None));
@@ -78,11 +89,12 @@ internal static class ValueKindTableTests
                 ("Name kind cell", Flip("Name", ValueKindProperty.MapKey), "Name MapKey = false"),
                 ("weak reference cell", Flip("WeakObjectReference", ValueKindProperty.AcceptsRequired), "WeakObjectReference AcceptsRequired = true"),
                 ("class reference cell", Flip("ClassReference", ValueKindProperty.RequiresTargetId), "ClassReference RequiresTargetId = false"),
+                ("optional cell", Flip("Optional", ValueKindProperty.ArrayElement), "Optional ArrayElement = true"),
                 ("container property", Flip("Array", ValueKindProperty.Container), "Array Container = false"),
                 ("whole FieldValue property", Flip("Struct", ValueKindProperty.WholeFieldValue), "Struct WholeFieldValue = true"),
-                // 런타임에 아직 없는 종류(리플렉션 B9e의 Optional)를 C# 표에만 더한 경우다.
+                // 런타임에 아직 없는 종류(리플렉션 B9f2의 Map)를 C# 표에만 더한 경우다.
                 ("extra C# kind", ValueKindTable.ParityHeader([.. ValueKindTable.Rows,
-                    new("Optional", (uint)count, ValueKindProperty.Field)]),
+                    new("Map", (uint)count, ValueKindProperty.Field)]),
                     $"C# table has {count + 1} value kinds"),
                 ("missing C# kind", ValueKindTable.ParityHeader([.. ValueKindTable.Rows.Take(count - 1)]),
                     $"C# table has {count - 1} value kinds"),
@@ -117,6 +129,9 @@ internal static class ValueKindTableTests
 
             Verify.That(ValueKindTable.Has(ArrayRules.Array, ValueKindProperty.Field) && ValueKindTable.Has(ArrayRules.Array, ValueKindProperty.StructMember),
                 "array fields can be class fields and struct members");
+            Verify.That(ValueKindTable.Has(OptionalRules.Optional, ValueKindProperty.Field) &&
+                ValueKindTable.Has(OptionalRules.Optional, ValueKindProperty.StructMember),
+                "optional fields can be class fields and struct members");
         });
     }
 

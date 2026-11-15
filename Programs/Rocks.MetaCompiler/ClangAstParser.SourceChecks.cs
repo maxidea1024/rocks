@@ -506,8 +506,9 @@ internal sealed partial class ClangAstParser
         "ROCKS_PROPERTY must be a direct prefix on one field in the same source file",
         hint: "Write ROCKS_PROPERTY(...) immediately before the field declaration, with no wrapper macro or intervening preprocessor directive.");
 
-    // 실패한 첫 Clang 실행에서 찾은 필드다(CompilerDriver의 rocks::Array 인스턴스화 실패 변환). Symbol은 정규 이름 owner::name,
-    // Spelling은 desugar 철자, StrongPath는 강한 참조 경로(PROPERTY는 배열 원소, NATIVE는 필드 형식 전체 — 없으면 null)다.
+    // 실패한 첫 Clang 실행에서 찾은 필드다(CompilerDriver의 rocks::Array·rocks::Optional 인스턴스화 실패 변환). Symbol은 정규 이름
+    // owner::name, Spelling은 desugar 철자, StrongPath는 강한 참조 경로(PROPERTY는 배열 원소·Optional 내부, NATIVE는 필드 형식
+    // 전체 — 없으면 null)다.
     internal sealed record FailedArrayField(string Symbol, string Spelling, bool Property, bool Native, SourceSite Site, string? StrongPath);
 
     // 실패한 첫 Clang 실행의 AST(오류가 있어도 stdout에 나온다)에서 이름 위치가 file의 (line, column)인 필드를 찾는다
@@ -566,7 +567,9 @@ internal sealed partial class ClangAstParser
                 }
 
                 string spelling = TypeSpelling(node);
-                string checkedType = !native && ArrayRules.Split(spelling) is (_, string element) ? element : spelling;
+                string checkedType = native ? spelling
+                    : ArrayRules.Split(spelling) is (_, string element) ? element
+                    : OptionalRules.Inner(spelling) ?? spelling;
                 return new(string.Join("::", scope.Append(name)), spelling, property, native, new SourceSite(location.File, line),
                     StrongReferencePath(checkedType, []));
             }

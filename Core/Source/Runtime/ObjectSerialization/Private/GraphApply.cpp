@@ -86,6 +86,30 @@ public:
         return PushRecord(Move(opened.Value()));
     }
 
+    // 필드 값 안의 Record 내용(Optional<값 struct>의 내부 — 리플렉션 B9e)이다. 1단계와 같은 버전
+    // 범위·크기 한도, 무제한 operation·work. 스택이 비면(최상위 필드 — 값 reader가 단독이다) 단독
+    // Open, 있으면 맨 위 Record의 OpenNestedRecord다.
+    Result<RecordScope> OpenRecordBytes(Span<const uint8> record, TypeId expected,
+                                        uint32 minVersion, uint32 maxVersion) noexcept override {
+        if (RecordReader* parent = CurrentRecord()) {
+            auto opened = parent->OpenNestedRecord(allocator_, record, expected, minVersion,
+                                                   maxVersion, limits_.maxTotalFields);
+            if (!opened) {
+                return Result<RecordScope>::Failure(opened.Error());
+            }
+
+            return PushRecord(Move(opened.Value()));
+        }
+
+        auto opened = RecordReader::Open(allocator_, record, expected, minVersion, maxVersion,
+                                         {Unlimited(), limits_.maxTotalFields});
+        if (!opened) {
+            return Result<RecordScope>::Failure(opened.Error());
+        }
+
+        return PushRecord(Move(opened.Value()));
+    }
+
     Result<RecordScope> OpenMigratedRecord(Span<const uint8> record, TypeId expected,
                                            uint32 version) noexcept override {
         auto opened = RecordReader::Open(allocator_, record, expected, version, version,

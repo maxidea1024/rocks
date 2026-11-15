@@ -19,9 +19,14 @@ bool IsDigit(char c) noexcept {
 }
 
 // 경로가 struct 값으로 끝나는 단계인지다(다음 단계 `.`를 받을 수 있다 — index 없는 배열은 아니다).
+// Optional<값 struct> 필드는 그 내부 struct로 들어간다(리플렉션 B9e — set 여부는 경로 연산이 본다).
 bool IsStructStep(const FieldSchema& field, bool indexed) noexcept {
-    return indexed ? field.value.kind == ValueKind::Array && field.element.kind == ValueKind::Struct
-                   : field.value.kind == ValueKind::Struct;
+    if (indexed) {
+        return field.value.kind == ValueKind::Array && field.element.kind == ValueKind::Struct;
+    }
+
+    return field.value.kind == ValueKind::Struct ||
+           (field.value.kind == ValueKind::Optional && field.element.kind == ValueKind::Struct);
 }
 
 usize DecimalDigits(uint32 value) noexcept {

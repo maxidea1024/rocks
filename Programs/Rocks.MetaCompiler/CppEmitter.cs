@@ -271,12 +271,12 @@ internal static class CppEmitter
                 {
                     string member = $"&::{field.Owner}::{field.Name}";
                     Line($"{{{GuidValue(field.Id)},");
-                    if (field.IsStruct || field.IsArray)
+                    if (field.IsAggregate)
                     {
-                        // struct·배열 필드는 FieldValue로 표현할 수 없으므로 read·write·writeStaged가 없고(통째 쓰기는
-                        // Unsupported) codec, struct native 키(배열이면 원소 Enum·Struct의 native 키, 그 밖은 nullptr을
-                        // 명시)와 경로 접근 thunk를 싣는다(Docs/Design/ReflectionFoundations.ko.md 4.6·5.6·7.1절). 멤버·원소
-                        // 단위 접근은 경로 thunk가 한다.
+                        // struct·배열·Optional<값 struct> 필드는 FieldValue로 표현할 수 없으므로 read·write·writeStaged가
+                        // 없고(통째 쓰기는 Unsupported) codec, struct native 키(배열이면 원소, Optional이면 내부 Enum·Struct의
+                        // native 키, 그 밖은 nullptr을 명시)와 경로 접근 thunk를 싣는다(Docs/Design/ReflectionFoundations.ko.md
+                        // 4.6·5.6·7.1절, ReflectionExtensions.ko.md 6절). 멤버·원소 단위 접근은 경로 thunk가 한다.
                         Line("nullptr, {}, nullptr,");
                         string valueNative = ValueNativeType(schema, field);
                         EmitClassCodec(native, member, (valueNative.Length == 0 ? ", nullptr" : valueNative) + ClassPathThunk(native, member, field), Line);
@@ -303,8 +303,8 @@ internal static class CppEmitter
                     Line("},");
                     Line("+[](ConstructionContext& construction, ObjectHandle object, const FieldValue& value) noexcept -> Result<void> {");
                     Line($"return detail::WriteGeneratedStagedField<{native}>(construction, object, {member}, value); }},");
-                    // Enum 필드는 정적 thunk의 enum native 키를 싣는다(등록이 value.type의 enum 레코드와 대조한다).
-                    EmitClassCodec(native, member, field.Kind == "Enum" ? $", NativeTypeKey<::{field.Reference}>()" : "", Line);
+                    // Enum 필드(Optional<enum> 포함)는 정적 thunk의 enum native 키를 싣는다(등록이 대상 enum 레코드와 대조한다).
+                    EmitClassCodec(native, member, field.TargetKind == "Enum" ? $", NativeTypeKey<::{field.Reference}>()" : "", Line);
                 }
 
                 Line("};");
@@ -382,6 +382,13 @@ internal static class CppEmitter
     // 다르면 RMC2304). 생성 static_assert가 import flags를 믿지 않고 원소 struct의 생성 형질로 다시 확인한다.
     private static void EmitElementStructAsserts(SchemaModel schema, ClassModel type, Action<string> Line)
     {
+        // Optional<S>의 S는 값 struct다(리플렉션 B9e — RMC2306). import flags를 믿지 않고 생성 형질로 다시 확인한다.
+        foreach (FieldModel field in type.Fields.Where(field => field.IsOptional && field.StructTarget))
+        {
+            string inner = $"GeneratedType<::{schema.Find(field.Reference!).NativeName}>";
+            Line($"static_assert(!{inner}::ContainsStrongReference, \"Optional field {field.Owner}::{field.Name} holds reference struct {field.Reference}; regenerate metadata (RMC2306)\");");
+        }
+
         foreach (FieldModel field in type.Fields.Where(field => field.IsArray && field.StructTarget))
         {
             string element = $"GeneratedType<::{schema.Find(field.Reference!).NativeName}>";
@@ -586,7 +593,8 @@ internal static class CppEmitter
     }
 
     // 클래스·struct 스키마의 필드 배열이다(필드가 없으면 내지 않는다). 배열 필드는 value가 {Array, 0}이고 원소 형식
-    // element(원소 대상 ID)와 maxElements를 더 싣는다(Docs/Design/ReflectionFoundations.ko.md 5.6절).
+    // element(원소 대상 ID)와 maxElements를 더 싣는다(Docs/Design/ReflectionFoundations.ko.md 5.6절). Optional 필드는 value가
+    // {Optional, 0}이고 내부 형식 element와 maxElements 0을 싣는다(ReflectionExtensions.ko.md 6절).
     private static void EmitFieldSchemas(ClassModel type, Action<string> Line)
     {
         if (type.Fields.Count == 0)
@@ -601,8 +609,8 @@ internal static class CppEmitter
             string kind = field.IsObjectReferenceFieldKind ? "ObjectReference" : "Value";
             string head = $"{{{GuidValue(field.Id)}, FieldKind::{kind}, {field.Flags}u, {View(field.Name)}, {{}}, ";
             string labels = $"{View(field.Spec.Category)}, {View(field.Spec.DisplayName)}, {View(field.Spec.ToolName)}";
-            Line(field.IsArray
-                ? $"{head}{{ValueKind::Array, Guid{{}}}}, {labels}, {{ValueKind::{field.ElementKind}, {GuidValue(targetId)}}}, {field.MaxElements}u}},"
+            Line(field.IsArray || field.IsOptional
+                ? $"{head}{{ValueKind::{field.Kind}, Guid{{}}}}, {labels}, {{ValueKind::{field.ElementKind}, {GuidValue(targetId)}}}, {field.MaxElements}u}},"
                 : $"{head}{{ValueKind::{field.Kind}, {GuidValue(targetId)}}}, {labels}}},");
         }
 

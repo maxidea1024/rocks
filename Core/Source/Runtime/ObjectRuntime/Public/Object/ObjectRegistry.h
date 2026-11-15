@@ -238,6 +238,27 @@ public:
         return options_.names;
     }
 
+    // 이 Registry가 객체 생성자에 주입하는 allocator(생성 때 받은 Allocator)다(리플렉션 B9e —
+    // Docs/Design/ReflectionExtensions.ko.md 1.7절). 값이 없던 필드 자리에 새 값을 만들 때 —
+    // Optional<String>·Optional<값 struct>를 unset에서 set으로 바꾸는 쓰기·경로 연산·복원 2단계,
+    // 뒤 단계의 InstancedStruct·Text — 객체의 다른 값과 같은 allocator로 만들어 그 값의 수명을
+    // 객체에 맞춘다(한 Registry의 객체 값이 다른 수명의 allocator 노드를 쥐지 않게).
+    //
+    // 수명: 반환 참조는 이 Registry 생성 때 받은 allocator 자체이며 Registry 계약상 Registry보다
+    // 오래 산다. 그 allocator로 만든 값은 객체 안에 두는 동안 객체(Registry) 수명을 따른다. 스레드:
+    // 접근자는 상태를 읽지 않으므로 어느 스레드에서나 부를 수 있다. 그 allocator로 객체 필드의 값을
+    // 만들고 바꾸는 일은 다른 Registry API와 같이 소유 스레드에서 한다(allocator 자체의 스레드
+    // 규칙은 그 Allocator 구현이다). 오류는 없다.
+    //
+    // 사용 예(Optional<String> 멤버를 unset에서 set으로 — 생성 코드 detail::WriteOptionalValue):
+    //   String replacement(registry.ObjectAllocator());
+    //   if (auto copied = replacement.TryAssign(text); !copied) {
+    //       return copied;
+    //   }
+    Allocator& ObjectAllocator() const noexcept {
+        return allocator_;
+    }
+
     // 호출 스레드와 access가 이 Registry의 소유 스레드·문맥인지 본다. 다른 API의 1단계 접근 검사와
     // 같다(소유 스레드가 아니면 WrongThread, 문맥이 다르면 WrongContext). Registry 상태를 읽거나
     // 바꾸지 않으므로 종료·재진입과 무관하다. Registry를 부르지 않을 수도 있는 소유 스레드 전용

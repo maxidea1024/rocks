@@ -24,19 +24,27 @@ namespace rocks {
 //                       진단으로 바꾼다)
 //   UnknownField      — FieldId 체인의 없는 필드(스키마가 바뀐 옛 경로, NotFound)
 //   NotArray          — 배열이 아닌 필드에 index(`[`)·길이·비우기(TypeMismatch)
-//   NotStruct         — struct가 아닌 값(index 없는 배열 포함) 뒤의 단계(`.`)(TypeMismatch)
+//   NotStruct         — struct가 아닌 값(index 없는 배열·단일 값 Optional 포함) 뒤의
+//                       단계(`.`)(TypeMismatch)
 //   IndexRequired     — 삽입·삭제의 마지막 단계에 index가 없음(InvalidArgument)
 //   IndexNotAllowed   — 길이·비우기의 마지막 단계에 index가 있음(InvalidArgument)
 //   IndexOutOfRange   — 원소 index가 범위 밖(InvalidArgument)
 //   InvalidValue      — 값 내용·종류(InvalidArgument — 값 종류나 enum ID가 필드와 다르면
 //                       TypeMismatch), 삽입 값 누락
 //   ReadOnly          — 유효 플래그(바깥 struct·배열 필드에서 전파)의 ReadOnly(Unsupported)
-//   AggregateValue    — struct·배열을 통째로 읽기·쓰기, struct 원소 삽입에 값·제거에 removed
-//                       (Unsupported, removed는 InvalidArgument)
+//   AggregateValue    — struct·배열·Optional<값 struct>를 통째로 읽기·쓰기, struct 원소 삽입에
+//                       값·제거에 removed(Unsupported, removed는 InvalidArgument)
 //   NoPathAccess      — 경로 thunk(또는 최상위 read·write)가 없는 필드·멤버, Opaque 필드로 끝나는
 //                       읽기·쓰기, previous를 요청했는데 최상위 필드에 read가 없음(Unsupported)
 //   TooManyElements   — 삽입 뒤 길이가 필드 MaxElements 초과(CapacityExceeded)
 //   StaticTypeMismatch — 생성 thunk의 정적 타입과 등록 스키마가 어긋남(TypeMismatch)
+//   OptionalUnset     — unset인 Optional<struct> 필드의 멤버로 들어가는 단계(NotFound — 리플렉션
+//                       B9e, 먼저 PathEmplaceOptional로 값을 만든다). 쓰기는 검증 지점이 thunk보다
+//                       먼저라 유효 플래그가 ReadOnly인 자리면 ReadOnly가 먼저다(읽기는
+//                       OptionalUnset)
+//   NotOptional       — PathEmplaceOptional·PathResetOptional·PathIsOptionalSet의 끝이 Optional<값
+//                       struct> 필드가 아님(TypeMismatch — 단일 값 Optional은 PathRead·PathWrite의
+//                       present로 다룬다)
 enum class PropertyPathError : uint8 {
     None,
     Syntax,
@@ -53,7 +61,9 @@ enum class PropertyPathError : uint8 {
     AggregateValue,
     NoPathAccess,
     TooManyElements,
-    StaticTypeMismatch
+    StaticTypeMismatch,
+    OptionalUnset,
+    NotOptional
 };
 
 // 경로 연산·문자열 해석의 실패 위치와 사유다. step은 실패한 단계의 index다: 경로 연산에서 문맥·
@@ -82,7 +92,8 @@ struct PropertyPathBuffer {
 };
 
 // 문자열 경로를 type(클래스 또는 struct lease)의 스키마로 해석해 out에 쓴다. 문법은
-// `name ('.' name | '[' index ']')*`이다: 이름은 ASCII 식별자이고 필드의 실효 도구 이름(toolName,
+// `name ('.' name | '[' index ']')*`이다(`.`는 struct 값 — struct 필드·struct 원소·Optional<값
+// struct> 필드 — 뒤에만 온다): 이름은 ASCII 식별자이고 필드의 실효 도구 이름(toolName,
 // 없으면 C++ 이름 — toolName이 있으면 C++ 이름은 받지 않는다)과 ASCII 대소문자 무시로 비교하며
 // Opaque 필드는 찾지 않는다. index는 정규 10진(앞자리 0은 `0` 하나만, 부호·공백·uint32 초과
 // 거부)이다. 파생 클래스 스키마는 상속 필드를 같은 ID로 담으므로 base lease로 해석한 경로를 파생
@@ -125,6 +136,12 @@ Result<void> FormatPropertyPath(const TypeLease& type, PropertyPath path, String
 //   컨테이너 API(SetReferenceAt·InsertReferenceAt·RemoveReferenceAt·ClearReferences),
 //   StructRefArray는 InsertElementAt·RemoveElementAt·ClearElements(원소 멤버는 멤버 단위)다.
 //   struct·배열을 통째로 읽거나 쓰면 Unsupported(AggregateValue)이고 Resize·원소 이동·복제는 없다.
+//   Optional 필드(리플렉션 B9e — Docs/Design/ReflectionExtensions.ko.md 6절)는 단일 값 내부면
+//   FieldValue(kind = 내부 종류, present = set 여부 — present = false 쓰기가 unset)로 읽고 쓰고,
+//   값 struct 내부면 aggregate다: PathEmplaceOptional·PathResetOptional로 값을 만들고 비우고
+//   PathIsOptionalSet으로 set 여부를 보며,
+//   멤버 경로(`opt.member`)는 set일 때만 닿는다(unset이면 NotFound(OptionalUnset)). 빈 자리에
+//   만드는 새 값(Optional의 String·struct)은 ObjectRegistry::ObjectAllocator로 만든다.
 // - 검증: 바깥 struct·배열 필드의 플래그를 PropagateFieldFlags로 누적한다 — ReadOnly는 멤버·원소
 //   쓰기와 삽입·삭제·비우기를 모두 막고(Unsupported), EditorOnly·Transient는 막지 않는다. 값 쓰기·
 //   단일 값 원소 삽입은 ValidateFieldWrite, 구조 변경은 ValidateArrayEdit를 지난다. 삽입 뒤 길이는
@@ -215,5 +232,54 @@ Result<void> PathRemoveElement(ObjectRegistry& registry, const ObjectAccessConte
 Result<void> PathClearArray(ObjectRegistry& registry, const ObjectAccessContext& access,
                             ObjectHandle handle, PropertyPath path,
                             PropertyPathFailure* failure = nullptr) noexcept;
+
+// path(마지막 단계는 Optional<값 struct> 필드 — index 없음)에 기본 값(S(Allocator&) 또는 S() —
+// ObjectRegistry::ObjectAllocator)을 만든다(리플렉션 B9e). 이미 set이면 기본 값으로 바꾼다(옛 값은
+// 게시 뒤 소멸). 새 값은 고정 아래 만들고 owner를 다시 확인한 뒤 무할당 이동으로 게시한다. 끝이
+// Optional<값 struct>가 아니면 TypeMismatch(NotOptional — 단일 값 Optional은 PathWrite), 유효
+// 플래그가 ReadOnly면 Unsupported(ReadOnly)다. 실패하면 대상은 바뀌지 않는다. 옛 값은 CU4가 연산 전
+// PathRead로 잎마다 만든다(Undo는 "PathResetOptional" 또는 "PathEmplaceOptional + 잎 쓰기").
+//
+// 사용 예:
+//   const PathStep steps[] = {{PreviewId}};
+//   auto made = PathEmplaceOptional(registry, access, mesh, PropertyPath{steps});
+//   // 이어서 preview.width 같은 멤버를 PathWrite로 쓴다
+Result<void> PathEmplaceOptional(ObjectRegistry& registry, const ObjectAccessContext& access,
+                                 ObjectHandle handle, PropertyPath path,
+                                 PropertyPathFailure* failure = nullptr) noexcept;
+
+// path(마지막 단계는 Optional<값 struct> 필드)를 unset으로 비운다(리플렉션 B9e — 이미 unset이면
+// 아무것도 하지 않는다). 옛 값은 게시 뒤 소멸한다. 오류는 PathEmplaceOptional과 같다(할당 없음).
+// 옛 값은 CU4가 연산 전 PathIsOptionalSet·PathRead로 잎마다 만든다(Undo는 "PathEmplaceOptional + 잎
+// 쓰기").
+//
+// 사용 예(asset-set의 --unset=preview):
+//   const PathStep steps[] = {{PreviewId}};
+//   if (auto cleared = PathResetOptional(registry, access, mesh, PropertyPath{steps}); !cleared) {
+//       return cleared;
+//   }
+Result<void> PathResetOptional(ObjectRegistry& registry, const ObjectAccessContext& access,
+                               ObjectHandle handle, PropertyPath path,
+                               PropertyPathFailure* failure = nullptr) noexcept;
+
+// path(마지막 단계는 Optional<값 struct> 필드)가 set인지 돌려준다(리플렉션 B9e — Docs/Design/
+// ReflectionExtensions.ko.md 6절). Optional<struct>는 통째 PathRead가 AggregateValue이고 멤버가
+// 없는 struct도 있으므로 set 여부는 이 조회로 얻는다: ReflectionText의 asset-info 출력(unset이면
+// `--unset=opt`, set이면 `opt={}`와 멤버 줄)과 CU4 Undo 기록이 쓴다. 단일 값 Optional은 PathRead의
+// FieldValue::present로 얻는다. 읽기라 owner를 바꾸지 않고 할당하지 않으며 encode 고정도 쥐지
+// 않는다. 반환: set이면 true. 오류: 끝이 Optional<값 struct>가 아니면 TypeMismatch(NotOptional),
+// 중간 단계의 unset Optional<struct>는 NotFound(OptionalUnset), 그 밖은 PathRead와 같다(유효 플래그
+// ReadOnly는 막지 않는다).
+//
+// 사용 예:
+//   auto set = PathIsOptionalSet(registry, access, mesh, path.View());
+//   if (!set) {
+//       return Result<void>::Failure(set.Error());
+//   }
+//
+//   if (!set.Value()) { /* --unset=preview 줄을 낸다 */ }
+Result<bool> PathIsOptionalSet(ObjectRegistry& registry, const ObjectAccessContext& access,
+                               ObjectHandle handle, PropertyPath path,
+                               PropertyPathFailure* failure = nullptr) noexcept;
 
 } // namespace rocks

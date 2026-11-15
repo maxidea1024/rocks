@@ -155,6 +155,12 @@ internal static class SchemaValidator
                 throw InvalidDescriptor(model, $"struct {model.Name} holds a struct that requires a WorldOnly owner but lacks the RequiresWorldOnlyOwner flag");
             }
 
+            // Optional<S>의 S는 값 struct다(원본 선언이면 RMC2306).
+            if (model.Fields.Any(field => field.IsOptional && field.StructTarget && Find(field.Reference!).ContainsStrongReference))
+            {
+                throw InvalidDescriptor(model, $"struct {model.Name} holds an Optional of a reference struct");
+            }
+
             // 형질은 descriptor flags로만 비교한다(멤버 struct의 형질도 그 항목의 flags) — import 순회 순서에 의존하지 않는다.
             if (ContainsReferenceArray(model, Find) != model.ContainsReferenceArray)
             {
@@ -163,9 +169,15 @@ internal static class SchemaValidator
         }
 
         // StructRefArray의 원소 struct(배열 필드의 원소 struct가 참조 struct)는 Registry 컨테이너를 담지 않는다(원소 블록이
-        // owner 저장소 밖이라 Registry가 그 컨테이너의 변경을 거부한다 — 이 모듈 선언이면 RMC2304).
+        // owner 저장소 밖이라 Registry가 그 컨테이너의 변경을 거부한다 — 이 모듈 선언이면 RMC2304). 클래스의 Optional<S>도 값 struct만
+        // 담는다(원본 선언이면 RMC2306).
         foreach (ClassModel external in imported.Values.Where(model => !model.IsEnum))
         {
+            if (!external.IsStruct && external.Fields.Any(field => field.IsOptional && field.StructTarget && Find(field.Reference!).ContainsStrongReference))
+            {
+                throw InvalidDescriptor(external, $"class {external.Name} holds an Optional of a reference struct");
+            }
+
             FieldModel? nested = external.Fields.FirstOrDefault(field => field.IsArray && field.StructTarget &&
                 Find(field.Reference!).ContainsStrongReference && Find(field.Reference!).ContainsReferenceArray);
             if (nested is not null)
@@ -208,7 +220,7 @@ internal static class SchemaValidator
 
             path.Add(model.Name);
             int depth = 1;
-            // struct 멤버와 struct 원소 배열 멤버(원소 깊이 + 1)가 간선이다.
+            // struct 멤버, struct 원소 배열 멤버(원소 깊이 + 1), Optional<struct> 멤버(내부 깊이 + 1 — 리플렉션 B9e)가 간선이다.
             foreach (FieldModel field in model.Fields.Where(field => field.StructTarget))
             {
                 depth = Math.Max(depth, 1 + Depth(find(field.Reference!)));
@@ -440,7 +452,7 @@ internal static class SchemaValidator
                 return $"Core value types are reflected by the {StructRules.BindingModule} module: depend on {StructRules.BindingModule} (add it to the module's RequiredModules) so its descriptor is imported.";
             }
 
-            return "Use a supported scalar, Guid, String, Name, AssetId, Sha256Digest, ROCKS_ENUM enum, ROCKS_STRUCT struct, ObjectRef, WeakRef, SoftObjectRef, ClassRef or rocks::Array/ObjectRefArray/StructRefArray field; raw pointers/other containers/cv-qualified fields need an explicit codec extension.";
+            return "Use a supported scalar, Guid, String, Name, AssetId, Sha256Digest, ROCKS_ENUM enum, ROCKS_STRUCT struct, ObjectRef, WeakRef, SoftObjectRef, ClassRef, rocks::Optional or rocks::Array/ObjectRefArray/StructRefArray field; raw pointers/other containers/cv-qualified fields need an explicit codec extension.";
         }
 
         // 단일 값 형식 철자 하나를 (값 종류, 대상 정규 이름, 대상 ID)로 푼다(필드와 Array<T> 원소가 같은 해석을 쓴다).
@@ -495,6 +507,13 @@ internal static class SchemaValidator
                 throw new MetadataException($"{symbol}: {container} element '{element}' is itself an array", "RMC2304", ArrayRules.ElementHint).At(field.Site);
             }
 
+            // Optional은 필드·멤버 자리에만 둔다(원소 위치는 컨테이너 쪽 코드 — Docs/Design/ReflectionExtensions.ko.md 15절).
+            if (OptionalRules.Inner(element) is not null)
+            {
+                throw new MetadataException($"{symbol}: {container} element '{element}' is an Optional", "RMC2304",
+                    "rocks::Optional<T> can only be a class field or struct member; store elements without Optional (a reference uses null, a ROCKS_STRUCT element can hold an Optional member).").At(field.Site);
+            }
+
             if (ArrayRules.IsCvQualified(element))
             {
                 throw new MetadataException($"{symbol}: cv-qualified array element '{element}' is unsupported",
@@ -536,6 +555,38 @@ internal static class SchemaValidator
             field.ReferenceId = value.ReferenceId;
         }
 
+        // Optional 필드의 내부를 푼다(리플렉션 B9e — Docs/Design/ReflectionExtensions.ko.md 6·15절). 내부는 단일 필드와 같은 해석이고
+        // 성질 표의 Optional 내부 종류여야 한다: 배열·중첩 Optional·참조(강한·weak·소프트·클래스)·지원하지 않는 형식·cv 내부는 RMC2306이다.
+        // 참조 struct 내부는 struct 형질을 계산한 뒤 CheckOptional이 RMC2306으로 거부한다.
+        void ResolveOptional(FieldModel field, string inner)
+        {
+            string symbol = $"{field.Owner}::{field.Name}";
+            field.Kind = OptionalRules.Optional;
+            field.ElementSpelling = inner;
+            string? reason = ArrayRules.IsContainer(inner) ? "is an array"
+                : OptionalRules.Inner(inner) is not null ? "is itself an Optional (Optionals do not nest)"
+                : ArrayRules.IsCvQualified(inner) ? "is cv-qualified" : null;
+            if (reason is not null)
+            {
+                throw new MetadataException($"{symbol}: Optional inner type '{inner}' {reason}", "RMC2306", OptionalRules.InnerHint).At(field.Site);
+            }
+
+            if (ResolveValue(inner, field.Owner, field.Site) is not { } value)
+            {
+                throw new MetadataException($"{symbol}: unsupported Optional inner type '{inner}'", "RMC2306",
+                    OptionalRules.InnerHint + " " + UnsupportedFieldHint(inner)).At(field.Site);
+            }
+
+            if (!ValueKindTable.Has(value.Kind, ValueKindProperty.OptionalInner))
+            {
+                throw new MetadataException($"{symbol}: {value.Kind} cannot be an Optional inner type", "RMC2306", OptionalRules.InnerHint).At(field.Site);
+            }
+
+            field.ElementKind = value.Kind;
+            field.Reference = value.Reference;
+            field.ReferenceId = value.ReferenceId;
+        }
+
         foreach (ClassModel model in classes.Values.Where(model => !model.IsEnum))
         {
             if (!model.IsStruct)
@@ -545,7 +596,11 @@ internal static class SchemaValidator
 
             foreach (FieldModel field in model.OwnFields)
             {
-                if (ArrayRules.Split(field.NativeSpelling) is (string container, string element))
+                if (OptionalRules.Inner(field.NativeSpelling) is string inner)
+                {
+                    ResolveOptional(field, inner);
+                }
+                else if (ArrayRules.Split(field.NativeSpelling) is (string container, string element))
                 {
                     ResolveArray(field, container, element);
                 }
@@ -576,6 +631,12 @@ internal static class SchemaValidator
                 }
 
                 // 지정자를 그 필드 종류에 쓸 수 있는지 본다(RMC2202 — 종류를 먼저 판정하고 값 범위는 그 뒤에 본다).
+                if (field.Spec.Required && field.IsOptional)
+                {
+                    throw new MetadataException($"{field.Owner}::{field.Name}: Required cannot apply to an Optional field", "RMC2202",
+                        "Remove Required; an unset Optional is a valid value (use a non-Optional field when the value must always exist).").At(field.Site);
+                }
+
                 if (field.Spec.Required && !field.AcceptsRequired)
                 {
                     // WeakRef는 대상이 죽으면 저절로 null이 되므로 Required를 지킬 수 없다(Docs/Design/ReflectionExtensions.ko.md 5.1절).
@@ -668,8 +729,19 @@ internal static class SchemaValidator
             }
         }
 
-        // struct: 필드 목록 → 순환·깊이(DFS, Order·생성 전 — PROPERTY struct 멤버·struct 원소 배열 멤버) → 순위(PROPERTY·
-        // NATIVE struct 멤버와 원소 struct) → 형질(쓰는 struct가 먼저 계산되도록 순위 순)·컨테이너 대조.
+        // Optional<S>의 S는 값 struct다(강한 참조를 담는 struct는 null이 이미 "없음"이고 Optional 안의 간선은 GC·관찰자 계수가 따라가지
+        // 않는다 — RMC2306, 런타임 등록도 거부한다). S의 형질을 계산한 뒤에 본다.
+        void CheckOptional(FieldModel field)
+        {
+            if (field.IsOptional && field.StructTarget && Find(field.Reference!).ContainsStrongReference)
+            {
+                throw new MetadataException($"{field.Owner}::{field.Name}: Optional inner struct {field.Reference} holds strong object references", "RMC2306",
+                    OptionalRules.InnerHint).At(field.Site);
+            }
+        }
+
+        // struct: 필드 목록 → 순환·깊이(DFS, Order·생성 전 — PROPERTY struct 멤버·struct 원소 배열 멤버·Optional<struct> 멤버) → 순위
+        // (PROPERTY·NATIVE struct 멤버와 원소·내부 struct) → 형질(쓰는 struct가 먼저 계산되도록 순위 순)·컨테이너 대조.
         ClassModel[] structs = classes.Values.Where(model => model.IsStruct).OrderBy(model => model.Name, StringComparer.Ordinal).ToArray();
         foreach (ClassModel model in structs)
         {
@@ -692,6 +764,7 @@ internal static class SchemaValidator
             model.ContainsReferenceArray = ContainsReferenceArray(model, Find);
             foreach (FieldModel field in model.OwnFields)
             {
+                CheckOptional(field);
                 CheckContainer(field);
             }
         }
@@ -700,6 +773,7 @@ internal static class SchemaValidator
         {
             foreach (FieldModel field in model.OwnFields)
             {
+                CheckOptional(field);
                 CheckContainer(field);
             }
         }

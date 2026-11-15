@@ -31,12 +31,13 @@ internal sealed class FieldModel
 
     public required PropertySpec Spec { get; init; }
 
-    // 값 종류(ValueKind 이름)다. 배열 필드는 "Array"이고 원소 종류는 ElementKind다.
+    // 값 종류(ValueKind 이름)다. 배열 필드는 "Array", Optional 필드는 "Optional"이고 원소·내부 종류는 ElementKind다.
     public string Kind { get; set; } = "Opaque";
 
-    // 배열 필드(Kind "Array")의 원소 값 종류다(배열이 아니면 null). 배열의 value.type은 항상 0이므로 원소의 대상
-    // (enum·struct·참조 대상)은 Reference·ReferenceId에 둔다(Docs/Design/ReflectionFoundations.ko.md 5.6절 —
-    // 대상을 찾는 지점이 배열에서 null 역참조나 조용한 건너뜀이 되지 않게 별도 칸을 두지 않는다).
+    // 배열 필드(Kind "Array")의 원소 값 종류, Optional 필드(Kind "Optional" — 리플렉션 B9e)의 내부 값 종류다(그 밖은 null).
+    // 배열·Optional의 value.type은 항상 0이므로 원소·내부의 대상(enum·struct·참조 대상)은 Reference·ReferenceId에 둔다
+    // (Docs/Design/ReflectionFoundations.ko.md 5.6절 — 대상을 찾는 지점이 배열에서 null 역참조나 조용한 건너뜀이 되지 않게
+    // 별도 칸을 두지 않는다).
     public string? ElementKind { get; set; }
 
     // 배열 필드의 길이 상한이다(MaxElements 지정자, 없으면 ArrayRules.DefaultMaxElements). 배열이 아니면 0이다.
@@ -48,7 +49,7 @@ internal sealed class FieldModel
     // 종류와 원소 struct 형질로 복원한다).
     public string? SpelledContainer { get; set; }
 
-    // 이 모듈 배열 필드의 원소 C++ 철자다(진단용, 그 밖은 "").
+    // 이 모듈 배열 필드의 원소·Optional 필드의 내부 C++ 철자다(진단용, 그 밖은 "").
     public string ElementSpelling { get; set; } = "";
 
     // 이 모듈 안에서 해석한 참조 대상의 정규 이름이다(rocks::Object 포함, 배열이면 원소의 대상). import 필드는
@@ -68,8 +69,15 @@ internal sealed class FieldModel
     // 배열 필드(Array·ObjectRefArray·StructRefArray)다.
     public bool IsArray => Kind == "Array";
 
-    // 필드 값의 대상 종류다: 배열이면 원소 종류, 아니면 값 종류(런타임 FieldTargetType과 같은 규칙).
-    public string TargetKind => IsArray ? ElementKind ?? "Opaque" : Kind;
+    // Optional<T> 필드다(리플렉션 B9e — Docs/Design/ReflectionExtensions.ko.md 6절).
+    public bool IsOptional => Kind == OptionalRules.Optional;
+
+    // FieldValue로 통째 읽고 쓰지 않는 필드다(런타임 FieldIsAggregate와 같은 규칙): struct 값, 배열, 값 struct 내부의 Optional.
+    // 생성 함수표는 read·write·writeStaged 없이 codec과 경로 thunk를 싣는다.
+    public bool IsAggregate => IsStruct || IsArray || (IsOptional && ElementKind == "Struct");
+
+    // 필드 값의 대상 종류다: 배열이면 원소 종류, Optional이면 내부 종류, 아니면 값 종류(런타임 FieldTargetType과 같은 규칙).
+    public string TargetKind => IsArray || IsOptional ? ElementKind ?? "Opaque" : Kind;
 
     // struct 필드이거나 struct 원소 배열이다(깊이·순위·형질·생성 헤더 include의 간선).
     public bool StructTarget => TargetKind == "Struct";
@@ -83,6 +91,8 @@ internal sealed class FieldModel
     public bool HasTargetType => ValueKindTable.Has(TargetKind, ValueKindProperty.HasTargetType);
 
     // Required를 쓸 수 있는 종류다(성질 표 AcceptsRequired): 강한 참조와 소프트 참조, 그리고 그 원소의 배열(원소마다 non-null).
+    // Optional은 대상 종류가 내부 종류이고 Optional 내부 종류는 모두 Required를 받지 않는다(성질 표 불변식 — ToolTests
+    // Meta.ValueKindTableMatchesRuntime). 원본 선언은 SchemaValidator가 Optional 전용 문구로 먼저 거부한다.
     public bool AcceptsRequired => ValueKindTable.Has(TargetKind, ValueKindProperty.AcceptsRequired);
 
     // 배열 필드의 컨테이너다(저장하지 않는 파생 속성 — Docs/Design/ReflectionFoundations.ko.md 5.6절): 원소가
@@ -217,6 +227,44 @@ internal static class ArrayRules
 
         return false;
     }
+}
+
+// 리플렉션 Optional 필드 규칙을 한 곳에 둔다(리플렉션 B9e — Docs/Design/ReflectionExtensions.ko.md 6절). Optional<T>는 클래스
+// 필드·struct 멤버에만 두고 내부 T는 성질 표의 Optional 내부 종류(단일 값·String·Name·enum·값 struct)다.
+internal static class OptionalRules
+{
+    public const string Optional = "Optional";
+
+    // spelling이 rocks::Optional<…>(desugar 철자, 앞의 :: 허용)이면 내부 철자를 돌려준다(아니면 null). 꺾쇠 깊이로 닫는 꺾쇠가
+    // 철자 끝인지 본다(rocks::Optional<int>::Inner 같은 중첩 이름이 아니게). Optional의 템플릿 인자는 하나다.
+    public static string? Inner(string spelling)
+    {
+        string text = spelling.Trim();
+        text = text.StartsWith("::", StringComparison.Ordinal) ? text[2..] : text;
+        const string template = "rocks::Optional<";
+        if (!text.StartsWith(template, StringComparison.Ordinal) || !text.EndsWith('>'))
+        {
+            return null;
+        }
+
+        int depth = 0;
+        for (int index = template.Length - 1; index < text.Length; ++index)
+        {
+            char c = text[index];
+            depth += c is '<' or '(' or '[' ? 1 : c is '>' or ')' or ']' ? -1 : 0;
+            if (depth == 0)
+            {
+                return index == text.Length - 1 ? text[template.Length..index].Trim() : null;
+            }
+        }
+
+        return null;
+    }
+
+    // RMC2306 진단의 공통 안내다.
+    public const string InnerHint =
+        "rocks::Optional<T> holds a scalar, Guid, String, Name, AssetId, Sha256Digest, ROCKS_ENUM enum or a ROCKS_STRUCT without strong references; " +
+        "references already use null for 'none', and containers or nested Optionals cannot be wrapped.";
 }
 
 // enum 규칙을 한 곳에 둔다. 파서·descriptor·생성기가 같이 쓰며 런타임 TypeRegistry::RegisterEnum과 같은 규칙이다.

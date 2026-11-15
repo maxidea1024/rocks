@@ -131,7 +131,28 @@ internal static partial class ModuleMetaTests
                 ("requiredScalarArray", "RMC1000", "Required on a field that is not an object, soft object or class reference or an array of them", parent => FieldNode(parent, "modes")["flags"] = new System.Text.Json.Nodes.JsonArray("Required")),
                 ("enumElementToStruct", "RMC1000", "targets probe::SA, which is not a reflected enum", parent => FieldNode(parent, "modes")["element"] = Element("Enum", saId)),
                 ("referenceElementToStruct", "RMC1000", "reference field probe::Parent::links targets struct probe::SA", parent => FieldNode(parent, "links")["element"] = Element("ObjectReference", saId)),
-                ("unknownElementStruct", "RMC2003", "not in an imported descriptor", parent => FieldNode(parent, "slots")["element"] = Element("Struct", "0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c01"))
+                ("unknownElementStruct", "RMC2003", "not in an imported descriptor", parent => FieldNode(parent, "slots")["element"] = Element("Struct", "0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c01")),
+                // 리플렉션 B9e: Optional 필드는 element가 내부 형식(Optional 내부 종류)이고 maxElements 0, Required를 받지 않는다.
+                ("optionalMaxElements", "RMC1000", "of an Optional field", parent => FieldNode(parent, "modes")["value"] = Element("Optional")),
+                ("optionalWithoutElement", "RMC1000", "element of an Optional field", parent =>
+                {
+                    System.Text.Json.Nodes.JsonObject field = FieldNode(parent, "modes");
+                    field["value"] = Element("Optional");
+                    field["element"] = null;
+                }),
+                ("optionalReferenceInner", "RMC1000", "Optional inner kind ObjectReference", parent =>
+                {
+                    System.Text.Json.Nodes.JsonObject field = FieldNode(parent, "links");
+                    field["value"] = Element("Optional");
+                    field["maxElements"] = 0;
+                }),
+                ("optionalRequired", "RMC1000", "Required on a field that is not an object, soft object or class reference or an array of them", parent =>
+                {
+                    System.Text.Json.Nodes.JsonObject field = FieldNode(parent, "modes");
+                    field["value"] = Element("Optional");
+                    field["maxElements"] = 0;
+                    field["flags"] = new System.Text.Json.Nodes.JsonArray("Required");
+                })
             })
             {
                 string mutated = layout.Generated("Mutated", name + ".rocksmeta.json");

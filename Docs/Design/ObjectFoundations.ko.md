@@ -198,7 +198,7 @@ const RegistryPolicy& ObjectRegistry::Policy() const noexcept;   // 생성 뒤 �
 - 패키지 정책 Registry의 `RequestDestroy`·`Object::Destroy`는 관찰자 유무와 무관하게 Unsupported다(A0-Ob, 11절 결정 1) — "소속 객체는 Discard로만 죽는다"(1.7절)가 정책 전체의 불변식이다. 판정 위치는 접근 검사(WrongThread·WrongContext) 바로 다음이다(정적인 Registry 성질이라 종료·재진입·handle보다 먼저 — 구현에서 정함). 관찰자는 패키지 정책 Registry에만 붙는다(Registry 생성자가 정책 없음·이미 붙은 관찰자를 Fatal로 거부하고, 소멸자가 떼어 낸다. 붙은 채 관찰자가 소멸하면 Fatal).
 - **후속 자리(World 정책)**: `RegistryPolicy::worldOnlyCreationKey`(불투명 키 — World API만 가진 키를 Create에 함께 줄 때만 WorldOnly 타입 생성을 허용)로 EngineRuntime 4절 134행 "World registry의 외부 생성 거부"를 구현한다. A0-O는 이름과 뜻만 정하고 구현은 World 정책 단계다(EngineRuntime 134행을 이 절로 연결 — 12절).
 
-리플렉션 B9 연결: [리플렉션 B9](ReflectionExtensions.ko.md)가 `RegistryOptions::names`(NamePool 빌림 — Registry보다 오래 살아야 한다, Name 필드의 intern·조회. B9c2 구현 — 없으면 Name 필드에 None만 둘 수 있다)와 객체 allocator 공개 조회 `ObjectRegistry::ObjectAllocator()`·`ConstructionContext::ObjectAllocator()`(Optional·InstancedStruct·Text 값 생성)를 더한다(ReflectionExtensions 4·1.7절).
+리플렉션 B9 연결: [리플렉션 B9](ReflectionExtensions.ko.md)가 `RegistryOptions::names`(NamePool 빌림 — Registry보다 오래 살아야 한다, Name 필드의 intern·조회. B9c2 구현 — 없으면 Name 필드에 None만 둘 수 있다)와 객체 allocator 공개 조회 `ObjectRegistry::ObjectAllocator()`·`ConstructionContext::ObjectAllocator()`(Optional·InstancedStruct·Text 값 생성 — B9e 구현: 생성 때 받은 allocator 자체, 수명은 Registry와 같고 그 allocator로 객체 값을 만들고 바꾸는 일은 소유 스레드)를 더한다(ReflectionExtensions 4·1.7절).
 
 ### 1.4 자료구조(`ObjectRegistry.cpp` 내부)
 

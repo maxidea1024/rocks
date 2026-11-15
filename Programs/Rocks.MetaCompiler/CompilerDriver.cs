@@ -347,12 +347,14 @@ internal static class CompilerDriver
         Console.WriteLine($"Rocks metadata: module {options.Module}: {schema.Ordered.Count} types; {(options.Check ? "checked" : "generated")}");
     }
 
-    // 첫 Clang 실행의 rocks::Array 인스턴스화 실패를 배열 원소 진단으로 바꾼다(Docs/Design/ReflectionFoundations.ko.md 5.6절
-    // MetaCompiler). Array<ObjectRef<T>>·Array<참조 struct>·Array<ObjectRefArray를 담은 struct>는 멤버 선언에서 Array가
-    // 인스턴스화되며 nothrow-move static_assert로 Clang이 먼저 실패한다 — 오류의 주 위치는 Core의 Array.h이고 멤버 선언은
-    // 딸린 note에만 나온다. 첫 error가 Array.h에 있고 그 note 중 이 모듈 입력 헤더 안의 첫 위치를 실패한 AST(오류가 있어도
-    // stdout에 나온다)에서 찾았으며, 그 원소(NATIVE는 필드 형식 전체)가 NATIVE 재귀 검사와 같은 규칙으로 강한 참조를 담을
-    // 때만 바꾼다: PROPERTY 필드면 RMC2304(cv 원소면 RMC2000), NATIVE 멤버면 RMC2205, 둘 다 붙었으면 RMC2204다. 그 밖(참조
+    // 첫 Clang 실행의 rocks::Array·rocks::Optional 인스턴스화 실패를 원소·내부 진단으로 바꾼다(Docs/Design/
+    // ReflectionFoundations.ko.md 5.6절 MetaCompiler, ReflectionExtensions.ko.md 6·15절). Array<ObjectRef<T>>·Array<참조
+    // struct>·Array<ObjectRefArray를 담은 struct>와 Optional<ObjectRef<T>>·Optional<참조 struct>는 멤버 선언에서 컨테이너가
+    // 인스턴스화되며 nothrow-move static_assert로 Clang이 먼저 실패한다 — 오류의 주 위치는 Core의 Array.h·Optional.h이고 멤버
+    // 선언은 딸린 note에만 나온다. 첫 error가 그 헤더에 있고 그 note 중 이 모듈 입력 헤더 안의 첫 위치를 실패한 AST(오류가 있어도
+    // stdout에 나온다)에서 찾았으며, 그 원소·내부(NATIVE는 필드 형식 전체)가 NATIVE 재귀 검사와 같은 규칙으로 강한 참조를 담을
+    // 때만 바꾼다: PROPERTY 필드면 Array는 RMC2304(cv 원소면 RMC2000)·Optional은 RMC2306, NATIVE 멤버면 RMC2205, 둘 다
+    // 붙었으면 RMC2204다. 그 밖(참조
     // 없는 원소의 이동·소멸 noexcept 위반 등)이나 보조 조회가 어떤 이유로든 실패하면 null이다 — 호출자가 Clang 원문을 담은
     // RMC3000을 낸다(보조 진단이 원래 오류를 가리지 않게). 진단 문구(지역화될 수 있다)는 보지 않고 위치·심각도 형식만 해석한다.
     private static MetadataException? ArrayElementFailure(ProcessResult compiled, IReadOnlyList<ModuleInput> inputs, string root)
@@ -381,7 +383,7 @@ internal static class CompilerDriver
             return found;
         }
 
-        if (ArrayInstantiationSite(compiled.StdErr, root, IsInput) is not (string file, int line, int column))
+        if (ContainerInstantiationSite(compiled.StdErr, root, IsInput) is not (string file, int line, int column, bool optional))
         {
             return null;
         }
@@ -404,13 +406,20 @@ internal static class CompilerDriver
             return null;
         }
 
-        string element = ArrayRules.Split(found.Spelling) is (_, string inner) ? inner : found.Spelling;
         if (found.Native)
         {
             return new MetadataException($"{found.Symbol}: ROCKS_NATIVE member '{found.Spelling}' holds a strong object reference ({found.StrongPath})", "RMC2205",
                 "Native members are not traced; store ObjectRef/RootRef/Object pointers in ROCKS_PROPERTY fields (ObjectRefArray, StructRefArray) or use WeakRef/ObjectHandle.").At(found.Site);
         }
 
+        if (optional)
+        {
+            string inner = OptionalRules.Inner(found.Spelling) ?? found.Spelling;
+            return new MetadataException($"{found.Symbol}: Optional inner type '{inner}' holds a strong object reference ({found.StrongPath}) and cannot be an Optional inner type",
+                "RMC2306", OptionalRules.InnerHint).At(found.Site);
+        }
+
+        string element = ArrayRules.Split(found.Spelling) is (_, string arrayElement) ? arrayElement : found.Spelling;
         if (ArrayRules.IsCvQualified(element))
         {
             return new MetadataException($"{found.Symbol}: cv-qualified array element '{element}' is unsupported",
@@ -422,11 +431,18 @@ internal static class CompilerDriver
     }
 
     // Clang 진단의 첫 error가 Core Array.h에 있으면 그 error에 딸린 note 중 isInput 파일에 있는 첫 위치를 찾는다(없으면
-    // null). clang의 `file:line:col: note:`와 clang-cl의 `file(line,col): note:` 형식을 모두 해석하고, 상대 경로는 Clang
-    // 작업 디렉터리(root) 기준이다. note가 아닌 줄(warning 포함)은 앞 묶음을 끝내고, 첫 error가 Array.h가 아니면 바꾸지 않는다.
-    internal static (string File, int Line, int Column)? ArrayInstantiationSite(string diagnostics, string root, Func<string, bool> isInput)
+    // null — Optional.h의 실패도 null이다). 규칙은 ContainerInstantiationSite다.
+    internal static (string File, int Line, int Column)? ArrayInstantiationSite(string diagnostics, string root, Func<string, bool> isInput) =>
+        ContainerInstantiationSite(diagnostics, root, isInput) is (string file, int line, int column, false) ? (file, line, column) : null;
+
+    // Clang 진단의 첫 error가 Core Array.h 또는 Optional.h에 있으면 그 error에 딸린 note 중 isInput 파일에 있는 첫 위치와 Optional.h
+    // 인지(Optional)를 찾는다(없으면 null). clang의 `file:line:col: note:`와 clang-cl의 `file(line,col): note:` 형식을 모두
+    // 해석하고, 상대 경로는 Clang 작업 디렉터리(root) 기준이다. note가 아닌 줄(warning 포함)은 앞 묶음을 끝내고, 첫 error가 두
+    // 헤더가 아니면 바꾸지 않는다.
+    internal static (string File, int Line, int Column, bool Optional)? ContainerInstantiationSite(string diagnostics, string root, Func<string, bool> isInput)
     {
         bool arrayError = false;
+        bool optionalError = false;
         bool sawError = false;
         foreach (string raw in diagnostics.Split('\n'))
         {
@@ -453,7 +469,9 @@ internal static class CompilerDriver
                 }
 
                 string normalized = file.Replace('\\', '/');
-                arrayError = error && normalized.EndsWith("/Core/Containers/Array.h", OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+                StringComparison comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+                optionalError = error && normalized.EndsWith("/Core/Optional.h", comparison);
+                arrayError = error && (optionalError || normalized.EndsWith("/Core/Containers/Array.h", comparison));
                 sawError |= error;
                 if (error && !arrayError)
                 {
@@ -476,7 +494,7 @@ internal static class CompilerDriver
 
             if (isInput(path))
             {
-                return (Path.GetFullPath(path), line, column);
+                return (Path.GetFullPath(path), line, column, optionalError);
             }
         }
 

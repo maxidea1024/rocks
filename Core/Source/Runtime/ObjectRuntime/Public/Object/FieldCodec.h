@@ -13,8 +13,8 @@
 // (Object/FieldCodecPolicy.h), 공통 기반 FieldCodecContext와 위치 scope
 // (Object/FieldCodecContext.h), 저장 문맥(Object/FieldEncodeContext.h). 이 헤더에는 복원 문맥
 // (FieldDecodeContext), Record 스택 scope(RecordScope), StructRefArray 원소 scope
-// (StructElementScope)와 사슬의 out-of-line inline 정의(PushRecord·BuildPath·Report·
-// CollectSoftReference)가 있다.
+// (StructElementScope)와 사슬의 out-of-line inline 정의(OpenRecordBytes·PushRecord·BuildPath·
+// Report·CollectSoftReference)가 있다.
 namespace rocks {
 
 // 복원 문맥이다(그래프 복원이 1단계·2단계로 구현한다).
@@ -70,6 +70,26 @@ public:
     // 마이그레이션 결과 Record를 정확히 version으로 열어 Record 스택에 넣는다(아니면 Unsupported).
     virtual Result<RecordScope> OpenMigratedRecord(Span<const uint8> record, TypeId expected,
                                                    uint32 version) noexcept = 0;
+
+    // 필드 값 안에 놓인 Record 내용(Optional<값 struct>의 내부 — OptionalWireReader::RecordBytes,
+    // 리플렉션 B9e. 뒤 단계의 Map 값·InstancedStruct도 같다)을 Record 스택에 넣는다(Docs/Design/
+    // ReflectionExtensions.ko.md 1.2절 "구현(B9a3)에서 정한 점"). record는 지금 위치의 필드 payload
+    // 안을 빌린 범위다. 직렬화기 구현 규칙:
+    // - 1단계: 맨 위(없으면 객체) Record의 RecordReader::OpenNestedRecord(공유 예산 — 색인만 청구,
+    //   필드 수 한도는 남은 그래프 누계)와 AddFields. 맨 위 Record가 없으면(최상위 필드) 2단계가
+    //   단독 reader로 다시 열며 청구할 몫(Optional 내용 넘기기와 단독 Record Open — record byte의
+    //   두 배)을 미리 청구한다("1단계 청구가 2단계 몫을 덮는다").
+    // - 2단계: 스택이 비면 같은 버전 범위·크기 한도·무제한 operation·work의 단독 Record Open
+    //   (RecordReader::Open), 있으면 맨 위의 OpenNestedRecord.
+    // 오류는 OpenRecord와 같다(범위 밖·빈 범위·버전 0 InvalidArgument, 범위 밖 버전 Unsupported,
+    // schema 불일치 TypeMismatch, 필드 수 초과 CapacityExceeded). 기본은 Unsupported다(Record
+    // 내용을 지원하지 않는 문맥 — 정의는 RecordScope 뒤).
+    //
+    // 사용 예(Optional<struct> codec):
+    //   auto scope = context.OpenRecordBytes(optional.RecordBytes(), structId, 1,
+    //                                        NumericLimits<uint32>::Max());
+    virtual Result<RecordScope> OpenRecordBytes(Span<const uint8> record, TypeId expected,
+                                                uint32 minVersion, uint32 maxVersion) noexcept;
 
     // 단일 값 원소 배열 필드(wire ValueArray)를 연다(Docs/Design/ReflectionFoundations.ko.md
     // 5.6절): wire가 ValueArray가 아니면 TypeMismatch, 그 뒤 OpenValue로 연 payload를
@@ -359,6 +379,16 @@ private:
     FieldDecodeContext& context_;
     detail::StructElementLocation location_;
 };
+
+inline Result<RecordScope> FieldDecodeContext::OpenRecordBytes(Span<const uint8> record,
+                                                               TypeId expected, uint32 minVersion,
+                                                               uint32 maxVersion) noexcept {
+    (void)record;
+    (void)expected;
+    (void)minVersion;
+    (void)maxVersion;
+    return Result<RecordScope>::Failure(ErrorCode::Unsupported);
+}
 
 inline Result<RecordScope> FieldDecodeContext::PushRecord(RecordReader&& reader) noexcept {
     if (depth_ == MaxRecordDepth) {

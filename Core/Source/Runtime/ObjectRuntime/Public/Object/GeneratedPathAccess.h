@@ -32,13 +32,7 @@ Result<void> SetPathMemberReference(PathCursor& cursor, ObjectRef<T>& field,
 // 원소의 기본 원소 — MakeRuntimeStructOps와 같은 규칙).
 template <class E>
 E MakePathElement(Allocator& allocator) noexcept {
-    if constexpr (__is_constructible(E, Allocator&)) {
-        static_assert(__is_nothrow_constructible(E, Allocator&));
-        return E(allocator);
-    } else {
-        static_assert(__is_nothrow_constructible(E));
-        return E();
-    }
+    return MakeAllocatedValue<E>(allocator);
 }
 
 // 지금 단계의 struct 값(struct 필드·멤버 또는 struct 원소)으로 내려간다: 등록 struct의 native 키와
@@ -463,18 +457,169 @@ Result<void> PathContainer(PathCursor& cursor, StructRefArray<S>& array) noexcep
     }
 }
 
-// 필드·멤버 값 하나(member — Member 형식)의 단계다: 정적 대조(대상 종류·배열 여부·enum ID) 뒤
-// 컨테이너, struct(내려가기), 단일 값 끝 지점으로 나눈다.
+// Optional<값 struct> 필드·멤버의 단계다(리플렉션 B9e): 먼저 내부 struct를 정적 대조하고, 끝이
+// 아니면 set일 때만 내부 값으로 내려간다(unset이면 NotFound(OptionalUnset)). 끝 단계는 기본 값
+// 만들기(고정 아래 객체 allocator로 새 값을 만들고 owner를 다시 확인한 뒤 옛 값을 지역으로 옮겨
+// 무할당 이동으로 게시 — 옛 값은 고정을 푼 뒤 소멸)와 비우기(옛 값을 지역으로 옮겨 비운 뒤 게시 뒤
+// 소멸)이고, 통째 읽기·쓰기는 AggregateValue다.
+template <class S>
+Result<void> PathOptionalStruct(PathCursor& cursor, Optional<S>& member) noexcept {
+    if (auto checked = cursor.CheckStruct(NativeTypeKey<S>()); !checked) {
+        return checked;
+    }
+
+    if (!cursor.IsLast()) {
+        if (!member.HasValue()) {
+            return cursor.Fail(ErrorCode::NotFound, PropertyPathError::OptionalUnset);
+        }
+
+        return cursor.Descend(&member.Value());
+    }
+
+    switch (cursor.Operation()) {
+    case PathOperation::EmplaceOptional: {
+        if (auto pinned = cursor.Pin(); !pinned) {
+            return pinned;
+        }
+
+        S created = MakeAllocatedValue<S>(cursor.Registry().ObjectAllocator());
+        if (auto alive = cursor.CheckOwner(); !alive) {
+            return alive;
+        }
+
+        Optional<S> previous(Move(member));
+        member.Reset();
+        member.Emplace(Move(created));
+        cursor.ReleasePin();
+        return Result<void>::Success();
+    }
+    case PathOperation::ResetOptional: {
+        Optional<S> previous(Move(member));
+        member.Reset();
+        return Result<void>::Success();
+    }
+    case PathOperation::QueryOptional:
+        cursor.SetLength(member.HasValue() ? 1 : 0);
+        return Result<void>::Success();
+    default:
+        return cursor.Fail(ErrorCode::Unsupported, PropertyPathError::AggregateValue);
+    }
+}
+
+// 단일 값 Optional 필드·멤버(struct 멤버 — 최상위 필드는 등록된 read·write)의 끝 지점이다(리플렉션
+// B9e). 읽기는 kind = Target, present = set 여부(unset이면 값 칸 기본값, enum이면 type만 그 enum
+// ID). 쓰기는 검증 지점(ValidateFieldWrite)을 지난 값으로: previous가 있으면 옛 값(String은
+// previous의 allocator로 고정 아래 복사), present = false면 옛 값을 지역으로 옮겨 비우고, 참이면
+// String은 고정 아래 새 값(set이면 그 값의 allocator, unset이면 객체 allocator)을 만들고 owner를
+// 다시 확인한 뒤 Swap·이동으로, 그 밖은 WriteTargetValue로 만든 새 값을 대입한다. 옛 값·버퍼는
+// 고정을 푼 뒤 반환한다.
+template <ValueKind Target, class T>
+Result<void> PathOptionalValue(PathCursor& cursor, Optional<T>& member) noexcept {
+    if (!cursor.IsLast()) {
+        return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::NotStruct);
+    }
+
+    const PathOperation operation = cursor.Operation();
+    if (operation != PathOperation::Read && operation != PathOperation::Write) {
+        return cursor.Fail(ErrorCode::InvalidArgument);
+    }
+
+    // 옛 값(읽기면 결과)을 담는다.
+    FieldValue* output = cursor.Output();
+    const bool read = operation == PathOperation::Read;
+    FieldValue captured(output ? output->GetAllocator() : cursor.Input()->GetAllocator());
+    if (output) {
+        captured.kind = Target;
+        captured.present = member.HasValue();
+        if (member.HasValue()) {
+            if constexpr (Target == ValueKind::Utf8String) {
+                // Read는 처음부터 고정을 쥔다. 쓰기의 previous 복사도 고정 아래 한다.
+                if (auto pinned = cursor.Pin(); !pinned) {
+                    return pinned;
+                }
+            }
+
+            if (auto copied = CopyTargetValue<Target>(member.Value(), captured); !copied) {
+                return cursor.Fail(copied.Error());
+            }
+        } else if constexpr (Target == ValueKind::Enum) {
+            captured.type = GeneratedType<T>::Id();
+        }
+    }
+
+    if (read) {
+        return cursor.PublishRead(captured);
+    }
+
+    const FieldValue& input = *cursor.Input();
+    if (!input.present) {
+        if (auto alive = cursor.CheckOwner(); !alive) {
+            return alive;
+        }
+
+        Optional<T> previous(Move(member));
+        member.Reset();
+        cursor.ReleasePin();
+        cursor.PublishOutput(captured);
+        return Result<void>::Success();
+    }
+
+    if constexpr (Target == ValueKind::Utf8String) {
+        if (auto pinned = cursor.Pin(); !pinned) {
+            return pinned;
+        }
+
+        String replacement(member.HasValue() ? member.Value().GetAllocator()
+                                             : cursor.Registry().ObjectAllocator());
+        if (auto copied = replacement.TryAssign(input.string.View()); !copied) {
+            return cursor.Fail(copied.Error());
+        }
+
+        if (auto alive = cursor.CheckOwner(); !alive) {
+            return alive;
+        }
+
+        if (member.HasValue()) {
+            member.Value().Swap(replacement);
+        } else {
+            member.Emplace(Move(replacement));
+        }
+
+        cursor.ReleasePin();
+        cursor.PublishOutput(captured);
+        return Result<void>::Success();
+    } else {
+        T candidate{};
+        if (auto written = WriteTargetValue<Target>(candidate, input); !written) {
+            return cursor.FailValue(written.Error());
+        }
+
+        if (auto alive = cursor.CheckOwner(); !alive) {
+            return alive;
+        }
+
+        member.Emplace(candidate);
+        cursor.ReleasePin();
+        cursor.PublishOutput(captured);
+        return Result<void>::Success();
+    }
+}
+
+// 필드·멤버 값 하나(member — Member 형식)의 단계다: 정적 대조(대상 종류·배열·Optional 여부·enum ID)
+// 뒤 컨테이너, Optional, struct(내려가기), 단일 값 끝 지점으로 나눈다.
 template <ValueKind Target, class Member>
 Result<void> PathMember(PathCursor& cursor, Member& member) noexcept {
     constexpr bool container = ArrayField<Member>::Supported;
+    constexpr bool optional = OptionalField<Member>::Supported;
     if constexpr (container) {
         static_assert(TargetValueCheck<Target, typename ArrayField<Member>::Element>::Valid);
+    } else if constexpr (optional) {
+        static_assert(TargetValueCheck<Target, typename OptionalField<Member>::Inner>::Valid);
     } else {
         static_assert(TargetValueCheck<Target, Member>::Valid);
     }
 
-    if (auto checked = cursor.CheckTarget(Target, container); !checked) {
+    if (auto checked = cursor.CheckTarget(Target, container, optional); !checked) {
         return checked;
     }
 
@@ -482,6 +627,12 @@ Result<void> PathMember(PathCursor& cursor, Member& member) noexcept {
         if constexpr (container) {
             if (auto checked =
                     cursor.CheckEnum(GeneratedType<typename ArrayField<Member>::Element>::Id());
+                !checked) {
+                return checked;
+            }
+        } else if constexpr (optional) {
+            if (auto checked =
+                    cursor.CheckEnum(GeneratedType<typename OptionalField<Member>::Inner>::Id());
                 !checked) {
                 return checked;
             }
@@ -494,6 +645,12 @@ Result<void> PathMember(PathCursor& cursor, Member& member) noexcept {
 
     if constexpr (container) {
         return PathContainer<Target>(cursor, member);
+    } else if constexpr (optional) {
+        if constexpr (Target == ValueKind::Struct) {
+            return PathOptionalStruct(cursor, member);
+        } else {
+            return PathOptionalValue<Target>(cursor, member);
+        }
     } else if constexpr (Target == ValueKind::Struct) {
         if (cursor.IsLast()) {
             return cursor.Fail(ErrorCode::Unsupported, PropertyPathError::AggregateValue);
@@ -505,9 +662,9 @@ Result<void> PathMember(PathCursor& cursor, Member& member) noexcept {
     }
 }
 
-// 클래스 Struct·Array 필드의 경로 thunk 본체다(생성 코드가 함수표의 path 칸에 내는 람다가 부른다).
-// 소유 객체는 실제 타입 레코드의 함수표에서 오므로 static_cast<Owner*>이고, cursor가 실제 타입이
-// Owner의 파생인지 다시 확인한다.
+// 클래스 aggregate 필드(Struct·Array·Optional<값 struct>)의 경로 thunk 본체다(생성 코드가 함수표의
+// path 칸에 내는 람다가 부른다). 소유 객체는 실제 타입 레코드의 함수표에서 오므로
+// static_cast<Owner*>이고, cursor가 실제 타입이 Owner의 파생인지 다시 확인한다.
 //
 // 생성 코드(B6b):
 //   +[](const ::rocks::RuntimeFieldOps&, ::rocks::detail::PathCursor& cursor) noexcept

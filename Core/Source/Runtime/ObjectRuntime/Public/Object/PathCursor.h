@@ -16,7 +16,12 @@ enum class PathOperation : uint8 {
     Length,
     Insert,
     Remove,
-    Clear
+    Clear,
+    // Optional<값 struct> 필드의 기본 값 만들기·비우기다(리플렉션 B9e).
+    EmplaceOptional,
+    ResetOptional,
+    // Optional<값 struct> 필드의 set 여부 조회다(PathIsOptionalSet — 결과는 Length 칸에 0·1).
+    QueryOptional
 };
 
 // 해석한 경로 단계 하나다: 필드(스키마 안 위치), 바깥 필드에서 누적한 유효 플래그, 대상
@@ -87,9 +92,10 @@ public:
     // TypeMismatch(StaticTypeMismatch)다.
     Result<Object*> Owner(const void* ownerNative) noexcept;
 
-    // 정적 대조: 지금 단계의 대상 형식 종류가 target이고 배열 여부가 container와 같은지
-    // (StaticTypeMismatch).
-    Result<void> CheckTarget(ValueKind target, bool container) noexcept;
+    // 정적 대조: 지금 단계의 대상 형식 종류가 target이고 배열 여부가 container, Optional 여부가
+    // optional과 같은지(StaticTypeMismatch — 스키마의 S 필드에 C++ Optional<S> 멤버가 오는 혼동을
+    // 막는다).
+    Result<void> CheckTarget(ValueKind target, bool container, bool optional = false) noexcept;
 
     // 정적 대조: 지금 단계의 대상 enum ID가 GeneratedType<E>::Id()인지(StaticTypeMismatch).
     Result<void> CheckEnum(TypeId enumeration) noexcept;

@@ -5,9 +5,10 @@
 // 필드 codec 사슬의 둘째 조각으로 단일 값의 wire 읽기 쪽과 codec 공용 판정이다(Docs/Design/
 // ReflectionFoundations.ko.md 5.6·6.4절). 읽은 값(ParsedValue), 값 읽기(ReadValueWire)·미선언
 // enum 판정(ResolveUndeclaredEnum)·보고(ReportParsedValue)·Name 2단계(ResolveParsedName), 단일 값
-// 필드 읽기(ParseFieldValue), 멤버 형식 대조(MatchesSchema)·정적 참조 형식(StaticReferenceNative)·
-// 모르는 필드 건너뛰기(SkipUnknownField)·Required 위치 판정(CarriesRequired)이 있다.
-// Object/GeneratedFieldCodec.h로 받는다.
+// 하나의 해석(ParseValuePayload — 단일 값 필드·Optional 내부 공용)과 단일 값 필드 읽기
+// (ParseFieldValue — Optional<단일 값> 포함), 멤버 형식 대조(MatchesSchema), 정적 참조 형식
+// (StaticReferenceNative), 모르는 필드 건너뛰기(SkipUnknownField), Required 위치 판정
+// (CarriesRequired)이 있다. Object/GeneratedFieldCodec.h로 받는다.
 namespace rocks::detail {
 
 // ReadValueWire가 읽은 값 하나다. 할당하지 않는 view이며(text는 입력을 빌린다) kind에 맞는 칸만
@@ -303,6 +304,7 @@ inline Result<void> ReadValueWire(ArchiveReader& reader, FieldDecodeContext& con
     }
     case ValueKind::Struct:
     case ValueKind::Array:
+    case ValueKind::Optional:
     case ValueKind::Opaque:
         break;
     }
@@ -383,33 +385,18 @@ inline Result<void> ResolveParsedName(FieldDecodeContext& context, ParsedValue& 
     return Result<void>::Success();
 }
 
-// 지금 위치(context.Field())의 단일 값 저장값 field를 해석·검증한다. 1단계와 2단계가 같은 reader
-// 호출 순서를 실행하며(문자열·경로는 view로 읽는다), 검증(wire 종류 TypeMismatch, 정수 폭 Overflow,
-// enum 정책, digest 길이·SoftObjectRef 규칙·trailing byte InvalidArgument)이 끝난 뒤 진단·수집을
-// 보고하고 2단계 몫(ReserveApply)을 청구한다. apply가 있으면(2단계) 게시할 값을 채운다(문자열
-// 복사는 apply의 allocator). staticNative는 강한 참조의 정적 대상 타입이다.
-inline Result<void> ParseFieldValue(const FieldView& field, FieldDecodeContext& context,
-                                    const void* staticNative, FieldValue* apply) noexcept {
-    const FieldSchema& schema = context.Field();
-    const ValueKind kind = schema.value.kind;
-    auto wire = FieldWireType(kind, context.ReferenceWireType());
-    if (!wire) {
-        return Result<void>::Failure(wire.Error());
-    }
-
-    if (field.wireType != wire.Value()) {
-        return Result<void>::Failure(ErrorCode::TypeMismatch);
-    }
-
-    auto opened = context.OpenValue(field);
-    if (!opened) {
-        return Result<void>::Failure(opened.Error());
-    }
-
-    ArchiveReader& reader = opened.Value();
+// 지금 위치의 단일 값 하나(type 종류 — 단일 값 필드의 값 형식 또는 Optional 필드의 내부 형식)를
+// reader의 남은 byte 전부로 해석·검증한다(ParseFieldValue의 본문). 검증(정수 폭 Overflow, enum
+// 정책, digest 길이·SoftObjectRef 규칙·trailing byte InvalidArgument)이 끝난 뒤 진단·수집을
+// 보고하고 2단계 몫(ReserveApply)을 청구한다. apply가 있으면 게시할 값을 채운다(kind = type.kind,
+// present = true — 문자열 복사는 apply의 allocator).
+inline Result<void> ParseValuePayload(ArchiveReader& reader, FieldDecodeContext& context,
+                                      const ValueType& type, const void* staticNative,
+                                      FieldValue* apply) noexcept {
+    const ValueKind kind = type.kind;
     ParsedValue parsed;
-    if (auto read = ReadValueWire(reader, context, schema.value, context.FieldEnum(), nullptr,
-                                  staticNative, parsed);
+    if (auto read = ReadValueWire(reader, context, type, context.FieldEnum(), nullptr, staticNative,
+                                  parsed);
         !read) {
         return read;
     }
@@ -433,7 +420,7 @@ inline Result<void> ParseFieldValue(const FieldView& field, FieldDecodeContext& 
     }
 
     // 진단·수집은 필드 검증이 끝난 뒤 보고한다(복원 2단계에서는 문맥이 버린다).
-    if (auto reported = ReportParsedValue(context, schema.value, parsed); !reported) {
+    if (auto reported = ReportParsedValue(context, type, parsed); !reported) {
         return reported;
     }
 
@@ -464,6 +451,7 @@ inline Result<void> ParseFieldValue(const FieldView& field, FieldDecodeContext& 
     }
 
     apply->kind = kind;
+    apply->present = true;
     apply->boolean = parsed.boolean;
     apply->unsignedInteger = parsed.unsignedInteger;
     apply->signedInteger = parsed.signedInteger;
@@ -473,12 +461,81 @@ inline Result<void> ParseFieldValue(const FieldView& field, FieldDecodeContext& 
     apply->name = parsed.name;
     apply->digest = parsed.digest;
     apply->reference = parsed.reference.handle;
-    apply->type = kind == ValueKind::Enum ? schema.value.type : TypeId{};
+    apply->type = kind == ValueKind::Enum ? type.type : TypeId{};
     if (kind == ValueKind::Utf8String || kind == ValueKind::SoftObjectReference) {
         return apply->string.TryAssign(parsed.text);
     }
 
     return Result<void>::Success();
+}
+
+// 지금 위치(context.Field())의 단일 값 저장값 field를 해석·검증한다. 1단계와 2단계가 같은 reader
+// 호출 순서를 실행하며(문자열·경로는 view로 읽는다), wire 종류(TypeMismatch)를 본 뒤 본문은
+// ParseValuePayload다. apply가 있으면(2단계) 게시할 값을 채운다(문자열 복사는 apply의 allocator).
+// staticNative는 강한 참조의 정적 대상 타입이다.
+//
+// Optional 필드(내부가 단일 값 — 리플렉션 B9e)는 payload를 OptionalWireReader로 열어(present byte
+// 0·1 밖·unset 뒤 byte·내부 tag가 Optional 내부 자리의 것이 아님 InvalidArgument, 내부 tag ≠ 내부
+// 형식의 wire TypeMismatch) set이면 내부 값을 ParseValuePayload(내부 형식 element)로 해석한다.
+// unset이면 2단계 몫 1을 청구한다. apply의 kind는 내부 종류, present는 set 여부다(unset이면 값 칸은
+// 기본값, enum이면 type만 그 enum ID).
+inline Result<void> ParseFieldValue(const FieldView& field, FieldDecodeContext& context,
+                                    const void* staticNative, FieldValue* apply) noexcept {
+    const FieldSchema& schema = context.Field();
+    const bool optional = schema.value.kind == ValueKind::Optional;
+    auto wire = optional ? FieldWireType(schema, context.ReferenceWireType())
+                         : FieldWireType(schema.value.kind, context.ReferenceWireType());
+    if (!wire) {
+        return Result<void>::Failure(wire.Error());
+    }
+
+    if (field.wireType != wire.Value()) {
+        return Result<void>::Failure(ErrorCode::TypeMismatch);
+    }
+
+    // Optional<값 struct>(aggregate)는 이 단일 값 경로로 읽지 않는다(DecodeOptionalStruct).
+    if (optional && FieldIsAggregate(schema)) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    auto opened = context.OpenValue(field);
+    if (!opened) {
+        return Result<void>::Failure(opened.Error());
+    }
+
+    if (!optional) {
+        return ParseValuePayload(opened.Value(), context, schema.value, staticNative, apply);
+    }
+
+    auto inner = FieldWireType(schema.element.kind, context.ReferenceWireType());
+    if (!inner) {
+        return Result<void>::Failure(inner.Error());
+    }
+
+    auto reader = OptionalWireReader::Open(Move(opened.Value()), inner.Value());
+    if (!reader) {
+        return Result<void>::Failure(reader.Error());
+    }
+
+    if (!reader.Value().IsSet()) {
+        if (auto reserved = context.ReserveApply(1); !reserved) {
+            return reserved;
+        }
+
+        if (apply) {
+            apply->kind = schema.element.kind;
+            apply->present = false;
+            apply->type = schema.element.kind == ValueKind::Enum ? schema.element.type : TypeId{};
+        }
+
+        return Result<void>::Success();
+    }
+
+    if (apply) {
+        apply->present = true;
+    }
+
+    return ParseValuePayload(reader.Value().Inner(), context, schema.element, staticNative, apply);
 }
 
 // 생성 thunk의 멤버 형식이 지금 스키마의 값 형식과 같은지다(별명·수동 스키마와 정적 thunk의
@@ -491,7 +548,21 @@ bool MatchesSchema(const FieldSchema& field) noexcept {
         return false;
     }
 
-    if constexpr (ArrayField<Member>::Supported) {
+    // Optional<T>(리플렉션 B9e)는 value = {Optional, 0}이고 내부 종류가 같으며 enum·struct 내부는
+    // element.type이 그 생성 ID여야 한다(struct 내부는 MatchesStructView도 — 호출자).
+    if constexpr (OptionalField<Member>::Supported) {
+        using Inner = typename OptionalField<Member>::Inner;
+        if (field.value.type != TypeId{} || field.element.kind != FieldValueKind<Inner>()) {
+            return false;
+        }
+
+        if constexpr (ReflectedEnumField<Inner>::Supported ||
+                      ReflectedStructField<Inner>::Supported) {
+            return field.element.type == GeneratedType<Inner>::Id();
+        } else {
+            return true;
+        }
+    } else if constexpr (ArrayField<Member>::Supported) {
         using Element = typename ArrayField<Member>::Element;
         if (field.value.type != TypeId{} || field.element.kind != FieldValueKind<Element>()) {
             return false;

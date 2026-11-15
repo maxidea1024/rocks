@@ -53,6 +53,13 @@ internal static partial class SelfTests
                 "a warning ends the notes of the Array.h failure");
             Verify.That(CompilerDriver.ArrayInstantiationSite($"{arrayHeader}:18:19: error: x\n{other}:4:5: note: y\n", temporary.Root, IsInput) is null,
                 "an array failure without a note in a module input keeps RMC3000");
+            // 리플렉션 B9e: Core Optional.h의 실패도 같은 규칙으로 찾고 Optional로 표시한다(배열 조회는 그것을 배열 실패로 보지 않는다).
+            const string optionalHeader = "C:/work/rocks/Core/Source/Runtime/Core/Public/Core/Optional.h";
+            string optional = $"{optionalHeader}:29:19: error: static assertion failed\n{input}:7:42: note: in instantiation of template class 'rocks::Optional<rocks::ObjectRef<probe::Value>>' requested here\n";
+            Verify.That(CompilerDriver.ContainerInstantiationSite(optional, temporary.Root, IsInput) is (string optionalFile, 7, 42, true) && IsInput(optionalFile),
+                "Optional.h failures are container failures marked Optional");
+            Verify.That(CompilerDriver.ContainerInstantiationSite(clang, temporary.Root, IsInput) is (_, 15, 56, false), "Array.h failures are not marked Optional");
+            Verify.That(CompilerDriver.ArrayInstantiationSite(optional, temporary.Root, IsInput) is null, "an Optional.h failure is not an array element failure");
         });
         suite.Add("MetaPrefix.CommentLineSpliceIsRejectedDirectly", () =>
         {

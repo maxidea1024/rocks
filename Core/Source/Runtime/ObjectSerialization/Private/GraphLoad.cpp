@@ -80,6 +80,43 @@ public:
         return PushRecord(Move(opened.Value()));
     }
 
+    // 필드 값 안의 Record 내용(Optional<값 struct>의 내부 — 리플렉션 B9e)이다. 맨 위(없으면 객체)
+    // Record 입력 안의 범위를 같은 예산으로 연다(색인만 청구 — 내용 byte는 그 Record의 Open이 이미
+    // 청구했다).
+    Result<RecordScope> OpenRecordBytes(Span<const uint8> record, TypeId expected,
+                                        uint32 minVersion, uint32 maxVersion) noexcept override {
+        const RecordReader* parent = CurrentRecord() ? CurrentRecord() : record_;
+        if (!parent) {
+            return Result<RecordScope>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        // 최상위 필드의 내용은 2단계가 단독 reader로 넘기고(내용 byte 청구) 단독 Record로 다시
+        // 열므로(payload byte 청구) 그 두 배를 미리 청구한다(1단계는 객체 Record가 이미 청구했다 —
+        // ReflectionExtensions.ko.md 1.2절 "뒤 단계 주의").
+        if (!CurrentRecord()) {
+            uint64 work = 0;
+            if (!TryMultiply(uint64{record.Size()}, uint64{2}, work)) {
+                return Result<RecordScope>::Failure(ErrorCode::CapacityExceeded);
+            }
+
+            if (auto spent = Charge(work); !spent) {
+                return Result<RecordScope>::Failure(spent.Error());
+            }
+        }
+
+        auto opened = parent->OpenNestedRecord(allocator_, record, expected, minVersion, maxVersion,
+                                               budget_.RemainingFields());
+        if (!opened) {
+            return Result<RecordScope>::Failure(opened.Error());
+        }
+
+        if (auto counted = budget_.AddFields(opened.Value().FieldCount()); !counted) {
+            return Result<RecordScope>::Failure(counted.Error());
+        }
+
+        return PushRecord(Move(opened.Value()));
+    }
+
     Result<RecordScope> OpenMigratedRecord(Span<const uint8> record, TypeId expected,
                                            uint32 version) noexcept override {
         // 콜백 결과는 신뢰하지 않는다. 정확히 현재 버전의 envelope와 모든 TLV를 다시 검사한다.

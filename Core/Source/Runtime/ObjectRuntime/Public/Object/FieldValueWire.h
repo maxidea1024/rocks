@@ -3,13 +3,14 @@
 #include <Base/Checked.h>
 #include <Object/FieldCodec.h>
 #include <Object/GeneratedFieldAccess.h>
+#include <Serialization/OptionalWire.h>
 
 // 필드 codec 사슬의 첫 조각으로 단일 값의 wire 쓰기 쪽이다(Docs/Design/ReflectionFoundations.ko.md
 // 5.6·6.4절). 값 종류·필드의 wire tag(FieldWireType), 정수 폭 한도(UnsignedLimit·SignedLimit·
 // FitsSignedLimit), enum 선언 값 집합(EnumValueSet), 값 쓰기(WriteValueWire)와 단일 값 필드
-// 쓰기(EncodeFieldWire)가 있다. 사슬(FieldValueWire → FieldValueParse → StructFieldCodec →
-// ArrayFieldCodec → GeneratedFieldCodec)은 각 조각이 앞 조각을 include하므로 직접 include하지 말고
-// Object/GeneratedFieldCodec.h로 받는다.
+// 쓰기(EncodeFieldWire — Optional<단일 값> 포함)가 있다. 사슬(FieldValueWire → FieldValueParse →
+// StructFieldCodec → ArrayFieldCodec → OptionalFieldCodec → GeneratedFieldCodec)은 각 조각이 앞
+// 조각을 include하므로 직접 include하지 말고 Object/GeneratedFieldCodec.h로 받는다.
 namespace rocks::detail {
 
 // 값 종류의 wire tag다. 참조(강한·weak)는 문맥의 referenceWire다. Array·Opaque는 Unsupported다(배열
@@ -63,6 +64,9 @@ inline Result<uint32> FieldWireType(ValueKind kind, uint32 referenceWire) noexce
         return Result<uint32>::Success(referenceWire);
     case ValueKind::Struct:
         return Result<uint32>::Success(static_cast<uint32>(WireType::Record));
+    case ValueKind::Optional:
+        // present byte + 내부 wire(Docs/Design/ReflectionExtensions.ko.md 1.2·6절).
+        return Result<uint32>::Success(static_cast<uint32>(WireType::Optional));
     case ValueKind::Array:
     case ValueKind::Opaque:
         break;
@@ -72,9 +76,18 @@ inline Result<uint32> FieldWireType(ValueKind kind, uint32 referenceWire) noexce
 }
 
 // 필드 하나의 wire tag다(5.6절). 배열은 원소가 Struct면 RecordList, 그 밖의 단일 값 원소면
-// ValueArray다(원소가 Opaque·Array면 Unsupported). 그 밖은 값 종류의 wire다. 직렬화기의 wire
-// 재확인·ValidateLayout·struct encode의 멤버 wire 재확인이 쓴다.
+// ValueArray다(원소가 Opaque·Array면 Unsupported). Optional은 내부 종류가 Optional 내부 종류(성질
+// 표)일 때 Optional이다(아니면 Unsupported — 내부 wire는 FieldWireType(element.kind)). 그 밖은 값
+// 종류의 wire다. 직렬화기의 wire 재확인·ValidateLayout·struct encode의 멤버 wire 재확인이 쓴다.
 inline Result<uint32> FieldWireType(const FieldSchema& field, uint32 referenceWire) noexcept {
+    if (field.value.kind == ValueKind::Optional) {
+        if (!ValueKindCanBeOptionalInner(field.element.kind)) {
+            return Result<uint32>::Failure(ErrorCode::Unsupported);
+        }
+
+        return Result<uint32>::Success(static_cast<uint32>(WireType::Optional));
+    }
+
     if (field.value.kind != ValueKind::Array) {
         return FieldWireType(field.value.kind, referenceWire);
     }
@@ -422,6 +435,7 @@ inline Result<void> WriteValueWire(ArchiveWriter& out, FieldEncodeContext& conte
         return context.WriteWeakReference(out, value.reference, {type.type, staticNative});
     case ValueKind::Struct:
     case ValueKind::Array:
+    case ValueKind::Optional:
     case ValueKind::Opaque:
         break;
     }
@@ -430,13 +444,57 @@ inline Result<void> WriteValueWire(ArchiveWriter& out, FieldEncodeContext& conte
 }
 
 // 지금 위치(context.Field())의 단일 값을 out에 쓰고 wire tag를 돌려준다. value.kind는 스키마의 값
-// 종류와 같아야 한다(TypeMismatch). 검증·수집 규칙은 WriteValueWire다.
+// 종류와 같아야 한다(TypeMismatch). 검증·수집 규칙은 WriteValueWire다. Optional 필드(내부가 단일
+// 값 — 리플렉션 B9e)는 value.kind가 내부 종류(element.kind)여야 하고, present가 거짓이면
+// unset(present byte 0), 참이면 present 1 + 내부 wire + 내부 값(WriteValueWire — 내부 형식 element,
+// enum은 FieldEnum)을 쓰고 wire Optional을 돌려준다. Optional이 아닌 필드에 present = false는
+// InvalidArgument다.
 inline Result<uint32> EncodeFieldWire(ArchiveWriter& out, FieldEncodeContext& context,
                                       const FieldValue& value, StringView text,
                                       const void* staticNative) noexcept {
     const FieldSchema& schema = context.Field();
+    if (schema.value.kind == ValueKind::Optional) {
+        if (value.kind != schema.element.kind || !ValueKindIsWholeFieldValue(value.kind)) {
+            return Result<uint32>::Failure(ErrorCode::TypeMismatch);
+        }
+
+        auto inner = FieldWireType(value.kind, context.ReferenceWireType());
+        if (!inner) {
+            return inner;
+        }
+
+        if (!value.present) {
+            if (auto written = OptionalWireWriter::WriteUnset(out); !written) {
+                return Result<uint32>::Failure(written.Error());
+            }
+
+            return Result<uint32>::Success(static_cast<uint32>(WireType::Optional));
+        }
+
+        auto set = OptionalWireWriter::BeginSet(out, inner.Value());
+        if (!set) {
+            return Result<uint32>::Failure(set.Error());
+        }
+
+        if (auto written = WriteValueWire(out, context, schema.element, context.FieldEnum(), value,
+                                          text, staticNative);
+            !written) {
+            return Result<uint32>::Failure(written.Error());
+        }
+
+        if (auto ended = set.Value().End(); !ended) {
+            return Result<uint32>::Failure(ended.Error());
+        }
+
+        return Result<uint32>::Success(static_cast<uint32>(WireType::Optional));
+    }
+
     if (value.kind != schema.value.kind) {
         return Result<uint32>::Failure(ErrorCode::TypeMismatch);
+    }
+
+    if (!value.present) {
+        return Result<uint32>::Failure(ErrorCode::InvalidArgument);
     }
 
     auto wire = FieldWireType(value.kind, context.ReferenceWireType());

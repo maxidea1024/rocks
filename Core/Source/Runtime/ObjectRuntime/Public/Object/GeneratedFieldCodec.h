@@ -1,14 +1,15 @@
 #pragma once
 
-#include <Object/ArrayFieldCodec.h>
+#include <Object/OptionalFieldCodec.h>
 
 // 필드 codec이다(Docs/Design/ReflectionFoundations.ko.md 4.6·5.6·6.4절). 생성 헤더와 직렬화기는
 // 이 헤더 하나만 include한다. codec은 앞 조각을 include하는 사슬로 나뉜다: 단일 값 wire 쓰기
 // (Object/FieldValueWire.h — WriteValueWire·EncodeFieldWire), 읽기·보고와 공용 판정
 // (Object/FieldValueParse.h — ReadValueWire·ReportParsedValue·ParseFieldValue), struct 값
 // (Object/StructFieldCodec.h — EncodeStructRecord·DecodeStructValue), 배열
-// (Object/ArrayFieldCodec.h — EncodeArrayField·DecodeArrayField). 이 헤더에는 멤버 값 codec
-// (EncodeMemberValue·EncodeStructMember·DecodeStructMember), 생성 thunk(EncodeGeneratedField·
+// (Object/ArrayFieldCodec.h — EncodeArrayField·DecodeArrayField), Optional
+// (Object/OptionalFieldCodec.h — EncodeOptionalField·DecodeOptionalField). 이 헤더에는 멤버 값
+// codec(EncodeMemberValue·EncodeStructMember·DecodeStructMember), 생성 thunk(EncodeGeneratedField·
 // DecodeGeneratedField·StructFieldOps)와 수동 함수표용 범용 codec(EncodeThroughFieldValue·
 // DecodeThroughFieldValue)이 있다.
 namespace rocks::detail {
@@ -24,6 +25,8 @@ Result<uint32> EncodeMemberValue(const Member& source, ArchiveWriter& out,
                                  FieldEncodeContext& context) noexcept {
     if constexpr (ArrayField<Member>::Supported) {
         return EncodeArrayField(source, out, context);
+    } else if constexpr (OptionalField<Member>::Supported) {
+        return EncodeOptionalField(source, out, context);
     } else if constexpr (ReflectedStructField<Member>::Supported) {
         if (!MatchesStructView<Member>(context)) {
             return Result<uint32>::Failure(ErrorCode::TypeMismatch);
@@ -83,6 +86,9 @@ Result<void> DecodeStructMember(const RuntimeStructFieldOps&, ConstructionContex
     if constexpr (ArrayField<Member>::Supported) {
         return DecodeArrayField(construction, owner, target ? &(target->*MemberPointer) : nullptr,
                                 field, context);
+    } else if constexpr (OptionalField<Member>::Supported) {
+        return DecodeOptionalField(construction, owner,
+                                   target ? &(target->*MemberPointer) : nullptr, field, context);
     } else if constexpr (ReflectedStructField<Member>::Supported) {
         if (!MatchesStructView<Member>(context)) {
             return Result<void>::Failure(ErrorCode::TypeMismatch);
@@ -164,6 +170,12 @@ RuntimeStructFieldOps StructFieldOps(Guid fieldId,
                       ReflectedStructField<Element>::Supported) {
             ops.valueNativeType = NativeTypeKey<Element>();
         }
+    } else if constexpr (OptionalField<Member>::Supported) {
+        using Inner = typename OptionalField<Member>::Inner;
+        if constexpr (ReflectedEnumField<Inner>::Supported ||
+                      ReflectedStructField<Inner>::Supported) {
+            ops.valueNativeType = NativeTypeKey<Inner>();
+        }
     } else if constexpr (ReflectedEnumField<Member>::Supported ||
                          ReflectedStructField<Member>::Supported) {
         ops.valueNativeType = NativeTypeKey<Member>();
@@ -244,6 +256,21 @@ Result<void> DecodeGeneratedField(ConstructionContext* construction, ObjectHandl
         }
 
         return DecodeArrayField(construction, handle, &(owner.Value()->*member), field, context);
+    } else if constexpr (OptionalField<Member>::Supported) {
+        // Optional 필드(리플렉션 B9e): 1단계는 값 없이 검증, 2단계는 새 객체 안의 Optional에 쓴다
+        // (unset 자리의 새 값은 ConstructionContext::ObjectAllocator — 할당 말고는 실패하지
+        // 않는다).
+        if (!construction) {
+            return DecodeOptionalField<typename OptionalField<Member>::Inner>(
+                nullptr, handle, nullptr, field, context);
+        }
+
+        auto owner = construction->GetForWrite<Owner>(handle);
+        if (!owner) {
+            return Result<void>::Failure(owner.Error());
+        }
+
+        return DecodeOptionalField(construction, handle, &(owner.Value()->*member), field, context);
     } else if constexpr (ReflectedStructField<Member>::Supported) {
         // struct 필드: 1단계는 값 없이 검증(관찰은 scratch), 2단계는 새 객체 안의 멤버 주소에 쓴다.
         if (!MatchesStructView<Member>(context)) {

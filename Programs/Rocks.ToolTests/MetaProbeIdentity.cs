@@ -50,7 +50,8 @@ internal static class MetaProbeIdentity
                 "probe::Value::point", "probe::Value::segment", "probe::Value::target", "probe::Value::targets", "probe::Value::peers",
                 "probe::Leaf::anything", "probe::Leaf::links", "probe::Value::strong",
                 "probe::Value::kind", "probe::Value::kinds", "probe::Value::self", "probe::Leaf::kind", "probe::Leaf::kinds",
-                "probe::Derived::extra", "probe::Other::value" }
+                "probe::Derived::extra", "probe::Other::value",
+                "probe::Leaf::weight", "probe::Value::text", "probe::Value::name", "probe::Value::list", "probe::Value::pointer" }
                 .Concat(Enumerable.Range(2, 16).Select(level => $"probe::Chain{level}::inner")))
             {
                 manifest.Register("field", name);
