@@ -102,7 +102,8 @@ internal static class ValueKindTable
             ValueKindProperty.WholeFieldValue | ValueKindProperty.AcceptsRequired | ValueKindProperty.HasTargetType),
         new("Digest256", 18, Keyed),
         new("Int8", 19, Keyed),
-        new("Int16", 20, Keyed)
+        new("Int16", 20, Keyed),
+        new("Name", 21, Keyed)
     ];
 
     // 성질과 같은 뜻의 런타임 질의 함수(rocks:: 이름공간)다. 대조 헤더가 칸마다 이 함수를 부른다.

@@ -61,6 +61,18 @@ public:
     bool RequiresWorldOnlyOwner() const noexcept;
     bool ContainsReferenceArray() const noexcept;
 
+    // Name 값(ValueKind::Name — 단일 멤버·Array<Name> 멤버)을 담는지다. 등록이 계산한 형질이며 중첩
+    // struct 멤버와 struct 원소 배열 멤버의 원소 struct에서 전파되고 Transient 멤버도 센다. 이것이
+    // 참인 struct는 그래프 복원 1단계의 관찰 대상(FieldCodecHooks::ObservedStructs)이 될 수 없다 —
+    // 1단계는 pool에 닿지 않아 Name 토큰을 만들 수 없기 때문이다(직렬화기가 InvalidArgument로
+    // 거부한다, Docs/Design/ReflectionExtensions.ko.md 4.1절). 빈 view는 Fatal이다.
+    //
+    // 사용 예:
+    //   if (lease.Struct().ContainsStrongReference() || lease.Struct().ContainsName()) {
+    //       return Result<void>::Failure(ErrorCode::InvalidArgument);   // 관찰할 수 없다
+    //   }
+    bool ContainsName() const noexcept;
+
     // 선언된 struct 플래그 TypeFlags::Atomic(ROCKS_STRUCT(Atomic))이 있는지다 — 값이 통째
     // 단위다(Docs/Design/ReflectionExtensions.ko.md 3.1절: 차이 저장은 멤버 하나라도 기준과
     // 다르면 모든 멤버를 쓰고, override 집합·되돌리기 단위가 그 struct 필드 경로다). 차이 쓰기·

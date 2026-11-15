@@ -504,9 +504,15 @@ public:
     // 이름 있는 Inner가 있는데 대표 노드, 대표 자식이 있는데 이름 있는 노드 — InvalidArgument) →
     // 기준 Outer 노드 이름의 점유(대표 노드는 빈 비교 키 — 기준 Outer에 이미 대표 자식이 있으면
     // AlreadyExists), hasBase가 아니면 outer 0 이름 있는 노드의 최상위 이름 공간 점유
-    // (AlreadyExists) → 생성(Create의 오류 — 할당 OutOfMemory·슬롯 CapacityExceeded·ShuttingDown·
-    // Busy, 트랜잭션은 그 오류로 고정된다). 사전 확인 실패는 아무것도 만들지 않는다. 실패하면
-    // Nodes()는 비어 있다.
+    // (AlreadyExists) → Name intern(1단계가 기록한 Name 표시 문자열을 registry의
+    // RegistryOptions::names pool로 — None 문자열은 기본 None, None이 아닌 값이 있는데 pool이
+    // 없으면 Unsupported, pool 한도 CapacityExceeded·OutOfMemory·ShuttingDown. 손상이 아니라 pool
+    // 상태이고 이미 intern한 entry는 pool에 남는다, 그래프 안 같은 표시는 한 번만 intern한다 —
+    // Docs/Design/ReflectionExtensions.ko.md 4.1절. TryIntern이 부르는 pool allocator callback이
+    // Registry에 재진입해 이름을 점유하면 뒤의 Create가 AlreadyExists로 실패하고 트랜잭션이
+    // 고정된다 — 계약 위반) → 생성(Create의 오류 — 할당 OutOfMemory·슬롯
+    // CapacityExceeded·ShuttingDown·Busy, 트랜잭션은 그 오류로 고정된다). 사전 확인·intern 실패는
+    // 아무것도 만들지 않는다. 실패하면 Nodes()는 비어 있다.
     Result<void> CreateObjects(ConstructionContext& transaction,
                                ObjectHandle baseOuter = {}) noexcept;
 
@@ -633,8 +639,10 @@ private:
 // 규칙·형제 중복·참조 값 범위 포함) → 참조(형식 TypeMismatch, 기대 타입 미등록 NotFound) →
 // 예산(CapacityExceeded) → 도달 검사(패키지 정책의 다른 패키지 포함 InvalidArgument) → imports의
 // 기록한 쌍 판정(기대 형식 불만족 TypeMismatch — 생성자 전) → 트랜잭션 시작 → 2a 사전 확인(기준
-// Outer 요약 불일치·실제 요약 재판정 InvalidArgument, 이름 점유 AlreadyExists) → 2단계(생성·imports
-// 확인·적용·Required 검사·prepare·Commit).
+// Outer 요약 불일치·실제 요약 재판정 InvalidArgument, 이름 점유 AlreadyExists) → 2a Name
+// intern(None이 아닌 Name 값이 있는데 Registry pool 없음 Unsupported, pool 한도
+// CapacityExceeded·OutOfMemory· ShuttingDown — 생성자 전) → 2단계(생성·imports 확인·적용·Required
+// 검사·prepare·Commit).
 //
 // 사용 예:
 //   ObjectGraphLoadOptions options;

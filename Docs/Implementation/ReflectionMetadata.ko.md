@@ -48,13 +48,14 @@ auto runtimeName = type.Name();
 | `float`, `double` | `Float32`, `Float64` |
 | `Guid` | 두 개의 64비트 정수로 구성된 값 |
 | `String` | 소유한 유효 UTF-8 문자열; 길이는 바이트 수 |
+| `Name` | `ValueKind::Name`(리플렉션 B9c2); 실행 중 pool 토큰(`Core/Text/Name.h`). 저장 wire는 표시 문자열 String(번호 접미 포함, None은 빈 문자열 — UTF-8·NFC·NUL 없음·번호 접미를 뗀 base 1,023 UTF-16 단위 이하(UE 5.8과 같다), `Object/NameField.h`). 토큰은 Registry의 `RegistryOptions::names` pool 것이어야 하고(다르면 WrongContext, pool이 없으면 None만), 복원은 1단계가 표시 문자열을 검사·기록하고 2a가 그 pool로 intern한다. Required는 받지 않는다(RMC2202). 생성자 기본값은 None뿐이다 |
 | `ObjectRef<T>` | `ObjectHandle`을 담은 참조 값; 실제 변경은 Registry barrier 경유 |
 | `AssetId` | `ValueKind::AssetId`; 에셋 ID(`Object/AssetId.h`, Guid, 0 = null). 저장 wire는 Guid |
 | `Sha256Digest` | `ValueKind::Digest256`; 32 byte 해시(`Core/Encoding/Sha256.h`). 저장 wire는 정확히 32 byte의 Bytes |
 | `SoftObjectRef<T>` | `ValueKind::SoftObjectReference`; 에셋 ID와 패키지 안 객체 경로(`Object/SoftObjectRef.h`). GC 간선이 아니며 `value.type`이 기대 타입(Object면 0). 저장 wire는 `SoftObjectReference`(12) |
 | `ROCKS_ENUM` enum class | `ValueKind::Enum`; `value.type`이 enum ID. 값은 선언된 값(Flags enum은 선언 값의 OR)만 유효하다. 저장 wire는 I64 (아래 "리플렉션 enum") |
 | `ROCKS_STRUCT` struct | `ValueKind::Struct`(`FieldKind::Value`); `value.type`이 struct ID. 저장 wire는 중첩 Record(10) (아래 "리플렉션 struct") |
-| `Array<T>`(T: 스칼라·`Guid`·`String`·`AssetId`·`Sha256Digest`·enum·`SoftObjectRef`·참조 없는 struct·Core 값 타입) | `ValueKind::Array`(`FieldKind::Value`); `element`가 T의 형식. wire는 단일 값 원소 `ValueArray`(13), struct 원소 `RecordList`(11) (아래 "리플렉션 배열") |
+| `Array<T>`(T: 스칼라·`Guid`·`String`·`Name`·`AssetId`·`Sha256Digest`·enum·`SoftObjectRef`·참조 없는 struct·Core 값 타입) | `ValueKind::Array`(`FieldKind::Value`); `element`가 T의 형식. wire는 단일 값 원소 `ValueArray`(13), struct 원소 `RecordList`(11) (아래 "리플렉션 배열") |
 | `ObjectRefArray<T>`(원소 null 허용) | `ValueKind::Array`(`FieldKind::ObjectReference`); `element = {ObjectReference, T의 ID}`. wire는 참조 원소의 `ValueArray` |
 | `StructRefArray<S>`(S: 참조 struct) | `ValueKind::Array`(`FieldKind::Value`); `element = {Struct, S의 ID}`. wire는 `RecordList` |
 

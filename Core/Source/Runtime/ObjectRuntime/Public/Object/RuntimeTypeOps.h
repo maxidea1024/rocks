@@ -4,6 +4,7 @@
 #include <Core/Encoding/Sha256.h>
 #include <Core/Lifetime/ModuleLease.h>
 #include <Core/Move.h>
+#include <Core/Text/Name.h>
 #include <Core/Text/String.h>
 #include <Meta/TypeSchema.h>
 #include <Object/ObjectAccessContext.h>
@@ -85,6 +86,11 @@ struct FieldValue {
     String string;
     // Digest256 값이다.
     Sha256Digest digest{};
+    // Name 값(실행 중 pool 토큰 — 리플렉션 B9c2)이다. 쓰기는 토큰이 대상 Registry의
+    // pool(RegistryOptions::names) 것인지 확인하고(다르면 WrongContext, pool이 없으면 None 말고는
+    // Unsupported) 표시 문자열의 내용 규칙(Object/NameField.h)을 본다. 읽기는 토큰을 복사할 뿐
+    // 할당하지 않는다(원문은 그 pool의 Acquire로 읽는다).
+    Name name{};
     // Enum 값의 enum 스키마 ID다(B3b).
     TypeId type{};
 
@@ -172,10 +178,12 @@ Result<void> ValidateArrayEdit(const FieldWriteTarget& target, ArrayEdit edit) n
 // 등록된 필드의 실제 대상 schema, 타입과 값 형식을 검사한다. 오류 순서는 context·수명, 타입·필드,
 // 전달 값 종류(TypeMismatch — enum은 FieldValue::type이 필드의 enum ID와 다를 때도), 읽기
 // 전용(Unsupported), 값 내용(정수 폭 Overflow·소프트 참조의 null 규칙과 경로 상한·선언되지 않은
-// enum 값 InvalidArgument)이다. Struct·Array 필드는 FieldValue로 통째 쓰지 않으므로 문맥·수명·대상
-// 타입·필드 검사 뒤 Unsupported다(멤버·원소 단위는 B6 경로 접근). 참조 값의 비정규 null(IsNull인
-// non-zero handle)은 null로 정규화한다 — 검증은 null로 하고 callback에는 reference를
-// ObjectHandle{}로 바꾼 사본(할당 없음)을 넘긴다(수동 함수표가 비정규 handle을 저장하지
+// enum 값 InvalidArgument, Name 토큰은 Object/NameField.h의 ValidateNameFieldToken — 이 Registry의
+// pool이 없으면 None 말고 Unsupported, 다른 pool의 토큰 WrongContext, 게시되지 않은 토큰
+// StaleHandle, 표시 문자열 규칙 InvalidArgument)이다. Struct·Array 필드는 FieldValue로 통째 쓰지
+// 않으므로 문맥·수명·대상 타입·필드 검사 뒤 Unsupported다(멤버·원소 단위는 B6 경로 접근). 참조 값의
+// 비정규 null(IsNull인 non-zero handle)은 null로 정규화한다 — 검증은 null로 하고 callback에는
+// reference를 ObjectHandle{}로 바꾼 사본(할당 없음)을 넘긴다(수동 함수표가 비정규 handle을 저장하지
 // 않게, 7.1절). 이 연산 자체는 encode 고정을 쥐지 않는다: 생성 callback(WriteGeneratedField)은
 // String·Soft 새 값 할당부터 게시까지 스스로 고정해 할당 콜백의 재진입 쓰기를 Busy로 막지만, 수동
 // callback은 그렇지 않으므로 할당하는 수동 callback은 같은 규칙을 스스로 지킨다. callback 코드

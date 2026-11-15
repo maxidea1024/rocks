@@ -1,4 +1,5 @@
 #include "GraphInternal.h"
+#include <Core/Text/NamePool.h>
 
 // 그래프 복원 2단계의 생성(2a)·필드 적용(2b — 2단계 문맥)이다(Docs/Design/ObjectFoundations.ko.md
 // 5.4절). 단계형 복원(ObjectGraphStage)이 사전 확인(GraphIdentity.cpp)·imports 확인
@@ -22,16 +23,28 @@ public:
         SetObject(node.type, index);
         node_ = &node;
         migration_ = 0;
+        name_ = 0;
     }
 
-    // 노드의 모든 필드를 적용한 뒤 부른다. 1단계가 보관한 struct 마이그레이션은 모두 소비되어야
-    // 한다(남으면 두 단계의 방문 순서가 어긋난 계약 위반).
+    // 노드의 모든 필드를 적용한 뒤 부른다. 1단계가 보관한 struct 마이그레이션과 Name 기록은 모두
+    // 소비되어야 한다(남으면 두 단계의 방문 순서가 어긋난 계약 위반).
     Result<void> EndNode() noexcept {
-        if (node_ && migration_ != node_->structMigrations.Size()) {
+        if (node_ &&
+            (migration_ != node_->structMigrations.Size() || name_ != node_->names.Size())) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
         return Result<void>::Success();
+    }
+
+    // 1단계가 같은 순서로 기록한 Name의 2a 토큰이다. 다시 읽은 표시 문자열이 기록과 다르면(방문
+    // 순서 어긋남) InvalidArgument다.
+    Result<Name> TakeName(StringView text) noexcept override {
+        if (!node_ || name_ >= node_->names.Size() || !(node_->names[name_].text == text)) {
+            return Result<Name>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        return Result<Name>::Success(node_->names[name_++].token);
     }
 
     Result<RecordScope> OpenRecord(const FieldView& field, TypeId expected, uint32 minVersion,
@@ -193,6 +206,7 @@ private:
     Span<const ObjectHandle> imports_;
     const LoadNode* node_ = nullptr;
     usize migration_ = 0;
+    usize name_ = 0;
 };
 
 } // namespace
@@ -217,6 +231,68 @@ Result<void> CreateNodes(ConstructionContext& transaction, Array<LoadNode>& node
         nodes[index].handle = created.Value();
         if (!handles.TryPushBack(created.Value())) {
             platform::Fatal("Object graph node handle reservation failed");
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> InternNodeNames(Allocator& allocator, NamePool* pool,
+                             Array<LoadNode>& nodes) noexcept {
+    // pool이 없으면 None이 아닌 값을 둘 곳이 없다 — intern을 시작하기 전에 판정한다(None 값만 있는
+    // 그래프는 pool 없이 복원된다).
+    usize named = 0;
+    for (const LoadNode& node : nodes) {
+        for (const StoredName& stored : node.names) {
+            if (!IsNoneNameText(stored.text)) {
+                ++named;
+            }
+        }
+    }
+
+    if (named == 0) {
+        for (LoadNode& node : nodes) {
+            for (StoredName& stored : node.names) {
+                stored.token = Name{};
+            }
+        }
+
+        return Result<void>::Success();
+    }
+
+    if (pool == nullptr) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    // 같은 byte의 표시 문자열은 한 번만 intern한다(첫 출현 순 — 결정적). text는 Stage 수명 동안
+    // 유효하므로 표의 키로 빌린다.
+    HashMap<StringView, Name> interned(allocator);
+    if (auto reserved = interned.Reserve(named); !reserved) {
+        return reserved;
+    }
+
+    for (LoadNode& node : nodes) {
+        for (StoredName& stored : node.names) {
+            if (IsNoneNameText(stored.text)) {
+                stored.token = Name{};
+                continue;
+            }
+
+            if (const Name* seen = interned.Find(stored.text)) {
+                stored.token = *seen;
+                continue;
+            }
+
+            auto token = pool->TryIntern(stored.text);
+            if (!token) {
+                return Result<void>::Failure(token.Error());
+            }
+
+            if (auto added = interned.Insert(stored.text, token.Value()); !added) {
+                return Result<void>::Failure(added.Error());
+            }
+
+            stored.token = token.Value();
         }
     }
 

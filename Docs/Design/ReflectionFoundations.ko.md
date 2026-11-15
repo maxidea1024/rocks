@@ -379,7 +379,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema&, Ru
 
 ### 5.1 `Array<T>`
 
-- 원소: 스칼라·`String`·`Guid`·`AssetId`·`Sha256Digest`·enum·참조 없는 struct(Binds Core 값 타입 포함)·`SoftObjectRef<U>`. 참조 목록은 `ObjectRefArray<T>`, 참조 struct 목록은 Registry가 관리하는 `StructRefArray<S>`(4.3·5.6절)다. `Array<ObjectRef<…>>`·`Array<참조 struct>`는 `Array`의 nothrow-move static_assert에서 Clang 단계가 먼저 실패하므로 MetaCompiler가 그 진단을 RMC2304로 바꿔 보고하고, 중첩 배열은 RMC2304다(5.6절). 리플렉션 B9가 Int8·Int16·Name·WeakRef·ClassRef·InstancedStruct·Text 원소를 더한다(RX 1.3·8절).
+- 원소: 스칼라·`String`·`Guid`·`AssetId`·`Sha256Digest`·enum·참조 없는 struct(Binds Core 값 타입 포함)·`SoftObjectRef<U>`. 참조 목록은 `ObjectRefArray<T>`, 참조 struct 목록은 Registry가 관리하는 `StructRefArray<S>`(4.3·5.6절)다. `Array<ObjectRef<…>>`·`Array<참조 struct>`는 `Array`의 nothrow-move static_assert에서 Clang 단계가 먼저 실패하므로 MetaCompiler가 그 진단을 RMC2304로 바꿔 보고하고, 중첩 배열은 RMC2304다(5.6절). 리플렉션 B9가 Int8·Int16·Name·WeakRef·ClassRef·InstancedStruct·Text 원소를 더한다(RX 1.3·8절 — Int8·Int16은 B9a2, Name은 B9c2에서 구현).
 - 필드는 소유 타입 생성자가 allocator로 초기화한다. struct 원소가 `explicit T(Allocator&) noexcept`면 그 allocator로 만든다.
 - `ValueKind::Array`, `element`가 원소 형식이다.
 
@@ -582,7 +582,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema&, Ru
 
 - A0-B는 graph envelope(format 1)를 그대로 두고 필드 인코딩·문맥·한도(원소 누계)만 넓힌다. 저장 집합·외부 참조·export 기준 노드 타입·EditorOnly 제외·Commit 다중도 보고·바이트·작업량 한도 확장은 graph v2(A0-O — [ObjectFoundations](ObjectFoundations.ko.md))다. 값 치환 hook은 B4가 `SubstituteStruct`로 구현했다.
 - A0-O가 A0-B에서 받는 것: 문맥의 참조 wire 매개변수, Soft 수집기·유효 플래그·struct hook·진단·decode 정책 자리, 두 단계 decode의 산출물 보관 구조.
-- 리플렉션 B9가 더하는 것: 참조 문맥의 weak 쓰기·읽기, 복원 2a의 Name 일괄 intern, 관찰 struct의 Name 제한, 진단 경로의 Map·Set 항목 삽입 순번, decode 정책 `unknownClass`·`unknownStructType`, 저장·복원 정책 `includeFlags`(RX 1.6·1.7·4.1·5절).
+- 리플렉션 B9가 더하는 것: 참조 문맥의 weak 쓰기·읽기, 복원 2a의 Name 일괄 intern·관찰 struct의 Name 제한(B9c2에서 구현 — RX 4절 "구현(B9c2)에서 정한 점"), 진단 경로의 Map·Set 항목 삽입 순번, decode 정책 `unknownClass`·`unknownStructType`, 저장·복원 정책 `includeFlags`(RX 1.6·1.7·4.1·5절).
 
 ### 6.4 B3c 구현 API(확정안)
 

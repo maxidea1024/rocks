@@ -114,9 +114,18 @@ Result<void> ObjectGraphStage::CreateObjects(ConstructionContext& transaction,
     Array<LoadNode>& nodes = data_->envelope.nodes;
     // 사전 확인 실패는 객체를 만들지 않았으므로 트랜잭션을 고정하지 않는다. 생성 도중의 실패는
     // Create가 이미 그 오류로 트랜잭션을 고정했다. handle은 지역 배열에 모았다가 성공한 뒤 옮긴다.
+    // Name intern(Docs/Design/ReflectionExtensions.ko.md 4.1절)도 생성 전의 사전 확인 몫이다 — pool
+    // 한도·pool 없음 실패는 객체를 만들지 않았으므로 트랜잭션을 고정하지 않는다(intern한 entry는
+    // pool에 남는다). TryIntern은 pool allocator callback(사용자 코드)을 부르므로, callback이
+    // Registry에 재진입해 노드 이름을 점유하면 사전 확인이 무효가 되어 뒤의 Create가
+    // AlreadyExists로 실패하고 트랜잭션이 고정된다(계약 위반 — 손상·부분 공개는 없다).
     Array<ObjectHandle> handles(allocator_);
     auto created = CheckCreatePreconditions(allocator_, transaction, policy_, nodes, hasBase_,
                                             base_, baseOuter);
+    if (created) {
+        created = InternNodeNames(allocator_, registry_.Names(), nodes);
+    }
+
     if (created) {
         created = CreateNodes(transaction, nodes, baseOuter, handles);
     }

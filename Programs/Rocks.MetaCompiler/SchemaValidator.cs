@@ -3,7 +3,8 @@ namespace Rocks.MetaCompiler;
 internal static class SchemaValidator
 {
     // Clang이 desugar한 단일 값 철자 → 값 종류다. int8·int16은 signed char·short다(Docs/Design/ReflectionExtensions.ko.md 2절).
-    // 평범한 char는 부호가 구현 정의라 넣지 않는다(UnsupportedFieldHint가 int8·uint8을 안내한다).
+    // 평범한 char는 부호가 구현 정의라 넣지 않는다(UnsupportedFieldHint가 int8·uint8을 안내한다). rocks::Name은 리플렉션 B9c2의
+    // Name 값 종류다(같은 문서 4절 — wire는 표시 문자열).
     private static readonly Dictionary<string, string> Scalars = new(StringComparer.Ordinal)
     {
         ["bool"] = "Bool",
@@ -19,6 +20,7 @@ internal static class SchemaValidator
         ["double"] = "Float64",
         ["rocks::Guid"] = "Guid",
         ["rocks::String"] = "Utf8String",
+        ["rocks::Name"] = "Name",
         ["rocks::AssetId"] = "AssetId",
         ["rocks::Sha256Digest"] = "Digest256"
     };
@@ -426,7 +428,7 @@ internal static class SchemaValidator
                 return $"Core value types are reflected by the {StructRules.BindingModule} module: depend on {StructRules.BindingModule} (add it to the module's RequiredModules) so its descriptor is imported.";
             }
 
-            return "Use a supported scalar, Guid, String, AssetId, Sha256Digest, ROCKS_ENUM enum, ROCKS_STRUCT struct, ObjectRef, SoftObjectRef or rocks::Array/ObjectRefArray/StructRefArray field; raw pointers/other containers/cv-qualified fields need an explicit codec extension.";
+            return "Use a supported scalar, Guid, String, Name, AssetId, Sha256Digest, ROCKS_ENUM enum, ROCKS_STRUCT struct, ObjectRef, SoftObjectRef or rocks::Array/ObjectRefArray/StructRefArray field; raw pointers/other containers/cv-qualified fields need an explicit codec extension.";
         }
 
         // 단일 값 형식 철자 하나를 (값 종류, 대상 정규 이름, 대상 ID)로 푼다(필드와 Array<T> 원소가 같은 해석을 쓴다).

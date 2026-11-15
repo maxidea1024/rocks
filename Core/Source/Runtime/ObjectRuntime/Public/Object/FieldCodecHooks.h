@@ -120,8 +120,10 @@ public:
         return Result<void>::Success();
     }
 
-    // 복원 1단계에서 관찰할 struct ID다(로드 시작 때 한 번 읽는다 — 미등록 ID는 NotFound, 참조를
-    // 담는 struct는 InvalidArgument). 반환 span은 그 로드 동안 유효해야 한다.
+    // 복원 1단계에서 관찰할 struct ID다(로드 시작 때 한 번 읽는다 — 미등록 ID는 NotFound, 참조나
+    // Name을 담는 struct는 InvalidArgument — 1단계 임시 값에는 참조 대상도 Name 토큰도 만들 수
+    // 없다, StructView::ContainsStrongReference·ContainsName). 반환 span은 그 로드 동안 유효해야
+    // 한다.
     virtual Span<const TypeId> ObservedStructs() noexcept {
         return {};
     }

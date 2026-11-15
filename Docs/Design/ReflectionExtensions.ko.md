@@ -151,6 +151,11 @@ MetaCompiler(C#)와 런타임(C++)의 표 대조: MetaCompiler가 "모든 종류
 - 성질 표에 행 둘을 더했다: `Int8` = 19, `Int16` = 20(1.1절 표의 값). 행은 위 허용 표의 "Bool·정수 8종" 칸이다(C++ `ValueKindTableEntry`의 keyed 묶음, C# `Keyed`). `ValueKindCount`는 21이다. 이번 단계가 실제로 여는 자리는 클래스 필드·struct 멤버·Array 원소(`Array<int8>`·`Array<int16>`)이고, StaticArray 원소·Map 키·값·Set 원소·Optional 내부는 표 칸만 ○이며 그 컨테이너 단계(B9e·B9f2·B9g)가 연다(B9a1이 정한 "뒤 단계 칸 선기입"과 같다). 원본 철자 해석(`SchemaValidator.Scalars`)에 `signed char` → Int8, `short` → Int16을 더해 `SourceValueKinds` = 표의 Array 원소 열이 그대로 성립한다.
 - 시험: 성질 표 시험(`ValueKindProperties_MatchSpecTable`·`ValueKindProperties_TypeRegistryFollowsTable`·`Meta.ValueKindTable*`)의 새 행, 대조 헤더 변이에 Int16 칸 뒤집기.
 
+구현(B9c2)에서 정한 점(성질 표 — Name의 나머지는 4절 "구현(B9c2)에서 정한 점"):
+
+- 성질 표에 행 `Name` = 21을 더했다(허용 표의 "String·Name" 칸 — C++ `ValueKindTableEntry`의 keyed 묶음, C# `Keyed`). `ValueKindCount`는 22다. 이번 단계가 여는 자리는 클래스 필드·struct 멤버·Array 원소(`Array<Name>` — 클래스 필드·struct 멤버·struct 원소 배열 안)이고 Map 키·값·Set 원소·StaticArray 원소·Optional 내부는 표 칸만 ○이다(B9e·B9f2·B9g가 연다). 원본 철자 해석 `SchemaValidator.Scalars`에 `rocks::Name` → Name을 더해 `SourceValueKinds` = Array 원소 열이 그대로 성립한다. Required는 표에 없으므로 지금의 RMC2202(지정자-종류 불일치)다.
+- 시험: 성질 표 시험의 새 행, C# `Meta.ValueKindTableMatchesRuntime`의 Name 칸 확인, 대조 헤더 변이에 Name 칸 뒤집기("C# 표에만 있는 종류" 변이는 아직 런타임에 없는 WeakObjectReference로 바꿨다).
+
 ### 1.4 플래그 비트
 
 | 플래그 | 값 | 대상 | 전파·상속 | 단계 |
@@ -297,15 +302,15 @@ Core 수학(`CORE/Math/Transform.h`)에 둘을 더한다(사용자 결정 U4).
 
 - C++ `rocks::Name`(세션 토큰 — CORE/Text/Name.h:10-28). 클래스 필드·struct 멤버·Array·StaticArray 원소·Map 키·값·Set 원소·Optional 내부.
 - wire String(8). 값은 **표시 문자열**이다(번호 접미 포함, 예 `Socket_7`). None은 빈 문자열로 쓴다(표시 변형 `NONE`도 빈 문자열 — 결정적).
-- 내용 규칙: 유효 UTF-8, NFC, NUL 없음, `MaxNameFieldBytes` = 3,072 byte 이하. UE `NAME_SIZE`는 null 포함 1,024 UTF-16 코드 단위라 이름 최대 1,023 단위이고(NameTypes.h:57, UnrealNames.cpp:3271), UTF-8로 최대 3,069 byte다. 3,072 byte면 UE 이름이 모두 들어간다. 쓰기·encode·decode 1단계가 같은 함수로 검사한다. NFC 판정은 Core Unicode를 쓰고 정규화는 하지 않는다(입력 계층인 ReflectionText가 NFC로 만든다 — OF 1.1절과 같은 분담).
+- 내용 규칙: 유효 UTF-8, NFC, NUL 없음, 길이는 UE 5.8과 같은 규칙 — 번호 접미(`SplitNameText`)를 뗀 base가 UTF-16 코드 단위로 1,023 이하(`MaxNameBaseUtf16Units`, 보충 문자는 2단위)다. UE `NAME_SIZE`는 null 포함 1,024 UTF-16 코드 단위이고(NameTypes.h:57), FName 생성은 번호를 먼저 떼고(`MakeDetectNumber` → `ParseNumberFromName`, UnrealNames.cpp:3414-3432·NameTypes.h:259-261) 남은 base 길이를 `NAME_SIZE`와 비교한다(UnrealNames.cpp:3024-3033 → 3271 `Len >= NAME_SIZE`). 그래서 UE 이름이 모두 들어가고 UE가 거부하는 이름은 Rocks도 거부한다. 이 규칙의 최대 표시는 3 byte 글자 1,023개 + `_2147483646` = 3,080 byte(`MaxNameFieldBytes`)이고, 그 byte를 넘는 입력은 UTF-8·NFC 판정 전에 거부한다. 쓰기·encode·decode 1단계가 같은 함수로 검사한다. NFC 판정은 Core Unicode를 쓰고 정규화는 하지 않는다(입력 계층인 ReflectionText가 NFC로 만든다 — OF 1.1절과 같은 분담).
 - 비교: Core Name 규칙(ASCII만 대소문자 무시, 비ASCII는 byte 비교, UE 5.8 번호 접미 — CORE/Text/NamePool.h:35-39). UE FName도 정확히 ASCII만 접는다(18.3절). Map 키·Set 원소의 중복 판정도 이 규칙이다.
 - 차이 저장의 같음은 표시 문자열 byte다. 대소문자만 바꾼 값은 "다름"으로 저장된다(의도한 편집이며 무해하다 — 사용자 결정 U7). UE는 `Identical`이 대소문자 무시라 저장하지 않는다.
-- NamePool 위치: `RegistryOptions`에 `NamePool* names`를 더한다(빌림, Registry보다 오래 산다). Engine이 pool 하나를 만들어 에셋 Registry·World Registry에 같이 준다(전역 singleton 없음 — RCM 32행). Name 필드를 가진 타입을 pool 없는 Registry에 만들면 그 필드의 쓰기·복원은 Unsupported다.
+- NamePool 위치: `RegistryOptions`에 `NamePool* names`를 더한다(빌림, Registry보다 오래 산다). Engine이 pool 하나를 만들어 에셋 Registry·World Registry에 같이 준다(전역 singleton 없음 — RCM 32행). Name 필드를 가진 타입을 pool 없는 Registry에 만들면 그 필드에는 None만 둘 수 있다: None이 아닌 토큰의 쓰기·저장과 None이 아닌 표시 문자열의 복원은 Unsupported다(기본 None은 pool이 필요 없다 — 구현(B9c2)에서 정한 점).
 - 생성자 기본값: 생성자는 `Allocator&`만 받으므로 Name 필드의 C++ 기본값은 None뿐이다. 기본 이름이 필요한 값은 프로파일·클래스 기본값 레코드(A5)·도구가 채운다.
 - Core 추가(B9c1 — `CORE/Text/NamePool.h`·`Name.h`):
   - `NamePool::TryFind(StringView) const -> Result<Name>`: intern하지 않는 조회(entry·예산 예약·할당 없음), 없으면 NotFound. 결과는 같은 입력을 `TryIntern`한 결과와 `==`다. byte가 같은 표시 entry가 있으면 그 토큰이고, 없으면 비교 identity와 **번호가 같은** 표시 가운데 가장 먼저 게시된 entry의 토큰(첫 표시)이다. 기본 None(빈 문자열·`None`·`_7`)은 언제나 기본 None 토큰이고, 번호 없는 None 표시 변형(`none`)은 byte가 같은 표시 entry가 없으면 기본 None 토큰이다. 잘못된 UTF-8은 InvalidArgument, 실행 중이 아니면 ShuttingDown이다(TryIntern과 같은 순서).
   - pool 없는 비교 `NameTextEquals(StringView, StringView) -> bool`과 base·번호 분해 `SplitNameText(StringView) -> NameTextParts{base, number}`. 1단계 Map<Name> 중복 판정과 `SamePropertyPath`가 쓴다. 해시는 지금 `TryMakeNameKey`(Name.h:144)를 쓴다.
-- 쓰기 thunk는 토큰의 domain이 그 Registry pool인지 확인한다(다르면 WrongContext).
+- 쓰기 경로(필드 write·staged write·경로 쓰기)와 저장 encode는 토큰의 domain이 그 Registry pool인지 확인한다(다르면 WrongContext — 생성 thunk의 값 대입 자체는 검사하지 않는다, 아래 B9c2).
 - GC 없음. Required 거부(RMC2202).
 - 텍스트: 출력은 그대로, None은 `None`(UE 비Delimited 출력과 같다). 입력은 빈 값·`None`(대소문자 무시)을 None으로 받는다.
 
@@ -320,10 +325,22 @@ Core 수학(`CORE/Math/Transform.h`)에 둘을 더한다(사용자 결정 U4).
 - `SplitNameText`는 문법만 본다: `_7`은 base 빈 문자열·번호 7이다(Name 의미의 None 판정은 `NameTextEquals`·TryIntern 몫 — UE도 빈 base의 번호 이름은 None이다, UnrealNames.cpp:3025-3045). 번호 규칙은 UE 5.8 `ParseNumberFromName`(NameTypes.h:231-266)과 같다: 끝 숫자 1–10자리, 그 앞 `_`, 두 자리 이상이면 선행 0 없음, 값 < 2,147,483,647(외부 번호 0–2,147,483,646). UTF-8 검사는 없다(ASCII byte만 보므로 다중 byte 문자 중간에서 자르지 않는다). `NameLease::BaseView`도 같은 분해 함수를 쓴다.
 - 시험(Core `NameLookupTests.cpp`): `NameFind_ReturnsPublishedTokenWithoutAllocating`(할당 시도 0·entry·예약 불변, 다른 번호·선행 0·NUL 접미 NotFound), `NameFind_FullPoolStillFindsAndReportsNotFound`, `NameFind_CaseVariantReturnsFirstPublishedDisplay`(기본·충돌 hash mask, 비ASCII byte 비교, embedded NUL), `NameFind_NoneRulesNeedNoEntry`, `NameFind_StateAndInvalidInputLeavePoolUnchanged`(오류 경로의 Stats 불변), `NameFind_ConcurrentWithInternSeesPublishedOrNotFound`(무작위 병행 스모크), `NameFind_PendingInternIsNotFoundUntilPublished`(후보 할당 안에서 멈춘 intern — 게시 전 NotFound·Stats 불변·callback 안 조회, 게시 전 대소문자 변형은 첫 표시), `NameTextEquals_FollowsPoolComparisonRules`(번호 경계·None·비ASCII), `NameTextEquals_AgreesWithInternFindAndKey`(원문 37개의 모든 쌍: 전체 pool에서 NameTextEquals·NameKey 같음 = intern `==`, 짝수 색인만 intern한 부분 pool에서 TryFind의 존재·`==`가 NameTextEquals와 같음 — 홀수 색인 변형이 첫 표시 경로를 탄다), `NameTextSplit_FollowsUe58NumberBounds`(직접 쓴 UE 경계값 표와 SplitNameText·intern 번호·`BaseView` 대조).
 
+구현(B9c2)에서 정한 점(Name 종류·`RegistryOptions.names`·1단계 수집·2a intern — 성질 표 행은 1.3절):
+
+- 공개 API: `Object/NameField.h`의 `MaxNameBaseUtf16Units`(1,023)·`MaxNameFieldBytes`(3,080 — base 규칙이 허용하는 최대 표시)·`ValidateNameFieldText(text, scratch)`(내용 규칙 하나 — byte 상한 → UTF-8 → NUL → base UTF-16 단위 → NFC 순, 모두 InvalidArgument, NFC 판정 할당 실패는 그 오류. 복원은 Archive reader가 String의 UTF-8을 먼저 본다 — 오류 코드는 같다)·`AcquireNameFieldText(pool, token, scratch) -> Result<NameLease>`(토큰 검사 + 저장할 표시 문자열 — None은 빈 lease)·`ValidateNameFieldToken`(같은 검사, lease를 바로 놓는다)·`IsNoneNameText`(= `NameTextEquals(text, "")`), `RegistryOptions::names`·`ObjectRegistry::Names()`, `FieldValue::name`, `FieldCodecContext::Names()`(저장 문맥이 그 Registry의 pool로 정한다), `FieldDecodeContext::CollectName`·`TakeName`(기본 Unsupported — 그래프 문맥만 구현), `StructView::ContainsName()`.
+- 토큰 검사 순서: 구조(`Name::IsValid` 아님 InvalidArgument — pool 유무와 무관) → 기본 None(`NameKind::None`)이면 성공(pool 불필요) → pool 없음 Unsupported → pool `Acquire`(실행 중이 아니면 ShuttingDown — 초기화 전도 같다, 찾지 못하면 토큰 domain ≠ pool domain일 때 WrongContext·같을 때 StaleHandle) → 번호 없는 None 표시 변형("none")이면 빈 표시 → 표시 문자열의 내용 규칙(pool은 NUL·분해형·긴 원문도 intern하므로 InvalidArgument). 성공 경로는 pool gate를 Acquire·lease 반환에서만 잡는다(domain은 찾지 못했을 때만 `Stats`로 읽는다 — NamePool을 고치지 않았다). 검사 지점은 필드 write(`FieldWriteOperation` — 소프트 참조 규칙처럼 읽기 전용 정책 뒤, 수동 callback도 지키게), staged write(생성 `WriteGeneratedStagedField` — owner `GetForWrite`(접근·생존·검사 중 Busy) 뒤, 소프트 참조와 같은 순서), 경로 쓰기(PathRunner 6단계 `ValidateFieldWrite` 바로 뒤 — 실패 사유는 `WriteReason`: InvalidArgument는 InvalidValue, 그 밖은 None), 저장 encode(`WriteValueWire` — C++에서 직접 넣은 토큰을 다시 검사하고 표시 byte만큼 Spend — 청구가 검사 뒤인 것은 표시를 얻어야 길이를 알기 때문이다)다. `WriteTargetValue<Name>`는 토큰을 대입만 한다(검사는 호출 경로).
+- **pool 없는 Registry의 None(스펙 보강)**: 4절 원문은 "그 필드의 쓰기·복원은 Unsupported"였다. 그대로 하면 생성자 기본값(None)만 가진 객체도 pool 없는 Registry에서 저장한 뒤 다시 열 수 없다(저장은 None을 빈 문자열로 쓰므로 pool이 필요 없다). 그래서 기본 None은 pool 없이 쓰기·저장·복원하고 None이 아닌 값만 Unsupported로 했다. None 표시 변형 토큰(`NoneDisplay` — 어느 pool의 entry)은 pool·domain 검사를 받는다.
+- **2a의 None 문자열(스펙 보강)**: 4.1절의 "모두 intern"을 None 문자열(빈 문자열·`None` 대소문자 변형·빈 base의 번호 이름)은 intern하지 않고 기본 None 토큰으로 두는 것으로 좁혔다. 저장이 어느 None이든 빈 문자열이라 다시 저장한 byte가 같고, pool entry를 만들지 않으며, pool 없는 Registry도 None을 복원할 수 있다. 번호 있는 `None_3`은 None이 아니라 intern한다.
+- 1단계: `ReadValueWire`가 표시 문자열을 view로 읽고 그 몫(byte)을 Spend한 뒤(소진된 예산으로 검사하지 않게 검사 전) 내용 규칙을 본다. 2단계(기록하지 않는 단계)는 내용을 다시 보지 않는다 — `TakeName`이 1단계 기록과 byte 같음을 보장하고, NFC 판정 할당이 2단계의 입력 실패 지점이 되지 않게 했다(Spend 규약대로 1단계는 두 배를 청구한다 — 보수적). `ResolveParsedName`이 기록하는 단계면 `CollectName`(값 하나에 한 번, None 문자열 포함 — 순서가 단순하다), 아니면 `TakeName`을 부른다(단일 값 필드·struct 멤버·배열 원소 공통). 그래프 1단계 문맥은 노드의 `names`(`StoredName{text, token}` — text는 입력·`node.migrated`·struct 마이그레이션 보관본을 빌린다)에 더하고 2a 몫 byte + `NameInternWork`(16)를 `Charge`로 한 번 청구한다(2단계는 intern하지 않으므로 두 배가 아니다). 2단계 적용 몫(`ReserveApply`)에는 Name 문자열 복사가 없다(토큰을 쓴다). 1단계는 ObjectRegistry·pool에 닿지 않는다(시험이 Validate 뒤 pool 통계 불변을 본다).
+- 2a: `ObjectGraphStage::CreateObjects`가 사전 확인(`CheckCreatePreconditions`) 뒤·`CreateNodes` 전에 `InternNodeNames(allocator, registry.Names(), nodes)`를 부른다. 그래프 안에서 byte가 같은 표시 문자열은 첫 출현만 TryIntern하고 나머지는 그 토큰을 쓴다(중복 표 — 첫 출현 순이라 결정적, 표 할당 실패 OutOfMemory). `TryIntern`은 pool allocator callback(사용자 코드)을 부른다 — callback이 Registry에 재진입해 노드 이름을 점유하면 사전 확인이 무효가 되어 Create가 AlreadyExists로 실패하고 트랜잭션이 고정된다(계약 위반, 손상·부분 공개 없음 — GraphStage·ObjectGraph.h 주석). None이 아닌 값이 있는데 pool이 없으면 intern 전에 Unsupported, `TryIntern`의 실패(CapacityExceeded·OutOfMemory·ShuttingDown)는 그 오류다. 객체를 만들기 전이라 트랜잭션을 고정하지 않고 Stage만 실패 상태가 되며, 이미 intern한 entry는 pool에 남는다(OF 5.7절 2a 실패 목록). 사전 확인 실패면 intern하지 않는다(pool이 늘지 않는다).
+- 2단계: `TakeName`은 기록 순번의 토큰을 주되 다시 읽은 표시 문자열이 기록과 byte가 다르거나 기록이 없으면 InvalidArgument(방문 순서 계약 위반)이고, `EndNode`가 노드의 기록을 모두 소비했는지 본다(struct 마이그레이션 보관본과 같은 방식). 2a 토큰은 그 Registry pool의 것이고 내용은 1단계가 검사했으므로 생성 decode는 staged write의 토큰 검사를 거치지 않는다(`DecodeGeneratedField`의 Name 갈래 — 2단계가 입력 때문에 실패하지 않게).
+- 관찰 struct: 등록 형질 `containsName`(Name 멤버·`Array<Name>` 멤버, Transient 포함, 멤버 struct·원소 struct에서 전파)을 두고, 그래프 1단계가 `ObservedStructs`의 struct가 참조 또는 Name을 담으면 InvalidArgument로 거부한다(관찰 값은 1단계 임시 값이라 토큰이 없다). codec도 1단계 관찰 자리의 Name 멤버·원소를 InvalidArgument로 막는다(방어).
+- 시험: ObjectRuntime `NameField_TextRulesFollowUeLengthAndRejectUtf8NulAndNonNfc`(base 1,023/1,024단위 — ASCII·3 byte 글자·보충 문자, 최대 번호 접미·번호가 아닌 접미, 3,080 byte 경계)·`NameField_TextChecksLengthBeforeNfcAndPropagateAllocationFailure`·`NameField_TokenChecksPoolDomainAndDisplay`(구조 오류와 pool 없음 순서, 초기화 전·종료 뒤 ShuttingDown)·`NameField_ValueConversionAndWire`·`NameField_DecodePhasesCollectThenTakeTokensInOrder`(2단계 재검사·청구 없음)·`NameField_CodecRejectsNameInObservationPositions`(NameFieldTests.cpp), ObjectSerialization `NameGraph_RoundTripKeepsDisplayNumberAndNone`(다른 pool로 복원·다시 저장 byte 같음·None entry 없음)·`NameGraph_RegistryWithoutPoolKeepsOnlyNone`·`NameGraph_WritesCheckPoolDomainAndContent`(필드·struct 멤버·배열 원소·원소 struct 안·staged·저장, 실패한 쓰기 뒤 값 불변)·`NameGraph_FieldWriteOperationChecksTokens`(등록 write 직접 호출)·`NameGraph_LoadRejectsInvalidNameText`·`NameGraph_NoneTextsLoadAsDefaultNoneWithoutEntries`(pool 있는·없는 Registry)·`NameGraph_InternFailureEndsLoadBeforeConstruction`(Validate 뒤 pool 불변, CapacityExceeded·생성자 미실행·트랜잭션 미고정·entry 남음)·`NameGraph_PreconditionFailureInternsNothing`·`NameGraph_MigratedRecordsKeepNameOrder`(노드·struct 마이그레이션 보관본)·`NameGraph_ValidateChargesInternWork`(같은 wire의 String 배열과 원소당·byte당 차이 = byte + 16, 1)·`NameGraph_ObservedStructsMustNotContainNames`(직접·원소 struct·일반 struct 멤버 전파·대조)(NameGraphTests.cpp·NameGraphLoadTests.cpp — 공용 도우미 NameGraphTestSupport.h, 생성 fixture `ReflectionTestFixtures/NameFieldFixture.h`), ToolTests `Meta.NameFieldsReachDescriptorAndGeneratedCode`·`Meta.NameRejectsRequired`.
+
 ### 4.1 복원의 intern
 
-- 1단계는 Name 문자열을 검사하고 위치를 산출물에 차례로 기록한다. 2a(`CreateObjects` 사전 확인, Game 스레드)가 대상 Registry의 pool로 모두 intern해 노드별 토큰 표를 만든다. 2단계는 같은 순서로 토큰을 소비한다(마이그레이션 보관본을 차례로 대조하는 지금 방식과 같다 — GraphApply.cpp:101-113). 순서가 어긋나면 InvalidArgument(계약 위반)다.
-- 작업량: 1단계가 Name 수 × (byte + 상수)를 2a 몫으로 미리 청구한다(OF 5.4절 Od2 "사전 확인 비용은 1단계가 청구한 몫이 덮는다"와 같은 방식).
+- 1단계는 Name 문자열을 검사하고 위치를 산출물에 차례로 기록한다. 2a(`CreateObjects` 사전 확인, Game 스레드)가 대상 Registry의 pool로 모두 intern해 노드별 토큰 표를 만든다(None 문자열은 intern하지 않고 기본 None이다 — 4절 "구현(B9c2)에서 정한 점"). 2단계는 같은 순서로 토큰을 소비한다(마이그레이션 보관본을 차례로 대조하는 지금 방식과 같다 — GraphApply.cpp:101-113). 순서가 어긋나면 InvalidArgument(계약 위반)다.
+- 작업량: 1단계가 Name 수 × (byte + 상수)를 2a 몫으로 미리 청구한다(OF 5.4절 Od2 "사전 확인 비용은 1단계가 청구한 몫이 덮는다"와 같은 방식). 구현(B9c2)의 상수는 `NameInternWork` 16이다(값마다 중복 표 조회, 서로 다른 표시마다 TryIntern 한 번 — gate 2–3번·base 해시·entry 할당). 한계: NamePool은 64 bucket 연결 목록이라 intern 비용이 O(byte + entry 수 / 64)이고(기본 maxEntries 65,536이면 사슬 약 1,024) 사슬 훑기는 상수에 들지 않는다 — "1단계 청구가 2a 몫을 덮는다"는 pool 크기에 비례하는 그 배수 안에서만 성립한다(pool 자체는 entry·storage 한도로 묶인다). 그래프 안 같은 표시의 중복 intern은 하지 않는다.
 - 실패: pool의 CapacityExceeded·OutOfMemory는 2a 실패로 로드를 끝낸다(생성자 실행 전). 손상이 아니므로 A1이 CorruptPackage로 바꾸지 않는다. 이미 intern한 entry는 남는다. pool entry는 pool 수명 자원이고 다시 쓰이므로 누수가 아니다(UE name table도 지우지 않는다). OF 5.7절 2a 실패 목록에 "Name pool 한도"를 더한다.
 - 한 트랜잭션의 여러 Stage(SCC)는 각자 자기 2a에서 intern한다.
 - 관찰 struct(`FieldCodecHooks::ObservedStructs` — 1단계 임시 값으로 넘긴다)는 Name을 (직간접으로) 담을 수 없다. 참조를 담는 struct와 같은 자리에서 InvalidArgument다(OR/FieldCodecHooks.h 관찰 규칙).
@@ -790,7 +807,7 @@ Core 커밋(B9b1·B9c1·B9f1·B9i1)은 다른 단계와 독립이라 먼저 해�
 
 **B9b**: Transform3f·3d — 점·벡터·방향 변환, 역변환, `ToMatrix`·`TryFromMatrix` 왕복, shear Unsupported·0 scale InvalidArgument, 변환 함수(넓힘 정확·좁힘 반올림). Atomic — STRUCT에만(CLASS는 모르는 지정자), descriptor 왕복, RegisterStruct mask(클래스 비트 거부), 미러 16종 Atomic·Transform 비Atomic 등록, `IsAtomic`. A5 시험 목록에 넘길 것: Atomic 차이 쓰기·override 단위·Transform 멤버 단위·Atomic 되돌리기 통째(RCM 70행 "struct 통째 되돌리기" 후속과 함께).
 
-**B9c**: Core `TryFind`(없으면 NotFound·할당 없음·표시 변형은 비교 토큰)·`NameTextEquals`(번호 접미·대소문자), 그래프 왕복(번호 접미·None·대소문자 표시 보존), pool 없는 Registry의 Unsupported, 다른 pool 토큰 WrongContext, NFC·UTF-8·3,072 byte·NUL 거부, 2a intern의 CapacityExceeded(생성자 미실행·Registry 불변·이미 들어간 entry는 남음), 1단계 청구가 2a 몫을 덮음(작업량 한도 fixture), 관찰 struct의 Name 거부, Array<Name> 왕복, 경로 쓰기.
+**B9c**: Core `TryFind`(없으면 NotFound·할당 없음·표시 변형은 비교 토큰)·`NameTextEquals`(번호 접미·대소문자), 그래프 왕복(번호 접미·None·대소문자 표시 보존), pool 없는 Registry의 Unsupported, 다른 pool 토큰 WrongContext, NFC·UTF-8·길이(번호 접미를 뗀 base 1,023 UTF-16 단위 — UE와 같다)·NUL 거부, 2a intern의 CapacityExceeded(생성자 미실행·Registry 불변·이미 들어간 entry는 남음), 1단계 청구가 2a 몫을 덮음(작업량 한도 fixture), 관찰 struct의 Name 거부, Array<Name> 왕복, 경로 쓰기.
 
 **B9d**: WeakRef 왕복(집합 안), 정책별 표(Reject는 null·진단·성공, Admit의 Null·Import → null·진단(값 2)과 Reject, 강한 참조가 먼저 Import한 대상을 weak가 slot 캐시 없이 다시 물음, Include 지연 덮어쓰기 — 노드 순서를 바꿔도 같은 결과·지연 진단의 경로·objectIndex·메모리 청구), 죽은 대상 encode null, 외부 번호 decode 거부, 기대 타입 위반 decode 거부, Array<WeakRef> 왕복, GC가 weak만 남은 대상을 회수, 도달 검사에서 weak 제외. ClassRef 왕복, 미등록(Reject·ReportAndNull, 키 위치는 늘 거부), Base 위반, struct ID 넣기 거부, 추상 클래스 허용, Required null 저장 거부, (B9h2 뒤) Deprecated 클래스 ClassRef 로드 진단과 재저장 성공, 타입 도구 이름(기본·`Name=`·충돌 RMC2203·`none` 예약)·TypeId 32자·36자 입력.
 
@@ -865,7 +882,7 @@ Core 커밋(B9b1·B9c1·B9f1·B9i1)은 다른 단계와 독립이라 먼저 해�
 | 조회 | `FNAME_Find`는 없으면 NAME_None(NameTypes.h:213-222), 정확한 표시 먼저·없으면 비교 entry(UnrealNames.cpp:1863-1876) | `TryFind`: 없으면 NotFound, 정확한 표시 먼저·없으면 같은 번호의 첫 표시 | 없음과 None을 구별한다(Result). 번호는 entry에 들어 있어 UE outline 번호 구성처럼 접미까지 찾는다 |
 | 토큰 없는 비교 | `FNameHelper::EqualsString`(FName 대 문자열, UnrealNames.cpp:3148-3192) | `NameTextEquals`(문자열 대 문자열) | pool 없이 1단계에서 쓴다 |
 | 저장 | 패키지 name map 인덱스(Display) + Number(LinkerSave.cpp:316-358, LinkerLoad.h:1150-1161) | Record 안 표시 문자열 | Record는 자기 완결 TLV. 패키지 name 표는 A1 후보 |
-| 길이 | NAME_SIZE 1024 UTF-16 단위(null 포함, NameTypes.h:57), 초과는 checkf 뒤 대체 이름(UnrealNames.cpp:3271-3285) | UTF-8 3,072 byte, 초과는 InvalidArgument | UE 이름이 모두 들어가는 byte 상한, 예외 대신 Result |
+| 길이 | NAME_SIZE 1024 UTF-16 단위(null 포함, NameTypes.h:57) — 번호 접미를 뗀 base에 건다(MakeDetectNumber → ParseNumberFromName, UnrealNames.cpp:3414-3432·NameTypes.h:259-261 → 3024-3033 → 3271), 초과는 checkf 뒤 대체 이름(UnrealNames.cpp:3271-3285) | 같은 규칙(base 1,023 UTF-16 단위 — 최대 표시 3,080 byte), 초과는 InvalidArgument | 규칙은 같다(UE 이름이 모두 들어가고 UE가 거부하는 이름은 거부), 예외 대신 Result |
 | 텍스트 | Delimited가 아니면 그대로(None은 `None`), Delimited면 None은 `""`(PropertyName.cpp:42-53) | 출력 그대로·None은 `None`, 입력은 빈 값·`None` | 같다(비Delimited) |
 | 차이 판정 | 대소문자 무시 `Identical` | 표시 byte | RCM 63행(사용자 결정 U7) |
 
@@ -1036,7 +1053,7 @@ U5의 Deprecated 저장 범위: UE의 저장 불가 판정은 패키지 저장 �
 1. 종류 성질 표는 MetaSchema constexpr 하나이고, MetaCompiler가 생성하는 대조 헤더를 ToolTests가 컴파일해 C#·C++ 표를 양방향으로 대조한다(1.3절).
 2. Rocks `Atomic`은 통째 단위이며 UE `immutable`·native 결과를 따른다. UE `Atomic`의 깊은 전체 쓰기에 대응하는 의미는 없다(3.1절).
 3. Name 복원은 1단계 수집 → 2a 일괄 intern → 2단계 소비. pool 한도 실패는 2a 실패다(4.1절).
-4. Name 상한은 UTF-8 3,072 byte(UE 이름 전부 수용).
+4. Name 길이 상한은 UE 5.8과 같은 규칙이다: 번호 접미를 뗀 base가 1,023 UTF-16 단위 이하(UE 이름 전부 수용 — 처음 확정안의 "UTF-8 3,072 byte"는 번호 접미를 빠뜨려 base 3,069 byte + `_2147483646`인 UE 이름을 거부했다. B9c2 리뷰 반영, 조정자 결정 2026-11-16).
 5. WeakRef는 같은 그래프 안만 보존하고, 정책별 처리는 5.1절 표다. Include는 지연 덮어쓰기로 순서와 무관하게 한다.
 6. ClassRef의 영속 값은 TypeId, 검사는 쓰기·encode·decode 1단계, 미등록은 정책(키 위치는 늘 거부).
 7. 타입 도구 이름 하나를 asset 명령·ClassRef·InstancedStruct·Sparks가 같이 쓴다(5.2절).
@@ -1155,7 +1172,7 @@ U5의 Deprecated 저장 범위: UE의 저장 불가 판정은 패키지 저장 �
 | A M6 | Deprecated 클래스를 쓰는 속성의 UHT 오류 | 반영: RMC2209(9.2절) |
 | A M7 | Transient의 CDO·archetype 예외 | 반영: 9.2절(A5·prefab에서 다시 정함), 20절 |
 | A L1 | FName은 정확히 ASCII만 | 반영: 4절·18.3절 |
-| A L2 | NAME_SIZE는 UTF-16 단위 | 반영: 상한 3,072 byte(4절, 결정 4) |
+| A L2 | NAME_SIZE는 UTF-16 단위 | 반영: 상한 3,072 byte(4절, 결정 4) — B9c2 리뷰에서 번호 접미를 뗀 base 1,023 UTF-16 단위(UE와 같은 규칙)로 바꿨다 |
 | A L3 | Name None 출력 | 반영: `None` 출력(4절) |
 | A L4 | weak 로드 불일치 정책 | 반영: InvalidArgument로 명시하고 차이 기록(5.1절·18.4절) |
 | A L5 | 인용 정밀도 | 반영: 18절 인용 행 정정(CheckValidObject 913행, CC:3548-3553 등) |

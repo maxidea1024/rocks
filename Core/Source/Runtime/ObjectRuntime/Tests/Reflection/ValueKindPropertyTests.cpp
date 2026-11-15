@@ -78,10 +78,11 @@ constexpr ExpectedRow Expected[] = {{ValueKind::Opaque, "00000000000000"},
                                     {ValueKind::SoftObjectReference, "11111110011001"},
                                     {ValueKind::Digest256, "11111111000001"},
                                     {ValueKind::Int8, "11111111000001"},
-                                    {ValueKind::Int16, "11111111000001"}};
+                                    {ValueKind::Int16, "11111111000001"},
+                                    {ValueKind::Name, "11111111000001"}};
 
 static_assert(sizeof(Expected) / sizeof(Expected[0]) == ValueKindCount);
-static_assert(ValueKindCount == 21);
+static_assert(ValueKindCount == 22);
 static_assert(ValueKindCanBeMapKey(ValueKind::Bool) && !ValueKindCanBeMapKey(ValueKind::Float32));
 
 usize CellCount(const char* cells) noexcept {

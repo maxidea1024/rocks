@@ -111,15 +111,17 @@ enum class ValueKind : uint8 {
                          // SoftObjectReference
     Digest256,           // rocks::Sha256Digest(Core/Encoding/Sha256.h), wire Bytes(정확히 32 byte)
     // 리플렉션 B9 이후의 값 종류다(Docs/Design/ReflectionExtensions.ko.md 1.1절).
-    Int8, // int8(Clang 철자 signed char — 평범한 char는 받지 않는다), wire I64(범위 검사)
-    Int16 // int16(short), wire I64(범위 검사)
+    Int8,  // int8(Clang 철자 signed char — 평범한 char는 받지 않는다), wire I64(범위 검사)
+    Int16, // int16(short), wire I64(범위 검사)
+    Name   // rocks::Name(Core/Text/Name.h — 실행 중 pool 토큰), wire String(표시 문자열 — None은
+           // 빈 문자열). 복원은 1단계 수집 → 2a intern(Object/NameField.h)
 };
 
 // ValueKind 열거자 수(마지막 열거자 + 1)다. 열거자 값은 schema·descriptor 계약이므로 새 종류는 끝에
 // 붙이고, 이 식의 마지막 열거자와 성질 표의 행을 함께 고친다. 아래 static_assert가 성질 표와,
 // MetaCompiler 대조 헤더가 C# 표의 종류 수와 이 값을 비교한다. 근거는
 // Docs/Design/ReflectionExtensions.ko.md 1.3절이다.
-inline constexpr uint32 ValueKindCount = static_cast<uint32>(ValueKind::Int16) + 1;
+inline constexpr uint32 ValueKindCount = static_cast<uint32>(ValueKind::Name) + 1;
 
 // 값 종류의 성질이다(종류 성질 표 — Docs/Design/ReflectionExtensions.ko.md 1.3절).
 // ValueKindProperties가 종류마다 이 비트의 OR를 돌려주고, 런타임의 등록 검증(TypeRegistry)·쓰기
@@ -213,6 +215,7 @@ constexpr ValueKindEntry ValueKindTableEntry(ValueKind kind) noexcept {
     case ValueKind::Int64:
     case ValueKind::Guid:
     case ValueKind::Utf8String:
+    case ValueKind::Name:
     case ValueKind::AssetId:
     case ValueKind::Digest256:
         return {true, keyed};
@@ -392,7 +395,7 @@ struct FieldSchema {
     Span<const char> toolName{};
     // Array 필드(value = {Array, 0})의 원소 형식과 길이 상한이다(B5 — maxElements는 1 이상
     // MaxArrayElements 이하, 저장·경로 쓰기에서 건다). 원소는 스칼라(Int8·Int16 포함), Guid,
-    // Utf8String, ObjectReference, Enum, Struct, AssetId, SoftObjectReference, Digest256이고
+    // Utf8String, Name, ObjectReference, Enum, Struct, AssetId, SoftObjectReference, Digest256이고
     // element.type은 Enum과 Struct면 필수, 두 참조는 기대 타입(선택), 그 밖은 0이다. 배열이 아닌
     // 필드는 Opaque·0이어야 한다.
     ValueType element{};

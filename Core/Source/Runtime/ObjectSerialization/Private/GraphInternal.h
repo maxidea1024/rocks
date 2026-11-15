@@ -33,6 +33,13 @@ inline constexpr uint32 MaxNodeCount = ExternalReferenceBit - 1;
 inline constexpr uint32 MaxExternalCount = ExternalReferenceBit - 1;
 // header의 externalCount 칸 위치다(AssignExternalIndices가 덮어쓴다).
 inline constexpr usize ExternalCountOffset = 20;
+// 2a의 Name intern 하나에 1단계가 미리 청구하는 상수 몫이다(표시 문자열 byte에 더한다 —
+// Docs/Design/ReflectionExtensions.ko.md 4.1절). 근거: 2a는 값마다 중복 표 조회(byte 해시·비교)를
+// 하고 서로 다른 표시마다 TryIntern(gate 2–3번, base 해시, bucket 사슬 훑기, 새 entry면 할당) 한
+// 번을 한다. 한계: NamePool은 64 bucket 연결 목록이라 사슬 길이가 entry 수 / 64에 비례하고(기본
+// maxEntries 65,536이면 약 1,024) 그 훑기는 이 상수에 들지 않는다 — "1단계 청구가 2a 몫을 덮는다"는
+// pool 크기에 비례하는 그 배수 안에서만 성립한다(pool 자체는 entry·storage 한도로 묶인다).
+inline constexpr uint64 NameInternWork = 16;
 
 // 그래프 하나의 누적 작업량 예산이다. ArchiveBudget 하나를 모든 Record 트리(값 reader 포함)와
 // 공유하므로 그래프 청구와 reader 청구가 같은
@@ -200,6 +207,15 @@ struct ImportExpectation {
     ReferenceExpectation expectation;
 };
 
+// 1단계가 기록한 Name 값 하나다(방문 순서 — Docs/Design/ReflectionExtensions.ko.md 4.1절). text는
+// 내용 규칙을 지난 표시 문자열이며 복원 입력·node.migrated·struct 마이그레이션 결과를 빌린다(Stage
+// 수명 동안 유효). token은 2a(InternNodeNames)가 대상 Registry의 pool로 intern한 결과이고(None
+// 문자열은 기본 None) 2단계가 같은 순서로 소비한다.
+struct StoredName {
+    StringView text;
+    Name token{};
+};
+
 // 1단계가 보관한 struct 마이그레이션 결과 하나다(발생 순서). 2단계가 같은 순서로 (type, from)을
 // 대조해 쓴다. bytes의 heap 블록은 Array 이동에도 그대로라 view가 유효하다.
 struct StoredStructMigration {
@@ -216,7 +232,7 @@ struct StoredStructMigration {
 struct LoadNode {
     explicit LoadNode(Allocator& allocator) noexcept
         : migrated(allocator), fields(allocator), expectations(allocator), tokens(allocator),
-          structMigrations(allocator) {
+          structMigrations(allocator), names(allocator) {
     }
 
     TypeId type{};
@@ -231,6 +247,7 @@ struct LoadNode {
     Array<ReferenceExpectation> expectations;
     Array<ReferenceToken> tokens;
     Array<StoredStructMigration> structMigrations;
+    Array<StoredName> names;
     ObjectHandle handle{};
 };
 
@@ -358,6 +375,19 @@ Result<void> CheckCreatePreconditions(Allocator& allocator, ConstructionContext&
 // Create의 오류이고 만든 객체는 트랜잭션에 남는다(호출자 Rollback).
 Result<void> CreateNodes(ConstructionContext& transaction, Array<LoadNode>& nodes,
                          ObjectHandle baseOuter, Array<ObjectHandle>& handles) noexcept;
+
+// 2a의 Name intern이다(GraphApply.cpp, Docs/Design/ReflectionExtensions.ko.md 4.1절 — 사전 확인
+// 뒤·생성 전): 1단계가 기록한 Name 값을 노드 순서·방문 순서대로 pool(대상 Registry의
+// RegistryOptions::names)에 TryIntern해 StoredName::token에 둔다. 그래프 안에서 byte가 같은 표시
+// 문자열은 처음 나온 것만 intern하고 나머지는 그 토큰을 쓴다(같은 byte의 TryIntern은 같은 토큰이다
+// — 순서는 첫 출현 순이라 결정적이다). None 문자열(IsNoneNameText)은 intern하지 않고 기본 None이다.
+// None이 아닌 값이 있는데 pool이 없으면 Unsupported(아무것도 바꾸지 않는다), 중복 표 할당 실패는
+// OutOfMemory, TryIntern의 실패(CapacityExceeded·OutOfMemory·ShuttingDown 등)는 그 오류로 끝난다 —
+// 손상이 아니라 pool 한도이고, 이미 intern한 entry는 pool에 남는다(pool 수명 자원 — 다시 쓰인다).
+// 작업량은 1단계가 Name마다 byte + NameInternWork로 미리 청구했다(한계는 NameInternWork 주석).
+// TryIntern은 pool allocator callback(사용자 코드)을 부른다 — callback이 Registry에 재진입해 이름을
+// 점유하면 뒤의 Create가 AlreadyExists로 실패하고 트랜잭션이 고정된다(손상은 없다 — 계약 위반).
+Result<void> InternNodeNames(Allocator& allocator, NamePool* pool, Array<LoadNode>& nodes) noexcept;
 
 // 2b 확인이다(GraphExternal.cpp, 5.4절 — 쓰기 전): imports 수가 선언 타입 수와 다르면
 // InvalidArgument → import마다 transaction.AcquireType(생존·이 트랜잭션 객체 — StaleHandle 등) →

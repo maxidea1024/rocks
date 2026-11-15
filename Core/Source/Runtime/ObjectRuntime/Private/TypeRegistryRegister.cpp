@@ -737,9 +737,12 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     bool strongReference = false;
     bool required = false;
     bool referenceArray = false;
+    bool nameMember = false;
     for (const FieldSchema& field : schema.fields) {
         // 강한 참조 멤버: 단일 참조와 ObjectRefArray(대상 형식이 ObjectReference).
         const bool referenceTarget = FieldTargetType(field).kind == ValueKind::ObjectReference;
+        // Name 멤버: 단일 Name과 Array<Name>(Transient 포함 — 관찰 struct 제한이 쓴다).
+        nameMember = nameMember || FieldTargetType(field).kind == ValueKind::Name;
         strongReference = strongReference || referenceTarget;
         referenceArray =
             referenceArray || (field.value.kind == ValueKind::Array && referenceTarget);
@@ -829,6 +832,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
                 requiresWorldOnlyOwner = requiresWorldOnlyOwner || record->requiresWorldOnlyOwner;
                 referenceArray = referenceArray || (array ? record->containsStrongReference
                                                           : record->containsReferenceArray);
+                nameMember = nameMember || record->containsName;
             }
         }
 
@@ -912,6 +916,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     record->containsRequired = required;
     record->requiresWorldOnlyOwner = requiresWorldOnlyOwner;
     record->containsReferenceArray = referenceArray;
+    record->containsName = nameMember;
     record->ops.size = ops.size;
     record->ops.alignment = ops.alignment;
     record->ops.nativeType = ops.nativeType;

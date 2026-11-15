@@ -29,6 +29,9 @@ public:
                              ReferenceWire),
           allocator_(allocator) {
         BeginRequiredCheck(transaction);
+        // Name은 Required를 품지 않아 검사 대상이 아니지만, 같은 encode 경로가 트랜잭션 Registry의
+        // pool로 읽도록 둔다.
+        SetNames(transaction.Registry().Names());
     }
 
     // 진단의 objectType·objectIndex(노드 위치, 0부터)를 정한다.

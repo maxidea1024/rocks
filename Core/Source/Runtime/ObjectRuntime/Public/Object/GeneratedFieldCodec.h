@@ -47,6 +47,8 @@ inline Result<uint32> FieldWireType(ValueKind kind, uint32 referenceWire) noexce
     case ValueKind::AssetId:
         return Result<uint32>::Success(static_cast<uint32>(WireType::Guid));
     case ValueKind::Utf8String:
+    case ValueKind::Name:
+        // Name은 표시 문자열이다(None은 빈 문자열 — Docs/Design/ReflectionExtensions.ko.md 4절).
         return Result<uint32>::Success(static_cast<uint32>(WireType::String));
     case ValueKind::Digest256:
         return Result<uint32>::Success(static_cast<uint32>(WireType::Bytes));
@@ -265,7 +267,10 @@ private:
 // rejectMissingRequired면 RequiredMissing 진단 + InvalidArgument, Required 검사 모드면 진단만).
 // non-null 소프트 참조는 쓴 뒤 수집한다(검사 모드는 수집하지 않는다 — Soft 수집은 복원 1단계의 파일
 // 값만). set이 있으면 enum 판정을 그 집합으로 하고 청구하지 않으며(배열 codec이 원소 수만큼 미리
-// 청구한다), 없으면 열거자 수만큼 Spend한다.
+// 청구한다), 없으면 열거자 수만큼 Spend한다. Name은 토큰을 문맥의 pool(Names())로 검사해 표시
+// 문자열을 쓴다(AcquireNameFieldText — pool 없음 Unsupported, 다른 pool WrongContext, 게시되지 않은
+// 토큰 StaleHandle, 내용 규칙 InvalidArgument, None은 빈 문자열) — 내용 검사 몫(byte 수)을
+// Spend한다.
 inline Result<void> WriteValueWire(ArchiveWriter& out, FieldEncodeContext& context,
                                    const ValueType& type, const EnumSchema* enumeration,
                                    const FieldValue& value, StringView text,
@@ -306,6 +311,21 @@ inline Result<void> WriteValueWire(ArchiveWriter& out, FieldEncodeContext& conte
         return out.WriteGuid(value.guid);
     case ValueKind::Utf8String:
         return out.WriteString(text);
+    case ValueKind::Name: {
+        // C++에서 직접 넣은 토큰은 쓰기 검증을 거치지 않았으므로 저장 때 다시 검사한다. lease가
+        // 표시 문자열을 쓰는 동안 붙잡는다.
+        // 청구는 검사 뒤다 — 표시 문자열을 얻어야 길이를 안다(검사 비용은 그 byte에 비례한다).
+        auto display = AcquireNameFieldText(context.Names(), value.name, context.Scratch());
+        if (!display) {
+            return Result<void>::Failure(display.Error());
+        }
+
+        if (auto spent = context.Spend(display.Value().View().ByteCount()); !spent) {
+            return spent;
+        }
+
+        return out.WriteString(display.Value().View());
+    }
     case ValueKind::Digest256:
         return out.WriteBytes(Span<const uint8>(value.digest.bytes, Sha256Digest::Bytes));
     case ValueKind::SoftObjectReference: {
@@ -399,7 +419,8 @@ inline Result<uint32> EncodeFieldWire(ArchiveWriter& out, FieldEncodeContext& co
 
 // ReadValueWire가 읽은 값 하나다. 할당하지 않는 view이며(text는 입력을 빌린다) kind에 맞는 칸만
 // 뜻이 있다. undeclared는 선언되지 않은 enum 값을 읽었다는 표시(stored = 저장 값)이고, 정책
-// 판정·대체 값은 ResolveUndeclaredEnum이 한다.
+// 판정·대체 값은 ResolveUndeclaredEnum이 한다. Name은 text가 표시 문자열이고 name은 2단계의
+// 토큰이다(ResolveParsedName — 1단계는 기본 None 그대로).
 struct ParsedValue {
     bool boolean = false;
     uint64 unsignedInteger = 0;
@@ -408,6 +429,7 @@ struct ParsedValue {
     double float64 = 0;
     Guid guid{};
     StringView text;
+    Name name{};
     Sha256Digest digest{};
     DecodedReference reference;
     bool undeclared = false;
@@ -418,7 +440,9 @@ struct ParsedValue {
 // 하지 않는다(강한 참조는 문맥의 ReadReference — 1단계는 token을 남긴다). 검증: 잘림·bool·UTF-8은
 // reader 규칙, 정수 폭 Overflow, digest 길이·SoftObjectRef 규칙 InvalidArgument, enum은
 // enumeration이 없으면 Unsupported이고 선언 여부를 set(있으면) 또는 스키마로 판정해
-// out.undeclared에 표시만 한다. Struct·Array·Opaque는 Unsupported다.
+// out.undeclared에 표시만 한다. Name은 표시 문자열을 view로 읽고, 기록하는 단계(복원 1단계)면 그
+// 몫(byte 수)을 Spend한 뒤 내용 규칙(ValidateNameFieldText — 길이·UTF-8·NUL·NFC, InvalidArgument)을
+// 본다 — 토큰은 ResolveParsedName이 단계에 맞게 정한다. Struct·Array·Opaque는 Unsupported다.
 inline Result<void> ReadValueWire(ArchiveReader& reader, FieldDecodeContext& context,
                                   const ValueType& type, const EnumSchema* enumeration,
                                   const EnumValueSet* set, const void* staticNative,
@@ -505,6 +529,30 @@ inline Result<void> ReadValueWire(ArchiveReader& reader, FieldDecodeContext& con
         auto decoded = reader.ReadStringView();
         if (!decoded) {
             return Result<void>::Failure(decoded.Error());
+        }
+
+        out.text = decoded.Value();
+        return Result<void>::Success();
+    }
+    case ValueKind::Name: {
+        auto decoded = reader.ReadStringView();
+        if (!decoded) {
+            return Result<void>::Failure(decoded.Error());
+        }
+
+        // 내용 검사는 기록하는 단계(복원 1단계)만 한다 — 2단계는 TakeName이 1단계 기록과 byte가
+        // 같음을 확인하므로 다시 보지 않는다(NFC 판정 할당이 2단계의 입력 실패 지점이 되지 않게).
+        // 청구는 검사 전이다(소진된 예산으로 검사하지 않는다 — 저장은 표시 문자열을 얻어야 길이를
+        // 알므로 검사 뒤다). Spend 규약대로 1단계는 두 배를 청구한다(2단계가 하지 않는 몫까지 —
+        // 보수적이다).
+        if (context.IsRecording()) {
+            if (auto spent = context.Spend(decoded.Value().ByteCount()); !spent) {
+                return spent;
+            }
+
+            if (auto valid = ValidateNameFieldText(decoded.Value(), context.Scratch()); !valid) {
+                return valid;
+            }
         }
 
         out.text = decoded.Value();
@@ -629,6 +677,24 @@ inline Result<void> ReportParsedValue(FieldDecodeContext& context, const ValueTy
     return Result<void>::Success();
 }
 
+// 검증을 마친 Name 값 하나(parsed.text)를 단계에 맞게 처리한다(ReflectionExtensions.ko.md 4.1절):
+// 기록하는 단계(복원 1단계)는 CollectName으로 방문 순서대로 기록하고(2a intern 몫 청구 —
+// parsed.name은 기본 None 그대로), 2단계는 TakeName이 준 토큰(2a가 대상 Registry의 pool로 intern한
+// 것)을 parsed.name에 둔다. 단일 값 필드·struct 멤버와 배열 원소가 원소마다 같은 순서로 부른다.
+inline Result<void> ResolveParsedName(FieldDecodeContext& context, ParsedValue& parsed) noexcept {
+    if (context.IsRecording()) {
+        return context.CollectName(parsed.text);
+    }
+
+    auto token = context.TakeName(parsed.text);
+    if (!token) {
+        return Result<void>::Failure(token.Error());
+    }
+
+    parsed.name = token.Value();
+    return Result<void>::Success();
+}
+
 // 지금 위치(context.Field())의 단일 값 저장값 field를 해석·검증한다. 1단계와 2단계가 같은 reader
 // 호출 순서를 실행하며(문자열·경로는 view로 읽는다), 검증(wire 종류 TypeMismatch, 정수 폭 Overflow,
 // enum 정책, digest 길이·SoftObjectRef 규칙·trailing byte InvalidArgument)이 끝난 뒤 진단·수집을
@@ -683,9 +749,18 @@ inline Result<void> ParseFieldValue(const FieldView& field, FieldDecodeContext& 
         return reported;
     }
 
-    // 2단계 몫: staged 쓰기 1 + 문자열(값 복사와 staged 교체본) 2배 + 강한 참조 연결 1.
+    // Name: 1단계는 표시 문자열을 기록하고 2단계는 2a가 intern한 토큰을 받는다.
+    if (kind == ValueKind::Name) {
+        if (auto resolved = ResolveParsedName(context, parsed); !resolved) {
+            return resolved;
+        }
+    }
+
+    // 2단계 몫: staged 쓰기 1 + 문자열(값 복사와 staged 교체본) 2배 + 강한 참조 연결 1. Name은
+    // 문자열을 복사하지 않는다(토큰을 쓴다 — intern 몫은 CollectName이 청구했다).
+    const usize copiedText = kind == ValueKind::Name ? 0 : parsed.text.ByteCount();
     usize applyWork = 0;
-    if (!TryMultiply(parsed.text.ByteCount(), 2, applyWork) ||
+    if (!TryMultiply(copiedText, 2, applyWork) ||
         !TryAdd(applyWork, kind == ValueKind::ObjectReference ? 2 : 1, applyWork)) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
@@ -705,6 +780,7 @@ inline Result<void> ParseFieldValue(const FieldView& field, FieldDecodeContext& 
     apply->float32 = parsed.float32;
     apply->float64 = parsed.float64;
     apply->guid = parsed.guid;
+    apply->name = parsed.name;
     apply->digest = parsed.digest;
     apply->reference = parsed.reference.handle;
     apply->type = kind == ValueKind::Enum ? schema.value.type : TypeId{};
@@ -1262,8 +1338,8 @@ Result<uint32> EncodeArrayField(const Container& array, ArchiveWriter& out,
 
         return Result<uint32>::Success(static_cast<uint32>(WireType::RecordList));
     } else {
-        constexpr bool variable =
-            IsSameV<Element, String> || SoftReferenceField<Element>::Supported;
+        constexpr bool variable = IsSameV<Element, String> || IsSameV<Element, Name> ||
+                                  SoftReferenceField<Element>::Supported;
         auto elementWire = FieldWireType(field.element.kind, context.ReferenceWireType());
         if (!elementWire) {
             return elementWire;
@@ -1350,6 +1426,8 @@ Result<void> AppendParsedElement(Array<Element>& target, const ParsedValue& pars
         return target.TryPushBack(AssetId{parsed.guid});
     } else if constexpr (IsSameV<Element, Sha256Digest>) {
         return target.TryPushBack(parsed.digest);
+    } else if constexpr (IsSameV<Element, Name>) {
+        return target.TryPushBack(parsed.name);
     } else if constexpr (IsSameV<Element, float>) {
         return target.TryPushBack(parsed.float32);
     } else if constexpr (IsSameV<Element, double>) {
@@ -1410,6 +1488,14 @@ Result<void> DecodeValueArray(Array<Element>* target, const FieldView& field,
         }
     }
 
+    // Name 원소는 1단계에서 토큰이 없으므로 관찰(1단계 임시 값 채우기)할 수 없다 — 관찰 struct는
+    // Name을 담지 않는다(직렬화기가 ObservedStructs에서 거부한다, 4.1절).
+    if constexpr (IsSameV<Element, Name>) {
+        if (target && context.IsRecording()) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
     if (target) {
         target->Clear();
         if (auto reserved = target->TryReserve(count); !reserved) {
@@ -1447,7 +1533,12 @@ Result<void> DecodeValueArray(Array<Element>* target, const FieldView& field,
             return reported;
         }
 
-        if (!TryAdd(textBytes, parsed.text.ByteCount(), textBytes)) {
+        // Name 원소는 문자열을 복사하지 않는다(1단계는 기록, 2단계는 2a 토큰 — 원소마다 같은 순서).
+        if constexpr (IsSameV<Element, Name>) {
+            if (auto resolved = ResolveParsedName(context, parsed); !resolved) {
+                return resolved;
+            }
+        } else if (!TryAdd(textBytes, parsed.text.ByteCount(), textBytes)) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }
 
@@ -1793,6 +1884,14 @@ Result<void> DecodeStructMember(const RuntimeStructFieldOps&, ConstructionContex
         return SetStructMemberReference(*construction, context, owner, target->*MemberPointer,
                                         value.reference);
     } else {
+        // Name 멤버는 1단계에서 토큰이 없으므로 관찰할 수 없다(관찰 struct는 Name을 담지 않는다 —
+        // 직렬화기가 ObservedStructs에서 거부한다, Docs/Design/ReflectionExtensions.ko.md 4.1절).
+        if constexpr (IsSameV<Member, Name>) {
+            if (!construction && target) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+        }
+
         // 검증 방식은 값을 채우지 않는다(문자열을 scratch에 복사하지 않는다). enum은 정적 enum
         // 확인에 값이 필요하다. 관찰 방식(construction 없음·target 있음)의 문자열 사본은 1단계에만
         // 있는 일이라 ObservationScratch로 한 번만 청구한다(Scratch는 2단계 몫까지 두 번 센다).
@@ -1958,6 +2057,21 @@ Result<void> DecodeGeneratedField(ConstructionContext* construction, ObjectHandl
         }
 
         return WriteGeneratedStagedField<Owner>(*construction, handle, member, value);
+    } else if constexpr (IsSameV<Member, Name>) {
+        // 2단계 토큰은 2a가 이 Registry의 pool로 intern한 것이고 내용은 1단계가 검사했으므로 staged
+        // 쓰기의 토큰 검사(pool·domain·내용)를 다시 하지 않는다 — 2단계는 입력 때문에 실패하지
+        // 않는다.
+        if (!construction) {
+            return ParseFieldValue(field, context, nullptr, nullptr);
+        }
+
+        FieldValue value(context.Scratch());
+        if (auto parsed = ParseFieldValue(field, context, nullptr, &value); !parsed) {
+            return parsed;
+        }
+
+        return WriteGeneratedValue<Owner>(
+            member, value, [&]() noexcept { return construction->GetForWrite<Owner>(handle); });
     } else {
         if (!construction) {
             return ParseFieldValue(field, context, StaticReferenceNative<Member>(), nullptr);

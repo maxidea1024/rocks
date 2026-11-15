@@ -271,6 +271,32 @@ public:
         return Result<DecodedReference>::Success(decoded);
     }
 
+    // 검증한 Name 표시 문자열을 노드의 기록에 더하고 2a intern 몫(byte + NameInternWork)을 한 번
+    // 청구한다(2단계는 intern하지 않으므로 Spend의 두 배가 아니다 — Charge로 세어 reader 작업 Δ
+    // 청구와 겹치지 않는다).
+    Result<void> CollectName(StringView text) noexcept override {
+        if (!node_) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        uint64 work = 0;
+        if (!TryAdd(uint64{text.ByteCount()}, NameInternWork, work)) {
+            return Result<void>::Failure(ErrorCode::Overflow);
+        }
+
+        if (auto spent = Charge(work); !spent) {
+            return spent;
+        }
+
+        StoredName stored;
+        stored.text = text;
+        if (!node_->names.TryPushBack(stored)) {
+            return Result<void>::Failure(ErrorCode::OutOfMemory);
+        }
+
+        return Result<void>::Success();
+    }
+
     Result<void> Spend(uint64 work) noexcept override {
         uint64 doubled = 0;
         if (!TryMultiply(work, uint64{2}, doubled)) {
@@ -700,7 +726,8 @@ Result<UniquePtr<StageData>> ValidateGraph(Allocator& allocator, TypeRegistry& t
     }
 
     GraphValidateContext context(allocator, data.budget, options, nodes.Size(), data.externalUses);
-    // 관찰할 struct ID를 정렬해 둔다(미등록 NotFound, 참조를 담는 struct InvalidArgument).
+    // 관찰할 struct ID를 정렬해 둔다(미등록 NotFound, 참조나 Name을 담는 struct InvalidArgument —
+    // 관찰 값은 1단계 임시 값인데 1단계는 참조 대상도 Name 토큰도 만들 수 없다).
     Array<TypeId> observed(allocator);
     if (options.hooks) {
         const Span<const TypeId> requested = options.hooks->ObservedStructs();
@@ -720,7 +747,8 @@ Result<UniquePtr<StageData>> ValidateGraph(Allocator& allocator, TypeRegistry& t
                 return Output::Failure(lease.Error());
             }
 
-            if (lease.Value().Struct().ContainsStrongReference()) {
+            if (lease.Value().Struct().ContainsStrongReference() ||
+                lease.Value().Struct().ContainsName()) {
                 return Output::Failure(ErrorCode::InvalidArgument);
             }
 

@@ -12,6 +12,7 @@
 
 namespace rocks {
 
+class NamePool;
 class WorkerScheduler;
 
 // 객체 경로(Outer 사슬 이름을 '.'로 이은 것 — Docs/Design/ObjectFoundations.ko.md 1.1절)의 byte
@@ -152,6 +153,12 @@ struct RegistryOptions {
     // 멈춘다(그 경로를 시험하는 Registry만 false로 둔다). 계수 ObjectStats::retiredWithoutDiscard는
     // 언제나 센다.
     bool assertRetiredWithoutDiscard = true;
+    // Name 필드(ValueKind::Name — 리플렉션 B9c2)의 토큰 pool이다(빌림 — Registry보다 오래 살고 쓰는
+    // 동안 실행 중이어야 한다, 생성 뒤 바꾸지 않는다). Engine이 pool 하나를 에셋·World Registry에
+    // 같이 준다(예: options.names = &names). 없으면 Name 필드에 None만 둘 수 있다(None이 아닌
+    // 토큰의 쓰기·저장·복원 Unsupported). 쓰기는 토큰 domain이 이 pool인지 보고(다르면
+    // WrongContext) 그래프 복원 2a가 이 pool로 intern한다(ReflectionExtensions.ko.md 4·4.1절).
+    NamePool* names = nullptr;
 };
 
 struct ObjectStats {
@@ -223,6 +230,12 @@ public:
     // 생성 때 받은 객체 정책이다. 생성 뒤 바뀌지 않으므로 어느 스레드에서나 읽을 수 있다.
     const RegistryPolicy& Policy() const noexcept {
         return options_.policy;
+    }
+
+    // RegistryOptions::names(없으면 nullptr)다. 생성 뒤 바뀌지 않아 어느 스레드에서나 읽는다(pool의
+    // 스레드 규칙은 NamePool). Name 쓰기 검사·저장 encode·복원 2a intern이 쓴다.
+    NamePool* Names() const noexcept {
+        return options_.names;
     }
 
     // 호출 스레드와 access가 이 Registry의 소유 스레드·문맥인지 본다. 다른 API의 1단계 접근 검사와

@@ -1,4 +1,5 @@
 #include <Object/RuntimeTypeOps.h>
+#include <Object/NameField.h>
 #include <Object/ObjectRegistry.h>
 #include <Object/SoftObjectRef.h>
 #include <Object/TypeRegistry.h>
@@ -116,6 +117,16 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
     binding.readOnly = readOnly_;
     if (auto valid = detail::ValidateFieldWrite(binding, target, value); !valid) {
         return valid;
+    }
+
+    // Name 토큰은 이 Registry의 pool 것이고 표시 문자열이 내용 규칙을 지켜야 한다(수동 callback도
+    // 지키도록 여기서 검사한다 — pool 없음 Unsupported, 다른 pool WrongContext, 게시되지 않은 토큰
+    // StaleHandle, 내용 InvalidArgument). 순서는 소프트 참조 규칙처럼 읽기 전용 정책 뒤다.
+    if (value.kind == ValueKind::Name) {
+        if (auto valid = ValidateNameFieldToken(registry.Names(), value.name, value.GetAllocator());
+            !valid) {
+            return valid;
+        }
     }
 
     // 수동 함수표가 비정규 handle을 저장하지 않게 callback에는 정규 null 사본을 넘긴다(참조 값의

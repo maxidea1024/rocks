@@ -198,7 +198,7 @@ const RegistryPolicy& ObjectRegistry::Policy() const noexcept;   // 생성 뒤 �
 - 패키지 정책 Registry의 `RequestDestroy`·`Object::Destroy`는 관찰자 유무와 무관하게 Unsupported다(A0-Ob, 11절 결정 1) — "소속 객체는 Discard로만 죽는다"(1.7절)가 정책 전체의 불변식이다. 판정 위치는 접근 검사(WrongThread·WrongContext) 바로 다음이다(정적인 Registry 성질이라 종료·재진입·handle보다 먼저 — 구현에서 정함). 관찰자는 패키지 정책 Registry에만 붙는다(Registry 생성자가 정책 없음·이미 붙은 관찰자를 Fatal로 거부하고, 소멸자가 떼어 낸다. 붙은 채 관찰자가 소멸하면 Fatal).
 - **후속 자리(World 정책)**: `RegistryPolicy::worldOnlyCreationKey`(불투명 키 — World API만 가진 키를 Create에 함께 줄 때만 WorldOnly 타입 생성을 허용)로 EngineRuntime 4절 134행 "World registry의 외부 생성 거부"를 구현한다. A0-O는 이름과 뜻만 정하고 구현은 World 정책 단계다(EngineRuntime 134행을 이 절로 연결 — 12절).
 
-리플렉션 B9 연결: [리플렉션 B9](ReflectionExtensions.ko.md)가 `RegistryOptions::names`(NamePool 빌림 — Registry보다 오래 살아야 한다, Name 필드의 intern·조회)와 객체 allocator 공개 조회 `ObjectRegistry::ObjectAllocator()`·`ConstructionContext::ObjectAllocator()`(Optional·InstancedStruct·Text 값 생성)를 더한다(ReflectionExtensions 4·1.7절).
+리플렉션 B9 연결: [리플렉션 B9](ReflectionExtensions.ko.md)가 `RegistryOptions::names`(NamePool 빌림 — Registry보다 오래 살아야 한다, Name 필드의 intern·조회. B9c2 구현 — 없으면 Name 필드에 None만 둘 수 있다)와 객체 allocator 공개 조회 `ObjectRegistry::ObjectAllocator()`·`ConstructionContext::ObjectAllocator()`(Optional·InstancedStruct·Text 값 생성)를 더한다(ReflectionExtensions 4·1.7절).
 
 ### 1.4 자료구조(`ObjectRegistry.cpp` 내부)
 
@@ -647,7 +647,7 @@ public:
 - **2b 확인**(쓰기 전): `imports.Size() == importTypes.Size()`(InvalidArgument), import마다 생존 객체 또는 이 트랜잭션 객체(StaleHandle), 실제 타입이 선언 타입의 native 파생(InvalidArgument — 호출자 계약), 그리고 1단계가 기록한 (import i, 기대 형식) 쌍마다 실제 대상이 그 기대를 만족(TypeMismatch). `importTypes`는 1단계 형식 검사와 A1의 `expectedTypeId` 대조에만 쓰이고, 실제 연결의 판정은 기록한 쌍이다. 이어서 지금 `ConstructGraph`의 적용 루프다(외부 참조 token을 `imports`의 handle로 바꾼다). 이 확인은 쓰기 전이지만 객체를 만든 뒤라 실패하면 트랜잭션을 고정한다(상태 기계 규칙).
 - 1단계가 청구하는 2단계 몫: 노드 생성(노드 수 + 이름 byte) + Commit 몫 1 + staged 간선 수 + 2b imports 확인(import 수 + 기록한 쌍 수) + 적용 몫(지금과 같다). 2c(Required)는 작업량 무제한이다(4절).
 
-리플렉션 B9 연결: 1단계는 Transient·Deprecated 클래스 노드를 거부하지 않고 진단(`TransientType`·`DeprecatedType`)한다. 그래프 안 Outer의 Within은 1단계, 기준 Outer의 Within은 2a가 판정한다. Name 필드는 1단계가 문자열을 검사·수집하고 2a 몫 작업량을 미리 청구하며, 2a가 대상 Registry의 pool로 일괄 intern한다(ReflectionExtensions 4.1·9.2절).
+리플렉션 B9 연결: 1단계는 Transient·Deprecated 클래스 노드를 거부하지 않고 진단(`TransientType`·`DeprecatedType`)한다. 그래프 안 Outer의 Within은 1단계, 기준 Outer의 Within은 2a가 판정한다. Name 필드는 1단계가 문자열을 검사·수집하고 2a 몫 작업량을 미리 청구하며, 2a가 대상 Registry의 pool로 일괄 intern한다(B9c2 구현 — 사전 확인 뒤·생성 전, None 문자열은 intern하지 않는다. ReflectionExtensions 4·4.1·9.2절).
 
 ### 5.5 편의 복원 (A0-Od1)
 
@@ -784,7 +784,7 @@ return transaction.Commit(roots, held);
 - 마지막 생존 재확인(5.2절)에 외부 참조 대상도 넣었다 — 결과의 handle은 게시 시점에 모두 생존 객체다.
 - 같은 대상의 이후 출현은 대상별 TypeLease 캐시로 기대 형식을 검사하고 생존은 lease 없는 조회로 본다(집합 노드 참조와 같은 비용 구조 — 참조마다 AcquireType을 부르지 않는다).
 
-리플렉션 B9 연결: 2a 실패 목록에 Name pool 한도(CapacityExceeded·OutOfMemory — 손상 아님)를, 1단계·2a 오류 위치에 Within(InvalidArgument)을 더한다. Transient·Deprecated 노드는 오류가 아니라 진단이다(ReflectionExtensions 4.1·9.2절).
+리플렉션 B9 연결: 2a 실패 목록에 Name pool 한도(CapacityExceeded·OutOfMemory — 손상 아님)와 pool 없는 Registry의 None이 아닌 Name 값(Unsupported — B9c2)을, 1단계·2a 오류 위치에 Within(InvalidArgument)을 더한다. Transient·Deprecated 노드는 오류가 아니라 진단이다(ReflectionExtensions 4.1·9.2절).
 
 ## 6. 스레드·수명·GC 장벽
 

@@ -20,6 +20,8 @@
 // 정한다. 이 헤더는 생성 헤더와 직렬화기만 include한다.
 namespace rocks {
 
+class NamePool;
+
 // 미선언 enum 값을 읽었을 때: 거부(InvalidArgument) 또는 진단 후 대체 값(EnumReplacementValue).
 enum class UndeclaredEnumPolicy : uint8 {
     Reject,
@@ -147,6 +149,16 @@ public:
         return recording_;
     }
 
+    // Name 필드 값(ValueKind::Name)의 토큰 pool이다(저장 encode가 토큰의 표시 문자열을 읽는다 —
+    // 직렬화기가 대상 Registry의 RegistryOptions::names로 정한다, 없으면 nullptr). 복원 문맥은
+    // pool에 닿지 않으므로(1단계는 표시 문자열을 기록하고 2a가 intern한다) 정하지 않는다.
+    //
+    // 사용 예(Name 값 encode):
+    //   auto display = AcquireNameFieldText(context.Names(), value.name, context.Scratch());
+    NamePool* Names() const noexcept {
+        return names_;
+    }
+
     // 진단을 받을 곳이 있는지다(기록하지 않는 단계는 참이다 — 1단계가 이미 판정했다). 값을 바꾸는
     // 정책(ReportAndDefault)은 이것이 거짓이면 InvalidArgument다(진단 없이 값을 바꾸지 않는다).
     bool CanReport() const noexcept {
@@ -222,6 +234,11 @@ protected:
         recording_ = recording;
     }
 
+    // 저장 문맥이 Names()를 정한다(그 Registry의 RegistryOptions::names).
+    void SetNames(NamePool* names) noexcept {
+        names_ = names;
+    }
+
     bool Recording() const noexcept {
         return recording_;
     }
@@ -238,6 +255,7 @@ private:
     friend class ElementIndexScope;
 
     FieldCodecHooks* hooks_;
+    NamePool* names_ = nullptr;
     // 맨 위 프레임이다. ElementIndexScope가 그 index 칸을 쓰므로 non-const다(Current()는 const를
     // 돌려준다).
     FieldCodecFrame* current_ = nullptr;
@@ -635,6 +653,27 @@ public:
     // 함께 기록한다.
     virtual Result<DecodedReference>
     ReadReference(ArchiveReader& reader, const ReferenceExpectation& expectation) noexcept = 0;
+
+    // 복원 1단계(기록하는 단계)가 내용 규칙(ValidateNameFieldText)을 지난 Name 표시 문자열 하나를
+    // 방문 순서대로 기록한다(Docs/Design/ReflectionExtensions.ko.md 4.1절). 1단계는 ObjectRegistry·
+    // pool에 닿지 않으므로 intern은 2a(CreateObjects 사전 확인)가 대상 Registry의 pool로 일괄 하고,
+    // 1단계가 그 몫(byte + 상수)을 여기서 미리 청구한다. text는 복원 입력(또는 1단계가 보관한
+    // 마이그레이션 결과)을 빌린 view이며 Stage 수명 동안 유효하다. 값 하나에 한 번이다(None
+    // 문자열도 기록한다 — 2a가 기본 None으로 둔다). 기본은 Unsupported다(Name 복원을 지원하지 않는
+    // 문맥).
+    virtual Result<void> CollectName(StringView text) noexcept {
+        (void)text;
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    // 복원 2단계가 1단계와 같은 방문 순서로 Name 토큰 하나를 받는다(2a가 intern한 토큰 — 대상
+    // Registry pool의 것이고 내용 검사를 지났다). text는 2단계가 다시 읽은 표시 문자열이며 1단계
+    // 기록과 byte가 다르거나 기록이 남지 않았으면 두 단계의 방문 순서가 어긋난 계약 위반이라
+    // InvalidArgument다. 기본은 Unsupported다.
+    virtual Result<Name> TakeName(StringView text) noexcept {
+        (void)text;
+        return Result<Name>::Failure(ErrorCode::Unsupported);
+    }
 
 protected:
     FieldDecodeContext(const FieldDecodePolicy& policy, FieldCodecHooks* hooks,

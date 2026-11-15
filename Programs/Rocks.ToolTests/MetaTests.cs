@@ -518,6 +518,41 @@ internal static class MetaTests
             ProcessResult compiled = await probe.CompileGeneratedAsync();
             Verify.Equal(0, compiled.ExitCode, "generated integer width header compiles: " + compiled.StdOut + compiled.StdErr);
         });
+        // 리플렉션 B9c2: rocks::Name 클래스 필드·struct 멤버·Array<Name> 원소가 descriptor의 Name 종류와 생성 코드(스키마·경로 thunk)에
+        // 닿고 생성 헤더가 컴파일된다(Docs/Design/ReflectionExtensions.ko.md 4절).
+        suite.Add("Meta.NameFieldsReachDescriptorAndGeneratedCode", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            string source = "#include <Core/Containers/Array.h>\n#include <Core/Text/Name.h>\n" + Preamble +
+                "ROCKS_STRUCT()\nstruct Leaf {\nexplicit Leaf(rocks::Allocator& allocator) noexcept : aliases(allocator) {}\n" +
+                "ROCKS_PROPERTY() rocks::Name socket;\nROCKS_PROPERTY() rocks::Array<rocks::Name> aliases;\n};\n" +
+                "ROCKS_CLASS()\nstruct Value : public rocks::Object {\n" +
+                "explicit Value(rocks::Allocator& allocator) noexcept : leaf(allocator), names(allocator) {}\n" +
+                "ROCKS_PROPERTY() rocks::Name label;\nROCKS_PROPERTY() Leaf leaf;\nROCKS_PROPERTY() rocks::Array<rocks::Name> names;\n};\n}\n";
+            await probe.GenerateAsync(source);
+            using System.Text.Json.JsonDocument descriptor = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(probe.Descriptor));
+            System.Text.Json.JsonElement Field(string type, string name) => descriptor.RootElement.GetProperty("types").EnumerateArray()
+                .Single(item => item.GetProperty("name").GetString() == type).GetProperty("fields").EnumerateArray()
+                .Single(field => field.GetProperty("name").GetString() == name);
+            Verify.Equal("Name", Field("probe::Value", "label").GetProperty("value").GetProperty("kind").GetString(), "Name class field");
+            Verify.Equal("Name", Field("probe::Leaf", "socket").GetProperty("value").GetProperty("kind").GetString(), "Name struct member");
+            Verify.Equal("Name", Field("probe::Value", "names").GetProperty("element").GetProperty("kind").GetString(), "Name array element");
+            Verify.Equal("Name", Field("probe::Leaf", "aliases").GetProperty("element").GetProperty("kind").GetString(), "Name member array element");
+            string generated = Compact(File.ReadAllText(probe.Output));
+            Verify.Contains("PathStructMember<&::probe::Leaf::socket,ValueKind::Name>", generated, "Name member path thunk");
+            Verify.Contains("{ValueKind::Name,Guid{}},65536u}", generated, "Name array element schema");
+            ProcessResult compiled = await probe.CompileGeneratedAsync();
+            Verify.Equal(0, compiled.ExitCode, "generated Name header compiles: " + compiled.StdOut + compiled.StdErr);
+        });
+        // Name은 Required를 받지 않는다(성질 표 AcceptsRequired 없음 — 단일 필드·Array<Name> 모두 RMC2202).
+        AddRejectGroup("Meta.NameRejectsRequired", [
+            Declaration("ROCKS_PROPERTY(Required) rocks::Name label;")
+                .Replace("namespace probe {", "#include <Core/Text/Name.h>\nnamespace probe {", StringComparison.Ordinal),
+            Declaration("ROCKS_PROPERTY(Required) rocks::Array<rocks::Name> names;",
+                    extra: "explicit Value(rocks::Allocator& allocator) noexcept : names(allocator) {}")
+                .Replace("namespace probe {", "#include <Core/Containers/Array.h>\n#include <Core/Text/Name.h>\nnamespace probe {",
+                    StringComparison.Ordinal)],
+            "RMC2202", "applies only to");
         // 평범한 char는 부호가 구현 정의라 필드·배열 원소 모두 받지 않고 int8·uint8을 안내한다.
         AddRejectGroup("Meta.PlainCharFieldIsUnsupported", [
             Declaration("ROCKS_PROPERTY() char letter = 0;"),
@@ -1864,7 +1899,7 @@ internal static class MetaProbeIdentity
                 "probe::Value::points", "probe::Box::refs", "probe::MovableBundle::refs",
                 "probe::Value::tiny", "probe::Value::signedValue", "probe::Value::shortValue", "probe::Value::wide", "probe::Value::huge",
                 "probe::Value::narrow", "probe::Value::tinies", "probe::Value::narrows", "probe::Leaf::tiny", "probe::Leaf::narrow",
-                "probe::Value::letter", "probe::Value::letters",
+                "probe::Value::letter", "probe::Value::letters", "probe::Value::label", "probe::Leaf::socket", "probe::Leaf::aliases",
                 "probe::Point::x", "probe::Point::y", "probe::Segment::from", "probe::Segment::owner", "probe::Plain::at",
                 "probe::Value::point", "probe::Value::segment" }
                 .Concat(Enumerable.Range(2, 16).Select(level => $"probe::Chain{level}::inner")))

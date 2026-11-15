@@ -3,6 +3,7 @@
 #include <Meta/GeneratedType.h>
 #include <Object/AssetId.h>
 #include <Object/ConstructionContext.h>
+#include <Object/NameField.h>
 #include <Object/SoftObjectRef.h>
 #include <Core/ScopeExit.h>
 
@@ -122,6 +123,8 @@ constexpr ValueKind ScalarValueKind() noexcept {
         return ValueKind::Guid;
     } else if constexpr (IsSameV<T, String>) {
         return ValueKind::Utf8String;
+    } else if constexpr (IsSameV<T, Name>) {
+        return ValueKind::Name;
     } else if constexpr (ObjectReferenceField<T>::Supported) {
         return ValueKind::ObjectReference;
     } else if constexpr (IsSameV<T, AssetId>) {
@@ -168,7 +171,8 @@ struct TargetValueCheck {
 };
 
 // 단일 값 하나를 Target 종류로 FieldValue에 복사한다(String·Soft 경로는 value의 allocator로 할당 —
-// OutOfMemory). enum은 정수와 GeneratedType<E>::Id()를 싣는다. 참조는 handle을 싣는다.
+// OutOfMemory). enum은 정수와 GeneratedType<E>::Id()를 싣는다. 참조는 handle을, Name은 토큰을
+// 싣는다(할당 없음).
 //
 // 사용 예:
 //   FieldValue value(allocator);
@@ -185,6 +189,8 @@ Result<void> CopyTargetValue(const T& source, FieldValue& value) noexcept {
         return value.string.TryAssign(source.objectPath.View());
     } else if constexpr (Target == ValueKind::AssetId) {
         value.guid = source.value;
+    } else if constexpr (Target == ValueKind::Name) {
+        value.name = source;
     } else if constexpr (Target == ValueKind::Digest256) {
         value.digest = source;
     } else if constexpr (Target == ValueKind::Enum) {
@@ -215,7 +221,9 @@ Result<void> CopyTargetValue(const T& source, FieldValue& value) noexcept {
 // ID가 GeneratedType<E>::Id()가 아니면 TypeMismatch·선언되지 않은 값이면 InvalidArgument, Soft는
 // null 규칙·경로 상한 위반이 InvalidArgument다(실패하면 target은 그대로다). String·Soft는 target의
 // allocator로 할당한다(OutOfMemory — 이때는 제자리 대입이므로 원자적 게시가 필요한 쓰기는 새 값에
-// 쓴 뒤 Swap한다). 참조는 Registry로만 쓰므로 받지 않는다(컴파일 오류).
+// 쓴 뒤 Swap한다). 참조는 Registry로만 쓰므로 받지 않는다(컴파일 오류). Name은 토큰을 그대로
+// 대입한다 — 토큰이 대상 Registry pool의 것인지와 내용 규칙(ValidateNameFieldToken)은 호출
+// 경로(FieldWriteOperation·WriteGeneratedStagedField·경로 쓰기)가 먼저 검사한다.
 template <ValueKind Target, class T>
 Result<void> WriteTargetValue(T& target, const FieldValue& value) noexcept {
     static_assert(TargetValueCheck<Target, T>::Valid);
@@ -231,6 +239,8 @@ Result<void> WriteTargetValue(T& target, const FieldValue& value) noexcept {
         return target.TryAssign(AssetId{value.guid}, value.string.View());
     } else if constexpr (Target == ValueKind::AssetId) {
         target = AssetId{value.guid};
+    } else if constexpr (Target == ValueKind::Name) {
+        target = value.name;
     } else if constexpr (Target == ValueKind::Digest256) {
         target = value.digest;
     } else if constexpr (Target == ValueKind::Enum) {
@@ -464,6 +474,23 @@ Result<void> WriteGeneratedStagedField(ConstructionContext& construction, Object
         }
 
         return construction.SetReference(handle, target.Value()->*member, value.reference);
+    } else if constexpr (IsSameV<Member, Name>) {
+        // Name 토큰은 그 트랜잭션 Registry의 pool 것이어야 한다(FieldWriteOperation과 같은 검사 —
+        // pool 없음 Unsupported, 다른 pool WrongContext, 내용 InvalidArgument). 소프트 참조처럼
+        // owner 확인(접근·생존·검사 중 Busy) 뒤에 본다 — 잘못된 문맥에서 pool을 만지지 않는다.
+        // 게시는 owner를 다시 얻어 할당 없이 대입한다.
+        if (auto target = construction.GetForWrite<Owner>(handle); !target) {
+            return Result<void>::Failure(target.Error());
+        }
+
+        if (auto valid = ValidateNameFieldToken(construction.Registry().Names(), value.name,
+                                                value.GetAllocator());
+            !valid) {
+            return valid;
+        }
+
+        return WriteGeneratedValue<Owner>(
+            member, value, [&]() noexcept { return construction.GetForWrite<Owner>(handle); });
     } else {
         return WriteGeneratedValue<Owner>(
             member, value, [&]() noexcept { return construction.GetForWrite<Owner>(handle); });

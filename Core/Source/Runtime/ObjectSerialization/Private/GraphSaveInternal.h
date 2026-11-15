@@ -48,6 +48,8 @@ public:
           expected_(allocator), firstAncestors_(allocator), chain_(allocator), names_(allocator),
           slots_(allocator), externals_(allocator), externalLeases_(allocator),
           positions_(allocator) {
+        // Name 필드는 이 Registry의 pool로 표시 문자열을 읽는다.
+        SetNames(registry.Names());
     }
 
     // 노드 하나의 encode를 시작한다. fileBytes는 이 노드 앞까지의 출력 byte 누계다(위치 표 메모리

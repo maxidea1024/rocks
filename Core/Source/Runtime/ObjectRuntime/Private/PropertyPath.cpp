@@ -1,4 +1,5 @@
 #include <Object/PathCursor.h>
+#include <Object/NameField.h>
 #include <Object/SoftObjectRef.h>
 #include <Platform/Fatal.h>
 
@@ -601,6 +602,16 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         binding.value = end.indexed ? end.field->element : end.field->value;
         if (auto valid = ValidateFieldWrite(binding, target, *value); !valid) {
             return cursor.Fail(valid.Error(), WriteReason(valid.Error(), end.effectiveFlags));
+        }
+
+        // Name 토큰은 이 Registry의 pool 것이어야 한다(FieldWriteOperation과 같은 검사 — struct
+        // 멤버·배열 원소의 생성 thunk는 토큰을 그대로 대입하므로 여기가 검사 지점이다).
+        if (value->kind == ValueKind::Name) {
+            if (auto valid = ValidateNameFieldToken(cursor.registry_.Names(), value->name,
+                                                    value->GetAllocator());
+                !valid) {
+                return cursor.Fail(valid.Error(), WriteReason(valid.Error(), end.effectiveFlags));
+            }
         }
     }
 
