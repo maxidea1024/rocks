@@ -4,8 +4,10 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Object/GeneratedFieldAccess.h>
 #include <ObjectSerialization/ObjectGraph.h>
+#include "GraphTestSupport.h"
 
 using namespace rocks;
+using test::graph::SameBytes;
 
 namespace {
 
@@ -181,57 +183,6 @@ struct SourceGraph {
     }
 };
 
-bool SameBytes(Span<const uint8> left, Span<const uint8> right) noexcept {
-    if (left.Size() != right.Size()) {
-        return false;
-    }
-    for (usize index = 0; index < left.Size(); ++index) {
-        if (left[index] != right[index]) {
-            return false;
-        }
-    }
-    return true;
-}
-
-Result<Array<uint8>> SingleGraph(Allocator& allocator, Span<const uint8> record,
-                                 uint32 version = 1) noexcept {
-    const uint8 magic[] = {'R', 'O', 'C', 'K', 'S', 'G', 'R', 'F'};
-    ArchiveWriter writer(allocator);
-    auto written = writer.WriteRaw(magic);
-    if (!written) {
-        return Result<Array<uint8>>::Failure(written.Error());
-    }
-    written = writer.WriteU32(1);
-    if (!written) {
-        return Result<Array<uint8>>::Failure(written.Error());
-    }
-    written = writer.WriteU32(1);
-    if (!written) {
-        return Result<Array<uint8>>::Failure(written.Error());
-    }
-    written = writer.WriteU32(1);
-    if (!written) {
-        return Result<Array<uint8>>::Failure(written.Error());
-    }
-    written = writer.WriteU64(1);
-    if (!written) {
-        return Result<Array<uint8>>::Failure(written.Error());
-    }
-    written = writer.WriteGuid(NodeType);
-    if (!written) {
-        return Result<Array<uint8>>::Failure(written.Error());
-    }
-    written = writer.WriteU32(version);
-    if (!written) {
-        return Result<Array<uint8>>::Failure(written.Error());
-    }
-    written = writer.WriteBytes(record);
-    if (!written) {
-        return Result<Array<uint8>>::Failure(written.Error());
-    }
-    return Result<Array<uint8>>::Success(writer.TakeBytes());
-}
-
 Result<Array<uint8>> MigrateVersion(Allocator& allocator, TypeId type, uint32 sourceVersion,
                                     uint32 targetVersion, Span<const uint8> source,
                                     void* user) noexcept {
@@ -332,7 +283,7 @@ TEST(ObjectGraphUnknownFieldsSkipAndMissingFieldsKeepConstructorValues) {
     REQUIRE(record.AddField({99, 99}, 0xf00du, unknown));
     auto recordBytes = record.Build();
     REQUIRE(recordBytes);
-    auto bytes = SingleGraph(source.allocator, recordBytes.Value().View());
+    auto bytes = test::graph::Single(source.allocator, NodeType, recordBytes.Value().View());
     REQUIRE(bytes);
     ObjectRegistry target(source.allocator, source.types, {101, 201});
     auto permissive = LoadObjectGraph(source.allocator, target, source.types, target.OwnerAccess(),
@@ -422,14 +373,17 @@ TEST(ObjectGraphMalformedKnownFieldsNeverPublishObjects) {
                           {NumberId, WireType::U32, {1}, 5, ErrorCode::InvalidArgument},
                           {SmallId, WireType::U32, {0, 1}, 4, ErrorCode::Overflow},
                           {BoolId, WireType::Bool, {2}, 1, ErrorCode::InvalidArgument},
-                          {LeftId, WireType::U64, {2}, 8, ErrorCode::InvalidArgument}};
+                          // 강한 참조는 U32 local ID다(graph v2): 범위 밖 번호는 InvalidArgument,
+                          // U64 wire는 TypeMismatch다.
+                          {LeftId, WireType::U32, {2}, 4, ErrorCode::InvalidArgument},
+                          {LeftId, WireType::U64, {1}, 8, ErrorCode::TypeMismatch}};
     ObjectGraphLoadOptions options;
     for (const auto& example : cases) {
         RecordBuilder record(source.allocator, NodeType, 1);
         REQUIRE(record.AddField(example.id, example.type, {example.bytes, example.size}));
         auto recordBytes = record.Build();
         REQUIRE(recordBytes);
-        auto bytes = SingleGraph(source.allocator, recordBytes.Value().View());
+        auto bytes = test::graph::Single(source.allocator, NodeType, recordBytes.Value().View());
         REQUIRE(bytes);
         auto loaded = LoadObjectGraph(source.allocator, target, source.types, target.OwnerAccess(),
                                       bytes.Value().View(), options);

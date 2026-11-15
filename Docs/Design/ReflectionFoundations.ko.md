@@ -396,13 +396,13 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema&, Ru
 - reader 검증: 원소 tag는 schema 원소 종류의 wire와 같아야 하고 Record·RecordList·ValueArray tag는 원소로 받지 않는다. count는 할당 전에 **schema 원소 종류의 최소 크기**(Digest 40, String·Bytes 8, SoftObjectReference 24, U64 8 …)로 남은 byte와 비교하고 count만큼 work를 먼저 청구한다. Record 트리 예산을 공유한다(codec은 필드 payload를 문맥의 `OpenValue`로 열어 `ValueArrayReader::Open`에 넘긴다 — 5.6절).
 - 원소 폭은 단일 값과 같다(UInt8·UInt16·UInt32 → U32, Int32·Int64 → I64 …) — 정수 폭을 넓히는 스키마 변경이 wire 호환으로 남는다(결정 10의 유연성 우선, 12절 결정 14). 그래서 `Array<uint8>`은 원소당 4 byte이고 대용량 byte·수치 데이터는 bulk data(A1)가 맡는다.
 - struct 원소 배열(`Array<S>`·`StructRefArray<S>`): `RecordList`(11), 항목 Record schema = struct ID·버전. 로드 reader의 `RecordListLimits.maxItems`는 `MaxArrayElements`다(기본 65,536에 기대지 않는다 — 1·2단계가 같은 함수로 정한다, 5.6절).
-- `ObjectRefArray`: `ValueArray` of 참조 원소(참조 wire는 문맥 매개변수 — 6.1절, graph v1은 U64 local ID, 0 = null).
+- `ObjectRefArray`: `ValueArray` of 참조 원소(참조 wire는 문맥 매개변수 — 6.1절, graph v2는 U32 local ID(A0-Od1 전 graph v1은 U64), 0 = null).
 
 ### 5.5 한도
 
-- 필드별 길이 상한 `MaxElements`: 기본 65,536, 최대 1,048,576(`MaxArrayElements`). 인코딩된 필드 값은 그래프 `maxValueBytes`(4 MiB)도 지켜야 한다(넘으면 CapacityExceeded — 예를 들어 U64 원소는 약 52만 개, U32 원소는 약 104만 개가 한계다).
+- 필드별 길이 상한 `MaxElements`: 기본 65,536, 최대 1,048,576(`MaxArrayElements`). 인코딩된 필드 값은 그래프 `maxValueBytes`(A0-Od1부터 64 MiB, 그 전 4 MiB)도 지켜야 한다(넘으면 CapacityExceeded — 4 MiB에서는 U64 원소 약 52만 개·U32 원소 약 104만 개가 한계였고, 64 MiB에서는 고정 폭 원소는 `MaxArrayElements`가 먼저 막는다).
 - **강제 지점**: 필드별 `MaxElements`는 리플렉션 쓰기(경로 접근 7절)·저장(encode)에서 건다. **로드(decode)는 필드별 `MaxElements`를 걸지 않고** 배열마다 `MaxArrayElements`와 그래프 한도(`maxValueBytes`·`maxTotalElements`·work)로만 막는다 — `MaxElements`를 낮춰도 기존 에셋이 열리고, 넘친 데이터는 다시 저장할 때 경로가 붙은 CapacityExceeded로 드러난다(UE도 로드에 필드별 상한이 없다, 12절 결정 13). Registry 변경 API(`AddReference` 등)와 C++ 직접 사용에는 걸지 않는다(Level의 actor 목록 같은 런타임 목록을 막지 않는다 — 넘친 목록은 저장할 때 오류다).
-- 그래프 전체: B4가 중첩 struct TLV를 `maxTotalFields`에 세기 시작하며 그 기본값을 4,096에서 A0-O 목표치인 1,048,576으로 올리고(필드 3개짜리 struct 배열이 원소 약 1,366개에서 막히지 않게 — Record별 `maxFields`는 남은 누계로 연다, 4.6절), B5가 `ObjectGraphLimits`에 `maxTotalElements`(기본 4,194,304)를 더한다. 바이트·작업량 한도 확장(그래프·필드 값 64 MiB, 작업량 8 × (필드 + 원소) + 4 × 바이트)은 A0-O의 graph v2가 정한다([ObjectFoundations](ObjectFoundations.ko.md) 5.6절 — 원래 식 8 × (필드 + 원소)는 바이트 작업을 빼먹어 지금 상한보다 작았다).
+- 그래프 전체: B4가 중첩 struct TLV를 `maxTotalFields`에 세기 시작하며 그 기본값을 4,096에서 A0-O 목표치인 1,048,576으로 올리고(필드 3개짜리 struct 배열이 원소 약 1,366개에서 막히지 않게 — Record별 `maxFields`는 남은 누계로 연다, 4.6절), B5가 `ObjectGraphLimits`에 `maxTotalElements`(기본 4,194,304)를 더한다. 바이트·작업량 한도 확장(그래프·필드 값 64 MiB, 작업량 8 × (필드 + 원소 + 바이트))은 A0-O의 graph v2가 정한다([ObjectFoundations](ObjectFoundations.ko.md) 5.6절·결정 5 — 원래 식 8 × (필드 + 원소)는 바이트 작업을 빼먹어 지금 상한보다 작았다).
 
 ### 5.6 B5 구현 API(확정안)
 
@@ -936,7 +936,7 @@ EngineVersion CurrentEngineVersion() noexcept {
 - **null 순회**: World는 컨테이너에 null을 넣지 않는 불변식을 지키지만, 로드된 배열에는 null이 올 수 있으므로(Required는 로드에서 진단만) `ComponentAt`의 null을 끝 표지로 쓰는 모든 순회(FindComponent·FinishSpawning·DestroyActor·AdvanceComponents)를 개수 기반 + null 건너뛰기로 바꾼다.
 - **장부 밖 객체**: `world_`가 null인 Actor·Component(그래프 로드 등 World 밖에서 만든 객체)의 계층·World API는 Fatal 대신 InvalidArgument를 돌려준다. 레벨 편입 계약(레벨 패키지 단계 — ActorRecord 생성, world_·level_·owner_ 연결, parent에서 children 재구성, null 원소 정리, relativeTransform 검증)과 World registry의 외부 생성 거부 정책 자리(A0-O 에셋 Registry 정책의 거울)를 EngineRuntime 문서에 고정한다.
 - 생성·소멸 불변(`T(Allocator&)`). GC 간선은 지금과 같다(생성 Trace → `TraceArrayField` → `ObjectRefArray::Trace`, root 추가 방문은 이미 components로 도달하는 객체). 생성 타입은 `parallelTraceSafe = true`(World는 scheduler 없이 Step하므로 지금은 차이 없음).
-- 저장·로드: graph v1로 Level 루트를 저장할 수 있다(그래프의 모든 타입이 생성 타입일 때 — native 파생 Actor가 하나라도 있으면 Unsupported. Actor별 저장 제외는 레벨 패키지 단계). **B8의 Level 그래프 저장은 구조 시험용이다** — 계층(parent·children)은 저장되지 않는다(root는 저장된다). 저장 안전 지점은 Tick 밖·PendingDestroy flush 뒤다(flush 전에는 PendingDestroy Actor가 `actors_`에 남아 함께 저장된다). 로드는 같은 TypeRegistry를 쓰는 별도 ObjectRegistry에 하고 로드된 객체는 World 장부 밖이다(편입은 레벨 패키지 단계).
+- 저장·로드: graph v2 편의 API로 Level 루트를 저장할 수 있다(A0-Od1 전에는 graph v1. 그래프의 모든 타입이 생성 타입일 때 — native 파생 Actor가 하나라도 있으면 Unsupported. Actor별 저장 제외는 레벨 패키지 단계). **B8의 Level 그래프 저장은 구조 시험용이다** — 계층(parent·children)은 저장되지 않는다(root는 저장된다). 저장 안전 지점은 Tick 밖·PendingDestroy flush 뒤다(flush 전에는 PendingDestroy Actor가 `actors_`에 남아 함께 저장된다). 로드는 같은 TypeRegistry를 쓰는 별도 ObjectRegistry에 하고 로드된 객체는 World 장부 밖이다(편입은 레벨 패키지 단계).
 - 경로 접근: B6이 그대로 적용된다(`components[0]`·`rootComponent`·`relativeTransform.translation.x` 읽기, World 필드 쓰기는 ReadOnly로 Unsupported). World의 `Access()` 문맥·게임 스레드 전용.
 - fixture 모듈 `Engine/Source/Developer/WorldTestFixtures`(헤더 Metadata, World 의존, 명세, EngineTests가 의존): `SaveActor : Actor`(int32·String·`SoftObjectRef<>` 필드 + `RocksRequiresWorldOnlyOwner` 형질 NATIVE 멤버 — AS 6.3 AssetLease 자리), `SaveComponent : SceneComponent`(형제 `ObjectRef<SaveComponent>`·`Array<int32>`).
 

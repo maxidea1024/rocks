@@ -5,6 +5,7 @@
 #include <Serialization/Archive.h>
 #include <Serialization/Record.h>
 #include <TestSupport/Test.h>
+#include "GraphTestSupport.h"
 
 // B3c 필드 codec 시험이다(Docs/Design/ReflectionFoundations.ko.md 6.1–6.4절): decode 정책(미선언
 // enum의 대체 값, 모르는 필드, 높은 Record 버전, 쿠킹 로드의 excludedFlags), 진단·소프트 참조
@@ -130,42 +131,6 @@ public:
     ErrorCode failCollect = ErrorCode::None;
 };
 
-// 레코드 하나짜리 graph format 1 바이트다.
-Result<Array<uint8>> SingleGraph(Allocator& allocator, TypeId type, uint32 version,
-                                 Span<const uint8> record) noexcept {
-    const uint8 magic[] = {'R', 'O', 'C', 'K', 'S', 'G', 'R', 'F'};
-    ArchiveWriter writer(allocator);
-    Result<void> written = writer.WriteRaw(magic);
-    const uint32 header[] = {1, 1, 1};
-    for (uint32 value : header) {
-        if (written) {
-            written = writer.WriteU32(value);
-        }
-    }
-
-    if (written) {
-        written = writer.WriteU64(1);
-    }
-
-    if (written) {
-        written = writer.WriteGuid(type);
-    }
-
-    if (written) {
-        written = writer.WriteU32(version);
-    }
-
-    if (written) {
-        written = writer.WriteBytes(record);
-    }
-
-    if (!written) {
-        return Result<Array<uint8>>::Failure(written.Error());
-    }
-
-    return Result<Array<uint8>>::Success(writer.TakeBytes());
-}
-
 // EnumFields 레코드를 만든다(값마다 I64). extra면 모르는 필드 하나를 더한다.
 Result<Array<uint8>> EnumRecord(Allocator& allocator, uint32 version, int64 group, int64 bias,
                                 int64 channels, bool extra) noexcept {
@@ -220,49 +185,6 @@ Result<Array<uint8>> OneFieldRecord(Allocator& allocator, TypeId type, Guid fiel
     return record.Build();
 }
 
-// 객체 둘짜리 graph format 1 바이트다(local ID 1과 2).
-Result<Array<uint8>> TwoObjectGraph(Allocator& allocator, TypeId firstType,
-                                    Span<const uint8> firstRecord, TypeId secondType,
-                                    Span<const uint8> secondRecord) noexcept {
-    const uint8 magic[] = {'R', 'O', 'C', 'K', 'S', 'G', 'R', 'F'};
-    ArchiveWriter writer(allocator);
-    Result<void> written = writer.WriteRaw(magic);
-    const uint32 header[] = {1, 2, 1};
-    for (uint32 value : header) {
-        if (written) {
-            written = writer.WriteU32(value);
-        }
-    }
-
-    const struct {
-        TypeId type;
-        Span<const uint8> record;
-    } objects[] = {{firstType, firstRecord}, {secondType, secondRecord}};
-    for (usize index = 0; index < 2; ++index) {
-        if (written) {
-            written = writer.WriteU64(index + 1);
-        }
-
-        if (written) {
-            written = writer.WriteGuid(objects[index].type);
-        }
-
-        if (written) {
-            written = writer.WriteU32(1);
-        }
-
-        if (written) {
-            written = writer.WriteBytes(objects[index].record);
-        }
-    }
-
-    if (!written) {
-        return Result<Array<uint8>>::Failure(written.Error());
-    }
-
-    return Result<Array<uint8>>::Success(writer.TakeBytes());
-}
-
 // 생성 함수표를 복사해 codec을 범용(FieldValue 경유) 구현으로 바꾼다(수동 함수표 경로).
 template <class T, usize Count>
 Result<TypeRegistrationToken> RegisterThroughFieldValue(TypeRegistry& types,
@@ -299,7 +221,7 @@ TEST(Codec_UndeclaredEnumsReportAndReplace) {
         ObjectRegistry target(allocator, types, {0x4344, 1});
         auto record = EnumRecord(allocator, 1, 5, 1, 16 | 1, false);
         REQUIRE(record);
-        auto graph = SingleGraph(allocator, TypeIdOf<EnumFields>(), 1, record.Value().View());
+        auto graph = test::graph::Single(allocator, TypeIdOf<EnumFields>(), record.Value().View());
         REQUIRE(graph);
 
         // 기본(Reject)은 거부, 진단 받을 곳이 없는 ReportAndDefault는 InvalidArgument다.
@@ -363,7 +285,7 @@ TEST(Codec_UnknownFieldsReportOrReject) {
         ObjectRegistry target(allocator, types, {0x4344, 2});
         auto record = EnumRecord(allocator, 1, 7, 0, 4, true);
         REQUIRE(record);
-        auto graph = SingleGraph(allocator, TypeIdOf<EnumFields>(), 1, record.Value().View());
+        auto graph = test::graph::Single(allocator, TypeIdOf<EnumFields>(), record.Value().View());
         REQUIRE(graph);
         RecordingHooks hooks;
         ObjectGraphLoadOptions options;
@@ -407,7 +329,7 @@ TEST(Codec_NewerRecordVersionPolicy) {
         ObjectRegistry target(allocator, types, {0x4344, 3});
         auto record = EnumRecord(allocator, 2, 7, -2, 8, true);
         REQUIRE(record);
-        auto graph = SingleGraph(allocator, TypeIdOf<EnumFields>(), 2, record.Value().View());
+        auto graph = test::graph::Single(allocator, TypeIdOf<EnumFields>(), record.Value().View());
         REQUIRE(graph);
         ObjectGraphLoadOptions options;
         CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(), graph.Value().View(),
@@ -742,15 +664,16 @@ TEST(Codec_StaticReferenceTargetIsCheckedBeforeConstruction) {
     {
         ObjectRegistry target(allocator, types, {0x4344, 13});
         ArchiveWriter payload(allocator);
-        REQUIRE(payload.WriteU64(2));
+        REQUIRE(payload.WriteU32(2));
         auto first = OneFieldRecord(allocator, schema.id, SchemaField(generated, "next").id,
-                                    WireType::U64, payload.View());
+                                    WireType::U32, payload.View());
         REQUIRE(first);
         RecordBuilder empty(allocator, TypeIdOf<Base>(), 1);
         auto second = empty.Build();
         REQUIRE(second);
-        auto graph = TwoObjectGraph(allocator, schema.id, first.Value().View(), TypeIdOf<Base>(),
-                                    second.Value().View());
+        const test::graph::Node nodes[] = {{schema.id, 0, {}, first.Value().View()},
+                                           {TypeIdOf<Base>(), 0, {}, second.Value().View()}};
+        auto graph = test::graph::Build(allocator, nodes);
         REQUIRE(graph);
         ObjectGraphLoadOptions options;
         CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(), graph.Value().View(),
@@ -841,7 +764,8 @@ TEST(Codec_RequiredSoftReferencePolicies) {
                                          SchemaField(TypeOf<AssetFields>(), "source").id,
                                          WireType::Guid, payload.View());
             REQUIRE(record);
-            auto graph = SingleGraph(allocator, TypeIdOf<AssetFields>(), 1, record.Value().View());
+            auto graph =
+                test::graph::Single(allocator, TypeIdOf<AssetFields>(), record.Value().View());
             REQUIRE(graph);
             RecordingHooks loadHooks;
             ObjectGraphLoadOptions loadOptions;
@@ -990,7 +914,7 @@ TEST(Codec_UnknownFieldRejectWinsOverNewerVersionSkipping) {
         ObjectRegistry target(allocator, types, {0x4344, 20});
         auto record = EnumRecord(allocator, 2, 7, 0, 4, true);
         REQUIRE(record);
-        auto graph = SingleGraph(allocator, TypeIdOf<EnumFields>(), 2, record.Value().View());
+        auto graph = test::graph::Single(allocator, TypeIdOf<EnumFields>(), record.Value().View());
         REQUIRE(graph);
         RecordingHooks hooks;
         ObjectGraphLoadOptions options;
@@ -1099,7 +1023,7 @@ TEST(Codec_WideRegisteredEnumIsCheckedAndCharged) {
         // 넓은 스키마에만 있는 값(20)은 1단계에서 InvalidArgument다.
         auto record = EnumRecord(allocator, 1, 20, 0, 4, false);
         REQUIRE(record);
-        auto graph = SingleGraph(allocator, TypeIdOf<EnumFields>(), 1, record.Value().View());
+        auto graph = test::graph::Single(allocator, TypeIdOf<EnumFields>(), record.Value().View());
         REQUIRE(graph);
         CHECK(LoadObjectGraph(allocator, wide, wideTypes, wide.OwnerAccess(), graph.Value().View())
                   .Error() == ErrorCode::InvalidArgument);
@@ -1108,7 +1032,8 @@ TEST(Codec_WideRegisteredEnumIsCheckedAndCharged) {
         // 선언된 값(7)이면 둘 다 복원되고, 넓은 쪽이 열거자 차이의 두 배 이상을 더 쓴다.
         auto valid = EnumRecord(allocator, 1, 7, 0, 4, false);
         REQUIRE(valid);
-        auto validGraph = SingleGraph(allocator, TypeIdOf<EnumFields>(), 1, valid.Value().View());
+        auto validGraph =
+            test::graph::Single(allocator, TypeIdOf<EnumFields>(), valid.Value().View());
         REQUIRE(validGraph);
         const uint64 narrowLoad =
             MinimalLoadWork(allocator, narrow, narrowTypes, validGraph.Value().View());

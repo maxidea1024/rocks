@@ -13,7 +13,7 @@
 
 // 필드 codec의 문맥·정책·hook이다(Docs/Design/ReflectionFoundations.ko.md 6.1–6.4절). 생성 codec
 // thunk(RuntimeFieldOps::encode·decode)는 이 문맥으로만 참조 wire·진단·Soft 수집·예산에 닿으므로,
-// 그래프 형식(graph v1 local ID, graph v2 import 비트)이나 저장 집합이 바뀌어도 생성 코드를 다시
+// 그래프 형식(graph v2의 U32 local ID·외부 참조 비트)이나 저장 집합이 바뀌어도 생성 코드를 다시
 // 만들지 않는다. 직렬화기(ObjectSerialization)가 문맥을 구현하고 필드마다 FieldScope로 위치를
 // 정한다. 이 헤더는 생성 헤더와 직렬화기만 include한다.
 namespace rocks {
@@ -74,11 +74,16 @@ enum class FieldDiagnosticKind : uint8 {
     NewerVersion,
     // 저장할 배열의 원소 수(value)가 필드 maxElements를 넘는다(path = 배열 필드). 저장은 이 진단
     // 뒤 CapacityExceeded다(로드는 필드별 maxElements를 걸지 않으므로 내지 않는다).
-    ArrayTooLong
+    ArrayTooLong,
+    // 저장 집합 밖 강한 참조를 쓰지 못했다(path = 참조 위치, value 0 = 거부). 그래프 저장의 Reject
+    // 정책과 Include 거부 조건(기준 Outer·노드 1의 조상·다른 패키지 — Docs/Design/
+    // ObjectFoundations.ko.md 5.2절)이 이 진단 뒤 InvalidArgument다. 외부 참조 허락 hook의
+    // 결과(거부 0·null 1)는 A0-Oe가 더한다.
+    ExternalReference
 };
 
-// 진단 하나다. objectIndex는 그래프 안 노드 위치(0부터 — local ID − 1), path는 필드 경로(호출
-// 동안만 유효)다.
+// 진단 하나다. objectIndex는 그래프 안 노드 위치(0부터 — local ID − 1 = export index − 1), path는
+// 필드 경로(호출 동안만 유효)다.
 struct FieldDiagnostic {
     FieldDiagnosticKind kind = FieldDiagnosticKind::UnknownField;
     TypeId objectType{};
@@ -232,7 +237,7 @@ public:
         return objectIndex_;
     }
 
-    // 강한 참조 필드의 wire tag다(graph v1 = U64 local ID, v2 = U32 + import 비트). 참조 필드의
+    // 강한 참조 필드의 wire tag다(graph v2 = U32 — local ID와 외부 참조 비트). 참조 필드의
     // encode는 이 값을 돌려주고 decode는 저장 tag를 이것과 비교한다.
     uint32 ReferenceWireType() const noexcept {
         return referenceWire_;

@@ -1,6 +1,6 @@
 # 객체·그래프 보강(A0-O) 설계
 
-기준일: 2026-11-14, 확정안(설계 교차검증 2건 — 구현 가능성, 적대적 반례와 UE 대조(당시 기준 UE 5.6) — 과 최종 검토 1건 반영, 사용자 승인 권고안으로 진행). [에셋 시스템 설계](AssetSystem.ko.md)(이하 AS) 1절 A0-O 단계의 상세다(기준 코드 `5ee4dc5` — A0-B B1–B8 구현 완료). 구현: A0-Oa(Outer·Name·정책·다중 root Commit), A0-Ob(Discard·ReferenceObserver·패키지 소속 보존), A0-Oc(누락 = 기준·실효 값 Required — graph v1 envelope 위) — 구현하며 구체화한 점은 각 절에 반영했다. A0-Od1–Oe는 구현 전이다.
+기준일: 2026-11-14, 확정안(설계 교차검증 2건 — 구현 가능성, 적대적 반례와 UE 대조(당시 기준 UE 5.6) — 과 최종 검토 1건 반영, 사용자 승인 권고안으로 진행). [에셋 시스템 설계](AssetSystem.ko.md)(이하 AS) 1절 A0-O 단계의 상세다(기준 코드 `5ee4dc5` — A0-B B1–B8 구현 완료). 구현: A0-Oa(Outer·Name·정책·다중 root Commit), A0-Ob(Discard·ReferenceObserver·패키지 소속 보존), A0-Oc(누락 = 기준·실효 값 Required — graph v1 envelope 위), A0-Od1(graph v2 형식·저장 집합·편의 저장·복원, v1 삭제) — 구현하며 구체화한 점은 각 절에 반영했다. A0-Od2–Oe는 구현 전이다.
 
 근거: AS 1절 A0-O 행과 3·5·6·7·11절, [리플렉션·빌드 보강 설계](ReflectionFoundations.ko.md)(이하 RF)의 A0-O 언급(2.2·2.3·3.3·5.5·6.1–6.4절, 결정 16·21·22), [런타임 클래스 메타데이터](RuntimeClassMetadata.ko.md)(이하 RCM) '클래스 기본값 결정', [엔진 구현 계획](EngineImplementationPlan.ko.md)(이하 EIP) §5.2 "Outer와 객체 경로", 현재 코드(`Core/Source/Runtime/ObjectRuntime`·`ObjectSerialization`). UE 대조는 UE 5.8(5.8.4, commit `f45729c0b6f0`) 원본으로 다시 확인했다(10절, 2026-11-15 — 처음 대조는 당시 기준 UE 5.6 브랜치).
 
@@ -516,7 +516,7 @@ Result<Array<uint8>> SaveObjectGraph(Allocator&, ObjectRegistry&, const ObjectAc
 ```
 
 - 노드 encode는 지금 `SaveNodeFields`와 같다(필드마다 frame, `IsExcluded`, wire 재확인, Record 조립, 작업량 청구). 참조 쓰기: 대상이 집합(handle → localId 해시)에 있으면 생존·기대 형식(스키마·정적 대상) 검사 뒤 localId, 없으면 정책대로 Reject·Admit·Include. 대상 검사(생존·문맥·TypeMismatch)는 모든 정책에서 같다.
-- **Include의 Outer 순서**: Include가 발견한 노드 T를 더할 때, T의 조상 중 아직 집합에 없는 것을 먼저 (바깥쪽부터) 더한다. 조상 순회는 집합 안 조상, 기준 Outer(노드 1의 Outer가 집합 밖이면 그것), null 중 먼저 만나는 곳에서 멈춘다. 노드 1은 언제나 호출자가 준 root다(그 Outer는 집합에 넣지 않고 기준 Outer가 된다). 그래서 모든 노드의 Outer가 그 노드보다 앞에 있거나 기준 Outer다. Include가 기준 Outer나 노드 1의 조상, 또는 (패키지 정책 Registry에서) 노드 1과 outermost가 다른 객체를 만나면 `ExternalReference` 진단 뒤 InvalidArgument다(11절 결정 17 — 그대로 더하면 Outer 없는 다른 패키지가 들어가 "Outer 없음·기준 Outer 혼합" 규칙에, 기준 Outer를 노드로 더하면 "Outer는 자기보다 앞" 규칙에 걸린다). 정책 없는 Registry의 B8 Level 구조 저장은 영향이 없다.
+- **Include의 Outer 순서**: Include가 발견한 노드 T를 더할 때, T의 조상 중 아직 집합에 없는 것을 먼저 (바깥쪽부터) 더한다. 조상 순회는 집합 안 조상, 기준 Outer(노드 1의 Outer가 집합 밖이면 그것), null 중 먼저 만나는 곳에서 멈춘다. 노드 1은 언제나 호출자가 준 root다(그 Outer는 집합에 넣지 않고 기준 Outer가 된다). 그래서 모든 노드의 Outer가 그 노드보다 앞에 있거나 기준 Outer다. Include가 기준 Outer나 노드 1의 조상, (패키지 정책 Registry에서) 노드 1과 outermost가 다른 객체, 또는 (정책 없는 Registry에서) 노드 1에 기준 Outer가 있는데 조상 순회가 Outer 없음에 닿는 객체(다른 트리)를 만나면 `ExternalReference` 진단 뒤 InvalidArgument다(11절 결정 17 — 그대로 더하면 Outer 없는 다른 패키지가 들어가 "Outer 없음·기준 Outer 혼합" 규칙에, 기준 Outer를 노드로 더하면 "Outer는 자기보다 앞" 규칙에 걸린다). 정책 없는 Registry의 B8 Level 구조 저장은 영향이 없다.
 - NodeTable: 노드 타입은 실제 객체 타입 ID, 이름은 Registry 이름, outer는 집합 안이면 그 localId(자기보다 앞이어야 한다 — 아니면 InvalidArgument), 집합 밖이면 0과 BaseOuter 비트(집합 밖 Outer를 가진 노드들의 Outer가 모두 같아야 하고, Outer 없는 노드와 섞이면 InvalidArgument).
 - 마지막에 모든 노드의 생존을 다시 확인한 뒤 결과를 게시한다(v1은 root만 확인).
 - 저장 쪽 값 치환 hook(AS A0-O 행의 "bulkId 재매핑")은 B4가 `FieldCodecHooks::SubstituteStruct`로 이미 구현했다 — graph v2는 그대로 쓴다.
@@ -656,7 +656,7 @@ Result<RootRef<Object>> LoadObjectGraph(Allocator&, ObjectRegistry&, TypeRegistr
 ```
 
 - 단계: ConstructionContext → `Stage.Validate`(base = `DescribeOuter(baseOuter)`, importTypes = imports의 실제 타입) → **도달 검사** → `CreateObjects` → `ApplyFields` → `CheckRequired` → prepare → `Commit()`(노드 1 root). 다중 root·여러 그래프는 `ObjectGraphStage`와 `Commit(roots, out)`을 직접 쓴다. 이 서술은 Od2 뒤의 모양이다 — Od1은 같은 단계를 편의 API 안에서 직접 구현하고 Od2가 Stage 위로 옮긴다.
-- **도달 검사(택함: 편의 API에만 유지)**: 노드 1에서 영속 강한 참조, inner → outer(노드 표의 outer), 패키지 정책이면 outer → inner와 기준 Outer 아래 보존(1.7절)으로 닿지 않는 노드가 있으면 생성 전에 InvalidArgument다. 대안(닿지 않는 노드에도 RootRef)은 반환 서명이 RootRef 하나라 표현할 수 없고, 검사 없이 공개하면 다음 GC가 조용히 지운다 — v1의 "조용한 손실 없음"을 편의 API에서 지킨다. Stage API는 고아를 허용한다(호출자가 root·Outer로 붙잡는다). 편의 저장(Include + Outer 순서 규칙)이 만든 그래프는 언제나 이 검사를 통과한다.
+- **도달 검사(택함: 편의 API에만 유지)**: 노드 1에서 영속 강한 참조, inner → outer(노드 표의 outer), 패키지 정책이면 outer → inner와 기준 Outer 아래 보존(1.7절)으로 닿지 않는 노드가 있으면 생성 전에 InvalidArgument다. 패키지 정책이고 기준 Outer가 없으면 노드 1이 아닌 outer 0 노드(다른 패키지)도 InvalidArgument다 — 편의 복원은 노드 1의 패키지 하나만 root로 공개하고, 다른 패키지를 root 없이 공개하면 다음 GC가 Discard 없이 회수한다(여러 패키지는 Stage와 `Commit(roots, out)` — 저장 쪽 결정 17과 대칭, Od1 리뷰 반영). 대안(닿지 않는 노드에도 RootRef)은 반환 서명이 RootRef 하나라 표현할 수 없고, 검사 없이 공개하면 다음 GC가 조용히 지운다 — v1의 "조용한 손실 없음"을 편의 API에서 지킨다. Stage API는 고아를 허용한다(호출자가 root·Outer로 붙잡는다). 편의 저장(Include + Outer 순서 규칙)이 만든 그래프는 언제나 이 검사를 통과한다.
 - A1 로더 흐름(예):
 
 ```cpp
@@ -708,16 +708,31 @@ return transaction.Commit(roots, held);
 | `maxTotalElements` | 4,194,304 | 그대로 |
 | `maxBytes` | 16 MiB | 64 MiB(AS 비-Bulk 섹션 상한) |
 | `maxValueBytes` | 4 MiB | 64 MiB(11절 결정 4) |
-| `maxWork` | 64Mi | 8 × (maxTotalFields + maxTotalElements) + 4 × maxBytes(11절 결정 5) |
+| `maxWork` | 64Mi | 8 × (maxTotalFields + maxTotalElements + maxBytes)(11절 결정 5 — Od1 구현에서 바이트 계수를 4에서 8로 고쳤다) |
 | `maxMigrationBytes` | 16 MiB | 64 MiB(바이트 상한과 맞춘다) |
 
-- `maxValueBytes` 64 MiB의 결과(결정 4 조건): `BudgetAllocator`의 단일 할당 한도도 64 MiB가 되고(`GraphInternal.h` 108–111행), 저장 피크는 필드 writer + Record builder + 출력으로 최대 약 3배(약 192 MiB), 로드는 원본을 view로 빌리므로 피크가 staged 값 복사와 2c 검사 버퍼(Required를 품은 가장 큰 필드 하나의 검사 출력 — 성장 중에는 그 약 2.5배, 4절)다. README와 Serialization 구현 문서에 적는다.
+- `maxValueBytes` 64 MiB의 결과(결정 4 조건): `BudgetAllocator`의 단일 할당 한도도 64 MiB가 되고(`GraphInternal.h` 108–111행), 저장 피크는 약 2배(약 128 MiB — 필드 writer와 Record builder, builder와 Build 사본, 노드 Record들과 출력이 단계마다 함께 있고, Record·필드 writer 한도가 남은 파일 byte라 노드 Record의 합이 maxBytes로 묶인다. writer 성장 중에는 옛·새 버퍼가 잠깐 함께 있다 — Od1 구현에서 고쳤다, 확정안은 약 3배로 적었다), 로드는 원본을 view로 빌리므로 피크가 staged 값 복사와 2c 검사 버퍼(Required를 품은 가장 큰 필드 하나의 검사 출력 — 성장 중에는 그 약 2.5배, 4절)다. README와 Serialization 구현 문서에 적는다.
 - 이름(64 byte)·객체 경로(4 KiB)는 Registry 규칙(1.1절)이고 Soft 경로 4 KiB는 B3 그대로다. 일반 String 필드 값에는 4 KiB를 걸지 않는다(11절 결정 6).
 
 ### 5.7 오류 순서
 
 - 저장: 입력(노드 0개·중복·null handle InvalidArgument, 개수 CapacityExceeded) → 접근·생존(노드 Borrow·AcquireType — StaleHandle·Destroyed·WrongContext) → 배치(`ValidateLayout` Unsupported) → 노드 encode(지금 순서 — 필드 wire TypeMismatch, Required InvalidArgument, ArrayTooLong CapacityExceeded, 값 InvalidArgument·Overflow) 안의 참조(대상 생존 → 기대 형식 TypeMismatch → 집합 밖 정책: Reject·hook Reject InvalidArgument, 외부 수 CapacityExceeded, Include의 노드 수 CapacityExceeded) → NodeTable(Outer 순서·기준 Outer 불일치·혼합 InvalidArgument) → 바이트 상한(위치 표 포함) CapacityExceeded → 마지막 생존 재확인.
 - 복원(지금 코드 순서): 저장소 불일치 WrongContext(`UsesTypeRegistry`) → 옵션(hook 없는 ReportAndDefault·LoadNewerSkippingUnknown InvalidArgument) → envelope(magic InvalidArgument, 버전 Unsupported, flags·개수·길이 InvalidArgument·CapacityExceeded) → 노드 출처·BaseOuter 일치(InvalidArgument) → 노드 검사(5.4절 순서) → Record(지금 순서 — 버전 Unsupported, 마이그레이션, 모르는 필드 정책, Transient 존재 Unsupported, excludedFlags 존재 InvalidArgument, 값) → 참조(범위 InvalidArgument, 형식 TypeMismatch, 기대 타입 미등록 NotFound) → 예산(CapacityExceeded). 편의 API의 도달 검사(InvalidArgument)는 그 뒤. 2a·2b·2c는 사전 확인·Registry 상태·할당·hook 실패·계약 위반만.
+
+**구현에서 정한 점(A0-Od1)**
+
+- 범위: 5.1 형식(header 24 byte·NodeTable·U32 참조), 5.2의 Reject·Include(Outer 순서·결정 17)와 NodeTable, 5.5 편의 복원(도달 검사·`baseOuter`·`prepare` — `imports`는 Oe), 5.6 한도, v1 envelope 삭제. 파일은 `GraphSave.cpp`(저장 집합·Include·NodeTable)·`GraphLoad.cpp`(envelope·1단계·도달 검사·2단계)·`GraphInternal.h`(형식 상수)다. `GraphExternalPolicy`는 Reject·Include만 두고 Admit은 Oe가 hook과 함께 더한다(쓰는 곳 없는 열거값을 두지 않는다). `ObjectGraphSaveResult`는 `Bytes`·`TakeBytes`·`Nodes`만 두고(`Externals`·`AssignExternalIndices`는 Oe), `TakeBytes` 뒤 `Bytes()`는 비고 노드 목록은 남는다. 생성자는 비공개다(직렬화기 내부 통로로만 만든다).
+- 저장 입력의 오류 순서: 노드 0개 → null handle(InvalidArgument) → 개수 maxObjects 초과(CapacityExceeded) → 중복(InvalidArgument). 개수를 중복보다 먼저 보아 중복 검사 해시 표가 maxObjects로 묶이게 했다(5.7의 "입력" 묶음 안 순서). 이어서 첫 노드 Borrow → 노드마다 AcquireType·GetOuter·(NodeTable이면) 이름 → 배치 → encode다.
+- 기준 Outer는 노드 1의 Outer(없으면 Outer 없음)로 정했다: NodeTable 규칙 "집합 밖 Outer는 모두 같고 Outer 없음과 섞지 않는다"와 Include의 멈춤·거부 조건이 같은 값을 쓴다(노드 1의 Outer는 노드 1보다 앞일 수 없으므로 언제나 집합 밖이다). NodeTable 위반(Outer가 자기 이상 번호, 기준 Outer와 다른 집합 밖 Outer, Outer 없음과 기준 Outer 혼합)은 모든 노드를 encode한 뒤 판정한다(Include가 집합을 늘리므로). 바이트 상한은 노드마다 누계(NodeTable 항목 포함)로 encode 중에 검사하므로 NodeTable 위반보다 먼저 날 수 있다. NodeTable 없이 쓰면 Outer 규칙을 보지 않는다(노드 표는 바깥 — A1은 CollectInners 순서로 만든다).
+- Include 거부 판정: 대상이 노드 1의 조상 집합(기준 Outer부터 outermost까지 — Include일 때만 미리 모은다)에 있으면, 조상 순회가 집합 안 조상·기준 Outer에서 멈추기 전에 그 집합의 객체를 만나면(기준 Outer 위의 노드 1 조상), 패키지 정책에서 대상의 outermost가 노드 1의 것과 다르면(조상은 같은 outermost라 대상만 본다) 지금 참조 위치의 `ExternalReference` 진단(value 0) 뒤 InvalidArgument다. 정책 없는 Registry에서 Include의 조상 순회가 Outer 없음에 닿으면(다른 트리의 객체) 노드 1에 기준 Outer가 없을 때는 그 조상까지 Outer 없음 노드로 더하고, 있으면 같은 진단 뒤 그 시점에 InvalidArgument다(Od1 리뷰 반영 — 처음 구현은 진단 없이 끝의 NodeTable 혼합 규칙에 맡겨 NodeTable 없이 쓰면 조용히 통과했다).
+- 편의 복원의 오류 순서: 저장소 불일치 → 옵션 → `baseOuter` 확인(`DescribeOuter` — 접근·종료·StaleHandle은 envelope보다 먼저, 단계형 입력의 base 요약을 만드는 자리) → envelope → 노드 출처(NodeTable 없음·BaseOuter 비트와 `baseOuter` 유무 불일치·externalCount ≠ 0 InvalidArgument — 외부 참조 대상을 줄 수 없으므로 import 수 0과 대조한 것과 같다, Oe가 `imports`와의 대조로 바꾼다) → 노드 → 참조 형식(모든 노드의 token — 도달과 무관하게 검사해 Od2 Stage가 그대로 쓰게) → 2단계 몫 청구(노드 수 + 이름 byte + 1 + 참조 수) → 도달 검사. header의 externalCount 상한 초과는 envelope의 CapacityExceeded다.
+- Record 버전은 Record header에서 읽는다: 저장 Record를 버전 범위 [1, 최대]로 연 뒤 현재 버전과 비교하므로, 높은 버전(Reject 정책)·migrate 없는 낮은 버전의 Unsupported가 Record envelope·TLV 경계 검사 뒤에 난다(v1은 외곽 버전으로 먼저 판정했다). Record schema가 노드 타입과 다르면 Record 계층의 TypeMismatch를 InvalidArgument로 바꾼다(파일 손상 — 5.1절. 마이그레이션 결과의 schema 불일치는 그대로 둔다).
+- 노드 표의 이름·대표 자식·패키지 정책 규칙은 Od1에서는 2단계 `Create`가 판정한다(생성자 실행 뒤 rollback — 부분 공개는 없다). 생성 전 판정(`CheckNewObjectIdentity`·형제 유일성·2a 사전 확인)은 Od2다. 1단계는 outer 값(0 또는 자기 번호 미만)만 본다(배치 검사 다음 — 5.4절 순서). 그래서 Od1에서 NodeTable 형제 이름 중복은 `Create`의 AlreadyExists이고, 5.4절의 최종 규칙(그래프 안 형제 유일성 InvalidArgument — 파일 손상)은 Od2가 바꾼다.
+- 도달 검사는 노드 1에서 BFS로 강한 참조 token·노드 표 outer(inner → outer)와, 패키지 정책 Registry면 자식 목록(outer → inner — 노드 표에서 만든 첫 자식·다음 형제 배열)을 따른다. 패키지 정책이고 기준 Outer가 있으면 outer 0 노드를 모두 시작점에 넣고(생존 기준 Outer가 자손을 붙잡는다 — 1.7절), 기준 Outer가 없으면 노드 1이 아닌 outer 0 노드를 거부한다(5.5절).
+- 옵션: `maxObjects`는 local ID가 외부 참조 비트와 겹치지 않게 2^31 − 1 이하다(저장은 맨 앞, 복원은 옵션 단계의 InvalidArgument — Od1 리뷰 반영).
+- 저장의 RecordBuilder와 필드 writer는 남은 파일 byte(maxBytes − 지금까지의 출력 − 이 노드의 Record 길이 prefix·NodeTable 항목)를 크기 한도로 연다 — 넘칠 Record를 끝까지 만들지 않고 피크가 줄어든다(Od1 리뷰 반영, 5.6절 피크). Serialization `ArchiveWriter`의 byte 추가는 일괄 복사다(동작·작업량 청구 같음 — 64 MiB 시험 시간 단축).
+- `prepare`는 Od1 편의 복원에서 구현했다(5.5 옵션 — Required 검사 뒤·Commit 전, 노드 handle을 local ID 순 배열로 준다).
+- 시험 공용 도구 `ObjectSerialization/Tests/GraphTestSupport.h`가 v2 byte를 명세로 직접 조립한다(저장 구현을 재사용하지 않는다). ObjectRuntime 쪽 시험(`AutoIdentityCompatibilityTests`·`ClassPropertyTests`)은 지금처럼 자기 파일에서 직접 조립한다.
 
 ## 6. 스레드·수명·GC 장벽
 
@@ -807,6 +822,7 @@ MetaCompiler·생성 헤더 형식·TypeRegistry 등록 규칙은 바꾸지 않�
 - 형식 손상: 버전 1·3 Unsupported, 정의되지 않은 flags·NodeTable 없는 BaseOuter, 개수·길이 불일치, 참조 값 경계(nodeCount+1·0x80000000·외부 비트 — Od1은 externalCount 0만), 남는 byte.
 - 한도: 64 MiB 경계(값 하나 64 MiB 포함), 최대 필드·원소·바이트 fixture가 기본 작업량 안에서 통과(결정 5), 작업량 선형(입력 두 배 → 청구 두 배 이내).
 - World: B8 Level 구조 저장·복원이 편의 API로 같은 결과.
+- (Od1 구현에서 더함) `GraphSetTests`(저장 집합·Include·NodeTable·도달 검사·prepare·조상과 이름을 쓰는 저장과 기준 Outer 복원의 N-fail), `GraphFormatTests`(header·NodeTable·Record·참조 값 경계와 저장 byte = 손으로 조립한 byte), `GraphLimitTests`(기본값, 64 MiB 파일·값 경계, 상한을 채운 세 fixture, 작업량 선형). 바이트 시험 재작성: `ObjectGraphTests`·`ObjectGraphReviewTests`·`CodecGraphTests`·`EnumGraphTests`·`ValueKindGraphTests`·`ArrayGraphTests`(U32 원소 위치·값 한도 4 MiB로 명시)·`AutoIdentityCompatibilityTests`·`ClassPropertyTests`.
 
 **Od2 — 단계형 복원**
 
@@ -855,8 +871,8 @@ MetaCompiler·생성 헤더 형식·TypeRegistry 등록 규칙은 바꾸지 않�
 1. **패키지 정책 Registry의 RequestDestroy** — 관찰자 유무와 무관하게 Unsupported(파괴는 Discard 하나 — "소속 객체는 Discard로만 죽는다"가 정책 전체의 불변식, 관찰자가 붙은 Registry만으로 두던 초안을 넓혔다). 관찰자는 패키지 정책 Registry에만 붙는다. 단서: Discard는 되돌릴 수 없고, Discard 대상을 가리키는 참조의 저장 정책·강제 삭제의 참조 재작성·undo의 삭제 취소는 A2·CU4의 열린 문제다(N5).
 2. **Rename·Outer 변경** — A0-O에 두지 않는다. EIP §5.2가 조건부로 허용하지만 A1–A6 소비자가 없고, 패키지 사이 이동은 관찰자·소속 불변식을 깨므로 넣을 때 "같은 패키지 안 이름·Outer 변경만, SubobjectGuid와 함께"로 따로 설계한다(UE Rename의 redirector 대응은 AS 4.3 별칭이 패키지 수준에서 맡는다).
 3. **빈 이름·대표 자식 규칙(1.1절)** — 그대로. Outer가 있는 빈 이름은 outermost의 유일한 자식만 — 객체 경로가 모호하지 않고 AS 5.1의 export 1 규칙과 같다. 패키지 정책의 패키지는 이름이 없다.
-4. **`maxValueBytes`** — 64 MiB(= 그래프 상한, RF 결정 16의 "한도 확장(64 MiB)"을 필드 값 한도로 읽는다). 조건: `BudgetAllocator` 단일 할당 한도·저장 피크(약 3배)·2c 버퍼를 문서화한다(5.6절).
-5. **작업량 상한** — `8 × (maxTotalFields + maxTotalElements) + 4 × maxBytes`(약 3.1억). AS·RF의 "8 × (필드 + 원소)"는 바이트 작업을 빼먹어 지금 64Mi보다 작다. 바이트·필드·원소 상한을 각각 채운 세 fixture가 통과함을 시험으로 고정한다.
+4. **`maxValueBytes`** — 64 MiB(= 그래프 상한, RF 결정 16의 "한도 확장(64 MiB)"을 필드 값 한도로 읽는다). 조건: `BudgetAllocator` 단일 할당 한도·저장 피크(약 2배 — Od1 구현에서 Record 한도를 남은 파일 byte로 열어 확정안의 약 3배에서 줄였다)·2c 버퍼를 문서화한다(5.6절).
+5. **작업량 상한** — `8 × (maxTotalFields + maxTotalElements + maxBytes)`(약 5.8억). AS·RF의 "8 × (필드 + 원소)"는 바이트 작업을 빼먹어 지금 64Mi보다 작다. 바이트·필드·원소 상한을 각각 채운 세 fixture가 통과함을 시험으로 고정한다(`GraphLimitTests`). A0-Od1 구현에서 고쳤다: 확정안의 `… + 4 × maxBytes`(약 3.1억)는 실제 청구로 잰 fixture를 담지 못했다 — 64 MiB 파일(문자열 하나) 저장 약 3.36억(byte당 5 — 값 encode·UTF-8 검사·Record 조립·Build·출력 복사)·복원 약 4.03억(byte당 6 — envelope·Record 색인·값 해석의 2단계 몫 선청구), 필드 상한(멤버 둘짜리 struct 원소 524,287개, 약 58 MiB) 저장 약 4.37억·복원 약 3.55억, 원소 상한(bool 4,194,304개) 저장 약 0.37억·복원 약 0.42억. 필드 상한을 채우면 TLV당 최소 28 byte라 바이트도 함께 차므로 세 항을 같은 계수로 묶었다(가장 큰 fixture가 상한의 약 76%). 청구를 줄이려면 저장의 Record 복사(builder → Build → 출력)를 출력 제자리 쓰기로 바꿔야 하는데 형식과 무관한 최적화라 후속으로 둔다. Oe의 외부 참조 위치 표 청구(참조 하나에 4 byte — 5.3절)가 더해지면 여유(지금 최대 fixture 약 76%)가 줄어든다 — Oe에서 다시 잰다.
 6. **"문자열 4 KiB"(AS A0-O 행)** — 객체 경로·Soft 경로(이미 4 KiB)·노드 이름(64 byte)에만 적용하고 일반 String 필드 값은 `maxValueBytes`로 둔다.
 7. **외부 번호 결정** — 첫 출현 slot과 u32 위치 표로 제자리 재배정, 재배정은 CRC·SHA 계산 전(5.3절에 대안 비교).
 8. **패키지 소속 객체의 생존(뒤집음)** — 패키지 정책 Registry에서 outer → inner를 GC 강한 간선으로 방문하고 자식 고리를 export 표로 쓴다. `Package.exports` 목록을 없애고, 소속 객체는 Discard로만 죽는다(`retiredWithoutDiscard` — `assertRetiredWithoutDiscard`면 Debug assert, 종료 뒤 제외). AssetManager는 모두 Discard한 뒤에만 RootRef를 놓는다(2절). 저장 집합이 GC 시점과 무관해진다. EIP §5.2에 "단 패키지 정책 Registry에서는 outer가 자손을 붙잡는다"를 덧붙인다(12절 정정).
@@ -868,7 +884,7 @@ MetaCompiler·생성 헤더 형식·TypeRegistry 등록 규칙은 바꾸지 않�
 14. **외부 참조 허락 결과** — `ExternalAdmission {Import, Null, Reject}`를 지금 둔다(5.3절 근거).
 15. **자식 고리와 회수** — 고리 해체를 하지 않는다. white 부모의 자식은 같은 sweep에서 스스로 떨어지고, 회수 조건 `firstChild == nullptr`가 그 사이 부모 슬롯 재사용을 막는다. Retire는 객체당 O(1), `processed`는 슬롯당 1 그대로(부모가 먼저 Retire될 때 고리를 해체하던 초안을 대신한다).
 16. **관찰자 키 상한** — `ReferenceObserver(Allocator&, usize maxKeys = 1u << 20)`, 넘으면 CapacityExceeded(N6의 상한).
-17. **편의 저장 Include의 거부 조건** — Include가 기준 Outer·노드 1의 조상·(패키지 정책 Registry에서) 노드 1과 다른 outermost의 객체를 만나면 `ExternalReference` 진단 뒤 InvalidArgument(초안의 "받아들이고 문서화"는 NodeTable 규칙에 걸려 실패하므로 바꿨다).
+17. **편의 저장 Include의 거부 조건** — Include가 기준 Outer·노드 1의 조상·(패키지 정책 Registry에서) 노드 1과 다른 outermost의 객체·(정책 없는 Registry에서 노드 1에 기준 Outer가 있을 때) 조상 순회가 Outer 없음에 닿는 다른 트리의 객체를 만나면 `ExternalReference` 진단 뒤 InvalidArgument(초안의 "받아들이고 문서화"는 NodeTable 규칙에 걸려 실패하므로 바꿨다. 다른 트리 조건은 Od1 리뷰에서 더했다). 복원 쪽 대칭: 패키지 정책의 편의 복원은 기준 Outer 없이 패키지 하나만 공개한다(5.5절).
 
 **열린 결정(권고안 포함 — 권고안으로 진행한다)**
 
@@ -926,8 +942,8 @@ ReflectionMetadata(`Docs/Implementation/ReflectionMetadata.ko.md` — A0-O 계�
 **(나) 코드 주석·구현 문서 — 구현 커밋에서 고친다**(지금 고치면 현재 코드와 어긋난다)
 
 22. `ObjectRegistry.h` 컨테이너 API 주석(200·209·224행 "할당하지 않는다") — Ob(7절 표). Ob에서 고쳤다(SetReference·ObjectRefArray 공통 규칙·StructRefArray 공통 규칙에 관찰자 예약·오류를 적었다).
-23. `FieldCodec.h`의 `FieldDecodePolicy` 주석(47–48행)·objectIndex(71행)·hook 계약(96–102행) — Oc·Od1. Oc에서 정책 주석·hook 계약·objectIndex(노드 위치 = local ID − 1)를 고쳤다(v2의 export index 문구는 Od1).
-24. `ObjectGraph.h` 주석, `ObjectSerialization/README.ko.md`("고아 객체 거부"·`allowMissingFields`·한도·형식) — Oc·Od1·Od2·Oe. Oc 몫(누락 = 기준·excludedFlags·Required 검사 단계·hook 시점)은 고쳤다.
-25. Docs/Implementation `Serialization.ko.md`(graph 형식·필드 codec)·`ObjectLifecycle.ko.md`(Outer·Name·Discard·다중 root Commit)·`IncrementalGarbageCollection.ko.md`(outer 간선·패키지 정책의 자식 방문·회수 조건) — Oa·Ob·Oc·Od. Oa·Ob 몫(`ObjectLifecycle`의 Outer·Name·Discard·관찰자, `IncrementalGarbageCollection`의 outer 간선·자식 방문·`retiredWithoutDiscard`)과 Oc 몫(`Serialization`의 누락 = 기준·excludedFlags·2c Required 검사·검사 버퍼 피크)은 고쳤다. RF의 graph v1 누락·Required 서술(12절 (가) 10번 — 4.6절·5.6절·6.2절·6.4절)도 Oc에서 지웠다.
+23. `FieldCodec.h`의 `FieldDecodePolicy` 주석(47–48행)·objectIndex(71행)·hook 계약(96–102행) — Oc·Od1. Oc에서 정책 주석·hook 계약·objectIndex(노드 위치 = local ID − 1)를 고쳤다(v2의 export index 문구는 Od1). Od1에서 objectIndex에 export index를, 참조 wire 주석을 v2로, `ExternalReference` 진단을 더했다.
+24. `ObjectGraph.h` 주석, `ObjectSerialization/README.ko.md`("고아 객체 거부"·`allowMissingFields`·한도·형식) — Oc·Od1·Od2·Oe. Oc 몫(누락 = 기준·excludedFlags·Required 검사 단계·hook 시점)은 고쳤다. Od1 몫(형식·저장 집합·고아·도달 검사·한도·편의 API)도 고쳤다.
+25. Docs/Implementation `Serialization.ko.md`(graph 형식·필드 codec)·`ObjectLifecycle.ko.md`(Outer·Name·Discard·다중 root Commit)·`IncrementalGarbageCollection.ko.md`(outer 간선·패키지 정책의 자식 방문·회수 조건) — Oa·Ob·Oc·Od. Oa·Ob 몫(`ObjectLifecycle`의 Outer·Name·Discard·관찰자, `IncrementalGarbageCollection`의 outer 간선·자식 방문·`retiredWithoutDiscard`)과 Oc 몫(`Serialization`의 누락 = 기준·excludedFlags·2c Required 검사·검사 버퍼 피크)은 고쳤다. RF의 graph v1 누락·Required 서술(12절 (가) 10번 — 4.6절·5.6절·6.2절·6.4절)도 Oc에서 지웠다. Od1 몫(`Serialization`의 graph v2 형식·저장 집합·도달 검사·한도 표)도 고쳤다. EngineRuntime 131행과 `Level.h` 주석의 graph v1도 v2 편의 API로 고쳤다.
 26. `GcBudget` 주석 — 결정 15(고리 해체 없음)로 바꿀 것이 없다.
 

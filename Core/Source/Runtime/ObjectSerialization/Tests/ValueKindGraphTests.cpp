@@ -6,6 +6,7 @@
 #include <Serialization/Record.h>
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
+#include "GraphTestSupport.h"
 
 // B3a 값 종류(AssetId·Sha256Digest·SoftObjectRef)의 스키마·등록된 쓰기 검증·그래프 왕복·잘못된
 // 저장값 거부 시험이다(Docs/Design/ReflectionFoundations.ko.md 3.1–3.3절). 필드 접근의 원자성과
@@ -65,42 +66,6 @@ StringView PathOfBytes(usize bytes) noexcept {
     path[bytes - 2] = '\x95';
     path[bytes - 1] = '\x9c';
     return StringView(path, bytes);
-}
-
-// 레코드 하나(AssetFields)짜리 graph format 1 바이트를 만든다(ObjectGraphTests의 SingleGraph와 같은
-// envelope).
-Result<Array<uint8>> SingleAssetGraph(Allocator& allocator, Span<const uint8> record) noexcept {
-    const uint8 magic[] = {'R', 'O', 'C', 'K', 'S', 'G', 'R', 'F'};
-    ArchiveWriter writer(allocator);
-    Result<void> written = writer.WriteRaw(magic);
-    const uint32 header[] = {1, 1, 1};
-    for (uint32 value : header) {
-        if (written) {
-            written = writer.WriteU32(value);
-        }
-    }
-
-    if (written) {
-        written = writer.WriteU64(1);
-    }
-
-    if (written) {
-        written = writer.WriteGuid(TypeIdOf<AssetFields>());
-    }
-
-    if (written) {
-        written = writer.WriteU32(1);
-    }
-
-    if (written) {
-        written = writer.WriteBytes(record);
-    }
-
-    if (!written) {
-        return Result<Array<uint8>>::Failure(written.Error());
-    }
-
-    return Result<Array<uint8>>::Success(writer.TakeBytes());
 }
 
 // AssetFields 하나를 만들어 값을 채운다. 시험이 RootRef를 소유한다.
@@ -437,7 +402,8 @@ TEST(ValueKinds_MalformedStoredValuesAreRejected) {
                 record.AddField(example.field, static_cast<uint32>(example.wire), example.payload));
             auto recordBytes = record.Build();
             REQUIRE(recordBytes);
-            auto graph = SingleAssetGraph(allocator, recordBytes.Value().View());
+            auto graph =
+                test::graph::Single(allocator, TypeIdOf<AssetFields>(), recordBytes.Value().View());
             REQUIRE(graph);
             auto loaded = LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
                                           graph.Value().View(), options);

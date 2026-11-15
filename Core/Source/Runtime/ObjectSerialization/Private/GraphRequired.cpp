@@ -67,10 +67,10 @@ public:
 
 protected:
     // 대상을 검사하지 않고 자리값만 쓴다(대상은 같은 트랜잭션 객체 — 1단계가 범위·기대 형식을
-    // 검증했고 Commit이 다시 검증한다). wire 형식은 그래프와 같다(graph v1 = U64).
+    // 검증했고 Commit이 다시 검증한다). wire 형식은 그래프와 같다(graph v2 = U32).
     Result<void> WriteReferenceWire(ArchiveWriter& out, ObjectHandle target,
                                     const ReferenceExpectation&) noexcept override {
-        return out.WriteU64(target == ObjectHandle{} ? 0 : 1);
+        return out.WriteU32(target == ObjectHandle{} ? 0 : 1);
     }
 
 private:

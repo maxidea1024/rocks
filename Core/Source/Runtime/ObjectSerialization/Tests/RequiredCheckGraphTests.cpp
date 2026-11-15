@@ -4,8 +4,8 @@
 #include <ObjectSerialization/ObjectGraph.h>
 #include <TestSupport/Test.h>
 
-// 누락 = 기준·실효 값 Required 진단(Docs/Design/ObjectFoundations.ko.md 4절 — A0-Oc, graph v1
-// envelope 위)의 그래프 시험이다. GeneratedType 특수화는 생성 코드와 같은 모양으로 손으로 썼다:
+// 누락 = 기준·실효 값 Required 진단(Docs/Design/ObjectFoundations.ko.md 4절 — A0-Oc, A0-Od1부터
+// graph v2 위)의 그래프 시험이다. GeneratedType 특수화는 생성 코드와 같은 모양으로 손으로 썼다:
 // Required 단일 참조·Soft(생성자 non-null·null)·참조 배열, 참조 struct 원소 배열(원소 안 Required
 // 참조), 참조 struct 필드, 참조 없는 struct 필드·원소 배열(빠진 멤버의 기준 값), MaxElements 배열,
 // Required Soft를 담은 참조 없는 struct(검사 모드의 치환 생략), EditorOnly 단일 값·Required 참조.

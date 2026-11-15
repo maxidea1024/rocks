@@ -6,130 +6,165 @@ namespace {
 
 using namespace graph_detail;
 
-Result<Array<LoadNode>> ReadEnvelope(Allocator& allocator, Span<const uint8> source,
-                                     Budget& budget) noexcept {
+// graph v2 envelope를 읽은 결과다. 노드 표(NodeTable)가 없으면 노드의 type·outer·name은 비어 있다.
+struct Envelope {
+    explicit Envelope(Allocator& allocator) noexcept : nodes(allocator) {
+    }
+
+    uint32 flags = 0;
+    uint32 externalCount = 0;
+    Array<LoadNode> nodes;
+};
+
+// header·NodeTable·Record 경계를 읽는다(Docs/Design/ObjectFoundations.ko.md 5.1절). 순서와 오류:
+// magic InvalidArgument → formatVersion이 2가 아니면 Unsupported(v1은 읽지 않는다) → 정의되지 않은
+// flags·NodeTable 없는 BaseOuter InvalidArgument → nodeCount 0 InvalidArgument·maxObjects 초과
+// CapacityExceeded → externalCount가 maxExternalReferences 초과 CapacityExceeded → 노드 수에 비해
+// 짧은 입력 InvalidArgument(할당 전) → NodeTable 항목(타입 0 InvalidArgument)·Record 길이·남는
+// byte.
+Result<Envelope> ReadEnvelope(Allocator& allocator, Span<const uint8> source,
+                              Budget& budget) noexcept {
     auto envelope = ArchiveReader::Create(source, budget.Archive(true));
     if (!envelope) {
-        return Result<Array<LoadNode>>::Failure(envelope.Error());
+        return Result<Envelope>::Failure(envelope.Error());
     }
 
     auto magic = envelope.Value().ReadRaw(sizeof(Magic));
     if (!magic) {
-        return Result<Array<LoadNode>>::Failure(magic.Error());
+        return Result<Envelope>::Failure(magic.Error());
     }
 
     for (usize index = 0; index < sizeof(Magic); ++index) {
         if (magic.Value()[index] != Magic[index]) {
-            return Result<Array<LoadNode>>::Failure(ErrorCode::InvalidArgument);
+            return Result<Envelope>::Failure(ErrorCode::InvalidArgument);
         }
     }
 
     auto version = envelope.Value().ReadU32();
     if (!version) {
-        return Result<Array<LoadNode>>::Failure(version.Error());
+        return Result<Envelope>::Failure(version.Error());
     }
 
-    if (version.Value() != 1) {
-        return Result<Array<LoadNode>>::Failure(ErrorCode::Unsupported);
+    if (version.Value() != FormatVersion) {
+        return Result<Envelope>::Failure(ErrorCode::Unsupported);
+    }
+
+    auto flags = envelope.Value().ReadU32();
+    if (!flags) {
+        return Result<Envelope>::Failure(flags.Error());
+    }
+
+    const bool nodeTable = (flags.Value() & NodeTableFlag) != 0;
+    if ((flags.Value() & ~KnownFlags) != 0 ||
+        ((flags.Value() & BaseOuterFlag) != 0 && !nodeTable)) {
+        return Result<Envelope>::Failure(ErrorCode::InvalidArgument);
     }
 
     auto count = envelope.Value().ReadU32();
     if (!count) {
-        return Result<Array<LoadNode>>::Failure(count.Error());
+        return Result<Envelope>::Failure(count.Error());
     }
 
-    auto root = envelope.Value().ReadU32();
-    if (!root) {
-        return Result<Array<LoadNode>>::Failure(root.Error());
-    }
-
-    if (count.Value() == 0 || root.Value() != 1) {
-        return Result<Array<LoadNode>>::Failure(ErrorCode::InvalidArgument);
+    if (count.Value() == 0) {
+        return Result<Envelope>::Failure(ErrorCode::InvalidArgument);
     }
 
     if (count.Value() > budget.limits.maxObjects) {
-        return Result<Array<LoadNode>>::Failure(ErrorCode::CapacityExceeded);
+        return Result<Envelope>::Failure(ErrorCode::CapacityExceeded);
     }
 
-    if (static_cast<uint64>(count.Value()) * (ObjectHeaderBytes + 44) >
-        envelope.Value().Remaining()) {
-        return Result<Array<LoadNode>>::Failure(ErrorCode::InvalidArgument);
+    auto externals = envelope.Value().ReadU32();
+    if (!externals) {
+        return Result<Envelope>::Failure(externals.Error());
+    }
+
+    if (externals.Value() > budget.limits.maxExternalReferences) {
+        return Result<Envelope>::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    // 노드마다 최소 byte(Record 길이 prefix와 header, NodeTable이면 항목)를 할당 전에 확인한다.
+    const usize perNode = RecordPrefixBytes + RecordHeaderBytes + (nodeTable ? NodeEntryBytes : 0);
+    if (static_cast<uint64>(count.Value()) * perNode > envelope.Value().Remaining()) {
+        return Result<Envelope>::Failure(ErrorCode::InvalidArgument);
     }
 
     auto spent = budget.Spend(envelope.Value().WorkUsed());
     if (!spent) {
-        return Result<Array<LoadNode>>::Failure(spent.Error());
+        return Result<Envelope>::Failure(spent.Error());
     }
 
     spent = budget.Spend(count.Value());
     if (!spent) {
-        return Result<Array<LoadNode>>::Failure(spent.Error());
+        return Result<Envelope>::Failure(spent.Error());
     }
 
-    Array<LoadNode> nodes(allocator);
+    Envelope result(allocator);
+    result.flags = flags.Value();
+    result.externalCount = externals.Value();
     // 노드 수만큼 먼저 예약하므로 이후 원소가 옮겨지지 않는다(FieldView가 node.migrated를
     // 가리킨다).
-    auto reserved = nodes.TryReserve(count.Value());
+    auto reserved = result.nodes.TryReserve(count.Value());
     if (!reserved) {
-        return Result<Array<LoadNode>>::Failure(reserved.Error());
+        return Result<Envelope>::Failure(reserved.Error());
+    }
+
+    for (uint32 index = 0; index < count.Value(); ++index) {
+        if (!result.nodes.TryEmplaceBack(allocator)) {
+            platform::Fatal("Object graph node reservation failed");
+        }
     }
 
     // 예약/초기화 비용을 먼저 차감한 나머지 예산만 body cursor에 준다.
     auto body = ArchiveReader::Create({source.Data() + HeaderBytes, source.Size() - HeaderBytes},
                                       budget.Archive(true));
     if (!body) {
-        return Result<Array<LoadNode>>::Failure(body.Error());
+        return Result<Envelope>::Failure(body.Error());
     }
 
-    for (uint32 index = 0; index < count.Value(); ++index) {
-        auto local = body.Value().ReadU64();
-        if (!local) {
-            return Result<Array<LoadNode>>::Failure(local.Error());
-        }
-
-        if (local.Value() != static_cast<uint64>(index) + 1) {
-            return Result<Array<LoadNode>>::Failure(ErrorCode::InvalidArgument);
-        }
-
+    for (usize index = 0; nodeTable && index < result.nodes.Size(); ++index) {
         auto type = body.Value().ReadGuid();
         if (!type) {
-            return Result<Array<LoadNode>>::Failure(type.Error());
+            return Result<Envelope>::Failure(type.Error());
         }
 
-        auto schemaVersion = body.Value().ReadU32();
-        if (!schemaVersion) {
-            return Result<Array<LoadNode>>::Failure(schemaVersion.Error());
+        if (type.Value() == Guid{}) {
+            return Result<Envelope>::Failure(ErrorCode::InvalidArgument);
         }
 
-        if (type.Value() == Guid{} || schemaVersion.Value() == 0) {
-            return Result<Array<LoadNode>>::Failure(ErrorCode::InvalidArgument);
+        auto outer = body.Value().ReadU32();
+        if (!outer) {
+            return Result<Envelope>::Failure(outer.Error());
         }
 
+        auto name = body.Value().ReadStringView();
+        if (!name) {
+            return Result<Envelope>::Failure(name.Error());
+        }
+
+        result.nodes[index].type = type.Value();
+        result.nodes[index].outer = outer.Value();
+        result.nodes[index].name = name.Value();
+    }
+
+    for (usize index = 0; index < result.nodes.Size(); ++index) {
         auto record = body.Value().ReadBytes();
         if (!record) {
-            return Result<Array<LoadNode>>::Failure(record.Error());
+            return Result<Envelope>::Failure(record.Error());
         }
 
-        auto added = nodes.TryEmplaceBack(allocator);
-        if (!added) {
-            return Result<Array<LoadNode>>::Failure(added.Error());
-        }
-
-        added.Value()->type = type.Value();
-        added.Value()->version = schemaVersion.Value();
-        added.Value()->source = record.Value();
+        result.nodes[index].source = record.Value();
     }
 
     if (!body.Value().AtEnd()) {
-        return Result<Array<LoadNode>>::Failure(ErrorCode::InvalidArgument);
+        return Result<Envelope>::Failure(ErrorCode::InvalidArgument);
     }
 
     spent = budget.Spend(body.Value().WorkUsed());
     if (!spent) {
-        return Result<Array<LoadNode>>::Failure(spent.Error());
+        return Result<Envelope>::Failure(spent.Error());
     }
 
-    return Result<Array<LoadNode>>::Success(Move(nodes));
+    return Result<Envelope>::Success(Move(result));
 }
 
 // 1단계(검증) 문맥이다. 값 reader는 그래프 공유 예산으로 열고, 강한 참조 token을 범위 검사해
@@ -322,12 +357,15 @@ public:
     Result<DecodedReference>
     ReadReference(ArchiveReader& reader,
                   const ReferenceExpectation& expectation) noexcept override {
-        auto local = reader.ReadU64();
+        auto local = reader.ReadU32();
         if (!local) {
             return Result<DecodedReference>::Failure(local.Error());
         }
 
-        if (local.Value() > objectCount_) {
+        // 외부 참조(ExternalReferenceBit | i)는 i ≤ externalCount여야 하는데 이 복원은
+        // externalCount 0만 받으므로(외부 참조 대상은 A0-Oe) 외부 비트는 모두 범위 밖이다. 노드
+        // 번호는 nodeCount 이하다.
+        if ((local.Value() & ExternalReferenceBit) != 0 || local.Value() > objectCount_) {
             return Result<DecodedReference>::Failure(ErrorCode::InvalidArgument);
         }
 
@@ -572,7 +610,7 @@ public:
 
     Result<DecodedReference> ReadReference(ArchiveReader& reader,
                                            const ReferenceExpectation&) noexcept override {
-        auto local = reader.ReadU64();
+        auto local = reader.ReadU32();
         if (!local) {
             return Result<DecodedReference>::Failure(local.Error());
         }
@@ -580,12 +618,12 @@ public:
         DecodedReference decoded;
         decoded.isNull = local.Value() == 0;
         if (!decoded.isNull) {
-            // 범위는 1단계가 검사했다. 다르면 원본이 바뀐 계약 위반이다.
+            // 범위는 1단계가 검사했다(외부 비트 포함). 다르면 원본이 바뀐 계약 위반이다.
             if (local.Value() > nodes_.Size()) {
                 return Result<DecodedReference>::Failure(ErrorCode::InvalidArgument);
             }
 
-            decoded.handle = nodes_[static_cast<usize>(local.Value() - 1)].handle;
+            decoded.handle = nodes_[local.Value() - 1].handle;
         }
 
         return Result<DecodedReference>::Success(decoded);
@@ -647,23 +685,47 @@ Result<RecordReader> OpenRecord(Allocator& allocator, Span<const uint8> source, 
     return record;
 }
 
+// 노드의 저장 Record를 연다(Record 버전이 저장 당시 스키마 버전이다 — graph v2 envelope는 버전을
+// 따로 쓰지 않는다). Record의 schema가 노드 타입과 다르면 InvalidArgument다(파일 손상 —
+// Docs/Design/ObjectFoundations.ko.md 5.1절. Record 계층은 TypeMismatch로 알린다). 버전은
+// node.version에 둔다.
+Result<RecordReader> OpenStoredRecord(Allocator& allocator, LoadNode& node,
+                                      Budget& budget) noexcept {
+    auto record =
+        RecordReader::Open(allocator, node.source, node.type, 1, NumericLimits<uint32>::Max(),
+                           budget.Record(), budget.Shared());
+    if (!record) {
+        return Result<RecordReader>::Failure(record.Error() == ErrorCode::TypeMismatch
+                                                 ? ErrorCode::InvalidArgument
+                                                 : record.Error());
+    }
+
+    auto fields = budget.AddFields(record.Value().FieldCount());
+    if (!fields) {
+        return Result<RecordReader>::Failure(fields.Error());
+    }
+
+    node.version = record.Value().SchemaVersion();
+    return record;
+}
+
 Result<RecordReader> CurrentRecord(Allocator& allocator, LoadNode& node, Budget& budget,
                                    const ObjectGraphLoadOptions& options,
                                    GraphValidateContext& context) noexcept {
+    auto record = OpenStoredRecord(allocator, node, budget);
+    if (!record) {
+        return record;
+    }
+
     const uint32 target = node.lease.Schema().version;
     if (node.version == target) {
-        return OpenRecord(allocator, node.source, node.type, node.version, budget);
+        return record;
     }
 
     // 저장 버전이 더 높으면 migrate를 부르지 않는다(AS 5.3 타입 데이터 축 — 높으면 읽기 전용 열기).
     if (node.version > target) {
         if (options.policy.newerVersion != NewerVersionPolicy::LoadNewerSkippingUnknown) {
             return Result<RecordReader>::Failure(ErrorCode::Unsupported);
-        }
-
-        auto record = OpenRecord(allocator, node.source, node.type, node.version, budget);
-        if (!record) {
-            return record;
         }
 
         if (auto reported = context.Report(FieldDiagnosticKind::NewerVersion, node.version);
@@ -676,11 +738,6 @@ Result<RecordReader> CurrentRecord(Allocator& allocator, LoadNode& node, Budget&
 
     if (options.migrate == nullptr) {
         return Result<RecordReader>::Failure(ErrorCode::Unsupported);
-    }
-
-    auto record = OpenRecord(allocator, node.source, node.type, node.version, budget);
-    if (!record) {
-        return record;
     }
 
     auto spent = budget.Spend(node.source.Size());
@@ -733,6 +790,13 @@ Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& nod
     auto layout = ValidateLayout(node.lease, budget);
     if (!layout) {
         return layout;
+    }
+
+    // 노드 표의 outer는 0(그래프 밖) 또는 자기보다 앞의 노드(1..자기 번호 − 1)다 — index는 0부터라
+    // outer ≤ index다. 노드 표의 이름·정책 규칙은 생성(2단계 Create)이 판정한다(생성 전 판정은
+    // 단계형 복원 A0-Od2).
+    if (node.outer > index) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     context.BeginNode(node, nullptr, index);
@@ -861,136 +925,207 @@ struct TypePairHash {
     }
 };
 
-// leases는 검사에 쓴 기대 타입 lease(기대 TypeId → lease)를 받아 호출자가 로드 끝까지 쥔다.
-// (기대, 실제) 결과 캐시와 기대 lease 목록은 해시 표이고 조회·삽입마다 작업량 1을 청구한다(원소
-// 참조가 많아도 대상 타입 수에 비례하지 않는다).
-Result<void> ValidateReachability(Allocator& allocator, TypeRegistry& types,
-                                  const Array<LoadNode>& nodes, Budget& budget,
-                                  HashMap<TypeId, TypeLease>& leases) noexcept {
-    auto spent = budget.Spend(nodes.Size());
-    if (!spent) {
-        return spent;
-    }
-
-    Array<uint8> visited(allocator);
-    Array<usize> queue(allocator);
+// 모든 노드의 강한 참조 token이 대상 노드의 타입 기대를 만족하는지 검사한다(도달 여부와 무관 —
+// setter와 같은 native 상속 계약을 생성 전에). leases는 검사에 쓴 기대 타입 lease(기대 TypeId →
+// lease)를 받아 호출자가 로드 끝까지 쥔다. (기대, 실제) 결과 캐시와 기대 lease 목록은 해시 표이고
+// 조회·삽입마다 작업량 1을 청구한다(원소 참조가 많아도 대상 타입 수에 비례하지 않는다).
+Result<void> ValidateReferenceTypes(Allocator& allocator, TypeRegistry& types,
+                                    const Array<LoadNode>& nodes, Budget& budget,
+                                    HashMap<TypeId, TypeLease>& leases) noexcept {
     HashMap<TypePair, bool, TypePairHash> checks(allocator);
-    auto reserved = visited.TryReserve(nodes.Size());
-    if (!reserved) {
-        return reserved;
-    }
-
-    reserved = queue.TryReserve(nodes.Size());
-    if (!reserved) {
-        return reserved;
-    }
-
-    for (usize index = 0; index < nodes.Size(); ++index) {
-        if (!visited.TryPushBack(uint8{0})) {
-            platform::Fatal("Object graph reachability reservation failed");
-        }
-    }
-
-    visited[0] = 1;
-    if (!queue.TryPushBack(usize{0})) {
-        platform::Fatal("Object graph root queue reservation failed");
-    }
-
-    for (usize index = 0; index < queue.Size(); ++index) {
-        const auto& node = nodes[queue[index]];
+    for (const LoadNode& node : nodes) {
         for (usize tokenIndex = 0; tokenIndex < node.tokens.Size(); ++tokenIndex) {
-            spent = budget.Spend(1);
+            auto spent = budget.Spend(1);
             if (!spent) {
                 return spent;
             }
 
             const ReferenceToken& token = node.tokens[tokenIndex];
-            const usize target = static_cast<usize>(token.target - 1);
+            const LoadNode& target = nodes[token.target - 1];
             const ReferenceExpectation& expectation = node.expectations[token.expectation];
-            // setter와 같은 native 상속 계약을 생성 전에 검사한다. 선언 타입의 파생 객체와 같은
-            // native의 다른 TypeId는 허용한다. 정적 thunk의 대상 타입도 함께 만족해야 한다.
-            if (expectation.staticNative &&
-                !nodes[target].lease.IsNativeA(expectation.staticNative)) {
+            // 선언 타입의 파생 객체와 같은 native의 다른 TypeId는 허용한다. 정적 thunk의 대상
+            // 타입도 함께 만족해야 한다.
+            if (expectation.staticNative && !target.lease.IsNativeA(expectation.staticNative)) {
                 return Result<void>::Failure(ErrorCode::TypeMismatch);
             }
 
-            if (expectation.schemaType != Guid{}) {
+            if (expectation.schemaType == Guid{}) {
+                continue;
+            }
+
+            spent = budget.Spend(1);
+            if (!spent) {
+                return spent;
+            }
+
+            const TypePair key{expectation.schemaType, target.type};
+            bool accepted = false;
+            if (const bool* cached = checks.Find(key)) {
+                accepted = *cached;
+            } else {
                 spent = budget.Spend(1);
                 if (!spent) {
                     return spent;
                 }
 
-                const TypePair key{expectation.schemaType, nodes[target].type};
-                bool accepted = false;
-                if (const bool* cached = checks.Find(key)) {
-                    accepted = *cached;
-                } else {
+                const TypeLease* expected = leases.Find(expectation.schemaType);
+                if (!expected) {
+                    // 조회와 마찬가지로 lease 획득·삽입도 청구한다.
                     spent = budget.Spend(1);
                     if (!spent) {
                         return spent;
                     }
 
-                    const TypeLease* expected = leases.Find(expectation.schemaType);
-                    if (!expected) {
-                        // 조회와 마찬가지로 lease 획득·삽입도 청구한다.
-                        spent = budget.Spend(1);
-                        if (!spent) {
-                            return spent;
-                        }
-
-                        auto acquired = types.Acquire(expectation.schemaType);
-                        if (!acquired) {
-                            return Result<void>::Failure(acquired.Error());
-                        }
-
-                        auto added = leases.Insert(expectation.schemaType, Move(acquired.Value()));
-                        if (!added) {
-                            return Result<void>::Failure(added.Error());
-                        }
-
-                        expected = leases.Find(expectation.schemaType);
+                    auto acquired = types.Acquire(expectation.schemaType);
+                    if (!acquired) {
+                        return Result<void>::Failure(acquired.Error());
                     }
 
-                    accepted = nodes[target].lease.IsNativeA(expected->Ops().nativeType);
-                    spent = budget.Spend(1);
-                    if (!spent) {
-                        return spent;
-                    }
-
-                    if (auto added = checks.Insert(key, accepted); !added) {
+                    auto added = leases.Insert(expectation.schemaType, Move(acquired.Value()));
+                    if (!added) {
                         return Result<void>::Failure(added.Error());
                     }
+
+                    expected = leases.Find(expectation.schemaType);
                 }
 
-                if (!accepted) {
-                    return Result<void>::Failure(ErrorCode::TypeMismatch);
+                accepted = target.lease.IsNativeA(expected->Ops().nativeType);
+                spent = budget.Spend(1);
+                if (!spent) {
+                    return spent;
+                }
+
+                if (auto added = checks.Insert(key, accepted); !added) {
+                    return Result<void>::Failure(added.Error());
                 }
             }
 
-            if (visited[target] == 0) {
-                visited[target] = 1;
-                if (!queue.TryPushBack(target)) {
-                    platform::Fatal("Object graph discovery queue reservation failed");
-                }
+            if (!accepted) {
+                return Result<void>::Failure(ErrorCode::TypeMismatch);
             }
         }
     }
 
-    if (queue.Size() != nodes.Size()) {
+    return Result<void>::Success();
+}
+
+// 편의 복원의 도달 검사다(Docs/Design/ObjectFoundations.ko.md 5.5절): 노드 1에서 영속 강한 참조,
+// inner → outer(노드 표의 outer), 패키지 정책 Registry면 outer → inner와 기준 Outer 아래 보존(기준
+// Outer가 있으면 outer 0 노드는 기준 Outer가 붙잡는다 — 1.7절)으로 닿지 않는 노드가 있으면
+// InvalidArgument다(공개 뒤 다음 GC가 조용히 지우지 않게 — 생성 전에 판정한다). 패키지 정책이고
+// 기준 Outer가 없으면 노드 1이 아닌 outer 0 노드(다른 패키지)도 InvalidArgument다.
+Result<void> CheckReachable(Allocator& allocator, const Array<LoadNode>& nodes, bool packagePolicy,
+                            bool hasBase, Budget& budget) noexcept {
+    const usize count = nodes.Size();
+    auto spent = budget.Spend(count);
+    if (!spent) {
+        return spent;
+    }
+
+    // visited와 큐, 패키지 정책이면 자식 목록(첫 자식·다음 형제 — 노드 번호 + 1, 0 = 없음)이다.
+    Array<uint8> visited(allocator);
+    Array<uint32> queue(allocator);
+    Array<uint32> firstChild(allocator);
+    Array<uint32> nextSibling(allocator);
+    if (auto resized = visited.TryResize(count); !resized) {
+        return resized;
+    }
+
+    if (auto reserved = queue.TryReserve(count); !reserved) {
+        return reserved;
+    }
+
+    if (packagePolicy) {
+        if (auto resized = firstChild.TryResize(count); !resized) {
+            return resized;
+        }
+
+        if (auto resized = nextSibling.TryResize(count); !resized) {
+            return resized;
+        }
+
+        // 역순으로 앞에 끼워 자식 목록이 노드 순서가 되게 한다(순서는 판정에 영향이 없다).
+        for (usize index = count; index > 0; --index) {
+            const uint32 outer = nodes[index - 1].outer;
+            if (outer != 0) {
+                nextSibling[index - 1] = firstChild[outer - 1];
+                firstChild[outer - 1] = static_cast<uint32>(index);
+            }
+        }
+    }
+
+    auto visit = [&](usize node) noexcept {
+        if (visited[node] == 0) {
+            visited[node] = 1;
+            if (!queue.TryPushBack(static_cast<uint32>(node))) {
+                platform::Fatal("Object graph reachability queue reservation failed");
+            }
+        }
+    };
+
+    visit(0);
+    for (usize index = 0; packagePolicy && index < count; ++index) {
+        if (nodes[index].outer != 0) {
+            continue;
+        }
+
+        // 패키지 정책에서 기준 Outer는 생존 객체이고 outer → inner로 자손을 붙잡는다. 기준 Outer가
+        // 없으면 outer 0 노드는 패키지이고, 편의 복원은 노드 1(root)인 패키지 하나만 공개한다 —
+        // 다른 패키지는 RootRef 없이 공개되어 다음 GC가 Discard 없이 회수하므로 거부한다(여러
+        // 패키지는 단계형 복원과 Commit(roots) — 저장 쪽 결정 17과 대칭).
+        if (!hasBase && index != 0) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        visit(index);
+    }
+
+    for (usize position = 0; position < queue.Size(); ++position) {
+        const LoadNode& node = nodes[queue[position]];
+        spent = budget.Spend(node.tokens.Size() + 2);
+        if (!spent) {
+            return spent;
+        }
+
+        for (const ReferenceToken& token : node.tokens) {
+            visit(token.target - 1);
+        }
+
+        if (node.outer != 0) {
+            visit(node.outer - 1);
+        }
+
+        for (uint32 child = packagePolicy ? firstChild[queue[position]] : 0; child != 0;
+             child = nextSibling[child - 1]) {
+            spent = budget.Spend(1);
+            if (!spent) {
+                return spent;
+            }
+
+            visit(child - 1);
+        }
+    }
+
+    if (queue.Size() != count) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     return Result<void>::Success();
 }
 
-// 2단계: 모든 객체를 만들고 보관한 필드를 staged 객체에 쓴 뒤, Required 실효 값을 진단하고(2c —
-// CheckRequiredFields) Commit한다. 그래프 예산에 접근하지 않는다.
+// 2단계: 모든 노드를 노드 표의 Outer·이름으로 만들고 보관한 필드를 staged 객체에 쓴 뒤, Required
+// 실효 값을 진단하고(2c — CheckRequiredFields) prepare를 부르고 노드 1을 root로 Commit한다. 그래프
+// 예산에 접근하지 않는다. 노드 표의 이름·정책 규칙 위반은 여기서 Create가 거부한다(rollback — 생성
+// 전 판정은 단계형 복원 A0-Od2).
 Result<RootRef<Object>> ConstructGraph(Allocator& allocator, ObjectRegistry& registry,
                                        const ObjectAccessContext& access, Array<LoadNode>& nodes,
                                        const ObjectGraphLoadOptions& options) noexcept {
     ConstructionContext transaction(registry, access);
     for (usize index = 0; index < nodes.Size(); ++index) {
-        auto created = transaction.Create<Object>(nodes[index].type);
+        const uint32 outerIndex = nodes[index].outer;
+        const ObjectHandle outer =
+            outerIndex == 0 ? options.baseOuter : nodes[outerIndex - 1].handle;
+        auto created = transaction.Create<Object>(nodes[index].type, outer, nodes[index].name);
         if (!created) {
             return Result<RootRef<Object>>::Failure(created.Error());
         }
@@ -1024,6 +1159,24 @@ Result<RootRef<Object>> ConstructGraph(Allocator& allocator, ObjectRegistry& reg
         return Result<RootRef<Object>>::Failure(checked.Error());
     }
 
+    if (options.prepare) {
+        Array<ObjectHandle> handles(allocator);
+        if (auto reserved = handles.TryReserve(nodes.Size()); !reserved) {
+            return Result<RootRef<Object>>::Failure(reserved.Error());
+        }
+
+        for (const LoadNode& node : nodes) {
+            if (!handles.TryPushBack(node.handle)) {
+                platform::Fatal("Object graph prepare handle reservation failed");
+            }
+        }
+
+        if (auto prepared = options.prepare(transaction, handles.View(), options.prepareUser);
+            !prepared) {
+            return Result<RootRef<Object>>::Failure(prepared.Error());
+        }
+    }
+
     return transaction.Commit();
 }
 
@@ -1033,50 +1186,71 @@ Result<RootRef<Object>> LoadObjectGraph(Allocator& allocator, ObjectRegistry& re
                                         TypeRegistry& types, const ObjectAccessContext& access,
                                         Span<const uint8> source,
                                         ObjectGraphLoadOptions options) noexcept {
+    using Output = Result<RootRef<Object>>;
     if (!registry.UsesTypeRegistry(types)) {
-        return Result<RootRef<Object>>::Failure(ErrorCode::WrongContext);
+        return Output::Failure(ErrorCode::WrongContext);
     }
 
-    // 값을 바꾸거나 모르는 내용을 건너뛰는 정책은 진단을 받을 곳이 있어야 한다.
-    if (!options.hooks &&
-        (options.policy.undeclaredEnum == UndeclaredEnumPolicy::ReportAndDefault ||
-         options.policy.newerVersion == NewerVersionPolicy::LoadNewerSkippingUnknown)) {
-        return Result<RootRef<Object>>::Failure(ErrorCode::InvalidArgument);
+    // 값을 바꾸거나 모르는 내용을 건너뛰는 정책은 진단을 받을 곳이 있어야 한다. 노드 수 상한은
+    // local ID가 외부 참조 비트와 겹치지 않게 MaxNodeCount 이하다.
+    if ((!options.hooks &&
+         (options.policy.undeclaredEnum == UndeclaredEnumPolicy::ReportAndDefault ||
+          options.policy.newerVersion == NewerVersionPolicy::LoadNewerSkippingUnknown)) ||
+        options.limits.maxObjects > MaxNodeCount) {
+        return Output::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 기준 Outer는 생존 객체여야 한다(단계형 복원 입력의 base 요약 — 접근·종료·handle 오류는
+    // DescribeOuter의 것).
+    const bool hasBase = options.baseOuter != ObjectHandle{};
+    if (hasBase) {
+        if (auto described = registry.DescribeOuter(access, options.baseOuter); !described) {
+            return Output::Failure(described.Error());
+        }
     }
 
     auto budget = Budget::Create(allocator, options.limits);
     if (!budget) {
-        return Result<RootRef<Object>>::Failure(budget.Error());
+        return Output::Failure(budget.Error());
     }
 
-    auto nodes = ReadEnvelope(allocator, source, budget.Value());
-    if (!nodes) {
-        return Result<RootRef<Object>>::Failure(nodes.Error());
+    auto envelope = ReadEnvelope(allocator, source, budget.Value());
+    if (!envelope) {
+        return Output::Failure(envelope.Error());
     }
 
-    GraphValidateContext context(allocator, budget.Value(), options, nodes.Value().Size());
+    // 노드 출처: 편의 복원은 그래프의 NodeTable로 노드를 만든다. BaseOuter 비트는 baseOuter 유무와
+    // 같아야 하고, 외부 참조 대상(imports — A0-Oe)을 줄 수 없으므로 externalCount는 0이어야 한다.
+    const uint32 flags = envelope.Value().flags;
+    if ((flags & NodeTableFlag) == 0 || ((flags & BaseOuterFlag) != 0) != hasBase ||
+        envelope.Value().externalCount != 0) {
+        return Output::Failure(ErrorCode::InvalidArgument);
+    }
+
+    Array<LoadNode>& nodes = envelope.Value().nodes;
+    GraphValidateContext context(allocator, budget.Value(), options, nodes.Size());
     // 관찰할 struct ID를 정렬해 둔다(미등록 NotFound, 참조를 담는 struct InvalidArgument).
     Array<TypeId> observed(allocator);
     if (options.hooks) {
         const Span<const TypeId> requested = options.hooks->ObservedStructs();
         auto reserved = observed.TryReserve(requested.Size());
         if (!reserved) {
-            return Result<RootRef<Object>>::Failure(reserved.Error());
+            return Output::Failure(reserved.Error());
         }
 
         for (TypeId id : requested) {
             auto spent = budget.Value().Spend(1);
             if (!spent) {
-                return Result<RootRef<Object>>::Failure(spent.Error());
+                return Output::Failure(spent.Error());
             }
 
             auto lease = types.AcquireValueType(id, TypeKind::Struct);
             if (!lease) {
-                return Result<RootRef<Object>>::Failure(lease.Error());
+                return Output::Failure(lease.Error());
             }
 
             if (lease.Value().Struct().ContainsStrongReference()) {
-                return Result<RootRef<Object>>::Failure(ErrorCode::InvalidArgument);
+                return Output::Failure(ErrorCode::InvalidArgument);
             }
 
             if (!observed.TryPushBack(id)) {
@@ -1086,12 +1260,12 @@ Result<RootRef<Object>> LoadObjectGraph(Allocator& allocator, ObjectRegistry& re
 
         uint64 sortWork = 0;
         if (!TryMultiply(uint64{observed.Size()}, uint64{64}, sortWork)) {
-            return Result<RootRef<Object>>::Failure(ErrorCode::Overflow);
+            return Output::Failure(ErrorCode::Overflow);
         }
 
         auto spent = budget.Value().Spend(sortWork);
         if (!spent) {
-            return Result<RootRef<Object>>::Failure(spent.Error());
+            return Output::Failure(spent.Error());
         }
 
         algo::Sort(observed.View(), [](TypeId left, TypeId right) noexcept {
@@ -1101,31 +1275,44 @@ Result<RootRef<Object>> LoadObjectGraph(Allocator& allocator, ObjectRegistry& re
     }
 
     usize references = 0;
-    for (usize index = 0; index < nodes.Value().Size(); ++index) {
-        auto decoded = DecodeNode(allocator, types, nodes.Value()[index],
-                                  static_cast<uint32>(index), budget.Value(), options, context);
+    usize nameBytes = 0;
+    for (usize index = 0; index < nodes.Size(); ++index) {
+        auto decoded = DecodeNode(allocator, types, nodes[index], static_cast<uint32>(index),
+                                  budget.Value(), options, context);
         if (!decoded) {
-            return Result<RootRef<Object>>::Failure(decoded.Error());
+            return Output::Failure(decoded.Error());
         }
 
-        references += nodes.Value()[index].tokens.Size();
+        references += nodes[index].tokens.Size();
+        nameBytes += nodes[index].name.ByteCount();
     }
 
     HashMap<TypeId, TypeLease> expectedLeases(allocator);
-    auto reachable =
-        ValidateReachability(allocator, types, nodes.Value(), budget.Value(), expectedLeases);
-    if (!reachable) {
-        return Result<RootRef<Object>>::Failure(reachable.Error());
+    if (auto typed =
+            ValidateReferenceTypes(allocator, types, nodes, budget.Value(), expectedLeases);
+        !typed) {
+        return Output::Failure(typed.Error());
     }
 
-    // 2단계의 노드 생성·Commit·staged 간선 검증 몫을 미리 청구한다(2단계는 예산으로 실패하지
-    // 않는다).
-    auto spent = budget.Value().Spend(static_cast<uint64>(nodes.Value().Size()) + 1 + references);
-    if (!spent) {
-        return Result<RootRef<Object>>::Failure(spent.Error());
+    // 2단계의 노드 생성(노드 수 + 이름 byte)·Commit·staged 간선 검증 몫을 미리 청구한다(2단계는
+    // 예산으로 실패하지 않는다).
+    uint64 phaseTwo = 0;
+    if (!TryAdd(static_cast<uint64>(nodes.Size()) + 1, static_cast<uint64>(references), phaseTwo) ||
+        !TryAdd(phaseTwo, static_cast<uint64>(nameBytes), phaseTwo)) {
+        return Output::Failure(ErrorCode::Overflow);
     }
 
-    return ConstructGraph(allocator, registry, access, nodes.Value(), options);
+    if (auto spent = budget.Value().Spend(phaseTwo); !spent) {
+        return Output::Failure(spent.Error());
+    }
+
+    const bool packagePolicy = registry.Policy().packageNativeType != nullptr;
+    if (auto reachable = CheckReachable(allocator, nodes, packagePolicy, hasBase, budget.Value());
+        !reachable) {
+        return Output::Failure(reachable.Error());
+    }
+
+    return ConstructGraph(allocator, registry, access, nodes, options);
 }
 
 } // namespace rocks

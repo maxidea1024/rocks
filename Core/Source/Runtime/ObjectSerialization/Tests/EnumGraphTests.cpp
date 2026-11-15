@@ -5,6 +5,7 @@
 #include <Serialization/Archive.h>
 #include <Serialization/Record.h>
 #include <TestSupport/Test.h>
+#include "GraphTestSupport.h"
 
 // B3b enum 필드의 그래프 저장·복원 시험이다(Docs/Design/ReflectionFoundations.ko.md 3.4절): I64
 // wire 왕복과 재저장 byte 동일성, C++에서 직접 넣은 선언되지 않은 값의 저장 거부, 저장된 선언되지
@@ -56,42 +57,6 @@ Result<RootRef<EnumFields>> NewFilled(ObjectRegistry& objects, TextureGroup grou
     value.Value()->bias = bias;
     value.Value()->channels = channels;
     return created;
-}
-
-// EnumFields 레코드 하나짜리 graph format 1 바이트를 만든다(ObjectGraphTests의 SingleGraph와 같은
-// envelope).
-Result<Array<uint8>> SingleGraph(Allocator& allocator, Span<const uint8> record) noexcept {
-    const uint8 magic[] = {'R', 'O', 'C', 'K', 'S', 'G', 'R', 'F'};
-    ArchiveWriter writer(allocator);
-    Result<void> written = writer.WriteRaw(magic);
-    const uint32 header[] = {1, 1, 1};
-    for (uint32 value : header) {
-        if (written) {
-            written = writer.WriteU32(value);
-        }
-    }
-
-    if (written) {
-        written = writer.WriteU64(1);
-    }
-
-    if (written) {
-        written = writer.WriteGuid(TypeIdOf<EnumFields>());
-    }
-
-    if (written) {
-        written = writer.WriteU32(1);
-    }
-
-    if (written) {
-        written = writer.WriteBytes(record);
-    }
-
-    if (!written) {
-        return Result<Array<uint8>>::Failure(written.Error());
-    }
-
-    return Result<Array<uint8>>::Success(writer.TakeBytes());
 }
 
 } // namespace
@@ -217,7 +182,8 @@ TEST(EnumGraph_LoadRejectsUndeclaredValuesAndWrongWire) {
                                     static_cast<uint32>(example.wire), bytes.View()));
             auto recordBytes = record.Build();
             REQUIRE(recordBytes);
-            auto graph = SingleGraph(allocator, recordBytes.Value().View());
+            auto graph =
+                test::graph::Single(allocator, TypeIdOf<EnumFields>(), recordBytes.Value().View());
             REQUIRE(graph);
             auto loaded = LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
                                           graph.Value().View(), options);
@@ -235,7 +201,8 @@ TEST(EnumGraph_LoadRejectsUndeclaredValuesAndWrongWire) {
                                 static_cast<uint32>(WireType::I64), bytes.View()));
         auto recordBytes = record.Build();
         REQUIRE(recordBytes);
-        auto graph = SingleGraph(allocator, recordBytes.Value().View());
+        auto graph =
+            test::graph::Single(allocator, TypeIdOf<EnumFields>(), recordBytes.Value().View());
         REQUIRE(graph);
         {
             auto loaded = LoadObjectGraph(allocator, target, types, target.OwnerAccess(),

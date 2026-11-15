@@ -31,10 +31,12 @@ Result<Array<uint8>> SingleRecordGraph(Allocator& allocator, TypeId type,
                                        Span<const uint8> record) noexcept {
     ArchiveWriter writer(allocator);
     const uint8 magic[] = {'R', 'O', 'C', 'K', 'S', 'G', 'R', 'F'};
-    // 테스트는 wire 명세로 envelope를 직접 구성한다. Save 구현의 판단을 재사용하지 않는다.
-    if (!writer.WriteRaw({magic, 8}) || !writer.WriteU32(1) || !writer.WriteU32(1) ||
-        !writer.WriteU32(1) || !writer.WriteU64(1) || !writer.WriteGuid(type) ||
-        !writer.WriteU32(1) || !writer.WriteBytes(record)) {
+    // 테스트는 wire 명세(graph v2 — Docs/Design/ObjectFoundations.ko.md 5.1절)로 직접 구성한다.
+    // Save 구현의 판단을 재사용하지 않는다: header(formatVersion 2, flags 1 = NodeTable, 노드 1개,
+    // 외부 참조 0), NodeTable 항목(타입, outer 0, 빈 이름), Bytes(Record).
+    if (!writer.WriteRaw({magic, 8}) || !writer.WriteU32(2) || !writer.WriteU32(1) ||
+        !writer.WriteU32(1) || !writer.WriteU32(0) || !writer.WriteGuid(type) ||
+        !writer.WriteU32(0) || !writer.WriteString({}) || !writer.WriteBytes(record)) {
         return Result<Array<uint8>>::Failure(ErrorCode::OutOfMemory);
     }
     return Result<Array<uint8>>::Success(writer.TakeBytes());
@@ -210,6 +212,22 @@ TEST(ReflectionTransientWireAndAbstractGraphAreRejectedBeforeConstructors) {
                   .Error() == ErrorCode::Unsupported);
         CHECK(AbstractBase::constructions == 0 && AbstractByPolicy::constructions == 0);
         CHECK(objects.Stats().liveObjects == 0 && objects.Stats().reservedObjects == 0);
+        // 양성 대조: 같은 조립의 빈 PropertyNode Record는 복원된다(위 거부가 형식 오류로 거짓
+        // 통과한 것이 아니다).
+        RecordBuilder empty(allocator, GeneratedType<PropertyNode>::Id(), 1);
+        auto emptyRecord = empty.Build();
+        REQUIRE(emptyRecord);
+        auto emptyGraph =
+            SingleRecordGraph(allocator, GeneratedType<PropertyNode>::Id(),
+                              {emptyRecord.Value().Data(), emptyRecord.Value().Size()});
+        REQUIRE(emptyGraph);
+        {
+            auto loaded = LoadObjectGraph(allocator, objects, types, objects.OwnerAccess(),
+                                          {emptyGraph.Value().Data(), emptyGraph.Value().Size()});
+            CHECK(loaded.IsOk());
+        }
+
+        REQUIRE(objects.Collect(objects.OwnerAccess()));
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }

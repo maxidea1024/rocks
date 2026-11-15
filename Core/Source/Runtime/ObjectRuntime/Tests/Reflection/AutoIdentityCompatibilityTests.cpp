@@ -83,7 +83,9 @@ TEST(AutoIdentityRenamedClassAndFieldPreserveSavedObjectGraphWire) {
                                      original.Value().Handle());
         REQUIRE(saved);
 
-        // 파일에 실제 쓰인 타입 ID, 레코드 필드 ID와 payload를 별도 reader로 검사한다.
+        // 파일에 실제 쓰인 타입 ID, 레코드 필드 ID와 payload를 별도 reader로 검사한다(graph v2 —
+        // Docs/Design/ObjectFoundations.ko.md 5.1절: header 24 byte, NodeTable 항목 {타입, outer,
+        // 이름}, Bytes(Record) — 스키마 버전은 Record header에만 있다).
         auto archive = ArchiveReader::Create(saved.Value().View());
         REQUIRE(archive);
         auto magic = archive.Value().ReadRaw(8);
@@ -91,15 +93,18 @@ TEST(AutoIdentityRenamedClassAndFieldPreserveSavedObjectGraphWire) {
         const uint8 expectedMagic[] = {'R', 'O', 'C', 'K', 'S', 'G', 'R', 'F'};
         CHECK(SameBytes(magic.Value(), expectedMagic));
         auto format = archive.Value().ReadU32();
+        auto flags = archive.Value().ReadU32();
         auto count = archive.Value().ReadU32();
-        auto root = archive.Value().ReadU32();
-        auto local = archive.Value().ReadU64();
+        auto externals = archive.Value().ReadU32();
         auto type = archive.Value().ReadGuid();
-        auto schemaVersion = archive.Value().ReadU32();
+        auto outer = archive.Value().ReadU32();
+        auto name = archive.Value().ReadStringView();
         auto recordBytes = archive.Value().ReadBytes();
-        REQUIRE(format && count && root && local && type && schemaVersion && recordBytes);
-        CHECK(format.Value() == 1 && count.Value() == 1 && root.Value() == 1 &&
-              local.Value() == 1 && type.Value() == SavedTypeId && schemaVersion.Value() == 1);
+        REQUIRE(format && flags && count && externals && type && outer && name && recordBytes);
+        // flags 1 = NodeTable(BaseOuter 없음), 외부 참조 0, Outer 없음·이름 없음.
+        CHECK(format.Value() == 2 && flags.Value() == 1 && count.Value() == 1 &&
+              externals.Value() == 0 && type.Value() == SavedTypeId && outer.Value() == 0 &&
+              name.Value().ByteCount() == 0);
         CHECK(archive.Value().AtEnd());
         auto record = RecordReader::Open(allocator, recordBytes.Value(), SavedTypeId, 1, 1);
         REQUIRE(record);

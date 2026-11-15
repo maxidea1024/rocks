@@ -6,11 +6,28 @@
 
 namespace rocks::graph_detail {
 
+// graph v2 형식(Docs/Design/ObjectFoundations.ko.md 5.1절)이다. header는 magic(8) · formatVersion
+// u32 · flags u32 · nodeCount u32 · externalCount u32의 24 byte이고, 그 뒤에 [NodeTable] nodeCount
+// × {Guid type, u32 outer, String name}, nodeCount × Bytes(Record)가 오며 남는 byte가 없다.
 inline constexpr uint8 Magic[] = {'R', 'O', 'C', 'K', 'S', 'G', 'R', 'F'};
-inline constexpr usize HeaderBytes = 20;
-inline constexpr usize ObjectHeaderBytes = 36;
-// graph v1의 강한 참조 wire: U64 local ID(0 = null).
-inline constexpr uint32 ReferenceWire = static_cast<uint32>(WireType::U64);
+inline constexpr uint32 FormatVersion = 2;
+inline constexpr usize HeaderBytes = 24;
+// flags 비트다. BaseOuter는 NodeTable과만 쓰고 outer 0 노드의 Outer가 기준 Outer임을 뜻한다.
+inline constexpr uint32 NodeTableFlag = 1;
+inline constexpr uint32 BaseOuterFlag = 2;
+inline constexpr uint32 KnownFlags = NodeTableFlag | BaseOuterFlag;
+// NodeTable 항목 하나의 고정 byte(Guid 16 + outer 4 + 이름 길이 8 — 이름 byte는 따로)다.
+inline constexpr usize NodeEntryBytes = 28;
+// Record 하나를 감싼 Bytes의 길이 prefix(8)와 Record header(44)다(노드마다 최소 byte).
+inline constexpr usize RecordPrefixBytes = 8;
+inline constexpr usize RecordHeaderBytes = 44;
+// 강한 참조 wire는 U32다: 0 = null, 1..nodeCount = 노드(local ID), ExternalReferenceBit | i(1 ≤ i ≤
+// externalCount) = 외부 참조 i(A0-Oe — 지금 복원은 externalCount 0만 받으므로 언제나 범위 밖이다).
+inline constexpr uint32 ReferenceWire = static_cast<uint32>(WireType::U32);
+inline constexpr uint32 ExternalReferenceBit = 0x80000000u;
+// local ID가 외부 참조 비트와 겹치지 않는 노드 수 상한이다(maxObjects가 넘으면 옵션 오류
+// InvalidArgument).
+inline constexpr uint32 MaxNodeCount = ExternalReferenceBit - 1;
 
 // 그래프 하나의 누적 작업량 예산이다. ArchiveBudget 하나를 모든 Record 트리(값 reader 포함)와
 // 공유하므로 그래프 청구와 reader 청구가 같은
@@ -177,6 +194,8 @@ struct StoredStructMigration {
     Array<uint8> bytes;
 };
 
+// 1단계가 노드 하나에 보관하는 것이다. type·outer·name은 노드 표(NodeTable)에서, version은 Record
+// header에서 온다. name은 원본 byte를 빌린다.
 struct LoadNode {
     explicit LoadNode(Allocator& allocator) noexcept
         : migrated(allocator), fields(allocator), expectations(allocator), tokens(allocator),
@@ -184,6 +203,9 @@ struct LoadNode {
     }
 
     TypeId type{};
+    // 0 = 그래프 밖(BaseOuter면 기준 Outer, 아니면 Outer 없음), 1..자기 번호 − 1 = 노드.
+    uint32 outer = 0;
+    StringView name{};
     uint32 version = 0;
     Span<const uint8> source;
     TypeLease lease;

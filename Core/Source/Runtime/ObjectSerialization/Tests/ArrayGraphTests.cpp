@@ -1597,9 +1597,10 @@ TEST(ArrayGraph_PerFieldMaxElementsAndGraphTotals) {
     CHECK(narrowFixture.Close());
 }
 
-// 값 byte 한도: U64 원소 524,287개(payload 정확히 4 MiB)는 저장·복원되고 하나 더면 저장이
-// CapacityExceeded다. 배열 원소 수 상한 MaxArrayElements: bool 1,048,576개는 왕복하고 저장 count를
-// 하나 늘린 입력은 로드가 생성자 전에 CapacityExceeded다.
+// 값 byte 한도(4 MiB로 낮춘 한도 — 기본 64 MiB 경계는 GraphLimitTests): U64 원소 524,287개(payload
+// 정확히 4 MiB)는 저장·복원되고 하나 더면 저장이 CapacityExceeded다. 배열 원소 수 상한
+// MaxArrayElements: bool 1,048,576개는 왕복하고 저장 count를 하나 늘린 입력은 로드가 생성자 전에
+// CapacityExceeded다.
 TEST(ArrayGraph_ValueBytesAndMaxArrayElements) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
@@ -1612,6 +1613,10 @@ TEST(ArrayGraph_ValueBytesAndMaxArrayElements) {
     {
         ObjectRegistry source(allocator, types, {0x4147, 14});
         ObjectRegistry target(allocator, types, {0x4147, 15});
+        ObjectGraphSaveOptions save;
+        save.limits.maxValueBytes = 4 * 1024 * 1024;
+        ObjectGraphLoadOptions load;
+        load.limits.maxValueBytes = 4 * 1024 * 1024;
         {
             auto root = source.NewObject<Wide>(source.OwnerAccess(), WideId);
             REQUIRE(root);
@@ -1626,11 +1631,11 @@ TEST(ArrayGraph_ValueBytesAndMaxArrayElements) {
                 }
             }
 
-            auto fits =
-                SaveObjectGraph(allocator, source, source.OwnerAccess(), root.Value().Handle());
+            auto fits = SaveObjectGraph(allocator, source, source.OwnerAccess(),
+                                        root.Value().Handle(), save);
             REQUIRE(fits);
             auto loaded = LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
-                                          fits.Value().View());
+                                          fits.Value().View(), load);
             REQUIRE(loaded);
             {
                 auto borrowed = target.Resolve<Wide>(target.OwnerAccess(), loaded.Value().Handle());
@@ -1648,7 +1653,8 @@ TEST(ArrayGraph_ValueBytesAndMaxArrayElements) {
                 REQUIRE(wide.values.TryPushBack(uint64{1}));
             }
 
-            CHECK(SaveObjectGraph(allocator, source, source.OwnerAccess(), root.Value().Handle())
+            CHECK(SaveObjectGraph(allocator, source, source.OwnerAccess(), root.Value().Handle(),
+                                  save)
                       .Error() == ErrorCode::CapacityExceeded);
             {
                 auto borrowed = source.Resolve<Wide>(source.OwnerAccess(), root.Value().Handle());
@@ -1661,11 +1667,11 @@ TEST(ArrayGraph_ValueBytesAndMaxArrayElements) {
                 }
             }
 
-            auto bits =
-                SaveObjectGraph(allocator, source, source.OwnerAccess(), root.Value().Handle());
+            auto bits = SaveObjectGraph(allocator, source, source.OwnerAccess(),
+                                        root.Value().Handle(), save);
             REQUIRE(bits);
             auto bitsLoaded = LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
-                                              bits.Value().View());
+                                              bits.Value().View(), load);
             REQUIRE(bitsLoaded);
             bitsLoaded.Value().Reset();
             const usize payload = FindPayload(bits.Value().View(), BitsId, WireType::ValueArray);
@@ -1673,9 +1679,9 @@ TEST(ArrayGraph_ValueBytesAndMaxArrayElements) {
             REQUIRE(Read32(bits.Value().View(), payload + 4) == MaxArrayElements);
             Write32(bits.Value(), payload + 4, MaxArrayElements + 1);
             const uint32 constructed = Wide::Constructed;
-            CHECK(
-                LoadObjectGraph(allocator, target, types, target.OwnerAccess(), bits.Value().View())
-                    .Error() == ErrorCode::CapacityExceeded);
+            CHECK(LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
+                                  bits.Value().View(), load)
+                      .Error() == ErrorCode::CapacityExceeded);
             CHECK(Wide::Constructed == constructed);
             REQUIRE(target.Collect(target.OwnerAccess()));
         }
@@ -2146,11 +2152,12 @@ TEST(ArrayGraph_TargetTypeMismatchAndReachability) {
             const usize payload = FindPayload(bytes.Value().View(), LinksId, WireType::ValueArray);
             REQUIRE(payload != IndexNone);
             REQUIRE(Read32(bytes.Value().View(), payload + 4) == 2);
-            Write64(bytes.Value(), payload + 8 + 8, 9);
+            // 원소는 U32 local ID다(graph v2): 두 번째 원소를 범위 밖(9)으로, 그다음 null로 바꾼다.
+            Write32(bytes.Value(), payload + 8 + 4, 9);
             CHECK(LoadObjectGraph(allocator, loose, looseTypes, loose.OwnerAccess(),
                                   bytes.Value().View())
                       .Error() == ErrorCode::InvalidArgument);
-            Write64(bytes.Value(), payload + 8 + 8, 0);
+            Write32(bytes.Value(), payload + 8 + 4, 0);
             CHECK(LoadObjectGraph(allocator, loose, looseTypes, loose.OwnerAccess(),
                                   bytes.Value().View())
                       .Error() == ErrorCode::InvalidArgument);

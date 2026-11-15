@@ -3,10 +3,12 @@
 #include <TestSupport/Test.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <ObjectSerialization/ObjectGraph.h>
+#include "GraphTestSupport.h"
 
 using namespace rocks;
 using reflection_fixture::Base;
 using reflection_fixture::Node;
+using test::graph::SameBytes;
 
 namespace {
 constexpr Guid HolderType{0xc0dec0de, 1};
@@ -71,55 +73,35 @@ bool RegisterGenerated(TypeRegistry& types, bool countConstruction = false) noex
     return types.Register(GeneratedType<Node>::Schema(), Move(ops)).IsOk();
 }
 
-bool SameBytes(Span<const uint8> left, Span<const uint8> right) noexcept {
-    if (left.Size() != right.Size()) {
-        return false;
-    }
-    for (usize index = 0; index < left.Size(); ++index) {
-        if (left[index] != right[index]) {
-            return false;
-        }
-    }
-    return true;
-}
-
-bool AppendObject(ArchiveWriter& writer, uint64 localId, Guid type, uint32 version,
-                  Span<const uint8> record) noexcept {
-    return writer.WriteU64(localId).IsOk() && writer.WriteGuid(type).IsOk() &&
-           writer.WriteU32(version).IsOk() && writer.WriteBytes(record).IsOk();
-}
-
 Result<Array<uint8>> HolderGraph(Allocator& allocator, Guid targetType,
                                  uint32 targetVersion) noexcept {
     ArchiveWriter reference(allocator);
-    auto written = reference.WriteU64(2);
+    auto written = reference.WriteU32(2);
     if (!written) {
         return Result<Array<uint8>>::Failure(written.Error());
     }
+
     RecordBuilder holder(allocator, HolderType, 1);
-    auto added = holder.AddField(HolderEdge, WireType::U64, reference.View());
+    auto added = holder.AddField(HolderEdge, WireType::U32, reference.View());
     if (!added) {
         return Result<Array<uint8>>::Failure(added.Error());
     }
+
     auto holderBytes = holder.Build();
     if (!holderBytes) {
         return Result<Array<uint8>>::Failure(holderBytes.Error());
     }
+
     RecordBuilder target(allocator, targetType, targetVersion);
     auto targetBytes = target.Build();
     if (!targetBytes) {
         return Result<Array<uint8>>::Failure(targetBytes.Error());
     }
-    // 공개 envelope 명세만 조립한다. 참조가 실제로 대입 가능한지는 loader가 판단한다.
-    ArchiveWriter output(allocator);
-    const uint8 magic[] = {'R', 'O', 'C', 'K', 'S', 'G', 'R', 'F'};
-    if (!output.WriteRaw(magic) || !output.WriteU32(1) || !output.WriteU32(2) ||
-        !output.WriteU32(1) ||
-        !AppendObject(output, 1, HolderType, 1, holderBytes.Value().View()) ||
-        !AppendObject(output, 2, targetType, targetVersion, targetBytes.Value().View())) {
-        return Result<Array<uint8>>::Failure(ErrorCode::DependencyFailed);
-    }
-    return Result<Array<uint8>>::Success(output.TakeBytes());
+
+    // 공개 형식 명세(graph v2)만 조립한다. 참조가 실제로 대입 가능한지는 loader가 판단한다.
+    const test::graph::Node nodes[] = {{HolderType, 0, {}, holderBytes.Value().View()},
+                                       {targetType, 0, {}, targetBytes.Value().View()}};
+    return test::graph::Build(allocator, nodes);
 }
 } // namespace
 

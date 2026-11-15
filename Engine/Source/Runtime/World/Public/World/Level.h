@@ -23,8 +23,8 @@ namespace rocks {
 //
 // 리플렉션(Docs/Design/ReflectionFoundations.ko.md 9.1절): WorldOnly 리플렉션 클래스다. 영속
 // 필드는 actors(소속 Actor 목록)·name이고 ReadOnly다(Spawn·정리는 World API로만 한다). World
-// 포인터·영구 여부·파괴 대기는 ROCKS_NATIVE다. 객체 그래프(graph v1)로 Level을 저장할 수 있지만
-// 구조 시험용이다 — 부착 계층(parent·children)은 저장되지 않고, 로드한 객체는 World 장부
+// 포인터·영구 여부·파괴 대기는 ROCKS_NATIVE다. 객체 그래프(graph v2 편의 API)로 Level을 저장할 수
+// 있지만 구조 시험용이다 — 부착 계층(parent·children)은 저장되지 않고, 로드한 객체는 World 장부
 // 밖이다(편입은 레벨 패키지 단계, EngineRuntime 문서 4.6절). 그래프에 native
 // 파생(ROCKS_NATIVE_TYPE) Actor가 하나라도 있으면 저장은 Unsupported다. 저장 안전 지점은 Tick
 // 밖·파괴 대기 정리 뒤다.

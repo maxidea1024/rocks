@@ -132,21 +132,17 @@ Result<void> ArchiveWriter::AppendReserved(Span<const uint8> prefix,
         }
     }
 
-    // 모든 실패 가능 작업을 먼저 끝낸다. 이후에는 예약된 uint8 슬롯만 생성하므로 부분 commit이
-    // 없다.
+    // 모든 실패 가능 작업을 먼저 끝낸다. 이후에는 예약된 uint8 슬롯만 늘리므로 부분 commit이
+    // 없다. 새 꼬리는 기존 byte 뒤라 자기 범위(aliases — 기존 byte 안)와 겹치지 않으므로 한 번에
+    // 복사한다(성장 뒤 원본 위치를 다시 구한다).
+    auto tail = bytes_.TryAppendUninitialized(prefix.Size() + payload.Size());
+    if (!tail) {
+        platform::Fatal("Archive payload reservation invariant failed");
+    }
+
     const uint8* data = aliases ? bytes_.Data() + offset : payload.Data();
-    for (usize index = 0; index < prefix.Size(); ++index) {
-        if (!bytes_.TryPushBack(prefix[index])) {
-            platform::Fatal("Archive prefix reservation invariant failed");
-        }
-    }
-
-    for (usize index = 0; index < payload.Size(); ++index) {
-        if (!bytes_.TryPushBack(data[index])) {
-            platform::Fatal("Archive payload reservation invariant failed");
-        }
-    }
-
+    platform::MemoryCopy(tail.Value().Data(), prefix.Data(), prefix.Size());
+    platform::MemoryCopy(tail.Value().Data() + prefix.Size(), data, payload.Size());
     return Result<void>::Success();
 }
 
