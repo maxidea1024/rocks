@@ -1,0 +1,206 @@
+using System.Text;
+using Rocks.Build;
+
+namespace Rocks.ToolTests;
+
+// meta 시험 중 MetaCompiler 명령줄·fixture·진단 출력 시험이다.
+internal static partial class MetaTests
+{
+    // fixture 결정성·include 바인딩·진단·컴파일러 옵션·prefix class·private GENERATED_BODY·abstract 시험이다.
+    private static void RegisterCli(MetaContext context)
+    {
+        var (suite, options, actualEnvironment, generator, compiler) = context;
+        suite.Add("Meta.FixtureDeterminismTimestampAndStaleCheck", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            await probe.GenerateAsync(fixture: true);
+            byte[] expected = File.ReadAllBytes(probe.Output);
+            Verify.That(!expected.Contains((byte)'\r'), "generated output must use LF");
+            Verify.Contains("rocks::reflection_fixture::Node", Encoding.UTF8.GetString(expected), "fixture generated type");
+            File.SetLastWriteTimeUtc(probe.Output, DateTime.UnixEpoch.AddSeconds(1_000_000_000));
+            DateTime timestamp = File.GetLastWriteTimeUtc(probe.Output);
+            await probe.GenerateAsync(fixture: true);
+            Verify.That(File.ReadAllBytes(probe.Output).AsSpan().SequenceEqual(expected), "generator output changed for identical source");
+            Verify.Equal(timestamp, File.GetLastWriteTimeUtc(probe.Output), "unchanged output was rewritten");
+            await probe.GenerateAsync(fixture: true, extra: ["--check"]);
+            Verify.Equal(timestamp, File.GetLastWriteTimeUtc(probe.Output), "check changed output timestamp");
+            File.WriteAllText(probe.Output, "stale\n");
+            await probe.GenerateAsync(fixture: true, extra: ["--check"], expectedCode: "RMC4000", reason: "stale");
+            Verify.Equal("stale\n", File.ReadAllText(probe.Output), "stale check overwrote output");
+        });
+        suite.Add("Meta.GeneratedHeaderDirectoryControlsIncludeBinding", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            await probe.OutputDirectoryBindingAsync();
+        });
+        suite.Add("Meta.SymlinkedParentsAndShadowedHeaders", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            await probe.SymlinkLocationsAsync();
+        });
+        suite.Add("Meta.ClangSourceNotesDoNotMisidentifyNames", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            await probe.SourceNotesAsync();
+        });
+        suite.Add("Meta.IncludedHeaderDiagnosticUsesOriginalFileAndLine", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            await probe.NestedLocationAsync();
+        });
+        AddRejectGroup(context, "Meta.MissingFieldAnnotation", [Declaration("rocks::int32 count = 0;")], "RMC2000", "field");
+        AddRejectGroup(context, "Meta.PointerAndCvFields", new[] { "rocks::int32* count = nullptr", "const rocks::int32 count = 0" }
+            .Select(field => Declaration($"ROCKS_PROPERTY() {field};")), "RMC2000", "type");
+        AddRejectGroup(context, "Meta.PrivateWithoutGeneratedBody", [Declaration("private: ROCKS_PROPERTY() rocks::int32 count = 0;",
+            extra: "public: rocks::int32 Read() const noexcept { return count; }")], "RMC2000", "GENERATED_BODY");
+        AddRejectGroup(context, "Meta.Bitfields", [Declaration("ROCKS_PROPERTY() unsigned int count : 1;")], "RMC2000", "bitfield");
+        AddRejectGroup(context, "Meta.StaticAnnotatedField", [Declaration("ROCKS_PROPERTY() static inline rocks::int32 count = 0;")], "RMC200", "nonstatic");
+        AddRejectGroup(context, "Meta.ManualTraceConflict", [Declaration(extra: "void Trace() noexcept {}")], "RMC2000", "Trace");
+        AddRejectGroup(context, "Meta.VirtualAndMultipleInheritance", [Declaration(bases: "public virtual rocks::Object"),
+            Declaration(bases: "public rocks::Object, public Other").Replace("namespace probe {", "namespace probe { struct Other {};", StringComparison.Ordinal)], "RMC2000", "nonvirtual");
+        AddRejectGroup(context, "Meta.UnreflectedBaseAndReference", [
+            Declaration(bases: "public Hidden").Replace("namespace probe {", "namespace probe { struct Hidden : rocks::Object {};", StringComparison.Ordinal),
+            Declaration("ROCKS_PROPERTY() rocks::ObjectRef<Hidden> next;")
+                .Replace("namespace probe {", "namespace probe { struct Hidden : rocks::Object {};", StringComparison.Ordinal),
+            Declaration("ROCKS_PROPERTY() rocks::SoftObjectRef<Hidden> next;", extra: "explicit Value(rocks::Allocator& allocator) noexcept : next(allocator) {}")
+                .Replace("namespace probe {", "#include <Object/SoftObjectRef.h>\nnamespace probe { struct Hidden : rocks::Object {};", StringComparison.Ordinal)],
+            "RMC2003", "reflected");
+        AddRejectGroup(context, "Meta.ClangSyntaxFailurePreservesOutput", [Declaration("this is not valid cxx;")], "RMC3000", "Clang");
+        suite.Add("Meta.DiagnosticsAndResponseOverridesRejected", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            var arguments = new List<string> { "-Wno-error", "-w", "@hidden.rsp", "-I", "-Ihidden", "-iquote", "-iquotehidden", "-isystem", "-isystemhidden", "-idirafter", "-idirafterhidden", "-include", "-includehidden", "-imacros", "-imacroshidden", "-F", "-Fhidden", "-iframeworkhidden", "-Wp,-Ihidden", "-ivfsoverlay=hidden", "--config=hidden" };
+            arguments.AddRange(["-iwithprefixbefore", "-iwithprefixbeforehidden", "-iwithprefix", "-iwithprefixhidden", "-iprefix", "-iprefixhidden", "-iwithsysroot", "-iwithsysroothidden", "-stdlib++-isystem", "-stdlib++-isystemhidden", "--gcc-toolchain", "--gcc-toolchain=hidden", "-vfsoverlay", "-vfsoverlay=hidden", "-working-directory", "-working-directory=hidden", "-D", "-D=invalid", "-D_CRT_SECURE_NO_WARNINGS", "--target=hidden"]);
+            if (OperatingSystem.IsWindows())
+            {
+                arguments.AddRange(["/clang:-Wno-error", "/W0", "/I", "/Ihidden", "/FI", "/FIhidden", "/external:Ihidden", "/clang:-Ihidden"]);
+            }
+
+            foreach (string argument in arguments)
+            {
+                await probe.GenerateAsync(Declaration(), extra: ["--clang-arg=" + argument], expectedCode: "RMC1000", reason: "override");
+                Verify.That(!File.Exists(probe.Output), "rejected CLI wrote output");
+            }
+        });
+        if (OperatingSystem.IsMacOS())
+        {
+            suite.Add("Meta.MacAbsolutePathsAreNotWindowsSwitches", async () =>
+            {
+                using Probe probe = new(options, actualEnvironment, generator, compiler);
+                // 경로가 없으므로 SDK 진단으로 거부한다. /I·/FI Windows 옵션으로 오인하지 않는다.
+                foreach (string path in new[] { "/Install/RocksMissingSdk", "/Files/RocksMissingSdk" })
+                {
+                    await probe.GenerateAsync(Declaration(), extra: ["--clang-arg=-isysroot", "--clang-arg=" + path],
+                        expectedCode: "RMC1000", reason: "SDK");
+                }
+            });
+        }
+
+        suite.Add("Meta.ConflictingOrDuplicateCompilerOptionsAreRejected", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            var cases = new List<string[]>
+            {
+                new[] { "-DROCKS_CONFLICT=1", "-DROCKS_CONFLICT=2" },
+                new[] { "-DROCKS_DUPLICATE=1", "-DROCKS_DUPLICATE=1" },
+                new[] { "-DROCKS_SAME", "-DROCKS_SAME=1" }
+            };
+            if (OperatingSystem.IsWindows())
+            {
+                cases.AddRange([["/MD", "/MDd"], ["/O2", "/Od"], ["/MD", "/MD"],
+                    ["/MDd", "/fsanitize=address"], ["/DROCKS_MIXED=1", "-DROCKS_MIXED=2"]]);
+            }
+            else
+            {
+                cases.AddRange([["-O0", "-O2"], ["-Wall", "-Wall"],
+                    ["-mmacosx-version-min=13.0", "-mmacosx-version-min=14.0"]]);
+            }
+
+            foreach (string[] conflict in cases)
+            {
+                await probe.GenerateAsync(Declaration(), extra: conflict.Select(value => "--clang-arg=" + value).ToArray(),
+                    expectedCode: "RMC1000", reason: "conflict");
+                Verify.That(!File.Exists(probe.Output), "conflicting options published metadata");
+            }
+        });
+        suite.Add("Meta.AllNativeCompileProfilesAndExplicitDefinesAreAccepted", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            NativeToolchain toolchain = await NativeToolchains.DiscoverAsync(compiler);
+            // 모든 구성 × 모든 모듈 최적화 재정의 조합이 AST 허용 목록을 통과해야 한다.
+            foreach (NativeConfiguration configuration in Enum.GetValues<NativeConfiguration>())
+            {
+                foreach (CodeOptimization optimization in Enum.GetValues<CodeOptimization>())
+                {
+                    string[] arguments = NativeCompileProfile.Arguments(toolchain, configuration, optimization)
+                        .Select(argument => "--clang-arg=" + argument)
+                        .Append("--clang-arg=-DROCKS_META_PROFILE_PROBE=1").ToArray();
+                    await probe.GenerateAsync(Declaration(), extra: arguments);
+                }
+            }
+        });
+        suite.Add("Meta.PrefixClassSupportsNestedScopesCommentsAndConditionalBlock", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            string marker = "ROCKS_CLASS()";
+            string valid = Preamble + "struct Outer { public:\n#if 1\n" + marker +
+                "\n// #if 0 is only a comment\n/* #include <ignored> */\n" +
+                "class Inner : public rocks::Object { public: Inner() noexcept = default; };\n#endif\n};\n}\n";
+            await probe.GenerateAsync(valid);
+            Verify.Contains("probe::Outer::Inner", File.ReadAllText(probe.Output), "nested prefix CLASS");
+        });
+        suite.Add("Meta.PrefixClassNeverBindsAcrossTokensOrPreprocessing", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            string marker = "ROCKS_CLASS()";
+            string definition = "struct Value : public rocks::Object {};\n";
+            string[] invalid =
+            [
+                marker + "\nint intervening;\n" + definition,
+                marker + ";\n" + definition,
+                marker + "\n" + marker + "\n" + definition,
+                marker + "\nstruct [[clang::annotate(\"rocks\", \"rocks.type\")]] Value : public rocks::Object {};\n",
+                marker + "\n#if 0\nstruct Intended : public rocks::Object {};\n#endif\n" + definition,
+                marker + "\n#include <Meta/Annotations.h>\n" + definition,
+                marker + "\ntemplate <class T> struct Value : public rocks::Object {};\n",
+                marker + "\nstruct Value;\n",
+                marker + "\nnamespace other {}\n" + definition,
+                "#define CLASS_WRAP(...) ROCKS_CLASS(__VA_ARGS__)\n" +
+                    "CLASS_WRAP()\n" + definition,
+                "#define CLASS_BODY struct Value : public rocks::Object {}\n" + marker + "\nCLASS_BODY;\n",
+                "void Test() {\n" + marker + "\n" + definition + "}\n",
+                "struct ROCKS_CLASS() Value : public rocks::Object {};\n",
+                marker + "\n#line 100 \"nonexistent_virtual_source.hpp\"\n" + definition
+            ];
+            foreach (string body in invalid)
+            {
+                await probe.RejectAsync(Preamble + body + "}\n", "RMC", "ROCKS_CLASS");
+            }
+        });
+        suite.Add("Meta.PrefixClassCannotBindAcrossIncludeFiles", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            await probe.PrefixDifferentFileAsync();
+        });
+        suite.Add("Meta.PrivateGeneratedBodyAndUnicodeSpecifiers", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            string source = Preamble + "ROCKS_CLASS()\nclass Value : public rocks::Object {\n" +
+                "ROCKS_GENERATED_BODY()\n" + "ROCKS_PROPERTY(ReadOnly, Category=\"능력\", DisplayName=\"체력🎮\") rocks::int32 count = 0;\n" +
+                "public: rocks::int32 Read() const noexcept { return count; }\n};\n}\n";
+            await probe.GenerateAsync(source);
+            string generated = File.ReadAllText(probe.Output);
+            Verify.Contains("\"체력🎮\"", generated, "generated display name remains readable UTF-8");
+            Verify.Contains("ErrorCode::Unsupported", generated, "ReadOnly public setter policy");
+            Verify.Contains("WriteGeneratedStagedField", generated, "ReadOnly staged initialization remains available");
+        });
+        suite.Add("Meta.AbstractClassHasExplicitMetadata", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            string source = Preamble + "ROCKS_CLASS(Abstract)\nclass Value : public rocks::Object { public:\n" +
+                "ROCKS_PROPERTY() rocks::int32 count=0; virtual void Tick() noexcept=0;\n};\n}\n";
+            await probe.GenerateAsync(source);
+            Verify.Contains("MakeRuntimeTypeOps<::probe::Value, true>", File.ReadAllText(probe.Output), "abstract generated runtime ops");
+        });
+    }
+}
