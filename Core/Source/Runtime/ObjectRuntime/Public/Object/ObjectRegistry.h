@@ -278,9 +278,7 @@ public:
     // Busy이고 모두 field 불변이다. 관찰자가 없으면 할당하지 않는다.
     template <class T>
     Result<void> SetReference(const ObjectAccessContext& access, ObjectHandle owner,
-                              ObjectRef<T>& field, ObjectHandle target) noexcept {
-        return SetEdge(access, owner, field.handle_, target, 0, NativeTypeKey<T>());
-    }
+                              ObjectRef<T>& field, ObjectHandle target) noexcept;
 
     // ObjectRefArray의 live 변경 API다(ObjectRefArray.h). 공통 규칙:
     // - owner는 게시된 생존 객체(Alive — 제거·비우기는 DestroyRequested도)이고 호출자가 owner의
@@ -314,52 +312,39 @@ public:
     //   registry.AddReference(access, actor, actorPointer->components_, component);
     template <class T>
     Result<void> AddReference(const ObjectAccessContext& access, ObjectHandle owner,
-                              ObjectRefArray<T>& array, ObjectHandle target) noexcept {
-        return InsertArrayEdge(access, owner, array.storage_, 0, true, target, NativeTypeKey<T>());
-    }
+                              ObjectRefArray<T>& array, ObjectHandle target) noexcept;
 
     // target을 index 위치에 넣고 뒤 원소를 민다(index == Size()면 끝). index > Size()는
     // InvalidArgument다. 도구 편집용이다.
     template <class T>
     Result<void> InsertReferenceAt(const ObjectAccessContext& access, ObjectHandle owner,
                                    ObjectRefArray<T>& array, usize index,
-                                   ObjectHandle target) noexcept {
-        return InsertArrayEdge(access, owner, array.storage_, index, false, target,
-                               NativeTypeKey<T>());
-    }
+                                   ObjectHandle target) noexcept;
 
     // index 원소를 target으로 바꾼다(null이면 슬롯을 비운다). 할당하지 않는다(관찰자 Registry는
     // 위 공통 규칙의 예약). index >= Size()는 InvalidArgument다.
     template <class T>
     Result<void> SetReferenceAt(const ObjectAccessContext& access, ObjectHandle owner,
                                 ObjectRefArray<T>& array, usize index,
-                                ObjectHandle target) noexcept {
-        return ReplaceArrayEdge(access, owner, array.storage_, index, target, NativeTypeKey<T>());
-    }
+                                ObjectHandle target) noexcept;
 
     // index 원소를 지우고 뒤 원소를 당긴다(순서 유지). 범위 밖은 InvalidArgument다. 할당하지
     // 않는다(관찰자 Registry는 위 공통 규칙의 예약). owner는 Alive 또는 DestroyRequested(정리
     // 중)이고 Borrow를 쥐고 있어야 한다.
     template <class T>
     Result<void> RemoveReferenceAt(const ObjectAccessContext& access, ObjectHandle owner,
-                                   ObjectRefArray<T>& array, usize index) noexcept {
-        return RemoveArrayEdge(access, owner, array.storage_, index, ObjectHandle{}, false);
-    }
+                                   ObjectRefArray<T>& array, usize index) noexcept;
 
     // target과 같은 첫 원소를 지운다(null이면 첫 null 원소). 없으면 NotFound다. 관찰자 Registry의
     // 예약 뒤 재검증에서 그 원소가 사라졌으면 Busy다.
     template <class T>
     Result<void> RemoveReference(const ObjectAccessContext& access, ObjectHandle owner,
-                                 ObjectRefArray<T>& array, ObjectHandle target) noexcept {
-        return RemoveArrayEdge(access, owner, array.storage_, 0, target, true);
-    }
+                                 ObjectRefArray<T>& array, ObjectHandle target) noexcept;
 
     // 모든 원소를 지운다(용량 유지). 할당하지 않는다(관찰자 Registry는 위 공통 규칙의 집계·예약).
     template <class T>
     Result<void> ClearReferences(const ObjectAccessContext& access, ObjectHandle owner,
-                                 ObjectRefArray<T>& array) noexcept {
-        return ClearArrayEdges(access, owner, array.storage_);
-    }
+                                 ObjectRefArray<T>& array) noexcept;
 
     // StructRefArray의 live 변경 API다(StructRefArray.h). owner·Borrow·컨테이너 위치·encode 고정
     // 규칙은 ObjectRefArray와 같다. 원소 블록 할당·기본 생성(S(Allocator&), 참조는 null이라 장벽이
@@ -378,35 +363,26 @@ public:
     //   auto index = registry.AddElement(access, mesh, meshPointer->materials);
     template <class S>
     Result<usize> AddElement(const ObjectAccessContext& access, ObjectHandle owner,
-                             StructRefArray<S>& array) noexcept {
-        return InsertStructElement(access, owner, array.storage_, 0, true);
-    }
+                             StructRefArray<S>& array) noexcept;
 
     // 기본 원소 하나를 index 위치에 넣는다(index == Size()면 끝). index > Size()는
     // InvalidArgument다.
     template <class S>
     Result<void> InsertElementAt(const ObjectAccessContext& access, ObjectHandle owner,
-                                 StructRefArray<S>& array, usize index) noexcept {
-        auto inserted = InsertStructElement(access, owner, array.storage_, index, false);
-        return inserted ? Result<void>::Success() : Result<void>::Failure(inserted.Error());
-    }
+                                 StructRefArray<S>& array, usize index) noexcept;
 
     // index 원소를 색인에서 떼어 잠금 밖에서 소멸·반환한다(뒤 원소의 주소는 그대로다). 범위 밖은
     // InvalidArgument다. owner는 Alive 또는 DestroyRequested(정리 중)이고 Borrow를 쥐고 있어야
     // 한다.
     template <class S>
     Result<void> RemoveElementAt(const ObjectAccessContext& access, ObjectHandle owner,
-                                 StructRefArray<S>& array, usize index) noexcept {
-        return RemoveStructElement(access, owner, array.storage_, index);
-    }
+                                 StructRefArray<S>& array, usize index) noexcept;
 
     // 모든 원소를 떼어 잠금 밖에서 역순으로 소멸·반환한다(색인도 반환한다). owner 규칙은
     // RemoveElementAt과 같다.
     template <class S>
     Result<void> ClearElements(const ObjectAccessContext& access, ObjectHandle owner,
-                               StructRefArray<S>& array) noexcept {
-        return ClearStructElements(access, owner, array.storage_);
-    }
+                               StructRefArray<S>& array) noexcept;
 
     // index 원소 안의 참조 멤버 field를 target으로 바꾼다(SetReference의 원소판 — null 허용).
     // owner는 Alive이고 Borrow를 쥐고 있어야 하며(없으면 InvalidArgument), 컨테이너가 owner 저장소
@@ -419,10 +395,7 @@ public:
     template <class S, class T>
     Result<void> SetElementReference(const ObjectAccessContext& access, ObjectHandle owner,
                                      StructRefArray<S>& array, usize index, ObjectRef<T>& field,
-                                     ObjectHandle target) noexcept {
-        const detail::StructElementLocation element{&array.storage_, index};
-        return SetEdge(access, owner, field.handle_, target, 0, NativeTypeKey<T>(), &element);
-    }
+                                     ObjectHandle target) noexcept;
 
     // encode thunk를 부르는 쪽이 owner의 필드를 encode하는 동안 쥐는 고정을 얻는다(EncodePin —
     // ObjectRefs.h). 고정된 owner의 컨테이너·참조 변경 API와 ResolveForWrite(등록된 필드 쓰기)는
@@ -646,27 +619,18 @@ private:
     template <class T>
     Result<void> AssignReferencesStaged(const ObjectAccessContext& access, ObjectHandle owner,
                                         ObjectRefArray<T>& array, Span<const ObjectHandle> targets,
-                                        uint64 transaction) noexcept {
-        return AssignArrayEdges(access, owner, array.storage_, targets, transaction,
-                                NativeTypeKey<T>());
-    }
+                                        uint64 transaction) noexcept;
 
     template <class S>
     Result<void> AssignElementsStaged(const ObjectAccessContext& access, ObjectHandle owner,
                                       StructRefArray<S>& array, usize count,
-                                      uint64 transaction) noexcept {
-        return AssignStructElements(access, owner, array.storage_, count, transaction);
-    }
+                                      uint64 transaction) noexcept;
 
     template <class S, class T>
     Result<void> SetElementReferenceStaged(const ObjectAccessContext& access, ObjectHandle owner,
                                            StructRefArray<S>& array, usize index,
                                            ObjectRef<T>& field, ObjectHandle target,
-                                           uint64 transaction) noexcept {
-        const detail::StructElementLocation element{&array.storage_, index};
-        return SetEdge(access, owner, field.handle_, target, transaction, NativeTypeKey<T>(),
-                       &element);
-    }
+                                           uint64 transaction) noexcept;
 
     // StructRefArray 원소 위치(detail::StructRefArrayAccess::Location)로 고르는 live 원소 참조
     // 쓰기다. 경로 접근(B6)의 참조 멤버 쓰기 단일 지점 detail::SetPathMemberReference만 friend로
@@ -677,9 +641,7 @@ private:
     template <class T>
     Result<void> SetElementReference(const ObjectAccessContext& access, ObjectHandle owner,
                                      const detail::StructElementLocation& element,
-                                     ObjectRef<T>& field, ObjectHandle target) noexcept {
-        return SetEdge(access, owner, field.handle_, target, 0, NativeTypeKey<T>(), &element);
-    }
+                                     ObjectRef<T>& field, ObjectHandle target) noexcept;
 
     Result<RootRef<Object>> NewRoot(const ObjectAccessContext&, TypeId, const void*,
                                     ObjectHandle outer, StringView name) noexcept;
@@ -849,10 +811,6 @@ private:
     bool closed_ = false;
 };
 
-template <class T>
-Result<RootRef<T>> WeakRef<T>::TryPin(ObjectRegistry& registry,
-                                      const ObjectAccessContext& access) const noexcept {
-    return registry.TryPin<T>(access, handle_);
-}
-
 } // namespace rocks
+
+#include <Object/ObjectRegistryContainers.h>
