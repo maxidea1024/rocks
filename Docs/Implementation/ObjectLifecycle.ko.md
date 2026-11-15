@@ -63,7 +63,7 @@ scope 객체의 주소를 범위 밖에 보관하거나 `longjmp` 등으로 소�
 
 ## Outer와 이름
 
-설계는 [객체·그래프 보강](../Design/ObjectFoundations.ko.md) 1절이다(A0-Oa). 객체는 생성 때 Outer와 이름을 정하고 수명 동안 바꾸지 않는다(Rename·Outer 변경은 없다). `ConstructionContext::Create<T>(type, outer, name)`과 `ObjectRegistry::NewObject<T>(access, type, outer, name)`이 받으며, 인자를 생략하면 지금처럼 Outer·이름 없는 객체다.
+설계는 [객체·그래프 보강](../Design/ObjectFoundations.ko.md) 1절이다(A0-Oa). 리플렉션 B9가 클래스 `Within`(생성 때 Outer 타입 검사)과 저장 불가 클래스(Transient·Deprecated — 패키지 저장에서 뺌)를 더한다([리플렉션 B9](../Design/ReflectionExtensions.ko.md) 9.2절). 객체는 생성 때 Outer와 이름을 정하고 수명 동안 바꾸지 않는다(Rename·Outer 변경은 없다). `ConstructionContext::Create<T>(type, outer, name)`과 `ObjectRegistry::NewObject<T>(access, type, outer, name)`이 받으며, 인자를 생략하면 지금처럼 Outer·이름 없는 객체다.
 
 ```cpp
 ConstructionContext transaction(registry, access);

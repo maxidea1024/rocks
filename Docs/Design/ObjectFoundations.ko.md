@@ -198,6 +198,8 @@ const RegistryPolicy& ObjectRegistry::Policy() const noexcept;   // 생성 뒤 �
 - 패키지 정책 Registry의 `RequestDestroy`·`Object::Destroy`는 관찰자 유무와 무관하게 Unsupported다(A0-Ob, 11절 결정 1) — "소속 객체는 Discard로만 죽는다"(1.7절)가 정책 전체의 불변식이다. 판정 위치는 접근 검사(WrongThread·WrongContext) 바로 다음이다(정적인 Registry 성질이라 종료·재진입·handle보다 먼저 — 구현에서 정함). 관찰자는 패키지 정책 Registry에만 붙는다(Registry 생성자가 정책 없음·이미 붙은 관찰자를 Fatal로 거부하고, 소멸자가 떼어 낸다. 붙은 채 관찰자가 소멸하면 Fatal).
 - **후속 자리(World 정책)**: `RegistryPolicy::worldOnlyCreationKey`(불투명 키 — World API만 가진 키를 Create에 함께 줄 때만 WorldOnly 타입 생성을 허용)로 EngineRuntime 4절 134행 "World registry의 외부 생성 거부"를 구현한다. A0-O는 이름과 뜻만 정하고 구현은 World 정책 단계다(EngineRuntime 134행을 이 절로 연결 — 12절).
 
+리플렉션 B9 연결: [리플렉션 B9](ReflectionExtensions.ko.md)가 `RegistryOptions::names`(NamePool 빌림 — Registry보다 오래 살아야 한다, Name 필드의 intern·조회)와 객체 allocator 공개 조회 `ObjectRegistry::ObjectAllocator()`·`ConstructionContext::ObjectAllocator()`(Optional·InstancedStruct·Text 값 생성)를 더한다(ReflectionExtensions 4·1.7절).
+
 ### 1.4 자료구조(`ObjectRegistry.cpp` 내부)
 
 - `Slot`에 더한다: `ObjectHandle outer`(생성 때 고정), `Slot* outermost`(자기면 자기), `Slot* parent·firstChild·lastChild·nextSibling·prevSibling`(`lastChild`는 고리 끝에 O(1)로 붙이려고), `NameRecord* name`(이름이 있거나 대표 자식이면), `uint16 pathBytes`, 상태 비트 `indexed`(이름 색인에 있음)·`linked`(부모 고리에 있음)·`discarded`(A0-Ob가 더한다). 고리는 슬롯 번호가 아니라 `Slot*`다 — chunk는 Registry 소멸 전까지 이동·반환되지 않으므로 포인터가 안정하고, 슬롯 번호로 이으면 순회마다 번호 → chunk 조회를 거친다(설계 당시 `SlotAt`은 chunk 선형 탐색이었고, Oa 뒤 Registry 성능 정비에서 chunk 포인터 표 O(1) 조회·빈 슬롯 목록·회수 대상(Retired) 목록으로 바꿨다 — [GC 구현 계약](../Implementation/IncrementalGarbageCollection.ko.md) '저장소와 회수 목록').
@@ -220,6 +222,8 @@ const RegistryPolicy& ObjectRegistry::Policy() const noexcept;   // 생성 뒤 �
 규칙 4의 완전한 필드 배치 조건(A0-Ob 리뷰 반영): 관찰자는 편집을 Registry API 지점(owner 저장소 안의 `ObjectRef`·컨테이너)에서, Commit·Discard를 타입 Trace로 센다. Trace가 덮지 않는 참조 필드(수동 함수표의 "Trace 없는 타입은 강한 간선 없음", 리플렉션 base를 둔 native 파생 등)를 Registry API로 쓰면 계수가 새고, 대상이 회수된 뒤 다음 편집이 불변식 Fatal에 닿는다. 그래서 패키지 정책 Registry는 `completeFieldLayout`(모든 강한 간선이 metadata에 있고 Trace가 모두 방문한다는 선언 — 생성 타입은 언제나 참)인 타입만 만든다. 에셋 객체는 패키지 그래프로 저장되어야 하므로(그래프 저장도 같은 선언을 요구한다 — `ValidateLayout`) 이 조건과 맞고, 패키지 타입 자신에게도 같다. 정책 없는 Registry는 지금처럼 만든다. 계약 문구는 `RegistryOptions::referenceObserver`·`SetReference`·`RuntimeTypeOps::completeFieldLayout` 주석에 적었다.
 
 규칙 6–9는 순수 함수 하나로 둔다: `detail::CheckNewObjectIdentity(const RegistryPolicy&, const TypeLease& type, const OuterSummary* outer, StringView name, Allocator& scratch) -> Result<void>`. 규칙 5는 호출자가 Outer 요약을 만들 때 판정한다(Registry는 슬롯 상태로, 그래프 1단계는 노드 표로). Create와 그래프 1단계·`CreateObjects` 사전 확인(5.4절)이 같이 쓴다 — 규칙이 갈라지지 않게.
+
+리플렉션 B9 연결: 정체성 규칙에 `Within` 단계(패키지 규칙 다음, InvalidArgument)를 더하고, `OuterSummary`에 Outer 타입 칸(`ForNewOutermost` 포함)을 더한다. Outer 없는 객체에 Within이 있으면 InvalidArgument다(ReflectionExtensions 9.2절).
 
 ### 1.6 다중 root Commit
 
@@ -436,6 +440,8 @@ protected:
 - `RuntimeFieldOps::readStaged`는 단일 값 필드만 가질 수 있다(struct·배열 필드에 주면 등록이 InvalidArgument — read·write·writeStaged와 같은 규칙).
 - 클래스 필드·struct 멤버의 encode 본문을 `detail::EncodeMemberValue`로 모았다(생성 thunk의 Resolve 경로·staged 경로와 struct 멤버 thunk가 같이 쓴다 — 생성 코드 형식은 그대로다).
 
+리플렉션 B9 연결: 저장·복원 정책에 포함 필터 `includeFlags`(세이브게임 — 필드·struct 멤버마다 자기 플래그, Atomic struct 안은 통째)를 더한다. 2c Required 검사도 포함 비트 밖의 필드·멤버를 뺀다(ReflectionExtensions 9.1절).
+
 ## 5. graph v2 (A0-Od1·A0-Od2·A0-Oe)
 
 ### 5.1 형식
@@ -521,6 +527,8 @@ Result<Array<uint8>> SaveObjectGraph(Allocator&, ObjectRegistry&, const ObjectAc
 - 마지막에 모든 노드의 생존을 다시 확인한 뒤 결과를 게시한다(v1은 root만 확인).
 - 저장 쪽 값 치환 hook(AS A0-O 행의 "bulkId 재매핑")은 B4가 `FieldCodecHooks::SubstituteStruct`로 이미 구현했다 — graph v2는 그대로 쓴다.
 
+리플렉션 B9 연결: 저장 옵션 `unsaveable`(Exclude 기본 = 패키지 저장, Keep = 스냅샷·undo·PIE 복제)을 더한다. Exclude는 저장 집합의 저장 불가 객체(Transient·Deprecated 클래스와 그 부분 트리)를 InvalidArgument로 거부하고 그 객체를 가리키는 참조를 null + `ExternalReference` 진단(값 3·4)으로 쓴다. Include는 저장 불가 객체를 집합에 넣지 않는다(ReflectionExtensions 9.2절).
+
 ### 5.3 외부 참조와 번호 재배정 (A0-Oe)
 
 - `FieldCodecHooks`에 더한다(RF 6.4 "A0-O가 외부 참조 보고를 같은 묶음에 더한다"):
@@ -564,6 +572,8 @@ virtual Result<ExternalAdmission> AdmitExternalReference(const ExternalReference
   - 대안 비교: (가) 두 번 encode(수집 → 정렬 → 다시 쓰기) — 저장·쿠킹 CPU 2배. (나) 그래프에 slot → import 번호 표를 두고 값은 slot으로 남기기 — 재배정이 표 하나라 싸지만 형식에 표가 더해지고 AS 5.1 "0x80000000 | i = object import index i"가 간접 번호로 바뀌어 로드마다 한 번 더 찾으며, A1 Dependencies 대조도 간접 번호를 거친다. 위치 표는 형식·로드 경로를 그대로 두고 저장에서만 O(출현 수)를 쓰므로 택한다.
 - 한도: 서로 다른 외부 대상 수 ≤ `maxExternalReferences`(65536), 아니면 CapacityExceeded.
 - Oe 구현의 세부(Null의 Required 규칙·필드 writer 계약·재배정 반복·한도 옵션)는 5.7절 뒤 "구현에서 정한 점(A0-Oe)"에 적었다.
+
+리플렉션 B9 연결: WeakRef 필드는 같은 그래프 안만 보존한다. `ExternalReferenceInfo`에 `weak`를 더하고, Admit에서 weak는 slot 캐시 없이 출현마다 hook에 묻고 Import 응답도 null + 진단(값 2)이다. 예시 hook에 `info.weak` 분기를 둔다. Include는 weak 위치를 기록했다가 모든 노드 encode 뒤 최종 집합 기준으로 제자리 덮어쓴다(지연 항목 메모리는 그래프 바이트·작업량에 청구, 진단은 기록 순서대로). 정책별 처리 표는 ReflectionExtensions 5.1절이다.
 
 ### 5.4 복원 API — 단계형 (A0-Od2, 외부 참조는 A0-Oe)
 
@@ -637,6 +647,8 @@ public:
 - **2b 확인**(쓰기 전): `imports.Size() == importTypes.Size()`(InvalidArgument), import마다 생존 객체 또는 이 트랜잭션 객체(StaleHandle), 실제 타입이 선언 타입의 native 파생(InvalidArgument — 호출자 계약), 그리고 1단계가 기록한 (import i, 기대 형식) 쌍마다 실제 대상이 그 기대를 만족(TypeMismatch). `importTypes`는 1단계 형식 검사와 A1의 `expectedTypeId` 대조에만 쓰이고, 실제 연결의 판정은 기록한 쌍이다. 이어서 지금 `ConstructGraph`의 적용 루프다(외부 참조 token을 `imports`의 handle로 바꾼다). 이 확인은 쓰기 전이지만 객체를 만든 뒤라 실패하면 트랜잭션을 고정한다(상태 기계 규칙).
 - 1단계가 청구하는 2단계 몫: 노드 생성(노드 수 + 이름 byte) + Commit 몫 1 + staged 간선 수 + 2b imports 확인(import 수 + 기록한 쌍 수) + 적용 몫(지금과 같다). 2c(Required)는 작업량 무제한이다(4절).
 
+리플렉션 B9 연결: 1단계는 Transient·Deprecated 클래스 노드를 거부하지 않고 진단(`TransientType`·`DeprecatedType`)한다. 그래프 안 Outer의 Within은 1단계, 기준 Outer의 Within은 2a가 판정한다. Name 필드는 1단계가 문자열을 검사·수집하고 2a 몫 작업량을 미리 청구하며, 2a가 대상 Registry의 pool로 일괄 intern한다(ReflectionExtensions 4.1·9.2절).
+
 ### 5.5 편의 복원 (A0-Od1)
 
 ```cpp
@@ -705,6 +717,8 @@ RootRef<Object> held[1];
 return transaction.Commit(roots, held);
 ```
 
+리플렉션 B9 연결: weak 간선은 도달 검사에 넣지 않는다(ReflectionExtensions 5.1절).
+
 ### 5.6 한도(`ObjectGraphLimits`)
 
 | 칸 | 지금 | A0-O |
@@ -720,6 +734,8 @@ return transaction.Commit(roots, held);
 
 - `maxValueBytes` 64 MiB의 결과(결정 4 조건): `BudgetAllocator`의 단일 할당 한도도 64 MiB가 되고(`GraphInternal.h` 108–111행), 저장 피크는 약 2배(약 128 MiB — 필드 writer와 Record builder, builder와 Build 사본, 노드 Record들과 출력이 단계마다 함께 있고, Record·필드 writer 한도가 남은 파일 byte라 노드 Record의 합이 maxBytes로 묶인다. writer 성장 중에는 옛·새 버퍼가 잠깐 함께 있다 — Od1 구현에서 고쳤다, 확정안은 약 3배로 적었다), 로드는 원본을 view로 빌리므로 피크가 staged 값 복사와 2c 검사 버퍼(Required를 품은 가장 큰 필드 하나의 검사 출력 — 성장 중에는 그 약 2.5배, 4절)다. README와 Serialization 구현 문서에 적는다.
 - 이름(64 byte)·객체 경로(4 KiB)는 Registry 규칙(1.1절)이고 Soft 경로 4 KiB는 B3 그대로다. 일반 String 필드 값에는 4 KiB를 걸지 않는다(11절 결정 6).
+
+리플렉션 B9 연결: Set 원소·Map 항목·StaticArray 원소는 `maxTotalElements`에 1씩, Map 값·Optional 내부·InstancedStruct의 Record 필드는 `maxTotalFields`에 센다(ReflectionExtensions 1.2절).
 
 ### 5.7 오류 순서
 
@@ -767,6 +783,8 @@ return transaction.Commit(roots, held);
 - `AssignExternalIndices`: 모든 검사(길이·0·count 초과·중복)를 마친 뒤에만 byte를 바꾼다(실패하면 불변). 다시 불러도 된다 — 마지막 재배정의 역표(새 번호 → slot, count개 u32)를 두어 위치의 지금 값에서 slot을 찾는다(위치 표를 참조마다 8 byte로 늘리지 않는다). TakeBytes 뒤에는 InvalidArgument이고 `Externals()`는 남는다.
 - 마지막 생존 재확인(5.2절)에 외부 참조 대상도 넣었다 — 결과의 handle은 게시 시점에 모두 생존 객체다.
 - 같은 대상의 이후 출현은 대상별 TypeLease 캐시로 기대 형식을 검사하고 생존은 lease 없는 조회로 본다(집합 노드 참조와 같은 비용 구조 — 참조마다 AcquireType을 부르지 않는다).
+
+리플렉션 B9 연결: 2a 실패 목록에 Name pool 한도(CapacityExceeded·OutOfMemory — 손상 아님)를, 1단계·2a 오류 위치에 Within(InvalidArgument)을 더한다. Transient·Deprecated 노드는 오류가 아니라 진단이다(ReflectionExtensions 4.1·9.2절).
 
 ## 6. 스레드·수명·GC 장벽
 

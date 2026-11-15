@@ -272,18 +272,18 @@ class BoxContainer : public Container {
 
 ## 7. Core 선행 계약
 
-현재 리플렉션은 `ROCKS_CLASS`와 `ROCKS_PROPERTY`(`Transient`·`ReadOnly`·`Category`·`DisplayName`)를 지원하며, 함수 리플렉션·이벤트·변경 통지는 없다. 필드 형식은 bool·정수·실수·Guid·String·ObjectRef로 한정되어 enum·구조체·배열 필드는 거부한다([Clang 생성 Reflection](../Implementation/ReflectionMetadata.ko.md), 2026-11-11 기준). UI와 에디터는 아래 8항목에 의존하므로 Foundation Gate 전에 계약을 확정한다. 구현 시점은 항목별로 조정할 수 있으나, 형식은 Object·Archive 계약과 함께 고정해야 이후 재작업이 발생하지 않는다.
+현재 리플렉션은 `ROCKS_CLASS`와 `ROCKS_PROPERTY`(`Transient`·`ReadOnly`·`Category`·`DisplayName`)를 지원하며, 함수 리플렉션·이벤트·변경 통지는 없다. 필드 형식은 bool·정수·실수·Guid·String·ObjectRef로 한정되어 enum·구조체·배열 필드는 거부한다([Clang 생성 Reflection](../Implementation/ReflectionMetadata.ko.md), 2026-11-11 기준). 이후 A0-B(B3–B5)가 enum·struct·배열·Soft 참조를 더했고, 리플렉션 B9가 Name·Text·Optional·Map·Set·클래스 참조·정적 배열·경로의 map key 단계를 더한다([리플렉션 B9](ReflectionExtensions.ko.md)). UI와 에디터는 아래 8항목에 의존하므로 Foundation Gate 전에 계약을 확정한다. 구현 시점은 항목별로 조정할 수 있으나, 형식은 Object·Archive 계약과 함께 고정해야 이후 재작업이 발생하지 않는다.
 
 | ID | 항목 | Godot · Unreal 대응 | Rocks 현재 | 계약 내용 · 사용처 |
 |---|---|---|---|---|
 | CU1 | 편집 메타데이터 어휘 | `PROPERTY_HINT_*`·usage / `UPROPERTY(meta=…)` | 지정자 4개. 미지원 지정자는 `RMC2000`으로 거부 | 범위(min·max·step)·단위·enum 표시·비트 플래그·여러 줄·에셋 기반 타입 제한·편집 조건·고급·숨김. 거부 정책을 유지하도록 어휘를 버전 있는 manifest로 등록하고 메타 컴파일러가 검증한다. 에디터 전용 값은 Shipping 스키마에서 제외한다. UI용으로 `Affects`·`EditIf`·`Clamp`·`Role`과 클래스 지정자 `ChildLayout`·`ChildSizeFlags`를 포함한다(§6). 사용처: Inspector·UI Designer·프로젝트 설정 |
 | CU2 | 함수 리플렉션 | `ClassDB::bind_method` / `UFUNCTION` | 없음. `Function.h`는 일반 callable | `ROCKS_FUNCTION`. 인자·반환 타입 스키마와 호출 thunk 생성. 사용처: 이벤트 연결 대상·자체 언어 바인딩·Inspector 버튼·에디터 명령 |
 | CU3 | 리플렉션된 이벤트 | signal / dynamic multicast delegate | 없음 | 약한 Object 바인딩, 대상 파괴 시 자동 해제(GC 안전), 연결을 WidgetAsset에 저장, 에디터에 이벤트 목록 노출 |
-| CU4 | 속성 경로 | `NodePath:property` / `FPropertyPath`·PropertyHandle | Transaction 계약(전체 계획 §22.2)이 stable ID·FieldId를 사용 | (객체 stable ID, FieldId 체인, 배열 index·map key) 한 형식을 Transaction·Inspector·UI 애니메이션 트랙·바인딩에서 공용으로 사용 |
+| CU4 | 속성 경로 | `NodePath:property` / `FPropertyPath`·PropertyHandle | Transaction 계약(전체 계획 §22.2)이 stable ID·FieldId를 사용 | (객체 stable ID, FieldId 체인, 배열 index·map key) 한 형식을 Transaction·Inspector·UI 애니메이션 트랙·바인딩에서 공용으로 사용. map key 단계는 리플렉션 B9 B9f3(key의 wire payload를 담는 `PathKey` — Record로 인코딩 가능, ReflectionExtensions 1.5절) |
 | CU5 | 변경 통지 | `set` + `property_list_changed` / `PreEditChange`·`PostEditChangeProperty` | 없음 | 변경 전·후 통지와 종류(드래그 중·확정) 구분. 생성 setter에 포함되므로 수기 호출이 없다(§6). 전체 계획 §22.1의 「drag는 preview 병합, release 시 하나의 undo」의 기반이며 바인딩도 사용 |
 | CU6 | 동적 속성 | `_get_property_list`·`_set`·`_get` / IDetailCustomization(에디터 측) | 없음 | 형태가 데이터로 정해지는 속성(스크립트 정의 속성·머티리얼 파라미터)을 객체가 추가 노출한다. 테마 override·배치 속성은 §6의 선언형으로 처리하므로 대상이 아니다. 저장 형식·Transaction 경로는 정적 속성과 동일하게 처리 |
 | CU7 | 텍스트 위치 변환 | String(UTF-32)·TextServer / FString(UTF-16)·ICU | String은 UTF-8. 변환 최소 기능은 Core 범위(상세안 §7.3) | UTF-8 byte ↔ UTF-16 ↔ code point 위치 변환은 Core, grapheme·줄바꿈 경계는 TextLayout. IME(상세안 §19.2)와 텍스트 편집 widget이 사용 |
-| CU8 | 필드 형식 확장 | Variant 형식 전체 / `FEnumProperty`·`FStructProperty`·`FArrayProperty` 계열 | bool·정수·실수·Guid·String·ObjectRef만 지원. enum·구조체·배열·컨테이너는 거부 | enum(플래그 포함, `ROCKS_ENUM`)·값 구조체(`ROCKS_STRUCT`: Vector2·Color·Sides·Rect)·Text·에셋 참조·배열. enum·구조체도 `.rocksids.json`의 안정 ID 체계에 포함한다. 사용처: 정렬·size flags·색·anchor 등 대부분의 widget 속성 |
+| CU8 | 필드 형식 확장 | Variant 형식 전체 / `FEnumProperty`·`FStructProperty`·`FArrayProperty` 계열 | (2026-11-11 기준) bool·정수·실수·Guid·String·ObjectRef만 지원. 지금은 enum·구조체·배열·Soft 참조를 지원하고(A0-B B3–B5), Text·Name·Map·Set·Optional은 리플렉션 B9가 더한다(Text는 B9l — ReflectionExtensions 13절) | enum(플래그 포함, `ROCKS_ENUM`)·값 구조체(`ROCKS_STRUCT`: Vector2·Color·Sides·Rect)·Text·에셋 참조·배열. enum·구조체도 `.rocksids.json`의 안정 ID 체계에 포함한다. 사용처: 정렬·size flags·색·anchor 등 대부분의 widget 속성 |
 
 항목 사이의 선행 관계는 다음과 같다. CU1·CU4는 enum·구조체·배열을 대상으로 하므로 CU8 이후에 확정한다. CU3은 연결 대상이 리플렉션된 함수이므로 CU2 이후다. CU5는 생성 setter의 형태가 정해지는 UD7 이후다. CU6은 같은 저장·Transaction 경로를 쓰므로 CU4·CU5 이후다. CU7은 다른 항목과 독립이다.
 

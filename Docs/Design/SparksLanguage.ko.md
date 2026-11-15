@@ -17,11 +17,11 @@
 
 | 항목 | 결정 |
 |---|---|
-| 이름 | Sparks. 소스 `.spark`, 컴파일 모듈 `.sparkc`(SD1). 파일 경로가 import 경로다(`Weapons/Sword.spark` → `import Weapons.Sword;`). |
+| 이름 | Sparks. 소스 `.spark`, 컴파일 모듈 `.sparkc`(SD1). 파일 경로가 import 경로다(`Weapons/Sword.spark` → `import Weapons.Sword;`). 이 경로가 엔진 공통 타입 도구 이름(asset 명령·클래스 참조 텍스트)이다([리플렉션 B9](ReflectionExtensions.ko.md) 5.2절). |
 | 단순성 | 진단은 경고 없이 오류만 두고 모든 오류에 수정 예를 제시한다. 한 가지 일에는 한 가지 방법만 둔다. 실수가 잦은 구조는 언어 규칙으로 제거한다. 기능은 core 프로필과 full 프로필로 구분한다. |
 | 문법 | C 계열이다. `var`/`let`, `fn Name(a: T): R`, 괄호로 감싼 조건식, `on` handler, `@attribute`, 범위 `0..<n`. 타입·멤버는 PascalCase로 C++ 이름과 같고, 내장 값 타입(`float`, `vec3`)과 지역 이름은 소문자로 시작한다. 한 위치에서 이름 하나는 대상 하나만 가리킨다. |
 | 수명 hook | Unity의 hook 체계(종류·호출 순서·의미)를 따르고 이름은 Rocks 어휘를 사용한다: `Awake`, `Enable`, `Start`, `Tick`, `FixedTick`, `LateTick`, `Disable`, `Destroy`, 물리 `TriggerEnter` 등. 종료 경로마다 실행하는 hook을 정한다(SD20). |
-| 객체 참조 | "없음"은 하나다. 다른 Entity·Component는 `T?`로 받고 약한 handle로 저장하며 파괴되면 null로 읽힌다. 스크립트 단계(§5.4) 안의 파괴 요청은 그 단계가 끝날 때 반영된다(SD3). 스크립트 상태는 GC root가 되지 않는다. |
+| 객체 참조 | "없음"은 하나다. 다른 Entity·Component는 `T?`로 받고 약한 handle로 저장하며 파괴되면 null로 읽힌다. 스크립트 단계(§5.4) 안의 파괴 요청은 그 단계가 끝날 때 반영된다(SD3). 스크립트 상태는 GC root가 되지 않는다. 엔진 쪽 저장 표현은 같은 저장 단위 안 대상만 보존하는 `WeakRef` 필드다(셀 사이 참조는 World의 영속 entity 참조 — [리플렉션 B9](ReflectionExtensions.ko.md) 5.1절). |
 | 이벤트 | `on 경로.이벤트(...)` 한 형태다. 명시 구독·closure가 없으며, 발행은 큐에 등록되어 현재 실행 조각(§5.4)이 끝난 뒤 같은 스크립트 단계 안에서 순서대로 전달된다. 기다리는 handler는 실행 중에 온 이벤트의 처리 방식을 표시한다(SD11). |
 | 유지 자원 | 멈출 때까지 계속되는 자원(반복 사운드·입력 context·로딩 요청 등)은 필드나 지역 변수(`var`·`let`)에 담아야만 생성되고(로딩 요청은 지역 변수 전용), 블록이 끝나거나 다른 값을 넣거나 객체가 비활성화·종료되면 멈춘다. 복사하거나 다른 이름으로 옮길 수 없다. |
 | 비동기 로딩 | `try await X.Load()` 하나로 로드하고, 상주는 결과 값을 보관하는 것으로 유지한다. 진행률은 지역 요청 handle로 조회한다. 이동·travel·준비 대기는 엔진이 prefetch와 로딩 화면을 관리한다. |
@@ -210,7 +210,7 @@ class DoorLogic : ScriptComponent {
 |---|---|---|
 | `var MoveSpeed: float = 600.0;`, `fn X(...): float`, PascalCase 멤버, 소문자 내장 타입, `Sword?`, `null`, `@edit @net`, `@edit let`, `if (...)`, 암묵적 `this`, `Log`, 파일 경로 import | 채택 | 수치의 단위는 엔진 규약(미터·라디안·초)이므로 예시 값은 `6.0`이다(§4.2) |
 | `on Start()`, `on Tick(dt: float)` | 채택 | hook은 Unity 체계를 따르고 이름은 Rocks 어휘(§5.1). 인자는 필요할 때만 선언 |
-| `Weak<Enemy>`, `Lock()` | 수정 | `Enemy?` 하나로 통합(§4.3) |
+| `Weak<Enemy>`, `Lock()` | 수정 | `Enemy?` 하나로 통합(§4.3). C++ 쪽은 `WeakRef<T>` 필드(리플렉션 B9 — ReflectionExtensions 5.1절) |
 | `var Trigger = SphereCollider(200.0);` | 수정 | 소유 component는 `let`, 생성 인자는 필드 이름, 필드 이름은 용도: `let PickupRange = SphereCollider(Radius: 2.0);` |
 | `Trigger.SetRelativeLocation(...)` | 수정 | 쓰기 가능한 속성이 있으면 setter 함수를 노출하지 않는다: `PickupRange.RelativeLocation = ...` |
 | `Input.GetAxis2D("MoveForward", "MoveRight")` | 수정 | action 필드 `let Move = Action("Gameplay.Move")`와 `Move.Value` |
@@ -479,9 +479,9 @@ full 프로필의 `interface`·`open` 선언 문법은 도입 단계 L0에서 �
 | 수학 | `vec2`–`vec4`, `quat`, `mat4`, `WorldPosition`, `Transform`, `Color` | Core 수학 타입의 바인딩. 스크립트 안의 성분은 `float`(64비트)이고 엔진에 전달할 때 위 규칙으로 변환한다. 단위·축은 엔진 규약(오른손 좌표계, +X 전방·+Y 왼쪽·+Z 위, yaw 양수는 왼쪽 회전, 미터·라디안·초)을 따른다(전체 계획 §2.2, Math 구현 문서의 Rotator 규약). 각도 상수는 `Math.Radians(90.0)`으로 쓰며 언어 서버가 hover·자동완성에 단위를 표시한다(SD18) |
 | 문자 | `string`, `Text` | 화면 표시 API는 `Text`만 받는다. `Text`는 `Loc(...)`로 생성 |
 | 엔진 데이터 | `Tag`, `TagSet`, `InputAction`, `Soft<T>`, `Row<T>` | §3.5 리터럴. `Soft<T>`·`Row<T>`에는 빈 값이 없으며 선택 값은 `Soft<T>?`다(SD19) |
-| 컨테이너 | `Array<T>`, `Map<K,V>`, `Set<T>` | 삽입 순서로 순회. 번호·키 읽기는 `T?`. 범위 밖 쓰기는 fault. Map의 `m[k] = v`는 삽입 또는 교체이고, 복합 대입과 경로 쓰기는 키가 없으면 fault. 무공변(`Array<Derived>`는 `Array<Base>`가 아니다). 타입 인자에는 `?`를 쓸 수 없다 |
+| 컨테이너 | `Array<T>`, `Map<K,V>`, `Set<T>` | 삽입 순서로 순회. 번호·키 읽기는 `T?`. 범위 밖 쓰기는 fault. Map의 `m[k] = v`는 삽입 또는 교체이고, 복합 대입과 경로 쓰기는 키가 없으면 fault. 무공변(`Array<Derived>`는 `Array<Base>`가 아니다). 타입 인자에는 `?`를 쓸 수 없다. C++ 쪽은 Core `OrderedMap`·`OrderedSet`(삽입 순서 보존)이고 키는 `==` 가능한 단일 값(정수·bool·enum·문자열·Name·Guid·Soft·클래스 참조 — 실수·객체 키는 저장할 수 없다)이다(리플렉션 B9 — ReflectionExtensions 7절) |
 | 합성 | `T?`, `Result<T>` | 조회 실패는 `T?`, 작업 실패는 `Result`. `r.Value: T?`, `r.Error: Error?`이며 `Result<void>`에는 `Value`가 없다. `?`는 중첩되지 않는다 |
-| 클래스 참조 (full) | `Class<T>` | TypeId와 기반 타입 제한. `Create(...)` |
+| 클래스 참조 (full) | `Class<T>` | TypeId와 기반 타입 제한. `Create(...)`. C++ 쪽은 `ClassRef<Base>`(리플렉션 B9 — ReflectionExtensions 5.2절) |
 
 ### 4.3 객체 참조와 "없음"
 
@@ -492,7 +492,7 @@ full 프로필의 `interface`·`open` 선언 문법은 도입 단계 L0에서 �
 | `Widget`(WidgetController의 속성) | widget 타입 | 실행 중 항상 유효 |
 | 소유 component 필드 | `T` | 소유 Entity와 같은 수명 |
 | `?` 없는 `@edit` 객체 필드 | `T` | 같은 prefab 안의 참조만 허용. spawn 시 해석에 실패하면 spawn 실패. 대상이 제거되면 참조하는 component를 격리(§8.3) |
-| 그 밖의 객체 필드 | `T?` | 파괴되면 null. 다른 셀의 Entity는 셀이 상주할 때 자동 해석 |
+| 그 밖의 객체 필드 | `T?` | 파괴되면 null. 다른 셀의 Entity는 셀이 상주할 때 자동 해석(엔진 `WeakRef` 필드는 같은 저장 단위 안만 보존하므로 셀 사이 참조는 World의 영속 entity 참조가 맡는다 — ReflectionExtensions 5.1절) |
 | 컨테이너 원소 | 순회 변수 `T`, 번호·키 읽기 `T?` | `Array`는 파괴된 원소의 자리를 유지하고 null로 읽으며 순회는 살아 있는 원소만 제공한다. `Set` 원소와 `Map` 키는 파괴가 반영된 뒤 처음 접근할 때 제거한다(SD14) |
 | 지역 이름(인자·지역 변수·`if (let)` binding·반복 변수) | `T` 또는 `T?` | `await`를 지난 뒤 읽으면 `T?`(아래) |
 
@@ -1112,7 +1112,7 @@ class Chest : ScriptComponent {
 }
 ~~~
 
-- **저장 가능 타입:** `bool`·`int`·`float`·수학 타입·`string`·enum·`Tag`·`TagSet`·`Soft<T>`·`Row<T>`, 이들의 `T?`, 그리고 이들로만 구성된 struct·컨테이너. 엔진 객체(자기 component 포함)·로드한 에셋 값·`Text`·`Result`는 저장할 수 없다(전체 계획 §7.2).
+- **저장 가능 타입:** `bool`·`int`·`float`·수학 타입·`string`·enum·`Tag`·`TagSet`·`Soft<T>`·`Row<T>`, 이들의 `T?`, 그리고 이들로만 구성된 struct·컨테이너. 엔진 객체(자기 component 포함)·로드한 에셋 값·`Text`·`Result`는 저장할 수 없다(전체 계획 §7.2). C++ 대응(리플렉션 B9 — ReflectionExtensions 19절): `Tag` → Name, `TagSet` → `OrderedSet<Name>`, `Row<T>` → Name, `T?`(단일 값·문자열·struct) → `Optional<T>`, `Tag?`·`Row<T>?`는 None Name(없음은 하나 — SD19).
 - **호환성:** 매 컴파일 검사. 필드 추가는 기본값(또는 zero value), 삭제는 `retire`, 이름 변경은 `@formerly`, 무손실이 아닌 형식 변경은 migration 함수. enum case는 뒤에 추가만 허용.
 - **로드:** 무손실 변환이 가능하면 변환하고, 불가능하거나 알 수 없는 enum 값이면 기본값을 쓰고 보고한다. 클래스를 찾지 못하면 원래 필드를 보존하는 placeholder로 로드한다. 저장 파일에도 RPC와 같은 길이·값 검사를 적용한다.
 - **범위 attribute:** `@edit(Min, Max)`는 편집기 입력 범위이자 실행 중 계약이다. 범위를 벗어난 값을 쓰면 `AssertFailed` fault이고, 저장 로드에서 범위를 벗어나면 가장 가까운 경계로 고치고 보고한다.

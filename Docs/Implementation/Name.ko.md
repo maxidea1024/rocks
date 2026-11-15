@@ -32,4 +32,4 @@ UE 5.8의 기본 번호 접미사 규칙(`UObject/NameTypes.h`의 `UE::Core::Pri
 
 기본 None의 문자열은 정적 저장소에 있지만 `Acquire`로 얻은 lease는 다른 이름과 동일하게 pool 수명을 지킨다. lease가 살아 있으면 `Shutdown()`은 admission을 닫고 `Busy`를 반환한다. 반환 후 재시도해야 한다. 닫힌 pool은 `TryIntern`·`Acquire`·lease 복제를 거부한다. 문자열 view는 살아 있는 lease보다 오래 보관하지 않는다. pool 객체 파괴 전 모든 호출과 lease를 종료하며 pool의 allocator는 pool보다 오래 살아야 한다.
 
-이 동작은 이전의 “기본 Name은 invalid, 빈 이름은 별도 entry” 의미를 변경한다. 이전 raw 토큰의 ABI·저장 호환성은 제공하지 않는다. 오브젝트·에셋 직렬화에 Name을 연결할 때는 pool ID가 아닌 안정적인 문자열·번호 인코딩과 버전 정책을 별도로 정의해야 한다. Unicode case folding, 문화권 의존 대소문자 변환, 실제 파일 이름 동등성은 이 기능이 보장하지 않는다.
+이 동작은 이전의 “기본 Name은 invalid, 빈 이름은 별도 entry” 의미를 변경한다. 이전 raw 토큰의 ABI·저장 호환성은 제공하지 않는다. 오브젝트·에셋 직렬화에 Name을 연결할 때는 pool ID가 아닌 안정적인 문자열·번호 인코딩과 버전 정책을 별도로 정의해야 한다. 리플렉션 `Name` 필드의 영속 규칙(표시 문자열 wire, UTF-8 NFC 3,072 byte 상한, 복원 2a의 일괄 intern, `NamePool::TryFind`·pool 없는 비교 `NameTextEquals`)은 [리플렉션 B9](../Design/ReflectionExtensions.ko.md) 4절이 정한다. Unicode case folding, 문화권 의존 대소문자 변환, 실제 파일 이름 동등성은 이 기능이 보장하지 않는다.

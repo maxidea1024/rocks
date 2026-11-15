@@ -91,6 +91,8 @@ Name 10개·Localization 24개와 플랫폼 확장을 포함한 전체 110개가
 
 ## 5. 후속 범위
 
+리플렉션 B9가 `NamePool::TryFind`(intern하지 않는 조회)·pool 없는 Name 비교와, Text의 영속 형태 조회 `TryGetPersistentForm`·깊은 복사 `DeepClone(Allocator&)`을 더한다([리플렉션 B9](../Design/ReflectionExtensions.ko.md) 4·13절).
+
 Name pool의 샤드 잠금/검색 최적화, Guid 생성·parse·format, 일반 hash/Path, catalog 추출·쿠킹·에셋 너겟·비동기 로더·request generation, locale별 숫자/통화/날짜·plural/select adapter, BiDi·shaping·폰트·IME/UI는 아직 후속이다. Text를 String의 별명으로 만들지 않고 이력과 snapshot 경계를 먼저 확보한 상태에서 확장한다.
 
 언어별 규칙은 검증된 라이브러리 adapter로 도입한다. 이번 invariant integer·named substitution을 완전한 국제화 엔진으로 표기하지 않는다. Windows/macOS Foundation 통과를 실제 에디터·UI 통합 검증으로 합산하지 않는다.

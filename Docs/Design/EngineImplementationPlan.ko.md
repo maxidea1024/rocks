@@ -132,7 +132,7 @@ CPU/GPU 구조체는 크기·정렬·필드 오프셋을 자동 검사한다. SI
 
 ### 2.3 Core Transform의 표현과 실패 규약
 
-Core의 authoring LocalTransform은 translation(double)·quaternion·diagonal scale의 TRS로 정의하고, 계산용 WorldAffine은 parent×local의 affine 결과를 보존한다. 비균일 parent scale과 child rotation의 합성에는 shear가 생길 수 있으므로 world 결과를 매번 TRS로 분해하여 근사하지 않는다. 카메라 상대 GPU matrix는 이 affine 결과에서 생성한다.
+Core의 authoring LocalTransform은 translation(double)·quaternion·diagonal scale의 TRS로 정의하고, 계산용 WorldAffine은 parent×local의 affine 결과를 보존한다. 비균일 parent scale과 child rotation의 합성에는 shear가 생길 수 있으므로 world 결과를 매번 TRS로 분해하여 근사하지 않는다. 카메라 상대 GPU matrix는 이 affine 결과에서 생성한다. Core의 `Transform`(이동 double·회전·크기 float)이 이 authoring LocalTransform이다. 정밀도가 하나인 값 타입 `Transform3f`·`Transform3d`(UE FTransform3f·3d 대응 — 데이터 반입, GPU·애니메이션용 float, 도구용 double)도 같은 TRS 규약과 실패 규약(shear는 근사하지 않고 Unsupported)을 따른다([리플렉션 B9](ReflectionExtensions.ko.md) 3.2절).
 
 KeepWorld reparent는 inverse(parent)×world를 계산한 뒤 local TRS 표현 가능성과 허용 오차를 검증한다. shear가 필요한 경우 NonRepresentableTransform으로 실패하여 원래 계층을 보존한다. 명시적인 geometry bake는 별도 편집 명령과 Undo를 제공하며 묵시 근사를 금지한다. singular/zero scale은 역행렬이 필요한 작업에서 실패하고, 음수 determinant의 winding·normal inverse-transpose·bounds를 일관되게 처리한다. physics는 허용 scale과 shape recook 정책을 별도 선언한다.
 
