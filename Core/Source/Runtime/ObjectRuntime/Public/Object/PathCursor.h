@@ -5,8 +5,8 @@
 
 // 경로 접근 cursor의 공개 detail 선언이다(Docs/Design/ReflectionFoundations.ko.md 7.1절). 생성 경로
 // 템플릿(Object/GeneratedPathAccess.h)이 멤버 함수를 부르므로 클래스 선언은 여기에 두고 구현은
-// Private/PropertyPath.cpp에 둔다. 사용자 코드는 쓰지 않는다 — 공개 API는 Object/PropertyPath.h의
-// handle + PropertyPath 연산뿐이다.
+// Private/PropertyPathCursor.cpp(연산 실행은 PropertyPathRunner.cpp)에 둔다. 사용자 코드는 쓰지
+// 않는다 — 공개 API는 Object/PropertyPath.h의 handle + PropertyPath 연산뿐이다.
 namespace rocks::detail {
 
 // 경로 연산 종류다.

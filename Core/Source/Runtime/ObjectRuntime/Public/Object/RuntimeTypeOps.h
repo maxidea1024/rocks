@@ -23,7 +23,7 @@ struct RuntimeStructFieldOps;
 
 namespace detail {
 // 경로 접근 cursor다(선언·인터페이스는 공개 detail 헤더 Object/PathCursor.h, 구현은
-// Private/PropertyPath.cpp — Docs/Design/ReflectionFoundations.ko.md 7.1절).
+// Private/PropertyPathCursor.cpp — Docs/Design/ReflectionFoundations.ko.md 7.1절).
 class PathCursor;
 } // namespace detail
 
