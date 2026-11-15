@@ -165,7 +165,7 @@ internal static class BuildConfigurationTests
         {
             Modules = request.Modules.Select(module => module.Name == "Engine" ? change(module) : module).ToArray()
         };
-        foreach (string define in new[] { "ROCKS_BUILD_RELEASE=1", "ROCKS_PLATFORM_WINDOWS=1", "ROCKS_ARCH_ARM64=1" })
+        foreach (string define in new[] { "ROCKS_BUILD_RELEASE=1", "ROCKS_PLATFORM_WINDOWS=1", "ROCKS_ARCH_ARM64=1", "ROCKS_TARGET_X64_AES=" })
         {
             await Rejects(WithEngineModule(module => module with { PrivateDefines = [define] }), "module defined a reserved macro " + define,
                 "reserved for the build configuration");

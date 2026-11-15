@@ -183,6 +183,8 @@ internal static class SelfTests
         ThirdPartyPolicyTests.Register(suite, options);
         suite.Add("Policy.RepositoryPlatform", () => NoFailures(PolicyChecks.PlatformBoundary(options.Root)));
         suite.Add("Policy.RepositoryTargetMacros", () => NoFailures(PolicyChecks.TargetMacros(options.Root)));
+        suite.Add("Policy.RepositoryTargetIntrinsics", () => NoFailures(PolicyChecks.TargetIntrinsics(options.Root)));
+        suite.Add("Policy.RepositoryTestAccess", () => NoFailures(PolicyChecks.TestAccess(options.Root)));
         suite.Add("Policy.RepositoryWarnings", () => NoFailures(PolicyChecks.SourceWarnings(options.Root)));
         suite.Add("Policy.RepositoryOptimizationOverrides", () => NoFailures(PolicyChecks.OptimizationOverrides(options.Root)));
         suite.Add("Policy.OptimizationOverrideControls", () =>
@@ -621,6 +623,202 @@ internal static class SelfTests
             // 정의 헤더라도 OS 헤더·API는 platform-boundary가 막는다(모든 번역 단위가 포함한다).
             temporary.Write("Core/Source/Runtime/Base/Public/Base/Compiler.h", "#if ROCKS_PLATFORM_WINDOWS && !defined(_WIN32)\n#endif\n#include <Windows.h>\n");
             Verify.Equal(1, PolicyChecks.PlatformBoundary(temporary.Root).Count, "OS header accepted in Compiler.h");
+        });
+        suite.Add("Policy.TargetIntrinsicControls", () =>
+        {
+            using TemporaryDirectory temporary = new();
+            const string compiler = "Core/Source/Runtime/Base/Public/Base/Compiler.h";
+            const string aes = "Core/Source/Runtime/Crypto/Private/Aes/AesKernels.cpp";
+            const string sha = "Core/Source/Runtime/Core/Private/Encoding/Sha256Hardware.cpp";
+            const string probe = "Engine/Source/Runtime/Probe/Private/Probe.cpp";
+            const string test = "Core/Source/Runtime/Crypto/Tests/ProbeTests.cpp";
+            const string math = "Core/Source/Runtime/PlatformBase/Public/Platform/Math/ClangPlatformMath.h";
+            // 정의 헤더는 target 속성으로 매크로를 정의하고, 계열 디렉터리는 자기 계열의 매크로·intrinsics를 쓴다. 주석·리터럴(raw
+            // 포함)의 언급, 범용 SIMD의 비슷한 이름, 이름만 비슷한 식별자, target이라는 이름의 함수·속성 인자 안의 호출은 대상이 아니다.
+            temporary.Write(compiler, "#define ROCKS_TARGET_X64_AES __attribute__((target(\"aes,avx,pclmul\")))\n" +
+                "#define ROCKS_TARGET_ARM64_AES __attribute__((target(\"neon,aes,fuse-aes\")))\n");
+            temporary.Write(aes, "ROCKS_TARGET_X64_AES static __m128i R(__m128i b, __m128i k) noexcept {\n" +
+                "    return _mm_xor_si128(_mm_aesenc_si128(b, k), _mm_clmulepi64_si128(b, k, 0x11));\n}\n" +
+                "ROCKS_TARGET_ARM64_AES uint8x16_t A(uint8x16_t b, uint8x16_t k) { return vaesmcq_u8(vaeseq_u8(b, k)); }\n" +
+                "poly128_t M(poly64_t a, poly64_t b) { return vmull_high_p64(a, b) ^ vmull_p64(a, b); }\n");
+            temporary.Write(sha, "uint32x4_t H(uint32x4_t a, uint32x4_t b, uint32x4_t w) { return vsha256hq_u32(a, b, w); }\n" +
+                "__m128i S(__m128i a, __m128i b, __m128i k) { return _mm_sha256rnds2_epu32(a, b, k); }\n");
+            temporary.Write(test, "// _mm_aesenc_si128, vsha256hq_u32, __attribute__((target(\"aes\"))) are only named here\n" +
+                "const char* names = \"_mm_aesenc_si128 ROCKS_TARGET_X64_AES #pragma clang attribute\";\n" +
+                "const char* attribute = \"__attribute__((target(\\\"aes\\\"))) [[gnu::target(\\\"aes\\\")]]\";\n" +
+                "const char* raw = R\"(\n#pragma clang attribute push(X, apply_to = function)\n_Pragma(\"clang attribute pop\")\n)\";\n" +
+                "__m128i X(__m128i a, __m128i b) { return _mm_shldi_epi64(_mm_shuffle_epi8(a, b), b, 1); }\n" +
+                "poly16x8_t P(poly8x16_t a, poly8x16_t b) { return vmull_high_p8(a, b); }\n" +
+                "uint8x16_t Q(uint8x16_t a, uint8x16_t b) { return veorq_u8(a, b); }\n" +
+                "int my_mm_aesenc_si128 = 0; int target(int); int t = target(1);\n" +
+                "[[nodiscard]] int target2(int); __attribute__((noinline)) void target(long);\n" +
+                "void Assume(int x) { [[assume(target(x) > 0)]]; }\n");
+            temporary.Write(probe, "void Clean();\n");
+            temporary.Write(math, "inline int Count(unsigned x) { return __builtin_popcount(x); }\n");
+            NoFailures(PolicyChecks.TargetIntrinsics(temporary.Root));
+
+            // target 속성을 직접 거는 형태(여러 줄·줄 이음·_Pragma·__pragma 포함)는 계열 디렉터리와 시험 소스를 포함해 Compiler.h 밖
+            // 어디서나 거부한다. #pragma clang attribute는 내용과 관계없이 거부한다.
+            foreach (string source in new[] { "__attribute__((target(\"aes\"))) void F();",
+                "__attribute__ (( __target__ (\"avx2\") )) void F();", "__attribute__((__target__(\"aes\"))) void F();",
+                "__attribute__((noinline, target(\"sse4.2\"))) void F();", "__attribute__((section(\"x\"), target(\"aes\"))) void F();",
+                "[[gnu::target(\"aes\")]] void F();", "[[clang::target(\"avx2\")]] void F();", "[[using gnu: target(\"aes\")]] void F();",
+                "__attribute__((target_clones(\"avx2\", \"default\"))) void F();", "__attribute__((target_version(\"sve\"))) void F();",
+                "__attribute__((cpu_specific(haswell))) void F();", "[[clang::cpu_dispatch(generic, haswell)]] void F();",
+                "__declspec(cpu_specific(westmere)) void F();",
+                "#pragma clang attribute push(__attribute__((target(\"aes\"))), apply_to = function)",
+                "#pragma clang attribute push(ROCKS_X, apply_to = function)", "#pragma clang attribute pop",
+                "#  pragma GCC target(\"aes\")", "#pragma GCC push_options",
+                "_Pragma(\"clang attribute push(__attribute__((target(\\\"aes\\\"))), apply_to = function)\")",
+                "__pragma(clang attribute push(X, apply_to = function))",
+                "__attribute__((noinline, nodebug,\n               target(\"aes,pclmul\"))) void F();",
+                "[[gnu::noinline,\n  gnu::target(\"aes\")]] void G();",
+                "#define ROCKS_PUSH_AES \\\n    _Pragma(        \\\n        \"clang attribute push(X, apply_to = function)\")" })
+            {
+                foreach (string file in new[] { probe, test, aes })
+                {
+                    string original = File.ReadAllText(temporary.FilePath(file));
+                    temporary.Write(file, original + source + "\n");
+                    int expectedLine = original.Count(character => character == '\n') + 1;
+                    var failures = PolicyChecks.TargetIntrinsics(temporary.Root);
+                    Verify.That(failures.Count == 1 && failures[0].Rule == "target-attribute" &&
+                        (failures[0].Line == expectedLine || source.StartsWith("#define", StringComparison.Ordinal)),
+                        $"target attribute escaped audit in {file} (expected line {expectedLine}): {source}\n{string.Join('\n', failures)}");
+                    temporary.Write(file, original);
+                }
+            }
+
+            // 계열의 target 매크로·intrinsics(builtin 형태 포함)는 그 계열 디렉터리 밖(시험·이름만 비슷한 디렉터리·다른 계열 디렉터리·
+            // builtin을 모두 허용받은 PlatformMath 헤더)에서 거부한다.
+            string[] aesFamily = ["ROCKS_TARGET_X64_AES void F();", "ROCKS_TARGET_ARM64_AES void F();", "x = _mm_aesenc_si128(a, k);",
+                "x = _mm_aeskeygenassist_si128(k, 1);", "x = _mm256_aesenc_epi128(a, k);", "x = _mm_clmulepi64_si128(a, b, 0);",
+                "x = _mm512_clmulepi64_epi128(a, b, 0);", "x = _mm_aesenc128kl_u8(&o, a, h);", "_mm_loadiwkey(c, a, b, d);",
+                "x = _mm_encodekey256_u32(c, a, b, h);", "x = vaeseq_u8(a, k);", "x = vaesdq_u8(a, k);", "x = vaesimcq_u8(a);",
+                "x = vmull_p64(a, b);", "x = vmull_high_p64(a, b);", "x = __builtin_ia32_aesenc128(a, k);",
+                "x = __builtin_ia32_pclmulqdq128(a, b, 0);", "x = __builtin_neon_vaeseq_u8(a, k);"];
+            string[] shaFamily = ["x = _mm_sha256rnds2_epu32(a, b, k);", "x = _mm_sha1msg1_epu32(a, b);", "x = vsha256hq_u32(a, b, w);",
+                "x = vsha1cq_u32(a, e, w);", "x = vsha512hq_u64(a, b, c);", "x = veor3q_u8(a, b, c);", "x = vrax1q_u64(a, b);",
+                "x = vsm3ss1q_u32(a, b, c);", "x = __builtin_ia32_sha256rnds2(a, b, k);", "x = __builtin_neon_vsha256hq_u32(a, b, w);"];
+            string lookalike = "Core/Source/Runtime/Crypto/Private/AesExtra/Probe.cpp";
+            foreach ((string[] sources, string[] files) in new[] { (aesFamily, new[] { probe, test, lookalike, sha, math }),
+                (shaFamily, new[] { probe, test, aes, math }) })
+            {
+                foreach (string source in sources)
+                {
+                    foreach (string file in files)
+                    {
+                        string original = File.Exists(temporary.FilePath(file)) ? File.ReadAllText(temporary.FilePath(file)) : "";
+                        temporary.Write(file, original + source + "\n");
+                        var failures = PolicyChecks.TargetIntrinsics(temporary.Root);
+                        Verify.That(failures.Count == 1 && failures[0].Rule == "target-intrinsics",
+                            $"intrinsic escaped audit in {file}: {source}\n{string.Join('\n', failures)}");
+                        temporary.Write(file, original);
+                    }
+                }
+            }
+
+            // 어느 계열에도 속하지 않은 ROCKS_TARGET_* 매크로는 정의(Compiler.h)·사용 모두 거부한다(계열 디렉터리 안에서도).
+            foreach (string source in new[] { "ROCKS_TARGET_X64_SHA void G();", "ROCKS_TARGET_X64_AES_VAES void F();" })
+            {
+                foreach (string file in new[] { probe, aes, sha })
+                {
+                    string original = File.ReadAllText(temporary.FilePath(file));
+                    temporary.Write(file, original + source + "\n");
+                    var failures = PolicyChecks.TargetIntrinsics(temporary.Root);
+                    Verify.That(failures.Count == 1 && failures[0].Rule == "target-intrinsics" &&
+                        failures[0].Message.Contains("not assigned", StringComparison.Ordinal),
+                        $"unassigned target macro accepted in {file}: {source}\n{string.Join('\n', failures)}");
+                    temporary.Write(file, original);
+                }
+            }
+
+            string definitions = File.ReadAllText(temporary.FilePath(compiler));
+            temporary.Write(compiler, definitions + "#define ROCKS_TARGET_X64_SHA __attribute__((target(\"sha\")))\n");
+            var unassigned = PolicyChecks.TargetIntrinsics(temporary.Root);
+            Verify.That(unassigned.Count == 1 && unassigned[0].Rule == "target-intrinsics" && unassigned[0].Line == 3,
+                "unassigned target macro definition accepted in Compiler.h\n" + string.Join('\n', unassigned));
+
+            // 정의 헤더도 intrinsics는 쓰지 못한다(매크로 정의만 예외다).
+            temporary.Write(compiler, definitions + "inline __m128i E(__m128i a, __m128i k) { return _mm_aesenc_si128(a, k); }\n");
+            var inCompiler = PolicyChecks.TargetIntrinsics(temporary.Root);
+            Verify.That(inCompiler.Count == 1 && inCompiler[0].Rule == "target-intrinsics",
+                "intrinsic accepted in Compiler.h\n" + string.Join('\n', inCompiler));
+        });
+        suite.Add("Policy.TestAccessControls", () =>
+        {
+            using TemporaryDirectory temporary = new();
+            const string access = "Core/Source/Runtime/Crypto/Private/AeadSequenceTestAccess.h";
+            const string module = "Core/Source/Runtime/Crypto/Private/Aead.cpp";
+            const string sodium = "Core/Source/Runtime/Crypto/Private/Sodium/SodiumRuntime.cpp";
+            const string probe = "Engine/Source/Runtime/Probe/Private/Probe.cpp";
+            const string moduleTests = "Core/Source/Runtime/Crypto/Tests/AeadTests.cpp";
+            // 모듈 Tests/ 소스는 접근점을 include하고, 시험 소스(Tests/·FoundationTests·TestSupport)는 ROCKS_TESTING을 쓴다. 접근점끼리의
+            // include, 주석·리터럴(raw 포함)의 언급, 이름이 TestAccess.h로 끝나지 않는 내부 헤더, Crypto 초기화의 libsodium 전역 설정은
+            // 대상이 아니다.
+            temporary.Write(access, "#pragma once\n");
+            temporary.Write("Core/Source/Runtime/Crypto/Private/OtherTestAccess.h", "#pragma once\n#include \"AeadSequenceTestAccess.h\"\n");
+            temporary.Write(moduleTests, "#include <Crypto/Private/AeadSequenceTestAccess.h>\n#if ROCKS_TESTING\n#endif\n");
+            temporary.Write("Programs/FoundationTests/Private/Main.cpp", "#if ROCKS_TESTING\n#endif\n");
+            temporary.Write("Core/Source/Developer/TestSupport/Private/Win64/Probe.cpp", "#if ROCKS_TESTING\n#endif\n");
+            temporary.Write(module, "#include \"KeyAccess.h\"\n// AeadSequenceTestAccess.h, ROCKS_TESTING, randombytes_set_implementation\n" +
+                "const char* n = \"ROCKS_TESTING AeadSequenceTestAccess.h sodium_set_misuse_handler\";\n" +
+                "const char* raw = R\"(\n#include \"AeadSequenceTestAccess.h\"\n)\";\n");
+            temporary.Write(sodium, "void Init() { randombytes_set_implementation(&impl); sodium_set_misuse_handler(&Misuse); }\n");
+            temporary.Write(probe, "void Clean();\n");
+            NoFailures(PolicyChecks.TestAccess(temporary.Root));
+
+            void ExpectOne(string file, string source, string rule)
+            {
+                string original = File.Exists(temporary.FilePath(file)) ? File.ReadAllText(temporary.FilePath(file)) : "";
+                temporary.Write(file, original + source + "\n");
+                var failures = PolicyChecks.TestAccess(temporary.Root);
+                Verify.That(failures.Count == 1 && failures[0].Rule == rule &&
+                    failures[0].Line == original.Count(character => character == '\n') + 1,
+                    $"{rule} escaped audit in {file}: {source}\n{string.Join('\n', failures)}");
+                temporary.Write(file, original);
+            }
+
+            // 시험 소스 밖(모듈 구현·모듈 Private/Tests/·다른 모듈·시험 지원 코드·이름만 비슷한 runner 경로)의 접근점 include는 거부한다.
+            foreach (string source in new[] { "#include \"AeadSequenceTestAccess.h\"", "#  include <Crypto/Private/AeadSequenceTestAccess.h>",
+                "#include_next <Crypto/Private/AeadSequenceTestAccess.h>", "#import \"AeadSequenceTestAccess.h\"" })
+            {
+                foreach (string file in new[] { module, "Core/Source/Runtime/Crypto/Private/Tests/Hook.cpp", probe,
+                    "Core/Source/Developer/TestSupport/Private/Win64/Other.cpp", "Programs/FoundationTestsX/Private/Main.cpp" })
+                {
+                    ExpectOne(file, source, "test-access-include");
+                }
+            }
+
+            // 접근점은 모듈 Private/에만 둔다(공개 include 경로 안의 Private/도 아니다).
+            foreach (string header in new[] { "Core/Source/Runtime/Crypto/Public/Crypto/AeadTestAccess.h",
+                "Core/Source/Runtime/Crypto/Public/Crypto/Private/AeadTestAccess.h" })
+            {
+                temporary.Write(header, "#pragma once\n");
+                var location = PolicyChecks.TestAccess(temporary.Root);
+                Verify.That(location.Count == 1 && location[0].Rule == "test-access-location",
+                    $"public test access header accepted: {header}\n{string.Join('\n', location)}");
+                File.Delete(temporary.FilePath(header));
+            }
+
+            // 시험 소스·TestSupport 밖(모듈 구현·Private/Tests/·접근점 헤더·이름만 비슷한 TestSupport 경로)의 ROCKS_TESTING은 거부한다.
+            foreach (string source in new[] { "#if ROCKS_TESTING", "#ifdef ROCKS_TESTING", "#if defined(ROCKS_TESTING)",
+                "if constexpr (ROCKS_TESTING != 0) {}" })
+            {
+                foreach (string file in new[] { module, "Core/Source/Runtime/Crypto/Private/Tests/Hook.cpp", access, probe,
+                    "Core/Source/Developer/TestSupportX/Private/Probe.cpp" })
+                {
+                    ExpectOne(file, source, "testing-macro");
+                }
+            }
+
+            // libsodium 전역 설정은 Crypto 초기화 밖에서 부르지 않는다(시험 포함).
+            foreach (string source in new[] { "randombytes_set_implementation(&fixed);", "sodium_set_misuse_handler(nullptr);" })
+            {
+                foreach (string file in new[] { module, moduleTests, probe })
+                {
+                    ExpectOne(file, source, "global-hook");
+                }
+            }
         });
         suite.Add("Policy.CompilerFlagsAndResponseFileControls", () =>
         {

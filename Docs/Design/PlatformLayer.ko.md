@@ -203,6 +203,13 @@ dotnet msbuild Rocks.proj -t:Test -p:RocksPlatform=android -p:AndroidAbi=x86_64
     묻지 않는다.
   - 모듈은 이 세 접두의 매크로를 정의할 수 없다(빌드 입력 검증). 소유 C 파일(`.c`, 예: `Lz4Unity.c`)은 C++ 전용 `Compiler.h`를
     쓸 수 없으므로 대상별 분기를 두지 않는다.
+  - 함수 단위 target 속성도 `Compiler.h`의 `ROCKS_TARGET_*` 매크로로만 건다(2026-11-15, Crypto.ko.md 5.3절). 매크로는 해당
+    아키텍처에서만 정의하고(`ROCKS_TARGET_X64_AES`·`ROCKS_TARGET_ARM64_AES`), 모듈 규칙은 정의할 수 없다(빌드 입력 검증).
+    `target-attribute`: target 속성(`cpu_specific`·`cpu_dispatch` 포함)·`#pragma clang attribute`·`#pragma GCC target`을 직접
+    쓰지 않는다. `target-intrinsics`: AES·carry-less 곱셈 intrinsics(builtin 형태 포함)와 그 매크로는 `Crypto/Private/Aes/`, SHA
+    계열은 `Core/Private/Encoding/`에서만 쓴다(지원하지 않는 CPU에서 부르면 잘못된 명령 예외이므로 감지 뒤 고른 커널 표로만
+    부르는 곳에 가둔다). 어느 계열에도 속하지 않은 `ROCKS_TARGET_*`는 거부하므로, SHA 경로는 자기 매크로를 `Compiler.h`에
+    더할 때 SHA 계열에 넣는다.
 
 ## 전환 순서와 검증
 

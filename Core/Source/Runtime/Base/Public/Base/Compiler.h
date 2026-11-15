@@ -165,6 +165,39 @@
 
 #define ROCKS_ENABLE_OPTIMIZATION _Pragma("clang optimize on")
 
+// AES 명령 경로를 함수 하나에만 켜는 target 속성이다(Docs/Design/Crypto.ko.md 5.3절). 전역 -maes·
+// -march 없이 이 속성을 붙인 함수만 AES·carry-less 곱셈 명령으로 컴파일한다.
+//   ROCKS_TARGET_X64_AES    AES-NI·PCLMULQDQ·AVX. libsodium aesni 원본과 같다. avx가 SSSE3·SSE4.1을
+//                           함께 켜고(_mm_shuffle_epi8) 속성 함수 안의 SSE 명령을 모두 VEX로
+//                           바꾼다. ROCKS_ARCH_X64에서만 정의한다.
+//   ROCKS_TARGET_ARM64_AES  NEON·AES(AESE·AESMC·PMULL)와 AESE·AESMC 융합 조율. libsodium armcrypto
+//                           원본의 crypto(SHA2까지 켠다)는 빼서 감지 조건과 같은 범위만 켠다.
+//                           ROCKS_ARCH_ARM64에서만 정의한다.
+// - PlatformBase CpuFeatures가 다음을 보고할 때만 부른다. 아니면 잘못된 명령 예외로 죽는다. x64:
+//   aes && pclmulqdq && avx(avx는 OS의 YMM 상태 저장 확인 포함), arm64: armAes && armPmull. 그래서
+//   이 속성 함수는 감지한 뒤 고른 커널 표를 거쳐서만 부른다.
+// - 속성이 없는 호출자로 inline된다고 기대하지 않는다(대상 기본 CPU가 기능을 이미 포함할 때만
+//   inline될 수 있다. 예: macOS arm64). 블록 하나가 아니라 버퍼 단위로 경계를 둔다.
+// - 다른 아키텍처에서는 정의하지 않으므로 쓰는 파일은 #if ROCKS_ARCH_*로 감싼다(잘못 쓰면 컴파일
+//   오류다).
+// - 정책 검사 target-intrinsics: 이 매크로와 AES·carry-less 곱셈 intrinsics는 Crypto/Private/Aes/
+//   에서만 쓴다. target-attribute: target 속성(__attribute__((target(...)))·#pragma clang attribute
+//   등)은 이 파일 밖에서 직접 쓰지 않는다.
+//
+// 사용 예(Crypto/Private/Aes/AesX64.cpp):
+//   #include <Base/Compiler.h>
+//   #if ROCKS_ARCH_X64
+//   #include <immintrin.h>
+//   ROCKS_TARGET_X64_AES static __m128i EncryptRound(__m128i block, __m128i key) noexcept {
+//       return _mm_aesenc_si128(block, key);
+//   }
+//   #endif
+#if ROCKS_ARCH_X64
+#define ROCKS_TARGET_X64_AES __attribute__((target("aes,avx,pclmul")))
+#elif ROCKS_ARCH_ARM64
+#define ROCKS_TARGET_ARM64_AES __attribute__((target("neon,aes,fuse-aes")))
+#endif
+
 namespace rocks {
 
 // 컴파일 대상 CPU 아키텍처다(위 ROCKS_ARCH_* 매크로와 같다).

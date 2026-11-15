@@ -63,9 +63,15 @@ public static partial class PolicyChecks
     // 엔진이 소유한 C++ 소스의 최상위 폴더다(서식·경고·플랫폼 경계 검사 범위).
     private static readonly string[] OwnedSourceRoots = ["Core", "Engine", "Programs", "Templates"];
 
-    private static bool IsTestSource(string relative) =>
-        relative.Split('/').Contains("Tests") ||
-        relative.StartsWith("Programs/FoundationTests/", StringComparison.Ordinal);
+    // 시험 실행 파일에 들어가는 소스다. 모듈 시험은 <루트>/Source/<그룹>/<모듈>/Tests/ 아래(FoundationTests.Build.cs가 모으는
+    // 곳)이고 runner는 Programs/FoundationTests/다. 모듈 Private/ 아래의 Tests 디렉터리(UE의 Private/Tests 관례)는 모듈 소스로
+    // 컴파일되어 출하되므로 시험 소스가 아니다.
+    private static bool IsTestSource(string relative)
+    {
+        string[] parts = relative.Split('/');
+        return (parts.Length > 5 && parts[1] == "Source" && parts[4] == "Tests") ||
+               relative.StartsWith("Programs/FoundationTests/", StringComparison.Ordinal);
+    }
 
     // 리플렉션 필드 템플릿(rocks::Array·ObjectRefArray·StructRefArray·ObjectRef·SoftObjectRef)의 명시적 인스턴스화·extern
     // template 선언이다. 그런 선언이 보이면 Clang이 필드 타입을 desugar 정규 철자가 아니라 작성 철자로 출력할 수 있어

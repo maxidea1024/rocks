@@ -154,7 +154,7 @@ private:
                                     Span<const uint8> sealed, Span<uint8> plaintext) noexcept;
 
 namespace detail {
-struct SequenceAccess;
+struct SequenceTestAccess;
 } // namespace detail
 
 namespace hazmat {
@@ -281,7 +281,7 @@ public:
     }
 
 private:
-    friend struct detail::SequenceAccess;
+    friend struct detail::SequenceTestAccess;
 
     AeadSequenceSealer(AeadKey&& key, SecretBytes&& iv) noexcept;
 
@@ -345,7 +345,7 @@ public:
     }
 
 private:
-    friend struct detail::SequenceAccess;
+    friend struct detail::SequenceTestAccess;
 
     AeadSequenceOpener(AeadKey&& key, SecretBytes&& iv) noexcept;
 

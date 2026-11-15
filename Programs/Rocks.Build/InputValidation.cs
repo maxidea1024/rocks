@@ -152,9 +152,10 @@ internal static class InputValidation
                     throw new ArgumentException($"Module {module.Name}: invalid define '{define}'.");
                 }
                 // 구성·대상 매크로는 빌드 시스템과 Base/Compiler.h만 정의한다(모듈이 바꾸면 구성·대상 판정이 모듈마다 달라지고,
-                // MetaCompiler가 프로필과 모듈 정의를 함께 받아 중복 오류를 낸다).
+                // MetaCompiler가 프로필과 모듈 정의를 함께 받아 중복 오류를 낸다). 함수 단위 target 매크로(ROCKS_TARGET_*)도
+                // Compiler.h만 정의한다(정책 검사 target-intrinsics가 계열별로 가둔다).
                 if (name.StartsWith("ROCKS_BUILD_", StringComparison.Ordinal) || name.StartsWith("ROCKS_PLATFORM_", StringComparison.Ordinal) ||
-                    name.StartsWith("ROCKS_ARCH_", StringComparison.Ordinal))
+                    name.StartsWith("ROCKS_ARCH_", StringComparison.Ordinal) || name.StartsWith("ROCKS_TARGET_", StringComparison.Ordinal))
                 {
                     throw new ArgumentException($"Module {module.Name}: define '{define}' is reserved for the build configuration and target.");
                 }

@@ -2,7 +2,7 @@
 #include <Crypto/Aead.h>
 #include <Crypto/Bytes.h>
 #include <Crypto/Kdf.h>
-#include <Crypto/Private/AeadSequenceAccess.h>
+#include <Crypto/Private/AeadSequenceTestAccess.h>
 #include <Crypto/Secret.h>
 #include <Platform/Cpu.h>
 #include <TestSupport/Test.h>
@@ -1065,7 +1065,7 @@ TEST(CryptoAeadSequenceKnownAnswers) {
 
     uint8 message[20];
     FillPattern(Span<uint8>(message), 0);
-    sequence::SequenceAccess::SetNextSequence(sealer.Value(), 0x0102030405060708);
+    sequence::SequenceTestAccess::SetNextSequence(sealer.Value(), 0x0102030405060708);
     auto written =
         sealer.Value().TrySeal(Text("channel"), Span<const uint8>(message), Span<uint8>(sealed));
     REQUIRE(written);
@@ -1085,16 +1085,20 @@ TEST(CryptoAeadSequenceExhaustion) {
     auto sealer = hazmat::AeadSequenceSealer::TryCreate(Move(sealerKey), Span<const uint8>(iv));
     auto opener = hazmat::AeadSequenceOpener::TryCreate(fixture.MakeKey(), Span<const uint8>(iv));
     REQUIRE(sealer && opener);
-    sequence::SequenceAccess::SetNextSequence(sealer.Value(), hazmat::AeadSequenceExhausted - 2);
-    sequence::SequenceAccess::SetNextSequence(opener.Value(), hazmat::AeadSequenceExhausted - 2);
+    sequence::SequenceTestAccess::SetNextSequence(sealer.Value(),
+                                                  hazmat::AeadSequenceExhausted - 2);
+    sequence::SequenceTestAccess::SetNextSequence(opener.Value(),
+                                                  hazmat::AeadSequenceExhausted - 2);
 
     // 마지막 seq에서 출력이 작아 실패해도 seq를 쓰지 않고 소진되지 않는다.
-    sequence::SequenceAccess::SetNextSequence(sealer.Value(), hazmat::AeadSequenceExhausted - 1);
+    sequence::SequenceTestAccess::SetNextSequence(sealer.Value(),
+                                                  hazmat::AeadSequenceExhausted - 1);
     uint8 small[8];
     CHECK(sealer.Value().TrySeal(Span<const uint8>(), Text("tail"), Span<uint8>(small)).Error() ==
           ErrorCode::CapacityExceeded);
     CHECK(!sealer.Value().IsExhausted());
-    sequence::SequenceAccess::SetNextSequence(sealer.Value(), hazmat::AeadSequenceExhausted - 2);
+    sequence::SequenceTestAccess::SetNextSequence(sealer.Value(),
+                                                  hazmat::AeadSequenceExhausted - 2);
 
     const char* expected[] = {"0b78aa4acc33517ed8b464576fb8b3fb6893cee4",
                               "b4970a8d3798abda11a0213aebddfcbd9210a324"};
@@ -1147,12 +1151,12 @@ TEST(CryptoAeadSequenceGcmBlockLimit) {
     auto unlimited =
         hazmat::AeadSequenceSealer::TryCreate(fixture.MakeKey(), Span<const uint8>(fixture.iv));
     REQUIRE(unlimited);
-    sequence::SequenceAccess::SetUsedBlocks(unlimited.Value(), limit);
+    sequence::SequenceTestAccess::SetUsedBlocks(unlimited.Value(), limit);
     uint8 sealed[64];
     CHECK(unlimited.Value().TrySeal(Span<const uint8>(), Text("0123456789abcdef"),
                                     Span<uint8>(sealed)));
     // 한도가 없는 알고리즘의 집계는 넘치지 않고 포화한다.
-    sequence::SequenceAccess::SetUsedBlocks(unlimited.Value(), static_cast<uint64>(-1) - 1);
+    sequence::SequenceTestAccess::SetUsedBlocks(unlimited.Value(), static_cast<uint64>(-1) - 1);
     CHECK(unlimited.Value().TrySeal(Span<const uint8>(), Text("0123456789abcdef"),
                                     Span<uint8>(sealed)));
     CHECK(unlimited.Value().UsedBlocks() == static_cast<uint64>(-1));
@@ -1168,7 +1172,7 @@ TEST(CryptoAeadSequenceGcmBlockLimit) {
     auto sealer = hazmat::AeadSequenceSealer::TryCreate(Move(key.Value()), Span<const uint8>(iv));
     REQUIRE(sealer);
     // 16 byte 평문 + 빈 AD = 2 블록. 남은 3 블록에 한 번 들어가고, 남은 1 블록에는 들어가지 않는다.
-    sequence::SequenceAccess::SetUsedBlocks(sealer.Value(), limit - 3);
+    sequence::SequenceTestAccess::SetUsedBlocks(sealer.Value(), limit - 3);
     REQUIRE(
         sealer.Value().TrySeal(Span<const uint8>(), Text("0123456789abcdef"), Span<uint8>(sealed)));
     CHECK(sealer.Value().UsedBlocks() == limit - 1);
@@ -1189,7 +1193,7 @@ TEST(CryptoAeadSequenceGcmBlockLimit) {
     auto exact =
         hazmat::AeadSequenceSealer::TryCreate(Move(exactKey.Value()), Span<const uint8>(iv));
     REQUIRE(exact);
-    sequence::SequenceAccess::SetUsedBlocks(exact.Value(), limit - 2);
+    sequence::SequenceTestAccess::SetUsedBlocks(exact.Value(), limit - 2);
     REQUIRE(
         exact.Value().TrySeal(Span<const uint8>(), Text("0123456789abcdef"), Span<uint8>(sealed)));
     CHECK(exact.Value().UsedBlocks() == limit);
@@ -1206,7 +1210,7 @@ TEST(CryptoAeadSequenceGcmBlockLimit) {
     auto careful =
         hazmat::AeadSequenceSealer::TryCreate(Move(carefulKey.Value()), Span<const uint8>(iv));
     REQUIRE(careful);
-    sequence::SequenceAccess::SetUsedBlocks(careful.Value(), limit - 1);
+    sequence::SequenceTestAccess::SetUsedBlocks(careful.Value(), limit - 1);
     uint8 small[8];
     CHECK(careful.Value()
               .TrySeal(Span<const uint8>(), Text("0123456789abcdef"), Span<uint8>(small))
