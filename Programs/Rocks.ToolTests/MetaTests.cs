@@ -98,6 +98,11 @@ internal static class MetaTests
     // 공백을 모두 지운 텍스트다(clang-format 줄바꿈과 무관하게 생성 코드 조각을 찾는다).
     private static string Compact(string text) => Regex.Replace(text, @"\s+", "", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(10));
 
+    // meta 시험 등록이 함께 쓰는 실행 문맥이다: 시험 묶음, 옵션, MetaCompiler·Clang 실행 환경(formatter 반영),
+    // MetaCompiler 실행 파일, Clang 경로.
+    private sealed record MetaContext(TestSuite Suite, Options Options, IReadOnlyDictionary<string, string?> Environment,
+        string Generator, string Compiler);
+
     public static void Register(TestSuite suite, Options options, IReadOnlyDictionary<string, string?> environment)
     {
         string compiler = options.Required("compiler");
@@ -121,6 +126,7 @@ internal static class MetaTests
         ModuleMetaTests.Register(suite, options, actualEnvironment);
         IdentityModuleCliTests.Register(suite, options, actualEnvironment);
         ValueKindTableTests.Register(suite, options, actualEnvironment);
+        MetaContext context = new(suite, options, actualEnvironment, generator, compiler);
 
         suite.Add("Meta.FixtureDeterminismTimestampAndStaleCheck", async () =>
         {
@@ -160,24 +166,24 @@ internal static class MetaTests
             using Probe probe = new(options, actualEnvironment, generator, compiler);
             await probe.NestedLocationAsync();
         });
-        AddRejectGroup("Meta.MissingFieldAnnotation", [Declaration("rocks::int32 count = 0;")], "RMC2000", "field");
-        AddRejectGroup("Meta.PointerAndCvFields", new[] { "rocks::int32* count = nullptr", "const rocks::int32 count = 0" }
+        AddRejectGroup(context, "Meta.MissingFieldAnnotation", [Declaration("rocks::int32 count = 0;")], "RMC2000", "field");
+        AddRejectGroup(context, "Meta.PointerAndCvFields", new[] { "rocks::int32* count = nullptr", "const rocks::int32 count = 0" }
             .Select(field => Declaration($"ROCKS_PROPERTY() {field};")), "RMC2000", "type");
-        AddRejectGroup("Meta.PrivateWithoutGeneratedBody", [Declaration("private: ROCKS_PROPERTY() rocks::int32 count = 0;",
+        AddRejectGroup(context, "Meta.PrivateWithoutGeneratedBody", [Declaration("private: ROCKS_PROPERTY() rocks::int32 count = 0;",
             extra: "public: rocks::int32 Read() const noexcept { return count; }")], "RMC2000", "GENERATED_BODY");
-        AddRejectGroup("Meta.Bitfields", [Declaration("ROCKS_PROPERTY() unsigned int count : 1;")], "RMC2000", "bitfield");
-        AddRejectGroup("Meta.StaticAnnotatedField", [Declaration("ROCKS_PROPERTY() static inline rocks::int32 count = 0;")], "RMC200", "nonstatic");
-        AddRejectGroup("Meta.ManualTraceConflict", [Declaration(extra: "void Trace() noexcept {}")], "RMC2000", "Trace");
-        AddRejectGroup("Meta.VirtualAndMultipleInheritance", [Declaration(bases: "public virtual rocks::Object"),
+        AddRejectGroup(context, "Meta.Bitfields", [Declaration("ROCKS_PROPERTY() unsigned int count : 1;")], "RMC2000", "bitfield");
+        AddRejectGroup(context, "Meta.StaticAnnotatedField", [Declaration("ROCKS_PROPERTY() static inline rocks::int32 count = 0;")], "RMC200", "nonstatic");
+        AddRejectGroup(context, "Meta.ManualTraceConflict", [Declaration(extra: "void Trace() noexcept {}")], "RMC2000", "Trace");
+        AddRejectGroup(context, "Meta.VirtualAndMultipleInheritance", [Declaration(bases: "public virtual rocks::Object"),
             Declaration(bases: "public rocks::Object, public Other").Replace("namespace probe {", "namespace probe { struct Other {};", StringComparison.Ordinal)], "RMC2000", "nonvirtual");
-        AddRejectGroup("Meta.UnreflectedBaseAndReference", [
+        AddRejectGroup(context, "Meta.UnreflectedBaseAndReference", [
             Declaration(bases: "public Hidden").Replace("namespace probe {", "namespace probe { struct Hidden : rocks::Object {};", StringComparison.Ordinal),
             Declaration("ROCKS_PROPERTY() rocks::ObjectRef<Hidden> next;")
                 .Replace("namespace probe {", "namespace probe { struct Hidden : rocks::Object {};", StringComparison.Ordinal),
             Declaration("ROCKS_PROPERTY() rocks::SoftObjectRef<Hidden> next;", extra: "explicit Value(rocks::Allocator& allocator) noexcept : next(allocator) {}")
                 .Replace("namespace probe {", "#include <Object/SoftObjectRef.h>\nnamespace probe { struct Hidden : rocks::Object {};", StringComparison.Ordinal)],
             "RMC2003", "reflected");
-        AddRejectGroup("Meta.ClangSyntaxFailurePreservesOutput", [Declaration("this is not valid cxx;")], "RMC3000", "Clang");
+        AddRejectGroup(context, "Meta.ClangSyntaxFailurePreservesOutput", [Declaration("this is not valid cxx;")], "RMC3000", "Clang");
         suite.Add("Meta.DiagnosticsAndResponseOverridesRejected", async () =>
         {
             using Probe probe = new(options, actualEnvironment, generator, compiler);
@@ -392,7 +398,7 @@ internal static class MetaTests
         });
         // underlying은 UE와 같은 정수 8종만 받는다(리플렉션 B9a2 — Docs/Design/ReflectionExtensions.ko.md 2절): 평범한 char(부호가
         // 구현 정의)·bool·long(폭이 플랫폼마다 다르다)·wchar_t는 거부한다.
-        AddRejectGroup("Meta.EnumUnderlyingAndValuesAreRestricted", new[]
+        AddRejectGroup(context, "Meta.EnumUnderlyingAndValuesAreRestricted", new[]
             {
                 "ROCKS_ENUM()\nenum class Mode { A };",
                 "ROCKS_ENUM()\nenum class Mode : char { A };",
@@ -408,25 +414,25 @@ internal static class MetaTests
             }.Select(declaration => Preamble + declaration + "\n" + "ROCKS_CLASS()\nstruct Value : public rocks::Object {};\n}\n"), "RMC2401", "probe::Mode");
         // uint64 열거자 값은 int64 최댓값 이하다(Flags는 비트 0–62 — 저장 값이 int64). 일반 범위 검사도 같은 RMC2401을 내므로 전용
         // 문구로 전용 검사를 고정한다(UE는 넘는 값을 (int64) 변환으로 음수로 감싸 받는다 — Docs/Design/ReflectionExtensions.ko.md 18.1절).
-        AddRejectGroup("Meta.EnumUint64ValuesAboveInt64AreRejected", new[]
+        AddRejectGroup(context, "Meta.EnumUint64ValuesAboveInt64AreRejected", new[]
             {
                 "ROCKS_ENUM()\nenum class Mode : rocks::uint64 { A = 0x8000000000000000ull };",
                 "ROCKS_ENUM(Flags)\nenum class Mode : rocks::uint64 { None = 0, Top = 0x8000000000000000ull };"
             }.Select(declaration => Preamble + declaration + "\n" + "ROCKS_CLASS()\nstruct Value : public rocks::Object {};\n}\n"), "RMC2401",
             "exceeds the int64 maximum");
-        AddRejectGroup("Meta.EnumToolNamesAreValidAndUnique", new[]
+        AddRejectGroup(context, "Meta.EnumToolNamesAreValidAndUnique", new[]
             {
                 "ROCKS_ENUM()\nenum class Mode : rocks::uint8 { A ROCKS_ENUMERATOR(Name = \"b\"), B };",
                 "ROCKS_ENUM(ToolPrefix = \"M_\")\nenum class Mode : rocks::uint8 { A, M_A };",
                 "ROCKS_ENUM()\nenum class Mode : rocks::uint8 { A ROCKS_ENUMERATOR(Name = \"has space\") };",
                 "ROCKS_ENUM(ToolPrefix = \"bad-\")\nenum class Mode : rocks::uint8 { A };"
             }.Select(declaration => Preamble + declaration + "\n}\n"), "RMC2203", "probe::Mode");
-        AddRejectGroup("Meta.EnumMarkerMustPrecedeAnEnum", [Preamble + "ROCKS_ENUM()\nstruct Value : public rocks::Object {};\n}\n"],
+        AddRejectGroup(context, "Meta.EnumMarkerMustPrecedeAnEnum", [Preamble + "ROCKS_ENUM()\nstruct Value : public rocks::Object {};\n}\n"],
             "RMC2000", "immediately followed by a named enum");
-        AddRejectGroup("Meta.EnumeratorAnnotationNeedsReflectedEnum", [
+        AddRejectGroup(context, "Meta.EnumeratorAnnotationNeedsReflectedEnum", [
             Preamble + "enum class Mode : rocks::uint8 { A ROCKS_ENUMERATOR(Hidden) };\nROCKS_CLASS()\nstruct Value : public rocks::Object {};\n}\n"],
             "RMC2000", "ROCKS_ENUMERATOR must annotate");
-        AddRejectGroup("Meta.NestedReflectedEnumMustBePublic", [
+        AddRejectGroup(context, "Meta.NestedReflectedEnumMustBePublic", [
             Preamble + "ROCKS_CLASS()\nclass Value : public rocks::Object {\nROCKS_ENUM()\nenum class Nested : rocks::uint8 { A };\n};\n}\n"],
             "RMC2401", "must be public");
         // underlying 명시 판정(주석·줄바꿈 사이, enum struct)과 식 초기값·int32 최솟값·uint32 최댓값을 받는다. 리플렉션 B9a2의
@@ -479,15 +485,15 @@ internal static class MetaTests
             ProcessResult compiled = await probe.CompileGeneratedAsync();
             Verify.Equal(0, compiled.ExitCode, "generated 8-underlying enum header compiles: " + compiled.StdOut + compiled.StdErr);
         });
-        AddRejectGroup("Meta.EnumFieldsRejectRequired", [
+        AddRejectGroup(context, "Meta.EnumFieldsRejectRequired", [
             Preamble + "ROCKS_ENUM()\nenum class Mode : rocks::uint8 { A };\nROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY(Required) Mode count = Mode::A;\n};\n}\n"],
             "RMC2202", "applies only to");
-        AddRejectGroup("Meta.EnumIsNotABaseOrReferenceTarget", [
+        AddRejectGroup(context, "Meta.EnumIsNotABaseOrReferenceTarget", [
             Preamble.Replace("namespace probe {", "#include <Object/SoftObjectRef.h>\nnamespace probe {", StringComparison.Ordinal) +
                 "ROCKS_ENUM()\nenum class Mode : rocks::uint8 { A };\nROCKS_CLASS()\nstruct Value : public rocks::Object {\n" +
                 "explicit Value(rocks::Allocator& allocator) noexcept : next(allocator) {}\nROCKS_PROPERTY() rocks::SoftObjectRef<Mode> next;\n};\n}\n"],
             "RMC2003", "enum");
-        AddRejectGroup("Meta.UnreflectedEnumFieldIsUnsupported", [
+        AddRejectGroup(context, "Meta.UnreflectedEnumFieldIsUnsupported", [
             Preamble + "enum class Mode : rocks::uint8 { A };\nROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() Mode count = Mode::A;\n};\n}\n"],
             "RMC2000", "unsupported field type");
         // 리플렉션 B9a2: int8·int16(별칭과 Clang 철자 signed char·short) 클래스 필드·struct 멤버·배열 원소가 Int8·Int16 종류로
@@ -545,7 +551,7 @@ internal static class MetaTests
             Verify.Equal(0, compiled.ExitCode, "generated Name header compiles: " + compiled.StdOut + compiled.StdErr);
         });
         // Name은 Required를 받지 않는다(성질 표 AcceptsRequired 없음 — 단일 필드·Array<Name> 모두 RMC2202).
-        AddRejectGroup("Meta.NameRejectsRequired", [
+        AddRejectGroup(context, "Meta.NameRejectsRequired", [
             Declaration("ROCKS_PROPERTY(Required) rocks::Name label;")
                 .Replace("namespace probe {", "#include <Core/Text/Name.h>\nnamespace probe {", StringComparison.Ordinal),
             Declaration("ROCKS_PROPERTY(Required) rocks::Array<rocks::Name> names;",
@@ -554,7 +560,7 @@ internal static class MetaTests
                     StringComparison.Ordinal)],
             "RMC2202", "applies only to");
         // 평범한 char는 부호가 구현 정의라 필드·배열 원소 모두 받지 않고 int8·uint8을 안내한다.
-        AddRejectGroup("Meta.PlainCharFieldIsUnsupported", [
+        AddRejectGroup(context, "Meta.PlainCharFieldIsUnsupported", [
             Declaration("ROCKS_PROPERTY() char letter = 0;"),
             "#include <Core/Containers/Array.h>\n" + Declaration("ROCKS_PROPERTY() rocks::Array<char> letters;",
                 extra: "explicit Value(rocks::Allocator& allocator) noexcept : letters(allocator) {}")],
@@ -697,27 +703,27 @@ internal static class MetaTests
             Verify.That(Compact(File.ReadAllText(probe.Output)).Contains(Compact("static constexpr uint32 Depth = 16u;"), StringComparison.Ordinal), "depth 16 is accepted");
             await probe.RejectAsync(ChainSource(17), "RMC2303", "nesting depth 17");
         });
-        AddRejectGroup("Meta.StructCannotInherit", [
+        AddRejectGroup(context, "Meta.StructCannotInherit", [
             Preamble + "struct Shared { rocks::int32 base = 0; };\nROCKS_STRUCT()\nstruct Leaf : Shared {\nROCKS_PROPERTY() rocks::int32 count = 0;\n};\n}\n",
             Preamble + "ROCKS_STRUCT()\nstruct Leaf : public rocks::Object {\nROCKS_PROPERTY() rocks::int32 count = 0;\n};\n}\n"],
             "RMC2301", "base class");
-        AddRejectGroup("Meta.StructTemplatesAndPlacementAreRejected", [
+        AddRejectGroup(context, "Meta.StructTemplatesAndPlacementAreRejected", [
             Preamble + "ROCKS_STRUCT()\ntemplate <class T> struct Leaf { ROCKS_PROPERTY() T count{}; };\n}\n",
             Preamble + "ROCKS_STRUCT()\nint intervening;\nstruct Leaf { ROCKS_PROPERTY() rocks::int32 count = 0; };\n}\n",
             Preamble + "void Test() {\nROCKS_STRUCT()\nstruct Leaf { rocks::int32 count = 0; };\n}\n}\n"],
             "RMC2000", "ROCKS_STRUCT");
-        AddRejectGroup("Meta.ClassAndStructMarkersAreExclusive", [
+        AddRejectGroup(context, "Meta.ClassAndStructMarkersAreExclusive", [
             Preamble + "ROCKS_CLASS()\nROCKS_STRUCT()\nstruct Value : public rocks::Object {};\n}\n",
             Preamble + "ROCKS_STRUCT()\nROCKS_CLASS()\nstruct Value : public rocks::Object {};\n}\n"],
             "RMC2000", "stacked");
-        AddRejectGroup("Meta.StructMembersNeedPropertyOrNative", [
+        AddRejectGroup(context, "Meta.StructMembersNeedPropertyOrNative", [
             Preamble + "ROCKS_STRUCT()\nstruct Leaf {\nROCKS_PROPERTY() rocks::int32 count = 0;\nrocks::int32 hidden = 0;\n};\n}\n"],
             "RMC2000", "PROPERTY or NATIVE");
-        AddRejectGroup("Meta.StructSpecifiersAreRestricted", new[] { "WorldOnly", "Abstract", "Version=0", "Version=\"2\"", "Binds=1", "Atomic=1", "Atomic=\"yes\"", "Atomic, Atomic" }
+        AddRejectGroup(context, "Meta.StructSpecifiersAreRestricted", new[] { "WorldOnly", "Abstract", "Version=0", "Version=\"2\"", "Binds=1", "Atomic=1", "Atomic=\"yes\"", "Atomic, Atomic" }
             .Select(spec => Preamble + $"ROCKS_STRUCT({spec})\nstruct Leaf {{\nROCKS_PROPERTY() rocks::int32 count = 0;\n}};\n}}\n"), "RMC2000", "specifier");
         // 리플렉션 B9b2: Atomic은 STRUCT 전용 지정자다(Docs/Design/ReflectionExtensions.ko.md 3.1·15절). CLASS 지정자 표에는 없으므로
         // ROCKS_CLASS(Atomic)은 모르는 지정자 오류다.
-        AddRejectGroup("Meta.ClassAtomicSpecifierIsUnknown", new[] { "Atomic", "WorldOnly, Atomic" }
+        AddRejectGroup(context, "Meta.ClassAtomicSpecifierIsUnknown", new[] { "Atomic", "WorldOnly, Atomic" }
             .Select(spec => Preamble + $"ROCKS_CLASS({spec})\nstruct Value : public rocks::Object {{\nROCKS_PROPERTY() rocks::int32 count = 0;\n}};\n}}\n"),
             "RMC2000", "unsupported CLASS specifier/value Atomic");
         // 리플렉션 B9b2: ROCKS_STRUCT(Atomic)은 descriptor struct flags의 Atomic(형질보다 앞)과 생성 스키마 flags 16u에 닿고, Version·
@@ -751,26 +757,26 @@ internal static class MetaTests
                 Verify.That(generated.Contains(Compact(expected), StringComparison.Ordinal), "generated code missing " + reason + ": " + expected);
             }
         });
-        AddRejectGroup("Meta.StructIsNotABaseOrReferenceTarget", [
+        AddRejectGroup(context, "Meta.StructIsNotABaseOrReferenceTarget", [
             Preamble.Replace("namespace probe {", "#include <Object/SoftObjectRef.h>\nnamespace probe {", StringComparison.Ordinal) + StructLeaf +
                 "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nexplicit Value(rocks::Allocator& allocator) noexcept : next(allocator) {}\n" +
                 "ROCKS_PROPERTY() rocks::SoftObjectRef<Leaf> next;\n};\n}\n",
             Preamble + StructLeaf + "ROCKS_CLASS()\nstruct Value : public Leaf {};\n}\n",
             Preamble + StructLeaf + "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() rocks::ObjectRef<Leaf> next;\n};\n}\n"],
             "RMC2003", "is a reflected struct");
-        AddRejectGroup("Meta.ConstStructFieldIsUnsupported", [
+        AddRejectGroup(context, "Meta.ConstStructFieldIsUnsupported", [
             Preamble + StructLeaf + "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() const Leaf leaf{};\n};\n}\n"],
             "RMC2000", "unsupported field type");
         // NATIVE 멤버로 둔 참조 struct는 AST 재귀 검사가 강한 참조를 찾는다(RMC2205 — 클래스·struct 모두).
         const string referenceHolder = "struct Value;\nROCKS_STRUCT()\nstruct Holder {\nROCKS_PROPERTY() rocks::ObjectRef<Value> target;\n};\n";
-        AddRejectGroup("Meta.NativeReferenceStructIsRejected", [
+        AddRejectGroup(context, "Meta.NativeReferenceStructIsRejected", [
             Preamble + referenceHolder + "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_NATIVE() Holder cache;\n};\n}\n",
             Preamble + referenceHolder + "ROCKS_STRUCT()\nstruct Box {\nROCKS_PROPERTY() rocks::int32 count = 0;\nROCKS_NATIVE() Holder cache;\n};\n" +
                 "ROCKS_CLASS()\nstruct Value : public rocks::Object {};\n}\n"],
             "RMC2205", "strong object reference");
         // WorldOnly 소유자 형질(NATIVE)은 struct에서 형질로 전파되고(중첩 포함), 그 struct를 필드로 둔 WorldOnly 아닌
         // 클래스가 RMC2206이다.
-        AddRejectGroup("Meta.StructWorldOnlyTraitNeedsWorldOnlyClass", new[]
+        AddRejectGroup(context, "Meta.StructWorldOnlyTraitNeedsWorldOnlyClass", new[]
             {
                 "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() WorldBits bits;\n};\n",
                 "ROCKS_STRUCT()\nstruct Outer {\nROCKS_PROPERTY() WorldBits inner;\n};\nROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() Outer bits;\n};\n",
@@ -778,7 +784,7 @@ internal static class MetaTests
             }.Select(declaration => Preamble + StructWorldBits + declaration + "}\n"),
             "RMC2206", "WorldOnly owner");
         // Migrate라는 이름이 있는데 시그니처가 다르면 생성 코드 검증 컴파일이 거부한다(조용히 마이그레이션 없이 등록되지 않는다).
-        AddRejectGroup("Meta.StructMigrateSignatureIsChecked", new[]
+        AddRejectGroup(context, "Meta.StructMigrateSignatureIsChecked", new[]
             {
                 "static void Migrate() noexcept {}",
                 // noexcept가 없다.
@@ -789,11 +795,11 @@ internal static class MetaTests
                     "rocks::Span<const rocks::uint8>) noexcept { return rocks::Result<rocks::Array<rocks::uint8>>::Success(rocks::Array<rocks::uint8>(allocator)); }"
             }.Select(migrate => "#include <Core/Containers/Array.h>\n" + Preamble + "ROCKS_STRUCT()\nstruct Leaf {\nROCKS_PROPERTY() rocks::int32 count = 0;\n" +
                 migrate + "\n};\n}\n"), "RMC3000", "Migrate");
-        AddRejectGroup("Meta.PrivateStructMigrateNeedsGeneratedBody", [
+        AddRejectGroup(context, "Meta.PrivateStructMigrateNeedsGeneratedBody", [
             Preamble + "ROCKS_STRUCT()\nclass Leaf {\npublic:\nROCKS_PROPERTY() rocks::int32 count = 0;\nprivate:\nstatic void Migrate() noexcept {}\n};\n}\n"],
             "RMC2000", "Migrate requires ROCKS_GENERATED_BODY");
         // 바깥에서 이름을 쓰는 생성 코드가 접근할 수 있도록 중첩 리플렉션 struct는 public 구역에 둔다.
-        AddRejectGroup("Meta.NestedReflectedStructMustBePublic", [
+        AddRejectGroup(context, "Meta.NestedReflectedStructMustBePublic", [
             Preamble + "class Outer {\nROCKS_STRUCT()\nstruct Leaf {\nROCKS_PROPERTY() rocks::int32 count = 0;\n};\n};\n" +
                 "ROCKS_CLASS()\nstruct Value : public rocks::Object {};\n}\n"],
             "RMC2000", "must be public");
@@ -843,21 +849,21 @@ internal static class MetaTests
             Verify.That(generated.IndexOf("structGeneratedType<::rocks::Vector3<double>>", StringComparison.Ordinal) <
                 generated.IndexOf("structGeneratedType<::probe::Pair>", StringComparison.Ordinal), "mirrors used by a mirror come first");
         });
-        AddRejectGroup("Meta.BindsIsAllowedOnlyInCoreTypeBindings", [BindsPreamble + BindsVec3 + "}\n"], "RMC2004", "allowed only in module CoreTypeBindings");
+        AddRejectGroup(context, "Meta.BindsIsAllowedOnlyInCoreTypeBindings", [BindsPreamble + BindsVec3 + "}\n"], "RMC2004", "allowed only in module CoreTypeBindings");
         // 별칭·앞의 ::·템플릿 인자 공백은 같은 정규 철자로 모이므로 같은 실제 타입의 두 번째 미러다.
-        AddRejectGroup("Meta.BindsConflictsAreRejected", [
+        AddRejectGroup(context, "Meta.BindsConflictsAreRejected", [
             BindsPreamble + BindsVec3 + BindsVec3.Replace("Vec3Binding", "OtherBinding", StringComparison.Ordinal).Replace("rocks::Vec3", "rocks::Vector3<float>", StringComparison.Ordinal) + "}\n",
             BindsPreamble + BindsVec3.Replace("rocks::Vec3", "::rocks::Vec3", StringComparison.Ordinal) +
                 BindsVec3.Replace("Vec3Binding", "OtherBinding", StringComparison.Ordinal).Replace("rocks::Vec3", "rocks::Vector3< float >", StringComparison.Ordinal) + "}\n",
             BindsPreamble + StructLeaf + "ROCKS_STRUCT(Binds = \"probe::Leaf\")\nstruct Vec3Binding {\nROCKS_PROPERTY() rocks::int32 count = 0;\n};\n}\n"],
             "RMC2004", "binds", BindsModule);
-        AddRejectGroup("Meta.BindsTargetMustBeACompleteClass", [
+        AddRejectGroup(context, "Meta.BindsTargetMustBeACompleteClass", [
             BindsPreamble + BindsVec3.Replace("rocks::Vec3", "rocks::uint8", StringComparison.Ordinal) + "}\n",
             BindsPreamble + BindsVec3.Replace("rocks::Vec3", "probe::Missing", StringComparison.Ordinal) + "}\n",
             BindsPreamble + "struct Later;\n" + BindsVec3.Replace("rocks::Vec3", "probe::Later", StringComparison.Ordinal) + "}\n"],
             "RMC3000", "does not name a complete class type", BindsModule);
         // 철자 문법, 정규 철자가 descriptor binds 문법 밖(별칭으로 묶은 Fixed<-3>), 미러의 NATIVE 멤버·Migrate·필드 없음.
-        AddRejectGroup("Meta.BindsSpellingAndMirrorMembersAreRestricted", [
+        AddRejectGroup(context, "Meta.BindsSpellingAndMirrorMembersAreRestricted", [
             BindsPreamble + BindsVec3.Replace("rocks::Vec3", "rocks::Vec3; int x", StringComparison.Ordinal) + "}\n",
             BindsPreamble + "template <int N>\nstruct Fixed {\nrocks::int32 v = 0;\n};\nusing FixedAlias = Fixed<-3>;\n" +
                 "ROCKS_STRUCT(Binds = \"probe::FixedAlias\")\nstruct FixedBinding {\nROCKS_PROPERTY() rocks::int32 v = 0;\n};\n}\n",
@@ -866,15 +872,15 @@ internal static class MetaTests
             BindsPreamble + "ROCKS_STRUCT(Binds = \"rocks::Vec3\")\nstruct Vec3Binding {};\n}\n"],
             "RMC2000", "Binds", BindsModule);
         // 미러 타입은 필드 형식으로 쓰지 않는다(실제 타입을 쓴다).
-        AddRejectGroup("Meta.BindsMirrorIsNotAFieldType", [
+        AddRejectGroup(context, "Meta.BindsMirrorIsNotAFieldType", [
             BindsPreamble + BindsVec3 + "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() Vec3Binding position;\n};\n}\n"],
             "RMC2000", "is a Binds mirror declaration", BindsModule);
         // CoreTypeBindings에 의존하지 않고 Core 값 타입 필드를 쓰면 의존을 더하라고 안내한다.
-        AddRejectGroup("Meta.CoreValueFieldWithoutBindingsHintsTheDependency", [
+        AddRejectGroup(context, "Meta.CoreValueFieldWithoutBindingsHintsTheDependency", [
             BindsPreamble + "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() rocks::Vec3 position;\n};\n}\n"],
             "RMC2000", "depend on CoreTypeBindings");
         // 미러가 자기가 묶는 실제 타입을 값으로 담으면(직접·서로) C++에서도 struct 순환이다(RMC2302).
-        AddRejectGroup("Meta.BindsCycleIsRejected", [
+        AddRejectGroup(context, "Meta.BindsCycleIsRejected", [
             BindsPreamble + "struct Real {\nrocks::int32 a = 0;\n};\nROCKS_STRUCT(Binds = \"probe::Real\")\nstruct RealBinding {\nROCKS_PROPERTY() Real inner;\n};\n}\n",
             BindsPreamble + "struct RealA {\nrocks::int32 a = 0;\n};\nstruct RealB {\nrocks::int32 b = 0;\n};\n" +
                 "ROCKS_STRUCT(Binds = \"probe::RealA\")\nstruct ABinding {\nROCKS_PROPERTY() RealB inner;\n};\n" +
@@ -882,7 +888,7 @@ internal static class MetaTests
             "RMC2302", "cycle", BindsModule);
         // 미러와 실제 타입의 대조 실패는 생성 코드 검증 컴파일이 거부한다: 멤버 이름·형식·개수·순서(같은 형식 멤버끼리
         // 바뀐 순서 포함), private 데이터 멤버, base에만 있는 멤버.
-        AddRejectGroup("Meta.BindsMismatchFailsToCompile", new[]
+        AddRejectGroup(context, "Meta.BindsMismatchFailsToCompile", new[]
             {
                 BindsVec3.Replace("float x", "float a", StringComparison.Ordinal),
                 BindsVec3.Replace("float x", "double x", StringComparison.Ordinal),
@@ -1199,16 +1205,16 @@ internal static class MetaTests
                     "RMC3000", "Clang rejected reflection input");
             }
         });
-        AddRejectGroup("Meta.ArrayElementTypeIsRestricted", new[]
+        AddRejectGroup(context, "Meta.ArrayElementTypeIsRestricted", new[]
             {
                 "rocks::Array<const rocks::int32>", "rocks::Array<rocks::int32*>", "rocks::Array<const rocks::int32*>",
                 "rocks::ObjectRefArray<const Value>", "rocks::StructRefArray<const Holder>"
             }.Select(type => ArrayPreamble + "struct Value;\n" + ArrayStructs + $"ROCKS_CLASS()\nstruct Value : public rocks::Object {{\nROCKS_PROPERTY() {type} ints;\n}};\n}}\n"),
             "RMC2000", "array element");
-        AddRejectGroup("Meta.ArrayMaxElementsRangeIsChecked", [
+        AddRejectGroup(context, "Meta.ArrayMaxElementsRangeIsChecked", [
             ArrayPreamble + "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY(MaxElements = 1048577) rocks::Array<rocks::int32> ints;\n};\n}\n"],
             "RMC2000", "exceeds 1048576");
-        AddRejectGroup("Meta.ArrayRequiredNeedsReferenceElements", new[]
+        AddRejectGroup(context, "Meta.ArrayRequiredNeedsReferenceElements", new[]
             {
                 "ROCKS_PROPERTY(Required) rocks::Array<rocks::int32> ints;",
                 "ROCKS_PROPERTY(Required) rocks::Array<rocks::String> names;",
@@ -1244,12 +1250,12 @@ internal static class MetaTests
                     $"ROCKS_CLASS()\nstruct Value : public rocks::Object {{\nROCKS_PROPERTY() {member}\n}};\n}}\n", "RMC2304", reason);
             }
         });
-        AddRejectGroup("Meta.ObjectRefArrayTargetMustBeAClass", new[] { "rocks::ObjectRefArray<Leaf>", "rocks::ObjectRefArray<Mode>" }
+        AddRejectGroup(context, "Meta.ObjectRefArrayTargetMustBeAClass", new[] { "rocks::ObjectRefArray<Leaf>", "rocks::ObjectRefArray<Mode>" }
             .Select(type => ArrayPreamble + "struct Value;\nROCKS_ENUM()\nenum class Mode : rocks::uint8 { Off = 0 };\n" + ArrayStructs +
                 $"ROCKS_CLASS()\nstruct Value : public rocks::Object {{\nROCKS_PROPERTY() {type} refs;\n}};\n}}\n"),
             "RMC2003", "not a class");
         // 배열을 거친 자기 참조는 RMC2302이고 깊이는 원소 깊이 + 1로 센다(16은 받고 17은 RMC2303).
-        AddRejectGroup("Meta.ArraySelfReferenceIsACycle", [
+        AddRejectGroup(context, "Meta.ArraySelfReferenceIsACycle", [
             ArrayPreamble + "struct Value;\nROCKS_STRUCT()\nstruct Node {\nexplicit Node(rocks::Allocator& allocator) noexcept : children(allocator) {}\n" +
                 "ROCKS_PROPERTY() rocks::StructRefArray<Node> children;\nROCKS_PROPERTY() rocks::ObjectRef<Value> target;\n};\n" +
                 "ROCKS_CLASS()\nstruct Value : public rocks::Object {};\n}\n"],
@@ -1263,31 +1269,31 @@ internal static class MetaTests
         });
         // WorldOnly 소유자 형질의 원소 struct는 WorldOnly가 아닌 클래스에 둘 수 없고(직접·원소 struct를 담은 struct), NATIVE
         // StructRefArray·Array<참조 struct>는 강한 참조다(RMC2205).
-        AddRejectGroup("Meta.ArrayWorldOnlyElementNeedsWorldOnlyClass", new[]
+        AddRejectGroup(context, "Meta.ArrayWorldOnlyElementNeedsWorldOnlyClass", new[]
             {
                 "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() rocks::Array<WorldBits> bits;\n};\n",
                 "ROCKS_STRUCT()\nstruct Outer {\nexplicit Outer(rocks::Allocator& allocator) noexcept : inner(allocator) {}\nROCKS_PROPERTY() rocks::Array<WorldBits> inner;\n};\n" +
                     "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() Outer bits;\n};\n"
             }.Select(declaration => ArrayPreamble + StructWorldBits + declaration + "}\n"),
             "RMC2206", "WorldOnly owner");
-        AddRejectGroup("Meta.NativeReferenceArraysAreRejected", new[] { "rocks::StructRefArray<Holder>", "rocks::Array<Holder>" }
+        AddRejectGroup(context, "Meta.NativeReferenceArraysAreRejected", new[] { "rocks::StructRefArray<Holder>", "rocks::Array<Holder>" }
             .Select(type => ArrayPreamble + "struct Value;\n" + ArrayStructs +
                 $"ROCKS_CLASS()\nstruct Value : public rocks::Object {{\nROCKS_NATIVE() {type} cache;\n}};\n}}\n"),
             "RMC2205", "strong object reference");
-        AddRejectGroup("Meta.IntegerSpecifierSyntax", new[] { "Version=0", "Version=01", "Version=2147483648", "Version=\"2\"", "Version=1x", "Version", "Version=-1", "Version=+1" }
+        AddRejectGroup(context, "Meta.IntegerSpecifierSyntax", new[] { "Version=0", "Version=01", "Version=2147483648", "Version=\"2\"", "Version=1x", "Version", "Version=-1", "Version=+1" }
             .Select(spec => Declaration().Replace("ROCKS_CLASS()", $"ROCKS_CLASS({spec})", StringComparison.Ordinal)), "RMC2000", "specifier");
-        AddRejectGroup("Meta.RequiredAndMaxElementsNeedMatchingFieldKinds", [Declaration("ROCKS_PROPERTY(Required) rocks::int32 count = 0;"),
+        AddRejectGroup(context, "Meta.RequiredAndMaxElementsNeedMatchingFieldKinds", [Declaration("ROCKS_PROPERTY(Required) rocks::int32 count = 0;"),
             Declaration("ROCKS_PROPERTY(Required) rocks::AssetId count;")
                 .Replace("namespace probe {", "#include <Object/AssetId.h>\nnamespace probe {", StringComparison.Ordinal),
             Declaration("ROCKS_PROPERTY(MaxElements=4) rocks::int32 count = 0;")], "RMC2202", "applies only to");
-        AddRejectGroup("Meta.ToolNameMustBeAnIdentifier", [Declaration("ROCKS_PROPERTY(Name=\"1bad\") rocks::int32 count = 0;"),
+        AddRejectGroup(context, "Meta.ToolNameMustBeAnIdentifier", [Declaration("ROCKS_PROPERTY(Name=\"1bad\") rocks::int32 count = 0;"),
             Declaration("ROCKS_PROPERTY(Name=\"has space\") rocks::int32 count = 0;"),
             Declaration("ROCKS_PROPERTY(Name=\"\") rocks::int32 count = 0;")], "RMC2203", "Name specifier");
-        AddRejectGroup("Meta.ToolNamesAreUniqueIgnoringCase", [Declaration("ROCKS_PROPERTY(Name=\"Other\") rocks::int32 count = 0;\nROCKS_PROPERTY() rocks::int32 other = 0;")],
+        AddRejectGroup(context, "Meta.ToolNamesAreUniqueIgnoringCase", [Declaration("ROCKS_PROPERTY(Name=\"Other\") rocks::int32 count = 0;\nROCKS_PROPERTY() rocks::int32 other = 0;")],
             "RMC2203", "tool name");
-        AddRejectGroup("Meta.PropertyAndNativeAreExclusive", [Declaration("ROCKS_PROPERTY() ROCKS_NATIVE() rocks::int32 count = 0;"),
+        AddRejectGroup(context, "Meta.PropertyAndNativeAreExclusive", [Declaration("ROCKS_PROPERTY() ROCKS_NATIVE() rocks::int32 count = 0;"),
             Declaration("ROCKS_NATIVE() ROCKS_PROPERTY() rocks::int32 count = 0;")], "RMC2204", "not both");
-        AddRejectGroup("Meta.NativeTakesNoSpecifiersAndNeedsGeneratedBodyWhenPrivate", [
+        AddRejectGroup(context, "Meta.NativeTakesNoSpecifiersAndNeedsGeneratedBodyWhenPrivate", [
             Declaration(extra: "ROCKS_NATIVE(Transient) rocks::int32 cache = 0;"),
             Declaration(extra: "private: ROCKS_NATIVE() rocks::int32 cache = 0;\npublic: rocks::int32 Read() const noexcept { return cache; }")], "RMC2000", "NATIVE");
         const string holders = "namespace probe { struct Holder { rocks::ObjectRef<rocks::Object> ref; };\n" +
@@ -1295,7 +1301,7 @@ internal static class MetaTests
             "template <class T> struct Keep { rocks::ObjectRef<rocks::Object> ref; T value{}; };\n" +
             "template <class A, class B> struct Pair { A first{}; B second{}; };\n" +
             "struct Tagged { union { rocks::Object* object; unsigned long long bits; }; };\n";
-        AddRejectGroup("Meta.NativeMembersCannotHoldStrongReferences", new[]
+        AddRejectGroup(context, "Meta.NativeMembersCannotHoldStrongReferences", new[]
             {
                 "rocks::ObjectRef<Value> cache;",
                 "rocks::RootRef<Value> cache;",
@@ -1464,7 +1470,7 @@ internal static class MetaTests
         });
         const string lease = "namespace probe { struct Lease { static constexpr bool RocksRequiresWorldOnlyOwner = true; };\n" +
             "struct Wrapper { Lease inner; };\n";
-        AddRejectGroup("Meta.WorldOnlyOwnerTraitNeedsWorldOnlyClass", [
+        AddRejectGroup(context, "Meta.WorldOnlyOwnerTraitNeedsWorldOnlyClass", [
             Declaration(extra: "ROCKS_NATIVE() Lease lease;").Replace("namespace probe {", lease, StringComparison.Ordinal),
             Declaration(extra: "ROCKS_NATIVE() Wrapper lease;").Replace("namespace probe {", lease, StringComparison.Ordinal)],
             "RMC2206", "WorldOnly owner");
@@ -1478,26 +1484,30 @@ internal static class MetaTests
             await probe.GenerateAsync(source);
             Verify.Contains("::probe::Value::cache", File.ReadAllText(probe.Output), "private NATIVE static_assert");
         });
-        AddRejectGroup("Meta.UnknownDuplicateAndWrongValueSpecifiers", new[] { "UnknownFlag", "ReadOnly, ReadOnly", "ReadOnly=\"yes\"", "Category=12", "DisplayName" }
+        AddRejectGroup(context, "Meta.UnknownDuplicateAndWrongValueSpecifiers", new[] { "UnknownFlag", "ReadOnly, ReadOnly", "ReadOnly=\"yes\"", "Category=12", "DisplayName" }
             .Select(spec => Declaration($"ROCKS_PROPERTY({spec}) rocks::int32 count=0;")), "RMC2000", "specifier");
-        AddRejectGroup("Meta.UnannotatedOwnerAndParameterMisuse", [
+        AddRejectGroup(context, "Meta.UnannotatedOwnerAndParameterMisuse", [
             Preamble + "struct Plain { ROCKS_PROPERTY() rocks::int32 count=0; };\n}\n",
             Preamble + "void F(ROCKS_PROPERTY() rocks::int32 value);\n}\n"], "RMC200", "PROPERTY");
-        AddRejectGroup("Meta.UnknownTypeSpecifier", [Declaration().Replace("ROCKS_CLASS()",
+        AddRejectGroup(context, "Meta.UnknownTypeSpecifier", [Declaration().Replace("ROCKS_CLASS()",
             "ROCKS_CLASS(UnknownClassFlag)", StringComparison.Ordinal)], "RMC2000", "specifier");
 
-        void AddRejectGroup(string name, IEnumerable<string> sources, string code, string reason, string module = MetaCompilerArguments.Module)
+    }
+
+    // 거부 시험 하나(name)를 등록한다. sources의 원본마다 MetaCompiler가 code 진단(reason을 담은 문장)으로 거부해야 한다.
+    // module은 생성할 모듈 이름이다(Binds 시험은 CoreTypeBindings).
+    private static void AddRejectGroup(MetaContext context, string name, IEnumerable<string> sources, string code, string reason,
+        string module = MetaCompilerArguments.Module)
+    {
+        string[] fixedSources = sources.ToArray();
+        context.Suite.Add(name, async () =>
         {
-            string[] fixedSources = sources.ToArray();
-            suite.Add(name, async () =>
+            using Probe probe = new(context.Options, context.Environment, context.Generator, context.Compiler, module);
+            foreach (string source in fixedSources)
             {
-                using Probe probe = new(options, actualEnvironment, generator, compiler, module);
-                foreach (string source in fixedSources)
-                {
-                    await probe.RejectAsync(source, code, reason);
-                }
-            });
-        }
+                await probe.RejectAsync(source, code, reason);
+            }
+        });
     }
 
     private sealed class Probe : IDisposable
