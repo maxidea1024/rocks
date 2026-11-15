@@ -468,7 +468,7 @@ RegisterObjectType은 TypeSchema와 중첩 field/name/attribute 배열·문자�
 
 등록된 `TypeId`에 대한 `ObjectRegistry::NewObject<Object>(access, typeId)`의 현재 낮은 수준 생성 경로와 편의 클래스 참조·클래스 기본값 기능을 구분한다. 생성 경로는 등록된 타입의 생성 가능성·context·트랜잭션을 검사해야 하며, 생성 실패는 부분 객체·등록 참조를 남기지 않는다. 직렬화된 타입 참조는 이름이나 원시 주소가 아니라 안정 식별자를 사용하고, 모듈 reload·PIE 종료 뒤의 오래된 revision은 명시적으로 거부한다. 상세 정책과 단계는 [런타임 클래스 메타데이터 설계](RuntimeClassMetadata.ko.md)를 따른다.
 
-UI·에디터가 의존하는 리플렉션 확장(편집 메타데이터 어휘·함수·이벤트·속성 경로·변경 통지·동적 속성·텍스트 위치 변환·필드 형식 확장)은 [UI 툴킷 설계](UiToolkit.ko.md) §7의 CU1–CU8로 정의한다. 구현 시점은 항목별로 조정할 수 있으나 형식은 Foundation Gate 전에 Object·Archive 계약과 함께 확정한다. 필드 형식 확장(CU8)은 enum·구조체·배열 필드를 다루므로 9.3절의 초기 지원 범위와 함께 검토한다.
+UI·에디터가 의존하는 리플렉션 확장(편집 메타데이터 어휘·함수·이벤트·속성 경로·변경 통지·동적 속성·텍스트 위치 변환·필드 형식 확장)은 [UI 툴킷 설계](UiToolkit.ko.md) §7의 CU1–CU9로 정의한다. 구현 시점은 항목별로 조정할 수 있으나 형식은 Foundation Gate 전에 Object·Archive 계약과 함께 확정한다. 필드 형식 확장(CU8)은 enum·구조체·배열 필드를 다루므로 9.3절의 초기 지원 범위와 함께 검토한다.
 
 ### 9.2 Archive 계약
 
@@ -1103,7 +1103,7 @@ RebindSession은 대상 user/action, 허용 device class, axis threshold, modifi
 
 Platform system reserved 동작 → 활성 window/사용자 → text/IME와 modal UI → 일반 UI → native viewport → gameplay context 순으로 전달 자격을 판정한다. 실제 소비 우선순위는 route policy로 설정하되 하나의 event를 UI와 gameplay 양쪽에서 독립 소비하지 않게 한다. UI와 gameplay 모두 필요한 action은 Shared로 명시한다.
 
-에디터와 게임 UI는 같은 UI 툴킷의 focus 하나로 text focus를 관리한다. TSF·NSTextInputClient의 composition/commit은 focus를 가진 text widget에 한 번만 전달한다. viewport(SubViewport widget)와 UI widget의 focus는 같은 focus tree의 token으로 Host가 관리하며, focus 요청에는 WindowEpoch·PIE session·LocalPlayer를 포함한다. viewport 첫 클릭은 기본적으로 focus 획득만 수행하고 gameplay 전달 여부는 명시 옵션이다.
+에디터와 게임 UI는 같은 UI 툴킷의 focus 하나로 text focus를 관리한다. TSF·NSTextInputClient의 composition/commit은 focus를 가진 텍스트 편집 Element에 한 번만 전달한다. viewport(viewport Element)와 UI Element의 focus는 같은 사용자 focus 경로(UI 툴킷 설계 3.9절)의 token으로 Host가 관리하며, focus 요청에는 WindowEpoch·PIE session·LocalPlayer를 포함한다. viewport 첫 클릭은 기본적으로 focus 획득만 수행하고 gameplay 전달 여부는 명시 옵션이다.
 
 modal을 열면 기존 gameplay action을 취소한다. 닫은 후에는 require-release 규칙을 적용한다. split-screen의 UI focus는 LocalUser별로 관리하며 OS의 foreground window 상태와 분리한다. gamepad navigation은 focusable tree·direction policy·repeat 설정을 사용하고 pointer 좌표가 없다는 이유로 임의 mouse 위치를 생성하지 않는다.
 
@@ -1111,7 +1111,7 @@ modal을 열면 기존 gameplay action을 취소한다. 닫은 후에는 require
 
 InputProfileEditor는 Action/Binding/Context 목록, processor parameter property panel, conflict report, 실제 장치 입력 표시, 현재 effective binding/glyph 미리보기를 제공하는 후속 도구다. runtime과 같은 schema·validator·CompileInputProfile을 호출한다. undo/redo는 profile transaction 단위이며 preview 실패가 저장된 profile을 훼손하지 않는다. 첫 I0/I1은 CLI probe와 fixture 파일로 충분하다.
 
-인게임 UI와 에디터 UI의 입력 연결은 WidgetFocus/Navigation/TextSession 계약으로 정의한다. designer preview는 synthetic input과 real input을 선택하고 preview route epoch로 실제 게임 세션과 격리한다. UI layout/render/designer 자체는 [UI 툴킷 설계](UiToolkit.ko.md)의 후속 작업이며 InputCore 선행 조건이 아니다.
+인게임 UI와 에디터 UI의 입력 연결은 사용자 focus 경로(`ui::User`)·navigation·TextSession 계약으로 정의한다. designer preview는 synthetic input과 real input을 선택하고 preview route epoch로 실제 게임 세션과 격리한다. UI layout/render/designer 자체는 [UI 툴킷 설계](UiToolkit.ko.md)의 후속 작업이며 InputCore 선행 조건이 아니다.
 
 ### 22.3 컷씬·개발자 콘솔·언어
 
@@ -1279,7 +1279,7 @@ fully concurrent GC, lock-free registry, moving/compacting heap, runtime native 
 | Entity/Component/Tags/Prefab | Type/Field/Subobject ID·owner edge·clone/default | World lifecycle·tag editor·prefab importer |
 | Asset/Async/Cook/에셋 너겟 | Archive·stable ID·IO lease·Task·schema version | asset database·cook farm·package format 전체 |
 | Renderer/Audio/Physics | immutable snapshot·backend completion token | 실제 GPU/audio/physics resource manager |
-| UI 툴킷·Editor·Cutscene | schema property·CU1–CU8 리플렉션 계약·transaction·input focus/context | widget layout/render·편집 화면·timeline |
+| UI 툴킷·Editor·Cutscene | schema property·CU1–CU9 리플렉션 계약·transaction·input focus/context | widget layout/render·편집 화면·timeline |
 | Material Editor·Compiler | stable ID·schema·Task·snapshot·module lease | 필수 M3/M4 그래프·preview·instance/function; M5/M6 layer |
 | Custom Language | TypeSchema·typed binding·약한 handle·weak subscription | VM/compiler/debugger |
 | Net/AI/Navigation | quantized command·scheduler·context epoch | replication/prediction·AI runtime·nav query |
@@ -1299,7 +1299,7 @@ Core 단계에서는 stable Guid·versioned schema·Archive·Task 취소/termina
 | material·lightmap bake·probe 조명 | schema/Task/IO·math adapter·revision·cancel/publish | material M3/M4, lightmap/probe M4 이후; CPU 기준/실제 renderer 검증 |
 | texture streaming·기본 콘텐츠 | allocation budget·lease·IO/decode·stable ID | 최소 mip residency/손상·취소, built-in lifetime/baseline을 실제 asset/renderer Gate에서 검증 |
 | 5개 graphics API·Deferred/Forward·upscale·고급 post | immutable snapshot·backend completion·capability·시간 history ID | D3D11/D3D12/Vulkan/OpenGL/Metal 각각 지원표·실장비 conformance; 기능별 일정은 전체 계획 |
-| UI 툴킷 Studio·viewport·인게임 UI 편집·컷씬 | Win/Mac focus/IME·transaction·schema·CU1–CU8·clock·PIE scope | 단일 UI 툴킷의 designer/runtime·Godot 오라클 GO1–GO6·sequence authoring/capture 필수; 자체 언어 이벤트 |
+| UI 툴킷 Studio·viewport·인게임 UI 편집·컷씬 | Win/Mac focus/IME·transaction·schema·CU1–CU9·clock·PIE scope | 단일 UI 툴킷의 designer/runtime·UE 5.8 근거 기준값 UV1–UV9·sequence authoring/capture 필수; 자체 언어 이벤트 |
 | Build/Cook/에셋 너겟·분산/반복 최적화 | C00 manifest·C20 내용 동일 유지·C31 action/cache 계약 | Rocks Build·분산 executor·로컬 fallback·compile/link/cook 측정; headless 필수 |
 | 전체 gameplay/AI/VFX/network/audio/nav/physics | Object/Schema/Task/context·ownership·테스트 하네스 | 각 subsystem 최초 구현부터 unit/contract/fault/concurrency·관측·누수 Gate |
 
