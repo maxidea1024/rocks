@@ -169,7 +169,7 @@ libsodium의 범용 AES는 AES-256-GCM 일회성(사전 계산 포함) 하나뿐
 - 증분 상태: 부분 블록 keystream과 GHASH 버퍼, AAD에서 평문으로 넘어가는 단계, 길이 블록
 - CTR과 CMAC 노출. 원본 `encrypt_xor_wide`는 GCM의 inc32(32 bit lane 덧셈)를 전제로 하므로, CTR의 32·64·128 bit 카운터 폭과 carry 전파는 새로 쓰는 코드다. 카운터 폭은 매개변수로 두고(기본 128 bit), wrap은 `CapacityExceeded`다. CMAC 서브키 doubling은 L = E_K(0)이 비밀이므로 분기 없는 mask로 한다.
 
-AES-256-GCM 일회성은 libsodium 원본 함수를 그대로 쓴다. 같은 기기에서 원본과 경량 계층의 AES-256-GCM을 대조하는 차등 시험이 GCM 파생 코드의 기준(oracle)이 된다. 다만 원본과 같은 구조라 원본에 있는 결함은 양쪽이 같이 통과하고, 원본에 없는 부분(CTR carry, CMAC, AES-128)은 기준이 되지 못한다. 그래서 시험 전용 스칼라 참조(블록 암호화 + 카운터 증가, 출하 코드 아님)를 따로 둔다(12절). 파생 파일 머리에는 출처(libsodium 1.0.22, 원본 경로)와 ISC 고지를 둔다. 원본 파일의 SHA-256을 Crypto 모듈의 파생 기록 파일에 적어 두어, libsodium을 올리면서 원본이 바뀌면 third-party 검사가 실패하고 diff 검토를 요구하게 한다.
+AES-256-GCM 일회성은 libsodium 원본 함수를 그대로 쓴다. 같은 기기에서 원본과 경량 계층의 AES-256-GCM을 대조하는 차등 시험이 GCM 파생 코드의 기준(oracle)이 된다. 다만 원본과 같은 구조라 원본에 있는 결함은 양쪽이 같이 통과하고, 원본에 없는 부분(CTR carry, CMAC, AES-128)은 기준이 되지 못한다. 그래서 시험 전용 스칼라 참조(블록 암호화 + 카운터 증가, 출하 코드 아님)를 따로 둔다(12절). 파생 파일 머리에는 출처(libsodium 1.0.22, 원본 경로)와 ISC 고지를 둔다. 원본 파일의 SHA-256을 파생 기록 파일(`Crypto/Private/Aes/Derivation.json`: 파생 파일마다 upstream 경로와 SHA-256)에 적어 두어, libsodium을 올리면서 원본이 바뀌면 정책 검사 `derived-source`가 실패하고 diff 검토를 요구하게 한다(P8). 이 검사는 upstream 경로가 manifest의 upstream 디렉터리 안에 있고 SHA-256이 맞는지, 파생 파일이 있고 출처 주석에 각 upstream 파일 이름을 적었는지, 기록에 알 수 없는 필드가 없는지 본다.
 
 **범위.** C2 단계에서 GCM(AES-128/256, 일회성·멀티파트)과 CTR을 먼저, CMAC를 이어서 만든다. CBC·KW·CCM은 역방향 라운드나 별도 형식이 필요하므로 요구가 생길 때 더한다. XTS·GCM-SIV와 96 bit가 아닌 GCM nonce는 넣지 않는다.
 
@@ -990,7 +990,7 @@ KeyBlob v1(Crypto/KeyBlob.h, 2026-11-15 구현, 설계 교차검증 반영)의 �
 | P5 | `SecureMemory`(guard page 예약·잠금 연결 지점). 구현 결과 기존 `VirtualMemoryRegion`과 `sodium_mlock`으로 충족해 새 API를 두지 않았다(10.2절) | PlatformBase |
 | P6 | ThirdParty Sodium·Wycheproof manifest, 컴파일 인자 허용 목록, target pragma 기록, 라이선스 고지 | Build, Tools |
 | P7 | 함수 단위 target 매크로(`ROCKS_TARGET_X64_AES`·`ROCKS_TARGET_ARM64_AES`)와, 이 매크로·AES·carry-less·SHA intrinsics를 디렉터리 허용 목록에서만 쓰게 하는 정책 검사. 시험 hook의 출하 빌드 제외 검사와 모듈 내부 시험 접근점(`Private/AeadSequenceTestAccess.h` 등)을 Tests 밖에서 include하지 않는지의 검사. 구현 결과(2026-11-15): 모듈 오브젝트가 시험·출하 공용이라 hook 제외는 "전역 hook을 두지 않고 값을 받는 내부 함수와 `*TestAccess.h` 접근점으로 시험한다"로 바꾸고 `ROCKS_TESTING`·libsodium 전역 설정 사용처를 검사한다. ARM64 매크로는 감지 조건과 같게 `crypto`를 뺐고, 정책의 시험 소스 판정을 시험 실행 파일 구성과 같게 좁혔다(모듈 `Private/Tests/`는 시험 소스가 아니다). 모듈 규칙의 `ROCKS_TARGET_*` 정의를 빌드 입력 검증이 거부한다(5.3·11절) | Base, Tools, Build |
-| P8 | libsodium 빌드 정의의 경고 정책 승인(Compression 3.4·3.6절 선례), 대상별 configure 결과 고정, 파생 파일 출처 SHA-256 기록 | Docs, Tools |
+| P8 | libsodium 빌드 정의의 경고 정책 승인(Compression 3.4·3.6절 선례), 대상별 configure 결과 고정, 파생 파일 출처 SHA-256 기록. 파생 기록은 2026-11-15에 일반 검사로 구현했다(`Derivation.json`, `PolicyChecks.DerivedSources`, 규칙 `derived-source`, 5.2절) | Docs, Tools |
 
 | 단계 | 내용 | 완료 조건 |
 |---|---|---|

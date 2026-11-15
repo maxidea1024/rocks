@@ -45,6 +45,61 @@ internal static class ThirdPartyPolicyTests
             Verify.That(PolicyChecks.NativeSources(temporary.Root).Any(path => path.EndsWith("Glue.c", StringComparison.Ordinal)),
                 "Rocks glue .c must remain an owned native source");
         });
+        suite.Add("Policy.RepositoryDerivedSources", () => NoFailures(PolicyChecks.DerivedSources(options.Root)));
+        suite.Add("Policy.DerivedSourceControls", () =>
+        {
+            const string directory = "Core/Source/Runtime/Probe/Private/Derived/";
+            const string upstream = Upstream + "/fake.c";
+            const string derived = "// Derived from fake.c (Fake 1.0).\nvoid Kernel();\n";
+            static string Entry(string path, string sha) => $"{{ \"path\": \"{path}\", \"sha256\": \"{sha}\" }}";
+            static string Record(string derivations) => $"{{ \"schema\": 1, \"derivations\": [ {derivations} ] }}";
+            static string Derivation(string file, string entries) => $"{{ \"file\": \"{file}\", \"upstream\": [ {entries} ] }}";
+            using TemporaryDirectory temporary = new();
+            WriteFixture(temporary);
+            string sha = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(temporary.FilePath(upstream))));
+            string valid = Record(Derivation("Kernel.cpp", Entry(upstream, sha)));
+            temporary.Write(directory + "Kernel.cpp", derived);
+            temporary.Write(directory + PolicyChecks.DerivationRecordName, valid);
+            // 하위 디렉터리의 파생 파일과 upstream 여러 개, 다른 디렉터리의 두 번째 기록도 받는다.
+            string Hash(string path) => Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(temporary.FilePath(path))));
+            temporary.Write("Engine/Source/Runtime/Other/Private/Sub/Both.cpp", "// fake.h, LICENSE\n");
+            temporary.Write("Engine/Source/Runtime/Other/Private/" + PolicyChecks.DerivationRecordName,
+                Record(Derivation("Sub/Both.cpp", Entry(Upstream + "/fake.h", Hash(Upstream + "/fake.h")) + ", " +
+                    Entry(Upstream + "/LICENSE", Hash(Upstream + "/LICENSE")))));
+            NoFailures(PolicyChecks.DerivedSources(temporary.Root));
+
+            void ExpectOne(string label, string record, Action? inject = null, Action? restore = null)
+            {
+                temporary.Write(directory + PolicyChecks.DerivationRecordName, record);
+                inject?.Invoke();
+                var failures = PolicyChecks.DerivedSources(temporary.Root);
+                Verify.That(failures.Count == 1 && failures[0].Rule == "derived-source",
+                    $"derived source defect escaped audit: {label}\n{string.Join('\n', failures)}");
+                restore?.Invoke();
+                temporary.Write(directory + PolicyChecks.DerivationRecordName, valid);
+            }
+
+            string fakeSource = File.ReadAllText(temporary.FilePath(upstream));
+            ExpectOne("upstream changed", valid, () => File.AppendAllText(temporary.FilePath(upstream), " "),
+                () => temporary.Write(upstream, fakeSource));
+            ExpectOne("derived file does not name its upstream", valid, () => temporary.Write(directory + "Kernel.cpp", "void Kernel();\n"),
+                () => temporary.Write(directory + "Kernel.cpp", derived));
+            ExpectOne("uppercase sha", Record(Derivation("Kernel.cpp", Entry(upstream, sha.ToUpperInvariant()))));
+            ExpectOne("upstream outside third-party", Record(Derivation("Kernel.cpp", Entry(directory + "Kernel.cpp", sha))));
+            ExpectOne("upstream path escapes", Record(Derivation("Kernel.cpp", Entry(Upstream + "/../fake-1.0/fake.c", sha))));
+            ExpectOne("upstream missing", Record(Derivation("Kernel.cpp", Entry(Upstream + "/missing.c", sha))));
+            ExpectOne("derived file missing", Record(Derivation("Missing.cpp", Entry(upstream, sha))));
+            ExpectOne("derived path escapes", Record(Derivation("../Kernel.cpp", Entry(upstream, sha))));
+            ExpectOne("duplicate derived file", Record(Derivation("Kernel.cpp", Entry(upstream, sha)) + ", " +
+                Derivation("Kernel.cpp", Entry(upstream, sha))));
+            ExpectOne("empty upstream", Record(Derivation("Kernel.cpp", "")));
+            ExpectOne("unknown entry field", Record(Derivation("Kernel.cpp", $"{{ \"path\": \"{upstream}\", \"sha256\": \"{sha}\", \"x\": 1 }}")));
+            ExpectOne("unknown derivation field", Record($"{{ \"file\": \"Kernel.cpp\", \"upstream\": [ {Entry(upstream, sha)} ], \"note\": \"\" }}"));
+            ExpectOne("unknown record field", $"{{ \"schema\": 1, \"derivations\": [ {Derivation("Kernel.cpp", Entry(upstream, sha))} ], \"x\": 0 }}");
+            ExpectOne("schema 2", $"{{ \"schema\": 2, \"derivations\": [ {Derivation("Kernel.cpp", Entry(upstream, sha))} ] }}");
+            ExpectOne("no derivations", "{ \"schema\": 1, \"derivations\": [] }");
+            ExpectOne("invalid JSON", "{");
+        });
         suite.Add("Policy.ThirdPartyNegativeControls", () =>
         {
             ExpectFailure("1-byte upstream change", fixture =>
