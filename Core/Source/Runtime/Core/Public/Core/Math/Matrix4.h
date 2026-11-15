@@ -60,6 +60,19 @@ struct Matrix4 {
     T m[16] = {static_cast<T>(1), 0, 0, 0, 0, static_cast<T>(1), 0, 0, 0, 0,
                static_cast<T>(1), 0, 0, 0, 0, static_cast<T>(1)};
 
+    constexpr Matrix4() noexcept = default;
+
+    // float↔double 변환은 정밀도 손실 가능성을 드러내도록 명시적으로만 허용한다(Vector3·
+    // Quaternion과 같다). float → double은 정확하고, double → float은 원소마다 가장 가까운 값으로
+    // 반올림한다(float 범위 밖은 ±Inf — 결과는 IsFinite로 확인한다).
+    template <typename U>
+        requires(math::IsFloatingPointV<U> && !IsSameV<U, T>)
+    explicit constexpr Matrix4(const Matrix4<U>& other) noexcept {
+        for (int index = 0; index < 16; ++index) {
+            m[index] = static_cast<T>(other.m[index]);
+        }
+    }
+
     static constexpr Matrix4 Identity() noexcept {
         return Matrix4();
     }

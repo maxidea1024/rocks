@@ -82,6 +82,30 @@ TEST(Matrix4_StorageIsColumnMajorWithColumnVectors) {
     CHECK(Mat4::Identity() == Mat4());
 }
 
+TEST(Matrix4_PrecisionConversionIsExplicit) {
+    // float → double은 원소마다 정확하고, 되돌리면 원래 값이다.
+    const Mat4 single =
+        Mat4::FromRows(Vec4(0.1f, -2.5f, 3.0e30f, 7.0f), Vec4(1.0e-40f, 1.0f, -0.0f, 2.0f),
+                       Vec4(0x1.fffffep127f, 0.3f, 4.0f, -1.0f), Vec4(0.0f, 0.0f, 0.0f, 1.0f));
+    const Mat4d wide(single);
+    for (int index = 0; index < 16; ++index) {
+        CHECK(wide.m[index] == static_cast<double>(single.m[index]));
+    }
+
+    CHECK(Mat4(wide) == single);
+    // double → float은 원소마다 가장 가까운 값(같은 거리면 짝수 쪽)이고 float 범위 밖은 ±Inf다.
+    Mat4d exact = Mat4d::Identity();
+    exact.m[0] = 0x1.000001p0;
+    exact.m[1] = 0x1.000003p0;
+    exact.m[2] = 1.0e39;
+    exact.m[3] = -1.0e39;
+    const Mat4 rounded(exact);
+    CHECK(rounded.m[0] == 1.0f && rounded.m[1] == 0x1.000004p0f);
+    CHECK(rounded.m[2] == platform::PlatformMath::Infinity<float>());
+    CHECK(rounded.m[3] == -platform::PlatformMath::Infinity<float>());
+    CHECK(!rounded.IsFinite());
+}
+
 TEST(Matrix4_CompositionAppliesRightOperandFirst) {
     // world = parent * local: scale(2)을 먼저, 이동을 나중에 적용한다.
     const Mat4d scale = Mat4d::Scale(Vec3d(2.0, 2.0, 2.0));

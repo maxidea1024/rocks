@@ -74,7 +74,7 @@ bool IsDefaultIgnorable(char32 codePoint) noexcept;
 
 ### 2.1 범위와 이유
 
-쿠킹 결과는 같은 도구 빌드라면 호스트와 무관하게 같은 바이트여야 한다(AssetSystem 10절). CRT의 `pow`·`exp`·`log`·`sin`은 구현과 CPU 경로(예: UCRT의 FMA3 분기)에 따라 결과가 달라질 수 있다(C3 전에는 `LinearColor::ToSRGB`가 UCRT `pow`를 썼다). 빌드는 이미 `-ffp-contract=off`이고 fast-math를 쓰지 않으며 x87을 쓰지 않으므로, IEEE 기본 연산(+ − × ÷ √, 정수 bit 연산)과 float↔double 변환만 쓰는 구현은 x64·ARM64에서 같은 결과를 낸다. 단 다음 전제를 지킨다.
+쿠킹 결과는 같은 도구 빌드라면 호스트와 무관하게 같은 바이트여야 한다(AssetSystem 10절). CRT의 `pow`·`exp`·`log`·`sin`은 구현과 CPU 경로(예: UCRT의 FMA3 분기)에 따라 결과가 달라질 수 있다(C3 전에는 `LinearColor::ToSRGB`가 UCRT `pow`를 썼다). 빌드는 이미 `-ffp-contract=off`이고 fast-math를 쓰지 않으며(`Base/NumericLimits.h`가 `__FAST_MATH__`·`__FINITE_MATH_ONLY__`를 빌드 오류로 막는다) x87을 쓰지 않으므로, IEEE 기본 연산(+ − × ÷ √, 정수 bit 연산)과 float↔double 변환만 쓰는 구현은 x64·ARM64에서 같은 결과를 낸다. 단 다음 전제를 지킨다.
 
 - 부동소수점 환경: 반올림 모드 nearest, 비정규 수 보존(FTZ·DAZ 끔), 예외 trap 꺼짐. 검사는 상태 플래그를 빼고 한다: x64는 `(MXCSR & ~0x3F) == 0x1F80`(bit 0–5는 보통 연산이 켜는 상태 플래그), ARM64는 FPCR의 FIZ·AH·NEP·trap enable·EBF·FZ16·RMode·FZ·DN·AHP 비트가 모두 0(기능이 없는 CPU에서는 RES0). 에디터 프로세스 안에서는 드라이버·미들웨어가 이 값을 바꿀 수 있으므로 쿠킹·결정적 계산은 PlatformBase의 `RunWithDeterministicFloatingPoint(function, context)` 안에서 실행한다(구현됨). 제어 설정을 기대 값으로 바꾸고 function을 실행한 뒤 제어 설정을 호출 전 값으로 되돌린다(안에서 바뀌었어도). 실행 중 쌓인 상태 플래그는 남긴다.
   - RAII guard로 하지 않는 이유: compiler는 부동소수점 연산이 환경과 무관하다고 보고(FENV_ACCESS off) 같은 함수 안의 연산을 제어 레지스터 쓰기 앞뒤로 옮기거나 합친다. 검증에서 guard 안의 곱셈이 guard 앞의 FTZ 결과로 합쳐지는 것을 재현했다. `#pragma STDC FENV_ACCESS ON`도 inline된 다른 함수의 연산을 `round.tonearest`/`fpexcept.ignore` constrained 연산으로 바꿀 뿐이라 MXCSR 쓰기를 가로질러 합쳐지고, LLVM은 FTZ 변화를 모델링하지 않는다(clang 21 IR로 확인). 그래서 환경을 바꾼 뒤 inline asm으로 세탁한 함수 포인터(ThinLTO도 대상을 알 수 없다)를 호출해 그 안의 연산이 환경 변경 뒤에만 실행되게 한다.

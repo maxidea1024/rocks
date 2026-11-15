@@ -25,6 +25,19 @@
 //
 // 구현 메모: Types.h를 거쳐 거의 모든 번역 단위에 들어가므로 rocks 안에 보조 이름공간(detail 등)을
 // 만들지 않는다. 다른 모듈이 using namespace로 끌어온 같은 이름의 이름공간과 모호해진다.
+
+// IEEE-754 부동소수점 의미를 확인한다. 거의 모든 번역 단위에 들어가는 이 헤더에 둔다. Rocks
+// 수학은 IsFinite·IsNaN 검사, 범위 밖 float 변환의 ±Inf(Core/Math/Transform.h 등), 고정한 합산
+// 순서에 기댄다. Clang은 -ffast-math·-ffinite-math-only·clang-cl /fp:fast에서 __FAST_MATH__ 또는
+// __FINITE_MATH_ONLY__ = 1을 정의하므로(clang 21·clang-cl·NDK clang 20에서 확인 — 기본은
+// __FINITE_MATH_ONLY__ = 0) 빌드 오류로 막는다. Rocks.Build가 모듈 인자에서 FP 모델 인자를 이미
+// 거부하므로(Programs/Rocks.Build/FloatingPointArguments.cs) 이 검사는 빌드 시스템 밖 컴파일에 대한
+// 이중 방어다. 매크로를 바꾸지 않는 인자(-fno-honor-nans 하나만, -ffast-math -fno-finite-math-only
+// 조합 등)는 Rocks.Build 검사만 막는다.
+#if defined(__FAST_MATH__) || (defined(__FINITE_MATH_ONLY__) && __FINITE_MATH_ONLY__ != 0)
+#error "Rocks requires IEEE-754 floating point (no -ffast-math, -ffinite-math-only, /fp:fast)."
+#endif
+
 namespace rocks {
 
 template <typename T>
