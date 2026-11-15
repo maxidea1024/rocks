@@ -544,7 +544,8 @@ TEST(GraphStage_CreatePreconditionsCheckRegistryState) {
             CHECK(registry.Stats().reservedObjects == 0);
             // 다른 Registry의 트랜잭션은 WrongContext다(정책이 다른 Registry, 정책이 같은 Registry
             // 모두).
-            for (ObjectRegistry* foreign : {&other, &twin}) {
+            ObjectRegistry* const foreignCases[] = {&other, &twin};
+            for (ObjectRegistry* foreign : foreignCases) {
                 ObjectGraphStage stage(allocator, registry, types, registry.OwnerAccess());
                 REQUIRE(stage.Validate(top));
                 ConstructionContext transaction(*foreign, foreign->OwnerAccess());
@@ -603,7 +604,8 @@ TEST(GraphStage_TwoGraphsShareOneTransactionAndFindObject) {
                 return value;
             };
             const uint32 liveBefore = registry.Stats().liveObjects;
-            for (bool failPrepare : {true, false}) {
+            const bool failPrepareCases[] = {true, false};
+            for (bool failPrepare : failPrepareCases) {
                 // worker에서 해도 되는 1단계를 트랜잭션 전에 끝낸다.
                 ObjectGraphStage stageA(allocator, registry, types, registry.OwnerAccess());
                 ObjectGraphStage stageB(allocator, registry, types, registry.OwnerAccess());

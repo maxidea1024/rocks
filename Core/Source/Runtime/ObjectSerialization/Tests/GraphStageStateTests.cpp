@@ -103,7 +103,8 @@ TEST(GraphStage_PhaseOrderAndCallChecksKeepState) {
                                             registry.OwnerAccess());
                 ObjectGraphStage foreign(allocator, registry, types, {{0x475334a, 9}});
                 ConstructionContext transaction(registry, registry.OwnerAccess());
-                for (ObjectGraphStage* stage : {&mismatched, &foreign}) {
+                ObjectGraphStage* const stageCases[] = {&mismatched, &foreign};
+                for (ObjectGraphStage* stage : stageCases) {
                     CHECK(stage->Validate(input).Error() == ErrorCode::WrongContext);
                     CHECK(stage->CreateObjects(transaction).Error() == ErrorCode::WrongContext);
                     CHECK(stage->ApplyFields(transaction).Error() == ErrorCode::WrongContext);
@@ -254,7 +255,8 @@ TEST(GraphStage_ReentryIsBusy) {
             const Array<uint8> first = MakeRecord(allocator, NodeType, 3);
             const Array<uint8> reenter = MakeRecord(allocator, ReenterType);
             const Array<uint8> last = MakeRecord(allocator, NodeType, 4);
-            for (bool hasBase : {false, true}) {
+            const bool hasBaseCases[] = {false, true};
+            for (bool hasBase : hasBaseCases) {
                 const StringView firstName = hasBase ? StringView("P") : StringView();
                 const test::graph::Node nodes[] = {{NodeType, 0, firstName, first.View()},
                                                    {ReenterType, 1, "R", reenter.View()},
@@ -328,7 +330,8 @@ TEST(GraphStage_FailureAfterCreateFixesTransaction) {
             ThreadDiagnostics diagnostics;
             ObjectGraphLoadOptions options;
             options.hooks = &diagnostics;
-            for (bool failApply : {true, false}) {
+            const bool failApplyCases[] = {true, false};
+            for (bool failApply : failApplyCases) {
                 ObjectGraphStage stage(allocator, registry, types, registry.OwnerAccess(), options);
                 REQUIRE(stage.Validate(input));
                 ConstructionContext transaction(registry, registry.OwnerAccess());
@@ -425,7 +428,8 @@ TEST(GraphStage_FinishedTransactionIsRejectedFirst) {
             baseInput.bytes = basedGraph.View();
             baseInput.hasBase = true;
             baseInput.base = OuterSummary::ForNewOutermost(false);
-            for (bool hasBase : {false, true}) {
+            const bool hasBaseCases[] = {false, true};
+            for (bool hasBase : hasBaseCases) {
                 ObjectGraphStage stage(allocator, registry, types, registry.OwnerAccess());
                 REQUIRE(stage.Validate(hasBase ? baseInput : topInput));
                 const ObjectHandle baseOuter = hasBase ? base.Value() : ObjectHandle{};
