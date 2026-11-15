@@ -156,6 +156,11 @@ MetaCompiler(C#)와 런타임(C++)의 표 대조: MetaCompiler가 "모든 종류
 - 성질 표에 행 `Name` = 21을 더했다(허용 표의 "String·Name" 칸 — C++ `ValueKindTableEntry`의 keyed 묶음, C# `Keyed`). `ValueKindCount`는 22다. 이번 단계가 여는 자리는 클래스 필드·struct 멤버·Array 원소(`Array<Name>` — 클래스 필드·struct 멤버·struct 원소 배열 안)이고 Map 키·값·Set 원소·StaticArray 원소·Optional 내부는 표 칸만 ○이다(B9e·B9f2·B9g가 연다). 원본 철자 해석 `SchemaValidator.Scalars`에 `rocks::Name` → Name을 더해 `SourceValueKinds` = Array 원소 열이 그대로 성립한다. Required는 표에 없으므로 지금의 RMC2202(지정자-종류 불일치)다.
 - 시험: 성질 표 시험의 새 행, C# `Meta.ValueKindTableMatchesRuntime`의 Name 칸 확인, 대조 헤더 변이에 Name 칸 뒤집기("C# 표에만 있는 종류" 변이는 아직 런타임에 없는 WeakObjectReference로 바꿨다).
 
+구현(B9d1)에서 정한 점(성질 표 — WeakRef의 나머지는 5.1절 "구현(B9d1)에서 정한 점"):
+
+- 성질 표에 행 `WeakObjectReference` = 22를 더했다(허용 표의 WeakRef 칸 — 단일·멤버·Array 원소·StaticArray 원소·Map 값·통째 FieldValue, 대상 타입 있음·대상 ID 선택(0 = Object), Required ×). `ValueKindCount`는 23이다. 이번 단계가 여는 자리는 클래스 필드·struct 멤버·Array 원소(`Array<WeakRef<T>>` — 클래스 필드·struct 멤버·struct 원소 배열 안)이고 StaticArray 원소·Map 값은 표 칸만 ○이다(B9g·B9f2가 연다). 원본 철자 해석 `SchemaValidator.ReferenceSpelling`에 `rocks::WeakRef<T>` → WeakObjectReference를 더해 `SourceValueKinds` = Array 원소 열이 그대로 성립한다. 대상은 강한·소프트 참조와 같이 리플렉션 클래스 또는 Object여야 한다(아니면 RMC2003). Required는 표에 없으므로 RMC2202다(안내 문구에 weak가 Required가 될 수 없는 이유를 적었다). descriptor `fieldKind`는 Value다.
+- 시험: 성질 표 시험의 새 행, C# `Meta.ValueKindTableMatchesRuntime`의 WeakObjectReference 칸 확인, 대조 헤더 변이에 WeakObjectReference의 Required 칸 뒤집기("C# 표에만 있는 종류" 변이는 아직 런타임에 없는 ClassReference로 바꿨다), `Meta.WeakReferenceFieldsReachDescriptorAndGeneratedCode`·`Meta.WeakReferenceRejectsRequired`·`Meta.WeakReferenceTargetMustBeReflectedClass`.
+
 ### 1.4 플래그 비트
 
 | 플래그 | 값 | 대상 | 전파·상속 | 단계 |
@@ -353,7 +358,7 @@ Core 수학(`CORE/Math/Transform.h`)에 둘을 더한다(사용자 결정 U4).
 - GC: 방문하지 않는다(지금도 생성 Trace가 WeakRef를 방문하지 않는다 — RuntimeTypeOps.h:322-323). ReferenceObserver도 관찰하지 않고, 편의 복원의 도달 검사에도 넣지 않는다(OF 5.5절). 쓰기 장벽 없음.
 - 쓰기 검증: 대상이 같은 Registry에서 살아 있고 기대 타입의 파생이어야 한다(`TypeRegistry::IsA`). null 허용.
 - encode: 대상이 죽었거나 stale이면 null을 쓴다(진단 없음 — weak의 정상 상태).
-- decode: 노드 번호면 그 객체 handle, 기대 타입 위반은 InvalidArgument(강한 참조와 같은 규칙. UE는 경고 후 null — 18.4절). 외부 번호(`0x80000000 | i`)는 writer가 쓰지 않으므로 InvalidArgument다.
+- decode: 노드 번호면 그 객체 handle, 기대 타입 위반은 TypeMismatch(강한 참조와 같은 규칙. UE는 경고 후 null — 18.4절). 외부 번호(`0x80000000 | i`)는 writer가 쓰지 않으므로 InvalidArgument다.
 - 같음(RCM 63행): non-null은 대상 정체성으로 비교한다.
 - Required 거부(RMC2202). 런타임에 저절로 null이 되므로 "늘 non-null" 계약을 지킬 수 없다(UE weak 속성도 NonNullable이 될 수 없다 — PropertyWeakObjectPtr.cpp:56).
 - 참조 wire는 문맥 매개변수(RF 6.1절)이므로 문맥에 `WriteWeakReference`·`ReadWeakReference`를 더한다(graph v2 = U32). `ExternalReferenceInfo`(OF 5.3절)에 `bool weak`를 더한다.
@@ -365,12 +370,27 @@ Core 수학(`CORE/Math/Transform.h`)에 둘을 더한다(사용자 결정 U4).
 |---|---|---|
 | Reject(기본) | localId | null + `ExternalReference` 진단(값 2 = weak null). 저장은 실패하지 않는다(강한 참조만 거부 대상) |
 | Admit | localId | hook에 `weak = true`로 묻는다. weak는 같은 대상의 slot 캐시(강한 참조가 먼저 Import한 대상 포함)를 쓰지 않고 출현마다 묻는다. Null·Import면 null + 진단(값 2 — weak import는 없다), Reject면 진단(값 0) 뒤 InvalidArgument |
-| Include(편의 저장) | 최종 집합 기준 localId | 출력 위치와 대상 handle을 기록해 두고, 모든 노드를 encode한 뒤 최종 집합에 있으면 localId, 없으면 0으로 제자리 덮어쓰고 그때 진단(값 2)한다. weak는 집합을 넓히지 않는다 |
+| Include(편의 저장) | 최종 집합 기준 localId | 값 위치(노드 Record offset)와 대상 handle을 기록해 두고, 모든 노드를 encode한 뒤 최종 집합에 있으면 localId, 없으면 0으로 제자리 덮어쓰고 그때 진단(값 2)한다. weak는 집합을 넓히지 않는다 |
 
 - Include의 지연 덮어쓰기는 참조 wire가 U32 고정 폭이라 가능하다(Oe의 외부 번호 위치 표와 같은 방식 — GraphExternal.cpp:77-114). 그래서 노드 encode 순서가 결과를 바꾸지 않는다.
 - 지연 항목은 (출력 위치, 대상 handle, objectIndex, 진단 경로 사본)이다. 경로 사본은 최대 `MaxPropertyPathSteps` 단계이고 1.6절 표기(삽입 순번)라 key를 복사하지 않는다. 그 메모리는 Oe 위치 표처럼 그래프 바이트 누계·작업량에 청구한다(GraphExternal.cpp:90-104). 진단은 모든 노드 encode가 끝난 뒤 기록 순서대로 한 번에 낸다(encode frame이 없어도 경로·objectIndex가 남는다).
 - Admit hook 계약(OF 5.3절 예시 hook)에 `info.weak` 분기를 적는다. weak를 보지 않는 hook이 Import를 골라도 저장은 실패하지 않는다(위 표).
 - 결정 21(RF 1023행): World의 parent·children을 리플렉션 WeakRef로 옮길지는 World 단계가 정한다. 이 단계는 가능하게만 한다.
+
+구현(B9d1)에서 정한 점:
+
+- 문맥 API(`Object/FieldCodec.h`): `FieldEncodeContext::WriteWeakReference(out, target, expectation)`(Required 검사 없음 — 직렬화기 구현은 가상 `WriteWeakReferenceWire`)와 `FieldDecodeContext::ReadWeakReference(reader, expectation)`. 둘 다 기본 구현은 Unsupported라 weak를 모르는 문맥(시험 문맥 등)은 바꾸지 않아도 된다. wire tag는 강한 참조와 같은 `ReferenceWireType()`이다(`detail::FieldWireType`). `AdmitExternalReference`는 `weak` 인자를 받아 `ExternalReferenceInfo::weak`를 채우고, weak면 `required`는 늘 거짓·`slot`은 0이다(weak import는 없다).
+- 생성 codec: `detail::WeakReferenceField<T>`(부분 특수화)가 `WeakRef<T>`를 알아보고 `ScalarValueKind`가 WeakObjectReference를 준다. `StaticReferenceNative<WeakRef<T>>` = `NativeTypeKey<T>`라 encode·decode가 정적 대상 타입도 기대 형식으로 넘긴다. `Array<WeakRef<T>>`는 `Array<E>`(ValueArray, U32 원소 고정 폭)이고 Registry 컨테이너가 아니다. 생성 Trace는 weak 필드·원소를 방문하지 않는다(`IsReference`는 ObjectReference만, `TraceArrayField(Array<E>)`는 무동작).
+- 저장(encode)의 "죽었거나 stale": null·비정규 null, 집합 노드의 생존 조회(`InspectLifecycle`)나 대상 타입 획득(`AcquireType`)이 StaleHandle·Destroyed(회수·재사용·논리 파괴·cutoff)면 진단·hook 질의 없이 0을 쓴다. 그 밖의 오류(다른 Registry의 handle WrongContext, 스레드·종료·재진입)는 그대로 실패한다 — weak가 잘못된 문맥을 가리키는 것은 정상 상태가 아니다(스펙에 없던 구분, 안전한 쪽). 산 대상은 강한 참조와 같이 정적 대상 타입·스키마 기대 타입 검사(TypeMismatch) 뒤 정책을 따른다. weak는 slot 캐시를 보지 않는다.
+- Include 지연 덮어쓰기: encode 때 이미 집합 안인 대상은 바로 local ID를 쓰고(local ID는 한번 정해지면 바뀌지 않는다), 밖이면 자리값 0을 쓰고 지연 항목 `WeakDeferral{position, target, objectIndex, pathOffset, pathSteps}`를 기록한다(경로 사본은 따로 둔 경로 표 — 1.6절 표기라 key를 복사하지 않는다). 메모리는 Oe 위치 표와 한 누계로(`GraphEncodeContext::TableBytes` = 위치 표 + 지연 항목 + 경로 사본) 노드 앞까지의 출력 + 저장 표 ≤ `maxBytes`를 항목마다·노드 끝마다 보고, 항목·경로 byte와 표 성장의 원소 이동을 작업량에 청구한다. 위치는 필드 writer offset → 노드 Record offset으로만 바꾸고(외부 참조 위치 표와 같은 필드 끝 재배정), 모든 노드를 encode한 뒤·NodeTable과 출력 조립 전에 `ResolveWeakDeferrals`가 노드 Record에 제자리로 덮어쓴다(출력 offset까지 옮길 필요가 없다). 항목마다 작업량 2이고, 최종 집합 밖이면 0을 두고 그 항목의 objectIndex·경로(진단 `field` = 경로 마지막 단계, `objectType` = 그 노드 타입)로 진단(값 2)을 기록 순서대로 낸다. 지연 항목도 직렬화기가 준 필드 writer에만 쓸 수 있다(다른 writer InvalidArgument).
+- 복원: 1단계 참조 token에 `weak` 표시를 더했다(`ReferenceToken::weak`). weak 값의 외부 참조 번호(`0x80000000 | i`)와 nodeCount 초과는 InvalidArgument, 노드 번호는 강한 참조와 같이 token으로 기록해 모든 노드를 해석한 뒤 기대 형식을 판정한다(TypeMismatch). 편의 복원의 도달 검사는 weak token을 따라가지 않는다. 2단계는 노드 handle을 대입하며(생성 decode thunk의 weak 갈래 — staged 쓰기의 대상 검사를 다시 하지 않는다, 2단계는 입력 때문에 실패하지 않는다), 2단계 몫은 강한 참조와 같이 참조 연결 1(배열은 non-null 원소 수)을 더해 1단계가 청구한다.
+- 관찰 struct(스펙에 없던 규칙, Name과 같은 이유): 1단계에는 대상 노드 handle이 없어 weak 값이 늘 null로 보이므로, weak를 (직간접으로) 담는 struct는 `FieldCodecHooks::ObservedStructs`에 둘 수 없다(InvalidArgument). 등록 형질 `StructView::ContainsWeakReference`(중첩 struct 멤버·struct 원소 배열에서 전파, Transient 포함 — `ContainsStrongReference`와 무관해 `Array<S>`·SubstituteStruct 대상은 그대로)를 더했다.
+- 쓰기 검증: `FieldWriteOperation`·`detail::ValidateFieldWrite`·경로 쓰기(5단계 lease)는 강한 참조와 같은 대상 검사(같은 Registry의 생존 객체 — 파괴 요청 Destroyed, 다른 Registry WrongContext — 와 스키마 기대 타입의 파생, null 허용)를 쓴다. 정적 대상 타입은 생성 write(`detail::ValidateWeakTarget` — RuntimeTypeOps.h), 경로 끝 지점(`PathCursor::CheckWeakTarget` — StaticTypeMismatch), staged 쓰기(`ConstructionContext::AcquireType` — 이 트랜잭션의 공개 전 객체도 받는다)가 본다. 쓰기 장벽·관찰자 기록은 없다(대입).
+- 다른 Registry의 handle(리뷰 반영): 조회 API(`AcquireType`·`InspectLifecycle`)는 다른 Registry의 handle을 회수된 handle과 같은 StaleHandle로 알리므로, 저장 encode는 정책·hook 질의 전에 `ObjectRegistry::OwnsHandle`(domain 비교 — 새 공개 함수)로 먼저 갈라 WrongContext로 실패한다(세 정책 모두 — 조용한 null로 잃지 않는다). 쓰기(`FieldWriteOperation`·경로 쓰기·`detail::ValidateWeakTarget`·staged 쓰기)도 같은 판정으로 WrongContext다. 같은 Registry에서 죽은 대상만 null이다(staged 쓰기의 파괴 요청·회수 대상은 `ConstructionContext::AcquireType`의 StaleHandle).
+- 표 성장(리뷰 반영): 지연 항목 표·경로 사본 표는 Array 성장 규칙(`ArrayGrowthCapacity` — 기하 성장)으로 늘고 표가 자랄 때만 기존 원소 이동을 청구한다(정확한 크기 예약은 항목마다 표 전체를 옮겨 작업량이 항목 수의 제곱이었다). 그래프 저장·복원의 다른 표(외부 위치 표·slot 표·노드 표·Name 기록·참조 token)는 이미 TryPushBack(기하 성장)이거나 루프 밖 한 번 예약이다.
+- 리플렉션 읽기(read thunk·경로 읽기)는 대상이 회수된 뒤에도 저장된 handle을 그대로 돌려준다 — "회수 뒤 null"은 `TryPin`·Resolve를 거칠 때다. 그래서 RCM 63행의 같음 비교(A5 차이 저장·override 판정)는 죽은 handle을 null로 정규화한 뒤 비교해야 한다(둘 다 저장 결과는 0이다).
+- Admit 정책에서 hook이 없거나 `AdmitExternalReference`를 재정의하지 않은 hook(기본 Reject)이면 집합 밖 weak 하나가 저장을 InvalidArgument로 실패시킨다(Reject 정책은 같은 입력을 null + 진단으로 통과시킨다 — weak에 가장 엄격한 쪽이 Admit 기본값이다). Admit hook은 `info.weak`를 보고 Null을 고른다(`FieldCodecHooks` 사용 예).
+- 시험(ObjectSerialization): `WeakRefGraph_RoundTripInsideTheGraph`·`WeakRefGraph_RejectPolicyWritesNullAndReports`·`WeakRefGraph_AdmitAsksEveryWeakOccurrenceWithoutSlotCache`·`WeakRefGraph_IncludeOverwritesDeferredWeakIndependentOfNodeOrder`·`WeakRefGraph_IncludeDeferralsAreChargedToGraphBytesAndWork`(같은 출력 byte에서 필요한 maxBytes가 항목 수에 정확히 선형)·`WeakRefGraph_IncludeDeferralWorkIsLinearInEntries`(작업량 증분이 항목 수 두 배마다 1.5–2.5배, 기본 한도에서 12,000개 Include 저장)·`WeakRefGraph_DeadTargetsEncodeNullAndTypeMismatchFails`(다른 Registry의 handle은 세 정책 모두 WrongContext·질의 0 포함 — WeakRefGraphTests.cpp), `WeakRefGraphLoad_RejectsExternalAndOutOfRangeNumbers`·`WeakRefGraphLoad_ExpectedTypeViolationIsRejected`·`WeakRefGraphLoad_WeakEdgesAreNotReachabilityOrGcEdges`(도달 검사 제외·GC가 weak만 남은 대상 회수)·`WeakRefGraphLoad_ObservedStructsCannotHoldWeakReferences`(WeakRefGraphLoadTests.cpp), `WeakRefField_WritesCheckLiveTargetAndExpectedType`·`WeakRefField_StagedWritesAcceptTransactionObjects`(WeakRefFieldTests.cpp), fixture `ReflectionTestFixtures/WeakRefFixture.h`.
 
 ### 5.2 ClassRef와 타입 도구 이름
 
@@ -890,9 +910,9 @@ Core 커밋(B9b1·B9c1·B9f1·B9i1)은 다른 단계와 독립이라 먼저 해�
 
 | 항목 | UE 5.8 | Rocks | 다른 이유 |
 |---|---|---|---|
-| weak 저장 | `Ar << Object`(ArchiveUObject.cpp:133-155). harvester가 수집하지 않으면 null(LinkerSave.cpp:240-250). 쿠킹이거나 같은 outermost의 다른 패키지(external actor)면 강한 참조처럼 import로 수집한다(PackageHarvester.cpp:1102-1122) | 같은 그래프 안만 보존, 밖은 null + 진단 | 편집기 저장은 같다. 쿠킹·외부 객체 패키지의 weak import는 World 외부 객체 패키지를 만들 때 정한다(20절 열린 문제) |
+| weak 저장 | `Ar << Object`(ArchiveUObject.cpp:133-155). harvester가 수집하지 않으면 null(LinkerSave.cpp:240-250 — 저장 문맥이 그 객체의 상태를 캐시하지 않았으면 "런타임에 null이 된다"는 Error 로그를 남기므로 늘 조용하지는 않다. weak 대상이 보통 그 캐시에 있는지는 확인하지 않았다). 쿠킹이거나 같은 outermost의 다른 패키지(external actor)면 강한 참조처럼 import로 수집한다(PackageHarvester.cpp:1102-1122) | 같은 그래프 안만 보존, 밖은 null + 진단 | 편집기 저장은 같다. 쿠킹·외부 객체 패키지의 weak import는 World 외부 객체 패키지를 만들 때 정한다(20절 열린 문제) |
 | weak GC | 참조 정보 없음(GarbageCollection.cpp:6833-6835, UT:3116-3121) | 방문 없음 | 같다 |
-| weak 로드 검사 | `CheckValidObject` 불일치는 경고 후 null(PropertyWeakObjectPtr.cpp:98, PropertyBaseObject.cpp:913·953-983) | InvalidArgument | 강한 참조와 같은 규칙(잘못된 값은 로드에서 드러낸다) |
+| weak 로드 검사 | `CheckValidObject` 불일치는 경고 후 null(PropertyWeakObjectPtr.cpp:98, PropertyBaseObject.cpp:913·953-983) | TypeMismatch | 강한 참조와 같은 규칙(잘못된 값은 로드에서 드러낸다) |
 | weak NonNullable | 불가(PropertyWeakObjectPtr.cpp:56) | Required 거부 | 같다 |
 | TSubclassOf 저장 | UClass 객체 참조(FClassProperty는 FObjectProperty 파생) | TypeId | 영속 ID와 실행 핸들 구분(RCM 30행) |
 | MetaClass 검사 | ImportText만(PropertyClass.cpp:125-140). 로드 때 검사 없음 | 쓰기·encode·decode | 잘못된 값은 로드에서 드러낸다 |
@@ -1026,7 +1046,7 @@ Core 커밋(B9b1·B9c1·B9f1·B9i1)은 다른 단계와 독립이라 먼저 해�
 | A6 | 검증 보고 출력(선택 — JsonWriter 직접 출력도 된다) | B9i4 | AS 1절 A6 |
 | (World) | 부착 계층 영속화 재검토(결정 21), 외부 객체 패키지의 weak import | B9d1 | RF 1023행 |
 | (Sparks) | `T?`(같은 저장 단위 안 weak)·`Map`·`Set`·`Class<T>`·`@tableRow`(`OrderedMap<Name, InstancedStruct<>>`), Tag → Name, TagSet → `OrderedSet<Name>`, `Row<T>` → Name(`Tag?`·`Row<T>?`는 None Name — Optional<Name>을 쓰지 않는다, SL 1198행 SD19) | B9c·B9d·B9e·B9f·B9j | SL 311·481-484·495·1090·1115행 |
-| (UI) | CU4 map key 경로(인코딩 가능한 key 단계), CU8 Text(DeepClone) | B9f3·B9l | UI 282·286행 |
+| (UI) | CU4 map key 경로(인코딩 가능한 key 단계), CU8 Text(DeepClone) | B9f3·B9l | UI 7절 CU4·CU8 행 |
 
 AS 514행 MinMagFilter·MipFilter는 닫힌 값 집합이므로 enum(B3)으로 충분하다(Name 소비자가 아니다). B9j·B9k·B9l·B9m은 A 단계 소비자가 없지만 사용자 결정대로 A0-G 앞에서 끝낸다.
 
@@ -1136,8 +1156,8 @@ U5의 Deprecated 저장 범위: UE의 저장 불가 판정은 패키지 저장 �
 | SL | 20·482-484행 | 컨테이너 = OrderedMap·OrderedSet, `Class<T>` = ClassRef, 타입 도구 이름, 키 제한(실수 키 불가) |
 | SL | 24·213·495행 | 객체 `T?` 필드 = 같은 저장 단위 안 WeakRef, 셀 사이는 World 영속 참조 |
 | SL | 1115·1198행 | 저장 가능 타입의 C++ 대응(Tag → Name, TagSet → OrderedSet<Name>, Row<T> → Name, `?`는 None) |
-| UI | 275·286행(CU8) | 낡은 "bool·정수·실수·Guid·String·ObjectRef만" 서술 정정(enum·struct·배열·Soft는 B3–B5, Name·Text·Map 등은 리플렉션 B9) |
-| UI | 282행(CU4) | map key 경로는 B9f3(인코딩 가능한 key 단계) |
+| UI | 7절 CU8 행 | 낡은 "bool·정수·실수·Guid·String·ObjectRef만" 서술 정정 — 반영 완료(UI 초안 2.0의 CU8 행이 이미 고친 서술이다) |
+| UI | 7절 CU4 행 | map key 경로는 B9f3(인코딩 가능한 key 단계) |
 | EIP | 2.3절(133-139행) | authoring LocalTransform은 `Transform`(혼합), Transform3f·Transform3d는 같은 실패 규약의 단일 정밀도 값 타입 |
 | EngineRuntime | 130·271행 | 부착 계층 "WeakObjectRef 뒤 저장 안 됨" → WeakRef PROPERTY 가능, 결정은 World 단계 |
 | CoreDataFoundations | Json 절 | `JsonWriter::Float`, `JsonValue::Position` |

@@ -81,6 +81,16 @@ Result<void> PathValue(PathCursor& cursor, T& value) noexcept {
             cursor.PublishReference(previous);
             return Result<void>::Success();
         } else {
+            // weak 대상은 정적 대상 타입의 파생이어야 한다(생존·스키마 기대 타입은 검증 지점이
+            // 봤다).
+            if constexpr (Target == ValueKind::WeakObjectReference) {
+                if (auto checked = cursor.CheckWeakTarget(
+                        NativeTypeKey<typename WeakReferenceField<T>::Target>());
+                    !checked) {
+                    return checked;
+                }
+            }
+
             // 할당하지 않는 쓰기다(옛 값 복사도 할당 없음).
             FieldValue* previous = cursor.Output();
             FieldValue captured(previous ? previous->GetAllocator()
@@ -117,6 +127,14 @@ Result<void> InsertArrayElement(PathCursor& cursor, Array<E>& array) noexcept {
 
     if (auto fits = cursor.CheckLength(size + 1); !fits) {
         return fits;
+    }
+
+    if constexpr (Target == ValueKind::WeakObjectReference) {
+        if (auto checked =
+                cursor.CheckWeakTarget(NativeTypeKey<typename WeakReferenceField<E>::Target>());
+            !checked) {
+            return checked;
+        }
     }
 
     if (size >= MaxSize / sizeof(E)) {

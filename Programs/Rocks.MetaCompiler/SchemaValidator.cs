@@ -25,22 +25,28 @@ internal static class SchemaValidator
         ["rocks::Sha256Digest"] = "Digest256"
     };
 
-    private static readonly string[] TargetKinds = ["Enum", "Struct", "ObjectReference", "SoftObjectReference"];
+    private static readonly string[] TargetKinds = ["Enum", "Struct", "ObjectReference", "WeakObjectReference", "SoftObjectReference"];
 
-    // 원본 선언의 철자 해석(ResolveValue·ResolveArray)이 만들 수 있는 단일 값 종류다: 스칼라 철자, 리플렉션 enum·struct, 강한·소프트
-    // 참조. ToolTests가 이 집합과 성질 표(ValueKindTable)의 Array 원소 열이 같은지 본다(새 종류는 철자 해석과 표에 함께 더한다).
+    // 원본 선언의 철자 해석(ResolveValue·ResolveArray)이 만들 수 있는 단일 값 종류다: 스칼라 철자(Name 포함), 리플렉션 enum·struct,
+    // 강한·weak·소프트 참조. ToolTests가 이 집합과 성질 표(ValueKindTable)의 Array 원소 열이 같은지 본다(새 종류는 철자 해석과 표에 함께 더한다).
     internal static IReadOnlyList<string> SourceValueKinds { get; } = [.. Scalars.Values, .. TargetKinds];
 
     // "prefix<T>" 철자의 T를 돌려준다(아니면 null).
     private static string? TemplateTarget(string spelling, string prefix) =>
         spelling.StartsWith(prefix, StringComparison.Ordinal) && spelling.EndsWith('>') ? spelling[prefix.Length..^1].Trim() : null;
 
-    // 강한 참조(ObjectRef<T>)·소프트 참조(SoftObjectRef<T>) 철자면 대상 T와 값 종류를 돌려준다(아니면 null).
+    // 강한 참조(ObjectRef<T>)·weak 참조(WeakRef<T> — 리플렉션 B9d1, Docs/Design/ReflectionExtensions.ko.md 5.1절)·소프트 참조
+    // (SoftObjectRef<T>) 철자면 대상 T와 값 종류를 돌려준다(아니면 null).
     private static (string Target, string Kind)? ReferenceSpelling(string spelling)
     {
         if (TemplateTarget(spelling, "rocks::ObjectRef<") is string strong)
         {
             return (strong, "ObjectReference");
+        }
+
+        if (TemplateTarget(spelling, "rocks::WeakRef<") is string weak)
+        {
+            return (weak, "WeakObjectReference");
         }
 
         if (TemplateTarget(spelling, "rocks::SoftObjectRef<") is string soft)
@@ -428,7 +434,7 @@ internal static class SchemaValidator
                 return $"Core value types are reflected by the {StructRules.BindingModule} module: depend on {StructRules.BindingModule} (add it to the module's RequiredModules) so its descriptor is imported.";
             }
 
-            return "Use a supported scalar, Guid, String, Name, AssetId, Sha256Digest, ROCKS_ENUM enum, ROCKS_STRUCT struct, ObjectRef, SoftObjectRef or rocks::Array/ObjectRefArray/StructRefArray field; raw pointers/other containers/cv-qualified fields need an explicit codec extension.";
+            return "Use a supported scalar, Guid, String, Name, AssetId, Sha256Digest, ROCKS_ENUM enum, ROCKS_STRUCT struct, ObjectRef, WeakRef, SoftObjectRef or rocks::Array/ObjectRefArray/StructRefArray field; raw pointers/other containers/cv-qualified fields need an explicit codec extension.";
         }
 
         // 단일 값 형식 철자 하나를 (값 종류, 대상 정규 이름, 대상 ID)로 푼다(필드와 Array<T> 원소가 같은 해석을 쓴다).
@@ -452,7 +458,7 @@ internal static class SchemaValidator
 
             if (ReferenceSpelling(spelling) is { } reference)
             {
-                // 강한 참조와 소프트 참조(GC 간선이 아님) 모두 대상이 리플렉션 클래스(또는 Object)여야 한다.
+                // 강한 참조와 weak·소프트 참조(GC 간선이 아님) 모두 대상이 리플렉션 클래스(또는 Object)여야 한다(아니면 RMC2003).
                 string target = Resolve(reference.Target.Length == 0 ? "rocks::Object" : reference.Target, owner, site);
                 return (reference.Kind, target, target == "rocks::Object" ? null : Find(target).Id);
             }
@@ -559,8 +565,9 @@ internal static class SchemaValidator
                 // 지정자를 그 필드 종류에 쓸 수 있는지 본다(RMC2202 — 종류를 먼저 판정하고 값 범위는 그 뒤에 본다).
                 if (field.Spec.Required && !field.AcceptsRequired)
                 {
+                    // WeakRef는 대상이 죽으면 저절로 null이 되므로 Required를 지킬 수 없다(Docs/Design/ReflectionExtensions.ko.md 5.1절).
                     throw new MetadataException($"{field.Owner}::{field.Name}: Required applies only to object or soft object reference fields and arrays of them", "RMC2202",
-                        "Remove Required or change the field to ObjectRef, SoftObjectRef, ObjectRefArray or Array<SoftObjectRef>.").At(field.Site);
+                        "Remove Required or change the field to ObjectRef, SoftObjectRef, ObjectRefArray or Array<SoftObjectRef>; a WeakRef becomes null when its target dies, so it cannot be Required.").At(field.Site);
                 }
 
                 if (!field.IsArray && field.Spec.MaxElements != 0)

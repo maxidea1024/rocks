@@ -24,11 +24,15 @@ enum class FieldDiagnosticKind : uint8 {
     // 저장할 배열의 원소 수(value)가 필드 maxElements를 넘는다(path = 배열 필드). 저장은 이 진단
     // 뒤 CapacityExceeded다(로드는 필드별 maxElements를 걸지 않으므로 내지 않는다).
     ArrayTooLong,
-    // 저장 집합 밖 강한 참조를 외부 참조로 쓰지 않았다(path = 참조 위치, value 0 = 거부, 1 = null로
-    // 씀 — Docs/Design/ObjectFoundations.ko.md 5.2·5.3절). 그래프 저장의 Reject 정책, Include 거부
-    // 조건(기준 Outer·노드 1의 조상·다른 패키지), Admit 정책에서 AdmitExternalReference가 Reject를
-    // 고른 위치가 value 0 뒤 InvalidArgument이고, Null을 고른 위치는 value 1을 남기고 그 위치를
-    // null로 쓴다.
+    // 저장 집합 밖 참조를 외부 참조로 쓰지 않았다(path = 참조 위치, value 0 = 거부, 1 = null로 씀,
+    // 2 = weak 집합 밖 null — Docs/Design/ObjectFoundations.ko.md 5.2·5.3절,
+    // ReflectionExtensions.ko.md 5.1·15절). 그래프 저장의 Reject 정책, Include 거부 조건(기준
+    // Outer·노드 1의 조상·다른 패키지), Admit 정책에서 AdmitExternalReference가 Reject를 고른
+    // 위치(weak 포함)가 value 0 뒤 InvalidArgument이고, 강한 참조에 Null을 고른 위치는 value 1을
+    // 남기고 그 위치를 null로 쓴다. weak 참조(WeakRef PROPERTY)의 대상이 저장 집합 밖이면 value 2를
+    // 남기고 null로 쓴다(저장은 실패하지 않는다): Reject 정책, Admit에서 Null·Import(weak import는
+    // 없다), Include에서 모든 노드를 encode한 뒤의 최종 집합 밖(그때 기록 순서대로 —
+    // objectIndex·path는 기록할 때의 위치다).
     ExternalReference
 };
 
@@ -54,7 +58,7 @@ struct SoftReferenceInfo {
     Span<const PathStep> path{};
 };
 
-// 그래프 저장(Admit 정책)이 저장 집합 밖 강한 참조 대상을 만났을 때 hook에 주는 정보다
+// 그래프 저장(Admit 정책)이 저장 집합 밖 참조(강한·weak) 대상을 만났을 때 hook에 주는 정보다
 // (Docs/Design/ObjectFoundations.ko.md 5.3절 — FieldCodecHooks::AdmitExternalReference). path는
 // 호출 동안만 유효하다.
 struct ExternalReferenceInfo {
@@ -70,8 +74,14 @@ struct ExternalReferenceInfo {
     uint32 objectIndex = 0;
     Span<const PathStep> path{};
     // Import를 고르면 이 대상이 받을 외부 번호(slot — 1부터, 첫 출현 순)다. Null·Reject면 쓰이지
-    // 않는다(다음 대상이 같은 번호를 받는다).
+    // 않는다(다음 대상이 같은 번호를 받는다). weak면 0이다(weak import는 없다).
     uint32 slot = 0;
+    // weak 참조(WeakRef PROPERTY — 리플렉션 B9d1) 위치인지다. weak는 같은 그래프 안만 보존하므로
+    // Null·Import 모두 그 위치를 null로 쓰고 ExternalReference 진단(value 2)을 남기며 저장은
+    // 실패하지 않는다. Reject만 진단(value 0) 뒤 InvalidArgument다. weak 질의는 slot 캐시를 쓰지
+    // 않는다 — 같은 대상의 출현마다(강한 참조가 먼저 Import한 대상이어도) 다시 묻는다. required는
+    // 늘 거짓이다.
+    bool weak = false;
 };
 
 // 외부 참조 허락 hook의 결과다(Docs/Design/ObjectFoundations.ko.md 5.3절·11절 결정 14).
@@ -120,10 +130,10 @@ public:
         return Result<void>::Success();
     }
 
-    // 복원 1단계에서 관찰할 struct ID다(로드 시작 때 한 번 읽는다 — 미등록 ID는 NotFound, 참조나
-    // Name을 담는 struct는 InvalidArgument — 1단계 임시 값에는 참조 대상도 Name 토큰도 만들 수
-    // 없다, StructView::ContainsStrongReference·ContainsName). 반환 span은 그 로드 동안 유효해야
-    // 한다.
+    // 복원 1단계에서 관찰할 struct ID다(로드 시작 때 한 번 읽는다 — 미등록 ID는 NotFound, 참조
+    // (강한·weak)나 Name을 담는 struct는 InvalidArgument — 1단계 임시 값에는 참조 대상도 Name
+    // 토큰도 만들 수 없다, StructView::ContainsStrongReference·ContainsWeakReference·ContainsName).
+    // 반환 span은 그 로드 동안 유효해야 한다.
     virtual Span<const TypeId> ObservedStructs() noexcept {
         return {};
     }
@@ -146,20 +156,29 @@ public:
         return Result<const void*>::Success(in);
     }
 
-    // 그래프 저장(GraphExternalPolicy::Admit)이 저장 집합 밖 강한 참조 대상을 만날 때마다 그 대상을
+    // 그래프 저장(GraphExternalPolicy::Admit)이 저장 집합 밖 참조 대상을 만날 때마다 그 대상을
     // 외부 참조로 쓸지 묻는다(Docs/Design/ObjectFoundations.ko.md 5.3절). 대상 생존·기대 형식
-    // 검사를 지난 뒤에 소유 스레드에서 불린다. 같은 대상의 두 번째 출현부터는 첫 결정이
-    // Import였으면 부르지 않고(같은 slot으로 집계만 한다) Null이었으면 다시 부른다. 실패를 돌려주면
-    // 저장이 그 오류로 실패하고, 정의되지 않은 결과 값은 InvalidArgument다. 기본은 Reject다(외부
-    // 참조를 쓰려면 hook을 준다). 저장 중이므로 Registry·저장 중인 객체를 바꾸지 않는다.
+    // 검사를 지난 뒤에 소유 스레드에서 불린다. 강한 참조는 같은 대상의 두 번째 출현부터 첫 결정이
+    // Import였으면 부르지 않고(같은 slot으로 집계만 한다) Null이었으면 다시 부른다. weak 참조
+    // (info.weak)는 출현마다 부르고 Import·Null 모두 null + 진단(value 2)이다 — weak를 보지 않는
+    // hook이 Import를 골라도 저장은 실패하지 않는다(ReflectionExtensions.ko.md 5.1절). 실패를
+    // 돌려주면 저장이 그 오류로 실패하고, 정의되지 않은 결과 값은 InvalidArgument다. 기본은
+    // Reject다(외부 참조를 쓰려면 hook을 준다). 저장 중이므로 Registry·저장 중인 객체를 바꾸지
+    // 않는다.
     //
     // 인자: info(대상·타입·위치·Import일 때 받을 slot — 호출 동안만 유효).
-    // 반환: Import(외부 참조로 쓴다), Null(그 위치를 null로 쓰고 진단 value 1), Reject(진단 value 0
-    // 뒤 InvalidArgument).
+    // 반환: Import(외부 참조로 쓴다 — weak면 null + 진단 value 2), Null(그 위치를 null로 쓰고 진단
+    // value 1 — weak면 value 2), Reject(진단 value 0 뒤 InvalidArgument — weak도 같다). hook이
+    // 없거나 이 함수를 재정의하지 않으면 Reject라 집합 밖 weak 하나로도 저장이 실패한다(weak를
+    // null로 받으려면 아래 예처럼 info.weak에 Null을 준다).
     //
-    // 사용 예(A1 writer — 같은 패키지 밖 객체만 import로 쓴다):
+    // 사용 예(A1 writer — 같은 패키지 밖 객체만 import로 쓴다, weak는 같은 그래프 밖이면 null):
     //   Result<ExternalAdmission> AdmitExternalReference(
     //       const ExternalReferenceInfo& info) noexcept override {
+    //       if (info.weak) {
+    //           return Result<ExternalAdmission>::Success(ExternalAdmission::Null);
+    //       }
+    //
     //       auto outermost = registry_.GetOutermost(access_, info.target);
     //       if (!outermost || outermost.Value() == package_) {
     //           return Result<ExternalAdmission>::Success(ExternalAdmission::Reject);

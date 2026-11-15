@@ -4,11 +4,11 @@
 // 허용하므로 편의 API만 쓴다).
 namespace rocks::graph_detail {
 
-// 편의 복원의 도달 검사다(Docs/Design/ObjectFoundations.ko.md 5.5절): 노드 1에서 영속 강한 참조,
-// inner → outer(노드 표의 outer), 패키지 정책 Registry면 outer → inner와 기준 Outer 아래 보존(기준
-// Outer가 있으면 outer 0 노드는 기준 Outer가 붙잡는다 — 1.7절)으로 닿지 않는 노드가 있으면
-// InvalidArgument다(공개 뒤 다음 GC가 조용히 지우지 않게 — 생성 전에 판정한다). 패키지 정책이고
-// 기준 Outer가 없으면 노드 1이 아닌 outer 0 노드(다른 패키지)도 InvalidArgument다.
+// 편의 복원의 도달 검사다(Docs/Design/ObjectFoundations.ko.md 5.5절): 노드 1에서 영속 강한
+// 참조(weak 참조 제외), inner → outer(노드 표의 outer), 패키지 정책 Registry면 outer → inner와 기준
+// Outer 아래 보존(기준 Outer가 있으면 outer 0 노드는 기준 Outer가 붙잡는다 — 1.7절)으로 닿지 않는
+// 노드가 있으면 InvalidArgument다(공개 뒤 다음 GC가 조용히 지우지 않게 — 생성 전에 판정한다).
+// 패키지 정책이고 기준 Outer가 없으면 노드 1이 아닌 outer 0 노드(다른 패키지)도 InvalidArgument다.
 Result<void> CheckReachable(Allocator& allocator, const Array<LoadNode>& nodes, bool packagePolicy,
                             bool hasBase, Budget& budget) noexcept {
     const usize count = nodes.Size();
@@ -82,9 +82,11 @@ Result<void> CheckReachable(Allocator& allocator, const Array<LoadNode>& nodes, 
             return spent;
         }
 
-        // 외부 참조는 노드가 아니므로 따라가지 않는다(대상은 그래프 밖 생존 객체다).
+        // 외부 참조는 노드가 아니므로 따라가지 않는다(대상은 그래프 밖 생존 객체다). weak 간선은
+        // 대상을 붙잡지 않으므로 따라가지 않는다(Docs/Design/ReflectionExtensions.ko.md 5.1절 —
+        // weak만 남은 노드는 공개 뒤 다음 GC가 지운다).
         for (const ReferenceToken& token : node.tokens) {
-            if (ExternalIndexOf(token) == 0) {
+            if (!token.weak && ExternalIndexOf(token) == 0) {
                 visit(token.target - 1);
             }
         }

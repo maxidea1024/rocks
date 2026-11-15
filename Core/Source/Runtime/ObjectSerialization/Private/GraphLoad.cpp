@@ -202,16 +202,31 @@ public:
     Result<DecodedReference>
     ReadReference(ArchiveReader& reader,
                   const ReferenceExpectation& expectation) noexcept override {
+        return ReadToken(reader, expectation, false);
+    }
+
+    // weak 참조는 같은 그래프 안 노드 번호만 받는다(외부 참조 번호는 writer가 쓰지 않는다 —
+    // InvalidArgument, Docs/Design/ReflectionExtensions.ko.md 5.1절). 기대 형식은 강한 참조와 같이
+    // token으로 기록해 모든 노드를 해석한 뒤 판정한다(weak token은 도달 검사가 따라가지 않는다).
+    Result<DecodedReference>
+    ReadWeakReference(ArchiveReader& reader,
+                      const ReferenceExpectation& expectation) noexcept override {
+        return ReadToken(reader, expectation, true);
+    }
+
+    // 참조 하나를 읽어 범위를 검사하고 non-null이면 token으로 기록한다(weak는 노드 번호만).
+    Result<DecodedReference>
+    ReadToken(ArchiveReader& reader, const ReferenceExpectation& expectation, bool weak) noexcept {
         auto local = reader.ReadU32();
         if (!local) {
             return Result<DecodedReference>::Failure(local.Error());
         }
 
         // 외부 참조(ExternalReferenceBit | i)는 1 ≤ i ≤ externalCount, 노드 번호는 nodeCount
-        // 이하다(그 밖 — 0x80000000 포함 — 은 파일 손상).
+        // 이하다(그 밖 — 0x80000000 포함 — 은 파일 손상). weak 값에는 외부 참조가 없다.
         const bool isExternal = (local.Value() & ExternalReferenceBit) != 0;
         const uint32 external = isExternal ? local.Value() & ~ExternalReferenceBit : 0;
-        const bool inRange = isExternal ? external != 0 && external <= externalUses_.Size()
+        const bool inRange = isExternal ? !weak && external != 0 && external <= externalUses_.Size()
                                         : local.Value() <= objectCount_;
         if (!inRange) {
             return Result<DecodedReference>::Failure(ErrorCode::InvalidArgument);
@@ -254,6 +269,7 @@ public:
         ReferenceToken token;
         token.target = static_cast<uint32>(local.Value());
         token.expectation = found;
+        token.weak = weak;
         if (!node_->tokens.TryPushBack(token)) {
             return Result<DecodedReference>::Failure(ErrorCode::OutOfMemory);
         }
@@ -726,8 +742,8 @@ Result<UniquePtr<StageData>> ValidateGraph(Allocator& allocator, TypeRegistry& t
     }
 
     GraphValidateContext context(allocator, data.budget, options, nodes.Size(), data.externalUses);
-    // 관찰할 struct ID를 정렬해 둔다(미등록 NotFound, 참조나 Name을 담는 struct InvalidArgument —
-    // 관찰 값은 1단계 임시 값인데 1단계는 참조 대상도 Name 토큰도 만들 수 없다).
+    // 관찰할 struct ID를 정렬해 둔다(미등록 NotFound, 참조(강한·weak)나 Name을 담는 struct
+    // InvalidArgument — 관찰 값은 1단계 임시 값인데 1단계는 참조 대상도 Name 토큰도 만들 수 없다).
     Array<TypeId> observed(allocator);
     if (options.hooks) {
         const Span<const TypeId> requested = options.hooks->ObservedStructs();
@@ -748,6 +764,7 @@ Result<UniquePtr<StageData>> ValidateGraph(Allocator& allocator, TypeRegistry& t
             }
 
             if (lease.Value().Struct().ContainsStrongReference() ||
+                lease.Value().Struct().ContainsWeakReference() ||
                 lease.Value().Struct().ContainsName()) {
                 return Output::Failure(ErrorCode::InvalidArgument);
             }

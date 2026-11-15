@@ -738,11 +738,14 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     bool required = false;
     bool referenceArray = false;
     bool nameMember = false;
+    bool weakMember = false;
     for (const FieldSchema& field : schema.fields) {
         // 강한 참조 멤버: 단일 참조와 ObjectRefArray(대상 형식이 ObjectReference).
         const bool referenceTarget = FieldTargetType(field).kind == ValueKind::ObjectReference;
         // Name 멤버: 단일 Name과 Array<Name>(Transient 포함 — 관찰 struct 제한이 쓴다).
         nameMember = nameMember || FieldTargetType(field).kind == ValueKind::Name;
+        // weak 참조 멤버: 단일 WeakRef와 Array<WeakRef>(Transient 포함 — 관찰 struct 제한이 쓴다).
+        weakMember = weakMember || FieldTargetType(field).kind == ValueKind::WeakObjectReference;
         strongReference = strongReference || referenceTarget;
         referenceArray =
             referenceArray || (field.value.kind == ValueKind::Array && referenceTarget);
@@ -833,6 +836,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
                 referenceArray = referenceArray || (array ? record->containsStrongReference
                                                           : record->containsReferenceArray);
                 nameMember = nameMember || record->containsName;
+                weakMember = weakMember || record->containsWeakReference;
             }
         }
 
@@ -917,6 +921,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     record->requiresWorldOnlyOwner = requiresWorldOnlyOwner;
     record->containsReferenceArray = referenceArray;
     record->containsName = nameMember;
+    record->containsWeakReference = weakMember;
     record->ops.size = ops.size;
     record->ops.alignment = ops.alignment;
     record->ops.nativeType = ops.nativeType;

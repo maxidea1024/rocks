@@ -244,6 +244,9 @@ Result<void> AppendParsedElement(Array<Element>& target, const ParsedValue& pars
         return target.TryPushBack(parsed.digest);
     } else if constexpr (IsSameV<Element, Name>) {
         return target.TryPushBack(parsed.name);
+    } else if constexpr (WeakReferenceField<Element>::Supported) {
+        // 1단계는 handle이 비어 있다(관찰은 직렬화기가 막는다), 2단계는 만든 노드 handle이다.
+        return target.TryPushBack(Element(parsed.reference.handle));
     } else if constexpr (IsSameV<Element, float>) {
         return target.TryPushBack(parsed.float32);
     } else if constexpr (IsSameV<Element, double>) {
@@ -271,7 +274,9 @@ inline Result<void> ReserveArrayApply(FieldDecodeContext& context, usize count, 
 }
 
 // 단일 값 원소 배열(Array<E>)의 decode다(DecodeArrayField의 ValueArray 가지). target이 없으면
-// 검증만, 있으면(관찰·적용) Clear → TryReserve(count) → 원소마다 채운다.
+// 검증만, 있으면(관찰·적용) Clear → TryReserve(count) → 원소마다 채운다. weak 원소
+// (Array<WeakRef<T>>)는 문맥의 ReadWeakReference로 읽고(정적 대상 타입 NativeTypeKey<T>) 2단계에서
+// 노드 handle을 그대로 담는다(GC 간선이 아니므로 Registry 컨테이너가 아니다).
 template <class Element>
 Result<void> DecodeValueArray(Array<Element>* target, const FieldView& field,
                               FieldDecodeContext& context) noexcept {
@@ -304,9 +309,10 @@ Result<void> DecodeValueArray(Array<Element>* target, const FieldView& field,
         }
     }
 
-    // Name 원소는 1단계에서 토큰이 없으므로 관찰(1단계 임시 값 채우기)할 수 없다 — 관찰 struct는
-    // Name을 담지 않는다(직렬화기가 ObservedStructs에서 거부한다, 4.1절).
-    if constexpr (IsSameV<Element, Name>) {
+    // Name 원소는 1단계에서 토큰이 없고 weak 원소는 대상 handle이 없으므로 관찰(1단계 임시 값
+    // 채우기)할 수 없다 — 관찰 struct는 Name·weak 참조를 담지 않는다(직렬화기가 ObservedStructs에서
+    // 거부한다, Docs/Design/ReflectionExtensions.ko.md 4.1·5.1절).
+    if constexpr (IsSameV<Element, Name> || WeakReferenceField<Element>::Supported) {
         if (target && context.IsRecording()) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
@@ -321,14 +327,20 @@ Result<void> DecodeValueArray(Array<Element>* target, const FieldView& field,
 
     const EnumValueSet* lookup = set ? &set.Value() : nullptr;
     usize textBytes = 0;
+    usize references = 0;
     ElementIndexScope element(context);
     for (usize index = 0; index < count; ++index) {
         element.Set(static_cast<uint32>(index));
         ParsedValue parsed;
         if (auto read = ReadValueWire(reader.Elements(), context, type, context.FieldEnum(), lookup,
-                                      nullptr, parsed);
+                                      StaticReferenceNative<Element>(), parsed);
             !read) {
             return read;
+        }
+
+        // weak 원소는 non-null마다 2단계의 연결 몫이 있다(강한 참조 배열과 같은 규칙).
+        if constexpr (WeakReferenceField<Element>::Supported) {
+            references += parsed.reference.isNull ? 0 : 1;
         }
 
         if constexpr (ReflectedEnumField<Element>::Supported) {
@@ -370,7 +382,8 @@ Result<void> DecodeValueArray(Array<Element>* target, const FieldView& field,
     }
 
     uint64 textWork = 0;
-    if (!TryMultiply(uint64{textBytes}, uint64{2}, textWork)) {
+    if (!TryMultiply(uint64{textBytes}, uint64{2}, textWork) ||
+        !TryAdd(textWork, uint64{references}, textWork)) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
 

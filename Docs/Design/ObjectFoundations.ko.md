@@ -543,7 +543,8 @@ struct ExternalReferenceInfo {
     uint32 objectIndex = 0;
     Span<const PathStep> path{};   // 호출 동안만 유효
     uint32 slot = 0;               // Import를 고르면 받을 외부 번호(1부터, 첫 출현 순 — 결정 전에 묻는다.
-                                   // Null·Reject면 쓰이지 않고 다음 대상이 같은 번호를 받는다)
+                                   // Null·Reject면 쓰이지 않고 다음 대상이 같은 번호를 받는다. weak면 0)
+    bool weak = false;             // WeakRef PROPERTY 위치(리플렉션 B9d1) — Import·Null 모두 null + 진단 값 2
 };
 
 enum class ExternalAdmission : uint8 {
@@ -557,6 +558,9 @@ enum class ExternalAdmission : uint8 {
 //
 // 사용 예(A1 writer):
 //   Result<ExternalAdmission> AdmitExternalReference(const ExternalReferenceInfo& info) noexcept override {
+//       if (info.weak) {
+//           return Result<ExternalAdmission>::Success(ExternalAdmission::Null);   // weak는 같은 그래프 안만
+//       }
 //       auto outermost = registry_.GetOutermost(access_, info.target);
 //       if (!outermost || outermost.Value() == package_) {
 //           return Result<ExternalAdmission>::Success(ExternalAdmission::Reject);   // UnpackagedReference
@@ -567,13 +571,13 @@ virtual Result<ExternalAdmission> AdmitExternalReference(const ExternalReference
 ```
 
 - `Null`을 지금 두는 이유(택함): 객체 단위 EditorOnly(A1)에서 쿠킹 저장이 런타임 필드가 가리키는 EditorOnly 객체를 만나면 거부·null 중 하나를 골라야 하는데, hook 서명을 A1에서 다시 바꾸지 않게 자리를 둔다. 진단을 남기므로 UE의 "저장 불가 대상은 오류 없이 null"(10절)과 달리 조용하지 않다. 어느 경우에 Null을 쓰는지는 A1이 정한다.
-- 진단 `FieldDiagnosticKind::ExternalReference`(새 값, path = 참조 위치, value = 0 거부·1 null)를 Reject 정책·hook Reject·Null 때 보고한다.
+- 진단 `FieldDiagnosticKind::ExternalReference`(새 값, path = 참조 위치, value = 0 거부·1 null·2 weak 집합 밖 null — 리플렉션 B9d1)를 Reject 정책·hook Reject·Null 때 보고한다.
 - **번호 결정(11절 결정 7 — 택함: 위치 표)**: 저장은 외부 참조를 `0x80000000 | slot`(첫 출현 순)으로 쓰고 값 위치를 u32 출력 byte offset으로 기록한다(출력은 64 MiB 이하라 u32로 충분). 위치 표는 참조 하나에 4 byte(slot은 그 자리 값에서 읽는다)이고 그 메모리를 그래프 바이트 누계와 작업량에 청구한다. A1은 `Externals()`로 ObjectImports를 (assetId, 객체 경로) 순으로 정렬하고(AS 5.2 — outer import도 더한다) `AssignExternalIndices`로 제자리 덮어쓴다. 위치 기록은 writer offset → Record 안 offset(`RecordBuilder`가 마지막 필드 payload의 시작을 알려 준다 — Serialization에 조회 하나를 더한다) → 출력 offset 순으로 바꾼다.
   - 대안 비교: (가) 두 번 encode(수집 → 정렬 → 다시 쓰기) — 저장·쿠킹 CPU 2배. (나) 그래프에 slot → import 번호 표를 두고 값은 slot으로 남기기 — 재배정이 표 하나라 싸지만 형식에 표가 더해지고 AS 5.1 "0x80000000 | i = object import index i"가 간접 번호로 바뀌어 로드마다 한 번 더 찾으며, A1 Dependencies 대조도 간접 번호를 거친다. 위치 표는 형식·로드 경로를 그대로 두고 저장에서만 O(출현 수)를 쓰므로 택한다.
 - 한도: 서로 다른 외부 대상 수 ≤ `maxExternalReferences`(65536), 아니면 CapacityExceeded.
 - Oe 구현의 세부(Null의 Required 규칙·필드 writer 계약·재배정 반복·한도 옵션)는 5.7절 뒤 "구현에서 정한 점(A0-Oe)"에 적었다.
 
-리플렉션 B9 연결: WeakRef 필드는 같은 그래프 안만 보존한다. `ExternalReferenceInfo`에 `weak`를 더하고, Admit에서 weak는 slot 캐시 없이 출현마다 hook에 묻고 Import 응답도 null + 진단(값 2)이다. 예시 hook에 `info.weak` 분기를 둔다. Include는 weak 위치를 기록했다가 모든 노드 encode 뒤 최종 집합 기준으로 제자리 덮어쓴다(지연 항목 메모리는 그래프 바이트·작업량에 청구, 진단은 기록 순서대로). 정책별 처리 표는 ReflectionExtensions 5.1절이다.
+리플렉션 B9 연결(B9d1 구현): WeakRef 필드는 같은 그래프 안만 보존한다. `ExternalReferenceInfo::weak`를 더했고(weak면 slot 0·required 거짓), Admit에서 weak는 slot 캐시 없이 출현마다 hook에 묻고 Import·Null 응답 모두 null + 진단(값 2), Reject는 진단(값 0) 뒤 InvalidArgument다. Reject 정책은 weak 집합 밖 대상을 null + 진단(값 2)으로 쓰고 저장은 성공한다. 예시 hook에 `info.weak` 분기를 두었다. Include는 weak 위치를 기록했다가 모든 노드 encode 뒤 최종 집합 기준으로 제자리 덮어쓴다(지연 항목 = 값 위치·대상·objectIndex·경로 사본, 그 메모리를 위치 표와 같이 그래프 바이트·작업량에 청구, 진단은 기록 순서대로 — 덮어쓰기는 출력 조립 전에 노드 Record에 하므로 위치는 Record offset까지만 바꾼다). 죽었거나 stale인 weak 대상은 어느 정책이든 진단·질의 없이 null이고, 다른 Registry의 handle은 정책·질의 전에 WrongContext다. hook이 없거나 기본(Reject)인 Admit은 집합 밖 weak 하나로 저장이 실패하므로 Admit hook은 `info.weak` 분기를 둔다. 정책별 처리 표는 ReflectionExtensions 5.1절이다.
 
 ### 5.4 복원 API — 단계형 (A0-Od2, 외부 참조는 A0-Oe)
 
@@ -717,7 +721,7 @@ RootRef<Object> held[1];
 return transaction.Commit(roots, held);
 ```
 
-리플렉션 B9 연결: weak 간선은 도달 검사에 넣지 않는다(ReflectionExtensions 5.1절).
+리플렉션 B9 연결(B9d1 구현): weak 간선은 도달 검사에 넣지 않는다(1단계 참조 token에 weak 표시 — 기대 형식 검사는 강한 참조와 같고 도달 검사만 건너뛴다, ReflectionExtensions 5.1절). weak 값의 외부 참조 번호는 1단계 InvalidArgument다.
 
 ### 5.6 한도(`ObjectGraphLimits`)
 

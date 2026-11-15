@@ -244,6 +244,10 @@ bool StructView::ContainsName() const noexcept {
     return ViewAs<TypeRegistry::Record>(record_).containsName;
 }
 
+bool StructView::ContainsWeakReference() const noexcept {
+    return ViewAs<TypeRegistry::Record>(record_).containsWeakReference;
+}
+
 bool StructView::IsAtomic() const noexcept {
     return HasFlag(ViewAs<TypeRegistry::Record>(record_).schema.flags, TypeFlags::Atomic);
 }

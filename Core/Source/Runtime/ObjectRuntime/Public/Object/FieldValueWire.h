@@ -12,7 +12,7 @@
 // Object/GeneratedFieldCodec.h로 받는다.
 namespace rocks::detail {
 
-// 값 종류의 wire tag다. 강한 참조는 문맥의 referenceWire다. Array·Opaque는 Unsupported다(배열
+// 값 종류의 wire tag다. 참조(강한·weak)는 문맥의 referenceWire다. Array·Opaque는 Unsupported다(배열
 // 필드는 아래 필드 단위 FieldWireType). 종류의 다른 성질은 MetaSchema 성질
 // 표(ValueKindProperties)에 있고, wire 대응만 MetaSchema가 Serialization에 의존하지 않도록 이
 // switch 하나에 둔다. Serialization에는 리플렉션 B9a3이 wire Optional 14·Set 15·Map 16·
@@ -55,6 +55,9 @@ inline Result<uint32> FieldWireType(ValueKind kind, uint32 referenceWire) noexce
     case ValueKind::SoftObjectReference:
         return Result<uint32>::Success(static_cast<uint32>(WireType::SoftObjectReference));
     case ValueKind::ObjectReference:
+    case ValueKind::WeakObjectReference:
+        // weak는 강한 참조와 같은 문맥 참조 wire다(graph v2 U32 — 같은 그래프 안 노드만,
+        // Docs/Design/ReflectionExtensions.ko.md 5.1절).
         return Result<uint32>::Success(referenceWire);
     case ValueKind::Struct:
         return Result<uint32>::Success(static_cast<uint32>(WireType::Record));
@@ -270,7 +273,8 @@ private:
 // 청구한다), 없으면 열거자 수만큼 Spend한다. Name은 토큰을 문맥의 pool(Names())로 검사해 표시
 // 문자열을 쓴다(AcquireNameFieldText — pool 없음 Unsupported, 다른 pool WrongContext, 게시되지 않은
 // 토큰 StaleHandle, 내용 규칙 InvalidArgument, None은 빈 문자열) — 내용 검사 몫(byte 수)을
-// Spend한다.
+// Spend한다. weak 참조는 문맥의 WriteWeakReference(Required 검사 없음 — 대상이 죽었으면 null,
+// 저장 집합 밖이면 정책대로 null + 진단)다.
 inline Result<void> WriteValueWire(ArchiveWriter& out, FieldEncodeContext& context,
                                    const ValueType& type, const EnumSchema* enumeration,
                                    const FieldValue& value, StringView text,
@@ -384,6 +388,8 @@ inline Result<void> WriteValueWire(ArchiveWriter& out, FieldEncodeContext& conte
     }
     case ValueKind::ObjectReference:
         return context.WriteReference(out, value.reference, {type.type, staticNative});
+    case ValueKind::WeakObjectReference:
+        return context.WriteWeakReference(out, value.reference, {type.type, staticNative});
     case ValueKind::Struct:
     case ValueKind::Array:
     case ValueKind::Opaque:

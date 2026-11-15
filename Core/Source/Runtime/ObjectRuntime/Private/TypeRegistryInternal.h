@@ -33,6 +33,7 @@ struct TypeRegistry::Record {
     bool requiresWorldOnlyOwner = false;
     bool containsReferenceArray = false;
     bool containsName = false;
+    bool containsWeakReference = false;
     Record** fieldTypes = nullptr;
     uint32 generation = 0;
     uint32 leases = 0;

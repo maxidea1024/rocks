@@ -881,6 +881,90 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::WeakHolder::any",
+      "id": "866510e2ea504c3aa4fb1e858bd309f7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::WeakHolder::group",
+      "id": "4873d2b0948f4656a862731c9f36263f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::WeakHolder::link",
+      "id": "ef9e3e1ff6cf4f5f8b573ebd154ac1d4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::WeakHolder::second",
+      "id": "8deeacf3d33441b5b5d2ea569c2cb0c4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::WeakHolder::strong",
+      "id": "938eede2dc014f59ab748692af03c874",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::WeakHolder::target",
+      "id": "abb3cb7981f6423dab4897e361d10c84",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::WeakHolder::targets",
+      "id": "b335422f913b4aca88afc91825db5d03",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::WeakLink::slot",
+      "id": "ceccbb4b925e440bbecb05f738b5a376",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::WeakLink::target",
+      "id": "70eed8bd4f6141e2bb73a861308029b4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::WeakLinkGroup::links",
+      "id": "d316448808134e939d90157e2aea5075",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::WeakOther::value",
+      "id": "607091c0ca45422dac5ed00e31b9ecc6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::WeakTarget::value",
+      "id": "864278577d0346c4a92bb11add12acb4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::WorldChild::depth",
       "id": "a82897e303e74b2c8e817c9f0fb46194",
       "aliases": [],
@@ -1179,6 +1263,41 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::TextureGroup",
       "id": "f7d5d28eb12f46b9990799c21ff47801",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::WeakHolder",
+      "id": "8c79a226f2a44edb9e8210325aa9b47d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::WeakLink",
+      "id": "47e774b163ea40b098a1b3a096a0dbf3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::WeakLinkGroup",
+      "id": "f1b9e9e4afe24917b82f92f56e40caa2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::WeakOther",
+      "id": "991480cbb2fc4a178670a85a070f11ac",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::WeakTarget",
+      "id": "2a57318ad0a64f0da7458e7b1545328a",
       "aliases": [],
       "retired": false
     },

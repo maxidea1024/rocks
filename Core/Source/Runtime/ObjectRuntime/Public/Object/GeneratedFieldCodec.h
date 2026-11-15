@@ -105,9 +105,10 @@ Result<void> DecodeStructMember(const RuntimeStructFieldOps&, ConstructionContex
         return SetStructMemberReference(*construction, context, owner, target->*MemberPointer,
                                         value.reference);
     } else {
-        // Name 멤버는 1단계에서 토큰이 없으므로 관찰할 수 없다(관찰 struct는 Name을 담지 않는다 —
-        // 직렬화기가 ObservedStructs에서 거부한다, Docs/Design/ReflectionExtensions.ko.md 4.1절).
-        if constexpr (IsSameV<Member, Name>) {
+        // Name 멤버는 1단계에서 토큰이 없고 weak 멤버는 대상 handle이 없으므로 관찰할 수 없다(관찰
+        // struct는 Name·weak 참조를 담지 않는다 — 직렬화기가 ObservedStructs에서 거부한다,
+        // Docs/Design/ReflectionExtensions.ko.md 4.1·5.1절).
+        if constexpr (IsSameV<Member, Name> || WeakReferenceField<Member>::Supported) {
             if (!construction && target) {
                 return Result<void>::Failure(ErrorCode::InvalidArgument);
             }
@@ -119,7 +120,8 @@ Result<void> DecodeStructMember(const RuntimeStructFieldOps&, ConstructionContex
         FieldValue value(!construction && target ? context.ObservationScratch()
                                                  : context.Scratch());
         FieldValue* apply = target || ReflectedEnumField<Member>::Supported ? &value : nullptr;
-        if (auto parsed = ParseFieldValue(field, context, nullptr, apply); !parsed) {
+        if (auto parsed = ParseFieldValue(field, context, StaticReferenceNative<Member>(), apply);
+            !parsed) {
             return parsed;
         }
 
@@ -288,6 +290,22 @@ Result<void> DecodeGeneratedField(ConstructionContext* construction, ObjectHandl
 
         FieldValue value(context.Scratch());
         if (auto parsed = ParseFieldValue(field, context, nullptr, &value); !parsed) {
+            return parsed;
+        }
+
+        return WriteGeneratedValue<Owner>(
+            member, value, [&]() noexcept { return construction->GetForWrite<Owner>(handle); });
+    } else if constexpr (WeakReferenceField<Member>::Supported) {
+        // weak 대상은 1단계가 범위(같은 그래프 안 노드)·기대 형식을 검증한 노드 handle(2a가 이
+        // 트랜잭션에 만든 객체)이므로 staged 쓰기의 대상 검사를 다시 하지 않는다 — 2단계는 입력
+        // 때문에 실패하지 않는다. weak는 GC 간선이 아니므로 SetReference를 거치지 않고 대입한다.
+        if (!construction) {
+            return ParseFieldValue(field, context, StaticReferenceNative<Member>(), nullptr);
+        }
+
+        FieldValue value(context.Scratch());
+        if (auto parsed = ParseFieldValue(field, context, StaticReferenceNative<Member>(), &value);
+            !parsed) {
             return parsed;
         }
 

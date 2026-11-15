@@ -16,5 +16,6 @@ public sealed class ReflectionTestFixtures : CoreModuleRules
     protected override IReadOnlyList<string> Metadata =>
         ["ReflectionTestFixtures/ReflectionFixture.h", "ReflectionTestFixtures/AutoIdentityFixture.h", "ReflectionTestFixtures/StructFixture.h",
             "ReflectionTestFixtures/CoreValueFixture.h", "ReflectionTestFixtures/ArrayFixture.h", "ReflectionTestFixtures/PathFixture.h",
-            "ReflectionTestFixtures/IntegerWidthFixture.h", "ReflectionTestFixtures/NameFieldFixture.h"];
+            "ReflectionTestFixtures/IntegerWidthFixture.h", "ReflectionTestFixtures/NameFieldFixture.h",
+            "ReflectionTestFixtures/WeakRefFixture.h"];
 }

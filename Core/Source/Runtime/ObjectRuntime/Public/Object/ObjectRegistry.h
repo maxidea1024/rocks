@@ -633,6 +633,22 @@ public:
     // 다른 스레드의 호출은 콜백 중에도 먼저 WrongThread로 거부한다.
     Result<ObjectLifecycle> InspectLifecycle(const ObjectAccessContext&,
                                              ObjectHandle) const noexcept;
+
+    // handle이 이 Registry가 발급한 것인지다(domain 비교만 — 생존·세대·접근 문맥은 보지 않는다).
+    // 조회 API는 다른 Registry의 handle을 회수된 handle과 같은 StaleHandle로 알리므로, 둘을
+    // 구별해야 하는 쪽이 먼저 부른다 — weak 참조(WeakRef PROPERTY)는 죽은 대상이면 null로 쓰지만
+    // 다른 Registry를 가리키면 WrongContext로
+    // 실패한다(Docs/Design/ReflectionExtensions.ko.md 5.1절). null handle(registry 0)은 거짓이다.
+    // 잠금·스레드 검사 없이 어느 스레드에서나 부를 수 있다.
+    //
+    // 사용 예:
+    //   if (!target.IsNull() && !registry.OwnsHandle(target)) {
+    //       return Result<void>::Failure(ErrorCode::WrongContext);
+    //   }
+    bool OwnsHandle(ObjectHandle handle) const noexcept {
+        return handle.registry != 0 && handle.registry == domain_;
+    }
+
     Result<BackendLease> AcquireBackendLease(const ObjectAccessContext&, ObjectHandle) noexcept;
     // 읽기용 불변 metadata/code lease를 복제한다. 객체 수명이나 접근권은 따로 보존해야 한다.
     // cutoff·논리 파괴 뒤에는 새 조회를 거부하며 호출자의 context/owner thread를 검사한다.

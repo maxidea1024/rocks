@@ -67,8 +67,10 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
     target.actual = actual;
     target.effectiveFlags = actual->flags;
     target.actualEnum = type.Value().FieldEnum(actualIndex);
-    if (valueKind_ == ValueKind::ObjectReference && value.kind == ValueKind::ObjectReference &&
-        actual->value.kind == ValueKind::ObjectReference) {
+    // 강한 참조와 weak 참조(리플렉션 B9d1)는 같은 대상 검사를 쓴다(생존 객체·기대 타입의 파생).
+    const bool referenceKind =
+        valueKind_ == ValueKind::ObjectReference || valueKind_ == ValueKind::WeakObjectReference;
+    if (referenceKind && value.kind == valueKind_ && actual->value.kind == valueKind_) {
         // 등록 시점에 자기 참조나 별칭이 아직 미등록일 수 있으므로 호출 시 각 레지스트리에서
         // 참조 타입을 확인한다. 서로 다른 GUID라도 같은 native 타입인 별칭은 허용한다.
         if (referencedType_ != TypeId{}) {
@@ -102,6 +104,13 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
 
         // 비정규 null(IsNull인 non-zero handle)은 null이다(B5 컨테이너·SetReference와 같은 정규화).
         if (!value.reference.IsNull()) {
+            // weak 대상이 다른 Registry의 객체면 WrongContext다(조회는 그것을 회수된 handle과 같은
+            // StaleHandle로 알린다 — 리플렉션 B9d1).
+            if (valueKind_ == ValueKind::WeakObjectReference &&
+                !registry.OwnsHandle(value.reference)) {
+                return Result<void>::Failure(ErrorCode::WrongContext);
+            }
+
             auto found = registry.AcquireType(access, value.reference);
             if (!found) {
                 return Result<void>::Failure(found.Error());
@@ -131,8 +140,9 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
 
     // 수동 함수표가 비정규 handle을 저장하지 않게 callback에는 정규 null 사본을 넘긴다(참조 값의
     // 문자열은 비어 있으므로 할당하지 않는다).
-    if (value.kind == ValueKind::ObjectReference && value.reference.IsNull() &&
-        value.reference != ObjectHandle{}) {
+    if ((value.kind == ValueKind::ObjectReference ||
+         value.kind == ValueKind::WeakObjectReference) &&
+        value.reference.IsNull() && value.reference != ObjectHandle{}) {
         FieldValue normalized(value.GetAllocator());
         normalized.kind = value.kind;
         normalized.reference = ObjectHandle{};
@@ -163,8 +173,9 @@ Result<void> ValidateFieldWrite(const FieldWriteBinding& binding, const FieldWri
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
 
-    if (kind == ValueKind::ObjectReference) {
-        // 서로 다른 GUID라도 같은 native 타입인 별칭은 허용한다.
+    if (kind == ValueKind::ObjectReference || kind == ValueKind::WeakObjectReference) {
+        // 서로 다른 GUID라도 같은 native 타입인 별칭은 허용한다. weak 참조도 쓰는 순간에는 같은
+        // Registry의 생존 객체여야 한다(죽으면 읽을 때 null이 되는 것은 그 뒤의 일이다).
         const void* source = target.sourceExpectedNative;
         const void* expected = target.targetExpectedNative;
         if (source && expected && source != expected) {
@@ -235,6 +246,28 @@ Result<void> ValidateArrayEdit(const FieldWriteTarget& target, ArrayEdit edit) n
     // 바깥 struct·배열 필드의 ReadOnly가 전파되어 원소 삽입·삭제·비우기를 모두 막는다.
     if (HasFlag(target.effectiveFlags, FieldFlags::ReadOnly)) {
         return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> ValidateWeakTarget(ObjectRegistry& registry, const ObjectAccessContext& access,
+                                ObjectHandle target, const void* staticNative) noexcept {
+    if (target.IsNull()) {
+        return Result<void>::Success();
+    }
+
+    if (!registry.OwnsHandle(target)) {
+        return Result<void>::Failure(ErrorCode::WrongContext);
+    }
+
+    auto type = registry.AcquireType(access, target);
+    if (!type) {
+        return Result<void>::Failure(type.Error());
+    }
+
+    if (staticNative && !type.Value().IsNativeA(staticNative)) {
+        return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
 
     return Result<void>::Success();

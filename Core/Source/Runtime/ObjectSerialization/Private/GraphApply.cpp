@@ -168,6 +168,29 @@ public:
         return Result<DecodedReference>::Success(decoded);
     }
 
+    // weak 참조는 2a가 만든 노드 handle이다(외부 번호는 1단계가 거부했다 — 다르면 원본이 바뀐 계약
+    // 위반).
+    Result<DecodedReference> ReadWeakReference(ArchiveReader& reader,
+                                               const ReferenceExpectation&) noexcept override {
+        auto local = reader.ReadU32();
+        if (!local) {
+            return Result<DecodedReference>::Failure(local.Error());
+        }
+
+        DecodedReference decoded;
+        decoded.isNull = local.Value() == 0;
+        if (decoded.isNull) {
+            return Result<DecodedReference>::Success(decoded);
+        }
+
+        if ((local.Value() & ExternalReferenceBit) != 0 || local.Value() > nodes_.Size()) {
+            return Result<DecodedReference>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        decoded.handle = nodes_[local.Value() - 1].handle;
+        return Result<DecodedReference>::Success(decoded);
+    }
+
     Result<void> Spend(uint64) noexcept override {
         return Result<void>::Success();
     }

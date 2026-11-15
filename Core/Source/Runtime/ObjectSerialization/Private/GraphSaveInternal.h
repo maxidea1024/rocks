@@ -4,8 +4,22 @@
 
 // 그래프 저장의 내부 정의다. GraphSave.cpp(노드 encode·참조 쓰기·저장 진입점),
 // GraphSaveSet.cpp(저장 집합·Include·NodeTable·출력 조립), GraphExternal.cpp(외부 참조 허락·위치
-// 표·번호 재배정)가 같이 쓴다.
+// 표·번호 재배정·weak 지연 덮어쓰기)가 같이 쓴다.
 namespace rocks::graph_detail {
+
+// Include 정책에서 encode 때 저장 집합 밖이던 weak 참조 하나의 지연 항목이다(Docs/Design/
+// ReflectionExtensions.ko.md 5.1절 — 모든 노드를 encode한 뒤 최종 집합으로 제자리 덮어쓴다).
+// position은 값(u32) 위치로, 필드 encode 동안은 필드 writer offset이고 필드를 Record에 더한 뒤
+// 노드 Record offset이다(외부 참조 위치 표와 같은 재배정 — 덮어쓰기는 출력 조립 전에 노드 Record에
+// 한다). target은 대상 handle, objectIndex는 값을 가진 노드 위치(0부터), [pathOffset, pathOffset +
+// pathSteps)는 진단 경로 사본(지연 경로 표 안 — 1.6절 표기라 key를 복사하지 않는다)이다.
+struct WeakDeferral {
+    uint32 position = 0;
+    ObjectHandle target{};
+    uint32 objectIndex = 0;
+    uint32 pathOffset = 0;
+    uint32 pathSteps = 0;
+};
 
 // 저장할 노드 하나다. lease는 집합 노드면 OpenSetNodes가, Include가 더한 노드면 발견할 때 연 대상
 // 타입 lease이며 참조 검사와 SaveNodeFields가 재사용한다. outer는 Registry의 Outer(없으면
@@ -35,6 +49,9 @@ struct SaveNode {
 // handle → 외부 slot 해시 표(키는 domain을 포함한 handle 전체 — 캐시 적중이 domain 검사를 건너뛰지
 // 않게), 노드·외부 대상별 TypeLease, 기대 TypeId → lease 캐시를 쓰고 조회·삽입마다 작업량 1을
 // 청구한다. 위치 표는 참조 하나에 4 byte이고 그 메모리를 그래프 바이트 누계와 작업량에 청구한다.
+// weak 참조(리플렉션 B9d1)는 집합 안이면 local ID, 밖이면 정책대로 null + 진단(값 2)이고, Include는
+// 지연 항목(WeakDeferral과 경로 사본)을 기록해 모든 노드 encode 뒤 ResolveWeakDeferrals가 최종
+// 집합으로 덮어쓴다 — 지연 항목 메모리도 위치 표처럼 그래프 바이트 누계·작업량에 청구한다.
 class GraphEncodeContext final : public FieldEncodeContext {
 public:
     GraphEncodeContext(Allocator& allocator, ObjectRegistry& registry,
@@ -47,7 +64,7 @@ public:
           scratch_(allocator, budget), observation_(allocator, budget, false), locals_(allocator),
           expected_(allocator), firstAncestors_(allocator), chain_(allocator), names_(allocator),
           slots_(allocator), externals_(allocator), externalLeases_(allocator),
-          positions_(allocator) {
+          positions_(allocator), weakDeferrals_(allocator), weakPaths_(allocator) {
         // Name 필드는 이 Registry의 pool로 표시 문자열을 읽는다.
         SetNames(registry.Names());
     }
@@ -77,6 +94,27 @@ public:
     }
 
     Result<void> RebasePositions(usize first, usize end, usize base) noexcept;
+
+    // weak 지연 항목(Include — GraphExternal.cpp)이다: 기록한 수, [first, 끝) 항목 위치에 base를
+    // 더하기(필드 writer offset → Record offset — u32를 넘으면 CapacityExceeded, 항목마다 작업량
+    // 1).
+    usize WeakDeferralCount() const noexcept {
+        return weakDeferrals_.Size();
+    }
+
+    Result<void> RebaseWeakDeferrals(usize first, usize base) noexcept;
+
+    // 그래프 바이트 누계에 드는 저장 표 메모리다: 외부 참조 위치 표와 weak 지연 항목·경로 사본.
+    usize TableBytes() const noexcept {
+        return PositionBytes() + weakDeferrals_.Size() * sizeof(WeakDeferral) +
+               weakPaths_.Size() * sizeof(PathStep);
+    }
+
+    // Include: 모든 노드를 encode한 뒤 weak 지연 항목을 기록 순서대로 최종 집합 기준으로 노드
+    // Record에 덮어쓴다(집합 안이면 local ID, 밖이면 0 그대로 두고 그 항목의 위치로
+    // ExternalReference 진단 값 2). 항목마다 작업량 2(조회·덮어쓰기)다. 출력 조립(WriteGraph) 전에
+    // 부른다.
+    Result<void> ResolveWeakDeferrals() noexcept;
 
     // 저장 결과로 넘길 외부 참조 목록(slot 순)과 위치 표다.
     Array<GraphExternal>& Externals() noexcept {
@@ -141,6 +179,10 @@ protected:
     Result<void> WriteReferenceWire(ArchiveWriter& out, ObjectHandle target,
                                     const ReferenceExpectation& expectation) noexcept override;
 
+    // weak 참조 쓰기(GraphSave.cpp)다.
+    Result<void> WriteWeakReferenceWire(ArchiveWriter& out, ObjectHandle target,
+                                        const ReferenceExpectation& expectation) noexcept override;
+
 private:
     // Include·이름(GraphSaveSet.cpp), 기대 타입 캐시(GraphSave.cpp), 외부 참조(GraphExternal.cpp)
     // 다.
@@ -154,6 +196,14 @@ private:
                                const ReferenceExpectation& expectation) noexcept;
     // Import된 slot의 참조 하나를 집계하고 위치를 기록한 뒤 0x80000000 | slot을 쓴다.
     Result<void> WriteImported(ArchiveWriter& out, uint32 slot) noexcept;
+    // 저장 집합 밖 weak 대상 하나를 정책대로 처리한다(Reject·Admit은 null + 진단, Include는 지연
+    // 항목 — GraphExternal.cpp). lease는 대상의 실제 타입이다.
+    Result<void> WriteExternalWeak(ArchiveWriter& out, ObjectHandle target, const TypeLease& lease,
+                                   const ReferenceExpectation& expectation) noexcept;
+    // Include: 지연 항목(지금 위치·경로 사본)을 기록하고 자리값 0을 쓴다.
+    Result<void> DeferWeak(ArchiveWriter& out, ObjectHandle target) noexcept;
+    // 위치 표·지연 항목 하나가 더 늘어도 그래프 바이트 누계 안인지 본다(늘어날 byte = added).
+    Result<void> CheckTableGrowth(usize added) noexcept;
 
     Allocator& allocator_;
     ObjectRegistry& registry_;
@@ -180,6 +230,9 @@ private:
     Array<GraphExternal> externals_;
     Array<TypeLease> externalLeases_;
     Array<uint32> positions_;
+    // Include의 weak 지연 항목(기록 순)과 그 진단 경로 사본이다.
+    Array<WeakDeferral> weakDeferrals_;
+    Array<PathStep> weakPaths_;
     const ArchiveWriter* fieldWriter_ = nullptr;
     usize committedBytes_ = 0;
 };

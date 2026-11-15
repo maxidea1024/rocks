@@ -131,6 +131,12 @@ public:
         length_ = length;
     }
 
+    // weak 참조 쓰기·삽입(Input()의 reference)의 대상이 정적 대상 타입 staticNative
+    // (NativeTypeKey<T>)의 native 파생인지다(리플렉션 B9d1). 대상의 생존·스키마 기대 타입은 검증
+    // 지점(PathRunner — ValidateFieldWrite)이 이미 봤다. null이면 성공, 아니면 TypeMismatch
+    // (StaticTypeMismatch)다.
+    Result<void> CheckWeakTarget(const void* staticNative) noexcept;
+
     // 할당하는 쓰기 끝 지점이 할당 전에 owner를 encode 고정한다(이미 고정했으면 그대로 성공 —
     // Read는 처음부터 고정한다). 고정 중 재진입 쓰기·Registry 컨테이너 변경·SetEdge는 Busy다.
     Result<void> Pin() noexcept;

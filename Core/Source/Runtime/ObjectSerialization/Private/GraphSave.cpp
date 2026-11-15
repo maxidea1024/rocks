@@ -115,6 +115,81 @@ GraphEncodeContext::WriteReferenceWire(ArchiveWriter& out, ObjectHandle target,
     return RejectExternal();
 }
 
+// weak 참조 하나다(Docs/Design/ReflectionExtensions.ko.md 5.1절): null·비정규 null·죽은 대상
+// (StaleHandle·Destroyed — 회수·재사용·논리 파괴·cutoff)은 진단 없이 0이다. 살아 있으면 강한 참조와
+// 같은 기대 형식 검사(TypeMismatch) 뒤 집합 안이면 local ID, 밖이면 WriteExternalWeak다. 다른
+// Registry의 handle은 WrongContext(정책·hook 질의 전)이고 접근·문맥·종료·재진입 오류는 그대로
+// 돌려준다 — weak 값이 잘못된 문맥을 가리키는 것은 정상 상태가 아니다. slot 캐시(강한 참조가
+// Import한 대상)는 보지 않는다.
+Result<void>
+GraphEncodeContext::WriteWeakReferenceWire(ArchiveWriter& out, ObjectHandle target,
+                                           const ReferenceExpectation& expectation) noexcept {
+    if (target.IsNull()) {
+        return out.WriteU32(0);
+    }
+
+    // 다른 Registry의 handle은 정책·hook 질의 전에 WrongContext다(조회 API는 그것을 회수된 handle과
+    // 같은 StaleHandle로 알리므로 먼저 가른다 — 조용한 null로 잃지 않는다).
+    if (!registry_.OwnsHandle(target)) {
+        return Result<void>::Failure(ErrorCode::WrongContext);
+    }
+
+    if (auto spent = budget_.Spend(1); !spent) {
+        return spent;
+    }
+
+    const auto dead = [](ErrorCode code) noexcept {
+        return code == ErrorCode::StaleHandle || code == ErrorCode::Destroyed;
+    };
+    TypeLease discovered;
+    const TypeLease* actual = &discovered;
+    const uint32* found = locals_.Find(target);
+    if (found) {
+        // 집합 노드도 참조마다 lease 없는 생존 조회를 한다(강한 참조와 같다). 죽었으면 null이다 —
+        // 그 노드 자신은 마지막 생존 재확인에서 저장을 실패시킨다.
+        auto lifecycle = registry_.InspectLifecycle(access_, target);
+        if (!lifecycle) {
+            return dead(lifecycle.Error()) ? out.WriteU32(0)
+                                           : Result<void>::Failure(lifecycle.Error());
+        }
+
+        if (lifecycle.Value() != ObjectLifecycle::Alive) {
+            return out.WriteU32(0);
+        }
+
+        actual = &nodes_[*found - 1].lease;
+    } else {
+        auto acquired = registry_.AcquireType(access_, target);
+        if (!acquired) {
+            return dead(acquired.Error()) ? out.WriteU32(0)
+                                          : Result<void>::Failure(acquired.Error());
+        }
+
+        discovered = Move(acquired.Value());
+    }
+
+    if (expectation.staticNative && !actual->IsNativeA(expectation.staticNative)) {
+        return Result<void>::Failure(ErrorCode::TypeMismatch);
+    }
+
+    if (expectation.schemaType != Guid{}) {
+        auto expected = ExpectedLease(expectation.schemaType);
+        if (!expected) {
+            return Result<void>::Failure(expected.Error());
+        }
+
+        if (!actual->IsNativeA(expected.Value()->Ops().nativeType)) {
+            return Result<void>::Failure(ErrorCode::TypeMismatch);
+        }
+    }
+
+    if (found) {
+        return out.WriteU32(*found);
+    }
+
+    return WriteExternalWeak(out, target, discovered, expectation);
+}
+
 // 기대 TypeId의 등록 타입 lease다(저장 끝까지 캐시에 쥔다). 조회·삽입마다 작업량 1이다.
 Result<const TypeLease*> GraphEncodeContext::ExpectedLease(TypeId type) noexcept {
     if (auto spent = budget_.Spend(1); !spent) {
@@ -182,7 +257,7 @@ Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
     usize reserved = 0;
     if (!TryAdd(fileBytes, RecordPrefixBytes, reserved) ||
         !TryAdd(reserved, entryBytes, reserved) ||
-        !TryAdd(reserved, context.PositionBytes(), reserved)) {
+        !TryAdd(reserved, context.TableBytes(), reserved)) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
 
@@ -222,8 +297,10 @@ Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
         ArchiveLimits fieldLimits = budget.Archive();
         fieldLimits.maxTotalBytes = recordLimits.archive.maxTotalBytes;
         ArchiveWriter encoded(allocator, fieldLimits);
-        // 이 필드의 외부 참조 위치는 [fieldPosition, 끝)이고 encoded 안 offset으로 기록된다.
+        // 이 필드의 외부 참조 위치는 [fieldPosition, 끝), weak 지연 항목은 [fieldWeak, 끝)이고
+        // encoded 안 offset으로 기록된다.
         const usize fieldPosition = context.PositionCount();
+        const usize fieldWeak = context.WeakDeferralCount();
         context.SetFieldWriter(&encoded);
         auto wire =
             accessor.Value()->encode(*accessor.Value(), registry, access, handle, encoded, context);
@@ -268,19 +345,25 @@ Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
             return rebased;
         }
 
+        if (auto rebased = context.RebaseWeakDeferrals(fieldWeak, record.LastFieldPayloadOffset());
+            !rebased) {
+            return rebased;
+        }
+
         if (!TryAdd(payloadBytes, appended, payloadBytes)) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }
     }
 
     // 이 노드가 출력에 더하는 byte: Bytes(Record) = 8 + 44 + payload, NodeTable이면 노드 항목.
-    // 외부 참조 위치 표 메모리도 그래프 바이트 누계에 든다(5.3절).
+    // 외부 참조 위치 표와 weak 지연 항목 메모리도 그래프 바이트 누계에 든다(5.3절, 리플렉션 B9
+    // 5.1절).
     usize recordBytes = 0;
     usize total = 0;
     usize charged = 0;
     if (!TryAdd(payloadBytes, RecordHeaderBytes, recordBytes) ||
         !TryAdd(fileBytes, RecordPrefixBytes, total) || !TryAdd(total, recordBytes, total) ||
-        !TryAdd(total, entryBytes, total) || !TryAdd(total, context.PositionBytes(), charged)) {
+        !TryAdd(total, entryBytes, total) || !TryAdd(total, context.TableBytes(), charged)) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
 
@@ -373,6 +456,12 @@ Result<ObjectGraphSaveResult> SaveObjectGraphSet(Allocator& allocator, ObjectReg
         if (!saved) {
             return Output::Failure(saved.Error());
         }
+    }
+
+    // Include의 weak 지연 항목을 최종 집합으로 덮어쓰고 집합 밖 항목을 기록 순서대로 진단한다
+    // (노드 encode 순서와 무관한 결과 — 리플렉션 B9 5.1절).
+    if (auto resolved = context.ResolveWeakDeferrals(); !resolved) {
+        return Output::Failure(resolved.Error());
     }
 
     Array<uint32> outers(allocator);

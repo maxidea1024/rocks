@@ -30,12 +30,13 @@ struct ParsedValue {
 };
 
 // reader에서 값 하나(type 종류)를 읽어 검증한다(단일 값 필드와 배열 원소 공용, 5.6절). 진단·청구는
-// 하지 않는다(강한 참조는 문맥의 ReadReference — 1단계는 token을 남긴다). 검증: 잘림·bool·UTF-8은
-// reader 규칙, 정수 폭 Overflow, digest 길이·SoftObjectRef 규칙 InvalidArgument, enum은
-// enumeration이 없으면 Unsupported이고 선언 여부를 set(있으면) 또는 스키마로 판정해
-// out.undeclared에 표시만 한다. Name은 표시 문자열을 view로 읽고, 기록하는 단계(복원 1단계)면 그
-// 몫(byte 수)을 Spend한 뒤 내용 규칙(ValidateNameFieldText — 길이·UTF-8·NUL·NFC, InvalidArgument)을
-// 본다 — 토큰은 ResolveParsedName이 단계에 맞게 정한다. Struct·Array·Opaque는 Unsupported다.
+// 하지 않는다(강한 참조는 문맥의 ReadReference, weak 참조는 ReadWeakReference — 1단계는 token을
+// 남긴다). 검증: 잘림·bool·UTF-8은 reader 규칙, 정수 폭 Overflow, digest 길이·SoftObjectRef 규칙
+// InvalidArgument, enum은 enumeration이 없으면 Unsupported이고 선언 여부를 set(있으면) 또는
+// 스키마로 판정해 out.undeclared에 표시만 한다. Name은 표시 문자열을 view로 읽고, 기록하는
+// 단계(복원 1단계)면 그 몫(byte 수)을 Spend한 뒤 내용 규칙(ValidateNameFieldText —
+// 길이·UTF-8·NUL·NFC, InvalidArgument)을 본다 — 토큰은 ResolveParsedName이 단계에 맞게 정한다.
+// Struct·Array·Opaque는 Unsupported다.
 inline Result<void> ReadValueWire(ArchiveReader& reader, FieldDecodeContext& context,
                                   const ValueType& type, const EnumSchema* enumeration,
                                   const EnumValueSet* set, const void* staticNative,
@@ -215,6 +216,15 @@ inline Result<void> ReadValueWire(ArchiveReader& reader, FieldDecodeContext& con
         out.reference = decoded.Value();
         return Result<void>::Success();
     }
+    case ValueKind::WeakObjectReference: {
+        auto decoded = context.ReadWeakReference(reader, {type.type, staticNative});
+        if (!decoded) {
+            return Result<void>::Failure(decoded.Error());
+        }
+
+        out.reference = decoded.Value();
+        return Result<void>::Success();
+    }
     case ValueKind::Struct:
     case ValueKind::Array:
     case ValueKind::Opaque:
@@ -349,12 +359,14 @@ inline Result<void> ParseFieldValue(const FieldView& field, FieldDecodeContext& 
         }
     }
 
-    // 2단계 몫: staged 쓰기 1 + 문자열(값 복사와 staged 교체본) 2배 + 강한 참조 연결 1. Name은
-    // 문자열을 복사하지 않는다(토큰을 쓴다 — intern 몫은 CollectName이 청구했다).
+    // 2단계 몫: staged 쓰기 1 + 문자열(값 복사와 staged 교체본) 2배 + 참조(강한·weak) 연결 1.
+    // Name은 문자열을 복사하지 않는다(토큰을 쓴다 — intern 몫은 CollectName이 청구했다).
     const usize copiedText = kind == ValueKind::Name ? 0 : parsed.text.ByteCount();
+    const bool reference =
+        kind == ValueKind::ObjectReference || kind == ValueKind::WeakObjectReference;
     usize applyWork = 0;
     if (!TryMultiply(copiedText, 2, applyWork) ||
-        !TryAdd(applyWork, kind == ValueKind::ObjectReference ? 2 : 1, applyWork)) {
+        !TryAdd(applyWork, reference ? 2 : 1, applyWork)) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
 
@@ -414,11 +426,13 @@ bool MatchesSchema(const FieldSchema& field) noexcept {
     }
 }
 
-// 강한 참조 멤버(ObjectRefArray면 원소)의 정적 대상 타입이다(그 밖은 nullptr).
+// 참조 멤버(강한·weak — 배열이면 원소)의 정적 대상 타입이다(그 밖은 nullptr).
 template <class Member>
 const void* StaticReferenceNative() noexcept {
     if constexpr (ObjectReferenceField<Member>::Supported) {
         return NativeTypeKey<typename ObjectReferenceField<Member>::Target>();
+    } else if constexpr (WeakReferenceField<Member>::Supported) {
+        return NativeTypeKey<typename WeakReferenceField<Member>::Target>();
     } else {
         return nullptr;
     }

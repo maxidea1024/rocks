@@ -20,6 +20,19 @@ struct ObjectReferenceField<ObjectRef<T>> {
     using Target = T;
 };
 
+// weak 참조 PROPERTY(WeakRef<T> — 리플렉션 B9d1, Docs/Design/ReflectionExtensions.ko.md 5.1절)다.
+// GC가 추적하지 않는 값 필드이고 Target은 정적 기대 대상 타입이다.
+template <class T>
+struct WeakReferenceField {
+    static constexpr bool Supported = false;
+};
+
+template <class T>
+struct WeakReferenceField<WeakRef<T>> {
+    static constexpr bool Supported = true;
+    using Target = T;
+};
+
 template <class T>
 struct SoftReferenceField {
     static constexpr bool Supported = false;
@@ -50,10 +63,10 @@ struct ReflectedStructField {
 };
 
 // 리플렉션 배열 필드의 컨테이너다(Docs/Design/ReflectionFoundations.ko.md 5.6절). 부분 특수화로만
-// 고르며(requires 탐지 없음) Element는 원소의 C++ 형식이다: Array<E>는 E(스칼라·String·Guid·
-// AssetId·Digest·enum·SoftObjectRef·참조 없는 struct), ObjectRefArray<T>는 ObjectRef<T>(원소 null
-// 허용), StructRefArray<S>는 참조 struct S다. Registry는 원소를 Registry가 관리하는 컨테이너
-// (ObjectRefArray·StructRefArray)인지다.
+// 고르며(requires 탐지 없음) Element는 원소의 C++ 형식이다: Array<E>는 E(스칼라·String·Name·Guid·
+// AssetId·Digest·enum·SoftObjectRef·WeakRef·참조 없는 struct), ObjectRefArray<T>는
+// ObjectRef<T>(원소 null 허용), StructRefArray<S>는 참조 struct S다. Registry는 원소를 Registry가
+// 관리하는 컨테이너(ObjectRefArray·StructRefArray)인지다.
 template <class T>
 struct ArrayField {
     static constexpr bool Supported = false;
@@ -127,6 +140,8 @@ constexpr ValueKind ScalarValueKind() noexcept {
         return ValueKind::Name;
     } else if constexpr (ObjectReferenceField<T>::Supported) {
         return ValueKind::ObjectReference;
+    } else if constexpr (WeakReferenceField<T>::Supported) {
+        return ValueKind::WeakObjectReference;
     } else if constexpr (IsSameV<T, AssetId>) {
         return ValueKind::AssetId;
     } else if constexpr (IsSameV<T, Sha256Digest>) {
@@ -171,8 +186,8 @@ struct TargetValueCheck {
 };
 
 // 단일 값 하나를 Target 종류로 FieldValue에 복사한다(String·Soft 경로는 value의 allocator로 할당 —
-// OutOfMemory). enum은 정수와 GeneratedType<E>::Id()를 싣는다. 참조는 handle을, Name은 토큰을
-// 싣는다(할당 없음).
+// OutOfMemory). enum은 정수와 GeneratedType<E>::Id()를 싣는다. 참조(강한·weak)는 handle을, Name은
+// 토큰을 싣는다(할당 없음 — weak는 대상이 죽었어도 저장된 handle 그대로다).
 //
 // 사용 예:
 //   FieldValue value(allocator);
@@ -196,7 +211,8 @@ Result<void> CopyTargetValue(const T& source, FieldValue& value) noexcept {
     } else if constexpr (Target == ValueKind::Enum) {
         value.signedInteger = static_cast<int64>(source);
         value.type = GeneratedType<T>::Id();
-    } else if constexpr (Target == ValueKind::ObjectReference) {
+    } else if constexpr (Target == ValueKind::ObjectReference ||
+                         Target == ValueKind::WeakObjectReference) {
         value.reference = source.Handle();
     } else if constexpr (Target == ValueKind::Bool) {
         value.boolean = source;
@@ -221,9 +237,13 @@ Result<void> CopyTargetValue(const T& source, FieldValue& value) noexcept {
 // ID가 GeneratedType<E>::Id()가 아니면 TypeMismatch·선언되지 않은 값이면 InvalidArgument, Soft는
 // null 규칙·경로 상한 위반이 InvalidArgument다(실패하면 target은 그대로다). String·Soft는 target의
 // allocator로 할당한다(OutOfMemory — 이때는 제자리 대입이므로 원자적 게시가 필요한 쓰기는 새 값에
-// 쓴 뒤 Swap한다). 참조는 Registry로만 쓰므로 받지 않는다(컴파일 오류). Name은 토큰을 그대로
+// 쓴 뒤 Swap한다). 강한 참조는 Registry로만 쓰므로 받지 않는다(컴파일 오류). Name은 토큰을 그대로
 // 대입한다 — 토큰이 대상 Registry pool의 것인지와 내용 규칙(ValidateNameFieldToken)은 호출
-// 경로(FieldWriteOperation·WriteGeneratedStagedField·경로 쓰기)가 먼저 검사한다.
+// 경로(FieldWriteOperation·WriteGeneratedStagedField·경로 쓰기)가 먼저 검사한다. weak 참조는
+// handle을 그대로 대입한다(비정규 null은 ObjectHandle{}로 정규화) — 대상이 같은 Registry의 생존
+// 객체이고 기대 타입의 파생인지는 호출 경로(FieldWriteOperation·WriteGeneratedField·
+// WriteGeneratedStagedField·경로 쓰기)가 먼저 검사하고, 복원 2단계는 1단계가 검증한 노드 handle을
+// 쓴다.
 template <ValueKind Target, class T>
 Result<void> WriteTargetValue(T& target, const FieldValue& value) noexcept {
     static_assert(TargetValueCheck<Target, T>::Valid);
@@ -241,6 +261,8 @@ Result<void> WriteTargetValue(T& target, const FieldValue& value) noexcept {
         target = AssetId{value.guid};
     } else if constexpr (Target == ValueKind::Name) {
         target = value.name;
+    } else if constexpr (Target == ValueKind::WeakObjectReference) {
+        target = T(value.reference.IsNull() ? ObjectHandle{} : value.reference);
     } else if constexpr (Target == ValueKind::Digest256) {
         target = value.digest;
     } else if constexpr (Target == ValueKind::Enum) {
@@ -443,6 +465,18 @@ Result<void> WriteGeneratedField(ObjectRegistry& registry, const ObjectAccessCon
         }
 
         return registry.SetReference(access, handle, target.Value()->*member, value.reference);
+    } else if constexpr (WeakReferenceField<Member>::Supported) {
+        // weak 대상은 이 Registry의 생존 객체이고 정적 대상 타입의 파생이어야 한다(null 허용 —
+        // 등록된 write를 거치면 FieldWriteOperation이 스키마 기대 타입으로 먼저 검사했다).
+        if (auto valid =
+                ValidateWeakTarget(registry, access, value.reference,
+                                   NativeTypeKey<typename WeakReferenceField<Member>::Target>());
+            !valid) {
+            return valid;
+        }
+
+        return WriteGeneratedValue<Owner>(member, value,
+                                          [&]() noexcept { return borrowed.Value().Get(); });
     } else if constexpr (IsSameV<Member, String> || SoftReferenceField<Member>::Supported) {
         auto pin = registry.PinForEncode(access, handle);
         if (!pin) {
@@ -474,6 +508,33 @@ Result<void> WriteGeneratedStagedField(ConstructionContext& construction, Object
         }
 
         return construction.SetReference(handle, target.Value()->*member, value.reference);
+    } else if constexpr (WeakReferenceField<Member>::Supported) {
+        // weak 대상은 이 트랜잭션 Registry의 생존 객체이거나 이 트랜잭션의 객체이고 정적 대상
+        // 타입의 파생이어야 한다(null 허용 — 다른 Registry의 handle은 WrongContext, 파괴 요청·
+        // 회수된 대상은 ConstructionContext::AcquireType의 StaleHandle). owner 확인(접근·생존·
+        // 검사 중 Busy) 뒤에 본다. 게시는 owner를 다시 얻어 할당 없이 대입한다.
+        if (auto target = construction.GetForWrite<Owner>(handle); !target) {
+            return Result<void>::Failure(target.Error());
+        }
+
+        if (!value.reference.IsNull()) {
+            if (!construction.Registry().OwnsHandle(value.reference)) {
+                return Result<void>::Failure(ErrorCode::WrongContext);
+            }
+
+            auto type = construction.AcquireType(value.reference);
+            if (!type) {
+                return Result<void>::Failure(type.Error());
+            }
+
+            if (!type.Value().IsNativeA(
+                    NativeTypeKey<typename WeakReferenceField<Member>::Target>())) {
+                return Result<void>::Failure(ErrorCode::TypeMismatch);
+            }
+        }
+
+        return WriteGeneratedValue<Owner>(
+            member, value, [&]() noexcept { return construction.GetForWrite<Owner>(handle); });
     } else if constexpr (IsSameV<Member, Name>) {
         // Name 토큰은 그 트랜잭션 Registry의 pool 것이어야 한다(FieldWriteOperation과 같은 검사 —
         // pool 없음 Unsupported, 다른 pool WrongContext, 내용 InvalidArgument). 소프트 참조처럼

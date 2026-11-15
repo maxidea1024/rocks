@@ -77,6 +77,13 @@ protected:
         return out.WriteU32(target == ObjectHandle{} ? 0 : 1);
     }
 
+    // weak는 Required가 될 수 없어 검사 대상이 아니다. 같은 encode 경로가 struct 값 안에서 지나갈
+    // 때를 위해 자리값만 쓴다(출력은 버린다).
+    Result<void> WriteWeakReferenceWire(ArchiveWriter& out, ObjectHandle target,
+                                        const ReferenceExpectation&) noexcept override {
+        return out.WriteU32(target.IsNull() ? 0 : 1);
+    }
+
 private:
     Allocator& allocator_;
 };

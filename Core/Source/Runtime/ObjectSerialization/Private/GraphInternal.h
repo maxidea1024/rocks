@@ -187,12 +187,15 @@ struct StoredField {
     FieldView view;
 };
 
-// 1단계가 모은 강한 참조 하나다. target은 저장 값 그대로다 — local ID(1부터) 또는 외부 참조
+// 1단계가 모은 참조 하나다. target은 저장 값 그대로다 — local ID(1부터) 또는 외부 참조
 // ExternalReferenceBit | i(null은 기록하지 않는다 — 배열은 non-null 원소마다 하나). expectation은
-// LoadNode::expectations의 위치(필드 안 서로 다른 기대마다 하나 — 원소마다 복제하지 않는다).
+// LoadNode::expectations의 위치(필드 안 서로 다른 기대마다 하나 — 원소마다 복제하지 않는다). weak는
+// weak 참조(리플렉션 B9d1 — 늘 노드 token이다)이고 기대 형식 검사는 강한 참조와 같지만 도달 검사가
+// 따라가지 않는다(Docs/Design/ReflectionExtensions.ko.md 5.1절).
 struct ReferenceToken {
     uint32 target = 0;
     uint32 expectation = 0;
+    bool weak = false;
 };
 
 // 외부 참조 token이면 그 번호 i(1부터)를, 노드 token이면 0을 돌려준다.

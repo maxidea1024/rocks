@@ -85,8 +85,8 @@ struct FieldCodecFrame {
     const FieldCodecFrame* parent = nullptr;
 };
 
-// 강한 참조의 기대 형식이다. schemaType은 스키마의 기대 타입(0 = Object), staticNative는 생성
-// thunk의 정적 대상 타입 NativeTypeKey<T>()(Object거나 모르면 nullptr)다. 대상은 둘 다를 상속
+// 참조(강한·weak)의 기대 형식이다. schemaType은 스키마의 기대 타입(0 = Object), staticNative는
+// 생성 thunk의 정적 대상 타입 NativeTypeKey<T>()(Object거나 모르면 nullptr)다. 대상은 둘 다를 상속
 // 규칙으로 만족해야 한다.
 struct ReferenceExpectation {
     TypeId schemaType{};
@@ -138,8 +138,9 @@ public:
         return objectIndex_;
     }
 
-    // 강한 참조 필드의 wire tag다(graph v2 = U32 — local ID와 외부 참조 비트). 참조 필드의
-    // encode는 이 값을 돌려주고 decode는 저장 tag를 이것과 비교한다.
+    // 참조 필드(강한·weak)의 wire tag다(graph v2 = U32 — local ID와 외부 참조 비트, weak는 외부
+    // 참조 비트를 쓰지 않는다). 참조 필드의 encode는 이 값을 돌려주고 decode는 저장 tag를 이것과
+    // 비교한다.
     uint32 ReferenceWireType() const noexcept {
         return referenceWire_;
     }
@@ -175,7 +176,7 @@ public:
             return Result<void>::Success();
         }
 
-        PathStep steps[33];
+        PathStep steps[MaxPropertyPathSteps];
         FieldDiagnostic diagnostic;
         diagnostic.kind = FieldDiagnosticKind::UnknownField;
         diagnostic.objectType = objectType_;
@@ -248,7 +249,7 @@ protected:
     }
 
     // 프레임 사슬로 경로를 만든다(바깥 → 안 순서). 반환 span은 steps를 가리킨다.
-    Span<const PathStep> BuildPath(PathStep (&steps)[33]) const noexcept;
+    Span<const PathStep> BuildPath(PathStep (&steps)[MaxPropertyPathSteps]) const noexcept;
 
 private:
     friend class FieldScope;
@@ -310,11 +311,11 @@ private:
 };
 
 // 배열 필드 프레임의 원소 index 칸을 쓴다(RAII, Docs/Design/ReflectionFoundations.ko.md 5.6절).
-// 원소마다 새 프레임을 만들지 않으므로 프레임은 최대 17개(BuildPath의 33 안)다. 만들 때 현재
-// 프레임이 배열 필드(value.kind == Array)이고 그 index가 NoIndex여야 한다(아니면 Fatal — 배열 codec
-// 계약 위반). Set은 현재 프레임이 그 배열 프레임일 때만 쓸 수 있고(원소 struct 멤버 scope 안에서
-// 부르면 Fatal), 소멸 때 index를 NoIndex로 되돌린다. 배열 프레임을 연 FieldScope보다 먼저 끝나야
-// 한다.
+// 원소마다 새 프레임을 만들지 않으므로 프레임은 최대 MaxPropertyPathSteps(17)개(BuildPath 버퍼
+// 크기)다. 만들 때 현재 프레임이 배열 필드(value.kind == Array)이고 그 index가 NoIndex여야
+// 한다(아니면 Fatal — 배열 codec 계약 위반). Set은 현재 프레임이 그 배열 프레임일 때만 쓸 수
+// 있고(원소 struct 멤버 scope 안에서 부르면 Fatal), 소멸 때 index를 NoIndex로 되돌린다. 배열
+// 프레임을 연 FieldScope보다 먼저 끝나야 한다.
 //
 // 사용 예(배열 codec):
 //   ElementIndexScope element(context);
@@ -418,6 +419,27 @@ public:
         return WriteReferenceWire(out, target, expectation);
     }
 
+    // weak 참조 하나를 쓴다(리플렉션 B9d1 — Docs/Design/ReflectionExtensions.ko.md 5.1절).
+    // ReferenceWireType() 형식이고 weak는 Required가 될 수 없으므로 Required 검사를 하지 않는다.
+    // 같은 저장 단위(그래프) 안 대상만 보존한다: 대상이 null이거나 같은 Registry에서 죽었으면
+    // (StaleHandle·Destroyed) null(진단 없음 — weak의 정상 상태), 살아 있으면 기대 형식을 검사한
+    // 뒤(TypeMismatch) 저장 집합 안이면 local ID, 밖이면 저장 정책(Reject·Admit·Include)대로 null과
+    // ExternalReference 진단(값 2)을 남긴다(그래프 저장의 규칙은 GraphExternalPolicy 주석). out은
+    // WriteReference와 같이 직렬화기가 이 필드의 encode에 준 writer여야 한다(Include가 값 위치를 그
+    // writer 안 offset으로 기록해 끝에 제자리로 덮어쓴다).
+    //
+    // 반환: 성공(값을 썼다). 실패 — 다른 Registry의 handle WrongContext(정책·hook 질의 전), 기대
+    // 형식 위반 TypeMismatch, Admit hook의 Reject InvalidArgument(진단 값 0)·hook 실패는 그 오류,
+    // 다른 writer InvalidArgument, 접근·종료·재진입 오류와 바이트·작업량 한도 CapacityExceeded,
+    // 할당 OutOfMemory. 기본 문맥은 Unsupported다.
+    //
+    // 사용 예(생성 codec이 부르는 형태):
+    //   return context.WriteWeakReference(out, value.reference, {type.type, staticNative});
+    Result<void> WriteWeakReference(ArchiveWriter& out, ObjectHandle target,
+                                    const ReferenceExpectation& expectation) noexcept {
+        return WriteWeakReferenceWire(out, target, expectation);
+    }
+
     // 중첩 Record(struct 값)의 한도다(그래프 옵션에서 — 전체 크기는 필드 값 한도, 값 하나도 같은
     // 값 한도).
     virtual RecordLimits NestedRecordLimits() const noexcept = 0;
@@ -476,27 +498,40 @@ protected:
     virtual Result<void> WriteReferenceWire(ArchiveWriter& out, ObjectHandle target,
                                             const ReferenceExpectation& expectation) noexcept = 0;
 
+    // weak 참조 쓰기의 직렬화기 구현이다(WriteWeakReference). 기본은 Unsupported다(weak 참조를 쓰지
+    // 않는 문맥).
+    virtual Result<void> WriteWeakReferenceWire(ArchiveWriter& out, ObjectHandle target,
+                                                const ReferenceExpectation& expectation) noexcept {
+        (void)out;
+        (void)target;
+        (void)expectation;
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
     // 지금 위치(Current())의 저장 집합 밖 대상 target을 외부 참조로 쓸지 hooks에 묻는다(그래프
     // 저장의 Admit 정책 — FieldCodecHooks::AdmitExternalReference). 유효 플래그·Required·노드
-    // 위치·경로는 문맥이 채운다. hooks가 없으면 Reject다(hook 기본과 같다). 결과 값의 검사와
-    // 진단은 호출자(직렬화기)가 한다.
+    // 위치·경로는 문맥이 채운다. weak면 info.weak가 참이고 Required는 늘 거짓이다(slot은 호출자가
+    // 0으로 준다 — weak import는 없다). hooks가 없으면 Reject다(hook 기본과 같다). 결과 값의
+    // 검사와 진단은 호출자(직렬화기)가 한다.
     Result<ExternalAdmission> AdmitExternalReference(ObjectHandle target, TypeId targetType,
-                                                     TypeId expectedType, uint32 slot) noexcept {
+                                                     TypeId expectedType, uint32 slot,
+                                                     bool weak = false) noexcept {
         FieldCodecHooks* hooks = Hooks();
         if (!hooks) {
             return Result<ExternalAdmission>::Success(ExternalAdmission::Reject);
         }
 
-        PathStep steps[33];
+        PathStep steps[MaxPropertyPathSteps];
         ExternalReferenceInfo info;
         info.target = target;
         info.targetType = targetType;
         info.expectedType = expectedType;
         info.effectiveFlags = EffectiveFlags();
-        info.required = HasFlag(info.effectiveFlags, FieldFlags::Required);
+        info.required = !weak && HasFlag(info.effectiveFlags, FieldFlags::Required);
         info.objectIndex = ObjectIndex();
         info.path = BuildPath(steps);
         info.slot = slot;
+        info.weak = weak;
         return hooks->AdmitExternalReference(info);
     }
 
@@ -653,6 +688,27 @@ public:
     // 함께 기록한다.
     virtual Result<DecodedReference>
     ReadReference(ArchiveReader& reader, const ReferenceExpectation& expectation) noexcept = 0;
+
+    // weak 참조 하나를 읽는다(리플렉션 B9d1 — Docs/Design/ReflectionExtensions.ko.md 5.1절,
+    // ReferenceWireType() 형식). 같은 그래프 안 노드 번호만 받는다: 외부 참조 번호(graph v2의
+    // 0x80000000 | i)는 writer가 쓰지 않으므로 InvalidArgument이고, 노드 번호의 대상은 강한 참조와
+    // 같은 기대 형식 규칙으로 판정한다(1단계가 기록해 모든 노드를 해석한 뒤 TypeMismatch). 1단계는
+    // isNull만 정확하고, 2단계는 만든 노드 객체 handle이다. weak 간선은 도달 검사·GC·관찰자의
+    // 대상이 아니다. 기본은 Unsupported다(weak 복원을 지원하지 않는 문맥).
+    //
+    // 사용 예(생성 codec이 부르는 형태 — ReadValueWire의 WeakObjectReference 갈래):
+    //   auto decoded = context.ReadWeakReference(reader, {type.type, staticNative});
+    //   if (!decoded) {
+    //       return Result<void>::Failure(decoded.Error());
+    //   }
+    //
+    //   out.reference = decoded.Value();   // 2단계면 handle로 WeakRef<T>를 만든다
+    virtual Result<DecodedReference>
+    ReadWeakReference(ArchiveReader& reader, const ReferenceExpectation& expectation) noexcept {
+        (void)reader;
+        (void)expectation;
+        return Result<DecodedReference>::Failure(ErrorCode::Unsupported);
+    }
 
     // 복원 1단계(기록하는 단계)가 내용 규칙(ValidateNameFieldText)을 지난 Name 표시 문자열 하나를
     // 방문 순서대로 기록한다(Docs/Design/ReflectionExtensions.ko.md 4.1절). 1단계는 ObjectRegistry·
@@ -818,14 +874,15 @@ inline Result<RecordScope> FieldDecodeContext::PushRecord(RecordReader&& reader)
     return Result<RecordScope>::Success(RecordScope(this, depth_));
 }
 
-inline Span<const PathStep> FieldCodecContext::BuildPath(PathStep (&steps)[33]) const noexcept {
+inline Span<const PathStep>
+FieldCodecContext::BuildPath(PathStep (&steps)[MaxPropertyPathSteps]) const noexcept {
     usize depth = 0;
     for (const FieldCodecFrame* frame = current_; frame; frame = frame->parent) {
         ++depth;
     }
 
-    if (depth > 33) {
-        platform::Fatal("FieldCodecContext path deeper than 33 steps");
+    if (depth > MaxPropertyPathSteps) {
+        platform::Fatal("FieldCodecContext path deeper than MaxPropertyPathSteps");
     }
 
     usize position = depth;
@@ -845,7 +902,7 @@ inline Result<void> FieldCodecContext::Report(FieldDiagnosticKind kind, int64 va
         return Result<void>::Success();
     }
 
-    PathStep steps[33];
+    PathStep steps[MaxPropertyPathSteps];
     FieldDiagnostic diagnostic;
     diagnostic.kind = kind;
     diagnostic.objectType = objectType_;
@@ -863,7 +920,7 @@ inline Result<void> FieldCodecContext::CollectSoftReference(AssetId asset, Strin
         return Result<void>::Success();
     }
 
-    PathStep steps[33];
+    PathStep steps[MaxPropertyPathSteps];
     SoftReferenceInfo info;
     info.asset = asset;
     info.objectPath = objectPath;

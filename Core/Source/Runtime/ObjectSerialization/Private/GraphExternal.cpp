@@ -2,9 +2,11 @@
 #include <Base/Endian.h>
 
 // 외부 참조다(Docs/Design/ObjectFoundations.ko.md 5.3·5.4절): 저장의 Admit 허락·Import 집계·값 위치
-// 표(필드 writer offset → Record offset → 출력 offset)와 번호 재배정(AssignExternalIndices), 단계형
-// 복원 2b의 imports 확인(편의 복원의 생성 전 확인도 같은 판정). 1단계의 범위 검사와 쓰임 집계는
-// GraphLoad.cpp, 선언 타입 대조와 쌍 기록은 GraphReferences.cpp, 2b의 값 치환은 GraphApply.cpp다.
+// 표(필드 writer offset → Record offset → 출력 offset)와 번호 재배정(AssignExternalIndices), 저장
+// 집합 밖 weak 참조의 정책별 처리와 Include 지연 덮어쓰기(Docs/Design/ReflectionExtensions.ko.md
+// 5.1절), 단계형 복원 2b의 imports 확인(편의 복원의 생성 전 확인도 같은 판정). 1단계의 범위 검사와
+// 쓰임 집계는 GraphLoad.cpp, 선언 타입 대조와 쌍 기록은 GraphReferences.cpp, 2b의 값 치환은
+// GraphApply.cpp다.
 namespace rocks::graph_detail {
 
 // Admit: 처음 보는 대상(또는 앞 결정이 Null인 대상)의 허락을 hook에 묻는다. Import면 slot(첫 출현
@@ -87,12 +89,10 @@ Result<void> GraphEncodeContext::WriteImported(ArchiveWriter& out, uint32 slot) 
         return Result<void>::Failure(ErrorCode::CapacityExceeded);
     }
 
-    // 위치 표(참조 하나에 4 byte)도 그래프 바이트 누계에 든다: 이 노드 앞까지의 출력 + 위치 표가
+    // 위치 표(참조 하나에 4 byte)도 그래프 바이트 누계에 든다: 이 노드 앞까지의 출력 + 저장 표가
     // maxBytes 안이어야 한다(이 노드의 Record까지 더한 검사는 노드 끝에서 한다).
-    const usize maximum = budget_.limits.maxBytes;
-    const usize table = PositionBytes() + sizeof(uint32);
-    if (committedBytes_ > maximum || table > maximum - committedBytes_) {
-        return Result<void>::Failure(ErrorCode::CapacityExceeded);
+    if (auto fits = CheckTableGrowth(sizeof(uint32)); !fits) {
+        return fits;
     }
 
     // 위치 4 byte와, 표가 자랄 때 기존 위치의 이동을 청구한다.
@@ -111,6 +111,193 @@ Result<void> GraphEncodeContext::WriteImported(ArchiveWriter& out, uint32 slot) 
     external.commonFlags &= flags;
     external.required = external.required || HasFlag(flags, FieldFlags::Required);
     return out.WriteU32(ExternalReferenceBit | slot);
+}
+
+Result<void> GraphEncodeContext::CheckTableGrowth(usize added) noexcept {
+    const usize maximum = budget_.limits.maxBytes;
+    const usize table = TableBytes();
+    if (committedBytes_ > maximum || table > maximum - committedBytes_ ||
+        added > maximum - committedBytes_ - table) {
+        return Result<void>::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    return Result<void>::Success();
+}
+
+// 저장 집합 밖 weak 대상이다(5.1절 표): Reject는 ExternalReference 진단(값 2) 뒤 0, Admit은 hook에
+// weak = true로 묻고(slot 캐시 없이 출현마다 — slot 인자는 0) Import·Null이면 진단(값 2) 뒤 0,
+// Reject면 진단(값 0) 뒤 InvalidArgument(정의되지 않은 결과 값도 InvalidArgument), Include는 지연
+// 항목을 기록한다(집합을 넓히지 않는다).
+Result<void>
+GraphEncodeContext::WriteExternalWeak(ArchiveWriter& out, ObjectHandle target,
+                                      const TypeLease& lease,
+                                      const ReferenceExpectation& expectation) noexcept {
+    switch (externalPolicy_) {
+    case GraphExternalPolicy::Reject:
+        break;
+    case GraphExternalPolicy::Admit: {
+        auto admitted = AdmitExternalReference(target, lease.Id(), expectation.schemaType, 0, true);
+        if (!admitted) {
+            return Result<void>::Failure(admitted.Error());
+        }
+
+        if (admitted.Value() == ExternalAdmission::Reject) {
+            return RejectExternal();
+        }
+
+        if (admitted.Value() != ExternalAdmission::Import &&
+            admitted.Value() != ExternalAdmission::Null) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        break;
+    }
+    case GraphExternalPolicy::Include:
+        return DeferWeak(out, target);
+    }
+
+    if (auto reported = Report(FieldDiagnosticKind::ExternalReference, 2); !reported) {
+        return reported;
+    }
+
+    return out.WriteU32(0);
+}
+
+// Include: 지금 위치의 weak 값 위치(필드 writer 안 offset)·대상·노드 위치·진단 경로 사본을 지연
+// 항목으로 기록하고 자리값 0을 쓴다. 항목과 경로 사본의 메모리를 그래프 바이트 누계·작업량에
+// 청구한다(표가 자랄 때 기존 원소 이동 포함 — 위치 표와 같은 규칙).
+Result<void> GraphEncodeContext::DeferWeak(ArchiveWriter& out, ObjectHandle target) noexcept {
+    // 직렬화기가 준 필드 writer가 아니면 그 위치를 Record 안 위치로 바꿀 수 없다(codec 계약).
+    if (fieldWriter_ == nullptr || &out != fieldWriter_) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const usize at = out.ByteCount();
+    if (at > NumericLimits<uint32>::Max() ||
+        weakPaths_.Size() > NumericLimits<uint32>::Max() - MaxPropertyPathSteps) {
+        return Result<void>::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    PathStep steps[MaxPropertyPathSteps];
+    const Span<const PathStep> path = BuildPath(steps);
+    const usize pathBytes = path.Size() * sizeof(PathStep);
+    if (auto fits = CheckTableGrowth(sizeof(WeakDeferral) + pathBytes); !fits) {
+        return fits;
+    }
+
+    const usize movedDeferrals = weakDeferrals_.Size() == weakDeferrals_.Capacity()
+                                     ? weakDeferrals_.Size() * sizeof(WeakDeferral)
+                                     : 0;
+    const usize movedPaths = weakPaths_.Size() + path.Size() > weakPaths_.Capacity()
+                                 ? weakPaths_.Size() * sizeof(PathStep)
+                                 : 0;
+    uint64 work = 0;
+    if (!TryAdd(uint64{sizeof(WeakDeferral)}, uint64{pathBytes}, work) ||
+        !TryAdd(work, uint64{movedDeferrals}, work) || !TryAdd(work, uint64{movedPaths}, work)) {
+        return Result<void>::Failure(ErrorCode::Overflow);
+    }
+
+    if (auto spent = budget_.Spend(work); !spent) {
+        return spent;
+    }
+
+    WeakDeferral deferral;
+    deferral.position = static_cast<uint32>(at);
+    deferral.target = target;
+    deferral.objectIndex = ObjectIndex();
+    deferral.pathOffset = static_cast<uint32>(weakPaths_.Size());
+    deferral.pathSteps = static_cast<uint32>(path.Size());
+    if (!weakDeferrals_.TryPushBack(deferral)) {
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    // 경로 표는 Array 성장 규칙(ArrayGrowthCapacity — 기하 성장)으로 미리 늘린다. 정확한 크기로
+    // 예약하면 항목마다 표 전체를 옮겨 비용이 항목 수의 제곱이 된다. 실패하면 항목을 되돌린다(표
+    // 둘은 함께 는다).
+    const usize needed = weakPaths_.Size() + path.Size();
+    if (needed > weakPaths_.Capacity()) {
+        if (auto reserved = weakPaths_.TryReserve(
+                ArrayGrowthCapacity(weakPaths_.Capacity(), needed, sizeof(PathStep)));
+            !reserved) {
+            (void)weakDeferrals_.TryPopBack();
+            return reserved;
+        }
+    }
+
+    for (const PathStep& step : path) {
+        if (!weakPaths_.TryPushBack(step)) {
+            platform::Fatal("Object graph weak path reservation failed");
+        }
+    }
+
+    return out.WriteU32(0);
+}
+
+Result<void> GraphEncodeContext::RebaseWeakDeferrals(usize first, usize base) noexcept {
+    const usize end = weakDeferrals_.Size();
+    if (first >= end) {
+        return Result<void>::Success();
+    }
+
+    if (auto spent = budget_.Spend(static_cast<uint64>(end - first)); !spent) {
+        return spent;
+    }
+
+    for (usize index = first; index < end; ++index) {
+        usize moved = 0;
+        if (!TryAdd(static_cast<usize>(weakDeferrals_[index].position), base, moved) ||
+            moved > NumericLimits<uint32>::Max()) {
+            return Result<void>::Failure(ErrorCode::CapacityExceeded);
+        }
+
+        weakDeferrals_[index].position = static_cast<uint32>(moved);
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> GraphEncodeContext::ResolveWeakDeferrals() noexcept {
+    if (weakDeferrals_.IsEmpty()) {
+        return Result<void>::Success();
+    }
+
+    if (auto spent = budget_.Spend(2 * static_cast<uint64>(weakDeferrals_.Size())); !spent) {
+        return spent;
+    }
+
+    FieldCodecHooks* hooks = Hooks();
+    for (const WeakDeferral& deferral : weakDeferrals_) {
+        SaveNode& node = nodes_[deferral.objectIndex];
+        if (static_cast<usize>(deferral.position) + sizeof(uint32) > node.record.Size()) {
+            platform::Fatal("Object graph weak deferral points outside its node record");
+        }
+
+        if (const uint32* local = locals_.Find(deferral.target)) {
+            StoreLittleEndian<uint32>(node.record.Data() + deferral.position, *local);
+            continue;
+        }
+
+        // 최종 집합 밖이다 — 자리값 0을 그대로 두고 기록한 위치로 진단한다(encode frame이 없어도
+        // 경로·objectIndex가 남는다).
+        if (!hooks) {
+            continue;
+        }
+
+        const Span<const PathStep> path(weakPaths_.Data() + deferral.pathOffset,
+                                        deferral.pathSteps);
+        FieldDiagnostic diagnostic;
+        diagnostic.kind = FieldDiagnosticKind::ExternalReference;
+        diagnostic.objectType = node.type;
+        diagnostic.objectIndex = deferral.objectIndex;
+        diagnostic.path = path;
+        diagnostic.field = path.Size() != 0 ? path[path.Size() - 1].fieldId : Guid{};
+        diagnostic.value = 2;
+        if (auto reported = hooks->Report(diagnostic); !reported) {
+            return reported;
+        }
+    }
+
+    return Result<void>::Success();
 }
 
 Result<void> GraphEncodeContext::RebasePositions(usize first, usize end, usize base) noexcept {

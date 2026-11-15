@@ -81,6 +81,7 @@ struct FieldValue {
     double float64 = 0;
     // Guid·AssetId 값, SoftObjectReference의 asset이다.
     Guid guid{};
+    // ObjectReference·WeakObjectReference 값의 대상 handle이다(null = ObjectHandle{}).
     ObjectHandle reference{};
     // Utf8String 값, SoftObjectReference의 객체 경로다.
     String string;
@@ -173,12 +174,32 @@ enum class ArrayEdit : uint8 {
 //   if (auto valid = detail::ValidateArrayEdit(target, detail::ArrayEdit::Clear); !valid) { ... }
 Result<void> ValidateArrayEdit(const FieldWriteTarget& target, ArrayEdit edit) noexcept;
 
+// weak 참조 값(WeakObjectReference — 리플렉션 B9d1)의 대상을 검사한다(Docs/Design/
+// ReflectionExtensions.ko.md 5.1절 쓰기 검증). target이 null(IsNull — 비정규 null 포함)이면 성공,
+// 다른 Registry가 발급한 handle이면 WrongContext(ObjectRegistry::OwnsHandle)이고, 아니면
+// registry.AcquireType(access, target)으로 생존 객체인지 본다(그 오류 — 회수·재사용 StaleHandle,
+// 파괴 요청 Destroyed, 스레드·문맥 오류). 대상이 staticNative(NativeTypeKey<T>, nullptr이면
+// Object)의 native 파생이 아니면 TypeMismatch다. 스키마 기대 타입은
+// ValidateFieldWrite(FieldWriteTarget::referenced)가 본다. 생성 write thunk(WriteGeneratedField)가
+// 대입 전에 부른다 — 수동 함수표는 FieldWriteOperation이 스키마 기대 타입으로 검사한다. lease를
+// 쥐지 않는 순수 검사다.
+//
+// 사용 예:
+//   if (auto valid = detail::ValidateWeakTarget(registry, access, value.reference,
+//                                               NativeTypeKey<Actor>());
+//       !valid) {
+//       return valid;
+//   }
+Result<void> ValidateWeakTarget(ObjectRegistry& registry, const ObjectAccessContext& access,
+                                ObjectHandle target, const void* staticNative) noexcept;
+
 } // namespace detail
 
 // 등록된 필드의 실제 대상 schema, 타입과 값 형식을 검사한다. 오류 순서는 context·수명, 타입·필드,
 // 전달 값 종류(TypeMismatch — enum은 FieldValue::type이 필드의 enum ID와 다를 때도), 읽기
 // 전용(Unsupported), 값 내용(정수 폭 Overflow·소프트 참조의 null 규칙과 경로 상한·선언되지 않은
-// enum 값 InvalidArgument, Name 토큰은 Object/NameField.h의 ValidateNameFieldToken — 이 Registry의
+// enum 값 InvalidArgument, weak 참조는 강한 참조와 같은 대상 검사 — 이 Registry의 생존 객체·기대
+// 타입의 파생, Name 토큰은 Object/NameField.h의 ValidateNameFieldToken — 이 Registry의
 // pool이 없으면 None 말고 Unsupported, 다른 pool의 토큰 WrongContext, 게시되지 않은 토큰
 // StaleHandle, 표시 문자열 규칙 InvalidArgument)이다. Struct·Array 필드는 FieldValue로 통째 쓰지
 // 않으므로 문맥·수명·대상 타입·필드 검사 뒤 Unsupported다(멤버·원소 단위는 B6 경로 접근). 참조 값의
@@ -330,7 +351,9 @@ using StructMigration = Result<Array<uint8>> (*)(Allocator&, TypeId type, uint32
                                                  Span<const uint8> sourceRecord) noexcept;
 
 // Trace 호출 동안만 유효한 방문자다. 보관하거나 다른 스레드에 전달하지 않는다.
-// 객체가 가진 모든 강한 ObjectRef를 빠짐없이 Visit해야 한다. WeakRef는 방문하지 않는다.
+// 객체가 가진 모든 강한 ObjectRef를 빠짐없이 Visit해야 한다. WeakRef는 방문하지 않는다(WeakRef
+// PROPERTY 포함 — 생성 Trace는 weak 필드·원소를 방문하지 않는다,
+// Docs/Design/ReflectionExtensions.ko.md 5.1절).
 class TraceVisitor {
 public:
     using VisitFn = void (*)(void*, ObjectHandle) noexcept;

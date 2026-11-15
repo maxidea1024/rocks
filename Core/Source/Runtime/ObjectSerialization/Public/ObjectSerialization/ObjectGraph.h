@@ -61,6 +61,18 @@ using ObjectGraphMigration = Result<Array<uint8>> (*)(Allocator&, TypeId type, u
 
 // 저장 집합 밖 강한 참조의 처리다(Docs/Design/ObjectFoundations.ko.md 5.2·5.3절). 어느 정책이든
 // 대상 생존·기대 형식 검사(StaleHandle·Destroyed·TypeMismatch)를 먼저 한다.
+//
+// weak 참조(WeakRef PROPERTY — 리플렉션 B9d1, Docs/Design/ReflectionExtensions.ko.md 5.1절)는 같은
+// 그래프 안만 보존한다: 대상이 null·같은 Registry에서 죽음(StaleHandle·Destroyed)이면 어느 정책이든
+// 진단·질의 없이 0이고, 다른 Registry의 handle은 정책·질의 전에 WrongContext로 실패하며, 산 대상은
+// 기대 형식 검사(TypeMismatch) 뒤 집합 안이면 local ID다. 집합 밖이면 Reject는 ExternalReference
+// 진단(value 2) 뒤 0(저장은 성공), Admit은 출현마다(slot 캐시 없이) hook에 info.weak = true로 물어
+// Import·Null이면 진단(value 2) 뒤 0·Reject면 진단(value 0) 뒤 InvalidArgument(외부 참조로 집계하지
+// 않는다), Include는 위치를 기록했다가 모든 노드를 encode한 뒤 최종 집합으로 제자리 덮어쓴다(밖이면
+// 0과 기록 순서대로 진단 value 2 — weak는 집합을 넓히지 않고, 지연 항목 메모리는 위치 표처럼
+// maxBytes·작업량에 든다). Admit에 hook이 없거나 hook이 weak에도 Reject를 고르면(기본 구현) 집합 밖
+// weak 하나로 저장이 실패하므로 Admit hook은 info.weak에 Null을
+// 준다(FieldCodecHooks::AdmitExternalReference 사용 예).
 enum class GraphExternalPolicy : uint8 {
     // 저장 집합 밖 참조는 ExternalReference 진단(value 0) 뒤 InvalidArgument다(기본).
     Reject,

@@ -169,7 +169,7 @@
 
 - `rocks::SoftObjectRef<T> { AssetId asset; String objectPath; }`를 ObjectRuntime에 둔다. GC 간선이 아니며(`FieldKind::Value`) 이동 전용이고 복제는 `TryClone`(실패 가능 — Core `String`이 복사를 지원하지 않는다)이다. `T`는 기대 타입(`value.type`, 0 = Object)이다. null은 `asset`이 0이고 `objectPath`가 빈 것이다(asset이 0인데 경로가 있으면 InvalidArgument). 객체 경로는 패키지 안 Outer·Name 경로(A0-O, 비면 대표 에셋), UTF-8 4 KiB 상한(AS 5.1절).
 - `ValueKind::SoftObjectReference`, wire `SoftObjectReference = 12`(새 wire tag, payload = Guid 16 byte + String). `FieldValue`는 `guid`·`string`을 쓴다.
-- Sparks 문서의 `Soft<T>`("AssetId만")와 UI 문서의 `AssetRef<T>`는 이 타입으로 맞춘다(11절). 클래스 참조(`TSoftClassPtr`·`TSubclassOf` 대응)는 이 단계 밖이다.
+- Sparks 문서의 `Soft<T>`("AssetId만")는 이 타입으로 맞춘다(11절). 클래스 참조(`TSoftClassPtr`·`TSubclassOf` 대응)는 이 단계 밖이다.
 
 ### 3.4 `ROCKS_ENUM`
 
@@ -239,7 +239,7 @@ struct BulkDataRef {
 };
 ```
 
-- base 없는 `struct`·`class`(상속은 v1에서 금지 — RMC2301. 리플렉션 B9가 base 필드를 펼치는 방식으로 연다 — RX 12절), 템플릿 금지(UI의 `Sides<float>`는 비템플릿 구체 타입으로 감싼다). 모든 비정적 필드는 PROPERTY 또는 NATIVE.
+- base 없는 `struct`·`class`(상속은 v1에서 금지 — RMC2301. 리플렉션 B9가 base 필드를 펼치는 방식으로 연다 — RX 12절), 템플릿 금지. 모든 비정적 필드는 PROPERTY 또는 NATIVE.
 - 생성: `explicit T(Allocator&) noexcept` 또는 `T() noexcept`, noexcept 소멸자. 배열 원소가 되려면 noexcept 이동 가능해야 한다(`Array`의 static_assert가 이미 강제한다).
 - 중첩: struct 필드는 다른 struct를 담을 수 있다. 타입 그래프에 순환이 있으면(배열을 거친 자기 참조 포함) RMC2302, 중첩 깊이는 16 이하(RMC2303 — EIP 635행의 재귀 깊이 제한. 리플렉션 B9의 InstancedStruct는 위치 깊이 + 내용 깊이의 합으로 센다 — RX 11절).
 
@@ -379,7 +379,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema&, Ru
 
 ### 5.1 `Array<T>`
 
-- 원소: 스칼라·`String`·`Guid`·`AssetId`·`Sha256Digest`·enum·참조 없는 struct(Binds Core 값 타입 포함)·`SoftObjectRef<U>`. 참조 목록은 `ObjectRefArray<T>`, 참조 struct 목록은 Registry가 관리하는 `StructRefArray<S>`(4.3·5.6절)다. `Array<ObjectRef<…>>`·`Array<참조 struct>`는 `Array`의 nothrow-move static_assert에서 Clang 단계가 먼저 실패하므로 MetaCompiler가 그 진단을 RMC2304로 바꿔 보고하고, 중첩 배열은 RMC2304다(5.6절). 리플렉션 B9가 Int8·Int16·Name·WeakRef·ClassRef·InstancedStruct·Text 원소를 더한다(RX 1.3·8절 — Int8·Int16은 B9a2, Name은 B9c2에서 구현).
+- 원소: 스칼라·`String`·`Guid`·`AssetId`·`Sha256Digest`·enum·참조 없는 struct(Binds Core 값 타입 포함)·`SoftObjectRef<U>`. 참조 목록은 `ObjectRefArray<T>`, 참조 struct 목록은 Registry가 관리하는 `StructRefArray<S>`(4.3·5.6절)다. `Array<ObjectRef<…>>`·`Array<참조 struct>`는 `Array`의 nothrow-move static_assert에서 Clang 단계가 먼저 실패하므로 MetaCompiler가 그 진단을 RMC2304로 바꿔 보고하고, 중첩 배열은 RMC2304다(5.6절). 리플렉션 B9가 Int8·Int16·Name·WeakRef·ClassRef·InstancedStruct·Text 원소를 더한다(RX 1.3·8절 — Int8·Int16은 B9a2, Name은 B9c2, WeakRef는 B9d1에서 구현).
 - 필드는 소유 타입 생성자가 allocator로 초기화한다. struct 원소가 `explicit T(Allocator&) noexcept`면 그 allocator로 만든다.
 - `ValueKind::Array`, `element`가 원소 형식이다.
 
@@ -582,7 +582,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema&, Ru
 
 - A0-B는 graph envelope(format 1)를 그대로 두고 필드 인코딩·문맥·한도(원소 누계)만 넓힌다. 저장 집합·외부 참조·export 기준 노드 타입·EditorOnly 제외·Commit 다중도 보고·바이트·작업량 한도 확장은 graph v2(A0-O — [ObjectFoundations](ObjectFoundations.ko.md))다. 값 치환 hook은 B4가 `SubstituteStruct`로 구현했다.
 - A0-O가 A0-B에서 받는 것: 문맥의 참조 wire 매개변수, Soft 수집기·유효 플래그·struct hook·진단·decode 정책 자리, 두 단계 decode의 산출물 보관 구조.
-- 리플렉션 B9가 더하는 것: 참조 문맥의 weak 쓰기·읽기, 복원 2a의 Name 일괄 intern·관찰 struct의 Name 제한(B9c2에서 구현 — RX 4절 "구현(B9c2)에서 정한 점"), 진단 경로의 Map·Set 항목 삽입 순번, decode 정책 `unknownClass`·`unknownStructType`, 저장·복원 정책 `includeFlags`(RX 1.6·1.7·4.1·5절).
+- 리플렉션 B9가 더하는 것: 참조 문맥의 weak 쓰기·읽기(B9d1에서 구현 — `FieldEncodeContext::WriteWeakReference`·`FieldDecodeContext::ReadWeakReference`, 관찰 struct의 weak 제한, RX 5.1절 "구현(B9d1)에서 정한 점"), 복원 2a의 Name 일괄 intern·관찰 struct의 Name 제한(B9c2에서 구현 — RX 4절 "구현(B9c2)에서 정한 점"), 진단 경로의 Map·Set 항목 삽입 순번, decode 정책 `unknownClass`·`unknownStructType`, 저장·복원 정책 `includeFlags`(RX 1.6·1.7·4.1·5절).
 
 ### 6.4 B3c 구현 API(확정안)
 
@@ -1039,6 +1039,6 @@ EngineVersion CurrentEngineVersion() noexcept {
 
 - AS 1절 A0-B 행·리플렉션 한계 행·5.6절(이 문서로 연결, `-fno-math-errno`·llvm-nm 서술 정정)·14절 시나리오 13·25(구성 사이 쿠킹 byte 비교): 이 초안과 함께 반영했다.
 - `ReflectionMetadata.ko.md`: 타깃 소유 서술은 B1에서 모듈 소유로 바꿨다. 버전 비노출·모든 비정적 필드 리플렉션 필수 서술은 B2 결과로 바꾼다.
-- `SparksLanguage.ko.md`의 `Soft<T>`(AssetId만)·`UiToolkit.ko.md`의 `AssetRef<T>` → `SoftObjectRef<T>`(AssetId + 객체 경로). `UiToolkit.ko.md`의 `Sides<float>`(비템플릿 구체 타입으로)·지정자 확장 문법(CU1이 2.1절 표를 넓힌다).
+- `SparksLanguage.ko.md`의 `Soft<T>`(AssetId만) → `SoftObjectRef<T>`(AssetId + 객체 경로). `UiToolkit.ko.md`의 지정자 확장 문법(CU1이 2.1절 표를 넓힌다).
 - `EngineImplementationPlan.ko.md` 7.1절 예시 매크로(`ROCKS_REFLECT`·`ROCKS_FIELD(FieldId=…)`)와 `GcArray` 용어 → 현재 문법·`ObjectRefArray`.
 - `EngineRuntime.ko.md` 68·80·105행: `ROCKS_NATIVE_CLASS` → `ROCKS_NATIVE_TYPE`, B8 이전 계획.

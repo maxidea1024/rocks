@@ -130,6 +130,19 @@ Result<void> PathCursor::CheckEnum(TypeId enumeration) noexcept {
     return Result<void>::Success();
 }
 
+Result<void> PathCursor::CheckWeakTarget(const void* staticNative) noexcept {
+    // 검증 지점(5단계)이 non-null 대상의 실제 타입 lease를 쥐었다(생존·문맥 검사 포함).
+    if (!input_ || input_->reference.IsNull()) {
+        return Result<void>::Success();
+    }
+
+    if (!referencedType_.IsValid() || (staticNative && !referencedType_.IsNativeA(staticNative))) {
+        return Fail(ErrorCode::TypeMismatch, PropertyPathError::StaticTypeMismatch);
+    }
+
+    return Result<void>::Success();
+}
+
 Result<void> PathCursor::CheckStruct(const void* nativeType) noexcept {
     const StructView target = Frame().target;
     if (target.IsEmpty() || target.StructOps().nativeType != nativeType) {
@@ -561,13 +574,15 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         }
     }
 
-    // 5. 참조 값의 lease(FieldWriteOperation과 같은 순서 — 기대 타입, non-null 대상). 완료까지
-    // 쥔다.
+    // 5. 참조 값(강한·weak)의 lease(FieldWriteOperation과 같은 순서 — 기대 타입, non-null 대상).
+    // 완료까지 쥔다.
     cursor.current_ = last;
     const FieldValue* value =
         operation == PathOperation::Write || operation == PathOperation::Insert ? cursor.input_
                                                                                 : nullptr;
-    if (value && kind == ValueKind::ObjectReference && value->kind == ValueKind::ObjectReference) {
+    const bool referenceKind =
+        kind == ValueKind::ObjectReference || kind == ValueKind::WeakObjectReference;
+    if (value && referenceKind && value->kind == kind) {
         const TypeId expected = end.indexed ? end.field->element.type : end.field->value.type;
         if (expected != TypeId{}) {
             auto lease = cursor.registry_.AcquireRegisteredType(cursor.access_, expected);
@@ -579,6 +594,12 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         }
 
         if (!value->reference.IsNull()) {
+            // weak 대상이 다른 Registry의 객체면 WrongContext다(FieldWriteOperation과 같다).
+            if (kind == ValueKind::WeakObjectReference &&
+                !cursor.registry_.OwnsHandle(value->reference)) {
+                return cursor.Fail(ErrorCode::WrongContext);
+            }
+
             auto found = cursor.registry_.AcquireType(cursor.access_, value->reference);
             if (!found) {
                 return cursor.Fail(found.Error());

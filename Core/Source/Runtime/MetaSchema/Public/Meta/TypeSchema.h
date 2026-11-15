@@ -113,15 +113,18 @@ enum class ValueKind : uint8 {
     // 리플렉션 B9 이후의 값 종류다(Docs/Design/ReflectionExtensions.ko.md 1.1절).
     Int8,  // int8(Clang 철자 signed char — 평범한 char는 받지 않는다), wire I64(범위 검사)
     Int16, // int16(short), wire I64(범위 검사)
-    Name   // rocks::Name(Core/Text/Name.h — 실행 중 pool 토큰), wire String(표시 문자열 — None은
+    Name,  // rocks::Name(Core/Text/Name.h — 실행 중 pool 토큰), wire String(표시 문자열 — None은
            // 빈 문자열). 복원은 1단계 수집 → 2a intern(Object/NameField.h)
+    WeakObjectReference // rocks::WeakRef<T>(Object/ObjectRefs.h — GC가 추적하지 않는다), wire는
+                        // 강한 참조와 같은 문맥 참조 wire(graph v2 U32 — 같은 그래프 안 노드만,
+                        // Docs/Design/ReflectionExtensions.ko.md 5.1절)
 };
 
 // ValueKind 열거자 수(마지막 열거자 + 1)다. 열거자 값은 schema·descriptor 계약이므로 새 종류는 끝에
 // 붙이고, 이 식의 마지막 열거자와 성질 표의 행을 함께 고친다. 아래 static_assert가 성질 표와,
 // MetaCompiler 대조 헤더가 C# 표의 종류 수와 이 값을 비교한다. 근거는
 // Docs/Design/ReflectionExtensions.ko.md 1.3절이다.
-inline constexpr uint32 ValueKindCount = static_cast<uint32>(ValueKind::Name) + 1;
+inline constexpr uint32 ValueKindCount = static_cast<uint32>(ValueKind::WeakObjectReference) + 1;
 
 // 값 종류의 성질이다(종류 성질 표 — Docs/Design/ReflectionExtensions.ko.md 1.3절).
 // ValueKindProperties가 종류마다 이 비트의 OR를 돌려주고, 런타임의 등록 검증(TypeRegistry)·쓰기
@@ -233,6 +236,12 @@ constexpr ValueKindEntry ValueKindTableEntry(ValueKind kind) noexcept {
         return {true, placed | ValueKindBit(ValueKindProperty::MapValue) |
                           ValueKindBit(ValueKindProperty::WholeFieldValue) |
                           ValueKindBit(ValueKindProperty::AcceptsRequired) |
+                          ValueKindBit(ValueKindProperty::HasTargetType)};
+    case ValueKind::WeakObjectReference:
+        // 강한 참조와 같은 자리지만 Required는 받지 않는다 — 대상이 죽으면 저절로 null이 되므로
+        // "늘 non-null"을 지킬 수 없다(UE weak 속성도 NonNullable이 될 수 없다).
+        return {true, placed | ValueKindBit(ValueKindProperty::MapValue) |
+                          ValueKindBit(ValueKindProperty::WholeFieldValue) |
                           ValueKindBit(ValueKindProperty::HasTargetType)};
     case ValueKind::SoftObjectReference:
         return {true, placed | ValueKindBit(ValueKindProperty::MapKey) |
@@ -364,9 +373,9 @@ constexpr bool ValueKindIsAggregate(ValueKind kind) noexcept {
            (properties & detail::ValueKindBit(ValueKindProperty::WholeFieldValue)) == 0;
 }
 
-// 필드 값 형식이다. type은 Enum·Struct 스키마 ID, ObjectReference·SoftObjectReference의 기대 대상
-// 타입(0 = Object)에만 쓰고 그 밖은 0이어야 한다(Array의 value.type도 0 — 원소 대상은
-// element.type).
+// 필드 값 형식이다. type은 Enum·Struct 스키마 ID, ObjectReference·WeakObjectReference·
+// SoftObjectReference의 기대 대상 타입(0 = Object)에만 쓰고 그 밖은 0이어야 한다(Array의
+// value.type도 0 — 원소 대상은 element.type).
 struct ValueType {
     ValueKind kind = ValueKind::Opaque;
     TypeId type{};
@@ -395,9 +404,9 @@ struct FieldSchema {
     Span<const char> toolName{};
     // Array 필드(value = {Array, 0})의 원소 형식과 길이 상한이다(B5 — maxElements는 1 이상
     // MaxArrayElements 이하, 저장·경로 쓰기에서 건다). 원소는 스칼라(Int8·Int16 포함), Guid,
-    // Utf8String, Name, ObjectReference, Enum, Struct, AssetId, SoftObjectReference, Digest256이고
-    // element.type은 Enum과 Struct면 필수, 두 참조는 기대 타입(선택), 그 밖은 0이다. 배열이 아닌
-    // 필드는 Opaque·0이어야 한다.
+    // Utf8String, Name, ObjectReference, WeakObjectReference, Enum, Struct, AssetId,
+    // SoftObjectReference, Digest256이고 element.type은 Enum과 Struct면 필수, 세 참조는 기대
+    // 타입(선택), 그 밖은 0이다. 배열이 아닌 필드는 Opaque·0이어야 한다.
     ValueType element{};
     uint32 maxElements = 0;
 };
