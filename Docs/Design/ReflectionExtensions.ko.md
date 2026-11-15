@@ -211,7 +211,7 @@ struct PropertyPath { Span<const PathStep> steps; Span<const PathKey> keys{}; };
 ### 1.7 공통 규칙
 
 - **누락 = 기준**(OF 4절): 새 종류도 같다. Record에 없는 필드·멤버는 기준 값이다. Optional의 unset, Map·Set의 빈 값, InstancedStruct의 비어 있음은 "있는 값"이며 누락과 다르다.
-- **제외·포함 정책**: `FieldEncodePolicy`·`FieldDecodePolicy`(OR/FieldCodec.h:44-64)에 `includeFlags`를 더한다(9.1절). 판정 위치는 지금 excludedFlags와 같다(OF 4절 "구현에서 정한 점"). 새 컨테이너의 원소·키·값은 그 필드의 유효 플래그를 그대로 받는다.
+- **제외·포함 정책**: `FieldEncodePolicy`·`FieldDecodePolicy`(OR/FieldCodecPolicy.h)에 `includeFlags`를 더한다(9.1절). 판정 위치는 지금 excludedFlags와 같다(OF 4절 "구현에서 정한 점"). 새 컨테이너의 원소·키·값은 그 필드의 유효 플래그를 그대로 받는다.
 - **두 단계 decode**(RF 6.2절): 1단계는 파싱·형식·한도·중복 키·TypeRegistry 조회만 하고 ObjectRegistry를 건드리지 않는다. 2단계는 할당 말고는 실패하지 않는다. Name intern만 그 사이 2a에서 한다(4절).
 - **키 위치의 decode 정책**: 값을 바꾸는 정책(미선언 enum `ReportAndDefault`, `unknownClass = ReportAndNull`)은 Map 키·Set 원소에 적용하지 않는다. 키 위치는 늘 거부다. 대체 값이 서로 다른 두 키를 같게 만들어 2단계에서 중복이 생기는 일을 막는다.
 - **allocator**: Optional·InstancedStruct·Text처럼 값이 없던 자리에 새 값을 만들 때는 객체 생성자에 주입되는 registry allocator(RuntimeTypeOps.h:400-420)를 쓴다. 공개 조회 `ObjectRegistry::ObjectAllocator()`·`ConstructionContext::ObjectAllocator()`를 더한다(B9e). 수명은 Registry·트랜잭션과 같고, 소유 스레드 계약은 다른 Registry API와 같다.
