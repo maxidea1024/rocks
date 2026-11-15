@@ -16,11 +16,11 @@ using namespace graph_detail;
 // 할당(ObservationScratch)은 1단계에만 있는 일이라 Charge로 한 번만 청구한다.
 class GraphValidateContext final : public FieldDecodeContext {
 public:
-    GraphValidateContext(Allocator& allocator, Budget& budget,
+    GraphValidateContext(Allocator& allocator, TypeRegistry& types, Budget& budget,
                          const ObjectGraphLoadOptions& options, usize objectCount,
                          Array<GraphExternalUse>& externalUses) noexcept
         : FieldDecodeContext(options.policy, options.hooks, ReferenceWire), allocator_(allocator),
-          budget_(budget), options_(options), objectCount_(objectCount),
+          types_(types), budget_(budget), options_(options), objectCount_(objectCount),
           externalUses_(externalUses), scratch_(allocator, budget), observation_(allocator, *this) {
     }
 
@@ -195,6 +195,12 @@ public:
         return budget_.AddFields(count);
     }
 
+    // ClassRef 값의 클래스 판정이다(리플렉션 B9d2). 1단계는 TypeRegistry만 조회한다(잠금으로 보호 —
+    // ObjectRegistry에 닿지 않는다). 조회 몫은 codec이 Spend했다.
+    Result<TypeLease> AcquireClassReference(TypeId type, TypeId base) noexcept override {
+        return detail::CheckClassReferenceLease(types_.Acquire(type), base, nullptr);
+    }
+
     Result<void> AddElements(usize count) noexcept override {
         return budget_.AddElements(count);
     }
@@ -313,6 +319,24 @@ public:
         return Result<void>::Success();
     }
 
+    // ClassRef 판정 하나를 노드의 기록에 더한다(리플렉션 B9d2 — 2단계가 같은 순서로 소비한다). 기록
+    // 메모리 몫(항목 byte)을 한 번 청구한다(2단계는 조회하지 않으므로 Spend의 두 배가 아니다).
+    Result<void> CollectClassReference(TypeId stored, bool nulled) noexcept override {
+        if (!node_) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (auto spent = Charge(sizeof(StoredClassReference)); !spent) {
+            return spent;
+        }
+
+        if (!node_->classes.TryPushBack(StoredClassReference{stored, nulled})) {
+            return Result<void>::Failure(ErrorCode::OutOfMemory);
+        }
+
+        return Result<void>::Success();
+    }
+
     Result<void> Spend(uint64 work) noexcept override {
         uint64 doubled = 0;
         if (!TryMultiply(work, uint64{2}, doubled)) {
@@ -382,6 +406,7 @@ private:
     }
 
     Allocator& allocator_;
+    TypeRegistry& types_;
     Budget& budget_;
     const ObjectGraphLoadOptions& options_;
     usize objectCount_;
@@ -741,7 +766,8 @@ Result<UniquePtr<StageData>> ValidateGraph(Allocator& allocator, TypeRegistry& t
         return Output::Failure(resized.Error());
     }
 
-    GraphValidateContext context(allocator, data.budget, options, nodes.Size(), data.externalUses);
+    GraphValidateContext context(allocator, types, data.budget, options, nodes.Size(),
+                                 data.externalUses);
     // 관찰할 struct ID를 정렬해 둔다(미등록 NotFound, 참조(강한·weak)나 Name을 담는 struct
     // InvalidArgument — 관찰 값은 1단계 임시 값인데 1단계는 참조 대상도 Name 토큰도 만들 수 없다).
     Array<TypeId> observed(allocator);

@@ -44,15 +44,19 @@ struct TypeRegistry::Record {
 // 등록 한 번의 색인 준비물이다(잠금 밖에서 할당한 새 색인과, 바꾼 뒤 잠금 밖에서 반환할 옛 색인).
 struct TypeRegistry::IndexGrowth {
     explicit IndexGrowth(Allocator& allocator) noexcept
-        : id(allocator), native(allocator), retiredId(allocator), retiredNative(allocator) {
+        : id(allocator), native(allocator), toolName(allocator), retiredId(allocator),
+          retiredNative(allocator), retiredToolName(allocator) {
     }
 
     IdIndex id;
     NativeIndex native;
+    ToolNameIndex toolName;
     IdIndex retiredId;
     NativeIndex retiredNative;
+    ToolNameIndex retiredToolName;
     bool rebuildId = false;
     bool rebuildNative = false;
+    bool rebuildToolName = false;
 };
 
 } // namespace rocks

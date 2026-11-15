@@ -6,9 +6,10 @@
 #include "RegistryIdentity.h"
 
 // TypeRegistry 기반부다. Registry 도메인 번호(detail::NextRegistryDomain), 생성·소멸, 레코드
-// 색인(ID·native)과 lease 발급, 조회(Acquire·AcquireValueType·AcquireStructByNative·IsA), lease
-// 계수, 해제·종료(Unregister·Shutdown), 통계를 둔다. 등록은 TypeRegistryRegister.cpp,
-// TypeLease·StructView 접근은 TypeLease.cpp, 필드 쓰기 검증은 RuntimeTypeOps.cpp다.
+// 색인(ID·native·타입 도구 이름)과 lease 발급, 조회(Acquire·AcquireValueType·AcquireStructByNative·
+// IsA), lease 계수, 해제·종료(Unregister·Shutdown), 통계를 둔다. 등록은 TypeRegistryRegister.cpp,
+// 타입 도구 이름 조회·파생 클래스 조회는 TypeRegistryToolName.cpp, TypeLease·StructView 접근은
+// TypeLease.cpp, 필드 쓰기 검증은 RuntimeTypeOps.cpp다.
 namespace rocks {
 
 namespace detail {
@@ -27,7 +28,7 @@ uint64 NextRegistryDomain() noexcept {
 } // namespace detail
 
 TypeRegistry::TypeRegistry(Allocator& allocator) noexcept
-    : allocator_(allocator), byId_(allocator), byNative_(allocator),
+    : allocator_(allocator), byId_(allocator), byNative_(allocator), byToolName_(allocator),
       domain_(detail::NextRegistryDomain()), ownerThread_(platform::CurrentThreadId()) {
 }
 
@@ -58,7 +59,8 @@ TypeRegistry::Record* TypeRegistry::FindNativeLocked(const void* nativeType,
     return found != nullptr ? *found : nullptr;
 }
 
-Result<void> TypeRegistry::PrepareIndexes(IndexGrowth& growth, bool native) noexcept {
+Result<void> TypeRegistry::PrepareIndexes(IndexGrowth& growth, bool native,
+                                          bool toolName) noexcept {
     // mutating_ 아래라 색인을 바꾸는 쪽은 이 스레드뿐이다(다른 스레드의 조회는 잠금 안에서 읽기만
     // 한다) — 크기를 잠금 없이 읽어도 경합이 없다. 새 색인은 아직 아무도 보지 않으므로 잠금 밖에서
     // 할당한다. 삽입이 할당하지 않으려면 공간이 있고 지운 칸이 없어야 한다(HashMap 삽입은 지운 칸이
@@ -74,6 +76,14 @@ Result<void> TypeRegistry::PrepareIndexes(IndexGrowth& growth, bool native) noex
         native && (nativeErased_ || byNative_.Count() + 1 > byNative_.Capacity());
     if (growth.rebuildNative) {
         if (auto reserved = growth.native.Reserve(byNative_.Count() + 1); !reserved) {
+            return reserved;
+        }
+    }
+
+    growth.rebuildToolName =
+        toolName && (toolNameErased_ || byToolName_.Count() + 1 > byToolName_.Capacity());
+    if (growth.rebuildToolName) {
+        if (auto reserved = growth.toolName.Reserve(byToolName_.Count() + 1); !reserved) {
             return reserved;
         }
     }
@@ -114,6 +124,27 @@ void TypeRegistry::PublishLocked(Record* record, IndexGrowth& growth) noexcept {
         if (!byNative_.Insert(NativeIndexKey{record->ops.nativeType, record->kind},
                               static_cast<Record*>(record))) {
             platform::Fatal("Reserved TypeRegistry native index unexpectedly failed");
+        }
+    }
+
+    // 도구 이름 키는 레코드가 소유한 이름의 view다(레코드와 함께 해제된다 — 해제 전에 색인에서
+    // 뗀다).
+    const Span<const char> toolName = record->schema.toolName;
+    if (toolName.Size() != 0) {
+        if (growth.rebuildToolName) {
+            byToolName_.ForEach([&](const StringView& key, Record*& value) noexcept {
+                if (!growth.toolName.Insert(StringView(key), static_cast<Record*>(value))) {
+                    platform::Fatal("Reserved TypeRegistry tool name index unexpectedly failed");
+                }
+            });
+            growth.retiredToolName = Move(byToolName_);
+            byToolName_ = Move(growth.toolName);
+            toolNameErased_ = false;
+        }
+
+        if (!byToolName_.Insert(StringView(toolName.Data(), toolName.Size()),
+                                static_cast<Record*>(record))) {
+            platform::Fatal("Reserved TypeRegistry tool name index unexpectedly failed");
         }
     }
 
@@ -312,6 +343,15 @@ Result<void> TypeRegistry::Unregister(TypeRegistrationToken token) noexcept {
             nativeErased_ = true;
         }
 
+        const Span<const char> toolName = removed->schema.toolName;
+        if (toolName.Size() != 0) {
+            if (!byToolName_.Erase(StringView(toolName.Data(), toolName.Size()))) {
+                platform::Fatal("TypeRegistry tool name index lost a record");
+            }
+
+            toolNameErased_ = true;
+        }
+
         mutating_ = true;
     }
 
@@ -335,6 +375,7 @@ Result<void> TypeRegistry::Shutdown() noexcept {
     // 색인 저장소는 잠금 밖에서 반환한다(잠금 안에서는 빈 색인으로 바꾸기만 한다).
     IdIndex retiredId(allocator_);
     NativeIndex retiredNative(allocator_);
+    ToolNameIndex retiredToolName(allocator_);
     {
         platform::LockGuard lock(gate_);
         if (mutating_) {
@@ -352,8 +393,10 @@ Result<void> TypeRegistry::Shutdown() noexcept {
         records_ = nullptr;
         retiredId = Move(byId_);
         retiredNative = Move(byNative_);
+        retiredToolName = Move(byToolName_);
         idErased_ = false;
         nativeErased_ = false;
+        toolNameErased_ = false;
         mutating_ = true;
     }
 

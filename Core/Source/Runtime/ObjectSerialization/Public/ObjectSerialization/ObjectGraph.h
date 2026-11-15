@@ -404,6 +404,12 @@ struct StageAccess;
 // 진단은 CheckRequired에서 소유 스레드로 온다. 한 Stage의 단계를 동시에 부르지 않으며, 단계 사이의
 // 스레드 넘김(worker 완료 → 소유 스레드)은 호출자가 동기화한다(작업 완료 대기 등).
 //
+// 등록 변경: ClassRef 값(리플렉션 B9d2)은 Validate가 TypeRegistry 조회로 판정하고(미등록은
+// policy.unknownClass) 값마다 그 판정을 노드 상태에 기록하며, ApplyFields는 다시 조회하지 않고 그
+// 기록대로 쓴다. 그래서 Validate와 ApplyFields 사이에 소유 스레드가 클래스를 등록·해제해도 적용
+// 결과는 Validate의 판정·진단과 같다(그 뒤의 등록 변경은 로드 뒤의 해제와 같다 —
+// ClassRef::Resolve가 다시 확인한다).
+//
 // 수명: Stage는 입력 byte·노드 이름을 빌리고 노드 타입·기대 타입 lease를 쥔다(소멸 때 반환).
 // allocator·registry·types는 Stage보다 오래 살아야 한다. options가 가리키는 hooks·migrationUser
 // (와 그 사용자 데이터)는 Stage의 마지막 단계(CheckRequired)까지 살아야 한다 — worker 지역 hooks를

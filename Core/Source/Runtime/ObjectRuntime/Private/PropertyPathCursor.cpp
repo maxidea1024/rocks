@@ -96,6 +96,19 @@ Result<void> PathCursor::CheckWeakTarget(const void* staticNative) noexcept {
     return Result<void>::Success();
 }
 
+Result<void> PathCursor::CheckClassTarget(const void* staticNative) noexcept {
+    // 검증 지점(6단계)이 non-null 값의 클래스 lease를 쥐었다(등록·스키마 Base 파생 검사 포함).
+    if (!input_ || input_->guid == Guid{}) {
+        return Result<void>::Success();
+    }
+
+    if (!referencedType_.IsValid() || !referencedType_.IsNativeA(staticNative)) {
+        return Fail(ErrorCode::TypeMismatch, PropertyPathError::StaticTypeMismatch);
+    }
+
+    return Result<void>::Success();
+}
+
 Result<void> PathCursor::CheckStruct(const void* nativeType) noexcept {
     const StructView target = Frame().target;
     if (target.IsEmpty() || target.StructOps().nativeType != nativeType) {

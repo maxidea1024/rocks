@@ -1,4 +1,5 @@
 #include <Core/Text/NamePool.h>
+#include <Core/Hash.h>
 #include <Base/Checked.h>
 #include <Platform/Memory.h>
 
@@ -68,13 +69,7 @@ bool IsNoneBase(StringView source, usize baseBytes) noexcept {
 }
 
 uint64 HashBytes(StringView value, usize baseBytes) noexcept {
-    uint64 hash = 14695981039346656037ull;
-    for (usize index = 0; index < baseBytes; ++index) {
-        hash ^= FoldAscii(static_cast<uint8>(value.Data()[index]));
-        hash *= 1099511628211ull;
-    }
-
-    return hash;
+    return HashStringBytesIgnoringAsciiCase(StringView(value.Data(), baseBytes));
 }
 
 // NameKey 영속 알고리즘 v1이다. pool 내부 hash(HashBytes)와 분리해 두며 값을 바꾸지 않는다.

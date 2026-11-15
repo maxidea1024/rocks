@@ -3,14 +3,16 @@ using System.Text.Json;
 namespace Rocks.MetaCompiler;
 
 // CLASS 지정자 결과다. Version은 Record schema version(없으면 1), WorldOnly는 이 선언이 직접 쓴 값이다(상속은
-// SchemaValidator가 base에서 더한다).
-internal sealed record ClassSpec(bool Abstract, uint Version, bool WorldOnly);
+// SchemaValidator가 base에서 더한다). ToolName은 Name="…"의 타입 도구 이름(없으면 "" — 기본은 한정하지 않은 C++ 이름,
+// Docs/Design/ReflectionExtensions.ko.md 5.2절)이다.
+internal sealed record ClassSpec(bool Abstract, uint Version, bool WorldOnly, string ToolName = "");
 
 // STRUCT 지정자 결과다. Version은 Record schema version(없으면 1)이다. Binds는 미러 선언이 결합하는 실제 C++ 타입의
 // 원문 철자다(Core 값 타입 결합 — Docs/Design/ReflectionFoundations.ko.md 4.5절, 없으면 ""). 정규 철자는 Clang이
 // 정한다(문자열로 비교하지 않는다). Atomic은 TypeFlags::Atomic(값이 통째 단위 — Docs/Design/ReflectionExtensions.ko.md
-// 3.1절)이고 struct 전용이다(CLASS 지정자 표에는 없으므로 ROCKS_CLASS(Atomic)은 모르는 지정자다).
-internal sealed record StructSpec(uint Version, string Binds, bool Atomic);
+// 3.1절)이고 struct 전용이다(CLASS 지정자 표에는 없으므로 ROCKS_CLASS(Atomic)은 모르는 지정자다). ToolName은 Name="…"의
+// 타입 도구 이름(없으면 "")이다.
+internal sealed record StructSpec(uint Version, string Binds, bool Atomic, string ToolName = "");
 
 // PROPERTY 지정자 결과다. ToolName은 Name="…"의 값이고 필드 이름과 같거나 없으면 ""다(기본 도구 이름은 필드
 // 이름이다). MaxElements는 배열 필드 전용이라 0이 아니면 SchemaValidator가 배열이 아닌 필드에서 거부한다.
@@ -46,18 +48,20 @@ internal static class Specifiers
         {
             bool flag = key is "Abstract" or "WorldOnly";
             bool number = key is "Version";
-            if ((!flag && !number) || (flag && value is not null) || (number && value?.Number is null))
+            bool label = key is "Name";
+            if ((!flag && !number && !label) || (flag && value is not null) || (number && value?.Number is null) || (label && value?.Text is null))
             {
                 throw new MetadataException($"{symbol}: unsupported CLASS specifier/value {key}");
             }
         }
 
-        return new(values.ContainsKey("Abstract"), values.GetValueOrDefault("Version")?.Number ?? 1, values.ContainsKey("WorldOnly"));
+        return new(values.ContainsKey("Abstract"), values.GetValueOrDefault("Version")?.Number ?? 1, values.ContainsKey("WorldOnly"),
+            TypeName(values, symbol));
     }
 
     public static StructSpec Struct(string text, string symbol)
     {
-        const string hint = "ROCKS_STRUCT takes Version=N (an unsigned decimal integer), Atomic (no value) and, in CoreTypeBindings only, Binds=\"<C++ type>\"; CLASS specifiers such as Abstract or WorldOnly do not apply to structs.";
+        const string hint = "ROCKS_STRUCT takes Version=N (an unsigned decimal integer), Atomic (no value), Name=\"<type tool name>\" and, in CoreTypeBindings only, Binds=\"<C++ type>\"; CLASS specifiers such as Abstract or WorldOnly do not apply to structs.";
         Dictionary<string, Value?> values;
         try
         {
@@ -72,7 +76,7 @@ internal static class Specifiers
         {
             bool flag = key is "Atomic";
             bool number = key is "Version";
-            bool label = key is "Binds";
+            bool label = key is "Binds" or "Name";
             if ((!flag && !number && !label) || (flag && value is not null) || (number && value?.Number is null) || (label && value?.Text is null))
             {
                 throw new MetadataException($"{symbol}: unsupported STRUCT specifier/value {key}", hint: hint);
@@ -86,7 +90,7 @@ internal static class Specifiers
                 hint: "Write the real type fully qualified from the global scope, e.g. Binds = \"rocks::Vector3<float>\" or Binds = \"rocks::Vec3\".");
         }
 
-        return new(values.GetValueOrDefault("Version")?.Number ?? 1, binds, values.ContainsKey("Atomic"));
+        return new(values.GetValueOrDefault("Version")?.Number ?? 1, binds, values.ContainsKey("Atomic"), TypeName(values, symbol));
     }
 
     public static PropertySpec Property(string text, string symbol, string fieldName)
@@ -176,6 +180,19 @@ internal static class Specifiers
 
         // C++ 이름과 같은 Name은 지정하지 않은 것과 같다.
         return new(toolName == name ? "" : toolName, values.GetValueOrDefault("DisplayName")?.Text ?? "", values.ContainsKey("Hidden"));
+    }
+
+    // CLASS·STRUCT의 Name="…"(타입 도구 이름)이다. 형식은 TypeToolName.IsValid이고 `none`은 예약이다(RMC2203). 없으면 ""다.
+    private static string TypeName(Dictionary<string, Value?> values, string symbol)
+    {
+        string toolName = values.GetValueOrDefault("Name")?.Text ?? "";
+        if (values.ContainsKey("Name") && !TypeToolName.IsValid(toolName))
+        {
+            throw new MetadataException($"{symbol}: Name specifier must be a type tool name ([A-Za-z_][A-Za-z0-9_]* segments joined by '.', not 'none'): \"{toolName}\"", "RMC2203",
+                "Use ASCII identifier segments separated by dots (for example Name=\"Weapons.Sword\"); 'none' is reserved for null in tool text.");
+        }
+
+        return toolName;
     }
 
     // enum 도구 이름·접두의 문자 집합이다: [A-Za-z0-9_]+ (UE의 접두를 뗀 이름 "8BitData"처럼 숫자로 시작할 수 있다).
@@ -314,5 +331,22 @@ internal static class Specifiers
                 throw new MetadataException($"{symbol}: specifier escape must use JSON string spelling");
             }
         }
+    }
+}
+
+// 타입 도구 이름 규칙이다(Docs/Design/ReflectionExtensions.ko.md 5.2절 — 런타임 Meta/TypeSchema.h IsTypeToolName과 같은 문법):
+// `[A-Za-z_][A-Za-z0-9_]*('.' [A-Za-z_][A-Za-z0-9_]*)*`, `none`은 대소문자 무시로 예약이다. 기본값은 한정하지 않은 C++ 타입 이름이고
+// ROCKS_CLASS(Name="…")·ROCKS_STRUCT(Name="…")로 바꾼다. 클래스·struct가 한 이름 공간이며 모듈과 import 범위에서 대소문자 무시로
+// 유일하다(RMC2203 — SchemaValidator).
+internal static class TypeToolName
+{
+    public static bool IsValid(string text) =>
+        text.Length != 0 && !string.Equals(text, "none", StringComparison.OrdinalIgnoreCase) && text.Split('.').All(Specifiers.IsAsciiIdentifier);
+
+    // 한정하지 않은 C++ 이름(정규 이름의 마지막 :: 뒤)이다.
+    public static string Default(string qualifiedName)
+    {
+        int separator = qualifiedName.LastIndexOf("::", StringComparison.Ordinal);
+        return separator < 0 ? qualifiedName : qualifiedName[(separator + 2)..];
     }
 }

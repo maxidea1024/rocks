@@ -254,7 +254,8 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         (HasFlag(schema.flags, TypeFlags::Abstract) != (ops.construct == nullptr)) ||
         !ops.destroy || !ops.trace || !ops.nativeType || ops.size < sizeof(Object) ||
         ops.alignment < alignof(Object) || (ops.alignment & (ops.alignment - 1)) != 0 ||
-        !StringView(schema.name.Data(), schema.name.Size()).ValidateUtf8()) {
+        !StringView(schema.name.Data(), schema.name.Size()).ValidateUtf8() ||
+        (schema.toolName.Size() != 0 && !IsTypeToolName(schema.toolName))) {
         return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -339,7 +340,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     const usize orderOffset = (typesEnd + alignof(uint32) - 1) & ~(alignof(uint32) - 1);
     const usize opsIndexOffset = orderOffset + schema.fields.Size() * sizeof(uint32);
     usize bytes = opsIndexOffset + schema.fields.Size() * sizeof(uint32);
-    if (!AddBytes(bytes, schema.name.Size())) {
+    if (!AddBytes(bytes, schema.name.Size()) || !AddBytes(bytes, schema.toolName.Size())) {
         return Result<TypeRegistrationToken>::Failure(ErrorCode::Overflow);
     }
 
@@ -361,7 +362,8 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
                                                                       : ErrorCode::Overflow);
         }
 
-        if (FindLocked(schema.id) != nullptr) {
+        // 타입 도구 이름은 클래스·struct 사이에서 대소문자 무시로 유일하다.
+        if (FindLocked(schema.id) != nullptr || FindToolNameLocked(schema.toolName) != nullptr) {
             return Result<TypeRegistrationToken>::Failure(ErrorCode::AlreadyExists);
         }
 
@@ -439,7 +441,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
 
     // 색인 공간은 레코드보다 먼저 준비한다(실패하면 아무것도 바꾸지 않는다).
     IndexGrowth growth(allocator_);
-    if (auto prepared = PrepareIndexes(growth, false); !prepared) {
+    if (auto prepared = PrepareIndexes(growth, false, schema.toolName.Size() != 0); !prepared) {
         platform::LockGuard lock(gate_);
         mutating_ = false;
         return Result<TypeRegistrationToken>::Failure(prepared.Error());
@@ -483,6 +485,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     record->schema.baseType = schema.baseType;
     record->schema.flags = schema.flags;
     record->schema.name = CopyBytes(schema.name, cursor);
+    record->schema.toolName = CopyBytes(schema.toolName, cursor);
     record->schema.fields = {fields, schema.fields.Size()};
     for (usize index = 0; index < schema.fields.Size(); ++index) {
         ::new (fields + index) FieldSchema(schema.fields[index]);
@@ -719,7 +722,8 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
         (schema.flags & ~KnownStructFlags) != 0 || ops.size == 0 || ops.alignment == 0 ||
         (ops.alignment & (ops.alignment - 1)) != 0 || !ops.nativeType || !ops.construct ||
         !ops.destroy || ops.fields.Size() != schema.fields.Size() ||
-        !StringView(schema.name.Data(), schema.name.Size()).ValidateUtf8()) {
+        !StringView(schema.name.Data(), schema.name.Size()).ValidateUtf8() ||
+        (schema.toolName.Size() != 0 && !IsTypeToolName(schema.toolName))) {
         return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -780,7 +784,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     const usize typesEnd = typesOffset + schema.fields.Size() * sizeof(Record*);
     const usize orderOffset = (typesEnd + alignof(uint32) - 1) & ~(alignof(uint32) - 1);
     usize bytes = orderOffset + schema.fields.Size() * sizeof(uint32);
-    if (!AddBytes(bytes, schema.name.Size())) {
+    if (!AddBytes(bytes, schema.name.Size()) || !AddBytes(bytes, schema.toolName.Size())) {
         return Result<TypeRegistrationToken>::Failure(ErrorCode::Overflow);
     }
 
@@ -804,7 +808,8 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
 
         // 같은 C++ struct를 다른 ID로 다시 등록하지 않는다(생성 thunk는 생성 ID 하나만 받는다).
         if (FindLocked(schema.id) != nullptr ||
-            FindNativeLocked(ops.nativeType, TypeKind::Struct) != nullptr) {
+            FindNativeLocked(ops.nativeType, TypeKind::Struct) != nullptr ||
+            FindToolNameLocked(schema.toolName) != nullptr) {
             return Result<TypeRegistrationToken>::Failure(ErrorCode::AlreadyExists);
         }
 
@@ -850,7 +855,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
 
     // 색인 공간은 레코드보다 먼저 준비한다(실패하면 아무것도 바꾸지 않는다).
     IndexGrowth growth(allocator_);
-    if (auto prepared = PrepareIndexes(growth, true); !prepared) {
+    if (auto prepared = PrepareIndexes(growth, true, schema.toolName.Size() != 0); !prepared) {
         platform::LockGuard lock(gate_);
         mutating_ = false;
         return Result<TypeRegistrationToken>::Failure(prepared.Error());
@@ -889,6 +894,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     record->schema.version = schema.version;
     record->schema.flags = schema.flags;
     record->schema.name = CopyBytes(schema.name, cursor);
+    record->schema.toolName = CopyBytes(schema.toolName, cursor);
     record->schema.fields = {fields, schema.fields.Size()};
     for (usize index = 0; index < schema.fields.Size(); ++index) {
         ::new (fields + index) FieldSchema(schema.fields[index]);

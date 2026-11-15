@@ -2,6 +2,7 @@
 
 #include <Meta/GeneratedType.h>
 #include <Object/AssetId.h>
+#include <Object/ClassRef.h>
 #include <Object/ConstructionContext.h>
 #include <Object/NameField.h>
 #include <Object/SoftObjectRef.h>
@@ -31,6 +32,20 @@ template <class T>
 struct WeakReferenceField<WeakRef<T>> {
     static constexpr bool Supported = true;
     using Target = T;
+};
+
+// 클래스 참조 PROPERTY(ClassRef<Base> — 리플렉션 B9d2, Docs/Design/ReflectionExtensions.ko.md
+// 5.2절)다. 클래스 TypeId 값 필드이고 Base는 정적 Base 클래스다(판정은 NativeTypeKey<Base> — Base의
+// 생성 헤더가 없어도 된다).
+template <class T>
+struct ClassReferenceField {
+    static constexpr bool Supported = false;
+};
+
+template <class Base>
+struct ClassReferenceField<ClassRef<Base>> {
+    static constexpr bool Supported = true;
+    using Target = Base;
 };
 
 template <class T>
@@ -64,7 +79,7 @@ struct ReflectedStructField {
 
 // 리플렉션 배열 필드의 컨테이너다(Docs/Design/ReflectionFoundations.ko.md 5.6절). 부분 특수화로만
 // 고르며(requires 탐지 없음) Element는 원소의 C++ 형식이다: Array<E>는 E(스칼라·String·Name·Guid·
-// AssetId·Digest·enum·SoftObjectRef·WeakRef·참조 없는 struct), ObjectRefArray<T>는
+// AssetId·Digest·enum·SoftObjectRef·WeakRef·ClassRef·참조 없는 struct), ObjectRefArray<T>는
 // ObjectRef<T>(원소 null 허용), StructRefArray<S>는 참조 struct S다. Registry는 원소를 Registry가
 // 관리하는 컨테이너(ObjectRefArray·StructRefArray)인지다.
 template <class T>
@@ -142,6 +157,8 @@ constexpr ValueKind ScalarValueKind() noexcept {
         return ValueKind::ObjectReference;
     } else if constexpr (WeakReferenceField<T>::Supported) {
         return ValueKind::WeakObjectReference;
+    } else if constexpr (ClassReferenceField<T>::Supported) {
+        return ValueKind::ClassReference;
     } else if constexpr (IsSameV<T, AssetId>) {
         return ValueKind::AssetId;
     } else if constexpr (IsSameV<T, Sha256Digest>) {
@@ -187,7 +204,8 @@ struct TargetValueCheck {
 
 // 단일 값 하나를 Target 종류로 FieldValue에 복사한다(String·Soft 경로는 value의 allocator로 할당 —
 // OutOfMemory). enum은 정수와 GeneratedType<E>::Id()를 싣는다. 참조(강한·weak)는 handle을, Name은
-// 토큰을 싣는다(할당 없음 — weak는 대상이 죽었어도 저장된 handle 그대로다).
+// 토큰을, ClassRef는 클래스 TypeId를 guid에 싣는다(할당 없음 — weak는 대상이 죽었어도 저장된 handle
+// 그대로, ClassRef는 클래스가 해제됐어도 저장된 ID 그대로다).
 //
 // 사용 예:
 //   FieldValue value(allocator);
@@ -204,6 +222,8 @@ Result<void> CopyTargetValue(const T& source, FieldValue& value) noexcept {
         return value.string.TryAssign(source.objectPath.View());
     } else if constexpr (Target == ValueKind::AssetId) {
         value.guid = source.value;
+    } else if constexpr (Target == ValueKind::ClassReference) {
+        value.guid = source.Id();
     } else if constexpr (Target == ValueKind::Name) {
         value.name = source;
     } else if constexpr (Target == ValueKind::Digest256) {
@@ -243,7 +263,9 @@ Result<void> CopyTargetValue(const T& source, FieldValue& value) noexcept {
 // handle을 그대로 대입한다(비정규 null은 ObjectHandle{}로 정규화) — 대상이 같은 Registry의 생존
 // 객체이고 기대 타입의 파생인지는 호출 경로(FieldWriteOperation·WriteGeneratedField·
 // WriteGeneratedStagedField·경로 쓰기)가 먼저 검사하고, 복원 2단계는 1단계가 검증한 노드 handle을
-// 쓴다.
+// 쓴다. ClassRef는 클래스 TypeId를 그대로 대입한다 — 등록·클래스·Base 파생은 호출 경로
+// (FieldWriteOperation·WriteGeneratedField·WriteGeneratedStagedField·경로 쓰기 —
+// ValidateClassReference)가 먼저 검사하고, 복원 2단계는 1단계가 판정한 값을 쓴다.
 template <ValueKind Target, class T>
 Result<void> WriteTargetValue(T& target, const FieldValue& value) noexcept {
     static_assert(TargetValueCheck<Target, T>::Valid);
@@ -259,6 +281,8 @@ Result<void> WriteTargetValue(T& target, const FieldValue& value) noexcept {
         return target.TryAssign(AssetId{value.guid}, value.string.View());
     } else if constexpr (Target == ValueKind::AssetId) {
         target = AssetId{value.guid};
+    } else if constexpr (Target == ValueKind::ClassReference) {
+        target = T(value.guid);
     } else if constexpr (Target == ValueKind::Name) {
         target = value.name;
     } else if constexpr (Target == ValueKind::WeakObjectReference) {
@@ -477,6 +501,18 @@ Result<void> WriteGeneratedField(ObjectRegistry& registry, const ObjectAccessCon
 
         return WriteGeneratedValue<Owner>(member, value,
                                           [&]() noexcept { return borrowed.Value().Get(); });
+    } else if constexpr (ClassReferenceField<Member>::Supported) {
+        // ClassRef 값은 이 Registry에 등록된 클래스이고 정적 Base의 파생이어야 한다(null 허용 —
+        // 등록된 write를 거치면 FieldWriteOperation이 스키마 Base로 먼저 검사했다).
+        if (auto valid = ValidateClassReference(
+                registry, access, value.guid, TypeId{},
+                NativeTypeKey<typename ClassReferenceField<Member>::Target>());
+            !valid) {
+            return valid;
+        }
+
+        return WriteGeneratedValue<Owner>(member, value,
+                                          [&]() noexcept { return borrowed.Value().Get(); });
     } else if constexpr (IsSameV<Member, String> || SoftReferenceField<Member>::Supported) {
         auto pin = registry.PinForEncode(access, handle);
         if (!pin) {
@@ -531,6 +567,23 @@ Result<void> WriteGeneratedStagedField(ConstructionContext& construction, Object
                     NativeTypeKey<typename WeakReferenceField<Member>::Target>())) {
                 return Result<void>::Failure(ErrorCode::TypeMismatch);
             }
+        }
+
+        return WriteGeneratedValue<Owner>(
+            member, value, [&]() noexcept { return construction.GetForWrite<Owner>(handle); });
+    } else if constexpr (ClassReferenceField<Member>::Supported) {
+        // ClassRef 값은 그 트랜잭션 Registry에 등록된 클래스이고 정적 Base의 파생이어야 한다(null
+        // 허용). owner 확인(접근·생존·검사 중 Busy) 뒤에 본다. 복원 2단계는 이 경로를 거치지 않는다
+        // (DecodeGeneratedField가 1단계 판정 값을 바로 대입한다).
+        if (auto target = construction.GetForWrite<Owner>(handle); !target) {
+            return Result<void>::Failure(target.Error());
+        }
+
+        if (auto valid = ValidateClassReference(
+                construction.Registry(), construction.Access(), value.guid, TypeId{},
+                NativeTypeKey<typename ClassReferenceField<Member>::Target>());
+            !valid) {
+            return valid;
         }
 
         return WriteGeneratedValue<Owner>(

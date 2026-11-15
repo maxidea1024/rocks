@@ -562,7 +562,7 @@ internal static class SelfTests
             // 특수화·부분 특수화·일반 사용, 이름만 비슷한 타입, 주석과 문자열·raw 문자열 안의 예시는 받는다.
             temporary.Write(probe, "#pragma once\ntemplate <> struct ArrayField<rocks::Array<int>> {};\n" +
                 "template <class T> class Array<T*> {};\nrocks::Array<int> values;\ntemplate class ValueArray<int>;\n" +
-                "rocks::WeakRef<Node> weak;\ntemplate class WeakRefHolder<int>;\n" +
+                "rocks::WeakRef<Node> weak;\ntemplate class WeakRefHolder<int>;\nrocks::ClassRef<Node> kind;\n" +
                 "// template class rocks::Array<int>;\n/* extern template\n   class rocks::ObjectRef<Node>; */\n" +
                 "const char* text = \"template class rocks::Array<int>;\";\nconst char* raw = R\"x(template class rocks::SoftObjectRef<Node>;)x\";\n" +
                 "constexpr int big = 1'000; const char quote = '\"';\n");
@@ -571,6 +571,7 @@ internal static class SelfTests
                 "template struct ::rocks::ObjectRefArray<Node>;", "extern  template  class StructRefArray<Slot>;", "template class Array <float>;",
                 "template class rocks::ObjectRef<Node>;", "extern template class rocks::SoftObjectRef<>;",
                 "template class rocks::WeakRef<Node>;", "extern template class ::rocks::WeakRef<>;",
+                "template class rocks::ClassRef<Node>;", "extern template struct ::rocks::ClassRef<Node>;",
                 "extern template\n    class\n    rocks::Array<int>;", "template class /* note */ rocks::StructRefArray<Slot>;" })
             {
                 temporary.Write(probe, "// first line\n" + banned + "\n");

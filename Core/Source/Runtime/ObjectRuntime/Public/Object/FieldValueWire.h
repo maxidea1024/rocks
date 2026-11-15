@@ -45,6 +45,8 @@ inline Result<uint32> FieldWireType(ValueKind kind, uint32 referenceWire) noexce
         return Result<uint32>::Success(static_cast<uint32>(WireType::F64));
     case ValueKind::Guid:
     case ValueKind::AssetId:
+    case ValueKind::ClassReference:
+        // ClassRef는 클래스 TypeId다(null은 0 — Docs/Design/ReflectionExtensions.ko.md 5.2절).
         return Result<uint32>::Success(static_cast<uint32>(WireType::Guid));
     case ValueKind::Utf8String:
     case ValueKind::Name:
@@ -274,7 +276,10 @@ private:
 // 문자열을 쓴다(AcquireNameFieldText — pool 없음 Unsupported, 다른 pool WrongContext, 게시되지 않은
 // 토큰 StaleHandle, 내용 규칙 InvalidArgument, None은 빈 문자열) — 내용 검사 몫(byte 수)을
 // Spend한다. weak 참조는 문맥의 WriteWeakReference(Required 검사 없음 — 대상이 죽었으면 null,
-// 저장 집합 밖이면 정책대로 null + 진단)다.
+// 저장 집합 밖이면 정책대로 null + 진단)다. ClassRef는 Required null 검사 뒤 non-null 값을 문맥의
+// AcquireClassReference(스키마 Base type.type)와 정적 Base(staticNative)로 다시 판정한다(조회 1을
+// Spend — 미등록 NotFound, 그 밖 InvalidArgument, Required 검사 모드는 조회하지 않는다). Deprecated
+// 클래스 값은 encode가 허용한다(로드한 값을 다시 저장할 수 있게 — 리플렉션 B9h2, 5.2절).
 inline Result<void> WriteValueWire(ArchiveWriter& out, FieldEncodeContext& context,
                                    const ValueType& type, const EnumSchema* enumeration,
                                    const FieldValue& value, StringView text,
@@ -313,6 +318,31 @@ inline Result<void> WriteValueWire(ArchiveWriter& out, FieldEncodeContext& conte
     case ValueKind::Guid:
     case ValueKind::AssetId:
         return out.WriteGuid(value.guid);
+    case ValueKind::ClassReference: {
+        const bool isNull = value.guid == Guid{};
+        if (auto required = context.CheckRequired(isNull); !required) {
+            return required;
+        }
+
+        // C++가 직접 넣은 값은 쓰기 검증을 거치지 않았으므로 저장 때 다시 검사한다. Required 검사
+        // 모드(staged 실효 값)는 Required만 본다.
+        if (!isNull && !context.IsRequiredCheck()) {
+            if (auto spent = context.Spend(1); !spent) {
+                return spent;
+            }
+
+            auto found = context.AcquireClassReference(value.guid, type.type);
+            if (!found) {
+                return Result<void>::Failure(found.Error());
+            }
+
+            if (!found.Value().IsNativeA(staticNative)) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+        }
+
+        return out.WriteGuid(value.guid);
+    }
     case ValueKind::Utf8String:
         return out.WriteString(text);
     case ValueKind::Name: {

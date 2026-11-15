@@ -997,3 +997,16 @@ TEST(CoreHashMapFactoryTemporaryDestructionKeepsMapGuarded) {
     CHECK(backing.Stats().liveAllocations == 0);
     CHECK(backing.Stats().liveBytes == 0);
 }
+
+// 대소문자 무시 FNV-1a(Name pool bucket·TypeRegistry 타입 도구 이름 색인 공용)는 ASCII 대소문자만
+// 접고 섞지 않은 FNV-1a 값이다: "abc"의 표준 64비트 FNV-1a와 같고, 대소문자만 다른 철자는 같으며,
+// ASCII가 아닌 byte는 접지 않는다.
+TEST(HashStringBytesIgnoringAsciiCaseIsFoldedFnv1a) {
+    CHECK(HashStringBytesIgnoringAsciiCase(StringView("abc")) == 0xe71fa2190541574bull);
+    CHECK(HashStringBytesIgnoringAsciiCase(StringView("ABC")) == 0xe71fa2190541574bull);
+    CHECK(HashStringBytesIgnoringAsciiCase(StringView("Weapons.Sword")) ==
+          HashStringBytesIgnoringAsciiCase(StringView("wEAPONS.sWORD")));
+    CHECK(HashStringBytesIgnoringAsciiCase(StringView()) == 14695981039346656037ull);
+    CHECK(HashStringBytesIgnoringAsciiCase(StringView("\xC3\x89")) !=
+          HashStringBytesIgnoringAsciiCase(StringView("\xC3\xA9")));
+}

@@ -115,16 +115,18 @@ enum class ValueKind : uint8 {
     Int16, // int16(short), wire I64(범위 검사)
     Name,  // rocks::Name(Core/Text/Name.h — 실행 중 pool 토큰), wire String(표시 문자열 — None은
            // 빈 문자열). 복원은 1단계 수집 → 2a intern(Object/NameField.h)
-    WeakObjectReference // rocks::WeakRef<T>(Object/ObjectRefs.h — GC가 추적하지 않는다), wire는
-                        // 강한 참조와 같은 문맥 참조 wire(graph v2 U32 — 같은 그래프 안 노드만,
-                        // Docs/Design/ReflectionExtensions.ko.md 5.1절)
+    WeakObjectReference, // rocks::WeakRef<T>(Object/ObjectRefs.h — GC가 추적하지 않는다), wire는
+                         // 강한 참조와 같은 문맥 참조 wire(graph v2 U32 — 같은 그래프 안 노드만,
+                         // Docs/Design/ReflectionExtensions.ko.md 5.1절)
+    ClassReference       // rocks::ClassRef<Base>(Object/ClassRef.h — 클래스 TypeId, 0 = null), wire
+                         // Guid. value.type은 Base 클래스 ID(필수)다(같은 문서 5.2절)
 };
 
 // ValueKind 열거자 수(마지막 열거자 + 1)다. 열거자 값은 schema·descriptor 계약이므로 새 종류는 끝에
 // 붙이고, 이 식의 마지막 열거자와 성질 표의 행을 함께 고친다. 아래 static_assert가 성질 표와,
 // MetaCompiler 대조 헤더가 C# 표의 종류 수와 이 값을 비교한다. 근거는
 // Docs/Design/ReflectionExtensions.ko.md 1.3절이다.
-inline constexpr uint32 ValueKindCount = static_cast<uint32>(ValueKind::WeakObjectReference) + 1;
+inline constexpr uint32 ValueKindCount = static_cast<uint32>(ValueKind::ClassReference) + 1;
 
 // 값 종류의 성질이다(종류 성질 표 — Docs/Design/ReflectionExtensions.ko.md 1.3절).
 // ValueKindProperties가 종류마다 이 비트의 OR를 돌려주고, 런타임의 등록 검증(TypeRegistry)·쓰기
@@ -243,6 +245,17 @@ constexpr ValueKindEntry ValueKindTableEntry(ValueKind kind) noexcept {
         return {true, placed | ValueKindBit(ValueKindProperty::MapValue) |
                           ValueKindBit(ValueKindProperty::WholeFieldValue) |
                           ValueKindBit(ValueKindProperty::HasTargetType)};
+    case ValueKind::ClassReference:
+        // 클래스 TypeId 값이다. 키·원소가 될 수 있고 Required(non-null)를 받는다. 대상 ID는 Base
+        // 클래스로 필수다(Object 전체를 받는 ClassRef는 없다). null이 이미 "없음"이라 Optional
+        // 내부는 아니다.
+        return {true, placed | ValueKindBit(ValueKindProperty::MapKey) |
+                          ValueKindBit(ValueKindProperty::MapValue) |
+                          ValueKindBit(ValueKindProperty::SetElement) |
+                          ValueKindBit(ValueKindProperty::WholeFieldValue) |
+                          ValueKindBit(ValueKindProperty::AcceptsRequired) |
+                          ValueKindBit(ValueKindProperty::HasTargetType) |
+                          ValueKindBit(ValueKindProperty::RequiresTargetId)};
     case ValueKind::SoftObjectReference:
         return {true, placed | ValueKindBit(ValueKindProperty::MapKey) |
                           ValueKindBit(ValueKindProperty::MapValue) |
@@ -374,8 +387,8 @@ constexpr bool ValueKindIsAggregate(ValueKind kind) noexcept {
 }
 
 // 필드 값 형식이다. type은 Enum·Struct 스키마 ID, ObjectReference·WeakObjectReference·
-// SoftObjectReference의 기대 대상 타입(0 = Object)에만 쓰고 그 밖은 0이어야 한다(Array의
-// value.type도 0 — 원소 대상은 element.type).
+// SoftObjectReference의 기대 대상 타입(0 = Object), ClassReference의 Base 클래스 ID(0이 아니어야
+// 한다)에만 쓰고 그 밖은 0이어야 한다(Array의 value.type도 0 — 원소 대상은 element.type).
 struct ValueType {
     ValueKind kind = ValueKind::Opaque;
     TypeId type{};
@@ -404,9 +417,9 @@ struct FieldSchema {
     Span<const char> toolName{};
     // Array 필드(value = {Array, 0})의 원소 형식과 길이 상한이다(B5 — maxElements는 1 이상
     // MaxArrayElements 이하, 저장·경로 쓰기에서 건다). 원소는 스칼라(Int8·Int16 포함), Guid,
-    // Utf8String, Name, ObjectReference, WeakObjectReference, Enum, Struct, AssetId,
-    // SoftObjectReference, Digest256이고 element.type은 Enum과 Struct면 필수, 세 참조는 기대
-    // 타입(선택), 그 밖은 0이다. 배열이 아닌 필드는 Opaque·0이어야 한다.
+    // Utf8String, Name, ObjectReference, WeakObjectReference, ClassReference, Enum, Struct,
+    // AssetId, SoftObjectReference, Digest256이고 element.type은 Enum·Struct·ClassReference면 필수,
+    // 세 참조는 기대 타입(선택), 그 밖은 0이다. 배열이 아닌 필드는 Opaque·0이어야 한다.
     ValueType element{};
     uint32 maxElements = 0;
 };
@@ -479,7 +492,55 @@ struct TypeSchema {
     // 선언된 단일 base schema의 ID다. 0은 reflected base가 없는 타입(Object 직접 파생)이다.
     TypeId baseType{};
     uint32 flags = 0;
+    // 타입 도구 이름이다(클래스·struct — Docs/Design/ReflectionExtensions.ko.md 5.2절). 에셋 명령의
+    // `<Type>`(asset-new·asset-list --type)·ClassRef 텍스트·InstancedStruct `_structType`·Sparks가
+    // 이 이름 하나로 타입을 가리킨다. MetaCompiler는 늘 채운다(기본은 한정하지 않은 C++ 타입 이름,
+    // ROCKS_CLASS(Name="…")·ROCKS_STRUCT(Name="…")로 바꾼다). 비어 있으면 도구 이름이 없는 타입이다
+    // (수동 등록 — TypeRegistry::AcquireByToolName으로 찾을 수 없다). 비어 있지 않으면
+    // IsTypeToolName을 만족해야 하고 TypeRegistry 안에서 대소문자 무시로 유일하다(등록
+    // AlreadyExists). 그래서 생성 스키마를 복사해 같은 C++ 타입을 다른 TypeId로 등록하는 별칭
+    // 스키마는 이 칸을 비운다(원본과 이름이 같아 AlreadyExists). 등록이 깊게 복사한다. 직렬화는
+    // TypeId를 쓰므로 이 이름과 무관하다.
+    Span<const char> toolName{};
 };
+
+// 타입 도구 이름의 문법이다: `[A-Za-z_][A-Za-z0-9_]*('.' [A-Za-z_][A-Za-z0-9_]*)*`(Sparks 모듈 경로
+// `Weapons.Sword` — `:`는 쓰지 않는다). `none`은 ClassRef·참조 텍스트의 null 표기라 대소문자 무시로
+// 예약이다(Docs/Design/ReflectionExtensions.ko.md 5.2·10절). 빈 이름은 거짓이다. TypeRegistry
+// 등록과 MetaCompiler(RMC2203 — C# TypeToolName.IsValid)가 같은 규칙을 쓴다.
+//
+// 사용 예:
+//   if (schema.toolName.Size() != 0 && !IsTypeToolName(schema.toolName)) { ... }
+constexpr bool IsTypeToolName(Span<const char> name) noexcept {
+    bool start = true;
+    for (usize index = 0; index < name.Size(); ++index) {
+        const char c = name[index];
+        const bool letter = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_';
+        if (c == '.') {
+            if (start) {
+                return false;
+            }
+
+            start = true;
+            continue;
+        }
+
+        if (!letter && (start || c < '0' || c > '9')) {
+            return false;
+        }
+
+        start = false;
+    }
+
+    constexpr char reserved[] = {'n', 'o', 'n', 'e'};
+    bool none = name.Size() == sizeof(reserved);
+    for (usize index = 0; none && index < sizeof(reserved); ++index) {
+        none = (name[index] >= 'A' && name[index] <= 'Z' ? name[index] - 'A' + 'a' : name[index]) ==
+               reserved[index];
+    }
+
+    return !start && !none;
+}
 
 // EnumFlags:
 //   Flags — 비트 플래그 enum이다(ROCKS_ENUM(Flags)). 값은 선언 값들의 OR(0 포함)이면 유효하다.

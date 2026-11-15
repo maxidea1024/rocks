@@ -56,18 +56,19 @@
   "types": [
     { "kind": "class", "name": "rocks::reflection_fixture::Base", "id": "<32 hex>", "version": 1,
       "flags": ["Abstract"], "base": "rocks::Object",
-      "header": "ReflectionTestFixtures/ReflectionFixture.h", "visibility": "public",
+      "header": "ReflectionTestFixtures/ReflectionFixture.h", "visibility": "public", "toolName": "Base",
       "fields": [ { "owner": "rocks::reflection_fixture::Base", "name": "count", "id": "<hex>",
                     "fieldKind": "Value", "value": { "kind": "Int32" }, "element": null,
                     "flags": [], "toolName": "count", "category": "", "displayName": "", "maxElements": 0 } ] },
     { "kind": "struct", "name": "…", "id": "<32 hex>", "version": 1, "flags": [], "binds": "",
-      "header": "…", "visibility": "public", "fields": [ … ] },
+      "header": "…", "visibility": "public", "toolName": "…", "fields": [ … ] },
     { "kind": "enum", "underlying": "UInt8", "flags": ["Flags"], "toolPrefix": "TC_",
       "values": [ { "name": "Default", "value": 0, "toolName": "Default", "displayName": "", "flags": ["Hidden"] } ] } ] }
 ```
 
 - 클래스 `fields`는 상속 포함 전체(정렬 순서 그대로)이고 각 필드에 선언 owner를 적는다. 생성 thunk는 `&::<owner>::<name>`을 쓰며 private 기반 필드는 owner의 `ROCKS_GENERATED_BODY`(모든 `GeneratedType` 특수화에 friend)로 접근한다 — 모듈 경계와 무관하다.
 - struct의 `flags`는 선언 플래그 `Atomic`(리플렉션 B9b2 — [RX](ReflectionExtensions.ko.md) 1.8·3.1절, 쓰기 순서는 형질보다 앞)과 `ContainsStrongReference`·`RequiresWorldOnlyOwner`(생성 형질, 4.6절)·`ContainsReferenceArray`(B5, 5.6절), `binds`는 Binds 실제 타입의 Clang 정규 철자(없으면 빈 문자열)다.
+- 클래스·struct의 `toolName`은 실효 타입 도구 이름이다(리플렉션 B9d2 — 지정하지 않았으면 한정하지 않은 C++ 이름, [RX](ReflectionExtensions.ko.md) 5.2절). 읽기는 형식을 검사한다(RMC1000).
 - 읽기는 모르는 속성을 거부하고 schema 1만 받는다. 출력은 결정적이다(이름 순, 고정 서식, LF).
 
 ### 1.5 import와 파서의 수집 범위
@@ -106,7 +107,7 @@
 
 ### 2.1 문법
 
-지정자 값은 따옴표 문자열 또는 **부호 없는 10진 정수**(앞자리 0 금지, 1–2³¹−1)다. 타입 지정자 `Name="…"`(타입 도구 이름)·`Within="…"`(Clang으로 정규 이름 해석)는 리플렉션 B9가 더한다(RX 5.2·9.2절). 나머지 문법(이름 목록·쉼표·중복 금지·JSON escape)은 그대로다. 지정자 어휘는 MetaCompiler의 표 하나에 두고 모르는 지정자는 오류다. UI 문서의 확장 문법(`|`·구간·실수 값)과 버전 있는 어휘 manifest는 UI의 메타데이터 단계(CU1)가 이 표를 넓혀 도입한다.
+지정자 값은 따옴표 문자열 또는 **부호 없는 10진 정수**(앞자리 0 금지, 1–2³¹−1)다. 타입 지정자 `Name="…"`(타입 도구 이름 — B9d2에서 구현, 형식은 `.`으로 이은 ASCII 식별자 마디이고 `none`은 예약)·`Within="…"`(Clang으로 정규 이름 해석)는 리플렉션 B9가 더한다(RX 5.2·9.2절). 나머지 문법(이름 목록·쉼표·중복 금지·JSON escape)은 그대로다. 지정자 어휘는 MetaCompiler의 표 하나에 두고 모르는 지정자는 오류다. UI 문서의 확장 문법(`|`·구간·실수 값)과 버전 있는 어휘 manifest는 UI의 메타데이터 단계(CU1)가 이 표를 넓혀 도입한다.
 
 ### 2.2 타입 지정자
 
@@ -119,7 +120,7 @@
 | `ToolPrefix="…"` | ENUM | 도구 이름의 선택 접두(예 `TC_`) |
 | `Binds="…"` | STRUCT | 미러 선언이 결합하는 실제 타입 철자(4.5절) |
 
-리플렉션 B9가 STRUCT `Atomic`(통째 단위, struct base에서 상속), CLASS `Transient`·`Deprecated`(상속, 저장 불가 객체)·`Within="…"`, CLASS·STRUCT `Name="…"`를 더한다(RX 3.1·5.2·9.2절).
+리플렉션 B9가 STRUCT `Atomic`(통째 단위, struct base에서 상속), CLASS `Transient`·`Deprecated`(상속, 저장 불가 객체)·`Within="…"`, CLASS·STRUCT `Name="…"`(B9d2에서 구현 — 타입 도구 이름, 기본은 한정하지 않은 C++ 이름, 모듈과 import 범위에서 대소문자 무시로 유일 RMC2203)를 더한다(RX 3.1·5.2·9.2절).
 
 버전 규칙: 버전은 그 타입 Record의 해석 규칙이다. 영속 필드의 의미·형식이 바뀌면 올리고 마이그레이션을 등록한다. base의 버전은 파생 Record에 기록되지 않으므로 base의 영속 배치를 바꾸면 파생 타입들도 버전을 올린다(MetaCompiler는 강제하지 않는다 — 배치 지문 비교는 후속 후보). 필드 추가만 한 경우의 누락은 정책이 아니라 A0-O의 형식 규칙으로 허용된다(Oc가 graph v1 envelope 위에서 먼저 넣었고 graph v2가 그대로 갖는다 — [ObjectFoundations](ObjectFoundations.ko.md) 4절) — 빠진 필드·멤버는 기준(클래스 기본값) 값을 뜻한다. 기본값만 바꾸는 것은 버전을 올리지 않고, 기존 인스턴스에 전파하지 않으려 하거나 필드의 의미를 바꾸면 올린다([RuntimeClassMetadata](RuntimeClassMetadata.ko.md) '클래스 기본값 결정').
 
@@ -133,7 +134,7 @@
 | `Name="…"` | — | 도구·명령행 이름(`toolName`). ASCII 식별자(`[A-Za-z_][A-Za-z0-9_]*`), 없으면 C++ 필드 이름. 상속 포함 대소문자 무시로 유일해야 한다(RMC2203). 직렬화는 필드 ID라 이름과 무관하다 |
 | `MaxElements=N` | — | 배열 길이 상한(5.5절 — 쓰기·저장에서 건다). 1..1,048,576(밖은 RMC2000), 없으면 65,536. 배열이 아닌 필드는 RMC2202 |
 
-리플렉션 B9가 `DuplicateTransient`·`NonPIEDuplicateTransient`·`SaveGame`·`TextExportTransient`(전파 없음)를 더하고, Required 허용 범위를 ClassRef와 그 컨테이너·참조 정적 배열·ObjectRefMap 값으로 넓히며, Required와 DuplicateTransient 계열의 조합을 거부한다. `MaxElements`는 Map·Set에도 쓴다(RX 9.1·15절).
+리플렉션 B9가 `DuplicateTransient`·`NonPIEDuplicateTransient`·`SaveGame`·`TextExportTransient`(전파 없음)를 더하고, Required 허용 범위를 ClassRef와 그 컨테이너(B9d2에서 ClassRef 필드·`Array<ClassRef>` 구현)·참조 정적 배열·ObjectRefMap 값으로 넓히며, Required와 DuplicateTransient 계열의 조합을 거부한다. `MaxElements`는 Map·Set에도 쓴다(RX 9.1·15절).
 
 계약 설정(기본값이 아니면 `UnsupportedSetting`, 12.4절)과 필드 기본값 조회(빌드 키의 "기본값 포함")는 클래스 기본값 레코드(RuntimeClassMetadata '클래스 기본값 결정')가 필요하므로 텍스처 설정 단계(A5)에서 구현한다(11절).
 
@@ -169,7 +170,7 @@
 
 - `rocks::SoftObjectRef<T> { AssetId asset; String objectPath; }`를 ObjectRuntime에 둔다. GC 간선이 아니며(`FieldKind::Value`) 이동 전용이고 복제는 `TryClone`(실패 가능 — Core `String`이 복사를 지원하지 않는다)이다. `T`는 기대 타입(`value.type`, 0 = Object)이다. null은 `asset`이 0이고 `objectPath`가 빈 것이다(asset이 0인데 경로가 있으면 InvalidArgument). 객체 경로는 패키지 안 Outer·Name 경로(A0-O, 비면 대표 에셋), UTF-8 4 KiB 상한(AS 5.1절).
 - `ValueKind::SoftObjectReference`, wire `SoftObjectReference = 12`(새 wire tag, payload = Guid 16 byte + String). `FieldValue`는 `guid`·`string`을 쓴다.
-- Sparks 문서의 `Soft<T>`("AssetId만")는 이 타입으로 맞춘다(11절). 클래스 참조(`TSoftClassPtr`·`TSubclassOf` 대응)는 이 단계 밖이다.
+- Sparks 문서의 `Soft<T>`("AssetId만")는 이 타입으로 맞춘다(11절). 클래스 참조(`TSoftClassPtr`·`TSubclassOf` 대응)는 이 단계 밖이다(`TSubclassOf` 대응 `ClassRef<Base>`는 리플렉션 B9d2에서 구현 — RX 5.2절).
 
 ### 3.4 `ROCKS_ENUM`
 
@@ -359,7 +360,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema&, Ru
 - 순환 RMC2302: native 철자로 푼 필드 간선 DFS를 Order·깊이 계산·생성보다 먼저 한다(Binds 미러는 C++에서 순환을 만들 수 있다 — 미러가 자기가 묶는 실제 타입을 필드로 가지는 경우). import 쪽은 `LoadImports`에서 같은 DFS·깊이 계산(descriptor에 깊이 키는 없다). 깊이 RMC2303, 생성 코드에 `static_assert(depth <= ::rocks::MaxStructDepth)`.
 - 형질: `ContainsStrongReference`(ObjectReference 필드 — Transient 포함 — 또는 그런 struct). `RequiresWorldOnlyOwner`: struct의 NATIVE 멤버가 RMC2206 형질을 가져도 struct 자체는 오류가 아니라 형질을 전파한다. 생성 struct는 `static constexpr bool RequiresWorldOnlyOwner`와 모델 값이 직접 멤버의 형질을 포함하는지 확인하는 static_assert를 내고, WorldOnly가 아닌 클래스는 struct 필드마다 `static_assert(!GeneratedType<S>::RequiresWorldOnlyOwner)`를 낸다(import 플래그를 믿지 않는다). NATIVE 멤버의 직접 타입이 리플렉션 struct면 그 생성 헤더를 include하고 `static_assert(!GeneratedType<S>::ContainsStrongReference)`(RMC2205의 생성 대조) — `NativeMemberTraits`에 `GeneratedType` 탐지 특수화를 두지 않는다(생성 헤더가 없으면 조용히 false가 되는 ODR 위반).
 - 생성: `GeneratedType<S>`(Id·Schema·Ops·형질·Trace·Register), struct가 `static Result<Array<uint8>> Migrate(Allocator&, TypeId, uint32, uint32, Span<const uint8>) noexcept`를 가지면 `Ops().migrate`에 연결, 클래스 struct 필드의 read·writeStaged는 nullptr·write는 Struct 종류, 헤더 안 특수화는 위상 순서, 다른 헤더(같은 모듈 포함)·import base의 상속 struct 필드가 쓰는 struct의 생성 헤더 include(header≠include 규칙), import 필드 Reference ID 채우기 확장.
-- descriptor struct 항목 키(1.4절): kind·name·id·version·header·visibility·flags·binds·fields.
+- descriptor struct 항목 키(1.4절): kind·name·id·version·header·visibility·flags·binds·toolName·fields(`toolName`은 리플렉션 B9d2).
 - 모듈 등록: `ModuleRegistration::RegisterStructIfAbsent`, 집계 순서 enum → struct(의존 위상 순서, 같은 깊이는 이름 순) → 클래스.
 
 **Binds(B4c)**
@@ -379,7 +380,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema&, Ru
 
 ### 5.1 `Array<T>`
 
-- 원소: 스칼라·`String`·`Guid`·`AssetId`·`Sha256Digest`·enum·참조 없는 struct(Binds Core 값 타입 포함)·`SoftObjectRef<U>`. 참조 목록은 `ObjectRefArray<T>`, 참조 struct 목록은 Registry가 관리하는 `StructRefArray<S>`(4.3·5.6절)다. `Array<ObjectRef<…>>`·`Array<참조 struct>`는 `Array`의 nothrow-move static_assert에서 Clang 단계가 먼저 실패하므로 MetaCompiler가 그 진단을 RMC2304로 바꿔 보고하고, 중첩 배열은 RMC2304다(5.6절). 리플렉션 B9가 Int8·Int16·Name·WeakRef·ClassRef·InstancedStruct·Text 원소를 더한다(RX 1.3·8절 — Int8·Int16은 B9a2, Name은 B9c2, WeakRef는 B9d1에서 구현).
+- 원소: 스칼라·`String`·`Guid`·`AssetId`·`Sha256Digest`·enum·참조 없는 struct(Binds Core 값 타입 포함)·`SoftObjectRef<U>`. 참조 목록은 `ObjectRefArray<T>`, 참조 struct 목록은 Registry가 관리하는 `StructRefArray<S>`(4.3·5.6절)다. `Array<ObjectRef<…>>`·`Array<참조 struct>`는 `Array`의 nothrow-move static_assert에서 Clang 단계가 먼저 실패하므로 MetaCompiler가 그 진단을 RMC2304로 바꿔 보고하고, 중첩 배열은 RMC2304다(5.6절). 리플렉션 B9가 Int8·Int16·Name·WeakRef·ClassRef·InstancedStruct·Text 원소를 더한다(RX 1.3·8절 — Int8·Int16은 B9a2, Name은 B9c2, WeakRef는 B9d1, ClassRef는 B9d2에서 구현).
 - 필드는 소유 타입 생성자가 allocator로 초기화한다. struct 원소가 `explicit T(Allocator&) noexcept`면 그 allocator로 만든다.
 - `ValueKind::Array`, `element`가 원소 형식이다.
 
@@ -582,7 +583,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema&, Ru
 
 - A0-B는 graph envelope(format 1)를 그대로 두고 필드 인코딩·문맥·한도(원소 누계)만 넓힌다. 저장 집합·외부 참조·export 기준 노드 타입·EditorOnly 제외·Commit 다중도 보고·바이트·작업량 한도 확장은 graph v2(A0-O — [ObjectFoundations](ObjectFoundations.ko.md))다. 값 치환 hook은 B4가 `SubstituteStruct`로 구현했다.
 - A0-O가 A0-B에서 받는 것: 문맥의 참조 wire 매개변수, Soft 수집기·유효 플래그·struct hook·진단·decode 정책 자리, 두 단계 decode의 산출물 보관 구조.
-- 리플렉션 B9가 더하는 것: 참조 문맥의 weak 쓰기·읽기(B9d1에서 구현 — `FieldEncodeContext::WriteWeakReference`·`FieldDecodeContext::ReadWeakReference`, 관찰 struct의 weak 제한, RX 5.1절 "구현(B9d1)에서 정한 점"), 복원 2a의 Name 일괄 intern·관찰 struct의 Name 제한(B9c2에서 구현 — RX 4절 "구현(B9c2)에서 정한 점"), 진단 경로의 Map·Set 항목 삽입 순번, decode 정책 `unknownClass`·`unknownStructType`, 저장·복원 정책 `includeFlags`(RX 1.6·1.7·4.1·5절).
+- 리플렉션 B9가 더하는 것: 참조 문맥의 weak 쓰기·읽기(B9d1에서 구현 — `FieldEncodeContext::WriteWeakReference`·`FieldDecodeContext::ReadWeakReference`, 관찰 struct의 weak 제한, RX 5.1절 "구현(B9d1)에서 정한 점"), 복원 2a의 Name 일괄 intern·관찰 struct의 Name 제한(B9c2에서 구현 — RX 4절 "구현(B9c2)에서 정한 점"), 진단 경로의 Map·Set 항목 삽입 순번, decode 정책 `unknownClass`(B9d2에서 구현 — `FieldDecodePolicy::unknownClass`, 문맥의 `AcquireClassReference`, 진단 `UnknownClassReference`, RX 5.2절 "구현(B9d2)에서 정한 점")·`unknownStructType`, 저장·복원 정책 `includeFlags`(RX 1.6·1.7·4.1·5절).
 
 ### 6.4 B3c 구현 API(확정안)
 

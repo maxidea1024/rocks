@@ -1,5 +1,6 @@
 #include "PropertyPathInternal.h"
 
+#include <Object/ClassRef.h>
 #include <Object/NameField.h>
 
 // 경로 연산의 실행(detail::PathRunner — 입력 형식·문맥·단계 해석·끝 지점 분류·참조 lease·검증
@@ -318,6 +319,20 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
                 !valid) {
                 return cursor.Fail(valid.Error(), WriteReason(valid.Error(), end.effectiveFlags));
             }
+        }
+
+        // ClassRef 값은 이 Registry에 등록된 클래스이고 스키마 Base의 파생이어야 한다
+        // (FieldWriteOperation과 같은 검사 — 리플렉션 B9d2). 그 lease는 완료까지 쥐고 생성 thunk가
+        // 정적 Base를 대조한다(CheckClassTarget).
+        if (value->kind == ValueKind::ClassReference && value->guid != Guid{}) {
+            const TypeId base = end.indexed ? end.field->element.type : end.field->value.type;
+            auto found = CheckClassReferenceLease(
+                cursor.registry_.AcquireRegisteredType(cursor.access_, value->guid), base, nullptr);
+            if (!found) {
+                return cursor.Fail(found.Error(), WriteReason(found.Error(), end.effectiveFlags));
+            }
+
+            cursor.referencedType_ = Move(found.Value());
         }
     }
 

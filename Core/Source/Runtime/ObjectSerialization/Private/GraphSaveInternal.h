@@ -166,6 +166,14 @@ public:
         return budget_.AddElements(count);
     }
 
+    // ClassRef 값의 클래스 판정이다(리플렉션 B9d2 — C++가 직접 넣은 값을 저장 때 다시 본다). 이
+    // Registry의 TypeRegistry를 소유 스레드 조회(AcquireRegisteredType)로 연다. 조회 몫은 codec이
+    // Spend했다.
+    Result<TypeLease> AcquireClassReference(TypeId type, TypeId base) noexcept override {
+        return detail::CheckClassReferenceLease(registry_.AcquireRegisteredType(access_, type),
+                                                base, nullptr);
+    }
+
     // 중첩 Record는 필드 값 하나라 전체 크기도 값 한도 안이어야 한다(배열 payload의 상한도 이
     // 값이다).
     RecordLimits NestedRecordLimits() const noexcept override {

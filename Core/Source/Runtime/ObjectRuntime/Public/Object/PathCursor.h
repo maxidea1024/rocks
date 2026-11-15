@@ -137,6 +137,12 @@ public:
     // (StaticTypeMismatch)다.
     Result<void> CheckWeakTarget(const void* staticNative) noexcept;
 
+    // ClassRef 쓰기·삽입(Input()의 guid)의 클래스가 정적 Base staticNative(NativeTypeKey<Base>)의
+    // C++ 파생인지다(리플렉션 B9d2). 등록·스키마 Base 파생은 검증 지점(PathRunner —
+    // ValidateClassReference)이 이미 봤고 그 클래스 lease를 쥐었다. null이면 성공, 아니면
+    // TypeMismatch(StaticTypeMismatch)다.
+    Result<void> CheckClassTarget(const void* staticNative) noexcept;
+
     // 할당하는 쓰기 끝 지점이 할당 전에 owner를 encode 고정한다(이미 고정했으면 그대로 성공 —
     // Read는 처음부터 고정한다). 고정 중 재진입 쓰기·Registry 컨테이너 변경·SetEdge는 Busy다.
     Result<void> Pin() noexcept;

@@ -34,6 +34,16 @@ enum class NewerVersionPolicy : uint8 {
     LoadNewerSkippingUnknown
 };
 
+// 등록되지 않은 클래스를 가리키는 ClassRef 값(ValueKind::ClassReference)을 읽었을 때: 거부(기본,
+// NotFound) 또는 진단(UnknownClassReference) 후 null(Docs/Design/ReflectionExtensions.ko.md 5.2절 —
+// 클래스를 지운 패키지를 열어 고칠 때 쓴다). 등록은 됐지만 클래스가 아니거나 Base의 파생이 아닌
+// 값은 정책과 무관하게 InvalidArgument다. Map 키·Set 원소 자리에는 값을 바꾸는 정책을 쓰지
+// 않는다(늘 거부 — 같은 문서 1.7절, 그 자리는 리플렉션 B9f2가 연다).
+enum class UnknownClassPolicy : uint8 {
+    Reject,
+    ReportAndNull
+};
+
 // 스키마에 없는 필드: 진단 후 건너뛰기(기본) 또는 거부(쿠킹 데이터는 정확히 일치해야 한다).
 enum class UnknownFieldPolicy : uint8 {
     SkipAndReport,
@@ -63,6 +73,7 @@ struct FieldDecodePolicy {
     NewerVersionPolicy newerVersion = NewerVersionPolicy::Reject;
     UnknownFieldPolicy unknownField = UnknownFieldPolicy::SkipAndReport;
     uint32 excludedFlags = 0;
+    UnknownClassPolicy unknownClass = UnknownClassPolicy::Reject;
 };
 
 class RecordScope;
@@ -197,6 +208,29 @@ public:
     // 복원 2단계에만 있는 작업량(staged 쓰기·문자열 복사·참조 연결)이다. 1단계가 미리 청구하고
     // 2단계와 저장은 청구하지 않는다.
     virtual Result<void> ReserveApply(uint64 work) noexcept = 0;
+
+    // ClassRef 값(ValueKind::ClassReference — Docs/Design/ReflectionExtensions.ko.md 5.2절)의
+    // 클래스 type을 대상 TypeRegistry에서 찾아 lease를 준다. base는 스키마의 Base 클래스
+    // ID(value.type — 배열이면 element.type)이고, type이 base 자신이거나 그 파생(스키마 사슬
+    // TypeLease::IsA)이어야 한다(base 0이면 Base ID를 보지 않는다 — 등록이 스키마의 0을 거부하므로
+    // codec이 주는 base는 0이 아니다). 직렬화기가 구현한다: 복원 1단계 문맥은 TypeRegistry만
+    // 조회하고(ObjectRegistry에 닿지 않는다 — 잠금으로 보호되는 TypeRegistry::Acquire라
+    // worker에서도 부를 수 있다), 저장 문맥은 ObjectRegistry::AcquireRegisteredType(소유
+    // 스레드)이다. 복원 2단계는 조회하지 않는다(1단계 판정 기록 — TakeClassReference). 판정 규칙은
+    // detail::CheckClassReferenceLease(Object/ClassRef.h) 하나다.
+    //
+    // 반환: 그 클래스의 lease. 실패 — 미등록 NotFound, 클래스가 아닌 레코드(struct·enum)·base의
+    // 파생이 아님 InvalidArgument, 종료 ShuttingDown, 문맥·스레드 오류는 그 오류. 기본 문맥은
+    // Unsupported다(ClassRef를 지원하지 않는 문맥 — 시험 문맥 등).
+    //
+    // 사용 예(codec이 부르는 형태):
+    //   auto found = context.AcquireClassReference(value.guid, type.type);
+    //   if (!found) { return Result<void>::Failure(found.Error()); }
+    virtual Result<TypeLease> AcquireClassReference(TypeId type, TypeId base) noexcept {
+        (void)type;
+        (void)base;
+        return Result<TypeLease>::Failure(ErrorCode::Unsupported);
+    }
 
     // 값 임시 저장에 쓰는 할당기다(저장·1단계는 예산을 청구한다).
     virtual Allocator& Scratch() noexcept = 0;
@@ -729,6 +763,25 @@ public:
     virtual Result<Name> TakeName(StringView text) noexcept {
         (void)text;
         return Result<Name>::Failure(ErrorCode::Unsupported);
+    }
+
+    // 복원 1단계가 null이 아닌 저장 ClassRef 값 하나(stored)의 판정을 방문 순서대로 기록한다(nulled
+    // = 미등록 클래스를 decode 정책 ReportAndNull로 null로 바꿨다 — Docs/Design/
+    // ReflectionExtensions.ko.md 5.2절). 2단계는 TypeRegistry를 다시 조회하지 않고 이 기록을 쓰므로
+    // 두 단계 사이에 등록이 바뀌어도 결과는 1단계 판정·진단과 같다. 기록 몫은 구현이 1단계에
+    // 청구한다. 기본은 Unsupported다(ClassRef 복원을 지원하지 않는 문맥).
+    virtual Result<void> CollectClassReference(TypeId stored, bool nulled) noexcept {
+        (void)stored;
+        (void)nulled;
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    // 복원 2단계가 1단계와 같은 방문 순서로 ClassRef 판정 하나를 받는다: 1단계 판정 뒤의 값(stored
+    // 그대로이거나 null). stored가 기록과 다르거나 기록이 남지 않았으면 두 단계의 방문 순서가
+    // 어긋난 계약 위반이라 InvalidArgument다. 기본은 Unsupported다.
+    virtual Result<TypeId> TakeClassReference(TypeId stored) noexcept {
+        (void)stored;
+        return Result<TypeId>::Failure(ErrorCode::Unsupported);
     }
 
 protected:

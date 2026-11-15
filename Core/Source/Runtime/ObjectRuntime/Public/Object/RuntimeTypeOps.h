@@ -79,7 +79,7 @@ struct FieldValue {
     int64 signedInteger = 0;
     float float32 = 0;
     double float64 = 0;
-    // Guid·AssetId 값, SoftObjectReference의 asset이다.
+    // Guid·AssetId 값, SoftObjectReference의 asset, ClassReference 값의 클래스 TypeId(0 = null)다.
     Guid guid{};
     // ObjectReference·WeakObjectReference 값의 대상 handle이다(null = ObjectHandle{}).
     ObjectHandle reference{};
@@ -193,17 +193,37 @@ Result<void> ValidateArrayEdit(const FieldWriteTarget& target, ArrayEdit edit) n
 Result<void> ValidateWeakTarget(ObjectRegistry& registry, const ObjectAccessContext& access,
                                 ObjectHandle target, const void* staticNative) noexcept;
 
+// ClassRef 값(ValueKind::ClassReference — 리플렉션 B9d2)의 쓰기 검사다(Docs/Design/
+// ReflectionExtensions.ko.md 5.2절 표의 "쓰기"). value가 0(null)이면 성공이고, 아니면
+// registry.AcquireRegisteredType(access, value)로 연 클래스가 base(스키마의 Base 클래스 ID — 0이면
+// 보지 않는다) 자신이거나 그 파생이고 baseNative(정적 Base의 NativeTypeKey — nullptr이면 보지
+// 않는다)의 C++ 파생이어야 한다(판정은 detail::CheckClassReferenceLease, Object/ClassRef.h). 미등록
+// NotFound, 클래스가 아닌 레코드(struct·enum)·파생 위반 InvalidArgument, 접근·스레드·종료·재진입
+// 오류는 그 오류다. FieldWriteOperation(스키마 base)·생성 write와 staged write thunk(정적
+// Base)·경로 쓰기가 값 내용 검사로 부른다(읽기 전용 정책 뒤). Deprecated 클래스 거부는 리플렉션
+// B9h2가 더한다. lease를 쥐지 않는 순수 검사다.
+//
+// 사용 예:
+//   if (auto valid = detail::ValidateClassReference(registry, access, value.guid, TypeId{},
+//                                                   NativeTypeKey<Pawn>());
+//       !valid) {
+//       return valid;
+//   }
+Result<void> ValidateClassReference(ObjectRegistry& registry, const ObjectAccessContext& access,
+                                    TypeId value, TypeId base, const void* baseNative) noexcept;
+
 } // namespace detail
 
 // 등록된 필드의 실제 대상 schema, 타입과 값 형식을 검사한다. 오류 순서는 context·수명, 타입·필드,
 // 전달 값 종류(TypeMismatch — enum은 FieldValue::type이 필드의 enum ID와 다를 때도), 읽기
 // 전용(Unsupported), 값 내용(정수 폭 Overflow·소프트 참조의 null 규칙과 경로 상한·선언되지 않은
 // enum 값 InvalidArgument, weak 참조는 강한 참조와 같은 대상 검사 — 이 Registry의 생존 객체·기대
-// 타입의 파생, Name 토큰은 Object/NameField.h의 ValidateNameFieldToken — 이 Registry의
-// pool이 없으면 None 말고 Unsupported, 다른 pool의 토큰 WrongContext, 게시되지 않은 토큰
-// StaleHandle, 표시 문자열 규칙 InvalidArgument)이다. Struct·Array 필드는 FieldValue로 통째 쓰지
-// 않으므로 문맥·수명·대상 타입·필드 검사 뒤 Unsupported다(멤버·원소 단위는 B6 경로 접근). 참조 값의
-// 비정규 null(IsNull인 non-zero handle)은 null로 정규화한다 — 검증은 null로 하고 callback에는
+// 타입의 파생, ClassRef 값은 detail::ValidateClassReference — 등록된 클래스이고 스키마 Base의 파생,
+// 미등록 NotFound·그 밖 InvalidArgument, Name 토큰은 Object/NameField.h의 ValidateNameFieldToken —
+// 이 Registry의 pool이 없으면 None 말고 Unsupported, 다른 pool의 토큰 WrongContext, 게시되지 않은
+// 토큰 StaleHandle, 표시 문자열 규칙 InvalidArgument)이다. Struct·Array 필드는 FieldValue로 통째
+// 쓰지 않으므로 문맥·수명·대상 타입·필드 검사 뒤 Unsupported다(멤버·원소 단위는 B6 경로 접근). 참조
+// 값의 비정규 null(IsNull인 non-zero handle)은 null로 정규화한다 — 검증은 null로 하고 callback에는
 // reference를 ObjectHandle{}로 바꾼 사본(할당 없음)을 넘긴다(수동 함수표가 비정규 handle을 저장하지
 // 않게, 7.1절). 이 연산 자체는 encode 고정을 쥐지 않는다: 생성 callback(WriteGeneratedField)은
 // String·Soft 새 값 할당부터 게시까지 스스로 고정해 할당 콜백의 재진입 쓰기를 Busy로 막지만, 수동

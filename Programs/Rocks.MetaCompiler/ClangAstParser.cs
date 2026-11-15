@@ -617,6 +617,8 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
                     Private = owner.Private,
                     IsStruct = isStruct,
                     Atomic = structSpec?.Atomic ?? false,
+                    // 기본 도구 이름(한정하지 않은 C++ 이름)과 같은 Name은 지정하지 않은 것과 같다.
+                    ToolName = (classSpec?.ToolName ?? structSpec!.ToolName) is string toolName && toolName != TypeToolName.Default(qualified) ? toolName : "",
                     BindsSpelling = structSpec?.Binds ?? "",
                     BindsSite = structSpec is { Binds.Length: > 0 } ? prefix.Site : null
                 };

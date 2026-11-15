@@ -9,14 +9,16 @@ namespace Rocks.MetaCompiler;
 // schema 1만 받는다. 쓰기는 결정적이다(타입 이름 순, 필드는 생성 순서, 고정 서식, LF).
 internal static class ModuleDescriptor
 {
+    // 클래스 항목이다. toolName은 실효 타입 도구 이름(Docs/Design/ReflectionExtensions.ko.md 1.8·5.2절 — 지정하지 않았으면 한정하지
+    // 않은 C++ 이름)이다.
     private static readonly string[] TypeKeys =
-        ["kind", "name", "id", "version", "flags", "base", "header", "visibility", "fields"];
+        ["kind", "name", "id", "version", "flags", "base", "header", "visibility", "toolName", "fields"];
 
     // struct 항목: base 대신 flags(선언 플래그 Atomic 다음 생성 형질 — 쓰기 순서 Atomic → ContainsStrongReference →
     // RequiresWorldOnlyOwner → ContainsReferenceArray)와 binds(Binds 실제 타입의 Clang 정규 철자, 미러가 아니면 "")다
     // (Docs/Design/ReflectionFoundations.ko.md 1.4·4.6·5.6절, Atomic은 ReflectionExtensions.ko.md 1.8·3.1절).
     private static readonly string[] StructKeys =
-        ["kind", "name", "id", "version", "header", "visibility", "flags", "binds", "fields"];
+        ["kind", "name", "id", "version", "header", "visibility", "flags", "binds", "toolName", "fields"];
 
     // enum 항목: 필드·base 대신 underlying·열거자다(Docs/Design/ReflectionFoundations.ko.md 3.4절).
     private static readonly string[] EnumKeys =
@@ -71,6 +73,7 @@ internal static class ModuleDescriptor
                 json.WriteString("base", type.Base);
                 json.WriteString("header", type.Header);
                 json.WriteString("visibility", type.Private ? "private" : "public");
+                json.WriteString("toolName", type.EffectiveToolName);
                 WriteFields(json, type);
                 json.WriteEndObject();
             }
@@ -115,6 +118,7 @@ internal static class ModuleDescriptor
 
         json.WriteEndArray();
         json.WriteString("binds", type.Binds);
+        json.WriteString("toolName", type.EffectiveToolName);
         WriteFields(json, type);
         json.WriteEndObject();
     }
@@ -341,6 +345,14 @@ internal static class ModuleDescriptor
             }
 
             string header = Header(type, name);
+            // toolName은 실효 타입 도구 이름이다(형식은 런타임 등록과 같은 TypeToolName — 모듈·import 범위의 유일성은
+            // SchemaValidator가 RMC2203으로 본다).
+            string typeToolName = type.GetProperty("toolName").GetString() ?? "";
+            if (!TypeToolName.IsValid(typeToolName))
+            {
+                throw Invalid("toolName of " + name + ": " + typeToolName);
+            }
+
             ClassModel model = new()
             {
                 Name = name,
@@ -359,7 +371,8 @@ internal static class ModuleDescriptor
                 ContainsStrongReference = flags.Contains("ContainsStrongReference"),
                 RequiresWorldOnlyOwner = flags.Contains("RequiresWorldOnlyOwner"),
                 ContainsReferenceArray = flags.Contains("ContainsReferenceArray"),
-                Binds = binds
+                Binds = binds,
+                ToolName = typeToolName == TypeToolName.Default(name) ? "" : typeToolName
             };
             List<FieldModel> fields = [];
             foreach (JsonElement field in type.GetProperty("fields").EnumerateArray())
@@ -441,7 +454,7 @@ internal static class ModuleDescriptor
                 // 같은 규칙).
                 if (!ValueKindTable.Has(targetKind, ValueKindProperty.AcceptsRequired) && fieldFlags.Contains("Required", StringComparer.Ordinal))
                 {
-                    throw Invalid("Required on a field that is not an object or soft object reference or an array of them");
+                    throw Invalid("Required on a field that is not an object, soft object or class reference or an array of them");
                 }
 
                 string? referenceId = null;

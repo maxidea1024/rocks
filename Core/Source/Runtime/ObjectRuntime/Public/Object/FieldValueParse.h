@@ -13,7 +13,9 @@ namespace rocks::detail {
 // ReadValueWire가 읽은 값 하나다. 할당하지 않는 view이며(text는 입력을 빌린다) kind에 맞는 칸만
 // 뜻이 있다. undeclared는 선언되지 않은 enum 값을 읽었다는 표시(stored = 저장 값)이고, 정책
 // 판정·대체 값은 ResolveUndeclaredEnum이 한다. Name은 text가 표시 문자열이고 name은 2단계의
-// 토큰이다(ResolveParsedName — 1단계는 기본 None 그대로).
+// 토큰이다(ResolveParsedName — 1단계는 기본 None 그대로). ClassRef는 guid가 판정 뒤 값이고,
+// unknownClass는 미등록 클래스를 decode 정책 ReportAndNull로 null로 바꿨다는 표시(storedClass =
+// 저장 값 — 진단은 ReportParsedValue)다.
 struct ParsedValue {
     bool boolean = false;
     uint64 unsignedInteger = 0;
@@ -27,16 +29,81 @@ struct ParsedValue {
     DecodedReference reference;
     bool undeclared = false;
     int64 stored = 0;
+    bool unknownClass = false;
+    TypeId storedClass{};
 };
+
+// 읽은 ClassRef 값 하나(out.guid — 0이면 null)를 판정한다(리플렉션 B9d2 — Docs/Design/
+// ReflectionExtensions.ko.md 5.2절 표의 "decode 1단계"). base는 스키마의 Base 클래스 ID(type.type),
+// staticNative는 정적 Base의 NativeTypeKey(nullptr이면 보지 않는다)다.
+// - 기록하는 단계(복원 1단계): 조회 1을 Spend한 뒤 문맥의 AcquireClassReference(TypeRegistry 조회 —
+//   ObjectRegistry 접근 아님)로 등록·클래스·Base 파생을 본다. 미등록(NotFound)이면 decode 정책
+//   unknownClass가 Reject이거나 진단 받을 곳이 없을 때(CanReport) NotFound, ReportAndNull이면
+//   out.unknownClass·storedClass를 남기고 null로 바꾼다(진단은 ReportParsedValue). 클래스가 아닌
+//   레코드·Base 파생 위반·정적 Base 위반은 정책과 무관하게 InvalidArgument, 그 밖의 조회 오류는 그
+//   오류다. 받은 값과 null로 바꾼 값은 CollectClassReference로 방문 순서대로 기록한다.
+// - 2단계(입력 때문에 실패하지 않는다): TypeRegistry를 다시 조회하지 않고 TakeClassReference로
+//   1단계 판정을 받는다 — 두 단계 사이에 등록이 바뀌어도 결과는 1단계 판정·진단과 같다(어긋난 방문
+//   순서는 계약 위반 InvalidArgument).
+// Deprecated 클래스의 DeprecatedType 진단은 리플렉션 B9h2가 이 판정에 더한다. Map 키·Set 원소
+// 자리(B9f2)는 ReportAndNull을 쓰지 않는다(1.7절).
+inline Result<void> ResolveClassReference(FieldDecodeContext& context, TypeId base,
+                                          const void* staticNative, ParsedValue& out) noexcept {
+    if (out.guid == Guid{}) {
+        return Result<void>::Success();
+    }
+
+    if (!context.IsRecording()) {
+        auto decided = context.TakeClassReference(out.guid);
+        if (!decided) {
+            return Result<void>::Failure(decided.Error());
+        }
+
+        out.guid = decided.Value();
+        return Result<void>::Success();
+    }
+
+    if (auto spent = context.Spend(1); !spent) {
+        return spent;
+    }
+
+    auto found = context.AcquireClassReference(out.guid, base);
+    if (found) {
+        if (!found.Value().IsNativeA(staticNative)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        return context.CollectClassReference(out.guid, false);
+    }
+
+    if (found.Error() != ErrorCode::NotFound) {
+        return Result<void>::Failure(found.Error());
+    }
+
+    // 진단 없이 값을 바꾸지 않는다(직렬화기가 hook 없이 ReportAndNull을 주면 거부).
+    if (context.Policy().unknownClass != UnknownClassPolicy::ReportAndNull ||
+        !context.CanReport()) {
+        return Result<void>::Failure(ErrorCode::NotFound);
+    }
+
+    if (auto recorded = context.CollectClassReference(out.guid, true); !recorded) {
+        return recorded;
+    }
+
+    out.unknownClass = true;
+    out.storedClass = out.guid;
+    out.guid = Guid{};
+    return Result<void>::Success();
+}
 
 // reader에서 값 하나(type 종류)를 읽어 검증한다(단일 값 필드와 배열 원소 공용, 5.6절). 진단·청구는
 // 하지 않는다(강한 참조는 문맥의 ReadReference, weak 참조는 ReadWeakReference — 1단계는 token을
-// 남긴다). 검증: 잘림·bool·UTF-8은 reader 규칙, 정수 폭 Overflow, digest 길이·SoftObjectRef 규칙
-// InvalidArgument, enum은 enumeration이 없으면 Unsupported이고 선언 여부를 set(있으면) 또는
-// 스키마로 판정해 out.undeclared에 표시만 한다. Name은 표시 문자열을 view로 읽고, 기록하는
-// 단계(복원 1단계)면 그 몫(byte 수)을 Spend한 뒤 내용 규칙(ValidateNameFieldText —
-// 길이·UTF-8·NUL·NFC, InvalidArgument)을 본다 — 토큰은 ResolveParsedName이 단계에 맞게 정한다.
-// Struct·Array·Opaque는 Unsupported다.
+// 남긴다, ClassRef는 ResolveClassReference가 조회 몫을 Spend하고 판정한다). 검증: 잘림·bool·UTF-8은
+// reader 규칙, 정수 폭 Overflow, digest 길이·SoftObjectRef 규칙 InvalidArgument, enum은
+// enumeration이 없으면 Unsupported이고 선언 여부를 set(있으면) 또는 스키마로 판정해
+// out.undeclared에 표시만 한다. Name은 표시 문자열을 view로 읽고, 기록하는 단계(복원 1단계)면 그
+// 몫(byte 수)을 Spend한 뒤 내용 규칙(ValidateNameFieldText — 길이·UTF-8·NUL·NFC, InvalidArgument)을
+// 본다 — 토큰은 ResolveParsedName이 단계에 맞게 정한다. Struct·Array·Opaque는 Unsupported다.
 inline Result<void> ReadValueWire(ArchiveReader& reader, FieldDecodeContext& context,
                                   const ValueType& type, const EnumSchema* enumeration,
                                   const EnumValueSet* set, const void* staticNative,
@@ -127,6 +194,15 @@ inline Result<void> ReadValueWire(ArchiveReader& reader, FieldDecodeContext& con
 
         out.text = decoded.Value();
         return Result<void>::Success();
+    }
+    case ValueKind::ClassReference: {
+        auto decoded = reader.ReadGuid();
+        if (!decoded) {
+            return Result<void>::Failure(decoded.Error());
+        }
+
+        out.guid = decoded.Value();
+        return ResolveClassReference(context, type.type, staticNative, out);
     }
     case ValueKind::Name: {
         auto decoded = reader.ReadStringView();
@@ -259,7 +335,8 @@ inline Result<void> ResolveUndeclaredEnum(FieldDecodeContext& context, const Enu
 }
 
 // 검증을 마친 값 하나의 진단·수집을 지금 위치로 보고한다(복원 2단계에서는 문맥이 버린다): 선언되지
-// 않은 enum(UndeclaredEnumValue — value = 저장 값), non-null 소프트 참조 수집. 배열은 원소마다 원소
+// 않은 enum(UndeclaredEnumValue — value = 저장 값), null로 읽은 미등록 클래스(UnknownClassReference
+// — valueType = 저장된 클래스 TypeId), non-null 소프트 참조 수집. 배열은 원소마다 원소
 // 검증 직후 부른다(경로 [f[i]]). Required null은 여기서 보고하지 않는다 — 복원은 적용 뒤 staged
 // 객체의 실효 값으로 한 번 진단한다(Docs/Design/ObjectFoundations.ko.md 4절).
 inline Result<void> ReportParsedValue(FieldDecodeContext& context, const ValueType& type,
@@ -267,6 +344,14 @@ inline Result<void> ReportParsedValue(FieldDecodeContext& context, const ValueTy
     if (parsed.undeclared) {
         if (auto reported =
                 context.Report(FieldDiagnosticKind::UndeclaredEnumValue, parsed.stored, type.type);
+            !reported) {
+            return reported;
+        }
+    }
+
+    if (parsed.unknownClass) {
+        if (auto reported =
+                context.Report(FieldDiagnosticKind::UnknownClassReference, 0, parsed.storedClass);
             !reported) {
             return reported;
         }
@@ -426,13 +511,16 @@ bool MatchesSchema(const FieldSchema& field) noexcept {
     }
 }
 
-// 참조 멤버(강한·weak — 배열이면 원소)의 정적 대상 타입이다(그 밖은 nullptr).
+// 참조 멤버(강한·weak — 배열이면 원소)의 정적 대상 타입, ClassRef 멤버의 정적 Base다(그 밖은
+// nullptr).
 template <class Member>
 const void* StaticReferenceNative() noexcept {
     if constexpr (ObjectReferenceField<Member>::Supported) {
         return NativeTypeKey<typename ObjectReferenceField<Member>::Target>();
     } else if constexpr (WeakReferenceField<Member>::Supported) {
         return NativeTypeKey<typename WeakReferenceField<Member>::Target>();
+    } else if constexpr (ClassReferenceField<Member>::Supported) {
+        return NativeTypeKey<typename ClassReferenceField<Member>::Target>();
     } else {
         return nullptr;
     }

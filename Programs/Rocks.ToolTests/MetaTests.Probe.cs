@@ -239,7 +239,7 @@ internal static partial class MetaTests
             string input = temporary.FilePath("Probe.h");
             string source = "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n" +
                 "namespace a { ROCKS_CLASS()\nstruct Thing : public rocks::Object { Thing() {} }; }\n" +
-                "namespace b { ROCKS_CLASS()\nstruct Thing : public rocks::Object {}; }\n" +
+                "namespace b { ROCKS_CLASS(Name = \"OtherThing\")\nstruct Thing : public rocks::Object {}; }\n" +
                 "namespace a { ROCKS_CLASS()\nstruct ThingExtended : public rocks::Object {}; }\n";
             File.WriteAllText(input, source);
             List<string> arguments = [];

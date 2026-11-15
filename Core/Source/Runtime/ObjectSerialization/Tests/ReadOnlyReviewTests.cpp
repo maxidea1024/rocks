@@ -103,6 +103,9 @@ TEST(RegisteredFieldWriteUsesActualObjectSchemaAcrossRegistriesAndAliases) {
         // 같은 C++ native 타입을 같은 레지스트리에 별도 ID로도 등록한다.
         const TypeId aliasId{0xad10000000000000ull, 0x99};
         readonlySchema.id = aliasId;
+        // 별칭 스키마는 타입 도구 이름을 두지 않는다(원본과 같은 이름은 AlreadyExists — 리플렉션
+        // B9d2).
+        readonlySchema.toolName = {};
         REQUIRE(first.Register(readonlySchema, GeneratedType<PropertyNode>::Ops()));
         // 수동으로 구성된 다른 schema의 필드 누락·표현 불일치도 호출 전에 거부한다.
         const TypeId missingId{0xad10000000000000ull, 0x9a};
@@ -126,11 +129,13 @@ TEST(RegisteredFieldWriteUsesActualObjectSchemaAcrossRegistriesAndAliases) {
         }
         auto missingSchema = writableSchema;
         missingSchema.id = missingId;
+        missingSchema.toolName = {};
         missingSchema.fields = missingFields;
         alteredOps.fields = missingOps;
         REQUIRE(first.Register(missingSchema, Move(alteredOps)));
         auto kindSchema = writableSchema;
         kindSchema.id = kindId;
+        kindSchema.toolName = {};
         kindSchema.fields = kindFields;
         REQUIRE(first.Register(kindSchema, GeneratedType<PropertyNode>::Ops()));
         ObjectRegistry firstObjects(allocator, first, {715, 1});

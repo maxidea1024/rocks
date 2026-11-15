@@ -104,7 +104,9 @@ internal static class ValueKindTable
         new("Int8", 19, Keyed),
         new("Int16", 20, Keyed),
         new("Name", 21, Keyed),
-        new("WeakObjectReference", 22, Placed | ValueKindProperty.MapValue | ValueKindProperty.WholeFieldValue | ValueKindProperty.HasTargetType)
+        new("WeakObjectReference", 22, Placed | ValueKindProperty.MapValue | ValueKindProperty.WholeFieldValue | ValueKindProperty.HasTargetType),
+        new("ClassReference", 23, Placed | ValueKindProperty.MapKey | ValueKindProperty.MapValue | ValueKindProperty.SetElement |
+            ValueKindProperty.WholeFieldValue | ValueKindProperty.AcceptsRequired | ValueKindProperty.HasTargetType | ValueKindProperty.RequiresTargetId)
     ];
 
     // 성질과 같은 뜻의 런타임 질의 함수(rocks:: 이름공간)다. 대조 헤더가 칸마다 이 함수를 부른다.

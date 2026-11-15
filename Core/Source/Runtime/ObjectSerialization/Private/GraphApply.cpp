@@ -24,13 +24,14 @@ public:
         node_ = &node;
         migration_ = 0;
         name_ = 0;
+        class_ = 0;
     }
 
-    // 노드의 모든 필드를 적용한 뒤 부른다. 1단계가 보관한 struct 마이그레이션과 Name 기록은 모두
-    // 소비되어야 한다(남으면 두 단계의 방문 순서가 어긋난 계약 위반).
+    // 노드의 모든 필드를 적용한 뒤 부른다. 1단계가 보관한 struct 마이그레이션·Name 기록·ClassRef
+    // 판정은 모두 소비되어야 한다(남으면 두 단계의 방문 순서가 어긋난 계약 위반).
     Result<void> EndNode() noexcept {
-        if (node_ &&
-            (migration_ != node_->structMigrations.Size() || name_ != node_->names.Size())) {
+        if (node_ && (migration_ != node_->structMigrations.Size() ||
+                      name_ != node_->names.Size() || class_ != node_->classes.Size())) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
@@ -45,6 +46,18 @@ public:
         }
 
         return Result<Name>::Success(node_->names[name_++].token);
+    }
+
+    // 1단계가 같은 순서로 기록한 ClassRef 판정이다(리플렉션 B9d2 — TypeRegistry를 다시 조회하지
+    // 않는다). 다시 읽은 저장 값이 기록과 다르면(방문 순서 어긋남) InvalidArgument다.
+    Result<TypeId> TakeClassReference(TypeId stored) noexcept override {
+        if (!node_ || class_ >= node_->classes.Size() ||
+            !(node_->classes[class_].stored == stored)) {
+            return Result<TypeId>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        const bool nulled = node_->classes[class_++].nulled;
+        return Result<TypeId>::Success(nulled ? TypeId{} : stored);
     }
 
     Result<RecordScope> OpenRecord(const FieldView& field, TypeId expected, uint32 minVersion,
@@ -230,6 +243,8 @@ private:
     const LoadNode* node_ = nullptr;
     usize migration_ = 0;
     usize name_ = 0;
+    // 다음에 소비할 ClassRef 판정 기록의 위치다(리플렉션 B9d2).
+    usize class_ = 0;
 };
 
 } // namespace

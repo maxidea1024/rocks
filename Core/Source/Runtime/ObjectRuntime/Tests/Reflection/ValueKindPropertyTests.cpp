@@ -80,10 +80,11 @@ constexpr ExpectedRow Expected[] = {{ValueKind::Opaque, "00000000000000"},
                                     {ValueKind::Int8, "11111111000001"},
                                     {ValueKind::Int16, "11111111000001"},
                                     {ValueKind::Name, "11111111000001"},
-                                    {ValueKind::WeakObjectReference, "11110100001001"}};
+                                    {ValueKind::WeakObjectReference, "11110100001001"},
+                                    {ValueKind::ClassReference, "11111110011101"}};
 
 static_assert(sizeof(Expected) / sizeof(Expected[0]) == ValueKindCount);
-static_assert(ValueKindCount == 23);
+static_assert(ValueKindCount == 24);
 static_assert(ValueKindCanBeMapKey(ValueKind::Bool) && !ValueKindCanBeMapKey(ValueKind::Float32));
 
 usize CellCount(const char* cells) noexcept {

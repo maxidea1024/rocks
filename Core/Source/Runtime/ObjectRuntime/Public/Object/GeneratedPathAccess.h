@@ -91,6 +91,15 @@ Result<void> PathValue(PathCursor& cursor, T& value) noexcept {
                 }
             }
 
+            // ClassRef 값은 정적 Base의 파생이어야 한다(등록·스키마 Base는 검증 지점이 봤다).
+            if constexpr (Target == ValueKind::ClassReference) {
+                if (auto checked = cursor.CheckClassTarget(
+                        NativeTypeKey<typename ClassReferenceField<T>::Target>());
+                    !checked) {
+                    return checked;
+                }
+            }
+
             // 할당하지 않는 쓰기다(옛 값 복사도 할당 없음).
             FieldValue* previous = cursor.Output();
             FieldValue captured(previous ? previous->GetAllocator()
@@ -132,6 +141,14 @@ Result<void> InsertArrayElement(PathCursor& cursor, Array<E>& array) noexcept {
     if constexpr (Target == ValueKind::WeakObjectReference) {
         if (auto checked =
                 cursor.CheckWeakTarget(NativeTypeKey<typename WeakReferenceField<E>::Target>());
+            !checked) {
+            return checked;
+        }
+    }
+
+    if constexpr (Target == ValueKind::ClassReference) {
+        if (auto checked =
+                cursor.CheckClassTarget(NativeTypeKey<typename ClassReferenceField<E>::Target>());
             !checked) {
             return checked;
         }

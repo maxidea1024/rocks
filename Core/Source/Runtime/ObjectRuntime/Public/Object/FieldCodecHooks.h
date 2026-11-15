@@ -33,7 +33,12 @@ enum class FieldDiagnosticKind : uint8 {
     // 남기고 null로 쓴다(저장은 실패하지 않는다): Reject 정책, Admit에서 Null·Import(weak import는
     // 없다), Include에서 모든 노드를 encode한 뒤의 최종 집합 밖(그때 기록 순서대로 —
     // objectIndex·path는 기록할 때의 위치다).
-    ExternalReference
+    ExternalReference,
+    // 복원 1단계가 읽은 ClassRef 값(ValueKind::ClassReference)의 클래스가 대상 TypeRegistry에
+    // 등록되어 있지 않아 decode 정책 UnknownClassPolicy::ReportAndNull대로 null로 읽었다(valueType
+    // = 저장된 클래스 TypeId, path = 그 값의 위치 — 배열이면 [f[i]], Docs/Design/
+    // ReflectionExtensions.ko.md 5.2·15절). Reject 정책(기본)은 진단 없이 NotFound다.
+    UnknownClassReference
 };
 
 // 진단 하나다. objectIndex는 그래프 안 노드 위치(0부터 — local ID − 1 = export index − 1), path는

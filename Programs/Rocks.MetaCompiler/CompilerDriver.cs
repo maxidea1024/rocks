@@ -491,10 +491,13 @@ internal static class CompilerDriver
         RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
     // import descriptor를 읽어 정규 이름 → 타입 모델과, public 타입이 있는 모듈 목록을 만든다. 같은 이름이
-    // 두 descriptor에 있으면 RMC2004다.
+    // 두 descriptor에 있으면 RMC2004, 클래스·struct의 타입 도구 이름이 두 import 모듈 사이에서 대소문자 무시로 겹치면
+    // RMC2203이다(그 둘을 함께 쓰는 프로그램의 TypeRegistry 등록이 AlreadyExists가 되기 전에 막는다 — Docs/Design/
+    // ReflectionExtensions.ko.md 5.2절).
     private static (Dictionary<string, ClassModel> Types, List<string> PublicModules) LoadImports(IEnumerable<string> descriptors, string self)
     {
         Dictionary<string, ClassModel> types = new(StringComparer.Ordinal);
+        Dictionary<string, ClassModel> toolNames = new(StringComparer.OrdinalIgnoreCase);
         HashSet<string> modules = new(StringComparer.OrdinalIgnoreCase);
         List<string> publicModules = [];
         foreach (string path in descriptors)
@@ -517,6 +520,13 @@ internal static class CompilerDriver
                 {
                     throw new MetadataException($"reflected type {model.Name} is declared by two imported modules ({types[model.Name].Module}, {module})", "RMC2004",
                         "Keep each reflected type in exactly one module.");
+                }
+
+                if (!model.IsEnum && !toolNames.TryAdd(model.EffectiveToolName, model))
+                {
+                    ClassModel other = toolNames[model.EffectiveToolName];
+                    throw new MetadataException($"type tool name '{model.EffectiveToolName}' of {model.Name} (module {module}) collides with {other.Name} (module {other.Module}) (case-insensitive)", "RMC2203",
+                        "Give one of the types a distinct ROCKS_CLASS(Name=\"...\") or ROCKS_STRUCT(Name=\"...\"); a module cannot import two modules whose type tool names collide.");
                 }
             }
 

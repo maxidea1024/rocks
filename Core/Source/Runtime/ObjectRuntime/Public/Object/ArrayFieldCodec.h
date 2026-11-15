@@ -247,6 +247,9 @@ Result<void> AppendParsedElement(Array<Element>& target, const ParsedValue& pars
     } else if constexpr (WeakReferenceField<Element>::Supported) {
         // 1단계는 handle이 비어 있다(관찰은 직렬화기가 막는다), 2단계는 만든 노드 handle이다.
         return target.TryPushBack(Element(parsed.reference.handle));
+    } else if constexpr (ClassReferenceField<Element>::Supported) {
+        // 판정을 마친 클래스 TypeId다(ReportAndNull로 바꾼 미등록 클래스는 null).
+        return target.TryPushBack(Element(parsed.guid));
     } else if constexpr (IsSameV<Element, float>) {
         return target.TryPushBack(parsed.float32);
     } else if constexpr (IsSameV<Element, double>) {

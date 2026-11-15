@@ -222,9 +222,9 @@ internal static partial class MetaTests
             string generated = Compact(File.ReadAllText(probe.Output));
             foreach ((string expected, string reason) in new[]
             {
-                ("Span<const char>(\"probe::Point\", 12), Guid{}, 16u};", "Atomic struct schema flags"),
-                ("Span<const char>(\"probe::Segment\", 14), Guid{}, 16u};", "Atomic reference struct schema flags"),
-                ("Span<const char>(\"probe::Plain\", 12), Guid{}, 0u};", "plain struct schema flags")
+                ("Span<const char>(\"probe::Point\", 12), Guid{}, 16u, Span<const char>(\"Point\", 5)};", "Atomic struct schema flags"),
+                ("Span<const char>(\"probe::Segment\", 14), Guid{}, 16u, Span<const char>(\"Segment\", 7)};", "Atomic reference struct schema flags"),
+                ("Span<const char>(\"probe::Plain\", 12), Guid{}, 0u, Span<const char>(\"Plain\", 5)};", "plain struct schema flags")
             })
             {
                 Verify.That(generated.Contains(Compact(expected), StringComparison.Ordinal), "generated code missing " + reason + ": " + expected);

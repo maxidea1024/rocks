@@ -161,10 +161,11 @@ internal static class CppEmitter
         // 다른 헤더(같은 모듈·다른 모듈)에 선언된 리플렉션 enum·struct를 필드(상속 필드·배열 원소 포함)나 NATIVE 멤버의
         // 직접 타입으로 쓰면 그 타입의 GeneratedType이 먼저 보여야 한다(생성 접근기가 GeneratedType<T>::Id·IsDeclared·
         // ContainsStrongReference로 알아보고, StructRefArray<S>::Trace가 GeneratedType<S>::Trace를 인스턴스화한다). 같은
-        // 특수화를 두 번 정의하지 않도록 그 타입의 생성 헤더를 include한다.
+        // 특수화를 두 번 정의하지 않도록 그 타입의 생성 헤더를 include한다. 클래스 대상(참조의 기대 타입·ClassRef의 Base)은
+        // NativeTypeKey만 쓰므로 include하지 않는다(ClassRef<Self>·파생 클래스를 Base로 두어도 include 순환이 생기지 않는다).
         ClassModel[] own = schema.Ordered.Where(type => type.Header == include).ToArray();
         IEnumerable<string> valueHeaders = own.SelectMany(type => type.Fields)
-            .Where(field => ValueKindTable.Has(field.TargetKind, ValueKindProperty.RequiresTargetId) && field.Reference is not null)
+            .Where(field => field.TargetKind is "Enum" or "Struct" && field.Reference is not null)
             .Select(field => field.Reference!)
             .Concat(own.SelectMany(type => type.NativeMembers).Where(native => native.Struct is not null).Select(native => native.Struct!))
             .Select(name => schema.Find(name).Header)
@@ -235,7 +236,7 @@ internal static class CppEmitter
             Line("static const TypeSchema& Schema() noexcept {");
             EmitFieldSchemas(type, Line);
             string fieldSpan = type.Fields.Count == 0 ? "Span<const FieldSchema>{}" : $"Span<const FieldSchema>(fields, {type.Fields.Count})";
-            Line($"static const TypeSchema schema{{Id(), {type.Version}, {fieldSpan}, {View(type.Name)}, {GuidValue(baseId)}, {type.Flags}u}};");
+            Line($"static const TypeSchema schema{{Id(), {type.Version}, {fieldSpan}, {View(type.Name)}, {GuidValue(baseId)}, {type.Flags}u, {View(type.EffectiveToolName)}}};");
             Line("return schema;");
             Line("}");
             // 클래스 생성 Trace다(Docs/Design/ReflectionFoundations.ko.md 9.1절 B8a). 상속 필드를 포함한 모든 참조·struct·배열
@@ -527,7 +528,7 @@ internal static class CppEmitter
         Line("static const TypeSchema& Schema() noexcept {");
         EmitFieldSchemas(type, Line);
         string fieldSpan = type.Fields.Count == 0 ? "Span<const FieldSchema>{}" : $"Span<const FieldSchema>(fields, {type.Fields.Count})";
-        Line($"static const TypeSchema schema{{Id(), {type.Version}, {fieldSpan}, {View(type.Name)}, Guid{{}}, {type.Flags}u}};");
+        Line($"static const TypeSchema schema{{Id(), {type.Version}, {fieldSpan}, {View(type.Name)}, Guid{{}}, {type.Flags}u, {View(type.EffectiveToolName)}}};");
         Line("return schema;");
         Line("}");
         // 참조 struct는 직접 ObjectRef 멤버(Transient 포함 — GC는 추적한다)를 Visit하고 멤버 struct의 Trace를, 모든 배열

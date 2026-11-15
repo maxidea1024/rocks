@@ -249,6 +249,42 @@ internal static class ModuleMetaTests
             await Reject(layout.RunUpperAsync(), "RMC2203", "tool name");
         });
 
+        // 리플렉션 B9d2: 타입 도구 이름(기본은 한정하지 않은 C++ 이름)이 descriptor toolName으로 전해지고, 이 모듈 타입의 이름은 import한
+        // 타입의 이름과도 대소문자 무시로 달라야 한다(RMC2203 — 같은 Registry 등록의 AlreadyExists를 먼저 잡는다).
+        suite.Add("Meta.TypeToolNamesAreUniqueAcrossImports", async () =>
+        {
+            using Layout layout = new(options, environment);
+            Verify.Equal(0, (await layout.RunLowerAsync()).ExitCode, "lower module");
+            using (JsonDocument lower = JsonDocument.Parse(File.ReadAllBytes(layout.Descriptor("Lower"))))
+            {
+                Verify.Equal("Parent", Type(lower, "probe::Parent").GetProperty("toolName").GetString(), "default type tool name in the descriptor");
+            }
+
+            layout.Write("Upper/Public/Upper/Value.h", Value.Replace("ROCKS_CLASS()", "ROCKS_CLASS(Name = \"PARENT\")", StringComparison.Ordinal));
+            await Reject(layout.RunUpperAsync(), "RMC2203", "of module Lower");
+        });
+
+        // 리플렉션 B9d2: import한 두 모듈의 타입 도구 이름이 대소문자 무시로 겹쳐도 RMC2203이다(그 둘을 함께 쓰는 프로그램의 등록이
+        // AlreadyExists가 되기 전에 — 정규 이름 중복의 RMC2004와 같은 자리). Upper가 Lower(probe::Parent — 기본 이름 Parent)와
+        // 도구 이름을 PARENT로 바꾼 Elements(probe::Plain)를 함께 import한다.
+        suite.Add("Meta.TypeToolNamesAreUniqueAmongImportedModules", async () =>
+        {
+            using Layout layout = new(options, environment);
+            layout.WriteArrayModules();
+            Verify.Equal(0, (await layout.RunArrayModuleAsync("Elements")).ExitCode, "elements module");
+            Verify.Equal(0, (await layout.RunArrayModuleAsync("Lower")).ExitCode, "lower module");
+            Verify.Equal(0, (await layout.RunArrayModuleAsync("Upper")).ExitCode, "upper module before the collision");
+            string mutated = layout.Generated("Mutated", "Elements.rocksmeta.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(mutated)!);
+            File.WriteAllText(mutated, MutateType(File.ReadAllText(layout.Descriptor("Elements")), "probe::Plain",
+                plain => plain["toolName"] = "PARENT"));
+            await Reject(layout.RunArrayModuleAsync("Upper", [layout.Descriptor("Lower"), mutated]), "RMC2203", "(module Lower)");
+            // descriptor의 toolName도 형식을 검사한다(빌드 산출물 위조 — RMC1000).
+            File.WriteAllText(mutated, MutateType(File.ReadAllText(layout.Descriptor("Elements")), "probe::Plain",
+                plain => plain["toolName"] = "bad name"));
+            await Reject(layout.RunArrayModuleAsync("Upper", [layout.Descriptor("Lower"), mutated]), "RMC1000", "toolName of probe::Plain");
+        });
+
         // B3a: AssetId·Sha256Digest·SoftObjectRef 필드가 descriptor에 담기고, import한 base의 소프트 참조 기대 타입이 파생
         // 모듈로 전해진다(Docs/Design/ReflectionFoundations.ko.md 3.1–3.3절).
         suite.Add("Meta.AssetValueKindsRoundTripThroughImportedDescriptors", async () =>
@@ -670,6 +706,7 @@ internal static class ModuleMetaTests
             box["name"] = "probe::OtherBox";
             box["id"] = "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b01";
             box["header"] = "Other/Box.h";
+            box["toolName"] = "OtherBox";
             System.Text.Json.Nodes.JsonObject inner = FieldNode(box, "x");
             inner["owner"] = "probe::OtherBox";
             inner["name"] = "inner";
@@ -937,7 +974,7 @@ internal static class ModuleMetaTests
                 ("largeMaxElements", "RMC1000", "maxElements 1048577 of an array field", parent => FieldNode(parent, "plains")["maxElements"] = 1048577),
                 ("referenceArrayAsValue", "RMC1000", "fieldKind and value kind disagree", parent => FieldNode(parent, "links")["fieldKind"] = "Value"),
                 ("structArrayAsReference", "RMC1000", "fieldKind and value kind disagree", parent => FieldNode(parent, "slots")["fieldKind"] = "ObjectReference"),
-                ("requiredScalarArray", "RMC1000", "Required on a field that is not an object or soft object reference or an array of them", parent => FieldNode(parent, "modes")["flags"] = new System.Text.Json.Nodes.JsonArray("Required")),
+                ("requiredScalarArray", "RMC1000", "Required on a field that is not an object, soft object or class reference or an array of them", parent => FieldNode(parent, "modes")["flags"] = new System.Text.Json.Nodes.JsonArray("Required")),
                 ("enumElementToStruct", "RMC1000", "targets probe::SA, which is not a reflected enum", parent => FieldNode(parent, "modes")["element"] = Element("Enum", saId)),
                 ("referenceElementToStruct", "RMC1000", "reference field probe::Parent::links targets struct probe::SA", parent => FieldNode(parent, "links")["element"] = Element("ObjectReference", saId)),
                 ("unknownElementStruct", "RMC2003", "not in an imported descriptor", parent => FieldNode(parent, "slots")["element"] = Element("Struct", "0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c01"))

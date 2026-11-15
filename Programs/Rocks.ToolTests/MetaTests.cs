@@ -50,6 +50,7 @@ internal static partial class MetaTests
         MetaContext context = new(suite, options, actualEnvironment, generator, compiler);
         RegisterCli(context);
         RegisterValueKinds(context);
+        RegisterClassRefs(context);
         RegisterStructs(context);
         RegisterBinds(context);
         RegisterArrays(context);

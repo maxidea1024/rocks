@@ -33,6 +33,8 @@ Result<TypeRegistrationToken> RegisterNodeAlias(TypeRegistry& types, TypeId id,
 
     schema.fields = {fields, schema.fields.Size()};
     schema.id = id;
+    // 별칭 스키마는 타입 도구 이름을 두지 않는다(원본과 같은 이름은 AlreadyExists — 리플렉션 B9d2).
+    schema.toolName = {};
     return types.Register(schema, GeneratedType<Node>::Ops());
 }
 
@@ -161,6 +163,9 @@ TEST(ReferenceWriteDoesNotTreatSameTypeIdAcrossRegistriesAsSameNativeType) {
         // 같은 ID를 서로 다른 registry에서 다른 native 타입으로 등록할 수 있다.
         auto misleading = GeneratedType<Base>::Schema();
         misleading.id = GeneratedType<Node>::Id();
+        // 별칭 스키마는 타입 도구 이름을 두지 않는다(원본과 같은 이름은 AlreadyExists — 리플렉션
+        // B9d2).
+        misleading.toolName = {};
         REQUIRE(targetTypes.Register(misleading, GeneratedType<Base>::Ops()));
         const TypeId ownerAlias{0xc0dec0de, 0x105};
         REQUIRE(RegisterNodeAlias(targetTypes, ownerAlias, GeneratedType<Node>::Id()));
@@ -200,6 +205,9 @@ TEST(ReferenceWriteKeepsBothDeclaredTypeLeasesUntilCallbackCompletes) {
 
         // 각 참조 alias에는 실제 객체가 없으므로 Busy는 owner의 lease가 아닌 검사 lease가 보장한다.
         auto sourceSchema = GeneratedType<Node>::Schema();
+        // 별칭 스키마는 타입 도구 이름을 두지 않는다(원본과 같은 이름은 AlreadyExists — 리플렉션
+        // B9d2).
+        sourceSchema.toolName = {};
         FieldSchema fields[32];
         RuntimeFieldOps accessors[32];
         auto sourceOps = GeneratedType<Node>::Ops();

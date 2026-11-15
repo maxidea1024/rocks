@@ -269,6 +269,9 @@ TEST(ObjectGraphReferenceToNativeAliasTypePreservesAliasSchemaOnResave) {
         REQUIRE(RegisterHolder(types));
         auto aliasSchema = GeneratedType<Base>::Schema();
         aliasSchema.id = AliasBaseType;
+        // 별칭 스키마는 타입 도구 이름을 두지 않는다(원본과 같은 이름은 AlreadyExists — 리플렉션
+        // B9d2).
+        aliasSchema.toolName = {};
         REQUIRE(types.Register(aliasSchema, GeneratedType<Base>::Ops()));
         auto source = HolderGraph(allocator, AliasBaseType, aliasSchema.version);
         REQUIRE(source);

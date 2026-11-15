@@ -359,6 +359,15 @@ internal sealed class ClassModel
     // TypeFlags 비트: Abstract 1, WorldOnly 2(클래스), Atomic 16(struct). 생성 스키마의 flags다.
     public uint Flags => (Abstract ? 1u : 0u) | (WorldOnly ? 2u : 0u) | (Atomic ? 16u : 0u);
 
+    // Name="…" 지정자의 타입 도구 이름이다(클래스·struct — 한정하지 않은 C++ 이름과 같거나 없으면 ""). import 타입은 descriptor의
+    // toolName에서 온다(기본 이름과 같으면 "").
+    public string ToolName { get; init; } = "";
+
+    // 실효 타입 도구 이름이다(Docs/Design/ReflectionExtensions.ko.md 5.2절 — 지정하지 않았으면 한정하지 않은 C++ 이름). 생성 스키마의
+    // TypeSchema::toolName과 descriptor의 toolName이다. 형식(TypeToolName.IsValid)과 모듈·import 범위의 대소문자 무시 유일성은
+    // SchemaValidator가 본다(RMC2203).
+    public string EffectiveToolName => ToolName.Length != 0 ? ToolName : TypeToolName.Default(Name);
+
     // ROCKS_NATIVE 멤버다(스키마에 넣지 않고 생성 코드의 static_assert만 받는다).
     public List<NativeMemberModel> NativeMembers { get; } = [];
 

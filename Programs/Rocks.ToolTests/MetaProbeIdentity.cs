@@ -17,7 +17,7 @@ internal static class MetaProbeIdentity
                 "probe::RealBinding", "probe::ABinding", "probe::BBinding", "probe::MixedBinding", "probe::HiddenBinding",
                 "probe::FixedBinding", "probe::SplitBinding", "probe::Bundle", "probe::WorldBundle", "probe::Movable", "probe::Node", "probe::MovableBundle",
                 "probe::Tiny", "probe::Signed", "probe::Short", "probe::Wide", "probe::Huge", "probe::Bits",
-                "probe::Point", "probe::Segment", "probe::Plain" }
+                "probe::Point", "probe::Segment", "probe::Plain", "probe::Derived", "probe::Other", "probe::none" }
                 .Concat(Enumerable.Range(1, 17).Select(level => $"probe::Chain{level}")))
             {
                 manifest.Register("type", name);
@@ -48,7 +48,9 @@ internal static class MetaProbeIdentity
                 "probe::Value::letter", "probe::Value::letters", "probe::Value::label", "probe::Leaf::socket", "probe::Leaf::aliases",
                 "probe::Point::x", "probe::Point::y", "probe::Segment::from", "probe::Segment::owner", "probe::Plain::at",
                 "probe::Value::point", "probe::Value::segment", "probe::Value::target", "probe::Value::targets", "probe::Value::peers",
-                "probe::Leaf::anything", "probe::Leaf::links", "probe::Value::strong" }
+                "probe::Leaf::anything", "probe::Leaf::links", "probe::Value::strong",
+                "probe::Value::kind", "probe::Value::kinds", "probe::Value::self", "probe::Leaf::kind", "probe::Leaf::kinds",
+                "probe::Derived::extra", "probe::Other::value" }
                 .Concat(Enumerable.Range(2, 16).Select(level => $"probe::Chain{level}::inner")))
             {
                 manifest.Register("field", name);

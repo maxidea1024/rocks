@@ -219,6 +219,14 @@ struct StoredName {
     Name token{};
 };
 
+// 1단계가 기록한 ClassRef 판정 하나다(null이 아닌 저장 값의 방문 순서 — Docs/Design/
+// ReflectionExtensions.ko.md 5.2절). nulled는 미등록 클래스를 decode 정책 ReportAndNull로 null로
+// 바꿨다는 뜻이다. 2단계가 같은 순서로 stored를 대조해 판정 뒤 값을 쓴다(TypeRegistry 재조회 없음).
+struct StoredClassReference {
+    TypeId stored{};
+    bool nulled = false;
+};
+
 // 1단계가 보관한 struct 마이그레이션 결과 하나다(발생 순서). 2단계가 같은 순서로 (type, from)을
 // 대조해 쓴다. bytes의 heap 블록은 Array 이동에도 그대로라 view가 유효하다.
 struct StoredStructMigration {
@@ -235,7 +243,7 @@ struct StoredStructMigration {
 struct LoadNode {
     explicit LoadNode(Allocator& allocator) noexcept
         : migrated(allocator), fields(allocator), expectations(allocator), tokens(allocator),
-          structMigrations(allocator), names(allocator) {
+          structMigrations(allocator), names(allocator), classes(allocator) {
     }
 
     TypeId type{};
@@ -251,6 +259,7 @@ struct LoadNode {
     Array<ReferenceToken> tokens;
     Array<StoredStructMigration> structMigrations;
     Array<StoredName> names;
+    Array<StoredClassReference> classes;
     ObjectHandle handle{};
 };
 
@@ -406,8 +415,8 @@ Result<void> CheckImports(Allocator& allocator, ConstructionContext& transaction
 Result<void> CheckImportTargets(const StageData& data, Span<const TypeLease> actual) noexcept;
 
 // 2b 적용이다(GraphApply.cpp): 1단계가 보관한 필드를 staged 객체에 쓴다(그래프 예산에 접근하지
-// 않는다 — 노드 참조는 노드 handle로, 외부 참조 i는 imports[i − 1]로 바꾼다). 실패는 쓰기
-// codec·Registry의 오류이고 호출자가 트랜잭션을 버린다.
+// 않는다 — 노드 참조는 노드 handle로, 외부 참조 i는 imports[i − 1]로, ClassRef 값은 1단계 판정
+// 기록으로 바꾼다). 실패는 쓰기 codec·Registry의 오류이고 호출자가 트랜잭션을 버린다.
 Result<void> ApplyNodeFields(Allocator& allocator, ConstructionContext& transaction,
                              const Array<LoadNode>& nodes, const ObjectGraphLoadOptions& options,
                              Span<const ObjectHandle> imports) noexcept;

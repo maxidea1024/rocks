@@ -1,4 +1,5 @@
 #include <Object/RuntimeTypeOps.h>
+#include <Object/ClassRef.h>
 #include <Object/NameField.h>
 #include <Object/ObjectRegistry.h>
 #include <Object/SoftObjectRef.h>
@@ -138,6 +139,25 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
         }
     }
 
+    // ClassRef 값은 이 Registry에 등록된 클래스이고 실제 대상 스키마의 Base 파생이어야 한다(수동
+    // callback도 지키도록 여기서 검사한다 — 리플렉션 B9d2). 원본 스키마의 Base가 다르면(별칭
+    // 스키마) 그것도 만족해야 한다. 순서는 Name 토큰처럼 읽기 전용 정책 뒤다. 판정한 클래스 lease는
+    // 참조 lease처럼 callback 완료까지 쥔다(callback 재진입이 그 클래스를 해제·재등록하지 못하게).
+    TypeLease classLease;
+    if (value.kind == ValueKind::ClassReference && value.guid != TypeId{}) {
+        auto found = detail::CheckClassReferenceLease(
+            registry.AcquireRegisteredType(access, value.guid), actual->value.type, nullptr);
+        if (!found) {
+            return Result<void>::Failure(found.Error());
+        }
+
+        if (referencedType_ != TypeId{} && !found.Value().IsA(referencedType_)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        classLease = Move(found.Value());
+    }
+
     // 수동 함수표가 비정규 handle을 저장하지 않게 callback에는 정규 null 사본을 넘긴다(참조 값의
     // 문자열은 비어 있으므로 할당하지 않는다).
     if ((value.kind == ValueKind::ObjectReference ||
@@ -268,6 +288,21 @@ Result<void> ValidateWeakTarget(ObjectRegistry& registry, const ObjectAccessCont
 
     if (staticNative && !type.Value().IsNativeA(staticNative)) {
         return Result<void>::Failure(ErrorCode::TypeMismatch);
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> ValidateClassReference(ObjectRegistry& registry, const ObjectAccessContext& access,
+                                    TypeId value, TypeId base, const void* baseNative) noexcept {
+    if (value == TypeId{}) {
+        return Result<void>::Success();
+    }
+
+    auto checked =
+        CheckClassReferenceLease(registry.AcquireRegisteredType(access, value), base, baseNative);
+    if (!checked) {
+        return Result<void>::Failure(checked.Error());
     }
 
     return Result<void>::Success();

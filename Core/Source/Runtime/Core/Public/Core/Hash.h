@@ -50,6 +50,24 @@ inline uint64 HashStringBytes(StringView value) noexcept {
     return MixHash(hash);
 }
 
+// ASCII 대문자를 소문자로 접은 byte에 돌린 64비트 FNV-1a다(섞지 않은 원값 — 해시 표에는 필요하면
+// MixHash를 더 씌운다). ASCII가 아닌 byte는 그대로다. 대소문자만 다른 두 문자열은 값이 같으므로
+// ASCII 대소문자 무시 같음과 짝이 맞는 해시다. Name pool의 bucket 해시(번호 접미를 뗀 base)와
+// TypeRegistry의 타입 도구 이름 색인이 같이 쓴다. 실행 중 분포용이며 영속 식별자가 아니다.
+//
+// 사용 예:
+//   const uint64 bucket = HashStringBytesIgnoringAsciiCase(name) & mask;
+inline uint64 HashStringBytesIgnoringAsciiCase(StringView value) noexcept {
+    uint64 hash = 14695981039346656037ull;
+    for (usize index = 0; index < value.ByteCount(); ++index) {
+        const uint8 byte = static_cast<uint8>(value.Data()[index]);
+        hash ^= byte >= 'A' && byte <= 'Z' ? static_cast<uint8>(byte + ('a' - 'A')) : byte;
+        hash *= 1099511628211ull;
+    }
+
+    return hash;
+}
+
 template <>
 struct Hash<StringView> {
     uint64 operator()(StringView value) const noexcept {

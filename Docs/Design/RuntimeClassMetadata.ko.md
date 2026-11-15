@@ -15,7 +15,7 @@
 | 정적 클래스 조회 | 현재 생성 헤더를 포함한 타입에서 `TypeIdOf<T>()`와 `TypeOf<T>()`를 제공한다. 직접적인 `T::StaticType()` 멤버는 생성 선언 누락, 파생 타입의 정적 함수 상속, 헤더·링크·동적 모듈 경계를 해결한 뒤 확정할 목표다. |
 | 객체의 실제 클래스 | 현재 객체의 `GetType()` 및 `TryGetType()`으로 등록 타입의 lease를 얻는다. 유효한 Borrow·소유 스레드와 타입/모듈 수명을 확인한다. 명시된 World 문맥은 검사하지만, 현재 기본 설정에서 scope가 없으면 호출자의 실제 World는 판별하지 못한다. 정적 C++ 포인터 타입으로 대신하지 않는다. |
 | 클래스를 값으로 전달 | 실행 시 등록된 클래스를 나타내는 안전한 클래스 객체 또는 핸들을 전달한다. 원시 메타데이터 주소와 영속 ID, Registry별 등록 세대를 혼동하지 않는다. |
-| 기반 타입 제한 | `ClassRef<Base>`에 해당하는 타입 제한 참조로 Base 또는 유효한 파생 타입만 선택한다. 영속 값 타입 `ClassRef<Base>`(TypeId 하나, 쓰기·encode·복원에서 등록·클래스·Base 파생 검사)는 [리플렉션 B9](ReflectionExtensions.ko.md) B9d가 정한다(ReflectionExtensions 5.2절). 메타데이터 상속만으로 안전한 C++ 포인터 변환을 추정하지 않는다. |
+| 기반 타입 제한 | `ClassRef<Base>`에 해당하는 타입 제한 참조로 Base 또는 유효한 파생 타입만 선택한다. 영속 값 타입 `ClassRef<Base>`(TypeId 하나, 쓰기·encode·복원에서 등록·클래스·Base 파생 검사)는 [리플렉션 B9](ReflectionExtensions.ko.md) B9d가 정하고 B9d2에서 구현했다(`Object/ClassRef.h` — `Resolve(TypeRegistry&)`, `TypeRegistry::AcquireDerivedClass`, ReflectionExtensions 5.2절). 메타데이터 상속만으로 안전한 C++ 포인터 변환을 추정하지 않는다. |
 | 선택한 클래스로 생성 | 선택된 클래스의 추상·생성 가능성, 생성 대상 Registry·World, allocator·module lease를 검사하고 편의 생성 경로로 결과를 반환한다. 실패 시 임시 객체와 subobject를 롤백한다. |
 | 클래스 기본값 | 타입 등록 세대(revision)에 붙은 불변 기본값 레코드를 경로로 조회하고, override 표시·기본값으로 되돌리기와 패키지 차이 저장의 기준으로 쓴다. 객체가 아니므로 World별 인스턴스와 변경 가능한 상태를 공유하지 않는다. 서브오브젝트 기본값은 prefab과 함께 후속이다('클래스 기본값 결정'). |
 | 필드와 함수 | 상속된 필드·함수의 식별자, 선언 타입, 접근·호출 정책, 인자·결과·진단을 탐색한다. 현재 필드 지원 범위와 함수 반영 후속 범위를 구분한다. |
@@ -78,7 +78,7 @@ Rocks는 같은 이점(기본값 변경 전파, 차이 저장, 기본값 조회�
 ## 단계와 완료 기준
 
 1. **타입 접근 기반:** 정적 생성 정보와 동적 등록 정보를 구분하는 API, lease·World·Borrow 및 오류 경로 검증. 생성기가 반영 클래스를 누락하거나 파생 클래스가 부모의 정적 함수로 잘못 식별되지 않아야 한다.
-2. **타입 제한 참조:** 영속 값 타입 `ClassRef<Base>`는 리플렉션 B9 B9d가 더한다(ReflectionExtensions 5.2절). 이 단계는 그 위의 등록 핸들(세대·revision 캐시)을 다룬다. 적합한 기반·파생·추상 타입과 무관한 타입, 동일 ID의 다른 Registry, unregister·재등록·module revision, 입력 실패 시 기존 참조 보존을 검증한다.
+2. **타입 제한 참조:** 영속 값 타입 `ClassRef<Base>`는 리플렉션 B9 B9d2가 더했다(ReflectionExtensions 5.2절 — 값은 TypeId만 담고 `Resolve`가 쓸 때마다 등록·Base 파생을 다시 확인한다). 이 단계는 그 위의 등록 핸들(세대·revision 캐시)을 다룬다. 적합한 기반·파생·추상 타입과 무관한 타입, 동일 ID의 다른 Registry, unregister·재등록·module revision, 입력 실패 시 기존 참조 보존을 검증한다.
 3. **안전한 동적 생성과 기본값:** 정상·추상·실패 생성, 기본값 레코드(생성 실패·결정성 대조·지연 게시), rollback, GC 도중 생성 및 World 종료를 검증한다. subobject·공유 참조·순환은 default subobject가 prefab과 함께 들어올 때 검증한다('클래스 기본값 결정'). 오류마다 남은 객체·lease·할당은 0이어야 한다.
 4. **필드·함수와 자체 언어:** 자동 metadata와 안전 호출, 인자·반환 유형·접근 권한·예외 경계·module lease를 검증한다. Blueprint는 도입하지 않는다.
 5. **에디터·에셋·PIE:** 후보 필터·저장·재로딩·타입 이름 변경 및 누락, 여러 World와 PIE 세션, reload·늦은 비동기 완료를 실제 통합 하네스로 검증한다.

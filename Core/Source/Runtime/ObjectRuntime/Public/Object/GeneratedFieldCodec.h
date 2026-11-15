@@ -295,6 +295,22 @@ Result<void> DecodeGeneratedField(ConstructionContext* construction, ObjectHandl
 
         return WriteGeneratedValue<Owner>(
             member, value, [&]() noexcept { return construction->GetForWrite<Owner>(handle); });
+    } else if constexpr (ClassReferenceField<Member>::Supported) {
+        // ClassRef 값은 1단계가 TypeRegistry 조회로 판정하고 기록했으므로(2단계는 그 기록을 쓴다)
+        // staged 쓰기의 등록 검사(ObjectRegistry 조회)를 다시 하지 않는다 — 2단계는 입력 때문에
+        // 실패하지 않는다.
+        if (!construction) {
+            return ParseFieldValue(field, context, StaticReferenceNative<Member>(), nullptr);
+        }
+
+        FieldValue value(context.Scratch());
+        if (auto parsed = ParseFieldValue(field, context, StaticReferenceNative<Member>(), &value);
+            !parsed) {
+            return parsed;
+        }
+
+        return WriteGeneratedValue<Owner>(
+            member, value, [&]() noexcept { return construction->GetForWrite<Owner>(handle); });
     } else if constexpr (WeakReferenceField<Member>::Supported) {
         // weak 대상은 1단계가 범위(같은 그래프 안 노드)·기대 형식을 검증한 노드 handle(2a가 이
         // 트랜잭션에 만든 객체)이므로 staged 쓰기의 대상 검사를 다시 하지 않는다 — 2단계는 입력
