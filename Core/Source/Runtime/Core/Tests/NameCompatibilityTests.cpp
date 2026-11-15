@@ -51,7 +51,7 @@ TEST(NameCasePreservesEachSpellingAndHashIdentity) {
         CHECK(first.Value() != numbered.Value());
         CHECK(first.Value() != plain.Value());
         CHECK(first.Value().HasNumber() && first.Value().GetNumber() == 7);
-        CHECK(!plain.Value().HasNumber() && plain.Value().GetNumber() == -1);
+        CHECK(!plain.Value().HasNumber() && plain.Value().GetNumber() == Name::NoNumber);
         CHECK(Hash<Name>{}(first.Value()) == Hash<Name>{}(second.Value()));
 
         {
@@ -88,17 +88,17 @@ TEST(NameNumberSuffixMatchesDocumentedUe58Bounds) {
             const char* base;
         };
         const Case cases[] = {
-            {"Rocket", -1, "Rocket"},
+            {"Rocket", Name::NoNumber, "Rocket"},
             {"Rocket_0", 0, "Rocket"},
             {"Rocket_19", 19, "Rocket"},
             {"Rocket_2147483646", 2147483646, "Rocket"},
-            {"Rocket_2147483647", -1, "Rocket_2147483647"},
-            {"Rocket_04", -1, "Rocket_04"},
-            {"Rocket_00000000000", -1, "Rocket_00000000000"},
-            {"Rocket_-1", -1, "Rocket_-1"},
-            {"Rocket_", -1, "Rocket_"},
+            {"Rocket_2147483647", Name::NoNumber, "Rocket_2147483647"},
+            {"Rocket_04", Name::NoNumber, "Rocket_04"},
+            {"Rocket_00000000000", Name::NoNumber, "Rocket_00000000000"},
+            {"Rocket_-1", Name::NoNumber, "Rocket_-1"},
+            {"Rocket_", Name::NoNumber, "Rocket_"},
             {"Rocket__7", 7, "Rocket_"},
-            {"_0", -1, "None"}, // 빈 base의 유효 번호는 UE5.8처럼 기본 None이다.
+            {"_0", Name::NoNumber, "None"}, // 빈 base의 유효 번호는 UE5.8처럼 기본 None이다.
         };
         for (const Case& sample : cases) {
             auto name = pool.TryIntern(sample.input);

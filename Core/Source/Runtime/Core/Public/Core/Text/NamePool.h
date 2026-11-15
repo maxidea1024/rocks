@@ -62,6 +62,36 @@ public:
     // 재사용하고, ASCII 대소문자만 다른 원문은 같은 비교 identity와 별도 표시 entry를 갖는다.
     Result<Name> TryIntern(StringView source) noexcept;
 
+    // source를 intern하지 않고 이미 게시된 이름에서 찾는다(UE FNAME_Find 대응). entry·예산
+    // 예약·할당을 만들지 않으므로, 사용자 입력이나 Map<Name> 키 조회처럼 런타임 문자열이 pool을
+    // 늘리면 안 되는 자리에 쓴다.
+    //
+    // 결과는 같은 source를 TryIntern한 결과와 ==이다(비교 identity와 번호가 같다). 표시 entry는
+    // 다음 순서로 고른다:
+    // - 기본 None(빈 문자열, "None", 빈 base의 번호 이름 "_7")은 언제나 찾으며 기본 None 토큰이다.
+    // - source와 byte가 같은 표시 entry가 있으면 그 토큰이다(TryIntern 결과와 필드까지 같다).
+    // - 없으면 비교 identity와 번호가 같은 표시 가운데 가장 먼저 게시된 entry의 토큰이다.
+    //   "Actor_7"만 있을 때 "ACTOR_7"을 찾으면 표시가 "Actor_7"인 토큰이다.
+    // - 번호 없는 None 표시 변형("none")은 기본 None 토큰이다.
+    // - 같은 base라도 번호가 같은 entry가 없으면 없음이다("Actor"만 있으면 "Actor_7"은 없음).
+    //   표시 entry가 번호까지 담으므로 그런 토큰은 Acquire로 읽을 수 없다.
+    //
+    // 반환: 없으면 NotFound, 잘못된 UTF-8은 InvalidArgument, 실행 중이 아니면(Initialize 전,
+    // Shutdown 시작 뒤) ShuttingDown이다(TryIntern과 같은 순서). 어떤 결과도 pool을 바꾸지 않는다.
+    //
+    // 동시성: gate 안에서 조회만 하고 allocator를 부르지 않는다. TryIntern·Acquire·Shutdown과
+    // 병행해도 되며, 아직 게시되지 않은 병행 TryIntern의 이름은 NotFound일 수 있다. 호출 중
+    // source storage가 유효하고 변하지 않아야 한다.
+    //
+    // 수명: 결과는 값 토큰이다. 원문은 Acquire로 lease를 얻어 읽는다.
+    //
+    // 사용 예:
+    //   auto found = names.TryFind(input);
+    //   if (!found) {
+    //       // NotFound면 그런 이름의 Map 키도 없다(새 이름을 만들지 않는다)
+    //   }
+    Result<Name> TryFind(StringView source) const noexcept;
+
     // 기본 None은 실행 중인 임의 pool에서 조회하며 정적 "None" 문자열 lease를 제공한다.
     // 표시를 보존하는 None을 포함한 발급 entry는 현재 domain과 게시 id를 함께 검사한다.
     // foreign/이전 token은 StaleHandle이다.
@@ -87,8 +117,11 @@ private:
     static constexpr usize BucketBits = 6;
     static constexpr usize BucketCount = static_cast<usize>(1) << BucketBits;
 
+    Name TokenFor(const Entry& entry) const noexcept;
     Entry* FindBytes(StringView source, uint64 hash) const noexcept;
     Entry* FindComparison(StringView source, usize baseBytes, uint64 hash) const noexcept;
+    Entry* FindDisplay(StringView source, usize baseBytes, uint32 number, uint64 hash,
+                       bool& exact) const noexcept;
     void FinishOperation(usize reservedBytes) noexcept;
     void ReleaseLease() noexcept;
     void FreeEntry(Entry* entry) noexcept;

@@ -302,12 +302,23 @@ Core 수학(`CORE/Math/Transform.h`)에 둘을 더한다(사용자 결정 U4).
 - 차이 저장의 같음은 표시 문자열 byte다. 대소문자만 바꾼 값은 "다름"으로 저장된다(의도한 편집이며 무해하다 — 사용자 결정 U7). UE는 `Identical`이 대소문자 무시라 저장하지 않는다.
 - NamePool 위치: `RegistryOptions`에 `NamePool* names`를 더한다(빌림, Registry보다 오래 산다). Engine이 pool 하나를 만들어 에셋 Registry·World Registry에 같이 준다(전역 singleton 없음 — RCM 32행). Name 필드를 가진 타입을 pool 없는 Registry에 만들면 그 필드의 쓰기·복원은 Unsupported다.
 - 생성자 기본값: 생성자는 `Allocator&`만 받으므로 Name 필드의 C++ 기본값은 None뿐이다. 기본 이름이 필요한 값은 프로파일·클래스 기본값 레코드(A5)·도구가 채운다.
-- Core 추가(B9c1):
-  - `NamePool::TryFind(StringView) -> Result<Name>`: intern하지 않는 조회, 없으면 NotFound. 표시 변형이 다른 입력에는 비교 identity 토큰(첫 표시)을 돌려준다.
-  - pool 없는 비교 `NameTextEquals(StringView, StringView)`와 base·번호 분해 공개. 1단계 Map<Name> 중복 판정과 `SamePropertyPath`가 쓴다. 해시는 지금 `TryMakeNameKey`(Name.h:144)를 쓴다.
+- Core 추가(B9c1 — `CORE/Text/NamePool.h`·`Name.h`):
+  - `NamePool::TryFind(StringView) const -> Result<Name>`: intern하지 않는 조회(entry·예산 예약·할당 없음), 없으면 NotFound. 결과는 같은 입력을 `TryIntern`한 결과와 `==`다. byte가 같은 표시 entry가 있으면 그 토큰이고, 없으면 비교 identity와 **번호가 같은** 표시 가운데 가장 먼저 게시된 entry의 토큰(첫 표시)이다. 기본 None(빈 문자열·`None`·`_7`)은 언제나 기본 None 토큰이고, 번호 없는 None 표시 변형(`none`)은 byte가 같은 표시 entry가 없으면 기본 None 토큰이다. 잘못된 UTF-8은 InvalidArgument, 실행 중이 아니면 ShuttingDown이다(TryIntern과 같은 순서).
+  - pool 없는 비교 `NameTextEquals(StringView, StringView) -> bool`과 base·번호 분해 `SplitNameText(StringView) -> NameTextParts{base, number}`. 1단계 Map<Name> 중복 판정과 `SamePropertyPath`가 쓴다. 해시는 지금 `TryMakeNameKey`(Name.h:144)를 쓴다.
 - 쓰기 thunk는 토큰의 domain이 그 Registry pool인지 확인한다(다르면 WrongContext).
 - GC 없음. Required 거부(RMC2202).
 - 텍스트: 출력은 그대로, None은 `None`(UE 비Delimited 출력과 같다). 입력은 빈 값·`None`(대소문자 무시)을 None으로 받는다.
+
+구현(B9c1)에서 정한 점(Core API만 — Name 종류·codec·2a intern은 B9c2):
+
+- TryFind의 번호: Rocks pool entry는 번호 접미까지 담은 표시 원문이다. 그래서 base만 같고 번호가 같은 entry가 없으면 NotFound다("Actor"만 있을 때 "Actor_7"). 그런 토큰을 만들면 `Acquire`가 표시를 찾지 못해 StaleHandle이 된다. Map<Name> 키는 모두 그 pool에 intern된 이름이므로 키 조회 의미는 같다(NotFound = 그 키 없음). 번호 있는 None(`None_3`)도 entry가 있어야 찾는다. UE 기본 구성(`UE_FNAME_OUTLINE_NUMBER` 0)은 번호를 FName 밖에 두어 문자열 부분만 찾고, 번호를 entry에 넣는 구성은 접미까지 정확히 찾는다(NameTypes.h:213-222). Rocks는 뒤쪽과 같다.
+- 첫 표시: 같은 비교 identity·번호의 표시 가운데 게시 순번이 가장 작은 entry다(같은 base는 한 bucket이고 bucket 안 id는 게시 순서다). UE `FNamePool::Find`가 정확한 표시를 먼저 찾고 없으면 비교 entry(처음 저장된 표시)를 돌려주는 것과 같다(UnrealNames.cpp:1863-1876). 번호 없는 None 표시 변형은 정적 `None`이 첫 표시다.
+- 잘못된 UTF-8은 NotFound가 아니라 InvalidArgument다(TryIntern·`TryMakeNameKey`와 같은 오류 — 손상 입력을 "없음"으로 숨기지 않는다).
+- 동시성: gate 한 번 안에서 bucket 하나를 한 번 훑어(byte 일치를 만나면 바로, 아니면 첫 표시) 조회만 하므로 진행 중 연산 수를 늘리지 않고 allocator를 부르지 않는다. 게시 전인 병행 TryIntern의 이름은 NotFound다(후보 할당 중에 멈춘 intern으로 시험이 고정한다). allocator callback 안에서 불러도 gate 밖이라 교착하지 않는다.
+- "번호 없음" 표지: `Name::GetNumber`·`NameTextParts::GetNumber`가 번호 없는 이름에 돌려주는 값을 이름 있는 상수 `Name::NoNumber`(= -1, UE `NAME_NO_NUMBER` 대응)로 두었다. 이 값은 형식 최댓값이 아니다 — 유효한 외부 번호가 0 이상이고 UE도 -1을 쓰므로 음수 하나를 표지로 쓴다.
+- `NameTextEquals`는 bool을 돌려주고 UTF-8을 검사하지 않는다. 호출 자리(1단계 중복 판정·경로 비교)는 이미 유효 UTF-8·NFC를 검사한 값을 비교하고, 규칙이 ASCII byte(대소문자·`_`·숫자)만 보므로 잘못된 입력에도 정의된 답을 낸다. 같은 pool의 intern 토큰 `==`·`TryMakeNameKey` 같음과 일치한다(시험으로 고정). UE `FNameHelper::EqualsString`(UnrealNames.cpp:3148-3192 — 번호 접미 먼저, `_N`은 None, Strnicmp)과 같은 규칙을 토큰 없이 원문 둘에 적용한다.
+- `SplitNameText`는 문법만 본다: `_7`은 base 빈 문자열·번호 7이다(Name 의미의 None 판정은 `NameTextEquals`·TryIntern 몫 — UE도 빈 base의 번호 이름은 None이다, UnrealNames.cpp:3025-3045). 번호 규칙은 UE 5.8 `ParseNumberFromName`(NameTypes.h:231-266)과 같다: 끝 숫자 1–10자리, 그 앞 `_`, 두 자리 이상이면 선행 0 없음, 값 < 2,147,483,647(외부 번호 0–2,147,483,646). UTF-8 검사는 없다(ASCII byte만 보므로 다중 byte 문자 중간에서 자르지 않는다). `NameLease::BaseView`도 같은 분해 함수를 쓴다.
+- 시험(Core `NameLookupTests.cpp`): `NameFind_ReturnsPublishedTokenWithoutAllocating`(할당 시도 0·entry·예약 불변, 다른 번호·선행 0·NUL 접미 NotFound), `NameFind_FullPoolStillFindsAndReportsNotFound`, `NameFind_CaseVariantReturnsFirstPublishedDisplay`(기본·충돌 hash mask, 비ASCII byte 비교, embedded NUL), `NameFind_NoneRulesNeedNoEntry`, `NameFind_StateAndInvalidInputLeavePoolUnchanged`(오류 경로의 Stats 불변), `NameFind_ConcurrentWithInternSeesPublishedOrNotFound`(무작위 병행 스모크), `NameFind_PendingInternIsNotFoundUntilPublished`(후보 할당 안에서 멈춘 intern — 게시 전 NotFound·Stats 불변·callback 안 조회, 게시 전 대소문자 변형은 첫 표시), `NameTextEquals_FollowsPoolComparisonRules`(번호 경계·None·비ASCII), `NameTextEquals_AgreesWithInternFindAndKey`(원문 37개의 모든 쌍: 전체 pool에서 NameTextEquals·NameKey 같음 = intern `==`, 짝수 색인만 intern한 부분 pool에서 TryFind의 존재·`==`가 NameTextEquals와 같음 — 홀수 색인 변형이 첫 표시 경로를 탄다), `NameTextSplit_FollowsUe58NumberBounds`(직접 쓴 UE 경계값 표와 SplitNameText·intern 번호·`BaseView` 대조).
 
 ### 4.1 복원의 intern
 
@@ -850,6 +861,9 @@ Core 커밋(B9b1·B9c1·B9f1·B9i1)은 다른 단계와 독립이라 먼저 해�
 | 항목 | UE 5.8 | Rocks | 다른 이유 |
 |---|---|---|---|
 | 비교 | "case-insensitive, but case-preserving"(NameTypes.h:629), `==`는 ComparisonIndex + Number(NameTypes.h:808-811), ComparisonIndex 공유는 Strnicmp(UnrealNames.cpp:220-242) — ASCII만 접는다 | ASCII만 대소문자 무시 | 같다 |
+| 번호 접미 | `ParseNumberFromName`: 끝 숫자 1–10자리, 앞 `_`, 선행 0 없음(한 자리 제외), 값 < MAX_int32(NameTypes.h:231-266). 빈 base면 번호를 버리고 None(UnrealNames.cpp:3025-3045) | `SplitNameText`·TryIntern 같은 규칙, 빈 base의 번호 이름은 None | 같다 |
+| 조회 | `FNAME_Find`는 없으면 NAME_None(NameTypes.h:213-222), 정확한 표시 먼저·없으면 비교 entry(UnrealNames.cpp:1863-1876) | `TryFind`: 없으면 NotFound, 정확한 표시 먼저·없으면 같은 번호의 첫 표시 | 없음과 None을 구별한다(Result). 번호는 entry에 들어 있어 UE outline 번호 구성처럼 접미까지 찾는다 |
+| 토큰 없는 비교 | `FNameHelper::EqualsString`(FName 대 문자열, UnrealNames.cpp:3148-3192) | `NameTextEquals`(문자열 대 문자열) | pool 없이 1단계에서 쓴다 |
 | 저장 | 패키지 name map 인덱스(Display) + Number(LinkerSave.cpp:316-358, LinkerLoad.h:1150-1161) | Record 안 표시 문자열 | Record는 자기 완결 TLV. 패키지 name 표는 A1 후보 |
 | 길이 | NAME_SIZE 1024 UTF-16 단위(null 포함, NameTypes.h:57), 초과는 checkf 뒤 대체 이름(UnrealNames.cpp:3271-3285) | UTF-8 3,072 byte, 초과는 InvalidArgument | UE 이름이 모두 들어가는 byte 상한, 예외 대신 Result |
 | 텍스트 | Delimited가 아니면 그대로(None은 `None`), Delimited면 None은 `""`(PropertyName.cpp:42-53) | 출력 그대로·None은 `None`, 입력은 빈 값·`None` | 같다(비Delimited) |

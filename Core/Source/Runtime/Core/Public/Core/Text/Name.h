@@ -20,6 +20,10 @@ enum class NameKind : uint8 {
 // ASCII 대소문자 비교와 UE5.8 번호 접미사만 지원한다. 비ASCII Unicode case folding과
 // 정규화는 아직 지원하지 않는다. 비교는 발급·stale 여부를 검증하지 않는다.
 struct Name {
+    // GetNumber가 번호 없는 이름에 돌려주는 "번호 없음" 표지다(UE NAME_NO_NUMBER = -1 대응). 유효한
+    // 외부 번호는 0 이상이므로 음수 하나를 표지로 쓴다. NameTextParts::GetNumber도 같은 값을 쓴다.
+    static constexpr int64 NoNumber = -1;
+
     uint64 domain = 0;
     uint64 id = 0;
     uint64 displayId = 0;
@@ -52,9 +56,9 @@ struct Name {
         return number != 0;
     }
 
-    // -1은 번호가 없다는 뜻이다. 숫자 0도 유효한 접미사다.
+    // 외부 번호다. 번호가 없으면 NoNumber다. 숫자 0도 유효한 접미사다.
     constexpr int64 GetNumber() const noexcept {
-        return number == 0 ? -1 : static_cast<int64>(number) - 1;
+        return number == 0 ? NoNumber : static_cast<int64>(number) - 1;
     }
 
     friend constexpr bool operator==(Name left, Name right) noexcept {
@@ -142,6 +146,67 @@ struct NameKey {
 // text의 NameKey다. NamePool::TryIntern과 같은 번호 접미사·None 규칙으로 해석한다. 잘못된 UTF-8은
 // InvalidArgument다. pool·allocator가 필요 없다.
 Result<NameKey> TryMakeNameKey(StringView text) noexcept;
+
+// Name 원문을 base와 번호 접미사로 나눈 결과다. SplitNameText가 만든다.
+struct NameTextParts {
+    // 번호 접미사 `_N`을 뺀 앞부분이다. 입력 view의 앞부분을 가리키므로 입력 storage가 살아 있는
+    // 동안만 쓴다. 번호가 없으면 입력 전체다.
+    StringView base;
+    // Name::number와 같은 표현이다: 0은 번호 없음, 그 밖은 외부 번호 + 1("Socket_7"은 8).
+    uint32 number = 0;
+
+    constexpr bool HasNumber() const noexcept {
+        return number != 0;
+    }
+
+    // 외부 번호다(Name::GetNumber와 같다). 번호가 없으면 Name::NoNumber이고 0도 유효한 번호다.
+    constexpr int64 GetNumber() const noexcept {
+        return number == 0 ? Name::NoNumber : static_cast<int64>(number) - 1;
+    }
+};
+
+// text를 NamePool::TryIntern·TryMakeNameKey와 같은 규칙(UE 5.8 ParseNumberFromName)으로 base와
+// 번호로 나눈다. 표시 문자열의 base나 번호를 따로 다룰 때 쓴다.
+//
+// 번호 접미사 규칙(하나라도 어기면 입력 전체가 base이고 번호가 없다):
+// - 끝의 ASCII 10진 숫자 1–10자리 바로 앞이 '_'다("Socket_7"은 base "Socket", 번호 7).
+// - 두 자리 이상이면 첫 숫자가 '0'이 아니다("Socket_0"은 번호 0, "Socket_07"은 번호 없음).
+// - 값이 int32 최댓값(2,147,483,647) 미만이다(번호는 0–2,147,483,646).
+// - 숫자 앞의 '_' 하나만 뗀다("Socket__7"은 base "Socket_", "a_1_2"는 base "a_1"·번호 2).
+//
+// 분해는 문법만 본다. "_7"처럼 base가 비면 base는 빈 문자열이고 번호는 7이지만, Name으로는 빈
+// base의 번호 이름이 기본 None이다(TryIntern·NameTextEquals). UTF-8 유효성은 검사하지 않는다 —
+// '_'와 숫자는 ASCII이고 UTF-8 다중 byte 문자에는 0x80 미만 byte가 없으므로 비ASCII 문자 중간에서
+// 자르지 않는다. embedded NUL도 base의 일부다. 할당하지 않으며 pool·allocator가 필요 없다.
+//
+// 사용 예:
+//   NameTextParts parts = SplitNameText("Socket_7");
+//   // parts.base == "Socket", parts.GetNumber() == 7
+NameTextParts SplitNameText(StringView text) noexcept;
+
+// 두 Name 원문이 같은 Name인지 pool·intern 없이 판정한다. 같은 pool에 두 원문을 TryIntern한 결과의
+// operator==와 같은 답이고, true이면 TryMakeNameKey의 key도 같다(유효 UTF-8 입력). Map<Name>
+// 키·Set<Name> 원소의 중복 판정, 경로 key 비교처럼 토큰 없이 원문끼리 비교할 때 쓴다. hash가
+// 필요하면 같은 규칙의 TryMakeNameKey를 쓴다.
+//
+// 규칙(NamePool 비교 규칙과 같다):
+// - 번호는 SplitNameText로 나누고 같아야 한다("Socket_7" != "Socket_07" != "Socket").
+// - base는 ASCII 문자만 대소문자를 무시하고 비ASCII는 byte로 비교한다("Socket" == "SOCKET",
+//   "Ünit" == "ÜNIT", "Ünit" != "ünit"). Unicode case folding·정규화는 하지 않는다(NFC 여부는
+//   호출자가 미리 검사한다).
+// - None: 빈 문자열, 빈 base의 번호 이름("_7"), 번호 없는 "None"(대소문자 무시)은 모두 같은
+//   None이다. "None_3"은 번호 있는 이름이라 "none_3"과 같고 None·"None_4"와 다르다.
+//
+// 표시 byte가 같은지(리플렉션 차이 저장의 같음)와는 다르다 — 그것은 StringView의 ==로 본다.
+// 잘못된 UTF-8은 검사하지 않고 위 byte 규칙대로 비교한다. TryIntern은 그런 입력을 거부하므로 Name
+// 의미가 필요한 호출자는 먼저 ValidateUtf8로 거른다. 할당하지 않고 입력만 읽으므로 어느
+// 스레드에서도 쓸 수 있다.
+//
+// 사용 예:
+//   NameTextEquals("Socket_7", "SOCKET_7");  // true
+//   NameTextEquals("Socket_7", "Socket_07"); // false
+//   NameTextEquals("none", "");              // true(둘 다 None)
+bool NameTextEquals(StringView left, StringView right) noexcept;
 
 // immutable 문자열의 조회 수명을 붙드는 이동 전용 lease다. pool 객체 자체를 소유하지 않으므로
 // pool/allocator는 모든 lease 반환과 진행 중 호출 종료까지 살아 있어야 한다.

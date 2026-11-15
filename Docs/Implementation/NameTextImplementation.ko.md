@@ -24,13 +24,13 @@
 
 ### API와 상태
 
-`NamePool(Allocator&)` 뒤 `Initialize(config)`로 시작한다. `TryIntern(StringView)`는 유효 UTF-8을 intern하고 `Result<Name>`을 반환한다. `Acquire(Name)`은 `Result<NameLease>`를 반환하며 lease의 `View()`로 원문을 읽는다. `TryClone()`은 명시적으로 reader 수를 늘린다. `Reset()`으로 반환한다.
+`NamePool(Allocator&)` 뒤 `Initialize(config)`로 시작한다. `TryIntern(StringView)`는 유효 UTF-8을 intern하고 `Result<Name>`을 반환한다. `TryFind(StringView)`는 intern하지 않고 게시된 이름만 찾는다(없으면 NotFound, 할당 없음). pool 없는 `NameTextEquals`·`SplitNameText`·`TryMakeNameKey`는 같은 비교·번호 규칙을 원문에 적용한다([Name](Name.ko.md)). `Acquire(Name)`은 `Result<NameLease>`를 반환하며 lease의 `View()`로 원문을 읽는다. `TryClone()`은 명시적으로 reader 수를 늘린다. `Reset()`으로 반환한다.
 
-기본 Name은 이름 없음이며 빈 문자열을 intern한 유효한 이름과 구분한다. UTF-8 바이트를 대소문자 구분하여 비교한다. 정규화·locale case folding은 암묵 적용하지 않는다. 내부 NUL은 길이 기반 데이터로 허용한다. FFI·OS 경계에서는 해당 경계의 입력 제한을 적용해야 한다.
+기본 Name·빈 문자열·대소문자 무시 `None`·빈 base의 번호 이름(`_7`)은 모두 같은 None이다. ASCII 문자만 대소문자를 무시하고 비ASCII는 UTF-8 byte로 비교하며 UE 5.8 번호 접미사 `_N`을 나눈다([Name](Name.ko.md)). 정규화·Unicode·locale case folding은 암묵 적용하지 않는다. 내부 NUL은 길이 기반 데이터로 허용한다. FFI·OS 경계에서는 해당 경계의 입력 제한을 적용해야 한다.
 
 각 초기화는 새로운 process-local domain을 받는다. pool 재생성·재초기화 이후의 이전 Name은 거부한다. domain과 entry id를 wrap하여 재사용하지 않는다. 영속 저장·네트워크에는 원문 또는 별도 stable Guid를 사용한다.
 
-`Shutdown()`은 새 intern/acquire/clone을 닫는다. 진행 중 할당·cleanup 또는 lease가 있으면 Busy이며 닫힌 상태를 유지한다. caller 종료·lease 반환 후 재호출하면 저장소를 반환한다. pool 소멸 전에 모든 API caller를 join하고 lease를 해제해야 한다. allocator는 pool과 보관 중인 저장소보다 오래 살아야 한다.
+`Shutdown()`은 새 intern/조회(`TryFind`)/acquire/clone을 닫는다. 진행 중 할당·cleanup 또는 lease가 있으면 Busy이며 닫힌 상태를 유지한다. caller 종료·lease 반환 후 재호출하면 저장소를 반환한다. pool 소멸 전에 모든 API caller를 join하고 lease를 해제해야 한다. allocator는 pool과 보관 중인 저장소보다 오래 살아야 한다.
 
 ### 할당·동시성
 
@@ -76,6 +76,7 @@ Publish는 호출자가 정한 게시 순서를 따른다. 비동기 로더의 �
 | 영역 | 독립 검증 기준 |
 |---|---|
 | Name identity | 별도 pool·재초기화 stale 거부, 빈 값/한글/NUL/대소문자, 강제 hash 충돌에서도 byte 동등 기준과 일치 |
+| Name 조회·원문 비교 | `TryFind` 할당 0·예약 불변·NotFound·첫 표시·게시 전 NotFound(멈춘 intern), `NameTextEquals` = 같은 pool intern `==` = `NameKey` 같음, `SplitNameText` UE 5.8 경계값 |
 | Name 수명·경합 | 동일/상이 입력 native thread 경쟁, lease 유지 중 Busy, 차단된 allocator와 Shutdown 경합, callback 재진입, 예약 예산 반환 |
 | Text 이력 | 입력 원문·인자 scratch 해제 이후 읽기, Clone/이동/다른 allocator 소유권, 깊은 DAG의 비재귀 해제 |
 | 번역 | exact sourceRevision, missing/stale fallback 카운터, 빈 번역, 여러 문화 snapshot, store/원래 wrapper 해제 후 reader 유지 |
@@ -91,7 +92,7 @@ Name 10개·Localization 24개와 플랫폼 확장을 포함한 전체 110개가
 
 ## 5. 후속 범위
 
-리플렉션 B9가 `NamePool::TryFind`(intern하지 않는 조회)·pool 없는 Name 비교와, Text의 영속 형태 조회 `TryGetPersistentForm`·깊은 복사 `DeepClone(Allocator&)`을 더한다([리플렉션 B9](../Design/ReflectionExtensions.ko.md) 4·13절).
+리플렉션 B9c1이 `NamePool::TryFind`(intern하지 않는 조회)·pool 없는 Name 비교 `NameTextEquals`·base·번호 분해 `SplitNameText`를 더했다. Text의 영속 형태 조회 `TryGetPersistentForm`·깊은 복사 `DeepClone(Allocator&)`은 B9l이 더한다([리플렉션 B9](../Design/ReflectionExtensions.ko.md) 4·13절).
 
 Name pool의 샤드 잠금/검색 최적화, Guid 생성·parse·format, 일반 hash/Path, catalog 추출·쿠킹·에셋 너겟·비동기 로더·request generation, locale별 숫자/통화/날짜·plural/select adapter, BiDi·shaping·폰트·IME/UI는 아직 후속이다. Text를 String의 별명으로 만들지 않고 이력과 snapshot 경계를 먼저 확보한 상태에서 확장한다.
 

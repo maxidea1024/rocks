@@ -178,14 +178,7 @@ StringView NameLease::BaseView() const noexcept {
     }
 
     // Acquire가 표시 entry와 번호를 함께 검증한다. lease 수명은 원문 저장소를 보호한다.
-    usize firstDigit = view_.ByteCount();
-    while (firstDigit != 0 && view_.Data()[firstDigit - 1] >= '0' &&
-           view_.Data()[firstDigit - 1] <= '9') {
-        --firstDigit;
-    }
-    return firstDigit != 0 && view_.Data()[firstDigit - 1] == '_'
-               ? StringView(view_.Data(), firstDigit - 1)
-               : view_;
+    return StringView(view_.Data(), ParseName(view_).baseBytes);
 }
 
 NameKey NameLease::Key() const noexcept {
@@ -306,9 +299,7 @@ Result<Name> NamePool::TryIntern(StringView source) noexcept {
 
         if (Entry* found = FindBytes(source, hash)) {
             --stats_.activeOperations;
-            return Result<Name>::Success(
-                Name{stats_.domain, found->comparisonId, found->id, found->number,
-                     found->comparisonId == 0 ? NameKind::NoneDisplay : NameKind::Normal});
+            return Result<Name>::Success(TokenFor(*found));
         }
 
         if (nextSerial_ > maximumSerial) {
@@ -355,8 +346,7 @@ Result<Name> NamePool::TryIntern(StringView source) noexcept {
         if (state_ != State::Running) {
             error = ErrorCode::ShuttingDown;
         } else if (Entry* found = FindBytes(source, hash)) {
-            result = Name{stats_.domain, found->comparisonId, found->id, found->number,
-                          found->comparisonId == 0 ? NameKind::NoneDisplay : NameKind::Normal};
+            result = TokenFor(*found);
         } else if (nextSerial_ > maximumSerial) {
             error = ErrorCode::Overflow;
         } else {
@@ -372,9 +362,7 @@ Result<Name> NamePool::TryIntern(StringView source) noexcept {
             --stats_.pendingEntries;
             stats_.pendingStorageBytes -= allocationBytes;
             --stats_.activeOperations;
-            return Result<Name>::Success(
-                Name{stats_.domain, candidate->comparisonId, candidate->id, candidate->number,
-                     candidate->comparisonId == 0 ? NameKind::NoneDisplay : NameKind::Normal});
+            return Result<Name>::Success(TokenFor(*candidate));
         }
     }
 
@@ -387,6 +375,49 @@ Result<Name> NamePool::TryIntern(StringView source) noexcept {
     }
 
     return Result<Name>::Success(result);
+}
+
+Result<Name> NamePool::TryFind(StringView source) const noexcept {
+    // 검사·분해·hash는 pool 상태를 읽지 않으므로 gate 밖에서 한다. 오류 순서는 TryIntern과 같게
+    // 실행 상태를 먼저 본다.
+    const auto valid = source.ValidateUtf8();
+    const ParsedName parsed = ParseName(source);
+    const bool noneBase = IsNoneBase(source, parsed.baseBytes);
+    const uint64 rawHash = HashBytes(source, parsed.baseBytes);
+    platform::LockGuard lock(gate_);
+    if (state_ != State::Running) {
+        return Result<Name>::Failure(ErrorCode::ShuttingDown);
+    }
+
+    if (!valid) {
+        return Result<Name>::Failure(valid.Error());
+    }
+
+    // 빈 base(빈 문자열과 "_7")는 기본 None이다. 정확히 "None"인 원문은 TryIntern이 entry를 만들지
+    // 않으므로 아래 None 변형 분기에서 기본 None이 된다.
+    if (parsed.baseBytes == 0) {
+        return Result<Name>::Success(Name{});
+    }
+
+    bool exact = false;
+    Entry* display =
+        FindDisplay(source, parsed.baseBytes, parsed.number, rawHash & config_.hashMask, exact);
+    // 번호 없는 None의 첫 표시는 정적 "None"이다(기본 None은 entry 없이 언제나 있다).
+    if (noneBase && parsed.number == 0 && !exact) {
+        return Result<Name>::Success(Name{});
+    }
+
+    if (display != nullptr) {
+        return Result<Name>::Success(TokenFor(*display));
+    }
+
+    return Result<Name>::Failure(ErrorCode::NotFound);
+}
+
+// gate를 쥔 상태에서 부른다(domain을 읽는다).
+Name NamePool::TokenFor(const Entry& entry) const noexcept {
+    return Name{stats_.domain, entry.comparisonId, entry.id, entry.number,
+                entry.comparisonId == 0 ? NameKind::NoneDisplay : NameKind::Normal};
 }
 
 NamePool::Entry* NamePool::FindBytes(StringView source, uint64 hash) const noexcept {
@@ -410,6 +441,35 @@ NamePool::Entry* NamePool::FindComparison(StringView source, usize baseBytes,
         }
     }
     return nullptr;
+}
+
+// TryFind의 bucket 한 번 순회다. byte가 같은 표시 entry가 있으면 그것을 돌려주고 exact를 true로
+// 둔다. 없으면 비교 identity(base)와 번호가 같은 표시 가운데 가장 먼저 게시된 entry다(없으면
+// null). byte가 같은 entry는 분해 결과도 같으므로 후보 조건 안에 있다. 같은 base는 같은 bucket에
+// 있고, 한 bucket 안의 id는 게시 순번 순서이므로 가장 작은 id가 첫 표시다(chain은 최근 게시가
+// 앞이다).
+NamePool::Entry* NamePool::FindDisplay(StringView source, usize baseBytes, uint32 number,
+                                       uint64 hash, bool& exact) const noexcept {
+    exact = false;
+    const usize bucket = static_cast<usize>(hash & (BucketCount - 1));
+    Entry* first = nullptr;
+    for (Entry* entry = buckets_[bucket]; entry != nullptr; entry = entry->next) {
+        if (entry->hash != hash || entry->number != number || entry->baseBytes != baseBytes ||
+            !EqualBase(entry->View(), source, baseBytes)) {
+            continue;
+        }
+
+        if (entry->View() == source) {
+            exact = true;
+            return entry;
+        }
+
+        if (first == nullptr || entry->id < first->id) {
+            first = entry;
+        }
+    }
+
+    return first;
 }
 
 Result<NameLease> NamePool::Acquire(Name name) noexcept {
@@ -538,6 +598,29 @@ Result<NameKey> TryMakeNameKey(StringView text) noexcept {
         return Result<NameKey>::Failure(valid.Error());
     }
     return Result<NameKey>::Success(KeyFor(text));
+}
+
+NameTextParts SplitNameText(StringView text) noexcept {
+    const ParsedName parsed = ParseName(text);
+    return NameTextParts{StringView(text.Data(), parsed.baseBytes), parsed.number};
+}
+
+bool NameTextEquals(StringView left, StringView right) noexcept {
+    const ParsedName leftParsed = ParseName(left);
+    const ParsedName rightParsed = ParseName(right);
+    // 빈 base는 번호와 무관하게 기본 None이고, base "None"(ASCII 대소문자 무시)은 번호로만 구별한다
+    // (TryIntern의 None 판정·KeyFor와 같다).
+    const bool leftNone = leftParsed.baseBytes == 0 || IsNoneBase(left, leftParsed.baseBytes);
+    const bool rightNone = rightParsed.baseBytes == 0 || IsNoneBase(right, rightParsed.baseBytes);
+    if (leftNone || rightNone) {
+        const uint32 leftNumber = leftParsed.baseBytes == 0 ? 0 : leftParsed.number;
+        const uint32 rightNumber = rightParsed.baseBytes == 0 ? 0 : rightParsed.number;
+        return leftNone && rightNone && leftNumber == rightNumber;
+    }
+
+    return leftParsed.number == rightParsed.number &&
+           leftParsed.baseBytes == rightParsed.baseBytes &&
+           EqualBase(left, right, leftParsed.baseBytes);
 }
 
 } // namespace rocks

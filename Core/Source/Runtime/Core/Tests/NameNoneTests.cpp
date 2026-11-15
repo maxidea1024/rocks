@@ -73,7 +73,7 @@ TEST(NameNoneDefaultAndValidEmptyBaseMatchUe58) {
     CHECK(!emptyLease && emptyLease.Identifier().IsNone());
     CHECK(emptyLease.View().IsEmpty());
     CHECK(none.IsValid() && none.IsNone());
-    CHECK(!none.HasNumber() && none.GetNumber() == -1);
+    CHECK(!none.HasNumber() && none.GetNumber() == Name::NoNumber);
 
     SystemAllocator allocator;
     {
