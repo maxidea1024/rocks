@@ -11,6 +11,8 @@
 #include <Core/Containers/BitArray.h>
 #include <Core/Containers/HashMap.h>
 #include <Core/Containers/HashSet.h>
+#include <Core/Containers/OrderedMap.h>
+#include <Core/Containers/OrderedSet.h>
 #include <Core/Containers/SlotArray.h>
 #include <Core/Containers/SparseArray.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -43,6 +45,11 @@ static_assert(std::forward_iterator<HashMap<int, int>::const_iterator>);
 static_assert(std::forward_iterator<HashSet<int>::const_iterator>);
 static_assert(std::ranges::forward_range<HashMap<int, int>>);
 static_assert(std::ranges::forward_range<HashSet<int>>);
+static_assert(std::forward_iterator<OrderedMap<int, int>::iterator>);
+static_assert(std::forward_iterator<OrderedMap<int, int>::const_iterator>);
+static_assert(std::forward_iterator<OrderedSet<int>::const_iterator>);
+static_assert(std::ranges::forward_range<OrderedMap<int, int>>);
+static_assert(std::ranges::forward_range<OrderedSet<int>>);
 static_assert(std::forward_iterator<SparseArray<int>::iterator>);
 static_assert(std::forward_iterator<SparseArray<int>::const_iterator>);
 static_assert(std::ranges::forward_range<const SparseArray<int>>);
@@ -100,6 +107,27 @@ TEST(StlCompatibility_HashContainersWithAlgorithms) {
     }
     CHECK(std::ranges::count_if(set, [](int key) { return key >= 10; }) == 10);
     CHECK(std::accumulate(set.begin(), set.end(), 0) == 190);
+}
+
+TEST(StlCompatibility_OrderedContainersVisitInInsertionOrder) {
+    SystemAllocator allocator;
+    OrderedMap<int, int> map(allocator);
+    for (int key = 10; key >= 1; --key) {
+        REQUIRE(map.Insert(key, key * key));
+    }
+    // 삽입 순서(10, 9, ..., 1)대로 방문하므로 첫 짝수 키는 10, 49를 가진 원소는 네 번째다.
+    const auto even =
+        std::find_if(map.begin(), map.end(), [](auto entry) { return entry.key % 2 == 0; });
+    REQUIRE(even != map.end());
+    CHECK(even->key == 10);
+    CHECK(std::distance(map.begin(), std::find_if(map.begin(), map.end(), [](auto entry) {
+                            return entry.value == 49;
+                        })) == 3);
+    OrderedSet<int> set(allocator);
+    for (int key = 5; key >= 0; --key) {
+        REQUIRE(set.Add(key));
+    }
+    CHECK(std::ranges::is_sorted(set, std::ranges::greater{}));
 }
 
 namespace {

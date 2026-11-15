@@ -1,24 +1,14 @@
 #pragma once
 
 #include <Base/Checked.h>
+#include <Core/Containers/ContainerDetail.h>
+#include <Core/Containers/InsertOutcome.h>
 #include <Core/Hash.h>
 #include <Core/Memory/Allocator.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
 
 namespace rocks {
-
-enum class InsertOutcome : uint8 {
-    Inserted,
-    AlreadyPresent
-};
-
-// value는 컨테이너가 소유한 빌린 포인터다. 재해시·삭제 등의 무효화 규약을 지킨다.
-template <typename V>
-struct FindOrAddResult {
-    V* value;
-    InsertOutcome outcome;
-};
 
 // 같은 컨테이너의 동시 접근은 caller가 동기화한다. const 순회도 내부 상태를 변경한다.
 // allocator는 모든 컨테이너보다 오래 살아야 한다.
@@ -569,11 +559,6 @@ private:
         return slotCount_;
     }
 
-    static bool Overlap(uptr a, usize aSize, uptr b, usize bSize) noexcept {
-        // 서로 다른 객체의 포인터를 직접 순서 비교하거나 끝 주소를 더하지 않는다.
-        return a <= b ? b - a < aSize : a - b < bSize;
-    }
-
     template <typename A>
     bool AliasesSlots(A& arg) const noexcept {
         if (!slots_) {
@@ -581,13 +566,14 @@ private:
         }
         const uptr address = reinterpret_cast<uptr>(platform::AddressOf(arg));
         const uptr base = reinterpret_cast<uptr>(slots_);
-        return Overlap(address, sizeof(A), base, slotCount_ * sizeof(Slot));
+        return detail::AddressRangesOverlap(address, sizeof(A), base, slotCount_ * sizeof(Slot));
     }
 
     template <typename A, typename B>
     static bool ArgumentsOverlap(A& a, B& b) noexcept {
-        return Overlap(reinterpret_cast<uptr>(platform::AddressOf(a)), sizeof(A),
-                       reinterpret_cast<uptr>(platform::AddressOf(b)), sizeof(B));
+        return detail::AddressRangesOverlap(
+            reinterpret_cast<uptr>(platform::AddressOf(a)), sizeof(A),
+            reinterpret_cast<uptr>(platform::AddressOf(b)), sizeof(B));
     }
 
     template <bool Assign, typename KeyArg, typename ValueArg>

@@ -128,6 +128,38 @@ if (!combined) {
 
 집합 연산 동안 양 입력은 외부에서 동기화해야 하며, 비교·해시·복제·할당 및 원소 수명 콜백에서 입력의 구조를 변경해서는 안 된다. `TryUnion`은 임시 결과와 복제 키의 소멸까지 양 입력의 구조 변경을 차단한다. `IntersectWith`와 `DifferenceWith`도 처리 중 상대 집합의 구조 변경을 차단한다. 순회 중 현재 집합에 필터 연산을 실행하면 `Busy`다. 같은 컨테이너의 내부 콜백에 의한 읽기 재진입까지 이 구조 변경 가드가 모두 탐지한다고 가정하지 않는다.
 
+## 삽입 순서 컨테이너: OrderedMap·OrderedSet
+
+`Core/Containers/OrderedMap.h`의 `OrderedMap<K, V, Hasher, KeyEqual>`과 `Core/Containers/OrderedSet.h`의 `OrderedSet<K, Hasher, KeyEqual>`은 **삽입 순서를 보존한다 — 키 정렬이 아니다**. 리플렉션 Map·Set 필드와 Sparks `Map`·`Set`의 C++ 대응이다([리플렉션 B9](../Design/ReflectionExtensions.ko.md) 7.1절).
+
+```cpp
+rocks::OrderedMap<rocks::int32, rocks::int32> scores(allocator);
+auto inserted = scores.Insert(rocks::int32{3}, rocks::int32{30});
+if (!inserted) {
+    return inserted.Error();
+}
+(void)scores.InsertOrAssign(rocks::int32{1}, rocks::int32{10});
+(void)scores.InsertOrAssign(rocks::int32{3}, rocks::int32{31}); // 자리는 그대로(3, 1 순서)
+for (auto [key, value] : scores) {
+    // 3, 1 순서로 방문한다.
+    (void)key;
+    (void)value;
+}
+```
+
+- **순서 규칙**: 새 키는 끝에 붙는다. 있는 키의 값 대입(`InsertOrAssign`, Sparks `m[k] = v`)은 자리를 지킨다. 중복 `Insert`·`FindOrAdd`·`OrderedSet::Add`는 값도 순서도 바꾸지 않는다. 지운 뒤 다시 넣으면 끝에 붙는다. 순서는 연산 순서만으로 정해지고 해시 값·seed·플랫폼과 무관하므로, 순회 결과를 그대로 직렬화해도 결정적이다.
+- **같음**: `operator==`는 순서까지 비교한다(키는 왼쪽 피연산자의 `KeyEqual`, 값은 `Equal<V>`). 같은 쌍이라도 순서가 다르면 다르다. 값 비교를 바꾸려면 `SequenceEquals(other, valueEqual)`을 쓴다.
+- **API**: HashMap·HashSet과 같은 이름·결과 형식이다. Map은 `Find`·`Contains`·`FindStoredKey`·`Insert`·`InsertOrAssign`·`FindOrAdd`·`FindOrAddWith`·`Reserve`·`Compact`·`Erase`·`EraseIf`·`Clear`·`Reset`·`ForEach`·STL 호환 전방 반복자, Set은 `Add`·`Contains`·`Find`·`Erase`·`EraseIf`·`Reserve`·`Compact`·`Clear`·`Reset`·`ForEach`·반복자다. `InsertOutcome`·`FindOrAddResult`는 `Core/Containers/InsertOutcome.h`를 함께 쓴다. HashSet의 집합 연산(`IntersectWith`·`DifferenceWith`·`TryUnion`)은 아직 없다(소비자가 생길 때 순서 규칙과 함께 더한다).
+- **구조**(`Core/Containers/OrderedEntryTable.h`): 삽입 순서의 조밀 항목 배열과 open addressing 색인(u32 항목 위치, 색인 칸 수 = 용량의 두 배)을 할당 한 번으로 잡는다. 항목은 키·값·전체 해시·생존 표시를 담는다. 삭제는 항목을 죽은 것으로 표시하고 색인 칸을 삭제 칸으로 바꾼다. 빈 칸은 다시 쓰지 않는다(다시 쓰면 순서가 깨진다).
+- **압축(삭제 뒤 순서 유지)**: 끝의 죽은 항목은 바로 뗀다. 죽은 항목이 산 항목의 절반을 넘으면 그 `Erase`·`EraseIf`가 산 항목을 상대 순서 그대로 앞으로 당긴다(할당 없음, 옮긴 항목의 색인 칸만 고친다). 가득 찬 저장소에 넣을 때는 죽은 항목이 용량의 1/8 이상이면 제자리 압축, 아니면 두 배로 성장하면서 산 항목만 옮긴다. `Reserve`도 같은 규칙이다: 용량은 되는데 끝자리가 모자라면 죽은 항목이 용량의 1/8 이상이거나 원소가 용량의 절반 미만일 때만 제자리 압축하고, 아니면 두 배로 성장한다("삭제 + `Reserve(Count() + 1)` + 삽입" 반복도 상환 O(1). 매번 남은 용량 전부를 요구하는 `Reserve(Capacity())` 반복은 매번 O(용량)이다). 색인의 삭제 칸이 칸 수의 1/4을 넘으면 삽입 때 제자리에서 색인만 다시 짓는다(항목은 움직이지 않는다). `EraseIf`는 처음 칸 수/8개만 색인 칸을 하나씩 지우고 나머지는 항목만 죽은 것으로 표시한 뒤 색인을 한 번 다시 지어, 모두 충돌하는 해시에서도 대량 삭제가 O(n²)이 되지 않는다. 압축 비용은 그 죽은 항목·삭제 칸을 만든 삭제들에 상환되므로 삽입·삭제는 상환 O(1)이고, 순회는 늘 산 원소 수에 비례한다.
+- **실패 원자성**: 실패할 수 있는 단계는 새 저장소 할당 하나이고, 할당이 성공한 뒤에만 원소를 옮긴다. 그래서 실패한 `Insert`·`InsertOrAssign`·`FindOrAdd*`·`Reserve`·`Compact`는 내용·순서·용량·기존 포인터를 보존하고 입력 인자를 소비하지 않는다(실패한 삽입은 반복자도 무효화하지 않는다). 위치 상한은 2^31(색인 표지 `EmptySlot`·`DeletedSlot` 아래)이며 넘으면 `Overflow`다.
+- **포인터 무효화**: 성장(삽입·`Reserve`), 압축(위 조건의 `Erase`·`EraseIf`·삽입, `Reserve`·`Compact`), `Clear`, `Reset`, 이동, 파괴는 모든 포인터를 무효화한다. 안전하게는 `Erase` 뒤 모든 포인터를 무효로 본다. `Reserve(n)`이 성공한 뒤 `Erase`·`EraseIf`·`Compact`·`Reset` 없이 `Count()`가 n이 될 때까지의 삽입은 할당·이동하지 않는다. `Capacity()`는 이 보장이 아니다: 삭제가 섞여 죽은 항목이 끝자리를 차지하면, 죽은 항목이 용량의 1/8 미만일 때 `Count() < Capacity()`여도 삽입이 두 배로 성장한다. 값 교체는 그 값 포인터만 무효화한다.
+- **반복자 무효화와 순회 중 수정**: HashMap과 같다. 원소 집합·저장소가 바뀐 뒤 기존 반복자의 역참조·증가는 Fatal이다(음성 대조 `ordered-map-iterator-modified`·`ordered-set-iterator-modified`). 값 교체는 반복자를 무효화하지 않는다. `ForEach`·`EraseIf` predicate·`FindOrAddWith` factory 안에서 삽입·예약·압축·`EraseIf`는 `Busy`, 삭제·`Clear`·`Reset`·이동은 Fatal이다(음성 대조 `ordered-map-foreach-erase`). 중첩 조회·순회와 Map 값 수정은 된다.
+- **해시(hash flooding 방어)**: 기본 해시 정책은 `Core/Hash.h`의 `SeededHash<K>`다. seed가 해시 계산 안에 들어가는 SipHash-2-4(128비트 `HashSeed`)라 seed를 모르는 상대는 색인 칸 충돌 집합을 미리 만들 수 없다. 정책 해시 뒤에 seed를 섞는 방식은 쓰지 않는다(FNV-1a의 64비트 전체 충돌이 그대로 남는다). 기본 seed는 `ProcessHashSeed()`(처음 쓸 때 OS 난수로 한 번 — 읽지 못하면 Fatal)이고, 시험·결정적 재현은 `OrderedMap<K, V>(allocator, SeededHash<K>(HashSeed{1, 2}))`처럼 넘긴다. 순서가 해시와 무관하므로 seed가 달라도 순회·직렬화·같음이 같다. 특수화: 정수·enum(기본), `String`·`StringView`(byte, StringView 이종 조회), `Name`(`Hash<Name>`과 같은 필드), `Guid`. 정수·Guid도 대상인 이유는 `MixHash`가 공개 전단사라 낮은 bit가 같은 키를 바로 계산할 수 있기 때문이다. 다른 해시 정책을 넘기면 이 보장은 그 정책의 몫이다. HashMap·HashSet은 순회 순서가 해시에 달려 있어 기본 정책을 바꾸지 않았다(아래 기본 계약의 "충돌 공격 미보장" 그대로). 이 방어는 OrderedMap 단계만이다: 파일 키가 먼저 지나는 JsonDocument 멤버 색인은 리플렉션 B9i1이 seed 해시로 바꾸고, NamePool bucket(FNV·64 bucket 고정)은 A1 전 후속 과제다. 길이가 정해진 키는 결과가 같은 word 경로 `SipHash24Words`를 쓴다. seed는 프로세스 수명이라 fork한 자식은 같은 seed를 물려받는다.
+- **정책·동시성·별칭**: 해시·동등 정책, 재진입 금지, 외부 동기화, 저장소 원소의 직접 별칭 거부(`InvalidArgument`)는 HashMap 규약 그대로다.
+- **언리얼과 다른 점**: UE 5.8 `TMap`·`TSet`은 sparse array 위에 있고 제거한 칸을 free list로 다시 써 순회가 삽입 순서가 아니다(SparseArray.h:117-141·191-209). `Compact`는 끝 원소를 구멍으로 옮겨 순서를 바꾸고 `CompactStable`만 순서를 지킨다(SparseArray.h:412·703). UE의 opt-in `TCompactSet`(기본은 꺼짐 — ContainerAllocationPolicies.h:1911-1913)에는 순서를 지키는 `RemoveStable`이 있다(CompactSet.h.inl:1100-1113). Rocks는 구멍을 다시 쓰지 않고 압축을 늘 안정 압축으로 해 삽입 순서를 상태로 지킨다. 같음도 다르다: UE는 `TMap`의 `operator==`를 지웠고(Map.h.inl:1014-1017, 대신 순서 무관 `OrderIndependentCompareEqual` — Map.h.inl:107-116), `TSet::LegacyCompareEqual`은 순서를 포함한다(SparseSet.h.inl:1818-1849). Rocks `operator==`는 순서를 포함한 O(n) 비교다.
+- **검증**: `Core/Source/Runtime/Core/Tests/OrderedMapTests.cpp`(순서, 같은 키 대입의 자리 유지, 제거 뒤 재삽입, 제자리 압축의 주소 간격, `Reserve` 압축이 옮긴 키의 포인터, 할당 실패 무변경·반복자 보존, 충돌·mask 충돌·탐사 순환, 무할당 반복 삽입·삭제, 원소 수명·이동, 순회 가드, 순서 포함 같음, 단순 배열 모형 대조), `OrderedMapKeyAndCostTests.cpp`(Reserve 상환의 이동 횟수, 충돌 해시의 대량 `EraseIf`, 용량 상한, Name 키, seed 무관 순서), `SeededHashTests.cpp`(SipHash 참조 벡터, 동등 키·seed, mask 충돌의 seed 의존), `OrderedSetTests.cpp`, `StlCompatibilityTests.cpp`의 iterator concept.
+
 ## 언리얼과 비교
 
 비교 대상은 Epic의 [TMap 안내](https://dev.epicgames.com/documentation/unreal-engine/map-containers-in-unreal-engine)와 [TSet 5.5 API](https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Runtime/Core/Containers/TSet?application_version=5.5)의 공개 설명이다. 이는 사용성 검토이며 내부 구현이나 동작의 완전한 호환성을 약속하지 않는다.
@@ -147,7 +179,7 @@ if (!combined) {
 
 ## 자료구조와 기본 계약
 
-삽입 순서를 보존하는 `OrderedMap`·`OrderedSet`(조밀 항목 + 해시 색인, 순서는 해시와 무관 — 키 정렬이 아니다)은 리플렉션 B9가 Core에 더하며 API 이름·결과 형식은 이 문서의 HashMap 규약을 따른다([리플렉션 B9](../Design/ReflectionExtensions.ko.md) 7.1절).
+아래 계약은 HashMap·HashSet 기준이며 OrderedMap·OrderedSet도 순서 규칙(위 절)을 빼면 같다.
 
 - Map은 고유 키와 값을 소유하고, Set은 고유 원소를 소유한다. Set이 Map을 재사용하더라도 의미 없는 값이나 잘못된 공개 수정 경로가 노출되지 않아야 한다.
 - 비어 있음·사용 중·삭제됨을 구분한다. 삭제된 위치를 넘어서 기존 키를 끝까지 탐색해야 하며, 비어 있는 위치 또는 탐사 상한에서 종료한다. 삭제 자리를 재사용할 때도 뒤쪽 중복 키 확인을 먼저 완료한다.
@@ -155,7 +187,7 @@ if (!combined) {
 - 저장소 할당·해제는 명시적으로 받은 `Allocator`를 사용하고 할당기가 컨테이너와 모든 사용보다 오래 살아야 한다. 할당 실패를 성공한 빈 슬롯으로 취급하지 않는다. capacity와 byte 계산, 정렬 및 증가 과정의 정수 overflow를 검사한다.
 - 원소는 적절한 정렬의 raw storage에 생성하고 생존 중인 원소만 소멸한다. 임의 타입에 byte 복사만으로 이동을 가정하지 않는다. 이동·소멸 등의 허용 조건은 실제 지원 타입에 맞추어 컴파일 시 검사한다.
 - 같은 컨테이너의 동시 접근은 호출자가 동기화한다. `const ForEach`도 내부 순회 상태를 변경하므로 읽기 전용 순회끼리도 동기화가 필요하다. 해시·비교·생성·소멸·할당 콜백이 같은 컨테이너를 재진입 변경하는 것은 기본적으로 금지한다. 락 기반 공유 또는 동시 컨테이너는 별도 설계다.
-- 해시와 순회 순서를 파일, 네트워크, 영속 ID 또는 결정적 게임 로직의 기준으로 사용하지 않는다. 결정적 출력은 별도 키 정렬과 명시적 인코딩으로 만든다. 악의적 입력의 충돌 공격이나 상수 시간 조회도 보장하지 않는다.
+- 해시와 HashMap·HashSet의 순회 순서를 파일, 네트워크, 영속 ID 또는 결정적 게임 로직의 기준으로 사용하지 않는다. 결정적 출력은 OrderedMap·OrderedSet의 삽입 순서나 별도 키 정렬과 명시적 인코딩으로 만든다. HashMap·HashSet은 악의적 입력의 충돌 공격이나 상수 시간 조회를 보장하지 않는다(OrderedMap·OrderedSet은 기본 `SeededHash`로 충돌 공격을 막는다 — 위 절). 상수 시간 조회는 어느 쪽도 보장하지 않는다.
 
 ## 사용성 목표와 우선순위
 

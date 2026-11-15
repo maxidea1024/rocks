@@ -477,12 +477,23 @@ Core 수학(`CORE/Math/Transform.h`)에 둘을 더한다(사용자 결정 U4).
 
 ### 7.1 Core 컨테이너(B9f1)
 
-`Core/Containers/OrderedMap.h`에 `OrderedMap<K, V, Hasher, KeyEqual>`, `Core/Containers/OrderedSet.h`에 `OrderedSet<T, Hasher, KeyEqual>`을 둔다(사용자 결정 U6). 헤더 첫 주석에 "삽입 순서를 보존한다 — 키 정렬이 아니다"를 적는다. 지금 Core HashMap은 open addressing·tombstone이고 순서를 보존하지 않는다(CORE/Containers/HashMap.h:283-301·357·388).
+`Core/Containers/OrderedMap.h`에 `OrderedMap<K, V, Hasher, KeyEqual>`, `Core/Containers/OrderedSet.h`에 `OrderedSet<T, Hasher, KeyEqual>`을 둔다(사용자 결정 U6). 헤더 첫 주석에 "삽입 순서를 보존한다 — 키 정렬이 아니다"를 적는다. 지금 Core HashMap은 open addressing·tombstone이고 순서를 보존하지 않는다(Core/Containers/HashMap.h의 `HashMap::Erase`·`ForEach`·반복자 — 순회는 슬롯 순서).
 
 - 구조: 조밀 항목 Array(삽입 순서) + open addressing 색인(u32 위치) + 죽은 항목 표시. 제거는 항목을 죽은 것으로 표시하고, 죽은 수가 산 수의 절반을 넘거나 성장할 때 압축한다(상환 O(1)).
 - 같은 키 대입은 위치를 유지하고, 제거 뒤 다시 넣으면 끝에 붙는다(Sparks `m[k] = v` — SL 482행).
 - 순서는 해시 값과 무관하다. 그래서 순회·직렬화가 해시 seed·플랫폼과 무관하게 결정적이다.
-- API는 Core HashMap 규약을 따른다(HashMap.h:72·121-374, Docs/Implementation/HashCollections.ko.md): `explicit OrderedMap(Allocator&, Hasher = {}, KeyEqual = {})`, `Count`·`IsEmpty`·`Find`·`Contains`, `Insert -> Result<InsertOutcome>`(`AlreadyPresent`), `InsertOrAssign`, `FindOrAdd`, `Reserve`, `Compact`, `Erase`, `Clear`·`Reset`, `ForEach`·반복자. 할당은 `Result`, 예외 없음. Name 키는 Core `Hash<Name>`(Hash.h:83)을 쓴다.
+- API는 Core HashMap 규약을 따른다(Core/Containers/HashMap.h의 `HashMap` 공개 멤버, Docs/Implementation/HashCollections.ko.md): `explicit OrderedMap(Allocator&, Hasher = {}, KeyEqual = {})`, `Count`·`IsEmpty`·`Find`·`Contains`, `Insert -> Result<InsertOutcome>`(`AlreadyPresent`), `InsertOrAssign`, `FindOrAdd`, `Reserve`, `Compact`, `Erase`, `Clear`·`Reset`, `ForEach`·반복자. 할당은 `Result`, 예외 없음. Name 키는 Core `Hash<Name>`과 같은 필드(Core/Hash.h의 `SeededHash<Name>` — 아래 해시 항목)로 해시한다.
+
+구현(B9f1)에서 정한 점:
+
+- 항목 배열과 색인(칸 수 = 용량 × 2, 용량은 2의 거듭제곱)은 할당 한 번이다(저장소는 `Core/Containers/OrderedEntryTable.h`의 `detail::OrderedEntryTable<K, V>` — OrderedMap이 정책·순회 가드를 얹고 OrderedSet은 OrderedMap을 감싼다). 삭제는 항목을 죽은 것으로 표시하고 색인 칸을 삭제 칸으로 바꾸며, 빈 항목 자리는 다시 쓰지 않는다(UE sparse array의 free list 재사용이 순서를 깨는 지점 — 18.6절). 위치 상한은 2^31(색인 표지 `EmptySlot`·`DeletedSlot` 아래)이고 넘으면 Overflow다.
+- 압축 시점: 끝의 죽은 항목은 그 `Erase`·`EraseIf`가 바로 뗀다. 죽은 수가 산 수의 절반을 넘으면 그 `Erase`·`EraseIf`가 제자리에서 앞으로 당긴다(할당 없음, 옮긴 항목의 색인 칸만 고침). 가득 찬 저장소에 넣을 때는 죽은 항목이 용량의 1/8 이상이면 제자리 압축, 아니면 두 배 성장하며 산 항목만 옮긴다(작은 죽은 수로 매 삽입마다 O(용량) 압축이 반복되지 않게). `Reserve`도 같은 상환 규칙이다: 용량은 되는데 끝자리가 모자라면 죽은 항목이 용량의 1/8 이상이거나 원소가 용량의 절반 미만일 때만 제자리 압축하고 아니면 두 배 성장한다("삭제 + `Reserve(Count() + 1)` + 삽입" 반복이 매번 O(n) 압축이 되지 않게 — B9f1 리뷰 반영. 매번 남은 용량 전부를 요구하는 `Reserve(Capacity())` 반복은 보장상 O(용량)이다). 색인의 삭제 칸이 1/4을 넘으면 삽입 때 색인만 제자리에서 다시 짓는다. `EraseIf`는 처음 칸 수/8개만 색인 칸을 하나씩 지우고 그 뒤는 항목만 죽은 것으로 표시한 뒤 색인을 한 번 다시 지어, 모두 충돌하는 해시에서도 대량 삭제가 O(n²)이 되지 않는다. 모든 압축은 안정 압축이다.
+- 실패할 수 있는 단계는 새 저장소 할당 하나뿐이라 실패한 Try 연산은 내용·순서·용량·포인터·반복자를 모두 보존한다. 제자리 압축은 실패하지 않는다.
+- 포인터 무효화는 HashMap보다 넓은 쪽으로 정했다: 압축이 일어날 수 있는 `Erase`·`EraseIf` 뒤에는 모든 포인터를 무효로 본다(HashMap의 Erase는 지운 원소만). 대신 `Reserve(n)` 뒤 `Erase`·`EraseIf`·`Compact`·`Reset` 없이 Count()가 n이 될 때까지의 삽입은 할당·이동하지 않는다(HashMap은 삭제 표시 정리로 보장하지 않는다). `Capacity()`는 그 보장이 아니다(삭제가 섞이면 Count() < Capacity()여도 성장할 수 있다).
+- 같음은 `operator==`(순서 포함, 값은 `Equal<V>`)와 `SequenceEquals(other, valueEqual)`이다. 리플렉션의 byte 같음(7.2절)은 B9f2가 codec으로 따로 한다.
+- 해시(hash flooding 방어 — 조정자 결정 2026-11-16, B9f1 리뷰 A): 기본 해시 정책은 Core/Hash.h의 `SeededHash<K>`다. seed는 해시 계산 안에 들어간다(SipHash-2-4, 128비트 `HashSeed`). 정책 해시 뒤에 seed를 섞으면 FNV-1a의 64비트 전체 충돌이 그대로 남으므로 그 방식은 쓰지 않는다. 기본 seed는 `ProcessHashSeed()`(프로세스마다 OS 난수 한 번)이고, 시험·결정적 재현은 `SeededHash<K>(HashSeed{...})`를 넘긴다. 순서가 해시와 무관하므로 seed가 달라도 순회·직렬화·같음이 같다(결정성 비용 없음). 대상 키: 파일이 고를 수 있는 키 모두다. String·StringView(byte), Name(Hash<Name>과 같은 필드 — 번호 접미는 파일이 고르고 비교 id도 intern 순서로 어느 정도 고를 수 있다), 정수·enum·Guid도 포함한다(`MixHash`는 공개 전단사라 낮은 bit 충돌 집합을 바로 계산할 수 있다). AssetId·Digest256·SoftObjectRef·ClassRef 키의 `SeededHash` 특수화는 B9f2가 더한다. HashMap·HashSet의 기본 정책은 바꾸지 않았다(충돌 공격 미보장 계약 유지). 범위: OrderedMap 단계만 막는다. 파일 키가 먼저 지나는 JsonDocument 멤버 색인(Json.h·Json.cpp, FNV)은 B9i1이 seed 해시로 바꾸고, NamePool bucket(Name.cpp, FNV·64 bucket 고정)은 A1 전 후속 과제다(B9f1 seed 리뷰 반영, 조정자 결정 2026-11-16). 길이가 정해진 키(정수·enum·Guid·Name)는 출력이 같은 word 경로 `SipHash24Words`를 쓴다. 범용 SipHash를 Core에 둔 이유: Crypto 모듈의 키 해시(libsodium SipHash-2-4, Docs/Design/Crypto.ko.md 4절)는 Core에 의존하는 상위 모듈이라 Core 컨테이너가 쓸 수 없다. 출력은 같은 SipHash-2-4다(논문 참조 벡터로 고정).
+- HashSet의 집합 연산(`IntersectWith`·`DifferenceWith`·`TryUnion`)은 넣지 않았다(소비자가 생길 때 결과 순서 규칙과 함께). `InsertOutcome`·`FindOrAddResult`는 `Core/Containers/InsertOutcome.h`로, 주소 겹침 판정은 `Core/Containers/ContainerDetail.h`(`detail::AddressRangesOverlap`)로 옮겨 HashMap과 함께 쓴다(동작 불변). 순회 가드(`IterationGuard`·`EnterIteration`)는 클래스마다 friend 접근이 달라 아직 HashMap 것을 복제했다(후속 정리 후보).
+- 시험(Core): `OrderedMap_IterationFollowsInsertionOrderNotHashOrder`·`OrderedMap_AssignKeepsPositionAndReinsertAppends`·`OrderedMap_EraseCompactsInPlaceAndKeepsOrder`·`OrderedMap_ReserveKeepsPointersStableUntilCount`·`OrderedMap_AllocationFailureLeavesMapUnchanged`·`OrderedMap_CollisionsAndMaskAliasedHashes`·`OrderedMap_InsertEraseChurnStaysWithoutAllocation`·`OrderedMap_ElementLifetimeAcrossCompactionAndMove`·`OrderedMap_TraversalGuardsStructuralChanges`·`OrderedMap_EqualityIncludesOrder`·`OrderedMap_EraseIfKeepsSurvivorOrder`·`OrderedMap_StringKeysAndHeterogeneousLookup`·`OrderedMap_RejectsArgumentsAliasingStorage`·`OrderedMap_MatchesReferenceModel`(OrderedMapTests.cpp), `OrderedMap_ReserveAfterEraseStaysAmortized`(이동 횟수)·`OrderedMap_BulkEraseIfWithCollidingHashesKeepsLookups`·`OrderedMap_CapacityLimitIsCheckedBeforeAllocation`·`OrderedMap_NameKeysUseComparisonIdentity`·`OrderedMap_OrderAndResultsDoNotDependOnSeed`(OrderedMapKeyAndCostTests.cpp), `SeededHash_SipHashMatchesReferenceVectors`·`SeededHash_EqualKeysAgreeAndSeedEntersTheHash`·`SeededHash_MaskCollisionsUnderOneSeedScatterUnderAnother`(SeededHashTests.cpp), `OrderedSet_AddKeepsInsertionOrder`·`OrderedSet_EraseIfCompactAndClear`·`OrderedSet_AllocationFailureLeavesSetUnchanged`·`OrderedSet_EqualityIncludesOrderAndMove`(OrderedSetTests.cpp), `StlCompatibility_OrderedContainersVisitInInsertionOrder`, 음성 대조 `Native.Fatal.ordered-map-iterator-modified`·`ordered-map-foreach-erase`·`ordered-set-iterator-modified`.
 
 ### 7.2 리플렉션 Map·Set(B9f2)
 
@@ -512,6 +523,8 @@ A5 `Downscale` 플랫폼별 값(AS 451행 계약):
 ### 7.4 ObjectRefMap(B9f4)
 
 사용자 결정 U3으로 B9에 포함한다.
+
+- OrderedMap의 `Erase`·`EraseIf`는 제자리 압축으로 모든 항목 포인터를 무효화할 수 있다(7.1절). ObjectRefMap의 staged 맵·관찰자 기록·장벽 처리는 항목 포인터를 Erase 너머로 들고 있으면 안 된다(키나 순번으로 다시 찾는다).
 
 - `ObjectRefMap<K, T>`: ObjectRefArray(OR/ObjectRefArray.h:14-61)처럼 저장소를 ObjectRegistry만 바꾼다. 키 종류는 7.2절과 같다. 값은 `ObjectRef<T>` 의미(null 허용 — null 값은 간선이 아니다).
 - 변경 API(ObjectRegistry): `SetMapReference(owner, map, key, target)`(삽입 또는 교체), `EraseMapReference(owner, map, key)`, `ClearMapReferences(owner, map)`. non-null 대상은 삽입 장벽·shade(Marking 중), 대상 타입·생존·같은 Registry 검증, 관찰자 계수(편집은 Registry API, Commit·Discard는 trace — RuntimeTypeOps.h:391-397와 같은 규칙). 실패 시 내용 불변.
@@ -613,6 +626,7 @@ enum class UnsaveablePolicy : uint8 {
   - `JsonWriter::Float(float)`: Canonical 규칙의 단정도 최단 표기. 지금은 `Double`만 있어 float 필드가 넓힌 double 표기(0.1f → 0.10000000149011612)로 나간다. JSON 읽기는 `JsonValue::RawNumber()`를 `TryParseFloat`로 읽어 이중 반올림을 피한다.
   - `JsonValue::Position()`: 노드 시작 byte offset과 그로부터 계산한 line·column. 의미 오류(모르는 키·타입 불일치·범위)의 위치 보고에 쓴다.
   - Core StringSplit에 escape 인식 분해 옵션(`\,`·`\;`·`\:`). A2 명령행 파서와 공유한다.
+  - JsonDocument 멤버 색인(Json.h·Json.cpp의 FNV `HashKeyBytes`)을 seed 해시(Core/Hash.h `SipHash24`·`SeededHash` 계열)로 바꾼다. 파일 키가 OrderedMap(7.1절)보다 먼저 이 색인을 지나므로 hash flooding 방어가 여기서도 필요하다(B9f1 seed 리뷰).
 - **용도(`TextUse`)** — 기본 제외 플래그를 고른다. UE `ShouldPort`(PR:1161-1182)와 JsonObjectConverter(JsonObjectConverter.cpp:404-410)를 따른다.
 
 | 용도 | 출력 제외 | 입력 제외 | 쓰는 곳 | UE 대응 |
@@ -846,14 +860,14 @@ public:
 | B9d1 | WeakRef PROPERTY·Array 원소·문맥 weak 참조·정책별 처리(Include 지연 덮어쓰기)·hook `weak` | B9a1, A0-Oe | L |
 | B9d2 | ClassRef·타입 도구 이름(TypeSchema·지정자·TypeRegistry 색인)·`unknownClass` 정책·Array 원소 | B9a1 | M |
 | B9e | Optional·`ObjectAllocator()` | B9a3(B9c2) | M |
-| B9f1 | Core OrderedMap·OrderedSet | — | M |
+| B9f1 | Core OrderedMap·OrderedSet(+ `SeededHash`) | — | L |
 | B9f2 | Map·Set 종류·codec·`FieldSchema.key`·키 대상 칸·진단 경로 frame 일반화 | B9f1, B9c2, B9d1, B9d2 | L |
 | B9f3 | 경로 key 단계(`PathSelector`·`PathKey`)·Map·Set 경로 연산 | B9f2 | M |
 | B9f4 | ObjectRefMap(Registry API·staged·Trace·관찰자) | B9f3 | L |
 | B9g | 정적 배열·NATIVE 형질 배열 특수화·성질 표 대조 시험 | B9a3(원소 종류는 c·d 뒤) | M |
 | B9h1 | 필드 플래그 4종·`includeFlags`(멤버마다)·Required 조합 거부·Transform 미러 멤버 SaveGame | B9a1, B9b2 | S |
 | B9h2 | 클래스 Transient·Deprecated(저장 정책 `unsaveable`·로드 진단·RMC2209)·Within(`OuterSummary`·정체성 규칙)·ClassRef 쓰기의 Deprecated 거부와 decode 진단 | B9a1, B9d1, B9d2, A0-Oe | L |
-| B9i1 | Core `JsonWriter::Float`·`JsonValue::Position`·StringSplit escape 옵션 | — | S |
+| B9i1 | Core `JsonWriter::Float`·`JsonValue::Position`·StringSplit escape 옵션·JsonDocument 멤버 색인 seed 해시(`SeededHash` — 7.1절) | — | S |
 | B9i2 | B6 확장: 객체 변경 표지·묶음 게시 구간(대상 재확인·관찰자 묶음 예약)·준비 단위 셋·대상 고정(ObjectRuntime 시험으로 원자성 고정) | B9f4 | M |
 | B9i3 | ReflectionText 모듈·용도·명령행 표기·대입 묶음 API·resolver·진단 | B9a–B9h, B9i1, B9i2 | L |
 | B9i4 | JSON export·import(객체·staged·struct 값, mapMerge) | B9i3 | L |

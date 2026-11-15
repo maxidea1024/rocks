@@ -12,6 +12,8 @@ int RunLoggerFailureProbe() noexcept;
 int RunProcessProbe(int argc, char** argv) noexcept;
 int RunHashTraversalNegativeControl(bool useSet, uint32 operation) noexcept;
 int RunHashOperationsNegativeControl(uint32 operation) noexcept;
+int RunOrderedMapNegativeControl(uint32 operation) noexcept;
+int RunOrderedSetNegativeControl() noexcept;
 int RunStackAllocatorNegativeControl(uint32 operation) noexcept;
 int RunMemoryAllocatorNegativeControl(uint32 operation) noexcept;
 int RunBinnedAllocatorNegativeControl(uint32 operation) noexcept;
@@ -229,6 +231,12 @@ int main(int argc, char** argv) {
                                          : strcmp(control, "hash-map-factory-clear") == 0 ? 2u
                                                                                           : 3u;
                 return test::RunHashOperationsNegativeControl(operation);
+            } else if (strcmp(control, "ordered-map-iterator-modified") == 0) {
+                return test::RunOrderedMapNegativeControl(0);
+            } else if (strcmp(control, "ordered-map-foreach-erase") == 0) {
+                return test::RunOrderedMapNegativeControl(1);
+            } else if (strcmp(control, "ordered-set-iterator-modified") == 0) {
+                return test::RunOrderedSetNegativeControl();
             } else if (strcmp(control, "allocator-arena-live") == 0 ||
                        strcmp(control, "allocator-pool-live") == 0 ||
                        strcmp(control, "allocator-budget-live") == 0) {
