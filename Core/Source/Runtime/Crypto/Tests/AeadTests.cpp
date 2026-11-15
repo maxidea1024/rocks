@@ -273,10 +273,9 @@ TEST(CryptoAeadInfo) {
         CHECK(info.Value().available == !info.Value().implementation.IsEmpty());
     }
 
-    // ChaCha20 계열은 모든 기기에서 쓸 수 있고 AES-128-GCM은 AES 경량 계층 전까지 없다.
+    // ChaCha20 계열은 모든 기기에서 쓸 수 있다.
     CHECK(IsAvailable(AeadAlgorithm::XChaCha20Poly1305));
     CHECK(IsAvailable(AeadAlgorithm::ChaCha20Poly1305Ietf));
-    CHECK(!IsAvailable(AeadAlgorithm::Aes128Gcm));
     CHECK(TryGetAeadInfo(AeadAlgorithm::XChaCha20Poly1305).Value().implementation ==
           StringView("libsodium"));
     CHECK(TryGetAeadInfo(AeadAlgorithm::ChaCha20Poly1305Ietf).Value().implementation ==
@@ -303,6 +302,14 @@ TEST(CryptoAeadInfo) {
         if (hardware) {
             CHECK(info.implementation == hardwareName);
         }
+    }
+
+    // AES-128-GCM은 같은 HW 조건의 AES 경량 계층이다(이름은 커널 표의 것).
+    const AeadInfo aes128 = TryGetAeadInfo(AeadAlgorithm::Aes128Gcm).Value();
+    CHECK(aes128.available == hardware);
+    if (hardware) {
+        CHECK(aes128.implementation ==
+              (IsX64 ? StringView("rocks-aes/x64") : StringView("rocks-aes/arm64")));
     }
 
     CHECK(GetPreferredAead() == AeadAlgorithm::XChaCha20Poly1305);
@@ -651,11 +658,12 @@ TEST(CryptoAeadRejectsMisuse) {
     CHECK(TrySeal(generated.Value(), Span<const uint8>(), message, Span<uint8>(buffer)).Error() ==
           ErrorCode::StaleHandle);
 
-    // 알고리즘·키 길이 검사다.
-    CHECK(AeadKey::TryGenerate(AeadAlgorithm::Aes128Gcm).Error() == ErrorCode::Unsupported);
+    // 알고리즘·키 길이 검사다. AES 키는 HW가 없으면 길이와 관계없이 Unsupported다(알고리즘 먼저).
+    const bool aes = IsAvailable(AeadAlgorithm::Aes128Gcm);
+    CHECK(AeadKey::TryGenerate(AeadAlgorithm::Aes128Gcm).IsOk() == aes);
     CHECK(
-        AeadKey::TryImport(AeadAlgorithm::Aes128Gcm, Span<const uint8>(buffer).Left(16)).Error() ==
-        ErrorCode::Unsupported);
+        AeadKey::TryImport(AeadAlgorithm::Aes128Gcm, Span<const uint8>(buffer).Left(32)).Error() ==
+        (aes ? ErrorCode::InvalidArgument : ErrorCode::Unsupported));
     CHECK(AeadKey::TryGenerate(static_cast<AeadAlgorithm>(0)).Error() ==
           ErrorCode::InvalidArgument);
     CHECK(AeadKey::TryImport(static_cast<AeadAlgorithm>(9), Span<const uint8>(buffer).Left(32))
@@ -855,6 +863,7 @@ TEST(CryptoAeadKeyDerivation) {
          "be8ecf7406501146f27d22de1841fcf58299720bec4715f6089eab22a68a8ba3"},
         {AeadAlgorithm::Aes256Gcm,
          "65b4f9b8693786bc4a584b1ee4f13d1002d7af107c3980f6dd036c2ffcc53d1c"},
+        {AeadAlgorithm::Aes128Gcm, "9cd99ee0484602a85441e7c70d211204"},
         {AeadAlgorithm::Aegis256,
          "b189ca935675849c7206677e561138bf4a4a028a8aa24f85e59dac387f2cbe83"},
         {AeadAlgorithm::Aegis128L, "56b4b4a6d915e374e3a3150cfbc65417"},
@@ -892,10 +901,13 @@ TEST(CryptoAeadKeyDerivation) {
     // 알고리즘 검사가 빈 master보다 먼저다.
     CHECK(TryDeriveAeadKey(KdfKey(), 7, TestContext, AeadAlgorithm::XChaCha20Poly1305).Error() ==
           ErrorCode::StaleHandle);
-    CHECK(TryDeriveAeadKey(KdfKey(), 7, TestContext, AeadAlgorithm::Aes128Gcm).Error() ==
-          ErrorCode::Unsupported);
-    CHECK(TryDeriveAeadKey(master, 7, TestContext, AeadAlgorithm::Aes128Gcm).Error() ==
-          ErrorCode::Unsupported);
+    CHECK(TryDeriveAeadKey(KdfKey(), 7, TestContext, static_cast<AeadAlgorithm>(0)).Error() ==
+          ErrorCode::InvalidArgument);
+    if (!IsAvailable(AeadAlgorithm::Aes128Gcm)) {
+        CHECK(TryDeriveAeadKey(KdfKey(), 7, TestContext, AeadAlgorithm::Aes128Gcm).Error() ==
+              ErrorCode::Unsupported);
+    }
+
     CHECK(TryDeriveAeadKey(master, 7, TestContext, static_cast<AeadAlgorithm>(0)).Error() ==
           ErrorCode::InvalidArgument);
 }
@@ -1501,9 +1513,9 @@ TEST(CryptoAeadSequenceDerive) {
                        Span<uint8>(opened))
               .Error() == ErrorCode::AuthenticationFailed);
 
-    // 오류: 알고리즘 검사가 먼저이고 빈 master는 StaleHandle이다.
+    // 오류: 알고리즘 검사가 먼저이고 빈 master는 StaleHandle이다. AES-128-GCM은 HW가 있으면 된다.
     CHECK(hazmat::AeadSequenceSealer::TryDerive(master, 7, TestContext, AeadAlgorithm::Aes128Gcm)
-              .Error() == ErrorCode::Unsupported);
+              .IsOk() == IsAvailable(AeadAlgorithm::Aes128Gcm));
     CHECK(
         hazmat::AeadSequenceOpener::TryDerive(master, 7, TestContext, static_cast<AeadAlgorithm>(0))
             .Error() == ErrorCode::InvalidArgument);

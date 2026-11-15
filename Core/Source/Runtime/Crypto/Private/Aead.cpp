@@ -5,6 +5,8 @@
 #include <Crypto/Random.h>
 
 #include "AdapterCommon.h"
+#include "Aes/AesKernels.h"
+#include "Aes/AesModesInternal.h"
 #include "AeadInternal.h"
 #include "KdfInternal.h"
 #include "KeyAccess.h"
@@ -46,7 +48,9 @@ static_assert(MaxAes256GcmMessageBytes <= crypto_aead_aes256gcm_MESSAGEBYTES_MAX
 constexpr uint64 MaxGcmBlocksPerKey = (uint64{1} << 36) - 1;
 
 // GCM nonce는 96 bit만 받는다. 표준은 다른 길이도 허용하므로 그 밖은 Unsupported다(5.2·11절).
-constexpr usize GcmNonceBytes = 12;
+constexpr usize GcmNonceBytes = detail::AesGcmNonceBytes;
+static_assert(GcmNonceBytes == crypto_aead_aes256gcm_NPUBBYTES &&
+              detail::AesGcmTagBytes == crypto_aead_aes256gcm_ABYTES);
 
 static_assert(alignof(crypto_aead_aes256gcm_state) <= 64);
 static_assert(sizeof(crypto_aead_aes256gcm_state) <= detail::SecretSlotMaxBytes);
@@ -91,8 +95,9 @@ Traits TraitsOf(AeadAlgorithm algorithm) noexcept {
                 false,
                 MaxGcmBlocksPerKey};
     case AeadAlgorithm::Aes128Gcm:
-        return {16,    GcmNonceBytes,     16, crypto_aead_aes256gcm_MESSAGEBYTES_MAX,
-                false, MaxGcmBlocksPerKey};
+        return {
+            16,    detail::AesGcmNonceBytes, detail::AesGcmTagBytes, detail::AesGcmMaxMessageBytes,
+            false, MaxGcmBlocksPerKey};
     case AeadAlgorithm::Aegis256:
         return {crypto_aead_aegis256_KEYBYTES,
                 crypto_aead_aegis256_NPUBBYTES,
@@ -112,47 +117,42 @@ Traits TraitsOf(AeadAlgorithm algorithm) noexcept {
     return {};
 }
 
-// AES-256-GCM·AEGIS의 HW 조건이다. 두 알고리즘이 같은 조건을 쓴다(6.1절 "HW 조건은 하나다").
-// - x86-64: AES-NI·PCLMULQDQ·AVX. ARM64: AES·PMULL. PlatformBase CpuFeatures와 libsodium 실행
-//   감지가 모두 참이어야 한다(6.2절). libsodium은 ARM에서 AES bit 하나만 보므로 PMULL은
-//   CpuFeatures로 본다. PMULL 없이 AES-256-GCM 키를 만들면 beforenm이 PMULL 명령에서 죽는다.
-// - crypto_aead_aes256gcm_is_available()은 libsodium이 HW 구현으로 빌드되었을 때만 참이다.
-//   ARM에서는 HAVE_ARMCRYPTO 빌드 정의를 뜻하고, 이는 AEGIS armcrypto 구현의 컴파일 조건과
-//   같다(ARM의 실행 감지는 빌드 정의와 무관해서 따로 확인해야 한다). x86의 실행 감지 값은 빌드
-//   정의가 있을 때만 켜진다.
-// 조건이 아니면 libsodium soft 경로로 내려가지 않고 Unsupported다(결정 D3).
-bool HasAesHardware() noexcept {
-    const platform::CpuFeatures& cpu = platform::QueryCpuFeatures();
-    const CryptoRuntimeInfo& info = GetCryptoRuntimeInfo();
-    bool hardware = false;
-    if constexpr (IsX64) {
-        hardware = cpu.aes && cpu.pclmulqdq && cpu.avx && info.sodiumAesni && info.sodiumPclmul &&
-                   info.sodiumAvx;
-    } else {
-        hardware = cpu.armAes && cpu.armPmull && info.sodiumArmCrypto;
-    }
-
-    return hardware && crypto_aead_aes256gcm_is_available() != 0;
+// libsodium AES 경로(AES-256-GCM·AEGIS)의 HW 판정을 이 프로세스의 감지 결과로 부른다. 판정
+// 규칙은 detail::HasAesHardware(AeadInternal.h)에 있다.
+bool DetectAesHardware() noexcept {
+    return detail::HasAesHardware(platform::QueryCpuFeatures(), GetCryptoRuntimeInfo(),
+                                  crypto_aead_aes256gcm_is_available() != 0);
 }
 
 StringView HardwareName() noexcept {
     return IsX64 ? StringView("libsodium/aesni") : StringView("libsodium/armcrypto");
 }
 
+// AES 계열(AES-GCM 두 가지, AEGIS)은 한 조건(detail::IsAesAvailable)으로 함께 쓰거나 함께
+// Unsupported다. AEGIS는 경량 계층을 쓰지 않지만 같은 기기에서 AES 일부만 되는 상태를 두지 않는다.
 bool IsAvailable(AeadAlgorithm algorithm) noexcept {
     switch (algorithm) {
     case AeadAlgorithm::XChaCha20Poly1305:
     case AeadAlgorithm::ChaCha20Poly1305Ietf:
         return true;
     case AeadAlgorithm::Aes256Gcm:
+    case AeadAlgorithm::Aes128Gcm:
     case AeadAlgorithm::Aegis256:
     case AeadAlgorithm::Aegis128L:
-        return HasAesHardware();
-    case AeadAlgorithm::Aes128Gcm:
-        return false;
+        return detail::IsAesAvailable();
     }
 
     return false;
+}
+
+// AES-GCM 키의 경량 계층 스케줄이다. AES-GCM 키는 늘 스케줄을 가진다(TryMakeKey).
+const detail::AesSchedule& ScheduleOf(const AeadKey& key) noexcept {
+    const void* schedule = detail::KeyAccess::Schedule(key);
+    if (schedule == nullptr) {
+        platform::Fatal("Crypto: AES-GCM key has no AES schedule");
+    }
+
+    return *static_cast<const detail::AesSchedule*>(schedule);
 }
 
 // 키·nonce·평문 길이와 겹침은 호출 전에 검사한다. libsodium 실패는 어댑터 결함이다.
@@ -199,10 +199,20 @@ void SealDetachedRaw(const AeadKey& key, Span<const uint8> nonce, Span<const uin
                               "Crypto: crypto_aead_aegis128l_encrypt_detached failed");
         return;
     case AeadAlgorithm::Aes128Gcm:
-        break;
+        detail::AesGcmSealDetached(detail::GetAesKernels(), ScheduleOf(key), nonce, associatedData,
+                                   plaintext, ciphertext, tag);
+        return;
     }
 
     platform::Fatal("Crypto: AEAD seal reached an unavailable algorithm");
+}
+
+// AD가 알고리즘 상한을 넘는가. 경량 계층 AES-128-GCM은 GCM 상한(2^61 - 1 byte)을 넘는 AD를 계약
+// 위반(Fatal)으로 보므로 어댑터가 먼저 거른다. 그런 길이의 Span은 실제 메모리를 가리킬 수 없지만
+// 멀티파트(AesGcmEncryptor)와 같은 오류를 돌려주게 한다.
+bool AssociatedDataTooLong(AeadAlgorithm algorithm, Span<const uint8> associatedData) noexcept {
+    return algorithm == AeadAlgorithm::Aes128Gcm &&
+           static_cast<uint64>(associatedData.Size()) > detail::AesGcmMaxAssociatedBytes;
 }
 
 // tag가 맞으면 true다. 실패하면 평문 출력은 호출자가 지운다.
@@ -235,7 +245,8 @@ bool OpenDetachedRaw(const AeadKey& key, Span<const uint8> nonce, Span<const uin
         return crypto_aead_aegis128l_decrypt_detached(m, nullptr, c, clen, tag.Data(), ad, adlen,
                                                       nonce.Data(), k.Data()) == 0;
     case AeadAlgorithm::Aes128Gcm:
-        break;
+        return detail::AesGcmOpenDetached(detail::GetAesKernels(), ScheduleOf(key), nonce,
+                                          associatedData, ciphertext, tag, plaintext);
     }
 
     platform::Fatal("Crypto: AEAD open reached an unavailable algorithm");
@@ -256,14 +267,26 @@ Result<void> CheckUsable(AeadAlgorithm algorithm) noexcept {
     return Result<void>::Success();
 }
 
-// 키 저장소 상태(AES-256-GCM 키 확장)를 만들어 키를 완성한다. 알고리즘·key 길이는 호출자가
-// 검사했다.
+// 키 저장소 상태(AES-GCM 경량 계층 스케줄, AES-256-GCM libsodium 키 확장)를 만들어 키를 완성한다.
+// 알고리즘·key 길이는 호출자가 검사했다. 실패하면 만든 슬롯을 돌려준다.
 Result<AeadKey> TryMakeKey(AeadAlgorithm algorithm, SecretBytes&& key) noexcept {
+    const bool gcm = algorithm == AeadAlgorithm::Aes256Gcm || algorithm == AeadAlgorithm::Aes128Gcm;
+    if (!gcm) {
+        return Result<AeadKey>::Success(
+            detail::KeyAccess::Make<AeadKey>(algorithm, Move(key), nullptr, nullptr));
+    }
+
+    auto schedule = detail::TryCreateAesSchedule(detail::GetAesKernels(), key.View());
+    if (!schedule) {
+        return Result<AeadKey>::Failure(schedule.Error());
+    }
+
     void* state = nullptr;
     if (algorithm == AeadAlgorithm::Aes256Gcm) {
         auto slot = detail::TryAllocateSecretSlot(sizeof(crypto_aead_aes256gcm_state),
                                                   alignof(crypto_aead_aes256gcm_state));
         if (!slot) {
+            detail::DestroyAesSchedule(schedule.Value());
             return Result<AeadKey>::Failure(slot.Error());
         }
 
@@ -274,7 +297,8 @@ Result<AeadKey> TryMakeKey(AeadAlgorithm algorithm, SecretBytes&& key) noexcept 
             "Crypto: crypto_aead_aes256gcm_beforenm failed");
     }
 
-    return Result<AeadKey>::Success(detail::KeyAccess::Make<AeadKey>(algorithm, Move(key), state));
+    return Result<AeadKey>::Success(
+        detail::KeyAccess::Make<AeadKey>(algorithm, Move(key), state, schedule.Value()));
 }
 
 // 열기 쪽 겹침 검사다. plaintext가 sealed와 같은 주소에서 시작하는 제자리만 허용하고, nonce·AD와
@@ -306,6 +330,23 @@ Result<void> CheckHazmat(const AeadKey& key, Span<const uint8> nonce) noexcept {
 } // namespace
 
 // ---- 모듈 내부 진입점 ----
+
+bool detail::HasAesHardware(const platform::CpuFeatures& cpu, const CryptoRuntimeInfo& sodium,
+                            bool sodiumAesGcmAvailable) noexcept {
+    bool sodiumHardware = false;
+    if constexpr (IsX64) {
+        sodiumHardware = sodium.sodiumAesni && sodium.sodiumPclmul && sodium.sodiumAvx;
+    } else {
+        sodiumHardware = sodium.sodiumArmCrypto;
+    }
+
+    return HasAesInstructions(cpu) && sodiumHardware && sodiumAesGcmAvailable;
+}
+
+bool detail::IsAesAvailable() noexcept {
+    detail::EnsureSodium();
+    return DetectAesHardware() && GetAesKernels().IsComplete();
+}
 
 Result<void> detail::CheckAeadUsable(AeadAlgorithm algorithm) noexcept {
     return CheckUsable(algorithm);
@@ -341,9 +382,14 @@ Result<AeadInfo> TryGetAeadInfo(AeadAlgorithm algorithm) noexcept {
     info.maxBlocksPerKey = traits.maxBlocksPerKey;
     info.available = IsAvailable(algorithm);
     if (info.available) {
-        const bool hardware = algorithm != AeadAlgorithm::XChaCha20Poly1305 &&
-                              algorithm != AeadAlgorithm::ChaCha20Poly1305Ietf;
-        info.implementation = hardware ? HardwareName() : StringView("libsodium");
+        // AES-128-GCM만 경량 계층이다. AES-256-GCM 일회성은 libsodium이다(결정 D4).
+        if (algorithm == AeadAlgorithm::Aes128Gcm) {
+            info.implementation = detail::GetAesKernels().name;
+        } else {
+            const bool hardware = algorithm != AeadAlgorithm::XChaCha20Poly1305 &&
+                                  algorithm != AeadAlgorithm::ChaCha20Poly1305Ietf;
+            info.implementation = hardware ? HardwareName() : StringView("libsodium");
+        }
     }
 
     return Result<AeadInfo>::Success(info);
@@ -374,8 +420,10 @@ AeadKey::~AeadKey() noexcept {
 }
 
 AeadKey::AeadKey(AeadKey&& other) noexcept
-    : algorithm_(other.algorithm_), key_(Move(other.key_)), state_(other.state_) {
+    : algorithm_(other.algorithm_), key_(Move(other.key_)), state_(other.state_),
+      schedule_(other.schedule_) {
     other.state_ = nullptr;
+    other.schedule_ = nullptr;
 }
 
 AeadKey& AeadKey::operator=(AeadKey&& other) noexcept {
@@ -384,7 +432,9 @@ AeadKey& AeadKey::operator=(AeadKey&& other) noexcept {
         algorithm_ = other.algorithm_;
         key_ = Move(other.key_);
         state_ = other.state_;
+        schedule_ = other.schedule_;
         other.state_ = nullptr;
+        other.schedule_ = nullptr;
     }
 
     return *this;
@@ -398,6 +448,8 @@ void AeadKey::Release() noexcept {
         state_ = nullptr;
     }
 
+    detail::DestroyAesSchedule(static_cast<detail::AesSchedule*>(schedule_));
+    schedule_ = nullptr;
     key_.Reset();
 }
 
@@ -464,7 +516,8 @@ Result<usize> TrySeal(const AeadKey& key, Span<const uint8> associatedData,
         return Result<usize>::Failure(ErrorCode::Unsupported);
     }
 
-    if (plaintext.Size() > traits.maxMessageBytes) {
+    if (plaintext.Size() > traits.maxMessageBytes ||
+        AssociatedDataTooLong(key.Algorithm(), associatedData)) {
         return Result<usize>::Failure(ErrorCode::CapacityExceeded);
     }
 
@@ -512,7 +565,8 @@ Result<usize> TryOpen(const AeadKey& key, Span<const uint8> associatedData,
     }
 
     const usize overhead = traits.nonceBytes + traits.tagBytes;
-    if (sealed.Size() < overhead || sealed.Size() - overhead > traits.maxMessageBytes) {
+    if (sealed.Size() < overhead || sealed.Size() - overhead > traits.maxMessageBytes ||
+        AssociatedDataTooLong(key.Algorithm(), associatedData)) {
         SecureZero(plaintext);
         return Result<usize>::Failure(ErrorCode::AuthenticationFailed);
     }
@@ -561,7 +615,8 @@ Result<usize> CheckSealWithNonce(const AeadKey& key, Span<const uint8> nonce,
     }
 
     const Traits traits = TraitsOf(key.Algorithm());
-    if (plaintext.Size() > traits.maxMessageBytes) {
+    if (plaintext.Size() > traits.maxMessageBytes ||
+        AssociatedDataTooLong(key.Algorithm(), associatedData)) {
         return Result<usize>::Failure(ErrorCode::CapacityExceeded);
     }
 
@@ -616,7 +671,8 @@ Result<usize> hazmat::TryOpenWithNonce(const AeadKey& key, Span<const uint8> non
 
     const Traits traits = TraitsOf(key.Algorithm());
     if (sealed.Size() < traits.tagBytes ||
-        sealed.Size() - traits.tagBytes > traits.maxMessageBytes) {
+        sealed.Size() - traits.tagBytes > traits.maxMessageBytes ||
+        AssociatedDataTooLong(key.Algorithm(), associatedData)) {
         SecureZero(plaintext);
         return Result<usize>::Failure(ErrorCode::AuthenticationFailed);
     }
@@ -644,7 +700,8 @@ Result<void> hazmat::TrySealDetached(const AeadKey& key, Span<const uint8> nonce
     }
 
     const Traits traits = TraitsOf(key.Algorithm());
-    if (plaintext.Size() > traits.maxMessageBytes) {
+    if (plaintext.Size() > traits.maxMessageBytes ||
+        AssociatedDataTooLong(key.Algorithm(), associatedData)) {
         return Result<void>::Failure(ErrorCode::CapacityExceeded);
     }
 
@@ -684,7 +741,8 @@ Result<void> hazmat::TryOpenDetached(const AeadKey& key, Span<const uint8> nonce
     // tag와 암호문 길이는 메시지에서 온 값이다. tag 길이가 틀리면 잘린 tag로 보고
     // AuthenticationFailed다(결정 D5).
     const Traits traits = TraitsOf(key.Algorithm());
-    if (tag.Size() != traits.tagBytes || ciphertext.Size() > traits.maxMessageBytes) {
+    if (tag.Size() != traits.tagBytes || ciphertext.Size() > traits.maxMessageBytes ||
+        AssociatedDataTooLong(key.Algorithm(), associatedData)) {
         SecureZero(plaintext);
         return Result<void>::Failure(ErrorCode::AuthenticationFailed);
     }

@@ -85,10 +85,11 @@ Core/Source/ThirdParty/
   Wycheproof/   ThirdParty.json(kind: data)  wycheproof-<commit>/testvectors_v1/*.json
 Core/Source/Runtime/Crypto/
   Crypto.Build.cs
-  Public/Crypto/   Crypto.h  Bytes.h  Random.h  Hash.h  Mac.h  Kdf.h  PasswordHash.h  Aead.h
+  Public/Crypto/   Crypto.h  Bytes.h  Random.h  Hash.h  Mac.h  Kdf.h  PasswordHash.h  Aead.h  AesModes.h(hazmat AES 모드)
                    SecretStream.h  SegmentStream.h  Signature.h  KeyExchange.h  Kem.h  Secret.h  KeyRing.h  AsyncCrypto.h
-                   Hazmat/{AeadNonce.h, AesModes.h, AesGcmMultipart.h, StreamCipher.h, Poly1305.h}
-  Private/         Sodium/(libsodium 어댑터)  Aes/{AesX64.cpp, AesArm64.cpp, AesModes.cpp}(경량 계층)
+                   Hazmat/{AeadNonce.h, StreamCipher.h, Poly1305.h}(후속)
+  Private/         Sodium/(libsodium 어댑터)  AesHazmat.cpp(AesModes.h 어댑터)
+                   Aes/{AesKernels.h, AesModesInternal.h, AesX64.cpp, AesArm64.cpp, AesModes.cpp, Derivation.json}(경량 계층)
                    Dispatch.cpp  SegmentStream.cpp  SecretArena.cpp
   Tests/
 ```
@@ -167,16 +168,16 @@ libsodium의 범용 AES는 AES-256-GCM 일회성(사전 계산 포함) 하나뿐
 
 - AES-128 키 확장과 라운드 수 매개변수(10·14). AES-128 키 확장은 libsodium ipcrypt 구현(`ipcrypt_aesni.c`·armcrypto)에 이미 있는 것을 가져온다.
 - 증분 상태: 부분 블록 keystream과 GHASH 버퍼, AAD에서 평문으로 넘어가는 단계, 길이 블록
-- CTR과 CMAC 노출. 원본 `encrypt_xor_wide`는 GCM의 inc32(32 bit lane 덧셈)를 전제로 하므로, CTR의 32·64·128 bit 카운터 폭과 carry 전파는 새로 쓰는 코드다. 카운터 폭은 매개변수로 두고(기본 128 bit), wrap은 `CapacityExceeded`다. CMAC 서브키 doubling은 L = E_K(0)이 비밀이므로 분기 없는 mask로 한다.
+- CTR과 CMAC 노출. 원본 `encrypt_xor_wide`·`incr_counters`는 byte 역순 카운터에 64 bit lane 덧셈(`ADD64x2`)을 쓴다. 메시지 블록 한도(2^32 − 2) 안에서만 inc32와 같으므로, 경량 계층은 카운터를 이어 받는 멀티파트를 위해 진짜 32 bit lane 덧셈(inc32)으로 바꾸고, CTR의 64 bit lane·128 bit(아래 lane 올림을 비교 mask로 위 lane에 더한다) 증가와 폭 선택은 새로 쓴 코드다. 카운터 폭은 매개변수로 두고(기본 128 bit), wrap은 쓰기 전에 `CapacityExceeded`다. CMAC 서브키 doubling은 L = E_K(0)이 비밀이므로 분기 없는 mask로 한다.
 
 AES-256-GCM 일회성은 libsodium 원본 함수를 그대로 쓴다. 같은 기기에서 원본과 경량 계층의 AES-256-GCM을 대조하는 차등 시험이 GCM 파생 코드의 기준(oracle)이 된다. 다만 원본과 같은 구조라 원본에 있는 결함은 양쪽이 같이 통과하고, 원본에 없는 부분(CTR carry, CMAC, AES-128)은 기준이 되지 못한다. 그래서 시험 전용 스칼라 참조(블록 암호화 + 카운터 증가, 출하 코드 아님)를 따로 둔다(12절). 파생 파일 머리에는 출처(libsodium 1.0.22, 원본 경로)와 ISC 고지를 둔다. 원본 파일의 SHA-256을 파생 기록 파일(`Crypto/Private/Aes/Derivation.json`: 파생 파일마다 upstream 경로와 SHA-256)에 적어 두어, libsodium을 올리면서 원본이 바뀌면 정책 검사 `derived-source`가 실패하고 diff 검토를 요구하게 한다(P8). 이 검사는 upstream 경로가 manifest의 upstream 디렉터리 안에 있고 SHA-256이 맞는지, 파생 파일이 있고 출처 주석에 각 upstream 파일 이름을 적었는지, 기록에 알 수 없는 필드가 없는지 본다.
 
-**범위.** C2 단계에서 GCM(AES-128/256, 일회성·멀티파트)과 CTR을 먼저, CMAC를 이어서 만든다. CBC·KW·CCM은 역방향 라운드나 별도 형식이 필요하므로 요구가 생길 때 더한다. XTS·GCM-SIV와 96 bit가 아닌 GCM nonce는 넣지 않는다.
+**범위.** C2 단계에서 GCM(AES-128/256, 일회성·멀티파트)과 CTR을 먼저, CMAC를 이어서 만든다. CBC·KW·CCM은 역방향 라운드나 별도 형식이 필요하므로 요구가 생길 때 더한다. XTS·GCM-SIV와 96 bit가 아닌 GCM nonce는 넣지 않는다. 구현(2026-11-15): AES-128-GCM(공개 AEAD), GCM 멀티파트·CTR(`Crypto/AesModes.h`), AES-CMAC(`MacAlgorithm::AesCmac`)을 모두 넣었다(13절 C2).
 
 ### 5.3 AES 경량 계층: 구조와 빌드
 
-- **파일.** `Crypto/Private/Aes/AesX64.cpp`(AES-NI·PCLMULQDQ 커널), `AesArm64.cpp`(AESE·AESMC·PMULL 커널), `AesModes.cpp`(아키텍처와 무관한 GCM·CTR·CMAC 상태 기계)로 나눈다. 규모는 원본 줄 수로 볼 때 아키텍처별 커널 약 800–1,000줄, 상태 기계 약 300줄로 추정한다.
-- **커널 표.** 아키텍처마다 `ExpandKey`, `CtrXor`(버퍼, 병렬 블록), `GhashUpdate`(버퍼), `CbcMacUpdate`(버퍼, CMAC), `EncryptBlock`(블록 하나: J0·CMAC 서브키 L·마지막 블록 같은 일회성 용도만) 다섯 함수를 두고, `CpuFeatures`로 첫 사용 때 한 번 고른다. 상태 기계(`AesModes.cpp`)는 블록마다 커널을 간접 호출하지 않는다(속성 함수는 일반 호출자로 inline되지 않는다). 고른 뒤 GCM 알려진 답 한 건으로 자가 시험하고, 불일치하면 표를 비우고 로그를 남긴다. HW 조건을 채우지 못하거나 자가 시험이 실패하면 모든 AES 호출이 `Unsupported`다.
+- **파일.** `Crypto/Private/Aes/AesX64.cpp`(AES-NI·PCLMULQDQ 커널), `AesArm64.cpp`(AESE·AESMC·PMULL 커널), `AesModes.cpp`(아키텍처와 무관한 커널 선택·자가 시험, 키 스케줄 수명, GCM 일회성·멀티파트, CTR 용량, CMAC), 내부 헤더 `AesKernels.h`(키 스케줄·커널 표)·`AesModesInternal.h`(모드 함수·상태 구조체)로 나눈다. 공개 hazmat 어댑터는 `Crypto/Private/AesHazmat.cpp`다. 구현 규모(2026-11-15)는 커널 x64 약 550줄·arm64 약 610줄, `AesModes.cpp` 약 680줄, 어댑터 `AesHazmat.cpp` 약 520줄이다. `Derivation.json`은 세 파생 파일(AesX64·AesArm64는 aesni·armcrypto와 ipcrypt 원본, AesModes는 aesni·armcrypto 원본)을 기록한다.
+- **커널 표(구현).** 아키텍처마다 `expandKey`(16·32 byte 키 → 라운드 키·H 거듭제곱), `ctrXor`(버퍼, 병렬 블록, 카운터 폭 `AesCounterWidth` Bits32·Bits64·Bits128을 버퍼마다 한 번 골라 템플릿 경로로 들어간다. 마지막 부분 블록은 keystream 앞부분만 쓰고 카운터는 그 블록만큼 올라간다. 폭 안의 wrap은 막지 않고 모드 계층이 미리 센다), `ghashUpdate`(버퍼, GCM byte 순서 누적값, 마지막 호출만 16의 배수가 아니어도 된다), `cbcMacUpdate`(블록 단위, CMAC), `encryptBlock`(블록 하나: GCM J0와 CMAC 서브키 L에만 쓴다) 다섯 함수와 구현 이름(`rocks-aes/x64`·`rocks-aes/arm64`)을 두고, `CpuFeatures`로 첫 사용 때 한 번 고른다(`GetAesKernels`). 상태 기계(`AesModes.cpp`)는 블록마다 커널을 간접 호출하지 않는다(속성 함수는 일반 호출자로 inline되지 않는다). GCM은 4032 byte(252블록, x64 7·arm64 6블록 병렬 폭의 공배수) 조각마다 CTR과 GHASH를 번갈아 부른다. 고른 뒤 자가 시험을 한다: AES-128·AES-256 각각 GCM 봉인 tag(AD 33 byte, 평문 245 byte), 같은 버퍼 제자리 열기 왕복, CBC-MAC 15블록의 알려진 답이다(Python cryptography·pycryptodome로 확인한 값). 불일치하면 표를 비우고 `StderrLogSink`에 한 줄을 남긴다. 값을 받는 `SelectAesKernels`·`CheckAesKernels`로 시험이 HW 없는 경로와 자가 시험 거부를 재현한다(11절 결정성). 공개 AES 계열(AES-128/256-GCM, AEGIS, AesModes.h, AES-CMAC)의 사용 가능 여부는 하나다(`detail::IsAesAvailable`): libsodium HW 판정(6.2절)과 이 표(HW 조건 + 자가 시험)가 모두 참이어야 하고, 아니면 모든 AES 호출이 `Unsupported`다(6.1절 "부분 AES 없음").
 - **컴파일.** 함수 단위 target을 쓴다. x86-64는 libsodium 원본과 같은 `"aes,avx,pclmul"`이다(`avx`가 SSSE3·SSE4.1을 함께 켜고 SSE 명령을 VEX로 바꾸므로 감지 조건은 `aes && pclmulqdq && avx`, avx는 OS의 YMM 상태 확인 포함). ARM64는 원본의 `"neon,crypto,aes,fuse-aes"`에서 `crypto`(SHA2까지 켠다)를 뺀 `"neon,aes,fuse-aes"`로, 감지 조건 `armAes && armPmull`과 같은 범위만 켠다. 원본은 `#pragma clang attribute push`로 파일 전체에 걸지만, Rocks 소스에서는 Base의 `ROCKS_TARGET_X64_AES`·`ROCKS_TARGET_ARM64_AES` 매크로(`Base/Compiler.h`, P7)로 함수마다 건다. 매크로는 해당 아키텍처에서만 정의하므로 커널 파일은 `#if ROCKS_ARCH_*`로 감싼다(다른 아키텍처에서 쓰면 컴파일 오류다). 속성 함수가 속성이 없는 호출자로 inline된다고 기대하지 않는다(대상 기본 CPU가 기능을 이미 포함할 때만 inline될 수 있다. 예: macOS arm64). 그래서 커널 표 함수는 블록이 아니라 버퍼 단위로 둔다. P7 probe(2026-11-15)에서 Windows clang-cl 21(`/W4 /WX`), NDK clang arm64·x86_64, macOS arm64 대상(Swift 툴체인의 upstream clang 21) 모두 이 매크로로 원본이 쓰는 intrinsics(AES·PCLMUL·PMULL·PMULL2·TBL·SSSE3 셔플)가 경고 없이 컴파일되고, 속성이 없으면 Windows·Android는 "requires target feature 'aes'"로, NDK arm64는 AES 함수 안의 SHA2 intrinsic을 "requires target feature 'sha2'"로 거부함을 확인했다(macOS arm64는 기본 CPU apple-m1이 AES·SHA2를 포함해 속성 없이도 컴파일된다). Apple clang은 같은 형식의 target 문자열을 쓰는 libsodium 원본이 macOS CI에서 컴파일되는 것으로 간접 확인한다. C2 전까지는 매크로를 쓰는 소스가 없어 CI가 컴파일하지 않으므로 이 probe가 근거다.
 - **정책 검사(P7).** 지원하지 않는 CPU에서 부르면 잘못된 명령 예외이므로, 확장 명령은 감지 뒤 고른 커널 표로만 부르는 디렉터리에 가둔다(`PolicyChecks.TargetIntrinsics`, 시험 소스 포함, 주석·리터럴 제외).
   - `target-attribute`: target 속성(`__attribute__((target(...)))`·`[[gnu::target]]`·`target_clones`·`target_version`·x86 `cpu_specific`·`cpu_dispatch`)과 `#pragma clang attribute`(내용과 관계없이)·`#pragma GCC target`, 그 `_Pragma`·`__pragma` 형태를 `Base/Compiler.h` 밖에서 직접 쓰지 않는다. 여러 줄·줄 이음에 걸친 형태도 잡는다. 허용 디렉터리 안에서도 매크로를 쓴다.
@@ -184,7 +185,7 @@ AES-256-GCM 일회성은 libsodium 원본 함수를 그대로 쓴다. 같은 기
   - `arm_neon.h` 자체는 이미 PlatformBase 공개 헤더(`NeonPlatformMath.h`·`VectorRegisterNeon.h`)가 include하므로 막지 않는다. 외부 원본은 이 검사에서 빠진다(libsodium의 target pragma는 manifest `pragmaDirectives`가 기록하고, zstd의 target 속성 매크로는 원본 SHA-256으로 고정된다).
   - lexical 검사의 한계: 매크로로 속성·이름을 조립하는 형태, inline asm 명령, 검사 대상이 아닌 확장자(.inl·.hpp)는 잡지 않는다. 의도적 우회이므로 리뷰가 맡는다.
 - **상수 시간.** AES 라운드와 carry-less 곱셈은 명령이 처리하므로 비밀에 따라 달라지는 테이블 조회가 없다. 키 확장도 x86은 `AESKEYGENASSIST`, ARM은 0 라운드 키를 준 `AESE`로 S-box를 명령에 맡긴다(원본 방식). 태그 비교는 `sodium_memcmp`다.
-- **키 객체.** AES 키를 만들 때 라운드 키와 GCM H 거듭제곱을 한 번 계산해 키 객체의 SecretArena 슬롯에 둔다. AES-256 키는 libsodium `beforenm` 상태도 이때 함께 만든다. 지연 계산하면 "생성 뒤 불변" 계약이 깨지기 때문이다. 이후 바뀌지 않으므로 여러 스레드가 공유한다.
+- **키 객체.** AES 키를 만들 때 라운드 키와 GCM H 거듭제곱을 한 번 계산해 키 객체의 SecretArena 슬롯(512 byte 등급)에 둔다. AES-256-GCM `AeadKey`는 libsodium `beforenm` 상태도 이때 함께 만들어 두 슬롯을 갖는다. 지연 계산하면 "생성 뒤 불변" 계약이 깨지기 때문이다. 이후 바뀌지 않으므로 여러 스레드가 공유한다. 구현: `AeadKey`(AES-128/256-GCM), `MacKey`(AES-CMAC), hazmat `AesKey`(CTR)가 스케줄을 품는다. 상태 객체(GCM 멀티파트, CTR 스트림, AES-CMAC `MacState`)는 키 스케줄을 자기 슬롯(1 KiB 등급)에 복사하므로 키 객체와 수명이 독립이다(키를 먼저 버려도 되고, 해제된 슬롯을 다른 키가 다시 받아 엉뚱한 키로 계산하는 일이 없다).
 - **Rocks 코드 규칙.** 파생 코드는 ThirdParty 원본(byte 보존)이 아니라 Rocks 소스다. 서식·경고 0·주석 규칙을 그대로 적용하고, 함수마다 대응하는 원본 함수 이름을 주석에 남긴다. 원본의 `#define __ARM_FEATURE_CRYPTO`·`__ARM_FEATURE_AES`(예약 식별자, PlatformBase가 `arm_neon.h`를 먼저 include하므로 효과도 없다)와 `#pragma clang attribute`는 가져오지 않고 매크로로 바꾼다.
 
 ### 5.4 시험 데이터: Wycheproof
@@ -193,7 +194,8 @@ Wycheproof는 Apache-2.0 data 라이브러리(`"kind": "data"`)로, commit을 �
 
 - C1(2026-11-15): commit `65ca494727a5`(릴리스가 없어 GitHub commit archive와 SHA-256으로 고정)의 `testvectors_v1/` 가운데 `aes_gcm`, `chacha20_poly1305`, `xchacha20_poly1305`, `hmac_sha256`·`hmac_sha512`, `hkdf_sha256`·`hkdf_sha512`, `ed25519`, `x25519`, `mlkem_768`과 LICENSE만 들인다. 시험은 파일마다 모든 사례를 세고 갈래별 개수를 고정해, 조용히 건너뛰는 사례가 생기면 실패한다.
 - AEGIS는 들이지 않는다. Wycheproof AEGIS 벡터는 128 bit tag이고 libsodium은 256 bit tag만 내므로 tag와 invalid(변조된 tag) 사례를 검증할 수 없다. 암호문 부분은 tag 길이와 무관해 valid 사례의 암호문만 비교할 수는 있지만, draft 부록 TV1–TV3(tag256)과 libsodium 표(AeadTests)가 같은 구현을 tag까지 덮으므로 들이지 않는다.
-- AES-128-GCM 108건은 이미 들인 `aes_gcm`에 있고 C2에서 사상만 Unsupported에서 검증으로 바뀐다. 파일을 더하는 것은 CMAC(`aes_cmac`, C2)과 secretstream(C3)이다(그때 manifest `files`를 늘린다).
+- AES-128-GCM 108건은 이미 들인 `aes_gcm`에 있고 C2에서 사상이 Unsupported에서 검증으로 바뀌었다(96 bit nonce 67건 검증, 다른 nonce 41건 `Unsupported`). 파일을 더하는 것은 CMAC(`aes_cmac`, C2)과 secretstream(C3)이다(그때 manifest `files`를 늘린다).
+- C2(2026-11-15): 같은 commit archive(SHA-256 일치 확인)에서 `aes_cmac_test.json`(311건)을 들였다. 사상: 128·256 bit 키 그룹 각 102건(valid 21, 변조 tag 81)은 일회성·증분 tag와 검증 결과를 확인하고, AES-192 키 102건과 키 길이 오류 5건(0·8·64·160·320 bit)은 `MacKey::TryImport`가 `InvalidArgument`다. AES HW가 없으면 311건 모두 `Unsupported`로 센다.
 - 실행 범위: 시험은 저장소 루트 기준 상대 경로로 파일을 읽는다. Windows·macOS 시험에서 돈다. Android 기기 runner는 지금 실행 파일만 기기에 올리므로 data 라이브러리를 읽는 시험(이 시험과 Core JSON·Unicode 시험)은 기기에서 파일을 찾지 못한다. runner가 data 라이브러리 `files`를 같은 상대 경로로 올리는 것은 빌드 도구 몫으로 남긴다(그 전까지 Android 완료 조건에서 이 시험들은 제외한다).
 
 ## 6. AES 하드웨어 가속
@@ -224,7 +226,7 @@ PlatformBase `CpuFeatures`에 다음 필드를 더한다. 기존 `avx` 필드(XG
 | `armSb` | — | macOS `sysctlbyname("hw.optional.arm.FEAT_SB")`. DIT를 켠 뒤 barrier 선택에 쓴다(6.3절 DIT) |
 
 - **일치 시험.** `sodium_runtime_has_aesni`·`_pclmul`·`_avx`가 x86 필드와, `sodium_runtime_has_armcrypto`가 `armAes`와 같아야 한다(libsodium은 HWCAP의 AES bit만 보고 PMULL은 보지 않는다). 다르면 빌드 정의 누락이므로 시험이 실패한다. libsodium이 하드웨어 경로를 오류 없이 끄는 문제를 이 시험이 잡는다.
-- **실행 시점 판정.** 시험이 없는 기기(Android arm64 실기기)를 위해, libsodium 경로의 `available`은 `CpuFeatures`와 `sodium_runtime_has_*`가 모두 참일 때만 참이다. 빌드 정의가 빠져 libsodium이 AEGIS를 soft로 돌리는 기기에서 Rocks가 `available = true`를 보고하지 않게 하기 위해서다. 경량 계층은 `CpuFeatures`와 자가 시험(5.3절)으로 판정한다.
+- **실행 시점 판정.** 시험이 없는 기기(Android arm64 실기기)를 위해, libsodium 경로의 `available`은 `CpuFeatures`와 `sodium_runtime_has_*`가 모두 참일 때만 참이다. 빌드 정의가 빠져 libsodium이 AEGIS를 soft로 돌리는 기기에서 Rocks가 `available = true`를 보고하지 않게 하기 위해서다. 경량 계층 표는 `CpuFeatures`와 자가 시험(5.3절)으로 고르고, 공개 AES 계열의 `available`은 두 판정이 모두 참일 때만 참이다(5.3절 `IsAesAvailable`).
 - **구현 보고.** `TryGetAeadInfo`는 선택된 구현의 이름을 돌려준다(예: `"libsodium/aesni"`, `"rocks-aes/arm64"`). 시작 진단 로그에도 이 이름을 한 번 남긴다.
 
 ### 6.3 HW AES가 없는 기기
@@ -238,6 +240,19 @@ ARMv8.0의 Crypto Extensions는 선택 기능이어서 저가 SoC에는 없을 �
 ### 6.4 성능 gate
 
 알고리즘별로 64 B·1 KiB·64 KiB·1 MiB 입력의 처리량(cycles/byte)을 측정해 기록한다. gate는 경량 계층 AES-256-GCM 처리량과 같은 기기 libsodium AES-256-GCM 처리량의 비율이다. 같은 구조에서 파생했으므로, 크게 떨어지면 파생 과정의 회귀로 보고 고친다. 결정 D4도 이 측정으로 확정한다. 측정 전에는 수치를 약속하지 않는다. macOS arm64에서는 DIT 범위(MSR 두 번과 barrier) 비용을 64 B 측정과 따로 기록한다. 증분 API(`TryUpdate`)의 작은 조각에서 비용이 크면, 지원 여부를 캐시하는 내부 경로를 검토한다.
+
+측정 도구는 `Programs/CryptoBench`(Release, 공개 API만, 단일 스레드, AD 13 byte, 크기마다 64·128 MiB, 5·9회 중 최고값)다. 경량 계층 AES-256-GCM의 공개 경로는 멀티파트뿐이라 메시지마다 `AesGcmEncryptor` 생성(슬롯 할당 + 스케줄 복사)·`TryUpdate` 한 번·`TryFinish`로 잰다. 2026-11-15 Windows x64(i5-13600KF, clang-cl Release) 결과(MB/s, 두 번 잰 범위)는 다음과 같다. cycles/byte는 아직 재지 않았다(시간 기준 처리량만).
+
+| 크기 | libsodium AES-256-GCM | 경량 AES-256(메시지마다 생성) | 경량 AES-256(조각 이어 넣기) | 경량 AES-128 일회성 | 비율(경량/libsodium) |
+|---|---|---|---|---|---|
+| 64 B | 1,486–1,523 | 542–544 | 3,580–3,762 | 1,144–1,260 | 0.36 |
+| 1 KiB | 5,948–6,016 | 3,911–4,312 | 6,233–6,544 | 5,827–6,112 | 0.65–0.73 |
+| 64 KiB | 7,281–7,380 | 6,555–6,630 | 6,635–6,698 | 7,688–8,113 | 0.90 |
+| 1 MiB | 6,711–7,282 | 6,540–6,569 | 6,028–6,577 | 7,819–7,833 | 0.90–0.97 |
+
+- 64 KiB 이상에서 경량 계층은 libsodium의 약 0.9배다. CTR·GHASH를 4032 byte 조각으로 번갈아 부르는 구조가 원본의 블록 단위 엮기보다 조금 느린 것으로 본다. 0.8배 아래가 아니어서 융합 GCM 커널(CTR·GHASH를 한 루프에서 엮는 원본 방식)은 넣지 않았다. 필요해지면 커널 표에 융합 함수를 더한다.
+- 작은 메시지의 "메시지마다 생성"은 키 저장소 슬롯 할당과 512 byte 스케줄 복사가 지배한다(멀티파트의 고정 비용이지 GCM 계산 비용이 아니다). 조각 이어 넣기(같은 암호기에 64 B씩)는 3.6 GB/s 이상이라 증분 API의 조각당 비용은 작다(Windows는 DIT가 없어 DIT 비용은 0이다. macOS arm64 측정은 CI 몫으로 남긴다).
+- D4 확정: AES-256-GCM 일회성·세그먼트 경로는 libsodium 원본을 유지한다. 경량 계층이 같은 기기에서 동등하지 않고(0.9배), 원본이 경량 계층 GCM의 차등 기준으로 남는다.
 
 ## 7. API 원칙: Span
 
@@ -356,7 +371,7 @@ enum class AeadAlgorithm : uint8 {
     XChaCha20Poly1305 = 1,     // nonce 24, tag 16
     ChaCha20Poly1305Ietf = 2,  // nonce 12, tag 16 (RFC 8439)
     Aes256Gcm = 3,             // nonce 12, tag 16
-    Aes128Gcm = 4,             // nonce 12, tag 16 (AES 경량 계층 C2 전까지 Unsupported)
+    Aes128Gcm = 4,             // nonce 12, tag 16 (AES 경량 계층)
     Aegis256 = 5,              // nonce 32, tag 32
     Aegis128L = 6,             // nonce 16, tag 32
 };
@@ -432,7 +447,7 @@ AEAD 규칙(2026-11-15 구현):
 
 - 오류 순서는 빈 키 `StaleHandle` → 알고리즘(`Unsupported`) → 호출자 버퍼(길이·겹침 `InvalidArgument`, 출력 부족 `CapacityExceeded`) → 메시지 검사다. 메시지에서 온 길이(nonce + tag보다 짧은 입력, 분리 형식의 틀린 tag 길이, 상한을 넘는 암호문)와 tag 불일치는 모두 `AuthenticationFailed`이고 plaintext 전체를 0으로 지운다(결정 D5). 호출자 버퍼 오류는 쓰기 전에 돌려준다.
 - 제자리(7절): 고수준은 `plaintext.Data() == output.Data() + nonceBytes`(봉인), `plaintext.Data() == sealed.Data() + nonceBytes`(열기)만, hazmat은 입력과 출력의 시작 주소가 같을 때만 겹침을 허용한다. AD·nonce·tag가 출력과 겹치면 `InvalidArgument`다.
-- AES-256-GCM과 AEGIS는 6.1절의 HW 조건 하나를 함께 쓴다: `CpuFeatures`(x86-64 AES-NI·PCLMULQDQ·AVX, ARM64 AES·PMULL)와 libsodium 실행 감지가 모두 참이고 `crypto_aead_aes256gcm_is_available()`이 참일 때다. 마지막 값은 ARM에서 `HAVE_ARMCRYPTO` 빌드 정의를 확인한다(ARM 실행 감지는 빌드 정의와 무관하다). 조건이 아니면 libsodium soft 경로로 내려가지 않고 `Unsupported`다(결정 D3). PMULL 없는 ARM64에서 AES-256-GCM 키를 만들면 libsodium `beforenm`이 PMULL 명령에서 죽으므로 이 확인이 필요하다(2026-11-15 리뷰 반영).
+- AES-256/128-GCM과 AEGIS는 6.1절의 HW 조건 하나를 함께 쓴다: `CpuFeatures`(x86-64 AES-NI·PCLMULQDQ·AVX, ARM64 AES·PMULL)와 libsodium 실행 감지가 모두 참이고 `crypto_aead_aes256gcm_is_available()`이 참이며, 경량 계층 커널 표가 자가 시험을 통과했을 때다(C2, 5.3절 `IsAesAvailable`). AES-128-GCM 일회성은 경량 계층이고 `implementation`은 커널 표 이름(`rocks-aes/x64`·`rocks-aes/arm64`)이다. AES-256-GCM 일회성은 libsodium이다(결정 D4, 6.4절). AES-GCM 키는 두 경로가 같은 상태를 미리 계산해 둔다(5.3절 키 객체). kx 세션 키는 32 byte 키 AEAD만 받으므로 AES-128-GCM은 기기와 관계없이 `InvalidArgument`다. 마지막 값은 ARM에서 `HAVE_ARMCRYPTO` 빌드 정의를 확인한다(ARM 실행 감지는 빌드 정의와 무관하다). 조건이 아니면 libsodium soft 경로로 내려가지 않고 `Unsupported`다(결정 D3). PMULL 없는 ARM64에서 AES-256-GCM 키를 만들면 libsodium `beforenm`이 PMULL 명령에서 죽으므로 이 확인이 필요하다(2026-11-15 리뷰 반영).
 - hazmat의 GCM nonce는 96 bit만 받고 그 밖은 `Unsupported`, 다른 알고리즘의 nonce 길이 오류는 `InvalidArgument`다.
 - AES-GCM·AEGIS 복호는 libsodium이 검증 전 평문을 호출자 버퍼에 잠시 쓴다. 실패하면 반환 전에 지우므로 "검증 전 평문을 내보내지 않는다"(2절)는 API 경계에서 성립한다. 호출 중 같은 버퍼를 다른 스레드가 읽지 않게 한다.
 - 순번 봉인기(2026-11-15 설계 리뷰 반영). 신뢰할 수 있고 순서가 보장되는 전송에서 AES-GCM·AEGIS의 HW 처리량이 필요하거나 nonce를 싣지 않아야 할 때, 또는 TLS 1.3·QUIC·HPKE형 레코드 nonce와 맞출 때 쓴다. 그 밖의 레코드 채널은 secretstream(9.4절)이 낫다.
@@ -571,12 +586,27 @@ class Ed25519phVerifier { /* TryCreate, TryUpdate, TryFinish(const Ed25519Public
 
 HKDF는 증분 extract를 두지 않는다(IKM은 공유 비밀처럼 짧다). extract·expand는 일회성이다. SHA-2·SHA-3·SHAKE 증분 객체는 같은 형태다.
 
-### 9.3 AES-GCM 멀티파트 (hazmat)
+### 9.3 AES-GCM 멀티파트와 AES 모드 (hazmat)
 
-상호운용 형식이 GCM 하나로 큰 메시지를 요구할 때만 쓴다. 구현은 경량 계층이다. 암호화는 안전하게 증분할 수 있다. 복호화는 tag를 확인하기 전에 평문이 나가므로 이름에 그 사실을 적는다.
+상호운용 형식이 GCM 하나로 큰 메시지를 요구할 때만 쓴다. 구현은 경량 계층이다. 암호화는 안전하게 증분할 수 있다. 복호화는 tag를 확인하기 전에 평문이 나가므로 이름에 그 사실을 적는다. CTR과 블록 암호 키도 같은 공개 헤더(`Crypto/AesModes.h`, 2026-11-15 구현)에 둔다. AES-CMAC은 MAC이므로 `Mac.h`의 `MacAlgorithm::AesCmac`이다.
 
 ```cpp
 namespace rocks::crypto::hazmat {
+
+// 블록 암호 모드용 키(16·32 byte). AeadKey와 섞지 않는다. 길이 오류 InvalidArgument(HW 판정보다 먼저), HW 없음 Unsupported.
+class AesKey { /* TryGenerate(keyBytes), TryImport(keyBytes), KeyBytes, IsEmpty. move-only, 스케줄만 둔다 */ };
+
+enum class AesCtrCounterWidth : uint8 { Bits32 = 32, Bits64 = 64, Bits128 = 128 };   // 카운터 블록의 끝 폭
+
+class AesCtr {   // move-only, 키 스케줄 사본·남은 keystream을 키 저장소 슬롯에 둔다
+public:
+    static Result<AesCtr> TryCreate(const AesKey& key, Span<const uint8> initialCounterBlock,   // 16 byte
+                                    AesCtrCounterWidth width = AesCtrCounterWidth::Bits128) noexcept;
+    Result<void> TryProcess(Span<const uint8> input, Span<uint8> output) noexcept;   // 같은 길이, 제자리 허용
+    void Reset() noexcept;                                                          // 지우고 빈 객체
+};
+Result<void> TryAesCtrXor(const AesKey& key, Span<const uint8> initialCounterBlock, Span<const uint8> input,
+                          Span<uint8> output, AesCtrCounterWidth width = AesCtrCounterWidth::Bits128) noexcept;
 
 class AesGcmEncryptor {
 public:
@@ -584,6 +614,7 @@ public:
     Result<void> TryUpdateAssociatedData(Span<const uint8> associatedData) noexcept;   // 평문 Update 전에만
     Result<usize> TryUpdate(Span<const uint8> plaintext, Span<uint8> ciphertext) noexcept;
     Result<void> TryFinish(Span<uint8> tag) noexcept;
+    void Reset() noexcept;
 };
 
 class AesGcmDecryptor {
@@ -592,13 +623,17 @@ public:
     Result<void> TryUpdateAssociatedData(Span<const uint8> associatedData) noexcept;
     // 나온 평문은 TryFinishVerify가 성공하기 전까지 신뢰하지 않는다. 실패하면 호출자가 지금까지 받은 평문을 버린다.
     Result<usize> TryUpdateUnverified(Span<const uint8> ciphertext, Span<uint8> plaintext) noexcept;
-    Result<void> TryFinishVerify(Span<const uint8> tag) noexcept;   // AuthenticationFailed
+    Result<void> TryFinishVerify(Span<const uint8> tag) noexcept;   // AuthenticationFailed(sticky)
+    void Reset() noexcept;
+    bool HasFailed() const noexcept;
 };
 
 } // namespace rocks::crypto::hazmat
 ```
 
-GCM의 (key, nonce)당 평문 상한은 2^36 − 32 byte(NIST SP 800-38D)다. 어댑터가 누적 길이를 세다가 넘으면 `CapacityExceeded`로 막는다. 부분 블록의 keystream과 GHASH 입력을 상태에 보관하므로 `TryUpdate`는 입력과 같은 byte 수를 바로 출력한다. nonce는 96 bit만 받는다(그 밖은 `Unsupported`).
+- GCM 멀티파트: 키는 AES-128/256-GCM `AeadKey`만 받는다(다른 알고리즘 `InvalidArgument`, 빈 키 `StaleHandle`). nonce는 96 bit만 받는다(그 밖은 `Unsupported`). 상태는 키 스케줄을 복사하므로 키 객체를 먼저 버려도 된다(5.3절). (key, nonce)당 평문 상한 16 × (2^32 − 2) byte(NIST SP 800-38D)와 AD 상한 2^61 − 1 byte를 누적 길이로 세다가 넘는 호출은 읽기 전에 `CapacityExceeded`(상태 불변)다. 부분 블록의 keystream과 GHASH 입력을 상태에 보관하므로 `TryUpdate`는 입력과 같은 byte 수를 바로 출력한다(출력이 작으면 `CapacityExceeded`, 제자리가 아닌 겹침은 `InvalidArgument`). `TryUpdate`를 한 번이라도 부른 뒤(빈 입력 포함)의 AD와 끝난 뒤의 호출은 `InvalidArgument`(상태 불변)다. `TryFinish`의 tag 길이 오류는 `InvalidArgument`이고 다시 부를 수 있다. `TryFinishVerify`는 결과와 관계없이 끝내고, 불일치·잘린 tag는 `AuthenticationFailed`이며 Reset 전까지 모든 호출이 같은 오류다. 끝·Reset·소멸 때 상태를 지운다. Reset은 같은 nonce로 다시 시작하지 않도록 빈 객체로 만든다. 일회성(AES-128은 경량 계층, AES-256은 libsodium)과 byte가 같다(차등 시험).
+- CTR: 카운터 블록의 끝 32·64·128 bit만 big-endian으로 올리고 그 폭 안에서만 올림한다. 이번 호출에 필요한 새 keystream 블록 수가 폭 안에 남은 값(2^폭 − c, 마지막 값을 쓴 뒤 0)보다 많으면 쓰기 전에 `CapacityExceeded`(상태 불변)다. 마지막 값으로 만든 블록의 남은 keystream은 계속 쓴다. 길이 불일치·제자리가 아닌 겹침·16 byte가 아닌 카운터 블록·열거값이 아닌 폭은 `InvalidArgument`다. CTR은 인증이 없으므로 MAC을 따로 붙인다.
+- AES-CMAC(RFC 4493·SP 800-38B): `MacAlgorithm::AesCmac`(값 4, tag 16 byte). 키는 16·32 byte만(AES-192와 다른 길이, hazmat 짧은 키 경로도 `InvalidArgument`), 생성·파생 기본은 32 byte다. 오류 순서는 열거값(`InvalidArgument`) → HW(`Unsupported`) → 길이(`InvalidArgument`)로 `AeadKey`와 같다. 키가 스케줄을 품고, 일회성은 키 스케줄을, `MacState`는 사본(1 KiB 슬롯)을 쓴다. 마지막 1–16 byte를 서브키를 섞을 때까지 보류한다. KeyBlob은 AES-CMAC 키를 16·32 byte로만 담는다(10.4절).
 
 ### 9.4 메시지 스트림: secretstream
 
@@ -829,7 +864,8 @@ public:
 };
 
 // 알고리즘에 묶인 키 타입은 SecretBytes를 품는다: AeadKey, MacKey, SecretStreamKey, SegmentStreamKey, BoxKeyPair, KemKeyPair,
-// Ed25519SigningKey, KxKeyPair. 공개 값(Ed25519PublicKey, KxPublicKey)은 일반 값 타입이다.
+// Ed25519SigningKey, KxKeyPair. 공개 값(Ed25519PublicKey, KxPublicKey)은 일반 값 타입이다. hazmat::AesKey(CTR)는
+// 키 byte 대신 AES 키 스케줄 슬롯만 둔다(9.3절).
 
 // 마스터 키에서 용도별 키를 타입으로 파생한다(BLAKE2b KDF). 결과가 일반 Span에 쓰이지 않는다.
 // context는 컴파일 시간 8 문자 상수(KdfContext, consteval 생성)만 받는다. 런타임·외부 입력으로 context를
@@ -909,7 +945,7 @@ KeyBlob v1(Crypto/KeyBlob.h, 2026-11-15 구현, 설계 교차검증 반영)의 �
 | 6 | 1 | algorithm | 클래스가 품는 열거값(Aead·Mac·Kem), 없으면 0(Ed25519 서명 키는 Ed25519·ph 공용이라 0). 표 밖이면 Unsupported |
 | 7 | 1 | method | 1 = Key(KdfKey KEK), 2 = Password(Argon2id v1.3, lane 1, salt 16, 출력 32). 모르면 Unsupported |
 | 8 | 16 | keyId | Nil이면 AuthenticationFailed |
-| 24 | 2 | L | (type, algorithm)의 허용 길이(AEAD 키 길이, HMAC 16–4096, BLAKE2b keyed 16–64, 32, KEM seed) |
+| 24 | 2 | L | (type, algorithm)의 허용 길이(AEAD 키 길이, HMAC 16–4096, BLAKE2b keyed 16–64, AES-CMAC 16·32, 32, KEM seed) |
 | 26 | P | 방식 매개변수 | Key: wrapKeyId 16(Nil 거부). Password: ops LE32 ‖ memKiB LE32 ‖ salt 16(P = 24, 하한 위반은 AuthenticationFailed) |
 | 26+P | 24 | nonce | OS 난수. AEAD nonce이면서 파생 transcript에도 들어간다 |
 | 50+P | 32 | commitment C | AEAD 전에 상수 시간 비교 |
@@ -969,10 +1005,10 @@ KeyBlob v1(Crypto/KeyBlob.h, 2026-11-15 구현, 설계 교차검증 반영)의 �
 
 ## 12. 검증 계획
 
-- **알려진 답.** Wycheproof 사상표에 따른 전 항목(96 bit가 아닌 GCM IV·짧은 tag는 `Unsupported`·`AuthenticationFailed`, Ed25519 "acceptable" 항목은 libsodium 결과를 기대값으로 둔다: 비정규 encoding·small-order는 거부, 혼합 차수 키는 cofactorless 식이 맞으면 수용). C1 사상표: AEAD는 valid가 봉인 byte와 열기 결과 일치, invalid는 AuthenticationFailed이고 평문 출력을 0으로 지운다. AES-GCM은 256 bit 키만 검증하고 128 bit 키는 C2 전까지 Unsupported, 192 bit 키는 열거값이 없어 센다. AES HW가 없는 기기에서는 256 bit 키 105건도 Unsupported로 센다(HW 판정이 조용히 꺼지는 회귀는 CPU 일치 시험이 잡는다). 들인 데이터에는 짧은 tag 사례가 없어(AES-GCM은 모두 16 byte, ChaCha 계열 0 byte tag는 nonce 길이 오류가 먼저다) 짧은 tag 거부는 AeadTests의 잘린 입력·tag 시험이 맡는다. ChaCha 계열의 nonce 길이 오류는 InvalidArgument다. HMAC의 잘린 tag는 전체 tag 앞부분과 비교하고, 검증 함수가 잘린 tag를 AuthenticationFailed로 거부하는지도 본다. HKDF 출력 상한 초과는 InvalidArgument다. X25519는 crypto_kx 클라이언트·서버 양쪽으로 돌려 공유 비밀 0(small-order 점 31건)을 AuthenticationFailed로, 나머지(twist 점·비정규 u 포함)를 BLAKE2b-512(q ‖ client_pk ‖ server_pk)와 비교한다. ML-KEM-768은 seed 길이 오류 InvalidArgument, 암호문 길이 오류 AuthenticationFailed, 그 밖은 공개키와 공유 비밀(암묵적 거부 포함) 일치다. RFC 8439(ChaCha20-Poly1305), XChaCha20 초안 벡터, RFC 8032(Ed25519·Ed25519ph), RFC 7748(X25519), RFC 5869(HKDF), RFC 4231(HMAC), RFC 7693(BLAKE2b), RFC 4493(CMAC), NIST SP 800-38A(CTR)·CAVP GCM, X-Wing·ML-KEM768 표준 벡터, 세그먼트 형식 golden(salt 고정).
+- **알려진 답.** Wycheproof 사상표에 따른 전 항목(96 bit가 아닌 GCM IV·짧은 tag는 `Unsupported`·`AuthenticationFailed`, Ed25519 "acceptable" 항목은 libsodium 결과를 기대값으로 둔다: 비정규 encoding·small-order는 거부, 혼합 차수 키는 cofactorless 식이 맞으면 수용). C1 사상표: AEAD는 valid가 봉인 byte와 열기 결과 일치, invalid는 AuthenticationFailed이고 평문 출력을 0으로 지운다. AES-GCM은 128·256 bit 키를 검증하고(128 bit는 C2부터, 5.4절) 192 bit 키는 열거값이 없어 센다. AES HW가 없는 기기에서는 128·256 bit 키 213건을 Unsupported로 센다(HW 판정이 조용히 꺼지는 회귀는 CPU 일치 시험이 잡는다). AES-CMAC은 5.4절 사상이다. 들인 데이터에는 짧은 tag 사례가 없어(AES-GCM은 모두 16 byte, ChaCha 계열 0 byte tag는 nonce 길이 오류가 먼저다) 짧은 tag 거부는 AeadTests의 잘린 입력·tag 시험이 맡는다. ChaCha 계열의 nonce 길이 오류는 InvalidArgument다. HMAC의 잘린 tag는 전체 tag 앞부분과 비교하고, 검증 함수가 잘린 tag를 AuthenticationFailed로 거부하는지도 본다. HKDF 출력 상한 초과는 InvalidArgument다. X25519는 crypto_kx 클라이언트·서버 양쪽으로 돌려 공유 비밀 0(small-order 점 31건)을 AuthenticationFailed로, 나머지(twist 점·비정규 u 포함)를 BLAKE2b-512(q ‖ client_pk ‖ server_pk)와 비교한다. ML-KEM-768은 seed 길이 오류 InvalidArgument, 암호문 길이 오류 AuthenticationFailed, 그 밖은 공개키와 공유 비밀(암묵적 거부 포함) 일치다. RFC 8439(ChaCha20-Poly1305), XChaCha20 초안 벡터, RFC 8032(Ed25519·Ed25519ph), RFC 7748(X25519), RFC 5869(HKDF), RFC 4231(HMAC), RFC 7693(BLAKE2b), RFC 4493(CMAC), NIST SP 800-38A(CTR)·CAVP GCM, X-Wing·ML-KEM768 표준 벡터, 세그먼트 형식 golden(salt 고정).
 - **차등.** 같은 기기에서 libsodium AES-256-GCM(원본)과 경량 계층 AES-256-GCM을 무작위 입력(길이 0–64 KiB, AD 0–1 KiB, 정렬·비정렬, 제자리)과 무작위 조각 나누기(멀티파트)로 대조한다. 원본이 파생 코드의 기준이다. x64와 arm64 결과는 같은 벡터 파일로 고정한다.
 - **스칼라 참조.** 시험 전용 스칼라 참조(블록 암호화 + 32·64·128 bit 카운터 증가)로 CTR·CMAC·AES-128을 대조한다. 시작 카운터를 2^32−k, 2^64−k, 2^128−k에 두어 carry 전파와 wrap(`CapacityExceeded`)을 확인한다. libsodium 원본에 없는 경로라 원본이 기준이 되지 못하기 때문이다.
-- **경로 범위.** GitHub CI(Windows x64 AES-NI·AVX, macOS arm64 AES·PMULL)와 로컬 Android x86_64 에뮬레이터(adb 실행)에서 돈다. 행마다 `AeadInfo.implementation`이 기대값과 같은지 단언한다. HW 없는 경로는 `CpuFeatures`를 값으로 받는 내부 판정 함수로 `Unsupported` 반환을 확인한다(11절 결정성. 지금 `HasAesHardware`는 `QueryCpuFeatures()`를 직접 읽으므로 C2에서 값을 받는 함수와 그것을 감지 결과로 부르는 공개 경로로 나눈다). Android arm64 실기기는 아직 실행 경로가 없으므로 결과에서 구분해 적는다.
+- **경로 범위.** GitHub CI(Windows x64 AES-NI·AVX, macOS arm64 AES·PMULL)와 로컬 Android x86_64 에뮬레이터(adb 실행)에서 돈다. 행마다 `AeadInfo.implementation`이 기대값과 같은지 단언한다. HW 없는 경로는 `CpuFeatures`를 값으로 받는 내부 판정 함수(`detail::HasAesHardware`, `SelectAesKernels`·`CheckAesKernels`)로 `Unsupported` 반환과 자가 시험 거부를 확인한다(11절 결정성. C2에서 값을 받는 함수와 감지 결과로 부르는 공개 경로로 나눴다). Android arm64 실기기는 아직 실행 경로가 없으므로 결과에서 구분해 적는다.
 - **일치 시험.** 라이브러리 CPU 감지 = `CpuFeatures`(6.2절).
 - **음성 시험.** misuse handler 도달 조건(secretstream 최대 길이 초과 등)이 Fatal 없이 오류로 돌아오는지, 제자리 규칙 밖 겹침의 쓰기 전 거부, tag의 bit 하나 뒤집기, 잘린 tag, 모든 세그먼트 경계와 중간에서의 절단, 세그먼트 교환·중복·삭제, 다른 스트림 세그먼트 이식, AD·헤더 bit flip(commitment 거부), last 표시 위조, 잘못된 키, Final 뒤 입력, 병렬 writer 재봉인, 크기 0·1·S−17·S−16·S−15·2(S−16), 1 byte 출력 창 역압, 최대 길이 경계(상한 −1·상한·상한 +1을 상태 조작으로 확인).
 - **소거·수명.** 소멸 뒤 슬롯이 0인지, 실패 경로에서 출력이 0인지, 이동 뒤 `StaleHandle`인지 확인한다. ASan 구성(libsodium 포함 여부는 결정 D9).
@@ -995,7 +1031,7 @@ KeyBlob v1(Crypto/KeyBlob.h, 2026-11-15 구현, 설계 교차검증 반영)의 �
 | 단계 | 내용 | 완료 조건 |
 |---|---|---|
 | C1 | 기반과 libsodium 일회성: SecretArena, 키 타입·키 직렬화, label 등록부, 난수·상수 시간(hex·base64 포함), macOS arm64 DIT, 해시·MAC·KDF·Argon2id, AEAD(ChaCha·XChaCha·AEGIS·AES-256-GCM HW), Ed25519, kx, sealed box, X-Wing·ML-KEM768 | Wycheproof·RFC 통과, CPU 일치 시험, 3개 플랫폼 경로 단언 |
-| C2 | AES 경량 계층: x64·arm64 커널, GCM(AES-128/256, 일회성·멀티파트), CTR, 이어서 CMAC | libsodium 대비 차등 시험, Wycheproof·NIST, 성능 gate(결정 D4 확정) |
+| C2 | AES 경량 계층: x64·arm64 커널, GCM(AES-128/256, 일회성·멀티파트), CTR, 이어서 CMAC | libsodium 대비 차등 시험, Wycheproof·NIST, 성능 gate(결정 D4 확정). 2026-11-15 구현: AES-128-GCM 공개, `Crypto/AesModes.h`(AesKey·AesCtr·GCM 멀티파트), AES-CMAC, Wycheproof aes_cmac, `Programs/CryptoBench`로 D4 확정(6.4절). Windows x64 Debug 시험 통과, arm64는 NDK·macOS 대상 컴파일만 확인(실행은 macOS arm64 CI) |
 | C3 | 스트리밍: 증분 객체, secretstream, 세그먼트 형식(순차·임의 접근·병렬 writer), 형식 명세 문서 | golden·음성 시험 전부, 형식 명세와 golden 일치 |
 | C4 | KeyRing·공급자, AsyncCrypto | 동기·비동기 결과 byte 일치, 취소·수명 시험 |
 | 후속 | OS 키 저장소, 서명된 청크 표, 전송 채널 보호, AES-CBC·CCM·KW(요구 시), P-256·RSA 검증 | 각자 설계 문서 |
@@ -1011,7 +1047,7 @@ KeyBlob v1(Crypto/KeyBlob.h, 2026-11-15 구현, 설계 교차검증 반영)의 �
 | D1 | AES 경량 계층의 출처 | libsodium aesni·armcrypto 구현에서 파생(ISC 고지 유지). 검증된 구조를 쓰고, 바꾸는 부분은 AES-128 키 확장·증분 상태·CTR·CMAC로 한정 | 처음부터 작성(Intel·Arm 공개 기법) / TF-PSA-Crypto에서 aes·aesni·aesce·gcm·cmac만 발췌(검증된 코드지만 1.x 비공개 내부라 업그레이드마다 맞춤 작업, Apache-2.0 의존 추가) |
 | D2 | AES HW가 있을 때 `GetPreferredAead()` | XChaCha20-Poly1305 유지(모든 기기에서 같은 결과, 무작위 nonce 안전) | AEGIS-256(최고속, 무작위 nonce 안전) / AES-256-GCM(상호운용) |
 | D3 | HW 없는 기기의 AEGIS | `Unsupported`(AES와 같은 규칙, 모든 경로 상수 시간) | libsodium soft 허용(부채널 보호 없음을 문서로 경고) |
-| D4 | AES-256-GCM 일회성·세그먼트 경로 | libsodium 원본(검증된 코드, 경량 계층의 차등 기준) | 경량 계층으로 단일화(경로 하나, 측정 결과가 같으면) |
+| D4 | AES-256-GCM 일회성·세그먼트 경로 | libsodium 원본(검증된 코드, 경량 계층의 차등 기준). 2026-11-15 확정: 같은 기기에서 경량 계층이 64 KiB 이상 약 0.9배라 동등하지 않다(6.4절) | 경량 계층으로 단일화(경로 하나, 측정 결과가 같으면) |
 | D5 | 인증 실패 오류 | `ErrorCode::AuthenticationFailed` 신설(이름 후보 `VerificationFailed`) | `InvalidArgument` 재사용(Compression과 같은 분류) |
 | D6 | 세그먼트 크기 기본값 | 64 KiB(임의 접근 단위와 병렬 분할의 균형). 프리셋 4 KiB·64 KiB·1 MiB | 1 MiB(순차 처리량 우선) |
 | D7 | SHA-256 공개 API | Core `Sha256` 하나만 둔다. libsodium SHA-256은 HMAC·HKDF 내부에서만 쓴다 | Crypto에도 SHA-256 공개(중복) |

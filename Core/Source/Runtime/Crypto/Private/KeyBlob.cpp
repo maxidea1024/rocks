@@ -7,6 +7,7 @@
 #include <Crypto/Random.h>
 
 #include "KeyAccess.h"
+#include "MacInternal.h"
 #include "PasswordInternal.h"
 
 #include <Core/Move.h>
@@ -60,7 +61,17 @@ KeyId LoadKeyId(const uint8* in) noexcept {
 struct SecretRule {
     usize minBytes;
     usize maxBytes;
+    // true면 minBytes·maxBytes 두 길이만 받는다(AES-CMAC 16·32, AES-192 없음).
+    bool endsOnly;
 };
+
+bool Allows(const SecretRule& rule, usize bytes) noexcept {
+    if (bytes < rule.minBytes || bytes > rule.maxBytes) {
+        return false;
+    }
+
+    return !rule.endsOnly || bytes == rule.minBytes || bytes == rule.maxBytes;
+}
 
 bool TryGetSecretRule(KeyBlobType type, uint8 algorithm, SecretRule& rule) noexcept {
     switch (type) {
@@ -70,18 +81,23 @@ bool TryGetSecretRule(KeyBlobType type, uint8 algorithm, SecretRule& rule) noexc
             return false;
         }
 
-        rule = {info.Value().keyBytes, info.Value().keyBytes};
+        rule = {info.Value().keyBytes, info.Value().keyBytes, false};
         return true;
     }
     case KeyBlobType::Mac:
         if (algorithm == static_cast<uint8>(MacAlgorithm::HmacSha256) ||
             algorithm == static_cast<uint8>(MacAlgorithm::HmacSha512)) {
-            rule = {MinMacKeyBytes, MaxHmacKeyBytes};
+            rule = {MinMacKeyBytes, MaxHmacKeyBytes, false};
             return true;
         }
 
         if (algorithm == static_cast<uint8>(MacAlgorithm::Blake2bKeyed)) {
-            rule = {MinMacKeyBytes, 64};
+            rule = {MinMacKeyBytes, 64, false};
+            return true;
+        }
+
+        if (algorithm == static_cast<uint8>(MacAlgorithm::AesCmac)) {
+            rule = {16, 32, true};
             return true;
         }
 
@@ -90,7 +106,7 @@ bool TryGetSecretRule(KeyBlobType type, uint8 algorithm, SecretRule& rule) noexc
     case KeyBlobType::Ed25519:
     case KeyBlobType::Kx:
     case KeyBlobType::Box:
-        rule = {32, 32};
+        rule = {32, 32, false};
         return algorithm == 0;
     case KeyBlobType::Kem: {
         auto info = TryGetKemInfo(static_cast<KemAlgorithm>(algorithm));
@@ -98,7 +114,7 @@ bool TryGetSecretRule(KeyBlobType type, uint8 algorithm, SecretRule& rule) noexc
             return false;
         }
 
-        rule = {info.Value().seedBytes, info.Value().seedBytes};
+        rule = {info.Value().seedBytes, info.Value().seedBytes, false};
         return true;
     }
     }
@@ -109,8 +125,7 @@ bool TryGetSecretRule(KeyBlobType type, uint8 algorithm, SecretRule& rule) noexc
 // secret이 (type, algorithm)에 허용된 길이인가.
 bool IsAllowedSecret(KeyBlobType type, uint8 algorithm, Span<const uint8> secret) noexcept {
     SecretRule rule{};
-    return TryGetSecretRule(type, algorithm, rule) && secret.Size() >= rule.minBytes &&
-           secret.Size() <= rule.maxBytes;
+    return TryGetSecretRule(type, algorithm, rule) && Allows(rule, secret.Size());
 }
 
 bool IsDefinedType(uint8 value) noexcept {
@@ -156,8 +171,7 @@ Result<KeyBlobInfo> TryParseHeader(Span<const uint8> blob) noexcept {
     info.method = static_cast<KeyBlobWrapMethod>(bytes[7]);
     info.keyId = LoadKeyId(bytes + 8);
     info.secretBytes = LoadLittleEndian<uint16>(bytes + 24);
-    if (info.keyId.IsNil() || info.secretBytes < rule.minBytes ||
-        info.secretBytes > rule.maxBytes) {
+    if (info.keyId.IsNil() || !Allows(rule, info.secretBytes)) {
         return Result<KeyBlobInfo>::Failure(ErrorCode::AuthenticationFailed);
     }
 
@@ -429,6 +443,12 @@ Result<UnwrappedKey<TKey>> TryUnwrapSecret(KeyBlobWrapMethod method, const KdfKe
 
     if (info.type == KeyBlobType::Aead &&
         !TryGetAeadInfo(static_cast<AeadAlgorithm>(info.algorithm)).Value().available) {
+        return Result<Unwrapped>::Failure(ErrorCode::Unsupported);
+    }
+
+    // 이 기기에서 쓸 수 없는 MAC 알고리즘(AES HW가 없는 AES-CMAC)도 KDF 전에 거부한다.
+    if (info.type == KeyBlobType::Mac &&
+        !detail::CheckMacUsable(static_cast<MacAlgorithm>(info.algorithm))) {
         return Result<Unwrapped>::Failure(ErrorCode::Unsupported);
     }
 

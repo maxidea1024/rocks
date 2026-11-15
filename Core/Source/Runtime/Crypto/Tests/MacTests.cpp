@@ -1,8 +1,10 @@
+#include <Crypto/Aead.h>
 #include <Crypto/Bytes.h>
 #include <Crypto/Mac.h>
 #include <Crypto/Secret.h>
 #include <TestSupport/Test.h>
 
+#include <stdio.h>
 #include <string.h>
 
 using namespace rocks;
@@ -459,4 +461,167 @@ TEST(CryptoMacKeyContract) {
     CHECK(
         TryMac(copy, Span<const uint8>(shared).Left(70), Span<uint8>(shared).Mid(64, 64)).Error() ==
         ErrorCode::InvalidArgument);
+}
+
+// AES-CMAC 알려진 답: RFC 4493 4절 예 1–4(AES-128)와 NIST SP 800-38B 부록 D.3 예 9–12(AES-256)다.
+// 메시지는 SP 800-38A 평문의 앞 0·16·40·64 byte다. Python cryptography 50.0.2와 pycryptodome
+// 4.4.0이 같은 값을 냄을 확인했다(2026-11-15). 빈·40 byte 메시지는 부분 블록(K2), 16·64 byte는 찬
+// 블록(K1)이고, AES-128 L은 맨 앞 bit가 0, K1·AES-256 L은 1이라 doubling의 두 갈래를 모두 지난다.
+TEST(CryptoMacAesCmacKnownAnswers) {
+    const HexBytes message("6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e51"
+                           "30c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710");
+    struct CmacCase {
+        const char* key;
+        usize length;
+        const char* tag;
+    };
+
+    const CmacCase cases[] = {
+        {"2b7e151628aed2a6abf7158809cf4f3c", 0, "bb1d6929e95937287fa37d129b756746"},
+        {"2b7e151628aed2a6abf7158809cf4f3c", 16, "070a16b46b4d4144f79bdd9dd04a287c"},
+        {"2b7e151628aed2a6abf7158809cf4f3c", 40, "dfa66747de9ae63030ca32611497c827"},
+        {"2b7e151628aed2a6abf7158809cf4f3c", 64, "51f0bebf7e3b9d92fc49741779363cfe"},
+        {"603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4", 0,
+         "028962f61b7bf89efc6b551f4667d983"},
+        {"603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4", 16,
+         "28a7023f452e8f82bd4bf28d8c37c35c"},
+        {"603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4", 40,
+         "aaf3d8f1de5640c232f5b169b9c911e6"},
+        {"603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4", 64,
+         "e1992190549f6ed5696a2c056c315410"},
+    };
+
+    // AES 조건은 Aead.h와 같다(AeadTests가 CPU 기능과의 일치를 단언한다).
+    const bool aes = TryGetAeadInfo(AeadAlgorithm::Aes128Gcm).Value().available;
+    for (const CmacCase& item : cases) {
+        const HexBytes keyBytes(item.key);
+        const HexBytes expected(item.tag);
+        auto key = MacKey::TryImport(MacAlgorithm::AesCmac, keyBytes.View());
+        if (!aes) {
+            CHECK(key.Error() == ErrorCode::Unsupported);
+            continue;
+        }
+
+        REQUIRE(key);
+        CHECK(key.Value().KeyBytes() == keyBytes.size);
+        const Span<const uint8> input = message.View().Left(item.length);
+        uint8 tag[AesCmacTagBytes];
+        REQUIRE(TryMac(key.Value(), input, Span<uint8>(tag)));
+        CHECK(ConstantTimeEquals(Span<const uint8>(tag), expected.View()));
+        CHECK(TryVerifyMac(key.Value(), input, expected.View()));
+
+        // 증분: 1 byte씩 넣어도 같다(마지막 블록 보류가 블록 경계마다 바뀐다).
+        auto state = MacState::TryCreate(key.Value());
+        REQUIRE(state);
+        CHECK(state.Value().TagBytes() == AesCmacTagBytes);
+        for (usize i = 0; i < input.Size(); ++i) {
+            REQUIRE(state.Value().TryUpdate(input.Mid(i, 1)));
+        }
+
+        REQUIRE(state.Value().TryFinish(Span<uint8>(tag)));
+        CHECK(ConstantTimeEquals(Span<const uint8>(tag), expected.View()));
+
+        // tag의 bit 하나를 바꾸면 AuthenticationFailed다.
+        uint8 tampered[AesCmacTagBytes];
+        memcpy(tampered, expected.bytes, sizeof(tampered));
+        tampered[item.length % AesCmacTagBytes] ^= 0x01;
+        CHECK(TryVerifyMac(key.Value(), input, Span<const uint8>(tampered)).Error() ==
+              ErrorCode::AuthenticationFailed);
+    }
+}
+
+TEST(CryptoMacAesCmacContract) {
+    uint8 bytes[64] = {};
+    CHECK(TryGetMacTagBytes(MacAlgorithm::AesCmac).Value() == AesCmacTagBytes);
+    if (!TryGetAeadInfo(AeadAlgorithm::Aes128Gcm).Value().available) {
+        // 알고리즘 판정이 길이보다 먼저다(AeadKey와 같은 순서).
+        CHECK(MacKey::TryGenerate(MacAlgorithm::AesCmac).Error() == ErrorCode::Unsupported);
+        CHECK(MacKey::TryImport(MacAlgorithm::AesCmac, Span<const uint8>(bytes).Left(24)).Error() ==
+              ErrorCode::Unsupported);
+        printf("  CryptoMacAesCmacContract: AES is unavailable on this CPU (Unsupported path)\n");
+        return;
+    }
+
+    // 키는 16·32 byte만 받는다(AES-192와 다른 길이는 hazmat 짧은 키 경로도 InvalidArgument).
+    const usize rejected[] = {0, 1, 15, 17, 24, 31, 33, 64};
+    for (usize length : rejected) {
+        CHECK(MacKey::TryImport(MacAlgorithm::AesCmac, Span<const uint8>(bytes).Left(length))
+                  .Error() == ErrorCode::InvalidArgument);
+        CHECK(hazmat::TryImportShortMacKey(MacAlgorithm::AesCmac,
+                                           Span<const uint8>(bytes).Left(length))
+                  .Error() == ErrorCode::InvalidArgument);
+    }
+
+    auto generated = MacKey::TryGenerate(MacAlgorithm::AesCmac);
+    REQUIRE(generated);
+    CHECK(generated.Value().KeyBytes() == 32);
+
+    // 이동한 키는 빈 키다. 증분 상태는 키 스케줄 사본을 두므로 키를 버린 뒤에도 쓴다.
+    MacKey key = Move(generated.Value());
+    CHECK(generated.Value().IsEmpty());
+    uint8 expected[AesCmacTagBytes];
+    CHECK(TryMac(generated.Value(), Span<const uint8>(bytes), Span<uint8>(expected)).Error() ==
+          ErrorCode::StaleHandle);
+    REQUIRE(TryMac(key, Span<const uint8>(bytes).Left(33), Span<uint8>(expected)));
+    auto state = MacState::TryCreate(key);
+    REQUIRE(state);
+    key = MacKey();
+    REQUIRE(state.Value().TryUpdate(Span<const uint8>(bytes).Left(17)));
+    REQUIRE(state.Value().TryUpdate(Span<const uint8>(bytes).Mid(17, 16)));
+    CHECK(state.Value().TryFinishVerify(Span<const uint8>(expected)));
+}
+
+// 일회성·조각 입력·증분 상태가 무작위 길이와 조각 나누기에서 같은 tag를 낸다(AES-128·AES-256).
+TEST(CryptoMacAesCmacChunking) {
+    if (!TryGetAeadInfo(AeadAlgorithm::Aes128Gcm).Value().available) {
+        printf("  CryptoMacAesCmacChunking: AES is unavailable on this CPU\n");
+        return;
+    }
+
+    uint8 message[300];
+    FillMessage(Span<uint8>(message));
+    uint8 keyBytes[32];
+    FillKey(Span<uint8>(keyBytes));
+    uint64 seed = 0x2545f4914f6cdd1dull ^ test::CurrentSeed();
+    auto next = [&seed](usize bound) {
+        seed = seed * 6364136223846793005ull + 1442695040888963407ull;
+        return static_cast<usize>((seed >> 33) % bound);
+    };
+
+    for (usize keyLength = 16; keyLength <= 32; keyLength += 16) {
+        const MacKey key =
+            Import(MacAlgorithm::AesCmac, Span<const uint8>(keyBytes).Left(keyLength));
+        REQUIRE(!key.IsEmpty());
+        for (usize iteration = 0; iteration < 120; ++iteration) {
+            const usize length = iteration < 50 ? iteration : next(sizeof(message) + 1);
+            const Span<const uint8> input = Span<const uint8>(message).Left(length);
+            uint8 oneShot[AesCmacTagBytes];
+            REQUIRE(TryMac(key, input, Span<uint8>(oneShot)));
+
+            // 조각 경계: 무작위이고, 절반은 16의 배수에 둔다(마지막 찬 블록 보류 경로).
+            Span<const uint8> pieces[4];
+            usize offset = 0;
+            auto mac = MacState::TryCreate(key);
+            REQUIRE(mac);
+            for (usize i = 0; i < 3; ++i) {
+                usize piece = next(length - offset + 1);
+                if (iteration % 2 == 0) {
+                    piece -= piece % 16;
+                }
+
+                pieces[i] = input.Mid(offset, piece);
+                REQUIRE(mac.Value().TryUpdate(pieces[i]));
+                offset += piece;
+            }
+
+            pieces[3] = input.RightChop(offset);
+            REQUIRE(mac.Value().TryUpdate(pieces[3]));
+            uint8 incremental[AesCmacTagBytes];
+            REQUIRE(mac.Value().TryFinish(Span<uint8>(incremental)));
+            uint8 joined[AesCmacTagBytes];
+            REQUIRE(TryMac(key, Span<const Span<const uint8>>(pieces), Span<uint8>(joined)));
+            CHECK(ConstantTimeEquals(Span<const uint8>(oneShot), Span<const uint8>(incremental)));
+            CHECK(ConstantTimeEquals(Span<const uint8>(oneShot), Span<const uint8>(joined)));
+        }
+    }
 }

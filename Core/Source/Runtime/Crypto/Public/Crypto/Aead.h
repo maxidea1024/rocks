@@ -8,14 +8,14 @@
 #include <Crypto/Kdf.h>
 #include <Crypto/Secret.h>
 
-// 인증 암호(AEAD)다(Docs/Design/Crypto.ko.md 4·6·8·11절). 구현은 libsodium이다(AES-128-GCM은 AES
-// 경량 계층 단계에서 더한다).
+// 인증 암호(AEAD)다(Docs/Design/Crypto.ko.md 4·6·8·11절). 구현은 libsodium이고, AES-128-GCM은 HW
+// 전용 AES 경량 계층이다(AES-256-GCM 일회성은 libsodium, 결정 D4). GCM 멀티파트는 AesModes.h다.
 //
 // - 기본은 XChaCha20-Poly1305다(GetPreferredAead, 결정 D2). 모든 CPU에서 상수 시간이고 nonce가 24
 //   byte라 무작위로 만들어도 안전하다.
-// - AES-256-GCM·AEGIS는 HW 명령(x86-64 AES-NI·PCLMULQDQ·AVX, ARM64 AES·PMULL)이 있을 때만 쓴다. 두
-//   알고리즘은 같은 조건이라 함께 쓸 수 있거나 함께 Unsupported다(소프트웨어 AES와 AEGIS soft
-//   경로는 상수 시간이 아니라서 쓰지 않는다, 결정 D3).
+// - AES-256/128-GCM·AEGIS는 HW 명령(x86-64 AES-NI·PCLMULQDQ·AVX, ARM64 AES·PMULL)이 있을 때만 쓴다.
+//   세 알고리즘(과 AesModes.h·AES-CMAC)은 같은 조건이라 함께 쓸 수 있거나 함께
+//   Unsupported다(소프트웨어 AES와 AEGIS soft 경로는 상수 시간이 아니라서 쓰지 않는다, 결정 D3).
 // - 고수준 TrySeal·TryOpen은 nonce를 만들어 앞에 붙인다(출력 = nonce ‖ 암호문 ‖ tag). 무작위
 //   nonce가 안전한 알고리즘(XChaCha20-Poly1305, AEGIS-256)만 받고, 나머지(ChaCha20-IETF·AES-GCM의
 //   96 bit, AEGIS-128L의 128 bit nonce)는 Unsupported다. 그 알고리즘은 hazmat 순번
@@ -47,7 +47,7 @@ enum class AeadAlgorithm : uint8 {
     XChaCha20Poly1305 = 1,    // key 32, nonce 24, tag 16
     ChaCha20Poly1305Ietf = 2, // key 32, nonce 12, tag 16 (RFC 8439)
     Aes256Gcm = 3,            // key 32, nonce 12, tag 16
-    Aes128Gcm = 4,            // key 16, nonce 12, tag 16 (AES 경량 계층, 아직 Unsupported)
+    Aes128Gcm = 4,            // key 16, nonce 12, tag 16 (AES 경량 계층)
     Aegis256 = 5,             // key 32, nonce 32, tag 32
     Aegis128L = 6,            // key 16, nonce 16, tag 32
 };
@@ -70,7 +70,8 @@ struct AeadInfo {
     bool randomNonceSafe = false;
     // 이 기기에서 쓸 수 있는가. AES·AEGIS는 HW 명령이 있을 때만 true다.
     bool available = false;
-    // 진단용 구현 이름이다(예: "libsodium/aesni"). 쓸 수 없으면 빈 문자열이다.
+    // 진단용 구현 이름이다(예: "libsodium/aesni", AES-128-GCM은 "rocks-aes/x64"·"rocks-aes/arm64").
+    // 쓸 수 없으면 빈 문자열이다.
     StringView implementation;
 };
 
@@ -85,8 +86,9 @@ struct AeadInfo {
 [[nodiscard]] Result<usize> TryGetSealedBytes(AeadAlgorithm algorithm,
                                               usize plaintextBytes) noexcept;
 
-// 알고리즘에 묶인 AEAD 키다. move-only이며 생성 뒤 바뀌지 않는다. AES-256-GCM 키는 만들 때 키 확장
-// 상태를 한 번 계산해 키 저장소에 둔다. 평문 내보내기는 hazmat::TryExportKey다.
+// 알고리즘에 묶인 AEAD 키다. move-only이며 생성 뒤 바뀌지 않는다. AES-GCM 키는 만들 때 AES 경량
+// 계층 키 스케줄(라운드 키·GHASH H 거듭제곱)을, AES-256-GCM 키는 libsodium 키 확장 상태도 함께 한
+// 번 계산해 키 저장소에 둔다(지연 계산하지 않는다, 5.3절). 평문 내보내기는 hazmat::TryExportKey다.
 class AeadKey {
 public:
     AeadKey() noexcept = default;
@@ -117,8 +119,8 @@ public:
 private:
     friend struct detail::KeyAccess;
 
-    AeadKey(AeadAlgorithm algorithm, SecretBytes&& key, void* state) noexcept
-        : algorithm_(algorithm), key_(Move(key)), state_(state) {
+    AeadKey(AeadAlgorithm algorithm, SecretBytes&& key, void* state, void* schedule) noexcept
+        : algorithm_(algorithm), key_(Move(key)), state_(state), schedule_(schedule) {
     }
 
     void Release() noexcept;
@@ -127,6 +129,9 @@ private:
     SecretBytes key_;
     // AES-256-GCM의 libsodium beforenm 상태(키 저장소 슬롯)다. 다른 알고리즘은 nullptr다.
     void* state_ = nullptr;
+    // AES-128/256-GCM의 AES 경량 계층 키 스케줄(키 저장소 슬롯)이다. AES-128-GCM 봉인·열기와 GCM
+    // 멀티파트(AesModes.h)가 쓴다. 다른 알고리즘은 nullptr다.
+    void* schedule_ = nullptr;
 };
 
 // master에서 AEAD 키를 뽑는다(Kdf.h 타입 파생, 키 타입·알고리즘을 섞는다). 알고리즘 오류는

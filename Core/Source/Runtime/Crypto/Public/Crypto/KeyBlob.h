@@ -59,7 +59,7 @@ namespace rocks::crypto {
 // 영속 형식에 기록하는 값이다. 값을 바꾸지 않고 끝에 덧붙인다.
 enum class KeyBlobType : uint8 {
     Aead = 1,    // 키 byte, algorithm = AeadAlgorithm
-    Mac = 2,     // 키 byte(16 byte 이상), algorithm = MacAlgorithm
+    Mac = 2,     // 키 byte(16 byte 이상, AES-CMAC은 16·32), algorithm = MacAlgorithm
     Kdf = 3,     // 키 32 byte
     Ed25519 = 4, // seed 32 byte(Ed25519·Ed25519ph 공용이라 algorithm = 0)
     Kx = 5,      // X25519 비밀키 32 byte

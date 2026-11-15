@@ -1,3 +1,4 @@
+#include <Crypto/Aead.h>
 #include <Crypto/Bytes.h>
 #include <Crypto/Kdf.h>
 #include <Crypto/Mac.h>
@@ -261,10 +262,19 @@ TEST(CryptoKdfTypedDerivation) {
          "2b243ef8d41e5adcfed33fe6eb0b084efdd5cfa83aaf1907c6c41c6a3336ec5e"},
         {MacAlgorithm::Blake2bKeyed, 32,
          "4d478a80f0e8b3a8504cb81756039b03c4045695ab184871528c393902b78674"},
+        {MacAlgorithm::AesCmac, 32,
+         "a7ef66aabf21a160bd59bf2430288746248b5eb1ee20bd392874348700b8a094"},
     };
+    // AES-CMAC은 AES HW가 있을 때만 파생된다(없으면 파생 전에 Unsupported).
+    const bool aes = TryGetAeadInfo(AeadAlgorithm::Aes128Gcm).Value().available;
     uint8 exported[64];
     for (const Typed& item : macCases) {
         auto macKey = TryDeriveMacKey(master, 7, TestContext, item.algorithm);
+        if (item.algorithm == MacAlgorithm::AesCmac && !aes) {
+            CHECK(macKey.Error() == ErrorCode::Unsupported);
+            continue;
+        }
+
         REQUIRE(macKey);
         CHECK(macKey.Value().Algorithm() == item.algorithm);
         REQUIRE(macKey.Value().KeyBytes() == item.bytes);

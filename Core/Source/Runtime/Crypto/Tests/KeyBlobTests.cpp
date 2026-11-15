@@ -251,7 +251,8 @@ TEST(CryptoKeyBlobRoundTrips) {
 
     const AeadAlgorithm aeadAlgorithms[] = {
         AeadAlgorithm::XChaCha20Poly1305, AeadAlgorithm::ChaCha20Poly1305Ietf,
-        AeadAlgorithm::Aes256Gcm, AeadAlgorithm::Aegis256, AeadAlgorithm::Aegis128L};
+        AeadAlgorithm::Aes256Gcm,         AeadAlgorithm::Aes128Gcm,
+        AeadAlgorithm::Aegis256,          AeadAlgorithm::Aegis128L};
     for (AeadAlgorithm algorithm : aeadAlgorithms) {
         auto key = AeadKey::TryGenerate(algorithm);
         if (key) {
@@ -265,6 +266,18 @@ TEST(CryptoKeyBlobRoundTrips) {
         auto key = MacKey::TryGenerate(algorithm);
         REQUIRE(key);
         CheckRoundTrip(kek.Value(), key.Value());
+    }
+
+    // AES-CMAC은 AES-256(생성 기본)과 AES-128 키를 담는다(AES HW가 있을 때).
+    if (TryGetAeadInfo(AeadAlgorithm::Aes128Gcm).Value().available) {
+        const uint8 cmac128[16] = {0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6,
+                                   0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c};
+        auto generated = MacKey::TryGenerate(MacAlgorithm::AesCmac);
+        auto imported = MacKey::TryImport(MacAlgorithm::AesCmac, Span<const uint8>(cmac128));
+        REQUIRE(generated && imported);
+        CHECK(generated.Value().KeyBytes() == 32 && imported.Value().KeyBytes() == 16);
+        CheckRoundTrip(kek.Value(), generated.Value());
+        CheckRoundTrip(kek.Value(), imported.Value());
     }
 
     // HMAC 긴 키(상한 4096 byte)와 BLAKE2b keyed 64 byte 키다.
@@ -513,6 +526,19 @@ TEST(CryptoKeyBlobRejectsBeforeKeyDerivation) {
     CHECK(TryUnwrapKey<AeadKey>(kek, Span<const uint8>(blob).Left(keyBytes)).Error() ==
           aes128Error);
 
+    // AES-CMAC 키는 16·32 byte만 담는다(24 byte = AES-192는 헤더 규칙 위반). 이 기기에서 쓸 수
+    // 없으면 unwrap이 KDF 전에 Unsupported다.
+    const auto mac = static_cast<uint8>(KeyBlobType::Mac);
+    const auto cmac = static_cast<uint8>(MacAlgorithm::AesCmac);
+    usize cmacBytes =
+        BuildHeaderOnlyBlob(mac, cmac, KeyBlobWrapMethod::Key, 24, 0, 0, Span<uint8>(blob));
+    CHECK(TryPeekKeyBlob(Span<const uint8>(blob).Left(cmacBytes)).Error() ==
+          ErrorCode::AuthenticationFailed);
+    cmacBytes = BuildHeaderOnlyBlob(mac, cmac, KeyBlobWrapMethod::Key, 16, 0, 0, Span<uint8>(blob));
+    CHECK(TryPeekKeyBlob(Span<const uint8>(blob).Left(cmacBytes)));
+    CHECK(TryUnwrapKey<MacKey>(kek, Span<const uint8>(blob).Left(cmacBytes)).Error() ==
+          aes128Error);
+
     // 비용 상한은 알고리즘 판정보다 먼저다(상한 검사가 빠지면 Unsupported가 나온다).
     const Span<const uint8> password = Text("pw");
     usize passwordBytes = BuildHeaderOnlyBlob(aead, aes128, KeyBlobWrapMethod::Password, 16, 33, 8,
@@ -661,7 +687,7 @@ TEST(CryptoLabelsAndTypeTags) {
     usize tagCount = 0;
     tags[tagCount++] = detail::KdfKeyTypeTag;
     tags[tagCount++] = detail::KdfBoundTypeTag;
-    for (uint8 algorithm = 1; algorithm <= 3; ++algorithm) {
+    for (uint8 algorithm = 1; algorithm <= 4; ++algorithm) {
         tags[tagCount++] = detail::MacKeyTypeTag(algorithm);
     }
 

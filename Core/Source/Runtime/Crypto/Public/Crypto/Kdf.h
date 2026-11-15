@@ -134,7 +134,8 @@ private:
                                                   KdfContext context, usize bytes) noexcept;
 
 // 알고리즘의 권장 길이로 MAC 키를 뽑는다. 키 타입과 알고리즘을 파생 입력에 섞는다(위 지침).
-// 알고리즘이 열거값이 아니면 InvalidArgument다(파생 전에 검사한다).
+// 알고리즘이 열거값이 아니면 InvalidArgument, 이 기기에서 쓸 수 없으면(AES HW가 없는 AES-CMAC)
+// Unsupported다(파생 전에 검사한다).
 [[nodiscard]] Result<MacKey> TryDeriveMacKey(const KdfKey& master, uint64 subkeyId,
                                              KdfContext context, MacAlgorithm algorithm) noexcept;
 

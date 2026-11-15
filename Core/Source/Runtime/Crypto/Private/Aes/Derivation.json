@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "derivations": [
+    {
+      "file": "AesX64.cpp",
+      "upstream": [
+        {
+          "path": "Core/Source/ThirdParty/Sodium/libsodium-1.0.22-stable/src/libsodium/crypto_aead/aes256gcm/aesni/aead_aes256gcm_aesni.c",
+          "sha256": "ab8361fe2f20405382aa8a7ab402cd03be018f47f124b0023ba816fa4ebc4d32"
+        },
+        {
+          "path": "Core/Source/ThirdParty/Sodium/libsodium-1.0.22-stable/src/libsodium/crypto_ipcrypt/ipcrypt_aesni.c",
+          "sha256": "969e4cce2a6b46065c7395fe510722e64db52394785314ee1a2d66b60978c590"
+        }
+      ]
+    },
+    {
+      "file": "AesArm64.cpp",
+      "upstream": [
+        {
+          "path": "Core/Source/ThirdParty/Sodium/libsodium-1.0.22-stable/src/libsodium/crypto_aead/aes256gcm/armcrypto/aead_aes256gcm_armcrypto.c",
+          "sha256": "85dccddf6f405e003d09840633c1e3e28c5c1af4ee150f1a87873a73c7a1273a"
+        },
+        {
+          "path": "Core/Source/ThirdParty/Sodium/libsodium-1.0.22-stable/src/libsodium/crypto_ipcrypt/ipcrypt_armcrypto.c",
+          "sha256": "92623c03c1f9eef8bf24b328544d08712ca5df477a0114cedd10425b305da3b8"
+        }
+      ]
+    },
+    {
+      "file": "AesModes.cpp",
+      "upstream": [
+        {
+          "path": "Core/Source/ThirdParty/Sodium/libsodium-1.0.22-stable/src/libsodium/crypto_aead/aes256gcm/aesni/aead_aes256gcm_aesni.c",
+          "sha256": "ab8361fe2f20405382aa8a7ab402cd03be018f47f124b0023ba816fa4ebc4d32"
+        },
+        {
+          "path": "Core/Source/ThirdParty/Sodium/libsodium-1.0.22-stable/src/libsodium/crypto_aead/aes256gcm/armcrypto/aead_aes256gcm_armcrypto.c",
+          "sha256": "85dccddf6f405e003d09840633c1e3e28c5c1af4ee150f1a87873a73c7a1273a"
+        }
+      ]
+    }
+  ]
+}

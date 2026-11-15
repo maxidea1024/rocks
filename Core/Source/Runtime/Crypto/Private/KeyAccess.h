@@ -16,10 +16,18 @@ struct KeyAccess {
         return key.key_.View();
     }
 
-    // 키에 딸린 libsodium 상태(AES-256-GCM 키 확장 등) 주소다. 상태가 없는 키는 nullptr다.
+    // 키에 딸린 상태 주소다(AeadKey AES-256-GCM의 libsodium 키 확장, MacKey AES-CMAC·hazmat
+    // AesKey의 AES 경량 계층 키 스케줄). 상태가 없는 키는 nullptr다.
     template <typename Key>
     static const void* State(const Key& key) noexcept {
         return key.state_;
+    }
+
+    // AeadKey AES-GCM(128·256)의 AES 경량 계층 키 스케줄(detail::AesSchedule) 주소다. 다른
+    // 알고리즘은 nullptr다.
+    template <typename Key>
+    static const void* Schedule(const Key& key) noexcept {
+        return key.schedule_;
     }
 
     // 파생 결과 같은 SecretBytes를 복사 없이 넘겨 키를 만든다(키 타입의 private 생성자).

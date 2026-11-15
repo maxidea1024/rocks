@@ -222,8 +222,8 @@ Result<SecretBytes> detail::TryDeriveTypedSecret(const KdfKey& master, uint64 su
 Result<MacKey> TryDeriveMacKey(const KdfKey& master, uint64 subkeyId, KdfContext context,
                                MacAlgorithm algorithm) noexcept {
     platform::DataIndependentTimingScope dit;
-    if (!detail::IsDefinedMacAlgorithm(algorithm)) {
-        return Result<MacKey>::Failure(ErrorCode::InvalidArgument);
+    if (auto usable = detail::CheckMacUsable(algorithm); !usable) {
+        return Result<MacKey>::Failure(usable.Error());
     }
 
     auto secret = detail::TryDeriveTypedSecret(master, subkeyId, context,
@@ -233,8 +233,7 @@ Result<MacKey> TryDeriveMacKey(const KdfKey& master, uint64 subkeyId, KdfContext
         return Result<MacKey>::Failure(secret.Error());
     }
 
-    return Result<MacKey>::Success(
-        detail::KeyAccess::Make<MacKey>(algorithm, Move(secret.Value())));
+    return detail::TryMakeMacKey(algorithm, Move(secret.Value()));
 }
 
 Result<KdfKey> TryDeriveKdfKey(const KdfKey& master, uint64 subkeyId, KdfContext context) noexcept {

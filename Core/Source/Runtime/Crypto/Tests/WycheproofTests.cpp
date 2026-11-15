@@ -22,10 +22,13 @@ using namespace rocks::crypto;
 // (Docs/Design/Crypto.ko.md 12절). 모든 사례를 세고 갈래별 개수를 고정해 조용히 건너뛰는 사례가
 // 없게 한다. 사상:
 // - AEAD: valid는 봉인 byte와 열기 결과가 같고, invalid는 열기가 AuthenticationFailed이고 평문
-//   출력을 0으로 지운다. AES-GCM은 256 bit 키·96 bit nonce만 검증한다. 128 bit 키는 AES 경량
-//   계층(C2) 전까지 Unsupported, 96 bit가 아닌 nonce는 Unsupported, 192 bit 키는 열거값이 없어
-//   세기만 한다. AES HW가 없는 기기에서는 256 bit 키도 Unsupported로 센다. ChaCha20-Poly1305·
-//   XChaCha20-Poly1305의 nonce 길이 오류는 InvalidArgument다.
+//   출력을 0으로 지운다. AES-GCM은 128 bit 키(AES 경량 계층)·256 bit 키(libsodium)와 96 bit
+//   nonce를 검증한다. 96 bit가 아닌 nonce는 Unsupported, 192 bit 키는 열거값이 없어 세기만 한다.
+//   AES HW가 없는 기기에서는 128·256 bit 키를 Unsupported로 센다.
+//   ChaCha20-Poly1305·XChaCha20-Poly1305의 nonce 길이 오류는 InvalidArgument다.
+// - AES-CMAC: valid는 tag가 같고(일회성·증분 모두) invalid(변조된 tag)는 검증이
+//   AuthenticationFailed다. 키 길이 오류(0·8·64·160·320 bit)와 AES-192 키는 MacKey::TryImport가
+//   InvalidArgument다. AES HW가 없는 기기에서는 모두 Unsupported로 센다.
 // - HMAC: 잘린 tag는 전체 tag의 앞부분과 비교하고, 검증 함수는 잘린 tag를 AuthenticationFailed로
 //   거부한다.
 // - HKDF: valid는 출력이 같고 invalid(출력 길이 상한 초과)는 InvalidArgument다.
@@ -158,11 +161,11 @@ struct AeadCounts {
     usize skipped = 0;
 };
 
-// AEAD 파일 하나를 algorithm으로 돌린다(키 길이가 algorithm과 맞는 그룹만 검증한다).
+// AEAD 파일 하나를 algorithm으로 돌린다(키 길이가 algorithm과 맞는 그룹만 검증한다). AES-GCM
+// 파일은 128 bit 키 그룹을 AES-128-GCM으로 돌린다.
 void RunAead(const char* name, AeadAlgorithm algorithm, AeadCounts& counts) {
     VectorFile file;
     REQUIRE(file.Load(name));
-    const AeadInfo info = TryGetAeadInfo(algorithm).Value();
     const bool gcm = algorithm == AeadAlgorithm::Aes256Gcm;
     Array<uint8> key(file.allocator);
     Array<uint8> iv(file.allocator);
@@ -177,19 +180,14 @@ void RunAead(const char* name, AeadAlgorithm algorithm, AeadCounts& counts) {
                 Decode(test, "msg", msg) && Decode(test, "ct", ct) && Decode(test, "tag", tag));
         usize keyBits = 0;
         REQUIRE(IntegerField(group, "keySize", keyBits));
-        if (gcm && keyBits == 128) {
-            CHECK(AeadKey::TryImport(AeadAlgorithm::Aes128Gcm, key.View()).Error() ==
-                  ErrorCode::Unsupported);
-            ++counts.unsupported;
-            return;
-        }
-
+        const AeadAlgorithm resolved = gcm && keyBits == 128 ? AeadAlgorithm::Aes128Gcm : algorithm;
+        const AeadInfo info = TryGetAeadInfo(resolved).Value();
         if (keyBits != info.keyBytes * 8) {
             ++counts.skipped;
             return;
         }
 
-        auto aeadKey = AeadKey::TryImport(algorithm, key.View());
+        auto aeadKey = AeadKey::TryImport(resolved, key.View());
         if (!info.available) {
             CHECK(aeadKey.Error() == ErrorCode::Unsupported);
             ++counts.unsupported;
@@ -237,9 +235,72 @@ TEST(CryptoWycheproofAesGcm) {
     CHECK(counts.total == 316);
     CHECK(counts.skipped == 103); // AES-192
     if (TryGetAeadInfo(AeadAlgorithm::Aes256Gcm).Value().available) {
-        CHECK(counts.verified == 66 && counts.badNonce == 39 && counts.unsupported == 108);
+        // 128 bit 키: 96 bit nonce 67건 검증 + 다른 nonce 41건, 256 bit 키: 66건 + 39건이다.
+        CHECK(TryGetAeadInfo(AeadAlgorithm::Aes128Gcm).Value().available);
+        CHECK(counts.verified == 67 + 66 && counts.badNonce == 41 + 39 && counts.unsupported == 0);
     } else {
         CHECK(counts.unsupported == 316 - 103);
+    }
+}
+
+TEST(CryptoWycheproofAesCmac) {
+    VectorFile file;
+    REQUIRE(file.Load("aes_cmac_test.json"));
+    const bool aes = TryGetAeadInfo(AeadAlgorithm::Aes128Gcm).Value().available;
+    Array<uint8> key(file.allocator);
+    Array<uint8> msg(file.allocator);
+    Array<uint8> tag(file.allocator);
+    usize verified = 0;
+    usize aes192 = 0;
+    usize badKey = 0;
+    usize unsupported = 0;
+    const usize total = ForEachTest(file, [&](JsonValue group, JsonValue test) {
+        REQUIRE(Decode(test, "key", key) && Decode(test, "msg", msg) && Decode(test, "tag", tag));
+        usize keyBits = 0;
+        REQUIRE(IntegerField(group, "keySize", keyBits));
+        auto macKey = MacKey::TryImport(MacAlgorithm::AesCmac, key.View());
+        if (!aes) {
+            CHECK(macKey.Error() == ErrorCode::Unsupported);
+            ++unsupported;
+            return;
+        }
+
+        if (keyBits == 192) {
+            CHECK(macKey.Error() == ErrorCode::InvalidArgument);
+            ++aes192;
+            return;
+        }
+
+        if (key.Size() != 16 && key.Size() != 32) {
+            CHECK(HasFlag(test, "InvalidKeySize") && ResultIs(test, "invalid"));
+            CHECK(macKey.Error() == ErrorCode::InvalidArgument);
+            ++badKey;
+            return;
+        }
+
+        REQUIRE(macKey);
+        REQUIRE(tag.Size() == AesCmacTagBytes);
+        const bool valid = ResultIs(test, "valid");
+        uint8 computed[AesCmacTagBytes];
+        REQUIRE(TryMac(macKey.Value(), msg.View(), Span<uint8>(computed)));
+        CHECK(ConstantTimeEquals(Span<const uint8>(computed), tag.View()) == valid);
+        CHECK(static_cast<bool>(TryVerifyMac(macKey.Value(), msg.View(), tag.View())) == valid);
+
+        // 증분 상태로 앞뒤를 나눠 넣어도 같다.
+        auto state = MacState::TryCreate(macKey.Value());
+        REQUIRE(state);
+        const usize split = msg.Size() / 3;
+        REQUIRE(state.Value().TryUpdate(msg.View().Left(split)));
+        REQUIRE(state.Value().TryUpdate(msg.View().RightChop(split)));
+        CHECK(static_cast<bool>(state.Value().TryFinishVerify(tag.View())) == valid);
+        ++verified;
+    });
+    CHECK(total == 311);
+    if (aes) {
+        // 128·256 bit 키 그룹마다 valid 21건 + 변조 tag 81건, AES-192 102건, 키 길이 오류 5건이다.
+        CHECK(verified == 204 && aes192 == 102 && badKey == 5);
+    } else {
+        CHECK(unsupported == 311);
     }
 }
 
