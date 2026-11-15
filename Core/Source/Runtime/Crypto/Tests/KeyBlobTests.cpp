@@ -113,6 +113,10 @@ usize ExportSecret(const SegmentStreamKey& key, Span<uint8> out) {
     return hazmat::TryExportKey(key, out.Left(SegmentStreamKeyBytes)) ? SegmentStreamKeyBytes : 0;
 }
 
+usize ExportSecret(const ChannelServerKey& key, Span<uint8> out) {
+    return hazmat::TryExportKey(key, out.Left(ChannelKeyBytes)) ? ChannelKeyBytes : 0;
+}
+
 // wrap할 keyId다. Id()를 품는 키(SegmentStreamKey)는 그 값이어야 한다.
 template <typename TKey>
 KeyId WrapIdFor(const TKey&) {
@@ -120,6 +124,10 @@ KeyId WrapIdFor(const TKey&) {
 }
 
 KeyId WrapIdFor(const SegmentStreamKey& key) {
+    return key.Id();
+}
+
+KeyId WrapIdFor(const ChannelServerKey& key) {
     return key.Id();
 }
 
@@ -358,6 +366,36 @@ TEST(CryptoKeyBlobRoundTrips) {
                 .Error() == ErrorCode::AuthenticationFailed);
     }
 
+    // 보안 채널 서버 정적 키(타입 10). Id()를 품으므로 세그먼트 스트림 키와 같은 규칙이고, 같은
+    // X25519 비밀키 32 byte인 kx·box 키 쌍으로는 열리지 않는다.
+    auto channelKey = ChannelServerKey::TryGenerate(TryNewKeyId().Value());
+    REQUIRE(channelKey);
+    CheckRoundTrip(kek.Value(), channelKey.Value());
+    {
+        uint8 channelBlob[KeyBlobMaxBytes];
+        const KeyId kekId = TryNewKeyId().Value();
+        auto wrapped = TryWrapKey(kek.Value(), kekId, channelKey.Value(), channelKey.Value().Id(),
+                                  Span<uint8>(channelBlob));
+        REQUIRE(wrapped);
+        const Span<const uint8> stored = Span<const uint8>(channelBlob).Left(wrapped.Value());
+        CHECK(TryPeekKeyBlob(stored).Value().type == KeyBlobType::ChannelServer);
+        auto unwrapped = TryUnwrapKey<ChannelServerKey>(kek.Value(), stored);
+        REQUIRE(unwrapped);
+        CHECK(unwrapped.Value().key.Id() == channelKey.Value().Id());
+        CHECK(unwrapped.Value().key.PublicKey() == channelKey.Value().PublicKey());
+        CHECK(TryWrapKey(kek.Value(), kekId, channelKey.Value(), TryNewKeyId().Value(),
+                         Span<uint8>(channelBlob))
+                  .Error() == ErrorCode::InvalidArgument);
+        auto again = TryWrapKey(kek.Value(), kekId, channelKey.Value(), channelKey.Value().Id(),
+                                Span<uint8>(channelBlob));
+        REQUIRE(again);
+        const Span<const uint8> restored = Span<const uint8>(channelBlob).Left(again.Value());
+        CHECK(TryUnwrapKey<KxKeyPair>(kek.Value(), restored).Error() ==
+              ErrorCode::AuthenticationFailed);
+        CHECK(TryUnwrapKey<BoxKeyPair>(kek.Value(), restored).Error() ==
+              ErrorCode::AuthenticationFailed);
+    }
+
     // 푼 서명 키는 같은 서명을 낸다(공개키를 seed에서 다시 계산한다).
     uint8 blob[KeyBlobMaxBytes];
     const KeyId id = TryNewKeyId().Value();
@@ -436,10 +474,12 @@ TEST(CryptoKeyBlobPeekAndHeaderRules) {
     // 모르는 버전·타입·방식, 표에 없는 (타입, 알고리즘)은 Unsupported다.
     CHECK(peekWith(4, 2) == ErrorCode::Unsupported);
     CHECK(peekWith(5, 0) == ErrorCode::Unsupported);
-    CHECK(peekWith(5, 10) == ErrorCode::Unsupported);
-    // 타입 8(secretstream)·9(세그먼트 스트림)은 키 32 byte, 알고리즘 0이다(C4에서 덧붙였다).
+    CHECK(peekWith(5, 11) == ErrorCode::Unsupported);
+    // 타입 8(secretstream)·9(세그먼트 스트림)·10(보안 채널 서버 키)은 키 32 byte, 알고리즘
+    // 0이다(8·9는 C4, 10은 보안 채널에서 덧붙였다).
     CHECK(peekWith(5, 8) == ErrorCode::None);
     CHECK(peekWith(5, 9) == ErrorCode::None);
+    CHECK(peekWith(5, 10) == ErrorCode::None);
     CHECK(peekWith(6, 1) == ErrorCode::Unsupported);
     CHECK(peekWith(7, 3) == ErrorCode::Unsupported);
     // magic, 길이 범위 밖은 AuthenticationFailed다.

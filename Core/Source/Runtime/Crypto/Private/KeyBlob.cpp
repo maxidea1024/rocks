@@ -108,6 +108,7 @@ bool TryGetSecretRule(KeyBlobType type, uint8 algorithm, SecretRule& rule) noexc
     case KeyBlobType::Box:
     case KeyBlobType::SecretStream:
     case KeyBlobType::SegmentStream:
+    case KeyBlobType::ChannelServer:
         rule = {32, 32, false};
         return algorithm == 0;
     case KeyBlobType::Kem: {
@@ -132,7 +133,7 @@ bool IsAllowedSecret(KeyBlobType type, uint8 algorithm, Span<const uint8> secret
 
 bool IsDefinedType(uint8 value) noexcept {
     return value >= static_cast<uint8>(KeyBlobType::Aead) &&
-           value <= static_cast<uint8>(KeyBlobType::SegmentStream);
+           value <= static_cast<uint8>(KeyBlobType::ChannelServer);
 }
 
 bool IsDefinedMethod(uint8 value) noexcept {
@@ -278,6 +279,12 @@ Result<SegmentStreamKey> TryMakeKey(TypeTag<SegmentStreamKey>, uint8, KeyId keyI
     return SegmentStreamKey::TryImport(keyId, secret);
 }
 
+// 서버 정적 키도 Id()를 품으므로 blob의 keyId로 만든다.
+Result<ChannelServerKey> TryMakeKey(TypeTag<ChannelServerKey>, uint8, KeyId keyId,
+                                    Span<const uint8> secret) noexcept {
+    return ChannelServerKey::TryImport(keyId, secret);
+}
+
 // key가 Id()를 품는 타입이면 keyId가 그 값과 같아야 한다(다르면 호출자 인자 오류).
 template <typename TKey>
 bool MatchesKeyId(const TKey&, KeyId) noexcept {
@@ -285,6 +292,10 @@ bool MatchesKeyId(const TKey&, KeyId) noexcept {
 }
 
 bool MatchesKeyId(const SegmentStreamKey& key, KeyId keyId) noexcept {
+    return key.Id() == keyId;
+}
+
+bool MatchesKeyId(const ChannelServerKey& key, KeyId keyId) noexcept {
     return key.Id() == keyId;
 }
 
@@ -608,6 +619,7 @@ ROCKS_CRYPTO_KEYBLOB_INSTANTIATE(BoxKeyPair)
 ROCKS_CRYPTO_KEYBLOB_INSTANTIATE(KemKeyPair)
 ROCKS_CRYPTO_KEYBLOB_INSTANTIATE(SecretStreamKey)
 ROCKS_CRYPTO_KEYBLOB_INSTANTIATE(SegmentStreamKey)
+ROCKS_CRYPTO_KEYBLOB_INSTANTIATE(ChannelServerKey)
 
 #undef ROCKS_CRYPTO_KEYBLOB_INSTANTIATE
 

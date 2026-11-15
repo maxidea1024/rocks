@@ -3,7 +3,7 @@
 > 상태: 채택(2026-11-15 사용자 결정: SC1 Noise NK, 나머지는 추천안). 리뷰 1회 반영. 엔진 계획 17.1절(NetCore가 암호화된 transport adapter를 맡고 자체 암호 알고리즘을 설계하지
 > 않는다)과 [Crypto](Crypto.ko.md) 13절 후속 판단을 따른다. 표준 Noise Protocol Framework(rev 34)를 libsodium primitive로 구현하는
 > 것은 자체 알고리즘 설계가 아니며, 외부 transport 라이브러리(DTLS·QUIC)를 들이지 않는 근거는 외부 의존 최소화다. Crypto 부품(3절)을 먼저
-> 구현하고, 4절은 NetCore가 생길 때 구현한다.
+> 구현하고, 4절은 NetCore가 생길 때 구현한다. 3절은 2026-11-15 구현했다(`Crypto/Channel.h`, 5절은 구현된 API).
 
 ## 1. 범위와 나눔
 
@@ -41,6 +41,22 @@ raw X25519는 공개 API로 내지 않는다.
 - `Split()` 결과로 방향별 datagram 봉인·열기 객체를 만들고 handshake hash `h`를 내보낸다. NK에는 클라이언트 키가 없으므로 `h`를 bearer
   토큰에 묶는 용도로는 쓰지 않는다(4.3절).
 - 검증: Noise 공식 시험 벡터(cacophony 형식 `NK_25519_ChaChaPoly_SHA256`)와 Python `noiseprotocol` 상호운용(시험 전용).
+- **구현(2026-11-15).** `Private/ChannelHandshake.cpp`. 상태(ck·h·k·n, e, responder의 s 사본, re·rs, DH·HKDF 중간값)는 키 저장소 슬롯
+  하나이고 Split·실패·소멸 때 지운다. responder의 s 사본과 initiator의 e는 그 메시지 읽기가 성공한 직후 지운다. HKDF는 libsodium
+  `crypto_kdf_hkdf_sha256_extract/expand`(salt = ck, 빈 info. Noise HKDF와 같은 byte)다. 단계는 `NoiseStep`(Write·Read·Split·
+  Done·Failed)이고, 차례가 아닌 호출·Split 뒤 호출은 `InvalidArgument`(상태 불변), 메시지 길이(48 미만·65,535 초과)·변조·다른 서버
+  키·다른 prologue·small-order e는 `AuthenticationFailed`다. responder는 이때 Failed가 된다(비밀 상태를 지우고 이후 모든 호출이
+  `AuthenticationFailed`, Hello마다 새 객체를 쓴다). initiator는 읽기 전 상태(같은 슬롯에 저장한 ck·h·k·n)로 되돌아가
+  ReadMessage에 머문다. 서버 주소로 위장한 경로 밖 공격자의 가짜 Welcome 하나로 handshake가 끝나지 않게 하는 것이고(사본으로
+  계산하고 성공할 때만 반영하는 WireGuard 방식, 리뷰 반영), 기다림의 상한은 NetCore가 둔다. 클라이언트가 가진 서버 공개키가
+  small-order면 첫 메시지 쓰기가 실패하고 Failed가 된다. payload 버퍼
+  부족은 `CapacityExceeded`(상태 불변, 다시 부를 수 있다)다. 시험용 고정 ephemeral은 값을 받는 내부 함수
+  `detail::ChannelFactory::TryWriteMessage`(`Private/ChannelInternal.h`, 빈 Span이면 OS 난수)로만 넣는다(전역 hook 없음).
+- **시험(`Tests/ChannelTests.cpp`).** cacophony `vectors/cacophony.txt`(commit 18b7348c)와 snow `tests/vectors/snow.txt`(commit
+  d00b360c)의 NK 항목(handshake·hash·transport), Python `noiseprotocol` 0.3.1로 만든 고정 키 transcript 둘(4.1절 꼴 prologue·긴
+  payload, 양방향 transport). 음성: 모든 byte bit 뒤집기·모든 길이 절단·늘리기·상한 초과, small-order e(u = 0, 1, p − 1), 다른
+  서버 키·prologue, 다른 transcript의 응답, 순서 오류·Split 뒤 재사용·이동 뒤 `StaleHandle`, 실패 뒤 sticky와 출력 소거, 키 저장소
+  반환. `CryptoFuzzTests.cpp`에 고정 seed 변형 fuzz(두 메시지 읽기 1,500회)를 더했다.
 
 ### 3.2 명시 counter datagram
 
@@ -53,6 +69,14 @@ raw X25519는 공개 API로 내지 않는다.
   뺀 값을 NetCore가 정한다.
 - 시험: AD가 있으면 cacophony transport 벡터와 다르므로 datagram golden은 Python(PyNaCl/`cryptography`)으로 따로 만든다. 창 경계·순서
   바꿈·유실·재전송·위조가 창을 밀지 않음·상한을 본다.
+- **구현(2026-11-15).** `Private/ChannelDatagram.cpp`. AEAD는 hazmat nonce 지정 API(ChaCha20-Poly1305 IETF `AeadKey`)이고 봉인은
+  payload + 16 byte(암호문 ‖ tag)다. 창은 받은 가장 큰 counter + 1(top)과 2048 bit 원형 bitmap이고 [top − 2048, top)을 기억한다.
+  앞으로 밀 때 새로 덮는 자리의 bit를 지우고, 2048 이상 뛰면 전부 지운다. 거부 순서는 빈 객체 `StaleHandle` → 겹침
+  `InvalidArgument` → payload 부족 `CapacityExceeded` → 소진·datagram 상한 초과·tag보다 짧음·counter ≥ 2^63·창 밖·중복
+  `AuthenticationFailed`(복호 없이) → AEAD다. 인증 실패 수는 AEAD를 시도해 실패한 것만 센다(창·형식 거부는 위조 시도가 아니다).
+  2^36에 이르면 이후 모든 열기를 거부한다. 빈 header의 봉인은 Noise transport 메시지와 같은 byte라 cacophony transport 벡터로도
+  확인된다. 시험 경계 이동(counter 2^63 − 1, 실패 2^36 − 1)은 `Private/ChannelTestAccess.h`(Tests 전용)로 한다. 고정 seed fuzz
+  (counter·header·봉인 변형 3,000회)는 변형한 열기가 거부되고 원래 datagram이 그 뒤에 열리며 재전송이 거부되는지 본다.
 
 ## 4. NetCore 요구사항(패킷·DoS·인증)
 
@@ -83,24 +107,36 @@ raw X25519는 공개 API로 내지 않는다.
   audience(서버 keyId·match id), 만료 시각, 한 번 쓰는 nonce를 담고 서버가 모두 확인한다(같은 신뢰 키를 가진 다른 서버로의 중계 방지).
 - 클라이언트 장기 키가 필요해지면(토큰 없는 상호 인증) XK·IK 패턴을 따로 더한다.
 
-## 5. API(초안)
+## 5. API(구현)
 
 ```cpp
-namespace rocks::crypto {
-class ChannelServerKey;                              // X25519 정적 키 쌍, KeyId, KeyBlob 타입 10
-struct ChannelPublicKey { KeyId id; uint8 bytes[32]; };
+namespace rocks::crypto {   // Crypto/Channel.h
+// 상수: ChannelKeyBytes 32, ChannelHashBytes 32, NoiseMaxMessageBytes 65535, NoiseMessageOverheadBytes 48, DatagramTagBytes 16,
+//       DatagramMaxBytes 65507, DatagramCounterLimit 2^63, DatagramFailureLimit 2^36, DatagramWindowSize 2048
+struct ChannelPublicKey { KeyId id; uint8 bytes[32]; static Result<ChannelPublicKey> TryFromBytes(KeyId, Span<const uint8>) noexcept; };
 
+class ChannelServerKey {                             // X25519 정적 키 쌍, KeyId, KeyBlob 타입 10, move-only
+    static Result<ChannelServerKey> TryGenerate(KeyId id) noexcept;
+    static Result<ChannelServerKey> TryImport(KeyId id, Span<const uint8> secretKey) noexcept;
+    ChannelPublicKey PublicKey() const noexcept;     KeyId Id() const noexcept;
+};
+
+enum class NoiseStep : uint8 { None, WriteMessage, ReadMessage, Split, Done, Failed };
 class NoiseHandshake {                               // Noise_NK_25519_ChaChaPoly_SHA256, 한 번 쓰고 버린다
     static Result<NoiseHandshake> TryCreateInitiator(const ChannelPublicKey& server, Span<const uint8> prologue) noexcept;
     static Result<NoiseHandshake> TryCreateResponder(const ChannelServerKey& key, Span<const uint8> prologue) noexcept;
-    Result<usize> TryWriteMessage(Span<const uint8> payload, Span<uint8> message) noexcept;
+    Result<usize> TryWriteMessage(Span<const uint8> payload, Span<uint8> message) noexcept;  // payload + 48
     Result<usize> TryReadMessage(Span<const uint8> message, Span<uint8> payload) noexcept;   // 변조 AuthenticationFailed
     Result<ChannelSession> TrySplit() noexcept;      // 두 메시지가 끝난 뒤
+    NoiseStep NextStep() const noexcept;             bool IsInitiator() const noexcept;
 };
 
 struct ChannelSession { DatagramSealer send; DatagramOpener receive; uint8 handshakeHash[32]; };
-class DatagramSealer { Result<uint64> TrySeal(Span<const uint8> header, Span<const uint8> payload, Span<uint8> sealed) noexcept; };  // 쓴 counter
-class DatagramOpener { Result<usize> TryOpen(uint64 counter, Span<const uint8> header, Span<const uint8> sealed, Span<uint8> payload) noexcept; };
+class DatagramSealer {   // 쓴 counter를 돌려준다. NextCounter·IsExhausted
+    Result<uint64> TrySeal(Span<const uint8> header, Span<const uint8> payload, Span<uint8> sealed) noexcept; };
+class DatagramOpener {   // AuthenticationFailures·IsExhausted
+    Result<usize> TryOpen(uint64 counter, Span<const uint8> header, Span<const uint8> sealed, Span<uint8> payload) noexcept; };
+namespace hazmat { Result<void> TryExportKey(const ChannelServerKey& key, Span<uint8> output) noexcept; }
 }
 ```
 
@@ -109,4 +145,5 @@ class DatagramOpener { Result<usize> TryOpen(uint64 counter, Span<const uint8> h
 ## 6. 단계
 
 (1) `NoiseHandshake` + cacophony 벡터·Python 상호운용 (2) datagram 봉인·열기·창·integrity limit (3) `ChannelServerKey`와 KeyBlob 타입
-10 (4) NetCore가 생기면 4절을 구현한다. Crypto 13절 후속 행과 엔진 계획 17.1 문구는 이 나눔에 맞춰 고친다.
+10 (4) NetCore가 생기면 4절을 구현한다. Crypto 13절 후속 행과 엔진 계획 17.1 문구는 이 나눔에 맞춰 고친다. (1)–(3)은 2026-11-15
+구현했다(Windows Debug `--filter Crypto` 통과. Asan·macOS·Android 실행과 구현 뒤 교차검증은 단계 묶음 끝에 한다).

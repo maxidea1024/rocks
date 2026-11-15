@@ -5,6 +5,7 @@
 #include <Core/Result.h>
 #include <Core/Traits.h>
 #include <Crypto/Aead.h>
+#include <Crypto/Channel.h>
 #include <Crypto/Kdf.h>
 #include <Crypto/Kem.h>
 #include <Crypto/KeyExchange.h>
@@ -60,15 +61,16 @@ namespace rocks::crypto {
 
 // 영속 형식에 기록하는 값이다. 값을 바꾸지 않고 끝에 덧붙인다.
 enum class KeyBlobType : uint8 {
-    Aead = 1,          // 키 byte, algorithm = AeadAlgorithm
-    Mac = 2,           // 키 byte(16 byte 이상, AES-CMAC은 16·32), algorithm = MacAlgorithm
-    Kdf = 3,           // 키 32 byte
-    Ed25519 = 4,       // seed 32 byte(Ed25519·Ed25519ph 공용이라 algorithm = 0)
-    Kx = 5,            // X25519 비밀키 32 byte
-    Box = 6,           // X25519 비밀키 32 byte
-    Kem = 7,           // seed(X-Wing 32, ML-KEM 64), algorithm = KemAlgorithm
-    SecretStream = 8,  // secretstream 키 32 byte(algorithm = 0)
-    SegmentStream = 9, // 세그먼트 스트림 마스터 키 32 byte(algorithm = 0, keyId = key.Id())
+    Aead = 1,           // 키 byte, algorithm = AeadAlgorithm
+    Mac = 2,            // 키 byte(16 byte 이상, AES-CMAC은 16·32), algorithm = MacAlgorithm
+    Kdf = 3,            // 키 32 byte
+    Ed25519 = 4,        // seed 32 byte(Ed25519·Ed25519ph 공용이라 algorithm = 0)
+    Kx = 5,             // X25519 비밀키 32 byte
+    Box = 6,            // X25519 비밀키 32 byte
+    Kem = 7,            // seed(X-Wing 32, ML-KEM 64), algorithm = KemAlgorithm
+    SecretStream = 8,   // secretstream 키 32 byte(algorithm = 0)
+    SegmentStream = 9,  // 세그먼트 스트림 마스터 키 32 byte(algorithm = 0, keyId = key.Id())
+    ChannelServer = 10, // 보안 채널 서버 정적 X25519 비밀키 32 byte(algorithm 0, keyId = Id())
 };
 
 enum class KeyBlobWrapMethod : uint8 {
@@ -151,13 +153,19 @@ struct KeyBlobTraits<SegmentStreamKey> {
     static constexpr KeyBlobType Type = KeyBlobType::SegmentStream;
 };
 
-// 위 9개 타입의 닫힌 목록이다. 정의는 KeyBlob.cpp의 9개 인스턴스뿐이므로 KeyBlobTraits를 다른
+template <>
+struct KeyBlobTraits<ChannelServerKey> {
+    static constexpr KeyBlobType Type = KeyBlobType::ChannelServer;
+};
+
+// 위 10개 타입의 닫힌 목록이다. 정의는 KeyBlob.cpp의 10개 인스턴스뿐이므로 KeyBlobTraits를 다른
 // 타입으로 특수화해도 목록은 늘지 않는다(링크 오류가 아니라 컴파일 오류로 막는다).
 template <typename TKey>
 concept KeyBlobKey =
     IsSameV<TKey, AeadKey> || IsSameV<TKey, MacKey> || IsSameV<TKey, KdfKey> ||
     IsSameV<TKey, Ed25519SigningKey> || IsSameV<TKey, KxKeyPair> || IsSameV<TKey, BoxKeyPair> ||
-    IsSameV<TKey, KemKeyPair> || IsSameV<TKey, SecretStreamKey> || IsSameV<TKey, SegmentStreamKey>;
+    IsSameV<TKey, KemKeyPair> || IsSameV<TKey, SecretStreamKey> ||
+    IsSameV<TKey, SegmentStreamKey> || IsSameV<TKey, ChannelServerKey>;
 
 // TryUnwrapKey의 결과다. id는 blob에 기록된 keyId이고 호출자가 기대한 ID와 비교한다.
 template <typename TKey>
@@ -173,8 +181,8 @@ template <KeyBlobKey TKey>
 
 // KEK(wrapKey, ID wrapKeyId) 아래 key를 keyId로 wrap한다. 쓴 byte 수를 돌려준다.
 // - 빈 wrapKey·key는 StaleHandle, Nil keyId·wrapKeyId, 16 byte보다 짧은 MAC 키(hazmat), key.Id()와
-//   다른 keyId(SegmentStreamKey)는 InvalidArgument, blob이 TryGetKeyBlobBytes보다 작으면
-//   CapacityExceeded다(모두 쓰기 전).
+//   다른 keyId(SegmentStreamKey·ChannelServerKey)는 InvalidArgument, blob이 TryGetKeyBlobBytes보다
+//   작으면 CapacityExceeded다(모두 쓰기 전).
 // - nonce용 OS 난수 실패는 DependencyFailed, 키 저장소가 찼으면 OutOfMemory다(blob을 지운다).
 template <KeyBlobKey TKey>
 [[nodiscard]] Result<usize> TryWrapKey(const KdfKey& wrapKey, KeyId wrapKeyId, const TKey& key,
@@ -196,7 +204,7 @@ template <KeyBlobKey TKey>
 //   AuthenticationFailed다(어느 검사인지 알리지 않는다).
 // - 모르는 버전·타입·방식·알고리즘과 이 기기에서 쓸 수 없는 AEAD 알고리즘은 Unsupported(KDF 전)다.
 // - 키 저장소가 찼으면 OutOfMemory다.
-// - SegmentStreamKey는 blob의 keyId를 Id()로 가진 채 나온다.
+// - SegmentStreamKey·ChannelServerKey는 blob의 keyId를 Id()로 가진 채 나온다.
 template <KeyBlobKey TKey>
 [[nodiscard]] Result<UnwrappedKey<TKey>> TryUnwrapKey(const KdfKey& wrapKey,
                                                       Span<const uint8> blob) noexcept;
@@ -209,7 +217,7 @@ template <KeyBlobKey TKey>
 [[nodiscard]] Result<UnwrappedKey<TKey>> TryUnwrapKeyWithPassword(Span<const uint8> password,
                                                                   Span<const uint8> blob) noexcept;
 
-// 정의는 KeyBlob.cpp에 있고 위 9개 타입으로만 인스턴스화한다.
+// 정의는 KeyBlob.cpp에 있고 위 10개 타입으로만 인스턴스화한다.
 #define ROCKS_CRYPTO_KEYBLOB_EXTERN(TKey)                                                          \
     extern template Result<usize> TryGetKeyBlobBytes<TKey>(const TKey&,                            \
                                                            KeyBlobWrapMethod) noexcept;            \
@@ -231,6 +239,7 @@ ROCKS_CRYPTO_KEYBLOB_EXTERN(BoxKeyPair)
 ROCKS_CRYPTO_KEYBLOB_EXTERN(KemKeyPair)
 ROCKS_CRYPTO_KEYBLOB_EXTERN(SecretStreamKey)
 ROCKS_CRYPTO_KEYBLOB_EXTERN(SegmentStreamKey)
+ROCKS_CRYPTO_KEYBLOB_EXTERN(ChannelServerKey)
 
 #undef ROCKS_CRYPTO_KEYBLOB_EXTERN
 

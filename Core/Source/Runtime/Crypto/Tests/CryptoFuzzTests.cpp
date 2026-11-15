@@ -1,8 +1,11 @@
+#include <Base/Endian.h>
 #include <Core/Containers/Array.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/Json.h>
 #include <Crypto/Aead.h>
+#include <Crypto/Channel.h>
 #include <Crypto/KeyId.h>
+#include <Crypto/Private/ChannelInternal.h>
 #include <Crypto/SecretStream.h>
 #include <Crypto/SegmentStream.h>
 #include <TestSupport/Test.h>
@@ -14,7 +17,8 @@ using namespace rocks::crypto;
 
 // 고정 seed 변형 fuzz다(Docs/Design/Crypto.ko.md 12절 fuzz). coverage 기반 fuzzer(libFuzzer)는 빌드
 // 기반(모듈 sanitizer 인자)이 없어 아직 쓰지 않고, 시험 묶음 안에서 매번 같은 변형 입력을 돌린다.
-// 공격자가 정하는 입력(세그먼트 헤더·전체 크기·암호문, secretstream 메시지, Wycheproof JSON)이
+// 공격자가 정하는 입력(세그먼트 헤더·전체 크기·암호문, secretstream 메시지, 보안 채널 handshake
+// 메시지·datagram, Wycheproof JSON)이
 // 정해진 오류로만 거부되고(Fatal·InvalidArgument 없음), 실패한 출력이 지워지며, 배치 계산이 형식의
 // 식과 같은지 본다.
 namespace {
@@ -500,4 +504,223 @@ TEST(CryptoFuzzWycheproofJson) {
     }
 
     CHECK(parsed != 0);
+}
+
+namespace {
+
+// 고정 키 보안 채널: 서버 비밀키 01..20, ephemeral 21..40(클라이언트)·41..60(서버)이다. 메시지가
+// 실행마다 같아 변형 위치와 결과가 seed로 재현된다.
+struct FixedChannel {
+    uint8 serverSecret[ChannelKeyBytes];
+    uint8 clientEphemeral[ChannelKeyBytes];
+    uint8 serverEphemeral[ChannelKeyBytes];
+    ChannelServerKey serverKey;
+
+    FixedChannel() noexcept {
+        for (usize index = 0; index < ChannelKeyBytes; ++index) {
+            serverSecret[index] = static_cast<uint8>(0x01 + index);
+            clientEphemeral[index] = static_cast<uint8>(0x21 + index);
+            serverEphemeral[index] = static_cast<uint8>(0x41 + index);
+        }
+
+        KeyId id;
+        id.value.high = 1;
+        id.value.low = 2;
+        auto key = ChannelServerKey::TryImport(id, Span<const uint8>(serverSecret));
+        if (key) {
+            serverKey = Move(key.Value());
+        }
+    }
+
+    Result<NoiseHandshake> TryInitiator() const noexcept {
+        return NoiseHandshake::TryCreateInitiator(serverKey.PublicKey(), Bytes("fuzz"));
+    }
+
+    Result<NoiseHandshake> TryResponder() const noexcept {
+        return NoiseHandshake::TryCreateResponder(serverKey, Bytes("fuzz"));
+    }
+
+    // 클라이언트 첫 메시지(payload "hello")를 쓴다. 실패하면 0이다.
+    usize WriteHello(NoiseHandshake& initiator, Span<uint8> message) const noexcept {
+        auto written = crypto::detail::ChannelFactory::TryWriteMessage(
+            initiator, Span<const uint8>(clientEphemeral), Bytes("hello"), message);
+        return written ? written.Value() : 0;
+    }
+
+    // 서버 둘째 메시지(payload "welcome")를 쓴다. 실패하면 0이다.
+    usize WriteWelcome(NoiseHandshake& responder, Span<uint8> message) const noexcept {
+        auto written = crypto::detail::ChannelFactory::TryWriteMessage(
+            responder, Span<const uint8>(serverEphemeral), Bytes("welcome"), message);
+        return written ? written.Value() : 0;
+    }
+};
+
+} // namespace
+
+// handshake 메시지 읽기: 변형한 첫 메시지(서버가 읽음)와 둘째 메시지(클라이언트가 읽음)는 원본과
+// 같을 때만 받고, 나머지는 AuthenticationFailed(payload 소거, Failed)로만 거부된다.
+TEST(CryptoFuzzNoiseHandshakeRead) {
+    SystemAllocator allocator;
+    const FixedChannel channel;
+    REQUIRE(!channel.serverKey.IsEmpty());
+    uint8 hello[64];
+    uint8 welcome[64];
+    uint8 payload[256];
+    auto initiator = channel.TryInitiator();
+    auto responder = channel.TryResponder();
+    REQUIRE(initiator && responder);
+    const usize helloBytes = channel.WriteHello(initiator.Value(), Span<uint8>(hello));
+    REQUIRE(helloBytes != 0);
+    REQUIRE(responder.Value().TryReadMessage(Span<const uint8>(hello).Left(helloBytes),
+                                             Span<uint8>(payload)));
+    const usize welcomeBytes = channel.WriteWelcome(responder.Value(), Span<uint8>(welcome));
+    REQUIRE(welcomeBytes != 0);
+
+    FuzzRandom random{0x401e};
+    Array<uint8> mutated(allocator);
+    uint8 scratch[64];
+    usize accepted = 0;
+    for (usize iteration = 0; iteration < 1500; ++iteration) {
+        const bool second = random.Below(2) == 1;
+        const Span<const uint8> source = second ? Span<const uint8>(welcome).Left(welcomeBytes)
+                                                : Span<const uint8>(hello).Left(helloBytes);
+        const bool garbage = random.Below(8) == 0;
+        if (garbage) {
+            REQUIRE(mutated.TryResize(random.Below(200)));
+            for (uint8& byte : mutated.View()) {
+                byte = static_cast<uint8>(random.Next());
+            }
+        } else {
+            REQUIRE(Mutate(random, source, mutated));
+        }
+
+        auto reader = second ? channel.TryInitiator() : channel.TryResponder();
+        REQUIRE(reader);
+        if (second) {
+            REQUIRE(channel.WriteHello(reader.Value(), Span<uint8>(scratch)) == helloBytes);
+        }
+
+        memset(payload, 0xa5, sizeof(payload));
+        auto read = reader.Value().TryReadMessage(mutated.View(), Span<uint8>(payload));
+        const bool changed = garbage || !Same(mutated.View(), source);
+        if (read) {
+            ++accepted;
+            CHECK(!changed);
+            CHECK(reader.Value().NextStep() ==
+                  (second ? NoiseStep::Split : NoiseStep::WriteMessage));
+        } else {
+            CHECK(read.Error() == ErrorCode::AuthenticationFailed);
+            CHECK(AllZero(Span<const uint8>(payload)));
+            CHECK(changed);
+            // 서버는 실패하면 버리고, 클라이언트는 읽기 전으로 돌아가 원래 둘째 메시지를 읽을 수
+            // 있다.
+            if (second) {
+                CHECK(reader.Value().NextStep() == NoiseStep::ReadMessage);
+                CHECK(reader.Value().TryReadMessage(source, Span<uint8>(payload)).Value() ==
+                      welcomeBytes - NoiseMessageOverheadBytes);
+            } else {
+                CHECK(reader.Value().NextStep() == NoiseStep::Failed);
+            }
+        }
+    }
+
+    CHECK(accepted != 0);
+}
+
+// datagram 열기: counter·header·봉인 중 하나를 변형하면 AuthenticationFailed(payload 소거)로만
+// 거부되고, 거부된 시도는 창을 바꾸지 않아 원래 datagram이 그 뒤에 열리며, 그다음 재전송은
+// 거부된다.
+TEST(CryptoFuzzDatagramOpen) {
+    SystemAllocator allocator;
+    const FixedChannel channel;
+    REQUIRE(!channel.serverKey.IsEmpty());
+    auto initiator = channel.TryInitiator();
+    auto responder = channel.TryResponder();
+    REQUIRE(initiator && responder);
+    uint8 message[64];
+    uint8 payload[512];
+    const usize helloBytes = channel.WriteHello(initiator.Value(), Span<uint8>(message));
+    REQUIRE(helloBytes != 0);
+    REQUIRE(responder.Value().TryReadMessage(Span<const uint8>(message).Left(helloBytes),
+                                             Span<uint8>(payload)));
+    const usize welcomeBytes = channel.WriteWelcome(responder.Value(), Span<uint8>(message));
+    REQUIRE(welcomeBytes != 0);
+    REQUIRE(initiator.Value().TryReadMessage(Span<const uint8>(message).Left(welcomeBytes),
+                                             Span<uint8>(payload)));
+    auto client = initiator.Value().TrySplit();
+    auto server = responder.Value().TrySplit();
+    REQUIRE(client && server);
+    DatagramSealer& sealer = client.Value().send;
+    DatagramOpener& opener = server.Value().receive;
+
+    FuzzRandom random{0xd47a};
+    Array<uint8> mutated(allocator);
+    Array<uint8> mutatedHeader(allocator);
+    uint8 plain[300];
+    uint8 sealed[512];
+    uint8 header[13] = {4, 7, 0, 0, 0};
+    for (usize iteration = 0; iteration < 3000; ++iteration) {
+        const usize size = random.Below(sizeof(plain));
+        for (usize index = 0; index < size; ++index) {
+            plain[index] = static_cast<uint8>(index * 13 + iteration);
+        }
+
+        StoreLittleEndian<uint64>(header + 5, sealer.NextCounter());
+        auto counter = sealer.TrySeal(Span<const uint8>(header), Span<const uint8>(plain, size),
+                                      Span<uint8>(sealed));
+        REQUIRE(counter);
+        const Span<const uint8> original = Span<const uint8>(sealed).Left(size + 16);
+
+        uint64 openCounter = counter.Value();
+        mutatedHeader.Clear();
+        mutated.Clear();
+        REQUIRE(mutatedHeader.TryAppend(Span<const uint8>(header)) && mutated.TryAppend(original));
+        switch (random.Below(3)) {
+        case 0:
+            REQUIRE(Mutate(random, original, mutated));
+            break;
+        case 1:
+            REQUIRE(Mutate(random, Span<const uint8>(header), mutatedHeader));
+            break;
+        default:
+            switch (random.Below(3)) {
+            case 0:
+                openCounter ^= uint64{1} << random.Below(64);
+                break;
+            case 1:
+                openCounter = counter.Value() - 3 + random.Below(7);
+                break;
+            default:
+                openCounter = random.Next();
+                break;
+            }
+
+            break;
+        }
+
+        const bool changed = openCounter != counter.Value() ||
+                             !Same(mutatedHeader.View(), Span<const uint8>(header)) ||
+                             !Same(mutated.View(), original);
+        memset(payload, 0xa5, sizeof(payload));
+        auto opened =
+            opener.TryOpen(openCounter, mutatedHeader.View(), mutated.View(), Span<uint8>(payload));
+        if (!changed) {
+            CHECK(opened && opened.Value() == size);
+            CHECK(Same(Span<const uint8>(payload).Left(size), Span<const uint8>(plain, size)));
+        } else {
+            CHECK(opened.Error() == ErrorCode::AuthenticationFailed);
+            CHECK(AllZero(Span<const uint8>(payload)));
+            auto retry = opener.TryOpen(counter.Value(), Span<const uint8>(header), original,
+                                        Span<uint8>(payload));
+            CHECK(retry && retry.Value() == size);
+        }
+
+        CHECK(
+            opener
+                .TryOpen(counter.Value(), Span<const uint8>(header), original, Span<uint8>(payload))
+                .Error() == ErrorCode::AuthenticationFailed);
+    }
+
+    CHECK(!opener.IsExhausted());
+    CHECK(opener.AuthenticationFailures() < 3000);
 }
