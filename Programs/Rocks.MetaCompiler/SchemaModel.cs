@@ -224,23 +224,33 @@ internal static class EnumRules
 {
     public const int MaxEnumerators = 4096;
 
-    // underlying(ValueKind 이름)의 값 범위다. 지원하지 않는 underlying이면 null이다.
+    // underlying(ValueKind 이름 — UE와 같은 정수 8종)의 값 범위다. 지원하지 않는 underlying이면 null이다. 저장 값이 int64이므로
+    // UInt64의 최댓값은 long.MaxValue다(런타임 EnumUnderlyingRange와 같은 표).
     public static (long Minimum, long Maximum)? Range(string underlying) => underlying switch
     {
-        "UInt8" => (0L, 0xffL),
-        "UInt16" => (0L, 0xffffL),
-        "UInt32" => (0L, 0xffffffffL),
+        "UInt8" => (0L, byte.MaxValue),
+        "UInt16" => (0L, ushort.MaxValue),
+        "UInt32" => (0L, uint.MaxValue),
+        "UInt64" => (0L, long.MaxValue),
+        "Int8" => (sbyte.MinValue, sbyte.MaxValue),
+        "Int16" => (short.MinValue, short.MaxValue),
         "Int32" => (int.MinValue, int.MaxValue),
+        "Int64" => (long.MinValue, long.MaxValue),
         _ => null
     };
 
-    // underlying의 rocks 정수 타입 이름이다(생성 static_assert용).
+    // underlying의 rocks 정수 타입 이름이다(생성 static_assert용). underlying은 Range가 받는 8종이어야 한다.
     public static string NativeType(string underlying) => underlying switch
     {
         "UInt8" => "uint8",
         "UInt16" => "uint16",
         "UInt32" => "uint32",
-        _ => "int32"
+        "UInt64" => "uint64",
+        "Int8" => "int8",
+        "Int16" => "int16",
+        "Int32" => "int32",
+        "Int64" => "int64",
+        _ => throw new ArgumentException($"unsupported enum underlying {underlying}", nameof(underlying))
     };
 
     // 접두 유무를 합친 두 도구 이름 집합 {a, prefix+a}와 {b, prefix+b}가 ASCII 대소문자 무시로 겹치는지다.
@@ -413,7 +423,7 @@ internal sealed class ClassModel
 
     public bool IsEnum { get; init; }
 
-    // enum underlying의 ValueKind 이름(UInt8·UInt16·UInt32·Int32)이다.
+    // enum underlying의 ValueKind 이름(UInt8·UInt16·UInt32·UInt64·Int8·Int16·Int32·Int64)이다.
     public string Underlying { get; init; } = "";
 
     // EnumFlags::Flags(비트 플래그 enum)다.

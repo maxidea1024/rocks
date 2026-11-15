@@ -361,7 +361,7 @@ internal static class ModuleMetaTests
             string original = File.ReadAllText(layout.Descriptor("Lower"));
             foreach ((string name, string from, string to) in new[]
             {
-                ("underlying", "\"underlying\": \"UInt16\"", "\"underlying\": \"Int64\""),
+                ("underlying", "\"underlying\": \"UInt16\"", "\"underlying\": \"Float32\""),
                 ("alias", "\"value\": 3", "\"value\": 0"),
                 ("range", "\"value\": 3", "\"value\": 70000"),
                 ("collision", "\"toolName\": \"Enabled\"", "\"toolName\": \"MODE_off\""),

@@ -280,7 +280,7 @@ TEST(Enums_ManualRegisterEnumValidatesAndDeepCopies) {
          ErrorCode::InvalidArgument},
         {[](EnumSchema& s, EnumeratorSchema*) noexcept { s.name = {}; },
          ErrorCode::InvalidArgument},
-        {[](EnumSchema& s, EnumeratorSchema*) noexcept { s.underlying = ValueKind::Int64; },
+        {[](EnumSchema& s, EnumeratorSchema*) noexcept { s.underlying = ValueKind::Float32; },
          ErrorCode::InvalidArgument},
         {[](EnumSchema& s, EnumeratorSchema*) noexcept { s.flags = 2; },
          ErrorCode::InvalidArgument},

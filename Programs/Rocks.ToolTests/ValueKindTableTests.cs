@@ -26,7 +26,9 @@ internal static class ValueKindTableTests
                 "each query names a distinct runtime function");
 
             // Has는 성질 하나만 받는다(런타임 HasValueKindProperty와 같은 계약). 표에 없는 이름은 성질이 없다.
-            Verify.That(!ValueKindTable.Has("Int8", ValueKindProperty.Field), "a kind outside the table has no property");
+            Verify.That(!ValueKindTable.Has("NotAKind", ValueKindProperty.Field), "a kind outside the table has no property");
+            Verify.That(ValueKindTable.Has("Int8", ValueKindProperty.MapKey) && ValueKindTable.Has("Int16", ValueKindProperty.ArrayElement),
+                "B9a2 integer widths are keyed single values");
             Verify.That(ValueKindTable.Has("SoftObjectReference", ValueKindProperty.MapKey), "single property query");
             Verify.Throws<ArgumentException>(() => ValueKindTable.Has("SoftObjectReference", ValueKindProperty.MapKey | ValueKindProperty.AcceptsRequired));
             Verify.Throws<ArgumentException>(() => ValueKindTable.Has("Bool", ValueKindProperty.None));
@@ -48,16 +50,19 @@ internal static class ValueKindTableTests
             string real = ValueKindTable.ParityHeader(ValueKindTable.Rows);
             const string realBit = "::rocks::ValueKindProperty::MapKey) == 16u, \"ValueKindTable: ValueKindProperty::MapKey = 16\"";
             Verify.Contains(realBit, real, "bit assertion to replace");
+            int count = ValueKindTable.Rows.Count;
             (string Name, string Header, string Diagnostic)[] cases =
             [
                 ("C# allows, runtime rejects", Flip("Float32", ValueKindProperty.MapKey), "Float32 MapKey = true"),
                 ("C# rejects, runtime allows", Flip("Bool", ValueKindProperty.MapKey), "Bool MapKey = false"),
+                ("new kind cell", Flip("Int16", ValueKindProperty.ArrayElement), "Int16 ArrayElement = false"),
                 ("container property", Flip("Array", ValueKindProperty.Container), "Array Container = false"),
                 ("whole FieldValue property", Flip("Struct", ValueKindProperty.WholeFieldValue), "Struct WholeFieldValue = true"),
-                ("extra C# kind", ValueKindTable.ParityHeader([.. ValueKindTable.Rows, new("Int8", 19, ValueKindProperty.Field)]),
-                    "C# table has 20 value kinds"),
-                ("missing C# kind", ValueKindTable.ParityHeader([.. ValueKindTable.Rows.Take(ValueKindTable.Rows.Count - 1)]),
-                    "C# table has 18 value kinds"),
+                // 런타임에 아직 없는 종류(리플렉션 B9c의 Name)를 C# 표에만 더한 경우다.
+                ("extra C# kind", ValueKindTable.ParityHeader([.. ValueKindTable.Rows, new("Name", (uint)count, ValueKindProperty.Field)]),
+                    $"C# table has {count + 1} value kinds"),
+                ("missing C# kind", ValueKindTable.ParityHeader([.. ValueKindTable.Rows.Take(count - 1)]),
+                    $"C# table has {count - 1} value kinds"),
                 ("enumerator value", ValueKindTable.ParityHeader([.. ValueKindTable.Rows.Select(row => row.Name == "Guid" ? row with { Value = 11 } : row)]),
                     "Guid = 11"),
                 ("property bit value", real.Replace(realBit,

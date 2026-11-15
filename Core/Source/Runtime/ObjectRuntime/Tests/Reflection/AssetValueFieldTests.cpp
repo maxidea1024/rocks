@@ -128,8 +128,7 @@ TEST(AssetValueFields_ManualRegistrationEnforcesValueTypeRules) {
     const usize source = SchemaIndex(generated, "source");
     const usize hash = SchemaIndex(generated, "hash");
     const usize icon = SchemaIndex(generated, "icon");
-    const ValueKind beyondLast =
-        static_cast<ValueKind>(static_cast<uint8>(ValueKind::Digest256) + 1);
+    const ValueKind beyondLast = static_cast<ValueKind>(ValueKindCount);
     struct Case {
         usize field;
         Mutation mutate;

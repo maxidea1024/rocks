@@ -772,7 +772,8 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
     }
 
     // ROCKS_ENUM 정의 하나를 모델로 만든다(Docs/Design/ReflectionFoundations.ko.md 3.4절). underlying은 원문에
-    // 명시한 uint8·uint16·uint32·int32만, 열거자는 하나 이상이고 값 별칭이 없어야 하며 Flags enum은 음수 값을 둘
+    // 명시한 정수 8종(uint8·uint16·uint32·uint64·int8·int16·int32·int64 — Docs/Design/ReflectionExtensions.ko.md 2절)만,
+    // 열거자는 하나 이상이고 값 별칭이 없어야 하며 Flags enum은 음수 값을, uint64 enum은 int64 최댓값보다 큰 값을 둘
     // 수 없다(RMC2401). 접두 유무를 합친 도구 이름은 대소문자 무시로 유일하다(RMC2203).
     private void VisitEnum(JsonElement node, string[] scope, bool anonymous, bool templated, PrefixBinding prefix)
     {
@@ -824,22 +825,28 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
 
         if (!HasExplicitUnderlying(node))
         {
-            throw new MetadataException($"{qualified}: ROCKS_ENUM requires an explicitly written uint8/uint16/uint32/int32 underlying type", "RMC2401",
+            throw new MetadataException($"{qualified}: ROCKS_ENUM requires an explicitly written integer underlying type", "RMC2401",
                 "Write the underlying type directly after the enum name, e.g. 'enum class Name : rocks::uint8'.");
         }
 
+        // underlying은 UE와 같은 정수 8종이다(Docs/Design/ReflectionExtensions.ko.md 2절 — Clang desugar 철자). 평범한 char·bool·
+        // long(폭이 플랫폼마다 다르다)은 받지 않는다.
         string? underlying = underlyingSpelling switch
         {
             "unsigned char" => "UInt8",
             "unsigned short" => "UInt16",
             "unsigned int" => "UInt32",
+            "unsigned long long" => "UInt64",
+            "signed char" => "Int8",
+            "short" => "Int16",
             "int" => "Int32",
+            "long long" => "Int64",
             _ => null
         };
         if (underlying is null)
         {
             throw new MetadataException($"{qualified}: unsupported ROCKS_ENUM underlying type '{underlyingSpelling}'", "RMC2401",
-                "Use rocks::uint8, uint16, uint32 or int32; int8/int16 and 64-bit enums are unsupported.");
+                "Use rocks::uint8, uint16, uint32, uint64, int8, int16, int32 or int64; plain char, bool and long are unsupported.");
         }
 
         (long minimum, long maximum) = EnumRules.Range(underlying)!.Value;
@@ -881,6 +888,13 @@ internal sealed class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableId
                     throw new MetadataException($"{symbol}: unsupported enumerator initializer AST shape", "RMC2001",
                         "Use the supported Clang/toolchain; add a reviewed parser case before accepting a new AST shape.");
                 }
+            }
+
+            // UInt64의 최댓값은 int64 최댓값이다(EnumeratorSchema::value가 int64 — Flags uint64 enum은 비트 0–62).
+            if (underlying == "UInt64" && value > maximum)
+            {
+                throw new MetadataException($"{symbol}: value {value} exceeds the int64 maximum {maximum} that UInt64 enumerators can store", "RMC2401",
+                    "Keep uint64 enumerator values at most 0x7fffffffffffffff (Flags enums use bits 0-62); stored enum values are int64.");
             }
 
             if (value < minimum || value > maximum || (spec.Flags && value < 0))

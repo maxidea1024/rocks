@@ -182,7 +182,7 @@ enum class TextureGroup : uint8 {
 };
 ```
 
-- 대상은 `enum class`이고 underlying을 명시해야 한다: `uint8`·`uint16`·`uint32`·`int32`(기존 `ValueKind`가 있는 폭. `int8`·`int16`·64비트는 받지 않는다 — RMC2401. 리플렉션 B9가 UE와 같은 8종으로 넓힌다 — RX 2절). 열거자 값은 서로 달라야 한다(별칭 금지).
+- 대상은 `enum class`이고 underlying을 명시해야 한다: UE와 같은 정수 8종 `uint8`·`uint16`·`uint32`·`uint64`·`int8`·`int16`·`int32`·`int64`(그 밖은 RMC2401, `uint64` 열거자 값은 int64 최댓값 이하 — RX 2절). A0-B 당시에는 기존 `ValueKind`가 있는 폭인 `uint8`·`uint16`·`uint32`·`int32`만 받았고 리플렉션 B9a2가 8종으로 넓혔다(RMC2401 뜻 변경). 열거자 값은 서로 달라야 한다(별칭 금지).
 - 열거자 지정자 `ROCKS_ENUMERATOR(Name="…", DisplayName="…", Hidden)`(UE `UMETA(DisplayName)` 대응): `Name`은 도구 이름(없으면 C++ 이름)이며 `[A-Za-z0-9_]+` — 접두를 떼면 숫자로 시작하는 UE 이름(`TEXTUREGROUP_8BitData`)을 받기 위해 숫자 시작을 허용한다. `DisplayName`은 표시용 UTF-8, `Hidden`은 저장 값으로는 유효하지만 도구가 설정 값으로 받지 않는 열거자다(텍스처 설정의 숨김 값 → `InvalidSetting`, 판정은 설정 계층). 도구 이름 조회는 대소문자 무시이고 `ToolPrefix`가 있으면 접두가 있든 없든 받는다. 접두 유무를 합친 이름 집합이 대소문자 무시로 유일해야 한다(RMC2203).
 - 값 검증: 일반 enum은 선언된 값이어야 하고, `Flags` enum은 선언 값들의 OR(`(v & ~mask) == 0`)이어야 한다. 생성 헤더가 constexpr 검증기 `GeneratedType<E>::IsDeclared(int64)`를 내고 쓰기·decode thunk가 그것을 쓴다(TypeRegistry에 접근하지 않는 staged 쓰기·decode에서도 검증된다). `FieldValue`는 `signedInteger`와 enum ID(`type`)를 싣고 thunk가 `type == GeneratedType<E>::Id()`를 확인한다(다르면 TypeMismatch).
 - 미선언 값: 쓰기는 InvalidArgument. 로드는 decode 정책(6.1·6.4절)을 따른다 — 기본 거부(InvalidArgument), `ReportAndDefault`면 일반 enum은 기본값(값 0이 선언되어 있으면 0, 아니면 첫 열거자), Flags enum은 선언되지 않은 비트만 지운 값으로 바꾸고 `UndeclaredEnumValue` 진단을 낸다(Sparks 1117행의 "기본값으로 바꾸고 보고"). 새 빌드가 쓴 데이터를 `CorruptPackage`로 오진하지 않도록 A1이 정책을 고른다.

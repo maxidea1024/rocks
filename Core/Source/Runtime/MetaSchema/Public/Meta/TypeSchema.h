@@ -99,14 +99,17 @@ enum class ValueKind : uint8 {
     AssetId,             // rocks::AssetId(Object/AssetId.h), wire Guid
     SoftObjectReference, // rocks::SoftObjectRef<T>(Object/SoftObjectRef.h), wire
                          // SoftObjectReference
-    Digest256            // rocks::Sha256Digest(Core/Encoding/Sha256.h), wire Bytes(정확히 32 byte)
+    Digest256,           // rocks::Sha256Digest(Core/Encoding/Sha256.h), wire Bytes(정확히 32 byte)
+    // 리플렉션 B9 이후의 값 종류다(Docs/Design/ReflectionExtensions.ko.md 1.1절).
+    Int8, // int8(Clang 철자 signed char — 평범한 char는 받지 않는다), wire I64(범위 검사)
+    Int16 // int16(short), wire I64(범위 검사)
 };
 
 // ValueKind 열거자 수(마지막 열거자 + 1)다. 열거자 값은 schema·descriptor 계약이므로 새 종류는 끝에
 // 붙이고, 이 식의 마지막 열거자와 성질 표의 행을 함께 고친다. 아래 static_assert가 성질 표와,
 // MetaCompiler 대조 헤더가 C# 표의 종류 수와 이 값을 비교한다. 근거는
 // Docs/Design/ReflectionExtensions.ko.md 1.3절이다.
-inline constexpr uint32 ValueKindCount = static_cast<uint32>(ValueKind::Digest256) + 1;
+inline constexpr uint32 ValueKindCount = static_cast<uint32>(ValueKind::Int16) + 1;
 
 // 값 종류의 성질이다(종류 성질 표 — Docs/Design/ReflectionExtensions.ko.md 1.3절).
 // ValueKindProperties가 종류마다 이 비트의 OR를 돌려주고, 런타임의 등록 검증(TypeRegistry)·쓰기
@@ -194,6 +197,8 @@ constexpr ValueKindEntry ValueKindTableEntry(ValueKind kind) noexcept {
     case ValueKind::UInt16:
     case ValueKind::UInt32:
     case ValueKind::UInt64:
+    case ValueKind::Int8:
+    case ValueKind::Int16:
     case ValueKind::Int32:
     case ValueKind::Int64:
     case ValueKind::Guid:
@@ -376,10 +381,10 @@ struct FieldSchema {
     // 무관하다.
     Span<const char> toolName{};
     // Array 필드(value = {Array, 0})의 원소 형식과 길이 상한이다(B5 — maxElements는 1 이상
-    // MaxArrayElements 이하, 저장·경로 쓰기에서 건다). 원소는 스칼라·Guid·Utf8String·
-    // ObjectReference·Enum·Struct·AssetId·SoftObjectReference·Digest256이고 element.type은 Enum·
-    // Struct면 필수, 두 참조는 기대 타입(선택), 그 밖은 0이다. 배열이 아닌 필드는 Opaque·0이어야
-    // 한다.
+    // MaxArrayElements 이하, 저장·경로 쓰기에서 건다). 원소는 스칼라(Int8·Int16 포함), Guid,
+    // Utf8String, ObjectReference, Enum, Struct, AssetId, SoftObjectReference, Digest256이고
+    // element.type은 Enum과 Struct면 필수, 두 참조는 기대 타입(선택), 그 밖은 0이다. 배열이 아닌
+    // 필드는 Opaque·0이어야 한다.
     ValueType element{};
     uint32 maxElements = 0;
 };
@@ -456,7 +461,7 @@ struct TypeSchema {
 
 // EnumFlags:
 //   Flags — 비트 플래그 enum이다(ROCKS_ENUM(Flags)). 값은 선언 값들의 OR(0 포함)이면 유효하다.
-//           열거자 값은 음수일 수 없다.
+//           열거자 값은 음수일 수 없다(uint64 Flags enum은 비트 0–62 — 값이 int64이기 때문이다).
 enum class EnumFlags : uint32 {
     None = 0,
     Flags = 1
@@ -493,8 +498,9 @@ struct EnumeratorSchema {
 };
 
 // 리플렉션 enum의 스키마다(ROCKS_ENUM). 필드에서는 ValueType{Enum, id}로 가리키고 저장 wire는
-// I64다. underlying은 UInt8·UInt16·UInt32·Int32 중 하나이며 열거자 값은 그 범위 안에서 서로
-// 다르다(별칭 금지). 등록은 TypeRegistry::RegisterEnum이다.
+// I64다. underlying은 UE와 같은 정수 8종(UInt8·UInt16·UInt32·UInt64·Int8·Int16·Int32·Int64 —
+// EnumUnderlyingRange) 중 하나이며 열거자 값은 그 범위 안에서 서로 다르다(별칭 금지). 값이
+// int64라서 UInt64 enum의 열거자 값은 int64 최댓값 이하다. 등록은 TypeRegistry::RegisterEnum이다.
 struct EnumSchema {
     TypeId id;
     Span<const char> name;
@@ -506,7 +512,16 @@ struct EnumSchema {
     Span<const char> toolPrefix{};
 };
 
-// underlying 폭의 값 범위를 minimum·maximum에 쓴다. 지원하지 않는 underlying이면 false다.
+// underlying 폭의 값 범위를 minimum·maximum에 쓴다. underlying은 UE와 같은 정수 8종이고 그 밖의
+// 종류면 false다(minimum·maximum은 그대로다). 근거는 Docs/Design/ReflectionExtensions.ko.md
+// 2절이다. 저장 값이 int64이므로 UInt64의 최댓값은 int64 최댓값이다(MetaCompiler가 그보다 큰
+// 열거자를 RMC2401로 거부한다 — UE UEnum도 값을 int64로 두지만 넘는 값을 음수로 감싸 받는다,
+// 같은 문서 18.1절). MetaCompiler EnumRules.Range와 같은 표다.
+//
+// 사용 예:
+//   int64 minimum = 0;
+//   int64 maximum = 0;
+//   if (!EnumUnderlyingRange(schema.underlying, minimum, maximum)) { return InvalidArgument; }
 constexpr bool EnumUnderlyingRange(ValueKind underlying, int64& minimum, int64& maximum) noexcept {
     switch (underlying) {
     case ValueKind::UInt8:
@@ -521,9 +536,25 @@ constexpr bool EnumUnderlyingRange(ValueKind underlying, int64& minimum, int64& 
         minimum = 0;
         maximum = NumericLimits<uint32>::Max();
         return true;
+    case ValueKind::UInt64:
+        minimum = 0;
+        maximum = NumericLimits<int64>::Max();
+        return true;
+    case ValueKind::Int8:
+        minimum = NumericLimits<int8>::Min();
+        maximum = NumericLimits<int8>::Max();
+        return true;
+    case ValueKind::Int16:
+        minimum = NumericLimits<int16>::Min();
+        maximum = NumericLimits<int16>::Max();
+        return true;
     case ValueKind::Int32:
         minimum = NumericLimits<int32>::Min();
         maximum = NumericLimits<int32>::Max();
+        return true;
+    case ValueKind::Int64:
+        minimum = NumericLimits<int64>::Min();
+        maximum = NumericLimits<int64>::Max();
         return true;
     default:
         return false;

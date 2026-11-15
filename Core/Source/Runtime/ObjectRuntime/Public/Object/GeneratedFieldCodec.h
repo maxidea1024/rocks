@@ -26,9 +26,13 @@ inline Result<uint32> FieldWireType(ValueKind kind, uint32 referenceWire) noexce
         return Result<uint32>::Success(static_cast<uint32>(WireType::U32));
     case ValueKind::UInt64:
         return Result<uint32>::Success(static_cast<uint32>(WireType::U64));
+    case ValueKind::Int8:
+    case ValueKind::Int16:
     case ValueKind::Int32:
     case ValueKind::Int64:
     case ValueKind::Enum:
+        // 부호 있는 정수는 폭과 무관하게 I64다(폭을 넓히는 schema 변경이 wire 호환으로 남는다 —
+        // Docs/Design/ReflectionExtensions.ko.md 2절).
         return Result<uint32>::Success(static_cast<uint32>(WireType::I64));
     case ValueKind::Float32:
         return Result<uint32>::Success(static_cast<uint32>(WireType::F32));
@@ -80,6 +84,22 @@ constexpr uint64 UnsignedLimit(ValueKind kind) noexcept {
            : kind == ValueKind::UInt16 ? uint64{NumericLimits<uint16>::Max()}
            : kind == ValueKind::UInt32 ? uint64{NumericLimits<uint32>::Max()}
                                        : 0;
+}
+
+// 좁은 부호 있는 정수 종류(Int8·Int16·Int32)의 상한이다. 하한은 -상한 - 1이다(그 밖은 0 — 검사하지
+// 않는다).
+constexpr int64 SignedLimit(ValueKind kind) noexcept {
+    return kind == ValueKind::Int8    ? int64{NumericLimits<int8>::Max()}
+           : kind == ValueKind::Int16 ? int64{NumericLimits<int16>::Max()}
+           : kind == ValueKind::Int32 ? int64{NumericLimits<int32>::Max()}
+                                      : 0;
+}
+
+// value가 부호 있는 정수 종류 kind의 폭 안인지다(SignedLimit가 0인 Int64는 늘 참). 저장·로드가 같은
+// 판정으로 Overflow를 낸다.
+constexpr bool FitsSignedLimit(ValueKind kind, int64 value) noexcept {
+    const int64 limit = SignedLimit(kind);
+    return limit == 0 || (value >= -limit - 1 && value <= limit);
 }
 
 // 열거자 count개 집합의 원소 조회 하나의 작업량이다: BitWidth(count) + 1(이진 탐색 비교 수의 상한).
@@ -263,14 +283,14 @@ inline Result<void> WriteValueWire(ArchiveWriter& out, FieldEncodeContext& conte
         return out.WriteU32(static_cast<uint32>(value.unsignedInteger));
     case ValueKind::UInt64:
         return out.WriteU64(value.unsignedInteger);
+    case ValueKind::Int8:
+    case ValueKind::Int16:
     case ValueKind::Int32:
-        if (value.signedInteger < NumericLimits<int32>::Min() ||
-            value.signedInteger > NumericLimits<int32>::Max()) {
+    case ValueKind::Int64:
+        if (!FitsSignedLimit(type.kind, value.signedInteger)) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }
 
-        return out.WriteI64(value.signedInteger);
-    case ValueKind::Int64:
         return out.WriteI64(value.signedInteger);
     case ValueKind::Float32:
         return out.WriteF32(value.float32);
@@ -432,6 +452,8 @@ inline Result<void> ReadValueWire(ArchiveReader& reader, FieldDecodeContext& con
         out.unsignedInteger = decoded.Value();
         return Result<void>::Success();
     }
+    case ValueKind::Int8:
+    case ValueKind::Int16:
     case ValueKind::Int32:
     case ValueKind::Int64: {
         auto decoded = reader.ReadI64();
@@ -439,8 +461,7 @@ inline Result<void> ReadValueWire(ArchiveReader& reader, FieldDecodeContext& con
             return Result<void>::Failure(decoded.Error());
         }
 
-        if (type.kind == ValueKind::Int32 && (decoded.Value() < NumericLimits<int32>::Min() ||
-                                              decoded.Value() > NumericLimits<int32>::Max())) {
+        if (!FitsSignedLimit(type.kind, decoded.Value())) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }
 
@@ -1328,7 +1349,8 @@ Result<void> AppendParsedElement(Array<Element>& target, const ParsedValue& pars
         return target.TryPushBack(parsed.float32);
     } else if constexpr (IsSameV<Element, double>) {
         return target.TryPushBack(parsed.float64);
-    } else if constexpr (IsSameV<Element, int32> || IsSameV<Element, int64>) {
+    } else if constexpr (IsSameV<Element, int8> || IsSameV<Element, int16> ||
+                         IsSameV<Element, int32> || IsSameV<Element, int64>) {
         return target.TryPushBack(static_cast<Element>(parsed.signedInteger));
     } else {
         static_assert(IsSameV<Element, uint8> || IsSameV<Element, uint16> ||

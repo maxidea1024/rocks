@@ -126,6 +126,11 @@ MetaCompiler(C#)와 런타임(C++)의 표 대조: MetaCompiler가 "모든 종류
 - 표로 바꾼 곳: TypeRegistry 등록(`<= Digest256` 범위 판정 제거 — 클래스 필드는 Field, struct 멤버는 StructMember 열, Array 원소·Required·대상 타입·aggregate), `FieldWriteOperation`·`ValidateFieldWrite`의 aggregate, 경로의 aggregate, 그래프 `ValidateLayout`의 대상 타입, 생성 codec의 배열 원소 static_assert. `FieldValueKind<T>`는 단일 값 형식 대응을 `ScalarValueKind<T>` 한 곳에 맡긴다.
 - C#: `MC/ValueKindTable.cs`의 `ValueKindProperty`(같은 비트)·`ValueKindTable.Rows`(이름·열거자 값·성질)·`ValueKindTable.Has`. 원본 선언 검증(`SchemaValidator.Validate`)도 철자 해석이 정한 종류가 그 자리(클래스 필드·struct 멤버·Array 원소)에 표가 허용하는지 확인한다(지금은 늘 통과 — 철자 해석이 만드는 종류 집합 `SchemaValidator.SourceValueKinds`와 표의 Array 원소 열이 같음을 `Meta.ValueKindTableMatchesSourceResolution`이 고정한다). 대조 헤더는 `ValueKindTable.ParityHeader(rows)`가 만들고(MetaCompiler 명령행 하위 명령은 두지 않았다 — ToolTests가 같은 어셈블리 함수를 직접 부른다), `rows` 인자가 시험이 칸을 바꾼 표를 넣는 통로다. 헤더는 칸마다의 질의 대조에 더해 성질 비트 값, `ValueKindCount == 행 수`, 행마다 열거자 값을 대조한다(종류 행이 한쪽에만 있는 경우도 잡는다). ToolTests `Meta.ValueKindTableMatchesRuntime`(Queries가 성질 전체를 덮는지 포함)·`Meta.ValueKindTableMismatchFailsToCompile`이 컴파일하고, C++ 표 = 이 절 허용 표는 `ValueKindProperties_MatchSpecTable`, 등록이 표를 따르는지(Array 원소·struct 멤버·클래스 필드)는 `ValueKindProperties_TypeRegistryFollowsTable`(ObjectRuntime 시험)이 고정한다.
 
+구현(B9a2)에서 정한 점(성질 표 — 정수 폭의 나머지는 2절 "구현(B9a2)에서 정한 점"):
+
+- 성질 표에 행 둘을 더했다: `Int8` = 19, `Int16` = 20(1.1절 표의 값). 행은 위 허용 표의 "Bool·정수 8종" 칸이다(C++ `ValueKindTableEntry`의 keyed 묶음, C# `Keyed`). `ValueKindCount`는 21이다. 이번 단계가 실제로 여는 자리는 클래스 필드·struct 멤버·Array 원소(`Array<int8>`·`Array<int16>`)이고, StaticArray 원소·Map 키·값·Set 원소·Optional 내부는 표 칸만 ○이며 그 컨테이너 단계(B9e·B9f2·B9g)가 연다(B9a1이 정한 "뒤 단계 칸 선기입"과 같다). 원본 철자 해석(`SchemaValidator.Scalars`)에 `signed char` → Int8, `short` → Int16을 더해 `SourceValueKinds` = 표의 Array 원소 열이 그대로 성립한다.
+- 시험: 성질 표 시험(`ValueKindProperties_MatchSpecTable`·`ValueKindProperties_TypeRegistryFollowsTable`·`Meta.ValueKindTable*`)의 새 행, 대조 헤더 변이에 Int16 칸 뒤집기.
+
 ### 1.4 플래그 비트
 
 | 플래그 | 값 | 대상 | 전파·상속 | 단계 |
@@ -192,10 +197,18 @@ struct PropertyPath { Span<const PathStep> steps; Span<const PathKey> keys{}; };
 - B9a1: 1.3절 성질 표와 대조 헤더. 동작 불변 리팩터다.
 - B9a2: `int8`·`int16` 필드·멤버·원소. enum underlying을 UE와 같은 8종(`uint8`·`uint16`·`uint32`·`uint64`·`int8`·`int16`·`int32`·`int64`)으로 넓힌다.
 - B9a3: Serialization의 wire 14–18 reader·writer와 ValueArray 원소 tag 확장(1.2절). 형식만 검증하는 시험을 먼저 고정한다.
-- wire는 I64다. 정수 폭을 넓히는 schema 변경이 wire 호환으로 남는다(RF 결정 14). decode는 I64 값이 int8·int16 범위인지 검사한다(UInt8·UInt16의 `UnsignedLimit` — GeneratedFieldCodec.h:76-80과 같은 자리에 `SignedLimit`).
-- 평범한 `char`는 거부한다(부호가 구현 정의). Clang desugar 철자 `signed char`·`short`를 MC/SchemaValidator.cs:5-20 표에 더한다.
+- wire는 I64다. 정수 폭을 넓히는 schema 변경이 wire 호환으로 남는다(RF 결정 14). decode는 I64 값이 int8·int16 범위인지 검사한다(UInt8·UInt16의 `UnsignedLimit` — GeneratedFieldCodec.h:76-80과 같은 자리에 `SignedLimit`). 배열 원소도 I64 원소 tag의 ValueArray다. 기존 wire만 쓰므로 B9a2는 B9a3(wire 14–18)와 독립이다(16절 선행 B9a1만).
+- 평범한 `char`는 거부한다(부호가 구현 정의 — 필드·원소는 RMC2000 "unsupported field type", enum underlying은 RMC2401). Clang desugar 철자 `signed char`·`short`를 MC/SchemaValidator.cs:5-20 표에 더한다.
 - uint64 enum의 열거자 값은 int64 최댓값 이하여야 한다(`EnumeratorSchema::value`가 int64 — MS/TypeSchema.h:238-248, 위반은 RMC2401). Flags uint64 enum은 비트 0–62를 쓴다. 검증기 `IsDeclared(int64)`와 wire I64를 그대로 쓰기 위해서다.
 - 경로·FieldValue는 `signedInteger` 칸, 텍스트는 10진이다.
+
+구현(B9a2)에서 정한 점(정수 폭 — 성질 표의 새 행은 1.3절):
+
+- wire는 기존 I64(4)다(위 항목). 단일 값과 ValueArray 원소 tag 모두 I64이고 I64는 지금도 원소 tag이므로, B9a2는 B9a3(wire 14–18)에 기대지 않고 완결된다. 범위 검사는 `detail::SignedLimit`·`FitsSignedLimit`(GeneratedFieldCodec.h, `UnsignedLimit` 옆 — Int8·Int16·Int32를 한 판정으로)를 저장(`WriteValueWire`)·로드(`ReadValueWire`)가 같이 쓰고(범위 밖 Overflow), FieldValue 쓰기(`WriteTargetValue` — 필드 write·staged·경로)는 대상 C++ 형식의 `NumericLimits<T>`로 같은 범위를 본다. FieldValue 칸은 `signedInteger`다.
+- C++ 형식 대응은 `ScalarValueKind`가 `int8`(= `signed char`)·`int16`(= `short`)을 받는다. 평범한 `char`는 다른 형식이라 Opaque다. MetaCompiler는 평범한 `char` 필드·원소를 지금의 "unsupported field type"(RMC2000)으로 거부하고 `int8`·`uint8`을 안내한다(새 진단 코드를 두지 않았다). enum underlying 자리의 `char`는 RMC2401이다.
+- enum underlying 8종: Clang desugar 철자 `unsigned char`·`unsigned short`·`unsigned int`·`unsigned long long`·`signed char`·`short`·`int`·`long long`만 받고 그 밖(`char`·`bool`·`long` — LLP64·LP64에서 폭이 다르다 — ·`wchar_t` 등)은 RMC2401이다. 범위 표는 런타임 `EnumUnderlyingRange`와 C# `EnumRules.Range` 한 쌍이고 UInt64는 [0, int64 최댓값]이다(넘는 열거자는 전용 문구의 RMC2401 — UE와 다른 점은 18.1절). 생성 코드: `__underlying_type` 대조 static_assert에 `uint64`·`int8`·`int16`·`int64`, int64 최솟값은 리터럴로 쓸 수 없어 `(-9223372036854775807ll - 1)`로 쓰고, Flags enum의 `IsDeclared`는 상한이 int64 최댓값(UInt64·Int64)이면 상한 비교를 내지 않는다. descriptor의 `underlying`·필드 `kind` 값은 ValueKind 이름(`UInt64`·`Int8`·`Int16`·`Int64`)이고 schema 번호는 그대로다(1.8절).
+- Binds 미러 멤버도 같은 철자 해석을 거치므로 int8·int16 멤버를 받는다(지금 미러에는 그런 멤버가 없다).
+- 시험: ObjectRuntime `IntegerWidth_FieldValueConversionChecksRange`·`IntegerWidth_CodecWireAndWidthLimits`·`IntegerWidth_EnumUnderlyingRangesMatchUe`·`IntegerWidth_RegisterEnumAcceptsEightUnderlyingKinds`, ObjectSerialization `IntegerWidthGraph_RoundTripKeepsBoundaryValuesAndResavesIdentically`·`IntegerWidthGraph_LoadRejectsOutOfRangeValues`·`IntegerWidthGraph_SaveRejectsUndeclaredWideEnums`·`IntegerWidthGraph_FieldAndPathWritesCheckWidth`(생성 fixture `ReflectionTestFixtures/IntegerWidthFixture.h`), ToolTests `Meta.IntegerWidthFieldsReachDescriptorAndGeneratedCode`·`Meta.PlainCharFieldIsUnsupported`·`Meta.EnumValuesFollowClangEvaluation`(8종·경계값·생성 헤더 컴파일)·`Meta.EnumUnderlyingAndValuesAreRestricted`(char·bool·long·wchar_t)·`Meta.EnumUint64ValuesAboveInt64AreRejected`(uint64 값 상한의 전용 문구).
 
 ## 3. Atomic·Transform3f·Transform3d(B9b)
 
@@ -774,6 +787,7 @@ Core 커밋(B9b1·B9c1·B9f1·B9i1)은 다른 단계와 독립이라 먼저 해�
 |---|---|---|---|
 | int8·int16 | FInt8Property UT:2267, FInt16Property UT:2301 | ValueKind Int8·Int16 | 같다 |
 | enum underlying | 9개 토큰(Int 포함, UhtEnum.cs:41-93), 기본 Int32(UhtEnumProperty.cs:59) | 8종, 명시 필수 | underlying 명시(RF 3.4절) |
+| enum 값 표현 | UEnum은 이름·값 쌍을 int64로 둔다(`SetEnums(TArray<TPair<FName, int64>>&, …)` CH:3166). int64 최댓값을 넘는 uint64 열거자는 거부하지 않고 생성 코드가 `(int64)` 변환으로 감싸 음수로 받는다(UhtHeaderCodeGeneratorCppFile.cs:712·738·756, 파서는 long으로 못 읽는 값을 미해석 -1로 둔다 — UhtEnumParser.cs:189-198) | `EnumeratorSchema::value` int64, uint64 열거자는 int64 최댓값 이하(RMC2401), Flags uint64는 비트 0–62 | 표현(int64)은 같다. 상한 초과 값은 거부한다 — 값이 조용히 음수로 바뀌는 것을 막고, Flags 판정 `value >= 0`·범위 표·I64 wire를 하나로 두기 위해서다(2절) |
 | 저장 폭 | native 폭 | I64 | RF 결정 14(폭 확장의 wire 호환) |
 
 ### 18.2 Atomic·수학 타입

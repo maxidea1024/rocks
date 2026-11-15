@@ -638,7 +638,9 @@ internal static class CppEmitter
         {
             ulong mask = type.Enumerators.Aggregate(0UL, (bits, value) => bits | (ulong)value.Value);
             long maximum = EnumRules.Range(type.Underlying)!.Value.Maximum;
-            Line($"return value >= 0 && value <= {Int64(maximum)} && (static_cast<uint64>(value) & ~0x{mask:x}ull) == 0;");
+            // 상한이 int64 최댓값(UInt64·Int64)이면 상한 비교는 늘 참이므로 내지 않는다(비교가 경고 대상이 되지 않게).
+            string upper = maximum == long.MaxValue ? "" : $" && value <= {Int64(maximum)}";
+            Line($"return value >= 0{upper} && (static_cast<uint64>(value) & ~0x{mask:x}ull) == 0;");
         }
         else
         {
@@ -661,6 +663,7 @@ internal static class CppEmitter
         Line("};");
     }
 
-    // int64 리터럴이다. 최솟값은 리터럴로 쓸 수 없지만 int32 범위의 enum만 있으므로 그 경우가 없다.
-    private static string Int64(long value) => value.ToString(CultureInfo.InvariantCulture) + "ll";
+    // int64 리터럴이다. int64 최솟값은 리터럴로 쓸 수 없으므로(9223372036854775808ll이 int64 밖이다) 식으로 쓴다(int64 enum).
+    private static string Int64(long value) =>
+        value == long.MinValue ? "(-9223372036854775807ll - 1)" : value.ToString(CultureInfo.InvariantCulture) + "ll";
 }

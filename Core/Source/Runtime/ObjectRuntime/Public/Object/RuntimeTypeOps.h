@@ -72,7 +72,9 @@ struct FieldValue {
 
     ValueKind kind = ValueKind::Opaque;
     bool boolean = false;
+    // UInt8·UInt16·UInt32·UInt64 값이다.
     uint64 unsignedInteger = 0;
+    // Int8·Int16·Int32·Int64 값과 Enum 값(underlying 8종 모두 int64)이다.
     int64 signedInteger = 0;
     float float32 = 0;
     double float64 = 0;

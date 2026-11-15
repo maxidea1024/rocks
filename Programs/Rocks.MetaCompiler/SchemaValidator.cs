@@ -2,6 +2,8 @@ namespace Rocks.MetaCompiler;
 
 internal static class SchemaValidator
 {
+    // Clang이 desugar한 단일 값 철자 → 값 종류다. int8·int16은 signed char·short다(Docs/Design/ReflectionExtensions.ko.md 2절).
+    // 평범한 char는 부호가 구현 정의라 넣지 않는다(UnsupportedFieldHint가 int8·uint8을 안내한다).
     private static readonly Dictionary<string, string> Scalars = new(StringComparer.Ordinal)
     {
         ["bool"] = "Bool",
@@ -9,6 +11,8 @@ internal static class SchemaValidator
         ["unsigned short"] = "UInt16",
         ["unsigned int"] = "UInt32",
         ["unsigned long long"] = "UInt64",
+        ["signed char"] = "Int8",
+        ["short"] = "Int16",
         ["int"] = "Int32",
         ["long long"] = "Int64",
         ["float"] = "Float32",
@@ -403,6 +407,12 @@ internal static class SchemaValidator
         // 않았다), import하지 않았으면 그 모듈에 의존하라고 안내한다.
         string UnsupportedFieldHint(string spelling)
         {
+            // 평범한 char는 signed char·unsigned char와 다른 형식이고 부호가 구현 정의라 받지 않는다(Docs/Design/ReflectionExtensions.ko.md 2절).
+            if (spelling == "char")
+            {
+                return "Plain char has implementation-defined signedness; use rocks::int8 (signed char) or rocks::uint8 (unsigned char).";
+            }
+
             static string Template(string text) => text.IndexOf('<') is int open and > 0 ? text[..open] : text;
             string[] bound = imported.Values.Where(model => model.Binds.Length != 0).Select(model => model.Binds).ToArray();
             string[] siblings = bound.Where(binds => Template(binds) == Template(spelling)).Order(StringComparer.Ordinal).ToArray();

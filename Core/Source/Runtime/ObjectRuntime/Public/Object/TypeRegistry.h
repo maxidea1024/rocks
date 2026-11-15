@@ -55,11 +55,12 @@ public:
     // 리플렉션 enum을 등록한다(생성 코드는 GeneratedType<E>::Register). 입력 버퍼는 호출 동안
     // 유효해야 하며 이름·열거자 바이트를 깊게 복사한다. 실패하면 기존 등록 상태를 유지하고 ops의
     // ModuleLease는 정리된다. 주요 실패: id 0·빈 이름·UTF-8이 아닌 이름·지원하지 않는
-    // underlying(UInt8·UInt16·UInt32·Int32만)·알 수 없는 플래그·열거자 없음 또는 4096개 초과·ASCII
-    // 식별자가 아닌 열거자 이름·[A-Za-z0-9_]+가 아닌 도구 이름이나 접두·UTF-8이 아닌 표시 이름·
-    // underlying 범위 밖 값·Flags enum의 음수 값·nativeType null은 InvalidArgument, 같은 ID(다른
-    // 종류 포함)·같은 nativeType의 enum(다른 ID의 별칭)·같은 값(별칭)·접두 유무를 합쳐 대소문자
-    // 무시로 같은 도구 이름은 AlreadyExists다.
+    // underlying(정수 8종 UInt8·UInt16·UInt32·UInt64·Int8·Int16·Int32·Int64만 —
+    // EnumUnderlyingRange)·알 수 없는 플래그·열거자 없음 또는 4096개 초과·ASCII 식별자가 아닌
+    // 열거자 이름·[A-Za-z0-9_]+가 아닌 도구 이름이나 접두·UTF-8이 아닌 표시 이름·underlying 범위 밖
+    // 값(UInt64는 int64 최댓값까지)·Flags enum의 음수 값·nativeType null은 InvalidArgument, 같은
+    // ID(다른 종류 포함)·같은 nativeType의 enum(다른 ID의 별칭)·같은 값(별칭)·접두 유무를 합쳐
+    // 대소문자 무시로 같은 도구 이름은 AlreadyExists다.
     //
     // 사용 예:
     //   auto token = GeneratedType<TextureGroup>::Register(types);   // enum 먼저

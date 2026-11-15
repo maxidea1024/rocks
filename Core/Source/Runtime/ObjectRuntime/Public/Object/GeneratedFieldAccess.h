@@ -91,7 +91,9 @@ struct StructMemberPointer<M S::*> {
 };
 
 // C++ 형식의 단일 값 종류다(enum·struct·컨테이너는 Opaque — 그 셋은 Target과 정적 대조로 가린다).
-// requires 탐지 없이 IsSameV와 부분 특수화(ObjectReferenceField·SoftReferenceField)만 쓴다.
+// requires 탐지 없이 IsSameV와 부분 특수화(ObjectReferenceField·SoftReferenceField)만 쓴다. 평범한
+// char는 signed char(int8)·unsigned char(uint8)와 다른 형식이라 Opaque다(부호가 구현 정의 —
+// MetaCompiler도 거부한다).
 template <class T>
 constexpr ValueKind ScalarValueKind() noexcept {
     if constexpr (IsSameV<T, bool>) {
@@ -104,6 +106,10 @@ constexpr ValueKind ScalarValueKind() noexcept {
         return ValueKind::UInt32;
     } else if constexpr (IsSameV<T, uint64>) {
         return ValueKind::UInt64;
+    } else if constexpr (IsSameV<T, int8>) {
+        return ValueKind::Int8;
+    } else if constexpr (IsSameV<T, int16>) {
+        return ValueKind::Int16;
     } else if constexpr (IsSameV<T, int32>) {
         return ValueKind::Int32;
     } else if constexpr (IsSameV<T, int64>) {
@@ -194,7 +200,8 @@ Result<void> CopyTargetValue(const T& source, FieldValue& value) noexcept {
         value.float32 = source;
     } else if constexpr (Target == ValueKind::Float64) {
         value.float64 = source;
-    } else if constexpr (Target == ValueKind::Int32 || Target == ValueKind::Int64) {
+    } else if constexpr (Target == ValueKind::Int8 || Target == ValueKind::Int16 ||
+                         Target == ValueKind::Int32 || Target == ValueKind::Int64) {
         value.signedInteger = source;
     } else {
         value.unsignedInteger = source;
@@ -203,7 +210,8 @@ Result<void> CopyTargetValue(const T& source, FieldValue& value) noexcept {
     return Result<void>::Success();
 }
 
-// FieldValue를 Target 종류의 단일 값 target에 쓴다. 정수 폭이 넘치면 Overflow, enum은 값의 enum
+// FieldValue를 Target 종류의 단일 값 target에 쓴다. 정수 폭이 넘치면 Overflow(Int8·Int16·Int32는
+// signedInteger, 부호 없는 정수는 unsignedInteger가 대상 폭 밖일 때), enum은 값의 enum
 // ID가 GeneratedType<E>::Id()가 아니면 TypeMismatch·선언되지 않은 값이면 InvalidArgument, Soft는
 // null 규칙·경로 상한 위반이 InvalidArgument다(실패하면 target은 그대로다). String·Soft는 target의
 // allocator로 할당한다(OutOfMemory — 이때는 제자리 대입이므로 원자적 게시가 필요한 쓰기는 새 값에
@@ -243,13 +251,15 @@ Result<void> WriteTargetValue(T& target, const FieldValue& value) noexcept {
         target = value.float32;
     } else if constexpr (Target == ValueKind::Float64) {
         target = value.float64;
-    } else if constexpr (Target == ValueKind::Int32) {
-        if (value.signedInteger < NumericLimits<int32>::Min() ||
-            value.signedInteger > NumericLimits<int32>::Max()) {
+    } else if constexpr (Target == ValueKind::Int8 || Target == ValueKind::Int16 ||
+                         Target == ValueKind::Int32) {
+        // 좁은 부호 있는 정수는 대상 폭(int8·int16·int32) 밖이면 Overflow다(값은 signedInteger).
+        if (value.signedInteger < NumericLimits<T>::Min() ||
+            value.signedInteger > NumericLimits<T>::Max()) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }
 
-        target = static_cast<int32>(value.signedInteger);
+        target = static_cast<T>(value.signedInteger);
     } else if constexpr (Target == ValueKind::Int64) {
         target = value.signedInteger;
     } else {

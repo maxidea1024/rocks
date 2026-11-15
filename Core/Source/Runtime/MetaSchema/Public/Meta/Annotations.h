@@ -17,12 +17,13 @@
 #define ROCKS_PROPERTY(...) [[clang::annotate("rocks", "rocks.field.arguments", #__VA_ARGS__)]]
 
 // 리플렉션 enum이다(Docs/Design/ReflectionFoundations.ko.md 3.4절). 바로 뒤에 underlying을 명시한
-// enum class 정의가 와야 한다(uint8·uint16·uint32·int32, 열거자 하나 이상, 값 별칭 금지 —
-// RMC2401). 지정자: ToolPrefix="…"(도구 이름 조회가 앞에 붙어 있어도 받는 접두), Flags(비트 플래그
-// — 값은 선언 값의 OR). 열거자에는 ROCKS_ENUMERATOR(Name="…", DisplayName="…", Hidden)를 열거자
-// 이름 바로 뒤에 붙일 수 있다(Name은 [A-Za-z0-9_]+ 도구 이름, Hidden은 도구 설정이 받지 않는 값).
-// 접두 유무를 합친 도구 이름은 대소문자 무시로 유일해야 한다(RMC2203). 필드에 쓰면 저장 wire는
-// I64다.
+// enum class 정의가 와야 한다(UE와 같은 정수 8종 uint8·uint16·uint32·uint64·int8·int16·int32·int64,
+// 열거자 하나 이상, 값 별칭 금지, uint64 열거자 값은 int64 최댓값 이하 — RMC2401, Docs/Design/
+// ReflectionExtensions.ko.md 2절). 지정자: ToolPrefix="…"(도구 이름 조회가 앞에 붙어 있어도 받는
+// 접두), Flags(비트 플래그 — 값은 선언 값의 OR). 열거자에는 ROCKS_ENUMERATOR(Name="…",
+// DisplayName="…", Hidden)를 열거자 이름 바로 뒤에 붙일 수 있다(Name은 [A-Za-z0-9_]+ 도구 이름,
+// Hidden은 도구 설정이 받지 않는 값). 접두 유무를 합친 도구 이름은 대소문자 무시로 유일해야
+// 한다(RMC2203). 필드에 쓰면 저장 wire는 I64다.
 //
 // 사용 예:
 //   ROCKS_ENUM(ToolPrefix = "TEXTUREGROUP_")
