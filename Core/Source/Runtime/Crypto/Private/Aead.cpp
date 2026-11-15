@@ -441,7 +441,7 @@ AeadKey& AeadKey::operator=(AeadKey&& other) noexcept {
 }
 
 void AeadKey::Release() noexcept {
-    platform::DataIndependentTimingScope dit;
+    // 해제는 값을 0으로 덮을 뿐 비밀 값을 읽어 계산하지 않으므로 DIT 범위를 열지 않는다(6.3절).
     if (state_ != nullptr) {
         // 키 저장소 슬롯은 해제 때 지워진다(SecretArena).
         detail::FreeSecretSlot(state_);
