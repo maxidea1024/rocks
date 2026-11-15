@@ -596,7 +596,7 @@ enum class UnsaveablePolicy : uint8 {
 
 - 지정하지 않으면 부모의 Within을 상속하고, 지정하면 부모 Within의 파생이어야 한다(RMC2208). 자기 자신을 Within으로 둘 수 있다(UE와 같다 — UhtClass.cs:1442).
 - 값 해석: `Within="…"`의 철자는 Binds와 같은 방식으로 Clang이 정규 이름으로 푼다(`using rocksWithin_N = ::철자;` 확인 실행 — MC/CompilerDriver.cs:534-589와 같은 경로).
-- 판정 위치: `OuterSummary`(OR/ObjectRegistry.h:48-66)에 Outer 타입(TypeId)을 더하고, 생성 정체성 규칙(`detail::CheckNewObjectIdentity` — Registry 생성·그래프 1단계·2a 사전 확인이 함께 쓰는 순수 함수, ObjectRegistry.h:84-100)에 Within 단계를 더한다(패키지 규칙 다음). 실패는 InvalidArgument다.
+- 판정 위치: `OuterSummary`(OR/ObjectIdentity.h)에 Outer 타입(TypeId)을 더하고, 생성 정체성 규칙(`detail::CheckNewObjectIdentity` — Registry 생성·그래프 1단계·2a 사전 확인이 함께 쓰는 순수 함수, OR/ObjectIdentity.h)에 Within 단계를 더한다(패키지 규칙 다음). 실패는 InvalidArgument다.
   - 그래프 안 Outer(노드 k)는 노드 표로 타입을 알므로 1단계에서 판정한다(파일 손상).
   - outer 0(기준 Outer)은 2a가 실제 handle로 판정한다.
   - `OuterSummary::ForNewOutermost`에 새 outermost의 타입 칸을 더한다(A1 로더의 새 Package).
@@ -679,10 +679,10 @@ Result<PreparedAssignments> PrepareAssignments(AssignmentTarget, Span<const Text
 - **대상 고정**: Prepare와 Append는 묶음이 새로 가리키는 non-null Hard·Weak 대상을 `RootRef`(`TryPin`)로 붙잡고, Publish가 끝나거나 `PreparedAssignments`가 소멸할 때 놓는다. 준비 단위는 GC Trace 밖이라 붙잡지 않으면 그 사이 GC가 대상을 회수할 수 있다. 고정은 Discard를 막지 못하므로 Publish 2단계가 다시 확인한다.
 - **Publish(살아 있는 객체)**:
   1. 소유자 Borrow를 얻고, Prepare 뒤 소유자가 바뀌지 않았는지 객체 변경 표지(`ObjectRegistry::MutationStamp(handle)` — 리플렉션 쓰기·Registry 참조 변경마다 증가)로 확인한다. 바뀌었으면 Busy, 소유자가 죽었으면 StaleHandle이고 아무것도 바뀌지 않는다.
-  2. Registry 묶음 게시 구간(`ObjectRegistry::BeginBatchPublish`)에 들어간다. 구간 안에서는 그 Registry의 다른 변경·GC 단계·Discard가 Busy이고 콜백이 없다. 그 안에서 (가) 모든 새 대상(Hard·Weak)의 생존(Discard·회수 아님)·기대 타입·같은 Registry를 다시 확인하고, (나) 간선 변경에서 센 관찰자 키 공간을 예약한다(`ReferenceObserver::Reserve` — OR/ReferenceObserver.h:108-113. 처리 표시 아래 잠금 밖에서 예약한 뒤 다시 잠가 확인하는 지금 `ClearReferences` 방식 — ObjectRegistry.h:441-447). 어느 것이든 실패하면(StaleHandle·TypeMismatch·OutOfMemory·CapacityExceeded) 아무것도 바뀌지 않는다.
+  2. Registry 묶음 게시 구간(`ObjectRegistry::BeginBatchPublish`)에 들어간다. 구간 안에서는 그 Registry의 다른 변경·GC 단계·Discard가 Busy이고 콜백이 없다. 그 안에서 (가) 모든 새 대상(Hard·Weak)의 생존(Discard·회수 아님)·기대 타입·같은 Registry를 다시 확인하고, (나) 간선 변경에서 센 관찰자 키 공간을 예약한다(`ReferenceObserver::Reserve` — OR/ReferenceObserver.h:108-113. 처리 표시 아래 잠금 밖에서 예약한 뒤 다시 잠가 확인하는 지금 `ClearReferences` 방식 — OR/ObjectRegistry.h의 ObjectRefArray 공통 규칙 주석). 어느 것이든 실패하면(StaleHandle·TypeMismatch·OutOfMemory·CapacityExceeded) 아무것도 바뀌지 않는다.
   3. 준비 단위를 무할당으로 차례로 게시한다. 2에서 대상과 공간을 확인했고 구간 안에는 다른 변경·콜백이 없으므로 이 단계는 실패하지 않는다. 삽입 장벽의 shade는 미리 잡은 GC 작업 용량을 쓰는 무할당 연산이고, 그 용량이 모자라는 것은 불변식 위반이다(ORP/ObjectRegistryGc.cpp:79-83).
   4. 구간을 나온 뒤 옛 값·옛 버퍼를 반환하고 대상 고정을 놓는다.
-  - 지금 `SetReference`·ObjectRefArray 변경은 게시 시점에 대상 검증(StaleHandle·TypeMismatch)·관찰자 예약 실패가 날 수 있다(ObjectRegistry.h:407-447). 이 실패를 2단계로 앞당기는 것이 B9i2 커밋의 선행 변경이다.
+  - 지금 `SetReference`·ObjectRefArray 변경은 게시 시점에 대상 검증(StaleHandle·TypeMismatch)·관찰자 예약 실패가 날 수 있다(OR/ObjectRegistry.h의 `SetReference` 주석과 ObjectRefArray 공통 규칙 주석). 이 실패를 2단계로 앞당기는 것이 B9i2 커밋의 선행 변경이다.
   - 계약: Prepare와 Publish 사이에 C++ 코드가 같은 객체의 값 필드를 직접 바꾸면 변경 표지에 잡히지 않고 게시가 그 값을 덮는다. 표지는 리플렉션 쓰기와 Registry 참조 변경만 올리며, 그 사이 직접 쓰기는 호출자 책임이다.
 - **staged 객체**(`asset-new`): staged write로 게시하고 관찰자가 없다. 실패하면 호출자의 트랜잭션 rollback이 원자성을 준다.
 - **struct 값**: 준비 사본을 대상 struct에 무할당으로 옮긴다(참조를 담는 struct 값은 대상이 될 수 없다 — 참조 struct는 객체 안에서만 쓴다).
