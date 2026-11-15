@@ -90,49 +90,6 @@ struct StructMemberPointer<M S::*> {
     using Member = M;
 };
 
-template <class T>
-constexpr ValueKind FieldValueKind() noexcept {
-    if constexpr (ArrayField<T>::Supported) {
-        return ValueKind::Array;
-    } else if constexpr (IsSameV<T, bool>) {
-        return ValueKind::Bool;
-    } else if constexpr (IsSameV<T, uint8>) {
-        return ValueKind::UInt8;
-    } else if constexpr (IsSameV<T, uint16>) {
-        return ValueKind::UInt16;
-    } else if constexpr (IsSameV<T, uint32>) {
-        return ValueKind::UInt32;
-    } else if constexpr (IsSameV<T, uint64>) {
-        return ValueKind::UInt64;
-    } else if constexpr (IsSameV<T, int32>) {
-        return ValueKind::Int32;
-    } else if constexpr (IsSameV<T, int64>) {
-        return ValueKind::Int64;
-    } else if constexpr (IsSameV<T, float>) {
-        return ValueKind::Float32;
-    } else if constexpr (IsSameV<T, double>) {
-        return ValueKind::Float64;
-    } else if constexpr (IsSameV<T, Guid>) {
-        return ValueKind::Guid;
-    } else if constexpr (IsSameV<T, String>) {
-        return ValueKind::Utf8String;
-    } else if constexpr (ObjectReferenceField<T>::Supported) {
-        return ValueKind::ObjectReference;
-    } else if constexpr (IsSameV<T, AssetId>) {
-        return ValueKind::AssetId;
-    } else if constexpr (IsSameV<T, Sha256Digest>) {
-        return ValueKind::Digest256;
-    } else if constexpr (SoftReferenceField<T>::Supported) {
-        return ValueKind::SoftObjectReference;
-    } else if constexpr (ReflectedEnumField<T>::Supported) {
-        return ValueKind::Enum;
-    } else if constexpr (ReflectedStructField<T>::Supported) {
-        return ValueKind::Struct;
-    } else {
-        return ValueKind::Opaque;
-    }
-}
-
 // C++ 형식의 단일 값 종류다(enum·struct·컨테이너는 Opaque — 그 셋은 Target과 정적 대조로 가린다).
 // requires 탐지 없이 IsSameV와 부분 특수화(ObjectReferenceField·SoftReferenceField)만 쓴다.
 template <class T>
@@ -167,6 +124,24 @@ constexpr ValueKind ScalarValueKind() noexcept {
         return ValueKind::Digest256;
     } else if constexpr (SoftReferenceField<T>::Supported) {
         return ValueKind::SoftObjectReference;
+    } else {
+        return ValueKind::Opaque;
+    }
+}
+
+// C++ 멤버 형식의 필드 값 종류다: 리플렉션 배열 컨테이너는 Array, 단일 값은 ScalarValueKind,
+// 리플렉션 enum·struct는 Enum·Struct, 그 밖은 Opaque다(단일 값 형식 대응은 ScalarValueKind 한 곳에
+// 있다).
+template <class T>
+constexpr ValueKind FieldValueKind() noexcept {
+    if constexpr (ArrayField<T>::Supported) {
+        return ValueKind::Array;
+    } else if constexpr (ScalarValueKind<T>() != ValueKind::Opaque) {
+        return ScalarValueKind<T>();
+    } else if constexpr (ReflectedEnumField<T>::Supported) {
+        return ValueKind::Enum;
+    } else if constexpr (ReflectedStructField<T>::Supported) {
+        return ValueKind::Struct;
     } else {
         return ValueKind::Opaque;
     }

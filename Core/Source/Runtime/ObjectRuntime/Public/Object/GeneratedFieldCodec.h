@@ -13,7 +13,9 @@
 namespace rocks::detail {
 
 // 값 종류의 wire tag다. 강한 참조는 문맥의 referenceWire다. Array·Opaque는 Unsupported다(배열
-// 필드는 아래 필드 단위 FieldWireType).
+// 필드는 아래 필드 단위 FieldWireType). 종류의 다른 성질은 MetaSchema 성질
+// 표(ValueKindProperties)에 있고, wire 대응만 MetaSchema가 Serialization에 의존하지 않도록 이
+// switch 하나에 둔다.
 inline Result<uint32> FieldWireType(ValueKind kind, uint32 referenceWire) noexcept {
     switch (kind) {
     case ValueKind::Bool:
@@ -1174,8 +1176,7 @@ Result<uint32> EncodeArrayField(const Container& array, ArchiveWriter& out,
     using Traits = ArrayField<Container>;
     using Element = typename Traits::Element;
     static_assert(Traits::Supported);
-    static_assert(FieldValueKind<Element>() != ValueKind::Opaque &&
-                      FieldValueKind<Element>() != ValueKind::Array,
+    static_assert(ValueKindCanBeArrayElement(FieldValueKind<Element>()),
                   "Reflected array elements must be single values or reflected structs");
     const FieldSchema& field = context.Field();
     if (!MatchesSchema<Container>(field)) {
@@ -1624,8 +1625,7 @@ Result<void> DecodeArrayField(ConstructionContext* construction, ObjectHandle ow
     using Traits = ArrayField<Container>;
     using Element = typename Traits::Element;
     static_assert(Traits::Supported);
-    static_assert(FieldValueKind<Element>() != ValueKind::Opaque &&
-                      FieldValueKind<Element>() != ValueKind::Array,
+    static_assert(ValueKindCanBeArrayElement(FieldValueKind<Element>()),
                   "Reflected array elements must be single values or reflected structs");
     const FieldSchema& schema = context.Field();
     auto wire = FieldWireType(schema, context.ReferenceWireType());

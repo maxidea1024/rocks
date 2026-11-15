@@ -118,6 +118,14 @@ MetaCompiler(C#)와 런타임(C++)의 표 대조: MetaCompiler가 "모든 종류
 - Optional 내부에서 참조를 막는 이유: 참조는 이미 null이 "없음"이다(SL 24행 "없음은 하나다", SL 1198행 SD19).
 - InstancedStruct 내용으로 받는 struct는 11절 조건(강한 참조·Registry 컨테이너·InstancedStruct·Required 없음)을 지켜야 한다.
 
+구현(B9a1, 동작 불변)에서 정한 점:
+
+- C++: `MS/TypeSchema.h`의 `enum class ValueKindProperty`(성질 14개, 비트 0–13)와 표 함수 `detail::ValueKindTableEntry`(switch 하나, default 없음 — 열거자 여부와 성질 비트)가 유일한 표이고, `ValueKindProperties(ValueKind) -> uint32`가 그 비트를 준다. 이름 있는 질의 `ValueKindCanBeField`·`ValueKindCanBeStructMember`·`ValueKindCanBeArrayElement`·`ValueKindCanBeStaticArrayElement`·`ValueKindCanBeMapKey`·`ValueKindCanBeMapValue`·`ValueKindCanBeSetElement`·`ValueKindCanBeOptionalInner`·`ValueKindCanBeInstancedStructContent`·`ValueKindAcceptsRequired`·`ValueKindHasTargetType`·`ValueKindRequiresTargetId`·`ValueKindIsContainer`·`ValueKindIsWholeFieldValue`가 `HasValueKindProperty`로 이것을 읽는다. `HasValueKindProperty`와 C# `ValueKindTable.Has`는 성질 하나만 받는다(None·여러 비트는 C++ `ROCKS_ASSERT`, C# ArgumentException — 같은 이름이 같은 뜻이게). `ValueKindCount`(마지막 열거자 + 1)는 헤더의 static_assert가 표와 맞춘다(새 열거자: case 누락은 -Wswitch, `ValueKindCount` 누락은 이 static_assert, C# 행 누락은 대조 헤더가 컴파일에서 잡는다). 파생 판정 `ValueKindIsAggregate`(필드 종류이면서 통째 FieldValue가 아님 — 지금 Struct·Array, 표를 한 번 읽는다)를 함께 둔다. `FieldTargetType`은 `ValueKindIsContainer`로 원소를 고른다.
+- 행의 뜻: 표는 종류 단위다. Struct 행은 값 struct 기준이고 참조 struct의 제한(StructRefArray, Map 값·Optional 내부·InstancedStruct 내용 ×)은 struct 형질로 따로 본다. ObjectReference의 Array 원소·Map 값 ○는 Registry 컨테이너(ObjectRefArray·ObjectRefMap)를 쓴다는 뜻이다. "InstancedStruct 내용"은 그 종류가 InstancedStruct에 담기는 값이 될 수 있는지다(Struct만 ○ — 담을 수 있는 struct 조건은 11절 형질 검사). Required·대상 타입 성질은 필드의 대상 종류(`FieldTargetType` — 컨테이너면 원소)로 판정한다. Opaque(비typed 수동 메타데이터)는 모든 성질이 ×이고, TypeRegistry는 클래스의 Opaque 필드를 표 밖에서 받는다(지금과 같다). 열거자 밖의 값은 성질이 없다.
+- 뒤 단계 주의(B9e): `ValueKindIsAggregate`와 그 호출처(TypeRegistry `IsAggregateField`, `FieldWriteOperation`·`ValidateFieldWrite`, 경로 `IsAggregateKind`)는 종류만 받는다. Optional은 내부가 단일 값이면 비aggregate, 값 struct면 aggregate이므로(위 표 아래 첫 항목) B9e가 필드 단위 판정(예: `FieldIsAggregate(const FieldSchema&)`)으로 넓힌다. 참조 struct의 Map 값·Optional 내부·InstancedStruct 내용 거부도 B9e·B9f2·B9j가 형질과 묶은 판정 도우미로 둔다.
+- 표로 바꾼 곳: TypeRegistry 등록(`<= Digest256` 범위 판정 제거 — 클래스 필드는 Field, struct 멤버는 StructMember 열, Array 원소·Required·대상 타입·aggregate), `FieldWriteOperation`·`ValidateFieldWrite`의 aggregate, 경로의 aggregate, 그래프 `ValidateLayout`의 대상 타입, 생성 codec의 배열 원소 static_assert. `FieldValueKind<T>`는 단일 값 형식 대응을 `ScalarValueKind<T>` 한 곳에 맡긴다.
+- C#: `MC/ValueKindTable.cs`의 `ValueKindProperty`(같은 비트)·`ValueKindTable.Rows`(이름·열거자 값·성질)·`ValueKindTable.Has`. 원본 선언 검증(`SchemaValidator.Validate`)도 철자 해석이 정한 종류가 그 자리(클래스 필드·struct 멤버·Array 원소)에 표가 허용하는지 확인한다(지금은 늘 통과 — 철자 해석이 만드는 종류 집합 `SchemaValidator.SourceValueKinds`와 표의 Array 원소 열이 같음을 `Meta.ValueKindTableMatchesSourceResolution`이 고정한다). 대조 헤더는 `ValueKindTable.ParityHeader(rows)`가 만들고(MetaCompiler 명령행 하위 명령은 두지 않았다 — ToolTests가 같은 어셈블리 함수를 직접 부른다), `rows` 인자가 시험이 칸을 바꾼 표를 넣는 통로다. 헤더는 칸마다의 질의 대조에 더해 성질 비트 값, `ValueKindCount == 행 수`, 행마다 열거자 값을 대조한다(종류 행이 한쪽에만 있는 경우도 잡는다). ToolTests `Meta.ValueKindTableMatchesRuntime`(Queries가 성질 전체를 덮는지 포함)·`Meta.ValueKindTableMismatchFailsToCompile`이 컴파일하고, C++ 표 = 이 절 허용 표는 `ValueKindProperties_MatchSpecTable`, 등록이 표를 따르는지(Array 원소·struct 멤버·클래스 필드)는 `ValueKindProperties_TypeRegistryFollowsTable`(ObjectRuntime 시험)이 고정한다.
+
 ### 1.4 플래그 비트
 
 | 플래그 | 값 | 대상 | 전파·상속 | 단계 |
@@ -177,7 +185,7 @@ struct PropertyPath { Span<const PathStep> steps; Span<const PathKey> keys{}; };
 - 필드: `key`(Map), `element`(Optional·Set·StaticArray·Map 값), StaticArray의 `maxElements` = N, `bitfield`(bool, 14절).
 - 클래스: `within`(정규 이름), `toolName`, flags에 `Transient`·`Deprecated`.
 - struct: `base`(정규 이름), `toolName`, flags에 `Atomic`, 비리플렉션 빈 base는 기록하지 않는다(12절).
-- 종류 검증(`IsSupportedValueKind`·`IsSupportedElementKind`·`KindAcceptsRequired`·`KindHasTargetType`)은 1.3절 C# 표를 쓴다.
+- 종류 검증(`IsSupportedValueKind`·`IsSupportedElementKind`·`KindAcceptsRequired`·`KindHasTargetType`)은 1.3절 C# 표를 쓴다. B9a1에서 이 넷과 `KindRequiresTargetId`를 지우고 `ValueKindTable.Has`로 바꿨다(필드 값 종류는 클래스면 Field, struct면 StructMember 열, 원소는 ArrayElement 열).
 
 ## 2. 정수 폭(B9a)
 

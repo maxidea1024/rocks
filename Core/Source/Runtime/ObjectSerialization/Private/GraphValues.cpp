@@ -50,8 +50,7 @@ Result<void> ValidateLayout(const TypeLease& type, Budget& budget) noexcept {
         // value.type은 0이다.
         const ValueType& target = FieldTargetType(field);
         const bool reference = target.kind == ValueKind::ObjectReference;
-        const bool typed = target.kind == ValueKind::SoftObjectReference ||
-                           target.kind == ValueKind::Enum || target.kind == ValueKind::Struct;
+        const bool typed = ValueKindHasTargetType(target.kind);
         if ((field.value.kind == ValueKind::Array && field.value.type != Guid{}) ||
             (reference && field.kind != FieldKind::ObjectReference) ||
             (!reference && (field.kind != FieldKind::Value || (!typed && target.type != Guid{}))) ||

@@ -150,7 +150,7 @@ internal static class CompilerDriver
             // (등록이 NotFound가 된다), public 생성 헤더는 private 생성 헤더를 include할 수 없다. NATIVE 멤버의 직접
             // 타입인 struct도 생성 헤더가 include하므로 같다.
             // 배열 필드의 원소 enum·struct도 같다(대상 종류가 원소 종류다).
-            FieldModel? privateValue = type.Private ? null : type.OwnFields.FirstOrDefault(field => FieldModel.KindRequiresTargetId(field.TargetKind) &&
+            FieldModel? privateValue = type.Private ? null : type.OwnFields.FirstOrDefault(field => ValueKindTable.Has(field.TargetKind, ValueKindProperty.RequiresTargetId) &&
                 field.Reference is not null && schema.Classes.TryGetValue(field.Reference, out ClassModel? target) && target.Private);
             if (privateValue is not null)
             {

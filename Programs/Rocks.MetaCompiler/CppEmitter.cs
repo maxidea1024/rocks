@@ -164,7 +164,7 @@ internal static class CppEmitter
         // 특수화를 두 번 정의하지 않도록 그 타입의 생성 헤더를 include한다.
         ClassModel[] own = schema.Ordered.Where(type => type.Header == include).ToArray();
         IEnumerable<string> valueHeaders = own.SelectMany(type => type.Fields)
-            .Where(field => FieldModel.KindRequiresTargetId(field.TargetKind) && field.Reference is not null)
+            .Where(field => ValueKindTable.Has(field.TargetKind, ValueKindProperty.RequiresTargetId) && field.Reference is not null)
             .Select(field => field.Reference!)
             .Concat(own.SelectMany(type => type.NativeMembers).Where(native => native.Struct is not null).Select(native => native.Struct!))
             .Select(name => schema.Find(name).Header)

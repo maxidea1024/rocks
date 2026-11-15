@@ -10,9 +10,8 @@ namespace rocks {
 Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
                                              const ObjectAccessContext& access, ObjectHandle handle,
                                              const FieldValue& value) const noexcept {
-    // 묶인 struct·배열 필드는 callback이 없다(아래에서 문맥·대상 검사 뒤 Unsupported).
-    const bool aggregateField =
-        bound_ && (valueKind_ == ValueKind::Struct || valueKind_ == ValueKind::Array);
+    // 묶인 struct·배열(aggregate) 필드는 callback이 없다(아래에서 문맥·대상 검사 뒤 Unsupported).
+    const bool aggregateField = bound_ && ValueKindIsAggregate(valueKind_);
     if (!callback_ && !aggregateField) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -172,9 +171,10 @@ Result<void> ValidateFieldWrite(const FieldWriteBinding& binding, const FieldWri
         }
     }
 
-    // struct 값·배열(원소 모드의 struct 원소 포함)은 FieldValue로 통째 쓰지 않는다 — 종류 대조
-    // 뒤의 정책 오류다(멤버·원소 단위 쓰기는 경로 접근이 단일 값으로 내려가 이 함수를 다시 거친다).
-    if (kind == ValueKind::Struct || kind == ValueKind::Array) {
+    // struct 값·배열(aggregate — 원소 모드의 struct 원소 포함)은 FieldValue로 통째 쓰지 않는다 —
+    // 종류 대조 뒤의 정책 오류다(멤버·원소 단위 쓰기는 경로 접근이 단일 값으로 내려가 이 함수를
+    // 다시 거친다).
+    if (ValueKindIsAggregate(kind)) {
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
 

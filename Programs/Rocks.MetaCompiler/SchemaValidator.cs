@@ -19,11 +19,11 @@ internal static class SchemaValidator
         ["rocks::Sha256Digest"] = "Digest256"
     };
 
-    // descriptor import가 받는 값 종류다(MetaCompiler가 만들 수 있는 종류 — 배열 필드의 Array 포함).
-    public static bool IsSupportedValueKind(string kind) => IsSupportedElementKind(kind) || kind == ArrayRules.Array;
+    private static readonly string[] TargetKinds = ["Enum", "Struct", "ObjectReference", "SoftObjectReference"];
 
-    // 배열 원소로 받는 값 종류다(Array 자신은 원소가 될 수 없다 — 중첩 배열은 RMC2304).
-    public static bool IsSupportedElementKind(string kind) => Scalars.ContainsValue(kind) || FieldModel.KindHasTargetType(kind);
+    // 원본 선언의 철자 해석(ResolveValue·ResolveArray)이 만들 수 있는 단일 값 종류다: 스칼라 철자, 리플렉션 enum·struct, 강한·소프트
+    // 참조. ToolTests가 이 집합과 성질 표(ValueKindTable)의 Array 원소 열이 같은지 본다(새 종류는 철자 해석과 표에 함께 더한다).
+    internal static IReadOnlyList<string> SourceValueKinds { get; } = [.. Scalars.Values, .. TargetKinds];
 
     // "prefix<T>" 철자의 T를 돌려준다(아니면 null).
     private static string? TemplateTarget(string spelling, string prefix) =>
@@ -88,7 +88,7 @@ internal static class SchemaValidator
             foreach (FieldModel field in external.Fields.Where(field => field.HasTargetType && field.ReferenceId is not null))
             {
                 bool found = byId.TryGetValue(field.ReferenceId!, out ClassModel? target);
-                if (!FieldModel.KindRequiresTargetId(field.TargetKind))
+                if (!ValueKindTable.Has(field.TargetKind, ValueKindProperty.RequiresTargetId))
                 {
                     // 강한·소프트 참조의 대상은 클래스다(import에 없는 대상은 런타임 Acquire가 판정한다).
                     if (found && (target!.IsEnum || target.IsStruct))
@@ -528,6 +528,20 @@ internal static class SchemaValidator
                 {
                     throw new MetadataException($"{field.Owner}::{field.Name}: unsupported field type '{field.NativeSpelling}'",
                     hint: UnsupportedFieldHint(field.NativeSpelling)).At(field.Site);
+                }
+
+                // 철자 해석이 정한 종류가 성질 표에서 그 자리(배열이면 원소, 그리고 클래스 필드·struct 멤버)에 허용되는지 본다. 해석이
+                // 만드는 종류는 지금 모두 표가 허용하므로 늘 통과한다 — 새 종류를 더할 때 철자 해석과 표가 갈라지지 않게 하는 확인이다.
+                if (field.IsArray && !ValueKindTable.Has(field.ElementKind!, ValueKindProperty.ArrayElement))
+                {
+                    throw new MetadataException($"{field.Owner}::{field.Name}: {field.ElementKind} cannot be an array element", "RMC2304",
+                        ArrayRules.ElementHint).At(field.Site);
+                }
+
+                if (!ValueKindTable.Has(field.Kind, model.IsStruct ? ValueKindProperty.StructMember : ValueKindProperty.Field))
+                {
+                    throw new MetadataException($"{field.Owner}::{field.Name}: value kind {field.Kind} cannot be a {(model.IsStruct ? "struct member" : "class field")}",
+                        hint: UnsupportedFieldHint(field.NativeSpelling)).At(field.Site);
                 }
 
                 // 지정자를 그 필드 종류에 쓸 수 있는지 본다(RMC2202 — 종류를 먼저 판정하고 값 범위는 그 뒤에 본다).

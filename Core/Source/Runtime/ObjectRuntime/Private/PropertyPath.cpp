@@ -29,9 +29,9 @@ struct PathRunner {
 
 namespace {
 
-// 경로 thunk가 FieldValue로 표현할 수 없는 값 종류다(struct 값·배열 통째).
+// 경로 thunk가 FieldValue로 표현할 수 없는 값 종류다(성질 표의 aggregate — struct 값·배열 통째).
 bool IsAggregateKind(ValueKind kind) noexcept {
-    return kind == ValueKind::Struct || kind == ValueKind::Array;
+    return ValueKindIsAggregate(kind);
 }
 
 // 쓰기 검증(ValidateFieldWrite·등록된 write) 오류의 사유다: Unsupported는 유효 플래그에 ReadOnly가

@@ -120,6 +120,7 @@ internal static class MetaTests
         IdentityCliReviewTests.Register(suite, options, actualEnvironment);
         ModuleMetaTests.Register(suite, options, actualEnvironment);
         IdentityModuleCliTests.Register(suite, options, actualEnvironment);
+        ValueKindTableTests.Register(suite, options, actualEnvironment);
 
         suite.Add("Meta.FixtureDeterminismTimestampAndStaleCheck", async () =>
         {

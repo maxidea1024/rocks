@@ -78,12 +78,12 @@ internal sealed class FieldModel
     // 아니다(값 필드이고 원소 struct가 참조를 담는다).
     public bool IsObjectReferenceFieldKind => TargetKind == "ObjectReference";
 
-    // 대상 타입 ID를 쓰는 종류다(배열이면 원소): 강한 참조·소프트 참조의 기대 타입, Enum의 enum ID, Struct의
-    // struct ID. 스키마·descriptor에는 배열이면 element.type, 아니면 value.type으로 나간다.
-    public bool HasTargetType => KindHasTargetType(TargetKind);
+    // 대상 타입 ID를 쓰는 종류다(배열이면 원소 — 성질 표 HasTargetType): 강한 참조·소프트 참조의 기대 타입, Enum의 enum ID,
+    // Struct의 struct ID. 스키마·descriptor에는 배열이면 element.type, 아니면 value.type으로 나간다.
+    public bool HasTargetType => ValueKindTable.Has(TargetKind, ValueKindProperty.HasTargetType);
 
-    // Required를 쓸 수 있는 종류다: 강한 참조와 소프트 참조, 그리고 그 원소의 배열(원소마다 non-null).
-    public bool AcceptsRequired => KindAcceptsRequired(TargetKind);
+    // Required를 쓸 수 있는 종류다(성질 표 AcceptsRequired): 강한 참조와 소프트 참조, 그리고 그 원소의 배열(원소마다 non-null).
+    public bool AcceptsRequired => ValueKindTable.Has(TargetKind, ValueKindProperty.AcceptsRequired);
 
     // 배열 필드의 컨테이너다(저장하지 않는 파생 속성 — Docs/Design/ReflectionFoundations.ko.md 5.6절): 원소가
     // ObjectReference면 ObjectRefArray, 원소가 Struct이고 그 struct가 ContainsStrongReference면 StructRefArray, 그
@@ -105,14 +105,6 @@ internal sealed class FieldModel
 
     // Registry가 관리하는 컨테이너(ObjectRefArray·StructRefArray) 필드다.
     public bool IsRegistryContainer(Func<string, ClassModel> find) => ContainerOf(find) is ArrayRules.ObjectRefArray or ArrayRules.StructRefArray;
-
-    // descriptor 읽기·쓰기와 생성이 같은 조건을 쓰도록 종류 이름으로도 판정한다.
-    public static bool KindHasTargetType(string kind) => kind is "ObjectReference" or "SoftObjectReference" or "Enum" or "Struct";
-
-    // 대상 ID가 비어 있으면 안 되는 종류다(참조의 빈 ID는 Object다).
-    public static bool KindRequiresTargetId(string kind) => kind is "Enum" or "Struct";
-
-    public static bool KindAcceptsRequired(string kind) => kind is "ObjectReference" or "SoftObjectReference";
 
     // FieldFlags 비트: Transient 1, ReadOnly 2, EditorOnly 4, Required 8.
     public uint Flags => (Spec.Transient ? 1u : 0u) | (Spec.ReadOnly ? 2u : 0u) | (Spec.EditorOnly ? 4u : 0u) | (Spec.Required ? 8u : 0u);

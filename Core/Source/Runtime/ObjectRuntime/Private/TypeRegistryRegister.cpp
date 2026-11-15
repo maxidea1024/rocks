@@ -69,14 +69,12 @@ bool SameBytes(Span<const char> left, Span<const char> right) noexcept {
     return true;
 }
 
-// 등록할 수 있는 값 종류다(Opaque부터 Digest256까지 — Array는 B5에서 열었다).
-bool SupportedValueKind(ValueKind kind) noexcept {
-    return static_cast<uint8>(kind) <= static_cast<uint8>(ValueKind::Digest256);
-}
-
-// 배열 원소가 될 수 있는 값 종류다(Opaque·Array 거부 — 중첩 배열은 MetaCompiler RMC2304).
-bool SupportedElementKind(ValueKind kind) noexcept {
-    return kind != ValueKind::Opaque && kind != ValueKind::Array && SupportedValueKind(kind);
+// 클래스 필드(structMember면 struct 멤버)의 값 종류로 등록할 수 있는지다. 종류는 성질 표
+// (Meta/TypeSchema.h ValueKindProperties)로 판정하고, Opaque는 수동 메타데이터의 비typed 필드라 표
+// 밖에서 받는다(struct는 typed 필드 수 검사가 Opaque 멤버를 거부한다).
+bool SupportedFieldKind(ValueKind kind, bool structMember) noexcept {
+    return kind == ValueKind::Opaque ||
+           (structMember ? ValueKindCanBeStructMember(kind) : ValueKindCanBeField(kind));
 }
 
 // enum 도구 이름·접두의 문자 집합이다: [A-Za-z0-9_]+ (숫자로 시작할 수 있다).
@@ -124,8 +122,10 @@ constexpr usize MaxEnumerators = 4096;
 
 // 클래스·struct가 함께 쓰는 필드 서술 검사다(Docs/Design/ReflectionFoundations.ko.md 4.6절). 필드
 // 하나의 규칙(플래그·값 종류·Required·도구 이름)과 필드 사이 규칙(같은 ID·실효 도구 이름은
-// AlreadyExists)을 본다. typedFields에 Opaque가 아닌 필드 수를 쓴다.
-Result<void> ValidateFieldList(Span<const FieldSchema> fields, usize& typedFields) noexcept {
+// AlreadyExists)을 본다. structMembers면 값 종류를 struct 멤버 자리로 판정한다. typedFields에
+// Opaque가 아닌 필드 수를 쓴다.
+Result<void> ValidateFieldList(Span<const FieldSchema> fields, bool structMembers,
+                               usize& typedFields) noexcept {
     typedFields = 0;
     if (fields.Size() > 4096) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -134,23 +134,25 @@ Result<void> ValidateFieldList(Span<const FieldSchema> fields, usize& typedField
     for (usize index = 0; index < fields.Size(); ++index) {
         const auto& field = fields[index];
         // 대상 형식은 배열이면 원소, 아니면 값이다(Docs/Design/ReflectionFoundations.ko.md 5.6절).
-        // Array 필드는 value.type 0, 원소 종류는 단일 값 종류(Opaque·Array 거부), maxElements는
-        // [1, MaxArrayElements]이고, 배열이 아닌 필드는 element = {Opaque, 0}·maxElements 0이다.
+        // Array 필드는 value.type 0, 원소 종류는 성질 표의 Array 원소 종류(Opaque·Array 거부),
+        // maxElements는 [1, MaxArrayElements]이고, 배열이 아닌 필드는 element = {Opaque, 0}·
+        // maxElements 0이다.
         const bool array = field.value.kind == ValueKind::Array;
         const ValueType& target = FieldTargetType(field);
         const bool arrayShape =
-            array ? field.value.type == TypeId{} && SupportedElementKind(field.element.kind) &&
-                        field.maxElements >= 1 && field.maxElements <= MaxArrayElements
-                  : field.element.kind == ValueKind::Opaque && field.element.type == TypeId{} &&
-                        field.maxElements == 0;
-        // Required는 typed 참조 필드(배열이면 원소)에만 뜻이 있다(저장이 null을 검사하려면
-        // 접근기·codec이 있어야 한다). 도구 이름은 비어 있거나 ASCII 식별자다.
+            array
+                ? field.value.type == TypeId{} && ValueKindCanBeArrayElement(field.element.kind) &&
+                      field.maxElements >= 1 && field.maxElements <= MaxArrayElements
+                : field.element.kind == ValueKind::Opaque && field.element.type == TypeId{} &&
+                      field.maxElements == 0;
+        // Required는 성질 표가 허용하는 대상 종류(typed 참조·소프트 참조, 배열이면 원소)에만 뜻이
+        // 있다(저장이 null을 검사하려면 접근기·codec이 있어야 한다). 도구 이름은 비어 있거나 ASCII
+        // 식별자다.
         if (field.id == Guid{} || (field.flags & ~KnownFieldFlags) != 0 ||
             (HasFlag(field.flags, FieldFlags::Required) &&
-             target.kind != ValueKind::ObjectReference &&
-             target.kind != ValueKind::SoftObjectReference) ||
+             !ValueKindAcceptsRequired(target.kind)) ||
             (field.kind != FieldKind::Value && field.kind != FieldKind::ObjectReference) ||
-            !SupportedValueKind(field.value.kind) || !arrayShape ||
+            !SupportedFieldKind(field.value.kind, structMembers) || !arrayShape ||
             !StringView(field.name.Data(), field.name.Size()).ValidateUtf8() ||
             !StringView(field.category.Data(), field.category.Size()).ValidateUtf8() ||
             !StringView(field.displayName.Data(), field.displayName.Size()).ValidateUtf8() ||
@@ -159,17 +161,14 @@ Result<void> ValidateFieldList(Span<const FieldSchema> fields, usize& typedField
         }
 
         // FieldKind::ObjectReference(강한 GC 간선) ⇔ 대상 형식이 ObjectReference(단일 참조 또는
-        // ObjectRefArray). 대상 type은 참조·소프트 참조의 기대 대상과 Enum·Struct의 대상 ID에만
-        // 쓴다. Enum·Struct는 ID가 필요하다.
+        // ObjectRefArray). 대상 type은 성질 표의 대상 타입 종류(참조·소프트 참조의 기대 대상,
+        // Enum·Struct의 대상 ID)에만 쓰고, 대상 ID 필수 종류(Enum·Struct)는 ID가 있어야 한다.
         if (field.value.kind != ValueKind::Opaque) {
             ++typedFields;
             const bool reference = target.kind == ValueKind::ObjectReference;
-            const bool valueType =
-                target.kind == ValueKind::Enum || target.kind == ValueKind::Struct;
-            const bool typed =
-                reference || valueType || target.kind == ValueKind::SoftObjectReference;
             if (field.name.Size() == 0 || (field.kind == FieldKind::ObjectReference) != reference ||
-                (!typed && target.type != TypeId{}) || (valueType && target.type == TypeId{})) {
+                (!ValueKindHasTargetType(target.kind) && target.type != TypeId{}) ||
+                (ValueKindRequiresTargetId(target.kind) && target.type == TypeId{})) {
                 return Result<void>::Failure(ErrorCode::InvalidArgument);
             }
         } else if (field.value.type != TypeId{}) {
@@ -200,10 +199,10 @@ bool CarriesValueNativeType(const FieldSchema& field) noexcept {
     return kind == ValueKind::Enum || kind == ValueKind::Struct;
 }
 
-// FieldValue로 통째 읽고 쓰지 않는 필드다(struct 값·배열 — read·write·writeStaged가 없어야 하고
-// Transient가 아니면 codec이 필수다).
+// FieldValue로 통째 읽고 쓰지 않는 필드다(성질 표의 aggregate — struct 값·배열: read·write·
+// writeStaged가 없어야 하고 Transient가 아니면 codec이 필수다).
 bool IsAggregateField(const FieldSchema& field) noexcept {
-    return field.value.kind == ValueKind::Struct || field.value.kind == ValueKind::Array;
+    return ValueKindIsAggregate(field.value.kind);
 }
 
 // 클래스 함수표에서 필드 ID의 valueNativeType을 찾는다(ResolveValueTypes의 thunkType).
@@ -256,7 +255,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     }
 
     usize typedFields = 0;
-    if (auto validated = ValidateFieldList(schema.fields, typedFields); !validated) {
+    if (auto validated = ValidateFieldList(schema.fields, false, typedFields); !validated) {
         return Result<TypeRegistrationToken>::Failure(validated.Error());
     }
 
@@ -721,7 +720,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     }
 
     usize typedFields = 0;
-    if (auto validated = ValidateFieldList(schema.fields, typedFields); !validated) {
+    if (auto validated = ValidateFieldList(schema.fields, true, typedFields); !validated) {
         return Result<TypeRegistrationToken>::Failure(validated.Error());
     }
 

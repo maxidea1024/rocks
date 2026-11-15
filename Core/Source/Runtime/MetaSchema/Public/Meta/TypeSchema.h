@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Base/Guid.h>
+#include <Core/Assert.h>
 #include <Core/Containers/Span.h>
 
 namespace rocks {
@@ -101,6 +102,250 @@ enum class ValueKind : uint8 {
     Digest256            // rocks::Sha256Digest(Core/Encoding/Sha256.h), wire Bytes(정확히 32 byte)
 };
 
+// ValueKind 열거자 수(마지막 열거자 + 1)다. 열거자 값은 schema·descriptor 계약이므로 새 종류는 끝에
+// 붙이고, 이 식의 마지막 열거자와 성질 표의 행을 함께 고친다. 아래 static_assert가 성질 표와,
+// MetaCompiler 대조 헤더가 C# 표의 종류 수와 이 값을 비교한다. 근거는
+// Docs/Design/ReflectionExtensions.ko.md 1.3절이다.
+inline constexpr uint32 ValueKindCount = static_cast<uint32>(ValueKind::Digest256) + 1;
+
+// 값 종류의 성질이다(종류 성질 표 — Docs/Design/ReflectionExtensions.ko.md 1.3절).
+// ValueKindProperties가 종류마다 이 비트의 OR를 돌려주고, 런타임의 등록 검증(TypeRegistry)·쓰기
+// 검증·경로·생성 codec이 이 표로 종류를 판정한다. MetaCompiler는 같은 내용의 C#
+// 표(ValueKindTable)로 판정하고, 대조 헤더가 두 표의 칸과 이 비트 값을 맞춘다(비트 값은 그 대조의
+// 계약이며 저장 형식은 아니다).
+//
+// 위치 성질은 그 자리에 그 종류를 둘 수 있는지다. 컨테이너 모양과 struct 형질에 따른 제한은 표 밖의
+// 규칙이다:
+//   - ObjectReference의 Array 원소는 ObjectRefArray, Map 값은 ObjectRefMap(Registry 컨테이너)이다.
+//   - Struct 행은 값 struct(강한 참조 없음) 기준이다. 참조 struct(ContainsStrongReference)는 Array
+//     원소가 StructRefArray이고 Map 값·Optional 내부·InstancedStruct 내용이 될 수 없다.
+//     InstancedStruct 내용은 Registry 컨테이너·InstancedStruct·Required도 담지 않아야 한다.
+//   - 직접 중첩만 막는다. 컨테이너 종류는 다른 컨테이너의 원소·키·값·내부가 아니지만,
+//     컨테이너 멤버를 담은 값 struct는 원소가 될 수 있다.
+//   - aggregate 여부(WholeFieldValue)는 종류 단위다. 내부에 따라 달라지는 종류(Optional)는 필드
+//     단위 판정이 따로 필요하다.
+// Required·대상 타입 성질은 필드의 대상 종류(FieldTargetType — 컨테이너면 원소 종류)로 판정한다.
+//
+//   Field                  — 클래스 필드
+//   StructMember           — 리플렉션 struct 멤버
+//   ArrayElement           — Array 계열(Array·ObjectRefArray·StructRefArray) 원소
+//   StaticArrayElement     — 정적 배열(T x[N]) 원소
+//   MapKey·MapValue        — OrderedMap 키·값
+//   SetElement             — OrderedSet 원소
+//   OptionalInner          — Optional<T>의 T
+//   InstancedStructContent — InstancedStruct가 담는 값
+//   AcceptsRequired        — Required 지정자(그 값 또는 원소마다 non-null)
+//   HasTargetType          — ValueType::type이 대상 타입 ID다(그 밖의 종류는 0이어야 한다)
+//   RequiresTargetId       — 대상 ID가 0이면 안 된다(참조의 0은 Object라 허용한다)
+//   Container              — 원소 형식(FieldSchema::element)을 갖는 컨테이너다
+//   WholeFieldValue        — FieldValue로 통째 읽고 쓴다(아니면 aggregate — read·write가 없고 멤버·
+//                            원소 단위 경로 연산으로만 쓴다)
+// StaticArray·Map·Set·Optional·InstancedStruct 자리는 리플렉션 B9 뒤 단계가 연다. 이 표는 그 자리의
+// 허용 여부를 미리 정해 두며, 그 단계 전에는 쓰는 곳이 없다.
+enum class ValueKindProperty : uint32 {
+    None = 0,
+    Field = 1u << 0,
+    StructMember = 1u << 1,
+    ArrayElement = 1u << 2,
+    StaticArrayElement = 1u << 3,
+    MapKey = 1u << 4,
+    MapValue = 1u << 5,
+    SetElement = 1u << 6,
+    OptionalInner = 1u << 7,
+    InstancedStructContent = 1u << 8,
+    AcceptsRequired = 1u << 9,
+    HasTargetType = 1u << 10,
+    RequiresTargetId = 1u << 11,
+    Container = 1u << 12,
+    WholeFieldValue = 1u << 13
+};
+
+namespace detail {
+
+constexpr uint32 ValueKindBit(ValueKindProperty property) noexcept {
+    return static_cast<uint32>(property);
+}
+
+// 성질 표의 한 행이다: enumerator는 ValueKind 열거자인지(성질이 없는 Opaque 포함), properties는
+// 성질 비트의 OR다.
+struct ValueKindEntry {
+    bool enumerator = false;
+    uint32 properties = 0;
+};
+
+// 종류 성질의 유일한 표다(switch 하나 — default가 없어 열거자의 case를 빠뜨리면 -Wswitch 오류다).
+constexpr ValueKindEntry ValueKindTableEntry(ValueKind kind) noexcept {
+    // 단일 값의 자리 넷(클래스 필드·struct 멤버·Array 원소·정적 배열 원소)이다.
+    constexpr uint32 placed = ValueKindBit(ValueKindProperty::Field) |
+                              ValueKindBit(ValueKindProperty::StructMember) |
+                              ValueKindBit(ValueKindProperty::ArrayElement) |
+                              ValueKindBit(ValueKindProperty::StaticArrayElement);
+    // Map 키·Set 원소·Optional 내부까지 되는 단일 값이다.
+    constexpr uint32 keyed = placed | ValueKindBit(ValueKindProperty::MapKey) |
+                             ValueKindBit(ValueKindProperty::MapValue) |
+                             ValueKindBit(ValueKindProperty::SetElement) |
+                             ValueKindBit(ValueKindProperty::OptionalInner) |
+                             ValueKindBit(ValueKindProperty::WholeFieldValue);
+    switch (kind) {
+    case ValueKind::Opaque:
+        return {true, 0};
+    case ValueKind::Bool:
+    case ValueKind::UInt8:
+    case ValueKind::UInt16:
+    case ValueKind::UInt32:
+    case ValueKind::UInt64:
+    case ValueKind::Int32:
+    case ValueKind::Int64:
+    case ValueKind::Guid:
+    case ValueKind::Utf8String:
+    case ValueKind::AssetId:
+    case ValueKind::Digest256:
+        return {true, keyed};
+    case ValueKind::Float32:
+    case ValueKind::Float64:
+        // 실수 키는 같음 규칙(NaN·-0)을 정할 소비자가 생길 때 연다.
+        return {true, placed | ValueKindBit(ValueKindProperty::MapValue) |
+                          ValueKindBit(ValueKindProperty::OptionalInner) |
+                          ValueKindBit(ValueKindProperty::WholeFieldValue)};
+    case ValueKind::Enum:
+        return {true, keyed | ValueKindBit(ValueKindProperty::HasTargetType) |
+                          ValueKindBit(ValueKindProperty::RequiresTargetId)};
+    case ValueKind::ObjectReference:
+        // 객체 정체성은 키가 아니고, null이 이미 "없음"이라 Optional 내부도 아니다.
+        return {true, placed | ValueKindBit(ValueKindProperty::MapValue) |
+                          ValueKindBit(ValueKindProperty::WholeFieldValue) |
+                          ValueKindBit(ValueKindProperty::AcceptsRequired) |
+                          ValueKindBit(ValueKindProperty::HasTargetType)};
+    case ValueKind::SoftObjectReference:
+        return {true, placed | ValueKindBit(ValueKindProperty::MapKey) |
+                          ValueKindBit(ValueKindProperty::MapValue) |
+                          ValueKindBit(ValueKindProperty::SetElement) |
+                          ValueKindBit(ValueKindProperty::WholeFieldValue) |
+                          ValueKindBit(ValueKindProperty::AcceptsRequired) |
+                          ValueKindBit(ValueKindProperty::HasTargetType)};
+    case ValueKind::Struct:
+        return {true, placed | ValueKindBit(ValueKindProperty::MapValue) |
+                          ValueKindBit(ValueKindProperty::OptionalInner) |
+                          ValueKindBit(ValueKindProperty::InstancedStructContent) |
+                          ValueKindBit(ValueKindProperty::HasTargetType) |
+                          ValueKindBit(ValueKindProperty::RequiresTargetId)};
+    case ValueKind::Array:
+        return {true, ValueKindBit(ValueKindProperty::Field) |
+                          ValueKindBit(ValueKindProperty::StructMember) |
+                          ValueKindBit(ValueKindProperty::Container)};
+    }
+
+    return {};
+}
+
+} // namespace detail
+
+// ValueKindCount가 열거자 수와 같다: 마지막 값(ValueKindCount - 1)은 표의 행이고 ValueKindCount는
+// 아니다. 새 열거자의 case를 더하고 ValueKindCount를 고치지 않으면 여기서 컴파일이 실패한다.
+static_assert(detail::ValueKindTableEntry(static_cast<ValueKind>(ValueKindCount - 1)).enumerator &&
+                  !detail::ValueKindTableEntry(static_cast<ValueKind>(ValueKindCount)).enumerator,
+              "ValueKindCount must be the last ValueKind enumerator + 1");
+
+// 값 종류의 성질 비트(ValueKindProperty의 OR)다. 아래 질의 함수가 모두 이것을 읽는다.
+// Opaque(비typed 수동 메타데이터)와 열거자 밖의 값은 0이다.
+//
+// 사용 예:
+//   if (ValueKindCanBeArrayElement(field.element.kind)) { ... }   // 보통은 이름 있는 질의를 쓴다
+//   const uint32 bits = ValueKindProperties(kind);                  // 여러 성질을 한 번에 볼 때
+constexpr uint32 ValueKindProperties(ValueKind kind) noexcept {
+    return detail::ValueKindTableEntry(kind).properties;
+}
+
+// kind가 성질 property 하나를 가졌는지다(ValueKindProperties 조회). property는 성질 하나여야 한다 —
+// None이나 여러 비트의 OR는 계약 위반이다(ROCKS_ASSERT, 상수 식이면 컴파일 오류). C#
+// ValueKindTable.Has와 같은 계약이다. 열거자 밖의 값은 어느 성질도 없다.
+constexpr bool HasValueKindProperty(ValueKind kind, ValueKindProperty property) noexcept {
+    const uint32 bit = static_cast<uint32>(property);
+    ROCKS_ASSERT(bit != 0 && (bit & (bit - 1)) == 0);
+    return (ValueKindProperties(kind) & bit) != 0;
+}
+
+// 클래스 필드의 값 종류가 될 수 있는지다(Opaque는 표 밖 — 등록이 비typed 필드로 따로 받는다).
+constexpr bool ValueKindCanBeField(ValueKind kind) noexcept {
+    return HasValueKindProperty(kind, ValueKindProperty::Field);
+}
+
+// 리플렉션 struct 멤버의 값 종류가 될 수 있는지다.
+constexpr bool ValueKindCanBeStructMember(ValueKind kind) noexcept {
+    return HasValueKindProperty(kind, ValueKindProperty::StructMember);
+}
+
+// Array 계열 원소가 될 수 있는지다(ObjectReference는 ObjectRefArray, 참조 struct는 StructRefArray).
+constexpr bool ValueKindCanBeArrayElement(ValueKind kind) noexcept {
+    return HasValueKindProperty(kind, ValueKindProperty::ArrayElement);
+}
+
+// 정적 배열 원소가 될 수 있는지다.
+constexpr bool ValueKindCanBeStaticArrayElement(ValueKind kind) noexcept {
+    return HasValueKindProperty(kind, ValueKindProperty::StaticArrayElement);
+}
+
+// OrderedMap 키가 될 수 있는지다.
+constexpr bool ValueKindCanBeMapKey(ValueKind kind) noexcept {
+    return HasValueKindProperty(kind, ValueKindProperty::MapKey);
+}
+
+// OrderedMap 값이 될 수 있는지다(ObjectReference는 ObjectRefMap, 참조 struct는 아니다).
+constexpr bool ValueKindCanBeMapValue(ValueKind kind) noexcept {
+    return HasValueKindProperty(kind, ValueKindProperty::MapValue);
+}
+
+// OrderedSet 원소가 될 수 있는지다.
+constexpr bool ValueKindCanBeSetElement(ValueKind kind) noexcept {
+    return HasValueKindProperty(kind, ValueKindProperty::SetElement);
+}
+
+// Optional<T>의 T가 될 수 있는지다(참조 struct는 아니다).
+constexpr bool ValueKindCanBeOptionalInner(ValueKind kind) noexcept {
+    return HasValueKindProperty(kind, ValueKindProperty::OptionalInner);
+}
+
+// InstancedStruct가 담는 값이 될 수 있는지다(담을 수 있는 struct 조건은 struct 형질로 따로 본다).
+constexpr bool ValueKindCanBeInstancedStructContent(ValueKind kind) noexcept {
+    return HasValueKindProperty(kind, ValueKindProperty::InstancedStructContent);
+}
+
+// 대상 종류에 Required를 쓸 수 있는지다.
+constexpr bool ValueKindAcceptsRequired(ValueKind kind) noexcept {
+    return HasValueKindProperty(kind, ValueKindProperty::AcceptsRequired);
+}
+
+// 대상 종류의 ValueType::type이 대상 타입 ID인지다(아니면 type은 0이어야 한다).
+constexpr bool ValueKindHasTargetType(ValueKind kind) noexcept {
+    return HasValueKindProperty(kind, ValueKindProperty::HasTargetType);
+}
+
+// 대상 종류의 대상 ID가 0이면 안 되는지다.
+constexpr bool ValueKindRequiresTargetId(ValueKind kind) noexcept {
+    return HasValueKindProperty(kind, ValueKindProperty::RequiresTargetId);
+}
+
+// 원소 형식(FieldSchema::element)을 갖는 컨테이너 종류인지다.
+constexpr bool ValueKindIsContainer(ValueKind kind) noexcept {
+    return HasValueKindProperty(kind, ValueKindProperty::Container);
+}
+
+// FieldValue로 통째 읽고 쓰는 종류인지다.
+constexpr bool ValueKindIsWholeFieldValue(ValueKind kind) noexcept {
+    return HasValueKindProperty(kind, ValueKindProperty::WholeFieldValue);
+}
+
+// typed 필드 값 종류 가운데 FieldValue로 통째 읽고 쓰지 않는 aggregate(지금은 Struct·Array)인지다
+// (클래스 필드가 될 수 있고 WholeFieldValue가 아니다 — 표를 한 번 읽는다). aggregate 필드는 read·
+// write·writeStaged가 없고 멤버·원소 단위 경로 연산으로만 쓴다. Opaque와 열거자 밖의 값은
+// aggregate가 아니다. 종류 단위 판정이므로 내부에 따라 달라지는 종류(Optional — 리플렉션 B9e)는
+// 필드 단위 판정으로 넓혀야 한다.
+constexpr bool ValueKindIsAggregate(ValueKind kind) noexcept {
+    const uint32 properties = ValueKindProperties(kind);
+    return (properties & detail::ValueKindBit(ValueKindProperty::Field)) != 0 &&
+           (properties & detail::ValueKindBit(ValueKindProperty::WholeFieldValue)) == 0;
+}
+
 // 필드 값 형식이다. type은 Enum·Struct 스키마 ID, ObjectReference·SoftObjectReference의 기대 대상
 // 타입(0 = Object)에만 쓰고 그 밖은 0이어야 한다(Array의 value.type도 0 — 원소 대상은
 // element.type).
@@ -139,15 +384,15 @@ struct FieldSchema {
     uint32 maxElements = 0;
 };
 
-// 필드 값의 대상 형식이다: Array 필드면 원소 형식(element), 아니면 값 형식(value). enum·struct·참조
-// 대상 해석(TypeRegistry의 의존·FieldEnum·FieldStruct, codec 검증, 그래프 기대 타입)이 같은 규칙을
-// 쓴다. 반환 참조는 field의 수명을 따른다.
+// 필드 값의 대상 형식이다: 컨테이너 종류(ValueKindIsContainer — 지금은 Array) 필드면 원소
+// 형식(element), 아니면 값 형식(value). enum·struct·참조 대상 해석(TypeRegistry의 의존·FieldEnum·
+// FieldStruct, codec 검증, 그래프 기대 타입)이 같은 규칙을 쓴다. 반환 참조는 field의 수명을 따른다.
 //
 // 사용 예:
 //   const ValueType& target = FieldTargetType(field);
 //   if (target.kind == ValueKind::Enum) { ... }   // Enum 필드이거나 enum 원소 배열
 constexpr const ValueType& FieldTargetType(const FieldSchema& field) noexcept {
-    return field.value.kind == ValueKind::Array ? field.element : field.value;
+    return ValueKindIsContainer(field.value.kind) ? field.element : field.value;
 }
 
 // 필드 경로의 한 단계다(7절 PropertyPath, 6.4절 진단 경로): 필드 ID와, 배열 원소면 그 index.

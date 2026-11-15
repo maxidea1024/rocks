@@ -369,9 +369,10 @@ internal static class ModuleDescriptor
                     throw Invalid("field value");
                 }
 
-                // 값 종류는 MetaCompiler가 만드는 종류만 받는다(그 밖은 생성 코드가 컴파일되어도 런타임 등록에서 실패한다).
+                // 값 종류는 성질 표(ValueKindTable — Docs/Design/ReflectionExtensions.ko.md 1.3·1.8절)가 그 자리(클래스 필드·struct
+                // 멤버)에 허용하는 종류만 받는다(그 밖은 생성 코드가 컴파일되어도 런타임 등록에서 실패한다).
                 string kind = Name(value.GetProperty("kind"), Identifier, "field value kind");
-                if (!SchemaValidator.IsSupportedValueKind(kind))
+                if (!ValueKindTable.Has(kind, isStruct ? ValueKindProperty.StructMember : ValueKindProperty.Field))
                 {
                     throw Invalid("field value kind " + kind);
                 }
@@ -379,7 +380,7 @@ internal static class ModuleDescriptor
                 // 배열 필드는 value에 대상이 없고(value.type 0) element가 원소 형식이다. 배열이 아닌 필드는 element가 null이고
                 // maxElements가 0이다(Docs/Design/ReflectionFoundations.ko.md 5.6절 descriptor).
                 bool array = kind == ArrayRules.Array;
-                RequireKeys(value, !array && FieldModel.KindHasTargetType(kind) ? ["kind", "type"] : ["kind"], Invalid);
+                RequireKeys(value, !array && ValueKindTable.Has(kind, ValueKindProperty.HasTargetType) ? ["kind", "type"] : ["kind"], Invalid);
                 JsonElement element = field.GetProperty("element");
                 if (!field.GetProperty("maxElements").TryGetUInt32(out uint maxElements))
                 {
@@ -396,12 +397,12 @@ internal static class ModuleDescriptor
                     }
 
                     elementKind = Name(elementKindValue, Identifier, "element kind");
-                    if (!SchemaValidator.IsSupportedElementKind(elementKind))
+                    if (!ValueKindTable.Has(elementKind, ValueKindProperty.ArrayElement))
                     {
                         throw Invalid("element kind " + elementKind);
                     }
 
-                    RequireKeys(element, FieldModel.KindHasTargetType(elementKind) ? ["kind", "type"] : ["kind"], Invalid);
+                    RequireKeys(element, ValueKindTable.Has(elementKind, ValueKindProperty.HasTargetType) ? ["kind", "type"] : ["kind"], Invalid);
                     if (maxElements < 1 || maxElements > ArrayRules.MaxArrayElements)
                     {
                         throw Invalid($"maxElements {maxElements} of an array field");
@@ -428,18 +429,19 @@ internal static class ModuleDescriptor
                     throw Invalid("unknown or duplicate field flag");
                 }
 
-                // Required는 강한·소프트 참조 필드와 그 원소의 배열에만 쓴다(원본 선언의 RMC2202와 같은 규칙).
-                if (!FieldModel.KindAcceptsRequired(targetKind) && fieldFlags.Contains("Required", StringComparer.Ordinal))
+                // Required는 성질 표가 허용하는 대상 종류(강한·소프트 참조 필드와 그 원소의 배열)에만 쓴다(원본 선언의 RMC2202와
+                // 같은 규칙).
+                if (!ValueKindTable.Has(targetKind, ValueKindProperty.AcceptsRequired) && fieldFlags.Contains("Required", StringComparer.Ordinal))
                 {
                     throw Invalid("Required on a field that is not an object or soft object reference or an array of them");
                 }
 
                 string? referenceId = null;
-                if (FieldModel.KindHasTargetType(targetKind))
+                if (ValueKindTable.Has(targetKind, ValueKindProperty.HasTargetType))
                 {
                     string target = targetHolder.GetProperty("type").GetString() ?? throw Invalid("reference target");
-                    // Enum·Struct 대상은 ID가 있어야 한다(참조의 ""는 Object다).
-                    referenceId = target.Length == 0 && !FieldModel.KindRequiresTargetId(targetKind) ? null : Hex(targetHolder.GetProperty("type"), Invalid);
+                    // 대상 ID 필수 종류(Enum·Struct)는 ID가 있어야 한다(참조의 ""는 Object다).
+                    referenceId = target.Length == 0 && !ValueKindTable.Has(targetKind, ValueKindProperty.RequiresTargetId) ? null : Hex(targetHolder.GetProperty("type"), Invalid);
                 }
 
                 string fieldName = Name(field.GetProperty("name"), Identifier, "field name");
