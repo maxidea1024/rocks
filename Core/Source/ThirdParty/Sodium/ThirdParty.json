@@ -1219,7 +1219,8 @@
     "sanitizerInstrumentation false(결정 D9): 설치 문서가 sanitizer 계측을 지원하지 않는다고 하고(signed overflow 등 의도한 동작) upstream CI에도 sanitizer 작업이 없다. Asan 구성에서 libsodium만 계측 없이 컴파일하고, 어댑터·AES 경량 계층·형식 코드는 계측한다. libsodium 안의 메모리 오류는 Asan이 잡지 못하므로 어댑터가 모든 길이를 먼저 검사한다(5.1 misuse 도달 금지).",
     "build.zig의 HAVE_WEAK_SYMBOLS·-fvisibility=hidden은 넣지 않는다. 약한 심볼이 없으면 sodium_memzero·sodium_memcmp는 volatile 경로를 쓴다(약한 심볼 경로보다 LTO에 안전). visibility는 정적 라이브러리를 실행 파일에 링크할 때 의미가 없고, 공유 라이브러리로 배포할 때의 심볼 노출은 엔진 전체 visibility 정책을 따른다.",
     "Windows(clang-cl)는 upstream MSVC 빌드처럼 HAVE_INLINE_ASM·HAVE_GCC_MEMORY_FENCES 없이 volatile optblocker 경로와 (void)0 ACQUIRE_FENCE를 쓴다. clang-cl은 둘 다 지원하고 build.zig는 Windows에도 정의하므로, 원시 함수 KAT(Wycheproof·RFC)가 세 플랫폼에서 돈 뒤 켜고 검증한다(후속).",
-    "추적 가능한 수정(사용자 결정 2026-11-14): 저장소 경고 프로필(/W4 /WX, -Wall -Wextra -Wpedantic -Werror)에서 남는 경고만 고친다. 동작 변경은 없다. 차이는 Rocks.patch, 사유는 modifications."
+    "추적 가능한 수정(사용자 결정 2026-11-14): 저장소 경고 프로필(/W4 /WX, -Wall -Wextra -Wpedantic -Werror)에서 남는 경고만 고친다. 동작 변경은 없다. 차이는 Rocks.patch, 사유는 modifications.",
+    "upstream 제출 안 함(사용자 결정 2026-11-15): Rocks는 libsodium을 따로 재배포하지 않으므로 경고 수정(Rocks.patch)과 다음 차이는 기록만 한다. crypto_aead_aes256gcm_MESSAGEBYTES_MAX는 16 × (2^32 − 2)이지만 aesni·armcrypto의 required_blocks()는 평문 블록 2^32 − 2를 거부하므로, Crypto 어댑터가 상한을 16 × (2^32 − 3)으로 둬 -1 반환(Fatal)에 닿지 않게 한다(Private/Aead.cpp MaxAes256GcmMessageBytes)."
   ],
   "compileArguments": [
     "-fno-strict-aliasing",

@@ -21,7 +21,7 @@
   XChaCha20-Poly1305다.
 - **실패.** `ErrorCode::AuthenticationFailed`를 새로 둔다. 출력에 쓰기 시작한 뒤 실패하면 출력을 0으로 지우고, 스트림
   오류는 Reset 전까지 유지된다(fail-closed).
-- **libsodium 경고.** 저장소 경고 프로필에서 남는 경고는 추적 가능한 수정으로 없앤다(2026-11-14 사용자 결정, 5.1절).
+- **libsodium 경고.** 저장소 경고 프로필에서 남는 경고는 추적 가능한 수정으로 없앤다(2026-11-14 사용자 결정, 5.1절). upstream에는 내지 않는다(2026-11-15 사용자 결정: Rocks가 libsodium을 따로 재배포하지 않으므로 코드 수정과 기록으로 충분하다). 경고 수정은 `Rocks.patch`(manifest `modifications`)에, AES-256-GCM `MESSAGEBYTES_MAX`가 구현이 받는 평문 상한보다 한 블록 큰 문제는 어댑터 상한(`MaxAes256GcmMessageBytes`, 2^36 − 48 byte)으로 막고 manifest `notes`에 적는다.
 
 ## 1. 범위
 
@@ -196,7 +196,7 @@ Wycheproof는 Apache-2.0 data 라이브러리(`"kind": "data"`)로, commit을 �
 - AEGIS는 들이지 않는다. Wycheproof AEGIS 벡터는 128 bit tag이고 libsodium은 256 bit tag만 내므로 tag와 invalid(변조된 tag) 사례를 검증할 수 없다. 암호문 부분은 tag 길이와 무관해 valid 사례의 암호문만 비교할 수는 있지만, draft 부록 TV1–TV3(tag256)과 libsodium 표(AeadTests)가 같은 구현을 tag까지 덮으므로 들이지 않는다.
 - AES-128-GCM 108건은 이미 들인 `aes_gcm`에 있고 C2에서 사상이 Unsupported에서 검증으로 바뀌었다(96 bit nonce 67건 검증, 다른 nonce 41건 `Unsupported`). 파일을 더하는 것은 CMAC(`aes_cmac`, C2)과 secretstream(C3)이다(그때 manifest `files`를 늘린다).
 - C2(2026-11-15): 같은 commit archive(SHA-256 일치 확인)에서 `aes_cmac_test.json`(311건)을 들였다. 사상: 128·256 bit 키 그룹 각 102건(valid 21, 변조 tag 81)은 일회성·증분 tag와 검증 결과를 확인하고, AES-192 키 102건과 키 길이 오류 5건(0·8·64·160·320 bit)은 `MacKey::TryImport`가 `InvalidArgument`다. AES HW가 없으면 311건 모두 `Unsupported`로 센다.
-- 실행 범위: 시험은 저장소 루트 기준 상대 경로로 파일을 읽는다. Windows·macOS 시험에서 돈다. Android 기기 runner는 지금 실행 파일만 기기에 올리므로 data 라이브러리를 읽는 시험(이 시험과 Core JSON·Unicode 시험)은 기기에서 파일을 찾지 못한다. runner가 data 라이브러리 `files`를 같은 상대 경로로 올리는 것은 빌드 도구 몫으로 남긴다(그 전까지 Android 완료 조건에서 이 시험들은 제외한다).
+- 실행 범위: 시험은 저장소 루트 기준 상대 경로로 파일을 읽는다. Windows·macOS 시험과 Android 기기 시험에서 돈다. Android 기기 runner(`Programs/Rocks.Build.Cli/AndroidDevice.cs`)는 data 라이브러리(`"kind": "data"`)의 manifest와 `files`를 기기 작업 디렉터리 아래 같은 상대 경로로 함께 올린다(2026-11-15. x86_64 에뮬레이터에서 Wycheproof·Core JSON·Unicode 시험 포함 1317개 통과).
 
 ## 6. AES 하드웨어 가속
 

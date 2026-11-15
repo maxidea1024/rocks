@@ -236,7 +236,7 @@ namespace Rocks.Build.Cli
                         // 프로세스를 띄우는 harness(Fatal 음성 대조 등)와 self·meta 검사는 Android에서 아직
                         // 실행하지 않는다.
                         var deviceStart = System.Diagnostics.Stopwatch.GetTimestamp();
-                        int deviceExit = await AndroidDevice.RunTestsAsync(executable, report, options.GetValueOrDefault("adb"),
+                        int deviceExit = await AndroidDevice.RunTestsAsync(root, executable, report, options.GetValueOrDefault("adb"),
                             toolchain.Environment, cancellationToken);
                         evidence.RecordStep("foundation-android", [executable, "--seed", "7351", "--json", report], deviceExit,
                             System.Diagnostics.Stopwatch.GetElapsedTime(deviceStart), tests: true);
