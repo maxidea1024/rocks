@@ -108,7 +108,7 @@ Map 키 대상: 지금 등록·lease·codec frame은 필드당 대상 하나다(
 
 ### 1.3 종류 성질 표
 
-값 종류의 성질을 MetaSchema(`MS/TypeSchema.h`)의 constexpr 함수 하나로 모은다. 지금은 원소 종류 목록이 OR/GeneratedFieldAccess.h·OR/GeneratedFieldCodec.h·ORP/TypeRegistryRegister.cpp·MC/SchemaValidator.cs·MC/SchemaModel.cs·MC/ModuleDescriptor.cs(374-442행)에 반복되고, TypeRegistry는 `<= Digest256` 숫자 범위로 지원 종류를 판정한다(TypeRegistryRegister.cpp:73-80). 이 판정은 표 조회로 바꾼다. wire 대응은 MetaSchema가 Serialization에 의존하지 않도록 ObjectRuntime codec의 switch 하나(`FieldWireType` — GeneratedFieldCodec.h:17-54)에 둔다.
+값 종류의 성질을 MetaSchema(`MS/TypeSchema.h`)의 constexpr 함수 하나로 모은다. 지금은 원소 종류 목록이 OR/GeneratedFieldAccess.h·OR/GeneratedFieldCodec.h·ORP/TypeRegistryRegister.cpp·MC/SchemaValidator.cs·MC/SchemaModel.cs·MC/ModuleDescriptor.cs(374-442행)에 반복되고, TypeRegistry는 `<= Digest256` 숫자 범위로 지원 종류를 판정한다(TypeRegistryRegister.cpp:73-80). 이 판정은 표 조회로 바꾼다. wire 대응은 MetaSchema가 Serialization에 의존하지 않도록 ObjectRuntime codec의 switch 하나(`detail::FieldWireType` — Object/FieldValueWire.h)에 둔다.
 
 성질(값 종류마다 bool): 단일 필드, struct 멤버, Array 원소, StaticArray 원소, Map 키, Map 값, Set 원소, Optional 내부, InstancedStruct 내용, Required 허용, 대상 타입 있음, 대상 ID 필수, 컨테이너, FieldValue 통째 읽기·쓰기(비aggregate).
 
@@ -222,14 +222,14 @@ struct PropertyPath { Span<const PathStep> steps; Span<const PathKey> keys{}; };
 - B9a1: 1.3절 성질 표와 대조 헤더. 동작 불변 리팩터다.
 - B9a2: `int8`·`int16` 필드·멤버·원소. enum underlying을 UE와 같은 8종(`uint8`·`uint16`·`uint32`·`uint64`·`int8`·`int16`·`int32`·`int64`)으로 넓힌다.
 - B9a3: Serialization의 wire 14–18 reader·writer와 ValueArray 원소 tag 확장(1.2절). 형식만 검증하는 시험을 먼저 고정한다(구현에서 정한 점은 1.2절 끝).
-- wire는 I64다. 정수 폭을 넓히는 schema 변경이 wire 호환으로 남는다(RF 결정 14). decode는 I64 값이 int8·int16 범위인지 검사한다(UInt8·UInt16의 `UnsignedLimit` — GeneratedFieldCodec.h:76-80과 같은 자리에 `SignedLimit`). 배열 원소도 I64 원소 tag의 ValueArray다. 기존 wire만 쓰므로 B9a2는 B9a3(wire 14–18)와 독립이다(16절 선행 B9a1만).
+- wire는 I64다. 정수 폭을 넓히는 schema 변경이 wire 호환으로 남는다(RF 결정 14). decode는 I64 값이 int8·int16 범위인지 검사한다(Object/FieldValueWire.h에서 UInt8·UInt16의 `UnsignedLimit` 옆에 `SignedLimit`). 배열 원소도 I64 원소 tag의 ValueArray다. 기존 wire만 쓰므로 B9a2는 B9a3(wire 14–18)와 독립이다(16절 선행 B9a1만).
 - 평범한 `char`는 거부한다(부호가 구현 정의 — 필드·원소는 RMC2000 "unsupported field type", enum underlying은 RMC2401). Clang desugar 철자 `signed char`·`short`를 MC/SchemaValidator.cs:5-20 표에 더한다.
 - uint64 enum의 열거자 값은 int64 최댓값 이하여야 한다(`EnumeratorSchema::value`가 int64 — MS/TypeSchema.h:238-248, 위반은 RMC2401). Flags uint64 enum은 비트 0–62를 쓴다. 검증기 `IsDeclared(int64)`와 wire I64를 그대로 쓰기 위해서다.
 - 경로·FieldValue는 `signedInteger` 칸, 텍스트는 10진이다.
 
 구현(B9a2)에서 정한 점(정수 폭 — 성질 표의 새 행은 1.3절):
 
-- wire는 기존 I64(4)다(위 항목). 단일 값과 ValueArray 원소 tag 모두 I64이고 I64는 지금도 원소 tag이므로, B9a2는 B9a3(wire 14–18)에 기대지 않고 완결된다. 범위 검사는 `detail::SignedLimit`·`FitsSignedLimit`(GeneratedFieldCodec.h, `UnsignedLimit` 옆 — Int8·Int16·Int32를 한 판정으로)를 저장(`WriteValueWire`)·로드(`ReadValueWire`)가 같이 쓰고(범위 밖 Overflow), FieldValue 쓰기(`WriteTargetValue` — 필드 write·staged·경로)는 대상 C++ 형식의 `NumericLimits<T>`로 같은 범위를 본다. FieldValue 칸은 `signedInteger`다.
+- wire는 기존 I64(4)다(위 항목). 단일 값과 ValueArray 원소 tag 모두 I64이고 I64는 지금도 원소 tag이므로, B9a2는 B9a3(wire 14–18)에 기대지 않고 완결된다. 범위 검사는 `detail::SignedLimit`·`FitsSignedLimit`(Object/FieldValueWire.h, `UnsignedLimit` 옆 — Int8·Int16·Int32를 한 판정으로)를 저장(`WriteValueWire`)·로드(`ReadValueWire`)가 같이 쓰고(범위 밖 Overflow), FieldValue 쓰기(`WriteTargetValue` — 필드 write·staged·경로)는 대상 C++ 형식의 `NumericLimits<T>`로 같은 범위를 본다. FieldValue 칸은 `signedInteger`다.
 - C++ 형식 대응은 `ScalarValueKind`가 `int8`(= `signed char`)·`int16`(= `short`)을 받는다. 평범한 `char`는 다른 형식이라 Opaque다. MetaCompiler는 평범한 `char` 필드·원소를 지금의 "unsupported field type"(RMC2000)으로 거부하고 `int8`·`uint8`을 안내한다(새 진단 코드를 두지 않았다). enum underlying 자리의 `char`는 RMC2401이다.
 - enum underlying 8종: Clang desugar 철자 `unsigned char`·`unsigned short`·`unsigned int`·`unsigned long long`·`signed char`·`short`·`int`·`long long`만 받고 그 밖(`char`·`bool`·`long` — LLP64·LP64에서 폭이 다르다 — ·`wchar_t` 등)은 RMC2401이다. 범위 표는 런타임 `EnumUnderlyingRange`와 C# `EnumRules.Range` 한 쌍이고 UInt64는 [0, int64 최댓값]이다(넘는 열거자는 전용 문구의 RMC2401 — UE와 다른 점은 18.1절). 생성 코드: `__underlying_type` 대조 static_assert에 `uint64`·`int8`·`int16`·`int64`, int64 최솟값은 리터럴로 쓸 수 없어 `(-9223372036854775807ll - 1)`로 쓰고, Flags enum의 `IsDeclared`는 상한이 int64 최댓값(UInt64·Int64)이면 상한 비교를 내지 않는다. descriptor의 `underlying`·필드 `kind` 값은 ValueKind 이름(`UInt64`·`Int8`·`Int16`·`Int64`)이고 schema 번호는 그대로다(1.8절).
 - Binds 미러 멤버도 같은 철자 해석을 거치므로 int8·int16 멤버를 받는다(지금 미러에는 그런 멤버가 없다).
@@ -713,7 +713,7 @@ public:
 - schema: struct의 `baseType` = Base ID. `fields`는 base 필드 + 자기 필드(펼침, owner 표시 — 클래스와 같다, RF 1.4절). 필드 ID는 base 소유 그대로다.
 - Record: schema = 파생 ID, version = 파생 버전, base 필드 TLV가 그대로 들어간다(펼침 — RF 결정 4, UE와 같다). base 배치를 바꾸면 파생도 버전을 올린다(RF 2.2절 클래스 규칙, MetaCompiler는 강제하지 않는다).
 - 형질: `ContainsStrongReference`·`RequiresWorldOnlyOwner`·`ContainsRequired`·`ContainsInstancedStruct`·`Depth`는 상속 필드까지 계산한다. Atomic은 base에서 상속되고 끌 수 없다.
-- 생성 멤버 thunk: 지금 struct 멤버 thunk는 멤버 포인터의 소유 타입으로 `void*`를 캐스트한다(GeneratedFieldCodec.h:1714-1743, GeneratedPathAccess.h:501-509). base 멤버면 파생 객체를 base로 잘못 캐스트할 수 있으므로(base 하위 객체가 offset 0이 아닐 때) struct 멤버 thunk도 소유 struct를 명시 인자로 받게 바꾼다(`EncodeStructMember<Derived, &Base::m>` 꼴 — 클래스 필드 thunk는 이미 소유자를 따로 받는다, GeneratedFieldAccess.h:317).
+- 생성 멤버 thunk: 지금 struct 멤버 thunk는 멤버 포인터의 소유 타입으로 `void*`를 캐스트한다(GeneratedFieldCodec.h의 `EncodeStructMember`·`DecodeStructMember`, GeneratedPathAccess.h:501-509). base 멤버면 파생 객체를 base로 잘못 캐스트할 수 있으므로(base 하위 객체가 offset 0이 아닐 때) struct 멤버 thunk도 소유 struct를 명시 인자로 받게 바꾼다(`EncodeStructMember<Derived, &Base::m>` 꼴 — 클래스 필드 thunk는 이미 소유자를 따로 받는다, GeneratedFieldAccess.h:317).
 - 값 의미: 필드 타입이 Base면 정확히 Base 값이다. 다형성은 `InstancedStruct<Base>`로 한다.
 - 도구 이름은 상속 포함 대소문자 무시 유일(RMC2203 — 클래스와 같다).
 - `InstancedStruct<Base>`: `value.type` = Base ID. 담긴 타입이 Base 또는 파생이어야 한다(쓰기·decode 1단계, TypeRegistry의 struct 파생 조회 `IsStructA`를 새로 둔다). C++ `Emplace<S>`는 `static_assert(__is_base_of(Base, S))`로 막는다(형질 내장은 ObjectRuntime·생성 코드가 이미 쓴다 — RuntimeTypeOps.h:406·457). Base가 InstancedStruct를 담으면 RMC2308.

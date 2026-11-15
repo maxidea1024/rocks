@@ -331,7 +331,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema&, Ru
 - `MigrateStruct(TypeId, uint32 from, uint32 to, Span<const uint8>) -> Result<Span<const uint8>>` — 1단계: override → (Unsupported면) 타입 migrate → 둘 다 없으면 Unsupported. 결과는 `maxMigrationBytes` 누계, 작업량은 원본 + 결과 바이트를 문맥의 `Charge`로(reader 작업 Δ 청구와 이중이 되지 않게), (TypeId, from, 소유 버퍼)를 노드 목록(`StoredStructMigration`)에 **발생 순서대로** 보관하고 view를 돌려준다(view는 `Array` 이동이 heap 블록을 유지하므로 유효하다). 2단계: 노드별 커서(`GraphApplyContext` 소유)로 다음 항목을 꺼내 (TypeId, from)을 대조한다 — 어긋남·부족·노드 끝에 남은 항목은 InvalidArgument(계약 위반 — 오류 반환·rollback, Fatal 아님 — 6.4절 2단계 규칙).
 - **struct hook**(6.4절): `FieldCodecHooks`에 기본 no-op 가상 함수 — `ObservedStructs() -> Span<const TypeId>`, `ObserveStruct(const FieldCodecFrame&, TypeId, const void* nativeKey, const void* value)`, `SubstituteStruct(const FieldCodecFrame&, TypeId, const void* nativeKey, const void* in) -> Result<const void*>`. 계약은 6.4절(한 번의 해석, 반환 수명, 참조 struct 제외).
 
-**struct 값 codec(B4a, `Object/GeneratedFieldCodec.h`)**
+**struct 값 codec(B4a, `Object/StructFieldCodec.h` — 멤버 thunk `StructFieldOps`는 `Object/GeneratedFieldCodec.h`)**
 
 - `EncodeStructRecord(StructView, const void* value, ArchiveWriter& out, FieldEncodeContext&)`: 참조 struct가 아니면 `SubstituteStruct` → `RecordWriter::Begin(out, id, version, NestedRecordLimits())` → 스키마 순서로 멤버마다 `FieldScope(멤버, struct ID, FieldEnum(i), FieldStruct(i))`, 유효 플래그가 제외면 건너뜀, `BeginField` → thunk가 out에 바로 쓰고 wire 재확인 → `EndField(wire)` → `End`. `AddFields(쓴 TLV 수)`, 작업량은 out의 청구(호출자가 out의 작업을 청구한다).
 - `DecodeStructRecord(StructView, ConstructionContext*, ObjectHandle owner, void* value, FieldDecodeContext&)`: `CurrentRecord()`를 순회한다 — `FieldIndex`, 모르는 필드 → unknownField 정책(path 포함), 저장된 Transient → Unsupported, 로드 정책 `excludedFlags`의 멤버 → InvalidArgument, 멤버 thunk 뒤 present 판정 `MarkPresent`(1단계만 — A5 override 집합 자리, 지금은 무동작). Record에 없는 멤버는 형식 규칙으로 기준 값을 뜻하므로 그 자리의 값을 그대로 둔다(NotFound 없음). Required 진단은 적용 뒤 staged 객체의 실효 값으로 낸다(빠졌다고 null로 보지 않는다 — RuntimeClassMetadata '클래스 기본값 결정', [ObjectFoundations](ObjectFoundations.ko.md) 4절). B4의 누락 정책(`IsMissingAllowed`)·누락 struct 안 Required 후손 순회·present bitset은 A0-Oc에서 지웠다.
@@ -490,7 +490,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema&, Ru
 - 누락: 빠진 배열 필드·멤버는 생성자 값을 유지한다(단일 값과 같다 — 누락 = 기준). B5가 두었던 누락 순회(`CheckMissingField`·`ReportMissingRequired`)의 배열 규칙은 A0-Oc에서 그 순회와 함께 지웠고, Required 배열은 적용 뒤 실효 값의 null 원소로 진단한다([ObjectFoundations](ObjectFoundations.ko.md) 4절).
 - Required 배열의 뜻: 원소마다 non-null. `ObjectRefArray`·`Array<SoftObjectRef<T>>`의 null 원소는 저장에서 `rejectMissingRequired`면 진단 + InvalidArgument, 로드는 진단만 낸다(경로 [f[i]] — A0-Oc부터 적용 뒤 실효 값으로). "비어 있지 않아야"라는 뜻은 없다.
 
-**codec(B5b, `Object/GeneratedFieldCodec.h`)**
+**codec(B5b, 값 wire `Object/FieldValueWire.h`·`Object/FieldValueParse.h`, 배열 `Object/ArrayFieldCodec.h` — 모두 `Object/GeneratedFieldCodec.h`로 include한다)**
 
 - 값 wire 읽기·쓰기를 `ValueType` 인자로 분리한다: `WriteValueWire(out, ctx, ValueType, const EnumSchema*, FieldValue, text, staticNative)`, `ReadValueWire(reader, ctx, ValueType, const EnumSchema*, const EnumValueSet*, staticNative, ParsedValue&)`(검증만 — 진단·청구 없음, `ParsedValue`는 할당 없는 view), `ReportParsedValue(ctx, ValueType, const ParsedValue&)`(미선언 enum·Required null·Soft 수집). `EncodeFieldWire`·`ParseFieldValue`는 이것을 감싸고 단일 값 동작은 바뀌지 않는다.
 - 필드 단위 `FieldWireType(const FieldSchema&, referenceWire)`: Array는 원소가 Struct면 RecordList, 아니면 ValueArray. `EncodeStructRecord`의 wire 재확인·GraphSave·`ValidateLayout`이 쓴다.
