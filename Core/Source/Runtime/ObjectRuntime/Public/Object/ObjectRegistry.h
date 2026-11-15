@@ -814,6 +814,10 @@ private:
                                        ObjectHandle outer, StringView name) noexcept;
     Result<void*> GetPending(const ObjectAccessContext&, ObjectHandle, uint64,
                              const void*) noexcept;
+    // ConstructionContext::AcquireType의 본문이다: 생존(Alive, cutoff 아님) 또는 transaction의 공개
+    // 전 객체(생성자 실행 뒤)의 타입 lease, 그 밖은 StaleHandle(staged 참조 대상 규칙과 같다).
+    Result<TypeLease> AcquireTypeChecked(const ObjectAccessContext&, ObjectHandle,
+                                         uint64 transaction) noexcept;
     // ConstructionContext::Commit(roots, out)의 Registry 몫이다. roots는 이 트랜잭션 객체여야 하고
     // (StaleHandle), out은 roots와 크기가 같고 비어 있다(호출자가 확인한다).
     Result<void> Commit(const ObjectAccessContext&, uint64, Span<const ObjectHandle> staged,

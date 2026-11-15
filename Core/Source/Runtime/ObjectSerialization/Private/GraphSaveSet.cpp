@@ -63,7 +63,7 @@ Result<void> GraphEncodeContext::OpenSetNodes() noexcept {
 // Include가 쓰는 거부 조건을 준비한다: 노드 1의 조상(기준 Outer부터 outermost까지)과, 패키지
 // 정책 Registry면 노드 1의 outermost.
 Result<void> GraphEncodeContext::PrepareInclude() noexcept {
-    if (externals_ != GraphExternalPolicy::Include) {
+    if (externalPolicy_ != GraphExternalPolicy::Include) {
         return Result<void>::Success();
     }
 
@@ -274,15 +274,19 @@ Result<bool> ResolveNodeTable(const Array<SaveNode>& nodes, const GraphEncodeCon
     return Result<bool>::Success(base != ObjectHandle{});
 }
 
-// header·NodeTable·Record를 출력 하나로 쓴다. outers가 비어 있으면 NodeTable 없이 쓴다.
+// header·NodeTable·Record를 출력 하나로 쓴다. outers가 비어 있으면 NodeTable 없이 쓴다. Record를
+// 쓰기 직전 출력 위치 + 길이 prefix가 그 Record의 출력 시작이고, 그 노드의 외부 참조 위치(Record
+// offset)에 더해 출력 offset으로 바꾼다.
 Result<Array<uint8>> WriteGraph(Allocator& allocator, const Array<SaveNode>& nodes,
-                                StringView names, const Array<uint32>& outers, bool baseOuter,
-                                Budget& budget) noexcept {
+                                GraphEncodeContext& context, const Array<uint32>& outers,
+                                bool baseOuter, Budget& budget) noexcept {
     const bool nodeTable = outers.Size() == nodes.Size();
     const uint32 flags = (nodeTable ? NodeTableFlag : 0) | (baseOuter ? BaseOuterFlag : 0);
+    const StringView names = context.Names();
     ArchiveWriter output(allocator, budget.Archive(true));
     auto written = output.WriteRaw(Magic);
-    const uint32 header[] = {FormatVersion, flags, static_cast<uint32>(nodes.Size()), 0};
+    const uint32 header[] = {FormatVersion, flags, static_cast<uint32>(nodes.Size()),
+                             static_cast<uint32>(context.Externals().Size())};
     for (uint32 value : header) {
         if (written) {
             written = output.WriteU32(value);
@@ -302,7 +306,14 @@ Result<Array<uint8>> WriteGraph(Allocator& allocator, const Array<SaveNode>& nod
     }
 
     for (usize index = 0; written && index < nodes.Size(); ++index) {
+        const usize recordStart = output.ByteCount() + RecordPrefixBytes;
         written = output.WriteBytes(nodes[index].record.View());
+        // 이 노드의 위치는 [firstPosition, 다음 노드의 firstPosition)이다.
+        const usize end =
+            index + 1 < nodes.Size() ? nodes[index + 1].firstPosition : context.PositionCount();
+        if (written) {
+            written = context.RebasePositions(nodes[index].firstPosition, end, recordStart);
+        }
     }
 
     if (!written) {

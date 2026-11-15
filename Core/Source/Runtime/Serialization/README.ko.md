@@ -15,7 +15,7 @@
 
 헤더는 `ROCKSREC` 8 bytes, envelope version u32, schema Guid, schema version u32, field count u32, payload byte count u64의 44 bytes다. 필드마다 GUID 16 bytes, wire tag u32, payload 길이 u64, encoded payload를 쓴다.
 
-`RecordBuilder`는 추가 순서를 보존한다. 같은 순서의 입력은 같은 bytes를 만들지만 GUID 정렬 canonicalization은 하지 않는다. `RecordReader::Open`은 전체 envelope와 모든 필드 경계·중복 ID를 검증한 뒤 index를 반환한다. 중복 검사는 id 순으로 정렬한 index의 이웃 비교(O(n log n), 정렬 비교 상한을 work로 미리 청구)이며, 같은 index로 `Find`가 이진 탐색한다(work는 log 비용). `Next`는 기록 순서를 따른다. reader는 index만 소유하므로 caller의 원본 buffer를 유지해야 한다.
+`RecordBuilder`는 추가 순서를 보존한다. 같은 순서의 입력은 같은 bytes를 만들지만 GUID 정렬 canonicalization은 하지 않는다. `LastFieldPayloadOffset()`은 마지막으로 더한 필드의 payload가 Build 결과에서 시작하는 offset이다(필드가 없으면 `IndexNone` — 객체 그래프 저장이 외부 참조 값의 위치를 Record 안 위치로 바꿀 때 쓴다). `RecordReader::Open`은 전체 envelope와 모든 필드 경계·중복 ID를 검증한 뒤 index를 반환한다. 중복 검사는 id 순으로 정렬한 index의 이웃 비교(O(n log n), 정렬 비교 상한을 work로 미리 청구)이며, 같은 index로 `Find`가 이진 탐색한다(work는 log 비용). `Next`는 기록 순서를 따른다. reader는 index만 소유하므로 caller의 원본 buffer를 유지해야 한다.
 
 unknown nonzero wire tag는 그대로 열거하고 skip할 수 있다. 알려진 tag도 record 계층이 payload 의미를 대신 검증하지 않는다. 소비자가 기대 tag를 확인하고 `RecordReader::OpenValue(field)`로 연 ArchiveReader(Record 트리 예산을 공유한다)로 값을 읽은 다음 `AtEnd()`까지 확인한다. ID/tag 0은 InvalidArgument, 중복 ID는 AlreadyExists, envelope/schema version 미지원은 Unsupported, 기대 schema GUID 불일치는 TypeMismatch다. 누락 필드와 iteration 끝은 NotFound다.
 

@@ -8,7 +8,8 @@
 // ConstructionContext::FindObject 시험이다(Docs/Design/ObjectFoundations.ko.md 5.4절, 9절 Od2): 이
 // 트랜잭션의 공개 전 객체와 공개된 객체를 객체 경로로 찾고(SCC import 해석), 다른 트랜잭션의 공개
 // 전 객체는 outermost면 StaleHandle·경로 구성 요소면 NotFound다. 그 밖의 규칙·오류 순서는
-// ObjectRegistry::FindObject와 같고 트랜잭션 상태 규칙을 먼저 본다.
+// ObjectRegistry::FindObject와 같고 트랜잭션 상태 규칙을 먼저 본다. 같은 기준의
+// ConstructionContext::AcquireType(Oe — import 대상의 타입 확인)도 본다.
 using namespace rocks;
 
 namespace {
@@ -66,6 +67,35 @@ ErrorCode FindOnWorker(ConstructionContext& transaction, ObjectHandle outermost,
     }
 
     return foreign.error;
+}
+
+// 다른 스레드에서 transaction.AcquireType(object)를 부른 결과다.
+ErrorCode AcquireOnWorker(ConstructionContext& transaction, ObjectHandle object) noexcept {
+    struct Foreign {
+        ConstructionContext* transaction;
+        ObjectHandle object;
+        ErrorCode error = ErrorCode::None;
+    } foreign{&transaction, object};
+    platform::Thread thread;
+    auto entry = [](void* context) noexcept {
+        auto* state = static_cast<Foreign*>(context);
+        auto type = state->transaction->AcquireType(state->object);
+        state->error = type ? ErrorCode::None : type.Error();
+    };
+    if (thread.Start(entry, &foreign) != platform::ThreadStatus::Success) {
+        return ErrorCode::DependencyFailed;
+    }
+
+    if (thread.WaitForCompletion(10000) != platform::WaitResult::Signaled ||
+        thread.Join() != platform::ThreadStatus::Success) {
+        platform::Fatal("Construction type test worker failed to join");
+    }
+
+    return foreign.error;
+}
+
+ErrorCode TypeError(const Result<TypeLease>& type) noexcept {
+    return type ? ErrorCode::None : type.Error();
 }
 
 } // namespace
@@ -207,6 +237,73 @@ TEST(ConstructionFindObject_ErrorOrderMatchesRegistryFindObject) {
         REQUIRE(registry.Collect(access));
 
         CHECK(registry.Stats().reservedObjects == 0);
+        REQUIRE(registry.Shutdown(access));
+        REQUIRE(types.Shutdown());
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// AcquireType: 생존 객체와 이 트랜잭션의 공개 전 객체는 실제 타입 lease를 돌려주고, null·파괴
+// 요청·다른 트랜잭션의 공개 전 객체는 StaleHandle이다. 트랜잭션 상태 규칙(시작 오류·고정된
+// 오류·끝난 트랜잭션)이 먼저이고, 열린 트랜잭션을 다른 스레드에서 부르면 WrongThread다.
+TEST(ConstructionAcquireType_SeesLiveAndThisTransactionObjects) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterTypes(types));
+        ObjectRegistry registry(allocator, types, {0x43464f03, 1});
+        const auto access = registry.OwnerAccess();
+        RootRef<Object> roots[2];
+        auto live = NewNode(registry, {}, {}, roots[0]);
+        auto doomed = NewNode(registry, {}, {}, roots[1]);
+        REQUIRE(live && doomed);
+        REQUIRE(registry.RequestDestroy(access, doomed.Value()));
+        {
+            ConstructionContext mismatched(registry, {{0x43464f03, 99}});
+            CHECK(TypeError(mismatched.AcquireType(live.Value())) == ErrorCode::WrongContext);
+        }
+
+        {
+            ConstructionContext transaction(registry, access);
+            auto staged = transaction.Create<FindNode>(FindNodeType);
+            REQUIRE(staged);
+            auto liveType = transaction.AcquireType(live.Value());
+            auto stagedType = transaction.AcquireType(staged.Value());
+            REQUIRE(liveType && stagedType);
+            CHECK(liveType.Value().Id() == FindNodeType && stagedType.Value().Id() == FindNodeType);
+            CHECK(TypeError(transaction.AcquireType({})) == ErrorCode::StaleHandle);
+            CHECK(TypeError(transaction.AcquireType(doomed.Value())) == ErrorCode::StaleHandle);
+            {
+                ConstructionContext other(registry, access);
+                CHECK(TypeError(other.AcquireType(staged.Value())) == ErrorCode::StaleHandle);
+                CHECK(TypeError(other.AcquireType(live.Value())) == ErrorCode::None);
+            }
+
+            CHECK(AcquireOnWorker(transaction, live.Value()) == ErrorCode::WrongThread);
+            REQUIRE(transaction.Fail(ErrorCode::DependencyFailed));
+            CHECK(TypeError(transaction.AcquireType(live.Value())) == ErrorCode::DependencyFailed);
+            transaction.Rollback();
+        }
+
+        {
+            ConstructionContext transaction(registry, access);
+            auto staged = transaction.Create<FindNode>(FindNodeType);
+            REQUIRE(staged);
+            const ObjectHandle publish[] = {staged.Value()};
+            RootRef<Object> held[1];
+            REQUIRE(transaction.Commit(publish, held));
+            CHECK(TypeError(transaction.AcquireType(staged.Value())) == ErrorCode::InvalidArgument);
+            CHECK(TypeError(registry.AcquireType(access, staged.Value())) == ErrorCode::None);
+            held[0].Reset();
+        }
+
+        for (auto& root : roots) {
+            root.Reset();
+        }
+
+        REQUIRE(registry.Collect(access));
+        CHECK(registry.Stats().liveObjects == 0);
         REQUIRE(registry.Shutdown(access));
         REQUIRE(types.Shutdown());
     }

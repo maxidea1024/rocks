@@ -5,8 +5,9 @@
 #include "GraphTestSupport.h"
 
 // graph v2 한도 시험이다(Docs/Design/ObjectFoundations.ko.md 5.6절·11절 결정 4·5, 9절 Od1 "한도"):
-// 기본값, 64 MiB 파일·값 경계, 바이트·필드·원소 상한을 각각 채운 입력이 기본 작업량 안에서 저장·
-// 복원되는지, 작업량이 입력에 선형인지(두 배 입력 → 청구 두 배 이내).
+// 기본값, 64 MiB 파일·값 경계, 바이트·필드·원소 상한을 각각 채운 입력과 원소 상한을 외부 참조로
+// 채운 입력(Oe — 위치 표 청구 포함)이 기본 작업량 안에서 저장·복원되는지, 작업량이 입력에
+// 선형인지(두 배 입력 → 청구 두 배 이내).
 using namespace rocks;
 
 namespace limit_fixture {
@@ -86,6 +87,7 @@ constexpr TypeId TextNodeId{0x474c4d43ULL, 1};
 constexpr TypeId FlagsNodeId{0x474c4d43ULL, 2};
 constexpr TypeId PairsNodeId{0x474c4d43ULL, 3};
 constexpr TypeId CountsNodeId{0x474c4d43ULL, 4};
+constexpr TypeId RefsNodeId{0x474c4d43ULL, 5};
 constexpr Guid TextId{0x474c4d46ULL, 1};
 constexpr Guid FlagsAId{0x474c4d46ULL, 2};
 constexpr Guid FlagsBId{0x474c4d46ULL, 3};
@@ -95,6 +97,7 @@ constexpr Guid ExtraId{0x474c4d46ULL, 6};
 constexpr Guid PairsId{0x474c4d46ULL, 7};
 constexpr Guid CountsId{0x474c4d46ULL, 8};
 constexpr Guid NextId{0x474c4d46ULL, 9};
+constexpr Guid RefsId{0x474c4d46ULL, 10};
 constexpr usize MiB = 1024 * 1024;
 
 struct TextNode final : Object {
@@ -146,6 +149,26 @@ struct CountsNode final : Object {
 
     Array<uint32> counts;
     ObjectRef<CountsNode> next;
+};
+
+// 외부 참조 원소 상한 fixture용이다: 강한 참조 배열 하나.
+struct RefsNode final : Object {
+    explicit RefsNode(Allocator& allocator) noexcept : refs(allocator) {
+    }
+
+    void Trace(TraceVisitor& visitor) const noexcept {
+        refs.Trace(visitor);
+    }
+
+    ObjectRefArray<RefsNode> refs;
+};
+
+// 집합 밖 대상을 모두 외부 참조로 쓴다(Admit).
+struct ImportAll final : FieldCodecHooks {
+    Result<ExternalAdmission>
+    AdmitExternalReference(const ExternalReferenceInfo&) noexcept override {
+        return Result<ExternalAdmission>::Success(ExternalAdmission::Import);
+    }
 };
 
 // 생성 코드와 같은 모양의 클래스 필드 함수표다.
@@ -221,10 +244,15 @@ bool RegisterTypes(TypeRegistry& types) noexcept {
     countFields[1].value.type = CountsNodeId;
     const RuntimeFieldOps countOps[] = {CodecField<&CountsNode::counts>(CountsId),
                                         ValueField<&CountsNode::next>(NextId)};
+    FieldSchema refFields[] = {ArrayOf(RefsId, "refs", 4, ValueKind::ObjectReference, RefsNodeId)};
+    refFields[0].kind = FieldKind::ObjectReference;
+    const RuntimeFieldOps refOps[] = {CodecField<&RefsNode::refs>(RefsId)};
     return RegisterClass<TextNode>(types, TextNodeId, "TextNode", 8, textFields, textOps) &&
            RegisterClass<FlagsNode>(types, FlagsNodeId, "FlagsNode", 9, flagFields, flagOps) &&
            RegisterClass<PairsNode>(types, PairsNodeId, "PairsNode", 9, pairFields, pairOps) &&
-           RegisterClass<CountsNode>(types, CountsNodeId, "CountsNode", 10, countFields, countOps);
+           RegisterClass<CountsNode>(types, CountsNodeId, "CountsNode", 10, countFields,
+                                     countOps) &&
+           RegisterClass<RefsNode>(types, RefsNodeId, "RefsNode", 8, refFields, refOps);
 }
 
 // TextNode 하나를 만들고 text를 bytes개의 'a'로 채운다.
@@ -349,6 +377,54 @@ Result<ObjectHandle> NewChain(ObjectRegistry& registry, Array<RootRef<CountsNode
     }
 
     return Result<ObjectHandle>::Success(roots[0].Handle());
+}
+
+// 외부 참조 원소 상한 fixture다: 집합 밖 대상 target 하나와 RefsNode 넷(원소 MaxArrayElements개가
+// 모두 target — 넷의 합이 maxTotalElements)을 한 트랜잭션으로 만들고 roots에 쥔다(roots[0] =
+// target, roots[1..4] = 노드).
+Result<void> NewExternalFixture(ObjectRegistry& registry, Allocator& allocator,
+                                Array<RootRef<Object>>& roots) noexcept {
+    ConstructionContext transaction(registry, registry.OwnerAccess());
+    auto target = transaction.Create<RefsNode>(RefsNodeId);
+    if (!target) {
+        return Result<void>::Failure(target.Error());
+    }
+
+    Array<ObjectHandle> targets(allocator);
+    if (auto resized = targets.TryResize(MaxArrayElements); !resized) {
+        return resized;
+    }
+
+    for (usize index = 0; index < targets.Size(); ++index) {
+        targets[index] = target.Value();
+    }
+
+    ObjectHandle handles[5] = {target.Value()};
+    for (usize index = 1; index < 5; ++index) {
+        auto node = transaction.Create<RefsNode>(RefsNodeId);
+        if (!node) {
+            return Result<void>::Failure(node.Error());
+        }
+
+        auto value = transaction.Get<RefsNode>(node.Value());
+        if (!value) {
+            return Result<void>::Failure(value.Error());
+        }
+
+        if (auto assigned =
+                transaction.AssignReferences(node.Value(), value.Value()->refs, targets.View());
+            !assigned) {
+            return assigned;
+        }
+
+        handles[index] = node.Value();
+    }
+
+    if (auto resized = roots.TryResize(5); !resized) {
+        return resized;
+    }
+
+    return transaction.Commit(handles, roots.View());
 }
 
 } // namespace
@@ -561,6 +637,67 @@ TEST(GraphLimit_MaximumFieldsWithinDefaultWork) {
         }
 
         REQUIRE(source.Shutdown(source.OwnerAccess()));
+        REQUIRE(target.Shutdown(target.OwnerAccess()));
+        REQUIRE(types.Shutdown());
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// 원소 상한을 외부 참조로 채운 fixture(결정 5 — Oe 위치 표 청구 포함): RefsNode 넷 ×
+// MaxArrayElements 원소 = maxTotalElements가 모두 집합 밖 대상 하나를 가리키는 그래프(외부 참조
+// 4,194,304개 — 위치 표 16 MiB가 출력 약 16 MiB와 함께 바이트 누계에 든다)가 기본 한도로 저장되고,
+// 단계형 복원이 import 하나로 모든 원소를 잇는다.
+TEST(GraphLimit_MaximumExternalReferencesWithinDefaultWork) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterTypes(types));
+        Array<uint8> bytes(allocator);
+        {
+            ObjectRegistry source(allocator, types, {0x474c36, 1});
+            {
+                Array<RootRef<Object>> roots(allocator);
+                REQUIRE(NewExternalFixture(source, allocator, roots));
+                const ObjectHandle set[] = {roots[1].Handle(), roots[2].Handle(), roots[3].Handle(),
+                                            roots[4].Handle()};
+                ImportAll hooks;
+                ObjectGraphSaveOptions options;
+                options.externals = GraphExternalPolicy::Admit;
+                options.writeNodeTable = true;
+                options.hooks = &hooks;
+                auto saved =
+                    SaveObjectGraphSet(allocator, source, source.OwnerAccess(), set, options);
+                REQUIRE(saved);
+                REQUIRE(saved.Value().Externals().Size() == 1);
+                CHECK(saved.Value().Externals()[0].occurrences ==
+                      ObjectGraphLimits{}.maxTotalElements);
+                bytes = saved.Value().TakeBytes();
+            }
+
+            REQUIRE(source.Shutdown(source.OwnerAccess()));
+        }
+
+        ObjectRegistry target(allocator, types, {0x474c36, 2});
+        {
+            auto imported = target.NewObject<RefsNode>(target.OwnerAccess(), RefsNodeId);
+            REQUIRE(imported);
+            const ObjectHandle imports[] = {imported.Value().Handle()};
+            const TypeId importTypes[] = {RefsNodeId};
+            ObjectGraphStage stage(allocator, target, types, target.OwnerAccess());
+            ObjectGraphInput input;
+            input.bytes = bytes.View();
+            input.importTypes = importTypes;
+            REQUIRE(stage.Validate(input));
+            ConstructionContext transaction(target, target.OwnerAccess());
+            REQUIRE(stage.CreateObjects(transaction));
+            REQUIRE(stage.ApplyFields(transaction, imports));
+            auto last = transaction.Get<RefsNode>(stage.Nodes()[3]);
+            REQUIRE(last);
+            CHECK(last.Value()->refs.Size() == MaxArrayElements &&
+                  last.Value()->refs[MaxArrayElements - 1] == imports[0]);
+        }
+
         REQUIRE(target.Shutdown(target.OwnerAccess()));
         REQUIRE(types.Shutdown());
     }

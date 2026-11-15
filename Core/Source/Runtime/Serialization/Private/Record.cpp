@@ -102,6 +102,9 @@ Result<void> RecordBuilder::AddField(Guid id, uint32 type, Span<const uint8> enc
         platform::Fatal("Record field reservation invariant failed");
     }
 
+    // 방금 붙인 TLV의 payload는 payload_ 끝에서 encoded 길이만큼 앞이고, Build가 그 앞에 header를
+    // 붙인다.
+    lastPayload_ = HeaderBytes + payload_.ByteCount() - encoded.Size();
     return Result<void>::Success();
 }
 
@@ -165,6 +168,10 @@ usize RecordBuilder::FieldCount() const noexcept {
 
 uint64 RecordBuilder::WorkUsed() const noexcept {
     return payload_.WorkUsed();
+}
+
+usize RecordBuilder::LastFieldPayloadOffset() const noexcept {
+    return lastPayload_;
 }
 
 Result<RecordWriter> RecordWriter::Begin(ArchiveWriter& out, Guid schema, uint32 schemaVersion,

@@ -140,7 +140,12 @@ Result<uint32> ObjectGraphStage::StoredVersion(usize node) const noexcept {
     return Result<uint32>::Success(data_->envelope.nodes[node].version);
 }
 
-Result<void> ObjectGraphStage::ApplyFields(ConstructionContext& transaction) noexcept {
+Span<const GraphExternalUse> ObjectGraphStage::ExternalUses() const noexcept {
+    return data_ ? data_->externalUses.View() : Span<const GraphExternalUse>{};
+}
+
+Result<void> ObjectGraphStage::ApplyFields(ConstructionContext& transaction,
+                                           Span<const ObjectHandle> imports) noexcept {
     if (auto callable = CheckCall(Phase::Created); !callable) {
         return callable;
     }
@@ -149,10 +154,16 @@ Result<void> ObjectGraphStage::ApplyFields(ConstructionContext& transaction) noe
         return same;
     }
 
-    // 객체를 이미 만들었으므로 실패하면 트랜잭션을 그 오류로 고정한다(Commit이 실패하고 소멸자가
-    // 되돌린다 — 부분 적용 객체를 공개하지 않는다).
+    // imports 확인(쓰기 전 전부)과 쓰기의 실패는 모두 객체를 만든 뒤의 실패라 트랜잭션을 그 오류로
+    // 고정한다(Commit이 실패하고 소멸자가 되돌린다 — 부분 적용 객체를 공개하지 않는다). imports는
+    // 호출 검사가 아니라 작업의 입력이므로 개수 불일치도 같다.
     phase_ = Phase::Running;
-    auto applied = ApplyNodeFields(allocator_, transaction, data_->envelope.nodes, options_);
+    auto applied = CheckImports(allocator_, transaction, *data_, imports);
+    if (applied) {
+        applied =
+            ApplyNodeFields(allocator_, transaction, data_->envelope.nodes, options_, imports);
+    }
+
     if (!applied) {
         (void)transaction.Fail(applied.Error());
         phase_ = Phase::Failed;
@@ -215,6 +226,35 @@ Result<RootRef<Object>> LoadObjectGraph(Allocator& allocator, ObjectRegistry& re
         input.base = described.Value();
     }
 
+    // 외부 참조 대상은 생존 객체이고 선언 타입은 그 실제 타입이다(접근·종료 오류는 AcquireType의
+    // 것). 파괴 요청·cutoff 대상은 Registry AcquireType이 Destroyed로 알리지만 단계형 2b
+    // (ConstructionContext::AcquireType — staged 참조 대상 규칙)와 같은 코드가 되게 StaleHandle로
+    // 바꾼다. 크기 대조(= externalCount)는 Validate의 노드 출처 단계가 한다. 실제 타입 lease는 생성
+    // 전 판정에 다시 쓴다.
+    Array<TypeId> importTypes(allocator);
+    Array<TypeLease> importLeases(allocator);
+    if (auto reserved = importTypes.TryReserve(options.imports.Size()); !reserved) {
+        return Output::Failure(reserved.Error());
+    }
+
+    if (auto reserved = importLeases.TryReserve(options.imports.Size()); !reserved) {
+        return Output::Failure(reserved.Error());
+    }
+
+    for (ObjectHandle target : options.imports) {
+        auto type = registry.AcquireType(access, target);
+        if (!type) {
+            return Output::Failure(type.Error() == ErrorCode::Destroyed ? ErrorCode::StaleHandle
+                                                                        : type.Error());
+        }
+
+        if (!importTypes.TryPushBack(type.Value().Id()) ||
+            !importLeases.TryPushBack(Move(type.Value()))) {
+            platform::Fatal("Object graph import type reservation failed");
+        }
+    }
+
+    input.importTypes = importTypes.View();
     ObjectGraphStage stage(allocator, registry, types, access, options);
     if (auto valid = stage.Validate(input); !valid) {
         return Output::Failure(valid.Error());
@@ -229,12 +269,18 @@ Result<RootRef<Object>> LoadObjectGraph(Allocator& allocator, ObjectRegistry& re
         return Output::Failure(reachable.Error());
     }
 
+    // imports의 실제 타입을 이미 알므로 1단계가 기록한 (import, 기대 형식) 쌍을 생성자 전에
+    // 판정한다(2b와 같은 판정 — 기대 형식 불만족 TypeMismatch가 객체를 만들기 전에 난다).
+    if (auto targets = CheckImportTargets(data, importLeases.View()); !targets) {
+        return Output::Failure(targets.Error());
+    }
+
     ConstructionContext transaction(registry, access);
     if (auto created = stage.CreateObjects(transaction, options.baseOuter); !created) {
         return Output::Failure(created.Error());
     }
 
-    if (auto applied = stage.ApplyFields(transaction); !applied) {
+    if (auto applied = stage.ApplyFields(transaction, options.imports); !applied) {
         return Output::Failure(applied.Error());
     }
 

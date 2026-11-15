@@ -66,6 +66,20 @@ public:
     usize FieldCount() const noexcept;
     uint64 WorkUsed() const noexcept;
 
+    // 마지막으로 더한 필드의 payload가 Build 결과(Record byte)에서 시작하는 offset이다(header 44 +
+    // 앞 필드 TLV들 + 이 필드의 TLV header 28). 필드를 하나도 더하지 않았으면 IndexNone이고, 실패한
+    // AddField는 이 값을 바꾸지 않는다. 같은 필드 순서로 Build하면 이 offset의 byte가 그 필드의
+    // encodedPayload와 같다. 객체 그래프 저장이 필드 writer 안의 값 위치(외부 참조 값)를 Record 안
+    // 위치로 바꿀 때 쓴다(Docs/Design/ObjectFoundations.ko.md 5.3절 — 필드 writer offset + 이 값 =
+    // Record offset).
+    //
+    // 사용 예:
+    //   const usize inField = encoded.ByteCount();   // 값을 쓰기 직전 필드 writer 위치
+    //   encoded.WriteU32(value);
+    //   builder.AddField(id, WireType::U32, encoded.View());
+    //   const usize inRecord = builder.LastFieldPayloadOffset() + inField;
+    usize LastFieldPayloadOffset() const noexcept;
+
 private:
     Allocator* allocator_;
     Guid schema_;
@@ -73,6 +87,7 @@ private:
     RecordLimits limits_;
     ArchiveWriter payload_;
     Array<Guid> ids_;
+    usize lastPayload_ = IndexNone;
 };
 
 // 바깥 ArchiveWriter 뒤에 Record 하나를 제자리로 쓴다(중첩 Record — 리플렉션 struct 값). header와

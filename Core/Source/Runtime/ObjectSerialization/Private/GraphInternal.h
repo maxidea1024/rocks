@@ -22,12 +22,17 @@ inline constexpr usize NodeEntryBytes = 28;
 inline constexpr usize RecordPrefixBytes = 8;
 inline constexpr usize RecordHeaderBytes = 44;
 // 강한 참조 wire는 U32다: 0 = null, 1..nodeCount = 노드(local ID), ExternalReferenceBit | i(1 ≤ i ≤
-// externalCount) = 외부 참조 i(A0-Oe — 지금 복원은 externalCount 0만 받으므로 언제나 범위 밖이다).
+// externalCount) = 외부 참조 i. 고정 4 byte라 외부 번호 재배정이 제자리 덮어쓰기다(5.3절).
 inline constexpr uint32 ReferenceWire = static_cast<uint32>(WireType::U32);
 inline constexpr uint32 ExternalReferenceBit = 0x80000000u;
 // local ID가 외부 참조 비트와 겹치지 않는 노드 수 상한이다(maxObjects가 넘으면 옵션 오류
 // InvalidArgument).
 inline constexpr uint32 MaxNodeCount = ExternalReferenceBit - 1;
+// 외부 번호가 외부 참조 비트와 겹치지 않는 외부 참조 수 상한이다(maxExternalReferences가 넘으면
+// 옵션 오류 InvalidArgument).
+inline constexpr uint32 MaxExternalCount = ExternalReferenceBit - 1;
+// header의 externalCount 칸 위치다(AssignExternalIndices가 덮어쓴다).
+inline constexpr usize ExternalCountOffset = 20;
 
 // 그래프 하나의 누적 작업량 예산이다. ArchiveBudget 하나를 모든 Record 트리(값 reader 포함)와
 // 공유하므로 그래프 청구와 reader 청구가 같은
@@ -175,12 +180,24 @@ struct StoredField {
     FieldView view;
 };
 
-// 1단계가 모은 강한 참조 하나다. target은 local ID(1부터, null은 기록하지 않는다 — 배열은 non-null
-// 원소마다 하나), expectation은 LoadNode::expectations의 위치(필드 안 서로 다른 기대마다 하나 —
-// 원소마다 복제하지 않는다).
+// 1단계가 모은 강한 참조 하나다. target은 저장 값 그대로다 — local ID(1부터) 또는 외부 참조
+// ExternalReferenceBit | i(null은 기록하지 않는다 — 배열은 non-null 원소마다 하나). expectation은
+// LoadNode::expectations의 위치(필드 안 서로 다른 기대마다 하나 — 원소마다 복제하지 않는다).
 struct ReferenceToken {
     uint32 target = 0;
     uint32 expectation = 0;
+};
+
+// 외부 참조 token이면 그 번호 i(1부터)를, 노드 token이면 0을 돌려준다.
+inline uint32 ExternalIndexOf(const ReferenceToken& token) noexcept {
+    return (token.target & ExternalReferenceBit) != 0 ? token.target & ~ExternalReferenceBit : 0;
+}
+
+// 1단계가 기록한 (외부 참조 i, 기대 형식) 쌍 하나다(서로 다른 쌍마다 하나 — 2b가 실제 대상으로
+// 판정한다).
+struct ImportExpectation {
+    uint32 externalIndex = 0;
+    ReferenceExpectation expectation;
 };
 
 // 1단계가 보관한 struct 마이그레이션 결과 하나다(발생 순서). 2단계가 같은 순서로 (type, from)을
@@ -233,16 +250,21 @@ Result<Envelope> ReadEnvelope(Allocator& allocator, Span<const uint8> source,
 
 // 단계형 복원(ObjectGraphStage)이 Validate에서 만들어 이후 단계까지 쥐는 상태다. 노드(필드 색인·
 // 참조 token·노드 타입 lease·마이그레이션 결과)와 그래프 예산, 참조 형식 검사에 쓴 기대 타입
-// lease를 소유하고 입력 byte·노드 이름은 빌린다. 노드 원소는 만든 뒤 옮기지 않는다(FieldView가
-// node.migrated를 가리킨다).
+// lease, 외부 참조의 선언 타입 lease·쓰임·기록한 기대 형식 쌍을 소유하고 입력 byte·노드 이름은
+// 빌린다. 노드 원소는 만든 뒤 옮기지 않는다(FieldView가 node.migrated를 가리킨다).
 struct StageData {
     StageData(Allocator& allocator, Budget&& graphBudget, Envelope&& graphEnvelope) noexcept
-        : budget(Move(graphBudget)), envelope(Move(graphEnvelope)), expectedLeases(allocator) {
+        : budget(Move(graphBudget)), envelope(Move(graphEnvelope)), expectedLeases(allocator),
+          importLeases(allocator), externalUses(allocator), importChecks(allocator) {
     }
 
     Budget budget;
     Envelope envelope;
     HashMap<TypeId, TypeLease> expectedLeases;
+    // 외부 참조 i의 선언 타입(importTypes) lease와 쓰임이다(i − 1 위치, 크기 = externalCount).
+    Array<TypeLease> importLeases;
+    Array<GraphExternalUse> externalUses;
+    Array<ImportExpectation> importChecks;
 };
 
 // ObjectGraphStage 내부 통로다(편의 복원의 도달 검사가 1단계 결과를 읽는다).
@@ -253,7 +275,8 @@ struct StageAccess {
 };
 
 // 복원 옵션 검사다: 값을 바꾸거나 모르는 내용을 건너뛰는 정책(ReportAndDefault·
-// LoadNewerSkippingUnknown)에 hooks가 없거나 maxObjects가 MaxNodeCount를 넘으면 InvalidArgument다.
+// LoadNewerSkippingUnknown)에 hooks가 없거나 maxObjects가 MaxNodeCount를,
+// maxExternalReferences가 MaxExternalCount를 넘으면 InvalidArgument다.
 Result<void> CheckLoadOptions(const ObjectGraphLoadOptions& options) noexcept;
 
 // 1단계(GraphLoad.cpp): envelope·노드 출처·노드 정체성·Record·값·참조를 검증하고 2단계 몫의
@@ -263,6 +286,14 @@ Result<UniquePtr<StageData>> ValidateGraph(Allocator& allocator, TypeRegistry& t
                                            const RegistryPolicy& policy,
                                            const ObjectGraphLoadOptions& options,
                                            const ObjectGraphInput& input) noexcept;
+
+// 1단계 참조 형식 검사다(GraphReferences.cpp — 모든 노드를 해석한 뒤): importTypes의 선언 타입
+// lease를 data.importLeases에 연다(미등록 NotFound·클래스 아님 TypeMismatch) → token마다 노드
+// 대상은 기대 형식(TypeMismatch, 기대 타입 미등록 NotFound), 외부 참조는 선언 타입과 기대 타입의
+// 양립(TypeMismatch)을 보고 서로 다른 (import, 기대 형식) 쌍을 data.importChecks에 기록한다. 쓴
+// 기대 타입 lease는 data.expectedLeases에 남는다. 조회·삽입마다 작업량 1을 그래프 예산에 청구한다.
+Result<void> ValidateReferenceTypes(Allocator& allocator, TypeRegistry& types, StageData& data,
+                                    Span<const TypeId> importTypes) noexcept;
 
 // 1단계 노드 정체성 검사다(GraphIdentity.cpp, Docs/Design/ObjectFoundations.ko.md 5.4절). 노드를
 // local ID 순서로 Check에 넘기면 앞 노드들로 계산한 Outer 요약(outer 0이면 hasBase ? base : Outer
@@ -328,11 +359,25 @@ Result<void> CheckCreatePreconditions(Allocator& allocator, ConstructionContext&
 Result<void> CreateNodes(ConstructionContext& transaction, Array<LoadNode>& nodes,
                          ObjectHandle baseOuter, Array<ObjectHandle>& handles) noexcept;
 
+// 2b 확인이다(GraphExternal.cpp, 5.4절 — 쓰기 전): imports 수가 선언 타입 수와 다르면
+// InvalidArgument → import마다 transaction.AcquireType(생존·이 트랜잭션 객체 — StaleHandle 등) →
+// 실제 타입이 선언 타입의 native 파생이 아니면 InvalidArgument → 기록한 (import, 기대 형식) 쌍마다
+// 실제 대상이 기대를 만족하지 않으면 TypeMismatch. 확인 표 할당 실패는 OutOfMemory다.
+Result<void> CheckImports(Allocator& allocator, ConstructionContext& transaction,
+                          const StageData& data, Span<const ObjectHandle> imports) noexcept;
+
+// CheckImports의 판정 부분이다(GraphExternal.cpp): actual(import마다 실제 타입 lease — i − 1
+// 위치)의 수가 선언 타입 수와 다르면 InvalidArgument → 실제 타입이 선언 타입의 native 파생이 아니면
+// InvalidArgument → 기록한 (import, 기대 형식) 쌍마다 실제 대상이 기대를 만족하지 않으면
+// TypeMismatch. 편의 복원은 imports의 실제 타입을 이미 알므로 생성자 전에 이것으로 판정한다.
+Result<void> CheckImportTargets(const StageData& data, Span<const TypeLease> actual) noexcept;
+
 // 2b 적용이다(GraphApply.cpp): 1단계가 보관한 필드를 staged 객체에 쓴다(그래프 예산에 접근하지
-// 않는다). 실패는 쓰기 codec·Registry의 오류이고 호출자가 트랜잭션을 버린다.
+// 않는다 — 노드 참조는 노드 handle로, 외부 참조 i는 imports[i − 1]로 바꾼다). 실패는 쓰기
+// codec·Registry의 오류이고 호출자가 트랜잭션을 버린다.
 Result<void> ApplyNodeFields(Allocator& allocator, ConstructionContext& transaction,
-                             const Array<LoadNode>& nodes,
-                             const ObjectGraphLoadOptions& options) noexcept;
+                             const Array<LoadNode>& nodes, const ObjectGraphLoadOptions& options,
+                             Span<const ObjectHandle> imports) noexcept;
 
 // 적용을 마친 staged 노드들의 Required 실효 값을 진단한다(Docs/Design/ObjectFoundations.ko.md 4절
 // — 2c 단계, GraphRequired.cpp). Required를 품은 최상위 필드(필드 자신이 Required이거나 struct

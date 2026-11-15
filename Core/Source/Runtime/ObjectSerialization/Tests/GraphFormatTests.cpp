@@ -101,8 +101,7 @@ bool Rejects(Allocator& allocator, ObjectRegistry& registry, TypeRegistry& types
 
 // header: formatVersion이 2가 아니면 Unsupported(v1은 읽지 않는다), 정의되지 않은 flags·NodeTable
 // 없는 BaseOuter·NodeTable 없음(편의 복원)·nodeCount 0은 InvalidArgument, nodeCount·externalCount
-// 상한 초과는 CapacityExceeded, externalCount가 0이 아니면 InvalidArgument(외부 참조 대상을 줄 수
-// 없다).
+// 상한 초과는 CapacityExceeded, externalCount가 imports 수(여기서는 0)와 다르면 InvalidArgument다.
 TEST(GraphFormat_HeaderVersionFlagsAndCounts) {
     SystemAllocator allocator;
     {

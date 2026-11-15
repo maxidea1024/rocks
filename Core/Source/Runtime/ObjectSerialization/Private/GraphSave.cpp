@@ -4,8 +4,11 @@ namespace rocks::graph_detail {
 
 // 저장 결과를 만드는 내부 통로다(ObjectGraphSaveResult의 생성자는 비공개다).
 struct SaveResultAccess {
-    static ObjectGraphSaveResult Make(Array<uint8>&& bytes, Array<ObjectHandle>&& nodes) noexcept {
-        return ObjectGraphSaveResult(Move(bytes), Move(nodes));
+    static ObjectGraphSaveResult Make(Array<uint8>&& bytes, Array<ObjectHandle>&& nodes,
+                                      Array<GraphExternal>&& externals, Array<uint32>&& positions,
+                                      uint32 maxExternalReferences) noexcept {
+        return ObjectGraphSaveResult(Move(bytes), Move(nodes), Move(externals), Move(positions),
+                                     maxExternalReferences);
     }
 };
 
@@ -24,12 +27,24 @@ GraphEncodeContext::WriteReferenceWire(ArchiveWriter& out, ObjectHandle target,
         return spent;
     }
 
-    // 집합 노드면 그 lease로 검사하고, 아니면 대상 타입을 열어(생존·문맥 검사 포함) 검사가 끝난
-    // 뒤 정책대로 처리한다.
+    // 집합 노드·Import한 외부 대상이면 그 lease로 검사하고, 아니면 대상 타입을 열어(생존·문맥 검사
+    // 포함) 검사가 끝난 뒤 정책대로 처리한다.
     uint32 local = 0;
+    uint32 slot = 0;
     TypeLease discovered;
     const TypeLease* actual = &discovered;
-    if (const uint32* found = locals_.Find(target)) {
+    const uint32* found = locals_.Find(target);
+    if (!found && externalPolicy_ == GraphExternalPolicy::Admit) {
+        if (auto spent = budget_.Spend(1); !spent) {
+            return spent;
+        }
+
+        if (const uint32* imported = slots_.Find(target)) {
+            slot = *imported;
+        }
+    }
+
+    if (found || slot != 0) {
         // 캐시에 맞아도 참조마다 lease 없는 O(1) 생존 조회를 한다 — 참조마다 AcquireType을
         // 부르는 것과 같은 판정이다(무효·재사용 handle은 StaleHandle, 논리 파괴·cutoff는
         // Destroyed, 문맥·종료·재진입 오류는 그대로).
@@ -42,8 +57,12 @@ GraphEncodeContext::WriteReferenceWire(ArchiveWriter& out, ObjectHandle target,
             return Result<void>::Failure(ErrorCode::Destroyed);
         }
 
-        local = *found;
-        actual = &nodes_[local - 1].lease;
+        if (found) {
+            local = *found;
+            actual = &nodes_[local - 1].lease;
+        } else {
+            actual = &externalLeases_[slot - 1];
+        }
     } else {
         auto acquired = registry_.AcquireType(access_, target);
         if (!acquired) {
@@ -70,20 +89,30 @@ GraphEncodeContext::WriteReferenceWire(ArchiveWriter& out, ObjectHandle target,
         }
     }
 
-    if (local == 0) {
-        if (externals_ != GraphExternalPolicy::Include) {
-            return RejectExternal();
-        }
+    if (local != 0) {
+        return out.WriteU32(local);
+    }
 
+    if (slot != 0) {
+        return WriteImported(out, slot);
+    }
+
+    switch (externalPolicy_) {
+    case GraphExternalPolicy::Reject:
+        break;
+    case GraphExternalPolicy::Admit:
+        return AdmitExternal(out, target, Move(discovered), expectation);
+    case GraphExternalPolicy::Include: {
         auto added = IncludeNode(target, Move(discovered));
         if (!added) {
             return Result<void>::Failure(added.Error());
         }
 
-        local = added.Value();
+        return out.WriteU32(added.Value());
+    }
     }
 
-    return out.WriteU32(local);
+    return RejectExternal();
 }
 
 // 기대 TypeId의 등록 타입 lease다(저장 끝까지 캐시에 쥔다). 조회·삽입마다 작업량 1이다.
@@ -120,7 +149,8 @@ namespace {
 using namespace graph_detail;
 
 // 노드 하나의 필드를 encode해 Record를 만든다. fileBytes는 지금까지의 출력 byte 누계이고 이 노드의
-// Bytes(Record)와(NodeTable이면) 노드 항목을 더해 maxBytes와 비교한다.
+// Bytes(Record)와(NodeTable이면) 노드 항목, 외부 참조 위치 표 메모리를 더해 maxBytes와 비교한다.
+// 필드마다 외부 참조 위치를 필드 writer offset에서 Record offset으로 바꾼다.
 Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
                             const ObjectAccessContext& access, Array<SaveNode>& nodes,
                             usize nodeIndex, Budget& budget, usize& fileBytes, bool nodeTable,
@@ -144,12 +174,15 @@ Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
 
     const auto& schema = nodes[nodeIndex].lease.Schema();
     // builder의 필드 수 한도는 이 객체 필드를 세기 전의 남은 누계다(로드와 같은 기준). 크기 한도는
-    // 남은 파일 byte(이 노드의 Record 길이 prefix와 NodeTable 항목을 뺀 것)라 넘칠 Record를 끝까지
-    // 만들지 않고, 노드 Record들의 합이 maxBytes로 묶인다(필드 writer도 같은 한도로 연다).
+    // 남은 파일 byte(이 노드의 Record 길이 prefix와 NodeTable 항목, 지금까지의 위치 표를 뺀 것)라
+    // 넘칠 Record를 끝까지 만들지 않고, 노드 Record들의 합이 maxBytes로 묶인다(필드 writer도 같은
+    // 한도로 연다).
     const usize entryBytes = nodeTable ? NodeEntryBytes + nodes[nodeIndex].nameBytes : 0;
+    const usize firstPosition = context.PositionCount();
     usize reserved = 0;
     if (!TryAdd(fileBytes, RecordPrefixBytes, reserved) ||
-        !TryAdd(reserved, entryBytes, reserved)) {
+        !TryAdd(reserved, entryBytes, reserved) ||
+        !TryAdd(reserved, context.PositionBytes(), reserved)) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
 
@@ -161,7 +194,7 @@ Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
         return counted;
     }
 
-    context.BeginObject(schema.id, static_cast<uint32>(nodeIndex));
+    context.BeginObject(schema.id, static_cast<uint32>(nodeIndex), fileBytes);
     RecordBuilder record(allocator, schema.id, schema.version, recordLimits);
     usize payloadBytes = 0;
     for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
@@ -189,8 +222,12 @@ Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
         ArchiveLimits fieldLimits = budget.Archive();
         fieldLimits.maxTotalBytes = recordLimits.archive.maxTotalBytes;
         ArchiveWriter encoded(allocator, fieldLimits);
+        // 이 필드의 외부 참조 위치는 [fieldPosition, 끝)이고 encoded 안 offset으로 기록된다.
+        const usize fieldPosition = context.PositionCount();
+        context.SetFieldWriter(&encoded);
         auto wire =
             accessor.Value()->encode(*accessor.Value(), registry, access, handle, encoded, context);
+        context.SetFieldWriter(nullptr);
         if (!wire) {
             return Result<void>::Failure(wire.Error());
         }
@@ -224,21 +261,30 @@ Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
             return spent;
         }
 
+        // 필드 writer offset → Record offset(이 필드 payload의 Record 안 시작을 더한다).
+        if (auto rebased = context.RebasePositions(fieldPosition, context.PositionCount(),
+                                                   record.LastFieldPayloadOffset());
+            !rebased) {
+            return rebased;
+        }
+
         if (!TryAdd(payloadBytes, appended, payloadBytes)) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }
     }
 
     // 이 노드가 출력에 더하는 byte: Bytes(Record) = 8 + 44 + payload, NodeTable이면 노드 항목.
+    // 외부 참조 위치 표 메모리도 그래프 바이트 누계에 든다(5.3절).
     usize recordBytes = 0;
     usize total = 0;
+    usize charged = 0;
     if (!TryAdd(payloadBytes, RecordHeaderBytes, recordBytes) ||
         !TryAdd(fileBytes, RecordPrefixBytes, total) || !TryAdd(total, recordBytes, total) ||
-        !TryAdd(total, entryBytes, total)) {
+        !TryAdd(total, entryBytes, total) || !TryAdd(total, context.PositionBytes(), charged)) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
 
-    if (total > budget.limits.maxBytes) {
+    if (charged > budget.limits.maxBytes) {
         return Result<void>::Failure(ErrorCode::CapacityExceeded);
     }
 
@@ -255,6 +301,7 @@ Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
     // encode가 nodes를 재할당했을 수 있으므로 이전 원소 참조를 저장하지 않고 index로 다시 접근한다.
     nodes[nodeIndex].type = schema.id;
     nodes[nodeIndex].record = Move(output.Value());
+    nodes[nodeIndex].firstPosition = firstPosition;
     fileBytes = total;
     return Result<void>::Success();
 }
@@ -266,7 +313,8 @@ Result<ObjectGraphSaveResult> SaveObjectGraphSet(Allocator& allocator, ObjectReg
                                                  Span<const ObjectHandle> set,
                                                  ObjectGraphSaveOptions options) noexcept {
     using Output = Result<ObjectGraphSaveResult>;
-    if (options.limits.maxObjects > MaxNodeCount) {
+    if (options.limits.maxObjects > MaxNodeCount ||
+        options.limits.maxExternalReferences > MaxExternalCount) {
         return Output::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -316,6 +364,8 @@ Result<ObjectGraphSaveResult> SaveObjectGraphSet(Allocator& allocator, ObjectReg
         return Output::Failure(prepared.Error());
     }
 
+    // Include는 encode 중에 노드를 끝에 더하므로 매번 크기를 다시 본다(더한 노드도 이 순서로 encode
+    // 된다 — 외부 참조 위치 표가 노드 순서다).
     usize bytes = HeaderBytes;
     for (usize index = 0; index < nodes.Size(); ++index) {
         auto saved = SaveNodeFields(allocator, registry, access, nodes, index, budget.Value(),
@@ -336,25 +386,34 @@ Result<ObjectGraphSaveResult> SaveObjectGraphSet(Allocator& allocator, ObjectReg
         baseOuter = resolved.Value();
     }
 
-    auto output = WriteGraph(allocator, nodes, context.Names(), outers, baseOuter, budget.Value());
+    auto output = WriteGraph(allocator, nodes, context, outers, baseOuter, budget.Value());
     if (!output) {
         return Output::Failure(output.Error());
     }
 
-    // 마지막 output 할당 callback까지 포함하여 모든 노드의 논리 수명을 다시 확인한 뒤 게시한다.
+    // 마지막 output 할당 callback까지 포함하여 모든 노드와 외부 참조 대상의 논리 수명을 다시
+    // 확인한 뒤 게시한다(결과의 handle이 게시 시점에 모두 생존 객체다).
+    auto alive = [&](ObjectHandle handle) noexcept -> Result<void> {
+        auto lifecycle = registry.InspectLifecycle(access, handle);
+        if (!lifecycle) {
+            return Result<void>::Failure(lifecycle.Error());
+        }
+
+        if (lifecycle.Value() != ObjectLifecycle::Alive) {
+            return Result<void>::Failure(ErrorCode::Destroyed);
+        }
+
+        return Result<void>::Success();
+    };
+
     Array<ObjectHandle> handles(allocator);
     if (auto reserved = handles.TryReserve(nodes.Size()); !reserved) {
         return Output::Failure(reserved.Error());
     }
 
     for (usize index = 0; index < nodes.Size(); ++index) {
-        auto lifecycle = registry.InspectLifecycle(access, nodes[index].handle);
-        if (!lifecycle) {
-            return Output::Failure(lifecycle.Error());
-        }
-
-        if (lifecycle.Value() != ObjectLifecycle::Alive) {
-            return Output::Failure(ErrorCode::Destroyed);
+        if (auto live = alive(nodes[index].handle); !live) {
+            return Output::Failure(live.Error());
         }
 
         if (!handles.TryPushBack(nodes[index].handle)) {
@@ -362,7 +421,15 @@ Result<ObjectGraphSaveResult> SaveObjectGraphSet(Allocator& allocator, ObjectReg
         }
     }
 
-    return Output::Success(SaveResultAccess::Make(Move(output.Value()), Move(handles)));
+    for (const GraphExternal& external : context.Externals()) {
+        if (auto live = alive(external.target); !live) {
+            return Output::Failure(live.Error());
+        }
+    }
+
+    return Output::Success(
+        SaveResultAccess::Make(Move(output.Value()), Move(handles), Move(context.Externals()),
+                               Move(context.Positions()), options.limits.maxExternalReferences));
 }
 
 Result<Array<uint8>> SaveObjectGraph(Allocator& allocator, ObjectRegistry& registry,

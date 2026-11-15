@@ -1,19 +1,20 @@
 #include "GraphInternal.h"
 
 // 그래프 복원 2단계의 생성(2a)·필드 적용(2b — 2단계 문맥)이다(Docs/Design/ObjectFoundations.ko.md
-// 5.4절). 단계형 복원(ObjectGraphStage)이 사전 확인(GraphIdentity.cpp) 뒤에 부르고, Required
-// 검사(2c)는 GraphRequired.cpp, Commit은 호출자다.
+// 5.4절). 단계형 복원(ObjectGraphStage)이 사전 확인(GraphIdentity.cpp)·imports 확인
+// (GraphExternal.cpp) 뒤에 부르고, Required 검사(2c)는 GraphRequired.cpp, Commit은 호출자다.
 namespace rocks::graph_detail {
 namespace {
 
 // 2단계(적용) 문맥이다. 그래프 예산에 접근하지 않는다: 값 reader는 같은 크기 한도·무제한 work로
-// 열고, 참조 token을 만든 객체 handle로 바꾸며, 진단·수집·청구는 버린다.
+// 열고, 참조 값을 만든 객체 handle(노드)이나 imports handle(외부 참조)로 바꾸며, 진단·수집·청구는
+// 버린다.
 class GraphApplyContext final : public FieldDecodeContext {
 public:
     GraphApplyContext(Allocator& allocator, const ObjectGraphLoadOptions& options,
-                      const Array<LoadNode>& nodes) noexcept
+                      const Array<LoadNode>& nodes, Span<const ObjectHandle> imports) noexcept
         : FieldDecodeContext(options.policy, options.hooks, ReferenceWire), allocator_(allocator),
-          limits_(options.limits), nodes_(nodes) {
+          limits_(options.limits), nodes_(nodes), imports_(imports) {
         SetRecording(false);
     }
 
@@ -130,15 +131,27 @@ public:
 
         DecodedReference decoded;
         decoded.isNull = local.Value() == 0;
-        if (!decoded.isNull) {
-            // 범위는 1단계가 검사했다(외부 비트 포함). 다르면 원본이 바뀐 계약 위반이다.
-            if (local.Value() > nodes_.Size()) {
+        if (decoded.isNull) {
+            return Result<DecodedReference>::Success(decoded);
+        }
+
+        // 범위는 1단계가 검사했다. 다르면 원본이 바뀐 계약 위반이다. 외부 참조 i는 2b 확인을 지난
+        // imports[i − 1]이다.
+        if ((local.Value() & ExternalReferenceBit) != 0) {
+            const uint32 external = local.Value() & ~ExternalReferenceBit;
+            if (external == 0 || external > imports_.Size()) {
                 return Result<DecodedReference>::Failure(ErrorCode::InvalidArgument);
             }
 
-            decoded.handle = nodes_[local.Value() - 1].handle;
+            decoded.handle = imports_[external - 1];
+            return Result<DecodedReference>::Success(decoded);
         }
 
+        if (local.Value() > nodes_.Size()) {
+            return Result<DecodedReference>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        decoded.handle = nodes_[local.Value() - 1].handle;
         return Result<DecodedReference>::Success(decoded);
     }
 
@@ -177,6 +190,7 @@ private:
     Allocator& allocator_;
     ObjectGraphLimits limits_;
     const Array<LoadNode>& nodes_;
+    Span<const ObjectHandle> imports_;
     const LoadNode* node_ = nullptr;
     usize migration_ = 0;
 };
@@ -210,9 +224,9 @@ Result<void> CreateNodes(ConstructionContext& transaction, Array<LoadNode>& node
 }
 
 Result<void> ApplyNodeFields(Allocator& allocator, ConstructionContext& transaction,
-                             const Array<LoadNode>& nodes,
-                             const ObjectGraphLoadOptions& options) noexcept {
-    GraphApplyContext context(allocator, options, nodes);
+                             const Array<LoadNode>& nodes, const ObjectGraphLoadOptions& options,
+                             Span<const ObjectHandle> imports) noexcept {
+    GraphApplyContext context(allocator, options, nodes, imports);
     for (usize index = 0; index < nodes.Size(); ++index) {
         const auto& node = nodes[index];
         const auto& schema = node.lease.Schema();

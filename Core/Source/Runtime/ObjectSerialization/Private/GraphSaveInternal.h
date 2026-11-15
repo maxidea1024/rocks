@@ -2,15 +2,18 @@
 
 #include "GraphInternal.h"
 
-// 그래프 저장의 내부 정의다. GraphSave.cpp(노드 encode·참조 쓰기·저장 진입점)와
-// GraphSaveSet.cpp(저장 집합·Include·NodeTable·출력 조립)가 같이 쓴다.
+// 그래프 저장의 내부 정의다. GraphSave.cpp(노드 encode·참조 쓰기·저장 진입점),
+// GraphSaveSet.cpp(저장 집합·Include·NodeTable·출력 조립), GraphExternal.cpp(외부 참조 허락·위치
+// 표·번호 재배정)가 같이 쓴다.
 namespace rocks::graph_detail {
 
 // 저장할 노드 하나다. lease는 집합 노드면 OpenSetNodes가, Include가 더한 노드면 발견할 때 연 대상
 // 타입 lease이며 참조 검사와 SaveNodeFields가 재사용한다. outer는 Registry의 Outer(없으면
 // ObjectHandle{}), 이름은 NodeTable을 쓸 때만 문맥의 이름 버퍼 [nameOffset, nameOffset +
-// nameBytes)에 모은다. nodes가 다시 할당될 수 있으므로 lease·노드의 주소를 보관하지 않고 index로
-// 다시 접근한다(lease가 돌려준 스키마·필드 정보는 레지스트리 레코드 안이라 안정적이다).
+// nameBytes)에 모은다. firstPosition은 이 노드의 첫 외부 참조 위치가 위치 표에서 차지하는 자리다
+// (노드 순서로 encode하므로 노드의 위치는 [firstPosition, 다음 노드의 firstPosition)이다). nodes가
+// 다시 할당될 수 있으므로 lease·노드의 주소를 보관하지 않고 index로 다시 접근한다(lease가 돌려준
+// 스키마·필드 정보는 레지스트리 레코드 안이라 안정적이다).
 struct SaveNode {
     SaveNode(Allocator& allocator, ObjectHandle value) noexcept : handle(value), record(allocator) {
     }
@@ -21,14 +24,17 @@ struct SaveNode {
     TypeId type{};
     usize nameOffset = 0;
     usize nameBytes = 0;
+    usize firstPosition = 0;
     Array<uint8> record;
 };
 
-// graph v2 저장 문맥이다: 강한 참조는 대상 타입을 검사한 뒤 U32 local ID로 쓴다. 집합 밖 대상은
-// 정책대로 거부(Reject)하거나 노드로 더한다(Include — Outer 사슬 먼저). nodes가 다시 할당될 수
-// 있으므로 원소 참조를 보관하지 않는다. 참조 비용은 참조 수에 선형이다(5.6절): handle → local ID
-// 해시 표(키는 domain을 포함한 handle 전체 — 캐시 적중이 domain 검사를 건너뛰지 않게), 노드별
-// TypeLease, 기대 TypeId → lease 캐시를 쓰고 조회·삽입마다 작업량 1을 청구한다.
+// graph v2 저장 문맥이다: 강한 참조는 대상 타입을 검사한 뒤 U32로 쓴다(집합 안이면 local ID). 집합
+// 밖 대상은 정책대로 거부(Reject)하거나, 노드로 더하거나(Include — Outer 사슬 먼저), hook이
+// 허락하면 외부 참조로 쓰고 값 위치를 위치 표에 기록한다(Admit — 5.3절). nodes가 다시 할당될 수
+// 있으므로 원소 참조를 보관하지 않는다. 참조 비용은 참조 수에 선형이다(5.6절): handle → local ID와
+// handle → 외부 slot 해시 표(키는 domain을 포함한 handle 전체 — 캐시 적중이 domain 검사를 건너뛰지
+// 않게), 노드·외부 대상별 TypeLease, 기대 TypeId → lease 캐시를 쓰고 조회·삽입마다 작업량 1을
+// 청구한다. 위치 표는 참조 하나에 4 byte이고 그 메모리를 그래프 바이트 누계와 작업량에 청구한다.
 class GraphEncodeContext final : public FieldEncodeContext {
 public:
     GraphEncodeContext(Allocator& allocator, ObjectRegistry& registry,
@@ -36,14 +42,47 @@ public:
                        const ObjectGraphSaveOptions& options) noexcept
         : FieldEncodeContext(options.policy, options.hooks, ReferenceWire), allocator_(allocator),
           registry_(registry), access_(access), nodes_(nodes), budget_(budget),
-          externals_(options.externals), writeNodeTable_(options.writeNodeTable),
+          externalPolicy_(options.externals), writeNodeTable_(options.writeNodeTable),
           packagePolicy_(registry.Policy().packageNativeType != nullptr),
           scratch_(allocator, budget), observation_(allocator, budget, false), locals_(allocator),
-          expected_(allocator), firstAncestors_(allocator), chain_(allocator), names_(allocator) {
+          expected_(allocator), firstAncestors_(allocator), chain_(allocator), names_(allocator),
+          slots_(allocator), externals_(allocator), externalLeases_(allocator),
+          positions_(allocator) {
     }
 
-    void BeginObject(TypeId type, uint32 index) noexcept {
+    // 노드 하나의 encode를 시작한다. fileBytes는 이 노드 앞까지의 출력 byte 누계다(위치 표 메모리
+    // 상한 검사에 쓴다).
+    void BeginObject(TypeId type, uint32 index, usize fileBytes) noexcept {
         SetObject(type, index);
+        committedBytes_ = fileBytes;
+    }
+
+    // 필드 하나의 encode 동안 직렬화기가 준 필드 writer다(외부 참조 값의 위치를 이 writer 안
+    // offset으로 기록한다 — 다른 writer에 쓴 외부 참조는 InvalidArgument). null이면 필드 밖이다.
+    void SetFieldWriter(const ArchiveWriter* writer) noexcept {
+        fieldWriter_ = writer;
+    }
+
+    // 외부 참조 위치 표(GraphExternal.cpp)다: 기록한 위치 수와 그 메모리 byte, [first, end) 위치에
+    // base를 더하기(필드 writer offset → Record offset → 출력 offset — u32를 넘으면
+    // CapacityExceeded, 위치마다 작업량 1).
+    usize PositionCount() const noexcept {
+        return positions_.Size();
+    }
+
+    usize PositionBytes() const noexcept {
+        return positions_.Size() * sizeof(uint32);
+    }
+
+    Result<void> RebasePositions(usize first, usize end, usize base) noexcept;
+
+    // 저장 결과로 넘길 외부 참조 목록(slot 순)과 위치 표다.
+    Array<GraphExternal>& Externals() noexcept {
+        return externals_;
+    }
+
+    Array<uint32>& Positions() noexcept {
+        return positions_;
     }
 
     // 저장 집합(GraphSaveSet.cpp)이다.
@@ -101,19 +140,25 @@ protected:
                                     const ReferenceExpectation& expectation) noexcept override;
 
 private:
-    // Include·이름(GraphSaveSet.cpp)과 기대 타입 캐시(GraphSave.cpp)다.
+    // Include·이름(GraphSaveSet.cpp), 기대 타입 캐시(GraphSave.cpp), 외부 참조(GraphExternal.cpp)
+    // 다.
     Result<void> RejectExternal() noexcept;
     Result<uint32> IncludeNode(ObjectHandle target, TypeLease lease) noexcept;
     Result<uint32> AddNode(ObjectHandle handle, ObjectHandle outer, TypeLease lease) noexcept;
     Result<void> AppendName(SaveNode& node) noexcept;
     Result<const TypeLease*> ExpectedLease(TypeId type) noexcept;
+    // Admit: 처음 보는(또는 앞 결정이 Null인) 대상의 허락을 hook에 묻고 결과대로 쓴다.
+    Result<void> AdmitExternal(ArchiveWriter& out, ObjectHandle target, TypeLease lease,
+                               const ReferenceExpectation& expectation) noexcept;
+    // Import된 slot의 참조 하나를 집계하고 위치를 기록한 뒤 0x80000000 | slot을 쓴다.
+    Result<void> WriteImported(ArchiveWriter& out, uint32 slot) noexcept;
 
     Allocator& allocator_;
     ObjectRegistry& registry_;
     const ObjectAccessContext& access_;
     Array<SaveNode>& nodes_;
     Budget& budget_;
-    GraphExternalPolicy externals_;
+    GraphExternalPolicy externalPolicy_;
     bool writeNodeTable_;
     bool packagePolicy_;
     BudgetAllocator scratch_;
@@ -126,15 +171,25 @@ private:
     Array<ObjectHandle> chain_;
     ObjectHandle firstOutermost_{};
     String names_;
+    // Admit: Import한 대상 handle → slot(1부터), slot 순 외부 대상과 그 실제 타입 lease(대상 검사
+    // 캐시), 외부 참조 값 위치 표(출현 순 — 필드 encode 동안은 필드 writer offset, 필드를 Record에
+    // 더한 뒤 Record offset, 출력 조립 뒤 출력 offset).
+    HashMap<ObjectHandle, uint32, HandleHash> slots_;
+    Array<GraphExternal> externals_;
+    Array<TypeLease> externalLeases_;
+    Array<uint32> positions_;
+    const ArchiveWriter* fieldWriter_ = nullptr;
+    usize committedBytes_ = 0;
 };
 
 // NodeTable의 outer 값과 BaseOuter 비트를 정한다(GraphSaveSet.cpp).
 Result<bool> ResolveNodeTable(const Array<SaveNode>& nodes, const GraphEncodeContext& context,
                               Array<uint32>& outers, Budget& budget) noexcept;
 
-// header·NodeTable·Record를 출력 하나로 쓴다(GraphSaveSet.cpp).
+// header(externalCount = 외부 대상 수)·NodeTable·Record를 출력 하나로 쓰고, 노드마다 그 Record의
+// 출력 시작 offset을 외부 참조 위치에 더한다(Record offset → 출력 offset — GraphSaveSet.cpp).
 Result<Array<uint8>> WriteGraph(Allocator& allocator, const Array<SaveNode>& nodes,
-                                StringView names, const Array<uint32>& outers, bool baseOuter,
-                                Budget& budget) noexcept;
+                                GraphEncodeContext& context, const Array<uint32>& outers,
+                                bool baseOuter, Budget& budget) noexcept;
 
 } // namespace rocks::graph_detail

@@ -113,6 +113,28 @@ TEST(RecordEnvelopeAndFieldEncodingMatchIndependentGolden) {
     CHECK(reader.Value().Position() == 1);
 }
 
+// LastFieldPayloadOffset는 마지막으로 더한 필드의 payload가 Build 결과에서 시작하는 offset이다
+// (header 44 + 앞 TLV + TLV header 28). 필드가 없으면 IndexNone이고 실패한 AddField는 값을 바꾸지
+// 않는다.
+TEST(RecordBuilderReportsLastFieldPayloadOffset) {
+    SystemAllocator allocator;
+    RecordBuilder builder(allocator, Schema, 1);
+    CHECK(builder.LastFieldPayloadOffset() == IndexNone);
+    const uint8 first[] = {1, 2, 3};
+    const uint8 second[] = {0x78, 0x56, 0x34, 0x12};
+    REQUIRE(builder.AddField(First, WireType::Bytes, first));
+    CHECK(builder.LastFieldPayloadOffset() == 44 + 28);
+    REQUIRE(builder.AddField(Second, WireType::U32, second));
+    const usize at = builder.LastFieldPayloadOffset();
+    CHECK(at == 44 + 28 + sizeof(first) + 28);
+    CHECK(!builder.AddField(Second, WireType::U32, first));
+    CHECK(builder.LastFieldPayloadOffset() == at);
+    auto bytes = builder.Build();
+    REQUIRE(bytes);
+    REQUIRE(at + sizeof(second) == bytes.Value().Size());
+    CHECK(SameBytes(Span<const uint8>(bytes.Value().Data() + at, sizeof(second)), second));
+}
+
 TEST(RecordUnknownTypesAndInsertionOrderArePreserved) {
     SystemAllocator allocator;
     RecordBuilder builder(allocator, Schema, 7);

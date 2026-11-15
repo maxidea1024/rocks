@@ -12,7 +12,8 @@
 #include <Serialization/RecordList.h>
 #include <Serialization/ValueArray.h>
 
-// 필드 codec의 문맥·정책·hook이다(Docs/Design/ReflectionFoundations.ko.md 6.1–6.4절). 생성 codec
+// 필드 codec의 문맥·정책이다(Docs/Design/ReflectionFoundations.ko.md 6.1–6.4절 — hook 묶음과 진단·
+// 외부 참조 정보는 Object/FieldCodecHooks.h). 생성 codec
 // thunk(RuntimeFieldOps::encode·decode)는 이 문맥으로만 참조 wire·진단·Soft 수집·예산에 닿으므로,
 // 그래프 형식(graph v2의 U32 local ID·외부 참조 비트)이나 저장 집합이 바뀌어도 생성 코드를 다시
 // 만들지 않는다. 직렬화기(ObjectSerialization)가 문맥을 구현하고 필드마다 FieldScope로 위치를
@@ -387,7 +388,9 @@ public:
     }
 
     // 강한 참조 하나를 쓴다: Required null 검사 뒤 대상을 expectation으로 검사하고(TypeMismatch)
-    // ReferenceWireType() 형식으로 쓴다.
+    // ReferenceWireType() 형식으로 쓴다. out은 직렬화기가 이 필드의 encode에 준 writer여야 한다 —
+    // 그래프 저장은 외부 참조 값의 위치를 그 writer 안 offset으로 기록하므로(번호 재배정 —
+    // Docs/Design/ObjectFoundations.ko.md 5.3절) 다른 writer에 쓴 외부 참조는 InvalidArgument다.
     Result<void> WriteReference(ArchiveWriter& out, ObjectHandle target,
                                 const ReferenceExpectation& expectation) noexcept {
         if (auto required = CheckRequired(target == ObjectHandle{}); !required) {
@@ -454,6 +457,30 @@ protected:
 
     virtual Result<void> WriteReferenceWire(ArchiveWriter& out, ObjectHandle target,
                                             const ReferenceExpectation& expectation) noexcept = 0;
+
+    // 지금 위치(Current())의 저장 집합 밖 대상 target을 외부 참조로 쓸지 hooks에 묻는다(그래프
+    // 저장의 Admit 정책 — FieldCodecHooks::AdmitExternalReference). 유효 플래그·Required·노드
+    // 위치·경로는 문맥이 채운다. hooks가 없으면 Reject다(hook 기본과 같다). 결과 값의 검사와
+    // 진단은 호출자(직렬화기)가 한다.
+    Result<ExternalAdmission> AdmitExternalReference(ObjectHandle target, TypeId targetType,
+                                                     TypeId expectedType, uint32 slot) noexcept {
+        FieldCodecHooks* hooks = Hooks();
+        if (!hooks) {
+            return Result<ExternalAdmission>::Success(ExternalAdmission::Reject);
+        }
+
+        PathStep steps[33];
+        ExternalReferenceInfo info;
+        info.target = target;
+        info.targetType = targetType;
+        info.expectedType = expectedType;
+        info.effectiveFlags = EffectiveFlags();
+        info.required = HasFlag(info.effectiveFlags, FieldFlags::Required);
+        info.objectIndex = ObjectIndex();
+        info.path = BuildPath(steps);
+        info.slot = slot;
+        return hooks->AdmitExternalReference(info);
+    }
 
 private:
     FieldEncodePolicy policy_;

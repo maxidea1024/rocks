@@ -135,6 +135,14 @@ Result<ObjectHandle> ConstructionContext::FindObject(ObjectHandle outermost,
     return registry_.FindObjectChecked(access_, outermost, objectPath, transaction_);
 }
 
+Result<TypeLease> ConstructionContext::AcquireType(ObjectHandle object) noexcept {
+    if (auto state = CheckOpen(); !state) {
+        return Result<TypeLease>::Failure(state.Error());
+    }
+
+    return registry_.AcquireTypeChecked(access_, object, transaction_);
+}
+
 Result<ObjectHandle> ConstructionContext::CreateImpl(TypeId type, const void* nativeType,
                                                      ObjectHandle outer, StringView name) noexcept {
     if (auto state = CheckOpen(); !state) {

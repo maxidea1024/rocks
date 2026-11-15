@@ -12,8 +12,8 @@ using namespace rocks::test::stage;
 
 // 노드 표 출처: NodeTable이 없는 그래프는 호출자 노드 설명(A1 Exports 모의)으로 복원한다.
 // NodeTable과 노드 설명이 둘 다 있거나 둘 다 없음, 개수 불일치, 타입 0, BaseOuter 비트와 hasBase
-// 불일치, externalCount ≠ 0은 InvalidArgument이고, 노드 타입이 Record schema와 다르면 생성자 전에
-// InvalidArgument다. StoredVersion은 Validate 뒤 Record 버전이다.
+// 불일치, importTypes 수 ≠ externalCount는 InvalidArgument이고, 노드 타입이 Record schema와
+// 다르면 생성자 전에 InvalidArgument다. StoredVersion은 Validate 뒤 Record 버전이다.
 TEST(GraphStage_NodeDescriptorsAndInputSource) {
     SystemAllocator allocator;
     {

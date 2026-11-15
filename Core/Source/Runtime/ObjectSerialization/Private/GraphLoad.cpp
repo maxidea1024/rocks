@@ -3,23 +3,25 @@
 
 // 그래프 복원 1단계(검증)다(Docs/Design/ObjectFoundations.ko.md 5.4절 — ObjectGraphStage::
 // Validate의 본문 ValidateGraph): envelope 뒤 노드 출처·노드 정체성(GraphIdentity.cpp)·Record·값을
-// 검증하고 참조 token의 형식을 검사하며 2단계 몫의 작업량을 미리 청구한다. ObjectRegistry에 닿지
-// 않는다.
+// 검증하고(참조 값의 범위와 외부 참조의 쓰임 집계 포함) 참조 token의 형식을 검사하며
+// (GraphReferences.cpp) 2단계 몫의 작업량을 미리 청구한다. ObjectRegistry에 닿지 않는다.
 namespace rocks {
 namespace {
 
 using namespace graph_detail;
 
 // 1단계(검증) 문맥이다. 값 reader는 그래프 공유 예산으로 열고, 강한 참조 token을 범위 검사해
-// 기록하며, 진단·수집을 hook으로 보낸다. Spend는 2단계 몫까지 두 배, ReserveApply는 한 배를
-// 청구한다. 관찰 할당(ObservationScratch)은 1단계에만 있는 일이라 Charge로 한 번만 청구한다.
+// 기록하며(외부 참조는 import마다 쓰임 — 출현 수·공통 플래그·Required — 도 모은다), 진단·수집을
+// hook으로 보낸다. Spend는 2단계 몫까지 두 배, ReserveApply는 한 배를 청구한다. 관찰
+// 할당(ObservationScratch)은 1단계에만 있는 일이라 Charge로 한 번만 청구한다.
 class GraphValidateContext final : public FieldDecodeContext {
 public:
     GraphValidateContext(Allocator& allocator, Budget& budget,
-                         const ObjectGraphLoadOptions& options, usize objectCount) noexcept
+                         const ObjectGraphLoadOptions& options, usize objectCount,
+                         Array<GraphExternalUse>& externalUses) noexcept
         : FieldDecodeContext(options.policy, options.hooks, ReferenceWire), allocator_(allocator),
           budget_(budget), options_(options), objectCount_(objectCount),
-          scratch_(allocator, budget), observation_(allocator, *this) {
+          externalUses_(externalUses), scratch_(allocator, budget), observation_(allocator, *this) {
     }
 
     // 관찰할 struct ID(정렬됨, 로드 동안 유효)를 정한다.
@@ -205,10 +207,13 @@ public:
             return Result<DecodedReference>::Failure(local.Error());
         }
 
-        // 외부 참조(ExternalReferenceBit | i)는 i ≤ externalCount여야 하는데 이 복원은
-        // externalCount 0만 받으므로(외부 참조 대상은 A0-Oe) 외부 비트는 모두 범위 밖이다. 노드
-        // 번호는 nodeCount 이하다.
-        if ((local.Value() & ExternalReferenceBit) != 0 || local.Value() > objectCount_) {
+        // 외부 참조(ExternalReferenceBit | i)는 1 ≤ i ≤ externalCount, 노드 번호는 nodeCount
+        // 이하다(그 밖 — 0x80000000 포함 — 은 파일 손상).
+        const bool isExternal = (local.Value() & ExternalReferenceBit) != 0;
+        const uint32 external = isExternal ? local.Value() & ~ExternalReferenceBit : 0;
+        const bool inRange = isExternal ? external != 0 && external <= externalUses_.Size()
+                                        : local.Value() <= objectCount_;
+        if (!inRange) {
             return Result<DecodedReference>::Failure(ErrorCode::InvalidArgument);
         }
 
@@ -251,6 +256,16 @@ public:
         token.expectation = found;
         if (!node_->tokens.TryPushBack(token)) {
             return Result<DecodedReference>::Failure(ErrorCode::OutOfMemory);
+        }
+
+        // 외부 참조의 쓰임은 저장의 GraphExternal과 같은 규칙으로 모은다(위치의 유효 플래그 —
+        // 배열 원소는 배열 필드의 것).
+        if (external != 0) {
+            GraphExternalUse& use = externalUses_[external - 1];
+            const uint32 flags = EffectiveFlags();
+            ++use.occurrences;
+            use.commonFlags &= flags;
+            use.required = use.required || HasFlag(flags, FieldFlags::Required);
         }
 
         return Result<DecodedReference>::Success(decoded);
@@ -328,6 +343,8 @@ private:
     Budget& budget_;
     const ObjectGraphLoadOptions& options_;
     usize objectCount_;
+    // 외부 참조 i의 쓰임이다(i − 1 위치, 크기 = externalCount).
+    Array<GraphExternalUse>& externalUses_;
     BudgetAllocator scratch_;
     ObservationAllocator observation_;
     LoadNode* node_ = nullptr;
@@ -585,115 +602,18 @@ Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& nod
     return Result<void>::Success();
 }
 
-// 강한 참조 대상 타입 검사 캐시의 키다: (기대 TypeId, 대상 TypeId).
-struct TypePair {
-    TypeId expected{};
-    TypeId actual{};
-
-    bool operator==(const TypePair&) const noexcept = default;
-};
-
-struct TypePairHash {
-    uint64 operator()(const TypePair& pair) const noexcept {
-        return MixHash(Hash<Guid>{}(pair.expected) ^ (Hash<Guid>{}(pair.actual) >> 1));
-    }
-};
-
-// 모든 노드의 강한 참조 token이 대상 노드의 타입 기대를 만족하는지 검사한다(도달 여부와 무관 —
-// setter와 같은 native 상속 계약을 생성 전에). leases는 검사에 쓴 기대 타입 lease(기대 TypeId →
-// lease)를 받아 호출자가 로드 끝까지 쥔다. (기대, 실제) 결과 캐시와 기대 lease 목록은 해시 표이고
-// 조회·삽입마다 작업량 1을 청구한다(원소 참조가 많아도 대상 타입 수에 비례하지 않는다).
-Result<void> ValidateReferenceTypes(Allocator& allocator, TypeRegistry& types,
-                                    const Array<LoadNode>& nodes, Budget& budget,
-                                    HashMap<TypeId, TypeLease>& leases) noexcept {
-    HashMap<TypePair, bool, TypePairHash> checks(allocator);
-    for (const LoadNode& node : nodes) {
-        for (usize tokenIndex = 0; tokenIndex < node.tokens.Size(); ++tokenIndex) {
-            auto spent = budget.Spend(1);
-            if (!spent) {
-                return spent;
-            }
-
-            const ReferenceToken& token = node.tokens[tokenIndex];
-            const LoadNode& target = nodes[token.target - 1];
-            const ReferenceExpectation& expectation = node.expectations[token.expectation];
-            // 선언 타입의 파생 객체와 같은 native의 다른 TypeId는 허용한다. 정적 thunk의 대상
-            // 타입도 함께 만족해야 한다.
-            if (expectation.staticNative && !target.lease.IsNativeA(expectation.staticNative)) {
-                return Result<void>::Failure(ErrorCode::TypeMismatch);
-            }
-
-            if (expectation.schemaType == Guid{}) {
-                continue;
-            }
-
-            spent = budget.Spend(1);
-            if (!spent) {
-                return spent;
-            }
-
-            const TypePair key{expectation.schemaType, target.type};
-            bool accepted = false;
-            if (const bool* cached = checks.Find(key)) {
-                accepted = *cached;
-            } else {
-                spent = budget.Spend(1);
-                if (!spent) {
-                    return spent;
-                }
-
-                const TypeLease* expected = leases.Find(expectation.schemaType);
-                if (!expected) {
-                    // 조회와 마찬가지로 lease 획득·삽입도 청구한다.
-                    spent = budget.Spend(1);
-                    if (!spent) {
-                        return spent;
-                    }
-
-                    auto acquired = types.Acquire(expectation.schemaType);
-                    if (!acquired) {
-                        return Result<void>::Failure(acquired.Error());
-                    }
-
-                    auto added = leases.Insert(expectation.schemaType, Move(acquired.Value()));
-                    if (!added) {
-                        return Result<void>::Failure(added.Error());
-                    }
-
-                    expected = leases.Find(expectation.schemaType);
-                }
-
-                accepted = target.lease.IsNativeA(expected->Ops().nativeType);
-                spent = budget.Spend(1);
-                if (!spent) {
-                    return spent;
-                }
-
-                if (auto added = checks.Insert(key, accepted); !added) {
-                    return Result<void>::Failure(added.Error());
-                }
-            }
-
-            if (!accepted) {
-                return Result<void>::Failure(ErrorCode::TypeMismatch);
-            }
-        }
-    }
-
-    return Result<void>::Success();
-}
-
 } // namespace
 
 namespace graph_detail {
 
 Result<void> CheckLoadOptions(const ObjectGraphLoadOptions& options) noexcept {
-    // 값을 바꾸거나 모르는 내용을 건너뛰는 정책은 진단을 받을 곳이 있어야 한다. 노드 수 상한은
-    // local ID가 외부 참조 비트와 겹치지 않게 MaxNodeCount 이하다.
+    // 값을 바꾸거나 모르는 내용을 건너뛰는 정책은 진단을 받을 곳이 있어야 한다. 노드 수·외부 참조
+    // 수 상한은 local ID·외부 번호가 외부 참조 비트와 겹치지 않게 2^31 − 1 이하다(저장과 같다).
     if ((!options.hooks &&
          (options.policy.undeclaredEnum == UndeclaredEnumPolicy::ReportAndDefault ||
           options.policy.newerVersion == NewerVersionPolicy::LoadNewerSkippingUnknown)) ||
-        options.limits.maxObjects > MaxNodeCount) {
+        options.limits.maxObjects > MaxNodeCount ||
+        options.limits.maxExternalReferences > MaxExternalCount) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -720,18 +640,29 @@ Result<UniquePtr<StageData>> ValidateGraph(Allocator& allocator, TypeRegistry& t
     }
 
     // 노드 출처: 그래프의 NodeTable과 호출자 노드 표 중 정확히 하나다. NodeTable이면 BaseOuter
-    // 비트가 hasBase와 같아야 하고, 호출자 노드 표는 nodeCount개다. 외부 참조 대상의 선언
-    // 타입(importTypes — A0-Oe)을 받지 않으므로 externalCount는 0이어야 한다.
+    // 비트가 hasBase와 같아야 하고, 호출자 노드 표는 nodeCount개다. 외부 참조의 선언
+    // 타입(importTypes)은 externalCount개이고 0이 없다.
     const uint32 flags = envelope.Value().flags;
     const bool nodeTable = (flags & NodeTableFlag) != 0;
     const usize count = envelope.Value().nodes.Size();
+    const uint32 externalCount = envelope.Value().externalCount;
     // 기준 Outer 요약의 경로 길이도 Registry 규칙(4 KiB) 안이어야 한다(호출자가 준 값 — 넘으면 어떤
     // 기준 Outer와도 맞지 않는다).
     if ((nodeTable && input.nodes.Size() != 0) || (!nodeTable && input.nodes.Size() == 0) ||
         (nodeTable && ((flags & BaseOuterFlag) != 0) != input.hasBase) ||
-        (!nodeTable && input.nodes.Size() != count) || envelope.Value().externalCount != 0 ||
+        (!nodeTable && input.nodes.Size() != count) || input.importTypes.Size() != externalCount ||
         (input.hasBase && input.base.pathBytes > MaxObjectPathBytes)) {
         return Output::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (auto spent = budget.Value().Spend(externalCount); !spent) {
+        return Output::Failure(spent.Error());
+    }
+
+    for (TypeId type : input.importTypes) {
+        if (type == TypeId{}) {
+            return Output::Failure(ErrorCode::InvalidArgument);
+        }
     }
 
     if (!nodeTable) {
@@ -763,7 +694,12 @@ Result<UniquePtr<StageData>> ValidateGraph(Allocator& allocator, TypeRegistry& t
 
     StageData& data = *made.Value();
     Array<LoadNode>& nodes = data.envelope.nodes;
-    GraphValidateContext context(allocator, data.budget, options, nodes.Size());
+    // 외부 참조 i의 쓰임(출현 0·공통 플래그 ~0·Required 아님에서 시작 — 노드 출처에서 청구했다).
+    if (auto resized = data.externalUses.TryResize(externalCount); !resized) {
+        return Output::Failure(resized.Error());
+    }
+
+    GraphValidateContext context(allocator, data.budget, options, nodes.Size(), data.externalUses);
     // 관찰할 struct ID를 정렬해 둔다(미등록 NotFound, 참조를 담는 struct InvalidArgument).
     Array<TypeId> observed(allocator);
     if (options.hooks) {
@@ -827,17 +763,18 @@ Result<UniquePtr<StageData>> ValidateGraph(Allocator& allocator, TypeRegistry& t
         nameBytes += nodes[index].name.ByteCount();
     }
 
-    if (auto typed =
-            ValidateReferenceTypes(allocator, types, nodes, data.budget, data.expectedLeases);
-        !typed) {
+    if (auto typed = ValidateReferenceTypes(allocator, types, data, input.importTypes); !typed) {
         return Output::Failure(typed.Error());
     }
 
-    // 2단계의 노드 생성(노드 수 + 이름 byte)·Commit·staged 간선 검증 몫을 미리 청구한다(2단계는
-    // 예산으로 실패하지 않는다).
+    // 2단계의 노드 생성(노드 수 + 이름 byte)·Commit·staged 간선 검증 몫과 2b의 imports 확인 몫
+    // (import마다 타입 조회 + 기록한 쌍마다 판정)을 미리 청구한다(2단계는 예산으로 실패하지
+    // 않는다).
     uint64 phaseTwo = 0;
     if (!TryAdd(static_cast<uint64>(nodes.Size()) + 1, static_cast<uint64>(references), phaseTwo) ||
-        !TryAdd(phaseTwo, static_cast<uint64>(nameBytes), phaseTwo)) {
+        !TryAdd(phaseTwo, static_cast<uint64>(nameBytes), phaseTwo) ||
+        !TryAdd(phaseTwo, static_cast<uint64>(externalCount), phaseTwo) ||
+        !TryAdd(phaseTwo, static_cast<uint64>(data.importChecks.Size()), phaseTwo)) {
         return Output::Failure(ErrorCode::Overflow);
     }
 

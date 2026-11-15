@@ -92,6 +92,31 @@ public:
     //   }
     Result<ObjectHandle> FindObject(ObjectHandle outermost, StringView objectPath) noexcept;
 
+    // object의 실제 등록 타입 lease다. 이 트랜잭션의 참조 대상으로 쓸 handle의 타입을 쓰기 전에
+    // 확인할 때 쓴다 — 단계형 그래프 복원이 외부 참조 대상(imports — 생존 객체 또는 같은 트랜잭션에
+    // 올린 SCC 형제의 객체)을 선언 타입·기대 형식과 대조한다(Docs/Design/ObjectFoundations.ko.md
+    // 5.4절). 받는 객체는 ObjectRegistry::AcquireType이 아니라 staged 참조 쓰기의 대상 규칙을
+    // 따른다: 생존(Alive, GC cutoff 아님) 또는 이 트랜잭션의 공개 전 객체(생성자 실행 뒤). 그래서
+    // Registry AcquireType과 두 곳이 다르다 — 이 트랜잭션의 공개 전 객체를 받고(Registry는
+    // StaleHandle), 파괴 요청(DestroyRequested)·cutoff 객체는 Destroyed가 아니라 StaleHandle이다
+    // (staged 참조 대상이 될 수 없다. ConstructionContext::FindObject는 DestroyRequested 객체도
+    // 찾으므로 그 결과를 import로 주면 여기서 StaleHandle이다). 읽기라 Required 검사 중 표시
+    // 동안에도 된다. 소유 스레드 전용이다. lease는 타입 레코드 수명만 지키고 객체 수명은 지키지
+    // 않는다.
+    //
+    // 순서와 오류: 트랜잭션 상태(클래스 주석의 규칙) → 접근(WrongThread·WrongContext) → 종료·재진입
+    // (ShuttingDown·Busy) → object가 null·무효·다른 Registry·회수됨·DestroyRequested·cutoff·다른
+    // 트랜잭션의 공개 전 객체면 StaleHandle.
+    //
+    // 사용 예(SCC 형제의 객체를 import로 쓰기 전에 타입을 본다):
+    //   auto target = transaction.FindObject(packageA, "Body");
+    //   auto type = target ? transaction.AcquireType(target.Value())
+    //                      : Result<TypeLease>::Failure(target.Error());
+    //   if (!type || !type.Value().IsNativeA(NativeTypeKey<Mesh>())) {
+    //       return Result<void>::Failure(type ? ErrorCode::TypeMismatch : type.Error());
+    //   }
+    Result<TypeLease> AcquireType(ObjectHandle object) noexcept;
+
     ObjectRegistry& Registry() const noexcept {
         return registry_;
     }

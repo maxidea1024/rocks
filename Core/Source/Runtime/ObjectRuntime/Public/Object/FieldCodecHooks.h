@@ -4,10 +4,10 @@
 #include <Object/AssetId.h>
 #include <Object/ObjectHandle.h>
 
-// 직렬화 관찰 hook 묶음(FieldCodecHooks)과 hook이 받는 진단·소프트 참조 정보다
-// (설계: Docs/Design/ReflectionFoundations.ko.md 6.4절). 필드 codec 문맥(Object/FieldCodec.h)이 이
-// 헤더를 include하며, 저장·복원 옵션에 hook을 주는 호출자는 FieldCodec.h 또는
-// ObjectSerialization/ObjectGraph.h로 받는다.
+// 직렬화 관찰 hook 묶음(FieldCodecHooks)과 hook이 받는 진단·소프트 참조·외부 참조 정보다
+// (설계: Docs/Design/ReflectionFoundations.ko.md 6.4절, ObjectFoundations.ko.md 5.3절).
+// 필드 codec 문맥(Object/FieldCodec.h)이 이 헤더를 include하며, 저장·복원 옵션에 hook을 주는
+// 호출자는 FieldCodec.h 또는 ObjectSerialization/ObjectGraph.h로 받는다.
 namespace rocks {
 
 enum class FieldDiagnosticKind : uint8 {
@@ -24,10 +24,11 @@ enum class FieldDiagnosticKind : uint8 {
     // 저장할 배열의 원소 수(value)가 필드 maxElements를 넘는다(path = 배열 필드). 저장은 이 진단
     // 뒤 CapacityExceeded다(로드는 필드별 maxElements를 걸지 않으므로 내지 않는다).
     ArrayTooLong,
-    // 저장 집합 밖 강한 참조를 쓰지 못했다(path = 참조 위치, value 0 = 거부). 그래프 저장의 Reject
-    // 정책과 Include 거부 조건(기준 Outer·노드 1의 조상·다른 패키지 — Docs/Design/
-    // ObjectFoundations.ko.md 5.2절)이 이 진단 뒤 InvalidArgument다. 외부 참조 허락 hook의
-    // 결과(거부 0·null 1)는 A0-Oe가 더한다.
+    // 저장 집합 밖 강한 참조를 외부 참조로 쓰지 않았다(path = 참조 위치, value 0 = 거부, 1 = null로
+    // 씀 — Docs/Design/ObjectFoundations.ko.md 5.2·5.3절). 그래프 저장의 Reject 정책, Include 거부
+    // 조건(기준 Outer·노드 1의 조상·다른 패키지), Admit 정책에서 AdmitExternalReference가 Reject를
+    // 고른 위치가 value 0 뒤 InvalidArgument이고, Null을 고른 위치는 value 1을 남기고 그 위치를
+    // null로 쓴다.
     ExternalReference
 };
 
@@ -53,6 +54,38 @@ struct SoftReferenceInfo {
     Span<const PathStep> path{};
 };
 
+// 그래프 저장(Admit 정책)이 저장 집합 밖 강한 참조 대상을 만났을 때 hook에 주는 정보다
+// (Docs/Design/ObjectFoundations.ko.md 5.3절 — FieldCodecHooks::AdmitExternalReference). path는
+// 호출 동안만 유효하다.
+struct ExternalReferenceInfo {
+    // 대상 객체와 그 실제 등록 타입이다(대상 생존·기대 형식 검사를 지난 뒤다).
+    ObjectHandle target{};
+    TypeId targetType{};
+    // 그 위치의 스키마 기대 타입이다(0 = Object).
+    TypeId expectedType{};
+    // 그 위치의 유효 플래그(PropagateFieldFlags — 배열 원소는 배열 필드의 것)와 Required 여부다.
+    uint32 effectiveFlags = 0;
+    bool required = false;
+    // 참조를 가진 노드 위치(0부터 — local ID − 1)와 필드 경로다.
+    uint32 objectIndex = 0;
+    Span<const PathStep> path{};
+    // Import를 고르면 이 대상이 받을 외부 번호(slot — 1부터, 첫 출현 순)다. Null·Reject면 쓰이지
+    // 않는다(다음 대상이 같은 번호를 받는다).
+    uint32 slot = 0;
+};
+
+// 외부 참조 허락 hook의 결과다(Docs/Design/ObjectFoundations.ko.md 5.3절·11절 결정 14).
+enum class ExternalAdmission : uint8 {
+    // 외부 참조로 쓴다(값 = 0x80000000 | slot — 같은 대상의 이후 출현은 hook 없이 같은 slot).
+    Import,
+    // 이 위치를 null(0)로 쓰고 ExternalReference 진단(value 1)을 남긴다(slot을 쓰지 않는다). 그
+    // 위치가 Required이면 null 값에 Required 규칙을 적용한다(rejectMissingRequired면
+    // RequiredMissing 진단 뒤 InvalidArgument).
+    Null,
+    // ExternalReference 진단(value 0) 뒤 저장이 InvalidArgument로 실패한다.
+    Reject
+};
+
 struct FieldCodecFrame;
 
 // 직렬화 관찰 hook 묶음이다. 기본 구현은 아무것도 하지 않는다. 실패를 돌려주면 그 저장·복원이
@@ -64,8 +97,9 @@ struct FieldCodecFrame;
 // 복원(ObjectGraphStage)의 1단계 hook(진단·Soft 수집·struct 관찰·ObservedStructs)은 Validate를 부른
 // 스레드(worker일 수 있다)에서, RequiredMissing은 소유 스레드에서 불린다 — worker 검증에 주는
 // hook은 그 스레드에서 안전해야 하고 다른 스레드와 동시에 쓰이면 스레드 안전해야 한다. struct
-// 관찰·치환(B4, Docs/Design/ReflectionFoundations.ko.md 4.6·6.4절)도 같은 묶음이고, A0-O가 외부
-// 참조 보고를 더한다. 배열 원소 struct의 Observe·Substitute에 오는 frame은 배열 필드의
+// 관찰·치환(B4, Docs/Design/ReflectionFoundations.ko.md 4.6·6.4절)과 그래프 저장의 외부 참조
+// 허락(AdmitExternalReference — Docs/Design/ObjectFoundations.ko.md 5.3절)도 같은 묶음이다. 배열
+// 원소 struct의 Observe·Substitute에 오는 frame은 배열 필드의
 // frame이다(field의 value.kind == Array, structure = 원소 struct, index = 원소 index — 원소마다 새
 // frame이 아니다).
 //
@@ -108,6 +142,33 @@ public:
                                                  const void* nativeKey, const void* in) noexcept {
         (void)nativeKey;
         return Result<const void*>::Success(in);
+    }
+
+    // 그래프 저장(GraphExternalPolicy::Admit)이 저장 집합 밖 강한 참조 대상을 만날 때마다 그 대상을
+    // 외부 참조로 쓸지 묻는다(Docs/Design/ObjectFoundations.ko.md 5.3절). 대상 생존·기대 형식
+    // 검사를 지난 뒤에 소유 스레드에서 불린다. 같은 대상의 두 번째 출현부터는 첫 결정이
+    // Import였으면 부르지 않고(같은 slot으로 집계만 한다) Null이었으면 다시 부른다. 실패를 돌려주면
+    // 저장이 그 오류로 실패하고, 정의되지 않은 결과 값은 InvalidArgument다. 기본은 Reject다(외부
+    // 참조를 쓰려면 hook을 준다). 저장 중이므로 Registry·저장 중인 객체를 바꾸지 않는다.
+    //
+    // 인자: info(대상·타입·위치·Import일 때 받을 slot — 호출 동안만 유효).
+    // 반환: Import(외부 참조로 쓴다), Null(그 위치를 null로 쓰고 진단 value 1), Reject(진단 value 0
+    // 뒤 InvalidArgument).
+    //
+    // 사용 예(A1 writer — 같은 패키지 밖 객체만 import로 쓴다):
+    //   Result<ExternalAdmission> AdmitExternalReference(
+    //       const ExternalReferenceInfo& info) noexcept override {
+    //       auto outermost = registry_.GetOutermost(access_, info.target);
+    //       if (!outermost || outermost.Value() == package_) {
+    //           return Result<ExternalAdmission>::Success(ExternalAdmission::Reject);
+    //       }
+    //
+    //       return Result<ExternalAdmission>::Success(ExternalAdmission::Import);
+    //   }
+    virtual Result<ExternalAdmission>
+    AdmitExternalReference(const ExternalReferenceInfo& info) noexcept {
+        (void)info;
+        return Result<ExternalAdmission>::Success(ExternalAdmission::Reject);
     }
 
 protected:

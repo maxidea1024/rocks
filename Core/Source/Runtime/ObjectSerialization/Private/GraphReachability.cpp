@@ -82,8 +82,11 @@ Result<void> CheckReachable(Allocator& allocator, const Array<LoadNode>& nodes, 
             return spent;
         }
 
+        // 외부 참조는 노드가 아니므로 따라가지 않는다(대상은 그래프 밖 생존 객체다).
         for (const ReferenceToken& token : node.tokens) {
-            visit(token.target - 1);
+            if (ExternalIndexOf(token) == 0) {
+                visit(token.target - 1);
+            }
         }
 
         if (node.outer != 0) {

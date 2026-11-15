@@ -10,7 +10,8 @@
 
 // ObjectRegistry 생성 트랜잭션이다(ConstructionContext가 거치는 Registry 쪽 지점).
 // BeginConstruction, CreatePending(생성 검사·이름 기록·이름 색인 확장·chunk 표 확장·빈 슬롯
-// 할당·게시), GetPending, Commit(staged 간선·Outer 검증, 관찰자 집계, 공개), Rollback(생성 저널
+// 할당·게시), GetPending, AcquireTypeChecked(트랜잭션 객체도 받는 타입 lease), Commit(staged 간선·
+// Outer 검증, 관찰자 집계, 공개), Rollback(생성 저널
 // 역순 회수)을 둔다.
 namespace rocks {
 
@@ -389,6 +390,31 @@ Result<void*> ObjectRegistry::GetPending(const ObjectAccessContext& access, Obje
     }
 
     return Result<void*>::Success(static_cast<void*>(slot->object));
+}
+
+Result<TypeLease> ObjectRegistry::AcquireTypeChecked(const ObjectAccessContext& access,
+                                                     ObjectHandle handle,
+                                                     uint64 transaction) noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return Result<TypeLease>::Failure(valid.Error());
+    }
+
+    platform::LockGuard lock(gate_);
+    if (closed_ || processing_) {
+        return Result<TypeLease>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
+    }
+
+    // staged 참조 대상 규칙(CheckTargetLocked)과 같은 기준에 생성자 실행 뒤(object 있음)를 더한다.
+    const Slot* slot = FindSlot(handle);
+    if (!slot || IsCutoff(slot) ||
+        !(slot->state == SlotState::Alive ||
+          (transaction != 0 && slot->state == SlotState::Reserved &&
+           slot->transaction == transaction && slot->object != nullptr))) {
+        return Result<TypeLease>::Failure(ErrorCode::StaleHandle);
+    }
+
+    return slot->type.Clone();
 }
 
 void ObjectRegistry::ValidateStagedEdge(void* pointer, ObjectHandle handle) noexcept {
