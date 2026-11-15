@@ -6,7 +6,7 @@
 // TypeRegistry의 타입 도구 이름 색인 조회(AcquireByToolName)와 파생 클래스 조회
 // (AcquireDerivedClass)다(리플렉션 B9d2 — Docs/Design/ReflectionExtensions.ko.md 5.2절). 색인의
 // 준비·게시·삭제는 TypeRegistry.cpp(PrepareIndexes·PublishLocked·Unregister·Shutdown), 유일성
-// 검사는 등록(TypeRegistryRegister.cpp)이다.
+// 검사는 등록(TypeRegistryRegister.cpp·TypeRegistryRegisterStruct.cpp)이다.
 namespace rocks {
 
 uint64 TypeRegistry::ToolNameHash::operator()(StringView name) const noexcept {

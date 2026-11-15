@@ -62,11 +62,11 @@ bitfield bool은 새 종류가 아니다(`Bool`, wire Bool(1) — 14절).
 `TypeSchema`(MS/TypeSchema.h:202-210):
 
 - `TypeId withinType{}`(클래스만, 0 = 제한 없음 — 9절)와 `Span<const char> toolName{}`(타입 도구 이름 — 5.2절)을 더한다. `toolName`은 B9d2에서 끝 칸으로 더했다(`withinType`은 B9h2).
-- struct의 `baseType`을 연다(12절). RegisterStruct의 `flags != 0` 거부(ORP/TypeRegistryRegister.cpp:715-716)는 struct 전용 허용 mask(`KnownStructFlags` = Atomic)로 바꾼다.
+- struct의 `baseType`을 연다(12절). RegisterStruct의 `flags != 0` 거부(ORP/TypeRegistryRegisterStruct.cpp `RegisterStruct`)는 struct 전용 허용 mask(`KnownStructFlags` = Atomic)로 바꾼다.
 
 `FieldValue`(OR/RuntimeTypeOps.h:60-91)에 칸을 더한다: `Name name`(B9c), `bool present`(B9e), `Text text`(B9l). ClassRef는 `guid` 칸(클래스 TypeId), WeakRef는 `reference` 칸을 쓴다. Optional 단일 값의 `kind`는 **내부 종류**이고 `present`가 set 여부다.
 
-Map 키 대상: 지금 등록·lease·codec frame은 필드당 대상 하나다(TypeRegistryRegister.cpp:657-704 `targets[index]`, RuntimeTypeOps.h `valueNativeType`, `TypeLease::FieldEnum`·`FieldStruct`, `FieldCodecFrame::enumeration`). Map 키가 Enum·ClassRef·Soft면 키 대상이 따로 필요하므로 `RuntimeFieldOps::keyNativeType`·`RuntimeStructFieldOps::keyNativeType`, 등록 레코드의 키 대상 포인터(의존 계수 포함 — ClassRef Base는 값 자리처럼 의존으로 붙잡지 않는다, 5.2절 "구현(B9d2)에서 정한 점"), `TypeLease::FieldKeyEnum(index)`, `FieldCodecFrame::keyEnumeration`을 더한다(B9f2).
+Map 키 대상: 지금 등록·lease·codec frame은 필드당 대상 하나다(TypeRegistryRegisterStruct.cpp `ResolveValueTypes`의 `targets[index]`, RuntimeTypeOps.h `valueNativeType`, `TypeLease::FieldEnum`·`FieldStruct`, `FieldCodecFrame::enumeration`). Map 키가 Enum·ClassRef·Soft면 키 대상이 따로 필요하므로 `RuntimeFieldOps::keyNativeType`·`RuntimeStructFieldOps::keyNativeType`, 등록 레코드의 키 대상 포인터(의존 계수 포함 — ClassRef Base는 값 자리처럼 의존으로 붙잡지 않는다, 5.2절 "구현(B9d2)에서 정한 점"), `TypeLease::FieldKeyEnum(index)`, `FieldCodecFrame::keyEnumeration`을 더한다(B9f2).
 
 ### 1.2 wire
 
@@ -108,7 +108,7 @@ Map 키 대상: 지금 등록·lease·codec frame은 필드당 대상 하나다(
 
 ### 1.3 종류 성질 표
 
-값 종류의 성질을 MetaSchema(`MS/TypeSchema.h`)의 constexpr 함수 하나로 모은다. 지금은 원소 종류 목록이 OR/GeneratedFieldAccess.h·OR/GeneratedFieldCodec.h·ORP/TypeRegistryRegister.cpp·MC/SchemaValidator.cs·MC/SchemaModel.cs·MC/ModuleDescriptor.cs(374-442행)에 반복되고, TypeRegistry는 `<= Digest256` 숫자 범위로 지원 종류를 판정한다(TypeRegistryRegister.cpp:73-80). 이 판정은 표 조회로 바꾼다. wire 대응은 MetaSchema가 Serialization에 의존하지 않도록 ObjectRuntime codec의 switch 하나(`detail::FieldWireType` — Object/FieldValueWire.h)에 둔다.
+값 종류의 성질을 MetaSchema(`MS/TypeSchema.h`)의 constexpr 함수 하나로 모은다. 지금은 원소 종류 목록이 OR/GeneratedFieldAccess.h·OR/GeneratedFieldCodec.h·ORP/TypeRegistryRegister.cpp·MC/SchemaValidator.cs·MC/SchemaModel.cs·MC/ModuleDescriptor.cs(374-442행)에 반복되고, TypeRegistry는 `<= Digest256` 숫자 범위로 지원 종류를 판정한다(TypeRegistryRegister.cpp `SupportedFieldKind`). 이 판정은 표 조회로 바꾼다. wire 대응은 MetaSchema가 Serialization에 의존하지 않도록 ObjectRuntime codec의 switch 하나(`detail::FieldWireType` — Object/FieldValueWire.h)에 둔다.
 
 성질(값 종류마다 bool): 단일 필드, struct 멤버, Array 원소, StaticArray 원소, Map 키, Map 값, Set 원소, Optional 내부, InstancedStruct 내용, Required 허용, 대상 타입 있음, 대상 ID 필수, 컨테이너, FieldValue 통째 읽기·쓰기(비aggregate).
 
@@ -181,7 +181,7 @@ MetaCompiler(C#)와 런타임(C++)의 표 대조: MetaCompiler가 "모든 종류
 | TypeFlags::Atomic | 16 | struct | struct base에서 상속 | B9b |
 
 - 새 필드 플래그는 `PropagateFieldFlags`(MS/TypeSchema.h:52-57)의 전파 집합에 넣지 않는다. UE 전파 집합(OM:509-513)에도 없다. 바깥 필드가 제외되면 안쪽은 방문되지 않으므로 제외 플래그에는 전파가 필요 없고, SaveGame은 UE처럼 멤버마다 표시한다(9.1절).
-- 예약 비트는 등록하지 않는다(알 수 없는 비트는 지금처럼 등록 거부 — TypeRegistryRegister.cpp:35-40). 문서에 번호만 잡는다.
+- 예약 비트는 등록하지 않는다(알 수 없는 비트는 지금처럼 등록 거부 — TypeRegistryRegister.cpp `KnownClassFlags`·`KnownFieldFlags`, TypeRegistryRegisterStruct.cpp `KnownStructFlags`). 문서에 번호만 잡는다.
 
 ### 1.5 경로 key 단계
 

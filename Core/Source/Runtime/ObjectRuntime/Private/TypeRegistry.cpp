@@ -7,9 +7,10 @@
 
 // TypeRegistry 기반부다. Registry 도메인 번호(detail::NextRegistryDomain), 생성·소멸, 레코드
 // 색인(ID·native·타입 도구 이름)과 lease 발급, 조회(Acquire·AcquireValueType·AcquireStructByNative·
-// IsA), lease 계수, 해제·종료(Unregister·Shutdown), 통계를 둔다. 등록은 TypeRegistryRegister.cpp,
-// 타입 도구 이름 조회·파생 클래스 조회는 TypeRegistryToolName.cpp, TypeLease·StructView 접근은
-// TypeLease.cpp, 필드 쓰기 검증은 RuntimeTypeOps.cpp다.
+// IsA), lease 계수, 해제·종료(Unregister·Shutdown), 통계를 둔다. 등록은 TypeRegistryRegister.cpp
+// (클래스)·TypeRegistryRegisterEnum.cpp·TypeRegistryRegisterStruct.cpp, 타입 도구 이름 조회·파생
+// 클래스 조회는 TypeRegistryToolName.cpp, TypeLease·StructView 접근은 TypeLease.cpp, 필드 쓰기
+// 검증은 RuntimeTypeOps.cpp다.
 namespace rocks {
 
 namespace detail {
