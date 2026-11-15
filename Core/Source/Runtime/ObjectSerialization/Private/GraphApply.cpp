@@ -1,0 +1,252 @@
+#include "GraphInternal.h"
+
+// 그래프 복원 2단계다: 노드 생성·필드 적용(2단계 문맥)·Required 검사·prepare·Commit
+// (Docs/Design/ObjectFoundations.ko.md 5.4·5.5절).
+namespace rocks::graph_detail {
+namespace {
+
+// 2단계(적용) 문맥이다. 그래프 예산에 접근하지 않는다: 값 reader는 같은 크기 한도·무제한 work로
+// 열고, 참조 token을 만든 객체 handle로 바꾸며, 진단·수집·청구는 버린다.
+class GraphApplyContext final : public FieldDecodeContext {
+public:
+    GraphApplyContext(Allocator& allocator, const ObjectGraphLoadOptions& options,
+                      const Array<LoadNode>& nodes) noexcept
+        : FieldDecodeContext(options.policy, options.hooks, ReferenceWire), allocator_(allocator),
+          limits_(options.limits), nodes_(nodes) {
+        SetRecording(false);
+    }
+
+    void BeginNode(const LoadNode& node, uint32 index) noexcept {
+        SetObject(node.type, index);
+        node_ = &node;
+        migration_ = 0;
+    }
+
+    // 노드의 모든 필드를 적용한 뒤 부른다. 1단계가 보관한 struct 마이그레이션은 모두 소비되어야
+    // 한다(남으면 두 단계의 방문 순서가 어긋난 계약 위반).
+    Result<void> EndNode() noexcept {
+        if (node_ && migration_ != node_->structMigrations.Size()) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        return Result<void>::Success();
+    }
+
+    Result<RecordScope> OpenRecord(const FieldView& field, TypeId expected, uint32 minVersion,
+                                   uint32 maxVersion) noexcept override {
+        if (field.wireType != static_cast<uint32>(WireType::Record)) {
+            return Result<RecordScope>::Failure(ErrorCode::TypeMismatch);
+        }
+
+        // 1단계와 같은 크기 한도·버전 범위, 무제한 operation·work, 필드 수는 그래프 누계 한도.
+        if (RecordReader* parent = CurrentRecord()) {
+            auto opened = parent->OpenRecordField(allocator_, field, expected, minVersion,
+                                                  maxVersion, limits_.maxTotalFields);
+            if (!opened) {
+                return Result<RecordScope>::Failure(opened.Error());
+            }
+
+            return PushRecord(Move(opened.Value()));
+        }
+
+        auto opened = RecordReader::Open(allocator_, field.payload, expected, minVersion,
+                                         maxVersion, {Unlimited(), limits_.maxTotalFields});
+        if (!opened) {
+            return Result<RecordScope>::Failure(opened.Error());
+        }
+
+        return PushRecord(Move(opened.Value()));
+    }
+
+    Result<RecordScope> OpenMigratedRecord(Span<const uint8> record, TypeId expected,
+                                           uint32 version) noexcept override {
+        auto opened = RecordReader::Open(allocator_, record, expected, version, version,
+                                         {Unlimited(), limits_.maxTotalFields});
+        if (!opened) {
+            return Result<RecordScope>::Failure(opened.Error());
+        }
+
+        return PushRecord(Move(opened.Value()));
+    }
+
+    Result<RecordListReader> OpenRecordList(const FieldView& field,
+                                            TypeId itemSchema) noexcept override {
+        if (field.wireType != static_cast<uint32>(WireType::RecordList)) {
+            return Result<RecordListReader>::Failure(ErrorCode::TypeMismatch);
+        }
+
+        // 1단계와 같은 목록 한도·항목 버전 범위, 무제한 operation·work. 스택이 비면 단독 Open(항목
+        // Record 크기 한도는 1단계 객체 Record와 같다), 있으면 맨 위 Record의 OpenField다.
+        if (RecordReader* parent = CurrentRecord()) {
+            return RecordListReader::OpenField(*parent, field, itemSchema, 1,
+                                               NumericLimits<uint32>::Max(),
+                                               ArrayLoadLimits(limits_));
+        }
+
+        return RecordListReader::Open(
+            allocator_, field.payload, itemSchema, 1, NumericLimits<uint32>::Max(),
+            {Unlimited(), limits_.maxTotalFields}, ArrayLoadLimits(limits_));
+    }
+
+    Result<RecordScope> OpenListItem(RecordListReader& list, usize index) noexcept override {
+        auto opened = list.OpenItem(index, limits_.maxTotalFields);
+        if (!opened) {
+            return Result<RecordScope>::Failure(opened.Error());
+        }
+
+        return PushRecord(Move(opened.Value()));
+    }
+
+    Result<Span<const uint8>> MigrateStruct(TypeId type, uint32 fromVersion, uint32,
+                                            Span<const uint8>) noexcept override {
+        if (!node_ || migration_ >= node_->structMigrations.Size()) {
+            return Result<Span<const uint8>>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        const StoredStructMigration& stored = node_->structMigrations[migration_];
+        if (stored.type != type || stored.from != fromVersion) {
+            return Result<Span<const uint8>>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        ++migration_;
+        return Result<Span<const uint8>>::Success(stored.bytes.View());
+    }
+
+    Result<void> AddFields(usize) noexcept override {
+        return Result<void>::Success();
+    }
+
+    Result<void> AddElements(usize) noexcept override {
+        return Result<void>::Success();
+    }
+
+    Result<DecodedReference> ReadReference(ArchiveReader& reader,
+                                           const ReferenceExpectation&) noexcept override {
+        auto local = reader.ReadU32();
+        if (!local) {
+            return Result<DecodedReference>::Failure(local.Error());
+        }
+
+        DecodedReference decoded;
+        decoded.isNull = local.Value() == 0;
+        if (!decoded.isNull) {
+            // 범위는 1단계가 검사했다(외부 비트 포함). 다르면 원본이 바뀐 계약 위반이다.
+            if (local.Value() > nodes_.Size()) {
+                return Result<DecodedReference>::Failure(ErrorCode::InvalidArgument);
+            }
+
+            decoded.handle = nodes_[local.Value() - 1].handle;
+        }
+
+        return Result<DecodedReference>::Success(decoded);
+    }
+
+    Result<void> Spend(uint64) noexcept override {
+        return Result<void>::Success();
+    }
+
+    Result<void> ReserveApply(uint64) noexcept override {
+        return Result<void>::Success();
+    }
+
+    Allocator& Scratch() noexcept override {
+        return allocator_;
+    }
+
+    // 2단계는 관찰하지 않는다(계약상 부르지 않는다).
+    Allocator& ObservationScratch() noexcept override {
+        return allocator_;
+    }
+
+protected:
+    Result<ArchiveReader> OpenTopLevelValue(const FieldView& field) noexcept override {
+        return ArchiveReader::Create(field.payload, Unlimited());
+    }
+
+private:
+    ArchiveLimits Unlimited() const noexcept {
+        ArchiveLimits limits;
+        limits.maxTotalBytes = limits_.maxBytes;
+        limits.maxValueBytes = limits_.maxValueBytes;
+        limits.maxOperations = NumericLimits<uint64>::Max();
+        limits.maxWork = NumericLimits<uint64>::Max();
+        return limits;
+    }
+
+    Allocator& allocator_;
+    ObjectGraphLimits limits_;
+    const Array<LoadNode>& nodes_;
+    const LoadNode* node_ = nullptr;
+    usize migration_ = 0;
+};
+
+} // namespace
+
+// 2단계: 모든 노드를 노드 표의 Outer·이름으로 만들고 보관한 필드를 staged 객체에 쓴 뒤, Required
+// 실효 값을 진단하고(2c — CheckRequiredFields) prepare를 부르고 노드 1을 root로 Commit한다. 그래프
+// 예산에 접근하지 않는다. 노드 표의 이름·정책 규칙 위반은 여기서 Create가 거부한다(rollback — 생성
+// 전 판정은 단계형 복원 A0-Od2).
+Result<RootRef<Object>> ConstructGraph(Allocator& allocator, ObjectRegistry& registry,
+                                       const ObjectAccessContext& access, Array<LoadNode>& nodes,
+                                       const ObjectGraphLoadOptions& options) noexcept {
+    ConstructionContext transaction(registry, access);
+    for (usize index = 0; index < nodes.Size(); ++index) {
+        const uint32 outerIndex = nodes[index].outer;
+        const ObjectHandle outer =
+            outerIndex == 0 ? options.baseOuter : nodes[outerIndex - 1].handle;
+        auto created = transaction.Create<Object>(nodes[index].type, outer, nodes[index].name);
+        if (!created) {
+            return Result<RootRef<Object>>::Failure(created.Error());
+        }
+
+        nodes[index].handle = created.Value();
+    }
+
+    GraphApplyContext context(allocator, options, nodes);
+    for (usize index = 0; index < nodes.Size(); ++index) {
+        const auto& node = nodes[index];
+        const auto& schema = node.lease.Schema();
+        context.BeginNode(node, static_cast<uint32>(index));
+        for (usize fieldIndex = 0; fieldIndex < node.fields.Size(); ++fieldIndex) {
+            const StoredField& stored = node.fields[fieldIndex];
+            FieldScope scope(context, schema.fields[stored.schemaIndex], schema.id,
+                             node.lease.FieldEnum(stored.schemaIndex),
+                             node.lease.FieldStruct(stored.schemaIndex));
+            auto written =
+                stored.ops->decode(*stored.ops, &transaction, node.handle, stored.view, context);
+            if (!written) {
+                return Result<RootRef<Object>>::Failure(written.Error());
+            }
+        }
+
+        if (auto ended = context.EndNode(); !ended) {
+            return Result<RootRef<Object>>::Failure(ended.Error());
+        }
+    }
+
+    if (auto checked = CheckRequiredFields(allocator, transaction, nodes, options); !checked) {
+        return Result<RootRef<Object>>::Failure(checked.Error());
+    }
+
+    if (options.prepare) {
+        Array<ObjectHandle> handles(allocator);
+        if (auto reserved = handles.TryReserve(nodes.Size()); !reserved) {
+            return Result<RootRef<Object>>::Failure(reserved.Error());
+        }
+
+        for (const LoadNode& node : nodes) {
+            if (!handles.TryPushBack(node.handle)) {
+                platform::Fatal("Object graph prepare handle reservation failed");
+            }
+        }
+
+        if (auto prepared = options.prepare(transaction, handles.View(), options.prepareUser);
+            !prepared) {
+            return Result<RootRef<Object>>::Failure(prepared.Error());
+        }
+    }
+
+    return transaction.Commit();
+}
+
+} // namespace rocks::graph_detail

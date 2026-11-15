@@ -217,6 +217,20 @@ struct LoadNode {
     ObjectHandle handle{};
 };
 
+// graph v2 envelope를 읽은 결과다. 노드 표(NodeTable)가 없으면 노드의 type·outer·name은 비어 있다.
+struct Envelope {
+    explicit Envelope(Allocator& allocator) noexcept : nodes(allocator) {
+    }
+
+    uint32 flags = 0;
+    uint32 externalCount = 0;
+    Array<LoadNode> nodes;
+};
+
+// header·NodeTable·Record 경계를 읽는다(정의·순서와 오류는 GraphEnvelope.cpp).
+Result<Envelope> ReadEnvelope(Allocator& allocator, Span<const uint8> source,
+                              Budget& budget) noexcept;
+
 // 적용을 마친 staged 노드들의 Required 실효 값을 진단한다(Docs/Design/ObjectFoundations.ko.md 4절
 // — 2c 단계, GraphRequired.cpp). Required를 품은 최상위 필드(필드 자신이 Required이거나 struct
 // 필드·struct 원소 배열의 struct가 ContainsRequired — detail::CarriesRequired)만 encode 경로의
@@ -231,5 +245,14 @@ struct LoadNode {
 Result<void> CheckRequiredFields(Allocator& allocator, ConstructionContext& transaction,
                                  const Array<LoadNode>& nodes,
                                  const ObjectGraphLoadOptions& options) noexcept;
+
+// 편의 복원의 도달 검사다(GraphReachability.cpp).
+Result<void> CheckReachable(Allocator& allocator, const Array<LoadNode>& nodes, bool packagePolicy,
+                            bool hasBase, Budget& budget) noexcept;
+
+// 2단계: 생성·적용·Required 검사·prepare·Commit이다(GraphApply.cpp).
+Result<RootRef<Object>> ConstructGraph(Allocator& allocator, ObjectRegistry& registry,
+                                       const ObjectAccessContext& access, Array<LoadNode>& nodes,
+                                       const ObjectGraphLoadOptions& options) noexcept;
 
 } // namespace rocks::graph_detail
