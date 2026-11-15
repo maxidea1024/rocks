@@ -54,6 +54,7 @@ dotnet msbuild Rocks.proj /t:Test /p:Configuration=Debug /p:RocksTarget=Foundati
 - [UI 툴킷 설계(게임 UI·에디터)](Docs/Design/UiToolkit.ko.md)
 - [압축 헬퍼 설계(코덱 선정·외부 라이브러리 통합·동기/비동기 API)](Docs/Design/Compression.ko.md)
 - [암호 모듈 설계(libsodium·HW 전용 AES 경량 계층·Span API·스트리밍)](Docs/Design/Crypto.ko.md)
+- [세그먼트 스트림 형식 v1 명세(헤더·키 파생·검증 순서·시험 벡터)](Docs/Design/CryptoSegmentFormat.ko.md)
 - [객체·그래프 보강(A0-O) 설계 — Outer·Name·Discard·관찰자·graph v2](Docs/Design/ObjectFoundations.ko.md)
 - [작업 목록](Docs/Design/CoreObjectInputTasks.ko.csv)
 - [예정 파일 구조](Docs/Design/CoreObjectInputFiles.ko.csv)

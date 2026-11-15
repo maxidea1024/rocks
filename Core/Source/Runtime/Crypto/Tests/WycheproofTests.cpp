@@ -8,6 +8,8 @@
 #include <Crypto/Kem.h>
 #include <Crypto/KeyExchange.h>
 #include <Crypto/Mac.h>
+#include <Crypto/Private/SecretStreamTestAccess.h>
+#include <Crypto/SecretStream.h>
 #include <Crypto/Signature.h>
 #include <Platform/File.h>
 #include <TestSupport/Test.h>
@@ -39,6 +41,11 @@ using namespace rocks::crypto;
 //   client_pk ‖ server_pk)와 같다.
 // - ML-KEM-768: seed로 만든 공개키가 ek와 같고 캡슐 해제 결과가 K와 같다(암묵적 거부 포함). seed
 //   길이 오류는 InvalidArgument, 암호문 길이 오류는 AuthenticationFailed다.
+// - secretstream: 상태 벡터다(sodium_compat 경계 회귀, push 7건). 시험 접근점으로 상태(하위
+// 키·카운터·
+//   inonce)를 넣고 push한 암호문과 뒤 상태가 같은지, 같은 상태의 Reader가 그 암호문을 열어 같은
+//   평문· tag·뒤 상태를 내는지 확인한다. 카운터 2^16 경계(조기 rekey 없음)와 2^32 wrap(자동
+//   rekey)을 덮는다.
 // - AEGIS는 들이지 않았다. Wycheproof는 128 bit tag라 libsodium(256 bit tag)으로는 tag와 invalid
 //   사례를 검증할 수 없다(암호문 부분은 tag 길이와 무관하지만 tag256 draft 벡터로 대신한다).
 namespace {
@@ -522,4 +529,72 @@ TEST(CryptoWycheproofMlKem768) {
         }
     });
     CHECK(total == 201 && valid == 161 && badSeed == 20 && badCiphertext == 20);
+}
+
+TEST(CryptoWycheproofSecretStream) {
+    VectorFile file;
+    REQUIRE(file.Load("xchacha20_poly1305_secretstream_test.json"));
+    Array<uint8> key(file.allocator);
+    Array<uint8> counter(file.allocator);
+    Array<uint8> inonce(file.allocator);
+    Array<uint8> expectedKey(file.allocator);
+    Array<uint8> expectedCounter(file.allocator);
+    Array<uint8> expectedInonce(file.allocator);
+    Array<uint8> aad(file.allocator);
+    Array<uint8> msg(file.allocator);
+    Array<uint8> ct(file.allocator);
+    Array<uint8> out(file.allocator);
+    auto streamKey = SecretStreamKey::TryGenerate();
+    REQUIRE(streamKey);
+    usize verified = 0;
+    const usize total = ForEachTest(file, [&](JsonValue group, JsonValue test) {
+        REQUIRE(group.Find("operation").GetString() == StringView("push"));
+        REQUIRE(ResultIs(test, "valid"));
+        const JsonValue initial = test.Find("initialState");
+        const JsonValue expected = test.Find("expectedState");
+        REQUIRE(Decode(initial, "key", key) && Decode(initial, "counter", counter) &&
+                Decode(initial, "inonce", inonce));
+        REQUIRE(Decode(expected, "key", expectedKey) &&
+                Decode(expected, "counter", expectedCounter) &&
+                Decode(expected, "inonce", expectedInonce));
+        REQUIRE(Decode(test, "aad", aad) && Decode(test, "msg", msg) && Decode(test, "ct", ct));
+        usize tag = 0;
+        REQUIRE(IntegerField(test, "tag", tag) && tag <= 3);
+        REQUIRE(ct.Size() == msg.Size() + SecretStreamWriter::OverheadBytes);
+
+        // 뒤 상태(하위 키 ‖ 카운터 ‖ inonce)를 한 줄로 이어 비교한다.
+        uint8 expectedState[44];
+        memcpy(expectedState, expectedKey.Data(), 32);
+        memcpy(expectedState + 32, expectedCounter.Data(), 4);
+        memcpy(expectedState + 36, expectedInonce.Data(), 8);
+        uint8 state[44];
+
+        uint8 header[SecretStreamWriter::HeaderBytes];
+        auto writer = SecretStreamWriter::TryCreate(streamKey.Value(), Span<uint8>(header));
+        REQUIRE(writer);
+        REQUIRE(crypto::detail::SecretStreamTestAccess::SetState(writer.Value(), key.View(),
+                                                                 counter.View(), inonce.View()));
+        REQUIRE(out.TryResize(ct.Size()));
+        auto written = writer.Value().TryPush(msg.View(), aad.View(),
+                                              static_cast<SecretStreamTag>(tag), out.View());
+        REQUIRE(written && written.Value() == ct.Size());
+        CHECK(ConstantTimeEquals(out.View(), ct.View()));
+        REQUIRE(
+            crypto::detail::SecretStreamTestAccess::GetState(writer.Value(), Span<uint8>(state)));
+        CHECK(ConstantTimeEquals(Span<const uint8>(state), Span<const uint8>(expectedState)));
+
+        auto reader = SecretStreamReader::TryCreate(streamKey.Value(), Span<const uint8>(header));
+        REQUIRE(reader);
+        REQUIRE(crypto::detail::SecretStreamTestAccess::SetState(reader.Value(), key.View(),
+                                                                 counter.View(), inonce.View()));
+        auto pulled = reader.Value().TryPull(ct.View(), aad.View(), out.View());
+        REQUIRE(pulled);
+        CHECK(pulled.Value().bytes == msg.Size() && static_cast<usize>(pulled.Value().tag) == tag);
+        CHECK(ConstantTimeEquals(out.View().Left(msg.Size()), msg.View()));
+        REQUIRE(
+            crypto::detail::SecretStreamTestAccess::GetState(reader.Value(), Span<uint8>(state)));
+        CHECK(ConstantTimeEquals(Span<const uint8>(state), Span<const uint8>(expectedState)));
+        ++verified;
+    });
+    CHECK(total == 7 && verified == 7);
 }

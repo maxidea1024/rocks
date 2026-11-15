@@ -22,6 +22,10 @@ inline constexpr KdfTypeTag KdfKeyTypeTag = {{'R', 'k', 'K', 'd', 'f', 'K', 'e',
 // transcript에 묶인 하위 마스터 키(TryDeriveBoundKdfKey)다.
 inline constexpr KdfTypeTag KdfBoundTypeTag = {{'R', 'k', 'K', 'd', 'f', 'B', 'n', 'd'}};
 
+// 스트림 키(TryDeriveSecretStreamKey·TryDeriveSegmentStreamKey)다.
+inline constexpr KdfTypeTag SecretStreamKeyTypeTag = {{'R', 'k', 'S', 't', 'r', 'e', 'a', 'm'}};
+inline constexpr KdfTypeTag SegmentStreamKeyTypeTag = {{'R', 'k', 'S', 'e', 'g', 'K', 'e', 'y'}};
+
 // algorithm은 MacAlgorithm 열거값이다.
 constexpr KdfTypeTag MacKeyTypeTag(uint8 algorithm) noexcept {
     return KdfTypeTag{{'R', 'k', 'M', 'a', 'c', 'K', 0x00, algorithm}};

@@ -35,12 +35,13 @@
     "testvectors_v1/hmac_sha512_test.json": "b6c90477bdb4a6fc8ee3d1f7b2c0b69a8dfffab34718abaa6cabd71cc2ba1207",
     "testvectors_v1/mlkem_768_test.json": "c59c067ae794c343df575dd90f6f7458f51881b11a22d6e9d8677c8d9ee21e90",
     "testvectors_v1/x25519_test.json": "35c3f5231cf25cc640b524d403461deee9e49441d5d915a3a25b2c8ff5adbe7d",
+    "testvectors_v1/xchacha20_poly1305_secretstream_test.json": "7144bda947da49b1ea9dfa2c59a6fa357898805e9f4f0114382d3566f672de14",
     "testvectors_v1/xchacha20_poly1305_test.json": "a79de072571b90eb40c3a63ce0c7f75dcb4b62323c8870228e1f61dcc61d63a9"
   },
   "pragmaDirectives": [],
   "notes": [
-    "commit archive에서 testvectors_v1/의 C1 암호 시험 파일 10개, C2의 aes_cmac_test.json(2026-11-15, 같은 archive SHA-256 확인 뒤 추가)과 LICENSE만 byte 그대로 꺼냈다(Java·Go 도구와 다른 벡터는 두지 않는다). Crypto 시험(Crypto/Tests/WycheproofTests.cpp)이 Core Json으로 읽는다. 설계는 Docs/Design/Crypto.ko.md 5.4·12절.",
+    "commit archive에서 testvectors_v1/의 C1 암호 시험 파일 10개, C2의 aes_cmac_test.json, C3의 xchacha20_poly1305_secretstream_test.json(2026-11-15, 같은 archive SHA-256 확인 뒤 추가)과 LICENSE만 byte 그대로 꺼냈다(Java·Go 도구와 다른 벡터는 두지 않는다). Crypto 시험(Crypto/Tests/WycheproofTests.cpp)이 Core Json으로 읽는다. 설계는 Docs/Design/Crypto.ko.md 5.4·12절.",
     "시험 데이터일 뿐 어떤 모듈 바이너리에도 들어가지 않으므로 embeddedIn이 없다(SDK가 라이선스를 배포할 필요 없다).",
-    "AEGIS 벡터는 128 bit tag라 libsodium(256 bit tag)으로 tag·invalid 사례를 검증할 수 없어 들이지 않았다. secretstream 파일은 스트리밍(C3)에서 더한다."
+    "AEGIS 벡터는 128 bit tag라 libsodium(256 bit tag)으로 tag·invalid 사례를 검증할 수 없어 들이지 않았다. secretstream 파일(상태 벡터 7건)은 C3에서 시험 접근점으로 상태를 넣어 돌린다."
   ]
 }

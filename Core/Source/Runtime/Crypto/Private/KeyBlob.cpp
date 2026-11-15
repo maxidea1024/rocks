@@ -106,6 +106,8 @@ bool TryGetSecretRule(KeyBlobType type, uint8 algorithm, SecretRule& rule) noexc
     case KeyBlobType::Ed25519:
     case KeyBlobType::Kx:
     case KeyBlobType::Box:
+    case KeyBlobType::SecretStream:
+    case KeyBlobType::SegmentStream:
         rule = {32, 32, false};
         return algorithm == 0;
     case KeyBlobType::Kem: {
@@ -130,7 +132,7 @@ bool IsAllowedSecret(KeyBlobType type, uint8 algorithm, Span<const uint8> secret
 
 bool IsDefinedType(uint8 value) noexcept {
     return value >= static_cast<uint8>(KeyBlobType::Aead) &&
-           value <= static_cast<uint8>(KeyBlobType::Kem);
+           value <= static_cast<uint8>(KeyBlobType::SegmentStream);
 }
 
 bool IsDefinedMethod(uint8 value) noexcept {
@@ -232,34 +234,58 @@ Span<const uint8> SecretOf(const Ed25519SigningKey& key) noexcept {
     return detail::KeyAccess::Bytes(key).Left(Ed25519SeedBytes);
 }
 
-Result<AeadKey> TryMakeKey(TypeTag<AeadKey>, uint8 algorithm, Span<const uint8> secret) noexcept {
+Result<AeadKey> TryMakeKey(TypeTag<AeadKey>, uint8 algorithm, KeyId,
+                           Span<const uint8> secret) noexcept {
     return AeadKey::TryImport(static_cast<AeadAlgorithm>(algorithm), secret);
 }
 
-Result<MacKey> TryMakeKey(TypeTag<MacKey>, uint8 algorithm, Span<const uint8> secret) noexcept {
+Result<MacKey> TryMakeKey(TypeTag<MacKey>, uint8 algorithm, KeyId,
+                          Span<const uint8> secret) noexcept {
     return MacKey::TryImport(static_cast<MacAlgorithm>(algorithm), secret);
 }
 
-Result<KdfKey> TryMakeKey(TypeTag<KdfKey>, uint8, Span<const uint8> secret) noexcept {
+Result<KdfKey> TryMakeKey(TypeTag<KdfKey>, uint8, KeyId, Span<const uint8> secret) noexcept {
     return KdfKey::TryImport(secret);
 }
 
-Result<Ed25519SigningKey> TryMakeKey(TypeTag<Ed25519SigningKey>, uint8,
+Result<Ed25519SigningKey> TryMakeKey(TypeTag<Ed25519SigningKey>, uint8, KeyId,
                                      Span<const uint8> secret) noexcept {
     return Ed25519SigningKey::TryFromSeed(secret);
 }
 
-Result<KxKeyPair> TryMakeKey(TypeTag<KxKeyPair>, uint8, Span<const uint8> secret) noexcept {
+Result<KxKeyPair> TryMakeKey(TypeTag<KxKeyPair>, uint8, KeyId, Span<const uint8> secret) noexcept {
     return KxKeyPair::TryImport(secret);
 }
 
-Result<BoxKeyPair> TryMakeKey(TypeTag<BoxKeyPair>, uint8, Span<const uint8> secret) noexcept {
+Result<BoxKeyPair> TryMakeKey(TypeTag<BoxKeyPair>, uint8, KeyId,
+                              Span<const uint8> secret) noexcept {
     return BoxKeyPair::TryImport(secret);
 }
 
-Result<KemKeyPair> TryMakeKey(TypeTag<KemKeyPair>, uint8 algorithm,
+Result<KemKeyPair> TryMakeKey(TypeTag<KemKeyPair>, uint8 algorithm, KeyId,
                               Span<const uint8> secret) noexcept {
     return KemKeyPair::TryFromSeed(static_cast<KemAlgorithm>(algorithm), secret);
+}
+
+Result<SecretStreamKey> TryMakeKey(TypeTag<SecretStreamKey>, uint8, KeyId,
+                                   Span<const uint8> secret) noexcept {
+    return SecretStreamKey::TryImport(secret);
+}
+
+// 세그먼트 스트림 키는 Id()를 품으므로 blob의 keyId로 만든다(헤더 keyId와 어긋날 수 없다).
+Result<SegmentStreamKey> TryMakeKey(TypeTag<SegmentStreamKey>, uint8, KeyId keyId,
+                                    Span<const uint8> secret) noexcept {
+    return SegmentStreamKey::TryImport(keyId, secret);
+}
+
+// key가 Id()를 품는 타입이면 keyId가 그 값과 같아야 한다(다르면 호출자 인자 오류).
+template <typename TKey>
+bool MatchesKeyId(const TKey&, KeyId) noexcept {
+    return true;
+}
+
+bool MatchesKeyId(const SegmentStreamKey& key, KeyId keyId) noexcept {
+    return key.Id() == keyId;
 }
 
 // ---- 파생 ----
@@ -305,12 +331,13 @@ struct WrapInput {
 };
 
 Result<usize> TryWrapSecret(const WrapInput& input, KeyBlobType type, uint8 algorithm,
-                            Span<const uint8> secret, KeyId keyId, Span<uint8> blob) noexcept {
+                            Span<const uint8> secret, KeyId keyId, bool keyIdMatches,
+                            Span<uint8> blob) noexcept {
     if ((input.method == KeyBlobWrapMethod::Key && input.wrapKey->IsEmpty()) || secret.IsEmpty()) {
         return Result<usize>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (keyId.IsNil() || !IsAllowedSecret(type, algorithm, secret)) {
+    if (keyId.IsNil() || !keyIdMatches || !IsAllowedSecret(type, algorithm, secret)) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -490,7 +517,7 @@ Result<UnwrappedKey<TKey>> TryUnwrapSecret(KeyBlobWrapMethod method, const KdfKe
         return Result<Unwrapped>::Failure(opened.Error());
     }
 
-    auto key = TryMakeKey(TypeTag<TKey>{}, info.algorithm, secret.Value().View());
+    auto key = TryMakeKey(TypeTag<TKey>{}, info.algorithm, info.keyId, secret.Value().View());
     if (!key) {
         return Result<Unwrapped>::Failure(key.Error());
     }
@@ -536,7 +563,7 @@ Result<usize> TryWrapKey(const KdfKey& wrapKey, KeyId wrapKeyId, const TKey& key
     platform::DataIndependentTimingScope dit;
     const WrapInput input{KeyBlobWrapMethod::Key, &wrapKey, wrapKeyId, Span<const uint8>(), {}};
     return TryWrapSecret(input, KeyBlobTraits<TKey>::Type, AlgorithmOf(key), SecretOf(key), keyId,
-                         blob);
+                         MatchesKeyId(key, keyId), blob);
 }
 
 template <KeyBlobKey TKey>
@@ -545,7 +572,7 @@ Result<usize> TryWrapKeyWithPassword(Span<const uint8> password, PasswordCost co
     platform::DataIndependentTimingScope dit;
     const WrapInput input{KeyBlobWrapMethod::Password, nullptr, KeyId(), password, cost};
     return TryWrapSecret(input, KeyBlobTraits<TKey>::Type, AlgorithmOf(key), SecretOf(key), keyId,
-                         blob);
+                         MatchesKeyId(key, keyId), blob);
 }
 
 template <KeyBlobKey TKey>
@@ -579,6 +606,8 @@ ROCKS_CRYPTO_KEYBLOB_INSTANTIATE(Ed25519SigningKey)
 ROCKS_CRYPTO_KEYBLOB_INSTANTIATE(KxKeyPair)
 ROCKS_CRYPTO_KEYBLOB_INSTANTIATE(BoxKeyPair)
 ROCKS_CRYPTO_KEYBLOB_INSTANTIATE(KemKeyPair)
+ROCKS_CRYPTO_KEYBLOB_INSTANTIATE(SecretStreamKey)
+ROCKS_CRYPTO_KEYBLOB_INSTANTIATE(SegmentStreamKey)
 
 #undef ROCKS_CRYPTO_KEYBLOB_INSTANTIATE
 

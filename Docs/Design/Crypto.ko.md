@@ -90,7 +90,7 @@ Core/Source/Runtime/Crypto/
                    Hazmat/{AeadNonce.h, StreamCipher.h, Poly1305.h}(후속)
   Private/         Sodium/(libsodium 어댑터)  AesHazmat.cpp(AesModes.h 어댑터)
                    Aes/{AesKernels.h, AesModesInternal.h, AesX64.cpp, AesArm64.cpp, AesModes.cpp, Derivation.json}(경량 계층)
-                   Dispatch.cpp  SegmentStream.cpp  SecretArena.cpp
+                   Dispatch.cpp  SecretStream.cpp  SegmentFormat.cpp  SegmentStream{Sequential,RandomAccess}.cpp  SecretArena.cpp
   Tests/
 ```
 
@@ -196,6 +196,7 @@ Wycheproof는 Apache-2.0 data 라이브러리(`"kind": "data"`)로, commit을 �
 - AEGIS는 들이지 않는다. Wycheproof AEGIS 벡터는 128 bit tag이고 libsodium은 256 bit tag만 내므로 tag와 invalid(변조된 tag) 사례를 검증할 수 없다. 암호문 부분은 tag 길이와 무관해 valid 사례의 암호문만 비교할 수는 있지만, draft 부록 TV1–TV3(tag256)과 libsodium 표(AeadTests)가 같은 구현을 tag까지 덮으므로 들이지 않는다.
 - AES-128-GCM 108건은 이미 들인 `aes_gcm`에 있고 C2에서 사상이 Unsupported에서 검증으로 바뀌었다(96 bit nonce 67건 검증, 다른 nonce 41건 `Unsupported`). 파일을 더하는 것은 CMAC(`aes_cmac`, C2)과 secretstream(C3)이다(그때 manifest `files`를 늘린다).
 - C2(2026-11-15): 같은 commit archive(SHA-256 일치 확인)에서 `aes_cmac_test.json`(311건)을 들였다. 사상: 128·256 bit 키 그룹 각 102건(valid 21, 변조 tag 81)은 일회성·증분 tag와 검증 결과를 확인하고, AES-192 키 102건과 키 길이 오류 5건(0·8·64·160·320 bit)은 `MacKey::TryImport`가 `InvalidArgument`다. AES HW가 없으면 311건 모두 `Unsupported`로 센다.
+- C3(2026-11-15): 같은 archive에서 `xchacha20_poly1305_secretstream_test.json`(7건, sodium_compat 경계 회귀의 push 상태 벡터)을 들였다. 벡터가 "이 상태에서 push하면 이 암호문·이 상태"라 공개 API로는 닿지 않으므로 시험 접근점(`Private/SecretStreamTestAccess.h`)으로 상태(하위 키·카운터·inonce)를 넣는다. 사상: Writer push의 암호문과 뒤 상태, 같은 상태 Reader의 pull 평문·tag·뒤 상태가 모두 같아야 한다(초기 상태 1건, 카운터 2^16 경계에서 조기 rekey 없음 3건, 2^32 wrap 자동 rekey 3건).
 - 실행 범위: 시험은 저장소 루트 기준 상대 경로로 파일을 읽는다. Windows·macOS 시험과 Android 기기 시험에서 돈다. Android 기기 runner(`Programs/Rocks.Build.Cli/AndroidDevice.cs`)는 data 라이브러리(`"kind": "data"`)의 manifest와 `files`를 기기 작업 디렉터리 아래 같은 상대 경로로 함께 올린다(2026-11-15. x86_64 에뮬레이터에서 Wycheproof·Core JSON·Unicode 시험 포함 1317개 통과).
 
 ## 6. AES 하드웨어 가속
@@ -584,7 +585,7 @@ class Ed25519phVerifier { /* TryCreate, TryUpdate, TryFinish(const Ed25519Public
 } // namespace rocks::crypto
 ```
 
-HKDF는 증분 extract를 두지 않는다(IKM은 공유 비밀처럼 짧다). extract·expand는 일회성이다. SHA-2·SHA-3·SHAKE 증분 객체는 같은 형태다.
+HKDF는 증분 extract를 두지 않는다(IKM은 공유 비밀처럼 짧다). extract·expand는 일회성이다. SHA-2·SHA-3·SHAKE 증분 객체는 같은 형태다. C3 점검(2026-11-15): 위 객체는 C1·C2에서 조각 overload(`Span<const Span<const uint8>>`)까지 모두 구현되어 있어 바꾸지 않았다.
 
 ### 9.3 AES-GCM 멀티파트와 AES 모드 (hazmat)
 
@@ -680,6 +681,8 @@ public:
 - Reader는 `IsFinished()`를 확인하지 않은 채 스트림을 완료로 취급하지 않는다. `TryFinish`가 이것을 강제한다.
 - pull이 돌려주는 tag byte는 0–255 어느 값이든 될 수 있다. 0–3 밖의 값은 Rocks writer가 만들지 않으므로 `AuthenticationFailed`로 다룬다.
 - 메시지 길이가 `MESSAGEBYTES_MAX`를 넘는 입력은 libsodium에 넘기기 전에 거부한다(misuse handler 도달 금지, 5.1절).
+- 구현(2026-11-15, `Crypto/SecretStream.h`·`Private/SecretStream.cpp`): `SecretStreamKey`(32 byte, `TryGenerate`·`TryImport`·`TryDeriveSecretStreamKey`(타입 tag `"RkStream"`)·`hazmat::TryExportKey`). Writer는 header를 `TryFillRandom`으로 만든 뒤 `init_pull`로 상태를 만든다(`init_push`와 같은 계산이고, OS 난수 실패가 Fatal 대신 `DependencyFailed`가 된다). 상태(52 byte)는 키 저장소 슬롯이다. 오류: Writer는 빈 객체 `StaleHandle` → Final 뒤·열거값 밖 tag·출력과 입력·AD 겹침 `InvalidArgument` → 메시지 상한 초과·출력 부족 `CapacityExceeded`(모두 쓰기 전, 상태 불변). Reader는 빈 객체 `StaleHandle` → 겹침 `InvalidArgument` → 실패 뒤·Final 뒤·길이 위반(17 byte 미만, 상한 초과) `AuthenticationFailed` → 출력 부족 `CapacityExceeded`(인증 전, 상태 불변) → MAC 불일치·0–3 밖 tag `AuthenticationFailed`다. `AuthenticationFailed`는 출력 전체와 상태를 지우고 Reset 전까지 같다. header 길이가 틀리면 Reader `TryCreate`가 `AuthenticationFailed`, Writer `TryCreate`가 `InvalidArgument`다. 제자리 처리는 받지 않는다(겹침은 모두 `InvalidArgument`). 두 객체 모두 `Reset`(빈 객체)을 두고, Reader는 `HasFailed`, Writer는 `IsFinished`를 둔다.
+- 검증: Wycheproof 상태 벡터(5.4절), PyNaCl 1.6.2가 만든 스트림(Message·Push·Rekey·Final, tag 0x04 거부) 열기, bit 뒤집기·잘린 메시지·다른 AD·순서 바꾸기·다른 키·Final 없는 끝·Final 뒤 입력, 길이만 큰 Span으로 상한 + 1 거부(`SecretStreamTests.cpp`).
 
 ### 9.5 세그먼트 스트림과 임의 접근
 
@@ -707,9 +710,13 @@ public:
 - **정규 인코딩.** 마지막을 뺀 모든 세그먼트는 S − 16 byte로 꽉 채운다. 빈 평문은 빈 마지막 세그먼트 하나로 표현한다. 세그먼트가 둘 이상이면 마지막 세그먼트는 비어 있을 수 없다. 그래서 같은 평문의 인코딩은 하나이고, 복호 쪽은 비정규 인코딩을 거부한다.
 - **크기 산술.** 전체 암호문 크기 T는 헤더를 포함한다. body = T − 88, n = ⌈body / S⌉, 마지막 세그먼트 크기 r = body − (n − 1)·S다. body < 16, n > 2^32, n ≥ 2인데 r ≤ 16이면 `AuthenticationFailed`다. 임의 접근 `TryOpen`에 넘긴 `lastSegment.Size()`는 r과 같아야 한다. flags의 모르는 bit, 범위 밖 log2 S도 거부한다. keyId는 RFC 9562 byte 순서로 기록한다.
 - **마지막 판정에는 시도가 없다.** 순차 복호기는 꽉 찬 세그먼트 뒤에 byte가 더 오면 last = 0으로, 입력이 끝나 `TryFinish`가 오면 last = 1로 연다. 같은 세그먼트를 last = 0으로 실패한 뒤 last = 1로 다시 열지 않는다. 그래서 마지막 세그먼트의 평문은 `TryFinish`에서 나온다.
-- **AES 스트림 상한.** AES-256-GCM 형식은 스트림당 평문을 2^48 byte로 제한한다. 한 키로 처리하는 블록 수 σ에 대한 구별 확률 σ²/2^129을 약 2^−41 아래로 두기 위해서다(16 MiB × 2^32 세그먼트를 다 쓰면 약 2^−25). ChaCha20-Poly1305 형식은 세그먼트 수 상한만 둔다.
+- **AES 스트림 상한.** AES-256-GCM 형식은 스트림당 세그먼트 암호문 합(헤더 제외, tag 포함)을 2^40 − 16 byte로 제한한다(C3 확정, 2026-11-15). 세그먼트 AD가 비어 세그먼트마다 GCM 블록이 ⌈암호문 / 16⌉개이므로 블록 2^36 − 1개이고, 11절 순번 봉인기와 같은 기밀성 목표 (σ + 1)²/2^129 ≤ 2^−57이다(스트림마다 키가 새로 파생되므로 키당 한도 = 스트림당 한도). 평문으로는 2^40 − 2^44/S − 16 byte다(64 KiB 세그먼트면 약 1 TiB − 256 MiB). 처음 설계의 평문 2^48 byte(약 2^−41)는 같은 목표로 다시 정해 바꿨다. 암호기·병렬 writer는 넘는 평문을 `CapacityExceeded`로, 복호 쪽은 넘는 크기를 형식 위반(`AuthenticationFailed`)으로 거부한다. ChaCha20-Poly1305 형식은 세그먼트 수 상한(평문 2^32 × (S − 16))만 둔다.
 - **세그먼트 연산.** ChaCha20-Poly1305는 libsodium `crypto_aead_chacha20poly1305_ietf_*_detached`가 맡는다. AES-256-GCM은 libsodium `crypto_aead_aes256gcm_*_detached`가 맡고, 파생 키는 `beforenm`으로 한 번만 확장한다. HW가 없으면 AES-256-GCM 형식은 `Unsupported`다. HKDF는 libsodium이다.
 - **Tink와의 관계.** 세그먼트 단위 구성은 같지만 wire 형식은 호환되지 않는다. Tink 상호운용이 필요해지면 별도 모드로 더한다.
+- **형식 명세.** byte 배치·파생·검증 순서·시험 벡터의 규범 명세는 [세그먼트 스트림 형식 v1](CryptoSegmentFormat.ko.md)이다. 벡터 V1–V3은 C++ golden 시험과 독립 Python 구현(pyca/cryptography, OpenSSL)이 같은 값을 낸다.
+- **구현(2026-11-15).** `Crypto/SegmentStream.h`, `Private/SegmentFormat.cpp`(헤더·크기 산술·파생·세그먼트 연산·키), `SegmentStreamSequential.cpp`(순차 암·복호), `SegmentStreamRandomAccess.cpp`(임의 접근·병렬 writer). 세그먼트 키는 파생한 32 byte로 만든 `AeadKey`(ChaCha20-Poly1305-IETF 또는 AES-256-GCM, libsodium `beforenm` 상태 포함)이고 키 저장소에 있다. SHA-256(AD)는 libsodium `crypto_hash_sha256`이다(D7의 "HMAC·HKDF 같은 파생 내부" 사용). 마지막 세그먼트 검증 전용 경로는 libsodium 복호 함수에 `m = NULL`을 넘기는 tag 확인이다(ChaCha20-Poly1305-IETF·AES-256-GCM `afternm` 모두 평문을 쓰지 않는다). salt는 공개 `TryCreate`가 OS 난수로 만들고, 고정 salt 생성은 모듈 내부 `detail::SegmentStreamFactory`(`Private/SegmentStreamInternal.h`, 11절 결정성)가 맡는다. 위치 이동 시험(세그먼트 2^32·AES 한도 경계)은 `Private/SegmentStreamTestAccess.h`로만 한다.
+- **설계에 더한 API.** `SegmentLayout`(n·S·마지막 세그먼트 위치·크기·평문 크기)과 `TryGetSegmentLayout(params, 전체 크기)`(크기 산술, 위반 `AuthenticationFailed`), `TryGetSegmentStreamCiphertextBytes`·`TryGetSegmentStreamMaxPlaintextBytes`, `SegmentHeaderInfo::Params()`, 임의 접근·병렬 writer의 `Layout()`, `SegmentRange{firstSegment, segmentCount, ciphertextOffset, ciphertextBytes, firstSegmentOffset}`, 순차 객체의 `Reset`(빈 객체), `TryDeriveSegmentStreamKey`(타입 tag `"RkSegKey"`)·`hazmat::TryExportKey`. 임의 접근 사용자는 Peek → `TryGetSegmentLayout`으로 마지막 세그먼트 구간을 알아낸 뒤 `TryOpen`을 부른다.
+- **구현 규칙.** 순차 객체의 `StreamProgress.complete`는 `TryProcess`에서 "입력을 다 소비했고 내보낼 출력이 남지 않음", `TryFinish`에서 "스트림 끝까지 다 내보냄"이다(끝난 뒤 `TryFinish`는 `{0, 0, true}`, Compression과 같다). 암호기는 헤더를 첫 출력으로 내고, 평문 한 세그먼트와 봉인 한 세그먼트 버퍼(2S − 16 byte)를 둔다. 복호기는 헤더 88 byte가 모이는 즉시 commitment까지 확인하고, 세그먼트 버퍼(S byte)에서 제자리로 연 뒤 내보낸다. 복호기의 실패(`AuthenticationFailed`·헤더의 `Unsupported`·헤더 처리 중 `OutOfMemory`)는 그 호출의 출력 전체를 지우고 Reset 전까지 같다. 임의 접근 `TryOpen`은 헤더를 지역 사본으로 한 번만 읽고, `lastSegment` 길이가 r과 다르면 `AuthenticationFailed`다. `TryOpenSegment`·`TrySealSegment`는 같은 시작 주소의 제자리만 허용한다. 병렬 writer의 claim은 비트맵 word의 원자적 OR이고(세그먼트 2^32개면 비트맵 512 MiB), 길이 오류·출력 부족은 claim 전에 돌아온다.
 
 ```cpp
 namespace rocks::crypto {
@@ -726,7 +733,8 @@ struct SegmentStreamParams {
 
 // 마스터 키 32 byte와 키 ID다. 헤더의 keyId는 key.Id()에서 온다(따로 지정하지 않으므로 어긋날 수 없다).
 // 매개변수는 헤더에 기록되고 키 파생에 묶이므로, 같은 마스터 키를 다른 매개변수로 써도 파생 키가 다르다.
-class SegmentStreamKey { /* TryGenerate(KeyId), TryImport(KeyId, Span<const uint8>), Id() */ };
+// Nil KeyId는 InvalidArgument다.
+class SegmentStreamKey { /* TryGenerate(KeyId), TryImport(KeyId, Span<const uint8>), Id(), IsEmpty() */ };
 
 struct SegmentHeaderInfo {
     SegmentStreamAlgorithm algorithm;
@@ -835,11 +843,23 @@ while (!pending.IsEmpty()) {
 }
 ```
 
+구현(2026-11-15): Crypto는 Compression에 의존하지 않는다. `CryptoSegmentStreamWithCompression` 시험이 위 형태(Lz4Frame 압축 → 세그먼트 암호화, 중간 버퍼 300 byte, 암호화 출력 창 97 byte)로 왕복하고 복호 → 해제로 원래 입력을 되찾는다(시험 실행 파일만 두 모듈을 함께 링크한다). 압축 문맥 규칙은 `SegmentStream.h`·`SecretStream.h` 주석에 적었다.
+
 ### 9.7 비동기·병렬
 
 - `AsyncCrypto.h`: `TrySubmitSegmentEncrypt`·`TrySubmitSegmentDecrypt`는 큰 버퍼를 세그먼트 단위로 쪼개 WorkerScheduler에서 병렬로 처리한다. 봉인은 `SegmentStreamParallelWriter`, 복호는 `SegmentStreamRandomAccess`의 const 함수를 쓴다. 세그먼트들은 헤더를 공유할 뿐 서로 독립이므로, salt를 고정한 시험에서 결과 byte는 동기 API와 같다.
 - `AsyncFile` 읽기 완료 → 세그먼트 복호를 의존 작업으로 잇는다(Compression 5절과 같은 형태). 취소는 세그먼트 경계에서 확인한다. 실패·취소된 작업은 2절 규칙대로 출력 전체를 지운다.
 - 출력 버퍼의 할당기·수명·취소·용량 계약은 `AsyncCompression.h`의 규약을 따른다. 키 의존 상태는 9.1절대로 SecretArena에 있다.
+
+구현(C4, 2026-11-15):
+
+- **작업 구성.** 한 제출은 worker 작업을 `SegmentCryptoOptions::maxTasks`개(0이면 worker 수, 상한 `SegmentCryptoMaxTasks` = 8, 세그먼트 수 이하) 만들고, 작업들은 다음 세그먼트 번호를 원자적으로 가져가 처리한다. 결과 보관소 `SegmentCryptoTask`는 `CompressionTask`와 같은 틀이다(이동 불가, 한 스레드, `TryGetResult`·`TryWaitResult`·`RequestCancel`, 소멸자는 진행 중이면 취소하고 기다린다). 첫 작업 제출이 거부되면 제출 전체가 실패하고(task·출력 불변), 그 뒤의 거부는 작업 수만 줄인다. 작업 상태·body는 `GetSecretAllocator()`다. 입출력이 겹치면 `InvalidArgument`다(제자리 없음).
+- **동기와 같은 결과.** 암호화는 제출 때 writer를 만든다(헤더·키 파생, 제출 오류가 `ParallelWriter::TryCreate`와 같다. 헤더는 성공하면 마지막에 출력 앞에 쓴다). 복호는 처음 시작한 작업 하나가 동기 사용자와 같은 순서(헤더 지역 사본 → Peek → `TryGetSegmentLayout` → `TryOpen` → 출력 크기 `CapacityExceeded`)로 열고, 다른 작업은 그 결과를 이벤트로 기다린다(여는 작업이 실행 중이므로 기다림은 그 처리 시간으로 묶인다). 세그먼트 하나라도 실패하면 결과는 그 오류다(처음 기록한 이유가 남는다).
+- **의존과 이어 붙이기.** dependencies는 모든 작업에 걸린다. 헤더는 작업 시작 때 읽으므로 앞선 읽기 작업이 암호문을 채울 수 있다. 이어 붙일 작업은 `Handles()` 전체를 dependency로 준다. 실패를 본 작업은 `Fail`로, 자기 취소 요청으로 멈춘 작업은 `Cancelled`로 끝나므로 성공하지 못한 제출 뒤의 작업은 실행되지 않는다.
+- **결과 기록과 소거.** 작업 capture마다 공유 상태의 표(참조) 하나를 들고, 마지막 표가 놓일 때 결과 slot을 쓰고 성공이 아니면 출력 전체를 지운다. capture는 body가 실행되지 않아도(실행 전 취소·의존 실패·Shutdown) terminal 게시 전에 정리되므로, 모든 handle이 terminal이면 결과와 소거가 끝나 있다. 별도 join 작업을 두지 않은 이유: 대기 중인 작업은 취소 요청을 받으면 의존 작업이 끝나기 전에 terminal이 되므로, join이 끝났다고 다른 작업이 출력을 다 썼다는 보장이 없다.
+- **취소.** 작업 시작 전과 세그먼트 경계마다 확인한다(세그먼트 하나, 최대 16 MiB는 끊지 않는다). 한 작업이 멈추면 다른 작업도 다음 경계에서 멈춘다. 모든 세그먼트를 처리한 뒤 늦게 걸린 취소는 결과를 바꾸지 않는다(`CompressionTask`와 같다).
+- **수명.** 키는 제출 때 필요한 만큼 복사한다(암호화는 파생 세그먼트 키를 품은 writer, 복호는 마스터 키 사본). 그래서 제출 뒤 키를 버리거나 KeyRing에서 빼도 된다. 입력·출력 Span과 복호의 associatedData는 결과가 나올 때까지 유효해야 한다.
+- **결정성(11절).** 고정 salt와 세그먼트 경계 probe(호출마다 넘기는 값)를 받는 `detail::TrySubmitSegmentEncryptWithSalt`·`TrySubmitSegmentDecryptWithProbe`(`Private/AsyncCryptoInternal.h`)로 시험한다.
 
 ## 10. 키와 비밀 메모리
 
@@ -875,7 +895,8 @@ public:
 // 같은 (id, context)라도 타입·알고리즘마다 독립인 키를 낸다(2026-11-15 리뷰 반영). TryDeriveSecret은 libsodium
 // crypto_kdf와 같은 byte다. 구현(Kdf.h): KdfKey, TryDeriveSecret(16–64 byte)·TryDeriveMacKey·TryDeriveKdfKey(키 계층)·TryDeriveBoundKdfKey(transcript 조각을 길이 접두로 묶은 하위 마스터, KEM 공유 비밀을 맥락에 묶을 때),
 // HKDF-SHA-256/512(TryHkdf·TryHkdfExtract·TryHkdfExpand, 상호운용용 Span 출력). TryDeriveAeadKey는 Aead.h에 있다.
-// 세그먼트 키 파생은 그 단계에서 더한다.
+// 스트림 키 파생(TryDeriveSegmentStreamKey 타입 tag "RkSegKey", TryDeriveSecretStreamKey "RkStream")은 C3에서
+// SegmentStream.h·SecretStream.h에 더했다.
 Result<AeadKey> TryDeriveAeadKey(const KdfKey& master, uint64 subkeyId, KdfContext context,
                                  AeadAlgorithm algorithm) noexcept;
 Result<SegmentStreamKey> TryDeriveSegmentStreamKey(const KdfKey& master, uint64 subkeyId, KdfContext context,
@@ -908,19 +929,35 @@ struct KeyId {   // Crypto/KeyId.h(KeyBlob이 C1에서 먼저 쓴다). 형식에
     Guid value;
 };
 
-// KeyId → 키. TKey는 AeadKey, SegmentStreamKey 같은 키 타입이며 키가 Id()를 가진다.
-// 항목은 등록 뒤 바뀌지 않는다. 읽기는 여러 스레드가 동시에 해도 된다.
+// KeyId → 키. TKey는 AeadKey, SegmentStreamKey 같은 키 타입이다. Id()를 품는 키(SegmentStreamKey)는
+// 그 값이 등록 ID와 같아야 한다. 항목은 등록 뒤 바뀌지 않는다. 모든 함수는 여러 스레드가 동시에 불러도 된다.
 template <typename TKey>
 class KeyRing {
 public:
-    Result<void> TryAdd(KeyId id, TKey&& key) noexcept;           // 이미 있으면 AlreadyExists(키 클래스는 Id를 품지 않는다)
+    explicit KeyRing(Allocator& allocator = GetSecretAllocator()) noexcept;
+    Result<void> TryAdd(KeyId id, TKey&& key) noexcept;           // 이미 있으면 AlreadyExists, 실패하면 key는 호출자에게 남는다
     Result<KeyLease<TKey>> TryAcquire(KeyId id) noexcept;         // 없으면 공급자를 부르고, 그래도 없으면 NotFound
-    Result<void> TryRemove(KeyId id) noexcept;                    // 마지막 lease가 끝나면 소거
-    void SetCurrent(KeyId id) noexcept;                           // 암호화에 쓸 현재 키
+    Result<KeyLease<TKey>> TryAcquireCurrent() noexcept;          // 현재 키(없으면 NotFound, 공급자를 부르지 않는다)
+    Result<void> TryRemove(KeyId id) noexcept;                    // 마지막 lease가 끝나면 소거. 현재 키였으면 현재 키도 없앤다
+    Result<void> TrySetCurrent(KeyId id) noexcept;                // 암호화에 쓸 현재 키. 등록된 키만(NotFound)
+    void ClearCurrent() noexcept;
+    KeyId CurrentId() const noexcept;
+    usize Count() const noexcept;
 
     // 없는 키를 가져오는 곳이다(서버, OS 키 저장소, 빌드 시 주입 표). 같은 ID의 동시 요청은 한 번만
     // 부른다(single-flight). 잠금 밖에서 부르며, 공급자는 키를 돌려주고 KeyRing이 등록한다.
     void SetProvider(Delegate<Result<TKey>(KeyId)> provider) noexcept;
+};
+
+// KeyBlob 표 공급자(KeyId → Key 방식 blob). 요청 때 wrapKeyId로 KEK를 빌려 풀고 id를 비교한다.
+template <KeyBlobKey TKey>
+class KeyBlobProvider {
+public:
+    explicit KeyBlobProvider(KeyRing<KdfKey>& kekRing) noexcept;
+    Result<void> TryAddBlob(Span<const uint8> blob) noexcept;     // blob을 복사해 둔다
+    Result<void> TryRemoveBlob(KeyId id) noexcept;
+    Result<TKey> TryFetch(KeyId id) noexcept;
+    typename KeyRing<TKey>::Provider AsProvider() noexcept;       // SetProvider에 넘긴다(수명 추적 없음)
 };
 
 } // namespace rocks::crypto
@@ -929,6 +966,11 @@ public:
 - 공급자가 KeyBlob에서 키를 꺼낼 때는 TryPeekKeyBlob로 wrapKeyId를 읽어 KEK(`KeyRing<KdfKey>`)를 lease하고, `TryUnwrapKey<TKey>`가 돌려준 id가 요청한 id와 같은지 확인한다(다르면 AuthenticationFailed, 같은 KEK 아래 blob 통째 교체 방어).
 - 형식은 키 ID를 기록하고, 복호는 ID로 키를 고른다. 키 회전은 "암호화는 현재 키, 복호는 등록된 키 전체(ID로)"다. 제거한 키라도 이미 받은 lease는 끝날 때까지 유효하다.
 - KeyRing은 키 타입별 템플릿이다. 하나의 ID가 두 알고리즘에 쓰이는 일을 타입으로 막는다.
+- **구현(C4, 2026-11-15).** `Crypto/KeyRing.h`(header-only 템플릿). 표는 잠금 하나로 지키는 `HashMap<Guid, SharedPtr<항목>>`이고 잠근 구간은 조회·삽입·lease 복사뿐이다. `KeyLease<TKey>`는 항목을 공유 소유하므로(복사 가능, 키 byte는 복사하지 않는다) 키를 제거하거나 KeyRing이 먼저 소멸해도 lease가 끝날 때까지 유효하고, 마지막 참조가 놓이는 스레드에서 키 소멸자가 지운다. 할당기는 마지막 lease보다 오래 살아야 하므로 기본값은 프로세스 끝까지 사는 `GetSecretAllocator()`다.
+- **설계에서 바꾼 점.** `SetCurrent`는 등록된 키만 받는 `TrySetCurrent`로 바꾸고(Nil `InvalidArgument`, 없으면 `NotFound`) `TryAcquireCurrent`·`ClearCurrent`·`CurrentId`·`Count`를 더했다. "키 클래스는 Id를 품지 않는다"는 Id를 품는 `SegmentStreamKey`와 맞지 않아, Id를 품는 키는 `TryAdd`에서 id와 같아야 하고(`InvalidArgument`) 공급자 결과가 다르면 `AuthenticationFailed`다. 오류 순서는 빈 키 `StaleHandle` → Nil·Id 불일치 `InvalidArgument` → `AlreadyExists`·`NotFound` → `OutOfMemory`다.
+- **공급자 계약.** 같은 ID의 동시 요청은 공급자를 한 번 부르고 성공·실패를 함께 받는다(늦게 온 요청은 표에서 찾거나, 실패였으면 다시 부른다. 실패는 기억하지 않는다). Core `Delegate`는 동시 실행을 허용하지 않으므로 KeyRing마다 공급자 호출은 한 번에 하나다(공급자 잠금, 잠금 순서 공급자 → 표). 표 잠금 밖에서 부르므로 공급자가 다른 KeyRing(KEK)이나 같은 KeyRing의 등록된 키를 빌릴 수 있다. 같은 KeyRing의 없는 키를 공급자 안에서 요청하면 교착 대신 `Busy`이고, 두 KeyRing의 공급자가 서로의 없는 키를 요청하는 순환은 만들지 않는다(KEK 계층처럼 한 방향). 공급자 안의 `SetProvider`와 공급자 호출 중 KeyRing 소멸은 Fatal이다. 공급자가 `NotFound`면 `NotFound`, 빈 키면 `StaleHandle`, 다른 오류는 그대로다. 둘이 같은 ID를 동시에 등록하면 먼저 등록된 항목이 남는다.
+- **KeyBlob 표 공급자.** `KeyBlobProvider<TKey>`는 Key 방식 blob을 복사해 두고 요청 때 위 첫 항목 절차(Peek → KEK lease → `TryUnwrapKey<TKey>` → id 비교)로 키를 낸다. 넣을 때 형식·타입·길이를 보고(`AuthenticationFailed`), 비밀번호 방식은 `Unsupported`다. OS 키 저장소 공급자는 후속이다(1절).
+- **Core 보강.** `Delegate`의 `CallIfAlive`(void 반환 전용 `ExecuteIfBound` 경로지만 모든 반환 타입에 만들어진다)가 반환값을 버려 `[[nodiscard]]` `Result` 반환 대상이 컴파일되지 않았다. 반환값을 명시적으로 버리게 고쳤다.
 - 비밀번호에서 키를 얻을 때는 Argon2id(salt 16 byte)를 쓴다. 입력 매개변수는 상한으로 검사해 자원 고갈을 막는다. 구현(PasswordHash.h): TryDeriveKdfKeyFromPassword·TryDerivePasswordSecret, 저장 문자열 TryHashPassword·TryVerifyPassword·TryPasswordNeedsRehash. 비용 상한은 반복 32회·메모리 1 GiB·반복 × 메모리 4 GiB(SENSITIVE)이고 넘으면 계산하지 않고 `CapacityExceeded`다. "$<id>$" 꼴의 다른 형식과 libsodium 형식보다 긴 문자열은 `Unsupported`, 형식 오류·불일치는 `AuthenticationFailed`, Argon2 작업 메모리 부족은 `OutOfMemory`다(errno ENOMEM으로 불일치와 구분한다, 2026-11-15 리뷰 반영). libsodium은 작업 메모리를 해제 때 지우지 않는다(동작을 바꾸는 패치는 하지 않는다).
 
 ### 10.4 키 직렬화
@@ -941,7 +983,7 @@ KeyBlob v1(Crypto/KeyBlob.h, 2026-11-15 구현, 설계 교차검증 반영)의 �
 |---|---|---|---|
 | 0 | 4 | magic "RKEY" | 다르면 AuthenticationFailed |
 | 4 | 1 | version = 1 | 모르면 Unsupported(magic과 이 byte만 보고 판정하며 뒤를 해석하지 않는다) |
-| 5 | 1 | KeyBlobType | Aead 1·Mac 2·Kdf 3·Ed25519 4·Kx 5·Box 6·Kem 7. 모르면 Unsupported |
+| 5 | 1 | KeyBlobType | Aead 1·Mac 2·Kdf 3·Ed25519 4·Kx 5·Box 6·Kem 7·SecretStream 8·SegmentStream 9(8·9는 C4에서 덧붙였다). 모르면 Unsupported |
 | 6 | 1 | algorithm | 클래스가 품는 열거값(Aead·Mac·Kem), 없으면 0(Ed25519 서명 키는 Ed25519·ph 공용이라 0). 표 밖이면 Unsupported |
 | 7 | 1 | method | 1 = Key(KdfKey KEK), 2 = Password(Argon2id v1.3, lane 1, salt 16, 출력 32). 모르면 Unsupported |
 | 8 | 16 | keyId | Nil이면 AuthenticationFailed |
@@ -954,9 +996,9 @@ KeyBlob v1(Crypto/KeyBlob.h, 2026-11-15 구현, 설계 교차검증 반영)의 �
 - 길이는 98 + P + L(Key 114 + L, Password 122 + L), 상한 `KeyBlobMaxBytes` = 4218이다. blob이 자기 길이를 담고, unwrap은 정확한 길이만 받는다.
 - 파생: M = KEK(Key) 또는 TryDeriveKdfKeyFromPassword(pw, salt, {ops, memKiB × 1024})(Password), T = blob[0, 50 + P), B = TryDeriveBoundKdfKey(M, 0, labels::KeyBlob, {T}), K = TryDeriveAeadKey(B, 0, labels::KeyBlob, XChaCha20Poly1305), C = TryDeriveSecret(B, 1, labels::KeyBlob, 32). 다른 KEK·비밀번호와 헤더 변조는 AEAD 전에 C 비교에서 걸린다. C는 키에 대한 commitment(CMT-1)라 비밀번호 후보를 여러 개 시도하는 흐름(2절)에도 partitioning oracle이 없다. 키 wrap에는 메시지 commitment가 필요 없다((K, nonce, AD)가 정해지면 평문이 하나다).
 - wrap 키를 AeadKey가 아니라 KdfKey로 받는다: 2절 "같은 키 byte를 다른 용도에 쓰지 않는다", 무작위 nonce XChaCha20만 쓰므로 이식성, commitment·blob별 파생에 PRF 키가 필요하다. 결정적 wrap(AES-KW·SIV)은 쓰지 않는다(HW 전용·자체 구성·같은 키 재wrap이 드러남). KEK 하나로 2^48개를 wrap해도 nonce 충돌은 약 2^-97이다.
-- 담는 비밀: AEAD·MAC·KDF 키 byte, Ed25519 seed(sk ‖ pk를 담지 않아 pk 불일치로 비밀키가 새는 double-public-key 문제를 구조적으로 피한다), X25519 비밀키(Kx·Box), KEM seed(FIPS 203 형식). hazmat 짧은 MAC 키(16 byte 미만)는 wrap하지 않는다. 순번 봉인기 상태와 세션 비밀(kx 세션 키, KEM 공유 비밀)은 담지 않고, blob에서 푼 AeadKey로 순번 봉인기를 만들지 않는다(복원할 때마다 seq 0부터 같은 nonce).
+- 담는 비밀: AEAD·MAC·KDF 키 byte, secretstream 키·세그먼트 스트림 마스터 키(32 byte, algorithm 0), Ed25519 seed(sk ‖ pk를 담지 않아 pk 불일치로 비밀키가 새는 double-public-key 문제를 구조적으로 피한다), X25519 비밀키(Kx·Box), KEM seed(FIPS 203 형식). hazmat 짧은 MAC 키(16 byte 미만)는 wrap하지 않는다. 순번 봉인기 상태와 세션 비밀(kx 세션 키, KEM 공유 비밀)은 담지 않고, blob에서 푼 AeadKey로 순번 봉인기를 만들지 않는다(복원할 때마다 seq 0부터 같은 nonce).
 - 비밀번호 방식: 비용은 명시 인자(도구·데스크톱 MODERATE, 모바일 INTERACTIVE 이상 권장), 기록은 KiB 단위(정규 인코딩), 하한 위반은 AuthenticationFailed, 상한(PasswordHash.h와 같은 검사, 내부 PasswordInternal.h 공유) 초과는 Argon2id 전에 CapacityExceeded다. 기기별 정책은 호출자가 TryPeekKeyBlob의 passwordCost로 먼저 정한다. 비밀번호 하나로 키 여러 개를 보관하면 비밀번호로 KdfKey blob 하나(KEK)를 만들고 나머지는 그 KEK 아래 Key 방식으로 둔다.
-- API: TryPeekKeyBlob(인증 전 헤더, 헤더만 있으면 된다), 닫힌 타입 목록(`KeyBlobTraits`, 7개 타입)의 템플릿 TryGetKeyBlobBytes·TryWrapKey(wrapKey, wrapKeyId, key, keyId, blob)·TryWrapKeyWithPassword·`TryUnwrapKey<TKey>`·`TryUnwrapKeyWithPassword<TKey>`(결과 `UnwrappedKey<TKey>{id, key}`). 정의는 KeyBlob.cpp에서 7개 타입으로 명시 인스턴스화한다.
+- API: TryPeekKeyBlob(인증 전 헤더, 헤더만 있으면 된다), 닫힌 타입 목록(`KeyBlobTraits`, 9개 타입)의 템플릿 TryGetKeyBlobBytes·TryWrapKey(wrapKey, wrapKeyId, key, keyId, blob)·TryWrapKeyWithPassword·`TryUnwrapKey<TKey>`·`TryUnwrapKeyWithPassword<TKey>`(결과 `UnwrappedKey<TKey>{id, key}`). 정의는 KeyBlob.cpp에서 9개 타입으로 명시 인스턴스화한다. `SegmentStreamKey`는 Id를 품으므로 wrap의 keyId가 `key.Id()`와 다르면 `InvalidArgument`(쓰기 전)이고, unwrap하면 blob의 keyId를 Id로 가진 키가 나온다(헤더 keyId와 어긋날 수 없다).
 - 오류(wrap): 빈 키 StaleHandle → 호출자 인자 InvalidArgument(Nil ID, 짧은 MAC 키, cost 범위, 빈 password, Argon2id 상한보다 긴 password, password·blob 겹침) → cost 상한·출력 부족 CapacityExceeded → 쓰기 시작 → 계산(DependencyFailed·OutOfMemory). 쓰기 시작한 뒤 실패하면 blob 전체를 지운다. TryGetKeyBlobBytes도 같은 비밀 길이 규칙을 쓴다(짧은 MAC 키는 InvalidArgument).
 - 오류(unwrap): 빈 KEK StaleHandle → 긴 password InvalidArgument → 헤더(byte 순서대로 판정한다: magic·version 5 byte 미만이나 magic 불일치 AuthenticationFailed → 모르는 version Unsupported → 앞 26 byte 부족 AuthenticationFailed → 모르는 타입·(타입, 알고리즘)·방식 Unsupported → Nil keyId·L 범위 밖·방식 매개변수 길이 부족·Nil wrapKeyId·비용 하한 위반 AuthenticationFailed) → 길이·타입·방식이 기대와 다름 AuthenticationFailed → 비용 상한 CapacityExceeded(Password) → 이 기기에 없는 AEAD 알고리즘 Unsupported → 계산(OutOfMemory) → commitment·tag AuthenticationFailed. 공격자 입력에서는 InvalidArgument가 나오지 않는다.
 - 한 번 읽기: Peek·unwrap은 blob을 지역 버퍼(Peek 50 byte, unwrap `KeyBlobMaxBytes`)로 한 번 복사하고 그 사본으로만 검사·파생·복호한다. blob이 공유 메모리나 쓰기 가능한 파일 매핑이라 호출 중 바뀌어도 헤더를 두 번 읽어 생기는 틈(첫 읽기에서 다른 타입으로 보이고 파생 때 원래 헤더로 돌아오면 KdfKey byte가 AeadKey로 나온다)이 없다. Peek와 unwrap 사이의 변경은 호출자 몫이다(같은 자기 버퍼를 넘긴다).
@@ -988,13 +1030,13 @@ KeyBlob v1(Crypto/KeyBlob.h, 2026-11-15 구현, 설계 교차검증 반영)의 �
 | AEGIS-256 / AEGIS-128L | 32 / 16 | 32 / 16 | 32 | 2^61 − 1. 무작위 nonce는 256이 사실상 무제한, 128L은 2^48개 |
 | 순번 봉인기(키당) | — | — | — | seq 2^64 − 1개. AES-GCM은 키당 2^36 − 1 블록(약 1 TiB): draft-irtf-cfrg-aead-limits-13 6.2절의 기밀성 이점 (s + q + 1)^2 / 2^129를 2^-57 아래로 둔다(QUIC RFC 9001 B.1.1의 기밀성 목표와 같은 값. TLS 1.3 레코드 한도는 이 식으로 약 2^-60). ChaCha20-Poly1305·AEGIS는 nonce를 지키면 키당 데이터 한도가 없다(aead-limits-13 6.3절, RFC 10032 10절) |
 | secretstream | 32 | header 24 | 17 | 메시지당 ≈ 256 GiB, 스트림은 무제한 |
-| 세그먼트 스트림 | 32 | header 88 | 16/세그먼트 | 2^32 세그먼트(64 KiB 세그먼트면 약 256 TiB) |
+| 세그먼트 스트림 | 32 | header 88 | 16/세그먼트 | 2^32 세그먼트(64 KiB 세그먼트면 약 256 TiB). AES-256-GCM은 세그먼트 암호문 합 2^40 − 16 B(평문 2^40 − 2^44/S − 16 B) |
 
-키당 데이터 한도의 목표는 기밀성 이점 2^-57(키마다)이다. 키가 여러 개면 대략 키 수만큼 더해진다(TLS·QUIC도 연결당 목표다). 9.5절 AES 세그먼트 스트림의 2^48 B(약 2^-41)는 C3에서 같은 목표로 다시 정한다. 같은 식이면 세그먼트 AD가 비어 세그먼트당 블록 + 1 = S/16이므로 "세그먼트 암호문 합(tag 포함) ≤ 2^40 − 16 B"가 된다.
+키당 데이터 한도의 목표는 기밀성 이점 2^-57(키마다)이다. 키가 여러 개면 대략 키 수만큼 더해진다(TLS·QUIC도 연결당 목표다). 9.5절 AES 세그먼트 스트림은 C3(2026-11-15)에서 같은 목표로 다시 정해 "세그먼트 암호문 합(tag 포함) ≤ 2^40 − 16 B"(블록 2^36 − 1개)로 확정했다. 처음 설계의 평문 2^48 B(약 2^-41)를 대신한다.
 
-- **스레드.** 자유 함수는 재진입 가능하다. 키 객체는 생성 뒤 불변이라 여러 스레드가 동시에 읽어도 된다. 연산 상태는 호출마다(일회성) 또는 스트림 객체마다 따로 있다. AES 라운드 키와 H 거듭제곱은 키를 만들 때 한 번 계산해 키 객체에 두고, 이후 바꾸지 않는다(5.3절).
+- **스레드.** 자유 함수는 재진입 가능하다. 키 객체는 생성 뒤 불변이라 여러 스레드가 동시에 읽어도 된다. 연산 상태는 호출마다(일회성) 또는 스트림 객체마다 따로 있다. AES 라운드 키와 H 거듭제곱은 키를 만들 때 한 번 계산해 키 객체에 두고, 이후 바꾸지 않는다(5.3절). KeyRing은 모든 함수가 스레드 안전하고 공급자 호출은 KeyRing마다 한 번에 하나다(10.3절). `SegmentCryptoTask`는 제출·조회·소멸을 한 스레드에서 하고, 그 작업들은 worker에서 같은 writer·임의 접근 객체를 함께 쓴다(9.7절).
 - **결정성.** 고수준 API는 무작위 nonce·salt를 쓰므로 출력이 실행마다 다르다. 시험은 hazmat의 nonce 지정 API와, 고정 salt·`CpuFeatures`를 값으로 받는 모듈 내부 함수로 재현한다. 모듈 오브젝트는 시험 실행 파일과 제품이 같이 쓰므로(모듈을 시험용으로 따로 컴파일하지 않고, `ROCKS_TESTING`은 시험 실행 파일 소스에만 정의된다) "시험 빌드에서만 컴파일되는 hook"은 만들 수 없다. 그래서 전역 hook(바꿔 둘 수 있는 함수 포인터·고정 salt 플래그)을 두지 않는다. 바꿔 둔 상태가 없으므로 출하 코드가 고정 salt로 (키, nonce)를 재사용할 길도 없다. 공개 API는 늘 OS 난수·감지 결과를 넘긴다. 시험이 닿는 길은 둘로 나눈다.
-  - 값을 받는 내부 함수(고정 salt·`CpuFeatures` 등)는 모듈 구현과 시험이 함께 include하는 일반 Private 내부 헤더(예: `KdfInternal.h`)에 선언한다. 정의하는 .cpp가 같은 선언을 봐야 선언·정의가 어긋나지 않는다.
+  - 값을 받는 내부 함수(고정 salt·`CpuFeatures`·세그먼트 경계 probe 등)는 모듈 구현과 시험이 함께 include하는 일반 Private 내부 헤더(예: `KdfInternal.h`, `AsyncCryptoInternal.h`)에 선언한다. 정의하는 .cpp가 같은 선언을 봐야 선언·정의가 어긋나지 않는다.
   - 공개 계약이 막은 상태 이동(순번 이어 가기 등)은 모듈 Private/의 header-only friend 접근점 `*TestAccess.h`로만 한다.
   - "바꿔 둘 수 있는 전역 hook을 두지 않는다"는 설계·리뷰 규칙이다. 정책 검사(P7, `PolicyChecks.TestAccess`)는 그 가운데 lexical하게 볼 수 있는 부분을 확인한다.
   - `test-access-include`: 시험 소스(모듈 `Tests/`·`Programs/FoundationTests/`) 밖의 소스(모듈 구현·모듈 `Private/Tests/`·다른 모듈·시험 지원 코드)는 `*TestAccess.h`를 include하지 않는다(`#include_next`·`#import` 포함, 접근점끼리는 예외). 모듈 `Private/Tests/`는 모듈 소스로 컴파일되어 출하되므로 시험 소스가 아니다.
@@ -1005,13 +1047,14 @@ KeyBlob v1(Crypto/KeyBlob.h, 2026-11-15 구현, 설계 교차검증 반영)의 �
 
 ## 12. 검증 계획
 
-- **알려진 답.** Wycheproof 사상표에 따른 전 항목(96 bit가 아닌 GCM IV·짧은 tag는 `Unsupported`·`AuthenticationFailed`, Ed25519 "acceptable" 항목은 libsodium 결과를 기대값으로 둔다: 비정규 encoding·small-order는 거부, 혼합 차수 키는 cofactorless 식이 맞으면 수용). C1 사상표: AEAD는 valid가 봉인 byte와 열기 결과 일치, invalid는 AuthenticationFailed이고 평문 출력을 0으로 지운다. AES-GCM은 128·256 bit 키를 검증하고(128 bit는 C2부터, 5.4절) 192 bit 키는 열거값이 없어 센다. AES HW가 없는 기기에서는 128·256 bit 키 213건을 Unsupported로 센다(HW 판정이 조용히 꺼지는 회귀는 CPU 일치 시험이 잡는다). AES-CMAC은 5.4절 사상이다. 들인 데이터에는 짧은 tag 사례가 없어(AES-GCM은 모두 16 byte, ChaCha 계열 0 byte tag는 nonce 길이 오류가 먼저다) 짧은 tag 거부는 AeadTests의 잘린 입력·tag 시험이 맡는다. ChaCha 계열의 nonce 길이 오류는 InvalidArgument다. HMAC의 잘린 tag는 전체 tag 앞부분과 비교하고, 검증 함수가 잘린 tag를 AuthenticationFailed로 거부하는지도 본다. HKDF 출력 상한 초과는 InvalidArgument다. X25519는 crypto_kx 클라이언트·서버 양쪽으로 돌려 공유 비밀 0(small-order 점 31건)을 AuthenticationFailed로, 나머지(twist 점·비정규 u 포함)를 BLAKE2b-512(q ‖ client_pk ‖ server_pk)와 비교한다. ML-KEM-768은 seed 길이 오류 InvalidArgument, 암호문 길이 오류 AuthenticationFailed, 그 밖은 공개키와 공유 비밀(암묵적 거부 포함) 일치다. RFC 8439(ChaCha20-Poly1305), XChaCha20 초안 벡터, RFC 8032(Ed25519·Ed25519ph), RFC 7748(X25519), RFC 5869(HKDF), RFC 4231(HMAC), RFC 7693(BLAKE2b), RFC 4493(CMAC), NIST SP 800-38A(CTR)·CAVP GCM, X-Wing·ML-KEM768 표준 벡터, 세그먼트 형식 golden(salt 고정).
+- **알려진 답.** Wycheproof 사상표에 따른 전 항목(96 bit가 아닌 GCM IV·짧은 tag는 `Unsupported`·`AuthenticationFailed`, Ed25519 "acceptable" 항목은 libsodium 결과를 기대값으로 둔다: 비정규 encoding·small-order는 거부, 혼합 차수 키는 cofactorless 식이 맞으면 수용). C1 사상표: AEAD는 valid가 봉인 byte와 열기 결과 일치, invalid는 AuthenticationFailed이고 평문 출력을 0으로 지운다. AES-GCM은 128·256 bit 키를 검증하고(128 bit는 C2부터, 5.4절) 192 bit 키는 열거값이 없어 센다. AES HW가 없는 기기에서는 128·256 bit 키 213건을 Unsupported로 센다(HW 판정이 조용히 꺼지는 회귀는 CPU 일치 시험이 잡는다). AES-CMAC은 5.4절 사상이다. 들인 데이터에는 짧은 tag 사례가 없어(AES-GCM은 모두 16 byte, ChaCha 계열 0 byte tag는 nonce 길이 오류가 먼저다) 짧은 tag 거부는 AeadTests의 잘린 입력·tag 시험이 맡는다. ChaCha 계열의 nonce 길이 오류는 InvalidArgument다. HMAC의 잘린 tag는 전체 tag 앞부분과 비교하고, 검증 함수가 잘린 tag를 AuthenticationFailed로 거부하는지도 본다. HKDF 출력 상한 초과는 InvalidArgument다. X25519는 crypto_kx 클라이언트·서버 양쪽으로 돌려 공유 비밀 0(small-order 점 31건)을 AuthenticationFailed로, 나머지(twist 점·비정규 u 포함)를 BLAKE2b-512(q ‖ client_pk ‖ server_pk)와 비교한다. ML-KEM-768은 seed 길이 오류 InvalidArgument, 암호문 길이 오류 AuthenticationFailed, 그 밖은 공개키와 공유 비밀(암묵적 거부 포함) 일치다. RFC 8439(ChaCha20-Poly1305), XChaCha20 초안 벡터, RFC 8032(Ed25519·Ed25519ph), RFC 7748(X25519), RFC 5869(HKDF), RFC 4231(HMAC), RFC 7693(BLAKE2b), RFC 4493(CMAC), NIST SP 800-38A(CTR)·CAVP GCM, X-Wing·ML-KEM768 표준 벡터, 세그먼트 형식 golden(salt 고정, [형식 명세](CryptoSegmentFormat.ko.md) 6절 V1–V3, 독립 Python 구현과 일치), secretstream Wycheproof 상태 벡터·PyNaCl 상호운용.
 - **차등.** 같은 기기에서 libsodium AES-256-GCM(원본)과 경량 계층 AES-256-GCM을 무작위 입력(길이 0–64 KiB, AD 0–1 KiB, 정렬·비정렬, 제자리)과 무작위 조각 나누기(멀티파트)로 대조한다. 원본이 파생 코드의 기준이다. x64와 arm64 결과는 같은 벡터 파일로 고정한다.
 - **스칼라 참조.** 시험 전용 스칼라 참조(블록 암호화 + 32·64·128 bit 카운터 증가)로 CTR·CMAC·AES-128을 대조한다. 시작 카운터를 2^32−k, 2^64−k, 2^128−k에 두어 carry 전파와 wrap(`CapacityExceeded`)을 확인한다. libsodium 원본에 없는 경로라 원본이 기준이 되지 못하기 때문이다.
 - **경로 범위.** GitHub CI(Windows x64 AES-NI·AVX, macOS arm64 AES·PMULL)와 로컬 Android x86_64 에뮬레이터(adb 실행)에서 돈다. 행마다 `AeadInfo.implementation`이 기대값과 같은지 단언한다. HW 없는 경로는 `CpuFeatures`를 값으로 받는 내부 판정 함수(`detail::HasAesHardware`, `SelectAesKernels`·`CheckAesKernels`)로 `Unsupported` 반환과 자가 시험 거부를 확인한다(11절 결정성. C2에서 값을 받는 함수와 감지 결과로 부르는 공개 경로로 나눴다). Android arm64 실기기는 아직 실행 경로가 없으므로 결과에서 구분해 적는다.
 - **일치 시험.** 라이브러리 CPU 감지 = `CpuFeatures`(6.2절).
-- **음성 시험.** misuse handler 도달 조건(secretstream 최대 길이 초과 등)이 Fatal 없이 오류로 돌아오는지, 제자리 규칙 밖 겹침의 쓰기 전 거부, tag의 bit 하나 뒤집기, 잘린 tag, 모든 세그먼트 경계와 중간에서의 절단, 세그먼트 교환·중복·삭제, 다른 스트림 세그먼트 이식, AD·헤더 bit flip(commitment 거부), last 표시 위조, 잘못된 키, Final 뒤 입력, 병렬 writer 재봉인, 크기 0·1·S−17·S−16·S−15·2(S−16), 1 byte 출력 창 역압, 최대 길이 경계(상한 −1·상한·상한 +1을 상태 조작으로 확인).
+- **음성 시험.** misuse handler 도달 조건(secretstream 최대 길이 초과 등)이 Fatal 없이 오류로 돌아오는지, 제자리 규칙 밖 겹침의 쓰기 전 거부, tag의 bit 하나 뒤집기, 잘린 tag, 모든 세그먼트 경계와 중간에서의 절단, 세그먼트 교환·중복·삭제, 다른 스트림 세그먼트 이식, AD·헤더 bit flip(commitment 거부), last 표시 위조, 잘못된 키, Final 뒤 입력, 병렬 writer 재봉인, 크기 0·1·S−17·S−16·S−15·2(S−16), 1 byte 출력 창 역압, 최대 길이 경계(상한 −1·상한·상한 +1을 상태 조작으로 확인). C3(2026-11-15): `SecretStreamTests.cpp`·`SegmentStreamTests.cpp`·`SegmentStreamNegativeTests.cpp`가 위 항목을 모두 덮는다. secretstream 상한은 길이만 큰 Span(내용은 읽히지 않는다)으로, 세그먼트 2^32개·AES 2^40 − 16 B 경계는 `SegmentStreamTestAccess`로 위치를 옮겨 확인한다. 병렬 writer는 네 스레드가 같은 index 64개를 다투어 index마다 한 번만 봉인되는지 본다.
 - **소거·수명.** 소멸 뒤 슬롯이 0인지, 실패 경로에서 출력이 0인지, 이동 뒤 `StaleHandle`인지 확인한다. ASan 구성(libsodium 포함 여부는 결정 D9).
+- **비동기·KeyRing(C4, 2026-11-15).** `AsyncCryptoTests.cpp`: 고정 salt 비동기 암호문 = 동기 순차 암호기(ChaCha20-Poly1305, HW가 있으면 AES-256-GCM, 세그먼트 경계 크기와 `--seed` 무작위 크기, 작업 수 1·3·8·기본), 비동기 복호 왕복, 공개 경로(OS 난수 salt) → 동기 임의 접근. 변조·다른 키 ID·같은 ID 다른 키·AD·절단·짧은 입력·버전·작은 출력에서 동기 경로와 같은 오류이고 출력 전체가 0. 제출 오류가 task·출력을 바꾸지 않음, 진행 중 `Busy`. 취소: 시작 전(의존 대기)·의존 실패·진행 중(probe 확인 횟수, 실제 `RequestCancel`) 모두 출력 0. 수명: 제출 뒤 키 소멸·KeyRing 제거·lease 반환, 의존 작업이 암호문을 채운 뒤 복호, 이어 붙인 작업은 성공일 때만 실행, 진행 중 task 소멸. `KeyRingTests.cpp`: 오류 순서, 제거·KeyRing 소멸 뒤 lease, 마지막 lease에서 키 저장소 반환, 공급자 성공·실패·빈 키·ID 불일치·재진입 `Busy`, single-flight(스레드 8개, 성공 한 번 호출), 스레드 8개 등록·조회·제거 혼합(`--seed`), KeyBlob 표 공급자(KEK 없음·변조 blob·타입·방식). `KeyBlobTests.cpp`: 타입 8·9 왕복·Peek·Id 불일치 거부.
 - **fuzz.** 세그먼트 header·임의 접근 계산·secretstream reader·Wycheproof 파서. 하네스 기반은 착수 때 저장소 기반을 확인한다.
 - **성능.** 6.4절 gate.
 
@@ -1032,8 +1075,8 @@ KeyBlob v1(Crypto/KeyBlob.h, 2026-11-15 구현, 설계 교차검증 반영)의 �
 |---|---|---|
 | C1 | 기반과 libsodium 일회성: SecretArena, 키 타입·키 직렬화, label 등록부, 난수·상수 시간(hex·base64 포함), macOS arm64 DIT, 해시·MAC·KDF·Argon2id, AEAD(ChaCha·XChaCha·AEGIS·AES-256-GCM HW), Ed25519, kx, sealed box, X-Wing·ML-KEM768 | Wycheproof·RFC 통과, CPU 일치 시험, 3개 플랫폼 경로 단언 |
 | C2 | AES 경량 계층: x64·arm64 커널, GCM(AES-128/256, 일회성·멀티파트), CTR, 이어서 CMAC | libsodium 대비 차등 시험, Wycheproof·NIST, 성능 gate(결정 D4 확정). 2026-11-15 구현: AES-128-GCM 공개, `Crypto/AesModes.h`(AesKey·AesCtr·GCM 멀티파트), AES-CMAC, Wycheproof aes_cmac, `Programs/CryptoBench`로 D4 확정(6.4절). Windows x64 Debug 시험 통과, arm64는 NDK·macOS 대상 컴파일만 확인(실행은 macOS arm64 CI) |
-| C3 | 스트리밍: 증분 객체, secretstream, 세그먼트 형식(순차·임의 접근·병렬 writer), 형식 명세 문서 | golden·음성 시험 전부, 형식 명세와 golden 일치 |
-| C4 | KeyRing·공급자, AsyncCrypto | 동기·비동기 결과 byte 일치, 취소·수명 시험 |
+| C3 | 스트리밍: 증분 객체, secretstream, 세그먼트 형식(순차·임의 접근·병렬 writer), 형식 명세 문서 | golden·음성 시험 전부, 형식 명세와 golden 일치. 2026-11-15 구현: `Crypto/SecretStream.h`·`Crypto/SegmentStream.h`, [형식 명세](CryptoSegmentFormat.ko.md)(벡터를 독립 Python 구현으로 대조), Wycheproof secretstream, AES 세그먼트 상한 2^40 − 16 B 확정(9.5·11절). Windows x64 Debug 시험 통과 |
+| C4 | KeyRing·공급자, AsyncCrypto | 동기·비동기 결과 byte 일치, 취소·수명 시험. 2026-11-15 구현: `Crypto/KeyRing.h`(KeyRing·KeyLease·KeyBlobProvider, 10.3절), `Crypto/AsyncCrypto.h`(9.7절), KeyBlob 타입 SecretStream 8·SegmentStream 9(10.4절), Core `Delegate` 보강. Windows x64 Debug 시험 통과(동시성 시험 여러 seed 반복) |
 | 후속 | OS 키 저장소, 서명된 청크 표, 전송 채널 보호, AES-CBC·CCM·KW(요구 시), P-256·RSA 검증 | 각자 설계 문서 |
 
 착수 시점은 기존 작업 순서 안에서 사용자가 정한다(결정 D10). 이 문서는 스펙 반영 전 설계안이다.

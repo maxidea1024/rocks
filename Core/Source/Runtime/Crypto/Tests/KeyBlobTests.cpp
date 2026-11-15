@@ -105,6 +105,24 @@ usize ExportSecret(const KemKeyPair& key, Span<uint8> out) {
     return hazmat::TryExportSeed(key, out.Left(bytes)) ? bytes : 0;
 }
 
+usize ExportSecret(const SecretStreamKey& key, Span<uint8> out) {
+    return hazmat::TryExportKey(key, out.Left(32)) ? 32 : 0;
+}
+
+usize ExportSecret(const SegmentStreamKey& key, Span<uint8> out) {
+    return hazmat::TryExportKey(key, out.Left(SegmentStreamKeyBytes)) ? SegmentStreamKeyBytes : 0;
+}
+
+// wrap할 keyId다. Id()를 품는 키(SegmentStreamKey)는 그 값이어야 한다.
+template <typename TKey>
+KeyId WrapIdFor(const TKey&) {
+    return TryNewKeyId().Value();
+}
+
+KeyId WrapIdFor(const SegmentStreamKey& key) {
+    return key.Id();
+}
+
 template <typename TKey>
 bool SameSecret(const TKey& left, const TKey& right) {
     uint8 a[4096];
@@ -119,13 +137,13 @@ bool SameSecret(const TKey& left, const TKey& right) {
 // key를 두 방식으로 wrap·unwrap해 같은 비밀·ID가 돌아오는지 본다.
 template <typename TKey>
 void CheckRoundTrip(const KdfKey& kek, const TKey& key) {
-    auto keyId = TryNewKeyId();
+    const KeyId keyId = WrapIdFor(key);
     auto kekId = TryNewKeyId();
-    REQUIRE(keyId && kekId);
+    REQUIRE(!keyId.IsNil() && kekId);
     auto expected = TryGetKeyBlobBytes(key, KeyBlobWrapMethod::Key);
     REQUIRE(expected);
     static uint8 blob[KeyBlobMaxBytes];
-    auto written = TryWrapKey(kek, kekId.Value(), key, keyId.Value(), Span<uint8>(blob));
+    auto written = TryWrapKey(kek, kekId.Value(), key, keyId, Span<uint8>(blob));
     REQUIRE(written);
     CHECK(written.Value() == expected.Value());
     const Span<const uint8> stored = Span<const uint8>(blob).Left(written.Value());
@@ -134,7 +152,7 @@ void CheckRoundTrip(const KdfKey& kek, const TKey& key) {
     REQUIRE(info);
     CHECK(info.Value().type == KeyBlobTraits<TKey>::Type);
     CHECK(info.Value().method == KeyBlobWrapMethod::Key);
-    CHECK(info.Value().keyId == keyId.Value());
+    CHECK(info.Value().keyId == keyId);
     CHECK(info.Value().wrapKeyId == kekId.Value());
     CHECK(info.Value().blobBytes == written.Value());
     // 담긴 비밀 길이는 키 타입의 정본 길이다(Ed25519는 sk ‖ pk가 아니라 seed 32 byte).
@@ -144,19 +162,19 @@ void CheckRoundTrip(const KdfKey& kek, const TKey& key) {
 
     auto restored = TryUnwrapKey<TKey>(kek, stored);
     REQUIRE(restored);
-    CHECK(restored.Value().id == keyId.Value());
+    CHECK(restored.Value().id == keyId);
     CHECK(SameSecret(restored.Value().key, key));
 
     auto passwordBytes = TryGetKeyBlobBytes(key, KeyBlobWrapMethod::Password);
     REQUIRE(passwordBytes);
-    auto passwordWritten = TryWrapKeyWithPassword(Text("pass phrase"), SmallCost, key,
-                                                  keyId.Value(), Span<uint8>(blob));
+    auto passwordWritten =
+        TryWrapKeyWithPassword(Text("pass phrase"), SmallCost, key, keyId, Span<uint8>(blob));
     REQUIRE(passwordWritten);
     CHECK(passwordWritten.Value() == passwordBytes.Value());
     auto passwordInfo = TryPeekKeyBlob(Span<const uint8>(blob).Left(passwordWritten.Value()));
     REQUIRE(passwordInfo);
     CHECK(passwordInfo.Value().method == KeyBlobWrapMethod::Password);
-    CHECK(passwordInfo.Value().keyId == keyId.Value());
+    CHECK(passwordInfo.Value().keyId == keyId);
     CHECK(passwordInfo.Value().wrapKeyId.IsNil());
     CHECK(passwordInfo.Value().passwordCost.operations == SmallCost.operations);
     CHECK(passwordInfo.Value().passwordCost.memoryBytes == SmallCost.memoryBytes);
@@ -165,7 +183,7 @@ void CheckRoundTrip(const KdfKey& kek, const TKey& key) {
     auto fromPassword = TryUnwrapKeyWithPassword<TKey>(
         Text("pass phrase"), Span<const uint8>(blob).Left(passwordWritten.Value()));
     REQUIRE(fromPassword);
-    CHECK(fromPassword.Value().id == keyId.Value());
+    CHECK(fromPassword.Value().id == keyId);
     CHECK(SameSecret(fromPassword.Value().key, key));
 }
 
@@ -307,6 +325,39 @@ TEST(CryptoKeyBlobRoundTrips) {
     CheckRoundTrip(kek.Value(), xwing.Value());
     CheckRoundTrip(kek.Value(), mlkem.Value());
 
+    // 스트림 키(타입 8·9, C4). 세그먼트 스트림 키는 blob의 keyId를 Id()로 가진 채 나오고, Id()와
+    // 다른 keyId로는 wrap하지 않는다(쓰기 전 InvalidArgument).
+    auto streamKey = SecretStreamKey::TryGenerate();
+    auto segmentKey = SegmentStreamKey::TryGenerate(TryNewKeyId().Value());
+    REQUIRE(streamKey && segmentKey);
+    CheckRoundTrip(kek.Value(), streamKey.Value());
+    CheckRoundTrip(kek.Value(), segmentKey.Value());
+    {
+        uint8 segmentBlob[KeyBlobMaxBytes];
+        const KeyId kekId = TryNewKeyId().Value();
+        auto wrapped = TryWrapKey(kek.Value(), kekId, segmentKey.Value(), segmentKey.Value().Id(),
+                                  Span<uint8>(segmentBlob));
+        REQUIRE(wrapped);
+        auto unwrapped = TryUnwrapKey<SegmentStreamKey>(
+            kek.Value(), Span<const uint8>(segmentBlob).Left(wrapped.Value()));
+        REQUIRE(unwrapped);
+        CHECK(unwrapped.Value().key.Id() == segmentKey.Value().Id());
+        CHECK(unwrapped.Value().id == segmentKey.Value().Id());
+        CHECK(TryWrapKey(kek.Value(), kekId, segmentKey.Value(), TryNewKeyId().Value(),
+                         Span<uint8>(segmentBlob))
+                  .Error() == ErrorCode::InvalidArgument);
+        CHECK(TryWrapKeyWithPassword(Text("pass phrase"), SmallCost, segmentKey.Value(),
+                                     TryNewKeyId().Value(), Span<uint8>(segmentBlob))
+                  .Error() == ErrorCode::InvalidArgument);
+        // 같은 32 byte라도 타입이 다르면 열리지 않는다(타입 byte는 transcript로 인증된다).
+        CHECK(TryUnwrapKey<SecretStreamKey>(kek.Value(),
+                                            Span<const uint8>(segmentBlob).Left(wrapped.Value()))
+                  .Error() == ErrorCode::AuthenticationFailed);
+        CHECK(
+            TryUnwrapKey<KdfKey>(kek.Value(), Span<const uint8>(segmentBlob).Left(wrapped.Value()))
+                .Error() == ErrorCode::AuthenticationFailed);
+    }
+
     // 푼 서명 키는 같은 서명을 낸다(공개키를 seed에서 다시 계산한다).
     uint8 blob[KeyBlobMaxBytes];
     const KeyId id = TryNewKeyId().Value();
@@ -385,7 +436,10 @@ TEST(CryptoKeyBlobPeekAndHeaderRules) {
     // 모르는 버전·타입·방식, 표에 없는 (타입, 알고리즘)은 Unsupported다.
     CHECK(peekWith(4, 2) == ErrorCode::Unsupported);
     CHECK(peekWith(5, 0) == ErrorCode::Unsupported);
-    CHECK(peekWith(5, 8) == ErrorCode::Unsupported);
+    CHECK(peekWith(5, 10) == ErrorCode::Unsupported);
+    // 타입 8(secretstream)·9(세그먼트 스트림)은 키 32 byte, 알고리즘 0이다(C4에서 덧붙였다).
+    CHECK(peekWith(5, 8) == ErrorCode::None);
+    CHECK(peekWith(5, 9) == ErrorCode::None);
     CHECK(peekWith(6, 1) == ErrorCode::Unsupported);
     CHECK(peekWith(7, 3) == ErrorCode::Unsupported);
     // magic, 길이 범위 밖은 AuthenticationFailed다.
