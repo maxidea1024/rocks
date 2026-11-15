@@ -1077,7 +1077,7 @@ KeyBlob v1(Crypto/KeyBlob.h, 2026-11-15 구현, 설계 교차검증 반영)의 �
 | C2 | AES 경량 계층: x64·arm64 커널, GCM(AES-128/256, 일회성·멀티파트), CTR, 이어서 CMAC | libsodium 대비 차등 시험, Wycheproof·NIST, 성능 gate(결정 D4 확정). 2026-11-15 구현: AES-128-GCM 공개, `Crypto/AesModes.h`(AesKey·AesCtr·GCM 멀티파트), AES-CMAC, Wycheproof aes_cmac, `Programs/CryptoBench`로 D4 확정(6.4절). Windows x64 Debug 시험 통과, arm64는 NDK·macOS 대상 컴파일만 확인(실행은 macOS arm64 CI) |
 | C3 | 스트리밍: 증분 객체, secretstream, 세그먼트 형식(순차·임의 접근·병렬 writer), 형식 명세 문서 | golden·음성 시험 전부, 형식 명세와 golden 일치. 2026-11-15 구현: `Crypto/SecretStream.h`·`Crypto/SegmentStream.h`, [형식 명세](CryptoSegmentFormat.ko.md)(벡터를 독립 Python 구현으로 대조), Wycheproof secretstream, AES 세그먼트 상한 2^40 − 16 B 확정(9.5·11절). Windows x64 Debug 시험 통과 |
 | C4 | KeyRing·공급자, AsyncCrypto | 동기·비동기 결과 byte 일치, 취소·수명 시험. 2026-11-15 구현: `Crypto/KeyRing.h`(KeyRing·KeyLease·KeyBlobProvider, 10.3절), `Crypto/AsyncCrypto.h`(9.7절), KeyBlob 타입 SecretStream 8·SegmentStream 9(10.4절), Core `Delegate` 보강. Windows x64 Debug 시험 통과(동시성 시험 여러 seed 반복) |
-| 후속 | Crypto 단독 후속은 두지 않는다(2026-11-15 사용자 판단: 게임 엔진에는 과하다). 전송 채널 보호는 네트워크 모듈, 서명된 청크 표(패치·DLC 변조 방지)는 에셋·배포 시스템이 필요할 때 기존 primitive(kx·순번 봉인기·Ed25519)로 설계한다. OS 키 저장소·AES-CBC·CCM·KW·P-256·RSA 검증은 구체적 요구가 생길 때만 더한다 | 소비 모듈의 설계 문서 |
+| 후속 | Crypto 단독 후속은 두지 않는다(2026-11-15 사용자 판단: 게임 엔진에는 과하다). 전송 채널 보호는 [SecureChannel](SecureChannel.ko.md)(채택: Crypto에 wire 형식 없는 Noise NK handshake·명시 counter datagram 봉인·열기·서버 키 타입, 패킷 형식·DoS는 NetCore), 서명된 청크 표는 [ContentSigning](ContentSigning.ko.md)(채택: 서명된 쿠킹 매니페스트 봉투, Crypto 추가 없음, AssetRuntime A1과 함께 구현). OS 키 저장소·AES-CBC·CCM·KW·P-256·RSA 검증은 구체적 요구가 생길 때만 더한다 | SecureChannel·ContentSigning |
 
 착수 시점은 기존 작업 순서 안에서 사용자가 정한다(결정 D10). 이 문서는 스펙 반영 전 설계안이다.
 

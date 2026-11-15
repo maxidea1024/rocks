@@ -1,9 +1,9 @@
 # 보안 채널 — 게임 transport 보호 설계안
 
-> 상태: 설계안(2026-11-15, 리뷰 1회 반영). 엔진 계획 17.1절(NetCore가 암호화된 transport adapter를 맡고 자체 암호 알고리즘을 설계하지
+> 상태: 채택(2026-11-15 사용자 결정: SC1 Noise NK, 나머지는 추천안). 리뷰 1회 반영. 엔진 계획 17.1절(NetCore가 암호화된 transport adapter를 맡고 자체 암호 알고리즘을 설계하지
 > 않는다)과 [Crypto](Crypto.ko.md) 13절 후속 판단을 따른다. 표준 Noise Protocol Framework(rev 34)를 libsodium primitive로 구현하는
-> 것은 자체 알고리즘 설계가 아니며, 외부 transport 라이브러리(DTLS·QUIC)를 들이지 않는 근거는 외부 의존 최소화다. 구현은 사용자
-> 확인 뒤에 한다.
+> 것은 자체 알고리즘 설계가 아니며, 외부 transport 라이브러리(DTLS·QUIC)를 들이지 않는 근거는 외부 의존 최소화다. Crypto 부품(3절)을 먼저
+> 구현하고, 4절은 NetCore가 생길 때 구현한다.
 
 ## 1. 범위와 나눔
 
