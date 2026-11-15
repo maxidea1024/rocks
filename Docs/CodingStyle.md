@@ -40,6 +40,14 @@
 - **예외(값 자체가 의미인 상수)**: 해시·CRC·FNV 초기값, 비트 마스크(`x & 0xffffffffu`, 부호 bit 마스크), 파일·wire 형식이나 알고리즘이 정한 값(zstd 사전 ID 범위, Linux 단일 read 한도 등. 이름 있는 형식 상수가 있으면 그것을 쓴다), 외부 API가 문서로 정한 값(`(DWORD)-1`, `D3D12_DEFAULT_SAMPLE_MASK` 같은 SDK 이름을 우선), 시험의 경계 입력(비트 패턴·10진 철자 자체를 검사하는 데이터)은 그대로 둔다. 시험도 한도 인자·"없음" 표지는 위 규칙을 따른다.
 - 정책 검사 `raw-limit-literal`(`PolicyChecks.RawLimitLiterals`)이 런타임·도구 C++ 소스(모듈 `Tests/`·테스트 runner 제외)의 C 한계 매크로, 부호 없는 형식의 -1 변환, 0의 비트 반전을 항상 거부하고, 32·64-bit 모든 bit·부호 있는 최대값과 같은 정수 리터럴은 `&`·`|`·`^`의 피연산자(비트 마스크)가 아니면 거부한다. 그 밖의 값 자체가 의미인 자리는 검사의 허용 목록에 파일과 철자로 등록하고 이유를 적는다.
 
+## 중괄호 목록 추론
+
+형식 추론이 `std::initializer_list`를 요구하는 문법을 쓰지 않는다. 엔진은 STL 헤더를 쓰지 않으므로 Android(NDK) 빌드에는 `<initializer_list>`가 없어 컴파일되지 않는다(Windows에서는 시스템 헤더가 간접으로 들여와 통과한다).
+
+- range-for의 범위를 중괄호 목록으로 쓰지 않는다: `for (bool x : {true, false})` 대신 `const bool cases[] = {true, false}; for (bool x : cases)`.
+- auto 변수를 중괄호 목록으로 복사 초기화하지 않는다: `auto values = {1, 2};` 대신 배열이나 `Array`.
+- 정책 검사 `initializer-list-deduction`(`PolicyChecks.InitializerListDeductions`)이 엔진 소유 C++ 소스 전체(시험 포함)에서 두 형태를 거부한다.
+
 ## 컴파일러 진단
 
 **컴파일러 경고는 허용하지 않고 오류로 처리한다.** 로컬·CI와 모든 빌드 구성의 엔진 소유 코드에 같은 기준을 적용한다. `/W4 /WX` 또는 `-Wall -Wextra -Wpedantic -Werror`를 필수로 사용하며 경고 억제·강등으로 해결하지 않는다. 생성 코드·테스트도 예외가 아니다. 실제 컴파일 실패 하네스와 상세 규약은 [컴파일러 경고 정책](Design/CompilerDiagnostics.ko.md)을 따른다.

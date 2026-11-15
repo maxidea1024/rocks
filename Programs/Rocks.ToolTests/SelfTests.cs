@@ -449,6 +449,44 @@ internal static class SelfTests
                 }
             }
         });
+        suite.Add("Policy.RepositoryInitializerListDeductions",
+            () => NoFailures(PolicyChecks.InitializerListDeductions(options.Root)));
+        suite.Add("Policy.InitializerListDeductionControls", () =>
+        {
+            using TemporaryDirectory temporary = new();
+            const string probe = "Core/Source/Runtime/Core/Tests/ProbeTests.cpp";
+
+            // 지역 배열 범위, 일반 for 문, 같은 줄의 case 라벨 블록, 형식 이름이 붙은 중괄호 임시값, auto 직접 초기화,
+            // 주석·문자열 안의 철자는 허용한다.
+            temporary.Write(probe, string.Join('\n',
+                "const bool cases[] = {true, false}; for (bool x : cases) { }",
+                "for (usize i = 0; i < n; ++i) { }",
+                "for (auto& item : items) { switch (item) { case 1: { break; } } }",
+                "for (const Pair& pair : Span<const Pair>{pairs, 2}) { }",
+                "auto value{1}; auto copy = value; const auto view = Span<const int>{data, 2};",
+                "// for (bool x : {true, false})와 auto x = {1, 2}는 주석이다.",
+                "const char* text = \"for (int v : {1, 2}) auto y = {3};\";",
+                ""));
+            NoFailures(PolicyChecks.InitializerListDeductions(temporary.Root));
+
+            // 중괄호 목록 범위와 auto 복사 초기화는 런타임·도구·시험 소스 어디서든 위반이다.
+            foreach (string source in new[] { "for (bool hasBase : {false, true}) {",
+                "for (ObjectGraphStage* stage : {&first, &second}) {", "for(int v:{1,2}){}",
+                "for (const auto& [key, value] : {Pair{1, 2}}) {", "auto values = {1, 2, 3};",
+                "const auto& list = {a, b};", "auto* pointers = {&a};" })
+            {
+                foreach (string file in new[] { probe, "Core/Source/Runtime/Core/Private/Probe.cpp",
+                    "Engine/Source/Runtime/Probe/Public/Probe.h", "Programs/Sandbox/Private/Probe.cpp" })
+                {
+                    temporary.Write(file, "// first line\n" + source + "\n");
+                    var failures = PolicyChecks.InitializerListDeductions(temporary.Root);
+                    Verify.That(failures.Count == 1 && failures[0].Line == 2 &&
+                        failures[0].ToString().Contains("initializer-list-deduction", StringComparison.Ordinal),
+                        $"initializer_list deduction escaped audit in {file}: {source}");
+                    temporary.Write(file, "// clean\n");
+                }
+            }
+        });
         suite.Add("Policy.RepositoryPythonFreeMainPath", () => NoFailures(PolicyChecks.PythonFreeMainPath(options.Root)));
         suite.Add("Policy.RuntimePositiveAndNegativeControls", () =>
         {
