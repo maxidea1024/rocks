@@ -781,7 +781,7 @@ public:
 - ByteOffset·ByteMask는 두지 않는다(RF 원칙 "raw offset 공개 없음"). 비트 배치는 컴파일러가 처리한다. UE는 0으로 채운 버퍼에 SetBit을 불러 바이트를 찾는다(PropertyBool.cpp:98-117).
 - descriptor 필드 `"bitfield": true`: 의존 모듈이 상속 필드 thunk를 만들 때 base의 접근자를 부르기 위해서다. 런타임 `FieldSchema`는 바뀌지 않는다.
 - wire Bool, 경로·텍스트·차이 저장은 bool과 같다.
-- NATIVE bitfield: 지금은 NATIVE·PROPERTY 모두 bitfield를 거부한다(MC/ClangAstParser.cs:683-686·710-713). NATIVE bitfield는 정수·`bool` 모두 허용하고(강한 참조를 담을 수 없다), 탐침은 쓰지 않는다(정수·bool 형식인지만 AST로 본다). RMC2207은 PROPERTY와 Binds 미러에만 건다(UHT도 UPROPERTY만 본다).
+- NATIVE bitfield: 지금은 NATIVE·PROPERTY 모두 bitfield를 거부한다(MC/ClangAstParser.cs `Visit`의 NATIVE·PROPERTY 멤버 `isBitfield` 검사). NATIVE bitfield는 정수·`bool` 모두 허용하고(강한 참조를 담을 수 없다), 탐침은 쓰지 않는다(정수·bool 형식인지만 AST로 본다). RMC2207은 PROPERTY와 Binds 미러에만 건다(UHT도 UPROPERTY만 본다).
 - Binds 미러 안 bitfield는 RMC2207이다(`VerifyBinds`가 `decltype(Real::m)`·`&Real::m`·구조적 바인딩을 쓴다 — CppEmitter.cs:434-461. Core 값 타입에는 bitfield가 없다).
 
 ## 15. 진단 코드
