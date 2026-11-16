@@ -392,7 +392,7 @@ TEST(DedicatedLane_StartContractAndThreadName) {
     REQUIRE(limited.Start(inlineConfig));
     auto kept = Task::TryCreate(allocator, []() noexcept {});
     REQUIRE(kept);
-    failing.FailOnAttempt(failing.Attempts() + 1);
+    failing.FailOnAttempt(1);
     CHECK(limited.Post(Move(kept.Value())).Error() == ErrorCode::OutOfMemory);
     CHECK(static_cast<bool>(kept.Value()));
     failing.DisableFailure();

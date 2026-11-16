@@ -185,7 +185,7 @@ TEST(ParallelFor_RunsInlineInsideWorkerOrWithoutHelpers) {
     // helper 본문 할당이 실패해도 호출 스레드가 남은 일을 모두 실행한다.
     test::NFailAllocator failing(allocator);
     coverage = Coverage{};
-    failing.FailOnAttempt(failing.Attempts() + 1);
+    failing.FailOnAttempt(1);
     auto degraded = ParallelFor(scheduler, failing, Count, [](usize begin, usize end) noexcept {
         coverage.Visit(begin, end);
     });

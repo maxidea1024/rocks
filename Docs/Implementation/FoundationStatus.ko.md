@@ -36,7 +36,7 @@
 | C01 | Base 정수 타입, Guid POD, checked arithmetic | 전체 ABI·compiler 추상화 |
 | C02 | 정렬 할당, 가상 메모리 예약·commit·decommit·release, 단조 시계, 스레드 식별, Thread/Mutex/CV/Event/Semaphore, 스레드 이름·우선순위·스택 크기(`ThreadOptions`), 최소 fatal sink, 플랫폼 경로 선택과 초기 동기 파일 I/O | 가상 메모리 OS 실패·부분 변경 fault injection, 파일 기능의 OS close 실패 강제 주입과 macOS 실행 검증, RWLock, thread affinity·취소 |
 | C03 | Result/Error, Move/Forward, 범용 Base/TypeTraits, `Optional`, `ScopeExit`, `Tuple`(구조적 바인딩 포함), `Variant`, `Delegate`/`MulticastDelegate`, `UniquePtr`, `SharedPtr`/`WeakPtr`/`SharedRef`/`EnableSharedFromThis`(사용자 deleter `TryAdopt`·aliasing 포함), `UniquePtr<T, Deleter>`, CRC-32·Base64, RFC 3986 URI 분해·상대 참조 해석·정규화·percent encoding | delegate payload·GC 객체 바인딩·스레드 안전 모드·Event, 여러 Variant 동시 Visit, 압축, IDN·IRI |
-| C04 | SystemAllocator·ArenaAllocator·StackAllocator·PoolAllocator·BinnedAllocator·BudgetAllocator·DebugAllocator, 외부 backend와 벤더 함수 바인딩, 소유권 ledger·통계 | frame 수명 관리·자동 일괄 해제 stack·thread cache·page guard, 실제 공급자 제품 통합·플랫폼 검증, 주소 검색 최적화·성능 측정 |
+| C04 | SystemAllocator·ArenaAllocator·StackAllocator·PoolAllocator·BinnedAllocator·BudgetAllocator·DebugAllocator, 프레임 수명 arena `FrameArena`(소멸자 등록·스레드별 writer·블록 재사용), 외부 backend와 벤더 함수 바인딩, 소유권 ledger·통계 | 자동 일괄 해제 stack·thread cache·page guard, 실제 공급자 제품 통합·플랫폼 검증, 주소 검색 최적화·성능 측정 |
 | C05 | Array·Span·BitArray·HashMap·HashSet·OrderedMap·OrderedSet(삽입 순서 보존, 기본 해시는 seed를 넣은 SipHash-2-4 `SeededHash` — 리플렉션 B9f1)의 부분 구현과 STL 호환 반복자(contiguous·random-access·forward, HashMap 구조 변경 후 반복자 사용은 Fatal), 배열 삽입·삭제·크기 조절·추가·검색, 비트 단위 검색·집합 연산 및 실패 시 상태 유지 | queue·inline·sparse/stable-slot, 범용 알고리즘·추가 범위 연산, Map/Set 정책, 내부 콜백 재진입 완전 진단 및 장시간 성능 검증 |
 | C06 | Function, ModuleLease, InlineExecutor와 WorkerScheduler, 의존성·취소·drain, 전용 lane 실행기 `DedicatedLane`(Thread·Inline 모드)·작업 lane 표지 `TaskLane`, 순서 전용 선행·직렬 체인 `SerialTaskChain`·범위 병렬 `ParallelFor`, 고정 용량 로그·프로파일 scope, assert, 음성 대조군 | priority/work-stealing/fiber scheduler, 비동기 로그 writer·viewer |
 | C07 | C# Clang AST 메타 생성·선언 검증, CLASS/PROPERTY·typed 필드 접근·자동 Trace, 상속 metadata IsA, 깊은 복사·revision/module lease, Archive/Record·객체 그래프 직렬화 | 자동 메타 unit 발견·프로젝트 전역 ID 검증, 범용 native 상속 cast, method/enum/container reflection, compile DB 입력 재구성·생성 캐시·외부 에셋 참조 |
@@ -259,7 +259,7 @@ Windows ASan은 LeakSanitizer가 아니며, 소유권 ledger와 종료 검사를
 
 현재 범위는 Core·Object의 실행 경로와 C#/.NET 기반 빌드·메타 도구의 초기 구현이다. 각 경로의 구현과 검증 결과를 전체 Core 또는 엔진 기능의 완료로 확대하지 않는다.
 
-전체 Foundation에는 frame 수명 관리·자동 일괄 해제 stack·thread cache 등 후속 할당기, 가상 메모리 오류 주입 검증, queue 및 기타 후속 컨테이너, 미완성 경로 유틸·파일 I/O와 플랫폼 검증, atomics/RWLock, root owner 진단, 정밀한 빌드 의존 추적과 메타 unit 자동 발견, 장시간 스트레스·대규모 pause 성능 검증 등이 남아 있다. 수학·기본 충돌 라이브러리는 첫 구현이 들어갔으나 frustum·swept shape·접촉 정보와 macOS·ARM64 실행 검증이 남아 있다([수학 구현](Math.ko.md)). 엔진 틱, Component와 상위 에디터·PIE·입력·렌더러 통합은 별도 후속 작업이다. 전체 C00–C26/Foundation Gate는 미완료이며 초기 선형 탐색과 고정 상한을 제품 성능 충족으로 간주하지 않는다.
+전체 Foundation에는 자동 일괄 해제 stack·thread cache 등 후속 할당기, 가상 메모리 오류 주입 검증, queue 및 기타 후속 컨테이너, 미완성 경로 유틸·파일 I/O와 플랫폼 검증, atomics/RWLock, root owner 진단, 정밀한 빌드 의존 추적과 메타 unit 자동 발견, 장시간 스트레스·대규모 pause 성능 검증 등이 남아 있다. 수학·기본 충돌 라이브러리는 첫 구현이 들어갔으나 frustum·swept shape·접촉 정보와 macOS·ARM64 실행 검증이 남아 있다([수학 구현](Math.ko.md)). 엔진 틱, Component와 상위 에디터·PIE·입력·렌더러 통합은 별도 후속 작업이다. 전체 C00–C26/Foundation Gate는 미완료이며 초기 선형 탐색과 고정 상한을 제품 성능 충족으로 간주하지 않는다.
 
 ## 2026-11-11 Windows 심볼릭 링크 재검증
 
