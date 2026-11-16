@@ -15,6 +15,7 @@ internal static partial class SelfTests
         suite.Add("Policy.RepositoryReflectionAnnotations", () => NoFailures(PolicyChecks.ReflectionAnnotations(options.Root)));
         ThirdPartyPolicyTests.Register(suite, options);
         ThirdPartyKindTests.Register(suite);
+        ThirdPartyStoreTests.Register(suite, options);
         suite.Add("Policy.RepositoryPlatform", () => NoFailures(PolicyChecks.PlatformBoundary(options.Root)));
         suite.Add("Policy.RepositoryTargetMacros", () => NoFailures(PolicyChecks.TargetMacros(options.Root)));
         suite.Add("Policy.RepositoryTargetIntrinsics", () => NoFailures(PolicyChecks.TargetIntrinsics(options.Root)));

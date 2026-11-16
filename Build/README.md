@@ -99,6 +99,21 @@ SDK는 타깃에서 도달하는 모듈만 내보낸다. 고정 버전 외부 �
 3. 새로 기록된 진단 지시문을 검토한다. `native` 단계의 `Native.ThirdPartyDirectivesHideNoWarnings`가 지시문을 지운 사본도 경고 0인지 실제 compile DB 인자로 확인한다.
 4. 압축 결과 golden(`Compression_DeterministicOutputGoldens`)이 바뀌면 의도한 변경인지 확인하고 갱신한다.
 
+## 미리 빌드한 바이너리(bootstrap)
+
+DXC·SPIRV-Cross·SPIRV-Tools처럼 Rocks 빌드가 컴파일하지 않는 도구는 manifest `kind: binary`로 `Engine/Source/ThirdParty/<Lib>/`에 둔다([셰이더 시스템](../Docs/Design/ShaderSystem.ko.md) 8절). 저장소에는 공개 헤더·라이선스·`Build/` 오프라인 빌드 스크립트·manifest만 두고, 바이너리는 사용자 단위 내용 주소 저장소(Windows `%LOCALAPPDATA%\Rocks\ThirdParty\<SHA-256>\`, macOS `~/Library/Application Support/Rocks/ThirdParty/<SHA-256>/`)에 명시적인 bootstrap 명령으로만 받는다. 기본 빌드·시험과 Foundation CI는 bootstrap 없이 돈다(헤더는 저장소에 있다). 워커가 도구를 여는 실행·시험만 bootstrap이 필요하다.
+
+```text
+dotnet msbuild Rocks.proj /t:ThirdPartyBootstrap
+dotnet out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks.Build.Cli.dll bootstrap --root . [--library <Lib>] [--mirror <dir>] [--offline true] [--store <dir>] [--windows-sdk <dir>]
+```
+
+- 받은 archive는 저장소 아래 임시 디렉터리에서 archive·파일 SHA-256과 크기를 검사한 뒤 최종 디렉터리로 옮긴다. 검사에 실패하거나 끊기면 최종 디렉터리는 생기지 않고, 다음 실행이 남은 임시 디렉터리를 지우고 다시 받는다. macOS는 검사 뒤 quarantine 속성을 지운다. 다른 bootstrap이 저장소를 쓰고 있으면 기다리지 않고 실패한다.
+- 이미 있으면 검사만 하고 받지 않는다. `--offline true`는 받지 않고 저장소만 검사한다. 저장소 파일이 manifest와 다르면 고치지 않고 오류다(그 디렉터리를 지우고 다시 실행한다).
+- `--mirror`: asset 이름(`<Lib>-<버전>-r<revision>-<호스트>.tar.gz`)으로 archive를 찾는 디렉터리. 없으면 manifest URL(저장소 GitHub Releases)에서 받고, 인증 없이 받을 수 없으면(비공개 저장소) `gh release download`가 사용자의 `gh` 로그인으로 받는다.
+- FXC(`D3DCompiler`)는 버전을 고정한 Windows SDK의 `Redist/D3D/x64/d3dcompiler_47.dll`을 SHA-256 검사 뒤 저장소로 복사한다. Apple Metal 도구(`MetalToolchain`, `status: system`)는 받지 않는다(최소 버전만 고정).
+- 오프라인 도구 빌드: `pwsh Engine/Source/ThirdParty/<Lib>/Build/Build.ps1`(Windows x64), `sh Engine/Source/ThirdParty/<Lib>/Build/Build.sh`(macOS arm64)가 manifest `build`의 고정 원본을 받아 SHA-256을 검사하고 CMake·Ninja로 빌드해 archive와 `<asset>.host.json`(manifest `hosts` 항목)을 만든다. CMake·Ninja·Python 3·Visual Studio C++ 도구(macOS는 Xcode)가 필요하다. 수동 실행 workflow `.github/workflows/third-party-tools.yml`이 두 호스트에서 빌드하고, 입력 `publish`가 true면 Release에 올린다.
+
 ## 메타 선언
 
 `ROCKS_CLASS()` 또는 `ROCKS_CLASS(Abstract)`를 `class`/`struct` 바로 앞에 두고, 리플렉션할 필드에 `ROCKS_PROPERTY(...)`를 붙인다. 선언에 ID나 스키마 버전 숫자를 넣지 않는다. 비공개 필드에는 `ROCKS_GENERATED_BODY()`가 필요하다. 타입 마커와 클래스 사이에는 공백·주석만 허용한다. 조건부 선언은 마커와 클래스를 같은 조건 블록에 둔다. 미지원 타입·상속·선언 위치·지정자와 모호한 선언은 오류다.
