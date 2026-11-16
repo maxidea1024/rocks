@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Object/StructFieldCodec.h>
 
 // 필드 codec 사슬의 넷째 조각으로 배열 필드 codec이다(Docs/Design/ReflectionFoundations.ko.md
@@ -543,7 +544,7 @@ Result<void> DecodeStructArray(ConstructionContext* construction, ObjectHandle o
             Element* value = nullptr;
             if (target) {
                 Result<Element*> added = Result<Element*>::Failure(ErrorCode::Unsupported);
-                if constexpr (__is_constructible(Element, Allocator&)) {
+                if constexpr (IsConstructibleV<Element, Allocator&>) {
                     added = target->TryEmplaceBack(target->GetAllocator());
                 } else {
                     added = target->TryEmplaceBack();

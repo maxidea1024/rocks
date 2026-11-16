@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Core/Hash.h>
 #include <Meta/GeneratedType.h>
 #include <Object/Object.h>
@@ -77,8 +78,7 @@ public:
     // 한다(GeneratedType<T>::Id).
     template <class T>
     static ClassRef Of() noexcept {
-        static_assert(__is_base_of(Base, T),
-                      "ClassRef<Base>::Of<T> requires T to derive from Base");
+        static_assert(IsBaseOfV<Base, T>, "ClassRef<Base>::Of<T> requires T to derive from Base");
         return ClassRef(TypeIdOf<T>());
     }
 
@@ -100,7 +100,7 @@ public:
     // 반환: 그 클래스의 lease. 실패 — null InvalidArgument, 미등록 NotFound, 클래스가 아니거나
     // Base의 파생이 아님 InvalidArgument, 종료 ShuttingDown, lease 포화 Overflow.
     Result<TypeLease> Resolve(TypeRegistry& types) const noexcept {
-        static_assert(__is_base_of(Object, Base), "ClassRef<Base> requires a reflected class Base");
+        static_assert(IsBaseOfV<Object, Base>, "ClassRef<Base> requires a reflected class Base");
         if (IsNull()) {
             return Result<TypeLease>::Failure(ErrorCode::InvalidArgument);
         }

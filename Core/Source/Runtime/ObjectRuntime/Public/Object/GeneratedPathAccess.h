@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Object/GeneratedFieldAccess.h>
 #include <Object/PathCursor.h>
 #include <Platform/Fatal.h>
@@ -697,8 +698,8 @@ Result<void> PathMember(PathCursor& cursor, Member& member) noexcept {
 //   }
 template <class Owner, ValueKind Target, class MemberOwner, class Member>
 Result<void> PathClassField(PathCursor& cursor, Member MemberOwner::* member) noexcept {
-    static_assert(__is_base_of(MemberOwner, Owner));
-    static_assert(__is_base_of(Object, Owner));
+    static_assert(IsBaseOfV<MemberOwner, Owner>);
+    static_assert(IsBaseOfV<Object, Owner>);
     auto owner = cursor.Owner(NativeTypeKey<Owner>());
     if (!owner) {
         return Result<void>::Failure(owner.Error());

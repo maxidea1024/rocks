@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Base/Checked.h>
 #include <Core/Algorithms.h>
 #include <Core/Containers/ContainerDetail.h>
@@ -129,7 +130,7 @@ public:
     // 반환 pointer의 수명은 해당 원소와 같으며 후속 재할당·Clear·파괴로 무효화된다.
     template <typename... Args>
     Result<T*> TryEmplaceBack(Args&&... args) noexcept {
-        static_assert(__is_nothrow_constructible(T, Args && ...));
+        static_assert(IsNothrowConstructibleV<T, Args&&...>);
         if (size_ == MaxSize / sizeof(T)) {
             return Result<T*>::Failure(ErrorCode::Overflow);
         }
@@ -163,7 +164,7 @@ public:
     // 재할당이 없어도 원소 이동으로 무효다.
     template <typename... Args>
     Result<T*> TryEmplaceAt(usize index, Args&&... args) noexcept {
-        static_assert(__is_nothrow_constructible(T, Args && ...));
+        static_assert(IsNothrowConstructibleV<T, Args&&...>);
         if (index > size_) {
             return Result<T*>::Failure(ErrorCode::InvalidArgument);
         }
@@ -230,7 +231,7 @@ public:
     // 범위의 원소를 복사해 끝에 붙인다. 자기 배열 전체/부분 view도 허용한다.
     // 성장 실패 시 원본·size·capacity·주소를 보존한다. 원소 복사 생성은 noexcept여야 한다.
     Result<void> TryAppend(Span<const T> values) noexcept {
-        static_assert(__is_nothrow_constructible(T, const T&));
+        static_assert(IsNothrowConstructibleV<T, const T&>);
         if (values.Size() == 0) {
             return Result<void>::Success();
         }
@@ -322,14 +323,14 @@ public:
     // 원소 수를 변경한다. 증가한 원소는 기본 생성하며 T의 기본 생성은 noexcept여야 한다.
     // 축소는 뒤에서부터 소멸하고 저장소를 유지한다. 확장 실패는 기존 원소와 주소를 보존한다.
     Result<void> TryResize(usize newSize) noexcept {
-        static_assert(__is_nothrow_constructible(T));
+        static_assert(IsNothrowConstructibleV<T>);
         if (newSize > MaxSize / sizeof(T)) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }
 
         if (newSize <= size_) {
             // trivial 소멸 타입은 길이만 줄인다(Debug 빌드에서도 O(1)).
-            if constexpr (__is_trivially_destructible(T)) {
+            if constexpr (IsTriviallyDestructibleV<T>) {
                 size_ = newSize;
             } else {
                 while (size_ > newSize) {
@@ -382,7 +383,7 @@ public:
     //   }
     // 오류: 크기 overflow는 Overflow, 확장 할당 실패는 allocator 오류(OutOfMemory 등).
     Result<Span<T>> TryAppendUninitialized(usize count) noexcept {
-        static_assert(__is_trivially_constructible(T) && __is_trivially_destructible(T),
+        static_assert(IsTriviallyConstructibleV<T> && IsTriviallyDestructibleV<T>,
                       "TryAppendUninitialized requires a trivial element type");
         if (count > MaxSize / sizeof(T) - size_) {
             return Result<Span<T>>::Failure(ErrorCode::Overflow);
@@ -597,7 +598,7 @@ public:
     // 원소를 역순 소멸시키고 capacity는 유지한다. 원소 참조는 무효지만 다음 추가에 buffer를
     // 재사용한다.
     void Clear() noexcept {
-        if constexpr (!__is_trivially_destructible(T)) {
+        if constexpr (!IsTriviallyDestructibleV<T>) {
             for (usize index = size_; index != 0; --index) {
                 DestroyAt(data_ + index - 1);
             }

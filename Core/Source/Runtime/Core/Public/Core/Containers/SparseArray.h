@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Base/Checked.h>
 #include <Core/Containers/BitArray.h>
 #include <Core/Containers/ContainerDetail.h>
@@ -135,7 +136,7 @@ public:
 
     template <typename... Args>
     Result<usize> TryEmplace(Args&&... args) noexcept {
-        static_assert(__is_nothrow_constructible(T, Args && ...));
+        static_assert(IsNothrowConstructibleV<T, Args&&...>);
         if (firstFree_ != NoIndex) {
             const usize index = firstFree_;
             Unlink(index);
@@ -151,7 +152,7 @@ public:
     // 시작 hint는 없다).
     template <typename... Args>
     Result<usize> TryEmplaceAtLowestFreeIndex(Args&&... args) noexcept {
-        static_assert(__is_nothrow_constructible(T, Args && ...));
+        static_assert(IsNothrowConstructibleV<T, Args&&...>);
         if (freeCount_ == 0) {
             return EmplaceBeyond(maxIndex_, Forward<Args>(args)...);
         }
@@ -167,7 +168,7 @@ public:
     // 있으므로 순서에 의존하지 않는다). 실패하면 상태를 보존한다.
     template <typename... Args>
     Result<usize> TryEmplaceAt(usize index, Args&&... args) noexcept {
-        static_assert(__is_nothrow_constructible(T, Args && ...));
+        static_assert(IsNothrowConstructibleV<T, Args&&...>);
         if (index >= maxIndex_) {
             return EmplaceBeyond(index, Forward<Args>(args)...);
         }

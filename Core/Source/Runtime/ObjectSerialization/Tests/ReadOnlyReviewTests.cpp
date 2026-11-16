@@ -1,3 +1,4 @@
+#include <Base/TypeTraits.h>
 #include <ReflectionTestFixtures/ReflectionFixture.generated.h>
 #include <TestSupport/Test.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -238,12 +239,12 @@ TEST(FieldWriteOperationAcceptsCapturelessNoexceptLambdaAggregate) {
             }
         };
 
-        static_assert(!__is_constructible(FieldWriteOperation, MayThrowConversion));
-        static_assert(__is_constructible(FieldWriteOperation, decltype(nullptr)));
-        static_assert(__is_constructible(FieldWriteOperation, FieldWriteOperation::Callback));
-        static_assert(__is_constructible(FieldWriteOperation, decltype(valid)));
-        static_assert(!__is_constructible(FieldWriteOperation, decltype(throwing)));
-        static_assert(!__is_constructible(FieldWriteOperation, decltype(closure)));
+        static_assert(!IsConstructibleV<FieldWriteOperation, MayThrowConversion>);
+        static_assert(IsConstructibleV<FieldWriteOperation, decltype(nullptr)>);
+        static_assert(IsConstructibleV<FieldWriteOperation, FieldWriteOperation::Callback>);
+        static_assert(IsConstructibleV<FieldWriteOperation, decltype(valid)>);
+        static_assert(!IsConstructibleV<FieldWriteOperation, decltype(throwing)>);
+        static_assert(!IsConstructibleV<FieldWriteOperation, decltype(closure)>);
         // 명시적인 unary + 없이 기존의 수동 함수표 aggregate 선언을 사용할 수 있어야 한다.
         FieldWriteOperation nullWrite(nullptr);
         CHECK(!nullWrite);

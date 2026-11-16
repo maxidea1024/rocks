@@ -1,3 +1,4 @@
+#include <Base/TypeTraits.h>
 #include <TestSupport/Test.h>
 #include <Core/Text/StringView.h>
 #include <Core/Tuple.h>
@@ -92,21 +93,21 @@ static_assert(IsSameV<TupleElementT<1, Tuple<int, float&, char>>, float&>);
 static_assert(IsSameV<decltype(MakeTuple(1, 2.0f)), Tuple<int, float>>);
 static_assert(IsSameV<decltype(MakeTuple("text")), Tuple<const char*>>);
 static_assert(IsSameV<decltype(MakeTuple(static_cast<const int&>(1))), Tuple<int>>);
-static_assert(__is_convertible_to(int, Tuple<long>));
-static_assert(!__is_convertible_to(int, Tuple<ExplicitOnly>));
-static_assert(__is_constructible(Tuple<ExplicitOnly>, int));
-static_assert(!__is_constructible(Tuple<int&>));          // 참조 원소는 기본 생성 없음
-static_assert(!__is_constructible(Tuple<int, int>, int)); // 개수 불일치
-static_assert(!__is_assignable(Tuple<MoveOnly>&, const Tuple<MoveOnly>&));
+static_assert(IsConvertibleV<int, Tuple<long>>);
+static_assert(!IsConvertibleV<int, Tuple<ExplicitOnly>>);
+static_assert(IsConstructibleV<Tuple<ExplicitOnly>, int>);
+static_assert(!IsConstructibleV<Tuple<int&>>);          // 참조 원소는 기본 생성 없음
+static_assert(!IsConstructibleV<Tuple<int, int>, int>); // 개수 불일치
+static_assert(!IsAssignableV<Tuple<MoveOnly>&, const Tuple<MoveOnly>&>);
 // 원소별 변환 생성: 모든 원소가 암묵 변환되면 암묵, 하나라도 명시 생성이면 명시다.
-static_assert(__is_convertible_to(Tuple<int, float>, Tuple<long, double>));
-static_assert(!__is_convertible_to(Tuple<int>, Tuple<ExplicitOnly>));
-static_assert(__is_constructible(Tuple<ExplicitOnly>, Tuple<int>));
-static_assert(!__is_constructible(Tuple<int, int>, Tuple<int>)); // 개수 불일치
-static_assert(!__is_constructible(Tuple<MoveOnly>, const Tuple<MoveOnly>&));
-static_assert(__is_constructible(Tuple<const int&>, Tuple<int&>));
-static_assert(!__is_constructible(Tuple<long&>, Tuple<int&>)); // 다른 타입 참조로는 묶지 않는다
-static_assert(__is_assignable(Tuple<MoveOnly>&, Tuple<MoveOnly>&&));
+static_assert(IsConvertibleV<Tuple<int, float>, Tuple<long, double>>);
+static_assert(!IsConvertibleV<Tuple<int>, Tuple<ExplicitOnly>>);
+static_assert(IsConstructibleV<Tuple<ExplicitOnly>, Tuple<int>>);
+static_assert(!IsConstructibleV<Tuple<int, int>, Tuple<int>>); // 개수 불일치
+static_assert(!IsConstructibleV<Tuple<MoveOnly>, const Tuple<MoveOnly>&>);
+static_assert(IsConstructibleV<Tuple<const int&>, Tuple<int&>>);
+static_assert(!IsConstructibleV<Tuple<long&>, Tuple<int&>>); // 다른 타입 참조로는 묶지 않는다
+static_assert(IsAssignableV<Tuple<MoveOnly>&, Tuple<MoveOnly>&&>);
 static_assert(Get<1>(MakeTuple(1, 2, 3)) == 2);
 static_assert(MakeTuple(1, 2) == MakeTuple(1, 2));
 static_assert(Tuple<int, double>() == MakeTuple(0, 0.0));

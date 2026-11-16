@@ -1,3 +1,4 @@
+#include <Base/TypeTraits.h>
 #include <CompressionTraining/CompressionDictionaryTraining.h>
 
 #include <Core/Assert.h>
@@ -14,7 +15,7 @@ namespace rocks {
 namespace {
 
 // ZDICT는 표본 길이를 size_t 배열로 받는다. usize가 같은 타입이라 복사 없이 넘긴다.
-static_assert(__is_same(usize, size_t), "usize must be size_t");
+static_assert(IsSameV<usize, size_t>, "usize must be size_t");
 
 // fastCover 고정 매개변수다(공개하지 않는다): 빈도 표 2^20, 가속 1(가장 정확).
 constexpr unsigned FrequencyLog = 20;

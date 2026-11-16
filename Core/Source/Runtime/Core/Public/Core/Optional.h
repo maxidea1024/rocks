@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Core/Move.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
@@ -36,7 +37,7 @@ public:
     }
 
     Optional(const T& value) noexcept
-        requires(__is_nothrow_constructible(T, const T&))
+        requires(IsNothrowConstructibleV<T, const T&>)
     {
         ConstructAt<T>(storage_, value);
         hasValue_ = true;
@@ -48,7 +49,7 @@ public:
     }
 
     Optional(const Optional& other) noexcept
-        requires(__is_nothrow_constructible(T, const T&))
+        requires(IsNothrowConstructibleV<T, const T&>)
     {
         if (other.hasValue_) {
             ConstructAt<T>(storage_, other.Get());
@@ -68,7 +69,7 @@ public:
     }
 
     Optional& operator=(const Optional& other) noexcept
-        requires(__is_nothrow_constructible(T, const T&))
+        requires(IsNothrowConstructibleV<T, const T&>)
     {
         if (this != &other) {
             if (other.hasValue_) {
@@ -143,7 +144,7 @@ public:
 
     // 값의 복사본 또는 fallback을 반환한다(UE Get(DefaultValue)). T는 noexcept 복사가 필요하다.
     T ValueOr(const T& fallback) const noexcept
-        requires(__is_nothrow_constructible(T, const T&))
+        requires(IsNothrowConstructibleV<T, const T&>)
     {
         return hasValue_ ? Get() : fallback;
     }
@@ -159,7 +160,7 @@ public:
     // 새 값을 먼저 만든 뒤 기존 값을 파괴하고 이동한다.
     template <typename... Args>
     T& Emplace(Args&&... args) noexcept {
-        static_assert(__is_nothrow_constructible(T, Args && ...),
+        static_assert(IsNothrowConstructibleV<T, Args&&...>,
                       "Optional::Emplace requires a noexcept constructor");
         T replacement(Forward<Args>(args)...);
         Reset();

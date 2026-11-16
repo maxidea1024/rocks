@@ -79,7 +79,7 @@ internal static class CompilerDriver
         arguments.Add("-");
         // 모듈의 리플렉션 헤더 전부를 한 번역 단위로 읽는다(같은 모듈 안 헤더 사이의 base·참조가 풀린다).
         string unit = string.Concat(options.Inputs.Select(input => $"#include \"{input.Path.Replace('\\', '/')}\"\n"));
-        ProcessResult compiled = await ProcessRunner.RunAsync(new(compiler, arguments, root, environment, unit, TimeSpan.FromMinutes(2)));
+        ProcessResult compiled = await ProcessRunner.RunAsync(new(compiler, arguments, root, environment, ValidateGeneratedCode(unit), TimeSpan.FromMinutes(2)));
         if (compiled.ExitCode != 0 || compiled.StdErr.Contains("warning:", StringComparison.OrdinalIgnoreCase))
         {
             if (compiled.ExitCode != 0 && ArrayElementFailure(compiled, options.Inputs, root) is MetadataException converted)
@@ -121,7 +121,7 @@ internal static class CompilerDriver
             bindsArguments.AddRange(clangCl ? ["/clang:-Xclang", "/clang:-ast-dump-filter=rocksBinds_"] : ["-Xclang", "-ast-dump-filter=rocksBinds_"]);
             bindsArguments.Add("-");
             await ResolveBindsAsync(declared, options.Module, options.Inputs.Count,
-                extra => ProcessRunner.RunAsync(new(compiler, bindsArguments, root, environment, unit + extra, TimeSpan.FromMinutes(2))));
+                extra => ProcessRunner.RunAsync(new(compiler, bindsArguments, root, environment, ValidateGeneratedCode(unit + extra), TimeSpan.FromMinutes(2))));
             schema = SchemaValidator.Validate(declared, imported);
         }
         catch (Exception error) when (error is JsonException or KeyNotFoundException or InvalidOperationException or FormatException)
@@ -180,7 +180,7 @@ internal static class CompilerDriver
         probeArguments.AddRange(clangCl ? ["/w", "/clang:-Xclang", "/clang:-ast-dump-filter=rocksProbe_"] : ["-w", "-Xclang", "-ast-dump-filter=rocksProbe_"]);
         probeArguments.Add("-");
         await NativeMemberProbe.VerifyAsync(schema.Ordered, options.Inputs.Count, () => ModulePublicHeaders(options),
-            extra => ProcessRunner.RunAsync(new(compiler, probeArguments, root, environment, unit + extra, TimeSpan.FromMinutes(2))));
+            extra => ProcessRunner.RunAsync(new(compiler, probeArguments, root, environment, ValidateGeneratedCode(unit + extra), TimeSpan.FromMinutes(2))));
 
         // 생성물: 입력 헤더마다 하나, public·private 집계 헤더, descriptor.
         List<(string Path, string Text, bool Private)> outputs = [];
@@ -210,6 +210,7 @@ internal static class CompilerDriver
         List<(string Path, byte[] Bytes, bool Private)> formattedOutputs = [];
         foreach ((string path, string text, bool isPrivate) in outputs)
         {
+            ValidateGeneratedCode(text);
             ProcessResult formatted = await ProcessRunner.RunAsync(new(formatter,
                 ["--style=file:" + Path.Combine(AppContext.BaseDirectory, ".clang-format"), "--assume-filename=Metadata.h"], root, environment, text, TimeSpan.FromSeconds(30)));
             if (formatted.ExitCode != 0 || formatted.StdErr.Contains("warning:", StringComparison.OrdinalIgnoreCase))
@@ -593,13 +594,14 @@ internal static class CompilerDriver
         }
 
         // 철자는 번역 단위 끝 전역 범위에서 해석하므로 ::로 시작하지 않으면 붙인다(전역 기준 완전 한정 이름 — 같은 이름의
-        // 전역 타입이나 using namespace가 다른 타입을 고르지 않게). 미러 N의 별칭은 합성 단위의 baseLines + 2N + 1번째 줄이다.
-        StringBuilder aliases = new();
+        // 전역 타입이나 using namespace가 다른 타입을 고르지 않게). 명시 include 다음부터 각 미러가 두 줄을 쓴다.
+        StringBuilder aliases = new("#include <Base/TypeTraits.h>\n");
+        int aliasBaseLines = baseLines + 1;
         for (int index = 0; index < mirrors.Length; ++index)
         {
             string spelling = mirrors[index].BindsSpelling.StartsWith("::", StringComparison.Ordinal) ? mirrors[index].BindsSpelling : "::" + mirrors[index].BindsSpelling;
             aliases.Append($"using rocksBinds_{index} = {spelling};\n");
-            aliases.Append($"static_assert(sizeof(rocksBinds_{index}) > 0 && __is_class(rocksBinds_{index}), \"Binds target must be a complete class type\");\n");
+            aliases.Append($"static_assert(sizeof(rocksBinds_{index}) > 0 && ::rocks::IsClassV<rocksBinds_{index}>, \"Binds target must be a complete class type\");\n");
         }
 
         const string hint = "Spell the real type fully qualified from the global scope as it is declared (e.g. rocks::Vector3<float> or an alias such as rocks::Vec3) and include its header before the mirror declaration.";
@@ -609,7 +611,7 @@ internal static class CompilerDriver
             // 진단의 <stdin> 줄로 실패한 미러를 찾는다(없으면 진단에 나온 첫 별칭, 그것도 없으면 첫 미러).
             Match line = Regex.Match(result.StdErr, @"<stdin>[:(](\d+)", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
             Match named = Regex.Match(result.StdErr, @"rocksBinds_(\d+)", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
-            int failed = line.Success && int.TryParse(line.Groups[1].Value, out int number) && number > baseLines ? (number - baseLines - 1) / 2
+            int failed = line.Success && int.TryParse(line.Groups[1].Value, out int number) && number > aliasBaseLines ? (number - aliasBaseLines - 1) / 2
                 : named.Success && int.TryParse(named.Groups[1].Value, out int alias) ? alias : 0;
             ClassModel mirror = mirrors[failed >= 0 && failed < mirrors.Length ? failed : 0];
             throw new MetadataException($"{mirror.Name}: Binds = \"{mirror.BindsSpelling}\" does not name a complete class type visible from the reflected headers:\n" + result.StdErr,
@@ -873,6 +875,19 @@ internal static class CompilerDriver
                     "RMC1000", "Pass the SDK selected by xcrun --show-sdk-path or change the selected Xcode SDK.");
             }
         }
+    }
+
+    // 조립된 결과에서 검사하므로 C# 문자열을 나눠 내장 이름을 만들어도 빠져나가지 않는다.
+    // 입력 파일의 내용은 여기서 펼치지 않으며 생성기 자신이 만든 C++만 검사한다.
+    private static string ValidateGeneratedCode(string source)
+    {
+        if (CompilerTypeTraits.FirstGeneratedBuiltinUse(source) is string intrinsic)
+        {
+            throw new MetadataException($"MetaCompiler emitted a compiler intrinsic directly: {intrinsic}", "RMC3000",
+                "Use Base/TypeTraits.h or the appropriate public Rocks helper in the generator.");
+        }
+
+        return source;
     }
 
     private static MetadataException InvalidArgument(string argument) => new(

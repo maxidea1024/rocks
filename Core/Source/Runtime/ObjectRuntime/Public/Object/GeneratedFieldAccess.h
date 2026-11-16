@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Meta/GeneratedType.h>
 #include <Object/AssetId.h>
 #include <Object/ClassRef.h>
@@ -64,7 +65,7 @@ struct SoftReferenceField<SoftObjectRef<T>> {
 // 리플렉션 enum(ROCKS_ENUM)이다: 생성 헤더가 GeneratedType<E>::Id·IsDeclared를 내는 enum class다.
 template <class T>
 struct ReflectedEnumField {
-    static constexpr bool Supported = __is_enum(T) && requires {
+    static constexpr bool Supported = IsEnumV<T> && requires {
         GeneratedType<T>::Id();
         GeneratedType<T>::IsDeclared(int64{});
     };
@@ -74,7 +75,7 @@ struct ReflectedEnumField {
 // 비enum 클래스다(Docs/Design/ReflectionFoundations.ko.md 4.6절).
 template <class T>
 struct ReflectedStructField {
-    static constexpr bool Supported = !__is_enum(T) && __is_class(T) && requires {
+    static constexpr bool Supported = !IsEnumV<T> && IsClassV<T> && requires {
         GeneratedType<T>::Id();
         GeneratedType<T>::ContainsStrongReference;
     };
@@ -157,11 +158,11 @@ struct MapField<OrderedSet<T>> {
 //   Point point = detail::MakeAllocatedValue<Point>(registry.ObjectAllocator());
 template <class E>
 E MakeAllocatedValue(Allocator& allocator) noexcept {
-    if constexpr (__is_constructible(E, Allocator&)) {
-        static_assert(__is_nothrow_constructible(E, Allocator&));
+    if constexpr (IsConstructibleV<E, Allocator&>) {
+        static_assert(IsNothrowConstructibleV<E, Allocator&>);
         return E(allocator);
     } else {
-        static_assert(__is_nothrow_constructible(E));
+        static_assert(IsNothrowConstructibleV<E>);
         return E();
     }
 }
@@ -267,10 +268,9 @@ constexpr ValueKind FieldAccessKind() noexcept {
 // FieldValueKind<T>()).
 template <ValueKind Target, class T>
 struct TargetValueCheck {
-    static constexpr bool Valid = Target == ValueKind::Enum ? __is_enum(T)
+    static constexpr bool Valid = Target == ValueKind::Enum ? IsEnumV<T>
                                   : Target == ValueKind::Struct
-                                      ? __is_class(T) &&
-                                            ScalarValueKind<T>() == ValueKind::Opaque &&
+                                      ? IsClassV<T> && ScalarValueKind<T>() == ValueKind::Opaque &&
                                             !ArrayField<T>::Supported &&
                                             !OptionalField<T>::Supported && !MapField<T>::Supported
                                       : Target != ValueKind::Opaque && Target != ValueKind::Array &&
@@ -503,7 +503,7 @@ template <class Owner, class MemberOwner, class T, class Getter>
 Result<void> WriteOptionalValue(Optional<T> MemberOwner::* member, const FieldValue& value,
                                 Getter&& get, Allocator& allocator,
                                 EncodePin* pin = nullptr) noexcept {
-    static_assert(__is_base_of(MemberOwner, Owner));
+    static_assert(IsBaseOfV<MemberOwner, Owner>);
     constexpr ValueKind kind = FieldValueKind<T>();
     static_assert(kind != ValueKind::Struct, "Optional struct values are not FieldValue");
     auto target = get();
@@ -577,7 +577,7 @@ template <class Owner, class MemberOwner, class Member>
 Result<void> ReadGeneratedField(ObjectRegistry& registry, const ObjectAccessContext& access,
                                 ObjectHandle handle, Member MemberOwner::* member,
                                 FieldValue& output) noexcept {
-    static_assert(__is_base_of(MemberOwner, Owner));
+    static_assert(IsBaseOfV<MemberOwner, Owner>);
     auto borrowed = registry.Resolve<Owner>(access, handle);
     if (!borrowed) {
         return Result<void>::Failure(borrowed.Error());
@@ -618,7 +618,7 @@ Result<void> ReadGeneratedField(ObjectRegistry& registry, const ObjectAccessCont
 template <class Owner, class MemberOwner, class Member, class Getter>
 Result<void> WriteGeneratedValue(Member MemberOwner::* member, const FieldValue& value,
                                  Getter&& get, EncodePin* pin = nullptr) noexcept {
-    static_assert(__is_base_of(MemberOwner, Owner));
+    static_assert(IsBaseOfV<MemberOwner, Owner>);
     static_assert(FieldValueKind<Member>() != ValueKind::Opaque);
     auto target = get();
     if (!target) {

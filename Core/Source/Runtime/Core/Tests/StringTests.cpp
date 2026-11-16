@@ -1,3 +1,4 @@
+#include <Base/TypeTraits.h>
 #include <TestSupport/Test.h>
 #include <TestSupport/NFailAllocator.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -49,7 +50,7 @@ Result<void> RunStringLifecycle(Allocator& allocator) noexcept {
 } // namespace
 
 TEST(StringEmptyAndNullViewsNeedNoAllocation) {
-    static_assert(!__is_constructible(String, const String&));
+    static_assert(!IsConstructibleV<String, const String&>);
     static_assert(IsNothrowMoveConstructibleV<String>);
     constexpr StringView literal("rocks");
     static_assert(literal.ByteCount() == 5);

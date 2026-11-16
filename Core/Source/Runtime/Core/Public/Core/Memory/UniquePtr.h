@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Move.h>
 #include <Platform/Fatal.h>
@@ -56,11 +57,11 @@ class UniquePtr {
 
 public:
     constexpr UniquePtr() noexcept
-        requires(__is_nothrow_constructible(Deleter))
+        requires(IsNothrowConstructibleV<Deleter>)
     = default;
 
     constexpr UniquePtr(decltype(nullptr)) noexcept
-        requires(__is_nothrow_constructible(Deleter))
+        requires(IsNothrowConstructibleV<Deleter>)
     {
     }
 
@@ -68,7 +69,7 @@ public:
     UniquePtr(T* object, Deleter deleter) noexcept
         requires(!UsesAllocator)
         : object_(object), deleter_(Move(deleter)) {
-        if constexpr (__is_pointer(Deleter)) {
+        if constexpr (IsPointerV<Deleter>) {
             if (object_ != nullptr && deleter_ == nullptr) {
                 platform::Fatal("UniquePtr adopted an object with a null deleter");
             }
@@ -80,7 +81,7 @@ public:
     template <typename... Args>
         requires(UsesAllocator)
     static Result<UniquePtr> TryMake(Allocator& allocator, Args&&... args) noexcept {
-        static_assert(__is_nothrow_constructible(T, Args && ...),
+        static_assert(IsNothrowConstructibleV<T, Args&&...>,
                       "UniquePtr::TryMake requires a noexcept constructor");
         auto storage = allocator.Allocate(sizeof(T), alignof(T));
         if (!storage) {
@@ -99,8 +100,8 @@ public:
     }
 
     template <typename U>
-        requires(UsesAllocator && !IsSameV<U, T> && __is_convertible_to(U*, T*) &&
-                 __has_virtual_destructor(T))
+        requires(UsesAllocator && !IsSameV<U, T> && IsConvertibleV<U*, T*> &&
+                 HasVirtualDestructorV<T>)
     UniquePtr(UniquePtr<U, AllocatorDeleter>&& other) noexcept
         : object_(other.object_), deleter_(other.deleter_) {
         other.object_ = nullptr;

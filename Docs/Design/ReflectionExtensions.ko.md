@@ -253,7 +253,7 @@ struct PropertyPath { Span<const PathStep> steps; Span<const PathKey> keys{}; };
 
 - wire는 기존 I64(4)다(위 항목). 단일 값과 ValueArray 원소 tag 모두 I64이고 I64는 지금도 원소 tag이므로, B9a2는 B9a3(wire 14–18)에 기대지 않고 완결된다. 범위 검사는 `detail::SignedLimit`·`FitsSignedLimit`(Object/FieldValueWire.h, `UnsignedLimit` 옆 — Int8·Int16·Int32를 한 판정으로)를 저장(`WriteValueWire`)·로드(`ReadValueWire`)가 같이 쓰고(범위 밖 Overflow), FieldValue 쓰기(`WriteTargetValue` — 필드 write·staged·경로)는 대상 C++ 형식의 `NumericLimits<T>`로 같은 범위를 본다. FieldValue 칸은 `signedInteger`다.
 - C++ 형식 대응은 `ScalarValueKind`가 `int8`(= `signed char`)·`int16`(= `short`)을 받는다. 평범한 `char`는 다른 형식이라 Opaque다. MetaCompiler는 평범한 `char` 필드·원소를 지금의 "unsupported field type"(RMC2000)으로 거부하고 `int8`·`uint8`을 안내한다(새 진단 코드를 두지 않았다). enum underlying 자리의 `char`는 RMC2401이다.
-- enum underlying 8종: Clang desugar 철자 `unsigned char`·`unsigned short`·`unsigned int`·`unsigned long long`·`signed char`·`short`·`int`·`long long`만 받고 그 밖(`char`·`bool`·`long` — LLP64·LP64에서 폭이 다르다 — ·`wchar_t` 등)은 RMC2401이다. 범위 표는 런타임 `EnumUnderlyingRange`와 C# `EnumRules.Range` 한 쌍이고 UInt64는 [0, int64 최댓값]이다(넘는 열거자는 전용 문구의 RMC2401 — UE와 다른 점은 18.1절). 생성 코드: `__underlying_type` 대조 static_assert에 `uint64`·`int8`·`int16`·`int64`, int64 최솟값은 리터럴로 쓸 수 없어 `(-9223372036854775807ll - 1)`로 쓰고, Flags enum의 `IsDeclared`는 상한이 int64 최댓값(UInt64·Int64)이면 상한 비교를 내지 않는다. descriptor의 `underlying`·필드 `kind` 값은 ValueKind 이름(`UInt64`·`Int8`·`Int16`·`Int64`)이고 schema 번호는 그대로다(1.8절).
+- enum underlying 8종: Clang desugar 철자 `unsigned char`·`unsigned short`·`unsigned int`·`unsigned long long`·`signed char`·`short`·`int`·`long long`만 받고 그 밖(`char`·`bool`·`long` — LLP64·LP64에서 폭이 다르다 — ·`wchar_t` 등)은 RMC2401이다. 범위 표는 런타임 `EnumUnderlyingRange`와 C# `EnumRules.Range` 한 쌍이고 UInt64는 [0, int64 최댓값]이다(넘는 열거자는 전용 문구의 RMC2401 — UE와 다른 점은 18.1절). 생성 코드: `UnderlyingTypeT` 대조 static_assert에 `uint64`·`int8`·`int16`·`int64`, int64 최솟값은 리터럴로 쓸 수 없어 `(-9223372036854775807ll - 1)`로 쓰고, Flags enum의 `IsDeclared`는 상한이 int64 최댓값(UInt64·Int64)이면 상한 비교를 내지 않는다. descriptor의 `underlying`·필드 `kind` 값은 ValueKind 이름(`UInt64`·`Int8`·`Int16`·`Int64`)이고 schema 번호는 그대로다(1.8절).
 - Binds 미러 멤버도 같은 철자 해석을 거치므로 int8·int16 멤버를 받는다(지금 미러에는 그런 멤버가 없다).
 - 시험: ObjectRuntime `IntegerWidth_FieldValueConversionChecksRange`·`IntegerWidth_CodecWireAndWidthLimits`·`IntegerWidth_EnumUnderlyingRangesMatchUe`·`IntegerWidth_RegisterEnumAcceptsEightUnderlyingKinds`, ObjectSerialization `IntegerWidthGraph_RoundTripKeepsBoundaryValuesAndResavesIdentically`·`IntegerWidthGraph_LoadRejectsOutOfRangeValues`·`IntegerWidthGraph_SaveRejectsUndeclaredWideEnums`·`IntegerWidthGraph_FieldAndPathWritesCheckWidth`(생성 fixture `ReflectionTestFixtures/IntegerWidthFixture.h`), ToolTests `Meta.IntegerWidthFieldsReachDescriptorAndGeneratedCode`·`Meta.PlainCharFieldIsUnsupported`·`Meta.EnumValuesFollowClangEvaluation`(8종·경계값·생성 헤더 컴파일)·`Meta.EnumUnderlyingAndValuesAreRestricted`(char·bool·long·wchar_t)·`Meta.EnumUint64ValuesAboveInt64AreRejected`(uint64 값 상한의 전용 문구).
 
@@ -831,7 +831,7 @@ public:
 - 생성 멤버 thunk: 지금 struct 멤버 thunk는 멤버 포인터의 소유 타입으로 `void*`를 캐스트한다(GeneratedFieldCodec.h의 `EncodeStructMember`·`DecodeStructMember`, GeneratedPathAccess.h:501-509). base 멤버면 파생 객체를 base로 잘못 캐스트할 수 있으므로(base 하위 객체가 offset 0이 아닐 때) struct 멤버 thunk도 소유 struct를 명시 인자로 받게 바꾼다(`EncodeStructMember<Derived, &Base::m>` 꼴 — 클래스 필드 thunk는 이미 소유자를 따로 받는다, GeneratedFieldAccess.h:317).
 - 값 의미: 필드 타입이 Base면 정확히 Base 값이다. 다형성은 `InstancedStruct<Base>`로 한다.
 - 도구 이름은 상속 포함 대소문자 무시 유일(RMC2203 — 클래스와 같다).
-- `InstancedStruct<Base>`: `value.type` = Base ID. 담긴 타입이 Base 또는 파생이어야 한다(쓰기·decode 1단계, TypeRegistry의 struct 파생 조회 `IsStructA`를 새로 둔다). C++ `Emplace<S>`는 `static_assert(__is_base_of(Base, S))`로 막는다(형질 내장은 ObjectRuntime·생성 코드가 이미 쓴다 — RuntimeTypeOps.h:406·457). Base가 InstancedStruct를 담으면 RMC2308.
+- `InstancedStruct<Base>`: `value.type` = Base ID. 담긴 타입이 Base 또는 파생이어야 한다(쓰기·decode 1단계, TypeRegistry의 struct 파생 조회 `IsStructA`를 새로 둔다). C++ `Emplace<S>`는 `static_assert(IsBaseOfV<Base, S>)`로 막는다(공용 형질은 ObjectRuntime·생성 코드가 함께 쓴다 — RuntimeTypeOps.h:406·457). Base가 InstancedStruct를 담으면 RMC2308.
 
 ## 13. Text(B9l)
 
@@ -1097,7 +1097,7 @@ Core 커밋(B9b1·B9c1·B9f1·B9i1)은 다른 단계와 독립이라 먼저 해�
 | 저장 | struct 참조 + SerialSize + 데이터, 같은 타입이면 그 기본값 대비(InstancedStruct.cpp:122-164·262-288) | Record(타입 ID 포함), 통째 | Record가 타입·길이를 담는다 |
 | 미등록 타입 | 경고 후 건너뛰고 빔(InstancedStruct.cpp:233-249) | 기본 거부, 정책으로 비움 | RF 결정 9와 같은 꼴 |
 | 객체 참조·중첩 | 허용 | 참조·InstancedStruct·Required 금지, 깊이 합 | 간선 모델과 고정 크기 frame 불변식 |
-| Base 제한 | 메타데이터 BaseStruct, 로드 검사 없음(InstancedStruct.h:19-29). C++은 `std::is_base_of` + `checkf(IsChildOf)`(InstancedStruct.h:316-368), UHT가 BaseStruct 자동(UhtStructProperty.cs:616-636) | 쓰기·decode 검사, `static_assert(__is_base_of)` | 잘못된 데이터를 로드에서 드러낸다 |
+| Base 제한 | 메타데이터 BaseStruct, 로드 검사 없음(InstancedStruct.h:19-29). C++은 `std::is_base_of` + `checkf(IsChildOf)`(InstancedStruct.h:316-368), UHT가 BaseStruct 자동(UhtStructProperty.cs:616-636) | 쓰기·decode 검사, `static_assert(IsBaseOfV)` | 잘못된 데이터를 로드에서 드러낸다 |
 | struct 상속 | `UStruct::SuperStruct`(CH:514), PropertyLink가 super 포함(CC:1036-1099, UT:7134-7144), USTRUCT base 하나(UhtScriptStruct.cs:1097-1101), 비USTRUCT base는 `#if CPP`로 숨김(:1100) | 펼침, 리플렉션 base 하나 + 필드 없는 비리플렉션 base | Clang이 모든 base를 본다 |
 | TSubScriptStructOf | 있음(SubScriptStructOf.h:105) | 밖 | Sparks 데이터 테이블 단계 |
 
@@ -1318,7 +1318,7 @@ U5의 Deprecated 저장 범위: UE의 저장 불가 판정은 패키지 저장 �
 | B M10 | struct 멤버 thunk 캐스트 | 반영: 소유자 명시 인자(12절) |
 | B M11 | allocator 조회 API | 반영: `ObjectAllocator()`(1.7절, B9e) |
 | B M12 | Optional FieldValue·aggregate | 반영: kind = 내부 종류 + present, 성질 표 "통째 FieldValue" 열(1.1·1.3절) |
-| B L1 | `__is_base_of` 서술 오류 | 반영: `static_assert(__is_base_of)`(12절) |
+| B L1 | `IsBaseOfV` 서술 오류 | 반영: `static_assert(IsBaseOfV)`(12절) |
 | B L2 | UE weak 쿠킹 import | 반영: 18.4절 |
 | B L3 | pool 없는 Name 비교 | 반영: `NameTextEquals`·분해 공개, `TryFind` 반환 규칙(4절) |
 | B L4 | 세이브게임 로드의 2c | 반영: includeFlags 밖 필드 제외(9.1절) |

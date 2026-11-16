@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Base/Types.h>
 
 // 정수 overflow·정렬·변환을 검사하는 산술이다. 크기 계산, 외부 데이터에서 온 길이·offset, 직렬화한
@@ -26,21 +27,21 @@ namespace rocks {
 namespace detail {
 
 template <typename T>
-inline constexpr bool IsCheckedInteger = __is_integral(T) && !__is_same(T, bool);
+inline constexpr bool IsCheckedInteger = IsIntegralV<T> && !IsSameV<T, bool>;
 
 template <typename T>
-inline constexpr bool IsCheckedUnsigned = IsCheckedInteger<T> && !__is_signed(T);
+inline constexpr bool IsCheckedUnsigned = IsCheckedInteger<T> && !IsSignedV<T>;
 
 // 인자 둘 중 하나라도 결과 타입과 다를 때만 혼합 타입 함수를 고른다(같으면 동일 타입 함수가
 // 받는다).
 template <typename T, typename L, typename R>
 inline constexpr bool IsMixed = IsCheckedInteger<T> && IsCheckedInteger<L> && IsCheckedInteger<R> &&
-                                (!__is_same(L, T) || !__is_same(R, T));
+                                (!IsSameV<L, T> || !IsSameV<R, T>);
 
 // 부호 없는 타입에서 "항상 거짓" 비교 경고가 나지 않게 부호 있는 타입만 비교한다.
 template <typename T>
 constexpr bool IsNegative(T value) noexcept {
-    if constexpr (__is_signed(T)) {
+    if constexpr (IsSignedV<T>) {
         return value < T{};
     } else {
         return false;

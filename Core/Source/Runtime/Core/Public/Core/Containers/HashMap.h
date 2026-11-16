@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Base/Checked.h>
 #include <Core/Containers/ContainerDetail.h>
 #include <Core/Containers/InsertOutcome.h>
@@ -29,8 +30,8 @@ class HashMap {
     static_assert(IsNothrowMoveConstructibleV<V> && IsNothrowDestructibleV<V>);
     static_assert(IsNothrowMoveConstructibleV<Hasher> && IsNothrowDestructibleV<Hasher>);
     static_assert(IsNothrowMoveConstructibleV<KeyEqual> && IsNothrowDestructibleV<KeyEqual>);
-    static_assert(__is_nothrow_assignable(Hasher&, Hasher&&));
-    static_assert(__is_nothrow_assignable(KeyEqual&, KeyEqual&&));
+    static_assert(IsNothrowAssignableV<Hasher&, Hasher&&>);
+    static_assert(IsNothrowAssignableV<KeyEqual&, KeyEqual&&>);
 
     enum class State : uint8 {
         Empty,
@@ -195,7 +196,7 @@ public:
     // 키가 없을 때만 noexcept 기본 생성자를 호출한다. 할당기 등이 필요한 값은 With를 쓴다.
     template <typename KeyArg>
     Result<FindOrAddResult<V>> FindOrAdd(KeyArg&& key) noexcept {
-        static_assert(__is_nothrow_constructible(V));
+        static_assert(IsNothrowConstructibleV<V>);
         return FindOrAddWith(Forward<KeyArg>(key),
                              []() noexcept { return Result<V>::Success(V{}); });
     }
@@ -210,7 +211,7 @@ public:
         static_assert(
             IsSameV<RemoveConstT<RemoveReferenceT<KeyArg>>, K>,
             "HashMap insertion key must be exactly K; heterogeneous keys are lookup only");
-        static_assert(__is_nothrow_constructible(K, KeyArg&&));
+        static_assert(IsNothrowConstructibleV<K, KeyArg&&>);
         static_assert(noexcept(factory()));
         static_assert(IsSameV<decltype(factory()), Result<V>>,
                       "HashMap factory must return Result<V>");
@@ -605,8 +606,8 @@ private:
         static_assert(
             IsSameV<RemoveConstT<RemoveReferenceT<KeyArg>>, K>,
             "HashMap insertion key must be exactly K; heterogeneous keys are lookup only");
-        static_assert(__is_nothrow_constructible(K, KeyArg&&));
-        static_assert(__is_nothrow_constructible(V, ValueArg&&));
+        static_assert(IsNothrowConstructibleV<K, KeyArg&&>);
+        static_assert(IsNothrowConstructibleV<V, ValueArg&&>);
         if (iterationDepth_ != 0) {
             return Result<InsertOutcome>::Failure(ErrorCode::Busy);
         }
@@ -614,8 +615,8 @@ private:
         const K& lookup = key;
         const uint64 hash = HashKey(lookup);
         const usize existing = FindIndex(lookup, hash);
-        constexpr bool safeSharedInput = __is_trivially_constructible(K, KeyArg&&) &&
-                                         __is_trivially_constructible(V, ValueArg&&);
+        constexpr bool safeSharedInput =
+            IsTriviallyConstructibleV<K, KeyArg&&> && IsTriviallyConstructibleV<V, ValueArg&&>;
         if (existing != slotCount_) {
             if constexpr (Assign) {
                 if (AliasesSlots(key) || AliasesSlots(value) ||

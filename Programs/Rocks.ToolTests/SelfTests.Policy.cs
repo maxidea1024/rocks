@@ -233,6 +233,85 @@ internal static partial class SelfTests
                 }
             }
         });
+        suite.Add("Policy.CompilerTypeTraitControls", () =>
+        {
+            using TemporaryDirectory temporary = new();
+            const string helper = "Core/Source/Runtime/Base/Public/Base/TypeTraits.h";
+            // 검사기 시험도 통째 면제하지 않는다. 위반 토큰은 조립하고 생성된 문자열을 실제로 검사한다.
+            string[] spellings = ["is_base_of", "is_future_trait", "remove_cvref", "remove_future_qualifier", "add_pointer",
+                "make_integer_seq", "make_signed", "has_trivial_copy", "has_nothrow_assign", "has_virtual_destructor",
+                "has_unique_object_representations", "array_rank", "array_extent", "underlying_type", "decay",
+                "type_pack_element", "reference_constructs_from_temporary", "reference_converts_from_temporary"];
+            string[] consumers = ["Core/Source/Runtime/Core/Public/Core/Bad.h", "Core/Source/Runtime/Core/Tests/Bad.cpp",
+                "Engine/Source/Runtime/Bad/Public/Bad.hpp", "Engine/Source/Runtime/Bad/Private/Bad.inl",
+                "Programs/Sandbox/Private/Bad.inc", "Programs/Scaffold/Templates/Bad.h.in",
+                "Programs/Rocks.MetaCompiler/Bad.cs", "Programs/NewGenerator/Emitter.cs", "Programs/Rocks.ToolTests/Bad.cs"];
+            foreach (string spelling in spellings)
+            {
+                string intrinsic = "__" + spelling;
+                string source = $"static_assert({intrinsic}(T));";
+                Verify.Equal(intrinsic, CompilerTypeTraits.FirstUse(source), "trait family not recognized");
+                temporary.Write(helper, source + "\n");
+                NoFailures(PolicyChecks.CompilerBuiltins(temporary.Root));
+                foreach (string file in consumers)
+                {
+                    temporary.Write(file, "// first line\n" + source + "\n");
+                    var failures = PolicyChecks.CompilerBuiltins(temporary.Root);
+                    Verify.That(failures.Count == 1 && failures[0].Path == file && failures[0].Line == 2 &&
+                        failures[0].ToString().Contains("compiler-type-trait", StringComparison.Ordinal),
+                        $"trait escaped audit in {file}: {intrinsic}");
+                    temporary.Write(file, "// clean\n");
+                }
+            }
+
+            // 기존 Core 헤더나 비슷한 이름의 파일은 구현 헤더 예외를 받지 않는다.
+            foreach (string file in new[] { "Core/Source/Runtime/Core/Public/Core/Traits.h",
+                "Core/Source/Runtime/Base/Public/Base/OtherTypeTraits.h", "Programs/Rocks.Tooling.Common/OtherCompilerTypeTraits.cs" })
+            {
+                temporary.Write(file, "static_assert(" + "__" + "is_same(int, int));\n");
+                Verify.Equal(1, PolicyChecks.CompilerBuiltins(temporary.Root).Count, "trait helper allowance too wide: " + file);
+                temporary.Write(file, "// clean\n");
+            }
+
+            foreach (string allowed in new[] { "#if __has_builtin(x)\n#endif", "#if __has_feature(x)\n#endif", "#if __is_identifier(x)\n#endif",
+                "::rocks::IsBaseOfV<Base, Derived>", "::rocks::RemoveCvRefT<T>", "my" + "__" + "is_base_of" })
+            {
+                Verify.That(CompilerTypeTraits.FirstUse(allowed) is null, "non-trait token rejected: " + allowed);
+            }
+
+            temporary.Write(helper, "using Value = decltype(__c11_atomic_load(pointer, 0));\n");
+            NoFailures(PolicyChecks.CompilerBuiltins(temporary.Root));
+            temporary.Write(helper, "__builtin_memcpy(destination, source, count);\n");
+            Verify.Equal(1, PolicyChecks.CompilerBuiltins(temporary.Root).Count, "traits header accepted an unrelated builtin");
+        });
+        suite.Add("Policy.GeneratedCppBuiltinControls", () =>
+        {
+            foreach (string spelling in new[] { "is_future_trait", "remove_cv", "builtin_memcpy", "atomic_load",
+                "sync_synchronize", "c11_atomic_load", "ATOMIC_RELAXED" })
+            {
+                string intrinsic = "__" + spelling;
+                // 개별 C# 조각에는 완성된 내장 이름이 없어도 합성 C++ 경계에서 검출한다.
+                string generated = "static_assert(" + "__" + spelling + "(T));\n";
+                Verify.Equal(intrinsic, CompilerTypeTraits.FirstGeneratedBuiltinUse(generated), "generated builtin not rejected");
+                string label = "const char* label = \"" + intrinsic + "\";\n";
+                string raw = "const char* raw = R\"tag(" + intrinsic + ")tag\";\n";
+                string comments = "// " + intrinsic + "\n/* " + intrinsic + " */\n";
+                Verify.That(CompilerTypeTraits.FirstGeneratedBuiltinUse(label + raw + comments) is null,
+                    "generated text or comment mistaken for a builtin call");
+                Verify.Equal(intrinsic, CompilerTypeTraits.FirstGeneratedBuiltinUse(label + raw + comments + generated),
+                    "generated builtin after a literal was skipped");
+                Verify.Equal(intrinsic, CompilerTypeTraits.FirstGeneratedBuiltinUse("constexpr int a = 1'000;\n" + generated +
+                    "constexpr int b = 0xA'B;\n"), "digit separators mistaken for a character literal spanning the builtin");
+                string include = "#include <Probe/" + intrinsic + ".h>\n";
+                Verify.That(CompilerTypeTraits.FirstGeneratedBuiltinUse(include) is null,
+                    "header name mistaken for a builtin call");
+                Verify.Equal(intrinsic, CompilerTypeTraits.FirstGeneratedBuiltinUse(include + generated),
+                    "builtin after an include was skipped");
+            }
+
+            Verify.That(CompilerTypeTraits.FirstGeneratedBuiltinUse("#if __has_builtin(x)\n#endif\n#if __is_identifier(x)\n#endif\n" +
+                "static_assert(::rocks::IsSameV<int, int>);\n") is null, "public helper or feature check rejected");
+        });
         suite.Add("Policy.RepositoryRawLimitLiterals", () => NoFailures(PolicyChecks.RawLimitLiterals(options.Root)));
         suite.Add("Policy.RawLimitLiteralControls", () =>
         {

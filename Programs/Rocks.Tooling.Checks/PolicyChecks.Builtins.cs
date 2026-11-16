@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Rocks.Tooling.Common;
 
 namespace Rocks.Tooling.Checks;
 
@@ -17,6 +18,9 @@ public static partial class PolicyChecks
             "\\b__builtin_(?:add|sub|mul)_overflow\\b"),
         ["Core/Source/Runtime/Base/Public/Base/Endian.h"] = Pattern(
             "\\b__builtin_bswap(?:16|32|64)\\b"),
+        // RemoveAtomicT는 평가되지 않는 load 식의 결과 형식으로 Clang의 원자 한정을 벗긴다.
+        ["Core/Source/Runtime/Base/Public/Base/TypeTraits.h"] = Pattern(
+            "\\b__c11_atomic_load\\b"),
         ["Core/Source/Runtime/PlatformBase/Public/Platform/Memory.h"] = Pattern(
             "\\b__builtin_(?:memcpy|memmove|memset|memcmp|strlen|strcmp|bit_cast|launder|addressof)\\b"),
         ["Core/Source/Runtime/PlatformBase/Public/Platform/Atomics.h"] = Pattern(
@@ -57,6 +61,44 @@ public static partial class PolicyChecks
                     failures.Add(new(relative, line, "compiler-builtin",
                         "compiler builtin outside its helper header (Platform/Memory.h, Platform/Atomics.h, " +
                         "Base/Checked.h, Base/Endian.h, Base/Compiler.h, PlatformMath)"));
+                }
+            }
+        }
+
+        failures.AddRange(CompilerTraits(root));
+        return failures;
+    }
+
+    // 형질은 Base의 단일 구현 헤더만 직접 쓴다. C# 생성 문자열·시험의 C++ 조각도 같은 규칙이며
+    // 테스트 파일 전체를 면제하지 않는다. 기존 NativeSources 소비자의 검사 범위는 바꾸지 않는다.
+    private static IReadOnlyList<CheckFailure> CompilerTraits(string root)
+    {
+        const string helper = "Core/Source/Runtime/Base/Public/Base/TypeTraits.h";
+        IReadOnlyList<string> upstream = UpstreamDirectories(root);
+        List<CheckFailure> failures = [];
+        foreach (string path in Files(root, OwnedSourceRoots))
+        {
+            string relative = Relative(root, path);
+            if (relative == helper || upstream.Any(directory => relative.StartsWith(directory, StringComparison.Ordinal)))
+            {
+                continue;
+            }
+
+            if (Path.GetExtension(path).ToLowerInvariant() is not
+                (".h" or ".hh" or ".hpp" or ".hxx" or ".c" or ".cc" or ".cpp" or ".cxx" or ".mm" or
+                ".inl" or ".inc" or ".in" or ".cs"))
+            {
+                continue;
+            }
+
+            int line = 0;
+            foreach (string text in File.ReadLines(path, StrictUtf8))
+            {
+                ++line;
+                if (CompilerTypeTraits.FirstUse(text) is string intrinsic)
+                {
+                    failures.Add(new(relative, line, "compiler-type-trait",
+                        $"{intrinsic} outside Base/TypeTraits.h; use the public rocks type traits"));
                 }
             }
         }

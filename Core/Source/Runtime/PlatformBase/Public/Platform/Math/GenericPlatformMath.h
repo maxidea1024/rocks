@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Base/Types.h>
 #include <Platform/Fatal.h>
 
@@ -24,8 +25,8 @@ struct GenericPlatformMath {
     // ---- IEEE 특수 값(float·double) ----
     template <class T>
     static constexpr T QuietNaN() noexcept {
-        static_assert(__is_same(T, float) || __is_same(T, double), "QuietNaN<float|double>");
-        if constexpr (__is_same(T, float)) {
+        static_assert(IsSameV<T, float> || IsSameV<T, double>, "QuietNaN<float|double>");
+        if constexpr (IsSameV<T, float>) {
             return __builtin_nanf("");
         } else {
             return __builtin_nan("");
@@ -34,8 +35,8 @@ struct GenericPlatformMath {
 
     template <class T>
     static constexpr T Infinity() noexcept {
-        static_assert(__is_same(T, float) || __is_same(T, double), "Infinity<float|double>");
-        if constexpr (__is_same(T, float)) {
+        static_assert(IsSameV<T, float> || IsSameV<T, double>, "Infinity<float|double>");
+        if constexpr (IsSameV<T, float>) {
             return __builtin_huge_valf();
         } else {
             return __builtin_huge_val();

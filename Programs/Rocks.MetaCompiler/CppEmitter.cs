@@ -147,6 +147,7 @@ internal static class CppEmitter
         Line("// Rocks MetaCompiler 생성 파일이다. 직접 편집하지 않는다. 안정 ID는 원본 annotation에서 유지한다.");
         Line("#pragma once");
         Line($"#include <{include}>");
+        Line("#include <Base/TypeTraits.h>");
         Line("#include <Meta/GeneratedType.h>");
         Line("#include <Object/GeneratedFieldAccess.h>");
         Line("#include <Object/GeneratedFieldCodec.h>");
@@ -329,7 +330,7 @@ internal static class CppEmitter
             {
                 // nativeBaseType은 상속 Resolve의 포인터 변환 근거다. 오래된 생성 헤더나 잘못된 base 선언이
                 // 조용히 컴파일되지 않도록 C++ 상속을 컴파일 시 확인한다.
-                Line($"static_assert(__is_base_of(::{type.Base}, {native}), \"reflected base must be a C++ base\");");
+                Line($"static_assert(::rocks::IsBaseOfV<::{type.Base}, {native}>, \"reflected base must be a C++ base\");");
                 Line($"ops.nativeBaseType = NativeTypeKey<::{type.Base}>();");
             }
 
@@ -473,15 +474,15 @@ internal static class CppEmitter
         string names = string.Join(", ", type.OwnFields.Select((_, index) => $"m{index}"));
         Line($"static void VerifyBinds(const {native}& value) noexcept {{");
         Line($"using BoundType = {native};");
-        Line($"static_assert(__is_standard_layout(BoundType), \"Binds target {type.Binds} must be a standard-layout type\");");
+        Line($"static_assert(::rocks::IsStandardLayoutV<BoundType>, \"Binds target {type.Binds} must be a standard-layout type\");");
         Line($"[[maybe_unused]] const auto& [{names}] = value;");
         for (int index = 0; index < type.OwnFields.Count; ++index)
         {
             FieldModel field = type.OwnFields[index];
             string member = CppType(field.NativeSpelling);
-            Line($"static_assert(__is_same(decltype(BoundType::{field.Name}), {member}), \"Binds mirror {type.Name}::{field.Name} must have the type of {type.Binds}::{field.Name}\");");
-            Line($"static_assert(__is_same(decltype(&BoundType::{field.Name}), {member} (BoundType::*)), \"Binds mirror {type.Name}::{field.Name} must be declared directly in {type.Binds}, not in a base\");");
-            Line($"static_assert(__is_same(__remove_cv(decltype(m{index})), {member}), \"Binds mirror {type.Name}: member {index} of {type.Binds} must be {field.Name} with the mirror's type (same count and order)\");");
+            Line($"static_assert(::rocks::IsSameV<decltype(BoundType::{field.Name}), {member}>, \"Binds mirror {type.Name}::{field.Name} must have the type of {type.Binds}::{field.Name}\");");
+            Line($"static_assert(::rocks::IsSameV<decltype(&BoundType::{field.Name}), {member} (BoundType::*)>, \"Binds mirror {type.Name}::{field.Name} must be declared directly in {type.Binds}, not in a base\");");
+            Line($"static_assert(::rocks::IsSameV<::rocks::RemoveCvT<decltype(m{index})>, {member}>, \"Binds mirror {type.Name}: member {index} of {type.Binds} must be {field.Name} with the mirror's type (same count and order)\");");
             if (index != 0)
             {
                 Line($"static_assert(ROCKS_OFFSET_OF(BoundType, {type.OwnFields[index - 1].Name}) < ROCKS_OFFSET_OF(BoundType, {field.Name}), \"Binds mirror {type.Name}: {type.OwnFields[index - 1].Name} must come before {field.Name} as in {type.Binds}\");");
@@ -531,7 +532,7 @@ internal static class CppEmitter
 
         // 모델 형질을 C++ 멤버 타입과 직접 대조한다(encode 고정이 ContainsReferenceArray에 기대므로 틀린 모델 값이 고정
         // 누락이 되지 않게 — Docs/Design/ReflectionFoundations.ko.md 5.6절). 직접 타입만 본다(struct 멤버는 위의 생성 형질).
-        // Binds 미러는 생략한다: VerifyBinds가 실제 타입의 멤버마다 __is_same(decltype(Real::m), 미러 필드 형식)을 확인하고 모델
+        // Binds 미러는 생략한다: VerifyBinds가 실제 타입의 멤버마다 ::rocks::IsSameV<decltype(Real::m), 미러 필드 형식>을 확인하고 모델
         // 형질은 그 미러 필드 형식으로만 계산되므로 같은 보장이 이미 있다.
         foreach (FieldModel field in type.Binds.Length == 0 ? type.Fields : [])
         {
@@ -650,7 +651,7 @@ internal static class CppEmitter
     {
         string native = "::" + type.Name;
         Line($"template <> struct GeneratedType<{native}> {{");
-        Line($"static_assert(__is_same(__underlying_type({native}), {EnumRules.NativeType(type.Underlying)}), \"ROCKS_ENUM {type.Name} underlying type changed; regenerate metadata\");");
+        Line($"static_assert(::rocks::IsSameV<::rocks::UnderlyingTypeT<{native}>, {EnumRules.NativeType(type.Underlying)}>, \"ROCKS_ENUM {type.Name} underlying type changed; regenerate metadata\");");
         // 스키마의 값이 C++ 값과 같은지 컴파일 시 대조한다(MetaCompiler가 AST에서 읽은 값을 믿지 않는다).
         foreach (EnumeratorModel value in type.Enumerators)
         {

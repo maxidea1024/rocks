@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Base/Types.h>
 
 // byte 순서(endianness) 변환과 고정 byte 순서 읽기·쓰기다. 파일·네트워크 형식처럼 플랫폼과 무관하게
@@ -24,7 +25,7 @@ static_assert(IsLittleEndian,
 // byte 순서를 뒤집는다. 예: ByteSwap<uint32>(0x11223344) == 0x44332211.
 template <typename T>
 constexpr T ByteSwap(T value) noexcept {
-    static_assert(__is_integral(T) && (sizeof(T) == 2 || sizeof(T) == 4 || sizeof(T) == 8));
+    static_assert(IsIntegralV<T> && (sizeof(T) == 2 || sizeof(T) == 4 || sizeof(T) == 8));
     if constexpr (sizeof(T) == 2) {
         return static_cast<T>(__builtin_bswap16(static_cast<uint16>(value)));
     } else if constexpr (sizeof(T) == 4) {
@@ -37,7 +38,7 @@ constexpr T ByteSwap(T value) noexcept {
 // bytes에서 sizeof(T) byte를 little-endian으로 읽는다. 정렬되지 않은 주소도 된다.
 template <typename T>
 constexpr T LoadLittleEndian(const uint8* bytes) noexcept {
-    static_assert(__is_integral(T) && (sizeof(T) == 2 || sizeof(T) == 4 || sizeof(T) == 8));
+    static_assert(IsIntegralV<T> && (sizeof(T) == 2 || sizeof(T) == 4 || sizeof(T) == 8));
     uint64 value = 0;
     for (usize index = 0; index < sizeof(T); ++index) {
         value |= static_cast<uint64>(bytes[index]) << (index * 8);
@@ -49,7 +50,7 @@ constexpr T LoadLittleEndian(const uint8* bytes) noexcept {
 // bytes에서 sizeof(T) byte를 big-endian(네트워크 byte 순서)으로 읽는다.
 template <typename T>
 constexpr T LoadBigEndian(const uint8* bytes) noexcept {
-    static_assert(__is_integral(T) && (sizeof(T) == 2 || sizeof(T) == 4 || sizeof(T) == 8));
+    static_assert(IsIntegralV<T> && (sizeof(T) == 2 || sizeof(T) == 4 || sizeof(T) == 8));
     uint64 value = 0;
     for (usize index = 0; index < sizeof(T); ++index) {
         value = (value << 8) | bytes[index];
@@ -61,7 +62,7 @@ constexpr T LoadBigEndian(const uint8* bytes) noexcept {
 // value를 bytes에 sizeof(T) byte little-endian으로 쓴다.
 template <typename T>
 constexpr void StoreLittleEndian(uint8* bytes, T value) noexcept {
-    static_assert(__is_integral(T) && (sizeof(T) == 2 || sizeof(T) == 4 || sizeof(T) == 8));
+    static_assert(IsIntegralV<T> && (sizeof(T) == 2 || sizeof(T) == 4 || sizeof(T) == 8));
     const auto bits = static_cast<uint64>(value);
     for (usize index = 0; index < sizeof(T); ++index) {
         bytes[index] = static_cast<uint8>(bits >> (index * 8));
@@ -71,7 +72,7 @@ constexpr void StoreLittleEndian(uint8* bytes, T value) noexcept {
 // value를 bytes에 sizeof(T) byte big-endian으로 쓴다.
 template <typename T>
 constexpr void StoreBigEndian(uint8* bytes, T value) noexcept {
-    static_assert(__is_integral(T) && (sizeof(T) == 2 || sizeof(T) == 4 || sizeof(T) == 8));
+    static_assert(IsIntegralV<T> && (sizeof(T) == 2 || sizeof(T) == 4 || sizeof(T) == 8));
     const auto bits = static_cast<uint64>(value);
     for (usize index = 0; index < sizeof(T); ++index) {
         bytes[index] = static_cast<uint8>(bits >> ((sizeof(T) - 1 - index) * 8));

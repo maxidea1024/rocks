@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Core/Containers/Span.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Text/String.h>
@@ -112,19 +113,18 @@ concept HasFormatter = requires(StringBuilderBase& out, const T& value, StringVi
 
 // const·volatile·참조를 벗긴 인자 타입이다.
 template <typename T>
-using FormatDecay = __remove_cvref(T);
+using FormatDecay = RemoveCvRefT<T>;
 
 template <typename T>
 inline constexpr bool IsCharacterTextPointer = IsSameV<T, const char*> || IsSameV<T, char*>;
 
 template <typename T>
-inline constexpr bool IsVoidPointer =
-    __is_pointer(T) && IsSameV<__remove_cv(__remove_pointer(T)), void>;
+inline constexpr bool IsVoidPointer = IsPointerV<T> && IsSameV<RemoveCvT<RemovePointerT<T>>, void>;
 
 template <typename T>
 FormatArg MakeFormatArg(const T& value) noexcept {
     using U = FormatDecay<T>;
-    static_assert(!__is_volatile(RemoveReferenceT<T>),
+    static_assert(!IsVolatileV<RemoveReferenceT<T>>,
                   "volatile values are not formattable; copy the value first");
     FormatArg arg;
     if constexpr (HasFormatter<U>) {
@@ -143,9 +143,9 @@ FormatArg MakeFormatArg(const T& value) noexcept {
     } else if constexpr (IsSameV<U, wchar_t> || IsSameV<U, char8_t> || IsSameV<U, char16_t> ||
                          IsSameV<U, char32_t>) {
         static_assert(sizeof(U) == 0, "wide/UTF character types are not formattable");
-    } else if constexpr (__is_integral(U)) {
+    } else if constexpr (IsIntegralV<U>) {
         static_assert(sizeof(U) <= 8, "integers wider than 64 bits are not formattable");
-        if constexpr (__is_signed(U)) {
+        if constexpr (IsSignedV<U>) {
             arg.kind = FormatArg::Kind::Signed;
             arg.signedValue = static_cast<int64>(value);
         } else {
@@ -177,7 +177,7 @@ FormatArg MakeFormatArg(const T& value) noexcept {
     } else if constexpr (IsVoidPointer<U>) {
         arg.kind = FormatArg::Kind::Pointer;
         arg.pointer = const_cast<const void*>(static_cast<const volatile void*>(value));
-    } else if constexpr (__is_pointer(U)) {
+    } else if constexpr (IsPointerV<U>) {
         static_assert(sizeof(U) == 0, "Only void pointers are formattable; cast to const void*");
     } else {
         static_assert(sizeof(U) == 0, "Type is not formattable; specialize rocks::Formatter<T>");

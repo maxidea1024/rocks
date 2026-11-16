@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Base/Types.h>
 #include <Core/Move.h>
 #include <Core/Traits.h>
@@ -90,8 +91,8 @@ template <typename... Types>
 class Variant {
     static_assert(sizeof...(Types) > 0, "Variant needs at least one alternative");
     static_assert(sizeof...(Types) < 256, "Variant supports at most 255 alternatives");
-    static_assert((!__is_reference(Types) && ...), "Variant alternatives must not be references");
-    static_assert((!__is_void(Types) && ...), "Variant alternatives must not be void");
+    static_assert((!IsReferenceV<Types> && ...), "Variant alternatives must not be references");
+    static_assert((!IsVoidV<Types> && ...), "Variant alternatives must not be void");
     static_assert(((detail::VariantCountOf<Types, Types...> == 1) && ...),
                   "Variant alternatives must be unique types");
     static_assert((IsNothrowMoveConstructibleV<Types> && ...),
@@ -109,7 +110,7 @@ public:
     using AlternativeList = detail::VariantTypeList<Types...>;
 
     Variant() noexcept
-        requires(__is_nothrow_constructible(TypePackElement<0, Types...>))
+        requires(IsNothrowConstructibleV<TypePackElement<0, Types...>>)
     {
         ConstructAt<TypePackElement<0, Types...>>(storage_);
         index_ = 0;
@@ -117,7 +118,7 @@ public:
 
     template <typename T>
         requires(IndexOf<detail::VariantDecayT<T>> < Count &&
-                 __is_nothrow_constructible(detail::VariantDecayT<T>, T &&))
+                 IsNothrowConstructibleV<detail::VariantDecayT<T>, T &&>)
     Variant(T&& value) noexcept {
         using Alternative = detail::VariantDecayT<T>;
         ConstructAt<Alternative>(storage_, Forward<T>(value));
@@ -125,14 +126,14 @@ public:
     }
 
     template <typename T, typename... Args>
-        requires(IndexOf<T> < Count && __is_nothrow_constructible(T, Args && ...))
+        requires(IndexOf<T> < Count && IsNothrowConstructibleV<T, Args && ...>)
     explicit Variant(InPlaceType<T>, Args&&... args) noexcept {
         ConstructAt<T>(storage_, Forward<Args>(args)...);
         index_ = static_cast<uint8>(IndexOf<T>);
     }
 
     Variant(const Variant& other) noexcept
-        requires((__is_nothrow_constructible(Types, const Types&) && ...))
+        requires((IsNothrowConstructibleV<Types, const Types&> && ...))
     {
         CopyConstructFrom(other, MakeIndexSequence<Count>{});
     }
@@ -146,7 +147,7 @@ public:
     }
 
     Variant& operator=(const Variant& other) noexcept
-        requires((__is_nothrow_constructible(Types, const Types&) && ...))
+        requires((IsNothrowConstructibleV<Types, const Types&> && ...))
     {
         if (this != &other) {
             Variant copy(other);
@@ -165,7 +166,7 @@ public:
 
     template <typename T>
         requires(IndexOf<detail::VariantDecayT<T>> < Count &&
-                 __is_nothrow_constructible(detail::VariantDecayT<T>, T &&))
+                 IsNothrowConstructibleV<detail::VariantDecayT<T>, T &&>)
     Variant& operator=(T&& value) noexcept {
         Set(Forward<T>(value));
         return *this;
@@ -216,7 +217,7 @@ public:
     template <typename T, typename... Args>
     T& Emplace(Args&&... args) noexcept {
         static_assert(IndexOf<T> < Count, "T is not an alternative of this Variant");
-        static_assert(__is_nothrow_constructible(T, Args && ...),
+        static_assert(IsNothrowConstructibleV<T, Args&&...>,
                       "Variant::Emplace requires a noexcept constructor");
         T replacement(Forward<Args>(args)...);
         DestroyCurrent(MakeIndexSequence<Count>{});

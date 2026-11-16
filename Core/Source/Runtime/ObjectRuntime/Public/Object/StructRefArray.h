@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Core/Memory/Allocator.h>
 #include <Meta/GeneratedType.h>
 #include <Object/Object.h>
@@ -39,13 +40,12 @@ struct StructElementOps {
 template <class S>
 struct StructElementOpsOf {
     static_assert(
-        __is_nothrow_constructible(S, Allocator&) || __is_nothrow_constructible(S),
+        IsNothrowConstructibleV<S, Allocator&> || IsNothrowConstructibleV<S>,
         "StructRefArray elements need `explicit S(Allocator&) noexcept` or `S() noexcept`");
-    static_assert(__is_nothrow_destructible(S),
-                  "StructRefArray elements need a noexcept destructor");
+    static_assert(IsNothrowDestructibleV<S>, "StructRefArray elements need a noexcept destructor");
 
     static void Construct(void* memory, Allocator& allocator) noexcept {
-        if constexpr (__is_constructible(S, Allocator&)) {
+        if constexpr (IsConstructibleV<S, Allocator&>) {
             ::new (memory) S(allocator);
         } else {
             ::new (memory) S();

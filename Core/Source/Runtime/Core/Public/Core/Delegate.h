@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Core/Containers/Array.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Memory/SharedPtr.h>
@@ -141,7 +142,7 @@ public:
     static Result<Delegate> TryCreateLambda(Allocator& allocator, Callable&& callable) noexcept {
         using Stored = RemoveConstT<RemoveReferenceT<Callable>>;
         static_assert(IsNothrowDestructibleV<Stored>, "Delegate target needs noexcept destruction");
-        static_assert(__is_nothrow_constructible(Stored, Callable&&),
+        static_assert(IsNothrowConstructibleV<Stored, Callable&&>,
                       "Delegate target needs a noexcept constructor");
         auto memory = allocator.Allocate(sizeof(Stored), alignof(Stored));
         if (!memory) {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Object/ObjectRefArray.h>
 #include <Object/ObjectRefs.h>
 #include <Object/StructRefArray.h>
@@ -66,7 +67,7 @@ struct RegistryContainer<StructRefArray<S>> {
 // 판정은 같은 특수화가 TU마다 다른 정의를 갖는 ODR 위반이 된다.
 template <class T>
 struct NativeStrongReference<T*> {
-    static constexpr bool value = NativeStrongReference<__remove_cv(T)>::value;
+    static constexpr bool value = NativeStrongReference<RemoveCvT<T>>::value;
 };
 
 template <class T>
@@ -93,12 +94,12 @@ struct RequiresWorldOnlyOwnerOf<T, decltype(void(T::RocksRequiresWorldOnlyOwner)
 // 타입의 필드·템플릿 인자는 MetaCompiler(탐침과 AST 재귀 검사, RMC2205)가 본다.
 template <class T>
 inline constexpr bool IsNativeStrongReference =
-    detail::NativeStrongReference<__remove_cv(__remove_all_extents(T))>::value;
+    detail::NativeStrongReference<RemoveCvT<RemoveAllExtentsT<T>>>::value;
 
 // T(배열이면 원소)가 `static constexpr bool RocksRequiresWorldOnlyOwner = true;`를 선언했으면
 // 참이다. 그런 타입은 WorldOnly 클래스의 ROCKS_NATIVE 멤버로만 둘 수 있다.
 template <class T>
 inline constexpr bool RequiresWorldOnlyOwner =
-    detail::RequiresWorldOnlyOwnerOf<__remove_cv(__remove_all_extents(T))>::value;
+    detail::RequiresWorldOnlyOwnerOf<RemoveCvT<RemoveAllExtentsT<T>>>::value;
 
 } // namespace rocks

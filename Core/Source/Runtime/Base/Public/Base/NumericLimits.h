@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
+
 // 수치 형식의 표현 범위다(UE5.8 TNumericLimits 대응, Math/NumericLimits.h). 0xffffffffu·UINT32_MAX·
 // SIZE_MAX·static_cast<usize>(-1)·~0u 같은 날 숫자 대신 형식 이름으로 한계를 적는다. 값은 모두
 // 상수 식이며 OS·CRT 헤더(<stdint.h>·<limits.h>·<float.h>)와 STL(<limits>)에 의존하지 않는다.
@@ -55,10 +57,10 @@ struct NumericLimits<const volatile T> : NumericLimits<T> {};
 // 한정 없는 정수 형식(bool 제외)이다. 한정 형식은 위 const·volatile 특수화가 한정을 떼어 여기로
 // 온다.
 template <typename T>
-    requires(__is_integral(T) && !__is_same(T, bool) && !__is_const(T) && !__is_volatile(T))
+    requires(IsIntegralV<T> && !IsSameV<T, bool> && !IsConstV<T> && !IsVolatileV<T>)
 struct NumericLimits<T> {
     [[nodiscard]] static constexpr T Max() noexcept {
-        if constexpr (__is_signed(T)) {
+        if constexpr (IsSignedV<T>) {
             // 부호 bit를 뺀 모든 bit가 1이다. 2^(N-2) - 1 + 2^(N-2)로 계산해 중간값이 넘치지
             // 않는다.
             constexpr T half = static_cast<T>(T{1} << (sizeof(T) * 8 - 2));
@@ -69,7 +71,7 @@ struct NumericLimits<T> {
     }
 
     [[nodiscard]] static constexpr T Min() noexcept {
-        if constexpr (__is_signed(T)) {
+        if constexpr (IsSignedV<T>) {
             return static_cast<T>(-Max() - 1);
         } else {
             return T{};

@@ -133,7 +133,7 @@ bool AppendSequence(StringView text, StringBuilderBase& out) noexcept {
     return true;
 }
 
-bool IsScalar(uint32 point) noexcept {
+bool IsUnicodeScalar(uint32 point) noexcept {
     return point < CodePointLimit && (point < 0xD800 || point > 0xDFFF);
 }
 
@@ -249,7 +249,7 @@ TEST(Unicode_NormalizationTestConformance) {
     usize identity = 0;
     StringBuilder<16> single(allocator);
     for (uint32 point = 0; point < CodePointLimit; ++point) {
-        if (!IsScalar(point) || inPart1[point] != 0) {
+        if (!IsUnicodeScalar(point) || inPart1[point] != 0) {
             continue;
         }
         single.Clear();
@@ -385,7 +385,7 @@ TEST(Unicode_CaselessKeyIsIdempotentAndCaseless) {
     // 모든 scalar 하나짜리 문자열에서 키의 키는 같은 키다.
     usize failures = 0;
     for (uint32 point = 0; point < CodePointLimit; ++point) {
-        if (!IsScalar(point)) {
+        if (!IsUnicodeScalar(point)) {
             continue;
         }
         single.Clear();

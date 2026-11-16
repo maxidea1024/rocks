@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Move.h>
 #include <Platform/Fatal.h>
@@ -156,7 +157,7 @@ template <typename T, typename Deleter>
 void SharedAdoptedStorage<T, Deleter>::Destroy(SharedControlBlock* control) noexcept {
     auto* storage = static_cast<SharedAdoptedStorage*>(control);
     T* object = static_cast<T*>(control->object);
-    if constexpr (__is_base_of(SharedFromThisAnchor, T)) {
+    if constexpr (IsBaseOfV<SharedFromThisAnchor, T>) {
         object->DetachSharedControl(control);
     }
     storage->deleter(object);
@@ -193,7 +194,7 @@ public:
     // 않는다.
     template <typename... Args>
     static Result<SharedPtr> TryMake(Allocator& allocator, Args&&... args) noexcept {
-        static_assert(__is_nothrow_constructible(T, Args && ...),
+        static_assert(IsNothrowConstructibleV<T, Args&&...>,
                       "SharedPtr::TryMake requires a noexcept constructor");
         using Storage = detail::SharedStorage<T>;
         auto memory = allocator.Allocate(sizeof(Storage), alignof(Storage));
@@ -206,7 +207,7 @@ public:
         Storage* storage = ConstructAt<Storage>(memory.Value());
         T* object = ConstructAt<T>(storage->object, Forward<Args>(args)...);
         storage->control = detail::SharedControlBlock{1, 1, &allocator, object, &Storage::Destroy};
-        if constexpr (__is_base_of(detail::SharedFromThisAnchor, T)) {
+        if constexpr (IsBaseOfV<detail::SharedFromThisAnchor, T>) {
             object->AttachSharedControl(&storage->control);
         }
         return Result<SharedPtr>::Success(SharedPtr(object, &storage->control));
@@ -228,7 +229,7 @@ public:
         if (object == nullptr) {
             return Result<SharedPtr>::Success(SharedPtr());
         }
-        if constexpr (__is_pointer(Deleter)) {
+        if constexpr (IsPointerV<Deleter>) {
             if (deleter == nullptr) {
                 platform::Fatal("SharedPtr adopted an object with a null deleter");
             }
@@ -248,7 +249,7 @@ public:
         control->allocator = &allocator;
         control->object = object;
         control->destroyObject = &Storage::Destroy;
-        if constexpr (__is_base_of(detail::SharedFromThisAnchor, T)) {
+        if constexpr (IsBaseOfV<detail::SharedFromThisAnchor, T>) {
             object->AttachSharedControl(control);
         }
         return Result<SharedPtr>::Success(SharedPtr(object, control));
@@ -277,7 +278,7 @@ public:
     }
 
     template <typename U>
-        requires(!IsSameV<U, T> && __is_convertible_to(U*, T*))
+        requires(!IsSameV<U, T> && IsConvertibleV<U*, T*>)
     SharedPtr(const SharedPtr<U>& other) noexcept
         : object_(other.object_), control_(other.control_) {
         if (control_ != nullptr) {
@@ -286,7 +287,7 @@ public:
     }
 
     template <typename U>
-        requires(!IsSameV<U, T> && __is_convertible_to(U*, T*))
+        requires(!IsSameV<U, T> && IsConvertibleV<U*, T*>)
     SharedPtr(SharedPtr<U>&& other) noexcept : object_(other.object_), control_(other.control_) {
         other.Clear();
     }
@@ -402,7 +403,7 @@ public:
     constexpr WeakPtr() noexcept = default;
 
     template <typename U>
-        requires(IsSameV<U, T> || __is_convertible_to(U*, T*))
+        requires(IsSameV<U, T> || IsConvertibleV<U*, T*>)
     WeakPtr(const SharedPtr<U>& shared) noexcept
         : object_(shared.object_), control_(shared.control_) {
         if (control_ != nullptr) {
@@ -411,7 +412,7 @@ public:
     }
 
     template <typename U>
-        requires(IsSameV<U, T> || __is_convertible_to(U*, T*))
+        requires(IsSameV<U, T> || IsConvertibleV<U*, T*>)
     WeakPtr(const SharedRef<U>& shared) noexcept : WeakPtr(shared.AsSharedPtr()) {
     }
 
@@ -521,7 +522,7 @@ public:
 
     // 빈 SharedPtr는 InvalidArgument다.
     template <typename U>
-        requires(IsSameV<U, T> || __is_convertible_to(U*, T*))
+        requires(IsSameV<U, T> || IsConvertibleV<U*, T*>)
     static Result<SharedRef> TryFrom(const SharedPtr<U>& pointer) noexcept {
         if (!pointer) {
             return Result<SharedRef>::Failure(ErrorCode::InvalidArgument);
@@ -537,7 +538,7 @@ public:
     }
 
     template <typename U>
-        requires(!IsSameV<U, T> && __is_convertible_to(U*, T*))
+        requires(!IsSameV<U, T> && IsConvertibleV<U*, T*>)
     SharedRef(const SharedRef<U>& other) noexcept : pointer_(other.AsSharedPtr()) {
     }
 
@@ -577,7 +578,7 @@ public:
 
     // 기반 타입 SharedPtr로의 변환이다(SharedPtr<Base> p = SharedRef<Derived>).
     template <typename U>
-        requires(!IsSameV<U, T> && __is_convertible_to(T*, U*))
+        requires(!IsSameV<U, T> && IsConvertibleV<T*, U*>)
     operator SharedPtr<U>() const noexcept {
         return SharedPtr<U>(pointer_);
     }

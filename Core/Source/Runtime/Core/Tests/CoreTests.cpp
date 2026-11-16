@@ -1,3 +1,4 @@
+#include <Base/TypeTraits.h>
 #include <TestSupport/Test.h>
 #include <TestSupport/NFailAllocator.h>
 #include <Base/Checked.h>
@@ -204,9 +205,9 @@ TEST(CoreSpanConstAndEmptyView) {
         int32 extra;
     };
 
-    static_assert(!__is_constructible(Span<BaseElement>, Span<DerivedElement>));
-    static_assert(!__is_constructible(Span<BaseElement>, DerivedElement*, usize));
-    static_assert(__is_constructible(Span<const int32>, Span<int32>));
+    static_assert(!IsConstructibleV<Span<BaseElement>, Span<DerivedElement>>);
+    static_assert(!IsConstructibleV<Span<BaseElement>, DerivedElement*, usize>);
+    static_assert(IsConstructibleV<Span<const int32>, Span<int32>>);
     Span<int32> nullView(nullptr, 0);
     CHECK(nullView.Size() == 0);
     int32 values[] = {4, 8, 15, 16};

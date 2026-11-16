@@ -43,9 +43,9 @@ internal static partial class MetaTests
                 ("struct GeneratedType<::rocks::Vector3<float>>", "specialization of the real type"),
                 ("Span<const char>(\"probe::Vec3Binding\", 18)", "schema name is the mirror name"),
                 ("using BoundType = ::rocks::Vector3<float>;", "verification alias of the real type"),
-                ("static_assert(__is_same(decltype(BoundType::x), float)", "member type static_assert"),
-                ("static_assert(__is_same(decltype(&BoundType::x), float (BoundType::*))", "member declared in the real type itself"),
-                ("static_assert(__is_standard_layout(BoundType)", "standard layout for the order check"),
+                ("static_assert(::rocks::IsSameV<decltype(BoundType::x), float>", "member type static_assert"),
+                ("static_assert(::rocks::IsSameV<decltype(&BoundType::x), float (BoundType::*)>", "member declared in the real type itself"),
+                ("static_assert(::rocks::IsStandardLayoutV<BoundType>", "standard layout for the order check"),
                 ("static_assert(ROCKS_OFFSET_OF(BoundType, x) < ROCKS_OFFSET_OF(BoundType, y)", "declaration order check"),
                 ("[[maybe_unused]] const auto& [m0, m1, m2] = value;", "structured binding count check"),
                 ("detail::StructFieldOps<&::probe::Pair::b>", "member thunk of the real type"),
@@ -74,6 +74,18 @@ internal static partial class MetaTests
             BindsPreamble + BindsVec3.Replace("rocks::Vec3", "probe::Missing", StringComparison.Ordinal) + "}\n",
             BindsPreamble + "struct Later;\n" + BindsVec3.Replace("rocks::Vec3", "probe::Later", StringComparison.Ordinal) + "}\n"],
             "RMC3000", "does not name a complete class type", BindsModule);
+        suite.Add("Meta.BindsSecondFailureNamesTheFailingMirror", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler, BindsModule);
+            string first = BindsVec3.Replace("Vec3Binding", "OtherBinding", StringComparison.Ordinal);
+            string second = BindsVec3.Replace("rocks::Vec3", "rocks::uint8", StringComparison.Ordinal);
+            // 두 번째 static_assert 줄의 오류다. traits include를 진단 줄 계산에서 빠뜨리면 뒤 미러를 가리킨다.
+            string third = BindsVec3.Replace("Vec3Binding", "Vec3dBinding", StringComparison.Ordinal)
+                .Replace("rocks::Vec3", "rocks::Vector3<double>", StringComparison.Ordinal)
+                .Replace("float", "double", StringComparison.Ordinal);
+            await probe.RejectAsync(BindsPreamble + first + second + third + "}\n", "RMC3000",
+                "probe::Vec3Binding: Binds = \"rocks::uint8\" does not name a complete class type");
+        });
         // 철자 문법, 정규 철자가 descriptor binds 문법 밖(별칭으로 묶은 Fixed<-3>), 미러의 NATIVE 멤버·Migrate·필드 없음.
         AddRejectGroup(context, "Meta.BindsSpellingAndMirrorMembersAreRestricted", [
             BindsPreamble + BindsVec3.Replace("rocks::Vec3", "rocks::Vec3; int x", StringComparison.Ordinal) + "}\n",

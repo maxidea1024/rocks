@@ -1,3 +1,4 @@
+#include <Base/TypeTraits.h>
 #include <TestSupport/Test.h>
 #include <TestSupport/NFailAllocator.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -159,9 +160,8 @@ struct CountingDeleter {
 };
 
 static_assert(sizeof(UniquePtr<int>) == 24); // 기본 deleter: 포인터 + 할당 주소 + allocator
-static_assert(!__is_constructible(UniquePtr<int>, int*, AllocatorDeleter));
-static_assert(
-    __is_constructible(UniquePtr<ExternalResource, void (*)(ExternalResource*) noexcept>));
+static_assert(!IsConstructibleV<UniquePtr<int>, int*, AllocatorDeleter>);
+static_assert(IsConstructibleV<UniquePtr<ExternalResource, void (*)(ExternalResource*) noexcept>>);
 
 } // namespace
 

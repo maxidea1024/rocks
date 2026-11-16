@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Base/Checked.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Move.h>
@@ -175,7 +176,7 @@ public:
 
     template <typename... Args>
     Result<SlotHandle> TryEmplace(Args&&... args) noexcept {
-        static_assert(__is_nothrow_constructible(T, Args && ...));
+        static_assert(IsNothrowConstructibleV<T, Args&&...>);
         if (firstFree_ != EndOfList) {
             const uint32 index = firstFree_;
             Slot& slot = slots_[index];

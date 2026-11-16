@@ -59,6 +59,7 @@
 // 같음이 그대로이고, 파일에서 온 키로도 상대가 색인 칸 충돌을 미리 고를 수 없다. 시험·재현은
 // SeededHash<K>(HashSeed{...})를 넘긴다. 다른 해시 정책을 넘기면 이 보장은 그 정책의 몫이다.
 
+#include <Base/TypeTraits.h>
 #include <Core/Containers/InsertOutcome.h>
 #include <Core/Containers/OrderedEntryTable.h>
 #include <Core/Hash.h>
@@ -76,9 +77,9 @@ class OrderedMap {
     static_assert(
         IsNothrowMoveConstructibleV<KeyEqual> && IsNothrowDestructibleV<KeyEqual>,
         "OrderedMap key equality must be nothrow move constructible and nothrow destructible");
-    static_assert(__is_nothrow_assignable(Hasher&, Hasher&&),
+    static_assert(IsNothrowAssignableV<Hasher&, Hasher&&>,
                   "OrderedMap hasher must be nothrow move assignable");
-    static_assert(__is_nothrow_assignable(KeyEqual&, KeyEqual&&),
+    static_assert(IsNothrowAssignableV<KeyEqual&, KeyEqual&&>,
                   "OrderedMap key equality must be nothrow move assignable");
 
     using Table = detail::OrderedEntryTable<K, V>;
@@ -217,7 +218,7 @@ public:
     // FindOrAddWith를 쓴다.
     template <typename KeyArg>
     Result<FindOrAddResult<V>> FindOrAdd(KeyArg&& key) noexcept {
-        static_assert(__is_nothrow_constructible(V),
+        static_assert(IsNothrowConstructibleV<V>,
                       "OrderedMap::FindOrAdd(key) requires a nothrow default constructible value");
         return FindOrAddWith(Forward<KeyArg>(key),
                              []() noexcept { return Result<V>::Success(V{}); });
@@ -236,7 +237,7 @@ public:
         static_assert(
             IsSameV<RemoveConstT<RemoveReferenceT<KeyArg>>, K>,
             "OrderedMap insertion key must be exactly K; heterogeneous keys are lookup only");
-        static_assert(__is_nothrow_constructible(K, KeyArg&&),
+        static_assert(IsNothrowConstructibleV<K, KeyArg&&>,
                       "OrderedMap key must be nothrow constructible from the argument");
         static_assert(noexcept(factory()), "OrderedMap factory must be noexcept");
         static_assert(IsSameV<decltype(factory()), Result<V>>,
@@ -688,9 +689,9 @@ private:
         static_assert(
             IsSameV<RemoveConstT<RemoveReferenceT<KeyArg>>, K>,
             "OrderedMap insertion key must be exactly K; heterogeneous keys are lookup only");
-        static_assert(__is_nothrow_constructible(K, KeyArg&&),
+        static_assert(IsNothrowConstructibleV<K, KeyArg&&>,
                       "OrderedMap key must be nothrow constructible from the argument");
-        static_assert(__is_nothrow_constructible(V, ValueArg&&),
+        static_assert(IsNothrowConstructibleV<V, ValueArg&&>,
                       "OrderedMap value must be nothrow constructible from the argument");
         if (iterationDepth_ != 0) {
             return Result<InsertOutcome>::Failure(ErrorCode::Busy);
@@ -700,8 +701,8 @@ private:
         const K& lookup = key;
         const uint64 hash = HashKey(lookup);
         const usize existing = FindPosition(lookup, hash);
-        constexpr bool safeSharedInput = __is_trivially_constructible(K, KeyArg&&) &&
-                                         __is_trivially_constructible(V, ValueArg&&);
+        constexpr bool safeSharedInput =
+            IsTriviallyConstructibleV<K, KeyArg&&> && IsTriviallyConstructibleV<V, ValueArg&&>;
         const bool aliased = AliasesStorage(key) || AliasesStorage(value) ||
                              (!safeSharedInput && ArgumentsOverlap(key, value));
         if (existing != IndexNone) {

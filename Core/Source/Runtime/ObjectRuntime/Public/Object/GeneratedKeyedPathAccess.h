@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Object/GeneratedPathAccess.h>
 
 // Map·Set 필드의 경로 key 단계(리플렉션 B9f3 — Docs/Design/ReflectionExtensions.ko.md 1.5·7.3절)
@@ -214,7 +215,7 @@ Result<void> InsertPathKey(PathCursor& cursor, Container& container, const Looku
         }
     } else {
         static_assert(Target == ValueKind::Struct, "only struct-valued maps insert default values");
-        static_assert(__is_nothrow_assignable(Value&, Value&&),
+        static_assert(IsNothrowAssignableV<Value&, Value&&>,
                       "map struct values must be nothrow move assignable");
         if (Value* existing = known ? container.Find(lookup) : nullptr) {
             if (auto pinned = cursor.Pin(); !pinned) {

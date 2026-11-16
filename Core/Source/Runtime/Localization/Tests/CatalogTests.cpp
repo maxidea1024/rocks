@@ -1,3 +1,4 @@
+#include <Base/TypeTraits.h>
 #include <TestSupport/Test.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Localization/Text.h>
@@ -66,7 +67,7 @@ TEST(CatalogOwnsInputsAndRetainedSnapshotOutlivesStoreAndPublishSources) {
 TEST(CatalogCloneMoveAndIdentityKeepExactOpaqueCulture) {
     SystemAllocator allocator;
     {
-        static_assert(!__is_constructible(CatalogSnapshot, const CatalogSnapshot&));
+        static_assert(!IsConstructibleV<CatalogSnapshot, const CatalogSnapshot&>);
         CatalogSnapshot invalid;
         CHECK(!invalid.IsValid());
         CHECK(invalid.Culture().IsEmpty());

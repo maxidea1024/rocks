@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Base/Types.h>
 #include <Core/Move.h>
 #include <Core/Traits.h>
@@ -105,7 +106,7 @@ public:
     static constexpr usize Size = sizeof...(Types);
 
     constexpr Tuple() noexcept
-        requires((__is_nothrow_constructible(Types) && ...))
+        requires((IsNothrowConstructibleV<Types> && ...))
         : Storage() {
     }
 
@@ -113,9 +114,8 @@ public:
     template <typename... Args>
         requires(sizeof...(Args) == sizeof...(Types) && sizeof...(Types) > 0 &&
                  !(sizeof...(Args) == 1 && (detail::IsTupleV<detail::TupleDecayT<Args>> && ...)) &&
-                 (__is_nothrow_constructible(Types, Args &&) && ...))
-    constexpr explicit(!(__is_convertible_to(Args&&, Types) && ...))
-        Tuple(Args&&... arguments) noexcept
+                 (IsNothrowConstructibleV<Types, Args &&> && ...))
+    constexpr explicit(!(IsConvertibleV<Args&&, Types> && ...)) Tuple(Args&&... arguments) noexcept
         : Storage(detail::TupleConstructTag{}, Forward<Args>(arguments)...) {
     }
 
@@ -124,8 +124,8 @@ public:
     template <typename... Others>
         requires(sizeof...(Others) == sizeof...(Types) && sizeof...(Types) > 0 &&
                  !IsSameV<Tuple<Others...>, Tuple> &&
-                 (__is_nothrow_constructible(Types, const Others&) && ...))
-    constexpr explicit(!(__is_convertible_to(const Others&, Types) && ...))
+                 (IsNothrowConstructibleV<Types, const Others&> && ...))
+    constexpr explicit(!(IsConvertibleV<const Others&, Types> && ...))
         Tuple(const Tuple<Others...>& other) noexcept
         : Tuple(detail::TupleConvertTag{}, other, MakeIndexSequence<Size>{}) {
     }
@@ -134,8 +134,8 @@ public:
     template <typename... Others>
         requires(sizeof...(Others) == sizeof...(Types) && sizeof...(Types) > 0 &&
                  !IsSameV<Tuple<Others...>, Tuple> &&
-                 (__is_nothrow_constructible(Types, Others &&) && ...))
-    constexpr explicit(!(__is_convertible_to(Others&&, Types) && ...))
+                 (IsNothrowConstructibleV<Types, Others &&> && ...))
+    constexpr explicit(!(IsConvertibleV<Others&&, Types> && ...))
         Tuple(Tuple<Others...>&& other) noexcept
         : Tuple(detail::TupleConvertTag{}, Move(other), MakeIndexSequence<Size>{}) {
     }
@@ -144,14 +144,14 @@ public:
     constexpr Tuple(Tuple&&) noexcept = default;
 
     constexpr Tuple& operator=(const Tuple& other) noexcept
-        requires((__is_assignable(Types&, const Types&) && ...))
+        requires((IsAssignableV<Types&, const Types&> && ...))
     {
         AssignFrom(other, MakeIndexSequence<Size>{});
         return *this;
     }
 
     constexpr Tuple& operator=(Tuple&& other) noexcept
-        requires((__is_assignable(Types&, Types &&) && ...))
+        requires((IsAssignableV<Types&, Types &&> && ...))
     {
         MoveAssignFrom(other, MakeIndexSequence<Size>{});
         return *this;
@@ -160,7 +160,7 @@ public:
     // 원소 타입이 다른 같은 크기 Tuple에서 원소별 대입한다(Tie(a, b) = MakeTuple(1, 2.0f) 등).
     template <typename... Others>
         requires(sizeof...(Others) == sizeof...(Types) && !IsSameV<Tuple<Others...>, Tuple> &&
-                 (__is_assignable(Types&, const Others&) && ...))
+                 (IsAssignableV<Types&, const Others&> && ...))
     constexpr Tuple& operator=(const Tuple<Others...>& other) noexcept {
         AssignFrom(other, MakeIndexSequence<Size>{});
         return *this;
@@ -168,7 +168,7 @@ public:
 
     template <typename... Others>
         requires(sizeof...(Others) == sizeof...(Types) && !IsSameV<Tuple<Others...>, Tuple> &&
-                 (__is_assignable(Types&, Others &&) && ...))
+                 (IsAssignableV<Types&, Others &&> && ...))
     constexpr Tuple& operator=(Tuple<Others...>&& other) noexcept {
         MoveAssignFrom(other, MakeIndexSequence<Size>{});
         return *this;

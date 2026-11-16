@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Base/Types.h>
 
 namespace rocks::platform {
@@ -48,13 +49,12 @@ struct AtomicOperand {
 
 template <class T>
 inline constexpr bool IsAtomicValue =
-    (__is_integral(T) || __is_enum(T) || __is_pointer(T)) &&
+    (IsIntegralV<T> || IsEnumV<T> || IsPointerV<T>) &&
     (sizeof(T) == 1 || sizeof(T) == 2 || sizeof(T) == 4 || sizeof(T) == 8) &&
     __atomic_always_lock_free(sizeof(T), 0);
 
 template <class T>
-inline constexpr bool IsAtomicArithmetic =
-    __is_integral(T) && !__is_same(T, bool) && IsAtomicValue<T>;
+inline constexpr bool IsAtomicArithmetic = IsIntegralV<T> && !IsSameV<T, bool> && IsAtomicValue<T>;
 
 template <MemoryOrder Order>
 inline constexpr bool IsLoadOrder =

@@ -41,14 +41,14 @@ internal static class NativeMemberProbe
 
     private const int StrongWrapper = 3;
 
-    // 탐침 판정 템플릿이다. 한 겹씩 cv·restrict를 벗기고(RocksProbeUnqualified) 포인터·참조(RocksProbeLayer — 형질 내장
-    // __is_pointer·__remove_pointer·__is_reference·__remove_reference_t라 __unaligned·주소 공간 한정 포인터도 벗긴다. kind 1,
+    // 탐침 판정 템플릿이다. 한 겹씩 cv·restrict를 벗기고(RocksProbeUnqualified) 포인터·참조(RocksProbeLayer — 공용 형질
+    // IsPointerV·RemovePointerT·IsReferenceV·RemoveReferenceT라 __unaligned·주소 공간 한정 포인터도 벗긴다. kind 1,
     // 그 뒤는 간접)·배열·_Atomic(RocksProbeShape, kind 2 — 간접 여부 유지)을 따라간다. 각 겹에서 강한 참조 래퍼면
     // (IsNativeStrongReference — 생성 static_assert와 같은 형질) 3, 간접으로 닿은 class면 완전성(sizeof SFINAE)을 보아 Object
     // 파생이면 1·아니면 0·불완전하면 2다. 값으로 담은 class·함수·멤버 포인터·스칼라는 0이다(함수 포인터의 반환·인자 형식은
-    // 따라가지 않는다). _Atomic(T)는 부분 특수화로 벗기면 Clang이 추론할 수 없는 특수화로 거부하므로
-    // (-Wunusable-partial-specialization) 원자 load의 결과 형식으로 벗긴다.
+    // 따라가지 않는다). _Atomic(T)의 원소 형식도 Base의 RemoveAtomicT로 얻어 탐침에는 내장을 직접 쓰지 않는다.
     private const string Templates = """
+        #include <Base/TypeTraits.h>
         #include <Object/Object.h>
         #include <Object/NativeMemberTraits.h>
         namespace rocks_meta_probe {
@@ -61,16 +61,16 @@ internal static class NativeMemberProbe
             static constexpr bool rocksProbeValue = true;
         };
         template <class RocksProbeT>
-        using RocksProbeUnqualified = __remove_restrict(__remove_cv(RocksProbeT));
+        using RocksProbeUnqualified = ::rocks::RemoveRestrictT<::rocks::RemoveCvT<RocksProbeT>>;
         template <class RocksProbeT, class = void>
         struct RocksProbeShape {
             static constexpr int rocksProbeKind = 0;
             using rocksProbeNext = void;
         };
         template <class RocksProbeT>
-        struct RocksProbeShape<RocksProbeT, decltype(void(__c11_atomic_load(static_cast<RocksProbeT*>(nullptr), 0)))> {
+        struct RocksProbeShape<RocksProbeT, ::rocks::VoidT<::rocks::RemoveAtomicT<RocksProbeT>>> {
             static constexpr int rocksProbeKind = 2;
-            using rocksProbeNext = decltype(__c11_atomic_load(static_cast<RocksProbeT*>(nullptr), 0));
+            using rocksProbeNext = ::rocks::RemoveAtomicT<RocksProbeT>;
         };
         template <class RocksProbeT>
         struct RocksProbeShape<RocksProbeT[], void> {
@@ -82,17 +82,17 @@ internal static class NativeMemberProbe
             static constexpr int rocksProbeKind = 2;
             using rocksProbeNext = RocksProbeT;
         };
-        template <class RocksProbeT, bool = __is_reference(RocksProbeT), bool = __is_pointer(RocksProbeT)>
+        template <class RocksProbeT, bool = ::rocks::IsReferenceV<RocksProbeT>, bool = ::rocks::IsPointerV<RocksProbeT>>
         struct RocksProbeLayer : RocksProbeShape<RocksProbeT> {};
         template <class RocksProbeT, bool RocksProbePointer>
         struct RocksProbeLayer<RocksProbeT, true, RocksProbePointer> {
             static constexpr int rocksProbeKind = 1;
-            using rocksProbeNext = __remove_reference_t(RocksProbeT);
+            using rocksProbeNext = ::rocks::RemoveReferenceT<RocksProbeT>;
         };
         template <class RocksProbeT>
         struct RocksProbeLayer<RocksProbeT, false, true> {
             static constexpr int rocksProbeKind = 1;
-            using rocksProbeNext = __remove_pointer(RocksProbeT);
+            using rocksProbeNext = ::rocks::RemovePointerT<RocksProbeT>;
         };
         template <class RocksProbeT, bool = RocksProbeComplete<RocksProbeT>::rocksProbeValue>
         struct RocksProbeClassLeaf {
@@ -101,10 +101,10 @@ internal static class NativeMemberProbe
         };
         template <class RocksProbeT>
         struct RocksProbeClassLeaf<RocksProbeT, true> {
-            static constexpr int rocksProbeValue = __is_base_of(::rocks::Object, RocksProbeT) ? 1 : 0;
+            static constexpr int rocksProbeValue = ::rocks::IsBaseOfV<::rocks::Object, RocksProbeT> ? 1 : 0;
             using rocksProbeType = RocksProbeT;
         };
-        template <class RocksProbeT, bool RocksProbeIndirect, bool = __is_class(RocksProbeT)>
+        template <class RocksProbeT, bool RocksProbeIndirect, bool = ::rocks::IsClassV<RocksProbeT>>
         struct RocksProbeLeaf {
             static constexpr int rocksProbeValue = 0;
             using rocksProbeType = void;

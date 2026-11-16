@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Object/MapFieldCodec.h>
 
 // 필드 codec이다(Docs/Design/ReflectionFoundations.ko.md 4.6·5.6·6.4절). 생성 헤더와 직렬화기는
@@ -212,7 +213,7 @@ template <class Owner, class MemberOwner, class Member>
 Result<uint32> EncodeGeneratedField(ObjectRegistry& registry, const ObjectAccessContext& access,
                                     ObjectHandle handle, Member MemberOwner::* member,
                                     ArchiveWriter& out, FieldEncodeContext& context) noexcept {
-    static_assert(__is_base_of(MemberOwner, Owner));
+    static_assert(IsBaseOfV<MemberOwner, Owner>);
     static_assert(FieldValueKind<Member>() != ValueKind::Opaque);
     if (!MatchesSchema<Member>(context.Field())) {
         return Result<uint32>::Failure(ErrorCode::TypeMismatch);
@@ -257,7 +258,7 @@ template <class Owner, class MemberOwner, class Member>
 Result<void> DecodeGeneratedField(ConstructionContext* construction, ObjectHandle handle,
                                   Member MemberOwner::* member, const FieldView& field,
                                   FieldDecodeContext& context) noexcept {
-    static_assert(__is_base_of(MemberOwner, Owner));
+    static_assert(IsBaseOfV<MemberOwner, Owner>);
     if (!MatchesSchema<Member>(context.Field())) {
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }

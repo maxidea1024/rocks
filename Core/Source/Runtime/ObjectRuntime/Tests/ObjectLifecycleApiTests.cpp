@@ -1,3 +1,4 @@
+#include <Base/TypeTraits.h>
 #include <TestSupport/Test.h>
 #include <TestSupport/HostFailure.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -13,8 +14,8 @@ using namespace rocks;
 namespace {
 
 constexpr Guid LifecycleType{0x4c49464553544154ULL, 1};
-static_assert(!__is_constructible(ObjectAccessScope, const ObjectAccessScope&));
-static_assert(!__is_constructible(ObjectAccessScope, ObjectAccessScope&&));
+static_assert(!IsConstructibleV<ObjectAccessScope, const ObjectAccessScope&>);
+static_assert(!IsConstructibleV<ObjectAccessScope, ObjectAccessScope&&>);
 ObjectRegistry* callbackRegistry = nullptr;
 ErrorCode constructorQuery = ErrorCode::None;
 ErrorCode constructorDestroy = ErrorCode::None;

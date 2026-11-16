@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Base/Types.h>
 #include <Core/Text/StringView.h>
 #include <Platform/PlatformMath.h>
@@ -502,6 +503,6 @@ constexpr LinearColor Color::ReinterpretAsLinear() const noexcept {
 
 static_assert(sizeof(Color) == 4 && alignof(Color) == 1);
 static_assert(sizeof(LinearColor) == 16 && alignof(LinearColor) == 4);
-static_assert(__is_trivially_copyable(Color) && __is_trivially_copyable(LinearColor));
+static_assert(IsTriviallyCopyableV<Color> && IsTriviallyCopyableV<LinearColor>);
 
 } // namespace rocks

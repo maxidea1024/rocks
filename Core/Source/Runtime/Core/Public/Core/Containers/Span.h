@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Base/Types.h>
 #include <Core/Result.h>
 #include <Core/Traits.h>
@@ -18,7 +19,7 @@ public:
     // count는 byte 수가 아닌 원소 수다. 실제 범위·정렬·수명은 caller가 보장한다.
     // 배열 간 호환성을 검사하여 Derived 배열을 Base 간격으로 잘못 순회하는 변환을 거부한다.
     template <typename U>
-        requires(__is_convertible_to(U (*)[], T (*)[]))
+        requires(IsConvertibleV<U (*)[], T (*)[]>)
     constexpr Span(U* data, usize count) noexcept : data_(data), count_(count) {
         if (data == nullptr && count != 0) {
             platform::Fatal("A nonempty Span requires storage");
@@ -43,7 +44,7 @@ public:
 
     // 동일 원소 타입의 const 추가 같은 안전한 변환만 허용하며 buffer를 복사하지 않는다.
     template <typename U>
-        requires(__is_convertible_to(U (*)[], T (*)[]))
+        requires(IsConvertibleV<U (*)[], T (*)[]>)
     constexpr Span(Span<U> other) noexcept : data_(other.Data()), count_(other.Size()) {
     }
 
@@ -170,7 +171,7 @@ private:
 // ---- byte view ----
 // 원소 배열을 같은 저장소의 byte view로 본다(UE MakeMemoryView 대응). 결과의 수명은 원본과 같다.
 // 해시· 암호 입력처럼 byte Span을 받는 API에 정수·구조체 배열을 복사 없이 넘길 때 쓴다. T는 값마다
-// byte 표현이 하나뿐이어야 한다(__has_unique_object_representations). 그래서 패딩이 있는
+// byte 표현이 하나뿐이어야 한다(HasUniqueObjectRepresentationsV). 그래서 패딩이 있는
 // 구조체(미정 byte가 끼어 해시가 실행마다 달라진다)와 float·double(+0/-0, NaN 표현이 여럿)은 컴파일
 // 오류다. 그런 값은 필드를 직렬화해 넘긴다.
 //
@@ -179,7 +180,7 @@ private:
 //   hasher.TryUpdate(AsBytes(Span<const uint32>(words)));   // 16 byte
 template <typename T>
 Span<const uint8> AsBytes(Span<T> values) noexcept {
-    static_assert(__has_unique_object_representations(RemoveConstT<T>),
+    static_assert(HasUniqueObjectRepresentationsV<RemoveConstT<T>>,
                   "AsBytes requires an element type without padding or multiple representations");
     return Span<const uint8>(reinterpret_cast<const uint8*>(values.Data()), values.ByteCount());
 }
@@ -188,8 +189,8 @@ Span<const uint8> AsBytes(Span<T> values) noexcept {
 // 구조체를 채우기 등)에 쓰며, 채운 byte가 T의 올바른 값이 되는지는 호출자가 보장한다.
 template <typename T>
 Span<uint8> AsWritableBytes(Span<T> values) noexcept {
-    static_assert(!__is_const(T), "AsWritableBytes requires a mutable element type");
-    static_assert(__is_trivially_copyable(T),
+    static_assert(!IsConstV<T>, "AsWritableBytes requires a mutable element type");
+    static_assert(IsTriviallyCopyableV<T>,
                   "AsWritableBytes requires a trivially copyable element type");
     return Span<uint8>(reinterpret_cast<uint8*>(values.Data()), values.ByteCount());
 }

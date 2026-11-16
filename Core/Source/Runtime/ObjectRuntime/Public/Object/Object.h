@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Core/Result.h>
 #include <Object/ObjectHandle.h>
 #include <Object/TypeLease.h>
@@ -83,7 +84,7 @@ inline uint8 NativeTypeIdentity = 0;
 // 동적 모듈 사이의 키 통합은 보장하지 않으며 별도 ABI 계약이 필요하다.
 template <class T>
 const void* NativeTypeKey() noexcept {
-    if constexpr (__is_same(T, Object)) {
+    if constexpr (IsSameV<T, Object>) {
         return nullptr;
     } else {
         return &NativeTypeIdentity<T>;

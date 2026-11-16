@@ -40,6 +40,18 @@
 - **예외(값 자체가 의미인 상수)**: 해시·CRC·FNV 초기값, 비트 마스크(`x & 0xffffffffu`, 부호 bit 마스크), 파일·wire 형식이나 알고리즘이 정한 값(zstd 사전 ID 범위, Linux 단일 read 한도 등. 이름 있는 형식 상수가 있으면 그것을 쓴다), 외부 API가 문서로 정한 값(`(DWORD)-1`, `D3D12_DEFAULT_SAMPLE_MASK` 같은 SDK 이름을 우선), 시험의 경계 입력(비트 패턴·10진 철자 자체를 검사하는 데이터)은 그대로 둔다. 시험도 한도 인자·"없음" 표지는 위 규칙을 따른다.
 - 정책 검사 `raw-limit-literal`(`PolicyChecks.RawLimitLiterals`)이 런타임·도구 C++ 소스(모듈 `Tests/`·테스트 runner 제외)의 C 한계 매크로, 부호 없는 형식의 -1 변환, 0의 비트 반전을 항상 거부하고, 32·64-bit 모든 bit·부호 있는 최대값과 같은 정수 리터럴은 `&`·`|`·`^`의 피연산자(비트 마스크)가 아니면 거부한다. 그 밖의 값 자체가 의미인 자리는 검사의 허용 목록에 파일과 철자로 등록하고 이유를 적는다.
 
+## 타입 형질
+
+타입 검사·변환은 `<Base/TypeTraits.h>`의 공용 API를 쓴다. 값은 `IsBaseOfV<Base, Derived>`처럼 `V` 접미사,
+타입 변환은 `RemoveCvRefT<T>`처럼 `T` 접미사를 사용한다. trait 자체를 전달할 때는 `IsBaseOf<Base, Derived>`
+등의 형식과 `::Value`·`::Type`을 쓴다. 기존 `<Core/Traits.h>` 경로도 유지하지만 새 코드는 Base 헤더를 직접 포함한다.
+
+컴파일러 내장 형질은 `Base/TypeTraits.h`에서만 사용한다. 필요한 기능이 없으면 해당 헤더에 의미·지원 범위와
+경계 타입 테스트를 추가하고 호출부는 새 API를 사용한다. C++ 테스트, C# 생성 문자열, 코드 템플릿도 같은 규칙이다.
+정책 검사 `compiler-type-trait`는 형질 계열 전체를 검사하며, MetaCompiler는 실제 생성 헤더와 Clang에 넘기는
+합성 C++에도 검사를 적용한다. 기능 검사 매크로와 플랫폼 intrinsic은 기존 목적별 정책을 따른다.
+지원 목록과 완전성·확장 타입 계약은 [타입 형질](Implementation/TypeTraits.ko.md)에 정리한다.
+
 ## 컴파일 시점 메시지
 
 `static_assert`의 메시지와 `#error` 문구는 영어로 쓴다(MetaCompiler가 생성 코드에 내는 static_assert 메시지도 영어다). 주석은 한국어로 쓴다. 정책 검사 `compile-time-message-english`(`PolicyChecks.CompileTimeMessages`)가 엔진 소유 C++ 소스 전체(시험 포함)에서 두 메시지에 한글이 있으면 거부한다(주석은 보지 않는다).

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Meta/GeneratedType.h>
 #include <Object/TypeRegistry.h>
 
@@ -70,12 +71,12 @@ namespace rocks {
 // ROCKS_NATIVE_TYPE를 선언한 Object 파생 클래스다. T 자신의 매크로 멤버(ThisClass가 T)로 판정하므로
 // 생성 헤더 include 여부와 무관하게 번역 단위마다 결과가 같다.
 template <class T>
-concept NativeClassType = __is_base_of(Object, T) && requires {
+concept NativeClassType = IsBaseOfV<Object, T> && requires {
     typename T::ThisClass;
     typename T::Super;
     T::StaticTypeId;
     T::StaticTypeName;
-} && __is_same(typename T::ThisClass, T);
+} && IsSameV<typename T::ThisClass, T>;
 
 namespace detail {
 
@@ -94,7 +95,7 @@ struct ReflectedAncestorOf<U, true> {
 
 template <class U>
 struct ReflectedAncestorOf<U, false> {
-    static_assert(__is_base_of(Object, U), "native class base must derive from rocks::Object");
+    static_assert(IsBaseOfV<Object, U>, "native class base must derive from rocks::Object");
     static_assert(
         requires { GeneratedType<U>::Schema(); },
         "native class base is neither a ROCKS_NATIVE_TYPE class (did it forget the macro?) "
@@ -142,11 +143,11 @@ struct NativeClassAccess {
         if constexpr (requires { &U::Trace; }) {
             using Pointer = decltype(&U::Trace);
             using Owner = typename MemberPointerClass<Pointer>::Type;
-            if constexpr (__is_same(Owner, void)) {
+            if constexpr (IsSameV<Owner, void>) {
                 return TraceDeclaration::Invalid;
-            } else if constexpr (!__is_same(Owner, U)) {
+            } else if constexpr (!IsSameV<Owner, U>) {
                 return TraceDeclaration::None;
-            } else if constexpr (__is_same(Pointer, void (U::*)(TraceVisitor&) const noexcept)) {
+            } else if constexpr (IsSameV<Pointer, void (U::*)(TraceVisitor&) const noexcept>) {
                 return TraceDeclaration::Own;
             } else {
                 return TraceDeclaration::Invalid;
@@ -189,7 +190,7 @@ void TraceNativeChain(const U& object, TraceVisitor& visitor) noexcept {
         if constexpr (NativeClassAccess::TraceOf<U>() == NativeClassAccess::TraceDeclaration::Own) {
             NativeClassAccess::Trace<U>(object, visitor);
         }
-    } else if constexpr (!__is_same(U, Object)) {
+    } else if constexpr (!IsSameV<U, Object>) {
         GeneratedType<U>::Trace(object, visitor);
     }
 }
@@ -213,7 +214,7 @@ constexpr TypeId NativeTypeIdOf() noexcept {
 //   auto actor = objects.NewObject<Actor>(access, rocks::ObjectTypeIdOf<SpinningActor>());
 template <class T>
 constexpr TypeId ObjectTypeIdOf() noexcept {
-    static_assert(__is_base_of(Object, T), "ObjectTypeIdOf requires an Object-derived type");
+    static_assert(IsBaseOfV<Object, T>, "ObjectTypeIdOf requires an Object-derived type");
     if constexpr (NativeClassType<T>) {
         return T::StaticTypeId;
     } else if constexpr (requires { GeneratedType<T>::Id(); }) {
@@ -250,10 +251,10 @@ constexpr TypeId ObjectTypeIdOf() noexcept {
 template <NativeClassType T>
 Result<TypeRegistrationToken> RegisterNativeClass(TypeRegistry& types,
                                                   ModuleLease module = {}) noexcept {
-    static_assert(__is_same(typename T::ThisClass, T),
+    static_assert(IsSameV<typename T::ThisClass, T>,
                   "ROCKS_NATIVE_TYPE is missing in this class; it inherited its base's identity");
     using Base = typename T::Super;
-    static_assert(__is_base_of(Base, T) && !__is_same(Base, T));
+    static_assert(IsBaseOfV<Base, T> && !IsSameV<Base, T>);
     // native 사슬 위의 첫 리플렉션 조상이다(없으면 void). 기반이 native도 리플렉션 클래스도 아니면
     // ReflectedAncestorOf의 static_assert가 안내한다.
     using Reflected = detail::ReflectedAncestor<T>;
@@ -266,12 +267,12 @@ Result<TypeRegistrationToken> RegisterNativeClass(TypeRegistry& types,
     TypeSchema schema;
     schema.id = T::StaticTypeId;
     schema.name = Span<const char>(T::StaticTypeName, sizeof(T::StaticTypeName) - 1);
-    schema.flags = __is_abstract(T) ? static_cast<uint32>(TypeFlags::Abstract) : 0u;
+    schema.flags = IsAbstractV<T> ? static_cast<uint32>(TypeFlags::Abstract) : 0u;
     RuntimeTypeOps ops = MakeRuntimeTypeOps<T>(Move(module));
     ops.trace = [](const Object& object, TraceVisitor& visitor) noexcept {
         detail::TraceNativeChain<T>(static_cast<const T&>(object), visitor);
     };
-    if constexpr (!__is_same(Reflected, void)) {
+    if constexpr (!IsSameV<Reflected, void>) {
         // 리플렉션 조상의 필드를 같은 ID·표현으로 담고(TypeRegistry의 상속 필드 대조) 그 생성
         // thunk를 빌린다. 스키마와 함수표는 TypeRegistry가 깊게 복사한다. WorldOnly는 상속되는
         // 플래그다(생성 스키마의 flags는 상속한 WorldOnly를 포함한다).
@@ -283,7 +284,7 @@ Result<TypeRegistrationToken> RegisterNativeClass(TypeRegistry& types,
         ops.parallelTraceSafe = false;
     }
 
-    if constexpr (!__is_same(Base, Object)) {
+    if constexpr (!IsSameV<Base, Object>) {
         schema.baseType = ObjectTypeIdOf<Base>();
         ops.nativeBaseType = NativeTypeKey<Base>();
     }

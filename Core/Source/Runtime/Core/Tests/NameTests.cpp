@@ -1,3 +1,4 @@
+#include <Base/TypeTraits.h>
 #include <TestSupport/Test.h>
 #include <TestSupport/NFailAllocator.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -217,8 +218,8 @@ Result<void> RunNameLifecycle(Allocator& allocator) noexcept {
 } // namespace
 
 TEST(NameEmptyIsNoneAndInternOwnsOtherBytes) {
-    static_assert(__is_trivially_copyable(Name));
-    static_assert(!__is_constructible(NameLease, const NameLease&));
+    static_assert(IsTriviallyCopyableV<Name>);
+    static_assert(!IsConstructibleV<NameLease, const NameLease&>);
     SystemAllocator allocator;
     {
         NamePool pool(allocator);

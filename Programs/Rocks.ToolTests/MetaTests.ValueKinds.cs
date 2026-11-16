@@ -169,8 +169,8 @@ internal static partial class MetaTests
             Verify.Contains("static_assert(static_cast<int64>(::probe::Mode::D) == 42ll", generated, "value static_assert");
             string compact = Compact(generated);
             Verify.Contains("(-9223372036854775807ll-1)", compact, "int64 minimum is written as an expression");
-            Verify.Contains("__underlying_type(::probe::Wide),int64)", compact, "int64 underlying static_assert");
-            Verify.Contains("__underlying_type(::probe::Tiny),int8)", compact, "int8 underlying static_assert");
+            Verify.Contains("::rocks::UnderlyingTypeT<::probe::Wide>,int64>", compact, "int64 underlying static_assert");
+            Verify.Contains("::rocks::UnderlyingTypeT<::probe::Tiny>,int8>", compact, "int8 underlying static_assert");
             Verify.Contains("ValueKind::UInt64", generated, "uint64 underlying schema");
             ProcessResult compiled = await probe.CompileGeneratedAsync();
             Verify.Equal(0, compiled.ExitCode, "generated 8-underlying enum header compiles: " + compiled.StdOut + compiled.StdErr);

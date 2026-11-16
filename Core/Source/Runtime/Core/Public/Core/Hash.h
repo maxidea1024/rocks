@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Base/Endian.h>
 #include <Base/Guid.h>
 #include <Core/Encoding/Sha256.h>
@@ -29,8 +30,7 @@ constexpr uint64 HashCombine(uint64 seed, uint64 value) noexcept {
 template <typename T>
 struct Hash {
     uint64 operator()(const T& value) const noexcept {
-        static_assert(__is_integral(T) || __is_enum(T),
-                      "Provide a custom hasher for this key type");
+        static_assert(IsIntegralV<T> || IsEnumV<T>, "Provide a custom hasher for this key type");
         return MixHash(static_cast<uint64>(value));
     }
 };
@@ -299,7 +299,7 @@ struct SeededHash : SeededHashBase {
     SeededHash() noexcept = default;
 
     uint64 operator()(const T& value) const noexcept {
-        static_assert(__is_integral(T) || __is_enum(T),
+        static_assert(IsIntegralV<T> || IsEnumV<T>,
                       "Provide a SeededHash specialization for this key type");
         const uint64 widened = static_cast<uint64>(value);
         return SipHash24Words(Seed(), &widened, 1);

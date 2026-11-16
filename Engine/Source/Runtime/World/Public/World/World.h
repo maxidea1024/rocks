@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Core/Containers/HashMap.h>
 #include <Core/Text/String.h>
 #include <Core/Time/GameClock.h>
@@ -209,7 +210,7 @@ public:
     // 아니면 StaleHandle이다.
     template <class T>
     Result<ObjectHandle> SpawnActorDeferred(const SpawnParams& params = {}) noexcept {
-        static_assert(__is_base_of(Actor, T));
+        static_assert(IsBaseOfV<Actor, T>);
         return SpawnActorDeferred(ObjectTypeIdOf<T>(), params);
     }
 
@@ -226,7 +227,7 @@ public:
     // SpawnActorDeferred + FinishSpawning이다. FinishSpawning이 실패하면 오류를 반환한다.
     template <class T>
     Result<ObjectHandle> SpawnActor(const SpawnParams& params = {}) noexcept {
-        static_assert(__is_base_of(Actor, T));
+        static_assert(IsBaseOfV<Actor, T>);
         return SpawnActor(ObjectTypeIdOf<T>(), params);
     }
 
@@ -289,7 +290,7 @@ public:
     // Component를 정리한다. 파괴 대기 Actor는 Destroyed다.
     template <class T>
     Result<ObjectHandle> AddComponent(ObjectHandle actor) noexcept {
-        static_assert(__is_base_of(Component, T));
+        static_assert(IsBaseOfV<Component, T>);
         return AddComponent(actor, ObjectTypeIdOf<T>());
     }
 
@@ -306,7 +307,7 @@ public:
     // 건너뛴다.
     template <class T>
     ObjectHandle FindComponent(ObjectHandle actor) noexcept {
-        static_assert(__is_base_of(Component, T));
+        static_assert(IsBaseOfV<Component, T>);
         ObjectAccessScope scope(Access());
         for (usize index = 0;; ++index) {
             const ComponentSlot slot = ComponentSlotAt(actor, index);
@@ -341,7 +342,7 @@ public:
     auto With(ObjectHandle handle, Function&& function) noexcept {
         using Returned = decltype(function(DeclVal<T&>()));
         static_assert(
-            !__is_pointer(Returned) && !__is_reference(Returned) && !detail::IsSpanV<Returned>,
+            !IsPointerV<Returned> && !IsReferenceV<Returned> && !detail::IsSpanV<Returned>,
             "World::With must not return pointers, references, or Spans into the borrowed "
             "object; copy the values out instead");
         using Output = typename detail::WithResult<Returned>::Type;
@@ -356,7 +357,7 @@ public:
             return Output::Failure(pointer.Error());
         }
 
-        if constexpr (__is_same(Returned, void)) {
+        if constexpr (IsSameV<Returned, void>) {
             function(*pointer.Value());
             return Output::Success();
         } else if constexpr (detail::IsResultV<Returned>) {

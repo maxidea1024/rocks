@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Base/Types.h>
 
 namespace rocks::platform {
@@ -58,7 +59,7 @@ inline bool MemoryEquals(const void* left, const void* right, usize bytes) noexc
 template <class To, class From>
 constexpr To BitCast(const From& value) noexcept {
     static_assert(sizeof(To) == sizeof(From), "BitCast requires types of the same size");
-    static_assert(__is_trivially_copyable(To) && __is_trivially_copyable(From),
+    static_assert(IsTriviallyCopyableV<To> && IsTriviallyCopyableV<From>,
                   "BitCast requires trivially copyable types");
     return __builtin_bit_cast(To, value);
 }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Core/Containers/Array.h>
 #include <Core/Encoding/Sha256.h>
 #include <Core/Lifetime/ModuleLease.h>
@@ -486,7 +487,7 @@ struct RuntimeTypeOps {
     Span<const RuntimeFieldOps> fields;
     // 기반 C++ 타입의 NativeTypeKey다. Resolve<기반>이 Object*에서 기반 포인터로 static_cast하는
     // 근거이므로, 등록 타입이 이 기반을 단일 public 비가상 상속한다는 것을 설정하는 쪽이 컴파일 시
-    // 보증해야 한다(RegisterNativeClass·메타 생성 코드는 static_assert(__is_base_of)를 거친다).
+    // 보증해야 한다(RegisterNativeClass·메타 생성 코드는 static_assert(IsBaseOfV)를 거친다).
     // 수동 함수표에서 임의로 설정하지 않는다. TypeRegistry는 기반 레코드 일치·크기·정렬 하한만
     // 검사한다.
     const void* nativeBaseType = nullptr;
@@ -505,14 +506,14 @@ struct RuntimeTypeOps {
 // Abstract 메타데이터는 생성 callback 없이 등록하고 생성 시도는 Unsupported로 거부한다.
 // 실패 가능한 초기화는 생성자 밖의 ConstructionContext 단계에서 처리한다.
 // Trace가 없는 타입은 강한 간선이 없는 것으로 취급한다. 메타데이터 자동 추적은 없다.
-template <class T, bool Abstract = __is_abstract(T)>
+template <class T, bool Abstract = IsAbstractV<T>>
 RuntimeTypeOps MakeRuntimeTypeOps(ModuleLease module = {}) noexcept {
-    static_assert(__is_base_of(Object, T));
+    static_assert(IsBaseOfV<Object, T>);
     static_assert(
-        Abstract || __is_nothrow_constructible(T, Allocator&) || __is_nothrow_constructible(T),
+        Abstract || IsNothrowConstructibleV<T, Allocator&> || IsNothrowConstructibleV<T>,
         "Object types need `explicit T(Allocator&) noexcept` or `T() noexcept`; a derived "
         "class whose base takes Allocator& must forward it (e.g. `using Super::Super;`)");
-    static_assert(__is_nothrow_destructible(T), "Object types need a noexcept destructor");
+    static_assert(IsNothrowDestructibleV<T>, "Object types need a noexcept destructor");
 
     RuntimeTypeOps ops;
     ops.size = sizeof(T);
@@ -520,8 +521,8 @@ RuntimeTypeOps MakeRuntimeTypeOps(ModuleLease module = {}) noexcept {
     ops.nativeType = NativeTypeKey<T>();
     if constexpr (!Abstract) {
         ops.construct = [](void* memory, Allocator& allocator) noexcept -> Object* {
-            if constexpr (__is_constructible(T, Allocator&)) {
-                static_assert(__is_nothrow_constructible(T, Allocator&));
+            if constexpr (IsConstructibleV<T, Allocator&>) {
+                static_assert(IsNothrowConstructibleV<T, Allocator&>);
                 return ::new (memory) T(allocator);
             } else {
                 return ::new (memory) T();
@@ -558,18 +559,18 @@ RuntimeTypeOps MakeRuntimeTypeOps(ModuleLease module = {}) noexcept {
 //   ops.fields = Span<const RuntimeStructFieldOps>(fields, 3);
 template <class S>
 RuntimeStructOps MakeRuntimeStructOps(ModuleLease module = {}) noexcept {
-    static_assert(!__is_base_of(Object, S), "Reflected structs are values, not Object types");
-    static_assert(__is_nothrow_constructible(S, Allocator&) || __is_nothrow_constructible(S),
+    static_assert(!IsBaseOfV<Object, S>, "Reflected structs are values, not Object types");
+    static_assert(IsNothrowConstructibleV<S, Allocator&> || IsNothrowConstructibleV<S>,
                   "Reflected structs need `explicit S(Allocator&) noexcept` or `S() noexcept`");
-    static_assert(__is_nothrow_destructible(S), "Reflected structs need a noexcept destructor");
+    static_assert(IsNothrowDestructibleV<S>, "Reflected structs need a noexcept destructor");
 
     RuntimeStructOps ops;
     ops.size = sizeof(S);
     ops.alignment = alignof(S);
     ops.nativeType = NativeTypeKey<S>();
     ops.construct = [](void* memory, Allocator& allocator) noexcept {
-        if constexpr (__is_constructible(S, Allocator&)) {
-            static_assert(__is_nothrow_constructible(S, Allocator&));
+        if constexpr (IsConstructibleV<S, Allocator&>) {
+            static_assert(IsNothrowConstructibleV<S, Allocator&>);
             ::new (memory) S(allocator);
         } else {
             ::new (memory) S();

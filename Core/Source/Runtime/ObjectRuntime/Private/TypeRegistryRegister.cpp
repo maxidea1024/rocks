@@ -354,7 +354,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
             }
 
             // nativeBaseType은 Resolve<기반>의 포인터 변환 근거다. C++ 상속 자체는 등록 코드의
-            // static_assert(__is_base_of)가 보증하고, 여기서는 명백히 잘못된 수동 함수표(기반보다
+            // static_assert(IsBaseOfV)가 보증하고, 여기서는 명백히 잘못된 수동 함수표(기반보다
             // 작거나 정렬이 약한 파생)를 거부한다.
             if (ops.size < base->ops.size || ops.alignment < base->ops.alignment) {
                 return Result<TypeRegistrationToken>::Failure(ErrorCode::TypeMismatch);

@@ -1,3 +1,4 @@
+#include <Base/TypeTraits.h>
 #include <Base/Checked.h>
 #include <Base/Compiler.h>
 #include <Base/Endian.h>
@@ -51,8 +52,8 @@ static_assert(NumericLimits<double>::Max() == DBL_MAX && NumericLimits<double>::
 static_assert(NumericLimits<const uint32>::Max() == UINT32_MAX &&
               NumericLimits<volatile int8>::Min() == INT8_MIN &&
               NumericLimits<const volatile double>::Max() == DBL_MAX);
-static_assert(__is_same(decltype(NumericLimits<uint8>::Max()), uint8) &&
-              __is_same(decltype(NumericLimits<int16>::Min()), int16));
+static_assert(IsSameV<decltype(NumericLimits<uint8>::Max()), uint8> &&
+              IsSameV<decltype(NumericLimits<int16>::Min()), int16>);
 // "없음" 표지와 usize 최대값은 같은 값이지만 다른 이름이다.
 static_assert(MaxSize == SIZE_MAX && IndexNone == MaxSize);
 

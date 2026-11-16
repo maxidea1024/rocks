@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/TypeTraits.h>
 #include <Core/Containers/Array.h>
 #include <Core/Containers/Span.h>
 #include <Core/Memory/UniquePtr.h>
@@ -51,7 +52,7 @@ struct SubsystemType {
 template <class Base, class T>
 SubsystemType<Base> MakeSubsystemType(const char* name,
                                       Span<const SubsystemKey> dependencies = {}) noexcept {
-    static_assert(__is_base_of(Base, T));
+    static_assert(IsBaseOfV<Base, T>);
     SubsystemType<Base> type;
     type.key = SubsystemKeyOf<T>();
     type.name = name;

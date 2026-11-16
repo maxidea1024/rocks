@@ -1,3 +1,4 @@
+#include <Base/TypeTraits.h>
 #include <TestSupport/Test.h>
 #include <Core/Text/StringView.h>
 #include <Core/Variant.h>
@@ -85,14 +86,14 @@ using Mixed = Variant<int, float, StringView>;
 static_assert(Mixed::Count == 3 && VariantSizeV<const Mixed&> == 3);
 static_assert(Mixed::IndexOf<float> == 1 && Mixed::IndexOf<double> == Mixed::Count);
 static_assert(IsSameV<VariantAlternativeT<2, Mixed>, StringView>);
-static_assert(__is_constructible(Variant<long, float>, long));
-static_assert(!__is_constructible(Variant<long, float>, int)); // 변환이 필요한 값은 명시해야 한다
-static_assert(!__is_constructible(Variant<bool, StringView>, const char*));
-static_assert(__is_constructible(Variant<long, float>, InPlaceType<long>, int));
-static_assert(!__is_constructible(Variant<int, MoveOnly>, const Variant<int, MoveOnly>&));
-static_assert(__is_constructible(Variant<int, MoveOnly>, Variant<int, MoveOnly>&&));
-static_assert(!__is_constructible(Variant<NoDefault, int>)); // 첫 대안이 기본 생성 불가
-static_assert(__is_constructible(Variant<int, NoDefault>));
+static_assert(IsConstructibleV<Variant<long, float>, long>);
+static_assert(!IsConstructibleV<Variant<long, float>, int>); // 변환이 필요한 값은 명시해야 한다
+static_assert(!IsConstructibleV<Variant<bool, StringView>, const char*>);
+static_assert(IsConstructibleV<Variant<long, float>, InPlaceType<long>, int>);
+static_assert(!IsConstructibleV<Variant<int, MoveOnly>, const Variant<int, MoveOnly>&>);
+static_assert(IsConstructibleV<Variant<int, MoveOnly>, Variant<int, MoveOnly>&&>);
+static_assert(!IsConstructibleV<Variant<NoDefault, int>>); // 첫 대안이 기본 생성 불가
+static_assert(IsConstructibleV<Variant<int, NoDefault>>);
 static_assert(sizeof(Variant<char, double>) == 16 && alignof(Variant<char, double>) == 8);
 static_assert(sizeof(Variant<char>) == 2);
 

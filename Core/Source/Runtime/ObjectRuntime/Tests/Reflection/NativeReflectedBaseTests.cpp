@@ -1,3 +1,4 @@
+#include <Base/TypeTraits.h>
 #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Object/NativeClass.h>
@@ -150,10 +151,10 @@ static_assert(ObjectTypeIdOf<NativeWorldActor>() == NativeWorldActor::StaticType
 static_assert(ObjectTypeIdOf<NativeWorldLeaf>() == NativeTypeIdOf<NativeWorldLeaf>());
 static_assert(ObjectTypeIdOf<WorldFixture>() == TypeIdOf<WorldFixture>());
 static_assert(ObjectTypeIdOf<SceneFixture>() == GeneratedType<SceneFixture>::Id());
-static_assert(__is_same(detail::ReflectedAncestor<NativeWorldActor>, WorldFixture));
-static_assert(__is_same(detail::ReflectedAncestor<NativeWorldLeaf>, WorldFixture));
-static_assert(__is_same(detail::ReflectedAncestor<NativeSceneActor>, SceneFixture));
-static_assert(__is_same(detail::ReflectedAncestor<NativePlain>, void));
+static_assert(IsSameV<detail::ReflectedAncestor<NativeWorldActor>, WorldFixture>);
+static_assert(IsSameV<detail::ReflectedAncestor<NativeWorldLeaf>, WorldFixture>);
+static_assert(IsSameV<detail::ReflectedAncestor<NativeSceneActor>, SceneFixture>);
+static_assert(IsSameV<detail::ReflectedAncestor<NativePlain>, void>);
 static_assert(NativeClassType<NativeWorldActor> && !NativeClassType<WorldFixture>);
 
 template <class T>

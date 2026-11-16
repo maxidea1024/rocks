@@ -1,3 +1,4 @@
+#include <Base/TypeTraits.h>
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 #include <Core/Delegate.h>
@@ -54,8 +55,8 @@ struct Large {
 };
 
 // 컴파일 시간 계약: 이동 전용, 큰 lambda는 inline으로 만들 수 없다.
-static_assert(!__is_constructible(Delegate<void()>, const Delegate<void()>&));
-static_assert(__is_constructible(Delegate<void()>, Delegate<void()>&&));
+static_assert(!IsConstructibleV<Delegate<void()>, const Delegate<void()>&>);
+static_assert(IsConstructibleV<Delegate<void()>, Delegate<void()>&&>);
 static_assert(sizeof(Delegate<void()>) <= DelegateInlineBytes + 24);
 
 } // namespace
