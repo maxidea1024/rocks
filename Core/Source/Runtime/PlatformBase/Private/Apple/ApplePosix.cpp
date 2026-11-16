@@ -65,4 +65,10 @@ int PosixDecommitAdvice() noexcept {
     return MADV_FREE;
 }
 
+// macOS 시스템 라이브러리는 dyld 공유 캐시에 있어 파일이 없어도 /usr/lib 절대 경로로 열린다. 이름만
+// 넘기면 dyld가 DYLD_LIBRARY_PATH·현재 디렉터리 같은 대체 경로도 찾으므로 절대 경로로 연다.
+const char* PosixSystemLibraryDirectory() noexcept {
+    return "/usr/lib/";
+}
+
 } // namespace rocks::platform::detail
