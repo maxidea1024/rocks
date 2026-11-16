@@ -243,7 +243,7 @@ protected:
 // `,`·`=`·`"`·`\`·ASCII 공백·제어 문자를 담을 수 없다(Syntax — 그런 key는 따옴표로 쓴다, 표기가
 // 하나가 되게). 따옴표 key(`ratios["a b"]`) 안에서는 UE ParseQuotedString의 escape 가운데 다섯
 // (`\\`·`\"`·`\n`·`\r`·`\t`)만 받고 그 밖의 `\x`(UE의 `\'`·8진 포함)와 날 제어 문자는 Syntax다.
-// 키 텍스트:
+// 키 텍스트(Soft·ClassRef 말고는 값 표기와 같은 공용 규칙 — Object/ValueText.h ParseScalarText):
 //   - String·Name: 그대로(Name은 정규화하지 않는다 — None은 `None`, 빈 key도 None으로 읽는다)
 //   - bool: true·false·on·off(ASCII 대소문자 무시)
 //   - 정수: 정규 10진(앞자리 0·`+`·`-0` 거부, 범위 밖 거부)

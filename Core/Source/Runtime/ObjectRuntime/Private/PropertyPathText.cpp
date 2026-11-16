@@ -1,8 +1,7 @@
 #include <Core/Guid.h>
 #include <Core/Optional.h>
-#include <Core/Text/NumberText.h>
-#include <Object/AssetId.h>
 #include <Object/PropertyPath.h>
+#include <Object/ValueText.h>
 
 // 문자열 경로(ParsePropertyPath·FormatPropertyPath)다. 도구 이름 조회는 대소문자 무시이고 원소
 // index는 정규 10진이다(Docs/Design/ReflectionFoundations.ko.md 7.1절). Map·Set의 key는 키 종류의
@@ -113,236 +112,14 @@ usize DecimalDigits(uint64 value) noexcept {
     return digits;
 }
 
-// value의 10진 표기를 out 끝(오른쪽 정렬)에 쓰고 쓴 범위를 돌려준다(out은 21자 이상).
-Span<const char> FormatDecimal(uint64 value, bool negative, char* out, usize capacity) noexcept {
-    usize count = 0;
-    do {
-        out[capacity - 1 - count++] = static_cast<char>('0' + value % 10);
-        value /= 10;
-    } while (value != 0);
-
-    if (negative) {
-        out[capacity - 1 - count++] = '-';
-    }
-
-    return Span<const char>(out + capacity - count, count);
-}
-
-// 정수 key 텍스트가 정규 10진인지다: 숫자 하나 이상, 앞자리 0은 `0` 하나만, 부호는 부호 있는
-// 종류의 `-`만이다(`+`·`-0` 거부 — 표기가 하나가 되게, 출력 FormatDecimal과 같다).
-bool IsCanonicalDecimal(StringView text, bool signedKind) noexcept {
-    const char* data = text.Data();
-    usize size = text.ByteCount();
-    usize start = 0;
-    if (signedKind && size != 0 && data[0] == '-') {
-        start = 1;
-    }
-
-    if (start == size) {
-        return false;
-    }
-
-    for (usize index = start; index < size; ++index) {
-        if (!IsDigit(data[index])) {
-            return false;
-        }
-    }
-
-    if (data[start] == '0') {
-        return size - start == 1 && start == 0;
-    }
-
-    return true;
-}
-
-constexpr char HexDigits[] = "0123456789abcdef";
-
-// Guid의 36자 소문자 표기(RFC 9562 — Core Guid "{}"·AssetId 표기와 같다, high가 앞 16자리)다.
-Span<const char> FormatGuidText(Guid value, char* out) noexcept {
-    usize count = 0;
-    for (usize nibble = 0; nibble < 32; ++nibble) {
-        if (nibble == 8 || nibble == 12 || nibble == 16 || nibble == 20) {
-            out[count++] = '-';
-        }
-
-        const uint64 word = nibble < 16 ? value.high : value.low;
-        const uint32 shift = static_cast<uint32>(60 - 4 * (nibble % 16));
-        out[count++] = HexDigits[(word >> shift) & 0xf];
-    }
-
-    return Span<const char>(out, count);
-}
-
-// Flags enum key 텍스트(`A+B`·`A|B`, 빈 값은 0)를 값으로 읽는다. 빈 이름 조각·모르는 이름이면
-// false다.
-bool ParseFlagsText(const EnumSchema& schema, StringView text, int64& value) noexcept {
-    value = 0;
-    const char* data = text.Data();
-    const usize size = text.ByteCount();
-    if (size == 0) {
-        return true;
-    }
-
-    usize start = 0;
-    for (usize position = 0; position <= size; ++position) {
-        if (position != size && data[position] != '+' && data[position] != '|') {
-            continue;
-        }
-
-        if (position == start) {
-            return false;
-        }
-
-        const EnumeratorSchema* found =
-            FindEnumerator(schema, Span<const char>(data + start, position - start));
-        if (!found) {
-            return false;
-        }
-
-        value |= found->value;
-        start = position + 1;
-    }
-
-    return true;
-}
-
-// Flags enum 값의 정규 텍스트(선언 순 `A+B`, 0은 빈 값)를 out(없으면 길이만)에 쓰고 byte 수를
-// 돌려준다. 이름 있는 열거자 조합으로 나타낼 수 없는 비트가 남으면 false다.
-bool FormatFlagsText(const EnumSchema& schema, int64 value, String* out, usize& bytes) noexcept {
-    bytes = 0;
-    int64 remaining = value;
-    bool first = true;
-    for (usize index = 0; index < schema.values.Size() && remaining != 0; ++index) {
-        const EnumeratorSchema& enumerator = schema.values[index];
-        if (enumerator.value == 0 || (enumerator.value & ~value) != 0 ||
-            (enumerator.value & remaining) == 0) {
-            continue;
-        }
-
-        const Span<const char> name = EffectiveToolName(enumerator);
-        if (out && ((!first && !out->TryAppend("+")) ||
-                    !out->TryAppend(StringView(name.Data(), name.Size())))) {
-            return false;
-        }
-
-        bytes += name.Size() + (first ? 0 : 1);
-        first = false;
-        remaining &= ~enumerator.value;
-    }
-
-    return remaining == 0;
-}
-
 // key 텍스트를 키 종류의 값으로 읽는다(ParsePropertyPath — text는 escape를 푼 원문).
-// Soft·ClassRef는 hook이 읽고(없으면 Unsupported), 그 밖의 해석 실패는 InvalidArgument다.
+// Soft·ClassRef는 hook이 읽고(없으면 Unsupported), 그 밖은 공용 단일 값 표기(ParseScalarText —
+// Object/ValueText.h)이며 해석 실패는 InvalidArgument다(64비트 범위 밖도 — 좁은 폭의 범위는 wire
+// 정규형이 Overflow로 본다).
 Result<PathKeyValue> ParseKeyText(const ValueType& keyType, const EnumSchema* keyEnum,
                                   StringView text, PathKeyTextHook* hook) noexcept {
-    const auto invalid = []() noexcept {
-        return Result<PathKeyValue>::Failure(ErrorCode::InvalidArgument);
-    };
-
-    const Span<const char> span(text.Data(), text.ByteCount());
-    PathKeyValue value;
-    value.kind = keyType.kind;
-    switch (keyType.kind) {
-    case ValueKind::Bool: {
-        const auto is = [&](const char* word, usize bytes) noexcept {
-            return EqualsIgnoringAsciiCase(span, Span<const char>(word, bytes));
-        };
-
-        if (is("true", 4) || is("on", 2)) {
-            value.boolean = true;
-        } else if (!is("false", 5) && !is("off", 3)) {
-            return invalid();
-        }
-
-        break;
-    }
-    case ValueKind::UInt8:
-    case ValueKind::UInt16:
-    case ValueKind::UInt32:
-    case ValueKind::UInt64: {
-        if (!IsCanonicalDecimal(text, false)) {
-            return invalid();
-        }
-
-        auto parsed = TryParseUInt64(text);
-        if (!parsed) {
-            return invalid();
-        }
-
-        value.unsignedInteger = parsed.Value();
-        break;
-    }
-    case ValueKind::Int8:
-    case ValueKind::Int16:
-    case ValueKind::Int32:
-    case ValueKind::Int64: {
-        if (!IsCanonicalDecimal(text, true)) {
-            return invalid();
-        }
-
-        auto parsed = TryParseInt64(text);
-        if (!parsed) {
-            return invalid();
-        }
-
-        value.signedInteger = parsed.Value();
-        break;
-    }
-    case ValueKind::Enum: {
-        if (!keyEnum) {
-            return invalid();
-        }
-
-        if (HasFlag(keyEnum->flags, EnumFlags::Flags)) {
-            if (!ParseFlagsText(*keyEnum, text, value.signedInteger)) {
-                return invalid();
-            }
-
-            break;
-        }
-
-        const EnumeratorSchema* found = FindEnumerator(*keyEnum, span);
-        if (!found) {
-            return invalid();
-        }
-
-        value.signedInteger = found->value;
-        break;
-    }
-    case ValueKind::Guid:
-    case ValueKind::AssetId: {
-        // AssetId 표기 규칙(36자 소문자 하나뿐 — AssetId::TryParse)이고 Guid 키도 같다(10.4절).
-        auto parsed = AssetId::TryParse(text);
-        if (!parsed) {
-            return invalid();
-        }
-
-        value.guid = parsed.Value().value;
-        break;
-    }
-    case ValueKind::Digest256: {
-        for (usize index = 0; index < text.ByteCount(); ++index) {
-            if (text.Data()[index] >= 'A' && text.Data()[index] <= 'F') {
-                return invalid();
-            }
-        }
-
-        auto parsed = Sha256Digest::ParseHex(text);
-        if (!parsed) {
-            return invalid();
-        }
-
-        value.digest = parsed.Value();
-        break;
-    }
-    case ValueKind::Utf8String:
-    case ValueKind::Name:
-        value.text = text;
-        break;
-    case ValueKind::SoftObjectReference:
-    case ValueKind::ClassReference: {
+    if (keyType.kind == ValueKind::SoftObjectReference ||
+        keyType.kind == ValueKind::ClassReference) {
         if (!hook) {
             // resolver(논리 경로)·TypeRegistry(타입 도구 이름)가 필요하다 — ReflectionText가 hook을
             // 준다.
@@ -360,11 +137,13 @@ Result<PathKeyValue> ParseKeyText(const ValueType& keyType, const EnumSchema* ke
 
         return resolved;
     }
-    default:
-        return invalid();
+
+    auto parsed = ParseScalarText(keyType, keyEnum, text);
+    if (!parsed) {
+        return Result<PathKeyValue>::Failure(ErrorCode::InvalidArgument);
     }
 
-    return Result<PathKeyValue>::Success(value);
+    return parsed;
 }
 
 // key 하나의 형식화 결과다: 따옴표·escape 전 텍스트(text — 지역 버퍼·key wire·schema·hook 문자열을
@@ -424,7 +203,7 @@ Result<void> FormatKeyText(const ValueType& keyType, const EnumSchema* keyEnum, 
     case ValueKind::UInt16:
     case ValueKind::UInt32:
     case ValueKind::UInt64:
-        piece.text = FormatDecimal(value.unsignedInteger, false, buffer, KeyTextBytes);
+        piece.text = detail::FormatDecimalText(value.unsignedInteger, false, buffer, KeyTextBytes);
         break;
     case ValueKind::Int8:
     case ValueKind::Int16:
@@ -434,7 +213,7 @@ Result<void> FormatKeyText(const ValueType& keyType, const EnumSchema* keyEnum, 
         const bool negative = value.signedInteger < 0;
         const uint64 magnitude = negative ? uint64{0} - static_cast<uint64>(value.signedInteger)
                                           : static_cast<uint64>(value.signedInteger);
-        piece.text = FormatDecimal(magnitude, negative, buffer, KeyTextBytes);
+        piece.text = detail::FormatDecimalText(magnitude, negative, buffer, KeyTextBytes);
         break;
     }
     case ValueKind::Enum: {
@@ -444,7 +223,8 @@ Result<void> FormatKeyText(const ValueType& keyType, const EnumSchema* keyEnum, 
 
         if (HasFlag(keyEnum->flags, EnumFlags::Flags)) {
             // 이름 조각은 식별자 글자뿐이라 따옴표가 필요 없다.
-            if (!FormatFlagsText(*keyEnum, value.signedInteger, nullptr, piece.bytes)) {
+            if (!detail::FormatFlagsText<String>(*keyEnum, value.signedInteger, nullptr,
+                                                 piece.bytes)) {
                 return Result<void>::Failure(ErrorCode::Unsupported);
             }
 
@@ -471,7 +251,7 @@ Result<void> FormatKeyText(const ValueType& keyType, const EnumSchema* keyEnum, 
     }
     case ValueKind::Guid:
     case ValueKind::AssetId:
-        piece.text = FormatGuidText(value.guid, buffer);
+        piece.text = detail::FormatGuidText(value.guid, buffer);
         break;
     case ValueKind::Digest256: {
         char hex[Sha256Digest::HexBytes + 1];
@@ -526,7 +306,7 @@ Result<void> AppendKeyPiece(const KeyPiece& piece, String& out) noexcept {
 
     if (piece.flagsEnum) {
         usize bytes = 0;
-        if (!FormatFlagsText(*piece.flagsEnum, piece.flags, &out, bytes)) {
+        if (!detail::FormatFlagsText(*piece.flagsEnum, piece.flags, &out, bytes)) {
             return failed();
         }
     } else {
@@ -919,7 +699,7 @@ Result<void> FormatPropertyPath(const TypeLease& type, PropertyPath path, String
         if (steps[index].selector == PathSelector::Index) {
             char digits[KeyTextBytes];
             const Span<const char> text =
-                FormatDecimal(steps[index].index, false, digits, KeyTextBytes);
+                detail::FormatDecimalText(steps[index].index, false, digits, KeyTextBytes);
             if (!result.TryAppend("[") || !result.TryAppend(StringView(text.Data(), text.Size())) ||
                 !result.TryAppend("]")) {
                 return Result<void>::Failure(ErrorCode::OutOfMemory);

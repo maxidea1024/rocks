@@ -21,8 +21,8 @@ class NamePool;
 //   auto checked = ValidateTextCodecOptions(options);
 namespace rocks::reflection_text {
 
-// 참조 텍스트(논리 경로·AssetId)를 handle·Soft 값으로 풀고 반대로 쓰는 hook이다(10.3절 — 대입 묶음
-// 단계에서 정의한다).
+// 참조 텍스트(논리 경로·AssetId)를 handle·Soft 값으로 풀고 반대로 쓰는 hook이다(10.3절 — 정의는
+// <ReflectionText/TextReference.h>).
 class TextReferenceResolver;
 
 // JSON import가 기존 Map 값 위에 읽는 방식이다(10.4절 "JSON import 의미").
