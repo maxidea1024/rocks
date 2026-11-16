@@ -91,7 +91,7 @@ Result<void> PathValue(PathCursor& cursor, T& value) noexcept {
             // ClassRef 값은 정적 Base의 파생이어야 한다(등록·스키마 Base는 검증 지점이 봤다).
             if constexpr (Target == ValueKind::ClassReference) {
                 if (auto checked = cursor.CheckClassTarget(
-                        NativeTypeKey<typename ClassReferenceField<T>::Target>());
+                        NativeTypeKey<typename ClassReferenceField<T>::Target>(), value.Id());
                     !checked) {
                     return checked;
                 }

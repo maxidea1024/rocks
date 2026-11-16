@@ -9,6 +9,7 @@
 using namespace rocks;
 using namespace rocks::test::map;
 using reflection_fixture::FlagAtom;
+using reflection_fixture::FlagContainers;
 using reflection_fixture::FlagHolder;
 using reflection_fixture::FlagSaveAtom;
 using reflection_fixture::FlagSaveList;
@@ -290,6 +291,50 @@ TEST(FieldFlagGraph_RequiredCheckSkipsFieldsOutsideInclude) {
         CHECK(LoadAndCheck(allocator, fixture.types, bytes.Value().View(), {}, &unfiltered,
                            [](ObjectRegistry&, ObjectHandle) noexcept {}) == ErrorCode::None);
         CHECK(unfiltered.missing == 1);
+    }
+
+    REQUIRE(objects.Collect(objects.OwnerAccess()));
+    REQUIRE(objects.Shutdown(objects.OwnerAccess()));
+}
+
+// 컨테이너 안 struct의 멤버도 포함 필터를 자기 플래그로 본다(Map 값·Optional 내부·정적 배열 원소 —
+// EncodeStructRecord·DecodeStructRecord의 같은 길): SaveGame 저장은 각 자리의 dropped를 쓰지 않고
+// kept만 쓰며, 전부 저장한 파일을 포함 필터로 읽으면 InvalidArgument다.
+TEST(FieldFlagGraph_IncludeFlagsReachContainerStructMembers) {
+    SystemAllocator allocator;
+    FlagFixture fixture(allocator);
+    ObjectRegistry objects(allocator, fixture.types, {0x464c43, 1});
+    {
+        RootRef<FlagContainers> holder = New<FlagContainers>(objects);
+        With<FlagContainers>(objects, holder.Handle(), [](FlagContainers& value) noexcept {
+            Put(value.byId, int32{1}, FlagSlot{2, 3});
+            value.maybe.Emplace(FlagSlot{4, 5});
+            value.fixed[1] = FlagSlot{6, 7};
+        });
+
+        FieldEncodePolicy saveGame;
+        saveGame.includeFlags = SaveGameFlag;
+        auto bytes = Save(allocator, objects, holder.Handle(), saveGame);
+        REQUIRE(bytes);
+        FieldDecodePolicy includeLoad;
+        includeLoad.includeFlags = SaveGameFlag;
+        CHECK(LoadAndCheck(
+                  allocator, fixture.types, bytes.Value().View(), includeLoad, nullptr,
+                  [](ObjectRegistry& target, ObjectHandle handle) noexcept {
+                      With<FlagContainers>(target, handle, [](FlagContainers& value) noexcept {
+                          const FlagSlot* slot = value.byId.Find(int32{1});
+                          REQUIRE(slot);
+                          CHECK(slot->kept == 2 && slot->dropped == 0);
+                          REQUIRE(value.maybe.HasValue());
+                          CHECK(value.maybe->kept == 4 && value.maybe->dropped == 0);
+                          CHECK(value.fixed[1].kept == 6 && value.fixed[1].dropped == 0);
+                      });
+                  }) == ErrorCode::None);
+        auto full = Save(allocator, objects, holder.Handle(), {});
+        REQUIRE(full);
+        CHECK(LoadAndCheck(allocator, fixture.types, full.Value().View(), includeLoad, nullptr,
+                           [](ObjectRegistry&, ObjectHandle) noexcept {}) ==
+              ErrorCode::InvalidArgument);
     }
 
     REQUIRE(objects.Collect(objects.OwnerAccess()));

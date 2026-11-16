@@ -392,6 +392,28 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
                 return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
             }
 
+            // 파생이 Within을 다시 정하면 base Within의 파생이어야 한다(좁히기만 — MetaCompiler
+            // RMC2208과 같은 규칙). 자기 자신이면 base 사슬로, 등록된 다른 클래스면 그 레코드
+            // 사슬로 본다. 아직 등록되지 않은 Within 클래스(모듈 등록 순서)는 여기서 판정하지
+            // 않는다.
+            if (base->schema.withinType != TypeId{} &&
+                schema.withinType != base->schema.withinType) {
+                const auto derives = [&](const Record* record) noexcept {
+                    for (; record; record = record->base) {
+                        if (record->schema.id == base->schema.withinType) {
+                            return true;
+                        }
+                    }
+
+                    return false;
+                };
+                const Record* within =
+                    schema.withinType == schema.id ? base : FindLocked(schema.withinType);
+                if (within && !derives(within)) {
+                    return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
+                }
+            }
+
             // 파생 스키마는 base field를 동일한 안정 ID/표현으로 포함한다. 그래서 기반 타입의 필드
             // 함수(Resolve<기반> 경유)를 파생 객체에 써도 같은 필드를 가리킨다.
             for (usize baseIndex = 0; baseIndex < base->schema.fields.Size(); ++baseIndex) {

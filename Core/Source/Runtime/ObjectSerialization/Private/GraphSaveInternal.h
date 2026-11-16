@@ -192,10 +192,14 @@ protected:
     Result<void> WriteWeakReferenceWire(ArchiveWriter& out, ObjectHandle target,
                                         const ReferenceExpectation& expectation) noexcept override;
 
-    // 저장 불가 대상(UnsaveablePolicy::Exclude — 리플렉션 B9h2)의 참조 하나를 null로 쓴다:
-    // ExternalReference 진단(value 3 = Transient, 4 = Deprecated) 뒤 강한 참조면 Required 규칙을
-    // 적용한다. 대상이 저장 불가가 아니거나 Keep이면 거짓을 돌려주고 아무것도 쓰지 않는다.
-    Result<bool> WriteUnsaveable(ArchiveWriter& out, const TypeLease& actual, bool strong) noexcept;
+    // 저장 불가 대상(UnsaveablePolicy::Exclude — 리플렉션 B9h2)의 참조 하나를 null로 쓴다: 대상
+    // 자신이나 집합 밖의 Outer 조상(집합 노드에서 멈춘다 — 조상마다 작업량 1) 중 하나라도 저장 불가
+    // 클래스면(UE SavePackage가 저장 불가 Outer 아래 객체도 빼는 것과 같다) ExternalReference
+    // 진단(value 3 = Transient, 4 = Deprecated — 처음 만난 저장 불가 클래스) 뒤 강한 참조면
+    // Required 규칙을 적용한다. 그래서 Include·Admit은 그런 대상과 조상을 노드·import로 넣지
+    // 않는다. 대상이 저장 불가 사슬이 아니거나 Keep이면 거짓을 돌려주고 아무것도 쓰지 않는다.
+    Result<bool> WriteUnsaveable(ArchiveWriter& out, ObjectHandle target, const TypeLease& actual,
+                                 bool strong) noexcept;
 
 private:
     // Include·이름(GraphSaveSet.cpp), 기대 타입 캐시(GraphSave.cpp), 외부 참조(GraphExternal.cpp)

@@ -120,7 +120,7 @@ Result<void> PathCursor::CheckWeakTarget(const void* staticNative) noexcept {
     return Result<void>::Success();
 }
 
-Result<void> PathCursor::CheckClassTarget(const void* staticNative) noexcept {
+Result<void> PathCursor::CheckClassTarget(const void* staticNative, TypeId current) noexcept {
     // 검증 지점(6단계)이 non-null 값의 클래스 lease를 쥐었다(등록·스키마 Base 파생 검사 포함).
     if (!input_ || input_->guid == Guid{}) {
         return Result<void>::Success();
@@ -128,6 +128,11 @@ Result<void> PathCursor::CheckClassTarget(const void* staticNative) noexcept {
 
     if (!referencedType_.IsValid() || !referencedType_.IsNativeA(staticNative)) {
         return Fail(ErrorCode::TypeMismatch, PropertyPathError::StaticTypeMismatch);
+    }
+
+    // Deprecated 클래스는 지금 값과 같은 재기록만 받는다(리플렉션 B9h2).
+    if (HasFlag(referencedType_.Schema().flags, TypeFlags::Deprecated) && input_->guid != current) {
+        return Fail(ErrorCode::InvalidArgument, PropertyPathError::InvalidValue);
     }
 
     return Result<void>::Success();

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Containers/Array.h>
 #include <Meta/Annotations.h>
 #include <Object/ClassRef.h>
 #include <Object/Object.h>
@@ -27,10 +28,14 @@ struct DeprecatedThing final : KindBase {};
 
 ROCKS_CLASS()
 struct ClassFlagHolder final : Object {
+    explicit ClassFlagHolder(Allocator& allocator) noexcept : kinds(allocator) {
+    }
+
     ROCKS_PROPERTY() ObjectRef<Object> strong;
     ROCKS_PROPERTY() WeakRef<Object> weak;
     ROCKS_PROPERTY(Required) ObjectRef<Object> needed;
     ROCKS_PROPERTY() ClassRef<KindBase> kind;
+    ROCKS_PROPERTY() Array<ClassRef<KindBase>> kinds;
 };
 
 ROCKS_CLASS()

@@ -369,7 +369,9 @@ struct ObjectGraphInput {
     // 기준 Outer의 요약이다(hasBase일 때만 쓴다 — 이미 있는 객체면 DescribeOuter 결과, 곧 만들
     // 패키지면 OuterSummary::ForNewOutermost(true)). 1단계 정체성 규칙의 입력이고 CreateObjects가
     // 실제 기준 Outer의 isOutermost·outermostIsPackage·pathBytes와 대조한다. pathBytes가
-    // MaxObjectPathBytes를 넘으면 InvalidArgument다.
+    // MaxObjectPathBytes를 넘으면 InvalidArgument다. 1단계는 이 요약의 type(Within 판정의 Outer
+    // 타입 — 리플렉션 B9h2)을 읽지 않는다(Registry slot을 가리킬 수 있다) — 기준 Outer 노드의
+    // Within은 CreateObjects(2a)가 실제 요약으로 판정한다.
     OuterSummary base;
     // 외부 참조 i의 선언 타입이다(i − 1 위치, 크기 = 그래프 header의 externalCount — A1은
     // ObjectImports의 typeId). 크기가 다르거나 0인 원소가 있으면 InvalidArgument, 등록 클래스가

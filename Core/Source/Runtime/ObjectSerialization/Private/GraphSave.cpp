@@ -92,7 +92,7 @@ GraphEncodeContext::WriteReferenceWire(ArchiveWriter& out, ObjectHandle target,
     // 저장 불가 대상(Exclude)은 외부 정책과 무관하게 null + 진단이다(집합 노드는 저장 전에 거부했다
     // — 리플렉션 B9h2).
     if (local == 0) {
-        auto unsaveable = WriteUnsaveable(out, *actual, true);
+        auto unsaveable = WriteUnsaveable(out, target, *actual, true);
         if (!unsaveable || unsaveable.Value()) {
             return unsaveable ? Result<void>::Success() : Result<void>::Failure(unsaveable.Error());
         }
@@ -196,7 +196,7 @@ GraphEncodeContext::WriteWeakReferenceWire(ArchiveWriter& out, ObjectHandle targ
         return out.WriteU32(*found);
     }
 
-    auto unsaveable = WriteUnsaveable(out, *actual, false);
+    auto unsaveable = WriteUnsaveable(out, target, *actual, false);
     if (!unsaveable || unsaveable.Value()) {
         return unsaveable ? Result<void>::Success() : Result<void>::Failure(unsaveable.Error());
     }
@@ -204,13 +204,41 @@ GraphEncodeContext::WriteWeakReferenceWire(ArchiveWriter& out, ObjectHandle targ
     return WriteExternalWeak(out, target, discovered, expectation);
 }
 
-Result<bool> GraphEncodeContext::WriteUnsaveable(ArchiveWriter& out, const TypeLease& actual,
-                                                 bool strong) noexcept {
-    if (!excludeUnsaveable_ || !IsUnsaveableType(actual)) {
+Result<bool> GraphEncodeContext::WriteUnsaveable(ArchiveWriter& out, ObjectHandle target,
+                                                 const TypeLease& actual, bool strong) noexcept {
+    if (!excludeUnsaveable_) {
         return Result<bool>::Success(false);
     }
 
-    const int64 reason = HasFlag(actual.Schema().flags, TypeFlags::Transient) ? 3 : 4;
+    uint32 flags = actual.Schema().flags & UnsaveableTypeFlags;
+    for (ObjectHandle current = target; flags == 0;) {
+        auto outer = registry_.GetOuter(access_, current);
+        if (!outer) {
+            return Result<bool>::Failure(outer.Error());
+        }
+
+        current = outer.Value();
+        if (current == ObjectHandle{} || locals_.Find(current)) {
+            break;
+        }
+
+        if (auto spent = budget_.Spend(1); !spent) {
+            return Result<bool>::Failure(spent.Error());
+        }
+
+        auto type = registry_.AcquireType(access_, current);
+        if (!type) {
+            return Result<bool>::Failure(type.Error());
+        }
+
+        flags = type.Value().Schema().flags & UnsaveableTypeFlags;
+    }
+
+    if (flags == 0) {
+        return Result<bool>::Success(false);
+    }
+
+    const int64 reason = (flags & static_cast<uint32>(TypeFlags::Transient)) != 0 ? 3 : 4;
     if (auto reported = Report(FieldDiagnosticKind::ExternalReference, reason); !reported) {
         return Result<bool>::Failure(reported.Error());
     }

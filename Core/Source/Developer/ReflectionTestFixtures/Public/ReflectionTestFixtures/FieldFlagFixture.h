@@ -1,7 +1,9 @@
 #pragma once
 
 #include <Core/Containers/Array.h>
+#include <Core/Containers/OrderedMap.h>
 #include <Core/Math/Transform.h>
+#include <Core/Optional.h>
 #include <Meta/Annotations.h>
 #include <Object/Object.h>
 #include <Object/ObjectRefs.h>
@@ -65,6 +67,18 @@ struct FlagSaveList final : Object {
 ROCKS_CLASS()
 struct FlagSaveAtom final : Object {
     ROCKS_PROPERTY(SaveGame) FlagAtom atom;
+};
+
+// 컨테이너 안 struct 멤버의 포함 필터 경로다(Map 값·Optional 내부·정적 배열 원소 — 멤버마다 자기
+// 플래그).
+ROCKS_CLASS()
+struct FlagContainers final : Object {
+    explicit FlagContainers(Allocator& allocator) noexcept : byId(allocator) {
+    }
+
+    ROCKS_PROPERTY(SaveGame) OrderedMap<int32, FlagSlot> byId;
+    ROCKS_PROPERTY(SaveGame) Optional<FlagSlot> maybe;
+    ROCKS_PROPERTY(SaveGame) FlagSlot fixed[2];
 };
 
 } // namespace rocks::reflection_fixture

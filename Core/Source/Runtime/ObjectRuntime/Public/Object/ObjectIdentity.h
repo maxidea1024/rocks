@@ -55,8 +55,8 @@ struct OuterSummary {
     uint32 pathBytes = 0;           // 이 객체의 객체 경로 byte 수
     // 이 객체(Outer가 될 객체)의 타입이다(Within 판정 — 리플렉션 B9h2). 비소유 포인터이며 요약을
     // 만든 같은 owner 스레드 작업 안에서만 쓴다(Registry 요약은 그 객체 slot의 lease를 가리킨다 —
-    // 객체가 회수되면 무효). null이면 타입을 모르는 요약이고 Within 판정을 미룬다(그래프 1단계의
-    // 기준 Outer 요약 — 2a가 실제 요약으로 다시 판정한다).
+    // 객체가 회수되면 무효). null이면 타입을 모르는 요약이고 Within 판정을 미룬다(그래프 1단계는
+    // 기준 Outer 요약의 type을 늘 비운다 — 2a와 실제 생성이 판정한다).
     const TypeLease* type = nullptr;
 
     // 아직 만들지 않은 outermost(예: 로더가 곧 만들 Package)의 요약이다. isPackage는 그 객체가

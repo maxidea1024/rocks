@@ -522,7 +522,9 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         // 정적 Base를 대조한다(CheckClassTarget).
         if (value->kind == ValueKind::ClassReference && value->guid != Guid{}) {
             const TypeId base = endType.type;
-            auto found = CheckWritableClassReferenceLease(
+            // Deprecated 클래스 거부는 지금 값을 아는 생성 thunk가 한다(같은 값의 재기록은 받는다 —
+            // CheckClassTarget, 최상위 단일 값은 등록된 write).
+            auto found = CheckClassReferenceLease(
                 cursor.registry_.AcquireRegisteredType(cursor.access_, value->guid), base, nullptr);
             if (!found) {
                 return cursor.Fail(found.Error(), WriteReason(found.Error(), end.effectiveFlags));

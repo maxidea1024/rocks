@@ -148,10 +148,22 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
     // 참조 lease처럼 callback 완료까지 쥔다(callback 재진입이 그 클래스를 해제·재등록하지 못하게).
     TypeLease classLease;
     if (value.kind == ValueKind::ClassReference && value.guid != TypeId{}) {
-        auto found = detail::CheckWritableClassReferenceLease(
+        auto found = detail::CheckClassReferenceLease(
             registry.AcquireRegisteredType(access, value.guid), actual->value.type, nullptr);
         if (!found) {
             return Result<void>::Failure(found.Error());
+        }
+
+        // Deprecated 클래스는 새로 쓰지 못하지만 지금 값과 같은 값의 재기록(asset-info → asset-set
+        // 왕복·undo·붙여넣기)은 받는다(생성 write는 같은 값이면 아무것도 하지 않는다 — 리플렉션
+        // B9h2).
+        if (HasFlag(found.Value().Schema().flags, TypeFlags::Deprecated)) {
+            const RuntimeFieldOps* ops = type.Value().FieldOps(actualIndex);
+            FieldValue current(value.GetAllocator());
+            if (!ops || !ops->read || !ops->read(registry, access, handle, current) ||
+                current.kind != ValueKind::ClassReference || current.guid != value.guid) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
         }
 
         if (referencedType_ != TypeId{} && !found.Value().IsA(referencedType_)) {

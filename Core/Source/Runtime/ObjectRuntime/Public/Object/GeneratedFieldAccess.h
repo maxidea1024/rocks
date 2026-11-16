@@ -776,7 +776,13 @@ Result<void> WriteGeneratedField(ObjectRegistry& registry, const ObjectAccessCon
                                           [&]() noexcept { return borrowed.Value().Get(); });
     } else if constexpr (ClassReferenceField<Member>::Supported) {
         // ClassRef 값은 이 Registry에 등록된 클래스이고 정적 Base의 파생이어야 한다(null 허용 —
-        // 등록된 write를 거치면 FieldWriteOperation이 스키마 Base로 먼저 검사했다).
+        // 등록된 write를 거치면 FieldWriteOperation이 스키마 Base로 먼저 검사했다). 지금 값과 같은
+        // 값은 아무것도 하지 않는다(Deprecated 클래스 값의 재기록 — 리플렉션 B9h2).
+        if (auto current = borrowed.Value().Get();
+            current && (current.Value()->*member).Id() == value.guid) {
+            return Result<void>::Success();
+        }
+
         if (auto valid = ValidateClassReference(
                 registry, access, value.guid, TypeId{},
                 NativeTypeKey<typename ClassReferenceField<Member>::Target>());
@@ -873,8 +879,14 @@ Result<void> WriteGeneratedStagedField(ConstructionContext& construction, Object
         // ClassRef 값은 그 트랜잭션 Registry에 등록된 클래스이고 정적 Base의 파생이어야 한다(null
         // 허용). owner 확인(접근·생존·검사 중 Busy) 뒤에 본다. 복원 2단계는 이 경로를 거치지 않는다
         // (DecodeGeneratedField가 1단계 판정 값을 바로 대입한다).
-        if (auto target = construction.GetForWrite<Owner>(handle); !target) {
+        auto target = construction.GetForWrite<Owner>(handle);
+        if (!target) {
             return Result<void>::Failure(target.Error());
+        }
+
+        // 지금 값과 같은 값은 아무것도 하지 않는다(Deprecated 클래스 값의 재기록 — 리플렉션 B9h2).
+        if ((target.Value()->*member).Id() == value.guid) {
+            return Result<void>::Success();
         }
 
         if (auto valid = ValidateClassReference(

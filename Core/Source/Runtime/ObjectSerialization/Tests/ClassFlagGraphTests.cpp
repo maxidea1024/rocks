@@ -64,6 +64,25 @@ public:
     TypeId lastDeprecated{};
 };
 
+// 모든 외부 참조를 Import로 받고 물어본 수를 센다(Admit 경로).
+class ImportEverything final : public FieldCodecHooks {
+public:
+    Result<ExternalAdmission>
+    AdmitExternalReference(const ExternalReferenceInfo&) noexcept override {
+        ++asked;
+        return Result<ExternalAdmission>::Success(ExternalAdmission::Import);
+    }
+
+    Result<void> Report(const FieldDiagnostic& diagnostic) noexcept override {
+        external3 +=
+            diagnostic.kind == FieldDiagnosticKind::ExternalReference && diagnostic.value == 3;
+        return Result<void>::Success();
+    }
+
+    usize asked = 0;
+    usize external3 = 0;
+};
+
 Result<Array<uint8>> Save(Allocator& allocator, ObjectRegistry& objects, ObjectHandle root,
                           UnsaveablePolicy unsaveable, FieldCodecHooks* hooks = nullptr,
                           bool rejectMissingRequired = false) noexcept {
@@ -148,6 +167,17 @@ TEST(ClassFlagGraph_SchemaFlagsInheritanceAndRegistry) {
     inner.withinType = TypeId{};
     CHECK(types.Register(inner, GeneratedType<WithinInnerChild>::Ops()).Error() ==
           ErrorCode::InvalidArgument);
+    // 파생이 Within을 다시 정하면 base Within의 파생이어야 한다(좁히기만 — 등록된 Within 클래스로
+    // 판정).
+    REQUIRE(GeneratedType<WithinOuter>::Register(types));
+    REQUIRE(GeneratedType<WithinOuterChild>::Register(types));
+    inner.withinType = TypeIdOf<KindBase>();
+    CHECK(types.Register(inner, GeneratedType<WithinInnerChild>::Ops()).Error() ==
+          ErrorCode::InvalidArgument);
+    inner.withinType = TypeIdOf<WithinOuterChild>();
+    auto narrowed = types.Register(inner, GeneratedType<WithinInnerChild>::Ops());
+    REQUIRE(narrowed);
+    CHECK(types.Unregister(narrowed.Value()));
     CHECK(GeneratedType<TransientChild>::Register(types));
     CHECK(GeneratedType<WithinInnerChild>::Register(types));
     CHECK(types.Shutdown());
@@ -277,6 +307,35 @@ TEST(ClassFlagGraph_ClassRefWritesRejectDeprecatedAndDecodeReports) {
             value.kind = ClassRef<KindBase>(TypeIdOf<DeprecatedThing>());
         });
 
+        // 같은 값의 재기록은 받는다(asset-info → asset-set 왕복·undo — 등록된 write와 원소 경로
+        // 쓰기). 다른 값에서 Deprecated로 바꾸거나 새 원소로 넣으면 거부한다.
+        CHECK(write(TypeIdOf<DeprecatedThing>()) == ErrorCode::None);
+        With<ClassFlagHolder>(objects, holder.Handle(), [](ClassFlagHolder& value) noexcept {
+            REQUIRE(value.kinds.TryPushBack(ClassRef<KindBase>(TypeIdOf<DeprecatedThing>())));
+        });
+        const auto writeElement = [&](TypeId type) noexcept {
+            FieldValue value(allocator);
+            value.kind = ValueKind::ClassReference;
+            value.guid = type;
+            return ErrorOf(PathWrite(objects, objects.OwnerAccess(), holder.Handle(),
+                                     PathText(lease.Value(), "kinds[0]").View(), value));
+        };
+
+        CHECK(writeElement(TypeIdOf<DeprecatedThing>()) == ErrorCode::None);
+        CHECK(writeElement(TypeIdOf<TransientThing>()) == ErrorCode::None);
+        CHECK(writeElement(TypeIdOf<DeprecatedThing>()) == ErrorCode::InvalidArgument);
+        FieldValue inserted(allocator);
+        inserted.kind = ValueKind::ClassReference;
+        inserted.guid = TypeIdOf<DeprecatedThing>();
+        CHECK(ErrorOf(PathInsertElement(objects, objects.OwnerAccess(), holder.Handle(),
+                                        PathText(lease.Value(), "kinds[0]").View(), &inserted)) ==
+              ErrorCode::InvalidArgument);
+        With<ClassFlagHolder>(objects, holder.Handle(), [](ClassFlagHolder& value) noexcept {
+            REQUIRE(value.kinds.Size() == 1);
+            CHECK(value.kinds[0].Id() == TypeIdOf<TransientThing>());
+            CHECK(value.kind.Id() == TypeIdOf<DeprecatedThing>());
+        });
+
         auto bytes = Save(allocator, objects, holder.Handle(), UnsaveablePolicy::Exclude);
         REQUIRE(bytes);
         ObjectRegistry target(allocator, fixture.types, {0x434652, 2});
@@ -366,5 +425,159 @@ TEST(ClassFlagGraph_WithinOuterRule) {
     }
 
     REQUIRE(objects.Collect(objects.OwnerAccess()));
+    REQUIRE(objects.Shutdown(objects.OwnerAccess()));
+}
+
+// 저장 불가 조상(Outer 사슬): 저장 가능한 클래스의 객체라도 Outer가 저장 불가 클래스면 그 참조는
+// null + 진단(3·4)이고 Include가 대상과 조상을 넣지 않는다(UE SavePackage가 저장 불가 Outer 아래
+// 객체를 빼는 것과 같다 — 부분 트리 저장 불가 판정). Admit은 hook을 묻지 않고 import하지 않는다.
+TEST(ClassFlagGraph_UnsaveableAncestorsAreExcluded) {
+    SystemAllocator allocator;
+    ClassFlagFixture fixture(allocator);
+    ObjectRegistry objects(allocator, fixture.types, {0x434641, 1});
+    {
+        const auto access = objects.OwnerAccess();
+        RootRef<ClassFlagHolder> holder = New<ClassFlagHolder>(objects);
+        RootRef<TransientThing> transient = New<TransientThing>(objects);
+        RootRef<DeprecatedThing> deprecated = New<DeprecatedThing>(objects);
+        auto underTransient =
+            objects.NewObject<KindBase>(access, TypeIdOf<KindBase>(), transient.Handle(), "x");
+        auto underDeprecated =
+            objects.NewObject<KindBase>(access, TypeIdOf<KindBase>(), deprecated.Handle(), "y");
+        REQUIRE(underTransient && underDeprecated);
+        With<ClassFlagHolder>(objects, holder.Handle(), [&](ClassFlagHolder& value) noexcept {
+            CHECK(objects.SetReference(access, holder.Handle(), value.strong,
+                                       underTransient.Value().Handle()));
+            value.weak = WeakRef<Object>(underDeprecated.Value().Handle());
+        });
+
+        ClassFlagDiagnostics included;
+        auto bytes =
+            Save(allocator, objects, holder.Handle(), UnsaveablePolicy::Exclude, &included);
+        REQUIRE(bytes);
+        CHECK(included.external3 == 1 && included.external4 == 1);
+        {
+            ObjectRegistry target(allocator, fixture.types, {0x434641, 2});
+            {
+                auto loaded = LoadObjectGraph(allocator, target, fixture.types,
+                                              target.OwnerAccess(), bytes.Value().View());
+                REQUIRE(loaded);
+                With<ClassFlagHolder>(target, loaded.Value().Handle(),
+                                      [](ClassFlagHolder& value) noexcept {
+                                          CHECK(value.strong.Handle().IsNull());
+                                          CHECK(value.weak.Handle().IsNull());
+                                      });
+                REQUIRE(target.Collect(target.OwnerAccess()));
+                CHECK(target.Stats().liveObjects == 1);
+            }
+
+            REQUIRE(target.Collect(target.OwnerAccess()));
+            REQUIRE(target.Shutdown(target.OwnerAccess()));
+        }
+
+        // Admit: 저장 불가 사슬의 대상은 hook에 묻지 않고 null로 쓴다.
+        ImportEverything admit;
+        ObjectGraphSaveOptions options;
+        options.externals = GraphExternalPolicy::Admit;
+        options.hooks = &admit;
+        const ObjectHandle set[] = {holder.Handle()};
+        auto admitted = SaveObjectGraphSet(allocator, objects, access,
+                                           Span<const ObjectHandle>(set, 1), options);
+        REQUIRE(admitted);
+        CHECK(admit.asked == 0 && admit.external3 == 1);
+
+        // Keep은 조상까지 보통 대상이다(Include가 Outer 사슬을 더한다).
+        ClassFlagDiagnostics kept;
+        CHECK(Save(allocator, objects, holder.Handle(), UnsaveablePolicy::Keep, &kept).IsOk());
+        CHECK(kept.external3 == 0 && kept.external4 == 0);
+    }
+
+    REQUIRE(objects.Collect(objects.OwnerAccess()));
+    REQUIRE(objects.Shutdown(objects.OwnerAccess()));
+}
+
+// 클래스를 나중에 Transient로 바꾼 패키지: 그 클래스가 저장 가능할 때 만든 파일을 Transient로
+// 등록한 Registry가 읽으면 노드는 만들고 TransientType 진단을 내며, Exclude로 다시 저장하면 그
+// 객체와 참조가 빠진다(패키지를 열고 고친다).
+TEST(ClassFlagGraph_LaterTransientPackageResavesWithoutObject) {
+    SystemAllocator allocator;
+    ClassFlagFixture fixture(allocator);
+    TypeRegistry changed(allocator);
+    REQUIRE(GeneratedType<ClassFlagHolder>::Register(changed));
+    TypeSchema transientOuter = GeneratedType<WithinOuter>::Schema();
+    transientOuter.flags |= static_cast<uint32>(TypeFlags::Transient);
+    REQUIRE(changed.Register(transientOuter, GeneratedType<WithinOuter>::Ops()));
+    {
+        ObjectRegistry objects(allocator, fixture.types, {0x43464c, 1});
+        ObjectRegistry reopened(allocator, changed, {0x43464c, 2});
+        {
+            RootRef<ClassFlagHolder> holder = New<ClassFlagHolder>(objects);
+            RootRef<WithinOuter> outer = New<WithinOuter>(objects);
+            With<ClassFlagHolder>(objects, holder.Handle(), [&](ClassFlagHolder& value) noexcept {
+                CHECK(objects.SetReference(objects.OwnerAccess(), holder.Handle(), value.strong,
+                                           outer.Handle()));
+            });
+
+            auto bytes = Save(allocator, objects, holder.Handle(), UnsaveablePolicy::Exclude);
+            REQUIRE(bytes);
+            ClassFlagDiagnostics loads;
+            ObjectGraphLoadOptions options;
+            options.hooks = &loads;
+            auto loaded = LoadObjectGraph(allocator, reopened, changed, reopened.OwnerAccess(),
+                                          bytes.Value().View(), options);
+            REQUIRE(loaded);
+            CHECK(loads.transient == 1);
+            ClassFlagDiagnostics resaved;
+            auto again = Save(allocator, reopened, loaded.Value().Handle(),
+                              UnsaveablePolicy::Exclude, &resaved);
+            REQUIRE(again);
+            CHECK(resaved.external3 == 1);
+            ObjectRegistry checked(allocator, fixture.types, {0x43464c, 3});
+            {
+                auto fixed = LoadObjectGraph(allocator, checked, fixture.types,
+                                             checked.OwnerAccess(), again.Value().View());
+                REQUIRE(fixed);
+                With<ClassFlagHolder>(
+                    checked, fixed.Value().Handle(),
+                    [](ClassFlagHolder& value) noexcept { CHECK(value.strong.Handle().IsNull()); });
+            }
+
+            REQUIRE(checked.Collect(checked.OwnerAccess()));
+            REQUIRE(checked.Shutdown(checked.OwnerAccess()));
+        }
+
+        REQUIRE(objects.Collect(objects.OwnerAccess()));
+        REQUIRE(objects.Shutdown(objects.OwnerAccess()));
+        REQUIRE(reopened.Collect(reopened.OwnerAccess()));
+        REQUIRE(reopened.Shutdown(reopened.OwnerAccess()));
+    }
+
+    CHECK(changed.Shutdown());
+}
+
+// 단계형 복원 1단계(Validate — 어느 스레드에서나, Registry에 닿지 않는다)는 기준 Outer 요약의
+// 타입을 읽지 않는다: Within 밖 타입(KindBase)을 가리키는 요약으로도 기준 Outer 아래 WithinInner
+// 노드를 받는다(판정은 CreateObjects·실제 생성 — 위 WithinOuterRule의 기준 Outer 사례).
+TEST(ClassFlagGraph_StageValidateDoesNotReadBaseOuterType) {
+    SystemAllocator allocator;
+    ClassFlagFixture fixture(allocator);
+    ObjectRegistry objects(allocator, fixture.types, {0x434656, 1});
+    {
+        auto wrong = fixture.types.Acquire(TypeIdOf<KindBase>());
+        REQUIRE(wrong);
+        Array<uint8> record = RecordOf(allocator, TypeIdOf<WithinInner>(), 1, {});
+        const test::graph::Node node{TypeIdOf<WithinInner>(), 0, "based", record.View()};
+        test::graph::Header header;
+        header.flags = test::graph::NodeTableFlag | test::graph::BaseOuterFlag;
+        auto graph = test::graph::Build(allocator, Span<const test::graph::Node>(&node, 1), header);
+        REQUIRE(graph);
+        ObjectGraphStage stage(allocator, objects, fixture.types, objects.OwnerAccess(), {});
+        ObjectGraphInput input;
+        input.bytes = graph.Value().View();
+        input.hasBase = true;
+        input.base = OuterSummary::ForNewOutermost(false, &wrong.Value());
+        CHECK(stage.Validate(input).IsOk());
+    }
+
     REQUIRE(objects.Shutdown(objects.OwnerAccess()));
 }

@@ -279,6 +279,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::ClassFlagHolder::kinds",
+      "id": "971fa39394164374992570f1997e9a08",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::ClassFlagHolder::needed",
       "id": "57385b0bd0c24e0281c3e45e960041a7",
       "aliases": [],
@@ -771,6 +778,27 @@
       "kind": "field",
       "name": "rocks::reflection_fixture::FlagAtom::b",
       "id": "6f6254dedb224e8a8c519e0cc981dada",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::FlagContainers::byId",
+      "id": "dacd14ec26294d11bc0f53d5dce16d74",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::FlagContainers::fixed",
+      "id": "1c83913963a8493d87682c1a71c7e91f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::FlagContainers::maybe",
+      "id": "0d3340e39287490ab555dab68c609a4b",
       "aliases": [],
       "retired": false
     },
@@ -2355,6 +2383,13 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::FlagAtom",
       "id": "00af462ba9f5486cbc4ad324403b0ce2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::FlagContainers",
+      "id": "1570b1af02b8444d803983d15d74ca6e",
       "aliases": [],
       "retired": false
     },
