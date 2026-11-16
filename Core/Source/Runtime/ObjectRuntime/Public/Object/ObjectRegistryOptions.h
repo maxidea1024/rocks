@@ -78,12 +78,21 @@ struct ObjectStats {
 };
 
 // 성공한 한 cycle의 결과다. 시간은 실제 collector slice의 합(ns)이며 mutator 시간은 제외한다.
+// phase별 시간은 durationNanoseconds의 내역이다: begin은 Begin(작업 큐 예약·epoch·루트 수집,
+// Collect는 같은 구간), mark는 표식, sweep은 white 판정과 Retire, reclaim은 소멸자·해제를 포함한
+// 회수다. 증분 수집은 slice마다 그 phase에 쓴 시간을 더한다(잠금 대기와 slice 진입·종료 처리는 어느
+// phase에도 넣지 않으므로 넷의 합은 durationNanoseconds 이하다). GC 벤치(Programs/GcBench)와 진단이
+// 쓴다.
 struct GcReport {
     uint32 examined = 0;
     uint32 marked = 0;
     uint32 retired = 0;
     uint32 reclaimed = 0;
     uint64 durationNanoseconds = 0;
+    uint64 beginNanoseconds = 0;
+    uint64 markNanoseconds = 0;
+    uint64 sweepNanoseconds = 0;
+    uint64 reclaimNanoseconds = 0;
 };
 
 struct GcProgress {

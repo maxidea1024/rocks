@@ -150,6 +150,7 @@ Result<void> ObjectRegistry::BeginCollection(const ObjectAccessContext& access) 
     }
 
     cycleGc_.durationNanoseconds = platform::MonotonicNanoseconds() - started;
+    cycleGc_.beginNanoseconds = cycleGc_.durationNanoseconds;
     return Result<void>::Success();
 }
 
@@ -309,6 +310,7 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
     }
 
     uint32 processed = 0;
+    const uint64 markStarted = platform::MonotonicNanoseconds();
     MarkState state{this, &gcWork_};
     auto setError = [this, &state](ErrorCode error) noexcept {
         platform::LockGuard lock(gate_);
@@ -422,6 +424,8 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
         return Result<GcProgress>::Failure(state.error);
     }
 
+    const uint64 sweepStarted = platform::MonotonicNanoseconds();
+    cycleGc_.markNanoseconds += sweepStarted - markStarted;
     // cutoff 뒤 Sweeping 중 생성이 붙인 새 chunk(더 큰 번호)는 방문하지 않는다. 그 객체는 현재
     // epoch로 표식되어 이번 cycle의 white 후보가 아니다.
     while (gcPhase_ == GcPhase::Sweeping && processed < budget.maxObjects && inBudget()) {
@@ -446,14 +450,18 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
         ++processed;
     }
 
+    const uint64 reclaimStarted = platform::MonotonicNanoseconds();
+    cycleGc_.sweepNanoseconds += reclaimStarted - sweepStarted;
     if (gcPhase_ == GcPhase::Reclaiming && processed < budget.maxObjects && inBudget()) {
         const uint32 reclaimed = ReclaimEligible(budget.maxObjects - processed, deadline);
         cycleGc_.reclaimed += reclaimed;
         processed += reclaimed;
     }
 
+    const uint64 finished = platform::MonotonicNanoseconds();
     platform::LockGuard lock(gate_);
-    cycleGc_.durationNanoseconds += platform::MonotonicNanoseconds() - started;
+    cycleGc_.reclaimNanoseconds += finished - reclaimStarted;
+    cycleGc_.durationNanoseconds += finished - started;
     if (gcPhase_ == GcPhase::Reclaiming && !HasReclaimableLocked()) {
         gcPhase_ = GcPhase::Idle;
         lastGc_ = cycleGc_;
@@ -519,6 +527,8 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access) noex
         }
     }
 
+    const uint64 markStarted = platform::MonotonicNanoseconds();
+    report.beginNanoseconds = markStarted - started;
     MarkState state{this, &work};
     TraceVisitor visitor(&state, &ObjectRegistry::MarkEdge);
     for (usize cursor = 0; cursor < work.Size() && state.error == ErrorCode::None; ++cursor) {
@@ -527,6 +537,8 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access) noex
         VisitIdentityEdges(*slot, visitor);
     }
 
+    const uint64 sweepStarted = platform::MonotonicNanoseconds();
+    report.markNanoseconds = sweepStarted - markStarted;
     if (state.error != ErrorCode::None) {
         platform::LockGuard lock(gate_);
         processing_ = false;
@@ -549,8 +561,12 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access) noex
         }
     }
 
+    const uint64 reclaimStarted = platform::MonotonicNanoseconds();
+    report.sweepNanoseconds = reclaimStarted - sweepStarted;
     report.reclaimed = ReclaimEligible();
-    report.durationNanoseconds = platform::MonotonicNanoseconds() - started;
+    const uint64 finished = platform::MonotonicNanoseconds();
+    report.reclaimNanoseconds = finished - reclaimStarted;
+    report.durationNanoseconds = finished - started;
     {
         platform::LockGuard lock(gate_);
         lastGc_ = report;
