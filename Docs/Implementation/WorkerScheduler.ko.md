@@ -73,7 +73,7 @@ Drain은 신규 제출을 닫고 수락한 작업을 완료한다. Cancel은 pen
 
 | 기능 | 인터페이스와 계약 |
 |---|---|
-| 시작 | `Start(DedicatedLaneConfig{mode, lane, thread})`. 생성 스레드 전용. Thread 모드는 lane 스레드가 진입해 이름·우선순위 적용을 마쳤음을 `started_` 이벤트로 알린 뒤 반환한다(시작 handshake). 잘못된 mode·스레드 옵션은 InvalidArgument, 스레드 생성 실패는 OutOfMemory, 실행 중 재시작은 Busy |
+| 시작 | `Start(DedicatedLaneConfig{mode, lane, thread, launch, launchContext})`. 생성 스레드 전용. 실패하면 mode·lane을 포함해 아무것도 바꾸지 않는다. `launch`(`DedicatedLaneLauncher`)는 스레드 생성을 대신하거나 실패를 주입하는 시험·호스트 경계이며, 실패를 돌려주면서 스레드를 시작한 launcher(계약 위반)도 그 스레드를 빈 큐로 끝내고 Join한 뒤 실패를 돌려준다. Thread 모드는 lane 스레드가 진입해 이름·우선순위 적용을 마쳤음을 `started_` 이벤트로 알린 뒤 반환한다(시작 handshake). 잘못된 mode·스레드 옵션은 InvalidArgument, 스레드 생성 실패는 OutOfMemory, 실행 중 재시작은 Busy |
 | 제출 | `Post(Function<void()>&&)`. 어느 스레드에서나. 큐 칸은 잠금 밖에서 할당하고, 수락이 확정된 뒤에만 task를 옮기므로 거부·할당 실패 때 호출자의 task가 그대로 남는다. 시작 전·종료 뒤 ShuttingDown |
 | 대기 | `Flush()`. 호출 전에 수락한 작업이 모두 끝날 때까지 기다린다. 수락 수와 완료 수를 비교한다(실행 흐름이 하나라 완료가 수락 순서대로 늘어난다) |
 | 종료 | `Shutdown()`. 생성 스레드 전용. 일반 Post를 닫고 남은 작업과 종료 중 lane 작업이 넣은 후속을 모두 실행한 뒤(Drain) 닫는다. Thread 모드는 lane 스레드가 큐가 빈 것과 종료 요청을 함께 본 뒤 `stopped_` 이벤트를 켜고(종료 handshake) Join한다. 재시작 가능 |
@@ -83,13 +83,13 @@ Drain은 신규 제출을 닫고 수락한 작업을 완료한다. Cancel은 pen
 
 **실행 칸 사슬.** 작업 본문과 capture 소멸 구간마다 스택에 칸을 쌓는다. Inline lane A의 작업이 Inline lane B에 Post해 B를 그 자리에서 비우면 B 칸이 A 칸 위에 쌓인다. `IsExecutingTask`는 가장 안쪽 칸만 보므로 B 작업 안에서 A는 false다(Thread 모드에서 B 작업이 B 스레드에서 도는 것과 같다). `Flush`·`Shutdown`은 사슬 전체를 보고 자기 lane 위에서 부르면 WrongThread다(자기 자신을 기다리는 교착). 그래서 Inline 모드에서도 lane 작업 밖(같은 스레드의 일반 코드)의 lane 전용 API 호출이 스레드 ID 검사와 달리 드러난다.
 
-**수명.** 큐 칸 allocator는 여러 스레드의 동시 Allocate·Deallocate를 지원하고 lane보다 오래 살아야 한다. 실행 중 파괴는 Fatal이다. 시작·종료 대기에 시간 제한은 없다(끝나지 않는 작업을 강제 종료하지 않는다).
+**수명.** 큐 칸 allocator는 여러 스레드의 동시 Allocate·Deallocate를 지원하고 lane보다 오래 살아야 한다. 실행 중 파괴는 Fatal이다. 조건 변수 알림은 모두 잠금 안에서 한다. 그래서 `Shutdown`이 반환하면 lane 코드를 실행 중인 스레드가 없다(Inline 모드에서 큐를 비우던 다른 스레드도 `draining_`을 내리고 알린 잠금 구간 뒤로는 lane을 건드리지 않는다). 다만 파괴 전에 다른 스레드의 `Post`·`Flush`·`Stats`·`IsExecutingTask` 호출도 모두 반환해야 한다(거부되는 Post도 큐 칸을 돌려주려고 lane을 쓴다). 시작·종료 대기에 시간 제한은 없다(끝나지 않는 작업을 강제 종료하지 않는다).
 
-시험(`Tests/DedicatedLaneTests.cpp`): gate로 막은 lane에 네 생산자가 동시에 넣은 작업의 생산자별 순서, 재진입 Post 순서가 두 모드에서 같음(바깥 작업이 A·B를 넣고 A가 C를, C가 D를 넣는 시나리오), Inline 가장 바깥 Post가 반환 전에 실행, 두 모드의 종료 Drain(남은 작업 0·종료 중 후속 수락·종료 뒤 거부와 task 보존), Flush, lane 작업 밖 lane 전용 API 거부와 Inline 중첩 실행의 판별·자기 대기 거부·lane 표지, 시작 계약(시작 전 Post 거부, 잘못된 옵션, 재시작, 스레드 이름 적용, 큐 칸 할당 실패 때 task 보존), 다른 스레드의 Start·Shutdown 거부. 순서는 모두 이벤트 gate로 만들고 sleep에 기대지 않는다.
+시험(`Tests/DedicatedLaneTests.cpp`, 11개): gate로 막은 lane에 네 생산자가 동시에 넣은 작업의 생산자별 순서, 재진입 Post 순서가 두 모드에서 같음(바깥 작업이 A·B를 넣고 A가 C를, C가 D를 넣는 시나리오), Inline 가장 바깥 Post가 반환 전에 실행, 두 모드의 종료 Drain(남은 작업 0·종료 중 후속 수락·종료 뒤 거부와 task 보존), Flush, lane 작업 밖 lane 전용 API 거부와 Inline 중첩 실행의 판별·자기 대기 거부·lane 표지, 시작 계약(시작 전 Post 거부, 잘못된 옵션, 재시작, 스레드 이름 적용, 큐 칸 할당 실패 때 task 보존), 다른 스레드의 Start·Shutdown 거부, Thread 모드 종료 중 lane 작업 후속 수락과 외부 Post 거부(수락이 닫힌 것을 `Stats().accepting`으로 확인한 뒤 gate를 연다), Inline 모드에서 다른 스레드가 비우는 중의 Post를 그 스레드가 실행함과 Inline Shutdown 직후 lane 파괴(비우던 스레드의 해제 뒤 사용 회귀), launcher 실패·계약 위반 launcher 뒤 상태 불변. 순서는 모두 이벤트 gate나 명시 상태 조건으로 만들고 sleep에 기대지 않는다.
 
 ## 순서 전용 선행과 lane 옵션(WorkerSubmitOptions)
 
-`Submit(body, dependencies, WorkerSubmitOptions{orderDependencies, lane})`(RenderBase CP2). `orderDependencies`는 끝난 뒤(terminal)에만 실행하되 결과를 보지 않는 선행이다. 실패·취소·회수된 순서 전용 선행은 `DependencyFailed`를 만들지 않는다(일반 선행은 그대로 전파한다). 검사는 두 목록을 이어 한 번에 한다(같은 scheduler·같은 세대·두 목록 사이 중복 금지, 합이 `maxDependencies` 이하). 기록에는 dependency 칸별 bit mask로 남기고 worker의 ready 판정만 그 bit를 본다. `lane`은 body와 capture 정리 구간의 `TaskLaneScope` 값이며 기본은 Worker다(`TryRevoke`로 호출 스레드가 capture를 정리할 때는 표지를 바꾸지 않는다).
+`Submit(body, dependencies, WorkerSubmitOptions{orderDependencies, lane})`(RenderBase CP2). `orderDependencies`는 끝난 뒤(terminal)에만 실행하되 결과를 보지 않는 선행이다. 실패·취소·회수된 순서 전용 선행은 `DependencyFailed`를 만들지 않는다(일반 선행은 그대로 전파한다). worker는 순서 전용 선행이 모두 terminal이 되기 전에는 그 작업을 실행·취소·`DependencyFailed` 어느 경로로도 고르지 않고, `TryRevoke`도 false다. 그래야 순서 전용 선행과 이 작업의 body·capture 정리가 겹치지 않고, 이 작업의 terminal이 선행 전체의 terminal을 뜻한다(교차검증에서 취소·선행 실패·회수 경로가 순서를 건너뛰던 결함을 고쳤다). Drain 정체 판정은 바뀌지 않는다. 순서 대기 사슬은 DAG라 끝이 실행 중 작업·고를 수 있는 작업·취소할 외부 이벤트 가운데 하나에 닿기 때문이다. 검사는 두 목록을 이어 한 번에 한다(같은 scheduler·같은 세대·두 목록 사이 중복 금지, 합이 `maxDependencies` 이하). 기록에는 dependency 칸별 bit mask로 남기고 worker의 ready 판정만 그 bit를 본다. `lane`은 body와 capture 정리 구간의 `TaskLaneScope` 값이며 기본은 Worker다(`TryRevoke`로 호출 스레드가 capture를 정리할 때는 표지를 바꾸지 않는다).
 
 ## 직렬 작업 체인(SerialTaskChain)
 
@@ -102,9 +102,10 @@ Drain은 신규 제출을 닫고 수락한 작업을 완료한다. Cancel은 pen
 - 분배: batch 크기는 max(`minBatchSize`, ⌈count / (참여자 × 4)⌉)이고, helper 수는 worker 수·`maxHelpers`·(batch 수 − 1)·64 이하다. batch는 원자 카운터로 번호 순서대로 가져간다.
 - 오류: body가 오류를 돌려주면 새 batch를 가져가지 않고, 실패한 batch 가운데 가장 앞 batch의 오류를 돌려준다. batch를 번호 순서로만 가져가므로 실패한 batch보다 앞선 batch는 모두 실행되고, 결과는 순차 실행에서 처음 만나는 실패와 같다(병렬 압축의 job 분배와 같은 규칙).
 - 정리: 호출 스레드가 일을 마치면 아직 꺼내지 않은 helper는 `TryRevoke`로 회수하고 실행 중인 helper만 기다린다. 반환 시 body와 공유 상태를 참조하는 helper가 모두 terminal이다.
-- 문맥: helper는 호출 스레드의 lane 표지를 물려받는다(None이면 Worker). 렌더 lane이 부른 ParallelFor의 batch는 worker에서도 Render 문맥이다(UE parallel rendering thread 판별 대응).
+- 문맥: helper는 호출 스레드의 lane 표지를 물려받는다. 렌더 lane이 부른 ParallelFor의 batch는 worker에서도 Render 문맥이다(UE parallel rendering thread 판별 대응). None과 Game은 물려주지 않고 helper를 Worker로 둔다(Game lane 전용 검사가 worker에서 통과하면 안 된다). 이때 호출 스레드가 실행한 batch는 호출자 표지 그대로라 batch마다 표지가 다를 수 있다.
+- body 반환형은 void 또는 `ErrorCode`이고 그 밖은 static_assert로 거부한다.
 - 혼자 실행: 같은 scheduler의 worker 안(helper를 기다릴 수 없다), scheduler 시작 전·종료 중, helper 본문 할당·제출 실패, `maxHelpers` 0이면 그만큼 helper 없이 호출 스레드가 남은 batch를 모두 실행하고 결과는 같다.
 
 병렬 압축(`Compression/Private/CompressedBlocks.cpp`의 `RunParticipants`)은 참여자별 codec 상태를 두는 같은 분배 방식을 이미 쓴다. ParallelFor에 참여자별 문맥이 생기면 그쪽을 옮긴다(후속).
 
-시험: `Tests/SerialTaskChainTests.cpp` 5개(4 worker에서 200개 작업의 순서·비중첩·Render 표지, 네 생산자의 생산자별 순서, 실패·회수·선행 실패 뒤에도 체인 진행, 시작 전 거부와 body 보존·scheduler 재시작 3회, 순서 전용 선행·lane 옵션 검사와 거부), `Tests/ParallelForTests.cpp` 3개(10007개 원소를 한 번씩·Render 표지 상속·count 0, 처음 실패 batch의 결정성 20회와 앞 원소 실행, 시작 전·`maxHelpers` 0·worker 안 호출·helper 할당 실패 때 호출 스레드 실행).
+시험: `Tests/SerialTaskChainTests.cpp` 6개(4 worker에서 200개 작업의 순서·비중첩·Render 표지, 네 생산자의 생산자별 순서, 머리 작업을 gate로 막은 채 가운데 작업을 취소·회수 시도·선행 실패시켜도 gate 전에는 모두 Pending·`TryRevoke` false·체인 `Wait` 미완료이고 gate 뒤 capture 정리까지 머리 뒤에 일어남, `Shutdown(Cancel)`이 순서 대기 작업을 앞 작업 뒤에 정리함, 시작 전 거부와 body 보존·scheduler 재시작 3회, 순서 전용 선행·lane 옵션 검사와 거부), `Tests/ParallelForTests.cpp` 5개(10007개 원소를 한 번씩·Render 표지 상속·count 0, 처음 실패 batch의 결정성 20회와 앞 원소 실행, 시작 전·`maxHelpers` 0·worker 안 호출·helper 할당 실패 때 호출 스레드 실행, count < `minBatchSize`·count 1·Game 표지 비상속, batch를 쥔 helper가 막힌 채 `Shutdown(Cancel)`해도 범위 전체를 한 번씩 처리).

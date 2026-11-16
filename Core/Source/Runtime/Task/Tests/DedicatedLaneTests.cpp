@@ -23,6 +23,7 @@ struct Log {
         if (count == 512) {
             Fatal("Dedicated lane test log overflow");
         }
+
         values[count++] = value;
     }
 };
@@ -40,6 +41,7 @@ bool PostCallable(DedicatedLane& lane, Allocator& allocator, Callable&& callable
     if (!task) {
         return false;
     }
+
     return lane.Post(Move(task.Value())).IsOk();
 }
 
@@ -124,6 +126,7 @@ Result<void> LaneOnlyOperation(const DedicatedLane& lane) noexcept {
     if (!lane.IsExecutingTask()) {
         return Result<void>::Failure(ErrorCode::WrongThread);
     }
+
     return Result<void>::Success();
 }
 
@@ -170,16 +173,19 @@ TEST(DedicatedLane_MultiProducerFifoPerProducer) {
     for (uint32 index = 0; index < 4; ++index) {
         REQUIRE(producers[index].Start(ProduceTasks, &contexts[index]) == ThreadStatus::Success);
     }
+
     launch.Signal();
     for (Thread& producer : producers) {
         JoinTestThread(producer);
     }
+
     gate.Signal();
     REQUIRE(lane.Flush());
 
     for (const ProducerContext& context : contexts) {
         CHECK(context.ok);
     }
+
     REQUIRE(log.count == 256);
     uint32 next[4]{};
     for (uint32 index = 0; index < log.count; ++index) {
@@ -188,6 +194,7 @@ TEST(DedicatedLane_MultiProducerFifoPerProducer) {
         CHECK(log.values[index] % 1000 == next[producer]);
         ++next[producer];
     }
+
     const DedicatedLaneStats stats = lane.Stats();
     CHECK(stats.posted == 257);
     CHECK(stats.completed == 257);
@@ -234,6 +241,7 @@ TEST(DedicatedLane_ShutdownDrainsQueueAndContinuations) {
         for (uint32 index = 0; index < 50; ++index) {
             REQUIRE(PostCallable(lane, allocator, [&calls]() noexcept { ++calls; }));
         }
+
         // 이 작업이 Shutdown 전에 실행되든 종료 중에 실행되든 그 후속 Post는 받아 실행해야 한다.
         bool continuationAccepted = false;
         REQUIRE(PostCallable(lane, allocator, [&]() noexcept {
@@ -273,6 +281,7 @@ TEST(DedicatedLane_FlushWaitsForEarlierTasks) {
     for (uint32 index = 0; index < 10; ++index) {
         REQUIRE(PostCallable(lane, allocator, [&calls]() noexcept { ++calls; }));
     }
+
     CHECK(lane.Stats().completed == 0);
     gate.Signal();
     REQUIRE(lane.Flush());
@@ -355,6 +364,7 @@ TEST(DedicatedLane_StartContractAndThreadName) {
     for (usize index = 0; index < MaxThreadNameBytes + 1; ++index) {
         longName[index] = 'n';
     }
+
     DedicatedLaneConfig invalid;
     invalid.thread.name = longName;
     CHECK(lane.Start(invalid).Error() == ErrorCode::InvalidArgument);
@@ -421,4 +431,207 @@ TEST(DedicatedLane_StartAndShutdownRequireOwnerThread) {
     CHECK(probe.start == ErrorCode::WrongThread);
     CHECK(probe.shutdown == ErrorCode::WrongThread);
     CHECK(!lane.Stats().running);
+}
+
+namespace {
+
+// 종료가 시작되었음(accepting false)을 본 뒤 외부 Post를 시도하고 gate를 연다. 상태 조건을 기다리는
+// 명시 대기이며 시간에 기대지 않는다.
+struct ShutdownObserver {
+    DedicatedLane* lane;
+    Allocator* allocator;
+    ManualResetEvent* gate;
+    ErrorCode external = ErrorCode::None;
+    bool taskKept = false;
+};
+
+void ObserveShutdownThenOpen(void* raw) noexcept {
+    auto& observer = *static_cast<ShutdownObserver*>(raw);
+    while (observer.lane->Stats().accepting) {
+        YieldThread();
+    }
+
+    auto task = Task::TryCreate(*observer.allocator, []() noexcept {});
+    if (task) {
+        observer.external = observer.lane->Post(Move(task.Value())).Error();
+        observer.taskKept = static_cast<bool>(task.Value());
+    }
+
+    observer.gate->Signal();
+}
+
+struct InlineDrainer {
+    DedicatedLane* lane;
+    Allocator* allocator;
+    ManualResetEvent* entered;
+    ManualResetEvent* gate;
+    uint64 thread = 0;
+    bool posted = false;
+};
+
+void DrainFromOtherThread(void* raw) noexcept {
+    auto& drainer = *static_cast<InlineDrainer*>(raw);
+    // 이 스레드가 Inline lane을 비우는 흐름이 된다. 첫 작업이 gate에서 막혀 있는 동안 다른 스레드가
+    // Post한 작업도 이 스레드가 실행한다.
+    drainer.posted = PostCallable(*drainer.lane, *drainer.allocator, [&drainer]() noexcept {
+        drainer.thread = CurrentThreadId();
+        drainer.entered->Signal();
+        if (drainer.gate->Wait(10000) != WaitResult::Signaled) {
+            Fatal("Inline lane gate was not opened");
+        }
+    });
+}
+
+struct LaunchProbe {
+    uint32 calls = 0;
+    bool startAnyway = false;
+    bool succeed = false;
+};
+
+ThreadStatus ProbeLaunch(void* context, Thread& thread, Thread::Entry entry, void* argument,
+                         const ThreadOptions& options) noexcept {
+    auto& probe = *static_cast<LaunchProbe*>(context);
+    ++probe.calls;
+    if (probe.succeed) {
+        return thread.Start(entry, argument, options);
+    }
+
+    if (probe.startAnyway) {
+        // 계약을 어긴 launcher: 스레드를 시작하고도 실패를 돌려준다.
+        static_cast<void>(thread.Start(entry, argument, options));
+    }
+
+    return ThreadStatus::SystemError;
+}
+
+} // namespace
+
+TEST(DedicatedLane_ThreadShutdownAcceptsOnlyLaneContinuations) {
+    SystemAllocator allocator;
+    DedicatedLane lane(allocator);
+    REQUIRE(lane.Start());
+    ManualResetEvent entered;
+    ManualResetEvent gate;
+    bool continuationAccepted = false;
+    bool continuationRan = false;
+    REQUIRE(PostCallable(lane, allocator, [&]() noexcept {
+        entered.Signal();
+        if (gate.Wait(10000) != WaitResult::Signaled) {
+            Fatal("Dedicated lane gate was not opened");
+        }
+
+        // gate는 Shutdown이 수락을 닫은 뒤에만 열리므로 이 Post는 반드시 종료 중이다.
+        continuationAccepted =
+            PostCallable(lane, allocator, [&]() noexcept { continuationRan = true; });
+    }));
+    REQUIRE(entered.Wait(10000) == WaitResult::Signaled);
+
+    ShutdownObserver observer{&lane, &allocator, &gate};
+    Thread helper;
+    REQUIRE(helper.Start(ObserveShutdownThenOpen, &observer) == ThreadStatus::Success);
+    REQUIRE(lane.Shutdown());
+    JoinTestThread(helper);
+
+    CHECK(observer.external == ErrorCode::ShuttingDown);
+    CHECK(observer.taskKept);
+    CHECK(continuationAccepted);
+    CHECK(continuationRan);
+    const DedicatedLaneStats stats = lane.Stats();
+    CHECK(stats.posted == 2);
+    CHECK(stats.completed == 2);
+    CHECK(!stats.accepting);
+}
+
+TEST(DedicatedLane_InlineCrossThreadTrampolineAndShutdown) {
+    // lane을 Shutdown 직후 파괴한 뒤에 비우던 스레드를 Join한다. 비우던 스레드가 잠금 밖에서 lane을
+    // 건드리면 Asan 구성에서 해제 뒤 사용으로 드러난다.
+    for (uint32 round = 0; round < 20; ++round) {
+        SystemAllocator allocator;
+        ManualResetEvent entered;
+        ManualResetEvent gate;
+        Thread drainerThread;
+        Thread helper;
+        InlineDrainer drainer{nullptr, &allocator, &entered, &gate};
+        uint64 secondRunner = 0;
+        bool secondRan = false;
+        ErrorCode external = ErrorCode::None;
+        {
+            DedicatedLane lane(allocator);
+            DedicatedLaneConfig config;
+            config.mode = DedicatedLaneMode::Inline;
+            REQUIRE(lane.Start(config));
+            drainer.lane = &lane;
+            REQUIRE(drainerThread.Start(DrainFromOtherThread, &drainer) == ThreadStatus::Success);
+            REQUIRE(entered.Wait(10000) == WaitResult::Signaled);
+
+            // 다른 스레드가 비우는 중이므로 이 Post는 실행하지 않고 돌아온다(그 스레드가 실행한다).
+            REQUIRE(PostCallable(lane, allocator, [&]() noexcept {
+                secondRunner = CurrentThreadId();
+                secondRan = true;
+            }));
+            CHECK(!secondRan);
+
+            ShutdownObserver observer{&lane, &allocator, &gate};
+            REQUIRE(helper.Start(ObserveShutdownThenOpen, &observer) == ThreadStatus::Success);
+            // Inline Shutdown은 비우던 스레드가 큐를 다 비울 때까지 기다린다.
+            REQUIRE(lane.Shutdown());
+            CHECK(secondRan);
+            CHECK(lane.Stats().completed == 2);
+            JoinTestThread(helper);
+            external = observer.external;
+        }
+
+        JoinTestThread(drainerThread);
+        CHECK(drainer.posted);
+        CHECK(secondRunner == drainer.thread);
+        CHECK(external == ErrorCode::ShuttingDown);
+    }
+}
+
+TEST(DedicatedLane_LauncherFailureLeavesLaneUnchanged) {
+    SystemAllocator allocator;
+    DedicatedLane lane(allocator);
+    DedicatedLaneConfig inlineConfig;
+    inlineConfig.mode = DedicatedLaneMode::Inline;
+    REQUIRE(lane.Start(inlineConfig));
+    REQUIRE(lane.Shutdown());
+
+    // 실패한 launcher(스레드 없음)와 계약을 어긴 launcher(스레드를 시작하고 실패 반환) 모두 Start가
+    // OutOfMemory이고 lane 상태(mode 포함)를 바꾸지 않는다. 시작된 스레드는 Start가
+    // 회수한다(회수하지 않으면 Thread 파괴가 Fatal이다).
+    LaunchProbe probe;
+    DedicatedLaneConfig config;
+    config.lane = TaskLane::Render;
+    config.launch = ProbeLaunch;
+    config.launchContext = &probe;
+    const bool startAnyway[] = {false, true};
+    for (bool anyway : startAnyway) {
+        probe.startAnyway = anyway;
+        CHECK(lane.Start(config).Error() == ErrorCode::OutOfMemory);
+        const DedicatedLaneStats stats = lane.Stats();
+        CHECK(!stats.running);
+        CHECK(!stats.accepting);
+        CHECK(stats.mode == DedicatedLaneMode::Inline);
+        auto task = Task::TryCreate(allocator, []() noexcept {});
+        REQUIRE(task);
+        CHECK(lane.Post(Move(task.Value())).Error() == ErrorCode::ShuttingDown);
+    }
+
+    CHECK(probe.calls == 2);
+
+    // 잘못된 lane 값은 InvalidArgument다.
+    DedicatedLaneConfig badLane;
+    badLane.lane = static_cast<TaskLane>(TaskLaneCount);
+    CHECK(lane.Start(badLane).Error() == ErrorCode::InvalidArgument);
+
+    // 정상 launcher로는 시작된다.
+    probe.succeed = true;
+    REQUIRE(lane.Start(config));
+    CHECK(probe.calls == 3);
+    CHECK(lane.Stats().mode == DedicatedLaneMode::Thread);
+    TaskLane seen = TaskLane::None;
+    REQUIRE(PostCallable(lane, allocator, [&seen]() noexcept { seen = CurrentTaskLane(); }));
+    REQUIRE(lane.Flush());
+    CHECK(seen == TaskLane::Render);
+    REQUIRE(lane.Shutdown());
 }

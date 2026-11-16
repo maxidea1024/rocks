@@ -41,6 +41,7 @@ FrameArena::~FrameArena() noexcept {
     if (platform::AtomicLoad(&openWriters_) != 0) {
         platform::Fatal("FrameArena destroyed with an open FrameArenaWriter");
     }
+
     ROCKS_ASSERT(Reset().IsOk());
     ROCKS_ASSERT(Trim().IsOk());
 }
@@ -49,9 +50,11 @@ Result<void*> FrameArena::TryAllocate(usize bytes, usize alignment) noexcept {
     if (!IsValidAlignment(alignment)) {
         return Result<void*>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (bytes == 0) {
         return Result<void*>::Success(nullptr);
     }
+
     return AllocateFrom(sharedNext_, sharedEnd_, bytes, alignment);
 }
 
@@ -61,6 +64,7 @@ Result<void> FrameArena::Reset() noexcept {
         if (resetting_ || platform::AtomicLoad(&openWriters_) != 0) {
             return Result<void>::Failure(ErrorCode::Busy);
         }
+
         resetting_ = true;
     }
 
@@ -83,6 +87,7 @@ Result<void> FrameArena::Reset() noexcept {
             block->next = release;
             release = block;
         }
+
         // 표준 블록은 남길 수까지 비워 다음 수명에 다시 쓴다.
         while (usedBlocks_ != nullptr) {
             Block* block = usedBlocks_;
@@ -97,6 +102,7 @@ Result<void> FrameArena::Reset() noexcept {
                 release = block;
             }
         }
+
         usedCount_ = 0;
         largeCount_ = 0;
         sharedNext_ = nullptr;
@@ -126,6 +132,7 @@ Result<void> FrameArena::Trim() noexcept {
         if (resetting_) {
             return Result<void>::Failure(ErrorCode::Busy);
         }
+
         release = freeBlocks_;
         freeBlocks_ = nullptr;
         freeCount_ = 0;
@@ -135,6 +142,7 @@ Result<void> FrameArena::Trim() noexcept {
         ReleaseBlock(release);
         release = next;
     }
+
     return Result<void>::Success();
 }
 
@@ -162,10 +170,12 @@ Result<FrameArena::Block*> FrameArena::AcquireBlock() noexcept {
         if (!memory) {
             return Result<Block*>::Failure(memory.Error());
         }
+
         block = ConstructAt<Block>(memory.Value());
         block->bytes = blockBytes_;
         AsanPoisonMemory(Payload(block), blockBytes_ - BlockHeaderBytes);
     }
+
     block->next = usedBlocks_;
     usedBlocks_ = block;
     ++usedCount_;
@@ -181,6 +191,7 @@ bool FrameArena::TryBump(unsigned char*& next, unsigned char* end, usize bytes, 
     if (aligned < address || aligned > limit || limit - aligned < bytes) {
         return false;
     }
+
     result = reinterpret_cast<void*>(aligned);
     next = reinterpret_cast<unsigned char*>(aligned + bytes);
     return true;
@@ -191,14 +202,17 @@ Result<void*> FrameArena::AllocateLarge(usize bytes, usize alignment) noexcept {
     if (!TryAdd(bytes, alignment - 1, total) || !TryAdd(total, BlockHeaderBytes, total)) {
         return Result<void*>::Failure(ErrorCode::Overflow);
     }
+
     platform::LockGuard lock(gate_);
     if (resetting_) {
         return Result<void*>::Failure(ErrorCode::Busy);
     }
+
     auto memory = backing_.Allocate(total, BlockAlignment);
     if (!memory) {
         return Result<void*>::Failure(memory.Error());
     }
+
     Block* block = ConstructAt<Block>(memory.Value());
     block->bytes = total;
     block->next = largeBlocks_;
@@ -221,6 +235,7 @@ Result<void*> FrameArena::AllocateFrom(unsigned char*& next, unsigned char*& end
     if (!TryAdd(bytes, alignment - 1, worst)) {
         return Result<void*>::Failure(ErrorCode::Overflow);
     }
+
     if (worst > payloadBytes / 2) {
         return AllocateLarge(bytes, alignment);
     }
@@ -229,18 +244,21 @@ Result<void*> FrameArena::AllocateFrom(unsigned char*& next, unsigned char*& end
     if (resetting_) {
         return Result<void*>::Failure(ErrorCode::Busy);
     }
+
     void* result = nullptr;
     if (!TryBump(next, end, bytes, alignment, result)) {
         auto block = AcquireBlock();
         if (!block) {
             return Result<void*>::Failure(block.Error());
         }
+
         // 이전 블록의 남은 공간은 Reset까지 쓰지 않는다. 새 블록은 비어 있고 worst가 payload의 절반
         // 이하이므로 반드시 들어간다.
         next = Payload(block.Value());
         end = reinterpret_cast<unsigned char*>(block.Value()) + block.Value()->bytes;
         ROCKS_ASSERT(TryBump(next, end, bytes, alignment, result));
     }
+
     AsanUnpoisonMemory(result, bytes);
     platform::AtomicFetchAdd<platform::MemoryOrder::Relaxed>(&requestedBytes_, uint64{bytes});
     return Result<void*>::Success(result);
@@ -287,9 +305,11 @@ Result<void*> FrameArenaWriter::TryAllocate(usize bytes, usize alignment) noexce
     if (!IsValidAlignment(alignment)) {
         return Result<void*>::Failure(ErrorCode::InvalidArgument);
     }
+
     if (bytes == 0) {
         return Result<void*>::Success(nullptr);
     }
+
     // 대형 요청은 자기 블록에 자리가 남아 있어도 대형 블록으로 보낸다(공유 경로와 같은 판정). 그
     // 밖의 요청은 자기 블록에 들어가면 잠금 없이 끝낸다.
     usize worst = 0;
@@ -302,6 +322,7 @@ Result<void*> FrameArenaWriter::TryAllocate(usize bytes, usize alignment) noexce
                                                                  uint64{bytes});
         return Result<void*>::Success(result);
     }
+
     return arena_.AllocateFrom(next_, end_, bytes, alignment);
 }
 

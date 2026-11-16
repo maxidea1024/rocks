@@ -33,10 +33,12 @@ void TouchLargeStack(void* raw) noexcept {
     for (usize offset = 0; offset < Bytes; offset += 4096) {
         buffer[offset] = static_cast<uint8>(offset >> 12);
     }
+
     usize sum = 0;
     for (usize offset = 0; offset < Bytes; offset += 4096) {
         sum += buffer[offset];
     }
+
     *static_cast<usize*>(raw) = sum;
 }
 
@@ -86,6 +88,7 @@ TEST(Thread_OptionsRejectInvalidInputWithoutStarting) {
     for (usize index = 0; index < MaxThreadNameBytes + 1; ++index) {
         longName[index] = 'x';
     }
+
     ThreadOptions options;
     options.name = longName;
     CHECK(thread.Start(MarkRan, &ran, options) == ThreadStatus::InvalidArgument);

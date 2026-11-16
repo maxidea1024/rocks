@@ -17,7 +17,7 @@ enum class ThreadStatus {
 // OS 스케줄러에 주는 상대 우선순위다(UE EThreadPriority의 일반 단계 대응). 실시간·time-critical
 // 단계는 두지 않는다. OS별 대응:
 // - Windows: THREAD_PRIORITY_LOWEST·BELOW_NORMAL·NORMAL·ABOVE_NORMAL·HIGHEST
-// - macOS: SCHED_OTHER 범위(최소·기본·최대)를 다섯 단계로 나눈 값
+// - macOS: SCHED_OTHER 범위의 최소·가운데·최대를 다섯 단계로 나눈 값(정책은 SCHED_OTHER 고정)
 // - Android: nice 19·10·0·-4·-8(android.os.Process THREAD_PRIORITY_LOWEST·BACKGROUND·DEFAULT·
 //   DISPLAY·URGENT_DISPLAY와 같은 값)
 enum class ThreadPriority : uint8 {

@@ -27,6 +27,13 @@ enum class TaskLane : uint8 {
     Gc
 };
 
+// TaskLane 값의 수다. 외부에서 받은 lane 값의 범위 검사에 쓴다(IsValidTaskLane).
+inline constexpr uint32 TaskLaneCount = static_cast<uint32>(TaskLane::Gc) + 1;
+
+constexpr bool IsValidTaskLane(TaskLane lane) noexcept {
+    return static_cast<uint32>(lane) < TaskLaneCount;
+}
+
 // 현재 스레드에서 가장 안쪽 TaskLaneScope의 lane이다. 범위 밖이면 None이다. 할당·잠금 없이
 // thread-local 값만 읽는다.
 TaskLane CurrentTaskLane() noexcept;

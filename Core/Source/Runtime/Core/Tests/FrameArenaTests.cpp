@@ -23,6 +23,7 @@ public:
         if (result) {
             AtomicFetchAdd(&allocations, uint64{1});
         }
+
         return result;
     }
 
@@ -31,6 +32,7 @@ public:
         if (result && address != nullptr) {
             AtomicFetchAdd(&deallocations, uint64{1});
         }
+
         return result;
     }
 
@@ -129,6 +131,7 @@ void WriteObjects(void* raw) noexcept {
             context.ok = false;
             break;
         }
+
         context.objects[index] = object.Value();
         // 소멸자 없는 할당도 섞는다(다른 크기·정렬).
         auto scratch = writer.TryAllocate(24 + (index % 7) * 8, usize{8} << (index % 4));
@@ -168,6 +171,7 @@ TEST(FrameArena_ResetRunsDestructorsInReverseRegistrationOrder) {
     for (uint32 index = 0; index < 5; ++index) {
         CHECK(log.values[index] == expected[index]);
     }
+
     const FrameArenaStats stats = arena.Stats();
     CHECK(stats.destructors == 0);
     CHECK(stats.requestedBytes == 0);
@@ -190,6 +194,7 @@ TEST(FrameArena_AlignmentLargeAllocationsAndErrors) {
         REQUIRE(memory);
         CHECK(reinterpret_cast<uptr>(memory.Value()) % alignment == 0);
     }
+
     auto wide = arena.TryNew<Wide>();
     REQUIRE(wide);
     CHECK(reinterpret_cast<uptr>(wide.Value()) % 256 == 0);
@@ -232,6 +237,7 @@ TEST(FrameArena_ResetRetainsBlocksAndTrimReturnsThem) {
         for (uint32 index = 0; index < 12; ++index) {
             REQUIRE(arena.TryAllocate(1024, 16));
         }
+
         const usize used = arena.Stats().usedBlocks;
         CHECK(used >= 4);
         CHECK(counting.allocations == used);
@@ -246,6 +252,7 @@ TEST(FrameArena_ResetRetainsBlocksAndTrimReturnsThem) {
         for (uint32 index = 0; index < 9; ++index) {
             REQUIRE(arena.TryAllocate(1024, 16));
         }
+
         CHECK(counting.allocations == allocations);
         CHECK(arena.Stats().retainedBlocks == 0);
         REQUIRE(arena.Reset());
@@ -266,6 +273,7 @@ TEST(FrameArena_ResetRetainsBlocksAndTrimReturnsThem) {
 
         REQUIRE(arena.TryAllocate(1024, 16));
     }
+
     // 파괴는 Reset 뒤 Trim이다.
     CHECK(counting.deallocations == counting.allocations);
 }
@@ -285,6 +293,7 @@ TEST(FrameArena_WritersAllocateConcurrently) {
         contexts[index] = WriterContext{&arena, &launch, index + 1};
         REQUIRE(threads[index].Start(WriteObjects, &contexts[index]) == ThreadStatus::Success);
     }
+
     launch.Signal();
     for (Thread& thread : threads) {
         if (thread.WaitForCompletion(10000) != WaitResult::Signaled ||
@@ -304,6 +313,7 @@ TEST(FrameArena_WritersAllocateConcurrently) {
             CHECK(reinterpret_cast<uptr>(object) % alignof(Counted) == 0);
         }
     }
+
     const FrameArenaStats stats = arena.Stats();
     CHECK(stats.destructors == 8000);
     CHECK(stats.openWriters == 0);
@@ -324,6 +334,7 @@ TEST(FrameArena_ResetRejectsOpenWritersAndReentry) {
         CHECK(arena.Stats().usedBlocks == 1);
         CHECK(writer.TryAllocate(0, 6).Error() == ErrorCode::InvalidArgument);
     }
+
     CHECK(arena.Stats().openWriters == 0);
 
     // 소멸자 안의 할당·Reset은 Busy다.

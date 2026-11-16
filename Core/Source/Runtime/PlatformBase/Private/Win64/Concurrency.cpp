@@ -50,11 +50,13 @@ usize CopyCurrentThreadName(char* buffer, usize capacity) noexcept {
     if (buffer == nullptr || capacity == 0) {
         return 0;
     }
+
     buffer[0] = '\0';
     PWSTR description = nullptr;
     if (FAILED(GetThreadDescription(GetCurrentThread(), &description))) {
         return 0;
     }
+
     usize bytes = 0;
     const bool converted =
         detail::WideToUtf8(description, lstrlenW(description), buffer, capacity, bytes);
@@ -63,6 +65,7 @@ usize CopyCurrentThreadName(char* buffer, usize capacity) noexcept {
         buffer[0] = '\0';
         return 0;
     }
+
     return bytes;
 }
 
@@ -87,6 +90,7 @@ void ApplyCurrentThreadOptions(const ThreadState& state) noexcept {
             static_cast<void>(SetThreadDescription(GetCurrentThread(), wide));
         }
     }
+
     int priority = THREAD_PRIORITY_NORMAL;
     switch (state.priority) {
     case ThreadPriority::Lowest:
@@ -104,6 +108,7 @@ void ApplyCurrentThreadOptions(const ThreadState& state) noexcept {
         priority = THREAD_PRIORITY_HIGHEST;
         break;
     }
+
     static_cast<void>(SetThreadPriority(GetCurrentThread(), priority));
 }
 

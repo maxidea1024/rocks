@@ -71,20 +71,18 @@ void PosixSetCurrentThreadName(const char* name) noexcept {
     static_cast<void>(pthread_setname_np(name));
 }
 
-// SCHED_OTHER의 최소·기본·최대 사이를 다섯 단계로 나눈다(UE Apple 스레드도 SCHED_OTHER 대역 안의
-// 값을 쓴다). 기본값은 현재 스레드의 값으로 둔다.
+// SCHED_OTHER의 최소·최대 사이를 다섯 단계로 나눈다(UE Apple 스레드도 SCHED_OTHER 대역 안의 값을
+// 쓴다). 보통은 대역 가운데((최소 + 최대) / 2)로 고정한다. 부모에서 물려받은 값을 기준으로 삼으면
+// 같은 단계가 만든 스레드마다 달라지기 때문이다. 정책은 늘 SCHED_OTHER로 둔다(실시간 정책은 쓰지
+// 않는다).
 void PosixSetCurrentThreadPriority(ThreadPriority priority) noexcept {
-    int policy = 0;
-    sched_param parameters{};
-    if (pthread_getschedparam(pthread_self(), &policy, &parameters) != 0) {
-        return;
-    }
     const int minimum = sched_get_priority_min(SCHED_OTHER);
     const int maximum = sched_get_priority_max(SCHED_OTHER);
-    const int normal = parameters.sched_priority;
-    if (minimum < 0 || maximum < minimum || normal < minimum || normal > maximum) {
+    if (minimum < 0 || maximum < minimum) {
         return;
     }
+
+    const int normal = (minimum + maximum) / 2;
     int value = normal;
     switch (priority) {
     case ThreadPriority::Lowest:
@@ -102,6 +100,8 @@ void PosixSetCurrentThreadPriority(ThreadPriority priority) noexcept {
         value = maximum;
         break;
     }
+
+    sched_param parameters{};
     parameters.sched_priority = value;
     static_cast<void>(pthread_setschedparam(pthread_self(), SCHED_OTHER, &parameters));
 }

@@ -142,6 +142,9 @@ bool IsSubmitting(WorkerState* state) noexcept {
 
 // gate 안에서 부른다. 실행(Running)·정리(Completing) 중인 작업이 없으면 취소 요청이 없는 외부
 // 이벤트에 취소를 요청하고 하나라도 바꿨으면 true다(호출자는 다시 고른다).
+// 순서 전용 선행을 기다리는 작업(취소 요청이 있어도)은 막힘이 아니다. 선행 사슬은 DAG라 끝을
+// 따라가면 실행 중인 작업, 고를 수 있는 작업, 또는 이 함수가 취소할 외부 이벤트에 닿는다. 그래서
+// 고를 작업이 없고 실행·정리 중인 작업도 없으면 남은 원인은 완료되지 않은 외부 이벤트뿐이다.
 bool CancelStalledEvents(WorkerState& state) noexcept {
     for (uint32 index = 0; index < state.capacity; ++index) {
         const WorkerRecord* record = state.records[index];
@@ -279,6 +282,17 @@ Result<bool> WorkerTaskHandle::TryRevoke() const noexcept {
         if (record_->status.state != WorkerTaskState::Pending) {
             return Result<bool>::Success(false);
         }
+
+        // 순서 전용 선행이 끝나지 않았으면 회수하지 않는다. 지금 정리하면 그 선행이 실행 중일 때
+        // 이 작업의 capture 정리가 겹치고, 이 작업이 먼저 terminal이 되어 뒤 작업이 선행보다 먼저
+        // 시작할 수 있다.
+        for (uint32 dependency = 0; dependency < record_->dependencyCount; ++dependency) {
+            const bool orderOnly = (record_->orderOnlyMask & (uint64{1} << dependency)) != 0;
+            if (orderOnly && !IsTerminal(record_->dependencies[dependency]->status.state)) {
+                return Result<bool>::Success(false);
+            }
+        }
+
         // Pending 작업은 수락 뒤 terminal 전까지 records의 자기 칸에 있다. Completing으로 바꾸면
         // worker가 꺼내지 않는다(worker는 Pending만 고른다).
         slot = record_->slot;
@@ -532,9 +546,10 @@ Result<WorkerTaskHandle> WorkerScheduler::Submit(Function<void(WorkerTaskContext
     if (!body) {
         return Result<WorkerTaskHandle>::Failure(ErrorCode::InvalidArgument);
     }
-    if (static_cast<uint32>(options.lane) > static_cast<uint32>(TaskLane::Gc)) {
+    if (!IsValidTaskLane(options.lane)) {
         return Result<WorkerTaskHandle>::Failure(ErrorCode::InvalidArgument);
     }
+
     const Span<const WorkerTaskHandle> orderDependencies = options.orderDependencies;
     WorkerState* state;
     WorkerRecord* retained[64]{};
@@ -719,6 +734,11 @@ void WorkerScheduler::RunWorker(void* raw) noexcept {
                         if (record->external && !record->status.cancellationRequested) {
                             continue;
                         }
+                        // 순서 전용 선행이 모두 끝나기 전에는 실행·취소·DependencyFailed 어느
+                        // 경로로도 고르지 않는다. 그래야 순서 전용 선행과 이 작업의 body·capture
+                        // 정리가 겹치지 않고, 이 작업의 terminal이 선행 전체의 terminal을 뜻한다
+                        // (SerialTaskChain이 마지막 작업만 보고 체인 전체 완료를 판단한다).
+                        bool orderReady = true;
                         bool ready = true;
                         bool failed = false;
                         for (uint32 dependency = 0; dependency < record->dependencyCount;
@@ -727,11 +747,20 @@ void WorkerScheduler::RunWorker(void* raw) noexcept {
                             const bool orderOnly =
                                 (record->orderOnlyMask & (uint64{1} << dependency)) != 0;
                             if (!IsTerminal(status)) {
-                                ready = false;
+                                if (orderOnly) {
+                                    orderReady = false;
+                                } else {
+                                    ready = false;
+                                }
                             } else if (status != WorkerTaskState::Succeeded && !orderOnly) {
                                 failed = true;
                             }
                         }
+
+                        if (!orderReady) {
+                            continue;
+                        }
+
                         if (!record->status.cancellationRequested && !failed && !ready) {
                             continue;
                         }

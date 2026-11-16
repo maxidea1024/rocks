@@ -23,7 +23,54 @@ WorkerTaskState WaitState(const WorkerTaskHandle& handle) noexcept {
     if (!waited || waited.Value() != WaitResult::Signaled) {
         Fatal("Serial chain task did not finish");
     }
+
     return handle.Status().Value().state;
+}
+
+WorkerTaskState StateNow(const WorkerTaskHandle& handle) noexcept {
+    return handle.Status().Value().state;
+}
+
+// 앞 작업(predecessorDone이 1이 되기 전)과 겹쳐 body가 실행되거나 capture가 정리되면 early를 센다.
+// 취소·회수·선행 실패로 body 없이 끝나는 작업도 capture 정리는 순서 전용 선행 뒤여야 한다.
+struct OrderedCapture {
+    OrderedCapture(uint32& done, uint32& earlyCount, uint32& runCount) noexcept
+        : predecessorDone(&done), early(&earlyCount), runs(&runCount) {
+    }
+
+    OrderedCapture(OrderedCapture&& other) noexcept
+        : predecessorDone(other.predecessorDone), early(other.early), runs(other.runs) {
+        other.predecessorDone = nullptr;
+    }
+
+    ~OrderedCapture() noexcept {
+        if (predecessorDone != nullptr && AtomicLoad(predecessorDone) == 0) {
+            AtomicFetchAdd(early, 1u);
+        }
+    }
+
+    void operator()(WorkerTaskContext&) noexcept {
+        if (AtomicLoad(predecessorDone) == 0) {
+            AtomicFetchAdd(early, 1u);
+        }
+
+        AtomicFetchAdd(runs, 1u);
+    }
+
+    uint32* predecessorDone;
+    uint32* early;
+    uint32* runs;
+};
+
+Result<WorkerTaskHandle> SubmitOrdered(SerialTaskChain& chain, Allocator& allocator,
+                                       OrderedCapture&& capture,
+                                       Span<const WorkerTaskHandle> dependencies = {}) noexcept {
+    auto body = Body::TryCreate(allocator, Move(capture));
+    if (!body) {
+        return Result<WorkerTaskHandle>::Failure(body.Error());
+    }
+
+    return chain.Submit(Move(body.Value()), dependencies);
 }
 
 // 체인 작업이 겹쳐 실행되면 active가 1을 넘는다. 기록은 체인 순서로만 쓰이므로 잠금 없이
@@ -40,12 +87,15 @@ struct ChainProbe {
         if (AtomicFetchAdd(&active, 1u) != 0) {
             AtomicFetchAdd(&overlaps, 1u);
         }
+
         if (CurrentTaskLane() != expectedLane) {
             AtomicFetchAdd(&wrongLane, 1u);
         }
+
         if (count < 256) {
             values[count] = value;
         }
+
         ++count;
         AtomicFetchSub(&active, 1u);
     }
@@ -59,6 +109,7 @@ Result<WorkerTaskHandle> SubmitRecord(SerialTaskChain& chain, Allocator& allocat
     if (!body) {
         return Result<WorkerTaskHandle>::Failure(body.Error());
     }
+
     return chain.Submit(Move(body.Value()), dependencies);
 }
 
@@ -101,6 +152,7 @@ TEST(SerialTaskChain_RunsInSubmitOrderWithoutOverlap) {
     for (uint32 index = 0; index < 200; ++index) {
         REQUIRE(SubmitRecord(chain, allocator, probe, index));
     }
+
     auto waited = chain.Wait(10000);
     REQUIRE(waited && waited.Value() == WaitResult::Signaled);
     CHECK(probe.overlaps == 0);
@@ -109,6 +161,7 @@ TEST(SerialTaskChain_RunsInSubmitOrderWithoutOverlap) {
     for (uint32 index = 0; index < 200; ++index) {
         CHECK(probe.values[index] == index);
     }
+
     REQUIRE(scheduler.Shutdown());
 }
 
@@ -130,15 +183,18 @@ TEST(SerialTaskChain_MultiProducerKeepsPerProducerOrder) {
         REQUIRE(producers[index].Start(ProduceChainTasks, &contexts[index]) ==
                 ThreadStatus::Success);
     }
+
     launch.Signal();
     for (Thread& producer : producers) {
         JoinTestThread(producer);
     }
+
     auto waited = chain.Wait(10000);
     REQUIRE(waited && waited.Value() == WaitResult::Signaled);
     for (const ProducerContext& context : contexts) {
         CHECK(context.ok);
     }
+
     CHECK(probe.overlaps == 0);
     REQUIRE(probe.count == 128);
     uint32 next[4]{};
@@ -148,61 +204,127 @@ TEST(SerialTaskChain_MultiProducerKeepsPerProducerOrder) {
         CHECK(probe.values[index] % 1000 == next[producer]);
         ++next[producer];
     }
+
     REQUIRE(scheduler.Shutdown());
 }
 
-TEST(SerialTaskChain_ContinuesAfterFailureCancelAndDependencyFailure) {
+TEST(SerialTaskChain_HeldHeadBlocksCancelledRevokedAndFailedSuccessors) {
     SystemAllocator allocator;
     WorkerScheduler scheduler(allocator);
     WorkerSchedulerConfig config;
     config.workerCount = 2;
     REQUIRE(scheduler.Start(config));
     SerialTaskChain chain(scheduler);
-    ChainProbe probe;
 
-    // 머리 작업을 gate로 막아 뒤 작업이 Pending인 동안 회수·이벤트 실패를 만든다.
+    // 머리 작업을 gate로 막은 채(실행 중) 뒤 작업을 취소·회수 시도·선행 실패시킨다. 순서 전용
+    // 선행이 끝나지 않았으므로 어느 것도 gate 전에 정리·terminal이 되면 안 된다. worker가 비어
+    // 있어도 그렇다는 것을 상태로 결정적으로 단언한다.
+    ManualResetEvent entered;
     ManualResetEvent gate;
-    auto head = Body::TryCreate(allocator, [&gate](WorkerTaskContext& context) noexcept {
+    uint32 headDone = 0;
+    uint32 early = 0;
+    uint32 runs = 0;
+    auto head = Body::TryCreate(allocator, [&](WorkerTaskContext& context) noexcept {
+        entered.Signal();
         if (gate.Wait(10000) != WaitResult::Signaled) {
             Fatal("Serial chain gate was not opened");
         }
+
+        AtomicStore(&headDone, 1u);
         context.Fail(ErrorCode::Busy);
     });
     REQUIRE(head);
     auto failed = chain.Submit(Move(head.Value()));
     REQUIRE(failed);
-    auto afterFailure = SubmitRecord(chain, allocator, probe, 1);
-    REQUIRE(afterFailure);
-    auto revoked = SubmitRecord(chain, allocator, probe, 2);
+    REQUIRE(entered.Wait(10000) == WaitResult::Signaled);
+
+    auto cancelled = SubmitOrdered(chain, allocator, OrderedCapture(headDone, early, runs));
+    REQUIRE(cancelled);
+    auto revoked = SubmitOrdered(chain, allocator, OrderedCapture(headDone, early, runs));
     REQUIRE(revoked);
     auto event = scheduler.TryCreateEvent();
     REQUIRE(event);
-    auto blocked = SubmitRecord(chain, allocator, probe, 3,
-                                Span<const WorkerTaskHandle>(&event.Value().Handle(), 1));
+    auto blocked = SubmitOrdered(chain, allocator, OrderedCapture(headDone, early, runs),
+                                 Span<const WorkerTaskHandle>(&event.Value().Handle(), 1));
     REQUIRE(blocked);
-    auto tail = SubmitRecord(chain, allocator, probe, 4);
+    auto tail = SubmitOrdered(chain, allocator, OrderedCapture(headDone, early, runs));
     REQUIRE(tail);
 
+    REQUIRE(cancelled.Value().RequestCancel());
     auto revokedNow = revoked.Value().TryRevoke();
     REQUIRE(revokedNow);
-    CHECK(revokedNow.Value());
+    CHECK(!revokedNow.Value());
+    REQUIRE(revoked.Value().RequestCancel());
     auto eventFailed = event.Value().TryFail(ErrorCode::NotFound);
     REQUIRE(eventFailed);
     CHECK(eventFailed.Value());
-    gate.Signal();
 
-    CHECK(WaitState(tail.Value()) == WorkerTaskState::Succeeded);
-    CHECK(WaitState(failed.Value()) == WorkerTaskState::Failed);
-    CHECK(WaitState(afterFailure.Value()) == WorkerTaskState::Succeeded);
-    CHECK(WaitState(revoked.Value()) == WorkerTaskState::Cancelled);
-    CHECK(WaitState(blocked.Value()) == WorkerTaskState::Failed);
+    CHECK(StateNow(failed.Value()) == WorkerTaskState::Running);
+    CHECK(StateNow(cancelled.Value()) == WorkerTaskState::Pending);
+    CHECK(StateNow(revoked.Value()) == WorkerTaskState::Pending);
+    CHECK(StateNow(blocked.Value()) == WorkerTaskState::Pending);
+    CHECK(StateNow(tail.Value()) == WorkerTaskState::Pending);
+    auto held = chain.Wait(0);
+    REQUIRE(held);
+    CHECK(held.Value() == WaitResult::TimedOut);
+    CHECK(runs == 0);
+
+    gate.Signal();
+    auto waited = chain.Wait(10000);
+    REQUIRE(waited && waited.Value() == WaitResult::Signaled);
+    // 마지막 작업이 끝났으면 체인 전체가 끝났다.
+    CHECK(StateNow(failed.Value()) == WorkerTaskState::Failed);
+    CHECK(StateNow(cancelled.Value()) == WorkerTaskState::Cancelled);
+    CHECK(StateNow(revoked.Value()) == WorkerTaskState::Cancelled);
+    CHECK(StateNow(blocked.Value()) == WorkerTaskState::Failed);
     CHECK(blocked.Value().Status().Value().error == ErrorCode::DependencyFailed);
-    // 실패·회수·선행 실패를 지나도 체인 순서대로 나머지만 실행된다.
-    REQUIRE(probe.count == 2);
-    CHECK(probe.values[0] == 1);
-    CHECK(probe.values[1] == 4);
-    CHECK(probe.overlaps == 0);
+    CHECK(StateNow(tail.Value()) == WorkerTaskState::Succeeded);
+    CHECK(runs == 1);
+    CHECK(early == 0);
     REQUIRE(scheduler.Shutdown());
+}
+
+TEST(WorkerScheduler_CancelShutdownWaitsForOrderDependencies) {
+    SystemAllocator allocator;
+    WorkerScheduler scheduler(allocator);
+    WorkerSchedulerConfig config;
+    config.workerCount = 2;
+    REQUIRE(scheduler.Start(config));
+
+    // 실행 중인 앞 작업은 취소 요청을 볼 때까지 돈다(명시 조건 대기). Shutdown(Cancel)이 Pending인
+    // 뒤 작업을 정리하는 것은 앞 작업이 끝난 뒤여야 한다.
+    ManualResetEvent entered;
+    uint32 done = 0;
+    uint32 early = 0;
+    uint32 runs = 0;
+    auto running = Body::TryCreate(allocator, [&](WorkerTaskContext& context) noexcept {
+        entered.Signal();
+        while (!context.IsCancellationRequested()) {
+            YieldThread();
+        }
+
+        AtomicStore(&done, 1u);
+    });
+    REQUIRE(running);
+    auto first = scheduler.Submit(Move(running.Value()));
+    REQUIRE(first);
+    REQUIRE(entered.Wait(10000) == WaitResult::Signaled);
+
+    auto ordered = Body::TryCreate(allocator, OrderedCapture(done, early, runs));
+    REQUIRE(ordered);
+    WorkerSubmitOptions options;
+    options.orderDependencies = Span<const WorkerTaskHandle>(&first.Value(), 1);
+    auto second = scheduler.Submit(Move(ordered.Value()), {}, options);
+    REQUIRE(second);
+    auto revoked = second.Value().TryRevoke();
+    REQUIRE(revoked);
+    CHECK(!revoked.Value());
+
+    REQUIRE(scheduler.Shutdown(WorkerShutdownMode::Cancel));
+    CHECK(StateNow(first.Value()) == WorkerTaskState::Cancelled);
+    CHECK(StateNow(second.Value()) == WorkerTaskState::Cancelled);
+    CHECK(runs == 0);
+    CHECK(early == 0);
 }
 
 TEST(SerialTaskChain_RejectionKeepsBodyAndChainSurvivesRestart) {
@@ -229,6 +351,7 @@ TEST(SerialTaskChain_RejectionKeepsBodyAndChainSurvivesRestart) {
         // 이전 세대의 마지막 작업은 선행에서 빠지므로 재시작 뒤 제출이 WrongContext가 되지 않는다.
         REQUIRE(scheduler.Shutdown());
     }
+
     REQUIRE(probe.count == 6);
     const uint32 expected[] = {0, 1, 10, 11, 20, 21};
     for (uint32 index = 0; index < 6; ++index) {
@@ -294,6 +417,7 @@ TEST(WorkerScheduler_OrderDependencyAndLaneOptions) {
         REQUIRE(clone);
         cloned[index] = Move(clone.Value());
     }
+
     CHECK(scheduler.Submit(Move(kept.Value()), Span<const WorkerTaskHandle>(cloned, 2), orderOnly)
               .Error() == ErrorCode::CapacityExceeded);
     WorkerSubmitOptions badLane;

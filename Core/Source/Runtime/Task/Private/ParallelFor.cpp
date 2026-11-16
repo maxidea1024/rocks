@@ -30,14 +30,17 @@ struct ParallelForShared {
             if (platform::AtomicLoad<platform::MemoryOrder::Acquire>(&stopped) != 0) {
                 return;
             }
+
             // 취소된 helper는 더 가져가지 않는다. 남은 batch는 호출 스레드가 실행한다.
             if (context != nullptr && context->IsCancellationRequested()) {
                 return;
             }
+
             const usize batch = platform::AtomicFetchAdd(&nextBatch, usize{1});
             if (batch >= batchCount) {
                 return;
             }
+
             const usize begin = batch * batchSize;
             const usize end = count - begin < batchSize ? count : begin + batchSize;
             const ErrorCode error = invoke(body, begin, end);
@@ -49,6 +52,7 @@ struct ParallelForShared {
                         failure = error;
                     }
                 }
+
                 platform::AtomicStore<platform::MemoryOrder::Release>(&stopped, 1u);
             }
         }
@@ -88,10 +92,11 @@ Result<void> RunParallelFor(WorkerScheduler& scheduler, Allocator& scratch, usiz
         helpers = shared.batchCount - 1;
     }
 
-    // helper는 호출 스레드의 lane 표지를 물려받는다.
+    // helper는 호출 스레드의 lane 표지를 물려받는다. None·Game은 물려주지 않는다(Game lane 전용
+    // 검사가 worker에서 통과하지 않게).
     WorkerSubmitOptions submitOptions;
     const TaskLane lane = CurrentTaskLane();
-    submitOptions.lane = lane == TaskLane::None ? TaskLane::Worker : lane;
+    submitOptions.lane = lane == TaskLane::None || lane == TaskLane::Game ? TaskLane::Worker : lane;
 
     WorkerTaskHandle handles[MaxHelpers];
     uint32 submitted = 0;
@@ -102,10 +107,12 @@ Result<void> RunParallelFor(WorkerScheduler& scheduler, Allocator& scratch, usiz
         if (!helper) {
             break;
         }
+
         auto handle = scheduler.Submit(Move(helper.Value()), {}, submitOptions);
         if (!handle) {
             break;
         }
+
         handles[submitted++] = Move(handle.Value());
     }
 
@@ -126,6 +133,7 @@ Result<void> RunParallelFor(WorkerScheduler& scheduler, Allocator& scratch, usiz
     if (shared.failedBatch != IndexNone) {
         return Result<void>::Failure(shared.failure);
     }
+
     return Result<void>::Success();
 }
 

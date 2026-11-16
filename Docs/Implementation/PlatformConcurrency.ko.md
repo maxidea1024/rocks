@@ -37,7 +37,7 @@ Mutex·ConditionVariable·Event·Semaphore 자체를 다른 호출과 동시에 
 | 옵션 | 계약 | Windows | macOS | Android |
 |---|---|---|---|---|
 | `name` | NUL 종료 UTF-8, `MaxThreadNameBytes`(63) 이하. 잘못된 UTF-8(과대 표현·대리 영역·잘린 문자)·초과는 `InvalidArgument`. Start가 ThreadState에 복사 | `SetThreadDescription` | `pthread_setname_np`(자기 스레드) | `pthread_setname_np`, 15 byte에서 문자 경계로 자름 |
-| `priority` | `Lowest`·`BelowNormal`·`Normal`·`AboveNormal`·`Highest`. 범위 밖 값은 `InvalidArgument` | `THREAD_PRIORITY_*` 다섯 단계 | `SCHED_OTHER` 최소·기본·최대를 다섯 단계로 나눈 값 | nice 19·10·0·-4·-8(`android.os.Process` 값) |
+| `priority` | `Lowest`·`BelowNormal`·`Normal`·`AboveNormal`·`Highest`. 범위 밖 값은 `InvalidArgument` | `THREAD_PRIORITY_*` 다섯 단계 | `SCHED_OTHER` 최소·가운데((최소 + 최대) / 2, 부모 상속값이 아님)·최대를 다섯 단계로 나눈 값 | nice 19·10·0·-4·-8(`android.os.Process` 값) |
 | `stackBytes` | 0이면 플랫폼 기본. `MaxThreadStackBytes`(1 GiB) 초과는 `InvalidArgument` | `_beginthreadex` 예약 크기(`STACK_SIZE_PARAM_IS_A_RESERVATION`) | `pthread_attr_setstacksize`(`PTHREAD_STACK_MIN`·page 단위로 올림) | macOS와 같음 |
 
 이름과 우선순위는 새 스레드가 entry를 부르기 전에 그 스레드 안에서 적용한다(macOS는 자기 스레드에만 이름을 붙일 수 있어 방식을 하나로 맞췄다). 둘은 OS 힌트라 OS가 거부해도(권한 부족으로 음수 nice 거부 등) Start는 성공하고 기본값으로 실행한다. 스택은 생성 때 적용하며 예약할 수 없으면 스레드를 만들지 않는다. 시험(`ThreadOptionsTests.cpp`)은 이름 왕복(ASCII 15 byte·한글 앞부분), 같은 Thread 재사용 때 이전 이름이 남지 않음, 잘못된 입력의 시작 거부, 기본 스택(Windows 1 MiB)보다 큰 지역 배열을 쓰는 8 MiB 스택, 다섯 우선순위의 실행을 확인한다. 우선순위의 실제 적용 값은 공통 API로 읽을 수 없어 확인하지 않는다.

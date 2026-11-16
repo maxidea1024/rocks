@@ -17,6 +17,7 @@ bool MeasureThreadName(const char* name, usize& length) noexcept {
         if (index >= MaxThreadNameBytes) {
             return false;
         }
+
         const auto lead = static_cast<uint8>(name[index]);
         usize extra = 0;
         uint32 codePoint = 0;
@@ -35,24 +36,30 @@ bool MeasureThreadName(const char* name, usize& length) noexcept {
         } else {
             return false;
         }
+
         for (usize offset = 1; offset <= extra; ++offset) {
             const auto next = static_cast<uint8>(name[index + offset]);
             if ((next & 0xC0u) != 0x80u) {
                 return false;
             }
+
             codePoint = (codePoint << 6) | (next & 0x3Fu);
         }
+
         const bool overlong =
             (extra == 2 && codePoint < 0x800u) || (extra == 3 && codePoint < 0x10000u);
         const bool surrogate = codePoint >= 0xD800u && codePoint <= 0xDFFFu;
         if (overlong || surrogate || codePoint > 0x10FFFFu) {
             return false;
         }
+
         index += extra + 1;
     }
+
     if (index > MaxThreadNameBytes) {
         return false;
     }
+
     length = index;
     return true;
 }
@@ -111,10 +118,12 @@ ThreadStatus Thread::Start(Entry entry, void* context, const ThreadOptions& opti
     if (options.name != nullptr && !detail::MeasureThreadName(options.name, nameLength)) {
         return ThreadStatus::InvalidArgument;
     }
+
     if (options.stackBytes > MaxThreadStackBytes ||
         static_cast<uint32>(options.priority) > static_cast<uint32>(ThreadPriority::Highest)) {
         return ThreadStatus::InvalidArgument;
     }
+
     auto& state = *reinterpret_cast<detail::ThreadState*>(storage_);
     LockGuard lock(state.gate);
     if (state.joinable) {
@@ -132,6 +141,7 @@ ThreadStatus Thread::Start(Entry entry, void* context, const ThreadOptions& opti
     for (usize index = 0; index < nameLength; ++index) {
         state.name[index] = options.name[index];
     }
+
     state.name[nameLength] = '\0';
     const ThreadStatus started = detail::StartNativeThread(state);
     if (started == ThreadStatus::Success) {

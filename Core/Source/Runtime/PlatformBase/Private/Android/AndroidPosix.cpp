@@ -101,13 +101,16 @@ void PosixSetCurrentThreadName(const char* name) noexcept {
         truncated[length] = name[length];
         ++length;
     }
+
     if (name[length] != '\0') {
         // 잘린 자리가 문자 중간이면 그 문자의 시작(연속 byte가 아닌 곳)까지 물린다.
         while (length > 0 && (static_cast<uint8>(name[length]) & 0xC0u) == 0x80u) {
             --length;
         }
+
         truncated[length] = '\0';
     }
+
     static_cast<void>(pthread_setname_np(pthread_self(), truncated));
 }
 
@@ -131,6 +134,7 @@ void PosixSetCurrentThreadPriority(ThreadPriority priority) noexcept {
         nice = -8;
         break;
     }
+
     static_cast<void>(setpriority(PRIO_PROCESS, static_cast<id_t>(gettid()), nice));
 }
 

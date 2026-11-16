@@ -42,8 +42,11 @@ Result<void> RunParallelFor(WorkerScheduler& scheduler, Allocator& scratch, usiz
 //   가져가지 않고(이미 가져간 batch는 끝까지 실행) 실패한 batch 가운데 가장 앞 batch의 오류를
 //   돌려준다. 실패한 batch보다 앞선 batch는 모두 실행되므로 결과는 순차 실행에서 처음 만나는
 //   실패와 같다.
-// - helper는 호출 스레드의 lane 표지를 물려받는다(CurrentTaskLane()이 None이면 Worker). 그래서 렌더
-//   lane이 부른 ParallelFor의 batch는 worker에서도 Render 문맥이다.
+// - helper는 호출 스레드의 lane 표지를 물려받는다. 그래서 렌더 lane이 부른 ParallelFor의 batch는
+//   worker에서도 Render 문맥이다. 예외로 None과 Game은 물려주지 않고 helper를 Worker로 둔다. Game
+//   lane 전용 검사(Object 가변 상태 접근)가 worker에서 통과하면 안 되기 때문이다. 이때 호출
+//   스레드가 실행한 batch는 호출자 표지(None·Game) 그대로이고 helper가 실행한 batch는 Worker라
+//   batch마다 표지가 다를 수 있다. body는 표지에 따라 동작을 바꾸지 않는다.
 // - 아직 worker가 꺼내지 않은 helper는 호출 스레드가 일을 마친 뒤 회수하고(TryRevoke) 실행 중인
 //   helper만 기다린다. 그 helper는 가져간 batch 하나를 마치면 돌아온다.
 // - 같은 scheduler의 worker 안에서 부르거나, scheduler가 시작 전·종료 중이거나, helper 제출·할당이
@@ -62,6 +65,8 @@ Result<void> ParallelFor(WorkerScheduler& scheduler, Allocator& scratch, usize c
             callable(begin, end);
             return ErrorCode::None;
         } else {
+            static_assert(IsSameV<decltype(callable(begin, end)), ErrorCode>,
+                          "ParallelFor body must return void or ErrorCode");
             return callable(begin, end);
         }
     };

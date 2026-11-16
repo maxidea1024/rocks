@@ -27,7 +27,8 @@ struct FrameArenaStats {
     usize usedBlocks = 0;
     usize largeBlocks = 0;
     usize retainedBlocks = 0;
-    // 이번 수명에 요청된 byte 합(정렬 여유·블록 머리·소멸자 기록 제외)과 등록된 소멸자 수다.
+    // 이번 수명에 할당한 byte 합과 등록된 소멸자 수다. byte 합은 TryAllocate에 넘긴 크기의 합이라
+    // TryNew·TryNewArray가 객체 앞에 붙이는 소멸자 기록도 들어가고, 정렬 여유·블록 머리는 빠진다.
     uint64 requestedBytes = 0;
     uint64 destructors = 0;
     // 지금 열려 있는 FrameArenaWriter 수와 지금까지 성공한 Reset 수다.
@@ -70,6 +71,7 @@ public:
         if (!placed) {
             return Result<T*>::Failure(placed.Error());
         }
+
         T* object = ConstructAt<T>(placed.Value().objects, Forward<Args>(args)...);
         Register(placed.Value());
         return Result<T*>::Success(object);
@@ -86,14 +88,17 @@ public:
         if (count == 0) {
             return Result<Span<T>>::Success(Span<T>());
         }
+
         auto placed = Place<T>(count);
         if (!placed) {
             return Result<Span<T>>::Failure(placed.Error());
         }
+
         T* objects = static_cast<T*>(placed.Value().objects);
         for (usize index = 0; index < count; ++index) {
             ConstructAt<T>(objects + index);
         }
+
         Register(placed.Value());
         return Result<Span<T>>::Success(Span<T>(objects, count));
     }
@@ -112,12 +117,14 @@ private:
         if (!TryMultiply(sizeof(T), count, objectBytes)) {
             return Result<Placement>::Failure(ErrorCode::Overflow);
         }
+
         Derived& self = static_cast<Derived&>(*this);
         if constexpr (IsTriviallyDestructibleV<T>) {
             auto memory = self.TryAllocate(objectBytes, alignof(T));
             if (!memory) {
                 return Result<Placement>::Failure(memory.Error());
             }
+
             return Result<Placement>::Success(Placement{memory.Value(), nullptr});
         } else {
             constexpr usize recordAlignment = alignof(FrameArenaDestructor);
@@ -128,10 +135,12 @@ private:
             if (!TryAdd(objectOffset, objectBytes, total)) {
                 return Result<Placement>::Failure(ErrorCode::Overflow);
             }
+
             auto memory = self.TryAllocate(total, alignment);
             if (!memory) {
                 return Result<Placement>::Failure(memory.Error());
             }
+
             auto* base = static_cast<unsigned char*>(memory.Value());
             auto* record = ConstructAt<FrameArenaDestructor>(base);
             record->destroy = &DestroyFrameArenaObjects<T>;

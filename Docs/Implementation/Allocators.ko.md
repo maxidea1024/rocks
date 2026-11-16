@@ -78,6 +78,7 @@ auto reset = arena.Reset();                            // 소멸자(등록 역�
 | 다중 스레드 | `FrameArenaWriter`는 한 스레드의 cursor다. 자기 표준 블록 안 할당은 잠금이 없고 새 블록을 얻을 때만 arena 잠금을 쓴다. arena 자신의 `TryAllocate`·`TryNew`는 공유 cursor를 잠금으로 나눠 쓴다. `Stats`·writer 생성·파괴도 동시에 부를 수 있다 |
 | Reset | 다른 어떤 호출과도 겹치지 않아야 한다(호출자가 수명 경계를 동기화). 열린 writer가 있거나 `Reset` 안(소멸자)에서 다시 부르면 `Busy`이고 아무것도 바꾸지 않는다. 소멸자 안의 할당도 `Busy`다 |
 | 실패 | 할당 실패는 backing 오류, 크기 넘침은 `Overflow`. 실패해도 이미 받은 할당은 그대로다. writer가 열린 채 arena를 파괴하면 Fatal, backing이 자기 블록 반환을 거부하면 Fatal이다 |
+| 통계 | `requestedBytes`는 `TryAllocate`에 넘긴 크기의 합이다. `TryNew`·`TryNewArray`의 소멸자 기록은 들어가고 정렬 여유·블록 머리는 빠진다 |
 | 진단 | Asan 구성은 새 블록과 `Reset`으로 비운 블록의 payload를 poison하고 할당한 범위만 연다. 이전 수명의 포인터를 쓰면 ASan이 보고한다 |
 
 backing은 arena보다 오래 살고 여러 스레드의 할당·해제를 지원해야 한다. backing 호출은 arena 잠금 안에서 하므로 backing 콜백이 같은 arena를 부르면 교착이다(금지). 시험(`Core/Tests/FrameArenaTests.cpp`)은 등록 역순 소멸(객체·배열 원소 역순·자명 소멸자 미등록·두 번째 Reset), 1–1024 정렬·256 정렬 타입·대형 블록 두 종류와 Reset 반환·0 byte·잘못된 정렬·`Overflow`, 블록 남김 수·다음 수명의 backing 무호출·`Trim`·`maxRetainedBlocks` 0·파괴 시 전부 반환, 네 writer의 동시 할당 8000개(내용으로 겹침 확인·소멸자 수), 열린 writer의 Reset 거부·소멸자 안 재진입 거부·backing 실패 보존을 확인한다.

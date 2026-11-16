@@ -13,6 +13,14 @@ enum class DedicatedLaneMode : uint8 {
     Inline
 };
 
+// 시험·호스트 정책이 lane 스레드 생성을 대신하거나 실패를 주입하는 경계다(WorkerThreadLauncher와
+// 같은 계약). Success는 주어진 thread에서 entry·argument·options로 실제 Start를 했을 때만 돌려준다.
+// 실패면 스레드를 만들지 않아야 한다(실패를 돌려주면서 시작했으면 Start가 그 스레드를 빈 큐로
+// 끝내고 Join한 뒤 실패를 돌려준다). context는 Start 호출 동안만 쓴다.
+using DedicatedLaneLauncher = platform::ThreadStatus (*)(
+    void* context, platform::Thread& thread, platform::Thread::Entry entry, void* argument,
+    const platform::ThreadOptions& options) noexcept;
+
 struct DedicatedLaneConfig {
     DedicatedLaneMode mode = DedicatedLaneMode::Thread;
     // 작업 실행 중 CurrentTaskLane()이 돌려줄 값이다(예: 렌더 lane은 TaskLane::Render).
@@ -20,6 +28,9 @@ struct DedicatedLaneConfig {
     // Thread 모드의 스레드 이름·우선순위·스택 크기다(Platform/Thread.h ThreadOptions). Start가
     // 이름을 복사하므로 Start 뒤에 원본을 버려도 된다. Inline 모드에서는 쓰지 않는다.
     platform::ThreadOptions thread;
+    // nullptr이면 platform::Thread::Start로 시작한다. Inline 모드에서는 쓰지 않는다.
+    DedicatedLaneLauncher launch = nullptr;
+    void* launchContext = nullptr;
 };
 
 struct DedicatedLaneStats {
@@ -28,6 +39,8 @@ struct DedicatedLaneStats {
     uint64 posted = 0;
     uint64 completed = 0;
     bool running = false;
+    // 일반 Post를 받는 중이다. Shutdown이 시작되면 false다(종료 중에는 lane 작업의 후속만 받는다).
+    bool accepting = false;
     DedicatedLaneMode mode = DedicatedLaneMode::Thread;
 };
 
@@ -63,6 +76,10 @@ struct DedicatedLaneStats {
 // - 작업(Function)과 그 capture 소멸자는 lane 실행 흐름에서 실행한다. 작업은 이 lane의
 //   Flush·Shutdown을 부를 수 없다(WrongThread).
 // - 실행 중(Start 성공 뒤 Shutdown 전)에 파괴하면 Fatal이다. 파괴 전에 Shutdown한다.
+// - Shutdown이 반환하면 lane 코드를 실행 중인 스레드가 없다(Inline 모드에서 큐를 비우던 다른
+//   스레드도 잠금을 놓은 뒤로는 lane을 건드리지 않는다). 다만 파괴 전에 다른 스레드의
+//   Post·Flush·Stats·IsExecutingTask 호출도 모두 반환해야 한다(거부되는 Post도 큐 칸 반환을
+//   위해 lane을 쓴다).
 class DedicatedLane {
 public:
     explicit DedicatedLane(Allocator& allocator) noexcept;
@@ -76,7 +93,8 @@ public:
     // lane을 연다. Thread 모드는 스레드를 만들고 그 스레드가 시작을 알린 뒤(handshake 이벤트)에
     // 돌아온다. 그래서 Start 성공 뒤의 작업은 스레드 이름·우선순위가 적용된 상태에서 실행된다.
     // 실패: 다른 스레드 WrongThread, 이미 실행 중 Busy, 잘못된 mode·스레드 옵션 InvalidArgument,
-    // 스레드 생성 실패 OutOfMemory(OS 자원 부족). 실패하면 아무것도 바꾸지 않는다. Shutdown 뒤 다시
+    // 스레드 생성 실패(launcher 실패 포함) OutOfMemory(OS 자원 부족), 범위 밖 lane InvalidArgument.
+    // 실패하면 아무것도 바꾸지 않는다(Stats의 mode도 이전 값이다). Shutdown 뒤 다시
     // Start할 수 있다.
     Result<void> Start(const DedicatedLaneConfig& config = {}) noexcept;
 
@@ -119,6 +137,8 @@ private:
     struct Node;
 
     static void RunThread(void* raw) noexcept;
+    // 시작이 실패했는데 스레드가 시작되어 있으면 빈 큐로 끝내고 Join한다(Start 실패 경로).
+    void StopUnstartedThread() noexcept;
     // 큐 맨 앞 작업 하나를 꺼낸다. 없으면 nullptr다. gate_ 안에서 부른다.
     Node* PopLocked() noexcept;
     // 작업 하나를 실행 표지 안에서 실행하고 capture·큐 칸을 정리한 뒤 완료를 게시한다(gate_ 밖).
