@@ -387,7 +387,7 @@ UE가 하위 호환으로 남긴 옛 지표 경로와 deprecated 경로는 보�
 | 단계 | 내용 | 선행 | 완료 기준(계획 TX) |
 |---|---|---|---|
 | TS1 | 상주 계획(4절 1차 범위: 사용 기록·관찰 지점·확정 보임 신호·식·허용 범위·비스트리밍·예산 배분·hysteresis·요청 목록·실패 상한), 진단 통계 | 화면 마일스톤, A5 메타 | TX02: 다중 지점·이동·해상도·UV 변경·비정방형 텍스처·크기 기반 UV의 이상적 mip 기준값. 고정 snapshot에서 한 프레임 계산과 N프레임 분할 계산의 결과 동일, 호스트 사이 같은 결과, 정렬 전순서 |
-| TS2 | mip 전송(재할당, 2D·2DArray·Volume), staging pool, hash 검증, 바인딩 snapshot·논리 handle 해석, 셰이더 helper | TS1, GX1·GX4·GX5·GX7·GX8 | TX01(손상 mip의 `CorruptEntry`), TX04(IO·업로드 취소·revision·device 교체의 stale 게시 0, 부분 성공 조건), TX05(늦은 제출·작은 staging에서 fence 전 재사용 0), mip별 색 텍스처로 올림·내림 픽셀 대조(D3D12·Vulkan·GLES 미리보기), 명시 LOD·Load 변환 시험, 게시 전후 그래프 import lease |
+| TS2 | mip 전송(재할당, 2D·2DArray·Volume), staging pool, hash 검증, 바인딩 snapshot·논리 handle 해석, 셰이더 helper | TS1, GX1·GX4·GX5·GX7·GX8, Core AsyncIoContext 완료 게시 보류(시험에서 IO 완료를 gate로 막는다, `feature/render-base` 7b9395a) | TX01(손상 mip의 `CorruptEntry`), TX04(IO·업로드 취소·revision·device 교체의 stale 게시 0, 부분 성공 조건), TX05(늦은 제출·작은 staging에서 fence 전 재사용 0), mip별 색 텍스처로 올림·내림 픽셀 대조(D3D12·Vulkan·GLES 미리보기), 명시 LOD·Load 변환 시험, 게시 전후 그래프 import lease |
 | TS3 | 예산 항목 분리, 임시 peak 승인·상한 검증, 전환 여유분, pin 승인·철회, 포화 시 builtin 교체, 장치 할당 실패, fallback·`TargetReady` 구분, 장치 손실 복구 | TS2 | TX03(pin·요청 포화에서 상주·임시 peak 준수, 예산 강제 감소 뒤 진척·pin 철회 통지), TX06(cold·누락·폭주에서 fallback 유지, `TargetReady` 오표시 0), TX08(이동·언로드 누수 0, mip 진동·IO·CPU·GPU 비용 계측) |
 | TS4 | 시네마틱 look-ahead·기한 pin·준비 gate·job residency 기록, capture·split-screen·World 가중, 보이는 mip 먼저 분할 요청, 텍스처별 예산 bias, 진단 보기 | TS3 | TX07(Forward+·Deferred·upscale·컷씬·offscreen 준비 gate 회귀) |
 | 후속 | copy queue 비동기 생성, Cube·CubeArray 스트리밍, optional mip, 레벨 정적 빌드 데이터, bindless descriptor 버전, 부분 상주, 가상 텍스처, 메시 LOD 스트리밍과 풀 공유 | — | — |
