@@ -25,12 +25,25 @@ using ContextId = Guid;
 //               멤버도 통째로 쓰이고, 비Atomic struct 안의 Atomic 멤버는 그 멤버 경로가 단위다.
 //               Core 값 타입 미러는 혼합 정밀도 Transform을 뺀 16종이 Atomic이다. 값 16은 클래스
 //               플래그 예약 비트(4·8)를 비켜 둔다(ReflectionExtensions.ko.md 1.4절).
+//   Transient·Deprecated — 클래스(ROCKS_CLASS(Transient)·ROCKS_CLASS(Deprecated) — 리플렉션 B9h2,
+//               Docs/Design/ReflectionExtensions.ko.md 9.2절). 상속된다(파생도 같은 비트를 가져야
+//               한다 — 등록 InvalidArgument). 이 클래스 객체는 저장 불가 객체다: 그래프 저장 정책
+//               UnsaveablePolicy::Exclude(패키지 저장 — 기본)가 그 객체를 저장 집합에서 거부하고
+//               그것을 가리키는 참조를 null + 진단으로 쓴다. 로드는 되고
+//               진단(TransientType·DeprecatedType)을 낸다. Deprecated 클래스는 ClassRef 쓰기가
+//               거부한다(이미 저장된 값은 진단과 함께 읽고 그대로 저장한다).
 enum class TypeFlags : uint32 {
     None = 0,
     Abstract = 1,
     WorldOnly = 2,
+    Transient = 4,
+    Deprecated = 8,
     Atomic = 16
 };
+
+// 저장 불가 클래스 비트(Transient·Deprecated — 리플렉션 B9h2)다.
+inline constexpr uint32 UnsaveableTypeFlags =
+    static_cast<uint32>(TypeFlags::Transient) | static_cast<uint32>(TypeFlags::Deprecated);
 
 // FieldFlags:
 //   Transient  — GC 추적은 하되 저장 그래프에서 뺀다.
@@ -574,6 +587,13 @@ struct TypeSchema {
     // 스키마는 이 칸을 비운다(원본과 이름이 같아 AlreadyExists). 등록이 깊게 복사한다. 직렬화는
     // TypeId를 쓰므로 이 이름과 무관하다.
     Span<const char> toolName{};
+    // Within 클래스 ID다(클래스만, 0 = 제한 없음 — 리플렉션 B9h2,
+    // Docs/Design/ReflectionExtensions.ko.md 9.2절). 0이 아니면 이 클래스 객체의 Outer가 그 클래스
+    // 또는 파생이어야 하고 Outer 없는 객체는 될 수 없다(생성 정체성 규칙 — InvalidArgument). 파생은
+    // base의 Within을 상속한다(MetaCompiler가 파생 스키마에 그대로 싣는다 — 다시 지정하면 base
+    // Within의 파생이어야 한다, RMC2208). TypeRegistry는 base에 Within이 있는데 파생이 0이면
+    // InvalidArgument다. struct는 0이어야 한다.
+    TypeId withinType{};
 };
 
 // 타입 도구 이름의 문법이다: `[A-Za-z_][A-Za-z0-9_]*('.' [A-Za-z_][A-Za-z0-9_]*)*`(Sparks 모듈 경로

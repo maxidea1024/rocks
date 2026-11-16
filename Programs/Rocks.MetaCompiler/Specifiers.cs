@@ -5,7 +5,16 @@ namespace Rocks.MetaCompiler;
 // CLASS 지정자 결과다. Version은 Record schema version(없으면 1), WorldOnly는 이 선언이 직접 쓴 값이다(상속은
 // SchemaValidator가 base에서 더한다). ToolName은 Name="…"의 타입 도구 이름(없으면 "" — 기본은 한정하지 않은 C++ 이름,
 // Docs/Design/ReflectionExtensions.ko.md 5.2절)이다.
-internal sealed record ClassSpec(bool Abstract, uint Version, bool WorldOnly, string ToolName = "");
+internal sealed record ClassSpec(bool Abstract, uint Version, bool WorldOnly, string ToolName = "")
+{
+    // 클래스 플래그 지정자다(리플렉션 B9h2 — Docs/Design/ReflectionExtensions.ko.md 9.2절): 저장 불가 클래스(Transient·Deprecated —
+    // 상속된다)와 Within="…"(Outer가 그 클래스 또는 파생이어야 한다 — 철자는 Clang이 정규 이름으로 푼다).
+    public bool Transient { get; init; }
+
+    public bool Deprecated { get; init; }
+
+    public string Within { get; init; } = "";
+}
 
 // STRUCT 지정자 결과다. Version은 Record schema version(없으면 1)이다. Binds는 미러 선언이 결합하는 실제 C++ 타입의
 // 원문 철자다(Core 값 타입 결합 — Docs/Design/ReflectionFoundations.ko.md 4.5절, 없으면 ""). 정규 철자는 Clang이
@@ -57,17 +66,29 @@ internal static class Specifiers
         Dictionary<string, Value?> values = Parse(text, symbol);
         foreach ((string key, Value? value) in values)
         {
-            bool flag = key is "Abstract" or "WorldOnly";
+            bool flag = key is "Abstract" or "WorldOnly" or "Transient" or "Deprecated";
             bool number = key is "Version";
-            bool label = key is "Name";
+            bool label = key is "Name" or "Within";
             if ((!flag && !number && !label) || (flag && value is not null) || (number && value?.Number is null) || (label && value?.Text is null))
             {
                 throw new MetadataException($"{symbol}: unsupported CLASS specifier/value {key}");
             }
         }
 
+        string within = values.GetValueOrDefault("Within")?.Text ?? "";
+        if (values.ContainsKey("Within") && within.Trim().Length == 0)
+        {
+            throw new MetadataException($"{symbol}: Within specifier must name a reflected class", "RMC2208",
+                "Write Within = \"ns::OuterClass\" with the class every Outer of this class must be (or derive from).");
+        }
+
         return new(values.ContainsKey("Abstract"), values.GetValueOrDefault("Version")?.Number ?? 1, values.ContainsKey("WorldOnly"),
-            TypeName(values, symbol));
+            TypeName(values, symbol))
+        {
+            Transient = values.ContainsKey("Transient"),
+            Deprecated = values.ContainsKey("Deprecated"),
+            Within = within
+        };
     }
 
     public static StructSpec Struct(string text, string symbol)

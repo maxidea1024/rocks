@@ -738,6 +738,22 @@ internal static partial class SchemaValidator
             }
         }
 
+        // name이 ancestor 자신이거나 base 사슬에 ancestor가 있는지다(이 모듈과 import 클래스 — Within 상속 판정, 리플렉션 B9h2).
+        bool DerivesFrom(string name, string ancestor)
+        {
+            for (string? current = name; current is not null && current != "rocks::Object";)
+            {
+                if (current == ancestor)
+                {
+                    return true;
+                }
+
+                current = classes.TryGetValue(current, out ClassModel? own) ? own.Base : imported.GetValueOrDefault(current)?.Base;
+            }
+
+            return false;
+        }
+
         List<ClassModel> ordered = [];
         HashSet<string> visiting = new(StringComparer.Ordinal);
         HashSet<string> visited = new(StringComparer.Ordinal);
@@ -770,6 +786,32 @@ internal static partial class SchemaValidator
                 inherited.AddRange(baseModel.Fields);
                 // WorldOnly는 상속된다(파생에 다시 쓰지 않아도 된다).
                 model.WorldOnly |= baseModel.WorldOnly;
+                // Transient·Deprecated도 상속된다(끄는 지정자는 없다 — 리플렉션 B9h2).
+                model.Transient |= baseModel.Transient;
+                model.Deprecated |= baseModel.Deprecated;
+                model.Within = baseModel.Within;
+                model.WithinId = baseModel.WithinId;
+            }
+
+            // Within(리플렉션 B9h2): 지정하면 리플렉션 클래스여야 하고(RMC2003) base의 Within이 있으면 그 클래스 또는 파생이어야 한다
+            // (RMC2208). 지정하지 않으면 base의 것을 이어받는다. 자기 자신을 Within으로 둘 수 있다(UE와 같다).
+            if (model.WithinResolved is string within)
+            {
+                string resolved = within == model.Name ? within : Resolve(within, model.Name, model.Site);
+                if (resolved == "rocks::Object")
+                {
+                    throw new MetadataException($"{model.Name}: Within must be a reflected class, not rocks::Object", "RMC2208",
+                        "Remove Within (every Outer is an Object) or name the reflected class every Outer must be.").At(model.Site);
+                }
+
+                if (model.Within is string baseWithin && !DerivesFrom(resolved, baseWithin))
+                {
+                    throw new MetadataException($"{model.Name}: Within {resolved} must be {baseWithin} or derive from it (the base class Within)", "RMC2208",
+                        "A derived class can only narrow the Within of its base; name the base Within class or one of its subclasses.").At(model.Site);
+                }
+
+                model.Within = resolved;
+                model.WithinId = resolved == model.Name ? model.Id : Find(resolved).Id;
             }
 
             model.Fields = BuildFields(model, inherited);
@@ -816,6 +858,26 @@ internal static partial class SchemaValidator
         foreach (ClassModel model in classes.Values.Where(model => !model.IsEnum && !model.IsStruct).OrderBy(model => model.Name, StringComparer.Ordinal))
         {
             Order(model);
+        }
+
+        // Deprecated가 아닌 타입의 PROPERTY는 Deprecated 클래스를 가리키지 않는다(RMC2209 — UE도 막는다, 리플렉션 B9h2): 강한·weak·소프트
+        // 참조와 ClassRef(그 컨테이너 원소·Map 값 포함)의 대상, Map 키의 Soft·ClassRef 대상. Deprecated 타입 자신의 필드와 NATIVE 멤버는
+        // 보지 않는다. 상속 플래그가 정해진 뒤에 본다.
+        bool IsDeprecatedClass(string? name) =>
+            name is not null && name != "rocks::Object" && (classes.TryGetValue(name, out ClassModel? own) ? own : imported.GetValueOrDefault(name)) is { IsEnum: false, IsStruct: false, Deprecated: true };
+        foreach (ClassModel model in classes.Values.Where(model => !model.IsEnum && !model.Deprecated).OrderBy(model => model.Name, StringComparer.Ordinal))
+        {
+            foreach (FieldModel field in model.OwnFields)
+            {
+                bool referenceTarget = field.TargetKind is "ObjectReference" or "WeakObjectReference" or "SoftObjectReference" or "ClassReference";
+                string? deprecated = referenceTarget && IsDeprecatedClass(field.Reference) ? field.Reference
+                    : field.KeyKind is "SoftObjectReference" or "ClassReference" && IsDeprecatedClass(field.KeyReference) ? field.KeyReference : null;
+                if (deprecated is not null)
+                {
+                    throw new MetadataException($"{field.Owner}::{field.Name}: refers to Deprecated class {deprecated}", "RMC2209",
+                        "Retire this field (ids retire) or mark its owner Deprecated; move old data with Version and Migrate instead of referring to a Deprecated class.").At(field.Site);
+                }
+            }
         }
 
         return new(classes, ordered, imported);

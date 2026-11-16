@@ -702,6 +702,16 @@ enum class UnsaveablePolicy : uint8 {
   - Outer 없는 객체에 Within이 있으면 InvalidArgument다(UE에서 Outer 없는 객체는 패키지뿐이다 — UOG:3481).
 - Outer는 생성 뒤 바뀌지 않으므로(OF 1.1절) 생성 검사로 충분하다. UE는 Rename·PreSave에서도 검사한다(Obj.cpp:270·1622-1631).
 
+구현(B9h2)에서 정한 점:
+
+- `TypeFlags::Transient` 4·`Deprecated` 8과 저장 불가 비트 묶음 `UnsaveableTypeFlags`, `TypeSchema::withinType`(끝 칸)을 더했다. TypeRegistry는 base의 Transient·Deprecated를 빠뜨린 파생과 base에 Within이 있는데 0인 파생을 InvalidArgument로 거부하고(파생 관계 판정은 MetaCompiler RMC2208), struct의 withinType ≠ 0도 거부한다. MetaCompiler는 Within을 상속한 실효 값을 파생 스키마·descriptor(`within: {name, id}` 또는 null)에 싣는다.
+- Within 판정(스펙에 없던 결정 — 타입 표현): `OuterSummary`에 TypeId 대신 비소유 `const TypeLease* type`(Outer 객체의 타입)을 더했다. 판정이 base 사슬(`TypeLease::IsA`)을 봐야 하기 때문이다. Registry 요약(`DescribeSlotLocked`)은 slot의 lease를 가리키고(생성은 `processing_` 동안이라 Outer가 회수되지 않는다), 그래프 1단계는 노드 lease를, 기준 Outer는 2a의 `DescribeOuter` 요약을 쓴다. type이 null이면(1단계의 기준 Outer 입력 요약) 판정을 미룬다. `ForNewOutermost(isPackage, type)`이 새 outermost의 타입을 받는다. `CheckNewObjectIdentity`의 순서는 패키지·대표 자식 규칙 다음(8a), 경로 길이 앞이다.
+- 저장: `UnsaveablePolicy`(Exclude 기본·Keep)와 `ObjectGraphSaveOptions::unsaveable`, 공개 판정 `IsUnsaveableType(const TypeLease&)`(A1이 `CollectInners` 결과를 거른다). Exclude는 집합 노드(root 포함)가 저장 불가면 InvalidArgument, 그것을 가리키는 강한·weak 참조는 외부 정책보다 먼저 null + `ExternalReference` 진단(3·4)이고 강한 참조는 그 뒤 Required 규칙을 거친다(`GraphEncodeContext::WriteUnsaveable`). 그래서 Include는 그 대상을 집합에 넣지 않는다. Include가 더하는 조상(Outer 사슬)이 저장 불가인 경우는 따로 보지 않았다(A1이 저장 불가 부분 트리를 미리 빼므로 패키지 저장에서는 생기지 않는다).
+- 로드 진단: 새 `FieldDiagnosticKind::TransientType`·`DeprecatedType`(끝에 더했다). 노드는 1단계 `DecodeNode`가 Record를 열 때 objectType = 노드 타입으로 낸다. ClassRef 값은 `ResolveClassReference`가 `ParsedValue::deprecatedClass`를 표시하고 `ReportParsedValue`가 DeprecatedType(valueType = 그 클래스)을 낸다. encode는 Deprecated 값을 그대로 쓴다.
+- ClassRef 쓰기 거부: `detail::CheckWritableClassReferenceLease`(= `CheckClassReferenceLease` + Deprecated InvalidArgument)를 `FieldWriteOperation`·`ValidateClassReference`(생성 write·staged write)·경로 값 쓰기·경로 키 넣기가 쓴다. decode·encode·`ClassRef::Resolve`·`AcquireDerivedClass`는 바꾸지 않았다(편집기 후보 목록의 Deprecated 제외는 RCM 5단계가 이 판정을 쓴다).
+- MetaCompiler: CLASS 지정자 `Transient`·`Deprecated`·`Within="…"`. Within 철자는 Binds와 같은 별칭 Clang 실행(`ResolveWithinAsync` — `using rocksWithin_N = ::철자;`)으로 정규 이름을 얻고, 리플렉션 클래스여야 하며(RMC2003, rocks::Object는 RMC2208) base Within이 있으면 그 클래스 또는 파생이어야 한다(RMC2208). Transient·Deprecated·Within은 상속된다. RMC2209는 Deprecated가 아닌 타입의 PROPERTY(클래스·struct)가 강한·weak·소프트 참조·ClassRef(컨테이너 원소·Map 값 포함)나 Soft·ClassRef Map 키로 Deprecated 클래스를 가리킬 때다(상속 플래그를 모두 정한 뒤 본다). descriptor class `flags`에 Transient·Deprecated를 싣는다.
+- 시험: ObjectSerialization `ClassFlagGraph_SchemaFlagsInheritanceAndRegistry`·`ClassFlagGraph_ExcludeAndKeepPolicies`·`ClassFlagGraph_ClassRefWritesRejectDeprecatedAndDecodeReports`·`ClassFlagGraph_WithinOuterRule`, ToolTests `Meta.ClassFlagSpecifiersReachDescriptorAndSchema`·`Meta.DeprecatedClassReferencesAreRejected`(RMC2209)·`Meta.WithinMustNarrowBaseWithin`(RMC2208), fixture ReflectionTestFixtures/ClassFlagFixture.h.
+
 ## 10. 텍스트·JSON codec(B9i)
 
 ### 10.1 모듈과 용도

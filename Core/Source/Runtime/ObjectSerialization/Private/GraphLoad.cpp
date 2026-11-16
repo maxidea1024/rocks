@@ -612,6 +612,22 @@ Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& nod
     } binding{context, node, index};
     context.BeginNode(node, &record.Value(), index);
     const auto& schema = node.lease.Schema();
+    // 저장 불가 클래스(Transient·Deprecated — 상속 포함, 리플렉션 B9h2) 노드는 정상으로 읽고 진단을
+    // 낸다(받을 hook이 없으면 하지 않는다).
+    if (HasFlag(schema.flags, TypeFlags::Transient)) {
+        if (auto reported = context.Report(FieldDiagnosticKind::TransientType, 0, schema.id);
+            !reported) {
+            return reported;
+        }
+    }
+
+    if (HasFlag(schema.flags, TypeFlags::Deprecated)) {
+        if (auto reported = context.Report(FieldDiagnosticKind::DeprecatedType, 0, schema.id);
+            !reported) {
+            return reported;
+        }
+    }
+
     // Record 필드 순회 몫이다(빠진 필드를 도는 일은 없다 — 누락 = 기준).
     auto spent = budget.Spend(record.Value().FieldCount());
     if (!spent) {

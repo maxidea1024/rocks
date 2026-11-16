@@ -148,7 +148,7 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
     // 참조 lease처럼 callback 완료까지 쥔다(callback 재진입이 그 클래스를 해제·재등록하지 못하게).
     TypeLease classLease;
     if (value.kind == ValueKind::ClassReference && value.guid != TypeId{}) {
-        auto found = detail::CheckClassReferenceLease(
+        auto found = detail::CheckWritableClassReferenceLease(
             registry.AcquireRegisteredType(access, value.guid), actual->value.type, nullptr);
         if (!found) {
             return Result<void>::Failure(found.Error());
@@ -338,8 +338,8 @@ Result<void> ValidateClassReference(ObjectRegistry& registry, const ObjectAccess
         return Result<void>::Success();
     }
 
-    auto checked =
-        CheckClassReferenceLease(registry.AcquireRegisteredType(access, value), base, baseNative);
+    auto checked = CheckWritableClassReferenceLease(registry.AcquireRegisteredType(access, value),
+                                                    base, baseNative);
     if (!checked) {
         return Result<void>::Failure(checked.Error());
     }

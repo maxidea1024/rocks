@@ -634,8 +634,24 @@ internal sealed class ClassModel
     // 단위다(Docs/Design/ReflectionExtensions.ko.md 3.1절). 형질과 달리 선언 값이라 멤버에서 계산하거나 대조하지 않는다.
     public bool Atomic { get; init; }
 
-    // TypeFlags 비트: Abstract 1, WorldOnly 2(클래스), Atomic 16(struct). 생성 스키마의 flags다.
-    public uint Flags => (Abstract ? 1u : 0u) | (WorldOnly ? 2u : 0u) | (Atomic ? 16u : 0u);
+    // TypeFlags::Transient·Deprecated(클래스 — 리플렉션 B9h2). 선언이 직접 쓰거나 base에서 상속된다(SchemaValidator가 채운다).
+    public bool Transient { get; set; }
+
+    public bool Deprecated { get; set; }
+
+    // Within="…" 지정자의 원문 철자다(이 모듈 클래스, 없으면 ""). CompilerDriver가 Clang으로 정규 이름(WithinResolved)을 얻는다.
+    public string WithinSpelling { get; init; } = "";
+
+    // Clang이 푼 Within 철자의 정규 이름이다(지정하지 않았으면 null).
+    public string? WithinResolved { get; set; }
+
+    // 실효 Within 클래스의 정규 이름·ID다(지정했거나 base에서 상속 — 없으면 null). 생성 스키마의 withinType과 descriptor의 within이다.
+    public string? Within { get; set; }
+
+    public string? WithinId { get; set; }
+
+    // TypeFlags 비트: Abstract 1, WorldOnly 2, Transient 4, Deprecated 8(클래스), Atomic 16(struct). 생성 스키마의 flags다.
+    public uint Flags => (Abstract ? 1u : 0u) | (WorldOnly ? 2u : 0u) | (Transient ? 4u : 0u) | (Deprecated ? 8u : 0u) | (Atomic ? 16u : 0u);
 
     // Name="…" 지정자의 타입 도구 이름이다(클래스·struct — 한정하지 않은 C++ 이름과 같거나 없으면 ""). import 타입은 descriptor의
     // toolName에서 온다(기본 이름과 같으면 "").

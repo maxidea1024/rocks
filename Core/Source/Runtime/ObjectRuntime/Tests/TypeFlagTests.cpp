@@ -62,7 +62,12 @@ constexpr uint32 Flag(FieldFlags flag) noexcept {
 TEST(TypeFlags_KnownFlagsAreAcceptedAndUnknownBitsRejected) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
-    CHECK(RegisterBase(types, {}, 4u).Error() == ErrorCode::InvalidArgument);
+    // 알려진 마지막 타입 플래그(Atomic 16 — 클래스에는 struct 전용이라 거부된다) 다음 비트다(4·8은
+    // 리플렉션 B9h2의 Transient·Deprecated).
+    CHECK(RegisterBase(types, {}, static_cast<uint32>(TypeFlags::Atomic) << 1).Error() ==
+          ErrorCode::InvalidArgument);
+    CHECK(RegisterBase(types, {}, static_cast<uint32>(TypeFlags::Atomic)).Error() ==
+          ErrorCode::InvalidArgument);
     // 알려진 마지막 필드 플래그(TextExportTransient 128 — 리플렉션 B9h1) 다음 비트다.
     FieldSchema unknown[] = {
         Field(1, "value", FieldKind::Value, Flag(FieldFlags::TextExportTransient) << 1)};

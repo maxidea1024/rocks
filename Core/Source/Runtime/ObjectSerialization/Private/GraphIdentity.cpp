@@ -42,6 +42,7 @@ const OuterSummary* NodeIdentityCheck::OuterOf(uint32 outer, OuterSummary& summa
     summary.hasRepresentative = shape.hasRepresentative;
     summary.hasNamedInners = shape.hasNamedInners;
     summary.pathBytes = shape.pathBytes;
+    summary.type = shape.type;
     return &summary;
 }
 
@@ -63,6 +64,7 @@ Result<void> NodeIdentityCheck::Check(const LoadNode& node, Budget& budget) noex
 
     NodeShape shape;
     shape.outer = node.outer;
+    shape.type = &node.lease;
     shape.isOutermost = outer == nullptr;
     shape.outermostIsPackage = outer != nullptr
                                    ? outer->outermostIsPackage

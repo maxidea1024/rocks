@@ -181,7 +181,7 @@ Result<void> PathRunner::PrepareInsertedKey(PathCursor& cursor, PathFrame& frame
     // ClassRef 키는 값과 같이 이 Registry에 등록된 클래스이고 스키마 Base의 파생이어야 한다(그
     // lease는 완료까지 쥐고 생성 thunk가 정적 Base를 대조한다 — CheckKeyClass).
     if (keyType.kind == ValueKind::ClassReference && frame.key.guid != Guid{}) {
-        auto found = CheckClassReferenceLease(
+        auto found = CheckWritableClassReferenceLease(
             cursor.registry_.AcquireRegisteredType(cursor.access_, frame.key.guid), keyType.type,
             nullptr);
         if (!found) {
@@ -522,7 +522,7 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         // 정적 Base를 대조한다(CheckClassTarget).
         if (value->kind == ValueKind::ClassReference && value->guid != Guid{}) {
             const TypeId base = endType.type;
-            auto found = CheckClassReferenceLease(
+            auto found = CheckWritableClassReferenceLease(
                 cursor.registry_.AcquireRegisteredType(cursor.access_, value->guid), base, nullptr);
             if (!found) {
                 return cursor.Fail(found.Error(), WriteReason(found.Error(), end.effectiveFlags));

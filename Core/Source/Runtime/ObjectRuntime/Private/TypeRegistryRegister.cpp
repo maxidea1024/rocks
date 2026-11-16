@@ -26,7 +26,8 @@ using detail::ValidateFieldList;
 // 클래스·struct가 받는 TypeFlags 비트다. 그 밖의 비트(클래스의 Atomic, struct의 Abstract·
 // WorldOnly 포함)는 InvalidArgument다.
 constexpr uint32 KnownClassFlags =
-    static_cast<uint32>(TypeFlags::Abstract) | static_cast<uint32>(TypeFlags::WorldOnly);
+    static_cast<uint32>(TypeFlags::Abstract) | static_cast<uint32>(TypeFlags::WorldOnly) |
+    static_cast<uint32>(TypeFlags::Transient) | static_cast<uint32>(TypeFlags::Deprecated);
 
 constexpr uint32 KnownFieldFlags =
     static_cast<uint32>(FieldFlags::Transient) | static_cast<uint32>(FieldFlags::ReadOnly) |
@@ -384,6 +385,13 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
                 return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
             }
 
+            // Transient·Deprecated도 상속되고(리플렉션 B9h2) Within은 파생이 이어받는다(base에
+            // Within이 있으면 파생도 0이 아니어야 한다 — 파생 관계 판정은 MetaCompiler RMC2208).
+            if ((base->schema.flags & UnsaveableTypeFlags & ~schema.flags) != 0 ||
+                (base->schema.withinType != TypeId{} && schema.withinType == TypeId{})) {
+                return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
+            }
+
             // 파생 스키마는 base field를 동일한 안정 ID/표현으로 포함한다. 그래서 기반 타입의 필드
             // 함수(Resolve<기반> 경유)를 파생 객체에 써도 같은 필드를 가리킨다.
             for (usize baseIndex = 0; baseIndex < base->schema.fields.Size(); ++baseIndex) {
@@ -465,6 +473,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     record->schema.version = schema.version;
     record->schema.baseType = schema.baseType;
     record->schema.flags = schema.flags;
+    record->schema.withinType = schema.withinType;
     record->schema.name = CopyBytes(schema.name, cursor);
     record->schema.toolName = CopyBytes(schema.toolName, cursor);
     record->schema.fields = {fields, schema.fields.Size()};

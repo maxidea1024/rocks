@@ -61,7 +61,7 @@ internal static class MetaProbeIdentity
                 "probe::Bundle::byName", "probe::Value::bySlot", "probe::Value::anything", "probe::Value::required", "probe::Value::notClass",
                 "probe::Value::maps", "probe::Value::nestedRefs", "probe::Value::slots", "probe::Slot::material", "probe::Slot::byKey",
                 "probe::Slot::target", "probe::Slot::codes", "probe::Value::watchers", "probe::Value::smalls", "probe::Value::shorts",
-                "probe::Value::grid", "probe::Value::fixed" }
+                "probe::Value::grid", "probe::Value::fixed", "probe::Leaf::target" }
                 .Concat(Enumerable.Range(2, 16).Select(level => $"probe::Chain{level}::inner")))
             {
                 manifest.Register("field", name);

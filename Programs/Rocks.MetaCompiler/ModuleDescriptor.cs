@@ -12,7 +12,7 @@ internal static class ModuleDescriptor
     // 클래스 항목이다. toolName은 실효 타입 도구 이름(Docs/Design/ReflectionExtensions.ko.md 1.8·5.2절 — 지정하지 않았으면 한정하지
     // 않은 C++ 이름)이다.
     private static readonly string[] TypeKeys =
-        ["kind", "name", "id", "version", "flags", "base", "header", "visibility", "toolName", "fields"];
+        ["kind", "name", "id", "version", "flags", "within", "base", "header", "visibility", "toolName", "fields"];
 
     // struct 항목: base 대신 flags(선언 플래그 Atomic 다음 생성 형질 — 쓰기 순서 Atomic → ContainsStrongReference →
     // RequiresWorldOnlyOwner → ContainsReferenceArray)와 binds(Binds 실제 타입의 Clang 정규 철자, 미러가 아니면 "")다
@@ -69,7 +69,30 @@ internal static class ModuleDescriptor
                     json.WriteStringValue("WorldOnly");
                 }
 
+                if (type.Transient)
+                {
+                    json.WriteStringValue("Transient");
+                }
+
+                if (type.Deprecated)
+                {
+                    json.WriteStringValue("Deprecated");
+                }
+
                 json.WriteEndArray();
+                // 실효 Within(상속 포함 — 리플렉션 B9h2)이다. 없으면 null이다.
+                if (type.Within is null)
+                {
+                    json.WriteNull("within");
+                }
+                else
+                {
+                    json.WriteStartObject("within");
+                    json.WriteString("name", type.Within);
+                    json.WriteString("id", type.WithinId ?? "");
+                    json.WriteEndObject();
+                }
+
                 json.WriteString("base", type.Base);
                 json.WriteString("header", type.Header);
                 json.WriteString("visibility", type.Private ? "private" : "public");
@@ -350,7 +373,8 @@ internal static class ModuleDescriptor
             string[] flags = type.GetProperty("flags").EnumerateArray().Select(flag => flag.GetString() ?? "").ToArray();
             // struct는 선언 플래그 Atomic과 생성 형질, 클래스는 Abstract·WorldOnly만 받는다(struct 전용 Atomic이 클래스에
             // 있거나 클래스 플래그가 struct에 있으면 모르는 플래그다).
-            bool KnownFlag(string flag) => isStruct ? flag is "Atomic" or "ContainsStrongReference" or "RequiresWorldOnlyOwner" or "ContainsReferenceArray" : flag is "Abstract" or "WorldOnly";
+            bool KnownFlag(string flag) => isStruct ? flag is "Atomic" or "ContainsStrongReference" or "RequiresWorldOnlyOwner" or "ContainsReferenceArray"
+                : flag is "Abstract" or "WorldOnly" or "Transient" or "Deprecated";
             if (flags.Any(flag => !KnownFlag(flag)) || flags.Distinct(StringComparer.Ordinal).Count() != flags.Length)
             {
                 throw Invalid("unknown or duplicate type flag in " + name);
@@ -393,6 +417,8 @@ internal static class ModuleDescriptor
                 Base = isStruct ? "" : Name(type.GetProperty("base"), QualifiedName, "base of " + name),
                 Abstract = flags.Contains("Abstract"),
                 WorldOnly = flags.Contains("WorldOnly"),
+                Transient = flags.Contains("Transient"),
+                Deprecated = flags.Contains("Deprecated"),
                 Header = header,
                 Private = isPrivate,
                 Imported = true,
@@ -405,6 +431,21 @@ internal static class ModuleDescriptor
                 Binds = binds,
                 ToolName = typeToolName == TypeToolName.Default(name) ? "" : typeToolName
             };
+            // 클래스의 실효 Within(리플렉션 B9h2)은 {name, id} 또는 null이다.
+            if (!isStruct)
+            {
+                JsonElement within = type.GetProperty("within");
+                if (within.ValueKind == JsonValueKind.Object)
+                {
+                    model.Within = Name(within.GetProperty("name"), QualifiedName, "within of " + name);
+                    model.WithinId = Hex(within.GetProperty("id"), Invalid);
+                }
+                else if (within.ValueKind != JsonValueKind.Null)
+                {
+                    throw Invalid("within of " + name);
+                }
+            }
+
             List<FieldModel> fields = [];
             foreach (JsonElement field in type.GetProperty("fields").EnumerateArray())
             {

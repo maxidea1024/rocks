@@ -60,6 +60,7 @@ public:
         : FieldEncodeContext(options.policy, options.hooks, ReferenceWire), allocator_(allocator),
           registry_(registry), access_(access), nodes_(nodes), budget_(budget),
           externalPolicy_(options.externals), writeNodeTable_(options.writeNodeTable),
+          excludeUnsaveable_(options.unsaveable == UnsaveablePolicy::Exclude),
           packagePolicy_(registry.Policy().packageNativeType != nullptr),
           scratch_(allocator, budget), observation_(allocator, budget, false), locals_(allocator),
           expected_(allocator), firstAncestors_(allocator), chain_(allocator), names_(allocator),
@@ -191,6 +192,11 @@ protected:
     Result<void> WriteWeakReferenceWire(ArchiveWriter& out, ObjectHandle target,
                                         const ReferenceExpectation& expectation) noexcept override;
 
+    // 저장 불가 대상(UnsaveablePolicy::Exclude — 리플렉션 B9h2)의 참조 하나를 null로 쓴다:
+    // ExternalReference 진단(value 3 = Transient, 4 = Deprecated) 뒤 강한 참조면 Required 규칙을
+    // 적용한다. 대상이 저장 불가가 아니거나 Keep이면 거짓을 돌려주고 아무것도 쓰지 않는다.
+    Result<bool> WriteUnsaveable(ArchiveWriter& out, const TypeLease& actual, bool strong) noexcept;
+
 private:
     // Include·이름(GraphSaveSet.cpp), 기대 타입 캐시(GraphSave.cpp), 외부 참조(GraphExternal.cpp)
     // 다.
@@ -220,6 +226,8 @@ private:
     Budget& budget_;
     GraphExternalPolicy externalPolicy_;
     bool writeNodeTable_;
+    // UnsaveablePolicy::Exclude인지다(리플렉션 B9h2).
+    bool excludeUnsaveable_;
     bool packagePolicy_;
     BudgetAllocator scratch_;
     BudgetAllocator observation_;

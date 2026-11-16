@@ -92,10 +92,35 @@ enum class GraphExternalPolicy : uint8 {
     Include
 };
 
+// 저장 불가 객체(클래스 Transient·Deprecated — 상속 포함, 리플렉션 B9h2, Docs/Design/
+// ReflectionExtensions.ko.md 9.2절)의 저장 정책이다.
+//   Exclude(기본) — 패키지 저장(UE SavePackage와 같다): 저장 집합에 저장 불가 객체가 있으면
+//                   InvalidArgument(호출자가 미리 거른다 — IsUnsaveableObject), 그것을 가리키는
+//                   강한·weak 참조는 외부 정책과 무관하게 null로 쓰고 ExternalReference 진단(value
+//                   3 = Transient 클래스, 4 = Deprecated 클래스)을 남긴다(Required 위치면 null에
+//                   Required 규칙 — rejectMissingRequired). Include도 그 대상을 집합에 넣지 않는다.
+//   Keep           — 스냅샷·undo·PIE 복제(UE 복제와 같다): 저장 불가 객체도 보통 노드·대상이다.
+//
+// 사용 예(스냅샷):
+//   ObjectGraphSaveOptions options;
+//   options.unsaveable = UnsaveablePolicy::Keep;
+enum class UnsaveablePolicy : uint8 {
+    Exclude,
+    Keep
+};
+
+// 클래스(상속 포함)가 Transient·Deprecated인 저장 불가 타입인지다(리플렉션 B9h2). A1 export 집합
+// 구성이 CollectInners 결과를 이것으로 거른다(저장 불가 객체의 부분 트리도 뺀다).
+inline bool IsUnsaveableType(const TypeLease& type) noexcept {
+    return (type.Schema().flags & UnsaveableTypeFlags) != 0;
+}
+
 // 저장 옵션이다. policy.rejectMissingRequired면 Required 참조 null을 RequiredMissing 진단 뒤
 // InvalidArgument로 거부하고, policy.excludedFlags의 필드는 저장하지 않는다. hooks는 진단·소프트
 // 참조 수집·struct 치환·외부 참조 허락(Admit)을 받는다(없으면 버리고, Admit은 모두 Reject다).
 struct ObjectGraphSaveOptions {
+    // 저장 불가 객체의 정책이다(기본 Exclude — 패키지 저장, UnsaveablePolicy).
+    UnsaveablePolicy unsaveable = UnsaveablePolicy::Exclude;
     ObjectGraphLimits limits;
     FieldEncodePolicy policy;
     FieldCodecHooks* hooks = nullptr;

@@ -272,6 +272,34 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::ClassFlagHolder::kind",
+      "id": "cb22a206092845d2b056a12aba25345d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::ClassFlagHolder::needed",
+      "id": "57385b0bd0c24e0281c3e45e960041a7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::ClassFlagHolder::strong",
+      "id": "fa21afa7199d459b9fa1f21fa5db50e7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::ClassFlagHolder::weak",
+      "id": "c4350ff8cb12469f8c0ccf197a8deed0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::ClassHolder::any",
       "id": "a06258fdec4642e0b4fc690ea670b618",
       "aliases": [],
@@ -2199,6 +2227,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::reflection_fixture::ClassFlagHolder",
+      "id": "8f4b03e3eafe4c19911a1f68c285359c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::reflection_fixture::ClassHolder",
       "id": "030270f01ebf46a88fe9b961b318b41b",
       "aliases": [],
@@ -2257,6 +2292,13 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::CountLimit",
       "id": "95c710567ae74a2193387f4913404031",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::DeprecatedThing",
+      "id": "be2f1ca481b44af2927458fc1bd8e94e",
       "aliases": [],
       "retired": false
     },
@@ -2376,6 +2418,13 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::IntegerWidthPair",
       "id": "42e78bf3ee5e4152875f8b4e29402e88",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::KindBase",
+      "id": "fa56cb138bff42e3a21cd940aa268446",
       "aliases": [],
       "retired": false
     },
@@ -2703,6 +2752,20 @@
     },
     {
       "kind": "type",
+      "name": "rocks::reflection_fixture::TransientChild",
+      "id": "a55947ab02cd44ffb9d0e30acf9b9dd6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::TransientThing",
+      "id": "aa240d44280740298004f8f9bf56631d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::reflection_fixture::WeakHolder",
       "id": "8c79a226f2a44edb9e8210325aa9b47d",
       "aliases": [],
@@ -2740,6 +2803,34 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::WideOffset",
       "id": "db40636182e4402c925470da8c6aa455",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::WithinInner",
+      "id": "1aedb6874a02454bbcfe48217df89585",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::WithinInnerChild",
+      "id": "3e857728824c4dcb9755fb9a9370fa16",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::WithinOuter",
+      "id": "61e67d06010b43eca31e06f00203a284",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::WithinOuterChild",
+      "id": "b2a7a55495044596a9e8b7e037245f2e",
       "aliases": [],
       "retired": false
     },

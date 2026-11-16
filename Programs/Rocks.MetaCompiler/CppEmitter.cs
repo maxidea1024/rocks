@@ -239,7 +239,7 @@ internal static class CppEmitter
             Line("static const TypeSchema& Schema() noexcept {");
             EmitFieldSchemas(type, Line);
             string fieldSpan = type.Fields.Count == 0 ? "Span<const FieldSchema>{}" : $"Span<const FieldSchema>(fields, {type.Fields.Count})";
-            Line($"static const TypeSchema schema{{Id(), {type.Version}, {fieldSpan}, {View(type.Name)}, {GuidValue(baseId)}, {type.Flags}u, {View(type.EffectiveToolName)}}};");
+            Line($"static const TypeSchema schema{{Id(), {type.Version}, {fieldSpan}, {View(type.Name)}, {GuidValue(baseId)}, {type.Flags}u, {View(type.EffectiveToolName)}, {GuidValue(type.WithinId)}}};");
             Line("return schema;");
             Line("}");
             // 클래스 생성 Trace다(Docs/Design/ReflectionFoundations.ko.md 9.1절 B8a). 상속 필드를 포함한 모든 참조·struct·배열
