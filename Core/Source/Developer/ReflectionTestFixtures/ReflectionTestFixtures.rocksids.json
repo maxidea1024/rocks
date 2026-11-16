@@ -265,6 +265,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::AssignHolder::anchorLink",
+      "id": "b53892d64c22468b96a59c3b72409ac3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::AssignHolder::atom",
       "id": "d229a93bfd9f42b5b36d12ed2ca08983",
       "aliases": [],
@@ -288,6 +295,13 @@
       "kind": "field",
       "name": "rocks::reflection_fixture::AssignHolder::inner",
       "id": "4e7a3f68a5fe481595652617fd62ad1f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::AssignHolder::items",
+      "id": "4f36da200cb84c49a04de6f1e285379f",
       "aliases": [],
       "retired": false
     },
@@ -372,6 +386,13 @@
       "kind": "field",
       "name": "rocks::reflection_fixture::AssignHolder::sealed",
       "id": "88032ef547bc43d0961f517bd528bdde",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::AssignHolder::slots",
+      "id": "59be0b44a8574365b2afaaf2cea180e2",
       "aliases": [],
       "retired": false
     },

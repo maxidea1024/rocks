@@ -156,6 +156,66 @@ private:
     bool inElement_ = false;
 };
 
+// PathPrepareReference가 찾아 둔 단일 강한 참조 위치 하나다(리플렉션 B9i3c2 — 대입 묶음의 간선
+// 변경 단위): ObjectRef 자리의 주소, 그 C++ 대상 타입, 찾을 때의 지금 대상(옛 대상), StructRefArray
+// 원소 안이면 그 원소 위치. 게시는 묶음 게시 구간 안에서 한 번이다. 준비와 게시 사이에 대상 객체의
+// 그 자리를 바꾸면 계약 위반이다(리플렉션 쓰기·Registry 참조 변경은 변경 표지가 잡아
+// BeginBatchPublish가 Busy다).
+//
+// 사용 예:
+//   PreparedReference prepared;
+//   auto located = PathPrepareReference(registry, access, mesh, path.View(), value, prepared);
+//   const BatchTargetCheck targets[] = {{value.reference, prepared.TargetType()}};
+//   const BatchEdgeChange edges[] = {{prepared.Previous(), value.reference}};
+//   auto batch = registry.BeginBatchPublish(access, mesh, stamp, targets, edges);
+//   ...
+//   prepared.Publish(batch.Value(), value.reference);
+class PreparedReference {
+public:
+    PreparedReference() noexcept = default;
+    PreparedReference(const PreparedReference&) = delete;
+    PreparedReference& operator=(const PreparedReference&) = delete;
+
+    bool IsReady() const noexcept {
+        return location_ != nullptr;
+    }
+
+    // 찾을 때 그 자리가 가리키던 대상이다(null 가능 — 간선 변경의 removed).
+    ObjectHandle Previous() const noexcept {
+        return previous_;
+    }
+
+    // 자리의 C++ 대상 타입(NativeTypeKey<T>)이다 — BatchTargetCheck의 기대 타입.
+    const void* TargetType() const noexcept {
+        return nativeType_;
+    }
+
+    // batch(같은 owner의 열린 묶음 게시 구간) 안에서 자리를 target으로 바꾼다(null이면 비운다).
+    // target은 BeginBatchPublish에서 TargetType()으로 재확인한 생존 대상이어야 하고, 간선 변경
+    // {Previous(), target}을 선언했어야 한다. 할당·실패가 없다. 준비되지 않았거나 다른 owner의
+    // 구간·닫힌 구간이면 Fatal이다(계약 위반).
+    void Publish(ObjectBatchPublish& batch, ObjectHandle target) noexcept;
+
+private:
+    friend class detail::PathCursor;
+
+    using PublishFunction = void (*)(ObjectBatchPublish&, void*, ObjectHandle,
+                                     const detail::StructElementLocation*) noexcept;
+
+    // 자리 형식마다의 게시 함수다(정의는 Object/ObjectBatchPublish.h).
+    template <class T>
+    static void PublishAt(ObjectBatchPublish& batch, void* field, ObjectHandle target,
+                          const detail::StructElementLocation* element) noexcept;
+
+    void* location_ = nullptr;
+    PublishFunction publish_ = nullptr;
+    const void* nativeType_ = nullptr;
+    ObjectHandle previous_{};
+    ObjectHandle owner_{};
+    detail::StructElementLocation element_{};
+    bool inElement_ = false;
+};
+
 // path의 끝(필드·멤버 하나 — 원소·항목 선택자 없음)의 값을 box에 깊게 복사한다(box의 allocator).
 // 읽기 연산이다: 게시된 객체는 읽기 Borrow(변경 표지를 올리지 않는다) + encode 고정 아래 복사하고
 // 상자를 채우기 전에 owner를 다시 확인한다(복사의 할당 콜백이 원본을 바꾸려 하면 Busy). 실패하면
@@ -193,5 +253,20 @@ Result<void> PathPrepareAttach(ObjectRegistry& registry, const ObjectAccessConte
                                const PathTarget& target, PropertyPath path, DetachedValue& box,
                                PreparedAttach& out,
                                PropertyPathFailure* failure = nullptr) noexcept;
+
+// path의 끝(단일 강한 참조 위치 — ObjectRef 필드, 인라인 struct·StructRefArray 원소의 ObjectRef
+// 멤버, 정적 배열의 ObjectRef 원소)을 value(ObjectReference)로 바꿀 자리를 찾아 out에 둔다(리플렉션
+// B9i3c2). 값은 바꾸지 않는다: PathWrite와 같은 해석·검증(ReadOnly·기대 타입·대상 생존 — staged
+// 객체는 ReadOnly를 막지 않는다)을 하되 읽기 Borrow로 찾으므로 변경 표지를 올리지 않는다. 게시된
+// 객체는 BeginBatchPublish 구간 안에서 out.Publish(batch, value.reference)로 게시한다. staged
+// 객체에서는 검증과 옛 대상 읽기만 쓴다(게시는 PathWrite — 트랜잭션의 staged 간선).
+//
+// 오류: 시작 위치가 분리된 값이면 Unsupported(NoPathAccess), 끝이 단일 강한 참조 위치가 아니면
+// (ObjectRefArray·ObjectRefMap 원소 포함) InvalidArgument(InvalidValue), value가 ObjectReference가
+// 아니면 TypeMismatch. 그 밖의 순서는 PathWrite와 같다.
+Result<void> PathPrepareReference(ObjectRegistry& registry, const ObjectAccessContext& access,
+                                  const PathTarget& target, PropertyPath path,
+                                  const FieldValue& value, PreparedReference& out,
+                                  PropertyPathFailure* failure = nullptr) noexcept;
 
 } // namespace rocks

@@ -879,6 +879,16 @@ Result<PreparedAssignments> PrepareAssignments(AssignmentTarget, Span<const Text
 - 경로 연산 실패의 진단 변환: 사유 ReadOnly → ReadOnly, TooManyElements·IndexOutOfRange·정수 Overflow → OutOfRange, AggregateValue·NoPathAccess·FixedLength·NotCopyable → Unsupported, 그 밖의 값·모양 사유 → InvalidValue. 호출 오류(OutOfMemory·Busy·StaleHandle·Destroyed·WrongThread·WrongContext·ShuttingDown)는 진단이 아니라 Prepare·Append의 실패다.
 - 시험: ReflectionText `TextAssign_AppliesInOrderAndNormalizesOverrides`·`TextAssign_SplitKeepsEqualsInsideKeys`·`TextAssign_CollectsErrorsAndKeepsSameValues`·`TextAssign_PublishFailuresChangeNothing`·`TextAssign_AllocationFailureLeavesObjectUnchanged`·`TextAssign_StagedAcceptsReadOnlyAndStructValues`(fixture ReflectionTestFixtures `AssignFixture.h`).
 
+구현(B9i3c2)에서 정한 점(단일 참조 위치 단위 — B9i3c2를 다시 나눴다. Registry 컨테이너(ObjectRefArray·ObjectRefMap) 단위, StructRefArray 원소 추가·삭제(원소 블록 소유 규칙), 참조 struct `{}`는 B9i3c3):
+
+- 타입 무관 자리 찾기 `PathPrepareReference(registry, access, target, path, value, PreparedReference&)`(Object/DetachedPath.h): 텍스트 층은 C++ 형식을 모르므로 B9i2의 형식별 `ObjectBatchPublish::SetReference`·`SetElementReference`를 직접 부를 수 없다. 그래서 PathWrite와 같은 해석·검증(ReadOnly·기대 타입·대상 생존 — staged는 ReadOnly를 막지 않는다)을 Write 연산으로 하되, 참조 쓰기 단일 지점(`SetPathMemberReference`)이 값을 바꾸지 않고 자리 주소·C++ 대상 타입(`NativeTypeKey<T>`)·지금 대상·StructRefArray 원소 위치를 `PreparedReference`에 둔다. 게시는 형식별 함수 주소(`PreparedReference::PublishAt<T>` — 생성 thunk가 인스턴스화)로 구간 안 `PublishBatchReference(field, target, element)`를 부른다(기존 `PublishBatchReference`에 원소 위치 인자를 더했다 — 무할당·무실패, 위치 검사는 B9i2와 같다). 찾기는 읽기 Borrow라 변경 표지를 올리지 않고, 최상위 ObjectRef 필드도 등록된 write가 아니라 경로 thunk로 찾는다. 시작 위치가 분리된 값이면 Unsupported(NoPathAccess), 끝이 단일 참조 위치가 아니면(ObjectRefArray·ObjectRefMap 원소 포함) InvalidArgument(InvalidValue)다. UE는 대응 개념이 없다(UE의 `FObjectPropertyBase::SetObjectPropertyValue`는 곧바로 쓰고, 트랜잭션 기록은 `UObject::Modify`가 객체 통째로 한다 — UE 5.8 CoreUObject/Public/UObject/UnrealType.h:2899·Object.h:303).
+- 준비 단위 판정: 경로를 위에서부터 보아 참조 없는 필드·멤버면 값 단위, 끝 단계가 ObjectRef 필드·멤버(선택자 없음)나 정적 배열의 ObjectRef 원소(index)면 참조 단위다. 참조를 담은 인라인 struct와 정적 배열·StructRefArray의 struct 원소(index)로는 내려간다 — 그래서 `items[0].weight` 같은 StructRefArray 원소 안 값 멤버도 값 단위다(단위 경로에 앞 단계 index가 남는다. 원소 추가·삭제가 없으므로 index가 묶음 안에서 바뀌지 않는다 — B9i3c3이 원소 추가·삭제를 열 때 다시 정한다). 그 밖(Registry 컨테이너·원소 통째·참조 struct 통째)은 진단 Unsupported다.
+- 참조 단위 대입: Set만이다(Unset·Erase는 InvalidValue — "none"을 대입한다). 값은 단일 ObjectReference여야 하고(resolver), 지금 대상과 같으면 무동작(override 경로는 넣고 ReadOnly 자리는 넣지 않는다 — 값 단위와 같은 규칙), 다르면 ReadOnly 자리는 진단 ReadOnly, 아니면 새 대상을 고정하고 `PathPrepareReference`로 검증한 뒤(실패는 값 단위와 같은 진단 변환) (위치 경로, 새 대상) 단위로 둔다. override 경로는 값 단위와 같은 정규화다(`slots[1]` → `slots`, `items[0].link` → `items`).
+- 대상 고정: Hard·Weak 새 대상 모두 값 해석 뒤 `TryPin`이다(10.2절 계약 그대로 — 살아 있지 않으면 진단 InvalidValue). Publish 2단계의 `BatchTargetCheck`는 Weak 고정이 생존만(nativeType nullptr), 참조 단위의 새 대상이 자리의 C++ 대상 타입(`PreparedReference::TargetType`)까지 본다.
+- Publish(살아 있는 객체): 값 단위의 `PathPrepareAttach` 뒤 참조 단위마다 `PathPrepareReference`로 자리와 옛 대상을 다시 찾는다(Prepare 뒤의 대상 Discard는 여기서 StaleHandle — owner Destroyed와 같은 변환). 간선 변경은 단위마다 {옛 대상, 새 대상}이고 `BeginBatchPublish`가 관찰자 키를 예약한다. 구간 안에서 값 단위 swap 뒤 참조 단위 `PreparedReference::Publish(batch, target)`를 부른다. staged 대상은 값 단위 게시 뒤 참조 단위마다 PathWrite(트랜잭션의 staged 간선)다.
+- 결과: `PublishedAssignments::ReferenceCount`·`ReferencePath`·`OldReference`(게시 전 대상 — 고정하지 않으므로 Undo는 생존을 다시 확인한다). 값 단위의 `UnitCount`와 따로 센다.
+- 시험: ReflectionText `TextAssign_ReferenceUnitsPublishWithValues`(값·ObjectRef·정적 배열 원소·StructRefArray 원소 멤버를 섞은 묶음, 관찰자 기록 한 번)·`TextAssign_ReferenceUnitFailuresChangeNothing`(ReadOnly·Unset·참조 struct `{}` 진단, 같은 대상 무동작, 대상 고정의 GC 회수 방지, 대상 Discard면 StaleHandle)·`TextAssign_ReferencePublishAllocationFailuresChangeNothing`(관찰자 예약·Registry 할당 실패 주입). fixture `AssignHolder`에 `anchorLink`(ReadOnly ObjectRef)·`slots`(ObjectRef 정적 배열)·`items`(StructRefArray<AssignMixed>)를 더했다.
+
 ### 10.3 참조 resolver
 
 ```cpp
@@ -1048,7 +1058,7 @@ public:
 | B9i2 | B6 확장: 객체 변경 표지·묶음 게시 구간(대상 재확인·관찰자 묶음 예약)·준비 단위 셋·대상 고정(ObjectRuntime 시험으로 원자성 고정) | B9f4 | M |
 | B9i3a | ReflectionText 모듈 골격·용도(`TextUse` 출력·입력 제외)·진단 모음·codec 옵션 | B9a–B9h, B9i1, B9i2 | S |
 | B9i3b | 명령행 표기(종류별 Format·Parse, escape 표) | B9i3a | M |
-| B9i3c | 대입 묶음 API·준비 단위·resolver·Publish — c0 선행 기반(값 연산·PathTarget·Detach·Attach), c1 API와 값 단위, c2 참조 단위·StructRefArray 원소 추가·삭제 | B9i3b | L |
+| B9i3c | 대입 묶음 API·준비 단위·resolver·Publish — c0 선행 기반(값 연산·PathTarget·Detach·Attach), c1 API와 값 단위, c2 단일 참조 위치 단위(간선 변경)·Hard 대상 고정, c3 Registry 컨테이너 단위·StructRefArray 원소 추가·삭제·참조 struct `{}` | B9i3b | L |
 | B9i4 | JSON export·import(객체·staged·struct 값, mapMerge) | B9i3c | L |
 | B9j | InstancedStruct<>·담기 조건·깊이 합·객체 문맥 경로 해석 | B9i4 | L |
 | B9k | struct 상속·비리플렉션 빈 base·struct 멤버 thunk 소유자 인자·`InstancedStruct<Base>` | B9j | L |

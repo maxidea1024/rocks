@@ -4,8 +4,9 @@
 #include <Object/PathKey.h>
 
 // 대입 하나를 해석해 준비 단위 사본에 적용한다(리플렉션 B9i3c1 — ReflectionText/TextAssignments.h의
-// PrepareAssignments 규칙). 경로 해석 → 같은 경로 검사 → 준비 단위(참조 없는 필드·멤버 하나) →
-// 값 읽기(resolver) → 사본 위 경로 연산 → override 경로.
+// PrepareAssignments 규칙). 경로 해석 → 같은 경로 검사 → 준비 단위(참조 없는 필드·멤버 하나, 또는
+// 단일 강한 참조 위치 — B9i3c2) → 값 읽기(resolver) → 사본 위 경로 연산 또는 참조 자리 검증 →
+// override 경로.
 namespace rocks::reflection_text::detail {
 
 namespace {
@@ -79,7 +80,8 @@ bool IsCallError(ErrorCode code) noexcept {
            code == ErrorCode::ShuttingDown;
 }
 
-// 새로 가리키는 Weak 대상을 고정한다(Publish가 다시 확인한다). 살아 있지 않으면 진단이다.
+// 새로 가리키는 Hard·Weak 대상을 고정한다(Publish가 다시 확인한다 — 고정은 GC 회수를 막지만
+// Discard는 막지 못한다). 살아 있지 않으면 진단이다.
 Result<bool> PinReferences(AssignmentState& state, const TextValue& value, TextSource source,
                            StringView pathText) noexcept {
     const FieldValue* lists[] = {&value.single};
@@ -88,7 +90,9 @@ Result<bool> PinReferences(AssignmentState& state, const TextValue& value, TextS
     for (const Span<const FieldValue>& group : groups) {
         for (usize index = 0; index < group.Size(); ++index) {
             const FieldValue& item = group[index];
-            if (item.kind != ValueKind::WeakObjectReference || item.reference.IsNull()) {
+            if ((item.kind != ValueKind::WeakObjectReference &&
+                 item.kind != ValueKind::ObjectReference) ||
+                item.reference.IsNull()) {
                 continue;
             }
 
@@ -451,32 +455,134 @@ Result<void> Apply::ReplaceContents(const TextValue& value) noexcept {
     return Result<void>::Success();
 }
 
-// 경로의 준비 단위 끝 단계다: 위에서부터 처음 만나는 참조 없는 필드·멤버. 강한 참조 자리(ObjectRef
-// 필드·참조 멤버·Registry 컨테이너·참조 struct 통째)면 IndexNone이다.
-Result<usize> FindUnitEnd(AssignmentState& state, PropertyPath path) noexcept {
+enum class UnitKind : uint8 {
+    None,
+    Value,
+    Reference
+};
+
+struct UnitEnd {
+    usize index = IndexNone;
+    UnitKind kind = UnitKind::None;
+};
+
+// 경로의 준비 단위다: 위에서부터 처음 만나는 참조 없는 필드·멤버(값 단위)나 단일 강한 참조
+// 위치(ObjectRef 필드·멤버, 정적 배열의 ObjectRef 원소 — 참조 단위). 참조를 담은 인라인 struct와
+// 정적 배열·StructRefArray의 struct 원소로는 내려간다. 그 밖(Registry 컨테이너·참조 struct 통째)은
+// None이다.
+Result<UnitEnd> FindUnitEnd(AssignmentState& state, PropertyPath path) noexcept {
     for (usize index = 0; index < path.steps.Size(); ++index) {
         TextSlot slot;
         const PropertyPath prefix{Span<const PathStep>(path.steps.Data(), index + 1), path.keys};
         if (auto described = DescribeTextPath(state.lease, prefix, slot); !described) {
-            return Result<usize>::Failure(described.Error());
+            return Result<UnitEnd>::Failure(described.Error());
         }
 
         const FieldSchema& field = *slot.field;
+        const ValueKind target = FieldTargetType(field).kind;
         const bool copyable =
-            FieldTargetType(field).kind != ValueKind::ObjectReference &&
+            target != ValueKind::ObjectReference &&
             (slot.structView.IsEmpty() || !slot.structView.ContainsStrongReference());
         if (copyable) {
-            return Result<usize>::Success(index);
+            return Result<UnitEnd>::Success(UnitEnd{index, UnitKind::Value});
         }
 
-        // 참조를 담은 인라인 struct만 멤버로 내려간다(원소·항목 안은 참조 단위 — B9i3c2).
-        if (path.steps[index].selector != PathSelector::None ||
-            field.value.kind != ValueKind::Struct) {
+        const PathSelector selector = path.steps[index].selector;
+        const bool last = index + 1 == path.steps.Size();
+        const bool single =
+            (field.value.kind == ValueKind::ObjectReference && selector == PathSelector::None) ||
+            (field.value.kind == ValueKind::StaticArray && selector == PathSelector::Index);
+        if (last && target == ValueKind::ObjectReference && single) {
+            return Result<UnitEnd>::Success(UnitEnd{index, UnitKind::Reference});
+        }
+
+        const bool element =
+            selector == PathSelector::Index && field.element.kind == ValueKind::Struct &&
+            (field.value.kind == ValueKind::StaticArray || field.value.kind == ValueKind::Array);
+        const bool member = selector == PathSelector::None && field.value.kind == ValueKind::Struct;
+        if (last || !(element || member)) {
             break;
         }
     }
 
-    return Result<usize>::Success(IndexNone);
+    return Result<UnitEnd>::Success(UnitEnd{});
+}
+
+// 단일 강한 참조 위치의 대입이다(리플렉션 B9i3c2): Set만 받고, 지금 대상과 같으면 무동작, 다르면
+// 자리를 검증(PathPrepareReference — ReadOnly·기대 타입·대상 생존)한 뒤 간선 변경 단위로 둔다.
+Result<void> ApplyReference(AssignmentState& state, const TextAssignment& assignment,
+                            const TextSlot& slot, PropertyPath path, TextSource source) noexcept {
+    if (assignment.kind != AssignmentKind::Set) {
+        return Diagnose(state, TextDiagnosticCode::InvalidValue, source, assignment.path,
+                        "a reference cannot be unset or erased; assign none");
+    }
+
+    TextValue value(state.allocator);
+    auto parsed =
+        ParseTextValue(state.context, slot, assignment.value, source, assignment.path, value);
+    if (!parsed) {
+        return Result<void>::Failure(parsed.Error());
+    }
+
+    if (!parsed.Value()) {
+        state.failed = true;
+        return Result<void>::Success();
+    }
+
+    if (value.shape != TextValueShape::Single || value.single.kind != ValueKind::ObjectReference) {
+        return Diagnose(state, TextDiagnosticCode::InvalidValue, source, assignment.path,
+                        "value does not fit the property");
+    }
+
+    ObjectRegistry& registry = state.target.Registry();
+    const ObjectAccessContext& access = state.target.Access();
+    const PathTarget root = state.Root();
+    const bool readOnly = state.target.GetKind() != AssignmentTarget::Kind::Staged &&
+                          (slot.flags & static_cast<uint32>(FieldFlags::ReadOnly)) != 0;
+    FieldValue current(state.allocator);
+    PropertyPathFailure failure;
+    if (auto read = PathRead(registry, access, root, path, current, &failure); !read) {
+        return ReportPathFailure(state, read.Error(), failure, source, assignment.path);
+    }
+
+    if (current.reference == value.single.reference) {
+        return readOnly ? Result<void>::Success() : AddOverride(state, path);
+    }
+
+    if (readOnly) {
+        return Diagnose(state, TextDiagnosticCode::ReadOnly, source, assignment.path,
+                        "property is read-only");
+    }
+
+    auto pinned = PinReferences(state, value, source, assignment.path);
+    if (!pinned || !pinned.Value()) {
+        return pinned ? Result<void>::Success() : Result<void>::Failure(pinned.Error());
+    }
+
+    auto made = UniquePtr<ReferenceUnit>::TryMake(state.allocator, state.allocator);
+    if (!made) {
+        return Result<void>::Failure(made.Error());
+    }
+
+    ReferenceUnit& unit = *made.Value();
+    if (auto copied = unit.steps.TryAppend(path.steps); !copied) {
+        return copied;
+    }
+
+    if (auto reserved = state.references.TryReserve(state.references.Size() + 1); !reserved) {
+        return reserved;
+    }
+
+    if (auto located = PathPrepareReference(registry, access, root, path, value.single,
+                                            unit.prepared, &failure);
+        !located) {
+        return ReportPathFailure(state, located.Error(), failure, source, assignment.path);
+    }
+
+    unit.target = value.single.reference;
+    unit.previous = unit.prepared.Previous();
+    (void)state.references.TryPushBack(Move(made.Value()));
+    return AddOverride(state, path);
 }
 
 } // namespace
@@ -512,14 +618,18 @@ Result<void> ProcessAssignment(AssignmentState& state, const TextAssignment& ass
         return Result<void>::Failure(unitEnd.Error());
     }
 
-    if (unitEnd.Value() == IndexNone) {
+    if (unitEnd.Value().kind == UnitKind::None) {
         return Diagnose(state, TextDiagnosticCode::Unsupported, source, assignment.path,
-                        "assignments to strong references are not supported yet");
+                        "this assignment to a reference-holding value is not supported yet");
     }
 
-    // 단위 경로는 끝 단계의 선택자를 뗀 필드·멤버 하나다(앞 단계는 모두 인라인 struct라 key가
-    // 없다).
-    const usize end = unitEnd.Value();
+    if (unitEnd.Value().kind == UnitKind::Reference) {
+        return ApplyReference(state, assignment, resolved.slot, path, source);
+    }
+
+    // 단위 경로는 끝 단계의 선택자를 뗀 필드·멤버 하나다(앞 단계는 인라인 struct와 정적 배열·
+    // StructRefArray 원소라 key가 없다).
+    const usize end = unitEnd.Value().index;
     PathStep unitSteps[MaxPropertyPathSteps];
     for (usize index = 0; index <= end; ++index) {
         unitSteps[index] = path.steps[index];

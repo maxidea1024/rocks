@@ -73,8 +73,8 @@ AssignmentState::AssignmentState(const AssignmentTarget& target_, const TextCode
                                  TextDiagnostics& diagnostics, Allocator& allocator_) noexcept
     : target(target_), options(options_),
       context(target_.Registry().Types(), options, diagnostics, allocator_), allocator(allocator_),
-      units(allocator_), assigned(allocator_), overrideSteps(allocator_), overrideEnds(allocator_),
-      overrideViews(allocator_), pins(allocator_) {
+      units(allocator_), references(allocator_), assigned(allocator_), overrideSteps(allocator_),
+      overrideEnds(allocator_), overrideViews(allocator_), pins(allocator_) {
 }
 
 PathTarget AssignmentState::Root() const noexcept {
@@ -351,6 +351,18 @@ DetachedValue& PublishedAssignments::OldValue(usize index) noexcept {
     return state_->units[index]->box;
 }
 
+usize PublishedAssignments::ReferenceCount() const noexcept {
+    return state_ ? state_->references.Size() : 0;
+}
+
+PropertyPath PublishedAssignments::ReferencePath(usize index) const noexcept {
+    return state_->references[index]->Path();
+}
+
+ObjectHandle PublishedAssignments::OldReference(usize index) const noexcept {
+    return state_->references[index]->previous;
+}
+
 PreparedAssignments::PreparedAssignments() noexcept = default;
 PreparedAssignments::~PreparedAssignments() = default;
 PreparedAssignments::PreparedAssignments(PreparedAssignments&&) noexcept = default;
@@ -439,15 +451,49 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
         }
     }
 
+    // 참조 단위: 게시된 객체는 자리와 옛 대상을 지금 찾는다(대상 생존·타입도 다시 검증한다).
+    FieldValue reference(state.allocator);
+    reference.kind = ValueKind::ObjectReference;
     if (live) {
-        // 2. owner Borrow와 묶음 게시 구간(표지·Weak 대상 재확인) → 무할당 게시.
+        for (usize index = 0; index < state.references.Size(); ++index) {
+            detail::ReferenceUnit& unit = *state.references[index];
+            reference.reference = unit.target;
+            if (auto located = PathPrepareReference(registry, access, root, unit.Path(), reference,
+                                                    unit.prepared);
+                !located) {
+                return PublishResult::Failure(ownerError(located.Error()));
+            }
+
+            unit.previous = unit.prepared.Previous();
+        }
+    }
+
+    if (live) {
+        // 2. owner Borrow와 묶음 게시 구간(표지·새 대상 재확인·관찰자 예약) → 무할당 게시.
         Array<BatchTargetCheck> targets(state.allocator);
-        if (auto reserved = targets.TryReserve(state.pins.Size()); !reserved) {
+        Array<BatchEdgeChange> edges(state.allocator);
+        if (auto reserved = targets.TryReserve(state.pins.Size() + state.references.Size());
+            !reserved) {
             return PublishResult::Failure(reserved.Error());
         }
 
+        if (auto reserved = edges.TryReserve(state.references.Size()); !reserved) {
+            return PublishResult::Failure(reserved.Error());
+        }
+
+        // Weak 고정은 생존만, 참조 단위의 새 대상은 자리의 C++ 대상 타입까지 본다.
         for (usize index = 0; index < state.pins.Size(); ++index) {
             (void)targets.TryPushBack(BatchTargetCheck{state.pins[index].Handle(), nullptr});
+        }
+
+        for (usize index = 0; index < state.references.Size(); ++index) {
+            const detail::ReferenceUnit& unit = *state.references[index];
+            if (!unit.target.IsNull()) {
+                (void)targets.TryPushBack(
+                    BatchTargetCheck{unit.target, unit.prepared.TargetType()});
+            }
+
+            (void)edges.TryPushBack(BatchEdgeChange{unit.previous, unit.target});
         }
 
         auto owner = registry.Resolve(access, state.target.Handle());
@@ -456,7 +502,7 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
         }
 
         auto batch = registry.BeginBatchPublish(access, state.target.Handle(), state.stamp,
-                                                targets.View(), {});
+                                                targets.View(), edges.View());
         if (!batch) {
             return PublishResult::Failure(batch.Error());
         }
@@ -465,11 +511,26 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
             state.units[index]->prepared.Publish(batch.Value());
         }
 
+        for (usize index = 0; index < state.references.Size(); ++index) {
+            detail::ReferenceUnit& unit = *state.references[index];
+            unit.prepared.Publish(batch.Value(), unit.target);
+        }
+
         batch.Value().End();
     } else {
         for (usize index = 0; index < state.units.Size(); ++index) {
             if (auto published = state.units[index]->prepared.Publish(); !published) {
                 return PublishResult::Failure(published.Error());
+            }
+        }
+
+        // staged 객체의 참조는 트랜잭션의 staged 간선 쓰기다(실패는 호출자의 rollback이 받는다).
+        for (usize index = 0; index < state.references.Size(); ++index) {
+            detail::ReferenceUnit& unit = *state.references[index];
+            reference.reference = unit.target;
+            if (auto written = PathWrite(registry, access, root, unit.Path(), reference);
+                !written) {
+                return PublishResult::Failure(written.Error());
             }
         }
     }

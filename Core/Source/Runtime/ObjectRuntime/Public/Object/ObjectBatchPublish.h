@@ -173,6 +173,15 @@ public:
 private:
     friend class ObjectRegistry;
     friend class PreparedAttach;
+    friend class PreparedReference;
+
+    // 경로로 찾은 단일 참조 위치(element가 있으면 그 StructRefArray 원소 블록 안)를 target으로
+    // 바꾼다(PreparedReference::Publish — 규칙은 SetReference와 같다).
+    template <class T>
+    void PublishReferenceAt(ObjectRef<T>& field, ObjectHandle target,
+                            const detail::StructElementLocation* element) noexcept {
+        Registry().PublishBatchReference(field, target, element);
+    }
 
     // 값 부분 트리 자리 하나(location부터 bytes — element가 있으면 그 StructRefArray 원소 블록 안,
     // 없으면 owner 저장소 안)를 게시함을 기록한다(End가 변경 표지를 올린다). 교환은 호출자
@@ -193,8 +202,9 @@ private:
 };
 
 template <class T>
-void ObjectRegistry::PublishBatchReference(ObjectRef<T>& field, ObjectHandle target) noexcept {
-    PublishBatchEdge(field.handle_, target, NativeTypeKey<T>(), nullptr);
+void ObjectRegistry::PublishBatchReference(ObjectRef<T>& field, ObjectHandle target,
+                                           const detail::StructElementLocation* element) noexcept {
+    PublishBatchEdge(field.handle_, target, NativeTypeKey<T>(), element);
 }
 
 template <class S, class T>

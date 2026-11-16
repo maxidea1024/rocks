@@ -140,6 +140,20 @@ public:
     // value 자리를 출력 PreparedAttach에 둔다(값은 바꾸지 않는다).
     Result<void> AttachValue(const RuntimeValueOps& ops, void* value) noexcept;
 
+    // PathPrepareReference(리플렉션 B9i3c2)인지다: 참조 쓰기 끝 지점이 값을 바꾸지 않고 자리를
+    // 찾는다(Write 연산 — 검증은 PathWrite와 같다).
+    bool LocatesReference() const noexcept {
+        return reference_ != nullptr;
+    }
+
+    // 단일 참조 위치 끝 지점이다: field 자리와 그 대상 타입·지금 대상·원소 위치를 출력
+    // PreparedReference에 둔다(값은 바꾸지 않는다).
+    template <class T>
+    Result<void> LocateReference(ObjectRef<T>& field) noexcept {
+        return LocateReferenceAt(&field, &PreparedReference::PublishAt<T>, NativeTypeKey<T>(),
+                                 field.Handle());
+    }
+
     // Write·Insert의 입력 값이다(Insert의 struct 원소는 nullptr). 검증을 마친 값이다.
     const FieldValue* Input() const noexcept {
         return input_;
@@ -297,6 +311,9 @@ private:
 
     void Record(ErrorCode code, PropertyPathError reason) noexcept;
 
+    Result<void> LocateReferenceAt(void* field, PreparedReference::PublishFunction publish,
+                                   const void* nativeType, ObjectHandle previous) noexcept;
+
     ObjectRegistry& registry_;
     const ObjectAccessContext& access_;
     ObjectHandle owner_;
@@ -312,6 +329,8 @@ private:
     // Detach의 출력 상자·Attach의 입력 상자와 Attach의 출력 자리다.
     DetachedValue* box_ = nullptr;
     PreparedAttach* attach_ = nullptr;
+    // PathPrepareReference의 출력 자리다(리플렉션 B9i3c2).
+    PreparedReference* reference_ = nullptr;
     PathOperation operation_;
     const FieldValue* input_;
     FieldValue* output_;

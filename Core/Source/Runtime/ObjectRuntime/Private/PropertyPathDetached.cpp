@@ -76,7 +76,29 @@ Result<void> PreparedAttach::Publish() noexcept {
     return Result<void>::Success();
 }
 
+void PreparedReference::Publish(ObjectBatchPublish& batch, ObjectHandle target) noexcept {
+    if (!IsReady() || !batch.IsActive() || !(batch.Owner() == owner_)) {
+        platform::Fatal("Prepared reference needs the open batch of its owner");
+    }
+
+    publish_(batch, location_, target, inElement_ ? &element_ : nullptr);
+    location_ = nullptr;
+}
+
 namespace detail {
+
+Result<void> PathCursor::LocateReferenceAt(void* field, PreparedReference::PublishFunction publish,
+                                           const void* nativeType, ObjectHandle previous) noexcept {
+    PreparedReference& out = *reference_;
+    out.location_ = field;
+    out.publish_ = publish;
+    out.nativeType_ = nativeType;
+    out.previous_ = previous;
+    out.owner_ = owner_;
+    out.inElement_ = inElement_;
+    out.element_ = inElement_ ? element_ : StructElementLocation{};
+    return Result<void>::Success();
+}
 
 Result<void> PathCursor::DetachValue(const RuntimeValueOps& ops, const void* value,
                                      DetachedPathFunction enter) noexcept {
@@ -176,6 +198,16 @@ Result<void> PathPrepareAttach(ObjectRegistry& registry, const ObjectAccessConte
     detail::PathCursor cursor = detail::PathRunner::Make(
         registry, access, target, detail::PathOperation::Attach, nullptr, nullptr, failure);
     detail::PathRunner::BindBox(cursor, box, &out);
+    return detail::PathRunner::Run(cursor, path);
+}
+
+Result<void> PathPrepareReference(ObjectRegistry& registry, const ObjectAccessContext& access,
+                                  const PathTarget& target, PropertyPath path,
+                                  const FieldValue& value, PreparedReference& out,
+                                  PropertyPathFailure* failure) noexcept {
+    detail::PathCursor cursor = detail::PathRunner::Make(
+        registry, access, target, detail::PathOperation::Write, &value, nullptr, failure);
+    detail::PathRunner::BindReference(cursor, out);
     return detail::PathRunner::Run(cursor, path);
 }
 

@@ -28,6 +28,23 @@ struct AssignmentUnit {
     bool dirty = false;
 };
 
+// 단일 강한 참조 위치의 간선 변경 단위다(리플렉션 B9i3c2): 위치 경로(인라인 struct 멤버·정적 배열과
+// StructRefArray의 index 선택자 — key 없음), 새 대상, 게시 자리와 옛 대상(Publish가 찾는다).
+struct ReferenceUnit {
+    explicit ReferenceUnit(Allocator& allocator) noexcept : steps(allocator) {
+    }
+
+    PropertyPath Path() const noexcept {
+        return PropertyPath{steps.View(), {}};
+    }
+
+    Array<PathStep> steps;
+    ObjectHandle target{};
+    // 게시한 뒤에는 게시 전 대상이다.
+    ObjectHandle previous{};
+    PreparedReference prepared;
+};
+
 // 복사해 둔 경로 목록이다(단계·key 종류·key wire를 평평한 배열에 담는다 — 버퍼가 옮겨져도 key는
 // offset으로 다시 만든다).
 class PathCopies {
@@ -87,13 +104,15 @@ struct AssignmentState {
     // Live 대상의 변경 표지(Prepare 처음에 읽는다).
     uint64 stamp = 0;
     Array<UniquePtr<AssignmentUnit>> units;
+    // 단일 강한 참조 위치 단위다(값이 실제로 바뀌는 것만).
+    Array<UniquePtr<ReferenceUnit>> references;
     // 해석한 대입 경로(같은 경로 두 번 검사).
     PathCopies assigned;
     // override 경로(선택자·key 없음)의 단계와 범위, 그 view.
     Array<PathStep> overrideSteps;
     Array<usize> overrideEnds;
     Array<PropertyPath> overrideViews;
-    // 새로 가리키는 Weak 대상의 고정이다(Publish가 끝나면 놓는다).
+    // 새로 가리키는 Hard·Weak 대상의 고정이다(Publish가 끝나면 놓는다).
     Array<RootRef<Object>> pins;
     // 진단을 남긴 묶음이다(게시할 수 없다).
     bool failed = false;

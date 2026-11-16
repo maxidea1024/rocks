@@ -884,7 +884,8 @@ private:
 
     // ---- 묶음 게시 구간 안(Private/ObjectRegistryBatch.cpp — 계약 위반은 Fatal) ----
     template <class T>
-    void PublishBatchReference(ObjectRef<T>& field, ObjectHandle target) noexcept;
+    void PublishBatchReference(ObjectRef<T>& field, ObjectHandle target,
+                               const detail::StructElementLocation* element = nullptr) noexcept;
     template <class S, class T>
     void PublishBatchElementReference(StructRefArray<S>& array, usize index, ObjectRef<T>& field,
                                       ObjectHandle target) noexcept;

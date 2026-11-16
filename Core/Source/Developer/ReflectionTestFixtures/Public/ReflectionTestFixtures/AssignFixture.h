@@ -9,6 +9,7 @@
 #include <Object/ClassRef.h>
 #include <Object/Object.h>
 #include <Object/ObjectRefs.h>
+#include <Object/StructRefArray.h>
 
 namespace rocks::reflection_fixture {
 
@@ -16,7 +17,8 @@ namespace rocks::reflection_fixture {
 // ReflectionText TextAssignmentTests). AssignHolder가 준비 단위·override 정규화의 모양(단일
 // 값·목록·struct 원소 Array·struct 정적 배열·Set·Map·Optional·Atomic struct·중첩 struct)과 ReadOnly
 // 필드·멤버, Deprecated 클래스를 가리킬 수 있는 ClassRef, Weak 참조, 값과 강한 참조를 섞은 인라인
-// struct를 담는다.
+// struct, 참조 단위(B9i3c2)의 자리 — ObjectRef 필드(ReadOnly 포함)·정적 배열 원소·StructRefArray
+// 원소 멤버를 담는다.
 ROCKS_STRUCT()
 struct AssignPoint {
     ROCKS_PROPERTY() int32 x = 0;
@@ -62,7 +64,7 @@ ROCKS_CLASS()
 struct AssignHolder final : Object {
     explicit AssignHolder(Allocator& allocator) noexcept
         : label(allocator), numbers(allocator), points(allocator), tags(allocator),
-          scores(allocator), byKey(allocator), mixed(allocator) {
+          scores(allocator), byKey(allocator), mixed(allocator), items(allocator) {
     }
 
     ROCKS_PROPERTY() int32 count = 0;
@@ -83,6 +85,9 @@ struct AssignHolder final : Object {
     ROCKS_PROPERTY() WeakRef<AssignTarget> peer;
     ROCKS_PROPERTY() AssignMixed mixed;
     ROCKS_PROPERTY() ObjectRef<AssignTarget> next;
+    ROCKS_PROPERTY(ReadOnly) ObjectRef<AssignTarget> anchorLink;
+    ROCKS_PROPERTY() ObjectRef<AssignTarget> slots[2];
+    ROCKS_PROPERTY() StructRefArray<AssignMixed> items;
 };
 
 } // namespace rocks::reflection_fixture
