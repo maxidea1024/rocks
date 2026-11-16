@@ -117,6 +117,7 @@ internal static class InputValidation
             }
 
             bool posix = request.Toolchain.Platform != NativePlatform.Windows;
+            GeneratedSources.Validate(module);
             foreach (string argument in module.AdditionalCompileArguments)
             {
                 ValidateArgument(module.Name, "AdditionalCompileArguments", argument, true, posix);

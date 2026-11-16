@@ -6,6 +6,9 @@ public sealed class FoundationTarget : TargetRules
 {
     public override string Name => "Foundation";
 
+    // 개발 도구·시험 실행 파일이다(Release 배제 정책 대상이 아니다).
+    public override TargetType Type => TargetType.Program;
+
     public override IReadOnlyList<string> Modules => ["FoundationTests"];
 
     public override bool CheckPublicHeaders => true;
@@ -18,6 +21,9 @@ public sealed class FoundationTarget : TargetRules
 public sealed class EngineTestsTarget : TargetRules
 {
     public override string Name => "EngineTests";
+
+    // 개발 도구·시험 실행 파일이다(Release 배제 정책 대상이 아니다).
+    public override TargetType Type => TargetType.Program;
 
     public override IReadOnlyList<string> Modules => ["EngineTests"];
 
@@ -33,12 +39,18 @@ public sealed class ReflectionFixturesTarget : TargetRules
 {
     public override string Name => "ReflectionFixtures";
 
+    // 개발 도구·시험 실행 파일이다(Release 배제 정책 대상이 아니다).
+    public override TargetType Type => TargetType.Program;
+
     public override IReadOnlyList<string> Modules => ["ReflectionTestFixtures", "ObjectSerialization"];
 }
 
 public sealed class CoreTarget : TargetRules
 {
     public override string Name => "Core";
+
+    // 개발 도구·시험 실행 파일이다(Release 배제 정책 대상이 아니다).
+    public override TargetType Type => TargetType.Program;
 
     public override IReadOnlyList<string> Modules => ["CoreFoundationTests"];
 

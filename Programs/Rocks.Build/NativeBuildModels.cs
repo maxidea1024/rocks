@@ -219,7 +219,19 @@ public sealed record NativeModuleInput
     // (Docs/Design/ReflectionFoundations.ko.md 8.1절). 엔진 Core 규칙이 켜고 설치 SDK가 함께 나른다. 이름 "Core"로 판정하지
     // 않으므로 엔진 밖 프로젝트의 같은 이름 모듈은 대상이 아니다.
     public bool ProvidesBuildInfo { get; init; }
+
+    // 규칙이 저장소 입력(예: Engine 루트 ThirdParty manifest)에서 만든 생성 번역 단위다(Docs/Design/ShaderSystem.ko.md 9절 도구 표).
+    // 빌드가 출력 잠금 아래에서 <out>/GeneratedSources/<모듈>/<FileName>에 내용이 바뀔 때만 쓰고(BuildInfo 생성 TU와 같은 방식) 이
+    // 모듈 소스로 컴파일한다. 내용은 호스트 경로를 담지 않아야 한다(도구 빌드 ID가 호스트 무관이다). 규칙은 이 목록을 매 실행 다시
+    // 만들므로 입력 manifest가 바뀌면 다음 빌드에서 내용과 compile key가 함께 바뀐다.
+    public IReadOnlyList<NativeGeneratedSource> GeneratedSources { get; init; } = [];
 }
+
+/// <summary>
+/// 규칙이 만든 생성 번역 단위 하나다(<see cref="NativeModuleInput.GeneratedSources"/>). <see cref="FileName"/>은 경로 구분자 없는
+/// <c>.cpp</c> 또는 <c>.c</c> 파일 이름이고 모듈 안에서 겹치지 않아야 한다. <see cref="Content"/>는 UTF-8로 쓴다.
+/// </summary>
+public sealed record NativeGeneratedSource(string FileName, string Content);
 
 /// <summary>설치 SDK가 동봉한 모듈 메타데이터다(절대 경로).</summary>
 public sealed record ImportedMetadata(string Descriptor, string IdentityManifest);

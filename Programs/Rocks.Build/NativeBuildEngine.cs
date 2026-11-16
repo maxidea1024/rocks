@@ -21,6 +21,8 @@ public sealed class NativeBuildEngine
         InputValidation.Validate(request);
         Directory.CreateDirectory(request.OutputDirectory);
         await using var outputLock = await AcquireOutputLockAsync(request.OutputDirectory, cancellationToken);
+        // 규칙이 만든 생성 번역 단위(도구 표 등)를 먼저 쓴다. 그 뒤의 BuildInfo·액션 그래프는 이것을 보통 소스로 본다.
+        request = GeneratedSources.Write(request);
         // 계획 두 단계(Docs/Design/ReflectionFoundations.ko.md 8.1절): BuildInfo 정의 TU를 만들어 실행 파일 소스에 더한 뒤 액션
         // 그래프를 세운다. 첫 InputSnapshot은 Prepare가 읽은 값의 메모로 만들어 마지막 비교가 Prepare 읽기부터 빌드 끝까지를
         // 덮는다(ActionGraph.Create는 파일 내용을 읽지 않으므로 메모에 없는 파일은 그 뒤 여기서 처음 읽는다).

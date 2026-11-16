@@ -60,7 +60,16 @@ internal static class Program
                         .Concat(PolicyChecks.TargetIntrinsics(root)).Concat(PolicyChecks.TestAccess(root))
                         .Concat(PolicyChecks.SourceWarnings(root)).Concat(PolicyChecks.OptimizationOverrides(root))
                         .Concat(PolicyChecks.CompilerBuiltins(root)).Concat(PolicyChecks.RawLimitLiterals(root)).Concat(PolicyChecks.InitializerListDeductions(root)).Concat(PolicyChecks.CompileTimeMessages(root)).Concat(PolicyChecks.DeterministicMathSources(root)).Concat(PolicyChecks.CrtNumberConversions(root)).Concat(UnicodeTables.Check(root)).Concat(MathTables.Check(root)).Concat(NumberTables.Check(root))
-                        .Concat(PolicyChecks.PythonFreeMainPath(root)).Concat(PolicyChecks.ThirdParty(root)).Concat(PolicyChecks.DerivedSources(root)).ToList();
+                        .Concat(PolicyChecks.PythonFreeMainPath(root)).Concat(PolicyChecks.ThirdParty(root)).Concat(PolicyChecks.DerivedSources(root))
+                        .Concat(PolicyChecks.ShaderToolReferences(root)).ToList();
+                    // Release 배제(셰이더 시스템 9절)는 규칙 어셈블리를 평가한다. 알려진 예외는 실패가 아니지만 조용히 넘기지 않고 출력한다.
+                    ReleaseExclusionResult release = ReleaseExclusion.Check(root, options.Optional("rules") ?? ReleaseExclusion.DefaultRulesAssembly(root));
+                    failures.AddRange(release.Failures);
+                    foreach (string notice in release.Notices)
+                    {
+                        Console.WriteLine("note: " + notice);
+                    }
+
                     if (options.Optional("compile-commands") is string database)
                     {
                         failures.AddRange(PolicyChecks.CompilationDatabase(database));

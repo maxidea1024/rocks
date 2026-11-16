@@ -351,3 +351,14 @@ libsodium 1.0.22-stable 기반 범용 암호 모듈 `Crypto`를 추가했다(설
 - 시험 라이브러리: Rocks.Build에 공유 라이브러리 모듈 종류를 더하지 않으므로 시험 지원 코드(`TestSupport/DynamicLibraryFixture.h`)가 실행 중에 데이터 전용 PE32+ DLL(export·import만, 코드 없음)을 직접 쓴다. macOS·Android 생성기는 후속이며 그 플랫폼에서는 의존·검색 시험이 SKIP이다.
 - 검증(Windows x64 clang-cl): 동적 라이브러리 시험 8건 — 인자 음성 대조, 파일·디렉터리·비라이브러리·없는 시스템 이름 오류, 심볼 조회·없는 심볼·표 되돌리기·lease 수·`Busy`·이동, 8 스레드 동시 조회의 lease 수, 같은 디렉터리 의존 해결(A의 import 칸 = B의 export 주소)과 의존 없음 `NotFound`, 소유자 소멸 뒤 lease가 내림, MAX_PATH 경계 앞뒤(239–261)와 긴 경로(작업 디렉터리 길이와 무관하게 정확한 길이로 만든다), 그리고 음성 대조(의존 DLL을 현재 디렉터리에만·PATH에만 두면 `NotFound`이고 같은 자리에서 OS 기본 검색 대조군은 연다, 자식 probe에서 실행). Foundation Debug·Asan native 각 1820건 통과, Engine 대상 Debug 빌드(PlatformWindow XInput), 정책·형식 검사.
 - Android: arm64·x86_64 교차 빌드, x86_64 에뮬레이터(API 35)에서 동적 라이브러리 시험 4건 통과·4건 SKIP(시험 라이브러리 생성기 없음). macOS는 이 기계에서 빌드하지 않았다(CI가 맡는다).
+
+## 2026-11-17 셰이더 도구 표·도구 열기·Release 배제(셰이더 P4)
+
+셰이더 워커 선행 기반으로 도구 표와 도구 열기 계층, 정책 검사를 추가했다(요구·진척: [셰이더 시스템](../Design/ShaderSystem.ko.md) 5.3절 P4·9절). 브랜치 `feature/shader-tools`.
+
+- 도구 표 `Developer/ShaderToolTable`: 규칙이 Engine 루트 `kind: binary` manifest에서 생성 TU를 만들고(Rocks.Tooling.Common `ShaderToolTableSource`) Rocks.Build가 `<out>/GeneratedSources/<모듈>/`에 써서 컴파일한다. 이를 위해 Rocks.Build에 `NativeModuleInput.GeneratedSources`(규칙이 만든 생성 번역 단위, BuildInfo와 같은 방식)를 더했다. 빌드 대상 호스트의 도구 이름·버전·저장소 디렉터리 이름·파일 SHA-256·크기·role만 담는다.
+- 도구 열기 `Developer/ShaderToolLoader`(워커 자리): 사용자 저장소 루트(bootstrap과 같은 위치), runtime 파일의 크기·SHA-256 대조 뒤 `DynamicLibrary::Open`, bootstrap 안내 오류(`NotBootstrapped`·`DigestMismatch`), DXC·FXC·SPIRV-Cross·SPIRV-Tools 함수 표와 네 도구 묶음 `ShaderToolSet`, DXC 버전 조회(Windows). `dxcapi.h`는 `Windows.h`·`Unknwn.h`·`objidl.h` 뒤에서 경고 0이다(빌드가 `WIN32_LEAN_AND_MEAN`을 정의한다).
+- 정책 검사: `shader-tool-table`·`shader-tool-binary-load`(도구 표 참조와 binary 로드를 따로), Release 배제 `release-developer-module`·`release-shader-compiler`·`release-windows-opengl`. "Release 대상"은 새 `TargetRules.Type`(UE TargetType 대응, 기본 Game, 도구·시험·벤치마크·Commandlet은 Program)이 Game인 타깃이다. 규칙 평가를 위해 `RuleLoader`를 Rocks.Build.Abstractions로 옮기고 `LoadAll`을 더했다. 알려진 예외 2건(D3D12Graphics `d3dcompiler`, Sandbox의 Windows OpenGLGraphics, 둘 다 SH2까지)은 `policy` 출력에 `note:` 줄로 나오고, 없어지면 `release-exception-stale`이 실패한다.
+- 시험 probe: FoundationTests runner에 상위 계층 시험이 `--process-probe` 모드를 이름으로 등록하는 `RegisterProcessProbe`를 더했다(도구 열기의 현재 디렉터리·PATH 음성 대조가 쓴다).
+- 남은 것: 런타임 의존 파일 복사(`RuntimeDependencies`·`redist`)는 결정 3 뒤, macOS 도구 열기(산출물 없음)·`QueryDxcVersion` macOS 구현, CI의 저장소 캐시(SH0).
+- 검증(Windows x64 clang-cl, Debug): Foundation native 1836·self 130, EngineTests native 1914(도구 표 3건·도구 열기 5건 포함, bootstrap한 저장소로 네 도구를 열어 SKIP 없음), Sandbox·Commandlet 빌드, Rocks.Build 회귀 41그룹(생성 번역 단위 포함), SDK·외부 게임 통합 22건, policy(알려진 Release 예외 2건 알림)·format. Asan은 실행하지 않았다(엔진 브랜치 병합 전 묶음 검증에서 돈다). macOS는 빌드하지 않았다.
