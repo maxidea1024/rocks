@@ -142,13 +142,13 @@ internal static class ModuleDescriptor
             json.WriteString("fieldKind", field.IsObjectReferenceFieldKind ? "ObjectReference" : "Value");
             json.WriteStartObject("value");
             json.WriteString("kind", field.Kind);
-            if (!field.IsArray && !field.IsOptional && !field.IsMap && !field.IsSet && field.HasTargetType)
+            if (!field.HasElement && field.HasTargetType)
             {
                 json.WriteString("type", field.ReferenceId ?? "");
             }
 
             json.WriteEndObject();
-            if (field.IsArray || field.IsOptional || field.IsMap || field.IsSet)
+            if (field.HasElement)
             {
                 json.WriteStartObject("element");
                 json.WriteString("kind", field.ElementKind);
@@ -205,7 +205,7 @@ internal static class ModuleDescriptor
             json.WriteString("toolName", field.EffectiveToolName);
             json.WriteString("category", field.Spec.Category);
             json.WriteString("displayName", field.Spec.DisplayName);
-            json.WriteNumber("maxElements", field.IsCounted ? field.MaxElements : 0);
+            json.WriteNumber("maxElements", field.IsCounted || field.IsStaticArray ? field.MaxElements : 0);
             json.WriteEndObject();
         }
 
@@ -425,7 +425,8 @@ internal static class ModuleDescriptor
                 bool optional = kind == OptionalRules.Optional;
                 bool map = kind == MapRules.Map;
                 bool set = kind == MapRules.Set;
-                RequireKeys(value, !array && !optional && !map && !set && ValueKindTable.Has(kind, ValueKindProperty.HasTargetType) ? ["kind", "type"] : ["kind"], Invalid);
+                bool fixedArray = kind == StaticArrayRules.StaticArray;
+                RequireKeys(value, !array && !optional && !map && !set && !fixedArray && ValueKindTable.Has(kind, ValueKindProperty.HasTargetType) ? ["kind", "type"] : ["kind"], Invalid);
                 JsonElement element = field.GetProperty("element");
                 JsonElement keyElement = field.GetProperty("key");
                 if (!field.GetProperty("maxElements").TryGetUInt32(out uint maxElements))
@@ -452,6 +453,28 @@ internal static class ModuleDescriptor
                     if (maxElements < 1 || maxElements > ArrayRules.MaxArrayElements)
                     {
                         throw Invalid($"maxElements {maxElements} of an array field");
+                    }
+
+                    targetHolder = element;
+                }
+                else if (fixedArray)
+                {
+                    // 정적 배열(리플렉션 B9g)은 element가 원소 형식(성질 표의 정적 배열 원소 종류)이고 maxElements가 정확한 원소 수 N이다.
+                    if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty("kind", out JsonElement fixedKindValue))
+                    {
+                        throw Invalid("element of a static array field");
+                    }
+
+                    elementKind = Name(fixedKindValue, Identifier, "static array element kind");
+                    if (!ValueKindTable.Has(elementKind, ValueKindProperty.StaticArrayElement))
+                    {
+                        throw Invalid("static array element kind " + elementKind);
+                    }
+
+                    RequireKeys(element, ValueKindTable.Has(elementKind, ValueKindProperty.HasTargetType) ? ["kind", "type"] : ["kind"], Invalid);
+                    if (maxElements < 1 || maxElements > StaticArrayRules.MaxStaticArrayElements)
+                    {
+                        throw Invalid($"maxElements {maxElements} of a static array field");
                     }
 
                     targetHolder = element;
@@ -502,7 +525,7 @@ internal static class ModuleDescriptor
                 }
                 else if (element.ValueKind != JsonValueKind.Null || maxElements != 0)
                 {
-                    throw Invalid("element or maxElements on a field that is not an array, Optional, map or set");
+                    throw Invalid("element or maxElements on a field that is not an array, static array, Optional, map or set");
                 }
 
                 // Map 키는 성질 표의 Map 키 종류이고 대상 종류(Enum·ClassReference·SoftObjectReference)면 type을 싣는다. Map이 아닌 필드의
@@ -590,7 +613,8 @@ internal static class ModuleDescriptor
                         EditorOnly = fieldFlags.Contains("EditorOnly"),
                         Required = fieldFlags.Contains("Required"),
                         ToolName = toolName == fieldName ? "" : toolName,
-                        MaxElements = maxElements
+                        // 정적 배열의 maxElements는 지정자가 아니라 N이다(리플렉션 B9g).
+                        MaxElements = fixedArray ? 0 : maxElements
                     },
                     Kind = kind,
                     ElementKind = elementKind,

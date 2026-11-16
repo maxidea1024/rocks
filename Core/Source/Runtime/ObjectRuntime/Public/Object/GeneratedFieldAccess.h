@@ -163,6 +163,25 @@ struct MapField<ObjectRefMap<K, T>> {
     using Value = ObjectRef<T>;
 };
 
+// 리플렉션 정적 배열 필드(T x[N] — 리플렉션 B9g, Docs/Design/ReflectionExtensions.ko.md 8절)다.
+// 부분 특수화로만 고르며 Element는 원소 C++ 형식(단일 값·ObjectRef·WeakRef·ClassRef·SoftObjectRef·
+// enum·struct — 참조 struct 포함), Count는 N이다. 원소가 소유 객체 저장소 안에 있으므로 Registry
+// 컨테이너가 아니다(ObjectRef 원소의 쓰기는 SetReference의 주소 범위 검사를 그대로 지난다).
+// 다차원 배열(T x[M][N])은 Element가 다시 배열이라 FieldValueKind가 StaticArray이고 성질 표의
+// 정적 배열 원소가 아니므로 생성 codec의 static_assert가 거부한다(MetaCompiler RMC2307이 먼저
+// 막는다).
+template <class T>
+struct StaticArrayField {
+    static constexpr bool Supported = false;
+};
+
+template <class E, usize N>
+struct StaticArrayField<E[N]> {
+    static constexpr bool Supported = true;
+    static constexpr usize Count = N;
+    using Element = E;
+};
+
 // 빈 자리에 새로 만드는 값이다: noexcept E(Allocator&)가 있으면 allocator를 넘기고 없으면 E()다
 // (Optional의 새 내부 값·경로가 넣는 원소 — MakeRuntimeStructOps와 같은 규칙). allocator는 보통
 // 객체 allocator(ObjectRegistry::ObjectAllocator)다.
@@ -242,12 +261,15 @@ constexpr ValueKind ScalarValueKind() noexcept {
     }
 }
 
-// C++ 멤버 형식의 필드 값 종류다: 리플렉션 배열 컨테이너는 Array, Optional<T>는 Optional,
+// C++ 멤버 형식의 필드 값 종류다: 정적 배열 T[N]은 StaticArray, 리플렉션 배열 컨테이너는 Array,
+// Optional<T>는 Optional,
 // OrderedMap<K, V>·OrderedSet<T>는 Map·Set, 단일 값은 ScalarValueKind, 리플렉션 enum·struct는
 // Enum·Struct, 그 밖은 Opaque다(단일 값 형식 대응은 ScalarValueKind 한 곳에 있다).
 template <class T>
 constexpr ValueKind FieldValueKind() noexcept {
-    if constexpr (ArrayField<T>::Supported) {
+    if constexpr (StaticArrayField<T>::Supported) {
+        return ValueKind::StaticArray;
+    } else if constexpr (ArrayField<T>::Supported) {
         return ValueKind::Array;
     } else if constexpr (OptionalField<T>::Supported) {
         return ValueKind::Optional;

@@ -122,6 +122,13 @@ internal static class CompilerDriver
             bindsArguments.Add("-");
             await ResolveBindsAsync(declared, options.Module, options.Inputs.Count,
                 extra => ProcessRunner.RunAsync(new(compiler, bindsArguments, root, environment, ValidateGeneratedCode(unit + extra), TimeSpan.FromMinutes(2))));
+            // 정적 배열 PROPERTY의 원소 형식도 같은 번역 단위에 탐침 변수를 붙인 Clang 실행으로 정규 철자를 얻는다(리플렉션 B9g —
+            // StaticArrayProbe). 정적 배열이 없으면 실행하지 않는다.
+            List<string> staticArguments = [.. arguments.Take(arguments.Count - 1)];
+            staticArguments.AddRange(clangCl ? ["/w", "/clang:-Xclang", "/clang:-ast-dump-filter=rocksStatic_"] : ["-w", "-Xclang", "-ast-dump-filter=rocksStatic_"]);
+            staticArguments.Add("-");
+            await StaticArrayProbe.ResolveAsync(declared,
+                extra => ProcessRunner.RunAsync(new(compiler, staticArguments, root, environment, ValidateGeneratedCode(unit + extra), TimeSpan.FromMinutes(2))));
             schema = SchemaValidator.Validate(declared, imported);
         }
         catch (Exception error) when (error is JsonException or KeyNotFoundException or InvalidOperationException or FormatException)

@@ -334,6 +334,49 @@ internal static partial class SchemaValidator
             field.ReferenceId = value.ReferenceId;
         }
 
+        // 정적 배열 필드의 원소를 푼다(리플렉션 B9g — Docs/Design/ReflectionExtensions.ko.md 8·15절). 원소는 단일 필드와 같은 해석(ObjectRef<T>도
+        // 그대로 — 원소가 소유 저장소 안이라 Registry 컨테이너가 필요 없다)이고 위치 규칙은 모두 RMC2307이다: N이 1..65535 밖, 다차원(원소가
+        // 다시 C 배열), 컨테이너(배열·Map·Set·Optional) 원소, cv 원소, 지원하지 않는 원소 형식, 성질 표의 정적 배열 원소가 아닌 종류. Registry
+        // 컨테이너를 담은 원소 struct는 struct 형질을 계산한 뒤 CheckStaticArray가 RMC2307로 거부한다.
+        void ResolveStaticArray(FieldModel field, string element, string bound)
+        {
+            string symbol = $"{field.Owner}::{field.Name}";
+            field.Kind = StaticArrayRules.StaticArray;
+            field.ElementSpelling = element;
+            if (!uint.TryParse(bound, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out uint count) ||
+                count < 1 || count > StaticArrayRules.MaxStaticArrayElements)
+            {
+                throw new MetadataException($"{symbol}: static array size [{bound}] is outside 1..{StaticArrayRules.MaxStaticArrayElements}", "RMC2307",
+                    StaticArrayRules.Hint).At(field.Site);
+            }
+
+            field.MaxElements = count;
+            string? reason = StaticArrayRules.Split(element) is not null ? "is itself an array (multi-dimensional arrays are not reflected)"
+                : ArrayRules.IsContainer(element) || MapRules.IsContainer(element) || MapRules.IsUnordered(element) || MapRules.SplitObjectRefMap(element) is not null
+                    ? "is a container (containers do not nest)"
+                : OptionalRules.Inner(element) is not null ? "is an Optional"
+                : ArrayRules.IsCvQualified(element) ? "is cv-qualified" : null;
+            if (reason is not null)
+            {
+                throw new MetadataException($"{symbol}: static array element '{element}' {reason}", "RMC2307", StaticArrayRules.Hint).At(field.Site);
+            }
+
+            if (ResolveValue(element, field.Owner, field.Site) is not { } value)
+            {
+                throw new MetadataException($"{symbol}: unsupported static array element type '{element}'", "RMC2307",
+                    StaticArrayRules.Hint + " " + UnsupportedFieldHint(element)).At(field.Site);
+            }
+
+            if (!ValueKindTable.Has(value.Kind, ValueKindProperty.StaticArrayElement))
+            {
+                throw new MetadataException($"{symbol}: {value.Kind} cannot be a static array element", "RMC2307", StaticArrayRules.Hint).At(field.Site);
+            }
+
+            field.ElementKind = value.Kind;
+            field.Reference = value.Reference;
+            field.ReferenceId = value.ReferenceId;
+        }
+
         // Optional 필드의 내부를 푼다(리플렉션 B9e — Docs/Design/ReflectionExtensions.ko.md 6·15절). 내부는 단일 필드와 같은 해석이고
         // 성질 표의 Optional 내부 종류여야 한다: 배열·중첩 Optional·참조(강한·weak·소프트·클래스)·지원하지 않는 형식·cv 내부는 RMC2306이다.
         // 참조 struct 내부는 struct 형질을 계산한 뒤 CheckOptional이 RMC2306으로 거부한다.
@@ -463,7 +506,11 @@ internal static partial class SchemaValidator
                         "Use rocks::OrderedMap<K, V> or rocks::OrderedSet<T>; HashMap and HashSet iterate in hash order, which is not a stable saved state.").At(field.Site);
                 }
 
-                if (OptionalRules.Inner(field.NativeSpelling) is string inner)
+                if (StaticArrayRules.Split(field.CanonicalSpelling ?? field.NativeSpelling) is (string fixedElement, string bound))
+                {
+                    ResolveStaticArray(field, fixedElement, bound);
+                }
+                else if (OptionalRules.Inner(field.NativeSpelling) is string inner)
                 {
                     ResolveOptional(field, inner);
                 }
@@ -517,14 +564,14 @@ internal static partial class SchemaValidator
                 {
                     // WeakRef는 대상이 죽으면 저절로 null이 되므로 Required를 지킬 수 없다(Docs/Design/ReflectionExtensions.ko.md 5.1절). Map은 값마다,
                     // Set은 원소마다 non-null이다(키에는 Required가 없다 — 리플렉션 B9f2).
-                    throw new MetadataException($"{field.Owner}::{field.Name}: Required applies only to object, soft object and class reference fields, arrays and sets of them and maps with such values", "RMC2202",
-                        "Remove Required or change the field to ObjectRef, SoftObjectRef, ClassRef, ObjectRefArray, ObjectRefMap, Array<SoftObjectRef>, Array<ClassRef>, OrderedSet<SoftObjectRef/ClassRef> or OrderedMap<K, SoftObjectRef/ClassRef>; a WeakRef becomes null when its target dies, so it cannot be Required.").At(field.Site);
+                    throw new MetadataException($"{field.Owner}::{field.Name}: Required applies only to object, soft object and class reference fields, arrays, static arrays and sets of them and maps with such values", "RMC2202",
+                        "Remove Required or change the field to ObjectRef, SoftObjectRef, ClassRef, ObjectRefArray, ObjectRefMap, Array<SoftObjectRef>, Array<ClassRef>, a static array of ObjectRef/SoftObjectRef/ClassRef, OrderedSet<SoftObjectRef/ClassRef> or OrderedMap<K, SoftObjectRef/ClassRef>; a WeakRef becomes null when its target dies, so it cannot be Required.").At(field.Site);
                 }
 
                 if (!field.IsCounted && field.Spec.MaxElements != 0)
                 {
                     throw new MetadataException($"{field.Owner}::{field.Name}: MaxElements applies only to array, map and set fields", "RMC2202",
-                        "Remove MaxElements; it limits the element count of reflected array, map and set fields.").At(field.Site);
+                        "Remove MaxElements; it limits the element count of reflected array, map and set fields (a static array T name[N] always holds exactly N elements).").At(field.Site);
                 }
 
                 if (field.IsCounted)
@@ -542,7 +589,8 @@ internal static partial class SchemaValidator
             // NATIVE 멤버의 직접 타입이 리플렉션 struct면 생성 코드가 그 struct의 형질로 RMC2205·2206을 한 번 더 확인한다.
             foreach (NativeMemberModel native in model.NativeMembers)
             {
-                native.Struct = ValueType(ClangAstParser.CleanType(native.Spelling), true, model.Name, native.Site)?.Name;
+                // C 배열 멤버는 모든 차원을 벗긴 원소로 본다(StaticArrayProbe — `RefStruct cache[2]`도 원소 struct 형질로 확인한다).
+                native.Struct = ValueType(ClangAstParser.CleanType(native.ElementSpelling ?? native.Spelling), true, model.Name, native.Site)?.Name;
             }
         }
 
@@ -617,6 +665,18 @@ internal static partial class SchemaValidator
             }
         }
 
+        // 정적 배열의 원소 struct는 Registry 컨테이너(ObjectRefArray·StructRefArray·ObjectRefMap — 중첩 포함)를 담지 않는다(RMC2307 — 런타임
+        // 등록도 거부한다, Docs/Design/ReflectionExtensions.ko.md 8절 "구현(B9g)에서 정한 점"). 참조 struct 원소는 받는다. 원소 struct의
+        // 형질을 계산한 뒤에 본다.
+        void CheckStaticArray(FieldModel field)
+        {
+            if (field.IsStaticArray && field.StructTarget && Find(field.Reference!).ContainsReferenceArray)
+            {
+                throw new MetadataException($"{field.Owner}::{field.Name}: static array element struct {field.Reference} holds ObjectRefArray, StructRefArray or ObjectRefMap members", "RMC2307",
+                    "Keep reference containers out of static array element structs (directly or nested); store them in the owning class instead.").At(field.Site);
+            }
+        }
+
         // Map 값 struct는 값 struct다(강한 참조를 담는 struct는 ObjectRefMap·인라인 struct 멤버로 둔다 — RMC2305, 런타임 등록도 거부한다).
         // 값 struct의 형질을 계산한 뒤에 본다.
         void CheckMap(FieldModel field)
@@ -654,6 +714,7 @@ internal static partial class SchemaValidator
             {
                 CheckOptional(field);
                 CheckMap(field);
+                CheckStaticArray(field);
                 CheckContainer(field);
             }
         }
@@ -664,6 +725,7 @@ internal static partial class SchemaValidator
             {
                 CheckOptional(field);
                 CheckMap(field);
+                CheckStaticArray(field);
                 CheckContainer(field);
             }
         }

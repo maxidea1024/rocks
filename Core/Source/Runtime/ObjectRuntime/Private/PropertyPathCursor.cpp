@@ -68,8 +68,7 @@ Result<Object*> PathCursor::Owner(const void* ownerNative) noexcept {
 Result<void> PathCursor::CheckTarget(ValueKind target, ValueKind wrapper) noexcept {
     const FieldSchema& field = *Frame().field;
     const ValueKind kind = field.value.kind;
-    const bool wrapped = kind == ValueKind::Array || kind == ValueKind::Optional ||
-                         kind == ValueKind::Map || kind == ValueKind::Set;
+    const bool wrapped = ValueKindIsContainer(kind);
     const bool matches = wrapper == ValueKind::Opaque ? !wrapped : kind == wrapper;
     if (FieldTargetType(field).kind != target || !matches) {
         return Fail(ErrorCode::TypeMismatch, PropertyPathError::StaticTypeMismatch);

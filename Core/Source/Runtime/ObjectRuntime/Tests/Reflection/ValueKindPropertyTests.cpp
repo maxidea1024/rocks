@@ -84,10 +84,11 @@ constexpr ExpectedRow Expected[] = {{ValueKind::Opaque, "00000000000000"},
                                     {ValueKind::ClassReference, "11111110011101"},
                                     {ValueKind::Optional, "11000000000010"},
                                     {ValueKind::Map, "11000000000010"},
-                                    {ValueKind::Set, "11000000000010"}};
+                                    {ValueKind::Set, "11000000000010"},
+                                    {ValueKind::StaticArray, "11000000000010"}};
 
 static_assert(sizeof(Expected) / sizeof(Expected[0]) == ValueKindCount);
-static_assert(ValueKindCount == 27);
+static_assert(ValueKindCount == 28);
 static_assert(ValueKindCanBeMapKey(ValueKind::Bool) && !ValueKindCanBeMapKey(ValueKind::Float32));
 
 usize CellCount(const char* cells) noexcept {
@@ -216,7 +217,8 @@ TEST(ValueKindProperties_MatchSpecTable) {
 }
 
 // 열거자 밖의 값은 성질이 없고 aggregate도 아니다. aggregate는 typed 필드 종류 중 통째 FieldValue가
-// 아닌 것(Struct·Array·Optional·Map·Set)이고, FieldTargetType은 컨테이너 종류에서 원소 형식을 준다.
+// 아닌 것(Struct·Array·Optional·Map·Set·StaticArray)이고, FieldTargetType은 컨테이너 종류에서 원소
+// 형식을 준다.
 // 필드 단위 FieldIsAggregate는 Optional을 내부로 가른다(단일 값 내부는 비aggregate, 값 struct는
 // aggregate — 리플렉션 B9e).
 TEST(ValueKindProperties_OutOfRangeAggregateAndTarget) {
@@ -231,7 +233,7 @@ TEST(ValueKindProperties_OutOfRangeAggregateAndTarget) {
     for (const ExpectedRow& row : Expected) {
         const bool aggregate = row.kind == ValueKind::Struct || row.kind == ValueKind::Array ||
                                row.kind == ValueKind::Optional || row.kind == ValueKind::Map ||
-                               row.kind == ValueKind::Set;
+                               row.kind == ValueKind::Set || row.kind == ValueKind::StaticArray;
         CHECK(ValueKindIsAggregate(row.kind) == aggregate);
     }
 
@@ -264,6 +266,15 @@ TEST(ValueKindProperties_OutOfRangeAggregateAndTarget) {
     set.element = ValueType{ValueKind::Name, {}};
     CHECK(&FieldTargetType(set) == &set.element);
     CHECK(FieldIsAggregate(set));
+    // 정적 배열은 원소 형식이 대상이고 늘 aggregate이며 index 단계를 받는다(리플렉션 B9g).
+    FieldSchema fixed;
+    fixed.value = ValueType{ValueKind::StaticArray, {}};
+    fixed.element = ValueType{ValueKind::ObjectReference, {}};
+    fixed.maxElements = 4;
+    CHECK(&FieldTargetType(fixed) == &fixed.element);
+    CHECK(FieldIsAggregate(fixed));
+    CHECK(ValueKindTakesIndex(ValueKind::StaticArray) && ValueKindTakesIndex(ValueKind::Array));
+    CHECK(!ValueKindTakesIndex(ValueKind::Map) && !ValueKindTakesIndex(ValueKind::Optional));
 }
 
 // TypeRegistry는 숫자 범위가 아니라 표로 종류를 판정한다. 대상 ID·GC 간선이 필요 없는 모든 종류 값
@@ -296,6 +307,9 @@ TEST(ValueKindProperties_TypeRegistryFollowsTable) {
         if (kind == ValueKind::Array || kind == ValueKind::Set) {
             single.element = ValueType{ValueKind::UInt16, {}};
             single.maxElements = DefaultMaxElements;
+        } else if (kind == ValueKind::StaticArray) {
+            single.element = ValueType{ValueKind::UInt16, {}};
+            single.maxElements = 4;
         } else if (kind == ValueKind::Map) {
             single.element = ValueType{ValueKind::UInt16, {}};
             single.key = ValueType{ValueKind::UInt16, {}};
@@ -347,6 +361,30 @@ TEST(ValueKindProperties_TypeRegistryFollowsTable) {
         setElement.element = ValueType{kind, {}};
         setElement.maxElements = DefaultMaxElements;
         CHECK(RegistersAsStructMember(types, setElement) == ValueKindCanBeSetElement(kind));
+        // 정적 배열 원소 자리다(리플렉션 B9g): 등록 성공 ⇔ ValueKindCanBeStaticArrayElement(Opaque·
+        // 컨테이너 거부 — ObjectReference 원소는 FieldKind::ObjectReference라 이 반복이 건너뛰고
+        // StaticArrayRegistry 시험이 본다).
+        FieldSchema fixed;
+        fixed.id = Guid{0x564b46, 7};
+        fixed.name = Span<const char>("fixed", 5);
+        fixed.value = ValueType{ValueKind::StaticArray, {}};
+        fixed.element = ValueType{kind, {}};
+        fixed.maxElements = 3;
+        CHECK(RegistersAsStructMember(types, fixed) == ValueKindCanBeStaticArrayElement(kind));
+        CHECK(RegistersAsClassField(types, fixed, true) == ValueKindCanBeStaticArrayElement(kind));
+    }
+
+    // 정적 배열의 원소 수 N은 1..MaxStaticArrayElements이고 value.type은 0이다(리플렉션 B9g).
+    const uint32 counts[] = {0u, 1u, MaxStaticArrayElements, MaxStaticArrayElements + 1};
+    for (uint32 count : counts) {
+        FieldSchema fixed;
+        fixed.id = Guid{0x564b46, 8};
+        fixed.name = Span<const char>("fixed", 5);
+        fixed.value = ValueType{ValueKind::StaticArray, {}};
+        fixed.element = ValueType{ValueKind::UInt8, {}};
+        fixed.maxElements = count;
+        CHECK(RegistersAsClassField(types, fixed, true) ==
+              (count >= 1 && count <= MaxStaticArrayElements));
     }
 
     CHECK(types.Shutdown());

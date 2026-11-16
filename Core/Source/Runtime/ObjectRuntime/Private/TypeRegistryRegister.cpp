@@ -111,8 +111,12 @@ Result<void> ValidateFieldList(Span<const FieldSchema> fields, bool structMember
         // Map 필드(리플렉션 B9f2)는 value.type 0, 키 종류는 성질 표의 Map 키 종류, 값 종류는 Map 값
         // 종류(ObjectReference는 ObjectRefMap — 리플렉션 B9f4, 참조 struct는 ResolveValueTypes가
         // 거부한다), maxElements는 배열과 같은 범위다. Set 필드는 원소 종류가
-        // Set 원소 종류다. Map이 아닌 필드의 key는 {Opaque, 0}이다.
+        // Set 원소 종류다. Map이 아닌 필드의 key는 {Opaque, 0}이다. StaticArray 필드(리플렉션
+        // B9g)는 value.type 0, 원소 종류는 성질 표의 정적 배열 원소 종류(참조 struct 포함 —
+        // Registry 컨테이너를 담은 원소 struct는 ResolveValueTypes가 거부한다), maxElements는
+        // 정확한 원소 수 N으로 [1, MaxStaticArrayElements]이다.
         const bool array = field.value.kind == ValueKind::Array;
+        const bool fixed = field.value.kind == ValueKind::StaticArray;
         const bool optional = field.value.kind == ValueKind::Optional;
         const bool map = field.value.kind == ValueKind::Map;
         const bool set = field.value.kind == ValueKind::Set;
@@ -120,7 +124,10 @@ Result<void> ValidateFieldList(Span<const FieldSchema> fields, bool structMember
         const ValueType& key = FieldKeyType(field);
         const bool counted = field.value.type == TypeId{} && field.maxElements >= 1 &&
                              field.maxElements <= MaxArrayElements;
-        const bool arrayShape = array ? counted && ValueKindCanBeArrayElement(field.element.kind)
+        const bool arrayShape = array   ? counted && ValueKindCanBeArrayElement(field.element.kind)
+                                : fixed ? field.value.type == TypeId{} && field.maxElements >= 1 &&
+                                              field.maxElements <= MaxStaticArrayElements &&
+                                              ValueKindCanBeStaticArrayElement(field.element.kind)
                                 : optional ? field.value.type == TypeId{} &&
                                                  ValueKindCanBeOptionalInner(field.element.kind) &&
                                                  field.maxElements == 0
@@ -153,9 +160,9 @@ Result<void> ValidateFieldList(Span<const FieldSchema> fields, bool structMember
         }
 
         // FieldKind::ObjectReference(강한 GC 간선) ⇔ 대상 형식이 ObjectReference(단일 참조,
-        // ObjectRefArray 또는 ObjectRefMap). 대상 type은 성질 표의 대상 타입 종류(참조·소프트
-        // 참조의 기대 대상, Enum·Struct의 대상 ID)에만 쓰고, 대상 ID 필수 종류(Enum·Struct)는 ID가
-        // 있어야 한다.
+        // ObjectRefArray, ObjectRef 원소 정적 배열 또는 ObjectRefMap). 대상 type은 성질 표의 대상
+        // 타입 종류(참조·소프트 참조의 기대 대상, Enum·Struct의 대상 ID)에만 쓰고, 대상 ID 필수
+        // 종류(Enum·Struct)는 ID가 있어야 한다.
         if (field.value.kind != ValueKind::Opaque) {
             ++typedFields;
             const bool reference = target.kind == ValueKind::ObjectReference;

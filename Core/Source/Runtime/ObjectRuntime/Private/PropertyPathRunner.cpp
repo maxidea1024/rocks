@@ -25,9 +25,10 @@ bool IsKeyedKind(ValueKind kind) noexcept {
     return kind == ValueKind::Map || kind == ValueKind::Set;
 }
 
-// 필드가 원소 수·비우기를 받는 컨테이너(Array·Map·Set)인지다.
+// 필드가 원소 수를 읽는 컨테이너(Array·StaticArray·Map·Set)인지다(StaticArray의 비우기는
+// FixedLength로 따로 거부한다).
 bool IsContainerKind(ValueKind kind) noexcept {
-    return kind == ValueKind::Array || IsKeyedKind(kind);
+    return ValueKindTakesIndex(kind) || IsKeyedKind(kind);
 }
 
 // 단계의 값이 FieldValue·struct로 접근하는 형식이다: 배열 원소·Map 항목·Set 원소 단계면 원소(Map은
@@ -325,7 +326,7 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         frame.keyName = Name{};
         frame.keyFound = true;
         cursor.count_ = index + 1;
-        if (step.selector == PathSelector::Index && field->value.kind != ValueKind::Array) {
+        if (step.selector == PathSelector::Index && !ValueKindTakesIndex(field->value.kind)) {
             return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::NotArray);
         }
 
@@ -359,6 +360,14 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
     if ((operation == PathOperation::Length || operation == PathOperation::Clear) &&
         !IsContainerKind(end.field->value.kind)) {
         return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::NotArray);
+    }
+
+    // 정적 배열(리플렉션 B9g)은 길이가 N으로 고정이다: 원소 삽입·삭제·비우기는 값·쓰기 검증보다
+    // 먼저 Unsupported(FixedLength)다(원소는 [i] 쓰기로 바꾼다).
+    if ((operation == PathOperation::Insert || operation == PathOperation::Remove ||
+         operation == PathOperation::Clear) &&
+        end.field->value.kind == ValueKind::StaticArray) {
+        return cursor.Fail(ErrorCode::Unsupported, PropertyPathError::FixedLength);
     }
 
     // Optional<값 struct> 값 만들기·비우기·set 여부 조회의 끝은 그 필드여야 한다(단일 값 Optional은

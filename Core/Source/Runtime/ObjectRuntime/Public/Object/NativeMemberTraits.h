@@ -46,9 +46,22 @@ struct NativeStrongReference<ObjectRefMap<K, T>> {
     static constexpr bool value = true;
 };
 
+// C 배열은 원소 형식으로 판정한다(리플렉션 B9g — 배열을 가리키는 포인터·참조
+// ObjectRef<T>(*)[4]와 다차원 배열도 원소까지 내려간다).
+template <class T, usize N>
+struct NativeStrongReference<T[N]> {
+    static constexpr bool value = NativeStrongReference<RemoveCvT<T>>::value;
+};
+
+template <class T>
+struct NativeStrongReference<T[]> {
+    static constexpr bool value = NativeStrongReference<RemoveCvT<T>>::value;
+};
+
 // Registry가 관리하는 참조 컨테이너(ObjectRefArray·StructRefArray·ObjectRefMap)면 참이다. 직접
-// 타입만 본다. 생성 코드가 struct의 ContainsReferenceArray 형질을 C++ 멤버 타입과 대조할 때
-// 쓴다(encode 고정이 그 형질에 기대므로 틀린 모델 값이 고정 누락이 되지 않게). 사용 예(생성 코드):
+// 타입(C 배열이면 원소 — ObjectRefArray<T> slots[2])만 본다. 생성 코드가 struct의
+// ContainsReferenceArray 형질을 C++ 멤버 타입과 대조할 때 쓴다(encode 고정이 그 형질에 기대므로
+// 틀린 모델 값이 고정 누락이 되지 않게). 사용 예(생성 코드):
 //   static_assert(GeneratedType<S>::ContainsReferenceArray ||
 //                 !::rocks::detail::RegistryContainer<decltype(S::slots)>::value, "...");
 template <class T>
@@ -69,6 +82,11 @@ struct RegistryContainer<StructRefArray<S>> {
 template <class K, class T>
 struct RegistryContainer<ObjectRefMap<K, T>> {
     static constexpr bool value = true;
+};
+
+template <class T, usize N>
+struct RegistryContainer<T[N]> {
+    static constexpr bool value = RegistryContainer<RemoveCvT<T>>::value;
 };
 
 // 포인터·참조의 대상이 강한 참조 래퍼이면(ObjectRef<T>*, RootRef<T>&, ObjectRef<T>**) 금지한다.

@@ -180,9 +180,9 @@ namespace detail {
 Result<void> ValidateFieldWrite(const FieldWriteBinding& binding, const FieldWriteTarget& target,
                                 const FieldValue& value) noexcept {
     const ValueKind kind = binding.value.kind;
-    // 원소 모드는 배열 필드의 원소·Map 필드의 값 형식과 대조한다(리플렉션 B9f3 — Map key 단계
-    // 쓰기).
-    if (!target.actual || (target.element && target.actual->value.kind != ValueKind::Array &&
+    // 원소 모드는 배열·정적 배열 필드의 원소·Map 필드의 값 형식과 대조한다(리플렉션 B9f3 — Map
+    // key 단계 쓰기, B9g — 정적 배열 [i] 쓰기).
+    if (!target.actual || (target.element && !ValueKindTakesIndex(target.actual->value.kind) &&
                            target.actual->value.kind != ValueKind::Map)) {
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }

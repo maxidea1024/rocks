@@ -312,6 +312,7 @@ inline Result<void> ReadValueWire(ArchiveReader& reader, FieldDecodeContext& con
     case ValueKind::Optional:
     case ValueKind::Map:
     case ValueKind::Set:
+    case ValueKind::StaticArray:
     case ValueKind::Opaque:
         break;
     }
@@ -605,6 +606,22 @@ bool MatchesSchema(const FieldSchema& field) noexcept {
         if constexpr (ReflectedEnumField<typename Traits::Value>::Supported ||
                       ReflectedStructField<typename Traits::Value>::Supported) {
             return field.element.type == GeneratedType<typename Traits::Value>::Id();
+        } else {
+            return true;
+        }
+    } else if constexpr (StaticArrayField<Member>::Supported) {
+        // 정적 배열(리플렉션 B9g)은 value = {StaticArray, 0}이고 원소 종류가 같으며 maxElements가
+        // 정확히 N이다(enum·struct 원소는 element.type이 그 생성 ID — struct 원소는
+        // MatchesStructView도 호출자가 본다).
+        using Element = typename StaticArrayField<Member>::Element;
+        if (field.value.type != TypeId{} || field.element.kind != FieldValueKind<Element>() ||
+            field.maxElements != StaticArrayField<Member>::Count) {
+            return false;
+        }
+
+        if constexpr (ReflectedEnumField<Element>::Supported ||
+                      ReflectedStructField<Element>::Supported) {
+            return field.element.type == GeneratedType<Element>::Id();
         } else {
             return true;
         }

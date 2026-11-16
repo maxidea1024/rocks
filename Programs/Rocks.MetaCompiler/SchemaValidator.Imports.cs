@@ -147,6 +147,13 @@ internal static partial class SchemaValidator
             {
                 throw InvalidDescriptor(external, $"StructRefArray field {external.Name}::{nested.Name} has element struct {nested.Reference} that holds a reference array");
             }
+
+            // 정적 배열의 원소 struct도 Registry 컨테이너를 담지 않는다(원본 선언이면 RMC2307 — 리플렉션 B9g).
+            FieldModel? fixedNested = external.Fields.FirstOrDefault(field => field.IsStaticArray && field.StructTarget && Find(field.Reference!).ContainsReferenceArray);
+            if (fixedNested is not null)
+            {
+                throw InvalidDescriptor(external, $"static array field {external.Name}::{fixedNested.Name} has element struct {fixedNested.Reference} that holds a reference array");
+            }
         }
     }
 

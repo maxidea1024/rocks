@@ -274,11 +274,12 @@ public:
     [[nodiscard]] explicit ElementIndexScope(FieldCodecContext& context) noexcept
         : context_(context), frame_(context.current_) {
         const ValueKind kind = frame_ ? frame_->field->value.kind : ValueKind::Opaque;
-        if ((kind != ValueKind::Array && kind != ValueKind::Map && kind != ValueKind::Set) ||
+        if ((kind != ValueKind::Array && kind != ValueKind::Map && kind != ValueKind::Set &&
+             kind != ValueKind::StaticArray) ||
             frame_->index != FieldCodecFrame::NoIndex) {
             platform::Fatal(
-                "ElementIndexScope requires an array, map or set field frame without an "
-                "index");
+                "ElementIndexScope requires an array, static array, map or set field frame "
+                "without an index");
         }
     }
 

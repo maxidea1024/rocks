@@ -460,6 +460,65 @@ Result<void> PathContainer(PathCursor& cursor, StructRefArray<S>& array) noexcep
     }
 }
 
+// 정적 배열(T x[N] — 리플렉션 B9g) 필드·멤버의 단계다: struct 원소는 연산과 무관하게 먼저 원소
+// struct를 정적 대조하고, index 없는 끝 단계는 길이(N)만 받는다(비우기는 경로 실행기가
+// Unsupported(FixedLength)로 먼저 거부한다). index 있는 중간 단계는 struct 원소로 내려가고, 끝
+// 단계는 원소 읽기·쓰기(PathValue — 참조 원소는 SetPathMemberReference, 소유 객체 저장소 안
+// 주소)다. 원소 수를 바꾸는 삽입·삭제는 경로 실행기가 먼저 거부하므로 여기 오면 계약 위반 방어로
+// Unsupported다.
+template <ValueKind Target, class E, usize N>
+Result<void> PathStaticArray(PathCursor& cursor, E (&array)[N]) noexcept {
+    const PathFrame& frame = cursor.Frame();
+    const PathOperation operation = cursor.Operation();
+    if constexpr (Target == ValueKind::Struct) {
+        if (auto checked = cursor.CheckStruct(NativeTypeKey<E>()); !checked) {
+            return checked;
+        }
+    }
+
+    if (frame.selector == PathSelector::None) {
+        if (operation == PathOperation::Length) {
+            cursor.SetLength(N);
+            return Result<void>::Success();
+        }
+
+        return cursor.Fail(ErrorCode::Unsupported, operation == PathOperation::Clear
+                                                       ? PropertyPathError::FixedLength
+                                                       : PropertyPathError::AggregateValue);
+    }
+
+    if (!cursor.IsLast()) {
+        if constexpr (Target == ValueKind::Struct) {
+            if (auto valid = cursor.CheckIndex(N); !valid) {
+                return valid;
+            }
+
+            return cursor.Descend(&array[frame.index]);
+        } else {
+            return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::NotStruct);
+        }
+    }
+
+    switch (operation) {
+    case PathOperation::Insert:
+    case PathOperation::Remove:
+        return cursor.Fail(ErrorCode::Unsupported, PropertyPathError::FixedLength);
+    case PathOperation::Read:
+    case PathOperation::Write:
+        if constexpr (Target == ValueKind::Struct) {
+            return cursor.Fail(ErrorCode::Unsupported, PropertyPathError::AggregateValue);
+        } else {
+            if (auto valid = cursor.CheckIndex(N); !valid) {
+                return valid;
+            }
+
+            return PathValue<Target>(cursor, array[frame.index]);
+        }
+    default:
+        return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::IndexNotAllowed);
+    }
+}
+
 // Optional<값 struct> 필드·멤버의 단계다(리플렉션 B9e): 먼저 내부 struct를 정적 대조하고, 끝이
 // 아니면 set일 때만 내부 값으로 내려간다(unset이면 NotFound(OptionalUnset)). 끝 단계는 기본 값
 // 만들기(고정 아래 객체 allocator로 새 값을 만들고 owner를 다시 확인한 뒤 옛 값을 지역으로 옮겨
@@ -613,19 +672,23 @@ Result<void> PathOptionalValue(PathCursor& cursor, Optional<T>& member) noexcept
 template <ValueKind Target, class Container>
 Result<void> PathKeyedContainer(PathCursor& cursor, Container& container) noexcept;
 
-// 필드·멤버 값 하나(member — Member 형식)의 단계다: 정적 대조(대상 종류·컨테이너 종류(배열·
-// Optional·Map·Set)·enum ID) 뒤 컨테이너, Map·Set, Optional, struct(내려가기), 단일 값 끝 지점으로
-// 나눈다.
+// 필드·멤버 값 하나(member — Member 형식)의 단계다: 정적 대조(대상 종류·컨테이너 종류(정적 배열·
+// 배열·Optional·Map·Set)·enum ID) 뒤 정적 배열, 컨테이너, Map·Set, Optional, struct(내려가기), 단일
+// 값 끝 지점으로 나눈다.
 template <ValueKind Target, class Member>
 Result<void> PathMember(PathCursor& cursor, Member& member) noexcept {
+    constexpr bool fixed = StaticArrayField<Member>::Supported;
     constexpr bool container = ArrayField<Member>::Supported;
     constexpr bool optional = OptionalField<Member>::Supported;
     constexpr bool keyed = MapField<Member>::Supported;
-    constexpr ValueKind wrapper = container  ? ValueKind::Array
-                                  : optional ? ValueKind::Optional
-                                  : keyed    ? FieldValueKind<Member>()
-                                             : ValueKind::Opaque;
-    if constexpr (container) {
+    constexpr ValueKind wrapper = fixed       ? ValueKind::StaticArray
+                                  : container ? ValueKind::Array
+                                  : optional  ? ValueKind::Optional
+                                  : keyed     ? FieldValueKind<Member>()
+                                              : ValueKind::Opaque;
+    if constexpr (fixed) {
+        static_assert(TargetValueCheck<Target, typename StaticArrayField<Member>::Element>::Valid);
+    } else if constexpr (container) {
         static_assert(TargetValueCheck<Target, typename ArrayField<Member>::Element>::Valid);
     } else if constexpr (optional) {
         static_assert(TargetValueCheck<Target, typename OptionalField<Member>::Inner>::Valid);
@@ -640,7 +703,13 @@ Result<void> PathMember(PathCursor& cursor, Member& member) noexcept {
     }
 
     if constexpr (Target == ValueKind::Enum) {
-        if constexpr (container) {
+        if constexpr (fixed) {
+            if (auto checked = cursor.CheckEnum(
+                    GeneratedType<typename StaticArrayField<Member>::Element>::Id());
+                !checked) {
+                return checked;
+            }
+        } else if constexpr (container) {
             if (auto checked =
                     cursor.CheckEnum(GeneratedType<typename ArrayField<Member>::Element>::Id());
                 !checked) {
@@ -665,7 +734,9 @@ Result<void> PathMember(PathCursor& cursor, Member& member) noexcept {
         }
     }
 
-    if constexpr (container) {
+    if constexpr (fixed) {
+        return PathStaticArray<Target>(cursor, member);
+    } else if constexpr (container) {
         return PathContainer<Target>(cursor, member);
     } else if constexpr (keyed) {
         return PathKeyedContainer<Target>(cursor, member);

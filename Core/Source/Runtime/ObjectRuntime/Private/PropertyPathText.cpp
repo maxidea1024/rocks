@@ -83,7 +83,7 @@ char Unescape(char c) noexcept {
 bool IsStructStep(const FieldSchema& field, PathSelector selector) noexcept {
     switch (selector) {
     case PathSelector::Index:
-        return field.value.kind == ValueKind::Array && field.element.kind == ValueKind::Struct;
+        return ValueKindTakesIndex(field.value.kind) && field.element.kind == ValueKind::Struct;
     case PathSelector::Key:
         return field.value.kind == ValueKind::Map && field.element.kind == ValueKind::Struct;
     case PathSelector::None:
@@ -764,7 +764,7 @@ Result<void> PropertyPathParser::Parse(const TypeLease& type, StringView text,
                             position);
             }
         } else if (position < size && data[position] == '[') {
-            if (field.value.kind != ValueKind::Array) {
+            if (!ValueKindTakesIndex(field.value.kind)) {
                 return fail(ErrorCode::TypeMismatch, PropertyPathError::NotArray, stepIndex,
                             position);
             }
@@ -869,7 +869,7 @@ Result<void> FormatPropertyPath(const TypeLease& type, PropertyPath path, String
             return Result<void>::Failure(ErrorCode::Unsupported);
         }
 
-        if ((step.selector == PathSelector::Index && field.value.kind != ValueKind::Array) ||
+        if ((step.selector == PathSelector::Index && !ValueKindTakesIndex(field.value.kind)) ||
             (step.selector == PathSelector::Key && !IsKeyedField(field))) {
             return Result<void>::Failure(ErrorCode::TypeMismatch);
         }

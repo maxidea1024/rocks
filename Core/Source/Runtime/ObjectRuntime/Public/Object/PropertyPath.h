@@ -27,8 +27,8 @@ namespace rocks {
 //   UnknownProperty   — 문자열 경로의 모르는 이름(NotFound — 도구가 AS 4.6절 UnknownProperty
 //                       진단으로 바꾼다)
 //   UnknownField      — FieldId 체인의 없는 필드(스키마가 바뀐 옛 경로, NotFound)
-//   NotArray          — 배열이 아닌 필드에 index(selector Index)·컨테이너(Array·Map·Set)가 아닌
-//                       필드에 원소 수·비우기(TypeMismatch)
+//   NotArray          — 배열(Array·StaticArray)이 아닌 필드에 index(selector Index)·컨테이너
+//                       (Array·StaticArray·Map·Set)가 아닌 필드에 원소 수·비우기(TypeMismatch)
 //   NotStruct         — struct가 아닌 값(index 없는 배열·key 없는 Map·단일 값 Optional·단일 값
 //                       Map 항목·Set 원소 포함) 뒤의 단계(`.`)(TypeMismatch)
 //   IndexRequired     — 배열 삽입·삭제의 마지막 단계가 index 단계가 아님(InvalidArgument)
@@ -63,6 +63,9 @@ namespace rocks {
 //                       — Unsupported)
 //   NotMap            — Set 원소 key 단계의 값 읽기·쓰기(TypeMismatch — Set 원소는 키라 값이 없다,
 //                       PathContains·PathInsertKey·PathEraseKey를 쓴다)
+//   FixedLength       — 정적 배열(T x[N] — 리플렉션 B9g)의 원소 삽입·삭제·비우기(Unsupported —
+//   길이가
+//                       N으로 고정이다. 원소는 [i] 쓰기로 바꾼다)
 enum class PropertyPathError : uint8 {
     None,
     Syntax,
@@ -86,7 +89,8 @@ enum class PropertyPathError : uint8 {
     KeyRequired,
     KeyNotFound,
     InvalidKey,
-    NotMap
+    NotMap,
+    FixedLength
 };
 
 // 경로 연산·문자열 해석의 실패 위치와 사유다. step은 실패한 단계의 index다: 경로 연산에서 문맥·

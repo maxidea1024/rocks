@@ -59,18 +59,19 @@ internal static class ValueKindTableTests
             // Optional 필드의 Required 거부는 이 불변식에 기댄다(대상 종류 = 내부 종류 — 런타임 static_assert NoOptionalInnerAcceptsRequired와 같다).
             Verify.That(!ValueKindTable.Rows.Any(row => (row.Properties & ValueKindProperty.OptionalInner) != 0 && (row.Properties & ValueKindProperty.AcceptsRequired) != 0),
                 "no Optional inner kind accepts Required");
-            foreach (string container in new[] { "Map", "Set" })
+            foreach (string container in new[] { "Map", "Set", "StaticArray" })
             {
                 Verify.That(ValueKindTable.Has(container, ValueKindProperty.Field) &&
                     ValueKindTable.Has(container, ValueKindProperty.StructMember) &&
                     ValueKindTable.Has(container, ValueKindProperty.Container) &&
                     !ValueKindTable.Has(container, ValueKindProperty.ArrayElement) &&
+                    !ValueKindTable.Has(container, ValueKindProperty.StaticArrayElement) &&
                     !ValueKindTable.Has(container, ValueKindProperty.MapKey) &&
                     !ValueKindTable.Has(container, ValueKindProperty.MapValue) &&
                     !ValueKindTable.Has(container, ValueKindProperty.SetElement) &&
                     !ValueKindTable.Has(container, ValueKindProperty.OptionalInner) &&
                     !ValueKindTable.Has(container, ValueKindProperty.WholeFieldValue),
-                    $"B9f2 {container} is a field-only aggregate container that does not nest");
+                    $"B9f2/B9g {container} is a field-only aggregate container that does not nest");
             }
 
             Verify.That(ValueKindTable.Has("SoftObjectReference", ValueKindProperty.MapKey), "single property query");
@@ -106,11 +107,12 @@ internal static class ValueKindTableTests
                 ("optional cell", Flip("Optional", ValueKindProperty.ArrayElement), "Optional ArrayElement = true"),
                 ("map cell", Flip("Map", ValueKindProperty.MapValue), "Map MapValue = true"),
                 ("set cell", Flip("Set", ValueKindProperty.Container), "Set Container = false"),
+                ("static array cell", Flip("StaticArray", ValueKindProperty.StaticArrayElement), "StaticArray StaticArrayElement = true"),
                 ("container property", Flip("Array", ValueKindProperty.Container), "Array Container = false"),
                 ("whole FieldValue property", Flip("Struct", ValueKindProperty.WholeFieldValue), "Struct WholeFieldValue = true"),
-                // 런타임에 아직 없는 종류(리플렉션 B9g의 StaticArray)를 C# 표에만 더한 경우다.
+                // 런타임에 아직 없는 종류(리플렉션 B9j의 InstancedStruct)를 C# 표에만 더한 경우다.
                 ("extra C# kind", ValueKindTable.ParityHeader([.. ValueKindTable.Rows,
-                    new("StaticArray", (uint)count, ValueKindProperty.Field)]),
+                    new("InstancedStruct", (uint)count, ValueKindProperty.Field)]),
                     $"C# table has {count + 1} value kinds"),
                 ("missing C# kind", ValueKindTable.ParityHeader([.. ValueKindTable.Rows.Take(count - 1)]),
                     $"C# table has {count - 1} value kinds"),

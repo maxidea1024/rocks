@@ -111,7 +111,9 @@ internal static class ValueKindTable
         new("Optional", 24, ValueKindProperty.Field | ValueKindProperty.StructMember | ValueKindProperty.Container),
         // OrderedMap(값 형식 element·키 형식 key)·OrderedSet(원소 형식 element)은 필드·멤버 자리의 aggregate 컨테이너다(리플렉션 B9f2).
         new("Map", 25, ValueKindProperty.Field | ValueKindProperty.StructMember | ValueKindProperty.Container),
-        new("Set", 26, ValueKindProperty.Field | ValueKindProperty.StructMember | ValueKindProperty.Container)
+        new("Set", 26, ValueKindProperty.Field | ValueKindProperty.StructMember | ValueKindProperty.Container),
+        // 정적 배열 T x[N](원소 형식 element, 원소 수 maxElements = N)도 필드·멤버 자리의 aggregate 컨테이너다(리플렉션 B9g).
+        new("StaticArray", 27, ValueKindProperty.Field | ValueKindProperty.StructMember | ValueKindProperty.Container)
     ];
 
     // 성질과 같은 뜻의 런타임 질의 함수(rocks:: 이름공간)다. 대조 헤더가 칸마다 이 함수를 부른다.
