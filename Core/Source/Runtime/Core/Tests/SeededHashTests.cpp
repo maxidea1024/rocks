@@ -165,3 +165,36 @@ TEST(SeededHash_MaskCollisionsUnderOneSeedScatterUnderAnother) {
     // 32개를 64칸에 고르게 던지면 평균 약 25칸이다. 한 칸에 몰리지 않음을 넉넉한 하한으로 본다.
     CHECK(distinct >= 16);
 }
+
+// 대소문자 무시 SipHash(리플렉션 B9f2 — 1단계 Name 키 판정이 쓴다)는 ASCII 대문자만 소문자로 바꾼
+// 사본의 SipHash24와 같다(길이 0·8의 배수·꼬리 byte 모두, 비ASCII byte는 그대로). 대문자만 다른 두
+// 원문은 같고 비ASCII 대소문자("Ü"·"ü")는 다르며 seed가 계산 안에 들어간다. Sha256Digest 특수화는
+// 32 byte가 같으면 같고 하나라도 다르면 다르다(ObjectRuntime 키 형식은
+// MapKeyHash_ObjectRuntimeKeysAgreeWithEquality).
+TEST(SeededHash_IgnoringAsciiCaseMatchesLoweredCopy) {
+    const HashSeed seed{0x0706050403020100ull, 0x0f0e0d0c0b0a0908ull};
+    const char* texts[] = {"",           "A", "Socket", "SOCKET_7", "MixedCaseLongerThan16Bytes",
+                           "\xc3\x9cnit"};
+    for (const char* text : texts) {
+        const StringView view(text);
+        char lowered[64] = {};
+        for (usize index = 0; index < view.ByteCount(); ++index) {
+            const char c = view.Data()[index];
+            lowered[index] = c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+        }
+
+        CHECK(SipHash24IgnoringAsciiCase(seed, view) == SipHash24(seed, lowered, view.ByteCount()));
+    }
+
+    CHECK(SipHash24IgnoringAsciiCase(seed, "Socket") == SipHash24IgnoringAsciiCase(seed, "sOCKET"));
+    CHECK(SipHash24IgnoringAsciiCase(seed, "\xc3\x9c") !=
+          SipHash24IgnoringAsciiCase(seed, "\xc3\xbc"));
+    CHECK(SipHash24IgnoringAsciiCase(seed, "Socket") !=
+          SipHash24IgnoringAsciiCase(HashSeed{1, 2}, "Socket"));
+    Sha256Digest digest{};
+    digest.bytes[31] = 1;
+    Sha256Digest same = digest;
+    CHECK(SeededHash<Sha256Digest>(seed)(digest) == SeededHash<Sha256Digest>(seed)(same));
+    same.bytes[0] = 1;
+    CHECK(SeededHash<Sha256Digest>(seed)(digest) != SeededHash<Sha256Digest>(seed)(same));
+}

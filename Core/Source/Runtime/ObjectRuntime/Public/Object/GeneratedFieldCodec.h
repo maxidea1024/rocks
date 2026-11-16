@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Object/OptionalFieldCodec.h>
+#include <Object/MapFieldCodec.h>
 
 // 필드 codec이다(Docs/Design/ReflectionFoundations.ko.md 4.6·5.6·6.4절). 생성 헤더와 직렬화기는
 // 이 헤더 하나만 include한다. codec은 앞 조각을 include하는 사슬로 나뉜다: 단일 값 wire 쓰기
@@ -8,7 +8,8 @@
 // (Object/FieldValueParse.h — ReadValueWire·ReportParsedValue·ParseFieldValue), struct 값
 // (Object/StructFieldCodec.h — EncodeStructRecord·DecodeStructValue), 배열
 // (Object/ArrayFieldCodec.h — EncodeArrayField·DecodeArrayField), Optional
-// (Object/OptionalFieldCodec.h — EncodeOptionalField·DecodeOptionalField). 이 헤더에는 멤버 값
+// (Object/OptionalFieldCodec.h — EncodeOptionalField·DecodeOptionalField), Map·Set
+// (Object/MapFieldCodec.h — EncodeMapField·DecodeMapField). 이 헤더에는 멤버 값
 // codec(EncodeMemberValue·EncodeStructMember·DecodeStructMember), 생성 thunk(EncodeGeneratedField·
 // DecodeGeneratedField·StructFieldOps)와 수동 함수표용 범용 codec(EncodeThroughFieldValue·
 // DecodeThroughFieldValue)이 있다.
@@ -16,10 +17,10 @@ namespace rocks::detail {
 
 // 지금 위치(context.Field())의 멤버 값 source를 out에 쓰고 wire tag를 돌려준다(클래스 필드·struct
 // 멤버 공용 — 호출자가 MatchesSchema를 확인했다). 배열은 컨테이너를 제자리로(ValueArray·
-// RecordList), struct는 등록 struct(지금 위치의 structure — MatchesStructView가 아니면
-// TypeMismatch)로 중첩 Record를, 단일 값은 EncodeFieldWire로 쓴다. String·경로·배열 원소는 복사하지
-// 않는다(ArchiveWriter가 성장 전에 크기 한도를 검사하고, owner 밖 버퍼는 encode 고정 또는 Required
-// 검사 중 표시가 지킨다).
+// RecordList), Optional은 EncodeOptionalField, Map·Set은 EncodeMapField, struct는 등록 struct(지금
+// 위치의 structure — MatchesStructView가 아니면 TypeMismatch)로 중첩 Record를, 단일 값은
+// EncodeFieldWire로 쓴다. String·경로·배열 원소는 복사하지 않는다(ArchiveWriter가 성장 전에 크기
+// 한도를 검사하고, owner 밖 버퍼는 encode 고정 또는 Required 검사 중 표시가 지킨다).
 template <class Member>
 Result<uint32> EncodeMemberValue(const Member& source, ArchiveWriter& out,
                                  FieldEncodeContext& context) noexcept {
@@ -27,6 +28,8 @@ Result<uint32> EncodeMemberValue(const Member& source, ArchiveWriter& out,
         return EncodeArrayField(source, out, context);
     } else if constexpr (OptionalField<Member>::Supported) {
         return EncodeOptionalField(source, out, context);
+    } else if constexpr (MapField<Member>::Supported) {
+        return EncodeMapField(source, out, context);
     } else if constexpr (ReflectedStructField<Member>::Supported) {
         if (!MatchesStructView<Member>(context)) {
             return Result<uint32>::Failure(ErrorCode::TypeMismatch);
@@ -89,6 +92,9 @@ Result<void> DecodeStructMember(const RuntimeStructFieldOps&, ConstructionContex
     } else if constexpr (OptionalField<Member>::Supported) {
         return DecodeOptionalField(construction, owner,
                                    target ? &(target->*MemberPointer) : nullptr, field, context);
+    } else if constexpr (MapField<Member>::Supported) {
+        return DecodeMapField(construction, owner, target ? &(target->*MemberPointer) : nullptr,
+                              field, context);
     } else if constexpr (ReflectedStructField<Member>::Supported) {
         if (!MatchesStructView<Member>(context)) {
             return Result<void>::Failure(ErrorCode::TypeMismatch);
@@ -148,7 +154,8 @@ Result<void> DecodeStructMember(const RuntimeStructFieldOps&, ConstructionContex
 }
 
 // struct 멤버 하나의 함수표다(생성 코드·수동 시험 공용). valueNativeType은 Enum·Struct 멤버와
-// Enum·Struct 원소 배열 멤버의 원소 native 키다. path는 경로 접근 thunk(B6 — 생성 코드는
+// Enum·Struct 원소 배열 멤버의 원소(Optional 내부, Map 값·Set 원소) native 키이고, keyNativeType은
+// 키가 Enum인 Map 멤버의 키 native 키다(리플렉션 B9f2). path는 경로 접근 thunk(B6 — 생성 코드는
 // &detail::PathStructMember<&S::m, ValueKind::Target>, Object/GeneratedPathAccess.h)이며 주지
 // 않으면 이 멤버로 들어가는 경로 연산은 Unsupported다.
 //
@@ -175,6 +182,17 @@ RuntimeStructFieldOps StructFieldOps(Guid fieldId,
         if constexpr (ReflectedEnumField<Inner>::Supported ||
                       ReflectedStructField<Inner>::Supported) {
             ops.valueNativeType = NativeTypeKey<Inner>();
+        }
+    } else if constexpr (MapField<Member>::Supported) {
+        using Value = typename MapField<Member>::Value;
+        using Key = typename MapField<Member>::Key;
+        if constexpr (ReflectedEnumField<Value>::Supported ||
+                      ReflectedStructField<Value>::Supported) {
+            ops.valueNativeType = NativeTypeKey<Value>();
+        }
+
+        if constexpr (!MapField<Member>::IsSet && ReflectedEnumField<Key>::Supported) {
+            ops.keyNativeType = NativeTypeKey<Key>();
         }
     } else if constexpr (ReflectedEnumField<Member>::Supported ||
                          ReflectedStructField<Member>::Supported) {
@@ -271,6 +289,19 @@ Result<void> DecodeGeneratedField(ConstructionContext* construction, ObjectHandl
         }
 
         return DecodeOptionalField(construction, handle, &(owner.Value()->*member), field, context);
+    } else if constexpr (MapField<Member>::Supported) {
+        // Map·Set 필드(리플렉션 B9f2): 1단계는 항목 없이 검증(키 중복 판정 포함), 2단계는 새 객체
+        // 안의 컨테이너를 비우고 파일 순서대로 채운다(할당 말고는 실패하지 않는다).
+        if (!construction) {
+            return DecodeMapField<Member>(nullptr, handle, nullptr, field, context);
+        }
+
+        auto owner = construction->GetForWrite<Owner>(handle);
+        if (!owner) {
+            return Result<void>::Failure(owner.Error());
+        }
+
+        return DecodeMapField(construction, handle, &(owner.Value()->*member), field, context);
     } else if constexpr (ReflectedStructField<Member>::Supported) {
         // struct 필드: 1단계는 값 없이 검증(관찰은 scratch), 2단계는 새 객체 안의 멤버 주소에 쓴다.
         if (!MatchesStructView<Member>(context)) {

@@ -108,7 +108,10 @@ internal static class ValueKindTable
         new("ClassReference", 23, Placed | ValueKindProperty.MapKey | ValueKindProperty.MapValue | ValueKindProperty.SetElement |
             ValueKindProperty.WholeFieldValue | ValueKindProperty.AcceptsRequired | ValueKindProperty.HasTargetType | ValueKindProperty.RequiresTargetId),
         // 통째 FieldValue 여부는 내부에 따라 다르므로(단일 값이면 비aggregate, 값 struct면 aggregate) 표 칸은 비우고 필드 단위로 판정한다.
-        new("Optional", 24, ValueKindProperty.Field | ValueKindProperty.StructMember | ValueKindProperty.Container)
+        new("Optional", 24, ValueKindProperty.Field | ValueKindProperty.StructMember | ValueKindProperty.Container),
+        // OrderedMap(값 형식 element·키 형식 key)·OrderedSet(원소 형식 element)은 필드·멤버 자리의 aggregate 컨테이너다(리플렉션 B9f2).
+        new("Map", 25, ValueKindProperty.Field | ValueKindProperty.StructMember | ValueKindProperty.Container),
+        new("Set", 26, ValueKindProperty.Field | ValueKindProperty.StructMember | ValueKindProperty.Container)
     ];
 
     // 성질과 같은 뜻의 런타임 질의 함수(rocks:: 이름공간)다. 대조 헤더가 칸마다 이 함수를 부른다.

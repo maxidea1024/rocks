@@ -42,6 +42,9 @@ Result<void> ValidateFieldList(Span<const FieldSchema> fields, bool structMember
 // 대상 형식(배열이면 원소)이 Enum·Struct인 필드만 값의 native 키를 싣는다.
 bool CarriesValueNativeType(const FieldSchema& field) noexcept;
 
+// 키가 Enum인 Map 필드만 키의 native 키를 싣는다(리플렉션 B9f2).
+bool CarriesKeyNativeType(const FieldSchema& field) noexcept;
+
 // 레코드 블록 할당 태그다('TYPE').
 inline constexpr uint32 RecordTag = 0x54595045u;
 

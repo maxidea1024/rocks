@@ -213,9 +213,47 @@ Result<uint32> EncodeArrayField(const Container& array, ArchiveWriter& out,
     }
 }
 
+// 해석한 단일 값 하나(할당하지 않는 형식 — String·SoftObjectRef 말고 모두)를 C++ 값으로 만든다
+// (배열 원소·Map 키와 값·Set 원소 공용). Name은 parsed.name(2단계 토큰, 1단계는 기본 None), weak
+// 참조는 노드 handle(1단계는 비어 있다 — 관찰은 직렬화기가 막는다), ClassRef는 판정을 마친 클래스
+// TypeId(ReportAndNull로 바꾼 미등록 클래스는 null)다.
+template <class Element>
+Element ParsedScalarValue(const ParsedValue& parsed) noexcept {
+    static_assert(!IsSameV<Element, String> && !SoftReferenceField<Element>::Supported,
+                  "allocating values are built by the caller");
+    if constexpr (ReflectedEnumField<Element>::Supported) {
+        return static_cast<Element>(parsed.signedInteger);
+    } else if constexpr (IsSameV<Element, bool>) {
+        return parsed.boolean;
+    } else if constexpr (IsSameV<Element, Guid>) {
+        return parsed.guid;
+    } else if constexpr (IsSameV<Element, AssetId>) {
+        return AssetId{parsed.guid};
+    } else if constexpr (IsSameV<Element, Sha256Digest>) {
+        return parsed.digest;
+    } else if constexpr (IsSameV<Element, Name>) {
+        return parsed.name;
+    } else if constexpr (WeakReferenceField<Element>::Supported) {
+        return Element(parsed.reference.handle);
+    } else if constexpr (ClassReferenceField<Element>::Supported) {
+        return Element(parsed.guid);
+    } else if constexpr (IsSameV<Element, float>) {
+        return parsed.float32;
+    } else if constexpr (IsSameV<Element, double>) {
+        return parsed.float64;
+    } else if constexpr (IsSameV<Element, int8> || IsSameV<Element, int16> ||
+                         IsSameV<Element, int32> || IsSameV<Element, int64>) {
+        return static_cast<Element>(parsed.signedInteger);
+    } else {
+        static_assert(IsSameV<Element, uint8> || IsSameV<Element, uint16> ||
+                      IsSameV<Element, uint32> || IsSameV<Element, uint64>);
+        return static_cast<Element>(parsed.unsignedInteger);
+    }
+}
+
 // 해석한 단일 값 원소 하나를 target 끝에 넣는다(예약된 용량 안 — 주소가 옮겨지지 않는다).
 // String·SoftObjectRef는 target의 allocator로 만든 뒤 TryAssign한다(실패하면 빈 원소가 남고 그 오류
-// — 2단계면 그래프 rollback).
+// — 2단계면 그래프 rollback). 그 밖은 ParsedScalarValue다.
 template <class Element>
 Result<void> AppendParsedElement(Array<Element>& target, const ParsedValue& parsed) noexcept {
     if constexpr (IsSameV<Element, String>) {
@@ -232,35 +270,8 @@ Result<void> AppendParsedElement(Array<Element>& target, const ParsedValue& pars
         }
 
         return added.Value()->TryAssign(AssetId{parsed.guid}, parsed.text);
-    } else if constexpr (ReflectedEnumField<Element>::Supported) {
-        return target.TryPushBack(static_cast<Element>(parsed.signedInteger));
-    } else if constexpr (IsSameV<Element, bool>) {
-        return target.TryPushBack(parsed.boolean);
-    } else if constexpr (IsSameV<Element, Guid>) {
-        return target.TryPushBack(parsed.guid);
-    } else if constexpr (IsSameV<Element, AssetId>) {
-        return target.TryPushBack(AssetId{parsed.guid});
-    } else if constexpr (IsSameV<Element, Sha256Digest>) {
-        return target.TryPushBack(parsed.digest);
-    } else if constexpr (IsSameV<Element, Name>) {
-        return target.TryPushBack(parsed.name);
-    } else if constexpr (WeakReferenceField<Element>::Supported) {
-        // 1단계는 handle이 비어 있다(관찰은 직렬화기가 막는다), 2단계는 만든 노드 handle이다.
-        return target.TryPushBack(Element(parsed.reference.handle));
-    } else if constexpr (ClassReferenceField<Element>::Supported) {
-        // 판정을 마친 클래스 TypeId다(ReportAndNull로 바꾼 미등록 클래스는 null).
-        return target.TryPushBack(Element(parsed.guid));
-    } else if constexpr (IsSameV<Element, float>) {
-        return target.TryPushBack(parsed.float32);
-    } else if constexpr (IsSameV<Element, double>) {
-        return target.TryPushBack(parsed.float64);
-    } else if constexpr (IsSameV<Element, int8> || IsSameV<Element, int16> ||
-                         IsSameV<Element, int32> || IsSameV<Element, int64>) {
-        return target.TryPushBack(static_cast<Element>(parsed.signedInteger));
     } else {
-        static_assert(IsSameV<Element, uint8> || IsSameV<Element, uint16> ||
-                      IsSameV<Element, uint32> || IsSameV<Element, uint64>);
-        return target.TryPushBack(static_cast<Element>(parsed.unsignedInteger));
+        return target.TryPushBack(ParsedScalarValue<Element>(parsed));
     }
 }
 

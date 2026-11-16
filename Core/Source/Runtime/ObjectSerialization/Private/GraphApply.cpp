@@ -373,7 +373,8 @@ Result<void> ApplyNodeFields(Allocator& allocator, ConstructionContext& transact
             const StoredField& stored = node.fields[fieldIndex];
             FieldScope scope(context, schema.fields[stored.schemaIndex], schema.id,
                              node.lease.FieldEnum(stored.schemaIndex),
-                             node.lease.FieldStruct(stored.schemaIndex));
+                             node.lease.FieldStruct(stored.schemaIndex), FieldCodecFrame::NoIndex,
+                             node.lease.FieldKeyEnum(stored.schemaIndex));
             auto written =
                 stored.ops->decode(*stored.ops, &transaction, node.handle, stored.view, context);
             if (!written) {

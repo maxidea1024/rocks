@@ -48,7 +48,8 @@ inline Result<uint32> EncodeStructRecord(StructView view, const void* value, Arc
             continue;
         }
 
-        FieldScope scope(context, member, schema.id, view.FieldEnum(index), nested);
+        FieldScope scope(context, member, schema.id, view.FieldEnum(index), nested,
+                         FieldCodecFrame::NoIndex, view.FieldKeyEnum(index));
         if (context.IsExcluded(context.EffectiveFlags())) {
             continue;
         }
@@ -140,8 +141,8 @@ inline Result<void> DecodeStructRecord(StructView view, ConstructionContext* con
             return Result<void>::Failure(ErrorCode::Unsupported);
         }
 
-        FieldScope scope(context, member, schema.id, view.FieldEnum(index),
-                         view.FieldStruct(index));
+        FieldScope scope(context, member, schema.id, view.FieldEnum(index), view.FieldStruct(index),
+                         FieldCodecFrame::NoIndex, view.FieldKeyEnum(index));
         // 이 데이터에 없어야 하는 플래그(바깥에서 전파된 것 포함 — 쿠킹 로드의 EditorOnly)의
         // 멤버다.
         if (context.IsExcluded(context.EffectiveFlags())) {

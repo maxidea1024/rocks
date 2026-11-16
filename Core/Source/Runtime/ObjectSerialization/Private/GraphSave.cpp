@@ -278,7 +278,8 @@ Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
         // 노드를 더하면 nodes가 다시 할당될 수 있으므로 lease는 매번 nodes[nodeIndex]로 접근한다.
         const TypeLease& type = nodes[nodeIndex].lease;
         FieldScope scope(context, field, schema.id, type.FieldEnum(fieldIndex),
-                         type.FieldStruct(fieldIndex));
+                         type.FieldStruct(fieldIndex), FieldCodecFrame::NoIndex,
+                         type.FieldKeyEnum(fieldIndex));
         // Transient 참조는 GC 수명에는 참여하지만 저장 그래프에는 참여하지 않는다.
         if (context.IsExcluded(context.EffectiveFlags())) {
             continue;

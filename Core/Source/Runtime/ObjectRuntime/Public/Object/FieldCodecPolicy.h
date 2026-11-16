@@ -39,7 +39,8 @@ enum class NewerVersionPolicy : uint8 {
 // NotFound) 또는 진단(UnknownClassReference) 후 null(Docs/Design/ReflectionExtensions.ko.md 5.2절 —
 // 클래스를 지운 패키지를 열어 고칠 때 쓴다). 등록은 됐지만 클래스가 아니거나 Base의 파생이 아닌
 // 값은 정책과 무관하게 InvalidArgument다. Map 키·Set 원소 자리에는 값을 바꾸는 정책을 쓰지
-// 않는다(늘 거부 — 같은 문서 1.7절, 그 자리는 리플렉션 B9f2가 연다).
+// 않는다(늘 NotFound — 같은 문서 1.7절, 리플렉션 B9f2). 미선언 enum 정책(UndeclaredEnumPolicy)도 키
+// 자리에서는 늘 거부다(InvalidArgument).
 enum class UnknownClassPolicy : uint8 {
     Reject,
     ReportAndNull
@@ -81,10 +82,13 @@ class RecordScope;
 
 // 지금 처리하는 필드 위치 하나다. field는 그 필드(struct 멤버면 멤버), declaringType은 그 필드를
 // 선언한 클래스·struct, effectiveFlags는 PropagateFieldFlags로 전파된 플래그(배열 원소와 원소
-// struct 멤버는 배열 필드의 것을 공유·전파한다), enumeration은 Enum 필드·enum 원소 배열의 등록된
-// enum 스키마(그 밖은 nullptr), structure는 Struct 필드·struct 원소 배열의 등록 struct(그 밖은 빈
-// view), index는 배열 필드에서 지금 처리하는 원소 index(아니면 NoIndex — 원소마다 새 프레임을
-// 만들지 않고 ElementIndexScope가 이 칸을 쓴다, 진단 경로는 [배열[i], 멤버])다.
+// struct 멤버는 배열 필드의 것을 공유·전파한다), enumeration은 Enum 필드·enum 원소 배열(Map의 값·
+// Set의 원소 포함)의 등록된 enum 스키마(그 밖은 nullptr), structure는 Struct 필드·struct 원소
+// 배열(Map의 값 struct 포함)의 등록 struct(그 밖은 빈 view), index는 배열·Map·Set 필드에서 지금
+// 처리하는 원소의 삽입 순번(아니면 NoIndex — 원소마다 새 프레임을 만들지 않고 ElementIndexScope가
+// 이 칸을 쓴다, 진단 경로는 [배열[i], 멤버] — Map 항목·Set 원소도 키를 복사하지 않고 순번으로
+// 표기한다, Docs/Design/ReflectionExtensions.ko.md 1.6절), keyEnumeration은 키가 Enum인 Map 필드의
+// 키 enum 스키마(리플렉션 B9f2 — TypeLease::FieldKeyEnum, 그 밖은 nullptr)다.
 struct FieldCodecFrame {
     static constexpr uint32 NoIndex = NumericLimits<uint32>::Max();
 
@@ -95,6 +99,7 @@ struct FieldCodecFrame {
     StructView structure{};
     uint32 index = NoIndex;
     const FieldCodecFrame* parent = nullptr;
+    const EnumSchema* keyEnumeration = nullptr;
 };
 
 // 참조(강한·weak)의 기대 형식이다. schemaType은 스키마의 기대 타입(0 = Object), staticNative는

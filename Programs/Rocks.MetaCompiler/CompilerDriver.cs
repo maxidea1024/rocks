@@ -383,7 +383,7 @@ internal static class CompilerDriver
             return found;
         }
 
-        if (ContainerInstantiationSite(compiled.StdErr, root, IsInput) is not (string file, int line, int column, bool optional))
+        if (ContainerInstantiationSite(compiled.StdErr, root, IsInput) is not (string file, int line, int column, string container))
         {
             return null;
         }
@@ -412,7 +412,15 @@ internal static class CompilerDriver
                 "Native members are not traced; store ObjectRef/RootRef/Object pointers in ROCKS_PROPERTY fields (ObjectRefArray, StructRefArray) or use WeakRef/ObjectHandle.").At(found.Site);
         }
 
-        if (optional)
+        // OrderedMap·OrderedSet(리플렉션 B9f2)의 키·값·원소가 강한 참조를 담으면 Map·Set 위치 규칙 RMC2305다(강한 참조 값은
+        // ObjectRefMap — 리플렉션 B9f4).
+        if (container == MapRules.Map)
+        {
+            return new MetadataException($"{found.Symbol}: '{found.Spelling}' holds a strong object reference ({found.StrongPath}) and cannot be a map key, map value or set element",
+                "RMC2305", MapRules.Hint).At(found.Site);
+        }
+
+        if (container == OptionalRules.Optional)
         {
             string inner = OptionalRules.Inner(found.Spelling) ?? found.Spelling;
             return new MetadataException($"{found.Symbol}: Optional inner type '{inner}' holds a strong object reference ({found.StrongPath}) and cannot be an Optional inner type",
@@ -433,16 +441,17 @@ internal static class CompilerDriver
     // Clang 진단의 첫 error가 Core Array.h에 있으면 그 error에 딸린 note 중 isInput 파일에 있는 첫 위치를 찾는다(없으면
     // null — Optional.h의 실패도 null이다). 규칙은 ContainerInstantiationSite다.
     internal static (string File, int Line, int Column)? ArrayInstantiationSite(string diagnostics, string root, Func<string, bool> isInput) =>
-        ContainerInstantiationSite(diagnostics, root, isInput) is (string file, int line, int column, false) ? (file, line, column) : null;
+        ContainerInstantiationSite(diagnostics, root, isInput) is (string file, int line, int column, ArrayRules.Array) ? (file, line, column) : null;
 
-    // Clang 진단의 첫 error가 Core Array.h 또는 Optional.h에 있으면 그 error에 딸린 note 중 isInput 파일에 있는 첫 위치와 Optional.h
-    // 인지(Optional)를 찾는다(없으면 null). clang의 `file:line:col: note:`와 clang-cl의 `file(line,col): note:` 형식을 모두
-    // 해석하고, 상대 경로는 Clang 작업 디렉터리(root) 기준이다. note가 아닌 줄(warning 포함)은 앞 묶음을 끝내고, 첫 error가 두
-    // 헤더가 아니면 바꾸지 않는다.
-    internal static (string File, int Line, int Column, bool Optional)? ContainerInstantiationSite(string diagnostics, string root, Func<string, bool> isInput)
+    // Clang 진단의 첫 error가 Core Array.h·Optional.h·OrderedMap.h·OrderedSet.h·OrderedEntryTable.h에 있으면 그 error에 딸린 note
+    // 중 isInput 파일에 있는 첫 위치와 컨테이너(ArrayRules.Array·OptionalRules.Optional·MapRules.Map — Map·Set 헤더는 Map)를
+    // 찾는다(없으면 null). clang의 `file:line:col: note:`와 clang-cl의 `file(line,col): note:` 형식을 모두 해석하고, 상대 경로는
+    // Clang 작업 디렉터리(root) 기준이다. note가 아닌 줄(warning 포함)은 앞 묶음을 끝내고, 첫 error가 그 헤더가 아니면 바꾸지
+    // 않는다.
+    internal static (string File, int Line, int Column, string Container)? ContainerInstantiationSite(string diagnostics, string root, Func<string, bool> isInput)
     {
         bool arrayError = false;
-        bool optionalError = false;
+        string container = "";
         bool sawError = false;
         foreach (string raw in diagnostics.Split('\n'))
         {
@@ -470,8 +479,13 @@ internal static class CompilerDriver
 
                 string normalized = file.Replace('\\', '/');
                 StringComparison comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-                optionalError = error && normalized.EndsWith("/Core/Optional.h", comparison);
-                arrayError = error && (optionalError || normalized.EndsWith("/Core/Containers/Array.h", comparison));
+                container = !error ? ""
+                    : normalized.EndsWith("/Core/Optional.h", comparison) ? OptionalRules.Optional
+                    : normalized.EndsWith("/Core/Containers/Array.h", comparison) ? ArrayRules.Array
+                    : normalized.EndsWith("/Core/Containers/OrderedMap.h", comparison) ||
+                      normalized.EndsWith("/Core/Containers/OrderedSet.h", comparison) ||
+                      normalized.EndsWith("/Core/Containers/OrderedEntryTable.h", comparison) ? MapRules.Map : "";
+                arrayError = container.Length != 0;
                 sawError |= error;
                 if (error && !arrayError)
                 {
@@ -494,7 +508,7 @@ internal static class CompilerDriver
 
             if (isInput(path))
             {
-                return (Path.GetFullPath(path), line, column, optionalError);
+                return (Path.GetFullPath(path), line, column, container);
             }
         }
 

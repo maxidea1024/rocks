@@ -615,6 +615,265 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::MapBag::points",
+      "id": "9d7ad406e976494f999c968a9011a534",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapBag::words",
+      "id": "ef69ea87d86e48ca86e34189535badc4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapHolder::assets",
+      "id": "62e488925d7d40239e88fb55ab5ad0ec",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapHolder::bag",
+      "id": "f4a24256e37e471da57a2c1e138102d4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapHolder::bags",
+      "id": "8b3555b6e3a04861957dad619ab8d8c7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapHolder::classNames",
+      "id": "eefd29045f36405a951f44e6dd6f29c4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapHolder::classes",
+      "id": "c5724aed3b964aa5af31db71084db878",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapHolder::colorNames",
+      "id": "946bebe7d1bf4f049b077d1530d785da",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapHolder::colors",
+      "id": "d45525ffeb5244b998b0a7127fb2cc86",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapHolder::counts",
+      "id": "6e6781f207ae44c3b0d652f8eaa1e11f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapHolder::digestFlags",
+      "id": "a9c163cfe1ee4345bf21a396f85f0c5a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapHolder::digests",
+      "id": "24c5d382202f4d67a8104dcc80515bb7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapHolder::flags",
+      "id": "2a089c02cdf1488e98b7229b8a2db2ef",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapHolder::guidColors",
+      "id": "3b6ea4a4c3e0476f96126e5cfaa5c170",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapHolder::limited",
+      "id": "695d540421744b9c84d3639756cf6149",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapHolder::links",
+      "id": "a06ce642443944d78d3ee27dedc3aefd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapHolder::perPlatform",
+      "id": "8605f10e8cd54107b0f0089fc3b54fce",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapHolder::points",
+      "id": "1d67bbcc3d1147e5a98470c5ae935752",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapHolder::ratios",
+      "id": "30077a0dc08f49b2b8da5c5d11a8868e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapHolder::required",
+      "id": "5f6bdb6278a1453bba22da8f3ef4e498",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapHolder::small",
+      "id": "04374f2a0e194d289db4181afcbef7f6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapHolder::softKeys",
+      "id": "0764ce1d69f5447b933b55992c891b50",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapHolder::tagBag",
+      "id": "80685ec53bcc42fe957ec4f4cdede83b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapHolder::tags",
+      "id": "df136c75ccd147a59fafc6adb5797404",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapHolder::versioned",
+      "id": "d7ac06e24ac9483a8db3656780f9c24c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapHolder::weak",
+      "id": "99e5b69ffbdf4b6db3f963d10e37c7fb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapHolder::words",
+      "id": "f466f5706cd64fb0a521bd6b31725247",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapLink::asset",
+      "id": "b10f63f610b44973a10bbec758996c85",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapLink::weight",
+      "id": "a3695c93c85947cdbd171760ae0ab435",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapPerPlatform::defaultValue",
+      "id": "d03eff693bce4d8fa692745bef90d7b5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapPerPlatform::perPlatform",
+      "id": "40a13dd3218540de83a857a60f38a5a2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapPoint::label",
+      "id": "48c2a782c04646e4a56b3b9ec63c6808",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapPoint::x",
+      "id": "5d966cd1de994d6ca4200e1858b0d409",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapPoint::y",
+      "id": "4a3c0c4a33844a62b7a236ba7ee626c2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapTagBag::tags",
+      "id": "f69f1d14dfa6419982c7aceb3afd32a2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapVersioned::extra",
+      "id": "9d1b5a9c8d56436aac219a0b4ea92e18",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapVersioned::value",
+      "id": "a134a87b839240209612926914c75365",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::NameFields::group",
       "id": "b79ba73ac7f94acab70e73c134cfbe04",
       "aliases": [],
@@ -1543,6 +1802,76 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::IntegerWidthPair",
       "id": "42e78bf3ee5e4152875f8b4e29402e88",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::MapBag",
+      "id": "72a0d081f7ff41e1bcc9f3a1bf91140c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::MapColor",
+      "id": "29082e9f99f0439a826761d92b09bbec",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::MapHolder",
+      "id": "7c2323a865604b78a3d9871987d14b23",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::MapKeyBase",
+      "id": "ba58fb1b9c4b44999d678afc1705f99e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::MapKeyDerived",
+      "id": "04ebe20e3113478795362049910b38e7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::MapLink",
+      "id": "2e2a350f4830495c9b74f2657b908761",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::MapPerPlatform",
+      "id": "ba4ee434e18c4580860b233b8595fd32",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::MapPoint",
+      "id": "febebc00599f4d75b75f8be6ddd9e30b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::MapTagBag",
+      "id": "f9bbf65dbb494c0fb11229130b7a2b5c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::MapVersioned",
+      "id": "6b60e62b2a2d40fe83c18144679cdb4a",
       "aliases": [],
       "retired": false
     },

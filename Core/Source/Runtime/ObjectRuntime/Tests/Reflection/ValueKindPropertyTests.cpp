@@ -82,10 +82,12 @@ constexpr ExpectedRow Expected[] = {{ValueKind::Opaque, "00000000000000"},
                                     {ValueKind::Name, "11111111000001"},
                                     {ValueKind::WeakObjectReference, "11110100001001"},
                                     {ValueKind::ClassReference, "11111110011101"},
-                                    {ValueKind::Optional, "11000000000010"}};
+                                    {ValueKind::Optional, "11000000000010"},
+                                    {ValueKind::Map, "11000000000010"},
+                                    {ValueKind::Set, "11000000000010"}};
 
 static_assert(sizeof(Expected) / sizeof(Expected[0]) == ValueKindCount);
-static_assert(ValueKindCount == 25);
+static_assert(ValueKindCount == 27);
 static_assert(ValueKindCanBeMapKey(ValueKind::Bool) && !ValueKindCanBeMapKey(ValueKind::Float32));
 
 usize CellCount(const char* cells) noexcept {
@@ -214,8 +216,8 @@ TEST(ValueKindProperties_MatchSpecTable) {
 }
 
 // 열거자 밖의 값은 성질이 없고 aggregate도 아니다. aggregate는 typed 필드 종류 중 통째 FieldValue가
-// 아닌 것(Struct·Array·Optional)이고, FieldTargetType은 컨테이너 종류에서 원소 형식을 준다. 필드
-// 단위 FieldIsAggregate는 Optional을 내부로 가른다(단일 값 내부는 비aggregate, 값 struct는
+// 아닌 것(Struct·Array·Optional·Map·Set)이고, FieldTargetType은 컨테이너 종류에서 원소 형식을 준다.
+// 필드 단위 FieldIsAggregate는 Optional을 내부로 가른다(단일 값 내부는 비aggregate, 값 struct는
 // aggregate — 리플렉션 B9e).
 TEST(ValueKindProperties_OutOfRangeAggregateAndTarget) {
     const ValueKind beyond[] = {static_cast<ValueKind>(ValueKindCount),
@@ -228,7 +230,8 @@ TEST(ValueKindProperties_OutOfRangeAggregateAndTarget) {
 
     for (const ExpectedRow& row : Expected) {
         const bool aggregate = row.kind == ValueKind::Struct || row.kind == ValueKind::Array ||
-                               row.kind == ValueKind::Optional;
+                               row.kind == ValueKind::Optional || row.kind == ValueKind::Map ||
+                               row.kind == ValueKind::Set;
         CHECK(ValueKindIsAggregate(row.kind) == aggregate);
     }
 
@@ -247,6 +250,20 @@ TEST(ValueKindProperties_OutOfRangeAggregateAndTarget) {
     FieldSchema single;
     single.value = ValueType{ValueKind::UInt16, {}};
     CHECK(&FieldTargetType(single) == &single.value);
+
+    // Map은 값 형식이 대상이고 키는 FieldKeyType이다(리플렉션 B9f2). Map·Set은 늘 aggregate다.
+    FieldSchema map;
+    map.value = ValueType{ValueKind::Map, {}};
+    map.element = ValueType{ValueKind::Float32, {}};
+    map.key = ValueType{ValueKind::Name, {}};
+    CHECK(&FieldTargetType(map) == &map.element);
+    CHECK(&FieldKeyType(map) == &map.key);
+    CHECK(FieldIsAggregate(map));
+    FieldSchema set;
+    set.value = ValueType{ValueKind::Set, {}};
+    set.element = ValueType{ValueKind::Name, {}};
+    CHECK(&FieldTargetType(set) == &set.element);
+    CHECK(FieldIsAggregate(set));
 }
 
 // TypeRegistry는 숫자 범위가 아니라 표로 종류를 판정한다. 대상 ID·GC 간선이 필요 없는 모든 종류 값
@@ -276,8 +293,12 @@ TEST(ValueKindProperties_TypeRegistryFollowsTable) {
         single.id = Guid{0x564b46, 2};
         single.name = Span<const char>("value", 5);
         single.value = ValueType{kind, {}};
-        if (kind == ValueKind::Array) {
+        if (kind == ValueKind::Array || kind == ValueKind::Set) {
             single.element = ValueType{ValueKind::UInt16, {}};
+            single.maxElements = DefaultMaxElements;
+        } else if (kind == ValueKind::Map) {
+            single.element = ValueType{ValueKind::UInt16, {}};
+            single.key = ValueType{ValueKind::UInt16, {}};
             single.maxElements = DefaultMaxElements;
         } else if (kind == ValueKind::Optional) {
             single.element = ValueType{ValueKind::UInt16, {}};
@@ -302,6 +323,29 @@ TEST(ValueKindProperties_TypeRegistryFollowsTable) {
         optional.element = ValueType{kind, {}};
         CHECK(RegistersAsStructMember(types, optional) == ValueKindCanBeOptionalInner(kind));
         CHECK(RegistersAsClassField(types, optional, true) == ValueKindCanBeOptionalInner(kind));
+
+        // Map 키·Map 값·Set 원소 자리다(리플렉션 B9f2): 등록 성공 ⇔ 성질 표의 그 칸(ObjectReference
+        // 값은 ObjectRefMap이라 B9f4 — 이 반복은 참조를 건너뛴다).
+        FieldSchema mapKey;
+        mapKey.id = Guid{0x564b46, 5};
+        mapKey.name = Span<const char>("byKey", 5);
+        mapKey.value = ValueType{ValueKind::Map, {}};
+        mapKey.key = ValueType{kind, {}};
+        mapKey.element = ValueType{ValueKind::UInt16, {}};
+        mapKey.maxElements = DefaultMaxElements;
+        CHECK(RegistersAsStructMember(types, mapKey) == ValueKindCanBeMapKey(kind));
+        CHECK(RegistersAsClassField(types, mapKey, true) == ValueKindCanBeMapKey(kind));
+        FieldSchema mapValue = mapKey;
+        mapValue.key = ValueType{ValueKind::UInt16, {}};
+        mapValue.element = ValueType{kind, {}};
+        CHECK(RegistersAsStructMember(types, mapValue) == ValueKindCanBeMapValue(kind));
+        FieldSchema setElement;
+        setElement.id = Guid{0x564b46, 6};
+        setElement.name = Span<const char>("items", 5);
+        setElement.value = ValueType{ValueKind::Set, {}};
+        setElement.element = ValueType{kind, {}};
+        setElement.maxElements = DefaultMaxElements;
+        CHECK(RegistersAsStructMember(types, setElement) == ValueKindCanBeSetElement(kind));
     }
 
     CHECK(types.Shutdown());

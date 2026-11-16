@@ -221,11 +221,15 @@ private:
     // 필드가 가리키는 레코드를 찾아 종류·native 키(thunkType)·의존 계수 여유를 확인하고, targets가
     // 있으면 필드별 대상(그 밖은 nullptr)을 쓴다. ownerWorldOnly가 거짓이면 WorldOnly 소유자를
     // 요구하는 struct(원소 포함)를 거부하고, 참조 struct 원소 배열(StructRefArray)의 원소가
-    // Registry 컨테이너를 담으면 거부한다(InvalidArgument).
+    // Registry 컨테이너를 담으면 거부한다(InvalidArgument). Optional 내부·Map 값·Set 원소의
+    // struct는 값 struct여야 한다(InvalidArgument). Map 키가 Enum이면 그 레코드도 같은
+    // 규칙(종류·native 키 — thunkType(..., key = true))으로 찾아 keyTargets(있으면)에 쓴다(리플렉션
+    // B9f2).
     Result<void> ResolveValueTypes(Span<const FieldSchema> fields,
-                                   const void* (*thunkType)(const void* context, Guid fieldId),
-                                   const void* context, bool ownerWorldOnly,
-                                   Record** targets) noexcept;
+                                   const void* (*thunkType)(const void* context, Guid fieldId,
+                                                            bool key),
+                                   const void* context, bool ownerWorldOnly, Record** targets,
+                                   Record** keyTargets) noexcept;
 
     Allocator& allocator_;
     mutable platform::Mutex gate_;

@@ -86,6 +86,19 @@ public:
     // 담을 수 있는 최대 원소 수(2^31)다. 넘는 Reserve·삽입은 Overflow다.
     static constexpr usize MaximumCapacity = Table::MaximumCapacity;
 
+    // 빈(또는 Clear한) Map의 Reserve(count)가 새로 잡는 저장소 byte의 상한을 bytes에 쓴다: count가
+    // 0이면 0, 아니면 용량을 2의 거듭제곱(최소 4)으로 올린 항목 배열 + 색인(용량 × 2 × u32)이다 —
+    // 빈 Map에서는 그 할당 한 번과 정확히 같다. count가 MaximumCapacity를 넘거나 byte가 넘치면
+    // false다. 원소 자체가 따로 할당하는 메모리(String 버퍼 등)는 들지 않는다. 미리 작업량을
+    // 청구하는 곳(리플렉션 Map 복원의 2단계 몫)이 쓴다.
+    //
+    // 사용 예:
+    //   usize bytes = 0;
+    //   if (!OrderedMap<uint32, int32>::ReservedBytes(count, bytes)) { return Overflow; }
+    static constexpr bool ReservedBytes(usize count, usize& bytes) noexcept {
+        return Table::ReservedBytes(count, bytes);
+    }
+
     explicit OrderedMap(Allocator& allocator, Hasher hasher = {}, KeyEqual equal = {}) noexcept
         : hasher_(Move(hasher)), equal_(Move(equal)), table_(allocator) {
     }
@@ -133,6 +146,13 @@ public:
 
     bool IsEmpty() const noexcept {
         return table_.Count() == 0;
+    }
+
+    // 저장소를 할당하는 allocator다(생성자에 준 것 — 이동하면 함께 옮겨 간다). 원소가 allocator를
+    // 받는 값(String·리플렉션 struct)이면 같은 allocator로 만들어 넣는다(리플렉션 Map 복원 —
+    // Array::GetAllocator와 같은 용도).
+    Allocator& GetAllocator() const noexcept {
+        return table_.GetAllocator();
     }
 
     // 값의 빌린 포인터를 돌려주며 없으면 nullptr다. 호출 예: if (auto* p = map.Find(key)).

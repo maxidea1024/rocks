@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Hash.h>
 #include <Core/Text/String.h>
 #include <Object/AssetId.h>
 #include <Object/Object.h>
@@ -30,6 +31,8 @@ namespace rocks {
 //
 // 리플렉션 필드(ValueKind::SoftObjectReference)로 쓰면 소유 클래스에 noexcept T(Allocator&)
 // 생성자가 필요하다 (String 필드와 같다). 저장 wire는 SoftObjectReference(Guid 16 byte + String)다.
+// 같음(operator==)은 asset과 경로 byte가 같은지다 — 리플렉션 Map 키·Set 원소(OrderedMap·OrderedSet
+// — 기본 해시 SeededHash<SoftObjectRef<T>>)의 키 같음이고 wire byte 같음과 같다.
 template <class T = Object>
 class SoftObjectRef {
 public:
@@ -111,8 +114,29 @@ public:
         return Result<SoftObjectRef>::Success(Move(copy));
     }
 
+    // asset과 경로 byte가 같은지다(allocator는 비교하지 않는다).
+    friend bool operator==(const SoftObjectRef& left, const SoftObjectRef& right) noexcept {
+        return left.asset == right.asset && left.objectPath.View() == right.objectPath.View();
+    }
+
     AssetId asset{};
     String objectPath;
+};
+
+// 소프트 참조 키(리플렉션 Map 키·Set 원소)의 seed 해시다. asset과 경로 byte를 함께
+// 해시한다(operator==와 같은 키 같음 — 기대 타입 T는 값에 없으므로 들어가지 않는다).
+template <class T>
+struct SeededHash<SoftObjectRef<T>> : SeededHashBase {
+    using SeededHashBase::SeededHashBase;
+
+    SeededHash() noexcept = default;
+
+    uint64 operator()(const SoftObjectRef<T>& value) const noexcept {
+        const uint64 path =
+            SipHash24(Seed(), value.objectPath.View().Data(), value.objectPath.View().ByteCount());
+        const uint64 words[3] = {value.asset.value.high, value.asset.value.low, path};
+        return SipHash24Words(Seed(), words, 3);
+    }
 };
 
 } // namespace rocks

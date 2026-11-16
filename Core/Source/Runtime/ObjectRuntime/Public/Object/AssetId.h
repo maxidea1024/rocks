@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Core/Guid.h>
+#include <Core/Hash.h>
 
 namespace rocks {
 
@@ -56,6 +57,20 @@ struct AssetId {
         }
 
         return Result<AssetId>::Success(AssetId{parsed.Value()});
+    }
+};
+
+// 리플렉션 Map 키·Set 원소(OrderedMap<AssetId, V>·OrderedSet<AssetId> — Docs/Design/
+// ReflectionExtensions.ko.md 7.1·7.2절)의 seed 해시다. Guid 해시와 같은 값이다.
+template <>
+struct SeededHash<AssetId> : SeededHashBase {
+    using SeededHashBase::SeededHashBase;
+
+    SeededHash() noexcept = default;
+
+    uint64 operator()(const AssetId& id) const noexcept {
+        const uint64 words[2] = {id.value.high, id.value.low};
+        return SipHash24Words(Seed(), words, 2);
     }
 };
 

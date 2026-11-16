@@ -292,6 +292,43 @@ internal static partial class ModuleMetaTests
             Verify.Contains("ReadGeneratedField<::probe::Value>(registry,access,object,&::probe::Parent::count,out)", generated,
                 "inherited Optional<scalar> field read thunk");
         });
+        // 리플렉션 B9f2: 다른 모듈 descriptor의 Map·Set 필드(enum 키·struct 값)를 상속하면 키 enum이 import enum으로 이어져(생성 헤더
+        // include·키 native 키) 생성 스키마가 같은 키·값·상한을 싣는다.
+        suite.Add("Meta.MapFieldsRoundTripThroughImportedDescriptors", async () =>
+        {
+            using Layout layout = new(options, environment);
+            layout.Write("Lower/Public/Lower/Parent.h", "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n" +
+                "#include <Core/Containers/OrderedMap.h>\n#include <Core/Containers/OrderedSet.h>\n#include <Core/Text/String.h>\nnamespace probe {\n" +
+                "ROCKS_ENUM()\nenum class Mode : rocks::uint8 { First = 1, Second = 2 };\n" +
+                "ROCKS_STRUCT()\nstruct Leaf {\nROCKS_PROPERTY() rocks::int32 x = 0;\n};\n" +
+                "ROCKS_CLASS()\nstruct Parent : public rocks::Object {\n" +
+                "explicit Parent(rocks::Allocator& allocator) noexcept : leaves(allocator), modes(allocator) {}\n" +
+                "ROCKS_PROPERTY() rocks::int32 value = 0;\nROCKS_PROPERTY(MaxElements = 4) rocks::OrderedMap<Mode, Leaf> leaves;\n" +
+                "ROCKS_PROPERTY() rocks::OrderedSet<Mode> modes;\n};\n}\n");
+            layout.Manifest("Lower", ["probe::Mode", "probe::Leaf"], ["probe::Leaf::x", "probe::Parent::leaves", "probe::Parent::modes"]);
+            ProcessResult lower = await layout.RunLowerAsync();
+            Verify.Equal(0, lower.ExitCode, "lower module: " + lower.StdErr);
+            layout.Write("Upper/Public/Upper/Value.h", "#pragma once\n#include <Lower/Parent.h>\n#include <Object/ObjectRefs.h>\nnamespace probe {\n" +
+                "ROCKS_CLASS()\nstruct Value : public Parent {\nusing Parent::Parent;\nROCKS_PROPERTY() rocks::ObjectRef<Parent> next;\n};\n}\n");
+            ProcessResult upper = await layout.RunUpperInputsAsync([(layout.Source("Upper/Public/Upper/Value.h"), "Upper/Value.h", false)]);
+            Verify.Equal(0, upper.ExitCode, "upper module: " + upper.StdErr);
+
+            using JsonDocument lowerDescriptor = JsonDocument.Parse(File.ReadAllBytes(layout.Descriptor("Lower")));
+            using JsonDocument upperDescriptor = JsonDocument.Parse(File.ReadAllBytes(layout.Descriptor("Upper")));
+            JsonElement Field(JsonDocument descriptor, string type, string name) => Type(descriptor, type).GetProperty("fields").EnumerateArray()
+                .Single(field => field.GetProperty("name").GetString() == name);
+            string modeId = Type(lowerDescriptor, "probe::Mode").GetProperty("id").GetString()!;
+            JsonElement inherited = Field(upperDescriptor, "probe::Value", "leaves");
+            Verify.Equal("Map", inherited.GetProperty("value").GetProperty("kind").GetString(), "inherited map kind");
+            Verify.Equal("Struct", inherited.GetProperty("element").GetProperty("kind").GetString(), "inherited map value kind");
+            Verify.Equal(modeId, inherited.GetProperty("key").GetProperty("type").GetString(), "inherited map enum key target");
+            Verify.Equal(4, inherited.GetProperty("maxElements").GetInt32(), "inherited map maxElements");
+            Verify.Equal("Set", Field(upperDescriptor, "probe::Value", "modes").GetProperty("value").GetProperty("kind").GetString(), "inherited set");
+            string generated = Compact(File.ReadAllText(layout.Generated("Upper", "Public/Upper/Value.generated.h")));
+            Verify.Contains("{ValueKind::Map,Guid{}}", generated, "generated inherited map schema");
+            Verify.Contains("NativeTypeKey<::probe::Mode>()}", generated, "inherited map enum key native key");
+            Verify.Contains("#include<Lower/Parent.generated.h>", generated, "generated header includes the key enum header");
+        });
     }
 
     // private 전용 모듈 등록·모듈 재선언·자기 import와 모듈 descriptor 엄격 읽기 시험이다(enum 시험 뒤에 등록한다).

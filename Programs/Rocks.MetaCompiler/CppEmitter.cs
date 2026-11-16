@@ -167,6 +167,8 @@ internal static class CppEmitter
         IEnumerable<string> valueHeaders = own.SelectMany(type => type.Fields)
             .Where(field => field.TargetKind is "Enum" or "Struct" && field.Reference is not null)
             .Select(field => field.Reference!)
+            .Concat(own.SelectMany(type => type.Fields).Where(field => field.KeyKind == "Enum" && field.KeyReference is not null)
+                .Select(field => field.KeyReference!))
             .Concat(own.SelectMany(type => type.NativeMembers).Where(native => native.Struct is not null).Select(native => native.Struct!))
             .Select(name => schema.Find(name).Header)
             .Where(header => header != include)
@@ -271,6 +273,18 @@ internal static class CppEmitter
                 {
                     string member = $"&::{field.Owner}::{field.Name}";
                     Line($"{{{GuidValue(field.Id)},");
+                    if (field.IsMap || field.IsSet)
+                    {
+                        // Map·Set 필드(리플렉션 B9f2)는 FieldValue로 표현할 수 없으므로 read·write·writeStaged가 없고 codec, 값·원소
+                        // Enum·Struct의 native 키(없으면 nullptr), 경로 thunk 없음(key 단계 경로 연산은 리플렉션 B9f3), readStaged
+                        // 없음과 키 enum의 native 키를 싣는다(Docs/Design/ReflectionExtensions.ko.md 7.2절).
+                        Line("nullptr, {}, nullptr,");
+                        string mapValueNative = ValueNativeType(schema, field);
+                        string keyNative = field.KeyKind == "Enum" ? $", nullptr, NativeTypeKey<::{field.KeyReference}>()" : "";
+                        EmitClassCodec(native, member, (mapValueNative.Length == 0 ? ", nullptr" : mapValueNative) + ", nullptr" + keyNative, Line);
+                        continue;
+                    }
+
                     if (field.IsAggregate)
                     {
                         // struct·배열·Optional<값 struct> 필드는 FieldValue로 표현할 수 없으므로 read·write·writeStaged가
@@ -357,6 +371,13 @@ internal static class CppEmitter
     private static string StructMemberOps(string native, FieldModel field)
     {
         string member = $"&{native}::{field.Name}";
+        // Map·Set 멤버(리플렉션 B9f2)는 경로 thunk가 없다(key 단계 경로 연산은 리플렉션 B9f3). 값·키 native 키는 StructFieldOps가 멤버
+        // 형식으로 채운다.
+        if (field.IsMap || field.IsSet)
+        {
+            return $"detail::StructFieldOps<{member}>({GuidValue(field.Id)}),";
+        }
+
         return $"detail::StructFieldOps<{member}>({GuidValue(field.Id)}, &detail::PathStructMember<{member}, ValueKind::{field.TargetKind}>),";
     }
 
@@ -387,6 +408,13 @@ internal static class CppEmitter
         {
             string inner = $"GeneratedType<::{schema.Find(field.Reference!).NativeName}>";
             Line($"static_assert(!{inner}::ContainsStrongReference, \"Optional field {field.Owner}::{field.Name} holds reference struct {field.Reference}; regenerate metadata (RMC2306)\");");
+        }
+
+        // Map 값 struct도 값 struct다(리플렉션 B9f2 — RMC2305).
+        foreach (FieldModel field in type.Fields.Where(field => field.IsMap && field.StructTarget))
+        {
+            string value = $"GeneratedType<::{schema.Find(field.Reference!).NativeName}>";
+            Line($"static_assert(!{value}::ContainsStrongReference, \"Map field {field.Owner}::{field.Name} holds reference struct {field.Reference}; regenerate metadata (RMC2305)\");");
         }
 
         foreach (FieldModel field in type.Fields.Where(field => field.IsArray && field.StructTarget))
@@ -594,7 +622,9 @@ internal static class CppEmitter
 
     // 클래스·struct 스키마의 필드 배열이다(필드가 없으면 내지 않는다). 배열 필드는 value가 {Array, 0}이고 원소 형식
     // element(원소 대상 ID)와 maxElements를 더 싣는다(Docs/Design/ReflectionFoundations.ko.md 5.6절). Optional 필드는 value가
-    // {Optional, 0}이고 내부 형식 element와 maxElements 0을 싣는다(ReflectionExtensions.ko.md 6절).
+    // {Optional, 0}이고 내부 형식 element와 maxElements 0을 싣는다(ReflectionExtensions.ko.md 6절). Map 필드는 value가 {Map, 0}이고
+    // 값 형식 element·maxElements·키 형식 key를, Set 필드는 value가 {Set, 0}이고 원소 형식 element·maxElements를 싣는다(같은 문서
+    // 7.2절).
     private static void EmitFieldSchemas(ClassModel type, Action<string> Line)
     {
         if (type.Fields.Count == 0)
@@ -609,8 +639,10 @@ internal static class CppEmitter
             string kind = field.IsObjectReferenceFieldKind ? "ObjectReference" : "Value";
             string head = $"{{{GuidValue(field.Id)}, FieldKind::{kind}, {field.Flags}u, {View(field.Name)}, {{}}, ";
             string labels = $"{View(field.Spec.Category)}, {View(field.Spec.DisplayName)}, {View(field.Spec.ToolName)}";
-            Line(field.IsArray || field.IsOptional
-                ? $"{head}{{ValueKind::{field.Kind}, Guid{{}}}}, {labels}, {{ValueKind::{field.ElementKind}, {GuidValue(targetId)}}}, {field.MaxElements}u}},"
+            string? keyId = field.KeyHasTargetType ? field.KeyReferenceId : null;
+            string key = field.IsMap ? $", {{ValueKind::{field.KeyKind}, {GuidValue(keyId)}}}" : "";
+            Line(field.IsArray || field.IsOptional || field.IsMap || field.IsSet
+                ? $"{head}{{ValueKind::{field.Kind}, Guid{{}}}}, {labels}, {{ValueKind::{field.ElementKind}, {GuidValue(targetId)}}}, {field.MaxElements}u{key}}},"
                 : $"{head}{{ValueKind::{field.Kind}, {GuidValue(targetId)}}}, {labels}}},");
         }
 

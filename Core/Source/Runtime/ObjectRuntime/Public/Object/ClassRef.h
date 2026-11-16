@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Hash.h>
 #include <Meta/GeneratedType.h>
 #include <Object/Object.h>
 #include <Object/TypeRegistry.h>
@@ -110,6 +111,20 @@ public:
 
 private:
     TypeId type_{};
+};
+
+// 클래스 참조 키(리플렉션 Map 키·Set 원소 — OrderedMap<ClassRef<Base>, V>, Docs/Design/
+// ReflectionExtensions.ko.md 7.1·7.2절)의 seed 해시다. 클래스 TypeId의 Guid 해시와 같다.
+template <class Base>
+struct SeededHash<ClassRef<Base>> : SeededHashBase {
+    using SeededHashBase::SeededHashBase;
+
+    SeededHash() noexcept = default;
+
+    uint64 operator()(const ClassRef<Base>& value) const noexcept {
+        const uint64 words[2] = {value.Id().high, value.Id().low};
+        return SipHash24Words(Seed(), words, 2);
+    }
 };
 
 } // namespace rocks

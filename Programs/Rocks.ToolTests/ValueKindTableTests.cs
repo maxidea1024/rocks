@@ -59,6 +59,20 @@ internal static class ValueKindTableTests
             // Optional 필드의 Required 거부는 이 불변식에 기댄다(대상 종류 = 내부 종류 — 런타임 static_assert NoOptionalInnerAcceptsRequired와 같다).
             Verify.That(!ValueKindTable.Rows.Any(row => (row.Properties & ValueKindProperty.OptionalInner) != 0 && (row.Properties & ValueKindProperty.AcceptsRequired) != 0),
                 "no Optional inner kind accepts Required");
+            foreach (string container in new[] { "Map", "Set" })
+            {
+                Verify.That(ValueKindTable.Has(container, ValueKindProperty.Field) &&
+                    ValueKindTable.Has(container, ValueKindProperty.StructMember) &&
+                    ValueKindTable.Has(container, ValueKindProperty.Container) &&
+                    !ValueKindTable.Has(container, ValueKindProperty.ArrayElement) &&
+                    !ValueKindTable.Has(container, ValueKindProperty.MapKey) &&
+                    !ValueKindTable.Has(container, ValueKindProperty.MapValue) &&
+                    !ValueKindTable.Has(container, ValueKindProperty.SetElement) &&
+                    !ValueKindTable.Has(container, ValueKindProperty.OptionalInner) &&
+                    !ValueKindTable.Has(container, ValueKindProperty.WholeFieldValue),
+                    $"B9f2 {container} is a field-only aggregate container that does not nest");
+            }
+
             Verify.That(ValueKindTable.Has("SoftObjectReference", ValueKindProperty.MapKey), "single property query");
             Verify.Throws<ArgumentException>(() => ValueKindTable.Has("SoftObjectReference", ValueKindProperty.MapKey | ValueKindProperty.AcceptsRequired));
             Verify.Throws<ArgumentException>(() => ValueKindTable.Has("Bool", ValueKindProperty.None));
@@ -90,11 +104,13 @@ internal static class ValueKindTableTests
                 ("weak reference cell", Flip("WeakObjectReference", ValueKindProperty.AcceptsRequired), "WeakObjectReference AcceptsRequired = true"),
                 ("class reference cell", Flip("ClassReference", ValueKindProperty.RequiresTargetId), "ClassReference RequiresTargetId = false"),
                 ("optional cell", Flip("Optional", ValueKindProperty.ArrayElement), "Optional ArrayElement = true"),
+                ("map cell", Flip("Map", ValueKindProperty.MapValue), "Map MapValue = true"),
+                ("set cell", Flip("Set", ValueKindProperty.Container), "Set Container = false"),
                 ("container property", Flip("Array", ValueKindProperty.Container), "Array Container = false"),
                 ("whole FieldValue property", Flip("Struct", ValueKindProperty.WholeFieldValue), "Struct WholeFieldValue = true"),
-                // 런타임에 아직 없는 종류(리플렉션 B9f2의 Map)를 C# 표에만 더한 경우다.
+                // 런타임에 아직 없는 종류(리플렉션 B9g의 StaticArray)를 C# 표에만 더한 경우다.
                 ("extra C# kind", ValueKindTable.ParityHeader([.. ValueKindTable.Rows,
-                    new("Map", (uint)count, ValueKindProperty.Field)]),
+                    new("StaticArray", (uint)count, ValueKindProperty.Field)]),
                     $"C# table has {count + 1} value kinds"),
                 ("missing C# kind", ValueKindTable.ParityHeader([.. ValueKindTable.Rows.Take(count - 1)]),
                     $"C# table has {count - 1} value kinds"),
@@ -132,6 +148,8 @@ internal static class ValueKindTableTests
             Verify.That(ValueKindTable.Has(OptionalRules.Optional, ValueKindProperty.Field) &&
                 ValueKindTable.Has(OptionalRules.Optional, ValueKindProperty.StructMember),
                 "optional fields can be class fields and struct members");
+            Verify.That(ValueKindTable.Has(MapRules.Map, ValueKindProperty.Field) && ValueKindTable.Has(MapRules.Set, ValueKindProperty.StructMember),
+                "map and set fields can be class fields and struct members");
         });
     }
 

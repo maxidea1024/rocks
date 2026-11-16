@@ -3,14 +3,16 @@
 #include <Base/Checked.h>
 #include <Object/FieldCodec.h>
 #include <Object/GeneratedFieldAccess.h>
+#include <Serialization/MapWire.h>
 #include <Serialization/OptionalWire.h>
+#include <Serialization/SetWire.h>
 
 // 필드 codec 사슬의 첫 조각으로 단일 값의 wire 쓰기 쪽이다(Docs/Design/ReflectionFoundations.ko.md
 // 5.6·6.4절). 값 종류·필드의 wire tag(FieldWireType), 정수 폭 한도(UnsignedLimit·SignedLimit·
 // FitsSignedLimit), enum 선언 값 집합(EnumValueSet), 값 쓰기(WriteValueWire)와 단일 값 필드
 // 쓰기(EncodeFieldWire — Optional<단일 값> 포함)가 있다. 사슬(FieldValueWire → FieldValueParse →
-// StructFieldCodec → ArrayFieldCodec → OptionalFieldCodec → GeneratedFieldCodec)은 각 조각이 앞
-// 조각을 include하므로 직접 include하지 말고 Object/GeneratedFieldCodec.h로 받는다.
+// StructFieldCodec → ArrayFieldCodec → OptionalFieldCodec → MapFieldCodec → GeneratedFieldCodec)은
+// 각 조각이 앞 조각을 include하므로 직접 include하지 말고 Object/GeneratedFieldCodec.h로 받는다.
 namespace rocks::detail {
 
 // 값 종류의 wire tag다. 참조(강한·weak)는 문맥의 referenceWire다. Array·Opaque는 Unsupported다(배열
@@ -67,6 +69,12 @@ inline Result<uint32> FieldWireType(ValueKind kind, uint32 referenceWire) noexce
     case ValueKind::Optional:
         // present byte + 내부 wire(Docs/Design/ReflectionExtensions.ko.md 1.2·6절).
         return Result<uint32>::Success(static_cast<uint32>(WireType::Optional));
+    case ValueKind::Map:
+        // 키 wire + 값 wire + count + 항목(Docs/Design/ReflectionExtensions.ko.md 1.2·7.2절).
+        return Result<uint32>::Success(static_cast<uint32>(WireType::Map));
+    case ValueKind::Set:
+        // 원소 wire + count + 원소(같은 문서 1.2·7.2절).
+        return Result<uint32>::Success(static_cast<uint32>(WireType::Set));
     case ValueKind::Array:
     case ValueKind::Opaque:
         break;
@@ -77,8 +85,10 @@ inline Result<uint32> FieldWireType(ValueKind kind, uint32 referenceWire) noexce
 
 // 필드 하나의 wire tag다(5.6절). 배열은 원소가 Struct면 RecordList, 그 밖의 단일 값 원소면
 // ValueArray다(원소가 Opaque·Array면 Unsupported). Optional은 내부 종류가 Optional 내부 종류(성질
-// 표)일 때 Optional이다(아니면 Unsupported — 내부 wire는 FieldWireType(element.kind)). 그 밖은 값
-// 종류의 wire다. 직렬화기의 wire 재확인·ValidateLayout·struct encode의 멤버 wire 재확인이 쓴다.
+// 표)일 때 Optional이다(아니면 Unsupported — 내부 wire는 FieldWireType(element.kind)). Map은 키가
+// Map 키 종류이고 값이 Map 값 종류(ObjectReference 제외 — ObjectRefMap은 리플렉션 B9f4)일 때 Map,
+// Set은 원소가 Set 원소 종류일 때 Set이다(아니면 Unsupported — 리플렉션 B9f2). 그 밖은 값 종류의
+// wire다. 직렬화기의 wire 재확인·ValidateLayout·struct encode의 멤버 wire 재확인이 쓴다.
 inline Result<uint32> FieldWireType(const FieldSchema& field, uint32 referenceWire) noexcept {
     if (field.value.kind == ValueKind::Optional) {
         if (!ValueKindCanBeOptionalInner(field.element.kind)) {
@@ -86,6 +96,23 @@ inline Result<uint32> FieldWireType(const FieldSchema& field, uint32 referenceWi
         }
 
         return Result<uint32>::Success(static_cast<uint32>(WireType::Optional));
+    }
+
+    if (field.value.kind == ValueKind::Map) {
+        if (!ValueKindCanBeMapKey(field.key.kind) || !ValueKindCanBeMapValue(field.element.kind) ||
+            field.element.kind == ValueKind::ObjectReference) {
+            return Result<uint32>::Failure(ErrorCode::Unsupported);
+        }
+
+        return Result<uint32>::Success(static_cast<uint32>(WireType::Map));
+    }
+
+    if (field.value.kind == ValueKind::Set) {
+        if (!ValueKindCanBeSetElement(field.element.kind)) {
+            return Result<uint32>::Failure(ErrorCode::Unsupported);
+        }
+
+        return Result<uint32>::Success(static_cast<uint32>(WireType::Set));
     }
 
     if (field.value.kind != ValueKind::Array) {
@@ -292,12 +319,14 @@ private:
 // 저장 집합 밖이면 정책대로 null + 진단)다. ClassRef는 Required null 검사 뒤 non-null 값을 문맥의
 // AcquireClassReference(스키마 Base type.type)와 정적 Base(staticNative)로 다시 판정한다(조회 1을
 // Spend — 미등록 NotFound, 그 밖 InvalidArgument, Required 검사 모드는 조회하지 않는다). Deprecated
-// 클래스 값은 encode가 허용한다(로드한 값을 다시 저장할 수 있게 — 리플렉션 B9h2, 5.2절).
+// 클래스 값은 encode가 허용한다(로드한 값을 다시 저장할 수 있게 — 리플렉션 B9h2, 5.2절). key가
+// 참이면 Map 키·Set 원소 자리다(리플렉션 B9f2): 키에는 Required가 없으므로 CheckRequired를 하지
+// 않는다(필드의 Required는 Map 값·Set 원소마다 non-null이다 — Set 원소는 key = 거짓으로 쓴다).
 inline Result<void> WriteValueWire(ArchiveWriter& out, FieldEncodeContext& context,
                                    const ValueType& type, const EnumSchema* enumeration,
                                    const FieldValue& value, StringView text,
-                                   const void* staticNative,
-                                   const EnumValueSet* set = nullptr) noexcept {
+                                   const void* staticNative, const EnumValueSet* set = nullptr,
+                                   bool key = false) noexcept {
     if (value.kind != type.kind) {
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
@@ -333,7 +362,8 @@ inline Result<void> WriteValueWire(ArchiveWriter& out, FieldEncodeContext& conte
         return out.WriteGuid(value.guid);
     case ValueKind::ClassReference: {
         const bool isNull = value.guid == Guid{};
-        if (auto required = context.CheckRequired(isNull); !required) {
+        if (auto required = key ? Result<void>::Success() : context.CheckRequired(isNull);
+            !required) {
             return required;
         }
 
@@ -383,7 +413,8 @@ inline Result<void> WriteValueWire(ArchiveWriter& out, FieldEncodeContext& conte
         }
 
         const bool isNull = asset.IsNull() && text.ByteCount() == 0;
-        if (auto required = context.CheckRequired(isNull); !required) {
+        if (auto required = key ? Result<void>::Success() : context.CheckRequired(isNull);
+            !required) {
             return required;
         }
 
@@ -436,6 +467,8 @@ inline Result<void> WriteValueWire(ArchiveWriter& out, FieldEncodeContext& conte
     case ValueKind::Struct:
     case ValueKind::Array:
     case ValueKind::Optional:
+    case ValueKind::Map:
+    case ValueKind::Set:
     case ValueKind::Opaque:
         break;
     }

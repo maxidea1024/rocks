@@ -259,3 +259,91 @@ TEST(OrderedMap_OrderAndResultsDoNotDependOnSeed) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+
+namespace {
+
+// 할당 byte를 센다(Reserve가 실제로 잡는 저장소 크기).
+struct ByteCounting final : Allocator {
+    explicit ByteCounting(Allocator& inner) noexcept : inner_(inner) {
+    }
+
+    Result<void*> Allocate(usize bytes, usize alignment, uint32 tag = 0) noexcept override {
+        total += bytes;
+        ++calls;
+        return inner_.Allocate(bytes, alignment, tag);
+    }
+
+    Result<void> Deallocate(void* value) noexcept override {
+        return inner_.Deallocate(value);
+    }
+
+    usize total = 0;
+    usize calls = 0;
+
+private:
+    Allocator& inner_;
+};
+
+// 빈 컨테이너 C의 Reserve(count)가 할당한 byte다(할당이 없으면 0).
+template <class C>
+usize ReservedByAllocator(usize count) noexcept {
+    SystemAllocator system;
+    ByteCounting counting(system);
+    {
+        C container(counting);
+        CHECK(container.Reserve(count));
+        CHECK(counting.calls <= 1);
+    }
+
+    return counting.total;
+}
+
+template <class C>
+void CheckReservedBytes() noexcept {
+    const usize counts[] = {0, 1, 3, 4, 5, 511, 512, 513, 1023, 1024, 1025, 65536, 65537};
+    for (usize count : counts) {
+        usize predicted = 0;
+        REQUIRE(C::ReservedBytes(count, predicted));
+        CHECK(predicted == ReservedByAllocator<C>(count));
+    }
+}
+
+struct Wide {
+    uint64 a = 0;
+    uint64 b = 0;
+    uint8 c = 0;
+};
+
+} // namespace
+
+// ReservedBytes(count)는 빈 컨테이너의 Reserve(count)가 실제로 할당하는 byte와 같다(항목의
+// hash·정렬 padding, 2의 거듭제곱 용량 올림, 색인 칸 포함 — 리플렉션 B9f2의 2단계 몫 선청구가 이
+// 값을 쓴다). 키·값 크기와 정렬이 다른 여러 형식, 2의 거듭제곱 경계 앞뒤의 count에서 확인하고,
+// Clear한 뒤의 Reserve는 이보다 많이 잡지 않으며, MaximumCapacity를 넘는 count는 false다.
+TEST(OrderedMap_ReservedBytesMatchesReserveAllocation) {
+    CheckReservedBytes<OrderedMap<uint32, int32>>();
+    CheckReservedBytes<OrderedMap<String, float>>();
+    CheckReservedBytes<OrderedMap<uint8, Wide>>();
+    CheckReservedBytes<OrderedMap<Guid, uint64>>();
+    CheckReservedBytes<OrderedSet<bool>>();
+    CheckReservedBytes<OrderedSet<uint32>>();
+    CheckReservedBytes<OrderedSet<String>>();
+
+    SystemAllocator system;
+    ByteCounting counting(system);
+    {
+        OrderedMap<uint32, int32> map(counting);
+        REQUIRE(map.Reserve(100));
+        REQUIRE(map.Insert(uint32{1}, int32{1}));
+        map.Clear();
+        const usize before = counting.total;
+        REQUIRE(map.Reserve(300));
+        usize bound = 0;
+        REQUIRE((OrderedMap<uint32, int32>::ReservedBytes(300, bound)));
+        CHECK(counting.total - before <= bound);
+    }
+
+    usize bytes = 0;
+    CHECK(!(OrderedMap<uint32, int32>::ReservedBytes(OrderedMap<uint32, int32>::MaximumCapacity + 1,
+                                                     bytes)));
+}

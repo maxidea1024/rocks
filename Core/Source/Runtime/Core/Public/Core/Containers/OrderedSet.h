@@ -71,6 +71,12 @@ public:
         return map_.EraseIf([&](const K& key, const Marker&) noexcept { return predicate(key); });
     }
 
+    // 빈(또는 Clear한) Set의 Reserve(count)가 새로 잡는 저장소 byte의
+    // 상한이다(OrderedMap::ReservedBytes).
+    static constexpr bool ReservedBytes(usize count, usize& bytes) noexcept {
+        return OrderedMap<K, Marker, Hasher, KeyEqual>::ReservedBytes(count, bytes);
+    }
+
     // count개 원소를 저장소 성장 없이 담게 한다. 실패하면 그대로다(OrderedMap::Reserve).
     Result<void> Reserve(usize count) noexcept {
         return map_.Reserve(count);
@@ -91,6 +97,11 @@ public:
 
     bool IsEmpty() const noexcept {
         return map_.IsEmpty();
+    }
+
+    // 저장소를 할당하는 allocator다(OrderedMap::GetAllocator).
+    Allocator& GetAllocator() const noexcept {
+        return map_.GetAllocator();
     }
 
     // 원소만 비우고 용량은 유지한다.

@@ -17,6 +17,7 @@ namespace rocks {
 namespace {
 
 using detail::AddBytes;
+using detail::CarriesKeyNativeType;
 using detail::CarriesValueNativeType;
 using detail::CopyBytes;
 using detail::RecordTag;
@@ -59,12 +60,13 @@ bool IsAggregateField(const FieldSchema& field) noexcept {
     return FieldIsAggregate(field);
 }
 
-// 클래스 함수표에서 필드 ID의 valueNativeType을 찾는다(ResolveValueTypes의 thunkType).
-const void* ClassThunkType(const void* context, Guid fieldId) noexcept {
+// 클래스 함수표에서 필드 ID의 valueNativeType(key면 keyNativeType)을 찾는다(ResolveValueTypes의
+// thunkType).
+const void* ClassThunkType(const void* context, Guid fieldId, bool key) noexcept {
     const auto& fields = *static_cast<const Span<const RuntimeFieldOps>*>(context);
     for (const RuntimeFieldOps& field : fields) {
         if (field.fieldId == fieldId) {
-            return field.valueNativeType;
+            return key ? field.keyNativeType : field.valueNativeType;
         }
     }
 
@@ -106,18 +108,35 @@ Result<void> ValidateFieldList(Span<const FieldSchema> fields, bool structMember
         // MaxArrayElements]이다. Optional 필드는 value.type 0, 내부 종류는 성질 표의 Optional 내부
         // 종류(참조·컨테이너·Optional 거부 — 참조 struct는 ResolveValueTypes가 거부한다),
         // maxElements 0이다. 그 밖의 필드는 element = {Opaque, 0}·maxElements 0이다.
+        // Map 필드(리플렉션 B9f2)는 value.type 0, 키 종류는 성질 표의 Map 키 종류, 값 종류는 Map 값
+        // 종류(ObjectReference는 ObjectRefMap이라 B9f4가 연다 — 지금은 거부, 참조 struct는
+        // ResolveValueTypes가 거부한다), maxElements는 배열과 같은 범위다. Set 필드는 원소 종류가
+        // Set 원소 종류다. Map이 아닌 필드의 key는 {Opaque, 0}이다.
         const bool array = field.value.kind == ValueKind::Array;
         const bool optional = field.value.kind == ValueKind::Optional;
+        const bool map = field.value.kind == ValueKind::Map;
+        const bool set = field.value.kind == ValueKind::Set;
         const ValueType& target = FieldTargetType(field);
-        const bool arrayShape =
-            array
-                ? field.value.type == TypeId{} && ValueKindCanBeArrayElement(field.element.kind) &&
-                      field.maxElements >= 1 && field.maxElements <= MaxArrayElements
-            : optional
-                ? field.value.type == TypeId{} && ValueKindCanBeOptionalInner(field.element.kind) &&
-                      field.maxElements == 0
-                : field.element.kind == ValueKind::Opaque && field.element.type == TypeId{} &&
-                      field.maxElements == 0;
+        const ValueType& key = FieldKeyType(field);
+        const bool counted = field.value.type == TypeId{} && field.maxElements >= 1 &&
+                             field.maxElements <= MaxArrayElements;
+        const bool arrayShape = array ? counted && ValueKindCanBeArrayElement(field.element.kind)
+                                : optional ? field.value.type == TypeId{} &&
+                                                 ValueKindCanBeOptionalInner(field.element.kind) &&
+                                                 field.maxElements == 0
+                                : map ? counted && ValueKindCanBeMapValue(field.element.kind) &&
+                                            field.element.kind != ValueKind::ObjectReference &&
+                                            ValueKindCanBeMapKey(key.kind)
+                                : set
+                                    ? counted && ValueKindCanBeSetElement(field.element.kind)
+                                    : field.element.kind == ValueKind::Opaque &&
+                                          field.element.type == TypeId{} && field.maxElements == 0;
+        // 키 대상 type은 키 종류가 대상 타입 종류일 때만 쓰고(Enum ID·ClassRef Base 필수, Soft 기대
+        // 타입 선택) 그 밖은 0이다. Map이 아닌 필드의 key는 {Opaque, 0}이다.
+        const bool keyShape =
+            map ? (ValueKindHasTargetType(key.kind) || key.type == TypeId{}) &&
+                      (!ValueKindRequiresTargetId(key.kind) || key.type != TypeId{})
+                : key.kind == ValueKind::Opaque && key.type == TypeId{};
         // Required는 성질 표가 허용하는 대상 종류(typed 참조·소프트 참조, 배열이면 원소)에만 뜻이
         // 있다(저장이 null을 검사하려면 접근기·codec이 있어야 한다). Optional은 대상 종류가 내부
         // 종류이고 Optional 내부 종류는 모두 Required를 받지 않으므로 같은 판정이 거부한다(성질
@@ -126,7 +145,7 @@ Result<void> ValidateFieldList(Span<const FieldSchema> fields, bool structMember
             (HasFlag(field.flags, FieldFlags::Required) &&
              !ValueKindAcceptsRequired(target.kind)) ||
             (field.kind != FieldKind::Value && field.kind != FieldKind::ObjectReference) ||
-            !SupportedFieldKind(field.value.kind, structMembers) || !arrayShape ||
+            !SupportedFieldKind(field.value.kind, structMembers) || !arrayShape || !keyShape ||
             !StringView(field.name.Data(), field.name.Size()).ValidateUtf8() ||
             !StringView(field.category.Data(), field.category.Size()).ValidateUtf8() ||
             !StringView(field.displayName.Data(), field.displayName.Size()).ValidateUtf8() ||
@@ -170,6 +189,10 @@ Result<void> ValidateFieldList(Span<const FieldSchema> fields, bool structMember
 bool CarriesValueNativeType(const FieldSchema& field) noexcept {
     const ValueKind kind = FieldTargetType(field).kind;
     return kind == ValueKind::Enum || kind == ValueKind::Struct;
+}
+
+bool CarriesKeyNativeType(const FieldSchema& field) noexcept {
+    return field.value.kind == ValueKind::Map && FieldKeyType(field).kind == ValueKind::Enum;
 }
 
 } // namespace detail
@@ -230,7 +253,8 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         for (usize schemaIndex = 0; schemaIndex < schema.fields.Size(); ++schemaIndex) {
             const auto& schemaField = schema.fields[schemaIndex];
             if (schemaField.id == field.fieldId && schemaField.value.kind != ValueKind::Opaque &&
-                CarriesValueNativeType(schemaField) == (field.valueNativeType != nullptr)) {
+                CarriesValueNativeType(schemaField) == (field.valueNativeType != nullptr) &&
+                CarriesKeyNativeType(schemaField) == (field.keyNativeType != nullptr)) {
                 matched = &schemaField;
                 break;
             }
@@ -267,7 +291,8 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         (fieldEnd + alignof(RuntimeFieldOps) - 1) & ~(alignof(RuntimeFieldOps) - 1);
     const usize opsEnd = opsOffset + ops.fields.Size() * sizeof(RuntimeFieldOps);
     const usize typesOffset = (opsEnd + alignof(Record*) - 1) & ~(alignof(Record*) - 1);
-    const usize typesEnd = typesOffset + schema.fields.Size() * sizeof(Record*);
+    // 값 대상과 키 대상(리플렉션 B9f2) 레코드 포인터를 이어 둔다.
+    const usize typesEnd = typesOffset + 2 * schema.fields.Size() * sizeof(Record*);
     // 필드 ID 정렬 색인과 스키마 위치 → 함수표 위치 색인(경로 접근의 FieldIndex·FieldOps).
     const usize orderOffset = (typesEnd + alignof(uint32) - 1) & ~(alignof(uint32) - 1);
     const usize opsIndexOffset = orderOffset + schema.fields.Size() * sizeof(uint32);
@@ -310,8 +335,9 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         // Enum·Struct 필드가 가리키는 레코드는 먼저 등록되어 있어야 하고, 정적 thunk의 C++ 타입과
         // 같은 native 타입이어야 한다. WorldOnly가 아닌 클래스는 WorldOnly 소유자를 요구하는
         // struct를 필드로 둘 수 없다.
-        if (auto resolved = ResolveValueTypes(schema.fields, &ClassThunkType, &ops.fields,
-                                              HasFlag(schema.flags, TypeFlags::WorldOnly), nullptr);
+        if (auto resolved =
+                ResolveValueTypes(schema.fields, &ClassThunkType, &ops.fields,
+                                  HasFlag(schema.flags, TypeFlags::WorldOnly), nullptr, nullptr);
             !resolved) {
             return Result<TypeRegistrationToken>::Failure(resolved.Error());
         }
@@ -352,6 +378,8 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
                         field.value.type == inherited.value.type &&
                         field.element.kind == inherited.element.kind &&
                         field.element.type == inherited.element.type &&
+                        field.key.kind == inherited.key.kind &&
+                        field.key.type == inherited.key.type &&
                         field.maxElements == inherited.maxElements &&
                         field.flags == inherited.flags &&
                         SameBytes(EffectiveToolName(field), EffectiveToolName(inherited))) {
@@ -397,6 +425,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         reinterpret_cast<RuntimeFieldOps*>(static_cast<uint8*>(memory.Value()) + opsOffset);
     auto* fieldTypes =
         reinterpret_cast<Record**>(static_cast<uint8*>(memory.Value()) + typesOffset);
+    Record** fieldKeyTypes = fieldTypes + schema.fields.Size();
     auto* fieldOrder = reinterpret_cast<uint32*>(static_cast<uint8*>(memory.Value()) + orderOffset);
     auto* opsIndex =
         reinterpret_cast<uint32*>(static_cast<uint8*>(memory.Value()) + opsIndexOffset);
@@ -406,12 +435,14 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         platform::LockGuard lock(gate_);
         Span<const RuntimeFieldOps> thunks = ops.fields;
         if (!ResolveValueTypes(schema.fields, &ClassThunkType, &thunks,
-                               HasFlag(schema.flags, TypeFlags::WorldOnly), fieldTypes)) {
+                               HasFlag(schema.flags, TypeFlags::WorldOnly), fieldTypes,
+                               fieldKeyTypes)) {
             platform::Fatal("TypeRegistry value type dependency vanished during registration");
         }
     }
 
     record->fieldTypes = fieldTypes;
+    record->fieldKeyTypes = fieldKeyTypes;
     record->schema.id = schema.id;
     record->schema.version = schema.version;
     record->schema.baseType = schema.baseType;
@@ -463,6 +494,10 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
         if (fieldTypes[fieldIndex]) {
             ++fieldTypes[fieldIndex]->dependents;
+        }
+
+        if (fieldKeyTypes[fieldIndex]) {
+            ++fieldKeyTypes[fieldIndex]->dependents;
         }
     }
 

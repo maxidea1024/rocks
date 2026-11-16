@@ -40,6 +40,11 @@ public:
         return current_ ? current_->enumeration : nullptr;
     }
 
+    // 지금 위치가 키가 Enum인 Map 필드면 그 키 enum 스키마다(리플렉션 B9f2 — 그 밖은 nullptr).
+    const EnumSchema* FieldKeyEnum() const noexcept {
+        return current_ ? current_->keyEnumeration : nullptr;
+    }
+
     TypeId ObjectType() const noexcept {
         return objectType_;
     }
@@ -138,7 +143,9 @@ public:
     // hook 관찰 — Docs/Design/ReflectionFoundations.ko.md 5.6절). 바이트를 작업량으로 청구하되
     // Scratch와 달리 단일 할당 한도(maxValueBytes)가 없다: 관찰 struct 안 배열의 원소 버퍼는 wire
     // 값 크기보다 클 수 있다(예: 빈 String 원소 20만 개 — wire 8 byte, native 수십 byte). work
-    // 예산이 상한이다. 복원 2단계와 저장은 관찰하지 않으므로 쓰지 않는다.
+    // 예산이 상한이다. 복원 1단계의 Map 키·Set 원소 중복 판정 색인(리플렉션 B9f2 — 1단계에만 있는
+    // 임시 색인이고 wire보다 클 수 있다)도 이 할당기를 쓴다. 복원 2단계와 저장은 관찰하지 않으므로
+    // 쓰지 않는다.
     virtual Allocator& ObservationScratch() noexcept = 0;
 
     // 중첩 Record(struct 값)의 TLV 수를 그래프 필드 누계(maxTotalFields)에 더한다. 복원 2단계는
@@ -200,23 +207,27 @@ private:
 };
 
 // 위치 하나에 들어가고 나온다(RAII). 바깥 프레임의 유효 플래그를 PropagateFieldFlags로 전파한다.
-// scope는 문맥보다 먼저 끝나야 하고 들어간 순서의 역순으로 끝나야 한다.
+// keyEnumeration은 키가 Enum인 Map 필드의 키 enum이다(리플렉션 B9f2 — TypeLease·StructView의
+// FieldKeyEnum). scope는 문맥보다 먼저 끝나야 하고 들어간 순서의 역순으로 끝나야 한다.
 //
 // 사용 예(직렬화기):
-//   FieldScope scope(context, schema.fields[index], schema.id, lease.FieldEnum(index));
+//   FieldScope scope(context, schema.fields[index], schema.id, lease.FieldEnum(index),
+//                    lease.FieldStruct(index), FieldCodecFrame::NoIndex,
+//                    lease.FieldKeyEnum(index));
 //   auto wire = ops->encode(*ops, registry, access, handle, payload, context);
 class FieldScope {
 public:
     [[nodiscard]] FieldScope(FieldCodecContext& context, const FieldSchema& field,
                              TypeId declaringType, const EnumSchema* enumeration = nullptr,
-                             StructView structure = {},
-                             uint32 index = FieldCodecFrame::NoIndex) noexcept
+                             StructView structure = {}, uint32 index = FieldCodecFrame::NoIndex,
+                             const EnumSchema* keyEnumeration = nullptr) noexcept
         : context_(context), previous_(context.current_) {
         frame_.field = &field;
         frame_.declaringType = declaringType;
         frame_.enumeration = enumeration;
         frame_.structure = structure;
         frame_.index = index;
+        frame_.keyEnumeration = keyEnumeration;
         frame_.parent = context.current_;
         frame_.effectiveFlags =
             context.current_ ? PropagateFieldFlags(context.current_->effectiveFlags, field.flags)
@@ -245,10 +256,12 @@ private:
 
 // 배열 필드 프레임의 원소 index 칸을 쓴다(RAII, Docs/Design/ReflectionFoundations.ko.md 5.6절).
 // 원소마다 새 프레임을 만들지 않으므로 프레임은 최대 MaxPropertyPathSteps(17)개(BuildPath 버퍼
-// 크기)다. 만들 때 현재 프레임이 배열 필드(value.kind == Array)이고 그 index가 NoIndex여야
-// 한다(아니면 Fatal — 배열 codec 계약 위반). Set은 현재 프레임이 그 배열 프레임일 때만 쓸 수
-// 있고(원소 struct 멤버 scope 안에서 부르면 Fatal), 소멸 때 index를 NoIndex로 되돌린다. 배열
-// 프레임을 연 FieldScope보다 먼저 끝나야 한다.
+// 크기)다. 만들 때 현재 프레임이 원소 열을 가진 컨테이너 필드(Array·Map·Set — 리플렉션 B9f2가
+// Map 항목·Set 원소로 넓혔다, 진단 경로는 키를 복사하지 않는 삽입 순번이다 —
+// Docs/Design/ReflectionExtensions.ko.md 1.6절)이고 그 index가 NoIndex여야 한다(아니면 Fatal —
+// 컨테이너 codec 계약 위반). Set은 현재 프레임이 그 컨테이너 프레임일 때만 쓸 수 있고(원소 struct
+// 멤버 scope 안에서 부르면 Fatal), 소멸 때 index를 NoIndex로 되돌린다. 컨테이너 프레임을 연
+// FieldScope보다 먼저 끝나야 한다.
 //
 // 사용 예(배열 codec):
 //   ElementIndexScope element(context);
@@ -260,9 +273,12 @@ class ElementIndexScope {
 public:
     [[nodiscard]] explicit ElementIndexScope(FieldCodecContext& context) noexcept
         : context_(context), frame_(context.current_) {
-        if (!frame_ || frame_->field->value.kind != ValueKind::Array ||
+        const ValueKind kind = frame_ ? frame_->field->value.kind : ValueKind::Opaque;
+        if ((kind != ValueKind::Array && kind != ValueKind::Map && kind != ValueKind::Set) ||
             frame_->index != FieldCodecFrame::NoIndex) {
-            platform::Fatal("ElementIndexScope requires an array field frame without an index");
+            platform::Fatal(
+                "ElementIndexScope requires an array, map or set field frame without an "
+                "index");
         }
     }
 

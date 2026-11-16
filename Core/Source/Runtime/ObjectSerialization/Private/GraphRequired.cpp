@@ -141,7 +141,8 @@ Result<void> CheckRequiredFields(Allocator& allocator, ConstructionContext& tran
             }
 
             // 최상위 필드의 declaringType은 객체 타입이다(저장과 같다).
-            FieldScope scope(context, field, schema.id, lease.FieldEnum(fieldIndex), structure);
+            FieldScope scope(context, field, schema.id, lease.FieldEnum(fieldIndex), structure,
+                             FieldCodecFrame::NoIndex, lease.FieldKeyEnum(fieldIndex));
             // Transient와 이 데이터에 없어야 하는 플래그(쿠킹 로드의 EditorOnly)는 저장하지
             // 않으므로 검사하지 않는다(struct 안 멤버는 EncodeStructRecord가 같은 규칙으로
             // 건너뛴다).

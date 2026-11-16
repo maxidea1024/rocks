@@ -51,7 +51,12 @@ internal static class MetaProbeIdentity
                 "probe::Leaf::anything", "probe::Leaf::links", "probe::Value::strong",
                 "probe::Value::kind", "probe::Value::kinds", "probe::Value::self", "probe::Leaf::kind", "probe::Leaf::kinds",
                 "probe::Derived::extra", "probe::Other::value",
-                "probe::Leaf::weight", "probe::Value::text", "probe::Value::name", "probe::Value::list", "probe::Value::pointer" }
+                "probe::Leaf::weight", "probe::Value::text", "probe::Value::name", "probe::Value::list", "probe::Value::pointer",
+                "probe::Leaf::x", "probe::Leaf::tags", "probe::Value::byMode", "probe::Value::assets", "probe::Value::byRatio",
+                "probe::Value::byObject", "probe::Value::byWeak", "probe::Value::byLeaf", "probe::Value::ratios", "probe::Value::lists",
+                "probe::Value::sets", "probe::Value::maybe", "probe::Value::maybeSet", "probe::Value::maybeKey", "probe::Value::unordered",
+                "probe::Value::maybeMap", "probe::Value::byAsset", "probe::Value::tags", "probe::Value::custom", "probe::Value::unorderedSet",
+                "probe::Value::constKey", "probe::Value::constValue", "probe::Value::pointers" }
                 .Concat(Enumerable.Range(2, 16).Select(level => $"probe::Chain{level}::inner")))
             {
                 manifest.Register("field", name);

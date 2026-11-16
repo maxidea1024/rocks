@@ -14,7 +14,9 @@ namespace rocks {
 // ops.fields 위치 색인(함수표가 없는 Opaque 필드는 NoOps)을 둔다(TypeLease::FieldOps — 클래스
 // ops.fields는 입력 순서다). 클래스·struct 레코드의 fieldTypes는 schema.fields와 같은 길이이며
 // 필드의 대상 형식(배열이면 원소)이 가리키는 Enum·Struct 레코드(그 밖은 nullptr)다 — 이 참조는
-// lease가 아니라 dependents 계수로 표시하므로 Shutdown이 영구 Busy가 되지 않는다.
+// lease가 아니라 dependents 계수로 표시하므로 Shutdown이 영구 Busy가 되지 않는다. fieldKeyTypes도
+// 같은 길이이며 Map 필드의 키(FieldKeyType)가 Enum이면 그 enum 레코드다(리플렉션 B9f2 — 그 밖은
+// nullptr, 같은 dependents 계수).
 struct TypeRegistry::Record {
     static constexpr uint32 NoOps = NumericLimits<uint32>::Max();
 
@@ -35,6 +37,7 @@ struct TypeRegistry::Record {
     bool containsName = false;
     bool containsWeakReference = false;
     Record** fieldTypes = nullptr;
+    Record** fieldKeyTypes = nullptr;
     uint32 generation = 0;
     uint32 leases = 0;
     uint32 dependents = 0;

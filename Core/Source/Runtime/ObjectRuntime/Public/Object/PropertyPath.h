@@ -32,7 +32,8 @@ namespace rocks {
 //   InvalidValue      — 값 내용·종류(InvalidArgument — 값 종류나 enum ID가 필드와 다르면
 //                       TypeMismatch), 삽입 값 누락
 //   ReadOnly          — 유효 플래그(바깥 struct·배열 필드에서 전파)의 ReadOnly(Unsupported)
-//   AggregateValue    — struct·배열·Optional<값 struct>를 통째로 읽기·쓰기, struct 원소 삽입에
+//   AggregateValue    — struct·배열·Optional<값 struct>·Map·Set을 통째로 읽기·쓰기(Map·Set의 key
+//                       단계는 리플렉션 B9f3), struct 원소 삽입에
 //                       값·제거에 removed(Unsupported, removed는 InvalidArgument)
 //   NoPathAccess      — 경로 thunk(또는 최상위 read·write)가 없는 필드·멤버, Opaque 필드로 끝나는
 //                       읽기·쓰기, previous를 요청했는데 최상위 필드에 read가 없음(Unsupported)

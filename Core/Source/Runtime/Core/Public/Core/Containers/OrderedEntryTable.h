@@ -64,6 +64,38 @@ public:
     explicit OrderedEntryTable(Allocator& allocator) noexcept : allocator_(&allocator) {
     }
 
+    // 용량 capacity의 저장소 byte다(항목 capacity개 + 색인 칸 capacity × 2개의 u32 — Reallocate가
+    // 할당 한 번으로 잡는 크기). usize를 넘으면 false다.
+    static constexpr bool StorageBytes(usize capacity, usize& bytes) noexcept {
+        usize entryBytes = 0;
+        usize indexBytes = 0;
+        return TryMultiply(capacity, sizeof(Entry), entryBytes) &&
+               TryMultiply(capacity, 2 * sizeof(uint32), indexBytes) &&
+               TryAdd(entryBytes, indexBytes, bytes);
+    }
+
+    // 빈 표(또는 Clear한 표)의 Reserve(count)가 새로 잡는 저장소 byte의 상한이다: count가 0이면 0,
+    // 아니면 MinimumCapacity부터 두 배씩 count 이상으로 올린 용량의 StorageBytes다(빈 표에서는
+    // 정확히 그 할당 한 번 — 이미 더 큰 용량이 있으면 할당하지 않는다). count가 MaximumCapacity를
+    // 넘거나 byte가 usize를 넘으면 false다(Reserve의 Overflow와 같다).
+    static constexpr bool ReservedBytes(usize count, usize& bytes) noexcept {
+        if (count == 0) {
+            bytes = 0;
+            return true;
+        }
+
+        if (count > MaximumCapacity) {
+            return false;
+        }
+
+        usize capacity = MinimumCapacity;
+        while (capacity < count) {
+            capacity *= 2; // 2의 거듭제곱이 MaximumCapacity 이하에서 멈춘다.
+        }
+
+        return StorageBytes(capacity, bytes);
+    }
+
     OrderedEntryTable(const OrderedEntryTable&) = delete;
     OrderedEntryTable& operator=(const OrderedEntryTable&) = delete;
 
@@ -420,12 +452,8 @@ private:
     // 새 저장소(항목 + 색인, 할당 한 번)를 잡은 뒤에만 산 항목을 순서대로 옮긴다. 실패하면
     // 그대로다.
     Result<void> Reallocate(usize newCapacity) noexcept {
-        usize entryBytes = 0;
-        usize indexBytes = 0;
         usize bytes = 0;
-        if (newCapacity > MaximumCapacity || !TryMultiply(newCapacity, sizeof(Entry), entryBytes) ||
-            !TryMultiply(newCapacity, 2 * sizeof(uint32), indexBytes) ||
-            !TryAdd(entryBytes, indexBytes, bytes)) {
+        if (newCapacity > MaximumCapacity || !StorageBytes(newCapacity, bytes)) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }
 
@@ -439,9 +467,11 @@ private:
             platform::Fatal("OrderedMap allocator returned invalid storage");
         }
 
-        unsigned char* indexStorage = reinterpret_cast<unsigned char*>(entries) + entryBytes;
+        // StorageBytes가 넘침 없이 계산했으므로 아래 곱은 넘치지 않는다.
+        unsigned char* indexStorage =
+            reinterpret_cast<unsigned char*>(entries) + newCapacity * sizeof(Entry);
         uint32* index = reinterpret_cast<uint32*>(indexStorage);
-        const usize slotCount = indexBytes / sizeof(uint32);
+        const usize slotCount = newCapacity * 2;
         for (usize slot = 0; slot < slotCount; ++slot) {
             ConstructAt<uint32>(index + slot, EmptySlot);
         }

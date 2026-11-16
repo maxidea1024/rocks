@@ -86,6 +86,20 @@ const EnumSchema* TypeLease::FieldEnum(usize fieldIndex) const& noexcept {
     return &record->fieldTypes[fieldIndex]->enumSchema;
 }
 
+const EnumSchema* TypeLease::FieldKeyEnum(usize fieldIndex) const& noexcept {
+    const auto* record = static_cast<TypeRegistry::Record*>(record_);
+    if (!record || fieldIndex >= record->schema.fields.Size()) {
+        platform::Fatal("TypeLease::FieldKeyEnum called on an empty lease or out of range");
+    }
+
+    if (!record->fieldKeyTypes || !record->fieldKeyTypes[fieldIndex] ||
+        record->fieldKeyTypes[fieldIndex]->kind != TypeKind::Enum) {
+        return nullptr;
+    }
+
+    return &record->fieldKeyTypes[fieldIndex]->enumSchema;
+}
+
 StructView TypeLease::FieldStruct(usize fieldIndex) const& noexcept {
     const auto* record = static_cast<TypeRegistry::Record*>(record_);
     if (!record || fieldIndex >= record->schema.fields.Size()) {
@@ -207,6 +221,16 @@ const EnumSchema* StructView::FieldEnum(usize schemaIndex) const noexcept {
     }
 
     const auto* target = record.fieldTypes[schemaIndex];
+    return target && target->kind == TypeKind::Enum ? &target->enumSchema : nullptr;
+}
+
+const EnumSchema* StructView::FieldKeyEnum(usize schemaIndex) const noexcept {
+    const auto& record = ViewAs<TypeRegistry::Record>(record_);
+    if (schemaIndex >= record.schema.fields.Size()) {
+        platform::Fatal("StructView::FieldKeyEnum out of range");
+    }
+
+    const auto* target = record.fieldKeyTypes ? record.fieldKeyTypes[schemaIndex] : nullptr;
     return target && target->kind == TypeKind::Enum ? &target->enumSchema : nullptr;
 }
 

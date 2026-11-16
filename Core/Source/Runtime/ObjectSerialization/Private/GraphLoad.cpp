@@ -676,7 +676,8 @@ Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& nod
         }
 
         FieldScope scope(context, schema.fields[schemaIndex], schema.id,
-                         node.lease.FieldEnum(schemaIndex), node.lease.FieldStruct(schemaIndex));
+                         node.lease.FieldEnum(schemaIndex), node.lease.FieldStruct(schemaIndex),
+                         FieldCodecFrame::NoIndex, node.lease.FieldKeyEnum(schemaIndex));
         context.BeginField();
         const uint64 before = budget.Used();
         // 해석과 present 판정(override 집합 자리 — 지금은 무동작)을 한 곳에서 한다.

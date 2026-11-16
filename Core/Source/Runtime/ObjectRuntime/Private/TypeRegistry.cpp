@@ -272,16 +272,19 @@ void TypeRegistry::DestroyRecord(Record* record) noexcept {
     if (record->fieldTypes) {
         platform::LockGuard lock(gate_);
         for (usize index = 0; index < record->schema.fields.Size(); ++index) {
-            Record* target = record->fieldTypes[index];
-            if (!target) {
-                continue;
-            }
+            Record* targets[] = {record->fieldTypes[index],
+                                 record->fieldKeyTypes ? record->fieldKeyTypes[index] : nullptr};
+            for (Record* target : targets) {
+                if (!target) {
+                    continue;
+                }
 
-            if (target->dependents == 0) {
-                platform::Fatal("TypeRegistry value type dependency underflow");
-            }
+                if (target->dependents == 0) {
+                    platform::Fatal("TypeRegistry value type dependency underflow");
+                }
 
-            --target->dependents;
+                --target->dependents;
+            }
         }
     }
 

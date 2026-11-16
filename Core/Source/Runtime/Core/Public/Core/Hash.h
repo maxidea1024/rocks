@@ -2,6 +2,7 @@
 
 #include <Base/Endian.h>
 #include <Base/Guid.h>
+#include <Core/Encoding/Sha256.h>
 #include <Core/Text/Name.h>
 #include <Core/Text/String.h>
 
@@ -216,6 +217,33 @@ inline uint64 SipHash24(HashSeed seed, const void* data, usize bytes) noexcept {
     return state.Finish(bytes, tail);
 }
 
+// ASCII 대문자를 소문자로 바꾼 byte열의 SipHash-2-4다(그 밖의 byte는 그대로 — 할당하지 않는다).
+// 결과는 소문자로 바꾼 사본에 SipHash24를 부른 값과 같다. 대소문자 무시로 같은 키(Name 원문의
+// base·도구 이름)를 seed 해시로 색인할 때 쓴다 — HashStringBytesIgnoringAsciiCase(FNV)와 같은 같음
+// 규칙이지만 seed가 계산 안에 들어가 충돌을 고를 수 없다.
+//
+// 사용 예:
+//   const uint64 hash = SipHash24IgnoringAsciiCase(seed, parts.base);   // "Socket" == "SOCKET"
+inline uint64 SipHash24IgnoringAsciiCase(HashSeed seed, StringView text) noexcept {
+    detail::SipHash24State state(seed);
+    const usize bytes = text.ByteCount();
+    uint64 word = 0;
+    usize filled = 0;
+    for (usize index = 0; index < bytes; ++index) {
+        const uint8 byte = static_cast<uint8>(text.Data()[index]);
+        const uint8 lowered =
+            byte >= 'A' && byte <= 'Z' ? static_cast<uint8>(byte + ('a' - 'A')) : byte;
+        word |= static_cast<uint64>(lowered) << (filled * 8);
+        if (++filled == sizeof(uint64)) {
+            state.Absorb(word);
+            word = 0;
+            filled = 0;
+        }
+    }
+
+    return state.Finish(bytes, word);
+}
+
 // 길이가 정해진 키(정수·enum·Guid·Name)용 word 경로다. words[0..count)를 little-endian으로 이어
 // 붙인 count * 8 byte에 대한 SipHash24와 결과가 같고, byte 모으기·꼬리 처리를 건너뛴다.
 //
@@ -257,7 +285,9 @@ private:
 };
 
 // seed를 넣은 키 해시다. 기본은 정수·enum(값을 64비트로 넓혀 SipHash)이고 String·StringView·
-// Name·Guid는 특수화가 있다. 다른 키 타입은 특수화를 더한다. 동등한 키는 같은 seed에서 같은 값이다.
+// Name·Guid·Sha256Digest는 특수화가 있다(ObjectRuntime의 AssetId·SoftObjectRef·ClassRef는 그
+// 타입의 헤더에 있다 — 리플렉션 Map 키·Set 원소, Docs/Design/ReflectionExtensions.ko.md 7.1절).
+// 다른 키 타입은 특수화를 더한다. 동등한 키는 같은 seed에서 같은 값이다.
 //
 // 사용 예:
 //   OrderedMap<String, int32> map(allocator);                                  // 프로세스 seed
@@ -340,6 +370,18 @@ struct SeededHash<Guid> : SeededHashBase {
     uint64 operator()(Guid value) const noexcept {
         const uint64 words[2] = {value.high, value.low};
         return SipHash24Words(Seed(), words, 2);
+    }
+};
+
+// digest 32 byte 전부를 해시한다(byte 같음 = 키 같음).
+template <>
+struct SeededHash<Sha256Digest> : SeededHashBase {
+    using SeededHashBase::SeededHashBase;
+
+    SeededHash() noexcept = default;
+
+    uint64 operator()(const Sha256Digest& value) const noexcept {
+        return SipHash24(Seed(), value.bytes, Sha256Digest::Bytes);
     }
 };
 

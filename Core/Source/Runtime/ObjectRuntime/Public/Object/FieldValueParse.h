@@ -46,10 +46,12 @@ struct ParsedValue {
 // - 2단계(입력 때문에 실패하지 않는다): TypeRegistry를 다시 조회하지 않고 TakeClassReference로
 //   1단계 판정을 받는다 — 두 단계 사이에 등록이 바뀌어도 결과는 1단계 판정·진단과 같다(어긋난 방문
 //   순서는 계약 위반 InvalidArgument).
-// Deprecated 클래스의 DeprecatedType 진단은 리플렉션 B9h2가 이 판정에 더한다. Map 키·Set 원소
-// 자리(B9f2)는 ReportAndNull을 쓰지 않는다(1.7절).
+// Deprecated 클래스의 DeprecatedType 진단은 리플렉션 B9h2가 이 판정에 더한다. keyed(Map 키·Set
+// 원소 자리 — 리플렉션 B9f2)면 ReportAndNull을 쓰지 않고 미등록은 늘 NotFound다(1.7절 — 대체 값이
+// 서로 다른 두 키를 같게 만들어 2단계에서 중복이 생기지 않게).
 inline Result<void> ResolveClassReference(FieldDecodeContext& context, TypeId base,
-                                          const void* staticNative, ParsedValue& out) noexcept {
+                                          const void* staticNative, ParsedValue& out,
+                                          bool keyed = false) noexcept {
     if (out.guid == Guid{}) {
         return Result<void>::Success();
     }
@@ -81,8 +83,9 @@ inline Result<void> ResolveClassReference(FieldDecodeContext& context, TypeId ba
         return Result<void>::Failure(found.Error());
     }
 
-    // 진단 없이 값을 바꾸지 않는다(직렬화기가 hook 없이 ReportAndNull을 주면 거부).
-    if (context.Policy().unknownClass != UnknownClassPolicy::ReportAndNull ||
+    // 진단 없이 값을 바꾸지 않는다(직렬화기가 hook 없이 ReportAndNull을 주면 거부). 키 자리는
+    // 정책과 무관하게 거부다.
+    if (keyed || context.Policy().unknownClass != UnknownClassPolicy::ReportAndNull ||
         !context.CanReport()) {
         return Result<void>::Failure(ErrorCode::NotFound);
     }
@@ -105,10 +108,12 @@ inline Result<void> ResolveClassReference(FieldDecodeContext& context, TypeId ba
 // out.undeclared에 표시만 한다. Name은 표시 문자열을 view로 읽고, 기록하는 단계(복원 1단계)면 그
 // 몫(byte 수)을 Spend한 뒤 내용 규칙(ValidateNameFieldText — 길이·UTF-8·NUL·NFC, InvalidArgument)을
 // 본다 — 토큰은 ResolveParsedName이 단계에 맞게 정한다. Struct·Array·Opaque는 Unsupported다.
+// keyed는 Map 키·Set 원소 자리다(리플렉션 B9f2 — ClassRef 미등록은 정책과 무관하게 NotFound,
+// ResolveClassReference). 미선언 enum은 여기서 표시만 하므로 키 자리의 거부는 호출자가 한다.
 inline Result<void> ReadValueWire(ArchiveReader& reader, FieldDecodeContext& context,
                                   const ValueType& type, const EnumSchema* enumeration,
                                   const EnumValueSet* set, const void* staticNative,
-                                  ParsedValue& out) noexcept {
+                                  ParsedValue& out, bool keyed = false) noexcept {
     switch (type.kind) {
     case ValueKind::Bool: {
         auto decoded = reader.ReadBool();
@@ -203,7 +208,7 @@ inline Result<void> ReadValueWire(ArchiveReader& reader, FieldDecodeContext& con
         }
 
         out.guid = decoded.Value();
-        return ResolveClassReference(context, type.type, staticNative, out);
+        return ResolveClassReference(context, type.type, staticNative, out, keyed);
     }
     case ValueKind::Name: {
         auto decoded = reader.ReadStringView();
@@ -305,6 +310,8 @@ inline Result<void> ReadValueWire(ArchiveReader& reader, FieldDecodeContext& con
     case ValueKind::Struct:
     case ValueKind::Array:
     case ValueKind::Optional:
+    case ValueKind::Map:
+    case ValueKind::Set:
     case ValueKind::Opaque:
         break;
     }
@@ -548,6 +555,13 @@ bool MatchesSchema(const FieldSchema& field) noexcept {
         return false;
     }
 
+    // Map·Set이 아닌 필드는 키 칸이 비어 있어야 한다(리플렉션 B9f2).
+    if constexpr (!MapField<Member>::Supported) {
+        if (field.key.kind != ValueKind::Opaque || field.key.type != TypeId{}) {
+            return false;
+        }
+    }
+
     // Optional<T>(리플렉션 B9e)는 value = {Optional, 0}이고 내부 종류가 같으며 enum·struct 내부는
     // element.type이 그 생성 ID여야 한다(struct 내부는 MatchesStructView도 — 호출자).
     if constexpr (OptionalField<Member>::Supported) {
@@ -559,6 +573,38 @@ bool MatchesSchema(const FieldSchema& field) noexcept {
         if constexpr (ReflectedEnumField<Inner>::Supported ||
                       ReflectedStructField<Inner>::Supported) {
             return field.element.type == GeneratedType<Inner>::Id();
+        } else {
+            return true;
+        }
+    } else if constexpr (MapField<Member>::Supported) {
+        // OrderedMap<K, V>·OrderedSet<T>(리플렉션 B9f2)는 value = {Map·Set, 0}이고 키·값(원소)
+        // 종류가 같으며 enum·struct 대상은 그 생성 ID여야 한다(struct 값은 MatchesStructView도 —
+        // 호출자). Set의 키 칸은 비어 있다.
+        using Traits = MapField<Member>;
+        if (field.value.type != TypeId{} ||
+            field.element.kind != FieldValueKind<typename Traits::Value>()) {
+            return false;
+        }
+
+        if constexpr (Traits::IsSet) {
+            if (field.key.kind != ValueKind::Opaque || field.key.type != TypeId{}) {
+                return false;
+            }
+        } else {
+            if (field.key.kind != FieldValueKind<typename Traits::Key>()) {
+                return false;
+            }
+
+            if constexpr (ReflectedEnumField<typename Traits::Key>::Supported) {
+                if (field.key.type != GeneratedType<typename Traits::Key>::Id()) {
+                    return false;
+                }
+            }
+        }
+
+        if constexpr (ReflectedEnumField<typename Traits::Value>::Supported ||
+                      ReflectedStructField<typename Traits::Value>::Supported) {
+            return field.element.type == GeneratedType<typename Traits::Value>::Id();
         } else {
             return true;
         }
@@ -583,7 +629,7 @@ bool MatchesSchema(const FieldSchema& field) noexcept {
 }
 
 // 참조 멤버(강한·weak — 배열이면 원소)의 정적 대상 타입, ClassRef 멤버의 정적 Base다(그 밖은
-// nullptr).
+// nullptr). 원소·키 형식을 Member로 넘겨 컨테이너 원소에도 쓴다.
 template <class Member>
 const void* StaticReferenceNative() noexcept {
     if constexpr (ObjectReferenceField<Member>::Supported) {

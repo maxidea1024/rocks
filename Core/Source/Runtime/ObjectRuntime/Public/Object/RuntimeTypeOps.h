@@ -333,10 +333,10 @@ struct RuntimeFieldOps {
     // DecodeThroughFieldValue(Object/GeneratedFieldCodec.h)를 그대로 쓸 수 있다.
     FieldEncodeFunction encode = nullptr;
     FieldDecodeFunction decode = nullptr;
-    // Enum·Struct 필드(또는 Enum·Struct 원소 배열)가 쓰는 C++ 타입의 NativeTypeKey다(그 밖의
-    // 필드는 nullptr). 등록이 필드의 대상 형식(FieldTargetType — 배열이면 원소)으로 찾은 레코드의
-    // native 키와 같은지 확인한다 — 스키마로 해석한 대상과 정적 thunk의 타입이 어긋나지 않게
-    // 한다(어긋나면 TypeMismatch).
+    // Enum·Struct 필드(또는 Enum·Struct 원소 배열, Map·Set의 값·원소)가 쓰는 C++ 타입의
+    // NativeTypeKey다(그 밖의 필드는 nullptr). 등록이 필드의 대상 형식(FieldTargetType — 배열이면
+    // 원소)으로 찾은 레코드의 native 키와 같은지 확인한다 — 스키마로 해석한 대상과 정적 thunk의
+    // 타입이 어긋나지 않게 한다(어긋나면 TypeMismatch).
     const void* valueNativeType = nullptr;
     // 경로 접근 thunk다(B6 — 생성 코드는 detail::PathClassField). aggregate 필드(FieldIsAggregate —
     // Struct·Array·Optional<값 struct>)만 가질 수 있고 선택이다(없으면 그 필드 아래 경로 연산은
@@ -367,6 +367,11 @@ struct RuntimeFieldOps {
     //       return Result<void>::Success();
     //   };
     Result<void> (*readStaged)(ConstructionContext&, ObjectHandle, FieldValue&) noexcept = nullptr;
+    // Map 필드의 키가 Enum일 때 키 enum C++ 타입의 NativeTypeKey다(리플렉션 B9f2 — 그 밖의 필드는
+    // nullptr). 등록이 키 형식(FieldKeyType)으로 찾은 enum 레코드의 native 키와 대조한다(어긋나면
+    // TypeMismatch — valueNativeType과 같은 규칙). ClassRef 키의 Base·Soft 키의 기대 타입은
+    // 레코드를 붙잡지 않으므로(값 자리와 같다) 싣지 않는다.
+    const void* keyNativeType = nullptr;
 };
 
 // 리플렉션 enum 등록의 실행 정보다(TypeRegistry::RegisterEnum). nativeType은 NativeTypeKey<E>()이며
@@ -394,15 +399,18 @@ using StructFieldDecodeFunction = Result<void> (*)(const RuntimeStructFieldOps& 
                                                    FieldDecodeContext& context) noexcept;
 
 // struct 멤버 하나의 함수표다. valueNativeType은 Enum·Struct 멤버(또는 Enum·Struct 원소 배열
-// 멤버의 원소)가 쓰는 C++ 타입의 NativeTypeKey다(그 밖은 nullptr — 등록이 대상 레코드의 native
-// 키와 대조한다). path는 경로 접근 thunk다(B6, 선택 — 생성 코드는 detail::PathStructMember. 없으면
-// 이 멤버로 들어가는 경로 연산은 Unsupported).
+// 멤버의 원소, Map·Set 멤버의 값·원소)가 쓰는 C++ 타입의 NativeTypeKey다(그 밖은 nullptr — 등록이
+// 대상 레코드의 native 키와 대조한다). path는 경로 접근 thunk다(B6, 선택 — 생성 코드는
+// detail::PathStructMember. 없으면 이 멤버로 들어가는 경로 연산은 Unsupported).
 struct RuntimeStructFieldOps {
     Guid fieldId{};
     StructFieldEncodeFunction encode = nullptr;
     StructFieldDecodeFunction decode = nullptr;
     const void* valueNativeType = nullptr;
     StructFieldPathFunction path = nullptr;
+    // Map 멤버의 키가 Enum일 때 키 enum의 NativeTypeKey다(리플렉션 B9f2 — RuntimeFieldOps::
+    // keyNativeType과 같은 규칙, 그 밖은 nullptr). 생성 코드는 detail::StructFieldOps가 채운다.
+    const void* keyNativeType = nullptr;
 };
 
 // struct의 옛 버전 Record를 현재 버전으로 올린다(ObjectGraphMigration과 같은 계약 — 전달

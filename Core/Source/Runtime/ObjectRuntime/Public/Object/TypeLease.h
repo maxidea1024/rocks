@@ -48,6 +48,10 @@ public:
     const EnumSchema* FieldEnum(usize schemaIndex) const noexcept;
     StructView FieldStruct(usize schemaIndex) const noexcept;
 
+    // schemaIndex Map 멤버의 키 enum이다(리플렉션 B9f2 — 키가 Enum이 아니거나 Map이 아니면 nullptr,
+    // TypeLease::FieldKeyEnum과 같은 규칙).
+    const EnumSchema* FieldKeyEnum(usize schemaIndex) const noexcept;
+
     // 등록이 계산한 값: 중첩 깊이(1 이상, MaxStructDepth 이하 — struct 원소 배열 멤버는 원소 깊이 +
     // 1), 강한 참조 멤버가 있는지(Transient 포함·중첩 포함·ObjectRefArray·StructRefArray 포함),
     // Required 멤버가 있는지(중첩 struct·배열 멤버·원소 struct 포함, Transient 멤버 아래 제외 —
@@ -171,6 +175,19 @@ public:
     // view는 이 lease 수명 동안 유효하다. 범위 밖 index나 빈 lease는 Fatal이다.
     StructView FieldStruct(usize fieldIndex) const& noexcept;
     StructView FieldStruct(usize fieldIndex) const&& = delete;
+
+    // Class·Struct lease에서 fieldIndex Map 필드의 키가 가리키는 enum의 스키마다(리플렉션 B9f2 —
+    // FieldKeyType이 Enum인 Map, Docs/Design/ReflectionExtensions.ko.md 1.1절 키 대상). 키가 Enum이
+    // 아니거나 Map이 아니면 nullptr이다. 등록이 그 enum을 의존으로 붙잡으므로 반환 참조는 이 lease
+    // 수명 동안 유효하다. 범위 밖 index나 빈 lease는 Fatal이다. codec은 위치 프레임의
+    // FieldCodecFrame::keyEnumeration으로 받는다(FieldScope).
+    //
+    // 사용 예:
+    //   FieldScope scope(context, field, schema.id, lease.FieldEnum(index),
+    //                    lease.FieldStruct(index), FieldCodecFrame::NoIndex,
+    //                    lease.FieldKeyEnum(index));
+    const EnumSchema* FieldKeyEnum(usize fieldIndex) const& noexcept;
+    const EnumSchema* FieldKeyEnum(usize fieldIndex) const&& = delete;
 
     // Class lease에서 schemaIndex(Schema().fields의 위치) 필드의 등록 함수표다(read·write·codec·
     // 경로 접근 thunk). 함수표가 없는 필드(Opaque)는 nullptr이다. 반환 포인터는 이 lease 수명 동안

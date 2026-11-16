@@ -8,8 +8,8 @@
 #include <new>
 
 // TypeRegistry struct 등록(RegisterStruct)과 클래스·struct 필드의 값 타입 레코드 해석
-// (ResolveValueTypes — Enum·Struct 대상의 native 대조·WorldOnly 소유자·Optional 내부의 값 struct·
-// 의존 계수 한도)이다
+// (ResolveValueTypes — Enum·Struct 대상과 Map 키 enum의 native 대조·WorldOnly 소유자·Optional
+// 내부·Map 값의 값 struct·의존 계수 한도)이다
 // (Docs/Design/ReflectionFoundations.ko.md 4.6절). 필드 서술 검사는 TypeRegistryRegister.cpp,
 // 등록 파일이 함께 쓰는 도우미 선언은 TypeRegistryRegisterInternal.h다.
 namespace rocks {
@@ -17,6 +17,7 @@ namespace rocks {
 namespace {
 
 using detail::AddBytes;
+using detail::CarriesKeyNativeType;
 using detail::CarriesValueNativeType;
 using detail::CopyBytes;
 using detail::RecordTag;
@@ -26,12 +27,12 @@ using detail::ValidateFieldList;
 // WorldOnly 포함)는 InvalidArgument다.
 constexpr uint32 KnownStructFlags = static_cast<uint32>(TypeFlags::Atomic);
 
-// struct 함수표에서 필드 ID의 valueNativeType을 찾는다.
-const void* StructThunkType(const void* context, Guid fieldId) noexcept {
+// struct 함수표에서 필드 ID의 valueNativeType(key면 keyNativeType)을 찾는다.
+const void* StructThunkType(const void* context, Guid fieldId, bool key) noexcept {
     const auto& fields = *static_cast<const Span<const RuntimeStructFieldOps>*>(context);
     for (const RuntimeStructFieldOps& field : fields) {
         if (field.fieldId == fieldId) {
-            return field.valueNativeType;
+            return key ? field.keyNativeType : field.valueNativeType;
         }
     }
 
@@ -41,13 +42,42 @@ const void* StructThunkType(const void* context, Guid fieldId) noexcept {
 } // namespace
 
 Result<void> TypeRegistry::ResolveValueTypes(Span<const FieldSchema> fields,
-                                             const void* (*thunkType)(const void*, Guid),
+                                             const void* (*thunkType)(const void*, Guid, bool),
                                              const void* context, bool ownerWorldOnly,
-                                             Record** targets) noexcept {
+                                             Record** targets, Record** keyTargets) noexcept {
+    // 필드 하나가 붙잡는 레코드는 값 대상과 키 대상 둘까지다(의존 계수 여유 판정).
+    const usize maximumDependents = fields.Size() * 2;
     for (usize index = 0; index < fields.Size(); ++index) {
         const auto& field = fields[index];
         if (targets) {
             targets[index] = nullptr;
+        }
+
+        if (keyTargets) {
+            keyTargets[index] = nullptr;
+        }
+
+        // Map 키가 Enum이면 키 대상 레코드를 가리킨다(리플렉션 B9f2 — ClassRef 키의 Base와 Soft
+        // 키의 기대 타입은 값 자리처럼 붙잡지 않는다). 종류·native 키 대조는 값 대상과 같다.
+        const ValueType& key = FieldKeyType(field);
+        if (field.value.kind == ValueKind::Map && key.kind == ValueKind::Enum) {
+            Record* keyTarget = FindLocked(key.type);
+            if (!keyTarget) {
+                return Result<void>::Failure(ErrorCode::NotFound);
+            }
+
+            if (keyTarget->kind != TypeKind::Enum ||
+                thunkType(context, field.id, true) != keyTarget->ops.nativeType) {
+                return Result<void>::Failure(ErrorCode::TypeMismatch);
+            }
+
+            if (keyTarget->dependents >= NumericLimits<uint32>::Max() - maximumDependents) {
+                return Result<void>::Failure(ErrorCode::Overflow);
+            }
+
+            if (keyTargets) {
+                keyTargets[index] = keyTarget;
+            }
         }
 
         // 대상 형식(배열이면 원소)이 Enum·Struct인 필드만 레코드를 가리킨다.
@@ -65,7 +95,8 @@ Result<void> TypeRegistry::ResolveValueTypes(Span<const FieldSchema> fields,
 
         // 스키마로 해석한 대상과 정적 thunk의 C++ 타입이 어긋나지 않게 한다.
         const TypeKind expected = enumeration ? TypeKind::Enum : TypeKind::Struct;
-        if (target->kind != expected || thunkType(context, field.id) != target->ops.nativeType) {
+        if (target->kind != expected ||
+            thunkType(context, field.id, false) != target->ops.nativeType) {
             return Result<void>::Failure(ErrorCode::TypeMismatch);
         }
 
@@ -80,14 +111,15 @@ Result<void> TypeRegistry::ResolveValueTypes(Span<const FieldSchema> fields,
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
-        // Optional의 내부 struct는 값 struct다(참조 struct는 null이 이미 "없음"이고, Optional 안의
-        // 간선은 GC·관찰자 계수가 따라가지 않는다 —
-        // Docs/Design/ReflectionExtensions.ko.md 1.3·6절).
-        if (field.value.kind == ValueKind::Optional && target->containsStrongReference) {
+        // Optional의 내부 struct와 Map의 값 struct는 값 struct다(참조 struct는 null이 이미
+        // "없음"이고, Optional·Map 안의 간선은 GC·관찰자 계수가 따라가지 않는다 —
+        // Docs/Design/ReflectionExtensions.ko.md 1.3·6·7.2절).
+        if ((field.value.kind == ValueKind::Optional || field.value.kind == ValueKind::Map) &&
+            target->containsStrongReference) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
-        if (target->dependents >= NumericLimits<uint32>::Max() - fields.Size()) {
+        if (target->dependents >= NumericLimits<uint32>::Max() - maximumDependents) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }
 
@@ -133,8 +165,10 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     for (const FieldSchema& field : schema.fields) {
         // 강한 참조 멤버: 단일 참조와 ObjectRefArray(대상 형식이 ObjectReference).
         const bool referenceTarget = FieldTargetType(field).kind == ValueKind::ObjectReference;
-        // Name 멤버: 단일 Name과 Array<Name>(Transient 포함 — 관찰 struct 제한이 쓴다).
-        nameMember = nameMember || FieldTargetType(field).kind == ValueKind::Name;
+        // Name 멤버: 단일 Name·Array<Name>·Name 원소 Set·Name 값이나 키의 Map(Transient 포함 — 관찰
+        // struct 제한이 쓴다).
+        nameMember = nameMember || FieldTargetType(field).kind == ValueKind::Name ||
+                     FieldKeyType(field).kind == ValueKind::Name;
         // weak 참조 멤버: 단일 WeakRef와 Array<WeakRef>(Transient 포함 — 관찰 struct 제한이 쓴다).
         weakMember = weakMember || FieldTargetType(field).kind == ValueKind::WeakObjectReference;
         strongReference = strongReference || referenceTarget;
@@ -155,6 +189,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
         }
 
         if (found != 1 || CarriesValueNativeType(field) != (match->valueNativeType != nullptr) ||
+            CarriesKeyNativeType(field) != (match->keyNativeType != nullptr) ||
             (match->encode == nullptr) != (match->decode == nullptr) ||
             (!HasFlag(field.flags, FieldFlags::Transient) && !match->encode)) {
             return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
@@ -168,7 +203,8 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
         (fieldEnd + alignof(RuntimeStructFieldOps) - 1) & ~(alignof(RuntimeStructFieldOps) - 1);
     const usize opsEnd = opsOffset + schema.fields.Size() * sizeof(RuntimeStructFieldOps);
     const usize typesOffset = (opsEnd + alignof(Record*) - 1) & ~(alignof(Record*) - 1);
-    const usize typesEnd = typesOffset + schema.fields.Size() * sizeof(Record*);
+    // 값 대상과 키 대상(리플렉션 B9f2) 레코드 포인터를 이어 둔다.
+    const usize typesEnd = typesOffset + 2 * schema.fields.Size() * sizeof(Record*);
     const usize orderOffset = (typesEnd + alignof(uint32) - 1) & ~(alignof(uint32) - 1);
     usize bytes = orderOffset + schema.fields.Size() * sizeof(uint32);
     if (!AddBytes(bytes, schema.name.Size()) || !AddBytes(bytes, schema.toolName.Size())) {
@@ -203,7 +239,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
         // struct는 WorldOnly 형질을 거부하지 않고 전파한다(그것을 필드로 둔 클래스가 판정한다).
         Span<const RuntimeStructFieldOps> thunks = ops.fields;
         if (auto resolved =
-                ResolveValueTypes(schema.fields, &StructThunkType, &thunks, true, nullptr);
+                ResolveValueTypes(schema.fields, &StructThunkType, &thunks, true, nullptr, nullptr);
             !resolved) {
             return Result<TypeRegistrationToken>::Failure(resolved.Error());
         }
@@ -264,19 +300,22 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     auto* fields = reinterpret_cast<FieldSchema*>(block + fieldOffset);
     auto* fieldOps = reinterpret_cast<RuntimeStructFieldOps*>(block + opsOffset);
     auto* fieldTypes = reinterpret_cast<Record**>(block + typesOffset);
+    Record** fieldKeyTypes = fieldTypes + schema.fields.Size();
     auto* fieldOrder = reinterpret_cast<uint32*>(block + orderOffset);
     uint8* cursor = reinterpret_cast<uint8*>(fieldOrder + schema.fields.Size());
     {
         // mutating_이 등록·해제를 막으므로 위에서 확인한 레코드가 그대로 있다.
         platform::LockGuard lock(gate_);
         Span<const RuntimeStructFieldOps> thunks = ops.fields;
-        if (!ResolveValueTypes(schema.fields, &StructThunkType, &thunks, true, fieldTypes)) {
+        if (!ResolveValueTypes(schema.fields, &StructThunkType, &thunks, true, fieldTypes,
+                               fieldKeyTypes)) {
             platform::Fatal("TypeRegistry value type dependency vanished during registration");
         }
     }
 
     record->kind = TypeKind::Struct;
     record->fieldTypes = fieldTypes;
+    record->fieldKeyTypes = fieldKeyTypes;
     record->schema.id = schema.id;
     record->schema.version = schema.version;
     record->schema.flags = schema.flags;
@@ -334,6 +373,10 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
         if (fieldTypes[fieldIndex]) {
             ++fieldTypes[fieldIndex]->dependents;
+        }
+
+        if (fieldKeyTypes[fieldIndex]) {
+            ++fieldKeyTypes[fieldIndex]->dependents;
         }
     }
 

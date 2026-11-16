@@ -123,14 +123,22 @@ enum class ValueKind : uint8 {
     // rocks::Optional<T>(Core/Optional.h — 클래스 필드·struct 멤버만), wire Optional(present byte +
     // 내부 wire). value.type은 0이고 내부 형식은 FieldSchema::element다(같은 문서 6절 — 내부가 단일
     // 값이면 FieldValue로 읽고 쓰고, 값 struct면 aggregate).
-    Optional
+    Optional,
+    // rocks::OrderedMap<K, V>(Core/Containers/OrderedMap.h — 삽입 순서), wire Map(u32 키 wire + u32
+    // 값 wire + count + (키, 값) × count). value.type은 0이고 키 형식은 FieldSchema::key, 값 형식은
+    // FieldSchema::element다(같은 문서 7.2절 — aggregate, 필드 통째로 저장·복원한다).
+    Map,
+    // rocks::OrderedSet<T>(Core/Containers/OrderedSet.h — 삽입 순서), wire Set(u32 원소 wire +
+    // count + 원소 × count). value.type은 0이고 원소 형식은 FieldSchema::element다(같은
+    // 문서 7.2절).
+    Set
 };
 
 // ValueKind 열거자 수(마지막 열거자 + 1)다. 열거자 값은 schema·descriptor 계약이므로 새 종류는 끝에
 // 붙이고, 이 식의 마지막 열거자와 성질 표의 행을 함께 고친다. 아래 static_assert가 성질 표와,
 // MetaCompiler 대조 헤더가 C# 표의 종류 수와 이 값을 비교한다. 근거는
 // Docs/Design/ReflectionExtensions.ko.md 1.3절이다.
-inline constexpr uint32 ValueKindCount = static_cast<uint32>(ValueKind::Optional) + 1;
+inline constexpr uint32 ValueKindCount = static_cast<uint32>(ValueKind::Set) + 1;
 
 // 값 종류의 성질이다(종류 성질 표 — Docs/Design/ReflectionExtensions.ko.md 1.3절).
 // ValueKindProperties가 종류마다 이 비트의 OR를 돌려주고, 런타임의 등록 검증(TypeRegistry)·쓰기
@@ -164,8 +172,9 @@ inline constexpr uint32 ValueKindCount = static_cast<uint32>(ValueKind::Optional
 //   Container              — 원소 형식(FieldSchema::element)을 갖는 컨테이너다
 //   WholeFieldValue        — FieldValue로 통째 읽고 쓴다(아니면 aggregate — read·write가 없고 멤버·
 //                            원소 단위 경로 연산으로만 쓴다)
-// StaticArray·Map·Set·InstancedStruct 자리는 리플렉션 B9 뒤 단계가 연다(Optional 내부는 B9e가
-// 열었다). 이 표는 그 자리의 허용 여부를 미리 정해 두며, 그 단계 전에는 쓰는 곳이 없다.
+// StaticArray·InstancedStruct 자리는 리플렉션 B9 뒤 단계가 연다(Optional 내부는 B9e, Map 키·값·Set
+// 원소는 B9f2가 열었다 — Map 값의 ObjectReference는 ObjectRefMap이라 B9f4가 연다). 이 표는 그
+// 자리의 허용 여부를 미리 정해 두며, 그 단계 전에는 쓰는 곳이 없다.
 enum class ValueKindProperty : uint32 {
     None = 0,
     Field = 1u << 0,
@@ -275,8 +284,12 @@ constexpr ValueKindEntry ValueKindTableEntry(ValueKind kind) noexcept {
                           ValueKindBit(ValueKindProperty::RequiresTargetId)};
     case ValueKind::Array:
     case ValueKind::Optional:
+    case ValueKind::Map:
+    case ValueKind::Set:
         // Optional은 내부 형식(element)을 갖는 컨테이너이고 필드·멤버 자리에만 둔다. 통째
         // FieldValue 여부는 내부에 따라 다르므로 이 칸은 비우고 FieldIsAggregate가 필드로 판정한다.
+        // Map(값 형식 element, 키 형식 key)·Set(원소 형식 element)도 필드·멤버 자리의 컨테이너이고
+        // aggregate다(B9f2는 필드 통째 저장·복원, key 단계 경로 연산은 B9f3).
         return {true, ValueKindBit(ValueKindProperty::Field) |
                           ValueKindBit(ValueKindProperty::StructMember) |
                           ValueKindBit(ValueKindProperty::Container)};
@@ -406,10 +419,10 @@ constexpr bool ValueKindIsWholeFieldValue(ValueKind kind) noexcept {
     return HasValueKindProperty(kind, ValueKindProperty::WholeFieldValue);
 }
 
-// typed 필드 값 종류 가운데 FieldValue로 통째 읽고 쓰지 않는 aggregate(Struct·Array·Optional)인지다
-// (클래스 필드가 될 수 있고 WholeFieldValue가 아니다 — 표를 한 번 읽는다). aggregate 필드는 read·
-// write·writeStaged가 없고 멤버·원소 단위 경로 연산으로만 쓴다. Opaque와 열거자 밖의 값은
-// aggregate가 아니다. 종류 단위 판정이라 Optional은 늘 참이다 — 필드는 내부에 따라 달라지므로
+// typed 필드 값 종류 가운데 FieldValue로 통째 읽고 쓰지 않는 aggregate(Struct·Array·Optional·
+// Map·Set)인지다(클래스 필드가 될 수 있고 WholeFieldValue가 아니다 — 표를 한 번 읽는다). aggregate
+// 필드는 read·write·writeStaged가 없고 멤버·원소 단위 경로 연산으로만 쓴다. Opaque와 열거자 밖의
+// 값은 aggregate가 아니다. 종류 단위 판정이라 Optional은 늘 참이다 — 필드는 내부에 따라 달라지므로
 // 필드 하나를 판정할 때는 FieldIsAggregate를 쓴다(Optional<단일 값>은 aggregate가 아니다).
 constexpr bool ValueKindIsAggregate(ValueKind kind) noexcept {
     const uint32 properties = ValueKindProperties(kind);
@@ -452,20 +465,42 @@ struct FieldSchema {
     // AssetId, SoftObjectReference, Digest256이고 element.type은 Enum·Struct·ClassReference면 필수,
     // 세 참조는 기대 타입(선택), 그 밖은 0이다. Optional 필드(value = {Optional, 0} — 리플렉션
     // B9e)는 element가 내부 형식(성질 표의 Optional 내부 종류 — 단일 값·String·Name·값 struct)이고
-    // maxElements는 0이다. 그 밖의 필드는 Opaque·0이어야 한다.
+    // maxElements는 0이다. Map 필드(value = {Map, 0} — 리플렉션 B9f2)는 element가 값 형식(성질 표의
+    // Map 값 종류 — ObjectReference는 ObjectRefMap이라 B9f4가 연다, 값 struct만), Set 필드(value =
+    // {Set, 0})는 element가 원소 형식(성질 표의 Set 원소 종류)이고 둘 다 maxElements는 1 이상
+    // MaxArrayElements 이하의 원소 수 상한이다(저장에서만 건다 — 배열과 같다). 그 밖의 필드는
+    // Opaque·0이어야 한다.
     ValueType element{};
     uint32 maxElements = 0;
+    // Map 필드의 키 형식이다(리플렉션 B9f2 — Docs/Design/ReflectionExtensions.ko.md 1.1·7.2절). 키
+    // 종류는 성질 표의 Map 키 종류(정수 8종·Bool·Enum·Guid·AssetId·Digest256·String·Name·
+    // SoftObjectReference·ClassReference)이고 key.type은 Enum이면 enum ID(필수), ClassReference면
+    // Base 클래스 ID(필수), SoftObjectReference면 기대 타입(0 = Object), 그 밖은 0이다. 키에는
+    // Required가 없다(필드의 Required는 값마다 non-null — 대상 형식 element로 판정한다). Map이 아닌
+    // 필드는 {Opaque, 0}이어야 한다.
+    ValueType key{};
 };
 
-// 필드 값의 대상 형식이다: 컨테이너 종류(ValueKindIsContainer — Array·Optional) 필드면 원소·내부
-// 형식(element), 아니면 값 형식(value). enum·struct·참조 대상 해석(TypeRegistry의 의존·FieldEnum·
-// FieldStruct, codec 검증, 그래프 기대 타입)이 같은 규칙을 쓴다. 반환 참조는 field의 수명을 따른다.
+// 필드 값의 대상 형식이다: 컨테이너 종류(ValueKindIsContainer — Array·Optional·Map·Set) 필드면
+// 원소·내부·값 형식(element), 아니면 값 형식(value). enum·struct·참조 대상 해석(TypeRegistry의
+// 의존·FieldEnum·FieldStruct, codec 검증, 그래프 기대 타입)이 같은 규칙을 쓴다. Map 키는
+// FieldKeyType이다. 반환 참조는 field의 수명을 따른다.
 //
 // 사용 예:
 //   const ValueType& target = FieldTargetType(field);
 //   if (target.kind == ValueKind::Enum) { ... }   // Enum 필드이거나 enum 원소 배열·Optional<enum>
 constexpr const ValueType& FieldTargetType(const FieldSchema& field) noexcept {
     return ValueKindIsContainer(field.value.kind) ? field.element : field.value;
+}
+
+// Map 필드의 키 형식이다(리플렉션 B9f2 — 그 밖의 필드는 {Opaque, 0}인 key 칸 그대로). 키 대상(Enum
+// 레코드·ClassRef Base·Soft 기대 타입)은 TypeRegistry가 이 형식으로
+// 해석한다(TypeLease::FieldKeyEnum). 반환 참조는 field의 수명을 따른다.
+//
+// 사용 예:
+//   if (FieldKeyType(field).kind == ValueKind::Enum) { ... }   // enum 키 Map
+constexpr const ValueType& FieldKeyType(const FieldSchema& field) noexcept {
+    return field.key;
 }
 
 // 필드가 FieldValue로 통째 읽고 쓰지 않는 aggregate인지다(필드 단위 판정 — Docs/Design/
@@ -485,7 +520,10 @@ constexpr bool FieldIsAggregate(const FieldSchema& field) noexcept {
 }
 
 // 필드 경로의 한 단계다(7절 PropertyPath, 6.4절 진단 경로): 필드 ID와, 배열 원소면 그 index.
-// 원소 index는 배열 필드의 단계에 둔다([slots[2], material] — slots 단계가 index 2를 가진다).
+// 원소 index는 배열 필드의 단계에 둔다([slots[2], material] — slots 단계가 index 2를 가진다). 진단
+// 경로(FieldDiagnostic 등)에서는 Map 항목·Set 원소도 삽입 순번 index로 표기한다(리플렉션 B9f2 —
+// Docs/Design/ReflectionExtensions.ko.md 1.6절, 키를 복사하지 않는다). 편집 경로의 Map key 단계는
+// 리플렉션 B9f3이 더한다.
 struct PathStep {
     Guid fieldId;
     uint32 index = 0;

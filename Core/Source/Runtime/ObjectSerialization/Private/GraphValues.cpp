@@ -55,7 +55,8 @@ Result<void> ValidateLayout(const TypeLease& type, Budget& budget) noexcept {
             (reference && field.kind != FieldKind::ObjectReference) ||
             (!reference && (field.kind != FieldKind::Value || (!typed && target.type != Guid{}))) ||
             (target.kind == ValueKind::Enum && type.FieldEnum(index) == nullptr) ||
-            (target.kind == ValueKind::Struct && type.FieldStruct(index).IsEmpty())) {
+            (target.kind == ValueKind::Struct && type.FieldStruct(index).IsEmpty()) ||
+            (FieldKeyType(field).kind == ValueKind::Enum && type.FieldKeyEnum(index) == nullptr)) {
             return Result<void>::Failure(ErrorCode::Unsupported);
         }
 

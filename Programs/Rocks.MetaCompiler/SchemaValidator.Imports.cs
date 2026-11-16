@@ -42,43 +42,63 @@ internal static partial class SchemaValidator
             bound.Add(mirror.Binds, mirror);
         }
 
+        // import 필드의 대상 하나(kind·referenceId — 값·원소·내부·Map 값의 대상이면 TargetKind, Map 키면 KeyKind)를 import 타입으로
+        // 잇고 정규 이름을 돌려준다. 강한·weak·소프트 참조의 기대 타입과 ClassRef의 Base는 클래스다(import에 없는 대상은 런타임
+        // Acquire가 판정한다 — 생성 코드는 그 클래스의 생성 헤더를 쓰지 않는다 — null). Enum·Struct 대상은 import에 있어야 하고
+        // (RMC2003) 그 종류여야 하며(RMC1000) 다른 모듈의 private 타입이면 RMC2006이다. key는 Map 키 대상인지다(진단 문구만 다르다).
+        string? LinkTarget(ClassModel external, FieldModel field, string kind, string referenceId, bool key)
+        {
+            bool found = byId.TryGetValue(referenceId, out ClassModel? target);
+            string symbol = $"{external.Name}::{field.Name}";
+            if (kind is not ("Enum" or "Struct"))
+            {
+                if (found && (target!.IsEnum || target.IsStruct))
+                {
+                    throw InvalidDescriptor(external, $"{(key ? "map key of" : "reference field")} {symbol} targets {(target.IsEnum ? "enum" : "struct")} {target.Name}");
+                }
+
+                return null;
+            }
+
+            string what = kind.ToLowerInvariant();
+            if (!found)
+            {
+                throw new MetadataException($"{symbol}: {(key ? "key " : "")}{what} {referenceId} of the imported field is not in an imported descriptor", "RMC2003",
+                    "Import the descriptors of every module the dependency uses; regenerate the dependency metadata.").At(external.Site);
+            }
+
+            if (target!.IsStruct != (kind == "Struct") || target.IsEnum != (kind == "Enum"))
+            {
+                throw InvalidDescriptor(external, $"{(key ? "enum key of map field" : what + " field")} {symbol} targets {target.Name}, which is not a reflected {what}");
+            }
+
+            if (target.Private && (!external.Private || !string.Equals(target.Module, external.Module, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new MetadataException($"{symbol}: imported type of module {external.Module} uses private {what} {target.Name} of module {target.Module}", "RMC2006",
+                    "Regenerate the dependency metadata; only private types of the same module can use private enums or structs.").At(external.Site);
+            }
+
+            return target.Name;
+        }
+
         foreach (ClassModel external in imported.Values.Where(model => !model.IsEnum))
         {
             // 대상은 배열이면 원소의 대상이다(원소 enum·struct·참조 대상도 같은 규칙으로 잇고 대조한다).
             foreach (FieldModel field in external.Fields.Where(field => field.HasTargetType && field.ReferenceId is not null))
             {
-                bool found = byId.TryGetValue(field.ReferenceId!, out ClassModel? target);
-                if (field.TargetKind is not ("Enum" or "Struct"))
+                if (LinkTarget(external, field, field.TargetKind, field.ReferenceId!, false) is string reference)
                 {
-                    // 강한·weak·소프트 참조의 기대 타입과 ClassRef의 Base는 클래스다(import에 없는 대상은 런타임 Acquire가 판정한다 —
-                    // 생성 코드는 그 클래스의 생성 헤더를 쓰지 않는다).
-                    if (found && (target!.IsEnum || target.IsStruct))
-                    {
-                        throw InvalidDescriptor(external, $"reference field {external.Name}::{field.Name} targets {(target.IsEnum ? "enum" : "struct")} {target.Name}");
-                    }
-
-                    continue;
+                    field.Reference = reference;
                 }
+            }
 
-                string what = field.TargetKind.ToLowerInvariant();
-                if (!found)
+            // Map 키의 대상(리플렉션 B9f2): Enum 키는 그 import enum으로 잇고(생성 헤더 include·native 키), ClassRef·Soft 키의 대상은 클래스다.
+            foreach (FieldModel field in external.Fields.Where(field => field.IsMap && field.KeyHasTargetType && field.KeyReferenceId is not null))
+            {
+                if (LinkTarget(external, field, field.KeyKind!, field.KeyReferenceId!, true) is string reference)
                 {
-                    throw new MetadataException($"{external.Name}::{field.Name}: {what} {field.ReferenceId} of the imported field is not in an imported descriptor", "RMC2003",
-                        "Import the descriptors of every module the dependency uses; regenerate the dependency metadata.").At(external.Site);
+                    field.KeyReference = reference;
                 }
-
-                if (target!.IsStruct != field.StructTarget || target.IsEnum != (field.TargetKind == "Enum"))
-                {
-                    throw InvalidDescriptor(external, $"{what} field {external.Name}::{field.Name} targets {target.Name}, which is not a reflected {what}");
-                }
-
-                if (target.Private && (!external.Private || !string.Equals(target.Module, external.Module, StringComparison.OrdinalIgnoreCase)))
-                {
-                    throw new MetadataException($"{external.Name}::{field.Name}: imported type of module {external.Module} uses private {what} {target.Name} of module {target.Module}", "RMC2006",
-                        "Regenerate the dependency metadata; only private types of the same module can use private enums or structs.").At(external.Site);
-                }
-
-                field.Reference = target.Name;
             }
         }
 
@@ -98,10 +118,10 @@ internal static partial class SchemaValidator
                 throw InvalidDescriptor(model, $"struct {model.Name} holds a struct that requires a WorldOnly owner but lacks the RequiresWorldOnlyOwner flag");
             }
 
-            // Optional<S>의 S는 값 struct다(원본 선언이면 RMC2306).
-            if (model.Fields.Any(field => field.IsOptional && field.StructTarget && Find(field.Reference!).ContainsStrongReference))
+            // Optional<S>의 S와 Map 값 struct는 값 struct다(원본 선언이면 RMC2306·RMC2305).
+            if (model.Fields.Any(field => (field.IsOptional || field.IsMap) && field.StructTarget && Find(field.Reference!).ContainsStrongReference))
             {
-                throw InvalidDescriptor(model, $"struct {model.Name} holds an Optional of a reference struct");
+                throw InvalidDescriptor(model, $"struct {model.Name} holds an Optional or map of a reference struct");
             }
 
             // 형질은 descriptor flags로만 비교한다(멤버 struct의 형질도 그 항목의 flags) — import 순회 순서에 의존하지 않는다.
@@ -116,9 +136,9 @@ internal static partial class SchemaValidator
         // 담는다(원본 선언이면 RMC2306).
         foreach (ClassModel external in imported.Values.Where(model => !model.IsEnum))
         {
-            if (!external.IsStruct && external.Fields.Any(field => field.IsOptional && field.StructTarget && Find(field.Reference!).ContainsStrongReference))
+            if (!external.IsStruct && external.Fields.Any(field => (field.IsOptional || field.IsMap) && field.StructTarget && Find(field.Reference!).ContainsStrongReference))
             {
-                throw InvalidDescriptor(external, $"class {external.Name} holds an Optional of a reference struct");
+                throw InvalidDescriptor(external, $"class {external.Name} holds an Optional or map of a reference struct");
             }
 
             FieldModel? nested = external.Fields.FirstOrDefault(field => field.IsArray && field.StructTarget &&
@@ -163,7 +183,8 @@ internal static partial class SchemaValidator
 
             path.Add(model.Name);
             int depth = 1;
-            // struct 멤버, struct 원소 배열 멤버(원소 깊이 + 1), Optional<struct> 멤버(내부 깊이 + 1 — 리플렉션 B9e)가 간선이다.
+            // struct 멤버, struct 원소 배열 멤버(원소 깊이 + 1), Optional<struct> 멤버(내부 깊이 + 1 — 리플렉션 B9e), Map 값 struct
+            // 멤버(값 깊이 + 1 — 리플렉션 B9f2)가 간선이다.
             foreach (FieldModel field in model.Fields.Where(field => field.StructTarget))
             {
                 depth = Math.Max(depth, 1 + Depth(find(field.Reference!)));

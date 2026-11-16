@@ -56,10 +56,15 @@ internal static partial class SelfTests
             // 리플렉션 B9e: Core Optional.h의 실패도 같은 규칙으로 찾고 Optional로 표시한다(배열 조회는 그것을 배열 실패로 보지 않는다).
             const string optionalHeader = "C:/work/rocks/Core/Source/Runtime/Core/Public/Core/Optional.h";
             string optional = $"{optionalHeader}:29:19: error: static assertion failed\n{input}:7:42: note: in instantiation of template class 'rocks::Optional<rocks::ObjectRef<probe::Value>>' requested here\n";
-            Verify.That(CompilerDriver.ContainerInstantiationSite(optional, temporary.Root, IsInput) is (string optionalFile, 7, 42, true) && IsInput(optionalFile),
+            Verify.That(CompilerDriver.ContainerInstantiationSite(optional, temporary.Root, IsInput) is (string optionalFile, 7, 42, OptionalRules.Optional) && IsInput(optionalFile),
                 "Optional.h failures are container failures marked Optional");
-            Verify.That(CompilerDriver.ContainerInstantiationSite(clang, temporary.Root, IsInput) is (_, 15, 56, false), "Array.h failures are not marked Optional");
+            Verify.That(CompilerDriver.ContainerInstantiationSite(clang, temporary.Root, IsInput) is (_, 15, 56, ArrayRules.Array), "Array.h failures are not marked Optional");
             Verify.That(CompilerDriver.ArrayInstantiationSite(optional, temporary.Root, IsInput) is null, "an Optional.h failure is not an array element failure");
+            // 리플렉션 B9f2: OrderedMap·OrderedSet(저장소 OrderedEntryTable)의 실패는 Map으로 표시한다.
+            const string mapHeader = "C:/work/rocks/Core/Source/Runtime/Core/Public/Core/Containers/OrderedMap.h";
+            string map = $"{mapHeader}:68:5: error: static assertion failed\n{input}:9:3: note: in instantiation of template class 'rocks::OrderedMap<int, rocks::ObjectRef<probe::Value>>' requested here\n";
+            Verify.That(CompilerDriver.ContainerInstantiationSite(map, temporary.Root, IsInput) is (_, 9, 3, MapRules.Map), "OrderedMap.h failures are marked Map");
+            Verify.That(CompilerDriver.ArrayInstantiationSite(map, temporary.Root, IsInput) is null, "an OrderedMap.h failure is not an array element failure");
         });
         suite.Add("MetaPrefix.CommentLineSpliceIsRejectedDirectly", () =>
         {

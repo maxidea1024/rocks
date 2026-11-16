@@ -27,7 +27,7 @@ internal static class ModuleDescriptor
     private static readonly string[] EnumeratorKeys = ["name", "toolName", "displayName", "value", "flags"];
 
     private static readonly string[] FieldKeys =
-        ["owner", "name", "id", "fieldKind", "value", "element", "flags", "toolName", "category", "displayName", "maxElements"];
+        ["owner", "name", "id", "fieldKind", "value", "element", "key", "flags", "toolName", "category", "displayName", "maxElements"];
 
     public static byte[] Write(string module, IEnumerable<ClassModel> types)
     {
@@ -125,8 +125,11 @@ internal static class ModuleDescriptor
 
     // 클래스·struct의 fields 배열이다(클래스는 상속 포함 전체, 생성 순서 그대로). 배열 필드는 value가 {"kind": "Array"}이고
     // 원소 형식이 element(대상 종류일 때만 type), 길이 상한이 maxElements다. Optional 필드(리플렉션 B9e)는 value가
-    // {"kind": "Optional"}이고 내부 형식이 element, maxElements는 0이다(그 밖의 필드는 element null·maxElements 0).
-    // 컨테이너 키는 두지 않는다(원소 종류와 원소 struct 형질로 정해진다 — Docs/Design/ReflectionFoundations.ko.md 5.6절).
+    // {"kind": "Optional"}이고 내부 형식이 element, maxElements는 0이다. Map 필드(리플렉션 B9f2)는 value가 {"kind": "Map"}이고 값
+    // 형식이 element, 키 형식이 key(대상 종류일 때만 type), 원소 수 상한이 maxElements이고, Set 필드는 value가 {"kind": "Set"}이고
+    // 원소 형식이 element, 상한이 maxElements다(그 밖의 필드는 element null·maxElements 0, Map이 아니면 key null).
+    // 배열 컨테이너 종류(Array·ObjectRefArray·StructRefArray)를 적는 칸은 두지 않는다(원소 종류와 원소 struct 형질로 정해진다 —
+    // Docs/Design/ReflectionFoundations.ko.md 5.6절. Map 키 형식 칸 key와 다른 이야기다).
     private static void WriteFields(Utf8JsonWriter json, ClassModel type)
     {
         json.WriteStartArray("fields");
@@ -139,13 +142,13 @@ internal static class ModuleDescriptor
             json.WriteString("fieldKind", field.IsObjectReferenceFieldKind ? "ObjectReference" : "Value");
             json.WriteStartObject("value");
             json.WriteString("kind", field.Kind);
-            if (!field.IsArray && !field.IsOptional && field.HasTargetType)
+            if (!field.IsArray && !field.IsOptional && !field.IsMap && !field.IsSet && field.HasTargetType)
             {
                 json.WriteString("type", field.ReferenceId ?? "");
             }
 
             json.WriteEndObject();
-            if (field.IsArray || field.IsOptional)
+            if (field.IsArray || field.IsOptional || field.IsMap || field.IsSet)
             {
                 json.WriteStartObject("element");
                 json.WriteString("kind", field.ElementKind);
@@ -159,6 +162,22 @@ internal static class ModuleDescriptor
             else
             {
                 json.WriteNull("element");
+            }
+
+            if (field.IsMap)
+            {
+                json.WriteStartObject("key");
+                json.WriteString("kind", field.KeyKind);
+                if (field.KeyHasTargetType)
+                {
+                    json.WriteString("type", field.KeyReferenceId ?? "");
+                }
+
+                json.WriteEndObject();
+            }
+            else
+            {
+                json.WriteNull("key");
             }
 
             json.WriteStartArray("flags");
@@ -186,7 +205,7 @@ internal static class ModuleDescriptor
             json.WriteString("toolName", field.EffectiveToolName);
             json.WriteString("category", field.Spec.Category);
             json.WriteString("displayName", field.Spec.DisplayName);
-            json.WriteNumber("maxElements", field.IsArray ? field.MaxElements : 0);
+            json.WriteNumber("maxElements", field.IsCounted ? field.MaxElements : 0);
             json.WriteEndObject();
         }
 
@@ -404,8 +423,11 @@ internal static class ModuleDescriptor
                 // maxElements가 0이다(Docs/Design/ReflectionFoundations.ko.md 5.6절 descriptor).
                 bool array = kind == ArrayRules.Array;
                 bool optional = kind == OptionalRules.Optional;
-                RequireKeys(value, !array && !optional && ValueKindTable.Has(kind, ValueKindProperty.HasTargetType) ? ["kind", "type"] : ["kind"], Invalid);
+                bool map = kind == MapRules.Map;
+                bool set = kind == MapRules.Set;
+                RequireKeys(value, !array && !optional && !map && !set && ValueKindTable.Has(kind, ValueKindProperty.HasTargetType) ? ["kind", "type"] : ["kind"], Invalid);
                 JsonElement element = field.GetProperty("element");
+                JsonElement keyElement = field.GetProperty("key");
                 if (!field.GetProperty("maxElements").TryGetUInt32(out uint maxElements))
                 {
                     throw Invalid("maxElements");
@@ -455,9 +477,64 @@ internal static class ModuleDescriptor
 
                     targetHolder = element;
                 }
+                else if (map || set)
+                {
+                    // Map 값은 성질 표의 Map 값 종류(강한 참조는 ObjectRefMap — 리플렉션 B9f4), Set 원소는 Set 원소 종류다(리플렉션 B9f2).
+                    string what = map ? "map value" : "set element";
+                    if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty("kind", out JsonElement mapElementKind))
+                    {
+                        throw Invalid("element of a map or set field");
+                    }
+
+                    elementKind = Name(mapElementKind, Identifier, what + " kind");
+                    if (!ValueKindTable.Has(elementKind, map ? ValueKindProperty.MapValue : ValueKindProperty.SetElement) ||
+                        elementKind == "ObjectReference")
+                    {
+                        throw Invalid(what + " kind " + elementKind);
+                    }
+
+                    RequireKeys(element, ValueKindTable.Has(elementKind, ValueKindProperty.HasTargetType) ? ["kind", "type"] : ["kind"], Invalid);
+                    if (maxElements < 1 || maxElements > ArrayRules.MaxArrayElements)
+                    {
+                        throw Invalid($"maxElements {maxElements} of a map or set field");
+                    }
+
+                    targetHolder = element;
+                }
                 else if (element.ValueKind != JsonValueKind.Null || maxElements != 0)
                 {
-                    throw Invalid("element or maxElements on a field that is not an array or Optional");
+                    throw Invalid("element or maxElements on a field that is not an array, Optional, map or set");
+                }
+
+                // Map 키는 성질 표의 Map 키 종류이고 대상 종류(Enum·ClassReference·SoftObjectReference)면 type을 싣는다. Map이 아닌 필드의
+                // key는 null이다.
+                string? keyKind = null;
+                string? keyReferenceId = null;
+                if (map)
+                {
+                    if (keyElement.ValueKind != JsonValueKind.Object || !keyElement.TryGetProperty("kind", out JsonElement keyKindValue))
+                    {
+                        throw Invalid("key of a map field");
+                    }
+
+                    keyKind = Name(keyKindValue, Identifier, "map key kind");
+                    if (!ValueKindTable.Has(keyKind, ValueKindProperty.MapKey))
+                    {
+                        throw Invalid("map key kind " + keyKind);
+                    }
+
+                    bool keyTarget = ValueKindTable.Has(keyKind, ValueKindProperty.HasTargetType);
+                    RequireKeys(keyElement, keyTarget ? ["kind", "type"] : ["kind"], Invalid);
+                    if (keyTarget)
+                    {
+                        string keyTargetText = keyElement.GetProperty("type").GetString() ?? throw Invalid("map key target");
+                        keyReferenceId = keyTargetText.Length == 0 && !ValueKindTable.Has(keyKind, ValueKindProperty.RequiresTargetId)
+                            ? null : Hex(keyElement.GetProperty("type"), Invalid);
+                    }
+                }
+                else if (keyElement.ValueKind != JsonValueKind.Null)
+                {
+                    throw Invalid("key on a field that is not a map");
                 }
 
                 // 대상 종류는 배열이면 원소, Optional이면 내부 종류다. FieldKind::ObjectReference ⇔ 대상이 ObjectReference(ObjectRefArray 포함).
@@ -517,6 +594,8 @@ internal static class ModuleDescriptor
                     },
                     Kind = kind,
                     ElementKind = elementKind,
+                    KeyKind = keyKind,
+                    KeyReferenceId = keyReferenceId,
                     MaxElements = maxElements,
                     ReferenceId = referenceId
                 });

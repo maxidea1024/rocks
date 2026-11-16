@@ -21,8 +21,9 @@ enum class FieldDiagnosticKind : uint8 {
     UndeclaredEnumValue,
     // value는 저장 버전이다(객체 Record면 path가 비어 있다).
     NewerVersion,
-    // 저장할 배열의 원소 수(value)가 필드 maxElements를 넘는다(path = 배열 필드). 저장은 이 진단
-    // 뒤 CapacityExceeded다(로드는 필드별 maxElements를 걸지 않으므로 내지 않는다).
+    // 저장할 배열·Map·Set의 원소 수(value)가 필드 maxElements를 넘는다(path = 그 필드 — Map·Set은
+    // 리플렉션 B9f2가 같은 진단을 쓴다). 저장은 이 진단 뒤 CapacityExceeded다(로드는 필드별
+    // maxElements를 걸지 않으므로 내지 않는다).
     ArrayTooLong,
     // 저장 집합 밖 참조를 외부 참조로 쓰지 않았다(path = 참조 위치, value 0 = 거부, 1 = null로 씀,
     // 2 = weak 집합 밖 null — Docs/Design/ObjectFoundations.ko.md 5.2·5.3절,

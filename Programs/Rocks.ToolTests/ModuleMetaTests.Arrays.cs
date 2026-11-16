@@ -152,6 +152,21 @@ internal static partial class ModuleMetaTests
                     field["value"] = Element("Optional");
                     field["maxElements"] = 0;
                     field["flags"] = new System.Text.Json.Nodes.JsonArray("Required");
+                }),
+                // 리플렉션 B9f2: Map 필드는 key가 Map 키 종류이고 값은 Map 값 종류(강한 참조 제외), Map이 아닌 필드의 key는 null이다.
+                ("keyOnArray", "RMC1000", "key on a field that is not a map", parent => FieldNode(parent, "modes")["key"] = Element("UInt32")),
+                ("mapWithoutKey", "RMC1000", "key of a map field", parent => FieldNode(parent, "modes")["value"] = Element("Map")),
+                ("mapFloatKey", "RMC1000", "map key kind Float32", parent =>
+                {
+                    System.Text.Json.Nodes.JsonObject field = FieldNode(parent, "modes");
+                    field["value"] = Element("Map");
+                    field["key"] = Element("Float32");
+                }),
+                ("mapReferenceValue", "RMC1000", "map value kind ObjectReference", parent =>
+                {
+                    System.Text.Json.Nodes.JsonObject field = FieldNode(parent, "links");
+                    field["value"] = Element("Map");
+                    field["key"] = Element("UInt32");
                 })
             })
             {
@@ -212,6 +227,7 @@ internal static partial class ModuleMetaTests
                     ["fieldKind"] = "ObjectReference",
                     ["value"] = new System.Text.Json.Nodes.JsonObject { ["kind"] = "Array" },
                     ["element"] = new System.Text.Json.Nodes.JsonObject { ["kind"] = "ObjectReference", ["type"] = "" },
+                    ["key"] = null,
                     ["flags"] = new System.Text.Json.Nodes.JsonArray(),
                     ["toolName"] = "refs",
                     ["category"] = "",
@@ -233,6 +249,7 @@ internal static partial class ModuleMetaTests
                     ["fieldKind"] = "Value",
                     ["value"] = new System.Text.Json.Nodes.JsonObject { ["kind"] = "Array" },
                     ["element"] = new System.Text.Json.Nodes.JsonObject { ["kind"] = "Struct", ["type"] = plainId },
+                    ["key"] = null,
                     ["flags"] = new System.Text.Json.Nodes.JsonArray(),
                     ["toolName"] = "children",
                     ["category"] = "",

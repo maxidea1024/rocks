@@ -31,7 +31,8 @@ internal sealed class FieldModel
 
     public required PropertySpec Spec { get; init; }
 
-    // 값 종류(ValueKind 이름)다. 배열 필드는 "Array", Optional 필드는 "Optional"이고 원소·내부 종류는 ElementKind다.
+    // 값 종류(ValueKind 이름)다. 배열 필드는 "Array", Optional 필드는 "Optional", Map·Set 필드는 "Map"·"Set"이고 원소·내부·값 종류는
+    // ElementKind, Map 키 종류는 KeyKind다.
     public string Kind { get; set; } = "Opaque";
 
     // 배열 필드(Kind "Array")의 원소 값 종류, Optional 필드(Kind "Optional" — 리플렉션 B9e)의 내부 값 종류다(그 밖은 null).
@@ -39,6 +40,19 @@ internal sealed class FieldModel
     // (Docs/Design/ReflectionFoundations.ko.md 5.6절 — 대상을 찾는 지점이 배열에서 null 역참조나 조용한 건너뜀이 되지 않게
     // 별도 칸을 두지 않는다).
     public string? ElementKind { get; set; }
+
+    // Map 필드(Kind "Map" — 리플렉션 B9f2)의 키 값 종류다(그 밖은 null). 키의 대상(Enum의 enum·ClassRef의 Base·Soft의 기대 타입)은
+    // KeyReference·KeyReferenceId에 둔다(원소·값의 대상과 따로 — 런타임 FieldSchema::key).
+    public string? KeyKind { get; set; }
+
+    // Map 키 대상의 정규 이름이다(이 모듈 필드, rocks::Object 포함). import 필드는 Enum 키만 LinkImported가 채운다.
+    public string? KeyReference { get; set; }
+
+    // Map 키 대상 타입 ID(32자리 16진, Object는 null)다. import 필드는 descriptor key.type에서 온다.
+    public string? KeyReferenceId { get; set; }
+
+    // 이 모듈 Map 필드의 키 C++ 철자다(진단용, 그 밖은 "").
+    public string KeySpelling { get; set; } = "";
 
     // 배열 필드의 길이 상한이다(MaxElements 지정자, 없으면 ArrayRules.DefaultMaxElements). 배열이 아니면 0이다.
     // import 필드는 descriptor 값을 그대로 보존한다(파생 클래스 스키마가 상속 maxElements를 같은 값으로 내야 한다).
@@ -72,12 +86,25 @@ internal sealed class FieldModel
     // Optional<T> 필드다(리플렉션 B9e — Docs/Design/ReflectionExtensions.ko.md 6절).
     public bool IsOptional => Kind == OptionalRules.Optional;
 
-    // FieldValue로 통째 읽고 쓰지 않는 필드다(런타임 FieldIsAggregate와 같은 규칙): struct 값, 배열, 값 struct 내부의 Optional.
-    // 생성 함수표는 read·write·writeStaged 없이 codec과 경로 thunk를 싣는다.
-    public bool IsAggregate => IsStruct || IsArray || (IsOptional && ElementKind == "Struct");
+    // OrderedMap<K, V> 필드다(리플렉션 B9f2 — Docs/Design/ReflectionExtensions.ko.md 7.2절).
+    public bool IsMap => Kind == MapRules.Map;
 
-    // 필드 값의 대상 종류다: 배열이면 원소 종류, Optional이면 내부 종류, 아니면 값 종류(런타임 FieldTargetType과 같은 규칙).
-    public string TargetKind => IsArray || IsOptional ? ElementKind ?? "Opaque" : Kind;
+    // OrderedSet<T> 필드다(리플렉션 B9f2).
+    public bool IsSet => Kind == MapRules.Set;
+
+    // 원소 수 상한(MaxElements)을 갖는 컨테이너 필드다(배열·Map·Set).
+    public bool IsCounted => IsArray || IsMap || IsSet;
+
+    // FieldValue로 통째 읽고 쓰지 않는 필드다(런타임 FieldIsAggregate와 같은 규칙): struct 값, 배열, 값 struct 내부의 Optional,
+    // Map·Set. 생성 함수표는 read·write·writeStaged 없이 codec과(Map·Set 말고) 경로 thunk를 싣는다.
+    public bool IsAggregate => IsStruct || IsArray || (IsOptional && ElementKind == "Struct") || IsMap || IsSet;
+
+    // 필드 값의 대상 종류다: 배열이면 원소 종류, Optional이면 내부 종류, Map이면 값 종류, Set이면 원소 종류, 아니면 값 종류(런타임
+    // FieldTargetType과 같은 규칙). Map 키는 KeyKind다.
+    public string TargetKind => IsArray || IsOptional || IsMap || IsSet ? ElementKind ?? "Opaque" : Kind;
+
+    // Map 키가 대상 타입 ID를 쓰는 종류다(Enum·ClassReference·SoftObjectReference — 성질 표 HasTargetType).
+    public bool KeyHasTargetType => KeyKind is not null && ValueKindTable.Has(KeyKind, ValueKindProperty.HasTargetType);
 
     // struct 필드이거나 struct 원소 배열이다(깊이·순위·형질·생성 헤더 include의 간선).
     public bool StructTarget => TargetKind == "Struct";
@@ -265,6 +292,117 @@ internal static class OptionalRules
     public const string InnerHint =
         "rocks::Optional<T> holds a scalar, Guid, String, Name, AssetId, Sha256Digest, ROCKS_ENUM enum or a ROCKS_STRUCT without strong references; " +
         "references already use null for 'none', and containers or nested Optionals cannot be wrapped.";
+}
+
+// 리플렉션 Map·Set 필드 규칙을 한 곳에 둔다(리플렉션 B9f2 — Docs/Design/ReflectionExtensions.ko.md 7.2·15절). OrderedMap<K, V>·
+// OrderedSet<T>는 클래스 필드·struct 멤버에만 두고 키·원소는 성질 표의 Map 키·Set 원소 종류, 값은 Map 값 종류(강한 참조는 ObjectRefMap —
+// 리플렉션 B9f4)다. 기본 해시·같음 정책만 받는다. HashMap·HashSet은 순서가 없어 저장할 수 없다(RMC2305).
+internal static class MapRules
+{
+    public const string Map = "Map";
+
+    public const string Set = "Set";
+
+    // spelling이 rocks::OrderedMap<K, V>면 (Map, K, V), rocks::OrderedSet<T>면 (Set, T, null)을 돌려준다(desugar 철자, 앞의 :: 허용 —
+    // 아니면 null). Clang이 기본 템플릿 인자를 출력하면 그 인자가 기본 정책(rocks::SeededHash<K>·rocks::Equal<K>)일 때만 받는다(다른 해시·
+    // 같음 정책이면 Unsupported 이유를 policy에 담는다).
+    public static (string Container, string Key, string? Value, string? Policy)? Split(string spelling)
+    {
+        string text = spelling.Trim();
+        text = text.StartsWith("::", StringComparison.Ordinal) ? text[2..] : text;
+        foreach ((string template, string container, int count) in new[] { ("rocks::OrderedMap", Map, 2), ("rocks::OrderedSet", Set, 1) })
+        {
+            if (!text.StartsWith(template + "<", StringComparison.Ordinal) || !text.EndsWith('>'))
+            {
+                continue;
+            }
+
+            if (Arguments(text, template.Length) is not { } arguments)
+            {
+                return null;
+            }
+
+            string key = arguments[0];
+            string? policy = null;
+            if (arguments.Count == count + 2)
+            {
+                string hash = Normalize(arguments[count]);
+                string equal = Normalize(arguments[count + 1]);
+                if (hash != $"rocks::SeededHash<{Normalize(key)}>" || equal != $"rocks::Equal<{Normalize(key)}>")
+                {
+                    policy = $"custom hash or equality policy '{arguments[count]}, {arguments[count + 1]}'";
+                }
+            }
+            else if (arguments.Count != count)
+            {
+                policy = "custom hash or equality policy";
+            }
+
+            return (container, key, container == Map && arguments.Count > 1 ? arguments[1] : null, policy);
+        }
+
+        return null;
+    }
+
+    // spelling이 리플렉션 Map·Set 컨테이너 철자인지다(원소·내부·키·값 위치의 중첩 판정).
+    public static bool IsContainer(string spelling) => Split(spelling) is not null;
+
+    // spelling이 순서 없는 Core 컨테이너(rocks::HashMap·rocks::HashSet)인지다(RMC2305 — 저장할 수 없다).
+    public static bool IsUnordered(string spelling)
+    {
+        string text = spelling.Trim();
+        text = text.StartsWith("::", StringComparison.Ordinal) ? text[2..] : text;
+        return text.StartsWith("rocks::HashMap<", StringComparison.Ordinal) || text.StartsWith("rocks::HashSet<", StringComparison.Ordinal);
+    }
+
+    // RMC2305 진단의 공통 안내다.
+    public const string Hint =
+        "rocks::OrderedMap<K, V> keys and rocks::OrderedSet<T> elements are integers, bool, ROCKS_ENUM enums, Guid, AssetId, Sha256Digest, String, Name, " +
+        "SoftObjectRef or ClassRef (no floats, object/weak references, structs, Optionals or containers); map values are any single value or a ROCKS_STRUCT " +
+        "without strong references (object references go in ObjectRefMap). Containers do not nest; wrap an inner container in a ROCKS_STRUCT value.";
+
+    // 템플릿 인자 목록(꺾쇠 깊이로 나눈다)이다. 닫는 꺾쇠가 철자 끝이 아니면 null이다(중첩 이름이 아니게).
+    private static List<string>? Arguments(string text, int open)
+    {
+        List<string> arguments = [];
+        int depth = 0;
+        int start = open + 1;
+        for (int index = open; index < text.Length; ++index)
+        {
+            char c = text[index];
+            if (c is '<' or '(' or '[')
+            {
+                ++depth;
+            }
+            else if (c is '>' or ')' or ']')
+            {
+                --depth;
+                if (depth == 0)
+                {
+                    if (index != text.Length - 1)
+                    {
+                        return null;
+                    }
+
+                    arguments.Add(text[start..index].Trim());
+                    return arguments;
+                }
+            }
+            else if (c == ',' && depth == 1)
+            {
+                arguments.Add(text[start..index].Trim());
+                start = index + 1;
+            }
+        }
+
+        return null;
+    }
+
+    private static string Normalize(string spelling)
+    {
+        string text = spelling.Trim();
+        return text.StartsWith("::", StringComparison.Ordinal) ? text[2..] : text;
+    }
 }
 
 // enum 규칙을 한 곳에 둔다. 파서·descriptor·생성기가 같이 쓰며 런타임 TypeRegistry::RegisterEnum과 같은 규칙이다.
