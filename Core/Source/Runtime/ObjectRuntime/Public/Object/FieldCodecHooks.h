@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Meta/TypeSchema.h>
+#include <Meta/PropertyPathSchema.h>
 #include <Object/AssetId.h>
 #include <Object/ObjectHandle.h>
 

@@ -6,7 +6,7 @@
 #include <Core/Move.h>
 #include <Core/Text/Name.h>
 #include <Core/Text/String.h>
-#include <Meta/TypeSchema.h>
+#include <Meta/PropertyPathSchema.h>
 #include <Object/ObjectAccessContext.h>
 #include <Object/Object.h>
 #include <new>

@@ -2,7 +2,7 @@
 
 #include <Core/Text/String.h>
 #include <Core/Text/StringView.h>
-#include <Meta/TypeSchema.h>
+#include <Meta/PropertyPathSchema.h>
 #include <Object/NameField.h>
 #include <Object/ObjectRegistry.h>
 #include <Object/PathKey.h>

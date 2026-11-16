@@ -5,7 +5,7 @@
 #include <Core/Encoding/Sha256.h>
 #include <Core/Result.h>
 #include <Core/Text/StringView.h>
-#include <Meta/TypeSchema.h>
+#include <Meta/PropertyPathSchema.h>
 
 // 경로 key 단계(리플렉션 B9f3 — Docs/Design/ReflectionExtensions.ko.md 1.5·7.3절)의 키 값이다.
 // PathKey(MetaSchema)는 키 종류와 그 종류의 wire payload 정규형 byte다. 이 헤더는 정규형을 만드는
