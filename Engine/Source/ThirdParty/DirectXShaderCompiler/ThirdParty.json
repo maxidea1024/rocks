@@ -1,0 +1,120 @@
+{
+  "schema": 1,
+  "kind": "binary",
+  "name": "DirectXShaderCompiler",
+  "version": "1.9.2609",
+  "upstreamDirectory": "dxc-1.9.2609",
+  "licenses": [
+    {
+      "spdx": "NCSA",
+      "upstreamExpression": "NCSA (LLVM Release License, LICENSE.TXT), 구성요소 고지는 ThirdPartyNotices.txt",
+      "file": "dxc-1.9.2609/LICENSE.TXT",
+      "binaryNoticeRequired": true
+    }
+  ],
+  "includeDirectories": [
+    "dxc-1.9.2609/include"
+  ],
+  "consumerDefines": [],
+  "adapterHeaders": [
+    "dxc-1.9.2609/include/dxc/WinAdapter.h",
+    "dxc-1.9.2609/include/dxc/dxcapi.h"
+  ],
+  "files": {
+    "LICENSE.TXT": "27a49e35d1da96eba18fba54bc882667ff0ff8c0254f16f2b6e165d605ba7df8",
+    "include/dxc/WinAdapter.h": "f5688a1408a8de8c0c35176bc900f21d7679d492215da94da4ab643cb66867f4",
+    "include/dxc/dxcapi.h": "a8d409642ded485ea4fd4c055f1199a13538f0393755c2d958ade281afed4ca0"
+  },
+  "pragmaDirectives": [],
+  "build": {
+    "tag": "v1.9.2609",
+    "revision": 1,
+    "source": {
+      "repository": "https://github.com/microsoft/DirectXShaderCompiler",
+      "commit": "01b62ad47db7dee3dd33f90e7339cf9e860b3f93",
+      "url": "https://github.com/microsoft/DirectXShaderCompiler/archive/01b62ad47db7dee3dd33f90e7339cf9e860b3f93.tar.gz",
+      "sha256": "c48c223df13ba425fd9beda9843754defbcd379a3811a6a0e590110be57168c7"
+    },
+    "dependencies": [
+      {
+        "path": "external/DirectX-Headers",
+        "repository": "https://github.com/microsoft/DirectX-Headers",
+        "commit": "980971e835876dc0cde415e8f9bc646e64667bf7",
+        "url": "https://github.com/microsoft/DirectX-Headers/archive/980971e835876dc0cde415e8f9bc646e64667bf7.tar.gz",
+        "sha256": "b5a4b6d8806ff7f29f19879f83d015dbe8740676d4ca0b48647a789cc7773c4e"
+      },
+      {
+        "path": "external/SPIRV-Headers",
+        "repository": "https://github.com/KhronosGroup/SPIRV-Headers",
+        "commit": "496543121ce6419f23d6fa5d7194ba66c36212d2",
+        "url": "https://github.com/KhronosGroup/SPIRV-Headers/archive/496543121ce6419f23d6fa5d7194ba66c36212d2.tar.gz",
+        "sha256": "a9bb9c48713245eacf97cc539b6f1d45405a92d8813f8b82e635f0a085ee9898"
+      },
+      {
+        "path": "external/SPIRV-Tools",
+        "repository": "https://github.com/KhronosGroup/SPIRV-Tools",
+        "commit": "ef96ed763b43b59b33b31b362f09a02b729fa1c9",
+        "url": "https://github.com/KhronosGroup/SPIRV-Tools/archive/ef96ed763b43b59b33b31b362f09a02b729fa1c9.tar.gz",
+        "sha256": "82c62146083fd558735a3171cf97cfc47903ca7d368482e87f94bd44883c0f00"
+      }
+    ],
+    "scripts": [
+      "Build/Build.ps1",
+      "Build/Build.sh"
+    ],
+    "patches": []
+  },
+  "hosts": {
+    "windows-x64": {
+      "archive": {
+        "url": "https://github.com/maxidea1024/rocks/releases/download/third-party-DirectXShaderCompiler-1.9.2609-r1/DirectXShaderCompiler-1.9.2609-r1-windows-x64.tar.gz",
+        "sha256": "ca36ac720f580ecccb1f12d548723ab046df6fd92e0e53be69f3f6812c99cd22",
+        "size": 82710834
+      },
+      "files": [
+        {
+          "path": "bin/dxc.exe",
+          "sha256": "2428f8709201b54cc3ebcb2651e615006a9b515174582357a675082d5d00c8bb",
+          "size": 1085952,
+          "role": "tool"
+        },
+        {
+          "path": "bin/dxc.pdb",
+          "sha256": "c48a6075469abee8f74a47669074a14a918ed70319758c49ea36586d6f7a18fc",
+          "size": 16084992,
+          "role": "symbols"
+        },
+        {
+          "path": "bin/dxcompiler.dll",
+          "sha256": "a0f75767be8ec0ca732af29668524707b6ccee78ec45547e163267d82899783b",
+          "size": 21943296,
+          "role": "runtime"
+        },
+        {
+          "path": "bin/dxcompiler.pdb",
+          "sha256": "c9b60e7df79d6dbc58992eb992ec40c964df7ea5062ddd41e40a6f1556d4c48e",
+          "size": 238145536,
+          "role": "symbols"
+        },
+        {
+          "path": "LICENSE.TXT",
+          "sha256": "27a49e35d1da96eba18fba54bc882667ff0ff8c0254f16f2b6e165d605ba7df8",
+          "size": 29241,
+          "role": "notice"
+        },
+        {
+          "path": "ThirdPartyNotices.txt",
+          "sha256": "19512a5d0a015ef16d167272c164da49a604614a786206212a80ad486ed0be6d",
+          "size": 11256,
+          "role": "notice"
+        }
+      ]
+    }
+  },
+  "notes": [
+    "DXC 고정 태그 v1.9.2609(2026-09-29, gh release list 기준 최신 안정 릴리스, 1.8.2505 이상 요건 충족). submodule(SPIRV-Headers·SPIRV-Tools·DirectX-Headers)은 그 태그의 커밋으로 받는다. SPIRV-Headers·SPIRV-Tools 커밋은 Vulkan SDK 1.4.363.0 태그와 같다.",
+    "업스트림 빌드 설정(예외·RTTI, cmake/caches/PredefinedParams.cmake)으로 엔진 빌드 밖에서 만든다(Build/Build.ps1·Build.sh, 경고 정책의 미리 빌드한 바이너리 절). dxil.dll은 만들지 않는다(1.8.2505부터 내장 validator가 서명한다).",
+    "공개 헤더 dxcapi.h(비Windows는 WinAdapter.h를 include)만 커밋한다. Windows에서 dxcapi.h는 COM 형식(IUnknown·HRESULT)을 쓰므로 Windows 헤더를 먼저 include하는 플랫폼 구현(P4 ShaderFormat)이 경고 0을 확인한다.",
+    "macos-arm64 산출물은 아직 없다(Build.sh 미검증)."
+  ]
+}

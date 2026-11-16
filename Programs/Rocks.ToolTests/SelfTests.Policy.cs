@@ -918,5 +918,17 @@ internal static partial class SelfTests
             temporary.Write("Programs/Rocks.Cli/Probe.cs", "var spec = new ProcessSpec(\"python.exe\", args, root);\n");
             Verify.That(PolicyChecks.PythonFreeMainPath(temporary.Root).Count != 0, "Python process invocation escaped audit");
         });
+        suite.Add("Policy.PythonExclusionIsOnlyTheThirdPartyToolsWorkflow", () =>
+        {
+            // 오프라인 도구 빌드 workflow만 제외한다. 이름이 비슷한 workflow와 Build/의 도구 빌드 공용 스크립트는 계속 검사한다.
+            using TemporaryDirectory temporary = new();
+            temporary.Write(PolicyChecks.ThirdPartyToolsWorkflow, "      - uses: actions/setup-python@v6\n");
+            NoFailures(PolicyChecks.PythonFreeMainPath(temporary.Root));
+            temporary.Write(".github/workflows/third-party-tools-2.yml", "      - uses: actions/setup-python@v6\n");
+            Verify.Equal(1, PolicyChecks.PythonFreeMainPath(temporary.Root).Count, "lookalike workflow escaped audit");
+            File.Delete(temporary.FilePath(".github/workflows/third-party-tools-2.yml"));
+            temporary.Write("Build/ThirdPartyTools/ToolBuild.ps1", "& python3 gen.py\n");
+            Verify.Equal(1, PolicyChecks.PythonFreeMainPath(temporary.Root).Count, "tool build helper under Build escaped audit");
+        });
     }
 }

@@ -129,6 +129,12 @@ public sealed partial record ThirdPartyManifest
     /// <summary>build 출처 스크립트·patch를 두는 라이브러리 폴더 바로 아래 디렉터리 이름이다.</summary>
     public const string BuildDirectory = "Build";
 
+    /// <summary>
+    /// build.scripts가 받는 확장자다. Windows 스크립트(.ps1·.cmd), macOS 스크립트(.sh), 스크립트가 작업 디렉터리에 복사해 쓰는 CMake
+    /// 래퍼(.cmake, 업스트림 원본을 고치지 않고 빌드 대상을 더할 때)다.
+    /// </summary>
+    public static readonly IReadOnlyList<string> BuildScriptExtensions = [".ps1", ".cmd", ".sh", ".cmake"];
+
     private static ThirdPartyManifest ParseBinary(JsonElement root)
     {
         Dictionary<string, JsonElement> fields = Object(root, "manifest", BinaryFields, optionalFields: OptionalBinaryFields);
@@ -303,10 +309,10 @@ public sealed partial record ThirdPartyManifest
         foreach (string script in scripts)
         {
             if (!script.StartsWith(BuildDirectory + "/", StringComparison.Ordinal) ||
-                !(script.EndsWith(".ps1", StringComparison.Ordinal) || script.EndsWith(".cmd", StringComparison.Ordinal) ||
-                  script.EndsWith(".sh", StringComparison.Ordinal)))
+                !BuildScriptExtensions.Any(extension => script.EndsWith(extension, StringComparison.Ordinal)))
             {
-                throw new FormatException($"build.scripts: '{script}' must be a .ps1, .cmd or .sh file under {BuildDirectory}/");
+                throw new FormatException(
+                    $"build.scripts: '{script}' must be a {string.Join(", ", BuildScriptExtensions)} file under {BuildDirectory}/");
             }
         }
 

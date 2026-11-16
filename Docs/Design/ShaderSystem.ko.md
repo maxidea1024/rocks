@@ -116,7 +116,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 | A4 | Cooker·TargetProfile·쿠킹 매니페스트 | AssetSystem A4 | 미착수 | P6b | A3 | 5.2 K1–K3 |
 | P1 | 자식 프로세스·pipe | PlatformLayer | **구현** | SH1 | — | 5.3 |
 | P2 | 바인딩 규약(GLES 포함) | 이 문서 | 설계 | SH2 | — | 7절 |
-| P3 | ThirdParty Engine 루트·`binary`·`headers` 종류·저장소·오프라인 도구 빌드 | 이 문서 | **구현 중**(루트·종류·Vulkan-Headers·SPIRV-Reflect·bootstrap) | P4, P9, P12, SH0 | — | 8절 |
+| P3 | ThirdParty Engine 루트·`binary`·`headers` 종류·저장소·오프라인 도구 빌드 | 이 문서 | **구현**(Windows. macOS 산출물·Release 게시 남음) | P4, P9, P12, SH0 | — | 8절 |
 | P4 | 도구 표 생성·binary 의존 정책·Release 배제 검사 | 이 문서 | 설계 | SH0, SH2 | P3, P10 | 9절 |
 | P5 | 셰이더 job 키 | 이 문서 | 설계 | SH1 | A2, A3, P6a | 10절 |
 | P6a | 형식 정의 스키마와 파일, 엔진 컴파일 프로필 | 이 문서 | 설계 | P5, P14, P6b, SH1 | A0-C(JSON), 결정 2·3·5 | 12.1절 |
@@ -465,7 +465,9 @@ Rocks도 같은 구조로 한다. 그래서 Rocks.Build에 공유 라이브러�
 - [x] CompilerDiagnostics 미리 빌드한 바이너리 승인 절·셰이더 컴파일 경고 절, RepositoryLayout·CoreDataFoundations·Compression 개정.
 - [x] Vulkan-Headers(``kind: headers``)·SPIRV-Reflect(``kind: code``)를 Vulkan SDK 1.4.363.0 태그(DXC v1.9.2609 submodule과 같은 SDK 태그)로 Engine 루트에 반입. SPIRV-Reflect가 Rocks 경고 규칙으로 빌드되고 두 헤더가 경고 0으로 include됨을 EngineTests(``Programs/FoundationTests/Engine/ThirdPartyShaderToolTests.cpp``)로 확인(Windows. macOS는 CI에 EngineTests가 없어 미검증).
 - [x] bootstrap 명령(``Rocks.Build.Cli bootstrap``·``/t:ThirdPartyBootstrap``, ``ThirdPartyStore``): 임시 경로 → archive·파일 SHA-256·크기 검사 → 이동, 미러·``gh`` 인증 다운로드, 잠금(기다리지 않음), 빌드·워커 경로에서 받지 않음(정책 시험). 시험: 정상·SHA 불일치·중단 뒤 재시도·취소·오프라인·호스트 누락·손상 저장소·archive 경로 탈출과 링크(``ThirdPartyStore.*``). FXC 고정본(Windows SDK 10.0.22621.0의 ``d3dcompiler_47.dll`` 10.0.22621.2428)·Apple 도구 최소 버전(``MetalToolchain``, 32023) 등록. quarantine 제거는 macOS에서만 실제로 돌며 Windows 실행은 함수가 아무것도 하지 않음만 확인(macOS 미검증). CI 저장소 캐시(``foundation.yml``)는 CI가 bootstrap을 쓰는 단계(SH0)에서 더한다.
-- [ ] 오프라인 도구 빌드 스크립트·workflow, Windows 산출물 SHA 등록, macOS 산출물.
+- [x] 오프라인 도구 빌드: `Engine/Source/ThirdParty/<Lib>/Build/Build.ps1`·`Build.sh`(공용 함수 `Build/ThirdPartyTools/`), 수동 실행 workflow `.github/workflows/third-party-tools.yml`(정책 `PythonFreeMainPath`는 이 파일만 제외). 고정 태그는 DXC v1.9.2609(2026-09-29 최신 안정 릴리스), SPIRV-Cross·SPIRV-Tools·SPIRV-Headers는 그 submodule과 같은 Vulkan SDK 1.4.363.0. 공개 헤더(`dxcapi.h`·`WinAdapter.h`·`spirv_cross_c.h`·`spirv.h`·`libspirv.h`)는 커밋하고 스크립트가 빌드 원본과 byte 대조한다. SPIRV-Tools는 업스트림 공유 빌드가 Windows에서 링크되지 않아 C API(검증·최적화기)를 `SPIRV-Tools-c` 하나로 묶는다(CMake 래퍼 `Build/SpirvToolsC.cmake`).
+- [x] Windows x64 archive를 실제로 만들어 manifest `hosts.windows-x64`에 SHA-256을 기록하고 미러 bootstrap으로 검사했다. 빌드한 DXC가 서명된 DXIL(hash 0이 아님)과 SPIR-V를 만든다. `spirv_cross_c.h`·`libspirv.h`는 EngineTests가 경고 0으로 include한다.
+- [ ] Release 게시(사용자 확인 뒤), macOS arm64 산출물(`Build.sh` 미검증: install name·ad-hoc 서명·dSYM 포함), `dxcapi.h` 경고 0 확인(Windows 헤더가 필요해 P4 ShaderFormat 플랫폼 구현에서), CI 저장소 캐시.
 
 ## 9. P4·P10 도구 로드와 Release 배제
 

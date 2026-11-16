@@ -29,7 +29,7 @@ public abstract class TestsModule : ModuleRules
 
     // EngineTests의 셰이더 도구 외부 라이브러리 시험(Programs/FoundationTests/Engine)이 include하는 라이브러리다. 헤더는 이 실행 파일의
     // Private include로만 들어가고(adapter 방식) 엔진 경고 규칙으로 경고 0이어야 한다(Docs/Design/ShaderSystem.ko.md 8절).
-    private static readonly string[] EngineThirdPartyHeaders = ["VulkanHeaders", "SpirvReflect"];
+    private static readonly string[] EngineThirdPartyHeaders = ["VulkanHeaders", "SpirvReflect", "SpirvCross", "SpirvTools"];
 
     protected abstract TestLayer Layer { get; }
 
