@@ -1,6 +1,6 @@
 # 렌더 기반(RenderBase) 설계
 
-기준일: 2026-11-16, 개정 2(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-16, 개정 3(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
 - 렌더 lane과 프레임 전달, 장치 스레드 모델, 장치 자원 수명, 렌더 그래프
 - 셰이더 런타임 객체(셰이더 집합·파라미터 바인딩·상수 블록·파이프라인 캐시)
 - 정점 입력 타입, 공용 자원·그리기 유틸리티, GPU 계측
@@ -332,6 +332,51 @@ RenderLane::Post(표면 작업) ──────────▶ 스왑체인 �
 - `Retire` 뒤 lease가 남은 동안 회수 0건, fence 완료 이벤트 뒤 회수(이벤트를 gate로 막아 단언).
 - 장치 재생성 뒤 구 handle 사용이 stale 오류.
 
+### 6.5 텍스처 플랫폼 데이터 입력 계약
+
+AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업로드·텍스처 스트리밍)가 읽는 계약이다. 에셋 세션과 합의했다(2026-11-16). 분담은 다음과 같다. 압축(BC·ASTC·ETC2)·색 보정은 에셋 빌드(A 단계, 에셋 너겟 키)가 맡는다. GPU 업로드·스트리밍·mip 상주는 렌더가 맡는다. 무손실 원본 bulk는 에디터 전용이며 쿠킹 데이터에 들어가지 않으므로 렌더는 읽지 않는다. 플랫폼 데이터는 TargetProfile마다 만들고 에셋 너겟 키로 캐시한다(형식 선택이 프로필에 걸린다).
+
+**UE 5.8 대응.**
+- 플랫폼 데이터는 크기·cube 여부·slice 수·픽셀 형식·플랫폼별 추가 데이터(mip tail 수 포함)·mip 배열을 가진다(`Engine/Classes/Engine/Texture.h:880–895`).
+- mip 하나는 크기(SizeX·SizeY, depth 또는 array 크기를 담는 SizeZ)와 bulk 하나를 가진다(`Engine/Public/TextureResource.h:45–57`).
+- cube는 한 mip의 bulk 안에 face를 이어 둔다(`Engine/Private/TextureCube.cpp:392`). face 순서는 +X·−X·+Y·−Y·+Z·−Z다(`RHI/Public/RHIDefinitions.h:506–515`).
+- 쿠킹은 mip을 셋으로 나눈다. optional(선택 다운로드)·스트리밍(별도 파일)·inline(에셋과 함께 상주)이다. inline 꼬리는 기본 7개와 형식 mip tail 수 가운데 큰 값이다(`Engine/Private/TextureDerivedData.cpp:1644, 3374–3392`, `Engine/Private/TextureDerivedDataTask.h:32`).
+
+**메타.** 텍스처마다 다음을 가진다.
+- 차원(2D·Cube·3D·2DArray·CubeArray).
+- 형식·sRGB·swizzle. 모두 GraphicsTypes 값이다.
+- 기준 크기: 폭·높이, 그리고 depth(3D) 또는 slice 수(array). cube는 face 6 × cube 수다.
+- mip 수와 상주 꼬리 mip 수.
+- mip마다: 크기(폭·높이·depth), 바이트 크기(패딩 제외), 위치(상주 꼬리 덩어리 안의 오프셋, 또는 스트리밍 덩어리 id·오프셋).
+- 렌더는 상주 mip 수를 다시 계산하지 않고 메타 값을 쓴다.
+
+**바이트 배치.**
+- mip-major: 큰 mip(0)부터 둔다. 스트리밍이 mip 하나의 모든 slice를 함께 올리기 때문이다.
+- 한 mip 안의 순서:
+  - array는 slice 0부터.
+  - cube는 face +X·−X·+Y·−Y·+Z·−Z 순(UE와 같다).
+  - cube array는 cube 0의 face 6개, 다음 cube 순.
+  - 3D는 z 0부터.
+- 2D 이미지 하나 안은 첫 행이 위이고 행 사이 padding이 없다. 지금 `TextureDesc`의 초기 픽셀 규칙(`Engine/Source/Runtime/Graphics/Public/Graphics/DeviceTypes.h:108–128` 주석)을 확장한 것이다.
+- 블록 압축 형식은 블록 행 단위다. 크기는 ceil(폭/블록 폭) × ceil(높이/블록 높이) × 블록 바이트다.
+- 장치 정렬(D3D12 행 pitch 256 byte, placed 자원 정렬 등)은 렌더 업로드(GX8)가 맞춘다. 에셋 데이터는 장치 정렬을 담지 않는다.
+
+**스트리밍 단위와 정렬.**
+- 스트리밍 mip은 mip마다 따로 읽을 수 있는 덩어리 하나다.
+- 상주 꼬리(가장 작은 mip들)는 한 덩어리로 묶어 에셋과 함께 읽는다.
+- 상주 꼬리 mip 수는 max(설정한 최소 상주 mip 수, 형식이 요구하는 mip tail 수)이고, 쿠킹 때 정해 메타에 적는다. 최소 상주 mip 수의 기본값은 텍스처 스트리밍 설계에서 정한다(UE 기본 7).
+- 스트리밍 덩어리의 시작 오프셋은 파일 안에서 4 KiB 정렬이고 패딩은 0으로 채운다. 메타의 크기는 패딩을 뺀 실제 크기다. 나중에 unbuffered 비동기 읽기나 mmap을 쓸 여지를 남기려는 것이고, 지금 직접 I/O를 쓰지는 않는다. 상주 꼬리 덩어리 안의 mip 오프셋은 16 byte 정렬이다.
+- 덩어리를 패키지 안에 둘지 별도 파일에 둘지는 AssetSystem A1 패키지 형식이 정한다.
+
+**직렬화.** 형식·sRGB·swizzle·차원은 GraphicsTypes가 가진 고정 번호표와 안정 이름(텍스트·JSON용)으로 기록하고 enum 순서 값을 쓰지 않는다. 번호는 한 번 정하면 재사용하지 않는다. 렌더 쪽 장치 형식 변환도 이 번호표를 기준으로 한다.
+
+**렌더 쪽 검사.** 텍스처를 만들 때 다음을 확인한다.
+- 메타의 mip 크기·바이트 크기가 위 공식과 맞는지. 다르면 `CorruptEntry`다.
+- 차원·형식 조합을 장치가 지원하는지(`DeviceCaps`, GX1). 지원하지 않으면 `UnsupportedCapability`다.
+- 상주 꼬리만으로 GPU 자원을 만들 수 있는지(가장 큰 상주 mip 기준으로 만들고, 스트리밍 mip은 상주가 늘 때 채운다).
+
+**후속.** optional mip(선택 다운로드), 가상 텍스처(AssetSystem 12.4절), 플랫폼 tiling 배치. 블록 압축 형식 표(BC1–7·ASTC·ETC2와 GLES·Android 가용성)는 압축 단계 착수 전에 에셋 세션과 함께 확정한다.
+
 ## 7. 렌더 그래프
 
 ### 7.1 UE 5.8 방식
@@ -635,6 +680,7 @@ RenderLane::Post(표면 작업) ──────────▶ 스왑체인 �
 |---|---|---|---|
 | AssetSystem | 1절 A0-G(샘플러 확장) | 샘플러 확장 범위 | **A0-G 착수 전**: 비교 함수(SX13), 텍스처 desc 샘플러는 기본값이고 바인딩 때 지정 가능(결정 R12) |
 | 〃 | 메시 에셋 단계(정해지면) | 정점 형식 Float만 | 패킹 법선·half·정규화 색 형식(10.2절) |
+| 〃 | A5 텍스처 플랫폼 데이터(`TexturePlatformData`) | 형식·swizzle·mip 배치 서술 | **A5 착수 전**: 6.5절 입력 계약(mip-major 배치, 상주 꼬리·스트리밍 덩어리, 4 KiB 정렬, 고정 번호표 직렬화). 에셋 세션이 반영한다 |
 | ShaderSystem | 9.9절 SX1–SX14 | — | 표대로. SX3·SX4·SX5·SX6은 P14 전, SX13은 A0-G 전, SX14는 SH1 전 |
 | 〃 | 3절 구조 | ShaderCore에 "라이브러리 로드" | ShaderCore는 장치 없는 메타데이터·라이브러리 형식 읽기, 장치 셰이더 객체는 RenderBase |
 | 〃 | 12.3절 | `GLES31_PC`·개발 트리는 필요 시 컴파일 | 셰이더 공급자 interface 경로(SX14) |
@@ -750,3 +796,4 @@ RenderLane::Post(표면 작업) ──────────▶ 스왑체인 �
     - GLES 정적 UB 처리(UE도 slot별 저장 뒤 바뀐 것만 복사)
     - Rocks backend 스레드 검사 없음
     - 정점 속성 최소 16(Vulkan·GLES 사양)
+- 개정 3(2026-11-16): 6.5절 텍스처 플랫폼 데이터 입력 계약을 더했다. 사용자 결정 "화면 마일스톤과 텍스처 스트리밍 … 이것도 니가해"로 렌더 세션이 GPU 업로드·스트리밍을 맡고, 압축·색 보정은 에셋 세션이 맡는다. 배치·스트리밍 단위·정렬·직렬화는 에셋 세션과 합의했다. UE 5.8 근거는 플랫폼 데이터·mip 구조·cube face 배치·쿠킹 mip 분할이다. 15절 AssetSystem 행에 A5 착수 전 요구를 더했다.
