@@ -3,6 +3,7 @@
 #include <Core/Containers/Span.h>
 #include <Core/Function.h>
 #include <Platform/Thread.h>
+#include <Task/TaskLane.h>
 
 namespace rocks {
 namespace detail {
@@ -161,6 +162,24 @@ struct WorkerSchedulerConfig {
     WorkerThreadLauncher launch = nullptr;
     void* launchContext = nullptr;
 };
+// Submit의 추가 옵션이다.
+//
+// 사용 예(앞 작업의 성공 여부와 무관하게 그 뒤에 실행):
+//   WorkerSubmitOptions options;
+//   options.orderDependencies = Span<const WorkerTaskHandle>(&previous, 1);
+//   options.lane = TaskLane::Render;
+//   auto next = scheduler.Submit(Move(body), {}, options);
+struct WorkerSubmitOptions {
+    // 순서 전용 선행이다. 모두 끝난 뒤(terminal)에만 실행하되 결과(실패·취소·회수)는 보지 않는다
+    // (UE FPipe처럼 "앞 작업이 끝난 뒤"만 보장, SerialTaskChain이 쓴다). 일반 선행과 같은 검사(같은
+    // scheduler·같은 세대·중복 없음)를 받고, 일반 선행과 같은 handle을 넣으면 InvalidArgument다. 두
+    // 목록의 합이 maxDependencies를 넘으면 CapacityExceeded다. Submit 호출 동안만 읽는다.
+    Span<const WorkerTaskHandle> orderDependencies;
+    // body와 capture 정리 동안 CurrentTaskLane()이 돌려줄 lane 표지다. TaskLane 범위 밖 값은
+    // InvalidArgument다. TryRevoke로 호출 스레드가 capture를 정리할 때는 표지를 바꾸지 않는다.
+    TaskLane lane = TaskLane::Worker;
+};
+
 enum class WorkerShutdownMode {
     Drain,
     Cancel
@@ -190,9 +209,10 @@ public:
     // 소비한다. 같은 Start 세대의 기존 handle만 허용하므로 새 node에서 기존 node로의 DAG만
     // 생성된다. 중복/invalid dependency는 InvalidArgument, 다른 scheduler/이전 세대는
     // WrongContext다. dependency 실패·취소는 body 없이 DependencyFailed다. 모든 거부/OOM은 caller
-    // body를 보존한다.
+    // body를 보존한다. options의 순서 전용 선행·lane 표지는 WorkerSubmitOptions를 따른다.
     Result<WorkerTaskHandle> Submit(Function<void(WorkerTaskContext&)>&& body,
-                                    Span<const WorkerTaskHandle> dependencies = {}) noexcept;
+                                    Span<const WorkerTaskHandle> dependencies = {},
+                                    const WorkerSubmitOptions& options = {}) noexcept;
     // 외부 완료 이벤트를 만든다(WorkerTaskEvent). 실패: 시작 전·종료 중 ShuttingDown, maxInFlight
     // 초과 CapacityExceeded, 할당 실패는 그 오류다.
     Result<WorkerTaskEvent> TryCreateEvent() noexcept;

@@ -86,3 +86,25 @@ Drain은 신규 제출을 닫고 수락한 작업을 완료한다. Cancel은 pen
 **수명.** 큐 칸 allocator는 여러 스레드의 동시 Allocate·Deallocate를 지원하고 lane보다 오래 살아야 한다. 실행 중 파괴는 Fatal이다. 시작·종료 대기에 시간 제한은 없다(끝나지 않는 작업을 강제 종료하지 않는다).
 
 시험(`Tests/DedicatedLaneTests.cpp`): gate로 막은 lane에 네 생산자가 동시에 넣은 작업의 생산자별 순서, 재진입 Post 순서가 두 모드에서 같음(바깥 작업이 A·B를 넣고 A가 C를, C가 D를 넣는 시나리오), Inline 가장 바깥 Post가 반환 전에 실행, 두 모드의 종료 Drain(남은 작업 0·종료 중 후속 수락·종료 뒤 거부와 task 보존), Flush, lane 작업 밖 lane 전용 API 거부와 Inline 중첩 실행의 판별·자기 대기 거부·lane 표지, 시작 계약(시작 전 Post 거부, 잘못된 옵션, 재시작, 스레드 이름 적용, 큐 칸 할당 실패 때 task 보존), 다른 스레드의 Start·Shutdown 거부. 순서는 모두 이벤트 gate로 만들고 sleep에 기대지 않는다.
+
+## 순서 전용 선행과 lane 옵션(WorkerSubmitOptions)
+
+`Submit(body, dependencies, WorkerSubmitOptions{orderDependencies, lane})`(RenderBase CP2). `orderDependencies`는 끝난 뒤(terminal)에만 실행하되 결과를 보지 않는 선행이다. 실패·취소·회수된 순서 전용 선행은 `DependencyFailed`를 만들지 않는다(일반 선행은 그대로 전파한다). 검사는 두 목록을 이어 한 번에 한다(같은 scheduler·같은 세대·두 목록 사이 중복 금지, 합이 `maxDependencies` 이하). 기록에는 dependency 칸별 bit mask로 남기고 worker의 ready 판정만 그 bit를 본다. `lane`은 body와 capture 정리 구간의 `TaskLaneScope` 값이며 기본은 Worker다(`TryRevoke`로 호출 스레드가 capture를 정리할 때는 표지를 바꾸지 않는다).
+
+## 직렬 작업 체인(SerialTaskChain)
+
+`Task/SerialTaskChain.h`는 넣은 순서대로 하나씩 실행하는 worker 위의 체인이다(UE `Core/Public/Tasks/Pipe.h` FPipe, 렌더 그래프 설정 task 대응). 새 작업은 직전에 수락한 작업을 순서 전용 선행으로 건다. 그래서 체인 안의 두 작업은 겹치지 않고, 앞 작업이 실패·취소·회수되어도 다음 작업은 실행한다(체인은 순서만 정하고 결과를 잇지 않는다). 사용자가 준 일반 선행이 실패하면 그 작업만 `DependencyFailed`다. 여러 스레드의 `Submit`은 체인 잠금 순서가 수락 순서이며, 잠금을 쥔 채 scheduler `Submit`을 부르므로 scheduler allocator 콜백에서 같은 체인을 부르면 교착이다. 이미 끝난 직전 작업은 선행에서 빼고 놓는다(결과 record를 오래 잡지 않고, scheduler 재시작 뒤 이전 세대 handle로 `WrongContext`가 나지 않게). `Last()`는 마지막 handle 사본, `Wait(timeout)`은 그 handle 대기다(worker에서 부르면 WrongThread). 체인 객체는 작업이 참조하는 상태가 없어 언제 파괴해도 수락한 작업은 계속 실행한다.
+
+## 범위 병렬 실행(ParallelFor)
+
+`Task/ParallelFor.h`의 `ParallelFor(scheduler, scratch, count, body(begin, end), ParallelForOptions{minBatchSize, maxHelpers})`는 [0, count)를 연속 batch로 나눠 호출 스레드와 helper 작업이 함께 실행한다(UE `Core/Public/Async/ParallelFor.h` 대응). body는 void 또는 `ErrorCode`를 돌려주며 복사하지 않고 참조로 여러 스레드에서 부른다. 템플릿은 body를 함수 포인터 하나로 감싸 비템플릿 `detail::RunParallelFor`에 넘긴다(본문 할당 없음).
+
+- 분배: batch 크기는 max(`minBatchSize`, ⌈count / (참여자 × 4)⌉)이고, helper 수는 worker 수·`maxHelpers`·(batch 수 − 1)·64 이하다. batch는 원자 카운터로 번호 순서대로 가져간다.
+- 오류: body가 오류를 돌려주면 새 batch를 가져가지 않고, 실패한 batch 가운데 가장 앞 batch의 오류를 돌려준다. batch를 번호 순서로만 가져가므로 실패한 batch보다 앞선 batch는 모두 실행되고, 결과는 순차 실행에서 처음 만나는 실패와 같다(병렬 압축의 job 분배와 같은 규칙).
+- 정리: 호출 스레드가 일을 마치면 아직 꺼내지 않은 helper는 `TryRevoke`로 회수하고 실행 중인 helper만 기다린다. 반환 시 body와 공유 상태를 참조하는 helper가 모두 terminal이다.
+- 문맥: helper는 호출 스레드의 lane 표지를 물려받는다(None이면 Worker). 렌더 lane이 부른 ParallelFor의 batch는 worker에서도 Render 문맥이다(UE parallel rendering thread 판별 대응).
+- 혼자 실행: 같은 scheduler의 worker 안(helper를 기다릴 수 없다), scheduler 시작 전·종료 중, helper 본문 할당·제출 실패, `maxHelpers` 0이면 그만큼 helper 없이 호출 스레드가 남은 batch를 모두 실행하고 결과는 같다.
+
+병렬 압축(`Compression/Private/CompressedBlocks.cpp`의 `RunParticipants`)은 참여자별 codec 상태를 두는 같은 분배 방식을 이미 쓴다. ParallelFor에 참여자별 문맥이 생기면 그쪽을 옮긴다(후속).
+
+시험: `Tests/SerialTaskChainTests.cpp` 5개(4 worker에서 200개 작업의 순서·비중첩·Render 표지, 네 생산자의 생산자별 순서, 실패·회수·선행 실패 뒤에도 체인 진행, 시작 전 거부와 body 보존·scheduler 재시작 3회, 순서 전용 선행·lane 옵션 검사와 거부), `Tests/ParallelForTests.cpp` 3개(10007개 원소를 한 번씩·Render 표지 상속·count 0, 처음 실패 batch의 결정성 20회와 앞 원소 실행, 시작 전·`maxHelpers` 0·worker 안 호출·helper 할당 실패 때 호출 스레드 실행).

@@ -124,7 +124,7 @@ ID는 이 문서가 붙인다. CP는 Core 선행, GX는 Graphics 확장, RB는 R
 | ID | 작업 | 상태 | 의존 | 막는 것 | 규모 | 상세 |
 |---|---|---|---|---|---|---|
 | CP1 | 전용 lane 실행기, 스레드 이름·우선순위·스택 크기 | 구현 | Thread·Sync(구현) | RB1 | M | 4.3절 |
-| CP2 | 직렬 작업 체인·ParallelFor·작업 문맥 표지 | 미설계 | WorkerScheduler(구현) | RG3, RB3 일괄 생성 선택 | M | 4.3절 |
+| CP2 | 직렬 작업 체인·ParallelFor·작업 문맥 표지 | 구현 | WorkerScheduler(구현) | RG3, RB3 일괄 생성 선택 | M | 4.3절 |
 | CP3 | 프레임 arena | 미설계 | Allocator(구현) | RG1, RB4(GLES `PerDraw`) | M | 4.3절 |
 | CP4 | 콘솔 설정(타입 있는 변수·명령·출처·렌더 snapshot) | 미설계, 별도 스펙 | CP8 | RB1 설정 snapshot, RG1 디버그 설정 | M | 12절 |
 | CP5 | 다중 스레드 CPU 구간 계측·카운터·GPU 상관 | 부분 | ProfileScope(구현) | RB7 | M | 13절 |
@@ -156,7 +156,7 @@ ID는 이 문서가 붙인다. CP는 Core 선행, GX는 Graphics 확장, RB는 R
 - 완료 기준: 다중 생산자 FIFO 순서, 재진입 `Post` 순서가 두 모드에서 같음, 종료 Drain(남은 작업 0), 인라인·스레드 모드 결과 동일, lane 작업 밖 lane 전용 API 호출 거부. 순서는 sleep 없이 이벤트 gate로 만든다.
 - **구현(2026-11-16).** `Task/DedicatedLane.h`(`DedicatedLane`·`DedicatedLaneConfig`·`DedicatedLaneMode::Thread/Inline`·`Post`·`Flush`·`Shutdown`·`IsExecutingTask`), 작업 lane 표지 `Task/TaskLane.h`(`TaskLane`·`CurrentTaskLane`·`TaskLaneScope`), `Platform/Thread.h`의 `ThreadOptions`·`ThreadPriority`·`CopyCurrentThreadName`. 계약은 [WorkerScheduler](../Implementation/WorkerScheduler.ko.md) "전용 lane 실행기"·[플랫폼 동시성](../Implementation/PlatformConcurrency.ko.md) "스레드 옵션"절. 5.3절의 `RenderLane::Drain`은 이 lane의 `Flush`(호출 전 작업 완료 대기) 위에 RenderBase가 만든다.
 
-**CP2 직렬 작업 체인·ParallelFor.** 이전 작업을 선행으로 거는 직렬 체인(UE 그래프 설정 task `RC/Public/RenderGraphBuilder.h:256–284`), 범위 분할 병렬 실행, 작업 문맥 표지(어느 lane의 일인지)다.
+**CP2 직렬 작업 체인·ParallelFor.** 이전 작업을 선행으로 거는 직렬 체인(UE 그래프 설정 task `RC/Public/RenderGraphBuilder.h:256–284`), 범위 분할 병렬 실행, 작업 문맥 표지(어느 lane의 일인지)다. **구현(2026-11-16).** `Task/SerialTaskChain.h`(`SerialTaskChain`·`Submit`·`Last`·`Wait`), `Task/ParallelFor.h`(`ParallelFor`·`ParallelForOptions`), `WorkerScheduler::Submit`의 `WorkerSubmitOptions{orderDependencies, lane}`. 체인은 직전 작업을 **순서 전용 선행**(결과 무관)으로 건다. 일반 선행으로 걸면 앞 작업 하나의 실패가 체인 뒤 전체를 `DependencyFailed`로 만들기 때문이다(UE pipe도 앞 작업 결과와 무관하게 다음을 실행한다). 작업 문맥 표지는 CP1의 `TaskLane`을 worker 작업에도 붙이고, ParallelFor helper는 호출자의 표지를 물려받는다. 계약은 [WorkerScheduler](../Implementation/WorkerScheduler.ko.md) "직렬 작업 체인"·"범위 병렬 실행"절.
 
 **CP3 프레임 arena.** 그래프·프레임 수명 객체(pass·자원·파라미터 구조체·GLES `PerDraw` 상수 사본)를 할당하고, 수명이 끝날 때 등록된 소멸자를 부른 뒤 한 번에 비운다. 여러 스레드가 블록 단위로 할당한다. 기존 `ArenaAllocator`는 반환 안 된 할당이 있으면 Reset을 거부하므로(`ArenaAllocator.h:23–24`) 별도 타입이 필요하다. UE 대응: `Core/Public/Misc/MemStack.h:77`, `RC/Public/RenderGraphAllocator.h:23,129`, `Core/Public/Experimental/ConcurrentLinearAllocator.h:769`.
 
