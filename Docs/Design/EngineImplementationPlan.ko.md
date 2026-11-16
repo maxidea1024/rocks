@@ -2,7 +2,7 @@
 
 STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-driven 렌더러
 
-**설계 기준일 2026.11.16 · 개정 1.10 · 상태: 구현 제안 / 성능 미측정**
+**설계 기준일 2026.11.16 · 개정 1.11 · 상태: 구현 제안 / 성능 미측정**
 
 **추가 요구 반영:** Deferred·Forward 정식 지원, 업스케일링, 태깅·컴포넌트·프리팹, Unreal 참고 체계 확대, 컷씬 제작 핵심화, Blueprint 제외·자체 언어 채택, 하이엔드 포스트이펙트 전체 기능군, UBT 계열 자체 빌드 도구·분산 빌드·반복 개발 최적화, 정식 헤드리스 모드, 필수 노드 기반 머티리얼 에디터.
 
@@ -1035,6 +1035,8 @@ UE 5.4 runtime hash의 Loose Hierarchical Grid는 actor extent로 streaming cell
 
 **Deferred와 Forward+를 모두 불투명·반투명·skeletal mesh·조명·그림자를 지원하는 정식 렌더링 경로로 제공한다.** Deferred의 반투명 pass만 Forward로 처리하는 것은 이 요구의 완료가 아니다. 프로젝트 기본값과 개별 ViewDesc에서 경로를 선택한다. 같은 World/session을 보는 복수 view는 서로 다른 경로로 동일 RenderScene snapshot을 사용할 수 있다. EditorWorld와 각 PIE는 별도 논리 RenderScene 또는 SessionId/WorldEpoch별 가시성·가변 proxy 격리를 갖는다.
 
+렌더 경로는 이 둘뿐이며 클러스터 없는 고전 Forward는 두지 않는다(2026-11-16 사용자 결정 "forward+, deferred 로 하자"). 저사양·모바일(OpenGL ES 3.2·Vulkan 1.1)도 Forward+로 그린다. 두 최저 사양 모두 compute와 texture buffer를 보장하므로 light grid 생성 pass를 어디서나 실행할 수 있다. 로컬 광원이 없는 view는 grid 생성을 건너뛰어 고전 Forward와 같은 비용으로 낮춘다. UE 5.8도 모바일 Forward에서 로컬 광원을 클러스터 light grid로 처리한다(`r.Mobile.Forward.EnableLocalLights` 기본 1, `Runtime/Core/Private/HAL/ConsoleManager.cpp:4025–4030`, `Runtime/Renderer/Private/MobileShadingRenderer.cpp:419`). OpenGL ES 3.2는 픽셀 셰이더의 storage buffer를 최소 0개로 보장하므로 GLES 형식은 light grid를 typed buffer(texture buffer)나 텍스처로 읽는다([셰이더 시스템](ShaderSystem.ko.md) 7.2절 4항 모바일 상한).
+
 ~~~cpp
 enum class RenderPath : uint8 {
     Deferred,
@@ -1260,7 +1262,43 @@ M6–M8 고급 직접 조명 범위에는 Rect/area emitter, source radius/lengt
 
 고정 물리 카메라에서 source 크기·거리·광량·IES 방향을 바꾸어 조도·specular highlight·soft shadow를 검증한다. unsupported 조합은 명시 근사/fallback으로 보고하며 point/spot만으로 고급 직접 조명 완료를 판정하지 않는다.
 
-### 14.3 Lumen 유사 DynamicGI
+### 14.3 GI 선택 구조와 Lumen 유사 DynamicGI
+
+GI는 **정적 조명**과 **동적 GI** 두 축으로 고른다(2026-11-16 사용자 결정). 렌더 경로(11.1절)와는 독립 축이며, path tracing은 GI 방식이 아니라 별도 렌더 모드다. UE 5.8도 정적 조명 허용(`r.AllowStaticLighting`)·동적 GI 방식(`EDynamicGlobalIlluminationMethod`, `Runtime/Engine/Classes/Engine/EngineTypes.h:452–468`)·path tracing(`r.PathTracing`, `Runtime/Engine/Classes/Engine/RendererSettings.h:695`)을 따로 둔다.
+
+~~~cpp
+enum class StaticLighting : uint8 {
+    None,
+    Baked          // 라이트맵 + 베이크 프로브(14.10절)
+};
+enum class DynamicGiMethod : uint8 {
+    None,
+    VoxelConeTracing,   // SVOGI 계열
+    DynamicGI,          // Lumen 유사, 아래 G0–G4
+    RayTraced           // 하드웨어 ray tracing 전용 GI
+};
+enum class RenderMode : uint8 {
+    Raster,         // RenderPath(Forward+·Deferred)로 그린다
+    PathTracing     // reference·영상 출력용 path tracer(14.4절)
+};
+~~~
+
+| 방식 | 내용 | 요구 capability | 비고 |
+|---|---|---|---|
+| 정적: Baked | 라이트맵·베이크 irradiance 프로브·reflection capture(14.10절) | 없음(모든 backend) | 낮은 GPU 비용의 정식 품질 profile. 이동 객체는 프로브로 받는다 |
+| 동적: VoxelConeTracing | 장면을 sparse voxel(또는 clipmap)로 만들고 cone trace로 diffuse·glossy 간접광을 구한다. 공개 기법 Crassin 외 2011(S97)을 바탕으로 한 자체 설계다 | compute, 3D 텍스처 또는 storage 버퍼 | UE 5.8에는 대응 방식이 없다. voxel 해상도·갱신 예산·누광을 profile로 고정한다 |
+| 동적: DynamicGI | Lumen 유사 단계안 G0–G4(아래) | G2까지 compute, G3 이후 SDF 또는 하드웨어 RT 선택 | 하드웨어 RT가 있으면 trace를 가속받지만 방식 자체는 소프트웨어 trace로도 성립한다 |
+| 동적: RayTraced | 하드웨어 ray tracing 전용 GI(RayScene(14.4절)·denoiser 공유) | 하드웨어 RT | DynamicGI의 하위 옵션이 아닌 독립 방식이다(2026-11-16 사용자 결정) |
+| 렌더 모드: PathTracing | 래스터 경로 전체를 대신하는 reference·영상 출력 renderer | 하드웨어 RT 또는 compute fallback | GI 목록에 넣지 않는다. 25절 영상 출력·26.3절 CinematicOffline profile이 쓴다 |
+
+조합 규칙:
+- 정적 조명과 동적 GI는 함께 켤 수 있다. 같은 광원의 같은 항을 라이트맵·프로브·동적 GI에서 이중 가산하지 않는다. 동적 GI가 켜진 view에서 baked 간접광을 어떻게 쓰는지(무시·움직이지 않는 객체만 사용·혼합)는 방식별로 정하고 지원표에 적는다. UE는 Lumen이 켜지면 precomputed lighting을 쓰지 않는다.
+- 동적 GI 방식은 view마다 하나다. 요구 capability가 없으면 profile이 정한 순서로 낮춘다(예: RayTraced → DynamicGI → VoxelConeTracing → None). 낮춘 결과는 resolved profile에 기록한다(26.3절).
+- 모든 방식은 Forward+와 Deferred가 같은 GI 결과를 조명 입력으로 소비한다.
+- 반사 방식은 GI와 같은 두 축을 따르는 별도 선택이다(UE `EReflectionMethod`, `EngineTypes.h:472`). 세부는 각 방식의 단계에서 정한다.
+- 목록에 없는 방식(screen-space GI 단독, runtime probe GI 등)은 위 enum에 값을 더하는 방식으로 늘린다. screen-space GI는 DynamicGI G1의 구성 요소로 둔다.
+
+#### DynamicGI 단계안
 
 Lumen의 공개 문서는 screen trace, software/hardware ray tracing, surface cache와 시간 분산 갱신의 결합을 설명한다. 아래 구성은 이를 참고한 자체 단계안이다. [S8](https://dev.epicgames.com/documentation/en-us/unreal-engine/lumen-technical-details-in-unreal-engine)
 
@@ -1282,9 +1320,9 @@ Deferred와 Forward 모두 공통 GI 결과를 조명 입력으로 소비한다.
 
 Substrate 유사 임의 closure/layer 체계는 기존 PBR에 자동 포함되지 않는다. 재질 compiler·GBuffer 저장·ray evaluation·shader permutation 비용을 별도 연구 gate에서 검증한다. [S33](https://dev.epicgames.com/documentation/en-us/unreal-engine/overview-of-substrate-materials-in-unreal-engine)
 
-Transparency는 blend mode·sort key·depth write·two-sided·refraction·separate translucency·velocity/DOF 정책을 포함한다. planar reflection·scene capture·render-to-texture·orthographic view와 recursion depth 제한을 M6–M8에 추가한다. OIT는 선택 후속 알고리즘이며 기본 sorted transparency의 한계를 숨기지 않는다. baked lightmap·irradiance probe·reflection capture는 DynamicGI 대체 profile로 제공한다.
+Transparency는 blend mode·sort key·depth write·two-sided·refraction·separate translucency·velocity/DOF 정책을 포함한다. planar reflection·scene capture·render-to-texture·orthographic view와 recursion depth 제한을 M6–M8에 추가한다. OIT는 선택 후속 알고리즘이며 기본 sorted transparency의 한계를 숨기지 않는다. baked lightmap·irradiance probe·reflection capture는 정적 조명 축(14.3절)으로 제공한다.
 
-RayScene은 BLAS/TLAS의 geometry revision·transform·material table·ray mask·skinned update·scratch lifetime을 소유한다. raster virtual geometry와 ray/collision proxy 오차를 별도 측정한다. GI·reflection·shadow ray budget과 denoiser 입력을 공유 계약으로 정의하며 GPU fence 전 acceleration structure를 재사용하지 않는다. 작은 reference path tracer는 M9의 조명/재질 검증 도구와 offline 선택 profile로 계획한다. production 영화 renderer와의 완전 동등성을 가정하지 않는다. [S35](https://dev.epicgames.com/documentation/en-us/unreal-engine/path-tracer-in-unreal-engine)
+RayScene은 BLAS/TLAS의 geometry revision·transform·material table·ray mask·skinned update·scratch lifetime을 소유한다. raster virtual geometry와 ray/collision proxy 오차를 별도 측정한다. GI·reflection·shadow ray budget과 denoiser 입력을 공유 계약으로 정의하며 GPU fence 전 acceleration structure를 재사용하지 않는다. 작은 reference path tracer는 M9의 조명/재질 검증 도구와 offline 선택 profile로 계획하며, GI 방식이 아니라 별도 렌더 모드 `RenderMode::PathTracing`이다(14.3절). 하드웨어 RT 전용 GI(`DynamicGiMethod::RayTraced`)도 같은 RayScene을 쓴다. production 영화 renderer와의 완전 동등성을 가정하지 않는다. [S35](https://dev.epicgames.com/documentation/en-us/unreal-engine/path-tracer-in-unreal-engine)
 
 ### 14.5 필수 노드 기반 머티리얼 에디터
 
@@ -2940,6 +2978,17 @@ Godot 오라클 시험 GO1–GO6을 UE 5.8 소스의 행 단위 근거를 단 �
 
 UE 5.8.4의 GC 구조도 대조하였다. 상세는 [GC 대규모 처리 보강 설계](GarbageCollectionScale.ko.md)에 둔다. 개정 범위는 표지·1.1(F1 행·C28 문장)·4.1·6.1·6.6·33.15절이다. 본 개정은 문서 계약의 변경이며 구현·실행 검증 결과가 아니다.
 
+### 33.16 개정 1.11의 렌더 경로·GI 선택 구조
+
+사용자 결정(2026-11-16)을 반영하였다.
+
+- 렌더 경로는 Forward+·Deferred 둘이며 고전 Forward는 두지 않는다. 저사양·모바일도 Forward+다(11.1절).
+- GI는 정적 조명(None·Baked)과 동적 GI(None·VoxelConeTracing·DynamicGI·RayTraced) 두 축으로 고르고 조합 규칙을 정하였다(14.3절).
+- RT GI는 DynamicGI의 하위 옵션이 아닌 독립 방식이다.
+- path tracing은 GI 방식이 아니라 별도 렌더 모드다(14.3·14.4절).
+
+UE 5.8.4의 셰이딩 경로·GI·반사·path tracing 설정 구조와 모바일 Forward의 클러스터 조명을 대조하였다. 렌더 기반 층은 [렌더 기반](RenderBase.ko.md)에 둔다. 개정 범위는 표지·11.1·14.3·14.4·33.16·34절(S97)이다. 본 개정은 문서 계약의 변경이며 구현·실행 검증 결과가 아니다.
+
 ## 34. 참고 자료와 설계 근거
 
 이전 대화는 사용자 제공 참조 「3D 엔진 설계」와 현재 대화의 추가 요구를 기준으로 한다. 아래 공식 문서는 기술 개념과 API 경계를 확인하기 위한 자료다. 일정·API·예산·구현 단계는 이 계획의 제안이며 참고 자료의 성능 보증이 아니다. 온라인 문서는 변경될 수 있으므로 실제 구현 착수 시 선택 SDK 버전의 문서·commit을 build manifest에 고정한다. 조회일은 2026.11.10이며 S75–S92는 2026.11.11이다.
@@ -3042,3 +3091,4 @@ UE 5.8.4의 GC 구조도 대조하였다. 상세는 [GC 대규모 처리 보강 
 | S94 | [The Book of Verse](https://verselang.github.io/book/) | failure context·구조적 동시성·persistable 호환성 검사 |
 | S95 | [Epic · The road to UE6 (2026-06-17)](https://www.unrealengine.com/news/the-road-to-ue-6) | Verse 전환·Blueprint deprecate 계획. 원문 접근 거부로 재게재 인용 확인 |
 | S96 | [Microsoft · Language Server Protocol](https://microsoft.github.io/language-server-protocol/) | Sparks 언어 서버·VS Code 확장 |
+| S97 | Crassin, Neyret, Sainz, Green, Eisemann · Interactive Indirect Illumination Using Voxel Cone Tracing, Computer Graphics Forum 30(7), 2011 ([doi:10.1111/j.1467-8659.2011.02063.x](https://doi.org/10.1111/j.1467-8659.2011.02063.x), 링크 미조회) | VoxelConeTracing(SVOGI 계열) 동적 GI의 공개 기법 |
