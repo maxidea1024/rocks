@@ -20,10 +20,23 @@ namespace rocks::detail {
 // 경로의 참조 멤버 쓰기 단일 지점이다(7.1절): StructRefArray 원소 안이면 그 원소 위치의 live
 // SetElementReference(컨테이너 기준 범위 검사 — 위치 오버로드는 ObjectRegistry의 private이고 이
 // 함수만 friend다), 아니면 소유 객체 저장소 안 주소의 SetReference다.
-// 비정규 null은 Registry가 ObjectHandle{}로 정규화한다.
+// 비정규 null은 Registry가 ObjectHandle{}로 정규화한다. staged 객체는 트랜잭션의 staged 간선
+// 쓰기이고, 분리된 값에는 강한 참조 위치가 없다(Unsupported(NoPathAccess) — 리플렉션 B9i3c0).
 template <class T>
 Result<void> SetPathMemberReference(PathCursor& cursor, ObjectRef<T>& field,
                                     ObjectHandle target) noexcept {
+    if (cursor.IsDetached()) {
+        return cursor.Fail(ErrorCode::Unsupported, PropertyPathError::NoPathAccess);
+    }
+
+    if (ConstructionContext* staged = cursor.Construction()) {
+        if (const StructElementLocation* element = cursor.Element()) {
+            return staged->SetElementReference(cursor.OwnerHandle(), *element, field, target);
+        }
+
+        return staged->SetReference(cursor.OwnerHandle(), field, target);
+    }
+
     if (const StructElementLocation* element = cursor.Element()) {
         return cursor.Registry().SetElementReference(cursor.Access(), cursor.OwnerHandle(),
                                                      *element, field, target);
@@ -346,6 +359,14 @@ Result<void> PathContainer(PathCursor& cursor, ObjectRefArray<T>& array) noexcep
     const ObjectHandle owner = cursor.OwnerHandle();
     const PathFrame& frame = cursor.Frame();
     const PathOperation operation = cursor.Operation();
+    // 원소 쓰기·삽입·삭제·비우기는 게시된 객체의 Registry API다(staged는 트랜잭션의
+    // AssignReferences).
+    if (!cursor.IsReading()) {
+        if (auto live = cursor.RequireLive(); !live) {
+            return live;
+        }
+    }
+
     if (frame.selector == PathSelector::None) {
         if (operation == PathOperation::Length) {
             cursor.SetLength(array.Size());
@@ -419,6 +440,13 @@ Result<void> PathContainer(PathCursor& cursor, StructRefArray<S>& array) noexcep
     const PathOperation operation = cursor.Operation();
     if (auto checked = cursor.CheckStruct(NativeTypeKey<S>()); !checked) {
         return checked;
+    }
+
+    // 원소 삽입·삭제·비우기는 게시된 객체의 Registry API다(staged는 트랜잭션의 AssignElements).
+    if (cursor.IsLast() && !cursor.IsReading()) {
+        if (auto live = cursor.RequireLive(); !live) {
+            return live;
+        }
     }
 
     if (frame.selector == PathSelector::None) {
@@ -545,7 +573,7 @@ Result<void> PathOptionalStruct(PathCursor& cursor, Optional<S>& member) noexcep
             return pinned;
         }
 
-        S created = MakeAllocatedValue<S>(cursor.Registry().ObjectAllocator());
+        S created = MakeAllocatedValue<S>(cursor.ValueAllocator());
         if (auto alive = cursor.CheckOwner(); !alive) {
             return alive;
         }
@@ -633,7 +661,7 @@ Result<void> PathOptionalValue(PathCursor& cursor, Optional<T>& member) noexcept
         }
 
         String replacement(member.HasValue() ? member.Value().GetAllocator()
-                                             : cursor.Registry().ObjectAllocator());
+                                             : cursor.ValueAllocator());
         if (auto copied = replacement.TryAssign(input.string.View()); !copied) {
             return cursor.Fail(copied.Error());
         }
@@ -672,6 +700,11 @@ Result<void> PathOptionalValue(PathCursor& cursor, Optional<T>& member) noexcept
 // Object/GeneratedKeyedPathAccess.h).
 template <ValueKind Target, class Container>
 Result<void> PathKeyedContainer(PathCursor& cursor, Container& container) noexcept;
+
+// 필드·멤버 값 하나의 Detach·Attach 끝 지점이다(리플렉션 B9i3c0 — 정의는 이 헤더 끝에서 include하는
+// Object/GeneratedDetachedPathAccess.h).
+template <ValueKind Target, class Member>
+Result<void> PathDetachedMember(PathCursor& cursor, Member& member) noexcept;
 
 // 필드·멤버 값 하나(member — Member 형식)의 단계다: 정적 대조(대상 종류·컨테이너 종류(정적 배열·
 // 배열·Optional·Map·Set)·enum ID) 뒤 정적 배열, 컨테이너, Map·Set, Optional, struct(내려가기), 단일
@@ -733,6 +766,13 @@ Result<void> PathMember(PathCursor& cursor, Member& member) noexcept {
                 return checked;
             }
         }
+    }
+
+    // 끝 단계의 Detach·Attach는 멤버 형식 통째의 값 연산이다(컨테이너·Optional·struct 모두).
+    const PathOperation operation = cursor.Operation();
+    if ((operation == PathOperation::Detach || operation == PathOperation::Attach) &&
+        cursor.IsLast()) {
+        return PathDetachedMember<Target>(cursor, member);
     }
 
     if constexpr (fixed) {
@@ -800,3 +840,4 @@ Result<void> PathStructMember(const RuntimeStructFieldOps&, PathCursor& cursor,
 } // namespace rocks::detail
 
 #include <Object/GeneratedKeyedPathAccess.h>
+#include <Object/GeneratedDetachedPathAccess.h>

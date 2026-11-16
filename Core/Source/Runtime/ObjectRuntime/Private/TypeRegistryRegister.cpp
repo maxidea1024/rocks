@@ -287,11 +287,11 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
                                                  !field.writeStaged && !field.readStaged)
                                               : (field.read && field.write && field.writeStaged);
         // struct·배열 필드는 Transient가 아니면 codec이 있어야 한다(그 밖은 completeFieldLayout
-        // 규칙). 경로 접근 thunk(path)는 struct·배열 필드만 가질 수 있다 — 최상위 단일 값의 경로
-        // 읽기·쓰기는 read·write 한 경로다(7.1절).
+        // 규칙). 경로 접근 thunk(path)는 모든 필드가 가질 수 있다 — 게시된 객체의 최상위 단일 값
+        // 읽기·쓰기는 그래도 read·write 한 경로이고, 단일 값의 thunk는 staged 객체·Detach·Attach가
+        // 쓴다(리플렉션 B9i3c0).
         if (!matched || !accessors || (field.encode == nullptr) != (field.decode == nullptr) ||
-            (aggregateField && !field.encode && !HasFlag(matched->flags, FieldFlags::Transient)) ||
-            (!aggregateField && field.path != nullptr)) {
+            (aggregateField && !field.encode && !HasFlag(matched->flags, FieldFlags::Transient))) {
             return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
         }
 

@@ -341,10 +341,10 @@ struct RuntimeFieldOps {
     // 원소)으로 찾은 레코드의 native 키와 같은지 확인한다 — 스키마로 해석한 대상과 정적 thunk의
     // 타입이 어긋나지 않게 한다(어긋나면 TypeMismatch).
     const void* valueNativeType = nullptr;
-    // 경로 접근 thunk다(B6 — 생성 코드는 detail::PathClassField). aggregate 필드(FieldIsAggregate —
-    // Struct·Array·Optional<값 struct>)만 가질 수 있고 선택이다(없으면 그 필드 아래 경로 연산은
-    // Unsupported). 단일 값 필드(Optional<단일 값> 포함)는 null이어야 한다 —
-    // 최상위 단일 값의 경로 읽기·쓰기는 read·write 한 경로다(등록이 InvalidArgument로 막는다).
+    // 경로 접근 thunk다(B6 — 생성 코드는 detail::PathClassField). 선택이다(없으면 그 필드 아래 경로
+    // 연산은 Unsupported). 생성 코드는 모든 필드에 싣는다(리플렉션 B9i3c0): 게시된 객체의 최상위
+    // 단일 값(Optional<단일 값> 포함) 읽기·쓰기는 그래도 read·write 한 경로이고, 단일 값 필드의
+    // thunk는 staged 객체의 경로 연산과 Detach·Attach(Object/DetachedPath.h)가 쓴다.
     FieldPathFunction path = nullptr;
     // 공개 전(staged) 객체의 값을 읽는다(선택 — Docs/Design/ObjectFoundations.ko.md 4절). 그래프
     // 로드의 Required 실효 값 검사(적용 뒤·Commit 전)가 수동 함수표의 범용 encode

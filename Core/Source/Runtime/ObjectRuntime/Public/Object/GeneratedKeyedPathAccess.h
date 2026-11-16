@@ -401,6 +401,14 @@ Result<void> PathObjectRefMap(PathCursor& cursor, ObjectRefMap<K, T>& map) noexc
     const ObjectHandle owner = cursor.OwnerHandle();
     const PathFrame& frame = cursor.Frame();
     const PathOperation operation = cursor.Operation();
+    // 항목 쓰기·지우기·비우기는 게시된 객체의 Registry API다(staged는 트랜잭션의
+    // AssignMapReferences — 리플렉션 B9i3c0).
+    if (!cursor.IsReading()) {
+        if (auto live = cursor.RequireLive(); !live) {
+            return live;
+        }
+    }
+
     if (frame.selector == PathSelector::None) {
         if (operation == PathOperation::Length) {
             cursor.SetLength(map.Count());

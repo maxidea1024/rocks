@@ -11,7 +11,7 @@ internal static partial class MetaTests
         var (suite, options, actualEnvironment, generator, compiler) = context;
         // B6b: 클래스 Struct·Array 필드의 함수표는 valueNativeType(없으면 nullptr 명시) 뒤에 PathClassField 경로 thunk를, 모든 struct
         // 멤버는 StructFieldOps의 둘째 인자로 PathStructMember를 내며 대상 종류는 TargetKind(배열이면 원소 종류)다. 단일 값 클래스
-        // 필드에는 path가 없다(Docs/Design/ReflectionFoundations.ko.md 7.1절 MetaCompiler).
+        // 필드도 path를 싣는다(리플렉션 B9i3c0 — Docs/Design/ReflectionExtensions.ko.md 10.2절).
         suite.Add("Meta.PathThunksReachStructAndArrayFields", async () =>
         {
             using Probe probe = new(options, actualEnvironment, generator, compiler);
@@ -53,13 +53,14 @@ internal static partial class MetaTests
             Verify.Equal(7, Count(generated, "&detail::PathStructMember<"), "struct member count");
             Verify.That(!generated.Contains("PathStructMember<&::probe::WorldBundle::lease", StringComparison.Ordinal), "NATIVE members have no path thunk");
 
-            // 단일 값 클래스 필드(plain)에는 path가 없고(함수표가 decode 뒤에 끝난다) private 멤버·enum·String·EditorOnly 멤버에도 thunk가
-            // 나온다.
+            // 단일 값 클래스 필드(plain)도 valueNativeType(nullptr) 뒤에 path thunk를 싣고(리플렉션 B9i3c0 — staged·Detach·Attach용)
+            // private 멤버·enum·String·EditorOnly 멤버에도 thunk가 나온다.
             await probe.GenerateAsync(StructSource);
             string structs = Compact(File.ReadAllText(probe.Output));
             foreach ((string expected, string reason) in new[]
             {
-                ("&::probe::Value::plain, field, context); } },", "scalar class field table ends after decode"),
+                ("&::probe::Value::plain, field, context); }, nullptr, " + lambda + "::probe::Value, ::rocks::ValueKind::UInt32>(cursor, &::probe::Value::plain); } }",
+                    "scalar class field spells nullptr before its path thunk"),
                 (lambda + "::probe::Value, ::rocks::ValueKind::Struct>(cursor, &::probe::Value::holder)", "struct field path thunk"),
                 (lambda + "::probe::Value, ::rocks::ValueKind::Struct>(cursor, &::probe::Value::extra)", "EditorOnly struct field path thunk"),
                 (lambda + "::probe::WorldValue, ::rocks::ValueKind::Struct>(cursor, &::probe::WorldValue::bits)", "WorldOnly class struct field path thunk"),
@@ -74,8 +75,7 @@ internal static partial class MetaTests
                 Verify.That(structs.Contains(Compact(expected), StringComparison.Ordinal), "generated code missing " + reason + ": " + expected);
             }
 
-            Verify.Equal(2, Count(structs, "PathClassField<::probe::Value,"), "only the struct fields of Value have path thunks");
-            Verify.That(!structs.Contains("(cursor,&::probe::Value::plain)", StringComparison.Ordinal), "scalar class field has no path thunk");
+            Verify.Equal(3, Count(structs, "PathClassField<::probe::Value,"), "every field of Value has a path thunk");
             Verify.That(!structs.Contains("PathStructMember<&::probe::Middle::cache", StringComparison.Ordinal), "NATIVE struct member has no path thunk");
             Verify.Equal(Count(structs, "detail::StructFieldOps<"), Count(structs, "&detail::PathStructMember<"), "every struct member has a path thunk");
         });

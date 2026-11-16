@@ -360,7 +360,7 @@ detail::StructFieldOps<&::S::m>(MemberId, &detail::PathStructMember<&::S::m, Val
 
 - `Owner`는 함수표를 내는 클래스(파생 — 함수표가 실제 타입 레코드에서 오므로 `static_cast<Owner*>`)이고 멤버 포인터는 선언 클래스의 것이다(다른 모듈에서 상속한 import 필드도 같다 — 이 모듈 헤더가 그 base 헤더를 include하므로 추가 include는 없다). struct 단계는 등록 `StructView`로 내려가므로 import struct의 멤버 thunk는 그 struct를 생성한 모듈의 것이 쓰인다.
 - 대상 종류는 `FieldModel.TargetKind`(배열이면 원소 종류 — `ObjectRefArray`는 ObjectReference, `StructRefArray`·`Array<S>`는 Struct)다. 이 모듈 필드는 C++ 형식으로, 상속 import 필드는 base 모듈 descriptor의 종류로 만들고, `detail::TargetValueCheck` static_assert가 그 종류를 C++ 멤버 형식과 대조한다(아래). Binds 미러는 실제 타입(`NativeName`)의 멤버 포인터를 쓴다(`&::rocks::Vector3<float>::x`).
-- 클래스 단일 값 필드에는 path를 내지 않는다(최상위 단일 값의 경로 읽기·쓰기는 등록된 read·write 한 경로 — 등록이 path를 거부한다). NATIVE 멤버는 스키마에 없으므로 thunk도 없다.
+- 클래스 단일 값 필드에도 path를 낸다(리플렉션 B9i3c0 — Docs/Design/ReflectionExtensions.ko.md 10.2절). 게시된 객체의 최상위 단일 값 경로 읽기·쓰기는 그래도 등록된 read·write 한 경로이고, 단일 값의 thunk는 staged 객체의 경로 연산과 Detach·Attach가 쓴다. NATIVE 멤버는 스키마에 없으므로 thunk도 없다.
 - 대상 종류가 C++ 멤버 형식(배열이면 원소 형식)과 다르면 `detail::TargetValueCheck` static_assert("path thunk target kind does not match the C++ member type")가 생성 헤더 컴파일을 실패시킨다 — MetaCompiler 검증 컴파일이 게시 전에 거부하고(문법상 유효하게 위조한 base descriptor의 상속 필드 종류 포함 — import 검사는 C++ 형식을 대조하지 않는다), 오래된 생성 헤더로 만든 thunk도 소비자 컴파일에서 잡힌다.
 
 ## 호스트 실행과 빌드 연결

@@ -893,6 +893,10 @@ private:
     void PublishBatchArray(detail::ObjectRefArrayStorage& storage,
                            detail::ObjectRefArrayStorage& prepared,
                            const void* nativeType) noexcept;
+    // 값 부분 트리 자리 하나의 위치를 확인하고 게시를 기록한다(리플렉션 B9i3c0 — 교환은
+    // PreparedAttach가 한다).
+    void PublishBatchValue(void* location, usize bytes,
+                           const detail::StructElementLocation* element) noexcept;
     // 열린 구간과 컨테이너 위치(owner 저장소 안)를 확인한다.
     void CheckBatchContainer(const void* storage, usize bytes) const noexcept;
     // 게시로 빠지는 옛 대상을 검사합에 넣는다.

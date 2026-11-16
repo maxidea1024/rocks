@@ -242,6 +242,29 @@ void ObjectRegistry::PublishBatchEdge(ObjectHandle& field, ObjectHandle target,
     field = value;
 }
 
+void ObjectRegistry::PublishBatchValue(void* location, usize bytes,
+                                       const detail::StructElementLocation* element) noexcept {
+    if (element != nullptr) {
+        const detail::StructRefArrayStorage* storage = element->storage;
+        CheckBatchContainer(storage, sizeof(*storage));
+        bool inside = element->index < storage->size;
+        if (inside) {
+            const uptr block = reinterpret_cast<uptr>(storage->blocks[element->index]);
+            const uptr start = reinterpret_cast<uptr>(location);
+            const usize size = storage->element->size;
+            inside = bytes <= size && start >= block && start - block <= size - bytes;
+        }
+
+        if (!inside) {
+            platform::Fatal("Batch publish element value is outside the element block");
+        }
+    } else {
+        CheckBatchContainer(location, bytes);
+    }
+
+    batchPublished_ = true;
+}
+
 void ObjectRegistry::PublishBatchArray(detail::ObjectRefArrayStorage& storage,
                                        detail::ObjectRefArrayStorage& prepared,
                                        const void* nativeType) noexcept {

@@ -318,8 +318,11 @@ internal static class CppEmitter
                     Line("},");
                     Line("+[](ConstructionContext& construction, ObjectHandle object, const FieldValue& value) noexcept -> Result<void> {");
                     Line($"return detail::WriteGeneratedStagedField<{native}>(construction, object, {member}, value); }},");
-                    // Enum 필드(Optional<enum> 포함)는 정적 thunk의 enum native 키를 싣는다(등록이 대상 enum 레코드와 대조한다).
-                    EmitClassCodec(native, member, field.TargetKind == "Enum" ? $", NativeTypeKey<::{field.Reference}>()" : "", Line);
+                    // Enum 필드(Optional<enum> 포함)는 정적 thunk의 enum native 키를 싣는다(등록이 대상 enum 레코드와 대조한다). 단일 값
+                    // 필드도 경로 접근 thunk를 싣는다(리플렉션 B9i3c0 — staged 객체의 경로 연산과 Detach·Attach가 쓴다. 게시된 객체의
+                    // 최상위 단일 값 읽기·쓰기는 그래도 read·write 한 경로다).
+                    string scalarNative = field.TargetKind == "Enum" ? $", NativeTypeKey<::{field.Reference}>()" : ", nullptr";
+                    EmitClassCodec(native, member, scalarNative + ClassPathThunk(native, member, field), Line);
                 }
 
                 Line("};");
@@ -361,8 +364,8 @@ internal static class CppEmitter
     // 클래스 Struct·Array·Optional<값 struct>·Map·Set 필드 함수표의 path 칸(valueNativeType 뒤)이다(Docs/Design/ReflectionFoundations.ko.md 7.1절
     // MetaCompiler). 소유자 Owner는 함수표를 내는 클래스(파생 — 함수표가 실제 타입 레코드에서 온다)이고 멤버 포인터는 선언
     // 클래스의 것이다(상속 import 필드 포함). 대상 종류는 FieldModel.TargetKind(배열이면 원소 종류)를 명시한다 — C++ 멤버
-    // 형식과 다르면 TargetValueCheck static_assert가 컴파일을 실패시킨다(requires 탐지를 쓰지 않는다). 단일 값 필드는 path가
-    // 없다(최상위 단일 값의 경로 접근은 read·write 한 경로 — 등록이 path를 거부한다).
+    // 형식과 다르면 TargetValueCheck static_assert가 컴파일을 실패시킨다(requires 탐지를 쓰지 않는다). 단일 값 필드도 path를
+    // 싣는다(리플렉션 B9i3c0 — 게시된 객체의 최상위 단일 값 읽기·쓰기는 read·write 한 경로, thunk는 staged·Detach·Attach용).
     private static string ClassPathThunk(string native, string member, FieldModel field) =>
         ", +[](const ::rocks::RuntimeFieldOps&, ::rocks::detail::PathCursor& cursor) noexcept -> ::rocks::Result<void> { " +
         $"return ::rocks::detail::PathClassField<{native}, ::rocks::ValueKind::{field.TargetKind}>(cursor, {member}); }}";
@@ -443,8 +446,8 @@ internal static class CppEmitter
 
     // 클래스 필드의 그래프 저장·복원 codec 두 thunk와 함수표 끝이다(Docs/Design/ReflectionFoundations.ko.md 6.4절).
     // 문맥이 참조 wire·진단·예산을 맡으므로 그래프 형식이 바뀌어도 이 코드를 다시 만들지 않는다. tail은 decode 뒤의
-    // 칸이다: Enum 단일 값 필드는 ", NativeTypeKey<T>()", 그 밖의 단일 값 필드는 ""(valueNativeType·path 생략),
-    // Struct·Array 필드는 valueNativeType(없으면 ", nullptr")과 경로 접근 thunk(ClassPathThunk)다.
+    // 칸이다: valueNativeType(Enum 단일 값 필드는 ", NativeTypeKey<T>()", 없으면 ", nullptr")과 경로 접근
+    // thunk(ClassPathThunk — 모든 필드), Map·Set은 그 뒤에 키 enum native 키다.
     private static void EmitClassCodec(string native, string member, string tail, Action<string> Line)
     {
         Line("+[](const RuntimeFieldOps&, ObjectRegistry& registry, const ObjectAccessContext& access, ObjectHandle object, ArchiveWriter& payload, FieldEncodeContext& context) noexcept -> Result<uint32> {");

@@ -172,6 +172,15 @@ public:
 
 private:
     friend class ObjectRegistry;
+    friend class PreparedAttach;
+
+    // 값 부분 트리 자리 하나(location부터 bytes — element가 있으면 그 StructRefArray 원소 블록 안,
+    // 없으면 owner 저장소 안)를 게시함을 기록한다(End가 변경 표지를 올린다). 교환은 호출자
+    // (PreparedAttach::Publish)가 한다. 열린 구간·위치 검사 위반은 Fatal이다.
+    void PublishValue(void* location, usize bytes,
+                      const detail::StructElementLocation* element) noexcept {
+        Registry().PublishBatchValue(location, bytes, element);
+    }
 
     ObjectBatchPublish(ObjectRegistry* registry, ObjectHandle owner) noexcept
         : registry_(registry), owner_(owner) {
