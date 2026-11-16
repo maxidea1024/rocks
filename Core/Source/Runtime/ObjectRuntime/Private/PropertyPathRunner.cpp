@@ -304,6 +304,19 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         }
     }
 
+    // Registry 컨테이너 준비 사본(PathTarget::WithReferences — 리플렉션 B9i3c3)은
+    // 객체(게시·staged)의 컨테이너 연산이다.
+    if (cursor.stage_) {
+        const bool staged =
+            operation == PathOperation::Read || operation == PathOperation::Write ||
+            operation == PathOperation::Length || operation == PathOperation::Insert ||
+            operation == PathOperation::Remove || operation == PathOperation::Clear ||
+            operation == PathOperation::Contains || operation == PathOperation::EraseKey;
+        if (!staged || cursor.IsDetached() || cursor.reference_ || cursor.box_) {
+            return cursor.Fail(ErrorCode::InvalidArgument);
+        }
+    }
+
     // 2. 문맥·수명. 게시된 객체는 소유 스레드·문맥·생존(staged·DestroyRequested 객체는 거부된다),
     // staged 객체는 그 트랜잭션의 AcquireType(registry가 트랜잭션의 것이 아니면 WrongContext)이다.
     // 소유 타입 lease는 완료까지 쥔다(해석한 스키마·함수표·StructView의 수명). 분리된 값은 lease가
@@ -474,7 +487,15 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
     // 최상위 단일 값의 등록된 read·write 경로는 게시된 객체의 값 연산만 쓴다(staged·분리된 값과
     // Detach·Attach는 경로 thunk — 리플렉션 B9i3c0).
     const bool topValue = cursor.root_ == PathTarget::Kind::Object && steps.Size() == 1 &&
-                          !FieldIsAggregate(*end.field) && !boxOperation && !cursor.reference_;
+                          !FieldIsAggregate(*end.field) && !boxOperation && !cursor.reference_ &&
+                          !cursor.stage_;
+    // 준비 사본의 끝은 ObjectRefArray·ObjectRefMap(그 원소·항목 포함)이다.
+    if (cursor.stage_ &&
+        (FieldTargetType(*end.field).kind != ValueKind::ObjectReference ||
+         (end.field->value.kind != ValueKind::Array && end.field->value.kind != ValueKind::Map))) {
+        return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::InvalidValue);
+    }
+
     // 참조 자리 찾기의 끝은 단일 강한 참조 위치다(Registry 컨테이너 원소는 그 컨테이너 단위).
     if (cursor.reference_ &&
         (kind != ValueKind::ObjectReference ||
@@ -689,7 +710,8 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
     // 대상을 바꾸지 않으므로 읽기 Borrow다(변경 표지를 올리지 않는다 — 대입 묶음이 표지를 읽은 뒤
     // 준비한다). staged 객체는 트랜잭션의 Get(쓰기는 GetForWrite), 분리된 값은 Borrow가 없다.
     cursor.current_ = 0;
-    const bool reading = cursor.IsReading() || boxOperation || cursor.reference_ != nullptr;
+    const bool reading = cursor.IsReading() || boxOperation || cursor.reference_ != nullptr ||
+                         cursor.stage_ != nullptr;
     if (cursor.root_ == PathTarget::Kind::Object) {
         auto borrowed =
             reading ? cursor.registry_.Resolve<Object>(cursor.access_, cursor.owner_)

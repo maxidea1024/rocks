@@ -144,13 +144,38 @@ Result<void> AppendKeyWire(AssignmentState& state, const FieldValue& value,
     return AppendPathKey(key, wire);
 }
 
-// 대입 하나의 적용 문맥이다.
+// 멤버마다 나누는 적용이 이번 호출의 진단만 보도록 묶음의 실패 표시를 잠시 내려 두고 나갈 때
+// 합친다(앞 대입의 진단이 뒤 대입의 진단 모으기를 멈추지 않게 한다).
+class FreshFailure {
+public:
+    explicit FreshFailure(AssignmentState& state) noexcept
+        : state_(state), previous_(state.failed) {
+        state_.failed = false;
+    }
+
+    ~FreshFailure() {
+        state_.failed = state_.failed || previous_;
+    }
+
+    FreshFailure(const FreshFailure&) = delete;
+    FreshFailure& operator=(const FreshFailure&) = delete;
+
+private:
+    AssignmentState& state_;
+    bool previous_;
+};
+
+// 대입 하나의 적용 문맥이다. 값 단위는 상자(start = PathTarget::Value(box), relative는 상자 기준
+// 경로), Registry 컨테이너 단위는 준비 사본을 건 대상(start = Root().WithReferences, relative는
+// 대상 기준 경로 — box 없음)이다.
 struct Apply {
     AssignmentState& state;
-    AssignmentUnit& unit;
+    PathTarget start;
+    bool& dirty;
+    DetachedValue* box;
     const TextAssignment& assignment;
     const TextSlot& slot;
-    // 대상 기준 끝 경로(override 경로의 원본)와 상자 기준 경로.
+    // 대상 기준 끝 경로(override 경로의 원본)와 start 기준 경로.
     PropertyPath path;
     PropertyPath relative;
     TextSource source;
@@ -164,8 +189,8 @@ struct Apply {
         return state.target.Access();
     }
 
-    PathTarget Box() const noexcept {
-        return PathTarget::Value(unit.box);
+    PathTarget Start() const noexcept {
+        return start;
     }
 
     Result<void> Diagnostic(TextDiagnosticCode code, StringView message) noexcept {
@@ -178,13 +203,17 @@ struct Apply {
 
     // 사본을 바꾼 대입을 기록한다.
     Result<void> Changed() noexcept {
-        unit.dirty = true;
+        dirty = true;
         return AddOverride(state, path);
     }
 
     Result<void> Run() noexcept;
     Result<void> RunSet(TextValue& value) noexcept;
     Result<void> ResetStruct() noexcept;
+    // 상자 안 자리 at(필드·멤버 하나)을 떼어 기본값으로 바꿔 되돌린다.
+    Result<void> ResetAt(PropertyPath at) noexcept;
+    // 정적 배열 struct 원소의 멤버마다 기본값으로 되돌린다(리플렉션 B9i3c3).
+    Result<void> ResetMembers() noexcept;
     Result<void> ReplaceContents(const TextValue& value) noexcept;
 };
 
@@ -205,12 +234,12 @@ Result<void> Apply::Run() noexcept {
 
         Result<void> done = Result<void>::Success();
         if (slot.field->element.kind == ValueKind::Struct) {
-            done = PathResetOptional(Registry(), Access(), Box(), relative, &failure);
+            done = PathResetOptional(Registry(), Access(), Start(), relative, &failure);
         } else {
             FieldValue unset(state.allocator);
             unset.kind = slot.field->element.kind;
             unset.present = false;
-            done = PathWrite(Registry(), Access(), Box(), relative, unset, nullptr, &failure);
+            done = PathWrite(Registry(), Access(), Start(), relative, unset, nullptr, &failure);
         }
 
         return done ? Changed() : Failed(done.Error());
@@ -227,8 +256,8 @@ Result<void> Apply::Run() noexcept {
 
         auto done =
             slot.part == TextSlotPart::Element
-                ? PathRemoveElement(Registry(), Access(), Box(), relative, nullptr, &failure)
-                : PathEraseKey(Registry(), Access(), Box(), relative, nullptr, &failure);
+                ? PathRemoveElement(Registry(), Access(), Start(), relative, nullptr, &failure)
+                : PathEraseKey(Registry(), Access(), Start(), relative, nullptr, &failure);
         return done ? Changed() : Failed(done.Error());
     }
     case AssignmentKind::Set:
@@ -247,7 +276,7 @@ Result<void> Apply::Run() noexcept {
             return Diagnostic(TextDiagnosticCode::ReadOnly, "property is read-only");
         }
 
-        auto inserted = PathInsertKey(Registry(), Access(), Box(), relative, &failure);
+        auto inserted = PathInsertKey(Registry(), Access(), Start(), relative, &failure);
         return inserted ? Changed() : Failed(inserted.Error());
     }
 
@@ -272,7 +301,7 @@ Result<void> Apply::Run() noexcept {
         // 지금 값과 같으면 무동작이다(ReadOnly·Deprecated ClassRef의 같은 값 재대입 포함).
         FieldValue current(state.allocator);
         PropertyPathFailure readFailure;
-        auto read = PathRead(Registry(), Access(), Box(), relative, current, &readFailure);
+        auto read = PathRead(Registry(), Access(), Start(), relative, current, &readFailure);
         if (!read && read.Error() == ErrorCode::OutOfMemory) {
             return read;
         }
@@ -294,36 +323,39 @@ Result<void> Apply::RunSet(TextValue& value) noexcept {
     switch (value.shape) {
     case TextValueShape::Single: {
         auto written =
-            PathWrite(Registry(), Access(), Box(), relative, value.single, nullptr, &failure);
+            PathWrite(Registry(), Access(), Start(), relative, value.single, nullptr, &failure);
         return written ? Changed() : Failed(written.Error());
     }
     case TextValueShape::StructDefault:
         if (slot.part == TextSlotPart::MapValue) {
-            auto inserted = PathInsertKey(Registry(), Access(), Box(), relative, &failure);
+            auto inserted = PathInsertKey(Registry(), Access(), Start(), relative, &failure);
             return inserted ? Changed() : Failed(inserted.Error());
         }
 
         if (slot.part == TextSlotPart::Element) {
             if (fieldKind == ValueKind::StaticArray) {
-                return Diagnostic(TextDiagnosticCode::Unsupported,
-                                  "a fixed-length struct array element cannot be reset; assign "
-                                  "its members");
+                // 길이가 고정이라 지우고 넣을 수 없다: 원소 멤버마다 기본값으로 되돌린다.
+                if (auto reset = ResetMembers(); !reset || state.failed) {
+                    return reset;
+                }
+
+                return Changed();
             }
 
             // Array<struct> 원소: 그 자리를 지우고 기본 원소를 넣는다.
             if (auto removed =
-                    PathRemoveElement(Registry(), Access(), Box(), relative, nullptr, &failure);
+                    PathRemoveElement(Registry(), Access(), Start(), relative, nullptr, &failure);
                 !removed) {
                 return Failed(removed.Error());
             }
 
             auto inserted =
-                PathInsertElement(Registry(), Access(), Box(), relative, nullptr, &failure);
+                PathInsertElement(Registry(), Access(), Start(), relative, nullptr, &failure);
             return inserted ? Changed() : Failed(inserted.Error());
         }
 
         if (fieldKind == ValueKind::Optional) {
-            auto made = PathEmplaceOptional(Registry(), Access(), Box(), relative, &failure);
+            auto made = PathEmplaceOptional(Registry(), Access(), Start(), relative, &failure);
             return made ? Changed() : Failed(made.Error());
         }
 
@@ -352,27 +384,63 @@ Result<void> Apply::RunSet(TextValue& value) noexcept {
 
 Result<void> Apply::ResetStruct() noexcept {
     // 단위 자신이면 상자를 기본값으로, 안쪽 struct면 그 자리를 따로 떼어 기본값으로 바꿔 되돌린다.
+    // 값 단위만 struct 자리를 가진다(컨테이너 단위의 값은 참조다).
+    if (!box) {
+        return Diagnostic(TextDiagnosticCode::InvalidValue, "value does not fit the property");
+    }
+
     if (relative.steps.Size() == 1) {
-        unit.box.ResetToDefault();
+        box->ResetToDefault();
         return Result<void>::Success();
     }
 
-    DetachedValue inner(unit.box.GetAllocator());
-    if (auto detached = PathDetach(Registry(), Access(), Box(), relative, inner, &failure);
-        !detached) {
+    return ResetAt(relative);
+}
+
+Result<void> Apply::ResetAt(PropertyPath at) noexcept {
+    DetachedValue inner(box->GetAllocator());
+    if (auto detached = PathDetach(Registry(), Access(), Start(), at, inner, &failure); !detached) {
         return Failed(detached.Error());
     }
 
     inner.ResetToDefault();
     PreparedAttach attach;
     if (auto located =
-            PathPrepareAttach(Registry(), Access(), Box(), relative, inner, attach, &failure);
+            PathPrepareAttach(Registry(), Access(), Start(), at, inner, attach, &failure);
         !located) {
         return Failed(located.Error());
     }
 
     // 옛 값은 inner가 받아 이 함수를 나갈 때 반환한다.
     return attach.Publish();
+}
+
+Result<void> Apply::ResetMembers() noexcept {
+    // 정적 배열의 struct 원소는 떼어 낼 수 없으므로(선택자가 있는 끝) 멤버마다 기본값으로 되돌린다.
+    const StructView view = slot.structView;
+    const usize count = relative.steps.Size();
+    if (!box || view.IsEmpty() || count >= MaxPropertyPathSteps) {
+        return Diagnostic(TextDiagnosticCode::Unsupported, "this element cannot be reset");
+    }
+
+    PathStep steps[MaxPropertyPathSteps];
+    for (usize index = 0; index < count; ++index) {
+        steps[index] = relative.steps[index];
+    }
+
+    FreshFailure fresh(state);
+    const auto& members = view.Schema().fields;
+    for (usize index = 0; index < members.Size(); ++index) {
+        steps[count] = PathStep{};
+        steps[count].fieldId = members[index].id;
+        if (auto reset =
+                ResetAt(PropertyPath{Span<const PathStep>(steps, count + 1), relative.keys});
+            !reset || state.failed) {
+            return reset;
+        }
+    }
+
+    return Result<void>::Success();
 }
 
 Result<void> Apply::ReplaceContents(const TextValue& value) noexcept {
@@ -399,7 +467,7 @@ Result<void> Apply::ReplaceContents(const TextValue& value) noexcept {
         last.selector = PathSelector::Index;
         for (usize index = 0; index < value.elements.Size(); ++index) {
             last.index = static_cast<uint32>(index);
-            if (auto written = PathWrite(Registry(), Access(), Box(), element,
+            if (auto written = PathWrite(Registry(), Access(), Start(), element,
                                          value.elements[index], nullptr, &failure);
                 !written) {
                 return Failed(written.Error());
@@ -409,7 +477,7 @@ Result<void> Apply::ReplaceContents(const TextValue& value) noexcept {
         return Result<void>::Success();
     }
 
-    if (auto cleared = PathClear(Registry(), Access(), Box(), relative, &failure); !cleared) {
+    if (auto cleared = PathClear(Registry(), Access(), Start(), relative, &failure); !cleared) {
         return Failed(cleared.Error());
     }
 
@@ -417,7 +485,7 @@ Result<void> Apply::ReplaceContents(const TextValue& value) noexcept {
         last.selector = PathSelector::Index;
         for (usize index = 0; index < value.elements.Size(); ++index) {
             last.index = static_cast<uint32>(index);
-            if (auto inserted = PathInsertElement(Registry(), Access(), Box(), element,
+            if (auto inserted = PathInsertElement(Registry(), Access(), Start(), element,
                                                   &value.elements[index], &failure);
                 !inserted) {
                 return Failed(inserted.Error());
@@ -440,10 +508,10 @@ Result<void> Apply::ReplaceContents(const TextValue& value) noexcept {
         keys[keyCount] = PathKey{value.elements[index].kind, wire.View()};
         Result<void> done = Result<void>::Success();
         if (fieldKind == ValueKind::Set) {
-            auto inserted = PathInsertKey(Registry(), Access(), Box(), keyed, &failure);
+            auto inserted = PathInsertKey(Registry(), Access(), Start(), keyed, &failure);
             done = inserted ? Result<void>::Success() : Result<void>::Failure(inserted.Error());
         } else {
-            done = PathWrite(Registry(), Access(), Box(), keyed, value.values[index], nullptr,
+            done = PathWrite(Registry(), Access(), Start(), keyed, value.values[index], nullptr,
                              &failure);
         }
 
@@ -458,7 +526,8 @@ Result<void> Apply::ReplaceContents(const TextValue& value) noexcept {
 enum class UnitKind : uint8 {
     None,
     Value,
-    Reference
+    Reference,
+    Container
 };
 
 struct UnitEnd {
@@ -466,10 +535,10 @@ struct UnitEnd {
     UnitKind kind = UnitKind::None;
 };
 
-// 경로의 준비 단위다: 위에서부터 처음 만나는 참조 없는 필드·멤버(값 단위)나 단일 강한 참조
-// 위치(ObjectRef 필드·멤버, 정적 배열의 ObjectRef 원소 — 참조 단위). 참조를 담은 인라인 struct와
-// 정적 배열·StructRefArray의 struct 원소로는 내려간다. 그 밖(Registry 컨테이너·참조 struct 통째)은
-// None이다.
+// 경로의 준비 단위다: 위에서부터 처음 만나는 참조 없는 필드·멤버(값 단위), 단일 강한 참조
+// 위치(ObjectRef 필드·멤버, 정적 배열의 ObjectRef 원소 — 참조 단위), ObjectRefArray·ObjectRefMap(그
+// 원소·항목 포함 — 컨테이너 단위). 참조를 담은 인라인 struct와 정적 배열·StructRefArray의 struct
+// 원소로는 내려간다. 그 밖(StructRefArray 통째·원소 통째·참조 struct 통째)은 None이다.
 Result<UnitEnd> FindUnitEnd(AssignmentState& state, PropertyPath path) noexcept {
     for (usize index = 0; index < path.steps.Size(); ++index) {
         TextSlot slot;
@@ -489,6 +558,14 @@ Result<UnitEnd> FindUnitEnd(AssignmentState& state, PropertyPath path) noexcept 
 
         const PathSelector selector = path.steps[index].selector;
         const bool last = index + 1 == path.steps.Size();
+        // ObjectRefArray·ObjectRefMap(통째·원소·항목)는 컨테이너 단위다(리플렉션 B9i3c3).
+        const bool registryContainer =
+            target == ValueKind::ObjectReference &&
+            (field.value.kind == ValueKind::Array || field.value.kind == ValueKind::Map);
+        if (registryContainer) {
+            return Result<UnitEnd>::Success(last ? UnitEnd{index, UnitKind::Container} : UnitEnd{});
+        }
+
         const bool single =
             (field.value.kind == ValueKind::ObjectReference && selector == PathSelector::None) ||
             (field.value.kind == ValueKind::StaticArray && selector == PathSelector::Index);
@@ -508,8 +585,92 @@ Result<UnitEnd> FindUnitEnd(AssignmentState& state, PropertyPath path) noexcept 
     return Result<UnitEnd>::Success(UnitEnd{});
 }
 
-// 단일 강한 참조 위치의 대입이다(리플렉션 B9i3c2): Set만 받고, 지금 대상과 같으면 무동작, 다르면
-// 자리를 검증(PathPrepareReference — ReadOnly·기대 타입·대상 생존)한 뒤 간선 변경 단위로 둔다.
+// 단일 강한 참조 위치 path를 target으로 바꾸는 간선 변경 단위를 둔다(리플렉션 B9i3c2·c3). 같은
+// 위치의 단위가 이미 있으면(참조 struct `{}`가 만든 null 단위 등) 그 새 대상을 바꾼다. 지금 대상(그
+// 단위의 새 대상, 없으면 객체의 값)과 같으면 무동작이다(record면 override를 넣는다 — ReadOnly
+// 자리는 넣지 않는다). 다르면 ReadOnly 자리는 진단, 아니면 pinValue의 대상을 고정하고 자리와 대상을
+// 검증(PathPrepareReference — ReadOnly·기대 타입·대상 생존)한다.
+Result<void> AssignReference(AssignmentState& state, PropertyPath path, ObjectHandle target,
+                             bool readOnly, bool record, const TextValue* pinValue,
+                             TextSource source, StringView pathText) noexcept {
+    ObjectRegistry& registry = state.target.Registry();
+    const ObjectAccessContext& access = state.target.Access();
+    const PathTarget root = state.Root();
+    ReferenceUnit* existing = nullptr;
+    for (usize index = 0; index < state.references.Size() && !existing; ++index) {
+        if (SamePropertyPath(state.references[index]->Path(), path)) {
+            existing = state.references[index].Get();
+        }
+    }
+
+    PropertyPathFailure failure;
+    ObjectHandle current = existing ? existing->target : ObjectHandle{};
+    if (!existing) {
+        FieldValue read(state.allocator);
+        if (auto found = PathRead(registry, access, root, path, read, &failure); !found) {
+            return ReportPathFailure(state, found.Error(), failure, source, pathText);
+        }
+
+        current = read.reference;
+    }
+
+    if (current == target) {
+        return readOnly || !record ? Result<void>::Success() : AddOverride(state, path);
+    }
+
+    if (readOnly) {
+        return Diagnose(state, TextDiagnosticCode::ReadOnly, source, pathText,
+                        "property is read-only");
+    }
+
+    if (pinValue) {
+        auto pinned = PinReferences(state, *pinValue, source, pathText);
+        if (!pinned || !pinned.Value()) {
+            return pinned ? Result<void>::Success() : Result<void>::Failure(pinned.Error());
+        }
+    }
+
+    FieldValue value(state.allocator);
+    value.kind = ValueKind::ObjectReference;
+    value.reference = target;
+    ReferenceUnit* unit = existing;
+    UniquePtr<ReferenceUnit> made;
+    if (!unit) {
+        auto created = UniquePtr<ReferenceUnit>::TryMake(state.allocator, state.allocator);
+        if (!created) {
+            return Result<void>::Failure(created.Error());
+        }
+
+        made = Move(created.Value());
+        unit = made.Get();
+        if (auto copied = unit->steps.TryAppend(path.steps); !copied) {
+            return copied;
+        }
+
+        if (auto reserved = state.references.TryReserve(state.references.Size() + 1); !reserved) {
+            return reserved;
+        }
+    }
+
+    // 앞 단위가 있으면 자리는 그대로이고 새 대상만 다시 검증한다(찾은 자리는 버린다).
+    PreparedReference scratch;
+    PreparedReference& located = made ? unit->prepared : scratch;
+    if (auto checked = PathPrepareReference(registry, access, root, path, value, located, &failure);
+        !checked) {
+        return ReportPathFailure(state, checked.Error(), failure, source, pathText);
+    }
+
+    unit->target = target;
+    if (made) {
+        unit->previous = unit->prepared.Previous();
+        (void)state.references.TryPushBack(Move(made));
+    }
+
+    return record ? AddOverride(state, path) : Result<void>::Success();
+}
+
+// 단일 강한 참조 위치의 대입이다(리플렉션 B9i3c2): Set만 받고 단일 ObjectReference 값을 간선 변경
+// 단위로 둔다(AssignReference).
 Result<void> ApplyReference(AssignmentState& state, const TextAssignment& assignment,
                             const TextSlot& slot, PropertyPath path, TextSource source) noexcept {
     if (assignment.kind != AssignmentKind::Set) {
@@ -534,54 +695,148 @@ Result<void> ApplyReference(AssignmentState& state, const TextAssignment& assign
                         "value does not fit the property");
     }
 
-    ObjectRegistry& registry = state.target.Registry();
-    const ObjectAccessContext& access = state.target.Access();
-    const PathTarget root = state.Root();
     const bool readOnly = state.target.GetKind() != AssignmentTarget::Kind::Staged &&
                           (slot.flags & static_cast<uint32>(FieldFlags::ReadOnly)) != 0;
-    FieldValue current(state.allocator);
-    PropertyPathFailure failure;
-    if (auto read = PathRead(registry, access, root, path, current, &failure); !read) {
-        return ReportPathFailure(state, read.Error(), failure, source, assignment.path);
+    return AssignReference(state, path, value.single.reference, readOnly, true, &value, source,
+                           assignment.path);
+}
+
+// 참조를 담은 struct 자리 path(인라인 struct 필드·멤버, 정적 배열·StructRefArray의 struct 원소 —
+// view는 그 struct)를 기본값으로 되돌린다(리플렉션 B9i3c3 — 참조 struct `{}`). 통째로 떼어 낼 수
+// 없으므로 멤버마다 기존 준비 단위로 나눈다: 값 멤버는 값 단위의 ResetToDefault, ObjectRef 멤버와
+// ObjectRef 정적 배열 원소는 null 참조 단위, ObjectRefArray·ObjectRefMap 멤버는 컨테이너 단위의
+// 비우기, 참조 struct 멤버와 그 정적 배열 원소는 다시 나눈다. StructRefArray 멤버는 Unsupported다.
+// ReadOnly 멤버(staged 대상 제외)는 값이 이미 기본값인 참조가 아니면 진단 ReadOnly다.
+Result<void> ResetReferenceStruct(AssignmentState& state, PropertyPath path, StructView view,
+                                  TextSource source, StringView pathText) noexcept {
+    const usize count = path.steps.Size();
+    if (view.IsEmpty() || count >= MaxPropertyPathSteps) {
+        return Diagnose(state, TextDiagnosticCode::Unsupported, source, pathText,
+                        "this struct cannot be reset");
     }
 
-    if (current.reference == value.single.reference) {
-        return readOnly ? Result<void>::Success() : AddOverride(state, path);
+    ObjectRegistry& registry = state.target.Registry();
+    const ObjectAccessContext& access = state.target.Access();
+    const bool staged = state.target.GetKind() == AssignmentTarget::Kind::Staged;
+    PathStep steps[MaxPropertyPathSteps];
+    for (usize index = 0; index < count; ++index) {
+        steps[index] = path.steps[index];
     }
 
-    if (readOnly) {
-        return Diagnose(state, TextDiagnosticCode::ReadOnly, source, assignment.path,
-                        "property is read-only");
+    FreshFailure fresh(state);
+    const auto& members = view.Schema().fields;
+    for (usize member = 0; member < members.Size() && !state.failed; ++member) {
+        const FieldSchema& field = members[member];
+        steps[count] = PathStep{};
+        steps[count].fieldId = field.id;
+        const PropertyPath child{Span<const PathStep>(steps, count + 1), path.keys};
+        TextSlot slot;
+        if (auto described = DescribeTextPath(state.lease, child, slot); !described) {
+            return described;
+        }
+
+        const bool readOnly =
+            !staged && (slot.flags & static_cast<uint32>(FieldFlags::ReadOnly)) != 0;
+        const ValueKind target = FieldTargetType(field).kind;
+        const bool strongStruct =
+            !slot.structView.IsEmpty() && slot.structView.ContainsStrongReference();
+        Result<void> done = Result<void>::Success();
+        if (field.value.kind == ValueKind::StaticArray &&
+            (target == ValueKind::ObjectReference || strongStruct)) {
+            // 원소마다 null 참조 단위이거나 다시 나눈다.
+            steps[count].selector = PathSelector::Index;
+            for (uint32 element = 0; element < field.maxElements && done && !state.failed;
+                 ++element) {
+                steps[count].index = element;
+                done = target == ValueKind::ObjectReference
+                           ? AssignReference(state, child, ObjectHandle{}, readOnly, false, nullptr,
+                                             source, pathText)
+                           : ResetReferenceStruct(state, child, slot.structView, source, pathText);
+            }
+        } else if (target == ValueKind::ObjectReference &&
+                   (field.value.kind == ValueKind::Array || field.value.kind == ValueKind::Map)) {
+            auto container = AcquireContainer(state, child, source, pathText);
+            if (!container || !container.Value()) {
+                return container ? Result<void>::Success()
+                                 : Result<void>::Failure(container.Error());
+            }
+
+            PropertyPathFailure failure;
+            if (auto cleared = PathClear(registry, access,
+                                         state.Root().WithReferences(container.Value()->stage),
+                                         child, &failure);
+                !cleared) {
+                done = ReportPathFailure(state, cleared.Error(), failure, source, pathText);
+            } else {
+                container.Value()->dirty = true;
+            }
+        } else if (target == ValueKind::ObjectReference) {
+            done = AssignReference(state, child, ObjectHandle{}, readOnly, false, nullptr, source,
+                                   pathText);
+        } else if (strongStruct && field.value.kind == ValueKind::Struct) {
+            done = ResetReferenceStruct(state, child, slot.structView, source, pathText);
+        } else if (strongStruct) {
+            done = Diagnose(state, TextDiagnosticCode::Unsupported, source, pathText,
+                            "a StructRefArray member cannot be reset yet");
+        } else if (readOnly) {
+            done = Diagnose(state, TextDiagnosticCode::ReadOnly, source, pathText,
+                            "property is read-only");
+        } else {
+            auto unit = AcquireUnit(state, child, source, pathText);
+            if (!unit || !unit.Value()) {
+                return unit ? Result<void>::Success() : Result<void>::Failure(unit.Error());
+            }
+
+            unit.Value()->box.ResetToDefault();
+            unit.Value()->dirty = true;
+        }
+
+        if (!done) {
+            return done;
+        }
     }
 
-    auto pinned = PinReferences(state, value, source, assignment.path);
-    if (!pinned || !pinned.Value()) {
-        return pinned ? Result<void>::Success() : Result<void>::Failure(pinned.Error());
+    return Result<void>::Success();
+}
+
+// 준비 단위가 없는 자리의 대입이다: 참조를 담은 struct 자리(인라인 struct 필드·멤버, 정적 배열·
+// StructRefArray의 struct 원소)의 `{}`만 받아 멤버마다 나누고(ResetReferenceStruct) override는 그
+// struct 경로로 넣는다. 그 밖(StructRefArray 통째·원소 지우기)은 Unsupported다.
+Result<void> ApplyReferenceStruct(AssignmentState& state, const TextAssignment& assignment,
+                                  const TextSlot& slot, PropertyPath path,
+                                  TextSource source) noexcept {
+    const bool structSlot =
+        !slot.structView.IsEmpty() &&
+        ((slot.part == TextSlotPart::Field && slot.field->value.kind == ValueKind::Struct) ||
+         slot.part == TextSlotPart::Element);
+    if (assignment.kind != AssignmentKind::Set || !structSlot) {
+        return Diagnose(state, TextDiagnosticCode::Unsupported, source, assignment.path,
+                        "this assignment to a reference-holding value is not supported yet");
     }
 
-    auto made = UniquePtr<ReferenceUnit>::TryMake(state.allocator, state.allocator);
-    if (!made) {
-        return Result<void>::Failure(made.Error());
+    TextValue value(state.allocator);
+    auto parsed =
+        ParseTextValue(state.context, slot, assignment.value, source, assignment.path, value);
+    if (!parsed) {
+        return Result<void>::Failure(parsed.Error());
     }
 
-    ReferenceUnit& unit = *made.Value();
-    if (auto copied = unit.steps.TryAppend(path.steps); !copied) {
-        return copied;
+    if (!parsed.Value()) {
+        state.failed = true;
+        return Result<void>::Success();
     }
 
-    if (auto reserved = state.references.TryReserve(state.references.Size() + 1); !reserved) {
-        return reserved;
+    if (value.shape != TextValueShape::StructDefault) {
+        return Diagnose(state, TextDiagnosticCode::InvalidValue, source, assignment.path,
+                        "value does not fit the property");
     }
 
-    if (auto located = PathPrepareReference(registry, access, root, path, value.single,
-                                            unit.prepared, &failure);
-        !located) {
-        return ReportPathFailure(state, located.Error(), failure, source, assignment.path);
+    FreshFailure fresh(state);
+    if (auto reset = ResetReferenceStruct(state, path, slot.structView, source, assignment.path);
+        !reset || state.failed) {
+        return reset;
     }
 
-    unit.target = value.single.reference;
-    unit.previous = unit.prepared.Previous();
-    (void)state.references.TryPushBack(Move(made.Value()));
     return AddOverride(state, path);
 }
 
@@ -619,8 +874,7 @@ Result<void> ProcessAssignment(AssignmentState& state, const TextAssignment& ass
     }
 
     if (unitEnd.Value().kind == UnitKind::None) {
-        return Diagnose(state, TextDiagnosticCode::Unsupported, source, assignment.path,
-                        "this assignment to a reference-holding value is not supported yet");
+        return ApplyReferenceStruct(state, assignment, resolved.slot, path, source);
     }
 
     if (unitEnd.Value().kind == UnitKind::Reference) {
@@ -637,16 +891,38 @@ Result<void> ProcessAssignment(AssignmentState& state, const TextAssignment& ass
 
     unitSteps[end].selector = PathSelector::None;
     unitSteps[end].index = 0;
-    auto unit = AcquireUnit(state, PropertyPath{Span<const PathStep>(unitSteps, end + 1), {}},
-                            source, assignment.path);
+    const PropertyPath unitPath{Span<const PathStep>(unitSteps, end + 1), {}};
+    if (unitEnd.Value().kind == UnitKind::Container) {
+        // 컨테이너 단위는 대상 기준 경로 그대로 준비 사본에 적용한다.
+        auto container = AcquireContainer(state, unitPath, source, assignment.path);
+        if (!container || !container.Value()) {
+            return container ? Result<void>::Success() : Result<void>::Failure(container.Error());
+        }
+
+        ContainerUnit& unit = *container.Value();
+        Apply apply{state,      state.Root().WithReferences(unit.stage),
+                    unit.dirty, nullptr,
+                    assignment, resolved.slot,
+                    path,       path,
+                    source,     {}};
+        return apply.Run();
+    }
+
+    auto unit = AcquireUnit(state, unitPath, source, assignment.path);
     if (!unit || !unit.Value()) {
         return unit ? Result<void>::Success() : Result<void>::Failure(unit.Error());
     }
 
-    Apply apply{state,      *unit.Value(),
-                assignment, resolved.slot,
-                path,       PropertyPath{path.steps.Mid(end), path.keys},
-                source,     {}};
+    Apply apply{state,
+                PathTarget::Value(unit.Value()->box),
+                unit.Value()->dirty,
+                &unit.Value()->box,
+                assignment,
+                resolved.slot,
+                path,
+                PropertyPath{path.steps.Mid(end), path.keys},
+                source,
+                {}};
     return apply.Run();
 }
 

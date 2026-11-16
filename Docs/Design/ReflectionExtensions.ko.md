@@ -889,6 +889,19 @@ Result<PreparedAssignments> PrepareAssignments(AssignmentTarget, Span<const Text
 - 결과: `PublishedAssignments::ReferenceCount`·`ReferencePath`·`OldReference`(게시 전 대상 — 고정하지 않으므로 Undo는 생존을 다시 확인한다). 값 단위의 `UnitCount`와 따로 센다.
 - 시험: ReflectionText `TextAssign_ReferenceUnitsPublishWithValues`(값·ObjectRef·정적 배열 원소·StructRefArray 원소 멤버를 섞은 묶음, 관찰자 기록 한 번)·`TextAssign_ReferenceUnitFailuresChangeNothing`(ReadOnly·Unset·참조 struct `{}` 진단, 같은 대상 무동작, 대상 고정의 GC 회수 방지, 대상 Discard면 StaleHandle)·`TextAssign_ReferencePublishAllocationFailuresChangeNothing`(관찰자 예약·Registry 할당 실패 주입). fixture `AssignHolder`에 `anchorLink`(ReadOnly ObjectRef)·`slots`(ObjectRef 정적 배열)·`items`(StructRefArray<AssignMixed>)를 더했다.
 
+구현(B9i3c3)에서 정한 점(Registry 컨테이너 단위와 참조 struct `{}` — B9i3c3을 다시 나눴다. StructRefArray 원소 지우기·비우기와 원소 블록 소유 규칙은 B9i3c4):
+
+- 준비 사본 `PreparedReferences`(Object/PreparedReferences.h)와 `PathTarget::WithReferences(stage)`: 텍스트 층은 컨테이너의 C++ 형식(`ObjectRefArray<T>`·`ObjectRefMap<K, T>`)을 모르므로 B9i2의 형식별 `ReplaceReferences`·`ReplaceMapReferences`를 직접 부를 수 없다. 그래서 시작 위치에 사본을 건 경로 연산이 ObjectRefArray·ObjectRefMap 끝 지점(원소·항목 포함)에 닿으면 객체 대신 사본을 읽고 바꾼다(생성 thunk `PathStagedReferenceArray`·`PathStagedReferenceMap` — Object/GeneratedStagedReferenceAccess.h). 검증은 보통 경로 연산 그대로다(ReadOnly·대상 스키마 타입·생존·키 해석·넣기 준비·원소 수 한도, C++ 대상 타입은 `CheckWeakTarget(NativeTypeKey<T>)`). 처음 닿는 연산이 컨테이너를 묶는다: 배열은 handle 목록 복사, Map은 컨테이너 allocator로 깊은 복사(게시의 무할당 교환이 같은 allocator를 요구한다). 객체는 읽기 Borrow로만 보므로 변경 표지를 올리지 않고, 게시된 객체는 복사를 encode 고정 아래 한다. 사본을 건 연산의 끝이 그 밖이거나 시작 위치가 분리된 값이면 InvalidArgument다. UE 대응: `FArrayProperty::ImportText_Internal`이 setter가 있는 배열을 임시 배열(`TempArrayStorage`)에 읽은 뒤 `SetValue_InContainer`로 한 번에 넣는 것과 같은 모양이다(UE 5.8 CoreUObject/Private/UObject/PropertyArray.cpp:1121-1149). UE에는 간선 장벽·관찰자 기록이 없다.
+- 게시: `PreparePublish`(구간 밖 — 배열은 컨테이너 allocator의 `PreparedReferenceArray`, Map은 사본 그대로)가 새 handle 목록 `Current()`를 만든다. 간선 변경은 묶을 때의 내용 `Previous()`의 원소마다 {원소, null}, `Current()`의 원소마다 {null, 원소}다 — 그대로 남는 원소는 검사합과 관찰자 집계에서 상쇄된다(B9i2 규칙). 새 대상의 재확인 기대 타입은 컨테이너의 C++ 대상 타입(`TargetType()`)이다. 구간 안 `Publish(batch)`가 형식별 함수로 내용을 맞바꾸고, 옛 버퍼·옛 Map은 사본이 받아 묶음이 소멸할 때(구간 밖) 반환한다. 묶을 때의 내용이 게시 때도 그대로임은 변경 표지가 보증한다(리플렉션 쓰기·Registry 참조 변경이 표지를 올린다 — Prepare 뒤 컨테이너를 바꾸면 Busy). Publish 1단계는 사본을 건 원소 수 읽기로 owner 생존과 같은 컨테이너인지 다시 확인한다(Discard된 owner는 StaleHandle).
+- staged 대상: 사본 게시가 트랜잭션의 `AssignReferences`·`AssignMapReferences`다(Map은 키 사본을 컨테이너 allocator로 만든다 — 실패하면 컨테이너는 그대로이고 호출자의 rollback이 원자성을 준다).
+- 준비 단위 판정: ObjectRefArray·ObjectRefMap 필드·멤버(통째·원소·항목 — 끝 단계)는 컨테이너 단위이고 단위 경로는 컨테이너 경로(선택자 없음)다. 컨테이너보다 깊은 경로는 없다(원소가 참조). 대입은 값 단위와 같은 종류별 적용을 사본에 한다: 통째 목록·항목 목록(비우고 차례로 넣기)·빈 값(비우기), 원소·항목 쓰기(같은 대상이면 무동작), Erase(원소 지우기·항목 지우기 — 없는 키는 InvalidValue). override 경로는 컨테이너 필드 경로다. 사본을 바꾸지 않은 단위는 게시하지 않는다.
+- 결과: `PublishedAssignments::ContainerCount`·`ContainerPath`·`OldReferences`(게시 전 handle — Map은 키 없이 항목 순서, 고정하지 않는다).
+- 참조 struct `{}`: 참조를 담은 struct 자리(인라인 struct 필드·멤버, 정적 배열·StructRefArray의 struct 원소)는 통째로 떼어 낼 수 없으므로 멤버마다 기존 단위로 나눈다 — 값 멤버는 값 단위의 `ResetToDefault`, ObjectRef 멤버와 ObjectRef 정적 배열 원소는 null 참조 단위, ObjectRefArray·ObjectRefMap 멤버는 컨테이너 단위의 비우기, 참조 struct 멤버와 그 정적 배열 원소는 다시 나눈다. StructRefArray 원소 `{}`도 원소를 지우고 넣지 않고 제자리 멤버마다 되돌린다(원소 수·index가 바뀌지 않는다). 같은 참조 위치의 단위는 하나다: 뒤 대입(`mixed={}` 뒤 `mixed.link=/t`)은 그 단위의 새 대상을 바꾸고 같은-값 판정은 그 단위의 새 대상과 한다. ReadOnly 멤버(staged 대상 제외)는 값 멤버면 진단 ReadOnly, 참조가 이미 null이면 무동작이다. override 경로는 그 struct 경로 하나다. StructRefArray 멤버는 Unsupported(B9i3c4).
+- 정적 배열 struct 원소 `{}`(값 단위 안 — B9i3c1의 Unsupported를 풀었다): 원소 단위 Detach를 더하지 않고, 상자 안에서 원소 struct의 멤버마다 떼어 기본값으로 바꿔 되돌린다(`pair[0]={}`).
+- 진단 모으기: 멤버마다 나누는 적용은 그 대입의 진단만 보고 멈춘다(앞 대입의 진단이 뒤 대입의 진단 모으기를 막지 않는다).
+- 남은 일(B9i3c4): StructRefArray 원소 지우기(Erase `items[i]`)·비우기(`items=`)와 원소 블록 소유 규칙(지운 블록은 구간 밖에서 소멸, 지운 원소의 참조는 간선 변경 {참조, null}), 같은 묶음 안 index 이동(원래 index로 옮겨 단위 경로를 정하고, 지운 원소 안의 단위는 버린다), staged 대상의 방법(트랜잭션 API는 통째 `AssignElements`뿐), 참조 struct `{}` 안의 StructRefArray 멤버. staged 대상에서 같은 트랜잭션의 공개 전 객체를 새 대상으로 대입하면 고정(`TryPin`)이 실패해 진단 InvalidValue다(공개 전 객체는 GC 대상이 아니므로 고정 규칙을 staged에 맞게 정한다).
+- 시험: ReflectionText `TextAssign_ContainerUnitsPublishWithValues`(통째·원소·항목 대입과 관찰자 기록, 옛 handle)·`TextAssign_ContainerUnitFailuresChangeNothing`(범위 밖·없는 키 진단, Prepare 뒤 컨테이너 변경 Busy, 대상 고정의 GC 회수 방지, 대상 Discard면 StaleHandle, staged 대상)·`TextAssign_ReferenceStructResetSplitsIntoUnits`(참조 struct·StructRefArray 원소·정적 배열 원소 `{}`, 같은 참조 위치 한 단위, 관찰자 기록 한 번). fixture `AssignHolder`에 `group`(ObjectRefArray)·`named`(ObjectRefMap<String>)·`bundle`(값·ObjectRef·ObjectRefArray를 담은 참조 struct `AssignBundle`)을 더했다.
+
 ### 10.3 참조 resolver
 
 ```cpp
@@ -1058,7 +1071,7 @@ public:
 | B9i2 | B6 확장: 객체 변경 표지·묶음 게시 구간(대상 재확인·관찰자 묶음 예약)·준비 단위 셋·대상 고정(ObjectRuntime 시험으로 원자성 고정) | B9f4 | M |
 | B9i3a | ReflectionText 모듈 골격·용도(`TextUse` 출력·입력 제외)·진단 모음·codec 옵션 | B9a–B9h, B9i1, B9i2 | S |
 | B9i3b | 명령행 표기(종류별 Format·Parse, escape 표) | B9i3a | M |
-| B9i3c | 대입 묶음 API·준비 단위·resolver·Publish — c0 선행 기반(값 연산·PathTarget·Detach·Attach), c1 API와 값 단위, c2 단일 참조 위치 단위(간선 변경)·Hard 대상 고정, c3 Registry 컨테이너 단위·StructRefArray 원소 추가·삭제·참조 struct `{}` | B9i3b | L |
+| B9i3c | 대입 묶음 API·준비 단위·resolver·Publish — c0 선행 기반(값 연산·PathTarget·Detach·Attach), c1 API와 값 단위, c2 단일 참조 위치 단위(간선 변경)·Hard 대상 고정, c3 Registry 컨테이너 단위·참조 struct `{}`, c4 StructRefArray 원소 지우기·비우기 | B9i3b | L |
 | B9i4 | JSON export·import(객체·staged·struct 값, mapMerge) | B9i3c | L |
 | B9j | InstancedStruct<>·담기 조건·깊이 합·객체 문맥 경로 해석 | B9i4 | L |
 | B9k | struct 상속·비리플렉션 빈 base·struct 멤버 thunk 소유자 인자·`InstancedStruct<Base>` | B9j | L |

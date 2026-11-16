@@ -396,6 +396,11 @@ template <ValueKind Target, class K, class T>
 Result<void> PathObjectRefMap(PathCursor& cursor, ObjectRefMap<K, T>& map) noexcept {
     static_assert(Target == ValueKind::ObjectReference,
                   "ObjectRefMap values are object references");
+    // 시작 위치에 준비 사본이 걸려 있으면 객체 대신 사본을 바꾼다(리플렉션 B9i3c3).
+    if (cursor.StagedReferences()) {
+        return PathStagedReferenceMap(cursor, map);
+    }
+
     ObjectRegistry& registry = cursor.Registry();
     const ObjectAccessContext& access = cursor.Access();
     const ObjectHandle owner = cursor.OwnerHandle();

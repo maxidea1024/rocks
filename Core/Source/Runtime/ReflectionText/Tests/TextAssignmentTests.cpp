@@ -356,20 +356,20 @@ TEST(TextAssign_CollectsErrorsAndKeepsSameValues) {
                                      Set("sealed.x", "1", 11)};
     auto prepared = fixture.Prepare(object, inputs);
     CHECK(ErrorOf(prepared) == ErrorCode::InvalidArgument);
+    // 참조 struct·정적 배열 원소의 `{}`는 멤버마다 나뉘어 받는다(리플렉션 B9i3c3) — 빈
+    // StructRefArray의 원소는 범위 밖이다.
     const TextDiagnosticCode codes[] = {TextDiagnosticCode::DuplicateAssignment,
                                         TextDiagnosticCode::UnknownProperty,
                                         TextDiagnosticCode::InvalidValue,
                                         TextDiagnosticCode::ReadOnly,
-                                        TextDiagnosticCode::Unsupported,
-                                        TextDiagnosticCode::Unsupported,
-                                        TextDiagnosticCode::Unsupported,
+                                        TextDiagnosticCode::OutOfRange,
                                         TextDiagnosticCode::InvalidValue,
                                         TextDiagnosticCode::InvalidValue,
                                         TextDiagnosticCode::InvalidValue,
                                         TextDiagnosticCode::ReadOnly};
-    const uint32 sources[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
-    REQUIRE(fixture.diagnostics.Count() == 11);
-    for (usize index = 0; index < 11; ++index) {
+    const uint32 sources[] = {1, 2, 3, 4, 6, 8, 9, 10, 11};
+    REQUIRE(fixture.diagnostics.Count() == 9);
+    for (usize index = 0; index < 9; ++index) {
         CHECK(fixture.diagnostics.Get(index).code == codes[index]);
         CHECK(fixture.diagnostics.Get(index).source.sourceIndex == sources[index]);
     }
@@ -606,8 +606,9 @@ TEST(TextAssign_ReferenceUnitsPublishWithValues) {
     CHECK(holder->next.Handle().IsNull() && holder->slots[1].Handle().IsNull());
 }
 
-// 참조 단위의 거부와 원자성: ReadOnly·Unset·참조 struct `{}`는 진단, 같은 대상은 무동작이다. 대상
-// 고정은 Prepare 뒤 GC 회수를 막고, 대상이 Discard되면 Publish가 StaleHandle이고 객체는 그대로다.
+// 참조 단위의 거부와 원자성: ReadOnly·Unset·StructRefArray 원소 지우기는 진단, 같은 대상은
+// 무동작이다. 대상 고정은 Prepare 뒤 GC 회수를 막고, 대상이 Discard되면 Publish가 StaleHandle이고
+// 객체는 그대로다.
 TEST(TextAssign_ReferenceUnitFailuresChangeNothing) {
     SystemAllocator system;
     Fixture fixture(system);
@@ -618,8 +619,9 @@ TEST(TextAssign_ReferenceUnitFailuresChangeNothing) {
     resolver.target = target.Handle();
     fixture.options.resolver = &resolver;
 
-    const TextAssignment rejected[] = {
-        Set("anchorLink", "/t"), Other(AssignmentKind::Unset, "next", 1), Set("mixed", "{}", 2)};
+    const TextAssignment rejected[] = {Set("anchorLink", "/t"),
+                                       Other(AssignmentKind::Unset, "next", 1),
+                                       Other(AssignmentKind::Erase, "items[0]", 2)};
     CHECK(ErrorOf(fixture.Prepare(object, rejected)) == ErrorCode::InvalidArgument);
     REQUIRE(fixture.diagnostics.Count() == 3);
     CHECK(fixture.diagnostics.Get(0).code == TextDiagnosticCode::ReadOnly);
@@ -709,4 +711,201 @@ TEST(TextAssign_ReferencePublishAllocationFailuresChangeNothing) {
     Peek holder(fixture, object);
     CHECK(holder->next.Handle() == target.Handle() &&
           holder->mixed.link.Handle() == target.Handle() && holder->count == 7);
+}
+
+// 컨테이너 단위(리플렉션 B9i3c3): ObjectRefArray·ObjectRefMap의 통째·원소·항목 대입을 준비 사본에
+// 차례로 적용하고(뒤 대입은 앞 대입이 만든 사본 위) 값 단위와 한 구간에서 게시한다. 관찰자 기록은
+// 옛 원소·새 원소의 간선 차이로 한 번에 남고, 결과는 컨테이너마다 옛 handle을 돌려준다.
+TEST(TextAssign_ContainerUnitsPublishWithValues) {
+    SystemAllocator system;
+    Fixture fixture(system, true);
+    auto root = fixture.Make();
+    const ObjectHandle object = root.Handle();
+    auto first = fixture.MakeTarget();
+    auto second = fixture.MakeTarget();
+    TargetResolver resolver;
+    resolver.target = first.Handle();
+    resolver.second = second.Handle();
+    fixture.options.resolver = &resolver;
+
+    const TextAssignment inputs[] = {Set("group", "/t,/u"), Set("named", "a:/t,b:/u", 1),
+                                     Set("count", "3", 2)};
+    auto prepared = fixture.Prepare(object, inputs);
+    REQUIRE(prepared);
+    CHECK(HasOverride(fixture, prepared.Value().OverridePaths(), "group") &&
+          HasOverride(fixture, prepared.Value().OverridePaths(), "named"));
+    auto published = prepared.Value().Publish();
+    REQUIRE(published);
+    CHECK(published.Value().ContainerCount() == 2 && published.Value().UnitCount() == 1);
+    CHECK(published.Value().OldReferences(0).IsEmpty() &&
+          published.Value().OldReferences(1).IsEmpty());
+    {
+        Peek holder(fixture, object);
+        REQUIRE(holder->group.Size() == 2 && holder->named.Count() == 2);
+        CHECK(holder->group[0] == first.Handle() && holder->group[1] == second.Handle());
+        CHECK(*holder->named.Find(StringView("a")) == first.Handle() &&
+              *holder->named.Find(StringView("b")) == second.Handle() && holder->count == 3);
+    }
+
+    // (package, first)와 (package, second)가 각각 +2다.
+    Array<ReferenceEdgeDelta> changes = fixture.Take();
+    REQUIRE(changes.Size() == 2);
+    for (usize index = 0; index < changes.Size(); ++index) {
+        CHECK(changes[index].delta == 2 && changes[index].cause == ReferenceChangeCause::Edit);
+    }
+
+    // 원소 쓰기 뒤 지우기, 항목 null 쓰기·지우기·넣기가 사본 위에서 이어진다.
+    const TextAssignment edits[] = {
+        Set("group[0]", "/u"), Other(AssignmentKind::Erase, "group[1]", 1),
+        Set("named[a]", "none", 2), Other(AssignmentKind::Erase, "named[b]", 3),
+        Set("named[c]", "/t", 4)};
+    auto edited = fixture.Prepare(object, edits);
+    REQUIRE(edited);
+    auto editPublished = edited.Value().Publish();
+    REQUIRE(editPublished);
+    REQUIRE(editPublished.Value().ContainerCount() == 2);
+    const Span<const ObjectHandle> oldGroup = editPublished.Value().OldReferences(0);
+    REQUIRE(oldGroup.Size() == 2);
+    CHECK(oldGroup[0] == first.Handle() && oldGroup[1] == second.Handle());
+    {
+        Peek holder(fixture, object);
+        REQUIRE(holder->group.Size() == 1 && holder->named.Count() == 2);
+        CHECK(holder->group[0] == second.Handle());
+        CHECK(holder->named.Find(StringView("a"))->IsNull() &&
+              *holder->named.Find(StringView("c")) == first.Handle());
+    }
+
+    // first는 group·named.a를 잃고 named.c를 얻어 -1, second는 named.b를 잃어 -1이다.
+    changes = fixture.Take();
+    REQUIRE(changes.Size() == 2);
+    for (usize index = 0; index < changes.Size(); ++index) {
+        CHECK(changes[index].delta == -1);
+    }
+}
+
+// 컨테이너 단위의 거부와 원자성: 범위 밖 원소·없는 키는 진단이다. Prepare 뒤 컨테이너가 바뀌면
+// Busy, 새 대상이 Discard되면 StaleHandle이고 객체는 그대로다. 고정한 대상은 GC 회수되지 않는다.
+// staged 객체는 트랜잭션의 통째 지정으로 게시한다.
+TEST(TextAssign_ContainerUnitFailuresChangeNothing) {
+    SystemAllocator system;
+    Fixture fixture(system);
+    auto root = fixture.Make();
+    const ObjectHandle object = root.Handle();
+    auto target = fixture.MakeTarget();
+    TargetResolver resolver;
+    resolver.target = target.Handle();
+    fixture.options.resolver = &resolver;
+
+    const TextAssignment rejected[] = {Set("group[2]", "/t"),
+                                       Other(AssignmentKind::Erase, "named[zz]", 1)};
+    CHECK(ErrorOf(fixture.Prepare(object, rejected)) == ErrorCode::InvalidArgument);
+    REQUIRE(fixture.diagnostics.Count() == 2);
+    CHECK(fixture.diagnostics.Get(0).code == TextDiagnosticCode::OutOfRange);
+    CHECK(fixture.diagnostics.Get(1).code == TextDiagnosticCode::InvalidValue);
+
+    PropertyPathBuffer groupPath;
+    REQUIRE(ParsePropertyPath(fixture.holder, "group", groupPath));
+    const TextAssignment fill[] = {Set("group", "/t,/t"), Set("count", "1", 1)};
+    auto busy = fixture.Prepare(object, fill);
+    REQUIRE(busy);
+    REQUIRE(PathClear(fixture.objects, fixture.Access(), object, groupPath.View()));
+    CHECK(ErrorOf(busy.Value().Publish()) == ErrorCode::Busy);
+    {
+        Peek holder(fixture, object);
+        CHECK(holder->group.IsEmpty() && holder->count == 0);
+    }
+
+    // 고정한 대상은 RootRef를 놓고 GC를 돌려도 남는다.
+    const TextAssignment name[] = {Set("named", "k:/t")};
+    auto pinned = fixture.Prepare(object, name);
+    REQUIRE(pinned);
+    target.Reset();
+    REQUIRE(fixture.objects.Collect(fixture.Access()));
+    REQUIRE(pinned.Value().Publish());
+    {
+        Peek holder(fixture, object);
+        REQUIRE(holder->named.Count() == 1);
+        CHECK(*holder->named.Find(StringView("k")) == resolver.target);
+    }
+
+    auto discarded = fixture.Prepare(object, fill);
+    REQUIRE(discarded);
+    REQUIRE(fixture.objects.Discard(fixture.Access(), resolver.target));
+    CHECK(ErrorOf(discarded.Value().Publish()) == ErrorCode::StaleHandle);
+    {
+        Peek holder(fixture, object);
+        CHECK(holder->group.IsEmpty() && holder->count == 0);
+    }
+
+    auto live = fixture.MakeTarget();
+    resolver.target = live.Handle();
+    ConstructionContext transaction(fixture.objects, fixture.Access());
+    auto created = transaction.Create<AssignHolder>(GeneratedType<AssignHolder>::Schema().id);
+    REQUIRE(created);
+    const TextAssignment staged[] = {Set("group", "/t,none"), Set("named", "k:/t", 1),
+                                     Set("named[j]", "none", 2), Set("bundle.crew", "/t", 3)};
+    fixture.diagnostics.Clear();
+    auto prepared = PrepareAssignments(AssignmentTarget::Staged(transaction, created.Value()),
+                                       staged, fixture.options, fixture.diagnostics);
+    REQUIRE(prepared);
+    REQUIRE(prepared.Value().Publish());
+    auto holder = transaction.Get<AssignHolder>(created.Value());
+    REQUIRE(holder);
+    REQUIRE(holder.Value()->group.Size() == 2 && holder.Value()->named.Count() == 2);
+    CHECK(holder.Value()->group[0] == live.Handle() && holder.Value()->group[1].IsNull());
+    CHECK(*holder.Value()->named.Find(StringView("k")) == live.Handle() &&
+          holder.Value()->bundle.crew.Size() == 1);
+    transaction.Rollback();
+}
+
+// 참조 struct·원소의 `{}`(리플렉션 B9i3c3)는 멤버마다 값 단위의 기본값·null 참조 단위·컨테이너
+// 비우기로 나뉘고, 뒤 대입은 그 단위 위에서 이어진다(같은 참조 위치는 한 단위). 정적 배열의 struct
+// 원소 `{}`는 멤버마다 기본값이다. override 경로는 그 struct 경로다.
+TEST(TextAssign_ReferenceStructResetSplitsIntoUnits) {
+    SystemAllocator system;
+    Fixture fixture(system, true);
+    auto root = fixture.Make();
+    const ObjectHandle object = root.Handle();
+    auto target = fixture.MakeTarget();
+    TargetResolver resolver;
+    resolver.target = target.Handle();
+    fixture.options.resolver = &resolver;
+    PropertyPathBuffer itemPath;
+    REQUIRE(ParsePropertyPath(fixture.holder, "items[0]", itemPath));
+    REQUIRE(PathInsertElement(fixture.objects, fixture.Access(), object, itemPath.View(), nullptr));
+
+    const TextAssignment fill[] = {
+        Set("bundle.level", "4"),       Set("bundle.lead", "/t", 1), Set("bundle.crew", "/t,/t", 2),
+        Set("mixed.weight", "2", 3),    Set("mixed.link", "/t", 4),  Set("items[0].link", "/t", 5),
+        Set("items[0].weight", "5", 6), Set("pair[0].x", "3", 7),    Set("pair[0].y", "4", 8)};
+    auto filled = fixture.Prepare(object, fill);
+    REQUIRE(filled);
+    REQUIRE(filled.Value().Publish());
+    (void)fixture.Take();
+
+    const TextAssignment reset[] = {Set("bundle", "{}"),      Set("bundle.level", "9", 1),
+                                    Set("mixed", "{}", 2),    Set("mixed.link", "/t", 3),
+                                    Set("items[0]", "{}", 4), Set("pair[0]", "{}", 5)};
+    auto prepared = fixture.Prepare(object, reset);
+    REQUIRE(prepared);
+    const Span<const PropertyPath> overrides = prepared.Value().OverridePaths();
+    CHECK(HasOverride(fixture, overrides, "bundle") && HasOverride(fixture, overrides, "mixed"));
+    CHECK(HasOverride(fixture, overrides, "items") && HasOverride(fixture, overrides, "pair"));
+    auto published = prepared.Value().Publish();
+    REQUIRE(published);
+    // 참조 위치는 bundle.lead·mixed.link·items[0].link 셋이다(mixed.link는 한 단위).
+    CHECK(published.Value().ReferenceCount() == 3 && published.Value().ContainerCount() == 1);
+    {
+        Peek holder(fixture, object);
+        CHECK(holder->bundle.level == 9 && holder->bundle.lead.Handle().IsNull() &&
+              holder->bundle.crew.IsEmpty());
+        CHECK(holder->mixed.weight == 0 && holder->mixed.link.Handle() == target.Handle());
+        CHECK(holder->items[0].weight == 0 && holder->items[0].link.Handle().IsNull());
+        CHECK(holder->pair[0].x == 0 && holder->pair[0].y == 0);
+    }
+
+    // lead·crew 둘·items[0].link를 잃어 (package, target)이 -4로 한 번 기록된다.
+    Array<ReferenceEdgeDelta> changes = fixture.Take();
+    REQUIRE(changes.Size() == 1);
+    CHECK(changes[0].targetPackage == target.Handle() && changes[0].delta == -4);
 }

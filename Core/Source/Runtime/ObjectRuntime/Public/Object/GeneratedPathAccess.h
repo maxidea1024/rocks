@@ -368,10 +368,23 @@ Result<void> PathContainer(PathCursor& cursor, Array<E>& array) noexcept {
     }
 }
 
+// Registry 컨테이너 준비 사본 위의 ObjectRefArray·ObjectRefMap 단계다(리플렉션 B9i3c3 — 정의는 이
+// 헤더 끝에서 include하는 Object/GeneratedStagedReferenceAccess.h).
+template <class T>
+Result<void> PathStagedReferenceArray(PathCursor& cursor, ObjectRefArray<T>& array) noexcept;
+
+template <class K, class T>
+Result<void> PathStagedReferenceMap(PathCursor& cursor, ObjectRefMap<K, T>& map) noexcept;
+
 // ObjectRefArray 필드·멤버의 단계다(원소 null 허용 — 비정규 null은 Registry가 정규화한다). Registry
-// 컨테이너 API로 바꾸며 고정을 쥐지 않는다(자체 재판단 규칙 — 5.6절).
+// 컨테이너 API로 바꾸며 고정을 쥐지 않는다(자체 재판단 규칙 — 5.6절). 시작 위치에 준비 사본이 걸려
+// 있으면 객체 대신 사본을 바꾼다.
 template <ValueKind Target, class T>
 Result<void> PathContainer(PathCursor& cursor, ObjectRefArray<T>& array) noexcept {
+    if (cursor.StagedReferences()) {
+        return PathStagedReferenceArray(cursor, array);
+    }
+
     ObjectRegistry& registry = cursor.Registry();
     const ObjectAccessContext& access = cursor.Access();
     const ObjectHandle owner = cursor.OwnerHandle();
@@ -859,3 +872,4 @@ Result<void> PathStructMember(const RuntimeStructFieldOps&, PathCursor& cursor,
 
 #include <Object/GeneratedKeyedPathAccess.h>
 #include <Object/GeneratedDetachedPathAccess.h>
+#include <Object/GeneratedStagedReferenceAccess.h>

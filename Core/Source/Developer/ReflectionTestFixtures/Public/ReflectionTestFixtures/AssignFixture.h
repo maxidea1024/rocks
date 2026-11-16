@@ -8,6 +8,8 @@
 #include <Meta/Annotations.h>
 #include <Object/ClassRef.h>
 #include <Object/Object.h>
+#include <Object/ObjectRefArray.h>
+#include <Object/ObjectRefMap.h>
 #include <Object/ObjectRefs.h>
 #include <Object/StructRefArray.h>
 
@@ -18,7 +20,8 @@ namespace rocks::reflection_fixture {
 // 값·목록·struct 원소 Array·struct 정적 배열·Set·Map·Optional·Atomic struct·중첩 struct)과 ReadOnly
 // 필드·멤버, Deprecated 클래스를 가리킬 수 있는 ClassRef, Weak 참조, 값과 강한 참조를 섞은 인라인
 // struct, 참조 단위(B9i3c2)의 자리 — ObjectRef 필드(ReadOnly 포함)·정적 배열 원소·StructRefArray
-// 원소 멤버를 담는다.
+// 원소 멤버, 컨테이너 단위(B9i3c3)의 ObjectRefArray·ObjectRefMap과 그것을 담은 참조 struct를
+// 담는다.
 ROCKS_STRUCT()
 struct AssignPoint {
     ROCKS_PROPERTY() int32 x = 0;
@@ -51,6 +54,18 @@ struct AssignMixed {
     ROCKS_PROPERTY() ObjectRef<AssignTarget> link;
 };
 
+// 값·ObjectRef·ObjectRefArray를 함께 담는 참조 struct다(리플렉션 B9i3c3 — `{}`가 멤버마다 값 단위·
+// 참조 단위·컨테이너 단위로 나뉜다). Registry 컨테이너를 담으므로 StructRefArray 원소가 될 수 없다.
+ROCKS_STRUCT()
+struct AssignBundle {
+    explicit AssignBundle(Allocator& allocator) noexcept : crew(allocator) {
+    }
+
+    ROCKS_PROPERTY() int32 level = 0;
+    ROCKS_PROPERTY() ObjectRef<AssignTarget> lead;
+    ROCKS_PROPERTY() ObjectRefArray<AssignTarget> crew;
+};
+
 ROCKS_CLASS(Abstract)
 struct AssignKindBase : Object {};
 
@@ -64,7 +79,8 @@ ROCKS_CLASS()
 struct AssignHolder final : Object {
     explicit AssignHolder(Allocator& allocator) noexcept
         : label(allocator), numbers(allocator), points(allocator), tags(allocator),
-          scores(allocator), byKey(allocator), mixed(allocator), items(allocator) {
+          scores(allocator), byKey(allocator), mixed(allocator), items(allocator), group(allocator),
+          named(allocator), bundle(allocator) {
     }
 
     ROCKS_PROPERTY() int32 count = 0;
@@ -88,6 +104,9 @@ struct AssignHolder final : Object {
     ROCKS_PROPERTY(ReadOnly) ObjectRef<AssignTarget> anchorLink;
     ROCKS_PROPERTY() ObjectRef<AssignTarget> slots[2];
     ROCKS_PROPERTY() StructRefArray<AssignMixed> items;
+    ROCKS_PROPERTY() ObjectRefArray<AssignTarget> group;
+    ROCKS_PROPERTY() ObjectRefMap<String, AssignTarget> named;
+    ROCKS_PROPERTY() AssignBundle bundle;
 };
 
 } // namespace rocks::reflection_fixture

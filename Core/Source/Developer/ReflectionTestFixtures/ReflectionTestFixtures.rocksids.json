@@ -258,6 +258,27 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::AssignBundle::crew",
+      "id": "8bd821c09bf84f3d847718f49f4ab0de",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::AssignBundle::lead",
+      "id": "7c143f60c7864b10a9412522d8dc2fed",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::AssignBundle::level",
+      "id": "7c1ae2c8e49340a8a6d92c1a786a5768",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::AssignHolder::anchor",
       "id": "59b38d165a9943b4b15bd5599e5ab24d",
       "aliases": [],
@@ -279,6 +300,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::AssignHolder::bundle",
+      "id": "4bbfd512af6f4aa882539ba065a3433b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::AssignHolder::byKey",
       "id": "2599fb3385f444279f217a398a6654e8",
       "aliases": [],
@@ -288,6 +316,13 @@
       "kind": "field",
       "name": "rocks::reflection_fixture::AssignHolder::count",
       "id": "7dd107cf01bb444d85f057cf453209fa",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::AssignHolder::group",
+      "id": "d771dce38aaa48e382b328e4af23f146",
       "aliases": [],
       "retired": false
     },
@@ -337,6 +372,13 @@
       "kind": "field",
       "name": "rocks::reflection_fixture::AssignHolder::mixed",
       "id": "aa280ea7db3b41c8b187785187936f63",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::AssignHolder::named",
+      "id": "3a7d0c09c337454bacd9543b070c2a2e",
       "aliases": [],
       "retired": false
     },
@@ -2726,6 +2768,13 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::AssignAtom",
       "id": "8aff7ed0dc584590aeecaad097184791",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::AssignBundle",
+      "id": "262fc47ef033458da690502bc14b0992",
       "aliases": [],
       "retired": false
     },
