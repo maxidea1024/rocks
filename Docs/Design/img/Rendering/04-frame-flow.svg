@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" width="960" height="560" role="img" aria-labelledby="title desc">
+<title id="title">한 프레임이 게임 lane, 렌더 lane, GPU를 지나는 길</title>
+<desc id="desc">게임 lane이 packet을 게시하면 렌더 lane이 자원 작업을 처리하고, 렌더 그래프를 만들어 컴파일·실행·제출한다. GPU가 실행하고 fence가 완료되면 slot과 자원이 회수되고 통지가 게임 lane으로 돌아간다.</desc>
+<style>
+text{font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;fill:#183142}.title{font-size:22px;font-weight:700}.head{font-size:13px;font-weight:700}.small{font-size:12px;fill:#405869}.lane{font-size:15px;font-weight:700;fill:#2f4c60}.num{font-size:13px;font-weight:700;fill:#ffffff}
+.game{fill:#e4f4ec;stroke:#69a789}.render{fill:#fff5df;stroke:#e1ba63}.gpu{fill:#f2f4f6;stroke:#8a98a4}.band{fill:#fafcfd;stroke:#e1e8ed}.dot{fill:#507d96}.arrow{stroke:#5c7385;stroke-width:2;fill:none;marker-end:url(#a)}.dash{stroke:#5c7385;stroke-width:2;fill:none;stroke-dasharray:6 4;marker-end:url(#a)}
+</style>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5c7385"/></marker></defs>
+<rect width="960" height="560" fill="#fff"/>
+<text x="24" y="34" class="title">프레임 N 하나가 지나가는 길</text>
+<text x="24" y="58" class="small">번호 순서로 읽는다. 렌더 lane 단계는 모두 RenderBase·RenderGraph가 맡는다. 셰이더·그래프 단계는 화면 마일스톤에서 구현한다.</text>
+
+<rect class="band" x="16" y="74" width="928" height="128" rx="8"/><text x="28" y="100" class="lane">게임 lane</text>
+<rect class="band" x="16" y="212" width="928" height="208" rx="8"/><text x="28" y="238" class="lane">렌더 lane</text>
+<rect class="band" x="16" y="430" width="928" height="114" rx="8"/><text x="28" y="456" class="lane">GPU</text>
+
+<g transform="translate(130 86)"><rect class="game" width="170" height="104" rx="8"/><circle class="dot" cx="18" cy="20" r="11"/><text x="14" y="25" class="num">1</text><text x="36" y="25" class="head">엔진 1–5단계</text><text x="12" y="52" class="small">입력·World Tick</text><text x="12" y="72" class="small">LateUpdate·PreRender</text><text x="12" y="92" class="small">까지 끝낸다</text></g>
+<g transform="translate(316 86)"><rect class="game" width="196" height="104" rx="8"/><circle class="dot" cx="18" cy="20" r="11"/><text x="14" y="25" class="num">2</text><text x="36" y="25" class="head">통지 비우기·slot 확보</text><text x="12" y="52" class="small">지난 프레임들의 결과 수신</text><text x="12" y="72" class="small">빈 slot이 없으면 가장</text><text x="12" y="92" class="small">오래된 slot의 GPU 완료 대기</text></g>
+<g transform="translate(528 86)"><rect class="game" width="196" height="104" rx="8"/><circle class="dot" cx="18" cy="20" r="11"/><text x="14" y="25" class="num">3</text><text x="36" y="25" class="head">packet 추출</text><text x="12" y="52" class="small">카메라·view·그릴 항목</text><text x="12" y="72" class="small">(값과 RenderHandle만)</text><text x="12" y="92" class="small">설정 snapshot·스트리밍 요청</text></g>
+<g transform="translate(740 86)"><rect class="game" width="190" height="104" rx="8"/><circle class="dot" cx="18" cy="20" r="11"/><text x="14" y="25" class="num">4</text><text x="36" y="25" class="head">게시</text><text x="12" y="52" class="small">RenderLane::Post</text><text x="12" y="72" class="small">게임 lane은 바로</text><text x="12" y="92" class="small">프레임 N+1로</text></g>
+<path class="arrow" d="M300 138 H314"/><path class="arrow" d="M512 138 H526"/><path class="arrow" d="M724 138 H738"/>
+
+<path class="arrow" d="M835 190 V222"/>
+<g transform="translate(740 224)"><rect class="render" width="190" height="88" rx="8"/><circle class="dot" cx="18" cy="20" r="11"/><text x="14" y="25" class="num">5</text><text x="36" y="25" class="head">자원·표면 작업</text><text x="12" y="52" class="small">생성·갱신·Retire</text><text x="12" y="72" class="small">스왑체인 resize 등</text></g>
+<g transform="translate(528 224)"><rect class="render" width="196" height="88" rx="8"/><circle class="dot" cx="18" cy="20" r="11"/><text x="14" y="25" class="num">6</text><text x="36" y="25" class="head">snapshot 게시</text><text x="12" y="52" class="small">프레임 경계에서 텍스처</text><text x="12" y="72" class="small">바인딩 새 generation</text></g>
+<g transform="translate(316 224)"><rect class="render" width="196" height="88" rx="8"/><circle class="dot" cx="18" cy="20" r="11"/><text x="14" y="25" class="num">7</text><text x="36" y="25" class="head">렌더 그래프 구성</text><text x="12" y="52" class="small">렌더러가 pass 추가</text><text x="12" y="72" class="small">handle → 물리 자원 import</text></g>
+<g transform="translate(130 224)"><rect class="render" width="170" height="88" rx="8"/><circle class="dot" cx="18" cy="20" r="11"/><text x="14" y="25" class="num">8</text><text x="36" y="25" class="head">그래프 컴파일</text><text x="12" y="52" class="small">culling·barrier</text><text x="12" y="72" class="small">수명·풀 할당</text></g>
+<path class="arrow" d="M740 268 H726"/><path class="arrow" d="M528 268 H514"/><path class="arrow" d="M316 268 H302"/>
+
+<path class="arrow" d="M215 312 V328"/>
+<g transform="translate(130 330)"><rect class="render" width="382" height="80" rx="8"/><circle class="dot" cx="18" cy="20" r="11"/><text x="14" y="25" class="num">9</text><text x="36" y="25" class="head">그래프 실행 → 기록 → 제출</text><text x="12" y="50" class="small">pass마다 barrier → attachment 시작 → 셰이더·파라미터·draw</text><text x="12" y="70" class="small">Submit → GpuFencePoint, present, slot에 fence 기록</text></g>
+<g transform="translate(528 330)"><rect class="render" width="402" height="80" rx="8"/><circle class="dot" cx="18" cy="20" r="11"/><text x="14" y="25" class="num">11</text><text x="36" y="25" class="head">fence 완료 이벤트 처리</text><text x="12" y="50" class="small">slot의 GPU 완료 표시 → 게임 lane slot 확보가 풀림</text><text x="12" y="70" class="small">Retire된 자원·staging 회수 → 완료 통지 큐에 넣음</text></g>
+
+<path class="arrow" d="M320 410 V440"/>
+<g transform="translate(130 442)"><rect class="gpu" width="382" height="90" rx="8"/><circle class="dot" cx="18" cy="20" r="11"/><text x="14" y="25" class="num">10</text><text x="36" y="25" class="head">GPU 실행</text><text x="12" y="50" class="small">명령을 순서대로 실행하고 화면에 표시</text><text x="12" y="70" class="small">끝나면 fence 값을 신호</text></g>
+<path class="dash" d="M512 487 H700 V412"/><text x="560" y="480" class="small">fence 신호</text></svg>

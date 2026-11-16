@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" width="960" height="420" role="img" aria-labelledby="title desc">
+<title id="title">GPU 자원 하나의 수명</title>
+<desc id="desc">게임 lane이 RenderHandle을 예약하면 렌더 lane이 장치 자원을 만든다. 그래프와 기록이 lease를 잡고 쓴다. Retire되면 새 lease를 막고, 남은 lease와 모든 queue fence가 끝난 뒤에 해제한다.</desc>
+<style>
+text{font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;fill:#183142}.title{font-size:22px;font-weight:700}.head{font-size:14px;font-weight:700}.small{font-size:12px;fill:#405869}
+.st{fill:#e6f2fa;stroke:#6c9ab7}.ok{fill:#e4f4ec;stroke:#69a789}.bad{fill:#fdecea;stroke:#d48a80}.end{fill:#f2f4f6;stroke:#8a98a4}.note{fill:#fafcfd;stroke:#e1e8ed}.arrow{stroke:#5c7385;stroke-width:2;fill:none;marker-end:url(#a)}
+</style>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5c7385"/></marker></defs>
+<rect width="960" height="420" fill="#fff"/>
+<text x="24" y="34" class="title">GPU 자원 하나의 수명</text>
+<text x="24" y="58" class="small">Object GC가 끝났다고 GPU가 끝난 것은 아니다. 회수는 lease 0과 마지막으로 쓴 모든 queue의 fence 완료를 함께 요구한다.</text>
+
+<g transform="translate(24 86)"><rect class="st" width="160" height="96" rx="8"/><text x="12" y="26" class="head">예약</text><text x="12" y="50" class="small">게임 lane이</text><text x="12" y="68" class="small">RenderHandle을 받음</text><text x="12" y="86" class="small">(장치는 아직 없음)</text></g>
+<g transform="translate(208 86)"><rect class="st" width="160" height="96" rx="8"/><text x="12" y="26" class="head">Pending</text><text x="12" y="50" class="small">렌더 lane 작업이</text><text x="12" y="68" class="small">장치 자원 생성 중</text><text x="12" y="86" class="small">그리면 대체 자원</text></g>
+<g transform="translate(392 86)"><rect class="ok" width="180" height="96" rx="8"/><text x="12" y="26" class="head">Ready</text><text x="12" y="50" class="small">그래프 import·기록이</text><text x="12" y="68" class="small">lease를 잡고 사용</text><text x="12" y="86" class="small">마지막 사용 fence 집계</text></g>
+<g transform="translate(596 86)"><rect class="st" width="160" height="96" rx="8"/><text x="12" y="26" class="head">Retired</text><text x="12" y="50" class="small">새 lease 거부</text><text x="12" y="68" class="small">기존 lease는 유지</text><text x="12" y="86" class="small">게임 lane의 해제 요청</text></g>
+<g transform="translate(780 86)"><rect class="end" width="156" height="96" rx="8"/><text x="12" y="26" class="head">회수</text><text x="12" y="50" class="small">lease 0 그리고</text><text x="12" y="68" class="small">모든 queue fence 완료</text><text x="12" y="86" class="small">→ 완료 통지</text></g>
+<path class="arrow" d="M184 134 H206"/><path class="arrow" d="M368 134 H390"/><path class="arrow" d="M572 134 H594"/><path class="arrow" d="M756 134 H778"/>
+
+<g transform="translate(208 212)"><rect class="bad" width="160" height="76" rx="8"/><text x="12" y="26" class="head">Failed</text><text x="12" y="50" class="small">생성 실패 → 통지</text><text x="12" y="68" class="small">그리면 대체 자원</text></g>
+<path class="arrow" d="M288 182 V210"/>
+<g transform="translate(392 212)"><rect class="bad" width="364" height="76" rx="8"/><text x="12" y="26" class="head">장치 손실</text><text x="12" y="50" class="small">fence 대기를 오류로 깨움 → 새 device epoch에서 다시 생성</text><text x="12" y="68" class="small">구 handle은 stale. 구 장치 fence로 새 자원을 회수하지 않는다</text></g>
+<path class="arrow" d="M482 182 V210"/>
+
+<g transform="translate(24 312)"><rect class="note" width="912" height="92" rx="8"/><text x="14" y="26" class="head">fence와 lease</text><text x="14" y="50" class="small">GpuFencePoint = (device epoch, queue, value). 제출할 때 기록 packet이 쓴 자원·descriptor·업로드 범위의 lease가 그 fence로 넘어간다.</text><text x="14" y="70" class="small">Retire는 이미 승인된 기록을 무효로 만들지 않는다. 게시 전에 만든 그래프는 구 텍스처 lease로 끝까지 그린다(텍스처 스트리밍 교체).</text><text x="14" y="88" class="small">근거: 계획 11.2절, RenderBase 6절. UE는 명령 순서와 "프레임 끝 동기 한 번 뒤 delete"에 기대지만 Rocks는 lease·fence로 판정한다.</text></g>
+</svg>

@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 640" width="960" height="640" role="img" aria-labelledby="title desc">
+<title id="title">Rocks 엔진과 렌더링을 이루는 모듈</title>
+<desc id="desc">게임·콘텐츠, 엔진 루프, 렌더, 셰이더, Graphics, Core 여섯 층. 위 층이 아래 층을 쓴다. 상자 색은 구현 상태를 뜻한다.</desc>
+<style>
+text{font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;fill:#183142}.title{font-size:22px;font-weight:700}.head{font-size:14px;font-weight:700}.small{font-size:12px;fill:#405869}.layer{font-size:14px;font-weight:700;fill:#2f4c60}
+.impl{fill:#e4f4ec;stroke:#69a789}.wip{fill:#fff5df;stroke:#e1ba63}.design{fill:#e6f2fa;stroke:#6c9ab7}.later{fill:#f2f4f6;stroke:#b5bec6}.band{fill:#fafcfd;stroke:#e1e8ed}
+</style>
+<rect width="960" height="640" fill="#fff"/>
+<text x="24" y="34" class="title">Rocks 엔진과 렌더링을 이루는 모듈</text>
+<text x="24" y="58" class="small">위 층이 아래 층을 쓴다. 아래 층은 위 층을 모른다. 상자 색은 2026-11-17 기준 구현 상태다.</text>
+<g transform="translate(560 18)"><rect class="impl" width="16" height="12" rx="2"/><text x="22" y="11" class="small">구현</text><rect class="wip" x="70" width="16" height="12" rx="2"/><text x="92" y="11" class="small">진행 중</text><rect class="design" x="152" width="16" height="12" rx="2"/><text x="174" y="11" class="small">설계</text><rect class="later" x="222" width="16" height="12" rx="2"/><text x="244" y="11" class="small">후속</text></g>
+
+<rect class="band" x="16" y="72" width="928" height="82" rx="8"/><text x="28" y="98" class="layer">게임·콘텐츠</text>
+<g transform="translate(150 82)"><rect class="design" width="230" height="62" rx="8"/><text x="12" y="24" class="head">Gameplay</text><text x="12" y="44" class="small">GameInstance·Director·Pawn</text></g>
+<g transform="translate(392 82)"><rect class="impl" width="250" height="62" rx="8"/><text x="12" y="24" class="head">World · Actor · Component</text><text x="12" y="44" class="small">Tick Scheduler·SceneComponent</text></g>
+<g transform="translate(654 82)"><rect class="design" width="278" height="62" rx="8"/><text x="12" y="24" class="head">WorldIntegration</text><text x="12" y="44" class="small">렌더 컴포넌트 → RenderHandle·packet</text></g>
+
+<rect class="band" x="16" y="162" width="928" height="82" rx="8"/><text x="28" y="188" class="layer">엔진 루프</text>
+<g transform="translate(150 172)"><rect class="impl" width="492" height="62" rx="8"/><text x="12" y="24" class="head">Engine</text><text x="12" y="44" class="small">상태 기계 · RunFrame 6단계 · EngineSubsystem · EngineLoopHooks · EngineClient</text></g>
+<g transform="translate(654 172)"><rect class="impl" width="278" height="62" rx="8"/><text x="12" y="24" class="head">PlatformWindow · Input</text><text x="12" y="44" class="small">창·메시지 펌프·키보드·마우스·패드</text></g>
+
+<rect class="band" x="16" y="252" width="928" height="122" rx="8"/><text x="28" y="278" class="layer">렌더</text>
+<g transform="translate(150 262)"><rect class="later" width="230" height="102" rx="8"/><text x="12" y="24" class="head">Renderer(정식)</text><text x="12" y="46" class="small">Forward+ · Deferred</text><text x="12" y="66" class="small">GI 두 축 · PathTracing 모드</text><text x="12" y="86" class="small">처음부터 새로 쓴다</text></g>
+<g transform="translate(392 262)"><rect class="design" width="120" height="102" rx="8"/><text x="12" y="24" class="head">RenderGraph</text><text x="12" y="46" class="small">pass·barrier</text><text x="12" y="66" class="small">수명·풀</text></g>
+<g transform="translate(524 262)"><rect class="design" width="118" height="102" rx="8"/><text x="12" y="24" class="head">Texture</text><text x="12" y="42" class="head">Streaming</text><text x="12" y="66" class="small">상주 계획</text><text x="12" y="86" class="small">mip 전송</text></g>
+<g transform="translate(654 262)"><rect class="wip" width="278" height="102" rx="8"/><text x="12" y="24" class="head">RenderBase</text><text x="12" y="46" class="small">렌더 lane · 프레임 slot · packet (진행 중)</text><text x="12" y="66" class="small">자원 소유자 · 셰이더 집합 · 파이프라인</text><text x="12" y="86" class="small">캐시 · 정점 입력 · 내장 자원 팩 (설계)</text></g>
+
+<rect class="band" x="16" y="382" width="928" height="82" rx="8"/><text x="28" y="408" class="layer">셰이더</text>
+<g transform="translate(150 392)"><rect class="design" width="230" height="62" rx="8"/><text x="12" y="24" class="head">ShaderCore (런타임)</text><text x="12" y="44" class="small">타입·퍼뮤테이션·라이브러리 형식</text></g>
+<g transform="translate(392 392)"><rect class="design" width="250" height="62" rx="8"/><text x="12" y="24" class="head">ShaderCompiler · 워커 (도구)</text><text x="12" y="44" class="small">전처리·키·너겟·ShaderFormat</text></g>
+<g transform="translate(654 392)"><rect class="wip" width="278" height="62" rx="8"/><text x="12" y="24" class="head">도구 바이너리 · 도구 표</text><text x="12" y="44" class="small">DXC·SPIRV-Cross·SPIRV-Tools (P3 구현, P4 중)</text></g>
+
+<rect class="band" x="16" y="472" width="928" height="82" rx="8"/><text x="28" y="498" class="layer">Graphics</text>
+<g transform="translate(150 482)"><rect class="wip" width="230" height="62" rx="8"/><text x="12" y="24" class="head">Device 계약</text><text x="12" y="44" class="small">제출·회수·스레드 모델 (진행 중)</text></g>
+<g transform="translate(392 482)"><rect class="impl" width="120" height="62" rx="8"/><text x="12" y="24" class="head">D3D12</text><text x="12" y="44" class="small">Windows</text></g>
+<g transform="translate(524 482)"><rect class="design" width="118" height="62" rx="8"/><text x="12" y="24" class="head">Vulkan</text><text x="12" y="44" class="small">주력, SH2</text></g>
+<g transform="translate(654 482)"><rect class="impl" width="134" height="62" rx="8"/><text x="12" y="24" class="head">OpenGL ES</text><text x="12" y="44" class="small">미리보기·Android</text></g>
+<g transform="translate(800 482)"><rect class="later" width="132" height="62" rx="8"/><text x="12" y="24" class="head">D3D11 · Metal</text><text x="12" y="44" class="small">SH5</text></g>
+
+<rect class="band" x="16" y="562" width="928" height="66" rx="8"/><text x="28" y="588" class="layer">Core</text>
+<g transform="translate(150 568)"><rect class="impl" width="230" height="52" rx="8"/><text x="12" y="22" class="head">Task</text><text x="12" y="40" class="small">DedicatedLane·Worker·ParallelFor</text></g>
+<g transform="translate(392 568)"><rect class="impl" width="120" height="52" rx="8"/><text x="12" y="22" class="head">Memory</text><text x="12" y="40" class="small">FrameArena</text></g>
+<g transform="translate(524 568)"><rect class="impl" width="264" height="52" rx="8"/><text x="12" y="22" class="head">PlatformBase</text><text x="12" y="40" class="small">Thread·AsyncFile·DynamicLibrary</text></g>
+<g transform="translate(800 568)"><rect class="impl" width="132" height="52" rx="8"/><text x="12" y="22" class="head">Object·리플렉션</text><text x="12" y="40" class="small">GC·Registry</text></g>
+</svg>
