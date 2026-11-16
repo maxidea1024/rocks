@@ -224,21 +224,26 @@ enum class Backend : uint8 { D3D12, OpenGL, Vulkan, Metal };
 Result<UniquePtr<Device>> CreateDevice(const DeviceDesc&);   // backend 모듈이 제공
 class Device {
     Result<SwapChainHandle> CreateSwapChain(const SwapChainDesc&);   // 네이티브 창 핸들
-    Result<BufferHandle> CreateBuffer(const BufferDesc&, Span<const uint8> initial);
+    Result<BufferHandle> CreateBuffer(const BufferDesc&, Span<const uint8> initial);   // 정점·index
     Result<TextureHandle> CreateTexture(const TextureDesc&, Span<const uint8> initial);
-    Result<PipelineHandle> CreatePipeline(const PipelineDesc&);
-    Result<CommandContext*> BeginFrame(SwapChainHandle, const ClearValue&);
-    Result<void> EndFrame(SwapChainHandle);   // 제출·present
-    void Destroy(Handle);                      // GPU 완료 후 회수
+    Result<PipelineHandle> CreatePipeline(const PipelineDesc&);      // 정점 배치·셰이더 입력 대조
+    Result<CommandContext*> BeginFrame(SwapChainHandle, const ClearColor&);
+    Result<GpuFencePoint> EndFrame();          // 제출·present, 완료 지점
+    void Retire(Handle);                       // 마지막 사용 fence 뒤 회수
+    void ReclaimCompleted();
+    // 스레드 안전: LastSubmittedFence·IsFenceComplete·WaitFence·NotifyFence·IsLost
+    // 소유권: IsOwnerThread·ReleaseOwnership·AcquireOwnership
 };
 }
 ```
 
-- 자원은 slot+generation 핸들이다. `Destroy`는 마지막으로 사용한 프레임의 GPU 완료(D3D12 fence) 이후에 실제 해제한다. OpenGL은 드라이버가 수명을 관리하므로 즉시 삭제한다.
+- 자원은 slot+generation 핸들이다. `Retire`는 마지막으로 사용한 제출의 fence(`GpuFencePoint`: device epoch·queue·value)가 끝난 뒤 자원과 descriptor를 해제한다. OpenGL도 `glFenceSync`로 같은 규칙을 따른다(즉시 삭제하지 않는다). fence 완료는 다른 스레드에서 기다리거나 통지·작업 이벤트(`Graphics/GpuFenceEvent.h`)로 받는다. 장치 손실은 기다리는 쪽을 `Destroyed`로 깨운다([렌더 기반](RenderBase.ko.md) GX7).
+- 장치 스레드 모델([렌더 기반](RenderBase.ko.md) 5.4절 GX11·GX10): 소유 스레드 하나가 제출·present·상태 변경·생성(지금은 생성도 — `DeviceInfo::concurrentResourceCreation` false)을 하고, 소유권은 `ReleaseOwnership`·`AcquireOwnership`으로 넘긴다. 소유 스레드 밖 호출은 Debug·Development에서 `WrongThread`다. 엔진 실행 때는 렌더 lane(RenderBase)이 장치를 소유한다.
+- 정점 배치([렌더 기반](RenderBase.ko.md) 10.4절 GX3a): 정점 원소 형식 20종(`GraphicsTypes/VertexFormat.h`), 속성(location·형식·stream·offset)·stream(stride·정점/인스턴스), index 버퍼(UInt16·UInt32), `Draw`·`DrawIndexed`(인스턴스 수), 정점 버퍼 없는 그리기. 셰이더 정점 입력 시맨틱은 `ATTRIBUTEn`이다.
 - 셰이더는 backend별 원문을 `PipelineDesc`에 담는다(D3D12: HLSL을 런타임 `D3DCompile` SM 5.1, OpenGL: GLSL 4.50). 오프라인 셰이더 쿠킹과 DXC는 후속이다.
 - 그리기 상수는 64바이트 행렬 + 16바이트 색으로 제한한다(D3D12 root constants, OpenGL uniform).
 - 좌표 규약: 행렬은 열 우선 column vector이며 HLSL·GLSL 모두 열 우선으로 업로드한다. OpenGL은 `glClipControl`의 `GL_ZERO_TO_ONE`으로 D3D와 같은 [0,1] 깊이를 쓰고, 원점은 창에 그릴 때 `GL_LOWER_LEFT`, RenderTarget 텍스처에 그릴 때 `GL_UPPER_LEFT`로 바꿔 RenderTarget의 첫 행이 이미지 위쪽이 되게 한다(샘플링·readback 모두 D3D12와 같은 배치). 텍스처는 첫 행이 위인 배치로 올리고 UV (0,0)이 좌상단이다.
-- D3D12는 프레임 2개를 동시에 진행하고 프레임 slot 재사용은 해당 fence 완료로 판정한다. 디버그 구성은 디버그 레이어를 켠다.
+- 동시에 진행하는 프레임 수는 렌더 lane 프레임 slot(2–3개)이 정하고, slot 재사용은 그 프레임의 모든 제출 fence 완료로 판정한다. D3D12는 끝난 제출의 기록 저장소를 다시 쓴다. 디버그 구성은 디버그 레이어를 켠다.
 
 ### 10.2 범위 밖
 
@@ -255,11 +260,11 @@ RenderGraph·Deferred/Forward 경로·깊이 버퍼·MSAA·멀티 큐·bindless�
 ## 12. 실행 경로(S6 완료 시)
 
 1. Sandbox가 창과 Graphics 장치(`--graphics=d3d12|opengl`)를 만든다.
-2. Engine을 초기화하고 World를 하나 만든다.
-3. AssetManager가 `Content/`를 마운트한다.
-4. 삼각형 Actor(매 Tick 회전)와 SpriteComponent를 가진 Actor(텍스처 에셋)를 Spawn한다.
-5. 매 프레임 Engine이 World를 Tick하고, `FrameEnd` hook에서 WorldIntegration이 RenderScene을 추출하고 Renderer가 그린다.
-6. 창을 닫으면 `RequestExit` → World 파괴 → GPU idle 대기 → 장치·창 정리 → Engine 종료.
+2. 렌더 lane(RenderBase `RenderLane`)을 시작해 장치 소유권을 lane으로 넘긴다. lane이 스왑체인·렌더러 자원을 만든다(표면 작업·`RenderLaneProcessor::OnLaneStart`).
+3. Engine을 초기화하고 World를 하나 만든다. AssetManager가 `Content/`를 마운트한다.
+4. 삼각형 Actor(매 Tick 회전)와 SpriteComponent를 가진 Actor(텍스처 에셋)를 Spawn한다. 텍스처는 `RenderHandle`을 예약하고 lane의 자원 작업이 만든다.
+5. 매 프레임 `FrameEnd` hook이 프레임 slot을 확보하고(빈 slot이 없으면 가장 오래된 slot의 GPU 완료를 창 메시지를 펌프하며 기다린다), World에서 추출한 그리기 항목을 slot 프레임 arena에 담아 프레임 packet으로 넘긴다. 렌더러는 렌더 lane 안에서 그린다(지금은 Sandbox 샘플 렌더러, 이후 정식 Renderer).
+6. 창을 닫으면 `RequestExit` → Engine 종료 hook(CP6)이 렌더 lane 종료 순서를 실행한다([렌더 기반](RenderBase.ko.md) 5.5절): 새 프레임 차단 → World 파괴 → 진행 중 프레임 GPU 완료 → 최종 GC와 Retire drain 반복 → 내장 자원·스왑체인 Retire와 closure 확인 → lane Drain·장치 소유권 반납·Join → 장치 `WaitIdle`·소멸 → 창 파괴.
 
 ## 13. 시험
 
@@ -272,5 +277,5 @@ RenderGraph·Deferred/Forward 경로·깊이 버퍼·MSAA·멀티 큐·bindless�
 
 - World 타입의 Level 그래프 저장은 구조 시험용이다: 부착 계층은 저장되지 않고(리플렉션 B9의 WeakRef PROPERTY와 World 단계의 결정 뒤), native 파생이 든 그래프는 저장할 수 없으며, 로드한 객체는 레벨 편입 단계 전까지 World 장부 밖이다(4.6절). World 필드는 ReadOnly라 CU5 setter hook 전에는 경로로 편집할 수 없다.
 - Tick마다 Borrow를 얻는 잠금 비용이 있다. 일괄 접근은 측정 후 도입한다.
-- 렌더 추출은 게임 스레드에서 동기 실행한다. 렌더 스레드·in-flight snapshot은 후속이다.
+- 렌더 lane(RB1)과 프레임 slot은 구현했다. 렌더 설정 snapshot(CP4), 대체 자원(RB2), 장치 재생성은 후속이다. 지금 Sandbox의 엔진 루프 경로는 self-test(`--self-test`)의 헤드리스 장면이며, World 추출(WorldIntegration)과 창 실행 경로는 화면 마일스톤에서 잇는다.
 - macOS·Vulkan·Metal은 미구현이며 해당 경로는 `Unsupported`를 반환한다.

@@ -1,6 +1,6 @@
 # 렌더 기반(RenderBase) 설계
 
-기준일: 2026-11-16, 개정 4(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-17, 개정 5(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
 - 렌더 lane과 프레임 전달, 장치 스레드 모델, 장치 자원 수명, 렌더 그래프
 - 셰이더 런타임 객체(셰이더 집합·파라미터 바인딩·상수 블록·파이프라인 캐시)
 - 정점 입력 타입, 공용 자원·그리기 유틸리티, GPU 계측
@@ -128,23 +128,24 @@ ID는 이 문서가 붙인다. CP는 Core 선행, GX는 Graphics 확장, RB는 R
 | CP3 | 프레임 arena | 구현 | Allocator(구현) | RG1, RB4(GLES `PerDraw`) | M | 4.3절 |
 | CP4 | 콘솔 설정(타입 있는 변수·명령·출처·렌더 snapshot) | 미설계, 별도 스펙 | CP8 | RB1 설정 snapshot, RG1 디버그 설정 | M | 12절 |
 | CP5 | 다중 스레드 CPU 구간 계측·카운터·GPU 상관 | 부분 | ProfileScope(구현) | RB7 | M | 13절 |
-| CP6 | 엔진 종료 단계 hook(기존 `EngineSubsystem`·`EngineLoopHooks` 확장) | 미설계 | Engine(구현) | RB1 종료 순서 | S | 4.3절 |
+| CP6 | 엔진 종료 단계 hook(기존 `EngineSubsystem`·`EngineLoopHooks` 확장) | 구현 | Engine(구현) | RB1 종료 순서 | S | 4.3절 |
 | CP7 | 엔진 전역 `Name` pool 결정 | 미결정 | Name(구현) | RB3 | S | 4.3절 |
 | CP8 | Config 계층(UE-C21) | 미설계, 별도 스펙 | — | CP4 | M | 12절 |
 | GX1 | 장치 능력 `DeviceCaps` | 미설계 | A0-G G1, 셰이더 시스템 P6a | RB3, RG1, RG4 | M | 4.4절 |
 | GX2 | 자원 desc·view 확장, 샘플러 위치(R12)·비교 샘플러 | 미설계 | A0-G | RB2, RG1 | L | 4.4절 |
 | GX3 | 파이프라인 완성(SH2 범위 밖 부분) | 미설계 | SH2·P2·P14 | RB4, RB5, RB6 | L | 4.4절 |
-| GX3a | 정점 배치 완성: 정점 원소 형식 20종·다중 stream·인스턴스 stream·index 버퍼·instanced·indexed draw·셰이더 입력 대조, CPU 패킹 helper | 설계(10.4절) | — | RB5, 메시 에셋 | M | 10.4절 |
+| GX3a | 정점 배치 완성: 정점 원소 형식 20종·다중 stream·인스턴스 stream·index 버퍼·instanced·indexed draw·셰이더 입력 대조, CPU 패킹 helper | 구현 | — | RB5, 메시 에셋 | M | 10.4절 |
 | GX4 | 명령 기록 확장 | 미설계 | GX2·GX3 | RB5, RB6, RG1 | L | 4.4절 |
 | GX5 | 명시 접근 상태와 전이 | 미설계 | GX2·GX4 | RG1 | M–L | 4.4절 |
 | GX6 | 파라미터 바인딩 런타임(상수 블록·묶음 설정·공유 slot) | 미설계 | P2·SH2 | RB4 | L | 4.4절, 9절 |
-| GX7 | 제출·완료·회수(계획 11.2), descriptor 회수, 스레드 안전 fence 대기 | 미설계(계획 11.2는 인터페이스 스케치) | — | RB1·RB2 | L | 4.4절, 6절 |
+| GX7 | 제출·완료·회수(계획 11.2), descriptor 회수, 스레드 안전 fence 대기 | 구현(lease는 RB2·RG1) | — | RB1·RB2 | L | 4.4절, 6절 |
 | GX8 | 업로드 ring·비동기 readback | 미설계 | GX7 | RB2, RB4, RG2 | M | 4.4절 |
 | GX9 | timestamp query·debug marker·CPU·GPU 시간 대응 | 미설계 | GX7 | RB7 | M | 4.4절, 13절 |
-| GX10 | 장치 소유 스레드 이관 | 미설계 | GX11 | RB1 | S | 5.4절 |
-| GX11 | 장치 스레드 모델 | 미설계 | GX7 | GX10, RB1–RB3 | M | 5.4절 |
+| GX10 | 장치 소유 스레드 이관 | 구현 | GX11 | RB1 | S | 5.4절 |
+| GX11 | 장치 스레드 모델 | 구현(D3D12 스레드 안전 생성은 GX8과 함께) | GX7 | GX10, RB1–RB3 | M | 5.4절 |
 | GX12 | transient heap·aliasing barrier | 후속 | GX5 | RG5 | L | 4.4절 |
 | GX13 | subpass·framebuffer fetch(tiled GPU 병합용) | 후속 | GX4·GX5 | RG3 병합 | M | 4.4절 |
+| RB1 | 렌더 lane·프레임 slot·전달 타입 등록·완료 통지·`RenderHandle` 예약 | 구현(설정 snapshot은 CP4 뒤) | CP1·CP6·GX7·GX10·GX11 | RB2–RB7 | M | 5절 |
 
 ### 4.3 Core 선행 작업
 
@@ -161,7 +162,7 @@ ID는 이 문서가 붙인다. CP는 Core 선행, GX는 Graphics 확장, RB는 R
 
 **CP3 프레임 arena.** 그래프·프레임 수명 객체(pass·자원·파라미터 구조체·GLES `PerDraw` 상수 사본)를 할당하고, 수명이 끝날 때 등록된 소멸자를 부른 뒤 한 번에 비운다. 여러 스레드가 블록 단위로 할당한다. 기존 `ArenaAllocator`는 반환 안 된 할당이 있으면 Reset을 거부하므로(`ArenaAllocator.h:23–24`) 별도 타입이 필요하다. UE 대응: `Core/Public/Misc/MemStack.h:77`, `RC/Public/RenderGraphAllocator.h:23,129`, `Core/Public/Experimental/ConcurrentLinearAllocator.h:769`. **구현(2026-11-16).** `Core/Memory/FrameArena.h`(`FrameArena`·`FrameArenaWriter`·`FrameArenaConfig`·`TryAllocate`·`TryNew`·`TryNewArray`·`Reset`·`Trim`). 개별 반환이 없으므로 `Allocator` 인터페이스를 구현하지 않고, 프레임 packet의 가변 길이 목록은 `TryNewArray`로 만든다. 계약은 [할당기](../Implementation/Allocators.ko.md) "FrameArena"절.
 
-**CP6 엔진 종료 단계 hook.** 렌더 lane 종료(5.5절)는 계획 3.2절 Shutdown 순서의 "GPU fence 완료"부터 "owner/retire/queue closure 확인"까지에 걸친다. 새 이벤트 체계를 만들지 않고 기존 `EngineSubsystem`·`EngineLoopHooks`(`Engine.h:27–69`)에 그 단계를 드러내는 hook을 더한다.
+**CP6 엔진 종료 단계 hook.** 렌더 lane 종료(5.5절)는 계획 3.2절 Shutdown 순서의 "GPU fence 완료"부터 "owner/retire/queue closure 확인"까지에 걸친다. 새 이벤트 체계를 만들지 않고 기존 `EngineSubsystem`·`EngineLoopHooks`(`Engine.h:27–69`)에 그 단계를 드러내는 hook을 더한다. **구현(2026-11-17).** `EngineLoopHooks`에 `BeginShutdown`·`CompleteInFlightWork`·`DrainShutdownCleanup`·`VerifyShutdownClosure`·`StopExecutors`, `EngineSubsystem`에 `BeginShutdown`·`CompleteInFlightWork`를 더했다. `Engine::Shutdown` 순서는 차단 → client 종료·World 파괴 → 진행 중 작업 완료 → Subsystem 정리 → [최종 GC → 정리 drain]을 둘 다 0이 될 때까지(`MaxShutdownCollectPasses` = 8, 넘으면 `Busy`) → closure 확인 → 실행기 종료 → Registry·타입 정리다. 정리 drain·closure·실행기 hook은 실행 파일 hook에만 둔다. Subsystem은 정리(`Deinitialize`) 뒤에는 불리지 않기 때문이다. 실패한 단계도 뒤 단계를 건너뛰지 않고 첫 오류를 돌려준다. 계약은 [렌더 기반 구현](../Implementation/RenderBase.ko.md) 3절.
 
 **CP7 Name pool.** 셰이더 타입·형식·pass 이름을 `Name`으로 다룰지, 정적 문자열과 SHA-256으로 다룰지 정한다. 셰이더 시스템은 키에 이름 정렬·SHA-256을 쓰므로(12.2절) 런타임 조회만 정하면 된다.
 
@@ -208,9 +209,10 @@ RenderCore가 쓰는 RHI 기능군과 Rocks Graphics의 차이다. "SH2" 열은 
   - descriptor(D3D12 heap slot, Vulkan descriptor set)도 마지막 사용 fence 뒤에 회수한다(계획 11.2절).
   - 다른 스레드가 fence 완료를 기다리는 스레드 안전 API와 완료 이벤트를 둔다. Core `WorkerTaskEvent`에 잇는다(`AsyncIoEvent`와 같은 방식). 장치 손실은 기다리는 쪽을 오류로 깨운다.
   - 장치가 내부에서 프레임 2개를 돌리는 지금 방식은 프레임 slot(5.3절)이 넘겨받는다.
+  - **구현(2026-11-17).** `Device::EndFrame`이 `GpuFencePoint`(device epoch·queue·value)를 돌려주고, `Destroy`를 `Retire`로 바꿔 자원·descriptor를 마지막 사용 fence 뒤에 해제한다(last-use는 장치 내부 집계: 기록 중 프레임이면 그 fence, 아니면 그때까지의 마지막 제출). 스레드 안전 `LastSubmittedFence`·`IsFenceComplete`·`WaitFence`·`NotifyFence`·`IsLost`는 공용 `FenceTimeline`(backend마다 관찰 스레드 하나)으로 구현했고, `Graphics/GpuFenceEvent.h`가 `WorkerTaskEvent`에 잇는다. OpenGL은 `glFenceSync`와 공유 context 관찰 스레드로 같은 계약을 따른다. 장치 손실은 기다리는 쪽을 `Destroyed`로 깨운다(Core에 장치 손실 전용 오류 코드가 없다). D3D12의 고정 프레임 2개는 기록 저장소 pool(상한 8)로 바꿨다. 남은 것: `RenderResourceLease`(병렬 기록·그래프 import가 생기는 RB2·RG1), 호출자 last-use 하한 인자(단일 queue에서는 내부 집계보다 늦을 수 없어 받지 않는다).
 - **GX8 업로드·readback.** 프레임 slot별 업로드 ring(map 쓰기 → 복사), staging과 fence 완료 이벤트에 의한 비동기 readback. `ReadPixels`(시험용 동기)는 남겨 두되 프레임 경로에서 쓰지 않는다.
 - **GX9 timestamp·marker.** 13절.
-- **GX10·GX11.** 5.4절.
+- **GX10·GX11.** 5.4절. **구현(2026-11-17).** `Device::IsOwnerThread`·`ReleaseOwnership`·`AcquireOwnership`·`RejectedCalls`, `DeviceInfo::concurrentResourceCreation`(지금 두 backend 모두 false — D3D12는 초기 데이터 업로드가 소유 스레드의 queue 제출이라 GX8과 함께 연다). 소유 스레드 전용 호출은 Debug·Development에서 `WrongThread`(반환값 없는 호출은 무시·계수), Release는 검사 생략이다. OpenGL은 이관 때 context를 떼고 새 스레드에 붙인다.
 - **GX12 transient heap(후속).** heap 배치, aliasing barrier(acquire·discard). RG5가 쓴다.
 - **GX13 subpass·framebuffer fetch(후속).** Vulkan subpass, GLES framebuffer fetch 확장. RG3의 render pass 병합이 쓴다.
 
@@ -297,6 +299,13 @@ RenderLane::Post(표면 작업) ──────────▶ 스왑체인 �
 렌더 lane의 장치 손실·치명 오류는 lane 상태에 기록하고, 게임 lane은 다음 slot 확보 결과(`Result`)와 완료 통지로 관찰한다. 기다리던 fence 대기는 GX7이 오류로 깨운다. 렌더 lane 스레드의 치명 오류 포착은 플랫폼 Fatal 처리(`Platform/Fatal.h`) 쪽 일이다. 장치 손실 뒤 재생성은 계획 11.2절(device epoch, 구 장치 recovery domain)을 따른다.
 
 ### 5.7 완료 기준(RB1)
+
+**구현(2026-11-17).** 새 모듈 `Engine/Source/Runtime/RenderBase`(의존 Graphics·Task·MetaSchema)에 `RenderLane`·`FrameTicket`·`RenderLaneProcessor`·`ROCKS_RENDER_TRANSFERABLE`·`RenderNotices`·`RenderHandleTable`·`RenderBlob`을 두었다. 아래 기준은 기록 backend(`RenderBase/Tests/RecordingDevice`) CPU 시험과 Sandbox self-test(D3D12·WARP·OpenGL, Thread·Inline)로 확인한다. 구현 메모:
+- 작업 함수는 캡처 없는 함수 포인터만 받는다. 캡처로 게임 주소를 넘기는 길을 막기 위해서다. lane 쪽 객체는 `RenderLaneContext::Processor`로 얻는다.
+- `ObjectRef`는 이동할 수 없으므로 그 필드를 가진 struct는 등록해도 C++ 타입 검사가 먼저 거부한다. Development 스키마 검사는 이동할 수 있는 `WeakRef`·참조 컨테이너 필드를 거부한다(중첩 struct는 보지 않는다).
+- slot의 GPU 완료 표지는 그 프레임 작업 안의 마지막 제출 fence이며 `NotifyFence`로 받는다. fence 완료는 lane inbox로 들어가 lane 작업(Inline 모드는 기다리는 게임 lane이 실행하는 lane 작업)이 장치 회수 → 통지 순서로 처리한다.
+- 대기 중 펌프는 1 ms 간격(UE와 같다)이며 펌프 hook이 없으면 이벤트만 기다린다. 대기 진단 상한(120초)의 디버거 연결 감지는 아직 없다.
+- `Start`는 시작 작업 완료를 기다리지 않는다(첫 `BeginFrame`이 기다린다). 그래서 이관 중에 게시한 표면 작업도 lane이 소유권을 얻은 뒤 FIFO로 실행된다.
 
 - 인라인 모드와 lane 모드에서 같은 프레임 packet 열이 같은 장치 호출 열을 낸다(기록 backend 대조). lane 작업 안의 재진입 `Post` 순서도 같다.
 - slot 2개 설정에서 GPU 완료 이벤트를 gate로 막으면 게임 lane이 세 번째 slot 확보에서 대기하고, gate를 열면 진행한다. 대기 중 메시지 펌프가 도는지 계수로 확인한다.
@@ -687,6 +696,11 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 - half 변환은 65536개 전체 왕복과 경계값(반올림 경계·비정규수·무한대·NaN)을 시험한다. 정규화 패킹은 경계값과 clamp를 시험한다.
 - 검증 계층 오류 0.
 
+**구현(2026-11-17).** `GraphicsTypes/VertexFormat.h`(형식 20종·고정 번호표·안정 이름·크기·성분·셰이더 타입 계열·정규화 여부, Vulkan·Metal 대응은 주석 표), `Graphics/DeviceTypes.h`의 `VertexAttribute`·`VertexStream`·`VertexLayout`·한계 상수·`ValidateVertexLayout`·`BufferUsage::Index`·`IndexFormat`·`VertexBufferBinding`, `CommandContext::SetVertexBuffers`·`SetIndexBuffer`·`Draw(정점 수, 인스턴스 수, 첫 정점)`·`DrawIndexed`, `Core/Math/VertexPacking.h`(snorm·unorm 8·16, 10:10:10:2, `PackNormal`·`PackTangent`, half는 기존 `Float16`). 셰이더 입력 대조는 D3D12가 `D3DReflect` 입력 signature(시맨틱 `ATTRIBUTEn`·성분 타입), OpenGL이 링크 뒤 active attribute로 한다. 원문 셰이더의 정점 입력 시맨틱은 `ATTRIBUTEn`으로 바꿨다. 구현 메모:
+- "UnsupportedCapability"는 Core 오류 코드에 없어 `ErrorCode::Unsupported`로 공개한다.
+- index 값 범위 검사는 하지 않는다. 장치가 index 버퍼 내용을 CPU에 남기지 않기 때문이다(메시 쿠커·RB5에서 내용을 아는 쪽이 검사한다). 묶이지 않은 stream은 그리기를 무시하고 `IgnoredDraws`를 올린다.
+- 정규화 패킹 반올림은 가장 가까운 정수(가운데는 0에서 먼 쪽)이며 double로 곱해 호스트와 무관한 결과를 낸다.
+
 ## 11. 공용 자원·그리기 유틸리티
 
 ### 11.1 내장 자원 팩 1차 내용
@@ -939,3 +953,4 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
     - 정점 속성 최소 16(Vulkan·GLES 사양)
 - 개정 3(2026-11-16): 6.5절 텍스처 플랫폼 데이터 입력 계약을 더했다. 사용자 결정 "화면 마일스톤과 텍스처 스트리밍 … 이것도 니가해"로 렌더 세션이 GPU 업로드·스트리밍을 맡고, 압축·색 보정은 에셋 세션이 맡는다. 배치·스트리밍 단위·정렬·직렬화는 에셋 세션과 합의했다. UE 5.8 근거는 플랫폼 데이터·mip 구조·cube face 배치·쿠킹 mip 분할이다. 15절 AssetSystem 행에 A5 착수 전 요구를 더했다.
 - 개정 4(2026-11-16): 18.1절 화면 마일스톤 범위를 정의했다. 사용자 결정은 다음과 같다: "원래 목표는 미니멀하게 테스트하고자 했던건데 이제 의미없음. 렌더코어 제대로 구현하는게 나음", 쿠킹 셰이더 위에서(셰이더 시스템 결정 11 (나)), 렌더 기반 구조 포함, A5 텍스처 전부, 검증 backend는 셰이더 경로를 따름. 결정 R10을 이에 맞췄다.
+- 개정 5(2026-11-17): GX7·GX10·GX11·CP6·RB1·GX3a 구현을 반영했다. 4.2절 상태 열과 RB1 행, 4.3·4.4·5.7·10.4절 구현 메모를 더했다. 스펙과 다르게 정한 것: 작업 함수를 캡처 없는 함수 포인터로 제한, `Retire`는 handle만 받음(호출자 last-use 하한 없음), D3D12 스레드 안전 생성은 GX8로 미룸, 장치 손실·미지원 능력은 기존 오류 코드(`Destroyed`·`Unsupported`), 정리 drain·closure·실행기 hook은 실행 파일 hook에만. 같은 날 사용자 결정으로 최소 렌더러(내장 메시·원문 셰이더)를 엔진 모듈에서 Sandbox 시험 샘플로 옮겼다.

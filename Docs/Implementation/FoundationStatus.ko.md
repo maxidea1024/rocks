@@ -46,7 +46,11 @@
 | C11 | full STW와 점진 mark/sweep, 삽입 장벽·cutoff, 선택적 병렬 mark, soft 시간·작업량 예산, OOM 시 sweep 금지·독립 oracle | 다중 mutator·동시 필드 스캔, hard deadline, 병렬 sweep·cluster·대규모 성능 검증 |
 | C12 | logical destroy·retire·실제 회수 분리, Busy 종료·재시도, 모의 backend lease | 실제 GPU/IO/audio 연동, 장시간 시스템 스트레스 |
 | C13 subset | 자체 UTF-8 String/StringView 검색·분리·치환 일부와 code point 단위 Left/Right/Mid·개수·순회, Name의 ASCII 비교·표기·None·번호와 pool/lease 수명·intern 없는 조회·pool 없는 원문 비교, Path 문자열 처리와 String `/`·`/=` | Unicode case folding·정규화·format 등 전체 문자열 기능, 영속 Name identity, Guid 생성/parse, 암호학적·영속 hash 정책, 플랫폼 경로 보정·기본 디렉터리 조회 |
-| Core Math | CPU별 `PlatformMath`(Generic→Clang→SSE2/NEON)·4-lane 레지스터, 벡터·정수 벡터·행렬·투영/뷰 행렬 생성·quaternion·Rotator·Transform(혼합 정밀도)·Transform3f·Transform3d·Box2/IntRect·Interval·Float16·보간·허용 오차 상수, 기본 도형 8종과 광선·선분·겹침·최근접 판정, Color/LinearColor, PCG32 RandomStream | frustum·swept shape·접촉 정보, AVX2/FMA dispatch·double 레지스터·SoA batch, Float16 색·noise·BoxSphereBounds, macOS·ARM64 실행 검증 |
+| Core Math | CPU별 `PlatformMath`(Generic→Clang→SSE2/NEON)·4-lane 레지스터, 벡터·정수 벡터·행렬·투영/뷰 행렬 생성·quaternion·Rotator·Transform(혼합 정밀도)·Transform3f·Transform3d·Box2/IntRect·Interval·Float16·정점 패킹(snorm·unorm·10:10:10:2·법선)·보간·허용 오차 상수, 기본 도형 8종과 광선·선분·겹침·최근접 판정, Color/LinearColor, PCG32 RandomStream | frustum·swept shape·접촉 정보, AVX2/FMA dispatch·double 레지스터·SoA batch, Float16 색·noise·BoxSphereBounds, macOS·ARM64 실행 검증 |
+
+### 엔진 렌더 기반(2026-11-17)
+
+Core 위 엔진 계층의 렌더 기반 첫 묶음([렌더 기반](../Design/RenderBase.ko.md) GX7·GX10·GX11·CP6·RB1·GX3a)을 구현했다. Graphics 장치의 제출 완료 지점(`GpuFencePoint`)·`Retire`·스레드 안전 fence 대기·통지·작업 이벤트(`Graphics/FenceTimeline.h`·`GpuFenceEvent.h`, OpenGL은 fence sync), 장치 소유 스레드 모델과 소유권 이관(`DeviceOwnership`), Engine 종료 단계 hook, 새 모듈 RenderBase의 렌더 lane(`RenderLane`·프레임 slot·전달 타입 등록·`RenderNotices`·`RenderHandleTable`), 정점 원소 형식 20종·정점 배치·index·instanced 그리기와 CPU 정점 패킹(`Core/Math/VertexPacking.h`)이다. CPU 시험은 EngineTests(기록 backend 대조 포함), GPU 시험은 `Sandbox --self-test`(D3D12·WARP·OpenGL)이며 GPU가 없는 환경에서는 NOT RUN이다. 계약과 남은 범위(lease·대체 자원·설정 snapshot·장치 재생성·D3D12 스레드 안전 생성)는 [렌더 기반 구현](RenderBase.ko.md)을 따른다.
 
 ### 경로와 파일 I/O의 초기 구현
 
