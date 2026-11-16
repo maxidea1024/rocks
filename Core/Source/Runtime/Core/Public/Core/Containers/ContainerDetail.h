@@ -12,4 +12,19 @@ inline bool AddressRangesOverlap(uptr a, usize aSize, uptr b, usize bSize) noexc
     return a <= b ? b - a < aSize : a - b < bSize;
 }
 
+// 연속 저장소 컨테이너(Array·SparseArray)가 버퍼를 늘릴 때 고르는 새 용량이다. 지금 용량
+// capacity에서 required개를 담아야 할 때, 빈 저장소는 4(required가 더 크면 required), 그 밖은
+// capacity의 1.5배 + 1(required가 더 크면 required)이며 maximum에서 포화한다. maximum은 그
+// 컨테이너가 담을 수 있는 원소 수 상한이고, required <= maximum은 caller가 보장한다(넘는 required는
+// 그대로 돌려주므로 caller의 할당 크기 검사가 Overflow로 거른다).
+constexpr usize GrowthCapacityWithin(usize capacity, usize required, usize maximum) noexcept {
+    if (capacity == 0) {
+        return maximum < 4 || required > 4 ? required : 4;
+    }
+
+    const usize growth = capacity / 2 + 1;
+    const usize candidate = growth > maximum - capacity ? maximum : capacity + growth;
+    return candidate < required ? required : candidate;
+}
+
 } // namespace rocks::detail

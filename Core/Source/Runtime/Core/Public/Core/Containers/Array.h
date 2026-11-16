@@ -2,6 +2,7 @@
 
 #include <Base/Checked.h>
 #include <Core/Algorithms.h>
+#include <Core/Containers/ContainerDetail.h>
 #include <Core/Containers/Span.h>
 #include <Core/Memory/Allocator.h>
 
@@ -19,14 +20,7 @@ namespace rocks {
 //   auto reserved =
 //       grown.TryReserve(ArrayGrowthCapacity(live.Capacity(), live.Size() + 1, sizeof(E)));
 constexpr usize ArrayGrowthCapacity(usize capacity, usize required, usize elementSize) noexcept {
-    const usize maximum = MaxSize / elementSize;
-    if (capacity == 0) {
-        return maximum < 4 || required > 4 ? required : 4;
-    }
-
-    const usize growth = capacity / 2 + 1;
-    const usize candidate = growth > maximum - capacity ? maximum : capacity + growth;
-    return candidate < required ? required : candidate;
+    return detail::GrowthCapacityWithin(capacity, required, MaxSize / elementSize);
 }
 
 // Allocator를 빌리고 원소·연속 buffer를 소유하는 이동 전용 컨테이너다.
@@ -76,23 +70,46 @@ public:
         ReleaseStorage();
     }
 
+    // capacity를 정확히 그 크기로 늘린다(성장 규칙을 쓰지 않는다 — 최종 크기를 아는 일괄 예약용).
     // 실패 시 데이터·size·capacity·기존 view를 보존한다. 실제 확장에 성공하면 기존 원소 주소와
     // view가 모두 무효화된다. 이미 충분한 capacity이면 원소를 이동하거나 buffer를 교체하지 않는다.
+    // 하나씩 추가하기 직전마다 여유를 확보하려면 TryEnsureCapacity를 쓴다(TryReserve(Size() + 1)
+    // 반복은 매번 재할당한다).
     Result<void> TryReserve(usize capacity) noexcept {
         if (capacity <= capacity_) {
             return Result<void>::Success();
         }
 
-        auto allocation = AllocateElements(capacity);
-        if (!allocation) {
-            return Result<void>::Failure(allocation.Error());
+        return ReallocateTo(capacity);
+    }
+
+    // 원소 required개를 재할당 없이 담을 capacity를 확보한다. 이미 충분하면 아무것도 하지 않고,
+    // 모자라면 추가 경로와 같은 성장 규칙(ArrayGrowthCapacity — 지금 용량의 1.5배 + 1 이상)으로
+    // 늘린다. 그래서 "곧 하나를 추가할 자리 확보 -> 실패할 수 없는 추가"를 반복해도 할당은
+    // 기하급수적으로만 일어난다(n번에 O(log n)번, 원소 이동은 상환 O(1)). required는 절대 원소
+    // 수다 — 다른 컨테이너의 크기를 기준으로 잡을 수 있다(예: 큐가 담을 수 있는 최대 원소 수).
+    //
+    // 사용 예:
+    //   auto reserved = pending.TryEnsureCapacity(actors.Size() + 1);
+    //   if (!reserved) {
+    //       return reserved.Error();
+    //   }
+    //   ...
+    //   pending.TryPushBack(actor);   // 확보한 용량 안이므로 할당하지 않고 성공한다
+    //
+    // 반환: 성공하면 Capacity() >= required다. 오류: required × sizeof(T)가 표현 범위를 넘으면
+    // Overflow, 할당 실패는 allocator 오류(OutOfMemory 등). 실패하면 데이터·size·capacity·기존
+    // view를 보존한다. 실제로 늘면 기존 원소 주소와 view가 모두 무효화된다.
+    Result<void> TryEnsureCapacity(usize required) noexcept {
+        if (required <= capacity_) {
+            return Result<void>::Success();
         }
 
-        T* replacement = allocation.Value();
-        RelocateTo(replacement);
-        data_ = replacement;
-        capacity_ = capacity;
-        return Result<void>::Success();
+        if (required > MaxSize / sizeof(T)) {
+            return Result<void>::Failure(ErrorCode::Overflow);
+        }
+
+        return ReallocateTo(GrowthCapacity(required));
     }
 
     // 자기 원소를 인자로 넘길 수 있다. 확장 실패는 원본도 보존하며, 성공한 rvalue 추가는
@@ -641,6 +658,20 @@ private:
         }
 
         return Result<T*>::Success(static_cast<T*>(allocation.Value()));
+    }
+
+    // capacity(> capacity_)개짜리 새 buffer로 원소를 옮긴다. 할당 실패는 아무것도 바꾸지 않는다.
+    Result<void> ReallocateTo(usize capacity) noexcept {
+        auto allocation = AllocateElements(capacity);
+        if (!allocation) {
+            return Result<void>::Failure(allocation.Error());
+        }
+
+        T* replacement = allocation.Value();
+        RelocateTo(replacement);
+        data_ = replacement;
+        capacity_ = capacity;
+        return Result<void>::Success();
     }
 
     // 기하급수적으로 확장하되 원소 수×sizeof(T)가 표현 범위를 넘지 않게 상한을 적용한다(공개 규칙

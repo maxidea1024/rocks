@@ -2,6 +2,7 @@
 
 #include <Base/Checked.h>
 #include <Core/Containers/BitArray.h>
+#include <Core/Containers/ContainerDetail.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Move.h>
 #include <Platform/Fatal.h>
@@ -146,7 +147,8 @@ public:
     }
 
     // 가장 낮은 빈 index에 생성한다(UE EmplaceAtLowestFreeIndex). 빈 자리가 없으면 끝에 붙인다.
-    // 매번 사용 표시 bit를 처음부터 찾으므로 O(MaxIndex()/64)다(UE의 검색 시작 hint는 없다).
+    // 매번 사용 표시 bit를 처음부터 한 bit씩 찾으므로(BitArray::Find) O(MaxIndex())다(UE의 검색
+    // 시작 hint는 없다).
     template <typename... Args>
     Result<usize> TryEmplaceAtLowestFreeIndex(Args&&... args) noexcept {
         static_assert(__is_nothrow_constructible(T, Args && ...));
@@ -538,15 +540,10 @@ private:
         return MaxSize / sizeof(Node) < MaxSlots ? MaxSize / sizeof(Node) : MaxSlots;
     }
 
-    // 기하급수적으로 늘리되 Limit()을 넘지 않는다. required <= Limit()은 caller가 보장한다.
+    // Array와 같은 성장 규칙으로 늘리되 Limit()을 넘지 않는다. required <= Limit()은 caller가
+    // 보장한다.
     usize GrowthCapacity(usize required) const noexcept {
-        const usize maximum = Limit();
-        if (capacity_ == 0) {
-            return maximum < 4 || required > 4 ? required : 4;
-        }
-        const usize growth = capacity_ / 2 + 1;
-        const usize candidate = growth > maximum - capacity_ ? maximum : capacity_ + growth;
-        return candidate < required ? required : candidate;
+        return detail::GrowthCapacityWithin(capacity_, required, Limit());
     }
 
     void CheckIndex(usize index) const noexcept {

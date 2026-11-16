@@ -607,7 +607,7 @@ public:
             return Result<DelegateHandle>::Failure(ErrorCode::InvalidArgument);
         }
         // Broadcast 중에는 배열이 커져도 항목 주소는 그대로이고 Broadcast는 index로 다시 읽는다.
-        auto reserved = entries_.TryReserve(entries_.Size() + 1);
+        auto reserved = entries_.TryEnsureCapacity(entries_.Size() + 1);
         if (!reserved) {
             return Result<DelegateHandle>::Failure(reserved.Error());
         }

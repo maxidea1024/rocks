@@ -177,7 +177,7 @@ Result<World*> Engine::CreateWorld(const WorldCreateDesc& desc) noexcept {
         return Result<World*>::Failure(ErrorCode::InvalidArgument);
     }
 
-    auto reserved = worlds_.TryReserve(worlds_.Size() + 1);
+    auto reserved = worlds_.TryEnsureCapacity(worlds_.Size() + 1);
     if (!reserved) {
         return Result<World*>::Failure(reserved.Error());
     }

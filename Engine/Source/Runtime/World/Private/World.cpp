@@ -297,7 +297,7 @@ bool World::HasLevel(ObjectHandle level) const noexcept {
 }
 
 Result<ObjectHandle> World::CreateLevelInternal(StringView name, bool persistent) noexcept {
-    auto reserved = levels_.TryReserve(levels_.Size() + 1);
+    auto reserved = levels_.TryEnsureCapacity(levels_.Size() + 1);
     if (!reserved) {
         return Result<ObjectHandle>::Failure(reserved.Error());
     }
@@ -416,8 +416,8 @@ Result<ObjectHandle> World::SpawnActorDeferred(TypeId type, const SpawnParams& p
 
     // 정리·시작 단계에서 할당 실패로 큐에 넣지 못하는 일이 없도록 여유를 먼저 확보한다. Actor
     // 하나는 각 큐에 많아야 한 번 들어간다.
-    if (!pendingStart_.TryReserve(actors_.Size() + 1) ||
-        !destroyActors_.TryReserve(actors_.Size() + 1)) {
+    if (!pendingStart_.TryEnsureCapacity(actors_.Size() + 1) ||
+        !destroyActors_.TryEnsureCapacity(actors_.Size() + 1)) {
         return Result<ObjectHandle>::Failure(ErrorCode::OutOfMemory);
     }
 
@@ -682,8 +682,8 @@ Result<ObjectHandle> World::AddComponent(ObjectHandle actor, TypeId type) noexce
     }
 
     // Component 하나는 각 큐에 많아야 한 번 들어간다.
-    if (!destroyComponents_.TryReserve(componentCount_ + 1) ||
-        !pendingComponentStart_.TryReserve(componentCount_ + 1)) {
+    if (!destroyComponents_.TryEnsureCapacity(componentCount_ + 1) ||
+        !pendingComponentStart_.TryEnsureCapacity(componentCount_ + 1)) {
         return Result<ObjectHandle>::Failure(ErrorCode::OutOfMemory);
     }
 

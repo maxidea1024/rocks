@@ -1422,7 +1422,7 @@ private:
     Result<void> ReserveRetireCapacity(usize extra) noexcept {
         const usize live = buffers_.Size() + textures_.Size() + pipelines_.Size() +
                            swapChains_.Size() * SwapChainRetireEntries;
-        return retired_.TryReserve(retired_.Size() + live + extra);
+        return retired_.TryEnsureCapacity(retired_.Size() + live + extra);
     }
 
     void AssignPendingRetires(uint64 value) noexcept {

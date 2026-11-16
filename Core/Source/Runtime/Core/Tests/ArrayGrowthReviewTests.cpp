@@ -153,3 +153,97 @@ TEST(ArrayGrowthCapacityMatchesArrayGrowth) {
         CHECK(values.Capacity() == expected);
     }
 }
+
+// "하나 추가할 자리 확보 -> 추가"를 반복할 때 TryReserve(Size() + 1)은 매번 정확히 한 칸만 늘려
+// 할당이 추가 횟수만큼 일어나고, TryEnsureCapacity(Size() + 1)은 성장 규칙으로 늘려 할당이 기하급수
+// 단계 수로 줄어든다. 할당 횟수(SystemAllocator 누적 할당 수)로 결정적으로 본다.
+TEST(ArrayEnsureCapacityGrowsGeometricallyUnlikeExactReserve) {
+    constexpr int32 Count = 100;
+    SystemAllocator linearAllocator;
+    {
+        Array<int32> values(linearAllocator);
+        for (int32 index = 0; index < Count; ++index) {
+            REQUIRE(values.TryReserve(values.Size() + 1));
+            CHECK(values.Capacity() == values.Size() + 1);
+            REQUIRE(values.TryPushBack(index));
+        }
+    }
+
+    CHECK(linearAllocator.Stats().totalAllocations == static_cast<uint64>(Count));
+
+    SystemAllocator geometricAllocator;
+    uint64 expectedAllocations = 0;
+    {
+        Array<int32> values(geometricAllocator);
+        usize expectedCapacity = 0;
+        for (int32 index = 0; index < Count; ++index) {
+            if (values.Size() + 1 > expectedCapacity) {
+                expectedCapacity =
+                    ArrayGrowthCapacity(expectedCapacity, values.Size() + 1, sizeof(int32));
+                ++expectedAllocations;
+            }
+
+            REQUIRE(values.TryEnsureCapacity(values.Size() + 1));
+            CHECK(values.Capacity() == expectedCapacity);
+            REQUIRE(values.TryPushBack(index));
+        }
+
+        for (int32 index = 0; index < Count; ++index) {
+            CHECK(values[static_cast<usize>(index)] == index);
+        }
+    }
+
+    // 4 -> 7 -> 11 -> 17 -> 26 -> 40 -> 61 -> 92 -> 139로 9번이다.
+    CHECK(expectedAllocations == 9);
+    CHECK(geometricAllocator.Stats().totalAllocations == expectedAllocations);
+    CHECK(geometricAllocator.Stats().liveAllocations == 0);
+}
+
+// 기준은 절대 원소 수다. 이미 충분하면 할당·이동하지 않고, 모자라면 성장 규칙의 용량(요청이 더
+// 크면 요청 그대로)을 잡는다. 할당 실패와 overflow는 데이터·size·capacity·주소를 보존한다.
+TEST(ArrayEnsureCapacityIsAbsoluteAndPreservesStateOnFailure) {
+    SystemAllocator backing;
+    test::NFailAllocator allocator(backing);
+    {
+        Array<int32> values(allocator);
+        REQUIRE(values.TryEnsureCapacity(0));
+        CHECK(values.Capacity() == 0 && values.Data() == nullptr);
+        CHECK(allocator.Attempts() == 0);
+
+        REQUIRE(values.TryEnsureCapacity(10));
+        CHECK(values.Capacity() == ArrayGrowthCapacity(0, 10, sizeof(int32)));
+        CHECK(values.Capacity() == 10);
+        for (int32 index = 0; index < 3; ++index) {
+            REQUIRE(values.TryPushBack(index + 1));
+        }
+
+        const int32* data = values.Data();
+        allocator.DisableFailure();
+        REQUIRE(values.TryEnsureCapacity(10));
+        REQUIRE(values.TryEnsureCapacity(4));
+        CHECK(allocator.Attempts() == 0);
+        CHECK(values.Data() == data && values.Capacity() == 10);
+
+        allocator.FailOnAttempt(1);
+        auto failed = values.TryEnsureCapacity(11);
+        CHECK(!failed && failed.Error() == ErrorCode::OutOfMemory);
+        CHECK(values.Data() == data && values.Capacity() == 10 && values.Size() == 3);
+        CHECK(values[0] == 1 && values[1] == 2 && values[2] == 3);
+
+        allocator.DisableFailure();
+        auto overflow = values.TryEnsureCapacity(MaxSize / sizeof(int32) + 1);
+        CHECK(!overflow && overflow.Error() == ErrorCode::Overflow);
+        CHECK(allocator.Attempts() == 0);
+        CHECK(values.Data() == data && values.Capacity() == 10 && values.Size() == 3);
+
+        // 10의 1.5배 + 1 = 16, 요청이 더 크면 요청 그대로다.
+        REQUIRE(values.TryEnsureCapacity(11));
+        CHECK(values.Capacity() == 16);
+        REQUIRE(values.TryEnsureCapacity(40));
+        CHECK(values.Capacity() == 40);
+        CHECK(values.Size() == 3);
+        CHECK(values[0] == 1 && values[1] == 2 && values[2] == 3);
+    }
+
+    CHECK(backing.Stats().liveAllocations == 0);
+}
