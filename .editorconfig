@@ -37,9 +37,9 @@ dotnet_diagnostic.IDE2001.severity = warning
 csharp_style_allow_blank_lines_between_consecutive_braces_experimental = false:warning
 dotnet_diagnostic.IDE2002.severity = warning
 
-# 외부 라이브러리 원본(Core/Source/ThirdParty/<Lib>/<lib>-<version>/)은 byte 그대로 둔다. 편집기가 공백·줄끝을
-# 바꾸지 않도록 모든 규칙을 해제한다. ThirdParty.json의 SHA-256이 원본 보존을 확인한다.
-[Core/Source/ThirdParty/*/*/**]
+# 외부 라이브러리 원본(<루트>/<Lib>/<lib>-<version>/, 루트는 Core/Source/ThirdParty·Engine/Source/ThirdParty)은 byte 그대로
+# 둔다. 편집기가 공백·줄끝을 바꾸지 않도록 모든 규칙을 해제한다. ThirdParty.json의 SHA-256이 원본 보존을 확인한다.
+[{Core,Engine}/Source/ThirdParty/*/*/**]
 charset = unset
 end_of_line = unset
 indent_style = unset
@@ -48,7 +48,21 @@ tab_width = unset
 insert_final_newline = unset
 trim_trailing_whitespace = unset
 
-# 추적 가능한 수정의 patch(Core/Source/ThirdParty/<Lib>/*.patch)는 빈 문맥 줄이 공백 하나라 줄 끝 공백을 지우면 깨진다.
-# 줄끝은 LF로 두고(검사가 CR을 거부한다) 공백 정리만 끈다.
-[Core/Source/ThirdParty/*/*.patch]
+# 미리 빌드한 바이너리의 오프라인 도구 빌드 스크립트(Engine/Source/ThirdParty/<Lib>/Build/)는 Rocks가 쓴 파일이므로 기본
+# 규칙(UTF-8·LF·끝 줄바꿈)을 되살린다. 뒤 절이 앞 절을 덮는다.
+[Engine/Source/ThirdParty/*/Build/**]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 4
+tab_width = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# 추적 가능한 수정의 patch(<루트>/<Lib>/*.patch, 도구 빌드의 <Lib>/Build/*.patch)는 빈 문맥 줄이 공백 하나라 줄 끝 공백을
+# 지우면 깨진다. 줄끝은 LF로 두고(검사가 CR을 거부한다) 공백 정리만 끈다.
+[{Core,Engine}/Source/ThirdParty/*/*.patch]
+trim_trailing_whitespace = false
+
+[Engine/Source/ThirdParty/*/Build/*.patch]
 trim_trailing_whitespace = false

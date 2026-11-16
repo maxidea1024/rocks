@@ -116,7 +116,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 | A4 | Cooker·TargetProfile·쿠킹 매니페스트 | AssetSystem A4 | 미착수 | P6b | A3 | 5.2 K1–K3 |
 | P1 | 자식 프로세스·pipe | PlatformLayer | **구현** | SH1 | — | 5.3 |
 | P2 | 바인딩 규약(GLES 포함) | 이 문서 | 설계 | SH2 | — | 7절 |
-| P3 | ThirdParty Engine 루트·`binary`·`headers` 종류·저장소·오프라인 도구 빌드 | 이 문서 | 설계 | P4, P9, P12, SH0 | — | 8절 |
+| P3 | ThirdParty Engine 루트·`binary`·`headers` 종류·저장소·오프라인 도구 빌드 | 이 문서 | **구현 중**(루트·종류) | P4, P9, P12, SH0 | — | 8절 |
 | P4 | 도구 표 생성·binary 의존 정책·Release 배제 검사 | 이 문서 | 설계 | SH0, SH2 | P3, P10 | 9절 |
 | P5 | 셰이더 job 키 | 이 문서 | 설계 | SH1 | A2, A3, P6a | 10절 |
 | P6a | 형식 정의 스키마와 파일, 엔진 컴파일 프로필 | 이 문서 | 설계 | P5, P14, P6b, SH1 | A0-C(JSON), 결정 2·3·5 | 12.1절 |
@@ -459,6 +459,13 @@ Rocks도 같은 구조로 한다. 그래서 Rocks.Build에 공유 라이브러�
 - FXC 고정본·Apple 도구 최소 버전 등록, macOS quarantine 속성 제거 시험.
 - bootstrap 없이 기본 빌드·Foundation CI가 통과한다(헤더는 저장소, 바이너리는 실행 때만).
 - SPIRV-Reflect가 Rocks 경고 규칙으로 Windows·macOS에서 빌드되고, Vulkan-Headers가 경고 0으로 include된다.
+
+진척(2026-11-16, `feature/shader-thirdparty`):
+- [x] 두 루트(`ThirdPartyManifest.ThirdPartyRoots`)와 `headers`·`binary` 종류의 manifest·정책 시험. 음성 대조: 커밋한 헤더 digest 불일치, 호스트 누락(`ThirdPartyBinary.Host`), 모르는 필드(최상위·호스트·호스트 파일·build), asset 이름 규칙, 루트 사이 이름 중복(`Policy.ThirdPartyEngineRoot`·`Policy.ThirdPartyHeadersLibrary`·`Policy.ThirdPartyBinaryLibrary`·`Policy.ThirdPartyBinarySdkAndSystem`).
+- [x] CompilerDiagnostics 미리 빌드한 바이너리 승인 절·셰이더 컴파일 경고 절, RepositoryLayout·CoreDataFoundations·Compression 개정.
+- [ ] Vulkan-Headers·SPIRV-Reflect 반입.
+- [ ] bootstrap(정상·SHA 불일치·중단 뒤 재시도·오프라인), FXC 고정본·Apple 도구 최소 버전 등록, quarantine 제거.
+- [ ] 오프라인 도구 빌드 스크립트·workflow, Windows 산출물 SHA 등록, macOS 산출물.
 
 ## 9. P4·P10 도구 로드와 Release 배제
 

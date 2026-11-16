@@ -383,19 +383,16 @@ public static partial class PolicyChecks
     /// </summary>
     internal static IReadOnlyList<string> UpstreamDirectories(string root)
     {
-        string thirdParty = Path.Combine(Path.GetFullPath(root), ThirdPartyManifest.ThirdPartyRoot);
-        if (!Directory.Exists(thirdParty))
-        {
-            return [];
-        }
-
         List<string> directories = [];
-        foreach (string library in Directory.EnumerateDirectories(thirdParty).Order(StringComparer.Ordinal))
+        foreach (string library in ThirdPartyManifest.LibraryDirectories(root))
         {
             try
             {
                 ThirdPartyManifest manifest = ThirdPartyManifest.Read(library);
-                directories.Add($"{ThirdPartyManifest.ThirdPartyRoot}/{Path.GetFileName(library)}/{manifest.UpstreamDirectory}/");
+                if (manifest.HasUpstream)
+                {
+                    directories.Add($"{Relative(Path.GetFullPath(root), library)}/{manifest.UpstreamDirectory}/");
+                }
             }
             catch (FormatException)
             {

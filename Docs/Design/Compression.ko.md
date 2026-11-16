@@ -35,7 +35,8 @@ gate를 둔다.** 설치 SDK는 각 라이브러리 manifest `licenses`의 모�
 ### 3.1 배치
 
 외부 원본은 Core가 쓰므로 Core 계층에 둔다(Core는 Engine을 참조하지 않는다). UE `Engine/Source/ThirdParty/<lib>/<version>/`과
-같은 방식이다.
+같은 방식이다. 엔진·도구 전용 라이브러리는 같은 규칙으로 `Engine/Source/ThirdParty/`에 둔다(2026-11-16, [셰이더 시스템](ShaderSystem.ko.md)
+8절 1항). 이 절의 규칙(manifest·byte 보존·정책 검사)은 두 루트에 똑같이 적용한다.
 
 ```text
 Core/Source/ThirdParty/
@@ -97,7 +98,9 @@ Core/Source/Runtime/Compression/   Compression.Build.cs  Public/Compression/  Pr
 
 ### 3.3 빌드 도구의 C 지원
 
-- 확장자가 정확히 소문자 `.c`인 번역 단위만 C17로 컴파일한다. 경고·FP 축약 금지·구성 매크로·CRT·최적화·디버그 정보·ASan
+- 확장자가 정확히 소문자 `.c`인 번역 단위만 C17로 컴파일한다(manifest `kind: code`). 헤더 전용(`kind: headers`)과 미리 빌드한
+  바이너리(`kind: binary`)는 번역 단위가 없고 모듈 규칙도 없다. 바이너리는 Rocks 빌드가 컴파일하지 않으며 승인 조건은
+  [경고 정책](CompilerDiagnostics.ko.md)의 미리 빌드한 바이너리 절을 따른다. 경고·FP 축약 금지·구성 매크로·CRT·최적화·디버그 정보·ASan
   프로필은 C++와 같다.
   - Windows clang-cl: `/clang:-std=c17`과 `/TC`. C++ 전용 `/GR- /EHs-c- /Zc:__cplusplus /clang:-std=c++23 /TP`는 뺀다.
   - macOS·Android: compiler가 `clang++` driver이므로 소스 앞에 `-x c`를 둔다(없으면 C++로 처리하며 `-Werror`에서 실패).
@@ -145,7 +148,7 @@ Core/Source/Runtime/Compression/   Compression.Build.cs  Public/Compression/  Pr
 - 기존 lexical 검사(서식, 경고 억제, 플랫폼 경계, 강제 인라인 금지)는 **manifest의 `upstreamDirectory`와 정확히 같은
   디렉터리만** 제외한다. 이름이 비슷한 디렉터리는 계속 검사한다. Rocks 글루(`*.Build.cs`, `Lz4Unity.c`)는 검사 대상이며
   검사 대상 확장자에 `.c`를 더한다.
-- 새 `third-party` 검사: manifest 스키마 엄격 검사(모르는·중복 필드 거부), 실제 파일 집합과 SHA-256(byte 기준) 일치,
+- 새 `third-party` 검사(두 루트, 라이브러리 이름은 루트를 통틀어 하나): manifest 스키마 엄격 검사(종류별 필드 집합, 모르는·중복 필드 거부), 실제 파일 집합과 SHA-256(byte 기준) 일치,
   링크 파일 거부, `licenses`의 모든 원문이 등록된 원본 파일임, `translationUnits` ⊆ 원본 파일 ∪ 글루, 컴파일러 지시문
   목록(`pragmaDirectives`)의 정확한 일치.
 - adapter 헤더의 진단 억제는 같은 계열(MSVC `warning`, clang/GCC `diagnostic`)의 push/pop 안에서만 허용하고(pack 등 무관한

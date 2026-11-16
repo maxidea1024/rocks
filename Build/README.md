@@ -90,7 +90,7 @@ SDK는 타깃에서 도달하는 모듈만 내보낸다. 고정 버전 외부 �
 
 ## 외부 라이브러리(C 원본)
 
-빌드 도구는 확장자가 정확히 `.c`인 번역 단위를 C17로 컴파일한다(clang-cl `/TC /clang:-std=c17`, POSIX `-x c -std=c17`). 경고·FP·구성·CRT·최적화 프로필은 C++와 같고 C++ 전용 플래그만 빠진다. C++ 번역 단위의 인자는 바뀌지 않는다. `.c`는 `Core/Source/ThirdParty/<Lib>/` 아래에서만 허용하며(compile DB 감사), 모듈 인자로 언어·표준을 바꿀 수 없다.
+빌드 도구는 확장자가 정확히 `.c`인 번역 단위를 C17로 컴파일한다(clang-cl `/TC /clang:-std=c17`, POSIX `-x c -std=c17`). 경고·FP·구성·CRT·최적화 프로필은 C++와 같고 C++ 전용 플래그만 빠진다. C++ 번역 단위의 인자는 바뀌지 않는다. `.c`는 외부 라이브러리 폴더(Core가 쓰면 `Core/Source/ThirdParty/<Lib>/`, 엔진·도구 전용이면 `Engine/Source/ThirdParty/<Lib>/`) 아래에서만 허용하며(compile DB 감사), 모듈 인자로 언어·표준을 바꿀 수 없다. manifest 종류는 `code`·`data`·`headers`(헤더 전용, 모듈 규칙 없음)·`binary`(Rocks가 컴파일하지 않는 미리 빌드한 바이너리)다([셰이더 시스템](../Docs/Design/ShaderSystem.ko.md) 8절).
 
 라이브러리 폴더는 `<Lib>.Build.cs`(`ThirdPartyModuleRules` 상속, 이름만 적는다), `ThirdParty.json`(단일 출처), `<lib>-<version>/`(릴리스 원본을 byte 그대로)로 구성한다. 업그레이드 절차:
 

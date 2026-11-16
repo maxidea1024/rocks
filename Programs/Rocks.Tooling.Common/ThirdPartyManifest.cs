@@ -22,10 +22,19 @@ public sealed record ThirdPartyLicense(string Spdx, string UpstreamExpression, s
     ThirdPartyFileSource? LicenseSource = null);
 
 /// <summary>
-/// 외부 라이브러리의 종류다. Code는 C 번역 단위를 빌드하는 라이브러리이고, Data는 생성기·시험이 읽는 데이터 파일
-/// 묶음(예: Unicode UCD, JSON 시험 사례)이다. Data는 번역 단위·include·정의·adapter·지시문이 없고 모듈 규칙도 없다.
+/// 외부 라이브러리의 종류다(manifest <c>kind</c>).
+/// <list type="bullet">
+/// <item>Code: C 번역 단위를 Rocks 경고 규칙으로 빌드하는 라이브러리다(모듈 규칙이 있다).</item>
+/// <item>Data: 생성기·시험이 읽는 데이터 파일 묶음(예: Unicode UCD, JSON 시험 사례)이다. 번역 단위·include·정의·adapter·
+/// 지시문이 없고 모듈 규칙도 없다.</item>
+/// <item>Headers: 번역 단위 없이 헤더만 쓰는 라이브러리(예: Vulkan-Headers)다. 모듈 규칙이 없고, 소비 모듈이 include
+/// 디렉터리를 Private으로 받아 adapter 헤더를 include한다. 그 번역 단위가 Rocks 경고 규칙으로 경고 0임을 확인한다.</item>
+/// <item>Binary: Rocks 빌드가 컴파일하지 않는 미리 빌드한 바이너리(DXC 등 오프라인 도구 빌드 산출물, 설치 SDK의 파일,
+/// 시스템 도구)다. 파일은 저장소가 아니라 사용자 단위 내용 주소 저장소에 두며(bootstrap 명령이 받는다), 공개 헤더만
+/// 저장소에 커밋한다. 상세는 <see cref="ThirdPartyBinary"/>.</item>
+/// </list>
 /// </summary>
-public enum ThirdPartyKind { Code, Data }
+public enum ThirdPartyKind { Code, Data, Headers, Binary }
 
 /// <summary>원본 archive 밖에서 받은 파일(예: 따로 배포되는 라이선스 원문)의 출처 URL과 SHA-256이다.</summary>
 public sealed record ThirdPartyFileSource(string Url, string Sha256);
@@ -42,21 +51,23 @@ public sealed record ThirdPartyPragma(string File, int Line, string Text);
 public sealed record ThirdPartyModification(string File, string? UpstreamSha256, string Reason);
 
 /// <summary>
-/// 고정 버전 외부 라이브러리 manifest(<c>Core/Source/ThirdParty/&lt;Lib&gt;/ThirdParty.json</c>)다. 모듈 규칙과 정책 검사가
-/// 같은 파일을 읽는 단일 출처다.
+/// 고정 버전 외부 라이브러리 manifest(<c>&lt;루트&gt;/&lt;Lib&gt;/ThirdParty.json</c>, 루트는 <see cref="ThirdPartyRoots"/>)다.
+/// 모듈 규칙과 정책 검사·bootstrap이 같은 파일을 읽는 단일 출처다.
 /// <list type="bullet">
 /// <item><see cref="Files"/>·<see cref="PragmaDirectives"/>의 경로는 원본 디렉터리(<see cref="UpstreamDirectory"/>) 기준이다.</item>
 /// <item><see cref="TranslationUnits"/>·<see cref="IncludeDirectories"/>·<see cref="AdapterHeaders"/>와 라이선스 파일 경로
 /// (<see cref="Licenses"/>)는 라이브러리 폴더 기준이다(원본 파일 또는 Rocks 글루).</item>
 /// <item>경로는 '/' 구분 상대 경로만 허용한다. 절대 경로·'..'·'.'·빈 조각·역슬래시는 오류다.</item>
+/// <item>저장소에 커밋한 파일이 없는 binary(설치 SDK에서 복사하는 파일·시스템 도구)는 <see cref="UpstreamDirectory"/>가
+/// 빈 문자열이고 <see cref="Source"/>가 null이며 파일·라이선스 목록이 비어 있다(<see cref="HasUpstream"/>).</item>
 /// </list>
 /// 읽기는 엄격하다: 모르는 필드, 중복 필드, 잘못된 타입, 주석·끝 쉼표, 1 MiB 초과는 <see cref="FormatException"/>이다.
 /// </summary>
-public sealed record ThirdPartyManifest(
+public sealed partial record ThirdPartyManifest(
     string Name,
     string Version,
     string UpstreamDirectory,
-    ThirdPartySource Source,
+    ThirdPartySource? Source,
     IReadOnlyList<ThirdPartyLicense> Licenses,
     IReadOnlyList<string> TranslationUnits,
     IReadOnlyList<string> IncludeDirectories,
@@ -74,11 +85,17 @@ public sealed record ThirdPartyManifest(
     public ThirdPartyKind Kind { get; init; } = ThirdPartyKind.Code;
 
     /// <summary>
-    /// data 종류의 파생물(생성 표 등)이 들어가는 모듈 이름이다(manifest <c>embeddedIn</c>). SDK 내보내기가 이 가운데 하나라도
-    /// 담으면 라이선스 원문을 함께 배포한다. 비어 있으면 배포물에 들어가지 않는 데이터(시험 전용)다. code 종류는 모듈
-    /// 자신이 라이브러리이므로 쓰지 않는다.
+    /// data 종류의 파생물(생성 표 등)이나 headers 종류의 헤더를 컴파일해 담는 모듈 이름이다(manifest <c>embeddedIn</c>).
+    /// SDK 내보내기가 이 가운데 하나라도 담으면 라이선스 원문을 함께 배포한다. 비어 있으면 배포물에 들어가지 않는다(시험
+    /// 전용). code 종류는 모듈 자신이 라이브러리이므로, binary 종류는 SDK가 내보내지 않으므로 쓰지 않는다.
     /// </summary>
     public IReadOnlyList<string> EmbeddedIn { get; init; } = [];
+
+    /// <summary>binary 종류의 출처·호스트별 파일 목록이다. 다른 종류는 null이다.</summary>
+    public ThirdPartyBinary? Binary { get; init; }
+
+    /// <summary>저장소에 커밋한 원본 디렉터리가 있는지다. 커밋한 파일이 없는 binary만 false다.</summary>
+    public bool HasUpstream => UpstreamDirectory.Length != 0;
 
     /// <summary>
     /// 라이브러리만 받는 컴파일 인자다(manifest <c>compileArguments</c>, 예: libsodium의 <c>-fno-strict-overflow</c>). 허용 목록
@@ -109,8 +126,62 @@ public sealed record ThirdPartyManifest(
     /// </summary>
     public string? Patch { get; init; }
 
-    /// <summary>외부 라이브러리 폴더의 부모다(저장소 루트 기준).</summary>
-    public const string ThirdPartyRoot = "Core/Source/ThirdParty";
+    /// <summary>Core 계층이 쓰는 외부 라이브러리 폴더의 부모다(저장소 루트 기준). Core 모듈은 이 루트의 라이브러리만 쓴다.</summary>
+    public const string CoreThirdPartyRoot = "Core/Source/ThirdParty";
+
+    /// <summary>엔진·도구 전용 외부 라이브러리 폴더의 부모다(저장소 루트 기준, 예: Vulkan-Headers·DXC).</summary>
+    public const string EngineThirdPartyRoot = "Engine/Source/ThirdParty";
+
+    /// <summary>
+    /// 외부 라이브러리 폴더의 부모 목록이다(저장소 루트 기준). 의존 방향은 계층과 같다: Core가 쓰는 라이브러리는 Core 루트에,
+    /// 엔진·도구 전용은 Engine 루트에 둔다. 라이브러리 폴더 이름(모듈 이름)은 두 루트를 통틀어 하나여야 한다(정책 검사
+    /// third-party).
+    /// </summary>
+    public static readonly IReadOnlyList<string> ThirdPartyRoots = [CoreThirdPartyRoot, EngineThirdPartyRoot];
+
+    /// <summary>
+    /// 모든 루트의 라이브러리 폴더(<see cref="FileName"/>이 있는 바로 아래 폴더)를 루트 순서, 그 안에서 이름 순으로 돌려준다.
+    /// manifest를 읽지는 않는다. 사용 예: <c>foreach (string library in ThirdPartyManifest.LibraryDirectories(root))</c>.
+    /// </summary>
+    /// <param name="root">저장소 루트(절대 또는 상대 경로).</param>
+    /// <returns>라이브러리 폴더의 절대 경로. 없는 루트는 건너뛴다.</returns>
+    public static IReadOnlyList<string> LibraryDirectories(string root)
+    {
+        List<string> libraries = [];
+        foreach (string parent in ThirdPartyRoots)
+        {
+            string directory = Path.Combine(Path.GetFullPath(root), parent);
+            if (!Directory.Exists(directory))
+            {
+                continue;
+            }
+
+            libraries.AddRange(Directory.EnumerateDirectories(directory).Order(StringComparer.Ordinal)
+                .Where(library => System.IO.File.Exists(Path.Combine(library, FileName))));
+        }
+
+        return libraries;
+    }
+
+    /// <summary>
+    /// 이름이 <paramref name="name"/>인 라이브러리 폴더를 루트 목록에서 찾는다(대소문자 구분).
+    /// 사용 예(모듈 규칙): <c>ThirdPartyManifest.FindLibrary(context.RootDirectory, "Zstd")</c> → <c>"Core/Source/ThirdParty/Zstd"</c>.
+    /// </summary>
+    /// <param name="root">저장소 루트.</param>
+    /// <param name="name">라이브러리 폴더 이름(모듈 이름).</param>
+    /// <returns>저장소 루트 기준 '/' 상대 경로.</returns>
+    /// <exception cref="FormatException">어느 루트에도 없거나 두 루트에 모두 있다.</exception>
+    public static string FindLibrary(string root, string name)
+    {
+        string[] found = ThirdPartyRoots.Where(parent => System.IO.File.Exists(Path.Combine(Path.GetFullPath(root), parent, name, FileName)))
+            .Select(parent => $"{parent}/{name}").ToArray();
+        return found.Length switch
+        {
+            1 => found[0],
+            0 => throw new FormatException($"third-party library '{name}' was not found under {string.Join(" or ", ThirdPartyRoots)}"),
+            _ => throw new FormatException($"third-party library '{name}' exists under more than one root: {string.Join(", ", found)}")
+        };
+    }
 
     /// <summary>platformDefines의 키로 허용하는 플랫폼 이름이다(NativePlatform 열거자 이름과 같다).</summary>
     public static readonly IReadOnlyList<string> PlatformNames = ["Windows", "MacOS", "Android"];
@@ -271,8 +342,9 @@ public sealed record ThirdPartyManifest(
     /// 아래로 복사한다. BSD 계열처럼 바이너리 배포에 고지 의무가 있는 원문을 정적 라이브러리와 함께 내보내려는 것이다.
     /// <list type="bullet">
     /// <item>code 라이브러리: SDK가 라이브러리 폴더 이름과 같은 모듈을 담으면 <see cref="Licenses"/>의 모든 원문을 복사한다.</item>
-    /// <item>data 라이브러리: 모듈이 아니므로 <see cref="EmbeddedIn"/>의 모듈 가운데 하나라도 SDK에 있을 때만 복사한다.
+    /// <item>data·headers 라이브러리: 모듈이 아니므로 <see cref="EmbeddedIn"/>의 모듈 가운데 하나라도 SDK에 있을 때만 복사한다.
     /// embeddedIn이 비어 있는 시험 전용 데이터(예: JsonTestSuite)는 배포하지 않는다.</item>
+    /// <item>binary 라이브러리: SDK가 워커·도구를 내보내지 않으므로 복사하지 않는다.</item>
     /// <item>복사 위치는 <c>Licenses/&lt;Lib&gt;/&lt;원본 디렉터리 기준 경로&gt;</c>다. 예: zstd의
     /// <c>zstd-1.5.7/LICENSE</c>는 <c>Licenses/Zstd/LICENSE</c>, <c>zstd-1.5.7/lib/dictBuilder/divsufsort.h</c>는
     /// <c>Licenses/Zstd/lib/dictBuilder/divsufsort.h</c>다. 원본 안 상대 경로를 그대로 두므로 파일 이름이 같은 원문(최상위
@@ -281,32 +353,25 @@ public sealed record ThirdPartyManifest(
     /// </list>
     /// 사용 예: <c>CopySdkLicenses(root, stage, packaged.Select(module =&gt; module.Name).ToArray())</c>.
     /// </summary>
-    /// <param name="root">저장소 루트. <see cref="ThirdPartyRoot"/>가 없으면 아무것도 복사하지 않는다.</param>
+    /// <param name="root">저장소 루트. <see cref="ThirdPartyRoots"/>가 하나도 없으면 아무것도 복사하지 않는다.</param>
     /// <param name="destination">SDK stage 루트. 같은 경로의 파일이 이미 있으면 덮어쓰지 않고 <see cref="IOException"/>이다.</param>
     /// <param name="modules">SDK가 담는 모듈 이름(대소문자 구분).</param>
-    /// <returns>복사한 파일의 <paramref name="destination"/> 기준 '/' 상대 경로(라이브러리 폴더 이름 순, 폴더 안은 manifest 순).</returns>
+    /// <returns>복사한 파일의 <paramref name="destination"/> 기준 '/' 상대 경로(루트 순, 그 안에서 라이브러리 폴더 이름 순, 폴더 안은
+    /// manifest 순).</returns>
     /// <exception cref="FormatException">manifest가 계약과 다르거나 라이선스 원문이 원본 디렉터리(<see cref="UpstreamDirectory"/>) 밖에 있다.</exception>
     public static IReadOnlyList<string> CopySdkLicenses(string root, string destination, IReadOnlyCollection<string> modules)
     {
         List<string> copied = [];
-        string thirdParty = Path.Combine(root, ThirdPartyRoot);
-        if (!Directory.Exists(thirdParty))
+        foreach (string library in LibraryDirectories(root))
         {
-            return copied;
-        }
-
-        foreach (string library in Directory.EnumerateDirectories(thirdParty).Order(StringComparer.Ordinal))
-        {
-            if (!System.IO.File.Exists(Path.Combine(library, FileName)))
-            {
-                continue;
-            }
-
             string name = Path.GetFileName(library);
             ThirdPartyManifest manifest = Read(library);
-            bool shipped = manifest.Kind == ThirdPartyKind.Code
-                ? modules.Contains(name, StringComparer.Ordinal)
-                : manifest.EmbeddedIn.Any(module => modules.Contains(module, StringComparer.Ordinal));
+            bool shipped = manifest.Kind switch
+            {
+                ThirdPartyKind.Code => modules.Contains(name, StringComparer.Ordinal),
+                ThirdPartyKind.Binary => false,
+                _ => manifest.EmbeddedIn.Any(module => modules.Contains(module, StringComparer.Ordinal))
+            };
             if (!shipped)
             {
                 continue;
@@ -334,24 +399,33 @@ public sealed record ThirdPartyManifest(
 
     private static ThirdPartyManifest Parse(JsonElement root)
     {
+        // 종류마다 필드 집합이 다르므로 kind를 먼저 본다(binary는 별도 schema, ThirdPartyManifest.Binary.cs).
+        ThirdPartyKind kind = ThirdPartyKind.Code;
+        if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("kind", out JsonElement kindElement))
+        {
+            kind = Text(kindElement, "kind") switch
+            {
+                "code" => ThirdPartyKind.Code,
+                "data" => ThirdPartyKind.Data,
+                "headers" => ThirdPartyKind.Headers,
+                "binary" => ThirdPartyKind.Binary,
+                _ => throw new FormatException("kind: must be \"code\", \"data\", \"headers\" or \"binary\"")
+            };
+        }
+
+        if (kind == ThirdPartyKind.Binary)
+        {
+            return ParseBinary(root);
+        }
+
         Dictionary<string, JsonElement> fields = Object(root, "manifest", TopLevel, optionalFields: OptionalTopLevel);
         if (Integer(fields["schema"], "schema") != 1)
         {
             throw new FormatException("schema: unsupported version (expected 1)");
         }
 
-        ThirdPartyKind kind = ThirdPartyKind.Code;
-        if (fields.TryGetValue("kind", out JsonElement kindElement))
-        {
-            kind = Text(kindElement, "kind") switch
-            {
-                "code" => ThirdPartyKind.Code,
-                "data" => ThirdPartyKind.Data,
-                _ => throw new FormatException("kind: must be \"code\" or \"data\"")
-            };
-        }
-
         bool data = kind == ThirdPartyKind.Data;
+        bool headers = kind == ThirdPartyKind.Headers;
 
         Dictionary<string, JsonElement> source = Object(fields["source"], "source", ["url", "sha256", "verification"]);
         string sourceUrl = Text(source["url"], "source.url");
@@ -375,43 +449,8 @@ public sealed record ThirdPartyManifest(
             platformDefines.Add(platform, DefineList(value, "platformDefines." + platform));
         }
 
-        var files = new SortedDictionary<string, string>(StringComparer.Ordinal);
-        var caseless = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        Dictionary<string, JsonElement> fileEntries = Object(fields["files"], "files", null);
-        if (fileEntries.Count == 0)
-        {
-            throw new FormatException("files: must list at least one file");
-        }
-
-        foreach ((string file, JsonElement value) in fileEntries)
-        {
-            string hash = Text(value, "files." + file);
-            if (!Sha256Text.IsMatch(hash))
-            {
-                throw new FormatException($"files.{file}: SHA-256 must be 64 lowercase hex digits");
-            }
-            // 대소문자만 다른 경로는 Windows·macOS 기본 파일 시스템에서 같은 파일이다.
-            if (!caseless.Add(file))
-            {
-                throw new FormatException($"files.{file}: duplicate path differing only by case");
-            }
-
-            files.Add(RelativePath(file, "files"), hash);
-        }
-
-        var pragmas = new List<ThirdPartyPragma>();
-        foreach (JsonElement entry in Array(fields["pragmaDirectives"], "pragmaDirectives"))
-        {
-            Dictionary<string, JsonElement> pragma = Object(entry, "pragmaDirectives[]", ["file", "line", "text"]);
-            int line = Integer(pragma["line"], "pragmaDirectives[].line");
-            if (line < 1)
-            {
-                throw new FormatException("pragmaDirectives[].line: must be positive");
-            }
-
-            pragmas.Add(new(RelativePath(Text(pragma["file"], "pragmaDirectives[].file"), "pragmaDirectives[].file"), line,
-                Text(pragma["text"], "pragmaDirectives[].text")));
-        }
+        SortedDictionary<string, string> files = FileList(fields["files"]);
+        List<ThirdPartyPragma> pragmas = PragmaList(fields["pragmaDirectives"]);
 
         string sha256 = Text(source["sha256"], "source.sha256");
         if (!Sha256Text.IsMatch(sha256))
@@ -419,7 +458,7 @@ public sealed record ThirdPartyManifest(
             throw new FormatException("source.sha256: must be 64 lowercase hex digits");
         }
 
-        IReadOnlyList<string> translationUnits = Paths(fields["translationUnits"], "translationUnits", nonEmpty: !data);
+        IReadOnlyList<string> translationUnits = Paths(fields["translationUnits"], "translationUnits", nonEmpty: kind == ThirdPartyKind.Code);
         foreach (string unit in translationUnits)
         {
             if (!unit.EndsWith(".c", StringComparison.Ordinal))
@@ -430,8 +469,23 @@ public sealed record ThirdPartyManifest(
 
         IReadOnlyList<string> defines = DefineList(fields["defines"], "defines");
         IReadOnlyList<string> consumerDefines = DefineList(fields["consumerDefines"], "consumerDefines");
-        IReadOnlyList<string> includeDirectories = Paths(fields["includeDirectories"], "includeDirectories", nonEmpty: false);
+        IReadOnlyList<string> includeDirectories = Paths(fields["includeDirectories"], "includeDirectories", nonEmpty: headers);
         IReadOnlyList<string> adapterHeaders = Paths(fields["adapterHeaders"], "adapterHeaders", nonEmpty: !data);
+        if (headers)
+        {
+            // 헤더 전용 라이브러리는 자기 번역 단위가 없으므로 라이브러리 빌드 입력이 없다(소비 정의는 consumerDefines).
+            foreach ((string field, int count) in new[]
+                     {
+                         ("translationUnits", translationUnits.Count), ("defines", defines.Count), ("platformDefines", platformDefines.Count)
+                     })
+            {
+                if (count != 0)
+                {
+                    throw new FormatException($"{field}: must be empty for a headers library");
+                }
+            }
+        }
+
         if (data)
         {
             // 데이터는 빌드하지 않으므로 빌드 입력이 있으면 계약 위반이다(빈 목록을 명시해 같은 schema를 유지한다).
@@ -453,9 +507,10 @@ public sealed record ThirdPartyManifest(
         IReadOnlyList<string> embeddedIn = [];
         if (fields.TryGetValue("embeddedIn", out JsonElement embeddedElement))
         {
-            if (!data)
+            if (!data && !headers)
             {
-                throw new FormatException("embeddedIn: only data libraries declare embedding modules (a code library is its own module)");
+                throw new FormatException(
+                    "embeddedIn: only data and headers libraries declare embedding modules (a code library is its own module)");
             }
 
             embeddedIn = Strings(embeddedElement, "embeddedIn");
@@ -584,6 +639,12 @@ public sealed record ThirdPartyManifest(
             throw new FormatException(
                 "compileArguments, linkTimeOptimization, sanitizerInstrumentation and modifications are not allowed for a data library");
         }
+
+        if (headers && (compileArguments.Count != 0 || !linkTimeOptimization || !sanitizerInstrumentation))
+        {
+            throw new FormatException(
+                "compileArguments, linkTimeOptimization and sanitizerInstrumentation are not allowed for a headers library (it has no translation units)");
+        }
         // adapter와 라이브러리가 같은 이름을 쓰면 값도 같아야 한다(예: Z_U4가 다르면 ABI가 소리 없이 어긋난다).
         foreach (string define in consumerDefines)
         {
@@ -617,6 +678,55 @@ public sealed record ThirdPartyManifest(
             Modifications = modifications,
             Patch = patch
         };
+    }
+
+    // files: 원본 디렉터리 기준 경로 → SHA-256(소문자 16진). 비어 있으면 오류다.
+    private static SortedDictionary<string, string> FileList(JsonElement element)
+    {
+        var files = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        var caseless = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, JsonElement> fileEntries = Object(element, "files", null);
+        if (fileEntries.Count == 0)
+        {
+            throw new FormatException("files: must list at least one file");
+        }
+
+        foreach ((string file, JsonElement value) in fileEntries)
+        {
+            string hash = Text(value, "files." + file);
+            if (!Sha256Text.IsMatch(hash))
+            {
+                throw new FormatException($"files.{file}: SHA-256 must be 64 lowercase hex digits");
+            }
+            // 대소문자만 다른 경로는 Windows·macOS 기본 파일 시스템에서 같은 파일이다.
+            if (!caseless.Add(file))
+            {
+                throw new FormatException($"files.{file}: duplicate path differing only by case");
+            }
+
+            files.Add(RelativePath(file, "files"), hash);
+        }
+
+        return files;
+    }
+
+    private static List<ThirdPartyPragma> PragmaList(JsonElement element)
+    {
+        var pragmas = new List<ThirdPartyPragma>();
+        foreach (JsonElement entry in Array(element, "pragmaDirectives"))
+        {
+            Dictionary<string, JsonElement> pragma = Object(entry, "pragmaDirectives[]", ["file", "line", "text"]);
+            int line = Integer(pragma["line"], "pragmaDirectives[].line");
+            if (line < 1)
+            {
+                throw new FormatException("pragmaDirectives[].line: must be positive");
+            }
+
+            pragmas.Add(new(RelativePath(Text(pragma["file"], "pragmaDirectives[].file"), "pragmaDirectives[].file"), line,
+                Text(pragma["text"], "pragmaDirectives[].text")));
+        }
+
+        return pragmas;
     }
 
     // 기본이 true인 선택 bool 필드다. 기본값을 적는 것은 의미가 없어 false만 받는다. 없으면 true다.

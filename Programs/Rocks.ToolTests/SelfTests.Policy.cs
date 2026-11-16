@@ -14,6 +14,7 @@ internal static partial class SelfTests
         suite.Add("Policy.RepositoryRuntime", () => NoFailures(PolicyChecks.Runtime(options.Root)));
         suite.Add("Policy.RepositoryReflectionAnnotations", () => NoFailures(PolicyChecks.ReflectionAnnotations(options.Root)));
         ThirdPartyPolicyTests.Register(suite, options);
+        ThirdPartyKindTests.Register(suite);
         suite.Add("Policy.RepositoryPlatform", () => NoFailures(PolicyChecks.PlatformBoundary(options.Root)));
         suite.Add("Policy.RepositoryTargetMacros", () => NoFailures(PolicyChecks.TargetMacros(options.Root)));
         suite.Add("Policy.RepositoryTargetIntrinsics", () => NoFailures(PolicyChecks.TargetIntrinsics(options.Root)));
@@ -178,7 +179,7 @@ internal static partial class SelfTests
         {
             // 손으로 고친 생성 파일과 없는 파일을 잡는다. 원본은 저장소의 UCD를 그대로 복사한다.
             using TemporaryDirectory temporary = new();
-            string library = Path.Combine(ThirdPartyManifest.ThirdPartyRoot, UnicodeTables.LibraryName);
+            string library = Path.Combine(ThirdPartyManifest.CoreThirdPartyRoot, UnicodeTables.LibraryName);
             foreach (string file in Directory.EnumerateFiles(Path.Combine(options.Root, library), "*", SearchOption.AllDirectories))
             {
                 string relative = Path.GetRelativePath(options.Root, file).Replace('\\', '/');
