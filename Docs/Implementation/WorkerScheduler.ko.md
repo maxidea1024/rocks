@@ -62,3 +62,27 @@ Drain은 신규 제출을 닫고 수락한 작업을 완료한다. Cancel은 pen
 외부 이벤트 시험 6개: 다른 스레드의 Trigger가 의존 작업을 풀고 재완료는 false, Fail·취소 요청·Trigger 없는 소멸·회수가 의존 작업을 DependencyFailed로 만듦, Drain이 아무도 완료하지 않는 이벤트를 취소·이벤트의 maxInFlight 사용·시작 전·종료 뒤 생성 거부·이전 세대 dependency 거부, AsyncIo 완료 규칙·즉시 제출 실패·문맥 할당 실패, Drain이 실행 중인 작업의 Trigger를 기다림·Cancel은 바로 취소, Pending 이벤트 위 이동 대입·이벤트 생성 OOM. 압축 쪽 통합 시험(`Compression_AsyncDecompressAfterAsyncFileRead`)은 실제 파일을 AsyncReadFile로 읽고 그 완료에 의존한 해제가 원본을 돌려주는지(40회 반복하며 객체를 바로 소멸), 짧은 읽기에서 해제가 실행되지 않는지 확인한다.
 
 `Core/Source/Runtime/Task/Tests/WorkerSchedulerReentryReviewTests.cpp`의 추가 2개 사례는 서로 다른 scheduler의 중첩 Submit에서 바깥·안쪽 Shutdown 거부, 무관한 scheduler 종료 허용, 내부 record OOM 시 caller Function 보존과 실행 생략, 예약 계수·TLS 프레임 복원 및 최종 allocator ledger 0을 검사한다. 이 사례의 실제 실행 결과도 해당 통합 빌드 증거를 따른다.
+
+## 작업 lane 표지(TaskLane)
+
+`Task/TaskLane.h`의 `TaskLane`(None·Game·Worker·Render·Physics·Io·Audio·Gc, 계획 8.1절 lane 표)은 "지금 실행 중인 일이 어느 lane의 일인가"를 스레드가 아니라 실행 구간에 붙인다. `CurrentTaskLane()`은 이 스레드의 가장 안쪽 `TaskLaneScope` 값이고 범위 밖이면 None이다. 실행기가 작업 실행 구간에 scope를 둔다(DedicatedLane은 설정한 lane). 진단·계약 검사용이며 동기화나 접근 권한을 대신하지 않는다. 특정 lane의 "그 실행 흐름 안"인지 확인해야 하면 `DedicatedLane::IsExecutingTask`를 쓴다.
+
+## 전용 lane 실행기(DedicatedLane)
+
+`Task/DedicatedLane.h`는 직렬 FIFO 큐 하나를 실행 흐름 하나가 차례로 소비하는 실행기다(RenderBase CP1, UE 렌더 스레드 `RenderCore/Private/RenderingThread.cpp`·named thread 대응). Render·Audio·Physics처럼 전용 스레드가 필요한 lane이 쓴다.
+
+| 기능 | 인터페이스와 계약 |
+|---|---|
+| 시작 | `Start(DedicatedLaneConfig{mode, lane, thread})`. 생성 스레드 전용. Thread 모드는 lane 스레드가 진입해 이름·우선순위 적용을 마쳤음을 `started_` 이벤트로 알린 뒤 반환한다(시작 handshake). 잘못된 mode·스레드 옵션은 InvalidArgument, 스레드 생성 실패는 OutOfMemory, 실행 중 재시작은 Busy |
+| 제출 | `Post(Function<void()>&&)`. 어느 스레드에서나. 큐 칸은 잠금 밖에서 할당하고, 수락이 확정된 뒤에만 task를 옮기므로 거부·할당 실패 때 호출자의 task가 그대로 남는다. 시작 전·종료 뒤 ShuttingDown |
+| 대기 | `Flush()`. 호출 전에 수락한 작업이 모두 끝날 때까지 기다린다. 수락 수와 완료 수를 비교한다(실행 흐름이 하나라 완료가 수락 순서대로 늘어난다) |
+| 종료 | `Shutdown()`. 생성 스레드 전용. 일반 Post를 닫고 남은 작업과 종료 중 lane 작업이 넣은 후속을 모두 실행한 뒤(Drain) 닫는다. Thread 모드는 lane 스레드가 큐가 빈 것과 종료 요청을 함께 본 뒤 `stopped_` 이벤트를 켜고(종료 handshake) Join한다. 재시작 가능 |
+| 실행 중 판별 | `IsExecutingTask()`. 스레드 ID가 아니라 thread-local 실행 칸 사슬의 가장 안쪽 칸으로 판별한다 |
+
+**Inline 모드(trampoline).** 스레드 없이 Post한 스레드가 큐를 소비하되 큐는 그대로 쓴다. Post는 늘 큐 맨 뒤에 넣고, 그 lane을 비우는 실행 흐름이 없으면 그 Post가 큐가 빌 때까지 실행한다. 비었음을 본 것과 비우는 표지를 내리는 것을 같은 잠금 안에서 하므로, 그 사이 다른 스레드가 넣은 작업은 비우던 흐름이 실행하거나 그 Post가 스스로 비운다. lane 작업 안의 재진입 Post는 중첩 실행되지 않고 큐 뒤에 붙으므로 실행 순서가 Thread 모드와 같다.
+
+**실행 칸 사슬.** 작업 본문과 capture 소멸 구간마다 스택에 칸을 쌓는다. Inline lane A의 작업이 Inline lane B에 Post해 B를 그 자리에서 비우면 B 칸이 A 칸 위에 쌓인다. `IsExecutingTask`는 가장 안쪽 칸만 보므로 B 작업 안에서 A는 false다(Thread 모드에서 B 작업이 B 스레드에서 도는 것과 같다). `Flush`·`Shutdown`은 사슬 전체를 보고 자기 lane 위에서 부르면 WrongThread다(자기 자신을 기다리는 교착). 그래서 Inline 모드에서도 lane 작업 밖(같은 스레드의 일반 코드)의 lane 전용 API 호출이 스레드 ID 검사와 달리 드러난다.
+
+**수명.** 큐 칸 allocator는 여러 스레드의 동시 Allocate·Deallocate를 지원하고 lane보다 오래 살아야 한다. 실행 중 파괴는 Fatal이다. 시작·종료 대기에 시간 제한은 없다(끝나지 않는 작업을 강제 종료하지 않는다).
+
+시험(`Tests/DedicatedLaneTests.cpp`): gate로 막은 lane에 네 생산자가 동시에 넣은 작업의 생산자별 순서, 재진입 Post 순서가 두 모드에서 같음(바깥 작업이 A·B를 넣고 A가 C를, C가 D를 넣는 시나리오), Inline 가장 바깥 Post가 반환 전에 실행, 두 모드의 종료 Drain(남은 작업 0·종료 중 후속 수락·종료 뒤 거부와 task 보존), Flush, lane 작업 밖 lane 전용 API 거부와 Inline 중첩 실행의 판별·자기 대기 거부·lane 표지, 시작 계약(시작 전 Post 거부, 잘못된 옵션, 재시작, 스레드 이름 적용, 큐 칸 할당 실패 때 task 보존), 다른 스레드의 Start·Shutdown 거부. 순서는 모두 이벤트 gate로 만들고 sleep에 기대지 않는다.

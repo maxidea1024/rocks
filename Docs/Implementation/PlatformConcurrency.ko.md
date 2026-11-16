@@ -14,7 +14,8 @@ OS 헤더·호출은 플랫폼 private backend와 테스트용 OS adapter만 사
 
 | API | 계약 |
 |---|---|
-| `Thread::Start(entry, context)` | 비복사·비이동 Thread에서 실행 시작. 실패하면 새 join 소유권을 만들지 않음. null entry 거부. allocator·STL·Core 의존 없음 |
+| `Thread::Start(entry, context, options)` | 비복사·비이동 Thread에서 실행 시작. 실패하면 새 join 소유권을 만들지 않음. null entry 거부. allocator·STL·Core 의존 없음. `ThreadOptions`로 이름·우선순위·스택 크기를 지정(아래 "스레드 옵션") |
+| `CopyCurrentThreadName(buffer, capacity)` | 현재 스레드의 OS 이름을 UTF-8로 복사하고 길이를 반환. 이름이 없거나 buffer가 모자라면 0. 진단·시험용 |
 | `WaitForCompletion(timeoutMs)` | entry 반환을 기다림. timeout은 실행 취소나 소유권 반환이 아님. CRT/TLS 종료까지 완료되었다는 뜻이 아님 |
 | `Join()` | native 스레드와 TLS 정리까지 회수하는 무기한 대기. 자기 자신은 SelfJoin, 진행 중 다른 Join은 Busy. 성공 후 재시작 가능 |
 | `Mutex` / `LockGuard` | 비재귀 상호 배제와 scope 반환. 보호 중인 데이터의 의미와 lock 순서는 상위 계층 책임 |
@@ -29,6 +30,18 @@ Thread 내부 gate가 Start/Wait/Join/IsJoinable의 상태를 보호한다. Join
 
 Mutex·ConditionVariable·Event·Semaphore 자체를 다른 호출과 동시에 파괴하지 않는다. 닫힘·취소가 필요한 서비스는 상위 계층의 predicate와 drain 규약을 설계한다. native 초기화 실패와 프로그래머의 불가능한 semaphore 초기값은 Fatal이다. wait의 시스템 오류는 Failed로 반환한다.
 
+## 스레드 옵션
+
+`ThreadOptions{name, priority, stackBytes}`는 `Thread::Start`의 셋째 인자다(UE `FRunnableThread::Create`의 이름·스택·우선순위 인자 대응, `Runtime/Core/Public/HAL/RunnableThread.h`). 기본값은 이름 없음·`ThreadPriority::Normal`·플랫폼 기본 스택이다.
+
+| 옵션 | 계약 | Windows | macOS | Android |
+|---|---|---|---|---|
+| `name` | NUL 종료 UTF-8, `MaxThreadNameBytes`(63) 이하. 잘못된 UTF-8(과대 표현·대리 영역·잘린 문자)·초과는 `InvalidArgument`. Start가 ThreadState에 복사 | `SetThreadDescription` | `pthread_setname_np`(자기 스레드) | `pthread_setname_np`, 15 byte에서 문자 경계로 자름 |
+| `priority` | `Lowest`·`BelowNormal`·`Normal`·`AboveNormal`·`Highest`. 범위 밖 값은 `InvalidArgument` | `THREAD_PRIORITY_*` 다섯 단계 | `SCHED_OTHER` 최소·기본·최대를 다섯 단계로 나눈 값 | nice 19·10·0·-4·-8(`android.os.Process` 값) |
+| `stackBytes` | 0이면 플랫폼 기본. `MaxThreadStackBytes`(1 GiB) 초과는 `InvalidArgument` | `_beginthreadex` 예약 크기(`STACK_SIZE_PARAM_IS_A_RESERVATION`) | `pthread_attr_setstacksize`(`PTHREAD_STACK_MIN`·page 단위로 올림) | macOS와 같음 |
+
+이름과 우선순위는 새 스레드가 entry를 부르기 전에 그 스레드 안에서 적용한다(macOS는 자기 스레드에만 이름을 붙일 수 있어 방식을 하나로 맞췄다). 둘은 OS 힌트라 OS가 거부해도(권한 부족으로 음수 nice 거부 등) Start는 성공하고 기본값으로 실행한다. 스택은 생성 때 적용하며 예약할 수 없으면 스레드를 만들지 않는다. 시험(`ThreadOptionsTests.cpp`)은 이름 왕복(ASCII 15 byte·한글 앞부분), 같은 Thread 재사용 때 이전 이름이 남지 않음, 잘못된 입력의 시작 거부, 기본 스택(Windows 1 MiB)보다 큰 지역 배열을 쓰는 8 MiB 스택, 다섯 우선순위의 실행을 확인한다. 우선순위의 실제 적용 값은 공통 API로 읽을 수 없어 확인하지 않는다.
+
 ## 시간과 backend 의미
 
 대기 함수의 `InfiniteTimeout`은 무한을 뜻하며 0은 즉시 predicate 검사다. Event·Semaphore·Thread 완료 대기는 최초 monotonic deadline의 잔여 시간을 재계산하여 spurious wake마다 timeout을 다시 시작하지 않는다. timeout은 deadline 이후 즉시 스케줄될 보장이 없으며 오버런은 OS 스케줄링의 영향을 받는다.
@@ -39,6 +52,6 @@ Windows는 CRT 정리가 있는 `_beginthreadex`와 handle 회수를 사용한�
 
 단위 fixture는 thread start/재시작/self-join, 완료 timeout, CV predicate·notify, 이벤트 유지·reset, semaphore 상한·생산자/소비자, TLS 소멸자가 막힌 동안의 entry 완료와 Join 완료 분리를 검증한다. 미회수 Thread 파괴는 자식 프로세스에서 Fatal 진단을 확인한다. Name·Text·Object의 동시성 fixture도 이 공통 계층을 사용한다.
 
-원자 연산 추상화, RWLock, thread name/priority/affinity/stack 설정, 취소 토큰, worker pool·dependency scheduler는 후속이다. native 스레드 생성·join의 OS 실패 강제 주입과 모든 스케줄 interleaving의 증명은 현재 범위가 아니다. 실제 실행 구성·개수·source digest는 Foundation 상태 문서에서 확인한다.
+RWLock, thread affinity, 취소 토큰은 후속이다(원자 연산은 `Platform/Atomics.h`, worker pool·dependency scheduler는 Task 모듈 [WorkerScheduler](WorkerScheduler.ko.md)에 있다). native 스레드 생성·join의 OS 실패 강제 주입과 모든 스케줄 interleaving의 증명은 현재 범위가 아니다. 실제 실행 구성·개수·source digest는 Foundation 상태 문서에서 확인한다.
 
 현재 구현은 동일 source digest로 Windows x64 Debug/Release/ASan과 macOS ARM64 Debug/ASan 실행을 통과했다. 동시 Join/Wait fixture 2개와 TLS 종료 분리도 전체 110개에 포함된다. 최종 clean commit 근거는 [CI 실행 42771207691](https://github.com/maxidea1024/rocks/actions/runs/42771207691)이며 전체 실행·미완료 범위는 [Foundation 상태](FoundationStatus.ko.md)를 따른다.

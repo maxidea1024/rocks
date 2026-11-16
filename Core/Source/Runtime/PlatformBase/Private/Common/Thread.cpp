@@ -9,6 +9,54 @@ namespace {
 // OS thread id 재사용과 무관하게 자기 실행을 식별한다. pointer는 TLS 종료 정리까지 유지한다.
 thread_local ThreadState* executingThread = nullptr;
 
+// name이 MaxThreadNameBytes 이하의 올바른 UTF-8이면 길이를 length에 두고 true다. 과대 표현·대리
+// 영역·U+10FFFF 초과는 거부한다(Windows UTF-16 변환이 실패하지 않게 한다).
+bool MeasureThreadName(const char* name, usize& length) noexcept {
+    usize index = 0;
+    while (name[index] != '\0') {
+        if (index >= MaxThreadNameBytes) {
+            return false;
+        }
+        const auto lead = static_cast<uint8>(name[index]);
+        usize extra = 0;
+        uint32 codePoint = 0;
+        if (lead < 0x80) {
+            ++index;
+            continue;
+        } else if (lead >= 0xC2 && lead <= 0xDF) {
+            extra = 1;
+            codePoint = lead & 0x1Fu;
+        } else if (lead >= 0xE0 && lead <= 0xEF) {
+            extra = 2;
+            codePoint = lead & 0x0Fu;
+        } else if (lead >= 0xF0 && lead <= 0xF4) {
+            extra = 3;
+            codePoint = lead & 0x07u;
+        } else {
+            return false;
+        }
+        for (usize offset = 1; offset <= extra; ++offset) {
+            const auto next = static_cast<uint8>(name[index + offset]);
+            if ((next & 0xC0u) != 0x80u) {
+                return false;
+            }
+            codePoint = (codePoint << 6) | (next & 0x3Fu);
+        }
+        const bool overlong =
+            (extra == 2 && codePoint < 0x800u) || (extra == 3 && codePoint < 0x10000u);
+        const bool surrogate = codePoint >= 0xD800u && codePoint <= 0xDFFFu;
+        if (overlong || surrogate || codePoint > 0x10FFFFu) {
+            return false;
+        }
+        index += extra + 1;
+    }
+    if (index > MaxThreadNameBytes) {
+        return false;
+    }
+    length = index;
+    return true;
+}
+
 } // namespace
 
 bool IsExecutingThread(const ThreadState& state) noexcept {
@@ -25,6 +73,9 @@ void RunThread(ThreadState& state) noexcept {
         entry = state.entry;
         context = state.context;
     }
+    // 이름·우선순위는 entry가 보기 전에 적용한다. Start가 joinable 동안 옵션을 바꾸지 않으므로 gate
+    // 밖에서 읽어도 된다.
+    ApplyCurrentThreadOptions(state);
     entry(context);
     {
         LockGuard lock(state.gate);
@@ -52,8 +103,16 @@ Thread::~Thread() noexcept {
     state.~ThreadState();
 }
 
-ThreadStatus Thread::Start(Entry entry, void* context) noexcept {
+ThreadStatus Thread::Start(Entry entry, void* context, const ThreadOptions& options) noexcept {
     if (entry == nullptr) {
+        return ThreadStatus::InvalidArgument;
+    }
+    usize nameLength = 0;
+    if (options.name != nullptr && !detail::MeasureThreadName(options.name, nameLength)) {
+        return ThreadStatus::InvalidArgument;
+    }
+    if (options.stackBytes > MaxThreadStackBytes ||
+        static_cast<uint32>(options.priority) > static_cast<uint32>(ThreadPriority::Highest)) {
         return ThreadStatus::InvalidArgument;
     }
     auto& state = *reinterpret_cast<detail::ThreadState*>(storage_);
@@ -68,6 +127,12 @@ ThreadStatus Thread::Start(Entry entry, void* context) noexcept {
     state.entry = entry;
     state.context = context;
     state.completed = false;
+    state.priority = options.priority;
+    state.stackBytes = options.stackBytes;
+    for (usize index = 0; index < nameLength; ++index) {
+        state.name[index] = options.name[index];
+    }
+    state.name[nameLength] = '\0';
     const ThreadStatus started = detail::StartNativeThread(state);
     if (started == ThreadStatus::Success) {
         state.joinable = true;

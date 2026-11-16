@@ -4,8 +4,10 @@
 #include "PosixPlatform.h"
 #include <pthread.h>
 #include <errno.h>
+#include <limits.h>
 #include <sched.h>
 #include <time.h>
+#include <unistd.h>
 #include <new>
 
 namespace rocks::platform {
@@ -67,6 +69,26 @@ void YieldThread() noexcept {
     sched_yield();
 }
 
+usize CopyCurrentThreadName(char* buffer, usize capacity) noexcept {
+    if (buffer == nullptr || capacity == 0) {
+        return 0;
+    }
+    buffer[0] = '\0';
+    if (pthread_getname_np(pthread_self(), buffer, capacity) != 0) {
+        buffer[0] = '\0';
+        return 0;
+    }
+    usize length = 0;
+    while (length < capacity && buffer[length] != '\0') {
+        ++length;
+    }
+    if (length == capacity) {
+        buffer[0] = '\0';
+        return 0;
+    }
+    return length;
+}
+
 namespace detail {
 namespace {
 
@@ -77,14 +99,45 @@ void* ThreadEntry(void* context) noexcept {
 
 } // namespace
 
+void ApplyCurrentThreadOptions(const ThreadState& state) noexcept {
+    if (state.name[0] != '\0') {
+        PosixSetCurrentThreadName(state.name);
+    }
+    if (state.priority != ThreadPriority::Normal) {
+        PosixSetCurrentThreadPriority(state.priority);
+    }
+}
+
 ThreadStatus StartNativeThread(ThreadState& state) noexcept {
     static_assert(sizeof(pthread_t) <= sizeof(state.native));
     static_assert(alignof(pthread_t) <= alignof(ThreadState));
-    auto* handle = ::new (state.native) pthread_t{};
-    if (pthread_create(handle, nullptr, ThreadEntry, &state) != 0) {
+    pthread_attr_t attributes;
+    if (pthread_attr_init(&attributes) != 0) {
         return ThreadStatus::SystemError;
     }
-    return ThreadStatus::Success;
+    ThreadStatus status = ThreadStatus::Success;
+    if (state.stackBytes != 0) {
+        // pthread는 PTHREAD_STACK_MIN 미만·(일부 구현에서) page 배수가 아닌 크기를 거부하므로 둘 다
+        // 맞춰 올린다. 상한(MaxThreadStackBytes)은 Start가 검사했으므로 올림이 넘치지 않는다.
+        const long pageBytes = sysconf(_SC_PAGESIZE);
+        const usize page = pageBytes > 0 ? static_cast<usize>(pageBytes) : usize{4096};
+        const auto minimum = static_cast<usize>(PTHREAD_STACK_MIN);
+        usize bytes = state.stackBytes < minimum ? minimum : state.stackBytes;
+        bytes = (bytes + page - 1) / page * page;
+        if (pthread_attr_setstacksize(&attributes, bytes) != 0) {
+            status = ThreadStatus::InvalidArgument;
+        }
+    }
+    if (status == ThreadStatus::Success) {
+        auto* handle = ::new (state.native) pthread_t{};
+        if (pthread_create(handle, &attributes, ThreadEntry, &state) != 0) {
+            status = ThreadStatus::SystemError;
+        }
+    }
+    if (pthread_attr_destroy(&attributes) != 0) {
+        Fatal("pthread_attr_destroy failed");
+    }
+    return status;
 }
 
 ThreadStatus JoinNativeThread(ThreadState& state) noexcept {
