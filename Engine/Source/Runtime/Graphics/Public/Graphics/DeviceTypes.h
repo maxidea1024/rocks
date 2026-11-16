@@ -220,6 +220,11 @@ struct DeviceInfo {
     uint64 deviceEpoch = 0;
     bool validationEnabled = false;
     bool software = false;
+    // 자원·파이프라인 생성(Create*)을 소유 스레드가 아닌 스레드에서도 부를 수 있는지다(RenderBase
+    // 5.4절 GX11). false면 소유 스레드 전용이고 다른 스레드의 생성 요청은 렌더 lane 작업으로
+    // 넘긴다. 지금은 두 backend 모두 false다: OpenGL은 context가 소유 스레드에 묶이고, D3D12는 초기
+    // 데이터 업로드가 소유 스레드의 queue 제출을 요구하므로 업로드 경로(GX8)와 함께 연다.
+    bool concurrentResourceCreation = false;
 };
 
 } // namespace rocks::graphics

@@ -41,9 +41,21 @@ protected:
 //   }
 //   device.Retire(vertices.Value());                 // 마지막 사용 fence 뒤에 해제된다
 //
+// 스레드 모델(RenderBase 5.4절 GX11):
+// - 소유 스레드 하나가 장치를 쓴다. 처음 소유자는 장치를 만든 스레드다. 제출·present·fence
+// 신호·장치
+//   상태 변경(EndFrame·WaitIdle·Retire·ReclaimCompleted·스왑체인)은 소유 스레드 전용이다.
+// - 기록 객체(CommandContext)는 기록하는 스레드마다 하나이며 소유 스레드가 제출한다. 지금은 소유
+//   스레드의 BeginFrame·BeginOffscreen이 돌려주는 하나뿐이다(병렬 기록은 GX4·RG3).
+// - 자원·파이프라인 생성의 스레드 안전 여부는 DeviceInfo::concurrentResourceCreation이 공개한다.
+//   false면 생성도 소유 스레드 전용이다.
+// - "스레드 안전" 표시가 붙은 함수(Info·fence API·소유권 조회)는 어느 스레드에서나 부를 수 있다.
+// - 소유권 이관(GX10): 소유 스레드가 ReleaseOwnership으로 놓고 새 스레드가 AcquireOwnership으로
+//   잡는다. 그 사이와 다른 스레드에서의 소유 스레드 전용 호출은 Debug·Development 구성에서
+//   WrongThread로 거부한다(반환값이 없는 호출은 무시하고 RejectedCalls를 올린다). Release 구성은
+//   검사를 생략한다. 기록 객체의 그리기 호출은 검사하지 않는다(소유 스레드의 Begin만 돌려준다).
+//
 // 계약:
-// - 생성한 스레드에서만 사용한다(D3D12 큐·OpenGL context 소유 스레드). 예외는 아래 "스레드 안전"
-//   표시가 붙은 fence API다.
 // - 프레임은 한 번에 하나만 기록한다. BeginFrame/BeginOffscreen 뒤 EndFrame 전의 다른 Begin은
 //   Busy다.
 // - 제출·완료·회수(계획 11.2절, RenderBase 4.4절 GX7): EndFrame·업로드·WaitIdle의 queue 제출은
@@ -142,6 +154,28 @@ public:
 
     // 장치 손실 상태인지다.
     virtual bool IsLost() const noexcept = 0;
+
+    // --- 소유권(GX10, 스레드 안전) ---
+
+    // 이 스레드가 장치 소유 스레드인지다.
+    virtual bool IsOwnerThread() const noexcept = 0;
+
+    // 소유 스레드가 소유권을 놓는다. OpenGL은 이 스레드에서 context를 뗀다. 그 뒤
+    // AcquireOwnership할 때까지 소유자가 없다. 실패: 소유 스레드가 아니면 WrongThread, 기록 중이면
+    // Busy.
+    //
+    // 사용 예(렌더 lane 시작):
+    //   device.ReleaseOwnership();                          // 게임 lane
+    //   lane.Post([&]() noexcept { device.AcquireOwnership(); });   // 렌더 lane
+    virtual Result<void> ReleaseOwnership() noexcept = 0;
+
+    // 소유자가 없는 장치를 이 스레드가 잡는다. OpenGL은 이 스레드에 context를 붙인다. 이미 이
+    // 스레드가 소유자면 성공이다. 실패: 다른 스레드가 소유 중이면 Busy, context를 붙이지 못하면
+    // DependencyFailed(소유자 없음으로 남는다).
+    virtual Result<void> AcquireOwnership() noexcept = 0;
+
+    // 소유 스레드가 아닌 곳의 호출을 거부한 누적 수다(Debug·Development, 진단·시험).
+    virtual uint64 RejectedCalls() const noexcept = 0;
 
     // --- 진단 ---
 

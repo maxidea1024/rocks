@@ -1,7 +1,9 @@
 #include <Core/Containers/Array.h>
 #include <Core/Text/String.h>
+#include <Graphics/DeviceOwnership.h>
 #include <Graphics/FenceTimeline.h>
 #include <OpenGLGraphics/OpenGLDevice.h>
+#include <Platform/Fatal.h>
 
 #include <Windows.h>
 #include <GL/gl.h>
@@ -389,6 +391,10 @@ public:
     }
 
     ~OpenGLDevice() override {
+        // 장치는 소유 스레드(또는 소유자가 없을 때 아무 스레드)에서 파괴한다.
+        if (!ownership_.IsOwner() && !ownership_.Acquire()) {
+            platform::Fatal("graphics device destroyed while another thread owns it");
+        }
         const bool current = context_ != nullptr && MakeCurrent(deviceDc_);
         if (current) {
             glFinish();
@@ -605,11 +611,17 @@ public:
         info.backend = Backend::OpenGL;
         info.adapterName = adapterName_.View();
         info.deviceEpoch = timeline_.DeviceEpoch();
+        info.concurrentResourceCreation = false;
         info.validationEnabled = validation_;
         return info;
     }
 
     Result<SwapChainHandle> CreateSwapChain(const SwapChainDesc& desc) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<SwapChainHandle>::Failure(owner.Error());
+        }
+
         if (desc.surface.window == nullptr || desc.width == 0 || desc.height == 0) {
             return Result<SwapChainHandle>::Failure(ErrorCode::InvalidArgument);
         }
@@ -648,6 +660,11 @@ public:
 
     Result<void> ResizeSwapChain(SwapChainHandle handle, uint32 width,
                                  uint32 height) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<void>::Failure(owner.Error());
+        }
+
         SwapChainRecord* record = swapChains_.Find(handle.slot);
         if (record == nullptr) {
             return Result<void>::Failure(ErrorCode::StaleHandle);
@@ -663,6 +680,11 @@ public:
 
     Result<BufferHandle> CreateBuffer(const BufferDesc& desc,
                                       Span<const uint8> initial) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<BufferHandle>::Failure(owner.Error());
+        }
+
         if (desc.size == 0 || initial.Size() != desc.size) {
             return Result<BufferHandle>::Failure(ErrorCode::InvalidArgument);
         }
@@ -683,6 +705,11 @@ public:
 
     Result<TextureHandle> CreateTexture(const TextureDesc& desc,
                                         Span<const uint8> pixels) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<TextureHandle>::Failure(owner.Error());
+        }
+
         const uint32 bytesPerPixel = BytesPerPixel(desc.format);
         const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
         const uint64 size = MipChainBytes(desc.width, desc.height, desc.mipLevels, desc.format);
@@ -750,6 +777,11 @@ public:
     }
 
     Result<PipelineHandle> CreatePipeline(const PipelineDesc& desc) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<PipelineHandle>::Failure(owner.Error());
+        }
+
         if (desc.vertex.glsl.ByteCount() == 0 || desc.pixel.glsl.ByteCount() == 0 ||
             desc.vertexStride == 0 || desc.attributes.Size() == 0 || desc.attributes.Size() > 8 ||
             InternalFormat(desc.colorFormat) == 0) {
@@ -808,6 +840,11 @@ public:
 
     Result<CommandContext*> BeginFrame(SwapChainHandle handle,
                                        const ClearColor& clear) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<CommandContext*>::Failure(owner.Error());
+        }
+
         SwapChainRecord* record = swapChains_.Find(handle.slot);
         if (record == nullptr) {
             return Result<CommandContext*>::Failure(ErrorCode::StaleHandle);
@@ -846,6 +883,11 @@ public:
 
     Result<CommandContext*> BeginOffscreen(TextureHandle handle,
                                            const ClearColor& clear) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<CommandContext*>::Failure(owner.Error());
+        }
+
         TextureRecord* record = textures_.Find(handle.slot);
         if (record == nullptr || record->framebuffer == 0) {
             return Result<CommandContext*>::Failure(record == nullptr ? ErrorCode::StaleHandle
@@ -870,6 +912,11 @@ public:
     }
 
     Result<GpuFencePoint> EndFrame() noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<GpuFencePoint>::Failure(owner.Error());
+        }
+
         if (!recording_) {
             return Result<GpuFencePoint>::Failure(ErrorCode::InvalidArgument);
         }
@@ -894,6 +941,11 @@ public:
     }
 
     Result<void> ReadPixels(TextureHandle handle, Span<uint8> out) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<void>::Failure(owner.Error());
+        }
+
         TextureRecord* record = textures_.Find(handle.slot);
         if (record == nullptr) {
             return Result<void>::Failure(ErrorCode::StaleHandle);
@@ -915,6 +967,10 @@ public:
     }
 
     void Retire(BufferHandle handle) noexcept override {
+        if (!ownership_.Check()) {
+            return;
+        }
+
         const BufferRecord* record = buffers_.Find(handle.slot);
         if (record == nullptr) {
             return;
@@ -928,6 +984,10 @@ public:
     }
 
     void Retire(TextureHandle handle) noexcept override {
+        if (!ownership_.Check()) {
+            return;
+        }
+
         const TextureRecord* record = textures_.Find(handle.slot);
         if (record == nullptr || handle == white_) {
             return;
@@ -942,6 +1002,10 @@ public:
     }
 
     void Retire(PipelineHandle handle) noexcept override {
+        if (!ownership_.Check()) {
+            return;
+        }
+
         const PipelineRecord* record = pipelines_.Find(handle.slot);
         if (record == nullptr) {
             return;
@@ -956,6 +1020,10 @@ public:
     }
 
     void Retire(SwapChainHandle handle) noexcept override {
+        if (!ownership_.Check()) {
+            return;
+        }
+
         SwapChainRecord* record = swapChains_.Find(handle.slot);
         if (record == nullptr) {
             return;
@@ -975,10 +1043,19 @@ public:
     }
 
     void ReclaimCompleted() noexcept override {
+        if (!ownership_.Check()) {
+            return;
+        }
+
         DeleteRetired(timeline_.Completed());
     }
 
     Result<void> WaitIdle() noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<void>::Failure(owner.Error());
+        }
+
         if (!MakeCurrentForResources()) {
             return Fail("wglMakeCurrent failed");
         }
@@ -1012,6 +1089,42 @@ public:
 
     bool IsLost() const noexcept override {
         return timeline_.IsLost();
+    }
+
+    bool IsOwnerThread() const noexcept override {
+        return ownership_.IsOwner();
+    }
+
+    Result<void> ReleaseOwnership() noexcept override {
+        if (!ownership_.IsOwner()) {
+            return Result<void>::Failure(ErrorCode::WrongThread);
+        }
+        if (recording_) {
+            return Result<void>::Failure(ErrorCode::Busy);
+        }
+        // context는 한 번에 한 스레드에만 붙는다. 새 소유 스레드가 붙일 수 있게 이 스레드에서 뗀다.
+        if (wglGetCurrentContext() == context_) {
+            wglMakeCurrent(nullptr, nullptr);
+        }
+        return ownership_.Release();
+    }
+
+    Result<void> AcquireOwnership() noexcept override {
+        const bool alreadyOwner = ownership_.IsOwner();
+        auto acquired = ownership_.Acquire();
+        if (!acquired) {
+            return acquired;
+        }
+        if (!alreadyOwner && !MakeCurrent(deviceDc_)) {
+            auto released = ownership_.Release();
+            (void)released;
+            return Fail("wglMakeCurrent failed on the new owner thread");
+        }
+        return Result<void>::Success();
+    }
+
+    uint64 RejectedCalls() const noexcept override {
+        return ownership_.Rejected();
     }
 
     usize PendingRetireCount() const noexcept override {
@@ -1320,6 +1433,7 @@ private:
     uint64 fenceValue_ = 0;
     OpenGLFenceSource fenceSource_;
     FenceTimeline timeline_;
+    DeviceOwnership ownership_;
     bool recording_ = false;
     bool bufferBound_ = false;
     bool constantsDirty_ = false;

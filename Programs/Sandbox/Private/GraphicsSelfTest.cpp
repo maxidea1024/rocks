@@ -256,6 +256,87 @@ void RunFenceChecks(const char* name, graphics::Device& device, render::Renderer
     }
 }
 
+// 소유권을 넘겨받은 스레드에서 그리는 시험의 상태다.
+struct OwnerThreadRun {
+    graphics::Device* device = nullptr;
+    render::Renderer* renderer = nullptr;
+    graphics::TextureHandle target;
+    Array<uint8>* pixels = nullptr;
+    platform::ManualResetEvent acquired;
+    platform::ManualResetEvent proceed;
+    bool owned = false;
+    bool drew = false;
+    bool released = false;
+
+    static void Run(void* raw) noexcept {
+        auto* self = static_cast<OwnerThreadRun*>(raw);
+        self->owned = self->device->AcquireOwnership().IsOk() && self->device->IsOwnerThread();
+        self->acquired.Signal();
+        self->proceed.Wait();
+        if (self->owned) {
+            render::RenderView view;
+            view.viewProjection = FillScreen();
+            render::RenderItem item;
+            item.mesh = render::MeshKind::Triangle;
+            auto frame = self->device->BeginOffscreen(self->target, view.clear);
+            if (frame) {
+                self->renderer->Draw(*frame.Value(), view,
+                                     Span<const render::RenderItem>(&item, 1));
+                self->drew = self->device->EndFrame().IsOk() &&
+                             self->pixels->TryResize(static_cast<usize>(Size) * Size * 4).IsOk() &&
+                             self->device->ReadPixels(self->target, self->pixels->View()).IsOk();
+            }
+        }
+        self->released = self->device->ReleaseOwnership().IsOk();
+    }
+};
+
+// GX11 장치 스레드 모델·GX10 소유권 이관(RenderBase 5.4절): 생성 스레드 안전 여부 공개, 소유자가
+// 없을 때 소유 스레드 전용 호출 거부(Development), 다른 스레드로 넘겨 그리고 되돌려 받기를
+// 확인한다.
+void RunOwnershipChecks(const char* name, graphics::Device& device, render::Renderer& renderer,
+                        graphics::TextureHandle target, Allocator& allocator) noexcept {
+    Check(!device.Info().concurrentResourceCreation && device.IsOwnerThread(), name,
+          "device starts owned by its creating thread");
+    Check(device.ReleaseOwnership().IsOk() && !device.IsOwnerThread(), name,
+          "owner releases the device");
+    if constexpr (!IsReleaseBuild) {
+        const uint64 before = device.RejectedCalls();
+        const graphics::ClearColor clear;
+        const bool rejected =
+            device.BeginOffscreen(target, clear).Error() == ErrorCode::WrongThread &&
+            device.WaitIdle().Error() == ErrorCode::WrongThread;
+        device.ReclaimCompleted();
+        Check(rejected && device.RejectedCalls() == before + 3, name,
+              "owner-only calls are rejected while the device has no owner");
+    }
+
+    Array<uint8> pixels(allocator);
+    OwnerThreadRun run;
+    run.device = &device;
+    run.renderer = &renderer;
+    run.target = target;
+    run.pixels = &pixels;
+    platform::Thread thread;
+    const bool started =
+        thread.Start(&OwnerThreadRun::Run, &run) == platform::ThreadStatus::Success;
+    if (started) {
+        run.acquired.Wait();
+        // 다른 스레드가 가진 동안 이 스레드는 잡거나 놓을 수 없다.
+        Check(device.AcquireOwnership().Error() == ErrorCode::Busy &&
+                  device.ReleaseOwnership().Error() == ErrorCode::WrongThread,
+              name, "a second thread cannot take or drop an owned device");
+        run.proceed.Signal();
+        Check(thread.Join() == platform::ThreadStatus::Success, name, "owner thread joins");
+    }
+    Check(started && run.owned && run.drew && run.released, name,
+          "another thread takes the device, draws and releases it");
+    Check(pixels.Size() == static_cast<usize>(Size) * Size * 4 && Dominant(At(pixels, 32, 4), 0),
+          name, "frame drawn on the new owner thread is correct");
+    Check(device.AcquireOwnership().IsOk() && device.IsOwnerThread(), name,
+          "original thread takes the device back");
+}
+
 // 한 backend에서 삼각형·사각형을 그려 픽셀을 검사한다.
 void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
                 BackendResult& result) noexcept {
@@ -482,6 +563,7 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
               "quad bottom-right samples white");
     }
     RunFenceChecks(name, device, renderer, target.Value(), result.triangle.GetAllocator());
+    RunOwnershipChecks(name, device, renderer, target.Value(), result.triangle.GetAllocator());
     RunSwapChainChecks(name, device, renderer, result.triangle.GetAllocator());
     Check(device.IgnoredDraws() == 0, name, "no ignored draws");
     Check(device.ValidationErrorCount() == 0, name, "no validation errors");

@@ -1,6 +1,7 @@
 #include <Core/Containers/Array.h>
 #include <Core/Text/String.h>
 #include <D3D12Graphics/D3D12Device.h>
+#include <Graphics/DeviceOwnership.h>
 #include <Graphics/FenceTimeline.h>
 #include <Platform/Fatal.h>
 
@@ -343,6 +344,10 @@ public:
     }
 
     ~D3D12Device() override {
+        // 장치는 소유 스레드(또는 소유자가 없을 때 아무 스레드)에서 파괴한다.
+        if (!ownership_.IsOwner() && !ownership_.Acquire()) {
+            platform::Fatal("graphics device destroyed while another thread owns it");
+        }
         if (queue_ && fence_ && fenceEvent_ != nullptr) {
             auto idle = WaitIdle();
             (void)idle;
@@ -504,12 +509,18 @@ public:
         info.backend = Backend::D3D12;
         info.adapterName = adapterName_.View();
         info.deviceEpoch = timeline_.DeviceEpoch();
+        info.concurrentResourceCreation = false;
         info.validationEnabled = validation_;
         info.software = software_;
         return info;
     }
 
     Result<SwapChainHandle> CreateSwapChain(const SwapChainDesc& desc) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<SwapChainHandle>::Failure(owner.Error());
+        }
+
         if (desc.surface.window == nullptr || desc.width == 0 || desc.height == 0) {
             return Result<SwapChainHandle>::Failure(ErrorCode::InvalidArgument);
         }
@@ -578,6 +589,11 @@ public:
 
     Result<void> ResizeSwapChain(SwapChainHandle handle, uint32 width,
                                  uint32 height) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<void>::Failure(owner.Error());
+        }
+
         SwapChainRecord* record = swapChains_.Find(handle.slot);
         if (record == nullptr) {
             return Result<void>::Failure(ErrorCode::StaleHandle);
@@ -615,6 +631,11 @@ public:
 
     Result<BufferHandle> CreateBuffer(const BufferDesc& desc,
                                       Span<const uint8> initial) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<BufferHandle>::Failure(owner.Error());
+        }
+
         if (desc.size == 0 || initial.Size() != desc.size) {
             return Result<BufferHandle>::Failure(ErrorCode::InvalidArgument);
         }
@@ -652,6 +673,11 @@ public:
 
     Result<TextureHandle> CreateTexture(const TextureDesc& desc,
                                         Span<const uint8> pixels) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<TextureHandle>::Failure(owner.Error());
+        }
+
         const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
         const uint64 size = MipChainBytes(desc.width, desc.height, desc.mipLevels, desc.format);
         if (desc.width > 16384 || desc.height > 16384 || size == 0 ||
@@ -735,6 +761,11 @@ public:
     }
 
     Result<PipelineHandle> CreatePipeline(const PipelineDesc& desc) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<PipelineHandle>::Failure(owner.Error());
+        }
+
         if (desc.vertex.hlsl.ByteCount() == 0 || desc.pixel.hlsl.ByteCount() == 0 ||
             desc.vertexStride == 0 || desc.attributes.Size() == 0 || desc.attributes.Size() > 8 ||
             ResourceFormat(desc.colorFormat) == DXGI_FORMAT_UNKNOWN) {
@@ -814,6 +845,11 @@ public:
 
     Result<CommandContext*> BeginFrame(SwapChainHandle handle,
                                        const ClearColor& clear) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<CommandContext*>::Failure(owner.Error());
+        }
+
         SwapChainRecord* record = swapChains_.Find(handle.slot);
         if (record == nullptr) {
             return Result<CommandContext*>::Failure(ErrorCode::StaleHandle);
@@ -842,6 +878,11 @@ public:
 
     Result<CommandContext*> BeginOffscreen(TextureHandle handle,
                                            const ClearColor& clear) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<CommandContext*>::Failure(owner.Error());
+        }
+
         TextureRecord* record = textures_.Find(handle.slot);
         if (record == nullptr || !record->renderTarget) {
             return Result<CommandContext*>::Failure(record == nullptr ? ErrorCode::StaleHandle
@@ -866,6 +907,11 @@ public:
     }
 
     Result<GpuFencePoint> EndFrame() noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<GpuFencePoint>::Failure(owner.Error());
+        }
+
         if (!recording_) {
             return Result<GpuFencePoint>::Failure(ErrorCode::InvalidArgument);
         }
@@ -918,6 +964,11 @@ public:
     }
 
     Result<void> ReadPixels(TextureHandle handle, Span<uint8> out) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<void>::Failure(owner.Error());
+        }
+
         TextureRecord* record = textures_.Find(handle.slot);
         if (record == nullptr) {
             return Result<void>::Failure(ErrorCode::StaleHandle);
@@ -986,6 +1037,10 @@ public:
     }
 
     void Retire(BufferHandle handle) noexcept override {
+        if (!ownership_.Check()) {
+            return;
+        }
+
         BufferRecord* record = buffers_.Find(handle.slot);
         if (record == nullptr) {
             return;
@@ -996,6 +1051,10 @@ public:
     }
 
     void Retire(TextureHandle handle) noexcept override {
+        if (!ownership_.Check()) {
+            return;
+        }
+
         TextureRecord* record = textures_.Find(handle.slot);
         if (record == nullptr || handle == white_) {
             return;
@@ -1007,6 +1066,10 @@ public:
     }
 
     void Retire(PipelineHandle handle) noexcept override {
+        if (!ownership_.Check()) {
+            return;
+        }
+
         PipelineRecord* record = pipelines_.Find(handle.slot);
         if (record == nullptr) {
             return;
@@ -1017,6 +1080,10 @@ public:
     }
 
     void Retire(SwapChainHandle handle) noexcept override {
+        if (!ownership_.Check()) {
+            return;
+        }
+
         SwapChainRecord* record = swapChains_.Find(handle.slot);
         if (record == nullptr) {
             return;
@@ -1033,10 +1100,19 @@ public:
     }
 
     void ReclaimCompleted() noexcept override {
+        if (!ownership_.Check()) {
+            return;
+        }
+
         ProcessRetired();
     }
 
     Result<void> WaitIdle() noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<void>::Failure(owner.Error());
+        }
+
         auto signaled = SignalQueue();
         if (!signaled) {
             // 장치가 제거되었으면 fence 완료 값이 최대라 회수 대기 항목을 모두 놓을 수 있다.
@@ -1072,6 +1148,28 @@ public:
 
     bool IsLost() const noexcept override {
         return timeline_.IsLost();
+    }
+
+    bool IsOwnerThread() const noexcept override {
+        return ownership_.IsOwner();
+    }
+
+    Result<void> ReleaseOwnership() noexcept override {
+        if (!ownership_.IsOwner()) {
+            return Result<void>::Failure(ErrorCode::WrongThread);
+        }
+        if (recording_) {
+            return Result<void>::Failure(ErrorCode::Busy);
+        }
+        return ownership_.Release();
+    }
+
+    Result<void> AcquireOwnership() noexcept override {
+        return ownership_.Acquire();
+    }
+
+    uint64 RejectedCalls() const noexcept override {
+        return ownership_.Rejected();
     }
 
     usize PendingRetireCount() const noexcept override {
@@ -1730,6 +1828,7 @@ private:
     mutable Array<uint8> messageScratch_;
     D3D12FenceSource fenceSource_;
     FenceTimeline timeline_;
+    DeviceOwnership ownership_;
     bool recording_ = false;
     bool pipelineBound_ = false;
     bool bufferBound_ = false;
