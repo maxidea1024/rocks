@@ -594,8 +594,12 @@ internal static class CppEmitter
             Line("}");
         }
 
+        EmitValueCopy(type, native, Line);
         Line("static RuntimeStructOps Ops(ModuleLease module = {}) noexcept {");
         Line($"auto ops = MakeRuntimeStructOps<{native}>(Move(module));");
+        Line("if constexpr (ValueCopyable) {");
+        Line($"ops.copy = +[](void* destination, const void* source, Allocator& allocator) noexcept -> Result<void> {{ return CopyValue(*static_cast<{native}*>(destination), *static_cast<const {native}*>(source), allocator); }};");
+        Line("}");
         if (type.Fields.Count != 0)
         {
             Line("static const RuntimeStructFieldOps fields[] = {");
@@ -627,6 +631,45 @@ internal static class CppEmitter
         Line("return registry.RegisterStruct(Schema(), Ops(Move(module)));");
         Line("}");
         Line("};");
+        // 다른 값(Array<S>·Map 값·Optional<S>·멤버 S)의 깊은 복사가 이 struct의 CopyValue를 쓰게 잇는다(Object/ValueCopy.h).
+        Line($"template <> struct detail::ValueCopy<{native}> {{");
+        Line($"static constexpr bool Supported = GeneratedType<{native}>::ValueCopyable;");
+        Line($"static Result<void> Copy({native}& destination, const {native}& source, Allocator& allocator) noexcept {{ return GeneratedType<{native}>::CopyValue(destination, source, allocator); }}");
+        Line("};");
+    }
+
+    // struct 값의 깊은 복사다(리플렉션 B9i3c0 — Docs/Design/ReflectionExtensions.ko.md 10.2절, UE UScriptStruct::CopyScriptStruct 대응).
+    // MetaCompiler는 struct의 모든 비정적 멤버에 PROPERTY 또는 NATIVE를 요구하므로 두 목록이 struct의 멤버 전부다: 멤버마다
+    // detail::TryCopyValue로 새 값을 다 만든 뒤 이동 대입 한 번으로 넣는다(실패하면 destination 그대로). 한 멤버라도 복사할 수
+    // 없으면(ObjectRef·Registry 컨테이너·복사 의미가 없는 NATIVE 타입) ValueCopyable이 거짓이고 CopyValue는 Unsupported다 — 멤버를
+    // 조용히 빠뜨리지 않는다. trivially copyable struct는 대입 한 번이다. 복사할 수 없는 분기가 컴파일되지 않게 템플릿이다.
+    private static void EmitValueCopy(ClassModel type, string native, Action<string> Line)
+    {
+        string[] members = type.Fields.Select(field => field.Name).Concat(type.NativeMembers.Select(member => member.Name)).ToArray();
+        string supported = string.Concat(members.Select(member => $" && ::rocks::detail::ValueCopy<decltype({native}::{member})>::Supported"));
+        Line($"static constexpr bool ValueCopyable = ::rocks::detail::IsPlainCopyV<{native}> || (::rocks::IsNothrowMoveAssignableV<{native}>{supported});");
+        Line($"template <class Self = {native}>");
+        Line("static Result<void> CopyValue(Self& destination, const Self& source, Allocator& allocator) noexcept {");
+        Line("if constexpr (::rocks::detail::IsPlainCopyV<Self>) {");
+        Line("(void)allocator;");
+        Line("destination = source;");
+        Line("return Result<void>::Success();");
+        Line("} else if constexpr (ValueCopyable) {");
+        Line("Self copy = ::rocks::detail::MakeAllocatedValue<Self>(allocator);");
+        foreach (string member in members)
+        {
+            Line($"if (auto copied = ::rocks::detail::TryCopyValue(copy.{member}, source.{member}, allocator); !copied) {{ return copied; }}");
+        }
+
+        Line("destination = Move(copy);");
+        Line("return Result<void>::Success();");
+        Line("} else {");
+        Line("(void)destination;");
+        Line("(void)source;");
+        Line("(void)allocator;");
+        Line("return Result<void>::Failure(ErrorCode::Unsupported);");
+        Line("}");
+        Line("}");
     }
 
     // 클래스·struct 스키마의 필드 배열이다(필드가 없으면 내지 않는다). 배열 필드는 value가 {Array, 0}이고 원소 형식

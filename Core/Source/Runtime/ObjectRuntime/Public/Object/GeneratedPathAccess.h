@@ -3,6 +3,7 @@
 #include <Base/TypeTraits.h>
 #include <Object/GeneratedFieldAccess.h>
 #include <Object/PathCursor.h>
+#include <Object/ValueCopy.h>
 #include <Platform/Fatal.h>
 
 // 경로 접근(B6) 생성 thunk 템플릿이다(Docs/Design/ReflectionFoundations.ko.md 7.1절). MetaCompiler

@@ -469,6 +469,47 @@ struct RuntimeStructOps {
     bool requiresWorldOnlyOwner = false;
     ModuleLease module;
     Span<const RuntimeStructFieldOps> fields;
+    // 깊은 복사다(리플렉션 B9i3c0 — Docs/Design/ReflectionExtensions.ko.md 10.2절, UE
+    // UScriptStruct::CopyScriptStruct 대응): destination(살아 있는 S 값)을 source의 깊은 복사로
+    // 바꾼다. 새 값은 allocator로 따로 다 만든 뒤 무할당 이동으로 넣으므로 실패하면(OutOfMemory 등)
+    // destination·source 모두 그대로다. 생성 코드는 GeneratedType<S>::CopyValue(PROPERTY·NATIVE
+    // 멤버 모두)를 싣고, 복사할 수 없는 멤버(ObjectRef·Registry 컨테이너·복사 의미가 없는 NATIVE
+    // 타입)가 있으면 null이다. 수동 함수표는 null이어도 된다(그 struct의 분리된 값 연산이
+    // Unsupported).
+    Result<void> (*copy)(void* destination, const void* source,
+                         Allocator& allocator) noexcept = nullptr;
+    // 두 S 값의 내용을 무할당·무실패로 맞바꾼다(MakeRuntimeStructOps — S가 nothrow 이동 생성·대입을
+    // 가지면 채운다, 아니면 null). 버퍼는 각자의 allocator와 함께 옮겨 간다.
+    void (*swap)(void* first, void* second) noexcept = nullptr;
+};
+
+// 필드·멤버 값 하나의 타입 무관 연산 표다(리플렉션 B9i3c0 — Docs/Design/ReflectionExtensions.ko.md
+// 10.2절, UE FProperty::InitializeValue·CopyCompleteValue·DestroyValue 대응). C++ 타입마다
+// detail::ValueOpsOf<T>()(Object/ValueCopy.h)가 정적 표를 준다. 대입 묶음이 값 부분 트리의 사본을
+// 만들고(copy) 게시 때 옮기는(swap) 데 쓴다.
+//
+// 사용 예:
+//   const RuntimeValueOps& ops = detail::ValueOpsOf<Array<String>>();
+//   alignas(Array<String>) unsigned char storage[sizeof(Array<String>)];
+//   ops.construct(storage, allocator);
+//   auto copied = ops.copy(storage, &source, allocator);   // 실패하면 storage는 빈 배열 그대로
+//   ops.destroy(storage);
+struct RuntimeValueOps {
+    usize size = 0;
+    usize alignment = 0;
+    // NativeTypeKey<T>()다(분리된 값과 경로 thunk의 멤버 형식을 대조한다).
+    const void* nativeType = nullptr;
+    // storage(size·alignment를 지키는 빈 저장소)에 기본 값을 만든다(noexcept T(Allocator&)가 있으면
+    // allocator를 넘기고 없으면 T() — 정적 배열은 원소마다).
+    void (*construct)(void* storage, Allocator& allocator) noexcept = nullptr;
+    // 값을 소멸한다(저장소는 반환하지 않는다).
+    void (*destroy)(void* value) noexcept = nullptr;
+    // 깊은 복사(RuntimeStructOps::copy와 같은 계약 — 실패하면 destination 그대로). 복사할 수 없는
+    // 타입은 null이다.
+    Result<void> (*copy)(void* destination, const void* source,
+                         Allocator& allocator) noexcept = nullptr;
+    // 무할당 교환이다. 교환할 수 없는 타입은 null이다.
+    void (*swap)(void* first, void* second) noexcept = nullptr;
 };
 
 // 생성·추적·소멸 콜백은 noexcept이며 Registry 잠금 밖에서 실행된다.
@@ -547,7 +588,8 @@ RuntimeTypeOps MakeRuntimeTypeOps(ModuleLease module = {}) noexcept {
 // 때
 // `&S::Migrate` — 생성 특수화는 ROCKS_GENERATED_BODY의 friend이므로 private Migrate도 연결되고,
 // 시그니처가 다르면 컴파일 오류다). 채우는 것: size·alignment·nativeType, construct(noexcept
-// S(Allocator&)가 있으면 allocator를 주입하고 없으면 noexcept S()), destroy, module.
+// S(Allocator&)가 있으면 allocator를 주입하고 없으면 noexcept S()), destroy, swap(nothrow 이동이
+// 있을 때), module. copy는 생성 코드가 GeneratedType<S>::CopyValue로 채운다.
 //
 // 리플렉션 struct와 배열 원소의 일반 규칙(7.1절): 이동된(moved-from) 값의 소멸자는 allocator를
 // 부르지 않는다(NATIVE 멤버 포함 — String·Array처럼 버퍼를 넘겨주고 비어야 한다). 경로 연산의 원소
@@ -577,6 +619,16 @@ RuntimeStructOps MakeRuntimeStructOps(ModuleLease module = {}) noexcept {
         }
     };
     ops.destroy = [](void* memory) noexcept { static_cast<S*>(memory)->S::~S(); };
+    if constexpr (IsNothrowMoveConstructibleV<S> && IsNothrowMoveAssignableV<S>) {
+        ops.swap = [](void* first, void* second) noexcept {
+            S& left = *static_cast<S*>(first);
+            S& right = *static_cast<S*>(second);
+            S held(Move(left));
+            left = Move(right);
+            right = Move(held);
+        };
+    }
+
     ops.module = Move(module);
     return ops;
 }

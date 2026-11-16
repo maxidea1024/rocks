@@ -378,6 +378,8 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     record->structOps.destroy = ops.destroy;
     record->structOps.trace = ops.trace;
     record->structOps.migrate = ops.migrate;
+    record->structOps.copy = ops.copy;
+    record->structOps.swap = ops.swap;
     record->structOps.requiresWorldOnlyOwner = requiresWorldOnlyOwner;
     record->structOps.fields = {fieldOps, schema.fields.Size()};
 

@@ -848,6 +848,17 @@ Result<PreparedAssignments> PrepareAssignments(AssignmentTarget, Span<const Text
 - 대상 고정은 새 API가 없다: 호출자가 기존 `TryPin`(RootRef)으로 고정하고, 고정이 GC 회수는 막지만 Discard는 막지 못함을 `BeginBatchPublish`의 재확인이 받는다.
 - 시험: ObjectRuntime `BatchPublish_PublishesUnitsAndRecordsObserverOnce`·`BatchPublish_MutationStampTracksWrites`·`BatchPublish_RevalidationFailuresChangeNothing`·`BatchPublish_OpenSectionMakesRegistryBusy`·`BatchPublish_ObserverReservationFailuresChangeNothing`·`BatchPublish_ShadesNewTargetsDuringMarking`.
 
+구현(B9i3c0)에서 정한 점(대입 묶음의 선행 기반 — 스펙이 전제한 "값 부분 트리의 사본(`TryClone`)과 게시 때 옮기기"를 할 타입 무관 값 연산이 ObjectRuntime에 없었다. B9i3c 착수 때 확인):
+
+- UE 대응: `UScriptStruct::ICppStructOps`(Construct·Destruct·Copy — UE 5.8 CoreUObject/Public/UObject/Class.h:1779·1814·1834·1979)와 `FProperty::CopyCompleteValue`·`DestroyValue`·`InitializeValue`(UnrealType.h:915·1027·1110). UE의 struct 복사는 `STRUCT_CopyNative`면 C++ 복사, POD면 memcpy, 그 밖은 속성마다 복사다(Class.cpp:3697-3725 `CopyScriptStruct`).
+- 값 연산 표 `RuntimeValueOps`(Object/ValueCopy.h): size·alignment·nativeType, `construct(storage, allocator)`(기본 값 — `T(Allocator&)` 또는 `T()`), `destroy`, `copy(destination, source, allocator) -> Result<void>`(깊은 복사), `swap(first, second)`(무할당 교환). `detail::ValueOpsOf<T>()`가 C++ 타입마다 정적 표를 준다(필드·멤버 값 — 경로 thunk가 멤버 형식으로 얻는다). 복사·교환할 수 없는 타입은 그 칸이 null이다.
+- 깊은 복사 `detail::TryCopyValue(destination, source, allocator)`: 새 값을 allocator로 따로 다 만든 뒤 무할당 이동으로 destination에 넣는다 — 실패하면(OutOfMemory 등) destination·source 모두 그대로다. 종류: 단일 값·Name 토큰·WeakRef·ClassRef 등 trivially copyable이면서 복사 생성·대입이 되는 타입(`IsPlainCopyV` — 복사·이동을 모두 지운 ObjectRef를 Clang 형질이 trivially copyable로 답하므로 둘을 함께 본다)은 대입, String·SoftObjectRef는 `TryClone`, Array·OrderedMap·OrderedSet·Optional·정적 배열은 원소마다, 생성 struct는 멤버마다(아래), 그 밖의 C++ 타입은 noexcept 복사 생성·대입이 있으면 C++ 복사, 없으면 지원하지 않음(Unsupported). ObjectRef·Registry 컨테이너는 복사할 수 없다(강한 참조는 대입 묶음의 간선 변경 단위 — 10.2절 준비 단위).
+- 생성 struct: MetaCompiler는 struct의 모든 비정적 멤버에 PROPERTY 또는 NATIVE를 요구한다(ClangAstParser `FieldArguments` — 주석 없는 멤버 거부). 그래서 생성 `GeneratedType<S>::CopyValue`가 PROPERTY·NATIVE 멤버를 모두 멤버마다 복사하고(빠지는 멤버 없음 — NATIVE 멤버는 그 C++ 타입의 복사 의미), 한 멤버라도 복사할 수 없으면 `ValueCopyable`이 거짓이고 struct 복사가 없다(조용히 멤버를 빠뜨리지 않는다). Binds 미러는 실제 타입의 멤버마다다(VerifyBinds가 멤버 수·순서를 대조한다). trivially copyable struct는 대입 한 번이다. 생성 코드는 `detail::ValueCopy<S>` 특수화로 이 함수를 다른 타입의 복사에 잇는다.
+- `RuntimeStructOps`에 `copy`(생성 `CopyValue` — 수동 함수표는 null이면 지원하지 않음)와 `swap`(MakeRuntimeStructOps — nothrow 이동 생성·대입이면 무할당 교환)을 더했다. construct·destroy는 그대로다.
+- 수명·allocator: 복사본은 인자 allocator로 할당한다(살아 있는 객체에 옮길 값은 `ObjectRegistry::ObjectAllocator`). 교환은 버퍼 소유를 맞바꿀 뿐이라 옛 값은 교환한 상대가 들고, 그 소멸(반환)은 묶음 게시 구간을 나온 뒤에 한다(B9i2의 옛 버퍼 규칙과 같다).
+- 남은 기반(B9i3c0 뒷부분): 분리된 값(StructView + 저장소, 필드·멤버 하나의 상자)에서 시작하는 경로 cursor, 그 위의 경로 연산 Detach(값 연산 copy로 상자 만들기)·Attach(swap — 살아 있는 객체는 묶음 게시 구간 안, staged 객체는 ConstructionContext), 최상위 단일 값 필드의 경로 thunk 생성(지금은 aggregate만 — Attach가 String·Soft 값을 무할당으로 옮기는 데 필요), staged 객체의 중첩 경로.
+- 시험: ObjectRuntime `ValueCopy_DeepCopiesEachKind`·`ValueCopy_FailureLeavesDestinationUnchanged`(NFailAllocator)·`ValueCopy_SwapDoesNotAllocate`(할당 계수)·`ValueCopy_GeneratedStructCopiesNativeMembers`.
+
 ### 10.3 참조 resolver
 
 ```cpp
