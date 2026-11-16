@@ -173,7 +173,7 @@ inline constexpr uint32 ValueKindCount = static_cast<uint32>(ValueKind::Set) + 1
 //   WholeFieldValue        — FieldValue로 통째 읽고 쓴다(아니면 aggregate — read·write가 없고 멤버·
 //                            원소 단위 경로 연산으로만 쓴다)
 // StaticArray·InstancedStruct 자리는 리플렉션 B9 뒤 단계가 연다(Optional 내부는 B9e, Map 키·값·Set
-// 원소는 B9f2가 열었다 — Map 값의 ObjectReference는 ObjectRefMap이라 B9f4가 연다). 이 표는 그
+// 원소는 B9f2가 열었고 Map 값의 ObjectReference(ObjectRefMap)는 B9f4가 열었다). 이 표는 그
 // 자리의 허용 여부를 미리 정해 두며, 그 단계 전에는 쓰는 곳이 없다.
 enum class ValueKindProperty : uint32 {
     None = 0,
@@ -448,7 +448,8 @@ struct FieldSchema {
     Span<const char> name;
     Span<const uint8> attributes;
     // 값 형식이다. typed 필드(value.kind ≠ Opaque)에서 FieldKind::ObjectReference ⇔ value.kind가
-    // ObjectReference(또는 원소가 ObjectReference인 Array)다. 접근기 없는 Opaque 필드는 수동
+    // ObjectReference(또는 원소가 ObjectReference인 Array, 값이 ObjectReference인 Map —
+    // ObjectRefMap)다. 접근기 없는 Opaque 필드는 수동
     // Trace의 간선을 FieldKind::ObjectReference로 서술할 수 있다.
     ValueType value{};
     // 표시 문자열도 등록 시 깊게 복사한다. category는 그룹, displayName은 표시용이며 ID가 아니다.
@@ -466,7 +467,7 @@ struct FieldSchema {
     // 세 참조는 기대 타입(선택), 그 밖은 0이다. Optional 필드(value = {Optional, 0} — 리플렉션
     // B9e)는 element가 내부 형식(성질 표의 Optional 내부 종류 — 단일 값·String·Name·값 struct)이고
     // maxElements는 0이다. Map 필드(value = {Map, 0} — 리플렉션 B9f2)는 element가 값 형식(성질 표의
-    // Map 값 종류 — ObjectReference는 ObjectRefMap이라 B9f4가 연다, 값 struct만), Set 필드(value =
+    // Map 값 종류 — ObjectReference는 ObjectRefMap(리플렉션 B9f4), 값 struct만), Set 필드(value =
     // {Set, 0})는 element가 원소 형식(성질 표의 Set 원소 종류)이고 둘 다 maxElements는 1 이상
     // MaxArrayElements 이하의 원소 수 상한이다(저장에서만 건다 — 배열과 같다). 그 밖의 필드는
     // Opaque·0이어야 한다.

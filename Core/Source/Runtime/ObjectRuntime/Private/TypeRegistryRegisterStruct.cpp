@@ -163,7 +163,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     bool nameMember = false;
     bool weakMember = false;
     for (const FieldSchema& field : schema.fields) {
-        // 강한 참조 멤버: 단일 참조와 ObjectRefArray(대상 형식이 ObjectReference).
+        // 강한 참조 멤버: 단일 참조·ObjectRefArray·ObjectRefMap(대상 형식이 ObjectReference).
         const bool referenceTarget = FieldTargetType(field).kind == ValueKind::ObjectReference;
         // Name 멤버: 단일 Name·Array<Name>·Name 원소 Set·Name 값이나 키의 Map(Transient 포함 — 관찰
         // struct 제한이 쓴다).
@@ -172,8 +172,12 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
         // weak 참조 멤버: 단일 WeakRef와 Array<WeakRef>(Transient 포함 — 관찰 struct 제한이 쓴다).
         weakMember = weakMember || FieldTargetType(field).kind == ValueKind::WeakObjectReference;
         strongReference = strongReference || referenceTarget;
+        // Registry 컨테이너 멤버: ObjectRefArray와 ObjectRefMap(리플렉션 B9f4 — 원소 블록이 owner
+        // 저장소 밖인 StructRefArray 원소 struct에는 둘 수 없다, RF 결정 15).
         referenceArray =
-            referenceArray || (field.value.kind == ValueKind::Array && referenceTarget);
+            referenceArray ||
+            ((field.value.kind == ValueKind::Array || field.value.kind == ValueKind::Map) &&
+             referenceTarget);
         // Transient 멤버는 저장·복원하지 않으므로 Required 실효 값 검사 대상이 아니다. 배열 멤버의
         // Required(원소마다 non-null)도 센다 — 검사는 누락 여부와 무관하게 실효 값을 본다
         // (Docs/Design/ObjectFoundations.ko.md 4절).

@@ -479,7 +479,7 @@ internal static class ModuleDescriptor
                 }
                 else if (map || set)
                 {
-                    // Map 값은 성질 표의 Map 값 종류(강한 참조는 ObjectRefMap — 리플렉션 B9f4), Set 원소는 Set 원소 종류다(리플렉션 B9f2).
+                    // Map 값은 성질 표의 Map 값 종류(강한 참조 값은 ObjectRefMap — 리플렉션 B9f4), Set 원소는 Set 원소 종류다(리플렉션 B9f2).
                     string what = map ? "map value" : "set element";
                     if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty("kind", out JsonElement mapElementKind))
                     {
@@ -487,8 +487,7 @@ internal static class ModuleDescriptor
                     }
 
                     elementKind = Name(mapElementKind, Identifier, what + " kind");
-                    if (!ValueKindTable.Has(elementKind, map ? ValueKindProperty.MapValue : ValueKindProperty.SetElement) ||
-                        elementKind == "ObjectReference")
+                    if (!ValueKindTable.Has(elementKind, map ? ValueKindProperty.MapValue : ValueKindProperty.SetElement))
                     {
                         throw Invalid(what + " kind " + elementKind);
                     }
@@ -537,7 +536,8 @@ internal static class ModuleDescriptor
                     throw Invalid("key on a field that is not a map");
                 }
 
-                // 대상 종류는 배열이면 원소, Optional이면 내부 종류다. FieldKind::ObjectReference ⇔ 대상이 ObjectReference(ObjectRefArray 포함).
+                // 대상 종류는 배열이면 원소, Optional이면 내부 종류, Map이면 값 종류다. FieldKind::ObjectReference ⇔ 대상이
+                // ObjectReference(ObjectRefArray·ObjectRefMap 포함).
                 string targetKind = elementKind ?? kind;
                 if (reference != (targetKind == "ObjectReference"))
                 {

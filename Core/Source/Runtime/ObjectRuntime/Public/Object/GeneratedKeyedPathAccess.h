@@ -12,7 +12,8 @@
 // 저장소를 준비하고(PrepareReserve — 할당만) owner를 다시 확인한 다음 적용(CommitReserve)과 무할당
 // Insert·Add로 게시한다. 지우기·비우기도 고정 아래 한다(키는 Erase 안에서 소멸한다 — 그 해제
 // 콜백의 재진입 쓰기는 Busy다). 순회 중인 컨테이너의 쓰기·넣기·지우기·비우기는 Busy다(RF 결정 20 —
-// 할당은 게시 전, 게시는 무할당, 옛 값을 돌려준다).
+// 할당은 게시 전, 게시는 무할당, 옛 값을 돌려준다). ObjectRefMap(리플렉션 B9f4)은 고정 없이
+// Registry API로 바꾼다(PathObjectRefMap — ObjectRefArray 갈래와 같은 규칙).
 namespace rocks::detail {
 
 // key 단계 키 값(PathFrame::key — 검증을 마친 정규형)의 C++ 단일 값이다(String·Name·Soft 제외 —
@@ -381,12 +382,145 @@ Result<void> ErasePathKey(PathCursor& cursor, Container& container, const Lookup
     }
 }
 
+// ObjectRefMap 필드·멤버의 단계다(리플렉션 B9f4 — Docs/Design/ReflectionExtensions.ko.md 7.3절
+// "B9f4 주의"·7.4절). ObjectRefArray 갈래처럼 고정을 쥐지 않고 Registry API(SetMapReference·
+// EraseMapReference·ClearMapReferences)로 바꾼다 — Registry가 owner·대상·순회 중(Busy)·관찰자·삽입
+// 장벽을 판정하고 할당 콜백 뒤 스스로 다시 판단한다. key 해석·검증 지점(대상 타입·생존 lease)·넣기
+// 준비(ClassRef 키 lease·Name 키 intern)·문자열 경로는 다른 Map과 같다. 연산: 원소 수·비우기(key
+// 없는 끝 단계), 조회, 값 읽기(없는 키 NotFound(KeyNotFound)), 쓰기(있으면 자리를 지키며 교체하고
+// previous는 Registry가 게시 잠금 안에서 실제로 덮어쓴 옛 handle, 없으면 넣기 준비 뒤 끝에 넣고
+// previous는 present = false — 새 키의 MaxElements는 Registry가 게시 직전에도 본다),
+// 지우기(removed는 지운 handle). 값 struct가 없으므로 중간 단계와 InsertKey는 다른 단일 값 Map과
+// 같이 거부한다.
+template <ValueKind Target, class K, class T>
+Result<void> PathObjectRefMap(PathCursor& cursor, ObjectRefMap<K, T>& map) noexcept {
+    static_assert(Target == ValueKind::ObjectReference,
+                  "ObjectRefMap values are object references");
+    ObjectRegistry& registry = cursor.Registry();
+    const ObjectAccessContext& access = cursor.Access();
+    const ObjectHandle owner = cursor.OwnerHandle();
+    const PathFrame& frame = cursor.Frame();
+    const PathOperation operation = cursor.Operation();
+    if (frame.selector == PathSelector::None) {
+        if (operation == PathOperation::Length) {
+            cursor.SetLength(map.Count());
+            return Result<void>::Success();
+        }
+
+        if (operation == PathOperation::Clear) {
+            return cursor.Finish(registry.ClearMapReferences(access, owner, map));
+        }
+
+        return cursor.Fail(ErrorCode::Unsupported, PropertyPathError::AggregateValue);
+    }
+
+    if constexpr (ReflectedEnumField<K>::Supported) {
+        if (!GeneratedType<K>::IsDeclared(frame.key.signedInteger)) {
+            return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::InvalidKey);
+        }
+    }
+
+    if (!cursor.IsLast()) {
+        return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::NotStruct);
+    }
+
+    const auto lookup = PathLookupKey<K>(frame);
+    const ObjectHandle* found = frame.keyFound ? map.Find(lookup) : nullptr;
+    switch (operation) {
+    case PathOperation::Contains:
+        cursor.SetLength(found ? 1 : 0);
+        return Result<void>::Success();
+    case PathOperation::InsertKey:
+        return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::InvalidValue);
+    case PathOperation::EraseKey: {
+        if (!found) {
+            return cursor.FailMissingKey();
+        }
+
+        // removed는 Registry가 게시 잠금 안에서 실제로 지운 값이다.
+        ObjectHandle previous;
+        if (auto erased = registry.EraseMapReference(access, owner, map, lookup, &previous);
+            !erased) {
+            return cursor.Fail(erased.Error());
+        }
+
+        cursor.PublishReference(previous);
+        return Result<void>::Success();
+    }
+    case PathOperation::Read: {
+        if (!found) {
+            return cursor.FailMissingKey();
+        }
+
+        FieldValue candidate(cursor.Output()->GetAllocator());
+        candidate.kind = ValueKind::ObjectReference;
+        candidate.reference = *found;
+        return cursor.PublishRead(candidate);
+    }
+    case PathOperation::Write: {
+        // Registry가 게시 잠금 안에서 실제로 덮어쓴 옛 값과 키가 있었는지(MapReferenceWrite)로
+        // previous를 채운다 — 호출 전에 읽은 값은 넣기 준비·할당·관찰자 예약 콜백이 그 사이 바꿀 수
+        // 있다(리플렉션 B9f4 리뷰 반영). 새 키의 MaxElements도 Registry가 게시 직전에 다시 본다.
+        MapReferenceWrite write;
+        write.maxCount = cursor.Frame().field->maxElements;
+        Result<void> set = Result<void>::Success();
+        if (found) {
+            set = registry.SetMapReference(access, owner, map, lookup, cursor.Input()->reference,
+                                           &write);
+        } else {
+            // 없던 키: 길이 검사 → 넣기 준비(ClassRef 등록·Base, Name 내용 규칙과 intern — 대상을
+            // 바꾸지 않으므로 고정 없이 한다) → 정적 키 검사 → Registry 넣기(Name 키는 넣기 준비가
+            // intern한 토큰(frame.keyName)으로 다시 만든다 — 그 사이 같은 키가 들어왔으면 교체다).
+            if (auto fits = cursor.CheckLength(map.Count() + 1); !fits) {
+                return fits;
+            }
+
+            if (auto prepared = cursor.PrepareInsertedKey(); !prepared) {
+                return prepared;
+            }
+
+            if (auto checked = CheckInsertedKey<K>(cursor); !checked) {
+                return checked;
+            }
+
+            const auto inserted = PathLookupKey<K>(cursor.Frame());
+            set = registry.SetMapReference(access, owner, map, inserted, cursor.Input()->reference,
+                                           &write);
+        }
+
+        if (!set) {
+            return set.Error() == ErrorCode::CapacityExceeded && map.Count() >= write.maxCount
+                       ? cursor.Fail(ErrorCode::CapacityExceeded,
+                                     PropertyPathError::TooManyElements)
+                       : cursor.Fail(set.Error());
+        }
+
+        if (write.replaced) {
+            cursor.PublishReference(write.previous);
+        } else if (FieldValue* previous = cursor.Output()) {
+            FieldValue captured(previous->GetAllocator());
+            captured.kind = ValueKind::ObjectReference;
+            captured.present = false;
+            cursor.PublishOutput(captured);
+        }
+
+        return Result<void>::Success();
+    }
+    default:
+        return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::KeyRequired);
+    }
+}
+
+template <ValueKind Target, class Container>
+Result<void> PathKeyedValueContainer(PathCursor& cursor, Container& container) noexcept;
+
 // Map·Set 필드·멤버의 단계다(리플렉션 B9f3 — Docs/Design/ReflectionExtensions.ko.md 7.3절). 연산과
 // 무관하게 먼저 Map 키 종류(키 enum ID)와 값 struct를 정적 대조한다. key 없는 끝 단계는 원소 수·
 // 비우기(옛 저장소는 게시 뒤 반환)이고, key 단계는 키 값(enum 키는 정적 선언도 본다 — 아니면
 // InvalidArgument(InvalidKey))으로 항목을 찾아 중간 단계면 Map 값 struct로 내려가고(없으면
 // NotFound(KeyNotFound)), 끝 단계면 조회·넣기·지우기·값 읽기·쓰기(단일 값 Map — 없는 키 쓰기는
-// InsertMapValue)다. Name 키가 pool에 없으면(keyFound 거짓) 항목도 없다.
+// InsertMapValue)다. Name 키가 pool에 없으면(keyFound 거짓) 항목도 없다. ObjectRefMap(리플렉션
+// B9f4)은 정적 대조 뒤 PathObjectRefMap(Registry API 갈래)이다.
 template <ValueKind Target, class Container>
 Result<void> PathKeyedContainer(PathCursor& cursor, Container& container) noexcept {
     using Traits = MapField<Container>;
@@ -413,6 +547,23 @@ Result<void> PathKeyedContainer(PathCursor& cursor, Container& container) noexce
         }
     }
 
+    // ObjectRefMap(리플렉션 B9f4)은 Registry API 갈래다.
+    if constexpr (Traits::Registry) {
+        return PathObjectRefMap<Target>(cursor, container);
+    } else {
+        return PathKeyedValueContainer<Target>(cursor, container);
+    }
+}
+
+// Map·Set(Registry 컨테이너가 아닌 OrderedMap·OrderedSet) 단계의 본문이다(PathKeyedContainer가 정적
+// 대조 뒤 부른다).
+template <ValueKind Target, class Container>
+Result<void> PathKeyedValueContainer(PathCursor& cursor, Container& container) noexcept {
+    using Traits = MapField<Container>;
+    using Key = typename Traits::Key;
+    using Value = typename Traits::Value;
+    constexpr bool set = Traits::IsSet;
+    constexpr bool structValue = !set && Target == ValueKind::Struct;
     const PathFrame& frame = cursor.Frame();
     const PathOperation operation = cursor.Operation();
     if (frame.selector == PathSelector::None) {

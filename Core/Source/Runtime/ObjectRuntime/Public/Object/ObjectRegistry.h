@@ -4,6 +4,7 @@
 #include <Core/Text/String.h>
 #include <Core/Text/StringView.h>
 #include <Object/ObjectRefArray.h>
+#include <Object/ObjectRefMap.h>
 #include <Object/ObjectRefs.h>
 #include <Object/ObjectDiagnostics.h>
 #include <Object/ObjectIdentity.h>
@@ -346,6 +347,59 @@ public:
     Result<void> ClearReferences(const ObjectAccessContext& access, ObjectHandle owner,
                                  ObjectRefArray<T>& array) noexcept;
 
+    // ObjectRefMap의 live 변경 API다(ObjectRefMap.h — 리플렉션 B9f4, Docs/Design/
+    // ReflectionExtensions.ko.md 7.4절). owner·Borrow·컨테이너 위치·encode 고정·대상 검증·null
+    // 정규화·삽입 장벽·관찰자 기록 규칙은 위 ObjectRefArray 공통 규칙과 같다. 다른 점:
+    // - key는 K이거나 String 키의 StringView, Soft 키의 SoftObjectRefView다(조회는 할당하지
+    // 않는다).
+    // - 컨테이너를 순회(View().ForEach 등) 중이면 Busy다(Core OrderedMap의 Fatal에 닿기 전에 거절).
+    // - 새 키는 Registry 잠금 밖에서 컨테이너 allocator로 키 사본과 한 항목 더 담을 저장소를
+    // 준비하고
+    //   (할당만 — 컨테이너는 그대로, 관찰자 예약도 같은 구간), 다시 잠가 owner·대상·관찰자 공간을
+    //   재검증한 뒤 같은 잠금 안에서 무할당·무실패로 적용·게시·기록한다. 그 사이 allocator 콜백이
+    //   같은 컨테이너의 구조를 바꿨으면(넣기·지우기·비우기) Busy, owner가 파괴 요청·회수 대상이
+    //   됐으면 StaleHandle이고 준비한 것만 반환한다(컨테이너의 내용·용량·항목 주소 불변).
+    // - 옛 저장소·지운 키·떼어 낸 옛 항목은 잠금을 푼 뒤 반환한다(그 해제 콜백은 게시를 마친
+    //   컨테이너를 보고, 재진입한 변경도 그 상태에서 다시 판단한다). 항목 포인터는 잠금을 넘겨
+    //   쥐지 않는다(다시 잠그면 키로 다시 찾는다).
+    // - 실패하면 컨테이너는 바뀌지 않는다. MaxElements는 여기서 걸지 않는다(저장할 때 검사한다).
+
+    // key의 값을 target으로 한다: 없으면 끝에 넣고, 있으면 자리를 지키며 바꾼다(null이면 값을
+    // 비운다 — 항목은 남는다). 있는 키의 교체는 할당하지 않는다(관찰자 Registry는 위 공통 규칙의
+    // 예약). 항목 수가 OrderedMap 상한(2^31)이면 Overflow, 키 사본·저장소 할당 실패는 그 오류다.
+    // write(선택 — MapReferenceWrite)를 주면 새 키의 항목 수 상한(넘으면 CapacityExceeded — 첫
+    // 판정과 게시 직전 재검증)을 걸고, 성공하면 게시 잠금 안에서 실제로 덮어쓴 옛 값과 키가 이미
+    // 있었는지를 돌려준다(실패하면 write의 출력은 그대로다).
+    //
+    // 사용 예:
+    //   registry.SetMapReference(access, inventory, pointer->slots_, StringView("sword"), item);
+    template <class K, class T, class Q>
+    Result<void> SetMapReference(const ObjectAccessContext& access, ObjectHandle owner,
+                                 ObjectRefMap<K, T>& map, const Q& key, ObjectHandle target,
+                                 MapReferenceWrite* write = nullptr) noexcept;
+
+    // key 항목을 지운다(남은 순서 유지). 없으면 NotFound(관찰자 예약 뒤 재검증에서 사라졌으면
+    // Busy)다. owner는 Alive 또는 DestroyRequested(정리 중)다. 할당하지 않는다(관찰자 Registry는
+    // 예약). 지운 키(String·Soft)는 잠금을 푼 뒤 반환한다. removed(선택)를 주면 성공했을 때 게시
+    // 잠금 안에서 실제로 지운 값을 담는다(호출 전에 읽은 값은 관찰자 예약 콜백이 바꿀 수 있다).
+    //
+    // 사용 예:
+    //   registry.EraseMapReference(access, inventory, pointer->slots_, StringView("sword"));
+    template <class K, class T, class Q>
+    Result<void> EraseMapReference(const ObjectAccessContext& access, ObjectHandle owner,
+                                   ObjectRefMap<K, T>& map, const Q& key,
+                                   ObjectHandle* removed = nullptr) noexcept;
+
+    // 모든 항목과 저장소를 떼어 빈 컨테이너를 게시하고 옛 항목은 잠금을 푼 뒤 반환한다. owner
+    // 규칙은 EraseMapReference와 같다. 할당하지 않는다(관찰자 Registry는 ClearReferences와 같은
+    // 처리 표시 아래 집계·예약).
+    //
+    // 사용 예:
+    //   registry.ClearMapReferences(access, inventory, pointer->slots_);
+    template <class K, class T>
+    Result<void> ClearMapReferences(const ObjectAccessContext& access, ObjectHandle owner,
+                                    ObjectRefMap<K, T>& map) noexcept;
+
     // StructRefArray의 live 변경 API다(StructRefArray.h). owner·Borrow·컨테이너 위치·encode 고정
     // 규칙은 ObjectRefArray와 같다. 원소 블록 할당·기본 생성(S(Allocator&), 참조는 null이라 장벽이
     // 필요 없다)·새 색인 할당은 Registry 잠금 밖에서 하고, 다시 잠근 뒤 owner를 재검증하며 그때의
@@ -590,6 +644,18 @@ private:
     Result<void> AssignArrayEdges(const ObjectAccessContext&, ObjectHandle,
                                   detail::ObjectRefArrayStorage&, Span<const ObjectHandle>,
                                   uint64 transaction, const void*) noexcept;
+    // ObjectRefMap 편집 본문이다(Private/ObjectRegistryMapEdges.cpp — 리플렉션 B9f4). edit가 키
+    // 형식별 조회·준비·게시를 맡는다(Object/ObjectRefMap.h).
+    Result<void> SetMapEdge(const ObjectAccessContext&, ObjectHandle, detail::ObjectRefMapEdit&,
+                            ObjectHandle target, const void* nativeType,
+                            MapReferenceWrite* write) noexcept;
+    Result<void> EraseMapEdge(const ObjectAccessContext&, ObjectHandle, detail::ObjectRefMapEdit&,
+                              ObjectHandle* removed) noexcept;
+    Result<void> ClearMapEdges(const ObjectAccessContext&, ObjectHandle,
+                               detail::ObjectRefMapEdit&) noexcept;
+    Result<void> AssignMapEdges(const ObjectAccessContext&, ObjectHandle, detail::ObjectRefMapEdit&,
+                                Span<const ObjectHandle>, uint64 transaction,
+                                const void* nativeType) noexcept;
     Result<usize> InsertStructElement(const ObjectAccessContext&, ObjectHandle,
                                       detail::StructRefArrayStorage&, usize index,
                                       bool append) noexcept;
@@ -625,6 +691,12 @@ private:
     Result<void> AssignElementsStaged(const ObjectAccessContext& access, ObjectHandle owner,
                                       StructRefArray<S>& array, usize count,
                                       uint64 transaction) noexcept;
+
+    template <class K, class T>
+    Result<void> AssignMapReferencesStaged(const ObjectAccessContext& access, ObjectHandle owner,
+                                           ObjectRefMap<K, T>& map, Span<const K> keys,
+                                           Span<const ObjectHandle> targets,
+                                           uint64 transaction) noexcept;
 
     template <class S, class T>
     Result<void> SetElementReferenceStaged(const ObjectAccessContext& access, ObjectHandle owner,

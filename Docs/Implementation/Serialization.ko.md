@@ -102,6 +102,7 @@ struct 필드(`ValueKind::Struct`)의 값은 struct ID·버전 헤더의 중첩 
 | `Array<S>` — 참조 없는 리플렉션 struct(Binds Core 값 타입 포함) | Struct | `RecordList`(11) — 항목 = struct ID·버전의 Record |
 | `ObjectRefArray<T>` — 원소 null 허용 | ObjectReference | `ValueArray`(원소 tag = 문맥의 참조 wire, graph v2 U32 local ID, 0 = null) |
 | `StructRefArray<S>` — 참조 struct | Struct | `RecordList`(11) |
+| `ObjectRefMap<K, T>` — 값 null 허용(리플렉션 B9f4) | ObjectReference(값) | `Map`(16 — 키 wire + 문맥 참조 wire, 삽입 순서). 복원 2단계는 키·handle을 Scratch에 모아 `AssignMapReferences`를 한 번 부른다 |
 
 - 저장(`detail::EncodeArrayField`): 스키마 대조(원소 종류·enum·struct ID, struct 원소는 등록 native 키) → 원소 수 ≤ 필드 `maxElements`(넘으면 배열 필드 경로의 `ArrayTooLong` 진단 — value = 원소 수 — 뒤 CapacityExceeded) → 그래프 원소 누계(`maxTotalElements`) → writer를 값 한도(`maxValueBytes`)로 열고 원소마다 위치 프레임의 index를 정한 뒤 바깥 writer에 제자리로 쓴다(struct 원소는 `RecordListWriter` 항목 안에 `EncodeStructRecord`, 목록 한도는 로드와 같은 `detail::ArrayRecordListLimits`). 원소마다 다시 검증한다: enum 선언 값(비어 있지 않은 배열마다 `EnumValueSet` 하나 — 원소 수 × 조회 작업 선청구, 빈 배열은 만들지도 청구하지도 않는다), 소프트 참조 규칙, `rejectMissingRequired`면 Required 배열의 null 원소(경로 [f[i]]의 `RequiredMissing` + InvalidArgument), 참조 원소의 대상 타입(스키마 기대 타입과 `NativeTypeKey<T>`). 치환 hook은 원소마다 index 프레임에서 불린다. 저장 참조 비용은 참조 수에 선형이다(handle → local ID 해시 표·노드 lease·기대 lease 캐시 — 캐시에 맞은 참조도 lease 없는 생존 조회로 StaleHandle·Destroyed를 판정한다).
 - 로드(`detail::DecodeArrayField`, 1·2단계가 같은 reader 호출 순서): wire(TypeMismatch) → 스키마 대조 → `OpenValueArray`(원소 수 상한은 **필드 `maxElements`가 아니라 `MaxArrayElements`** — 상한을 낮춰도 기존 데이터가 열리고 다시 저장할 때 CapacityExceeded로 드러난다)·`OpenRecordList`(항목 버전 범위 (1, UINT32_MAX), 목록 한도 `{MaxArrayElements, maxValueBytes, maxValueBytes − 12}` — 1단계는 항목 수 한도를 남은 원소 누계로도 걸어 색인 할당 전에 CapacityExceeded) → 원소 누계 → 원소(진단은 원소 검증 직후 경로 [f[i]] — 원소 struct 멤버는 [f[i], m]) → trailing byte(InvalidArgument) → 2단계 몫 선청구 한 번(원소 메모리 count × sizeof — StructRefArray는 원소 블록 + 색인 포인터, ObjectRefArray는 staged 버퍼 + Scratch 사본 — + 원소 수 + 1 + 문자열·경로 byte × 2, ObjectRefArray는 + 참조 수). 큰 NATIVE 멤버를 가진 원소 struct도 작은 wire로 큰 할당을 끌어내지 못하고 생성자 전에 실패한다. enum 원소는 등록 enum과 정적 `IsDeclared`를 원소마다 1단계에서 확인한다(`ReportAndDefault`면 원소마다 진단·대체 값).
@@ -109,7 +110,7 @@ struct 필드(`ValueKind::Struct`)의 값은 struct ID·버전 헤더의 중첩 
 - 누락: 빠진 배열 필드·멤버는 생성자 값을 유지한다(누락 = 기준). Required 배열은 적용 뒤 실효 값(생성자 값 포함)의 null 원소마다 진단한다(Required 배열의 뜻은 원소마다 non-null — 빈 배열은 진단하지 않는다).
 - struct 원소: 버전·마이그레이션·관찰은 struct 값과 같다 — 낮은 버전 원소마다 마이그레이션이 한 번(목록 항목의 Record byte가 입력, 2단계는 방문 순서의 보관본), 관찰 대상 원소 struct는 원소마다 한 번의 해석으로 채워 `ObserveStruct`(frame index = 원소)를 부른다. 관찰 임시 값과 그 안 배열의 원소 버퍼·문자열 사본은 `ObservationScratch()`(바이트를 작업량으로 청구하되 단일 할당 한도 없음)로 할당한다 — 원소 버퍼가 `maxValueBytes`보다 커도 관찰된다. 관찰은 1단계에만 있는 일이라 이 할당은 한 번만 청구한다(2단계 몫 두 배 청구에 들어가지 않는다 — 관찰 있음·없음의 예산 차이는 관찰 byte에 관찰 목록 몫을 더한 값이다).
 - 강한 참조 token은 non-null 원소마다 하나이고 기대 형식은 필드 안 서로 다른 기대마다 하나만 보관한다(참조 멤버 종류 수 — 원소마다 복제하지 않는다). 도달성 검사의 (기대, 실제) 캐시와 기대 lease는 해시 표다.
-- 생성 Trace는 모든 배열 필드·멤버에 `detail::TraceArrayField`(Array는 아무것도 하지 않고 ObjectRefArray·StructRefArray는 모든 원소를 방문)를 부른다.
+- 생성 Trace는 모든 배열 필드·멤버에 `detail::TraceArrayField`(Array는 아무것도 하지 않고 ObjectRefArray·StructRefArray는 모든 원소를 방문)를, 모든 Map 필드·멤버에 `detail::TraceMapField`(OrderedMap은 아무것도 하지 않고 ObjectRefMap은 모든 값을 방문 — 리플렉션 B9f4)를 부른다.
 
 ### 필드 codec과 문맥
 

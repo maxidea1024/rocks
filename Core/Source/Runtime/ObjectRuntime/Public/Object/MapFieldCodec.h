@@ -3,8 +3,11 @@
 #include <Object/OptionalFieldCodec.h>
 
 // 필드 codec 사슬의 여섯째 조각으로 Map·Set 필드 codec이다(리플렉션 B9f2 — Docs/Design/
-// ReflectionExtensions.ko.md 1.2·7.2절). 쓰기(EncodeMapField — OrderedMap<K, V>·OrderedSet<T>)와
-// 읽기(DecodeMapField), 1단계 키 중복 판정의 비소유 키(KeyProbe — 입력 byte를 빌린다)가 있다.
+// ReflectionExtensions.ko.md 1.2·7.2절). 쓰기(EncodeMapField — OrderedMap<K, V>·OrderedSet<T>·
+// ObjectRefMap<K, T>)와 읽기(DecodeMapField), 1단계 키 중복 판정의 비소유 키(KeyProbe — 입력 byte를
+// 빌린다), 생성 Trace 도우미(TraceMapField)가 있다. ObjectRefMap(리플렉션 B9f4 — 7.4절)은 값이 강한
+// 참조(문맥 참조 wire, null 허용)이고 2단계가 키·대상 handle을 Scratch에 모아
+// ConstructionContext::AssignMapReferences를 한 번 부른다(ObjectRefArray와 같은 규칙).
 // wire는 Map(16: u32 키 wire + u32 값 wire + u32 count + (키, 값) × count — 값 struct는 u64 길이 +
 // Record)·Set(15: u32 원소 wire + u32 count + 원소 × count)이고 순서는 삽입 순서다(OrderedMap 순회
 // 순서 — 해시·seed와 무관하다). 필드는 통째로 저장·복원한다(차이 단위 통째 — 20절 결정 U7). 같음
@@ -170,13 +173,15 @@ Result<uint32> EncodeMapField(const Container& source, ArchiveWriter& out,
     using Value = typename Traits::Value;
     constexpr bool set = Traits::IsSet;
     constexpr bool structValue = !set && ReflectedStructField<Value>::Supported;
+    constexpr bool registry = Traits::Registry;
     static_assert(Traits::Supported);
     static_assert(set ? ValueKindCanBeSetElement(FieldValueKind<Key>())
                       : ValueKindCanBeMapKey(FieldValueKind<Key>()),
                   "Reflected map keys and set elements must be key kinds");
     static_assert(set || (ValueKindCanBeMapValue(FieldValueKind<Value>()) &&
-                          FieldValueKind<Value>() != ValueKind::ObjectReference),
-                  "Reflected map values must be single values or value structs");
+                          (FieldValueKind<Value>() != ValueKind::ObjectReference || registry)),
+                  "Reflected map values must be single values or value structs; object "
+                  "references go in ObjectRefMap");
     const FieldSchema& field = context.Field();
     if constexpr (structValue) {
         if (!MatchesStructView<Value>(context)) {
@@ -295,13 +300,33 @@ Result<uint32> EncodeMapField(const Container& source, ArchiveWriter& out,
         const StructView view = context.Current()->structure;
         ElementIndexScope element(context);
         uint32 index = 0;
-        for (auto entry : source) {
+        // ObjectRefMap은 항목 view(OrderedMap<K, ObjectHandle>)를 같은 순서로 돈다.
+        const auto& entries = [&source]() noexcept -> const auto& {
+            if constexpr (registry) {
+                return source.View();
+            } else {
+                return source;
+            }
+        }();
+        for (auto entry : entries) {
             element.Set(index++);
             if (auto written = writeKey(entry.key); !written) {
                 return Result<uint32>::Failure(written.Error());
             }
 
-            if constexpr (structValue) {
+            if constexpr (registry) {
+                // 강한 참조 값: null은 0, non-null은 문맥이 대상 형식({element.type,
+                // NativeTypeKey<T>()}) 과 Required(값마다 non-null)를 검사해 쓴다(ObjectRefArray
+                // 원소와 같다).
+                entryValue.kind = ValueKind::ObjectReference;
+                entryValue.reference = entry.value;
+                if (auto written =
+                        WriteValueWire(out, context, field.element, nullptr, entryValue,
+                                       StringView{}, StaticReferenceNative<Value>(), nullptr);
+                    !written) {
+                    return Result<uint32>::Failure(written.Error());
+                }
+            } else if constexpr (structValue) {
                 auto record = PrefixedRecordWriter::Begin(out, WireType::Record);
                 if (!record) {
                     return Result<uint32>::Failure(record.Error());
@@ -360,6 +385,7 @@ Result<void> DecodeMapEntries(ConstructionContext* construction, ObjectHandle ow
     using Value = typename Traits::Value;
     using Probe = KeyProbe<Key>;
     constexpr bool set = Traits::IsSet;
+    constexpr bool registry = Traits::Registry;
     constexpr bool structValue = !set && ReflectedStructField<Value>::Supported;
     const FieldSchema& schema = context.Field();
     const ValueType& keyType = set ? schema.element : schema.key;
@@ -404,8 +430,22 @@ Result<void> DecodeMapEntries(ConstructionContext* construction, ObjectHandle ow
     }
 
     // 적용·관찰 자리도 같은 상한으로 예약한다(넣는 키 수가 그 상한을 넘지 않으므로 값 struct 주소가
-    // 고정된다).
-    if (target) {
+    // 고정된다). ObjectRefMap은 컨테이너를 직접 바꾸지 않고 키·대상 handle을 Scratch에 모은 뒤
+    // AssignMapReferences로 통째로 게시한다(관찰 자리는 없다 — 참조 struct는 관찰하지 않는다).
+    [[maybe_unused]] const bool assign = registry && construction != nullptr && target != nullptr;
+    Array<Key> keys(context.Scratch());
+    Array<ObjectHandle> handles(context.Scratch());
+    if constexpr (registry) {
+        if (assign) {
+            if (auto reserved = keys.TryReserve(reserve); !reserved) {
+                return reserved;
+            }
+
+            if (auto reserved = handles.TryReserve(reserve); !reserved) {
+                return reserved;
+            }
+        }
+    } else if (target) {
         target->Clear();
         if (auto reserved = target->Reserve(reserve); !reserved) {
             return reserved;
@@ -517,6 +557,36 @@ Result<void> DecodeMapEntries(ConstructionContext* construction, ObjectHandle ow
                 !decoded) {
                 return decoded;
             }
+        } else if constexpr (registry) {
+            // ObjectRefMap 값(강한 참조 — null 허용): ReadValueWire가 대상 형식을 검사하고
+            // non-null은 (token, 기대 형식)을 남긴다(Required null 진단은 적용 뒤 실효 값 검사가
+            // [f[i]]로 낸다).
+            ParsedValue parsed;
+            if (auto read = ReadValueWire(entries, context, schema.element, nullptr, nullptr,
+                                          StaticReferenceNative<Value>(), parsed);
+                !read) {
+                return read;
+            }
+
+            if (auto reported = ReportParsedValue(context, schema.element, parsed); !reported) {
+                return reported;
+            }
+
+            references += parsed.reference.isNull ? 0 : 1;
+            if (assign) {
+                auto madeKey = MakeParsedValue<Key>(context.Scratch(), key);
+                if (!madeKey) {
+                    return Result<void>::Failure(madeKey.Error());
+                }
+
+                if (auto pushed = keys.TryPushBack(Move(madeKey.Value())); !pushed) {
+                    return pushed;
+                }
+
+                if (auto pushed = handles.TryPushBack(parsed.reference.handle); !pushed) {
+                    return pushed;
+                }
+            }
         } else {
             ParsedValue parsed;
             if (auto read = ReadValueWire(entries, context, schema.element, context.FieldEnum(),
@@ -582,6 +652,12 @@ Result<void> DecodeMapEntries(ConstructionContext* construction, ObjectHandle ow
         return Result<void>::Failure(ErrorCode::Overflow);
     }
 
+    if constexpr (registry) {
+        if (assign) {
+            return construction->AssignMapReferences(owner, *target, keys.View(), handles.View());
+        }
+    }
+
     return Result<void>::Success();
 }
 
@@ -609,14 +685,16 @@ Result<void> DecodeMapField(ConstructionContext* construction, ObjectHandle owne
     using Key = typename Traits::Key;
     using Value = typename Traits::Value;
     constexpr bool set = Traits::IsSet;
+    constexpr bool registry = Traits::Registry;
     constexpr bool structValue = !set && ReflectedStructField<Value>::Supported;
     static_assert(Traits::Supported);
     static_assert(set ? ValueKindCanBeSetElement(FieldValueKind<Key>())
                       : ValueKindCanBeMapKey(FieldValueKind<Key>()),
                   "Reflected map keys and set elements must be key kinds");
     static_assert(set || (ValueKindCanBeMapValue(FieldValueKind<Value>()) &&
-                          FieldValueKind<Value>() != ValueKind::ObjectReference),
-                  "Reflected map values must be single values or value structs");
+                          (FieldValueKind<Value>() != ValueKind::ObjectReference || registry)),
+                  "Reflected map values must be single values or value structs; object "
+                  "references go in ObjectRefMap");
     const FieldSchema& schema = context.Field();
     auto wire = FieldWireType(schema, context.ReferenceWireType());
     if (!wire) {
@@ -705,10 +783,15 @@ Result<void> DecodeMapField(ConstructionContext* construction, ObjectHandle owne
         }
     }
 
-    // 2단계 몫: 컨테이너 Reserve(count)의 저장소 byte(Container::ReservedBytes — 항목의 hash·정렬
-    // padding과 2의 거듭제곱 용량을 담은 실제 할당 크기) + 항목 수 + 1 + 문자열 복사·weak 연결 몫.
+    // 2단계 몫: 컨테이너 Reserve(count)의 저장소 byte(ReservedBytes — 항목의 hash·정렬 padding과
+    // 2의 거듭제곱 용량을 담은 실제 할당 크기) + 항목 수 + 1 + 문자열 복사·참조 연결 몫.
+    // ObjectRefMap은 Scratch의 키·handle 사본(항목마다 sizeof(K) + sizeof(ObjectHandle))을 더한다.
     usize storage = 0;
-    if (!Container::ReservedBytes(count, storage)) {
+    if constexpr (registry) {
+        if (!Container::MapType::ReservedBytes(count, storage)) {
+            return Result<void>::Failure(ErrorCode::Overflow);
+        }
+    } else if (!Container::ReservedBytes(count, storage)) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
 
@@ -717,7 +800,23 @@ Result<void> DecodeMapField(ConstructionContext* construction, ObjectHandle owne
         return Result<void>::Failure(ErrorCode::Overflow);
     }
 
-    return ReserveArrayApply(context, count, 0, extra);
+    return ReserveArrayApply(context, count, registry ? sizeof(Key) + sizeof(ObjectHandle) : 0,
+                             extra);
+}
+
+// 생성 Trace가 모든 Map 필드·멤버에 부르는 오버로드 집합이다(TraceArrayField와 같은 규칙 — 실제 C++
+// 타입이 호출을 고른다): OrderedMap<K, V>는 강한 참조가 없어 아무것도 하지 않고(값 struct는 참조를
+// 담지 않는다), ObjectRefMap은 모든 값을 방문한다(리플렉션 B9f4).
+//
+// 사용 예(생성 Trace):
+//   detail::TraceMapField(value.*(&::Inventory::slots), visitor);
+template <class K, class V>
+void TraceMapField(const OrderedMap<K, V>&, TraceVisitor&) noexcept {
+}
+
+template <class K, class T>
+void TraceMapField(const ObjectRefMap<K, T>& map, TraceVisitor& visitor) noexcept {
+    map.Trace(visitor);
 }
 
 } // namespace rocks::detail

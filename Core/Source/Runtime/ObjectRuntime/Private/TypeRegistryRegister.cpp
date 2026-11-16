@@ -109,8 +109,8 @@ Result<void> ValidateFieldList(Span<const FieldSchema> fields, bool structMember
         // 종류(참조·컨테이너·Optional 거부 — 참조 struct는 ResolveValueTypes가 거부한다),
         // maxElements 0이다. 그 밖의 필드는 element = {Opaque, 0}·maxElements 0이다.
         // Map 필드(리플렉션 B9f2)는 value.type 0, 키 종류는 성질 표의 Map 키 종류, 값 종류는 Map 값
-        // 종류(ObjectReference는 ObjectRefMap이라 B9f4가 연다 — 지금은 거부, 참조 struct는
-        // ResolveValueTypes가 거부한다), maxElements는 배열과 같은 범위다. Set 필드는 원소 종류가
+        // 종류(ObjectReference는 ObjectRefMap — 리플렉션 B9f4, 참조 struct는 ResolveValueTypes가
+        // 거부한다), maxElements는 배열과 같은 범위다. Set 필드는 원소 종류가
         // Set 원소 종류다. Map이 아닌 필드의 key는 {Opaque, 0}이다.
         const bool array = field.value.kind == ValueKind::Array;
         const bool optional = field.value.kind == ValueKind::Optional;
@@ -125,7 +125,6 @@ Result<void> ValidateFieldList(Span<const FieldSchema> fields, bool structMember
                                                  ValueKindCanBeOptionalInner(field.element.kind) &&
                                                  field.maxElements == 0
                                 : map ? counted && ValueKindCanBeMapValue(field.element.kind) &&
-                                            field.element.kind != ValueKind::ObjectReference &&
                                             ValueKindCanBeMapKey(key.kind)
                                 : set
                                     ? counted && ValueKindCanBeSetElement(field.element.kind)
@@ -153,9 +152,10 @@ Result<void> ValidateFieldList(Span<const FieldSchema> fields, bool structMember
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
-        // FieldKind::ObjectReference(강한 GC 간선) ⇔ 대상 형식이 ObjectReference(단일 참조 또는
-        // ObjectRefArray). 대상 type은 성질 표의 대상 타입 종류(참조·소프트 참조의 기대 대상,
-        // Enum·Struct의 대상 ID)에만 쓰고, 대상 ID 필수 종류(Enum·Struct)는 ID가 있어야 한다.
+        // FieldKind::ObjectReference(강한 GC 간선) ⇔ 대상 형식이 ObjectReference(단일 참조,
+        // ObjectRefArray 또는 ObjectRefMap). 대상 type은 성질 표의 대상 타입 종류(참조·소프트
+        // 참조의 기대 대상, Enum·Struct의 대상 ID)에만 쓰고, 대상 ID 필수 종류(Enum·Struct)는 ID가
+        // 있어야 한다.
         if (field.value.kind != ValueKind::Opaque) {
             ++typedFields;
             const bool reference = target.kind == ValueKind::ObjectReference;

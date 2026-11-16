@@ -153,7 +153,9 @@ internal static partial class ModuleMetaTests
                     field["maxElements"] = 0;
                     field["flags"] = new System.Text.Json.Nodes.JsonArray("Required");
                 }),
-                // 리플렉션 B9f2: Map 필드는 key가 Map 키 종류이고 값은 Map 값 종류(강한 참조 제외), Map이 아닌 필드의 key는 null이다.
+                // 리플렉션 B9f2: Map 필드는 key가 Map 키 종류이고 값은 Map 값 종류, Map이 아닌 필드의 key는 null이다. 강한 참조 값 Map은
+                // ObjectRefMap(리플렉션 B9f4)이라 descriptor로는 읽히고, C++ 멤버(ObjectRefArray)와 어긋나 생성 Trace의 TraceMapField가
+                // 검증 컴파일에서 실패한다(RMC3000 — 위조 descriptor는 게시되지 않는다).
                 ("keyOnArray", "RMC1000", "key on a field that is not a map", parent => FieldNode(parent, "modes")["key"] = Element("UInt32")),
                 ("mapWithoutKey", "RMC1000", "key of a map field", parent => FieldNode(parent, "modes")["value"] = Element("Map")),
                 ("mapFloatKey", "RMC1000", "map key kind Float32", parent =>
@@ -162,7 +164,7 @@ internal static partial class ModuleMetaTests
                     field["value"] = Element("Map");
                     field["key"] = Element("Float32");
                 }),
-                ("mapReferenceValue", "RMC1000", "map value kind ObjectReference", parent =>
+                ("mapReferenceValue", "RMC3000", "TraceMapField", parent =>
                 {
                     System.Text.Json.Nodes.JsonObject field = FieldNode(parent, "links");
                     field["value"] = Element("Map");

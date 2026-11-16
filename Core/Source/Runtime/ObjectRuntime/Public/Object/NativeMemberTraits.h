@@ -2,6 +2,7 @@
 
 #include <Base/TypeTraits.h>
 #include <Object/ObjectRefArray.h>
+#include <Object/ObjectRefMap.h>
 #include <Object/ObjectRefs.h>
 #include <Object/StructRefArray.h>
 
@@ -40,9 +41,14 @@ struct NativeStrongReference<StructRefArray<S>> {
     static constexpr bool value = true;
 };
 
-// Registry가 관리하는 참조 컨테이너(ObjectRefArray·StructRefArray)면 참이다. 직접 타입만 본다.
-// 생성 코드가 struct의 ContainsReferenceArray 형질을 C++ 멤버 타입과 대조할 때 쓴다(encode 고정이
-// 그 형질에 기대므로 틀린 모델 값이 고정 누락이 되지 않게). 사용 예(생성 코드):
+template <class K, class T>
+struct NativeStrongReference<ObjectRefMap<K, T>> {
+    static constexpr bool value = true;
+};
+
+// Registry가 관리하는 참조 컨테이너(ObjectRefArray·StructRefArray·ObjectRefMap)면 참이다. 직접
+// 타입만 본다. 생성 코드가 struct의 ContainsReferenceArray 형질을 C++ 멤버 타입과 대조할 때
+// 쓴다(encode 고정이 그 형질에 기대므로 틀린 모델 값이 고정 누락이 되지 않게). 사용 예(생성 코드):
 //   static_assert(GeneratedType<S>::ContainsReferenceArray ||
 //                 !::rocks::detail::RegistryContainer<decltype(S::slots)>::value, "...");
 template <class T>
@@ -57,6 +63,11 @@ struct RegistryContainer<ObjectRefArray<T>> {
 
 template <class S>
 struct RegistryContainer<StructRefArray<S>> {
+    static constexpr bool value = true;
+};
+
+template <class K, class T>
+struct RegistryContainer<ObjectRefMap<K, T>> {
     static constexpr bool value = true;
 };
 
@@ -88,10 +99,10 @@ struct RequiresWorldOnlyOwnerOf<T, decltype(void(T::RocksRequiresWorldOnlyOwner)
 
 } // namespace detail
 
-// T(배열이면 원소)가 ObjectRef·RootRef·ObjectRefArray·StructRefArray이거나 그것을 가리키는 포인터·
-// 참조면 참이다. WeakRef와 ObjectHandle은 추적하지 않는 참조라 거짓이다. 직접 타입만 보고 대상
-// 타입의 완전성에 기대지 않는다 — Object 파생 타입을 가리키는 raw 포인터·참조, 멤버를 값으로 담는
-// 타입의 필드·템플릿 인자는 MetaCompiler(탐침과 AST 재귀 검사, RMC2205)가 본다.
+// T(배열이면 원소)가 ObjectRef·RootRef·ObjectRefArray·StructRefArray·ObjectRefMap이거나 그것을
+// 가리키는 포인터· 참조면 참이다. WeakRef와 ObjectHandle은 추적하지 않는 참조라 거짓이다. 직접
+// 타입만 보고 대상 타입의 완전성에 기대지 않는다 — Object 파생 타입을 가리키는 raw 포인터·참조,
+// 멤버를 값으로 담는 타입의 필드·템플릿 인자는 MetaCompiler(탐침과 AST 재귀 검사, RMC2205)가 본다.
 template <class T>
 inline constexpr bool IsNativeStrongReference =
     detail::NativeStrongReference<RemoveCvT<RemoveAllExtentsT<T>>>::value;

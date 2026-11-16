@@ -255,12 +255,12 @@ internal static partial class MetaTests
                 ("rocks::StructRefArray<rocks::ObjectRefArray<Value>> nested;", "StructRefArray element 'rocks::ObjectRefArray<probe::Value>' is itself an array"),
                 ("rocks::StructRefArray<Leaf> leaves;", "holds no strong object references and needs rocks::Array<S>"),
                 ("rocks::StructRefArray<Value> values;", "StructRefArray element 'probe::Value' is not a reflected ROCKS_STRUCT"),
-                ("rocks::StructRefArray<Bundle> bundles;", "StructRefArray element struct probe::Bundle holds ObjectRefArray or StructRefArray members"),
+                ("rocks::StructRefArray<Bundle> bundles;", "StructRefArray element struct probe::Bundle holds ObjectRefArray, StructRefArray or ObjectRefMap members"),
                 ("rocks::StructRefArray<Mode> values;", "StructRefArray element 'probe::Mode' is not a reflected ROCKS_STRUCT"),
                 ("rocks::StructRefArray<rocks::int32> values;", "StructRefArray element 'int' is not a reflected ROCKS_STRUCT"),
                 ("rocks::Array<Movable> movables;", "element struct probe::Movable holds strong object references and needs rocks::StructRefArray<S>"),
                 // 참조 컨테이너를 담는 원소 struct는 어느 컨테이너로도 쓸 수 없으므로 StructRefArray로 바꾸라는 안내보다 먼저 알린다.
-                ("rocks::Array<MovableBundle> bundles;", "Array element struct probe::MovableBundle holds ObjectRefArray or StructRefArray members")
+                ("rocks::Array<MovableBundle> bundles;", "Array element struct probe::MovableBundle holds ObjectRefArray, StructRefArray or ObjectRefMap members")
             })
             {
                 await probe.RejectAsync(ArrayPreamble + "struct Value;\nROCKS_ENUM()\nenum class Mode : rocks::uint8 { Off = 0 };\n" + ArrayStructs +

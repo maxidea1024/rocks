@@ -249,7 +249,7 @@ internal static class CppEmitter
             // 없는 struct는 빈 본문 — 비템플릿 함수라 if constexpr로 가를 수 없다). 배열 필드(상속한 import 필드 포함)는 모두
             // TraceArrayField를 부른다 — 실제 C++ 타입이 오버로드를 고르므로 컨테이너를 descriptor에서 잘못 추론해도 Trace가 빠지지
             // 않는다. 방문할 필드가 없으면 매개변수 이름 없는 빈 본문이다(사용하지 않는 매개변수 경고를 피한다).
-            FieldModel[] traced = type.Fields.Where(field => field.IsReference || field.IsStruct || field.IsArray).ToArray();
+            FieldModel[] traced = type.Fields.Where(field => field.IsReference || field.IsStruct || field.IsArray || field.IsMap).ToArray();
             if (traced.Length == 0)
             {
                 Line($"static void Trace(const {native}&, TraceVisitor&) noexcept {{}}");
@@ -379,13 +379,19 @@ internal static class CppEmitter
 
     // 클래스·참조 struct Trace의 필드 한 줄이다(owner는 Trace 매개변수 value, ownerType은 멤버 포인터의 클래스 철자). ObjectRef는
     // Visit, struct 필드는 그 struct의 생성 Trace, 배열은 TraceArrayField(Array<E>는 아무것도 하지 않고 ObjectRefArray·
-    // StructRefArray는 원소를 방문한다)다.
+    // StructRefArray는 원소를 방문한다), Map은 TraceMapField(OrderedMap은 아무것도 하지 않고 ObjectRefMap은 값을 방문한다 — 리플렉션
+    // B9f4)다. 실제 C++ 타입이 오버로드를 고르므로 모델이 컨테이너를 잘못 추론해도 Trace가 빠지지 않는다.
     private static string TraceStatement(SchemaModel schema, FieldModel field, string owner, string ownerType)
     {
         string member = $"{owner}.*(&{ownerType}::{field.Name})";
         if (field.IsArray)
         {
             return $"detail::TraceArrayField({member}, visitor);";
+        }
+
+        if (field.IsMap)
+        {
+            return $"detail::TraceMapField({member}, visitor);";
         }
 
         return field.IsStruct
@@ -563,9 +569,9 @@ internal static class CppEmitter
         Line("return schema;");
         Line("}");
         // 참조 struct는 직접 ObjectRef 멤버(Transient 포함 — GC는 추적한다)를 Visit하고 멤버 struct의 Trace를, 모든 배열
-        // 멤버에 TraceArrayField를 부른다(인라인 struct 안 ObjectRefArray·StructRefArray). 참조 없는 struct는 빈 본문이다(그
-        // 형질은 위의 static_assert가 C++ 멤버 타입과 대조한다).
-        FieldModel[] traced = type.ContainsStrongReference ? type.Fields.Where(field => field.IsReference || field.IsStruct || field.IsArray).ToArray() : [];
+        // 멤버에 TraceArrayField를, 모든 Map 멤버에 TraceMapField를 부른다(인라인 struct 안 ObjectRefArray·StructRefArray·
+        // ObjectRefMap). 참조 없는 struct는 빈 본문이다(그 형질은 위의 static_assert가 C++ 멤버 타입과 대조한다).
+        FieldModel[] traced = type.ContainsStrongReference ? type.Fields.Where(field => field.IsReference || field.IsStruct || field.IsArray || field.IsMap).ToArray() : [];
         if (traced.Length == 0)
         {
             Line($"static void Trace(const {native}&, TraceVisitor&) noexcept {{}}");

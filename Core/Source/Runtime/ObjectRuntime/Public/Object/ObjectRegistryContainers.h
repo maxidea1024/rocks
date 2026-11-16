@@ -4,9 +4,10 @@
 
 // ObjectRegistry 컨테이너·참조 변경 템플릿의 클래스 밖 정의다. 선언과 사용 규칙(목적·오류·수명·
 // 사용 예)은 Object/ObjectRegistry.h의 클래스에 있고, 이 헤더는 그 끝에서 include된다. 정의는
-// SetReference, ObjectRefArray 변경(AddReference…ClearReferences), StructRefArray 변경
-// (AddElement…SetElementReference), ConstructionContext가 거치는 staged 지점과 경로 접근의 원소
-// 참조 쓰기(private), WeakRef<T>::TryPin 순서다.
+// SetReference, ObjectRefArray 변경(AddReference…ClearReferences), ObjectRefMap 변경
+// (SetMapReference…ClearMapReferences), StructRefArray 변경(AddElement…SetElementReference),
+// ConstructionContext가 거치는 staged 지점과 경로 접근의 원소 참조 쓰기(private),
+// WeakRef<T>::TryPin 순서다.
 namespace rocks {
 
 template <class T>
@@ -55,6 +56,33 @@ Result<void> ObjectRegistry::ClearReferences(const ObjectAccessContext& access, 
     return ClearArrayEdges(access, owner, array.storage_);
 }
 
+// ObjectRefMap 편집 객체(detail::ObjectRefMapEditor)는 이 함수의 지역이라 Registry 호출이 돌아온
+// 뒤(잠금 밖) 소멸하며 준비한 키 사본·예약·지운 키·옛 항목을 반환한다.
+template <class K, class T, class Q>
+Result<void> ObjectRegistry::SetMapReference(const ObjectAccessContext& access, ObjectHandle owner,
+                                             ObjectRefMap<K, T>& map, const Q& key,
+                                             ObjectHandle target,
+                                             MapReferenceWrite* write) noexcept {
+    detail::ObjectRefMapEditor<K, Q> edit(map.storage_, &key);
+    return SetMapEdge(access, owner, edit, target, NativeTypeKey<T>(), write);
+}
+
+template <class K, class T, class Q>
+Result<void> ObjectRegistry::EraseMapReference(const ObjectAccessContext& access,
+                                               ObjectHandle owner, ObjectRefMap<K, T>& map,
+                                               const Q& key, ObjectHandle* removed) noexcept {
+    detail::ObjectRefMapEditor<K, Q> edit(map.storage_, &key);
+    return EraseMapEdge(access, owner, edit, removed);
+}
+
+template <class K, class T>
+Result<void> ObjectRegistry::ClearMapReferences(const ObjectAccessContext& access,
+                                                ObjectHandle owner,
+                                                ObjectRefMap<K, T>& map) noexcept {
+    detail::ObjectRefMapEditor<K, K> edit(map.storage_, nullptr);
+    return ClearMapEdges(access, owner, edit);
+}
+
 template <class S>
 Result<usize> ObjectRegistry::AddElement(const ObjectAccessContext& access, ObjectHandle owner,
                                          StructRefArray<S>& array) noexcept {
@@ -96,6 +124,20 @@ Result<void> ObjectRegistry::AssignReferencesStaged(const ObjectAccessContext& a
                                                     uint64 transaction) noexcept {
     return AssignArrayEdges(access, owner, array.storage_, targets, transaction,
                             NativeTypeKey<T>());
+}
+
+template <class K, class T>
+Result<void> ObjectRegistry::AssignMapReferencesStaged(const ObjectAccessContext& access,
+                                                       ObjectHandle owner, ObjectRefMap<K, T>& map,
+                                                       Span<const K> keys,
+                                                       Span<const ObjectHandle> targets,
+                                                       uint64 transaction) noexcept {
+    if (keys.Size() != targets.Size()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    detail::ObjectRefMapEditor<K, K> edit(map.storage_, nullptr, keys);
+    return AssignMapEdges(access, owner, edit, targets, transaction, NativeTypeKey<T>());
 }
 
 template <class S>

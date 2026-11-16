@@ -150,7 +150,7 @@ internal static partial class SchemaValidator
         }
     }
 
-    // struct의 ContainsReferenceArray 형질을 필드로 계산한다: Registry 컨테이너(ObjectRefArray·StructRefArray) 필드이거나
+    // struct의 ContainsReferenceArray 형질을 필드로 계산한다: Registry 컨테이너(ObjectRefArray·StructRefArray·ObjectRefMap) 필드이거나
     // 그 형질을 가진 struct 멤버(런타임 RegisterStruct와 같은 규칙).
     private static bool ContainsReferenceArray(ClassModel model, Func<string, ClassModel> find) =>
         model.Fields.Any(field => field.IsRegistryContainer(find) || (field.IsStruct && find(field.Reference!).ContainsReferenceArray));

@@ -325,7 +325,8 @@ TEST(ValueKindProperties_TypeRegistryFollowsTable) {
         CHECK(RegistersAsClassField(types, optional, true) == ValueKindCanBeOptionalInner(kind));
 
         // Map 키·Map 값·Set 원소 자리다(리플렉션 B9f2): 등록 성공 ⇔ 성질 표의 그 칸(ObjectReference
-        // 값은 ObjectRefMap이라 B9f4 — 이 반복은 참조를 건너뛴다).
+        // 값은 FieldKind::ObjectReference인 ObjectRefMap이라 이 반복은 참조를 건너뛴다 — B9f4, 그
+        // 등록 규칙은 MapFieldRegistryTests).
         FieldSchema mapKey;
         mapKey.id = Guid{0x564b46, 5};
         mapKey.name = Span<const char>("byKey", 5);

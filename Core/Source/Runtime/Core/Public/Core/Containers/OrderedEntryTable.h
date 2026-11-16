@@ -12,9 +12,11 @@
 //   - 삽입 직전 (산 칸 + 삭제 칸) < 칸 수라 탐사는 늘 빈 칸에서 끝난다.
 //
 // 반환 순서(리플렉션 B9f3 리뷰 — 경로 쓰기의 B6 규칙 "옛 버퍼는 게시 뒤 반환"): 옛 저장소는 새
-// 저장소와 멤버(항목·색인·용량·개수)를 게시한 뒤에 반환한다(Reallocate·Release·CommitReserve).
-// 원소의 소멸은 그 항목을 논리적으로 지운 뒤(산 표시·개수·색인 칸)에 일어난다. 그래서 allocator의
-// 해제 콜백이 같은 표를 읽으면 늘 일관된 상태(옛 저장소가 아니라 게시된 표)를 본다.
+// 저장소와 멤버(항목·색인·용량·개수)를 게시한 뒤에 반환한다(Reallocate·Release). CommitReserve는
+// 옛 저장소를 반환하지 않고 그 예약(Reservation)에 넘기며 예약이 소멸할 때 반환한다(리플렉션 B9f4 —
+// 잠금 안에서 적용하고 해제 콜백은 잠금 밖에서 부르는 호출자). 원소의 소멸은 그 항목을 논리적으로
+// 지운 뒤(산 표시·개수·색인 칸)에 일어난다. 그래서 allocator의 해제 콜백이 같은 표를 읽으면 늘
+// 일관된 상태(옛 저장소가 아니라 게시된 표)를 본다.
 
 #include <Base/Checked.h>
 #include <Base/NumericLimits.h>
@@ -262,7 +264,7 @@ public:
     // 2단계 예약(PrepareReserve → CommitReserve)의 준비 결과다(이동 전용). 새 저장소가 필요한
     // 예약이면 그 저장소를 소유하고(아직 표에 넣지 않았다), 제자리 압축이면 할당이 없다. 쓰지 않고
     // 소멸하면 잡은 저장소를 반환한다(표는 그대로). 준비한 표에만, 그 뒤 구조 변경 없이 한 번
-    // CommitReserve한다(어기면 Fatal).
+    // CommitReserve한다(어기면 Fatal). 적용한 예약은 표의 옛 저장소를 넘겨받아 소멸할 때 반환한다.
     class Reservation {
     public:
         Reservation(Reservation&& other) noexcept
@@ -346,8 +348,9 @@ public:
             Reservation(this, Action::Grow, storage.Value(), target));
     }
 
-    // 준비한 예약을 적용한다(할당 없음, 실패 없음): 제자리 압축 또는 새 저장소로 옮겨 게시한 뒤 옛
-    // 저장소를 반환한다. 다른 표의 예약이거나 준비 뒤 구조가 바뀌었으면 Fatal이다.
+    // 준비한 예약을 적용한다(할당 없음, 실패 없음, 해제 없음): 제자리 압축 또는 새 저장소로 옮겨
+    // 게시하고 옛 저장소는 reservation에 넘긴다(reservation이 소멸할 때 반환한다 — 해제 콜백은
+    // 게시된 표를 본다). 다른 표의 예약이거나 준비 뒤 구조가 바뀌었으면 Fatal이다.
     void CommitReserve(Reservation& reservation) noexcept {
         using Action = typename Reservation::Action;
         if (reservation.table_ != this ||
@@ -358,9 +361,7 @@ public:
         if (reservation.action_ == Action::Compact) {
             CompactEntries();
         } else if (reservation.action_ == Action::Grow) {
-            Entry* storage = reservation.storage_;
-            reservation.storage_ = nullptr;
-            AdoptStorage(storage, reservation.capacity_);
+            reservation.storage_ = AdoptStorage(reservation.storage_, reservation.capacity_);
         }
 
         reservation.action_ = Action::None;
@@ -424,6 +425,22 @@ public:
 
     void EraseAt(usize position) noexcept {
         EraseSlot(SlotOfPosition(entries_[position].hash, position));
+    }
+
+    // EraseSlot과 같이 항목을 논리적으로 지운 뒤, 키·값을 소멸하기 전에 taker(K&&, V&&)로 넘긴다
+    // (taker가 옮겨 가고 남은 껍데기만 여기서 소멸한다 — 이동된 원소의 소멸자는 allocator를 부르지
+    // 않는다). 압축은 SettleAfterErase가 한다.
+    template <typename Taker>
+    void EraseSlotTaking(usize slot, Taker& taker) noexcept {
+        Entry& entry = entries_[index_[slot]];
+        index_[slot] = DeletedSlot;
+        ++tombstones_;
+        entry.alive = false;
+        --count_;
+        ++revision_;
+        taker(Move(*entry.Key()), Move(*entry.Value()));
+        DestroyAt(entry.Value());
+        DestroyAt(entry.Key());
     }
 
     // 대량 삭제에서 칸을 하나씩 찾아 지우는 수가 EagerEraseLimit()을 넘으면 쓰는 길이다. 항목만
@@ -553,7 +570,11 @@ private:
             return Result<void>::Failure(storage.Error());
         }
 
-        AdoptStorage(storage.Value(), newCapacity);
+        Entry* old = AdoptStorage(storage.Value(), newCapacity);
+        if (old != nullptr && !allocator_->Deallocate(old)) {
+            platform::Fatal("OrderedMap storage was not owned by its allocator");
+        }
+
         return Result<void>::Success();
     }
 
@@ -578,8 +599,9 @@ private:
     }
 
     // 잡아 둔 저장소 entries(용량 newCapacity)로 산 항목을 순서대로 옮기고 새 표를 게시한 뒤 옛
-    // 저장소를 반환한다(할당 없음, 실패 없음 — 이동된 원소의 소멸자는 allocator를 부르지 않는다).
-    void AdoptStorage(Entry* entries, usize newCapacity) noexcept {
+    // 저장소(없었으면 nullptr)를 돌려준다 — 반환은 호출자가 한다(할당·해제 없음, 실패 없음 — 이동된
+    // 원소의 소멸자는 allocator를 부르지 않는다).
+    [[nodiscard]] Entry* AdoptStorage(Entry* entries, usize newCapacity) noexcept {
 
         // StorageBytes가 넘침 없이 계산했으므로 아래 곱은 넘치지 않는다.
         unsigned char* indexStorage =
@@ -616,9 +638,7 @@ private:
         used_ = target;
         tombstones_ = 0;
         ++revision_;
-        if (old != nullptr && !allocator_->Deallocate(old)) {
-            platform::Fatal("OrderedMap storage was not owned by its allocator");
-        }
+        return old;
     }
 
     // 산 항목을 상대 순서 그대로 앞으로 당긴다(할당 없음). 옮긴 항목의 색인 칸만 고친다.

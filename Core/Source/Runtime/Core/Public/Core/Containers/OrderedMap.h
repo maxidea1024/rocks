@@ -296,7 +296,8 @@ public:
     }
 
     // 2단계 예약의 준비 결과다(이동 전용 — Reserve를 할당과 옮기기로 나눈다, 리플렉션 B9f3 경로
-    // 넣기). 쓰지 않고 소멸하면 잡은 저장소를 반환하고 Map은 그대로다.
+    // 넣기). 쓰지 않고 소멸하면 잡은 저장소를 반환하고 Map은 그대로다. CommitReserve로 적용한
+    // 뒤에는 Map의 옛 저장소를 넘겨받아 소멸할 때 반환한다.
     using Reservation = typename Table::Reservation;
 
     // Reserve(capacity)와 같은 판정으로 예약을 준비한다. 새 저장소가 필요하면 그 할당만 하고 Map은
@@ -318,10 +319,12 @@ public:
         return table_.PrepareReserve(capacity);
     }
 
-    // 준비한 예약을 적용한다(할당 없음, 실패 없음). 성공한 Reserve(capacity)와 같은 보장(Count()가
-    // capacity가 될 때까지의 삽입은 할당·이동하지 않는다)이고, 옛 저장소는 새 저장소를 게시한 뒤
-    // 반환한다(해제 콜백은 게시된 Map을 본다). 이 Map의 예약이 아니거나, 준비 뒤 구조가 바뀌었거나,
-    // 순회 중이면 Fatal이다.
+    // 준비한 예약을 적용한다(할당·해제 없음, 실패 없음). 성공한 Reserve(capacity)와 같은 보장
+    // (Count()가 capacity가 될 때까지의 삽입은 할당·이동하지 않는다)이고, 옛 저장소는 반환하지 않고
+    // reservation에 넘긴다 — reservation이 소멸할 때 반환하므로 그 해제 콜백은 새 저장소를 게시한
+    // (그 사이 넣은 원소까지 담은) Map을 본다. 그래서 잠금 안에서 적용·삽입하고 해제 콜백은 잠금
+    // 밖에서 부르게 할 수 있다(ObjectRegistry의 ObjectRefMap 넣기 — 리플렉션 B9f4). 이 Map의 예약이
+    // 아니거나, 준비 뒤 구조가 바뀌었거나, 순회 중이면 Fatal이다.
     void CommitReserve(Reservation& reservation) noexcept {
         CheckNotIterating();
         table_.CommitReserve(reservation);
@@ -355,6 +358,38 @@ public:
         }
 
         table_.EraseSlot(slot);
+        table_.SettleAfterErase();
+        return true;
+    }
+
+    // 키가 있으면 그 항목을 지우고(Erase와 같은 순서·압축·무효화 규칙) 키·값을 소멸하기 전에
+    // taker(K&&, V&&)로 넘긴 뒤 true, 없으면 taker를 부르지 않고 false다. taker는 noexcept이고
+    // 넘겨받은 키·값을 옮겨 가져간다(옮겨 가고 남은 껍데기만 Map 안에서 소멸한다 — 이동된 원소의
+    // 소멸자는 allocator를 부르지 않는다는 계약). taker 안에서 같은 Map에 재진입하지 않는다(항목은
+    // 이미 논리적으로 지워졌다). 원소 소멸의 해제 콜백을 다른 시점(잠금 밖 등)으로 미룰 때 쓴다
+    // (ObjectRegistry의 ObjectRefMap 지우기 — 리플렉션 B9f4). 순회 중 호출은 Fatal이다.
+    //
+    // 수명 계약: taker가 옮겨 가지 않은 키·값(인자를 받기만 하고 Move하지 않은 것)은 taker가 돌아온
+    // 직후 Map 안에서 소멸한다 — 그 소멸의 해제 콜백은 이 호출 안에서 돈다(미뤄지지 않는다). 해제를
+    // 미루려면 taker가 반드시 키·값을 자기 저장소로 옮겨야 한다(컴파일 시점에 강제하지 않는다).
+    //
+    // 사용 예:
+    //   Optional<String> removed;
+    //   map.EraseAndTake(StringView("key"), [&](String&& key, int32&&) noexcept {
+    //       removed.Emplace(Move(key));
+    //   });   // removed는 원하는 시점에 소멸한다
+    template <typename Q, typename Taker>
+    bool EraseAndTake(const Q& key, Taker&& taker) noexcept {
+        static_assert(
+            noexcept(taker(Move(*static_cast<K*>(nullptr)), Move(*static_cast<V*>(nullptr)))),
+            "OrderedMap EraseAndTake taker must be noexcept");
+        CheckNotIterating();
+        const usize slot = FindSlot(key, HashKey(key));
+        if (slot == IndexNone) {
+            return false;
+        }
+
+        table_.EraseSlotTaking(slot, taker);
         table_.SettleAfterErase();
         return true;
     }

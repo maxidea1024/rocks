@@ -221,6 +221,40 @@ public:
         return registry_.AssignReferencesStaged(access_, owner, array, targets, transaction_);
     }
 
+    // 이 트랜잭션의 staged 객체 owner 안 ObjectRefMap 내용을 (keys[i], targets[i]) 항목으로 통째로
+    // 바꾼다(리플렉션 B9f4 — Docs/Design/ReflectionExtensions.ko.md 7.4절, 그래프 로드가 한 번에
+    // 채운다). 순서는 keys 순서다. owner·컨테이너 위치·값 대상 규칙은 AssignReferences와
+    // 같다(null은 ObjectHandle{}로 정규화, 생존 객체 또는 이 트랜잭션의 Reserved 객체, 그 밖
+    // StaleHandle, T의 파생이 아니면 TypeMismatch). keys와 targets의 길이가 다르거나 같은 키가
+    // 둘이면 InvalidArgument, 컨테이너를 순회 중이면 Busy다. 키 사본(String·Soft는 컨테이너
+    // allocator로 복사)과 저장소는 레지스트리 처리 표시(processing_) 아래 잠금 밖에서 새 컨테이너로
+    // 만들고(그동안의 Registry 재진입은 Busy, 할당 실패는 그 오류) 한 잠금 안에서 게시한다. 옛
+    // 항목은 호출이 돌아온 뒤 반환한다. 생존 대상만 shade하고 Reserved 대상은 Commit이 shade하며,
+    // Commit은 owner Trace로 값을 다시 검증한다. 실패하면 컨테이너는 바뀌지 않는다. 트랜잭션이
+    // 끝났거나 오류 상태면 InvalidArgument다.
+    //
+    // 키 형식은 map에서 정해진다(keys는 Span<const K>로 바뀌는 무엇이든 — 배열·Array의 View).
+    //
+    // 사용 예(owner·inventory는 같은 트랜잭션의 Create·Get 결과):
+    //   const Name keys[] = {sword, shield};
+    //   const ObjectHandle targets[] = {first, {}};
+    //   if (auto assigned = transaction.AssignMapReferences(owner, inventory->slots_, keys,
+    //   targets);
+    //       !assigned) {
+    //       return assigned;
+    //   }
+    template <class K, class T>
+    Result<void> AssignMapReferences(ObjectHandle owner, ObjectRefMap<K, T>& map,
+                                     Span<const TypeIdentityT<K>> keys,
+                                     Span<const ObjectHandle> targets) noexcept {
+        if (auto writable = CheckStagedWrite(); !writable) {
+            return writable;
+        }
+
+        return registry_.AssignMapReferencesStaged(access_, owner, map, keys, targets,
+                                                   transaction_);
+    }
+
     // staged owner 안 StructRefArray를 count개의 기본 원소로 통째로 바꾼다. owner 규칙은
     // AssignReferences와 같다. 블록 할당·원소 생성·옛 원소 소멸은 처리 표시 아래 잠금 밖에서 하며,
     // 하나라도 실패하면 만든 원소를 모두 되돌리고 배열은 바뀌지 않는다(옛 원소는 게시 뒤 소멸한다).

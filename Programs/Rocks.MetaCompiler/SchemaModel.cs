@@ -140,8 +140,13 @@ internal sealed class FieldModel
         return ElementKind == "Struct" && find(Reference!).ContainsStrongReference ? ArrayRules.StructRefArray : ArrayRules.Array;
     }
 
-    // Registry가 관리하는 컨테이너(ObjectRefArray·StructRefArray) 필드다.
-    public bool IsRegistryContainer(Func<string, ClassModel> find) => ContainerOf(find) is ArrayRules.ObjectRefArray or ArrayRules.StructRefArray;
+    // Registry가 관리하는 컨테이너(ObjectRefArray·StructRefArray·ObjectRefMap) 필드다. Map 값이 강한 참조면 ObjectRefMap이다(OrderedMap의
+    // 강한 참조 값은 RMC2305로 막힌다 — 리플렉션 B9f4).
+    public bool IsRegistryContainer(Func<string, ClassModel> find) =>
+        ContainerOf(find) is ArrayRules.ObjectRefArray or ArrayRules.StructRefArray || IsObjectRefMap;
+
+    // ObjectRefMap<K, T> 필드다(Map 필드이고 값이 강한 참조 — 리플렉션 B9f4, Docs/Design/ReflectionExtensions.ko.md 7.4절).
+    public bool IsObjectRefMap => IsMap && ElementKind == "ObjectReference";
 
     // FieldFlags 비트: Transient 1, ReadOnly 2, EditorOnly 4, Required 8.
     public uint Flags => (Spec.Transient ? 1u : 0u) | (Spec.ReadOnly ? 2u : 0u) | (Spec.EditorOnly ? 4u : 0u) | (Spec.Required ? 8u : 0u);
@@ -296,7 +301,9 @@ internal static class OptionalRules
 
 // 리플렉션 Map·Set 필드 규칙을 한 곳에 둔다(리플렉션 B9f2 — Docs/Design/ReflectionExtensions.ko.md 7.2·15절). OrderedMap<K, V>·
 // OrderedSet<T>는 클래스 필드·struct 멤버에만 두고 키·원소는 성질 표의 Map 키·Set 원소 종류, 값은 Map 값 종류(강한 참조는 ObjectRefMap —
-// 리플렉션 B9f4)다. 기본 해시·같음 정책만 받는다. HashMap·HashSet은 순서가 없어 저장할 수 없다(RMC2305).
+// 리플렉션 B9f4)다. 기본 해시·같음 정책만 받는다. HashMap·HashSet은 순서가 없어 저장할 수 없다(RMC2305). ObjectRefMap<K, T>(리플렉션 B9f4 —
+// 7.4절)는 키가 Map 키 종류, 값이 T(클래스, 기본 rocks::Object)의 강한 참조인 Map 필드다(Registry 컨테이너 — 클래스 필드·인라인 struct
+// 멤버에 둔다).
 internal static class MapRules
 {
     public const string Map = "Map";
@@ -344,8 +351,27 @@ internal static class MapRules
         return null;
     }
 
-    // spelling이 리플렉션 Map·Set 컨테이너 철자인지다(원소·내부·키·값 위치의 중첩 판정).
-    public static bool IsContainer(string spelling) => Split(spelling) is not null;
+    // spelling이 rocks::ObjectRefMap<K, T>(desugar 철자, 앞의 :: 허용)면 (K, T)를 돌려준다(아니면 null). Clang이 기본 인자를 생략해
+    // ObjectRefMap<K>로 출력하면 T는 ""(rocks::Object)다.
+    public static (string Key, string Target)? SplitObjectRefMap(string spelling)
+    {
+        string text = Normalize(spelling);
+        const string template = "rocks::ObjectRefMap";
+        if (!text.StartsWith(template + "<", StringComparison.Ordinal) || !text.EndsWith('>') || Arguments(text, template.Length) is not { } arguments)
+        {
+            return null;
+        }
+
+        return arguments.Count switch
+        {
+            1 => (arguments[0], ""),
+            2 => (arguments[0], arguments[1]),
+            _ => null
+        };
+    }
+
+    // spelling이 리플렉션 Map·Set 컨테이너 철자인지다(원소·내부·키·값 위치의 중첩 판정 — ObjectRefMap 포함).
+    public static bool IsContainer(string spelling) => Split(spelling) is not null || SplitObjectRefMap(spelling) is not null;
 
     // spelling이 순서 없는 Core 컨테이너(rocks::HashMap·rocks::HashSet)인지다(RMC2305 — 저장할 수 없다).
     public static bool IsUnordered(string spelling)
@@ -359,7 +385,7 @@ internal static class MapRules
     public const string Hint =
         "rocks::OrderedMap<K, V> keys and rocks::OrderedSet<T> elements are integers, bool, ROCKS_ENUM enums, Guid, AssetId, Sha256Digest, String, Name, " +
         "SoftObjectRef or ClassRef (no floats, object/weak references, structs, Optionals or containers); map values are any single value or a ROCKS_STRUCT " +
-        "without strong references (object references go in ObjectRefMap). Containers do not nest; wrap an inner container in a ROCKS_STRUCT value.";
+        "without strong references (object references go in rocks::ObjectRefMap<K, T>). Containers do not nest; wrap an inner container in a ROCKS_STRUCT value.";
 
     // 템플릿 인자 목록(꺾쇠 깊이로 나눈다)이다. 닫는 꺾쇠가 철자 끝이 아니면 null이다(중첩 이름이 아니게).
     private static List<string>? Arguments(string text, int open)

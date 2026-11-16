@@ -125,10 +125,12 @@ struct OptionalField<Optional<T>> {
     using Inner = T;
 };
 
-// 리플렉션 Map·Set 필드(OrderedMap<K, V>·OrderedSet<T> — 리플렉션 B9f2, Docs/Design/
-// ReflectionExtensions.ko.md 7.2절)다. 부분 특수화로만 고르며 기본 해시·같음
+// 리플렉션 Map·Set 필드(OrderedMap<K, V>·OrderedSet<T> — 리플렉션 B9f2, ObjectRefMap<K, T> —
+// B9f4, Docs/Design/ReflectionExtensions.ko.md 7.2·7.4절)다. 부분 특수화로만 고르며 기본 해시·같음
 // 정책(SeededHash·Equal)인 컨테이너만 받는다(다른 정책은 Supported가 거짓 — 리플렉션하지 않는다).
-// Key는 키(Set이면 원소) C++ 형식, Value는 값(Set이면 원소) C++ 형식, IsSet은 OrderedSet인지다.
+// Key는 키(Set이면 원소) C++ 형식, Value는 값(Set이면 원소) C++ 형식(ObjectRefMap은 ObjectRef<T> —
+// 값 null 허용), IsSet은 OrderedSet인지, Registry는 Registry가 관리하는 컨테이너(ObjectRefMap —
+// 항목을 Registry API로만 바꾼다)인지다.
 template <class T>
 struct MapField {
     static constexpr bool Supported = false;
@@ -138,6 +140,7 @@ template <class K, class V>
 struct MapField<OrderedMap<K, V>> {
     static constexpr bool Supported = true;
     static constexpr bool IsSet = false;
+    static constexpr bool Registry = false;
     using Key = K;
     using Value = V;
 };
@@ -146,8 +149,18 @@ template <class T>
 struct MapField<OrderedSet<T>> {
     static constexpr bool Supported = true;
     static constexpr bool IsSet = true;
+    static constexpr bool Registry = false;
     using Key = T;
     using Value = T;
+};
+
+template <class K, class T>
+struct MapField<ObjectRefMap<K, T>> {
+    static constexpr bool Supported = true;
+    static constexpr bool IsSet = false;
+    static constexpr bool Registry = true;
+    using Key = K;
+    using Value = ObjectRef<T>;
 };
 
 // 빈 자리에 새로 만드는 값이다: noexcept E(Allocator&)가 있으면 allocator를 넘기고 없으면 E()다

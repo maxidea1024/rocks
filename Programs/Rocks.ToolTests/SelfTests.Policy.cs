@@ -484,6 +484,7 @@ internal static partial class SelfTests
                 "template class rocks::ObjectRef<Node>;", "extern template class rocks::SoftObjectRef<>;",
                 "template class rocks::WeakRef<Node>;", "extern template class ::rocks::WeakRef<>;",
                 "template class rocks::ClassRef<Node>;", "extern template struct ::rocks::ClassRef<Node>;",
+                "template class rocks::ObjectRefMap<int, Node>;", "extern template class ::rocks::ObjectRefMap<rocks::Name>;",
                 "extern template\n    class\n    rocks::Array<int>;", "template class /* note */ rocks::StructRefArray<Slot>;" })
             {
                 temporary.Write(probe, "// first line\n" + banned + "\n");

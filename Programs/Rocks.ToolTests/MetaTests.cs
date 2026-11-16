@@ -53,6 +53,7 @@ internal static partial class MetaTests
         RegisterClassRefs(context);
         RegisterOptionals(context);
         RegisterMaps(context);
+        RegisterObjectRefMaps(context);
         RegisterStructs(context);
         RegisterBinds(context);
         RegisterArrays(context);

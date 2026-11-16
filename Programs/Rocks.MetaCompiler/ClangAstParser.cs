@@ -78,10 +78,10 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
     private readonly Dictionary<string, RecordInfo> records = new(StringComparer.Ordinal);
 
     // 강한 객체 참조를 담는 템플릿이다(StructRefArray는 참조 struct 원소의 목록이다 — Docs/Design/ReflectionFoundations.ko.md
-    // 5.6절).
+    // 5.6절, ObjectRefMap은 키 → 강한 참조 Map이다 — ReflectionExtensions.ko.md 7.4절).
     private static readonly HashSet<string> StrongReferenceTemplates = new(StringComparer.Ordinal)
     {
-        "rocks::ObjectRef", "rocks::RootRef", "rocks::ObjectRefArray", "rocks::StructRefArray"
+        "rocks::ObjectRef", "rocks::RootRef", "rocks::ObjectRefArray", "rocks::StructRefArray", "rocks::ObjectRefMap"
     };
 
     // 대상 객체를 담지도 추적하지도 않는 참조 템플릿이다. 인자 타입을 따라가지 않는다(WeakRef<T>는 T의 필드를 담지 않고,

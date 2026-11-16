@@ -83,7 +83,7 @@ public:
     }
 
     // 2단계 예약이다(OrderedMap::PrepareReserve·CommitReserve — 할당만 먼저 하고 적용은 무할당·
-    // 무실패).
+    // 무실패, 옛 저장소는 적용한 예약이 소멸할 때 반환한다).
     using Reservation = typename OrderedMap<K, Marker, Hasher, KeyEqual>::Reservation;
 
     Result<Reservation> PrepareReserve(usize count) noexcept {

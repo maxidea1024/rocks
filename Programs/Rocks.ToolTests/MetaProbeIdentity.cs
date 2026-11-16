@@ -17,7 +17,8 @@ internal static class MetaProbeIdentity
                 "probe::RealBinding", "probe::ABinding", "probe::BBinding", "probe::MixedBinding", "probe::HiddenBinding",
                 "probe::FixedBinding", "probe::SplitBinding", "probe::Bundle", "probe::WorldBundle", "probe::Movable", "probe::Node", "probe::MovableBundle",
                 "probe::Tiny", "probe::Signed", "probe::Short", "probe::Wide", "probe::Huge", "probe::Bits",
-                "probe::Point", "probe::Segment", "probe::Plain", "probe::Derived", "probe::Other", "probe::none" }
+                "probe::Point", "probe::Segment", "probe::Plain", "probe::Derived", "probe::Other", "probe::none",
+                "probe::Target", "probe::Slot" }
                 .Concat(Enumerable.Range(1, 17).Select(level => $"probe::Chain{level}")))
             {
                 manifest.Register("type", name);
@@ -56,7 +57,9 @@ internal static class MetaProbeIdentity
                 "probe::Value::byObject", "probe::Value::byWeak", "probe::Value::byLeaf", "probe::Value::ratios", "probe::Value::lists",
                 "probe::Value::sets", "probe::Value::maybe", "probe::Value::maybeSet", "probe::Value::maybeKey", "probe::Value::unordered",
                 "probe::Value::maybeMap", "probe::Value::byAsset", "probe::Value::tags", "probe::Value::custom", "probe::Value::unorderedSet",
-                "probe::Value::constKey", "probe::Value::constValue", "probe::Value::pointers", "probe::Leaf::named" }
+                "probe::Value::constKey", "probe::Value::constValue", "probe::Value::pointers", "probe::Leaf::named",
+                "probe::Bundle::byName", "probe::Value::bySlot", "probe::Value::anything", "probe::Value::required", "probe::Value::notClass",
+                "probe::Value::maps", "probe::Value::nestedRefs", "probe::Value::slots", "probe::Slot::material", "probe::Slot::byKey" }
                 .Concat(Enumerable.Range(2, 16).Select(level => $"probe::Chain{level}::inner")))
             {
                 manifest.Register("field", name);

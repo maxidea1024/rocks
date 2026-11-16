@@ -1,13 +1,16 @@
 #include <Base/Types.h>
 #include <Core/Containers/OrderedMap.h>
 #include <Core/Containers/OrderedSet.h>
+#include <Core/Optional.h>
+#include <Core/Text/String.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
 
 // OrderedMap·OrderedSet의 저장소 반환 순서와 2단계 예약이다(리플렉션 B9f3 리뷰 반영 — Docs/Design/
 // ReflectionExtensions.ko.md 7.3절): 옛 저장소는 새 저장소를 게시한 뒤 반환하고(그 해제 콜백은
 // 일관된 Map을 본다), PrepareReserve는 할당만 하고 Map을 바꾸지 않으며(버리면 잡은 저장소만 반환),
-// CommitReserve는 할당·실패 없이 적용한다. IsIterating은 ForEach 중에만 참이다.
+// CommitReserve는 할당·해제·실패 없이 적용한다(옛 저장소는 예약이 소멸할 때 반환 — 리플렉션 B9f4).
+// IsIterating은 ForEach 중에만 참이다. EraseAndTake는 지운 항목의 키·값을 소멸 전에 넘긴다.
 using namespace rocks;
 
 namespace {
@@ -91,9 +94,9 @@ const void* StorageOf(const Map& map) noexcept {
 
 } // namespace
 
-// 성장(Reallocate)·Reset·Compact·CommitReserve가 옛 저장소를 반환하는 순간 그 해제 콜백은 게시된
-// Map을 본다: 성장이면 옛 원소가 모두 새 저장소에 있고(Count·Find·Contains 일관), Reset이면 빈
-// Map이다.
+// 성장(Reallocate)·Reset·Compact와 CommitReserve로 적용한 예약의 소멸이 옛 저장소를 반환하는 순간
+// 그 해제 콜백은 게시된 Map을 본다: 성장이면 옛 원소가 모두 새 저장소에 있고(Count·Find·Contains
+// 일관), Reset이면 빈 Map이다. CommitReserve 자체는 반환하지 않는다(리플렉션 B9f4).
 TEST(OrderedMap_ReleaseCallbacksSeeThePublishedTable) {
     SystemAllocator system;
     WatchAllocator allocator(system);
@@ -110,13 +113,22 @@ TEST(OrderedMap_ReleaseCallbacksSeeThePublishedTable) {
     CHECK(grown.called && grown.count == 4 && grown.allFound && grown.valuesMatch);
     CHECK(map.Capacity() == 8 && map.Count() == 5);
 
+    // CommitReserve는 옛 저장소를 예약에 넘긴다: 적용 뒤 넣은 원소까지 게시된 Map을 예약 소멸 때의
+    // 해제 콜백이 본다.
     Seen reserved;
     reserved.map = &map;
     allocator.Watch(StorageOf(map), &Observe, &reserved);
-    auto prepared = map.PrepareReserve(9);
-    REQUIRE(prepared);
-    map.CommitReserve(prepared.Value());
-    CHECK(reserved.called && reserved.count == 5 && reserved.allFound && reserved.valuesMatch);
+    {
+        auto prepared = map.PrepareReserve(9);
+        REQUIRE(prepared);
+        map.CommitReserve(prepared.Value());
+        CHECK(!reserved.called);
+        REQUIRE(map.Insert(int32{5}, int32{50}));
+        CHECK(!reserved.called);
+    }
+
+    CHECK(reserved.called && reserved.count == 6 && reserved.allFound && reserved.valuesMatch);
+    REQUIRE(map.Erase(int32{5}));
 
     Seen compacted;
     compacted.map = &map;
@@ -211,4 +223,59 @@ TEST(OrderedMap_PrepareReserveSplitsAllocationFromCommit) {
     REQUIRE(setPrepared);
     set.CommitReserve(setPrepared.Value());
     CHECK(set.Capacity() == 16 && set.Contains(int32{1}) && !set.IsIterating());
+}
+
+// EraseAndTake(리플렉션 B9f4)는 항목을 논리적으로 지운 뒤 키·값을 taker로 넘긴다: taker 안에서
+// Map은 이미 그 키가 없고(Count·Contains), 키 버퍼는 taker가 가져간 사본이 소멸할 때 반환된다(Map
+// 안의 껍데기 소멸은 반환하지 않는다). 없는 키는 taker를 부르지 않고 false다. 압축이 일어나도 남은
+// 순서는 그대로다.
+TEST(OrderedMap_EraseAndTakeHandsOverTheErasedEntry) {
+    SystemAllocator system;
+    WatchAllocator allocator(system);
+    OrderedMap<String, int32> map(allocator);
+    for (int32 index = 0; index < 6; ++index) {
+        String key(allocator);
+        const char text[] = {'k', 'e', 'y', '-', 'l',
+                             'o', 'n', 'g', '-', static_cast<char>('a' + index)};
+        REQUIRE(key.TryAssign(StringView(text, sizeof(text))));
+        REQUIRE(map.Insert(Move(key), index));
+    }
+
+    Optional<String> taken;
+    int32 value = -1;
+    usize seenCount = NumericLimits<usize>::Max();
+    bool seenContains = true;
+    const uint64 before = allocator.deallocations;
+    const bool erased =
+        map.EraseAndTake(StringView("key-long-c"), [&](String&& key, int32&& stored) noexcept {
+            seenCount = map.Count();
+            seenContains = map.Contains(StringView("key-long-c"));
+            taken.Emplace(Move(key));
+            value = stored;
+        });
+    CHECK(erased && value == 2 && seenCount == 5 && !seenContains);
+    CHECK(taken && taken->View() == StringView("key-long-c"));
+    CHECK(allocator.deallocations == before);
+    CHECK(
+        !map.EraseAndTake(StringView("missing"), [&](String&&, int32&&) noexcept { value = 99; }));
+    CHECK(value == 2);
+
+    // 절반 넘게 지워 제자리 압축이 일어나도 남은 순서는 삽입 순서다.
+    const char* const erasedKeys[] = {"key-long-a", "key-long-d", "key-long-e"};
+    for (const char* key : erasedKeys) {
+        String sink(allocator);
+        REQUIRE(map.EraseAndTake(StringView(key),
+                                 [&](String&& stored, int32&&) noexcept { sink = Move(stored); }));
+    }
+
+    const char* const order[] = {"key-long-b", "key-long-f"};
+    usize position = 0;
+    for (auto entry : map) {
+        REQUIRE(position < 2);
+        CHECK(entry.key.View() == StringView(order[position++]));
+    }
+
+    CHECK(position == 2 && map.Count() == 2);
+    taken.Reset();
+    CHECK(allocator.deallocations == before + 4);
 }

@@ -369,9 +369,10 @@ internal static partial class SchemaValidator
 
         // Map·Set 필드의 키·값·원소를 푼다(리플렉션 B9f2 — Docs/Design/ReflectionExtensions.ko.md 7.2·15절). 키·원소·값은 단일 필드와
         // 같은 해석이고 위치 규칙은 모두 RMC2305다: 컨테이너(배열·Map·Set·Optional — 직접 중첩)·cv·지원하지 않는 형식, 성질 표의 Map 키·
-        // Set 원소가 아닌 키·원소(실수·참조·struct), Map 값이 아닌 값, 강한 참조 값(ObjectRefMap — 리플렉션 B9f4), 기본이 아닌 해시·같음
-        // 정책. 참조 struct 값은 struct 형질을 계산한 뒤 CheckMap이 RMC2305로 거부한다.
-        void ResolveMap(FieldModel field, string container, string key, string? value, string? policy)
+        // Set 원소가 아닌 키·원소(실수·참조·struct), Map 값이 아닌 값, OrderedMap의 강한 참조 값(ObjectRefMap에 담는다), 기본이 아닌
+        // 해시·같음 정책. 참조 struct 값은 struct 형질을 계산한 뒤 CheckMap이 RMC2305로 거부한다. objectTarget이 있으면
+        // ObjectRefMap<K, T>(리플렉션 B9f4)이고 값은 objectClass(호출자가 푼 T — 빈 철자는 rocks::Object)의 강한 참조다.
+        void ResolveMap(FieldModel field, string container, string key, string? value, string? policy, string? objectTarget = null, string? objectClass = null)
         {
             string symbol = $"{field.Owner}::{field.Name}";
             bool set = container == MapRules.Set;
@@ -424,6 +425,19 @@ internal static partial class SchemaValidator
             }
 
             (string keyKind, string? keyReference, string? keyReferenceId) = Resolve(key, "map key", ValueKindProperty.MapKey);
+            if (objectTarget is not null)
+            {
+                string target = objectClass!;
+                field.ElementSpelling = objectTarget;
+                field.KeyKind = keyKind;
+                field.KeyReference = keyReference;
+                field.KeyReferenceId = keyReferenceId;
+                field.ElementKind = "ObjectReference";
+                field.Reference = target;
+                field.ReferenceId = target == "rocks::Object" ? null : Find(target).Id;
+                return;
+            }
+
             field.ElementSpelling = value!;
             (string valueKind, string? valueReference, string? valueReferenceId) = Resolve(value!, "map value", ValueKindProperty.MapValue);
             field.KeyKind = keyKind;
@@ -452,6 +466,11 @@ internal static partial class SchemaValidator
                 if (OptionalRules.Inner(field.NativeSpelling) is string inner)
                 {
                     ResolveOptional(field, inner);
+                }
+                else if (MapRules.SplitObjectRefMap(field.NativeSpelling) is (string refKey, string refTarget))
+                {
+                    // ObjectRefMap<K, T>의 T는 ObjectRefArray<T>와 같이 클래스다(빈 철자는 rocks::Object — 아니면 RMC2003).
+                    ResolveMap(field, MapRules.Map, refKey, null, null, refTarget, Resolve(refTarget.Length == 0 ? "rocks::Object" : refTarget, field.Owner, field.Site));
                 }
                 else if (MapRules.Split(field.NativeSpelling) is (string mapContainer, string key, var mapValue, var policy))
                 {
@@ -499,7 +518,7 @@ internal static partial class SchemaValidator
                     // WeakRef는 대상이 죽으면 저절로 null이 되므로 Required를 지킬 수 없다(Docs/Design/ReflectionExtensions.ko.md 5.1절). Map은 값마다,
                     // Set은 원소마다 non-null이다(키에는 Required가 없다 — 리플렉션 B9f2).
                     throw new MetadataException($"{field.Owner}::{field.Name}: Required applies only to object, soft object and class reference fields, arrays and sets of them and maps with such values", "RMC2202",
-                        "Remove Required or change the field to ObjectRef, SoftObjectRef, ClassRef, ObjectRefArray, Array<SoftObjectRef>, Array<ClassRef>, OrderedSet<SoftObjectRef/ClassRef> or OrderedMap<K, SoftObjectRef/ClassRef>; a WeakRef becomes null when its target dies, so it cannot be Required.").At(field.Site);
+                        "Remove Required or change the field to ObjectRef, SoftObjectRef, ClassRef, ObjectRefArray, ObjectRefMap, Array<SoftObjectRef>, Array<ClassRef>, OrderedSet<SoftObjectRef/ClassRef> or OrderedMap<K, SoftObjectRef/ClassRef>; a WeakRef becomes null when its target dies, so it cannot be Required.").At(field.Site);
                 }
 
                 if (!field.IsCounted && field.Spec.MaxElements != 0)
@@ -570,7 +589,7 @@ internal static partial class SchemaValidator
             // 바꾸라는 안내가 다음 실행에서 다시 실패하지 않게).
             if (derived == ArrayRules.StructRefArray && Find(field.Reference!).ContainsReferenceArray)
             {
-                throw new MetadataException($"{symbol}: {field.SpelledContainer} element struct {field.Reference} holds ObjectRefArray or StructRefArray members", "RMC2304",
+                throw new MetadataException($"{symbol}: {field.SpelledContainer} element struct {field.Reference} holds ObjectRefArray, StructRefArray or ObjectRefMap members", "RMC2304",
                     "Keep reference containers out of array element structs (directly or nested); store them in the owning class instead.").At(field.Site);
             }
 
@@ -622,8 +641,8 @@ internal static partial class SchemaValidator
         ClassModel[] orderedStructs = structs.OrderBy(model => model.Rank).ThenBy(model => model.Name, StringComparer.Ordinal).ToArray();
         foreach (ClassModel model in orderedStructs)
         {
-            // Transient 참조도 GC가 추적하므로 강한 참조로 센다. ObjectRefArray 필드와 참조 struct 원소 배열(StructRefArray)도
-            // 강한 참조다.
+            // Transient 참조도 GC가 추적하므로 강한 참조로 센다. ObjectRefArray·ObjectRefMap 필드와 참조 struct 원소
+            // 배열(StructRefArray)도 강한 참조다.
             model.ContainsStrongReference = model.Fields.Any(field => field.IsObjectReferenceFieldKind || (field.StructTarget && Find(field.Reference!).ContainsStrongReference));
             // NATIVE 멤버의 WorldOnly 소유자 형질은 struct에서는 오류가 아니라 형질로 전파된다(Docs/Design/
             // ReflectionFoundations.ko.md 2.4절). 원소 struct의 형질도 전파된다.

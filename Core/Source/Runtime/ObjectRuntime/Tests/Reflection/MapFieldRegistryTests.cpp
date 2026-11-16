@@ -8,7 +8,8 @@
 
 // 리플렉션 B9f2 Map·Set 필드의 TypeRegistry 등록 시험이다(Docs/Design/ReflectionExtensions.ko.md
 // 1.1·7.2절): Map·Set 필드 모양(value.type 0·maxElements 범위·Map이 아닌 필드의 빈 키 칸·키 대상
-// type 규칙), Map 값의 ObjectReference 거부(ObjectRefMap은 리플렉션 B9f4)와 참조 struct 값 거부,
+// type 규칙), Map 값의 ObjectReference(ObjectRefMap — 리플렉션 B9f4: FieldKind::ObjectReference여야
+// 한다)와 참조 struct 값 거부,
 // Required(값·원소 종류로 판정), 키 enum의 레코드 의존(Unregister Busy)·native 키 대조
 // (keyNativeType)와 키 대상 조회(TypeLease::FieldKeyEnum), ObjectRuntime 키 형식의 seed 해시와
 // 같음의 일치.
@@ -128,8 +129,9 @@ ErrorCode HolderCode(TypeRegistry& types, const FieldSchema& field,
 
 // Map·Set 필드 모양: value.type 0, maxElements 1..MaxArrayElements, Set·Map이 아닌 필드의 key는
 // {Opaque, 0}, 키 대상 type은 대상 종류에만(ClassRef Base는 필수, Soft는 선택, 정수는 0), Map 값의
-// ObjectReference는 거부(ObjectRefMap — B9f4). Required는 값·원소 종류로 판정한다(Soft 값 Map·Soft
-// 원소 Set은 받고 정수 값 Map은 거부 — 키는 Required와 무관하다).
+// ObjectReference(ObjectRefMap — B9f4)는 FieldKind::ObjectReference일 때만 받는다(강한 간선 표지 —
+// Value면 InvalidArgument). Required는 값·원소 종류로 판정한다(Soft·강한 참조 값 Map·Soft 원소
+// Set은 받고 정수 값 Map은 거부 — 키는 Required와 무관하다).
 TEST(MapFieldRegistry_ShapeRules) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
@@ -147,7 +149,10 @@ TEST(MapFieldRegistry_ShapeRules) {
     FieldSchema references = MapField();
     references.kind = FieldKind::ObjectReference;
     references.element = ValueType{ValueKind::ObjectReference, {}};
-    CHECK(HolderCode(types, references) == ErrorCode::InvalidArgument);
+    CHECK(HolderCode(types, references) == ErrorCode::None);
+    references.flags = static_cast<uint32>(FieldFlags::Required);
+    CHECK(HolderCode(types, references) == ErrorCode::None);
+    references.flags = 0;
     references.kind = FieldKind::Value;
     CHECK(HolderCode(types, references) == ErrorCode::InvalidArgument);
 
@@ -252,6 +257,43 @@ TEST(MapFieldRegistry_EnumKeyIsADependency) {
     CHECK(types.Unregister(enumeration.Value()).Error() == ErrorCode::Busy);
     REQUIRE(types.Unregister(member.Value()));
     CHECK(types.Unregister(enumeration.Value()));
+    CHECK(types.Shutdown());
+}
+
+// ObjectRefMap 멤버(리플렉션 B9f4 — Map 값 ObjectReference)는 struct를 참조 struct이자 Registry
+// 컨테이너 담김(containsReferenceArray)으로 만든다: trace가 없으면 강한 참조 형질과 어긋나
+// InvalidArgument, 그런 struct는 인라인 struct 필드로는 등록되고 Array 원소
+// struct(StructRefArray)로는 InvalidArgument다(원소 블록이 owner 저장소 밖 — RF 결정 15).
+TEST(MapFieldRegistry_ObjectRefMapMemberMakesARegistryContainerStruct) {
+    SystemAllocator allocator;
+    TypeRegistry types(allocator);
+    FieldSchema member = MapField();
+    member.kind = FieldKind::ObjectReference;
+    member.element = ValueType{ValueKind::ObjectReference, {}};
+    CHECK(RegisterStruct(types, ReferenceStructType, &ReferenceStructKey, member, false).Error() ==
+          ErrorCode::InvalidArgument);
+    auto structure = RegisterStruct(types, ReferenceStructType, &ReferenceStructKey, member, true);
+    REQUIRE(structure);
+    {
+        auto lease = types.AcquireValueType(ReferenceStructType, TypeKind::Struct);
+        REQUIRE(lease);
+        CHECK(lease.Value().Struct().ContainsStrongReference());
+        CHECK(lease.Value().Struct().ContainsReferenceArray());
+    }
+
+    FieldSchema inlineField;
+    inlineField.id = Guid{0x4d4652, 30};
+    inlineField.name = Span<const char>("bundle", 6);
+    inlineField.value = ValueType{ValueKind::Struct, ReferenceStructType};
+    CHECK(HolderCode(types, inlineField, &ReferenceStructKey) == ErrorCode::None);
+    FieldSchema elements;
+    elements.id = Guid{0x4d4652, 31};
+    elements.name = Span<const char>("slots", 5);
+    elements.value = ValueType{ValueKind::Array, {}};
+    elements.element = ValueType{ValueKind::Struct, ReferenceStructType};
+    elements.maxElements = DefaultMaxElements;
+    CHECK(HolderCode(types, elements, &ReferenceStructKey) == ErrorCode::InvalidArgument);
+    REQUIRE(types.Unregister(structure.Value()));
     CHECK(types.Shutdown());
 }
 

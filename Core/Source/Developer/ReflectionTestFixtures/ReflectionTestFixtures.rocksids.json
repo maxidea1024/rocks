@@ -1469,6 +1469,76 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::RefMapBundle::byName",
+      "id": "cb0b06c3c0f042cea1293d0638fb7238",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::RefMapBundle::weight",
+      "id": "156bf2a6371c4441bf89f6a3d2f81a4e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::RefMapHolder::bundle",
+      "id": "1345dfc2dde8430db74d4de1a3f5e559",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::RefMapHolder::byClass",
+      "id": "8091f09ef36d45d6901a3fb082356979",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::RefMapHolder::byNumber",
+      "id": "a8af05a2ae49456eae55c15460289f08",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::RefMapHolder::bySlot",
+      "id": "eed807dbfbbb41ab8a39c2cd8be9ac8c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::RefMapHolder::bySoft",
+      "id": "d7786a067f98492fb9b5ca396143ee1e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::RefMapHolder::byString",
+      "id": "8fc189873b5641fe9da67eeb20d9d19b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::RefMapHolder::limited",
+      "id": "f1602dcf900745e3bb01ad6cdcc9647c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::RefMapHolder::required",
+      "id": "dfe12965bfe540a29a55e59adb52889f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::SceneFixture::relative",
       "id": "3df48c7fcbdc4a1ab6cd18440b28898b",
       "aliases": [],
@@ -2103,6 +2173,48 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::PropertyNode",
       "id": "ad100000000000000000000000000004",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::RefMapBundle",
+      "id": "aef32092dc6b4632b1b3dc893ecc68f2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::RefMapDerived",
+      "id": "b31e77f621d348f2a66632c78778676a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::RefMapHolder",
+      "id": "09aca3b14d944c018cf97e5657f77e06",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::RefMapOther",
+      "id": "74f9bf8820ee405a8e20e77a0efb7aa6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::RefMapSlot",
+      "id": "c8f69ba0de654b5abb8b70d77540ebbb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::RefMapTarget",
+      "id": "6220af7fde0f48ee9383a9dfc79c240c",
       "aliases": [],
       "retired": false
     },
