@@ -1,13 +1,13 @@
-# GC 대규모 처리 실험 결과 (GC-S0·GC-S1·GC-S2)
+# GC 대규모 처리 실험 결과 (GC-S0–GC-S3·M2)
 
 기준일: 2026-11-16. 브랜치 `experiment/gc-scale`(기준 `795761a`). 설계는 [GC 대규모 처리 보강](../Design/GarbageCollectionScale.ko.md)이다.
 
-이 문서는 설계 6절의 단계 중 **GC-S0(측정 기준과 장기 smoke)**, **GC-S1(잠금 없는 직렬 marker·배치 visitor·prefetch)**, **GC-S2(시간 기준 예산)** 의 실행 결과다. 사용자 지시(2026-11-16)로 범위를 이 세 단계로 줄였으며 **GC-S3·GC-S4(이 실험의 Phase 2·3)는 착수하지 않았다.** GC-S5–S7과 M1–M7도 범위 밖이다.
+이 문서는 설계 6절의 단계 중 **GC-S0(측정 기준과 장기 smoke, Phase 0)**, **GC-S1(잠금 없는 직렬 marker·배치 visitor·prefetch)과 GC-S2(시간 기준 예산)(Phase 1)**, **GC-S3(GC 밀집 자료·루트 목록·비트 sweep·상한)과 M2(잎 타입)(Phase 2)** 의 실행 결과다. 사용자 지시(2026-11-16)로 Phase 2에서 멈췄으며 **GC-S4(병렬 표식, Phase 3)는 착수하지 않았다.** GC-S5–S7과 M1·M3–M7도 범위 밖이다.
 
 ## 1. 측정 환경
 
 - Windows 11 Pro, 논리 코어 20개, clang(저장소 고정 도구 체인) **Development(-O2)** 구성.
-- 실행 우선순위는 보통(normal)이다. 기준(Phase 0)과 Phase 1 벤치는 각각 다른 빌드·벤치·soak와 겹치지 않게 단독으로 돌렸다.
+- 실행 우선순위는 보통(normal)이다. 각 단계의 벤치는 다른 빌드·벤치·soak와 겹치지 않게 단독으로 돌렸다.
 - 측정 도구는 `Programs/GcBench`(`GcBench.exe`, 인자 없이 기본 표)다. 할당자는 벤치 전용 `BenchAllocator`(플랫폼 정렬 할당을 직접 쓰는 O(1) 해제, 범주별 바이트 계수)를 써서 할당자 비용을 GC 비용에서 떼었다. 할당자 비교는 `--allocators`로 따로 쟀다.
 - scheduler 경로는 worker 8개로 쟀다.
 - 수치는 실행마다 ±10–20% 흔들린다. 정지형 Collect는 반복 측정의 중앙값(100K 5회, 1M 3회)이고 증분 수집은 cycle 1회다.
@@ -24,26 +24,33 @@
 | 증분 | 기본 `GcBudget`, 시간 한도만 둔 2ms·0.5ms 예산. Step 횟수와 Step 한 번의 시간 분포(p50·p95·p99·최대) |
 | scheduler | `StepCollection(..., scheduler)` worker 8개, 예산 무제한 |
 | churn | 살아 있는 객체의 10%만큼 쓰레기 묶음(간선은 산 그래프로)을 만든 뒤 Collect — 회수 시간 |
-| 메모리 | 범주별 바이트(Slot chunk·객체·참조 배열·이름·기타)와 최고치 |
+| 메모리 | 범주별 바이트(Slot chunk·객체·참조 배열·이름·GC 밀집 자료·기타)와 최고치 |
 
-## 3. 결과: 기준(Phase 0) 대 Phase 1
+## 3. 결과: 기준(Phase 0) → Phase 1 → Phase 2
 
 ### 3.1 정지형 Collect (중앙값, ms)
 
 | 시나리오 | 단계 | Begin | 표식 | sweep | 전체 | churn 회수 |
 |---|---|---:|---:|---:|---:|---:|
 | 100K · 간선 4 | 기준 | 0.88 | 72.1 | 0.88 | 74.1 | 4.39 (9.8K개) |
-| | Phase 1 | 0.61 | **20.0** | 0.64 | 21.4 | 1.78 |
+| | Phase 1 | 0.61 | 20.0 | 0.64 | 21.4 | 1.78 |
+| | Phase 2 | 0.006 | **7.4** | 0.002 | 7.4 | 1.56 |
 | 100K · 간선 8 | 기준 | 0.91 | 132.0 | 1.03 | 133.6 | 3.22 (10K개) |
-| | Phase 1 | 0.49 | **22.4** | 0.50 | 23.5 | 1.51 |
+| | Phase 1 | 0.49 | 22.4 | 0.50 | 23.5 | 1.51 |
+| | Phase 2 | 0.006 | **11.6** | 0.002 | 11.6 | 1.37 |
 | 1M · 간선 4 | 기준 | 8.46 | 779.0 | 7.86 | 795.5 | 17.8 (98K개) |
-| | Phase 1 | 8.18 | **259.4** | 8.21 | 275.9 | 20.1 |
+| | Phase 1 | 8.18 | 259.4 | 8.21 | 275.9 | 20.1 |
+| | Phase 2 | 0.035 | **112.3** | 0.012 | 112.4 | 17.0 |
 | 1M · 간선 8 | 기준 | 7.96 | 706.7 | 6.46 | 719.7 | 13.8 (100K개) |
-| | Phase 1 | 7.43 | **320.8** | 6.88 | 335.9 | 14.0 |
+| | Phase 1 | 7.43 | 320.8 | 6.88 | 335.9 | 14.0 |
+| | Phase 2 | 0.054 | **142.4** | 0.012 | 142.4 | 14.6 |
 | 1M · 간선 4 · 잎 50% | 기준 | 7.05 | 273.7 | 8.62 | 289.4 | 14.6 (80K개) |
-| | Phase 1 | 8.28 | **134.9** | 7.96 | 151.4 | 15.2 |
+| | Phase 1 | 8.28 | 134.9 | 7.96 | 151.4 | 15.2 |
+| | Phase 2 | 0.072 | **57.3** | 0.012 | 57.4 | 15.2 |
 
-표식 단축은 100K에서 3.6·5.9배, 1M에서 3.0·2.2배다. 1M·간선 8의 기준 표식(707ms)이 간선 4(779ms)보다 짧은 것은 실행 흔들림이다(첫 Collect에서는 725 대 818ms). Begin·sweep은 Phase 1에서 바꾸지 않은 전체 Slot 순회라 그대로다(GC-S3 몫).
+- 표식: Phase 1이 기준 대비 100K에서 3.6·5.9배, 1M에서 3.0·2.2배 줄였고, Phase 2가 다시 1M에서 2.3배(간선 4)·2.3배(간선 8), 잎 50%에서 2.4배 줄였다. 기준 대비 1M은 6.9배(간선 4)·5.0배(간선 8)·4.8배(잎 50%)다. 1M·간선 8의 기준 표식(707ms)이 간선 4(779ms)보다 짧은 것은 실행 흔들림이다(첫 Collect에서는 725 대 818ms).
+- Begin·sweep 후보 판정: Phase 2의 루트 목록과 비트 sweep으로 1M에서 Begin 8.2 → 0.035–0.07ms, sweep 8.2 → 0.012ms(white가 없을 때)다. white가 있는 첫 Collect·churn의 sweep(1M 1.9–5ms)은 대부분 Retire 처리(이름 색인·고리·회수 목록)이고 white 수에 비례한다.
+- 회수(churn)는 세 단계 모두 1M에서 객체당 140–220ns로 비슷하다. 객체마다 잠금 두 번과 소멸자·해제가 남는다(GC-S5).
 
 ### 3.2 증분 수집 (cycle 1회)
 
@@ -53,35 +60,47 @@
 |---|---|---|---:|---:|---:|---:|---:|---:|
 | 100K · 4 | 기본 | 기준 | 3,098 | 3.2 | 91.8 | 258.3 | 1,659 | 115.0 |
 | | | Phase 1 | 20 | 1,006 | 1,021 | 1,031 | 1,031 | 19.1 |
+| | | Phase 2 | 8 | 1,005 | 1,008 | 1,008 | 1,008 | 7.0 |
 | | 2ms | 기준 | 50 | 2,001 | 2,030 | 2,364 | 2,364 | 99.6 |
 | | | Phase 1 | 10 | 2,011 | 2,024 | 2,024 | 2,024 | 19.0 |
+| | | Phase 2 | 5 | 2,002 | 2,010 | 2,010 | 2,010 | 7.0 |
 | 100K · 8 | 기본 | 기준 | 3,126 | 18.5 | 115.8 | 157.2 | 1,057 | 142.4 |
 | | | Phase 1 | 27 | 1,018 | 1,032 | 1,033 | 1,033 | 26.8 |
+| | | Phase 2 | 12 | 1,006 | 1,016 | 1,016 | 1,016 | 10.9 |
 | | 2ms | 기준 | 70 | 2,001 | 2,003 | 2,007 | 2,007 | 139.1 |
 | | | Phase 1 | 16 | 2,012 | 2,037 | 2,037 | 2,037 | 29.7 |
+| | | Phase 2 | 8 | 2,005 | 2,042 | 2,042 | 2,042 | 13.0 |
 | 1M · 4 | 기본 | 기준 | 30,941 | 9.3 | 67.5 | 95.7 | 267 | 790.6 |
 | | | Phase 1 | 279 | 1,016 | 1,041 | 1,069 | 1,300 | 292.4 |
+| | | Phase 2 | 124 | 1,009 | 1,021 | 1,059 | 1,062 | 124.3 |
 | | 2ms | 기준 | 331 | 2,001 | 2,001 | 2,022 | 2,074 | 668.7 |
 | | | Phase 1 | 128 | 2,014 | 2,036 | 2,045 | 2,046 | 263.1 |
+| | | Phase 2 | **57** | 2,008 | 2,015 | 2,019 | 2,019 | 111.6 |
 | 1M · 8 | 기본 | 기준 | 31,246 | 21.1 | 64.0 | 84.9 | 261 | 923.6 |
 | | | Phase 1 | 323 | 1,021 | 1,048 | 1,057 | 1,094 | 338.0 |
+| | | Phase 2 | 144 | 1,011 | 1,020 | 1,023 | 1,028 | 144.3 |
 | | 2ms | 기준 | 598 | 2,001 | 2,008 | 2,059 | 2,329 | 1,203.4 |
 | | | Phase 1 | 166 | 2,021 | 2,048 | 2,063 | 2,070 | 340.5 |
+| | | Phase 2 | 73 | 2,010 | 2,017 | 2,023 | 2,023 | 144.5 |
+| 1M · 4 · 잎 50% | 기본 | Phase 2 | 62 | 1,008 | 1,021 | 1,095 | 1,095 | 61.4 |
+| | 2ms | Phase 2 | 33 | 2,010 | 2,062 | 2,090 | 2,090 | 63.6 |
 
 - 기준의 기본 예산은 Step이 짧지만(p99 0.1–0.26ms) 1M cycle 하나에 Step 3.1만 번이 걸렸다(60fps에서 약 8.6분 — 설계 3.2절 7번과 일치한다).
 - Phase 1의 기본 예산(1ms)은 1M cycle을 279–323 Step에 끝낸다. 2ms 예산은 128–166 Step이다.
 - soft deadline 초과는 2ms 예산에서 p99 2–3%(최대 2.07ms), 1ms 예산에서 최대 1.30ms였다. 시계를 객체 128개마다 보므로 생기는 초과와 Begin이 들어간 첫 Step이 원인이다.
-- 시간 예산 cycle의 Begin(1M 6.5–9.3ms)은 첫 Step 전 `BeginCollection` 한 번에 들고 예산 밖이다.
+- 시간 예산 cycle의 Begin은 첫 Step 전 `BeginCollection` 한 번에 들고 예산 밖이다. 1M에서 Phase 1까지 6.5–9.3ms, Phase 2에서 0.02–0.08ms다.
+- Phase 2의 2ms 예산은 1M·간선 4 cycle을 57 Step(60fps 기준 0.95초)에 끝낸다. 간선 8은 73 Step이다.
 
 ### 3.3 scheduler 경로 (worker 8개, 표식 ms)
 
-| 시나리오 | 기준 | Phase 1 |
-|---|---:|---:|
-| 100K · 4 | 490.8 | 394.6 |
-| 1M · 4 | 4,838.8 | 3,811.5 |
-| 1M · 8 | 4,833.6 | 4,062.4 |
+| 시나리오 | 기준 | Phase 1 | Phase 2 |
+|---|---:|---:|---:|
+| 100K · 4 | 490.8 | 394.6 | 425.0 |
+| 1M · 4 | 4,838.8 | 3,811.5 | 4,350.7 |
+| 1M · 8 | 4,833.6 | 4,062.4 | 4,427.8 |
+| 1M · 4 · 잎 50% | 3,385.6 | 2,807.2 | 1,800.8 |
 
-직렬 Phase 1(259ms)보다 15배 느리다. 객체마다 `Function`을 할당·제출하고 64개마다 기다리는 구조(설계 3.2절 6번)를 Phase 1에서 바꾸지 않았기 때문이다(잠금만 간선마다에서 배치마다로 줄었다). GC-S4 몫이다.
+직렬(Phase 2 112ms)보다 39배 느리다. 객체마다 `Function`을 할당·제출하고 64개마다 기다리는 구조(설계 3.2절 6번)를 Phase 1에서 바꾸지 않았기 때문이다(잠금만 간선마다에서 배치마다로 줄었다). GC-S4 몫이다.
 
 ### 3.4 메모리 (1M · 간선 4, 첫 Collect 전)
 
@@ -91,10 +110,13 @@
 | 객체 본체 | 45.8 | |
 | 참조 배열 버퍼 | 81.4 | |
 | 이름 기록·색인 | 54.0 | |
+| GC 밀집 자료(Phase 2: GC 페이지·타입 표·루트 목록) | 19.7 | 20.6 B/slot |
 | 기타(작업 큐 등) | 55.2 | |
-| 합계 | 419.7 | 440 B/object |
+| 합계 | 419.7(기준·Phase 1) → 439.4(Phase 2) | 440 → 461 B/object |
 
-Phase 1은 메모리 배치를 바꾸지 않았다(같은 수치). Slot 정보 192B는 4절 목표(≤ 64B)의 3배다.
+- Phase 1은 메모리 배치를 바꾸지 않았다.
+- Phase 2는 Slot(192B)을 그대로 두고 GC 밀집 자료를 더했다. 슬롯당 hot 레코드 16B, 비트 묶음 0.375B(live·mark·leaf 3비트), 루트 목록 용량 4B(두 배씩 늘려 최대 8B)다. marker가 슬롯마다 읽는 자료는 Slot 192B(cache line 3개)에서 16.4B로 줄었다.
+- Slot 정보 합계(192 + 20.6B)는 4절 목표(≤ 64B)의 3.3배다. cold Slot을 줄이는 방안은 5.5절이다.
 
 ### 3.5 할당자 비교 (기준, 살아 있는 객체 20K, churn 10% × 5회)
 
@@ -144,8 +166,12 @@ Phase 1은 메모리 배치를 바꾸지 않았다(같은 수치). Slot 정보 1
 | Phase 1 seed 12 | 직렬, 객체 3000 | 300,000 | 179,673 | 176,728 | 4,281 / 3,632 | 782 | PASS |
 | Phase 1 seed 13 | scheduler worker 4개 | 200,000 | 122,603 | 120,928 | 2,958 / 2,523 | 575 | PASS |
 | Phase 1 seed 14 | 시간 예산 100us | 200,000 | 123,240 | 120,235 | 22,193 / 22,137 | 3,609 | PASS |
+| Phase 2 seed 11 | 직렬, 객체 3000 | 300,000 | 183,427 | 180,455 | 5,379 / 4,753 | 1,042 | PASS |
+| Phase 2 seed 12 | 직렬, 객체 3000 | 300,000 | 182,872 | 181,922 | 5,361 / 4,745 | 981 | PASS |
+| Phase 2 seed 13 | scheduler worker 4개 | 300,000 | 182,996 | 179,988 | 5,325 / 4,698 | 952 | PASS |
+| Phase 2 seed 14 | 시간 예산 100us | 200,000 | 124,146 | 121,160 | 22,414 / 22,370 | 3,714 | PASS |
 
-기준과 Phase 1 모두 1M tick(직렬 600K, scheduler 200K, 시간 예산 200K)씩 통과했다. Phase 1은 cutoff slice가 sweep 없이 끝나 cycle이 짧아졌고 같은 tick에 cycle 수가 약 2배다. 생성 수와 회수 수의 차이는 끝에 남은 추적 객체(최대 3008개)이고 종료 대조에서 0이 됐다.
+기준과 Phase 1은 각각 1M tick(직렬 600K, scheduler 200K, 시간 예산 200K), Phase 2는 1.1M tick(직렬 600K, scheduler 300K, 시간 예산 200K)을 통과했다. Phase 2의 시뮬레이터 잎 타입(SoakLeaf)은 `hasStrongReferences = false`라 잎 경로(M2)를 지난다. Phase 1은 cutoff slice가 sweep 없이 끝나 cycle이 짧아졌고 같은 tick에 cycle 수가 약 2배다. 생성 수와 회수 수의 차이는 끝에 남은 추적 객체(최대 3008개)이고 종료 대조에서 0이 됐다.
 
 **기준 GC에서 찾은 결함은 없다.** 시뮬레이터를 만드는 동안의 실패는 모두 모델 쪽 오류였다(비동기 반환의 계수 반영 시점, Discard의 무동작 반복과 부분 트리 판정).
 
@@ -174,7 +200,7 @@ World의 `StepGarbageCollection`을 쓰는 World 단위 변형은 만들지 않�
 | 생성·간선 쓰기·장벽(`ShadeLocked`)·Discard·Commit | 소유 스레드 | Trace 콜백 재진입은 `processing_`으로 Busy | 없음 |
 | `IsCutoff`·`CheckLive`·`InspectLifecycle` | 소유 스레드(gate 아래) | Sweeping에서만 mark를 읽는다. cutoff 게시는 gate 아래다 | 표식 종료 뒤에만 읽는다 |
 
-그래서 `mark`만 relaxed atomic(`Slot::Mark`·`SetMark`)으로 바꾸고 나머지 칸은 그대로 두었다. `GcConcurrencyTests.cpp`가 증분 slice와 Collect 각각에서 탐침 Trace 안 helper 스레드의 RootRef·BackendLease·EncodePin 반환과 RootRef 복제(Busy)를 명시 hand-off로 실행하고 결과(루트를 slice 안에서 놓은 객체는 이번 cycle에 남고 다음 수집에서 회수, lease를 slice 안에서 놓은 쓰레기는 이번 cycle에 회수, 통계)를 단언한다. Asan 실행은 6절을 본다.
+그래서 `mark`만 relaxed atomic(`Slot::Mark`·`SetMark`)으로 바꾸고 나머지 칸은 그대로 두었다. `GcConcurrencyTests.cpp`가 증분 slice와 Collect 각각에서 탐침 Trace 안 helper 스레드의 RootRef·BackendLease·EncodePin 반환과 RootRef 복제(Busy)를 명시 hand-off로 실행하고 결과(루트를 slice 안에서 놓은 객체는 이번 cycle에 남고 다음 수집에서 회수, lease를 slice 안에서 놓은 쓰레기는 이번 cycle에 회수, 통계)를 단언한다. Asan 실행은 7절을 본다.
 
 ### 5.2 바꾼 것
 
@@ -201,47 +227,96 @@ World의 `StepGarbageCollection`을 쓰는 World 단위 변형은 만들지 않�
 | scheduler 경로 | GC-S4 전까지 잠금 edge 함수 유지 | 잠금을 배치마다로 줄였다 | 같은 잠금 아래 같은 처리다 |
 | 증분 Begin | | 그대로(예산 밖, 1M 8ms) | GC-S3의 루트 목록 몫이다 |
 
-## 6. 검증
+## 6. Phase 2 구현 (GC-S3·M2)
+
+### 6.1 바꾼 것
+
+- **GC 밀집 자료.** 슬롯 4096개(chunk 64개)마다 GC 페이지 하나를 둔다. 페이지는 16B hot 레코드(object 포인터·Outer 슬롯 번호·GC 타입 번호) 4096개와 chunk마다의 비트 묶음(live·mark·leaf 각 64비트) 64개를 담는다. 페이지는 이동하지 않고 페이지 표만 두 배로 늘린다. 늘리는 일은 생성의 처리 표시 아래 잠금 밖에서 준비하고 잠금 안에서 게시한다(marker와 겹치지 않는다).
+- **GC 타입 표.** hot 레코드의 16비트 번호가 가리키는 항목(trace 함수·병렬 안전·잎)이다. 생성이 타입 레코드의 `RuntimeTypeOps` 주소로 찾거나 단다.
+- **marker.** 큐는 슬롯 번호(uint32)다. 꺼낸 객체는 hot 레코드로 trace하고(Slot·`TypeLease::Ops()`를 읽지 않는다) Outer는 hot 레코드의 슬롯 번호로 바로 표식한다. 간선은 domain·슬롯 범위·live 비트·mark 비트만 본다. 세대·상태 검사는 Debug만 한다(설계 GC-S3 "GC 중 세대 검사는 Debug 검증으로만"). 큐 16칸 앞 hot 레코드, 8칸 앞 객체 본체, 배치마다 대상의 비트 묶음을 prefetch한다.
+- **루트 목록.** roots가 0 ↔ 1로 바뀌는 `AddRoot`·Commit의 root 증가·`detail::ReleaseRoot`에서 gate 아래 갱신한다. 목록 용량은 언제나 슬롯 수 이상이라 gate 아래 추가가 할당하지 않는다(성장은 chunk 생성 때 잠금 밖 할당·잠금 안 교체). Begin·Collect는 목록만 걷는다.
+- **표식 초기화.** epoch를 없애고 Begin·Collect가 chunk마다 mark word 하나를 지운다(1M에서 1.56만 word).
+- **비트 sweep.** chunk마다 `live & ~mark`를 잠금 없이 계산하고 white가 있는 chunk만 잠가 낮은 번호부터 Retire한다(슬롯 순서 유지). live 비트는 Commit이 켜고 Retire가 끈다(소유 스레드, 잠금 안).
+- **M2 잎 타입.** `RuntimeTypeOps::hasStrongReferences`(기본 true)를 더했다. MetaCompiler는 방문 필드가 없는 클래스에 false를 낸다. `RegisterNativeClass`는 사슬의 어느 native 클래스도 Trace를 선언하지 않고 리플렉션 조상도 잎일 때 false로 둔다. `MakeRuntimeTypeOps`는 추론하지 않는다(호출자가 trace를 바꿀 수 있어 true가 안전하다). 잎 객체는 표식만 하고 큐에 넣지 않으며 hot 레코드의 Outer 사슬을 바로 따라간다. Debug는 Commit 검증에서 잎 타입이 간선을 방문하면 Fatal로 멈춘다.
+- **기본 상한.** `RegistryOptions::maxSlots` 기본값을 2,097,152로 올렸다.
+- Debug `Stats`가 live 비트와 루트 목록 위치를 슬롯과 대조한다.
+- 7.1절 감사 갱신: marker가 잠금 없이 읽고 쓰는 자료가 hot 레코드·비트 묶음·GC 타입 표·작업 큐로 바뀌었다. 다른 스레드의 `ReleaseRoot`·`ReleaseBackend`·`ReleaseEncodePin`은 이 자료를 건드리지 않는다(`ReleaseRoot`는 루트 목록을 바꾸지만 marker는 목록을 읽지 않는다). live 비트를 바꾸는 Commit·Retire와 페이지·타입 표·루트 목록 용량을 바꾸는 생성은 소유 스레드이고 slice 중에는 Busy다.
+
+### 6.2 결정 (설계 11절 열린 결정)
+
+| 번호 | 항목 | 결정 | 근거 |
+|---|---|---|---|
+| 2 | 표식 단위 | **bit**(chunk마다 64비트 word, live·leaf와 같은 24B 묶음) | 1M에서 표식 비트 전체가 375KB(live·leaf 포함)로 L2에 가깝게 들어간다. Begin의 지우기가 chunk마다 word 하나다. GC-S4는 `fetch_or`로 옮긴다(지금은 relaxed load·store) |
+| 7 | slice 중 루트 해제의 루트 목록 반영 시점 | **즉시 반영** | 목록은 Begin·Collect의 gate 구간만 읽는다. slice 중 `ReleaseRoot`는 gate 아래에서 목록을 바꾸지만 marker는 목록을 읽지 않는다. 이미 표식된 객체는 이번 cycle에 남는다(`GcConcurrencyTests`) |
+| — | 패키지 정책 자식 고리 | **cold Slot 접근 유지** | 자식 고리는 패키지 정책 Registry만 읽는다(정책 없는 Registry는 비용 0). 패키지 정책 Registry는 잎 처리도 하지 않는다(자식을 따라야 한다). 패키지 Registry의 비용은 이번 벤치에서 재지 않았다 |
+| 5 | Slot 정보 64B 목표 | **이번 단계에서 하지 않음, 방안만** | 6.4절 |
+
+### 6.3 설계와 다르게 한 것
+
+| 항목 | 설계 | 실제 | 이유 |
+|---|---|---|---|
+| hot 레코드의 상태 바이트 | 상태 바이트·live bitmap | live 비트만 둔다 | marker·sweep이 쓰는 상태는 "후보(Alive·DestroyRequested)인가"뿐이다. 나머지 상태 판정은 소유 스레드의 잠금 구간이 Slot에서 한다 |
+| 밀집 배열 단위 | chunk처럼 페이지 단위 | 4096슬롯 페이지(약 66KB) | chunk(64칸)마다 두면 비트가 1KB씩 흩어져 대상 비트 미스가 다시 생긴다. 시험의 작은 Registry도 페이지 하나(66KB)를 받는다 |
+| 세대 검사 | Debug만 | Debug만 + Release도 domain·슬롯 범위·live 비트 | 잘못된 Trace가 다른 Registry handle이나 빈 슬롯을 방문하면 지금처럼 StaleHandle로 cycle을 멈춘다(`ObjectIncrementalGcTraceFailureCannotPublishCutoffOrReclaimGarbage`). 회수 뒤 재사용된 슬롯의 옛 handle은 Release에서 새 객체를 표식할 수 있다(floating, 메모리 안전) |
+| 잎 표시의 출처 | 생성기가 내는 상수 | 생성기 + `RegisterNativeClass` 추론, 수동 함수표는 명시 | native 클래스도 사슬로 판정할 수 있다 |
+| 3단 prefetch | 16·8·4칸 | 16·8칸 + 대상 비트 | 참조 배열 버퍼는 M3 몫이다. 32·16칸으로 늘려 봤으나 1M 표식이 135 → 141ms로 차이가 없었다 |
+| 시험 | | 잎 Item을 padding으로 써서 Marking을 유지하던 두 시험(`ConstructionContext_Assign*ShadesAliveTargets*`)을 trace되는 Holder로 바꿨다 | 잎은 큐에 들지 않아 첫 slice에 cutoff가 났다. 단언하는 계약(slice 사이 staged 대상 shade)은 같다 |
+
+### 6.4 Slot 64B 목표의 방안 (결정 5, 미구현)
+
+marker는 이제 Slot을 읽지 않으므로 Slot 크기는 GC 시간이 아니라 메모리와 생성·회수 경로의 문제다. 지금 Slot 192B의 구성은 대략 수명·상태 24B, 회수 목록 고리 16B, object·storage 16B, TypeLease 16B, stableType 16B, 보유 계수 16B, transaction 8B, Outer handle 16B, 이름·자식 고리 56B, 이름 기록 8B, 나머지다. 64B로 가려면 다음이 필요하다(추정).
+
+- 이름·자식 고리(outermost·parent·firstChild·lastChild·nextSibling·prevSibling·name·pathBytes, 약 66B)를 이름 있는/Outer 있는 객체만 갖는 별도 identity 레코드로 뺀다.
+- Outer handle(16B)은 hot 레코드의 Outer 슬롯 번호와 세대로 대신한다.
+- stableType(16B)·transaction(8B)·회수 목록 고리(16B)는 생성·회수 중에만 쓰므로 cold 보조 표로 옮긴다.
+- object(hot에 있음)와 storage를 합친다.
+
+## 7. 검증
 
 | 항목 | 결과 |
 |---|---|
-| Debug Foundation 전체 시험 | Phase 1에서 1734개 전부 통과 |
+| Debug Foundation 전체 시험 | Phase 1 1734개, Phase 2 1737개 전부 통과 |
 | Development Foundation 전체 시험 | Phase 1에서 1734개 중 GC 무관 2개 실패(`Process_RunTimeoutTerminatesChild`·`SharedPtr_LockRacesWithLastRelease` — 동시 빌드·벤치 부하에서 나는 시간·경쟁 의존 시험), GC·Object 시험(`--filter Object` 158개, `--filter Gc` 39개) 전부 통과 |
 | GcSoak 시험(직렬·scheduler) | Debug·Development 통과 |
-| 장기 soak | 4.2절(기준·Phase 1 각 1M tick 통과) |
+| 장기 soak | 4.2절(기준·Phase 1 각 1M tick, Phase 2 1.1M tick 통과) |
 | Development 벤치 | 3절 |
 | clang-format 21.1.6 | 통과(`Rocks.ToolTests format`) |
 | policy 검사 | 통과(`Rocks.ToolTests policy`, 정책 자체 시험 `self` 113개 통과) |
-| Asan Foundation 전체 시험 | Phase 1에서 1734개 전부 통과(GcSoak·GcConcurrency 포함, AddressSanitizer 보고 없음) |
-| MetaCompiler·C# 도구 시험 | 해당 없음(MetaCompiler를 바꾸지 않았다). 정책 검사 C# 한 줄만 바꿨다 |
+| Asan Foundation 전체 시험 | Phase 1에서 1734개 전부 통과(GcSoak·GcConcurrency 포함, AddressSanitizer 보고 없음). Phase 2 1737개 통과 |
+| MetaCompiler·C# 도구 시험 | Phase 2(MetaCompiler가 `hasStrongReferences`를 낸다): Debug Foundation `-t:Test` 전체(네이티브 1737개, 도구 self 113개, native 112개, meta 195개) 통과 |
+| Asan EngineTests | Phase 2 1803개 통과 |
+| EngineTests(World·Engine) | Phase 1(Debug) 1800개 통과 — `GcBudget` 기본값 변경(64객체 → 1ms)으로 실패한 시험이 없어 World 쪽 수정은 하지 않았다. Phase 2(Debug) 1803개 통과 |
 
-## 7. 실행 기록
+## 8. 실행 기록
 
 - 기준(Phase 0, 커밋 `b5b42a4`): Debug `--filter Gc` 36개 통과, policy·format 통과, Development 벤치·장기 soak(4.2절).
-- Phase 1(커밋 `63da487`): Debug·Asan Foundation 전체 1734개 통과, Development `--filter Object`·`--filter Gc` 통과, policy·format·`self` 통과, Development 벤치·장기 soak(4.2절). Development 전체 실행의 GC 무관 실패 2개는 6절에 적었다.
-- 실행하지 않은 것: Release 구성 벤치, macOS·Android, EngineTests(World·Engine 시험 — `World::StepGarbageCollection`이 쓰는 `GcBudget` 기본값이 바뀌었으므로 다음 단계 착수 전에 돌려야 한다), World 단위 soak.
+- Phase 1(커밋 `63da487`): Debug·Asan Foundation 전체 1734개 통과, Development `--filter Object`·`--filter Gc` 통과, policy·format·`self` 통과, Development 벤치·장기 soak(4.2절). Development 전체 실행의 GC 무관 실패 2개는 7절에 적었다.
+- Phase 1 추가: Debug EngineTests 1800개 통과. 부하 아래 실패했던 Development 시험 2개(`Process_RunTimeoutTerminatesChild`·`SharedPtr_LockRacesWithLastRelease`)는 단독 실행에서 통과했다(`Process_*` 21개·`SharedPtr*` 12개 전부 통과). 뒤의 것은 경쟁이 실제로 났는지(`observedAlive > 0 && observedDead > 0`)를 단언하므로 부하에 따라 흔들리는 기존 시험이다.
+- Phase 2(커밋 `d90a769`): Debug Foundation 1734개·Debug EngineTests 1803개 통과, Development `--filter Object`·`--filter Gc` 통과, policy·format 통과, Development 벤치·장기 soak(4.2절). Asan Foundation 1737개·Asan EngineTests 1803개 통과, Debug Foundation `-t:Test`(meta 195개 포함) 통과.
+- 실행하지 않은 것: Release 구성 벤치, macOS·Android, World 단위 soak, 패키지 정책 Registry 벤치.
 
-## 8. 4절 성능 gate와의 차이 (Phase 1 시점)
+## 9. 4절 성능 gate와의 차이 (Phase 2 시점)
 
-| gate | 목표 | Phase 1 (1M) | 상태 |
-|---|---|---|---|
-| STW 병렬 전체 표식 | ≤ 15ms | scheduler 3,812ms | 미달(GC-S4) |
-| 단일 스레드 전체 표식 | ≤ 60ms | 259ms(간선 4)·321ms(간선 8) | 미달(GC-S3 SoA·M2) |
-| Begin | ≤ 1ms | 8.2ms | 미달(GC-S3 루트 목록) |
-| sweep 후보 판정 | ≤ 1ms | 8.2ms | 미달(GC-S3 bitmap) |
-| 증분 Step p99 | ≤ 2ms | 2ms 예산에서 2.04–2.06ms, 1ms 예산에서 1.07ms | 시간 예산으로는 거의 충족. soft 초과 2–3% |
-| 증분 cycle | 2ms 예산에서 60프레임 이내 | 128–166 Step | 미달(표식 속도) |
-| Slot 정보 | ≤ 64B | 192B | 미달(GC-S3) |
-| 기본 `maxSlots` | ≥ 2,097,152 | 1,048,576 | 미달(GC-S3) |
+| gate | 목표 | Phase 1 (1M) | Phase 2 (1M) | 상태 |
+|---|---|---|---|---|
+| STW 병렬 전체 표식 | ≤ 15ms | scheduler 3,812ms | scheduler 4,351ms | 미달(GC-S4) |
+| 단일 스레드 전체 표식 | ≤ 60ms | 259ms(간선 4)·321ms(간선 8) | 112ms(간선 4)·142ms(간선 8)·57ms(잎 50%) | 미달(잎 50%만 충족) |
+| Begin | ≤ 1ms | 8.2ms | 0.035–0.07ms | **충족** |
+| sweep 후보 판정 | ≤ 1ms | 8.2ms | 0.012ms | **충족** |
+| 증분 Step p99 | ≤ 2ms | 2ms 예산에서 2.04–2.06ms | 2ms 예산에서 2.02–2.09ms, 1ms 예산에서 1.02–1.10ms | 시간 예산으로는 거의 충족. soft 초과 1–5% |
+| 증분 cycle | 2ms 예산에서 60프레임 이내 | 128–166 Step | 57 Step(간선 4)·73 Step(간선 8)·33 Step(잎 50%) | 간선 4·잎 50% 충족, 간선 8 미달 |
+| Slot 정보 | ≤ 64B | 192B | 192 + 20.6B(marker가 읽는 자료는 16.4B) | 미달(6.4절) |
+| 기본 `maxSlots` | ≥ 2,097,152 | 1,048,576 | 2,097,152 | **충족** |
 
-설계 GC-S1 완료 기준 "1M 표식 약 3.5배"는 100K(3.6·5.9배)에서는 넘었고 1M(3.0·2.2배)에서는 못 미쳤다. 1M에서는 객체 본체 → 참조 배열 버퍼 → 대상 Slot(192B, 2–3 cache line)의 미스가 남는다. 모델(3.4절)의 GC-S1 변형이 참조 배열까지 prefetch한 것과 다르다.
+GC-S3 완료 기준 중 "Begin·sweep 후보 판정이 각 1ms 이하"는 충족했고 "단일 스레드 표식이 4절 목표(60ms)"는 1M·간선 4에서 112ms로 못 미쳤다. 모델(설계 3.4절)의 GC-S3 변형은 45–55ms였다. 차이는 참조 배열 버퍼의 미스다. 모델은 객체 배치를 알아 버퍼를 큐 4칸 앞에서 prefetch했지만 실제 marker는 수동 Trace 계약상 버퍼 위치를 모른다(M3 몫). prefetch 거리를 32·16칸으로 늘려도 바뀌지 않아(135 → 141ms) 남은 시간의 대부분이 객체 본체 → 참조 배열 버퍼의 직렬 미스로 보인다(해석, 하드웨어 계수로 확인하지 않았다).
 
-## 9. 남은 단계가 더할 것 (추정)
+## 10. 남은 단계가 더할 것 (추정)
 
 모델(설계 3.4절)과 이번 측정을 근거로 한 해석이며 측정 전 수치다.
 
-- **GC-S3(SoA·루트 목록·bitmap sweep·상한) + M2.** 16B hot 레코드와 mark 바이트로 대상 검사 미스가 192B Slot의 2–3줄에서 1줄로 줄고, u32 큐로 큐 대역폭이 1/4이 된다. 모델은 GC-S1 → GC-S3에서 약 4배(199 → 45ms)였다. 이번 1M 259ms에 같은 비율이면 60–80ms로 단일 스레드 gate(60ms) 근처다. Begin·sweep은 루트 목록·bitmap으로 각각 1ms 아래(모델 0.05·0.03ms)가 된다. M2(잎 표시)는 잎 50% 시나리오(135ms)에서 잎의 trace 호출·큐 왕복을 없앤다. `maxSlots` 기본값 상향과 Slot 64B 목표의 cold 분리도 이 단계다.
-- **GC-S4(병렬 표식).** worker별 큐·512칸 블록·atomic 표식으로 모델 기준 단일의 1/4–1/5(8–16스레드 10–13ms)다. 지금 scheduler 경로(3.8s)의 객체당 task 제출이 사라진다. World가 scheduler를 넘기는 변경과 1·2·N worker 종료 시험이 함께 필요하다. 장벽 전용 큐가 있어야 증분 slice 안 병렬 표식과 장벽이 공존한다.
-- **GC-S5.** STW 병렬 수집 일정과 파괴·회수의 시간 예산(지금 회수는 객체마다 잠금 두 번, 1M churn 98K 회수 20ms).
+- **GC-S4(병렬 표식).** worker별 지역 큐·512칸 블록·블록 훔치기·`fetch_or` 표식으로 바꾸면 지금의 객체당 task 제출(1M 4.4초)이 사라진다. 모델은 단일 대비 8스레드에서 약 1/4이었다. Phase 2 직렬 112ms에 이 비율이면 25–35ms로, 15ms gate에는 M3나 스레드 수 증가가 더 필요하다. 필요한 일: 비병렬 수동 Trace 타입의 소유 스레드 큐, 장벽 전용 큐(증분 slice의 병렬 표식과 장벽 공존), World가 scheduler를 넘기는 변경, 1·2·N worker 진행·종료 시험, mark 비트의 `fetch_or`와 live·leaf 비트 읽기의 경합 정리, GcSoak의 병렬 변형을 새 경로에 맞추기.
+- **M3(참조 위치 상수).** 생성 타입의 컨테이너 버퍼 offset을 상수로 내 marker가 세 번째 prefetch 단계를 갖게 한다. 단일 표식을 모델 수준(45–55ms)으로 내리는 데 가장 직접적인 항목으로 본다.
+- **GC-S5.** STW 병렬 수집 일정과 파괴·회수의 시간 예산(지금 회수는 객체마다 잠금 두 번, 1M churn 98K 회수 15–20ms).
 - **GC-S6.** O(1) 소유권 판정·스레드 캐시·크기별 slab 할당자. `SystemAllocator`·`BinnedAllocator`로는 1M 규모의 생성·회수를 측정할 수 없었다(3.5절).
-- **GC-S7·M1·M3–M7.** 영구 영역·클러스터로 표식 대상 수를 줄이고, schema Trace로 큰 배열을 나눈다. M3(참조 위치 상수)는 이번에 빠진 세 번째 prefetch 단계를 채운다. M1(marker 전용 정적 특수화)은 배치 visitor가 이미 간선당 간접 호출을 없앴으므로 추가 이득은 작을 것으로 본다.
+- **Slot 64B.** 6.4절의 cold 분리. GC 시간에는 영향이 작고 메모리(1M에서 약 130MB)를 줄인다.
+- **GC-S7·M1·M4–M7.** 영구 영역·클러스터로 표식 대상 수를 줄이고 schema Trace로 큰 배열을 나눈다. M1은 배치 visitor가 이미 간선당 간접 호출을 없앴으므로 추가 이득이 작을 것으로 본다. M2는 잎 50% 시나리오에서 Phase 1 대비 2.4배(135 → 57ms)였다.
