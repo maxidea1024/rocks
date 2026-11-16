@@ -36,10 +36,17 @@ constexpr bool IsCurveMode(InterpCurveMode mode) noexcept {
 // 커브 값 형식별 성질이다. 지원 형식: float, double, Vector2/3/4<float|double>,
 // Quaternion<float|double>, LinearColor. 그 밖의 형식은 특수화가 없어 InterpCurve가 컴파일되지
 // 않는다.
-//   Scalar          성분·입력 키·접선 시간 단위의 정밀도(float 계열 float, double 계열 double).
+//   Scalar          성분(값·접선)의 정밀도(float 계열 float, double 계열 double). 입력 키·구간
+//   길이·
+//                   보간 비율은 형식과 무관하게 float다(UE와 같다 — InterpCurvePoint::inValue).
 //   ComponentCount  성분 수. 회전이 아닌 형식의 보간·접선 계산은 모두 성분별 scalar 식이다.
 //   IsRotation      true면 quaternion 회전 보간(SQUAD)을 쓰고 접선 칸에 제어점을 담는다.
 //   HasDistance     true면 성분 차의 제곱합을 거리 제곱으로 쓰는 최근접 탐색을 제공한다.
+//   DividesByReciprocal  true면 float 입력 길이로 나눌 때 역수를 한 번 구해 곱한다(UE TVector·
+//                   TVector2·TVector4·FLinearColor의 operator/ 와 /=). false(scalar)는 정확한
+//                   나눗셈.
+//   ClampsAutoTangents   true면 CurveAutoClamped 키의 자동 접선을 성분별로 clamp한다. false면
+//                   CurveAuto와 같게 계산한다(UE 일반 ComputeCurveTangent — FLinearColor·FVector4).
 //   DefaultValue()  빈 커브 평가의 기본 fallback(0, quaternion은 항등)이다.
 //   DefaultTangent  새 키의 접선 기본값(0). quaternion은 키 자신(제어점 = 키, 정지)이다.
 //   NaNValue()      모든 성분이 quiet NaN인 값(NaN 입력 평가 결과)이다.
@@ -54,6 +61,8 @@ struct CurveValueTraits<S> {
     static constexpr usize ComponentCount = 1;
     static constexpr bool IsRotation = false;
     static constexpr bool HasDistance = true;
+    static constexpr bool DividesByReciprocal = false;
+    static constexpr bool ClampsAutoTangents = true;
 
     static constexpr S DefaultValue() noexcept {
         return static_cast<S>(0);
@@ -82,6 +91,8 @@ struct CurveValueTraits<Vector2<S>> {
     static constexpr usize ComponentCount = 2;
     static constexpr bool IsRotation = false;
     static constexpr bool HasDistance = true;
+    static constexpr bool DividesByReciprocal = true;
+    static constexpr bool ClampsAutoTangents = true;
 
     static constexpr Vector2<S> DefaultValue() noexcept {
         return Vector2<S>();
@@ -111,6 +122,8 @@ struct CurveValueTraits<Vector3<S>> {
     static constexpr usize ComponentCount = 3;
     static constexpr bool IsRotation = false;
     static constexpr bool HasDistance = true;
+    static constexpr bool DividesByReciprocal = true;
+    static constexpr bool ClampsAutoTangents = true;
 
     static constexpr Vector3<S> DefaultValue() noexcept {
         return Vector3<S>();
@@ -141,6 +154,8 @@ struct CurveValueTraits<Vector4<S>> {
     static constexpr usize ComponentCount = 4;
     static constexpr bool IsRotation = false;
     static constexpr bool HasDistance = true;
+    static constexpr bool DividesByReciprocal = true;
+    static constexpr bool ClampsAutoTangents = false;
 
     static constexpr Vector4<S> DefaultValue() noexcept {
         return Vector4<S>();
@@ -174,6 +189,8 @@ struct CurveValueTraits<LinearColor> {
     static constexpr usize ComponentCount = 4;
     static constexpr bool IsRotation = false;
     static constexpr bool HasDistance = false;
+    static constexpr bool DividesByReciprocal = true;
+    static constexpr bool ClampsAutoTangents = false;
 
     static constexpr LinearColor DefaultValue() noexcept {
         return LinearColor();
@@ -210,6 +227,8 @@ struct CurveValueTraits<Quaternion<S>> {
     static constexpr usize ComponentCount = 4;
     static constexpr bool IsRotation = true;
     static constexpr bool HasDistance = false;
+    static constexpr bool DividesByReciprocal = false;
+    static constexpr bool ClampsAutoTangents = false;
 
     static constexpr Quaternion<S> DefaultValue() noexcept {
         return Quaternion<S>::Identity();
@@ -242,7 +261,8 @@ template <typename T>
 concept InterpCurveValue = requires { typename CurveValueTraits<T>::Scalar; };
 
 // 커브 키 하나다(UE 5.8 FInterpCurvePoint 대응). 내부 상태가 없는 일반 값이다.
-//   inValue        이 키의 입력값(보통 시간). 커브 안에서는 InterpCurve가 정렬을 관리한다.
+//   inValue        이 키의 입력값(보통 시간). 모든 값 형식에서 float다(UE와 같다). 커브 안에서는
+//                  InterpCurve가 정렬을 관리한다.
 //   outValue       inValue에서의 출력값.
 //   arriveTangent  이 키로 들어오는 구간 끝의 접선(입력 1단위당 값 변화).
 //   leaveTangent   이 키에서 나가는 구간 시작의 접선.
@@ -260,7 +280,7 @@ struct InterpCurvePoint {
     using Traits = CurveValueTraits<T>;
     using Scalar = typename Traits::Scalar;
 
-    Scalar inValue = static_cast<Scalar>(0);
+    float inValue = 0.0f;
     T outValue = Traits::DefaultValue();
     T arriveTangent = Traits::DefaultTangent(Traits::DefaultValue());
     T leaveTangent = Traits::DefaultTangent(Traits::DefaultValue());
@@ -270,12 +290,12 @@ struct InterpCurvePoint {
 
     // Linear 키다. 접선은 0(quaternion은 키 자신)이다(UE 생성자의 memset 0과 같다. quaternion만
     // 다름).
-    constexpr InterpCurvePoint(Scalar input, const T& output) noexcept
+    constexpr InterpCurvePoint(float input, const T& output) noexcept
         : inValue(input), outValue(output), arriveTangent(Traits::DefaultTangent(output)),
           leaveTangent(Traits::DefaultTangent(output)) {
     }
 
-    constexpr InterpCurvePoint(Scalar input, const T& output, const T& arrive, const T& leave,
+    constexpr InterpCurvePoint(float input, const T& output, const T& arrive, const T& leave,
                                InterpCurveMode interpMode) noexcept
         : inValue(input), outValue(output), arriveTangent(arrive), leaveTangent(leave),
           mode(interpMode) {

@@ -1,5 +1,6 @@
 #include <TestSupport/Test.h>
 #include <TestSupport/MathTestSupport.h>
+#include <TestSupport/NFailAllocator.h>
 #include <Core/Math/InterpCurve.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Platform/Memory.h>
@@ -349,22 +350,28 @@ TEST(InterpCurve_AutoClampedDoesNotOvershootMonotoneKeys) {
     CHECK(crest.GetPoint(1).leaveTangent == crest.GetPoint(0).leaveTangent);
     CHECK(crest.GetPoint(1).leaveTangent == 1.0f);
 
-    // 색·벡터도 성분별로 clamp한다(UE는 FLinearColor에서 clamp를 무시한다).
+    // Vector2·Vector3는 성분별로 clamp한다(UE FVector 경로는 double을 float로 읽는 결함).
+    // 색·Vector4는 UE처럼 clamp를 무시하고 CurveAuto와 같다(UE 일반 ComputeCurveTangent).
+    InterpCurveVector positions(allocator);
     InterpCurveLinearColor colors(allocator);
     InterpCurveVector4 vectors(allocator);
     for (usize index = 0; index < 3; ++index) {
         const float input = static_cast<float>(index);
+        REQUIRE(positions.TryAddPoint(input, Vec3(values[index], 0.0f, 0.0f)));
         REQUIRE(colors.TryAddPoint(input, LinearColor(values[index], 0.0f, 0.0f, 1.0f)));
         REQUIRE(vectors.TryAddPoint(input, Vec4(0.0f, values[index], 0.0f, 0.0f)));
+        positions.SetMode(index, InterpCurveMode::CurveAutoClamped);
         colors.SetMode(index, InterpCurveMode::CurveAutoClamped);
         vectors.SetMode(index, InterpCurveMode::CurveAutoClamped);
     }
 
+    positions.AutoSetTangents();
     colors.AutoSetTangents();
     vectors.AutoSetTangents();
-    CHECK(colors.GetPoint(1).leaveTangent.r == clamped.GetPoint(1).leaveTangent);
-    CHECK(vectors.GetPoint(1).leaveTangent.y == clamped.GetPoint(1).leaveTangent);
-    CHECK(colors.Eval(1.5f).r <= 1.0f);
+    CHECK(positions.GetPoint(1).leaveTangent.x == clamped.GetPoint(1).leaveTangent);
+    CHECK(colors.GetPoint(1).leaveTangent.r == automatic.GetPoint(1).leaveTangent);
+    CHECK(vectors.GetPoint(1).leaveTangent.y == automatic.GetPoint(1).leaveTangent);
+    CHECK(colors.Eval(1.5f).r > 1.0f);
 }
 
 TEST(InterpCurve_TangentContinuityAcrossModes) {
@@ -376,39 +383,41 @@ TEST(InterpCurve_TangentContinuityAcrossModes) {
                                      InterpCurveMode::CurveAutoClamped, InterpCurveMode::CurveAuto,
                                      InterpCurveMode::Linear};
     for (usize index = 0; index < 5; ++index) {
-        REQUIRE(curve.TryAddPoint(2.0 * static_cast<double>(index), values[index]));
+        REQUIRE(curve.TryAddPoint(2.0f * static_cast<float>(index), values[index]));
         curve.SetMode(index, modes[index]);
     }
 
-    curve.AutoSetTangents(0.0, false);
+    curve.AutoSetTangents(0.0f, false);
     CHECK(curve.GetPoint(0).leaveTangent == 2.0);
 
-    // 모든 안쪽 키에서 왼쪽 극한과 오른쪽 값의 1차 미분이 같다.
+    // 모든 안쪽 키에서 왼쪽 극한(키 바로 아래 float 입력)과 오른쪽 값의 1차 미분이 같다.
     for (usize index = 1; index < 4; ++index) {
-        const double key = curve.GetPoint(index).inValue;
-        const double left = curve.EvalDerivative(key - 1.0e-9);
+        const float key = curve.GetPoint(index).inValue;
+        const double left = curve.EvalDerivative(NextBelow(key));
         const double right = curve.EvalDerivative(key);
-        CHECK(Near(left, right, 1.0e-6));
+        CHECK(Near(left, right, 1.0e-5));
     }
 
-    // 1차·2차 미분은 중앙 차분과 맞는다. 키에서는 2차 미분이 끊기므로 차분 폭 안의 표본은 뺀다.
+    // 1차·2차 미분은 중앙 차분과 맞는다. 입력은 float라 차분 폭은 2^-6(float에서 정확)이고, 3차식
+    // 중앙 차분의 오차(h² / 6 × 3차 도함수)만큼 여유를 둔다. 키에서는 2차 미분이 끊기므로 차분 폭
+    // 안의 표본은 뺀다.
     MathRandom random(0x5eedc0de12345678ull);
+    const float step = 0.015625f;
     for (int32 sample = 0; sample < 2000; ++sample) {
-        const double input = random.Range(0.001, 7.999);
-        const double step = 1.0e-5;
-        const bool nearKey = math::Abs(input - math::Round(input / 2.0) * 2.0) < 2.0 * step;
-        if (nearKey) {
+        const float input = static_cast<float>(random.Range(0.05, 7.95));
+        const float nearestKey = 2.0f * math::Round(input / 2.0f);
+        if (math::Abs(input - nearestKey) < 2.0f * step) {
             continue;
         }
 
         const double forward = curve.Eval(input + step);
         const double backward = curve.Eval(input - step);
-        const double difference = (forward - backward) / (2.0 * step);
-        CHECK(Near(curve.EvalDerivative(input), difference, 1.0e-6, 1.0e-6));
+        const double difference = (forward - backward) / (2.0 * static_cast<double>(step));
+        CHECK(Near(curve.EvalDerivative(input), difference, 1.0e-3, 1.0e-4));
         const double slopeDifference =
             (curve.EvalDerivative(input + step) - curve.EvalDerivative(input - step)) /
-            (2.0 * step);
-        CHECK(Near(curve.EvalSecondDerivative(input), slopeDifference, 1.0e-5, 1.0e-5));
+            (2.0 * static_cast<double>(step));
+        CHECK(Near(curve.EvalSecondDerivative(input), slopeDifference, 1.0e-3, 1.0e-4));
     }
 }
 
@@ -449,6 +458,53 @@ TEST(InterpCurve_CopyAndReset) {
           moved.GetPoint(1).outValue == Vec2(3.0f, 4.0f));
 }
 
+TEST(InterpCurve_AllocationFailureLeavesCurveUnchanged) {
+    SystemAllocator backing;
+    NFailAllocator allocator(backing);
+    InterpCurveVector curve(allocator);
+
+    // 빈 커브의 첫 할당 실패.
+    allocator.FailOnAttempt(1);
+    auto first = curve.TryAddPoint(0.0f, Vec3(1.0f, 0.0f, 0.0f));
+    CHECK(!first && first.Error() == ErrorCode::OutOfMemory);
+    CHECK(curve.IsEmpty());
+
+    // 키 4개(Array의 첫 용량 4)를 채운 뒤 성장 할당 실패: 키·순서·루프가 그대로다.
+    allocator.DisableFailure();
+    for (int32 index = 0; index < 4; ++index) {
+        const float input = static_cast<float>(index);
+        REQUIRE(curve.TryAddPoint(input, Vec3(input, 0.0f, 0.0f)));
+    }
+
+    REQUIRE(curve.TrySetLoopKey(5.0f));
+    allocator.FailOnAttempt(1);
+    auto grown = curve.TryAddPoint(1.5f, Vec3(9.0f, 9.0f, 9.0f));
+    CHECK(!grown && grown.Error() == ErrorCode::OutOfMemory);
+    CHECK(allocator.Attempts() == 1);
+    REQUIRE(curve.PointCount() == 4);
+    CHECK(curve.GetPoint(1).inValue == 1.0f && curve.GetPoint(2).inValue == 2.0f);
+    CHECK(curve.Eval(1.5f) == Vec3(1.5f, 0.0f, 0.0f));
+    CHECK(curve.IsLooped() && curve.LoopKeyOffset() == 2.0f);
+
+    allocator.FailOnAttempt(1);
+    auto reserved = curve.TryReserve(64);
+    CHECK(!reserved && reserved.Error() == ErrorCode::OutOfMemory);
+    CHECK(curve.PointCount() == 4 && curve.GetPoint(3).outValue == Vec3(3.0f, 0.0f, 0.0f));
+
+    // 복사 실패는 대상의 키와 루프 설정을 바꾸지 않는다.
+    allocator.DisableFailure();
+    InterpCurveVector copy(allocator);
+    REQUIRE(copy.TryAddPoint(7.0f, Vec3(7.0f, 7.0f, 7.0f)));
+    allocator.FailOnAttempt(1);
+    auto copied = copy.TryCopyFrom(curve);
+    CHECK(!copied && copied.Error() == ErrorCode::OutOfMemory);
+    REQUIRE(copy.PointCount() == 1);
+    CHECK(copy.GetPoint(0).inValue == 7.0f && !copy.IsLooped());
+    allocator.DisableFailure();
+    REQUIRE(copy.TryCopyFrom(curve));
+    CHECK(copy == curve);
+}
+
 TEST(InterpCurve_QuaternionSquadPassesKeysAndStaysUnit) {
     SystemAllocator allocator;
     InterpCurveQuatd curve(allocator);
@@ -461,20 +517,20 @@ TEST(InterpCurve_QuaternionSquadPassesKeysAndStaysUnit) {
     };
 
     for (usize index = 0; index < 4; ++index) {
-        REQUIRE(curve.TryAddPoint(static_cast<double>(index), keys[index]));
+        REQUIRE(curve.TryAddPoint(static_cast<float>(index), keys[index]));
         curve.SetMode(index, InterpCurveMode::CurveAuto);
     }
 
-    curve.AutoSetTangents(0.0, false);
+    curve.AutoSetTangents(0.0f, false);
 
     for (usize index = 0; index < 4; ++index) {
-        CHECK(curve.Eval(static_cast<double>(index)) == keys[index]);
+        CHECK(curve.Eval(static_cast<float>(index)) == keys[index]);
     }
 
     // 단위 길이, 키에서 연속(왼쪽 극한도 같은 회전), 이웃 표본 사이 각이 작다.
     Quatd previous = curve.Eval(0.0);
     for (int32 step = 1; step <= 3000; ++step) {
-        const Quatd value = curve.Eval(static_cast<double>(step) * 0.001);
+        const Quatd value = curve.Eval(static_cast<float>(step) * 0.001f);
         CHECK(value.IsNormalized(1.0e-12));
         CHECK(AngularDistance(previous, value) < 0.01);
         previous = value;
@@ -482,7 +538,8 @@ TEST(InterpCurve_QuaternionSquadPassesKeysAndStaysUnit) {
 
     for (usize index = 1; index < 4; ++index) {
         const double key = static_cast<double>(index);
-        CHECK(AngularDistance(curve.Eval(key - 1.0e-12), keys[index]) < 1.0e-9);
+        CHECK(AngularDistance(curve.Eval(NextBelow(static_cast<float>(key))), keys[index]) <
+              1.0e-5);
     }
 
     // 키를 −q로 넣어도 같은 회전 곡선이다(반구 맞춤).
@@ -490,26 +547,28 @@ TEST(InterpCurve_QuaternionSquadPassesKeysAndStaysUnit) {
     for (usize index = 0; index < 4; ++index) {
         const Quatd key =
             index == 2 ? Quatd(-keys[2].x, -keys[2].y, -keys[2].z, -keys[2].w) : keys[index];
-        REQUIRE(flipped.TryAddPoint(static_cast<double>(index), key));
+        REQUIRE(flipped.TryAddPoint(static_cast<float>(index), key));
         flipped.SetMode(index, InterpCurveMode::CurveAuto);
     }
 
-    flipped.AutoSetTangents(0.0, false);
+    flipped.AutoSetTangents(0.0f, false);
     for (int32 step = 0; step <= 300; ++step) {
-        const double input = static_cast<double>(step) * 0.01;
+        const float input = static_cast<float>(step) * 0.01f;
         CHECK(AngularDistance(flipped.Eval(input), curve.Eval(input)) < 1.0e-9);
     }
 
     // tension 1과 고정 끝점은 제어점이 키 자신이다. Linear는 Slerp다.
-    curve.AutoSetTangents(1.0, true);
+    curve.AutoSetTangents(1.0f, true);
     for (usize index = 0; index < 4; ++index) {
         CHECK(AngularDistance(curve.GetPoint(index).leaveTangent, keys[index]) < 1.0e-12);
     }
 
     curve.SetMode(1, InterpCurveMode::Linear);
-    CHECK(AngularDistance(curve.Eval(1.25), Slerp(keys[1], keys[2], 0.25)) < 1.0e-12);
+    // Linear는 UE TQuat::Slerp와 같은 식(전환 기준 0.9999)이다.
+    CHECK(curve.Eval(1.25f) == CurveSlerp(keys[1], keys[2], 0.25));
+    CHECK(AngularDistance(curve.Eval(1.25f), Slerp(keys[1], keys[2], 0.25)) < 1.0e-12);
     curve.SetMode(1, InterpCurveMode::Constant);
-    CHECK(curve.Eval(1.75) == keys[1]);
+    CHECK(curve.Eval(1.75f) == keys[1]);
 }
 
 TEST(InterpCurve_QuaternionLogExpAndSquadHelpers) {

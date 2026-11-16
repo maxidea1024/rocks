@@ -2,65 +2,68 @@
 
 #include <Core/Math/Quaternion.h>
 
-// 키 커브(InterpCurve)가 쓰는 보간 식이다. 성분별 scalar 식은 UE 5.8 식과 같은 항 순서로 계산해
-// 같은 정밀도에서 비트 단위로 같은 결과를 낸다(빌드가 FMA 축약을 끄므로 -ffp-contract=off). 커브
-// 밖에서도 쓸 수 있는 공개 함수이며 상태가 없고 스레드 제약이 없다.
+// 키 커브(InterpCurve)가 쓰는 보간 식이다. 성분별 scalar 식은 UE 5.8 식과 같은 항 순서·같은 정밀도
+// 조합(보간 비율은 float, 성분은 값 형식의 정밀도)으로 계산해 비트 단위로 같은 결과를 낸다(빌드가
+// FMA 축약을 끄므로 -ffp-contract=off). 커브 밖에서도 쓸 수 있는 공개 함수이며 상태가 없고 스레드
+// 제약이 없다.
 namespace rocks::math {
 
 // 3차 Hermite 값이다. p0·p1은 구간 끝 값, t0·t1은 구간 길이를 곱한 끝 접선, alpha ∈ [0, 1]이다.
 // UE FMath::CubicInterp의 일반 템플릿과 같은 식·항 순서다:
 //   (2a³ − 3a² + 1)·p0 + (a³ − 2a² + a)·t0 + (a³ − a²)·t1 + (−2a³ + 3a²)·p1 (왼쪽부터 합산)
-// 기존 math::CubicInterp는 p1 항을 t1 항보다 먼저 더해 반올림이 다를 수 있다. alpha = 0이면 p0,
-// alpha = 1이면 p1이다(유한한 입력에서 정확). NaN은 전파된다.
+// 기저 계수는 alpha의 형식 A로 계산한 뒤 S로 넓힌다(UE CubicInterp<T, U>에서 U = float, T =
+// double인 조합과 같다). 기존 math::CubicInterp는 p1 항을 t1 항보다 먼저 더해 반올림이 다를 수
+// 있다. alpha = 0이면 p0, alpha = 1이면 p1이다(유한한 입력에서 정확). NaN은 전파된다.
 //
 // 사용 예:
 //   const float value = math::CurveHermite(0.0f, 1.0f, 2.0f, 1.0f, 0.5f);
-template <typename S>
-    requires IsFloatingPointV<S>
-constexpr S CurveHermite(S p0, S t0, S p1, S t1, S alpha) noexcept {
-    const S a2 = alpha * alpha;
-    const S a3 = a2 * alpha;
-    const S h00 = static_cast<S>(2) * a3 - static_cast<S>(3) * a2 + static_cast<S>(1);
-    const S h10 = a3 - static_cast<S>(2) * a2 + alpha;
-    const S h11 = a3 - a2;
-    const S h01 = static_cast<S>(-2) * a3 + static_cast<S>(3) * a2;
-    return h00 * p0 + h10 * t0 + h11 * t1 + h01 * p1;
+template <typename S, typename A>
+    requires(IsFloatingPointV<S> && IsFloatingPointV<A>)
+constexpr S CurveHermite(S p0, S t0, S p1, S t1, A alpha) noexcept {
+    const A a2 = alpha * alpha;
+    const A a3 = a2 * alpha;
+    const A h00 = static_cast<A>(2) * a3 - static_cast<A>(3) * a2 + static_cast<A>(1);
+    const A h10 = a3 - static_cast<A>(2) * a2 + alpha;
+    const A h11 = a3 - a2;
+    const A h01 = static_cast<A>(-2) * a3 + static_cast<A>(3) * a2;
+    return static_cast<S>(h00) * p0 + static_cast<S>(h10) * t0 + static_cast<S>(h11) * t1 +
+           static_cast<S>(h01) * p1;
 }
 
 // CurveHermite의 alpha에 대한 1차 미분이다(UE FMath::CubicInterpDerivative와 같은 식):
 //   a = 6p0 + 3t0 + 3t1 − 6p1, b = −6p0 − 4t0 − 2t1 + 6p1, 결과 a·α² + b·α + t0
-// 입력 단위 미분은 결과를 구간 길이로 나눈다.
-template <typename S>
-    requires IsFloatingPointV<S>
-constexpr S CurveHermiteDerivative(S p0, S t0, S p1, S t1, S alpha) noexcept {
+// a·b는 S, α²는 A로 계산한다. 입력 단위 미분은 결과를 구간 길이로 나눈다.
+template <typename S, typename A>
+    requires(IsFloatingPointV<S> && IsFloatingPointV<A>)
+constexpr S CurveHermiteDerivative(S p0, S t0, S p1, S t1, A alpha) noexcept {
     const S a = static_cast<S>(6) * p0 + static_cast<S>(3) * t0 + static_cast<S>(3) * t1 -
                 static_cast<S>(6) * p1;
     const S b = static_cast<S>(-6) * p0 - static_cast<S>(4) * t0 - static_cast<S>(2) * t1 +
                 static_cast<S>(6) * p1;
     const S c = t0;
-    const S alpha2 = alpha * alpha;
-    return a * alpha2 + b * alpha + c;
+    const A alpha2 = alpha * alpha;
+    return a * static_cast<S>(alpha2) + b * static_cast<S>(alpha) + c;
 }
 
 // CurveHermite의 alpha에 대한 2차 미분이다(UE FMath::CubicInterpSecondDerivative와 같은 식):
 //   a = 12p0 + 6t0 + 6t1 − 12p1, b = −6p0 − 4t0 − 2t1 + 6p1, 결과 a·α + b
 // 입력 단위 미분은 결과를 구간 길이의 제곱으로 나눈다.
-template <typename S>
-    requires IsFloatingPointV<S>
-constexpr S CurveHermiteSecondDerivative(S p0, S t0, S p1, S t1, S alpha) noexcept {
+template <typename S, typename A>
+    requires(IsFloatingPointV<S> && IsFloatingPointV<A>)
+constexpr S CurveHermiteSecondDerivative(S p0, S t0, S p1, S t1, A alpha) noexcept {
     const S a = static_cast<S>(12) * p0 + static_cast<S>(6) * t0 + static_cast<S>(6) * t1 -
                 static_cast<S>(12) * p1;
     const S b = static_cast<S>(-6) * p0 - static_cast<S>(4) * t0 - static_cast<S>(2) * t1 +
                 static_cast<S>(6) * p1;
-    return a * alpha + b;
+    return a * static_cast<S>(alpha) + b;
 }
 
 // 자동 접선 계산의 시간 차 하한이다. 같은 입력값 키(시간 차 0)에서도 나눗셈이 유한하도록 UE
 // UE_KINDA_SMALL_NUMBER(1e-4)로 막는다. 따라서 키 간격이 1e-4보다 작으면 자동 접선이 작아진다.
-template <typename S>
-    requires IsFloatingPointV<S>
-constexpr S CurveTangentTimeDifference(S earlierTime, S laterTime) noexcept {
-    return Max(KindaSmallNumber<S>, laterTime - earlierTime);
+template <typename K>
+    requires IsFloatingPointV<K>
+constexpr K CurveTangentTimeDifference(K earlierTime, K laterTime) noexcept {
+    return Max(KindaSmallNumber<K>, laterTime - earlierTime);
 }
 
 namespace detail {
@@ -77,17 +80,18 @@ constexpr S CurveSelect(bool rising, S current, S limit) noexcept {
 
 } // namespace detail
 
-// CurveAutoClamped 키의 한 성분 접선이다(UE ClampFloatTangent와 같은 식, 정밀도만 S).
-// 이웃 두 키가 같은 쪽에 있으면(극값·평탄) 0이다. 단조 구간이면 이웃 키를 잇는 기울기에서 시작해,
-// 현재 키 높이가 양 끝 33.3% 안쪽에 있으면 가까운 쪽 구간 기울기로 섞어 줄여 곡선이 키 값을
-// 넘어가지 않게 한다. tension은 적용하지 않는다(호출자가 (1 − tension)을 곱한다).
-template <typename S>
-    requires IsFloatingPointV<S>
-constexpr S ClampCurveTangent(S previousValue, S previousTime, S currentValue, S currentTime,
-                              S nextValue, S nextTime) noexcept {
-    const S previousToNextTime = CurveTangentTimeDifference(previousTime, nextTime);
-    const S previousToCurrentTime = CurveTangentTimeDifference(previousTime, currentTime);
-    const S currentToNextTime = CurveTangentTimeDifference(currentTime, nextTime);
+// CurveAutoClamped 키의 한 성분 접선이다(UE ClampFloatTangent와 같은 식). 값은 S, 시간은
+// K(커브에서는 float)이며 S = K = float이면 UE와 비트가 같다. 이웃 두 키가 같은 쪽에
+// 있으면(극값·평탄) 0이다. 단조 구간이면 이웃 키를 잇는 기울기에서 시작해, 현재 키 높이가 양
+// 끝 33.3% 안쪽에 있으면 가까운 쪽 구간 기울기로 섞어 줄여 곡선이 키 값을 넘어가지 않게 한다.
+// tension은 적용하지 않는다(호출자가 (1 − tension)을 곱한다).
+template <typename S, typename K>
+    requires(IsFloatingPointV<S> && IsFloatingPointV<K>)
+constexpr S ClampCurveTangent(S previousValue, K previousTime, S currentValue, K currentTime,
+                              S nextValue, K nextTime) noexcept {
+    const K previousToNextTime = CurveTangentTimeDifference(previousTime, nextTime);
+    const K previousToCurrentTime = CurveTangentTimeDifference(previousTime, currentTime);
+    const K currentToNextTime = CurveTangentTimeDifference(currentTime, nextTime);
 
     const S previousToNextHeight = nextValue - previousValue;
     const S previousToCurrentHeight = currentValue - previousValue;
@@ -101,9 +105,10 @@ constexpr S ClampCurveTangent(S previousValue, S previousTime, S currentValue, S
     }
 
     const S threshold = static_cast<S>(0.333);
-    const S currentToNextTangent = currentToNextHeight / currentToNextTime;
-    const S previousToCurrentTangent = previousToCurrentHeight / previousToCurrentTime;
-    const S previousToNextTangent = previousToNextHeight / previousToNextTime;
+    const S currentToNextTangent = currentToNextHeight / static_cast<S>(currentToNextTime);
+    const S previousToCurrentTangent =
+        previousToCurrentHeight / static_cast<S>(previousToCurrentTime);
+    const S previousToNextTangent = previousToNextHeight / static_cast<S>(previousToNextTime);
     const S lowerThreshold = threshold;
     const S upperThreshold = static_cast<S>(1) - threshold;
     const S heightAlpha = previousToCurrentHeight / previousToNextHeight;
@@ -127,18 +132,6 @@ constexpr S ClampCurveTangent(S previousValue, S previousTime, S currentValue, S
     }
 
     return clamped;
-}
-
-// CurveAuto 키의 한 성분 접선이다(UE AutoCalcTangent + ComputeCurveTangent의 나눗셈):
-//   (1 − tension)·((current − previous) + (next − current)) / max(1e-4, nextTime − previousTime)
-// 끝 키처럼 이웃이 자기 자신이면 한쪽 기울기가 된다.
-template <typename S>
-    requires IsFloatingPointV<S>
-constexpr S AutoCurveTangent(S previousValue, S previousTime, S currentValue, S nextValue,
-                             S nextTime, S tension) noexcept {
-    const S sum = (currentValue - previousValue) + (nextValue - currentValue);
-    const S scaled = (static_cast<S>(1) - tension) * sum;
-    return scaled / CurveTangentTimeDifference(previousTime, nextTime);
 }
 
 } // namespace rocks::math
@@ -229,6 +222,38 @@ Quaternion<S> SlerpFullPath(const Quaternion<S>& a, const Quaternion<S>& b, S t)
     return detail::NormalizedOr(detail::SlerpFullPathUnnormalized(a, b, t), a);
 }
 
+// 최단 경로 구면 보간이다(UE TQuat::Slerp = Slerp_NotNormalized + GetNormalized와 같은 식). 내적의
+// 부호로 b를 같은 반구로 맞추고, |내적| < 0.9999이면 sin 가중치, 그 밖은 선형 가중치를 쓴 뒤
+// 정규화한다. 커브의 Linear quaternion 구간이 쓴다. Rocks Slerp(전환 기준 0.9995, 끝점 특별 처리)와
+// 반올림이 다를 수 있다. 정규화할 수 없으면(제곱 길이 < 1e-8 — UE GetNormalized의 기준) 항등을
+// 반환한다(UE와 같다). 단위 quaternion 전제다.
+template <typename S>
+Quaternion<S> CurveSlerp(const Quaternion<S>& a, const Quaternion<S>& b, S t) noexcept {
+    S rawCosine = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+    const S sign = rawCosine >= static_cast<S>(0) ? static_cast<S>(1) : static_cast<S>(-1);
+    rawCosine *= sign;
+    S scaleA = static_cast<S>(1) - t;
+    S scaleB = t * sign;
+    if (rawCosine < static_cast<S>(0.9999)) {
+        const S omega = math::Acos(rawCosine);
+        const S inverseSine = static_cast<S>(1) / math::Sin(omega);
+        scaleA = math::Sin(scaleA * omega) * inverseSine;
+        scaleB = math::Sin(scaleB * omega) * inverseSine;
+    }
+
+    const Quaternion<S> blended(scaleA * a.x + scaleB * b.x, scaleA * a.y + scaleB * b.y,
+                                scaleA * a.z + scaleB * b.z, scaleA * a.w + scaleB * b.w);
+    const S lengthSquared = blended.x * blended.x + blended.y * blended.y + blended.z * blended.z +
+                            blended.w * blended.w;
+    if (!(lengthSquared >= math::SmallNumber<S>)) {
+        return blended.IsFinite() ? Quaternion<S>::Identity() : blended;
+    }
+
+    const S inverseLength = math::InvSqrt(lengthSquared);
+    return Quaternion<S>(blended.x * inverseLength, blended.y * inverseLength,
+                         blended.z * inverseLength, blended.w * inverseLength);
+}
+
 // 키 current의 SQUAD 제어점이다(Shoemake):
 //   s = current · exp(−(1 − tension) · (log(current⁻¹·previous) + log(current⁻¹·next)) / 4)
 // previous·next는 current와 같은 반구로 맞춘 뒤 쓴다. tension = 0은 표준 SQUAD, tension = 1은 s =
@@ -262,6 +287,9 @@ Quaternion<S> SquadControlPoint(const Quaternion<S>& previous, const Quaternion<
 // SQUAD 보간이다: Slerp(Slerp(q0, q1, t), Slerp(s0, s1, t), 2t(1 − t)).
 // q1이 q0과 다른 반구면 q1과 s1을 함께 뒤집어 최단 경로를 택하고, 안쪽 세 slerp는 다시 뒤집지
 // 않는다 (SlerpFullPath). t = 0이면 q0, t = 1이면 반구를 맞춘 q1이다. 결과는 단위 quaternion이다.
+// 따라서 뒤집은 구간의 끝(t = 1, 커브에서는 루프 구간 끝에서 비율이 1로 잘린 경우)에서는 −q1을
+// 반환한다. 같은 회전이지만 성분 부호가 키에서 평가한 q1과 반대이므로, 성분을 그대로 섞는 소비자는
+// 반구를 다시 맞춰야 한다(UE TQuat::Squad도 같은 성질이다).
 // s0은 q0에서 나가는 제어점, s1은 q1로 들어오는 제어점이다. 단위 quaternion 전제다.
 // UE TQuat::Squad와 같은 구조(q0→q1만 최단 경로)이며 제어점 계산이 다르다(SquadControlPoint).
 template <typename S>
