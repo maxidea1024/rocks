@@ -11,6 +11,10 @@ namespace rocks {
 
 class Engine;
 
+// 종료 때 최종 GC와 정리 drain을 반복하는 최대 횟수다. 넘으면 닫히지 않은 것으로 보고 Busy를
+// 보고한다(계획 3.2절 "timeout은 실패").
+inline constexpr uint32 MaxShutdownCollectPasses = 8;
+
 // 엔진 실행 상태다.
 enum class EngineState : uint8 {
     Uninitialized,
@@ -41,6 +45,16 @@ public:
     virtual void OnFrameEnd(Engine&) noexcept {
     }
 
+    // 종료 1단계(계획 3.2절 "신규 요청 차단")다. 새 작업 제출을 막는다. 종료 중 한 번만 불린다.
+    virtual void BeginShutdown(Engine&) noexcept {
+    }
+
+    // 종료 2단계(World 파괴 뒤, "GPU fence·audio epoch·physics step 완료")다. 진행 중인 비동기
+    // 작업이 끝날 때까지 기다린다. 실패는 Shutdown의 결과로 보고되며 뒤 단계는 계속 실행한다.
+    virtual Result<void> CompleteInFlightWork(Engine&) noexcept {
+        return Result<void>::Success();
+    }
+
     virtual void Deinitialize(Engine&) noexcept {
     }
 };
@@ -49,6 +63,27 @@ using EngineSubsystemType = SubsystemType<EngineSubsystem>;
 
 // 실행 파일이 엔진 루프에 끼워 넣는 확장 지점이다. 창 이벤트 펌프·입력 수집·렌더 추출과 제출처럼
 // Engine이 직접 의존하지 않는 시스템을 연결한다. 헤드리스 실행은 hook 없이 돈다.
+//
+// 종료 단계 hook(CP6, Docs/Design/RenderBase.ko.md 4.3·5.5절, 계획 3.2절 Shutdown 순서)은 렌더
+// lane처럼 Engine이 모르는 실행기가 엔진 종료 순서에 끼어드는 자리다. Engine::Shutdown이 다음
+// 순서로 부른다(각 hook은 종료 중 한 번, DrainShutdownCleanup만 반복):
+//   BeginShutdown → client 종료·World 파괴 → CompleteInFlightWork → Subsystem 정리 → [최종 GC →
+//   DrainShutdownCleanup]을 닫힐 때까지 반복 → VerifyShutdownClosure → StopExecutors → 엔진
+//   Registry· 타입 정리.
+// 실패한 단계가 있어도 뒤 단계를 건너뛰지 않으며 Shutdown은 첫 오류를 돌려준다.
+//
+// 사용 예(렌더 lane 연결):
+//   void BeginShutdown(Engine&) noexcept override { renderLane.BlockFrames(); }
+//   Result<void> CompleteInFlightWork(Engine&) noexcept override {
+//       return renderLane.WaitFramesIdle();
+//   }
+//   Result<uint64> DrainShutdownCleanup(Engine&) noexcept override {
+//       return renderLane.DrainRetires();
+//   }
+//   Result<void> VerifyShutdownClosure(Engine&) noexcept override {
+//       return renderLane.CloseResources();
+//   }
+//   Result<void> StopExecutors(Engine&) noexcept override { return renderLane.Stop(); }
 class EngineLoopHooks {
 public:
     // 1단계: 프레임의 첫 단계다. 창 메시지·입력을 펌프한다. 종료가 필요하면
@@ -62,6 +97,34 @@ public:
 
     // 6단계: 프레임의 마지막 단계다. World 상태로 렌더를 추출·제출한다.
     virtual void EndFrame(Engine&) noexcept {
+    }
+
+    // 종료: 새 게임·편집 요청과 새 프레임 제출을 막는다(계획 3.2절 첫 단계).
+    virtual void BeginShutdown(Engine&) noexcept {
+    }
+
+    // 종료: World 파괴 뒤 진행 중인 GPU 프레임·비동기 작업이 끝날 때까지 기다린다("GPU fence
+    // 완료").
+    virtual Result<void> CompleteInFlightWork(Engine&) noexcept {
+        return Result<void>::Success();
+    }
+
+    // 종료: 최종 GC 한 번이 끝날 때마다 불린다. 그 GC가 만든 정리 작업(Retire·backend 회수)을
+    // 끝까지 처리하고 이번에 처리한 수를 돌려준다. Engine은 GC 회수 수와 이 값이 모두 0이 될 때까지
+    // 반복한다(closure). 실패는 보고되고 0으로 본다.
+    virtual Result<uint64> DrainShutdownCleanup(Engine&) noexcept {
+        return Result<uint64>::Success(0);
+    }
+
+    // 종료: owner·retire·queue closure를 확인한다(남은 자원·대기 0). 남아 있으면 실패를 돌려준다.
+    virtual Result<void> VerifyShutdownClosure(Engine&) noexcept {
+        return Result<void>::Success();
+    }
+
+    // 종료: 전용 lane·scheduler 같은 실행기를 끝낸다(남은 작업 0 확인·Join). 엔진 Registry·타입
+    // 정리 전이다.
+    virtual Result<void> StopExecutors(Engine&) noexcept {
+        return Result<void>::Success();
     }
 
 protected:
@@ -168,12 +231,15 @@ struct EngineStats {
 //   EngineConfig.registerModuleTypes -> EngineConfig.registerTypes(native, 마지막)) -> 엔진
 //   Registry -> EngineSubsystem -> EngineClient. 어느 단계든 실패하면 이미 한 단계를 역순으로
 //   정리하고 Failed가 된다.
-// - 종료 순서: client.OnEngineShutdown -> 모든 World Shutdown·파괴 -> Subsystem 역순 정리 -> 엔진
-//   Registry -> ModuleRegistration 파괴(붙잡은 lease 해제) -> TypeRegistry::Shutdown. 타입은
+// - 종료 순서(계획 3.2절): BeginShutdown(Subsystem 역순 → hooks) -> client.OnEngineShutdown -> 모든
+//   World Shutdown·파괴 -> CompleteInFlightWork(Subsystem 역순 → hooks) -> Subsystem 역순 정리 ->
+//   [엔진 Registry 최종 GC -> hooks.DrainShutdownCleanup]을 둘 다 0이 될 때까지 반복(최대
+//   MaxShutdownCollectPasses) -> hooks.VerifyShutdownClosure -> hooks.StopExecutors -> 엔진
+//   Registry 종료 -> ModuleRegistration 파괴(붙잡은 lease 해제) -> TypeRegistry::Shutdown. 타입은
 //   Unregister하지 않는다 — 게임이 토큰을 버린 native 파생이 리플렉션 base의 dependent로 남아
 //   Unregister가 Busy로 멈추기 때문이다. Shutdown은 남은 lease만 검사하고 dependent 순서로 레코드를
-//   반납한다. 초기화 실패 경로도 같은 순서다. 프레임 실행 중(hook 안)에는 Busy이므로 RequestExit 후
-//   Run이 돌아온 뒤 호출한다.
+//   반납한다. 초기화 실패 경로는 hook 단계 없이 같은 정리 순서다. 프레임 실행 중(hook 안)에는
+//   Busy이므로 RequestExit 후 Run이 돌아온 뒤 호출한다.
 // - World는 Engine이 소유한다. 프레임 안에서 DestroyWorld를 호출하면 5단계(지연 작업)에서 파괴된다.
 //
 // 스레드: 생성한 게임 스레드에서만 사용한다.
@@ -208,7 +274,9 @@ public:
 
     // 엔진을 정리한다. Uninitialized·Stopped·Failed에서는 아무것도 하지 않고 성공한다. 프레임 실행
     // 중이면 Busy, World가 외부 보유권 때문에 끝나지 않으면 그 오류이며 Stopping에 머문다(반환 후
-    // 다시 호출).
+    // 다시 호출 — 이미 부른 종료 hook은 다시 부르지 않는다). 종료 hook 단계가 실패하거나 최종 GC·
+    // 정리가 MaxShutdownCollectPasses 안에 닫히지 않으면(Busy) 나머지 단계를 마저 실행해 Stopped가
+    // 된 뒤 첫 오류를 돌려준다.
     Result<void> Shutdown() noexcept;
 
     EngineState State() const noexcept {
@@ -265,6 +333,9 @@ private:
     };
 
     void Teardown(uint32 completedSteps) noexcept;
+    // 종료 hook 단계(BeginShutdown 등)를 진행 정도에 맞춰 한 번씩 부른다.
+    Result<void> RunShutdownHooksBeforeWorlds() noexcept;
+    Result<void> CloseAfterSubsystems() noexcept;
     Result<void> DestroyWorldNow(usize index) noexcept;
     void ProcessDeferred() noexcept;
 
@@ -283,6 +354,8 @@ private:
     uint64 frameNanoseconds_ = 0;
     uint64 worldTickNanoseconds_ = 0;
     uint32 initializedSteps_ = 0;
+    // 종료 hook 단계의 진행 정도다(재시도 때 같은 hook을 다시 부르지 않는다).
+    uint32 shutdownProgress_ = 0;
     bool inFrame_ = false;
     bool exitRequested_ = false;
 };
