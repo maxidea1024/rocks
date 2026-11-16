@@ -330,6 +330,9 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
     }
 
     // 3. 단계 순서의 해석: FieldId → 스키마 위치(정렬 색인), 모양, 유효 플래그 누적, key 값.
+    // staged 객체와 거기서 분리한 상자는 ReadOnly를 막지 않는다(리플렉션 B9i3c1 — 공개 전 객체의
+    // 초기값은 ReadOnly 필드도 정한다, Docs/Design/ReflectionExtensions.ko.md 10.2절).
+    const bool acceptsReadOnly = cursor.AcceptsReadOnlyWrites();
     for (usize index = 0; index < steps.Size(); ++index) {
         cursor.current_ = index;
         const PathStep& step = steps[index];
@@ -383,6 +386,10 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
             frame.keyEnumeration = parent.target.FieldKeyEnum(position);
             frame.target = parent.target.FieldStruct(position);
             frame.effectiveFlags = PropagateFieldFlags(parent.effectiveFlags, field->flags);
+        }
+
+        if (acceptsReadOnly) {
+            frame.effectiveFlags &= ~static_cast<uint32>(FieldFlags::ReadOnly);
         }
 
         frame.field = field;

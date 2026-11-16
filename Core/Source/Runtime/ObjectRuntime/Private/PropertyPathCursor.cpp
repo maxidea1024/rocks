@@ -18,6 +18,11 @@ PathCursor::PathCursor(ObjectRegistry& registry, const ObjectAccessContext& acce
     }
 }
 
+bool PathCursor::AcceptsReadOnlyWrites() const noexcept {
+    return root_ == PathTarget::Kind::Staged ||
+           (root_ == PathTarget::Kind::Detached && rootBox_->fromStaged_);
+}
+
 Allocator& PathCursor::ValueAllocator() const noexcept {
     if (root_ == PathTarget::Kind::Struct) {
         return *rootAllocator_;

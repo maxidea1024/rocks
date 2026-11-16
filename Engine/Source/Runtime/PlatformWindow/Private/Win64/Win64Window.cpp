@@ -1,4 +1,5 @@
 #include <Platform/Clock.h>
+#include <Platform/DynamicLibrary.h>
 #include <PlatformWindow/Window.h>
 
 #include <Windows.h>
@@ -545,24 +546,25 @@ using XInputGetStateFunction = DWORD(WINAPI*)(DWORD, XINPUT_STATE*);
 class XInputGamepads final : public GamepadBackend {
 public:
     ~XInputGamepads() override {
-        if (library_ != nullptr) {
-            FreeLibrary(library_);
-        }
+        // 함수 표를 먼저 놓아야 DLL을 내릴 수 있다.
+        getState_ = nullptr;
+        lease_.Reset();
+        (void)library_.Close();
     }
 
-    // XInput DLL을 연다. Windows 8 이상은 xinput1_4, 그 이전 호환으로 xinput9_1_0을 쓴다.
+    // System32의 XInput DLL을 연다(Windows 8 이상 xinput1_4, 이전 호환 xinput9_1_0).
     Result<void> Load() noexcept {
-        library_ = LoadLibraryExW(L"xinput1_4.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
-        if (library_ == nullptr) {
-            library_ = LoadLibraryExW(L"xinput9_1_0.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
-        }
-        if (library_ == nullptr) {
+        if (!library_.OpenSystem("xinput1_4.dll") && !library_.OpenSystem("xinput9_1_0.dll")) {
             return Result<void>::Failure(ErrorCode::DependencyFailed);
         }
-        getState_ = reinterpret_cast<XInputGetStateFunction>(
-            reinterpret_cast<void*>(GetProcAddress(library_, "XInputGetState")));
-        return getState_ != nullptr ? Result<void>::Success()
-                                    : Result<void>::Failure(ErrorCode::DependencyFailed);
+
+        void* getState = nullptr;
+        if (!library_.Find("XInputGetState", getState, lease_)) {
+            return Result<void>::Failure(ErrorCode::DependencyFailed);
+        }
+
+        getState_ = reinterpret_cast<XInputGetStateFunction>(getState);
+        return Result<void>::Success();
     }
 
     void Poll(input::InputQueue& queue) noexcept override {
@@ -615,7 +617,9 @@ private:
         uint64 lastProbe = 0;
     };
 
-    HMODULE library_ = nullptr;
+    // lease_가 살아 있는 동안 getState_가 유효하다. 소멸자가 lease_를 먼저 놓고 library_를 닫는다.
+    DynamicLibrary library_;
+    DynamicLibraryLease lease_;
     XInputGetStateFunction getState_ = nullptr;
     Slot slots_[input::MaxGamepads];
 };

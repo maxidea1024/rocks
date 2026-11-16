@@ -66,6 +66,12 @@ public:
 
     // RegistryOptions::names(없으면 nullptr)다. 생성 뒤 바뀌지 않아 어느 스레드에서나 읽는다(pool의
     // 스레드 규칙은 NamePool). Name 쓰기 검사·저장 encode·복원 2a intern이 쓴다.
+    // 이 Registry가 쓰는 타입 Registry다(생성자 인자 — 텍스트 codec 같은 도구 계층이 대상
+    // Registry에서 얻는다).
+    TypeRegistry& Types() const noexcept {
+        return types_;
+    }
+
     NamePool* Names() const noexcept {
         return options_.names;
     }

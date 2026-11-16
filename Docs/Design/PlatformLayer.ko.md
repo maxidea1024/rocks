@@ -155,6 +155,40 @@ UE 5.8(5.8.4, commit `f45729c0b6f0`) 원본(경로는 `Engine/Source/Runtime/Cor
 
 검증(2026-11-13): Windows x64 Debug와 Asan에서 프로세스 시험 21건과 Core 전체 시험 897건이 통과했다. 프로세스 시험은 종료 코드, 입력 검증 음성 대조(NUL·잘못된 UTF-8·`"`·`.BAT`·2 MiB 인자 Overflow·작업 디렉터리 NotFound·WrongType), 인용·UTF-8 인자 왕복(따옴표·역슬래시·빈 인자·줄바꿈·BMP 밖 문자), UTF-8 이름 실행 파일·작업 디렉터리, 상대 경로 실행 파일, 1 MiB 입출력 동시 진행, 출력·오류 동시 용량 초과와 용량 0, 합친 출력 순서, `Inherit`가 손자까지 이어지는지와 `Null`, 시간 초과 강제 종료(쉬지 않고 출력하는 자식 포함), 대기·종료·재시작·이동, 소멸 시 종료, 자손 종료, 자연 종료 뒤 남은 자손 종료, 손자가 pipe를 잡은 경우의 RunProcess 종료, 스트리밍 pipe와 EOF, 입력 시간 초과 때 쓴 양의 정확성과 읽는 쪽이 닫힌 입력, Low 우선순위, 부모 handle 비상속, 비정상 종료(신호·예외), PID·실행 파일 경로를 확인한다. 자식은 테스트 실행 파일을 `--process-probe`로 다시 띄운 probe다(`PlatformBase/Tests/ProcessProbe.cpp`, 플랫폼 도구는 `TestSupport/ProcessProbe.h`). Android x86_64 에뮬레이터(API 35)에서도 프로세스 시험 21건이 통과했다(Unsupported 경로와 PID·생존 확인·실행 파일 경로). 이 교차 빌드가 POSIX 시험 도구의 경고 오류를 잡아 macOS CI 전에 고쳤다. macOS 구현은 이 기계에서 빌드·실행하지 않았다(CI가 맡는다).
 
+## 동적 라이브러리 (2026-11-16 1차 구현, 셰이더 P10)
+
+`Platform/DynamicLibrary.h`는 OS 공유 라이브러리를 열고 심볼을 찾고 내린다(UE `FPlatformProcess::GetDllHandle`·`GetDllExport`·`FreeDllHandle` 대응). 셰이더 워커가 도구(DXC·SPIRV-Cross·SPIRV-Tools·FXC)를 사용자 단위 저장소의 절대 경로에서 열고, 렌더러가 OS 공급 라이브러리(Vulkan 로더, XInput)를 여는 선행 기반이다([셰이더 시스템](ShaderSystem.ko.md) 5.3절 P10·9절). 엔진 모듈을 동적으로 싣는 로더가 아니다. 인자 검사·lease 계수·수명은 `Private/Common/DynamicLibrary.cpp`, OS 호출은 `Private/Win64/DynamicLibrary.cpp`·`Private/Posix/DynamicLibrary.cpp`(시스템 라이브러리 디렉터리만 OS hook)가 맡는다.
+
+| API | 계약 |
+|---|---|
+| `Open(absolutePath)` | 절대 경로만 받는다(Windows `X:\`·UNC, POSIX `/`). Windows `LoadLibraryExW(LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR \| LOAD_LIBRARY_SEARCH_SYSTEM32)`: 의존 DLL은 연 DLL의 디렉터리와 System32에서만 찾고 현재 디렉터리·PATH·실행 파일 디렉터리는 보지 않는다. 긴 경로는 파일 backend와 같은 `WidePath`로 확장 경로가 된다. macOS·Android `dlopen(RTLD_NOW \| RTLD_LOCAL)` |
+| `OpenSystem(name)` | OS 공급 라이브러리를 파일 이름 하나로 연다(구분자·`:`·`.`·`..` 거부, 최대 255 byte). Windows는 System32만(`LOAD_LIBRARY_SEARCH_SYSTEM32`), macOS는 `/usr/lib/<name>`(dyld 공유 캐시), Android는 이름 그대로 링커 namespace 검색(`libvulkan.so`) |
+| `Find(symbols, count, lease)`·`Find(symbol, address, lease)` | 심볼 표를 한꺼번에 찾는다. 하나라도 없으면 `NotFound`, 모든 주소를 null로 되돌리고 lease를 바꾸지 않는다(처음 없는 항목 색인을 돌려줄 수 있다). 성공하면 lease 하나를 준다. 여러 스레드에서 동시에 불러도 된다(lease 수는 비교 교환) |
+| `DynamicLibraryLease` | 얻은 주소가 유효하다는 보증이다. 이동만 된다. 어느 스레드에서 풀어도 된다 |
+| `Close` | lease가 남아 있으면 `Busy`로 거부하고 열린 채 둔다(PlatformLayer P1 "참조 중 unload 거부"). lease가 없으면 내린다 |
+| 소멸·이동 대입 | lease가 남아 있으면 내리지 않고 소유권만 놓는다. 마지막 lease가 풀릴 때 내린다 |
+
+오류: 잘못된 경로·이름·심볼(null·빈 값·NUL·잘못된 UTF-8·상대 경로) `InvalidArgument`, Windows 장치 namespace `Unsupported`, 파일·심볼 없음 `NotFound`(Windows는 의존 DLL·그 import 심볼 없음도 `NotFound`, nativeError로 구분), 디렉터리·실을 수 없는 이미지(형식·아키텍처) `WrongType`, 권한 `AccessDenied`. POSIX는 `dlopen`이 errno를 주지 않으므로 실패한 뒤에만 파일을 확인한다(macOS 시스템 라이브러리는 디스크 파일이 없으므로 성공 경로에서는 보지 않는다). 파일이 있고 ELF·Mach-O 표지가 맞는데 실패하면 `SystemError`다(의존 라이브러리 없음 포함, dlerror 문구는 아직 넘기지 않는다). Windows 열기는 호출 스레드의 오류 모드를 잠시 `SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX`로 바꿔 오류 대화상자를 띄우지 않는다(UE `GetDllHandle`과 같다).
+
+UE 5.8(`Engine/Source/Runtime/Core/Private/Windows/WindowsPlatformProcess.cpp:234–320`)과 다르게 정한 점:
+
+| 항목 | UE 5.8 | Rocks |
+|---|---|---|
+| 검색 | `GetDllHandle`이 모듈 디렉터리·`PushDllDirectory` 스택·`AddDllDirectory` 목록을 차례로 붙여 찾고(`LoadLibraryWithSearchPaths`), 상대 이름도 받는다 | 절대 경로만. 의존 DLL은 같은 디렉터리와 System32만. 이름 열기는 `OpenSystem`(System32)으로 분리한다 |
+| 수명 | `FreeDllHandle`은 확인 없이 `FreeLibrary`한다. 얻은 함수 포인터의 수명은 호출자가 관리한다 | 심볼 표를 lease로 세고 lease가 남으면 `Close`가 `Busy`. 소유자가 먼저 사라지면 마지막 lease가 내린다 |
+| 실패 정보 | 핸들 null만 돌려준다 | 공통 `FileStatus` 코드와 OS 원인 코드 |
+
+시험 라이브러리: Rocks.Build에는 공유 라이브러리 모듈 종류가 없고 더하지 않으므로([셰이더 시스템](ShaderSystem.ko.md) 8절), 시험 지원 코드(`TestSupport/DynamicLibraryFixture.h`, `Private/Win64/DynamicLibraryFixture.cpp`)가 실행 중에 데이터 전용 PE32+ DLL(실행 중인 프로세스와 같은 machine, 코드·재배치·진입점 없음, export와 import만)을 직접 쓴다. 실제 OS 로더의 경로 검색·의존 해결·심볼 조회·해제를 그대로 시험하며 시험 지원 코드가 컴파일러·링커에 기대지 않는다. macOS(Mach-O와 ad-hoc 코드 서명)·Android(ELF) 생성기는 후속이며 그 플랫폼에서는 OS 공급 라이브러리 시험만 돌고 나머지는 SKIP이다.
+
+한계:
+
+- Windows는 같은 기본 이름의 DLL이 이미 프로세스에 올라와 있으면 디렉터리와 관계없이 그것을 쓴다(OS 규칙). 도구 DLL 이름이 다른 DLL과 겹치지 않아야 한다.
+- macOS에서 hardened runtime이 아닌 프로세스는 `DYLD_LIBRARY_PATH` 환경 변수가 같은 이름 파일을 먼저 고를 수 있다. 같은 디렉터리 의존은 라이브러리의 install name(`@loader_path`)이, Android는 `DT_RUNPATH`(`$ORIGIN`)가 정한다.
+- POSIX `dlsym`은 의존 라이브러리의 심볼도 찾는다(`GetProcAddress`는 그 DLL의 export만).
+- 후속: dlerror 문구 전달, 심볼 버전, macOS·Android 시험 라이브러리 생성기, macOS CI 실행.
+
+검증(2026-11-16): Windows x64 Debug·Asan에서 동적 라이브러리 시험 8건이 통과했다. 인자 음성 대조, 파일 없음·없는 디렉터리 아래·디렉터리·라이브러리가 아닌 파일·없는 시스템 이름, 심볼 조회·없는 심볼·표 되돌리기(처음 없는 색인)·lease 수·`Busy`·lease 이동·라이브러리 이동 대입, 8 스레드 × 64회 동시 조회의 lease 수, 같은 디렉터리 의존 해결(A의 import 칸 = B의 export 주소)과 의존 없음 `NotFound`·실패 뒤 남지 않음, 소유자 소멸 뒤 마지막 lease가 내림, 260자 넘는 경로, 음성 대조를 확인한다. 음성 대조는 자식 probe에서 의존 DLL B를 현재 디렉터리에만·PATH에만 두고 연다: `DynamicLibrary`는 `NotFound`이고 같은 자리에서 OS 기본 검색(`LoadLibraryExW` 플래그 0) 대조군은 연다(B가 실제로 찾을 수 있는 곳에 있는데 보지 않음). B를 A 옆에 두면 같은 probe가 연다. Android x86_64 에뮬레이터(API 35)에서는 OS 공급 라이브러리 시험 4건이 통과하고 시험 라이브러리가 필요한 4건은 SKIP이다. macOS는 이 기계에서 빌드하지 않았다(CI가 맡는다).
+
 ## 모바일 플랫폼 (2026-11-11: desktop + mobile은 우선 Android)
 
 사용자 결정으로 mobile은 Android에 먼저 집중하고 iOS는 보류한다. PlatformBase는 다음 구조다.
@@ -164,9 +198,9 @@ UE 5.8(5.8.4, commit `f45729c0b6f0`) 원본(경로는 `Engine/Source/Runtime/Cor
 | `Private/Common` | OS 호출 없는 공용 수명·동기화 규칙 | 모든 대상 |
 | `Private/Win64` | Windows backend | Windows |
 | `Private/Posix` | thread·mutex·조건 변수·clock·동기/비동기 파일·디렉터리·virtual memory의 POSIX 공통 구현, errno 변환(`PosixFileError.h`) | macOS·Android |
-| `Private/Apple` | `PosixPlatform.h` hook의 Apple 구현(`st_mtimespec`, `renamex_np`, `F_FULLFSYNC`, `pthread_threadid_np`, 상대 시간 조건 변수 대기, `MADV_FREE`) | macOS |
+| `Private/Apple` | `PosixPlatform.h` hook의 Apple 구현(`st_mtimespec`, `renamex_np`, `F_FULLFSYNC`, `pthread_threadid_np`, 상대 시간 조건 변수 대기, `MADV_FREE`, 시스템 라이브러리 디렉터리 `/usr/lib/`) | macOS |
 | `Private/Mac` | 기본 경로(`_NSGetExecutablePath`·`~/Library`) | macOS |
-| `Private/Android` | hook의 Android 구현(`st_mtim`, `renameat2(RENAME_NOREPLACE)` system call과 미지원 시 검사 후 rename, `fsync`, `gettid`, `CLOCK_MONOTONIC` 조건 변수, `MADV_DONTNEED`)과 경로(`/proc/self/exe`, 앱 등록 디렉터리) | Android |
+| `Private/Android` | hook의 Android 구현(`st_mtim`, `renameat2(RENAME_NOREPLACE)` system call과 미지원 시 검사 후 rename, `fsync`, `gettid`, `CLOCK_MONOTONIC` 조건 변수, `MADV_DONTNEED`, 시스템 라이브러리는 이름 그대로 링커 검색)과 경로(`/proc/self/exe`, 앱 등록 디렉터리) | Android |
 
 POSIX 공통 코드는 hook 밖의 OS 전용 API를 직접 쓰지 않는다. policy 검사는 `Posix`·`Apple`·`Android`를 native backend 디렉터리로 인정한다. 테스트 지원 코드도 `Core/Source/Developer/TestSupport/Private/Posix`로 합쳤다.
 
@@ -234,7 +268,7 @@ dotnet msbuild Rocks.proj -t:Test -p:RocksPlatform=android -p:AndroidAbi=x86_64
 | P1 | TLS: `GenericPlatform/GenericPlatformTLS.h`의 slot 할당·조회·설정·해제 | Rocks 내부에는 `thread_local`을 이용하는 구현이 있으나 UE에 대응하는 공개 동적 TLS slot API는 확인하지 못하였다. | slot 고갈·할당 실패·해제 후 재사용·스레드 간 격리·스레드 종료 정리·모듈 수명과 동시 경쟁을 검증한다. |
 | P1 | 공유 메모리: `GenericPlatform/GenericPlatformMemory.h`의 named shared-memory map/unmap | Rocks에 named shared-memory 공개 API는 확인하지 못하였다. 범위와 읽기/쓰기 권한, 소유권과 플랫폼별 이름 규칙을 설계한다. | 별도 프로세스 간 읽기·쓰기, 중복 생성·열기, 접근 거부, 부분 실패·중도 종료·해제, 이름 충돌과 크기 경계를 검증한다. |
 | P1 | 프로세스와 pipe: `GenericPlatform/GenericPlatformProcess.h`의 생성·대기·종료·반환값·pipe | **부분 구현(2026-11-13)**: `Platform/Process.h`의 생성·대기·종료 코드·자손까지 강제 종료·시간 제한 pipe·동시 수집 `RunProcess`·PID 생존 확인(위 "자식 프로세스와 pipe" 절). 환경 변수 지정·detach·(PID, 시작 시각) 정체·권한 상승 여부(Rockpile R0)·다른 스레드 취소는 후속이며 Android는 Unsupported다. | 실행 실패, stdin/stdout/stderr, 제한된 출력 수집, timeout·취소, 자식 및 자손 회수, 중복 종료·정리 실패와 플랫폼별 동작을 검증한다. Windows Debug·Asan과 Android 에뮬레이터 21건 통과, macOS는 CI만(로컬 미빌드). |
-| P1 | 동적 모듈: `GenericPlatform/GenericPlatformProcess.h`의 라이브러리 load/export/free | Rocks `ModuleLease`는 이미 확보된 모듈 수명 관리에 사용되며 OS 라이브러리 로더 자체는 아니다. 로드·심볼 조회·해제와 callback 소유권을 별도로 구현한다. | 누락·잘못된 심볼, ABI, 참조 중 unload 거부, 동시 조회와 실패 rollback, Windows/macOS 실행을 검증한다. |
+| P1 | 동적 모듈: `GenericPlatform/GenericPlatformProcess.h`의 라이브러리 load/export/free | **구현(2026-11-16, 위 "동적 라이브러리" 절)**: `Platform/DynamicLibrary.h`의 절대 경로 열기·OS 공급 라이브러리 이름 열기·심볼 표 조회·lease 수명(참조 중 `Close`는 `Busy`). Rocks `ModuleLease`는 이미 확보된 모듈 수명 관리용이며 이 로더와 별개다. macOS·Android 시험 라이브러리 생성과 실행 검증은 후속이다. | 누락·잘못된 심볼, ABI, 참조 중 unload 거부, 동시 조회와 실패 rollback, Windows/macOS 실행을 검증한다. |
 | P1 | 비동기·매핑 파일: `GenericPlatform/GenericPlatformFile.h`의 async read, mapped file 및 결과 오류 | 비동기 파일 핸들·매핑 파일 backend는 아직 없다. 동기 파일 계약과 task/lifetime 기반 이후에 도입한다. | 취소와 완료의 단일 종결, 사용 중 해제·늦은 completion, EOF·잘못된 범위·매핑 해제, fault injection과 실제 OS 실행을 검증한다. |
 | P2 | 파일 journal 및 플랫폼 부가 기능: `GenericPlatform/GenericPlatformFile.h`의 journal 조회·반복, 파일 특성 | journal, 실제 디스크 이름·링크 및 플랫폼별 부가 메타데이터는 기능별 후속이다. unsupported는 성공이나 빈 결과로 위장하지 않는다. | 기능 가용성, 권한·미지원, 중단/재개와 변경 추적의 중복·누락, 플랫폼별 오류와 resource cleanup을 검증한다. |
 

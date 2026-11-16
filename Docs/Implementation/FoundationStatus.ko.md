@@ -343,3 +343,11 @@ libsodium 1.0.22-stable 기반 범용 암호 모듈 `Crypto`를 추가했다(설
 - C3 스트리밍: secretstream, 세그먼트 스트림(순차·임의 접근·병렬 writer), 고정 seed 변형 fuzz 시험. C4: KeyRing·공급자, AsyncCrypto(Task 모듈).
 - 정책 검사: target 속성·AES/SHA intrinsics 디렉터리 허용 목록, 시험 접근점·`ROCKS_TESTING`·libsodium 전역 설정 위치, 파생 소스 출처. Android 기기 runner가 data 라이브러리 파일을 올린다.
 - 검증(Windows x64 clang-cl): Debug native 1352, Asan·Release, Android x86_64·arm64 빌드, x86_64 에뮬레이터 1349, Wycheproof(AES-GCM·ChaCha·XChaCha·HMAC·HKDF·Ed25519·X25519·ML-KEM·AES-CMAC·secretstream). macOS arm64 CI(run 43686796858, macos-15)에서 `armAes·armPmull·armDit·armSb`가 모두 감지되고 arm64 AES 커널 스칼라 대조·자가 시험을 포함해 Debug·Asan·Release 각 1349건이 통과했다(Windows job도 통과). macOS의 DIT 범위 비용 측정(6.4절)은 아직이다.
+
+## 2026-11-16 PlatformBase 동적 라이브러리(셰이더 P10)
+
+셰이더 워커의 도구 로드와 Vulkan 로더의 선행 기반으로 `Platform/DynamicLibrary.h`를 추가했다(상세 계약·UE 5.8 대조: [플랫폼 계층](../Design/PlatformLayer.ko.md) "동적 라이브러리", 요구: [셰이더 시스템](../Design/ShaderSystem.ko.md) 5.3절 P10). 절대 경로만 받는 `Open`(Windows는 의존 DLL을 같은 디렉터리·System32에서만 찾는다), OS 공급 라이브러리를 이름으로 여는 `OpenSystem`, 심볼 표를 한꺼번에 찾고 실패하면 되돌리는 `Find`, 얻은 심볼 표를 세는 `DynamicLibraryLease`(남아 있으면 `Close`가 `Busy`, 소유자가 먼저 사라지면 마지막 lease가 내린다)를 제공한다. PlatformWindow의 XInput 직접 로드(`LoadLibraryExW`·`GetProcAddress`)를 `OpenSystem`·`Find`로 옮겼다.
+
+- 시험 라이브러리: Rocks.Build에 공유 라이브러리 모듈 종류를 더하지 않으므로 시험 지원 코드(`TestSupport/DynamicLibraryFixture.h`)가 실행 중에 데이터 전용 PE32+ DLL(export·import만, 코드 없음)을 직접 쓴다. macOS·Android 생성기는 후속이며 그 플랫폼에서는 의존·검색 시험이 SKIP이다.
+- 검증(Windows x64 clang-cl): 동적 라이브러리 시험 8건 — 인자 음성 대조, 파일·디렉터리·비라이브러리·없는 시스템 이름 오류, 심볼 조회·없는 심볼·표 되돌리기·lease 수·`Busy`·이동, 8 스레드 동시 조회의 lease 수, 같은 디렉터리 의존 해결(A의 import 칸 = B의 export 주소)과 의존 없음 `NotFound`, 소유자 소멸 뒤 lease가 내림, 260자 넘는 경로, 그리고 음성 대조(의존 DLL을 현재 디렉터리에만·PATH에만 두면 `NotFound`이고 같은 자리에서 OS 기본 검색 대조군은 연다, 자식 probe에서 실행). Foundation Debug·Asan native 각 1820건 통과, Engine 대상 Debug 빌드(PlatformWindow XInput), 정책·형식 검사.
+- Android: arm64·x86_64 교차 빌드, x86_64 에뮬레이터(API 35)에서 동적 라이브러리 시험 4건 통과·4건 SKIP(시험 라이브러리 생성기 없음). macOS는 이 기계에서 빌드하지 않았다(CI가 맡는다).

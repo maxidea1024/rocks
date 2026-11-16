@@ -89,7 +89,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 | Sandbox | self-test가 D3D12 하드웨어·WARP·OpenGL을 대조(허용 오차 채널 ±8·2%, `Programs/Sandbox/Private/GraphicsSelfTest.cpp:409–415`, 대상 `:427–438`). `--graphics=` 인자는 없다 | Vulkan·GLES 미리보기 대조 → SH2 |
 | GraphicsTypes | RGBA8 2종, 2D, 필터 4종(`PixelFormat.h:12–16`, `Sampler.h:11–20`) | A0-G(다른 문서, 5.2절 요구) |
 | 수학 타입 | `Matrix4`·`Vector3`는 정렬 지정 없음(`Core/Source/Runtime/Core/Public/Core/Math/Matrix4.h:56–61`, `Vector3.h:19–24`) | 셰이더 전용 정렬 타입(7.2절 5항) → SH2 |
-| 플랫폼 | `Platform/Process.h`(P1 구현), `Platform/DirectoryWatch.h:88`(A0-P 구현). 동적 라이브러리 API 없음(PlatformLayer P1 표 "동적 모듈" 미구현). PlatformWindow는 Win32만이고 다른 플랫폼은 Unsupported(`PlatformWindow.Build.cs`) | P10, P12, P13 |
+| 플랫폼 | `Platform/Process.h`(P1 구현), `Platform/DirectoryWatch.h:88`(A0-P 구현). `Platform/DynamicLibrary.h`(P10 구현, Windows 검증, XInput이 이 API로 연다). PlatformWindow는 Win32만이고 다른 플랫폼은 Unsupported(`PlatformWindow.Build.cs`) | P10, P12, P13 |
 | Core | SHA-256(`Core/Encoding/Sha256.h:23,40`), JSON(`Core/Text/Json.h`), 결정적 수학 버전 `rocks::deterministic::Version`(`DeterministicMath/DeterministicMath.h:31`), 툴체인 지문·도구 빌드 ID(`Core/Build/BuildInfo.h:24,30`), Archive·Record·RecordList, `WorkerScheduler`, `CommandletRegistry` | 그대로 쓴다(5.2절) |
 | 리플렉션 | A0-B B1–B8 구현(`ROCKS_STRUCT`·identity·배열·지정자·World 타입, `e405c37`) | 셰이더 파라미터 종류 → P7 |
 | ThirdParty | 루트 `Core/Source/ThirdParty` 하나(`Programs/Rocks.Tooling.Common/ThirdPartyManifest.cs:76`), `kind`는 `code`·`data`(`:28`), `code`는 `.c` 번역 단위만(`:357–364`), 미리 빌드된 바이너리 필드 없음(`:132–136`, 모르는 필드는 오류 `:45`) | P3 |
@@ -124,7 +124,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 | P7 | MetaCompiler 셰이더 파라미터 | 이 문서 | 설계 | SH3 | B1–B8 | 13절 |
 | P8 | 다른 문서 개정 | 이 문서 | 목록 | 모든 단계의 기준 | 결정별 기한(15절) | 14절 |
 | P9 | Vulkan 선행 | 이 문서·EngineRuntime | 설계 | SH2 | P3, P10 | 5.3 |
-| P10 | 동적 라이브러리 API | PlatformLayer | 미착수 | P4, P9, P13, SH0, SH2 | — | 5.3 |
+| P10 | 동적 라이브러리 API | PlatformLayer | **구현** | P4, P9, P13, SH0, SH2 | — | 5.3 |
 | P11 | OpenGL ES 선행(OpenGLGraphics를 UE `OpenGLDrv` 방식으로) | EngineRuntime·이 문서 | 설계 | P13, SH2, SH6 | A0-G | 5.3 |
 | P12 | macOS 실행 기반(Objective-C++ 빌드·Cocoa 창·Metal layer) | PlatformLayer·Rocks.Build | 미설계 | P15, SH5 | P3 | 5.3 |
 | P13 | Android 실행 기반(앱·창·EGL surface·수명·APK) | PlatformLayer | 미설계 | SH6 | P10, P11, AssetSystem APK 읽기(VFS) | 5.3 |
@@ -199,13 +199,14 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 - macOS는 Metal을 쓰므로 Vulkan(MoltenVK 등)은 범위 밖이다.
 - 완료 기준: Vulkan-Headers가 Rocks 경고 규칙으로 include되고, 로더 동적 로드와 검증 레이어 켜기가 Windows에서 시험되며, VulkanGraphics 설계 절이 확정된다.
 
-**P10 동적 라이브러리 API — 미착수(PlatformLayer P1 표의 "동적 모듈" 항목).**
-- 현재: 공개 로더가 없고 private 코드가 OS 함수를 직접 부른다(XInput, `Engine/Source/Runtime/PlatformWindow/Private/Win64/Win64Window.cpp:553`). 계획 §2.5의 "동적 loader를 Foundation 선행 조건으로 만들지 않는다"는 native plugin 모듈 이야기다. 이 API는 Foundation이 아니라 셰이더 워커와 VulkanGraphics의 선행 조건이고, 엔진 모듈을 동적으로 싣는 로더가 아니다.
+**P10 동적 라이브러리 API — 구현(2026-11-16, PlatformLayer P1 표의 "동적 모듈" 항목, 상세: PlatformLayer "동적 라이브러리" 절).**
+- 구현 전: 공개 로더가 없고 private 코드가 OS 함수를 직접 불렀다(XInput, `Win64Window.cpp`). 지금은 XInput도 `OpenSystem`으로 연다. 계획 §2.5의 "동적 loader를 Foundation 선행 조건으로 만들지 않는다"는 native plugin 모듈 이야기다. 이 API는 Foundation이 아니라 셰이더 워커와 VulkanGraphics의 선행 조건이고, 엔진 모듈을 동적으로 싣는 로더가 아니다.
 - 산출물 `Platform/DynamicLibrary.h`:
   - `Open(absolutePath)`: 절대 경로만 받는다. Windows `LoadLibraryExW`(`LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32`, 현재 디렉터리·PATH를 찾지 않고 같은 디렉터리의 의존 DLL은 찾는다), macOS·Android `dlopen(RTLD_NOW | RTLD_LOCAL)`.
   - `OpenSystem(name)`: OS가 공급하는 라이브러리만 이름으로 연다(Windows System32의 `vulkan-1.dll`·XInput, Android `libvulkan.so`).
   - `Find(symbol)`, 수명, 오류 변환(파일 없음 `NotFound`, 심볼 없음, 잘못된 경로 `InvalidArgument`). 수명은 PlatformLayer "동적 모듈" 검증 기준("참조 중 unload 거부")을 따른다: 얻은 심볼 표를 lease로 세고, lease가 남아 있으면 `Close`가 `Busy`로 거부한다.
 - 완료 기준: 파일 없음·심볼 없음 오류, 현재 디렉터리에 둔 같은 이름 DLL을 열지 않는 음성 대조, 같은 디렉터리 의존 DLL 해결, Windows Debug·Asan·macOS CI·Android 에뮬레이터 시험. XInput 직접 로드를 이 API로 옮긴다.
+- 달성(2026-11-16): Windows Debug·Asan에서 위 항목과 PATH 음성 대조·긴 경로를 확인했고 XInput을 옮겼다. 시험 DLL은 시험 지원 코드가 실행 중에 쓰는 데이터 전용 PE다(8절대로 Rocks.Build에 공유 라이브러리 종류를 더하지 않았다). Android 에뮬레이터는 OS 공급 라이브러리 시험만 돌고 의존·검색 시험은 SKIP, macOS는 CI 미확인이다. 두 플랫폼의 시험 라이브러리 생성기(Mach-O 코드 서명, ELF)는 후속이다.
 - 막는 것: SH0(워커 도구 로드), SH2(Vulkan 로더).
 
 **P11 OpenGL ES 선행 — 설계.** OpenGLGraphics를 UE `OpenGLDrv`처럼 Windows 미리보기와 Android ES를 함께 맡는 backend로 바꾸는 설계다.
@@ -635,7 +636,7 @@ Rocks 규칙:
 | 〃 | 9절(:267–292) | 에셋 중심 키(TypeId·입력 bulk·의존 목록, SCC 식) | N1–N3(5.2절) |
 | 〃 | 10절 TargetProfile(:296)·cookKey(:299)·매니페스트(:307)·결정성(:311) | 그래픽 backend 단일 항목, 기본 프로필 Windows·Android, 매니페스트 v1 | K1–K3(5.2절), 12절 `graphicsBackends`·`shaderFormats`·`MacOS` 프로필. 결정성 규칙은 그대로 셰이더에 적용한다(10절) |
 | ReflectionFoundations | 3절 값 종류, 4절 struct | — | 셰이더 파라미터 종류가 `ROCKS_STRUCT` 경로를 쓰고 셰이더 자원 값 종류를 더한다(13절, 결정 4를 고를 때) |
-| PlatformLayer | P1 표 "동적 모듈", 모바일 절 | 동적 모듈 미구현, Android는 시험 실행만 | P10 `DynamicLibrary` 절, P13 Android 실행 기반, P12 macOS 창(PlatformWindow) |
+| PlatformLayer | P1 표 "동적 모듈", 모바일 절 | 동적 모듈 구현(P10, "동적 라이브러리" 절), Android는 시험 실행만 | P13 Android 실행 기반, P12 macOS 창(PlatformWindow) |
 | RepositoryLayout | 트리(:14·:29)·:52–56 | Engine에 Shaders·Config 없음, ThirdParty는 Core만 원본(:14 목록도 낡음) | 3절 구조와 8절 루트·`binary`·`headers` 종류 |
 | CompilerDiagnostics | :9·:25·:29·:36 | 생성 파일도 경고 검사, 외부 원본도 같은 경고 프로필로 컴파일, Core 루트만, "이 절 밖의 경고 억제 예외는 없다" | 15절 결정 7의 답에 따라: 두 루트, Rocks가 컴파일하지 않는 미리 빌드된 바이너리(오프라인 도구 빌드 포함) 승인 절과 그 공개 헤더의 경고 0 조건, 셰이더 경고 절(작성자 원문과 SPIRV-Cross가 다시 쓴 중간 원문 모두 경고를 오류로) |
 | Compression | 3.1·3.3·3.5 | Core 루트, `.c` 번역 단위만 | Engine 루트와 `kind: binary`·`headers` 언급(규칙 자체는 그대로) |
