@@ -1,6 +1,18 @@
 #include <Graphics/DeviceTypes.h>
+#include <Platform/Atomics.h>
 
 namespace rocks::graphics {
+
+namespace {
+
+// 마지막으로 나눠 준 장치 incarnation 번호다.
+uint64 lastDeviceEpoch = 0;
+
+} // namespace
+
+uint64 NewDeviceEpoch() noexcept {
+    return platform::AtomicFetchAdd<platform::MemoryOrder::Relaxed>(&lastDeviceEpoch, 1) + 1;
+}
 
 const char* BackendName(Backend backend) noexcept {
     switch (backend) {

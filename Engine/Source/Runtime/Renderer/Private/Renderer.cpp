@@ -139,12 +139,12 @@ Result<void> Renderer::Initialize(graphics::Device& device, graphics::Format col
     quadDesc.size = sizeof(QuadVertices);
     auto quad = device.CreateBuffer(quadDesc, Bytes(QuadVertices));
     if (!triangle || !quad) {
-        device.Destroy(createdPipeline.Value());
+        device.Retire(createdPipeline.Value());
         if (triangle) {
-            device.Destroy(triangle.Value());
+            device.Retire(triangle.Value());
         }
         if (quad) {
-            device.Destroy(quad.Value());
+            device.Retire(quad.Value());
         }
         return Result<void>::Failure(!triangle ? triangle.Error() : quad.Error());
     }
@@ -160,9 +160,9 @@ void Renderer::Shutdown() noexcept {
     if (device_ == nullptr) {
         return;
     }
-    device_->Destroy(pipeline_);
-    device_->Destroy(triangle_);
-    device_->Destroy(quad_);
+    device_->Retire(pipeline_);
+    device_->Retire(triangle_);
+    device_->Retire(quad_);
     device_ = nullptr;
     pipeline_ = {};
     triangle_ = {};

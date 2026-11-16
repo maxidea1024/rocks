@@ -1,6 +1,7 @@
 #include <Core/Containers/Array.h>
 #include <Core/Text/String.h>
 #include <D3D12Graphics/D3D12Device.h>
+#include <Graphics/FenceTimeline.h>
 #include <Platform/Fatal.h>
 
 #include <Windows.h>
@@ -14,7 +15,10 @@ namespace rocks::graphics {
 
 namespace {
 
-constexpr uint32 FrameCount = 2;
+// 기록 저장소(command allocator) 수의 상한이다. 끝난 제출의 저장소를 다시 쓰고, 모두 GPU가 쓰는
+// 중이면 이 수까지 새로 만든다. 프레임 수 제한(프레임 slot, RenderBase 5.3절)은 장치 밖에서 하므로
+// 보통은 slot 수 + 업로드 정도만 쓴다. 상한에 닿으면 가장 오래된 제출을 기다린다.
+constexpr uint32 MaxCommandAllocators = 8;
 constexpr uint32 SwapChainBufferCount = 2;
 constexpr uint32 RtvCapacity = 128;
 constexpr uint32 SrvCapacity = 1024;
@@ -298,12 +302,44 @@ private:
     uint32 capacity_ = 0;
 };
 
+// fence 관찰 스레드가 제출 하나의 완료를 기다리는 경계다. 장치가 제거되면 fence 완료 값이
+// UINT64_MAX가 되어 대기가 풀린다(D3D12 device removed 규칙).
+class D3D12FenceSource final : public FenceWaitSource {
+public:
+    bool WaitSubmission(uint64 value, void* token) noexcept override {
+        (void)token;
+        uint64 completed = fence->GetCompletedValue();
+        if (completed == RemovedFenceValue) {
+            return false;
+        }
+
+        if (completed >= value) {
+            return true;
+        }
+
+        if (FAILED(fence->SetEventOnCompletion(value, event))) {
+            return false;
+        }
+
+        WaitForSingleObject(event, INFINITE);
+        completed = fence->GetCompletedValue();
+        return completed != RemovedFenceValue;
+    }
+
+    // 장치 제거 뒤 fence가 돌려주는 완료 값이다.
+    static constexpr uint64 RemovedFenceValue = NumericLimits<uint64>::Max();
+
+    ID3D12Fence* fence = nullptr;
+    HANDLE event = nullptr;
+};
+
 class D3D12Device final : public Device, private CommandContext {
 public:
     explicit D3D12Device(Allocator& allocator) noexcept
         : adapterName_(allocator), lastError_(allocator), buffers_(allocator), textures_(allocator),
           pipelines_(allocator), swapChains_(allocator), retired_(allocator), rtvs_(allocator),
-          srvs_(allocator), samplers_(allocator), messageScratch_(allocator) {
+          srvs_(allocator), samplers_(allocator), allocators_(allocator),
+          messageScratch_(allocator), timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics) {
     }
 
     ~D3D12Device() override {
@@ -311,6 +347,9 @@ public:
             auto idle = WaitIdle();
             (void)idle;
         }
+        // 모든 제출이 끝났거나(WaitIdle) 장치가 제거되어 관찰 스레드가 곧 빠져나온다.
+        timeline_.StopWatcher();
+        timeline_.Close();
         retired_.Clear();
         swapChains_.Clear();
         textures_.Clear();
@@ -318,6 +357,9 @@ public:
         buffers_.Clear();
         if (fenceEvent_ != nullptr) {
             CloseHandle(fenceEvent_);
+        }
+        if (watcherEvent_ != nullptr) {
+            CloseHandle(watcherEvent_);
         }
     }
 
@@ -392,16 +434,18 @@ public:
             return Fail("CreateCommandQueue failed");
         }
 
-        for (Frame& frame : frames_) {
-            if (FAILED(device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                                       IID_PPV_ARGS(frame.allocator.Out())))) {
-                return Fail("CreateCommandAllocator failed");
-            }
+        auto reservedAllocators = allocators_.TryReserve(MaxCommandAllocators);
+        if (!reservedAllocators) {
+            return reservedAllocators;
+        }
+        auto firstAllocator = AddCommandAllocator();
+        if (!firstAllocator) {
+            return Result<void>::Failure(firstAllocator.Error());
         }
         if (FAILED(device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
                                                    IID_PPV_ARGS(uploadAllocator_.Out()))) ||
             FAILED(device_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                              frames_[0].allocator.Get(), nullptr,
+                                              allocators_[0].allocator.Get(), nullptr,
                                               IID_PPV_ARGS(list_.Out()))) ||
             FAILED(device_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
                                               uploadAllocator_.Get(), nullptr,
@@ -415,8 +459,15 @@ public:
             return Fail("CreateFence failed");
         }
         fenceEvent_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-        if (fenceEvent_ == nullptr) {
+        watcherEvent_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (fenceEvent_ == nullptr || watcherEvent_ == nullptr) {
             return Fail("CreateEvent failed");
+        }
+        fenceSource_.fence = fence_.Get();
+        fenceSource_.event = watcherEvent_;
+        auto watching = timeline_.StartWatcher(fenceSource_, "D3D12Fence");
+        if (!watching) {
+            return Fail("fence watcher thread creation failed");
         }
 
         auto rtvs =
@@ -452,6 +503,7 @@ public:
         DeviceInfo info;
         info.backend = Backend::D3D12;
         info.adapterName = adapterName_.View();
+        info.deviceEpoch = timeline_.DeviceEpoch();
         info.validationEnabled = validation_;
         info.software = software_;
         return info;
@@ -769,6 +821,9 @@ public:
         if (recording_) {
             return Result<CommandContext*>::Failure(ErrorCode::Busy);
         }
+        if (timeline_.IsLost()) {
+            return Result<CommandContext*>::Failure(ErrorCode::Destroyed);
+        }
         if (record->broken) {
             return FailWith<CommandContext*>("swap chain has no buffers after a failed resize");
         }
@@ -795,6 +850,9 @@ public:
         if (recording_) {
             return Result<CommandContext*>::Failure(ErrorCode::Busy);
         }
+        if (timeline_.IsLost()) {
+            return Result<CommandContext*>::Failure(ErrorCode::Destroyed);
+        }
 
         auto begun = BeginRecording();
         if (!begun) {
@@ -807,9 +865,9 @@ public:
         return Result<CommandContext*>::Success(this);
     }
 
-    Result<void> EndFrame() noexcept override {
+    Result<GpuFencePoint> EndFrame() noexcept override {
         if (!recording_) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<GpuFencePoint>::Failure(ErrorCode::InvalidArgument);
         }
 
         const D3D12_RESOURCE_BARRIER back =
@@ -817,7 +875,10 @@ public:
         list_->ResourceBarrier(1, &back);
         recording_ = false;
         if (FAILED(list_->Close())) {
-            return Fail("command list close failed");
+            // 아무것도 제출하지 않았다. 이 기록만 참조하던 자원은 지금까지의 제출 뒤에 놓아도 된다.
+            allocators_[recordingAllocator_].fenceValue = fenceValue_;
+            AssignPendingRetires(fenceValue_);
+            return FailWith<GpuFencePoint>("command list close failed");
         }
         ID3D12CommandList* lists[] = {list_.Get()};
         queue_->ExecuteCommandLists(1, lists);
@@ -828,6 +889,7 @@ public:
             if (record != nullptr) {
                 const HRESULT presented = record->swapChain->Present(record->vsync ? 1 : 0, 0);
                 if (FAILED(presented)) {
+                    DetectLost(presented);
                     outcome = Fail(presented == DXGI_ERROR_DEVICE_REMOVED
                                        ? "Present failed: device removed"
                                        : "Present failed");
@@ -835,19 +897,24 @@ public:
             }
         }
 
-        const uint64 value = ++fenceValue_;
-        if (FAILED(queue_->Signal(fence_.Get(), value))) {
-            // 장치 제거 등으로 완료를 알 수 없다. 이 프레임이 쓴 자원은 소멸 때까지 놓지 않는다.
+        auto signaled = SignalQueue();
+        if (!signaled) {
+            // 장치 제거 등으로 완료를 알 수 없다. 이 프레임이 쓴 자원·기록 저장소는 소멸 때까지
+            // 놓지 않는다.
+            allocators_[recordingAllocator_].fenceValue = RetainUntilDestructionFence;
             AssignPendingRetires(RetainUntilDestructionFence);
             DrainValidationMessages();
-            return Fail("queue signal failed");
+            return Result<GpuFencePoint>::Failure(signaled.Error());
         }
-        frames_[frameSlot_].fenceValue = value;
-        frameSlot_ = (frameSlot_ + 1) % FrameCount;
+        const uint64 value = signaled.Value();
+        allocators_[recordingAllocator_].fenceValue = value;
         AssignPendingRetires(value);
         ProcessRetired();
         DrainValidationMessages();
-        return outcome;
+        if (!outcome) {
+            return Result<GpuFencePoint>::Failure(outcome.Error());
+        }
+        return Result<GpuFencePoint>::Success(timeline_.Point(value));
     }
 
     Result<void> ReadPixels(TextureHandle handle, Span<uint8> out) noexcept override {
@@ -918,38 +985,38 @@ public:
         return Result<void>::Success();
     }
 
-    void Destroy(BufferHandle handle) noexcept override {
+    void Retire(BufferHandle handle) noexcept override {
         BufferRecord* record = buffers_.Find(handle.slot);
         if (record == nullptr) {
             return;
         }
-        Retire(Move(record->resource), -1, -1);
+        Defer(Move(record->resource), -1, -1);
         auto removed = buffers_.TryRemove(handle.slot);
         (void)removed;
     }
 
-    void Destroy(TextureHandle handle) noexcept override {
+    void Retire(TextureHandle handle) noexcept override {
         TextureRecord* record = textures_.Find(handle.slot);
         if (record == nullptr || handle == white_) {
             return;
         }
-        Retire(Move(record->resource), record->srv,
-               record->renderTarget ? static_cast<int64>(record->rtv) : int64{-1});
+        Defer(Move(record->resource), record->srv,
+              record->renderTarget ? static_cast<int64>(record->rtv) : int64{-1});
         auto removed = textures_.TryRemove(handle.slot);
         (void)removed;
     }
 
-    void Destroy(PipelineHandle handle) noexcept override {
+    void Retire(PipelineHandle handle) noexcept override {
         PipelineRecord* record = pipelines_.Find(handle.slot);
         if (record == nullptr) {
             return;
         }
-        Retire(Move(record->state), -1, -1);
+        Defer(Move(record->state), -1, -1);
         auto removed = pipelines_.TryRemove(handle.slot);
         (void)removed;
     }
 
-    void Destroy(SwapChainHandle handle) noexcept override {
+    void Retire(SwapChainHandle handle) noexcept override {
         SwapChainRecord* record = swapChains_.Find(handle.slot);
         if (record == nullptr) {
             return;
@@ -958,25 +1025,57 @@ public:
         // 그리고 있어도 retire 항목이 참조를 쥐므로 EndFrame의 barrier까지 유효하다(present는
         // 생략된다).
         for (uint32 index = 0; index < SwapChainBufferCount; ++index) {
-            Retire(Move(record->buffers[index]), -1, record->rtv[index]);
+            Defer(Move(record->buffers[index]), -1, record->rtv[index]);
         }
-        Retire(Move(record->swapChain), -1, -1);
+        Defer(Move(record->swapChain), -1, -1);
         auto removed = swapChains_.TryRemove(handle.slot);
         (void)removed;
     }
 
+    void ReclaimCompleted() noexcept override {
+        ProcessRetired();
+    }
+
     Result<void> WaitIdle() noexcept override {
-        const uint64 value = ++fenceValue_;
-        if (FAILED(queue_->Signal(fence_.Get(), value))) {
-            return Fail("queue signal failed");
+        auto signaled = SignalQueue();
+        if (!signaled) {
+            // 장치가 제거되었으면 fence 완료 값이 최대라 회수 대기 항목을 모두 놓을 수 있다.
+            ProcessRetired();
+            return Result<void>::Failure(signaled.Error());
         }
-        auto waited = WaitFence(value);
+        auto waited = WaitFenceOwner(signaled.Value());
+        // 기록 중인 프레임의 보류 항목은 아직 제출되지 않았으므로 남긴다.
+        ProcessRetired();
         if (!waited) {
             return waited;
         }
-        // 기록 중인 프레임의 보류 항목은 아직 제출되지 않았으므로 남긴다.
-        ProcessRetired();
         return Result<void>::Success();
+    }
+
+    GpuFencePoint LastSubmittedFence() const noexcept override {
+        return timeline_.LastSubmitted();
+    }
+
+    Result<bool> IsFenceComplete(GpuFencePoint point) const noexcept override {
+        return timeline_.IsComplete(point);
+    }
+
+    Result<platform::WaitResult> WaitFence(GpuFencePoint point,
+                                           uint32 timeoutMs) noexcept override {
+        return timeline_.Wait(point, timeoutMs);
+    }
+
+    Result<void> NotifyFence(GpuFencePoint point, FenceCallback callback,
+                             void* context) noexcept override {
+        return timeline_.Notify(point, callback, context);
+    }
+
+    bool IsLost() const noexcept override {
+        return timeline_.IsLost();
+    }
+
+    usize PendingRetireCount() const noexcept override {
+        return retired_.Size();
     }
 
     StringView LastError() const noexcept override {
@@ -993,7 +1092,8 @@ public:
     }
 
 private:
-    struct Frame {
+    // 기록 저장소 하나와 그것으로 마지막에 제출한 fence 값이다(0이면 쓴 적 없음).
+    struct AllocatorRecord {
         ComRef<ID3D12CommandAllocator> allocator;
         uint64 fenceValue = 0;
     };
@@ -1016,10 +1116,86 @@ private:
         uint32 slot = 0;
     };
 
+    // 진단 문자열을 남기고 실패를 돌려준다. 장치가 손실되었으면 Destroyed다.
     Result<void> Fail(const char* message) noexcept {
         auto assigned = lastError_.TryAssign(StringView(message, platform::CStringLength(message)));
         (void)assigned;
-        return Result<void>::Failure(ErrorCode::DependencyFailed);
+        return Result<void>::Failure(timeline_.IsLost() ? ErrorCode::Destroyed
+                                                        : ErrorCode::DependencyFailed);
+    }
+
+    // API 실패가 장치 제거 때문이면 손실을 게시한다(기다리는 쪽을 Destroyed로 깨운다).
+    void DetectLost(HRESULT failure) noexcept {
+        if (failure == DXGI_ERROR_DEVICE_REMOVED || failure == DXGI_ERROR_DEVICE_RESET ||
+            device_->GetDeviceRemovedReason() != S_OK) {
+            timeline_.MarkLost();
+        }
+    }
+
+    // graphics queue에 다음 fence 값을 신호하고 타임라인에 알린다. 실패하면 값을 쓰지 않는다.
+    Result<uint64> SignalQueue() noexcept {
+        if (timeline_.IsLost()) {
+            return Result<uint64>::Failure(ErrorCode::Destroyed);
+        }
+        const uint64 value = fenceValue_ + 1;
+        const HRESULT signaled = queue_->Signal(fence_.Get(), value);
+        if (FAILED(signaled)) {
+            DetectLost(signaled);
+            return FailWith<uint64>("queue signal failed");
+        }
+        fenceValue_ = value;
+        timeline_.Submitted(value, nullptr);
+        return Result<uint64>::Success(value);
+    }
+
+    // 소유 스레드가 직접 본 완료 값을 타임라인에 게시한다(관찰 스레드보다 먼저 알 수 있다).
+    void PublishObserved() noexcept {
+        const uint64 completed = fence_->GetCompletedValue();
+        if (completed == D3D12FenceSource::RemovedFenceValue) {
+            timeline_.MarkLost();
+            return;
+        }
+        timeline_.Publish(completed);
+    }
+
+    Result<uint32> AddCommandAllocator() noexcept {
+        AllocatorRecord record;
+        if (FAILED(device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
+                                                   IID_PPV_ARGS(record.allocator.Out())))) {
+            return FailWith<uint32>("CreateCommandAllocator failed");
+        }
+        auto pushed = allocators_.TryPushBack(Move(record));
+        if (!pushed) {
+            return Result<uint32>::Failure(pushed.Error());
+        }
+        return Result<uint32>::Success(static_cast<uint32>(allocators_.Size() - 1));
+    }
+
+    // GPU가 다 쓴 기록 저장소를 고른다. 없으면 상한까지 새로 만들고, 상한이면 가장 오래된 제출을
+    // 기다린다(프레임 slot이 앞서 기다리므로 보통은 기다리지 않는다).
+    Result<uint32> PickCommandAllocator() noexcept {
+        const uint64 completed = fence_->GetCompletedValue();
+        if (completed == D3D12FenceSource::RemovedFenceValue) {
+            timeline_.MarkLost();
+            return Result<uint32>::Failure(ErrorCode::Destroyed);
+        }
+        uint32 oldest = 0;
+        for (uint32 index = 0; index < allocators_.Size(); ++index) {
+            if (allocators_[index].fenceValue <= completed) {
+                return Result<uint32>::Success(index);
+            }
+            if (allocators_[index].fenceValue < allocators_[oldest].fenceValue) {
+                oldest = index;
+            }
+        }
+        if (allocators_.Size() < MaxCommandAllocators) {
+            return AddCommandAllocator();
+        }
+        auto waited = WaitFenceOwner(allocators_[oldest].fenceValue);
+        if (!waited) {
+            return Result<uint32>::Failure(waited.Error());
+        }
+        return Result<uint32>::Success(oldest);
     }
 
     template <class T>
@@ -1163,28 +1339,33 @@ private:
         return Result<void>::Success();
     }
 
-    Result<void> WaitFence(uint64 value) noexcept {
-        if (fence_->GetCompletedValue() >= value) {
-            return Result<void>::Success();
+    // 소유 스레드가 value 완료를 직접 기다린다(업로드·readback·WaitIdle·저장소 재사용).
+    Result<void> WaitFenceOwner(uint64 value) noexcept {
+        if (fence_->GetCompletedValue() < value) {
+            if (FAILED(fence_->SetEventOnCompletion(value, fenceEvent_))) {
+                return Fail("fence wait setup failed");
+            }
+            WaitForSingleObject(fenceEvent_, INFINITE);
         }
-        if (FAILED(fence_->SetEventOnCompletion(value, fenceEvent_))) {
-            return Fail("fence wait setup failed");
+        PublishObserved();
+        if (timeline_.IsLost()) {
+            return Result<void>::Failure(ErrorCode::Destroyed);
         }
-        WaitForSingleObject(fenceEvent_, INFINITE);
         return Result<void>::Success();
     }
 
     Result<void> BeginRecording() noexcept {
-        Frame& frame = frames_[frameSlot_];
-        // 이 slot의 이전 제출이 끝나야 allocator를 다시 쓸 수 있다.
-        auto waited = WaitFence(frame.fenceValue);
-        if (!waited) {
-            return waited;
+        // 이전 제출이 끝난 저장소만 다시 쓸 수 있다.
+        auto picked = PickCommandAllocator();
+        if (!picked) {
+            return Result<void>::Failure(picked.Error());
         }
-        if (FAILED(frame.allocator->Reset()) ||
-            FAILED(list_->Reset(frame.allocator.Get(), nullptr))) {
+        AllocatorRecord& record = allocators_[picked.Value()];
+        if (FAILED(record.allocator->Reset()) ||
+            FAILED(list_->Reset(record.allocator.Get(), nullptr))) {
             return Fail("command list reset failed");
         }
+        recordingAllocator_ = picked.Value();
         recording_ = true;
         pipelineBound_ = false;
         bufferBound_ = false;
@@ -1234,11 +1415,11 @@ private:
         }
         ID3D12CommandList* lists[] = {uploadList_.Get()};
         queue_->ExecuteCommandLists(1, lists);
-        const uint64 value = ++fenceValue_;
-        if (FAILED(queue_->Signal(fence_.Get(), value))) {
-            return Fail("queue signal failed");
+        auto signaled = SignalQueue();
+        if (!signaled) {
+            return Result<void>::Failure(signaled.Error());
         }
-        return WaitFence(value);
+        return WaitFenceOwner(signaled.Value());
     }
 
     Result<void> UploadTexture(TextureRecord& record, Span<const uint8> pixels) noexcept {
@@ -1394,7 +1575,7 @@ private:
 
     // 모든 D3D 인터페이스는 IUnknown을 단일 상속하므로 포인터 변환이 안전하다.
     template <class T>
-    void Retire(ComRef<T>&& object, int64 srv, int64 rtv) noexcept {
+    void Defer(ComRef<T>&& object, int64 srv, int64 rtv) noexcept {
         ComRef<IUnknown> unknown;
         unknown.Attach(object.Detach());
         RetireObject(Move(unknown), srv, rtv);
@@ -1529,8 +1710,11 @@ private:
     ComRef<ID3D12RootSignature> rootSignature_;
     ComRef<ID3D12Fence> fence_;
     HANDLE fenceEvent_ = nullptr;
-    Frame frames_[FrameCount];
-    uint32 frameSlot_ = 0;
+    // fence 관찰 스레드 전용 이벤트다(소유 스레드의 fenceEvent_와 나눈다).
+    HANDLE watcherEvent_ = nullptr;
+    Array<AllocatorRecord> allocators_;
+    uint32 recordingAllocator_ = 0;
+    // 마지막으로 신호한 graphics queue fence 값이다.
     uint64 fenceValue_ = 0;
     Target target_;
     SwapChainHandle presentTarget_;
@@ -1544,6 +1728,8 @@ private:
     // 검증 메시지는 읽을 때마다 비우고 여기에 누적한다(저장 한도로 오래된 오류가 밀려나지 않게).
     mutable uint64 validationErrors_ = 0;
     mutable Array<uint8> messageScratch_;
+    D3D12FenceSource fenceSource_;
+    FenceTimeline timeline_;
     bool recording_ = false;
     bool pipelineBound_ = false;
     bool bufferBound_ = false;

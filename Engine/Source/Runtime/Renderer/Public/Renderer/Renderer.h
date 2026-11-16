@@ -49,7 +49,7 @@ struct RenderStats {
 //   auto frame = device.BeginFrame(swapChain, view.clear);
 //   if (frame) {
 //       renderer.Draw(*frame.Value(), view, items);
-//       auto presented = device.EndFrame();
+//       auto submitted = device.EndFrame();      // GpuFencePoint
 //   }
 //   renderer.Shutdown();                     // 장치보다 먼저
 //

@@ -170,10 +170,54 @@ struct ClearColor {
     float a = 1.0f;
 };
 
+// 제출 queue 종류다(계획 11.2절 QueueId). 1차 범위는 graphics queue 하나다(RenderBase 1절 렌더
+// 그래프 결정). compute·copy queue는 그 단계에서 더한다.
+enum class QueueKind : uint8 {
+    Graphics
+};
+
+// GPU 제출 하나의 완료 지점이다(계획 11.2절 GpuFencePoint). 장치 incarnation(deviceEpoch)·queue·
+// fence 값의 튜플이며, 같은 epoch·queue 안에서 value가 클수록 나중 제출이다. 뒤 제출의 완료는 앞
+// 제출의 완료를 뜻한다.
+//
+// - deviceEpoch는 장치를 만들 때마다 프로세스 안에서 새로 받는 번호다(NewDeviceEpoch). 장치 손실 뒤
+//   새로 만든 장치는 다른 epoch이므로 구 장치의 지점을 새 장치에 물으면 WrongContext다.
+// - value 0(IsNull)은 "제출 없음"이며 늘 끝난 것으로 본다.
+//
+// 사용 예:
+//   auto submitted = device.EndFrame();
+//   if (submitted) {
+//       slot.completion = submitted.Value();
+//   }
+//   ...
+//   auto waited = device.WaitFence(slot.completion);   // 다른 스레드에서도 된다
+struct GpuFencePoint {
+    uint64 deviceEpoch = 0;
+    QueueKind queue = QueueKind::Graphics;
+    uint64 value = 0;
+
+    bool IsNull() const noexcept {
+        return value == 0;
+    }
+
+    bool operator==(const GpuFencePoint&) const noexcept = default;
+};
+
+// fence 완료 통지 함수다(Device::NotifyFence). result는 완료면 None, 장치 손실이면 Destroyed, 완료
+// 전에 장치가 닫히면 ShuttingDown이다. 장치의 관찰 스레드나 NotifyFence를 부른 스레드에서 불리므로
+// 짧게 끝내고 장치 API(스레드 안전 fence API 제외)를 부르지 않는다.
+using FenceCallback = void (*)(ErrorCode result, void* context) noexcept;
+
+// 새 장치 incarnation 번호다(1부터, 프로세스 안에서 다시 쓰지 않는다). backend가 장치를 만들 때
+// 부른다. 어느 스레드에서나 부를 수 있다.
+uint64 NewDeviceEpoch() noexcept;
+
 // 장치 정보다. 문자열은 장치가 소유하며 장치 수명 동안 유효하다.
 struct DeviceInfo {
     Backend backend = Backend::D3D12;
     StringView adapterName;
+    // 이 장치의 incarnation 번호다(GpuFencePoint::deviceEpoch).
+    uint64 deviceEpoch = 0;
     bool validationEnabled = false;
     bool software = false;
 };

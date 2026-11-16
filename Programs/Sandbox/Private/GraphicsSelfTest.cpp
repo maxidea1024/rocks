@@ -2,6 +2,7 @@
 
 #include <Core/Containers/Array.h>
 #include <D3D12Graphics/D3D12Device.h>
+#include <Graphics/GpuFenceEvent.h>
 #include <OpenGLGraphics/OpenGLDevice.h>
 #include <PlatformWindow/Window.h>
 #include <Renderer/Renderer.h>
@@ -125,12 +126,134 @@ void RunSwapChainChecks(const char* name, graphics::Device& device, render::Rend
     bool destroyed = frame.IsOk();
     if (frame) {
         renderer.Draw(*frame.Value(), view, Span<const render::RenderItem>(&item, 1));
-        device.Destroy(swapChain.Value());
+        device.Retire(swapChain.Value());
         destroyed = device.EndFrame().IsOk();
     }
     Check(destroyed && device.WaitIdle().IsOk(), name, "swap chain destroyed while recording");
     Check(device.BeginFrame(swapChain.Value(), view.clear).Error() == ErrorCode::StaleHandle, name,
           "destroyed swap chain handle is stale");
+}
+
+// 다른 스레드에서 fence 완료를 기다린 결과다.
+struct FenceWaiter {
+    graphics::Device* device = nullptr;
+    graphics::GpuFencePoint point;
+    bool signaled = false;
+};
+
+// fence 통지를 받은 결과다.
+struct FenceNotified {
+    platform::ManualResetEvent done;
+    ErrorCode result = ErrorCode::Cancelled;
+};
+
+// GX7 제출·완료·회수(RenderBase 4.4절): EndFrame 완료 지점, 다른 스레드의 대기, 완료 통지, Core
+// 작업 이벤트 연결, 다른 장치 지점 거부, fence 뒤 회수(OpenGL 포함 즉시 삭제 없음)를 확인한다.
+void RunFenceChecks(const char* name, graphics::Device& device, render::Renderer& renderer,
+                    graphics::TextureHandle target, Allocator& allocator) noexcept {
+    render::RenderView view;
+    view.viewProjection = FillScreen();
+    render::RenderItem item;
+    item.mesh = render::MeshKind::Triangle;
+    auto frame = device.BeginOffscreen(target, view.clear);
+    Check(frame.IsOk(), name, "fence frame begins");
+    if (!frame) {
+        return;
+    }
+    renderer.Draw(*frame.Value(), view, Span<const render::RenderItem>(&item, 1));
+    auto submitted = device.EndFrame();
+    Check(submitted.IsOk() && !submitted.Value().IsNull() &&
+              submitted.Value().deviceEpoch == device.Info().deviceEpoch &&
+              device.LastSubmittedFence() == submitted.Value(),
+          name, "EndFrame returns this device's fence point");
+    if (!submitted) {
+        return;
+    }
+    const graphics::GpuFencePoint point = submitted.Value();
+
+    FenceWaiter waiter;
+    waiter.device = &device;
+    waiter.point = point;
+    platform::Thread thread;
+    const bool started = thread.Start(
+                             [](void* raw) noexcept {
+                                 auto* state = static_cast<FenceWaiter*>(raw);
+                                 auto waited = state->device->WaitFence(state->point);
+                                 state->signaled =
+                                     waited && waited.Value() == platform::WaitResult::Signaled;
+                             },
+                             &waiter) == platform::ThreadStatus::Success;
+    Check(started && thread.Join() == platform::ThreadStatus::Success && waiter.signaled, name,
+          "fence wait from another thread is signaled");
+    auto complete = device.IsFenceComplete(point);
+    Check(complete && complete.Value(), name, "waited fence is complete");
+
+    FenceNotified notified;
+    auto registered = device.NotifyFence(
+        point,
+        [](ErrorCode result, void* context) noexcept {
+            auto* state = static_cast<FenceNotified*>(context);
+            state->result = result;
+            state->done.Signal();
+        },
+        &notified);
+    Check(registered.IsOk() && notified.done.Wait() == platform::WaitResult::Signaled &&
+              notified.result == ErrorCode::None,
+          name, "fence notification reports completion");
+
+    // 이 장치가 신호하지 않은 지점은 거부한다.
+    graphics::GpuFencePoint foreign = point;
+    foreign.deviceEpoch += 1000;
+    graphics::GpuFencePoint future = point;
+    future.value += 1000;
+    Check(device.IsFenceComplete(foreign).Error() == ErrorCode::WrongContext &&
+              device.IsFenceComplete(future).Error() == ErrorCode::InvalidArgument,
+          name, "foreign and unsubmitted fence points are rejected");
+
+    // fence 완료를 작업 이벤트로 잇는다: 다음 제출이 끝나면 그 뒤 작업이 실행된다.
+    WorkerScheduler scheduler(allocator);
+    bool ran = false;
+    bool eventOk = scheduler.Start().IsOk();
+    if (eventOk) {
+        auto again = device.BeginOffscreen(target, view.clear);
+        auto nextPoint =
+            again ? device.EndFrame() : Result<graphics::GpuFencePoint>::Failure(again.Error());
+        auto event = scheduler.TryCreateEvent();
+        auto body = Function<void(WorkerTaskContext&)>::TryCreate(
+            allocator, [&ran](WorkerTaskContext&) noexcept { ran = true; });
+        eventOk = nextPoint.IsOk() && event.IsOk() && body.IsOk();
+        if (eventOk) {
+            auto after = Span<const WorkerTaskHandle>(&event.Value().Handle(), 1);
+            auto task = scheduler.Submit(Move(body.Value()), after);
+            eventOk = task.IsOk() && graphics::TrySubmitFenceEvent(device, nextPoint.Value(),
+                                                                   Move(event.Value()), allocator)
+                                         .IsOk();
+            if (eventOk) {
+                auto waited = task.Value().Wait();
+                auto status = task.Value().Status();
+                eventOk = waited && status && status.Value().state == WorkerTaskState::Succeeded;
+            }
+        }
+        eventOk = scheduler.Shutdown().IsOk() && eventOk;
+    }
+    Check(eventOk && ran, name, "fence completion triggers a worker task event");
+
+    // fence 뒤 회수: Retire는 즉시 지우지 않고 회수 대기에 두며, 끝난 fence 뒤 ReclaimCompleted가
+    // 지운다.
+    Check(device.WaitIdle().IsOk() && device.PendingRetireCount() == 0, name,
+          "nothing is pending after WaitIdle");
+    const uint8 bytes[12] = {};
+    graphics::BufferDesc bufferDesc;
+    bufferDesc.size = sizeof(bytes);
+    auto doomed = device.CreateBuffer(bufferDesc, Span<const uint8>(bytes, sizeof(bytes)));
+    Check(doomed.IsOk(), name, "retire probe buffer");
+    if (doomed) {
+        device.Retire(doomed.Value());
+        const usize pending = device.PendingRetireCount();
+        device.ReclaimCompleted();
+        Check(pending == 1 && device.PendingRetireCount() == 0, name,
+              "retired buffer waits for its fence then is reclaimed");
+    }
 }
 
 // 한 backend에서 삼각형·사각형을 그려 픽셀을 검사한다.
@@ -215,7 +338,7 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
               "sampled render target keeps bottom-left blue");
     }
     if (copyTarget) {
-        device.Destroy(copyTarget.Value());
+        device.Retire(copyTarget.Value());
     }
 
     // 기록 중 파괴한 텍스처는 그 프레임이 끝날 때까지 살아 있어야 한다. 파괴 뒤 업로드(별도
@@ -235,11 +358,11 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
         item.texture = doomed.Value();
         auto frame = device.BeginOffscreen(target.Value(), view.clear);
         if (!frame) {
-            device.Destroy(doomed.Value());
+            device.Retire(doomed.Value());
             return false;
         }
         renderer.Draw(*frame.Value(), view, Span<const render::RenderItem>(&item, 1));
-        device.Destroy(doomed.Value());
+        device.Retire(doomed.Value());
         bool ok = true;
         if (waitIdle) {
             ok = device.WaitIdle().IsOk();
@@ -251,7 +374,7 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
              device.ReadPixels(target.Value(), pixels.View()).IsOk() &&
              Dominant(At(pixels, 32, 32), 0);
         if (replacement) {
-            device.Destroy(replacement.Value());
+            device.Retire(replacement.Value());
         }
         return ok;
     };
@@ -267,7 +390,7 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
         Array<uint8> pixels(result.triangle.GetAllocator());
         const bool ok = probe.IsOk() && draw(render::MeshKind::Quad, probe.Value(), pixels);
         if (probe) {
-            device.Destroy(probe.Value());
+            device.Retire(probe.Value());
         }
         if (ok) {
             out = At(pixels, x, y);
@@ -333,7 +456,7 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
                         pixels.TryResize(static_cast<usize>(Size) * Size * 4).IsOk() &&
                         device.ReadPixels(target.Value(), pixels.View()).IsOk();
             }
-            device.Destroy(mipped.Value());
+            device.Retire(mipped.Value());
         }
         Check(mipped.IsOk() && drawn && Dominant(At(pixels, 31, 31), 2), name,
               "minified texture samples the matching mip level");
@@ -358,6 +481,7 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
         Check(white.r > 200 && white.g > 200 && white.b > 200, name,
               "quad bottom-right samples white");
     }
+    RunFenceChecks(name, device, renderer, target.Value(), result.triangle.GetAllocator());
     RunSwapChainChecks(name, device, renderer, result.triangle.GetAllocator());
     Check(device.IgnoredDraws() == 0, name, "no ignored draws");
     Check(device.ValidationErrorCount() == 0, name, "no validation errors");
@@ -382,8 +506,8 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
               "validation layer error is counted (intentional RTV format mismatch)");
     }
 
-    device.Destroy(texture.Value());
-    device.Destroy(target.Value());
+    device.Retire(texture.Value());
+    device.Retire(target.Value());
     renderer.Shutdown();
     auto idle = device.WaitIdle();
     Check(idle.IsOk(), name, "wait idle");

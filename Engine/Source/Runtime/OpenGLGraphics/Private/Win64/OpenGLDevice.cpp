@@ -1,5 +1,6 @@
 #include <Core/Containers/Array.h>
 #include <Core/Text/String.h>
+#include <Graphics/FenceTimeline.h>
 #include <OpenGLGraphics/OpenGLDevice.h>
 
 #include <Windows.h>
@@ -15,6 +16,8 @@ namespace {
 using GLchar = char;
 using GLsizeiptr = signed long long;
 using GLintptr = signed long long;
+using GLuint64 = unsigned long long;
+using GLsync = struct __GLsync*;
 using GLDEBUGPROC = void(APIENTRY*)(GLenum source, GLenum type, GLuint id, GLenum severity,
                                     GLsizei length, const GLchar* message, const void* user);
 
@@ -40,6 +43,10 @@ constexpr GLenum GL_MAJOR_VERSION_VALUE = 0x821B;
 constexpr GLenum GL_MINOR_VERSION_VALUE = 0x821C;
 constexpr GLenum GL_NUM_EXTENSIONS_VALUE = 0x821D;
 constexpr GLenum GL_MIRRORED_REPEAT_VALUE = 0x8370;
+constexpr GLenum GL_SYNC_GPU_COMMANDS_COMPLETE_VALUE = 0x9117;
+constexpr GLenum GL_ALREADY_SIGNALED_VALUE = 0x911A;
+constexpr GLenum GL_TIMEOUT_EXPIRED_VALUE = 0x911B;
+constexpr GLenum GL_CONDITION_SATISFIED_VALUE = 0x911C;
 constexpr GLenum GL_CLAMP_TO_BORDER_VALUE = 0x812D;
 // GL 4.6 core·ARB_texture_filter_anisotropic·EXT_texture_filter_anisotropic 공통 값이다.
 constexpr GLenum GL_TEXTURE_MAX_ANISOTROPY_VALUE = 0x84FE;
@@ -139,6 +146,9 @@ struct GlFunctions {
     void(APIENTRY* BlendFuncSeparate)(GLenum, GLenum, GLenum, GLenum) = nullptr;
     void(APIENTRY* ClipControl)(GLenum, GLenum) = nullptr;
     void(APIENTRY* DebugMessageCallback)(GLDEBUGPROC, const void*) = nullptr;
+    GLsync(APIENTRY* FenceSync)(GLenum, GLbitfield) = nullptr;
+    GLenum(APIENTRY* ClientWaitSync)(GLsync, GLbitfield, GLuint64) = nullptr;
+    void(APIENTRY* DeleteSync)(GLsync) = nullptr;
 };
 
 // wglGetProcAddress는 실패를 nullptr뿐 아니라 1·2·3·-1로도 알린다.
@@ -193,7 +203,9 @@ bool LoadFunctions(GlFunctions& gl) noexcept {
            Bind(gl.BindFramebuffer, "glBindFramebuffer") &&
            Bind(gl.BlendFuncSeparate, "glBlendFuncSeparate") &&
            Bind(gl.ClipControl, "glClipControl") &&
-           Bind(gl.DebugMessageCallback, "glDebugMessageCallback");
+           Bind(gl.DebugMessageCallback, "glDebugMessageCallback") &&
+           Bind(gl.FenceSync, "glFenceSync") && Bind(gl.ClientWaitSync, "glClientWaitSync") &&
+           Bind(gl.DeleteSync, "glDeleteSync");
 }
 
 GLint ComponentCount(VertexFormat format) noexcept {
@@ -294,16 +306,109 @@ struct SwapChainRecord {
     int appliedInterval = -1;
 };
 
+// fence 완료 뒤에 지울 GL 객체다(장치 계약의 "OpenGL도 fence 뒤 회수").
+enum class RetiredKind : uint8 {
+    Buffer,
+    Texture,
+    Pipeline,
+    SwapChain
+};
+
+struct RetiredObject {
+    RetiredKind kind = RetiredKind::Buffer;
+    // Buffer: 버퍼, Texture: 텍스처·framebuffer, Pipeline: program·정점 배열.
+    GLuint first = 0;
+    GLuint second = 0;
+    // SwapChain: 창과 DC.
+    HWND window = nullptr;
+    HDC dc = nullptr;
+    uint64 fenceValue = 0;
+    // 기록 중인(아직 제출하지 않은) 프레임이 쓸 수 있다. EndFrame이 그 프레임의 fence 값을 정한다.
+    bool pending = false;
+};
+
+// 관찰 스레드가 공유 context로 fence sync를 기다린다. sync 객체는 공유 그룹 전체에서 보이고 소유
+// 스레드가 glFenceSync 뒤 glFlush하므로 다른 context에서 기다려도 끝난다.
+class OpenGLFenceSource final : public FenceWaitSource {
+public:
+    void OnWatcherStart() noexcept override {
+        current = wglMakeCurrent(dc, context) != FALSE;
+    }
+
+    void OnWatcherStop() noexcept override {
+        if (current) {
+            wglMakeCurrent(nullptr, nullptr);
+            current = false;
+        }
+    }
+
+    bool WaitSubmission(uint64 value, void* token) noexcept override {
+        (void)value;
+        // sync를 만들지 못한 제출은 소유 스레드가 glFinish로 끝냈다.
+        if (token == nullptr) {
+            return true;
+        }
+        if (!current) {
+            return false;
+        }
+        for (;;) {
+            const GLenum waited =
+                clientWaitSync(static_cast<GLsync>(token), 0, WaitSliceNanoseconds);
+            if (waited == GL_ALREADY_SIGNALED_VALUE || waited == GL_CONDITION_SATISFIED_VALUE) {
+                return true;
+            }
+            if (waited != GL_TIMEOUT_EXPIRED_VALUE) {
+                return false;
+            }
+        }
+    }
+
+    void ReleaseToken(void* token) noexcept override {
+        if (token != nullptr) {
+            deleteSync(static_cast<GLsync>(token));
+        }
+    }
+
+    // glClientWaitSync 한 번의 최대 대기다. 끝나지 않았으면 다시 기다린다(완료 판정에 시간을 쓰지
+    // 않는다).
+    static constexpr GLuint64 WaitSliceNanoseconds = 1000000000ull;
+
+    HDC dc = nullptr;
+    HGLRC context = nullptr;
+    GLenum(APIENTRY* clientWaitSync)(GLsync, GLbitfield, GLuint64) = nullptr;
+    void(APIENTRY* deleteSync)(GLsync) = nullptr;
+    bool current = false;
+};
+
 class OpenGLDevice final : public Device, private CommandContext {
 public:
     explicit OpenGLDevice(Allocator& allocator) noexcept
         : adapterName_(allocator), lastError_(allocator), buffers_(allocator), textures_(allocator),
-          pipelines_(allocator), swapChains_(allocator) {
+          pipelines_(allocator), swapChains_(allocator), retired_(allocator),
+          timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics) {
     }
 
     ~OpenGLDevice() override {
-        if (context_ != nullptr && MakeCurrent(deviceDc_)) {
+        const bool current = context_ != nullptr && MakeCurrent(deviceDc_);
+        if (current) {
             glFinish();
+            timeline_.Publish(fenceValue_);
+        }
+        // 모든 sync가 신호된 뒤(glFinish)이므로 관찰 스레드가 곧 빠져나온다.
+        timeline_.StopWatcher();
+        timeline_.Close();
+        if (watcherContext_ != nullptr) {
+            wglDeleteContext(watcherContext_);
+        }
+        if (watcherWindow_ != nullptr) {
+            ReleaseDC(watcherWindow_, watcherDc_);
+            DestroyWindow(watcherWindow_);
+        }
+        if (current) {
+            for (RetiredObject& entry : retired_) {
+                entry.pending = false;
+            }
+            DeleteRetired(NumericLimits<uint64>::Max());
             for (const BufferRecord& record : buffers_) {
                 gl_.DeleteBuffers(1, &record.buffer);
             }
@@ -323,6 +428,11 @@ public:
         }
         for (const SwapChainRecord& record : swapChains_) {
             ReleaseDC(record.window, record.dc);
+        }
+        for (const RetiredObject& entry : retired_) {
+            if (entry.kind == RetiredKind::SwapChain) {
+                ReleaseDC(entry.window, entry.dc);
+            }
         }
         if (deviceWindow_ != nullptr) {
             ReleaseDC(deviceWindow_, deviceDc_);
@@ -443,6 +553,28 @@ public:
             (void)assigned;
         }
 
+        // 3) fence 관찰 스레드용 공유 context를 숨김 창에 만든다(sync 객체를 공유한다).
+        watcherWindow_ = CreateHiddenWindow();
+        if (watcherWindow_ == nullptr) {
+            return Fail("OpenGL fence watcher window creation failed");
+        }
+        watcherDc_ = GetDC(watcherWindow_);
+        if (!SetPixelFormat(watcherDc_, pixelFormat_, &pixelDescriptor_)) {
+            return Fail("SetPixelFormat failed on the fence watcher window");
+        }
+        watcherContext_ = createContext(watcherDc_, context_, contextAttributes);
+        if (watcherContext_ == nullptr) {
+            return Fail("OpenGL shared context for the fence watcher failed");
+        }
+        fenceSource_.dc = watcherDc_;
+        fenceSource_.context = watcherContext_;
+        fenceSource_.clientWaitSync = gl_.ClientWaitSync;
+        fenceSource_.deleteSync = gl_.DeleteSync;
+        auto watching = timeline_.StartWatcher(fenceSource_, "OpenGLFence");
+        if (!watching) {
+            return Fail("fence watcher thread creation failed");
+        }
+
         if (desc.enableValidation) {
             glEnable(GL_DEBUG_OUTPUT_VALUE);
             glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS_VALUE);
@@ -472,6 +604,7 @@ public:
         DeviceInfo info;
         info.backend = Backend::OpenGL;
         info.adapterName = adapterName_.View();
+        info.deviceEpoch = timeline_.DeviceEpoch();
         info.validationEnabled = validation_;
         return info;
     }
@@ -682,6 +815,9 @@ public:
         if (recording_) {
             return Result<CommandContext*>::Failure(ErrorCode::Busy);
         }
+        if (timeline_.IsLost()) {
+            return Result<CommandContext*>::Failure(ErrorCode::Destroyed);
+        }
         if (!MakeCurrent(record->dc)) {
             return FailWith<CommandContext*>("wglMakeCurrent failed on the swap chain window");
         }
@@ -718,6 +854,9 @@ public:
         if (recording_) {
             return Result<CommandContext*>::Failure(ErrorCode::Busy);
         }
+        if (timeline_.IsLost()) {
+            return Result<CommandContext*>::Failure(ErrorCode::Destroyed);
+        }
         if (!MakeCurrentForResources()) {
             return FailWith<CommandContext*>("wglMakeCurrent failed");
         }
@@ -730,21 +869,28 @@ public:
         return Result<CommandContext*>::Success(this);
     }
 
-    Result<void> EndFrame() noexcept override {
+    Result<GpuFencePoint> EndFrame() noexcept override {
         if (!recording_) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<GpuFencePoint>::Failure(ErrorCode::InvalidArgument);
         }
         recording_ = false;
         gl_.BindVertexArray(0);
         gl_.UseProgram(0);
+        Result<void> outcome = Result<void>::Success();
         if (!presentTarget_.IsNull()) {
             const SwapChainRecord* record = swapChains_.Find(presentTarget_.slot);
             if (record != nullptr && !SwapBuffers(record->dc)) {
-                return Fail("SwapBuffers failed");
+                outcome = Fail("SwapBuffers failed");
             }
         }
         gl_.BindFramebuffer(GL_FRAMEBUFFER_VALUE, 0);
-        return Result<void>::Success();
+        const uint64 value = Submit();
+        AssignPendingRetires(value);
+        DeleteRetired(timeline_.Completed());
+        if (!outcome) {
+            return Result<GpuFencePoint>::Failure(outcome.Error());
+        }
+        return Result<GpuFencePoint>::Success(timeline_.Point(value));
     }
 
     Result<void> ReadPixels(TextureHandle handle, Span<uint8> out) noexcept override {
@@ -768,64 +914,108 @@ public:
         return Result<void>::Success();
     }
 
-    void Destroy(BufferHandle handle) noexcept override {
+    void Retire(BufferHandle handle) noexcept override {
         const BufferRecord* record = buffers_.Find(handle.slot);
         if (record == nullptr) {
             return;
         }
-        if (!MakeCurrentForResources()) {
-            return;
-        }
-        gl_.DeleteBuffers(1, &record->buffer);
+        RetiredObject entry;
+        entry.kind = RetiredKind::Buffer;
+        entry.first = record->buffer;
+        Defer(entry);
         auto removed = buffers_.TryRemove(handle.slot);
         (void)removed;
     }
 
-    void Destroy(TextureHandle handle) noexcept override {
+    void Retire(TextureHandle handle) noexcept override {
         const TextureRecord* record = textures_.Find(handle.slot);
         if (record == nullptr || handle == white_) {
             return;
         }
-        if (!MakeCurrentForResources()) {
-            return;
-        }
-        ReleaseTexture(*record);
+        RetiredObject entry;
+        entry.kind = RetiredKind::Texture;
+        entry.first = record->texture;
+        entry.second = record->framebuffer;
+        Defer(entry);
         auto removed = textures_.TryRemove(handle.slot);
         (void)removed;
     }
 
-    void Destroy(PipelineHandle handle) noexcept override {
+    void Retire(PipelineHandle handle) noexcept override {
         const PipelineRecord* record = pipelines_.Find(handle.slot);
         if (record == nullptr) {
             return;
         }
-        if (!MakeCurrentForResources()) {
-            return;
-        }
-        gl_.DeleteProgram(record->program);
-        gl_.DeleteVertexArrays(1, &record->vertexArray);
+        RetiredObject entry;
+        entry.kind = RetiredKind::Pipeline;
+        entry.first = record->program;
+        entry.second = record->vertexArray;
+        Defer(entry);
         auto removed = pipelines_.TryRemove(handle.slot);
         (void)removed;
     }
 
-    void Destroy(SwapChainHandle handle) noexcept override {
+    void Retire(SwapChainHandle handle) noexcept override {
         SwapChainRecord* record = swapChains_.Find(handle.slot);
         if (record == nullptr) {
             return;
         }
-        // 이 창 DC에 context가 붙어 있으면 장치 창으로 옮긴 뒤 DC를 놓는다.
+        // 이 창 DC에 context가 붙어 있으면 장치 창으로 옮긴다. DC는 fence 뒤에 놓는다.
         if (wglGetCurrentContext() == context_ && wglGetCurrentDC() == record->dc &&
             !MakeCurrent(deviceDc_)) {
             wglMakeCurrent(nullptr, nullptr);
         }
-        ReleaseDC(record->window, record->dc);
+        RetiredObject entry;
+        entry.kind = RetiredKind::SwapChain;
+        entry.window = record->window;
+        entry.dc = record->dc;
+        Defer(entry);
         auto removed = swapChains_.TryRemove(handle.slot);
         (void)removed;
     }
 
+    void ReclaimCompleted() noexcept override {
+        DeleteRetired(timeline_.Completed());
+    }
+
     Result<void> WaitIdle() noexcept override {
+        if (!MakeCurrentForResources()) {
+            return Fail("wglMakeCurrent failed");
+        }
         glFinish();
+        // glFinish 뒤에는 앞선 모든 sync가 신호되었다. 관찰 스레드를 기다리지 않고 바로 게시한다.
+        timeline_.Publish(fenceValue_);
+        DeleteRetired(fenceValue_);
+        if (timeline_.IsLost()) {
+            return Result<void>::Failure(ErrorCode::Destroyed);
+        }
         return Result<void>::Success();
+    }
+
+    GpuFencePoint LastSubmittedFence() const noexcept override {
+        return timeline_.LastSubmitted();
+    }
+
+    Result<bool> IsFenceComplete(GpuFencePoint point) const noexcept override {
+        return timeline_.IsComplete(point);
+    }
+
+    Result<platform::WaitResult> WaitFence(GpuFencePoint point,
+                                           uint32 timeoutMs) noexcept override {
+        return timeline_.Wait(point, timeoutMs);
+    }
+
+    Result<void> NotifyFence(GpuFencePoint point, FenceCallback callback,
+                             void* context) noexcept override {
+        return timeline_.Notify(point, callback, context);
+    }
+
+    bool IsLost() const noexcept override {
+        return timeline_.IsLost();
+    }
+
+    usize PendingRetireCount() const noexcept override {
+        return retired_.Size();
     }
 
     StringView LastError() const noexcept override {
@@ -889,6 +1079,85 @@ private:
         if (clipOrigin_ != origin) {
             gl_.ClipControl(origin, GL_ZERO_TO_ONE_VALUE);
             clipOrigin_ = origin;
+        }
+    }
+
+    // graphics queue에 fence sync를 넣고 다음 값을 돌려준다. sync를 만들지 못하면 glFinish로 끝내고
+    // token 없이 알린다(관찰 스레드가 곧바로 완료로 본다).
+    uint64 Submit() noexcept {
+        GLsync sync = gl_.FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE_VALUE, 0);
+        if (sync == nullptr) {
+            glFinish();
+        } else {
+            // 다른 context(관찰 스레드)가 기다리므로 fence 명령을 GPU로 보낸다.
+            glFlush();
+        }
+        const uint64 value = ++fenceValue_;
+        timeline_.Submitted(value, sync);
+        return value;
+    }
+
+    // value의 제출이 끝나면 지울 수 있게 retire 목록에 넣는다. 목록을 늘릴 수 없으면 GPU가 끝날
+    // 때까지 기다린 뒤(glFinish) 바로 지운다.
+    void Defer(RetiredObject entry) noexcept {
+        entry.fenceValue = fenceValue_;
+        entry.pending = recording_;
+        auto pushed = retired_.TryPushBack(entry);
+        if (pushed) {
+            return;
+        }
+        if (recording_ || !MakeCurrentForResources()) {
+            // 기록 중인 프레임이 쓸 수 있거나 context가 없다. 지우지 않고 버린다(드라이버가 context
+            // 삭제 때 회수한다).
+            return;
+        }
+        glFinish();
+        DeleteObject(entry);
+    }
+
+    void AssignPendingRetires(uint64 value) noexcept {
+        for (RetiredObject& entry : retired_) {
+            if (entry.pending) {
+                entry.pending = false;
+                entry.fenceValue = value;
+            }
+        }
+    }
+
+    // completed까지 끝난 제출만 쓰던 retire 항목을 지운다.
+    void DeleteRetired(uint64 completed) noexcept {
+        if (retired_.IsEmpty() || !MakeCurrentForResources()) {
+            return;
+        }
+        for (usize index = retired_.Size(); index > 0; --index) {
+            const RetiredObject& entry = retired_[index - 1];
+            if (entry.pending || entry.fenceValue > completed) {
+                continue;
+            }
+            DeleteObject(entry);
+            auto removed = retired_.TryRemoveAtSwap(index - 1);
+            (void)removed;
+        }
+    }
+
+    void DeleteObject(const RetiredObject& entry) noexcept {
+        switch (entry.kind) {
+        case RetiredKind::Buffer:
+            gl_.DeleteBuffers(1, &entry.first);
+            break;
+        case RetiredKind::Texture:
+            if (entry.second != 0) {
+                gl_.DeleteFramebuffers(1, &entry.second);
+            }
+            glDeleteTextures(1, &entry.first);
+            break;
+        case RetiredKind::Pipeline:
+            gl_.DeleteProgram(entry.first);
+            gl_.DeleteVertexArrays(1, &entry.second);
+            break;
+        case RetiredKind::SwapChain:
+            ReleaseDC(entry.window, entry.dc);
+            break;
         }
     }
 
@@ -1025,11 +1294,16 @@ private:
     SlotArray<TextureRecord> textures_;
     SlotArray<PipelineRecord> pipelines_;
     SlotArray<SwapChainRecord> swapChains_;
+    Array<RetiredObject> retired_;
     GlFunctions gl_;
     WglSwapInterval swapInterval_ = nullptr;
     HWND deviceWindow_ = nullptr;
     HDC deviceDc_ = nullptr;
     HGLRC context_ = nullptr;
+    // fence 관찰 스레드의 숨김 창·DC·공유 context다.
+    HWND watcherWindow_ = nullptr;
+    HDC watcherDc_ = nullptr;
+    HGLRC watcherContext_ = nullptr;
     int pixelFormat_ = 0;
     PIXELFORMATDESCRIPTOR pixelDescriptor_ = {};
     GLenum clipOrigin_ = 0;
@@ -1042,6 +1316,10 @@ private:
     DrawConstants constants_;
     uint64 ignoredDraws_ = 0;
     uint64 validationErrors_ = 0;
+    // 마지막으로 제출한 fence 값이다.
+    uint64 fenceValue_ = 0;
+    OpenGLFenceSource fenceSource_;
+    FenceTimeline timeline_;
     bool recording_ = false;
     bool bufferBound_ = false;
     bool constantsDirty_ = false;
