@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 350" width="960" height="350" role="img" aria-labelledby="title desc">
+<title id="title">루트에서 도달할 수 있는 객체와 순환 참조</title>
+<desc id="desc">루트가 플레이어, 인벤토리, 아이템에 이어져 이들은 살아남는다. 서로 참조하는 두 객체는 루트에서 도달할 수 없어 수거 후보다.</desc>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#667f8f"/></marker></defs>
+<style>
+text{font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;fill:#183142}.title{font-size:21px;font-weight:700}.small{font-size:14px;fill:#405869}.box{fill:#fff;stroke:#86a2b1;stroke-width:1.5}.live{fill:#e4f4ec;stroke:#4f9674}.garbage{fill:#fff0e7;stroke:#ca8062}.root{fill:#e6f2fa;stroke:#4482a6}.line{fill:none;stroke:#667f8f;stroke-width:2;marker-end:url(#a)}.label{font-size:15px;font-weight:700;text-anchor:middle}.caption{font-size:14px;font-weight:700}
+</style>
+<rect width="960" height="350" fill="#fff"/>
+<text x="25" y="33" class="title">루트에서 따라갈 수 있는가?</text>
+<rect x="20" y="53" width="920" height="125" rx="12" fill="#f4faf7" stroke="#c1ddce"/>
+<text x="40" y="79" class="caption" fill="#277353">도달 가능 → 이번 수집에서 보존</text>
+<rect x="40" y="100" width="130" height="46" rx="8" class="box root"/><text x="105" y="129" class="label">RootRef</text>
+<rect x="230" y="100" width="135" height="46" rx="8" class="box live"/><text x="297" y="129" class="label">플레이어</text>
+<rect x="425" y="100" width="135" height="46" rx="8" class="box live"/><text x="492" y="129" class="label">인벤토리</text>
+<rect x="620" y="100" width="135" height="46" rx="8" class="box live"/><text x="687" y="129" class="label">아이템</text>
+<path class="line" d="M170 123 H223"/><path class="line" d="M365 123 H418"/><path class="line" d="M560 123 H613"/>
+<text x="780" y="128" class="small">강한 참조를 추적</text>
+<rect x="20" y="193" width="920" height="135" rx="12" fill="#fff9f5" stroke="#ead2c6"/>
+<text x="40" y="220" class="caption">루트에서 도달 불가 → 수거 후보</text>
+<rect x="130" y="247" width="140" height="46" rx="8" class="box garbage"/><text x="200" y="276" class="label">객체 A</text>
+<rect x="365" y="247" width="140" height="46" rx="8" class="box garbage"/><text x="435" y="276" class="label">객체 B</text>
+<path class="line" d="M270 257 H358"/><path class="line" d="M365 283 H277"/>
+<text x="555" y="258" class="small">서로 참조해도 루트에서 닿지 않으면</text><text x="555" y="280" class="small">둘 다 수거 대상이 될 수 있다.</text>
+<text x="555" y="307" class="small">화살표: GC가 아는 강한 참조</text>
+</svg>

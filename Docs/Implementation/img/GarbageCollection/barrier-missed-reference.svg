@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 500" width="960" height="500" role="img" aria-labelledby="title desc">
+<title id="title">쓰기 장벽이 없으면 살아 있는 객체를 놓치는 예</title>
+<desc id="desc">루트가 A와 B에 닿고 B가 흰 D를 가리키는 중, A가 D를 가리키도록 옮긴 뒤 B의 참조가 사라진다. 장벽이 없다면 D를 놓칠 수 있고, Rocks 장벽은 D를 회색으로 만들어 추가 탐색한다.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#658092"/></marker></defs>
+<style>
+text{font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;fill:#183142}.title{font-size:21px;font-weight:700}.head{font-size:16px;font-weight:700}.small{font-size:13px;fill:#405869}.node{font-size:16px;font-weight:700;text-anchor:middle;dominant-baseline:central}.light{fill:#fff}.panel{fill:#f7f9fb;stroke:#d2dce4}.black{fill:#263d4e;stroke:#263d4e;stroke-width:2}.gray{fill:#b8c6ce;stroke:#637785;stroke-width:2}.white{fill:#fff;stroke:#8293a0;stroke-width:2}.root{fill:#e6f2fa;stroke:#4482a6}.line{stroke:#658092;stroke-width:2;fill:none;marker-end:url(#arrow)}
+</style>
+<rect width="960" height="500" fill="#fff"/><text x="24" y="34" class="title">참조를 옮기는 사이에 GC가 놓칠 수 있는 것</text>
+<text x="24" y="58" class="small">예: Marking 도중 두 slice 사이에 A → D를 추가하고 B → D를 제거한다.</text>
+<g transform="translate(20 76)"><rect class="panel" width="445" height="186" rx="12"/>
+<text x="18" y="28" class="head">1  변경 전</text><text x="18" y="49" class="small">A는 검사 완료 · B는 탐색 대기 · D는 미발견</text>
+<rect class="root" x="20" y="98" width="55" height="31" rx="6"/><text x="47" y="119" class="small" text-anchor="middle">루트</text>
+<path class="line" d="M75 108 L137 82"/><path class="line" d="M75 118 L137 144"/><path class="line" d="M196 149 H333"/>
+<circle class="black" cx="168" cy="72" r="25"/><text class="node light" x="168" y="72">A</text>
+<circle class="gray" cx="168" cy="149" r="25"/><text class="node" x="168" y="149">B</text>
+<circle class="white" cx="360" cy="149" r="25"/><text class="node" x="360" y="149">D</text>
+</g>
+<g transform="translate(495 76)"><rect class="panel" width="445" height="186" rx="12"/>
+<text x="18" y="28" class="head">2  참조 이동 후 · 장벽이 없다면</text><text x="18" y="49" class="small">A를 다시 검사하지 않으면 D를 놓칠 수 있다.</text>
+<rect class="root" x="20" y="98" width="55" height="31" rx="6"/><text x="47" y="119" class="small" text-anchor="middle">루트</text>
+<path class="line" d="M75 108 L137 82"/><path class="line" d="M75 118 L137 144"/><path class="line" d="M196 72 H333"/>
+<circle class="black" cx="168" cy="72" r="25"/><text class="node light" x="168" y="72">A</text>
+<circle class="gray" cx="168" cy="149" r="25"/><text class="node" x="168" y="149">B</text>
+<circle class="white" cx="360" cy="72" r="25"/><text class="node" x="360" y="72">D</text>
+<text x="264" y="156" class="small">B → D는 제거됨</text>
+</g>
+<rect x="20" y="278" width="920" height="195" rx="12" fill="#edf8f2" stroke="#b3d7c2"/>
+<text x="40" y="309" class="head">3  Rocks의 삽입 장벽을 사용하면</text>
+<text x="40" y="335" class="small">A → D를 게시할 때 D를 먼저 회색 작업에 넣는다. B → D를 제거해도 D의 탐색은 남는다.</text>
+<circle class="black" cx="150" cy="398" r="25"/><text class="node light" x="150" y="398">A</text>
+<path class="line" d="M177 398 H268"/>
+<circle class="gray" cx="296" cy="398" r="25"/><text class="node" x="296" y="398">D</text>
+<path class="line" d="M324 398 H418"/>
+<rect x="427" y="373" width="205" height="50" rx="8" fill="#fff" stroke="#69a789"/><text x="530" y="403" class="small" text-anchor="middle">D의 참조도 이후 탐색</text>
+<text x="663" y="395" class="small">참조 변경은 제공된</text><text x="663" y="418" class="small">Registry API를 사용한다.</text>
+</svg>

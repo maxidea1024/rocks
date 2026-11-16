@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 340" width="960" height="340" role="img" aria-labelledby="title desc">
+<title id="title">도달 불가능 확정과 실제 메모리 회수의 차이</title>
+<desc id="desc">마킹 마감 후 도달 불가능한 객체는 접근이 차단되고 Retired로 분류된다. 보유나 자식이 남으면 물리적 회수가 연기되며 조건이 해소된 후 회수된다.</desc>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#667f8f"/></marker></defs>
+<style>
+text{font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;fill:#183142}.title{font-size:21px;font-weight:700}.head{font-size:15px;font-weight:700;text-anchor:middle}.small{font-size:13px;fill:#405869}.box{stroke-width:1.5}.line{fill:none;stroke:#667f8f;stroke-width:2;marker-end:url(#a)}
+</style>
+<rect width="960" height="340" fill="#fff"/><text x="25" y="33" class="title">접근 차단과 저장소 해제는 서로 다른 시점</text>
+<rect x="25" y="65" width="180" height="80" rx="10" class="box" fill="#f7f9fb" stroke="#a7b6c0"/><text x="115" y="96" class="head">마킹 마감</text><text x="50" y="122" class="small">흰 객체: 접근 차단</text>
+<rect x="255" y="65" width="180" height="80" rx="10" class="box" fill="#fff0e7" stroke="#ca8062"/><text x="345" y="96" class="head">Sweeping</text><text x="292" y="122" class="small">Retired로 분류</text>
+<rect x="495" y="65" width="200" height="80" rx="10" class="box" fill="#fff5df" stroke="#d2a74c"/><text x="595" y="96" class="head">회수 가능 여부</text><text x="515" y="122" class="small">보유권·남은 자식 확인</text>
+<rect x="755" y="65" width="180" height="80" rx="10" class="box" fill="#e4f4ec" stroke="#69a789"/><text x="845" y="96" class="head">실제 회수</text><text x="782" y="122" class="small">소멸자 · 저장소 해제</text>
+<path class="line" d="M205 105 H248"/><path class="line" d="M435 105 H488"/><path class="line" d="M695 105 H748"/>
+<rect x="495" y="205" width="200" height="70" rx="10" class="box" fill="#f1eafe" stroke="#9d87c1"/><text x="595" y="233" class="head">회수 지연</text><text x="520" y="255" class="small">보유 또는 자식이 남음</text>
+<path class="line" d="M595 145 V198"/><path class="line" d="M695 240 H845 V152"/>
+<text x="613" y="178" class="small">불가능</text><text x="725" y="228" class="small">조건 해소 후</text>
+<text x="25" y="315" class="small">지연된 Retired가 남아도 현재 회수 가능한 대상이 없으면 cycle은 완료될 수 있다.</text>
+</svg>

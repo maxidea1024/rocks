@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 710" width="960" height="710" role="img" aria-labelledby="title desc">
+<title id="title">Rocks GC의 삼색 마킹과 회수</title>
+<desc id="desc">루트에서 A, B, C를 순서대로 탐색하고 연결되지 않은 D를 수거 후보로 분류하는 네 단계. Retired 객체는 보유권이 해소된 후 회수된다.</desc>
+<style>
+  text { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; fill: #172b3a; }
+  .title { font-size: 22px; font-weight: 700; } .subtitle { font-size: 14px; fill: #496070; }
+  .panel { fill: #f7f9fb; stroke: #d2dce4; stroke-width: 1.3; }
+  .head { font-size: 17px; font-weight: 700; } .small { font-size: 13px; fill: #405869; }
+  .root { fill: #e6f2fa; stroke: #4482a6; stroke-width: 1.4; }
+  .white { fill: #fff; stroke: #8293a0; stroke-width: 2; }
+  .gray { fill: #b8c6ce; stroke: #637785; stroke-width: 2; }
+  .black { fill: #263d4e; stroke: #263d4e; stroke-width: 2; }
+  .wtext { fill: #fff; } .node { font-size: 16px; font-weight: 700; text-anchor: middle; dominant-baseline: central; }
+  .edge { stroke: #668092; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+  .note { fill: #fff5df; stroke: #e1ba63; stroke-width: 1.2; }
+</style>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#668092"/></marker></defs>
+<rect width="960" height="710" fill="#ffffff"/>
+<text x="30" y="34" class="title">루트에서 시작해 살아 있는 그래프를 찾는다</text>
+<text x="30" y="60" class="subtitle">화살표는 강한 참조 · 예시는 변경이 없는 한 cycle의 개념적 상태</text>
+
+<g transform="translate(20 82)">
+  <rect class="panel" width="450" height="235" rx="12"/>
+  <text x="20" y="31" class="head">1  초기 상태</text>
+  <text x="20" y="55" class="small">기존 후보는 개념적으로 모두 흰색</text>
+  <rect class="root" x="20" y="92" width="65" height="34" rx="6"/><text x="52" y="114" text-anchor="middle" class="small">루트</text>
+  <path class="edge" d="M85 109 H115"/><path class="edge" d="M166 109 H210"/><path class="edge" d="M262 109 H307"/>
+  <circle class="white" cx="141" cy="109" r="25"/><text class="node" x="141" y="109">A</text>
+  <circle class="white" cx="236" cy="109" r="25"/><text class="node" x="236" y="109">B</text>
+  <circle class="white" cx="333" cy="109" r="25"/><text class="node" x="333" y="109">C</text>
+  <circle class="white" cx="236" cy="181" r="25"/><text class="node" x="236" y="181">D</text>
+  <text x="278" y="186" class="small">루트에서 닿지 않음</text>
+</g>
+<g transform="translate(490 82)">
+  <rect class="panel" width="450" height="235" rx="12"/>
+  <text x="20" y="31" class="head">2  루트 발견</text>
+  <text x="20" y="55" class="small">루트가 가리키는 A를 회색으로 등록</text>
+  <rect class="root" x="20" y="92" width="65" height="34" rx="6"/><text x="52" y="114" text-anchor="middle" class="small">루트</text>
+  <path class="edge" d="M85 109 H115"/><path class="edge" d="M166 109 H210"/><path class="edge" d="M262 109 H307"/>
+  <circle class="gray" cx="141" cy="109" r="25"/><text class="node" x="141" y="109">A</text>
+  <circle class="white" cx="236" cy="109" r="25"/><text class="node" x="236" y="109">B</text>
+  <circle class="white" cx="333" cy="109" r="25"/><text class="node" x="333" y="109">C</text>
+  <circle class="white" cx="236" cy="181" r="25"/><text class="node" x="236" y="181">D</text>
+  <text x="278" y="186" class="small">아직 미발견</text>
+</g>
+<g transform="translate(20 333)">
+  <rect class="panel" width="450" height="235" rx="12"/>
+  <text x="20" y="31" class="head">3  참조 전파</text>
+  <text x="20" y="55" class="small">A의 방문 완료 → 검정, 발견한 B → 회색</text>
+  <rect class="root" x="20" y="92" width="65" height="34" rx="6"/><text x="52" y="114" text-anchor="middle" class="small">루트</text>
+  <path class="edge" d="M85 109 H115"/><path class="edge" d="M166 109 H210"/><path class="edge" d="M262 109 H307"/>
+  <circle class="black" cx="141" cy="109" r="25"/><text class="node wtext" x="141" y="109">A</text>
+  <circle class="gray" cx="236" cy="109" r="25"/><text class="node" x="236" y="109">B</text>
+  <circle class="white" cx="333" cy="109" r="25"/><text class="node" x="333" y="109">C</text>
+  <circle class="white" cx="236" cy="181" r="25"/><text class="node" x="236" y="181">D</text>
+  <text x="278" y="186" class="small">B, C도 차례로 방문</text>
+</g>
+<g transform="translate(490 333)">
+  <rect class="panel" width="450" height="235" rx="12"/>
+  <text x="20" y="31" class="head">4  마감과 수거</text>
+  <text x="20" y="55" class="small">회색 작업이 없으면 흰 D를 수거 대상으로 확정</text>
+  <rect class="root" x="20" y="92" width="65" height="34" rx="6"/><text x="52" y="114" text-anchor="middle" class="small">루트</text>
+  <path class="edge" d="M85 109 H115"/><path class="edge" d="M166 109 H210"/><path class="edge" d="M262 109 H307"/>
+  <circle class="black" cx="141" cy="109" r="25"/><text class="node wtext" x="141" y="109">A</text>
+  <circle class="black" cx="236" cy="109" r="25"/><text class="node wtext" x="236" y="109">B</text>
+  <circle class="black" cx="333" cy="109" r="25"/><text class="node wtext" x="333" y="109">C</text>
+  <circle class="white" cx="236" cy="181" r="25"/><text class="node" x="236" y="181">D</text>
+  <text x="278" y="176" class="small">Retired로 분류 후</text><text x="278" y="195" class="small">조건이 되면 실제 회수</text>
+</g>
+<rect class="note" x="20" y="584" width="920" height="104" rx="10"/>
+<text x="38" y="611" class="head">Marking 중 slice 사이 참조 변경은 삽입 장벽이 보호</text>
+<text x="38" y="636" class="small">예: 검은 A에서 흰 D를 새로 참조하면 D도 회색 작업에 넣어 탐색한다.</text>
+<text x="38" y="659" class="small">Rocks는 slice 중 mutator와 필드 스캔을 동시에 실행하지 않는다. Retired와 실제 회수는 별도다.</text>
+</svg>

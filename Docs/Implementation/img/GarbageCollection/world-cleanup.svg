@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 380" width="960" height="380" role="img" aria-labelledby="title desc">
+<title id="title">서브 레벨 정리와 World 종료의 GC 흐름</title>
+<desc id="desc">서브 레벨은 파괴 요청 후 Actor와 Level 루트를 정리하고 프레임 끝에 점진 GC를 수행한다. World 종료는 모든 Actor와 Level을 정리하고 GC를 마친 뒤 Registry를 종료한다.</desc>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#667f8f"/></marker></defs>
+<style>
+text{font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;fill:#183142}.title{font-size:21px;font-weight:700}.head{font-size:16px;font-weight:700}.label{font-size:14px;font-weight:700;text-anchor:middle}.small{font-size:13px;fill:#405869}.box{fill:#fff;stroke:#8aa3b1;stroke-width:1.4}.line{fill:none;stroke:#667f8f;stroke-width:2;marker-end:url(#a)}
+</style>
+<rect width="960" height="380" fill="#fff"/><text x="25" y="34" class="title">레벨 정리와 World 종료는 서로 다른 범위</text>
+<rect x="20" y="55" width="920" height="125" rx="11" fill="#f4faf7" stroke="#c1ddce"/><text x="40" y="82" class="head">서브 레벨 파괴</text>
+<rect class="box" x="40" y="103" width="177" height="43" rx="7"/><text class="label" x="128" y="130">DestroyLevel</text>
+<rect class="box" x="267" y="103" width="177" height="43" rx="7"/><text class="label" x="355" y="130">Actor 정리</text>
+<rect class="box" x="494" y="103" width="177" height="43" rx="7"/><text class="label" x="582" y="130">Level 루트 반환</text>
+<rect class="box" x="721" y="103" width="177" height="43" rx="7"/><text class="label" x="809" y="130">프레임 끝 GC</text>
+<path class="line" d="M217 124 H260"/><path class="line" d="M444 124 H487"/><path class="line" d="M671 124 H714"/>
+<rect x="20" y="194" width="920" height="125" rx="11" fill="#f3f6fb" stroke="#c8d5e4"/><text x="40" y="221" class="head">World 종료</text>
+<rect class="box" x="40" y="242" width="177" height="43" rx="7"/><text class="label" x="128" y="269">World::Shutdown</text>
+<rect class="box" x="267" y="242" width="177" height="43" rx="7"/><text class="label" x="355" y="269">전체 Actor 정리</text>
+<rect class="box" x="494" y="242" width="177" height="43" rx="7"/><text class="label" x="582" y="269">모든 Level 반환</text>
+<rect class="box" x="721" y="242" width="177" height="43" rx="7"/><text class="label" x="809" y="269">GC · Registry 종료</text>
+<path class="line" d="M217 263 H260"/><path class="line" d="M444 263 H487"/><path class="line" d="M671 263 H714"/>
+<text x="25" y="349" class="small">두 흐름 모두 다른 루트·보유권 때문에 물리적 회수가 늦어질 수 있다. 단계별 조건은 본문을 참고한다.</text>
+</svg>

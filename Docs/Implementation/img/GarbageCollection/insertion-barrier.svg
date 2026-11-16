@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 345" width="960" height="345" role="img" aria-labelledby="title desc">
+<title id="title">삽입 장벽이 새 참조를 보호하는 과정</title>
+<desc id="desc">이미 검사한 검은 A에서 아직 발견되지 않은 흰 D로 참조를 추가할 때 장벽이 D를 회색 작업에 넣는다.</desc>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#667f8f"/></marker></defs>
+<style>
+text{font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;fill:#183142}.title{font-size:21px;font-weight:700}.head{font-size:16px;font-weight:700}.small{font-size:13px;fill:#405869}.label{font-size:17px;font-weight:700;text-anchor:middle;dominant-baseline:central}.line{stroke:#667f8f;stroke-width:2;fill:none;marker-end:url(#a)}.panel{fill:#f7f9fb;stroke:#d2dce4}.black{fill:#263d4e;stroke:#263d4e}.white{fill:#fff;stroke:#8293a0}.gray{fill:#b8c6ce;stroke:#637785}.node{stroke-width:2}
+</style>
+<rect width="960" height="345" fill="#fff"/><text x="25" y="33" class="title">탐색이 끝난 객체에 참조가 새로 생기면?</text>
+<g transform="translate(20 55)"><rect class="panel" width="445" height="205" rx="12"/>
+<text x="20" y="30" class="head">1  slice 사이에 A → D 참조 추가 시도</text><text x="20" y="54" class="small">A는 이미 검사했고 D는 아직 발견되지 않았다.</text>
+<circle class="node black" cx="125" cy="117" r="28"/><text x="125" y="117" class="label" fill="#fff" style="fill:#fff">A</text>
+<circle class="node white" cx="320" cy="117" r="28"/><text x="320" y="117" class="label">D</text>
+<path class="line" stroke-dasharray="5 4" d="M155 117 H285"/><text x="170" y="102" class="small">추가할 참조</text>
+<text x="73" y="175" class="small">검사 완료</text><text x="280" y="175" class="small">미발견</text></g>
+<g transform="translate(495 55)"><rect class="panel" width="445" height="205" rx="12"/>
+<text x="20" y="30" class="head">2  장벽이 D를 작업 목록에 추가</text><text x="20" y="54" class="small">참조 게시와 대상 표식은 같은 gate 안에서 이뤄진다.</text>
+<circle class="node black" cx="125" cy="117" r="28"/><text x="125" y="117" class="label" style="fill:#fff">A</text>
+<circle class="node gray" cx="320" cy="117" r="28"/><text x="320" y="117" class="label">D</text>
+<path class="line" d="M155 117 H285"/><text x="162" y="102" class="small">게시된 강한 참조</text>
+<text x="73" y="175" class="small">검사 완료</text><text x="261" y="175" class="small">탐색 대기</text></g>
+<rect x="20" y="277" width="920" height="50" rx="9" fill="#fff5df" stroke="#e1ba63"/>
+<text x="38" y="308" class="small">SetReference 등 장벽이 적용된 API를 사용하고, 대상 객체의 강한 참조도 Trace에서 방문해야 한다.</text>
+</svg>

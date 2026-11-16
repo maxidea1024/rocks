@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 475" width="960" height="475" role="img" aria-labelledby="title desc">
+<title id="title">파괴 요청과 GC 회수의 차이</title>
+<desc id="desc">일반 Registry에서 파괴 요청을 하면 일반 접근이 즉시 차단된다. 루트나 강한 참조를 정리한 뒤 도달 불가능하면 GC가 Retired로 분류하고 보유 조건이 해소되면 저장소를 회수한다.</desc>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#667f8f"/></marker></defs>
+<style>
+text{font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;fill:#183142}.title{font-size:21px;font-weight:700}.head{font-size:15px;font-weight:700;text-anchor:middle}.small{font-size:13px;fill:#405869}.box{stroke-width:1.5}.line{fill:none;stroke:#667f8f;stroke-width:2;marker-end:url(#a)}
+</style>
+<rect width="960" height="475" fill="#fff"/><text x="25" y="34" class="title">파괴 요청은 즉시 접근을 닫고, 회수는 나중에 진행</text>
+<rect x="25" y="79" width="165" height="78" rx="10" class="box" fill="#e4f4ec" stroke="#69a789"/><text x="107" y="110" class="head">Alive</text><text x="64" y="135" class="small">일반 접근 가능</text>
+<rect x="255" y="79" width="200" height="78" rx="10" class="box" fill="#fff5df" stroke="#d2a74c"/><text x="355" y="110" class="head">DestroyRequested</text><text x="300" y="135" class="small">일반 접근 차단</text>
+<rect x="515" y="79" width="180" height="78" rx="10" class="box" fill="#fff0e7" stroke="#ca8062"/><text x="605" y="110" class="head">Retired</text><text x="550" y="135" class="small">수거 대상으로 분류</text>
+<rect x="755" y="79" width="180" height="78" rx="10" class="box" fill="#f1eafe" stroke="#9d87c1"/><text x="845" y="110" class="head">실제 회수</text><text x="783" y="135" class="small">소멸자 · 저장소 해제</text>
+<path class="line" d="M190 118 H248"/><path class="line" d="M455 118 H508"/><path class="line" d="M695 118 H748"/>
+<text x="185" y="69" class="small">파괴 요청</text><text x="457" y="69" class="small">도달 불가 → GC</text><text x="707" y="69" class="small">보유 해소</text>
+<rect x="255" y="204" width="440" height="84" rx="10" fill="#f7f9fb" stroke="#d2dce4"/>
+<text x="275" y="232" class="small">루트나 강한 참조가 남아 있으면 DestroyRequested 객체도</text><text x="275" y="256" class="small">GC가 계속 표식할 수 있다. 일반 접근은 이미 차단된 상태다.</text>
+<path class="line" d="M355 157 V197"/>
+<rect x="25" y="315" width="910" height="129" rx="10" fill="#f7f9fb" stroke="#d2dce4"/>
+<text x="45" y="346" class="small">• 파괴 요청은 루트·참조를 자동으로 해제하거나 소멸자를 즉시 실행하지 않는다.</text>
+<text x="45" y="375" class="small">• 명시적 파괴 요청 없이도 도달 불가능한 Alive 객체는 GC 수거 대상이 될 수 있다.</text>
+<text x="45" y="404" class="small">• 증분 GC에서는 Retired 전에 cutoff로 Unreachable이 관찰될 수 있다.</text>
+</svg>
