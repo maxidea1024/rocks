@@ -19,17 +19,16 @@ public static class ThirdPartyManifestRefresh
     public static IReadOnlyList<string> Run(string root, bool write)
     {
         root = Path.GetFullPath(root);
-        string thirdParty = Path.Combine(root, ThirdPartyManifest.ThirdPartyRoot);
         List<string> changed = [];
-        if (!Directory.Exists(thirdParty))
-        {
-            return changed;
-        }
-
-        foreach (string library in Directory.EnumerateDirectories(thirdParty).Order(StringComparer.Ordinal))
+        foreach (string library in ThirdPartyManifest.LibraryDirectories(root))
         {
             // 엄격한 읽기로 먼저 검증한다(나머지 필드가 계약을 지키는지).
             ThirdPartyManifest manifest = ThirdPartyManifest.Read(library);
+            if (!manifest.HasUpstream)
+            {
+                continue; // 커밋한 파일이 없는 binary(sdk·system 출처)는 다시 계산할 것이 없다.
+            }
+
             string path = Path.Combine(library, ThirdPartyManifest.FileName);
             string original = File.ReadAllText(path, new UTF8Encoding(false, true));
             JsonObject document = JsonNode.Parse(original)!.AsObject();
@@ -43,8 +42,9 @@ public static class ThirdPartyManifestRefresh
             {
                 byte[] bytes = File.ReadAllBytes(Path.Combine(upstream, file));
                 files[file] = Convert.ToHexStringLower(SHA256.HashData(bytes));
-                // 데이터 전용 라이브러리는 컴파일하지 않으므로 지시문을 기록하지 않는다(목록은 비어 있어야 한다).
-                if (manifest.Kind == ThirdPartyKind.Code)
+                // 데이터 전용 라이브러리는 컴파일하지 않으므로 지시문을 기록하지 않는다(목록은 비어 있어야 한다). 헤더 전용과
+                // binary의 공개 헤더는 엔진 번역 단위가 include하므로 기록한다.
+                if (manifest.Kind != ThirdPartyKind.Data)
                 {
                     foreach (ThirdPartyPragma pragma in ThirdPartyManifest.ScanPragmaDirectives(file, bytes))
                     {

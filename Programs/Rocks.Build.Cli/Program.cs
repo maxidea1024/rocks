@@ -36,7 +36,7 @@ namespace Rocks.Build.Cli
         {
             if (args.Length == 0)
             {
-                throw new ArgumentException("Expected build, test, sdk, or game command.");
+                throw new ArgumentException("Expected build, test, sdk, game, or bootstrap command.");
             }
 
             var options = Parse(args.Skip(1).ToArray());
@@ -45,6 +45,8 @@ namespace Rocks.Build.Cli
                 "game" => new HashSet<string>(["sdk", "project", "target", "configuration", "output", "compiler", "jobs"], StringComparer.Ordinal),
                 "sdk" => new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination"], StringComparer.Ordinal),
                 "build" or "test" => new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "platform", "android-abi", "android-api", "android-ndk", "adb"], StringComparer.Ordinal),
+                // 미리 빌드한 바이너리를 사용자 저장소에 받는다(build·test는 받지 않는다, Docs/Design/ShaderSystem.ko.md 8절 2항).
+                "bootstrap" => new HashSet<string>(["root", "library", "store", "mirror", "offline", "windows-sdk"], StringComparer.Ordinal),
                 _ => throw new ArgumentException($"Unknown command: {args[0]}")
             };
             foreach (var name in options.Keys)
@@ -66,6 +68,11 @@ namespace Rocks.Build.Cli
             if (args[0] == "game")
             {
                 return await InstalledSdk.BuildGameAsync(options, cancellationToken);
+            }
+
+            if (args[0] == "bootstrap")
+            {
+                return await ThirdPartyBootstrapCommand.RunAsync(options, cancellationToken);
             }
 
             if (args[0] is not ("build" or "test" or "sdk"))
@@ -366,7 +373,7 @@ namespace Rocks.Build.Cli
 
         internal static Dictionary<string, string> Parse(string[] args)
         {
-            var allowed = new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", "sdk", "project", "platform", "android-abi", "android-api", "android-ndk", "adb"], StringComparer.Ordinal);
+            var allowed = new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", "sdk", "project", "platform", "android-abi", "android-api", "android-ndk", "adb", "library", "store", "mirror", "offline", "windows-sdk"], StringComparer.Ordinal);
             var values = new Dictionary<string, string>(StringComparer.Ordinal);
             for (var index = 0; index < args.Length; index += 2)
             {

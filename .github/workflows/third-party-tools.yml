@@ -1,0 +1,79 @@
+name: Third-party tools
+# 미리 빌드한 바이너리(manifest kind: binary)의 오프라인 도구 빌드다(Docs/Design/ShaderSystem.ko.md 8절 4항).
+# 수동으로만 돈다. 라이브러리마다 Engine/Source/ThirdParty/<Lib>/Build/의 스크립트로 Windows x64·macOS arm64 archive를 만들고,
+# publish가 true면 그 manifest의 Release 태그(third-party-<이름>-<버전>-r<revision>)에 asset으로 올린다. 올린 뒤 각 archive의
+# <asset>.host.json을 manifest hosts에 옮겨 커밋한다(bootstrap이 그 SHA-256으로 검사한다).
+# 이 workflow는 기본 빌드·시험 경로가 아니다. 업스트림 빌드가 Python으로 표를 생성하므로 Python을 설치하며, 정책 검사
+# python-main-path는 이 파일만 명시 제외한다. 엔진 빌드·시험과 Foundation CI는 Python 없이 돈다.
+on:
+  workflow_dispatch:
+    inputs:
+      library:
+        description: 빌드할 라이브러리 폴더 이름(DirectXShaderCompiler, SpirvCross, SpirvTools)
+        required: true
+        type: choice
+        options: [DirectXShaderCompiler, SpirvCross, SpirvTools]
+      publish:
+        description: Release에 asset으로 올린다
+        required: true
+        type: boolean
+        default: false
+permissions:
+  contents: write
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            host: windows-x64
+          - os: macos-15
+            host: macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install Ninja (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./Engine/Source/ThirdParty/${{ inputs.library }}/Build/Build.ps1 -WorkDirectory "${{ runner.temp }}\rtb" -OutputDirectory "${{ runner.temp }}\archives"
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: sh ./Engine/Source/ThirdParty/${{ inputs.library }}/Build/Build.sh "${{ runner.temp }}/rtb" "${{ runner.temp }}/archives"
+      - name: Keep archives
+        uses: actions/upload-artifact@v7
+        with:
+          name: third-party-${{ inputs.library }}-${{ matrix.host }}
+          path: ${{ runner.temp }}/archives/*
+  publish:
+    # 두 호스트 archive가 모두 만들어진 뒤 한 번에 올린다(Release 생성이 겹치지 않게).
+    if: inputs.publish
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: third-party-${{ inputs.library }}-*
+          path: archives
+          merge-multiple: true
+      - name: Publish release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $manifest = Get-Content -Raw "Engine/Source/ThirdParty/${{ inputs.library }}/ThirdParty.json" | ConvertFrom-Json
+          $tag = "third-party-$($manifest.name)-$($manifest.version)-r$($manifest.build.revision)"
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title $tag --notes "Rocks offline tool build: $($manifest.name) $($manifest.version) ($($manifest.build.tag), revision $($manifest.build.revision))."
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          gh release upload $tag --repo $env:GITHUB_REPOSITORY (Get-ChildItem archives -Filter *.tar.gz).FullName
+          exit $LASTEXITCODE

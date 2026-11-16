@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "kind": "binary",
+  "name": "D3DCompiler",
+  "version": "10.0.22621.2428",
+  "sdk": {
+    "name": "Windows SDK",
+    "version": "10.0.22621.0"
+  },
+  "hosts": {
+    "windows-x64": {
+      "files": [
+        {
+          "path": "d3dcompiler_47.dll",
+          "sdkPath": "Redist/D3D/x64/d3dcompiler_47.dll",
+          "sha256": "af7b99be1b8770c0e4d18e43b04e81d11bdeb667fa6b07ade7a88f4c5676bf9a",
+          "size": 4916728,
+          "role": "runtime"
+        }
+      ]
+    }
+  },
+  "notes": [
+    "FXC(D3DCompile·D3DReflect)는 버전을 고정한 Windows SDK 10.0.22621.0의 Redist/D3D/x64/d3dcompiler_47.dll(파일 버전 10.0.22621.2428)을 쓴다. System32의 d3dcompiler_47.dll은 OS 빌드마다 다르므로 쓰지 않는다(Docs/Design/ShaderSystem.ko.md 8절 2항, UE도 동봉본을 전체 경로로 연다).",
+    "Windows SDK는 설치기라 다시 게시하지 않는다. bootstrap이 설치된 SDK에서 SHA-256 검사 뒤 사용자 저장소(<파일 SHA-256>/d3dcompiler_47.dll)로 복사한다. 다른 SDK가 같은 Redist 경로를 덮어써 SHA가 바뀌면 bootstrap이 실패하고 manifest를 다시 고정해야 한다.",
+    "라이선스: Windows SDK 사용 조건(재배포 가능 파일 목록의 D3D Redist)을 따른다. 저장소에 커밋한 파일이 없어 licenses 항목이 없다. Runtime 실행 파일과 함께 재배포할지는 측정 S10에서 정한다."
+  ]
+}

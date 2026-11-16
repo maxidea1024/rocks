@@ -14,6 +14,8 @@ internal static partial class SelfTests
         suite.Add("Policy.RepositoryRuntime", () => NoFailures(PolicyChecks.Runtime(options.Root)));
         suite.Add("Policy.RepositoryReflectionAnnotations", () => NoFailures(PolicyChecks.ReflectionAnnotations(options.Root)));
         ThirdPartyPolicyTests.Register(suite, options);
+        ThirdPartyKindTests.Register(suite);
+        ThirdPartyStoreTests.Register(suite, options);
         suite.Add("Policy.RepositoryPlatform", () => NoFailures(PolicyChecks.PlatformBoundary(options.Root)));
         suite.Add("Policy.RepositoryTargetMacros", () => NoFailures(PolicyChecks.TargetMacros(options.Root)));
         suite.Add("Policy.RepositoryTargetIntrinsics", () => NoFailures(PolicyChecks.TargetIntrinsics(options.Root)));
@@ -178,7 +180,7 @@ internal static partial class SelfTests
         {
             // 손으로 고친 생성 파일과 없는 파일을 잡는다. 원본은 저장소의 UCD를 그대로 복사한다.
             using TemporaryDirectory temporary = new();
-            string library = Path.Combine(ThirdPartyManifest.ThirdPartyRoot, UnicodeTables.LibraryName);
+            string library = Path.Combine(ThirdPartyManifest.CoreThirdPartyRoot, UnicodeTables.LibraryName);
             foreach (string file in Directory.EnumerateFiles(Path.Combine(options.Root, library), "*", SearchOption.AllDirectories))
             {
                 string relative = Path.GetRelativePath(options.Root, file).Replace('\\', '/');
@@ -915,6 +917,18 @@ internal static partial class SelfTests
             temporary.Write(".github/workflows/build.yml", "run: dotnet run --project Programs/Rocks.Cli\n");
             temporary.Write("Programs/Rocks.Cli/Probe.cs", "var spec = new ProcessSpec(\"python.exe\", args, root);\n");
             Verify.That(PolicyChecks.PythonFreeMainPath(temporary.Root).Count != 0, "Python process invocation escaped audit");
+        });
+        suite.Add("Policy.PythonExclusionIsOnlyTheThirdPartyToolsWorkflow", () =>
+        {
+            // 오프라인 도구 빌드 workflow만 제외한다. 이름이 비슷한 workflow와 Build/의 도구 빌드 공용 스크립트는 계속 검사한다.
+            using TemporaryDirectory temporary = new();
+            temporary.Write(PolicyChecks.ThirdPartyToolsWorkflow, "      - uses: actions/setup-python@v6\n");
+            NoFailures(PolicyChecks.PythonFreeMainPath(temporary.Root));
+            temporary.Write(".github/workflows/third-party-tools-2.yml", "      - uses: actions/setup-python@v6\n");
+            Verify.Equal(1, PolicyChecks.PythonFreeMainPath(temporary.Root).Count, "lookalike workflow escaped audit");
+            File.Delete(temporary.FilePath(".github/workflows/third-party-tools-2.yml"));
+            temporary.Write("Build/ThirdPartyTools/ToolBuild.ps1", "& python3 gen.py\n");
+            Verify.Equal(1, PolicyChecks.PythonFreeMainPath(temporary.Root).Count, "tool build helper under Build escaped audit");
         });
     }
 }

@@ -25,7 +25,11 @@ public abstract class TestsModule : ModuleRules
     private static readonly string[] EngineTestModules = ["Runtime/Input", "Runtime/PlatformWindow", "Runtime/World", "Runtime/Engine", "Runtime/AssetRuntime", "Developer/AssetTools"];
 
     // EngineTests가 링크하는 엔진 모듈이다(테스트가 쓰는 최상위 모듈만 둔다. 하위 의존은 전파된다).
-    private static readonly string[] EngineTestDependencies = ["PlatformWindow", "Engine"];
+    private static readonly string[] EngineTestDependencies = ["PlatformWindow", "Engine", "SpirvReflect"];
+
+    // EngineTests의 셰이더 도구 외부 라이브러리 시험(Programs/FoundationTests/Engine)이 include하는 라이브러리다. 헤더는 이 실행 파일의
+    // Private include로만 들어가고(adapter 방식) 엔진 경고 규칙으로 경고 0이어야 한다(Docs/Design/ShaderSystem.ko.md 8절).
+    private static readonly string[] EngineThirdPartyHeaders = ["VulkanHeaders", "SpirvReflect", "SpirvCross", "SpirvTools"];
 
     protected abstract TestLayer Layer { get; }
 
@@ -47,6 +51,7 @@ public abstract class TestsModule : ModuleRules
         {
             directories.AddRange(EngineTestModules.Select(module => $"Engine/Source/{module}/Tests")
                 .Where(directory => Directory.Exists(context.PathInRoot(directory))));
+            directories.Add("Programs/FoundationTests/Engine");
         }
 
         // POSIX 플랫폼은 공통 테스트 지원 구현을 쓴다.
@@ -78,8 +83,10 @@ public abstract class TestsModule : ModuleRules
             Sources = sources,
             // Core/Source/Runtime: 시험이 모듈의 Private 헤더를 <Module/Private/...> 철자로 include한다. 저장소 루트는 include하지 않는다
             // (gitignore된 출력·사용자 디렉터리·중첩 작업 사본의 헤더가 include inventory에 들어가지 않게).
-            PrivateIncludeDirectories = [context.PathInRoot("Core/Source/Runtime"), context.PathInRoot($"{support}/Public")],
-            PrivateDefines = ["ROCKS_TESTING=1"],
+            PrivateIncludeDirectories = [context.PathInRoot("Core/Source/Runtime"), context.PathInRoot($"{support}/Public"),
+                .. (Layer == TestLayer.Engine ? ThirdPartyModuleRules.ConsumerIncludeDirectories(context, EngineThirdPartyHeaders) : [])],
+            PrivateDefines = ["ROCKS_TESTING=1",
+                .. (Layer == TestLayer.Engine ? ThirdPartyModuleRules.ConsumerDefines(context, EngineThirdPartyHeaders) : [])],
             Dependencies = [.. dependencies, .. fixtures]
         };
     }

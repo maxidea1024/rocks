@@ -1,0 +1,79 @@
+{
+  "schema": 1,
+  "kind": "binary",
+  "name": "SpirvCross",
+  "version": "1.4.363.0",
+  "upstreamDirectory": "spirv-cross-1.4.363.0",
+  "licenses": [
+    {
+      "spdx": "Apache-2.0",
+      "upstreamExpression": "Apache-2.0 (일부 파일 Apache-2.0 OR MIT)",
+      "file": "spirv-cross-1.4.363.0/LICENSE",
+      "binaryNoticeRequired": true
+    }
+  ],
+  "includeDirectories": [
+    "spirv-cross-1.4.363.0"
+  ],
+  "consumerDefines": [],
+  "adapterHeaders": [
+    "spirv-cross-1.4.363.0/spirv.h",
+    "spirv-cross-1.4.363.0/spirv_cross_c.h"
+  ],
+  "files": {
+    "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "spirv.h": "62e24e3f287d612b47163350a04aa0b49822c1437be407fbe10e488b9e4adf3a",
+    "spirv_cross_c.h": "8939834efb802521ad36f97f2afd83fa03a0daecbefc2124c4e56be77d126d4f"
+  },
+  "pragmaDirectives": [],
+  "build": {
+    "tag": "vulkan-sdk-1.4.363.0",
+    "revision": 1,
+    "source": {
+      "repository": "https://github.com/KhronosGroup/SPIRV-Cross",
+      "commit": "f11ba9f0b21ba8fc15153d50a2a1ae31ab1cf8f7",
+      "url": "https://github.com/KhronosGroup/SPIRV-Cross/archive/f11ba9f0b21ba8fc15153d50a2a1ae31ab1cf8f7.tar.gz",
+      "sha256": "92b0458889ed77eac9892b3be5a41e3cf716849fd90f39632e159e555abf3d03"
+    },
+    "dependencies": [],
+    "scripts": [
+      "Build/Build.ps1",
+      "Build/Build.sh"
+    ],
+    "patches": []
+  },
+  "hosts": {
+    "windows-x64": {
+      "archive": {
+        "url": "https://github.com/maxidea1024/rocks/releases/download/third-party-SpirvCross-1.4.363.0-r1/SpirvCross-1.4.363.0-r1-windows-x64.tar.gz",
+        "sha256": "8c605e218335a3af650048455abde764df523748a0021fbde6e56decd318a94b",
+        "size": 6065909
+      },
+      "files": [
+        {
+          "path": "bin/spirv-cross-c-shared.dll",
+          "sha256": "1ba4505f2e23a16e1c7c28951ed06e40cc98a650f36a3a9f75799cdbe439abfc",
+          "size": 2305536,
+          "role": "runtime"
+        },
+        {
+          "path": "bin/spirv-cross-c-shared.pdb",
+          "sha256": "c260176fb9fc2bdc6a48877d11208048846ef9352a6c4c111b1ae91e9a28b3dc",
+          "size": 21942272,
+          "role": "symbols"
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "size": 11358,
+          "role": "notice"
+        }
+      ]
+    }
+  },
+  "notes": [
+    "Vulkan SDK 1.4.363.0 태그(DXC v1.9.2609 submodule과 같은 SDK 태그)로 고정한다. SPIRV-Cross는 DXC submodule이 아니므로 같은 SDK 태그로 맞춘다.",
+    "C API(spirv_cross_c.h)를 단일 공유 라이브러리(spirv-cross-c-shared)로 만든다. 예외는 라이브러리 안에서만 쓰이고 C API가 오류 값으로 바꾼다.",
+    "macos-arm64 산출물은 아직 없다(Build.sh 미검증)."
+  ]
+}
