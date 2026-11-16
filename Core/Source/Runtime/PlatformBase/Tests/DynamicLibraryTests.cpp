@@ -97,9 +97,9 @@ struct FixturePair {
     char nameA[64]{};
     char nameB[64]{};
 
-    explicit FixturePair(uint32 serial) noexcept {
-        LibraryName("A", serial, nameA, sizeof(nameA));
-        LibraryName("B", serial, nameB, sizeof(nameB));
+    explicit FixturePair(uint32 serial, const char* stemA = "A", const char* stemB = "B") noexcept {
+        LibraryName(stemA, serial, nameA, sizeof(nameA));
+        LibraryName(stemB, serial, nameB, sizeof(nameB));
     }
 
     bool WriteA(const char* path) const noexcept {
@@ -451,7 +451,104 @@ TEST(DynamicLibraryOwnerDestroyedBeforeLeaseKeepsLibrary) {
     CHECK(!LibraryIsLoaded(pair.nameB));
 }
 
-// 확장 경로 접두사가 필요한 긴 경로(Windows 260자 이상)도 연다.
+namespace {
+
+// 경로 길이 경계다: 239·240(파일 backend가 확장 경로 접두사 "\\?\"를 붙이기 시작하는 240),
+// 247·248(디렉터리 생성 한도 248), 259·260·261(MAX_PATH 260), 그리고 그보다 긴 경로.
+constexpr usize LongPathTargets[] = {239, 240, 247, 248, 259, 260, 261, 300, 512};
+
+// 작업 디렉터리 길이와 관계없이 마지막에 시험하는 길이다(기준 경로 + 이만큼, 언제나 260 초과).
+constexpr usize LongPathMargin = 300;
+
+constexpr usize LongPathCapacity = 2048;
+
+constexpr usize MaxSegmentBytes = 64;
+
+// root 아래에 디렉터리 이름 조각을 붙여 "<directory>/<fileBytes byte 파일 이름>"의 길이가 정확히
+// target byte가 되게 한다. 붙일 길이(구분자 포함)를 MaxSegmentBytes 이하 조각으로 나누며 마지막에
+// 1(구분자만)이 남지 않게 앞 조각을 한 글자 줄인다. 붙일 길이가 정확히 1이면 만들 수 없어 false다.
+bool PadDirectory(const char* root, usize target, usize fileBytes, char* directory,
+                  usize capacity) noexcept {
+    usize length = strlen(root);
+    if (length + 1u + fileBytes > target || target >= capacity) {
+        return false;
+    }
+
+    usize remaining = target - length - 1u - fileBytes;
+    if (remaining == 1u) {
+        return false;
+    }
+
+    memcpy(directory, root, length);
+    while (remaining != 0) {
+        usize segment = remaining - 1u > MaxSegmentBytes ? MaxSegmentBytes : remaining - 1u;
+        if (remaining - 1u - segment == 1u) {
+            --segment;
+        }
+
+        directory[length++] = NativePathSeparator();
+        memset(directory + length, 'd', segment);
+        length += segment;
+        remaining -= segment + 1u;
+    }
+
+    directory[length] = '\0';
+    return true;
+}
+
+// 전체 경로가 정확히 target byte인 자리에 의존 쌍을 쓰고 A를 연다. 기준 경로가 target보다 길어
+// 만들 수 없으면 checked를 false로 둔다(실패가 아니다).
+void OpenAtPathLength(const Scratch& scratch, usize target, bool& checked) noexcept {
+    checked = false;
+    char root[LongPathCapacity];
+    const int rootCount = snprintf(root, sizeof(root), "%s%c%llu", scratch.path,
+                                   NativePathSeparator(), static_cast<unsigned long long>(target));
+    REQUIRE(rootCount > 0 && static_cast<usize>(rootCount) < sizeof(root));
+
+    // 붙일 길이가 1이면 파일 이름을 한 글자 늘려 같은 전체 길이를 만든다.
+    const uint32 serial = NextSerial();
+    FixturePair pair(serial);
+    char directory[LongPathCapacity];
+    if (!PadDirectory(root, target, strlen(pair.nameA), directory, sizeof(directory))) {
+        pair = FixturePair(serial, "AX", "BX");
+        if (!PadDirectory(root, target, strlen(pair.nameA), directory, sizeof(directory))) {
+            return;
+        }
+    }
+
+    REQUIRE(MakeDirectoryTree(PhysicalFileSystem(), directory, strlen(directory)));
+    char pathA[LongPathCapacity];
+    char pathB[LongPathCapacity];
+    snprintf(pathA, sizeof(pathA), "%s%c%s", directory, NativePathSeparator(), pair.nameA);
+    snprintf(pathB, sizeof(pathB), "%s%c%s", directory, NativePathSeparator(), pair.nameB);
+    REQUIRE(strlen(pathA) == target);
+    REQUIRE(pair.WriteA(pathA));
+    REQUIRE(pair.WriteB(pathB));
+
+    DynamicLibrary library;
+    const FileStatus opened = library.Open(pathA);
+    if (!opened) {
+        printf("  long path %llu bytes: Open failed (code %d, native %u)\n",
+               static_cast<unsigned long long>(target), static_cast<int>(opened.code),
+               opened.nativeError);
+    }
+
+    REQUIRE(opened);
+    DynamicLibraryLease lease;
+    void* value = nullptr;
+    REQUIRE(library.Find("RocksValue", value, lease));
+    CHECK(ReadValue(value) == ValueA);
+    lease.Reset();
+    CHECK(library.Close());
+    checked = true;
+}
+
+} // namespace
+
+// MAX_PATH 경계 앞뒤와 그보다 긴 경로에서 같은 디렉터리 의존까지 연다. 경로는 작업 디렉터리 길이와
+// 관계없이 정확한 전체 길이로 만든다(고정 개수의 디렉터리를 붙이면 짧은 작업 디렉터리에서 260자를
+// 넘지 못한다). 기준 경로보다 짧은 경계 길이는 만들 수 없어 건너뛰지만, 기준 경로 + 300 길이는
+// 언제나 시험한다.
 TEST(DynamicLibraryOpensLongPath) {
     if (SkipWithoutFixtures("DynamicLibraryOpensLongPath")) {
         return;
@@ -459,32 +556,14 @@ TEST(DynamicLibraryOpensLongPath) {
 
     Scratch scratch;
     REQUIRE(scratch.Make("long"));
-    char directory[1100];
-    const int count = snprintf(
-        directory, sizeof(directory), "%s%c%s%c%s%c%s", scratch.path, NativePathSeparator(),
-        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", NativePathSeparator(),
-        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", NativePathSeparator(),
-        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
-    REQUIRE(count > 0 && static_cast<usize>(count) < sizeof(directory));
-    REQUIRE(MakeDirectoryTree(PhysicalFileSystem(), directory, static_cast<usize>(count)));
+    for (const usize target : LongPathTargets) {
+        bool checked = false;
+        OpenAtPathLength(scratch, target, checked);
+    }
 
-    const FixturePair pair(NextSerial());
-    char pathA[1300];
-    char pathB[1300];
-    snprintf(pathA, sizeof(pathA), "%s%c%s", directory, NativePathSeparator(), pair.nameA);
-    snprintf(pathB, sizeof(pathB), "%s%c%s", directory, NativePathSeparator(), pair.nameB);
-    REQUIRE(strlen(pathA) > 260);
-    REQUIRE(pair.WriteA(pathA));
-    REQUIRE(pair.WriteB(pathB));
-
-    DynamicLibrary library;
-    REQUIRE(library.Open(pathA));
-    DynamicLibraryLease lease;
-    void* value = nullptr;
-    REQUIRE(library.Find("RocksValue", value, lease));
-    CHECK(ReadValue(value) == ValueA);
-    lease.Reset();
-    CHECK(library.Close());
+    bool checked = false;
+    OpenAtPathLength(scratch, scratch.length + LongPathMargin, checked);
+    CHECK(checked);
 }
 
 namespace {

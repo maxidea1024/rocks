@@ -39,6 +39,10 @@
   <Target Name="Test" DependsOnTargets="BootstrapTools">
     <Exec Command="$(Tool) test $(CommonArguments) --target $(RocksTarget)" />
   </Target>
+  <!-- 미리 빌드한 바이너리(manifest kind: binary)를 사용자 단위 저장소에 받는다. Build·Test는 받지 않는다(Build/README.md). -->
+  <Target Name="ThirdPartyBootstrap" DependsOnTargets="BootstrapTools">
+    <Exec Command="$(Tool) bootstrap --root &quot;$(RocksRoot).&quot;" />
+  </Target>
   <Target Name="InstalledSdk" DependsOnTargets="BootstrapTools">
     <Error Condition="'$(SdkDestination)' == ''" Text="SdkDestination is required; use a new versioned directory." />
     <Exec Command="$(Tool) sdk $(CommonArguments) --target $(SdkTarget) --destination &quot;$(SdkDestinationText)&quot;" />

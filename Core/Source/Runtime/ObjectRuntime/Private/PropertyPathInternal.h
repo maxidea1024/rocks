@@ -40,6 +40,11 @@ struct PathRunner {
         cursor.attach_ = attach;
     }
 
+    // PathPrepareReference의 출력 자리를 건다(리플렉션 B9i3c2).
+    static void BindReference(PathCursor& cursor, PreparedReference& out) noexcept {
+        cursor.reference_ = &out;
+    }
+
     static usize Length(const PathCursor& cursor) noexcept {
         return cursor.length_;
     }

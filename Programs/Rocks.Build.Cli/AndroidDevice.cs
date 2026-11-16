@@ -85,20 +85,9 @@ internal static class AndroidDevice
     /// </summary>
     internal static IReadOnlyList<string> DataFiles(string root)
     {
-        string thirdParty = Path.Combine(root, ThirdPartyManifest.ThirdPartyRoot);
-        if (!Directory.Exists(thirdParty))
-        {
-            return [];
-        }
-
         List<string> files = [];
-        foreach (string library in Directory.EnumerateDirectories(thirdParty).Order(StringComparer.Ordinal))
+        foreach (string library in ThirdPartyManifest.LibraryDirectories(root))
         {
-            if (!File.Exists(Path.Combine(library, "ThirdParty.json")))
-            {
-                continue;
-            }
-
             ThirdPartyManifest manifest = ThirdPartyManifest.Read(library);
             if (manifest.Kind != ThirdPartyKind.Data)
             {
@@ -106,7 +95,7 @@ internal static class AndroidDevice
             }
 
             // 시험이 manifest로 파일 목록을 읽기도 하므로(JsonTests) manifest도 함께 올린다.
-            string libraryPrefix = $"{ThirdPartyManifest.ThirdPartyRoot}/{Path.GetFileName(library)}/";
+            string libraryPrefix = Path.GetRelativePath(Path.GetFullPath(root), library).Replace('\\', '/') + "/";
             files.Add(libraryPrefix + "ThirdParty.json");
             string prefix = libraryPrefix + manifest.UpstreamDirectory + "/";
             files.AddRange(manifest.Files.Keys.Order(StringComparer.Ordinal).Select(file => prefix + file));

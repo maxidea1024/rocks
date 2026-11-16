@@ -10,7 +10,8 @@ namespace Rocks.Tooling.Checks;
 /// 진단 지시문(<c>#pragma warning</c>·<c>clang/GCC diagnostic</c>, 경고 억제 define)이 실제로 가리는 경고가 없음을
 /// 매 실행 증명한다.
 /// <list type="number">
-/// <item>compile DB에서 <c>Core/Source/ThirdParty/&lt;Lib&gt;/</c> 번역 단위를 찾는다(이번 구성·toolchain의 실제 인자).</item>
+/// <item>compile DB에서 외부 라이브러리 루트(<see cref="ThirdPartyManifest.ThirdPartyRoots"/>)의 <c>&lt;Lib&gt;/</c> 번역 단위를 찾는다
+/// (이번 구성·toolchain의 실제 인자).</item>
 /// <item>라이브러리 폴더를 임시 위치로 복사하고 원본의 진단 지시문 줄을 빈 줄로 바꾼다(줄 번호 유지).</item>
 /// <item>같은 인자로 문법 검사만 한다(출력·LTO 인자 제외). 진단이 하나라도 나오면 실패다.</item>
 /// </list>
@@ -31,12 +32,15 @@ public static class ThirdPartyDirectiveProbe
     {
         root = Path.GetFullPath(root);
         // compile DB 경로와 비교하도록 플랫폼 구분자로 정규화한다.
-        string thirdParty = Path.GetFullPath(Path.Combine(root, ThirdPartyManifest.ThirdPartyRoot)) + Path.DirectorySeparatorChar;
+        string[] thirdPartyRoots = ThirdPartyManifest.ThirdPartyRoots
+            .Select(parent => Path.GetFullPath(Path.Combine(root, parent)) + Path.DirectorySeparatorChar).ToArray();
         using JsonDocument document = JsonDocument.Parse(File.ReadAllText(compileCommands, new UTF8Encoding(false, true)));
         var entries = document.RootElement.EnumerateArray()
             .Select(entry => (File: Path.GetFullPath(entry.GetProperty("file").GetString()!),
                 Arguments: entry.GetProperty("arguments").EnumerateArray().Select(value => value.GetString()!).ToArray()))
-            .Where(entry => entry.File.StartsWith(thirdParty, StringComparison.OrdinalIgnoreCase))
+            .Select(entry => (entry.File, entry.Arguments,
+                Parent: thirdPartyRoots.FirstOrDefault(parent => entry.File.StartsWith(parent, StringComparison.OrdinalIgnoreCase))))
+            .Where(entry => entry.Parent is not null)
             .ToArray();
 
         string temporary = Path.Combine(Path.GetTempPath(), "rocks-thirdparty-" + Guid.NewGuid().ToString("N"));
@@ -44,11 +48,12 @@ public static class ThirdPartyDirectiveProbe
         int verified = 0;
         try
         {
-            foreach (var library in entries.GroupBy(entry => entry.File[thirdParty.Length..].Split(Path.DirectorySeparatorChar, '/')[0],
-                         StringComparer.OrdinalIgnoreCase))
+            // 라이브러리 이름은 두 루트를 통틀어 하나다(정책 검사 third-party).
+            foreach (var library in entries.GroupBy(entry => Path.Combine(entry.Parent!,
+                         entry.File[entry.Parent!.Length..].Split(Path.DirectorySeparatorChar, '/')[0]), StringComparer.OrdinalIgnoreCase))
             {
-                string source = Path.Combine(thirdParty, library.Key);
-                string copy = Path.Combine(temporary, library.Key);
+                string source = library.Key;
+                string copy = Path.Combine(temporary, Path.GetFileName(library.Key));
                 ThirdPartyManifest manifest = ThirdPartyManifest.Read(source);
                 int stripped = CopyWithoutDiagnosticDirectives(source, copy, manifest.UpstreamDirectory);
                 if (stripped == 0)
@@ -84,7 +89,7 @@ public static class ThirdPartyDirectiveProbe
                 if (failures.Count != 0)
                 {
                     throw new InvalidOperationException(
-                        $"{library.Key}: upstream diagnostic directives hide warnings (Compression.ko.md 3.6 rule 2):\n" +
+                        $"{Path.GetFileName(library.Key)}: upstream diagnostic directives hide warnings (Compression.ko.md 3.6 rule 2):\n" +
                         string.Join("\n", failures));
                 }
 

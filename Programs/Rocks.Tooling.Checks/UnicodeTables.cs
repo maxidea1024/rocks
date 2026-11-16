@@ -37,7 +37,7 @@ public static class UnicodeTables
     /// <summary>원본에서 생성한 헤더 텍스트다. 원본이 계약과 다르면(<see cref="FormatException"/>) 표를 만들지 않는다.</summary>
     public static string Generate(string root)
     {
-        string library = Path.Combine(Path.GetFullPath(root), ThirdPartyManifest.ThirdPartyRoot, LibraryName);
+        string library = Path.Combine(Path.GetFullPath(root), ThirdPartyManifest.CoreThirdPartyRoot, LibraryName);
         ThirdPartyManifest manifest = ThirdPartyManifest.Read(library);
         if (manifest.Kind != ThirdPartyKind.Data)
         {
@@ -72,7 +72,7 @@ public static class UnicodeTables
     /// <summary>저장소의 생성 파일이 원본으로 만든 결과와 같은지 본다(rule id <c>unicode-tables</c>).</summary>
     public static IReadOnlyList<CheckFailure> Check(string root)
     {
-        string library = Path.Combine(Path.GetFullPath(root), ThirdPartyManifest.ThirdPartyRoot, LibraryName);
+        string library = Path.Combine(Path.GetFullPath(root), ThirdPartyManifest.CoreThirdPartyRoot, LibraryName);
         if (!Directory.Exists(library))
         {
             return [];

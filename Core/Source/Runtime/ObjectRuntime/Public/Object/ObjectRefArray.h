@@ -98,6 +98,11 @@ public:
         return Span<const ObjectHandle>(storage_.data, storage_.size);
     }
 
+    // 원소 버퍼를 할당하는 allocator다(생성자에 준 것).
+    Allocator& GetAllocator() const noexcept {
+        return *storage_.allocator;
+    }
+
     // 첫 번째로 handle과 같은 원소의 위치다. null(IsNull)은 첫 null 원소를 찾는다. 없으면 NotFound
     // 값(Size())을 반환한다.
     usize IndexOf(ObjectHandle handle) const noexcept {

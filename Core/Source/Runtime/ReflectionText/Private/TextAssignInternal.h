@@ -4,6 +4,7 @@
 
 #include <Core/Containers/Array.h>
 #include <Object/ObjectRefs.h>
+#include <Object/PreparedReferences.h>
 #include <ReflectionText/TextAssignments.h>
 
 // 대입 묶음(리플렉션 B9i3c1 — ReflectionText/TextAssignments.h)의 내부 상태다.
@@ -25,6 +26,39 @@ struct AssignmentUnit {
     DetachedValue box;
     Array<PathStep> steps;
     PreparedAttach prepared;
+    bool dirty = false;
+};
+
+// 단일 강한 참조 위치의 간선 변경 단위다(리플렉션 B9i3c2): 위치 경로(인라인 struct 멤버·정적 배열과
+// StructRefArray의 index 선택자 — key 없음), 새 대상, 게시 자리와 옛 대상(Publish가 찾는다).
+struct ReferenceUnit {
+    explicit ReferenceUnit(Allocator& allocator) noexcept : steps(allocator) {
+    }
+
+    PropertyPath Path() const noexcept {
+        return PropertyPath{steps.View(), {}};
+    }
+
+    Array<PathStep> steps;
+    ObjectHandle target{};
+    // 게시한 뒤에는 게시 전 대상이다.
+    ObjectHandle previous{};
+    PreparedReference prepared;
+};
+
+// Registry 컨테이너(ObjectRefArray·ObjectRefMap) 단위다(리플렉션 B9i3c3): 컨테이너 필드·멤버
+// 경로(선택자 없음 — 앞 단계는 인라인 struct), 준비 사본(묶을 때의 내용과 대입이 만든 새 내용),
+// 대입이 사본을 바꿨는지.
+struct ContainerUnit {
+    explicit ContainerUnit(Allocator& allocator) noexcept : steps(allocator), stage(allocator) {
+    }
+
+    PropertyPath Path() const noexcept {
+        return PropertyPath{steps.View(), {}};
+    }
+
+    Array<PathStep> steps;
+    PreparedReferences stage;
     bool dirty = false;
 };
 
@@ -87,13 +121,17 @@ struct AssignmentState {
     // Live 대상의 변경 표지(Prepare 처음에 읽는다).
     uint64 stamp = 0;
     Array<UniquePtr<AssignmentUnit>> units;
+    // 단일 강한 참조 위치 단위다(값이 실제로 바뀌는 것만).
+    Array<UniquePtr<ReferenceUnit>> references;
+    // Registry 컨테이너 단위다(리플렉션 B9i3c3).
+    Array<UniquePtr<ContainerUnit>> containers;
     // 해석한 대입 경로(같은 경로 두 번 검사).
     PathCopies assigned;
     // override 경로(선택자·key 없음)의 단계와 범위, 그 view.
     Array<PathStep> overrideSteps;
     Array<usize> overrideEnds;
     Array<PropertyPath> overrideViews;
-    // 새로 가리키는 Weak 대상의 고정이다(Publish가 끝나면 놓는다).
+    // 새로 가리키는 Hard·Weak 대상의 고정이다(Publish가 끝나면 놓는다).
     Array<RootRef<Object>> pins;
     // 진단을 남긴 묶음이다(게시할 수 없다).
     bool failed = false;
@@ -108,6 +146,11 @@ Result<void> ProcessAssignment(AssignmentState& state, const TextAssignment& ass
 // 단위 경로(선택자 없음)의 준비 단위를 찾거나 대상에서 떼어 만든다. 진단을 남겼으면 nullptr이다.
 Result<AssignmentUnit*> AcquireUnit(AssignmentState& state, PropertyPath unitPath,
                                     TextSource source, StringView pathText) noexcept;
+
+// 컨테이너 경로(선택자 없음)의 Registry 컨테이너 단위를 찾거나 만들어 지금 내용으로 묶는다(리플렉션
+// B9i3c3). 진단을 남겼으면 nullptr이다.
+Result<ContainerUnit*> AcquireContainer(AssignmentState& state, PropertyPath unitPath,
+                                        TextSource source, StringView pathText) noexcept;
 
 // 끝 경로 path의 override 경로를 state에 넣는다(같은 경로가 있으면 무동작).
 Result<void> AddOverride(AssignmentState& state, PropertyPath path) noexcept;

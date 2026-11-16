@@ -3,6 +3,7 @@
 #include <Object/AssetId.h>
 #include <Object/DetachedPath.h>
 #include <Object/PathKey.h>
+#include <Object/PreparedReferences.h>
 #include <Object/PropertyPath.h>
 
 // 경로 접근 cursor의 공개 detail 선언이다(Docs/Design/ReflectionFoundations.ko.md 7.1절). 생성 경로
@@ -139,6 +140,35 @@ public:
     // Attach 끝 지점이다: 상자 값의 형식이 ops와 같은지 대조하고(TypeMismatch(StaticTypeMismatch))
     // value 자리를 출력 PreparedAttach에 둔다(값은 바꾸지 않는다).
     Result<void> AttachValue(const RuntimeValueOps& ops, void* value) noexcept;
+
+    // PathPrepareReference(리플렉션 B9i3c2)인지다: 참조 쓰기 끝 지점이 값을 바꾸지 않고 자리를
+    // 찾는다(Write 연산 — 검증은 PathWrite와 같다).
+    bool LocatesReference() const noexcept {
+        return reference_ != nullptr;
+    }
+
+    // 단일 참조 위치 끝 지점이다: field 자리와 그 대상 타입·지금 대상·원소 위치를 출력
+    // PreparedReference에 둔다(값은 바꾸지 않는다).
+    template <class T>
+    Result<void> LocateReference(ObjectRef<T>& field) noexcept {
+        return LocateReferenceAt(&field, &PreparedReference::PublishAt<T>, NativeTypeKey<T>(),
+                                 field.Handle());
+    }
+
+    // 시작 위치에 건 Registry 컨테이너 준비 사본이다(리플렉션 B9i3c3 — PathTarget::WithReferences,
+    // 없으면 nullptr). 있으면 ObjectRefArray·ObjectRefMap 끝 지점이 객체 대신 사본을 읽고 바꾼다.
+    PreparedReferences* StagedReferences() const noexcept {
+        return stage_;
+    }
+
+    // 준비 사본 끝 지점이 부른다: 사본이 묶이지 않았으면 container(그 연산 표 ops, 컨테이너
+    // allocator)를 묶고 지금 내용(배열은 elements, Map은 사본 clone의 값)을 Previous로 둔다 —
+    // 게시된 객체는 고정 아래 복사하고 owner를 다시 확인한다. 이미 묶였으면 같은 컨테이너·owner인지
+    // 대조한다(아니면 InvalidArgument(InvalidValue)). clone은 결과와 무관하게 넘겨받는다(실패하거나
+    // 이미 묶였으면 반환한다).
+    Result<void> BindReferences(void* container, const ReferenceStageOps& ops,
+                                Allocator& containerAllocator, Span<const ObjectHandle> elements,
+                                void* clone) noexcept;
 
     // Write·Insert의 입력 값이다(Insert의 struct 원소는 nullptr). 검증을 마친 값이다.
     const FieldValue* Input() const noexcept {
@@ -297,6 +327,9 @@ private:
 
     void Record(ErrorCode code, PropertyPathError reason) noexcept;
 
+    Result<void> LocateReferenceAt(void* field, PreparedReference::PublishFunction publish,
+                                   const void* nativeType, ObjectHandle previous) noexcept;
+
     ObjectRegistry& registry_;
     const ObjectAccessContext& access_;
     ObjectHandle owner_;
@@ -312,6 +345,10 @@ private:
     // Detach의 출력 상자·Attach의 입력 상자와 Attach의 출력 자리다.
     DetachedValue* box_ = nullptr;
     PreparedAttach* attach_ = nullptr;
+    // PathPrepareReference의 출력 자리다(리플렉션 B9i3c2).
+    PreparedReference* reference_ = nullptr;
+    // 시작 위치에 건 Registry 컨테이너 준비 사본이다(리플렉션 B9i3c3).
+    PreparedReferences* stage_;
     PathOperation operation_;
     const FieldValue* input_;
     FieldValue* output_;

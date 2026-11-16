@@ -157,6 +157,29 @@ public:
     // index번째 게시 단위의 옛 값이다(Undo가 읽는다 — PathTarget::Value(box)로 경로 연산을 쓴다).
     DetachedValue& OldValue(usize index) noexcept;
 
+    // 게시한 단일 강한 참조 위치(간선 변경 단위 — 리플렉션 B9i3c2) 수다. 값 단위(UnitCount)와 따로
+    // 센다.
+    usize ReferenceCount() const noexcept;
+
+    // index번째 참조 위치의 경로(ObjectRef 필드·멤버, 정적 배열 원소면 그 index 선택자 포함)다
+    // (index < ReferenceCount()).
+    PropertyPath ReferencePath(usize index) const noexcept;
+
+    // index번째 참조 위치가 게시 전에 가리키던 대상이다(null 가능 — Undo가 그 경로에 다시 쓴다).
+    // 옛 대상을 고정하지 않으므로 Undo는 대상 생존을 다시 확인한다.
+    ObjectHandle OldReference(usize index) const noexcept;
+
+    // 게시한 Registry 컨테이너(ObjectRefArray·ObjectRefMap — 리플렉션 B9i3c3) 단위 수다. 값
+    // 단위·참조 위치와 따로 센다.
+    usize ContainerCount() const noexcept;
+
+    // index번째 컨테이너의 경로(필드·멤버 하나 — 선택자 없음)다(index < ContainerCount()).
+    PropertyPath ContainerPath(usize index) const noexcept;
+
+    // index번째 컨테이너가 게시 전에 담던 handle이다(배열 순서·Map 항목 순서, null 포함 — Map의
+    // 키는 담지 않는다). 옛 대상을 고정하지 않으므로 Undo는 대상 생존을 다시 확인한다.
+    Span<const ObjectHandle> OldReferences(usize index) const noexcept;
+
 private:
     friend class PreparedAssignments;
 

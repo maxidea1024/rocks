@@ -2,6 +2,7 @@
 
 #include <Base/TypeTraits.h>
 #include <Object/GeneratedFieldAccess.h>
+#include <Object/ObjectBatchPublish.h>
 #include <Object/PathCursor.h>
 #include <Object/ValueCopy.h>
 #include <Platform/Fatal.h>
@@ -15,6 +16,18 @@
 // 대조해 void* 타입 혼동을 막는다. Map·Set의 key 단계(리플렉션 B9f3 —
 // Docs/Design/ReflectionExtensions.ko.md 7.3절)는 PathKeyedContainer다. Serialization에 의존하지
 // 않는다.
+namespace rocks {
+
+// 경로로 찾은 참조 자리의 형식별 게시 함수다(Object/DetachedPath.h — PathPrepareReference가 이
+// 함수의 주소를 PreparedReference에 둔다).
+template <class T>
+void PreparedReference::PublishAt(ObjectBatchPublish& batch, void* field, ObjectHandle target,
+                                  const detail::StructElementLocation* element) noexcept {
+    batch.PublishReferenceAt(*static_cast<ObjectRef<T>*>(field), target, element);
+}
+
+} // namespace rocks
+
 namespace rocks::detail {
 
 // 경로의 참조 멤버 쓰기 단일 지점이다(7.1절): StructRefArray 원소 안이면 그 원소 위치의 live
@@ -27,6 +40,11 @@ Result<void> SetPathMemberReference(PathCursor& cursor, ObjectRef<T>& field,
                                     ObjectHandle target) noexcept {
     if (cursor.IsDetached()) {
         return cursor.Fail(ErrorCode::Unsupported, PropertyPathError::NoPathAccess);
+    }
+
+    // PathPrepareReference는 자리만 찾는다(리플렉션 B9i3c2 — 게시는 묶음 게시 구간).
+    if (cursor.LocatesReference()) {
+        return cursor.LocateReference(field);
     }
 
     if (ConstructionContext* staged = cursor.Construction()) {
@@ -350,10 +368,23 @@ Result<void> PathContainer(PathCursor& cursor, Array<E>& array) noexcept {
     }
 }
 
+// Registry 컨테이너 준비 사본 위의 ObjectRefArray·ObjectRefMap 단계다(리플렉션 B9i3c3 — 정의는 이
+// 헤더 끝에서 include하는 Object/GeneratedStagedReferenceAccess.h).
+template <class T>
+Result<void> PathStagedReferenceArray(PathCursor& cursor, ObjectRefArray<T>& array) noexcept;
+
+template <class K, class T>
+Result<void> PathStagedReferenceMap(PathCursor& cursor, ObjectRefMap<K, T>& map) noexcept;
+
 // ObjectRefArray 필드·멤버의 단계다(원소 null 허용 — 비정규 null은 Registry가 정규화한다). Registry
-// 컨테이너 API로 바꾸며 고정을 쥐지 않는다(자체 재판단 규칙 — 5.6절).
+// 컨테이너 API로 바꾸며 고정을 쥐지 않는다(자체 재판단 규칙 — 5.6절). 시작 위치에 준비 사본이 걸려
+// 있으면 객체 대신 사본을 바꾼다.
 template <ValueKind Target, class T>
 Result<void> PathContainer(PathCursor& cursor, ObjectRefArray<T>& array) noexcept {
+    if (cursor.StagedReferences()) {
+        return PathStagedReferenceArray(cursor, array);
+    }
+
     ObjectRegistry& registry = cursor.Registry();
     const ObjectAccessContext& access = cursor.Access();
     const ObjectHandle owner = cursor.OwnerHandle();
@@ -841,3 +872,4 @@ Result<void> PathStructMember(const RuntimeStructFieldOps&, PathCursor& cursor,
 
 #include <Object/GeneratedKeyedPathAccess.h>
 #include <Object/GeneratedDetachedPathAccess.h>
+#include <Object/GeneratedStagedReferenceAccess.h>

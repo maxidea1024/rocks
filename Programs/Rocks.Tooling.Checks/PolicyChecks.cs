@@ -324,7 +324,16 @@ public static partial class PolicyChecks
         return failures;
     }
 
-    /// <summary>새 MSBuild/CLI/workflow/launcher만 검사한다. 보존된 .py와 시험 fixture는 실행 경로가 아니다.</summary>
+    /// <summary>
+    /// 오프라인 도구 빌드 workflow다. 기본 빌드·시험 경로가 아니며 업스트림 빌드(DXC·SPIRV-Tools)가 Python으로 표를 생성하므로
+    /// <see cref="PythonFreeMainPath"/>에서 이 파일 하나만 명시 제외한다(Docs/Design/ShaderSystem.ko.md 8절 4항).
+    /// </summary>
+    public const string ThirdPartyToolsWorkflow = ".github/workflows/third-party-tools.yml";
+
+    /// <summary>
+    /// 새 MSBuild/CLI/workflow/launcher만 검사한다. 보존된 .py와 시험 fixture는 실행 경로가 아니다. 오프라인 도구 빌드 workflow
+    /// (<see cref="ThirdPartyToolsWorkflow"/>)만 명시 제외한다.
+    /// </summary>
     public static IReadOnlyList<CheckFailure> PythonFreeMainPath(string root)
     {
         List<CheckFailure> failures = [];
@@ -332,7 +341,8 @@ public static partial class PolicyChecks
         {
             string relative = Relative(root, path);
             if (relative.StartsWith("Programs/Rocks.ToolTests/", StringComparison.Ordinal) ||
-                relative.StartsWith("Programs/Rocks.Tooling.Checks/", StringComparison.Ordinal))
+                relative.StartsWith("Programs/Rocks.Tooling.Checks/", StringComparison.Ordinal) ||
+                relative == ThirdPartyToolsWorkflow)
             {
                 continue;
             }
@@ -383,19 +393,16 @@ public static partial class PolicyChecks
     /// </summary>
     internal static IReadOnlyList<string> UpstreamDirectories(string root)
     {
-        string thirdParty = Path.Combine(Path.GetFullPath(root), ThirdPartyManifest.ThirdPartyRoot);
-        if (!Directory.Exists(thirdParty))
-        {
-            return [];
-        }
-
         List<string> directories = [];
-        foreach (string library in Directory.EnumerateDirectories(thirdParty).Order(StringComparer.Ordinal))
+        foreach (string library in ThirdPartyManifest.LibraryDirectories(root))
         {
             try
             {
                 ThirdPartyManifest manifest = ThirdPartyManifest.Read(library);
-                directories.Add($"{ThirdPartyManifest.ThirdPartyRoot}/{Path.GetFileName(library)}/{manifest.UpstreamDirectory}/");
+                if (manifest.HasUpstream)
+                {
+                    directories.Add($"{Relative(Path.GetFullPath(root), library)}/{manifest.UpstreamDirectory}/");
+                }
             }
             catch (FormatException)
             {
