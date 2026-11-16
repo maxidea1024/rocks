@@ -18,6 +18,9 @@ public abstract class TestsModule : ModuleRules
     // Core 계층 개발 도구 모듈(Core/Source/Developer)의 테스트다(모든 테스트 실행 파일에 들어간다).
     private static readonly string[] DeveloperTestModules = ["CompressionTraining"];
 
+    // Object 계열 시험이 쓰는 개발 도구 모듈이다(FoundationTests·EngineTests가 링크한다). GcSoak: 장기 GC smoke 시뮬레이터.
+    private static readonly string[] ObjectDeveloperModules = ["GcSoak"];
+
     // Object 계열 모듈의 테스트다(FoundationTests·EngineTests에 들어간다).
     private static readonly string[] ObjectTestModules = ["ObjectRuntime", "ObjectSerialization"];
 
@@ -57,8 +60,8 @@ public abstract class TestsModule : ModuleRules
         string[] dependencies = Layer switch
         {
             TestLayer.Core => ["Task", "Localization", "Serialization", "Compression", "Crypto", .. DeveloperTestModules],
-            TestLayer.Foundation => ["ObjectSerialization", "Localization", "Compression", "Crypto", .. DeveloperTestModules],
-            _ => ["ObjectSerialization", "Localization", "Compression", "Crypto", .. DeveloperTestModules,
+            TestLayer.Foundation => ["ObjectSerialization", "Localization", "Compression", "Crypto", .. DeveloperTestModules, .. ObjectDeveloperModules],
+            _ => ["ObjectSerialization", "Localization", "Compression", "Crypto", .. DeveloperTestModules, .. ObjectDeveloperModules,
                 .. EngineTestDependencies]
         };
 
