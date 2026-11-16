@@ -672,14 +672,34 @@ template <typename T>
 inline constexpr bool IsTriviallyMoveAssignableV = IsTriviallyMoveAssignable<T>::Value;
 
 // 배열 차원과 길이. 배열이 아니거나 해당 차원이 없으면 0이다.
+// __array_rank·__array_extent 대신 부분 특수화로 계산한다: Android NDK r29 clang은 경계 없는
+// 배열(const int[][3][4])의 __array_rank 상수 평가에서 frontend가 죽는다.
 template <typename T>
-struct Rank : IntegralConstant<decltype(sizeof(0)), __array_rank(T)> {};
+struct Rank : IntegralConstant<decltype(sizeof(0)), 0> {};
+
+template <typename T>
+struct Rank<T[]> : IntegralConstant<decltype(sizeof(0)), Rank<T>::Value + 1> {};
+
+template <typename T, decltype(sizeof(0)) Size>
+struct Rank<T[Size]> : IntegralConstant<decltype(sizeof(0)), Rank<T>::Value + 1> {};
 
 template <typename T>
 inline constexpr decltype(sizeof(0)) RankV = Rank<T>::Value;
 
 template <typename T, unsigned Dimension = 0>
-struct Extent : IntegralConstant<decltype(sizeof(0)), __array_extent(T, Dimension)> {};
+struct Extent : IntegralConstant<decltype(sizeof(0)), 0> {};
+
+template <typename T>
+struct Extent<T[], 0> : IntegralConstant<decltype(sizeof(0)), 0> {};
+
+template <typename T, unsigned Dimension>
+struct Extent<T[], Dimension> : Extent<T, Dimension - 1> {};
+
+template <typename T, decltype(sizeof(0)) Size>
+struct Extent<T[Size], 0> : IntegralConstant<decltype(sizeof(0)), Size> {};
+
+template <typename T, decltype(sizeof(0)) Size, unsigned Dimension>
+struct Extent<T[Size], Dimension> : Extent<T, Dimension - 1> {};
 
 template <typename T, unsigned Dimension = 0>
 inline constexpr decltype(sizeof(0)) ExtentV = Extent<T, Dimension>::Value;
