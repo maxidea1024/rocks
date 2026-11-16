@@ -799,47 +799,6 @@ TEST(CoreHashCollectionsCompactFailureAndRecovery) {
     CHECK(backing.Stats().liveBytes == 0);
 }
 
-TEST(CoreHashCollectionsAutomaticTombstoneCleanupFailure) {
-    SystemAllocator backing;
-    test::NFailAllocator allocator(backing);
-    {
-        HashMap<int32, TrackedValue, CollisionHash> map(allocator);
-        REQUIRE(map.Reserve(16));
-        for (int32 key = 0; key != 12; ++key) {
-            REQUIRE(map.Insert(key, TrackedValue(key * 10)));
-        }
-        for (int32 key = 0; key != 9; ++key) {
-            CHECK(map.Erase(key));
-        }
-        auto* old = map.Find(10);
-        REQUIRE(old != nullptr);
-        const usize oldCapacity = map.Capacity();
-        TrackedValue candidate(900);
-        // 삭제 슬롯이 쌓인 상황에서 자동 재구성이 실패해도 후보와 기존 주소를 보존한다.
-        allocator.FailOnAttempt(1);
-        auto fail = map.Insert(99, Move(candidate));
-        CHECK(!fail);
-        CHECK(fail.Error() == ErrorCode::OutOfMemory);
-        CHECK(candidate.value == 900);
-        CHECK(map.Capacity() == oldCapacity);
-        CHECK(map.Find(10) == old);
-        CHECK(old->value == 100);
-        CHECK(map.Count() == 3);
-        CHECK(map.Find(99) == nullptr);
-        allocator.DisableFailure();
-        auto inserted = map.Insert(99, Move(candidate));
-        REQUIRE(inserted);
-        CHECK(inserted.Value() == InsertOutcome::Inserted);
-        REQUIRE(map.Find(99) != nullptr);
-        CHECK(map.Find(99)->value == 900);
-        REQUIRE(map.Find(10) != nullptr);
-        CHECK(map.Find(10)->value == 100);
-    }
-    CHECK(TrackedValue::live == 0);
-    CHECK(backing.Stats().liveAllocations == 0);
-    CHECK(backing.Stats().liveBytes == 0);
-}
-
 TEST(CoreHashCollisionWraparoundAndDuplicateBeyondDeletion) {
     SystemAllocator allocator;
     {

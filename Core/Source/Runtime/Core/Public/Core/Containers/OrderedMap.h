@@ -224,7 +224,8 @@ public:
     // factory는 키가 없을 때만 한 번 호출하며 noexcept Result<V>를 돌려줘야 한다. factory
     // 실패나 그 뒤 저장소 할당 실패는 Map·키 인자를 보존한다(factory의 외부 부작용은 되돌리지
     // 않는다). factory 실행과 만든 임시 값의 소멸 동안 같은 Map의 구조 변경은 막힌다.
-    // 중첩 조회는 된다.
+    // 중첩 조회는 된다. 키 없음 판정과 해시는 factory 전에 한 번만 하므로(키가 없을 때도 해시·동등
+    // 비교 조회가 한 번이다) factory는 입력 key나 저장된 키를 바꾸지 않아야 한다.
     //
     // 사용 예:
     //   auto name = names.FindOrAddWith(int32{42}, [&]() noexcept -> Result<String> { ... });
@@ -243,7 +244,9 @@ public:
             return Result<FindOrAddResult<V>>::Failure(ErrorCode::Busy);
         }
 
-        const usize existing = FindPosition(key, HashKey(key));
+        const K& lookup = key;
+        const uint64 hash = HashKey(lookup);
+        const usize existing = FindPosition(lookup, hash);
         if (existing != IndexNone) {
             return Result<FindOrAddResult<V>>::Success(
                 {table_.At(existing).Value(), InsertOutcome::AlreadyPresent});
@@ -260,9 +263,12 @@ public:
             return Result<FindOrAddResult<V>>::Failure(created.Error());
         }
 
+        // factory 동안 구조 변경은 가드가 막았고(삽입·예약·압축은 Busy, 삭제·Clear·Reset·이동은
+        // Fatal) factory는 입력 key를 바꾸지 않으므로 키는 여전히 없다. 그래서 해시·중복 조회를
+        // 다시 하지 않고 앞의 hash로 바로 붙인다. 만든 값은 지역 임시라 저장소·key와 겹치지 않는다.
         V* found = nullptr;
         guard.Suspend();
-        auto result = InsertImpl<false>(Forward<KeyArg>(key), Move(created.Value()), &found);
+        auto result = InsertAbsent(hash, Forward<KeyArg>(key), Move(created.Value()), &found);
         guard.Resume();
         if (!result) {
             return Result<FindOrAddResult<V>>::Failure(result.Error());
@@ -330,7 +336,9 @@ public:
         }
 
         // 처음 EagerEraseLimit()개는 색인 칸을 하나씩 지우고, 그 뒤는 항목만 죽은 것으로 표시한 뒤
-        // 끝에 색인을 한 번 다시 짓는다. 모두 충돌하는 해시에서도 대량 삭제가 O(n^2)이 되지 않는다.
+        // 끝에 색인을 한 번 다시 짓는다. 해시가 칸에 고르게 퍼지면 대량 삭제는 기대 O(n)이다(기본
+        // SeededHash가 그 전제를 지킨다 — 머리 주석). 모두 충돌하는 해시에서는 칸 하나를 찾는 데
+        // 사슬 길이만큼 들고 색인 재구성도 충돌 사슬을 다시 밟으므로 O(n^2)을 막지 못한다.
         usize removed = 0;
         const usize eagerLimit = table_.EagerEraseLimit();
         bool rebuild = false;
@@ -678,6 +686,14 @@ private:
             return Result<InsertOutcome>::Failure(ErrorCode::InvalidArgument);
         }
 
+        return InsertAbsent(hash, Forward<KeyArg>(key), Forward<ValueArg>(value), resultValue);
+    }
+
+    // 같은 키가 없음과 별칭 검사를 caller가 끝낸 뒤 새 원소를 끝에 붙인다. hash는 key의 해시다.
+    // 성장이나 압축이 일어나도 색인 칸은 hash로 다시 계산하므로 미리 구한 값을 그대로 쓴다.
+    template <typename KeyArg, typename ValueArg>
+    Result<InsertOutcome> InsertAbsent(uint64 hash, KeyArg&& key, ValueArg&& value,
+                                       V** resultValue) noexcept {
         // 실패할 수 있는 단계(성장 할당)는 이 한 곳이고, 실패하면 아무것도 바꾸지 않았다.
         auto room = table_.EnsureAppendRoom();
         if (!room) {

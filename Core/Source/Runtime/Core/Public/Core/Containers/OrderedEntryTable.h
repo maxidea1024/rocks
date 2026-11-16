@@ -335,9 +335,9 @@ public:
         EraseSlot(SlotOfPosition(entries_[position].hash, position));
     }
 
-    // 대량 삭제에서 칸 하나씩 찾는 비용(모두 충돌하면 원소마다 사슬 길이)을 넘으면 쓰는 길이다.
-    // 항목만 죽은 것으로 표시하고 색인 칸은 남긴다(FindSlot은 죽은 항목의 칸을 건너뛴다). 다른
-    // 변경 전에 반드시 RebuildIndex로 정리한다.
+    // 대량 삭제에서 칸을 하나씩 찾아 지우는 수가 EagerEraseLimit()을 넘으면 쓰는 길이다. 항목만
+    // 죽은 것으로 표시하고 색인 칸은 남긴다(FindSlot은 죽은 항목의 칸을 건너뛴다). 다른 변경 전에
+    // 반드시 RebuildIndex로 정리한다.
     void MarkDeadKeepingSlot(usize position) noexcept {
         Entry& entry = entries_[position];
         entry.alive = false;
@@ -347,8 +347,12 @@ public:
         DestroyAt(entry.Key());
     }
 
-    // 한 번의 대량 삭제에서 칸을 하나씩 찾아 지우는 최대 수다. 넘는 삭제는 MarkDeadKeepingSlot과
-    // RebuildIndex 한 번(O(칸 수))으로 처리해, 그 비용을 이 수만큼의 삭제에 상환한다.
+    // 한 번의 대량 삭제에서 칸을 하나씩 찾아 지우는 최대 수(칸 수/8 — 용량에 비례)다. 넘는 삭제는
+    // MarkDeadKeepingSlot과 RebuildIndex 한 번으로 처리한다. 해시가 칸에 고르게 퍼지면 칸 하나
+    // 찾기와 RebuildIndex의 원소당 배치가 기대 O(1)이라, 재구성의 O(칸 수)를 이 수만큼의 삭제에
+    // 나눠 대량 삭제가 기대 O(n)이다(기본 SeededHash가 그 전제를 지킨다). 해시가 모두 충돌하면
+    // 칸 찾기(EraseAt -> SlotOfPosition)와 재구성의 배치가 각각 사슬 길이만큼 들어 O(n^2)이며, 이
+    // 한도는 그 경우를 막지 않는다.
     usize EagerEraseLimit() const noexcept {
         return SlotCount() / 8;
     }

@@ -112,9 +112,26 @@ public:
         return size_;
     }
 
-    // 슬롯을 늘리지 않고 보관 가능한 원소 수다. 삭제 누적 정리는 같은 크기로 재할당할 수 있다.
+    // 슬롯을 늘리지 않고 보관 가능한 원소 수다. 삭제 칸이 쌓이면 삽입이 정리 재해시를 하며, 그때
+    // 그 삽입 뒤의 산 원소가 Capacity()의 3/4을 넘으면 슬롯을 두 배로 늘린다(아래 SlotCount 참고).
     usize Capacity() const noexcept {
         return slotCount_ / 2;
+    }
+
+    // 탐사 부하를 들여다보는 진단용 값이다(시험·측정). SlotCount()는 슬롯 수(0 또는 8 이상의 2의
+    // 거듭제곱), DeletedSlotCount()는 정리 전까지 남은 삭제 칸 수다. 늘
+    // (Count() + DeletedSlotCount()) <= SlotCount() × 3/4이다 — 삭제는 점유 칸을 삭제 칸으로 바꿀
+    // 뿐이라 합이 그대로이고, 합을 넘길 삽입은 그 앞에서 삭제 칸을 정리한다(같은 크기 재해시 또는
+    // 성장, 상환 O(1)).
+    //
+    // 사용 예:
+    //   CHECK((map.Count() + map.DeletedSlotCount()) * 4 <= map.SlotCount() * 3);
+    usize SlotCount() const noexcept {
+        return slotCount_;
+    }
+
+    usize DeletedSlotCount() const noexcept {
+        return deleted_;
     }
 
     bool IsEmpty() const noexcept {
@@ -186,7 +203,8 @@ public:
     // factory는 키가 없을 때만 한 번 호출하며 noexcept Result<V>를 반환해야 한다.
     // factory 실패는 기존 포인터와 키를 보존한다. factory의 외부 부작용은 되돌리지 않으며,
     // 기존 원소·키나 입력 key를 직접 수정하지 않아야 한다. 간접 별칭의 수명은 caller 책임이다.
-    // factory 중 구조 변경은 차단되며, 재해시가 일어나면 기존 포인터는 무효화된다.
+    // factory 중 구조 변경은 차단되며, 재해시가 일어나면 기존 포인터는 무효화된다. 키 없음 판정과
+    // 해시는 factory 전에 한 번만 한다(키가 없을 때도 해시·동등 비교 조회가 한 번이다).
     template <typename KeyArg, typename Factory>
     Result<FindOrAddResult<V>> FindOrAddWith(KeyArg&& key, Factory&& factory) noexcept {
         static_assert(
@@ -200,7 +218,9 @@ public:
         if (iterationDepth_ != 0) {
             return Result<FindOrAddResult<V>>::Failure(ErrorCode::Busy);
         }
-        const usize existing = FindIndex(key, HashKey(key));
+        const K& lookup = key;
+        const uint64 hash = HashKey(lookup);
+        const usize existing = FindIndex(lookup, hash);
         if (existing != slotCount_) {
             return Result<FindOrAddResult<V>>::Success(
                 {slots_[existing].Value(), InsertOutcome::AlreadyPresent});
@@ -216,9 +236,12 @@ public:
             return Result<FindOrAddResult<V>>::Failure(created.Error());
         }
 
+        // factory 동안 구조 변경은 가드가 막았고(삽입·예약은 Busy, 삭제·Clear·Reset·이동은 Fatal)
+        // factory는 입력 key를 바꾸지 않으므로 키는 여전히 없다. 그래서 해시·중복 조회를 다시 하지
+        // 않고 앞의 hash로 바로 넣는다. 만든 값은 지역 임시라 저장소·key와 겹치지 않는다.
         V* found = nullptr;
         guard.Suspend();
-        auto result = InsertImpl<false>(Forward<KeyArg>(key), Move(created.Value()), &found);
+        auto result = InsertAbsent(hash, Forward<KeyArg>(key), Move(created.Value()), &found);
         guard.Resume();
         if (!result) {
             return Result<FindOrAddResult<V>>::Failure(result.Error());
@@ -612,6 +635,16 @@ private:
             return Result<InsertOutcome>::Failure(ErrorCode::InvalidArgument);
         }
 
+        return InsertAbsent(hash, Forward<KeyArg>(key), Forward<ValueArg>(value), resultValue);
+    }
+
+    // 같은 키가 없음과 별칭 검사를 caller가 끝낸 뒤 새 원소를 넣는다. hash는 key의 해시다(재해시가
+    // 일어나도 자리는 hash로 다시 계산하므로 미리 구한 값을 그대로 쓴다). 실패 가능한 단계(Reserve·
+    // 삭제 칸 정리)가 모두 끝난 뒤에만 입력을 이동하므로, 실패하면 입력과 기존 원소·주소를
+    // 보존한다.
+    template <typename KeyArg, typename ValueArg>
+    Result<InsertOutcome> InsertAbsent(uint64 hash, KeyArg&& key, ValueArg&& value,
+                                       V** resultValue) noexcept {
         // 모든 실패 가능한 할당과 재구성이 끝나기 전에는 입력 객체를 이동하지 않는다.
         if (size_ == MaxSize) {
             return Result<InsertOutcome>::Failure(ErrorCode::Overflow);
@@ -620,12 +653,9 @@ private:
         if (!reserve) {
             return Result<InsertOutcome>::Failure(reserve.Error());
         }
-        // tombstone 누적으로 탐색이 길어지는 것을 완화한다. 실패 시 입력은 소비하지 않는다.
-        if (deleted_ > slotCount_ / 4 && deleted_ > size_) {
-            auto cleanup = Rehash(slotCount_);
-            if (!cleanup) {
-                return Result<InsertOutcome>::Failure(cleanup.Error());
-            }
+        auto settled = SettleDeletedSlots();
+        if (!settled) {
+            return Result<InsertOutcome>::Failure(settled.Error());
         }
         usize index = static_cast<usize>(hash) & (slotCount_ - 1);
         usize deleted = slotCount_;
@@ -643,7 +673,8 @@ private:
             }
             index = (index + 1) & (slotCount_ - 1);
         }
-        // 전체 슬롯이 tombstone일 수 있다. 항상 한 개 이상의 비점유 슬롯이 존재한다.
+        // SettleDeletedSlots가 빈 칸을 칸 수의 1/4 이상 남기므로 위 탐사는 늘 빈 칸에서 끝난다.
+        // 빈 칸을 찾지 못한 경우(일어나지 않음)의 방어로 첫 삭제 칸을 쓴다.
         if (slots_[index].state == State::Occupied && deleted != slotCount_) {
             index = deleted;
         }
@@ -664,6 +695,41 @@ private:
             *resultValue = target.Value();
         }
         return Result<InsertOutcome>::Success(InsertOutcome::Inserted);
+    }
+
+    // 삽입 하나를 받기 전에 (점유 + 삭제) 칸이 칸 수의 3/4(MaxFilledSlots)에 이르렀으면 삭제 칸을
+    // 정리한다. 그래서 삽입 뒤에도 (점유 + 삭제) <= 칸 수 × 3/4이고, 없는 키 조회의 선형 탐사는 늘
+    // 빈 칸을 1/4 이상 남긴 표에서 끝난다. Reserve(size_ + 1)이 끝난 뒤에만 부른다.
+    //
+    // 정리 방식: 이 삽입 뒤 산 원소가 칸 수의 3/8(Capacity()의 3/4)을 넘으면 두 배로 성장하고,
+    // 아니면 같은 크기로 재해시한다(두 배가 표현 범위를 넘으면 같은 크기). 산 원소가 많을 때 같은
+    // 크기로만 정리하면 되찾는 빈 칸이 적어 정리가 잦아지므로 성장으로 여유를 넓힌다.
+    //
+    // 상환 O(1) 근거: (점유 + 삭제)는 빈 칸을 차지하는 삽입으로만 1씩 는다(Erase는 점유 칸을 삭제
+    // 칸으로 바꿀 뿐이고, 삭제 칸을 재사용하는 삽입은 합을 바꾸지 않는다). Reserve가
+    // size_ + 1 <= 칸 수/2를 보장하므로 정리 직후 합(= 산 원소 수)은 같은 크기 재해시에서 칸 수의
+    // 3/8 미만, 성장에서 새 칸 수의 1/4 미만이다(성장할 수 없어 같은 크기로 정리한 경우도 1/2
+    // 미만). 따라서 다음 정리까지 같은 크기에서는 칸 수의 3/8번(성장할 수 없던 경우 1/4번), 성장
+    // 뒤에는 새 칸 수의 1/2번 이상의 삽입이 있어야 하고, 정리 한 번의 비용 O(칸 수)는 그 삽입들에
+    // 나뉘어 삽입당 O(1)이다. 실패(할당 실패)하면 아무것도 바꾸지 않는다.
+    Result<void> SettleDeletedSlots() noexcept {
+        if (size_ + deleted_ < MaxFilledSlots(slotCount_)) {
+            return Result<void>::Success();
+        }
+
+        constexpr usize maximum = MaxSize / sizeof(Slot);
+        const bool crowded = size_ + 1 > slotCount_ / 8 * 3;
+        if (crowded && slotCount_ <= maximum / 2) {
+            return Rehash(slotCount_ * 2);
+        }
+
+        return Rehash(slotCount_);
+    }
+
+    // 삽입 뒤 (점유 + 삭제) 칸 수의 상한(칸 수의 3/4)이다. 칸 수는 0 또는 8 이상의 2의
+    // 거듭제곱이다.
+    static constexpr usize MaxFilledSlots(usize slotCount) noexcept {
+        return slotCount - slotCount / 4;
     }
 
     Result<void> Rehash(usize count) noexcept {

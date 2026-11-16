@@ -347,3 +347,70 @@ TEST(OrderedMap_ReservedBytesMatchesReserveAllocation) {
     CHECK(!(OrderedMap<uint32, int32>::ReservedBytes(OrderedMap<uint32, int32>::MaximumCapacity + 1,
                                                      bytes)));
 }
+
+namespace {
+
+// 해시·동등 비교 호출 수를 센다. 모든 키가 한 색인 칸에서 시작하므로 조회 한 번의 동등 비교 수는
+// 그 앞에 놓인 산 원소 수다.
+struct CountingZeroHash {
+    static inline usize calls = 0;
+
+    usize operator()(int32) const noexcept {
+        ++calls;
+        return 0;
+    }
+};
+
+struct CountingEqual {
+    static inline usize calls = 0;
+
+    bool operator()(const int32& left, const int32& right) const noexcept {
+        ++calls;
+        return left == right;
+    }
+};
+
+} // namespace
+
+// FindOrAddWith는 키가 없을 때도 해시 한 번·동등 비교 한 바퀴만 한다(factory 동안 구조 변경이 막혀
+// 키 없음이 유지되므로 붙일 때 다시 조회하지 않는다). 이전에는 해시 2번·비교 2바퀴였다.
+TEST(OrderedMap_FindOrAddWithLooksUpOnce) {
+    SystemAllocator allocator;
+    {
+        OrderedMap<int32, int32, CountingZeroHash, CountingEqual> map(allocator);
+        for (int32 key = 0; key != 3; ++key) {
+            REQUIRE(map.Insert(int32{key}, key + 100));
+        }
+
+        CountingZeroHash::calls = 0;
+        CountingEqual::calls = 0;
+        usize factoryCalls = 0;
+        auto added = map.FindOrAddWith(int32{9}, [&]() noexcept {
+            ++factoryCalls;
+            return Result<int32>::Success(int32{909});
+        });
+        REQUIRE(added);
+        CHECK(added.Value().outcome == InsertOutcome::Inserted);
+        CHECK(*added.Value().value == 909);
+        CHECK(factoryCalls == 1);
+        CHECK(CountingZeroHash::calls == 1);
+        CHECK(CountingEqual::calls == 3);
+
+        CountingZeroHash::calls = 0;
+        CountingEqual::calls = 0;
+        auto present = map.FindOrAddWith(int32{1}, [&]() noexcept {
+            ++factoryCalls;
+            return Result<int32>::Success(int32{0});
+        });
+        REQUIRE(present);
+        CHECK(present.Value().outcome == InsertOutcome::AlreadyPresent);
+        CHECK(*present.Value().value == 101);
+        CHECK(factoryCalls == 1);
+        CHECK(CountingZeroHash::calls == 1);
+        CHECK(CountingEqual::calls == 2);
+        const int32 expected[] = {0, 1, 2, 9};
+        CHECK(KeysAre(map, expected, 4));
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
