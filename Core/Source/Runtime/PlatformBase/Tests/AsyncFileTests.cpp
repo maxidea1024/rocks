@@ -232,22 +232,201 @@ TEST(AsyncFile_CloseIsBusyWhileRequestsAreInFlight) {
         REQUIRE(file.Open(context, pattern.path, pattern.length));
         static uint8 large[PatternBytes];
         AsyncReadRequest request;
+        // 완료 게시를 보류해 OS가 읽기를 끝냈더라도 요청이 진행 중인 상태를 결정적으로 만든다.
+        context.HoldCompletions();
         REQUIRE(file.SubmitRead(request, 0, large, sizeof(large)));
+        CHECK(!request.IsComplete());
+        CHECK(request.Wait(0) == WaitResult::TimedOut);
         // 진행 중인 요청은 다시 제출할 수 없고, 파일 닫기·context 종료는 Busy다.
-        if (!request.IsComplete()) {
-            const auto again = file.SubmitRead(request, 0, large, 16);
-            CHECK(again.code == FileCode::Busy || request.IsComplete());
-            const auto closed = file.Close();
-            CHECK(closed.code == FileCode::Busy || request.IsComplete());
-            if (closed) {
-                REQUIRE(file.Open(context, pattern.path, pattern.length));
-            }
-        }
+        CHECK(file.SubmitRead(request, 0, large, 16).code == FileCode::Busy);
+        CHECK(file.Close().code == FileCode::Busy);
         CHECK(context.Shutdown().code == FileCode::Busy);
+        REQUIRE(context.ResumeCompletions());
         REQUIRE(request.Wait(30000) == WaitResult::Signaled);
         CHECK(request.Result().status && request.Result().bytes == sizeof(large));
         CHECK(MatchesPattern(large, 0, sizeof(large)));
         CHECK(file.Close());
+    });
+}
+
+namespace {
+
+// 보류된 결과가 count개 쌓일 때까지 기다린다(OS·worker 완료라는 외부 상태 조건이며 시간 제한은
+// 실패 판정용이다).
+bool WaitForHeld(const AsyncIoContext& context, uint64 count) noexcept {
+    const uint64 deadline = MonotonicNanoseconds() + 30000000000ull;
+    while (context.HeldCompletionCount() < count) {
+        if (MonotonicNanoseconds() > deadline) {
+            return false;
+        }
+
+        YieldThread();
+    }
+
+    return context.HeldCompletionCount() == count;
+}
+
+// callback이 불린 순서·스레드·결과를 기록한다. 재개는 호출 스레드에서 callback을 부르므로 기록은
+// 그 스레드 하나에서만 쓰인다.
+struct OrderLog {
+    int indices[16]{};
+    uint64 threads[16]{};
+    int count = 0;
+};
+
+struct OrderSlot {
+    OrderLog* log;
+    int index;
+};
+
+void OrderCallback(const AsyncIoResult&, void* raw) noexcept {
+    auto& slot = *static_cast<OrderSlot*>(raw);
+    OrderLog& log = *slot.log;
+    if (log.count < 16) {
+        log.indices[log.count] = slot.index;
+        log.threads[log.count] = CurrentThreadId();
+    }
+
+    ++log.count;
+}
+
+} // namespace
+
+TEST(AsyncFile_HeldCompletionsPublishOnResumeInCompletionOrder) {
+    PatternFile pattern;
+    REQUIRE(pattern.Create(PatternBytes));
+    const AsyncIoBackend backends[] = {AsyncIoBackend::Native, AsyncIoBackend::WorkerPool};
+    for (AsyncIoBackend backend : backends) {
+        // WorkerPool은 worker 하나라 완료 순서가 제출 순서다. Native는 OS 완료 순서라 횟수만 본다.
+        AsyncIoContext context;
+        auto started = context.Start(backend, 1);
+        if (backend == AsyncIoBackend::Native && started.code == FileCode::Unsupported) {
+            continue;
+        }
+
+        REQUIRE(started);
+        AsyncReadFile file;
+        REQUIRE(file.Open(context, pattern.path, pattern.length));
+        constexpr int Count = 8;
+        static uint8 buffers[Count][4096];
+        AsyncIoRequest requests[Count];
+        OrderLog log;
+        OrderSlot slots[Count];
+        CHECK(context.ResumeCompletions().code == FileCode::InvalidArgument);
+
+        // 중첩 보류: 바깥 재개 전에는 게시되지 않는다.
+        context.HoldCompletions();
+        context.HoldCompletions();
+        for (int index = 0; index < Count; ++index) {
+            slots[index] = {&log, index};
+            REQUIRE(file.SubmitRead(requests[index], static_cast<uint64>(index) * 4096u,
+                                    buffers[index], sizeof(buffers[index]), OrderCallback,
+                                    &slots[index]));
+        }
+
+        REQUIRE(WaitForHeld(context, Count));
+        REQUIRE(context.ResumeCompletions());
+        CHECK(context.HeldCompletionCount() == Count);
+        for (int index = 0; index < Count; ++index) {
+            CHECK(!requests[index].IsComplete());
+        }
+
+        CHECK(log.count == 0);
+
+        // 마지막 재개가 이 스레드에서 모두 게시하고 callback을 부른 뒤 돌아온다.
+        const uint64 self = CurrentThreadId();
+        REQUIRE(context.ResumeCompletions());
+        CHECK(context.HeldCompletionCount() == 0);
+        REQUIRE(log.count == Count);
+        bool seen[Count]{};
+        for (int position = 0; position < Count; ++position) {
+            const int index = log.indices[position];
+            REQUIRE(index >= 0 && index < Count);
+            CHECK(!seen[index]);
+            seen[index] = true;
+            CHECK(log.threads[position] == self);
+            if (backend == AsyncIoBackend::WorkerPool) {
+                CHECK(index == position);
+            }
+        }
+
+        for (int index = 0; index < Count; ++index) {
+            CHECK(requests[index].IsComplete());
+            const AsyncIoResult result = requests[index].Result();
+            CHECK(result.status && result.bytes == 4096);
+            CHECK(MatchesPattern(buffers[index], static_cast<uint64>(index) * 4096u, 4096));
+        }
+
+        CHECK(file.Close());
+        CHECK(context.Shutdown());
+    }
+}
+
+TEST(AsyncFile_HeldCompletionsCancellationAndShutdown) {
+    PatternFile pattern;
+    REQUIRE(pattern.Create(PatternBytes));
+    ForEachBackend([&](AsyncIoContext& context) {
+        AsyncReadFile file;
+        REQUIRE(file.Open(context, pattern.path, pattern.length));
+        constexpr int Count = 8;
+        static uint8 buffers[Count][4096];
+        AsyncIoRequest requests[Count];
+        CallbackLog log;
+
+        // 모든 결과가 쌓인 뒤의 취소는 정해진 결과를 바꾸지 않는다. 쌓인 결과가 있으면 Shutdown은
+        // Busy다.
+        context.HoldCompletions();
+        for (int index = 0; index < Count; ++index) {
+            REQUIRE(file.SubmitRead(requests[index], static_cast<uint64>(index) * 4096u,
+                                    buffers[index], sizeof(buffers[index]), CountingCallback,
+                                    &log));
+        }
+
+        REQUIRE(WaitForHeld(context, Count));
+        for (AsyncIoRequest& request : requests) {
+            request.Cancel();
+            CHECK(!request.IsComplete());
+        }
+
+        CHECK(context.Shutdown().code == FileCode::Busy);
+        CHECK(AtomicLoad(&log.calls) == 0);
+        REQUIRE(context.ResumeCompletions());
+        CHECK(AtomicLoad(&log.calls) == Count);
+        for (int index = 0; index < Count; ++index) {
+            const AsyncIoResult result = requests[index].Result();
+            CHECK(result.status && result.bytes == 4096);
+            CHECK(MatchesPattern(buffers[index], static_cast<uint64>(index) * 4096u, 4096));
+        }
+
+        // 아직 끝나지 않은 요청을 보류 중에 취소하면 평소처럼 취소 또는 완료 하나로 끝난다.
+        CallbackLog second;
+        context.HoldCompletions();
+        for (int index = 0; index < Count; ++index) {
+            REQUIRE(file.SubmitRead(requests[index], static_cast<uint64>(index) * 4096u,
+                                    buffers[index], sizeof(buffers[index]), CountingCallback,
+                                    &second));
+            requests[index].Cancel();
+        }
+
+        REQUIRE(WaitForHeld(context, Count));
+        REQUIRE(context.ResumeCompletions());
+        CHECK(AtomicLoad(&second.calls) == Count);
+        for (int index = 0; index < Count; ++index) {
+            const AsyncIoResult result = requests[index].Result();
+            const bool cancelled = result.status.code == FileCode::Cancelled;
+            const bool succeeded =
+                result.status && result.bytes == 4096 &&
+                MatchesPattern(buffers[index], static_cast<uint64>(index) * 4096u, 4096);
+            CHECK(cancelled || succeeded);
+        }
+
+        // 진행 중 요청이 없으면 보류 중에도 Shutdown이 성공하고 계수는 남는다.
+        CHECK(file.Close());
+        context.HoldCompletions();
+        REQUIRE(context.Shutdown());
+        REQUIRE(context.Start(context.Backend(), 2));
+        REQUIRE(context.ResumeCompletions());
+        CHECK(context.ResumeCompletions().code == FileCode::InvalidArgument);
     });
 }
 

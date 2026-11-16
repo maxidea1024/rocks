@@ -108,6 +108,8 @@ Engine / Tools / Game         프로젝트·설치 구성과 상위 시스템
 
 수명 규칙: 요청 레코드(OVERLAPPED 포함)와 버퍼는 최종 완료까지 유지된다. 진행 중 요청의 소멸자는 취소 후 완료를 기다리고, 파일 소멸자는 그 파일의 모든 요청을 취소·대기한 뒤 닫는다. `Close`는 진행 중 요청이 있으면 Busy, context `Shutdown`은 열린 파일이 있으면 Busy, 열린 파일을 남긴 context 소멸은 Fatal이다. 완료 스레드는 mutex 안에서 결과를 게시한 뒤 요청·파일에 다시 접근하지 않으며, callback은 게시 뒤 요청 대신 사용자 context만 받는다.
 
+**완료 게시 보류**(2026-11-16, Rocks 고유: UE 5.8 `IAsyncReadFileHandle`·IoDispatcher에 대응 없음). `AsyncIoContext::HoldCompletions`·`ResumeCompletions`·`HeldCompletionCount`. 보류 중에는 OS·worker에서 끝난 요청도 게시하지 않고 공용 경로(`CompleteAsyncRequest`)가 결과를 완료 순서대로 목록에 쌓는다(요청 단계 `Held`, 두 backend 공통). 그 요청은 진행 중으로 보인다(`IsComplete` false, `Wait` 대기, callback 없음, 재제출·`Close`·`Shutdown`은 Busy). 계수로 중첩하며, 마지막 재개가 목록을 순서대로 게시하고 callback을 재개한 스레드에서 부른다(게시 중 새로 끝난 요청도 목록 뒤에 붙어 순서를 지킨다. 동시에 둘이 게시하지 않도록 한 스레드만 게시한다). 이미 쌓인 요청의 취소는 결과를 바꾸지 않고, 아직 끝나지 않은 요청은 평소대로 취소될 수 있어 결과는 요청마다 하나다. 보류 중 진행 중 요청이 있는 파일·요청 소멸은 완료를 영원히 기다리게 되므로 Fatal이다. 진행 중 요청이 없으면 보류 중 `Shutdown`도 성공하고 계수는 남는다. 용도는 IO 완료를 gate로 막고 단언하는 결정적 시험(텍스처 스트리밍 TS2)과 프레임 경계에서만 완료를 받는 호출자다. 시험: 보류 중 재제출·`Close`·`Shutdown`이 Busy인지와 재개 뒤 결과(`AsyncFile_CloseIsBusyWhileRequestsAreInFlight`, 완료 시점에 기대던 `if (!IsComplete())` 분기를 대체), 중첩 보류·재개 스레드의 callback·WorkerPool 1 worker의 완료 순서, 쌓인 뒤 취소 무효·보류 중 취소의 단일 결과·보류 중 `Shutdown`.
+
 검증: Windows x64에서 두 backend로 동시 32개 읽기·EOF·짧은 읽기·0 byte·잘못된 제출·Busy·대량 취소 경합·소멸자 대기, 그리고 동시 쓰기 8개의 역순 제출 후 읽기 대조·열기 모드 3종·끝 너머 확장의 0 채움·0 byte 쓰기·소멸자 대기를 실제 파일로 확인했다(비동기 파일 테스트 10건 100회 반복 실패 0). macOS backend(pwrite·`F_FULLFSYNC` 포함)는 빌드·실행하지 않았다. 디스크 가득 참 같은 쓰기 실패 주입, scatter/gather, 우선순위·deadline, dispatch I/O 평가, 결정적 fake backend interleaving, Android asset·iOS 번들 경로는 후속이다.
 
 ## 자식 프로세스와 pipe (2026-11-13 1차 구현)
