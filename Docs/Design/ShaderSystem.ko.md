@@ -409,7 +409,7 @@ Rocks도 같은 구조로 한다. 그래서 Rocks.Build에 공유 라이브러�
    - 바꿀 코드: 위 상수와 그것을 쓰는 다섯 곳, `.c` 위치 검사(`PolicyChecks.ThirdParty.cs:457–459`), lexical 제외(`PolicyChecks.cs:371,383`), SDK 라이선스 복사(`ThirdPartyManifest.cs:227`), 도구 시험, `.gitattributes:9–11`·`.editorconfig:38–47`(원본 byte 보존 규칙).
    - 문서 개정은 14절에 있다.
 2. **미리 빌드된 바이너리(`kind: "binary"`).** 엔진 빌드가 컴파일하지 않고 워커가 실행 중에 여는 도구다(9절). manifest 항목:
-   - `version`, 라이선스(`spdx`·고지 파일), 출처. 출처는 Rocks 도구 빌드가 게시한 archive의 URL·`sha256`과 그 빌드의 원본 태그·patch 목록이다. 설치된 SDK에서 가져오는 도구는 그 SDK의 경로 규칙을 적는다.
+   - `version`, 라이선스(`spdx`·고지 파일), 출처. 출처는 Rocks 도구 빌드가 게시한 archive의 URL·`sha256`과 그 빌드의 원본 태그·patch 목록이다. 게시 위치는 저장소의 GitHub Releases다(2026-11-16 사용자 결정). 수동 실행 도구 빌드 workflow(4항)가 Release에 올리고, 비공개 저장소이면 bootstrap이 `gh` 인증으로 받는다. 설치된 SDK에서 가져오는 도구는 그 SDK의 경로 규칙을 적는다.
    - 호스트별 파일 목록 `hosts.<플랫폼>-<아키텍처>[] = {path, sha256, size, role}`.
      - 호스트 키는 `windows-x64`·`macos-arm64`처럼 아키텍처를 포함한다(계획 §2.5: x64·ARM64 산출물을 섞지 않는다).
      - 지원 개발 호스트는 Windows·macOS뿐이다(`Programs/Rocks.Build/Toolchain.cs:21–25`).
@@ -644,7 +644,7 @@ Rocks 규칙:
 4. **파라미터 선언** — MetaCompiler 셰이더 파라미터 종류(권장, 13절, 리플렉션 단일 출처·생성 HLSL을 디스크에 둠) 또는 UE 매크로 방식(`SHADER_PARAMETER_*`, `Runtime/RenderCore/Public/ShaderParameterMacros.h`).
 5. **형식별 생산 호스트** — 키가 호스트별이므로(10절) DXIL·SPIR-V·ESSL은 각 호스트가 직접 만든다. 한 호스트만 만들 수 있는 형식: DXBC는 Windows. metallib은 macOS(Xcode Metal 도구)를 기준으로 하고, Windows에도 Apple Metal Developer Tools(UE 5.8이 지원, 기대 버전 5.3, `MetalShaderFormat.cpp:724–725,1030–1137`)가 있으면 만들게 할지 정한다(권장: 허용, 형식 정의의 생산 호스트 규칙, 측정 S9). 만들 수 없는 호스트에서는 `UnsupportedCapability`이고, 원격 워커가 생기면 그쪽으로 보낸다.
 6. **전처리기** — Rocks 자체 구현을 `Developer/ShaderCompiler`에 둔다(권장, UE처럼 메인 프로세스에서 실행. UE 전처리기 stb_preprocess는 Epic 저작권 원본이라 가져올 수 없다, `Developer/ShaderPreprocessor/Private/stb_preprocess/preprocessor.h:1`) 또는 라이선스를 확인한 외부 C 전처리기를 P3 C 원본 규칙으로 들인다. DXC `-P`는 메인 프로세스가 DXC를 열게 되어(9절 규칙 위반) 쓰지 않는다. 자체 구현의 정합성은 측정 S7로 확인한다.
-7. **경고 정책** — 확인 필요. CompilerDiagnostics는 "외부 원본도 엔진과 같은 경고 프로필로 컴파일한다"(:25), "생성 파일이라는 이유로 경고 검사를 생략하지 않는다"(:9), "이 절 밖의 경고 억제 예외는 없다"(:36)고 한다.
+7. **경고 정책** — **결정됨(2026-11-16): 아래 (1)·(2)의 권장안.** CompilerDiagnostics에 "Rocks 빌드가 컴파일하지 않는 미리 빌드한 바이너리" 승인 절을 더하고(P3 구현 때 14절 CompilerDiagnostics 행대로 개정), 셰이더 컴파일 경고는 작성자 원문과 SPIRV-Cross가 다시 쓴 중간 원문 모두 오류로 한다. 결정 전 기록: CompilerDiagnostics는 "외부 원본도 엔진과 같은 경고 프로필로 컴파일한다"(:25), "생성 파일이라는 이유로 경고 검사를 생략하지 않는다"(:9), "이 절 밖의 경고 억제 예외는 없다"(:36)고 한다.
    - (1) 오프라인 도구 빌드: 결정 8(UE 방식)로 DXC·SPIRV-Cross·SPIRV-Tools는 업스트림 빌드 설정(예외·RTTI 사용, 업스트림 경고 설정)으로 엔진 빌드 밖에서 컴파일한다. DXC(LLVM)는 예외 없이·Rocks 경고 프로필로 빌드할 수 없다. 권장: CompilerDiagnostics에 "Rocks 빌드가 컴파일하지 않는 미리 빌드된 바이너리" 승인 절을 더한다(조건: 원본 태그·patch·빌드 스크립트 고정, Rocks가 include하는 공개 헤더는 경고 0, 엔진 컴파일 인자에 억제를 더하지 않음).
    - (2) 셰이더 컴파일 경고: 권장은 공통 규칙대로 작성자 원문과 SPIRV-Cross가 다시 쓴 중간 HLSL 모두 경고를 오류로 하는 것이다. 중간 원문 경고는 SPIRV-Cross 옵션이나 추적 가능한 patch(8절 4항)로 없앤다. UE는 작성자 원문에만 `-WX`를 걸고(`Developer/ShaderCompilerCommon/Private/ShaderConductorContext.cpp:425–429`), SPIRV-Cross 출력을 FXC로 컴파일할 때는 경고를 오류로 하지 않는다(`D3DShaderCompiler.cpp:959–961`).
 8. **도구 공급 방식** — **결정됨(2026-11-13): UE 방식.** DXC·SPIRV-Cross·SPIRV-Tools를 엔진 빌드 밖 스크립트로 직접 빌드해 바이너리로 배포하고, 엔진은 받은 바이너리를 쓰기만 한다(8절 4항). 조사 근거: upstream DXC는 macOS 빌드를 공식 CI로 돌리고(업스트림 `azure-pipelines.yml`), SPIRV-Cross는 C API 공유 라이브러리를 CMake 옵션으로 만든다. 고려했던 대안은 LunarG Vulkan SDK 바이너리였다(SPIRV-Cross C API 공유 라이브러리 포함 여부 미확인, 설치기라 다시 묶어야 함, 패치 불가).
