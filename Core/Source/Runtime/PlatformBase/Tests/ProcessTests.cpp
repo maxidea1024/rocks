@@ -557,14 +557,16 @@ TEST(Process_InheritAndNullStreams) {
     options = {};
     options.output = output;
     options.outputCapacity = sizeof(output);
-    options.timeoutMilliseconds = 10'000;
+    // 시간 초과는 RunProbe의 넉넉한 안전장치만 쓴다(결과를 가르지 않게).
     const auto empty = RunProbe(info, options);
     CHECK(empty.status && !empty.timedOut && empty.exit.code == 0 && empty.outputBytes == 0);
 }
 
 TEST(Process_RunTimeoutTerminatesChild) {
+    // 자식은 스스로 끝나지 않으므로(block) 결과는 시간 초과 종료 하나뿐이다. 시간 초과 값은 결과를
+    // 가르지 않고 시험 시간만 정한다.
     Probe probe;
-    probe.Add("sleep").Add("60000");
+    probe.Add("block");
     ProcessRunOptions options;
     options.timeoutMilliseconds = 300;
     uint64 start = MonotonicNanoseconds();
@@ -578,7 +580,10 @@ TEST(Process_RunTimeoutTerminatesChild) {
     CHECK(run.exit.kind == ProcessExitKind::Terminated);
     CHECK(ElapsedMilliseconds(start) < 20'000);
 
-    // 출력이 쉬지 않고 들어와도 시간 초과를 놓치지 않는다.
+    // 출력이 쉬지 않고 들어와도 시간 초과를 놓치지 않는다. spew도 스스로 끝나지 않으므로 결과는
+    // 시간 초과 하나뿐이다. 시간 초과 전에 출력이 상한을 넘었는지는 부하에 따라 달라지므로 보지
+    // 않는다. 상한 truncation은 정상 종료하는 Process_OutputBeyondCapacityIsDrainedAndTruncated가
+    // 본다.
     Probe spew;
     spew.Add("spew");
     ProcessStartInfo info = spew.Info();
@@ -590,8 +595,43 @@ TEST(Process_RunTimeoutTerminatesChild) {
     const auto busy = RunProbe(info, options);
     REQUIRE(busy.status);
     CHECK(busy.timedOut);
-    CHECK(busy.outputTruncated);
+    CHECK(busy.exit.kind == ProcessExitKind::Terminated);
+    CHECK(busy.outputBytes <= sizeof(output));
     CHECK(ElapsedMilliseconds(start) < 20'000);
+}
+
+TEST(Process_TerminatingWaitingChildKeepsEarlierOutput) {
+    // 자식이 표지를 쓴 뒤 기다리는 것을 표지를 받아 확인한 다음 종료한다. 순서는 표지 수신으로
+    // 정해지고 시간에 기대지 않는다. 종료 전에 받은 출력은 그대로 남고, 기다리는 자식은 강제 종료로
+    // 끝난다.
+    Probe probe;
+    probe.Add("block");
+    ProcessStartInfo info = probe.Info();
+    info.output = ProcessStreamMode::Pipe;
+    Process process;
+    const auto started = process.Start(info);
+    if (SkipUnsupported(started)) {
+        return;
+    }
+
+    REQUIRE(started);
+    char line[16]{};
+    usize used = 0;
+    while (used < 6u) {
+        const auto read =
+            process.Read(ProcessStream::Output, line + used, 6u - used, GenerousTimeout);
+        REQUIRE(read.status && read.bytes != 0);
+        used += read.bytes;
+    }
+
+    CHECK(memcmp(line, "ready\n", 6) == 0);
+    CHECK(process.Wait(0) == WaitResult::TimedOut);
+    CHECK(process.Terminate());
+    REQUIRE(process.Wait(GenerousTimeout) == WaitResult::Signaled);
+    ProcessExit exit;
+    REQUIRE(process.GetExit(exit));
+    CHECK(exit.kind == ProcessExitKind::Terminated);
+    process.Close();
 }
 
 TEST(Process_WaitTerminateCloseAndRestart) {

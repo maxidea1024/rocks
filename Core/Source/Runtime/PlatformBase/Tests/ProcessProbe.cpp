@@ -159,6 +159,8 @@ int Priority() noexcept {
 //   spew                        쓰기가 실패할 때까지 표준 출력에 쓴다.
 //   streams                     "out1"(출력) "err1"(오류) "out2"(출력)를 이 순서로 쓴다.
 //   sleep <ms>                  기다린 뒤 0으로 끝난다.
+//   block                       표준 출력에 "ready\n"을 쓰고 스스로 끝나지 않는다(부모가
+//                               강제 종료해야 끝난다). 시간 초과 시험이 진행과 경쟁하지 않게 한다.
 //   cwd                         현재 디렉터리를 표준 출력에 쓴다.
 //   spawn-descendant wait|exit  같은 job·그룹의 손자를 띄우고 PID를 "<pid>\n"으로 쓴다.
 //                               wait면 기다리고 exit면 바로 끝난다(손자는 출력을 잡고 있다).
@@ -201,6 +203,14 @@ int RunProcessProbe(int argc, char** argv) noexcept {
     if (Equal(mode, "sleep") && argc == 4) {
         SleepFor(static_cast<uint32>(strtoul(argv[3], nullptr, 10)));
         return 0;
+    }
+
+    if (Equal(mode, "block")) {
+        // 표준 출력이 Null이면 쓰기가 실패해도 그대로 기다린다(표지는 출력을 받는 시험만 본다).
+        static_cast<void>(WriteText(1, "ready\n"));
+        for (;;) {
+            SleepFor(1000);
+        }
     }
 
     if (Equal(mode, "cwd")) {
