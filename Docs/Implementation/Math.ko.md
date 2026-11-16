@@ -57,6 +57,7 @@ Core/Public/Core/Math        Vec·Quat·Mat4·Transform·Rotator·Rect·Color·R
 | `MathBatch.h` | `math::TransformPoints/TransformVectors` | 원소 수 불일치·부분 겹침은 Fatal, 정확한 in-place 허용, 결과는 원소별 Mat4 변환과 동일 |
 | `Color.h` | `Color`(8-bit), `LinearColor`(float, 선형 sRGB 원색) | 아래 3절 |
 | `RandomStream.h` | PCG32 결정적 난수 | 아래 4절 |
+| `InterpCurve.h`·`InterpCurvePoint.h`·`InterpCurveMath.h`·`PolynomialRoots.h` | `InterpCurve<T>`(UE FInterpCurve) 키 커브, Hermite·SQUAD 식, 다항식 실근 | [키 커브](InterpCurve.ko.md) — 키 정렬·루프·외삽·접선·quaternion 보간의 의미 결정과 UE 차이 |
 
 ## 2.1 기본 도형과 충돌 판정
 
@@ -89,6 +90,7 @@ UE 5.8 `Color.h`/`Color.cpp`와의 차이(원본 확인 — 아래 개수는 5.6
 ## 5. 검증
 
 - 단위 테스트: `Core/Source/Runtime/PlatformBase/Tests/PlatformMathTests.cpp`(Generic↔CPU 구현 bit 대조, 정수 변환 경계·무작위 30만 건, InvSqrtEstimate 오차, scalar↔SIMD 레지스터 bit 대조 5만 건×2), `Core/Source/Runtime/Core/Tests/Math*Tests.cpp`(벡터·행렬·투영·quaternion·Transform·Transform3f/3d(`MathTransform3Tests.cpp` — 변환 경계값의 최근접 짝수 반올림, 세 타입의 분해 판정 일치)·Rotator·보간·Rect·Float16, 독립 Gauss-Jordan 역행렬 oracle·Python 정수 행렬식·half 65,536개 전수 왕복과 이진 탐색 oracle 등), `ColorTests.cpp`, `RandomStreamTests.cpp`.
+- 키 커브: `MathInterpCurveTests.cpp`(G09 경계)·`MathInterpCurveGoldenTests.cpp`(UE 5.8 식 비트 대조, 독립 double reference, 조밀 표본 최근접 oracle) — 상세는 [키 커브](InterpCurve.ko.md) 5절.
 - 음성 대조(자식 프로세스): `math-invalid-0..7` — NaN·범위 밖 정수 변환, IntVector overflow, 일괄 변환 크기 불일치·부분 겹침, 행렬 인덱스, 비단위 축, Clamp 범위 위반이 각각 정상 종료하지 않고 지정 진단으로 끝나는지 확인한다.
 - ARM64는 `--target=aarch64-pc-windows-msvc`로 NEON 경로의 **컴파일만** 확인했다. 실행 결과는 아래 미검증이다.
 - 독립 리뷰(2026-11-11, 수학·도형 각 1개 subagent): 수학 쪽은 SSE↔Generic 정수 변환(double 1.6억 건, float 전체 2^32), InvSqrtEstimate(양의 정규 float 전수, ARM FRSQRTE 에뮬레이션 포함), half 변환(F16C 하드웨어와 전수 일치), scalar↔SSE 레지스터(300만 세트)에서 불일치 0을 확인했고, 위 표의 LookTo 평행 판정·Reversed oblique·AngularDistance·quaternion 역원·NaN 전파·FMA 축약·큰 far overflow를 찾아 수정했다. 도형 쪽은 비단위 OBB 회전, capsule 옆면 시작, 삼각형 끝점, 평면 Inf 거리, Box NaN 소실을 찾아 수정했고 수정 후 리뷰어 재현 프로그램 전부(OBB 무작위 70만 쌍 등)에서 실패 0이다. 재현 입력은 회귀 테스트로 옮겼다.
@@ -99,4 +101,4 @@ UE 5.8 `Color.h`/`Color.cpp`와의 차이(원본 확인 — 아래 개수는 5.6
 - macOS(x64·ARM64) 빌드·실행, ARM64 NEON 실행 결과와 `ScalarSimdBitExact`의 실제 성립 여부, Apple libm의 초월 함수·`pow` 결과 차이.
 - 성능 측정(scalar 대 SIMD, batch 크기·정렬)은 실행하지 않았다. SIMD 경로가 항상 빠르다고 주장하지 않는다.
 - double 4-lane 레지스터(`VectorRegister4Double` 대응), AVX2/FMA 선택 kernel과 CPU 기능 dispatch, SoA batch kernel.
-- UE 5.8 `Core/Public/Math` 101개 파일(`.h`·`.inl`·`.isph`, 5.6은 99개 — 5.8에서 `SpringMath.h`가 새로 생기고 `StaticSpatialIndex.h`가 Engine WorldPartition에서 옮겨 왔다) 중 미구현: SpringMath(스프링 감쇠)·StaticSpatialIndex(정적 공간 색인, 5.8 추가분), Float16Color·PackedVector(반정밀 색·패킹 벡터), BoxSphereBounds, DualQuat, Range·RangeSet(정수·열린 경계 범위), InterpCurve·CurveEd, Int128·BigInt·GuardedInt, NumericLimits, Halton·Sobol·LFSR, SHMath, ConvexHull2d·PolynomialRootSolver, GenericOctree, UnitConversion, TwoVectors, TransformCalculus, BasicMathExpressionEvaluator, IntVector4·UInt 변형, ColorList(이름 색 목록), ISPC(`*.isph`) 경로. 우선순위는 [Core 상세 명세](../Design/CoreDetailedSpec.ko.md) §3.4를 따른다.
+- UE 5.8 `Core/Public/Math` 101개 파일(`.h`·`.inl`·`.isph`, 5.6은 99개 — 5.8에서 `SpringMath.h`가 새로 생기고 `StaticSpatialIndex.h`가 Engine WorldPartition에서 옮겨 왔다) 중 미구현: SpringMath(스프링 감쇠)·StaticSpatialIndex(정적 공간 색인, 5.8 추가분), Float16Color·PackedVector(반정밀 색·패킹 벡터), BoxSphereBounds, DualQuat, Range·RangeSet(정수·열린 경계 범위), CurveEd·InterpCurve의 `CalcBounds`(InterpCurve 본체는 2026-11-16 구현 — [키 커브](InterpCurve.ko.md)), Int128·BigInt·GuardedInt, NumericLimits, Halton·Sobol·LFSR, SHMath, ConvexHull2d·PolynomialRootSolver(구간 실근은 `PolynomialRoots.h`로 구현, 일반 solver 형태는 미구현), GenericOctree, UnitConversion, TwoVectors, TransformCalculus, BasicMathExpressionEvaluator, IntVector4·UInt 변형, ColorList(이름 색 목록), ISPC(`*.isph`) 경로. 우선순위는 [Core 상세 명세](../Design/CoreDetailedSpec.ko.md) §3.4를 따른다.
