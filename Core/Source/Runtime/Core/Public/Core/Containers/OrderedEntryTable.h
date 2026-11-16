@@ -10,6 +10,11 @@
 //   - 위치 [0, used_)의 항목만 쓴 자리다. 산 항목의 상대 순서가 삽입 순서다.
 //   - 용량은 0 또는 2의 거듭제곱이고, 색인 칸 수는 용량의 두 배다.
 //   - 삽입 직전 (산 칸 + 삭제 칸) < 칸 수라 탐사는 늘 빈 칸에서 끝난다.
+//
+// 반환 순서(리플렉션 B9f3 리뷰 — 경로 쓰기의 B6 규칙 "옛 버퍼는 게시 뒤 반환"): 옛 저장소는 새
+// 저장소와 멤버(항목·색인·용량·개수)를 게시한 뒤에 반환한다(Reallocate·Release·CommitReserve).
+// 원소의 소멸은 그 항목을 논리적으로 지운 뒤(산 표시·개수·색인 칸)에 일어난다. 그래서 allocator의
+// 해제 콜백이 같은 표를 읽으면 늘 일관된 상태(옛 저장소가 아니라 게시된 표)를 본다.
 
 #include <Base/Checked.h>
 #include <Base/NumericLimits.h>
@@ -254,40 +259,126 @@ public:
         return *entry;
     }
 
+    // 2단계 예약(PrepareReserve → CommitReserve)의 준비 결과다(이동 전용). 새 저장소가 필요한
+    // 예약이면 그 저장소를 소유하고(아직 표에 넣지 않았다), 제자리 압축이면 할당이 없다. 쓰지 않고
+    // 소멸하면 잡은 저장소를 반환한다(표는 그대로). 준비한 표에만, 그 뒤 구조 변경 없이 한 번
+    // CommitReserve한다(어기면 Fatal).
+    class Reservation {
+    public:
+        Reservation(Reservation&& other) noexcept
+            : table_(other.table_), allocator_(other.allocator_), storage_(other.storage_),
+              capacity_(other.capacity_), revision_(other.revision_), action_(other.action_) {
+            other.table_ = nullptr;
+            other.storage_ = nullptr;
+            other.action_ = Action::None;
+        }
+
+        Reservation(const Reservation&) = delete;
+        Reservation& operator=(const Reservation&) = delete;
+        Reservation& operator=(Reservation&&) = delete;
+
+        ~Reservation() noexcept {
+            if (storage_ != nullptr && !allocator_->Deallocate(storage_)) {
+                platform::Fatal("OrderedMap reservation storage was not owned by its allocator");
+            }
+        }
+
+    private:
+        friend class OrderedEntryTable;
+
+        enum class Action : uint8 {
+            None,
+            Compact,
+            Grow
+        };
+
+        Reservation(const OrderedEntryTable* table, Action action, Entry* storage,
+                    usize capacity) noexcept
+            : table_(table), allocator_(table->allocator_), storage_(storage), capacity_(capacity),
+              revision_(table->revision_), action_(action) {
+        }
+
+        const OrderedEntryTable* table_ = nullptr;
+        Allocator* allocator_ = nullptr;
+        Entry* storage_ = nullptr;
+        usize capacity_ = 0;
+        uint64 revision_ = 0;
+        Action action_ = Action::None;
+    };
+
+    // Reserve(capacity)와 같은 판정으로 예약을 준비한다: 할당이 필요하면 새 저장소만 잡고 표는
+    // 바꾸지 않는다. 오류: Overflow, 할당 오류(표는 그대로).
+    Result<Reservation> PrepareReserve(usize capacity) noexcept {
+        using Action = typename Reservation::Action;
+        if (capacity <= count_) {
+            return Result<Reservation>::Success(Reservation(this, Action::None, nullptr, 0));
+        }
+
+        usize target = 0;
+        if (capacity <= capacity_) {
+            if (capacity - count_ <= capacity_ - used_) {
+                return Result<Reservation>::Success(Reservation(this, Action::None, nullptr, 0));
+            }
+
+            const usize dead = used_ - count_;
+            if (dead >= capacity_ / 8 || count_ < capacity_ / 2 || capacity_ == MaximumCapacity) {
+                return Result<Reservation>::Success(Reservation(this, Action::Compact, nullptr, 0));
+            }
+
+            target = capacity_ * 2;
+        } else {
+            if (capacity > MaximumCapacity) {
+                return Result<Reservation>::Failure(ErrorCode::Overflow);
+            }
+
+            target = capacity_ == 0 ? MinimumCapacity : capacity_;
+            while (target < capacity) {
+                target *= 2; // 2의 거듭제곱이 MaximumCapacity(2의 거듭제곱) 이하에서 멈춘다.
+            }
+        }
+
+        auto storage = AllocateStorage(target);
+        if (!storage) {
+            return Result<Reservation>::Failure(storage.Error());
+        }
+
+        return Result<Reservation>::Success(
+            Reservation(this, Action::Grow, storage.Value(), target));
+    }
+
+    // 준비한 예약을 적용한다(할당 없음, 실패 없음): 제자리 압축 또는 새 저장소로 옮겨 게시한 뒤 옛
+    // 저장소를 반환한다. 다른 표의 예약이거나 준비 뒤 구조가 바뀌었으면 Fatal이다.
+    void CommitReserve(Reservation& reservation) noexcept {
+        using Action = typename Reservation::Action;
+        if (reservation.table_ != this ||
+            (reservation.action_ != Action::None && reservation.revision_ != revision_)) {
+            platform::Fatal("OrderedMap reservation committed to a changed or different map");
+        }
+
+        if (reservation.action_ == Action::Compact) {
+            CompactEntries();
+        } else if (reservation.action_ == Action::Grow) {
+            Entry* storage = reservation.storage_;
+            reservation.storage_ = nullptr;
+            AdoptStorage(storage, reservation.capacity_);
+        }
+
+        reservation.action_ = Action::None;
+    }
+
     // capacity개 원소를 성장 없이 담게 한다. 용량이 모자라면 새 저장소다. 용량은 되는데 죽은 항목
     // 때문에 끝자리가 모자라면, 죽은 항목이 용량의 1/8 이상이거나 산 항목이 용량의 절반 미만일 때
     // 제자리 압축(할당 없음)을, 아니면 두 배로 성장한다. 그래서 "가득 찬 상태에서 삭제 하나 +
     // Reserve(Count() + 1) + 삽입" 반복도 상환 O(1)이다. Reserve(Capacity()) 반복처럼 매번 남은
     // 용량 전부를 요구하면 보장상 매번 O(용량)이다. 오류: Overflow, 할당 오류. 실패하면 그대로다.
     Result<void> Reserve(usize capacity) noexcept {
-        if (capacity <= count_) {
-            return Result<void>::Success();
+        auto prepared = PrepareReserve(capacity);
+        if (!prepared) {
+            return Result<void>::Failure(prepared.Error());
         }
 
-        if (capacity <= capacity_) {
-            if (capacity - count_ <= capacity_ - used_) {
-                return Result<void>::Success();
-            }
-
-            const usize dead = used_ - count_;
-            if (dead >= capacity_ / 8 || count_ < capacity_ / 2 || capacity_ == MaximumCapacity) {
-                CompactEntries();
-                return Result<void>::Success();
-            }
-
-            return Reallocate(capacity_ * 2);
-        }
-
-        if (capacity > MaximumCapacity) {
-            return Result<void>::Failure(ErrorCode::Overflow);
-        }
-
-        usize target = capacity_ == 0 ? MinimumCapacity : capacity_;
-        while (target < capacity) {
-            target *= 2; // 2의 거듭제곱이 MaximumCapacity(2의 거듭제곱) 이하에서 멈춘다.
-        }
-
-        return Reallocate(target);
+        CommitReserve(prepared.Value());
+        return Result<void>::Success();
     }
 
     // 죽은 항목과 삭제 칸을 정리하고 최소 용량으로 줄인다. 비었으면 저장소를 반환한다. 실패하면
@@ -396,18 +487,19 @@ public:
         ++revision_;
     }
 
-    // 모든 원소와 저장소를 반환한다.
+    // 모든 원소와 저장소를 반환한다. 빈 표를 게시한 뒤 옛 저장소를 반환한다(해제 콜백은 빈 표를
+    // 본다).
     void Release() noexcept {
         DestroyEntries();
-        if (entries_ != nullptr && !allocator_->Deallocate(entries_)) {
-            platform::Fatal("OrderedMap storage was not owned by its allocator");
-        }
-
+        Entry* old = entries_;
         entries_ = nullptr;
         index_ = nullptr;
         capacity_ = 0;
         tombstones_ = 0;
         ++revision_;
+        if (old != nullptr && !allocator_->Deallocate(old)) {
+            platform::Fatal("OrderedMap storage was not owned by its allocator");
+        }
     }
 
 private:
@@ -456,20 +548,38 @@ private:
     // 새 저장소(항목 + 색인, 할당 한 번)를 잡은 뒤에만 산 항목을 순서대로 옮긴다. 실패하면
     // 그대로다.
     Result<void> Reallocate(usize newCapacity) noexcept {
+        auto storage = AllocateStorage(newCapacity);
+        if (!storage) {
+            return Result<void>::Failure(storage.Error());
+        }
+
+        AdoptStorage(storage.Value(), newCapacity);
+        return Result<void>::Success();
+    }
+
+    // 용량 newCapacity의 저장소를 잡는다(표는 바꾸지 않는다). 오류: Overflow, 할당 오류.
+    Result<Entry*> AllocateStorage(usize newCapacity) noexcept {
         usize bytes = 0;
         if (newCapacity > MaximumCapacity || !StorageBytes(newCapacity, bytes)) {
-            return Result<void>::Failure(ErrorCode::Overflow);
+            return Result<Entry*>::Failure(ErrorCode::Overflow);
         }
 
         auto allocation = allocator_->Allocate(bytes, alignof(Entry));
         if (!allocation) {
-            return Result<void>::Failure(allocation.Error());
+            return Result<Entry*>::Failure(allocation.Error());
         }
 
         Entry* entries = static_cast<Entry*>(allocation.Value());
         if (entries == nullptr || reinterpret_cast<uptr>(entries) % alignof(Entry) != 0) {
             platform::Fatal("OrderedMap allocator returned invalid storage");
         }
+
+        return Result<Entry*>::Success(entries);
+    }
+
+    // 잡아 둔 저장소 entries(용량 newCapacity)로 산 항목을 순서대로 옮기고 새 표를 게시한 뒤 옛
+    // 저장소를 반환한다(할당 없음, 실패 없음 — 이동된 원소의 소멸자는 allocator를 부르지 않는다).
+    void AdoptStorage(Entry* entries, usize newCapacity) noexcept {
 
         // StorageBytes가 넘침 없이 계산했으므로 아래 곱은 넘치지 않는다.
         unsigned char* indexStorage =
@@ -499,17 +609,16 @@ private:
             ++target;
         }
 
-        if (entries_ != nullptr && !allocator_->Deallocate(entries_)) {
-            platform::Fatal("OrderedMap storage was not owned by its allocator");
-        }
-
+        Entry* old = entries_;
         entries_ = entries;
         index_ = index;
         capacity_ = newCapacity;
         used_ = target;
         tombstones_ = 0;
         ++revision_;
-        return Result<void>::Success();
+        if (old != nullptr && !allocator_->Deallocate(old)) {
+            platform::Fatal("OrderedMap storage was not owned by its allocator");
+        }
     }
 
     // 산 항목을 상대 순서 그대로 앞으로 당긴다(할당 없음). 옮긴 항목의 색인 칸만 고친다.
@@ -541,11 +650,14 @@ private:
         ++revision_;
     }
 
+    // 산 항목을 하나씩 논리적으로 지운 뒤(산 표시·개수) 소멸시킨다 — 원소 소멸의 해제 콜백은 아직
+    // 남은 항목만 산 것으로 본다.
     void DestroyEntries() noexcept {
         for (usize position = 0; position < used_; ++position) {
             Entry& entry = entries_[position];
             if (entry.alive) {
                 entry.alive = false;
+                --count_;
                 DestroyAt(entry.Value());
                 DestroyAt(entry.Key());
             }

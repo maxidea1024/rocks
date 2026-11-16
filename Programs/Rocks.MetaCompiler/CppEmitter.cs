@@ -276,12 +276,12 @@ internal static class CppEmitter
                     if (field.IsMap || field.IsSet)
                     {
                         // Map·Set 필드(리플렉션 B9f2)는 FieldValue로 표현할 수 없으므로 read·write·writeStaged가 없고 codec, 값·원소
-                        // Enum·Struct의 native 키(없으면 nullptr), 경로 thunk 없음(key 단계 경로 연산은 리플렉션 B9f3), readStaged
-                        // 없음과 키 enum의 native 키를 싣는다(Docs/Design/ReflectionExtensions.ko.md 7.2절).
+                        // Enum·Struct의 native 키(없으면 nullptr), key 단계 경로 thunk(리플렉션 B9f3), readStaged 없음과 키 enum의
+                        // native 키를 싣는다(Docs/Design/ReflectionExtensions.ko.md 7.2·7.3절).
                         Line("nullptr, {}, nullptr,");
                         string mapValueNative = ValueNativeType(schema, field);
                         string keyNative = field.KeyKind == "Enum" ? $", nullptr, NativeTypeKey<::{field.KeyReference}>()" : "";
-                        EmitClassCodec(native, member, (mapValueNative.Length == 0 ? ", nullptr" : mapValueNative) + ", nullptr" + keyNative, Line);
+                        EmitClassCodec(native, member, (mapValueNative.Length == 0 ? ", nullptr" : mapValueNative) + ClassPathThunk(native, member, field) + keyNative, Line);
                         continue;
                     }
 
@@ -357,7 +357,7 @@ internal static class CppEmitter
         _ => ""
     };
 
-    // 클래스 Struct·Array 필드 함수표의 path 칸(valueNativeType 뒤)이다(Docs/Design/ReflectionFoundations.ko.md 7.1절
+    // 클래스 Struct·Array·Optional<값 struct>·Map·Set 필드 함수표의 path 칸(valueNativeType 뒤)이다(Docs/Design/ReflectionFoundations.ko.md 7.1절
     // MetaCompiler). 소유자 Owner는 함수표를 내는 클래스(파생 — 함수표가 실제 타입 레코드에서 온다)이고 멤버 포인터는 선언
     // 클래스의 것이다(상속 import 필드 포함). 대상 종류는 FieldModel.TargetKind(배열이면 원소 종류)를 명시한다 — C++ 멤버
     // 형식과 다르면 TargetValueCheck static_assert가 컴파일을 실패시킨다(requires 탐지를 쓰지 않는다). 단일 값 필드는 path가
@@ -371,13 +371,8 @@ internal static class CppEmitter
     private static string StructMemberOps(string native, FieldModel field)
     {
         string member = $"&{native}::{field.Name}";
-        // Map·Set 멤버(리플렉션 B9f2)는 경로 thunk가 없다(key 단계 경로 연산은 리플렉션 B9f3). 값·키 native 키는 StructFieldOps가 멤버
-        // 형식으로 채운다.
-        if (field.IsMap || field.IsSet)
-        {
-            return $"detail::StructFieldOps<{member}>({GuidValue(field.Id)}),";
-        }
-
+        // Map·Set 멤버(리플렉션 B9f2)의 대상 종류는 값·원소 종류다(key 단계 경로 연산 — 리플렉션 B9f3). 값·키 native 키는
+        // StructFieldOps가 멤버 형식으로 채운다.
         return $"detail::StructFieldOps<{member}>({GuidValue(field.Id)}, &detail::PathStructMember<{member}, ValueKind::{field.TargetKind}>),";
     }
 

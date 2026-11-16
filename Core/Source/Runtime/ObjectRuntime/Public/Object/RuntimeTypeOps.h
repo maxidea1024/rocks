@@ -129,11 +129,11 @@ struct FieldWriteBinding {
 // 플래그(최상위 필드면 필드 플래그 — B6 경로 쓰기는 바깥 ReadOnly를 전파한다), actualEnum은 그
 // 필드의 등록된 enum 스키마(원소 모드면 원소 enum — TypeLease::FieldEnum이 돌려주는 값),
 // sourceExpectedNative·targetExpectedNative는 원본·대상 스키마의 참조 기대 타입 native 키(0이면
-// Object), referenced는 non-null 참조 값의 대상 타입 lease, element는 원소 모드(배열 필드의 원소
-// 하나를 쓴다 — actual은 Array여야 하고 binding을 actual->element와 대조한다)다. null 참조는 단일
-// 참조·ObjectRefArray 원소 모두 받는다(B5 — 원소 null 허용). null 판정은 ObjectHandle::IsNull이다
-// (registry 0 또는 generation 0인 비정규 null도 null — 쓰는 쪽이 ObjectHandle{}로
-// 정규화한다, 7.1절). lease는 호출자가 얻어 쓰기 완료까지 쥔다.
+// Object), referenced는 non-null 참조 값의 대상 타입 lease, element는 원소 모드다: 배열 필드의 원소
+// 하나나 Map 필드의 값 하나(Map은 리플렉션 B9f3)를 쓰며, actual은 Array·Map이어야 하고 binding을
+// actual->element와 대조한다. null 참조는 단일 참조·ObjectRefArray 원소 모두 받는다(B5 — 원소 null
+// 허용). null 판정은 ObjectHandle::IsNull이다(registry 0 또는 generation 0인 비정규 null도 null —
+// 쓰는 쪽이 ObjectHandle{}로 정규화한다, 7.1절). lease는 호출자가 얻어 쓰기 완료까지 쥔다.
 struct FieldWriteTarget {
     const FieldSchema* actual = nullptr;
     uint32 effectiveFlags = 0;
@@ -163,8 +163,9 @@ struct FieldWriteTarget {
 Result<void> ValidateFieldWrite(const FieldWriteBinding& binding, const FieldWriteTarget& target,
                                 const FieldValue& value) noexcept;
 
-// 배열 필드의 새 길이를 검사한다(경로 접근의 삽입·크기 변경 — B6, 저장의 MaxElements와 같은
-// 규칙). field가 Array가 아니면 TypeMismatch, newLength > field.maxElements면 CapacityExceeded다.
+// 컨테이너 필드(Array·Map·Set — Map·Set은 리플렉션 B9f3)의 새 길이를 검사한다(경로 접근의 삽입·
+// 크기 변경 — B6, 저장의 MaxElements와 같은 규칙). field가 Array·Map·Set이 아니면 TypeMismatch,
+// newLength > field.maxElements면 CapacityExceeded다.
 // 로드는 필드별 상한을 걸지 않으므로 이 검사를 거치지 않는다(MaxArrayElements만 — 5.5절).
 //
 // 사용 예:
@@ -178,8 +179,9 @@ enum class ArrayEdit : uint8 {
     Clear
 };
 
-// 배열 구조 변경(삽입·삭제·비우기)의 검증 한 곳이다(Docs/Design/ReflectionFoundations.ko.md
-// 7.1절). target.actual이 없거나 Array가 아니면 TypeMismatch, 유효 플래그(target.effectiveFlags —
+// 컨테이너 구조 변경(배열 원소·Map 항목·Set 원소의 삽입·삭제·비우기 — Map·Set은 리플렉션 B9f3)의
+// 검증 한 곳이다(Docs/Design/ReflectionFoundations.ko.md 7.1절). target.actual이 없거나
+// Array·Map·Set이 아니면 TypeMismatch, 유효 플래그(target.effectiveFlags —
 // 바깥 struct·배열 필드에서 전파된다)가 ReadOnly면 Unsupported다. lease를 얻지 않는 순수 검사다.
 // 삽입하는 단일 값 원소 자체는 ValidateFieldWrite(원소 모드)가 따로 검사한다. 고정 길이 배열 같은
 // UI 정책(UE EditFixedSize)은 나중에 이 한 곳에 더한다.

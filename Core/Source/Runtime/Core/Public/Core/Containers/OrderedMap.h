@@ -33,7 +33,9 @@
 //   - 해시·동등 비교는 noexcept이고 같은 키에 안정적이며, 동등 키는 해시가 같아야 한다.
 //     키를 복사·이동한 뒤에도 원본과 동등하고 해시가 같아야 한다.
 //   - 키·값 생성·이동·소멸, 해시·동등 비교, allocator 콜백에서 같은 Map에 재진입(읽기
-//     포함)하지 않는다.
+//     포함)하지 않는다. 예외로 저장소 반환과 원소 소멸의 해제 콜백에서 읽는 것은 된다: 옛 저장소는
+//     새 표를 게시한 뒤 반환하고 원소는 논리적으로 지운 뒤 소멸하므로 콜백은 일관된 Map을
+//     본다(리플렉션 경로 연산의 B6 규칙).
 //   - 실패한 Insert·InsertOrAssign·FindOrAdd*·Reserve·Compact는 내용·순서·용량·포인터·
 //     반복자를 보존하고 입력 인자를 소비하지 않는다.
 //   - 신규 삽입과 값 교체는 저장소 원소의 직접 별칭을 거부한다(InvalidArgument).
@@ -290,6 +292,44 @@ public:
         }
 
         return table_.Reserve(capacity);
+    }
+
+    // 2단계 예약의 준비 결과다(이동 전용 — Reserve를 할당과 옮기기로 나눈다, 리플렉션 B9f3 경로
+    // 넣기). 쓰지 않고 소멸하면 잡은 저장소를 반환하고 Map은 그대로다.
+    using Reservation = typename Table::Reservation;
+
+    // Reserve(capacity)와 같은 판정으로 예약을 준비한다. 새 저장소가 필요하면 그 할당만 하고 Map은
+    // 바꾸지 않는다(내용·순서·용량·포인터 불변). 그 사이에 호출자가 할당 콜백의 효과(소유자 파괴
+    // 등)를 확인한 뒤 CommitReserve로 적용하거나 Reservation을 버린다. 오류: Busy(순회 중),
+    // Overflow, 할당 오류(Map은 그대로).
+    //
+    // 사용 예:
+    //   auto prepared = map.PrepareReserve(map.Count() + 1);
+    //   if (!prepared) { return prepared.Error(); }
+    //   if (!ownerAlive) { return Destroyed; }        // 버리면 잡은 저장소만 반환한다
+    //   map.CommitReserve(prepared.Value());          // 할당·실패 없음
+    //   map.Insert(Move(key), Move(value));           // Reserve와 같이 할당 없음
+    Result<Reservation> PrepareReserve(usize capacity) noexcept {
+        if (iterationDepth_ != 0) {
+            return Result<Reservation>::Failure(ErrorCode::Busy);
+        }
+
+        return table_.PrepareReserve(capacity);
+    }
+
+    // 준비한 예약을 적용한다(할당 없음, 실패 없음). 성공한 Reserve(capacity)와 같은 보장(Count()가
+    // capacity가 될 때까지의 삽입은 할당·이동하지 않는다)이고, 옛 저장소는 새 저장소를 게시한 뒤
+    // 반환한다(해제 콜백은 게시된 Map을 본다). 이 Map의 예약이 아니거나, 준비 뒤 구조가 바뀌었거나,
+    // 순회 중이면 Fatal이다.
+    void CommitReserve(Reservation& reservation) noexcept {
+        CheckNotIterating();
+        table_.CommitReserve(reservation);
+    }
+
+    // ForEach·EraseIf·FindOrAddWith 순회 중인지다(그 사이 삭제·Clear·이동은 Fatal, 삽입·예약은
+    // Busy). 방어적 호출자(리플렉션 경로 연산)가 구조 변경 전에 Busy로 거절할 때 쓴다.
+    bool IsIterating() const noexcept {
+        return iterationDepth_ != 0;
     }
 
     // 죽은 항목과 삭제 칸을 정리하고 현재 원소 수에 맞는 최소 용량으로 줄인다. 빈 Map은

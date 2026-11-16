@@ -18,12 +18,16 @@
 // 진단 기록 hook.
 namespace rocks::test::map {
 
+using reflection_fixture::MapAccess;
 using reflection_fixture::MapBag;
 using reflection_fixture::MapColor;
 using reflection_fixture::MapHolder;
 using reflection_fixture::MapKeyBase;
 using reflection_fixture::MapKeyDerived;
+using reflection_fixture::MapKeyLeaf;
 using reflection_fixture::MapLink;
+using reflection_fixture::MapLockedHolder;
+using reflection_fixture::MapPathHolder;
 using reflection_fixture::MapPerPlatform;
 using reflection_fixture::MapPoint;
 using reflection_fixture::MapTagBag;
@@ -48,7 +52,13 @@ inline Guid HolderField(StringView name) noexcept {
     return SchemaField(TypeOf<MapHolder>(), name).id;
 }
 
-// fixture를 쓰는 순서대로 등록한다. 기록은 Shutdown이 정리한다.
+// MapPathHolder 필드 ID다.
+inline Guid PathHolderField(StringView name) noexcept {
+    return SchemaField(TypeOf<MapPathHolder>(), name).id;
+}
+
+// fixture를 쓰는 순서대로 등록한다(MapKeyLeaf·MapLockedHolder는 쓰는 시험이 따로 등록한다).
+// 기록은 Shutdown이 정리한다.
 inline bool RegisterFixture(TypeRegistry& types) noexcept {
     return GeneratedType<MapColor>::Register(types).IsOk() &&
            GeneratedType<MapKeyBase>::Register(types).IsOk() &&
@@ -59,7 +69,9 @@ inline bool RegisterFixture(TypeRegistry& types) noexcept {
            GeneratedType<MapBag>::Register(types).IsOk() &&
            GeneratedType<MapTagBag>::Register(types).IsOk() &&
            GeneratedType<MapPerPlatform>::Register(types).IsOk() &&
-           GeneratedType<MapHolder>::Register(types).IsOk();
+           GeneratedType<MapHolder>::Register(types).IsOk() &&
+           GeneratedType<MapAccess>::Register(types).IsOk() &&
+           GeneratedType<MapPathHolder>::Register(types).IsOk();
 }
 
 inline RegistryOptions WithNames(NamePool* names) noexcept {
@@ -68,9 +80,10 @@ inline RegistryOptions WithNames(NamePool* names) noexcept {
     return options;
 }
 
-// root로 쥔 새 객체다(실패하면 시험 중단).
-inline RootRef<MapHolder> New(ObjectRegistry& objects) noexcept {
-    auto created = objects.NewObject<MapHolder>(objects.OwnerAccess(), TypeIdOf<MapHolder>());
+// root로 쥔 새 T 객체다(T는 MapHolder가 기본 — 실패하면 시험 중단).
+template <class T = MapHolder>
+RootRef<T> New(ObjectRegistry& objects) noexcept {
+    auto created = objects.NewObject<T>(objects.OwnerAccess(), TypeIdOf<T>());
     if (!created) {
         platform::Fatal("test object creation failed");
     }
@@ -78,10 +91,10 @@ inline RootRef<MapHolder> New(ObjectRegistry& objects) noexcept {
     return Move(created.Value());
 }
 
-// 객체 값을 edit로 바꾸거나 본다(Borrow 동안).
-template <class Edit>
+// T 객체 값을 edit로 바꾸거나 본다(Borrow 동안 — T는 MapHolder가 기본).
+template <class T = MapHolder, class Edit>
 void With(ObjectRegistry& objects, ObjectHandle handle, Edit&& edit) noexcept {
-    auto borrowed = objects.Resolve<MapHolder>(objects.OwnerAccess(), handle);
+    auto borrowed = objects.Resolve<T>(objects.OwnerAccess(), handle);
     REQUIRE(borrowed);
     auto value = borrowed.Value().Get();
     REQUIRE(value);
@@ -209,6 +222,64 @@ inline uint64 MinimumValidateWork(Allocator& allocator, ObjectRegistry& registry
     }
 
     return high;
+}
+
+// lease 스키마로 해석한 문자열 경로다(실패하면 시험 중단 — key 단계 경로 시험, 리플렉션 B9f3).
+inline PropertyPathBuffer PathText(const TypeLease& lease, StringView text) noexcept {
+    PropertyPathBuffer path;
+    if (!ParsePropertyPath(lease, text, path)) {
+        platform::Fatal("test property path parse failed");
+    }
+
+    return path;
+}
+
+// 종류 kind의 단일 값이다(정수·실수는 해당 칸 — 부호 있는 정수·enum은 signedInteger).
+inline FieldValue Scalar(Allocator& allocator, ValueKind kind, int64 value) noexcept {
+    FieldValue result(allocator);
+    result.kind = kind;
+    result.signedInteger = value;
+    result.unsignedInteger = static_cast<uint64>(value);
+    result.float32 = static_cast<float>(value);
+    result.boolean = value != 0;
+    return result;
+}
+
+// String 값이다.
+inline FieldValue TextField(Allocator& allocator, StringView text) noexcept {
+    FieldValue result(allocator);
+    result.kind = ValueKind::Utf8String;
+    if (!result.string.TryAssign(text)) {
+        platform::Fatal("test string value assign failed");
+    }
+
+    return result;
+}
+
+// 한 단계 key 경로(field[key] — 키 wire는 wire가 담는다)다. 키 wire를 바로 만들 수 없는 종류(Soft·
+// ClassRef)나 정규형이 아닌 wire를 시험할 때 쓴다.
+struct KeyPath {
+    explicit KeyPath(Allocator& allocator) noexcept : wire(allocator) {
+    }
+
+    Array<uint8> wire;
+    PathKey keys[1];
+    PathStep steps[1];
+
+    PropertyPath View() const noexcept {
+        return PropertyPath{Span<const PathStep>(steps, 1), Span<const PathKey>(keys, 1)};
+    }
+};
+
+// field[key] 경로를 path에 만든다(AppendPathKey가 실패하면 시험 중단).
+inline void MakeKeyPath(KeyPath& path, Guid field, const PathKeyValue& key) noexcept {
+    path.wire.Clear();
+    if (!AppendPathKey(key, path.wire)) {
+        platform::Fatal("test path key encode failed");
+    }
+
+    path.keys[0] = PathKey{key.kind, path.wire.View()};
+    path.steps[0] = PathStep{field, 0, PathSelector::Key};
 }
 
 // 진단과 소프트 참조 수집을 기록한다(진단은 경로 전체, 소프트 참조는 경로의 첫 단계만 둔다).

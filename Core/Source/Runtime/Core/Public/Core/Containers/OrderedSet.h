@@ -82,6 +82,23 @@ public:
         return map_.Reserve(count);
     }
 
+    // 2단계 예약이다(OrderedMap::PrepareReserve·CommitReserve — 할당만 먼저 하고 적용은 무할당·
+    // 무실패).
+    using Reservation = typename OrderedMap<K, Marker, Hasher, KeyEqual>::Reservation;
+
+    Result<Reservation> PrepareReserve(usize count) noexcept {
+        return map_.PrepareReserve(count);
+    }
+
+    void CommitReserve(Reservation& reservation) noexcept {
+        map_.CommitReserve(reservation);
+    }
+
+    // 순회 중인지다(OrderedMap::IsIterating).
+    bool IsIterating() const noexcept {
+        return map_.IsIterating();
+    }
+
     // 죽은 항목을 정리하고 최소 용량으로 줄인다. 실패하면 그대로다(OrderedMap::Compact).
     Result<void> Compact() noexcept {
         return map_.Compact();

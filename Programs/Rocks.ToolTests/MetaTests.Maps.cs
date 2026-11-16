@@ -16,7 +16,8 @@ internal static partial class MetaTests
         "ROCKS_CLASS()\nstruct Value : public rocks::Object {\n" + field + "\n};\n}\n";
 
     // Map·Set 클래스 필드와 struct 멤버가 descriptor(value {Map·Set}·element 값·원소 형식·key 키 형식·maxElements)와 생성 코드(스키마
-    // {Map·Set, 0} + 값·원소 형식 + maxElements + 키 형식, 경로 thunk 없음, 키 enum native 키)에 닿고 생성 헤더가 컴파일된다.
+    // {Map·Set, 0} + 값·원소 형식 + maxElements + 키 형식, 값·원소 종류의 경로 thunk — 리플렉션 B9f3, 키 enum native 키)에 닿고 생성 헤더가
+    // 컴파일된다.
     private static void RegisterMaps(MetaContext context)
     {
         var (suite, options, actualEnvironment, generator, compiler) = context;
@@ -25,8 +26,9 @@ internal static partial class MetaTests
             using Probe probe = new(options, actualEnvironment, generator, compiler);
             string source = MapPreamble +
                 "ROCKS_ENUM()\nenum class Mode : rocks::uint8 { First = 1, Second = 2 };\n" +
-                "ROCKS_STRUCT()\nstruct Leaf {\nexplicit Leaf(rocks::Allocator& allocator) noexcept : label(allocator), tags(allocator) {}\n" +
-                "ROCKS_PROPERTY() rocks::String label;\nROCKS_PROPERTY() rocks::OrderedSet<rocks::Name> tags;\n};\n" +
+                "ROCKS_STRUCT()\nstruct Leaf {\nexplicit Leaf(rocks::Allocator& allocator) noexcept : label(allocator), tags(allocator), named(allocator) {}\n" +
+                "ROCKS_PROPERTY() rocks::String label;\nROCKS_PROPERTY() rocks::OrderedSet<rocks::Name> tags;\n" +
+                "ROCKS_PROPERTY() rocks::OrderedMap<rocks::uint32, rocks::String> named;\n};\n" +
                 "ROCKS_CLASS()\nstruct Value : public rocks::Object {\n" +
                 "explicit Value(rocks::Allocator& allocator) noexcept : byMode(allocator), leaves(allocator), assets(allocator), kinds(allocator) {}\n" +
                 "ROCKS_PROPERTY(MaxElements = 8) rocks::OrderedMap<Mode, rocks::String> byMode;\n" +
@@ -65,7 +67,12 @@ internal static partial class MetaTests
             Verify.Contains("{ValueKind::Set,Guid{}}", generated, "generated set schema");
             Verify.Contains("NativeTypeKey<::probe::Mode>()}", generated, "map enum key native key");
             Verify.Contains("detail::StructFieldOps<&::probe::Leaf::tags>(", generated, "set struct member ops");
-            Verify.That(!generated.Contains("PathStructMember<&::probe::Leaf::tags", StringComparison.Ordinal), "set member has no path thunk");
+            Verify.Contains("PathStructMember<&::probe::Leaf::tags,ValueKind::Name>", generated, "set member path thunk targets the element kind");
+            Verify.Contains("PathStructMember<&::probe::Leaf::named,ValueKind::Utf8String>", generated, "map member path thunk targets the value kind");
+            Verify.Contains("PathClassField<::probe::Value,::rocks::ValueKind::Struct>(cursor,&::probe::Value::leaves)", generated,
+                "map class field path thunk targets the value kind");
+            Verify.Contains("PathClassField<::probe::Value,::rocks::ValueKind::SoftObjectReference>(cursor,&::probe::Value::assets)", generated,
+                "set class field path thunk targets the element kind");
             ProcessResult compiled = await probe.CompileGeneratedAsync();
             Verify.Equal(0, compiled.ExitCode, "generated map header compiles: " + compiled.StdOut + compiled.StdErr);
         });

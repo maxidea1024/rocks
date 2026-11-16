@@ -5,12 +5,14 @@
 #include <Platform/Fatal.h>
 
 // 경로 접근(B6) 생성 thunk 템플릿이다(Docs/Design/ReflectionFoundations.ko.md 7.1절). MetaCompiler
-// 생성 헤더가 include하고 그 안에서만 인스턴스화한다: 클래스 Struct·Array 필드의 함수표에
-// PathClassField, struct 멤버의 StructFieldOps 둘째 인자에 PathStructMember를 낸다. 대상 종류는
-// ValueKind Target으로 명시하고(requires 탐지 형질을 쓰지 않는다 — 컨테이너는 부분 특수화
-// ArrayField, enum은 GeneratedType<E>를 직접 쓰므로 생성 헤더가 없으면 조용히 거짓이 아니라 컴파일
-// 오류다), 정적 타입과 등록 스키마를 실행 시 대조해 void* 타입 혼동을 막는다. Serialization에
-// 의존하지 않는다.
+// 생성 헤더가 include하고 그 안에서만 인스턴스화한다: 클래스 Struct·Array·Optional<값 struct>·
+// Map·Set 필드의 함수표에 PathClassField, struct 멤버의 StructFieldOps 둘째 인자에
+// PathStructMember를 낸다. 대상 종류는 ValueKind Target으로 명시하고(requires 탐지 형질을 쓰지
+// 않는다 — 컨테이너는 부분 특수화 ArrayField·OptionalField·MapField, enum은 GeneratedType<E>를 직접
+// 쓰므로 생성 헤더가 없으면 조용히 거짓이 아니라 컴파일 오류다), 정적 타입과 등록 스키마를 실행 시
+// 대조해 void* 타입 혼동을 막는다. Map·Set의 key 단계(리플렉션 B9f3 —
+// Docs/Design/ReflectionExtensions.ko.md 7.3절)는 PathKeyedContainer다. Serialization에 의존하지
+// 않는다.
 namespace rocks::detail {
 
 // 경로의 참조 멤버 쓰기 단일 지점이다(7.1절): StructRefArray 원소 안이면 그 원소 위치의 live
@@ -286,7 +288,7 @@ Result<void> PathContainer(PathCursor& cursor, Array<E>& array) noexcept {
         }
     }
 
-    if (!frame.indexed) {
+    if (frame.selector == PathSelector::None) {
         if (operation == PathOperation::Length) {
             cursor.SetLength(array.Size());
             return Result<void>::Success();
@@ -342,7 +344,7 @@ Result<void> PathContainer(PathCursor& cursor, ObjectRefArray<T>& array) noexcep
     const ObjectHandle owner = cursor.OwnerHandle();
     const PathFrame& frame = cursor.Frame();
     const PathOperation operation = cursor.Operation();
-    if (!frame.indexed) {
+    if (frame.selector == PathSelector::None) {
         if (operation == PathOperation::Length) {
             cursor.SetLength(array.Size());
             return Result<void>::Success();
@@ -417,7 +419,7 @@ Result<void> PathContainer(PathCursor& cursor, StructRefArray<S>& array) noexcep
         return checked;
     }
 
-    if (!frame.indexed) {
+    if (frame.selector == PathSelector::None) {
         if (operation == PathOperation::Length) {
             cursor.SetLength(array.Size());
             return Result<void>::Success();
@@ -605,21 +607,34 @@ Result<void> PathOptionalValue(PathCursor& cursor, Optional<T>& member) noexcept
     }
 }
 
-// 필드·멤버 값 하나(member — Member 형식)의 단계다: 정적 대조(대상 종류·배열·Optional 여부·enum ID)
-// 뒤 컨테이너, Optional, struct(내려가기), 단일 값 끝 지점으로 나눈다.
+// Map·Set 필드·멤버의 단계다(리플렉션 B9f3 — 정의와 key 단계 도우미는 이 헤더 끝에서 include하는
+// Object/GeneratedKeyedPathAccess.h).
+template <ValueKind Target, class Container>
+Result<void> PathKeyedContainer(PathCursor& cursor, Container& container) noexcept;
+
+// 필드·멤버 값 하나(member — Member 형식)의 단계다: 정적 대조(대상 종류·컨테이너 종류(배열·
+// Optional·Map·Set)·enum ID) 뒤 컨테이너, Map·Set, Optional, struct(내려가기), 단일 값 끝 지점으로
+// 나눈다.
 template <ValueKind Target, class Member>
 Result<void> PathMember(PathCursor& cursor, Member& member) noexcept {
     constexpr bool container = ArrayField<Member>::Supported;
     constexpr bool optional = OptionalField<Member>::Supported;
+    constexpr bool keyed = MapField<Member>::Supported;
+    constexpr ValueKind wrapper = container  ? ValueKind::Array
+                                  : optional ? ValueKind::Optional
+                                  : keyed    ? FieldValueKind<Member>()
+                                             : ValueKind::Opaque;
     if constexpr (container) {
         static_assert(TargetValueCheck<Target, typename ArrayField<Member>::Element>::Valid);
     } else if constexpr (optional) {
         static_assert(TargetValueCheck<Target, typename OptionalField<Member>::Inner>::Valid);
+    } else if constexpr (keyed) {
+        static_assert(TargetValueCheck<Target, typename MapField<Member>::Value>::Valid);
     } else {
         static_assert(TargetValueCheck<Target, Member>::Valid);
     }
 
-    if (auto checked = cursor.CheckTarget(Target, container, optional); !checked) {
+    if (auto checked = cursor.CheckTarget(Target, wrapper); !checked) {
         return checked;
     }
 
@@ -636,6 +651,12 @@ Result<void> PathMember(PathCursor& cursor, Member& member) noexcept {
                 !checked) {
                 return checked;
             }
+        } else if constexpr (keyed) {
+            if (auto checked =
+                    cursor.CheckEnum(GeneratedType<typename MapField<Member>::Value>::Id());
+                !checked) {
+                return checked;
+            }
         } else {
             if (auto checked = cursor.CheckEnum(GeneratedType<Member>::Id()); !checked) {
                 return checked;
@@ -645,6 +666,8 @@ Result<void> PathMember(PathCursor& cursor, Member& member) noexcept {
 
     if constexpr (container) {
         return PathContainer<Target>(cursor, member);
+    } else if constexpr (keyed) {
+        return PathKeyedContainer<Target>(cursor, member);
     } else if constexpr (optional) {
         if constexpr (Target == ValueKind::Struct) {
             return PathOptionalStruct(cursor, member);
@@ -662,8 +685,8 @@ Result<void> PathMember(PathCursor& cursor, Member& member) noexcept {
     }
 }
 
-// 클래스 aggregate 필드(Struct·Array·Optional<값 struct>)의 경로 thunk 본체다(생성 코드가 함수표의
-// path 칸에 내는 람다가 부른다). 소유 객체는 실제 타입 레코드의 함수표에서 오므로
+// 클래스 aggregate 필드(Struct·Array·Optional<값 struct>·Map·Set)의 경로 thunk 본체다(생성 코드가
+// 함수표의 path 칸에 내는 람다가 부른다). 소유 객체는 실제 타입 레코드의 함수표에서 오므로
 // static_cast<Owner*>이고, cursor가 실제 타입이 Owner의 파생인지 다시 확인한다.
 //
 // 생성 코드(B6b):
@@ -702,3 +725,5 @@ Result<void> PathStructMember(const RuntimeStructFieldOps&, PathCursor& cursor,
 }
 
 } // namespace rocks::detail
+
+#include <Object/GeneratedKeyedPathAccess.h>

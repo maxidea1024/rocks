@@ -296,7 +296,8 @@ TEST(MapGraph_KeyPositionRejectsReplacementPolicies) {
         });
         REQUIRE(hooks.count == 1);
         CHECK(hooks.entries[0].kind == FieldDiagnosticKind::UndeclaredEnumValue);
-        CHECK(hooks.entries[0].steps == 1 && hooks.entries[0].path[0].indexed &&
+        CHECK(hooks.entries[0].steps == 1 &&
+              hooks.entries[0].path[0].selector == PathSelector::Index &&
               hooks.entries[0].path[0].index == 0);
         loaded.Value().Reset();
         REQUIRE(objects.Collect(objects.OwnerAccess()));
@@ -331,7 +332,8 @@ TEST(MapGraph_MaxElementsLimitsSaveButNotLoad) {
         REQUIRE(hooks.count == 1);
         CHECK(hooks.entries[0].kind == FieldDiagnosticKind::ArrayTooLong);
         CHECK(hooks.entries[0].value == 3);
-        CHECK(hooks.entries[0].steps == 1 && !hooks.entries[0].path[0].indexed &&
+        CHECK(hooks.entries[0].steps == 1 &&
+              hooks.entries[0].path[0].selector == PathSelector::None &&
               hooks.entries[0].path[0].fieldId == HolderField("limited"));
 
         auto three =
@@ -482,12 +484,12 @@ TEST(MapGraph_DiagnosticPathsUseInsertionIndex) {
         bool asset = false;
         for (uint32 index = 0; index < loadHooks.softCount; ++index) {
             const PathStep& step = loadHooks.softPaths[index];
-            softKey = softKey ||
-                      (step.fieldId == HolderField("softKeys") && step.indexed && step.index == 1);
-            link =
-                link || (step.fieldId == HolderField("links") && step.indexed && step.index == 1);
-            asset =
-                asset || (step.fieldId == HolderField("assets") && step.indexed && step.index == 0);
+            softKey = softKey || (step.fieldId == HolderField("softKeys") &&
+                                  step.selector == PathSelector::Index && step.index == 1);
+            link = link || (step.fieldId == HolderField("links") &&
+                            step.selector == PathSelector::Index && step.index == 1);
+            asset = asset || (step.fieldId == HolderField("assets") &&
+                              step.selector == PathSelector::Index && step.index == 0);
         }
 
         CHECK(softKey && link && asset);
@@ -495,7 +497,8 @@ TEST(MapGraph_DiagnosticPathsUseInsertionIndex) {
         // asset]이다.
         REQUIRE(loadHooks.count == 1);
         CHECK(loadHooks.entries[0].kind == FieldDiagnosticKind::RequiredMissing);
-        CHECK(loadHooks.entries[0].steps == 2 && loadHooks.entries[0].path[0].indexed &&
+        CHECK(loadHooks.entries[0].steps == 2 &&
+              loadHooks.entries[0].path[0].selector == PathSelector::Index &&
               loadHooks.entries[0].path[0].index == 0);
 
         // rejectMissingRequired 저장: Required Map 값의 null은 [required[1]]로 진단 뒤
@@ -518,7 +521,8 @@ TEST(MapGraph_DiagnosticPathsUseInsertionIndex) {
         REQUIRE(rejected.count == 1);
         CHECK(rejected.entries[0].kind == FieldDiagnosticKind::RequiredMissing);
         CHECK(rejected.entries[0].path[0].fieldId == HolderField("required") &&
-              rejected.entries[0].path[0].indexed && rejected.entries[0].path[0].index == 1);
+              rejected.entries[0].path[0].selector == PathSelector::Index &&
+              rejected.entries[0].path[0].index == 1);
 
         // Required Set 원소의 null도 원소마다 거부한다([assets[1]] — 키 자리라도 Set 원소는 필드의
         // Required를 본다).
@@ -535,7 +539,8 @@ TEST(MapGraph_DiagnosticPathsUseInsertionIndex) {
         REQUIRE(nullElement.count == 1);
         CHECK(nullElement.entries[0].kind == FieldDiagnosticKind::RequiredMissing);
         CHECK(nullElement.entries[0].path[0].fieldId == HolderField("assets") &&
-              nullElement.entries[0].path[0].indexed && nullElement.entries[0].path[0].index == 1);
+              nullElement.entries[0].path[0].selector == PathSelector::Index &&
+              nullElement.entries[0].path[0].index == 1);
         loaded.Value().Reset();
         holder.Reset();
         REQUIRE(objects.Collect(objects.OwnerAccess()));

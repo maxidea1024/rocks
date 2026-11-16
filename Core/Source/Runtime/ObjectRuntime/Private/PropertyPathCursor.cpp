@@ -65,11 +65,13 @@ Result<Object*> PathCursor::Owner(const void* ownerNative) noexcept {
     return Result<Object*>::Success(object_);
 }
 
-Result<void> PathCursor::CheckTarget(ValueKind target, bool container, bool optional) noexcept {
+Result<void> PathCursor::CheckTarget(ValueKind target, ValueKind wrapper) noexcept {
     const FieldSchema& field = *Frame().field;
-    if (FieldTargetType(field).kind != target ||
-        (field.value.kind == ValueKind::Array) != container ||
-        (field.value.kind == ValueKind::Optional) != optional) {
+    const ValueKind kind = field.value.kind;
+    const bool wrapped = kind == ValueKind::Array || kind == ValueKind::Optional ||
+                         kind == ValueKind::Map || kind == ValueKind::Set;
+    const bool matches = wrapper == ValueKind::Opaque ? !wrapped : kind == wrapper;
+    if (FieldTargetType(field).kind != target || !matches) {
         return Fail(ErrorCode::TypeMismatch, PropertyPathError::StaticTypeMismatch);
     }
 
@@ -78,6 +80,28 @@ Result<void> PathCursor::CheckTarget(ValueKind target, bool container, bool opti
 
 Result<void> PathCursor::CheckEnum(TypeId enumeration) noexcept {
     if (!(FieldTargetType(*Frame().field).type == enumeration)) {
+        return Fail(ErrorCode::TypeMismatch, PropertyPathError::StaticTypeMismatch);
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> PathCursor::CheckKey(ValueKind key, TypeId enumeration) noexcept {
+    const ValueType& type = FieldKeyType(*Frame().field);
+    if (type.kind != key || (key == ValueKind::Enum && !(type.type == enumeration))) {
+        return Fail(ErrorCode::TypeMismatch, PropertyPathError::StaticTypeMismatch);
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> PathCursor::CheckKeyClass(const void* staticNative) noexcept {
+    // 검증 지점(6단계)이 넣을 non-null 키의 클래스 lease를 쥐었다(등록·스키마 Base 파생 검사 포함).
+    if (Frame().key.guid == Guid{}) {
+        return Result<void>::Success();
+    }
+
+    if (!keyClass_.IsValid() || !keyClass_.IsNativeA(staticNative)) {
         return Fail(ErrorCode::TypeMismatch, PropertyPathError::StaticTypeMismatch);
     }
 
@@ -155,7 +179,8 @@ Result<void> PathCursor::Descend(void* structValue) noexcept {
 Result<void> PathCursor::CheckIndex(usize size) noexcept {
     const PathFrame& frame = Frame();
     const bool insertion = operation_ == PathOperation::Insert && IsLast();
-    if (!frame.indexed || frame.index > size || (!insertion && frame.index == size)) {
+    if (frame.selector != PathSelector::Index || frame.index > size ||
+        (!insertion && frame.index == size)) {
         return Fail(ErrorCode::InvalidArgument, PropertyPathError::IndexOutOfRange);
     }
 

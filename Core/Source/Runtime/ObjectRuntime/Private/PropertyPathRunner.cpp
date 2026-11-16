@@ -1,11 +1,13 @@
 #include "PropertyPathInternal.h"
 
+#include <Core/Text/NamePool.h>
 #include <Object/ClassRef.h>
 #include <Object/NameField.h>
 
-// 경로 연산의 실행(detail::PathRunner — 입력 형식·문맥·단계 해석·끝 지점 분류·참조 lease·검증
-// 지점·Borrow·생성 thunk 실행)과 공개 연산 진입점(PathRead·PathWrite·PathArrayLength·
-// PathInsertElement·PathRemoveElement·PathClearArray·PathEmplaceOptional·PathResetOptional·PathIsOptionalSet)이다.
+// 경로 연산의 실행(detail::PathRunner — 입력 형식·문맥·단계 해석·key 해석·끝 지점 분류·참조
+// lease·검증 지점·Borrow·생성 thunk 실행, thunk가 부르는 넣기 준비)과 공개 연산 진입점이다:
+// PathRead·PathWrite·PathCount·PathInsertElement·PathRemoveElement·PathClear·PathContains·
+// PathInsertKey·PathEraseKey·PathEmplaceOptional·PathResetOptional·PathIsOptionalSet.
 namespace rocks {
 
 namespace detail {
@@ -18,10 +20,21 @@ bool IsAggregateKind(ValueKind kind) noexcept {
     return ValueKindIsAggregate(kind);
 }
 
-// 단계의 값이 FieldValue·struct로 접근하는 형식이다: 배열 원소 단계면 원소, Optional 필드면
-// 내부(리플렉션 B9e), 아니면 값 형식.
-const ValueType& StepValueType(const FieldSchema& field, bool indexed) noexcept {
-    return indexed || field.value.kind == ValueKind::Optional ? field.element : field.value;
+// 필드가 key 단계를 받는 컨테이너(Map·Set — 리플렉션 B9f3)인지다.
+bool IsKeyedKind(ValueKind kind) noexcept {
+    return kind == ValueKind::Map || kind == ValueKind::Set;
+}
+
+// 필드가 원소 수·비우기를 받는 컨테이너(Array·Map·Set)인지다.
+bool IsContainerKind(ValueKind kind) noexcept {
+    return kind == ValueKind::Array || IsKeyedKind(kind);
+}
+
+// 단계의 값이 FieldValue·struct로 접근하는 형식이다: 배열 원소·Map 항목·Set 원소 단계면 원소(Map은
+// 값), Optional 필드면 내부(리플렉션 B9e), 아니면 값 형식.
+const ValueType& StepValueType(const FieldSchema& field, PathSelector selector) noexcept {
+    return selector != PathSelector::None || field.value.kind == ValueKind::Optional ? field.element
+                                                                                     : field.value;
 }
 
 // 쓰기 검증(ValidateFieldWrite·등록된 write) 오류의 사유다: Unsupported는 유효 플래그에 ReadOnly가
@@ -111,9 +124,119 @@ Result<void> PathRunner::RunTopWrite(PathCursor& cursor) noexcept {
     return Result<void>::Success();
 }
 
+Result<void> PathRunner::ResolveKey(PathCursor& cursor, PathFrame& frame,
+                                    const PathKey& key) noexcept {
+    const FieldSchema& field = *frame.field;
+    const ValueType& keyType = field.value.kind == ValueKind::Map ? field.key : field.element;
+    if (key.kind != keyType.kind) {
+        return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::InvalidKey);
+    }
+
+    auto value = ReadPathKey(key);
+    if (!value) {
+        return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::InvalidKey);
+    }
+
+    // 미선언 enum 키는 어느 컨테이너에도 없다(복원·저장·쓰기가 모두 거부한다) — 값 오류다.
+    if (keyType.kind == ValueKind::Enum &&
+        (!frame.keyEnumeration ||
+         !IsDeclaredEnumValue(*frame.keyEnumeration, value.Value().signedInteger))) {
+        return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::InvalidKey);
+    }
+
+    frame.key = value.Value();
+    frame.keyName = Name{};
+    frame.keyFound = true;
+    if (keyType.kind != ValueKind::Name) {
+        return Result<void>::Success();
+    }
+
+    // Name 키 조회는 pool을 늘리지 않는다(NamePool::TryFind — pool에 없으면 그 키도 없다). pool이
+    // 없는 Registry에는 기본 None만 있다.
+    const StringView text = frame.key.text;
+    NamePool* names = cursor.registry_.Names();
+    if (!names) {
+        frame.keyFound = NameTextEquals(text, StringView());
+        return Result<void>::Success();
+    }
+
+    auto found = names->TryFind(text);
+    if (found) {
+        frame.keyName = found.Value();
+        return Result<void>::Success();
+    }
+
+    if (found.Error() != ErrorCode::NotFound) {
+        return cursor.Fail(found.Error());
+    }
+
+    frame.keyFound = false;
+    return Result<void>::Success();
+}
+
+Result<void> PathRunner::PrepareInsertedKey(PathCursor& cursor, PathFrame& frame) noexcept {
+    const FieldSchema& field = *frame.field;
+    const ValueType& keyType = field.value.kind == ValueKind::Map ? field.key : field.element;
+    // ClassRef 키는 값과 같이 이 Registry에 등록된 클래스이고 스키마 Base의 파생이어야 한다(그
+    // lease는 완료까지 쥐고 생성 thunk가 정적 Base를 대조한다 — CheckKeyClass).
+    if (keyType.kind == ValueKind::ClassReference && frame.key.guid != Guid{}) {
+        auto found = CheckClassReferenceLease(
+            cursor.registry_.AcquireRegisteredType(cursor.access_, frame.key.guid), keyType.type,
+            nullptr);
+        if (!found) {
+            return cursor.Fail(found.Error(), PropertyPathError::InvalidKey);
+        }
+
+        cursor.keyClass_ = Move(found.Value());
+        return Result<void>::Success();
+    }
+
+    if (keyType.kind != ValueKind::Name) {
+        return Result<void>::Success();
+    }
+
+    // 넣을 수 있는 Name 키는 Name 필드 값과 같은 내용 규칙을 지키고 그 표시 문자열 그대로
+    // intern한다(같은 원문의 표시 entry가 있으면 그것을 다시 쓴다 — 대소문자 변형은 별도 표시
+    // entry다). intern은 대상을 바꾸지 않으므로 뒤 단계가 실패해도 entry는 남는다.
+    NamePool* names = cursor.registry_.Names();
+    if (!names) {
+        if (NameTextEquals(frame.key.text, StringView())) {
+            frame.keyName = Name{};
+            frame.keyFound = true;
+            return Result<void>::Success();
+        }
+
+        return cursor.Fail(ErrorCode::Unsupported, PropertyPathError::InvalidKey);
+    }
+
+    Allocator& scratch =
+        cursor.input_ ? cursor.input_->GetAllocator() : cursor.registry_.ObjectAllocator();
+    if (auto valid = ValidateNameFieldText(frame.key.text, scratch); !valid) {
+        return cursor.Fail(valid.Error(), valid.Error() == ErrorCode::InvalidArgument
+                                              ? PropertyPathError::InvalidKey
+                                              : PropertyPathError::None);
+    }
+
+    auto interned = names->TryIntern(frame.key.text);
+    if (!interned) {
+        return cursor.Fail(interned.Error());
+    }
+
+    frame.keyName = interned.Value();
+    frame.keyFound = true;
+    return Result<void>::Success();
+}
+
+Result<void> PathCursor::PrepareInsertedKey() noexcept {
+    return PathRunner::PrepareInsertedKey(*this, frames_[current_]);
+}
+
 Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
     const Span<const PathStep> steps = path.steps;
     const PathOperation operation = cursor.operation_;
+    const bool keyOperation = operation == PathOperation::Contains ||
+                              operation == PathOperation::InsertKey ||
+                              operation == PathOperation::EraseKey;
     // 1. 입력 형식.
     if (steps.Size() == 0) {
         return cursor.Fail(ErrorCode::InvalidArgument);
@@ -125,22 +248,27 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
     }
 
     for (usize index = 0; index < steps.Size(); ++index) {
-        if (!IsCanonicalPathStep(steps[index])) {
+        if (!IsCanonicalPathStep(steps[index], path.keys.Size())) {
             cursor.current_ = index;
             return cursor.Fail(ErrorCode::InvalidArgument);
         }
     }
 
     const usize last = steps.Size() - 1;
+    const PathSelector lastSelector = steps[last].selector;
     cursor.current_ = last;
     if ((operation == PathOperation::Insert || operation == PathOperation::Remove) &&
-        !steps[last].indexed) {
+        lastSelector != PathSelector::Index) {
         return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::IndexRequired);
     }
 
     if ((operation == PathOperation::Length || operation == PathOperation::Clear) &&
-        steps[last].indexed) {
+        lastSelector != PathSelector::None) {
         return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::IndexNotAllowed);
+    }
+
+    if (keyOperation && lastSelector != PathSelector::Key) {
+        return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::KeyRequired);
     }
 
     if ((operation == PathOperation::Write || operation == PathOperation::Insert) &&
@@ -157,7 +285,7 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
     }
 
     cursor.ownerType_ = Move(type.Value());
-    // 3. 단계 순서의 해석: FieldId → 스키마 위치(정렬 색인), 모양, 유효 플래그 누적.
+    // 3. 단계 순서의 해석: FieldId → 스키마 위치(정렬 색인), 모양, 유효 플래그 누적, key 값.
     for (usize index = 0; index < steps.Size(); ++index) {
         cursor.current_ = index;
         const PathStep& step = steps[index];
@@ -172,6 +300,7 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
 
             field = &cursor.ownerType_.Schema().fields[position];
             frame.enumeration = cursor.ownerType_.FieldEnum(position);
+            frame.keyEnumeration = cursor.ownerType_.FieldKeyEnum(position);
             frame.target = cursor.ownerType_.FieldStruct(position);
             frame.effectiveFlags = field->flags;
         } else {
@@ -183,6 +312,7 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
 
             field = &parent.target.Schema().fields[position];
             frame.enumeration = parent.target.FieldEnum(position);
+            frame.keyEnumeration = parent.target.FieldKeyEnum(position);
             frame.target = parent.target.FieldStruct(position);
             frame.effectiveFlags = PropagateFieldFlags(parent.effectiveFlags, field->flags);
         }
@@ -190,24 +320,44 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         frame.field = field;
         frame.schemaIndex = position;
         frame.index = step.index;
-        frame.indexed = step.indexed;
+        frame.selector = step.selector;
+        frame.key = PathKeyValue{};
+        frame.keyName = Name{};
+        frame.keyFound = true;
         cursor.count_ = index + 1;
-        if (step.indexed && field->value.kind != ValueKind::Array) {
+        if (step.selector == PathSelector::Index && field->value.kind != ValueKind::Array) {
             return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::NotArray);
         }
 
+        if (step.selector == PathSelector::Key) {
+            if (!IsKeyedKind(field->value.kind)) {
+                return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::NotKeyed);
+            }
+
+            // Set 원소의 enum은 원소 enum(FieldEnum)이다.
+            if (field->value.kind == ValueKind::Set) {
+                frame.keyEnumeration = frame.enumeration;
+            }
+
+            if (auto resolved = ResolveKey(cursor, frame, path.keys[step.index]); !resolved) {
+                return resolved;
+            }
+        }
+
         if (index < last) {
-            const ValueKind kind = StepValueType(*field, step.indexed).kind;
-            if (kind != ValueKind::Struct || frame.target.IsEmpty()) {
+            const ValueKind kind = StepValueType(*field, step.selector).kind;
+            const bool setElement =
+                step.selector == PathSelector::Key && field->value.kind == ValueKind::Set;
+            if (kind != ValueKind::Struct || setElement || frame.target.IsEmpty()) {
                 return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::NotStruct);
             }
         }
     }
 
     cursor.current_ = last;
-    const PathFrame& end = cursor.frames_[last];
+    PathFrame& end = cursor.frames_[last];
     if ((operation == PathOperation::Length || operation == PathOperation::Clear) &&
-        end.field->value.kind != ValueKind::Array) {
+        !IsContainerKind(end.field->value.kind)) {
         return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::NotArray);
     }
 
@@ -216,18 +366,26 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
     const bool optionalEdit =
         operation == PathOperation::EmplaceOptional || operation == PathOperation::ResetOptional;
     const bool optionalStructOperation = optionalEdit || operation == PathOperation::QueryOptional;
-    if (optionalStructOperation && (end.field->value.kind != ValueKind::Optional ||
-                                    end.field->element.kind != ValueKind::Struct)) {
+    if (optionalStructOperation &&
+        (end.selector != PathSelector::None || end.field->value.kind != ValueKind::Optional ||
+         end.field->element.kind != ValueKind::Struct)) {
         return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::NotOptional);
     }
 
     // 4. 끝 지점 분류: struct·배열 통째 접근, 값 유무, thunk 유무(Unsupported).
-    const ValueType& endType = StepValueType(*end.field, end.indexed);
+    const ValueType& endType = StepValueType(*end.field, end.selector);
     const ValueKind kind = endType.kind;
+    const bool setElement =
+        end.selector == PathSelector::Key && end.field->value.kind == ValueKind::Set;
     const bool topValue = steps.Size() == 1 && !FieldIsAggregate(*end.field);
     switch (operation) {
     case PathOperation::Read:
     case PathOperation::Write:
+        // Set 원소는 키라 값이 없다(PathContains·PathInsertKey·PathEraseKey).
+        if (setElement) {
+            return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::NotMap);
+        }
+
         if (kind == ValueKind::Opaque) {
             return cursor.Fail(ErrorCode::Unsupported, PropertyPathError::NoPathAccess);
         }
@@ -248,8 +406,16 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
 
         break;
     case PathOperation::Remove:
-        if (kind == ValueKind::Struct && cursor.output_) {
+    case PathOperation::EraseKey:
+        if (kind == ValueKind::Struct && !setElement && cursor.output_) {
             return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::AggregateValue);
+        }
+
+        break;
+    case PathOperation::InsertKey:
+        // 단일 값 Map 항목은 값이 필요하다(PathWrite로 넣는다).
+        if (!setElement && kind != ValueKind::Struct) {
+            return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::InvalidValue);
         }
 
         break;
@@ -321,11 +487,12 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
     target.targetExpectedNative =
         cursor.expectedType_.IsValid() ? cursor.expectedType_.Ops().nativeType : nullptr;
     target.referenced = cursor.referencedType_.IsValid() ? &cursor.referencedType_ : nullptr;
-    target.element = end.indexed;
+    target.element = end.selector != PathSelector::None;
     if (value) {
         FieldWriteBinding binding;
         binding.value = endType;
-        binding.optional = !end.indexed && end.field->value.kind == ValueKind::Optional;
+        binding.optional =
+            end.selector == PathSelector::None && end.field->value.kind == ValueKind::Optional;
         if (auto valid = ValidateFieldWrite(binding, target, *value); !valid) {
             return cursor.Fail(valid.Error(), WriteReason(valid.Error(), end.effectiveFlags));
         }
@@ -356,11 +523,16 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         }
     }
 
-    if (operation == PathOperation::Insert || operation == PathOperation::Remove ||
-        operation == PathOperation::Clear) {
-        const ArrayEdit edit = operation == PathOperation::Insert   ? ArrayEdit::Insert
-                               : operation == PathOperation::Remove ? ArrayEdit::Remove
-                                                                    : ArrayEdit::Clear;
+    const bool structural =
+        operation == PathOperation::Insert || operation == PathOperation::Remove ||
+        operation == PathOperation::Clear || operation == PathOperation::InsertKey ||
+        operation == PathOperation::EraseKey;
+    if (structural) {
+        const ArrayEdit edit =
+            operation == PathOperation::Insert || operation == PathOperation::InsertKey
+                ? ArrayEdit::Insert
+            : operation == PathOperation::Clear ? ArrayEdit::Clear
+                                                : ArrayEdit::Remove;
         if (auto valid = ValidateArrayEdit(target, edit); !valid) {
             return cursor.Fail(valid.Error(), valid.Error() == ErrorCode::Unsupported
                                                   ? PropertyPathError::ReadOnly
@@ -386,7 +558,8 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
     // 7. Borrow(쓰기는 ResolveForWrite — encode 고정 중이면 Busy)와 읽기 고정.
     cursor.current_ = 0;
     const bool reading = operation == PathOperation::Read || operation == PathOperation::Length ||
-                         operation == PathOperation::QueryOptional;
+                         operation == PathOperation::QueryOptional ||
+                         operation == PathOperation::Contains;
     auto borrowed = reading
                         ? cursor.registry_.Resolve<Object>(cursor.access_, cursor.owner_)
                         : cursor.registry_.ResolveForWrite<Object>(cursor.access_, cursor.owner_);
@@ -437,6 +610,20 @@ Result<void> RunOperation(ObjectRegistry& registry, const ObjectAccessContext& a
     return result;
 }
 
+// 결과가 Length 칸의 0·1인 연산(PathContains·PathInsertKey·PathIsOptionalSet)이다.
+Result<bool> RunQuery(ObjectRegistry& registry, const ObjectAccessContext& access,
+                      ObjectHandle handle, PropertyPath path, PathOperation operation,
+                      PropertyPathFailure* failure) noexcept {
+    usize answer = 0;
+    auto result =
+        RunOperation(registry, access, handle, path, operation, nullptr, nullptr, failure, &answer);
+    if (!result) {
+        return Result<bool>::Failure(result.Error());
+    }
+
+    return Result<bool>::Success(answer != 0);
+}
+
 } // namespace
 
 Result<void> PathRead(ObjectRegistry& registry, const ObjectAccessContext& access,
@@ -453,9 +640,9 @@ Result<void> PathWrite(ObjectRegistry& registry, const ObjectAccessContext& acce
                         failure, nullptr);
 }
 
-Result<usize> PathArrayLength(ObjectRegistry& registry, const ObjectAccessContext& access,
-                              ObjectHandle handle, PropertyPath path,
-                              PropertyPathFailure* failure) noexcept {
+Result<usize> PathCount(ObjectRegistry& registry, const ObjectAccessContext& access,
+                        ObjectHandle handle, PropertyPath path,
+                        PropertyPathFailure* failure) noexcept {
     usize length = 0;
     auto result = RunOperation(registry, access, handle, path, PathOperation::Length, nullptr,
                                nullptr, failure, &length);
@@ -480,10 +667,29 @@ Result<void> PathRemoveElement(ObjectRegistry& registry, const ObjectAccessConte
                         failure, nullptr);
 }
 
-Result<void> PathClearArray(ObjectRegistry& registry, const ObjectAccessContext& access,
-                            ObjectHandle handle, PropertyPath path,
-                            PropertyPathFailure* failure) noexcept {
+Result<void> PathClear(ObjectRegistry& registry, const ObjectAccessContext& access,
+                       ObjectHandle handle, PropertyPath path,
+                       PropertyPathFailure* failure) noexcept {
     return RunOperation(registry, access, handle, path, PathOperation::Clear, nullptr, nullptr,
+                        failure, nullptr);
+}
+
+Result<bool> PathContains(ObjectRegistry& registry, const ObjectAccessContext& access,
+                          ObjectHandle handle, PropertyPath path,
+                          PropertyPathFailure* failure) noexcept {
+    return RunQuery(registry, access, handle, path, PathOperation::Contains, failure);
+}
+
+Result<bool> PathInsertKey(ObjectRegistry& registry, const ObjectAccessContext& access,
+                           ObjectHandle handle, PropertyPath path,
+                           PropertyPathFailure* failure) noexcept {
+    return RunQuery(registry, access, handle, path, PathOperation::InsertKey, failure);
+}
+
+Result<void> PathEraseKey(ObjectRegistry& registry, const ObjectAccessContext& access,
+                          ObjectHandle handle, PropertyPath path, FieldValue* removed,
+                          PropertyPathFailure* failure) noexcept {
+    return RunOperation(registry, access, handle, path, PathOperation::EraseKey, nullptr, removed,
                         failure, nullptr);
 }
 
@@ -504,14 +710,7 @@ Result<void> PathResetOptional(ObjectRegistry& registry, const ObjectAccessConte
 Result<bool> PathIsOptionalSet(ObjectRegistry& registry, const ObjectAccessContext& access,
                                ObjectHandle handle, PropertyPath path,
                                PropertyPathFailure* failure) noexcept {
-    usize set = 0;
-    auto result = RunOperation(registry, access, handle, path, PathOperation::QueryOptional,
-                               nullptr, nullptr, failure, &set);
-    if (!result) {
-        return Result<bool>::Failure(result.Error());
-    }
-
-    return Result<bool>::Success(set != 0);
+    return RunQuery(registry, access, handle, path, PathOperation::QueryOptional, failure);
 }
 
 } // namespace rocks

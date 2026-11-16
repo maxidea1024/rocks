@@ -1115,7 +1115,8 @@ TEST(ArrayGraph_RequiredNullElementsAndElementDiagnosticPaths) {
             CHECK(saveHooks.entries[0].kind == FieldDiagnosticKind::RequiredMissing);
             CHECK(saveHooks.entries[0].depth == 1);
             CHECK(saveHooks.entries[0].path[0].fieldId == RefsId);
-            CHECK(saveHooks.entries[0].path[0].indexed && saveHooks.entries[0].path[0].index == 1);
+            CHECK(saveHooks.entries[0].path[0].selector == PathSelector::Index &&
+                  saveHooks.entries[0].path[0].index == 1);
 
             auto bytes = SaveGraph(allocator, source);
             REQUIRE(bytes);
@@ -1130,15 +1131,18 @@ TEST(ArrayGraph_RequiredNullElementsAndElementDiagnosticPaths) {
             bool bundle = false;
             for (usize index = 0; index < hooks.count; ++index) {
                 const ArrayHooks::Entry& entry = hooks.entries[index];
-                refs = refs || (entry.depth == 1 && entry.path[0].fieldId == RefsId &&
-                                entry.path[0].indexed && entry.path[0].index == 1);
+                refs = refs ||
+                       (entry.depth == 1 && entry.path[0].fieldId == RefsId &&
+                        entry.path[0].selector == PathSelector::Index && entry.path[0].index == 1);
                 slot = slot || (entry.depth == 2 && entry.path[0].fieldId == SlotsId &&
-                                entry.path[0].indexed && entry.path[0].index == 1 &&
-                                entry.path[1].fieldId == MaterialId && !entry.path[1].indexed);
-                bundle =
-                    bundle || (entry.depth == 2 && entry.path[0].fieldId == BundleFieldId &&
-                               !entry.path[0].indexed && entry.path[1].fieldId == BundleRefsId &&
-                               entry.path[1].indexed && entry.path[1].index == 0);
+                                entry.path[0].selector == PathSelector::Index &&
+                                entry.path[0].index == 1 && entry.path[1].fieldId == MaterialId &&
+                                entry.path[1].selector == PathSelector::None);
+                bundle = bundle || (entry.depth == 2 && entry.path[0].fieldId == BundleFieldId &&
+                                    entry.path[0].selector == PathSelector::None &&
+                                    entry.path[1].fieldId == BundleRefsId &&
+                                    entry.path[1].selector == PathSelector::Index &&
+                                    entry.path[1].index == 0);
             }
 
             CHECK(refs && slot && bundle);
@@ -1167,7 +1171,8 @@ TEST(ArrayGraph_RequiredNullElementsAndElementDiagnosticPaths) {
                 if (entry.kind == FieldDiagnosticKind::UndeclaredEnumValue) {
                     CHECK(entry.value == 16);
                     CHECK(entry.depth == 1 && entry.path[0].fieldId == ChannelsId);
-                    CHECK(entry.path[0].indexed && entry.path[0].index == 1);
+                    CHECK(entry.path[0].selector == PathSelector::Index &&
+                          entry.path[0].index == 1);
                 }
             }
 
@@ -1564,7 +1569,7 @@ TEST(ArrayGraph_PerFieldMaxElementsAndGraphTotals) {
             CHECK(tooLong.entries[0].value == 3);
             CHECK(tooLong.entries[0].field == BytesId);
             CHECK(tooLong.entries[0].depth == 1 && tooLong.entries[0].path[0].fieldId == BytesId &&
-                  !tooLong.entries[0].path[0].indexed);
+                  tooLong.entries[0].path[0].selector == PathSelector::None);
 
             bool clean = true;
             auto elements = [](ObjectGraphLimits& limits, uint32 value) noexcept {
@@ -2453,9 +2458,11 @@ TEST(ArrayGraph_StructElementNewerVersionPolicy) {
                     continue;
                 }
 
-                elements += entry.path[0].fieldId == TaggedFieldId && entry.path[0].indexed &&
+                elements += entry.path[0].fieldId == TaggedFieldId &&
+                            entry.path[0].selector == PathSelector::Index &&
                             entry.path[0].index == elements;
-                singles += entry.path[0].fieldId == SingleId && !entry.path[0].indexed;
+                singles += entry.path[0].fieldId == SingleId &&
+                           entry.path[0].selector == PathSelector::None;
             }
 
             CHECK(elements == 2 && singles == 2);
@@ -2506,10 +2513,10 @@ TEST(ArrayGraph_UndeclaredEnumElementInsideStructElement) {
             CHECK(entry.kind == FieldDiagnosticKind::UndeclaredEnumValue);
             CHECK(entry.value == (16 | 4));
             CHECK(entry.depth == 2);
-            CHECK(entry.path[0].fieldId == TaggedFieldId && entry.path[0].indexed &&
-                  entry.path[0].index == 0);
-            CHECK(entry.path[1].fieldId == MasksId && entry.path[1].indexed &&
-                  entry.path[1].index == 1);
+            CHECK(entry.path[0].fieldId == TaggedFieldId &&
+                  entry.path[0].selector == PathSelector::Index && entry.path[0].index == 0);
+            CHECK(entry.path[1].fieldId == MasksId &&
+                  entry.path[1].selector == PathSelector::Index && entry.path[1].index == 1);
             CHECK(WithRoot(target, loaded.Value().Handle(), [](const Node& node) noexcept {
                 return node.tagged[0].masks.Size() == 2 &&
                        node.tagged[0].masks[1] == Channels::Blue;

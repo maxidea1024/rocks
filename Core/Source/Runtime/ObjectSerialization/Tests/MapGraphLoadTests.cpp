@@ -419,10 +419,11 @@ TEST(MapGraph_ApplyAllocationFailureRollsBack) {
     CHECK(types.Shutdown());
 }
 
-// Map·Set 필드는 aggregate다(리플렉션 B9f2 — 필드 통째로 저장·복원하고 key 단계 경로 연산은
-// 리플렉션 B9f3): 경로 통째 읽기는 Unsupported(AggregateValue), index 단계는
-// TypeMismatch(NotArray), 등록된 write(FieldWriteOperation)는 함수표 검사 뒤 Unsupported다. struct
-// 멤버 Map 아래로 들어가는 경로도 struct가 아니므로 TypeMismatch(NotStruct)다.
+// Map·Set 필드는 aggregate다(리플렉션 B9f2 — 필드 통째로 저장·복원하고 항목은 key 단계 경로
+// 연산 — 리플렉션 B9f3, MapPathTests.cpp): 경로 통째 읽기는 Unsupported(AggregateValue), index
+// 단계는 TypeMismatch(NotArray), 등록된 write(FieldWriteOperation)는 함수표 검사 뒤 Unsupported다.
+// 함수표에는 read가 없고 경로 thunk가 있다. key 없이 struct 멤버 Map 아래로 들어가는 경로는
+// struct가 아니므로 TypeMismatch(NotStruct)다.
 TEST(MapField_PathAndFieldValueTreatMapsAsAggregates) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
@@ -436,7 +437,7 @@ TEST(MapField_PathAndFieldValueTreatMapsAsAggregates) {
         CHECK(ErrorOf(PathRead(objects, objects.OwnerAccess(), holder.Handle(), {counts}, out,
                                &failure)) == ErrorCode::Unsupported);
         CHECK(failure.reason == PropertyPathError::AggregateValue);
-        const PathStep words[] = {{HolderField("words"), 0, true}};
+        const PathStep words[] = {{HolderField("words"), 0, PathSelector::Index}};
         CHECK(ErrorOf(PathRead(objects, objects.OwnerAccess(), holder.Handle(), {words}, out,
                                &failure)) == ErrorCode::TypeMismatch);
         CHECK(failure.reason == PropertyPathError::NotArray);
@@ -453,7 +454,7 @@ TEST(MapField_PathAndFieldValueTreatMapsAsAggregates) {
         REQUIRE(index != TypeLease::NoField);
         const RuntimeFieldOps* ops = lease.Value().FieldOps(index);
         REQUIRE(ops);
-        CHECK(!ops->read && !ops->path);
+        CHECK(!ops->read && ops->path);
         FieldValue value(allocator);
         value.kind = ValueKind::Map;
         CHECK(ErrorOf(ops->write(objects, objects.OwnerAccess(), holder.Handle(), value)) ==

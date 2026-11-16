@@ -439,14 +439,15 @@ TEST(PropertyPathParse_GrammarTable) {
         // 정규 index의 경계: 0과 uint32 최댓값.
         PropertyPathBuffer out;
         REQUIRE(ParsePropertyPath(lease.Value(), "numbers[0]", out));
-        CHECK(out.count == 1 && out.steps[0].indexed && out.steps[0].index == 0);
+        CHECK(out.count == 1 && out.steps[0].selector == PathSelector::Index &&
+              out.steps[0].index == 0);
         REQUIRE(ParsePropertyPath(lease.Value(), "numbers[4294967295]", out));
         CHECK(out.steps[0].index == NumericLimits<uint32>::Max() &&
               out.steps[0].fieldId == NumbersId);
         REQUIRE(ParsePropertyPath(lease.Value(), "parts[10].label", out));
         CHECK(out.count == 2 && out.steps[0].fieldId == PartsId && out.steps[0].index == 10 &&
-              out.steps[0].indexed && out.steps[1].fieldId == LabelId && !out.steps[1].indexed &&
-              out.steps[1].index == 0);
+              out.steps[0].selector == PathSelector::Index && out.steps[1].fieldId == LabelId &&
+              out.steps[1].selector == PathSelector::None && out.steps[1].index == 0);
         lease.Value().Reset();
     }
 
@@ -533,10 +534,10 @@ TEST(PropertyPathParse_FormatRoundTripAndBaseLeaseOnDerivedObject) {
         const PathStep unknown[] = {{Guid{0x123, 4}}};
         CHECK(ErrorOf(FormatPropertyPath(base.Value(), PropertyPath{unknown}, text)) ==
               ErrorCode::NotFound);
-        const PathStep nonCanonical[] = {{NumbersId, 2, false}};
+        const PathStep nonCanonical[] = {{NumbersId, 2, PathSelector::None}};
         CHECK(ErrorOf(FormatPropertyPath(base.Value(), PropertyPath{nonCanonical}, text)) ==
               ErrorCode::InvalidArgument);
-        const PathStep shape[] = {{BaseValueId, 1, true}};
+        const PathStep shape[] = {{BaseValueId, 1, PathSelector::Index}};
         CHECK(ErrorOf(FormatPropertyPath(base.Value(), PropertyPath{shape}, text)) ==
               ErrorCode::TypeMismatch);
         const PathStep afterArray[] = {{PartsId}, {LabelId}};

@@ -136,7 +136,8 @@ struct Recorder final : FieldCodecHooks {
             const Entry& entry = entries[at];
             if (entry.kind != FieldDiagnosticKind::UnknownClassReference ||
                 entry.valueType != type || entry.steps != steps || entry.path[0].fieldId != first ||
-                entry.path[0].indexed != indexed || (indexed && entry.path[0].index != index)) {
+                (entry.path[0].selector == PathSelector::Index) != indexed ||
+                (indexed && entry.path[0].index != index)) {
                 continue;
             }
 

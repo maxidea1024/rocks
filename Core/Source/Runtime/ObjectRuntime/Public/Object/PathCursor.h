@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Object/AssetId.h>
+#include <Object/PathKey.h>
 #include <Object/PropertyPath.h>
 
 // 경로 접근 cursor의 공개 detail 선언이다(Docs/Design/ReflectionFoundations.ko.md 7.1절). 생성 경로
@@ -21,19 +22,32 @@ enum class PathOperation : uint8 {
     EmplaceOptional,
     ResetOptional,
     // Optional<값 struct> 필드의 set 여부 조회다(PathIsOptionalSet — 결과는 Length 칸에 0·1).
-    QueryOptional
+    QueryOptional,
+    // Map 항목·Set 원소의 key 단계 연산이다(리플렉션 B9f3): 있는지 조회(결과는 Length 칸에 0·1),
+    // Set 원소 넣기·Map<K, 값 struct> 기본 값 넣기·초기화(결과는 Length 칸에 새로 넣었으면 1),
+    // 지우기.
+    Contains,
+    InsertKey,
+    EraseKey
 };
 
 // 해석한 경로 단계 하나다: 필드(스키마 안 위치), 바깥 필드에서 누적한 유효 플래그, 대상
-// 형식(배열이면 원소)의 등록 enum·struct, 원소 index.
+// 형식(배열이면 원소, Map이면 값, Set이면 원소)의 등록 enum·struct, 선택자와 원소 index, key
+// 단계면 키 값(리플렉션 B9f3 — key는 PathKey wire를 빌린다, Name 키는 표시 문자열과 pool 조회
+// 결과 — keyFound가 거짓이면 pool에 없는 이름이라 어느 컨테이너에도 없다, 새로 넣을 때는 넣기
+// 준비가 intern한 토큰을 keyName에 둔다)와 키 enum 스키마.
 struct PathFrame {
     const FieldSchema* field = nullptr;
     usize schemaIndex = 0;
     uint32 effectiveFlags = 0;
     const EnumSchema* enumeration = nullptr;
+    const EnumSchema* keyEnumeration = nullptr;
     StructView target;
     uint32 index = 0;
-    bool indexed = false;
+    PathSelector selector = PathSelector::None;
+    PathKeyValue key;
+    Name keyName{};
+    bool keyFound = true;
 };
 
 struct PathRunner;
@@ -42,7 +56,8 @@ struct PathRunner;
 // 고정을 연산 끝까지 쥐고(멤버 소멸 순서가 고정 → Borrow → lease다), 해석 프레임(최대
 // MaxPropertyPathSteps)·연산 입출력·StructRefArray 원소 위치를 담는다. 생성 thunk는 자기 단계만
 // 처리하고 다음 단계는 Descend로 넘긴다. 아래 멤버는 생성 템플릿용이며 오류를 돌려주는 함수는 실패
-// 사유를 지금 단계에 기록한다(처음 기록한 것만 남는다).
+// 사유를 지금 단계에 기록한다(처음 기록한 것만 남는다). 크기는 약 3.4 KB(단계 프레임 17개 — key
+// 단계의 키 값 포함)이고 경로 연산마다 스택에 하나 둔다(작은 스택 worker는 그 몫을 잡는다).
 class PathCursor {
 public:
     PathCursor(const PathCursor&) = delete;
@@ -92,13 +107,24 @@ public:
     // TypeMismatch(StaticTypeMismatch)다.
     Result<Object*> Owner(const void* ownerNative) noexcept;
 
-    // 정적 대조: 지금 단계의 대상 형식 종류가 target이고 배열 여부가 container, Optional 여부가
-    // optional과 같은지(StaticTypeMismatch — 스키마의 S 필드에 C++ Optional<S> 멤버가 오는 혼동을
-    // 막는다).
-    Result<void> CheckTarget(ValueKind target, bool container, bool optional = false) noexcept;
+    // 정적 대조: 지금 단계의 대상 형식 종류(FieldTargetType — 컨테이너면 원소·값)가 target이고
+    // 필드 값 종류가 wrapper(C++ 멤버의 컨테이너 종류 — Array·Optional·Map·Set, 단일 값·struct면
+    // Opaque)와 맞는지다(StaticTypeMismatch — 스키마의 S 필드에 C++ Optional<S>·OrderedMap 멤버가
+    // 오는 혼동을 막는다). wrapper가 Opaque면 필드 값 종류가 컨테이너가 아니어야 한다.
+    Result<void> CheckTarget(ValueKind target, ValueKind wrapper = ValueKind::Opaque) noexcept;
 
     // 정적 대조: 지금 단계의 대상 enum ID가 GeneratedType<E>::Id()인지(StaticTypeMismatch).
     Result<void> CheckEnum(TypeId enumeration) noexcept;
+
+    // 정적 대조: 지금 단계(Map 필드)의 키 종류가 key이고, 키가 enum이면 키 enum ID가
+    // enumeration인지다(StaticTypeMismatch — 리플렉션 B9f3, Set은 원소를 CheckTarget이 본다).
+    Result<void> CheckKey(ValueKind key, TypeId enumeration = TypeId{}) noexcept;
+
+    // ClassRef 키를 넣을 때(key 단계 Write·InsertKey) 그 클래스가 정적 Base staticNative
+    // (NativeTypeKey<Base>)의 C++ 파생인지다(리플렉션 B9f3). 등록·스키마 Base 파생은 넣기
+    // 준비(PrepareInsertedKey)가 봤고 그 클래스 lease를 쥐었다. null 키면 성공, 아니면 TypeMismatch
+    // (StaticTypeMismatch)다.
+    Result<void> CheckKeyClass(const void* staticNative) noexcept;
 
     // 정적 대조: 지금 단계의 대상 struct(배열이면 원소 struct)의 native 키가 nativeType
     // (NativeTypeKey<S>)인지(StaticTypeMismatch — MatchesStructView와 같은 형태).
@@ -125,14 +151,29 @@ public:
     }
 
     // 지금 단계의 원소 index를 길이 size로 검사한다: 마지막 단계의 Insert는 index ≤ size, 그 밖은
-    // index < size(아니면 InvalidArgument(IndexOutOfRange)).
+    // index < size(아니면 InvalidArgument(IndexOutOfRange)). 선택자가 Index가 아니어도
+    // InvalidArgument(IndexOutOfRange)다.
     Result<void> CheckIndex(usize size) noexcept;
 
-    // 지금 단계의 배열 필드에 newLength개를 둘 수 있는지다(MaxElements — CapacityExceeded
-    // (TooManyElements)).
+    // 지금 단계의 컨테이너 필드(Array·Map·Set)에 newLength개를 둘 수 있는지다(MaxElements —
+    // CapacityExceeded(TooManyElements)).
     Result<void> CheckLength(usize newLength) noexcept;
 
-    // PathArrayLength의 결과를 기록한다.
+    // 지금 단계(마지막 key 단계)의 키를 컨테이너에 새로 넣기 전에 준비한다(리플렉션 B9f3 — 키가
+    // 없을 때만 부른다, 있는 키의 교체·무동작 넣기는 부르지 않는다). ClassRef 키는 이 Registry에
+    // 등록된 클래스이고 스키마 Base의 파생이어야 하고(lease를 쥔다 — CheckKeyClass가 정적 Base를
+    // 대조한다, 미등록 NotFound·그 밖 InvalidArgument — 사유 InvalidKey), Name 키는 내용 규칙
+    // (ValidateNameFieldText — InvalidArgument(InvalidKey)) 뒤 그 표시 문자열을 Registry pool에
+    // intern한다(pool 없는 Registry의 None이 아닌 키는 Unsupported(InvalidKey), intern 오류는
+    // 그대로). 할당 콜백의 재진입 쓰기를 막도록 고정을 쥔 뒤에 부른다.
+    Result<void> PrepareInsertedKey() noexcept;
+
+    // key 단계에서 키가 없을 때의 실패를 기록한다(NotFound(KeyNotFound)).
+    Result<void> FailMissingKey() noexcept {
+        return Fail(ErrorCode::NotFound, PropertyPathError::KeyNotFound);
+    }
+
+    // PathCount·PathContains·PathInsertKey·PathIsOptionalSet의 결과를 기록한다.
     void SetLength(usize length) noexcept {
         length_ = length;
     }
@@ -216,6 +257,7 @@ private:
     TypeLease ownerType_;
     TypeLease expectedType_;
     TypeLease referencedType_;
+    TypeLease keyClass_;
     Borrow<Object> borrow_;
     EncodePin pin_;
     Object* object_ = nullptr;

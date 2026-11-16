@@ -935,9 +935,9 @@ TEST(WorldReflection_PathReadsWorldFieldsAndWritesOnlyFixtureFields) {
                                     &failure)) == ErrorCode::Unsupported);
     CHECK(failure.reason == PropertyPathError::ReadOnly);
     REQUIRE(ParsePropertyPath(actorType.Value(), StringView("components"), path));
-    CHECK(ErrorOf(PathClearArray(objects, access, actor.Value(), path.View(), &failure)) ==
+    CHECK(ErrorOf(PathClear(objects, access, actor.Value(), path.View(), &failure)) ==
           ErrorCode::Unsupported);
-    auto length = PathArrayLength(objects, access, actor.Value(), path.View());
+    auto length = PathCount(objects, access, actor.Value(), path.View());
     CHECK(length && length.Value() == 2);
     REQUIRE(ParsePropertyPath(saveType.Value(), StringView("enabled"), path));
     CHECK(ErrorOf(PathWrite(objects, access, extra.Value(), path.View(),

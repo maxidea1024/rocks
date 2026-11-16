@@ -364,7 +364,7 @@ PropertyPath PathOf(const PathStep (&steps)[N]) noexcept {
 }
 
 PathStep At(Guid id, uint32 index) noexcept {
-    return PathStep{id, index, true};
+    return PathStep{id, index, PathSelector::Index};
 }
 
 ErrorCode ErrorOf(const Result<void>& result) noexcept {
@@ -487,7 +487,7 @@ void ReenterSameArray(void* raw) noexcept {
     FieldValue same = TextValue(*probe.allocator, "beta");
     probe.inserted = ErrorOf(PathInsertElement(objects, access, probe.owner, PathOf(at), &same));
     const PathStep names[] = {{NamesId}};
-    probe.cleared = ErrorOf(PathClearArray(objects, access, probe.owner, PathOf(names)));
+    probe.cleared = ErrorOf(PathClear(objects, access, probe.owner, PathOf(names)));
     const PathStep name[] = {{LabelFieldId}, {NameId}};
     probe.written = ErrorOf(PathWrite(objects, access, probe.owner, PathOf(name), same));
     auto added = objects.AddElement(access, probe.owner, probe.box->entries);
@@ -515,7 +515,7 @@ void ReadDuringRelease(void* raw) noexcept {
     ObjectRegistry& objects = probe.world->objects;
     const auto access = objects.OwnerAccess();
     const PathStep names[] = {{NamesId}};
-    auto length = PathArrayLength(objects, access, probe.owner, PathOf(names));
+    auto length = PathCount(objects, access, probe.owner, PathOf(names));
     probe.length = length ? length.Value() : MaxSize;
     const PathStep at[] = {At(NamesId, probe.index)};
     probe.readResult = ErrorOf(PathRead(objects, access, probe.owner, PathOf(at), *probe.read));
@@ -764,7 +764,7 @@ TEST(PropertyPathReentry_OldBufferReleaseSeesThePublishedArray) {
         probe.index = 0;
         world.hooked.ArmRelease(pointer->names.Data(), &ReadDuringRelease, &probe);
         const PathStep names[] = {{NamesId}};
-        REQUIRE(PathClearArray(objects, access, owner, PathOf(names)));
+        REQUIRE(PathClear(objects, access, owner, PathOf(names)));
         CHECK(probe.length == 0 && probe.readResult == ErrorCode::InvalidArgument);
         CHECK(pointer->names.Capacity() == 0);
         box.Value().Reset();

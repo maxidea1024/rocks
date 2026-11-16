@@ -415,8 +415,10 @@ FieldCodecContext::BuildPath(PathStep (&steps)[MaxPropertyPathSteps]) const noex
     for (const FieldCodecFrame* frame = current_; frame; frame = frame->parent) {
         --position;
         steps[position].fieldId = frame->field->id;
-        steps[position].indexed = frame->index != FieldCodecFrame::NoIndex;
-        steps[position].index = steps[position].indexed ? frame->index : 0;
+        // 원소·Map 항목·Set 원소는 삽입 순번 Index다(진단 경로 — key를 복사하지 않는다).
+        const bool indexed = frame->index != FieldCodecFrame::NoIndex;
+        steps[position].selector = indexed ? PathSelector::Index : PathSelector::None;
+        steps[position].index = indexed ? frame->index : 0;
     }
 
     return Span<const PathStep>(steps, depth);

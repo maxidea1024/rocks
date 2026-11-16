@@ -180,8 +180,10 @@ namespace detail {
 Result<void> ValidateFieldWrite(const FieldWriteBinding& binding, const FieldWriteTarget& target,
                                 const FieldValue& value) noexcept {
     const ValueKind kind = binding.value.kind;
-    // 원소 모드는 배열 필드의 원소 형식과 대조한다.
-    if (!target.actual || (target.element && target.actual->value.kind != ValueKind::Array)) {
+    // 원소 모드는 배열 필드의 원소·Map 필드의 값 형식과 대조한다(리플렉션 B9f3 — Map key 단계
+    // 쓰기).
+    if (!target.actual || (target.element && target.actual->value.kind != ValueKind::Array &&
+                           target.actual->value.kind != ValueKind::Map)) {
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
 
@@ -263,7 +265,8 @@ Result<void> ValidateFieldWrite(const FieldWriteBinding& binding, const FieldWri
 }
 
 Result<void> ValidateArrayLength(const FieldSchema& field, usize newLength) noexcept {
-    if (field.value.kind != ValueKind::Array) {
+    if (field.value.kind != ValueKind::Array && field.value.kind != ValueKind::Map &&
+        field.value.kind != ValueKind::Set) {
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
 
@@ -279,11 +282,13 @@ Result<void> ValidateArrayEdit(const FieldWriteTarget& target, ArrayEdit edit) n
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    if (!target.actual || target.actual->value.kind != ValueKind::Array) {
+    const ValueKind kind = target.actual ? target.actual->value.kind : ValueKind::Opaque;
+    if (kind != ValueKind::Array && kind != ValueKind::Map && kind != ValueKind::Set) {
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
 
-    // 바깥 struct·배열 필드의 ReadOnly가 전파되어 원소 삽입·삭제·비우기를 모두 막는다.
+    // 바깥 struct·배열 필드의 ReadOnly가 전파되어 원소 삽입·삭제·비우기를 모두 막는다(Map 항목·Set
+    // 원소도 같다 — 리플렉션 B9f3).
     if (HasFlag(target.effectiveFlags, FieldFlags::ReadOnly)) {
         return Result<void>::Failure(ErrorCode::Unsupported);
     }

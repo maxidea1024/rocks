@@ -495,7 +495,7 @@ public:
             const bool indexed = element != IndexNone;
             found += entry.kind == FieldDiagnosticKind::RequiredMissing &&
                      entry.objectIndex == objectIndex && entry.path[0].fieldId == field &&
-                     entry.path[0].indexed == indexed &&
+                     (entry.path[0].selector == PathSelector::Index) == indexed &&
                      (!indexed || entry.path[0].index == element) &&
                      entry.depth == (member == Guid{} ? 1u : 2u) &&
                      (member == Guid{} || entry.path[1].fieldId == member);

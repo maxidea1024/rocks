@@ -4,6 +4,7 @@
 #include <Core/Containers/OrderedMap.h>
 #include <Core/Containers/OrderedSet.h>
 #include <Core/Encoding/Sha256.h>
+#include <Core/Optional.h>
 #include <Core/Text/Name.h>
 #include <Core/Text/String.h>
 #include <Meta/Annotations.h>
@@ -23,8 +24,9 @@ namespace rocks::reflection_fixture {
 // MapTagBag(Name 원소 Set)·MapPerPlatform(Name 키 Map — A5 PerPlatformFloat 모양)은 Name 담김
 // 형질이 Set 원소·Map 키로 전파되는지 보는 struct다. MapHolder는 키 종류별 Map, 값 종류별
 // Map(enum·digest·weak·Required Soft·값 struct), 원소 종류별 Set(bool 포함), 상한 2의 Map과 MapBag
-// 멤버·원소 배열을 담고 그래프 왕복·키 중복·키 자리 정책·진단 경로·선청구·예약 상한으로
-// 시험한다(MapGraphTests·MapGraphLoadTests).
+// 멤버·원소 배열을 담고 그래프 왕복·키 중복·키 자리 정책·진단 경로·선청구·예약 상한·key 단계
+// 경로(B9f3)로 시험한다(MapGraphTests·MapGraphLoadTests·MapPathTests). MapLockedHolder는 ReadOnly
+// Map·Set·struct 필드다(MapPathTests).
 ROCKS_ENUM()
 enum class MapColor : uint8 {
     Red = 1,
@@ -128,6 +130,49 @@ struct MapHolder final : Object {
     ROCKS_PROPERTY() Array<MapBag> bags;
     ROCKS_PROPERTY() MapTagBag tagBag;
     ROCKS_PROPERTY() OrderedSet<bool> flags;
+};
+
+// 리플렉션 B9f3 경로 시험 보충이다: MapAccess는 Flags enum(Map 키 — `A+B` 표기), MapKeyLeaf는
+// 시험이 따로 등록·해제하는 ClassRef 키 클래스, MapPathHolder는 Flags 키 Map·ClassRef 값 Map·상한
+// 2의 Set·Optional<MapBag>(Optional 안 Map)·String·Soft 값 Map·String 키 값 struct Map(key 두 개
+// 경로)을 담는다(MapPathEdgeTests·MapPathReentryTests).
+ROCKS_ENUM(Flags)
+enum class MapAccess : uint8 {
+    Read = 1,
+    Write = 2,
+    Exec = 4
+};
+
+ROCKS_CLASS()
+struct MapKeyLeaf final : MapKeyBase {};
+
+ROCKS_CLASS()
+struct MapPathHolder final : Object {
+    explicit MapPathHolder(Allocator& allocator) noexcept
+        : byAccess(allocator), classValues(allocator), limitedSet(allocator), texts(allocator),
+          softs(allocator), nested(allocator) {
+    }
+
+    ROCKS_PROPERTY() OrderedMap<MapAccess, uint32> byAccess;
+    ROCKS_PROPERTY() OrderedMap<uint32, ClassRef<MapKeyBase>> classValues;
+    ROCKS_PROPERTY(MaxElements = 2) OrderedSet<uint32> limitedSet;
+    ROCKS_PROPERTY() Optional<MapBag> maybeBag;
+    ROCKS_PROPERTY() OrderedMap<uint32, String> texts;
+    ROCKS_PROPERTY() OrderedMap<uint32, SoftObjectRef<>> softs;
+    ROCKS_PROPERTY() OrderedMap<String, MapBag> nested;
+};
+
+// ReadOnly Map·Set·struct 필드다(리플렉션 B9f3 경로 시험 — ReadOnly가 key 단계 쓰기·넣기·지우기·
+// 비우기를 막고 struct 필드의 ReadOnly는 멤버 Map으로 전파된다. 조회·원소 수는 막지 않는다).
+ROCKS_CLASS()
+struct MapLockedHolder final : Object {
+    explicit MapLockedHolder(Allocator& allocator) noexcept
+        : locked(allocator), lockedWords(allocator), lockedBag(allocator) {
+    }
+
+    ROCKS_PROPERTY(ReadOnly) OrderedMap<uint32, uint32> locked;
+    ROCKS_PROPERTY(ReadOnly) OrderedSet<String> lockedWords;
+    ROCKS_PROPERTY(ReadOnly) MapBag lockedBag;
 };
 
 } // namespace rocks::reflection_fixture

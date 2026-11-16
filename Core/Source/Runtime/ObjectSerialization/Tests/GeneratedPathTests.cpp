@@ -126,7 +126,7 @@ public:
             return Result<usize>::Failure(parsed.Error());
         }
 
-        return PathArrayLength(objects_, objects_.OwnerAccess(), handle_, path.View(), failure);
+        return PathCount(objects_, objects_.OwnerAccess(), handle_, path.View(), failure);
     }
 
     Result<void> Insert(const char* text, const FieldValue* value,
@@ -157,7 +157,7 @@ public:
             return parsed;
         }
 
-        return PathClearArray(objects_, objects_.OwnerAccess(), handle_, path.View(), failure);
+        return PathClear(objects_, objects_.OwnerAccess(), handle_, path.View(), failure);
     }
 
 private:

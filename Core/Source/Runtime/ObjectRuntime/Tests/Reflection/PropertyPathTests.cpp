@@ -636,7 +636,7 @@ PropertyPath PathOf(const PathStep (&steps)[N]) noexcept {
 }
 
 PathStep At(Guid id, uint32 index) noexcept {
-    return PathStep{id, index, true};
+    return PathStep{id, index, PathSelector::Index};
 }
 
 FieldValue Unsigned(Allocator& allocator, ValueKind kind, uint64 value) noexcept {
@@ -866,7 +866,7 @@ TEST(PropertyPath_ReadWriteEveryKindWithPrevious) {
             CHECK(removed.kind == ValueKind::Utf8String &&
                   removed.string.View() == StringView("replaced"));
             const PathStep labels[] = {{LabelsId}};
-            auto length = PathArrayLength(objects, access, handle, PathOf(labels));
+            auto length = PathCount(objects, access, handle, PathOf(labels));
             REQUIRE(length);
             CHECK(length.Value() == 1);
             FieldValue read(allocator);
@@ -1029,7 +1029,7 @@ TEST(PropertyPath_ReadOnlyPropagatesToMembersAndElements) {
         CHECK(ErrorOf(PathRemoveElement(objects, access, handle, PathOf(frozenName0), nullptr,
                                         &failure)) == ErrorCode::Unsupported);
         CHECK(failure.reason == PropertyPathError::ReadOnly);
-        CHECK(ErrorOf(PathClearArray(objects, access, handle, PathOf(frozenNames), &failure)) ==
+        CHECK(ErrorOf(PathClear(objects, access, handle, PathOf(frozenNames), &failure)) ==
               ErrorCode::Unsupported);
         CHECK(failure.reason == PropertyPathError::ReadOnly);
         // ReadOnly 배열 필드 → 원소 쓰기·삽입·삭제·비우기.
@@ -1042,7 +1042,7 @@ TEST(PropertyPath_ReadOnlyPropagatesToMembersAndElements) {
                                         &failure)) == ErrorCode::Unsupported);
         CHECK(ErrorOf(PathRemoveElement(objects, access, handle, PathOf(locked0), nullptr,
                                         &failure)) == ErrorCode::Unsupported);
-        CHECK(ErrorOf(PathClearArray(objects, access, handle, PathOf(locked), &failure)) ==
+        CHECK(ErrorOf(PathClear(objects, access, handle, PathOf(locked), &failure)) ==
               ErrorCode::Unsupported);
         CHECK(failure.reason == PropertyPathError::ReadOnly);
         // 읽기는 막지 않는다. 값은 바뀌지 않았다.
@@ -1051,7 +1051,7 @@ TEST(PropertyPath_ReadOnlyPropagatesToMembersAndElements) {
         CHECK(read.unsignedInteger == 3);
         REQUIRE(PathRead(objects, access, handle, PathOf(locked0), read));
         CHECK(read.unsignedInteger == 4);
-        auto length = PathArrayLength(objects, access, handle, PathOf(frozenNames));
+        auto length = PathCount(objects, access, handle, PathOf(frozenNames));
         REQUIRE(length);
         CHECK(length.Value() == 1);
         node.Value().Reset();
@@ -1217,10 +1217,10 @@ TEST(PropertyPath_IndexShapeAndInputErrors) {
               ErrorCode::TypeMismatch);
         CHECK(failure.reason == PropertyPathError::NotStruct);
         const PathStep count[] = {{CountId}};
-        CHECK(PathArrayLength(objects, access, handle, PathOf(count), &failure).Error() ==
+        CHECK(PathCount(objects, access, handle, PathOf(count), &failure).Error() ==
               ErrorCode::TypeMismatch);
         CHECK(failure.reason == PropertyPathError::NotArray);
-        CHECK(ErrorOf(PathClearArray(objects, access, handle, PathOf(count), &failure)) ==
+        CHECK(ErrorOf(PathClear(objects, access, handle, PathOf(count), &failure)) ==
               ErrorCode::TypeMismatch);
         // 입력 형식: index 유무(IndexRequired·IndexNotAllowed), 정규형, 단계 수, Opaque 값.
         const PathStep numbers[] = {{NumbersId}};
@@ -1231,13 +1231,13 @@ TEST(PropertyPath_IndexShapeAndInputErrors) {
                                         &failure)) == ErrorCode::InvalidArgument);
         CHECK(failure.reason == PropertyPathError::IndexRequired);
         const PathStep number0[] = {At(NumbersId, 0)};
-        CHECK(PathArrayLength(objects, access, handle, PathOf(number0), &failure).Error() ==
+        CHECK(PathCount(objects, access, handle, PathOf(number0), &failure).Error() ==
               ErrorCode::InvalidArgument);
         CHECK(failure.reason == PropertyPathError::IndexNotAllowed);
-        CHECK(ErrorOf(PathClearArray(objects, access, handle, PathOf(number0), &failure)) ==
+        CHECK(ErrorOf(PathClear(objects, access, handle, PathOf(number0), &failure)) ==
               ErrorCode::InvalidArgument);
         CHECK(failure.reason == PropertyPathError::IndexNotAllowed);
-        const PathStep nonCanonical[] = {{LeafFieldId}, {U32Id, 3, false}};
+        const PathStep nonCanonical[] = {{LeafFieldId}, {U32Id, 3, PathSelector::None}};
         CHECK(ErrorOf(PathRead(objects, access, handle, PathOf(nonCanonical), read, &failure)) ==
               ErrorCode::InvalidArgument);
         CHECK(failure.reason == PropertyPathError::None && failure.step == 1);
@@ -1267,7 +1267,7 @@ TEST(PropertyPath_IndexShapeAndInputErrors) {
               read.unsignedInteger == 10);
         // DestroyRequested owner는 Destroyed다(정리 중 변경은 Registry API를 직접 쓴다).
         REQUIRE(objects.RequestDestroy(access, handle));
-        CHECK(ErrorOf(PathClearArray(objects, access, handle, PathOf(numbers), &failure)) ==
+        CHECK(ErrorOf(PathClear(objects, access, handle, PathOf(numbers), &failure)) ==
               ErrorCode::Destroyed);
         CHECK(failure.reason == PropertyPathError::None);
         node.Value().Reset();
@@ -1327,11 +1327,11 @@ TEST(PropertyPath_ObjectRefArrayElements) {
         FieldValue removed(allocator);
         REQUIRE(PathRemoveElement(objects, access, handle, PathOf(ref0), &removed));
         CHECK(removed.reference == first.Value().Handle());
-        auto length = PathArrayLength(objects, access, handle, PathOf(refs));
+        auto length = PathCount(objects, access, handle, PathOf(refs));
         REQUIRE(length);
         CHECK(length.Value() == 1);
-        REQUIRE(PathClearArray(objects, access, handle, PathOf(refs)));
-        length = PathArrayLength(objects, access, handle, PathOf(refs));
+        REQUIRE(PathClear(objects, access, handle, PathOf(refs)));
+        length = PathCount(objects, access, handle, PathOf(refs));
         REQUIRE(length);
         CHECK(length.Value() == 0);
 
@@ -1466,7 +1466,7 @@ TEST(PropertyPath_StructRefArrayElements) {
         REQUIRE(PathRead(objects, access, handle, PathOf(moved), read));
         CHECK(read.string.View() == StringView("slot label"));
         REQUIRE(PathRemoveElement(objects, access, handle, PathOf(slot0)));
-        auto length = PathArrayLength(objects, access, handle, PathOf(slots));
+        auto length = PathCount(objects, access, handle, PathOf(slots));
         REQUIRE(length);
         CHECK(length.Value() == 2);
         {
@@ -1502,9 +1502,9 @@ TEST(PropertyPath_StructRefArrayElements) {
         material.Value().Reset();
         REQUIRE(objects.Collect(access));
         CHECK(IsAlive(objects, materialHandle));
-        REQUIRE(PathClearArray(objects, access, handle, PathOf(slots)));
+        REQUIRE(PathClear(objects, access, handle, PathOf(slots)));
         const PathStep holderSlots[] = {{HolderFieldId}, {HolderSlotsId}};
-        REQUIRE(PathClearArray(objects, access, handle, PathOf(holderSlots)));
+        REQUIRE(PathClear(objects, access, handle, PathOf(holderSlots)));
         REQUIRE(objects.Collect(access));
         CHECK(!IsAlive(objects, materialHandle));
         node.Value().Reset();
@@ -1568,7 +1568,7 @@ TEST(PropertyPath_ArrayOfStructDefaultElementAndNestedMember) {
         REQUIRE(PathRead(objects, access, handle, PathOf(name0), read));
         CHECK(read.string.View() == StringView("point name0"));
         const PathStep points[] = {{PointsId}};
-        REQUIRE(PathClearArray(objects, access, handle, PathOf(points)));
+        REQUIRE(PathClear(objects, access, handle, PathOf(points)));
         {
             auto borrowed = objects.Resolve<Node>(access, handle);
             REQUIRE(borrowed);
@@ -1639,17 +1639,17 @@ TEST(PropertyPath_EncodePinMakesEveryWriteBusy) {
               ErrorCode::Busy);
         CHECK(ErrorOf(PathRemoveElement(objects, access, handle, PathOf(label0))) ==
               ErrorCode::Busy);
-        CHECK(ErrorOf(PathClearArray(objects, access, handle, PathOf(numbers))) == ErrorCode::Busy);
-        CHECK(ErrorOf(PathClearArray(objects, access, handle, PathOf(slots))) == ErrorCode::Busy);
-        CHECK(ErrorOf(PathClearArray(objects, access, handle, PathOf(refs))) == ErrorCode::Busy);
+        CHECK(ErrorOf(PathClear(objects, access, handle, PathOf(numbers))) == ErrorCode::Busy);
+        CHECK(ErrorOf(PathClear(objects, access, handle, PathOf(slots))) == ErrorCode::Busy);
+        CHECK(ErrorOf(PathClear(objects, access, handle, PathOf(refs))) == ErrorCode::Busy);
         // 읽기·길이는 고정과 무관하다.
         FieldValue read(allocator);
         CHECK(PathRead(objects, access, handle, PathOf(label0), read));
         CHECK(read.string.View() == StringView("label"));
-        auto length = PathArrayLength(objects, access, handle, PathOf(numbers));
+        auto length = PathCount(objects, access, handle, PathOf(numbers));
         CHECK(length && length.Value() == 1);
         pin.Value().Reset();
-        CHECK(PathClearArray(objects, access, handle, PathOf(numbers)));
+        CHECK(PathClear(objects, access, handle, PathOf(numbers)));
         node.Value().Reset();
         other.Value().Reset();
         REQUIRE(objects.Collect(access));

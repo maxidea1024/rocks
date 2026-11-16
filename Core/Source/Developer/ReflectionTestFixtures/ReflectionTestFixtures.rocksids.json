@@ -818,6 +818,76 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::MapLockedHolder::locked",
+      "id": "b93edfd99ac54a52b1c843ba0b4c6c40",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapLockedHolder::lockedBag",
+      "id": "b2996356d57d40f494f95622e8c424dc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapLockedHolder::lockedWords",
+      "id": "5cefce92530d4f5293313387e7afa76e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapPathHolder::byAccess",
+      "id": "2b52279ebcd847c49564172fe22c5a17",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapPathHolder::classValues",
+      "id": "05b5611b69434a1bb695e6b6a988205c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapPathHolder::limitedSet",
+      "id": "8e08fcd7886541058cd964f9f453110c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapPathHolder::maybeBag",
+      "id": "d13860d910be42668eb33dbf9f9c109e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapPathHolder::nested",
+      "id": "564b66e0a42241fd866e66e6ec01995c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapPathHolder::softs",
+      "id": "4d49c427f4674b1da9d4f45408a6fc98",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::MapPathHolder::texts",
+      "id": "5621b6644df84b2482fc21aef4e9e83c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::MapPerPlatform::defaultValue",
       "id": "d03eff693bce4d8fa692745bef90d7b5",
       "aliases": [],
@@ -1807,6 +1877,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::reflection_fixture::MapAccess",
+      "id": "fd6c253281f74afd8aea79721fa72bf0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::reflection_fixture::MapBag",
       "id": "72a0d081f7ff41e1bcc9f3a1bf91140c",
       "aliases": [],
@@ -1842,8 +1919,29 @@
     },
     {
       "kind": "type",
+      "name": "rocks::reflection_fixture::MapKeyLeaf",
+      "id": "5b99793ceef947f5a14861cda661a2b0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::reflection_fixture::MapLink",
       "id": "2e2a350f4830495c9b74f2657b908761",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::MapLockedHolder",
+      "id": "84783dc3c28c4b2ea71b61ed536d8ead",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::MapPathHolder",
+      "id": "ac1a57aa181e4656ba9786977c70aabe",
       "aliases": [],
       "retired": false
     },

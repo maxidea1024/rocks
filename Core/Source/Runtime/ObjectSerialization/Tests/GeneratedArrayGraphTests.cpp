@@ -541,7 +541,7 @@ TEST(GeneratedArrayGraph_RequiredNullElementAndMaxElements) {
                 CHECK(saveHooks.entries[0].kind == FieldDiagnosticKind::RequiredMissing);
                 CHECK(saveHooks.entries[0].depth == 1);
                 CHECK(saveHooks.entries[0].path[0].fieldId == requiredId);
-                CHECK(saveHooks.entries[0].path[0].indexed &&
+                CHECK(saveHooks.entries[0].path[0].selector == PathSelector::Index &&
                       saveHooks.entries[0].path[0].index == 0);
 
                 auto bytes = SaveGraph(allocator, source, nullRequired);

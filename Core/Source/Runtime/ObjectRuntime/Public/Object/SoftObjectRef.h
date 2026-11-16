@@ -123,8 +123,36 @@ public:
     String objectPath;
 };
 
+// 소프트 참조 키의 비소유 조회 값이다(asset과 경로 view — 할당 없는 Map 키·Set 원소 조회와 복원
+// 1단계의 키 중복 판정이 쓴다). 같음은 SoftObjectRef의 operator==와 같다(asset과 경로 byte).
+// objectPath는 빌린 뷰다.
+//
+// 사용 예:
+//   const uint64* count = map.Find(SoftObjectRefView{asset, "Body.Socket"});
+struct SoftObjectRefView {
+    AssetId asset{};
+    StringView objectPath;
+
+    friend bool operator==(const SoftObjectRefView& left, const SoftObjectRefView& right) noexcept {
+        return left.asset == right.asset && left.objectPath == right.objectPath;
+    }
+};
+
+namespace detail {
+
+// 소프트 참조 키의 seed 해시 본문이다(asset과 경로 byte — SoftObjectRef와 SoftObjectRefView가 같은
+// 값을 낸다).
+inline uint64 HashSoftKey(HashSeed seed, AssetId asset, StringView path) noexcept {
+    const uint64 bytes = SipHash24(seed, path.Data(), path.ByteCount());
+    const uint64 words[3] = {asset.value.high, asset.value.low, bytes};
+    return SipHash24Words(seed, words, 3);
+}
+
+} // namespace detail
+
 // 소프트 참조 키(리플렉션 Map 키·Set 원소)의 seed 해시다. asset과 경로 byte를 함께
 // 해시한다(operator==와 같은 키 같음 — 기대 타입 T는 값에 없으므로 들어가지 않는다).
+// SoftObjectRefView 조회도 같은 해시를 낸다.
 template <class T>
 struct SeededHash<SoftObjectRef<T>> : SeededHashBase {
     using SeededHashBase::SeededHashBase;
@@ -132,10 +160,34 @@ struct SeededHash<SoftObjectRef<T>> : SeededHashBase {
     SeededHash() noexcept = default;
 
     uint64 operator()(const SoftObjectRef<T>& value) const noexcept {
-        const uint64 path =
-            SipHash24(Seed(), value.objectPath.View().Data(), value.objectPath.View().ByteCount());
-        const uint64 words[3] = {value.asset.value.high, value.asset.value.low, path};
-        return SipHash24Words(Seed(), words, 3);
+        return detail::HashSoftKey(Seed(), value.asset, value.objectPath.View());
+    }
+
+    uint64 operator()(const SoftObjectRefView& value) const noexcept {
+        return detail::HashSoftKey(Seed(), value.asset, value.objectPath);
+    }
+};
+
+template <>
+struct SeededHash<SoftObjectRefView> : SeededHashBase {
+    using SeededHashBase::SeededHashBase;
+
+    SeededHash() noexcept = default;
+
+    uint64 operator()(const SoftObjectRefView& value) const noexcept {
+        return detail::HashSoftKey(Seed(), value.asset, value.objectPath);
+    }
+};
+
+// 소프트 참조 키의 같음이다(asset과 경로 byte). SoftObjectRefView와의 비교는 할당 없는 조회다.
+template <class T>
+struct Equal<SoftObjectRef<T>> {
+    bool operator()(const SoftObjectRef<T>& left, const SoftObjectRef<T>& right) const noexcept {
+        return left == right;
+    }
+
+    bool operator()(const SoftObjectRef<T>& left, const SoftObjectRefView& right) const noexcept {
+        return left.asset == right.asset && left.objectPath.View() == right.objectPath;
     }
 };
 

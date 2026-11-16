@@ -365,7 +365,7 @@ struct Admitter final : FieldCodecHooks {
             if (info.path.Size() != 0) {
                 const PathStep& last = info.path[info.path.Size() - 1];
                 entry.field = last.fieldId;
-                entry.indexed = last.indexed;
+                entry.indexed = last.selector == PathSelector::Index;
                 entry.index = last.index;
             }
 

@@ -227,7 +227,7 @@ namespace {
 using namespace path_replay;
 
 PathStep At(Guid id, uint32 index) noexcept {
-    return PathStep{id, index, true};
+    return PathStep{id, index, PathSelector::Index};
 }
 
 template <usize N>
@@ -326,7 +326,7 @@ TEST(PropertyPathReplay_StructElementRemovalReplaysToSameBytes) {
             FieldValue savedName(allocator);
             REQUIRE(PathRead(objects, access, owner, PathOf(code), savedCode));
             REQUIRE(PathRead(objects, access, owner, PathOf(name), savedName));
-            auto count = PathArrayLength(objects, access, owner, PathOf(values));
+            auto count = PathCount(objects, access, owner, PathOf(values));
             REQUIRE(count && count.Value() == 2);
             FieldValue savedValues[2] = {FieldValue(allocator), FieldValue(allocator)};
             for (uint32 index = 0; index < 2; ++index) {

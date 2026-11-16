@@ -20,29 +20,6 @@
 //   - Map 키에는 Required가 없다(필드의 Required는 Map 값·Set 원소마다 non-null이다).
 namespace rocks::detail {
 
-// 1단계 중복 판정의 소프트 참조 키다(asset과 경로 view — 입력을 빌린다).
-struct SoftKeyView {
-    AssetId asset{};
-    StringView path;
-
-    friend bool operator==(const SoftKeyView& left, const SoftKeyView& right) noexcept {
-        return left.asset == right.asset && left.path == right.path;
-    }
-};
-
-// SoftKeyView의 seed 해시다(asset과 경로 byte).
-struct SoftKeyViewHash : SeededHashBase {
-    using SeededHashBase::SeededHashBase;
-
-    SoftKeyViewHash() noexcept = default;
-
-    uint64 operator()(const SoftKeyView& value) const noexcept {
-        const uint64 path = SipHash24(Seed(), value.path.Data(), value.path.ByteCount());
-        const uint64 words[3] = {value.asset.value.high, value.asset.value.low, path};
-        return SipHash24Words(Seed(), words, 3);
-    }
-};
-
 // 1단계 중복 판정의 Name 키다(표시 문자열 view — 1단계에는 토큰이 없다). 같음은 NameTextEquals다.
 struct NameKeyView {
     StringView text;
@@ -105,14 +82,15 @@ struct KeyProbe<String> {
     }
 };
 
+// 소프트 참조 키는 asset과 경로 view(SoftObjectRefView — 입력을 빌린다)다.
 template <class T>
 struct KeyProbe<SoftObjectRef<T>> {
-    using Type = SoftKeyView;
-    using HashPolicy = SoftKeyViewHash;
-    using EqualPolicy = Equal<SoftKeyView>;
+    using Type = SoftObjectRefView;
+    using HashPolicy = SeededHash<SoftObjectRefView>;
+    using EqualPolicy = Equal<SoftObjectRefView>;
 
     static Type Make(const ParsedValue& parsed) noexcept {
-        return SoftKeyView{AssetId{parsed.guid}, parsed.text};
+        return SoftObjectRefView{AssetId{parsed.guid}, parsed.text};
     }
 };
 

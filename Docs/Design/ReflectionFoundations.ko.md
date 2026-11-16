@@ -545,7 +545,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema&, Ru
 
 **B6 호환**
 
-- `PathStep{fieldId, index, indexed}`는 그대로이고 원소 index는 배열 필드 단계에 둔다([slots[2], material]). B6이 쓰는 것: Registry 컨테이너 API, `ValidateFieldWrite` 원소 모드·`ValidateArrayLength`, 원소 struct 멤버 단위 쓰기(참조 struct 단위 원자성 없음), `Array<T>` 삽입은 원소와 새 버퍼를 먼저 만든 뒤 무할당으로 옮겨 게시(7.1절). B6의 `ops.path` thunk는 `RuntimeFieldOps`·`RuntimeStructFieldOps` 끝에 더한다. 배열 원소 접근 템플릿은 생성 헤더 안에서만 인스턴스화한다. 원소 안정 ID는 열린 문제다(B5 wire는 순서 기반).
+- `PathStep{fieldId, index, indexed}`는 그대로이고 원소 index는 배열 필드 단계에 둔다([slots[2], material]). 리플렉션 B9f3이 `indexed`를 선택자 `PathSelector`(None·Index·Key)로 바꾸고 Map·Set의 key 단계(`PropertyPath::keys`)를 더했다([리플렉션 B9](ReflectionExtensions.ko.md) 1.5·7.3절). B6이 쓰는 것: Registry 컨테이너 API, `ValidateFieldWrite` 원소 모드·`ValidateArrayLength`, 원소 struct 멤버 단위 쓰기(참조 struct 단위 원자성 없음), `Array<T>` 삽입은 원소와 새 버퍼를 먼저 만든 뒤 무할당으로 옮겨 게시(7.1절). B6의 `ops.path` thunk는 `RuntimeFieldOps`·`RuntimeStructFieldOps` 끝에 더한다. 배열 원소 접근 템플릿은 생성 헤더 안에서만 인스턴스화한다. 원소 안정 ID는 열린 문제다(B5 wire는 순서 기반).
 
 **시험**
 
@@ -597,7 +597,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema&, Ru
 
 - `FieldCodecFrame { const FieldSchema* field; TypeId declaringType; uint32 effectiveFlags; const EnumSchema* enumeration; uint32 index; const FieldCodecFrame* parent; }` — 지금 처리하는 필드(struct 멤버면 멤버), 그 필드를 선언한 클래스·struct(최상위 필드는 객체 타입), 전파된 플래그, Enum 필드의 등록된 enum 스키마, 배열 원소 index(아니면 `NoIndex`), 바깥 프레임. `FieldScope`는 `[[nodiscard]]`이고 역순으로 끝나지 않으면 Fatal이다. 문맥 기반 클래스가 프레임 스택을 갖고, 직렬화기와 B4·B5 codec은 RAII `FieldScope`로 들어가고 나온다. 기반 클래스는 `Current()`, `ObjectType()`, `ObjectIndex()`(노드 위치(0부터) = 그래프 local ID − 1 = v2 export index − 1)와 줄임 `Field()`·`EffectiveFlags()`를 준다.
 - 전파 규칙은 MetaSchema의 constexpr 하나로 고정한다: `PropagateFieldFlags(parent, own) = (parent & (EditorOnly | Transient | ReadOnly)) | own`. B6의 ReadOnly 전파도 이것을 쓴다. 최상위 필드의 유효 플래그는 필드 플래그다.
-- 경로 표현은 7절의 `PathStep { Guid fieldId; uint32 index; bool indexed; }`(MetaSchema)이며, 진단 경로는 프레임 사슬로 고정 크기 버퍼(struct 깊이 16 + 배열 index — 최대 33 step)에 만들어 할당하지 않는다.
+- 경로 표현은 7절의 `PathStep { Guid fieldId; uint32 index; bool indexed; }`(MetaSchema — 리플렉션 B9f3에서 `PathSelector selector`로 바꿨다, 진단 경로는 selector Index)이며, 진단 경로는 프레임 사슬로 고정 크기 버퍼(struct 깊이 16 + 배열 index — 최대 33 step)에 만들어 할당하지 않는다.
 
 **문맥·정책·hook(`Object/FieldCodec.h` — hook·진단·외부 참조 정보는 `Object/FieldCodecHooks.h`)**
 
@@ -645,7 +645,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema&, Ru
 
 ## 7. 경로 접근(B6)
 
-- **해석 결과는 FieldId 체인 + 원소 index**(`PropertyPath { Span<const PathStep> }`, `PathStep { Guid fieldId; uint32 index; bool indexed }`)다. UI 문서의 Transaction(CU4)도 같은 표현을 쓴다. 문자열 경로(`toolName('.' toolName | '[' index ']')*`, 대소문자 무시, 모르는 이름은 `UnknownProperty` — AS 4.6절)는 schema로 이 체인을 만드는 앞단이다.
+- **해석 결과는 FieldId 체인 + 원소 index·Map key**(`PropertyPath { Span<const PathStep> steps; Span<const PathKey> keys; }`, `PathStep { Guid fieldId; uint32 index; PathSelector selector }` — 리플렉션 B9f3이 `bool indexed`를 선택자 None·Index·Key로 바꾸고 key 단계를 더했다, [리플렉션 B9](ReflectionExtensions.ko.md) 1.5·7.3절)다. UI 문서의 Transaction(CU4)도 같은 표현을 쓴다. 문자열 경로(`toolName('.' toolName | '[' index ']' | '[' key ']')*`, 대소문자 무시, 모르는 이름은 `UnknownProperty` — AS 4.6절, key의 따옴표·escape는 리플렉션 B9 1.5절)는 schema로 이 체인을 만드는 앞단이다.
 - 연산: 단일 값 읽기·쓰기(`FieldValue`), 배열 길이·삽입·삭제·원소 교체, 참조 struct의 멤버 쓰기, `ObjectRefArray`의 삽입·교체(5.2절 API), `StructRefArray`의 원소 삽입·삭제와 원소 멤버 쓰기(5.6절 API). 실제 접근은 생성 thunk(`ops.path`)가 정적 타입으로 한다. 검증은 3.6절의 단일 검증 지점을 지난다(ReadOnly·대상 타입·enum·MaxElements).
 - 원자성: 소유 객체 Borrow 안에서 하고, cursor가 직접 할당하는 멤버·원소 끝 지점은 할당부터 게시까지 encode 고정을 쥐어 재진입 변경을 막으며, 할당 뒤 게시 직전에 `Borrow.Get()`으로 소유자 생존을 다시 확인한다(고정은 RequestDestroy를 막지 않는다 — 7.1절). encode 고정된 소유자(5.6절)에는 Busy다. 배열 삽입은 원소와 새 버퍼를 먼저 만든 뒤 무할당으로 옮겨 게시한다(살아 있는 배열의 내부 성장은 새 버퍼를 게시하기 전에 옛 버퍼를 반환하므로 그 해제 콜백이 해제된 버퍼를 본다 — 쓰지 않는다). 실패하면 미게시.
 - 명령행 값 표기(쉼표 목록·`none`·경로 또는 AssetId, AS 13절)는 리플렉션 B9의 공용 모듈 `ReflectionText`가 이 연산 위에서 해석한다(RX 10절 — 처음에는 도구 계층에 두었다). 리플렉션 B9는 경로에 Map key·Set 원소 단계(`PathSelector`·`PathKey` — RX 1.5절)와 대입 묶음 게시(`BeginBatchPublish` — 대상 고정·재확인·관찰자 예약·준비 단위, RX 10.2절)를 더한다. B6은 A0-B 순서대로 지금 구현한다(7.1절 — 처음에는 A6까지 미룰 수 있다고 했다).
@@ -656,7 +656,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema&, Ru
 
 **표현(MetaSchema `TypeSchema.h`)**
 
-- `inline constexpr uint32 MaxPropertyPathSteps = MaxStructDepth + 1;`(17 — codec 프레임 수와 같다), `struct PropertyPath { Span<const PathStep> steps; };`. `PathStep{fieldId, index, indexed}`는 그대로이고 원소 index는 배열 필드 단계에 둔다(`[slots[2], material]`). **정규형**: `indexed == false`면 `index == 0`(아니면 InvalidArgument) — CU4가 경로 동등성으로 병합할 수 있게.
+- `inline constexpr uint32 MaxPropertyPathSteps = MaxStructDepth + 1;`(17 — codec 프레임 수와 같다), `struct PropertyPath { Span<const PathStep> steps; Span<const PathKey> keys{}; };`. 원소 index는 배열 필드 단계에 둔다(`[slots[2], material]` — selector Index). **정규형**: selector None이면 `index == 0`, Key면 `index < keys 수`(아니면 InvalidArgument) — CU4가 경로 동등성(`SamePropertyPath` — Key 단계는 키 값으로 비교)으로 병합할 수 있게(리플렉션 B9f3에서 `indexed`를 selector로 바꿨다).
 - 경로는 **객체 하나 안에서 끝난다**(참조를 따라 다른 객체로 들어가지 않는다 — 객체 지정은 CU4의 안정 ID가 맡는다. UE PropertyPathHelpers는 객체·함수 세그먼트를 지나지만 Rocks는 하지 않는다).
 - `TypeSchema.h`로 옮기는 공용 도우미: `EffectiveToolName(const FieldSchema&)`·ASCII 대소문자 무시 비교(TypeRegistry.cpp 익명 namespace에서 — `detail::EnumNameEquals`와 같은 구현을 공유).
 
@@ -684,19 +684,24 @@ Result<void>  PathRead(ObjectRegistry&, const ObjectAccessContext&, ObjectHandle
                        PropertyPathFailure* failure = nullptr) noexcept;
 Result<void>  PathWrite(…, PropertyPath, const FieldValue& value, FieldValue* previous = nullptr,
                         PropertyPathFailure* failure = nullptr) noexcept;           // 원소 교체 포함
-Result<usize> PathArrayLength(…, PropertyPath, PropertyPathFailure* = nullptr) noexcept;
+Result<usize> PathCount(…, PropertyPath, PropertyPathFailure* = nullptr) noexcept;   // B9f3: 이름 바꿈(Array·Map·Set)
 Result<void>  PathInsertElement(…, PropertyPath /*마지막 단계 indexed: 삽입 위치, size면 끝*/,
                                 const FieldValue* value, PropertyPathFailure* = nullptr) noexcept;
 Result<void>  PathRemoveElement(…, PropertyPath /*마지막 단계 indexed*/, FieldValue* removed = nullptr,
                                 PropertyPathFailure* = nullptr) noexcept;
-Result<void>  PathClearArray(…, PropertyPath, PropertyPathFailure* = nullptr) noexcept;
+Result<void>  PathClear(…, PropertyPath, PropertyPathFailure* = nullptr) noexcept;    // B9f3: 이름 바꿈(Array·Map·Set)
+// 리플렉션 B9f3: Map·Set key 단계(RX 7.3절 "구현(B9f3)에서 정한 점")
+Result<bool>  PathContains(…, PropertyPath, PropertyPathFailure* = nullptr) noexcept;
+Result<bool>  PathInsertKey(…, PropertyPath, PropertyPathFailure* = nullptr) noexcept;
+Result<void>  PathEraseKey(…, PropertyPath, FieldValue* removed = nullptr,
+                           PropertyPathFailure* = nullptr) noexcept;
 // 리플렉션 B9e: Optional<값 struct> 필드의 기본 값 만들기·비우기·set 여부 조회(RX 6절 "구현(B9e)에서 정한 점")
 Result<void>  PathEmplaceOptional(…, PropertyPath, PropertyPathFailure* = nullptr) noexcept;
 Result<void>  PathResetOptional(…, PropertyPath, PropertyPathFailure* = nullptr) noexcept;
 Result<bool>  PathIsOptionalSet(…, PropertyPath, PropertyPathFailure* = nullptr) noexcept;
 ```
 
-- 모든 연산이 `PropertyPathFailure`로 실패 단계와 사유를 돌려준다 — 도구가 모르는 속성·범위 오류·값 오류를 나눠 보고한다. 사유와 코드: UnknownProperty(문자열 앞단의 모르는 이름, NotFound), UnknownField(FieldId 체인의 없는 필드 — 스키마가 바뀐 옛 경로, NotFound), NotArray·NotStruct(모양 불일치, TypeMismatch), IndexRequired(index가 있어야 하는 단계에 없음, InvalidArgument), IndexNotAllowed(index가 없어야 하는 단계에 있음, InvalidArgument), IndexOutOfRange(InvalidArgument), InvalidValue(값 내용, InvalidArgument), ReadOnly(Unsupported), AggregateValue(통째 struct·배열, Unsupported), NoPathAccess(path thunk 없음, Unsupported), TooManyElements(MaxElements, CapacityExceeded), StaticTypeMismatch(정적 타입과 스키마 불일치, TypeMismatch), 리플렉션 B9e의 OptionalUnset(unset Optional<struct>의 멤버로 들어감, NotFound)·NotOptional(Optional<값 struct> 연산의 끝이 그 필드가 아님, TypeMismatch). 사유가 없는 오류(문맥·수명·Busy·OutOfMemory·Overflow)는 None이고 step만 채운다.
+- 모든 연산이 `PropertyPathFailure`로 실패 단계와 사유를 돌려준다 — 도구가 모르는 속성·범위 오류·값 오류를 나눠 보고한다. 사유와 코드: UnknownProperty(문자열 앞단의 모르는 이름, NotFound), UnknownField(FieldId 체인의 없는 필드 — 스키마가 바뀐 옛 경로, NotFound), NotArray·NotStruct(모양 불일치, TypeMismatch), IndexRequired(index가 있어야 하는 단계에 없음, InvalidArgument), IndexNotAllowed(index가 없어야 하는 단계에 있음, InvalidArgument), IndexOutOfRange(InvalidArgument), InvalidValue(값 내용, InvalidArgument), ReadOnly(Unsupported), AggregateValue(통째 struct·배열, Unsupported), NoPathAccess(path thunk 없음, Unsupported), TooManyElements(MaxElements, CapacityExceeded), StaticTypeMismatch(정적 타입과 스키마 불일치, TypeMismatch), 리플렉션 B9e의 OptionalUnset(unset Optional<struct>의 멤버로 들어감, NotFound)·NotOptional(Optional<값 struct> 연산의 끝이 그 필드가 아님, TypeMismatch), 리플렉션 B9f3의 NotKeyed·KeyRequired·KeyNotFound·InvalidKey·NotMap(RX 7.3절). 사유가 없는 오류(문맥·수명·Busy·OutOfMemory·Overflow)는 None이고 step만 채운다.
 - **옛 값 출력(CU4용)**: `PathWrite`의 `previous`는 쓰기 전 값이고, `PathRemoveElement`의 `removed`는 단일 값 원소의 값이다(struct 원소에 `removed`를 주면 InvalidArgument). String·Soft 경로는 `previous`·`removed`의 FieldValue allocator와 원본 allocator가 같을 때만 Swap·이동으로 옮기고(추가 할당 없음), 다르면 고정 아래 게시 전에 그 FieldValue의 allocator로 복사한다(CU4 Undo 기록이 객체 allocator의 버퍼를 쥐지 않게). `previous`가 쥐던 옛 버퍼는 고정을 푼 뒤 반환하고, 연산이 실패하면 `previous`·`removed`는 바뀌지 않는다. 최상위 단일 값 필드는 write 직전에 등록된 read로 `previous`를 얻는다(read와 write 사이의 재진입 변경은 계약 밖). 비우기와 struct 원소 제거의 옛 값은 CU4가 연산 전 `PathRead`로 만들고, struct 원소 제거의 복원은 "기본 원소 삽입 + 잎 단위 쓰기" 재생으로 충분함을 시험으로 고정한다(제거 → 재생 → encode byte 동일). 캡처한 참조 handle은 약한 참조이므로 CU4가 RootRef로 붙잡는다.
 - 끝 지점별 동작:
 
@@ -711,7 +716,7 @@ Result<bool>  PathIsOptionalSet(…, PropertyPath, PropertyPathFailure* = nullpt
 | `ObjectRefArray` 원소 | `SetReferenceAt`(null 허용) | `InsertReferenceAt`·`RemoveReferenceAt`·`ClearReferences` |
 | `StructRefArray` 원소 | 멤버 단위만 | `InsertElementAt`·`RemoveElementAt`·`ClearElements`(값 없음) |
 
-- struct·배열을 **통째로 읽거나 쓰면 Unsupported**(AggregateValue — FieldValue로 표현할 수 없다, Record 복사는 CU4·A6). struct 원소 삽입에 값을 주면 Unsupported, 단일 값 원소 삽입에 값이 없으면 InvalidArgument. 모양: `PathInsertElement`·`PathRemoveElement`의 마지막 단계가 index가 없으면 InvalidArgument(IndexRequired), `PathArrayLength`·`PathClearArray`의 마지막 단계에 index가 있으면 InvalidArgument(IndexNotAllowed). 경로 연산은 `ResolveForWrite`를 쓰므로 DestroyRequested 소유자에서는 Destroyed다 — 정리 중 제거·비우기는 Registry API를 직접 쓴다(그 API는 DestroyRequested를 허용한다). Resize·원소 이동·복제는 두지 않는다. 참조 struct는 struct 단위 원자성이 없다(4.3절).
+- struct·배열을 **통째로 읽거나 쓰면 Unsupported**(AggregateValue — FieldValue로 표현할 수 없다, Record 복사는 CU4·A6). struct 원소 삽입에 값을 주면 Unsupported, 단일 값 원소 삽입에 값이 없으면 InvalidArgument. 모양: `PathInsertElement`·`PathRemoveElement`의 마지막 단계가 index가 없으면 InvalidArgument(IndexRequired), `PathCount`·`PathClear`(리플렉션 B9f3에서 `PathArrayLength`·`PathClearArray`의 이름을 바꿨다 — Array·Map·Set)의 마지막 단계에 index·key가 있으면 InvalidArgument(IndexNotAllowed). 경로 연산은 `ResolveForWrite`를 쓰므로 DestroyRequested 소유자에서는 Destroyed다 — 정리 중 제거·비우기는 Registry API를 직접 쓴다(그 API는 DestroyRequested를 허용한다). Resize·원소 이동·복제는 두지 않는다. 참조 struct는 struct 단위 원자성이 없다(4.3절).
 - 비정규 null(`IsNull()`인 non-zero handle)은 모든 쓰기에서 `ObjectHandle{}`로 정규화한다(B5 컨테이너·`SetReference`와 하나로). B3 쪽 세 곳을 함께 바꾼다: `FieldWriteOperation`의 StaleHandle 거부, `ValidateFieldWrite`의 null 판정(`value.reference != ObjectHandle{}` → `IsNull()`), 콜백에 넘기는 값(reference를 `ObjectHandle{}`로 바꾼 사본 — 할당 없음, 수동 함수표가 비정규 handle을 저장하지 않게). `ReferenceSchemaReviewTests`의 StaleHandle 기대(`{0, 7, 1}`)는 성공·null 저장으로 바꾼다.
 
 **thunk(`RuntimeTypeOps.h`, 생성 템플릿 `Object/GeneratedPathAccess.h`)**
