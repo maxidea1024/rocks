@@ -53,7 +53,9 @@ struct RenderStats {
 //   }
 //   renderer.Shutdown();                     // 장치보다 먼저
 //
-// 장치는 Renderer보다 오래 살아야 한다. 생성한 스레드에서만 사용한다.
+// 장치는 Renderer보다 오래 살아야 한다. 장치 소유 스레드에서만 사용한다. 렌더 lane(RenderBase)이
+// 장치를 가지면 lane 쪽 객체(RenderLaneProcessor)가 Renderer를 소유하고 프레임 packet 작업 안에서
+// 그린다.
 class Renderer {
 public:
     Renderer() noexcept = default;

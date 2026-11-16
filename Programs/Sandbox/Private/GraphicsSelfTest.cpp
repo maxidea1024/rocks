@@ -1,4 +1,5 @@
 #include "GraphicsSelfTest.h"
+#include "RenderLaneSelfTest.h"
 
 #include <Core/Containers/Array.h>
 #include <D3D12Graphics/D3D12Device.h>
@@ -593,6 +594,8 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     renderer.Shutdown();
     auto idle = device.WaitIdle();
     Check(idle.IsOk(), name, "wait idle");
+    // 렌더 lane(RB1): 장치를 lane으로 넘겨 엔진 루프 프레임을 그리고 되돌려 받는다.
+    failures += RunRenderLaneChecks(name, device, result.triangle.GetAllocator());
     result.passed = failures == before;
     printf("  [%s] %s\n", result.passed ? "PASS" : "FAIL", name);
 }
