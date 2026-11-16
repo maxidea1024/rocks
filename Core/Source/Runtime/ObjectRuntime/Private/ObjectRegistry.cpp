@@ -190,6 +190,11 @@ Result<void> ObjectRegistry::AddBorrow(const ObjectAccessContext& access, Object
 
     ++slot->borrows;
     ++totalBorrows_;
+    // 쓰기용 Borrow는 owner를 바꿀 수 있으므로 변경 표지를 올린다(MutationStamp).
+    if (rejectEncodePinned) {
+        ++slot->mutations;
+    }
+
     return Result<void>::Success();
 }
 

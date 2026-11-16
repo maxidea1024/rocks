@@ -809,6 +809,17 @@ Result<PreparedAssignments> PrepareAssignments(AssignmentTarget, Span<const Text
 - **struct 값**: 준비 사본을 대상 struct에 무할당으로 옮긴다(참조를 담는 struct 값은 대상이 될 수 없다 — 참조 struct는 객체 안에서만 쓴다).
 - **진단**: `TextDiagnostic { code; uint32 sourceIndex 또는 JsonPosition; 경로 텍스트; 설명 }`. 코드: UnknownProperty·ExcludedProperty·ReadOnly·InvalidValue·OutOfRange·DuplicateKey·DuplicateAssignment·HiddenEnumerator·UnknownType·Unresolved(resolver 실패)·Unsupported(resolver 없음). Prepare는 한도(`maxDiagnostics`) 안에서 오류를 모두 모아 보고하고 아무것도 게시하지 않는다(사람이 고치는 설정 파일에 맞는 방식).
 
+구현(B9i2)에서 정한 점(Registry 쪽 — `PreparedAssignments`·준비 단위 구성은 B9i3):
+
+- 변경 표지 `ObjectRegistry::MutationStamp(access, owner) -> Result<uint64>`: 슬롯의 `mutations` 계수다. 오르는 곳은 쓰기용 Borrow(`ResolveForWrite` — 리플렉션 필드·경로 쓰기가 쓴다), live `SetReference`·`SetElementReference` 성공, live 컨테이너 변경의 owner 검사 통과(`CheckContainerOwnerLocked` — 뒤 단계가 실패해도 오른다, 보수적), 게시한 묶음의 End다. 그래서 Publish 1단계의 owner Borrow는 읽기 `Resolve`로 얻는다(`ResolveForWrite`는 표지를 올려 늘 Busy가 된다).
+- 묶음 게시 구간 `ObjectRegistry::BeginBatchPublish(access, owner, expectedStamp, Span<BatchTargetCheck>, Span<BatchEdgeChange>) -> Result<ObjectBatchPublish>`(Object/ObjectBatchPublish.h): 새 대상(Hard·Weak, 기대 타입)과 강한 참조 위치의 간선 변경 목록(removed → added)을 받는다. 2단계의 오류는 스펙 목록에 InvalidArgument(owner Borrow 없음·null 대상·회수된 removed)와 Busy(encode 고정·다른 구간·예약 콜백 재진입)를 더했다. 다른 Registry의 대상은 StaleHandle이다(조회 API와 같은 규칙).
+- 관찰자 묶음 예약: 간선 변경마다 `PlanEditLocked`(같은 패키지 쌍은 기록하지 않는 단일 간선 규칙)를 Registry allocator 집계(`EdgeTally`)에 합쳐 모자란 키만 예약하고, End가 집계를 한 번에 `Add`한다(원인 Edit). 게시 함수마다 기록하지 않는 이유: 컨테이너 교체는 그대로 남는 원소가 순 0 키를 만들어 예약을 넘길 수 있다. 대신 선언과 게시의 일치를 검사합(간선마다 added 해시 − removed 해시의 합)으로 End가 대조하고 다르면 Fatal이다.
+- 준비 단위 게시(구간 안, 무할당·무실패 — owner 저장소 밖 위치·재확인하지 않은 대상·다른 allocator·순회 중 Map은 계약 위반 Fatal): 단일 참조 위치 `SetReference`(owner 저장소 안 ObjectRef — 인라인 struct 멤버·StaticArray 원소 포함), `SetElementReference`(StructRefArray 원소 블록 안 멤버), ObjectRefArray 버퍼 교체 `ReplaceReferences(array, PreparedReferenceArray&)`, ObjectRefMap 내용 교체 `ReplaceMapReferences(map, OrderedMap<K, ObjectHandle>&)`(revision 증가). 새 값마다 생존·타입 재확인과 Marking 중 shade(미리 잡은 GC 작업 용량 — 모자라면 Fatal)를 하고, 옛 버퍼·옛 Map은 준비물로 넘어가 구간을 나온 뒤 호출자가 반환한다. 값 부분 트리는 호출자가 구간 안에서 직접 옮긴다(Registry가 하는 일이 없다). StructRefArray의 원소 추가·삭제를 담은 버퍼 교체는 원소 블록 소유 규칙이 필요해 B9i3에서 그 단위를 구성할 때 정한다(지금은 원소 멤버 쓰기만).
+- 아무것도 게시하지 않고 닫은 구간은 관찰자 기록·표지 증가가 없다(Prepare 뒤 할 일이 없을 때).
+- 선행 변경(게시 시점 실패를 2단계로): 기존 단일 편집 API(`SetReference`·ObjectRefArray 변경)의 의미는 그대로 두고, 묶음 게시는 그 API를 부르지 않고 위 구간 API를 쓴다 — 실패할 수 있는 검사·예약은 모두 `BeginBatchPublish`에 있다. 그래서 따로 떼어 낼 기존 코드 변경은 표지 증가 지점뿐이다.
+- 대상 고정은 새 API가 없다: 호출자가 기존 `TryPin`(RootRef)으로 고정하고, 고정이 GC 회수는 막지만 Discard는 막지 못함을 `BeginBatchPublish`의 재확인이 받는다.
+- 시험: ObjectRuntime `BatchPublish_PublishesUnitsAndRecordsObserverOnce`·`BatchPublish_MutationStampTracksWrites`·`BatchPublish_RevalidationFailuresChangeNothing`·`BatchPublish_OpenSectionMakesRegistryBusy`·`BatchPublish_ObserverReservationFailuresChangeNothing`·`BatchPublish_ShadesNewTargetsDuringMarking`.
+
 ### 10.3 참조 resolver
 
 ```cpp
