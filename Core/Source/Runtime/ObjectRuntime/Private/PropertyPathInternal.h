@@ -28,9 +28,16 @@ struct PathRunner {
     static Result<void> PrepareInsertedKey(PathCursor& cursor, PathFrame& frame) noexcept;
 
     static PathCursor Make(ObjectRegistry& registry, const ObjectAccessContext& access,
-                           ObjectHandle owner, PathOperation operation, const FieldValue* input,
-                           FieldValue* output, PropertyPathFailure* failure) noexcept {
-        return PathCursor(registry, access, owner, operation, input, output, failure);
+                           const PathTarget& target, PathOperation operation,
+                           const FieldValue* input, FieldValue* output,
+                           PropertyPathFailure* failure) noexcept {
+        return PathCursor(registry, access, target, operation, input, output, failure);
+    }
+
+    // Detach의 출력 상자·Attach의 입력 상자와 Attach의 출력 자리를 건다(리플렉션 B9i3c0).
+    static void BindBox(PathCursor& cursor, DetachedValue& box, PreparedAttach* attach) noexcept {
+        cursor.box_ = &box;
+        cursor.attach_ = attach;
     }
 
     static usize Length(const PathCursor& cursor) noexcept {

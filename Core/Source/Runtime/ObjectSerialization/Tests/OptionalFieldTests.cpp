@@ -43,7 +43,8 @@ TEST(OptionalField_FieldValueKindIsInnerAndPresentTracksSet) {
             const ObjectHandle handle = holder.Handle();
 
             const RuntimeFieldOps* count = FindOps(lease.Value(), HolderField("count"));
-            REQUIRE(count && count->read && count->write && count->writeStaged && !count->path);
+            // 단일 값 Optional도 경로 thunk를 싣는다(리플렉션 B9i3c0 — staged·Detach·Attach용).
+            REQUIRE(count && count->read && count->write && count->writeStaged && count->path);
             FieldValue read(values);
             REQUIRE(count->read(objects, access, handle, read));
             CHECK(read.kind == ValueKind::UInt32 && !read.present);

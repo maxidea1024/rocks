@@ -89,7 +89,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 | Sandbox | self-test가 D3D12 하드웨어·WARP·OpenGL을 대조(허용 오차 채널 ±8·2%, `Programs/Sandbox/Private/GraphicsSelfTest.cpp:409–415`, 대상 `:427–438`). `--graphics=` 인자는 없다 | Vulkan·GLES 미리보기 대조 → SH2 |
 | GraphicsTypes | RGBA8 2종, 2D, 필터 4종(`PixelFormat.h:12–16`, `Sampler.h:11–20`) | A0-G(다른 문서, 5.2절 요구) |
 | 수학 타입 | `Matrix4`·`Vector3`는 정렬 지정 없음(`Core/Source/Runtime/Core/Public/Core/Math/Matrix4.h:56–61`, `Vector3.h:19–24`) | 셰이더 전용 정렬 타입(7.2절 5항) → SH2 |
-| 플랫폼 | `Platform/Process.h`(P1 구현), `Platform/DirectoryWatch.h:88`(A0-P 구현). 동적 라이브러리 API 없음(PlatformLayer P1 표 "동적 모듈" 미구현). PlatformWindow는 Win32만이고 다른 플랫폼은 Unsupported(`PlatformWindow.Build.cs`) | P10, P12, P13 |
+| 플랫폼 | `Platform/Process.h`(P1 구현), `Platform/DirectoryWatch.h:88`(A0-P 구현). `Platform/DynamicLibrary.h`(P10 구현, Windows 검증, XInput이 이 API로 연다). PlatformWindow는 Win32만이고 다른 플랫폼은 Unsupported(`PlatformWindow.Build.cs`) | P10, P12, P13 |
 | Core | SHA-256(`Core/Encoding/Sha256.h:23,40`), JSON(`Core/Text/Json.h`), 결정적 수학 버전 `rocks::deterministic::Version`(`DeterministicMath/DeterministicMath.h:31`), 툴체인 지문·도구 빌드 ID(`Core/Build/BuildInfo.h:24,30`), Archive·Record·RecordList, `WorkerScheduler`, `CommandletRegistry` | 그대로 쓴다(5.2절) |
 | 리플렉션 | A0-B B1–B8 구현(`ROCKS_STRUCT`·identity·배열·지정자·World 타입, `e405c37`) | 셰이더 파라미터 종류 → P7 |
 | ThirdParty | 루트 `Core/Source/ThirdParty` 하나(`Programs/Rocks.Tooling.Common/ThirdPartyManifest.cs:76`), `kind`는 `code`·`data`(`:28`), `code`는 `.c` 번역 단위만(`:357–364`), 미리 빌드된 바이너리 필드 없음(`:132–136`, 모르는 필드는 오류 `:45`) | P3 |
@@ -98,7 +98,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 | 에셋 | A0-O·A0-G·A1–A6 미착수(AssetRuntime·AssetNugget 모듈 없음), `ProjectLayout`은 이름만(AssetSystem 1절 A2) | A1–A4 → P5·P6b |
 | 셰이더 원문·설정 | `Engine/Shaders`·`Engine/Config` 없음, 셰이더 파일 없음 | SH1·P6a·P14 |
 
-다른 설계 문서 상태: A0-P·A0-C·A0-B는 구현되었고 A0-O·A0-G·A1–A6은 착수 전이다. "화면 마일스톤"은 AssetSystem 12.2·12.4.1절에 이름만 있고 범위가 정의되어 있지 않다.
+다른 설계 문서 상태: A0-P·A0-C·A0-B는 구현되었고 A0-O·A0-G·A1–A6은 착수 전이다. "화면 마일스톤"의 범위는 2026-11-16 [렌더 기반](RenderBase.ko.md) 18.1절에 정의했다(셰이더 구현과 렌더 기반을 함께 세우는 단계, 결정 11 (나)).
 
 ## 5. 선행 작업
 
@@ -124,7 +124,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 | P7 | MetaCompiler 셰이더 파라미터 | 이 문서 | 설계 | SH3 | B1–B8 | 13절 |
 | P8 | 다른 문서 개정 | 이 문서 | 목록 | 모든 단계의 기준 | 결정별 기한(15절) | 14절 |
 | P9 | Vulkan 선행 | 이 문서·EngineRuntime | 설계 | SH2 | P3, P10 | 5.3 |
-| P10 | 동적 라이브러리 API | PlatformLayer | 미착수 | P4, P9, P13, SH0, SH2 | — | 5.3 |
+| P10 | 동적 라이브러리 API | PlatformLayer | **구현** | P4, P9, P13, SH0, SH2 | — | 5.3 |
 | P11 | OpenGL ES 선행(OpenGLGraphics를 UE `OpenGLDrv` 방식으로) | EngineRuntime·이 문서 | 설계 | P13, SH2, SH6 | A0-G | 5.3 |
 | P12 | macOS 실행 기반(Objective-C++ 빌드·Cocoa 창·Metal layer) | PlatformLayer·Rocks.Build | 미설계 | P15, SH5 | P3 | 5.3 |
 | P13 | Android 실행 기반(앱·창·EGL surface·수명·APK) | PlatformLayer | 미설계 | SH6 | P10, P11, AssetSystem APK 읽기(VFS) | 5.3 |
@@ -199,13 +199,14 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 - macOS는 Metal을 쓰므로 Vulkan(MoltenVK 등)은 범위 밖이다.
 - 완료 기준: Vulkan-Headers가 Rocks 경고 규칙으로 include되고, 로더 동적 로드와 검증 레이어 켜기가 Windows에서 시험되며, VulkanGraphics 설계 절이 확정된다.
 
-**P10 동적 라이브러리 API — 미착수(PlatformLayer P1 표의 "동적 모듈" 항목).**
-- 현재: 공개 로더가 없고 private 코드가 OS 함수를 직접 부른다(XInput, `Engine/Source/Runtime/PlatformWindow/Private/Win64/Win64Window.cpp:553`). 계획 §2.5의 "동적 loader를 Foundation 선행 조건으로 만들지 않는다"는 native plugin 모듈 이야기다. 이 API는 Foundation이 아니라 셰이더 워커와 VulkanGraphics의 선행 조건이고, 엔진 모듈을 동적으로 싣는 로더가 아니다.
+**P10 동적 라이브러리 API — 구현(2026-11-16, PlatformLayer P1 표의 "동적 모듈" 항목, 상세: PlatformLayer "동적 라이브러리" 절).**
+- 구현 전: 공개 로더가 없고 private 코드가 OS 함수를 직접 불렀다(XInput, `Win64Window.cpp`). 지금은 XInput도 `OpenSystem`으로 연다. 계획 §2.5의 "동적 loader를 Foundation 선행 조건으로 만들지 않는다"는 native plugin 모듈 이야기다. 이 API는 Foundation이 아니라 셰이더 워커와 VulkanGraphics의 선행 조건이고, 엔진 모듈을 동적으로 싣는 로더가 아니다.
 - 산출물 `Platform/DynamicLibrary.h`:
   - `Open(absolutePath)`: 절대 경로만 받는다. Windows `LoadLibraryExW`(`LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32`, 현재 디렉터리·PATH를 찾지 않고 같은 디렉터리의 의존 DLL은 찾는다), macOS·Android `dlopen(RTLD_NOW | RTLD_LOCAL)`.
   - `OpenSystem(name)`: OS가 공급하는 라이브러리만 이름으로 연다(Windows System32의 `vulkan-1.dll`·XInput, Android `libvulkan.so`).
   - `Find(symbol)`, 수명, 오류 변환(파일 없음 `NotFound`, 심볼 없음, 잘못된 경로 `InvalidArgument`). 수명은 PlatformLayer "동적 모듈" 검증 기준("참조 중 unload 거부")을 따른다: 얻은 심볼 표를 lease로 세고, lease가 남아 있으면 `Close`가 `Busy`로 거부한다.
 - 완료 기준: 파일 없음·심볼 없음 오류, 현재 디렉터리에 둔 같은 이름 DLL을 열지 않는 음성 대조, 같은 디렉터리 의존 DLL 해결, Windows Debug·Asan·macOS CI·Android 에뮬레이터 시험. XInput 직접 로드를 이 API로 옮긴다.
+- 달성(2026-11-16): Windows Debug·Asan에서 위 항목과 PATH 음성 대조·긴 경로를 확인했고 XInput을 옮겼다. 시험 DLL은 시험 지원 코드가 실행 중에 쓰는 데이터 전용 PE다(8절대로 Rocks.Build에 공유 라이브러리 종류를 더하지 않았다). Android 에뮬레이터는 OS 공급 라이브러리 시험만 돌고 의존·검색 시험은 SKIP, macOS는 CI 미확인이다. 두 플랫폼의 시험 라이브러리 생성기(Mach-O 코드 서명, ELF)는 후속이다.
 - 막는 것: SH0(워커 도구 로드), SH2(Vulkan 로더).
 
 **P11 OpenGL ES 선행 — 설계.** OpenGLGraphics를 UE `OpenGLDrv`처럼 Windows 미리보기와 Android ES를 함께 맡는 backend로 바꾸는 설계다.
@@ -269,7 +270,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 
 1. **지금**: 이 문서를 스펙으로만 둔다.
 2. **A0-G·A1·A2·A3·A4 착수 전**: 5.2절 셰이더 요구(G1–G3, A1 ErrorCode, A2 `ProjectLayout` 위치, N1–N3, K1–K3)를 AssetSystem에 반영한다(P8의 AssetSystem 부분). A0-O에 넣을 셰이더 요구는 없으므로 가장 가까운 기한은 A0-G 착수 전이다. 반영하지 않고 그 단계를 구현하면 셰이더 착수 때 그 단계를 다시 고쳐야 한다.
-3. **셰이더 구현 착수**: A6 뒤다. 의존만 보면 A4 뒤면 되지만(P5가 A2·A3을, P6b가 A1·A4를 요구한다) 고정 순서가 A1–A6을 한 묶음으로 두기 때문이다. 화면 마일스톤 앞인지 뒤인지는 15절 결정 11이다.
+3. **셰이더 구현 착수**: A6 뒤다. 의존만 보면 A4 뒤면 되지만(P5가 A2·A3을, P6b가 A1·A4를 요구한다) 고정 순서가 A1–A6을 한 묶음으로 두기 때문이다. 결정 11(2026-11-16, (나))에 따라 셰이더 구현은 화면 마일스톤 안에서 렌더 기반보다 먼저 한다([렌더 기반](RenderBase.ko.md) 18.1절).
 4. **셰이더 구현 안의 순서**: P2·P8(문서, 15절 결정별 기한) → P10 → P3 → P4 → SH0 → P6a → P5 → SH1 → P14 → P9·P11 → P6b → SH2 → P7 → SH3 → SH4 → P12·P15 → SH5 → P13 → SH6.
 
 ## 7. P2 바인딩 규약
@@ -409,7 +410,7 @@ Rocks도 같은 구조로 한다. 그래서 Rocks.Build에 공유 라이브러�
    - 바꿀 코드: 위 상수와 그것을 쓰는 다섯 곳, `.c` 위치 검사(`PolicyChecks.ThirdParty.cs:457–459`), lexical 제외(`PolicyChecks.cs:371,383`), SDK 라이선스 복사(`ThirdPartyManifest.cs:227`), 도구 시험, `.gitattributes:9–11`·`.editorconfig:38–47`(원본 byte 보존 규칙).
    - 문서 개정은 14절에 있다.
 2. **미리 빌드된 바이너리(`kind: "binary"`).** 엔진 빌드가 컴파일하지 않고 워커가 실행 중에 여는 도구다(9절). manifest 항목:
-   - `version`, 라이선스(`spdx`·고지 파일), 출처. 출처는 Rocks 도구 빌드가 게시한 archive의 URL·`sha256`과 그 빌드의 원본 태그·patch 목록이다. 설치된 SDK에서 가져오는 도구는 그 SDK의 경로 규칙을 적는다.
+   - `version`, 라이선스(`spdx`·고지 파일), 출처. 출처는 Rocks 도구 빌드가 게시한 archive의 URL·`sha256`과 그 빌드의 원본 태그·patch 목록이다. 게시 위치는 저장소의 GitHub Releases다(2026-11-16 사용자 결정). 수동 실행 도구 빌드 workflow(4항)가 Release에 올리고, 비공개 저장소이면 bootstrap이 `gh` 인증으로 받는다. 설치된 SDK에서 가져오는 도구는 그 SDK의 경로 규칙을 적는다.
    - 호스트별 파일 목록 `hosts.<플랫폼>-<아키텍처>[] = {path, sha256, size, role}`.
      - 호스트 키는 `windows-x64`·`macos-arm64`처럼 아키텍처를 포함한다(계획 §2.5: x64·ARM64 산출물을 섞지 않는다).
      - 지원 개발 호스트는 Windows·macOS뿐이다(`Programs/Rocks.Build/Toolchain.cs:21–25`).
@@ -626,7 +627,7 @@ Rocks 규칙:
 | 〃 | 9절(:267–292) | 에셋 중심 키(TypeId·입력 bulk·의존 목록, SCC 식) | N1–N3(5.2절) |
 | 〃 | 10절 TargetProfile(:296)·cookKey(:299)·매니페스트(:307)·결정성(:311) | 그래픽 backend 단일 항목, 기본 프로필 Windows·Android, 매니페스트 v1 | K1–K3(5.2절), 12절 `graphicsBackends`·`shaderFormats`·`MacOS` 프로필. 결정성 규칙은 그대로 셰이더에 적용한다(10절) |
 | ReflectionFoundations | 3절 값 종류, 4절 struct | — | 셰이더 파라미터 종류가 `ROCKS_STRUCT` 경로를 쓰고 셰이더 자원 값 종류를 더한다(13절, 결정 4를 고를 때) |
-| PlatformLayer | P1 표 "동적 모듈", 모바일 절 | 동적 모듈 미구현, Android는 시험 실행만 | P10 `DynamicLibrary` 절, P13 Android 실행 기반, P12 macOS 창(PlatformWindow) |
+| PlatformLayer | P1 표 "동적 모듈", 모바일 절 | 동적 모듈 구현(P10, "동적 라이브러리" 절), Android는 시험 실행만 | P13 Android 실행 기반, P12 macOS 창(PlatformWindow) |
 | RepositoryLayout | 트리(:14·:29)·:52–56 | Engine에 Shaders·Config 없음, ThirdParty는 Core만 원본(:14 목록도 낡음) | 3절 구조와 8절 루트·`binary`·`headers` 종류 |
 | CompilerDiagnostics | :9·:25·:29·:36 | 생성 파일도 경고 검사, 외부 원본도 같은 경고 프로필로 컴파일, Core 루트만, "이 절 밖의 경고 억제 예외는 없다" | 15절 결정 7의 답에 따라: 두 루트, Rocks가 컴파일하지 않는 미리 빌드된 바이너리(오프라인 도구 빌드 포함) 승인 절과 그 공개 헤더의 경고 0 조건, 셰이더 경고 절(작성자 원문과 SPIRV-Cross가 다시 쓴 중간 원문 모두 경고를 오류로) |
 | Compression | 3.1·3.3·3.5 | Core 루트, `.c` 번역 단위만 | Engine 루트와 `kind: binary`·`headers` 언급(규칙 자체는 그대로) |
@@ -644,13 +645,13 @@ Rocks 규칙:
 4. **파라미터 선언** — MetaCompiler 셰이더 파라미터 종류(권장, 13절, 리플렉션 단일 출처·생성 HLSL을 디스크에 둠) 또는 UE 매크로 방식(`SHADER_PARAMETER_*`, `Runtime/RenderCore/Public/ShaderParameterMacros.h`).
 5. **형식별 생산 호스트** — 키가 호스트별이므로(10절) DXIL·SPIR-V·ESSL은 각 호스트가 직접 만든다. 한 호스트만 만들 수 있는 형식: DXBC는 Windows. metallib은 macOS(Xcode Metal 도구)를 기준으로 하고, Windows에도 Apple Metal Developer Tools(UE 5.8이 지원, 기대 버전 5.3, `MetalShaderFormat.cpp:724–725,1030–1137`)가 있으면 만들게 할지 정한다(권장: 허용, 형식 정의의 생산 호스트 규칙, 측정 S9). 만들 수 없는 호스트에서는 `UnsupportedCapability`이고, 원격 워커가 생기면 그쪽으로 보낸다.
 6. **전처리기** — Rocks 자체 구현을 `Developer/ShaderCompiler`에 둔다(권장, UE처럼 메인 프로세스에서 실행. UE 전처리기 stb_preprocess는 Epic 저작권 원본이라 가져올 수 없다, `Developer/ShaderPreprocessor/Private/stb_preprocess/preprocessor.h:1`) 또는 라이선스를 확인한 외부 C 전처리기를 P3 C 원본 규칙으로 들인다. DXC `-P`는 메인 프로세스가 DXC를 열게 되어(9절 규칙 위반) 쓰지 않는다. 자체 구현의 정합성은 측정 S7로 확인한다.
-7. **경고 정책** — 확인 필요. CompilerDiagnostics는 "외부 원본도 엔진과 같은 경고 프로필로 컴파일한다"(:25), "생성 파일이라는 이유로 경고 검사를 생략하지 않는다"(:9), "이 절 밖의 경고 억제 예외는 없다"(:36)고 한다.
+7. **경고 정책** — **결정됨(2026-11-16): 아래 (1)·(2)의 권장안.** CompilerDiagnostics에 "Rocks 빌드가 컴파일하지 않는 미리 빌드한 바이너리" 승인 절을 더하고(P3 구현 때 14절 CompilerDiagnostics 행대로 개정), 셰이더 컴파일 경고는 작성자 원문과 SPIRV-Cross가 다시 쓴 중간 원문 모두 오류로 한다. 결정 전 기록: CompilerDiagnostics는 "외부 원본도 엔진과 같은 경고 프로필로 컴파일한다"(:25), "생성 파일이라는 이유로 경고 검사를 생략하지 않는다"(:9), "이 절 밖의 경고 억제 예외는 없다"(:36)고 한다.
    - (1) 오프라인 도구 빌드: 결정 8(UE 방식)로 DXC·SPIRV-Cross·SPIRV-Tools는 업스트림 빌드 설정(예외·RTTI 사용, 업스트림 경고 설정)으로 엔진 빌드 밖에서 컴파일한다. DXC(LLVM)는 예외 없이·Rocks 경고 프로필로 빌드할 수 없다. 권장: CompilerDiagnostics에 "Rocks 빌드가 컴파일하지 않는 미리 빌드된 바이너리" 승인 절을 더한다(조건: 원본 태그·patch·빌드 스크립트 고정, Rocks가 include하는 공개 헤더는 경고 0, 엔진 컴파일 인자에 억제를 더하지 않음).
    - (2) 셰이더 컴파일 경고: 권장은 공통 규칙대로 작성자 원문과 SPIRV-Cross가 다시 쓴 중간 HLSL 모두 경고를 오류로 하는 것이다. 중간 원문 경고는 SPIRV-Cross 옵션이나 추적 가능한 patch(8절 4항)로 없앤다. UE는 작성자 원문에만 `-WX`를 걸고(`Developer/ShaderCompilerCommon/Private/ShaderConductorContext.cpp:425–429`), SPIRV-Cross 출력을 FXC로 컴파일할 때는 경고를 오류로 하지 않는다(`D3DShaderCompiler.cpp:959–961`).
 8. **도구 공급 방식** — **결정됨(2026-11-13): UE 방식.** DXC·SPIRV-Cross·SPIRV-Tools를 엔진 빌드 밖 스크립트로 직접 빌드해 바이너리로 배포하고, 엔진은 받은 바이너리를 쓰기만 한다(8절 4항). 조사 근거: upstream DXC는 macOS 빌드를 공식 CI로 돌리고(업스트림 `azure-pipelines.yml`), SPIRV-Cross는 C API 공유 라이브러리를 CMake 옵션으로 만든다. 고려했던 대안은 LunarG Vulkan SDK 바이너리였다(SPIRV-Cross C API 공유 라이브러리 포함 여부 미확인, 설치기라 다시 묶어야 함, 패치 불가).
 9. **SH2 범위** — **결정됨(2026-11-13), 2026-11-14 개정.** Graphics API를 컴파일된 코드로 바꾸는 변경이 D3D12·Vulkan self-test를 함께 통과할 때 들어간다. 처음 결정은 같은 변경에서 OpenGL을 지우는 것이었으나, 2026-11-14 OpenGL ES 필수·UE 방식 결정에 따라 OpenGLGraphics는 지우지 않고 같은 변경에서 GLES 미리보기 형식을 받게 바꾼다(UE `OpenGLDrv`가 Windows 미리보기와 Android를 함께 맡는 것과 같다). self-test는 D3D12·Vulkan·GLES 미리보기를 대조한다.
 10. **셰이더 키의 툴체인 지문** — **결정됨(2026-11-13): 공통 규칙 준수.** 셰이더 job 키에도 AssetSystem 9절 공통 항목(툴체인 지문·결정적 수학 버전·대상 프로파일 id와 출력 설정 전체 포함)을 그대로 넣는다(10절). UE 5.8은 셰이더 job 키에 엔진을 빌드한 컴파일러·호스트를 넣지 않지만(`ShaderCore.cpp:4612–4671`), Rocks는 공통 규칙을 우선한다. 비용은 호스트 사이 셰이더 너겟 비공유와, 프로파일 출력 설정이 바뀔 때의 재컴파일이다.
-11. **셰이더 구현 착수 위치** — 고정 순서(A0-B → A0-O → A0-G → A1–A6 → 화면 마일스톤) 안에서 셰이더 구현(6절 4항)을 어디에 둘지다. 셰이더는 A1–A4가 필요하고 고정 순서가 A1–A6을 한 묶음으로 두므로 A6 뒤다.
+11. **셰이더 구현 착수 위치** — **결정됨(2026-11-16): (나).** 사용자 결정 "쿠킹 셰이더 위에서(정공법)", "원래 목표는 미니멀하게 테스트하고자 했던건데 이제 의미없음. 렌더코어 제대로 구현하는게 나음". 화면 마일스톤은 셰이더 구현(SH0–SH3)과 렌더 기반을 함께 세우는 단계이며, 범위는 [렌더 기반](RenderBase.ko.md) 18.1절이다. 아래는 결정 전 선택지 기록이다. 고정 순서(A0-B → A0-O → A0-G → A1–A6 → 화면 마일스톤) 안에서 셰이더 구현(6절 4항)을 어디에 둘지다. 셰이더는 A1–A4가 필요하고 고정 순서가 A1–A6을 한 묶음으로 두므로 A6 뒤다.
     - (가) 화면 마일스톤 뒤(권장): 고정 순서를 그대로 둔다. 화면 마일스톤은 지금의 backend별 원문 경로로 그리고, SH2가 Renderer 내장 셰이더와 Graphics 파이프라인 생성을 바꾼다. 화면 마일스톤의 범위는 아직 정의되어 있지 않으므로(4절) 이 권장은 화면 마일스톤이 내장 셰이더 몇 개로 그리고 material(셰이더 그래프)을 들이지 않는다는 조건에서다. (가)를 고르면 5.2절 G2(ES 공통 API) 규칙을 화면 마일스톤의 OpenGL 작업까지 넓히고, 화면 마일스톤의 새 셰이더도 7.2절 규칙(짝 규칙·허용 타입·`ATTRIBUTEn`)대로 쓴다.
     - (나) 화면 마일스톤 본체 앞: 화면 마일스톤을 처음부터 쿠킹된 셰이더와 최종 바인딩 규약 위에 쌓는다. 화면 마일스톤이 P2·P3·P4·P5·P6a·P6b·P9–P11·P14·SH0–SH2만큼 늦어진다. 화면 마일스톤이 material이나 많은 셰이더를 들인다면 이쪽이 낫다.
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Object/AssetId.h>
+#include <Object/DetachedPath.h>
 #include <Object/PathKey.h>
 #include <Object/PropertyPath.h>
 
@@ -28,7 +29,11 @@ enum class PathOperation : uint8 {
     // 지우기.
     Contains,
     InsertKey,
-    EraseKey
+    EraseKey,
+    // 필드·멤버 값 하나를 상자로 깊게 복사하기(PathDetach)와 상자와 맞바꿀 자리 찾기
+    // (PathPrepareAttach)다(리플렉션 B9i3c0).
+    Detach,
+    Attach
 };
 
 // 해석한 경로 단계 하나다: 필드(스키마 안 위치), 바깥 필드에서 누적한 유효 플래그, 대상
@@ -91,6 +96,49 @@ public:
     ObjectHandle OwnerHandle() const noexcept {
         return owner_;
     }
+
+    // 시작 위치가 게시된 객체인지다(Registry 컨테이너 변경·live 참조 쓰기는 이때만 된다).
+    bool IsLive() const noexcept {
+        return root_ == PathTarget::Kind::Object;
+    }
+
+    // 쓰기 검증이 ReadOnly를 보지 않는 시작 위치인지다: staged 객체와 staged 객체에서 분리한 상자다
+    // (리플렉션 B9i3c1 — Docs/Design/ReflectionExtensions.ko.md 10.2절).
+    bool AcceptsReadOnlyWrites() const noexcept;
+
+    // 시작 위치가 분리된 값(struct 값·상자)인지다(강한 참조 쓰기가 없다).
+    bool IsDetached() const noexcept {
+        return root_ == PathTarget::Kind::Struct || root_ == PathTarget::Kind::Detached;
+    }
+
+    // staged 시작 위치의 트랜잭션이다(아니면 nullptr).
+    ConstructionContext* Construction() const noexcept {
+        return construction_;
+    }
+
+    // 빈 자리(unset Optional 등)에 새로 만드는 값의 allocator다: 객체(게시·staged)면
+    // ObjectRegistry::ObjectAllocator, 분리된 값이면 그 값의 allocator다.
+    Allocator& ValueAllocator() const noexcept;
+
+    // 게시된 객체에서만 되는 끝 지점(Registry 컨테이너의 변경)이 부른다: 아니면
+    // Unsupported(NoPathAccess)를 기록한다.
+    Result<void> RequireLive() noexcept;
+
+    // 지금 연산이 대상을 바꾸지 않는 읽기(Read·Length·QueryOptional·Contains)인지다.
+    bool IsReading() const noexcept {
+        return operation_ == PathOperation::Read || operation_ == PathOperation::Length ||
+               operation_ == PathOperation::QueryOptional || operation_ == PathOperation::Contains;
+    }
+
+    // Detach 끝 지점이다: value(ops 형식의 지금 값)를 출력 상자에 깊게 복사하고 상자를
+    // 채운다(enter는 상자에서 경로를 시작하는 생성 함수). 게시된 객체면 고정 아래 복사하고 owner를
+    // 다시 확인한다. copy·swap이 없으면 Unsupported(NotCopyable)다.
+    Result<void> DetachValue(const RuntimeValueOps& ops, const void* value,
+                             DetachedPathFunction enter) noexcept;
+
+    // Attach 끝 지점이다: 상자 값의 형식이 ops와 같은지 대조하고(TypeMismatch(StaticTypeMismatch))
+    // value 자리를 출력 PreparedAttach에 둔다(값은 바꾸지 않는다).
+    Result<void> AttachValue(const RuntimeValueOps& ops, void* value) noexcept;
 
     // Write·Insert의 입력 값이다(Insert의 struct 원소는 nullptr). 검증을 마친 값이다.
     const FieldValue* Input() const noexcept {
@@ -243,15 +291,27 @@ public:
 private:
     friend struct PathRunner;
 
-    PathCursor(ObjectRegistry& registry, const ObjectAccessContext& access, ObjectHandle owner,
-               PathOperation operation, const FieldValue* input, FieldValue* output,
-               PropertyPathFailure* failure) noexcept;
+    PathCursor(ObjectRegistry& registry, const ObjectAccessContext& access,
+               const PathTarget& target, PathOperation operation, const FieldValue* input,
+               FieldValue* output, PropertyPathFailure* failure) noexcept;
 
     void Record(ErrorCode code, PropertyPathError reason) noexcept;
 
     ObjectRegistry& registry_;
     const ObjectAccessContext& access_;
     ObjectHandle owner_;
+    // 시작 위치(PathTarget — 리플렉션 B9i3c0): staged 트랜잭션, struct 값의 lease·view·저장소·
+    // allocator, 상자.
+    PathTarget::Kind root_;
+    ConstructionContext* construction_;
+    const TypeLease* rootLease_;
+    StructView rootView_;
+    void* rootValue_;
+    Allocator* rootAllocator_;
+    DetachedValue* rootBox_;
+    // Detach의 출력 상자·Attach의 입력 상자와 Attach의 출력 자리다.
+    DetachedValue* box_ = nullptr;
+    PreparedAttach* attach_ = nullptr;
     PathOperation operation_;
     const FieldValue* input_;
     FieldValue* output_;

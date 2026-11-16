@@ -241,7 +241,7 @@ RuntimeStructOps MakeStructOps(Span<const RuntimeStructFieldOps> fields) noexcep
     return ops;
 }
 
-// 단일 값 클래스 필드의 함수표다(생성 코드와 같은 모양 — read·write·writeStaged·codec, path 없음).
+// 단일 값 클래스 필드의 함수표다(read·write·writeStaged·codec — 생성 코드와 달리 path는 없다).
 template <auto Member>
 RuntimeFieldOps ValueField(Guid id) noexcept {
     using O = typename detail::StructMemberPointer<decltype(Member)>::Owner;
@@ -1682,19 +1682,8 @@ TEST(PropertyPath_RegistryIndexesAndPathRegistrationRule) {
         CHECK(leaf.Value().FieldIndex(TextId) == 10);
         lease.Value().Reset();
         leaf.Value().Reset();
-
-        // 클래스 단일 값 필드의 path는 null이어야 한다(InvalidArgument).
-        TypeSchema schema = GeneratedType<Node>::Schema();
-        schema.id = TypeId{0x50544e, 9};
-        RuntimeTypeOps bad = GeneratedType<Node>::Ops();
-        RuntimeFieldOps fields[17];
-        for (usize index = 0; index < 17; ++index) {
-            fields[index] = bad.fields[index];
-        }
-
-        fields[0].path = fields[3].path;
-        bad.fields = Span<const RuntimeFieldOps>(fields, 17);
-        CHECK(world.types.Register(schema, Move(bad)).Error() == ErrorCode::InvalidArgument);
+        // 클래스 단일 값 필드의 path는 이제 등록이 받는다(리플렉션 B9i3c0 — staged·Detach·Attach용,
+        // 생성 코드의 모양은 ObjectSerialization GeneratedPathTests가 본다).
     }
 
     CHECK(allocator.Stats().liveAllocations == 0);

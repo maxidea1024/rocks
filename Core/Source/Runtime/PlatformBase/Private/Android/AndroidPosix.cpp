@@ -138,4 +138,10 @@ void PosixSetCurrentThreadPriority(ThreadPriority priority) noexcept {
     static_cast<void>(setpriority(PRIO_PROCESS, static_cast<id_t>(gettid()), nice));
 }
 
+// Android 공개 NDK 라이브러리(libvulkan.so 등)는 링커 namespace가 이름으로 찾아야 한다. 앱
+// namespace는 /system 절대 경로 열기를 막을 수 있으므로(Android 7 이후) 이름 그대로 넘긴다.
+const char* PosixSystemLibraryDirectory() noexcept {
+    return "";
+}
+
 } // namespace rocks::platform::detail

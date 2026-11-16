@@ -39,4 +39,8 @@ void PosixSetCurrentThreadPriority(ThreadPriority priority) noexcept;
 // decommit한 페이지를 OS에 돌려주는 madvise 값이다(Apple MADV_FREE, Linux 계열 MADV_DONTNEED).
 int PosixDecommitAdvice() noexcept;
 
+// OpenSystem이 이름 앞에 붙일 시스템 라이브러리 디렉터리다(끝 '/' 포함). 빈 문자열이면 이름 그대로
+// dlopen에 넘겨 링커의 시스템 검색 경로에서 찾는다(Apple "/usr/lib/", Android "").
+const char* PosixSystemLibraryDirectory() noexcept;
+
 } // namespace rocks::platform::detail

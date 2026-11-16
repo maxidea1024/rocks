@@ -15,5 +15,6 @@
 | Localization | Core | 지역화 Text·catalog |
 | ObjectRuntime | MetaSchema, Task | Object·Registry·GC·Reflection |
 | ObjectSerialization | ObjectRuntime, Serialization | 객체 그래프 직렬화 |
+| ReflectionText | ObjectRuntime, Core | 리플렉션 값의 명령행·JSON 표기와 대입 묶음 |
 
 `Source/Developer/TestSupport/`는 테스트 지원 코드다. 테스트 실행 파일은 `Programs/FoundationTests`다.

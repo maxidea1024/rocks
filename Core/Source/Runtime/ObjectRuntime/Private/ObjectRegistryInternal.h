@@ -65,6 +65,9 @@ struct ObjectRegistry::Slot {
     uint32 backendHolds = 0;
     // encode 고정 계수(PinForEncode). 0이 아니면 컨테이너·참조 변경이 Busy이고 회수하지 않는다.
     uint32 encodePins = 0;
+    // 변경 표지(ObjectRegistry::MutationStamp — 쓰기 Borrow·live 참조·컨테이너 변경·묶음 게시마다
+    // 오른다). 슬롯을 다시 써도 되돌리지 않는다.
+    uint64 mutations = 0;
     uint64 transaction = 0;
     uint64 mark = 0;
     // Outer·이름(생성 때 고정 — Docs/Design/ObjectFoundations.ko.md 1.4절). 고리는 슬롯 번호가

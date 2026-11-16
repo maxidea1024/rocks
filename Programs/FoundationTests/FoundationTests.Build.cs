@@ -19,7 +19,7 @@ public abstract class TestsModule : ModuleRules
     private static readonly string[] DeveloperTestModules = ["CompressionTraining"];
 
     // Object 계열 모듈의 테스트다(FoundationTests·EngineTests에 들어간다).
-    private static readonly string[] ObjectTestModules = ["ObjectRuntime", "ObjectSerialization"];
+    private static readonly string[] ObjectTestModules = ["ObjectRuntime", "ObjectSerialization", "ReflectionText"];
 
     // 엔진 계층 모듈의 테스트다(EngineTests에만 들어간다). 경로는 Engine/Source 아래 Group/Module이다.
     private static readonly string[] EngineTestModules = ["Runtime/Input", "Runtime/PlatformWindow", "Runtime/World", "Runtime/Engine", "Runtime/AssetRuntime", "Developer/AssetTools"];
@@ -57,8 +57,8 @@ public abstract class TestsModule : ModuleRules
         string[] dependencies = Layer switch
         {
             TestLayer.Core => ["Task", "Localization", "Serialization", "Compression", "Crypto", .. DeveloperTestModules],
-            TestLayer.Foundation => ["ObjectSerialization", "Localization", "Compression", "Crypto", .. DeveloperTestModules],
-            _ => ["ObjectSerialization", "Localization", "Compression", "Crypto", .. DeveloperTestModules,
+            TestLayer.Foundation => ["ObjectSerialization", "ReflectionText", "Localization", "Compression", "Crypto", .. DeveloperTestModules],
+            _ => ["ObjectSerialization", "ReflectionText", "Localization", "Compression", "Crypto", .. DeveloperTestModules,
                 .. EngineTestDependencies]
         };
 

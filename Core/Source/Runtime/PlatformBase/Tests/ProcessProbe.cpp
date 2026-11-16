@@ -1,8 +1,10 @@
 #include <Base/Compiler.h>
+#include <Platform/DynamicLibrary.h>
 #include <Platform/Memory.h>
 #include <Platform/Path.h>
 #include <Platform/Process.h>
 #include <Platform/Thread.h>
+#include <TestSupport/DynamicLibraryFixture.h>
 #include <TestSupport/ProcessProbe.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -149,6 +151,36 @@ int Priority() noexcept {
     return WriteText(1, text) ? 0 : 83;
 }
 
+// DynamicLibrary 음성 시험의 자식 쪽이다(DynamicLibraryTests.cpp). 부모가 작업 디렉터리를 의존
+// DLL이 있는 디렉터리로 두고 띄운다. 마지막 인자(dir)가 있으면 PATH 맨 앞에도 더한다. how가
+// "rocks"면 DynamicLibrary::Open, "default"면 OS 기본 검색(대조군)으로 연다. 열리면 0, NotFound면
+// 10, 그 밖의 실패는 11, 준비 실패는 12다. 경로는 UTF-8로 다시 읽는다(Windows main argv는 ANSI다).
+int OpenDynamicLibrary(int argc, char** argv) noexcept {
+    static char storage[16 * 1024];
+    const char* arguments[8];
+    const usize count = ReadUtf8Arguments(argc, argv, storage, sizeof(storage), arguments, 8);
+    if (count != 5 && count != 6) {
+        return 12;
+    }
+
+    if (count == 6 && !PrependSearchPath(arguments[5])) {
+        return 12;
+    }
+
+    const char* path = arguments[4];
+    if (Equal(arguments[3], "default")) {
+        return LoadWithDefaultSearch(path) ? 0 : 11;
+    }
+
+    DynamicLibrary library;
+    const FileStatus opened = library.Open(path);
+    if (opened) {
+        return library.Close() ? 0 : 11;
+    }
+
+    return opened.code == FileCode::NotFound ? 10 : 11;
+}
+
 } // namespace
 
 // probe 모드:
@@ -170,6 +202,8 @@ int Priority() noexcept {
 //   signal-self                 자신에게 SIGTERM을 보낸다(신호가 없는 플랫폼은 77).
 //   crash                       중단점으로 끝난다(처리되지 않은 예외·SIGTRAP).
 //   parent-alive <pid>          IsProcessRunning(pid)이면 0, 아니면 1이다.
+//   dynamic-library <how> <path> [dir]
+//                               DynamicLibrary 음성 시험(OpenDynamicLibrary 주석).
 int RunProcessProbe(int argc, char** argv) noexcept {
     if (argc < 3) {
         return 90;
@@ -251,6 +285,10 @@ int RunProcessProbe(int argc, char** argv) noexcept {
 
     if (Equal(mode, "parent-alive") && argc == 4) {
         return IsProcessRunning(static_cast<uint32>(strtoul(argv[3], nullptr, 10))) ? 0 : 1;
+    }
+
+    if (Equal(mode, "dynamic-library") && (argc == 5 || argc == 6)) {
+        return OpenDynamicLibrary(argc, argv);
     }
 
     return 99;

@@ -15,6 +15,11 @@
 
 namespace rocks {
 
+class ObjectBatchPublish;
+class PreparedReferenceArray;
+struct BatchTargetCheck;
+struct BatchEdgeChange;
+
 namespace detail {
 class PathCursor;
 // 시험 전용 내부 계수 통로다(정의는 ObjectRuntime/Private/ObjectRegistryAccess.h).
@@ -61,6 +66,12 @@ public:
 
     // RegistryOptions::names(없으면 nullptr)다. 생성 뒤 바뀌지 않아 어느 스레드에서나 읽는다(pool의
     // 스레드 규칙은 NamePool). Name 쓰기 검사·저장 encode·복원 2a intern이 쓴다.
+    // 이 Registry가 쓰는 타입 Registry다(생성자 인자 — 텍스트 codec 같은 도구 계층이 대상
+    // Registry에서 얻는다).
+    TypeRegistry& Types() const noexcept {
+        return types_;
+    }
+
     NamePool* Names() const noexcept {
         return options_.names;
     }
@@ -465,6 +476,47 @@ public:
     //   }
     Result<EncodePin> PinForEncode(const ObjectAccessContext& access, ObjectHandle owner) noexcept;
 
+    // ---- 묶음 게시(리플렉션 B9i2 — Docs/Design/ReflectionExtensions.ko.md 10.2절) ----
+
+    // owner의 변경 표지다. 그 객체를 바꿀 수 있는 지점마다 오른다: 쓰기용 Borrow(ResolveForWrite —
+    // 리플렉션 필드 쓰기·경로 쓰기), live 참조 쓰기(SetReference·SetElementReference)와 live
+    // 컨테이너 변경 시도(ObjectRefArray·ObjectRefMap·StructRefArray — owner 검사를 통과한 시도마다,
+    // 뒤 단계가 실패해도 오를 수 있다), 게시한 묶음(ObjectBatchPublish::End). 같은 값이면 그 사이
+    // owner가 Registry API로 바뀌지 않았다(값이 다르다고 꼭 바뀐 것은 아니다 — 보수적). 읽기 Borrow
+    // (Resolve)·RootRef·조회는 올리지 않는다. 값 필드를 C++로 직접 쓰는 것은 잡지 못한다(호출자
+    // 책임).
+    //
+    // 오류: 접근(WrongThread·WrongContext), 종료 뒤 ShuttingDown, 재진입·묶음 구간 중 Busy, owner가
+    // 생존(Alive)이 아니면 CheckLive 규칙(StaleHandle·Destroyed).
+    //
+    // 사용 예(대입 묶음 Prepare가 읽어 두고 Publish가 BeginBatchPublish에 넘긴다):
+    //   auto stamp = registry.MutationStamp(access, owner);
+    //   if (!stamp) { return Result<void>::Failure(stamp.Error()); }
+    Result<uint64> MutationStamp(const ObjectAccessContext& access,
+                                 ObjectHandle owner) const noexcept;
+
+    // owner의 묶음 게시 구간에 들어간다(ObjectBatchPublish.h). 그 뒤의 게시는 할당·실패가 없으므로
+    // 실패할 수 있는 검사를 모두 여기서 한다. 순서와 오류(실패하면 아무것도 바뀌지 않는다):
+    //   1. 접근(WrongThread·WrongContext) → 종료(ShuttingDown) → 재진입·다른 구간(Busy).
+    //   2. owner: 생존(Alive, cutoff 아님)이 아니면 StaleHandle(Discard·파괴 요청 포함), 호출자가
+    //      owner의 Borrow를 쥐지 않았으면 InvalidArgument, encode 고정 중이면 Busy, 변경 표지가
+    //      expectedStamp와 다르면 Busy.
+    //   3. edges의 removed(non-null)가 회수 전 객체(Alive·DestroyRequested)가 아니면
+    //   InvalidArgument.
+    //   4. targets(null이면 InvalidArgument)와 edges의 non-null added: 같은 Registry의 생존(Alive,
+    //      cutoff 아님 — Discard·회수·다른 Registry는 StaleHandle)이고 기대 타입의
+    //      파생(TypeMismatch).
+    //   5. 처리 표시(processing_)를 세운다. 관찰자 Registry이고 owner가 기록 대상이면(Alive·Outer
+    //      있음) edges의 패키지 쌍을 Registry allocator로 합친 뒤(잠금 밖 — OutOfMemory) 모자란 새
+    //      키 공간을 관찰자에 예약하고(OutOfMemory·키 상한 CapacityExceeded·예약 콜백 재진입 Busy)
+    //      다시 잠가 공간을 확인한다(모자라면 Busy).
+    // 구간은 반환값이 닫는다(End·소멸). 열린 동안 이 Registry의 다른 변경·Borrow·RootRef 복제·
+    // GC 단계·Discard는 Busy이고 콜백이 없다. owner Borrow는 구간을 닫은 뒤 놓는다.
+    Result<ObjectBatchPublish> BeginBatchPublish(const ObjectAccessContext& access,
+                                                 ObjectHandle owner, uint64 expectedStamp,
+                                                 Span<const BatchTargetCheck> targets,
+                                                 Span<const BatchEdgeChange> edges) noexcept;
+
     // 논리적 접근을 즉시 닫는다. 기존 루트/간선은 GC에서 추적되어 보관된 자식도 보존한다.
     // 저장소 파괴는 도달성 및 모든 보유 계수 해소 뒤 Collect/DrainRetired에서 수행한다. 이름은
     // 회수 전까지 남는다(이름을 바로 비우려면 Discard). 패키지 정책 Registry에서는 접근 검사 다음에
@@ -571,6 +623,7 @@ private:
     friend Result<void> detail::SetPathMemberReference(detail::PathCursor&, ObjectRef<T>&,
                                                        ObjectHandle) noexcept;
     friend struct detail::ObjectRegistryAccess;
+    friend class ObjectBatchPublish;
 
     struct Slot;
     struct Chunk;
@@ -829,6 +882,36 @@ private:
     // 처리 표시를 내리고 result를 돌려준다.
     Result<void> EndProcessing(Result<void> result) noexcept;
 
+    // ---- 묶음 게시 구간 안(Private/ObjectRegistryBatch.cpp — 계약 위반은 Fatal) ----
+    template <class T>
+    void PublishBatchReference(ObjectRef<T>& field, ObjectHandle target) noexcept;
+    template <class S, class T>
+    void PublishBatchElementReference(StructRefArray<S>& array, usize index, ObjectRef<T>& field,
+                                      ObjectHandle target) noexcept;
+    template <class T>
+    void PublishBatchReferences(ObjectRefArray<T>& array,
+                                PreparedReferenceArray& prepared) noexcept;
+    template <class K, class T>
+    void PublishBatchMap(ObjectRefMap<K, T>& map, OrderedMap<K, ObjectHandle>& prepared) noexcept;
+    // 단일 참조 위치(element가 있으면 StructRefArray 원소 블록 안, 없으면 owner 저장소 안).
+    void PublishBatchEdge(ObjectHandle& field, ObjectHandle target, const void* nativeType,
+                          const detail::StructElementLocation* element) noexcept;
+    void PublishBatchArray(detail::ObjectRefArrayStorage& storage,
+                           detail::ObjectRefArrayStorage& prepared,
+                           const void* nativeType) noexcept;
+    // 값 부분 트리 자리 하나의 위치를 확인하고 게시를 기록한다(리플렉션 B9i3c0 — 교환은
+    // PreparedAttach가 한다).
+    void PublishBatchValue(void* location, usize bytes,
+                           const detail::StructElementLocation* element) noexcept;
+    // 열린 구간과 컨테이너 위치(owner 저장소 안)를 확인한다.
+    void CheckBatchContainer(const void* storage, usize bytes) const noexcept;
+    // 게시로 빠지는 옛 대상을 검사합에 넣는다.
+    void NoteBatchRemoved(ObjectHandle removed) noexcept;
+    // 새 값 하나를 정규화(null)·재확인·shade하고 검사합에 넣는다.
+    void PublishBatchTarget(ObjectHandle& value, const void* nativeType) noexcept;
+    // 관찰자 기록·표지 증가 뒤 구간을 닫는다(ObjectBatchPublish::End).
+    void EndBatchPublish(ObjectHandle owner) noexcept;
+
     Allocator& allocator_;
     TypeRegistry& types_;
     ContextId context_;
@@ -881,8 +964,17 @@ private:
     // worker trace 실행 구간도 포함한다. phase 자체와 달리 slice 사이에는 false다.
     bool processing_ = false;
     bool closed_ = false;
+    // 열린 묶음 게시 구간(BeginBatchPublish)이다. 열린 동안 processing_도 선다. 검사합은 간선
+    // 변경마다 (added 해시 - removed 해시)의 합이다(선언과 게시가 같은지 End가 대조한다).
+    ObjectHandle batchOwner_{};
+    EdgeTally* batchTally_ = nullptr;
+    uint64 batchDeclared_ = 0;
+    uint64 batchApplied_ = 0;
+    bool batchActive_ = false;
+    bool batchPublished_ = false;
 };
 
 } // namespace rocks
 
 #include <Object/ObjectRegistryContainers.h>
+#include <Object/ObjectBatchPublish.h>

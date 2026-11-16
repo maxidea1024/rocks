@@ -52,6 +52,11 @@ Result<void> ObjectRegistry::CheckContainerOwnerLocked(ObjectHandle owner, const
         return Result<void>::Failure(ErrorCode::Busy);
     }
 
+    // live 변경 시도는 변경 표지를 올린다(MutationStamp — 뒤 단계가 실패해도 보수적으로 오른다).
+    if (transaction == 0) {
+        ++source->mutations;
+    }
+
     return Result<void>::Success();
 }
 
@@ -174,6 +179,10 @@ Result<void> ObjectRegistry::SetEdge(const ObjectAccessContext& access, ObjectHa
                 }
 
                 ApplyPlanLocked(plan);
+                if (transaction == 0) {
+                    ++FindSlot(owner)->mutations;
+                }
+
                 return Result<void>::Success();
             }
 

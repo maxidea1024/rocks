@@ -10,7 +10,7 @@ rocks/
   Core/                       기반 라이브러리(엔진 아님)
     Source/
       Runtime/                모듈: Base PlatformBase Core Task Compression Serialization MetaSchema
-                              Localization ObjectRuntime ObjectSerialization
+                              Localization ObjectRuntime ObjectSerialization ReflectionText
       ThirdParty/             고정 버전 외부 라이브러리 원본(Lz4·Zstd·Zlib). <Lib>/<Lib>.Build.cs·ThirdParty.json·
                               <lib>-<version>/(릴리스 원본을 byte 그대로)·필요 시 Rocks 글루 .c
         <Module>/

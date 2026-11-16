@@ -21,5 +21,6 @@ public sealed class ReflectionTestFixtures : CoreModuleRules
             "ReflectionTestFixtures/OptionalFixture.h", "ReflectionTestFixtures/MapFixture.h",
             "ReflectionTestFixtures/ObjectRefMapFixture.h", "ReflectionTestFixtures/StaticArrayFixture.h",
             "ReflectionTestFixtures/FieldFlagFixture.h",
-            "ReflectionTestFixtures/ClassFlagFixture.h"];
+            "ReflectionTestFixtures/ClassFlagFixture.h", "ReflectionTestFixtures/TextFixture.h",
+            "ReflectionTestFixtures/AssignFixture.h"];
 }

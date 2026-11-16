@@ -318,8 +318,11 @@ internal static class CppEmitter
                     Line("},");
                     Line("+[](ConstructionContext& construction, ObjectHandle object, const FieldValue& value) noexcept -> Result<void> {");
                     Line($"return detail::WriteGeneratedStagedField<{native}>(construction, object, {member}, value); }},");
-                    // Enum 필드(Optional<enum> 포함)는 정적 thunk의 enum native 키를 싣는다(등록이 대상 enum 레코드와 대조한다).
-                    EmitClassCodec(native, member, field.TargetKind == "Enum" ? $", NativeTypeKey<::{field.Reference}>()" : "", Line);
+                    // Enum 필드(Optional<enum> 포함)는 정적 thunk의 enum native 키를 싣는다(등록이 대상 enum 레코드와 대조한다). 단일 값
+                    // 필드도 경로 접근 thunk를 싣는다(리플렉션 B9i3c0 — staged 객체의 경로 연산과 Detach·Attach가 쓴다. 게시된 객체의
+                    // 최상위 단일 값 읽기·쓰기는 그래도 read·write 한 경로다).
+                    string scalarNative = field.TargetKind == "Enum" ? $", NativeTypeKey<::{field.Reference}>()" : ", nullptr";
+                    EmitClassCodec(native, member, scalarNative + ClassPathThunk(native, member, field), Line);
                 }
 
                 Line("};");
@@ -361,8 +364,8 @@ internal static class CppEmitter
     // 클래스 Struct·Array·Optional<값 struct>·Map·Set 필드 함수표의 path 칸(valueNativeType 뒤)이다(Docs/Design/ReflectionFoundations.ko.md 7.1절
     // MetaCompiler). 소유자 Owner는 함수표를 내는 클래스(파생 — 함수표가 실제 타입 레코드에서 온다)이고 멤버 포인터는 선언
     // 클래스의 것이다(상속 import 필드 포함). 대상 종류는 FieldModel.TargetKind(배열이면 원소 종류)를 명시한다 — C++ 멤버
-    // 형식과 다르면 TargetValueCheck static_assert가 컴파일을 실패시킨다(requires 탐지를 쓰지 않는다). 단일 값 필드는 path가
-    // 없다(최상위 단일 값의 경로 접근은 read·write 한 경로 — 등록이 path를 거부한다).
+    // 형식과 다르면 TargetValueCheck static_assert가 컴파일을 실패시킨다(requires 탐지를 쓰지 않는다). 단일 값 필드도 path를
+    // 싣는다(리플렉션 B9i3c0 — 게시된 객체의 최상위 단일 값 읽기·쓰기는 read·write 한 경로, thunk는 staged·Detach·Attach용).
     private static string ClassPathThunk(string native, string member, FieldModel field) =>
         ", +[](const ::rocks::RuntimeFieldOps&, ::rocks::detail::PathCursor& cursor) noexcept -> ::rocks::Result<void> { " +
         $"return ::rocks::detail::PathClassField<{native}, ::rocks::ValueKind::{field.TargetKind}>(cursor, {member}); }}";
@@ -443,8 +446,8 @@ internal static class CppEmitter
 
     // 클래스 필드의 그래프 저장·복원 codec 두 thunk와 함수표 끝이다(Docs/Design/ReflectionFoundations.ko.md 6.4절).
     // 문맥이 참조 wire·진단·예산을 맡으므로 그래프 형식이 바뀌어도 이 코드를 다시 만들지 않는다. tail은 decode 뒤의
-    // 칸이다: Enum 단일 값 필드는 ", NativeTypeKey<T>()", 그 밖의 단일 값 필드는 ""(valueNativeType·path 생략),
-    // Struct·Array 필드는 valueNativeType(없으면 ", nullptr")과 경로 접근 thunk(ClassPathThunk)다.
+    // 칸이다: valueNativeType(Enum 단일 값 필드는 ", NativeTypeKey<T>()", 없으면 ", nullptr")과 경로 접근
+    // thunk(ClassPathThunk — 모든 필드), Map·Set은 그 뒤에 키 enum native 키다.
     private static void EmitClassCodec(string native, string member, string tail, Action<string> Line)
     {
         Line("+[](const RuntimeFieldOps&, ObjectRegistry& registry, const ObjectAccessContext& access, ObjectHandle object, ArchiveWriter& payload, FieldEncodeContext& context) noexcept -> Result<uint32> {");
@@ -594,8 +597,12 @@ internal static class CppEmitter
             Line("}");
         }
 
+        EmitValueCopy(type, native, Line);
         Line("static RuntimeStructOps Ops(ModuleLease module = {}) noexcept {");
         Line($"auto ops = MakeRuntimeStructOps<{native}>(Move(module));");
+        Line("if constexpr (ValueCopyable) {");
+        Line($"ops.copy = +[](void* destination, const void* source, Allocator& allocator) noexcept -> Result<void> {{ return CopyValue(*static_cast<{native}*>(destination), *static_cast<const {native}*>(source), allocator); }};");
+        Line("}");
         if (type.Fields.Count != 0)
         {
             Line("static const RuntimeStructFieldOps fields[] = {");
@@ -627,6 +634,45 @@ internal static class CppEmitter
         Line("return registry.RegisterStruct(Schema(), Ops(Move(module)));");
         Line("}");
         Line("};");
+        // 다른 값(Array<S>·Map 값·Optional<S>·멤버 S)의 깊은 복사가 이 struct의 CopyValue를 쓰게 잇는다(Object/ValueCopy.h).
+        Line($"template <> struct detail::ValueCopy<{native}> {{");
+        Line($"static constexpr bool Supported = GeneratedType<{native}>::ValueCopyable;");
+        Line($"static Result<void> Copy({native}& destination, const {native}& source, Allocator& allocator) noexcept {{ return GeneratedType<{native}>::CopyValue(destination, source, allocator); }}");
+        Line("};");
+    }
+
+    // struct 값의 깊은 복사다(리플렉션 B9i3c0 — Docs/Design/ReflectionExtensions.ko.md 10.2절, UE UScriptStruct::CopyScriptStruct 대응).
+    // MetaCompiler는 struct의 모든 비정적 멤버에 PROPERTY 또는 NATIVE를 요구하므로 두 목록이 struct의 멤버 전부다: 멤버마다
+    // detail::TryCopyValue로 새 값을 다 만든 뒤 이동 대입 한 번으로 넣는다(실패하면 destination 그대로). 한 멤버라도 복사할 수
+    // 없으면(ObjectRef·Registry 컨테이너·복사 의미가 없는 NATIVE 타입) ValueCopyable이 거짓이고 CopyValue는 Unsupported다 — 멤버를
+    // 조용히 빠뜨리지 않는다. trivially copyable struct는 대입 한 번이다. 복사할 수 없는 분기가 컴파일되지 않게 템플릿이다.
+    private static void EmitValueCopy(ClassModel type, string native, Action<string> Line)
+    {
+        string[] members = type.Fields.Select(field => field.Name).Concat(type.NativeMembers.Select(member => member.Name)).ToArray();
+        string supported = string.Concat(members.Select(member => $" && ::rocks::detail::ValueCopy<decltype({native}::{member})>::Supported"));
+        Line($"static constexpr bool ValueCopyable = ::rocks::detail::IsPlainCopyV<{native}> || (::rocks::IsNothrowMoveAssignableV<{native}>{supported});");
+        Line($"template <class Self = {native}>");
+        Line("static Result<void> CopyValue(Self& destination, const Self& source, Allocator& allocator) noexcept {");
+        Line("if constexpr (::rocks::detail::IsPlainCopyV<Self>) {");
+        Line("(void)allocator;");
+        Line("destination = source;");
+        Line("return Result<void>::Success();");
+        Line("} else if constexpr (ValueCopyable) {");
+        Line("Self copy = ::rocks::detail::MakeAllocatedValue<Self>(allocator);");
+        foreach (string member in members)
+        {
+            Line($"if (auto copied = ::rocks::detail::TryCopyValue(copy.{member}, source.{member}, allocator); !copied) {{ return copied; }}");
+        }
+
+        Line("destination = Move(copy);");
+        Line("return Result<void>::Success();");
+        Line("} else {");
+        Line("(void)destination;");
+        Line("(void)source;");
+        Line("(void)allocator;");
+        Line("return Result<void>::Failure(ErrorCode::Unsupported);");
+        Line("}");
+        Line("}");
     }
 
     // 클래스·struct 스키마의 필드 배열이다(필드가 없으면 내지 않는다). 배열 필드는 value가 {Array, 0}이고 원소 형식
