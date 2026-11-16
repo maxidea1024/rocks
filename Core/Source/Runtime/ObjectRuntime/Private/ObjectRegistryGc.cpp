@@ -6,7 +6,7 @@
 #include <Platform/Fatal.h>
 #include <Task/WorkerScheduler.h>
 
-// ObjectRegistry GC다. 전체 수집(Collect)과 증분 수집(Begin·Step·Cancel), 표식(MarkEdge·삽입
+// ObjectRegistry GC다. 전체 수집(Collect)과 증분 수집(Begin·Step·Cancel), 표식(MarkSerial·삽입
 // 장벽 ShadeLocked·cutoff 판정), Registry가 방문하는 신원 간선(VisitIdentityEdges),
 // sweep(RetireLocked), 회수 대상 목록(Pending·Deferred·Ready)과 회수(ReclaimEligible·
 // DrainRetired)를 둔다.
@@ -26,40 +26,111 @@ void ObjectRegistry::VisitIdentityEdges(const Slot& slot, TraceVisitor& visitor)
     }
 }
 
-void ObjectRegistry::MarkEdge(void* pointer, ObjectHandle handle) noexcept {
+namespace {
+
+// 직렬 marker가 시계를 읽는 간격(trace한 객체 수)이다. 시간 예산은 soft deadline이라 이 간격만큼
+// 넘을 수 있다.
+constexpr uint32 TimeCheckInterval = 128;
+// 작업 큐에서 몇 칸 앞의 Slot·객체 본체를 미리 읽는지다(3.4절 모델의 16·8칸). 참조 배열 버퍼는 본체
+// 배치를 알아야 하므로(M3) 미리 읽지 않는다.
+constexpr usize SlotPrefetchDistance = 16;
+constexpr usize ObjectPrefetchDistance = 8;
+
+} // namespace
+
+// 배치 간선 처리의 공통 본문이다. 대상 슬롯의 첫 cache line(세대·상태)과 표식 칸을 먼저 모두 미리
+// 읽은 뒤 방문 순서대로 검사·표식·enqueue한다(순서는 간선마다 처리할 때와 같다).
+void ObjectRegistry::MarkHandles(MarkState& state, const ObjectHandle* handles,
+                                 uint32 count) noexcept {
+    for (uint32 index = 0; index < count; ++index) {
+        if (const Slot* slot = SlotAt(handles[index].slot)) {
+            platform::PrefetchRead(slot);
+            platform::PrefetchRead(&slot->markEpoch);
+        }
+    }
+
+    const uint64 epoch = markEpoch_;
+    for (uint32 index = 0; index < count; ++index) {
+        Slot* slot = FindSlot(handles[index]);
+        if (!slot ||
+            !(slot->state == SlotState::Alive || slot->state == SlotState::DestroyRequested)) {
+            state.error = ErrorCode::StaleHandle;
+            return;
+        }
+
+        if (slot->Mark() == epoch) {
+            continue;
+        }
+
+        // 작업 큐는 모든 슬롯을 담을 용량을 미리 확보했다(Begin·생성·Collect) — 할당하지 않는다.
+        auto pushed = state.work->TryPushBack(handles[index]);
+        if (!pushed) {
+            state.error = pushed.Error();
+            return;
+        }
+
+        slot->SetMark(epoch);
+    }
+}
+
+void ObjectRegistry::MarkBatch(void* pointer, const ObjectHandle* handles, uint32 count) noexcept {
     auto& state = *static_cast<MarkState*>(pointer);
-    if (handle.IsNull()) {
-        return;
+    if (state.error == ErrorCode::None) {
+        state.registry->MarkHandles(state, handles, count);
     }
+}
 
+void ObjectRegistry::MarkBatchLocked(void* pointer, const ObjectHandle* handles,
+                                     uint32 count) noexcept {
+    auto& state = *static_cast<MarkState*>(pointer);
     platform::LockGuard lock(state.registry->gate_);
-    if (state.error != ErrorCode::None) {
-        return;
+    if (state.error == ErrorCode::None) {
+        state.registry->MarkHandles(state, handles, count);
+    }
+}
+
+uint32 ObjectRegistry::MarkSerial(Array<ObjectHandle>& work, usize& cursor, MarkState& state,
+                                  uint32 maxObjects, uint64 deadline) noexcept {
+    TraceVisitor visitor(&state, &ObjectRegistry::MarkBatch);
+    uint32 processed = 0;
+    while (cursor < work.Size() && processed < maxObjects && state.error == ErrorCode::None) {
+        if (deadline != 0 && processed != 0 && processed % TimeCheckInterval == 0 &&
+            platform::MonotonicNanoseconds() >= deadline) {
+            break;
+        }
+
+        // 미스 사슬(Slot → 본체)을 큐 앞쪽에서 미리 당긴다. 큐의 handle은 표식할 때 검증했다.
+        const usize size = work.Size();
+        if (cursor + SlotPrefetchDistance < size) {
+            if (const Slot* ahead = SlotAt(work[cursor + SlotPrefetchDistance].slot)) {
+                platform::PrefetchRead(ahead);
+                platform::PrefetchRead(&ahead->outer);
+            }
+        }
+
+        if (cursor + ObjectPrefetchDistance < size) {
+            if (const Slot* ahead = SlotAt(work[cursor + ObjectPrefetchDistance].slot)) {
+                platform::PrefetchRead(ahead->object);
+            }
+        }
+
+        Slot& slot = *FindSlot(work[cursor]);
+        ++cursor;
+        slot.type.Ops().trace(*slot.object, visitor);
+        // inner → outer(패키지 정책이면 outer → inner도)는 Registry가 방문하는 강한 간선이다.
+        VisitIdentityEdges(slot, visitor);
+        // 객체마다 비워 큐 순서를 간선마다 처리할 때와 같게 둔다.
+        visitor.Flush();
+        ++processed;
     }
 
-    Slot* slot = state.registry->FindSlot(handle);
-    if (!slot || !(slot->state == SlotState::Alive || slot->state == SlotState::DestroyRequested)) {
-        state.error = ErrorCode::StaleHandle;
-        return;
-    }
-
-    if (slot->mark == state.registry->markEpoch_) {
-        return;
-    }
-
-    auto pushed = state.work->TryPushBack(handle);
-    if (!pushed) {
-        state.error = pushed.Error();
-        return;
-    }
-
-    slot->mark = state.registry->markEpoch_;
+    return processed;
 }
 
 bool ObjectRegistry::IsCutoff(const Slot* slot) const noexcept {
     return slot && gcPhase_ == GcPhase::Sweeping &&
            (slot->state == SlotState::Alive || slot->state == SlotState::DestroyRequested) &&
-           slot->mark != markEpoch_;
+           slot->Mark() != markEpoch_;
 }
 
 ErrorCode ObjectRegistry::ShadeLocked(ObjectHandle handle) noexcept {
@@ -72,7 +143,7 @@ ErrorCode ObjectRegistry::ShadeLocked(ObjectHandle handle) noexcept {
         return ErrorCode::StaleHandle;
     }
 
-    if (slot->mark == markEpoch_) {
+    if (slot->Mark() == markEpoch_) {
         return ErrorCode::None;
     }
 
@@ -87,7 +158,7 @@ ErrorCode ObjectRegistry::ShadeLocked(ObjectHandle handle) noexcept {
         return pushed.Error();
     }
 
-    slot->mark = markEpoch_;
+    slot->SetMark(markEpoch_);
     return ErrorCode::None;
 }
 
@@ -126,7 +197,7 @@ Result<void> ObjectRegistry::BeginCollection(const ObjectAccessContext& access) 
         markEpoch_ = 1;
         for (uint32 chunk = chunkCount_; chunk-- != 0;) {
             for (auto& slot : chunks_[chunk]->slots) {
-                slot.mark = 0;
+                slot.SetMark(0);
             }
         }
     }
@@ -135,7 +206,6 @@ Result<void> ObjectRegistry::BeginCollection(const ObjectAccessContext& access) 
     gcCursor_ = 0;
     cycleGc_ = {};
     sweepChunk_ = 0;
-    sweepOffset_ = 0;
     // 슬롯 순회는 새 chunk부터 옛 chunk로, chunk 안은 낮은 번호부터다(root 표식·sweep·통계 순서).
     for (uint32 chunk = chunkCount_; chunk-- != 0;) {
         for (auto& slot : chunks_[chunk]->slots) {
@@ -269,49 +339,10 @@ void ObjectRegistry::WakeDeferredLocked(Slot& slot) noexcept {
     }
 }
 
-Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& access,
-                                                  GcBudget budget,
-                                                  WorkerScheduler* scheduler) noexcept {
-    auto valid = CheckAccess(access);
-    if (!valid) {
-        return Result<GcProgress>::Failure(valid.Error());
-    }
-
-    if (budget.maxObjects == 0) {
-        return Result<GcProgress>::Failure(ErrorCode::InvalidArgument);
-    }
-
-    if (scheduler && scheduler->IsCurrentWorker()) {
-        return Result<GcProgress>::Failure(ErrorCode::WrongThread);
-    }
-
-    const uint64 started = platform::MonotonicNanoseconds();
-    uint64 deadline = 0;
-    if (budget.maxNanoseconds != 0) {
-        const uint64 maximum = NumericLimits<uint64>::Max();
-        deadline =
-            budget.maxNanoseconds > maximum - started ? maximum : started + budget.maxNanoseconds;
-    }
-
-    auto inBudget = [deadline]() noexcept {
-        return deadline == 0 || platform::MonotonicNanoseconds() < deadline;
-    };
-    {
-        platform::LockGuard lock(gate_);
-        if (processing_ || constructions_ || totalBorrows_) {
-            return Result<GcProgress>::Failure(ErrorCode::Busy);
-        }
-
-        if (gcPhase_ == GcPhase::Idle) {
-            return Result<GcProgress>::Failure(ErrorCode::InvalidArgument);
-        }
-
-        processing_ = true;
-    }
-
-    uint32 processed = 0;
-    const uint64 markStarted = platform::MonotonicNanoseconds();
-    MarkState state{this, &gcWork_};
+uint32 ObjectRegistry::MarkWithScheduler(MarkState& state, uint32 maxObjects, uint64 deadline,
+                                         WorkerScheduler& scheduler) noexcept {
+    // worker가 같은 큐에 동시에 넣으므로 표식·enqueue·오류는 배치마다 gate_
+    // 아래다(MarkBatchLocked). 병렬 표식의 잠금 제거는 GC-S4다.
     auto setError = [this, &state](ErrorCode error) noexcept {
         platform::LockGuard lock(gate_);
         if (state.error == ErrorCode::None) {
@@ -322,34 +353,30 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
         platform::LockGuard lock(gate_);
         return state.error != ErrorCode::None;
     };
-    while (gcPhase_ == GcPhase::Marking && processed < budget.maxObjects && inBudget() &&
-           !hasError()) {
+    auto inBudget = [deadline]() noexcept {
+        return deadline == 0 || platform::MonotonicNanoseconds() < deadline;
+    };
+    uint32 processed = 0;
+    while (processed < maxObjects && inBudget() && !hasError()) {
         ObjectHandle next;
         bool parallel = false;
         {
             platform::LockGuard lock(gate_);
             if (gcCursor_ == gcWork_.Size()) {
-                // 모든 barrier가 같은 gate에서 게시되므로 빈 큐 판정과 cutoff는 하나의 선형화다.
-                // 아직 slot을 Retired로 바꾸기 전에도 white 객체의 Resolve/Pin/연결을 차단한다.
-                cycleGc_.marked = static_cast<uint32>(gcWork_.Size());
-                gcPhase_ = GcPhase::Sweeping;
-                sweepChunk_ = chunkCount_;
-                sweepOffset_ = 0;
                 break;
             }
 
             next = gcWork_[gcCursor_];
-            parallel = scheduler && FindSlot(next)->type.Ops().parallelTraceSafe;
+            parallel = FindSlot(next)->type.Ops().parallelTraceSafe;
         }
 
         if (!parallel) {
             ++gcCursor_;
-            TraceVisitor visitor(&state, &ObjectRegistry::MarkEdge);
+            TraceVisitor visitor(&state, &ObjectRegistry::MarkBatchLocked);
             Slot* slot = FindSlot(next);
             slot->type.Ops().trace(*slot->object, visitor);
-            // inner → outer(패키지 정책이면 outer → inner도)는 Registry가 방문하는 강한 간선이다
-            // (gate_ 없이 — slice 동안 outer·고리는 불변이고 MarkEdge가 gate_를 잡는다).
             VisitIdentityEdges(*slot, visitor);
+            visitor.Flush();
             ++processed;
             continue;
         }
@@ -358,7 +385,7 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
         // stack state/visitor를 없앤다. 미선언 Trace는 이 batch와 겹쳐 실행하지 않는다.
         WorkerTaskHandle tasks[64];
         uint32 submitted = 0;
-        while (submitted < 64 && processed < budget.maxObjects && inBudget() && !hasError()) {
+        while (submitted < 64 && processed < maxObjects && inBudget() && !hasError()) {
             ObjectHandle handle;
             {
                 platform::LockGuard lock(gate_);
@@ -376,19 +403,20 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
 
             auto body = Function<void(WorkerTaskContext&)>::TryCreate(
                 allocator_, [this, &state, handle](WorkerTaskContext&) noexcept {
-                    TraceVisitor visitor(&state, &ObjectRegistry::MarkEdge);
+                    TraceVisitor visitor(&state, &ObjectRegistry::MarkBatchLocked);
                     Slot* slot = FindSlot(handle);
                     slot->type.Ops().trace(*slot->object, visitor);
                     // outer는 공개 전에 정해져 바뀌지 않고 고리는 slice(처리 표시) 동안 바뀌지
                     // 않으므로 worker가 읽어도 경합이 없다.
                     VisitIdentityEdges(*slot, visitor);
+                    visitor.Flush();
                 });
             if (!body) {
                 setError(body.Error());
                 break;
             }
 
-            auto accepted = scheduler->Submit(Move(body.Value()));
+            auto accepted = scheduler.Submit(Move(body.Value()));
             if (!accepted) {
                 setError(accepted.Error());
                 break;
@@ -415,7 +443,77 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
         }
     }
 
-    if (hasError()) {
+    return processed;
+}
+
+Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& access,
+                                                  GcBudget budget,
+                                                  WorkerScheduler* scheduler) noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return Result<GcProgress>::Failure(valid.Error());
+    }
+
+    if (budget.maxObjects == 0) {
+        return Result<GcProgress>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (scheduler && scheduler->IsCurrentWorker()) {
+        return Result<GcProgress>::Failure(ErrorCode::WrongThread);
+    }
+
+    const uint64 started = platform::MonotonicNanoseconds();
+    uint64 deadline = 0;
+    if (budget.maxNanoseconds != 0) {
+        const uint64 maximum = NumericLimits<uint64>::Max();
+        deadline =
+            budget.maxNanoseconds > maximum - started ? maximum : started + budget.maxNanoseconds;
+    }
+
+    {
+        platform::LockGuard lock(gate_);
+        if (processing_ || constructions_ || totalBorrows_) {
+            return Result<GcProgress>::Failure(ErrorCode::Busy);
+        }
+
+        if (gcPhase_ == GcPhase::Idle) {
+            return Result<GcProgress>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        processing_ = true;
+    }
+
+    // 처리 표시 아래에서 gcPhase_·gcWork_·gcCursor_·sweepChunk_는 이 스레드만 바꾼다(장벽·생성·
+    // Discard는 Busy, 다른 스레드의 RootRef 복제도 Busy). 그래서 아래 루프는 잠금 없이 읽고, 다른
+    // 스레드가 잠금 아래에서 읽는 전이(cutoff 게시·Reclaiming)만 잠가서 쓴다.
+    uint32 processed = 0;
+    const uint64 markStarted = platform::MonotonicNanoseconds();
+    MarkState state{this, &gcWork_};
+    bool cutoffPublished = false;
+    if (gcPhase_ == GcPhase::Marking) {
+        processed = scheduler == nullptr
+                        ? MarkSerial(gcWork_, gcCursor_, state, budget.maxObjects, deadline)
+                        : MarkWithScheduler(state, budget.maxObjects, deadline, *scheduler);
+        // 큐가 빈 것을 이 slice의 예산 안에서 보았을 때만 cutoff를 게시한다(예산을 다 쓴 slice는
+        // Marking으로 끝나 다음 slice 전에 mutator가 장벽을 거칠 수 있다).
+        if (state.error == ErrorCode::None && gcCursor_ == gcWork_.Size() &&
+            processed < budget.maxObjects &&
+            (deadline == 0 || platform::MonotonicNanoseconds() < deadline)) {
+            // 모든 장벽이 같은 gate에서 게시되고 slice 동안은 장벽이 없으므로(처리 표시) 빈 큐
+            // 판정과 cutoff는 하나의 선형화다. 아직 slot을 Retired로 바꾸기 전에도 white 객체의
+            // Resolve·Pin· 연결을 차단한다. cutoff를 게시한 slice는 sweep 없이 끝낸다. sweep 단위가
+            // chunk라 작은 그래프는 한 slice에 끝나므로, mutator가 cutoff 뒤 아직 분류하지 않은
+            // white를 만나는 구간(Sweeping)을 언제나 한 번은
+            // 거친다(Docs/Implementation/IncrementalGarbageCollection.ko.md의 cutoff 계약).
+            platform::LockGuard lock(gate_);
+            cycleGc_.marked = static_cast<uint32>(gcWork_.Size());
+            gcPhase_ = GcPhase::Sweeping;
+            sweepChunk_ = chunkCount_;
+            cutoffPublished = true;
+        }
+    }
+
+    if (state.error != ErrorCode::None) {
         platform::LockGuard lock(gate_);
         gcPhase_ = GcPhase::Idle;
         gcWork_.Clear();
@@ -426,33 +524,33 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
 
     const uint64 sweepStarted = platform::MonotonicNanoseconds();
     cycleGc_.markNanoseconds += sweepStarted - markStarted;
-    // cutoff 뒤 Sweeping 중 생성이 붙인 새 chunk(더 큰 번호)는 방문하지 않는다. 그 객체는 현재
-    // epoch로 표식되어 이번 cycle의 white 후보가 아니다.
-    while (gcPhase_ == GcPhase::Sweeping && processed < budget.maxObjects && inBudget()) {
+    // sweep의 작업 단위는 chunk(64칸) 하나다(GC-S2). chunk마다 잠금 한 번, 시계 한 번이다. cutoff
+    // 뒤 Sweeping 중 생성이 붙인 새 chunk(더 큰 번호)는 방문하지 않는다. 그 객체는 현재 epoch로
+    // 표식되어 이번 cycle의 white 후보가 아니다. 순서는 새 chunk부터, chunk 안은 낮은 번호부터다.
+    while (!cutoffPublished && gcPhase_ == GcPhase::Sweeping && processed < budget.maxObjects &&
+           (deadline == 0 || processed == 0 || platform::MonotonicNanoseconds() < deadline)) {
         platform::LockGuard lock(gate_);
+        if (sweepChunk_ != 0) {
+            for (Slot& slot : chunks_[--sweepChunk_]->slots) {
+                if ((slot.state == SlotState::Alive || slot.state == SlotState::DestroyRequested) &&
+                    slot.Mark() != markEpoch_) {
+                    RetireLocked(slot);
+                    ++cycleGc_.retired;
+                }
+            }
+
+            ++processed;
+        }
+
         if (sweepChunk_ == 0) {
             gcPhase_ = GcPhase::Reclaiming;
-            break;
         }
-
-        Slot& slot = chunks_[sweepChunk_ - 1]->slots[sweepOffset_++];
-        if ((slot.state == SlotState::Alive || slot.state == SlotState::DestroyRequested) &&
-            slot.mark != markEpoch_) {
-            RetireLocked(slot);
-            ++cycleGc_.retired;
-        }
-
-        if (sweepOffset_ == SlotsPerChunk) {
-            --sweepChunk_;
-            sweepOffset_ = 0;
-        }
-
-        ++processed;
     }
 
     const uint64 reclaimStarted = platform::MonotonicNanoseconds();
     cycleGc_.sweepNanoseconds += reclaimStarted - sweepStarted;
-    if (gcPhase_ == GcPhase::Reclaiming && processed < budget.maxObjects && inBudget()) {
+    if (gcPhase_ == GcPhase::Reclaiming && processed < budget.maxObjects &&
+        (deadline == 0 || platform::MonotonicNanoseconds() < deadline)) {
         const uint32 reclaimed = ReclaimEligible(budget.maxObjects - processed, deadline);
         cycleGc_.reclaimed += reclaimed;
         processed += reclaimed;
@@ -507,7 +605,7 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access) noex
             markEpoch_ = 1;
             for (uint32 chunk = chunkCount_; chunk-- != 0;) {
                 for (auto& slot : chunks_[chunk]->slots) {
-                    slot.mark = 0;
+                    slot.SetMark(0);
                 }
             }
         }
@@ -521,7 +619,7 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access) noex
                         platform::Fatal("Preallocated GC work queue exhausted");
                     }
 
-                    slot.mark = markEpoch_;
+                    slot.SetMark(markEpoch_);
                 }
             }
         }
@@ -530,12 +628,8 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access) noex
     const uint64 markStarted = platform::MonotonicNanoseconds();
     report.beginNanoseconds = markStarted - started;
     MarkState state{this, &work};
-    TraceVisitor visitor(&state, &ObjectRegistry::MarkEdge);
-    for (usize cursor = 0; cursor < work.Size() && state.error == ErrorCode::None; ++cursor) {
-        Slot* slot = FindSlot(work[cursor]);
-        slot->type.Ops().trace(*slot->object, visitor);
-        VisitIdentityEdges(*slot, visitor);
-    }
+    usize cursor = 0;
+    (void)MarkSerial(work, cursor, state, NumericLimits<uint32>::Max(), 0);
 
     const uint64 sweepStarted = platform::MonotonicNanoseconds();
     report.markNanoseconds = sweepStarted - markStarted;
@@ -553,7 +647,7 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access) noex
         for (uint32 chunk = chunkCount_; chunk-- != 0;) {
             for (auto& slot : chunks_[chunk]->slots) {
                 if ((slot.state == SlotState::Alive || slot.state == SlotState::DestroyRequested) &&
-                    slot.mark != markEpoch_) {
+                    slot.Mark() != markEpoch_) {
                     RetireLocked(slot);
                     ++report.retired;
                 }
@@ -615,7 +709,7 @@ void ObjectRegistry::FinishReclaim(ReclaimWork& work) noexcept {
         slot.storage = nullptr;
         slot.transaction = 0;
         slot.stableType = {};
-        slot.mark = 0;
+        slot.SetMark(0);
         slot.outer = {};
         slot.outermost = nullptr;
         slot.parent = nullptr;

@@ -129,7 +129,8 @@ TEST(ObjectIncrementalGcCutoffBlocksUnclassifiedWhiteAndProtectsLaterBirths) {
         auto cutoff = registry.StepCollection(access, {1, 0});
         REQUIRE(cutoff);
         CHECK(cutoff.Value().phase == GcPhase::Sweeping);
-        CHECK(registry.Stats().retiredObjects == 1);
+        // cutoff를 게시한 slice는 분류하지 않고 끝난다(white는 아직 Retire 전이다).
+        CHECK(registry.Stats().retiredObjects == 0);
         CHECK(!registry.Resolve<IncrementalNode>(access, white));
         CHECK(!registry.TryPin<IncrementalNode>(access, white));
         CHECK(!registry.AcquireBackendLease(access, white));

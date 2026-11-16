@@ -3,6 +3,7 @@
 #include <Core/Containers/HashMap.h>
 #include <Core/Hash.h>
 #include <Object/ObjectRegistry.h>
+#include <Platform/Atomics.h>
 #include <Platform/Fatal.h>
 
 // ObjectRegistry 구현 파일(ObjectRegistry*.cpp)이 함께 쓰는 내부 정의다. 슬롯 상태와 Registry
@@ -66,7 +67,9 @@ struct ObjectRegistry::Slot {
     // encode 고정 계수(PinForEncode). 0이 아니면 컨테이너·참조 변경이 Busy이고 회수하지 않는다.
     uint32 encodePins = 0;
     uint64 transaction = 0;
-    uint64 mark = 0;
+    // 표식 epoch다. 직렬 marker가 잠금 없이 읽고 쓰므로(GC-S1,
+    // Docs/Design/GarbageCollectionScale.ko.md 7.1절) Mark·SetMark(relaxed atomic)로만 접근한다.
+    uint64 markEpoch = 0;
     // Outer·이름(생성 때 고정 — Docs/Design/ObjectFoundations.ko.md 1.4절). 고리는 슬롯 번호가
     // 아니라 Slot*다: chunk는 Registry 소멸 전까지 이동·반환되지 않으므로 포인터가 안정하고, 순회가
     // 슬롯 번호 → chunk 표 조회를 거치지 않고 바로 따라간다. Reclaiming·Free 슬롯의 이 칸은 읽지
@@ -86,6 +89,14 @@ struct ObjectRegistry::Slot {
     bool indexed = false;   // 이름 색인에 있다
     bool linked = false;    // 부모 고리에 있다
     bool discarded = false; // Discard됐다(DestroyRequested이고 색인·고리에 없다 — 회수 때 내린다)
+
+    uint64 Mark() const noexcept {
+        return platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&markEpoch);
+    }
+
+    void SetMark(uint64 epoch) noexcept {
+        platform::AtomicStore<platform::MemoryOrder::Relaxed>(&markEpoch, epoch);
+    }
 
     // 잠금 보유 상태에서 부른다. tally는 그 Registry의 상태별 통계다.
     void SetState(ObjectStats& tally, registry_detail::SlotState next) noexcept {
@@ -235,6 +246,25 @@ struct ObjectRegistry::NameEntry {
     Slot* slot = nullptr;
     uint64 keyHash = 0;
 };
+
+// chunk 표 색인이라 O(1)이다. 다른 스레드의 계수 반환도 잠금 안에서 부르므로 표 교체(잠금 안)와
+// 겹치지 않고, 처리 표시 아래 잠금 없이 부를 때(소유 스레드와 병렬 trace worker)는 표가 바뀌지
+// 않는다(교체는 생성의 처리 표시 아래에서만 한다). 옛 표는 소멸 때까지 보관하므로 이 규칙 밖의 잠금
+// 없는 조회가 생겨도 해제된 표를 읽지는 않는다. GC marker의 간선마다 부르므로 inline이다.
+inline ObjectRegistry::Slot* ObjectRegistry::SlotAt(uint32 index) const noexcept {
+    const uint32 chunk = index / registry_detail::SlotsPerChunk;
+    return chunk < chunkCount_ ? &chunks_[chunk]->slots[index % registry_detail::SlotsPerChunk]
+                               : nullptr;
+}
+
+inline ObjectRegistry::Slot* ObjectRegistry::FindSlot(ObjectHandle handle) const noexcept {
+    if (handle.registry != domain_ || handle.generation == 0 || handle.slot >= options_.maxSlots) {
+        return nullptr;
+    }
+
+    Slot* slot = SlotAt(handle.slot);
+    return slot && slot->generation == handle.generation ? slot : nullptr;
+}
 
 } // namespace rocks
 

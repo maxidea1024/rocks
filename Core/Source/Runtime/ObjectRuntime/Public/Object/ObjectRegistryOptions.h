@@ -19,12 +19,21 @@ enum class GcPhase : uint8 {
     Reclaiming
 };
 
-// 시간 예산은 soft deadline이다. Trace/소멸자 한 번을 중간에 중단하지 않는다.
-// Begin의 root scan·잠금 획득·회수 후보 탐색도 hard deadline으로 제한하지 않는다.
-// maxObjects는 trace·slot 분류·실제 회수의 합이며 0은 잘못된 설정이다.
-// maxNanoseconds=0은 시간 한도를 끄되 객체 작업량 한도는 유지한다.
+// 증분 수집 slice 하나의 예산이다(Docs/Design/GarbageCollectionScale.ko.md GC-S2). 기본은 시간
+// 한도(1ms)이고 maxObjects는 상한 장치일 뿐이다.
+// - 시간 예산은 soft deadline이다. Trace·소멸자 한 번을 중간에 중단하지 않고, 표식은 객체
+//   128개마다·sweep은 chunk(64칸)마다·회수는 객체마다 시계를 본다. Begin의 root scan·잠금 획득·회수
+//   후보 탐색도 hard deadline으로 제한하지 않는다.
+// - maxObjects는 작업 단위의 합이다: trace한 객체 하나, 분류한 slot chunk(64칸) 하나, 회수한 객체
+//   하나가 각각 1이다. 0은 잘못된 설정(InvalidArgument)이다.
+// - maxNanoseconds=0은 시간 한도를 끄되 작업량 한도는 유지한다(시험의 결정적 진행).
+//
+// 사용 예(프레임마다 2ms):
+//   registry.StepCollection(access, GcBudget{GcBudget::DefaultMaxObjects, 2000000});
 struct GcBudget {
-    uint32 maxObjects = 64;
+    static constexpr uint32 DefaultMaxObjects = 1u << 20;
+
+    uint32 maxObjects = DefaultMaxObjects;
     uint64 maxNanoseconds = 1000000;
 };
 

@@ -88,24 +88,6 @@ Result<void> ObjectRegistry::CheckAccess(const ObjectAccessContext& access) cons
     return Result<void>::Success();
 }
 
-// chunk 표 색인이라 O(1)이다. 다른 스레드의 계수 반환도 잠금 안에서 부르므로 표 교체(잠금 안)와
-// 겹치지 않고, 처리 표시 아래 잠금 없이 부를 때(소유 스레드와 병렬 trace worker)는 표가 바뀌지
-// 않는다(교체는 생성의 처리 표시 아래에서만 한다). 옛 표는 소멸 때까지 보관하므로 이 규칙 밖의 잠금
-// 없는 조회가 생겨도 해제된 표를 읽지는 않는다.
-ObjectRegistry::Slot* ObjectRegistry::SlotAt(uint32 index) const noexcept {
-    const uint32 chunk = index / SlotsPerChunk;
-    return chunk < chunkCount_ ? &chunks_[chunk]->slots[index % SlotsPerChunk] : nullptr;
-}
-
-ObjectRegistry::Slot* ObjectRegistry::FindSlot(ObjectHandle handle) const noexcept {
-    if (handle.registry != domain_ || handle.generation == 0 || handle.slot >= options_.maxSlots) {
-        return nullptr;
-    }
-
-    Slot* slot = SlotAt(handle.slot);
-    return slot && slot->generation == handle.generation ? slot : nullptr;
-}
-
 Result<void> ObjectRegistry::CheckLive(Slot* slot, const void* nativeType) const noexcept {
     if (!slot || slot->state == SlotState::Free || slot->state == SlotState::Exhausted ||
         slot->state == SlotState::Reserved) {

@@ -598,7 +598,22 @@ private:
         Slot* tail = nullptr;
     };
 
-    static void MarkEdge(void*, ObjectHandle) noexcept;
+    // 표식(Private/ObjectRegistryGc.cpp). MarkBatch는 직렬 marker의 배치 visitor 콜백이다(잠금 없음
+    // — 처리 표시 아래 단일 marker, Docs/Design/GarbageCollectionScale.ko.md 7.1절).
+    // MarkBatchLocked는 worker가 동시에 부르는 scheduler 경로용이며 배치마다 gate_를 잡는다.
+    // MarkHandles는 둘의 본문이다.
+    static void MarkBatch(void*, const ObjectHandle*, uint32) noexcept;
+    static void MarkBatchLocked(void*, const ObjectHandle*, uint32) noexcept;
+    void MarkHandles(MarkState&, const ObjectHandle*, uint32) noexcept;
+    // 작업 큐 work를 cursor부터 trace한다(최대 maxObjects개, deadline이 0이 아니면 그때까지 —
+    // 시계는 일정 개수마다 본다). 잠금 없이 처리 표시 아래에서 부른다. 반환은 trace한 객체 수이고
+    // 오류는 state.error다.
+    uint32 MarkSerial(Array<ObjectHandle>& work, usize& cursor, MarkState& state, uint32 maxObjects,
+                      uint64 deadline) noexcept;
+    // scheduler 경로의 표식이다(parallelTraceSafe 타입은 worker, 나머지는 소유 스레드). 반환은
+    // MarkSerial과 같다.
+    uint32 MarkWithScheduler(MarkState& state, uint32 maxObjects, uint64 deadline,
+                             WorkerScheduler& scheduler) noexcept;
     static void ValidateStagedEdge(void*, ObjectHandle) noexcept;
     // 떼어 낼 간선의 패키지 쌍을 집계한다(MarkState의 tally·ownerPackage·delta — 대상 패키지 조회는
     // 간선마다 잠금, 집계 삽입은 잠금 밖).
@@ -606,8 +621,9 @@ private:
     // Registry가 직접 방문하는 간선이다: inner → outer, 패키지 정책이면 outer → inner(자식 고리의
     // 모든 자식). gate_를 쥐지 않고 부른다(처리 표시 아래라 Outer·고리가 바뀌지 않는다).
     void VisitIdentityEdges(const Slot&, TraceVisitor&) const noexcept;
-    Slot* FindSlot(ObjectHandle) const noexcept;
-    Slot* SlotAt(uint32) const noexcept;
+    // 정의는 ObjectRuntime/Private/ObjectRegistryInternal.h(inline — 구현 파일만 부른다).
+    inline Slot* FindSlot(ObjectHandle) const noexcept;
+    inline Slot* SlotAt(uint32) const noexcept;
     Result<void> CheckAccess(const ObjectAccessContext&) const noexcept;
     Result<void> CheckLive(Slot*, const void*) const noexcept;
     Result<ObjectAccessContext> ScopedAccess() const noexcept;
@@ -868,10 +884,9 @@ private:
     usize gcCursor_ = 0;
     GcPhase gcPhase_ = GcPhase::Idle;
     GcReport cycleGc_;
-    // 증분 sweep 위치: 남은 chunk 수(다음은 sweepChunk_ - 1번 chunk — 새 chunk부터 옛 chunk로)와
-    // 그 chunk 안 슬롯 위치다. 0이면 끝났다.
+    // 증분 sweep 위치: 남은 chunk 수다(다음은 sweepChunk_ - 1번 chunk — 새 chunk부터 옛 chunk로,
+    // chunk 하나를 한 번에 분류한다). 0이면 끝났다.
     uint32 sweepChunk_ = 0;
-    uint32 sweepOffset_ = 0;
     // 이름 색인: 개방 주소 표(2의 거듭제곱 크기, (live + tombstone) ≤ 1/2). 표 할당·반환은 잠금 밖.
     NameEntry* names_ = nullptr;
     uint32 nameCapacity_ = 0;

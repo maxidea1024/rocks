@@ -289,16 +289,49 @@ TEST(ObjectIdentityGc_RetiredParentWaitsForChildrenBeforeReclaim) {
         REQUIRE(Register(types));
         ObjectRegistry registry(allocator, types, {0x4f4704, 1});
         const auto access = registry.OwnerAccess();
-        auto parent = NewNode(registry, {}, "Parent");
+        // sweep은 새 chunk부터 chunk 하나씩 분류한다. parent·child·grandchild를 서로 다른 chunk(새
+        // 것부터 2·1·0번)에 두어 parent가 먼저, 그다음 child가 Retire되게 한다: 0·1번 chunk를 채운
+        // 뒤 parent를 만들고, 1번 chunk를 비운 뒤 child를, 0번 chunk를 비운 뒤 grandchild를
+        // 만든다(빈 슬롯 목록은 가장 최근에 회수한 슬롯부터 쓴다).
+        constexpr uint32 Fillers = 64;
+        RootRef<Object> older[Fillers];
+        RootRef<Object> newer[Fillers];
+        for (uint32 index = 0; index < Fillers; ++index) {
+            REQUIRE(NewNode(registry, {}, {}, &older[index]));
+        }
+
+        for (uint32 index = 0; index < Fillers; ++index) {
+            REQUIRE(NewNode(registry, {}, {}, &newer[index]));
+        }
+
+        RootRef<Object> parentRoot;
+        auto parent = NewNode(registry, {}, "Parent", &parentRoot);
         REQUIRE(parent);
-        auto child = NewNode(registry, parent.Value(), "Child");
+        for (RootRef<Object>& root : newer) {
+            root.Reset();
+        }
+
+        REQUIRE(registry.Collect(access));
+        RootRef<Object> childRoot;
+        auto child = NewNode(registry, parent.Value(), "Child", &childRoot);
         REQUIRE(child);
+        for (RootRef<Object>& root : older) {
+            root.Reset();
+        }
+
+        REQUIRE(registry.Collect(access));
         auto grandchild = NewNode(registry, child.Value(), "Grandchild");
         REQUIRE(grandchild);
+        CHECK(parent.Value().slot / 64 == 2);
+        CHECK(child.Value().slot / 64 == 1);
+        CHECK(grandchild.Value().slot / 64 == 0);
+        parentRoot.Reset();
+        childRoot.Reset();
         nodesDestroyed = 0;
         REQUIRE(registry.BeginCollection(access));
         REQUIRE(StepToSweeping(registry));
-        // cutoff slice가 첫 슬롯(parent)만 Retire했다.
+        // cutoff slice는 분류하지 않고 끝난다. 다음 slice가 첫 chunk(parent)만 Retire한다.
+        REQUIRE(registry.StepCollection(access, {1, 0}));
         auto parentState = registry.InspectLifecycle(access, parent.Value());
         REQUIRE(parentState && parentState.Value() == ObjectLifecycle::Retired);
         auto childState = registry.InspectLifecycle(access, child.Value());
@@ -328,7 +361,7 @@ TEST(ObjectIdentityGc_RetiredParentWaitsForChildrenBeforeReclaim) {
         CHECK(nodesDestroyed == 1);
         parentState = registry.InspectLifecycle(access, parent.Value());
         CHECK(parentState && parentState.Value() == ObjectLifecycle::Retired);
-        // 한 슬롯씩 더 분류해 child만 Retire된 상태(grandchild가 아직 child에 붙어 있다)를 본다.
+        // chunk 하나를 더 분류해 child만 Retire된 상태(grandchild가 아직 child에 붙어 있다)를 본다.
         REQUIRE(registry.StepCollection(access, {1, 0}));
         childState = registry.InspectLifecycle(access, child.Value());
         REQUIRE(childState && childState.Value() == ObjectLifecycle::Retired);

@@ -426,15 +426,50 @@ using StructMigration = Result<Array<uint8>> (*)(Allocator&, TypeId type, uint32
 // 객체가 가진 모든 강한 ObjectRef를 빠짐없이 Visit해야 한다. WeakRef는 방문하지 않는다(WeakRef
 // PROPERTY 포함 — 생성 Trace는 weak 필드·원소를 방문하지 않는다,
 // Docs/Design/ReflectionExtensions.ko.md 5.1절).
+//
+// 방문자는 두 방식이다(Trace 코드는 어느 쪽인지 모르고 Visit만 부른다).
+// - 간선마다: VisitFn을 간선마다 그대로 부른다(null 포함). 간선마다 상태를 바꾸는 소비자(Commit
+//   검증·관찰자 집계·시험의 기록)가 쓴다.
+// - 배치: null이 아닌 handle을 방문 순서대로 내부 버퍼(BatchCapacity개)에 쌓고, 가득 차면 FlushFn에
+//   한꺼번에 넘긴다. Trace가 끝나면 visitor를 만든 쪽이 Flush()로 남은 간선을 넘긴다(넘기지 않으면
+//   간선이 빠진다). 간선당 간접 호출이 없어 GC marker가
+//   쓴다(Docs/Design/GarbageCollectionScale.ko.md GC-S1). FlushFn은 handle 배열과 개수를 받으며
+//   배열은 그 호출 동안만 유효하다.
+//
+// 사용 예(배치):
+//   TraceVisitor visitor(&state, &MarkBatch);
+//   ops.trace(object, visitor);
+//   visitor.Flush();
 class TraceVisitor {
 public:
     using VisitFn = void (*)(void*, ObjectHandle) noexcept;
+    using FlushFn = void (*)(void*, const ObjectHandle*, uint32) noexcept;
+
+    static constexpr uint32 BatchCapacity = 256;
 
     TraceVisitor(void* state, VisitFn visit) noexcept : state_(state), visit_(visit) {
     }
 
+    TraceVisitor(void* state, FlushFn flush) noexcept : state_(state), flush_(flush) {
+    }
+
+    TraceVisitor(const TraceVisitor&) = delete;
+    TraceVisitor& operator=(const TraceVisitor&) = delete;
+
     void Visit(ObjectHandle handle) noexcept {
-        visit_(state_, handle);
+        if (flush_ == nullptr) {
+            visit_(state_, handle);
+            return;
+        }
+
+        if (handle.IsNull()) {
+            return;
+        }
+
+        batch_[count_++] = handle;
+        if (count_ == BatchCapacity) {
+            Flush();
+        }
     }
 
     template <class Ref>
@@ -442,9 +477,21 @@ public:
         Visit(reference.Handle());
     }
 
+    // 배치 방식에서 쌓인 간선을 FlushFn에 넘기고 버퍼를 비운다(비었거나 간선마다 방식이면 무동작).
+    void Flush() noexcept {
+        if (count_ != 0) {
+            const uint32 count = count_;
+            count_ = 0;
+            flush_(state_, batch_, count);
+        }
+    }
+
 private:
     void* state_;
-    VisitFn visit_;
+    VisitFn visit_ = nullptr;
+    FlushFn flush_ = nullptr;
+    uint32 count_ = 0;
+    ObjectHandle batch_[BatchCapacity];
 };
 
 // 리플렉션 struct 등록의 실행 정보다(TypeRegistry::RegisterStruct, 4.6절). construct·destroy는

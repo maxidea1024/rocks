@@ -25,7 +25,7 @@ RootRef 생성·복제, SetReference, Registry 컨테이너 쓰기(ObjectRefArra
 
 Marking 중 공개하는 newborn은 모든 staged 객체를 grey로 넣어 자체 Trace가 실행되도록 한다. 검게만 표시하고 스캔을 생략하지 않는다. 생성 전에 전체 슬롯 수에 맞는 큐 용량을 확보하여 잠금 안의 shade가 할당하지 않도록 한다. 현재 cycle의 Marking 중에는 객체를 회수·슬롯 재사용하지 않는다.
 
-Marking 큐가 비었음을 확인하고 Sweeping으로의 전환은 gate 안에서 원자적으로 수행한다. 아직 slot cursor가 방문하지 않은 흰 객체도 cutoff 검사로 접근을 거부한다. Sweeping 중 태어난 객체는 현재 epoch로 표식하고 cutoff 대상에 연결하지 못하게 하므로 이번 cycle에 보존된다.
+Marking 큐가 비었음을 확인하고 Sweeping으로의 전환은 gate 안에서 원자적으로 수행한다. 큐가 빈 것을 slice 예산 안에서 본 slice가 cutoff를 게시하고 그 slice는 분류 없이 끝난다(sweep 단위가 chunk라 작은 그래프도 cutoff 뒤 미분류 white 구간을 한 번은 거친다). 아직 slot cursor가 방문하지 않은 흰 객체도 cutoff 검사로 접근을 거부한다. Sweeping 중 태어난 객체는 현재 epoch로 표식하고 cutoff 대상에 연결하지 못하게 하므로 이번 cycle에 보존된다.
 
 inner → outer는 언제나 강한 간선이다([객체·그래프 보강](../Design/ObjectFoundations.ko.md) 1.5절). 타입 Trace가 아니라 Registry가 객체를 trace하는 모든 곳(full Collect, Step의 순차·병렬 trace, Commit의 staged 검증)에서 Trace 뒤에 그 객체의 Outer를 방문한다. Outer는 공개 전에 정해져 바뀌지 않으므로 worker가 `gate_` 없이 읽어도 경합이 없다. Marking 중 공개한 newborn의 trace가 Outer를 표식하고, Sweeping 중에는 cutoff white Outer 아래 생성이 StaleHandle이며 Commit 검증이 Outer도 대상처럼 검사한다. 정책 없는 Registry에서 outer는 inner를 살리지 않는다. Retire(sweep·rollback)는 같은 잠금 안에서 그 객체를 이름 색인과 부모의 자식 고리에서 뗀다. 고리는 해체하지 않는다: white 부모의 자식은 모두 white라 같은 sweep에서 스스로 떨어지므로, 부모가 먼저 Retire되어도 자식이 남은 동안(`firstChild != nullptr`)은 회수하지 않는다(sweep 사이의 `DrainRetired` 회수 포함 — rollback은 생성 저널의 슬롯만 회수하므로 white 부모에 닿지 않는다). 회수가 이름 기록을 잠금 밖에서 반환한다.
 
@@ -37,13 +37,15 @@ Trace 오류나 작업 제출 실패는 수락한 모든 worker를 정리한 후
 
 `StepCollection`에 `WorkerScheduler`를 주면 `RuntimeTypeOps::parallelTraceSafe=true`인 타입만 worker에 제출한다. 기본값은 false이며, 생성 메타데이터의 순수 참조 방문은 true다. 사용자 Trace는 thread-safe 선언뿐 아니라 공유 상태 접근과 callback 계약을 실제로 지켜야 한다. 선언하지 않은 타입의 Trace는 소유 스레드에서 수행한다.
 
-최대 64개 표식 작업을 한 배치로 제출하고 수락한 handle을 모두 기다린다. 수동 Trace와 병렬 배치를 혼합할 때 이전 배치를 먼저 완료한다. marker는 Registry gate 아래에서 mark epoch·큐·오류 상태를 갱신한다. scheduler allocator는 worker에서 capture를 해제할 수 있는 thread-safe allocator여야 한다.
+최대 64개 표식 작업을 한 배치로 제출하고 수락한 handle을 모두 기다린다. 수동 Trace와 병렬 배치를 혼합할 때 이전 배치를 먼저 완료한다. scheduler 경로의 marker는 배치 visitor의 flush마다(간선 최대 256개) Registry gate 아래에서 mark epoch·큐·오류 상태를 갱신한다(GC-S4에서 atomic 표식으로 바꾼다).
+
+직렬 marker(`Collect`, scheduler 없는 `StepCollection`)는 gate를 잡지 않는다([GC 대규모 처리 보강](../Design/GarbageCollectionScale.ko.md) GC-S1). 근거는 처리 표시다: slice 동안 생성·간선 변경·장벽·Discard·RootRef 복제는 Busy이고, 다른 스레드의 `ReleaseRoot`·`ReleaseBackend`·`ReleaseEncodePin`은 gate 아래에서 roots·보유 계수와 회수 목록 고리만 바꾼다(marker가 읽고 쓰는 generation·state·mark·object·type·outer·자식 고리는 건드리지 않는다). `mark`는 relaxed atomic으로 접근한다. Trace는 배치 visitor(`TraceVisitor`의 FlushFn 방식)로 간선을 모은 뒤 대상 Slot을 미리 읽고 방문 순서대로 표식하며, 작업 큐 16·8칸 앞의 Slot과 객체 본체를 미리 읽는다. 시계는 객체 128개마다 본다. `GcConcurrencyTests.cpp`가 slice 안 cross-thread 반환을 명시 hand-off로 고정한다. scheduler allocator는 worker에서 capture를 해제할 수 있는 thread-safe allocator여야 한다.
 
 같은 scheduler worker 안에서 Step을 호출하면 작업을 제출하기 전에 WrongThread다. 부분 제출 뒤 OOM, scheduler 종료 또는 취소가 발생해도 이미 제출한 marker가 끝나기 전 함수의 stack 상태를 파괴하지 않는다. 이는 별도 event 제어 회귀로 검증한다.
 
 ## 예산과 진단
 
-`GcBudget.maxObjects`는 Trace, 슬롯 분류, 실제 저장소 회수의 처리량을 합산한다. 0은 InvalidArgument다. 기본값은 64이며 `maxNanoseconds` 기본값은 1,000,000ns다. 시간값 0은 시간 제한만 끈다.
+`GcBudget.maxObjects`는 Trace한 객체, 분류한 slot chunk(64칸), 실제 저장소 회수의 처리량을 합산한다(GC-S2 — sweep 단위는 chunk). 0은 InvalidArgument다. 기본은 시간 예산이다: `maxNanoseconds` 기본값 1,000,000ns, `maxObjects` 기본값 `GcBudget::DefaultMaxObjects`(2^20)는 상한 장치다. 시간값 0은 시간 제한만 끈다.
 
 이 시간 예산은 **soft deadline**이다. 사용자 Trace·소멸자, 잠금 대기, worker 배치 완료를 중간에 중단하지 않는다. Begin의 루트·슬롯 스캔(한 잠금 구간에서 전체 슬롯)도 최악 시간 상한을 보장하지 않는다. 회수와 완료 여부 검사는 회수 대상 목록만 보고 지연된 슬롯은 다시 걷지 않지만(아래), 회수 한 개의 비용은 사용자 소멸자에 달렸다. pause percentile 벤치마크는 후속 과제다. `maxObjects=1`만으로 프레임 시간 상한을 보장한다고 해석하지 않는다.
 

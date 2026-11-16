@@ -545,7 +545,7 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
                 // cutoff 이후 태어난 객체는 이전 cohort의 white 후보가 아니다. Commit 검증이
                 // 기존 white 대상·Outer 연결을 거부하므로 새 객체를 이번 cycle에서 trace할 필요가
                 // 없다.
-                slot->mark = markEpoch_;
+                slot->SetMark(markEpoch_);
             }
         }
 
