@@ -24,7 +24,7 @@
 // - 증분 수집: 기본 GcBudget, 시간 한도만 둔 예산(2ms). Step 횟수와 Step 한 번의 시간 분포
 // - scheduler 경로(worker N개, 예산 무제한)
 // - churn: 살아 있는 객체의 10%만큼 쓰레기 묶음을 만든 뒤 Collect(회수 시간)
-// - 메모리: 범주별(Slot chunk·객체·참조 배열·이름·기타) 바이트와 최고치
+// - 메모리: 범주별(Slot chunk·객체·참조 배열·이름·GC 밀집 자료·기타) 바이트와 최고치
 //
 // 사용:
 //   GcBench                          기본 표(100K·1M × 간선 4·8, 1M 잎 50%)
@@ -49,6 +49,7 @@ enum class Category : uint32 {
     ObjectStorage,
     RefArray,
     Names,
+    GcDense,
     Other,
     Count
 };
@@ -65,6 +66,11 @@ Category CategoryOf(uint32 tag) noexcept {
     case 0x4e414d54u: // 'NAMT'
     case 0x4e414d52u: // 'NAMR'
         return Category::Names;
+    case 0x47435047u: // 'GCPG' GC 페이지(hot 레코드·비트 묶음)
+    case 0x47435054u: // 'GCPT'
+    case 0x47435459u: // 'GCTY'
+    case 0x4743524cu: // 'GCRL' 루트 목록
+        return Category::GcDense;
     default:
         return Category::Other;
     }
@@ -442,21 +448,26 @@ bool RunIncremental(ObjectRegistry& registry, const char* label, GcBudget budget
 void PrintMemory(const BenchAllocator& memory, uint64 objects, const ObjectStats& stats) noexcept {
     const uint64 slots = uint64(stats.chunks) * 64;
     const double perObject = objects == 0 ? 0.0 : 1.0 / static_cast<double>(objects);
-    printf("  memory: slot chunks %.1f MiB (%.1f B/slot, %llu slots), objects %.1f MiB, ref "
-           "arrays %.1f MiB, names %.1f MiB, other %.1f MiB, total %.1f MiB (%.1f B/object), "
-           "peak %.1f MiB\n",
-           static_cast<double>(memory.Live(Category::SlotChunk)) / 1048576.0,
-           slots == 0
-               ? 0.0
-               : static_cast<double>(memory.Live(Category::SlotChunk)) / static_cast<double>(slots),
-           static_cast<unsigned long long>(slots),
-           static_cast<double>(memory.Live(Category::ObjectStorage)) / 1048576.0,
-           static_cast<double>(memory.Live(Category::RefArray)) / 1048576.0,
-           static_cast<double>(memory.Live(Category::Names)) / 1048576.0,
-           static_cast<double>(memory.Live(Category::Other)) / 1048576.0,
-           static_cast<double>(memory.Total()) / 1048576.0,
-           static_cast<double>(memory.Total()) * perObject,
-           static_cast<double>(memory.Peak()) / 1048576.0);
+    printf(
+        "  memory: slot chunks %.1f MiB (%.1f B/slot, %llu slots), objects %.1f MiB, ref "
+        "arrays %.1f MiB, names %.1f MiB, GC dense %.1f MiB (%.1f B/slot), other %.1f MiB, total "
+        "%.1f MiB (%.1f B/object), peak %.1f MiB\n",
+        static_cast<double>(memory.Live(Category::SlotChunk)) / 1048576.0,
+        slots == 0
+            ? 0.0
+            : static_cast<double>(memory.Live(Category::SlotChunk)) / static_cast<double>(slots),
+        static_cast<unsigned long long>(slots),
+        static_cast<double>(memory.Live(Category::ObjectStorage)) / 1048576.0,
+        static_cast<double>(memory.Live(Category::RefArray)) / 1048576.0,
+        static_cast<double>(memory.Live(Category::Names)) / 1048576.0,
+        static_cast<double>(memory.Live(Category::GcDense)) / 1048576.0,
+        slots == 0
+            ? 0.0
+            : static_cast<double>(memory.Live(Category::GcDense)) / static_cast<double>(slots),
+        static_cast<double>(memory.Live(Category::Other)) / 1048576.0,
+        static_cast<double>(memory.Total()) / 1048576.0,
+        static_cast<double>(memory.Total()) * perObject,
+        static_cast<double>(memory.Peak()) / 1048576.0);
 }
 
 struct Scenario {
