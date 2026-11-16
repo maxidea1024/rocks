@@ -54,16 +54,18 @@ struct AssignMixed {
     ROCKS_PROPERTY() ObjectRef<AssignTarget> link;
 };
 
-// 값·ObjectRef·ObjectRefArray를 함께 담는 참조 struct다(리플렉션 B9i3c3 — `{}`가 멤버마다 값 단위·
-// 참조 단위·컨테이너 단위로 나뉜다). Registry 컨테이너를 담으므로 StructRefArray 원소가 될 수 없다.
+// 값·ObjectRef·ObjectRefArray·StructRefArray를 함께 담는 참조 struct다(리플렉션 B9i3c3·c4 — `{}`가
+// 멤버마다 값 단위·참조 단위·컨테이너 단위·원소 지우기 단위로 나뉜다). Registry 컨테이너를 담으므로
+// StructRefArray 원소가 될 수 없다.
 ROCKS_STRUCT()
 struct AssignBundle {
-    explicit AssignBundle(Allocator& allocator) noexcept : crew(allocator) {
+    explicit AssignBundle(Allocator& allocator) noexcept : crew(allocator), parts(allocator) {
     }
 
     ROCKS_PROPERTY() int32 level = 0;
     ROCKS_PROPERTY() ObjectRef<AssignTarget> lead;
     ROCKS_PROPERTY() ObjectRefArray<AssignTarget> crew;
+    ROCKS_PROPERTY() StructRefArray<AssignMixed> parts;
 };
 
 ROCKS_CLASS(Abstract)

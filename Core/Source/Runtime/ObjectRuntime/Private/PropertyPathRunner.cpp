@@ -317,6 +317,13 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         }
     }
 
+    // StructRefArray 원소 지우기 준비물(PathPrepareStructElements — 리플렉션 B9i3c4)은 객체(게시·
+    // staged)의 원소 수 읽기다.
+    if (cursor.elements_ && (operation != PathOperation::Length || cursor.IsDetached() ||
+                             cursor.stage_ || cursor.reference_ || cursor.box_)) {
+        return cursor.Fail(ErrorCode::InvalidArgument);
+    }
+
     // 2. 문맥·수명. 게시된 객체는 소유 스레드·문맥·생존(staged·DestroyRequested 객체는 거부된다),
     // staged 객체는 그 트랜잭션의 AcquireType(registry가 트랜잭션의 것이 아니면 WrongContext)이다.
     // 소유 타입 lease는 완료까지 쥔다(해석한 스키마·함수표·StructView의 수명). 분리된 값은 lease가
@@ -493,6 +500,14 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
     if (cursor.stage_ &&
         (FieldTargetType(*end.field).kind != ValueKind::ObjectReference ||
          (end.field->value.kind != ValueKind::Array && end.field->value.kind != ValueKind::Map))) {
+        return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::InvalidValue);
+    }
+
+    // 원소 지우기 준비물의 끝은 struct 원소 배열 필드·멤버 통째다(StructRefArray인지는 thunk가
+    // 묶으며 가린다 — 값 struct 배열은 PathPrepareStructElements가 거부한다).
+    if (cursor.elements_ &&
+        (end.selector != PathSelector::None || end.field->value.kind != ValueKind::Array ||
+         end.field->element.kind != ValueKind::Struct)) {
         return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::InvalidValue);
     }
 

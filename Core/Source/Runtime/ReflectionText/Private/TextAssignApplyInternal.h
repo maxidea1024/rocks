@@ -4,7 +4,8 @@
 
 // 대입 하나의 적용(리플렉션 B9i3c1–c3)을 기능별 파일로 나눈 내부 선언이다: 해석·준비 단위 찾기와
 // 공용 도우미(TextAssignApply.cpp), 값·컨테이너 단위의 적용 문맥(TextAssignValueUnit.cpp), 단일
-// 강한 참조 단위(TextAssignReferenceUnit.cpp), 참조 struct 분해(TextAssignReferenceStruct.cpp).
+// 강한 참조 단위(TextAssignReferenceUnit.cpp), 참조 struct 분해(TextAssignReferenceStruct.cpp),
+// StructRefArray 원소 지우기·비우기(TextAssignElements.cpp — 리플렉션 B9i3c4).
 namespace rocks::reflection_text::detail {
 
 // 두 단일 값이 같은 값인지다(실수는 bit 단위).
@@ -111,5 +112,24 @@ Result<void> ResetReferenceStruct(AssignmentState& state, PropertyPath path, Str
 Result<void> ApplyReferenceStruct(AssignmentState& state, const TextAssignment& assignment,
                                   const TextSlot& slot, PropertyPath path,
                                   TextSource source) noexcept;
+
+// 슬롯이 StructRefArray 필드·멤버(통째 또는 원소)인지다.
+bool IsStructRefArraySlot(const TextSlot& slot) noexcept;
+
+// path 안 StructRefArray 원소 index(지금 index — 앞 대입이 지운 원소를 뺀 자리)를 묶을 때 index로
+// 옮겨 steps(MaxPropertyPathSteps칸)에 담는다. 그 배열의 원소 지우기 단위가 없으면 그대로다. 지금
+// 원소 수 밖이면 진단 OutOfRange를 남기고 false다.
+Result<bool> MapElementIndices(AssignmentState& state, PropertyPath path, PathStep* steps,
+                               TextSource source, StringView pathText) noexcept;
+
+// StructRefArray 필드·멤버 통째(비우기 `items=`)와 원소(지우기 `--erase items[i]`)의 대입이다
+// (TextAssignElements.cpp). path는 묶을 때 index로 옮긴 경로다.
+Result<void> ApplyElements(AssignmentState& state, const TextAssignment& assignment,
+                           const TextSlot& slot, PropertyPath path, TextSource source) noexcept;
+
+// 배열 경로 arrayPath(선택자 없음)의 StructRefArray를 비운다(참조 struct `{}`의 멤버 — 이미
+// 비었으면 무동작, ReadOnly면 진단).
+Result<void> ClearElements(AssignmentState& state, PropertyPath arrayPath, bool readOnly,
+                           TextSource source, StringView pathText) noexcept;
 
 } // namespace rocks::reflection_text::detail

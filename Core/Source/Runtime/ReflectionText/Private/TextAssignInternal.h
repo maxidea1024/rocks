@@ -5,6 +5,7 @@
 #include <Core/Containers/Array.h>
 #include <Object/ObjectRefs.h>
 #include <Object/PreparedReferences.h>
+#include <Object/PreparedStructElements.h>
 #include <ReflectionText/TextAssignments.h>
 
 // 대입 묶음(리플렉션 B9i3c1 — ReflectionText/TextAssignments.h)의 내부 상태다.
@@ -60,6 +61,21 @@ struct ContainerUnit {
     Array<PathStep> steps;
     PreparedReferences stage;
     bool dirty = false;
+};
+
+// StructRefArray 원소 지우기·비우기 단위다(리플렉션 B9i3c4): 배열 필드·멤버 경로(선택자 없음 — 앞
+// 단계는 인라인 struct), 준비물(지금 index → 묶을 때 index 표와 게시). 같은 묶음의 다른 단위는
+// 이 배열의 원소를 묶을 때 index로 가리킨다.
+struct ElementsUnit {
+    explicit ElementsUnit(Allocator& allocator) noexcept : steps(allocator), stage(allocator) {
+    }
+
+    PropertyPath Path() const noexcept {
+        return PropertyPath{steps.View(), {}};
+    }
+
+    Array<PathStep> steps;
+    PreparedStructElements stage;
 };
 
 // 복사해 둔 경로 목록이다(단계·key 종류·key wire를 평평한 배열에 담는다 — 버퍼가 옮겨져도 key는
@@ -125,6 +141,8 @@ struct AssignmentState {
     Array<UniquePtr<ReferenceUnit>> references;
     // Registry 컨테이너 단위다(리플렉션 B9i3c3).
     Array<UniquePtr<ContainerUnit>> containers;
+    // StructRefArray 원소 지우기·비우기 단위다(리플렉션 B9i3c4).
+    Array<UniquePtr<ElementsUnit>> elements;
     // 해석한 대입 경로(같은 경로 두 번 검사).
     PathCopies assigned;
     // override 경로(선택자·key 없음)의 단계와 범위, 그 view.
@@ -151,6 +169,11 @@ Result<AssignmentUnit*> AcquireUnit(AssignmentState& state, PropertyPath unitPat
 // B9i3c3). 진단을 남겼으면 nullptr이다.
 Result<ContainerUnit*> AcquireContainer(AssignmentState& state, PropertyPath unitPath,
                                         TextSource source, StringView pathText) noexcept;
+
+// 배열 경로(선택자 없음)의 StructRefArray 원소 지우기 단위를 찾거나 만들어 배열에 묶는다(리플렉션
+// B9i3c4). 진단을 남겼으면 nullptr이다.
+Result<ElementsUnit*> AcquireElements(AssignmentState& state, PropertyPath unitPath,
+                                      TextSource source, StringView pathText) noexcept;
 
 // 끝 경로 path의 override 경로를 state에 넣는다(같은 경로가 있으면 무동작).
 Result<void> AddOverride(AssignmentState& state, PropertyPath path) noexcept;

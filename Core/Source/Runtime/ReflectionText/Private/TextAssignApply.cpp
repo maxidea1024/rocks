@@ -1,5 +1,6 @@
 #include "TextAssignApplyInternal.h"
 
+#include <Object/ConstructionContext.h>
 #include <Object/NameField.h>
 #include <Object/PathKey.h>
 
@@ -99,6 +100,16 @@ Result<bool> PinReferences(AssignmentState& state, const TextValue& value, TextS
             }
 
             auto pinned = state.target.Registry().TryPin(state.target.Access(), item.reference);
+            // staged 대상은 같은 트랜잭션의 공개 전 객체를 가리킬 수 있다(리플렉션 B9i3c4): 그
+            // 객체는 GC 대상이 아니라 고정할 것이 없고(TryPin은 공개 전 객체를 거부한다), 게시의
+            // staged 쓰기가 트랜잭션 규칙으로 다시 확인한다.
+            if (!pinned && state.target.GetKind() == AssignmentTarget::Kind::Staged &&
+                (!IsCallError(pinned.Error()) || pinned.Error() == ErrorCode::StaleHandle ||
+                 pinned.Error() == ErrorCode::Destroyed) &&
+                state.target.Transaction()->AcquireType(item.reference)) {
+                continue;
+            }
+
             if (!pinned) {
                 if (IsCallError(pinned.Error()) && pinned.Error() != ErrorCode::StaleHandle) {
                     return Result<bool>::Failure(pinned.Error());
@@ -225,7 +236,17 @@ Result<void> ProcessAssignment(AssignmentState& state, const TextAssignment& ass
         return Result<void>::Success();
     }
 
-    const PropertyPath path = resolved.path.View();
+    // StructRefArray 원소 index는 앞 대입이 지운 원소를 뺀 지금 index다 — 묶을 때 index로
+    // 옮긴다(리플렉션 B9i3c4).
+    PathStep mapped[MaxPropertyPathSteps];
+    auto translated =
+        MapElementIndices(state, resolved.path.View(), mapped, source, assignment.path);
+    if (!translated || !translated.Value()) {
+        return translated ? Result<void>::Success() : Result<void>::Failure(translated.Error());
+    }
+
+    const PropertyPath path{Span<const PathStep>(mapped, resolved.path.View().steps.Size()),
+                            resolved.path.View().keys};
     PathKey keys[MaxPropertyPathSteps];
     for (usize index = 0; index < state.assigned.Count(); ++index) {
         if (SamePropertyPath(state.assigned.View(index, keys), path)) {

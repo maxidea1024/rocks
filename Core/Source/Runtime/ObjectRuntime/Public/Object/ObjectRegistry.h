@@ -17,6 +17,7 @@ namespace rocks {
 
 class ObjectBatchPublish;
 class PreparedReferenceArray;
+class PreparedStructElements;
 struct BatchTargetCheck;
 struct BatchEdgeChange;
 
@@ -624,6 +625,7 @@ private:
                                                        ObjectHandle) noexcept;
     friend struct detail::ObjectRegistryAccess;
     friend class ObjectBatchPublish;
+    friend class PreparedStructElements;
 
     struct Slot;
     struct Chunk;

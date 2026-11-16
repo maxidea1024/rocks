@@ -482,6 +482,11 @@ Result<void> PathContainer(PathCursor& cursor, StructRefArray<S>& array) noexcep
 
     if (frame.selector == PathSelector::None) {
         if (operation == PathOperation::Length) {
+            // 원소 지우기 준비물(리플렉션 B9i3c4)은 원소 수 대신 배열을 묶는다.
+            if (cursor.LocatesElements()) {
+                return cursor.BindStructElements(StructRefArrayAccess::Storage(array));
+            }
+
             cursor.SetLength(array.Size());
             return Result<void>::Success();
         }

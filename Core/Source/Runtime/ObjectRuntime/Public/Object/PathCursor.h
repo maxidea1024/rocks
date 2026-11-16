@@ -6,6 +6,12 @@
 #include <Object/PreparedReferences.h>
 #include <Object/PropertyPath.h>
 
+namespace rocks {
+
+class PreparedStructElements;
+
+} // namespace rocks
+
 // 경로 접근 cursor의 공개 detail 선언이다(Docs/Design/ReflectionFoundations.ko.md 7.1절). 생성 경로
 // 템플릿(Object/GeneratedPathAccess.h)이 멤버 함수를 부르므로 클래스 선언은 여기에 두고 구현은
 // Private/PropertyPathCursor.cpp(연산 실행은 PropertyPathRunner.cpp)에 둔다. 사용자 코드는 쓰지
@@ -169,6 +175,18 @@ public:
     Result<void> BindReferences(void* container, const ReferenceStageOps& ops,
                                 Allocator& containerAllocator, Span<const ObjectHandle> elements,
                                 void* clone) noexcept;
+
+    // PathPrepareStructElements(리플렉션 B9i3c4)인지다: StructRefArray 끝 지점이 원소 수 대신 출력
+    // 준비물에 배열을 묶는다(Length 연산).
+    bool LocatesElements() const noexcept {
+        return elements_ != nullptr;
+    }
+
+    // StructRefArray 끝 지점이 부른다: 출력 준비물이 묶이지 않았으면 storage에 묶고(지금 원소
+    // 수·변경 계수), 묶였으면 같은 owner·배열(아니면 InvalidArgument(InvalidValue))과 변경
+    // 계수(아니면 Busy)를 확인한 뒤 게시된 객체면 지울 원소 안의 참조를 다시 모은다. 할당은 고정
+    // 아래 하고 owner를 다시 확인한다.
+    Result<void> BindStructElements(StructRefArrayStorage& storage) noexcept;
 
     // Write·Insert의 입력 값이다(Insert의 struct 원소는 nullptr). 검증을 마친 값이다.
     const FieldValue* Input() const noexcept {
@@ -349,6 +367,8 @@ private:
     PreparedReference* reference_ = nullptr;
     // 시작 위치에 건 Registry 컨테이너 준비 사본이다(리플렉션 B9i3c3).
     PreparedReferences* stage_;
+    // PathPrepareStructElements의 출력 준비물이다(리플렉션 B9i3c4).
+    PreparedStructElements* elements_ = nullptr;
     PathOperation operation_;
     const FieldValue* input_;
     FieldValue* output_;

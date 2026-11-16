@@ -7,7 +7,8 @@ namespace rocks::reflection_text::detail {
 // view는 그 struct)를 기본값으로 되돌린다(리플렉션 B9i3c3 — 참조 struct `{}`). 통째로 떼어 낼 수
 // 없으므로 멤버마다 기존 준비 단위로 나눈다: 값 멤버는 값 단위의 ResetToDefault, ObjectRef 멤버와
 // ObjectRef 정적 배열 원소는 null 참조 단위, ObjectRefArray·ObjectRefMap 멤버는 컨테이너 단위의
-// 비우기, 참조 struct 멤버와 그 정적 배열 원소는 다시 나눈다. StructRefArray 멤버는 Unsupported다.
+// 비우기, 참조 struct 멤버와 그 정적 배열 원소는 다시 나눈다. StructRefArray 멤버는 원소 지우기
+// 단위의 비우기다(B9i3c4).
 // ReadOnly 멤버(staged 대상 제외)는 값이 이미 기본값인 참조가 아니면 진단 ReadOnly다.
 Result<void> ResetReferenceStruct(AssignmentState& state, PropertyPath path, StructView view,
                                   TextSource source, StringView pathText) noexcept {
@@ -78,8 +79,8 @@ Result<void> ResetReferenceStruct(AssignmentState& state, PropertyPath path, Str
         } else if (strongStruct && field.value.kind == ValueKind::Struct) {
             done = ResetReferenceStruct(state, child, slot.structView, source, pathText);
         } else if (strongStruct) {
-            done = Diagnose(state, TextDiagnosticCode::Unsupported, source, pathText,
-                            "a StructRefArray member cannot be reset yet");
+            // StructRefArray 멤버는 원소 지우기 단위의 비우기다(리플렉션 B9i3c4).
+            done = ClearElements(state, child, readOnly, source, pathText);
         } else if (readOnly) {
             done = Diagnose(state, TextDiagnosticCode::ReadOnly, source, pathText,
                             "property is read-only");
@@ -103,10 +104,17 @@ Result<void> ResetReferenceStruct(AssignmentState& state, PropertyPath path, Str
 
 // 준비 단위가 없는 자리의 대입이다: 참조를 담은 struct 자리(인라인 struct 필드·멤버, 정적 배열·
 // StructRefArray의 struct 원소)의 `{}`만 받아 멤버마다 나누고(ResetReferenceStruct) override는 그
-// struct 경로로 넣는다. 그 밖(StructRefArray 통째·원소 지우기)은 Unsupported다.
+// struct 경로로 넣는다. StructRefArray 통째·원소 지우기는 ApplyElements(B9i3c4), 그 밖은
+// Unsupported다.
 Result<void> ApplyReferenceStruct(AssignmentState& state, const TextAssignment& assignment,
                                   const TextSlot& slot, PropertyPath path,
                                   TextSource source) noexcept {
+    // StructRefArray 통째(비우기)와 원소 지우기는 원소 지우기 단위다(리플렉션 B9i3c4).
+    if (IsStructRefArraySlot(slot) &&
+        (slot.part == TextSlotPart::Field || assignment.kind != AssignmentKind::Set)) {
+        return ApplyElements(state, assignment, slot, path, source);
+    }
+
     const bool structSlot =
         !slot.structView.IsEmpty() &&
         ((slot.part == TextSlotPart::Field && slot.field->value.kind == ValueKind::Struct) ||

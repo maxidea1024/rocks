@@ -279,6 +279,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::AssignBundle::parts",
+      "id": "d9144aa932e94461a720dbec3aa67e30",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::AssignHolder::anchor",
       "id": "59b38d165a9943b4b15bd5599e5ab24d",
       "aliases": [],

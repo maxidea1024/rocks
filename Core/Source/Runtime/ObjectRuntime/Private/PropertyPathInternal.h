@@ -45,6 +45,11 @@ struct PathRunner {
         cursor.reference_ = &out;
     }
 
+    // PathPrepareStructElements의 출력 준비물을 건다(리플렉션 B9i3c4).
+    static void BindElements(PathCursor& cursor, PreparedStructElements& out) noexcept {
+        cursor.elements_ = &out;
+    }
+
     static usize Length(const PathCursor& cursor) noexcept {
         return cursor.length_;
     }
