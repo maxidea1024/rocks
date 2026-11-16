@@ -71,6 +71,17 @@ ObjectRegistry::~ObjectRegistry() {
 
     chunkTables_ = nullptr;
     chunks_ = nullptr;
+    for (uint32 index = 0; index < gcPageCount_; ++index) {
+        gcPages_[index]->~GcPage();
+        ReleaseRegistryMemory(allocator_, gcPages_[index]);
+    }
+
+    ReleaseRegistryMemory(allocator_, gcPages_);
+    ReleaseRegistryMemory(allocator_, gcTypes_);
+    ReleaseRegistryMemory(allocator_, rootList_);
+    gcPages_ = nullptr;
+    gcTypes_ = nullptr;
+    rootList_ = nullptr;
     chunkCount_ = 0;
     chunkCapacity_ = 0;
     freeSlots_ = nullptr;
@@ -137,7 +148,10 @@ Result<void> ObjectRegistry::AddRoot(const ObjectAccessContext& access, ObjectHa
         return Result<void>::Failure(shaded);
     }
 
-    ++slot->roots;
+    if (slot->roots++ == 0) {
+        AddRootListLocked(*slot);
+    }
+
     ++tally_.roots;
     return Result<void>::Success();
 }
@@ -214,7 +228,12 @@ void ReleaseRoot(ObjectRegistry* registry, ObjectHandle handle) noexcept {
         platform::Fatal("RootRef release after lifetime closure");
     }
 
-    --slot->roots;
+    if (--slot->roots == 0) {
+        // 루트 목록에서 즉시 뺀다(GC-S3 결정 — 목록은 Begin·Collect의 잠금 구간만 읽으므로 slice
+        // 중 반환도 안전하다. 이미 표식된 객체는 이번 cycle에 남는다).
+        registry->RemoveRootListLocked(*slot);
+    }
+
     --registry->tally_.roots;
     registry->WakeDeferredLocked(*slot);
 }
@@ -624,6 +643,17 @@ ObjectStats ObjectRegistry::Stats() const noexcept {
                 }
 
                 freeCount += slot.state == SlotState::Free ? 1u : 0u;
+                // GC 밀집 자료(GC-S3): live 비트와 루트 목록 위치가 슬롯과 맞는다.
+                const bool live =
+                    slot.state == SlotState::Alive || slot.state == SlotState::DestroyRequested;
+                const uint64 bit = uint64(1) << (slot.index % SlotsPerChunk);
+                if (((BitsOf(slot.index).live & bit) != 0) != live ||
+                    (slot.roots != 0) != (slot.rootPosition != NoSlot) ||
+                    (slot.rootPosition != NoSlot && (slot.rootPosition >= rootCount_ ||
+                                                     rootList_[slot.rootPosition] != slot.index))) {
+                    platform::Fatal("Object registry GC bits or root list diverged from its slots");
+                }
+
                 retiredCount += slot.state == SlotState::Retired ? 1u : 0u;
                 counted.roots += slot.roots;
                 counted.borrows += slot.borrows;

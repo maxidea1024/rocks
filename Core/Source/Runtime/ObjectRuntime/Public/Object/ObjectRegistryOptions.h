@@ -39,7 +39,9 @@ struct GcBudget {
 
 // 한도는 생성 시 고정한다. maxGeneration을 낮추면 슬롯 고갈 회귀 시험을 할 수 있다.
 struct RegistryOptions {
-    uint32 maxSlots = 1048576;
+    // 슬롯 수 상한이다. 기본값은 UE MaxUObjects 기본과 같은 2M이다(Docs/Design/
+    // GarbageCollectionScale.ko.md 4절). 슬롯 저장소는 쓰는 만큼만 chunk·GC 페이지 단위로 늘어난다.
+    uint32 maxSlots = 2097152;
     uint32 maxGeneration = NumericLimits<uint32>::Max();
     // 기본값은 scope 없는 객체 자체 호출에 Registry의 문맥을 사용한다. World/PIE dispatcher가
     // 실행 문맥을 설정하는 구성은 true로 하여 무인자 생명주기·타입 조회 API의 scope 누락을

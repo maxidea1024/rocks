@@ -256,6 +256,8 @@ bool RegisterTypes(TypeRegistry& types, TypeTokens& tokens) noexcept {
     auto registeredNode = types.Register(TypeSchema{NodeTypeId, 1, {}, {}}, Move(node));
     RuntimeTypeOps leaf = MakeRuntimeTypeOps<BenchLeaf>();
     leaf.parallelTraceSafe = true;
+    // 강한 참조가 없다(GC marker가 trace하지 않는다 — M2).
+    leaf.hasStrongReferences = false;
     auto registeredLeaf = types.Register(TypeSchema{LeafTypeId, 1, {}, {}}, Move(leaf));
     if (!registeredNode || !registeredLeaf) {
         return false;

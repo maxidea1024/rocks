@@ -161,6 +161,17 @@ struct NativeClassAccess {
         }
     }
 
+    // U와 Super 사슬의 native 클래스 중 Trace를 직접 선언한 것이 있는지다(리플렉션 조상은 보지
+    // 않는다).
+    template <class U>
+    static constexpr bool ChainDeclaresTrace() noexcept {
+        if constexpr (NativeClassType<U>) {
+            return TraceOf<U>() == TraceDeclaration::Own || ChainDeclaresTrace<typename U::Super>();
+        } else {
+            return false;
+        }
+    }
+
     // U와 Super 사슬의 native 클래스가 모두 Trace를 올바르게 선언했는지(또는 선언하지 않았는지)다.
     template <class U>
     static constexpr bool ValidTraceChain() noexcept {
@@ -272,6 +283,9 @@ Result<TypeRegistrationToken> RegisterNativeClass(TypeRegistry& types,
     ops.trace = [](const Object& object, TraceVisitor& visitor) noexcept {
         detail::TraceNativeChain<T>(static_cast<const T&>(object), visitor);
     };
+    // 사슬의 어느 클래스도 Trace를 선언하지 않고 리플렉션 조상도 잎이면 잎 타입이다(GC marker가
+    // trace를 부르지 않는다 — RuntimeTypeOps::hasStrongReferences).
+    ops.hasStrongReferences = detail::NativeClassAccess::ChainDeclaresTrace<T>();
     if constexpr (!IsSameV<Reflected, void>) {
         // 리플렉션 조상의 필드를 같은 ID·표현으로 담고(TypeRegistry의 상속 필드 대조) 그 생성
         // thunk를 빌린다. 스키마와 함수표는 TypeRegistry가 깊게 복사한다. WorldOnly는 상속되는
@@ -282,6 +296,8 @@ Result<TypeRegistrationToken> RegisterNativeClass(TypeRegistry& types,
         ops.fields = GeneratedType<Reflected>::Ops().fields;
         ops.completeFieldLayout = false;
         ops.parallelTraceSafe = false;
+        ops.hasStrongReferences =
+            ops.hasStrongReferences || GeneratedType<Reflected>::Ops().hasStrongReferences;
     }
 
     if constexpr (!IsSameV<Base, Object>) {

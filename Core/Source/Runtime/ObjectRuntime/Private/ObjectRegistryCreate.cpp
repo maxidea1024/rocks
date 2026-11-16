@@ -1,5 +1,7 @@
 #include "ObjectRegistryInternal.h"
 
+#include <Base/Compiler.h>
+
 #include <Core/Text/NameComponent.h>
 #include <Core/Text/StringBuilder.h>
 #include <Object/ObjectRegistry.h>
@@ -75,10 +77,12 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
     NameRecord* record = nullptr;
     NameEntry* grown = nullptr;
     ChunkTable* grownChunks = nullptr;
+    GcGrowth gcGrowth;
     void* storage = nullptr;
     auto fail = [&](ErrorCode error) noexcept -> Result<ObjectHandle> {
         ReleaseRegistryMemory(allocator_, storage);
         ReleaseRegistryMemory(allocator_, grownChunks);
+        ReleaseGcGrowth(gcGrowth);
         ReleaseRegistryMemory(allocator_, grown);
         ReleaseRegistryMemory(allocator_, record);
         platform::LockGuard lock(gate_);
@@ -236,6 +240,12 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
         }
     }
 
+    // GC 타입 표 번호(hot 레코드에 둔다 — GC-S3). 표는 처리 표시 아래에서만 자란다.
+    auto gcType = AcquireGcType(ops);
+    if (!gcType) {
+        return fail(gcType.Error());
+    }
+
     auto memory = allocator_.Allocate(ops.size, ops.alignment, 0x4f424a45u);
     if (!memory) {
         return fail(memory.Error());
@@ -274,6 +284,12 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
             grownChunkCapacity = static_cast<uint32>(capacity);
         }
 
+        // 새 chunk의 슬롯을 담을 GC 페이지·루트 목록 용량(GC-S3)도 잠금 밖에서 준비한다.
+        if (auto prepared = PrepareGcGrowth((uint64(chunkCount_) + 1) * SlotsPerChunk, gcGrowth);
+            !prepared) {
+            return fail(prepared.Error());
+        }
+
         auto block = allocator_.Allocate(sizeof(Chunk), alignof(Chunk), ChunkTag);
         if (!block) {
             return fail(block.Error());
@@ -303,6 +319,7 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
                 chunkCapacity_ = grownChunkCapacity;
             }
 
+            GrowGcLocked(gcGrowth);
             chunks_[chunkCount_++] = chunk;
             // 낮은 번호부터 쓰도록 거꾸로 넣는다. 상한 밖(Exhausted) 슬롯은 넣지 않는다.
             for (uint32 index = SlotsPerChunk; index-- != 0;) {
@@ -315,6 +332,8 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
         }
 
         grownChunks = nullptr;
+        // GrowGcLocked가 넘겨준 옛 페이지 표·루트 목록을 잠금 밖에서 반환한다.
+        ReleaseGcGrowth(gcGrowth);
     }
 
     Slot* freeSlot = nullptr;
@@ -334,6 +353,14 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
         freeSlot->stableType = type;
         freeSlot->type = Move(typeLease.Value());
         freeSlot->outer = outerKey;
+        // hot 레코드와 잎 비트(GC-S3·M2). object는 생성자 실행 뒤 채운다.
+        GcHot& hot = HotOf(freeSlot->index);
+        hot.object = nullptr;
+        hot.outer = hasOuter ? outerKey.slot : NoSlot;
+        hot.type = gcType.Value();
+        if (gcTypes_[hot.type].leaf) {
+            BitsOf(freeSlot->index).leaf |= uint64(1) << (freeSlot->index % SlotsPerChunk);
+        }
         freeSlot->parent = parent;
         freeSlot->outermost = parent != nullptr ? parent->outermost : freeSlot;
         freeSlot->pathBytes = static_cast<uint16>(pathBytes);
@@ -365,6 +392,7 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
     {
         platform::LockGuard lock(gate_);
         freeSlot->object = object;
+        HotOf(freeSlot->index).object = object;
         processing_ = false;
     }
 
@@ -421,6 +449,14 @@ void ObjectRegistry::ValidateStagedEdge(void* pointer, ObjectHandle handle) noex
     auto& state = *static_cast<MarkState*>(pointer);
     if (handle.IsNull() || state.error != ErrorCode::None) {
         return;
+    }
+
+    if constexpr (IsDebugBuild) {
+        // 잎 타입(RuntimeTypeOps::hasStrongReferences == false)은 GC가 trace하지 않으므로 간선을
+        // 방문하면 그 간선이 GC에 보이지 않는다.
+        if (state.leafOwner) {
+            platform::Fatal("A type declared without strong references visited a reference");
+        }
     }
 
     ObjectHandle package;
@@ -500,12 +536,14 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
     for (usize index = 0; index < staged.Size() && state.error == ErrorCode::None; ++index) {
         Slot* slot = FindSlot(staged[index]);
         state.observe = options_.referenceObserver != nullptr && !slot->outer.IsNull();
+        state.leafOwner = !slot->type.Ops().hasStrongReferences;
         if (state.observe) {
             state.ownerPackage = HandleOf(*slot->outermost);
         }
 
         slot->type.Ops().trace(*slot->object, visitor);
         state.observe = false;
+        state.leafOwner = false;
         VisitIdentityEdges(*slot, visitor);
     }
 
@@ -535,6 +573,9 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
             Slot* slot = FindSlot(staged[index]);
             slot->SetState(tally_, SlotState::Alive);
             slot->transaction = 0;
+            const uint64 bit = uint64(1) << (slot->index % SlotsPerChunk);
+            GcBits& bits = BitsOf(slot->index);
+            bits.live |= bit;
             if (gcPhase_ == GcPhase::Marking) {
                 if (ShadeLocked(staged[index]) != ErrorCode::None) {
                     platform::Fatal("Preallocated newborn mark queue exhausted");
@@ -545,13 +586,17 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
                 // cutoff 이후 태어난 객체는 이전 cohort의 white 후보가 아니다. Commit 검증이
                 // 기존 white 대상·Outer 연결을 거부하므로 새 객체를 이번 cycle에서 trace할 필요가
                 // 없다.
-                slot->SetMark(markEpoch_);
+                bits.mark |= bit;
             }
         }
 
         // root 증가와 관찰자 기록(transaction = 이 트랜잭션)은 공개와 같은 잠금 안이다.
         for (usize index = 0; index < roots.Size(); ++index) {
-            ++FindSlot(roots[index])->roots;
+            Slot* slot = FindSlot(roots[index]);
+            if (slot->roots++ == 0) {
+                AddRootListLocked(*slot);
+            }
+
             ++tally_.roots;
         }
 

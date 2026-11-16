@@ -582,6 +582,10 @@ private:
     struct ChunkTable;
     struct EdgeTally;
     struct EdgePlan;
+    struct GcHot;
+    struct GcBits;
+    struct GcPage;
+    struct GcType;
 
     // Retired 슬롯이 든 회수 대상 목록이다. 슬롯은 셋 중 하나에만 있다(Retired가 아니면 어디에도
     // 없다).
@@ -605,10 +609,16 @@ private:
     static void MarkBatch(void*, const ObjectHandle*, uint32) noexcept;
     static void MarkBatchLocked(void*, const ObjectHandle*, uint32) noexcept;
     void MarkHandles(MarkState&, const ObjectHandle*, uint32) noexcept;
+    // 슬롯 index를 표식한다(잠금 없이 또는 gate_ 아래). 살아 있지 않으면 StaleHandle이다. 잎 타입은
+    // 큐에 넣지 않고 Outer 사슬을 바로 따라간다(M2). work는 모든 슬롯을 담을 용량을 미리 확보했다.
+    ErrorCode MarkIndex(uint32 index, Array<uint32>& work, uint32& marked) noexcept;
+    // index 객체 하나를 trace한다(Trace 간선 → Outer → 패키지 정책이면 자식 고리). locked면 Outer·
+    // 자식 표식도 gate_ 아래다(scheduler 경로).
+    void TraceIndex(uint32 index, MarkState& state, TraceVisitor& visitor, bool locked) noexcept;
     // 작업 큐 work를 cursor부터 trace한다(최대 maxObjects개, deadline이 0이 아니면 그때까지 —
     // 시계는 일정 개수마다 본다). 잠금 없이 처리 표시 아래에서 부른다. 반환은 trace한 객체 수이고
     // 오류는 state.error다.
-    uint32 MarkSerial(Array<ObjectHandle>& work, usize& cursor, MarkState& state, uint32 maxObjects,
+    uint32 MarkSerial(Array<uint32>& work, usize& cursor, MarkState& state, uint32 maxObjects,
                       uint64 deadline) noexcept;
     // scheduler 경로의 표식이다(parallelTraceSafe 타입은 worker, 나머지는 소유 스레드). 반환은
     // MarkSerial과 같다.
@@ -624,6 +634,23 @@ private:
     // 정의는 ObjectRuntime/Private/ObjectRegistryInternal.h(inline — 구현 파일만 부른다).
     inline Slot* FindSlot(ObjectHandle) const noexcept;
     inline Slot* SlotAt(uint32) const noexcept;
+    // GC 밀집 자료(GC-S3, 정의는 ObjectRegistryInternal.h). 슬롯 index의 페이지·hot 레코드·비트
+    // 묶음과 그 묶음 안의 비트다. index는 chunk가 있는 슬롯이어야 한다.
+    inline GcPage& PageOf(uint32) const noexcept;
+    inline GcHot& HotOf(uint32) const noexcept;
+    inline GcBits& BitsOf(uint32) const noexcept;
+    // 잠금 보유: 슬롯을 루트 목록에 넣고 뺀다(roots 0 ↔ 1 전이에서 부른다).
+    void AddRootListLocked(Slot&) noexcept;
+    void RemoveRootListLocked(Slot&) noexcept;
+    // 잠금 밖·처리 표시 아래: ops의 GC 타입 표 번호를 찾거나 새로 단다(0은 없음). 표가 가득하면
+    // CapacityExceeded, 할당 실패는 그 오류다.
+    Result<uint16> AcquireGcType(const RuntimeTypeOps& ops) noexcept;
+    // 잠금 밖·처리 표시 아래: 슬롯 수 slots를 담을 GC 페이지·루트 목록을 준비한다. 새 페이지·표·
+    // 목록은 잠금 안에서 게시해야 하므로 넘겨받은 칸에 담아 돌려준다(GrowGcLocked).
+    struct GcGrowth;
+    Result<void> PrepareGcGrowth(uint64 slots, GcGrowth& growth) noexcept;
+    void GrowGcLocked(GcGrowth& growth) noexcept;
+    void ReleaseGcGrowth(GcGrowth& growth) noexcept;
     Result<void> CheckAccess(const ObjectAccessContext&) const noexcept;
     Result<void> CheckLive(Slot*, const void*) const noexcept;
     Result<ObjectAccessContext> ScopedAccess() const noexcept;
@@ -775,6 +802,9 @@ private:
     // 잠금 보유: Alive·DestroyRequested 슬롯을 Retired로 바꾸고 이름 색인·부모 고리에서 떼어 분류
     // 전 목록 끝에 붙인다(sweep).
     void RetireLocked(Slot&) noexcept;
+    // 잠금 보유: chunk의 white 후보(GC 비트 묶음의 live & ~mark)를 낮은 번호부터 Retire하고 그 수를
+    // 돌려준다(sweep).
+    uint32 RetireWhiteLocked(uint32 chunk) noexcept;
     // 잠금 보유: 어느 목록에도 없는 Retired 슬롯을 queue 목록 끝에 붙인다.
     void LinkRetiredLocked(Slot&, RetiredQueue) noexcept;
     // 잠금 보유: 슬롯을 지금 든 회수 대상 목록에서 뗀다.
@@ -861,6 +891,22 @@ private:
     uint32 chunkCount_ = 0;
     uint32 chunkCapacity_ = 0;
     ChunkTable* chunkTables_ = nullptr; // 지금 표(옛 표는 그 previous 사슬)
+    // GC 밀집 자료(GC-S3): GcPageSlots개 슬롯마다 페이지 하나(hot 레코드와 live·mark·leaf 비트)다.
+    // 페이지는 이동하지 않고 표만 두 배로 키운다(생성의 처리 표시 아래 — marker와 겹치지 않는다).
+    GcPage** gcPages_ = nullptr;
+    uint32 gcPageCount_ = 0;
+    uint32 gcPageCapacity_ = 0;
+    // GC 타입 표(hot 레코드의 타입 번호 → trace·병렬 안전·잎). 0번은 비어 있다. 생성의 처리 표시
+    // 아래에서만 자란다.
+    GcType* gcTypes_ = nullptr;
+    uint32 gcTypeCount_ = 0;
+    uint32 gcTypeCapacity_ = 0;
+    // 루트(roots > 0) 슬롯 번호 목록이다. Begin·Collect가 O(루트 수)로 루트를 표식한다. 용량은
+    // 언제나 슬롯 수 이상이라 gate_ 아래 추가가 할당하지 않는다(다른 스레드의 ReleaseRoot도 gate_
+    // 아래에서 즉시 뺀다 — 목록은 Begin·Collect의 잠금 구간만 읽는다).
+    uint32* rootList_ = nullptr;
+    uint32 rootCount_ = 0;
+    uint32 rootCapacity_ = 0;
     // 빈(Free) 슬롯 목록이다. 가장 최근에 회수한 슬롯부터 재사용한다(새 chunk는 낮은 번호부터).
     Slot* freeSlots_ = nullptr;
     // 회수 대상 목록(RetiredQueue): sweep이 분류 전 목록 끝에 붙이고, 회수가 분류하며 지연 목록으로
@@ -878,9 +924,8 @@ private:
     uint32 totalBorrows_ = 0;
     uint32 constructions_ = 0;
     uint64 nextTransaction_ = 1;
-    uint64 markEpoch_ = 0;
     GcReport lastGc_;
-    Array<ObjectHandle> gcWork_;
+    Array<uint32> gcWork_;
     usize gcCursor_ = 0;
     GcPhase gcPhase_ = GcPhase::Idle;
     GcReport cycleGc_;

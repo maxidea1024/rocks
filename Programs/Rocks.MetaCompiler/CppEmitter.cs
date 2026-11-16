@@ -336,6 +336,12 @@ internal static class CppEmitter
 
             Line("ops.completeFieldLayout = true;");
             Line("ops.parallelTraceSafe = true;");
+            // 방문할 필드가 없는 클래스는 잎 타입이다(GC marker가 trace를 부르지 않는다 — Docs/Design/GarbageCollectionScale.ko.md M2).
+            if (traced.Length == 0)
+            {
+                Line("ops.hasStrongReferences = false;");
+            }
+
             Line($"ops.trace = +[](const Object& object, TraceVisitor& visitor) noexcept {{ Trace(static_cast<const {native}&>(object), visitor); }};");
             Line("return ops;");
             Line("}");

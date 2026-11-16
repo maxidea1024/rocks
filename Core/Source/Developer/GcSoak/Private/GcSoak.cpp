@@ -1394,6 +1394,7 @@ bool RunGcSoak(Allocator& allocator, const GcSoakOptions& options, GcSoakReport&
         node.parallelTraceSafe = true;
         RuntimeTypeOps leaf = MakeRuntimeTypeOps<SoakLeaf>();
         leaf.parallelTraceSafe = true;
+        leaf.hasStrongReferences = false;
         auto nodeToken = types.Register(TypeSchema{SoakNodeType, 1, {}, {}}, Move(node));
         auto leafToken = types.Register(TypeSchema{SoakLeafType, 1, {}, {}}, Move(leaf));
         auto probeToken =

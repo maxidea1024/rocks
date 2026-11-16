@@ -540,6 +540,13 @@ struct RuntimeTypeOps {
     const void* nativeBaseType = nullptr;
     // 기본 수동 Trace는 owner 전용이다. side effect 없는 generated Trace만 명시 opt-in한다.
     bool parallelTraceSafe = false;
+    // trace가 강한 간선을 방문할 수 있는지다. false(잎 타입)면 GC marker가 이 타입 객체를 표식만
+    // 하고 trace를 부르지 않는다(Outer 간선은 Registry가 따로 따라간다 — Docs/Design/
+    // GarbageCollectionScale.ko.md M2). 기본값 true가 안전하다. 메타 생성 코드(참조·struct·배열·맵
+    // 필드가 없는 클래스)와 RegisterNativeClass(사슬에 Trace가 없고 리플렉션 조상도 잎)만 false로
+    // 둔다. 함수표를 직접 만드는 쪽은 trace가 아무것도 방문하지 않을 때만 false로 한다. Debug는
+    // Commit 검증에서 잎 타입이 간선을 방문하면 Fatal로 멈춘다.
+    bool hasStrongReferences = true;
     // 모든 영속 필드와 모든 강한 간선이 typed metadata에 포함된 경우만 true다. ROCKS_NATIVE 멤버는
     // 영속 필드가 아니고 강한 참조를 담을 수 없으므로(MetaCompiler RMC2205·생성 static_assert) 생성
     // 타입은 계속 true다. graph serializer는 이 선언 없는 수동/부분 metadata를 완전한 객체로

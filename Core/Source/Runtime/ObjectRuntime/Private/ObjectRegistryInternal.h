@@ -3,7 +3,6 @@
 #include <Core/Containers/HashMap.h>
 #include <Core/Hash.h>
 #include <Object/ObjectRegistry.h>
-#include <Platform/Atomics.h>
 #include <Platform/Fatal.h>
 
 // ObjectRegistry 구현 파일(ObjectRegistry*.cpp)이 함께 쓰는 내부 정의다. 슬롯 상태와 Registry
@@ -13,6 +12,11 @@
 namespace rocks::registry_detail {
 
 inline constexpr uint32 SlotsPerChunk = 64;
+// GC 페이지 하나의 슬롯 수다(chunk 64개). hot 레코드 64 KiB와 비트 묶음 1.5 KiB를 담는다.
+inline constexpr uint32 GcPageSlots = 4096;
+inline constexpr uint32 ChunksPerGcPage = GcPageSlots / SlotsPerChunk;
+// 슬롯 번호가 없다는 표지다(hot 레코드의 Outer 없음, 루트 목록 밖).
+inline constexpr uint32 NoSlot = NumericLimits<uint32>::Max();
 enum class SlotState : uint8 {
     Free,
     Reserved,
@@ -67,9 +71,8 @@ struct ObjectRegistry::Slot {
     // encode 고정 계수(PinForEncode). 0이 아니면 컨테이너·참조 변경이 Busy이고 회수하지 않는다.
     uint32 encodePins = 0;
     uint64 transaction = 0;
-    // 표식 epoch다. 직렬 marker가 잠금 없이 읽고 쓰므로(GC-S1,
-    // Docs/Design/GarbageCollectionScale.ko.md 7.1절) Mark·SetMark(relaxed atomic)로만 접근한다.
-    uint64 markEpoch = 0;
+    // 루트 목록(ObjectRegistry::rootList_)에서의 위치다(roots가 0이면 NoSlot).
+    uint32 rootPosition = registry_detail::NoSlot;
     // Outer·이름(생성 때 고정 — Docs/Design/ObjectFoundations.ko.md 1.4절). 고리는 슬롯 번호가
     // 아니라 Slot*다: chunk는 Registry 소멸 전까지 이동·반환되지 않으므로 포인터가 안정하고, 순회가
     // 슬롯 번호 → chunk 표 조회를 거치지 않고 바로 따라간다. Reclaiming·Free 슬롯의 이 칸은 읽지
@@ -89,14 +92,6 @@ struct ObjectRegistry::Slot {
     bool indexed = false;   // 이름 색인에 있다
     bool linked = false;    // 부모 고리에 있다
     bool discarded = false; // Discard됐다(DestroyRequested이고 색인·고리에 없다 — 회수 때 내린다)
-
-    uint64 Mark() const noexcept {
-        return platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&markEpoch);
-    }
-
-    void SetMark(uint64 epoch) noexcept {
-        platform::AtomicStore<platform::MemoryOrder::Relaxed>(&markEpoch, epoch);
-    }
 
     // 잠금 보유 상태에서 부른다. tally는 그 Registry의 상태별 통계다.
     void SetState(ObjectStats& tally, registry_detail::SlotState next) noexcept {
@@ -138,9 +133,14 @@ struct ObjectRegistry::ReclaimWork {
 
 struct ObjectRegistry::MarkState {
     ObjectRegistry* registry;
-    Array<ObjectHandle>* work;
+    Array<uint32>* work;
     uint64 transaction = 0;
     ErrorCode error = ErrorCode::None;
+    // 이번 표식이 새로 표식한 객체 수다(잎 객체 포함 — 큐 길이와 다르다).
+    uint32 marked = 0;
+    // Commit 검증: 지금 trace하는 소유자가 잎 타입(강한 참조 없음 선언)이면 간선을 방문하면 안
+    // 된다.
+    bool leafOwner = false;
     // 관찰자 쌍 집계(Commit 검증·Discard·다중 간선 지점): tally가 있고 observe면 지금 trace하는
     // 소유자의 패키지 ownerPackage에서 다른 패키지로 가는 간선을 delta로 합친다.
     EdgeTally* tally = nullptr;
@@ -246,6 +246,69 @@ struct ObjectRegistry::NameEntry {
     Slot* slot = nullptr;
     uint64 keyHash = 0;
 };
+
+// GC가 슬롯마다 읽는 값의 밀집 레코드다(GC-S3, Docs/Design/GarbageCollectionScale.ko.md). 슬롯
+// 번호로 GcPage에서 찾는다. 생성 게시(잠금 안)에서 채우고 회수 때 비운다. Reserved·Alive·
+// DestroyRequested·Retired 동안 object·type·outer가 유효하다.
+struct ObjectRegistry::GcHot {
+    Object* object = nullptr;
+    // Outer의 슬롯 번호다(없으면 NoSlot). Outer는 생성 때 고정이다.
+    uint32 outer = registry_detail::NoSlot;
+    // GC 타입 표 번호다(0은 없음).
+    uint16 type = 0;
+    uint16 reserved = 0;
+};
+
+// 슬롯 64개(chunk 하나)의 비트 묶음이다. bit i가 chunk의 i번 슬롯이다.
+// - live: Alive·DestroyRequested(GC 후보). Commit이 켜고 Retire가 끈다(잠금 안, 소유 스레드).
+// - mark: 이번 cycle에 표식됨. Begin·Collect가 지우고 marker·장벽·Sweeping 출생이 켠다.
+// - leaf: 잎 타입(강한 참조 없음)이라 표식만 하고 trace하지 않는다(M2 — 패키지 정책 Registry는
+//   자식 고리를 따라야 하므로 켜지 않는다). 생성 게시가 켜고 회수가 끈다.
+struct ObjectRegistry::GcBits {
+    uint64 live = 0;
+    uint64 mark = 0;
+    uint64 leaf = 0;
+};
+
+struct ObjectRegistry::GcPage {
+    static_assert(sizeof(GcHot) == 16, "GC hot record must stay 16 bytes");
+
+    GcBits bits[registry_detail::ChunksPerGcPage];
+    GcHot hot[registry_detail::GcPageSlots];
+};
+
+// GC 타입 표의 항목이다. key는 타입 레코드의 RuntimeTypeOps 주소다(레코드가 살아 있는 동안
+// 안정하다 — 레코드가 해제되어 같은 주소를 다른 타입이 쓰면 찾을 때 값을 다시 채운다. 그때는
+// 옛 타입의 객체가 남아 있지 않다).
+struct ObjectRegistry::GcType {
+    const void* key = nullptr;
+    void (*trace)(const Object&, TraceVisitor&) noexcept = nullptr;
+    bool parallelTraceSafe = false;
+    bool leaf = false;
+};
+
+// 생성이 잠금 밖에서 준비해 잠금 안에서 게시하는 GC 자료 성장분이다. 쓰지 않은 것은
+// ReleaseGcGrowth가 반환한다.
+struct ObjectRegistry::GcGrowth {
+    GcPage* page = nullptr;
+    GcPage** pageTable = nullptr;
+    uint32 pageTableCapacity = 0;
+    uint32* rootList = nullptr;
+    uint32 rootCapacity = 0;
+};
+
+inline ObjectRegistry::GcPage& ObjectRegistry::PageOf(uint32 index) const noexcept {
+    return *gcPages_[index / registry_detail::GcPageSlots];
+}
+
+inline ObjectRegistry::GcHot& ObjectRegistry::HotOf(uint32 index) const noexcept {
+    return PageOf(index).hot[index % registry_detail::GcPageSlots];
+}
+
+inline ObjectRegistry::GcBits& ObjectRegistry::BitsOf(uint32 index) const noexcept {
+    return PageOf(index)
+        .bits[(index % registry_detail::GcPageSlots) / registry_detail::SlotsPerChunk];
+}
 
 // chunk 표 색인이라 O(1)이다. 다른 스레드의 계수 반환도 잠금 안에서 부르므로 표 교체(잠금 안)와
 // 겹치지 않고, 처리 표시 아래 잠금 없이 부를 때(소유 스레드와 병렬 trace worker)는 표가 바뀌지

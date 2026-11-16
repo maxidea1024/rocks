@@ -913,9 +913,11 @@ TEST(ConstructionContext_AssignReferencesShadesAliveTargetsBetweenSlices) {
         REQUIRE(RegisterAll(types));
         ObjectRegistry objects(allocator, types, {0x4352, 9});
         const auto access = objects.OwnerAccess();
-        RootRef<Item> padding[3];
-        for (RootRef<Item>& root : padding) {
-            auto created = objects.NewObject<Item>(access, NativeTypeIdOf<Item>());
+        // padding은 trace되는(잎이 아닌) 타입이라 slice마다 하나씩 처리되어 Marking이 남는다(잎
+        // 타입 Item은 표식만 하고 큐에 넣지 않는다 — GC M2).
+        RootRef<Holder> padding[3];
+        for (RootRef<Holder>& root : padding) {
+            auto created = objects.NewObject<Holder>(access, NativeTypeIdOf<Holder>());
             REQUIRE(created);
             root = Move(created.Value());
         }
@@ -951,7 +953,7 @@ TEST(ConstructionContext_AssignReferencesShadesAliveTargetsBetweenSlices) {
         REQUIRE(objects.Collect(access));
         CHECK(!IsAlive(objects, white));
         root.Reset();
-        for (RootRef<Item>& padded : padding) {
+        for (RootRef<Holder>& padded : padding) {
             padded.Reset();
         }
 
