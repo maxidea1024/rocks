@@ -153,14 +153,14 @@ uint8 LinearToSrgbByte(float linear) noexcept;   // 경계 표 이분 탐색. Na
 - 위치: 줄·열은 1부터, CRLF는 줄바꿈 1개, CR 단독도 줄바꿈, 열은 코드 포인트 단위(tab은 1칸), byte offset을 함께 보고한다(`JsonPosition { line, column, byteOffset }`, 오류 위치는 잘못된 값·문자·이스케이프의 시작, 건너뛴 BOM은 세지 않는다).
 - 한도(`JsonReadOptions`로 조정, 기본): 입력 64 MiB, 깊이 128, 문자열 하나 16 MiB, 노드 수 4,194,304. 파서는 반복형(명시 스택)이다(`n_structure_100000_opening_arrays`).
 - DOM: `JsonDocument` — `JsonValue`(Null·Bool·Integer·Unsigned·Double·String·Array·Object의 가벼운 핸들), 객체는 원문 순서를 보존하는 (키, 값) 배열 + 조회용 해시.
-- 구현(구현됨, `Core/Text/Json.h`): ArenaAllocator는 소멸 전에 모든 할당이 반환돼야 하므로 노드·배열 원소 색인·객체 멤버·문자열 byte를 allocator의 평평한 배열 네 개에 담는다(할당 수가 적고 해제가 단순하다). 반복형 파서는 컨테이너마다 frame을 쌓고 자식을 대기 배열에 모았다가 닫을 때 최종 배열로 옮긴다. (객체 노드, 키 byte) 하나의 해시 색인이 중복 키 판정과 조회를 함께 맡는다. 줄·열은 오류·경고 때만 앞에서부터 다시 센다(정상 경로 비용 없음). 숫자 분류는 Core NumberText(C4)를 쓰고 원문 토큰을 보관한다. 입력은 1 GiB 이하(위치가 uint32).
+- 구현(구현됨, `Core/Text/Json.h`): ArenaAllocator는 소멸 전에 모든 할당이 반환돼야 하므로 노드·배열 원소 색인·객체 멤버·문자열 byte를 allocator의 평평한 배열 네 개에 담는다(할당 수가 적고 해제가 단순하다). 반복형 파서는 컨테이너마다 frame을 쌓고 자식을 대기 배열에 모았다가 닫을 때 최종 배열로 옮긴다. (객체 노드, 키 byte) 하나의 해시 색인이 중복 키 판정과 조회를 함께 맡는다(키 byte는 프로세스 seed의 `SeededHash<StringView>`(SipHash-2-4) — 입력 파일의 키로 칸 충돌을 고를 수 없다, B9i1. writer의 중복 키 색인도 같다). 오류 위치는 실패 때 앞에서부터 다시 세고, 값 위치(`JsonValue::Position()`)는 노드마다 시작 byte를 기록했다가 성공한 뒤 입력을 한 번 훑어 줄·열을 채운다(노드 순서가 전위라 시작 위치가 줄지 않는다 — 노드당 12 byte, 입력 + 노드 수에 비례). 숫자 분류는 Core NumberText(C4)를 쓰고 원문 토큰을 보관한다. 입력은 1 GiB 이하(위치가 uint32).
 
 ### 3.4 쓰기
 
 - `JsonWriter`(StringBuilder 대상)의 byte 단위 고정 규칙: 들여쓰기 2칸, 줄바꿈 LF, 끝에 줄바꿈 1개, 키 구분자 `": "`, 빈 컨테이너 `{}`·`[]`, 키 순서는 호출자 순서(정렬이 필요한 파일은 호출자가 AssetSystem 4.2절 정렬로 넣는다). 문자열 이스케이프는 `"`·`\\`·제어 문자만(U+0008·U+000C·U+000A·U+000D·U+0009는 `\b\f\n\r\t`, 그 밖은 소문자 16진 `\u00xx` — 키 안의 U+0000 포함), 그 밖의 문자는 UTF-8 그대로. 호출자가 준 문자열은 UTF-8을 검증한다. BOM은 쓰지 않는다.
 - 모드: **Canonical**(기본 — 정수 종류는 10진, double은 최단 왕복 표기이며 결과에 `.`·`e`가 없으면 `.0`을 붙여 다시 읽어도 double이 된다, −0.0은 `-0.0`) — 읽기 → 쓰기 → 읽기가 같은 DOM이고 쓰기 결과는 고정점이다. **Preserve**(원문 숫자 토큰 그대로 — 사람이 쓴 표기를 유지해야 하는 편집 도구용, 고정점 보장 없음). NaN·Inf는 쓰기 오류.
 - 쓰기 보강(구현됨): 같은 객체의 중복 키는 InvalidArgument(자기 reader가 거부하므로), 깊이 한도는 reader와 같은 128 기본값(생성자 인자 — 더 깊게 읽은 문서는 같은 한도의 writer로 쓴다), DOM 쓰기(`Value`)와 비교(`JsonEquals`)는 재귀하지 않는다(읽기·비교는 10만 단계 시험, 쓰기는 고정 들여쓰기 때문에 출력이 깊이의 제곱에 비례하므로 5천 단계를 기본 스택이 작은 보조 스레드에서 시험한다). `JsonEquals`는 노드가 전위 순서로 쌓여 서브트리가 연속 구간이라는 점을 써서 두 구간을 한 번 훑고, 숫자는 비트를 정수로 풀어 정확히 비교한다(부동소수점 환경과 무관 — DAZ 시험). 입력 문자열이 출력 builder의 View()여도 된다(복사 후 쓴다).
-- 원자적 파일 기록은 호출자가 `FileSystem::Replace` 흐름으로 한다(AssetSystem 5.5절과 같은 임시 파일 규칙). 리플렉션 B9(B9i1)가 `JsonWriter::Float(float)`(Canonical 규칙의 단정도 최단 표기 — 지금은 float를 넓힌 double로 쓴다)와 `JsonValue::Position()`(노드 시작 byte offset과 line·column — 의미 오류 위치 보고)을 더한다([리플렉션 B9](ReflectionExtensions.ko.md) 10.1절).
+- 원자적 파일 기록은 호출자가 `FileSystem::Replace` 흐름으로 한다(AssetSystem 5.5절과 같은 임시 파일 규칙). 리플렉션 B9(B9i1)가 `JsonWriter::Float(float)`(Canonical 규칙의 단정도 최단 표기 — Double은 float를 넓힌 double로 쓴다. 읽는 쪽은 `RawNumber()`를 `TryParseFloat`로 읽는다)와 `JsonValue::Position()`(값 시작의 byte offset과 line·column, 오류 위치와 같은 규칙 — 의미 오류 위치 보고)을 더했다([리플렉션 B9](ReflectionExtensions.ko.md) 10.1절).
 
 ### 3.5 시험
 

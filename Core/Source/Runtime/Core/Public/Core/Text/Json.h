@@ -3,6 +3,7 @@
 #include <Core/Containers/Array.h>
 #include <Core/Containers/HashMap.h>
 #include <Core/Containers/Span.h>
+#include <Core/Hash.h>
 #include <Core/Result.h>
 #include <Core/Text/StringBuilder.h>
 #include <Core/Text/StringView.h>
@@ -150,6 +151,20 @@ public:
     // 객체 멤버 조회(해시). 객체가 아니거나 키가 없으면 무효 값.
     JsonValue Find(StringView key) const noexcept;
 
+    // 이 값이 입력에서 시작하는 위치다(JsonError의 위치와 같은 규칙: 문자열은 여는 '"', 컨테이너는
+    // '{'·'[', 숫자는 부호 또는 첫 숫자, 리터럴은 첫 글자. byteOffset은 건너뛴 BOM을 포함한 입력
+    // byte 위치다). 문법은 맞지만 뜻이 틀린 값(모르는 키·타입 불일치·범위 밖)을 사람이 고치도록
+    // 위치를 보고할 때 쓴다. 객체 멤버는 값의 위치다(키 위치는 따로 없다 — 보통 같은 줄이다).
+    // Parse가 한 번에 계산해 두므로 상수 시간이다. 전제: IsValid()(아니면 Fatal).
+    //
+    // 사용 예:
+    //   const JsonValue scale = document.Root().Find("scale");
+    //   if (scale.IsValid() && !scale.IsNumber()) {
+    //       const JsonPosition at = scale.Position();
+    //       Report(at.line, at.column, "scale must be a number");
+    //   }
+    JsonPosition Position() const noexcept;
+
 private:
     friend class JsonDocument;
     friend bool JsonEquals(JsonValue left, JsonValue right) noexcept;
@@ -210,7 +225,16 @@ private:
         uint32 value;
     };
 
+    // 노드 시작 위치(nodes_와 같은 순서). 입력 상한이 1 GiB라 uint32로 충분하다.
+    struct NodePosition {
+        uint32 byteOffset;
+        uint32 line;
+        uint32 column;
+    };
+
     // 중복 키 판정과 조회용 색인 키: (객체 노드, text_의 키 범위). 조회는 (객체 노드, StringView).
+    // 키는 입력 파일에서 오므로 seed 해시(SeededHash — 프로세스 seed)로 색인한다(hash flooding
+    // 방어, Docs/Design/ReflectionExtensions.ko.md 10.1절).
     struct MemberKey {
         uint32 object;
         uint32 offset;
@@ -224,6 +248,7 @@ private:
 
     struct MemberHash {
         const Array<char>* text;
+        SeededHash<StringView> bytes;
         uint64 operator()(const MemberKey& key) const noexcept;
         uint64 operator()(const MemberQuery& query) const noexcept;
     };
@@ -237,6 +262,7 @@ private:
     StringView Text(uint32 offset, uint32 length) const noexcept;
 
     Array<Node> nodes_;
+    Array<NodePosition> positions_;
     Array<uint32> elements_;
     Array<Member> members_;
     Array<char> text_;
@@ -287,6 +313,16 @@ public:
     Result<void> Int64(int64 value) noexcept;
     Result<void> UInt64(uint64 value) noexcept;
     Result<void> Double(double value) noexcept;
+    // float 값을 단정도 최단 왕복 표기로 쓴다(0.1f는 "0.1" — Double(0.1f)는 넓힌 double의
+    // "0.10000000149011612"다). 고정 소수점·과학 표기 경계와 ".0" 규칙은 Double과 같다(Canonical,
+    // 1.0f는 "1.0", -0.0f는 "-0.0"). 다시 읽은 문서에서 같은 float를 얻으려면 TryGetDouble로
+    // double을 거치지 말고 RawNumber()를 TryParseFloat(NumberText.h)로 읽는다(이중 반올림을
+    // 피한다). NaN·Inf는 InvalidArgument다. 숫자 모드(Preserve)와 무관하게 이 표기를 쓴다.
+    //
+    // 사용 예:
+    //   writer.Key("gamma") && writer.Float(2.2f);   // "gamma": 2.2
+    //   // 읽기: TryParseFloat(document.Root().Find("gamma").RawNumber()) == 2.2f
+    Result<void> Float(float value) noexcept;
     Result<void> String(StringView value) noexcept;
     // 문서 값을 통째로 쓴다(Preserve면 원문 숫자 토큰). 재귀하지 않는다.
     Result<void> Value(JsonValue value) noexcept;
@@ -308,8 +344,10 @@ private:
         usize length;
     };
 
+    // 쓴 키도 입력 문서에서 옮겨 온 것일 수 있어(Value) 문서 색인과 같은 seed 해시를 쓴다.
     struct WrittenKeyHash {
         const StringBuilderBase* out;
+        SeededHash<StringView> bytes;
         uint64 operator()(const WrittenKey& key) const noexcept;
     };
 
@@ -323,6 +361,7 @@ private:
     Result<void> BeginContainer(bool object) noexcept;
     Result<void> EndContainer(bool object) noexcept;
     Result<void> WriteNumber(JsonValue value) noexcept;
+    Result<void> FinishFloatingPoint(usize start) noexcept;
     Result<void> WriteEscaped(StringView text) noexcept;
     Result<void> WriteIndent(usize depth) noexcept;
     Result<void> Fail(ErrorCode code) noexcept;

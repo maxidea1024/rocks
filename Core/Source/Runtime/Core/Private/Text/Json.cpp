@@ -56,9 +56,12 @@ namespace {
 // 않는다.
 constexpr uint64 HardInputLimit = 1ull << 30;
 
-uint64 HashKeyBytes(uint32 owner, const char* bytes, usize length) noexcept {
-    return MixHash(HashStringBytes(StringView(bytes, length)) ^
-                   (static_cast<uint64>(owner) * 0x9E3779B97F4A7C15ull));
+// (소유 객체, 키 byte)의 색인 해시다. 키 byte는 seed가 들어간 SipHash라 seed를 모르는 입력 작성자가
+// 칸 충돌을 고를 수 없다. 소유 객체 번호는 그 뒤에 섞는다(같은 키라도 객체마다 다른 칸 — 섞는 값이
+// 예측할 수 없는 키 해시라 객체 번호를 골라도 충돌을 맞출 수 없다).
+uint64 HashKeyBytes(const SeededHash<StringView>& hash, uint32 owner, const char* bytes,
+                    usize length) noexcept {
+    return HashCombine(hash(StringView(bytes, length)), owner);
 }
 
 bool Overlaps(const char* data, usize size, const char* begin, usize count) noexcept {
@@ -70,11 +73,11 @@ bool Overlaps(const char* data, usize size, const char* begin, usize count) noex
 } // namespace
 
 uint64 JsonDocument::MemberHash::operator()(const MemberKey& key) const noexcept {
-    return HashKeyBytes(key.object, text->Data() + key.offset, key.length);
+    return HashKeyBytes(bytes, key.object, text->Data() + key.offset, key.length);
 }
 
 uint64 JsonDocument::MemberHash::operator()(const MemberQuery& query) const noexcept {
-    return HashKeyBytes(query.object, query.key.Data(), query.key.ByteCount());
+    return HashKeyBytes(bytes, query.object, query.key.Data(), query.key.ByteCount());
 }
 
 bool JsonDocument::MemberEqual::operator()(const MemberKey& left,
@@ -91,8 +94,9 @@ bool JsonDocument::MemberEqual::operator()(const MemberKey& left,
 }
 
 JsonDocument::JsonDocument(Allocator& allocator) noexcept
-    : nodes_(allocator), elements_(allocator), members_(allocator), text_(allocator),
-      warnings_(allocator), index_(allocator, MemberHash{&text_}, MemberEqual{&text_}) {
+    : nodes_(allocator), positions_(allocator), elements_(allocator), members_(allocator),
+      text_(allocator), warnings_(allocator),
+      index_(allocator, MemberHash{&text_, {}}, MemberEqual{&text_}) {
 }
 
 Span<const JsonWarning> JsonDocument::Warnings() const noexcept {
@@ -101,6 +105,7 @@ Span<const JsonWarning> JsonDocument::Warnings() const noexcept {
 
 void JsonDocument::Clear() noexcept {
     nodes_.Clear();
+    positions_.Clear();
     elements_.Clear();
     members_.Clear();
     text_.Clear();
@@ -174,7 +179,10 @@ private:
 
         index = static_cast<uint32>(document_.nodes_.Size());
         node.end = index + 1;
-        return Memory(document_.nodes_.TryPushBack(node));
+        // line·column은 성공한 뒤 FillPositions가 한 번에 채운다(at은 입력 상한 1 GiB 아래다).
+        return Memory(document_.nodes_.TryPushBack(node)) &&
+               Memory(document_.positions_.TryPushBack(
+                   JsonDocument::NodePosition{static_cast<uint32>(at), 0, 0}));
     }
 
     bool ParseValue(uint32& node) noexcept;
@@ -187,6 +195,8 @@ private:
     bool BeginKey() noexcept;
     bool CloseContainer() noexcept;
     JsonPosition PositionOf(usize offset) const noexcept;
+    void Advance(JsonPosition& position, usize& index, usize offset) const noexcept;
+    void FillPositions() noexcept;
 
     JsonDocument& document_;
     const uint8* data_;
@@ -202,11 +212,18 @@ private:
 };
 
 JsonPosition JsonParser::PositionOf(usize offset) const noexcept {
-    // 오류 때만 앞에서부터 센다. CRLF는 줄바꿈 1개, CR 단독도 줄바꿈, column은 code point(UTF-8
-    // 이어지는 byte는 세지 않는다). 건너뛴 BOM은 세지 않는다.
+    // 오류 때만 앞에서부터 센다. 건너뛴 BOM은 세지 않는다.
     JsonPosition position;
+    usize index = bomLength_;
+    Advance(position, index, offset);
+    return position;
+}
+
+// position(입력 index 앞까지 센 위치)을 offset 앞까지 진행한다. CRLF는 줄바꿈 1개, CR 단독도
+// 줄바꿈, column은 code point(UTF-8 이어지는 byte는 세지 않는다)다.
+void JsonParser::Advance(JsonPosition& position, usize& index, usize offset) const noexcept {
     position.byteOffset = offset;
-    for (usize index = bomLength_; index < offset && index < size_; ++index) {
+    for (; index < offset && index < size_; ++index) {
         const uint8 byte = data_[index];
         if (byte == '\n' || (byte == '\r' && !(index + 1 < size_ && data_[index + 1] == '\n'))) {
             ++position.line;
@@ -217,8 +234,19 @@ JsonPosition JsonParser::PositionOf(usize offset) const noexcept {
             ++position.column;
         }
     }
+}
 
-    return position;
+// 성공한 문서의 노드 위치에 line·column을 채운다. 노드는 문서 순서(전위)라 시작 위치가 줄지
+// 않으므로 입력을 한 번만 훑는다(입력 + 노드 수에 비례).
+void JsonParser::FillPositions() noexcept {
+    JsonPosition position;
+    usize index = bomLength_;
+    for (usize node = 0; node < document_.positions_.Size(); ++node) {
+        JsonDocument::NodePosition& entry = document_.positions_[node];
+        Advance(position, index, entry.byteOffset);
+        entry.line = position.line;
+        entry.column = position.column;
+    }
 }
 
 bool JsonParser::AppendText(const void* bytes, usize count) noexcept {
@@ -850,6 +878,10 @@ JsonError JsonParser::Run() noexcept {
         }
     }
 
+    if (ok) {
+        FillPositions();
+    }
+
     if (!ok) {
         result.code = errorCode_;
         result.position = PositionOf(errorOffset_);
@@ -972,6 +1004,16 @@ Result<double> JsonValue::TryGetDouble() const noexcept {
     }
 
     return Result<double>::Failure(ErrorCode::InvalidArgument);
+}
+
+JsonPosition JsonValue::Position() const noexcept {
+    CheckValid("JsonValue::Position on an invalid or stale value");
+    const JsonDocument::NodePosition& entry = document_->positions_[node_];
+    JsonPosition position;
+    position.line = entry.line;
+    position.column = entry.column;
+    position.byteOffset = entry.byteOffset;
+    return position;
 }
 
 StringView JsonValue::RawNumber() const noexcept {
@@ -1192,7 +1234,7 @@ bool JsonEquals(JsonValue left, JsonValue right) noexcept {
 // ---- 쓰기 ----
 
 uint64 JsonWriter::WrittenKeyHash::operator()(const WrittenKey& key) const noexcept {
-    return HashKeyBytes(key.object, out->View().Data() + key.offset, key.length);
+    return HashKeyBytes(bytes, key.object, out->View().Data() + key.offset, key.length);
 }
 
 bool JsonWriter::WrittenKeyEqual::operator()(const WrittenKey& left,
@@ -1204,7 +1246,7 @@ bool JsonWriter::WrittenKeyEqual::operator()(const WrittenKey& left,
 
 JsonWriter::JsonWriter(StringBuilderBase& out, JsonNumberMode mode, uint32 maxDepth) noexcept
     : out_(&out), mode_(mode), maxDepth_(maxDepth), frames_(out.GetAllocator()),
-      keys_(out.GetAllocator(), WrittenKeyHash{&out}, WrittenKeyEqual{&out}) {
+      keys_(out.GetAllocator(), WrittenKeyHash{&out, {}}, WrittenKeyEqual{&out}) {
 }
 
 Result<void> JsonWriter::Fail(ErrorCode code) noexcept {
@@ -1518,6 +1560,30 @@ Result<void> JsonWriter::Double(double value) noexcept {
         return written;
     }
 
+    return FinishFloatingPoint(start);
+}
+
+Result<void> JsonWriter::Float(float value) noexcept {
+    // NaN·Inf는 JSON에 없다(비트로 판정 — 부동소수점 환경과 무관).
+    if ((platform::BitCast<uint32>(value) & 0x7F800000u) == 0x7F800000u) {
+        return Fail(ErrorCode::InvalidArgument);
+    }
+
+    if (auto before = BeforeValue(); !before) {
+        return before;
+    }
+
+    // StringBuilder의 float "{}"는 단정도 최단 왕복 표기이고 고정·과학 표기 경계가 double과 같다.
+    const usize start = out_->ByteCount();
+    if (auto written = Check(out_->TryAppendFormat("{}", value)); !written) {
+        return written;
+    }
+
+    return FinishFloatingPoint(start);
+}
+
+// start부터 쓴 최단 실수 표기를 마무리한다.
+Result<void> JsonWriter::FinishFloatingPoint(usize start) noexcept {
     // 최단 표기에 '.'·'e'가 없으면 ".0"을 붙인다(−0도 "-0" → "-0.0"). 다시 읽어도 double이다.
     const StringView text = out_->View();
     bool hasMarker = false;

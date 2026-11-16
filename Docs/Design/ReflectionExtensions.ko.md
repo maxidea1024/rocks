@@ -739,6 +739,14 @@ enum class UnsaveablePolicy : uint8 {
 - ReadOnly 필드: 살아 있는 객체 대상이면 진단 `ReadOnly`, staged 객체(생성 중 — `asset-new`) 대상이면 받는다(ReadOnly는 생성·복원의 staged write를 허용한다 — MS/TypeSchema.h FieldFlags 주석). 살아 있는 객체 대상이라도 값이 지금 값과 같은 ReadOnly 대입은 무동작으로 받고 override 경로에도 넣지 않는다(`asset-info` 출력의 재입력 — 10.4절).
 - 숨김 열거자(`EnumeratorFlags::Hidden`): 입력은 진단 `HiddenEnumerator`로 거부한다(A5가 `InvalidSetting`으로 바꾼다 — AS 435행). 출력은 그대로 쓴다.
 
+구현(B9i1)에서 정한 점:
+
+- `JsonWriter::Float`: StringBuilder의 float `"{}"`(단정도 최단 왕복, 고정·과학 표기 경계는 double과 같은 −4 이상 16 미만)에 Double과 같은 `.0` 규칙을 붙인다. NaN·Inf는 InvalidArgument. Preserve 모드에서도 같은 표기다(원문 토큰이 없는 값이다). DOM에는 float 종류를 두지 않고 읽기 쪽 `TryGetFloat`도 더하지 않았다(소비자가 `TryParseFloat(RawNumber())` — 위 항목).
+- `JsonValue::Position()`: 값 시작(문자열 `"`, 컨테이너 `{`·`[`, 숫자 첫 글자, 리터럴 첫 글자)의 `JsonPosition`이며 오류 위치와 같은 규칙이다(byteOffset은 BOM 포함 입력 byte, column은 BOM을 세지 않는다). 객체 멤버는 값의 위치만 있고 키 위치는 두지 않았다(모르는 키도 값 위치로 보고한다 — 보통 같은 줄). 저장: 노드와 나란한 `positions_`(byte offset·line·column uint32 셋)에 노드를 넣을 때 offset을 적고, 성공한 뒤 입력을 한 번 훑어 line·column을 채운다(노드는 전위 순서라 시작 위치가 줄지 않는다). 무효 값에서 부르면 다른 접근자처럼 Fatal이다.
+- StringSplit escape: `SplitOptions::escapeCharacters`(escape할 수 있는 글자 목록, 비면 escape 없음 — 기본)를 더했다. 목록 글자 앞의 백슬래시만 escape 쌍이고 구분자 검색이 쌍을 건너뛰며, 조각에는 escape가 그대로 남는다(조각이 입력을 빌린 view라서). 푸는 함수 `TryAppendUnescaped(StringBuilderBase&, piece, list)`와 첫 구분자만 찾는 `TryFindUnescaped`(Map 항목의 첫 escape되지 않은 `:`)를 같이 더했다. 표(`,;:`)는 Core에 두지 않고 B9i3의 codec이 상수로 갖는다(Core는 범용 옵션만). 목록 글자는 ASCII 0x21–0x7E만 받는다(공백 escape는 trim과 어긋난다). 이 표에서는 백슬래시 자체를 escape할 수 없어 목록 원소가 백슬래시로 끝나면 바로 뒤 `,`와 붙어 `\,`가 된다(`C:\dir\,D:` — 마지막 원소가 아니면 쓸 수 없다). 10.4절 표대로 두었고, 필요해지면 목록에 백슬래시를 더해(`\\`) 푼다.
+- 멤버 색인 seed 해시: `JsonDocument::MemberHash`가 `SeededHash<StringView>`(프로세스 seed, SipHash-2-4)를 갖고, 키 byte 해시에 객체 노드 번호를 `HashCombine`으로 섞는다(키 해시가 예측할 수 없으므로 객체 번호를 골라도 칸을 맞출 수 없다). writer의 중복 키 색인(`WrittenKeyHash`)도 같은 해시로 바꿨다 — `Value`로 입력 문서의 키를 그대로 옮겨 쓸 수 있기 때문이다. seed 주입 API는 두지 않았다(멤버 순서가 해시와 무관해 재현성 문제가 없다).
+- 시험: Core `Json_ValuePositionsForSemanticErrors`·`Json_WriterFloatShortestSingle`·`Json_MemberIndexSeededAcrossObjects`, `StringSplit_EscapeAwareSplitFindAndUnescape`.
+
 ### 10.2 대입 묶음 API
 
 ```cpp

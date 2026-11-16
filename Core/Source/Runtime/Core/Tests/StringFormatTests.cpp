@@ -452,6 +452,77 @@ TEST(StringSplit_IntoArrayAndJoin) {
           ErrorCode::InvalidArgument);
 }
 
+// 명령행 escape 표(ReflectionExtensions.ko.md 10.4절): \, \; \: 만 escape이고 그 밖의 백슬래시는
+// 글자 그대로다. 조각은 escape를 그대로 담고 TryAppendUnescaped가 푼다.
+TEST(StringSplit_EscapeAwareSplitFindAndUnescape) {
+    SystemAllocator allocator;
+    Array<StringView> parts(allocator);
+    SplitOptions escaped;
+    escaped.escapeCharacters = ",;:";
+    auto count = TrySplitIntoArray("a\\,b,c\\;d,C:\\x,e\\", ",", parts, escaped);
+    REQUIRE(count);
+    REQUIRE(count.Value() == 4);
+    CHECK(Same(parts[0], "a\\,b") && Same(parts[1], "c\\;d") && Same(parts[2], "C:\\x") &&
+          Same(parts[3], "e\\"));
+    const char* const unescaped[] = {"a,b", "c;d", "C:\\x", "e\\"};
+    for (usize index = 0; index < 4; ++index) {
+        StringBuilder<32> text(allocator);
+        REQUIRE(TryAppendUnescaped(text, parts[index], escaped.escapeCharacters));
+        CHECK(Same(text.View(), unescaped[index]));
+    }
+
+    // 왼쪽부터 본다: 목록에 백슬래시가 없으면 \\, 는 글자 \ 와 escape 쌍 \, 이다.
+    parts.Clear();
+    count = TrySplitIntoArray("x\\\\,y", ",", parts, escaped);
+    CHECK(count && count.Value() == 1);
+    StringBuilder<32> joined(allocator);
+    REQUIRE(TryAppendUnescaped(joined, parts[0], escaped.escapeCharacters));
+    CHECK(Same(joined.View(), "x\\,y"));
+    // 목록에 백슬래시를 넣으면 \\ 가 글자 \ 이고 뒤의 ','는 구분자다.
+    parts.Clear();
+    SplitOptions withBackslash;
+    withBackslash.escapeCharacters = "\\,";
+    count = TrySplitIntoArray("x\\\\,y", ",", parts, withBackslash);
+    REQUIRE(count);
+    CHECK(count.Value() == 2 && Same(parts[0], "x\\\\") && Same(parts[1], "y"));
+    StringBuilder<32> single(allocator);
+    REQUIRE(TryAppendUnescaped(single, parts[0], withBackslash.escapeCharacters));
+    CHECK(Same(single.View(), "x\\"));
+
+    // 여러 byte 구분자·공백 지우기와 함께 쓴다.
+    parts.Clear();
+    SplitOptions colons;
+    colons.escapeCharacters = ":";
+    count = TrySplitIntoArray("a\\::b::c", "::", parts, colons);
+    CHECK(count && count.Value() == 2 && Same(parts[0], "a\\::b") && Same(parts[1], "c"));
+    parts.Clear();
+    SplitOptions trimmed = escaped;
+    trimmed.trimAsciiWhitespace = true;
+    count = TrySplitIntoArray(" a\\, b , c", ",", parts, trimmed);
+    CHECK(count && count.Value() == 2 && Same(parts[0], "a\\, b") && Same(parts[1], "c"));
+
+    // Map 항목은 escape되지 않은 첫 ':'에서 나눈다(값 안의 C:\x는 escape 없이 쓴다).
+    auto colon = TryFindUnescaped("a\\:b:C:\\x", ":", ",;:");
+    CHECK(colon && colon.Value() == 4);
+    colon = TryFindUnescaped("a\\:b", ":", ",;:");
+    CHECK(colon && colon.Value() == StringView::NotFound);
+    colon = TryFindUnescaped("aXb", "x", "", StringComparison::IgnoreAsciiCase);
+    CHECK(colon && colon.Value() == 1);
+
+    // 잘못된 escape 목록(공백·비ASCII)과 빈 구분자는 InvalidArgument이고 out은 그대로다.
+    parts.Clear();
+    SplitOptions spaced;
+    spaced.escapeCharacters = " ";
+    CHECK(TrySplitIntoArray("a,b", ",", parts, spaced).Error() == ErrorCode::InvalidArgument);
+    CHECK(parts.IsEmpty());
+    CHECK(TryFindUnescaped("a", ":", StringView("\xC3", 1)).Error() == ErrorCode::InvalidArgument);
+    CHECK(TryFindUnescaped("a", "", ",").Error() == ErrorCode::InvalidArgument);
+    StringBuilder<32> untouched(allocator);
+    CHECK(TryAppendUnescaped(untouched, "a\\,b", StringView("\x7F", 1)).Error() ==
+          ErrorCode::InvalidArgument);
+    CHECK(untouched.ByteCount() == 0);
+}
+
 TEST(StringSplit_GrowthFailureRestoresArray) {
     SystemAllocator system;
     test::NFailAllocator failing(system);
