@@ -187,7 +187,7 @@ UE 5.8(`Engine/Source/Runtime/Core/Private/Windows/WindowsPlatformProcess.cpp:23
 - POSIX `dlsym`은 의존 라이브러리의 심볼도 찾는다(`GetProcAddress`는 그 DLL의 export만).
 - 후속: dlerror 문구 전달, 심볼 버전, macOS·Android 시험 라이브러리 생성기, macOS CI 실행.
 
-검증(2026-11-16): Windows x64 Debug·Asan에서 동적 라이브러리 시험 8건이 통과했다. 인자 음성 대조, 파일 없음·없는 디렉터리 아래·디렉터리·라이브러리가 아닌 파일·없는 시스템 이름, 심볼 조회·없는 심볼·표 되돌리기(처음 없는 색인)·lease 수·`Busy`·lease 이동·라이브러리 이동 대입, 8 스레드 × 64회 동시 조회의 lease 수, 같은 디렉터리 의존 해결(A의 import 칸 = B의 export 주소)과 의존 없음 `NotFound`·실패 뒤 남지 않음, 소유자 소멸 뒤 마지막 lease가 내림, 260자 넘는 경로, 음성 대조를 확인한다. 음성 대조는 자식 probe에서 의존 DLL B를 현재 디렉터리에만·PATH에만 두고 연다: `DynamicLibrary`는 `NotFound`이고 같은 자리에서 OS 기본 검색(`LoadLibraryExW` 플래그 0) 대조군은 연다(B가 실제로 찾을 수 있는 곳에 있는데 보지 않음). B를 A 옆에 두면 같은 probe가 연다. Android x86_64 에뮬레이터(API 35)에서는 OS 공급 라이브러리 시험 4건이 통과하고 시험 라이브러리가 필요한 4건은 SKIP이다. macOS는 이 기계에서 빌드하지 않았다(CI가 맡는다).
+검증(2026-11-16): Windows x64 Debug·Asan에서 동적 라이브러리 시험 8건이 통과했다. 인자 음성 대조, 파일 없음·없는 디렉터리 아래·디렉터리·라이브러리가 아닌 파일·없는 시스템 이름, 심볼 조회·없는 심볼·표 되돌리기(처음 없는 색인)·lease 수·`Busy`·lease 이동·라이브러리 이동 대입, 8 스레드 × 64회 동시 조회의 lease 수, 같은 디렉터리 의존 해결(A의 import 칸 = B의 export 주소)과 의존 없음 `NotFound`·실패 뒤 남지 않음, 소유자 소멸 뒤 마지막 lease가 내림, 정확한 전체 길이 239·240·247·248·259·260·261·300·512 byte와 기준 경로 + 300 byte 경로(작업 디렉터리 길이와 무관하게 만든다), 음성 대조를 확인한다. 음성 대조는 자식 probe에서 의존 DLL B를 현재 디렉터리에만·PATH에만 두고 연다: `DynamicLibrary`는 `NotFound`이고 같은 자리에서 OS 기본 검색(`LoadLibraryExW` 플래그 0) 대조군은 연다(B가 실제로 찾을 수 있는 곳에 있는데 보지 않음). B를 A 옆에 두면 같은 probe가 연다. Android x86_64 에뮬레이터(API 35)에서는 OS 공급 라이브러리 시험 4건이 통과하고 시험 라이브러리가 필요한 4건은 SKIP이다. macOS는 이 기계에서 빌드하지 않았다(CI가 맡는다).
 
 ## 모바일 플랫폼 (2026-11-11: desktop + mobile은 우선 Android)
 
