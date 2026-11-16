@@ -2,7 +2,7 @@
 
 STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-driven 렌더러
 
-**설계 기준일 2026.11.16 · 개정 1.9 · 상태: 구현 제안 / 성능 미측정**
+**설계 기준일 2026.11.16 · 개정 1.10 · 상태: 구현 제안 / 성능 미측정**
 
 **추가 요구 반영:** Deferred·Forward 정식 지원, 업스케일링, 태깅·컴포넌트·프리팹, Unreal 참고 체계 확대, 컷씬 제작 핵심화, Blueprint 제외·자체 언어 채택, 하이엔드 포스트이펙트 전체 기능군, UBT 계열 자체 빌드 도구·분산 빌드·반복 개발 최적화, 정식 헤드리스 모드, 필수 노드 기반 머티리얼 에디터.
 
@@ -21,6 +21,8 @@ STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-d
 **1.8 Sparks 언어 모호성 교차 검증:** 같은 규격을 읽은 구현자나 사용자가 다른 결론에 이를 수 있는 지점을 6개 관점으로 교차 검증하고, 스크립트 단계와 프레임 순서·인과 깊이 연쇄 상한·전달 순회·Changed 값 기준·격리·종료 경로별 hook·이름 해석·예약 이름·어휘를 확정하였다. 결정 SD11–SD21(재진입 정책 표시, Start 대기 범위, 이벤트 대기 결과, Array 파괴 처리, enum 한정, 범위 `..<`, 정수 나눗셈 오류, 미터·라디안 단위, 빈 Soft 제거, 종료 경로 hook, NextTick 시계)을 채택하였고, 사용자 결정으로 컴파일 모듈 확장자를 `.sparkc`로 정정하였다(SD1). 2.4·3.2·5.2·6.4·9.2·20.2·22.6·23·29.6(NL09)·31(R03)절과 33.1절 A04의 문구를 개정하고 결과는 33.13절에 기록한다.
 
 **1.9 UI 구조 전환:** 개정 1.4의 Godot 4.x 수준 단일 층 툴킷을 폐기하고 UE 5.8의 두 층 UI 구조(비객체 Element 층 + Object Widget 층)로 전환한다. 기본 스타일과 룩도 최초 구성에서는 UE 5.8 기본값을 따른다. 이름은 Rocks 고유 이름을 쓰고 UE 이름은 대응표에만 적는다. Godot 오라클 시험 GO1–GO6을 UE 5.8 소스 근거 기준값 시험 UV1–UV9로 대체한다. 1.4·2.5·3.1·3.2·21·21.1·21.2·21.3·21.4·21.5·22.1·29.2·30.1·30.2·31·32·33.2·33.9·34절을 개정하고 [UI 툴킷 설계](UiToolkit.ko.md)를 초안 2.0으로 다시 썼다. 개정 범위는 33.14절에 기록한다.
+
+**1.10 GC 대규모 처리 필수화:** 현재 `ObjectRegistry` GC는 객체 100만 개 규모에서 쓸 수 없다(2026-11-16 사용자 판단, 모델 측정 1M 표식 약 0.7초). 대규모 처리 보강을 선택 최적화가 아닌 **필수 작업**으로 정하고 6.6절과 [GC 대규모 처리 보강 설계](GarbageCollectionScale.ko.md)를 추가한다. 착수 시점은 사용자가 정하며 고정 구현 순서는 바꾸지 않는다.
 
 ## 1. 목표와 실행 전략
 
@@ -64,14 +66,14 @@ Unreal Core의 개별 기능에 대해 Rocks에서도 가능한지 묻는다면 
 | Foundation 책임 묶음 | 최종 구현 결과 | 검증 책임 |
 |---|---|---|
 | F0 · 실행 기반 | PlatformBase·고정 toolchain·assert/log·CPU-only runner | GPU/창/에디터 없이 생성·실행·오류 재현 |
-| F1 · 메모리 | 기준 heap/page·tag·실패·정렬·track, slab/thread cache는 선택 최적화 | 모든 기반 자료구조의 allocator/수명 계약 |
+| F1 · 메모리 | 기준 heap/page·tag·실패·정렬·track, slab/thread cache는 선택 최적화(GC 대규모 처리 보강 GC-S6에서는 필수 — 6.6절) | 모든 기반 자료구조의 allocator/수명 계약 |
 | F2 · 공통 library | Array/Span/String/Name/HashMap·handle store·math·path/time/archive | iterator·소멸·복사/이동·overflow·Transform·serialization 정확성 |
 | F3 · 실행 시스템 | Atomic/Thread/Mutex/Event·queue·Task DAG·기초 async IO·Trace | 의존성·취소·drain·read/write phase 검증 |
 | F4 · 객체 기반 | TypeInfo 최소형·Object·청크 Registry·generation·Root/Object/Weak 참조·ClassDefaults | 공개 전 초기화·instancing·논리 파괴·회수 규약 |
 | F5 · GC·데이터 | Nonmoving full collector·generated/manual visitor 대조·Archive·schema fixture | 오수거·dangling·영속 ID 손상 0건 |
 | F6 · Foundation Gate | 병렬 기반 stress·Object/GC 수명 시험·문서화된 API·재현 trace | 이후 시스템의 본격 구현 착수 |
 
-F0–F6는 Foundation 책임 묶음이며 번호순으로 전체 기능을 완료하라는 선행 관계가 아니다. 실제 착수는 상세안 R0의 기준 heap·최소 Array·inline executor → R1 객체/정지형 GC → R2 전체 library·worker/IO·Archive 순서다. C07–C12에 C13–C20 또는 C28을 선행시키지 않으며 slab/thread cache는 C28 선택 최적화다.
+F0–F6는 Foundation 책임 묶음이며 번호순으로 전체 기능을 완료하라는 선행 관계가 아니다. 실제 착수는 상세안 R0의 기준 heap·최소 Array·inline executor → R1 객체/정지형 GC → R2 전체 library·worker/IO·Archive 순서다. C07–C12에 C13–C20 또는 C28을 선행시키지 않으며 slab/thread cache는 C28 최적화다. 다만 GC 대규모 처리 보강(6.6절 GC-S6)에서는 필수 항목이다.
 
 병렬·점진 GC의 공개 목표는 유지하되 첫 collector는 정확한 정지형 기준 구현이다. 초기부터 barrier-aware API를 설계하여 나중에 raw pointer 필드를 일괄 교체하지 않게 한다. 병렬 marking/점진 budget 최적화는 full collector와 결과를 대조한 뒤 확대한다.
 
@@ -357,7 +359,7 @@ ARM64는 NEON backend를 검증하며 macOS ARM64를 별도 CI/실기기 항목�
 
 ### 4.1 할당기 구성
 
-첫 R0/R1은 단순 기준 heap/page와 잠금 기반 회계로 정확성을 검증한다. 크기 등급별 slab·thread cache·Object 전용 size-class pool은 C28 이후 측정 기반 최적화안이며 첫 객체 작업의 선행 조건이 아니다. Object 주소 비이동은 기준 heap에서도 유지한다. Registry 청크와 객체 본체는 서로 다른 메모리 영역이다. 큰 객체나 특수 정렬은 별도 page allocation으로 지원한다.
+첫 R0/R1은 단순 기준 heap/page와 잠금 기반 회계로 정확성을 검증한다. 크기 등급별 slab·thread cache·Object 전용 size-class pool은 C28 이후 측정 기반 최적화안이며 첫 객체 작업의 선행 조건이 아니다. 단 slab·thread cache·O(1) 소유권 판정은 GC 대규모 처리 보강(6.6절 GC-S6)의 필수 항목이며 Core Memory 공용으로 둔다. Object 전용 할당자는 따로 두지 않는다. Object 주소 비이동은 기준 heap에서도 유지한다. Registry 청크와 객체 본체는 서로 다른 메모리 영역이다. 큰 객체나 특수 정렬은 별도 page allocation으로 지원한다.
 
 | 할당기 | 사용 대상 | 반환 규약 |
 |---|---|---|
@@ -514,7 +516,7 @@ CF06–CF08에서 ctor의 GC 요청 defer/진단, 단계 사이 강제 GC, alloc
 
 ### 6.1 수거 방식과 참조 규약
 
-**주소 비이동 mark-and-sweep, safepoint 구간의 병렬 marking, 여러 프레임에 분산한 점진 marking**을 기본 구현으로 채택한다. 병렬은 여러 GC worker의 동시 처리를 의미하며, 초기 단계에서는 게임의 필드 변경과 GC의 필드 스캔을 동시에 허용하지 않는다. 완전 concurrent marker는 별도의 P3 연구로 분리한다.
+**주소 비이동 mark-and-sweep, safepoint 구간의 병렬 marking, 여러 프레임에 분산한 점진 marking**을 기본 구현으로 채택한다. 이 기본은 6.6절 GC-S5 완료 뒤 바뀐다. 정식 경로는 STW 병렬 전체 수집이 되고 점진 marking은 선택 경로가 된다. 병렬은 여러 GC worker의 동시 처리를 의미하며, 초기 단계에서는 게임의 필드 변경과 GC의 필드 스캔을 동시에 허용하지 않는다. 완전 concurrent marker는 별도의 P3 연구로 분리한다.
 
 | 참조 타입 | 도달성·역할 | 보장 |
 |---|---|---|
@@ -568,6 +570,38 @@ IsLogicallyAvailable은 generation·TypeInfo IsA·slot 상태·born/mark/cutoff�
 초기 collector는 active mark/cutoff 분류 cycle을 1개만 허용한다. 모든 cutoff 대상 slot의 판정·Retiring 분류가 끝나기 전에는 bitmap/epoch를 재사용하거나 다음 mark를 시작하지 않는다. 이미 분류된 retirement backlog는 generation이 포함된 불변 record로 관리하여 후속 mark와 공존한다. retire record의 storage/metadata/backend hold는 GC root가 아니며 RootRef self-root로 구현하지 않는다. born epoch·64-bit epoch wrap은 정지·drain 후 재설정하는 정책으로 검증한다.
 
 chunk마다 sweep을 정지하고 allocation·root 변경·후속 cycle 요청·지연 fence를 조합한다. 이전 판정이 새 mark에 덮이거나 retire backlog가 자기 도달성을 유지하지 않아야 한다. safepoint에서 worker를 반환하거나 GC 작업에 참여시켜 정지한 mutator가 worker 전체를 점유하지 않게 한다. 1-worker/2-worker에서도 GC 진행·종료를 검증한다.
+
+### 6.6 대규모 처리 필수 보강 (개정 1.10)
+
+**반드시 해야 하는 작업이다.** 현재 GC는 정확성 기준 구현에 머물러 AAA급 규모(살아 있는 객체 100만 개 이상)에서 쓸 수 없다. 원인은 네 가지다.
+
+- 간선마다 Registry 전역 잠금을 잡는다.
+- 192B Slot에 GC 필드와 비GC 필드가 섞여 있다.
+- 루트 수집과 sweep이 전체 Slot을 순회한다.
+- 병렬 경로가 게임에서 쓰이지 않고, 증분 예산이 객체 수 기준이다.
+
+6.2절이 정한 epoch bitmap test-and-set, 청크·회색 객체 블록 분담, 큰 배열 batch 분할도 아직 구현되지 않았다(지금은 객체 하나 단위의 task 분담만 있다). GC-S5를 마치면 6.1절의 기본 구현은 STW 병렬 전체 수집으로 바뀌고 점진 marking은 선택 경로가 된다. 이 절의 작업은 위 0.5/1.0ms 목표처럼 "성능 미달을 별도 측정 결과로 관리"하는 대상이 아니다. 완료와 성능 gate 통과가 GC를 대규모 콘텐츠에 쓰기 위한 조건이다.
+
+- **원칙:** 객체 규모는 엔진이 감당한다. 객체 수 줄이기를 GC 문제의 1차 해법으로 사용자에게 요구하지 않는다. 5.1절의 대량 데이터 표현 규칙(정점·입자 등을 Object로 만들지 않음)은 그대로 둔다.
+- **성능 gate(제안, 측정으로 확정):** 8코어 데스크톱, 살아 있는 객체 1M 기준으로 다음을 목표로 한다.
+  - STW 병렬 전체 표식 ≤ 15ms
+  - Begin과 sweep 후보 판정 각 ≤ 1ms
+  - 증분 Step ≤ 2ms(p99)를 gate로 둔다. 6.3절의 0.5/1.0ms는 soft 목표로 별도 기록한다. 증분 cycle은 60프레임 이내에 완료한다
+  - 대량 파괴는 프레임당 시간 예산 안에서 처리
+  - 기본 상한 2M 슬롯 이상
+- **단계(GC-S0–S7):**
+  - S0 실제 Registry 벤치
+  - S1 표식 잠금 제거·배치 visitor·prefetch
+  - S2 시간 기준 예산
+  - S3 GC 필드 SoA 분리·루트 목록·bitmap sweep
+  - S4 병렬 표식과 World 연결
+  - S5 STW 병렬 수집 경로와 파괴 예산
+  - S6 스레드 캐시·O(1) 소유권 할당자(C28의 slab/thread cache를 필수로 올린다)
+  - S7 영구 영역·자동 클러스터·schema 기반 Trace와 큰 배열 분할
+  - MetaCompiler 활용 M1–M7: marker 전용 정적 특수화, 잎 타입 표시, 참조 위치 상수, 정적 schema 등(제안, 측정 뒤 채택)
+- **착수 시점:** 사용자가 정한다. 고정 구현 순서를 바꾸지 않는다.
+
+상세 근거, UE 5.8 대조, 모델 측정, 위험은 [GC 대규모 처리 보강 설계](GarbageCollectionScale.ko.md)에 둔다.
 
 ## 7. Clang 메타 컴파일러와 직렬화
 
@@ -2896,6 +2930,15 @@ Verse 조사에서 Epic의 "The road to UE6"(2026-06-17)는 게임플레이 프�
 Godot 오라클 시험 GO1–GO6을 UE 5.8 소스의 행 단위 근거를 단 기준값 시험 UV1–UV9로 대체하였다. Core 선행 계약 CU1–CU9의 ID와 UI 툴킷 설계 7절 번호는 유지하였으며, Element 층이 요구하는 Core 보강 CB1–CB4와 PlatformWindow 보강 PW1–PW8을 추가하였다. 세부와 결정 UD1–UD12(2026.11.16 모두 확정)는 [UI 툴킷 설계](UiToolkit.ko.md) 초안 2.0에 둔다.
 
 개정 범위는 표지·1.4·1.9·2.5·3.1·3.2·21·21.1·21.2·21.3·21.4·21.5·22.1·29.2(B12)·30.1·30.2·31(R08)·32·33.2·33.9·34절이다. S75–S77은 본문 인용을 철회하였다. 본 개정은 문서 계약의 변경이며 구현·실행 검증 결과가 아니다.
+
+### 33.15 개정 1.10의 GC 대규모 처리 필수화
+
+사용자 판단(2026-11-16)에 따라 현재 GC를 대규모 규모에서 쓸 수 없는 상태로 기록하고, 대규모 처리 보강을 필수 작업으로 정하였다. 근거는 두 가지다.
+
+- 현재 코드의 핫패스 분석: 간선별 전역 잠금, 192B Slot, 전체 Slot 순회, 객체 수 기준 예산
+- 리포 밖 독립 모델의 측정: 1M 표식이 현재 구조 약 0.7초, 개선 구조 단일 스레드 약 45ms, 16스레드 약 10ms
+
+UE 5.8.4의 GC 구조도 대조하였다. 상세는 [GC 대규모 처리 보강 설계](GarbageCollectionScale.ko.md)에 둔다. 개정 범위는 표지·1.1(F1 행·C28 문장)·4.1·6.1·6.6·33.15절이다. 본 개정은 문서 계약의 변경이며 구현·실행 검증 결과가 아니다.
 
 ## 34. 참고 자료와 설계 근거
 
