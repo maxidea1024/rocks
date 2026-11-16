@@ -134,6 +134,7 @@ ID는 이 문서가 붙인다. CP는 Core 선행, GX는 Graphics 확장, RB는 R
 | GX1 | 장치 능력 `DeviceCaps` | 미설계 | A0-G G1, 셰이더 시스템 P6a | RB3, RG1, RG4 | M | 4.4절 |
 | GX2 | 자원 desc·view 확장, 샘플러 위치(R12)·비교 샘플러 | 미설계 | A0-G | RB2, RG1 | L | 4.4절 |
 | GX3 | 파이프라인 완성(SH2 범위 밖 부분) | 미설계 | SH2·P2·P14 | RB4, RB5, RB6 | L | 4.4절 |
+| GX3a | 정점 배치 완성: 정점 원소 형식 20종·다중 stream·인스턴스 stream·index 버퍼·instanced·indexed draw·셰이더 입력 대조, CPU 패킹 helper | 설계(10.4절) | — | RB5, 메시 에셋 | M | 10.4절 |
 | GX4 | 명령 기록 확장 | 미설계 | GX2·GX3 | RB5, RB6, RG1 | L | 4.4절 |
 | GX5 | 명시 접근 상태와 전이 | 미설계 | GX2·GX4 | RG1 | M–L | 4.4절 |
 | GX6 | 파라미터 바인딩 런타임(상수 블록·묶음 설정·공유 slot) | 미설계 | P2·SH2 | RB4 | L | 4.4절, 9절 |
@@ -584,6 +585,106 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 ### 10.3 완료 기준(RB5)
 
 등록 결정성(등록 순서와 무관한 키), 늦은 등록 거부, 키 축 포함 라이브러리 왕복, 정점 배치 ⊇ 입력 마스크·타입 불일치의 음성 대조, 다중 stream·인스턴스 stream 픽셀 대조(D3D12·Vulkan·GLES 미리보기).
+
+### 10.4 정점 배치와 정점 원소 형식(GX3a)
+
+정점 입력 타입(10.2절)의 바탕인 Graphics 쪽 정점 배치를 셰이더 시스템보다 먼저 완성한다(2026-11-16 사용자 지시 "하시오", "이번에는 제대로 해야함"). 셰이더와 독립이고, A0-G 착수 전에 Graphics 계약 변경과 함께 합친다. 정점 입력 타입 등록·셰이더 키 축(RB5)은 셰이더 시스템 P14·SH2 뒤다.
+
+**정점 원소 형식.** UE 5.8 정점 원소 타입 20종 전부를 둔다.
+- 형식은 메시 에셋이 직렬화하므로 GraphicsTypes에 둔다. 텍스처 형식과 같은 방식으로 고정 번호표와 안정 이름을 쓰고 enum 순서 값은 직렬화하지 않는다(6.5절과 같은 규칙).
+- "셰이더 타입"은 VS 입력 변수의 기본 타입이다. 정규화·float 형식은 float 계열, 정규화 없는 정수 형식은 int·uint 계열이어야 한다.
+- UE 대응 근거:
+  - D3D12: `D3D12RHI/Private/D3D12VertexDeclaration.cpp:27–41`
+  - Vulkan: `VulkanRHI/Private/VulkanRHIPrivate.h:405–450`
+  - Metal: `Apple/MetalRHI/Private/MetalVertexDeclaration.cpp:26–59`
+  - OpenGL: `OpenGLDrv/Private/OpenGLVertexDeclaration.cpp:49–77`
+  - 목록: `RHI/Public/RHIDefinitions.h:477–500`
+
+| 번호 | Rocks | UE 5.8 | 바이트 | 셰이더 타입 | D3D12 | Vulkan | Metal | OpenGL ES |
+|---|---|---|---|---|---|---|---|---|
+| 1 | `Float1` | `VET_Float1` | 4 | float | `R32_FLOAT` | `R32_SFLOAT` | `Float` | `GL_FLOAT`×1 |
+| 2 | `Float2` | `VET_Float2` | 8 | float2 | `R32G32_FLOAT` | `R32G32_SFLOAT` | `Float2` | `GL_FLOAT`×2 |
+| 3 | `Float3` | `VET_Float3` | 12 | float3 | `R32G32B32_FLOAT` | `R32G32B32_SFLOAT` | `Float3` | `GL_FLOAT`×3 |
+| 4 | `Float4` | `VET_Float4` | 16 | float4 | `R32G32B32A32_FLOAT` | `R32G32B32A32_SFLOAT` | `Float4` | `GL_FLOAT`×4 |
+| 5 | `Byte4Snorm` | `VET_PackedNormal` | 4 | float4 | `R8G8B8A8_SNORM` | `R8G8B8A8_SNORM` | `Char4Normalized` | `GL_BYTE`×4 정규화 |
+| 6 | `UByte4` | `VET_UByte4` | 4 | uint4 | `R8G8B8A8_UINT` | `R8G8B8A8_UINT` | `UChar4` | `GL_UNSIGNED_BYTE`×4 정수 |
+| 7 | `UByte4Unorm` | `VET_UByte4N` | 4 | float4 | `R8G8B8A8_UNORM` | `R8G8B8A8_UNORM` | `UChar4Normalized` | `GL_UNSIGNED_BYTE`×4 정규화 |
+| 8 | `Bgra8Unorm` | `VET_Color` | 4 | float4 | `B8G8R8A8_UNORM` | `B8G8R8A8_UNORM` | `UChar4Normalized_BGRA` | 미지원(`UnsupportedCapability`) |
+| 9 | `Short2` | `VET_Short2` | 4 | int2 | `R16G16_SINT` | `R16G16_SINT` | `Short2` | `GL_SHORT`×2 정수 |
+| 10 | `Short4` | `VET_Short4` | 8 | int4 | `R16G16B16A16_SINT` | `R16G16B16A16_SINT` | `Short4` | `GL_SHORT`×4 정수 |
+| 11 | `Short2Snorm` | `VET_Short2N` | 4 | float2 | `R16G16_SNORM` | `R16G16_SNORM` | `Short2Normalized` | `GL_SHORT`×2 정규화 |
+| 12 | `Short4Snorm` | `VET_Short4N` | 8 | float4 | `R16G16B16A16_SNORM` | `R16G16B16A16_SNORM` | `Short4Normalized` | `GL_SHORT`×4 정규화 |
+| 13 | `Half2` | `VET_Half2` | 4 | float2 | `R16G16_FLOAT` | `R16G16_SFLOAT` | `Half2` | `GL_HALF_FLOAT`×2 |
+| 14 | `Half4` | `VET_Half4` | 8 | float4 | `R16G16B16A16_FLOAT` | `R16G16B16A16_SFLOAT` | `Half4` | `GL_HALF_FLOAT`×4 |
+| 15 | `UShort2` | `VET_UShort2` | 4 | uint2 | `R16G16_UINT` | `R16G16_UINT` | `UShort2` | `GL_UNSIGNED_SHORT`×2 정수 |
+| 16 | `UShort4` | `VET_UShort4` | 8 | uint4 | `R16G16B16A16_UINT` | `R16G16B16A16_UINT` | `UShort4` | `GL_UNSIGNED_SHORT`×4 정수 |
+| 17 | `UShort2Unorm` | `VET_UShort2N` | 4 | float2 | `R16G16_UNORM` | `R16G16_UNORM` | `UShort2Normalized` | `GL_UNSIGNED_SHORT`×2 정규화 |
+| 18 | `UShort4Unorm` | `VET_UShort4N` | 8 | float4 | `R16G16B16A16_UNORM` | `R16G16B16A16_UNORM` | `UShort4Normalized` | `GL_UNSIGNED_SHORT`×4 정규화 |
+| 19 | `Rgb10A2Unorm` | `VET_URGB10A2N` | 4 | float4 | `R10G10B10A2_UNORM` | `A2B10G10R10_UNORM_PACK32` | `UInt1010102Normalized` | `GL_UNSIGNED_INT_2_10_10_10_REV`×4 정규화 |
+| 20 | `UInt1` | `VET_UInt` | 4 | uint | `R32_UINT` | `R32_UINT` | `UInt` | `GL_UNSIGNED_INT`×1 정수 |
+
+- OpenGL ES의 정규화 없는 정수 형식은 `glVertexAttribIPointer`로 설정한다(`glVertexAttribPointer`로 설정하면 float로 변환되어 int 입력과 맞지 않는다).
+- `Bgra8Unorm`의 OpenGL ES 처리:
+  - ES에는 BGRA 정점 배열이 없다. UE는 이 경우 RGBA로 읽어 채널이 뒤바뀐다(`OpenGLVertexDeclaration.cpp:56–64`).
+  - Rocks는 이 형식을 OpenGL backend(ES 3.2 공통 API, 셰이더 시스템 5.2절 G2)에서 미지원으로 공개한다. 이 형식이 든 파이프라인 생성은 `UnsupportedCapability`다.
+  - 메시 쿠커는 GLES 형식 프로필에서 색을 `UByte4Unorm`으로 쓴다.
+  - 지원 여부는 backend별 형식 지원 표(GX1, A0-G G1과 같은 방식)로 조회한다.
+- 정규화 변환 규칙은 그래픽 API 표준을 따른다. snorm은 max(c / (2^(b−1) − 1), −1), unorm은 c / (2^b − 1)이다. 32-bit 정수 형식은 정규화하지 않는다.
+
+**정점 배치.**
+- **속성** = (location 0–15, 형식, stream 0–7, offset)이다.
+  - location은 HLSL `ATTRIBUTEn`의 n이다. 지금 원문 셰이더의 `TEXCOORDn`도 이번에 `ATTRIBUTEn`으로 바꾼다(셰이더 시스템 7.2절 7항).
+  - 속성 수 상한은 16이다. Vulkan `maxVertexInputAttributes`와 OpenGL ES `GL_MAX_VERTEX_ATTRIBS`의 최소 보장이고, UE는 17이다.
+- **stream** = (stride, 정점·인스턴스 구분)이다.
+  - stream 상한은 8이다(Metal 정점 buffer 상한, 셰이더 시스템 7.2절 4항).
+  - 인스턴스 stream은 인스턴스마다 한 번 진행한다. 진행 간격 1만 지원한다. UE도 instancing 여부 하나만 둔다(`RHI/Public/RHI.h:171–182` `bUseInstanceIndex`).
+- **한계**:
+  - offset ≤ 2047, stride ≤ 2048, 둘 다 4 byte 배수다. Vulkan `maxVertexInputAttributeOffset`·`maxVertexInputBindingStride`, OpenGL ES `GL_MAX_VERTEX_ATTRIB_RELATIVE_OFFSET`·`GL_MAX_VERTEX_ATTRIB_STRIDE`의 최소 보장이고, Metal stride는 4 byte 배수다.
+  - UE stream 성분은 offset·stride ≤ 255다(`RenderCore/Public/VertexStreamComponent.h:57–58`). Rocks는 장치 최소 보장 쪽을 쓴다.
+  - 한계 값은 이름 있는 상수로 둔다.
+- **배치 자체 검사**(파이프라인 생성 때, 위반은 `InvalidArgument`):
+  - location이 겹치지 않는다.
+  - offset + 형식 크기 ≤ stride.
+  - 선언된 stream마다 속성이 하나 이상 있다.
+  - 속성이 없는 배치(정점 입력 없음, 11.2절)도 유효하다.
+- **셰이더 입력 대조**(파이프라인 생성 때):
+  - 셰이더가 읽는 모든 location이 배치에 있어야 하고(배치 ⊇ 입력), 형식의 셰이더 타입 계열(float·int·uint)이 셰이더 입력 타입과 맞아야 한다. 위반은 `InvalidArgument`이고 진단 문자열에 location·형식·셰이더 타입을 적는다.
+  - 셰이더가 읽지 않는 속성은 허용한다. 깊이 pass처럼 위치만 읽는 셰이더가 같은 배치를 쓰기 때문이다.
+  - 셰이더 시스템 SH2 전에는 다음으로 입력을 얻는다.
+    - D3D12: 컴파일한 VS 입력 signature(시맨틱 `ATTRIBUTE` 번호·성분 타입)
+    - OpenGL: 링크 뒤 active attribute(location·타입)
+  - SH2 뒤에는 쿠킹된 `ShaderBindingLayout`의 입력 마스크·타입을 쓴다(셰이더 시스템 7.2절 3·7항).
+
+**버퍼와 그리기**(GX4 일부를 함께 당긴다).
+- 버퍼 용도에 index를 더한다. index 형식은 UInt16·UInt32다.
+- 기록 객체에 다음을 둔다.
+  - `SetVertexBuffers(첫 stream, {버퍼, offset} 목록)`
+  - `SetIndexBuffer(버퍼, 형식, offset)`
+  - `Draw(정점 수, 인스턴스 수, 첫 정점)`
+  - `DrawIndexed(index 수, 인스턴스 수, 첫 index)`
+- base vertex·base instance는 0으로 고정한다. `SV_VertexID`·`SV_InstanceID`의 base 포함 여부가 backend마다 다르기 때문이다(셰이더 시스템 7.2절 7항).
+- 정점 버퍼 없는 그리기(속성 없는 배치)를 허용한다. 지금은 정점 버퍼가 없으면 그리기를 무시한다(`Device.h:18–20`).
+- 묶이지 않은 stream이나 범위를 넘는 index는 Development 진단이다. 범위 검사는 index 버퍼 내용을 CPU에서 아는 경우에만 한다.
+
+**CPU 패킹 helper.**
+- 메시 쿠커와 시험이 쓰는 변환을 Core 수학에 둔다(공용 기능 중복 금지).
+  - float ↔ half(IEEE binary16, round-to-nearest-even, 비정규수·무한대·NaN 보존)
+  - float → snorm8·unorm8·snorm16·unorm16(위 정규화 규칙의 역, 반올림, clamp)
+  - 10:10:10:2 패킹
+  - 법선·탄젠트를 `Byte4Snorm`에 담는 규칙(w에 탄젠트 부호. UE `RenderCore/Public/PackedNormal.h`와 같은 의미)
+- 변환 결과는 호스트와 무관하게 비트가 같아야 한다.
+
+**완료 기준.**
+- 형식 20종 각각에 대해 다음을 확인한다.
+  - CPU 시험: 크기·셰이더 타입 계열·번호표 왕복.
+  - 픽셀 대조: 그 형식으로 색이나 위치를 넣은 그리기를 D3D12(WARP 포함)와 OpenGL에서 기대 픽셀과 대조한다. `Bgra8Unorm`의 OpenGL은 `UnsupportedCapability` 음성 대조다.
+- 다중 stream(위치 stream 0, 색 stream 1), 인스턴스 stream(인스턴스별 offset·색), indexed draw(UInt16·UInt32), 정점 버퍼 없는 그리기를 픽셀 대조한다.
+- 음성 대조:
+  - location 중복, offset·stride 한계·정렬 위반, offset + 크기 > stride
+  - 셰이더가 읽는 location이 배치에 없음
+  - int 입력에 정규화 형식
+- half 변환은 65536개 전체 왕복과 경계값(반올림 경계·비정규수·무한대·NaN)을 시험한다. 정규화 패킹은 경계값과 clamp를 시험한다.
+- 검증 계층 오류 0.
 
 ## 11. 공용 자원·그리기 유틸리티
 
