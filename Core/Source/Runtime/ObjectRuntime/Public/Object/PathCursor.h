@@ -102,6 +102,10 @@ public:
         return root_ == PathTarget::Kind::Object;
     }
 
+    // 쓰기 검증이 ReadOnly를 보지 않는 시작 위치인지다: staged 객체와 staged 객체에서 분리한 상자다
+    // (리플렉션 B9i3c1 — Docs/Design/ReflectionExtensions.ko.md 10.2절).
+    bool AcceptsReadOnlyWrites() const noexcept;
+
     // 시작 위치가 분리된 값(struct 값·상자)인지다(강한 참조 쓰기가 없다).
     bool IsDetached() const noexcept {
         return root_ == PathTarget::Kind::Struct || root_ == PathTarget::Kind::Detached;

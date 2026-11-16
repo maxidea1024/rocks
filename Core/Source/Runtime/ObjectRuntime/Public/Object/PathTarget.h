@@ -25,7 +25,8 @@ class DetachedValue;
 //   SetElementReference(staged 간선)이고, Registry 컨테이너(ObjectRefArray·StructRefArray·
 //   ObjectRefMap)의 변경은 Unsupported(NoPathAccess)다(트랜잭션의 Assign*을 직접 쓴다). 최상위 단일
 //   값 필드도 경로 thunk로 접근한다(등록된 read는 공개된 객체만 읽는다). registry·access 인자는
-//   트랜잭션의 것이어야 한다(아니면 WrongContext).
+//   트랜잭션의 것이어야 한다(아니면 WrongContext). ReadOnly는 막지 않는다(공개 전 객체의 초기값 —
+//   리플렉션 B9i3c1, staged 객체에서 분리한 상자도 같다).
 // - Value(struct 값): 등록 struct의 값 하나(view — lease가 준 view, storage — 그 struct의 살아 있는
 //   C++ 값)다. 경로 첫 단계는 그 struct의 멤버다. 호출자가 소유한 값이라 고정·재확인이 없고,
 //   새로 만드는 빈 자리 값(Optional의 값 등)은 allocator로 만든다. 강한 참조 쓰기는

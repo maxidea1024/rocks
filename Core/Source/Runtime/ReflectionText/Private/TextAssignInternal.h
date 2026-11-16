@@ -1,0 +1,124 @@
+#pragma once
+
+#include "TextInternal.h"
+
+#include <Core/Containers/Array.h>
+#include <Object/ObjectRefs.h>
+#include <ReflectionText/TextAssignments.h>
+
+// 대입 묶음(리플렉션 B9i3c1 — ReflectionText/TextAssignments.h)의 내부 상태다.
+// TextAssignments.cpp가 묶음의 수명·단위·override 경로·게시를, TextAssignApply.cpp가 대입 하나를
+// 준비 단위 사본에 적용하는 일을 맡는다.
+namespace rocks::reflection_text::detail {
+
+// 값 부분 트리 준비 단위 하나다: 떼어 낸 사본(상자), 단위 경로(필드·멤버 하나 — 선택자 없음), 게시
+// 자리, 대입이 실제로 사본을 바꿨는지.
+struct AssignmentUnit {
+    explicit AssignmentUnit(Allocator& valueAllocator, Allocator& allocator) noexcept
+        : box(valueAllocator), steps(allocator) {
+    }
+
+    PropertyPath Path() const noexcept {
+        return PropertyPath{steps.View(), {}};
+    }
+
+    DetachedValue box;
+    Array<PathStep> steps;
+    PreparedAttach prepared;
+    bool dirty = false;
+};
+
+// 복사해 둔 경로 목록이다(단계·key 종류·key wire를 평평한 배열에 담는다 — 버퍼가 옮겨져도 key는
+// offset으로 다시 만든다).
+class PathCopies {
+public:
+    explicit PathCopies(Allocator& allocator) noexcept
+        : steps_(allocator), keys_(allocator), bytes_(allocator), entries_(allocator) {
+    }
+
+    // path를 복사해 붙인다. 오류: 할당 실패(목록은 그대로).
+    Result<void> Append(PropertyPath path) noexcept;
+
+    usize Count() const noexcept {
+        return entries_.Size();
+    }
+
+    // index번째 경로다. key는 keys(MaxPropertyPathSteps칸)에 다시 만들고 경로가 그것을 가리킨다 —
+    // keys와 이 목록이 바뀌지 않는 동안 유효하다.
+    PropertyPath View(usize index, PathKey* keys) const noexcept;
+
+private:
+    struct KeyRecord {
+        ValueKind kind = ValueKind::Opaque;
+        usize offset = 0;
+        usize size = 0;
+    };
+
+    struct Entry {
+        usize stepOffset = 0;
+        usize stepCount = 0;
+        usize keyOffset = 0;
+        usize keyCount = 0;
+    };
+
+    Array<PathStep> steps_;
+    Array<KeyRecord> keys_;
+    Array<uint8> bytes_;
+    Array<Entry> entries_;
+};
+
+// 묶음의 상태다(PreparedAssignments·PublishedAssignments가 소유한다). 옮길 수 없다(문맥이 options를
+// 가리킨다).
+struct AssignmentState {
+    AssignmentState(const AssignmentTarget& target, const TextCodecOptions& options,
+                    TextDiagnostics& diagnostics, Allocator& allocator) noexcept;
+
+    AssignmentState(const AssignmentState&) = delete;
+    AssignmentState& operator=(const AssignmentState&) = delete;
+
+    // 경로 연산의 시작 위치다(대상 그 자체).
+    PathTarget Root() const noexcept;
+
+    AssignmentTarget target;
+    TextCodecOptions options;
+    TextCodecContext context;
+    Allocator& allocator;
+    TypeLease lease;
+    // Live 대상의 변경 표지(Prepare 처음에 읽는다).
+    uint64 stamp = 0;
+    Array<UniquePtr<AssignmentUnit>> units;
+    // 해석한 대입 경로(같은 경로 두 번 검사).
+    PathCopies assigned;
+    // override 경로(선택자·key 없음)의 단계와 범위, 그 view.
+    Array<PathStep> overrideSteps;
+    Array<usize> overrideEnds;
+    Array<PropertyPath> overrideViews;
+    // 새로 가리키는 Weak 대상의 고정이다(Publish가 끝나면 놓는다).
+    Array<RootRef<Object>> pins;
+    // 진단을 남긴 묶음이다(게시할 수 없다).
+    bool failed = false;
+    // Publish를 불렀다.
+    bool consumed = false;
+};
+
+// 대입 하나를 해석하고 준비 단위에 적용한다. 진단을 남겼으면 state.failed를 세운다. 오류는 호출
+// 오류(할당·입력 한도·대상 문맥·Busy 등)다.
+Result<void> ProcessAssignment(AssignmentState& state, const TextAssignment& assignment) noexcept;
+
+// 단위 경로(선택자 없음)의 준비 단위를 찾거나 대상에서 떼어 만든다. 진단을 남겼으면 nullptr이다.
+Result<AssignmentUnit*> AcquireUnit(AssignmentState& state, PropertyPath unitPath,
+                                    TextSource source, StringView pathText) noexcept;
+
+// 끝 경로 path의 override 경로를 state에 넣는다(같은 경로가 있으면 무동작).
+Result<void> AddOverride(AssignmentState& state, PropertyPath path) noexcept;
+
+// 경로 연산 실패를 진단(값·경로 문제)이나 호출 오류(그 밖)로 옮긴다. 진단이면 Success다.
+Result<void> ReportPathFailure(AssignmentState& state, ErrorCode code,
+                               const PropertyPathFailure& failure, TextSource source,
+                               StringView pathText) noexcept;
+
+// 진단 하나를 남기고 묶음을 실패로 표시한다.
+Result<void> Diagnose(AssignmentState& state, TextDiagnosticCode code, TextSource source,
+                      StringView pathText, StringView message) noexcept;
+
+} // namespace rocks::reflection_text::detail

@@ -25,6 +25,7 @@ void DetachedValue::Reset() noexcept {
     enter_ = nullptr;
     field_ = nullptr;
     effectiveFlags_ = 0;
+    fromStaged_ = false;
     enumeration_ = nullptr;
     keyEnumeration_ = nullptr;
     target_ = StructView{};
@@ -33,6 +34,15 @@ void DetachedValue::Reset() noexcept {
     ops->destroy(storage);
     (void)allocator_->Deallocate(storage);
     lease_.Reset();
+}
+
+void DetachedValue::ResetToDefault() noexcept {
+    if (!storage_) {
+        platform::Fatal("Resetting an empty detached value");
+    }
+
+    ops_->destroy(storage_);
+    ops_->construct(storage_, *allocator_);
 }
 
 void PreparedAttach::Publish(ObjectBatchPublish& batch) noexcept {
@@ -118,6 +128,7 @@ Result<void> PathCursor::DetachValue(const RuntimeValueOps& ops, const void* val
     box.lease_ = Move(lease.Value());
     box.field_ = frame.field;
     box.effectiveFlags_ = frame.effectiveFlags;
+    box.fromStaged_ = AcceptsReadOnlyWrites();
     box.enumeration_ = frame.enumeration;
     box.keyEnumeration_ = frame.keyEnumeration;
     box.target_ = frame.target;

@@ -69,6 +69,22 @@ public:
     // 게시 구간 밖에서 부른다.
     void Reset() noexcept;
 
+    // 담은 값을 그 형식의 기본값(T(Allocator&) 또는 T() — 상자의 allocator)으로 바꾼다(리플렉션
+    // B9i3c1 — 텍스트 `s={}`). 옛 값은 이 안에서 소멸·반환하므로 게시 구간 밖에서 부른다. 할당하지
+    // 않고 실패하지 않는다. 빈 상자는 Fatal이다(계약 위반).
+    //
+    // 사용 예:
+    //   if (!box.IsEmpty()) {
+    //       box.ResetToDefault();
+    //   }
+    void ResetToDefault() noexcept;
+
+    // staged 객체(또는 그 상자)에서 분리한 값인지다. 그런 상자 위의 경로 쓰기는 ReadOnly를 막지
+    // 않는다(staged 객체 대상의 ReadOnly 허용 — Docs/Design/ReflectionExtensions.ko.md 10.2절).
+    bool IsFromStaged() const noexcept {
+        return fromStaged_;
+    }
+
 private:
     friend class detail::PathCursor;
     friend struct detail::PathRunner;
@@ -81,6 +97,7 @@ private:
     TypeLease lease_;
     const FieldSchema* field_ = nullptr;
     uint32 effectiveFlags_ = 0;
+    bool fromStaged_ = false;
     const EnumSchema* enumeration_ = nullptr;
     const EnumSchema* keyEnumeration_ = nullptr;
     StructView target_{};
@@ -163,9 +180,9 @@ Result<void> PathDetach(ObjectRegistry& registry, const ObjectAccessContext& acc
 //
 // 오류: box가 비었으면 InvalidArgument, 끝 단계에 선택자가 있으면 InvalidArgument(IndexNotAllowed),
 // box의 필드가 끝 필드와 다르면(다른 스키마 레코드·다른 C++ 형식) TypeMismatch(StaticTypeMismatch),
-// 유효 플래그가 ReadOnly면 Unsupported(ReadOnly), 교환할 수 없는 값은 Unsupported(NotCopyable),
-// box가 target 자신이면 InvalidArgument. 그 밖의 순서는 PathWrite와 같다(값 검증은 없다 — 상자
-// 안의 값은 경로 연산이 검증하며 넣었다).
+// 유효 플래그가 ReadOnly면 Unsupported(ReadOnly — staged 객체는 막지 않는다), 교환할 수 없는 값은
+// Unsupported(NotCopyable), box가 target 자신이면 InvalidArgument. 그 밖의 순서는 PathWrite와
+// 같다(값 검증은 없다 — 상자 안의 값은 경로 연산이 검증하며 넣었다).
 //
 // 사용 예(게시된 객체):
 //   PreparedAttach prepared;
