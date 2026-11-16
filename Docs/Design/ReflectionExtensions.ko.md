@@ -747,6 +747,17 @@ enum class UnsaveablePolicy : uint8 {
 - 멤버 색인 seed 해시: `JsonDocument::MemberHash`가 `SeededHash<StringView>`(프로세스 seed, SipHash-2-4)를 갖고, 키 byte 해시에 객체 노드 번호를 `HashCombine`으로 섞는다(키 해시가 예측할 수 없으므로 객체 번호를 골라도 칸을 맞출 수 없다). writer의 중복 키 색인(`WrittenKeyHash`)도 같은 해시로 바꿨다 — `Value`로 입력 문서의 키를 그대로 옮겨 쓸 수 있기 때문이다. seed 주입 API는 두지 않았다(멤버 순서가 해시와 무관해 재현성 문제가 없다).
 - 시험: Core `Json_ValuePositionsForSemanticErrors`·`Json_WriterFloatShortestSingle`·`Json_MemberIndexSeededAcrossObjects`, `StringSplit_EscapeAwareSplitFindAndUnescape`.
 
+구현(B9i3a)에서 정한 점(모듈 골격·용도·진단 — 값 Format·Parse는 B9i3b, 대입 묶음은 B9i3c):
+
+- 모듈: `Core/Source/Runtime/ReflectionText`(`ReflectionText.Build.cs` — `RequiredModules` ObjectRuntime·Core), 공개 헤더 `<ReflectionText/TextUse.h>`·`TextDiagnostics.h`·`TextCodecOptions.h`, namespace `rocks::reflection_text`. 리플렉션 타입이 없어 `.rocksids.json`은 두지 않는다. 시험은 FoundationTests의 Object 계열 시험 모듈 목록에 넣었다(Foundation·EngineTests가 함께 돈다).
+- 용도 판정 API: `TextOutputExcludedFlags(use)`(위 표), `TextInputExcludedFlags(use) -> Result<uint32>`(Report와 정의되지 않은 값은 InvalidArgument — 입력 진입점이 맨 앞에서 부른다), `IsTextOutputExcluded(use, flags)`, `ClassifyTextInput(use, flags) -> TextFieldInput { Accept, Excluded, ReadOnly }`. 제외가 ReadOnly보다 먼저다(Transient + ReadOnly는 Excluded). ReadOnly 결과의 수용(staged 대상·같은 값 무동작)은 대상과 값을 아는 대입 묶음이 정한다.
+- 판정 입력은 그 위치의 유효 플래그(`PropagateFieldFlags`)다. Transient·ReadOnly는 전파로 멤버에 닿지만 DuplicateTransient·NonPIEDuplicateTransient·TextExportTransient는 전파되지 않으므로(9.1절), codec은 경로·순회의 단계마다 판정하고 제외된 단계의 부분 트리에 들어가지 않는다 — 제외된 struct 필드는 멤버까지 통째로 빠진다(포함 필터처럼 멤버마다 보지 않는다).
+- EditorOnly·SaveGame·Required는 텍스트 용도와 무관하다(스펙 표에 없는 결정 — 텍스트 codec은 도구·편집기 문맥에서 쓰고, UE `ShouldPort`도 CPF_EditorOnly를 보지 않는다 — Property.cpp:1153-1182).
+- 진단: `TextDiagnosticCode`(10.2절의 11종, `TextDiagnosticCodeName`이 열거자 철자), 위치 `TextSource { kind: None·Assignment·Json; sourceIndex; JsonPosition }`(None은 옵션·묶음 전체 진단), 읽기 view `TextDiagnostic { code, source, path, message }`. 모음 `TextDiagnostics`는 진단 텍스트를 버퍼 하나에 복사하고(view는 다음 Add·Clear까지 유효), 한도까지 저장한 뒤 넘친 진단은 `Omitted()`로만 센다(Add는 성공, 포화 계수). `Full()`이면 codec이 남은 입력 해석을 멈춰도 된다. Add는 텍스트·레코드 버퍼를 먼저 모두 확보해 할당 실패에도 저장한 진단이 바뀌지 않는다. 모든 진단은 오류다(`HasErrors()` — 경고 종류 없음). 묶음이 모음을 가리키므로 복사·이동을 막았다.
+- 한도의 자리: 스펙대로 `TextCodecOptions::maxDiagnostics`에 두고, 모음은 `SetLimit`으로 받는다(codec 진입점이 options 값으로 부른다 — 묶음의 Append도 같은 한도를 쓴다). `DefaultMaxTextDiagnostics`(256)는 TextDiagnostics.h에 둔다(TextCodecOptions.h가 include한다).
+- 스펙의 "입력 byte·JSON 깊이·원소 수 한도"(스펙에 없던 결정 — 이름·기본값·오류): `maxInputBytes`(기본 64 MiB = Core `JsonReadOptions::maxInputBytes`, 한 codec 호출이 복사·해석하는 입력 텍스트 byte 합 — Prepare와 그 묶음 Append의 누계, 넘으면 CapacityExceeded), `maxJsonDepth`(기본 128 = `JsonReadOptions::maxDepth`, 넘으면 CapacityExceeded), `maxElements`(기본 `MaxArrayElements`, 값 텍스트 하나·JSON 배열·객체 하나의 원소 수 — 원소를 만들기 전에 진단 OutOfRange). `ValidateTextCodecOptions`가 use·mapMerge의 정의 여부와 한도(0 금지, maxElements ≤ MaxArrayElements)를 보고 InvalidArgument를 낸다. Report 용도는 옵션 검사에서 거부하지 않는다(출력에 쓴다). `names`와 대상 Registry pool의 일치는 대상을 아는 대입 묶음(B9i3c)이 본다. `TextReferenceResolver`는 전방 선언만 두었다(B9i3c).
+- 시험: ReflectionText `TextUse_ExclusionTableMatchesSpec`·`TextUse_FixtureFieldsFollowUseTable`(FieldFlagFixture의 FlagHolder 생성 스키마)·`TextUse_InputClassificationOrderAndPropagation`·`TextCodecOptions_ValidateRanges`·`TextDiagnostics_CollectsInOrderWithSources`·`TextDiagnostics_LimitStoresFirstAndCountsOmitted`·`TextDiagnostics_FailuresLeaveCollectionUnchanged`(NFailAllocator — 텍스트·레코드 버퍼 할당 실패).
+
 ### 10.2 대입 묶음 API
 
 ```cpp
@@ -987,8 +998,10 @@ public:
 | B9h2 | 클래스 Transient·Deprecated(저장 정책 `unsaveable`·로드 진단·RMC2209)·Within(`OuterSummary`·정체성 규칙)·ClassRef 쓰기의 Deprecated 거부와 decode 진단 | B9a1, B9d1, B9d2, A0-Oe | L |
 | B9i1 | Core `JsonWriter::Float`·`JsonValue::Position`·StringSplit escape 옵션·JsonDocument 멤버 색인 seed 해시(`SeededHash` — 7.1절) | — | S |
 | B9i2 | B6 확장: 객체 변경 표지·묶음 게시 구간(대상 재확인·관찰자 묶음 예약)·준비 단위 셋·대상 고정(ObjectRuntime 시험으로 원자성 고정) | B9f4 | M |
-| B9i3 | ReflectionText 모듈·용도·명령행 표기·대입 묶음 API·resolver·진단 | B9a–B9h, B9i1, B9i2 | L |
-| B9i4 | JSON export·import(객체·staged·struct 값, mapMerge) | B9i3 | L |
+| B9i3a | ReflectionText 모듈 골격·용도(`TextUse` 출력·입력 제외)·진단 모음·codec 옵션 | B9a–B9h, B9i1, B9i2 | S |
+| B9i3b | 명령행 표기(종류별 Format·Parse, escape 표) | B9i3a | M |
+| B9i3c | 대입 묶음 API·준비 단위·resolver·Publish | B9i3b | L |
+| B9i4 | JSON export·import(객체·staged·struct 값, mapMerge) | B9i3c | L |
 | B9j | InstancedStruct<>·담기 조건·깊이 합·객체 문맥 경로 해석 | B9i4 | L |
 | B9k | struct 상속·비리플렉션 빈 base·struct 멤버 thunk 소유자 인자·`InstancedStruct<Base>` | B9j | L |
 | B9l | Text·Localization `TryGetPersistentForm`·`DeepClone` | B9i4 | M |

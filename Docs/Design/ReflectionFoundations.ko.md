@@ -648,7 +648,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema&, Ru
 - **해석 결과는 FieldId 체인 + 원소 index·Map key**(`PropertyPath { Span<const PathStep> steps; Span<const PathKey> keys; }`, `PathStep { Guid fieldId; uint32 index; PathSelector selector }` — 리플렉션 B9f3이 `bool indexed`를 선택자 None·Index·Key로 바꾸고 key 단계를 더했다, [리플렉션 B9](ReflectionExtensions.ko.md) 1.5·7.3절)다. UI 문서의 Transaction(CU4)도 같은 표현을 쓴다. 문자열 경로(`toolName('.' toolName | '[' index ']' | '[' key ']')*`, 대소문자 무시, 모르는 이름은 `UnknownProperty` — AS 4.6절, key의 따옴표·escape는 리플렉션 B9 1.5절)는 schema로 이 체인을 만드는 앞단이다.
 - 연산: 단일 값 읽기·쓰기(`FieldValue`), 배열 길이·삽입·삭제·원소 교체, 참조 struct의 멤버 쓰기, `ObjectRefArray`의 삽입·교체(5.2절 API), `StructRefArray`의 원소 삽입·삭제와 원소 멤버 쓰기(5.6절 API). 실제 접근은 생성 thunk(`ops.path`)가 정적 타입으로 한다. 검증은 3.6절의 단일 검증 지점을 지난다(ReadOnly·대상 타입·enum·MaxElements).
 - 원자성: 소유 객체 Borrow 안에서 하고, cursor가 직접 할당하는 멤버·원소 끝 지점은 할당부터 게시까지 encode 고정을 쥐어 재진입 변경을 막으며, 할당 뒤 게시 직전에 `Borrow.Get()`으로 소유자 생존을 다시 확인한다(고정은 RequestDestroy를 막지 않는다 — 7.1절). encode 고정된 소유자(5.6절)에는 Busy다. 배열 삽입은 원소와 새 버퍼를 먼저 만든 뒤 무할당으로 옮겨 게시한다(살아 있는 배열의 내부 성장은 새 버퍼를 게시하기 전에 옛 버퍼를 반환하므로 그 해제 콜백이 해제된 버퍼를 본다 — 쓰지 않는다). 실패하면 미게시.
-- 명령행 값 표기(쉼표 목록·`none`·경로 또는 AssetId, AS 13절)는 리플렉션 B9의 공용 모듈 `ReflectionText`가 이 연산 위에서 해석한다(RX 10절 — 처음에는 도구 계층에 두었다). 리플렉션 B9는 경로에 Map key·Set 원소 단계(`PathSelector`·`PathKey` — RX 1.5절)와 대입 묶음 게시(`BeginBatchPublish` — 대상 고정·재확인·관찰자 예약·준비 단위, RX 10.2절)를 더한다. B6은 A0-B 순서대로 지금 구현한다(7.1절 — 처음에는 A6까지 미룰 수 있다고 했다).
+- 명령행 값 표기(쉼표 목록·`none`·경로 또는 AssetId, AS 13절)는 리플렉션 B9의 공용 모듈 `ReflectionText`(Core/Source/Runtime/ReflectionText — ObjectRuntime·Core 의존)가 이 연산 위에서 해석한다(RX 10절 — 처음에는 도구 계층에 두었다). 용도(`TextUse` — 출력·입력 제외 플래그)와 진단 모음(`TextDiagnostics`)은 B9i3a, 명령행 표기는 B9i3b, 대입 묶음은 B9i3c, JSON은 B9i4가 만든다. 리플렉션 B9는 경로에 Map key·Set 원소 단계(`PathSelector`·`PathKey` — RX 1.5절)와 대입 묶음 게시(`BeginBatchPublish` — 대상 고정·재확인·관찰자 예약·준비 단위, RX 10.2절)를 더한다. B6은 A0-B 순서대로 지금 구현한다(7.1절 — 처음에는 A6까지 미룰 수 있다고 했다).
 
 ### 7.1 B6 구현 API(확정안)
 
@@ -675,7 +675,7 @@ Result<void> FormatPropertyPath(const TypeLease& type, PropertyPath path, String
 
 - 문법 `name ('.' name | '[' index ']')*`. 이름은 ASCII 식별자이고 실효 도구 이름(toolName, 없으면 C++ 이름)과 대소문자 무시로 비교한다 — toolName이 있으면 C++ 이름은 받지 않는다(AS 13절의 "Name으로 노출한 이름"). index는 정규 10진(앞자리 0은 `0` 하나만, 부호·공백·uint32 초과 거부).
 - 해석은 클래스·struct lease 스키마로 한다(파생 스키마가 상속 필드를 같은 ID로 담는다). struct 멤버는 `FieldStruct(i)`, 원소 struct는 원소 규칙으로 내려간다. Opaque 필드는 이름 조회에서 건너뛰고, enum lease를 넘기면 InvalidArgument.
-- 실패: 문법 InvalidArgument(Syntax), 17단계 초과 InvalidArgument(TooDeep), 모르는 이름 **NotFound + `UnknownProperty`**(step·byte offset — ErrorCode에 새 값을 더하지 않는다. 도구 계층이 AS 4.6절 `UnknownProperty` 진단으로 바꾼다), 배열 아닌 필드의 `[` TypeMismatch(NotArray), struct가 아닌 값(index 없는 배열 포함)의 `.` TypeMismatch(NotStruct).
+- 실패: 문법 InvalidArgument(Syntax), 17단계 초과 InvalidArgument(TooDeep), 모르는 이름 **NotFound + `UnknownProperty`**(step·byte offset — ErrorCode에 새 값을 더하지 않는다. 리플렉션 B9의 `ReflectionText` 대입 묶음이 `TextDiagnostic`의 `UnknownProperty`로 바꾸고, 도구가 그것을 AS 4.6절 진단으로 낸다 — RX 10.1·10.2절), 배열 아닌 필드의 `[` TypeMismatch(NotArray), struct가 아닌 값(index 없는 배열 포함)의 `.` TypeMismatch(NotStruct).
 
 **연산(`Object/PropertyPath.h`, 소유 스레드 전용)**
 
