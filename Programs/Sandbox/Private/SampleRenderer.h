@@ -5,9 +5,13 @@
 #include <Core/Math/Matrix4.h>
 #include <Graphics/Device.h>
 
-// 최소 렌더러다. 내장 메시(삼각형·사각형)와 파이프라인 하나(텍스처 × 정점색 × 항목색, 일반 알파
-// 블렌드)로 RenderItem 목록을 그린다. Deferred/Forward 경로·깊이·조명·RenderGraph는 후속 범위다.
-namespace rocks::render {
+// Sandbox 시험용 샘플 그리기다. 내장 메시(삼각형·사각형)와 파이프라인 하나(텍스처 × 정점색 ×
+// 항목색, 일반 알파 블렌드)로 RenderItem 목록을 그린다. 엔진 렌더러가 아니다: 원문 셰이더 문자열과
+// 고정 파이프라인으로 Graphics backend·렌더 lane self-test를 그리는 데만 쓴다. 정식
+// 렌더러(Forward+· Deferred)는 Engine/Source/Runtime/Renderer 모듈로 따로 둔다.
+namespace sandbox::sample {
+
+using namespace rocks;
 
 // 내장 메시다. 둘 다 원점 중심 단위 크기이며 로컬 Y(왼쪽)-Z(위) 평면에 놓인다(Rocks 좌표: +X 전방,
 // +Y 왼쪽, +Z 위). 카메라가 +X를 바라보면 정면으로 보인다.
@@ -44,7 +48,7 @@ struct RenderStats {
 // 장치 자원(메시 버퍼·파이프라인)을 소유하고 RenderItem 목록을 그린다.
 //
 // 사용 예:
-//   render::Renderer renderer;
+//   sample::Renderer renderer;
 //   if (!renderer.Initialize(device, graphics::Format::RGBA8UnormSrgb)) { ... }
 //   auto frame = device.BeginFrame(swapChain, view.clear);
 //   if (frame) {
@@ -97,4 +101,4 @@ StringView BuiltinShaderHlsl() noexcept;
 StringView BuiltinVertexGlsl() noexcept;
 StringView BuiltinPixelGlsl() noexcept;
 
-} // namespace rocks::render
+} // namespace sandbox::sample

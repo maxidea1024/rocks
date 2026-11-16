@@ -1,7 +1,8 @@
-#include <Renderer/Renderer.h>
+#include "SampleRenderer.h"
+
 #include <Base/Compiler.h>
 
-namespace rocks::render {
+namespace sandbox::sample {
 
 namespace {
 
@@ -198,4 +199,4 @@ void Renderer::Draw(graphics::CommandContext& context, const RenderView& view,
     }
 }
 
-} // namespace rocks::render
+} // namespace sandbox::sample

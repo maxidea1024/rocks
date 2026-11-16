@@ -7,7 +7,7 @@
 #include <Graphics/GpuFenceEvent.h>
 #include <OpenGLGraphics/OpenGLDevice.h>
 #include <PlatformWindow/Window.h>
-#include <Renderer/Renderer.h>
+#include "SampleRenderer.h"
 #include <stdio.h>
 #include <Platform/Memory.h>
 
@@ -74,7 +74,7 @@ void Check(bool condition, const char* backend, const char* what) noexcept {
 }
 
 // 숨김 창에 스왑체인을 만들어 프레임·크기 변경·기록 중 파괴를 확인한다(화면 픽셀은 읽지 않는다).
-void RunSwapChainChecks(const char* name, graphics::Device& device, render::Renderer& renderer,
+void RunSwapChainChecks(const char* name, graphics::Device& device, sample::Renderer& renderer,
                         Allocator& allocator) noexcept {
     platform::WindowDesc windowDesc;
     windowDesc.title = "Rocks graphics self-test";
@@ -101,18 +101,18 @@ void RunSwapChainChecks(const char* name, graphics::Device& device, render::Rend
                device.LastError().Data());
         return;
     }
-    render::RenderView view;
+    sample::RenderView view;
     view.viewProjection = FillScreen();
     view.clear = {0.1f, 0.1f, 0.1f, 1.0f};
-    render::RenderItem item;
-    item.mesh = render::MeshKind::Triangle;
+    sample::RenderItem item;
+    item.mesh = sample::MeshKind::Triangle;
     auto frameOnce = [&]() {
         window.Value()->PumpEvents(queue);
         auto frame = device.BeginFrame(swapChain.Value(), view.clear);
         if (!frame) {
             return false;
         }
-        renderer.Draw(*frame.Value(), view, Span<const render::RenderItem>(&item, 1));
+        renderer.Draw(*frame.Value(), view, Span<const sample::RenderItem>(&item, 1));
         return device.EndFrame().IsOk();
     };
     bool frames = true;
@@ -127,7 +127,7 @@ void RunSwapChainChecks(const char* name, graphics::Device& device, render::Rend
     auto frame = device.BeginFrame(swapChain.Value(), view.clear);
     bool destroyed = frame.IsOk();
     if (frame) {
-        renderer.Draw(*frame.Value(), view, Span<const render::RenderItem>(&item, 1));
+        renderer.Draw(*frame.Value(), view, Span<const sample::RenderItem>(&item, 1));
         device.Retire(swapChain.Value());
         destroyed = device.EndFrame().IsOk();
     }
@@ -151,18 +151,18 @@ struct FenceNotified {
 
 // GX7 제출·완료·회수(RenderBase 4.4절): EndFrame 완료 지점, 다른 스레드의 대기, 완료 통지, Core
 // 작업 이벤트 연결, 다른 장치 지점 거부, fence 뒤 회수(OpenGL 포함 즉시 삭제 없음)를 확인한다.
-void RunFenceChecks(const char* name, graphics::Device& device, render::Renderer& renderer,
+void RunFenceChecks(const char* name, graphics::Device& device, sample::Renderer& renderer,
                     graphics::TextureHandle target, Allocator& allocator) noexcept {
-    render::RenderView view;
+    sample::RenderView view;
     view.viewProjection = FillScreen();
-    render::RenderItem item;
-    item.mesh = render::MeshKind::Triangle;
+    sample::RenderItem item;
+    item.mesh = sample::MeshKind::Triangle;
     auto frame = device.BeginOffscreen(target, view.clear);
     Check(frame.IsOk(), name, "fence frame begins");
     if (!frame) {
         return;
     }
-    renderer.Draw(*frame.Value(), view, Span<const render::RenderItem>(&item, 1));
+    renderer.Draw(*frame.Value(), view, Span<const sample::RenderItem>(&item, 1));
     auto submitted = device.EndFrame();
     Check(submitted.IsOk() && !submitted.Value().IsNull() &&
               submitted.Value().deviceEpoch == device.Info().deviceEpoch &&
@@ -261,7 +261,7 @@ void RunFenceChecks(const char* name, graphics::Device& device, render::Renderer
 // 소유권을 넘겨받은 스레드에서 그리는 시험의 상태다.
 struct OwnerThreadRun {
     graphics::Device* device = nullptr;
-    render::Renderer* renderer = nullptr;
+    sample::Renderer* renderer = nullptr;
     graphics::TextureHandle target;
     Array<uint8>* pixels = nullptr;
     platform::ManualResetEvent acquired;
@@ -276,14 +276,14 @@ struct OwnerThreadRun {
         self->acquired.Signal();
         self->proceed.Wait();
         if (self->owned) {
-            render::RenderView view;
+            sample::RenderView view;
             view.viewProjection = FillScreen();
-            render::RenderItem item;
-            item.mesh = render::MeshKind::Triangle;
+            sample::RenderItem item;
+            item.mesh = sample::MeshKind::Triangle;
             auto frame = self->device->BeginOffscreen(self->target, view.clear);
             if (frame) {
                 self->renderer->Draw(*frame.Value(), view,
-                                     Span<const render::RenderItem>(&item, 1));
+                                     Span<const sample::RenderItem>(&item, 1));
                 self->drew = self->device->EndFrame().IsOk() &&
                              self->pixels->TryResize(static_cast<usize>(Size) * Size * 4).IsOk() &&
                              self->device->ReadPixels(self->target, self->pixels->View()).IsOk();
@@ -296,7 +296,7 @@ struct OwnerThreadRun {
 // GX11 장치 스레드 모델·GX10 소유권 이관(RenderBase 5.4절): 생성 스레드 안전 여부 공개, 소유자가
 // 없을 때 소유 스레드 전용 호출 거부(Development), 다른 스레드로 넘겨 그리고 되돌려 받기를
 // 확인한다.
-void RunOwnershipChecks(const char* name, graphics::Device& device, render::Renderer& renderer,
+void RunOwnershipChecks(const char* name, graphics::Device& device, sample::Renderer& renderer,
                         graphics::TextureHandle target, Allocator& allocator) noexcept {
     Check(!device.Info().concurrentResourceCreation && device.IsOwnerThread(), name,
           "device starts owned by its creating thread");
@@ -355,7 +355,7 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
            info.adapterName.Data(), info.validationEnabled ? "on" : "off",
            info.software ? ", software" : "");
 
-    render::Renderer renderer;
+    sample::Renderer renderer;
     auto initialized = renderer.Initialize(device, graphics::Format::RGBA8UnormSrgb);
     if (!initialized) {
         printf("    %.*s\n", static_cast<int>(device.LastError().ByteCount()),
@@ -385,35 +385,35 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
         return;
     }
 
-    render::RenderView view;
+    sample::RenderView view;
     view.viewProjection = FillScreen();
     view.clear = {0.0f, 0.0f, 0.0f, 1.0f};
-    auto drawTo = [&](graphics::TextureHandle into, render::MeshKind mesh,
+    auto drawTo = [&](graphics::TextureHandle into, sample::MeshKind mesh,
                       graphics::TextureHandle bound, Array<uint8>& out) {
-        render::RenderItem item;
+        sample::RenderItem item;
         item.mesh = mesh;
         item.texture = bound;
         auto frame = device.BeginOffscreen(into, view.clear);
         if (!frame) {
             return false;
         }
-        renderer.Draw(*frame.Value(), view, Span<const render::RenderItem>(&item, 1));
+        renderer.Draw(*frame.Value(), view, Span<const sample::RenderItem>(&item, 1));
         if (!device.EndFrame() || !out.TryResize(static_cast<usize>(Size) * Size * 4)) {
             return false;
         }
         return device.ReadPixels(into, out.View()).IsOk();
     };
-    auto draw = [&](render::MeshKind mesh, graphics::TextureHandle bound, Array<uint8>& out) {
+    auto draw = [&](sample::MeshKind mesh, graphics::TextureHandle bound, Array<uint8>& out) {
         return drawTo(target.Value(), mesh, bound, out);
     };
 
-    Check(draw(render::MeshKind::Triangle, {}, result.triangle), name, "triangle render/readback");
-    Check(draw(render::MeshKind::Quad, texture.Value(), result.quad), name, "quad render/readback");
+    Check(draw(sample::MeshKind::Triangle, {}, result.triangle), name, "triangle render/readback");
+    Check(draw(sample::MeshKind::Quad, texture.Value(), result.quad), name, "quad render/readback");
 
     // RenderTarget을 텍스처로 샘플링해도 위아래가 바뀌지 않아야 한다(GL은 원점 규약이 다르다).
     auto copyTarget = device.CreateTexture(targetDesc, {});
     Check(copyTarget.IsOk() &&
-              drawTo(copyTarget.Value(), render::MeshKind::Quad, target.Value(), result.copy),
+              drawTo(copyTarget.Value(), sample::MeshKind::Quad, target.Value(), result.copy),
           name, "render target sampled as a texture");
     if (result.copy.Size() == result.quad.Size()) {
         Check(Dominant(At(result.copy, 4, 4), 0), name, "sampled render target keeps top-left red");
@@ -436,15 +436,15 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
         if (!doomed) {
             return false;
         }
-        render::RenderItem item;
-        item.mesh = render::MeshKind::Quad;
+        sample::RenderItem item;
+        item.mesh = sample::MeshKind::Quad;
         item.texture = doomed.Value();
         auto frame = device.BeginOffscreen(target.Value(), view.clear);
         if (!frame) {
             device.Retire(doomed.Value());
             return false;
         }
-        renderer.Draw(*frame.Value(), view, Span<const render::RenderItem>(&item, 1));
+        renderer.Draw(*frame.Value(), view, Span<const sample::RenderItem>(&item, 1));
         device.Retire(doomed.Value());
         bool ok = true;
         if (waitIdle) {
@@ -471,7 +471,7 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
         desc.sampler.addressV = address;
         auto probe = device.CreateTexture(desc, Span<const uint8>(checker, sizeof(checker)));
         Array<uint8> pixels(result.triangle.GetAllocator());
-        const bool ok = probe.IsOk() && draw(render::MeshKind::Quad, probe.Value(), pixels);
+        const bool ok = probe.IsOk() && draw(sample::MeshKind::Quad, probe.Value(), pixels);
         if (probe) {
             device.Retire(probe.Value());
         }
@@ -524,8 +524,8 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
         Array<uint8> pixels(result.triangle.GetAllocator());
         bool drawn = false;
         if (mipped) {
-            render::RenderItem item;
-            item.mesh = render::MeshKind::Quad;
+            sample::RenderItem item;
+            item.mesh = sample::MeshKind::Quad;
             item.texture = mipped.Value();
             // 단위 사각형을 1/16로 줄여 64픽셀 대상에서 4×4 픽셀을 덮는다.
             item.world = Mat4::Identity();
@@ -534,7 +534,7 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
             item.world.m[10] = 1.0f / 16.0f;
             auto frame = device.BeginOffscreen(target.Value(), view.clear);
             if (frame) {
-                renderer.Draw(*frame.Value(), view, Span<const render::RenderItem>(&item, 1));
+                renderer.Draw(*frame.Value(), view, Span<const sample::RenderItem>(&item, 1));
                 drawn = device.EndFrame().IsOk() &&
                         pixels.TryResize(static_cast<usize>(Size) * Size * 4).IsOk() &&
                         device.ReadPixels(target.Value(), pixels.View()).IsOk();
@@ -576,13 +576,13 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     // 그리면 debug layer 오류다(OpenGL에는 대응 오류가 없다).
     if (info.backend == graphics::Backend::D3D12 && info.validationEnabled) {
         const uint64 before = device.ValidationErrorCount();
-        render::Renderer mismatched;
+        sample::Renderer mismatched;
         if (mismatched.Initialize(device, graphics::Format::RGBA8Unorm)) {
-            render::RenderItem item;
-            item.mesh = render::MeshKind::Triangle;
+            sample::RenderItem item;
+            item.mesh = sample::MeshKind::Triangle;
             auto frame = device.BeginOffscreen(target.Value(), view.clear);
             if (frame) {
-                mismatched.Draw(*frame.Value(), view, Span<const render::RenderItem>(&item, 1));
+                mismatched.Draw(*frame.Value(), view, Span<const sample::RenderItem>(&item, 1));
                 auto ended = device.EndFrame();
                 (void)ended;
             }

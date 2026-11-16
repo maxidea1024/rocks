@@ -4,7 +4,7 @@
 #include <Engine/Engine.h>
 #include <PlatformWindow/Window.h>
 #include <RenderBase/RenderLane.h>
-#include <Renderer/Renderer.h>
+#include "SampleRenderer.h"
 #include <stdio.h>
 
 namespace sandbox {
@@ -23,15 +23,15 @@ struct SceneItem {
     Mat4 world = Mat4::Identity();
     LinearColor color = LinearColor(1.0f, 1.0f, 1.0f, 1.0f);
     render::RenderHandle texture;
-    render::MeshKind mesh = render::MeshKind::Quad;
+    sample::MeshKind mesh = sample::MeshKind::Quad;
 };
 
 // 프레임 packet이다. 목록은 그 slot의 프레임 arena에 있다. scratch는 lane이 장치 handle로 바꾼
 // 항목을 쓰는 같은 길이의 칸이다.
 struct ScenePacket {
-    render::RenderView view;
+    sample::RenderView view;
     Span<const SceneItem> items;
-    Span<render::RenderItem> scratch;
+    Span<sample::RenderItem> scratch;
     bool capture = false;
 };
 
@@ -113,7 +113,7 @@ public:
     }
 
     graphics::NativeSurface surface;
-    render::Renderer renderer;
+    sample::Renderer renderer;
     graphics::TextureHandle target;
     graphics::SwapChainHandle swapChain;
     Array<uint8> pixels;
@@ -126,7 +126,7 @@ void RenderScene(render::RenderFrameContext& context, ScenePacket& packet) noexc
     graphics::Device& device = context.Device();
     for (usize index = 0; index < packet.items.Size(); ++index) {
         const SceneItem& item = packet.items[index];
-        render::RenderItem& drawn = packet.scratch[index];
+        sample::RenderItem& drawn = packet.scratch[index];
         drawn.world = item.world;
         drawn.color = item.color;
         drawn.mesh = item.mesh;
@@ -135,7 +135,7 @@ void RenderScene(render::RenderFrameContext& context, ScenePacket& packet) noexc
         drawn.texture = texture ? texture.Value() : graphics::TextureHandle{};
     }
 
-    const Span<const render::RenderItem> items(packet.scratch.Data(), packet.scratch.Size());
+    const Span<const sample::RenderItem> items(packet.scratch.Data(), packet.scratch.Size());
     auto offscreen = device.BeginOffscreen(processor->target, packet.view.clear);
     if (!offscreen) {
         context.ReportFailure(offscreen.Error());
@@ -235,7 +235,7 @@ public:
 
         FrameArena& arena = lane_.Arena(ticket.Value());
         auto items = arena.TryNewArray<SceneItem>(2);
-        auto scratch = arena.TryNewArray<render::RenderItem>(2);
+        auto scratch = arena.TryNewArray<sample::RenderItem>(2);
         if (!items || !scratch) {
             ++frameErrors;
             lane_.AbandonFrame(Move(ticket.Value()));
@@ -244,7 +244,7 @@ public:
 
         // 텍스처 사각형이 화면을 채우고, 그 위에 작은 삼각형을 가운데 둔다.
         items.Value()[0].texture = texture;
-        items.Value()[1].mesh = render::MeshKind::Triangle;
+        items.Value()[1].mesh = sample::MeshKind::Triangle;
         Mat4 small = Mat4::Identity();
         small.m[5] = 0.25f;
         small.m[10] = 0.25f;

@@ -107,7 +107,7 @@ RenderCore는 Public 38,326줄·Private 63,918줄·Internal 1,239줄이다(`wc -
 | 제출·회수 | D3D12 DIRECT queue 하나(`D3D12Device.cpp:390`), 프레임 2개 동시 진행·fence로 slot 회수(`:17, 838–846`), `Destroy` 지연 해제(`:1396–1445`). OpenGL은 즉시 삭제. lease·`Retire`·공개 fence 없음 | GX7 |
 | 업로드·readback | 생성 때 초기 데이터만, 텍스처 업로드는 동기 완료(`Device.h:50`), `ReadPixels`는 시험용 동기 대기(`:90–92`) | GX8 |
 | 계측 | query·marker 없음 | GX9 |
-| Renderer | 내장 셰이더 원문 문자열(`Renderer/Private/Renderer.cpp:14–71`), 파이프라인 하나, 메시 둘(`Renderer/Public/Renderer/Renderer.h:15–23`) | 셰이더 시스템 SH2, RB 단계 |
+| Renderer | 내장 셰이더 원문 문자열, 파이프라인 하나, 메시 둘. 엔진 모듈이 아니라 Sandbox 시험 샘플(`Programs/Sandbox/Private/SampleRenderer.*`, 2026-11-17 이동)이다 | 셰이더 시스템 SH2, RB 단계 |
 | 엔진 루프 | `EngineSubsystem`(Initialize·OnFrameBegin·OnFrameEnd·Deinitialize)과 `EngineLoopHooks`(PumpEvents·BeginFrame·EndFrame)가 있다(`Engine/Source/Runtime/Engine/Public/Engine/Engine.h:27–69`). 렌더 추출과 제출은 `EndFrame` hook에서 게임 스레드가 동기로 한다. 렌더 스레드·in-flight snapshot은 후속(`Docs/Design/EngineRuntime.ko.md` 14절) | RB1, CP6 |
 | 스레드·동기화 | join 소유 `platform::Thread`(`Core/Source/Runtime/PlatformBase/Public/Platform/Thread.h:23–44`), `Mutex`·`ConditionVariable`·`ManualResetEvent`·`Semaphore`(`Sync.h:19,62,79,98`), `Atomics.h`. 스레드 이름·우선순위·affinity·스택 크기는 후속(`Docs/Implementation/PlatformConcurrency.ko.md:42`) | CP1 |
 | 작업 | `WorkerScheduler`(선행 작업·취소·Drain, 외부 이벤트 `WorkerTaskEvent`, `Core/Source/Runtime/Task/Public/Task/WorkerScheduler.h:93–149, 182–217`), `AsyncIoEvent`, `InlineExecutor`(동기 기준, `TaskScheduler.h:55–56`). 직렬 체인·ParallelFor·전용 스레드 lane 없음 | CP1·CP2 |
@@ -264,7 +264,7 @@ RenderLane::Post(표면 작업) ──────────▶ 스왑체인 �
 
 ### 5.4 장치 스레드 모델(GX10·GX11)
 
-지금 `Device`·`Renderer`는 "생성한 스레드에서만 사용"이고(`Device.h:43`, `Renderer.h:56`) D3D12·OpenGL backend 어디에도 호출 스레드 검사가 없다. 지연 셰이더 생성·병렬 기록·게임 lane handle 예약을 하려면 계약을 다음처럼 나눈다.
+지금 `Device`와 최소 렌더러(현 Sandbox `SampleRenderer`)는 "생성한 스레드에서만 사용"이고(`Device.h:43`) D3D12·OpenGL backend 어디에도 호출 스레드 검사가 없다. 지연 셰이더 생성·병렬 기록·게임 lane handle 예약을 하려면 계약을 다음처럼 나눈다.
 
 | 호출 종류 | 규칙 |
 |---|---|
@@ -575,7 +575,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 ### 10.2 Rocks 규칙
 
 - **등록.** 이름, `.rsh` 가상 경로, 기능 표시, 거르기 함수, 정적 정점 배치(인스턴스 데이터와 무관), 소유 파라미터 구조체를 가진다. 정적 등록 표이고, 셰이더 타입 등록(셰이더 시스템 12.2절)과 같은 시점에 닫힌다. 늦게 로드되는 모듈의 등록은 거부한다.
-- **세 가지 정점 입력.** (1) **정점 입력 없음**: 전체화면·compute·유틸리티 셰이더(속성 없는 파이프라인, 11.2절). (2) **엔진 기본 정점 입력 타입**: 내장 메시와 fallback 메시 셰이더(계획 9.6절)가 쓰는 고정 배치(위치·UV·색, 지금 Renderer의 "Rocks 정점 형식", `Renderer.h` `BuiltinShaderHlsl` 주석). (3) **메시 정점 입력 타입**: 메시 렌더링 단계에서 정의한다.
+- **세 가지 정점 입력.** (1) **정점 입력 없음**: 전체화면·compute·유틸리티 셰이더(속성 없는 파이프라인, 11.2절). (2) **엔진 기본 정점 입력 타입**: 내장 메시와 fallback 메시 셰이더(계획 9.6절)가 쓰는 고정 배치(위치·UV·색, 지금 Sandbox 샘플 렌더러의 "Rocks 정점 형식", `Programs/Sandbox/Private/SampleRenderer.h` `BuiltinShaderHlsl` 주석). (3) **메시 정점 입력 타입**: 메시 렌더링 단계에서 정의한다.
 - **셰이더 키 축.** 셰이더 시스템 키에 정점 입력 타입을 더한다(SX4, 결정 R9 권장안 (a) 키 필드). 거르기는 셰이더 타입 조건 AND 정점 입력 타입 조건이다. 완결성 검사(9.2절)는 타입 × 정점 입력 타입 × 퍼뮤테이션을 열거한다.
 - **include 연결.** 메시 셰이더는 고정 가상 경로 `/Engine/Generated/VertexInput.rsh`를 include한다. 워커 입력을 만드는 메인 프로세스 전처리기가 이 경로를 그 정점 입력 타입의 `.rsh`로 잇는다(셰이더 시스템 결정 6). 그래서 셰이더 맵 키에 정점 입력 타입이 들어가야 한다(SX4). `.rsh`가 구현할 함수 인터페이스(입력 구조체, 월드 위치, 단계 사이 변수 채우기)는 첫 메시 셰이더 착수 전에 정한다.
 - **정점 배치.** 속성마다 (location, 형식, stream 번호, offset), stream마다 (stride, 정점/인스턴스, 인스턴스 step 1). Metal 정점 buffer 상한(셰이더 시스템 7.2절 4항: 정점 stream 8개)과 맞춰 stream ≤ 8이다. 같은 버퍼·stride·용도의 stream 합치기는 UE와 같다.
@@ -697,7 +697,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 | flat-normal 2D | 1×1, 법선 인코딩별 중립값(tangent space (0,0,1)) | 없음. UE Renderer 기본 법선 텍스처는 (128,128,128,255)로 tangent flat normal이 아니다(`Renderer/Private/SystemTextures.cpp:314–320`). 머티리얼용 flat normal은 Engine 에셋 쪽이다 | Rocks 정의 |
 | 차원별 대체 | array·3D·cube·cube array·depth·uint 변형 | `RC/Public/GlobalRenderResources.h:54–78` | A0-G 차원 확장 뒤. 9.6절 "2D white를 cube slot에 넣지 않음"과 같다 |
 | 0·1 버퍼 | 빈 버퍼, black float4, white(1) | `GlobalRenderResources.h:30–51` | identity 행렬 버퍼는 Rocks 추가(9.6절) |
-| 기본 메시 | cube·plane(엔진 기본 정점 입력 타입) | `RC/Public/RenderUtils.h:402–405`(단위 cube 버퍼) | 지금 Renderer 내장 메시(삼각형·사각형)를 옮긴다 |
+| 기본 메시 | cube·plane(엔진 기본 정점 입력 타입) | `RC/Public/RenderUtils.h:402–405`(단위 cube 버퍼) | 지금 Sandbox 샘플 렌더러(`SampleRenderer`)의 내장 메시(삼각형·사각형)를 옮긴다. 최소 렌더러는 엔진 모듈이 아니다(2026-11-17 Sandbox로 이동) |
 | fallback 셰이더 | 엔진 기본 정점 입력 타입의 VS·PS | (UE 엔진 셰이더 맵) | 엔진 셰이더 집합에서 온다(9.2절) |
 | checker·error 텍스처, error material, UI 글꼴 | 9.6절 | UE는 Engine UObject 에셋(`Engine/Classes/Engine/Engine.h:903, 911`) | 에셋·머티리얼·UI 단계에서 팩 범위를 넓힌다 |
 

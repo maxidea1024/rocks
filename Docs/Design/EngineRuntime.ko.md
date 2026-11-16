@@ -43,8 +43,10 @@ S4·S5는 S2·S3과 독립이다. 이번 범위에서 macOS는 창·Metal 구현
 | `Gameplay` | Engine, World | GameInstance·GameDirector·GameState·Controller·Pawn·LocalPlayer | Graphics 참조 |
 | `AssetRuntime` | Serialization, Core | AssetId·에셋 파일 형식·AssetManager·TextureAsset | World·Graphics 참조 |
 | `AssetTools`(Developer) | AssetRuntime | BMP 임포터·에셋 파일 기록 | Shipping 링크 |
-| `Renderer` | Graphics | 내장 셰이더·RenderScene(평범한 데이터) 그리기 | World 순회 |
-| `WorldIntegration` | World, Renderer, AssetRuntime | SpriteComponent 등 렌더 컴포넌트, RenderScene 추출, 텍스처 GPU 캐시 | Engine 내부 상태 변경 |
+| `RenderBase` | Graphics, Task, MetaSchema | 렌더 lane·프레임 slot·프레임 packet 전달·완료 통지·`RenderHandle` 예약([렌더 기반](RenderBase.ko.md) RB1) | ObjectRuntime·World 참조 |
+| `WorldIntegration` | World, RenderBase, AssetRuntime | SpriteComponent 등 렌더 컴포넌트, RenderScene 추출, 텍스처 GPU 캐시 | Engine 내부 상태 변경 |
+
+정식 렌더러 모듈(`Renderer`, Forward+·Deferred, 계획 11절)은 아직 없다. 내장 메시·원문 셰이더로 그리던 최소 렌더러는 엔진 핵심이 아니라 시험 샘플이므로 `Programs/Sandbox/Private/SampleRenderer`로 옮겼다(2026-11-17). `Renderer` 이름은 정식 렌더러가 다시 쓴다.
 
 Engine은 창·그래픽·게임플레이를 모른다. 이벤트 펌프와 렌더는 `EngineLoopHooks`의 확장 지점으로 실행 파일(Sandbox)이 연결한다. 헤드리스 서버·테스트는 같은 Engine을 hook 없이 실행한다.
 

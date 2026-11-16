@@ -85,7 +85,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 | Graphics API | `Backend{D3D12, OpenGL, Vulkan, Metal}`(Vulkan·Metal은 Unsupported, `DeviceTypes.h:14–21`), `ShaderSource{hlsl, glsl}`(`:140–143`), 파이프라인 생성이 컴파일까지 한다. 바인딩은 고정(상수 b0, 텍스처 t0·s0, `:145–148`), `DrawConstants` 80 byte(`float transform[16]`·`float color[4]`, `:161–164`) | 컴파일된 코드를 받는 API·파이프라인 layout → SH2. D3D11·Vulkan·Metal backend와 OpenGL의 GLES 전환 → P9·P11·P12·SH2·SH5 |
 | D3D12 | root signature 하나(32-bit 상수 20개 b0, SRV·샘플러 테이블 각 1개는 PS만, `Engine/Source/Runtime/D3D12Graphics/Private/Win64/D3D12Device.cpp:1083–1120`), 런타임 `D3DCompile` `vs_5_1`·`ps_5_1`(`:1122–1146`), 모든 구성에서 `d3dcompiler` 링크(`D3D12Graphics.Build.cs:21–22`), 입력 시맨틱 `TEXCOORD`+location(`:703–704`), 디버그 레이어(`:323–330`) | 파이프라인별 root signature(7.2절 4항) → SH2, `d3dcompiler` 제거 → P4·SH2 |
 | OpenGL | Windows WGL 4.5 core(`Engine/Source/Runtime/OpenGLGraphics/Private/Win64/OpenGLDevice.cpp:394–422`), GL 함수 선언을 직접 두고 `wglGetProcAddress`로 얻음(`:144–146`), 런타임 GLSL 450 컴파일(`:921–935`), uniform 이름 조회(`:653–654`), DSA(`:574–585`·`:996`), `glClipControl`(`:888–893`) | GLES 3.2 공통 API 부분집합과 쿠킹된 ESSL → P11·SH2 |
-| Renderer | 내장 셰이더를 C++ 문자열로 가진다(HLSL `Engine/Source/Runtime/Renderer/Private/Renderer.cpp:14–46`, GLSL `:48–71`), 파이프라인 하나(텍스처×정점색×항목색) | `.rsf` 원문과 쿠킹된 라이브러리 → SH1·SH2 |
+| Renderer | 내장 셰이더를 C++ 문자열로 가진다(HLSL·GLSL 문자열, 2026-11-17부터 Sandbox 시험 샘플 `Programs/Sandbox/Private/SampleRenderer.cpp`), 파이프라인 하나(텍스처×정점색×항목색) | `.rsf` 원문과 쿠킹된 라이브러리 → SH1·SH2 |
 | Sandbox | self-test가 D3D12 하드웨어·WARP·OpenGL을 대조(허용 오차 채널 ±8·2%, `Programs/Sandbox/Private/GraphicsSelfTest.cpp:409–415`, 대상 `:427–438`). `--graphics=` 인자는 없다 | Vulkan·GLES 미리보기 대조 → SH2 |
 | GraphicsTypes | RGBA8 2종, 2D, 필터 4종(`PixelFormat.h:12–16`, `Sampler.h:11–20`) | A0-G(다른 문서, 5.2절 요구) |
 | 수학 타입 | `Matrix4`·`Vector3`는 정렬 지정 없음(`Core/Source/Runtime/Core/Public/Core/Math/Matrix4.h:56–61`, `Vector3.h:19–24`) | 셰이더 전용 정렬 타입(7.2절 5항) → SH2 |
@@ -668,9 +668,9 @@ Rocks 규칙:
 
 | 단계 | 내용 | 선행 | 완료 기준 |
 |---|---|---|---|
-| SH0 | 도구 스파이크: 지금의 내장 Renderer 셰이더(`Renderer.cpp:14–46`)를 DXIL·SPIR-V·DXBC·MSL·ESSL로 만들고 검증 도구를 돌린다. Windows·macOS 양쪽에서 실행 | P3·P4·P10 | 형식별 산출, `spirv-val` 통과, DXIL 서명 hash 검사(macOS DXC 포함, S1), FXC 고정본 로드, 리플렉션 덤프, `ROCKS_IMAGE_FORMAT`의 DXC 지원 확인, S2·S3·S6·S8·S9·S12(데스크톱) 측정 |
+| SH0 | 도구 스파이크: 지금의 내장 샘플 셰이더(`Programs/Sandbox/Private/SampleRenderer.cpp`의 HLSL)를 DXIL·SPIR-V·DXBC·MSL·ESSL로 만들고 검증 도구를 돌린다. Windows·macOS 양쪽에서 실행 | P3·P4·P10 | 형식별 산출, `spirv-val` 통과, DXIL 서명 hash 검사(macOS DXC 포함, S1), FXC 고정본 로드, 리플렉션 덤프, `ROCKS_IMAGE_FORMAT`의 DXC 지원 확인, S2·S3·S6·S8·S9·S12(데스크톱) 측정 |
 | SH1 | 소스 트리·가상 경로·`Platform.rsh`·전처리기(결정 6)·ShaderCompileWorker(P1, 11절)·두 층 키(P5)·에셋 너겟·`shader-compile` 명령·Development 필요 시 컴파일 | SH0·P1·P5(A2·A3·P6a)·결정 6 | 같은 입력 같은 바이트, 빈/찬 캐시 동일, 워커 강제 종료 보고, 부모 종료 시 워커와 그 자식 종료, 형식 버전 불일치 진단, 도구 조회, 전처리 정합성(S7) |
-| SH2 | 리플렉션 정규화·워커 규칙 검사(7.2절)·Graphics API(`ShaderCodeKind`·`CreateShader`·파이프라인 layout·root signature·래스터(컬링·앞면)와 깊이 상태)·셰이더 타입과 퍼뮤테이션(P14)·쿠킹된 라이브러리 로드(P6b)·VulkanGraphics 최소 구현(offscreen·내장 셰이더, P9)·OpenGLGraphics GLES 미리보기 전환(P11)·Renderer 원문·런타임 `D3DCompile`·GLSL 원문 제거(결정 9) | SH1·P2·P4·P6b·P9·P11·P14·A0-G·결정 2·3·4·5 | Sandbox self-test에서 D3D12·Vulkan·GLES 미리보기가 허용 오차 안 일치(Vulkan·GL은 CI에서 NOT RUN일 수 있다), A0-G 범위를 Vulkan이 받음(G3), 행렬 옵션·앞면 매핑 기록(S5), Release에 컴파일러 없음(P4), 7.3절 SH2 시험 |
+| SH2 | 리플렉션 정규화·워커 규칙 검사(7.2절)·Graphics API(`ShaderCodeKind`·`CreateShader`·파이프라인 layout·root signature·래스터(컬링·앞면)와 깊이 상태)·셰이더 타입과 퍼뮤테이션(P14)·쿠킹된 라이브러리 로드(P6b)·VulkanGraphics 최소 구현(offscreen·내장 셰이더, P9)·OpenGLGraphics GLES 미리보기 전환(P11)·샘플 렌더러 원문·런타임 `D3DCompile`·GLSL 원문 제거(결정 9) | SH1·P2·P4·P6b·P9·P11·P14·A0-G·결정 2·3·4·5 | Sandbox self-test에서 D3D12·Vulkan·GLES 미리보기가 허용 오차 안 일치(Vulkan·GL은 CI에서 NOT RUN일 수 있다), A0-G 범위를 Vulkan이 받음(G3), 행렬 옵션·앞면 매핑 기록(S5), Release에 컴파일러 없음(P4), 7.3절 SH2 시험 |
 | SH3 | 파라미터 구조체(P7)·생성 HLSL·오프셋 시험 | SH2·P7 | 7.3절 (a)·(f)를 생성 구조체로 |
 | SH4 | 감시 재컴파일(`DirectoryWatch`)·오류 위치·디버그 심볼·PSO 교체 | SH2 | 저장 후 10초 안 반영(계획 I5) |
 | SH5 | D3D11Graphics → MetalGraphics | SH2·P12·P15 | 각 backend가 D3D12와 허용 오차 안 일치, 7.3절 (c)·(e)·(g)의 D3D11·Metal 부분 |
