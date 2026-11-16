@@ -188,6 +188,7 @@ Result<World*> Engine::CreateWorld(const WorldCreateDesc& desc) noexcept {
     worldDesc.timeStep = desc.timeStep;
     worldDesc.objects = desc.objects;
     worldDesc.gcBudget = desc.gcBudget;
+    worldDesc.gcScheduler = desc.gcScheduler;
     worldDesc.subsystems = desc.subsystems;
     auto created = UniquePtr<World>::TryMake(allocator_, allocator_, *types_, worldDesc);
     if (!created) {

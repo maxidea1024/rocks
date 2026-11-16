@@ -347,7 +347,9 @@ TEST(ObjectIncrementalGcMatchesIndependentGraphOracleWithParallelMarking) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
-TEST(ObjectIncrementalGcRejectedMarkerSubmissionAbortsWithoutSweep) {
+// worker가 없는(시작하지 않은) scheduler를 주면 병렬 표식은 소유 스레드 혼자 참여해 끝낸다(GC-S4 —
+// task를 제출하지 않는다). 제출 실패로 cycle을 버리는 경로는 IncrementalGcReviewTests가 본다.
+TEST(ObjectIncrementalGcSchedulerWithoutWorkersMarksOnOwnerThread) {
     SystemAllocator allocator;
     {
         TypeRegistry types(allocator);
@@ -360,10 +362,13 @@ TEST(ObjectIncrementalGcRejectedMarkerSubmissionAbortsWithoutSweep) {
         REQUIRE(root && garbage);
         garbage.Value().Reset();
         REQUIRE(registry.BeginCollection(access));
-        CHECK(!registry.StepCollection(access, {10, 0}, &stopped));
+        for (uint32 guard = 0; guard < 8 && registry.CollectionPhase() != GcPhase::Idle; ++guard) {
+            REQUIRE(registry.StepCollection(access, {10, 0}, &stopped));
+        }
+
         CHECK(registry.CollectionPhase() == GcPhase::Idle);
-        CHECK(registry.Stats().liveObjects == 2);
-        CHECK(registry.Stats().retiredObjects == 0);
+        CHECK(registry.Stats().liveObjects == 1);
+        CHECK(registry.LastGcReport().reclaimed == 1);
         root.Value().Reset();
         REQUIRE(registry.Shutdown(access));
         REQUIRE(types.Shutdown());

@@ -51,6 +51,7 @@ constexpr uint32 GcPageTag = 0x47435047u;      // 'GCPG'
 constexpr uint32 GcPageTableTag = 0x47435054u; // 'GCPT'
 constexpr uint32 GcTypeTag = 0x47435459u;      // 'GCTY'
 constexpr uint32 RootListTag = 0x4743524cu;    // 'GCRL'
+constexpr uint32 GcBlockTag = 0x4743424bu;     // 'GCBK'
 
 uint64 LoadMark(const uint64& word) noexcept {
     return platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&word);
@@ -97,6 +98,25 @@ ErrorCode ObjectRegistry::MarkIndex(uint32 index, Array<uint32>& work, uint32& m
     }
 }
 
+bool ObjectRegistry::IsMarkableEdge(ObjectHandle handle, uint64 slots) const noexcept {
+    if (handle.registry != domain_ || handle.slot >= slots) {
+        return false;
+    }
+
+    if constexpr (IsDebugBuild) {
+        // 강한 간선은 언제나 살아 있는 객체를 가리킨다(세대까지 맞다). Release는 세대를 보지
+        // 않으므로 (GC-S3) 회수된 객체의 옛 handle을 Debug가 여기서 잡는다. 어긋나면 Trace나
+        // Registry의 계약 위반이다.
+        const Slot* slot = FindSlot(handle);
+        if (!slot ||
+            !(slot->state == SlotState::Alive || slot->state == SlotState::DestroyRequested)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 // 배치 간선 처리의 공통 본문이다. 대상의 비트 묶음을 먼저 모두 미리 읽은 뒤 방문 순서대로 검사·
 // 표식·enqueue한다(순서는 간선마다 처리할 때와 같다).
 void ObjectRegistry::MarkHandles(MarkState& state, const ObjectHandle* handles,
@@ -109,24 +129,12 @@ void ObjectRegistry::MarkHandles(MarkState& state, const ObjectHandle* handles,
     }
 
     for (uint32 index = 0; index < count; ++index) {
-        const ObjectHandle handle = handles[index];
-        if (handle.registry != domain_ || handle.slot >= slots) {
+        if (!IsMarkableEdge(handles[index], slots)) {
             state.error = ErrorCode::StaleHandle;
             return;
         }
 
-        if constexpr (IsDebugBuild) {
-            // 강한 간선은 언제나 살아 있는 객체를 가리킨다(세대까지 맞다). 어긋나면 Trace나
-            // Registry의 계약 위반이다.
-            const Slot* slot = FindSlot(handle);
-            if (!slot ||
-                !(slot->state == SlotState::Alive || slot->state == SlotState::DestroyRequested)) {
-                state.error = ErrorCode::StaleHandle;
-                return;
-            }
-        }
-
-        const ErrorCode marked = MarkIndex(handle.slot, *state.work, state.marked);
+        const ErrorCode marked = MarkIndex(handles[index].slot, *state.work, state.marked);
         if (marked != ErrorCode::None) {
             state.error = marked;
             return;
@@ -141,58 +149,35 @@ void ObjectRegistry::MarkBatch(void* pointer, const ObjectHandle* handles, uint3
     }
 }
 
-void ObjectRegistry::MarkBatchLocked(void* pointer, const ObjectHandle* handles,
-                                     uint32 count) noexcept {
-    auto& state = *static_cast<MarkState*>(pointer);
-    platform::LockGuard lock(state.registry->gate_);
-    if (state.error == ErrorCode::None) {
-        state.registry->MarkHandles(state, handles, count);
-    }
-}
-
-void ObjectRegistry::TraceIndex(uint32 index, MarkState& state, TraceVisitor& visitor,
-                                bool locked) noexcept {
+void ObjectRegistry::TraceIndex(uint32 index, MarkState& state, TraceVisitor& visitor) noexcept {
     const GcHot& hot = HotOf(index);
     gcTypes_[hot.type].trace(*hot.object, visitor);
     // 객체마다 비워 큐 순서를 간선마다 처리할 때와 같게 둔다(Trace 간선 → Outer → 자식).
     visitor.Flush();
-    const bool package = options_.policy.packageNativeType != nullptr;
-    if (hot.outer == NoSlot && !package) {
+    if (state.error != ErrorCode::None) {
         return;
     }
 
-    auto mark = [&]() noexcept {
-        if (state.error != ErrorCode::None) {
+    // inner → outer는 Registry가 방문하는 강한 간선이다.
+    if (hot.outer != NoSlot) {
+        const ErrorCode outer = MarkIndex(hot.outer, *state.work, state.marked);
+        if (outer != ErrorCode::None) {
+            state.error = outer;
             return;
         }
+    }
 
-        // inner → outer는 Registry가 방문하는 강한 간선이다.
-        if (hot.outer != NoSlot) {
-            const ErrorCode outer = MarkIndex(hot.outer, *state.work, state.marked);
-            if (outer != ErrorCode::None) {
-                state.error = outer;
+    // 패키지 정책: outer → inner(자식 고리)도 강한 간선이다. 고리는 cold Slot에 둔다(GC-S3 결정 —
+    // 패키지 정책 Registry만 읽는다). 처리 표시 아래라 고리가 바뀌지 않는다.
+    if (options_.policy.packageNativeType != nullptr) {
+        for (const Slot* child = SlotAt(index)->firstChild; child != nullptr;
+             child = child->nextSibling) {
+            const ErrorCode marked = MarkIndex(child->index, *state.work, state.marked);
+            if (marked != ErrorCode::None) {
+                state.error = marked;
                 return;
             }
         }
-
-        // 패키지 정책: outer → inner(자식 고리)도 강한 간선이다. 고리는 cold Slot에 둔다(GC-S3 결정
-        // — 패키지 정책 Registry만 읽는다). 처리 표시 아래라 고리가 바뀌지 않는다.
-        if (package) {
-            for (const Slot* child = SlotAt(index)->firstChild; child != nullptr;
-                 child = child->nextSibling) {
-                const ErrorCode marked = MarkIndex(child->index, *state.work, state.marked);
-                if (marked != ErrorCode::None) {
-                    state.error = marked;
-                    return;
-                }
-            }
-        }
-    };
-    if (locked) {
-        platform::LockGuard lock(gate_);
-        mark();
-    } else {
-        mark();
     }
 }
 
@@ -216,7 +201,7 @@ uint32 ObjectRegistry::MarkSerial(Array<uint32>& work, usize& cursor, MarkState&
             platform::PrefetchRead(HotOf(work[cursor + ObjectPrefetchDistance]).object);
         }
 
-        TraceIndex(work[cursor++], state, visitor, false);
+        TraceIndex(work[cursor++], state, visitor);
         ++processed;
     }
 
@@ -243,13 +228,25 @@ ErrorCode ObjectRegistry::ShadeLocked(ObjectHandle handle) noexcept {
         return ErrorCode::None;
     }
 
-    // Reserve는 Begin/CreatePending에서 gate 밖에 수행한다. barrier가 allocator 콜백을 실행하지
-    // 않도록 capacity를 먼저 검사하며 불변식 위반은 실패로 반환한다.
-    if (gcWork_.Size() == gcWork_.Capacity()) {
+    // 장벽은 장벽 큐에만 넣는다(slice 시작에 표식 큐로 옮긴다 — GC-S4). Reserve는 Begin/
+    // CreatePending에서 gate 밖에 수행한다. barrier가 allocator 콜백을 실행하지 않도록 capacity를
+    // 먼저 검사하며 불변식 위반은 실패로 반환한다.
+    if (gcShade_.Size() == gcShade_.Capacity()) {
         return ErrorCode::CapacityExceeded;
     }
 
-    return MarkIndex(slot->index, gcWork_, cycleGc_.marked);
+    return MarkIndex(slot->index, gcShade_, cycleGc_.marked);
+}
+
+void ObjectRegistry::DrainShadeQueue() noexcept {
+    for (usize index = 0; index < gcShade_.Size(); ++index) {
+        // 표식 큐도 모든 슬롯을 담을 용량이 있다(회색 객체는 cycle마다 슬롯당 한 번이다).
+        if (!gcWork_.TryPushBack(gcShade_[index])) {
+            platform::Fatal("Preallocated GC work queue exhausted");
+        }
+    }
+
+    gcShade_.Clear();
 }
 
 void ObjectRegistry::AddRootListLocked(Slot& slot) noexcept {
@@ -420,7 +417,12 @@ Result<void> ObjectRegistry::BeginCollection(const ObjectAccessContext& access) 
     }
 
     gcWork_.Clear();
+    gcShade_.Clear();
     auto reserved = gcWork_.TryReserve(capacity);
+    if (reserved) {
+        reserved = gcShade_.TryReserve(capacity);
+    }
+
     platform::LockGuard lock(gate_);
     processing_ = false;
     if (!reserved) {
@@ -462,6 +464,7 @@ Result<void> ObjectRegistry::CancelCollection(const ObjectAccessContext& access)
 
     gcPhase_ = GcPhase::Idle;
     gcWork_.Clear();
+    gcShade_.Clear();
     gcCursor_ = 0;
     return Result<void>::Success();
 }
@@ -565,105 +568,483 @@ void ObjectRegistry::WakeDeferredLocked(Slot& slot) noexcept {
     }
 }
 
-uint32 ObjectRegistry::MarkWithScheduler(MarkState& state, uint32 maxObjects, uint64 deadline,
-                                         WorkerScheduler& scheduler) noexcept {
-    // worker가 같은 큐에 동시에 넣으므로 표식·enqueue·오류는 배치마다 gate_
-    // 아래다(MarkBatchLocked). 병렬 표식의 잠금 제거는 GC-S4다.
-    auto setError = [this, &state](ErrorCode error) noexcept {
-        platform::LockGuard lock(gate_);
-        if (state.error == ErrorCode::None) {
-            state.error = error;
-        }
-    };
-    auto hasError = [this, &state]() noexcept {
-        platform::LockGuard lock(gate_);
-        return state.error != ErrorCode::None;
-    };
-    auto inBudget = [deadline]() noexcept {
-        return deadline == 0 || platform::MonotonicNanoseconds() < deadline;
-    };
-    uint32 processed = 0;
-    while (processed < maxObjects && inBudget() && !hasError()) {
-        uint32 next = 0;
-        bool parallel = false;
+// 병렬 표식 참여자 하나(worker task 또는 소유 스레드)의 지역 상태다.
+struct ObjectRegistry::MarkParticipant {
+    ParallelMark* shared = nullptr;
+    // 지역 큐: 블록 더미의 맨 위 블록에서 넣고 뺀다. 맨 위 아래의 블록은 언제나 가득 차 있다.
+    GcBlock* stack = nullptr;
+    // worker가 만난 수동 Trace(parallelTraceSafe가 아닌) 객체를 소유 스레드로 보내려고 모으는
+    // 블록이다.
+    GcBlock* owner = nullptr;
+    uint32 marked = 0;
+    uint32 traced = 0;
+    // 공유 trace 수에 아직 더하지 않은 수다(예산 검사 간격).
+    uint32 pending = 0;
+    bool isOwner = false;
+};
+
+// 한 slice(또는 Collect)의 병렬 표식이다(GC-S4, Docs/Design/GarbageCollectionScale.ko.md).
+// 참여자는 worker task W개와 소유 스레드다. 공유 풀은 512칸 블록 목록이고 잠금 하나(gate)로 지킨다
+// (설계의 "블록 풀 하나를 잠금으로 보호하는 단순한 방식"). 참여자는 지역 큐가 비면 소유 스레드 큐
+// (소유 스레드만)와 공유 풀에서 블록을 가져오고, 둘 다 비면 idle로 기다린다. 모든 참여자가 idle이고
+// 두 풀이 비면 끝이다(새 회색 객체는 idle이 아닌 참여자만 만들고, 수동 Trace 객체는 idle 전에
+// 넘긴다). 예산(객체 수·시간)이나 오류는 stop을 세워 모두 멈추고 남은 블록을 leftovers로 모은다.
+struct ObjectRegistry::ParallelMark {
+    ObjectRegistry* registry = nullptr;
+    platform::Mutex gate;
+    platform::ConditionVariable changed;
+    GcBlock* pool = nullptr;
+    GcBlock* ownerPool = nullptr;
+    GcBlock* leftovers = nullptr;
+    GcBlock* freeBlocks = nullptr;
+    // 풀의 블록 수·idle 참여자 수다(잠금 안에서 쓰고 밖에서는 relaxed로 읽어 나눔 판단에만 쓴다).
+    uint32 poolBlocks = 0;
+    uint32 idle = 0;
+    uint32 participants = 0;
+    bool done = false;
+    // atomic: 멈춤 요청, 첫 오류(ErrorCode), 모든 참여자의 trace 수.
+    uint32 stop = 0;
+    uint32 error = 0;
+    uint32 traced = 0;
+    uint32 maxObjects = 0;
+    uint64 deadline = 0;
+    // 예산 검사 간격(참여자마다 trace한 객체 수)이다. 기본 64, 객체 예산이 그보다 작으면 그 값이다.
+    uint32 budgetInterval = 64;
+
+    bool Stopped() const noexcept {
+        return platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&stop) != 0;
+    }
+
+    void RequestStop() noexcept {
+        platform::AtomicStore<platform::MemoryOrder::Relaxed>(&stop, 1u);
+        platform::LockGuard lock(gate);
+        changed.NotifyAll();
+    }
+
+    void SetError(ErrorCode code) noexcept {
+        uint32 expected = 0;
+        (void)platform::AtomicCompareExchangeStrong<platform::MemoryOrder::Relaxed,
+                                                    platform::MemoryOrder::Relaxed>(
+            &error, expected, static_cast<uint32>(code));
+        RequestStop();
+    }
+
+    GcBlock* TakeBlock() noexcept {
         {
-            platform::LockGuard lock(gate_);
-            if (gcCursor_ == gcWork_.Size()) {
+            platform::LockGuard lock(gate);
+            if (GcBlock* block = freeBlocks) {
+                freeBlocks = block->next;
+                block->next = nullptr;
+                block->count = 0;
+                return block;
+            }
+        }
+
+        // 여러 worker가 동시에 부를 수 있다(Registry allocator의 다중 스레드 계약 — StepCollection
+        // 주석).
+        auto memory = registry->allocator_.Allocate(sizeof(GcBlock), alignof(GcBlock), GcBlockTag);
+        if (!memory) {
+            SetError(memory.Error());
+            return nullptr;
+        }
+
+        return ::new (memory.Value()) GcBlock();
+    }
+
+    void ReleaseBlock(GcBlock* block) noexcept {
+        platform::LockGuard lock(gate);
+        block->next = freeBlocks;
+        freeBlocks = block;
+    }
+
+    void Publish(GcBlock* block) noexcept {
+        platform::LockGuard lock(gate);
+        block->next = pool;
+        pool = block;
+        platform::AtomicStore<platform::MemoryOrder::Relaxed>(&poolBlocks, poolBlocks + 1);
+        changed.NotifyOne();
+    }
+
+    void PublishOwner(GcBlock* block) noexcept {
+        platform::LockGuard lock(gate);
+        block->next = ownerPool;
+        ownerPool = block;
+        // 기다리는 참여자 중 소유 스레드를 깨워야 한다(누가 소유 스레드인지 골라 깨울 수 없다).
+        changed.NotifyAll();
+    }
+
+    // 지역 큐에 넣는다. 맨 위 블록이 가득 차면 풀이 모자랄 때(참여자 수보다 적을 때) 그 블록을
+    // 풀에 내놓고 새 블록을 받는다.
+    void Push(MarkParticipant& self, uint32 index) noexcept {
+        GcBlock* top = self.stack;
+        if (top == nullptr || top->count == GcBlock::Capacity) {
+            if (top != nullptr &&
+                platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&poolBlocks) < participants) {
+                self.stack = top->next;
+                Publish(top);
+            }
+
+            GcBlock* block = TakeBlock();
+            if (block == nullptr) {
+                return;
+            }
+
+            block->next = self.stack;
+            self.stack = block;
+            top = block;
+        }
+
+        top->items[top->count++] = index;
+    }
+
+    void PushOwner(MarkParticipant& self, uint32 index) noexcept {
+        if (self.owner == nullptr || self.owner->count == GcBlock::Capacity) {
+            if (self.owner != nullptr) {
+                PublishOwner(self.owner);
+            }
+
+            self.owner = TakeBlock();
+            if (self.owner == nullptr) {
+                return;
+            }
+        }
+
+        self.owner->items[self.owner->count++] = index;
+    }
+
+    bool Pop(MarkParticipant& self, uint32& index) noexcept {
+        while (GcBlock* top = self.stack) {
+            if (top->count != 0) {
+                index = top->items[--top->count];
+                // 미스 사슬(hot 레코드 → 본체)을 지역 큐 앞쪽(LIFO라 아래 칸)에서 미리 당긴다.
+                if (top->count > HotPrefetchDistance) {
+                    platform::PrefetchRead(
+                        &registry->HotOf(top->items[top->count - HotPrefetchDistance]));
+                }
+
+                if (top->count > ObjectPrefetchDistance) {
+                    platform::PrefetchRead(
+                        registry->HotOf(top->items[top->count - ObjectPrefetchDistance]).object);
+                }
+
+                return true;
+            }
+
+            self.stack = top->next;
+            ReleaseBlock(top);
+        }
+
+        return false;
+    }
+
+    // 표식한다(atomic fetch_or — 이긴 참여자만 지역 큐에 넣는다). 잎은 Outer 사슬을 바로 따라간다.
+    ErrorCode Mark(MarkParticipant& self, uint32 index) noexcept {
+        for (;;) {
+            GcBits& bits = registry->BitsOf(index);
+            const uint64 bit = BitOf(index);
+            if ((bits.live & bit) == 0) {
+                return ErrorCode::StaleHandle;
+            }
+
+            if ((LoadMark(bits.mark) & bit) != 0 ||
+                (platform::AtomicFetchOr<platform::MemoryOrder::Relaxed>(&bits.mark, bit) & bit) !=
+                    0) {
+                return ErrorCode::None;
+            }
+
+            ++self.marked;
+            if ((bits.leaf & bit) == 0) {
+                Push(self, index);
+                return ErrorCode::None;
+            }
+
+            index = registry->HotOf(index).outer;
+            if (index == NoSlot) {
+                return ErrorCode::None;
+            }
+        }
+    }
+
+    static void MarkBatchShared(void* pointer, const ObjectHandle* handles, uint32 count) noexcept {
+        auto& self = *static_cast<MarkParticipant*>(pointer);
+        ParallelMark& shared = *self.shared;
+        ObjectRegistry& registry = *shared.registry;
+        const uint64 slots = uint64(registry.chunkCount_) * SlotsPerChunk;
+        for (uint32 index = 0; index < count; ++index) {
+            if (handles[index].slot < slots) {
+                platform::PrefetchRead(&registry.BitsOf(handles[index].slot));
+            }
+        }
+
+        for (uint32 index = 0; index < count; ++index) {
+            if (!registry.IsMarkableEdge(handles[index], slots)) {
+                shared.SetError(ErrorCode::StaleHandle);
+                return;
+            }
+
+            const ErrorCode marked = shared.Mark(self, handles[index].slot);
+            if (marked != ErrorCode::None) {
+                shared.SetError(marked);
+                return;
+            }
+        }
+    }
+
+    void Trace(MarkParticipant& self, uint32 index, TraceVisitor& visitor) noexcept {
+        const GcHot& hot = registry->HotOf(index);
+        registry->gcTypes_[hot.type].trace(*hot.object, visitor);
+        visitor.Flush();
+        if (hot.outer != NoSlot) {
+            const ErrorCode outer = Mark(self, hot.outer);
+            if (outer != ErrorCode::None) {
+                SetError(outer);
+                return;
+            }
+        }
+
+        // 패키지 정책의 자식 고리는 slice 동안 바뀌지 않아 여러 참여자가 읽어도 경합이 없다.
+        if (registry->options_.policy.packageNativeType != nullptr) {
+            for (const Slot* child = registry->SlotAt(index)->firstChild; child != nullptr;
+                 child = child->nextSibling) {
+                const ErrorCode marked = Mark(self, child->index);
+                if (marked != ErrorCode::None) {
+                    SetError(marked);
+                    return;
+                }
+            }
+        }
+    }
+
+    // trace 수를 공유 계수에 더하고 객체 수·시간 예산을 본다.
+    void ChargeBudget(MarkParticipant& self) noexcept {
+        const uint32 total =
+            platform::AtomicFetchAdd<platform::MemoryOrder::Relaxed>(&traced, self.pending) +
+            self.pending;
+        self.pending = 0;
+        if (total >= maxObjects ||
+            (deadline != 0 && platform::MonotonicNanoseconds() >= deadline)) {
+            RequestStop();
+        }
+    }
+
+    // 지역 큐가 비었다: 소유 스레드 큐(소유 스레드만)나 공유 풀에서 블록을 받는다. 받으면 true,
+    // 끝이나 멈춤이면 false다.
+    bool Refill(MarkParticipant& self) noexcept {
+        platform::LockGuard lock(gate);
+        for (;;) {
+            if (Stopped() || done) {
+                return false;
+            }
+
+            GcBlock** source = self.isOwner && ownerPool != nullptr ? &ownerPool
+                               : pool != nullptr                    ? &pool
+                                                                    : nullptr;
+            if (source != nullptr) {
+                GcBlock* block = *source;
+                *source = block->next;
+                if (source == &pool) {
+                    platform::AtomicStore<platform::MemoryOrder::Relaxed>(&poolBlocks,
+                                                                          poolBlocks - 1);
+                }
+
+                block->next = self.stack;
+                self.stack = block;
+                return true;
+            }
+
+            platform::AtomicStore<platform::MemoryOrder::Relaxed>(&idle, idle + 1);
+            // 모두 idle이고 두 풀이 비었다: 회색 객체가 더 생길 수 없다. worker가 소유 스레드 큐를
+            // 남긴 채 idle이 되면(소유 스레드가 아직 깨어나 잠금을 다시 잡기 전) 끝이 아니다.
+            if (idle == participants && pool == nullptr && ownerPool == nullptr) {
+                done = true;
+                changed.NotifyAll();
+                return false;
+            }
+
+            (void)changed.Wait(gate);
+            platform::AtomicStore<platform::MemoryOrder::Relaxed>(&idle, idle - 1);
+        }
+    }
+
+    // 참여자 하나의 표식 루프다.
+    void Run(MarkParticipant& self) noexcept {
+        TraceVisitor visitor(&self, &ParallelMark::MarkBatchShared);
+        for (;;) {
+            uint32 index = 0;
+            while (!Stopped() && Pop(self, index)) {
+                if (!self.isOwner &&
+                    !registry->gcTypes_[registry->HotOf(index).type].parallelTraceSafe) {
+                    PushOwner(self, index);
+                    continue;
+                }
+
+                Trace(self, index, visitor);
+                ++self.traced;
+                if (++self.pending == budgetInterval) {
+                    ChargeBudget(self);
+                    // 다른 참여자가 기다리고 지역 큐에 가득 찬 블록이 더 있으면 하나 내놓는다.
+                    if (platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&idle) != 0 &&
+                        self.stack != nullptr && self.stack->next != nullptr) {
+                        GcBlock* spare = self.stack->next;
+                        self.stack->next = spare->next;
+                        Publish(spare);
+                    }
+                }
+            }
+
+            // idle 전에 소유 스레드로 보낼 객체를 넘긴다(끝 판정이 이 블록을 놓치지 않게).
+            if (self.owner != nullptr) {
+                if (self.owner->count != 0) {
+                    PublishOwner(self.owner);
+                } else {
+                    ReleaseBlock(self.owner);
+                }
+
+                self.owner = nullptr;
+            }
+
+            if (Stopped() || !Refill(self)) {
                 break;
             }
-
-            next = gcWork_[gcCursor_];
-            parallel = gcTypes_[HotOf(next).type].parallelTraceSafe;
         }
 
-        if (!parallel) {
-            ++gcCursor_;
-            TraceVisitor visitor(&state, &ObjectRegistry::MarkBatchLocked);
-            TraceIndex(next, state, visitor, true);
-            ++processed;
-            continue;
+        if (self.pending != 0) {
+            ChargeBudget(self);
         }
 
-        // 한 batch는 최대 64개다. 각 task의 완료는 capture 정리 뒤 관측하고 모두 회수한 뒤에만
-        // stack state/visitor를 없앤다. 미선언 Trace는 이 batch와 겹쳐 실행하지 않는다.
-        WorkerTaskHandle tasks[64];
-        uint32 submitted = 0;
-        while (submitted < 64 && processed < maxObjects && inBudget() && !hasError()) {
-            uint32 index = 0;
-            {
-                platform::LockGuard lock(gate_);
-                if (gcCursor_ == gcWork_.Size()) {
-                    break;
-                }
+        // 멈췄으면 남은 지역 블록을 다음 slice 몫으로 모은다.
+        platform::LockGuard lock(gate);
+        while (GcBlock* block = self.stack) {
+            self.stack = block->next;
+            block->next = leftovers;
+            leftovers = block;
+        }
+    }
+};
 
-                index = gcWork_[gcCursor_];
-                if (!gcTypes_[HotOf(index).type].parallelTraceSafe) {
-                    break;
-                }
+uint32 ObjectRegistry::MarkParallel(Array<uint32>& work, usize& cursor, MarkState& state,
+                                    uint32 maxObjects, uint64 deadline, WorkerScheduler& scheduler,
+                                    bool& completed) noexcept {
+    completed = false;
+    constexpr uint32 MaxWorkers = 64;
+    const uint32 workers =
+        scheduler.Stats().workerCount < MaxWorkers ? scheduler.Stats().workerCount : MaxWorkers;
+    ParallelMark shared;
+    shared.registry = this;
+    shared.participants = workers + 1;
+    shared.maxObjects = maxObjects;
+    shared.deadline = deadline;
+    shared.budgetInterval = maxObjects < shared.budgetInterval ? maxObjects : shared.budgetInterval;
+    shared.freeBlocks = gcFreeBlocks_;
+    gcFreeBlocks_ = nullptr;
+    MarkParticipant participants[MaxWorkers + 1];
+    for (uint32 index = 0; index <= workers; ++index) {
+        participants[index].shared = &shared;
+    }
 
-                ++gcCursor_;
-            }
+    participants[0].isOwner = true;
+    // 씨앗(work[cursor..))을 블록으로 묶어 공유 풀에 둔다. 큐는 비우고 끝에서 남은 것을 다시
+    // 담는다.
+    for (usize at = cursor; at < work.Size();) {
+        GcBlock* block = shared.TakeBlock();
+        if (block == nullptr) {
+            break;
+        }
 
+        while (at < work.Size() && block->count < GcBlock::Capacity) {
+            block->items[block->count++] = work[at++];
+        }
+
+        block->next = shared.pool;
+        shared.pool = block;
+        ++shared.poolBlocks;
+    }
+
+    work.Clear();
+    cursor = 0;
+    WorkerTaskHandle tasks[MaxWorkers];
+    uint32 submitted = 0;
+    if (!shared.Stopped()) {
+        for (; submitted < workers; ++submitted) {
+            MarkParticipant* self = &participants[submitted + 1];
             auto body = Function<void(WorkerTaskContext&)>::TryCreate(
-                allocator_, [this, &state, index](WorkerTaskContext&) noexcept {
-                    // hot 레코드·Outer·고리는 slice(처리 표시) 동안 바뀌지 않으므로 worker가 읽어도
-                    // 경합이 없다. 표식은 gate_ 아래다.
-                    TraceVisitor visitor(&state, &ObjectRegistry::MarkBatchLocked);
-                    TraceIndex(index, state, visitor, true);
-                });
+                allocator_, [&shared, self](WorkerTaskContext&) noexcept { shared.Run(*self); });
             if (!body) {
-                setError(body.Error());
+                shared.SetError(body.Error());
                 break;
             }
 
             auto accepted = scheduler.Submit(Move(body.Value()));
             if (!accepted) {
-                setError(accepted.Error());
+                shared.SetError(accepted.Error());
                 break;
             }
 
-            tasks[submitted++] = Move(accepted.Value());
-            ++processed;
+            tasks[submitted] = Move(accepted.Value());
         }
 
-        for (uint32 index = 0; index < submitted; ++index) {
-            auto waited = tasks[index].Wait();
-            if (!waited || waited.Value() != platform::WaitResult::Signaled) {
-                // stack에 남은 trace context를 사용하는 worker를 버리고 복귀할 수 없다.
-                platform::Fatal("Cannot drain a GC marker task");
-            }
-
-            auto status = tasks[index].Status();
-            if (!status) {
-                setError(status.Error());
-            } else if (status.Value().state != WorkerTaskState::Succeeded) {
-                setError(status.Value().error == ErrorCode::None ? ErrorCode::DependencyFailed
-                                                                 : status.Value().error);
-            }
+        if (submitted != workers) {
+            // 제출하지 못한 참여자는 끝 판정 수에서 뺀다(이미 멈춤이 걸려 모두 곧 나온다).
+            platform::LockGuard lock(shared.gate);
+            shared.participants = submitted + 1;
+            shared.changed.NotifyAll();
         }
     }
 
-    return processed;
+    shared.Run(participants[0]);
+    for (uint32 index = 0; index < submitted; ++index) {
+        auto waited = tasks[index].Wait();
+        if (!waited || waited.Value() != platform::WaitResult::Signaled) {
+            // stack에 남은 표식 상태를 쓰는 worker를 버리고 복귀할 수 없다.
+            platform::Fatal("Cannot drain a GC marker task");
+        }
+
+        auto status = tasks[index].Status();
+        if (!status) {
+            shared.SetError(status.Error());
+        } else if (status.Value().state != WorkerTaskState::Succeeded) {
+            shared.SetError(status.Value().error == ErrorCode::None ? ErrorCode::DependencyFailed
+                                                                    : status.Value().error);
+        }
+    }
+
+    // 모든 참여자가 끝났다. 남은 회색 객체(멈춤)를 큐에 다시 담고 블록을 재사용 목록으로 돌린다.
+    uint32 traced = 0;
+    for (uint32 index = 0; index <= workers; ++index) {
+        state.marked += participants[index].marked;
+        traced += participants[index].traced;
+        if (participants[index].owner != nullptr) {
+            participants[index].owner->next = shared.leftovers;
+            shared.leftovers = participants[index].owner;
+        }
+    }
+
+    GcBlock* lists[] = {shared.leftovers, shared.pool, shared.ownerPool};
+    for (GcBlock* block : lists) {
+        while (block != nullptr) {
+            GcBlock* next = block->next;
+            for (uint32 item = 0; item < block->count; ++item) {
+                // 큐는 모든 슬롯을 담을 용량을 미리 확보했다(회색 객체는 슬롯마다 한 번이다).
+                if (!work.TryPushBack(block->items[item])) {
+                    platform::Fatal("Preallocated GC work queue exhausted");
+                }
+            }
+
+            block->next = shared.freeBlocks;
+            shared.freeBlocks = block;
+            block = next;
+        }
+    }
+
+    gcFreeBlocks_ = shared.freeBlocks;
+    const auto error = static_cast<ErrorCode>(shared.error);
+    if (error != ErrorCode::None) {
+        state.error = error;
+        return traced;
+    }
+
+    completed = work.IsEmpty() && shared.done;
+    return traced;
 }
 
 uint32 ObjectRegistry::RetireWhiteLocked(uint32 chunk) noexcept {
@@ -727,15 +1108,23 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
     MarkState state{this, &gcWork_};
     bool cutoffPublished = false;
     if (gcPhase_ == GcPhase::Marking) {
-        processed = scheduler == nullptr
-                        ? MarkSerial(gcWork_, gcCursor_, state, budget.maxObjects, deadline)
-                        : MarkWithScheduler(state, budget.maxObjects, deadline, *scheduler);
+        // slice 사이에 장벽이 모은 회색 객체를 표식 큐로 옮긴다(slice 동안은 장벽이 없다 — 처리
+        // 표시).
+        DrainShadeQueue();
+        bool completed = false;
+        if (scheduler == nullptr) {
+            processed = MarkSerial(gcWork_, gcCursor_, state, budget.maxObjects, deadline);
+            // 큐가 빈 것을 이 slice의 예산 안에서 보았을 때만 끝난 것으로 본다(예산을 다 쓴 slice는
+            // Marking으로 끝나 다음 slice 전에 mutator가 장벽을 거칠 수 있다).
+            completed = gcCursor_ == gcWork_.Size() && processed < budget.maxObjects &&
+                        (deadline == 0 || platform::MonotonicNanoseconds() < deadline);
+        } else {
+            processed = MarkParallel(gcWork_, gcCursor_, state, budget.maxObjects, deadline,
+                                     *scheduler, completed);
+        }
+
         cycleGc_.marked += state.marked;
-        // 큐가 빈 것을 이 slice의 예산 안에서 보았을 때만 cutoff를 게시한다(예산을 다 쓴 slice는
-        // Marking으로 끝나 다음 slice 전에 mutator가 장벽을 거칠 수 있다).
-        if (state.error == ErrorCode::None && gcCursor_ == gcWork_.Size() &&
-            processed < budget.maxObjects &&
-            (deadline == 0 || platform::MonotonicNanoseconds() < deadline)) {
+        if (state.error == ErrorCode::None && completed && gcShade_.IsEmpty()) {
             // 모든 장벽이 같은 gate에서 게시되고 slice 동안은 장벽이 없으므로(처리 표시) 빈 큐
             // 판정과 cutoff는 하나의 선형화다. 아직 slot을 Retired로 바꾸기 전에도 white 객체의
             // Resolve·Pin·연결을 차단한다. cutoff를 게시한 slice는 sweep 없이 끝낸다. sweep 단위가
@@ -753,6 +1142,7 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
         platform::LockGuard lock(gate_);
         gcPhase_ = GcPhase::Idle;
         gcWork_.Clear();
+        gcShade_.Clear();
         gcCursor_ = 0;
         processing_ = false;
         return Result<GcProgress>::Failure(state.error);
@@ -805,6 +1195,7 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
         gcPhase_ = GcPhase::Idle;
         lastGc_ = cycleGc_;
         gcWork_.Clear();
+        gcShade_.Clear();
         gcCursor_ = 0;
     }
 
@@ -812,10 +1203,15 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
     return Result<GcProgress>::Success({gcPhase_, processed, cycleGc_});
 }
 
-Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access) noexcept {
+Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access,
+                                         WorkerScheduler* scheduler) noexcept {
     auto valid = CheckAccess(access);
     if (!valid) {
         return Result<GcReport>::Failure(valid.Error());
+    }
+
+    if (scheduler && scheduler->IsCurrentWorker()) {
+        return Result<GcReport>::Failure(ErrorCode::WrongThread);
     }
 
     const uint64 started = platform::MonotonicNanoseconds();
@@ -857,7 +1253,16 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access) noex
     const uint64 markStarted = platform::MonotonicNanoseconds();
     report.beginNanoseconds = markStarted - started;
     usize cursor = 0;
-    (void)MarkSerial(work, cursor, state, NumericLimits<uint32>::Max(), 0);
+    if (scheduler == nullptr) {
+        (void)MarkSerial(work, cursor, state, NumericLimits<uint32>::Max(), 0);
+    } else {
+        bool completed = false;
+        (void)MarkParallel(work, cursor, state, NumericLimits<uint32>::Max(), 0, *scheduler,
+                           completed);
+        if (state.error == ErrorCode::None && !completed) {
+            platform::Fatal("Unbounded parallel marking stopped before completion");
+        }
+    }
 
     const uint64 sweepStarted = platform::MonotonicNanoseconds();
     report.markNanoseconds = sweepStarted - markStarted;

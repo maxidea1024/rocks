@@ -6,6 +6,7 @@
 #include <Object/TypeRegistry.h>
 #include <Platform/Sync.h>
 #include <Platform/Thread.h>
+#include <Task/WorkerScheduler.h>
 
 // GC-S1(잠금 없는 직렬 marker)의 전제 시험이다(Docs/Design/GarbageCollectionScale.ko.md 7.1·7.2절).
 // - 표식 slice 안에서 다른 스레드가 RootRef·BackendLease·EncodePin을 반환해도 결과가 정의대로다.
@@ -109,10 +110,18 @@ bool IsAlive(ObjectRegistry& objects, ObjectHandle handle) noexcept {
     return lifecycle && lifecycle.Value() == ObjectLifecycle::Alive;
 }
 
-// incremental이 참이면 Begin·Step(직렬), 거짓이면 Collect로 수집한다.
-void RunCrossThreadReleaseDuringSlice(bool incremental) noexcept {
+// incremental이 참이면 Begin·Step, 거짓이면 Collect로 수집한다. workers가 0이 아니면 그 수의
+// worker로 병렬 표식한다(탐침·노드는 수동 Trace라 소유 스레드가 trace하고 그 안에서 hand-off한다).
+void RunCrossThreadReleaseDuringSlice(bool incremental, uint32 workers) noexcept {
     SystemAllocator allocator;
     {
+        WorkerScheduler scheduler(allocator);
+        WorkerScheduler* parallel = nullptr;
+        if (workers != 0) {
+            REQUIRE(scheduler.Start({workers, 256, 16}));
+            parallel = &scheduler;
+        }
+
         TypeRegistry types(allocator);
         REQUIRE(RegisterAuditTypes(types));
         ObjectRegistry objects(allocator, types, Guid{0x4743, incremental ? 1u : 2u});
@@ -159,12 +168,12 @@ void RunCrossThreadReleaseDuringSlice(bool incremental) noexcept {
             const GcBudget unlimited{NumericLimits<uint32>::Max(), 0};
             for (uint32 guard = 0; guard < 8 && objects.CollectionPhase() != GcPhase::Idle;
                  ++guard) {
-                REQUIRE(objects.StepCollection(access, unlimited));
+                REQUIRE(objects.StepCollection(access, unlimited, parallel));
             }
 
             CHECK(objects.CollectionPhase() == GcPhase::Idle);
         } else {
-            REQUIRE(objects.Collect(access));
+            REQUIRE(objects.Collect(access, parallel));
         }
 
         activeWork = nullptr;
@@ -192,6 +201,9 @@ void RunCrossThreadReleaseDuringSlice(bool incremental) noexcept {
         pinned.Value().Reset();
         kept.Value().Reset();
         REQUIRE(objects.Shutdown(access));
+        if (parallel != nullptr) {
+            REQUIRE(scheduler.Shutdown());
+        }
     }
 
     CHECK(allocator.Stats().liveAllocations == 0);
@@ -214,11 +226,19 @@ struct OrderLog {
 } // namespace
 
 TEST(ObjectGc_CrossThreadReleasesDuringIncrementalSliceAreSafe) {
-    RunCrossThreadReleaseDuringSlice(true);
+    RunCrossThreadReleaseDuringSlice(true, 0);
 }
 
 TEST(ObjectGc_CrossThreadReleasesDuringCollectAreSafe) {
-    RunCrossThreadReleaseDuringSlice(false);
+    RunCrossThreadReleaseDuringSlice(false, 0);
+}
+
+TEST(ObjectGc_CrossThreadReleasesDuringParallelSliceAreSafe) {
+    RunCrossThreadReleaseDuringSlice(true, 3);
+}
+
+TEST(ObjectGc_CrossThreadReleasesDuringParallelCollectAreSafe) {
+    RunCrossThreadReleaseDuringSlice(false, 3);
 }
 
 // 배치 visitor는 null을 빼고 방문 순서 그대로 넘기며, 버퍼가 차면 Trace 도중에도 넘긴다.

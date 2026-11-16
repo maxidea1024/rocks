@@ -22,7 +22,7 @@
 // - 생성(묶음 생성·Commit)과 연결(AddReference) 시간
 // - 정지형 Collect: Begin(루트 수집)·표식·sweep·회수·전체(반복 측정의 중앙값)
 // - 증분 수집: 기본 GcBudget, 시간 한도만 둔 예산(2ms). Step 횟수와 Step 한 번의 시간 분포
-// - scheduler 경로(worker N개, 예산 무제한)
+// - 병렬 표식: worker 2·4·8·16개의 정지형 Collect, worker N개(--workers)의 증분 수집
 // - churn: 살아 있는 객체의 10%만큼 쓰레기 묶음을 만든 뒤 Collect(회수 시간)
 // - 메모리: 범주별(Slot chunk·객체·참조 배열·이름·GC 밀집 자료·기타) 바이트와 최고치
 //
@@ -604,9 +604,41 @@ int RunScenario(const Scenario& scenario, const Options& options) noexcept {
                 return 5;
             }
 
+            // 병렬 표식(GC-S4): worker 수마다 정지형 Collect(STW 병렬 전체 수집)를 잰다. 소유
+            // 스레드도 참여하므로 참여자는 worker + 1이다.
+            const uint32 workerCounts[] = {2, 4, 8, 16};
+            for (uint32 workers : workerCounts) {
+                WorkerScheduler parallel(memory);
+                if (!parallel.Start({workers, 256, 16})) {
+                    printf("scheduler start failed\n");
+                    return 5;
+                }
+
+                reports.Clear();
+                for (uint32 rep = 0; rep < scenario.reps; ++rep) {
+                    auto collected = registry.Collect(access, &parallel);
+                    if (!collected || !reports.TryPushBack(collected.Value())) {
+                        printf("parallel Collect failed\n");
+                        return 5;
+                    }
+                }
+
+                char label[64];
+                snprintf(label, sizeof(label), "parallel Collect x%u", workers);
+                PrintPhases(label, MedianOf(reports, memory));
+                if (!parallel.Shutdown()) {
+                    return 5;
+                }
+            }
+
             char label[64];
-            snprintf(label, sizeof(label), "scheduler x%u unlimited", options.workers);
-            if (!RunIncremental(registry, label, GcBudget{NumericLimits<uint32>::Max(), 0},
+            snprintf(label, sizeof(label), "incremental default x%u", options.workers);
+            if (!RunIncremental(registry, label, GcBudget{}, &scheduler, memory)) {
+                return 5;
+            }
+
+            snprintf(label, sizeof(label), "incremental time 2ms x%u", options.workers);
+            if (!RunIncremental(registry, label, GcBudget{NumericLimits<uint32>::Max(), 2000000},
                                 &scheduler, memory)) {
                 return 5;
             }

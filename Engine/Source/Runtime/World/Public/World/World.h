@@ -76,6 +76,11 @@ struct WorldDesc {
     RegistryOptions objects;
     // 프레임 끝 증분 GC 한 번의 예산이다.
     GcBudget gcBudget;
+    // 주면 World의 GC 표식(프레임 끝 증분 slice와 종료 수집)을 이 scheduler로 병렬로
+    // 한다(Docs/Design/ GarbageCollectionScale.ko.md GC-S4 — ObjectRegistry::StepCollection의
+    // scheduler 규칙). 빌림이며 시작된 scheduler여야 하고 World보다 오래 살아야 한다. World를 그
+    // worker 스레드에서 tick하지 않는다. 없으면 직렬 표식이다.
+    WorkerScheduler* gcScheduler = nullptr;
     // 초기화할 WorldSubsystem 종류다. 배열은 Initialize가 끝날 때까지 살아 있어야 한다.
     Span<const WorldSubsystemType> subsystems;
 };
@@ -540,6 +545,7 @@ private:
     Array<ObjectHandle> destroyActors_;
     Array<ObjectHandle> destroyComponents_;
     GcBudget gcBudget_;
+    WorkerScheduler* gcScheduler_ = nullptr;
     StepPlan lastStep_;
     WorldState state_ = WorldState::Created;
     uint32 hookDepth_ = 0;

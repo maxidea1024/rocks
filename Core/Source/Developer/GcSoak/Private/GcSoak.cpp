@@ -287,7 +287,7 @@ public:
         }
 
         for (uint32 round = 0; round < 2; ++round) {
-            auto collected = registry_.Collect(access_);
+            auto collected = registry_.Collect(access_, options_.scheduler);
             if (!collected && !failedBefore) {
                 Fail("final Collect failed", None, collected.Error());
             }
@@ -1052,7 +1052,7 @@ private:
             return;
         }
 
-        auto collected = registry_.Collect(access_);
+        auto collected = registry_.Collect(access_, options_.scheduler);
         if (collected || collected.Error() != ErrorCode::Busy) {
             Fail("Collect did not report Busy while a Borrow was held", target,
                  collected ? ErrorCode::None : collected.Error());
@@ -1086,7 +1086,7 @@ private:
             } else if (roll < 14) {
                 currentBegin_ = ++cyclesBegun_;
                 report_.cyclesBegun = cyclesBegun_;
-                auto collected = registry_.Collect(access_);
+                auto collected = registry_.Collect(access_, options_.scheduler);
                 if (!collected) {
                     Fail("Collect failed", None, collected.Error());
                     return;

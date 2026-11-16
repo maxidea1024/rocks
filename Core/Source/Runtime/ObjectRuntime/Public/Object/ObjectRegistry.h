@@ -532,13 +532,25 @@ public:
     Result<TypeLease> AcquireRegisteredType(const ObjectAccessContext&, TypeId) noexcept;
     // 소유 스레드 full STW 수집. Borrow/생성 트랜잭션/재진입 중에는 Busy다.
     // 작업 큐 할당이나 Trace 간선 검증 실패 시 부분 표식으로 sweep하지 않는다.
-    Result<GcReport> Collect(const ObjectAccessContext&) noexcept;
+    // scheduler를 주면 표식을 병렬로 한다(StepCollection의 scheduler 규칙과 같다 — 소유 스레드도
+    // 표식에 참여하고 parallelTraceSafe가 아닌 타입은 소유 스레드만 trace한다). 반환 전에 worker
+    // 작업을 모두 회수한다.
+    //
+    // 사용 예(레벨 전환 때 STW 병렬 수집):
+    //   auto report = registry.Collect(access, &scheduler);
+    Result<GcReport> Collect(const ObjectAccessContext&,
+                             WorkerScheduler* scheduler = nullptr) noexcept;
     // Begin/Step은 Borrow=0·활성 생성=0인 소유 스레드 safepoint에서만 진행한다.
     // slice 사이에는 mutator를 재개하며 root/간선/신규 게시가 삽입 장벽을 거친다.
     Result<void> BeginCollection(const ObjectAccessContext&) noexcept;
-    // scheduler를 지정하면 parallelTraceSafe 타입만 worker에서 추적한다. 미선언 타입은 owner에서
-    // 실행한다. allocator는 worker의 capture 정리를 지원해야 한다. 각 slice는 worker를 모두 drain한
-    // 뒤 반환하므로 mutator와 field scan을 동시에 실행하지 않는다.
+    // scheduler를 지정하면 표식을 병렬로 한다(GC-S4, Docs/Design/GarbageCollectionScale.ko.md):
+    // worker 수만큼 task를 한 번 제출하고 소유 스레드도 참여한다. 참여자마다 지역 큐(512칸 블록)를
+    // 두고 남는 블록을 공유 풀에 내놓아 나눈다. 표식은 atomic fetch_or로 이긴 쪽만 큐에 넣는다.
+    // parallelTraceSafe가 아닌 수동 Trace 타입은 소유 스레드 큐로 모아 이 스레드에서 trace한다.
+    // 예산(객체 수·시간)이 다하면 남은 회색 객체를 다음 slice로 넘긴다. allocator는 여러 스레드의
+    // 동시 할당·반환을 지원해야 한다(worker의 큐 블록·capture 정리). 각 slice는 worker를 모두
+    // 회수한 뒤 반환하므로 mutator와 field scan을 동시에 실행하지 않는다. scheduler worker
+    // 스레드에서 부르면 WrongThread다.
     Result<GcProgress> StepCollection(const ObjectAccessContext&, GcBudget = {},
                                       WorkerScheduler* scheduler = nullptr) noexcept;
     // 아직 cutoff를 게시하지 않은 Marking만 취소한다. cutoff 이후 중단으로 죽은 간선을 부활시키지
@@ -586,6 +598,9 @@ private:
     struct GcBits;
     struct GcPage;
     struct GcType;
+    struct GcBlock;
+    struct ParallelMark;
+    struct MarkParticipant;
 
     // Retired 슬롯이 든 회수 대상 목록이다. 슬롯은 셋 중 하나에만 있다(Retired가 아니면 어디에도
     // 없다).
@@ -603,27 +618,30 @@ private:
     };
 
     // 표식(Private/ObjectRegistryGc.cpp). MarkBatch는 직렬 marker의 배치 visitor 콜백이다(잠금 없음
-    // — 처리 표시 아래 단일 marker, Docs/Design/GarbageCollectionScale.ko.md 7.1절).
-    // MarkBatchLocked는 worker가 동시에 부르는 scheduler 경로용이며 배치마다 gate_를 잡는다.
-    // MarkHandles는 둘의 본문이다.
+    // — 처리 표시 아래 단일 marker, Docs/Design/GarbageCollectionScale.ko.md 7.1절). MarkHandles가
+    // 본문이다. 병렬 marker는 ParallelMark(ObjectRegistryGc.cpp)다.
     static void MarkBatch(void*, const ObjectHandle*, uint32) noexcept;
-    static void MarkBatchLocked(void*, const ObjectHandle*, uint32) noexcept;
     void MarkHandles(MarkState&, const ObjectHandle*, uint32) noexcept;
+    // 간선 handle이 이 Registry의 슬롯 범위 안인지 본다(Release 검사). Debug는 세대·상태까지 보아
+    // "강한 간선은 언제나 살아 있는 객체를 가리킨다"를 확인한다.
+    bool IsMarkableEdge(ObjectHandle handle, uint64 slots) const noexcept;
     // 슬롯 index를 표식한다(잠금 없이 또는 gate_ 아래). 살아 있지 않으면 StaleHandle이다. 잎 타입은
     // 큐에 넣지 않고 Outer 사슬을 바로 따라간다(M2). work는 모든 슬롯을 담을 용량을 미리 확보했다.
     ErrorCode MarkIndex(uint32 index, Array<uint32>& work, uint32& marked) noexcept;
-    // index 객체 하나를 trace한다(Trace 간선 → Outer → 패키지 정책이면 자식 고리). locked면 Outer·
-    // 자식 표식도 gate_ 아래다(scheduler 경로).
-    void TraceIndex(uint32 index, MarkState& state, TraceVisitor& visitor, bool locked) noexcept;
+    // index 객체 하나를 trace한다(Trace 간선 → Outer → 패키지 정책이면 자식 고리).
+    void TraceIndex(uint32 index, MarkState& state, TraceVisitor& visitor) noexcept;
     // 작업 큐 work를 cursor부터 trace한다(최대 maxObjects개, deadline이 0이 아니면 그때까지 —
     // 시계는 일정 개수마다 본다). 잠금 없이 처리 표시 아래에서 부른다. 반환은 trace한 객체 수이고
     // 오류는 state.error다.
     uint32 MarkSerial(Array<uint32>& work, usize& cursor, MarkState& state, uint32 maxObjects,
                       uint64 deadline) noexcept;
-    // scheduler 경로의 표식이다(parallelTraceSafe 타입은 worker, 나머지는 소유 스레드). 반환은
-    // MarkSerial과 같다.
-    uint32 MarkWithScheduler(MarkState& state, uint32 maxObjects, uint64 deadline,
-                             WorkerScheduler& scheduler) noexcept;
+    // 병렬 표식이다(GC-S4). work[cursor..)를 씨앗으로 쓰고 work를 비운 뒤, 예산이 다해 남은 회색
+    // 객체를 work에 다시 담는다(cursor는 0). 반환은 trace한 객체 수이고 오류는 state.error다.
+    // 끝까지 표식했으면 completed가 참이다.
+    uint32 MarkParallel(Array<uint32>& work, usize& cursor, MarkState& state, uint32 maxObjects,
+                        uint64 deadline, WorkerScheduler& scheduler, bool& completed) noexcept;
+    // 장벽 큐(gcShade_)를 표식 큐(gcWork_) 뒤로 옮긴다(slice 시작).
+    void DrainShadeQueue() noexcept;
     static void ValidateStagedEdge(void*, ObjectHandle) noexcept;
     // 떼어 낼 간선의 패키지 쌍을 집계한다(MarkState의 tally·ownerPackage·delta — 대상 패키지 조회는
     // 간선마다 잠금, 집계 삽입은 잠금 밖).
@@ -925,7 +943,13 @@ private:
     uint32 constructions_ = 0;
     uint64 nextTransaction_ = 1;
     GcReport lastGc_;
+    // 표식 작업 큐(슬롯 번호)와 장벽 큐다. 장벽(삽입 장벽·새 루트·Marking 중 출생)은 slice 사이에
+    // gcShade_에만 넣고 slice 시작에 gcWork_로 옮긴다(병렬 marker의 지역 큐와 섞이지 않는다). 둘 다
+    // 슬롯 수만큼 용량을 미리 확보한다.
     Array<uint32> gcWork_;
+    Array<uint32> gcShade_;
+    // 병렬 표식의 512칸 큐 블록 재사용 목록이다(Registry 소멸 때 반환한다).
+    GcBlock* gcFreeBlocks_ = nullptr;
     usize gcCursor_ = 0;
     GcPhase gcPhase_ = GcPhase::Idle;
     GcReport cycleGc_;

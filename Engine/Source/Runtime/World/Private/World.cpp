@@ -89,7 +89,7 @@ World::World(Allocator& allocator, TypeRegistry& types, const WorldDesc& desc) n
       name_(allocator), ticks_(allocator), subsystems_(allocator), subsystemTypes_(desc.subsystems),
       timeStep_(desc.timeStep), actors_(allocator), actorIndex_(allocator), levels_(allocator),
       pendingStart_(allocator), pendingComponentStart_(allocator), destroyActors_(allocator),
-      destroyComponents_(allocator), gcBudget_(desc.gcBudget) {
+      destroyComponents_(allocator), gcBudget_(desc.gcBudget), gcScheduler_(desc.gcScheduler) {
     // 이름은 진단용이다. 복사에 실패하면 빈 이름으로 둔다.
     auto named = name_.TryAssign(desc.name);
     (void)named;
@@ -1648,7 +1648,7 @@ void World::StepGarbageCollection() noexcept {
         destroyedDuringCycle_ = false;
     }
 
-    auto progress = objects_.StepCollection(Access(), gcBudget_);
+    auto progress = objects_.StepCollection(Access(), gcBudget_, gcScheduler_);
     if (progress && progress.Value().IsComplete()) {
         // 이번 cycle 시작 뒤에 파괴된 객체가 있으면 다음 cycle이 필요하다.
         gcPending_ = destroyedDuringCycle_;
@@ -1693,14 +1693,14 @@ Result<void> World::Shutdown() noexcept {
 
     for (uint32 attempt = 0; attempt < 64 && objects_.CollectionPhase() != GcPhase::Idle;
          ++attempt) {
-        auto stepped = objects_.StepCollection(Access(), GcBudget{1u << 20, 0});
+        auto stepped = objects_.StepCollection(Access(), GcBudget{1u << 20, 0}, gcScheduler_);
         if (!stepped) {
             return Result<void>::Failure(stepped.Error());
         }
     }
 
     for (uint32 attempt = 0; attempt < 8; ++attempt) {
-        auto collected = objects_.Collect(Access());
+        auto collected = objects_.Collect(Access(), gcScheduler_);
         if (!collected) {
             return Result<void>::Failure(collected.Error());
         }

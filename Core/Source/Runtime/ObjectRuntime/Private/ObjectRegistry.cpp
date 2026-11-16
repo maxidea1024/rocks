@@ -21,7 +21,7 @@ ObjectRegistry::ObjectRegistry(Allocator& allocator, TypeRegistry& types, Contex
                                RegistryOptions options) noexcept
     : allocator_(allocator), types_(types), context_(context), options_(options),
       domain_(detail::NextRegistryDomain()), ownerThread_(platform::CurrentThreadId()),
-      gcWork_(allocator) {
+      gcWork_(allocator), gcShade_(allocator) {
     // 관찰자는 패키지 정책 Registry 하나에만 붙는다(생성자는 실패를 돌려줄 수 없다).
     if (ReferenceObserver* observer = options_.referenceObserver) {
         if (options_.policy.packageNativeType == nullptr) {
@@ -74,6 +74,12 @@ ObjectRegistry::~ObjectRegistry() {
     for (uint32 index = 0; index < gcPageCount_; ++index) {
         gcPages_[index]->~GcPage();
         ReleaseRegistryMemory(allocator_, gcPages_[index]);
+    }
+
+    while (GcBlock* block = gcFreeBlocks_) {
+        gcFreeBlocks_ = block->next;
+        block->~GcBlock();
+        ReleaseRegistryMemory(allocator_, block);
     }
 
     ReleaseRegistryMemory(allocator_, gcPages_);

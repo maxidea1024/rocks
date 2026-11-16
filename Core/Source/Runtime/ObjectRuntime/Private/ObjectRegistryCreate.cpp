@@ -223,8 +223,14 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
             needed = options_.maxSlots;
         }
 
-        if (needed > gcWork_.Capacity()) {
-            uint64 capacity = uint64(gcWork_.Capacity()) * 2;
+        // 표식 큐와 장벽 큐 둘 다다(장벽은 gcShade_에 넣고 slice 시작에 gcWork_로 옮긴다).
+        Array<uint32>* const queues[] = {&gcWork_, &gcShade_};
+        for (Array<uint32>* queue : queues) {
+            if (needed <= queue->Capacity()) {
+                continue;
+            }
+
+            uint64 capacity = uint64(queue->Capacity()) * 2;
             if (capacity > options_.maxSlots) {
                 capacity = options_.maxSlots;
             }
@@ -233,7 +239,7 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
                 capacity = needed;
             }
 
-            auto reserve = gcWork_.TryReserve(static_cast<usize>(capacity));
+            auto reserve = queue->TryReserve(static_cast<usize>(capacity));
             if (!reserve) {
                 return fail(reserve.Error());
             }

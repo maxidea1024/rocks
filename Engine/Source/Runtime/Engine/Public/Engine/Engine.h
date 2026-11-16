@@ -124,6 +124,8 @@ struct WorldCreateDesc {
     TimeStepPolicy timeStep;
     RegistryOptions objects;
     GcBudget gcBudget;
+    // World GC 표식의 병렬 scheduler다(WorldDesc::gcScheduler — 빌림, 없으면 직렬).
+    WorkerScheduler* gcScheduler = nullptr;
     Span<const WorldSubsystemType> subsystems;
     // 만든 뒤 바로 BeginPlay한다. 에디터·미리보기 World는 false로 둔다.
     bool beginPlay = true;

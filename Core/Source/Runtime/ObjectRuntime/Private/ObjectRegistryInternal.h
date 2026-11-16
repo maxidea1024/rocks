@@ -287,6 +287,16 @@ struct ObjectRegistry::GcType {
     bool leaf = false;
 };
 
+// 병렬 표식의 큐 블록이다(GC-S4). 참여자의 지역 큐는 블록 더미이고 공유 풀·소유 스레드 큐는 블록을
+// 주고받는다. 재사용 목록(ObjectRegistry::gcFreeBlocks_)에 남겨 다음 slice가 다시 쓴다.
+struct ObjectRegistry::GcBlock {
+    static constexpr uint32 Capacity = 512;
+
+    GcBlock* next = nullptr;
+    uint32 count = 0;
+    uint32 items[Capacity];
+};
+
 // 생성이 잠금 밖에서 준비해 잠금 안에서 게시하는 GC 자료 성장분이다. 쓰지 않은 것은
 // ReleaseGcGrowth가 반환한다.
 struct ObjectRegistry::GcGrowth {
