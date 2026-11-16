@@ -96,7 +96,8 @@ protected:
 // - 장치 손실(D3D12 device removed, OpenGL fence 대기 실패): 장치는 손실 상태가 되고 기다리던 fence
 //   대기·통지가 모두 Destroyed로 깨어난다. 이후 BeginFrame·EndFrame도 Destroyed다. 장치를 다시
 //   만들어야 한다(새 deviceEpoch).
-// - 기록 중에도 자원을 만들 수 있다(텍스처 업로드는 동기 완료된다).
+// - 기록 중에도 자원을 만들 수 있다. 초기 데이터 업로드는 아래 업로드 경로로 다음 제출 앞에서
+//   실행된다(기다리지 않는다).
 // - 장치 소멸 전에 WaitIdle을 기다리고 모든 자원을 해제한다(소멸자가 대신한다).
 class Device {
 public:
@@ -159,6 +160,75 @@ public:
     // 않은 그 프레임은 기다리지 않으며 그 프레임이 쓸 수 있는 자원도 해제하지 않는다. 장치 손실이면
     // Destroyed다.
     virtual Result<void> WaitIdle() noexcept = 0;
+
+    // --- 업로드·readback(GX8, RenderBase 4.4절) ---
+    //
+    // 업로드는 "map 쓰기 → 복사"다: 데이터를 CPU 가시 메모리(업로드 ring 또는 staging)에 쓰고 GPU
+    // 복사를 업로드 기록에 쌓는다. 쌓인 기록은 소유 스레드의 다음
+    // 제출(EndFrame·WaitIdle·SubmitUploads· ReadPixels·RequestReadback)이 그 제출보다 먼저
+    // 실행한다. 그래서 갱신 뒤에 기록한 그리기는 새 내용을 본다(기록 중에 갱신하면 그 프레임 전체가
+    // 새 내용을 본다). 생성의 초기 데이터도 같은 경로다. ring 구간·staging은 그것을 읽은 제출의
+    // fence가 끝난 뒤에만 다시 쓴다. 생성·갱신·staging 업로드의 스레드 규칙은
+    // DeviceInfo::concurrentResourceCreation을 따른다.
+    //
+    // 사용 예(렌더 lane의 갱신 작업):
+    //   device.UpdateTexture(texture, 0, pixels);     // 다음 EndFrame 전에 복사된다
+    //   auto staging = device.AcquireStaging(mipBytes);   // 스트리밍: IO가 staging에 바로 읽는다
+    //   ... staging.Value().data에 읽기 ...
+    //   device.UploadTextureFromStaging(texture, mip, staging.Value().handle, 0);
+    //   device.ReleaseStaging(staging.Value().handle);   // 업로드 fence 뒤 재사용된다
+
+    // 버퍼 [offset, offset + data.Size()) 내용을 바꾼다. 실패: 모르는 handle StaleHandle, 빈
+    // data·범위 밖 InvalidArgument, ring·staging을 잡지 못하면 그 오류다.
+    virtual Result<void> UpdateBuffer(BufferHandle buffer, uint64 offset,
+                                      Span<const uint8> data) noexcept = 0;
+
+    // 텍스처 mip 하나를 바꾼다(pixels는 빈틈 없는 행, 첫 행이 위). 실패: 모르는 handle StaleHandle,
+    // mip 범위 밖·크기 불일치 InvalidArgument.
+    virtual Result<void> UpdateTexture(TextureHandle texture, uint32 mipLevel,
+                                       Span<const uint8> pixels) noexcept = 0;
+
+    // 쌓인 업로드 기록을 지금 제출하고 그 완료 지점을 돌려준다(소유 스레드). 쌓인 것이 없으면 null
+    // 지점이다. 기록 중이면 Busy다.
+    virtual Result<GpuFencePoint> SubmitUploads() noexcept = 0;
+
+    // 업로드 ring 진단이다(소유 스레드).
+    virtual UploadStats UploadStatistics() const noexcept = 0;
+
+    // 스트리밍 staging을 받는다(스레드 안전). 프레임 업로드 ring과 따로인 pool이며 IO 목적지로 바로
+    // 쓸 수 있는 CPU 가시 메모리다(TextureStreaming 5.4절). 실패: 0·예산 초과 크기 InvalidArgument,
+    // 예산이 찼으면 CapacityExceeded.
+    virtual Result<StagingBuffer> AcquireStaging(uint64 bytes) noexcept = 0;
+
+    // staging의 offset부터 빈틈 없는 행 픽셀로 텍스처 mip 하나를 올린다. 실패: stale handle
+    // StaleHandle, 범위 밖 InvalidArgument. staging은 이 업로드의 fence 뒤까지 재사용되지 않는다.
+    virtual Result<void> UploadTextureFromStaging(TextureHandle texture, uint32 mipLevel,
+                                                  StagingHandle staging,
+                                                  uint64 offset) noexcept = 0;
+
+    // staging 구간을 버퍼 구간으로 올린다.
+    virtual Result<void> UploadBufferFromStaging(BufferHandle buffer, uint64 destinationOffset,
+                                                 StagingHandle staging, uint64 sourceOffset,
+                                                 uint64 size) noexcept = 0;
+
+    // staging을 돌려준다(스레드 안전). 그것을 읽는 업로드의 fence가 끝나면 pool이 다시 쓴다.
+    virtual void ReleaseStaging(StagingHandle staging) noexcept = 0;
+
+    // staging pool 진단이다(스레드 안전).
+    virtual StagingStats StagingStatistics() const noexcept = 0;
+
+    // RenderTarget 텍스처의 비동기 readback을 요청한다(소유 스레드). 지금까지의 제출 뒤에 복사를
+    // 제출하고 완료 지점을 돌려준다. 기다리지 않는다. 실패: stale StaleHandle, RenderTarget이
+    // 아니면 InvalidArgument, 기록 중이면 Busy.
+    virtual Result<ReadbackRequest> RequestReadback(TextureHandle target) noexcept = 0;
+
+    // readback 결과를 out(width*height*4 byte, 첫 행이 위)에 복사한다(소유 스레드). 완료 지점이
+    // 아직 끝나지 않았으면 false이며 기다리지 않는다. 실패: stale StaleHandle, 크기 불일치
+    // InvalidArgument, 장치 손실 Destroyed.
+    virtual Result<bool> TryReadback(ReadbackHandle readback, Span<uint8> out) noexcept = 0;
+
+    // readback을 놓는다(소유 스레드). 버퍼는 fence 뒤에 회수된다.
+    virtual void ReleaseReadback(ReadbackHandle readback) noexcept = 0;
 
     // --- 스레드 안전 fence API(어느 스레드에서나 부를 수 있다) ---
 

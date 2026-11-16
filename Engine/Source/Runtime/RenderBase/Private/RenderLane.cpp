@@ -25,6 +25,58 @@ struct RenderLane::RetireWait {
     RenderHandle handle;
 };
 
+// readback 하나의 fence 통지 문맥이다.
+struct RenderLane::ReadbackWait {
+    RenderLane* lane = nullptr;
+    uint64 id = 0;
+};
+
+namespace {
+
+// 갱신 작업 값이다.
+struct ContentUpdate {
+    RenderHandle handle;
+    uint64 offset = 0;
+    uint32 mipLevel = 0;
+    bool texture = false;
+    RenderBlob data;
+};
+
+} // namespace
+
+} // namespace rocks::render
+
+ROCKS_RENDER_TRANSFERABLE(rocks::render::ContentUpdate);
+
+namespace rocks::render {
+
+namespace {
+
+void ApplyContentUpdate(RenderLaneContext& context, ContentUpdate& update) noexcept {
+    if (update.texture) {
+        auto texture = context.Handles().Texture(update.handle);
+        if (texture) {
+            auto updated = context.Device().UpdateTexture(texture.Value(), update.mipLevel,
+                                                          update.data.View());
+            if (!updated && updated.Error() != ErrorCode::InvalidArgument) {
+                context.ReportFailure(updated.Error());
+            }
+        }
+        return;
+    }
+
+    auto buffer = context.Handles().Buffer(update.handle);
+    if (buffer) {
+        auto updated =
+            context.Device().UpdateBuffer(buffer.Value(), update.offset, update.data.View());
+        if (!updated && updated.Error() != ErrorCode::InvalidArgument) {
+            context.ReportFailure(updated.Error());
+        }
+    }
+}
+
+} // namespace
+
 FrameTicket::FrameTicket(FrameTicket&& other) noexcept : slot_(other.slot_), frame_(other.frame_) {
     other.frame_ = 0;
 }
@@ -61,7 +113,7 @@ void RenderLaneContext::ReportFailure(ErrorCode error) const noexcept {
 
 RenderLane::RenderLane(Allocator& allocator, graphics::Device& device) noexcept
     : allocator_(allocator), device_(device), lane_(allocator), handles_(allocator),
-      notices_(allocator), inbox_(allocator) {
+      notices_(allocator), readbacks_(allocator), inbox_(allocator) {
     for (uint32 index = 0; index < MaxFrameSlots; ++index) {
         slotFence_[index].lane = this;
         slotFence_[index].slot = index;
@@ -537,6 +589,11 @@ void RenderLane::ProcessInbox() noexcept {
             const InboxItem& item = batch[index];
             RenderNotice notice;
             notice.error = item.error;
+            if (item.kind == InboxKind::ReadbackCompleted) {
+                FinishReadback(item.frame, item.error);
+                continue;
+            }
+
             if (item.kind == InboxKind::FrameCompleted) {
                 notice.kind = RenderNoticeKind::FrameCompleted;
                 notice.frame = item.frame;
@@ -640,6 +697,209 @@ void RenderLane::OnRetireFence(ErrorCode result, void* context) noexcept {
     platform::LockGuard lock(lane.gate_);
     --lane.outstandingNotifies_;
     lane.changed_.NotifyAll();
+}
+
+Result<void> RenderLane::UpdateBuffer(RenderHandle buffer, uint64 offset,
+                                      RenderBlob&& data) noexcept {
+    auto state = handles_.State(buffer);
+    if (!state) {
+        return Result<void>::Failure(state.Error());
+    }
+
+    ContentUpdate update;
+    update.handle = buffer;
+    update.offset = offset;
+    update.data = Move(data);
+    return PostResource(Move(update), &ApplyContentUpdate);
+}
+
+Result<void> RenderLane::UpdateTexture(RenderHandle texture, uint32 mipLevel,
+                                       RenderBlob&& pixels) noexcept {
+    auto state = handles_.State(texture);
+    if (!state) {
+        return Result<void>::Failure(state.Error());
+    }
+
+    ContentUpdate update;
+    update.handle = texture;
+    update.mipLevel = mipLevel;
+    update.texture = true;
+    update.data = Move(pixels);
+    return PostResource(Move(update), &ApplyContentUpdate);
+}
+
+Result<uint64> RenderLane::RequestReadback(RenderHandle texture) noexcept {
+    auto state = handles_.State(texture);
+    if (!state) {
+        return Result<uint64>::Failure(state.Error());
+    }
+
+    uint64 id = 0;
+    {
+        platform::LockGuard lock(readbackGate_);
+        ReadbackEntry entry;
+        entry.id = nextReadback_++;
+        entry.texture = texture;
+        auto pushed = readbacks_.TryPushBack(Move(entry));
+        if (!pushed) {
+            return Result<uint64>::Failure(pushed.Error());
+        }
+
+        id = readbacks_[readbacks_.Size() - 1].id;
+    }
+
+    auto posted = PostLaneTask([this, id, texture]() noexcept {
+        ProcessInbox();
+        RunReadback(id, texture);
+    });
+    if (!posted) {
+        platform::LockGuard lock(readbackGate_);
+        auto removed = readbacks_.TryRemoveAt(readbacks_.Size() - 1);
+        (void)removed;
+        return Result<uint64>::Failure(posted.Error());
+    }
+
+    return Result<uint64>::Success(id);
+}
+
+void RenderLane::RunReadback(uint64 id, RenderHandle texture) noexcept {
+    auto target = handles_.Texture(texture);
+    if (!target) {
+        FinishReadback(id, target.Error());
+        return;
+    }
+
+    auto requested = device_.RequestReadback(target.Value());
+    if (!requested) {
+        FinishReadback(id, requested.Error());
+        return;
+    }
+
+    {
+        platform::LockGuard lock(readbackGate_);
+        for (ReadbackEntry& entry : readbacks_) {
+            if (entry.id == id) {
+                entry.device = requested.Value().handle;
+                entry.bytes = requested.Value().bytes;
+            }
+        }
+    }
+
+    auto memory = allocator_.Allocate(sizeof(ReadbackWait), alignof(ReadbackWait));
+    if (!memory) {
+        // 통지 문맥을 만들 수 없다. 이 lane에서 GPU 완료를 기다린 뒤 끝낸다.
+        auto waited = device_.WaitFence(requested.Value().completion);
+        FinishReadback(id, waited ? ErrorCode::None : waited.Error());
+        return;
+    }
+
+    {
+        platform::LockGuard lock(gate_);
+        ++outstandingNotifies_;
+    }
+
+    auto* wait = ConstructAt<ReadbackWait>(memory.Value());
+    wait->lane = this;
+    wait->id = id;
+    auto notified =
+        device_.NotifyFence(requested.Value().completion, &RenderLane::OnReadbackFence, wait);
+    if (!notified) {
+        OnReadbackFence(notified.Error(), wait);
+    }
+}
+
+void RenderLane::OnReadbackFence(ErrorCode result, void* context) noexcept {
+    auto* wait = static_cast<ReadbackWait*>(context);
+    RenderLane& lane = *wait->lane;
+    InboxItem item;
+    item.kind = InboxKind::ReadbackCompleted;
+    item.error = result;
+    item.frame = wait->id;
+    DestroyAt(wait);
+    (void)lane.allocator_.Deallocate(wait);
+    lane.PushInbox(item);
+    platform::LockGuard lock(lane.gate_);
+    --lane.outstandingNotifies_;
+    lane.changed_.NotifyAll();
+}
+
+// lane에서 readback 결과를 보관하고 통지한다(장치를 가진 실행 흐름).
+void RenderLane::FinishReadback(uint64 id, ErrorCode error) noexcept {
+    graphics::ReadbackHandle device;
+    uint64 bytes = 0;
+    RenderHandle texture;
+    {
+        platform::LockGuard lock(readbackGate_);
+        for (ReadbackEntry& entry : readbacks_) {
+            if (entry.id == id) {
+                device = entry.device;
+                bytes = entry.bytes;
+                texture = entry.texture;
+            }
+        }
+    }
+
+    RenderBlob result;
+    if (error == ErrorCode::None && !device.IsNull()) {
+        auto buffer = allocator_.Allocate(static_cast<usize>(bytes), 16);
+        if (!buffer) {
+            error = buffer.Error();
+        } else {
+            auto copied =
+                device_.TryReadback(device, Span<uint8>(static_cast<uint8*>(buffer.Value()),
+                                                        static_cast<usize>(bytes)));
+            if (!copied || !copied.Value()) {
+                error = copied ? ErrorCode::DependencyFailed : copied.Error();
+            } else {
+                auto blob = RenderBlob::TryCopy(
+                    allocator_, Span<const uint8>(static_cast<const uint8*>(buffer.Value()),
+                                                  static_cast<usize>(bytes)));
+                if (blob) {
+                    result = Move(blob.Value());
+                } else {
+                    error = blob.Error();
+                }
+            }
+
+            (void)allocator_.Deallocate(buffer.Value());
+        }
+    }
+
+    if (!device.IsNull()) {
+        device_.ReleaseReadback(device);
+    }
+
+    {
+        platform::LockGuard lock(readbackGate_);
+        for (ReadbackEntry& entry : readbacks_) {
+            if (entry.id == id) {
+                entry.result = Move(result);
+                entry.ready = true;
+                entry.device = {};
+            }
+        }
+    }
+
+    RenderNotice notice;
+    notice.kind = RenderNoticeKind::ReadbackReady;
+    notice.error = error;
+    notice.frame = id;
+    notice.handle = texture;
+    notices_.Push(notice);
+}
+
+Result<RenderBlob> RenderLane::TakeReadback(uint64 readback) noexcept {
+    platform::LockGuard lock(readbackGate_);
+    for (usize index = 0; index < readbacks_.Size(); ++index) {
+        if (readbacks_[index].id == readback && readbacks_[index].ready) {
+            RenderBlob result = Move(readbacks_[index].result);
+            auto removed = readbacks_.TryRemoveAt(index);
+            (void)removed;
+            return Result<RenderBlob>::Success(Move(result));
+        }
+    }
+
+    return Result<RenderBlob>::Failure(ErrorCode::NotFound);
 }
 
 Result<LaneMarker> RenderLane::PostMarker() noexcept {

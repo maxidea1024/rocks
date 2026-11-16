@@ -307,6 +307,23 @@ public:
     // 무시한다).
     Result<void> Retire(RenderHandle handle) noexcept;
 
+    // 장치 자원 내용 갱신 작업이다(6.2절 "갱신", GX8 업로드 ring). lane이 handle의 장치 자원에
+    // 업로드를 기록하고, 다음 제출 앞에서 실행된다. 같은 프레임 안의 갱신 순서는 lane FIFO가
+    // 지킨다. Ready가 아닌 handle이면 그 갱신은 버리고 LaneFailed 통지를 하지
+    // 않는다(ResourceFailed가 이미 갔거나 Retire 중이다). 실패: 모르는 handle StaleHandle, 게시
+    // 실패는 그 오류다.
+    Result<void> UpdateBuffer(RenderHandle buffer, uint64 offset, RenderBlob&& data) noexcept;
+    Result<void> UpdateTexture(RenderHandle texture, uint32 mipLevel, RenderBlob&& pixels) noexcept;
+
+    // 렌더 타깃 텍스처의 비동기 readback을 요청하고 번호를 돌려준다(GX8). lane이 지금까지의 그리기
+    // 뒤에 복사를 제출하고, 그 fence가 끝나면 결과를 보관하고 ReadbackReady 통지(frame = 번호)를
+    // 보낸다. 게임 lane은 TakeReadback으로 결과를 가져간다. 실패: 모르는 handle StaleHandle, 게시
+    // 실패는 그 오류다.
+    Result<uint64> RequestReadback(RenderHandle texture) noexcept;
+
+    // 끝난 readback 결과를 가져간다(한 번). 실패: 아직 없거나 모르는 번호 NotFound.
+    Result<RenderBlob> TakeReadback(uint64 readback) noexcept;
+
     // 표면 작업(스왑체인 생성·resize·파괴, 표면 소실·재생성)을 게시한다. 장치 소유권 이관 중에
     // 게시해도 lane이 소유권을 얻은 뒤에 실행된다.
     template <RenderTransferable T>
@@ -377,6 +394,17 @@ public:
 
 private:
     struct RetireWait;
+    struct ReadbackWait;
+
+    // lane이 보관하는 readback 진행·결과다(readbackGate_ 보호).
+    struct ReadbackEntry {
+        uint64 id = 0;
+        graphics::ReadbackHandle device;
+        uint64 bytes = 0;
+        RenderHandle texture;
+        RenderBlob result;
+        bool ready = false;
+    };
     friend class RenderLaneContext;
 
     enum class SlotPhase : uint8 {
@@ -392,7 +420,8 @@ private:
 
     enum class InboxKind : uint8 {
         FrameCompleted,
-        RetireCompleted
+        RetireCompleted,
+        ReadbackCompleted
     };
 
     // fence 완료 통지가 lane에 넘기는 항목이다.
@@ -436,6 +465,9 @@ private:
     void CancelSubmit(uint32 slot) noexcept;
     void FinishFrame(uint32 slot, uint64 frame, graphics::GpuFencePoint before) noexcept;
     void RunRetire(RenderHandle handle) noexcept;
+    void RunReadback(uint64 id, RenderHandle texture) noexcept;
+    void FinishReadback(uint64 id, ErrorCode error) noexcept;
+    static void OnReadbackFence(ErrorCode result, void* context) noexcept;
     static void OnSlotFence(ErrorCode result, void* context) noexcept;
     static void OnRetireFence(ErrorCode result, void* context) noexcept;
 
@@ -449,6 +481,10 @@ private:
     uint64 gameThread_ = 0;
     UniquePtr<FrameArena> arenas_[MaxFrameSlots];
     SlotFenceContext slotFence_[MaxFrameSlots];
+    // readback 보관함이다. lane이 채우고 게임 lane이 가져간다.
+    platform::Mutex readbackGate_;
+    Array<ReadbackEntry> readbacks_;
+    uint64 nextReadback_ = 1;
     // fence 완료 통지가 넣고 lane 작업이 처리한다. inboxGate_가 보호한다(gate_보다 먼저 잡지
     // 않는다).
     platform::Mutex inboxGate_;

@@ -8,7 +8,182 @@ using namespace rocks::graphics;
 
 RecordingDevice::RecordingDevice(Allocator& allocator) noexcept
     : timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics), buffers_(allocator),
-      textures_(allocator), pipelines_(allocator), swapChains_(allocator), retired_(allocator) {
+      textures_(allocator), pipelines_(allocator), swapChains_(allocator), retired_(allocator),
+      readbacks_(allocator),
+      staging_(allocator, stagingSource_, graphics::DefaultStagingBudgetBytes) {
+    stagingSource_.allocator = &allocator;
+}
+
+Result<StagingMemory> RecordingDevice::CpuStaging::CreateStaging(uint64 bytes) noexcept {
+    auto memory = allocator->Allocate(static_cast<usize>(bytes), 16);
+    if (!memory) {
+        return Result<StagingMemory>::Failure(memory.Error());
+    }
+
+    StagingMemory staging;
+    staging.resource = memory.Value();
+    staging.data = static_cast<uint8*>(memory.Value());
+    staging.size = bytes;
+    return Result<StagingMemory>::Success(staging);
+}
+
+void RecordingDevice::CpuStaging::DestroyStaging(const StagingMemory& memory) noexcept {
+    (void)allocator->Deallocate(memory.resource);
+}
+
+// 제출 하나를 만든다(시험이 완료를 미루면 Complete까지 끝나지 않는다).
+uint64 RecordingDevice::SubmitInternal() noexcept {
+    const uint64 value = ++fenceValue_;
+    timeline_.Submitted(value, nullptr);
+    bool hold = false;
+    {
+        platform::LockGuard lock(gate_);
+        hold = hold_;
+    }
+
+    if (!hold) {
+        timeline_.Publish(value);
+    }
+
+    return value;
+}
+
+Result<void> RecordingDevice::UpdateBuffer(BufferHandle buffer, uint64 offset,
+                                           Span<const uint8> data) noexcept {
+    auto owner = ownership_.Check();
+    if (!owner) {
+        return owner;
+    }
+
+    if (!buffers_.IsValid(buffer.slot)) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    Record(Op::UpdateBuffer, offset + data.Size());
+    return Result<void>::Success();
+}
+
+Result<void> RecordingDevice::UpdateTexture(TextureHandle texture, uint32 mipLevel,
+                                            Span<const uint8> pixels) noexcept {
+    auto owner = ownership_.Check();
+    if (!owner) {
+        return owner;
+    }
+
+    if (!textures_.IsValid(texture.slot)) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    Record(Op::UpdateTexture, (static_cast<uint64>(mipLevel) << 32) | pixels.Size());
+    return Result<void>::Success();
+}
+
+Result<GpuFencePoint> RecordingDevice::SubmitUploads() noexcept {
+    return Result<GpuFencePoint>::Success(GpuFencePoint{});
+}
+
+UploadStats RecordingDevice::UploadStatistics() const noexcept {
+    return UploadStats{};
+}
+
+Result<StagingBuffer> RecordingDevice::AcquireStaging(uint64 bytes) noexcept {
+    return staging_.Acquire(bytes);
+}
+
+Result<void> RecordingDevice::UploadTextureFromStaging(TextureHandle texture, uint32 mipLevel,
+                                                       StagingHandle staging,
+                                                       uint64 offset) noexcept {
+    (void)offset;
+    if (!textures_.IsValid(texture.slot) || !staging_.Find(staging)) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    auto marked = staging_.MarkPending(staging);
+    Record(Op::UploadFromStaging, mipLevel);
+    return marked;
+}
+
+Result<void> RecordingDevice::UploadBufferFromStaging(BufferHandle buffer, uint64 destinationOffset,
+                                                      StagingHandle staging, uint64 sourceOffset,
+                                                      uint64 size) noexcept {
+    (void)destinationOffset;
+    (void)sourceOffset;
+    if (!buffers_.IsValid(buffer.slot) || !staging_.Find(staging)) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    auto marked = staging_.MarkPending(staging);
+    Record(Op::UploadFromStaging, size);
+    return marked;
+}
+
+void RecordingDevice::ReleaseStaging(StagingHandle staging) noexcept {
+    staging_.Release(staging);
+}
+
+StagingStats RecordingDevice::StagingStatistics() const noexcept {
+    return staging_.Stats();
+}
+
+Result<ReadbackRequest> RecordingDevice::RequestReadback(TextureHandle target) noexcept {
+    auto owner = ownership_.Check();
+    if (!owner) {
+        return Result<ReadbackRequest>::Failure(owner.Error());
+    }
+
+    if (!textures_.IsValid(target.slot) || recording_) {
+        return Result<ReadbackRequest>::Failure(recording_ ? ErrorCode::Busy
+                                                           : ErrorCode::StaleHandle);
+    }
+
+    // 앞서 기록한 staging 업로드도 이 제출의 fence 뒤에 돌아간다.
+    Record(Op::RequestReadback);
+    const uint64 value = SubmitInternal();
+    staging_.AssignPending(value);
+    Readback readback;
+    readback.fenceValue = value;
+    readback.bytes = 16;
+    auto added = readbacks_.TryAdd(readback);
+    if (!added) {
+        return Result<ReadbackRequest>::Failure(added.Error());
+    }
+
+    ReadbackRequest request;
+    request.handle = ReadbackHandle{added.Value()};
+    request.completion = timeline_.Point(value);
+    request.bytes = readback.bytes;
+    return Result<ReadbackRequest>::Success(request);
+}
+
+Result<bool> RecordingDevice::TryReadback(ReadbackHandle readback, Span<uint8> out) noexcept {
+    const Readback* record = readbacks_.Find(readback.slot);
+    if (record == nullptr) {
+        return Result<bool>::Failure(ErrorCode::StaleHandle);
+    }
+
+    if (out.Size() != record->bytes) {
+        return Result<bool>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto complete = timeline_.IsComplete(timeline_.Point(record->fenceValue));
+    if (!complete) {
+        return Result<bool>::Failure(complete.Error());
+    }
+
+    if (!complete.Value()) {
+        return Result<bool>::Success(false);
+    }
+
+    for (uint8& byte : out) {
+        byte = readbackFill_;
+    }
+
+    return Result<bool>::Success(true);
+}
+
+void RecordingDevice::ReleaseReadback(ReadbackHandle readback) noexcept {
+    auto removed = readbacks_.TryRemove(readback.slot);
+    (void)removed;
 }
 
 RecordingDevice::~RecordingDevice() {
@@ -284,6 +459,7 @@ void RecordingDevice::ReclaimCompleted() noexcept {
     }
 
     const uint64 completed = timeline_.Completed();
+    staging_.Reclaim(completed);
     for (usize index = retired_.Size(); index > 0; --index) {
         const Retired& entry = retired_[index - 1];
         if (!entry.pending && entry.fenceValue <= completed) {

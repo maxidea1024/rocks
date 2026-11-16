@@ -425,6 +425,76 @@ void RunFormat(Bench& bench, VertexFormat format, bool openGl) noexcept {
     bench.device->Retire(pipeline.Value());
 }
 
+// 정점 버퍼 내용 갱신(GX8): UpdateBuffer와 staging에서 올린 색이 다음 그리기에 보인다.
+void RunBufferUpdates(Bench& bench) noexcept {
+    const VertexAttribute attributes[] = {{0, VertexFormat::Float2, 0, 0},
+                                          {1, VertexFormat::UByte4Unorm, 1, 0}};
+    const VertexStream streams[] = {{8, VertexStepRate::Vertex}, {4, VertexStepRate::Vertex}};
+    auto pipeline = bench.Pipeline(Text(FloatHlsl), Text(FloatVertexGlsl), {attributes, streams});
+    uint8 colors[6][4] = {};
+    auto positions = bench.Buffer(FullScreen, sizeof(FullScreen));
+    auto colorBuffer = bench.Buffer(colors, sizeof(colors));
+    auto draw = [&]() noexcept {
+        return bench.Render([&](CommandContext& commands) noexcept {
+            commands.SetPipeline(pipeline.Value());
+            const VertexBufferBinding bindings[] = {{positions.Value(), 0},
+                                                    {colorBuffer.Value(), 0}};
+            commands.SetVertexBuffers(0, bindings);
+            commands.Draw(6);
+        });
+    };
+
+    bool ready = pipeline && positions && colorBuffer;
+    for (uint32 vertex = 0; vertex < 6; ++vertex) {
+        colors[vertex][0] = 200;
+        colors[vertex][1] = 40;
+        colors[vertex][2] = 16;
+        colors[vertex][3] = 255;
+    }
+
+    const Span<const uint8> updated(&colors[0][0], sizeof(colors));
+    Check(ready && bench.device->UpdateBuffer(colorBuffer.Value(), 0, updated).IsOk() && draw() &&
+              PixelIs(bench.pixels, 4, 4, {200, 40, 16}),
+          "vertex buffer content update is visible to the next draw");
+    if (ready) {
+        Check(bench.device->UpdateBuffer(colorBuffer.Value(), 4, updated).Error() ==
+                  ErrorCode::InvalidArgument,
+              "buffer update past the end is rejected");
+    }
+
+    auto staging = ready ? bench.device->AcquireStaging(sizeof(colors))
+                         : Result<StagingBuffer>::Failure(ErrorCode::InvalidArgument);
+    if (staging) {
+        for (uint32 vertex = 0; vertex < 6; ++vertex) {
+            const uint8 color[4] = {24, 160, 96, 255};
+            platform::MemoryCopy(staging.Value().data + vertex * 4, color, 4);
+        }
+
+        const bool uploaded =
+            bench.device
+                ->UploadBufferFromStaging(colorBuffer.Value(), 0, staging.Value().handle, 0,
+                                          sizeof(colors))
+                .IsOk();
+        bench.device->ReleaseStaging(staging.Value().handle);
+        Check(uploaded && draw() && PixelIs(bench.pixels, 4, 4, {24, 160, 96}),
+              "vertex buffer uploaded from staging");
+    } else {
+        Check(false, "staging for a buffer upload");
+    }
+
+    if (positions) {
+        bench.device->Retire(positions.Value());
+    }
+
+    if (colorBuffer) {
+        bench.device->Retire(colorBuffer.Value());
+    }
+
+    if (pipeline) {
+        bench.device->Retire(pipeline.Value());
+    }
+}
+
 void RunStreams(Bench& bench) noexcept {
     // 다중 stream: 위치 stream 0, 색 stream 1(binding offset 4 byte).
     const VertexAttribute attributes[] = {{0, VertexFormat::Float2, 0, 0},
@@ -654,6 +724,7 @@ uint32 RunVertexChecks(const char* name, Device& device, Allocator& allocator) n
     }
 
     RunStreams(bench);
+    RunBufferUpdates(bench);
     RunInstances(bench);
     RunIndexed(bench, IndexFormat::UInt16);
     RunIndexed(bench, IndexFormat::UInt32);

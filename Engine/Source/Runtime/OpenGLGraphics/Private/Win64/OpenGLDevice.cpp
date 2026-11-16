@@ -2,6 +2,7 @@
 #include <Core/Text/String.h>
 #include <Graphics/DeviceOwnership.h>
 #include <Graphics/FenceTimeline.h>
+#include <Graphics/StagingPool.h>
 #include <OpenGLGraphics/OpenGLDevice.h>
 #include <Platform/Fatal.h>
 
@@ -47,6 +48,9 @@ constexpr GLenum GL_NUM_EXTENSIONS_VALUE = 0x821D;
 constexpr GLenum GL_MIRRORED_REPEAT_VALUE = 0x8370;
 constexpr GLenum GL_SYNC_GPU_COMMANDS_COMPLETE_VALUE = 0x9117;
 constexpr GLenum GL_HALF_FLOAT_VALUE = 0x140B;
+constexpr GLenum GL_PIXEL_PACK_BUFFER_VALUE = 0x88EB;
+// glNamedBufferStorage: glNamedBufferSubData로 내용을 바꿀 수 있다.
+constexpr GLbitfield GL_DYNAMIC_STORAGE_BIT_VALUE = 0x0100;
 constexpr GLenum GL_UNSIGNED_INT_2_10_10_10_REV_VALUE = 0x8368;
 constexpr GLenum GL_ACTIVE_ATTRIBUTES_VALUE = 0x8B89;
 constexpr GLenum GL_FLOAT_VEC2_VALUE = 0x8B50;
@@ -169,6 +173,9 @@ struct GlFunctions {
     void(APIENTRY* ClipControl)(GLenum, GLenum) = nullptr;
     void(APIENTRY* DebugMessageCallback)(GLDEBUGPROC, const void*) = nullptr;
     GLsync(APIENTRY* FenceSync)(GLenum, GLbitfield) = nullptr;
+    void(APIENTRY* NamedBufferSubData)(GLuint, GLintptr, GLsizeiptr, const void*) = nullptr;
+    void(APIENTRY* GetNamedBufferSubData)(GLuint, GLintptr, GLsizeiptr, void*) = nullptr;
+    void(APIENTRY* BindBuffer)(GLenum, GLuint) = nullptr;
     GLenum(APIENTRY* ClientWaitSync)(GLsync, GLbitfield, GLuint64) = nullptr;
     void(APIENTRY* DeleteSync)(GLsync) = nullptr;
 };
@@ -233,7 +240,10 @@ bool LoadFunctions(GlFunctions& gl) noexcept {
            Bind(gl.BlendFuncSeparate, "glBlendFuncSeparate") &&
            Bind(gl.ClipControl, "glClipControl") &&
            Bind(gl.DebugMessageCallback, "glDebugMessageCallback") &&
-           Bind(gl.FenceSync, "glFenceSync") && Bind(gl.ClientWaitSync, "glClientWaitSync") &&
+           Bind(gl.FenceSync, "glFenceSync") &&
+           Bind(gl.NamedBufferSubData, "glNamedBufferSubData") &&
+           Bind(gl.GetNamedBufferSubData, "glGetNamedBufferSubData") &&
+           Bind(gl.BindBuffer, "glBindBuffer") && Bind(gl.ClientWaitSync, "glClientWaitSync") &&
            Bind(gl.DeleteSync, "glDeleteSync");
 }
 
@@ -419,6 +429,7 @@ struct TextureRecord {
     GLuint framebuffer = 0;
     uint32 width = 0;
     uint32 height = 0;
+    uint32 mipLevels = 1;
     Format format = Format::Unknown;
 };
 
@@ -462,6 +473,37 @@ struct RetiredObject {
     uint64 fenceValue = 0;
     // 기록 중인(아직 제출하지 않은) 프레임이 쓸 수 있다. EndFrame이 그 프레임의 fence 값을 정한다.
     bool pending = false;
+};
+
+// OpenGL staging은 CPU 메모리다(TextureStreaming 5.4절). client 메모리 업로드는 호출이 반환되면
+// 다시 써도 되므로 fence를 기다리지 않는다.
+class OpenGLStagingSource final : public StagingSource {
+public:
+    Result<StagingMemory> CreateStaging(uint64 bytes) noexcept override {
+        auto memory = allocator->Allocate(static_cast<usize>(bytes), 64);
+        if (!memory) {
+            return Result<StagingMemory>::Failure(memory.Error());
+        }
+        StagingMemory staging;
+        staging.resource = memory.Value();
+        staging.data = static_cast<uint8*>(memory.Value());
+        staging.size = bytes;
+        return Result<StagingMemory>::Success(staging);
+    }
+
+    void DestroyStaging(const StagingMemory& memory) noexcept override {
+        (void)allocator->Deallocate(memory.resource);
+    }
+
+    Allocator* allocator = nullptr;
+};
+
+// 비동기 readback 하나다(pixel pack buffer). fenceValue 제출이 끝나면 읽을 수 있다.
+struct ReadbackRecord {
+    GLuint buffer = 0;
+    uint64 fenceValue = 0;
+    uint32 width = 0;
+    uint32 height = 0;
 };
 
 // 관찰 스레드가 공유 context로 fence sync를 기다린다. sync 객체는 공유 그룹 전체에서 보이고 소유
@@ -521,8 +563,9 @@ class OpenGLDevice final : public Device, private CommandContext {
 public:
     explicit OpenGLDevice(Allocator& allocator) noexcept
         : adapterName_(allocator), lastError_(allocator), buffers_(allocator), textures_(allocator),
-          pipelines_(allocator), swapChains_(allocator), retired_(allocator),
+          pipelines_(allocator), swapChains_(allocator), retired_(allocator), readbacks_(allocator),
           timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics) {
+        stagingSource_.allocator = &allocator;
     }
 
     ~OpenGLDevice() override {
@@ -545,7 +588,13 @@ public:
             ReleaseDC(watcherWindow_, watcherDc_);
             DestroyWindow(watcherWindow_);
         }
+        if (staging_) {
+            staging_->Clear();
+        }
         if (current) {
+            for (const ReadbackRecord& record : readbacks_) {
+                gl_.DeleteBuffers(1, &record.buffer);
+            }
             for (RetiredObject& entry : retired_) {
                 entry.pending = false;
             }
@@ -707,6 +756,14 @@ public:
         if (watcherContext_ == nullptr) {
             return Fail("OpenGL shared context for the fence watcher failed");
         }
+        const uint64 stagingBudget =
+            desc.stagingBudgetBytes != 0 ? desc.stagingBudgetBytes : DefaultStagingBudgetBytes;
+        auto pool = UniquePtr<StagingPool>::TryMake(
+            *stagingSource_.allocator, *stagingSource_.allocator, stagingSource_, stagingBudget);
+        if (!pool) {
+            return Result<void>::Failure(pool.Error());
+        }
+        staging_ = Move(pool.Value());
         fenceSource_.dc = watcherDc_;
         fenceSource_.context = watcherContext_;
         fenceSource_.clientWaitSync = gl_.ClientWaitSync;
@@ -831,7 +888,7 @@ public:
         record.size = desc.size;
         gl_.CreateBuffers(1, &record.buffer);
         gl_.NamedBufferStorage(record.buffer, static_cast<GLsizeiptr>(desc.size), initial.Data(),
-                               0);
+                               GL_DYNAMIC_STORAGE_BIT_VALUE);
         auto added = buffers_.TryAdd(record);
         if (!added) {
             gl_.DeleteBuffers(1, &record.buffer);
@@ -862,6 +919,7 @@ public:
         TextureRecord record;
         record.width = desc.width;
         record.height = desc.height;
+        record.mipLevels = desc.mipLevels;
         record.format = desc.format;
         gl_.CreateTextures(GL_TEXTURE_2D, 1, &record.texture);
         gl_.TextureStorage2D(record.texture, static_cast<GLsizei>(desc.mipLevels),
@@ -1238,6 +1296,205 @@ public:
             return Result<void>::Failure(ErrorCode::Destroyed);
         }
         return Result<void>::Success();
+    }
+
+    // --- 업로드·readback(GX8) ---
+    // OpenGL은 드라이버가 업로드 순서를 지키므로 쌓아 둘 기록이 없다. 갱신은 바로
+    // glNamedBufferSubData· glTextureSubImage2D로 보내고 staging은 CPU 메모리다.
+
+    Result<void> UpdateBuffer(BufferHandle handle, uint64 offset,
+                              Span<const uint8> data) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return owner;
+        }
+        const BufferRecord* record = buffers_.Find(handle.slot);
+        if (record == nullptr) {
+            return Result<void>::Failure(ErrorCode::StaleHandle);
+        }
+        if (data.Size() == 0 || offset > record->size || data.Size() > record->size - offset) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+        if (!MakeCurrentForResources()) {
+            return Fail("wglMakeCurrent failed");
+        }
+        gl_.NamedBufferSubData(record->buffer, static_cast<GLintptr>(offset),
+                               static_cast<GLsizeiptr>(data.Size()), data.Data());
+        return Result<void>::Success();
+    }
+
+    Result<void> UpdateTexture(TextureHandle handle, uint32 mipLevel,
+                               Span<const uint8> pixels) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return owner;
+        }
+        const TextureRecord* record = textures_.Find(handle.slot);
+        if (record == nullptr) {
+            return Result<void>::Failure(ErrorCode::StaleHandle);
+        }
+        const uint32 width = MipExtent(record->width, mipLevel);
+        const uint32 height = MipExtent(record->height, mipLevel);
+        if (mipLevel >= record->mipLevels ||
+            pixels.Size() != static_cast<usize>(width) * height * BytesPerPixel(record->format)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+        if (!MakeCurrentForResources()) {
+            return Fail("wglMakeCurrent failed");
+        }
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        gl_.TextureSubImage2D(record->texture, static_cast<GLint>(mipLevel), 0, 0,
+                              static_cast<GLsizei>(width), static_cast<GLsizei>(height), GL_RGBA,
+                              GL_UNSIGNED_BYTE, pixels.Data());
+        return Result<void>::Success();
+    }
+
+    Result<GpuFencePoint> SubmitUploads() noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<GpuFencePoint>::Failure(owner.Error());
+        }
+        if (recording_) {
+            return Result<GpuFencePoint>::Failure(ErrorCode::Busy);
+        }
+        return Result<GpuFencePoint>::Success(GpuFencePoint{});
+    }
+
+    UploadStats UploadStatistics() const noexcept override {
+        return UploadStats{};
+    }
+
+    Result<StagingBuffer> AcquireStaging(uint64 bytes) noexcept override {
+        return staging_->Acquire(bytes);
+    }
+
+    Result<void> UploadTextureFromStaging(TextureHandle handle, uint32 mipLevel,
+                                          StagingHandle staging, uint64 offset) noexcept override {
+        auto memory = staging_->Find(staging);
+        const TextureRecord* record = textures_.Find(handle.slot);
+        if (!memory || record == nullptr) {
+            return Result<void>::Failure(ErrorCode::StaleHandle);
+        }
+        const uint64 bytes = static_cast<uint64>(MipExtent(record->width, mipLevel)) *
+                             MipExtent(record->height, mipLevel) * BytesPerPixel(record->format);
+        if (offset > memory.Value().size || bytes > memory.Value().size - offset) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+        return UpdateTexture(
+            handle, mipLevel,
+            Span<const uint8>(memory.Value().data + offset, static_cast<usize>(bytes)));
+    }
+
+    Result<void> UploadBufferFromStaging(BufferHandle handle, uint64 destinationOffset,
+                                         StagingHandle staging, uint64 sourceOffset,
+                                         uint64 size) noexcept override {
+        auto memory = staging_->Find(staging);
+        if (!memory) {
+            return Result<void>::Failure(ErrorCode::StaleHandle);
+        }
+        if (sourceOffset > memory.Value().size || size > memory.Value().size - sourceOffset) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+        return UpdateBuffer(
+            handle, destinationOffset,
+            Span<const uint8>(memory.Value().data + sourceOffset, static_cast<usize>(size)));
+    }
+
+    void ReleaseStaging(StagingHandle staging) noexcept override {
+        // client 메모리 업로드는 반환하면 끝났으므로 바로 재사용할 수 있다.
+        staging_->Release(staging);
+        staging_->Reclaim(NumericLimits<uint64>::Max());
+    }
+
+    StagingStats StagingStatistics() const noexcept override {
+        return staging_->Stats();
+    }
+
+    Result<ReadbackRequest> RequestReadback(TextureHandle target) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<ReadbackRequest>::Failure(owner.Error());
+        }
+        const TextureRecord* record = textures_.Find(target.slot);
+        if (record == nullptr) {
+            return Result<ReadbackRequest>::Failure(ErrorCode::StaleHandle);
+        }
+        if (record->framebuffer == 0 || recording_) {
+            return Result<ReadbackRequest>::Failure(recording_ ? ErrorCode::Busy
+                                                               : ErrorCode::InvalidArgument);
+        }
+        if (!MakeCurrentForResources()) {
+            return FailWith<ReadbackRequest>("wglMakeCurrent failed");
+        }
+        ReadbackRecord readback;
+        readback.width = record->width;
+        readback.height = record->height;
+        const uint64 bytes =
+            static_cast<uint64>(record->width) * record->height * BytesPerPixel(record->format);
+        gl_.CreateBuffers(1, &readback.buffer);
+        gl_.NamedBufferStorage(readback.buffer, static_cast<GLsizeiptr>(bytes), nullptr, 0);
+        gl_.BindFramebuffer(GL_FRAMEBUFFER_VALUE, record->framebuffer);
+        gl_.BindBuffer(GL_PIXEL_PACK_BUFFER_VALUE, readback.buffer);
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        // offscreen 패스는 위쪽 원점으로 그렸으므로 저장소 첫 행이 이미지 위쪽이다(ReadPixels와
+        // 같다).
+        glReadPixels(0, 0, static_cast<GLsizei>(record->width),
+                     static_cast<GLsizei>(record->height), GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        gl_.BindBuffer(GL_PIXEL_PACK_BUFFER_VALUE, 0);
+        gl_.BindFramebuffer(GL_FRAMEBUFFER_VALUE, 0);
+        readback.fenceValue = Submit();
+        auto added = readbacks_.TryAdd(readback);
+        if (!added) {
+            gl_.DeleteBuffers(1, &readback.buffer);
+            return Result<ReadbackRequest>::Failure(added.Error());
+        }
+        ReadbackRequest request;
+        request.handle = ReadbackHandle{added.Value()};
+        request.completion = timeline_.Point(readback.fenceValue);
+        request.bytes = bytes;
+        return Result<ReadbackRequest>::Success(request);
+    }
+
+    Result<bool> TryReadback(ReadbackHandle handle, Span<uint8> out) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<bool>::Failure(owner.Error());
+        }
+        const ReadbackRecord* record = readbacks_.Find(handle.slot);
+        if (record == nullptr) {
+            return Result<bool>::Failure(ErrorCode::StaleHandle);
+        }
+        if (out.Size() != static_cast<usize>(record->width) * record->height * 4u) {
+            return Result<bool>::Failure(ErrorCode::InvalidArgument);
+        }
+        if (timeline_.Completed() < record->fenceValue) {
+            if (timeline_.IsLost()) {
+                return Result<bool>::Failure(ErrorCode::Destroyed);
+            }
+            return Result<bool>::Success(false);
+        }
+        if (!MakeCurrentForResources()) {
+            return FailWith<bool>("wglMakeCurrent failed");
+        }
+        gl_.GetNamedBufferSubData(record->buffer, 0, static_cast<GLsizeiptr>(out.Size()),
+                                  out.Data());
+        return Result<bool>::Success(true);
+    }
+
+    void ReleaseReadback(ReadbackHandle handle) noexcept override {
+        if (!ownership_.Check()) {
+            return;
+        }
+        const ReadbackRecord* record = readbacks_.Find(handle.slot);
+        if (record == nullptr) {
+            return;
+        }
+        RetiredObject entry;
+        entry.kind = RetiredKind::Buffer;
+        entry.first = record->buffer;
+        Defer(entry);
+        auto removed = readbacks_.TryRemove(handle.slot);
+        (void)removed;
     }
 
     GpuFencePoint LastSubmittedFence() const noexcept override {
@@ -1713,6 +1970,9 @@ private:
     SlotArray<PipelineRecord> pipelines_;
     SlotArray<SwapChainRecord> swapChains_;
     Array<RetiredObject> retired_;
+    SlotArray<ReadbackRecord> readbacks_;
+    OpenGLStagingSource stagingSource_;
+    UniquePtr<StagingPool> staging_;
     GlFunctions gl_;
     WglSwapInterval swapInterval_ = nullptr;
     HWND deviceWindow_ = nullptr;

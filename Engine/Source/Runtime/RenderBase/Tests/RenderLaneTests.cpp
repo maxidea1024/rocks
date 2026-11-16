@@ -684,3 +684,63 @@ TEST(RenderHandleTable_ReserveBindRetireRemove) {
     CHECK(table.State(failed.Value()).Value() == RenderResourceState::Failed);
     CHECK(table.Remove(failed.Value()).Error() == ErrorCode::InvalidArgument);
 }
+
+TEST(RenderLane_ReadbackNoticeArrivesOnlyAfterGpuCompletion) {
+    SystemAllocator allocator;
+    RecordingDevice device(allocator);
+    device.HoldCompletions(true);
+    device.SetReadbackFill(0x5a);
+    TestProcessor processor;
+    RenderLane lane(allocator, device);
+    REQUIRE(lane.Start(MakeConfig(RenderLaneMode::Thread, processor)));
+    auto texture = lane.ReserveHandle(RenderResourceKind::Texture);
+    REQUIRE(texture);
+    const uint8 pixels[16] = {};
+    auto blob = RenderBlob::TryCopy(allocator, Span<const uint8>(pixels, sizeof(pixels)));
+    REQUIRE(blob);
+    REQUIRE(lane.PostResource(TextureUpload{texture.Value(), 2, Move(blob.Value())},
+                              &CreateTextureOnLane));
+    // 갱신 작업은 lane FIFO 순서로 장치 갱신이 된다.
+    auto update = RenderBlob::TryCopy(allocator, Span<const uint8>(pixels, sizeof(pixels)));
+    REQUIRE(update);
+    REQUIRE(lane.UpdateTexture(texture.Value(), 0, Move(update.Value())));
+    auto readback = lane.RequestReadback(texture.Value());
+    REQUIRE(readback);
+    REQUIRE(lane.Drain(RenderDrainReason::Test));
+
+    // GPU 완료(fence gate) 전에는 결과도 통지도 없다.
+    CHECK(lane.TakeReadback(readback.Value()).Error() == ErrorCode::NotFound);
+    Array<RenderNotice> notices(allocator);
+    REQUIRE(lane.Notices().TakeAll(notices));
+    bool early = false;
+    for (const RenderNotice& notice : notices) {
+        early = early || notice.kind == RenderNoticeKind::ReadbackReady;
+    }
+
+    CHECK(!early);
+    device.CompleteAll();
+    REQUIRE(lane.Drain(RenderDrainReason::Test));
+    notices.Clear();
+    REQUIRE(lane.Notices().TakeAll(notices));
+    bool ready = false;
+    for (const RenderNotice& notice : notices) {
+        ready = ready || (notice.kind == RenderNoticeKind::ReadbackReady &&
+                          notice.frame == readback.Value() && notice.error == ErrorCode::None &&
+                          notice.handle == texture.Value());
+    }
+
+    CHECK(ready);
+    auto result = lane.TakeReadback(readback.Value());
+    REQUIRE(result);
+    REQUIRE(result.Value().Size() == 16);
+    CHECK(result.Value().View()[0] == 0x5a && result.Value().View()[15] == 0x5a);
+    CHECK(lane.TakeReadback(readback.Value()).Error() == ErrorCode::NotFound);
+    bool updated = false;
+    for (const RecordingDevice::Call& call : device.Calls()) {
+        updated = updated || call.op == RecordingDevice::Op::UpdateTexture;
+    }
+
+    CHECK(updated);
+    REQUIRE(lane.Retire(texture.Value()));
+    CHECK(lane.Shutdown());
+}

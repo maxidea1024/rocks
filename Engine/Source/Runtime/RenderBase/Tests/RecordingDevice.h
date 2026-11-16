@@ -4,6 +4,7 @@
 #include <Graphics/Device.h>
 #include <Graphics/DeviceOwnership.h>
 #include <Graphics/FenceTimeline.h>
+#include <Graphics/StagingPool.h>
 
 namespace rocks::render::testing {
 
@@ -36,7 +37,11 @@ public:
         RetireTexture,
         RetirePipeline,
         RetireSwapChain,
-        WaitIdle
+        WaitIdle,
+        UpdateBuffer,
+        UpdateTexture,
+        UploadFromStaging,
+        RequestReadback
     };
 
     struct Call {
@@ -114,6 +119,30 @@ public:
     void Retire(graphics::SwapChainHandle swapChain) noexcept override;
     void ReclaimCompleted() noexcept override;
     Result<void> WaitIdle() noexcept override;
+    Result<void> UpdateBuffer(graphics::BufferHandle buffer, uint64 offset,
+                              Span<const uint8> data) noexcept override;
+    Result<void> UpdateTexture(graphics::TextureHandle texture, uint32 mipLevel,
+                               Span<const uint8> pixels) noexcept override;
+    Result<graphics::GpuFencePoint> SubmitUploads() noexcept override;
+    graphics::UploadStats UploadStatistics() const noexcept override;
+    Result<graphics::StagingBuffer> AcquireStaging(uint64 bytes) noexcept override;
+    Result<void> UploadTextureFromStaging(graphics::TextureHandle texture, uint32 mipLevel,
+                                          graphics::StagingHandle staging,
+                                          uint64 offset) noexcept override;
+    Result<void> UploadBufferFromStaging(graphics::BufferHandle buffer, uint64 destinationOffset,
+                                         graphics::StagingHandle staging, uint64 sourceOffset,
+                                         uint64 size) noexcept override;
+    void ReleaseStaging(graphics::StagingHandle staging) noexcept override;
+    graphics::StagingStats StagingStatistics() const noexcept override;
+    Result<graphics::ReadbackRequest>
+    RequestReadback(graphics::TextureHandle target) noexcept override;
+    Result<bool> TryReadback(graphics::ReadbackHandle readback, Span<uint8> out) noexcept override;
+    void ReleaseReadback(graphics::ReadbackHandle readback) noexcept override;
+
+    // readback이 돌려줄 byte 값이다(시험이 결과를 알아본다).
+    void SetReadbackFill(uint8 value) noexcept {
+        readbackFill_ = value;
+    }
     graphics::GpuFencePoint LastSubmittedFence() const noexcept override;
     Result<bool> IsFenceComplete(graphics::GpuFencePoint point) const noexcept override;
     Result<platform::WaitResult> WaitFence(graphics::GpuFencePoint point,
@@ -136,6 +165,22 @@ private:
         bool pending = false;
     };
 
+    struct Readback {
+        uint64 fenceValue = 0;
+        uint64 bytes = 0;
+    };
+
+    // CPU 메모리 staging이다.
+    class CpuStaging final : public graphics::StagingSource {
+    public:
+        Result<graphics::StagingMemory> CreateStaging(uint64 bytes) noexcept override;
+        void DestroyStaging(const graphics::StagingMemory& memory) noexcept override;
+
+        Allocator* allocator = nullptr;
+    };
+
+    uint64 SubmitInternal() noexcept;
+
     // --- CommandContext ---
     void SetPipeline(graphics::PipelineHandle pipeline) noexcept override;
     void SetVertexBuffers(uint32 firstStream,
@@ -157,6 +202,10 @@ private:
     SlotArray<uint8> pipelines_;
     SlotArray<uint8> swapChains_;
     Array<Retired> retired_;
+    SlotArray<Readback> readbacks_;
+    CpuStaging stagingSource_;
+    graphics::StagingPool staging_;
+    uint8 readbackFill_ = 0;
     Call calls_[MaxCalls];
     usize callCount_ = 0;
     platform::Mutex gate_;

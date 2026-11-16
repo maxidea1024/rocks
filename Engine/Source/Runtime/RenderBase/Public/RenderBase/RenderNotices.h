@@ -19,10 +19,13 @@ enum class RenderNoticeKind : uint8 {
     // 장치가 손실되었다. 이후 프레임 slot 확보는 실패한다.
     DeviceLost,
     // 렌더 lane 작업이 치명 오류를 보고했다(error).
-    LaneFailed
+    LaneFailed,
+    // 비동기 readback이 끝났다(frame 칸이 readback 번호, handle이 대상 텍스처). 결과는
+    // RenderLane::TakeReadback으로 가져간다. 실패면 error다.
+    ReadbackReady
 };
 
-// 완료 통지 하나다. 종류에 따라 frame·handle 가운데 하나를 쓴다.
+// 완료 통지 하나다. 종류에 따라 frame·handle을 쓴다(ReadbackReady는 frame에 readback 번호).
 struct RenderNotice {
     RenderNoticeKind kind = RenderNoticeKind::FrameCompleted;
     ErrorCode error = ErrorCode::None;

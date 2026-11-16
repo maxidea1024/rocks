@@ -1,5 +1,6 @@
 #include "GraphicsSelfTest.h"
 #include "RenderLaneSelfTest.h"
+#include "UploadSelfTest.h"
 #include "VertexSelfTest.h"
 
 #include <Core/Containers/Array.h>
@@ -250,10 +251,13 @@ void RunFenceChecks(const char* name, graphics::Device& device, sample::Renderer
     auto doomed = device.CreateBuffer(bufferDesc, Span<const uint8>(bytes, sizeof(bytes)));
     Check(doomed.IsOk(), name, "retire probe buffer");
     if (doomed) {
+        // 초기 데이터 업로드가 아직 제출되지 않았을 수 있다(D3D12 업로드 기록). 그 제출의 fence가
+        // 끝나기 전에는 회수하지 않는다.
         device.Retire(doomed.Value());
         const usize pending = device.PendingRetireCount();
         device.ReclaimCompleted();
-        Check(pending == 1 && device.PendingRetireCount() == 0, name,
+        const bool reclaimed = device.WaitIdle().IsOk() && device.PendingRetireCount() == 0;
+        Check(pending == 1 && reclaimed, name,
               "retired buffer waits for its fence then is reclaimed");
     }
 }
@@ -298,7 +302,9 @@ struct OwnerThreadRun {
 // 확인한다.
 void RunOwnershipChecks(const char* name, graphics::Device& device, sample::Renderer& renderer,
                         graphics::TextureHandle target, Allocator& allocator) noexcept {
-    Check(!device.Info().concurrentResourceCreation && device.IsOwnerThread(), name,
+    // D3D12는 생성이 스레드 안전이고(GX8 업로드 경로), OpenGL은 소유 스레드 전용이다.
+    const bool concurrent = device.Info().backend == graphics::Backend::D3D12;
+    Check(device.Info().concurrentResourceCreation == concurrent && device.IsOwnerThread(), name,
           "device starts owned by its creating thread");
     Check(device.ReleaseOwnership().IsOk() && !device.IsOwnerThread(), name,
           "owner releases the device");
@@ -333,6 +339,11 @@ void RunOwnershipChecks(const char* name, graphics::Device& device, sample::Rend
     }
     Check(started && run.owned && run.drew && run.released, name,
           "another thread takes the device, draws and releases it");
+    if (!(run.owned && run.drew && run.released)) {
+        printf("    owned %d drew %d released %d: %.*s\n", run.owned ? 1 : 0, run.drew ? 1 : 0,
+               run.released ? 1 : 0, static_cast<int>(device.LastError().ByteCount()),
+               device.LastError().Data());
+    }
     Check(pixels.Size() == static_cast<usize>(Size) * Size * 4 && Dominant(At(pixels, 32, 4), 0),
           name, "frame drawn on the new owner thread is correct");
     Check(device.AcquireOwnership().IsOk() && device.IsOwnerThread(), name,
@@ -570,6 +581,8 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     Check(device.IgnoredDraws() == 0, name, "no ignored draws");
     // 정점 배치(GX3a): 형식 20종·stream·인스턴스·index·정점 버퍼 없는 그리기와 음성 대조.
     failures += RunVertexChecks(name, device, result.triangle.GetAllocator());
+    // 업로드·readback(GX8): 내용 갱신·ring wrap·staging 회수·비동기 readback·다른 스레드 생성.
+    failures += RunUploadChecks(name, device, renderer, result.triangle.GetAllocator());
     Check(device.ValidationErrorCount() == 0, name, "no validation errors");
 
     // 검증 오류 집계가 실제로 동작하는지 확인한다: D3D12는 파이프라인 RTV 형식과 다른 대상에

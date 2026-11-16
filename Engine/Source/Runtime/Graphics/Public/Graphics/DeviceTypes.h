@@ -71,6 +71,11 @@ struct DeviceDesc {
     bool enableValidation = false;
     // D3D12: 하드웨어 대신 소프트웨어 장치(WARP)를 쓴다. 헤드리스 CI 검증용이다. OpenGL은 무시한다.
     bool preferSoftware = false;
+    // 업로드 ring 크기다(0이면 DefaultUploadRingBytes). 생성 초기 데이터·내용 갱신이 이 ring을
+    // 거친다.
+    uint64 uploadRingBytes = 0;
+    // 스트리밍 staging pool 예산이다(0이면 DefaultStagingBudgetBytes).
+    uint64 stagingBudgetBytes = 0;
 };
 
 // 창에 그리기 위한 OS 표면이다. Windows: window = HWND, instance = HINSTANCE.
@@ -271,6 +276,70 @@ using FenceCallback = void (*)(ErrorCode result, void* context) noexcept;
 // 부른다. 어느 스레드에서나 부를 수 있다.
 uint64 NewDeviceEpoch() noexcept;
 
+// 스트리밍 staging handle이다(Device::AcquireStaging). 발급한 장치 안에서만 의미가 있다.
+struct StagingHandle {
+    SlotHandle slot;
+
+    bool IsNull() const noexcept {
+        return slot.IsNull();
+    }
+
+    bool operator==(const StagingHandle&) const noexcept = default;
+};
+
+// 받은 staging이다. data는 size byte의 CPU 가시 메모리이며 Release까지 주소가 바뀌지 않는다(IO
+// 목적지로 바로 쓸 수 있다).
+struct StagingBuffer {
+    StagingHandle handle;
+    uint8* data = nullptr;
+    uint64 size = 0;
+};
+
+// staging pool 진단이다.
+struct StagingStats {
+    // 호출자가 가진 수, Release했지만 업로드 fence를 기다리는 수, 재사용을 기다리는 빈 수다.
+    uint64 acquired = 0;
+    uint64 waiting = 0;
+    uint64 free = 0;
+    uint64 createdBytes = 0;
+    uint64 created = 0;
+    uint64 reused = 0;
+};
+
+// 비동기 readback handle이다(Device::RequestReadback).
+struct ReadbackHandle {
+    SlotHandle slot;
+
+    bool IsNull() const noexcept {
+        return slot.IsNull();
+    }
+
+    bool operator==(const ReadbackHandle&) const noexcept = default;
+};
+
+// readback 요청 결과다. completion이 끝나면 TryReadback이 bytes byte를 낸다.
+struct ReadbackRequest {
+    ReadbackHandle handle;
+    GpuFencePoint completion;
+    uint64 bytes = 0;
+};
+
+// 업로드 경로 진단이다(RenderBase GX8).
+struct UploadStats {
+    uint64 ringCapacity = 0;
+    uint64 ringUsed = 0;
+    // ring이 0으로 감은 횟수다.
+    uint64 ringWraps = 0;
+    // ring에 자리가 없어 전용 staging으로 올린 수다.
+    uint64 dedicatedUploads = 0;
+    // 아직 제출하지 않은 업로드 기록이 있는지다.
+    bool pending = false;
+};
+
+// 업로드 ring 기본 크기(4 MiB)와 스트리밍 staging 예산 기본값(256 MiB)이다.
+inline constexpr uint64 DefaultUploadRingBytes = uint64{4} << 20;
+inline constexpr uint64 DefaultStagingBudgetBytes = uint64{256} << 20;
+
 // 장치 정보다. 문자열은 장치가 소유하며 장치 수명 동안 유효하다.
 struct DeviceInfo {
     Backend backend = Backend::D3D12;
@@ -281,8 +350,8 @@ struct DeviceInfo {
     bool software = false;
     // 자원·파이프라인 생성(Create*)을 소유 스레드가 아닌 스레드에서도 부를 수 있는지다(RenderBase
     // 5.4절 GX11). false면 소유 스레드 전용이고 다른 스레드의 생성 요청은 렌더 lane 작업으로
-    // 넘긴다. 지금은 두 backend 모두 false다: OpenGL은 context가 소유 스레드에 묶이고, D3D12는 초기
-    // 데이터 업로드가 소유 스레드의 queue 제출을 요구하므로 업로드 경로(GX8)와 함께 연다.
+    // 넘긴다. D3D12는 true다: 생성·갱신·staging 업로드는 내부 잠금 아래 업로드 기록에 쌓이고 소유
+    // 스레드의 다음 제출이 실행한다(GX8). OpenGL은 context가 소유 스레드에 묶여 false다.
     bool concurrentResourceCreation = false;
 };
 
