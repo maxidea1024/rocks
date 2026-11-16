@@ -6,6 +6,7 @@
 #include <Core/Text/StringView.h>
 #include <GraphicsTypes/PixelFormat.h>
 #include <GraphicsTypes/Sampler.h>
+#include <GraphicsTypes/VertexFormat.h>
 
 // 그래픽 장치 계약의 값 타입(handle·장치·자원 설정)이다. backend와 무관하며 API 객체를 담지
 // 않는다. 픽셀 형식·샘플러는 GraphicsTypes 모듈에 있다.
@@ -22,16 +23,6 @@ enum class Backend : uint8 {
 
 // "D3D12" 같은 이름이다. 범위 밖이면 "Unknown"이다.
 const char* BackendName(Backend backend) noexcept;
-
-// 정점 속성 형식이다.
-enum class VertexFormat : uint8 {
-    Float2,
-    Float3,
-    Float4
-};
-
-// 형식의 바이트 크기다.
-uint32 VertexFormatSize(VertexFormat format) noexcept;
 
 // 자원 handle이다. 발급한 장치 안에서만 의미가 있으며 파괴 후에는 stale이 된다(slot+generation).
 struct BufferHandle {
@@ -96,14 +87,27 @@ struct SwapChainDesc {
     bool vsync = true;
 };
 
+// 버퍼 용도다. 정점 버퍼는 SetVertexBuffers, index 버퍼는 SetIndexBuffer로 묶는다.
 enum class BufferUsage : uint8 {
-    Vertex
+    Vertex,
+    Index
 };
 
 struct BufferDesc {
     usize size = 0;
     BufferUsage usage = BufferUsage::Vertex;
 };
+
+// index 형식이다(RenderBase 10.4절).
+enum class IndexFormat : uint8 {
+    UInt16,
+    UInt32
+};
+
+// index 하나의 byte 크기다(2·4).
+constexpr uint32 IndexFormatSize(IndexFormat format) noexcept {
+    return format == IndexFormat::UInt16 ? 2u : 4u;
+}
 
 enum class TextureUsage : uint8 {
     // 셰이더에서 샘플링한다(초기 픽셀 필요).
@@ -127,12 +131,62 @@ struct TextureDesc {
     SamplerDesc sampler;
 };
 
-// 정점 속성 하나다. location은 GLSL의 layout(location), HLSL에서는 TEXCOORD{location} 의미 체계로
-// 연결한다(셰이더 작성 규칙).
+// 정점 배치 한계다(RenderBase 10.4절). 장치 최소 보장 쪽 값이다: 속성 16(Vulkan
+// maxVertexInputAttributes·GL_MAX_VERTEX_ATTRIBS 최소), stream 8(Metal 정점 buffer 상한), offset ≤
+// 2047· stride ≤ 2048(Vulkan maxVertexInputAttributeOffset·maxVertexInputBindingStride, GL
+// MAX_VERTEX_ATTRIB_RELATIVE_OFFSET·MAX_VERTEX_ATTRIB_STRIDE 최소), 둘 다 4 byte 배수(Metal
+// stride).
+inline constexpr uint32 MaxVertexAttributes = 16;
+inline constexpr uint32 MaxVertexStreams = 8;
+inline constexpr uint32 MaxVertexAttributeOffset = 2047;
+inline constexpr uint32 MaxVertexStride = 2048;
+inline constexpr uint32 VertexLayoutAlignment = 4;
+
+// 정점 속성 하나다. location(0–15)은 HLSL 시맨틱 ATTRIBUTE{location}, GLSL layout(location)이다.
+// stream(0–7)의 정점에서 offset byte 위치에 format 형식으로 놓인다.
 struct VertexAttribute {
     uint32 location = 0;
     VertexFormat format = VertexFormat::Float3;
+    uint32 stream = 0;
     uint32 offset = 0;
+};
+
+// stream이 정점마다 진행하는지 인스턴스마다 진행하는지다. 인스턴스 stream은 인스턴스마다 한 번(간격
+// 1) 진행한다.
+enum class VertexStepRate : uint8 {
+    Vertex,
+    Instance
+};
+
+// 정점 stream 하나다. streams 배열의 index가 stream 번호다.
+struct VertexStream {
+    uint32 stride = 0;
+    VertexStepRate stepRate = VertexStepRate::Vertex;
+};
+
+// 정점 배치다(UE vertex declaration 대응). 속성이 없으면 정점 입력이 없는 배치다(SV_VertexID로
+// 위치를 만드는 그리기).
+//
+// 사용 예(위치 stream 0, 인스턴스 색 stream 1):
+//   const VertexAttribute attributes[] = {
+//       {0, VertexFormat::Float3, 0, 0},
+//       {1, VertexFormat::UByte4Unorm, 1, 0}};
+//   const VertexStream streams[] = {{12, VertexStepRate::Vertex}, {4, VertexStepRate::Instance}};
+//   desc.layout = {attributes, streams};
+struct VertexLayout {
+    Span<const VertexAttribute> attributes;
+    Span<const VertexStream> streams;
+};
+
+// 배치 자체를 검사한다(파이프라인 생성이 부른다). 위반은 InvalidArgument다: 속성 수 > 16, stream 수
+// > 8, location ≥ 16 또는 중복, 모르는 형식, 속성의 stream이 streams 밖, offset > 2047·stride >
+// 2048 ·4 byte 배수 아님, offset + 형식 크기 > stride, 속성이 하나도 없는 stream.
+Result<void> ValidateVertexLayout(const VertexLayout& layout) noexcept;
+
+// 정점 버퍼 묶기 하나다(SetVertexBuffers).
+struct VertexBufferBinding {
+    BufferHandle buffer;
+    uint64 offset = 0;
 };
 
 // backend별 셰이더 원문이다. 장치는 자기 backend 원문만 쓴다. 진입점 이름은 HLSL에서 VSMain·PSMain,
@@ -146,11 +200,16 @@ struct ShaderSource {
 // (DrawConstants, HLSL b0 / GLSL uniform uTransform·uColor)와 텍스처 하나(HLSL t0·s0 /
 // GLSL binding 0 uTexture). 샘플러는 묶은 텍스처의 TextureDesc::sampler를 따른다. 깊이·컬링은
 // 쓰지 않는다.
+//
+// 셰이더 입력 대조(RenderBase 10.4절): 정점 셰이더가 읽는 모든 location이 layout에 있어야 하고
+// 형식의 셰이더 타입 계열(VertexFormatShaderType)이 셰이더 입력 타입과 같아야 한다. 셰이더가 읽지
+// 않는 속성은 허용한다. 입력은 D3D12가 컴파일한 VS 입력 signature(시맨틱 ATTRIBUTEn), OpenGL이 링크
+// 뒤 active attribute에서 얻는다. 위반은 InvalidArgument이며 LastError에 location·형식·셰이더
+// 타입을 적는다. 정점 입력 시맨틱은 ATTRIBUTEn만 쓴다(SV_ 시스템 값 제외).
 struct PipelineDesc {
     ShaderSource vertex;
     ShaderSource pixel;
-    Span<const VertexAttribute> attributes;
-    uint32 vertexStride = 0;
+    VertexLayout layout;
     Format colorFormat = Format::RGBA8UnormSrgb;
     // 소스 알파로 섞는다(premultiplied가 아닌 일반 알파).
     bool alphaBlend = false;

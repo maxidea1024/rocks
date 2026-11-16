@@ -18,9 +18,9 @@ cbuffer DrawConstants : register(b0) {
 };
 
 struct VSInput {
-    float3 position : TEXCOORD0;
-    float2 uv : TEXCOORD1;
-    float4 color : TEXCOORD2;
+    float3 position : ATTRIBUTE0;
+    float2 uv : ATTRIBUTE1;
+    float4 color : ATTRIBUTE2;
 };
 
 struct VSOutput {
@@ -116,15 +116,15 @@ Result<void> Renderer::Initialize(graphics::Device& device, graphics::Format col
     }
 
     const graphics::VertexAttribute attributes[] = {
-        {0, graphics::VertexFormat::Float3, ROCKS_OFFSET_OF(Vertex, position)},
-        {1, graphics::VertexFormat::Float2, ROCKS_OFFSET_OF(Vertex, uv)},
-        {2, graphics::VertexFormat::Float4, ROCKS_OFFSET_OF(Vertex, color)},
+        {0, graphics::VertexFormat::Float3, 0, ROCKS_OFFSET_OF(Vertex, position)},
+        {1, graphics::VertexFormat::Float2, 0, ROCKS_OFFSET_OF(Vertex, uv)},
+        {2, graphics::VertexFormat::Float4, 0, ROCKS_OFFSET_OF(Vertex, color)},
     };
+    const graphics::VertexStream streams[] = {{sizeof(Vertex), graphics::VertexStepRate::Vertex}};
     graphics::PipelineDesc pipeline;
     pipeline.vertex = {BuiltinShaderHlsl(), BuiltinVertexGlsl()};
     pipeline.pixel = {BuiltinShaderHlsl(), BuiltinPixelGlsl()};
-    pipeline.attributes = attributes;
-    pipeline.vertexStride = sizeof(Vertex);
+    pipeline.layout = {attributes, streams};
     pipeline.colorFormat = colorFormat;
     pipeline.alphaBlend = true;
     auto createdPipeline = device.CreatePipeline(pipeline);
@@ -189,13 +189,10 @@ void Renderer::Draw(graphics::CommandContext& context, const RenderView& view,
         constants.color[3] = item.color.a;
         context.SetConstants(constants);
         context.SetTexture(item.texture);
-        if (item.mesh == MeshKind::Triangle) {
-            context.SetVertexBuffer(triangle_);
-            context.Draw(3);
-        } else {
-            context.SetVertexBuffer(quad_);
-            context.Draw(6);
-        }
+        const bool triangle = item.mesh == MeshKind::Triangle;
+        const graphics::VertexBufferBinding binding{triangle ? triangle_ : quad_, 0};
+        context.SetVertexBuffers(0, Span<const graphics::VertexBufferBinding>(&binding, 1));
+        context.Draw(triangle ? 3u : 6u);
         ++stats_.items;
         ++stats_.draws;
     }

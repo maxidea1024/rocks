@@ -1,5 +1,6 @@
 #include "GraphicsSelfTest.h"
 #include "RenderLaneSelfTest.h"
+#include "VertexSelfTest.h"
 
 #include <Core/Containers/Array.h>
 #include <D3D12Graphics/D3D12Device.h>
@@ -567,6 +568,8 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     RunOwnershipChecks(name, device, renderer, target.Value(), result.triangle.GetAllocator());
     RunSwapChainChecks(name, device, renderer, result.triangle.GetAllocator());
     Check(device.IgnoredDraws() == 0, name, "no ignored draws");
+    // 정점 배치(GX3a): 형식 20종·stream·인스턴스·index·정점 버퍼 없는 그리기와 음성 대조.
+    failures += RunVertexChecks(name, device, result.triangle.GetAllocator());
     Check(device.ValidationErrorCount() == 0, name, "no validation errors");
 
     // 검증 오류 집계가 실제로 동작하는지 확인한다: D3D12는 파이프라인 RTV 형식과 다른 대상에

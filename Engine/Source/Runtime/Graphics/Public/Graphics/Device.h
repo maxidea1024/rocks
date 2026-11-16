@@ -11,14 +11,39 @@ namespace rocks::graphics {
 // 돌려주며 EndFrame까지만 유효하다. 기록 순서대로 실행된다.
 class CommandContext {
 public:
+    // 파이프라인을 묶는다. 이미 묶인 정점 버퍼는 새 파이프라인 배치의 stride로 다시 묶인다.
     virtual void SetPipeline(PipelineHandle pipeline) noexcept = 0;
-    virtual void SetVertexBuffer(BufferHandle buffer) noexcept = 0;
+
+    // firstStream부터 차례로 정점 버퍼를 묶는다(stream 0–7, offset은 버퍼 안 byte 위치). 범위 밖
+    // stream은 무시한다.
+    //
+    // 사용 예(위치 stream 0, 인스턴스 stream 1):
+    //   const VertexBufferBinding buffers[] = {{positions, 0}, {instances, 0}};
+    //   commands.SetVertexBuffers(0, buffers);
+    //   commands.Draw(6, instanceCount);
+    virtual void SetVertexBuffers(uint32 firstStream,
+                                  Span<const VertexBufferBinding> buffers) noexcept = 0;
+
+    // index 버퍼를 묶는다(BufferUsage::Index로 만든 버퍼, offset은 byte 위치).
+    virtual void SetIndexBuffer(BufferHandle buffer, IndexFormat format,
+                                uint64 offset = 0) noexcept = 0;
+
     // 텍스처 슬롯 0에 묶는다. null handle이면 1x1 흰색 텍스처를 쓴다.
     virtual void SetTexture(TextureHandle texture) noexcept = 0;
     virtual void SetConstants(const DrawConstants& constants) noexcept = 0;
-    // 묶인 파이프라인·정점 버퍼로 삼각형 목록을 그린다. 파이프라인이나 버퍼가 없으면 무시하고
-    // 진단 계수만 올린다.
-    virtual void Draw(uint32 vertexCount, uint32 firstVertex = 0) noexcept = 0;
+
+    // 삼각형 목록을 그린다(정점 vertexCount개 × 인스턴스 instanceCount개, firstVertex부터). base
+    // instance는 0으로 고정한다(SV_InstanceID의 base 포함 여부가 backend마다 달라서다). 정점 입력이
+    // 없는 배치는 정점 버퍼 없이 그린다. 파이프라인이 없거나 배치가 선언한 stream에 정점 버퍼가
+    // 묶이지 않았으면 무시하고 IgnoredDraws를 올린다(Development 진단).
+    virtual void Draw(uint32 vertexCount, uint32 instanceCount = 1,
+                      uint32 firstVertex = 0) noexcept = 0;
+
+    // index 버퍼로 그린다(firstIndex부터 indexCount개). base vertex·base instance는 0이다. index
+    // 버퍼가 없으면 Draw와 같이 무시한다. index 값의 범위 검사는 하지 않는다(장치가 index 내용을
+    // CPU에 남기지 않는다).
+    virtual void DrawIndexed(uint32 indexCount, uint32 instanceCount = 1,
+                             uint32 firstIndex = 0) noexcept = 0;
 
 protected:
     ~CommandContext() = default;
@@ -34,8 +59,9 @@ protected:
 //   auto pipeline = device.CreatePipeline(pipelineDesc);
 //   auto frame = device.BeginFrame(swapChain.Value(), {0.1f, 0.1f, 0.1f, 1.0f});
 //   if (frame) {
+//       const VertexBufferBinding binding{vertices.Value(), 0};
 //       frame.Value()->SetPipeline(pipeline.Value());
-//       frame.Value()->SetVertexBuffer(vertices.Value());
+//       frame.Value()->SetVertexBuffers(0, Span<const VertexBufferBinding>(&binding, 1));
 //       frame.Value()->Draw(3);
 //       auto submitted = device.EndFrame();          // GpuFencePoint
 //   }
@@ -87,7 +113,8 @@ public:
     virtual Result<void> ResizeSwapChain(SwapChainHandle swapChain, uint32 width,
                                          uint32 height) noexcept = 0;
 
-    // 정점 버퍼를 만들고 initial을 복사한다. initial 크기가 desc.size와 다르면 InvalidArgument다.
+    // 정점·index 버퍼를 만들고 initial을 복사한다. initial 크기가 desc.size와 다르면
+    // InvalidArgument다.
     virtual Result<BufferHandle> CreateBuffer(const BufferDesc& desc,
                                               Span<const uint8> initial) noexcept = 0;
 
@@ -97,7 +124,8 @@ public:
                                                 Span<const uint8> pixels) noexcept = 0;
 
     // 셰이더를 컴파일하고 파이프라인을 만든다. 셰이더 컴파일 실패는 DependencyFailed다(진단 로그는
-    // LastError로 읽는다).
+    // LastError로 읽는다). 정점 배치 위반(ValidateVertexLayout)과 셰이더 입력 대조 실패는
+    // InvalidArgument, backend가 지원하지 않는 정점 형식(OpenGL의 Bgra8Unorm)은 Unsupported다.
     virtual Result<PipelineHandle> CreatePipeline(const PipelineDesc& desc) noexcept = 0;
 
     // 스왑체인의 다음 백버퍼에 그리기를 시작한다(clear 포함). 장치 손실 뒤에는 Destroyed다.

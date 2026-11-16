@@ -94,8 +94,11 @@ class TestProcessor final : public RenderLaneProcessor {
 public:
     Result<void> OnLaneStart(RenderLaneContext& context) noexcept override {
         graphics::Device& device = context.Device();
+        const graphics::VertexAttribute attributes[] = {{0, graphics::VertexFormat::Float3, 0, 0},
+                                                        {1, graphics::VertexFormat::Float4, 0, 12}};
+        const graphics::VertexStream streams[] = {{36, graphics::VertexStepRate::Vertex}};
         graphics::PipelineDesc pipelineDesc;
-        pipelineDesc.vertexStride = 36;
+        pipelineDesc.layout = {attributes, streams};
         auto createdPipeline = device.CreatePipeline(pipelineDesc);
         const uint8 bytes[36] = {};
         graphics::BufferDesc bufferDesc;
@@ -147,7 +150,8 @@ void DrawScene(RenderFrameContext& context, ScenePacket& packet) noexcept {
 
     graphics::CommandContext& commands = *frame.Value();
     commands.SetPipeline(processor->pipeline);
-    commands.SetVertexBuffer(processor->buffer);
+    const graphics::VertexBufferBinding binding{processor->buffer, 0};
+    commands.SetVertexBuffers(0, Span<const graphics::VertexBufferBinding>(&binding, 1));
     auto texture = context.Handles().Texture(packet.texture);
     commands.SetTexture(texture ? texture.Value() : graphics::TextureHandle{});
     for (const DrawItem& item : packet.items) {

@@ -139,7 +139,8 @@ Result<PipelineHandle> RecordingDevice::CreatePipeline(const PipelineDesc& desc)
         return Result<PipelineHandle>::Failure(added.Error());
     }
 
-    Record(Op::CreatePipeline, desc.vertexStride);
+    Record(Op::CreatePipeline,
+           desc.layout.streams.Size() != 0 ? desc.layout.streams[0].stride : 0u);
     return Result<PipelineHandle>::Success(PipelineHandle{added.Value()});
 }
 
@@ -383,8 +384,21 @@ void RecordingDevice::SetPipeline(PipelineHandle pipeline) noexcept {
     Record(Op::SetPipeline, pipelines_.IsValid(pipeline.slot) ? 1u : 0u);
 }
 
-void RecordingDevice::SetVertexBuffer(BufferHandle buffer) noexcept {
-    Record(Op::SetVertexBuffer, buffers_.IsValid(buffer.slot) ? 1u : 0u);
+void RecordingDevice::SetVertexBuffers(uint32 firstStream,
+                                       Span<const VertexBufferBinding> buffers) noexcept {
+    uint64 valid = 0;
+    for (const VertexBufferBinding& binding : buffers) {
+        valid += buffers_.IsValid(binding.buffer.slot) ? 1u : 0u;
+    }
+
+    Record(Op::SetVertexBuffers, (static_cast<uint64>(firstStream) << 32) | valid);
+}
+
+void RecordingDevice::SetIndexBuffer(BufferHandle buffer, IndexFormat format,
+                                     uint64 offset) noexcept {
+    (void)offset;
+    Record(Op::SetIndexBuffer,
+           (buffers_.IsValid(buffer.slot) ? 2u : 0u) | (format == IndexFormat::UInt32 ? 1u : 0u));
 }
 
 void RecordingDevice::SetTexture(TextureHandle texture) noexcept {
@@ -395,8 +409,15 @@ void RecordingDevice::SetConstants(const DrawConstants& constants) noexcept {
     Record(Op::SetConstants, static_cast<uint64>(constants.color[0] * 255.0f));
 }
 
-void RecordingDevice::Draw(uint32 vertexCount, uint32 firstVertex) noexcept {
-    Record(Op::Draw, (static_cast<uint64>(vertexCount) << 32) | firstVertex);
+void RecordingDevice::Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept {
+    Record(Op::Draw, (static_cast<uint64>(vertexCount) << 40) |
+                         (static_cast<uint64>(instanceCount) << 20) | firstVertex);
+}
+
+void RecordingDevice::DrawIndexed(uint32 indexCount, uint32 instanceCount,
+                                  uint32 firstIndex) noexcept {
+    Record(Op::DrawIndexed, (static_cast<uint64>(indexCount) << 40) |
+                                (static_cast<uint64>(instanceCount) << 20) | firstIndex);
 }
 
 } // namespace rocks::render::testing

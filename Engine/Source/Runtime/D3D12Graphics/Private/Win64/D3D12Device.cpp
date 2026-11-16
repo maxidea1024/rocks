@@ -7,6 +7,7 @@
 
 #include <Windows.h>
 #include <d3d12.h>
+#include <d3d12shader.h>
 #include <d3dcompiler.h>
 #include <dxgi1_6.h>
 #include <dxgidebug.h>
@@ -117,17 +118,102 @@ DXGI_FORMAT ResourceFormat(Format format) noexcept {
     return DXGI_FORMAT_UNKNOWN;
 }
 
+// 정점 원소 형식의 DXGI 형식이다(RenderBase 10.4절 표, UE D3D12VertexDeclaration.cpp:27–41).
 DXGI_FORMAT AttributeFormat(VertexFormat format) noexcept {
     switch (format) {
+    case VertexFormat::Float1:
+        return DXGI_FORMAT_R32_FLOAT;
     case VertexFormat::Float2:
         return DXGI_FORMAT_R32G32_FLOAT;
     case VertexFormat::Float3:
         return DXGI_FORMAT_R32G32B32_FLOAT;
     case VertexFormat::Float4:
         return DXGI_FORMAT_R32G32B32A32_FLOAT;
+    case VertexFormat::Byte4Snorm:
+        return DXGI_FORMAT_R8G8B8A8_SNORM;
+    case VertexFormat::UByte4:
+        return DXGI_FORMAT_R8G8B8A8_UINT;
+    case VertexFormat::UByte4Unorm:
+        return DXGI_FORMAT_R8G8B8A8_UNORM;
+    case VertexFormat::Bgra8Unorm:
+        return DXGI_FORMAT_B8G8R8A8_UNORM;
+    case VertexFormat::Short2:
+        return DXGI_FORMAT_R16G16_SINT;
+    case VertexFormat::Short4:
+        return DXGI_FORMAT_R16G16B16A16_SINT;
+    case VertexFormat::Short2Snorm:
+        return DXGI_FORMAT_R16G16_SNORM;
+    case VertexFormat::Short4Snorm:
+        return DXGI_FORMAT_R16G16B16A16_SNORM;
+    case VertexFormat::Half2:
+        return DXGI_FORMAT_R16G16_FLOAT;
+    case VertexFormat::Half4:
+        return DXGI_FORMAT_R16G16B16A16_FLOAT;
+    case VertexFormat::UShort2:
+        return DXGI_FORMAT_R16G16_UINT;
+    case VertexFormat::UShort4:
+        return DXGI_FORMAT_R16G16B16A16_UINT;
+    case VertexFormat::UShort2Unorm:
+        return DXGI_FORMAT_R16G16_UNORM;
+    case VertexFormat::UShort4Unorm:
+        return DXGI_FORMAT_R16G16B16A16_UNORM;
+    case VertexFormat::Rgb10A2Unorm:
+        return DXGI_FORMAT_R10G10B10A2_UNORM;
+    case VertexFormat::UInt1:
+        return DXGI_FORMAT_R32_UINT;
     }
     return DXGI_FORMAT_UNKNOWN;
 }
+
+// HLSL 시맨틱은 대소문자를 가리지 않는다. 정점 입력 시맨틱이 ATTRIBUTE인지 본다.
+bool IsAttributeSemantic(const char* name) noexcept {
+    constexpr char Expected[] = "ATTRIBUTE";
+    usize index = 0;
+    for (; Expected[index] != 0; ++index) {
+        char letter = name[index];
+        if (letter >= 'a' && letter <= 'z') {
+            letter = static_cast<char>(letter - 'a' + 'A');
+        }
+        if (letter != Expected[index]) {
+            return false;
+        }
+    }
+    return name[index] == 0;
+}
+
+// 진단 문자열 조립 칸이다(셰이더 입력 대조 실패의 location·형식·셰이더 타입).
+class Diagnostic {
+public:
+    Diagnostic& Text(const char* text) noexcept {
+        while (*text != '\0' && length_ + 1 < sizeof(buffer_)) {
+            buffer_[length_++] = *text++;
+        }
+        buffer_[length_] = '\0';
+        return *this;
+    }
+
+    Diagnostic& Number(uint32 value) noexcept {
+        char digits[12] = {};
+        usize count = 0;
+        do {
+            digits[count++] = static_cast<char>('0' + value % 10);
+            value /= 10;
+        } while (value != 0);
+        while (count > 0 && length_ + 1 < sizeof(buffer_)) {
+            buffer_[length_++] = digits[--count];
+        }
+        buffer_[length_] = '\0';
+        return *this;
+    }
+
+    const char* CStr() const noexcept {
+        return buffer_;
+    }
+
+private:
+    char buffer_[256] = {};
+    usize length_ = 0;
+};
 
 D3D12_FILTER SamplerFilter(Filter filter) noexcept {
     switch (filter) {
@@ -190,7 +276,8 @@ D3D12_RESOURCE_DESC BufferResource(uint64 size) noexcept {
 
 struct BufferRecord {
     ComRef<ID3D12Resource> resource;
-    D3D12_VERTEX_BUFFER_VIEW view = {};
+    D3D12_GPU_VIRTUAL_ADDRESS address = 0;
+    uint64 size = 0;
 };
 
 struct TextureRecord {
@@ -208,6 +295,9 @@ struct TextureRecord {
 
 struct PipelineRecord {
     ComRef<ID3D12PipelineState> state;
+    // stream별 stride와 배치가 선언한 stream mask다(그리기 때 묶인 정점 버퍼를 확인한다).
+    uint32 strides[MaxVertexStreams] = {};
+    uint32 streamMask = 0;
 };
 
 struct SwapChainRecord {
@@ -636,7 +726,9 @@ public:
             return Result<BufferHandle>::Failure(owner.Error());
         }
 
-        if (desc.size == 0 || initial.Size() != desc.size) {
+        if (desc.size == 0 || initial.Size() != desc.size ||
+            (desc.usage != BufferUsage::Vertex && desc.usage != BufferUsage::Index) ||
+            desc.size > NumericLimits<uint32>::Max()) {
             return Result<BufferHandle>::Failure(ErrorCode::InvalidArgument);
         }
 
@@ -646,19 +738,18 @@ public:
         if (FAILED(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &resource,
                                                     D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
                                                     IID_PPV_ARGS(record.resource.Out())))) {
-            return FailWith<BufferHandle>("vertex buffer creation failed");
+            return FailWith<BufferHandle>("buffer creation failed");
         }
 
         void* mapped = nullptr;
         const D3D12_RANGE noRead = {0, 0};
         if (FAILED(record.resource->Map(0, &noRead, &mapped))) {
-            return FailWith<BufferHandle>("vertex buffer map failed");
+            return FailWith<BufferHandle>("buffer map failed");
         }
         platform::MemoryCopy(mapped, initial.Data(), desc.size);
         record.resource->Unmap(0, nullptr);
-        record.view.BufferLocation = record.resource->GetGPUVirtualAddress();
-        record.view.SizeInBytes = static_cast<UINT>(desc.size);
-        record.view.StrideInBytes = 0;
+        record.address = record.resource->GetGPUVirtualAddress();
+        record.size = desc.size;
 
         auto reserved = ReserveRetireCapacity(1);
         if (!reserved) {
@@ -767,8 +858,13 @@ public:
         }
 
         if (desc.vertex.hlsl.ByteCount() == 0 || desc.pixel.hlsl.ByteCount() == 0 ||
-            desc.vertexStride == 0 || desc.attributes.Size() == 0 || desc.attributes.Size() > 8 ||
             ResourceFormat(desc.colorFormat) == DXGI_FORMAT_UNKNOWN) {
+            return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
+        }
+        auto layoutChecked = ValidateVertexLayout(desc.layout);
+        if (!layoutChecked) {
+            auto failed = Fail("vertex layout is invalid (RenderBase 10.4 limits)");
+            (void)failed;
             return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
         }
 
@@ -778,20 +874,28 @@ public:
         if (!vertex) {
             return Result<PipelineHandle>::Failure(vertex.Error());
         }
+        auto matched = MatchVertexInputs(vertexCode.Get(), desc.layout);
+        if (!matched) {
+            return Result<PipelineHandle>::Failure(matched.Error());
+        }
         auto pixel = Compile(desc.pixel.hlsl, "PSMain", "ps_5_1", pixelCode);
         if (!pixel) {
             return Result<PipelineHandle>::Failure(pixel.Error());
         }
 
-        D3D12_INPUT_ELEMENT_DESC elements[8] = {};
-        for (usize index = 0; index < desc.attributes.Size(); ++index) {
-            const VertexAttribute& attribute = desc.attributes[index];
-            elements[index].SemanticName = "TEXCOORD";
+        D3D12_INPUT_ELEMENT_DESC elements[MaxVertexAttributes] = {};
+        for (usize index = 0; index < desc.layout.attributes.Size(); ++index) {
+            const VertexAttribute& attribute = desc.layout.attributes[index];
+            const VertexStream& stream = desc.layout.streams[attribute.stream];
+            const bool instance = stream.stepRate == VertexStepRate::Instance;
+            elements[index].SemanticName = "ATTRIBUTE";
             elements[index].SemanticIndex = attribute.location;
             elements[index].Format = AttributeFormat(attribute.format);
-            elements[index].InputSlot = 0;
+            elements[index].InputSlot = attribute.stream;
             elements[index].AlignedByteOffset = attribute.offset;
-            elements[index].InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
+            elements[index].InputSlotClass = instance ? D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA
+                                                      : D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
+            elements[index].InstanceDataStepRate = instance ? 1u : 0u;
         }
 
         D3D12_GRAPHICS_PIPELINE_STATE_DESC state = {};
@@ -814,13 +918,18 @@ public:
         state.RasterizerState.DepthClipEnable = TRUE;
         state.DepthStencilState.DepthEnable = FALSE;
         state.DepthStencilState.StencilEnable = FALSE;
-        state.InputLayout = {elements, static_cast<UINT>(desc.attributes.Size())};
+        state.InputLayout = {desc.layout.attributes.Size() != 0 ? elements : nullptr,
+                             static_cast<UINT>(desc.layout.attributes.Size())};
         state.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
         state.NumRenderTargets = 1;
         state.RTVFormats[0] = ResourceFormat(desc.colorFormat);
         state.SampleDesc.Count = 1;
 
         PipelineRecord record;
+        for (usize index = 0; index < desc.layout.streams.Size(); ++index) {
+            record.strides[index] = desc.layout.streams[index].stride;
+            record.streamMask |= 1u << index;
+        }
         if (FAILED(
                 device_->CreateGraphicsPipelineState(&state, IID_PPV_ARGS(record.state.Out())))) {
             return FailWith<PipelineHandle>("CreateGraphicsPipelineState failed");
@@ -832,13 +941,6 @@ public:
         auto added = pipelines_.TryAdd(Move(record));
         if (!added) {
             return Result<PipelineHandle>::Failure(added.Error());
-        }
-        // 정점 간격은 파이프라인마다 다를 수 있으므로 handle과 함께 기억한다.
-        auto stride = StrideFor(added.Value(), desc.vertexStride);
-        if (!stride) {
-            auto removed = pipelines_.TryRemove(added.Value());
-            (void)removed;
-            return Result<PipelineHandle>::Failure(stride.Error());
         }
         return Result<PipelineHandle>::Success(PipelineHandle{added.Value()});
     }
@@ -1204,9 +1306,16 @@ private:
         uint32 height = 0;
     };
 
-    struct PipelineStride {
-        SlotHandle pipeline;
-        uint32 stride = 0;
+    // 기록 중 묶인 정점·index 버퍼다(파이프라인을 바꾸면 그 stride로 다시 묶는다).
+    struct BoundVertexBuffer {
+        BufferHandle buffer;
+        uint64 offset = 0;
+    };
+
+    struct BoundIndexBuffer {
+        BufferHandle buffer;
+        IndexFormat format = IndexFormat::UInt16;
+        uint64 offset = 0;
     };
 
     struct SamplerEntry {
@@ -1332,29 +1441,106 @@ private:
         return Result<uint32>::Success(slot.Value());
     }
 
-    Result<void> StrideFor(SlotHandle pipeline, uint32 stride) noexcept {
-        // 사용 중인 칸 중 파괴된 파이프라인의 칸을 재사용하고, 없으면 뒤에 추가한다.
-        for (uint32 index = 0; index < pipelineStrideCount_; ++index) {
-            if (!pipelines_.IsValid(pipelineStrides_[index].pipeline) ||
-                pipelineStrides_[index].pipeline == pipeline) {
-                pipelineStrides_[index] = {pipeline, stride};
-                return Result<void>::Success();
+    // 컴파일한 VS 입력 signature를 배치와 대조한다(RenderBase 10.4절 셰이더 입력 대조). 사용자
+    // 입력은 시맨틱 ATTRIBUTEn만 받고, n이 배치에 있어야 하며 성분 타입 계열이 형식의 셰이더 타입과
+    // 같아야 한다. 셰이더가 읽지 않는 속성은 허용한다.
+    Result<void> MatchVertexInputs(ID3DBlob* code, const VertexLayout& layout) noexcept {
+        ComRef<ID3D12ShaderReflection> reflection;
+        if (FAILED(D3DReflect(code->GetBufferPointer(), code->GetBufferSize(),
+                              IID_PPV_ARGS(reflection.Out())))) {
+            return Fail("D3DReflect failed on the vertex shader");
+        }
+        D3D12_SHADER_DESC shader = {};
+        if (FAILED(reflection->GetDesc(&shader))) {
+            return Fail("vertex shader reflection description failed");
+        }
+        for (UINT index = 0; index < shader.InputParameters; ++index) {
+            D3D12_SIGNATURE_PARAMETER_DESC input = {};
+            if (FAILED(reflection->GetInputParameterDesc(index, &input))) {
+                return Fail("vertex shader input description failed");
+            }
+            if (input.SystemValueType != D3D_NAME_UNDEFINED) {
+                continue; // SV_VertexID·SV_InstanceID 등
+            }
+            Diagnostic message;
+            if (input.SemanticName == nullptr || !IsAttributeSemantic(input.SemanticName) ||
+                input.SemanticIndex >= MaxVertexAttributes) {
+                message.Text("vertex shader input ")
+                    .Text(input.SemanticName != nullptr ? input.SemanticName : "?")
+                    .Number(input.SemanticIndex)
+                    .Text(" must use semantic ATTRIBUTE0-15");
+                return Reject(message);
+            }
+            const VertexAttribute* attribute = nullptr;
+            for (const VertexAttribute& candidate : layout.attributes) {
+                if (candidate.location == input.SemanticIndex) {
+                    attribute = &candidate;
+                }
+            }
+            if (attribute == nullptr) {
+                message.Text("vertex shader reads location ")
+                    .Number(input.SemanticIndex)
+                    .Text(" which the vertex layout does not provide");
+                return Reject(message);
+            }
+            VertexShaderType shaderType = VertexShaderType::Float;
+            if (input.ComponentType == D3D_REGISTER_COMPONENT_SINT32) {
+                shaderType = VertexShaderType::Int;
+            } else if (input.ComponentType == D3D_REGISTER_COMPONENT_UINT32) {
+                shaderType = VertexShaderType::Uint;
+            }
+            if (VertexFormatShaderType(attribute->format) != shaderType) {
+                message.Text("vertex input location ")
+                    .Number(input.SemanticIndex)
+                    .Text(": format ")
+                    .Text(VertexFormatName(attribute->format))
+                    .Text(" feeds ")
+                    .Text(VertexShaderTypeName(VertexFormatShaderType(attribute->format)))
+                    .Text(" but the shader reads ")
+                    .Text(VertexShaderTypeName(shaderType));
+                return Reject(message);
             }
         }
-        if (pipelineStrideCount_ >= MaxPipelines) {
-            return Result<void>::Failure(ErrorCode::CapacityExceeded);
-        }
-        pipelineStrides_[pipelineStrideCount_++] = {pipeline, stride};
         return Result<void>::Success();
     }
 
-    uint32 StrideOf(SlotHandle pipeline) const noexcept {
-        for (uint32 index = 0; index < pipelineStrideCount_; ++index) {
-            if (pipelineStrides_[index].pipeline == pipeline) {
-                return pipelineStrides_[index].stride;
+    Result<void> Reject(const Diagnostic& message) noexcept {
+        auto assigned = lastError_.TryAssign(
+            StringView(message.CStr(), platform::CStringLength(message.CStr())));
+        (void)assigned;
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 묶인 정점 버퍼 하나를 지금 파이프라인의 stride로 IA에 건다.
+    void ApplyVertexBuffer(uint32 stream) noexcept {
+        const BufferRecord* buffer = buffers_.Find(boundVertex_[stream].buffer.slot);
+        const PipelineRecord* pipeline = pipelines_.Find(boundPipeline_);
+        if (buffer == nullptr || boundVertex_[stream].offset >= buffer->size) {
+            return;
+        }
+        D3D12_VERTEX_BUFFER_VIEW view = {};
+        view.BufferLocation = buffer->address + boundVertex_[stream].offset;
+        view.SizeInBytes = static_cast<UINT>(buffer->size - boundVertex_[stream].offset);
+        view.StrideInBytes = pipeline != nullptr ? pipeline->strides[stream] : 0u;
+        list_->IASetVertexBuffers(stream, 1, &view);
+    }
+
+    // 묶인 파이프라인이 선언한 stream에 모두 유효한 버퍼가 있는지다.
+    bool StreamsBound() const noexcept {
+        const PipelineRecord* pipeline = pipelines_.Find(boundPipeline_);
+        if (pipeline == nullptr) {
+            return false;
+        }
+        for (uint32 stream = 0; stream < MaxVertexStreams; ++stream) {
+            if ((pipeline->streamMask & (1u << stream)) == 0) {
+                continue;
+            }
+            const BufferRecord* buffer = buffers_.Find(boundVertex_[stream].buffer.slot);
+            if (buffer == nullptr || boundVertex_[stream].offset >= buffer->size) {
+                return false;
             }
         }
-        return 0;
+        return true;
     }
 
     Result<void> CreateRootSignature() noexcept {
@@ -1465,9 +1651,11 @@ private:
         }
         recordingAllocator_ = picked.Value();
         recording_ = true;
-        pipelineBound_ = false;
-        bufferBound_ = false;
         boundPipeline_ = {};
+        for (BoundVertexBuffer& bound : boundVertex_) {
+            bound = {};
+        }
+        boundIndex_ = {};
         return Result<void>::Success();
     }
 
@@ -1736,29 +1924,42 @@ private:
     void SetPipeline(PipelineHandle handle) noexcept override {
         const PipelineRecord* record = pipelines_.Find(handle.slot);
         if (record == nullptr) {
-            pipelineBound_ = false;
+            boundPipeline_ = {};
             return;
         }
         list_->SetPipelineState(record->state.Get());
-        pipelineBound_ = true;
         boundPipeline_ = handle.slot;
-        // 이미 묶인 정점 버퍼가 있으면 새 파이프라인 간격으로 다시 묶는다.
-        if (bufferBound_) {
-            SetVertexBuffer(boundBuffer_);
+        // 이미 묶인 정점 버퍼를 새 파이프라인의 stride로 다시 묶는다.
+        for (uint32 stream = 0; stream < MaxVertexStreams; ++stream) {
+            if (!boundVertex_[stream].buffer.IsNull()) {
+                ApplyVertexBuffer(stream);
+            }
         }
     }
 
-    void SetVertexBuffer(BufferHandle handle) noexcept override {
-        const BufferRecord* record = buffers_.Find(handle.slot);
-        if (record == nullptr) {
-            bufferBound_ = false;
+    void SetVertexBuffers(uint32 firstStream,
+                          Span<const VertexBufferBinding> buffers) noexcept override {
+        for (usize index = 0; index < buffers.Size(); ++index) {
+            const usize stream = firstStream + index;
+            if (stream >= MaxVertexStreams) {
+                return;
+            }
+            boundVertex_[stream] = {buffers[index].buffer, buffers[index].offset};
+            ApplyVertexBuffer(static_cast<uint32>(stream));
+        }
+    }
+
+    void SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64 offset) noexcept override {
+        boundIndex_ = {buffer, format, offset};
+        const BufferRecord* record = buffers_.Find(buffer.slot);
+        if (record == nullptr || offset >= record->size) {
             return;
         }
-        D3D12_VERTEX_BUFFER_VIEW view = record->view;
-        view.StrideInBytes = pipelineBound_ ? StrideOf(boundPipeline_) : 0;
-        list_->IASetVertexBuffers(0, 1, &view);
-        bufferBound_ = true;
-        boundBuffer_ = handle;
+        D3D12_INDEX_BUFFER_VIEW view = {};
+        view.BufferLocation = record->address + offset;
+        view.SizeInBytes = static_cast<UINT>(record->size - offset);
+        view.Format = format == IndexFormat::UInt16 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
+        list_->IASetIndexBuffer(&view);
     }
 
     void SetTexture(TextureHandle handle) noexcept override {
@@ -1776,15 +1977,24 @@ private:
         list_->SetGraphicsRoot32BitConstants(0, ConstantCount, &constants, 0);
     }
 
-    void Draw(uint32 vertexCount, uint32 firstVertex) noexcept override {
-        if (!pipelineBound_ || !bufferBound_ || !buffers_.IsValid(boundBuffer_.slot)) {
+    void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override {
+        if (!StreamsBound()) {
             ++ignoredDraws_;
             return;
         }
-        list_->DrawInstanced(vertexCount, 1, firstVertex, 0);
+        // base instance는 0으로 고정한다(RenderBase 10.4절).
+        list_->DrawInstanced(vertexCount, instanceCount, firstVertex, 0);
     }
 
-    static constexpr uint32 MaxPipelines = 256;
+    void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override {
+        const BufferRecord* index = buffers_.Find(boundIndex_.buffer.slot);
+        if (!StreamsBound() || index == nullptr || boundIndex_.offset >= index->size) {
+            ++ignoredDraws_;
+            return;
+        }
+        // base vertex·base instance는 0으로 고정한다.
+        list_->DrawIndexedInstanced(indexCount, instanceCount, firstIndex, 0, 0);
+    }
 
     String adapterName_;
     String lastError_;
@@ -1817,10 +2027,9 @@ private:
     Target target_;
     SwapChainHandle presentTarget_;
     TextureHandle white_;
-    PipelineStride pipelineStrides_[MaxPipelines];
-    uint32 pipelineStrideCount_ = 0;
     SlotHandle boundPipeline_;
-    BufferHandle boundBuffer_;
+    BoundVertexBuffer boundVertex_[MaxVertexStreams];
+    BoundIndexBuffer boundIndex_;
     uint64 ignoredDraws_ = 0;
     ComRef<IDXGIInfoQueue> dxgiInfoQueue_;
     // 검증 메시지는 읽을 때마다 비우고 여기에 누적한다(저장 한도로 오래된 오류가 밀려나지 않게).
@@ -1830,8 +2039,6 @@ private:
     FenceTimeline timeline_;
     DeviceOwnership ownership_;
     bool recording_ = false;
-    bool pipelineBound_ = false;
-    bool bufferBound_ = false;
     bool validation_ = false;
     bool software_ = false;
 };

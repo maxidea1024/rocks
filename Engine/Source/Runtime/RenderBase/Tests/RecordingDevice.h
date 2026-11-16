@@ -25,10 +25,12 @@ public:
         BeginFrame,
         BeginOffscreen,
         SetPipeline,
-        SetVertexBuffer,
+        SetVertexBuffers,
+        SetIndexBuffer,
         SetTexture,
         SetConstants,
         Draw,
+        DrawIndexed,
         EndFrame,
         RetireBuffer,
         RetireTexture,
@@ -136,10 +138,14 @@ private:
 
     // --- CommandContext ---
     void SetPipeline(graphics::PipelineHandle pipeline) noexcept override;
-    void SetVertexBuffer(graphics::BufferHandle buffer) noexcept override;
+    void SetVertexBuffers(uint32 firstStream,
+                          Span<const graphics::VertexBufferBinding> buffers) noexcept override;
+    void SetIndexBuffer(graphics::BufferHandle buffer, graphics::IndexFormat format,
+                        uint64 offset) noexcept override;
     void SetTexture(graphics::TextureHandle texture) noexcept override;
     void SetConstants(const graphics::DrawConstants& constants) noexcept override;
-    void Draw(uint32 vertexCount, uint32 firstVertex) noexcept override;
+    void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override;
+    void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override;
 
     void Record(Op op, uint64 value = 0) noexcept;
     void Defer() noexcept;

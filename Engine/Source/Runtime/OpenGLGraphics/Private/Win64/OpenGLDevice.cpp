@@ -46,6 +46,18 @@ constexpr GLenum GL_MINOR_VERSION_VALUE = 0x821C;
 constexpr GLenum GL_NUM_EXTENSIONS_VALUE = 0x821D;
 constexpr GLenum GL_MIRRORED_REPEAT_VALUE = 0x8370;
 constexpr GLenum GL_SYNC_GPU_COMMANDS_COMPLETE_VALUE = 0x9117;
+constexpr GLenum GL_HALF_FLOAT_VALUE = 0x140B;
+constexpr GLenum GL_UNSIGNED_INT_2_10_10_10_REV_VALUE = 0x8368;
+constexpr GLenum GL_ACTIVE_ATTRIBUTES_VALUE = 0x8B89;
+constexpr GLenum GL_FLOAT_VEC2_VALUE = 0x8B50;
+constexpr GLenum GL_FLOAT_VEC3_VALUE = 0x8B51;
+constexpr GLenum GL_FLOAT_VEC4_VALUE = 0x8B52;
+constexpr GLenum GL_INT_VEC2_VALUE = 0x8B53;
+constexpr GLenum GL_INT_VEC3_VALUE = 0x8B54;
+constexpr GLenum GL_INT_VEC4_VALUE = 0x8B55;
+constexpr GLenum GL_UNSIGNED_INT_VEC2_VALUE = 0x8DC6;
+constexpr GLenum GL_UNSIGNED_INT_VEC3_VALUE = 0x8DC7;
+constexpr GLenum GL_UNSIGNED_INT_VEC4_VALUE = 0x8DC8;
 constexpr GLenum GL_ALREADY_SIGNALED_VALUE = 0x911A;
 constexpr GLenum GL_TIMEOUT_EXPIRED_VALUE = 0x911B;
 constexpr GLenum GL_CONDITION_SATISFIED_VALUE = 0x911C;
@@ -114,6 +126,14 @@ struct GlFunctions {
                                             GLuint) = nullptr;
     void(APIENTRY* VertexArrayAttribBinding)(GLuint, GLuint, GLuint) = nullptr;
     void(APIENTRY* VertexArrayVertexBuffer)(GLuint, GLuint, GLuint, GLintptr, GLsizei) = nullptr;
+    void(APIENTRY* VertexArrayAttribIFormat)(GLuint, GLuint, GLint, GLenum, GLuint) = nullptr;
+    void(APIENTRY* VertexArrayBindingDivisor)(GLuint, GLuint, GLuint) = nullptr;
+    void(APIENTRY* VertexArrayElementBuffer)(GLuint, GLuint) = nullptr;
+    void(APIENTRY* DrawArraysInstanced)(GLenum, GLint, GLsizei, GLsizei) = nullptr;
+    void(APIENTRY* DrawElementsInstanced)(GLenum, GLsizei, GLenum, const void*, GLsizei) = nullptr;
+    void(APIENTRY* GetActiveAttrib)(GLuint, GLuint, GLsizei, GLsizei*, GLint*, GLenum*,
+                                    GLchar*) = nullptr;
+    GLint(APIENTRY* GetAttribLocation)(GLuint, const GLchar*) = nullptr;
     GLuint(APIENTRY* CreateShader)(GLenum) = nullptr;
     void(APIENTRY* ShaderSource)(GLuint, GLsizei, const GLchar* const*, const GLint*) = nullptr;
     void(APIENTRY* CompileShader)(GLuint) = nullptr;
@@ -180,6 +200,13 @@ bool LoadFunctions(GlFunctions& gl) noexcept {
            Bind(gl.VertexArrayAttribFormat, "glVertexArrayAttribFormat") &&
            Bind(gl.VertexArrayAttribBinding, "glVertexArrayAttribBinding") &&
            Bind(gl.VertexArrayVertexBuffer, "glVertexArrayVertexBuffer") &&
+           Bind(gl.VertexArrayAttribIFormat, "glVertexArrayAttribIFormat") &&
+           Bind(gl.VertexArrayBindingDivisor, "glVertexArrayBindingDivisor") &&
+           Bind(gl.VertexArrayElementBuffer, "glVertexArrayElementBuffer") &&
+           Bind(gl.DrawArraysInstanced, "glDrawArraysInstanced") &&
+           Bind(gl.DrawElementsInstanced, "glDrawElementsInstanced") &&
+           Bind(gl.GetActiveAttrib, "glGetActiveAttrib") &&
+           Bind(gl.GetAttribLocation, "glGetAttribLocation") &&
            Bind(gl.CreateShader, "glCreateShader") && Bind(gl.ShaderSource, "glShaderSource") &&
            Bind(gl.CompileShader, "glCompileShader") && Bind(gl.GetShaderiv, "glGetShaderiv") &&
            Bind(gl.GetShaderInfoLog, "glGetShaderInfoLog") &&
@@ -210,17 +237,122 @@ bool LoadFunctions(GlFunctions& gl) noexcept {
            Bind(gl.DeleteSync, "glDeleteSync");
 }
 
-GLint ComponentCount(VertexFormat format) noexcept {
+// 정점 원소 형식의 GL 속성 설정이다(RenderBase 10.4절 표, UE OpenGLVertexDeclaration.cpp:49–77).
+// 정규화 없는 정수 형식은 glVertexArrayAttribIFormat(integer = true)로 설정한다(float 변환을
+// 막는다). Bgra8Unorm은 ES 공통 API에 BGRA 정점 배열이 없어 supported = false다.
+struct GlAttribute {
+    GLenum type = 0;
+    GLint size = 0;
+    bool normalized = false;
+    bool integer = false;
+    bool supported = false;
+};
+
+GlAttribute AttributeFormat(VertexFormat format) noexcept {
     switch (format) {
+    case VertexFormat::Float1:
+        return {GL_FLOAT, 1, false, false, true};
     case VertexFormat::Float2:
-        return 2;
+        return {GL_FLOAT, 2, false, false, true};
     case VertexFormat::Float3:
-        return 3;
+        return {GL_FLOAT, 3, false, false, true};
     case VertexFormat::Float4:
-        return 4;
+        return {GL_FLOAT, 4, false, false, true};
+    case VertexFormat::Byte4Snorm:
+        return {GL_BYTE, 4, true, false, true};
+    case VertexFormat::UByte4:
+        return {GL_UNSIGNED_BYTE, 4, false, true, true};
+    case VertexFormat::UByte4Unorm:
+        return {GL_UNSIGNED_BYTE, 4, true, false, true};
+    case VertexFormat::Bgra8Unorm:
+        return {};
+    case VertexFormat::Short2:
+        return {GL_SHORT, 2, false, true, true};
+    case VertexFormat::Short4:
+        return {GL_SHORT, 4, false, true, true};
+    case VertexFormat::Short2Snorm:
+        return {GL_SHORT, 2, true, false, true};
+    case VertexFormat::Short4Snorm:
+        return {GL_SHORT, 4, true, false, true};
+    case VertexFormat::Half2:
+        return {GL_HALF_FLOAT_VALUE, 2, false, false, true};
+    case VertexFormat::Half4:
+        return {GL_HALF_FLOAT_VALUE, 4, false, false, true};
+    case VertexFormat::UShort2:
+        return {GL_UNSIGNED_SHORT, 2, false, true, true};
+    case VertexFormat::UShort4:
+        return {GL_UNSIGNED_SHORT, 4, false, true, true};
+    case VertexFormat::UShort2Unorm:
+        return {GL_UNSIGNED_SHORT, 2, true, false, true};
+    case VertexFormat::UShort4Unorm:
+        return {GL_UNSIGNED_SHORT, 4, true, false, true};
+    case VertexFormat::Rgb10A2Unorm:
+        return {GL_UNSIGNED_INT_2_10_10_10_REV_VALUE, 4, true, false, true};
+    case VertexFormat::UInt1:
+        return {GL_UNSIGNED_INT, 1, false, true, true};
     }
-    return 0;
+    return {};
 }
+
+// active attribute 타입의 셰이더 타입 계열이다. 받을 수 없는 타입(double 등)은 false다.
+bool ShaderTypeOf(GLenum type, VertexShaderType& out) noexcept {
+    switch (type) {
+    case GL_FLOAT:
+    case GL_FLOAT_VEC2_VALUE:
+    case GL_FLOAT_VEC3_VALUE:
+    case GL_FLOAT_VEC4_VALUE:
+        out = VertexShaderType::Float;
+        return true;
+    case GL_INT:
+    case GL_INT_VEC2_VALUE:
+    case GL_INT_VEC3_VALUE:
+    case GL_INT_VEC4_VALUE:
+        out = VertexShaderType::Int;
+        return true;
+    case GL_UNSIGNED_INT:
+    case GL_UNSIGNED_INT_VEC2_VALUE:
+    case GL_UNSIGNED_INT_VEC3_VALUE:
+    case GL_UNSIGNED_INT_VEC4_VALUE:
+        out = VertexShaderType::Uint;
+        return true;
+    default:
+        return false;
+    }
+}
+
+// 진단 문자열 조립 칸이다(셰이더 입력 대조 실패의 location·형식·셰이더 타입).
+class Diagnostic {
+public:
+    Diagnostic& Text(const char* text) noexcept {
+        while (*text != 0 && length_ + 1 < sizeof(buffer_)) {
+            buffer_[length_++] = *text++;
+        }
+        buffer_[length_] = 0;
+        return *this;
+    }
+
+    Diagnostic& Number(uint32 value) noexcept {
+        char digits[12] = {};
+        usize count = 0;
+        do {
+            digits[count++] = static_cast<char>('0' + value % 10);
+            value /= 10;
+        } while (value != 0);
+        while (count > 0 && length_ + 1 < sizeof(buffer_)) {
+            buffer_[length_++] = digits[--count];
+        }
+        buffer_[length_] = 0;
+        return *this;
+    }
+
+    const char* CStr() const noexcept {
+        return buffer_;
+    }
+
+private:
+    char buffer_[256] = {};
+    usize length_ = 0;
+};
 
 GLint MinFilter(Filter filter) noexcept {
     switch (filter) {
@@ -279,6 +411,7 @@ HWND CreateHiddenWindow() noexcept {
 
 struct BufferRecord {
     GLuint buffer = 0;
+    uint64 size = 0;
 };
 
 struct TextureRecord {
@@ -294,7 +427,9 @@ struct PipelineRecord {
     GLuint vertexArray = 0;
     GLint transformLocation = -1;
     GLint colorLocation = -1;
-    uint32 stride = 0;
+    // stream별 stride와 배치가 선언한 stream mask다.
+    uint32 strides[MaxVertexStreams] = {};
+    uint32 streamMask = 0;
     bool alphaBlend = false;
 };
 
@@ -685,13 +820,15 @@ public:
             return Result<BufferHandle>::Failure(owner.Error());
         }
 
-        if (desc.size == 0 || initial.Size() != desc.size) {
+        if (desc.size == 0 || initial.Size() != desc.size ||
+            (desc.usage != BufferUsage::Vertex && desc.usage != BufferUsage::Index)) {
             return Result<BufferHandle>::Failure(ErrorCode::InvalidArgument);
         }
         if (!MakeCurrentForResources()) {
             return FailWith<BufferHandle>("wglMakeCurrent failed");
         }
         BufferRecord record;
+        record.size = desc.size;
         gl_.CreateBuffers(1, &record.buffer);
         gl_.NamedBufferStorage(record.buffer, static_cast<GLsizeiptr>(desc.size), initial.Data(),
                                0);
@@ -783,9 +920,23 @@ public:
         }
 
         if (desc.vertex.glsl.ByteCount() == 0 || desc.pixel.glsl.ByteCount() == 0 ||
-            desc.vertexStride == 0 || desc.attributes.Size() == 0 || desc.attributes.Size() > 8 ||
             InternalFormat(desc.colorFormat) == 0) {
             return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
+        }
+        if (!ValidateVertexLayout(desc.layout)) {
+            auto failed = Fail("vertex layout is invalid (RenderBase 10.4 limits)");
+            (void)failed;
+            return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
+        }
+        for (const VertexAttribute& attribute : desc.layout.attributes) {
+            if (!AttributeFormat(attribute.format).supported) {
+                Diagnostic message;
+                message.Text("vertex format ")
+                    .Text(VertexFormatName(attribute.format))
+                    .Text(" is not supported by the OpenGL backend");
+                auto rejected = Reject(message, ErrorCode::Unsupported);
+                return Result<PipelineHandle>::Failure(rejected.Error());
+            }
         }
 
         if (!MakeCurrentForResources()) {
@@ -815,18 +966,38 @@ public:
             gl_.DeleteProgram(record.program);
             return Result<PipelineHandle>::Failure(ErrorCode::DependencyFailed);
         }
+        auto matched = MatchVertexInputs(record.program, desc.layout);
+        if (!matched) {
+            gl_.DeleteProgram(record.program);
+            return Result<PipelineHandle>::Failure(matched.Error());
+        }
         record.transformLocation = gl_.GetUniformLocation(record.program, "uTransform");
         record.colorLocation = gl_.GetUniformLocation(record.program, "uColor");
-        record.stride = desc.vertexStride;
         record.alphaBlend = desc.alphaBlend;
+        for (usize index = 0; index < desc.layout.streams.Size(); ++index) {
+            record.strides[index] = desc.layout.streams[index].stride;
+            record.streamMask |= 1u << index;
+        }
 
+        // 속성이 없는 배치도 core profile 그리기에는 정점 배열 객체가 있어야 한다.
         gl_.CreateVertexArrays(1, &record.vertexArray);
-        for (const VertexAttribute& attribute : desc.attributes) {
+        for (const VertexAttribute& attribute : desc.layout.attributes) {
+            const GlAttribute format = AttributeFormat(attribute.format);
             gl_.EnableVertexArrayAttrib(record.vertexArray, attribute.location);
-            gl_.VertexArrayAttribFormat(record.vertexArray, attribute.location,
-                                        ComponentCount(attribute.format), GL_FLOAT, GL_FALSE,
-                                        attribute.offset);
-            gl_.VertexArrayAttribBinding(record.vertexArray, attribute.location, 0);
+            if (format.integer) {
+                gl_.VertexArrayAttribIFormat(record.vertexArray, attribute.location, format.size,
+                                             format.type, attribute.offset);
+            } else {
+                gl_.VertexArrayAttribFormat(record.vertexArray, attribute.location, format.size,
+                                            format.type, format.normalized ? GL_TRUE : GL_FALSE,
+                                            attribute.offset);
+            }
+            gl_.VertexArrayAttribBinding(record.vertexArray, attribute.location, attribute.stream);
+        }
+        for (usize index = 0; index < desc.layout.streams.Size(); ++index) {
+            gl_.VertexArrayBindingDivisor(
+                record.vertexArray, static_cast<GLuint>(index),
+                desc.layout.streams[index].stepRate == VertexStepRate::Instance ? 1u : 0u);
         }
 
         auto added = pipelines_.TryAdd(record);
@@ -1281,6 +1452,104 @@ private:
         glDeleteTextures(1, &record.texture);
     }
 
+    Result<void> Reject(const Diagnostic& message, ErrorCode error) noexcept {
+        auto assigned = lastError_.TryAssign(
+            StringView(message.CStr(), platform::CStringLength(message.CStr())));
+        (void)assigned;
+        return Result<void>::Failure(error);
+    }
+
+    // 링크한 프로그램의 active attribute를 배치와 대조한다(RenderBase 10.4절 셰이더 입력 대조).
+    // gl_로 시작하는 내장 입력은 건너뛴다. 셰이더가 읽지 않는 속성은 허용한다.
+    Result<void> MatchVertexInputs(GLuint program, const VertexLayout& layout) noexcept {
+        GLint count = 0;
+        gl_.GetProgramiv(program, GL_ACTIVE_ATTRIBUTES_VALUE, &count);
+        for (GLint index = 0; index < count; ++index) {
+            char name[128] = {};
+            GLsizei length = 0;
+            GLint size = 0;
+            GLenum type = 0;
+            gl_.GetActiveAttrib(program, static_cast<GLuint>(index), sizeof(name), &length, &size,
+                                &type, name);
+            if (length >= 3 && name[0] == 'g' && name[1] == 'l' && name[2] == '_') {
+                continue;
+            }
+            const GLint location = gl_.GetAttribLocation(program, name);
+            Diagnostic message;
+            VertexShaderType shaderType = VertexShaderType::Float;
+            if (location < 0 || location >= static_cast<GLint>(MaxVertexAttributes) ||
+                !ShaderTypeOf(type, shaderType)) {
+                message.Text("vertex shader input ")
+                    .Text(name)
+                    .Text(" needs layout(location = 0-15) and a float, int or uint type");
+                return Reject(message, ErrorCode::InvalidArgument);
+            }
+            const VertexAttribute* attribute = nullptr;
+            for (const VertexAttribute& candidate : layout.attributes) {
+                if (candidate.location == static_cast<uint32>(location)) {
+                    attribute = &candidate;
+                }
+            }
+            if (attribute == nullptr) {
+                message.Text("vertex shader reads location ")
+                    .Number(static_cast<uint32>(location))
+                    .Text(" which the vertex layout does not provide");
+                return Reject(message, ErrorCode::InvalidArgument);
+            }
+            if (VertexFormatShaderType(attribute->format) != shaderType) {
+                message.Text("vertex input location ")
+                    .Number(static_cast<uint32>(location))
+                    .Text(": format ")
+                    .Text(VertexFormatName(attribute->format))
+                    .Text(" feeds ")
+                    .Text(VertexShaderTypeName(VertexFormatShaderType(attribute->format)))
+                    .Text(" but the shader reads ")
+                    .Text(VertexShaderTypeName(shaderType));
+                return Reject(message, ErrorCode::InvalidArgument);
+            }
+        }
+        return Result<void>::Success();
+    }
+
+    // 묶인 정점 버퍼 하나를 지금 파이프라인의 정점 배열에 건다.
+    void ApplyVertexBuffer(uint32 stream) noexcept {
+        const PipelineRecord* pipeline = pipelines_.Find(boundPipeline_.slot);
+        const BufferRecord* buffer = buffers_.Find(boundVertex_[stream].buffer.slot);
+        if (pipeline == nullptr || buffer == nullptr) {
+            return;
+        }
+        gl_.VertexArrayVertexBuffer(pipeline->vertexArray, stream, buffer->buffer,
+                                    static_cast<GLintptr>(boundVertex_[stream].offset),
+                                    static_cast<GLsizei>(pipeline->strides[stream]));
+    }
+
+    void ApplyIndexBuffer() noexcept {
+        const PipelineRecord* pipeline = pipelines_.Find(boundPipeline_.slot);
+        const BufferRecord* buffer = buffers_.Find(boundIndex_.buffer.slot);
+        if (pipeline != nullptr) {
+            gl_.VertexArrayElementBuffer(pipeline->vertexArray,
+                                         buffer != nullptr ? buffer->buffer : 0u);
+        }
+    }
+
+    // 묶인 파이프라인이 선언한 stream에 모두 유효한 버퍼가 있는지다.
+    const PipelineRecord* DrawablePipeline() const noexcept {
+        const PipelineRecord* pipeline = pipelines_.Find(boundPipeline_.slot);
+        if (pipeline == nullptr) {
+            return nullptr;
+        }
+        for (uint32 stream = 0; stream < MaxVertexStreams; ++stream) {
+            if ((pipeline->streamMask & (1u << stream)) == 0) {
+                continue;
+            }
+            const BufferRecord* buffer = buffers_.Find(boundVertex_[stream].buffer.slot);
+            if (buffer == nullptr || boundVertex_[stream].offset >= buffer->size) {
+                return nullptr;
+            }
+        }
+        return pipeline;
+    }
+
     void StoreLog(GLuint object, bool shader) noexcept {
         GLint length = 0;
         if (shader) {
@@ -1319,7 +1588,10 @@ private:
     void StartPass(uint32 width, uint32 height, const ClearColor& clear) noexcept {
         recording_ = true;
         boundPipeline_ = {};
-        bufferBound_ = false;
+        for (BoundVertexBuffer& bound : boundVertex_) {
+            bound = {};
+        }
+        boundIndex_ = {};
         constantsDirty_ = true;
         constants_ = DrawConstants{};
         glEnable(GL_FRAMEBUFFER_SRGB_VALUE);
@@ -1352,21 +1624,30 @@ private:
             glDisable(GL_BLEND);
         }
         constantsDirty_ = true;
-        // 앞서 묶은 정점 버퍼를 새 파이프라인의 정점 배열·간격으로 다시 묶는다.
-        if (bufferBound_) {
-            SetVertexBuffer(boundBuffer_);
+        // 앞서 묶은 정점·index 버퍼를 새 파이프라인의 정점 배열·간격으로 다시 묶는다.
+        for (uint32 stream = 0; stream < MaxVertexStreams; ++stream) {
+            if (!boundVertex_[stream].buffer.IsNull()) {
+                ApplyVertexBuffer(stream);
+            }
+        }
+        ApplyIndexBuffer();
+    }
+
+    void SetVertexBuffers(uint32 firstStream,
+                          Span<const VertexBufferBinding> buffers) noexcept override {
+        for (usize index = 0; index < buffers.Size(); ++index) {
+            const usize stream = firstStream + index;
+            if (stream >= MaxVertexStreams) {
+                return;
+            }
+            boundVertex_[stream] = {buffers[index].buffer, buffers[index].offset};
+            ApplyVertexBuffer(static_cast<uint32>(stream));
         }
     }
 
-    void SetVertexBuffer(BufferHandle handle) noexcept override {
-        const BufferRecord* record = buffers_.Find(handle.slot);
-        bufferBound_ = record != nullptr;
-        boundBuffer_ = handle;
-        const PipelineRecord* pipeline = pipelines_.Find(boundPipeline_.slot);
-        if (record != nullptr && pipeline != nullptr) {
-            gl_.VertexArrayVertexBuffer(pipeline->vertexArray, 0, record->buffer, 0,
-                                        static_cast<GLsizei>(pipeline->stride));
-        }
+    void SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64 offset) noexcept override {
+        boundIndex_ = {buffer, format, offset};
+        ApplyIndexBuffer();
     }
 
     void SetTexture(TextureHandle handle) noexcept override {
@@ -1384,21 +1665,45 @@ private:
         constantsDirty_ = true;
     }
 
-    void Draw(uint32 vertexCount, uint32 firstVertex) noexcept override {
-        const PipelineRecord* pipeline = pipelines_.Find(boundPipeline_.slot);
-        if (pipeline == nullptr || !bufferBound_ || !buffers_.IsValid(boundBuffer_.slot)) {
+    void ApplyConstants(const PipelineRecord& pipeline) noexcept {
+        if (constantsDirty_) {
+            // Rocks 행렬은 열 우선 저장이며 GLSL mat4도 열 우선이므로 전치하지 않는다.
+            gl_.ProgramUniformMatrix4fv(pipeline.program, pipeline.transformLocation, 1, GL_FALSE,
+                                        constants_.transform);
+            gl_.ProgramUniform4fv(pipeline.program, pipeline.colorLocation, 1, constants_.color);
+            constantsDirty_ = false;
+        }
+    }
+
+    void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override {
+        const PipelineRecord* pipeline = DrawablePipeline();
+        if (pipeline == nullptr) {
             ++ignoredDraws_;
             return;
         }
-        if (constantsDirty_) {
-            // Rocks 행렬은 열 우선 저장이며 GLSL mat4도 열 우선이므로 전치하지 않는다.
-            gl_.ProgramUniformMatrix4fv(pipeline->program, pipeline->transformLocation, 1, GL_FALSE,
-                                        constants_.transform);
-            gl_.ProgramUniform4fv(pipeline->program, pipeline->colorLocation, 1, constants_.color);
-            constantsDirty_ = false;
+        ApplyConstants(*pipeline);
+        // base instance는 0으로 고정한다(RenderBase 10.4절).
+        gl_.DrawArraysInstanced(GL_TRIANGLES, static_cast<GLint>(firstVertex),
+                                static_cast<GLsizei>(vertexCount),
+                                static_cast<GLsizei>(instanceCount));
+    }
+
+    void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override {
+        const PipelineRecord* pipeline = DrawablePipeline();
+        const BufferRecord* index = buffers_.Find(boundIndex_.buffer.slot);
+        if (pipeline == nullptr || index == nullptr || boundIndex_.offset >= index->size) {
+            ++ignoredDraws_;
+            return;
         }
-        glDrawArrays(GL_TRIANGLES, static_cast<GLint>(firstVertex),
-                     static_cast<GLsizei>(vertexCount));
+        ApplyConstants(*pipeline);
+        const uint64 start = boundIndex_.offset +
+                             static_cast<uint64>(firstIndex) * IndexFormatSize(boundIndex_.format);
+        // base vertex·base instance는 0으로 고정한다.
+        gl_.DrawElementsInstanced(GL_TRIANGLES, static_cast<GLsizei>(indexCount),
+                                  boundIndex_.format == IndexFormat::UInt16 ? GL_UNSIGNED_SHORT
+                                                                            : GL_UNSIGNED_INT,
+                                  reinterpret_cast<const void*>(static_cast<uptr>(start)),
+                                  static_cast<GLsizei>(instanceCount));
     }
 
     String adapterName_;
@@ -1425,7 +1730,18 @@ private:
     TextureHandle white_;
     SwapChainHandle presentTarget_;
     PipelineHandle boundPipeline_;
-    BufferHandle boundBuffer_;
+    // 기록 중 묶인 정점·index 버퍼다(파이프라인을 바꾸면 그 정점 배열에 다시 묶는다).
+    struct BoundVertexBuffer {
+        BufferHandle buffer;
+        uint64 offset = 0;
+    };
+    struct BoundIndexBuffer {
+        BufferHandle buffer;
+        IndexFormat format = IndexFormat::UInt16;
+        uint64 offset = 0;
+    };
+    BoundVertexBuffer boundVertex_[MaxVertexStreams];
+    BoundIndexBuffer boundIndex_;
     DrawConstants constants_;
     uint64 ignoredDraws_ = 0;
     uint64 validationErrors_ = 0;
@@ -1435,7 +1751,6 @@ private:
     FenceTimeline timeline_;
     DeviceOwnership ownership_;
     bool recording_ = false;
-    bool bufferBound_ = false;
     bool constantsDirty_ = false;
     bool validation_ = false;
 };
