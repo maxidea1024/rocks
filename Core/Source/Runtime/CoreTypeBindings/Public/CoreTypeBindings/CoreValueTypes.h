@@ -140,13 +140,14 @@ struct IntVec3Binding {
 };
 
 // 이동(double)·회전(float quaternion)·축별 scale(float)이다. 멤버는 위 미러들이 결합한 실제
-// 타입이다. 비Atomic(멤버 단위 — UE FTransform과 같다)이다. 멤버 SaveGame 표시는 필드 플래그
-// 단계(리플렉션 B9h1)가 더한다.
+// 타입이다. 비Atomic(멤버 단위 — UE FTransform과 같다)이다. 세이브게임 포함 필터(includeFlags =
+// SaveGame)는 멤버마다 자기 플래그를 보므로 멤버에 SaveGame을 단다(UE FTransform 멤버와 같다 —
+// 리플렉션 B9h1). Atomic 미러의 멤버는 통째 단위라 표시하지 않는다.
 ROCKS_STRUCT(Binds = "rocks::Transform", Version = 1)
 struct TransformBinding {
-    ROCKS_PROPERTY() Vec3d translation;
-    ROCKS_PROPERTY() Quat rotation;
-    ROCKS_PROPERTY() Vec3 scale = Vec3::One();
+    ROCKS_PROPERTY(SaveGame) Vec3d translation;
+    ROCKS_PROPERTY(SaveGame) Quat rotation;
+    ROCKS_PROPERTY(SaveGame) Vec3 scale = Vec3::One();
 };
 
 // 모든 성분이 float인 TRS(rocks::Transform3<float>)다. 멤버 순서는 Core 선언 순서

@@ -22,6 +22,17 @@ internal sealed record PropertySpec(bool Transient, bool ReadOnly, string Catego
 
     public bool Required { get; init; }
 
+    // 필드 플래그 지정자다(리플렉션 B9h1 — Docs/Design/ReflectionExtensions.ko.md 9.1절): 복제 저장·복사 텍스트에서 뺀다
+    // (DuplicateTransient), PIE가 아닌 복제·텍스트에서 뺀다(NonPIEDuplicateTransient), 세이브게임 저장 포함 필터(SaveGame — 멤버마다
+    // 표시), 복사 텍스트에서 뺀다(TextExportTransient).
+    public bool DuplicateTransient { get; init; }
+
+    public bool NonPIEDuplicateTransient { get; init; }
+
+    public bool SaveGame { get; init; }
+
+    public bool TextExportTransient { get; init; }
+
     public string ToolName { get; init; } = "";
 
     public uint MaxElements { get; init; }
@@ -98,7 +109,8 @@ internal static class Specifiers
         Dictionary<string, Value?> values = Parse(text, symbol);
         foreach ((string key, Value? value) in values)
         {
-            bool flag = key is "Transient" or "ReadOnly" or "EditorOnly" or "Required";
+            bool flag = key is "Transient" or "ReadOnly" or "EditorOnly" or "Required" or "DuplicateTransient" or "NonPIEDuplicateTransient" or
+                "SaveGame" or "TextExportTransient";
             bool label = key is "Category" or "DisplayName" or "Name";
             bool number = key is "MaxElements";
             if ((!flag && !label && !number) || (flag && value is not null) || (label && value?.Text is null) ||
@@ -120,6 +132,10 @@ internal static class Specifiers
         {
             EditorOnly = values.ContainsKey("EditorOnly"),
             Required = values.ContainsKey("Required"),
+            DuplicateTransient = values.ContainsKey("DuplicateTransient"),
+            NonPIEDuplicateTransient = values.ContainsKey("NonPIEDuplicateTransient"),
+            SaveGame = values.ContainsKey("SaveGame"),
+            TextExportTransient = values.ContainsKey("TextExportTransient"),
             // 필드 이름과 같은 Name은 지정하지 않은 것과 같다(모듈 사이 상속 필드의 도구 이름이 같은 바이트가 되게).
             ToolName = toolName == fieldName ? "" : toolName,
             MaxElements = values.GetValueOrDefault("MaxElements")?.Number ?? 0

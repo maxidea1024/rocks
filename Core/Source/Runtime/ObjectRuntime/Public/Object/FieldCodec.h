@@ -30,6 +30,13 @@ public:
         return (effectiveFlags & policy_.excludedFlags) != 0;
     }
 
+    // 지금 위치(필드·struct 멤버)가 이 데이터에 없어야 하는지다: 유효 플래그의
+    // 제외(IsExcluded)이거나 포함 필터 밖(IsOutsideInclude — policy.includeFlags, 리플렉션
+    // B9h1)이다. 있으면 직렬화기·struct codec이 InvalidArgument로 거부한다.
+    bool ExcludesCurrent() const noexcept {
+        return IsExcluded(EffectiveFlags()) || IsOutsideInclude(policy_.includeFlags);
+    }
+
     // 지금 위치(Current())의 필드·멤버가 저장 데이터에 있음을 알린다. 복원 1단계가 필드·멤버마다 그
     // 값을 검증한 뒤 한 번 부른다(객체 Record는 직렬화기, struct 멤버는 DecodeStructRecord).
     // 기록하지 않는 단계(복원 2단계)나 위치 밖에서는 아무것도 하지 않는다. A5 override 집합("파일에

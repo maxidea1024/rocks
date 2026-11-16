@@ -30,7 +30,16 @@ constexpr uint32 KnownClassFlags =
 
 constexpr uint32 KnownFieldFlags =
     static_cast<uint32>(FieldFlags::Transient) | static_cast<uint32>(FieldFlags::ReadOnly) |
-    static_cast<uint32>(FieldFlags::EditorOnly) | static_cast<uint32>(FieldFlags::Required);
+    static_cast<uint32>(FieldFlags::EditorOnly) | static_cast<uint32>(FieldFlags::Required) |
+    static_cast<uint32>(FieldFlags::DuplicateTransient) |
+    static_cast<uint32>(FieldFlags::NonPIEDuplicateTransient) |
+    static_cast<uint32>(FieldFlags::SaveGame) |
+    static_cast<uint32>(FieldFlags::TextExportTransient);
+
+// 복제 제외 플래그다. Required와 함께 쓰면 InvalidArgument다(리플렉션 B9h1 — 복제본이 늘 null을
+// 가져 패키지 저장의 rejectMissingRequired가 실패한다).
+constexpr uint32 DuplicateExcludedFlags = static_cast<uint32>(FieldFlags::DuplicateTransient) |
+                                          static_cast<uint32>(FieldFlags::NonPIEDuplicateTransient);
 
 bool SameBytes(Span<const char> left, Span<const char> right) noexcept {
     if (left.Size() != right.Size()) {
@@ -148,6 +157,8 @@ Result<void> ValidateFieldList(Span<const FieldSchema> fields, bool structMember
         // 종류이고 Optional 내부 종류는 모두 Required를 받지 않으므로 같은 판정이 거부한다(성질
         // 표의 불변식 — Meta/TypeSchema.h static_assert). 도구 이름은 비어 있거나 ASCII 식별자다.
         if (field.id == Guid{} || (field.flags & ~KnownFieldFlags) != 0 ||
+            (HasFlag(field.flags, FieldFlags::Required) &&
+             (field.flags & DuplicateExcludedFlags) != 0) ||
             (HasFlag(field.flags, FieldFlags::Required) &&
              !ValueKindAcceptsRequired(target.kind)) ||
             (field.kind != FieldKind::Value && field.kind != FieldKind::ObjectReference) ||

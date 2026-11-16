@@ -568,6 +568,14 @@ internal static partial class SchemaValidator
                         "Remove Required or change the field to ObjectRef, SoftObjectRef, ClassRef, ObjectRefArray, ObjectRefMap, Array<SoftObjectRef>, Array<ClassRef>, a static array of ObjectRef/SoftObjectRef/ClassRef, OrderedSet<SoftObjectRef/ClassRef> or OrderedMap<K, SoftObjectRef/ClassRef>; a WeakRef becomes null when its target dies, so it cannot be Required.").At(field.Site);
                 }
 
+                // Required와 복제 제외 플래그는 함께 쓸 수 없다(리플렉션 B9h1 — 복제본이 늘 null을 가져 패키지 저장의 rejectMissingRequired가
+                // 실패한다).
+                if (field.Spec.Required && (field.Spec.DuplicateTransient || field.Spec.NonPIEDuplicateTransient))
+                {
+                    throw new MetadataException($"{field.Owner}::{field.Name}: Required cannot be combined with DuplicateTransient or NonPIEDuplicateTransient", "RMC2202",
+                        "A duplicate never carries this field, so a Required check on the duplicate would always fail; remove Required or the duplicate-transient specifier.").At(field.Site);
+                }
+
                 if (!field.IsCounted && field.Spec.MaxElements != 0)
                 {
                     throw new MetadataException($"{field.Owner}::{field.Name}: MaxElements applies only to array, map and set fields", "RMC2202",

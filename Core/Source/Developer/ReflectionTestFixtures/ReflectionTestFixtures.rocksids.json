@@ -734,6 +734,125 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::FlagAtom::a",
+      "id": "ad0cabcf4fde4b9481de0423966a616b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::FlagAtom::b",
+      "id": "6f6254dedb224e8a8c519e0cc981dada",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::FlagHolder::atom",
+      "id": "2b8a103bef8d42de859e175bd4f5b9a7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::FlagHolder::duplicateOnly",
+      "id": "7df2376cb37643a5b617602053706263",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::FlagHolder::instance",
+      "id": "3586fbe415c24e43933588c948f672b7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::FlagHolder::plain",
+      "id": "83badc7688a04749bf2608710235f9c9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::FlagHolder::pose",
+      "id": "ff22ad6dfbff40feb35e556ad6e9f216",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::FlagHolder::score",
+      "id": "fb13323a48e549b8a700f0fa54b6bc46",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::FlagHolder::slot",
+      "id": "b43f4d378c314f45a4e2294147b1f480",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::FlagHolder::slots",
+      "id": "aa3dca5844cd4b7c96cc6d0dc62220d3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::FlagHolder::source",
+      "id": "488d5d6952104789a2425a7febfe678c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::FlagHolder::textOnly",
+      "id": "c30e5e0e64ce45fb89e28317d4fc7341",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::FlagSaveAtom::atom",
+      "id": "449ffb3733a645fdb7752e5bc8f5cf4b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::FlagSaveList::slots",
+      "id": "267ba5f9b5e7417a925367007d494338",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::FlagSaveSlot::slot",
+      "id": "b19a0fa24bb84e0086b62e1d9b010593",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::FlagSlot::dropped",
+      "id": "18ea8e6bc2054eb5b8ad309444bae16b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::FlagSlot::kept",
+      "id": "534ff5aed1ce46b3a89df0e05881a3c9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::IntegerWidthFields::byteOffset",
       "id": "d89d0895aa644158bfd0841188524501",
       "aliases": [],
@@ -2187,6 +2306,48 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::FixedRequired",
       "id": "5498a1ba31454b3f927ca772124eae7d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::FlagAtom",
+      "id": "00af462ba9f5486cbc4ad324403b0ce2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::FlagHolder",
+      "id": "ba6bd7016b0a443099a0d67bebbbfb72",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::FlagSaveAtom",
+      "id": "82ac040aba29443bbe3a87e318866bbc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::FlagSaveList",
+      "id": "ab0b783f1219476ca8d810ff978e5cef",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::FlagSaveSlot",
+      "id": "eaebb41cf48d42d88cea62952cf7b8bb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::FlagSlot",
+      "id": "309117d3591a4da3bc1ffecba1814fef",
       "aliases": [],
       "retired": false
     },

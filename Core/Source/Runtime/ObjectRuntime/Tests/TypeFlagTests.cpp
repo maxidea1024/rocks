@@ -63,7 +63,9 @@ TEST(TypeFlags_KnownFlagsAreAcceptedAndUnknownBitsRejected) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
     CHECK(RegisterBase(types, {}, 4u).Error() == ErrorCode::InvalidArgument);
-    FieldSchema unknown[] = {Field(1, "value", FieldKind::Value, 16u)};
+    // 알려진 마지막 필드 플래그(TextExportTransient 128 — 리플렉션 B9h1) 다음 비트다.
+    FieldSchema unknown[] = {
+        Field(1, "value", FieldKind::Value, Flag(FieldFlags::TextExportTransient) << 1)};
     CHECK(RegisterBase(types, Span<const FieldSchema>(unknown, 1)).Error() ==
           ErrorCode::InvalidArgument);
 

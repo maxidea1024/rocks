@@ -159,8 +159,11 @@ internal sealed class FieldModel
     // ObjectRefMap<K, T> 필드다(Map 필드이고 값이 강한 참조 — 리플렉션 B9f4, Docs/Design/ReflectionExtensions.ko.md 7.4절).
     public bool IsObjectRefMap => IsMap && ElementKind == "ObjectReference";
 
-    // FieldFlags 비트: Transient 1, ReadOnly 2, EditorOnly 4, Required 8.
-    public uint Flags => (Spec.Transient ? 1u : 0u) | (Spec.ReadOnly ? 2u : 0u) | (Spec.EditorOnly ? 4u : 0u) | (Spec.Required ? 8u : 0u);
+    // FieldFlags 비트: Transient 1, ReadOnly 2, EditorOnly 4, Required 8, DuplicateTransient 16, NonPIEDuplicateTransient 32, SaveGame 64,
+    // TextExportTransient 128(리플렉션 B9h1).
+    public uint Flags => (Spec.Transient ? 1u : 0u) | (Spec.ReadOnly ? 2u : 0u) | (Spec.EditorOnly ? 4u : 0u) | (Spec.Required ? 8u : 0u) |
+        (Spec.DuplicateTransient ? 16u : 0u) | (Spec.NonPIEDuplicateTransient ? 32u : 0u) | (Spec.SaveGame ? 64u : 0u) |
+        (Spec.TextExportTransient ? 128u : 0u);
 
     // 도구 이름(지정하지 않았으면 필드 이름)이다. 상속 포함 대소문자 무시로 유일해야 한다(RMC2203).
     public string EffectiveToolName => Spec.ToolName.Length != 0 ? Spec.ToolName : Name;

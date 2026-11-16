@@ -664,9 +664,12 @@ Result<void> DecodeNode(Allocator& allocator, TypeRegistry& types, LoadNode& nod
             return Result<void>::Failure(ErrorCode::Unsupported);
         }
 
-        // 이 데이터에 없어야 하는 플래그(쿠킹 로드의 EditorOnly)의 필드가 있으면 거부한다(최상위
-        // 필드의 유효 플래그는 필드 플래그다 — struct 안 멤버는 DecodeStructRecord가 본다).
-        if (context.IsExcluded(schema.fields[schemaIndex].flags)) {
+        // 이 데이터에 없어야 하는 플래그(쿠킹 로드의 EditorOnly)의 필드와 포함 필터(includeFlags —
+        // 리플렉션 B9h1) 밖의 필드가 있으면 거부한다(최상위 필드의 유효 플래그는 필드 플래그다 —
+        // struct 안 멤버는 DecodeStructRecord가 본다).
+        if (context.IsExcluded(schema.fields[schemaIndex].flags) ||
+            (context.Policy().includeFlags != 0 &&
+             (schema.fields[schemaIndex].flags & context.Policy().includeFlags) == 0)) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 

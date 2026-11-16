@@ -645,6 +645,16 @@ A5 `Downscale` 플랫폼별 값(AS 451행 계약):
 - **Required와의 조합**: Required와 DuplicateTransient·NonPIEDuplicateTransient를 함께 쓰면 RMC2202다. 복제본이 늘 null을 가져 패키지 저장(`rejectMissingRequired`)이 실패하기 때문이다.
 - 2c Required 검사는 로드 정책의 excludedFlags에 든 필드를 지금처럼 뺀다(GraphRequired.cpp:28).
 
+구현(B9h1)에서 정한 점:
+
+- `FieldFlags`에 DuplicateTransient 16·NonPIEDuplicateTransient 32·SaveGame 64·TextExportTransient 128을 더했다(TypeRegistry `KnownFieldFlags`, MetaCompiler 지정자·`FieldModel.Flags`, descriptor `flags`의 같은 이름). 네 플래그는 멤버로 전파하지 않는다(`PropagateFieldFlags`의 상속 집합은 EditorOnly·Transient·ReadOnly 그대로 — 제외된 struct 필드는 멤버까지 통째로 빠지고, 포함 필터는 멤버마다 자기 플래그를 본다).
+- Required + DuplicateTransient·NonPIEDuplicateTransient는 MetaCompiler RMC2202에 더해 TypeRegistry 등록도 InvalidArgument로 거부한다(수동 등록·import descriptor도 같은 규칙 — descriptor 읽기는 RMC1000).
+- 포함 필터: `FieldEncodePolicy::includeFlags`·`FieldDecodePolicy::includeFlags`(0이면 끔). 판정은 `FieldCodecContext::IsOutsideInclude(includeFlags)` 하나다 — 지금 위치의 자기 플래그(`field.flags`)에 그 비트가 없으면 밖이고, 조상 위치의 struct가 Atomic이면 밖이 아니다. 저장·복원 문맥의 `ExcludesCurrent()`(= 유효 플래그 제외 || 포함 필터 밖)를 직렬화기(GraphSave·GraphRequired 최상위 필드)와 struct codec(EncodeStructRecord·DecodeStructRecord — 배열 원소·Map 값·Optional 내부의 struct 멤버도 같은 길)이 쓴다. 복원 최상위 필드는 위치에 들어가기 전에 같은 규칙(포함 비트가 없으면 InvalidArgument)을 본다(GraphLoad).
+- 2c Required 검사 문맥(`RequiredCheckContext`)의 정책에 로드 정책의 includeFlags를 넘겨 포함 필터 밖의 최상위 필드·멤버를 검사하지 않는다.
+- `TransformBinding`(비Atomic) 멤버 셋에 SaveGame을 달았다. Atomic 미러 16종은 멤버를 표시하지 않는다(통째).
+- 복제·텍스트 호출자 API는 더하지 않았다: 복제는 호출자가 `excludedFlags`를 고르고(A2 `asset-duplicate`·PIE), TextExportTransient·NonPIE 텍스트 제외는 텍스트 codec(B9i)이 쓴다. override 집합 기록의 경로 제외는 A5가 그 기록을 만들 때 같은 판정을 쓴다.
+- 시험: ObjectSerialization `FieldFlagGraph_SchemaCarriesFlagsAndRegistryRejectsRequiredDuplicate`·`FieldFlagGraph_DuplicatePoliciesChooseSavedFields`·`FieldFlagGraph_IncludeFlagsSaveAndLoadPerMember`·`FieldFlagGraph_RequiredCheckSkipsFieldsOutsideInclude`, ToolTests `Meta.FieldFlagSpecifiersReachDescriptorAndSchema`·`Meta.RequiredCannotBeDuplicateTransient`, fixture ReflectionTestFixtures/FieldFlagFixture.h.
+
 ### 9.2 클래스 플래그(B9h2)
 
 | 지정자 | 비트·칸 | 의미 |

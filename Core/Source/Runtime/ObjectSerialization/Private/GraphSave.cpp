@@ -281,7 +281,7 @@ Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
                          type.FieldStruct(fieldIndex), FieldCodecFrame::NoIndex,
                          type.FieldKeyEnum(fieldIndex));
         // Transient 참조는 GC 수명에는 참여하지만 저장 그래프에는 참여하지 않는다.
-        if (context.IsExcluded(context.EffectiveFlags())) {
+        if (context.ExcludesCurrent()) {
             continue;
         }
 

@@ -201,6 +201,17 @@ internal static class ModuleDescriptor
                 json.WriteStringValue("Required");
             }
 
+            // 필드 플래그(리플렉션 B9h1)는 비트 순서로 적는다.
+            foreach ((bool set, string flag) in new[] { (field.Spec.DuplicateTransient, "DuplicateTransient"),
+                (field.Spec.NonPIEDuplicateTransient, "NonPIEDuplicateTransient"), (field.Spec.SaveGame, "SaveGame"),
+                (field.Spec.TextExportTransient, "TextExportTransient") })
+            {
+                if (set)
+                {
+                    json.WriteStringValue(flag);
+                }
+            }
+
             json.WriteEndArray();
             json.WriteString("toolName", field.EffectiveToolName);
             json.WriteString("category", field.Spec.Category);
@@ -568,7 +579,8 @@ internal static class ModuleDescriptor
                 }
 
                 string[] fieldFlags = field.GetProperty("flags").EnumerateArray().Select(flag => flag.GetString() ?? "").ToArray();
-                if (fieldFlags.Any(flag => flag is not ("Transient" or "ReadOnly" or "EditorOnly" or "Required")) ||
+                if (fieldFlags.Any(flag => flag is not ("Transient" or "ReadOnly" or "EditorOnly" or "Required" or "DuplicateTransient" or
+                        "NonPIEDuplicateTransient" or "SaveGame" or "TextExportTransient")) ||
                     fieldFlags.Distinct(StringComparer.Ordinal).Count() != fieldFlags.Length)
                 {
                     throw Invalid("unknown or duplicate field flag");
@@ -579,6 +591,13 @@ internal static class ModuleDescriptor
                 if (!ValueKindTable.Has(targetKind, ValueKindProperty.AcceptsRequired) && fieldFlags.Contains("Required", StringComparer.Ordinal))
                 {
                     throw Invalid("Required on a field that is not an object, soft object or class reference or an array of them");
+                }
+
+                // Required와 복제 제외 플래그의 조합은 원본 선언의 RMC2202와 같이 거부한다(리플렉션 B9h1).
+                if (fieldFlags.Contains("Required", StringComparer.Ordinal) &&
+                    (fieldFlags.Contains("DuplicateTransient", StringComparer.Ordinal) || fieldFlags.Contains("NonPIEDuplicateTransient", StringComparer.Ordinal)))
+                {
+                    throw Invalid("Required combined with DuplicateTransient or NonPIEDuplicateTransient");
                 }
 
                 string? referenceId = null;
@@ -612,6 +631,10 @@ internal static class ModuleDescriptor
                     {
                         EditorOnly = fieldFlags.Contains("EditorOnly"),
                         Required = fieldFlags.Contains("Required"),
+                        DuplicateTransient = fieldFlags.Contains("DuplicateTransient"),
+                        NonPIEDuplicateTransient = fieldFlags.Contains("NonPIEDuplicateTransient"),
+                        SaveGame = fieldFlags.Contains("SaveGame"),
+                        TextExportTransient = fieldFlags.Contains("TextExportTransient"),
                         ToolName = toolName == fieldName ? "" : toolName,
                         // 정적 배열의 maxElements는 지정자가 아니라 N이다(리플렉션 B9g).
                         MaxElements = fixedArray ? 0 : maxElements

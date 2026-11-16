@@ -101,6 +101,9 @@ public:
 | `ReadOnly` | PROPERTY | 일반 write는 거부하고 생성·복원의 staged write만 허용한다. |
 | `EditorOnly` | PROPERTY | 플래그만 단다(항상 컴파일). 쿠킹 데이터에서 빼는 것은 그래프 저장 정책 `FieldEncodePolicy::excludedFlags`(쿠킹 = EditorOnly — 그 필드를 저장하지 않는다)이고, 쿠킹 로드는 `FieldDecodePolicy::excludedFlags`로 그런 필드가 있으면 InvalidArgument다([ObjectFoundations](../Design/ObjectFoundations.ko.md) 4절 — 정책을 주지 않으면 보통 필드처럼 저장·복원한다). |
 | `Required` | PROPERTY | `ObjectRef<T>`·`SoftObjectRef<T>`·`ClassRef<Base>` 필드와 그 원소의 배열(`ObjectRefArray<T>`·`Array<SoftObjectRef<T>>`·`Array<ClassRef<Base>>` — 원소마다 non-null), 그 원소의 Set(`OrderedSet<SoftObjectRef<T>>`·`OrderedSet<ClassRef<Base>>` — 원소마다)과 그 값의 Map(`OrderedMap<K, SoftObjectRef<T>>`·`OrderedMap<K, ClassRef<Base>>`·`ObjectRefMap<K, T>` — 값마다, 키에는 Required가 없다 — 리플렉션 B9f2·B9f4)에만 쓴다(그 밖은 RMC2202 — `WeakRef<T>`도 대상이 죽으면 저절로 null이 되므로 거부한다). 패키지 저장·쿠킹이 null을 거부한다(A1). 로드는 거부하지 않는다. |
+| `DuplicateTransient`·`NonPIEDuplicateTransient` | PROPERTY | `FieldFlags` 16·32(리플렉션 B9h1). 복제 저장에서 뺀다 — 복제 호출자가 `excludedFlags`로 고른다(에셋 복제 = 둘 다, PIE 복제 = DuplicateTransient). `Required`와 함께 쓰면 RMC2202(복제본이 늘 null이다 — TypeRegistry 등록도 InvalidArgument). |
+| `SaveGame` | PROPERTY | `FieldFlags` 64(리플렉션 B9h1). 세이브게임 저장의 포함 필터 `includeFlags`(`FieldEncodePolicy`·`FieldDecodePolicy`)가 필드·struct 멤버마다 자기 플래그로 본다(UE처럼 멤버마다 표시 — Atomic struct 안의 멤버는 통째라 보지 않는다). |
+| `TextExportTransient` | PROPERTY | `FieldFlags` 128(리플렉션 B9h1). 복사 텍스트에서 뺀다(텍스트 codec B9i가 쓴다). |
 | `Name="…"` | PROPERTY | 도구·명령행 이름(`FieldSchema::toolName`). ASCII 식별자이며, 없으면 C++ 필드 이름이다. 상속 필드를 포함해 대소문자 무시로 유일해야 한다(RMC2203). 직렬화는 필드 ID를 쓰므로 이름과 무관하다. |
 | `Category="…"`·`DisplayName="…"` | PROPERTY | 표시용 UTF-8 문자열(아래). |
 | `MaxElements=N` | PROPERTY | 배열·Map·Set 필드의 원소 수 상한(그래프 저장과 B6 경로 쓰기에서 건다 — 로드와 Registry 변경 API는 걸지 않는다, Map·Set은 리플렉션 B9f2). 1..1,048,576(넘으면 RMC2000), 없으면 65,536. 배열·Map·Set이 아닌 필드는 RMC2202(종류를 먼저 판정한다). |
