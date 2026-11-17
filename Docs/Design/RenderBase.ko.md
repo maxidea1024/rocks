@@ -149,7 +149,7 @@ ID는 이 문서가 붙인다. CP는 Core 선행, GX는 Graphics 확장, RB는 R
 | GX12 | transient heap·aliasing barrier | 후속 | GX5 | RG5 | L | 4.4절 |
 | GX13 | subpass·framebuffer fetch(tiled GPU 병합용) | 후속 | GX4·GX5 | RG3 병합 | M | 4.4절 |
 | RB1 | 렌더 lane·프레임 slot·전달 타입 등록·완료 통지·`RenderHandle` 예약 | 구현(설정 snapshot 포함, 12절) | CP1·CP6·GX7·GX10·GX11 | RB2–RB7 | M | 5절 |
-| RG1 | 최소 렌더 그래프 | 구현(명시 접근 목록 경로. 파라미터 구조체 경로는 RB4·SH2 뒤, (g)는 D3D12·WARP·D3D11·OpenGL) | RB7·GX5·CP3(RB4·GX1·GX2·GX4는 범위를 줄여 앞당김) | RG2 | L | 7·8절 |
+| RG1 | 최소 렌더 그래프 | 구현(명시 접근 목록 경로. 파라미터 구조체 경로는 RB4·SH2 뒤, (g)는 D3D12·D3D11(각 WARP 포함)·OpenGL ES 두 context) | RB7·GX5·CP3(RB4·GX1·GX2·GX4는 범위를 줄여 앞당김) | RG2 | L | 7·8절 |
 
 ### 4.3 Core 선행 작업
 
@@ -471,7 +471,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
   - (d) 구현·시험: 동치를 "전이를 뺀 장치 호출 열이 같고, 두 모드 모두 각 pass가 맞는 상태를 보며(기록 장치 검증 오류 0), 최종 상태가 같다"로 정했다. 읽기 병합은 앞을 내다봐야 하므로 즉시 모드는 전이가 더 많다. 병합이 없는 그래프는 전이까지 같다.
   - (e) 구현·시험: 생산 전 읽기, 한 pass 안 상충 접근, Raster pass의 UAV, Retire된 자원 import(lease 실패), 그 밖에 생산 전 export·다른 그래프 handle·pass 종류 위반.
   - (f) 구현·시험: 풀 축출은 마지막 사용 fence가 끝나기 전에는 일어나지 않는다(기록 장치 `HoldCompletions`·`CompleteAll` gate).
-  - (g) D3D12(하드웨어·WARP)·D3D11·OpenGL에서 Sandbox self-test 픽셀 대조(그래프 텍스처 → SRV 합성, culling, history export → import)와 검증 오류 0(D3D12는 전이 before 불일치 포함). Vulkan·GLES는 그 backend가 들어온 뒤다(OpenGL은 지금 데스크톱 GL backend이며 GLES 전환은 다른 작업이다).
+  - (g) D3D12(하드웨어·WARP)·D3D11(하드웨어·WARP)·OpenGL ES 미리보기(ES 3.2 profile·GL 4.3 core context)에서 Sandbox self-test 픽셀 대조(그래프 텍스처 → SRV 합성, culling, history export → import)와 검증 오류 0(D3D12는 전이 before 불일치 포함). Vulkan은 그 backend가 들어온 뒤다.
 - 스펙과 다르게 한 점:
   - 의존 선언은 파라미터 구조체가 아니라 명시 접근 목록이다(위). 결정 R4는 그대로이고 수집기가 같은 목록을 만든다.
   - GX5는 최소 범위다: begin·end 분리 전이와 pipe가 없고, Raster pass 렌더 타깃 전이(attachment)는 장치 `BeginOffscreen`·`BeginFrame`이 낸다(GX4 attachment 시작이 기록 안으로 들어오면 그래프가 `Transition`으로 낸다). 만든 자원의 첫 전이 before는 `Unknown`(내용 불필요, 장치 추적 상태)이다.
@@ -484,7 +484,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
   - `GraphSharedData`(7.3절)는 넣지 않았다.
   - GPU 계측: 그래프의 장치 기록 전체를 GPU 프레임 하나로 묶는다(첫 기록에서 `GpuTrace::BeginFrame`, 마지막 기록에서 `EndFrame`). pass마다 `CpuScope`와 `GpuScope`(pass 이름은 정적 `TraceScopeName`)를 둔다(13.3절 스펙과 다른 점 (4) 해소).
   - 렌더 lane 연결: `RenderFrameContext::Arena()`(그 slot의 FrameArena)를 더했다. 그래프 수명 표는 그 arena에 두고, pass 함수(람다)는 그래프 파괴 때 렌더 lane에서 부순다(arena Reset은 게임 lane에서 일어나기 때문이다).
-- 남은 것(RG1): 파라미터 구조체 수집기(RB4·SH2·P7), `GraphSharedData`, attachment load·MRT·깊이·렌더 타깃 없는 기록(GX4), 버퍼 용도·텍스처 차원·형식 확장(GX2·픽셀 형식), Vulkan·GLES 픽셀 대조, 그래프 설정 변수(CP4), 캡처 도구 수동 확인 기록(13.3절).
+- 남은 것(RG1): 파라미터 구조체 수집기(RB4·SH2·P7), `GraphSharedData`, attachment load·MRT·깊이·렌더 타깃 없는 기록(GX4), 버퍼 용도·텍스처 차원·형식 확장(GX2·픽셀 형식), Vulkan 픽셀 대조, 그래프 설정 변수(CP4), 캡처 도구 수동 확인 기록(13.3절).
 
 ## 9. 셰이더 런타임
 
@@ -665,10 +665,10 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 | 19 | `Rgb10A2Unorm` | `VET_URGB10A2N` | 4 | float4 | `R10G10B10A2_UNORM` | `A2B10G10R10_UNORM_PACK32` | `UInt1010102Normalized` | `GL_UNSIGNED_INT_2_10_10_10_REV`×4 정규화 |
 | 20 | `UInt1` | `VET_UInt` | 4 | uint | `R32_UINT` | `R32_UINT` | `UInt` | `GL_UNSIGNED_INT`×1 정수 |
 
-- OpenGL ES의 정규화 없는 정수 형식은 `glVertexAttribIPointer`로 설정한다(`glVertexAttribPointer`로 설정하면 float로 변환되어 int 입력과 맞지 않는다).
+- OpenGL ES의 정규화 없는 정수 형식은 정수 경로(`glVertexAttribIFormat`, ES 3.1 vertex attrib binding. 옛 API로는 `glVertexAttribIPointer`)로 설정한다(float 경로로 설정하면 float로 변환되어 int 입력과 맞지 않는다).
 - `Bgra8Unorm`의 OpenGL ES 처리:
   - ES에는 BGRA 정점 배열이 없다. UE는 이 경우 RGBA로 읽어 채널이 뒤바뀐다(`OpenGLVertexDeclaration.cpp:56–64`).
-  - Rocks는 이 형식을 OpenGL backend(ES 3.2 공통 API, 셰이더 시스템 5.2절 G2)에서 미지원으로 공개한다. 이 형식이 든 파이프라인 생성은 `UnsupportedCapability`다.
+  - Rocks는 이 형식을 OpenGL backend(ES 3.2 공통 API, 셰이더 시스템 5.2절 G2)에서 미지원으로 공개한다. 이 형식이 든 파이프라인 생성은 `UnsupportedCapability`다(지금 Graphics 오류 코드로는 `Unsupported`, [OpenGL ES backend](OpenGLESGraphics.ko.md) 5.1절).
   - 메시 쿠커는 GLES 형식 프로필에서 색을 `UByte4Unorm`으로 쓴다.
   - 지원 여부는 backend별 형식 지원 표(GX1, A0-G G1과 같은 방식)로 조회한다.
 - 정규화 변환 규칙은 그래픽 API 표준을 따른다. snorm은 max(c / (2^(b−1) − 1), −1), unorm은 c / (2^b − 1)이다. 32-bit 정수 형식은 정규화하지 않는다.
