@@ -171,6 +171,11 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
         return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // 올바른 형식이지만 대응 표에 없으면 미지원이다(다른 형식으로 대신하지 않는다).
+    if (ResourceFormat(desc.format) == DXGI_FORMAT_UNKNOWN) {
+        return Result<TextureHandle>::Failure(ErrorCode::Unsupported);
+    }
+
     platform::LockGuard lock(gate_);
     auto sampler = SamplerFor(desc.sampler);
     if (!sampler) {
@@ -240,8 +245,12 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
 Result<PipelineHandle> D3D11Device::CreatePipeline(const PipelineDesc& desc) noexcept {
     platform::LockGuard lock(gate_);
     if (desc.vertex.hlsl.ByteCount() == 0 || desc.pixel.hlsl.ByteCount() == 0 ||
-        ResourceFormat(desc.colorFormat) == DXGI_FORMAT_UNKNOWN) {
+        desc.colorFormat == Format::Unknown) {
         return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (ResourceFormat(desc.colorFormat) == DXGI_FORMAT_UNKNOWN) {
+        return Result<PipelineHandle>::Failure(ErrorCode::Unsupported);
     }
 
     auto layoutChecked = ValidateVertexLayout(desc.layout);

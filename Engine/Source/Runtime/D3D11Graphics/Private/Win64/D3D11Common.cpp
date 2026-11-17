@@ -2,14 +2,27 @@
 
 namespace rocks::graphics::d3d11 {
 
+namespace {
+
+// 텍스처 형식과 DXGI 형식의 대응 표다. 표에 없는 형식은 지원하지 않는다(다른 형식으로 대신하지
+// 않는다). 형식을 늘릴 때는 행만 더한다.
+struct FormatMapping {
+    Format format;
+    DXGI_FORMAT dxgi;
+};
+
+constexpr FormatMapping FormatTable[] = {
+    {Format::RGBA8Unorm, DXGI_FORMAT_R8G8B8A8_UNORM},
+    {Format::RGBA8UnormSrgb, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB},
+};
+
+} // namespace
+
 DXGI_FORMAT ResourceFormat(Format format) noexcept {
-    switch (format) {
-    case Format::RGBA8Unorm:
-        return DXGI_FORMAT_R8G8B8A8_UNORM;
-    case Format::RGBA8UnormSrgb:
-        return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
-    case Format::Unknown:
-        break;
+    for (const FormatMapping& mapping : FormatTable) {
+        if (mapping.format == format) {
+            return mapping.dxgi;
+        }
     }
 
     return DXGI_FORMAT_UNKNOWN;
