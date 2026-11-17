@@ -1,6 +1,6 @@
 # 텍스처 스트리밍 설계
 
-기준일: 2026-11-16, 개정 2(초안). [엔진 구현 계획](EngineImplementationPlan.ko.md) 9.5절 "필수 Texture Streaming"을 구현 스펙으로 정한다. 계획 9.5절은 요구와 수용 시험(TX01–TX08)을 정하고, 이 문서는 구조·계산식·실행 단계·Graphics 요구·단계를 정한다. 사용자 분담 결정(2026-11-16 "이것도 니가해")에 따라 렌더 세션이 맡는다. 압축·색 보정은 에셋 세션 몫이다.
+기준일: 2026-11-16, 개정 3(초안). [엔진 구현 계획](EngineImplementationPlan.ko.md) 9.5절 "필수 Texture Streaming"을 구현 스펙으로 정한다. 계획 9.5절은 요구와 수용 시험(TX01–TX08)을 정하고, 이 문서는 구조·계산식·실행 단계·Graphics 요구·단계를 정한다. 사용자 분담 결정(2026-11-16 "이것도 니가해")에 따라 렌더 세션이 맡는다. 압축·색 보정은 에셋 세션 몫이다.
 
 UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275b`, 로컬 클론)의 현재 기본 경로다. 경로는 `Engine/Source/Runtime/` 기준이며 다음 약어를 쓴다.
 - `ES/` = `Engine/Private/Streaming/`
@@ -379,6 +379,9 @@ UE가 하위 호환으로 남긴 옛 지표 경로와 deprecated 경로는 보�
 - 의존은 RenderBase, AssetRuntime(텍스처 메타·설정), Task, Core(압축·hash·PlatformMath·비동기 파일)다.
 - World에 의존하지 않는다. 사용 기록은 WorldIntegration이 넣는다.
 - 상주 계획은 장치 없이 시험한다. 사용 기록·관찰 지점·메타를 넣고 요청 목록을 단언한다.
+- **실행 중 스트리밍 상태의 위치.** 자산 객체(AssetSystem 12.1절의 `StreamableRenderAsset`)에는 게임 lane만 읽고 쓰는 값만 transient로 둔다. 스트리밍 표 handle 하나(UE `StreamingIndex`에 해당)가 그것이다.
+  - 다음 상태는 이 모듈의 표에 둔다: 상주 mip 수(렌더 lane이 교체를 게시할 때 바뀐다), 진행 중 전송과 요청 세대(5.2절), 갱신 대기, 강제 상주·시네마틱 mip 사용 같은 실행 중 판정, mip 변경 통지 구독. 렌더 lane이 바꾸는 값을 게임 lane 객체에 직접 쓰지 않기 위해서다(RenderBase 5절 lane 소유).
+  - 게임 쪽이 상주 mip 수를 읽어야 하면 sync 지점에서 표의 값을 복사한 snapshot으로 읽는다. 저장 설정(NeverStream·전 mip 강제 상주·NumCinematicMipLevels)은 자산 필드이고, 상주 계획이 메타로 읽는다(4.4절).
 
 ## 10. 단계와 완료 기준
 
@@ -455,3 +458,4 @@ UE가 하위 호환으로 남긴 옛 지표 경로와 deprecated 경로는 보�
     - 비동기 task 시점
     - 숨은 축소 예외·범위 mask·보임 전용 boost
     - D3D12 bindless의 새 heap 할당
+- 개정 3(2026-11-17): 9절에 실행 중 스트리밍 상태의 위치를 적었다. 자산 객체에는 표 handle만 두고, 상주 mip 수·전송·요청 세대·갱신 대기·통지는 이 모듈의 표에 둔다(AssetSystem 개정 8의 `StreamableRenderAsset` 도입에 맞춤).
