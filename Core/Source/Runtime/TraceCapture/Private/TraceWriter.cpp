@@ -1,6 +1,7 @@
 #include "TraceSessionInternal.h"
 
 #include <Base/Endian.h>
+#include <Core/Diagnostics/Log.h>
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
@@ -12,6 +13,9 @@ namespace rocks::detail {
 using platform::AtomicLoad;
 
 namespace {
+
+// trace 수집 자체의 실패(출력 쓰기·콜백)를 남기는 로그 카테고리다.
+inline constexpr LogCategory LogTrace{"Trace"};
 
 void StoreChunkHeader(uint8* header, uint16 sizeAndFlags, uint16 stream) noexcept {
     StoreLittleEndian<uint16>(header, sizeAndFlags);
@@ -142,14 +146,22 @@ bool TraceSessionState::WriteOutput(TraceOutput& output, Span<const uint8> bytes
             lastOutputFileStatus = transfer.status
                                        ? platform::FileStatus{platform::FileCode::NoProgress, 0}
                                        : transfer.status;
-            // TODO(log): 출력 쓰기 실패를 로그로 알린다(LoggingSystem).
+            // 출력은 이 실패로 닫히므로(output.failed) 출력마다 한 번만 남는다.
+            Log::Warning(LogTrace,
+                         "Trace output write failed (file code {FileCode}, OS error {OsError}); "
+                         "the output is closed and later records are dropped",
+                         static_cast<uint32>(lastOutputFileStatus.code),
+                         lastOutputFileStatus.nativeError);
         }
     } else {
         const Result<void> result = output.write(output.context, bytes);
         written = result.IsOk();
         if (!written) {
             lastOutputCallbackError = result.Error();
-            // TODO(log): 출력 콜백 실패를 로그로 알린다(LoggingSystem).
+            Log::Warning(LogTrace,
+                         "Trace output callback failed ({Error}); the output is closed and later "
+                         "records are dropped",
+                         ErrorCodeName(lastOutputCallbackError));
         }
     }
 

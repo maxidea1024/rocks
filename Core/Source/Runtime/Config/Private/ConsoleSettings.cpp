@@ -794,8 +794,9 @@ void RunCommandsAndCallbacks(ConfigState& state, Span<const bool> sectionChanged
         if (auto executed =
                 definition.execute(definition.context, command.arguments, command.output);
             !executed) {
-            // TODO(log): 명령 실패를 로깅 시스템의 설정 범주로도 남긴다(지금은 그 명령의 콘솔
-            // 출력에만 쓴다).
+            // 명령 실패는 그 명령의 콘솔 출력과 로그 양쪽에 남긴다.
+            Log::Warning(detail::LogConfig, "Console command {Command} failed ({Error})",
+                         definition.name.View(), ErrorCodeName(executed.Error()));
             StringBuilder<128> line(state.allocator);
             static_cast<void>(line.TryAppendFormat("{}: command failed ({})\n",
                                                    definition.name.View(),
