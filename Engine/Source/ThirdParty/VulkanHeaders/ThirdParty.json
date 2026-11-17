@@ -7,12 +7,12 @@
   "source": {
     "url": "https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/vulkan-sdk-1.4.363.0.tar.gz",
     "sha256": "4a078be12bef21cfebc09d878b77a63cff9d68f899254a0b00d0e37ef73e7f7e",
-    "verification": "GitHub 태그 vulkan-sdk-1.4.363.0(커밋 6802bb4733b63ed5efd3adb308a6c885ef180ea1)의 archive를 2026-11-16에 받아 SHA-256을 기록했다. 업스트림이 서명이나 해시를 게시하지 않으므로 태그 커밋과 archive 해시로 고정한다."
+    "verification": "The archive of GitHub tag vulkan-sdk-1.4.363.0 (commit 6802bb4733b63ed5efd3adb308a6c885ef180ea1) was downloaded on 2026-11-16 and its SHA-256 recorded. Upstream publishes no signatures or hashes, so it is pinned by the tag commit and the archive hash."
   },
   "licenses": [
     {
       "spdx": "MIT",
-      "upstreamExpression": "Apache-2.0 OR MIT (LICENSE.md, 헤더의 SPDX-License-Identifier)",
+      "upstreamExpression": "Apache-2.0 OR MIT (LICENSE.md, SPDX-License-Identifier in the headers)",
       "file": "vulkan-headers-1.4.363.0/LICENSES/MIT.txt",
       "binaryNoticeRequired": true
     }
@@ -73,9 +73,9 @@
   },
   "pragmaDirectives": [],
   "notes": [
-    "Vulkan SDK 1.4.363.0 태그로 고정한다. DXC v1.9.2609의 SPIRV-Headers·SPIRV-Tools submodule 커밋이 같은 SDK 태그(vulkan-sdk-1.4.363.0)와 정확히 같으므로 SPIRV-Reflect·SPIRV-Cross와 함께 이 태그에 맞춘다(Docs/Design/ShaderSystem.ko.md 8절).",
-    "C 헤더만 둔다(include/vulkan의 vk_platform.h·vulkan.h·vulkan_core.h와 Windows·Metal·Android·beta 플랫폼 헤더, vulkan_core.h가 include하는 include/vk_video 전체). C++ 바인딩(*.hpp·*.cppm), registry, 쓰지 않는 플랫폼 헤더(X11·Wayland 등)는 넣지 않는다.",
-    "VK_NO_PROTOTYPES: 엔진은 Vulkan 로더를 실행 중에 열고 함수 포인터로만 부른다(링크하지 않는다). 소비 모듈이 같은 정의로 include한다.",
-    "라이선스는 Apache-2.0 OR MIT 가운데 MIT를 고른다(LICENSES/MIT.txt)."
+    "Pinned to the Vulkan SDK 1.4.363.0 tag. The SPIRV-Headers and SPIRV-Tools submodule commits of DXC v1.9.2609 exactly match the same SDK tag (vulkan-sdk-1.4.363.0), so this tag is aligned together with SPIRV-Reflect and SPIRV-Cross (Docs/Design/ShaderSystem.ko.md section 8).",
+    "Only C headers are kept (vk_platform.h, vulkan.h and vulkan_core.h of include/vulkan, the Windows, Metal, Android and beta platform headers, and all of include/vk_video that vulkan_core.h includes). C++ bindings (*.hpp, *.cppm), the registry and unused platform headers (X11, Wayland and the like) are not included.",
+    "VK_NO_PROTOTYPES: the engine opens the Vulkan loader at run time and calls it only through function pointers (it does not link it). Consumer modules include it with the same definition.",
+    "Of Apache-2.0 OR MIT, the license chosen is MIT (LICENSES/MIT.txt)."
   ]
 }

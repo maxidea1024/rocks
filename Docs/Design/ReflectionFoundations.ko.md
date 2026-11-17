@@ -270,7 +270,7 @@ struct BulkDataRef {
 
 - 색·벡터 설정(`PaddingColor`·`ChromaKeyColor`는 UE FColor(8비트), `AlphaCoverageThresholds`는 FVector4(LWC double), 12.4절)은 Core 수학 타입을 쓴다. Core는 MetaSchema·ObjectRuntime에 의존하지 않으므로 Core 헤더에 annotation을 달 수 없다.
 - 별도 Metadata 모듈 **`CoreTypeBindings`**(Core/Source/Runtime, 소스 없음, ObjectRuntime 의존)에 미러 선언 헤더 `CoreTypeBindings/CoreValueTypes.h`를 두고 `ROCKS_STRUCT(Binds = "<실제 타입 철자>", Version = 1)`로 같은 공개 멤버를 가진 미러 선언을 리플렉션한다(UE NoExportTypes 방식). ObjectRuntime을 Metadata 모듈로 만들지 않는다(그것에 닿는 모든 타깃에 meta 단계가 붙지 않게) — Core 값 타입 필드를 쓰는 모듈만 의존한다. 생성 코드는 미러가 아니라 실제 타입의 멤버 포인터를 쓰고, 미러와 실제 타입의 멤버 이름·형식·개수·순서가 같은지 static_assert로 확인한다(어긋나면 컴파일 실패, 4.6절).
-- 대상(Core 헤더 확인 결과): `rocks::Vector2<float|double>`·`Vector3<float|double>`·`Vector4<float|double>`, `Quaternion<float|double>`, `Rotator<float|double>`(yaw·pitch·roll 라디안 — UE FRotator는 pitch·yaw·roll 도라 UE 데이터 반입 때 변환), `Color`(uint8 RGBA), `LinearColor`(float RGBA), `IntVec2`·`IntVec3`(int32), `Transform`(비템플릿 — `Vec3d translation`·`Quat rotation`·`Vec3 scale`, 다른 Binds struct에 의존). ID는 `CoreTypeBindings` 명세에 등록한다.
+- 대상(Core 헤더 확인 결과): `rocks::Vector2<float|double>`·`Vector3<float|double>`·`Vector4<float|double>`, `Quaternion<float|double>`, `Rotator<float|double>`(pitch·yaw·roll 도 — 2026-11-17 UE FRotator와 같게 바꿨다. 이전은 yaw·pitch·roll 라디안), `Color`(uint8 RGBA), `LinearColor`(float RGBA), `IntVec2`·`IntVec3`(int32), `Transform`(비템플릿 — `Quatd rotation`·`Vec3d translation`·`Vec3d scale`, UE FTransform과 같은 순서·정밀도, 다른 Binds struct에 의존). ID는 `CoreTypeBindings` 명세에 등록한다.
 
 ### 4.6 B4 구현 API(확정안)
 

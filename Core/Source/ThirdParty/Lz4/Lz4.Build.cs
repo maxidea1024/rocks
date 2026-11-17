@@ -1,8 +1,8 @@
 using Rocks.Build.Rules;
 
-// LZ4 1.11.1 고정 버전(BSD-2-Clause). LZ4 raw block과 LZ4 frame(lz4frame, xxHash) 압축·해제. lz4.c·lz4hc.c는 Lz4Unity.c
-// 한 번역 단위로, lz4frame.c·xxhash.c는 따로 빌드한다.
-// 소스·정의·라이선스·파일 해시는 같은 폴더의 ThirdParty.json이 단일 출처다(Docs/Design/Compression.ko.md 3절).
+// LZ4 1.11.1 pinned version (BSD-2-Clause). LZ4 raw block and LZ4 frame (lz4frame, xxHash) compression and decompression. lz4.c and lz4hc.c are built
+// as one translation unit through Lz4Unity.c; lz4frame.c and xxhash.c are built separately.
+// The ThirdParty.json in the same folder is the single source of sources, definitions, licenses and file hashes (Docs/Design/Compression.ko.md section 3).
 public sealed class Lz4 : ThirdPartyModuleRules
 {
     protected override string ModuleName => "Lz4";

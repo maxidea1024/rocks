@@ -1,11 +1,11 @@
 #!/bin/sh
-# DirectXShaderCompiler(DXC) 오프라인 빌드다(macOS arm64). Windows 판은 같은 폴더의 Build.ps1이다. UE 5.8
-# ThirdParty/ShaderConductor/Build_ShaderConductor_Mac.command처럼 CMake·Ninja로 빌드하고 install name·dSYM을 정리한다.
-# 업스트림 빌드는 예외·RTTI를 쓰며 Python 3(PATH)으로 표를 생성한다.
-# 상태: 미검증(이 스크립트를 실행한 macOS 호스트 기록이 아직 없다, Docs/Design/ShaderSystem.ko.md 8절 진척).
+# Offline build of DirectXShaderCompiler (DXC) (macOS arm64). The Windows version is Build.ps1 in the same folder. Like UE 5.8
+# ThirdParty/ShaderConductor/Build_ShaderConductor_Mac.command, builds with CMake and Ninja and fixes up install names and dSYMs.
+# The upstream build uses exceptions and RTTI and generates tables with Python 3 (PATH).
+# Status: unverified (no macOS host has a record of running this script yet, Docs/Design/ShaderSystem.ko.md section 8 progress).
 #
-# 사용: sh Engine/Source/ThirdParty/DirectXShaderCompiler/Build/Build.sh [작업 디렉터리] [archive 출력 디렉터리]
-# 필요: Xcode 명령행 도구, CMake, Ninja, Python 3, git(patch 적용).
+# Usage: sh Engine/Source/ThirdParty/DirectXShaderCompiler/Build/Build.sh [work directory] [archive output directory]
+# Requires: Xcode command line tools, CMake, Ninja, Python 3, git (to apply patches).
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/../../../../../Build/ThirdPartyTools/tool-build.sh"
@@ -37,7 +37,7 @@ tool="$stage/bin/dxc"
 cp -L "$build/bin/dxc" "$tool"
 dsymutil "$tool" -o "$tool.dSYM"
 strip -x "$tool"
-# dxc는 ../lib의 libdxcompiler.dylib를 쓴다.
+# dxc uses libdxcompiler.dylib in ../lib.
 for dependency in $(otool -L "$tool" | tail -n +2 | awk '{print $1}'); do
     case "$dependency" in
         @rpath/libdxcompiler*.dylib) install_name_tool -change "$dependency" "@loader_path/../lib/libdxcompiler.dylib" "$tool" ;;

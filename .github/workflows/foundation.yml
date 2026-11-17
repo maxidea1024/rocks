@@ -1,7 +1,7 @@
 name: Foundation
-# 커밋마다 로컬에서 Debug·format·변경 부분 시험을 돌리므로, push는 head 커밋 메시지에 `[ci]`가 있을
-# 때만 돈다(단계 묶음 끝, macOS에서만 드러날 수 있는 변경). PR과 수동 실행은 늘 돈다. 수동 실행
-# (workflow_dispatch)은 이 파일이 기본 브랜치에 있어야 쓸 수 있다.
+# Debug, format and changed-area tests run locally for every commit, so push runs only when the head commit message contains `[ci]`
+# (end of a stage batch, or changes that may show up only on macOS). PRs and manual runs always run. Manual runs
+# (workflow_dispatch) are available only when this file is on the default branch.
 on:
   push:
   pull_request:
@@ -38,7 +38,7 @@ jobs:
           $executable = if ($IsWindows) { 'out/ci-commandlet/bin/RocksCommandlet.exe' } else { 'out/ci-commandlet/bin/RocksCommandlet' }
           dotnet run --project Programs/Rocks.Commandlet.Tests -- --executable $executable
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      # C++은 위에서 설치한 clang-format 21.1.6, C#은 global.json이 고정한 SDK의 dotnet format(Build/Format/Rocks.Format.slnx)이다.
+      # C++ uses clang-format 21.1.6 installed above; C# uses dotnet format of the SDK pinned by global.json (Build/Format/Rocks.Format.slnx).
       - name: Verify C++ and C# formatting
         run: dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll format --root .
       - name: Verify native action graph and incremental failures

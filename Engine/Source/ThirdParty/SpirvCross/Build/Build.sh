@@ -1,9 +1,9 @@
 #!/bin/sh
-# SPIRV-Cross C API 공유 라이브러리(spirv-cross-c-shared) 오프라인 빌드다(macOS arm64). Windows 판은 같은 폴더의 Build.ps1이다.
-# 상태: 미검증(이 스크립트를 실행한 macOS 호스트 기록이 아직 없다, Docs/Design/ShaderSystem.ko.md 8절 진척).
+# Offline build of the SPIRV-Cross C API shared library (spirv-cross-c-shared) (macOS arm64). The Windows version is Build.ps1 in the same folder.
+# Status: unverified (no macOS host has a record of running this script yet, Docs/Design/ShaderSystem.ko.md section 8 progress).
 #
-# 사용: sh Engine/Source/ThirdParty/SpirvCross/Build/Build.sh [작업 디렉터리] [archive 출력 디렉터리]
-# 필요: Xcode 명령행 도구(clang·install_name_tool·codesign·dsymutil), CMake, Ninja, git(patch 적용).
+# Usage: sh Engine/Source/ThirdParty/SpirvCross/Build/Build.sh [work directory] [archive output directory]
+# Requires: Xcode command line tools (clang, install_name_tool, codesign, dsymutil), CMake, Ninja, git (to apply patches).
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/../../../../../Build/ThirdPartyTools/tool-build.sh"

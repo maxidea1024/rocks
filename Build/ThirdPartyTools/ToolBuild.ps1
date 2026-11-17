@@ -1,19 +1,19 @@
-# 미리 빌드한 바이너리(manifest kind: binary)의 오프라인 도구 빌드 공용 함수다(Windows, PowerShell 7).
-# 라이브러리별 스크립트(Engine/Source/ThirdParty/<Lib>/Build/Build.ps1)가 dot-source해서 쓴다. Docs/Design/ShaderSystem.ko.md 8절 4항.
+# Shared functions for the offline tool build of prebuilt binaries (manifest kind: binary) (Windows, PowerShell 7).
+# Per-library scripts (Engine/Source/ThirdParty/<Lib>/Build/Build.ps1) dot-source this file. Docs/Design/ShaderSystem.ko.md section 8, item 4.
 #
-# 순서: manifest(ThirdParty.json)의 build.source·build.dependencies를 받아 SHA-256 검사 → 원본 트리 구성 → build.patches 적용 →
-# 저장소에 커밋한 공개 헤더·라이선스가 원본과 byte 단위로 같은지 확인 → (라이브러리 스크립트가 CMake·Ninja로 빌드) → 산출물을
-# stage 디렉터리에 모으고 tar.gz archive와 호스트 항목(파일 목록·SHA-256·크기·역할) JSON을 만든다.
-# 게시(GitHub Release)는 하지 않는다. workflow(.github/workflows/third-party-tools.yml)나 사람이 따로 한다.
+# Order: download build.source and build.dependencies of the manifest (ThirdParty.json) and verify SHA-256 -> assemble the source tree -> apply build.patches ->
+# confirm the public headers and licenses committed to the repository match the sources byte for byte -> (the library script builds with CMake and Ninja) -> collect
+# the outputs in a stage directory and produce a tar.gz archive and a host entry JSON (file list, SHA-256, size, role).
+# Publishing (GitHub Release) is not done here; the workflow (.github/workflows/third-party-tools.yml) or a person does it separately.
 #
-# 이 파일은 엔진 기본 빌드·시험 경로가 아니다. Python은 업스트림 CMake가 표 생성에 쓰며(PATH의 Python 3), 이 스크립트는 직접
-# 부르지 않는다(정책 검사 python-main-path 대상 디렉터리).
+# This file is not on the default engine build and test path. Python is used by the upstream CMake for table generation (Python 3 on PATH); this script never
+# calls it directly (a directory covered by the python-main-path policy check).
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
 
-# 호스트 키(manifest hosts의 키)다. 지금 스크립트는 Windows x64만 만든다.
+# Host key (key of the manifest hosts). The script currently produces only Windows x64.
 $script:RocksToolHost = 'windows-x64'
 
 function Read-RocksToolManifest {
@@ -34,7 +34,7 @@ function Get-RocksSha256 {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
-# 원본 archive 하나를 받아 SHA-256을 검사하고 Destination에 푼다(archive 안의 최상위 디렉터리 하나를 벗긴다).
+# Downloads one source archive, verifies its SHA-256 and extracts it into Destination (stripping the single top-level directory inside the archive).
 function Expand-RocksVerifiedSource {
     param(
         [Parameter(Mandatory)] $Source,
@@ -76,7 +76,7 @@ function Expand-RocksVerifiedSource {
     Remove-Item -LiteralPath $unpack -Recurse -Force
 }
 
-# manifest build의 주 원본과 의존 원본(build.dependencies[].path 위치)으로 원본 트리를 만들고 patch를 적용한다.
+# Builds the source tree from the manifest build's main source and dependency sources (at build.dependencies[].path) and applies the patches.
 function Initialize-RocksSourceTree {
     param(
         [Parameter(Mandatory)] $Manifest,
@@ -102,9 +102,9 @@ function Initialize-RocksSourceTree {
     return $source
 }
 
-# 저장소에 커밋한 원본 디렉터리(upstreamDirectory)의 모든 파일이 빌드에 쓰는 원본 트리의 같은 경로와 byte 단위로 같은지 본다.
-# 그래서 Rocks가 include하는 공개 헤더와 게시하는 바이너리가 같은 원본에서 나온다(커밋한 파일과 manifest SHA-256의 일치는
-# 정책 검사 third-party가 본다).
+# Checks that every file of the source directory committed to the repository (upstreamDirectory) matches the same path in the build source tree byte for byte.
+# So the public headers Rocks includes and the binaries it publishes come from the same sources (the match between committed files and the manifest SHA-256
+# is checked by the third-party policy check).
 function Assert-RocksCommittedFiles {
     param(
         [Parameter(Mandatory)] $Manifest,
@@ -124,7 +124,7 @@ function Assert-RocksCommittedFiles {
         }
     }
 }
-# Visual Studio C++ 도구(vcvarsall x64)의 환경을 이 프로세스에 들인다.
+# Imports the environment of the Visual Studio C++ tools (vcvarsall x64) into this process.
 function Import-RocksMsvcEnvironment {
     $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
     $installation = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
@@ -142,8 +142,8 @@ function Import-RocksMsvcEnvironment {
     }
 }
 
-# stage 디렉터리의 파일을 역할과 함께 archive로 묶고 호스트 항목 JSON을 쓴다. Files는 @{ '<stage 기준 경로>' = '<role>' }이며
-# stage에 그 밖의 파일이 있으면 오류다(archive 내용 = manifest 파일 목록).
+# Packs the stage directory files with their roles into an archive and writes the host entry JSON. Files is @{ '<path relative to stage>' = '<role>' }, and
+# any other file in stage is an error (archive contents = manifest file list).
 function New-RocksToolArchive {
     param(
         [Parameter(Mandatory)] $Manifest,
@@ -184,7 +184,7 @@ function New-RocksToolArchive {
         [ordered]@{ path = $path; sha256 = (Get-RocksSha256 $full); size = (Get-Item -LiteralPath $full).Length; role = $Files[$path] }
     }
 
-    # 게시 위치는 이 저장소의 GitHub Releases다(workflow는 GITHUB_REPOSITORY, 로컬은 origin 원격에서 owner/repo를 읽는다).
+    # Publishing goes to this repository's GitHub Releases (the workflow reads owner/repo from GITHUB_REPOSITORY, local runs from the origin remote).
     $repository = $env:GITHUB_REPOSITORY
     if (-not $repository) {
         $origin = git -C $PSScriptRoot remote get-url origin

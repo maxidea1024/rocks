@@ -7,7 +7,7 @@
   "licenses": [
     {
       "spdx": "Apache-2.0",
-      "upstreamExpression": "Apache-2.0 (일부 파일 Apache-2.0 OR MIT)",
+      "upstreamExpression": "Apache-2.0 (some files Apache-2.0 OR MIT)",
       "file": "spirv-cross-1.4.363.0/LICENSE",
       "binaryNoticeRequired": true
     }
@@ -72,8 +72,8 @@
     }
   },
   "notes": [
-    "Vulkan SDK 1.4.363.0 태그(DXC v1.9.2609 submodule과 같은 SDK 태그)로 고정한다. SPIRV-Cross는 DXC submodule이 아니므로 같은 SDK 태그로 맞춘다.",
-    "C API(spirv_cross_c.h)를 단일 공유 라이브러리(spirv-cross-c-shared)로 만든다. 예외는 라이브러리 안에서만 쓰이고 C API가 오류 값으로 바꾼다.",
-    "macos-arm64 산출물은 아직 없다(Build.sh 미검증)."
+    "Pinned to the Vulkan SDK 1.4.363.0 tag (the same SDK tag as the DXC v1.9.2609 submodules). SPIRV-Cross is not a DXC submodule, so it is aligned to the same SDK tag.",
+    "The C API (spirv_cross_c.h) is built as a single shared library (spirv-cross-c-shared). Exceptions are used only inside the library, and the C API turns them into error values.",
+    "There is no macos-arm64 output yet (Build.sh unverified)."
   ]
 }

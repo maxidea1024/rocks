@@ -3,26 +3,28 @@ using Rocks.Build.Rules;
 using Rocks.Tooling.Common;
 
 /// <summary>
-/// 고정 버전 외부 라이브러리 모듈 규칙이다(UE ThirdParty 모듈 대응). 소스·정의·include는 라이브러리 폴더의
-/// <c>ThirdParty.json</c>(단일 출처)에서 읽는다. 라이브러리 폴더는 Core가 쓰면 <c>Core/Source/ThirdParty</c>, 엔진·도구 전용이면
-/// <c>Engine/Source/ThirdParty</c> 아래에 둔다(<see cref="ThirdPartyManifest.ThirdPartyRoots"/>). 폴더 구조:
+/// Rules for pinned-version third-party library modules (counterpart of UE ThirdParty modules). Sources, defines and includes
+/// are read from the library folder's <c>ThirdParty.json</c> (single source of truth). A library used by Core lives under
+/// <c>Core/Source/ThirdParty</c>; one used only by the engine or tools lives under <c>Engine/Source/ThirdParty</c>
+/// (<see cref="ThirdPartyManifest.ThirdPartyRoots"/>). Folder layout:
 /// <code>
-/// &lt;루트&gt;/&lt;Module&gt;/
-///   &lt;Module&gt;.Build.cs   이 클래스를 상속한 규칙(이름만 적는다)
-///   ThirdParty.json      버전·출처·라이선스·파일별 SHA-256·번역 단위·정의(정책 검사 third-party가 확인)
-///   &lt;lib&gt;-&lt;version&gt;/      릴리스 원본을 byte 그대로 둔 디렉터리(수정 금지, 서식·lexical 검사 제외)
-///   *.c                  필요할 때만 두는 Rocks 글루(정책 검사 대상)
+/// &lt;Root&gt;/&lt;Module&gt;/
+///   &lt;Module&gt;.Build.cs   rule deriving from this class (states only the name)
+///   ThirdParty.json      version, origin, license, per-file SHA-256, translation units, defines (checked by the third-party policy check)
+///   &lt;lib&gt;-&lt;version&gt;/      release sources kept byte for byte (never modified; excluded from format and lexical checks)
+///   *.c                  Rocks glue, only when needed (subject to policy checks)
 /// </code>
-/// 규칙 계약:
+/// Rule contract:
 /// <list type="bullet">
-/// <item>외부 헤더는 전파하지 않는다. PublicIncludeDirectories가 비어 있고, 소비 모듈은 <see cref="ConsumerIncludeDirectories"/>와
-/// <see cref="ConsumerDefines"/>를 private으로 받는다. 엔진 공개 헤더는 외부 헤더를 포함하지 않는다.</item>
-/// <item>항상 최적화한다(<see cref="CodeOptimization.Always"/>). Debug 빌드의 에셋 해제가 크게 느려지는 것을 막는다.
-/// CRT·구성 매크로·NDEBUG는 구성을 따른다. manifest <c>linkTimeOptimization: false</c>이면 Release에서도 ThinLTO에서 빼고,
-/// <c>sanitizerInstrumentation: false</c>이면 Asan에서도 계측하지 않는다.</item>
-/// <item>규칙 로더는 모든 규칙의 Configure를 매 빌드 실행하므로 manifest 오류는 즉시 빌드 오류가 된다.</item>
+/// <item>Third-party headers are not propagated. PublicIncludeDirectories is empty, and consuming modules take
+/// <see cref="ConsumerIncludeDirectories"/> and <see cref="ConsumerDefines"/> privately. Engine public headers never include
+/// third-party headers.</item>
+/// <item>Always optimized (<see cref="CodeOptimization.Always"/>) so that asset decoding is not drastically slower in Debug
+/// builds. CRT, configuration macros and NDEBUG follow the configuration. A manifest with <c>linkTimeOptimization: false</c> is
+/// excluded from ThinLTO even in Release, and one with <c>sanitizerInstrumentation: false</c> is not instrumented even in Asan.</item>
+/// <item>The rule loader runs Configure of every rule on each build, so a manifest error becomes a build error immediately.</item>
 /// </list>
-/// 사용 예(Core/Source/ThirdParty/Zstd/Zstd.Build.cs):
+/// Usage example (Core/Source/ThirdParty/Zstd/Zstd.Build.cs):
 /// <code>
 /// public sealed class Zstd : ThirdPartyModuleRules
 /// {
@@ -32,12 +34,12 @@ using Rocks.Tooling.Common;
 /// </summary>
 public abstract class ThirdPartyModuleRules : ModuleRules
 {
-    /// <summary>모듈 이름이다. 라이브러리 폴더 이름과 같아야 한다.</summary>
+    /// <summary>Module name. Must match the library folder name.</summary>
     protected abstract string ModuleName { get; }
 
     /// <summary>
-    /// 저장소 루트 기준 라이브러리 폴더다. 예: Core/Source/ThirdParty/Zstd. 루트 목록에서 찾으며 없거나 두 루트에 모두 있으면
-    /// <see cref="FormatException"/>이다(빌드 오류).
+    /// Library folder relative to the repository root, e.g. Core/Source/ThirdParty/Zstd. It is looked up in the root list;
+    /// a missing library or one present under both roots throws <see cref="FormatException"/> (a build error).
     /// </summary>
     public static string LibraryDirectory(BuildContext context, string module) => ThirdPartyManifest.FindLibrary(context.RootDirectory, module);
 
@@ -56,8 +58,8 @@ public abstract class ThirdPartyModuleRules : ModuleRules
             Sources = manifest.TranslationUnits.Select(unit => context.PathInRoot($"{library}/{unit}")).ToArray(),
             PrivateIncludeDirectories = manifest.IncludeDirectories.Select(directory => context.PathInRoot($"{library}/{directory}")).ToArray(),
             PrivateDefines = manifest.DefinesFor(context.Platform.ToString(), context.Architecture.ToString()),
-            // manifest compileArguments는 GCC형 철자이고 clang-cl도 그대로 받는다(ThirdPartyManifest.AllowedCompileArguments).
-            // /clang: 우회 경로는 빌드 입력 검증이 막으므로 쓰지 않는다.
+            // Manifest compileArguments use GCC-style spellings, which clang-cl accepts as is (ThirdPartyManifest.AllowedCompileArguments).
+            // The /clang: escape is not used because build input validation rejects it.
             AdditionalCompileArguments = manifest.CompileArguments,
             Optimization = CodeOptimization.Always,
             LinkTimeOptimization = manifest.LinkTimeOptimization,
@@ -66,9 +68,10 @@ public abstract class ThirdPartyModuleRules : ModuleRules
     }
 
     /// <summary>
-    /// adapter(소비 모듈의 Private 소스)가 외부 헤더를 include할 경로다. 여러 라이브러리를 순서대로 합친다. code 라이브러리뿐 아니라
-    /// 헤더 전용(<c>kind: headers</c>, 모듈 의존 없이 include만)과 binary의 커밋한 공개 헤더(<c>kind: binary</c>)에도 쓴다.
-    /// 사용 예: <c>ThirdPartyModuleRules.ConsumerIncludeDirectories(context, "VulkanHeaders", "SpirvReflect")</c>.
+    /// Paths from which an adapter (a consuming module's Private sources) includes third-party headers. Multiple libraries are
+    /// concatenated in order. Used for code libraries as well as header-only libraries (<c>kind: headers</c>, include only, no
+    /// module dependency) and the committed public headers of binary libraries (<c>kind: binary</c>).
+    /// Usage example: <c>ThirdPartyModuleRules.ConsumerIncludeDirectories(context, "VulkanHeaders", "SpirvReflect")</c>.
     /// </summary>
     public static IReadOnlyList<string> ConsumerIncludeDirectories(BuildContext context, params string[] modules) =>
         modules.SelectMany(module =>
@@ -79,8 +82,8 @@ public abstract class ThirdPartyModuleRules : ModuleRules
         }).ToArray();
 
     /// <summary>
-    /// adapter가 외부 헤더를 include할 때 라이브러리 빌드와 같아야 하는 정의다(예: zlib Z_PREFIX). 같은 이름이 다른 값으로
-    /// 겹치면 빌드 도구가 오류로 거부한다.
+    /// Defines that must match the library build when an adapter includes third-party headers (e.g. zlib Z_PREFIX). The build
+    /// tool rejects the same name with conflicting values.
     /// </summary>
     public static IReadOnlyList<string> ConsumerDefines(BuildContext context, params string[] modules) =>
         modules.SelectMany(module => ThirdPartyManifest.Read(context.PathInRoot(LibraryDirectory(context, module))).ConsumerDefines)
