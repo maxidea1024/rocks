@@ -397,12 +397,16 @@ T FindDeltaAngleRadians(T fromRadians, T toRadians) noexcept {
     return UnwindRadians(toRadians - fromRadians);
 }
 
-// 도(degree) 각도를 (-180, 180] 구간으로 감는다(UE FMath::UnwindDegrees 대응, UnrealMathUtility.h:
-// 949-964). 결과 구간과 값은 Rotator::NormalizeAxis와 같다. UE와 다른 점: UE는 ±360을 반복해서 빼고
-// 더하는 루프라 -180을 그대로 두고(닫힌 구간 [-180, 180]) Inf에서 끝나지 않는다. Rocks는 Fmod로
-// 한 번에 감아 -180은 180이 되고, 유한하지 않은 입력은 NaN이다.
+// 도(degree) 각도를 [-180, 180] 구간으로 감는다(UE FMath::UnwindDegrees와 같은 결과,
+// UnrealMathUtility.h:949-964). UE처럼 [-180, 180] 안의 값은 그대로 두고(-180도 그대로), 180보다
+// 크면 (-180, 180]로, -180보다 작으면 [-180, 180)으로 감는다(UE의 ±360 반복 루프와 같은 경계).
+// Rotator::NormalizeAxis((-180, 180])와는 -180을 남기는 점만 다르다. UE와 다른 점: UE 루프는
+// Inf에서 끝나지 않고 큰 값에서 뺄셈 반올림이 쌓인다. Rocks는 Fmod(정확)로 한 번에 감고, 유한하지
+// 않은 입력은 NaN이다.
 //   math::UnwindDegrees(190.0);  // -170
-//   math::UnwindDegrees(-540.0); // 180
+//   math::UnwindDegrees(-180.0); // -180
+//   math::UnwindDegrees(-540.0); // -180
+//   math::UnwindDegrees(540.0);  // 180
 template <typename T>
     requires IsFloatingPointV<T>
 T UnwindDegrees(T degrees) noexcept {
@@ -411,16 +415,17 @@ T UnwindDegrees(T degrees) noexcept {
     T wrapped = Fmod(degrees, FullTurn);
     if (wrapped > HalfTurn) {
         wrapped -= FullTurn;
-    } else if (wrapped <= -HalfTurn) {
+    } else if (wrapped < -HalfTurn) {
         wrapped += FullTurn;
     }
 
     return wrapped;
 }
 
-// fromDegrees에서 toDegrees로 가는 최소 각 차이(도, (-180, 180])다. UE FindDeltaAngleDegrees 대응
-// (UnrealMathUtility.h:898-913 — UE는 Wrap(Delta, -180, 180)이라 경계 ±180 중 어느 쪽이 나올지가
-// Wrap 규칙을 따른다. Rocks는 UnwindDegrees와 같은 반열린 구간이다).
+// fromDegrees에서 toDegrees로 가는 최소 각 차이(도, [-180, 180])다. UE FindDeltaAngleDegrees
+// (UnrealMathUtility.h:898-913, Wrap(Delta, -180, 180) — :610-634)와 경계 값이 같다: 차이가
+// -180이나 -540처럼 -180 쪽에서 감기면 -180, 540처럼 180 쪽에서 감기면 180이다(UnwindDegrees와
+// 같다).
 template <typename T>
     requires IsFloatingPointV<T>
 T FindDeltaAngleDegrees(T fromDegrees, T toDegrees) noexcept {

@@ -287,21 +287,25 @@ TEST(Rotator_RandomRoundTripAndAxisAngleDecomposition) {
 
 TEST(Rotator_ClampAndNormalizeAxisMatchUnreal) {
     // UE TRotator::ClampAxis·NormalizeAxis(Rotator.h:688-716) probe 값과 정확히 같다.
+    // unwound는 UE FMath::UnwindDegrees(±360 루프)의 값이다. NormalizeAxis와 달리 -180 쪽 경계를
+    // 남긴다(-180, -540).
     struct AxisCase {
         double input;
         double clamped;
         double normalized;
+        double unwound;
     };
 
-    const AxisCase cases[] = {
-        {0.0, 0.0, 0.0},        {180.0, 180.0, 180.0},  {-180.0, 180.0, 180.0},
-        {190.0, 190.0, -170.0}, {-190.0, 170.0, 170.0}, {540.0, 180.0, 180.0},
-        {-540.0, 180.0, 180.0}, {360.0, 0.0, 0.0},      {-360.0, 0.0, 0.0},
-        {725.0, 5.0, 5.0},      {-90.0, 270.0, -90.0},  {359.5, 359.5, -0.5}};
+    const AxisCase cases[] = {{0.0, 0.0, 0.0, 0.0},           {180.0, 180.0, 180.0, 180.0},
+                              {-180.0, 180.0, 180.0, -180.0}, {190.0, 190.0, -170.0, -170.0},
+                              {-190.0, 170.0, 170.0, 170.0},  {540.0, 180.0, 180.0, 180.0},
+                              {-540.0, 180.0, 180.0, -180.0}, {360.0, 0.0, 0.0, 0.0},
+                              {-360.0, 0.0, 0.0, 0.0},        {725.0, 5.0, 5.0, 5.0},
+                              {-90.0, 270.0, -90.0, -90.0},   {359.5, 359.5, -0.5, -0.5}};
     for (const AxisCase& item : cases) {
         CHECK(Rotator<double>::ClampAxis(item.input) == item.clamped);
         CHECK(Rotator<double>::NormalizeAxis(item.input) == item.normalized);
-        CHECK(math::UnwindDegrees(item.input) == item.normalized);
+        CHECK(math::UnwindDegrees(item.input) == item.unwound);
         const float single = static_cast<float>(item.input);
         CHECK(Rotator<float>::ClampAxis(single) == static_cast<float>(item.clamped));
         CHECK(Rotator<float>::NormalizeAxis(single) == static_cast<float>(item.normalized));

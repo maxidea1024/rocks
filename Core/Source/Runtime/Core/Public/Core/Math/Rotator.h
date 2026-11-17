@@ -72,8 +72,8 @@ struct Rotator {
     }
 
     // 각을 (-180, 180]으로 감는다(UE TRotator::NormalizeAxis, Rotator.h:703-716 — ClampAxis
-    // 뒤 180보다 크면 360을 뺀다). math::UnwindDegrees와 같은 값이다. 유한하지 않은 입력은
-    // NaN이다.
+    // 뒤 180보다 크면 360을 뺀다). math::UnwindDegrees와는 -180 쪽 경계만 다르다(UnwindDegrees는
+    // -180을 남긴다). 유한하지 않은 입력은 NaN이다.
     //   Rotator<double>::NormalizeAxis(190.0);  // -170
     //   Rotator<double>::NormalizeAxis(-180.0); // 180
     static T NormalizeAxis(T angleDegrees) noexcept {
