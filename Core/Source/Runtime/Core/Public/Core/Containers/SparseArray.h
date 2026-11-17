@@ -140,7 +140,7 @@ public:
         if (firstFree_ != NoIndex) {
             const usize index = firstFree_;
             Unlink(index);
-            ConstructAt<T>(&nodes_[index].value, Forward<Args>(args)...);
+            InitializeAt<T>(&nodes_[index].value, Forward<Args>(args)...);
             allocated_[index] = true;
             return Result<usize>::Success(index);
         }
@@ -158,7 +158,7 @@ public:
         }
         const usize index = allocated_.Find(false);
         Unlink(index);
-        ConstructAt<T>(&nodes_[index].value, Forward<Args>(args)...);
+        InitializeAt<T>(&nodes_[index].value, Forward<Args>(args)...);
         allocated_[index] = true;
         return Result<usize>::Success(index);
     }
@@ -176,7 +176,7 @@ public:
             return Result<usize>::Failure(ErrorCode::AlreadyExists);
         }
         Unlink(index);
-        ConstructAt<T>(&nodes_[index].value, Forward<Args>(args)...);
+        InitializeAt<T>(&nodes_[index].value, Forward<Args>(args)...);
         allocated_[index] = true;
         return Result<usize>::Success(index);
     }
@@ -190,7 +190,10 @@ public:
         if (!allocated_[index]) {
             return Result<void>::Failure(ErrorCode::NotFound);
         }
-        DestroyAt(&nodes_[index].value);
+        if constexpr (!IsTriviallyDestructibleV<T>) {
+            DestroyAt(&nodes_[index].value);
+        }
+
         allocated_[index] = false;
         PushFree(index);
         return Result<void>::Success();
@@ -254,8 +257,11 @@ public:
             do {
                 --last;
             } while (!allocated_[last]);
-            ConstructAt<T>(&nodes_[hole].value, Move(nodes_[last].value));
-            DestroyAt(&nodes_[last].value);
+            InitializeAt<T>(&nodes_[hole].value, Move(nodes_[last].value));
+            if constexpr (!IsTriviallyDestructibleV<T>) {
+                DestroyAt(&nodes_[last].value);
+            }
+
             allocated_[hole] = true;
             allocated_[last] = false;
             moved = true;
@@ -275,8 +281,11 @@ public:
                 continue;
             }
             if (read != write) {
-                ConstructAt<T>(&nodes_[write].value, Move(nodes_[read].value));
-                DestroyAt(&nodes_[read].value);
+                InitializeAt<T>(&nodes_[write].value, Move(nodes_[read].value));
+                if constexpr (!IsTriviallyDestructibleV<T>) {
+                    DestroyAt(&nodes_[read].value);
+                }
+
                 allocated_[write] = true;
                 allocated_[read] = false;
                 moved = true;
@@ -289,11 +298,14 @@ public:
 
     // 원소를 index 역순으로 소멸하고 용량은 유지한다. 모든 index가 무효가 된다.
     void Clear() noexcept {
-        for (usize index = maxIndex_; index != 0; --index) {
-            if (allocated_[index - 1]) {
-                DestroyAt(&nodes_[index - 1].value);
+        if constexpr (!IsTriviallyDestructibleV<T>) {
+            for (usize index = maxIndex_; index != 0; --index) {
+                if (allocated_[index - 1]) {
+                    DestroyAt(&nodes_[index - 1].value);
+                }
             }
         }
+
         allocated_.Clear();
         maxIndex_ = 0;
         freeCount_ = 0;
@@ -410,7 +422,7 @@ private:
         }
         // 기존 저장소가 아직 유효할 때 먼저 생성하므로 인자가 기존 원소를 가리켜도 된다. 이후
         // 단계는 실패하지 않는다.
-        ConstructAt<T>(&target[index].value, Forward<Args>(args)...);
+        InitializeAt<T>(&target[index].value, Forward<Args>(args)...);
         if (replacement != nullptr) {
             AdoptStorage(replacement, capacity);
         }
@@ -456,7 +468,7 @@ private:
         // 활성 멤버(value·link)는 사용할 때 정한다.
         auto* nodes = static_cast<Node*>(allocation.Value());
         for (usize index = 0; index < capacity; ++index) {
-            ConstructAt<Node>(nodes + index);
+            InitializeAt<Node>(nodes + index);
         }
         return Result<Node*>::Success(nodes);
     }
@@ -471,8 +483,10 @@ private:
     void RelocateTo(Node* replacement) noexcept {
         for (usize index = 0; index < maxIndex_; ++index) {
             if (allocated_[index]) {
-                ConstructAt<T>(&replacement[index].value, Move(nodes_[index].value));
-                DestroyAt(&nodes_[index].value);
+                InitializeAt<T>(&replacement[index].value, Move(nodes_[index].value));
+                if constexpr (!IsTriviallyDestructibleV<T>) {
+                    DestroyAt(&nodes_[index].value);
+                }
             } else {
                 replacement[index].link = nodes_[index].link;
             }

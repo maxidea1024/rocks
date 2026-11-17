@@ -181,7 +181,7 @@ public:
             const uint32 index = firstFree_;
             Slot& slot = slots_[index];
             const uint32 next = slot.next;
-            ConstructAt<T>(&slot.value, Forward<Args>(args)...);
+            InitializeAt<T>(&slot.value, Forward<Args>(args)...);
             slot.next = Occupied;
             firstFree_ = next;
             ++size_;
@@ -205,7 +205,7 @@ public:
         // 기존 저장소가 아직 유효할 때 먼저 생성하므로 인자가 기존 원소를 가리켜도 된다.
         const uint32 index = static_cast<uint32>(slotCount_);
         Slot& slot = target[index];
-        ConstructAt<T>(&slot.value, Forward<Args>(args)...);
+        InitializeAt<T>(&slot.value, Forward<Args>(args)...);
         slot.generation = 1;
         slot.next = Occupied;
         if (replacement != nullptr) {
@@ -225,7 +225,10 @@ public:
         if (!checked) {
             return checked;
         }
-        DestroyAt(&slots_[handle.index].value);
+        if constexpr (!IsTriviallyDestructibleV<T>) {
+            DestroyAt(&slots_[handle.index].value);
+        }
+
         FreeSlot(handle.index);
         return Result<void>::Success();
     }
@@ -238,7 +241,10 @@ public:
         }
         Slot& slot = slots_[handle.index];
         auto taken = Result<T>::Success(Move(slot.value));
-        DestroyAt(&slot.value);
+        if constexpr (!IsTriviallyDestructibleV<T>) {
+            DestroyAt(&slot.value);
+        }
+
         FreeSlot(handle.index);
         return taken;
     }
@@ -266,7 +272,10 @@ public:
     void Clear() noexcept {
         for (usize index = slotCount_; index != 0; --index) {
             if (slots_[index - 1].next == Occupied) {
-                DestroyAt(&slots_[index - 1].value);
+                if constexpr (!IsTriviallyDestructibleV<T>) {
+                    DestroyAt(&slots_[index - 1].value);
+                }
+
                 FreeSlot(static_cast<uint32>(index - 1));
             }
         }
@@ -405,7 +414,7 @@ private:
         // value는 생성하지 않는다.
         auto* slots = static_cast<Slot*>(allocation.Value());
         for (usize index = 0; index < capacity; ++index) {
-            ConstructAt<Slot>(slots + index);
+            InitializeAt<Slot>(slots + index);
         }
         return Result<Slot*>::Success(slots);
     }
@@ -422,8 +431,10 @@ private:
             Slot& source = slots_[index];
             Slot& target = replacement[index];
             if (source.next == Occupied) {
-                ConstructAt<T>(&target.value, Move(source.value));
-                DestroyAt(&source.value);
+                InitializeAt<T>(&target.value, Move(source.value));
+                if constexpr (!IsTriviallyDestructibleV<T>) {
+                    DestroyAt(&source.value);
+                }
             }
             target.generation = source.generation;
             target.next = source.next;
@@ -461,9 +472,11 @@ private:
     }
 
     void Release() noexcept {
-        for (usize index = slotCount_; index != 0; --index) {
-            if (slots_[index - 1].next == Occupied) {
-                DestroyAt(&slots_[index - 1].value);
+        if constexpr (!IsTriviallyDestructibleV<T>) {
+            for (usize index = slotCount_; index != 0; --index) {
+                if (slots_[index - 1].next == Occupied) {
+                    DestroyAt(&slots_[index - 1].value);
+                }
             }
         }
         FreeStorage(slots_);

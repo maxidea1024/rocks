@@ -286,7 +286,7 @@ public:
             platform::Fatal("BitArray allocator returned invalid storage");
         }
         for (usize i = 0; i < words; ++i) {
-            ConstructAt<uint64>(replacement + i, i < wordCapacity_ ? words_[i] : 0);
+            InitializeAt<uint64>(replacement + i, i < wordCapacity_ ? words_[i] : 0);
         }
         FreeWords();
         words_ = replacement;

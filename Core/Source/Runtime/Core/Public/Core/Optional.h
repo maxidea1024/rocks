@@ -39,12 +39,12 @@ public:
     Optional(const T& value) noexcept
         requires(IsNothrowConstructibleV<T, const T&>)
     {
-        ConstructAt<T>(storage_, value);
+        InitializeAt<T>(storage_, value);
         hasValue_ = true;
     }
 
     Optional(T&& value) noexcept {
-        ConstructAt<T>(storage_, Move(value));
+        InitializeAt<T>(storage_, Move(value));
         hasValue_ = true;
     }
 
@@ -52,14 +52,14 @@ public:
         requires(IsNothrowConstructibleV<T, const T&>)
     {
         if (other.hasValue_) {
-            ConstructAt<T>(storage_, other.Get());
+            InitializeAt<T>(storage_, other.Get());
             hasValue_ = true;
         }
     }
 
     Optional(Optional&& other) noexcept {
         if (other.hasValue_) {
-            ConstructAt<T>(storage_, Move(other.Get()));
+            InitializeAt<T>(storage_, Move(other.Get()));
             hasValue_ = true;
         }
     }
@@ -152,7 +152,9 @@ public:
     void Reset() noexcept {
         if (hasValue_) {
             hasValue_ = false;
-            DestroyAt(&Get());
+            if constexpr (!IsTriviallyDestructibleV<T>) {
+                DestroyAt(&Get());
+            }
         }
     }
 
@@ -164,7 +166,7 @@ public:
                       "Optional::Emplace requires a noexcept constructor");
         T replacement(Forward<Args>(args)...);
         Reset();
-        ConstructAt<T>(storage_, Move(replacement));
+        InitializeAt<T>(storage_, Move(replacement));
         hasValue_ = true;
         return Get();
     }

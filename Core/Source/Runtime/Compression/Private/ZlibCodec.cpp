@@ -79,7 +79,7 @@ Result<ZlibState*> CreateState(CompressionFormat format, Allocator& allocator,
         return Result<ZlibState*>::Failure(ErrorCode::OutOfMemory);
     }
 
-    ZlibState* state = ConstructAt<ZlibState>(memory);
+    ZlibState* state = InitializeAt<ZlibState>(memory);
     *state = ZlibState{};
     state->allocator = &allocator;
     state->format = format;

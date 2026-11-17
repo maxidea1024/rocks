@@ -246,9 +246,9 @@ public:
         }
 
         const usize position = used_;
-        Entry* entry = ConstructAt<Entry>(entries_ + position);
-        ConstructAt<K>(entry->key, Forward<KeyArg>(key));
-        ConstructAt<V>(entry->value, Forward<ValueArg>(value));
+        Entry* entry = InitializeAt<Entry>(entries_ + position);
+        InitializeAt<K>(entry->key, Forward<KeyArg>(key));
+        InitializeAt<V>(entry->value, Forward<ValueArg>(value));
         entry->hash = hash;
         entry->alive = true;
         if (PlaceInIndex(index_, SlotCount(), hash, position)) {
@@ -419,8 +419,13 @@ public:
         entry.alive = false;
         --count_;
         ++revision_;
-        DestroyAt(entry.Value());
-        DestroyAt(entry.Key());
+        if constexpr (!IsTriviallyDestructibleV<V>) {
+            DestroyAt(entry.Value());
+        }
+
+        if constexpr (!IsTriviallyDestructibleV<K>) {
+            DestroyAt(entry.Key());
+        }
     }
 
     void EraseAt(usize position) noexcept {
@@ -439,8 +444,13 @@ public:
         --count_;
         ++revision_;
         taker(Move(*entry.Key()), Move(*entry.Value()));
-        DestroyAt(entry.Value());
-        DestroyAt(entry.Key());
+        if constexpr (!IsTriviallyDestructibleV<V>) {
+            DestroyAt(entry.Value());
+        }
+
+        if constexpr (!IsTriviallyDestructibleV<K>) {
+            DestroyAt(entry.Key());
+        }
     }
 
     // 대량 삭제에서 칸을 하나씩 찾아 지우는 수가 EagerEraseLimit()을 넘으면 쓰는 길이다. 항목만
@@ -451,8 +461,13 @@ public:
         entry.alive = false;
         --count_;
         ++revision_;
-        DestroyAt(entry.Value());
-        DestroyAt(entry.Key());
+        if constexpr (!IsTriviallyDestructibleV<V>) {
+            DestroyAt(entry.Value());
+        }
+
+        if constexpr (!IsTriviallyDestructibleV<K>) {
+            DestroyAt(entry.Key());
+        }
     }
 
     // 한 번의 대량 삭제에서 칸을 하나씩 찾아 지우는 최대 수(칸 수/8 — 용량에 비례)다. 넘는 삭제는
@@ -609,7 +624,7 @@ private:
         uint32* index = reinterpret_cast<uint32*>(indexStorage);
         const usize slotCount = newCapacity * 2;
         for (usize slot = 0; slot < slotCount; ++slot) {
-            ConstructAt<uint32>(index + slot, EmptySlot);
+            InitializeAt<uint32>(index + slot, EmptySlot);
         }
 
         usize target = 0;
@@ -619,14 +634,20 @@ private:
                 continue;
             }
 
-            Entry* moved = ConstructAt<Entry>(entries + target);
-            ConstructAt<K>(moved->key, Move(*old.Key()));
-            ConstructAt<V>(moved->value, Move(*old.Value()));
+            Entry* moved = InitializeAt<Entry>(entries + target);
+            InitializeAt<K>(moved->key, Move(*old.Key()));
+            InitializeAt<V>(moved->value, Move(*old.Value()));
             moved->hash = old.hash;
             moved->alive = true;
             old.alive = false;
-            DestroyAt(old.Value());
-            DestroyAt(old.Key());
+            if constexpr (!IsTriviallyDestructibleV<V>) {
+                DestroyAt(old.Value());
+            }
+
+            if constexpr (!IsTriviallyDestructibleV<K>) {
+                DestroyAt(old.Key());
+            }
+
             PlaceInIndex(index, slotCount, moved->hash, target);
             ++target;
         }
@@ -653,13 +674,19 @@ private:
             if (position != target) {
                 const usize slot = SlotOfPosition(entry.hash, position);
                 Entry& destination = entries_[target];
-                ConstructAt<K>(destination.key, Move(*entry.Key()));
-                ConstructAt<V>(destination.value, Move(*entry.Value()));
+                InitializeAt<K>(destination.key, Move(*entry.Key()));
+                InitializeAt<V>(destination.value, Move(*entry.Value()));
                 destination.hash = entry.hash;
                 destination.alive = true;
                 entry.alive = false;
-                DestroyAt(entry.Value());
-                DestroyAt(entry.Key());
+                if constexpr (!IsTriviallyDestructibleV<V>) {
+                    DestroyAt(entry.Value());
+                }
+
+                if constexpr (!IsTriviallyDestructibleV<K>) {
+                    DestroyAt(entry.Key());
+                }
+
                 index_[slot] = static_cast<uint32>(target);
             }
 
@@ -673,16 +700,24 @@ private:
     // 산 항목을 하나씩 논리적으로 지운 뒤(산 표시·개수) 소멸시킨다 — 원소 소멸의 해제 콜백은 아직
     // 남은 항목만 산 것으로 본다.
     void DestroyEntries() noexcept {
-        for (usize position = 0; position < used_; ++position) {
-            Entry& entry = entries_[position];
-            if (entry.alive) {
-                entry.alive = false;
-                --count_;
-                DestroyAt(entry.Value());
-                DestroyAt(entry.Key());
+        if constexpr (!IsTriviallyDestructibleV<K> || !IsTriviallyDestructibleV<V>) {
+            for (usize position = 0; position < used_; ++position) {
+                Entry& entry = entries_[position];
+                if (entry.alive) {
+                    entry.alive = false;
+                    --count_;
+                    if constexpr (!IsTriviallyDestructibleV<V>) {
+                        DestroyAt(entry.Value());
+                    }
+
+                    if constexpr (!IsTriviallyDestructibleV<K>) {
+                        DestroyAt(entry.Key());
+                    }
+                }
             }
         }
 
+        // trivial K/V는 카운터만 비운다. 이후 Append가 각 Entry의 수명을 다시 시작한다.
         used_ = 0;
         count_ = 0;
     }

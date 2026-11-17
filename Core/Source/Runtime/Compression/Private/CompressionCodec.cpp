@@ -35,7 +35,7 @@ struct Registry {
 // 소멸된 mutex를 쓰지 않는다. 첫 호출에서 thread-safe하게 만든다(정적 초기화 순서와 무관하다).
 Registry& Codecs() noexcept {
     alignas(Registry) static unsigned char storage[sizeof(Registry)];
-    static Registry* registry = ConstructAt<Registry>(storage);
+    static Registry* registry = InitializeAt<Registry>(storage);
     return *registry;
 }
 

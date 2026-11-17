@@ -747,8 +747,11 @@ private:
                     return Result<InsertOutcome>::Failure(ErrorCode::InvalidArgument);
                 }
 
-                DestroyAt(entry.Value());
-                ConstructAt<V>(entry.value, Forward<ValueArg>(value));
+                if constexpr (!IsTriviallyDestructibleV<V>) {
+                    DestroyAt(entry.Value());
+                }
+
+                InitializeAt<V>(entry.value, Forward<ValueArg>(value));
             }
 
             if (resultValue != nullptr) {

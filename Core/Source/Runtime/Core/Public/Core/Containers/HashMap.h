@@ -302,8 +302,14 @@ public:
             return false;
         }
         Slot& slot = slots_[index];
-        DestroyAt(slot.Value());
-        DestroyAt(slot.Key());
+        if constexpr (!IsTriviallyDestructibleV<V>) {
+            DestroyAt(slot.Value());
+        }
+
+        if constexpr (!IsTriviallyDestructibleV<K>) {
+            DestroyAt(slot.Key());
+        }
+
         slot.state = State::Deleted;
         --size_;
         ++revision_;
@@ -343,8 +349,13 @@ public:
             ++revision_;
             ++deleted_;
             ++removed;
-            DestroyAt(slot.Value());
-            DestroyAt(slot.Key());
+            if constexpr (!IsTriviallyDestructibleV<V>) {
+                DestroyAt(slot.Value());
+            }
+
+            if constexpr (!IsTriviallyDestructibleV<K>) {
+                DestroyAt(slot.Key());
+            }
         }
         --iterationDepth_;
         if (removed != 0 && size_ == 0) {
@@ -363,7 +374,7 @@ public:
     void Reset() noexcept {
         CheckNotIterating();
         ClearSlots();
-        FreeSlots(slots_, slotCount_);
+        FreeSlots(slots_);
         slots_ = nullptr;
         slotCount_ = 0;
     }
@@ -623,8 +634,11 @@ private:
                     (!safeSharedInput && ArgumentsOverlap(key, value))) {
                     return Result<InsertOutcome>::Failure(ErrorCode::InvalidArgument);
                 }
-                DestroyAt(slots_[existing].Value());
-                ConstructAt<V>(slots_[existing].value, Forward<ValueArg>(value));
+                if constexpr (!IsTriviallyDestructibleV<V>) {
+                    DestroyAt(slots_[existing].Value());
+                }
+
+                InitializeAt<V>(slots_[existing].value, Forward<ValueArg>(value));
             }
             if (resultValue != nullptr) {
                 *resultValue = slots_[existing].Value();
@@ -686,8 +700,8 @@ private:
         if (target.state == State::Deleted) {
             --deleted_;
         }
-        ConstructAt<K>(target.key, Forward<KeyArg>(key));
-        ConstructAt<V>(target.value, Forward<ValueArg>(value));
+        InitializeAt<K>(target.key, Forward<KeyArg>(key));
+        InitializeAt<V>(target.value, Forward<ValueArg>(value));
         target.hash = hash;
         target.state = State::Occupied;
         ++size_;
@@ -749,7 +763,7 @@ private:
 
         // 할당에 성공한 뒤에만 이전 객체를 noexcept 이동하고 수명을 끝낸다.
         for (usize i = 0; i < count; ++i) {
-            ConstructAt<Slot>(replacement + i);
+            InitializeAt<Slot>(replacement + i);
         }
         for (usize i = 0; i < slotCount_; ++i) {
             Slot& old = slots_[i];
@@ -761,15 +775,21 @@ private:
                 index = (index + 1) & (count - 1);
             }
             Slot& dest = replacement[index];
-            ConstructAt<K>(dest.key, Move(*old.Key()));
-            ConstructAt<V>(dest.value, Move(*old.Value()));
+            InitializeAt<K>(dest.key, Move(*old.Key()));
+            InitializeAt<V>(dest.value, Move(*old.Value()));
             dest.hash = old.hash;
             dest.state = State::Occupied;
-            DestroyAt(old.Value());
-            DestroyAt(old.Key());
+            if constexpr (!IsTriviallyDestructibleV<V>) {
+                DestroyAt(old.Value());
+            }
+
+            if constexpr (!IsTriviallyDestructibleV<K>) {
+                DestroyAt(old.Key());
+            }
+
             old.state = State::Empty;
         }
-        FreeSlots(slots_, slotCount_);
+        FreeSlots(slots_);
         slots_ = replacement;
         slotCount_ = count;
         deleted_ = 0;
@@ -781,8 +801,13 @@ private:
         for (usize i = 0; i < slotCount_; ++i) {
             Slot& slot = slots_[i];
             if (slot.state == State::Occupied) {
-                DestroyAt(slot.Value());
-                DestroyAt(slot.Key());
+                if constexpr (!IsTriviallyDestructibleV<V>) {
+                    DestroyAt(slot.Value());
+                }
+
+                if constexpr (!IsTriviallyDestructibleV<K>) {
+                    DestroyAt(slot.Key());
+                }
             }
             slot.state = State::Empty;
         }
@@ -791,13 +816,12 @@ private:
         ++revision_;
     }
 
-    void FreeSlots(Slot* slots, usize count) noexcept {
+    void FreeSlots(Slot* slots) noexcept {
         if (!slots) {
             return;
         }
-        for (usize i = 0; i < count; ++i) {
-            DestroyAt(slots + i);
-        }
+        // Slot은 raw K/V 저장소와 메타데이터다. 실제 K/V의 소멸은 caller가 담당한다.
+        static_assert(IsTriviallyDestructibleV<Slot>);
         if (!allocator_->Deallocate(slots)) {
             platform::Fatal("HashMap storage was not owned by its allocator");
         }

@@ -148,7 +148,7 @@ public:
         if (!memory) {
             return Result<Delegate>::Failure(memory.Error());
         }
-        Stored* stored = ConstructAt<Stored>(memory.Value(), Forward<Callable>(callable));
+        Stored* stored = InitializeAt<Stored>(memory.Value(), Forward<Callable>(callable));
         Delegate result;
         result.template Emplace<HeapLambdaTarget<Stored>>(stored, &allocator);
         return Result<Delegate>::Success(Move(result));
@@ -316,7 +316,10 @@ private:
 
         ~HeapLambdaTarget() noexcept {
             if (callable != nullptr) {
-                DestroyAt(callable);
+                if constexpr (!IsTriviallyDestructibleV<Stored>) {
+                    DestroyAt(callable);
+                }
+
                 if (!allocator->Deallocate(callable)) {
                     platform::Fatal("Delegate lambda storage release failed");
                 }
@@ -469,10 +472,16 @@ private:
         },
         [](void* from, void* to) noexcept {
             Target& source = TargetAt<Target>(from);
-            ConstructAt<Target>(to, Move(source));
-            DestroyAt(&source);
+            InitializeAt<Target>(to, Move(source));
+            if constexpr (!IsTriviallyDestructibleV<Target>) {
+                DestroyAt(&source);
+            }
         },
-        [](void* storage) noexcept { DestroyAt(&TargetAt<Target>(storage)); },
+        [](void* storage) noexcept {
+            if constexpr (!IsTriviallyDestructibleV<Target>) {
+                DestroyAt(&TargetAt<Target>(storage));
+            }
+        },
     };
 
     template <typename Target, typename... TargetArgs>
@@ -483,7 +492,7 @@ private:
         static_assert(IsNothrowMoveConstructibleV<Target>,
                       "Delegate target needs a noexcept move constructor");
         static_assert(IsNothrowDestructibleV<Target>, "Delegate target needs noexcept destruction");
-        ConstructAt<Target>(storage_, Forward<TargetArgs>(arguments)...);
+        InitializeAt<Target>(storage_, Forward<TargetArgs>(arguments)...);
         ops_ = &OpsFor<Target>;
     }
 
@@ -616,7 +625,7 @@ public:
         if (!memory) {
             return Result<DelegateHandle>::Failure(memory.Error());
         }
-        Entry* entry = ConstructAt<Entry>(memory.Value(), nextId_++, Move(delegate));
+        Entry* entry = InitializeAt<Entry>(memory.Value(), nextId_++, Move(delegate));
         if (!entries_.TryPushBack(entry)) {
             platform::Fatal("MulticastDelegate reserved push failed");
         }

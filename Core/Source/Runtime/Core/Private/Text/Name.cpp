@@ -324,7 +324,7 @@ Result<Name> NamePool::TryIntern(StringView source) noexcept {
         platform::Fatal("Allocator returned null for a nonzero name allocation");
     }
 
-    Entry* candidate = ConstructAt<Entry>(allocation.Value());
+    Entry* candidate = InitializeAt<Entry>(allocation.Value());
     candidate->hash = hash;
     candidate->number = parsed.number;
     candidate->baseBytes = parsed.baseBytes;
@@ -533,7 +533,7 @@ void NamePool::FinishOperation(usize reservedBytes) noexcept {
 }
 
 void NamePool::FreeEntry(Entry* entry) noexcept {
-    DestroyAt(entry);
+    static_assert(IsTriviallyDestructibleV<RemovePointerT<decltype(entry)>>);
     if (!allocator_->Deallocate(entry)) {
         platform::Fatal("Name entry storage was not owned by its allocator");
     }

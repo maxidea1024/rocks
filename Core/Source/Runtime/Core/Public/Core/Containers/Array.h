@@ -136,7 +136,7 @@ public:
         }
 
         if (size_ < capacity_) {
-            T* value = ConstructAt<T>(data_ + size_, Forward<Args>(args)...);
+            T* value = InitializeAt<T>(data_ + size_, Forward<Args>(args)...);
             ++size_;
             return Result<T*>::Success(value);
         }
@@ -150,7 +150,7 @@ public:
         T* replacement = allocation.Value();
         // 새 tail을 기존 buffer가 유효할 때 먼저 생성하여 자기 원소 인자를 안전하게 읽는다.
         // 할당 실패는 이 지점 전에 반환하며, 이후 이동·소멸은 noexcept이므로 rollback이 필요 없다.
-        T* value = ConstructAt<T>(replacement + size_, Forward<Args>(args)...);
+        T* value = InitializeAt<T>(replacement + size_, Forward<Args>(args)...);
         RelocateTo(replacement);
         data_ = replacement;
         capacity_ = capacity;
@@ -181,11 +181,13 @@ public:
             // 이동으로 입력 별칭이 바뀌기 전에 새 원소를 확보한다.
             T staged(Forward<Args>(args)...);
             for (usize i = size_; i > index; --i) {
-                ConstructAt<T>(data_ + i, Move(data_[i - 1]));
-                DestroyAt(data_ + i - 1);
+                InitializeAt<T>(data_ + i, Move(data_[i - 1]));
+                if constexpr (!IsTriviallyDestructibleV<T>) {
+                    DestroyAt(data_ + i - 1);
+                }
             }
 
-            T* inserted = ConstructAt<T>(data_ + index, Move(staged));
+            T* inserted = InitializeAt<T>(data_ + index, Move(staged));
             ++size_;
             return Result<T*>::Success(inserted);
         }
@@ -198,17 +200,19 @@ public:
 
         T* replacement = allocation.Value();
         // 원본이 살아 있을 때 새 원소부터 만들어 자기 원소 인자를 보호한다.
-        T* inserted = ConstructAt<T>(replacement + index, Forward<Args>(args)...);
+        T* inserted = InitializeAt<T>(replacement + index, Forward<Args>(args)...);
         for (usize i = 0; i < index; ++i) {
-            ConstructAt<T>(replacement + i, Move(data_[i]));
+            InitializeAt<T>(replacement + i, Move(data_[i]));
         }
 
         for (usize i = index; i < size_; ++i) {
-            ConstructAt<T>(replacement + i + 1, Move(data_[i]));
+            InitializeAt<T>(replacement + i + 1, Move(data_[i]));
         }
 
-        for (usize i = size_; i != 0; --i) {
-            DestroyAt(data_ + i - 1);
+        if constexpr (!IsTriviallyDestructibleV<T>) {
+            for (usize i = size_; i != 0; --i) {
+                DestroyAt(data_ + i - 1);
+            }
         }
 
         FreeStorage(data_);
@@ -244,7 +248,7 @@ public:
         const usize newSize = size_ + values.Size();
         if (newSize <= capacity_) {
             for (usize i = 0; i < values.Size(); ++i) {
-                ConstructAt<T>(data_ + size_ + i, values[i]);
+                InitializeAt<T>(data_ + size_ + i, values[i]);
             }
 
             size_ = newSize;
@@ -260,7 +264,7 @@ public:
         T* replacement = allocation.Value();
         // source가 자기 배열일 때도 relocation 전에 새 tail을 복사한다.
         for (usize i = 0; i < values.Size(); ++i) {
-            ConstructAt<T>(replacement + size_ + i, values[i]);
+            InitializeAt<T>(replacement + size_ + i, values[i]);
         }
 
         RelocateTo(replacement);
@@ -293,7 +297,7 @@ public:
         const usize newSize = size_ + values.size_;
         if (newSize <= capacity_) {
             for (usize i = 0; i < values.size_; ++i) {
-                ConstructAt<T>(data_ + size_ + i, Move(values.data_[i]));
+                InitializeAt<T>(data_ + size_ + i, Move(values.data_[i]));
             }
 
             values.Clear();
@@ -309,7 +313,7 @@ public:
 
         T* replacement = allocation.Value();
         for (usize i = 0; i < values.size_; ++i) {
-            ConstructAt<T>(replacement + size_ + i, Move(values.data_[i]));
+            InitializeAt<T>(replacement + size_ + i, Move(values.data_[i]));
         }
 
         RelocateTo(replacement);
@@ -344,7 +348,7 @@ public:
 
         if (newSize <= capacity_) {
             for (usize i = size_; i < newSize; ++i) {
-                ConstructAt<T>(data_ + i);
+                InitializeAt<T>(data_ + i);
             }
 
             size_ = newSize;
@@ -359,7 +363,7 @@ public:
 
         T* replacement = allocation.Value();
         for (usize i = size_; i < newSize; ++i) {
-            ConstructAt<T>(replacement + i);
+            InitializeAt<T>(replacement + i);
         }
 
         RelocateTo(replacement);
@@ -420,13 +424,17 @@ public:
             return Result<void>::Success();
         }
 
-        for (usize i = index + count; i != index; --i) {
-            DestroyAt(data_ + i - 1);
+        if constexpr (!IsTriviallyDestructibleV<T>) {
+            for (usize i = index + count; i != index; --i) {
+                DestroyAt(data_ + i - 1);
+            }
         }
 
         for (usize i = index + count; i < size_; ++i) {
-            ConstructAt<T>(data_ + i - count, Move(data_[i]));
-            DestroyAt(data_ + i);
+            InitializeAt<T>(data_ + i - count, Move(data_[i]));
+            if constexpr (!IsTriviallyDestructibleV<T>) {
+                DestroyAt(data_ + i);
+            }
         }
 
         size_ -= count;
@@ -444,14 +452,18 @@ public:
 
         const usize trailing = size_ - index - count;
         const usize moved = trailing < count ? trailing : count;
-        for (usize i = index + count; i != index; --i) {
-            DestroyAt(data_ + i - 1);
+        if constexpr (!IsTriviallyDestructibleV<T>) {
+            for (usize i = index + count; i != index; --i) {
+                DestroyAt(data_ + i - 1);
+            }
         }
 
         for (usize i = 0; i < moved; ++i) {
             const usize source = size_ - moved + i;
-            ConstructAt<T>(data_ + index + i, Move(data_[source]));
-            DestroyAt(data_ + source);
+            InitializeAt<T>(data_ + index + i, Move(data_[source]));
+            if constexpr (!IsTriviallyDestructibleV<T>) {
+                DestroyAt(data_ + source);
+            }
         }
 
         size_ -= count;
@@ -466,7 +478,10 @@ public:
 
         T value(Move(data_[size_ - 1]));
         --size_;
-        DestroyAt(data_ + size_);
+        if constexpr (!IsTriviallyDestructibleV<T>) {
+            DestroyAt(data_ + size_);
+        }
+
         return Result<T>::Success(Move(value));
     }
 
@@ -691,11 +706,13 @@ private:
     // replacement의 충분한 공간과 비중첩은 이 함수를 호출하는 할당 경로가 보장한다.
     void RelocateTo(T* replacement) noexcept {
         for (usize index = 0; index < size_; ++index) {
-            ConstructAt<T>(replacement + index, Move(data_[index]));
+            InitializeAt<T>(replacement + index, Move(data_[index]));
         }
 
-        for (usize index = size_; index != 0; --index) {
-            DestroyAt(data_ + index - 1);
+        if constexpr (!IsTriviallyDestructibleV<T>) {
+            for (usize index = size_; index != 0; --index) {
+                DestroyAt(data_ + index - 1);
+            }
         }
 
         FreeStorage(data_);

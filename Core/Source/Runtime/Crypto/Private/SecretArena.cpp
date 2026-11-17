@@ -372,7 +372,7 @@ struct SecretMemory {
 
 SecretMemory& Instance() noexcept {
     alignas(SecretMemory) static unsigned char storage[sizeof(SecretMemory)];
-    static SecretMemory* const instance = ConstructAt<SecretMemory>(storage);
+    static SecretMemory* const instance = InitializeAt<SecretMemory>(storage);
     return *instance;
 }
 
