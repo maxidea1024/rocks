@@ -154,6 +154,18 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
             return Result<void>::Failure(found.Error());
         }
 
+        // Deprecated 클래스는 새로 쓰지 못하지만 지금 값과 같은 값의 재기록(asset-info → asset-set
+        // 왕복·undo·붙여넣기)은 받는다(생성 write는 같은 값이면 아무것도 하지 않는다 — 리플렉션
+        // B9h2).
+        if (HasFlag(found.Value().Schema().flags, TypeFlags::Deprecated)) {
+            const RuntimeFieldOps* ops = type.Value().FieldOps(actualIndex);
+            FieldValue current(value.GetAllocator());
+            if (!ops || !ops->read || !ops->read(registry, access, handle, current) ||
+                current.kind != ValueKind::ClassReference || current.guid != value.guid) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+        }
+
         if (referencedType_ != TypeId{} && !found.Value().IsA(referencedType_)) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
@@ -180,9 +192,9 @@ namespace detail {
 Result<void> ValidateFieldWrite(const FieldWriteBinding& binding, const FieldWriteTarget& target,
                                 const FieldValue& value) noexcept {
     const ValueKind kind = binding.value.kind;
-    // 원소 모드는 배열 필드의 원소·Map 필드의 값 형식과 대조한다(리플렉션 B9f3 — Map key 단계
-    // 쓰기).
-    if (!target.actual || (target.element && target.actual->value.kind != ValueKind::Array &&
+    // 원소 모드는 배열·정적 배열 필드의 원소·Map 필드의 값 형식과 대조한다(리플렉션 B9f3 — Map
+    // key 단계 쓰기, B9g — 정적 배열 [i] 쓰기).
+    if (!target.actual || (target.element && !ValueKindTakesIndex(target.actual->value.kind) &&
                            target.actual->value.kind != ValueKind::Map)) {
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
@@ -338,8 +350,8 @@ Result<void> ValidateClassReference(ObjectRegistry& registry, const ObjectAccess
         return Result<void>::Success();
     }
 
-    auto checked =
-        CheckClassReferenceLease(registry.AcquireRegisteredType(access, value), base, baseNative);
+    auto checked = CheckWritableClassReferenceLease(registry.AcquireRegisteredType(access, value),
+                                                    base, baseNative);
     if (!checked) {
         return Result<void>::Failure(checked.Error());
     }

@@ -1,0 +1,86 @@
+{
+  "schema": 1,
+  "kind": "binary",
+  "name": "SpirvTools",
+  "version": "1.4.363.0",
+  "upstreamDirectory": "spirv-tools-1.4.363.0",
+  "licenses": [
+    {
+      "spdx": "Apache-2.0",
+      "upstreamExpression": "Apache-2.0",
+      "file": "spirv-tools-1.4.363.0/LICENSE",
+      "binaryNoticeRequired": true
+    }
+  ],
+  "includeDirectories": [
+    "spirv-tools-1.4.363.0/include"
+  ],
+  "consumerDefines": [],
+  "adapterHeaders": [
+    "spirv-tools-1.4.363.0/include/spirv-tools/libspirv.h"
+  ],
+  "files": {
+    "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "include/spirv-tools/libspirv.h": "1fb0b5b10bbdee783285d99f7de2440d5976d7d9993a35f4d751233a55156c5f"
+  },
+  "pragmaDirectives": [],
+  "build": {
+    "tag": "vulkan-sdk-1.4.363.0",
+    "revision": 1,
+    "source": {
+      "repository": "https://github.com/KhronosGroup/SPIRV-Tools",
+      "commit": "ef96ed763b43b59b33b31b362f09a02b729fa1c9",
+      "url": "https://github.com/KhronosGroup/SPIRV-Tools/archive/ef96ed763b43b59b33b31b362f09a02b729fa1c9.tar.gz",
+      "sha256": "82c62146083fd558735a3171cf97cfc47903ca7d368482e87f94bd44883c0f00"
+    },
+    "dependencies": [
+      {
+        "path": "external/spirv-headers",
+        "repository": "https://github.com/KhronosGroup/SPIRV-Headers",
+        "commit": "496543121ce6419f23d6fa5d7194ba66c36212d2",
+        "url": "https://github.com/KhronosGroup/SPIRV-Headers/archive/496543121ce6419f23d6fa5d7194ba66c36212d2.tar.gz",
+        "sha256": "a9bb9c48713245eacf97cc539b6f1d45405a92d8813f8b82e635f0a085ee9898"
+      }
+    ],
+    "scripts": [
+      "Build/Build.ps1",
+      "Build/Build.sh",
+      "Build/SpirvToolsC.cmake"
+    ],
+    "patches": []
+  },
+  "hosts": {
+    "windows-x64": {
+      "archive": {
+        "url": "https://github.com/maxidea1024/rocks/releases/download/third-party-SpirvTools-1.4.363.0-r1/SpirvTools-1.4.363.0-r1-windows-x64.tar.gz",
+        "sha256": "5ab1b42f05e9247c7b5ad5f49a2d92b3c0eb069fd8a73f652e837f0c0820d2bc",
+        "size": 12257239
+      },
+      "files": [
+        {
+          "path": "bin/SPIRV-Tools-c.dll",
+          "sha256": "3b01a06cced8199a4bb057fe07156cbb039fd24e2da66600aec38c74575cb298",
+          "size": 3644416,
+          "role": "runtime"
+        },
+        {
+          "path": "bin/SPIRV-Tools-c.pdb",
+          "sha256": "2abb62997ffc0e59ace1aa9603c0f7338c8a9957be5ec5cddc8af7aeabdbd0bf",
+          "size": 44085248,
+          "role": "symbols"
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "size": 11358,
+          "role": "notice"
+        }
+      ]
+    }
+  },
+  "notes": [
+    "Built from the external/SPIRV-Tools and external/SPIRV-Headers submodule commits of DXC v1.9.2609 (= Vulkan SDK 1.4.363.0 tag). So spirv-val is the same version as the SPIR-V DXC produces.",
+    "The libspirv.h C API (spvValidate and the like, plus the optimizer C API) is built as one shared library (SPIRV-Tools-c). The upstream shared build does not link on Windows because SPIRV-Tools-opt uses core's internal C++ symbols across the DLL boundary, so the two static libraries are compiled to export only the C API and bundled with whole-archive in a CMake wrapper (Build/SpirvToolsC.cmake). Upstream sources are not modified.",
+    "There is no macos-arm64 output yet (Build.sh unverified)."
+  ]
+}

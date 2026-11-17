@@ -5,7 +5,8 @@
 #include <Compression/CompressionDictionary.h>
 #include <Compression/CompressionStream.h>
 
-// 압축 모듈 내부 경계다. 공개 API(Compression.cpp)·비동기(AsyncCompression.cpp)와 코덱
+// 압축 모듈 내부 경계다. 공개 API(Compression.cpp)·비동기(AsyncCompression 모듈의
+// AsyncCompression.cpp)와 코덱
 // adapter(Lz4Codec.cpp·Lz4FrameCodec.cpp·ZstdCodec.cpp·ZlibCodec.cpp·BrotliCodec.cpp),
 // 사용자 등록 형식 표(CompressionCodec.cpp) 사이의 계약만 둔다. 외부 코덱 헤더는 각 adapter
 // 번역 단위만 포함한다.

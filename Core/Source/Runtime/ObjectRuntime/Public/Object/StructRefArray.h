@@ -91,6 +91,12 @@ struct StructRefArrayAccess {
     static const StructRefArrayStorage& Storage(const StructRefArray<S>& array) noexcept {
         return array.storage_;
     }
+
+    // 경로로 찾은 배열을 원소 지우기 준비물(PreparedStructElements — 리플렉션 B9i3c4)에 묶는다.
+    template <class S>
+    static StructRefArrayStorage& Storage(StructRefArray<S>& array) noexcept {
+        return array.storage_;
+    }
 };
 
 } // namespace detail

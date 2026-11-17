@@ -163,6 +163,25 @@ struct MapField<ObjectRefMap<K, T>> {
     using Value = ObjectRef<T>;
 };
 
+// 리플렉션 정적 배열 필드(T x[N] — 리플렉션 B9g, Docs/Design/ReflectionExtensions.ko.md 8절)다.
+// 부분 특수화로만 고르며 Element는 원소 C++ 형식(단일 값·ObjectRef·WeakRef·ClassRef·SoftObjectRef·
+// enum·struct — 참조 struct 포함), Count는 N이다. 원소가 소유 객체 저장소 안에 있으므로 Registry
+// 컨테이너가 아니다(ObjectRef 원소의 쓰기는 SetReference의 주소 범위 검사를 그대로 지난다).
+// 다차원 배열(T x[M][N])은 Element가 다시 배열이라 FieldValueKind가 StaticArray이고 성질 표의
+// 정적 배열 원소가 아니므로 생성 codec의 static_assert가 거부한다(MetaCompiler RMC2307이 먼저
+// 막는다).
+template <class T>
+struct StaticArrayField {
+    static constexpr bool Supported = false;
+};
+
+template <class E, usize N>
+struct StaticArrayField<E[N]> {
+    static constexpr bool Supported = true;
+    static constexpr usize Count = N;
+    using Element = E;
+};
+
 // 빈 자리에 새로 만드는 값이다: noexcept E(Allocator&)가 있으면 allocator를 넘기고 없으면 E()다
 // (Optional의 새 내부 값·경로가 넣는 원소 — MakeRuntimeStructOps와 같은 규칙). allocator는 보통
 // 객체 allocator(ObjectRegistry::ObjectAllocator)다.
@@ -242,12 +261,15 @@ constexpr ValueKind ScalarValueKind() noexcept {
     }
 }
 
-// C++ 멤버 형식의 필드 값 종류다: 리플렉션 배열 컨테이너는 Array, Optional<T>는 Optional,
+// C++ 멤버 형식의 필드 값 종류다: 정적 배열 T[N]은 StaticArray, 리플렉션 배열 컨테이너는 Array,
+// Optional<T>는 Optional,
 // OrderedMap<K, V>·OrderedSet<T>는 Map·Set, 단일 값은 ScalarValueKind, 리플렉션 enum·struct는
 // Enum·Struct, 그 밖은 Opaque다(단일 값 형식 대응은 ScalarValueKind 한 곳에 있다).
 template <class T>
 constexpr ValueKind FieldValueKind() noexcept {
-    if constexpr (ArrayField<T>::Supported) {
+    if constexpr (StaticArrayField<T>::Supported) {
+        return ValueKind::StaticArray;
+    } else if constexpr (ArrayField<T>::Supported) {
         return ValueKind::Array;
     } else if constexpr (OptionalField<T>::Supported) {
         return ValueKind::Optional;
@@ -754,7 +776,13 @@ Result<void> WriteGeneratedField(ObjectRegistry& registry, const ObjectAccessCon
                                           [&]() noexcept { return borrowed.Value().Get(); });
     } else if constexpr (ClassReferenceField<Member>::Supported) {
         // ClassRef 값은 이 Registry에 등록된 클래스이고 정적 Base의 파생이어야 한다(null 허용 —
-        // 등록된 write를 거치면 FieldWriteOperation이 스키마 Base로 먼저 검사했다).
+        // 등록된 write를 거치면 FieldWriteOperation이 스키마 Base로 먼저 검사했다). 지금 값과 같은
+        // 값은 아무것도 하지 않는다(Deprecated 클래스 값의 재기록 — 리플렉션 B9h2).
+        if (auto current = borrowed.Value().Get();
+            current && (current.Value()->*member).Id() == value.guid) {
+            return Result<void>::Success();
+        }
+
         if (auto valid = ValidateClassReference(
                 registry, access, value.guid, TypeId{},
                 NativeTypeKey<typename ClassReferenceField<Member>::Target>());
@@ -851,8 +879,14 @@ Result<void> WriteGeneratedStagedField(ConstructionContext& construction, Object
         // ClassRef 값은 그 트랜잭션 Registry에 등록된 클래스이고 정적 Base의 파생이어야 한다(null
         // 허용). owner 확인(접근·생존·검사 중 Busy) 뒤에 본다. 복원 2단계는 이 경로를 거치지 않는다
         // (DecodeGeneratedField가 1단계 판정 값을 바로 대입한다).
-        if (auto target = construction.GetForWrite<Owner>(handle); !target) {
+        auto target = construction.GetForWrite<Owner>(handle);
+        if (!target) {
             return Result<void>::Failure(target.Error());
+        }
+
+        // 지금 값과 같은 값은 아무것도 하지 않는다(Deprecated 클래스 값의 재기록 — 리플렉션 B9h2).
+        if ((target.Value()->*member).Id() == value.guid) {
+            return Result<void>::Success();
         }
 
         if (auto valid = ValidateClassReference(

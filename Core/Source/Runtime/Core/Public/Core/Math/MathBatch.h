@@ -5,8 +5,9 @@
 
 namespace rocks::math {
 
-// 연속 배열의 일괄 변환이다. 원소마다 선택된 platform::simd(SSE2/NEON) 경로로 계산하며 결과는
-// Mat4::TransformPoint/TransformVector를 원소별로 호출한 것과 같다.
+// 연속 배열의 일괄 변환이다. Matrix4와 같은 행 벡터 규약(p' = p · M, UE FMatrix)이며 원소마다
+// 선택된 platform::simd(SSE2/NEON) 경로로 계산한다. 결과는 Mat4::TransformPoint/TransformVector를
+// 원소별로 호출한 것과 비트 단위로 같다.
 // - input과 output의 원소 수가 다르면 Fatal이다. 0개는 아무 작업도 하지 않는다.
 // - output이 input과 정확히 같은 범위(in-place)이면 허용한다. 부분적으로 겹치는 범위는 금지하며
 //   Fatal로 거부한다(겹친 원소를 읽기 전에 덮어쓸 수 있기 때문이다).
@@ -34,6 +35,7 @@ inline void TransformBatch(const Mat4& matrix, Span<const Vec3> input, Span<Vec3
     CheckBatchSpans(input, output);
     for (usize index = 0; index < input.Size(); ++index) {
         const Vec3 source = input[index];
+        // 행 벡터 (x, y, z, w) · M이다.
         const auto transformed = platform::simd::TransformVector4(
             matrix.m, platform::simd::Set(source.x, source.y, source.z, w));
         output[index] =

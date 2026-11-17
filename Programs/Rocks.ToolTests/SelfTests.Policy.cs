@@ -14,6 +14,9 @@ internal static partial class SelfTests
         suite.Add("Policy.RepositoryRuntime", () => NoFailures(PolicyChecks.Runtime(options.Root)));
         suite.Add("Policy.RepositoryReflectionAnnotations", () => NoFailures(PolicyChecks.ReflectionAnnotations(options.Root)));
         ThirdPartyPolicyTests.Register(suite, options);
+        ThirdPartyKindTests.Register(suite);
+        ThirdPartyStoreTests.Register(suite, options);
+        ShaderToolPolicyTests.Register(suite, options);
         suite.Add("Policy.RepositoryPlatform", () => NoFailures(PolicyChecks.PlatformBoundary(options.Root)));
         suite.Add("Policy.RepositoryTargetMacros", () => NoFailures(PolicyChecks.TargetMacros(options.Root)));
         suite.Add("Policy.RepositoryTargetIntrinsics", () => NoFailures(PolicyChecks.TargetIntrinsics(options.Root)));
@@ -178,7 +181,7 @@ internal static partial class SelfTests
         {
             // 손으로 고친 생성 파일과 없는 파일을 잡는다. 원본은 저장소의 UCD를 그대로 복사한다.
             using TemporaryDirectory temporary = new();
-            string library = Path.Combine(ThirdPartyManifest.ThirdPartyRoot, UnicodeTables.LibraryName);
+            string library = Path.Combine(ThirdPartyManifest.CoreThirdPartyRoot, UnicodeTables.LibraryName);
             foreach (string file in Directory.EnumerateFiles(Path.Combine(options.Root, library), "*", SearchOption.AllDirectories))
             {
                 string relative = Path.GetRelativePath(options.Root, file).Replace('\\', '/');
@@ -203,6 +206,9 @@ internal static partial class SelfTests
             temporary.Write(atomics, "enum class MemoryOrder { Relaxed = __ATOMIC_RELAXED };\n" +
                 "template <class T> T Load(const T* a) { T r; __atomic_load(a, &r, __ATOMIC_ACQUIRE); return r; }\n");
             temporary.Write("Core/Source/Runtime/Base/Public/Base/Compiler.h", "#define ROCKS_UNREACHABLE() __builtin_unreachable()\n");
+            const string sourceLocation = "Core/Source/Runtime/Core/Public/Core/Diagnostics/SourceLocation.h";
+            temporary.Write(sourceLocation, "static consteval S Current(const char* f = __builtin_FILE(), " +
+                "const char* n = __builtin_FUNCTION(), uint32 l = __builtin_LINE()) noexcept;\n");
             temporary.Write("Engine/Source/Runtime/Probe/Private/Clean.cpp",
                 "#if __has_builtin(x)\n#endif\nvoid builtin_memcpy(); int my__builtin_x;\n");
             NoFailures(PolicyChecks.CompilerBuiltins(temporary.Root));
@@ -215,11 +221,15 @@ internal static partial class SelfTests
             }
 
             temporary.Write(memory, "#pragma once\n");
+            temporary.Write(sourceLocation, "__builtin_memcpy(d, s, n);\n");
+            Verify.Equal(1, PolicyChecks.CompilerBuiltins(temporary.Root).Count, "source location allowance too wide");
+            temporary.Write(sourceLocation, "#pragma once\n");
 
             // 그 밖의 소스는 테스트까지 모두 위반이다.
             foreach (string source in new[] { "__builtin_memcpy(d, s, n);", "x = __builtin_bit_cast(float, y);",
                 "__atomic_add_fetch(&counter, 1, __ATOMIC_RELAXED);", "__sync_synchronize();",
-                "__c11_atomic_load(&x, 0);", "int order = __ATOMIC_SEQ_CST;", "auto o = __builtin_offsetof(T, m);" })
+                "__c11_atomic_load(&x, 0);", "int order = __ATOMIC_SEQ_CST;", "auto o = __builtin_offsetof(T, m);",
+                "const char* file = __builtin_FILE();" })
             {
                 foreach (string file in new[] { "Engine/Source/Runtime/Probe/Private/Probe.cpp",
                     "Core/Source/Runtime/Core/Tests/ProbeTests.cpp", "Programs/Sandbox/Private/Probe.h" })
@@ -401,6 +411,7 @@ internal static partial class SelfTests
                 }
             }
         });
+        RegisterEnglishArtifacts(suite, options);
         suite.Add("Policy.RepositoryInitializerListDeductions",
             () => NoFailures(PolicyChecks.InitializerListDeductions(options.Root)));
         suite.Add("Policy.InitializerListDeductionControls", () =>
@@ -915,6 +926,18 @@ internal static partial class SelfTests
             temporary.Write(".github/workflows/build.yml", "run: dotnet run --project Programs/Rocks.Cli\n");
             temporary.Write("Programs/Rocks.Cli/Probe.cs", "var spec = new ProcessSpec(\"python.exe\", args, root);\n");
             Verify.That(PolicyChecks.PythonFreeMainPath(temporary.Root).Count != 0, "Python process invocation escaped audit");
+        });
+        suite.Add("Policy.PythonExclusionIsOnlyTheThirdPartyToolsWorkflow", () =>
+        {
+            // 오프라인 도구 빌드 workflow만 제외한다. 이름이 비슷한 workflow와 Build/의 도구 빌드 공용 스크립트는 계속 검사한다.
+            using TemporaryDirectory temporary = new();
+            temporary.Write(PolicyChecks.ThirdPartyToolsWorkflow, "      - uses: actions/setup-python@v6\n");
+            NoFailures(PolicyChecks.PythonFreeMainPath(temporary.Root));
+            temporary.Write(".github/workflows/third-party-tools-2.yml", "      - uses: actions/setup-python@v6\n");
+            Verify.Equal(1, PolicyChecks.PythonFreeMainPath(temporary.Root).Count, "lookalike workflow escaped audit");
+            File.Delete(temporary.FilePath(".github/workflows/third-party-tools-2.yml"));
+            temporary.Write("Build/ThirdPartyTools/ToolBuild.ps1", "& python3 gen.py\n");
+            Verify.Equal(1, PolicyChecks.PythonFreeMainPath(temporary.Root).Count, "tool build helper under Build escaped audit");
         });
     }
 }

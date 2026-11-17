@@ -19,9 +19,10 @@ public static class MathReference
     public static string Generate()
     {
         var text = new StringBuilder();
-        text.Append("// 생성 파일이다. 직접 고치지 않는다: Rocks.ToolTests math-tables --root . --write\n");
-        text.Append("// 정확도 기준값 {입력, 둘째 입력(Pow 지수), 정확히 반올림한 참값}의 double 비트.\n");
-        text.Append("// 참값: 400비트 고정소수점(Rocks.Tooling.Checks/MathReference.cs).\n");
+        text.Append("// Generated file. Do not edit by hand: Rocks.ToolTests math-tables --root . --write\n");
+        text.Append("// Accuracy reference cases as double bits:\n");
+        text.Append("// {input, second input (Pow exponent), correctly rounded exact value}.\n");
+        text.Append("// Exact values: 400-bit fixed point (Rocks.Tooling.Checks/MathReference.cs).\n");
         text.Append("#pragma once\n\n#include <Base/Types.h>\n\nnamespace rocks::deterministic::reference {\n\n");
         text.Append("struct ReferenceCase {\n    uint64 input;\n    uint64 second;\n    uint64 expected;\n};\n\n");
         text.Append("// clang-format off\n");

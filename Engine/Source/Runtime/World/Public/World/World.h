@@ -344,7 +344,7 @@ public:
     //
     // 사용 예:
     //   auto moved = world.With<SceneComponent>(node, [](SceneComponent& scene) noexcept {
-    //       return scene.SetRelativeLocation(Vec3d(0.0, 0.0, 100.0));     // Result<void>
+    //       return scene.SetRelativeLocation(Vec3d(0.0, 0.0, 100.0)); // 위로 100 cm, Result<void>
     //   });
     //   auto location = world.With<SceneComponent>(
     //       node, [](SceneComponent& scene) noexcept { return scene.WorldLocation(); });

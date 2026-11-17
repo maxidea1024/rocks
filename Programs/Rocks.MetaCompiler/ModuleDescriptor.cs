@@ -12,7 +12,7 @@ internal static class ModuleDescriptor
     // 클래스 항목이다. toolName은 실효 타입 도구 이름(Docs/Design/ReflectionExtensions.ko.md 1.8·5.2절 — 지정하지 않았으면 한정하지
     // 않은 C++ 이름)이다.
     private static readonly string[] TypeKeys =
-        ["kind", "name", "id", "version", "flags", "base", "header", "visibility", "toolName", "fields"];
+        ["kind", "name", "id", "version", "flags", "within", "base", "header", "visibility", "toolName", "fields"];
 
     // struct 항목: base 대신 flags(선언 플래그 Atomic 다음 생성 형질 — 쓰기 순서 Atomic → ContainsStrongReference →
     // RequiresWorldOnlyOwner → ContainsReferenceArray)와 binds(Binds 실제 타입의 Clang 정규 철자, 미러가 아니면 "")다
@@ -69,7 +69,30 @@ internal static class ModuleDescriptor
                     json.WriteStringValue("WorldOnly");
                 }
 
+                if (type.Transient)
+                {
+                    json.WriteStringValue("Transient");
+                }
+
+                if (type.Deprecated)
+                {
+                    json.WriteStringValue("Deprecated");
+                }
+
                 json.WriteEndArray();
+                // 실효 Within(상속 포함 — 리플렉션 B9h2)이다. 없으면 null이다.
+                if (type.Within is null)
+                {
+                    json.WriteNull("within");
+                }
+                else
+                {
+                    json.WriteStartObject("within");
+                    json.WriteString("name", type.Within);
+                    json.WriteString("id", type.WithinId ?? "");
+                    json.WriteEndObject();
+                }
+
                 json.WriteString("base", type.Base);
                 json.WriteString("header", type.Header);
                 json.WriteString("visibility", type.Private ? "private" : "public");
@@ -142,13 +165,13 @@ internal static class ModuleDescriptor
             json.WriteString("fieldKind", field.IsObjectReferenceFieldKind ? "ObjectReference" : "Value");
             json.WriteStartObject("value");
             json.WriteString("kind", field.Kind);
-            if (!field.IsArray && !field.IsOptional && !field.IsMap && !field.IsSet && field.HasTargetType)
+            if (!field.HasElement && field.HasTargetType)
             {
                 json.WriteString("type", field.ReferenceId ?? "");
             }
 
             json.WriteEndObject();
-            if (field.IsArray || field.IsOptional || field.IsMap || field.IsSet)
+            if (field.HasElement)
             {
                 json.WriteStartObject("element");
                 json.WriteString("kind", field.ElementKind);
@@ -201,11 +224,22 @@ internal static class ModuleDescriptor
                 json.WriteStringValue("Required");
             }
 
+            // 필드 플래그(리플렉션 B9h1)는 비트 순서로 적는다.
+            foreach ((bool set, string flag) in new[] { (field.Spec.DuplicateTransient, "DuplicateTransient"),
+                (field.Spec.NonPIEDuplicateTransient, "NonPIEDuplicateTransient"), (field.Spec.SaveGame, "SaveGame"),
+                (field.Spec.TextExportTransient, "TextExportTransient") })
+            {
+                if (set)
+                {
+                    json.WriteStringValue(flag);
+                }
+            }
+
             json.WriteEndArray();
             json.WriteString("toolName", field.EffectiveToolName);
             json.WriteString("category", field.Spec.Category);
             json.WriteString("displayName", field.Spec.DisplayName);
-            json.WriteNumber("maxElements", field.IsCounted ? field.MaxElements : 0);
+            json.WriteNumber("maxElements", field.IsCounted || field.IsStaticArray ? field.MaxElements : 0);
             json.WriteEndObject();
         }
 
@@ -339,7 +373,8 @@ internal static class ModuleDescriptor
             string[] flags = type.GetProperty("flags").EnumerateArray().Select(flag => flag.GetString() ?? "").ToArray();
             // struct는 선언 플래그 Atomic과 생성 형질, 클래스는 Abstract·WorldOnly만 받는다(struct 전용 Atomic이 클래스에
             // 있거나 클래스 플래그가 struct에 있으면 모르는 플래그다).
-            bool KnownFlag(string flag) => isStruct ? flag is "Atomic" or "ContainsStrongReference" or "RequiresWorldOnlyOwner" or "ContainsReferenceArray" : flag is "Abstract" or "WorldOnly";
+            bool KnownFlag(string flag) => isStruct ? flag is "Atomic" or "ContainsStrongReference" or "RequiresWorldOnlyOwner" or "ContainsReferenceArray"
+                : flag is "Abstract" or "WorldOnly" or "Transient" or "Deprecated";
             if (flags.Any(flag => !KnownFlag(flag)) || flags.Distinct(StringComparer.Ordinal).Count() != flags.Length)
             {
                 throw Invalid("unknown or duplicate type flag in " + name);
@@ -382,6 +417,8 @@ internal static class ModuleDescriptor
                 Base = isStruct ? "" : Name(type.GetProperty("base"), QualifiedName, "base of " + name),
                 Abstract = flags.Contains("Abstract"),
                 WorldOnly = flags.Contains("WorldOnly"),
+                Transient = flags.Contains("Transient"),
+                Deprecated = flags.Contains("Deprecated"),
                 Header = header,
                 Private = isPrivate,
                 Imported = true,
@@ -394,6 +431,21 @@ internal static class ModuleDescriptor
                 Binds = binds,
                 ToolName = typeToolName == TypeToolName.Default(name) ? "" : typeToolName
             };
+            // 클래스의 실효 Within(리플렉션 B9h2)은 {name, id} 또는 null이다.
+            if (!isStruct)
+            {
+                JsonElement within = type.GetProperty("within");
+                if (within.ValueKind == JsonValueKind.Object)
+                {
+                    model.Within = Name(within.GetProperty("name"), QualifiedName, "within of " + name);
+                    model.WithinId = Hex(within.GetProperty("id"), Invalid);
+                }
+                else if (within.ValueKind != JsonValueKind.Null)
+                {
+                    throw Invalid("within of " + name);
+                }
+            }
+
             List<FieldModel> fields = [];
             foreach (JsonElement field in type.GetProperty("fields").EnumerateArray())
             {
@@ -425,7 +477,8 @@ internal static class ModuleDescriptor
                 bool optional = kind == OptionalRules.Optional;
                 bool map = kind == MapRules.Map;
                 bool set = kind == MapRules.Set;
-                RequireKeys(value, !array && !optional && !map && !set && ValueKindTable.Has(kind, ValueKindProperty.HasTargetType) ? ["kind", "type"] : ["kind"], Invalid);
+                bool fixedArray = kind == StaticArrayRules.StaticArray;
+                RequireKeys(value, !array && !optional && !map && !set && !fixedArray && ValueKindTable.Has(kind, ValueKindProperty.HasTargetType) ? ["kind", "type"] : ["kind"], Invalid);
                 JsonElement element = field.GetProperty("element");
                 JsonElement keyElement = field.GetProperty("key");
                 if (!field.GetProperty("maxElements").TryGetUInt32(out uint maxElements))
@@ -452,6 +505,28 @@ internal static class ModuleDescriptor
                     if (maxElements < 1 || maxElements > ArrayRules.MaxArrayElements)
                     {
                         throw Invalid($"maxElements {maxElements} of an array field");
+                    }
+
+                    targetHolder = element;
+                }
+                else if (fixedArray)
+                {
+                    // 정적 배열(리플렉션 B9g)은 element가 원소 형식(성질 표의 정적 배열 원소 종류)이고 maxElements가 정확한 원소 수 N이다.
+                    if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty("kind", out JsonElement fixedKindValue))
+                    {
+                        throw Invalid("element of a static array field");
+                    }
+
+                    elementKind = Name(fixedKindValue, Identifier, "static array element kind");
+                    if (!ValueKindTable.Has(elementKind, ValueKindProperty.StaticArrayElement))
+                    {
+                        throw Invalid("static array element kind " + elementKind);
+                    }
+
+                    RequireKeys(element, ValueKindTable.Has(elementKind, ValueKindProperty.HasTargetType) ? ["kind", "type"] : ["kind"], Invalid);
+                    if (maxElements < 1 || maxElements > StaticArrayRules.MaxStaticArrayElements)
+                    {
+                        throw Invalid($"maxElements {maxElements} of a static array field");
                     }
 
                     targetHolder = element;
@@ -502,7 +577,7 @@ internal static class ModuleDescriptor
                 }
                 else if (element.ValueKind != JsonValueKind.Null || maxElements != 0)
                 {
-                    throw Invalid("element or maxElements on a field that is not an array, Optional, map or set");
+                    throw Invalid("element or maxElements on a field that is not an array, static array, Optional, map or set");
                 }
 
                 // Map 키는 성질 표의 Map 키 종류이고 대상 종류(Enum·ClassReference·SoftObjectReference)면 type을 싣는다. Map이 아닌 필드의
@@ -545,7 +620,8 @@ internal static class ModuleDescriptor
                 }
 
                 string[] fieldFlags = field.GetProperty("flags").EnumerateArray().Select(flag => flag.GetString() ?? "").ToArray();
-                if (fieldFlags.Any(flag => flag is not ("Transient" or "ReadOnly" or "EditorOnly" or "Required")) ||
+                if (fieldFlags.Any(flag => flag is not ("Transient" or "ReadOnly" or "EditorOnly" or "Required" or "DuplicateTransient" or
+                        "NonPIEDuplicateTransient" or "SaveGame" or "TextExportTransient")) ||
                     fieldFlags.Distinct(StringComparer.Ordinal).Count() != fieldFlags.Length)
                 {
                     throw Invalid("unknown or duplicate field flag");
@@ -556,6 +632,13 @@ internal static class ModuleDescriptor
                 if (!ValueKindTable.Has(targetKind, ValueKindProperty.AcceptsRequired) && fieldFlags.Contains("Required", StringComparer.Ordinal))
                 {
                     throw Invalid("Required on a field that is not an object, soft object or class reference or an array of them");
+                }
+
+                // Required와 복제 제외 플래그의 조합은 원본 선언의 RMC2202와 같이 거부한다(리플렉션 B9h1).
+                if (fieldFlags.Contains("Required", StringComparer.Ordinal) &&
+                    (fieldFlags.Contains("DuplicateTransient", StringComparer.Ordinal) || fieldFlags.Contains("NonPIEDuplicateTransient", StringComparer.Ordinal)))
+                {
+                    throw Invalid("Required combined with DuplicateTransient or NonPIEDuplicateTransient");
                 }
 
                 string? referenceId = null;
@@ -589,8 +672,13 @@ internal static class ModuleDescriptor
                     {
                         EditorOnly = fieldFlags.Contains("EditorOnly"),
                         Required = fieldFlags.Contains("Required"),
+                        DuplicateTransient = fieldFlags.Contains("DuplicateTransient"),
+                        NonPIEDuplicateTransient = fieldFlags.Contains("NonPIEDuplicateTransient"),
+                        SaveGame = fieldFlags.Contains("SaveGame"),
+                        TextExportTransient = fieldFlags.Contains("TextExportTransient"),
                         ToolName = toolName == fieldName ? "" : toolName,
-                        MaxElements = maxElements
+                        // 정적 배열의 maxElements는 지정자가 아니라 N이다(리플렉션 B9g).
+                        MaxElements = fixedArray ? 0 : maxElements
                     },
                     Kind = kind,
                     ElementKind = elementKind,

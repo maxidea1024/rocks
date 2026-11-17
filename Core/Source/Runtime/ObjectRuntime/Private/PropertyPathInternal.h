@@ -28,9 +28,31 @@ struct PathRunner {
     static Result<void> PrepareInsertedKey(PathCursor& cursor, PathFrame& frame) noexcept;
 
     static PathCursor Make(ObjectRegistry& registry, const ObjectAccessContext& access,
-                           ObjectHandle owner, PathOperation operation, const FieldValue* input,
-                           FieldValue* output, PropertyPathFailure* failure) noexcept {
-        return PathCursor(registry, access, owner, operation, input, output, failure);
+                           const PathTarget& target, PathOperation operation,
+                           const FieldValue* input, FieldValue* output,
+                           PropertyPathFailure* failure) noexcept {
+        return PathCursor(registry, access, target, operation, input, output, failure);
+    }
+
+    // Detach의 출력 상자·Attach의 입력 상자와 Attach의 출력 자리를 건다(리플렉션 B9i3c0).
+    static void BindBox(PathCursor& cursor, DetachedValue& box, PreparedAttach* attach) noexcept {
+        cursor.box_ = &box;
+        cursor.attach_ = attach;
+    }
+
+    // PathPrepareReference의 출력 자리를 건다(리플렉션 B9i3c2).
+    static void BindReference(PathCursor& cursor, PreparedReference& out) noexcept {
+        cursor.reference_ = &out;
+    }
+
+    // PathReadKeys의 출력 키 목록을 건다(리플렉션 B9i4).
+    static void BindKeys(PathCursor& cursor, Array<FieldValue>& out) noexcept {
+        cursor.keys_ = &out;
+    }
+
+    // PathPrepareStructElements의 출력 준비물을 건다(리플렉션 B9i3c4).
+    static void BindElements(PathCursor& cursor, PreparedStructElements& out) noexcept {
+        cursor.elements_ = &out;
     }
 
     static usize Length(const PathCursor& cursor) noexcept {

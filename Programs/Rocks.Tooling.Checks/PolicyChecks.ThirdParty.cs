@@ -15,11 +15,15 @@ public static partial class PolicyChecks
         "^\\s*#\\s*include\\s*([<\"])([^>\"]+)[>\"]");
 
     /// <summary>
-    /// 고정 버전 외부 라이브러리(<c>Core/Source/ThirdParty/&lt;Lib&gt;/</c>)를 검사한다(rule id <c>third-party</c>).
+    /// 고정 버전 외부 라이브러리(<see cref="ThirdPartyManifest.ThirdPartyRoots"/>의 <c>&lt;루트&gt;/&lt;Lib&gt;/</c>)를 검사한다(rule id
+    /// <c>third-party</c>). 라이브러리 폴더 이름은 두 루트를 통틀어 하나여야 한다(모듈 이름).
     /// <list type="bullet">
-    /// <item>폴더마다 엄격한 <c>ThirdParty.json</c>과 <c>&lt;Lib&gt;.Build.cs</c>가 있어야 한다. 그 밖의 파일은 manifest의
-    /// 번역 단위로 등록한 Rocks 글루(.c)뿐이다. 데이터 전용 라이브러리(<c>"kind": "data"</c>)는 모듈 규칙이 없어야 하고
-    /// 지시문 검사를 하지 않는다(파일 집합·SHA-256·라이선스 검사는 같다).</item>
+    /// <item>폴더마다 엄격한 <c>ThirdParty.json</c>이 있어야 한다. code 라이브러리는 <c>&lt;Lib&gt;.Build.cs</c>도 있어야 하고, 그 밖의
+    /// 파일은 manifest의 번역 단위로 등록한 Rocks 글루(.c)뿐이다. 데이터 전용(<c>"kind": "data"</c>)·헤더 전용(<c>"headers"</c>)·
+    /// 미리 빌드한 바이너리(<c>"binary"</c>) 라이브러리는 모듈 규칙이 없어야 한다. 데이터는 지시문 검사를 하지 않는다(파일
+    /// 집합·SHA-256·라이선스 검사는 같다).</item>
+    /// <item>binary: 커밋한 공개 헤더(원본 디렉터리)에 위 검사를 똑같이 하고, build 출처는 <c>Build/</c>의 파일 집합이 manifest
+    /// <c>build.scripts</c>·<c>build.patches</c>와 정확히 같아야 한다. 커밋한 파일이 없는 sdk·system 출처는 manifest만 둔다.</item>
     /// <item>원본 디렉터리의 실제 파일 집합이 manifest <c>files</c>와 정확히 같고 SHA-256(byte 기준)이 일치한다.
     /// 링크는 거부하고 따라 들어가지 않는다. manifest <c>licenses</c>의 모든 원문 파일이 등록된 원본 파일이어야 한다.</item>
     /// <item>번역 단위·include 경로·adapter 헤더가 존재하고 허용 위치에 있다.</item>
@@ -34,30 +38,40 @@ public static partial class PolicyChecks
     {
         root = Path.GetFullPath(root);
         List<CheckFailure> failures = [];
-        string thirdParty = Path.Combine(root, ThirdPartyManifest.ThirdPartyRoot);
-        if (!Directory.Exists(thirdParty))
-        {
-            return failures;
-        }
-
         List<(string Library, ThirdPartyManifest Manifest)> libraries = [];
-        foreach (string entry in Directory.EnumerateFileSystemEntries(thirdParty).Order(StringComparer.Ordinal))
+        var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string parent in ThirdPartyManifest.ThirdPartyRoots)
         {
-            string relative = Relative(root, entry);
-            if (SystemMetadataFiles.Contains(Path.GetFileName(entry)))
+            string thirdParty = Path.Combine(root, parent);
+            if (!Directory.Exists(thirdParty))
             {
                 continue;
             }
 
-            if (!Directory.Exists(entry) || IsLink(entry))
+            foreach (string entry in Directory.EnumerateFileSystemEntries(thirdParty).Order(StringComparer.Ordinal))
             {
-                failures.Add(new(relative, 0, "third-party", "only library directories are allowed under ThirdParty"));
-                continue;
-            }
+                string relative = Relative(root, entry);
+                if (SystemMetadataFiles.Contains(Path.GetFileName(entry)))
+                {
+                    continue;
+                }
 
-            if (CheckLibrary(root, entry, failures) is ThirdPartyManifest manifest)
-            {
-                libraries.Add((entry, manifest));
+                if (!Directory.Exists(entry) || IsLink(entry))
+                {
+                    failures.Add(new(relative, 0, "third-party", "only library directories are allowed under ThirdParty"));
+                    continue;
+                }
+                // 모듈 이름은 저장소 전체에서 하나다(대소문자만 다른 이름도 Windows·macOS 기본 파일 시스템에서 헷갈린다).
+                if (!names.TryAdd(Path.GetFileName(entry), relative))
+                {
+                    failures.Add(new(relative, 0, "third-party",
+                        $"library name is already used by {names[Path.GetFileName(entry)]} (names must be unique across third-party roots)"));
+                }
+
+                if (CheckLibrary(root, entry, failures) is ThirdPartyManifest manifest)
+                {
+                    libraries.Add((entry, manifest));
+                }
             }
         }
 
@@ -154,39 +168,53 @@ public static partial class PolicyChecks
             return null;
         }
 
+        // 라이브러리 폴더 바로 아래: manifest·규칙·등록한 글루·원본 디렉터리·(binary build 출처의) Build/만 허용한다.
+        var glue = manifest.TranslationUnits.Where(unit => !unit.StartsWith(manifest.UpstreamDirectory + "/", StringComparison.Ordinal))
+            .ToHashSet(StringComparer.Ordinal);
+        bool data = manifest.Kind == ThirdPartyKind.Data;
+        bool code = manifest.Kind == ThirdPartyKind.Code;
+        ThirdPartyToolBuild? build = manifest.Binary?.Build;
+        bool hasRule = File.Exists(Path.Combine(library, name + ".Build.cs"));
+        if (code && !hasRule)
+        {
+            Fail(relativeLibrary, 0, $"missing module rule {name}.Build.cs");
+        }
+
+        if (!code && hasRule)
+        {
+            Fail($"{relativeLibrary}/{name}.Build.cs", 0,
+                $"{manifest.Kind.ToString().ToLowerInvariant()} library must not have a module rule (it is not built by Rocks)");
+        }
+
+        foreach (string entry in Directory.EnumerateFileSystemEntries(library).Order(StringComparer.Ordinal))
+        {
+            string child = Path.GetFileName(entry);
+            bool allowed = child == ThirdPartyManifest.FileName || (code && child == name + ".Build.cs") ||
+                           (manifest.HasUpstream && child == manifest.UpstreamDirectory) || glue.Contains(child) ||
+                           SystemMetadataFiles.Contains(child) || child == manifest.Patch ||
+                           (build is not null && child == ThirdPartyManifest.BuildDirectory && Directory.Exists(entry) && !IsLink(entry));
+            if (!allowed)
+            {
+                Fail(Relative(root, entry), 0, "unregistered file or directory in third-party library folder");
+            }
+        }
+
+        if (build is not null)
+        {
+            CheckToolBuildFiles(root, library, relativeLibrary, build, Fail);
+        }
+
+        if (!manifest.HasUpstream)
+        {
+            return manifest; // 커밋한 파일이 없는 binary(sdk·system 출처)다.
+        }
+
         string upstream = Path.Combine(library, manifest.UpstreamDirectory);
         string relativeUpstream = $"{relativeLibrary}/{manifest.UpstreamDirectory}";
         if (!Directory.Exists(upstream) || IsLink(upstream))
         {
             Fail(relativeUpstream, 0, "upstream directory is missing or is a link");
             return null;
-        }
-
-        // 라이브러리 폴더 바로 아래: manifest·규칙·등록한 글루·원본 디렉터리만 허용한다.
-        var glue = manifest.TranslationUnits.Where(unit => !unit.StartsWith(manifest.UpstreamDirectory + "/", StringComparison.Ordinal))
-            .ToHashSet(StringComparer.Ordinal);
-        bool data = manifest.Kind == ThirdPartyKind.Data;
-        bool hasRule = File.Exists(Path.Combine(library, name + ".Build.cs"));
-        if (!data && !hasRule)
-        {
-            Fail(relativeLibrary, 0, $"missing module rule {name}.Build.cs");
-        }
-
-        if (data && hasRule)
-        {
-            Fail($"{relativeLibrary}/{name}.Build.cs", 0, "data library must not have a module rule (it is not built)");
-        }
-
-        foreach (string entry in Directory.EnumerateFileSystemEntries(library).Order(StringComparer.Ordinal))
-        {
-            string child = Path.GetFileName(entry);
-            bool allowed = child == ThirdPartyManifest.FileName || child == name + ".Build.cs" ||
-                           child == manifest.UpstreamDirectory || glue.Contains(child) || SystemMetadataFiles.Contains(child) ||
-                           child == manifest.Patch;
-            if (!allowed)
-            {
-                Fail(Relative(root, entry), 0, "unregistered file or directory in third-party library folder");
-            }
         }
 
         foreach (string unit in glue)
@@ -289,7 +317,8 @@ public static partial class PolicyChecks
             }
         }
 
-        // 컴파일러 지시문 목록은 정확히 같아야 한다(파일·논리 줄 시작·원문). 데이터는 컴파일하지 않으므로 검사하지 않는다
+        // 컴파일러 지시문 목록은 정확히 같아야 한다(파일·논리 줄 시작·원문). 헤더 전용·binary 공개 헤더도 엔진 번역 단위가
+        // include하므로 검사한다. 데이터는 컴파일하지 않으므로 검사하지 않는다
         // (manifest의 목록은 리더가 비어 있음을 강제한다).
         var expected = manifest.PragmaDirectives.ToHashSet();
         HashSet<ThirdPartyPragma> found = data
@@ -331,6 +360,43 @@ public static partial class PolicyChecks
         }
 
         return manifest;
+    }
+
+    // binary build 출처의 Build/ 파일 집합은 manifest build.scripts·build.patches와 정확히 같다(하위 디렉터리·링크 거부).
+    private static void CheckToolBuildFiles(string root, string library, string relativeLibrary, ThirdPartyToolBuild build,
+        Action<string, int, string> fail)
+    {
+        string directory = Path.Combine(library, ThirdPartyManifest.BuildDirectory);
+        var expected = build.Scripts.Concat(build.Patches).ToHashSet(StringComparer.Ordinal);
+        if (!Directory.Exists(directory) || IsLink(directory))
+        {
+            fail($"{relativeLibrary}/{ThirdPartyManifest.BuildDirectory}", 0, "tool build directory is missing or is a link");
+            return;
+        }
+
+        var actual = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string entry in Directory.EnumerateFileSystemEntries(directory, "*", SearchOption.TopDirectoryOnly).Order(StringComparer.Ordinal))
+        {
+            string child = Path.GetFileName(entry);
+            if (SystemMetadataFiles.Contains(child))
+            {
+                continue;
+            }
+
+            string relative = $"{ThirdPartyManifest.BuildDirectory}/{child}";
+            if (!File.Exists(entry) || IsLink(entry) || !expected.Contains(relative))
+            {
+                fail(Relative(root, entry), 0, "tool build file is not listed in manifest build.scripts or build.patches");
+                continue;
+            }
+
+            actual.Add(relative);
+        }
+
+        foreach (string missing in expected.Where(path => !actual.Contains(path)).Order(StringComparer.Ordinal))
+        {
+            fail($"{relativeLibrary}/{missing}", 0, "tool build file listed in manifest is missing");
+        }
     }
 
     // 진단 억제 지시문의 push/pop 균형을 계열별로 센다. MSVC warning 스택과 clang/GCC diagnostic 스택은 따로이며,
@@ -385,7 +451,9 @@ public static partial class PolicyChecks
     private static void CheckOwnedIncludes(string root, IReadOnlyList<(string Library, ThirdPartyManifest Manifest)> libraries,
         List<CheckFailure> failures)
     {
-        var reachable = new Dictionary<string, (bool Adapter, string Library)>(StringComparer.Ordinal);
+        // include 철자 → 그 철자로 닿는 원본(라이브러리별). 두 라이브러리가 같은 철자를 가지면 둘 다 기록하고, 어느 하나가
+        // adapter 헤더이거나 include하는 글루 자신의 라이브러리 파일이면 허용한다.
+        var reachable = new Dictionary<string, List<(bool Adapter, string Library)>>(StringComparer.Ordinal);
         var glueAllowed = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach ((string library, ThirdPartyManifest manifest) in libraries)
         {
@@ -395,7 +463,13 @@ public static partial class PolicyChecks
                 string inside = directory == manifest.UpstreamDirectory ? "" : directory[upstreamPrefix.Length..] + "/";
                 foreach (string file in manifest.Files.Keys.Where(file => file.StartsWith(inside, StringComparison.Ordinal)))
                 {
-                    reachable.TryAdd(file[inside.Length..], (manifest.AdapterHeaders.Contains(upstreamPrefix + file), library));
+                    if (!reachable.TryGetValue(file[inside.Length..], out List<(bool Adapter, string Library)>? targets))
+                    {
+                        targets = [];
+                        reachable.Add(file[inside.Length..], targets);
+                    }
+
+                    targets.Add((manifest.AdapterHeaders.Contains(upstreamPrefix + file), library));
                 }
             }
 
@@ -418,12 +492,8 @@ public static partial class PolicyChecks
             {
                 ++line;
                 Match include = IncludeDirective.Match(text);
-                if (!include.Success || !reachable.TryGetValue(include.Groups[2].Value, out var target) || target.Adapter)
-                {
-                    continue;
-                }
-
-                if (glueLibrary != null && string.Equals(glueLibrary, target.Library, StringComparison.Ordinal))
+                if (!include.Success || !reachable.TryGetValue(include.Groups[2].Value, out var targets) ||
+                    targets.Any(target => target.Adapter || (glueLibrary != null && string.Equals(glueLibrary, target.Library, StringComparison.Ordinal))))
                 {
                     continue;
                 }
@@ -461,7 +531,8 @@ public static partial class PolicyChecks
     /// compile DB 항목의 언어 인자가 파일 확장자와 맞는지 검사한다(rule id <c>warning-language</c>). 마지막 지정이
     /// 이기는 컴파일러 규칙대로 해석한다(<c>-x</c>·<c>-x&lt;lang&gt;</c>·<c>--language</c>·<c>/TC</c>·<c>/TP</c>, std 지정).
     /// <list type="bullet">
-    /// <item>정확히 <c>.c</c>인 파일: C 모드와 C17이어야 하고 <c>Core/Source/ThirdParty/</c> 아래에만 있어야 한다.</item>
+    /// <item>정확히 <c>.c</c>인 파일: C 모드와 C17이어야 하고 외부 라이브러리 루트(<see cref="ThirdPartyManifest.ThirdPartyRoots"/>) 아래에만
+    /// 있어야 한다.</item>
     /// <item>그 밖의 파일: C++ 모드와 C++23이어야 한다.</item>
     /// </list>
     /// <paramref name="directory"/>는 상대 <paramref name="file"/>의 기준 폴더다(compile DB의 directory).
@@ -529,9 +600,10 @@ public static partial class PolicyChecks
             }
 
             string full = directory != null && !Path.IsPathRooted(file) ? Path.Combine(directory, file) : file;
-            if (!Path.GetFullPath(full).Replace('\\', '/').Contains("/" + ThirdPartyManifest.ThirdPartyRoot + "/", StringComparison.Ordinal))
+            string normalized = Path.GetFullPath(full).Replace('\\', '/');
+            if (!ThirdPartyManifest.ThirdPartyRoots.Any(parent => normalized.Contains("/" + parent + "/", StringComparison.Ordinal)))
             {
-                Fail("C sources are allowed only for third-party libraries under " + ThirdPartyManifest.ThirdPartyRoot);
+                Fail("C sources are allowed only for third-party libraries under " + string.Join(" or ", ThirdPartyManifest.ThirdPartyRoots));
             }
         }
         else

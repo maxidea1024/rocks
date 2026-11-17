@@ -7,7 +7,7 @@
   "source": {
     "url": "https://github.com/nst/JSONTestSuite/archive/1ef36fa01286573e846ac449e8683f8833c5b26a.zip",
     "sha256": "5b205e1f9533123411e794f1f052cf50df8e723a855f629a07f777f472af53d8",
-    "verification": "GitHub HTTPS commit archive(2026-11-12, master = 1ef36fa01286573e846ac449e8683f8833c5b26a). 릴리스가 없어 commit으로 고정한다. 서명은 없다."
+    "verification": "GitHub HTTPS commit archive (2026-11-12, master = 1ef36fa01286573e846ac449e8683f8833c5b26a). There are no releases, so it is pinned to a commit. There is no signature."
   },
   "licenses": [
     {
@@ -346,9 +346,9 @@
   },
   "pragmaDirectives": [],
   "notes": [
-    "commit archive에서 test_parsing/의 y_·n_·i_ 사례 318개와 LICENSE만 byte 그대로 꺼냈다(파서 구현·결과·스크립트는 두지 않는다). Core JSON 시험(C5)이 읽는다. 설계는 Docs/Design/CoreDataFoundations.ko.md 3.5절.",
-    "시험 데이터일 뿐 어떤 모듈 바이너리에도 들어가지 않으므로 embeddedIn이 없다(SDK가 라이선스를 배포할 필요 없다).",
-    "test_parsing/n_structure_trailing_#.json은 manifest 경로 규칙([A-Za-z0-9._+-])에 맞게 n_structure_trailing_hash.json으로 이름만 바꿨다(내용 byte는 그대로).",
-    "CR·NUL·BOM·잘못된 UTF-8이 든 파일이 있어 .gitattributes의 Core/Source/ThirdParty/*/*/** -text 규칙으로 byte를 보존한다."
+    "Only the 318 y_, n_ and i_ cases of test_parsing/ and LICENSE were extracted byte for byte from the commit archive (parser implementations, results and scripts are not kept). Read by the Core JSON tests (C5). Design: Docs/Design/CoreDataFoundations.ko.md section 3.5.",
+    "It is test data only and goes into no module binary, so it has no embeddedIn (the SDK need not distribute the license).",
+    "test_parsing/n_structure_trailing_#.json was renamed to n_structure_trailing_hash.json to fit the manifest path rule ([A-Za-z0-9._+-]) (content bytes unchanged).",
+    "Some files contain CR, NUL, BOM or invalid UTF-8, so the Core/Source/ThirdParty/*/*/** -text rule in .gitattributes preserves their bytes."
   ]
 }

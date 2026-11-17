@@ -615,7 +615,8 @@ internal static class BuildInfoGenerator
             "} // namespace rocks::build\n";
     }
 
-    // 인자 정규화 (2)·(3): object는 obj:<소스 키>, 전체가 절대 경로이거나 /I·-I·/WHOLEARCHIVE: 뒤가 절대 경로면 경로 키. 경로 키는
+    // 인자 정규화 (2)·(3): object는 obj:<소스 키>, 전체가 절대 경로이거나 /I·-I·/WHOLEARCHIVE: 뒤가 절대 경로면 경로 키, 접두 매핑
+    // (-fmacro-prefix-map=<루트>=)은 루트를 경로 키로. 경로 키는
     // PortablePaths.Key가 이미 인코딩했으므로 다시 인코딩하지 않고, 경로가 아닌 인자만 여기서 한 번 인코딩한다.
     private static string NormalizeArgument(string argument, PortablePaths paths, IReadOnlyDictionary<string, string> objectSources)
     {
@@ -635,6 +636,16 @@ internal static class BuildInfoGenerator
                 Path.IsPathFullyQualified(argument[prefix.Length..]))
             {
                 return prefix + paths.Key(argument[prefix.Length..]);
+            }
+        }
+
+        // ActionGraph.TargetCompileArguments의 소스 경로 접두 매핑(<접두>-fmacro-prefix-map=<루트><구분자>=)은 루트를 경로 키로 바꾼다.
+        foreach (string prefix in new[] { "/clang:-fmacro-prefix-map=", "-fmacro-prefix-map=" })
+        {
+            if (argument.Length > prefix.Length + 1 && argument.StartsWith(prefix, StringComparison.Ordinal) && argument.EndsWith('=') &&
+                Path.IsPathFullyQualified(argument[prefix.Length..^1]))
+            {
+                return prefix + paths.Key(Path.TrimEndingDirectorySeparator(argument[prefix.Length..^1])) + "=";
             }
         }
 

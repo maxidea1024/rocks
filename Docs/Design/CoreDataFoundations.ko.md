@@ -17,7 +17,7 @@
 
 기존 manifest는 C 번역 단위가 있는 라이브러리만 받았다. 다음을 추가했다(C1, 구현됨 — `Policy.ThirdPartyDataLibrary` 시험).
 
-- 최상위 필드 `kind`(`"code"` 기본·`"data"`). `data`면 `translationUnits`·`includeDirectories`·`defines`·`platformDefines`·`consumerDefines`·`adapterHeaders`·`pragmaDirectives`가 비어야 하고(`nonEmpty` 검사를 kind에 따라 바꾼다) `<Lib>.Build.cs`가 없어야 한다. `files` SHA-256·출처·라이선스 검증은 같다. 지시문 스캔(정책 검사·refresh)은 data 종류를 건너뛴다.
+- 최상위 필드 `kind`(`"code"` 기본·`"data"`, 2026-11-16 셰이더 시스템 P3에서 `"headers"`·`"binary"`를 더했다 — 헤더 전용은 `translationUnits`·`defines`·`platformDefines`가 비고 `includeDirectories`·`adapterHeaders`가 있으며 모듈 규칙이 없다. 미리 빌드한 바이너리는 별도 필드 집합(`build`·`sdk`·`status: "system"`, 호스트별 파일 목록 `hosts`)을 쓴다. 상세는 [셰이더 시스템](ShaderSystem.ko.md) 8절 2·3항). `data`면 `translationUnits`·`includeDirectories`·`defines`·`platformDefines`·`consumerDefines`·`adapterHeaders`·`pragmaDirectives`가 비어야 하고(`nonEmpty` 검사를 kind에 따라 바꾼다) `<Lib>.Build.cs`가 없어야 한다. `files` SHA-256·출처·라이선스 검증은 같다. 지시문 스캔(정책 검사·refresh)은 data 종류를 건너뛴다.
 - 최상위 필드 `embeddedIn`(모듈 이름 목록): 이 데이터의 파생물(생성 표)이 들어가는 모듈. SDK 내보내기(`InstalledSdk.cs` → `ThirdPartyManifest.CopySdkLicenses`)는 packaged 모듈 이름이 아니라 `embeddedIn`에 packaged 모듈이 있으면 `licenses`의 모든 원문을 `Licenses/<Lib>/<원본 디렉터리 기준 경로>`로 복사한다. 시험 전용 데이터(JSONTestSuite)는 `embeddedIn`이 비어 배포하지 않는다. 게임 패키징의 고지 경로는 패키징 단계(후속)에서 같은 필드를 쓴다.
 - 바꿀 곳: `ThirdPartyManifest.cs`(필드·검증), `PolicyChecks.ThirdParty.cs`, `ThirdPartyManifestRefresh.cs`, `InstalledSdk.cs`, 시험(`ThirdPartyPolicyTests.cs`, `NativeTests.cs`의 fixture JSON), 기존 manifest 3개는 `kind` 생략(기본 code)으로 그대로 둔다. Rocks.Tooling은 다른 세션이 함께 쓰므로 착수 전에 조율한다.
 - 라이선스: UCD는 SPDX `Unicode-3.0`, 고지 조건(사본 또는 문서에 저작권·허가 고지)을 지키려고 `binaryNoticeRequired: true`.
@@ -147,20 +147,20 @@ uint8 LinearToSrgbByte(float linear) noexcept;   // 경계 표 이분 탐색. Na
 ### 3.3 읽기(`Core/Text/Json.h`)
 
 - 결과: `JsonDocument::Parse(input, options)`가 `JsonError { code, position }`를 돌려준다(성공이면 code None, 실패하면 문서가 빈다). 경고는 `Warnings()`(`JsonWarningCode::BomIgnored` 등), 설명 문자열은 `JsonErrorMessage(code)`다. 문서는 핸들(`JsonValue`)이 문서 포인터를 들고 있어 이동·복사하지 않으며, 다시 Parse·Clear하면 세대 번호로 이전 핸들이 무효가 된다.
-- 입력은 UTF-8. 맨 앞 BOM 하나는 건너뛰고 `BomIgnored` 경고를 남긴다(RFC 8259 §8.1의 MAY — PowerShell 5.1·Visual Studio가 기본으로 붙인다). 주석·끝 쉼표·작은따옴표·NaN/Infinity 리터럴·잘못된 UTF-8·짝 없는 surrogate 이스케이프(`\uD800`)는 거부.
+- 입력은 UTF-8. 맨 앞 BOM 하나는 건너뛰고 `BomIgnored` 경고를 남긴다(RFC 8259 §8.1의 MAY — PowerShell 5.1·Visual Studio가 기본으로 붙인다). 주석·끝 쉼표·작은따옴표·NaN/Infinity 리터럴·잘못된 UTF-8·짝 없는 surrogate 이스케이프(`\uD800`)는 거부. 예외: config 파일 읽기는 읽기 옵션 `JsonReadOptions::allowLineComments`로 값·키 사이 공백 자리의 `//` 줄 주석을 받는다(문자열 안의 `//`는 그대로, 주석 안도 UTF-8, 블록 주석·끝 쉼표·중복 키는 여전히 오류, 기본은 거짓 — [설정 계층](ConfigSystem.ko.md) 4.1절). 쿠킹 manifest·도구 보고서 등 다른 용도는 엄격한 기본값을 쓴다.
 - 같은 객체 안 중복 키는 오류다(조용히 덮어쓰지 않는다). 판정은 이스케이프를 푼 뒤 byte 비교이며 Unicode 정규화는 하지 않는다(키 `a`와 이스케이프로 쓴 키 `a`(역슬래시·u·0061)은 같은 키, NFC·NFD 차이는 다른 키).
 - 숫자 모델: 소수부·지수가 없는 토큰만 정수 종류(int64, 넘으면 uint64, 그보다 크면 double)이고 나머지는 double(3.2절 파서). double로도 표현할 수 없는 크기(예: `1e400`)는 `NumberOutOfRange` 오류다(±Inf로 바꾸지 않는다). `-0`은 double −0.0. 원문 토큰도 보관한다(Preserve 쓰기용). 값 비교는 수치 기준.
 - 위치: 줄·열은 1부터, CRLF는 줄바꿈 1개, CR 단독도 줄바꿈, 열은 코드 포인트 단위(tab은 1칸), byte offset을 함께 보고한다(`JsonPosition { line, column, byteOffset }`, 오류 위치는 잘못된 값·문자·이스케이프의 시작, 건너뛴 BOM은 세지 않는다).
 - 한도(`JsonReadOptions`로 조정, 기본): 입력 64 MiB, 깊이 128, 문자열 하나 16 MiB, 노드 수 4,194,304. 파서는 반복형(명시 스택)이다(`n_structure_100000_opening_arrays`).
 - DOM: `JsonDocument` — `JsonValue`(Null·Bool·Integer·Unsigned·Double·String·Array·Object의 가벼운 핸들), 객체는 원문 순서를 보존하는 (키, 값) 배열 + 조회용 해시.
-- 구현(구현됨, `Core/Text/Json.h`): ArenaAllocator는 소멸 전에 모든 할당이 반환돼야 하므로 노드·배열 원소 색인·객체 멤버·문자열 byte를 allocator의 평평한 배열 네 개에 담는다(할당 수가 적고 해제가 단순하다). 반복형 파서는 컨테이너마다 frame을 쌓고 자식을 대기 배열에 모았다가 닫을 때 최종 배열로 옮긴다. (객체 노드, 키 byte) 하나의 해시 색인이 중복 키 판정과 조회를 함께 맡는다. 줄·열은 오류·경고 때만 앞에서부터 다시 센다(정상 경로 비용 없음). 숫자 분류는 Core NumberText(C4)를 쓰고 원문 토큰을 보관한다. 입력은 1 GiB 이하(위치가 uint32).
+- 구현(구현됨, `Core/Text/Json.h`): ArenaAllocator는 소멸 전에 모든 할당이 반환돼야 하므로 노드·배열 원소 색인·객체 멤버·문자열 byte를 allocator의 평평한 배열 네 개에 담는다(할당 수가 적고 해제가 단순하다). 반복형 파서는 컨테이너마다 frame을 쌓고 자식을 대기 배열에 모았다가 닫을 때 최종 배열로 옮긴다. (객체 노드, 키 byte) 하나의 해시 색인이 중복 키 판정과 조회를 함께 맡는다(키 byte는 프로세스 seed의 `SeededHash<StringView>`(SipHash-2-4) — 입력 파일의 키로 칸 충돌을 고를 수 없다, B9i1. writer의 중복 키 색인도 같다). 오류 위치는 실패 때 앞에서부터 다시 세고, 값 위치(`JsonValue::Position()`)는 노드마다 시작 byte를 기록했다가 성공한 뒤 입력을 한 번 훑어 줄·열을 채운다(노드 순서가 전위라 시작 위치가 줄지 않는다 — 노드당 12 byte, 입력 + 노드 수에 비례). 숫자 분류는 Core NumberText(C4)를 쓰고 원문 토큰을 보관한다. 입력은 1 GiB 이하(위치가 uint32).
 
 ### 3.4 쓰기
 
 - `JsonWriter`(StringBuilder 대상)의 byte 단위 고정 규칙: 들여쓰기 2칸, 줄바꿈 LF, 끝에 줄바꿈 1개, 키 구분자 `": "`, 빈 컨테이너 `{}`·`[]`, 키 순서는 호출자 순서(정렬이 필요한 파일은 호출자가 AssetSystem 4.2절 정렬로 넣는다). 문자열 이스케이프는 `"`·`\\`·제어 문자만(U+0008·U+000C·U+000A·U+000D·U+0009는 `\b\f\n\r\t`, 그 밖은 소문자 16진 `\u00xx` — 키 안의 U+0000 포함), 그 밖의 문자는 UTF-8 그대로. 호출자가 준 문자열은 UTF-8을 검증한다. BOM은 쓰지 않는다.
 - 모드: **Canonical**(기본 — 정수 종류는 10진, double은 최단 왕복 표기이며 결과에 `.`·`e`가 없으면 `.0`을 붙여 다시 읽어도 double이 된다, −0.0은 `-0.0`) — 읽기 → 쓰기 → 읽기가 같은 DOM이고 쓰기 결과는 고정점이다. **Preserve**(원문 숫자 토큰 그대로 — 사람이 쓴 표기를 유지해야 하는 편집 도구용, 고정점 보장 없음). NaN·Inf는 쓰기 오류.
 - 쓰기 보강(구현됨): 같은 객체의 중복 키는 InvalidArgument(자기 reader가 거부하므로), 깊이 한도는 reader와 같은 128 기본값(생성자 인자 — 더 깊게 읽은 문서는 같은 한도의 writer로 쓴다), DOM 쓰기(`Value`)와 비교(`JsonEquals`)는 재귀하지 않는다(읽기·비교는 10만 단계 시험, 쓰기는 고정 들여쓰기 때문에 출력이 깊이의 제곱에 비례하므로 5천 단계를 기본 스택이 작은 보조 스레드에서 시험한다). `JsonEquals`는 노드가 전위 순서로 쌓여 서브트리가 연속 구간이라는 점을 써서 두 구간을 한 번 훑고, 숫자는 비트를 정수로 풀어 정확히 비교한다(부동소수점 환경과 무관 — DAZ 시험). 입력 문자열이 출력 builder의 View()여도 된다(복사 후 쓴다).
-- 원자적 파일 기록은 호출자가 `FileSystem::Replace` 흐름으로 한다(AssetSystem 5.5절과 같은 임시 파일 규칙). 리플렉션 B9(B9i1)가 `JsonWriter::Float(float)`(Canonical 규칙의 단정도 최단 표기 — 지금은 float를 넓힌 double로 쓴다)와 `JsonValue::Position()`(노드 시작 byte offset과 line·column — 의미 오류 위치 보고)을 더한다([리플렉션 B9](ReflectionExtensions.ko.md) 10.1절).
+- 원자적 파일 기록은 호출자가 `FileSystem::Replace` 흐름으로 한다(AssetSystem 5.5절과 같은 임시 파일 규칙). 리플렉션 B9(B9i1)가 `JsonWriter::Float(float)`(Canonical 규칙의 단정도 최단 표기 — Double은 float를 넓힌 double로 쓴다. 읽는 쪽은 `RawNumber()`를 `TryParseFloat`로 읽는다)와 `JsonValue::Position()`(값 시작의 byte offset과 line·column, 오류 위치와 같은 규칙 — 의미 오류 위치 보고)을 더했다([리플렉션 B9](ReflectionExtensions.ko.md) 10.1절).
 
 ### 3.5 시험
 

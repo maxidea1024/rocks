@@ -33,13 +33,23 @@ enum class FieldDiagnosticKind : uint8 {
     // 남기고 그 위치를 null로 쓴다. weak 참조(WeakRef PROPERTY)의 대상이 저장 집합 밖이면 value 2를
     // 남기고 null로 쓴다(저장은 실패하지 않는다): Reject 정책, Admit에서 Null·Import(weak import는
     // 없다), Include에서 모든 노드를 encode한 뒤의 최종 집합 밖(그때 기록 순서대로 —
-    // objectIndex·path는 기록할 때의 위치다).
+    // objectIndex·path는 기록할 때의 위치다). 저장 정책 UnsaveablePolicy::Exclude에서 저장 불가
+    // 객체(클래스 Transient·Deprecated — 리플렉션 B9h2)를 가리키는 강한·weak 참조는 value 3
+    // (Transient 클래스)·4(Deprecated 클래스)를 남기고 null로 쓴다.
     ExternalReference,
     // 복원 1단계가 읽은 ClassRef 값(ValueKind::ClassReference)의 클래스가 대상 TypeRegistry에
     // 등록되어 있지 않아 decode 정책 UnknownClassPolicy::ReportAndNull대로 null로 읽었다(valueType
     // = 저장된 클래스 TypeId, path = 그 값의 위치 — 배열이면 [f[i]], Docs/Design/
     // ReflectionExtensions.ko.md 5.2·15절). Reject 정책(기본)은 진단 없이 NotFound다.
-    UnknownClassReference
+    UnknownClassReference,
+    // 복원 1단계가 클래스 Transient(상속 포함 — 리플렉션 B9h2)인 노드를 읽었다(objectType = 그 노드
+    // 타입, path는 비어 있다 — 노드는 정상으로 만든다). 패키지 저장(Exclude)으로 다시 저장하면 그
+    // 객체와 그 참조는 빠진다.
+    TransientType,
+    // 복원 1단계가 클래스 Deprecated인 노드(path 빈 것 — objectType = 노드 타입) 또는 Deprecated
+    // 클래스를 가리키는 ClassRef 값(valueType = 그 클래스, path = 값 위치)을 읽었다(리플렉션 B9h2 —
+    // 값·노드는 정상으로 읽는다).
+    DeprecatedType
 };
 
 // 진단 하나다. objectIndex는 그래프 안 노드 위치(0부터 — local ID − 1 = export index − 1), path는

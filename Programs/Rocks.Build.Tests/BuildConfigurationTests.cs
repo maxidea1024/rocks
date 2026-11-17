@@ -44,6 +44,40 @@ internal static class BuildConfigurationTests
             Expect(NativeConfiguration.Asan, Unoptimized(), ndebug: false, lto: false, "ROCKS_BUILD_DEBUG=1");
         }
 
+        // 로그 컴파일 하한(LoggingSystem.ko.md 6.4절): 모든 모듈·번역 단위가 같은 값을 정확히 한 번 받는다. 기본은 구성별
+        // (Debug·Asan: Trace=0, Development: Debug=1, Release: Info=2)이고 타깃 재정의는 모든 모듈에 같게 간다.
+        void ExpectLogMinimum(NativeBuildRequest input, int level, string name)
+        {
+            var compiles = ActionGraph.Create(input).Actions.Where(action => action.Kind == "Compile").ToArray();
+            Check(compiles.Select(action => action.Module).Distinct().Count() > 1, name + ": expected several compiled modules");
+            foreach (var compile in compiles)
+            {
+                string[] macros = compile.Arguments.Where(argument => argument.Contains("ROCKS_LOG_COMPILED_MINIMUM", StringComparison.Ordinal)).ToArray();
+                Check(macros.SequenceEqual([Define("ROCKS_LOG_COMPILED_MINIMUM=" + level)]),
+                    $"{name}: {compile.Id} log compiled minimum {string.Join(' ', macros)}, expected {level}");
+            }
+        }
+
+        ExpectLogMinimum(request with { Configuration = NativeConfiguration.Debug }, 0, "Debug");
+        ExpectLogMinimum(request with { Configuration = NativeConfiguration.Development }, 1, "Development");
+        ExpectLogMinimum(request with { Configuration = NativeConfiguration.Release }, 2, "Release");
+        if (request.Toolchain.Platform != NativePlatform.Android)
+        {
+            ExpectLogMinimum(request with { Configuration = NativeConfiguration.Asan }, 0, "Asan");
+        }
+
+        ExpectLogMinimum(request with { Configuration = NativeConfiguration.Release, LogCompiledMinimum = LogLevel.Warning }, 3, "Release override");
+        ExpectLogMinimum(request with { Configuration = NativeConfiguration.Debug, LogCompiledMinimum = LogLevel.Info }, 2, "Debug override");
+
+        // 소스 경로 접두 매핑: 저장소 루트를 떼어 __FILE__·__builtin_FILE()을 상대 경로로 남긴다(모든 compile action).
+        string prefixMap = (windows ? "/clang:" : "") + "-fmacro-prefix-map=" +
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(request.RootDirectory)) + Path.DirectorySeparatorChar + "=";
+        foreach (var compile in ActionGraph.Create(request).Actions.Where(action => action.Kind == "Compile"))
+        {
+            Check(compile.Arguments.Count(argument => argument.Contains("prefix-map", StringComparison.Ordinal)) == 1 &&
+                  compile.Arguments.Contains(prefixMap), $"{compile.Id}: expected {prefixMap}");
+        }
+
         // 모든 구성의 실행 파일이 PDB를 남긴다(Windows).
         if (windows)
         {
@@ -170,6 +204,17 @@ internal static class BuildConfigurationTests
             await Rejects(WithEngineModule(module => module with { PrivateDefines = [define] }), "module defined a reserved macro " + define,
                 "reserved for the build configuration");
         }
+        // 로그 컴파일 하한은 타깃 전체에 하나다: 모듈 정의·모듈 인자로 바꾸면 ODR 위반이므로 거부한다.
+        foreach (string define in new[] { "ROCKS_LOG_COMPILED_MINIMUM=3", "ROCKS_LOG_COMPILED_MINIMUM" })
+        {
+            await Rejects(WithEngineModule(module => module with { PublicDefines = [define] }), "module defined " + define,
+                "reserved for the target");
+            await Rejects(WithEngineModule(module => module with { PrivateDefines = [define] }), "module defined " + define,
+                "reserved for the target");
+            await Rejects(WithEngineModule(module => module with { AdditionalCompileArguments = [Define(define)] }), "module argument " + define);
+        }
+
+        await Rejects(request with { LogCompiledMinimum = (LogLevel)6 }, "accepted undefined log compiled minimum", "LogCompiledMinimum");
 
         foreach (string argument in new[] { "-O", "-O3", "-Os", "-Ofast", "--optimize=2", "/O1", "/O2", "/Ox", "/Od", "/Ob2",
                      "-flto", "-flto=full", "-fno-lto", "-fsanitize=address", "-fsanitize=undefined", "-fno-sanitize=address",

@@ -433,15 +433,15 @@ TEST(VectorRegister_ReductionsMatchScalarOrder) {
         scalar::MatrixMultiply(matrix, other, scalarMatrix);
         bool matrixSame = true;
         bool matrixNear = true;
-        for (int column = 0; column < 4; ++column) {
-            float simdColumn[4];
-            float scalarColumn[4];
-            for (int row = 0; row < 4; ++row) {
-                simdColumn[row] = simdMatrix[column * 4 + row];
-                scalarColumn[row] = scalarMatrix[column * 4 + row];
+        for (int row = 0; row < 4; ++row) {
+            float simdRow[4];
+            float scalarRow[4];
+            for (int column = 0; column < 4; ++column) {
+                simdRow[column] = simdMatrix[row * 4 + column];
+                scalarRow[column] = scalarMatrix[row * 4 + column];
             }
-            matrixSame = matrixSame && SameLanes(simdColumn, scalarColumn);
-            matrixNear = matrixNear && NearLanes(simdColumn, scalarColumn);
+            matrixSame = matrixSame && SameLanes(simdRow, scalarRow);
+            matrixNear = matrixNear && NearLanes(simdRow, scalarRow);
         }
         if constexpr (platform::ScalarSimdBitExact) {
             CHECK(SameLanes(dot3, dot3Reference));
@@ -467,7 +467,7 @@ TEST(VectorRegister_ReductionsMatchScalarOrder) {
 TEST(VectorRegister_CrossProductOrientationAndZeroW) {
     namespace simd = platform::simd;
     float result[4];
-    // 오른손: X × Y = Z. w는 입력과 무관하게 +0이다.
+    // 표준 외적: X × Y = Z(UE 축 이름으로 Forward × Right = Up). w는 입력과 무관하게 +0이다.
     simd::Store(result, simd::Cross3(simd::Set(1.0f, 0.0f, 0.0f, QuietNaN),
                                      simd::Set(0.0f, 1.0f, 0.0f, Infinity)));
     CHECK(result[0] == 0.0f && result[1] == 0.0f && result[2] == 1.0f);
@@ -494,7 +494,7 @@ TEST(VectorRegister_MatrixMultiplyAllowsAliasedOutput) {
         same = same && aliased[index] == expected[index];
     }
     CHECK(same);
-    // 열 우선: (a*b)(0,0) = sum_k a(0,k) * b(k,0) = 1*16 + 5*15 + 9*14 + 13*13.
+    // 행 우선 output = b * a: output[0][0] = sum_k b[0][k] * a[k][0] = 16*1 + 15*5 + 14*9 + 13*13.
     CHECK(expected[0] == 386.0f);
 }
 

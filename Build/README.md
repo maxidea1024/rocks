@@ -29,6 +29,8 @@ UE5.8 Debug·Development·Shipping에 대응한다. 구성마다 `ROCKS_BUILD_DE
 
 - 계약 위반 검사(Fatal)는 모든 구성에서 유지한다. 구성 매크로로 빼는 것은 디버그 표시·치트·통계 같은 개발용 기능뿐이다.
 - 대상 OS 매크로 `ROCKS_PLATFORM_WINDOWS`·`ROCKS_PLATFORM_MAC`·`ROCKS_PLATFORM_ANDROID`도 빌드가 정확히 하나를 1로 정의하고, `Base/Compiler.h`가 컴파일 대상과 맞는지 검증한다. 아키텍처 매크로 `ROCKS_ARCH_X64`·`ROCKS_ARCH_ARM64`는 `Compiler.h`가 정한다. 모듈은 `ROCKS_BUILD_*`·`ROCKS_PLATFORM_*`·`ROCKS_ARCH_*`를 정의할 수 없다. 사용 규칙(원시 컴파일러 매크로 금지, include 순서, `defined()` 금지)은 [플랫폼 계층](../Docs/Design/PlatformLayer.ko.md)의 "플랫폼 선택과 실패 정책"을 따른다.
+- 로그 컴파일 하한 `ROCKS_LOG_COMPILED_MINIMUM`(`LogLevel` 숫자)은 빌드가 타깃의 모든 모듈에 같은 값으로 정의한다. 기본은 Debug·Asan Trace(0), Development Debug(1), Release Info(2)이고, 타깃이 `TargetRules.LogCompiledMinimum`으로 바꿀 수 있다. 모듈별 정의는 ODR 위반이라 거부하며, 설치 SDK export·SDK 게임 타깃은 미리 빌드한 엔진 라이브러리와 맞추려고 재정의를 거부한다([로깅 시스템](../Docs/Design/LoggingSystem.ko.md) 6.4절).
+- 모든 compile action은 `-fmacro-prefix-map=<저장소 루트><구분자>=`(clang-cl은 `/clang:` 접두, 설치 SDK 게임 빌드는 SDK 루트도)를 받아 `__FILE__`·`__builtin_FILE()`이 저장소 기준 상대 경로(예: `Core\Source\Runtime\Core\Private\...`)가 된다. 로그·assert 위치에 빌드 장소가 남지 않는다. 디버그 정보 경로는 바꾸지 않는다(`-ffile-prefix-map`이 아니다). 도구 빌드 ID는 루트를 경로 키(`src:`)로 정규화한다.
 - Release는 최적화된 모듈을 ThinLTO bitcode로 컴파일한다. 도구 탐색은 archiver·linker를 compiler와 같은 폴더에서 먼저 찾으며, Windows Release는 compiler 폴더의 `llvm-lib`·`lld-link`만 받는다(MSVC `lib.exe`·`link.exe`나 다른 LLVM 설치의 도구는 빌드 전에 거부). macOS는 compiler 옆에 `llvm-ar`가 없으면 Xcode `ar`(libLTO)를 쓴다. POSIX link driver에는 `-flto=thin`을 넘긴다.
 - 모든 구성이 디버그 정보를 만든다. Release PDB는 UE Shipping처럼 배포 파일과 분리해 크래시 덤프 심볼화에 쓴다.
 - 후속: ThinLTO 캐시(`/lldltocache`·`--thinlto-cache-dir`)가 없어 Release relink는 backend를 모두 다시 생성한다. 병렬 link 수와 LTO thread 수 조정도 측정 후 정한다.
@@ -62,6 +64,7 @@ public sealed class Physics : EngineModuleRules
 - 빌드는 프로세스 환경을 물려받지 않고 허용 목록(VS·Windows SDK·Xcode 선택·SOURCE_DATE_EPOCH 같은 Keyed 변수와 PATH·TEMP 같은 Runtime 변수)만 컴파일러에 넘긴다. Keyed 변수만 증분 key에 들어가므로 `dotnet msbuild`가 실행마다 바꾸는 세션 변수가 재빌드를 일으키지 않는다. 컴파일러·링커 동작을 바꾸는 변수(`CL`·`_CL_`·`LINK`·`_LINK_`·`CCC_OVERRIDE_OPTIONS`·`COMPILER_PATH`·`CPATH`·`C_INCLUDE_PATH`·`CPLUS_INCLUDE_PATH`·`OBJC_INCLUDE_PATH`·`LIBRARY_PATH`)가 있었으면 `Build environment: removed …` 한 줄로 알린다. 기본 config 파일은 받는 컴파일러면 `--no-default-config`로 끈다(받지 않는 컴파일러가 config 파일을 읽으면 오류).
 - 모듈 인자로 FP 모델(`-ffast-math`·`/fp:*`·`-ffp-*`·ISA 선택 `-m*` 등)·`-mllvm`·`-Xlinker`·`-Ofast`·`-Xclang`·config 파일·링커·대상 선택·절대 경로를 넘길 수 없다. FP 모델은 구성·모듈마다 달라지지 않는다.
 - Core(`ProvidesBuildInfo`)에 닿는 실행 파일마다 `<출력>/BuildInfo/<실행 파일>.BuildInfo.cpp`가 생겨 `rocks::build::ToolchainFingerprint()`(툴체인 지문 — 에셋 너겟 키, 구성 무관)·`ToolBuildId()`(도구 빌드 ID — 진단·캐시 무효화, 패키지에 쓰지 않음)·`CurrentEngineVersion()`(엔진 버전 — 아래 [엔진 버전](#엔진-버전))을 정의한다(`Core/Build/BuildInfo.h`). 원문은 같은 폴더의 `ToolchainFingerprint.txt`·`<실행 파일>.BuildInfo.txt`이고 `action-report.json`의 `ToolchainFingerprint`·`ToolBuildIds`에도 실린다. 실행 파일이 Core에 닿으면 입력 byte가 하나만 바뀌어도 생성 TU와 link가 다시 돈다. 자세한 규칙은 [Rocks.Build](../Programs/Rocks.Build/README.ko.md#빌드-주입-상수buildinfo)와 [ReflectionFoundations](../Docs/Design/ReflectionFoundations.ko.md) 8.1절을 따른다.
+- 규칙은 저장소 입력에서 만든 번역 단위를 `NativeModuleInput.GeneratedSources`(파일 이름·내용)로 넘길 수 있다. 빌드가 출력 잠금 아래에서 `<출력>/GeneratedSources/<모듈>/<파일 이름>`에 내용이 바뀔 때만 써서 그 모듈 소스로 컴파일한다(BuildInfo와 같은 방식, 내용이 같으면 다시 컴파일하지 않는다). 이름은 구분자 없는 `.cpp`·`.c`이고 내용은 호스트 경로를 담지 않는다. 셰이더 도구 표(`Developer/ShaderToolTable`)가 Engine 루트 binary manifest에서 이렇게 만든다(아래 [미리 빌드한 바이너리](#미리-빌드한-바이너리bootstrap)).
 
 ### 엔진 버전
 
@@ -90,7 +93,7 @@ SDK는 타깃에서 도달하는 모듈만 내보낸다. 고정 버전 외부 �
 
 ## 외부 라이브러리(C 원본)
 
-빌드 도구는 확장자가 정확히 `.c`인 번역 단위를 C17로 컴파일한다(clang-cl `/TC /clang:-std=c17`, POSIX `-x c -std=c17`). 경고·FP·구성·CRT·최적화 프로필은 C++와 같고 C++ 전용 플래그만 빠진다. C++ 번역 단위의 인자는 바뀌지 않는다. `.c`는 `Core/Source/ThirdParty/<Lib>/` 아래에서만 허용하며(compile DB 감사), 모듈 인자로 언어·표준을 바꿀 수 없다.
+빌드 도구는 확장자가 정확히 `.c`인 번역 단위를 C17로 컴파일한다(clang-cl `/TC /clang:-std=c17`, POSIX `-x c -std=c17`). 경고·FP·구성·CRT·최적화 프로필은 C++와 같고 C++ 전용 플래그만 빠진다. C++ 번역 단위의 인자는 바뀌지 않는다. `.c`는 외부 라이브러리 폴더(Core가 쓰면 `Core/Source/ThirdParty/<Lib>/`, 엔진·도구 전용이면 `Engine/Source/ThirdParty/<Lib>/`) 아래에서만 허용하며(compile DB 감사), 모듈 인자로 언어·표준을 바꿀 수 없다. manifest 종류는 `code`·`data`·`headers`(헤더 전용, 모듈 규칙 없음)·`binary`(Rocks가 컴파일하지 않는 미리 빌드한 바이너리)다([셰이더 시스템](../Docs/Design/ShaderSystem.ko.md) 8절).
 
 라이브러리 폴더는 `<Lib>.Build.cs`(`ThirdPartyModuleRules` 상속, 이름만 적는다), `ThirdParty.json`(단일 출처), `<lib>-<version>/`(릴리스 원본을 byte 그대로)로 구성한다. 업그레이드 절차:
 
@@ -98,6 +101,23 @@ SDK는 타깃에서 도달하는 모듈만 내보낸다. 고정 버전 외부 �
 2. `ThirdParty.json`의 `version`·`upstreamDirectory`·`source`·경로를 고친 뒤 `dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll third-party --root . --write`로 `files`(SHA-256)와 `pragmaDirectives`를 다시 계산한다. 인자 없이 실행하면 차이만 보고한다.
 3. 새로 기록된 진단 지시문을 검토한다. `native` 단계의 `Native.ThirdPartyDirectivesHideNoWarnings`가 지시문을 지운 사본도 경고 0인지 실제 compile DB 인자로 확인한다.
 4. 압축 결과 golden(`Compression_DeterministicOutputGoldens`)이 바뀌면 의도한 변경인지 확인하고 갱신한다.
+
+## 미리 빌드한 바이너리(bootstrap)
+
+DXC·SPIRV-Cross·SPIRV-Tools처럼 Rocks 빌드가 컴파일하지 않는 도구는 manifest `kind: binary`로 `Engine/Source/ThirdParty/<Lib>/`에 둔다([셰이더 시스템](../Docs/Design/ShaderSystem.ko.md) 8절). 저장소에는 공개 헤더·라이선스·`Build/` 오프라인 빌드 스크립트·manifest만 두고, 바이너리는 사용자 단위 내용 주소 저장소(Windows `%LOCALAPPDATA%\Rocks\ThirdParty\<SHA-256>\`, macOS `~/Library/Application Support/Rocks/ThirdParty/<SHA-256>/`)에 명시적인 bootstrap 명령으로만 받는다. 기본 빌드·시험과 Foundation CI는 bootstrap 없이 돈다(헤더는 저장소에 있다). 워커가 도구를 여는 실행·시험만 bootstrap이 필요하다.
+
+```text
+dotnet msbuild Rocks.proj /t:ThirdPartyBootstrap
+dotnet out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks.Build.Cli.dll bootstrap --root . [--library <Lib>] [--mirror <dir>] [--offline true] [--store <dir>] [--windows-sdk <dir>]
+```
+
+- 받은 archive는 저장소 아래 임시 디렉터리에서 archive·파일 SHA-256과 크기를 검사한 뒤 최종 디렉터리로 옮긴다. 검사에 실패하거나 끊기면 최종 디렉터리는 생기지 않고, 다음 실행이 남은 임시 디렉터리를 지우고 다시 받는다. macOS는 검사 뒤 quarantine 속성을 지운다. 다른 bootstrap이 저장소를 쓰고 있으면 기다리지 않고 실패한다.
+- 이미 있으면 검사만 하고 받지 않는다. `--offline true`는 받지 않고 저장소만 검사한다. 저장소 파일이 manifest와 다르면 고치지 않고 오류다(그 디렉터리를 지우고 다시 실행한다).
+- `--mirror`: asset 이름(`<Lib>-<버전>-r<revision>-<호스트>.tar.gz`)으로 archive를 찾는 디렉터리. 없으면 manifest URL(저장소 GitHub Releases)에서 받고, 인증 없이 받을 수 없으면(비공개 저장소) `gh release download`가 사용자의 `gh` 로그인으로 받는다.
+- FXC(`D3DCompiler`)는 버전을 고정한 Windows SDK의 `Redist/D3D/x64/d3dcompiler_47.dll`을 SHA-256 검사 뒤 저장소로 복사한다. Apple Metal 도구(`MetalToolchain`, `status: system`)는 받지 않는다(최소 버전만 고정).
+- 오프라인 도구 빌드: `pwsh Engine/Source/ThirdParty/<Lib>/Build/Build.ps1`(Windows x64), `sh Engine/Source/ThirdParty/<Lib>/Build/Build.sh`(macOS arm64)가 manifest `build`의 고정 원본을 받아 SHA-256을 검사하고 CMake·Ninja로 빌드해 archive와 `<asset>.host.json`(manifest `hosts` 항목)을 만든다. CMake·Ninja·Python 3·Visual Studio C++ 도구(macOS는 Xcode)가 필요하다. 수동 실행 workflow `.github/workflows/third-party-tools.yml`이 두 호스트에서 빌드하고, 입력 `publish`가 true면 Release에 올린다.
+- 도구 표와 열기([셰이더 시스템](../Docs/Design/ShaderSystem.ko.md) 9절): `Developer/ShaderToolTable`은 빌드 대상 호스트의 도구 이름·저장소 디렉터리 이름·파일 SHA-256·role을 생성 TU로 가진다(메타데이터만, 파일을 열지 않는다). `Developer/ShaderToolLoader`(워커 자리)가 저장소 파일의 크기·SHA-256을 표와 대조한 뒤 `DynamicLibrary::Open`으로 절대 경로에서 열고 함수 표(DXC·FXC·SPIRV-Cross·SPIRV-Tools)를 얻는다. 저장소에 없으면 `NotBootstrapped`, 다르면 `DigestMismatch`로 bootstrap을 안내한다. 도구를 여는 EngineTests 시험은 저장소가 없으면 SKIP이다.
+- 정책 검사: 도구 표는 ShaderCompiler·워커·ShaderFormat* 모듈만(`shader-tool-table`), 도구 binary 로드·binary 헤더·`DynamicLibrary::Open`은 워커·ShaderFormat*·ShaderToolLoader만(`shader-tool-binary-load`) 쓴다. Game 타깃(`TargetRules.Type`, 기본 Game, 도구·시험은 Program)은 Release 구성에서 Developer 모듈에 닿거나 d3dcompiler·dxcompiler를 링크하거나 Windows에서 OpenGLGraphics를 링크하면 안 된다(`release-*`). 알려진 예외 세 건(SH2까지 D3D12Graphics의 d3dcompiler와 Sandbox의 Windows OpenGLGraphics, SH5까지 D3D11Graphics의 d3dcompiler)은 `policy` 실행 때 `note: known Release exception until SH2`(또는 `SH5`)로 출력된다.
 
 ## 메타 선언
 

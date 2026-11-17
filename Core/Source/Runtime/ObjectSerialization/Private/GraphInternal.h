@@ -357,6 +357,9 @@ private:
         bool outermostIsPackage = false;
         bool hasRepresentative = false;
         bool hasNamedInners = false;
+        // 이 노드의 타입이다(자식 노드의 Within 판정 — 리플렉션 B9h2, 노드 배열은 판정 동안 바뀌지
+        // 않는다).
+        const TypeLease* type = nullptr;
     };
 
     // outer 값의 요약이다(Outer 없음이면 nullptr, 아니면 summary를 채워 그 주소).

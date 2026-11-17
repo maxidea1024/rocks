@@ -1,8 +1,16 @@
 #pragma once
 
 #include <Object/AssetId.h>
+#include <Object/DetachedPath.h>
 #include <Object/PathKey.h>
+#include <Object/PreparedReferences.h>
 #include <Object/PropertyPath.h>
+
+namespace rocks {
+
+class PreparedStructElements;
+
+} // namespace rocks
 
 // 경로 접근 cursor의 공개 detail 선언이다(Docs/Design/ReflectionFoundations.ko.md 7.1절). 생성 경로
 // 템플릿(Object/GeneratedPathAccess.h)이 멤버 함수를 부르므로 클래스 선언은 여기에 두고 구현은
@@ -28,7 +36,13 @@ enum class PathOperation : uint8 {
     // 지우기.
     Contains,
     InsertKey,
-    EraseKey
+    EraseKey,
+    // 필드·멤버 값 하나를 상자로 깊게 복사하기(PathDetach)와 상자와 맞바꿀 자리 찾기
+    // (PathPrepareAttach)다(리플렉션 B9i3c0).
+    Detach,
+    Attach,
+    // Map·Set 필드의 키를 삽입 순서대로 모두 읽기다(PathReadKeys — 리플렉션 B9i4).
+    ReadKeys
 };
 
 // 해석한 경로 단계 하나다: 필드(스키마 안 위치), 바깥 필드에서 누적한 유효 플래그, 대상
@@ -92,6 +106,106 @@ public:
         return owner_;
     }
 
+    // 시작 위치가 게시된 객체인지다(Registry 컨테이너 변경·live 참조 쓰기는 이때만 된다).
+    bool IsLive() const noexcept {
+        return root_ == PathTarget::Kind::Object;
+    }
+
+    // 쓰기 검증이 ReadOnly를 보지 않는 시작 위치인지다: staged 객체와 staged 객체에서 분리한 상자다
+    // (리플렉션 B9i3c1 — Docs/Design/ReflectionExtensions.ko.md 10.2절).
+    bool AcceptsReadOnlyWrites() const noexcept;
+
+    // 시작 위치가 분리된 값(struct 값·상자)인지다(강한 참조 쓰기가 없다).
+    bool IsDetached() const noexcept {
+        return root_ == PathTarget::Kind::Struct || root_ == PathTarget::Kind::Detached;
+    }
+
+    // staged 시작 위치의 트랜잭션이다(아니면 nullptr).
+    ConstructionContext* Construction() const noexcept {
+        return construction_;
+    }
+
+    // 시작 위치가 원소 추가 준비물이 소유한 게시 전 StructRefArray 원소 블록인지다(리플렉션 B9i5 —
+    // PathTarget::WithAddedElement).
+    bool WritesAddedElement() const noexcept {
+        return added_ != nullptr;
+    }
+
+    // 게시 전 원소 블록 안의 강한 참조 멤버 field에 쓰기 입력(Input()의 reference)을 직접
+    // 쓴다(리플렉션 B9i5). 대상의 생존·스키마 기대 타입은 검증 지점이 이미 봤고 여기서는 C++ 대상
+    // 타입을 대조한다 (CheckWeakTarget). field가 시작 위치 블록 밖이면 InvalidArgument다. 간선은
+    // 게시 때 선언한다(PreparedStructElements::AddedReferences).
+    template <class T>
+    Result<void> WriteAddedReference(ObjectRef<T>& field) noexcept {
+        return WriteAddedReferenceAt(field.handle_, NativeTypeKey<T>());
+    }
+
+    // 빈 자리(unset Optional 등)에 새로 만드는 값의 allocator다: 객체(게시·staged)면
+    // ObjectRegistry::ObjectAllocator, 분리된 값이면 그 값의 allocator다.
+    Allocator& ValueAllocator() const noexcept;
+
+    // 게시된 객체에서만 되는 끝 지점(Registry 컨테이너의 변경)이 부른다: 아니면
+    // Unsupported(NoPathAccess)를 기록한다.
+    Result<void> RequireLive() noexcept;
+
+    // 지금 연산이 대상을 바꾸지 않는 읽기(Read·Length·QueryOptional·Contains·ReadKeys)인지다.
+    bool IsReading() const noexcept {
+        return operation_ == PathOperation::Read || operation_ == PathOperation::Length ||
+               operation_ == PathOperation::QueryOptional ||
+               operation_ == PathOperation::Contains || operation_ == PathOperation::ReadKeys;
+    }
+
+    // Detach 끝 지점이다: value(ops 형식의 지금 값)를 출력 상자에 깊게 복사하고 상자를
+    // 채운다(enter는 상자에서 경로를 시작하는 생성 함수). 게시된 객체면 고정 아래 복사하고 owner를
+    // 다시 확인한다. copy·swap이 없으면 Unsupported(NotCopyable)다.
+    Result<void> DetachValue(const RuntimeValueOps& ops, const void* value,
+                             DetachedPathFunction enter) noexcept;
+
+    // Attach 끝 지점이다: 상자 값의 형식이 ops와 같은지 대조하고(TypeMismatch(StaticTypeMismatch))
+    // value 자리를 출력 PreparedAttach에 둔다(값은 바꾸지 않는다).
+    Result<void> AttachValue(const RuntimeValueOps& ops, void* value) noexcept;
+
+    // PathPrepareReference(리플렉션 B9i3c2)인지다: 참조 쓰기 끝 지점이 값을 바꾸지 않고 자리를
+    // 찾는다(Write 연산 — 검증은 PathWrite와 같다).
+    bool LocatesReference() const noexcept {
+        return reference_ != nullptr;
+    }
+
+    // 단일 참조 위치 끝 지점이다: field 자리와 그 대상 타입·지금 대상·원소 위치를 출력
+    // PreparedReference에 둔다(값은 바꾸지 않는다).
+    template <class T>
+    Result<void> LocateReference(ObjectRef<T>& field) noexcept {
+        return LocateReferenceAt(&field, &PreparedReference::PublishAt<T>, NativeTypeKey<T>(),
+                                 field.Handle());
+    }
+
+    // 시작 위치에 건 Registry 컨테이너 준비 사본이다(리플렉션 B9i3c3 — PathTarget::WithReferences,
+    // 없으면 nullptr). 있으면 ObjectRefArray·ObjectRefMap 끝 지점이 객체 대신 사본을 읽고 바꾼다.
+    PreparedReferences* StagedReferences() const noexcept {
+        return stage_;
+    }
+
+    // 준비 사본 끝 지점이 부른다: 사본이 묶이지 않았으면 container(그 연산 표 ops, 컨테이너
+    // allocator)를 묶고 지금 내용(배열은 elements, Map은 사본 clone의 값)을 Previous로 둔다 —
+    // 게시된 객체는 고정 아래 복사하고 owner를 다시 확인한다. 이미 묶였으면 같은 컨테이너·owner인지
+    // 대조한다(아니면 InvalidArgument(InvalidValue)). clone은 결과와 무관하게 넘겨받는다(실패하거나
+    // 이미 묶였으면 반환한다).
+    Result<void> BindReferences(void* container, const ReferenceStageOps& ops,
+                                Allocator& containerAllocator, Span<const ObjectHandle> elements,
+                                void* clone) noexcept;
+
+    // PathPrepareStructElements(리플렉션 B9i3c4)인지다: StructRefArray 끝 지점이 원소 수 대신 출력
+    // 준비물에 배열을 묶는다(Length 연산).
+    bool LocatesElements() const noexcept {
+        return elements_ != nullptr;
+    }
+
+    // StructRefArray 끝 지점이 부른다: 출력 준비물이 묶이지 않았으면 storage에 묶고(지금 원소
+    // 수·변경 계수), 묶였으면 같은 owner·배열(아니면 InvalidArgument(InvalidValue))과 변경
+    // 계수(아니면 Busy)를 확인한 뒤 게시된 객체면 지울 원소 안의 참조를 다시 모은다. 할당은 고정
+    // 아래 하고 owner를 다시 확인한다.
+    Result<void> BindStructElements(StructRefArrayStorage& storage) noexcept;
+
     // Write·Insert의 입력 값이다(Insert의 struct 원소는 nullptr). 검증을 마친 값이다.
     const FieldValue* Input() const noexcept {
         return input_;
@@ -100,6 +214,11 @@ public:
     // Read의 out, Write의 previous, Remove의 removed다(주지 않았으면 nullptr — Read는 항상 있다).
     FieldValue* Output() const noexcept {
         return output_;
+    }
+
+    // ReadKeys의 out이다(리플렉션 B9i4 — 그 밖의 연산은 nullptr).
+    Array<FieldValue>* KeysOutput() const noexcept {
+        return keys_;
     }
 
     // 클래스 필드 thunk가 소유 객체 주소를 얻는다. 실제 객체 타입이
@@ -187,8 +306,10 @@ public:
     // ClassRef 쓰기·삽입(Input()의 guid)의 클래스가 정적 Base staticNative(NativeTypeKey<Base>)의
     // C++ 파생인지다(리플렉션 B9d2). 등록·스키마 Base 파생은 검증 지점(PathRunner —
     // ValidateClassReference)이 이미 봤고 그 클래스 lease를 쥐었다. null이면 성공, 아니면
-    // TypeMismatch(StaticTypeMismatch)다.
-    Result<void> CheckClassTarget(const void* staticNative) noexcept;
+    // TypeMismatch(StaticTypeMismatch)다. 클래스가 Deprecated면(리플렉션 B9h2) 그 자리의 지금 값
+    // current와 같을 때만 받는다(같은 값의 재기록 — 새 원소·Map 항목은 current 0이라 거부,
+    // InvalidArgument(InvalidValue)).
+    Result<void> CheckClassTarget(const void* staticNative, TypeId current = TypeId{}) noexcept;
 
     // 할당하는 쓰기 끝 지점이 할당 전에 owner를 encode 고정한다(이미 고정했으면 그대로 성공 —
     // Read는 처음부터 고정한다). 고정 중 재진입 쓰기·Registry 컨테이너 변경·SetEdge는 Busy다.
@@ -206,6 +327,10 @@ public:
     // Read: owner를 다시 확인한 뒤 고정을 풀고 value를 out으로 옮긴다(out의 옛 버퍼는 고정 밖에서
     // 반환한다).
     Result<void> PublishRead(FieldValue& value) noexcept;
+
+    // ReadKeys: owner를 다시 확인한 뒤 고정을 풀고 keys(KeysOutput()의 allocator로 만든 키 목록)를
+    // out으로 옮긴다(out의 옛 원소는 고정 밖에서 반환한다).
+    Result<void> PublishKeys(Array<FieldValue>& keys) noexcept;
 
     // 성공한 쓰기·삭제의 옛 값(value)을 Output()으로 옮긴다. 고정을 푼 뒤에 부른다. Output()이
     // 없으면 아무것도 하지 않는다.
@@ -241,18 +366,44 @@ public:
 private:
     friend struct PathRunner;
 
-    PathCursor(ObjectRegistry& registry, const ObjectAccessContext& access, ObjectHandle owner,
-               PathOperation operation, const FieldValue* input, FieldValue* output,
-               PropertyPathFailure* failure) noexcept;
+    PathCursor(ObjectRegistry& registry, const ObjectAccessContext& access,
+               const PathTarget& target, PathOperation operation, const FieldValue* input,
+               FieldValue* output, PropertyPathFailure* failure) noexcept;
 
     void Record(ErrorCode code, PropertyPathError reason) noexcept;
+
+    Result<void> LocateReferenceAt(void* field, PreparedReference::PublishFunction publish,
+                                   const void* nativeType, ObjectHandle previous) noexcept;
+
+    Result<void> WriteAddedReferenceAt(ObjectHandle& field, const void* nativeType) noexcept;
 
     ObjectRegistry& registry_;
     const ObjectAccessContext& access_;
     ObjectHandle owner_;
+    // 시작 위치(PathTarget — 리플렉션 B9i3c0): staged 트랜잭션, struct 값의 lease·view·저장소·
+    // allocator, 상자.
+    PathTarget::Kind root_;
+    ConstructionContext* construction_;
+    const TypeLease* rootLease_;
+    StructView rootView_;
+    void* rootValue_;
+    Allocator* rootAllocator_;
+    DetachedValue* rootBox_;
+    // Detach의 출력 상자·Attach의 입력 상자와 Attach의 출력 자리다.
+    DetachedValue* box_ = nullptr;
+    PreparedAttach* attach_ = nullptr;
+    // PathPrepareReference의 출력 자리다(리플렉션 B9i3c2).
+    PreparedReference* reference_ = nullptr;
+    // 시작 위치에 건 Registry 컨테이너 준비 사본이다(리플렉션 B9i3c3).
+    PreparedReferences* stage_;
+    // 시작 위치가 원소 추가 준비물의 게시 전 원소 블록이면 그 준비물이다(리플렉션 B9i5).
+    PreparedStructElements* added_;
+    // PathPrepareStructElements의 출력 준비물이다(리플렉션 B9i3c4).
+    PreparedStructElements* elements_ = nullptr;
     PathOperation operation_;
     const FieldValue* input_;
     FieldValue* output_;
+    Array<FieldValue>* keys_ = nullptr;
     PropertyPathFailure* failure_;
     TypeLease ownerType_;
     TypeLease expectedType_;

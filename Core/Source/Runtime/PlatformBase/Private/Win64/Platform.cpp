@@ -44,25 +44,27 @@ void Mutex::Unlock() noexcept {
     ReleaseSRWLockExclusive(reinterpret_cast<SRWLOCK*>(storage_));
 }
 
-uint64 MonotonicNanoseconds() noexcept {
+// ns 변환(MonotonicNanoseconds)은 플랫폼 공통 Private/Common/Clock.cpp가 이 두 값으로 한다.
+uint64 MonotonicTicks() noexcept {
     LARGE_INTEGER counter{};
-    LARGE_INTEGER frequency{};
-    if (!QueryPerformanceCounter(&counter) || !QueryPerformanceFrequency(&frequency) ||
-        counter.QuadPart < 0 || frequency.QuadPart <= 0) {
+    if (!QueryPerformanceCounter(&counter) || counter.QuadPart < 0) {
         Fatal("QueryPerformanceCounter failed");
     }
 
-    // 정수 tick×10^9 중간 곱의 overflow를 피한다. 단위 변환은 해상도 향상을 뜻하지 않는다.
-    const long double nanoseconds = static_cast<long double>(counter.QuadPart) * 1000000000.0L /
-                                    static_cast<long double>(frequency.QuadPart);
-    if (nanoseconds >= static_cast<long double>(NumericLimits<uint64>::Max())) {
-        Fatal("Monotonic clock overflow");
-    }
-
-    return static_cast<uint64>(nanoseconds);
+    return static_cast<uint64>(counter.QuadPart);
 }
 
-int64 UtcTicks() noexcept {
+// 주파수는 부팅 때 정해져 바뀌지 않는다. 호출마다 읽어도 비용이 작아 따로 캐시하지 않는다.
+uint64 MonotonicTickFrequency() noexcept {
+    LARGE_INTEGER frequency{};
+    if (!QueryPerformanceFrequency(&frequency) || frequency.QuadPart <= 0) {
+        Fatal("QueryPerformanceFrequency failed");
+    }
+
+    return static_cast<uint64>(frequency.QuadPart);
+}
+
+bool TryUtcTicks(int64& ticks) noexcept {
     FILETIME time{};
     GetSystemTimePreciseAsFileTime(&time);
     // FILETIME은 1601-01-01부터의 100ns다. 0001-01-01부터 1601-01-01까지는 584388일이다.
@@ -70,13 +72,44 @@ int64 UtcTicks() noexcept {
     constexpr uint64 MaxTicks = 3155378975999999999ull;
     const uint64 value = (static_cast<uint64>(time.dwHighDateTime) << 32) | time.dwLowDateTime;
     if (value > MaxTicks - static_cast<uint64>(Offset)) {
+        return false;
+    }
+
+    ticks = static_cast<int64>(value) + Offset;
+    return true;
+}
+
+int64 UtcTicks() noexcept {
+    int64 ticks = 0;
+    if (!TryUtcTicks(ticks)) {
         Fatal("UTC clock is outside the DateTime range");
     }
-    return static_cast<int64>(value) + Offset;
+
+    return ticks;
 }
 
 uint64 CurrentThreadId() noexcept {
     return static_cast<uint64>(GetCurrentThreadId());
+}
+
+void WriteDiagnostic(const char* bytes, usize count) noexcept {
+    const HANDLE errorStream = GetStdHandle(STD_ERROR_HANDLE);
+    if (bytes == nullptr || errorStream == nullptr || errorStream == INVALID_HANDLE_VALUE) {
+        return;
+    }
+
+    // WriteFile은 DWORD 길이를 받으므로 나눠 쓴다. 진행이 없으면(실패·0 byte) 멈춘다.
+    constexpr usize MaxChunk = 1u << 30;
+    while (count != 0) {
+        const DWORD chunk = static_cast<DWORD>(count < MaxChunk ? count : MaxChunk);
+        DWORD written = 0;
+        if (!WriteFile(errorStream, bytes, chunk, &written, nullptr) || written == 0) {
+            return;
+        }
+
+        bytes += written;
+        count -= written;
+    }
 }
 
 [[noreturn]] void Fatal(const char* message) noexcept {

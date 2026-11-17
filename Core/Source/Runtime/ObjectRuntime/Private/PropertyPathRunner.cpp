@@ -2,6 +2,7 @@
 
 #include <Core/Text/NamePool.h>
 #include <Object/ClassRef.h>
+#include <Object/ConstructionContext.h>
 #include <Object/NameField.h>
 
 // 경로 연산의 실행(detail::PathRunner — 입력 형식·문맥·단계 해석·key 해석·끝 지점 분류·참조
@@ -25,9 +26,10 @@ bool IsKeyedKind(ValueKind kind) noexcept {
     return kind == ValueKind::Map || kind == ValueKind::Set;
 }
 
-// 필드가 원소 수·비우기를 받는 컨테이너(Array·Map·Set)인지다.
+// 필드가 원소 수를 읽는 컨테이너(Array·StaticArray·Map·Set)인지다(StaticArray의 비우기는
+// FixedLength로 따로 거부한다).
 bool IsContainerKind(ValueKind kind) noexcept {
-    return kind == ValueKind::Array || IsKeyedKind(kind);
+    return ValueKindTakesIndex(kind) || IsKeyedKind(kind);
 }
 
 // 단계의 값이 FieldValue·struct로 접근하는 형식이다: 배열 원소·Map 항목·Set 원소 단계면 원소(Map은
@@ -180,7 +182,7 @@ Result<void> PathRunner::PrepareInsertedKey(PathCursor& cursor, PathFrame& frame
     // ClassRef 키는 값과 같이 이 Registry에 등록된 클래스이고 스키마 Base의 파생이어야 한다(그
     // lease는 완료까지 쥐고 생성 thunk가 정적 Base를 대조한다 — CheckKeyClass).
     if (keyType.kind == ValueKind::ClassReference && frame.key.guid != Guid{}) {
-        auto found = CheckClassReferenceLease(
+        auto found = CheckWritableClassReferenceLease(
             cursor.registry_.AcquireRegisteredType(cursor.access_, frame.key.guid), keyType.type,
             nullptr);
         if (!found) {
@@ -262,9 +264,15 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::IndexRequired);
     }
 
-    if ((operation == PathOperation::Length || operation == PathOperation::Clear) &&
+    if ((operation == PathOperation::Length || operation == PathOperation::Clear ||
+         operation == PathOperation::ReadKeys) &&
         lastSelector != PathSelector::None) {
         return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::IndexNotAllowed);
+    }
+
+    // 키 읽기(PathReadKeys — 리플렉션 B9i4)는 출력 키 목록이 있어야 한다.
+    if ((operation == PathOperation::ReadKeys) != (cursor.keys_ != nullptr)) {
+        return cursor.Fail(ErrorCode::InvalidArgument);
     }
 
     if (keyOperation && lastSelector != PathSelector::Key) {
@@ -276,23 +284,130 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::InvalidValue);
     }
 
-    // 2. 문맥·수명(소유 스레드·문맥·생존 — staged·DestroyRequested 객체는 거부된다). 소유 타입
-    // lease는 완료까지 쥔다(해석한 스키마·함수표·StructView의 수명).
-    cursor.current_ = 0;
-    auto type = cursor.registry_.AcquireType(cursor.access_, cursor.owner_);
-    if (!type) {
-        return cursor.Fail(type.Error());
+    // Detach·Attach(리플렉션 B9i3c0)는 필드·멤버 하나 단위다. Detach는 빈 상자에 채우고 Attach는 찬
+    // 상자를 쓴다. 상자에서 시작한 경로가 같은 상자를 대상으로 삼을 수 없다.
+    const bool boxOperation =
+        operation == PathOperation::Detach || operation == PathOperation::Attach;
+    if (boxOperation) {
+        if (lastSelector != PathSelector::None) {
+            return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::IndexNotAllowed);
+        }
+
+        const bool wantEmpty = operation == PathOperation::Detach;
+        if (!cursor.box_ || cursor.box_->IsEmpty() != wantEmpty || cursor.box_ == cursor.rootBox_) {
+            return cursor.Fail(ErrorCode::InvalidArgument);
+        }
     }
 
-    cursor.ownerType_ = Move(type.Value());
+    // 참조 자리 찾기(PathPrepareReference — 리플렉션 B9i3c2)는 객체(게시·staged)의 Write다.
+    if (cursor.reference_) {
+        if (operation != PathOperation::Write) {
+            return cursor.Fail(ErrorCode::InvalidArgument);
+        }
+
+        if (cursor.IsDetached()) {
+            return cursor.Fail(ErrorCode::Unsupported, PropertyPathError::NoPathAccess);
+        }
+    }
+
+    // Registry 컨테이너 준비 사본(PathTarget::WithReferences — 리플렉션 B9i3c3)은
+    // 객체(게시·staged)의 컨테이너 연산이다.
+    if (cursor.stage_) {
+        const bool staged =
+            operation == PathOperation::Read || operation == PathOperation::Write ||
+            operation == PathOperation::Length || operation == PathOperation::Insert ||
+            operation == PathOperation::Remove || operation == PathOperation::Clear ||
+            operation == PathOperation::Contains || operation == PathOperation::EraseKey;
+        if (!staged || cursor.IsDetached() || cursor.reference_ || cursor.box_) {
+            return cursor.Fail(ErrorCode::InvalidArgument);
+        }
+    }
+
+    // StructRefArray 원소 지우기 준비물(PathPrepareStructElements — 리플렉션 B9i3c4)은 객체(게시·
+    // staged)의 원소 수 읽기다.
+    if (cursor.elements_ && (operation != PathOperation::Length || cursor.IsDetached() ||
+                             cursor.stage_ || cursor.reference_ || cursor.box_)) {
+        return cursor.Fail(ErrorCode::InvalidArgument);
+    }
+
+    // 원소 추가 준비물의 게시 전 원소 블록(PathTarget::WithAddedElement — 리플렉션 B9i5)은 struct
+    // 값 시작 위치다.
+    if (cursor.added_ && (cursor.root_ != PathTarget::Kind::Struct || cursor.stage_ ||
+                          cursor.reference_ || cursor.elements_)) {
+        return cursor.Fail(ErrorCode::InvalidArgument);
+    }
+
+    // 2. 문맥·수명. 게시된 객체는 소유 스레드·문맥·생존(staged·DestroyRequested 객체는 거부된다),
+    // staged 객체는 그 트랜잭션의 AcquireType(registry가 트랜잭션의 것이 아니면 WrongContext)이다.
+    // 소유 타입 lease는 완료까지 쥔다(해석한 스키마·함수표·StructView의 수명). 분리된 값은 lease가
+    // 없다 — struct 값은 호출자의 lease, 상자는 상자가 쥔 lease가 수명을 지킨다.
+    cursor.current_ = 0;
+    if (cursor.root_ == PathTarget::Kind::Object || cursor.root_ == PathTarget::Kind::Staged) {
+        Result<TypeLease> type = Result<TypeLease>::Failure(ErrorCode::InvalidArgument);
+        if (cursor.root_ == PathTarget::Kind::Object) {
+            type = cursor.registry_.AcquireType(cursor.access_, cursor.owner_);
+        } else if (!cursor.construction_) {
+            return cursor.Fail(ErrorCode::InvalidArgument);
+        } else if (&cursor.construction_->Registry() != &cursor.registry_) {
+            return cursor.Fail(ErrorCode::WrongContext);
+        } else {
+            type = cursor.construction_->AcquireType(cursor.owner_);
+        }
+
+        if (!type) {
+            return cursor.Fail(type.Error());
+        }
+
+        cursor.ownerType_ = Move(type.Value());
+    } else if (cursor.root_ == PathTarget::Kind::Struct) {
+        if (!cursor.rootLease_ || cursor.rootView_.IsEmpty() || !cursor.rootValue_ ||
+            !cursor.rootAllocator_) {
+            return cursor.Fail(ErrorCode::InvalidArgument);
+        }
+
+        // Registry 컨테이너는 owner 저장소 안에서만 뜻이 있다.
+        if (cursor.rootView_.ContainsReferenceArray()) {
+            return cursor.Fail(ErrorCode::Unsupported, PropertyPathError::NoPathAccess);
+        }
+    } else if (!cursor.rootBox_ || cursor.rootBox_->IsEmpty()) {
+        return cursor.Fail(ErrorCode::InvalidArgument);
+    }
+
     // 3. 단계 순서의 해석: FieldId → 스키마 위치(정렬 색인), 모양, 유효 플래그 누적, key 값.
+    // staged 객체와 거기서 분리한 상자는 ReadOnly를 막지 않는다(리플렉션 B9i3c1 — 공개 전 객체의
+    // 초기값은 ReadOnly 필드도 정한다, Docs/Design/ReflectionExtensions.ko.md 10.2절).
+    const bool acceptsReadOnly = cursor.AcceptsReadOnlyWrites();
     for (usize index = 0; index < steps.Size(); ++index) {
         cursor.current_ = index;
         const PathStep& step = steps[index];
         PathFrame& frame = cursor.frames_[index];
         usize position = TypeLease::NoField;
         const FieldSchema* field = nullptr;
-        if (index == 0) {
+        if (index == 0 && cursor.root_ == PathTarget::Kind::Detached) {
+            // 상자의 첫 단계는 상자에 담은 필드 자신이다(바깥 유효 플래그를 이어 받는다).
+            const DetachedValue& box = *cursor.rootBox_;
+            if (!(step.fieldId == box.field_->id)) {
+                return cursor.Fail(ErrorCode::NotFound, PropertyPathError::UnknownField);
+            }
+
+            position = 0;
+            field = box.field_;
+            frame.enumeration = box.enumeration_;
+            frame.keyEnumeration = box.keyEnumeration_;
+            frame.target = box.target_;
+            frame.effectiveFlags = box.effectiveFlags_;
+        } else if (index == 0 && cursor.root_ == PathTarget::Kind::Struct) {
+            position = cursor.rootView_.FieldIndex(step.fieldId);
+            if (position == StructView::NoField) {
+                return cursor.Fail(ErrorCode::NotFound, PropertyPathError::UnknownField);
+            }
+
+            field = &cursor.rootView_.Schema().fields[position];
+            frame.enumeration = cursor.rootView_.FieldEnum(position);
+            frame.keyEnumeration = cursor.rootView_.FieldKeyEnum(position);
+            frame.target = cursor.rootView_.FieldStruct(position);
+            frame.effectiveFlags = field->flags;
+        } else if (index == 0) {
             position = cursor.ownerType_.FieldIndex(step.fieldId);
             if (position == TypeLease::NoField) {
                 return cursor.Fail(ErrorCode::NotFound, PropertyPathError::UnknownField);
@@ -317,6 +432,10 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
             frame.effectiveFlags = PropagateFieldFlags(parent.effectiveFlags, field->flags);
         }
 
+        if (acceptsReadOnly) {
+            frame.effectiveFlags &= ~static_cast<uint32>(FieldFlags::ReadOnly);
+        }
+
         frame.field = field;
         frame.schemaIndex = position;
         frame.index = step.index;
@@ -325,7 +444,7 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         frame.keyName = Name{};
         frame.keyFound = true;
         cursor.count_ = index + 1;
-        if (step.selector == PathSelector::Index && field->value.kind != ValueKind::Array) {
+        if (step.selector == PathSelector::Index && !ValueKindTakesIndex(field->value.kind)) {
             return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::NotArray);
         }
 
@@ -361,6 +480,19 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::NotArray);
     }
 
+    if (operation == PathOperation::ReadKeys && end.field->value.kind != ValueKind::Map &&
+        end.field->value.kind != ValueKind::Set) {
+        return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::NotKeyed);
+    }
+
+    // 정적 배열(리플렉션 B9g)은 길이가 N으로 고정이다: 원소 삽입·삭제·비우기는 값·쓰기 검증보다
+    // 먼저 Unsupported(FixedLength)다(원소는 [i] 쓰기로 바꾼다).
+    if ((operation == PathOperation::Insert || operation == PathOperation::Remove ||
+         operation == PathOperation::Clear) &&
+        end.field->value.kind == ValueKind::StaticArray) {
+        return cursor.Fail(ErrorCode::Unsupported, PropertyPathError::FixedLength);
+    }
+
     // Optional<값 struct> 값 만들기·비우기·set 여부 조회의 끝은 그 필드여야 한다(단일 값 Optional은
     // PathRead·PathWrite의 present로 다룬다 — 리플렉션 B9e).
     const bool optionalEdit =
@@ -377,8 +509,45 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
     const ValueKind kind = endType.kind;
     const bool setElement =
         end.selector == PathSelector::Key && end.field->value.kind == ValueKind::Set;
-    const bool topValue = steps.Size() == 1 && !FieldIsAggregate(*end.field);
+    // 최상위 단일 값의 등록된 read·write 경로는 게시된 객체의 값 연산만 쓴다(staged·분리된 값과
+    // Detach·Attach는 경로 thunk — 리플렉션 B9i3c0).
+    const bool topValue = cursor.root_ == PathTarget::Kind::Object && steps.Size() == 1 &&
+                          !FieldIsAggregate(*end.field) && !boxOperation && !cursor.reference_ &&
+                          !cursor.stage_;
+    // 준비 사본의 끝은 ObjectRefArray·ObjectRefMap(그 원소·항목 포함)이다.
+    if (cursor.stage_ &&
+        (FieldTargetType(*end.field).kind != ValueKind::ObjectReference ||
+         (end.field->value.kind != ValueKind::Array && end.field->value.kind != ValueKind::Map))) {
+        return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::InvalidValue);
+    }
+
+    // 원소 지우기 준비물의 끝은 struct 원소 배열 필드·멤버 통째다(StructRefArray인지는 thunk가
+    // 묶으며 가린다 — 값 struct 배열은 PathPrepareStructElements가 거부한다).
+    if (cursor.elements_ &&
+        (end.selector != PathSelector::None || end.field->value.kind != ValueKind::Array ||
+         end.field->element.kind != ValueKind::Struct)) {
+        return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::InvalidValue);
+    }
+
+    // 참조 자리 찾기의 끝은 단일 강한 참조 위치다(Registry 컨테이너 원소는 그 컨테이너 단위).
+    if (cursor.reference_ &&
+        (kind != ValueKind::ObjectReference ||
+         (end.selector != PathSelector::None && end.field->value.kind != ValueKind::StaticArray))) {
+        return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::InvalidValue);
+    }
+
     switch (operation) {
+    case PathOperation::Attach:
+        // 상자는 같은 스키마 레코드의 필드여야 한다(C++ 형식은 thunk가 대조한다).
+        if (cursor.box_->field_ != end.field) {
+            return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::StaticTypeMismatch);
+        }
+
+        if (HasFlag(end.effectiveFlags, FieldFlags::ReadOnly)) {
+            return cursor.Fail(ErrorCode::Unsupported, PropertyPathError::ReadOnly);
+        }
+
+        break;
     case PathOperation::Read:
     case PathOperation::Write:
         // Set 원소는 키라 값이 없다(PathContains·PathInsertKey·PathEraseKey).
@@ -425,7 +594,16 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
 
     for (usize index = 0; index < steps.Size(); ++index) {
         cursor.current_ = index;
-        if (index == 0) {
+        if (index == 0 && cursor.root_ == PathTarget::Kind::Detached) {
+            // 상자는 Detach가 멤버 형식의 진입 함수를 채웠다.
+            if (!cursor.rootBox_->enter_) {
+                return cursor.Fail(ErrorCode::Unsupported, PropertyPathError::NoPathAccess);
+            }
+        } else if (index == 0 && cursor.root_ == PathTarget::Kind::Struct) {
+            if (!cursor.rootView_.FieldOps(cursor.frames_[0].schemaIndex).path) {
+                return cursor.Fail(ErrorCode::Unsupported, PropertyPathError::NoPathAccess);
+            }
+        } else if (index == 0) {
             const RuntimeFieldOps* ops = cursor.ownerType_.FieldOps(cursor.frames_[0].schemaIndex);
             const bool available =
                 ops && (topValue ? (operation == PathOperation::Read
@@ -470,7 +648,11 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
                 return cursor.Fail(ErrorCode::WrongContext);
             }
 
-            auto found = cursor.registry_.AcquireType(cursor.access_, value->reference);
+            // staged 객체의 강한 참조는 같은 트랜잭션의 공개 전 객체도 가리킬 수 있다(그 트랜잭션의
+            // AcquireType — weak 대상은 게시된 객체만).
+            auto found = cursor.construction_ && kind == ValueKind::ObjectReference
+                             ? cursor.construction_->AcquireType(value->reference)
+                             : cursor.registry_.AcquireType(cursor.access_, value->reference);
             if (!found) {
                 return cursor.Fail(found.Error());
             }
@@ -513,6 +695,8 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         // 정적 Base를 대조한다(CheckClassTarget).
         if (value->kind == ValueKind::ClassReference && value->guid != Guid{}) {
             const TypeId base = endType.type;
+            // Deprecated 클래스 거부는 지금 값을 아는 생성 thunk가 한다(같은 값의 재기록은 받는다 —
+            // CheckClassTarget, 최상위 단일 값은 등록된 write).
             auto found = CheckClassReferenceLease(
                 cursor.registry_.AcquireRegisteredType(cursor.access_, value->guid), base, nullptr);
             if (!found) {
@@ -555,33 +739,57 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         return operation == PathOperation::Read ? RunTopRead(cursor) : RunTopWrite(cursor);
     }
 
-    // 7. Borrow(쓰기는 ResolveForWrite — encode 고정 중이면 Busy)와 읽기 고정.
+    // 7. Borrow(쓰기는 ResolveForWrite — encode 고정 중이면 Busy)와 읽기 고정. Detach·Attach는
+    // 대상을 바꾸지 않으므로 읽기 Borrow다(변경 표지를 올리지 않는다 — 대입 묶음이 표지를 읽은 뒤
+    // 준비한다). staged 객체는 트랜잭션의 Get(쓰기는 GetForWrite), 분리된 값은 Borrow가 없다.
     cursor.current_ = 0;
-    const bool reading = operation == PathOperation::Read || operation == PathOperation::Length ||
-                         operation == PathOperation::QueryOptional ||
-                         operation == PathOperation::Contains;
-    auto borrowed = reading
-                        ? cursor.registry_.Resolve<Object>(cursor.access_, cursor.owner_)
-                        : cursor.registry_.ResolveForWrite<Object>(cursor.access_, cursor.owner_);
-    if (!borrowed) {
-        return cursor.Fail(borrowed.Error());
+    const bool reading = cursor.IsReading() || boxOperation || cursor.reference_ != nullptr ||
+                         cursor.stage_ != nullptr;
+    if (cursor.root_ == PathTarget::Kind::Object) {
+        auto borrowed =
+            reading ? cursor.registry_.Resolve<Object>(cursor.access_, cursor.owner_)
+                    : cursor.registry_.ResolveForWrite<Object>(cursor.access_, cursor.owner_);
+        if (!borrowed) {
+            return cursor.Fail(borrowed.Error());
+        }
+
+        cursor.borrow_ = Move(borrowed.Value());
+        auto object = cursor.borrow_.Get();
+        if (!object) {
+            return cursor.Fail(object.Error());
+        }
+
+        cursor.object_ = object.Value();
+    } else if (cursor.root_ == PathTarget::Kind::Staged) {
+        auto object = reading ? cursor.construction_->Get<Object>(cursor.owner_)
+                              : cursor.construction_->GetForWrite<Object>(cursor.owner_);
+        if (!object) {
+            return cursor.Fail(object.Error());
+        }
+
+        cursor.object_ = object.Value();
     }
 
-    cursor.borrow_ = Move(borrowed.Value());
-    auto object = cursor.borrow_.Get();
-    if (!object) {
-        return cursor.Fail(object.Error());
-    }
-
-    cursor.object_ = object.Value();
-    if (operation == PathOperation::Read) {
+    if (operation == PathOperation::Read || operation == PathOperation::Detach ||
+        operation == PathOperation::ReadKeys) {
         if (auto pinned = cursor.Pin(); !pinned) {
             return pinned;
         }
     }
 
-    // 8. 생성 thunk 실행(필드 하나에 thunk 하나 — 끝이 아니면 Descend).
-    Result<void> result = cursor.topOps_->path(*cursor.topOps_, cursor);
+    // 8. 생성 thunk 실행(필드 하나에 thunk 하나 — 끝이 아니면 Descend). 분리된 값은 struct 값의 첫
+    // 멤버 thunk 또는 상자의 진입 함수다.
+    Result<void> result = Result<void>::Success();
+    if (cursor.root_ == PathTarget::Kind::Detached) {
+        result = cursor.rootBox_->enter_(cursor, cursor.rootBox_->storage_);
+    } else if (cursor.root_ == PathTarget::Kind::Struct) {
+        const RuntimeStructFieldOps& member =
+            cursor.rootView_.FieldOps(cursor.frames_[0].schemaIndex);
+        result = member.path(member, cursor, cursor.rootValue_);
+    } else {
+        result = cursor.topOps_->path(*cursor.topOps_, cursor);
+    }
+
     if (!result) {
         cursor.Record(result.Error(), PropertyPathError::None);
     }
@@ -597,11 +805,11 @@ using detail::PathOperation;
 using detail::PathRunner;
 
 Result<void> RunOperation(ObjectRegistry& registry, const ObjectAccessContext& access,
-                          ObjectHandle handle, PropertyPath path, PathOperation operation,
+                          const PathTarget& target, PropertyPath path, PathOperation operation,
                           const FieldValue* input, FieldValue* output, PropertyPathFailure* failure,
                           usize* length) noexcept {
     detail::PathCursor cursor =
-        PathRunner::Make(registry, access, handle, operation, input, output, failure);
+        PathRunner::Make(registry, access, target, operation, input, output, failure);
     Result<void> result = PathRunner::Run(cursor, path);
     if (result && length) {
         *length = PathRunner::Length(cursor);
@@ -612,11 +820,11 @@ Result<void> RunOperation(ObjectRegistry& registry, const ObjectAccessContext& a
 
 // 결과가 Length 칸의 0·1인 연산(PathContains·PathInsertKey·PathIsOptionalSet)이다.
 Result<bool> RunQuery(ObjectRegistry& registry, const ObjectAccessContext& access,
-                      ObjectHandle handle, PropertyPath path, PathOperation operation,
+                      const PathTarget& target, PropertyPath path, PathOperation operation,
                       PropertyPathFailure* failure) noexcept {
     usize answer = 0;
     auto result =
-        RunOperation(registry, access, handle, path, operation, nullptr, nullptr, failure, &answer);
+        RunOperation(registry, access, target, path, operation, nullptr, nullptr, failure, &answer);
     if (!result) {
         return Result<bool>::Failure(result.Error());
     }
@@ -627,24 +835,24 @@ Result<bool> RunQuery(ObjectRegistry& registry, const ObjectAccessContext& acces
 } // namespace
 
 Result<void> PathRead(ObjectRegistry& registry, const ObjectAccessContext& access,
-                      ObjectHandle handle, PropertyPath path, FieldValue& out,
+                      const PathTarget& target, PropertyPath path, FieldValue& out,
                       PropertyPathFailure* failure) noexcept {
-    return RunOperation(registry, access, handle, path, PathOperation::Read, nullptr, &out, failure,
+    return RunOperation(registry, access, target, path, PathOperation::Read, nullptr, &out, failure,
                         nullptr);
 }
 
 Result<void> PathWrite(ObjectRegistry& registry, const ObjectAccessContext& access,
-                       ObjectHandle handle, PropertyPath path, const FieldValue& value,
+                       const PathTarget& target, PropertyPath path, const FieldValue& value,
                        FieldValue* previous, PropertyPathFailure* failure) noexcept {
-    return RunOperation(registry, access, handle, path, PathOperation::Write, &value, previous,
+    return RunOperation(registry, access, target, path, PathOperation::Write, &value, previous,
                         failure, nullptr);
 }
 
 Result<usize> PathCount(ObjectRegistry& registry, const ObjectAccessContext& access,
-                        ObjectHandle handle, PropertyPath path,
+                        const PathTarget& target, PropertyPath path,
                         PropertyPathFailure* failure) noexcept {
     usize length = 0;
-    auto result = RunOperation(registry, access, handle, path, PathOperation::Length, nullptr,
+    auto result = RunOperation(registry, access, target, path, PathOperation::Length, nullptr,
                                nullptr, failure, &length);
     if (!result) {
         return Result<usize>::Failure(result.Error());
@@ -653,64 +861,73 @@ Result<usize> PathCount(ObjectRegistry& registry, const ObjectAccessContext& acc
     return Result<usize>::Success(length);
 }
 
+Result<void> PathReadKeys(ObjectRegistry& registry, const ObjectAccessContext& access,
+                          const PathTarget& target, PropertyPath path, Array<FieldValue>& out,
+                          PropertyPathFailure* failure) noexcept {
+    detail::PathCursor cursor = PathRunner::Make(registry, access, target, PathOperation::ReadKeys,
+                                                 nullptr, nullptr, failure);
+    PathRunner::BindKeys(cursor, out);
+    return PathRunner::Run(cursor, path);
+}
+
 Result<void> PathInsertElement(ObjectRegistry& registry, const ObjectAccessContext& access,
-                               ObjectHandle handle, PropertyPath path, const FieldValue* value,
+                               const PathTarget& target, PropertyPath path, const FieldValue* value,
                                PropertyPathFailure* failure) noexcept {
-    return RunOperation(registry, access, handle, path, PathOperation::Insert, value, nullptr,
+    return RunOperation(registry, access, target, path, PathOperation::Insert, value, nullptr,
                         failure, nullptr);
 }
 
 Result<void> PathRemoveElement(ObjectRegistry& registry, const ObjectAccessContext& access,
-                               ObjectHandle handle, PropertyPath path, FieldValue* removed,
+                               const PathTarget& target, PropertyPath path, FieldValue* removed,
                                PropertyPathFailure* failure) noexcept {
-    return RunOperation(registry, access, handle, path, PathOperation::Remove, nullptr, removed,
+    return RunOperation(registry, access, target, path, PathOperation::Remove, nullptr, removed,
                         failure, nullptr);
 }
 
 Result<void> PathClear(ObjectRegistry& registry, const ObjectAccessContext& access,
-                       ObjectHandle handle, PropertyPath path,
+                       const PathTarget& target, PropertyPath path,
                        PropertyPathFailure* failure) noexcept {
-    return RunOperation(registry, access, handle, path, PathOperation::Clear, nullptr, nullptr,
+    return RunOperation(registry, access, target, path, PathOperation::Clear, nullptr, nullptr,
                         failure, nullptr);
 }
 
 Result<bool> PathContains(ObjectRegistry& registry, const ObjectAccessContext& access,
-                          ObjectHandle handle, PropertyPath path,
+                          const PathTarget& target, PropertyPath path,
                           PropertyPathFailure* failure) noexcept {
-    return RunQuery(registry, access, handle, path, PathOperation::Contains, failure);
+    return RunQuery(registry, access, target, path, PathOperation::Contains, failure);
 }
 
 Result<bool> PathInsertKey(ObjectRegistry& registry, const ObjectAccessContext& access,
-                           ObjectHandle handle, PropertyPath path,
+                           const PathTarget& target, PropertyPath path,
                            PropertyPathFailure* failure) noexcept {
-    return RunQuery(registry, access, handle, path, PathOperation::InsertKey, failure);
+    return RunQuery(registry, access, target, path, PathOperation::InsertKey, failure);
 }
 
 Result<void> PathEraseKey(ObjectRegistry& registry, const ObjectAccessContext& access,
-                          ObjectHandle handle, PropertyPath path, FieldValue* removed,
+                          const PathTarget& target, PropertyPath path, FieldValue* removed,
                           PropertyPathFailure* failure) noexcept {
-    return RunOperation(registry, access, handle, path, PathOperation::EraseKey, nullptr, removed,
+    return RunOperation(registry, access, target, path, PathOperation::EraseKey, nullptr, removed,
                         failure, nullptr);
 }
 
 Result<void> PathEmplaceOptional(ObjectRegistry& registry, const ObjectAccessContext& access,
-                                 ObjectHandle handle, PropertyPath path,
+                                 const PathTarget& target, PropertyPath path,
                                  PropertyPathFailure* failure) noexcept {
-    return RunOperation(registry, access, handle, path, PathOperation::EmplaceOptional, nullptr,
+    return RunOperation(registry, access, target, path, PathOperation::EmplaceOptional, nullptr,
                         nullptr, failure, nullptr);
 }
 
 Result<void> PathResetOptional(ObjectRegistry& registry, const ObjectAccessContext& access,
-                               ObjectHandle handle, PropertyPath path,
+                               const PathTarget& target, PropertyPath path,
                                PropertyPathFailure* failure) noexcept {
-    return RunOperation(registry, access, handle, path, PathOperation::ResetOptional, nullptr,
+    return RunOperation(registry, access, target, path, PathOperation::ResetOptional, nullptr,
                         nullptr, failure, nullptr);
 }
 
 Result<bool> PathIsOptionalSet(ObjectRegistry& registry, const ObjectAccessContext& access,
-                               ObjectHandle handle, PropertyPath path,
+                               const PathTarget& target, PropertyPath path,
                                PropertyPathFailure* failure) noexcept {
-    return RunQuery(registry, access, handle, path, PathOperation::QueryOptional, failure);
+    return RunQuery(registry, access, target, path, PathOperation::QueryOptional, failure);
 }
 
 } // namespace rocks

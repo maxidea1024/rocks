@@ -30,8 +30,11 @@ const OuterSummary* NodeIdentityCheck::OuterOf(uint32 outer, OuterSummary& summa
             return nullptr;
         }
 
-        // 기준 Outer는 입력 요약이고, 앞서 나온 기준 Outer 노드(형제)를 Inner로 더한다.
+        // 기준 Outer는 입력 요약이고, 앞서 나온 기준 Outer 노드(형제)를 Inner로 더한다. 타입은
+        // 비운다 — 1단계는 어느 스레드에서나 돌고 Registry에 닿지 않으므로 입력 요약이 가리키는
+        // slot lease를 읽지 않는다(Within 판정은 2a와 실제 생성이 한다 — 리플렉션 B9h2).
         summary = base_;
+        summary.type = nullptr;
         return &summary;
     }
 
@@ -42,6 +45,7 @@ const OuterSummary* NodeIdentityCheck::OuterOf(uint32 outer, OuterSummary& summa
     summary.hasRepresentative = shape.hasRepresentative;
     summary.hasNamedInners = shape.hasNamedInners;
     summary.pathBytes = shape.pathBytes;
+    summary.type = shape.type;
     return &summary;
 }
 
@@ -63,6 +67,7 @@ Result<void> NodeIdentityCheck::Check(const LoadNode& node, Budget& budget) noex
 
     NodeShape shape;
     shape.outer = node.outer;
+    shape.type = &node.lease;
     shape.isOutermost = outer == nullptr;
     shape.outermostIsPackage = outer != nullptr
                                    ? outer->outermostIsPackage

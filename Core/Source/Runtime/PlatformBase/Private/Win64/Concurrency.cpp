@@ -1,6 +1,7 @@
 #include <Platform/Thread.h>
 #include <Platform/Fatal.h>
 #include "../Common/ThreadInternal.h"
+#include "WindowsString.h"
 #include <Windows.h>
 #include <process.h>
 #include <new>
@@ -45,6 +46,29 @@ void YieldThread() noexcept {
     SwitchToThread();
 }
 
+usize CopyCurrentThreadName(char* buffer, usize capacity) noexcept {
+    if (buffer == nullptr || capacity == 0) {
+        return 0;
+    }
+
+    buffer[0] = '\0';
+    PWSTR description = nullptr;
+    if (FAILED(GetThreadDescription(GetCurrentThread(), &description))) {
+        return 0;
+    }
+
+    usize bytes = 0;
+    const bool converted =
+        detail::WideToUtf8(description, lstrlenW(description), buffer, capacity, bytes);
+    LocalFree(description);
+    if (!converted) {
+        buffer[0] = '\0';
+        return 0;
+    }
+
+    return bytes;
+}
+
 namespace detail {
 namespace {
 
@@ -56,10 +80,47 @@ unsigned __stdcall ThreadEntry(void* context) noexcept {
 
 } // namespace
 
+void ApplyCurrentThreadOptions(const ThreadState& state) noexcept {
+    if (state.name[0] != '\0') {
+        // Start가 UTF-8과 길이를 검사했으므로 변환은 실패하지 않는다. 실패해도 이름은 힌트라
+        // 무시한다.
+        wchar_t wide[MaxThreadNameBytes + 1]{};
+        if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, state.name, -1, wide,
+                                static_cast<int>(MaxThreadNameBytes + 1)) > 0) {
+            static_cast<void>(SetThreadDescription(GetCurrentThread(), wide));
+        }
+    }
+
+    int priority = THREAD_PRIORITY_NORMAL;
+    switch (state.priority) {
+    case ThreadPriority::Lowest:
+        priority = THREAD_PRIORITY_LOWEST;
+        break;
+    case ThreadPriority::BelowNormal:
+        priority = THREAD_PRIORITY_BELOW_NORMAL;
+        break;
+    case ThreadPriority::Normal:
+        return;
+    case ThreadPriority::AboveNormal:
+        priority = THREAD_PRIORITY_ABOVE_NORMAL;
+        break;
+    case ThreadPriority::Highest:
+        priority = THREAD_PRIORITY_HIGHEST;
+        break;
+    }
+
+    static_cast<void>(SetThreadPriority(GetCurrentThread(), priority));
+}
+
 ThreadStatus StartNativeThread(ThreadState& state) noexcept {
     static_assert(sizeof(HANDLE) <= sizeof(state.native));
     static_assert(alignof(HANDLE) <= alignof(ThreadState));
-    const uintptr_t handle = _beginthreadex(nullptr, 0, ThreadEntry, &state, 0, nullptr);
+    // stackBytes는 MaxThreadStackBytes(1 GiB) 이하라 unsigned에 들어간다. 예약 크기로 넘기며 OS가
+    // 할당 단위로 올린다. 0이면 실행 파일 기본값이다.
+    const auto stackBytes = static_cast<unsigned>(state.stackBytes);
+    const unsigned flags = stackBytes != 0 ? STACK_SIZE_PARAM_IS_A_RESERVATION : 0u;
+    const uintptr_t handle =
+        _beginthreadex(nullptr, stackBytes, ThreadEntry, &state, flags, nullptr);
     if (handle == 0) {
         return ThreadStatus::SystemError;
     }

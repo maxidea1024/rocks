@@ -29,6 +29,10 @@ internal sealed class FieldModel
 
     public required string NativeSpelling { get; init; }
 
+    // C 배열 PROPERTY의 정규 철자(`원소[N]` — 원소는 Clang 정규 형식)다. 첫 실행 철자는 원소를 쓰인 그대로(별칭·한정 없는 이름) 내므로
+    // StaticArrayProbe가 두 번째 Clang 실행으로 채운다(리플렉션 B9g). 배열이 아니면 null이다.
+    public string? CanonicalSpelling { get; set; }
+
     public required PropertySpec Spec { get; init; }
 
     // 값 종류(ValueKind 이름)다. 배열 필드는 "Array", Optional 필드는 "Optional", Map·Set 필드는 "Map"·"Set"이고 원소·내부·값 종류는
@@ -54,7 +58,8 @@ internal sealed class FieldModel
     // 이 모듈 Map 필드의 키 C++ 철자다(진단용, 그 밖은 "").
     public string KeySpelling { get; set; } = "";
 
-    // 배열 필드의 길이 상한이다(MaxElements 지정자, 없으면 ArrayRules.DefaultMaxElements). 배열이 아니면 0이다.
+    // 배열 필드의 길이 상한이다(MaxElements 지정자, 없으면 ArrayRules.DefaultMaxElements). 정적 배열(리플렉션 B9g)은 정확한 원소 수 N이다.
+    // 그 밖은 0이다.
     // import 필드는 descriptor 값을 그대로 보존한다(파생 클래스 스키마가 상속 maxElements를 같은 값으로 내야 한다).
     public uint MaxElements { get; set; }
 
@@ -92,16 +97,22 @@ internal sealed class FieldModel
     // OrderedSet<T> 필드다(리플렉션 B9f2).
     public bool IsSet => Kind == MapRules.Set;
 
-    // 원소 수 상한(MaxElements)을 갖는 컨테이너 필드다(배열·Map·Set).
+    // 정적 배열 T x[N] 필드다(리플렉션 B9g — Docs/Design/ReflectionExtensions.ko.md 8절). 원소 종류는 ElementKind, N은 MaxElements다.
+    public bool IsStaticArray => Kind == StaticArrayRules.StaticArray;
+
+    // 원소·내부·값 형식(런타임 FieldSchema::element)을 갖는 컨테이너 필드다(배열·정적 배열·Optional·Map·Set — 성질 표 Container).
+    public bool HasElement => IsArray || IsStaticArray || IsOptional || IsMap || IsSet;
+
+    // 원소 수 상한(MaxElements 지정자)을 갖는 컨테이너 필드다(배열·Map·Set). 정적 배열의 MaxElements는 지정자가 아니라 N이다.
     public bool IsCounted => IsArray || IsMap || IsSet;
 
     // FieldValue로 통째 읽고 쓰지 않는 필드다(런타임 FieldIsAggregate와 같은 규칙): struct 값, 배열, 값 struct 내부의 Optional,
     // Map·Set. 생성 함수표는 read·write·writeStaged 없이 codec과(Map·Set 말고) 경로 thunk를 싣는다.
-    public bool IsAggregate => IsStruct || IsArray || (IsOptional && ElementKind == "Struct") || IsMap || IsSet;
+    public bool IsAggregate => IsStruct || IsArray || IsStaticArray || (IsOptional && ElementKind == "Struct") || IsMap || IsSet;
 
     // 필드 값의 대상 종류다: 배열이면 원소 종류, Optional이면 내부 종류, Map이면 값 종류, Set이면 원소 종류, 아니면 값 종류(런타임
     // FieldTargetType과 같은 규칙). Map 키는 KeyKind다.
-    public string TargetKind => IsArray || IsOptional || IsMap || IsSet ? ElementKind ?? "Opaque" : Kind;
+    public string TargetKind => HasElement ? ElementKind ?? "Opaque" : Kind;
 
     // Map 키가 대상 타입 ID를 쓰는 종류다(Enum·ClassReference·SoftObjectReference — 성질 표 HasTargetType).
     public bool KeyHasTargetType => KeyKind is not null && ValueKindTable.Has(KeyKind, ValueKindProperty.HasTargetType);
@@ -148,8 +159,11 @@ internal sealed class FieldModel
     // ObjectRefMap<K, T> 필드다(Map 필드이고 값이 강한 참조 — 리플렉션 B9f4, Docs/Design/ReflectionExtensions.ko.md 7.4절).
     public bool IsObjectRefMap => IsMap && ElementKind == "ObjectReference";
 
-    // FieldFlags 비트: Transient 1, ReadOnly 2, EditorOnly 4, Required 8.
-    public uint Flags => (Spec.Transient ? 1u : 0u) | (Spec.ReadOnly ? 2u : 0u) | (Spec.EditorOnly ? 4u : 0u) | (Spec.Required ? 8u : 0u);
+    // FieldFlags 비트: Transient 1, ReadOnly 2, EditorOnly 4, Required 8, DuplicateTransient 16, NonPIEDuplicateTransient 32, SaveGame 64,
+    // TextExportTransient 128(리플렉션 B9h1).
+    public uint Flags => (Spec.Transient ? 1u : 0u) | (Spec.ReadOnly ? 2u : 0u) | (Spec.EditorOnly ? 4u : 0u) | (Spec.Required ? 8u : 0u) |
+        (Spec.DuplicateTransient ? 16u : 0u) | (Spec.NonPIEDuplicateTransient ? 32u : 0u) | (Spec.SaveGame ? 64u : 0u) |
+        (Spec.TextExportTransient ? 128u : 0u);
 
     // 도구 이름(지정하지 않았으면 필드 이름)이다. 상속 포함 대소문자 무시로 유일해야 한다(RMC2203).
     public string EffectiveToolName => Spec.ToolName.Length != 0 ? Spec.ToolName : Name;
@@ -259,6 +273,55 @@ internal static class ArrayRules
 
         return false;
     }
+}
+
+// 리플렉션 정적 배열 필드 규칙을 한 곳에 둔다(리플렉션 B9g — Docs/Design/ReflectionExtensions.ko.md 8·15절). T x[N]은 클래스 필드·struct
+// 멤버에만 두고 원소는 성질 표의 정적 배열 원소 종류(단일 값·참조·enum·struct — 참조 struct 포함)다. N은 1..MaxStaticArrayElements(UE 생성
+// 코드의 uint16 ArrayDim과 같은 상한)이고 다차원·컨테이너·Optional·cv 원소와 N 범위 밖은 RMC2307이다. 런타임 MetaSchema의
+// MaxStaticArrayElements와 같은 값이다.
+internal static class StaticArrayRules
+{
+    public const string StaticArray = "StaticArray";
+
+    public const uint MaxStaticArrayElements = 65535;
+
+    // spelling이 C 배열 T[N](Clang 정규 철자 — 크기는 숫자로 출력된다)이면 (원소 철자, 크기 철자)를 돌려준다(아니면 null). 꺾쇠·괄호 밖의
+    // 마지막 [..]를 떼므로 다차원 T[M][N]의 원소 철자는 T[M]이다(호출자가 RMC2307로 거부한다). 함수 포인터·참조 철자는 배열이 아니다.
+    public static (string Element, string Bound)? Split(string spelling)
+    {
+        string text = spelling.Trim();
+        if (!text.EndsWith(']') || text.Contains("(*)", StringComparison.Ordinal) || text.Contains("(&)", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        int depth = 0;
+        for (int index = text.Length - 1; index >= 0; --index)
+        {
+            char c = text[index];
+            if (c is '>' or ')')
+            {
+                ++depth;
+            }
+            else if (c is '<' or '(')
+            {
+                --depth;
+            }
+            else if (c == '[' && depth == 0)
+            {
+                string element = text[..index].Trim();
+                return element.Length == 0 ? null : (element, text[(index + 1)..^1].Trim());
+            }
+        }
+
+        return null;
+    }
+
+    // RMC2307 진단의 공통 안내다.
+    public const string Hint =
+        "A reflected static array T name[N] holds N (1..65535) scalars, Guid, String, Name, AssetId, Sha256Digest, ROCKS_ENUM enums, ROCKS_STRUCT structs or " +
+        "ObjectRef/WeakRef/SoftObjectRef/ClassRef elements; multi-dimensional arrays, containers, Optional and cv-qualified elements are not reflected " +
+        "(wrap an inner array in a ROCKS_STRUCT element, or use rocks::Array<T> for a variable count).";
 }
 
 // 리플렉션 Optional 필드 규칙을 한 곳에 둔다(리플렉션 B9e — Docs/Design/ReflectionExtensions.ko.md 6절). Optional<T>는 클래스
@@ -488,6 +551,9 @@ internal sealed class NativeMemberModel
 
     public required SourceSite Site { get; init; }
 
+    // C 배열 멤버의 모든 차원을 벗긴 원소 정규 철자다(StaticArrayProbe — 리플렉션 B9g). 배열이 아니면 null이다.
+    public string? ElementSpelling { get; set; }
+
     public string? Struct { get; set; }
 }
 
@@ -568,8 +634,32 @@ internal sealed class ClassModel
     // 단위다(Docs/Design/ReflectionExtensions.ko.md 3.1절). 형질과 달리 선언 값이라 멤버에서 계산하거나 대조하지 않는다.
     public bool Atomic { get; init; }
 
-    // TypeFlags 비트: Abstract 1, WorldOnly 2(클래스), Atomic 16(struct). 생성 스키마의 flags다.
-    public uint Flags => (Abstract ? 1u : 0u) | (WorldOnly ? 2u : 0u) | (Atomic ? 16u : 0u);
+    // 설정 struct(ROCKS_STRUCT(Settings(Branch="…", Section="…")) — Docs/Design/ConfigSystem.ko.md 7절)의 branch·섹션 이름이다(설정 struct가
+    // 아니면 둘 다 ""). 이 모듈 struct만 채운다(descriptor에 싣지 않는다 — import struct의 생성 SettingsSchema는 그 모듈의 생성 헤더에 있다).
+    public string SettingsBranch { get; init; } = "";
+
+    public string SettingsSection { get; init; } = "";
+
+    public bool IsSettings => SettingsSection.Length != 0;
+
+    // TypeFlags::Transient·Deprecated(클래스 — 리플렉션 B9h2). 선언이 직접 쓰거나 base에서 상속된다(SchemaValidator가 채운다).
+    public bool Transient { get; set; }
+
+    public bool Deprecated { get; set; }
+
+    // Within="…" 지정자의 원문 철자다(이 모듈 클래스, 없으면 ""). CompilerDriver가 Clang으로 정규 이름(WithinResolved)을 얻는다.
+    public string WithinSpelling { get; init; } = "";
+
+    // Clang이 푼 Within 철자의 정규 이름이다(지정하지 않았으면 null).
+    public string? WithinResolved { get; set; }
+
+    // 실효 Within 클래스의 정규 이름·ID다(지정했거나 base에서 상속 — 없으면 null). 생성 스키마의 withinType과 descriptor의 within이다.
+    public string? Within { get; set; }
+
+    public string? WithinId { get; set; }
+
+    // TypeFlags 비트: Abstract 1, WorldOnly 2, Transient 4, Deprecated 8(클래스), Atomic 16(struct). 생성 스키마의 flags다.
+    public uint Flags => (Abstract ? 1u : 0u) | (WorldOnly ? 2u : 0u) | (Transient ? 4u : 0u) | (Deprecated ? 8u : 0u) | (Atomic ? 16u : 0u);
 
     // Name="…" 지정자의 타입 도구 이름이다(클래스·struct — 한정하지 않은 C++ 이름과 같거나 없으면 ""). import 타입은 descriptor의
     // toolName에서 온다(기본 이름과 같으면 "").

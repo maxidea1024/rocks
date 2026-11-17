@@ -25,8 +25,9 @@ class RequiredCheckContext final : public FieldEncodeContext {
 public:
     RequiredCheckContext(Allocator& allocator, ConstructionContext& transaction,
                          const ObjectGraphLoadOptions& options) noexcept
-        : FieldEncodeContext(FieldEncodePolicy{false, options.policy.excludedFlags}, options.hooks,
-                             ReferenceWire),
+        : FieldEncodeContext(
+              FieldEncodePolicy{false, options.policy.excludedFlags, options.policy.includeFlags},
+              options.hooks, ReferenceWire),
           allocator_(allocator) {
         BeginRequiredCheck(transaction);
         // Name은 Required를 품지 않아 검사 대상이 아니지만, 같은 encode 경로가 트랜잭션 Registry의
@@ -146,7 +147,7 @@ Result<void> CheckRequiredFields(Allocator& allocator, ConstructionContext& tran
             // Transient와 이 데이터에 없어야 하는 플래그(쿠킹 로드의 EditorOnly)는 저장하지
             // 않으므로 검사하지 않는다(struct 안 멤버는 EncodeStructRecord가 같은 규칙으로
             // 건너뛴다).
-            if (context.IsExcluded(context.EffectiveFlags())) {
+            if (context.ExcludesCurrent()) {
                 continue;
             }
 

@@ -1,6 +1,6 @@
 using Rocks.Build.Rules;
 
-// TypeId·FieldId 등 메타 schema 헤더 모듈이다.
+// Header module for meta schema types such as TypeId and FieldId.
 public sealed class MetaSchema : CoreModuleRules
 {
     protected override string ModuleName => "MetaSchema";

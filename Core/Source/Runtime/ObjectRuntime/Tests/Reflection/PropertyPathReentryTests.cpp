@@ -107,7 +107,7 @@ RuntimeStructFieldOps MemberOps(Guid id) noexcept {
     return detail::StructFieldOps<Member>(id, &detail::PathStructMember<Member, Target>);
 }
 
-// 단일 값 클래스 필드(생성 코드 모양 — read·write·writeStaged, path 없음).
+// 단일 값 클래스 필드(read·write·writeStaged — 생성 코드와 달리 path는 없다).
 template <auto Member>
 RuntimeFieldOps ValueField(Guid id) noexcept {
     using O = typename detail::StructMemberPointer<decltype(Member)>::Owner;

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Base/TypeTraits.h>
-#include <Object/MapFieldCodec.h>
+#include <Object/StaticArrayFieldCodec.h>
 
 // 필드 codec이다(Docs/Design/ReflectionFoundations.ko.md 4.6·5.6·6.4절). 생성 헤더와 직렬화기는
 // 이 헤더 하나만 include한다. codec은 앞 조각을 include하는 사슬로 나뉜다: 단일 값 wire 쓰기
@@ -10,10 +10,11 @@
 // (Object/StructFieldCodec.h — EncodeStructRecord·DecodeStructValue), 배열
 // (Object/ArrayFieldCodec.h — EncodeArrayField·DecodeArrayField), Optional
 // (Object/OptionalFieldCodec.h — EncodeOptionalField·DecodeOptionalField), Map·Set
-// (Object/MapFieldCodec.h — EncodeMapField·DecodeMapField). 이 헤더에는 멤버 값
-// codec(EncodeMemberValue·EncodeStructMember·DecodeStructMember), 생성 thunk(EncodeGeneratedField·
-// DecodeGeneratedField·StructFieldOps)와 수동 함수표용 범용 codec(EncodeThroughFieldValue·
-// DecodeThroughFieldValue)이 있다.
+// (Object/MapFieldCodec.h — EncodeMapField·DecodeMapField), 정적
+// 배열(Object/StaticArrayFieldCodec.h — EncodeStaticArrayField·DecodeStaticArrayField). 이 헤더에는
+// 멤버 값 codec(EncodeMemberValue·EncodeStructMember·DecodeStructMember), 생성
+// thunk(EncodeGeneratedField· DecodeGeneratedField·StructFieldOps)와 수동 함수표용 범용
+// codec(EncodeThroughFieldValue· DecodeThroughFieldValue)이 있다.
 namespace rocks::detail {
 
 // 지금 위치(context.Field())의 멤버 값 source를 out에 쓰고 wire tag를 돌려준다(클래스 필드·struct
@@ -25,7 +26,9 @@ namespace rocks::detail {
 template <class Member>
 Result<uint32> EncodeMemberValue(const Member& source, ArchiveWriter& out,
                                  FieldEncodeContext& context) noexcept {
-    if constexpr (ArrayField<Member>::Supported) {
+    if constexpr (StaticArrayField<Member>::Supported) {
+        return EncodeStaticArrayField(source, out, context);
+    } else if constexpr (ArrayField<Member>::Supported) {
         return EncodeArrayField(source, out, context);
     } else if constexpr (OptionalField<Member>::Supported) {
         return EncodeOptionalField(source, out, context);
@@ -73,7 +76,7 @@ Result<uint32> EncodeStructMember(const RuntimeStructFieldOps&, const void* stru
 
 // 생성(또는 수동) struct 멤버 decode thunk다. 검증 방식(structValue null)은 값에 손대지 않고, 관찰·
 // 적용 방식은 struct 값에 직접 쓴다(참조 멤버의 적용은 SetStructMemberReference, 배열 멤버는
-// DecodeArrayField).
+// DecodeArrayField, 정적 배열 멤버는 DecodeStaticArrayField).
 template <auto MemberPointer>
 Result<void> DecodeStructMember(const RuntimeStructFieldOps&, ConstructionContext* construction,
                                 ObjectHandle owner, void* structValue, const FieldView& field,
@@ -87,7 +90,10 @@ Result<void> DecodeStructMember(const RuntimeStructFieldOps&, ConstructionContex
     }
 
     S* target = static_cast<S*>(structValue);
-    if constexpr (ArrayField<Member>::Supported) {
+    if constexpr (StaticArrayField<Member>::Supported) {
+        return DecodeStaticArrayField<Member>(
+            construction, owner, target ? &(target->*MemberPointer) : nullptr, field, context);
+    } else if constexpr (ArrayField<Member>::Supported) {
         return DecodeArrayField(construction, owner, target ? &(target->*MemberPointer) : nullptr,
                                 field, context);
     } else if constexpr (OptionalField<Member>::Supported) {
@@ -172,7 +178,13 @@ RuntimeStructFieldOps StructFieldOps(Guid fieldId,
     ops.encode = &EncodeStructMember<MemberPointer>;
     ops.decode = &DecodeStructMember<MemberPointer>;
     ops.path = path;
-    if constexpr (ArrayField<Member>::Supported) {
+    if constexpr (StaticArrayField<Member>::Supported) {
+        using Element = typename StaticArrayField<Member>::Element;
+        if constexpr (ReflectedEnumField<Element>::Supported ||
+                      ReflectedStructField<Element>::Supported) {
+            ops.valueNativeType = NativeTypeKey<Element>();
+        }
+    } else if constexpr (ArrayField<Member>::Supported) {
         using Element = typename ArrayField<Member>::Element;
         if constexpr (ReflectedEnumField<Element>::Supported ||
                       ReflectedStructField<Element>::Supported) {
@@ -263,7 +275,21 @@ Result<void> DecodeGeneratedField(ConstructionContext* construction, ObjectHandl
         return Result<void>::Failure(ErrorCode::TypeMismatch);
     }
 
-    if constexpr (ArrayField<Member>::Supported) {
+    if constexpr (StaticArrayField<Member>::Supported) {
+        // 정적 배열 필드(리플렉션 B9g): 1단계는 원소 없이 검증, 2단계는 새 객체 안의 원소 자리에
+        // 쓴다(ObjectRef 원소는 SetReference — 소유 객체 저장소 안 주소).
+        if (!construction) {
+            return DecodeStaticArrayField<Member>(nullptr, handle, nullptr, field, context);
+        }
+
+        auto owner = construction->GetForWrite<Owner>(handle);
+        if (!owner) {
+            return Result<void>::Failure(owner.Error());
+        }
+
+        return DecodeStaticArrayField<Member>(construction, handle, &(owner.Value()->*member),
+                                              field, context);
+    } else if constexpr (ArrayField<Member>::Supported) {
         // 배열 필드: 1단계는 원소 없이 검증, 2단계는 새 객체 안의 컨테이너에 쓴다.
         if (!construction) {
             return DecodeArrayField<Member>(nullptr, handle, nullptr, field, context);

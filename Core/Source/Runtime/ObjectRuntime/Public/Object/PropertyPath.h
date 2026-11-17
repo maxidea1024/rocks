@@ -6,6 +6,7 @@
 #include <Object/NameField.h>
 #include <Object/ObjectRegistry.h>
 #include <Object/PathKey.h>
+#include <Object/PathTarget.h>
 
 // 리플렉션 속성 경로 접근이다(Docs/Design/ReflectionFoundations.ko.md 7·7.1절). 경로(PropertyPath —
 // FieldId 체인 + 원소 index·Map key, MetaSchema)로 객체 하나 안의 단일 값을 읽고 쓰고, 배열 원소를
@@ -27,8 +28,8 @@ namespace rocks {
 //   UnknownProperty   — 문자열 경로의 모르는 이름(NotFound — 도구가 AS 4.6절 UnknownProperty
 //                       진단으로 바꾼다)
 //   UnknownField      — FieldId 체인의 없는 필드(스키마가 바뀐 옛 경로, NotFound)
-//   NotArray          — 배열이 아닌 필드에 index(selector Index)·컨테이너(Array·Map·Set)가 아닌
-//                       필드에 원소 수·비우기(TypeMismatch)
+//   NotArray          — 배열(Array·StaticArray)이 아닌 필드에 index(selector Index)·컨테이너
+//                       (Array·StaticArray·Map·Set)가 아닌 필드에 원소 수·비우기(TypeMismatch)
 //   NotStruct         — struct가 아닌 값(index 없는 배열·key 없는 Map·단일 값 Optional·단일 값
 //                       Map 항목·Set 원소 포함) 뒤의 단계(`.`)(TypeMismatch)
 //   IndexRequired     — 배열 삽입·삭제의 마지막 단계가 index 단계가 아님(InvalidArgument)
@@ -63,6 +64,9 @@ namespace rocks {
 //                       — Unsupported)
 //   NotMap            — Set 원소 key 단계의 값 읽기·쓰기(TypeMismatch — Set 원소는 키라 값이 없다,
 //                       PathContains·PathInsertKey·PathEraseKey를 쓴다)
+//   FixedLength       — 정적 배열(T x[N] — 리플렉션 B9g)의 원소 삽입·삭제·비우기(Unsupported —
+//   길이가
+//                       N으로 고정이다. 원소는 [i] 쓰기로 바꾼다)
 enum class PropertyPathError : uint8 {
     None,
     Syntax,
@@ -86,7 +90,10 @@ enum class PropertyPathError : uint8 {
     KeyRequired,
     KeyNotFound,
     InvalidKey,
-    NotMap
+    NotMap,
+    FixedLength,
+    // 깊은 복사·무할당 교환을 할 수 없는 값이다(PathDetach·PathPrepareAttach — 리플렉션 B9i3c0).
+    NotCopyable
 };
 
 // 경로 연산·문자열 해석의 실패 위치와 사유다. step은 실패한 단계의 index다: 경로 연산에서 문맥·
@@ -239,7 +246,7 @@ protected:
 // `,`·`=`·`"`·`\`·ASCII 공백·제어 문자를 담을 수 없다(Syntax — 그런 key는 따옴표로 쓴다, 표기가
 // 하나가 되게). 따옴표 key(`ratios["a b"]`) 안에서는 UE ParseQuotedString의 escape 가운데 다섯
 // (`\\`·`\"`·`\n`·`\r`·`\t`)만 받고 그 밖의 `\x`(UE의 `\'`·8진 포함)와 날 제어 문자는 Syntax다.
-// 키 텍스트:
+// 키 텍스트(Soft·ClassRef 말고는 값 표기와 같은 공용 규칙 — Object/ValueText.h ParseScalarText):
 //   - String·Name: 그대로(Name은 정규화하지 않는다 — None은 `None`, 빈 key도 None으로 읽는다)
 //   - bool: true·false·on·off(ASCII 대소문자 무시)
 //   - 정수: 정규 10진(앞자리 0·`+`·`-0` 거부, 범위 밖 거부)
@@ -294,8 +301,10 @@ Result<void> FormatPropertyPath(const TypeLease& type, PropertyPath path, String
 // ---- 경로 연산(소유 스레드 전용) ----
 //
 // 공통 계약:
-// - 경로는 객체 하나 안에서 끝난다(참조를 따라 다른 객체로 들어가지 않는다). handle은 게시된 생존
-//   객체여야 하고(staged 객체는 decode의 몫이다) 해석은 그 객체의 실제 타입 스키마로 한다.
+// - 경로는 객체 하나 안에서 끝난다(참조를 따라 다른 객체로 들어가지 않는다). target은 게시된 생존
+//   객체(ObjectHandle에서 암묵 변환)이고 해석은 그 객체의 실제 타입 스키마로 한다. staged
+//   객체·분리된 값(struct 값·DetachedValue 상자)에서 시작하는 차이는 Object/PathTarget.h(리플렉션
+//   B9i3c0)다.
 // - 끝 지점: 최상위 단일 값 필드는 등록된 read·write(FieldWriteOperation — 수동 함수표도 같다),
 //   struct 멤버 단일 값(String·Soft·enum 포함)과 Array<E> 원소는 경로 thunk, 참조 멤버는
 //   SetReference(StructRefArray 원소 안이면 SetElementReference), ObjectRefArray 원소는 Registry
@@ -366,7 +375,7 @@ Result<void> FormatPropertyPath(const TypeLease& type, PropertyPath path, String
 //   FieldValue value(allocator);
 //   auto read = PathRead(registry, access, mesh, path.View(), value);
 Result<void> PathRead(ObjectRegistry& registry, const ObjectAccessContext& access,
-                      ObjectHandle handle, PropertyPath path, FieldValue& out,
+                      const PathTarget& target, PropertyPath path, FieldValue& out,
                       PropertyPathFailure* failure = nullptr) noexcept;
 
 // path의 단일 값(배열 원소 교체, Map 항목 넣기·교체 포함)을 value로 쓴다. previous가 있으면
@@ -384,7 +393,7 @@ Result<void> PathRead(ObjectRegistry& registry, const ObjectAccessContext& acces
 //   FieldValue previous(allocator);
 //   auto written = PathWrite(registry, access, mesh, path.View(), value, &previous);
 Result<void> PathWrite(ObjectRegistry& registry, const ObjectAccessContext& access,
-                       ObjectHandle handle, PropertyPath path, const FieldValue& value,
+                       const PathTarget& target, PropertyPath path, const FieldValue& value,
                        FieldValue* previous = nullptr,
                        PropertyPathFailure* failure = nullptr) noexcept;
 
@@ -395,8 +404,25 @@ Result<void> PathWrite(ObjectRegistry& registry, const ObjectAccessContext& acce
 //   const PathStep words[] = {{WordsId}};
 //   auto count = PathCount(registry, access, holder, PropertyPath{words});
 Result<usize> PathCount(ObjectRegistry& registry, const ObjectAccessContext& access,
-                        ObjectHandle handle, PropertyPath path,
+                        const PathTarget& target, PropertyPath path,
                         PropertyPathFailure* failure = nullptr) noexcept;
+
+// path(마지막 단계는 index·key 없는 Map·Set 필드)의 키를 삽입 순서대로 모두 읽어 out을 그 목록으로
+// 바꾼다(리플렉션 B9i4 — JSON export가 Map·Set을 펼칠 때 쓴다. Map 값은 이어서 key 경로의
+// PathRead로 읽는다). 키는 out의 allocator로 만든다(String·Soft 키는 복사 — Name은 토큰, enum은
+// 정수와 enum ID, ClassRef는 클래스 TypeId). 읽기는 Resolve + encode 고정 아래 모든 키를 새 목록에
+// 복사하고 owner를 다시 확인한 뒤 out과 바꾼다 — 실패하면 out은 바뀌지 않는다. 유효 플래그
+// ReadOnly는 막지 않는다. 오류: 마지막 단계에 index·key가 있으면 InvalidArgument(IndexNotAllowed),
+// Map·Set이 아니면 TypeMismatch(NotKeyed), 할당 OutOfMemory, 그 밖은 PathRead와 같다.
+//
+// 사용 예:
+//   Array<FieldValue> keys(allocator);
+//   if (auto read = PathReadKeys(registry, access, holder, PropertyPath{scores}, keys); !read) {
+//       return read;
+//   }
+Result<void> PathReadKeys(ObjectRegistry& registry, const ObjectAccessContext& access,
+                          const PathTarget& target, PropertyPath path, Array<FieldValue>& out,
+                          PropertyPathFailure* failure = nullptr) noexcept;
 
 // path 마지막 단계(index가 있어야 한다 — 없으면 InvalidArgument(IndexRequired))의 배열에서 index
 // 위치에 원소를 넣는다(index == 길이면 끝, 넘으면 InvalidArgument(IndexOutOfRange)). 단일 값 원소는
@@ -409,7 +435,7 @@ Result<usize> PathCount(ObjectRegistry& registry, const ObjectAccessContext& acc
 //   const PathStep steps[] = {{LodsId, lods.Size(), PathSelector::Index}};   // 끝에 넣기
 //   auto inserted = PathInsertElement(registry, access, mesh, PropertyPath{steps}, &value);
 Result<void> PathInsertElement(ObjectRegistry& registry, const ObjectAccessContext& access,
-                               ObjectHandle handle, PropertyPath path, const FieldValue* value,
+                               const PathTarget& target, PropertyPath path, const FieldValue* value,
                                PropertyPathFailure* failure = nullptr) noexcept;
 
 // path 마지막 단계(index가 있어야 한다)의 배열 원소를 지운다(뒤 원소를 당긴다). removed가 있으면
@@ -418,7 +444,7 @@ Result<void> PathInsertElement(ObjectRegistry& registry, const ObjectAccessConte
 // 원소에 removed를 주면 InvalidArgument(AggregateValue)다 — struct 원소의 옛 값은 CU4가 연산 전
 // PathRead로 잎마다 만들고 "기본 원소 삽입 + 잎 쓰기"로 재생한다. 떼어 낸 원소는 게시 뒤 소멸한다.
 Result<void> PathRemoveElement(ObjectRegistry& registry, const ObjectAccessContext& access,
-                               ObjectHandle handle, PropertyPath path,
+                               const PathTarget& target, PropertyPath path,
                                FieldValue* removed = nullptr,
                                PropertyPathFailure* failure = nullptr) noexcept;
 
@@ -426,7 +452,7 @@ Result<void> PathRemoveElement(ObjectRegistry& registry, const ObjectAccessConte
 // Set은 용량까지 반환한다(원소와 저장소는 게시 뒤 반환). 오류는 PathCount와 같고 유효 플래그가
 // ReadOnly면 Unsupported(ReadOnly)다. 옛 값은 CU4가 연산 전 PathRead로 만든다.
 Result<void> PathClear(ObjectRegistry& registry, const ObjectAccessContext& access,
-                       ObjectHandle handle, PropertyPath path,
+                       const PathTarget& target, PropertyPath path,
                        PropertyPathFailure* failure = nullptr) noexcept;
 
 // path(마지막 단계는 Map·Set 필드의 key 단계 — 아니면 InvalidArgument(KeyRequired))의 키가 있는지
@@ -438,7 +464,7 @@ Result<void> PathClear(ObjectRegistry& registry, const ObjectAccessContext& acce
 //   auto present = PathContains(registry, access, holder, path.View());   // tags[Hero]
 //   if (present && present.Value()) { ... }
 Result<bool> PathContains(ObjectRegistry& registry, const ObjectAccessContext& access,
-                          ObjectHandle handle, PropertyPath path,
+                          const PathTarget& target, PropertyPath path,
                           PropertyPathFailure* failure = nullptr) noexcept;
 
 // path(마지막 단계는 key 단계)에 키를 넣는다(리플렉션 B9f3): Set은 원소를 끝에 넣고(이미 있으면
@@ -454,7 +480,7 @@ Result<bool> PathContains(ObjectRegistry& registry, const ObjectAccessContext& a
 //   auto inserted = PathInsertKey(registry, access, holder, path.View());
 //   if (!inserted) { return Result<void>::Failure(inserted.Error()); }
 Result<bool> PathInsertKey(ObjectRegistry& registry, const ObjectAccessContext& access,
-                           ObjectHandle handle, PropertyPath path,
+                           const PathTarget& target, PropertyPath path,
                            PropertyPathFailure* failure = nullptr) noexcept;
 
 // path(마지막 단계는 key 단계)의 Map 항목·Set 원소를 지운다(리플렉션 B9f3 — 남은 항목의 순서는
@@ -469,7 +495,8 @@ Result<bool> PathInsertKey(ObjectRegistry& registry, const ObjectAccessContext& 
 //   FieldValue removed(allocator);
 //   auto erased = PathEraseKey(registry, access, texture, path.View(), &removed);
 Result<void> PathEraseKey(ObjectRegistry& registry, const ObjectAccessContext& access,
-                          ObjectHandle handle, PropertyPath path, FieldValue* removed = nullptr,
+                          const PathTarget& target, PropertyPath path,
+                          FieldValue* removed = nullptr,
                           PropertyPathFailure* failure = nullptr) noexcept;
 
 // path(마지막 단계는 Optional<값 struct> 필드 — index 없음)에 기본 값(S(Allocator&) 또는 S() —
@@ -484,7 +511,7 @@ Result<void> PathEraseKey(ObjectRegistry& registry, const ObjectAccessContext& a
 //   auto made = PathEmplaceOptional(registry, access, mesh, PropertyPath{steps});
 //   // 이어서 preview.width 같은 멤버를 PathWrite로 쓴다
 Result<void> PathEmplaceOptional(ObjectRegistry& registry, const ObjectAccessContext& access,
-                                 ObjectHandle handle, PropertyPath path,
+                                 const PathTarget& target, PropertyPath path,
                                  PropertyPathFailure* failure = nullptr) noexcept;
 
 // path(마지막 단계는 Optional<값 struct> 필드)를 unset으로 비운다(리플렉션 B9e — 이미 unset이면
@@ -498,7 +525,7 @@ Result<void> PathEmplaceOptional(ObjectRegistry& registry, const ObjectAccessCon
 //       return cleared;
 //   }
 Result<void> PathResetOptional(ObjectRegistry& registry, const ObjectAccessContext& access,
-                               ObjectHandle handle, PropertyPath path,
+                               const PathTarget& target, PropertyPath path,
                                PropertyPathFailure* failure = nullptr) noexcept;
 
 // path(마지막 단계는 Optional<값 struct> 필드)가 set인지 돌려준다(리플렉션 B9e — Docs/Design/
@@ -518,7 +545,7 @@ Result<void> PathResetOptional(ObjectRegistry& registry, const ObjectAccessConte
 //
 //   if (!set.Value()) { /* --unset=preview 줄을 낸다 */ }
 Result<bool> PathIsOptionalSet(ObjectRegistry& registry, const ObjectAccessContext& access,
-                               ObjectHandle handle, PropertyPath path,
+                               const PathTarget& target, PropertyPath path,
                                PropertyPathFailure* failure = nullptr) noexcept;
 
 } // namespace rocks

@@ -328,8 +328,8 @@ void CheckMemberThunks(StructView view, usize& members, uint32 depth) noexcept {
     }
 }
 
-// 클래스 type의 Struct·Array 필드에만 path thunk가 있고(단일 값 필드는 없다) 그 struct의 모든
-// 멤버에 thunk가 있는지 세며 확인한다.
+// 클래스 type의 모든 필드에 path thunk가 있고(단일 값 필드도 — 리플렉션 B9i3c0, staged·Detach·
+// Attach용) 그 struct의 모든 멤버에 thunk가 있는지 세며 확인한다.
 void CheckClassThunks(TypeRegistry& types, TypeId type, usize& paths, usize& scalars,
                       usize& members) noexcept {
     auto lease = types.Acquire(type);
@@ -343,7 +343,7 @@ void CheckClassThunks(TypeRegistry& types, TypeId type, usize& paths, usize& sca
             CHECK(ops->path != nullptr);
             ++paths;
         } else {
-            CHECK(ops->path == nullptr);
+            CHECK(ops->path != nullptr);
             ++scalars;
         }
 
@@ -567,8 +567,8 @@ void FillCoreValues(const Paths& paths, Allocator& allocator) noexcept {
                        {"tint.a", Unsigned(allocator, ValueKind::UInt8, 200)},
                        {"placement.translation.x", Float64(allocator, 1.0e9 + 0.25)},
                        {"placement.translation.z", Float64(allocator, 0.125)},
-                       {"placement.rotation.x", Float32(allocator, 0.5f)},
-                       {"placement.scale.y", Float32(allocator, 3.0f)},
+                       {"placement.rotation.x", Float64(allocator, 0.5)},
+                       {"placement.scale.y", Float64(allocator, 3.0)},
                        {"cell.x", Signed(allocator, ValueKind::Int32, -1)},
                        {"cell.z", Signed(allocator, ValueKind::Int32, 2147483647)},
                        {"debugColor.a", Float32(allocator, -1.0f)},
@@ -650,8 +650,8 @@ void CheckObject(ObjectRegistry& objects, ObjectHandle handle,
 
 } // namespace
 
-// 모듈 집계 등록이 클래스 Struct·Array 필드(상속 필드 포함)의 함수표에 path thunk를 싣고 단일 값
-// 필드에는 싣지 않으며(등록이 거부한다), 등록된 모든 struct 멤버(Binds 미러·원소 struct 포함)의
+// 모듈 집계 등록이 클래스의 모든 필드(Struct·Array·단일 값, 상속 필드 포함 — 단일 값은 리플렉션
+// B9i3c0부터)의 함수표에 path thunk를 싣고, 등록된 모든 struct 멤버(Binds 미러·원소 struct 포함)의
 // 함수표에 path thunk가 있다.
 TEST(GeneratedPath_ModuleRegistrationAttachesPathThunks) {
     SystemAllocator allocator;
@@ -659,7 +659,7 @@ TEST(GeneratedPath_ModuleRegistrationAttachesPathThunks) {
     {
         ModuleRegistration registration(types, allocator);
         REQUIRE(generated::ReflectionTestFixtures::RegisterModuleTypes(registration));
-        // 클래스마다 path가 있는 Struct·Array 필드 수, path가 없는 단일 값 필드 수(상속 포함), 그
+        // 클래스마다 path가 있는 Struct·Array 필드 수, path가 있는 단일 값 필드 수(상속 포함), 그
         // struct 필드·struct 원소 배열이 닿는 struct 멤버 수(중첩 struct를 따라 센다)다.
         //   StructOwner: holder·extra / plain, 멤버 StructHolder 3 + StructMiddle 3 + StructLeaf 3
         //                + extra의 StructLeaf 3 = 12

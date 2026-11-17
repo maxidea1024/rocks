@@ -232,7 +232,12 @@ TEST(FileSystem_CopyAndMoveReplaceRules) {
 
     // Move: 이름 변경, 이미 있으면 AlreadyExists, replace면 덮어쓴다. 디렉터리도 옮긴다.
     CHECK(system.Move(c, Length(c), b, Length(b), false).code == FileCode::AlreadyExists);
+    // 다른 쪽(백신·색인기 등)이 대상을 열어 둔 상태에서도 덮어쓴다. 바깥 프로세스가 방금 쓴 파일을
+    // 잠깐 여는 경우를 열린 handle로 고정해 재현한다(Windows 일반 rename은 이때 접근 거부였다).
+    File reader;
+    REQUIRE(reader.Open(system, b, Length(b), FileOpenMode::ReadExisting));
     REQUIRE(system.Move(c, Length(c), b, Length(b), true));
+    REQUIRE(reader.Close());
     FileInfo info;
     CHECK(system.Stat(c, Length(c), info).code == FileCode::NotFound);
     REQUIRE(system.Move(dir, Length(dir), moved, Length(moved), false));

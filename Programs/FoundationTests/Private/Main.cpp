@@ -9,6 +9,7 @@
 
 namespace rocks::test {
 int RunLoggerFailureProbe() noexcept;
+int RunLogFatalProbe(uint32 mode) noexcept;
 int RunProcessProbe(int argc, char** argv) noexcept;
 int RunHashTraversalNegativeControl(bool useSet, uint32 operation) noexcept;
 int RunHashOperationsNegativeControl(uint32 operation) noexcept;
@@ -52,6 +53,27 @@ static int (*destroyRequestedNegativeControl)(bool) noexcept = nullptr;
 static int (*typeConvenienceNegativeControl)(uint32) noexcept = nullptr;
 static int (*objectObserverNegativeControl)(uint32) noexcept = nullptr;
 static int (*requiredCheckNegativeControl)(uint32) noexcept = nullptr;
+
+// 상위 계층 시험(엔진 모듈)이 등록하는 추가 process probe 모드다. Core 계층
+// probe(RunProcessProbe)는 엔진 모듈을 모르므로 엔진 시험은 자기 probe를 이름으로 등록한다.
+struct RegisteredProcessProbe {
+    const char* mode = nullptr;
+    int (*function)(int, char**) noexcept = nullptr;
+};
+
+static constexpr usize MaxRegisteredProcessProbes = 8;
+static RegisteredProcessProbe registeredProcessProbes[MaxRegisteredProcessProbes];
+static usize registeredProcessProbeCount = 0;
+
+// "--process-probe <mode> ..."의 mode를 등록한다(정적 초기화에서 부른다). 자리가 없으면 false다.
+bool RegisterProcessProbe(const char* mode, int (*function)(int, char**) noexcept) noexcept {
+    if (registeredProcessProbeCount == MaxRegisteredProcessProbes) {
+        return false;
+    }
+
+    registeredProcessProbes[registeredProcessProbeCount++] = {mode, function};
+    return true;
+}
 
 // Object 테스트가 포함된 타깃만 음성 대조 callback을 등록한다. Core-only는 링크 의존이 없다.
 void RegisterObjectScopeNegativeControl(int (*function)(bool) noexcept) noexcept {
@@ -118,6 +140,12 @@ int main(int argc, char** argv) {
     test::PrepareAutomatedTestProcess();
     // Process 시험이 이 실행 파일을 자식으로 다시 띄운 경우다(PlatformBase/Tests/ProcessTests.cpp).
     if (argc >= 3 && strcmp(argv[1], "--process-probe") == 0) {
+        for (usize index = 0; index < test::registeredProcessProbeCount; ++index) {
+            if (strcmp(argv[2], test::registeredProcessProbes[index].mode) == 0) {
+                return test::registeredProcessProbes[index].function(argc, argv);
+            }
+        }
+
         return test::RunProcessProbe(argc, argv);
     }
 
@@ -335,6 +363,14 @@ int main(int argc, char** argv) {
                 return test::RunSecretSlotUseAfterFreeProbe();
             } else if (strcmp(control, "secret-slot-tail-overflow") == 0) {
                 return test::RunSecretSlotTailOverflowProbe();
+            } else if (strcmp(control, "log-fatal-sync") == 0) {
+                return test::RunLogFatalProbe(0);
+            } else if (strcmp(control, "log-fatal-async") == 0) {
+                return test::RunLogFatalProbe(1);
+            } else if (strcmp(control, "log-assert") == 0) {
+                return test::RunLogFatalProbe(2);
+            } else if (strcmp(control, "log-fatal-recursive") == 0) {
+                return test::RunLogFatalProbe(3);
             } else if (strcmp(control, "asan-uaf") == 0) {
                 return test::RunAsanNegativeControl();
             } else if (strcmp(control, "assert-stderr-lock") == 0) {

@@ -37,7 +37,7 @@ public static class UnicodeTables
     /// <summary>원본에서 생성한 헤더 텍스트다. 원본이 계약과 다르면(<see cref="FormatException"/>) 표를 만들지 않는다.</summary>
     public static string Generate(string root)
     {
-        string library = Path.Combine(Path.GetFullPath(root), ThirdPartyManifest.ThirdPartyRoot, LibraryName);
+        string library = Path.Combine(Path.GetFullPath(root), ThirdPartyManifest.CoreThirdPartyRoot, LibraryName);
         ThirdPartyManifest manifest = ThirdPartyManifest.Read(library);
         if (manifest.Kind != ThirdPartyKind.Data)
         {
@@ -72,7 +72,7 @@ public static class UnicodeTables
     /// <summary>저장소의 생성 파일이 원본으로 만든 결과와 같은지 본다(rule id <c>unicode-tables</c>).</summary>
     public static IReadOnlyList<CheckFailure> Check(string root)
     {
-        string library = Path.Combine(Path.GetFullPath(root), ThirdPartyManifest.ThirdPartyRoot, LibraryName);
+        string library = Path.Combine(Path.GetFullPath(root), ThirdPartyManifest.CoreThirdPartyRoot, LibraryName);
         if (!Directory.Exists(library))
         {
             return [];
@@ -379,8 +379,8 @@ public static class UnicodeTables
         int maximumExpansion = decompositionEntries.Count == 0 ? 1 : decompositionEntries.Max(entry => entry.Length);
         var text = new StringBuilder();
         void Line(string value = "") => text.Append(value).Append('\n');
-        Line("// 생성 파일이다. 직접 고치지 않는다: Rocks.ToolTests unicode-tables --root . --write");
-        Line($"// Unicode {version}, 생성기 버전 {GeneratorVersion}. 원본 SHA-256:");
+        Line("// Generated file. Do not edit by hand: Rocks.ToolTests unicode-tables --root . --write");
+        Line($"// Unicode {version}, generator version {GeneratorVersion}. Source SHA-256:");
         foreach ((string name, string hash) in hashes)
         {
             Line($"//   {name} {hash}");
@@ -395,15 +395,17 @@ public static class UnicodeTables
         Line($"inline constexpr char UnicodeVersion[] = \"{version}\";");
         Line($"inline constexpr uint32 MaxDecompositionLength = {maximumExpansion};");
         Line();
-        Line("// 코드 포인트 속성 조합: bit 0–7 결합 등급, 8–12 GeneralCategory, 13–14 NFC_QC(0 Yes·1 No·2 Maybe),");
-        Line("// 15 NFD_QC(0 Yes·1 No), 16 Default_Ignorable.");
+        Line("// Code point property records: bits 0-7 combining class, 8-12 GeneralCategory,");
+        Line("// 13-14 NFC_QC (0 Yes, 1 No, 2 Maybe), 15 NFD_QC (0 Yes, 1 No), 16 Default_Ignorable.");
         Line("// clang-format off");
         EmitArray(text, "uint32", "PropertyRecords", records.Select(value => value.ToString(CultureInfo.InvariantCulture)), 8);
-        Line($"// 상위 색인: 코드 포인트 >> {BlockShift} → 블록 번호.");
+        Line($"// Stage-1 index: code point >> {BlockShift} -> block number.");
         EmitArray(text, "uint16", "PropertyStage1", stage1.Select(value => value.ToString(CultureInfo.InvariantCulture)), 16);
-        Line($"// 블록({BlockSize}칸)마다 속성 조합 번호. 블록 b의 칸 o = PropertyBlocks[b * {BlockSize} + o].");
+        Line($"// Property record number per block ({BlockSize} entries each).");
+        Line($"// Entry o of block b = PropertyBlocks[b * {BlockSize} + o].");
         EmitArray(text, "uint16", "PropertyBlocks", blocks.SelectMany(block => block).Select(value => value.ToString(CultureInfo.InvariantCulture)), 16);
-        Line("// 정규 분해 색인(코드 포인트 순): { 코드 포인트, DecompositionData 시작, 길이 }. Hangul 음절은 알고리즘.");
+        Line("// Canonical decomposition index (by code point): { code point, DecompositionData offset, length }.");
+        Line("// Hangul syllables are algorithmic.");
         Line("struct DecompositionEntry {");
         Line("    uint32 codePoint;");
         Line("    uint32 offset;");
@@ -412,14 +414,14 @@ public static class UnicodeTables
         EmitArray(text, "DecompositionEntry", "DecompositionEntries",
             decompositionEntries.Select(entry => $"{{0x{entry.Code:X}, {entry.Offset}, {entry.Length}}}"), 3);
         EmitArray(text, "uint32", "DecompositionData", decompositionData.Select(value => $"0x{value:X}"), 8);
-        Line("// 정규 합성 쌍(키 순): 키 = (앞 문자 << 21) | 뒤 문자.");
+        Line("// Canonical composition pairs (by key): key = (first character << 21) | second character.");
         Line("struct CompositionEntry {");
         Line("    uint64 key;");
         Line("    uint32 composite;");
         Line("};");
         EmitArray(text, "CompositionEntry", "CompositionEntries",
             compositions.Select(entry => $"{{0x{entry.Key:X}ull, 0x{entry.Composite:X}}}"), 3);
-        Line("// 단순 case folding 구간: first..last에서 stride 간격의 코드 포인트를 delta만큼 옮긴다.");
+        Line("// Simple case folding ranges: code points in first..last at stride intervals are shifted by delta.");
         Line("struct FoldingRange {");
         Line("    uint32 first;");
         Line("    uint32 last;");

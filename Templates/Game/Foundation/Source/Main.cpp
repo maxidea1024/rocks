@@ -4,7 +4,8 @@
 int main() {
     rocks::SystemAllocator allocator;
     rocks::TypeRegistry types(allocator);
-    // 모듈 집계 헤더가 이 모듈과 의존 모듈의 리플렉션 타입을 base 먼저 등록한다.
+    // The module aggregate header registers the reflection types of this module and its
+    // dependencies, bases first.
     rocks::ModuleRegistration registration(types, allocator);
     if (!rocks::generated::SampleGame::RegisterModuleTypes(registration)) {
         return 1;

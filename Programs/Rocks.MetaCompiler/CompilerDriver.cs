@@ -122,6 +122,19 @@ internal static class CompilerDriver
             bindsArguments.Add("-");
             await ResolveBindsAsync(declared, options.Module, options.Inputs.Count,
                 extra => ProcessRunner.RunAsync(new(compiler, bindsArguments, root, environment, ValidateGeneratedCode(unit + extra), TimeSpan.FromMinutes(2))));
+            // 정적 배열 PROPERTY의 원소 형식도 같은 번역 단위에 탐침 변수를 붙인 Clang 실행으로 정규 철자를 얻는다(리플렉션 B9g —
+            // StaticArrayProbe). 정적 배열이 없으면 실행하지 않는다.
+            List<string> staticArguments = [.. arguments.Take(arguments.Count - 1)];
+            staticArguments.AddRange(clangCl ? ["/w", "/clang:-Xclang", "/clang:-ast-dump-filter=rocksStatic_"] : ["-w", "-Xclang", "-ast-dump-filter=rocksStatic_"]);
+            staticArguments.Add("-");
+            await StaticArrayProbe.ResolveAsync(declared,
+                extra => ProcessRunner.RunAsync(new(compiler, staticArguments, root, environment, ValidateGeneratedCode(unit + extra), TimeSpan.FromMinutes(2))));
+            // Within="…" 철자도 Binds처럼 별칭을 붙인 Clang 실행으로 정규 이름을 얻는다(리플렉션 B9h2 — Within이 없으면 실행하지 않는다).
+            List<string> withinArguments = [.. arguments.Take(arguments.Count - 1)];
+            withinArguments.AddRange(clangCl ? ["/w", "/clang:-Xclang", "/clang:-ast-dump-filter=rocksWithin_"] : ["-w", "-Xclang", "-ast-dump-filter=rocksWithin_"]);
+            withinArguments.Add("-");
+            await ResolveWithinAsync(declared,
+                extra => ProcessRunner.RunAsync(new(compiler, withinArguments, root, environment, ValidateGeneratedCode(unit + extra), TimeSpan.FromMinutes(2))));
             schema = SchemaValidator.Validate(declared, imported);
         }
         catch (Exception error) when (error is JsonException or KeyNotFoundException or InvalidOperationException or FormatException)
@@ -578,6 +591,55 @@ internal static class CompilerDriver
     // 받는다(RMC2004). 같은 합성 번역 단위 끝에 미러마다 `using rocksBinds_N = <철자>;`와 완전한 class 타입인지 확인하는
     // static_assert를 붙여 Clang을 한 번 더 실행하고(-ast-dump-filter로 그 별칭만 덤프한다) 별칭의 desugar 철자를 쓴다.
     // 이 실행의 오류는 그 미러 선언 위치로 보고한다(RMC3000).
+    // ROCKS_CLASS(Within = "…") 철자를 정규 이름으로 푼다(리플렉션 B9h2 — Docs/Design/ReflectionExtensions.ko.md 9.2절): 번역 단위 끝 전역
+    // 범위에 클래스마다 `using rocksWithin_N = ::철자;`를 붙인 Clang 실행의 별칭 desugar 철자를 WithinResolved에 둔다. 철자가 타입을
+    // 이름하지 않으면 RMC2208이다. Within이 있는 클래스가 없으면 실행하지 않는다.
+    private static async Task ResolveWithinAsync(Dictionary<string, ClassModel> declared, Func<string, Task<ProcessResult>> run)
+    {
+        ClassModel[] classes = declared.Values.Where(model => model.WithinSpelling.Length != 0).OrderBy(model => model.Name, StringComparer.Ordinal).ToArray();
+        if (classes.Length == 0)
+        {
+            return;
+        }
+
+        StringBuilder aliases = new();
+        for (int index = 0; index < classes.Length; ++index)
+        {
+            string spelling = classes[index].WithinSpelling.Trim();
+            aliases.Append($"using rocksWithin_{index} = {(spelling.StartsWith("::", StringComparison.Ordinal) ? spelling : "::" + spelling)};\n");
+        }
+
+        ProcessResult result = await run(aliases.ToString());
+        if (result.ExitCode != 0)
+        {
+            Match named = Regex.Match(result.StdErr, @"rocksWithin_(\d+)", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+            ClassModel failed = classes[named.Success && int.TryParse(named.Groups[1].Value, out int at) && at < classes.Length ? at : 0];
+            throw new MetadataException($"{failed.Name}: Within = \"{failed.WithinSpelling}\" does not name a type visible from the reflected headers:\n" + result.StdErr,
+                "RMC2208", "Spell the Within class fully qualified from the global scope and include its header before this class.").At(failed.Site);
+        }
+
+        Utf8JsonReader reader = new(Encoding.UTF8.GetBytes(result.StdOut), new JsonReaderOptions { AllowMultipleValues = true, MaxDepth = 2048 });
+        while (reader.Read())
+        {
+            using JsonDocument alias = JsonDocument.ParseValue(ref reader);
+            JsonElement node = alias.RootElement;
+            string name = node.TryGetProperty("name", out JsonElement value) ? value.GetString() ?? "" : "";
+            if (node.TryGetProperty("kind", out JsonElement kind) && kind.GetString() == "TypeAliasDecl" &&
+                name.StartsWith("rocksWithin_", StringComparison.Ordinal) && int.TryParse(name["rocksWithin_".Length..], out int index) &&
+                index >= 0 && index < classes.Length)
+            {
+                classes[index].WithinResolved = ClangAstParser.CleanType(ClangAstParser.TypeSpelling(node));
+            }
+        }
+
+        ClassModel? unresolved = classes.FirstOrDefault(model => model.WithinResolved is null);
+        if (unresolved is not null)
+        {
+            throw new MetadataException($"{unresolved.Name}: Clang did not report the Within alias for \"{unresolved.WithinSpelling}\"", "RMC2001",
+                "Use the supported Clang/toolchain; add a reviewed parser case before accepting a new AST shape.").At(unresolved.Site);
+        }
+    }
+
     private static async Task ResolveBindsAsync(Dictionary<string, ClassModel> declared, string module, int baseLines, Func<string, Task<ProcessResult>> run)
     {
         ClassModel[] mirrors = declared.Values.Where(model => model.BindsSpelling.Length != 0).OrderBy(model => model.Name, StringComparer.Ordinal).ToArray();

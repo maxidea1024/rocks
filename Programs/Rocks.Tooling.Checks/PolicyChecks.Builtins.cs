@@ -25,6 +25,10 @@ public static partial class PolicyChecks
             "\\b__builtin_(?:memcpy|memmove|memset|memcmp|strlen|strcmp|bit_cast|launder|addressof|prefetch)\\b"),
         ["Core/Source/Runtime/PlatformBase/Public/Platform/Atomics.h"] = Pattern(
             "\\b__atomic_[A-Za-z0-9_]*|\\b__ATOMIC_[A-Z_]+\\b"),
+        // 호출 위치(파일·함수·줄)는 SourceLocation::Current의 기본 인자로만 쓴다. 기본 인자가 호출 지점에서
+        // 평가되어야 하므로 함수 본문으로 감쌀 수 없다.
+        ["Core/Source/Runtime/Core/Public/Core/Diagnostics/SourceLocation.h"] = Pattern(
+            "\\b__builtin_(?:FILE|FUNCTION|LINE)\\b"),
         // 수치 intrinsic(비트 계수·특수 값)은 PlatformMath 계층이 컴파일러별로 감싼다.
         ["Core/Source/Runtime/PlatformBase/Public/Platform/Math/ClangPlatformMath.h"] = Pattern(
             "\\b__builtin_[A-Za-z0-9_]*"),
@@ -40,6 +44,7 @@ public static partial class PolicyChecks
     /// <item>원자 연산·메모리 순서: Platform/Atomics.h</item>
     /// <item>overflow 검사 산술: Base/Checked.h. byte 순서: Base/Endian.h</item>
     /// <item>중단점·도달 불가·offsetof: Base/Compiler.h</item>
+    /// <item>호출 위치(파일·함수·줄): Core/Diagnostics/SourceLocation.h</item>
     /// <item>비트 계수·NaN·무한대: Platform/Math/{Clang,Generic}PlatformMath.h</item>
     /// </list>
     /// 외부 라이브러리 원본은 <see cref="NativeSources"/>가 제외한다. 주석의 언급도 lexical하게 검사한다.
@@ -60,7 +65,7 @@ public static partial class PolicyChecks
                 {
                     failures.Add(new(relative, line, "compiler-builtin",
                         "compiler builtin outside its helper header (Platform/Memory.h, Platform/Atomics.h, " +
-                        "Base/Checked.h, Base/Endian.h, Base/Compiler.h, PlatformMath)"));
+                        "Base/Checked.h, Base/Endian.h, Base/Compiler.h, PlatformMath, Core/Diagnostics/SourceLocation.h)"));
                 }
             }
         }

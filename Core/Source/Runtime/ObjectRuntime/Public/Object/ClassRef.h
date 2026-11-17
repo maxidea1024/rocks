@@ -23,8 +23,8 @@ namespace detail {
 // 돌려준다. 실패: 미등록 NotFound(acquired의 오류 그대로), 클래스가 아닌 레코드(struct·enum)와
 // 파생 위반 InvalidArgument, 그 밖의 acquired 오류(ShuttingDown·문맥 오류·lease 포화)는 그대로다.
 // 추상 클래스도 받는다(생성 가능성은 생성 때 따로 본다 — UE TSubclassOf도 추상 클래스를 담는다).
-// Deprecated 클래스의 쓰기 거부·decode 진단은 리플렉션 B9h2가 이 판정 뒤에 더한다(encode는
-// 허용한다 — 같은 문서 5.2절).
+// Deprecated 클래스는 이 판정이 받는다(decode는 진단, encode는 허용 — 같은 문서 5.2절). 쓰기는
+// CheckWritableClassReferenceLease가 Deprecated를 거부한다(리플렉션 B9h2).
 //
 // 사용 예:
 //   auto lease = detail::CheckClassReferenceLease(types.Acquire(value), schemaBase, nullptr);
@@ -43,6 +43,23 @@ inline Result<TypeLease> CheckClassReferenceLease(Result<TypeLease> acquired, Ty
     }
 
     return acquired;
+}
+
+// ClassRef 쓰기(FieldValue 쓰기·staged 쓰기·경로 쓰기·경로 키)의 판정이다:
+// CheckClassReferenceLease에 더해 Deprecated 클래스(상속 포함 — 리플렉션 B9h2)는
+// InvalidArgument다(이미 저장된 값의 로드·저장은 받는다).
+//
+// 사용 예:
+//   auto lease = detail::CheckWritableClassReferenceLease(registry.AcquireRegisteredType(access,
+//                                                         value), schemaBase, nullptr);
+inline Result<TypeLease> CheckWritableClassReferenceLease(Result<TypeLease> acquired, TypeId base,
+                                                          const void* baseNative) noexcept {
+    auto checked = CheckClassReferenceLease(Move(acquired), base, baseNative);
+    if (checked && HasFlag(checked.Value().Schema().flags, TypeFlags::Deprecated)) {
+        return Result<TypeLease>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return checked;
 }
 
 } // namespace detail

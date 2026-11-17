@@ -54,12 +54,16 @@ internal static partial class MetaTests
         RegisterOptionals(context);
         RegisterMaps(context);
         RegisterObjectRefMaps(context);
+        RegisterStaticArrays(context);
+        RegisterFieldFlags(context);
+        RegisterClassFlags(context);
         RegisterStructs(context);
         RegisterBinds(context);
         RegisterArrays(context);
         RegisterPathThunks(context);
         RegisterArrayRestrictions(context);
         RegisterNative(context);
+        RegisterSettings(context);
     }
 
     // 거부 시험 하나(name)를 등록한다. sources의 원본마다 MetaCompiler가 code 진단(reason을 담은 문장)으로 거부해야 한다.

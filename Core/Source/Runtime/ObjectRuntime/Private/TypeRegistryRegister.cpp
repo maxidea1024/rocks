@@ -26,11 +26,21 @@ using detail::ValidateFieldList;
 // 클래스·struct가 받는 TypeFlags 비트다. 그 밖의 비트(클래스의 Atomic, struct의 Abstract·
 // WorldOnly 포함)는 InvalidArgument다.
 constexpr uint32 KnownClassFlags =
-    static_cast<uint32>(TypeFlags::Abstract) | static_cast<uint32>(TypeFlags::WorldOnly);
+    static_cast<uint32>(TypeFlags::Abstract) | static_cast<uint32>(TypeFlags::WorldOnly) |
+    static_cast<uint32>(TypeFlags::Transient) | static_cast<uint32>(TypeFlags::Deprecated);
 
 constexpr uint32 KnownFieldFlags =
     static_cast<uint32>(FieldFlags::Transient) | static_cast<uint32>(FieldFlags::ReadOnly) |
-    static_cast<uint32>(FieldFlags::EditorOnly) | static_cast<uint32>(FieldFlags::Required);
+    static_cast<uint32>(FieldFlags::EditorOnly) | static_cast<uint32>(FieldFlags::Required) |
+    static_cast<uint32>(FieldFlags::DuplicateTransient) |
+    static_cast<uint32>(FieldFlags::NonPIEDuplicateTransient) |
+    static_cast<uint32>(FieldFlags::SaveGame) |
+    static_cast<uint32>(FieldFlags::TextExportTransient);
+
+// 복제 제외 플래그다. Required와 함께 쓰면 InvalidArgument다(리플렉션 B9h1 — 복제본이 늘 null을
+// 가져 패키지 저장의 rejectMissingRequired가 실패한다).
+constexpr uint32 DuplicateExcludedFlags = static_cast<uint32>(FieldFlags::DuplicateTransient) |
+                                          static_cast<uint32>(FieldFlags::NonPIEDuplicateTransient);
 
 bool SameBytes(Span<const char> left, Span<const char> right) noexcept {
     if (left.Size() != right.Size()) {
@@ -111,8 +121,12 @@ Result<void> ValidateFieldList(Span<const FieldSchema> fields, bool structMember
         // Map 필드(리플렉션 B9f2)는 value.type 0, 키 종류는 성질 표의 Map 키 종류, 값 종류는 Map 값
         // 종류(ObjectReference는 ObjectRefMap — 리플렉션 B9f4, 참조 struct는 ResolveValueTypes가
         // 거부한다), maxElements는 배열과 같은 범위다. Set 필드는 원소 종류가
-        // Set 원소 종류다. Map이 아닌 필드의 key는 {Opaque, 0}이다.
+        // Set 원소 종류다. Map이 아닌 필드의 key는 {Opaque, 0}이다. StaticArray 필드(리플렉션
+        // B9g)는 value.type 0, 원소 종류는 성질 표의 정적 배열 원소 종류(참조 struct 포함 —
+        // Registry 컨테이너를 담은 원소 struct는 ResolveValueTypes가 거부한다), maxElements는
+        // 정확한 원소 수 N으로 [1, MaxStaticArrayElements]이다.
         const bool array = field.value.kind == ValueKind::Array;
+        const bool fixed = field.value.kind == ValueKind::StaticArray;
         const bool optional = field.value.kind == ValueKind::Optional;
         const bool map = field.value.kind == ValueKind::Map;
         const bool set = field.value.kind == ValueKind::Set;
@@ -120,7 +134,10 @@ Result<void> ValidateFieldList(Span<const FieldSchema> fields, bool structMember
         const ValueType& key = FieldKeyType(field);
         const bool counted = field.value.type == TypeId{} && field.maxElements >= 1 &&
                              field.maxElements <= MaxArrayElements;
-        const bool arrayShape = array ? counted && ValueKindCanBeArrayElement(field.element.kind)
+        const bool arrayShape = array   ? counted && ValueKindCanBeArrayElement(field.element.kind)
+                                : fixed ? field.value.type == TypeId{} && field.maxElements >= 1 &&
+                                              field.maxElements <= MaxStaticArrayElements &&
+                                              ValueKindCanBeStaticArrayElement(field.element.kind)
                                 : optional ? field.value.type == TypeId{} &&
                                                  ValueKindCanBeOptionalInner(field.element.kind) &&
                                                  field.maxElements == 0
@@ -142,6 +159,8 @@ Result<void> ValidateFieldList(Span<const FieldSchema> fields, bool structMember
         // 표의 불변식 — Meta/TypeSchema.h static_assert). 도구 이름은 비어 있거나 ASCII 식별자다.
         if (field.id == Guid{} || (field.flags & ~KnownFieldFlags) != 0 ||
             (HasFlag(field.flags, FieldFlags::Required) &&
+             (field.flags & DuplicateExcludedFlags) != 0) ||
+            (HasFlag(field.flags, FieldFlags::Required) &&
              !ValueKindAcceptsRequired(target.kind)) ||
             (field.kind != FieldKind::Value && field.kind != FieldKind::ObjectReference) ||
             !SupportedFieldKind(field.value.kind, structMembers) || !arrayShape || !keyShape ||
@@ -153,9 +172,9 @@ Result<void> ValidateFieldList(Span<const FieldSchema> fields, bool structMember
         }
 
         // FieldKind::ObjectReference(강한 GC 간선) ⇔ 대상 형식이 ObjectReference(단일 참조,
-        // ObjectRefArray 또는 ObjectRefMap). 대상 type은 성질 표의 대상 타입 종류(참조·소프트
-        // 참조의 기대 대상, Enum·Struct의 대상 ID)에만 쓰고, 대상 ID 필수 종류(Enum·Struct)는 ID가
-        // 있어야 한다.
+        // ObjectRefArray, ObjectRef 원소 정적 배열 또는 ObjectRefMap). 대상 type은 성질 표의 대상
+        // 타입 종류(참조·소프트 참조의 기대 대상, Enum·Struct의 대상 ID)에만 쓰고, 대상 ID 필수
+        // 종류(Enum·Struct)는 ID가 있어야 한다.
         if (field.value.kind != ValueKind::Opaque) {
             ++typedFields;
             const bool reference = target.kind == ValueKind::ObjectReference;
@@ -268,11 +287,11 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
                                                  !field.writeStaged && !field.readStaged)
                                               : (field.read && field.write && field.writeStaged);
         // struct·배열 필드는 Transient가 아니면 codec이 있어야 한다(그 밖은 completeFieldLayout
-        // 규칙). 경로 접근 thunk(path)는 struct·배열 필드만 가질 수 있다 — 최상위 단일 값의 경로
-        // 읽기·쓰기는 read·write 한 경로다(7.1절).
+        // 규칙). 경로 접근 thunk(path)는 모든 필드가 가질 수 있다 — 게시된 객체의 최상위 단일 값
+        // 읽기·쓰기는 그래도 read·write 한 경로이고, 단일 값의 thunk는 staged 객체·Detach·Attach가
+        // 쓴다(리플렉션 B9i3c0).
         if (!matched || !accessors || (field.encode == nullptr) != (field.decode == nullptr) ||
-            (aggregateField && !field.encode && !HasFlag(matched->flags, FieldFlags::Transient)) ||
-            (!aggregateField && field.path != nullptr)) {
+            (aggregateField && !field.encode && !HasFlag(matched->flags, FieldFlags::Transient))) {
             return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
         }
 
@@ -366,6 +385,35 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
                 return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
             }
 
+            // Transient·Deprecated도 상속되고(리플렉션 B9h2) Within은 파생이 이어받는다(base에
+            // Within이 있으면 파생도 0이 아니어야 한다 — 파생 관계 판정은 MetaCompiler RMC2208).
+            if ((base->schema.flags & UnsaveableTypeFlags & ~schema.flags) != 0 ||
+                (base->schema.withinType != TypeId{} && schema.withinType == TypeId{})) {
+                return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
+            }
+
+            // 파생이 Within을 다시 정하면 base Within의 파생이어야 한다(좁히기만 — MetaCompiler
+            // RMC2208과 같은 규칙). 자기 자신이면 base 사슬로, 등록된 다른 클래스면 그 레코드
+            // 사슬로 본다. 아직 등록되지 않은 Within 클래스(모듈 등록 순서)는 여기서 판정하지
+            // 않는다.
+            if (base->schema.withinType != TypeId{} &&
+                schema.withinType != base->schema.withinType) {
+                const auto derives = [&](const Record* record) noexcept {
+                    for (; record; record = record->base) {
+                        if (record->schema.id == base->schema.withinType) {
+                            return true;
+                        }
+                    }
+
+                    return false;
+                };
+                const Record* within =
+                    schema.withinType == schema.id ? base : FindLocked(schema.withinType);
+                if (within && !derives(within)) {
+                    return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
+                }
+            }
+
             // 파생 스키마는 base field를 동일한 안정 ID/표현으로 포함한다. 그래서 기반 타입의 필드
             // 함수(Resolve<기반> 경유)를 파생 객체에 써도 같은 필드를 가리킨다.
             for (usize baseIndex = 0; baseIndex < base->schema.fields.Size(); ++baseIndex) {
@@ -447,6 +495,7 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     record->schema.version = schema.version;
     record->schema.baseType = schema.baseType;
     record->schema.flags = schema.flags;
+    record->schema.withinType = schema.withinType;
     record->schema.name = CopyBytes(schema.name, cursor);
     record->schema.toolName = CopyBytes(schema.toolName, cursor);
     record->schema.fields = {fields, schema.fields.Size()};

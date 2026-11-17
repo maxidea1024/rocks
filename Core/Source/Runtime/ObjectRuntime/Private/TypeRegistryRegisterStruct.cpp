@@ -111,6 +111,14 @@ Result<void> TypeRegistry::ResolveValueTypes(Span<const FieldSchema> fields,
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
+        // 정적 배열(리플렉션 B9g)의 원소 struct는 Registry 컨테이너를 담지 않는다(참조 struct
+        // 원소는 소유 저장소 안이라 받지만, 원소 안 ObjectRefArray·StructRefArray·ObjectRefMap은
+        // 경로·복원 시험 범위 밖으로 두고 거부한다 — Docs/Design/ReflectionExtensions.ko.md 8절
+        // "구현(B9g)에서 정한 점").
+        if (field.value.kind == ValueKind::StaticArray && target->containsReferenceArray) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
         // Optional의 내부 struct와 Map의 값 struct는 값 struct다(참조 struct는 null이 이미
         // "없음"이고, Optional·Map 안의 간선은 GC·관찰자 계수가 따라가지 않는다 —
         // Docs/Design/ReflectionExtensions.ko.md 1.3·6·7.2절).
@@ -138,9 +146,9 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     }
 
     if (schema.id == Guid{} || schema.version == 0 || schema.baseType != TypeId{} ||
-        (schema.flags & ~KnownStructFlags) != 0 || ops.size == 0 || ops.alignment == 0 ||
-        (ops.alignment & (ops.alignment - 1)) != 0 || !ops.nativeType || !ops.construct ||
-        !ops.destroy || ops.fields.Size() != schema.fields.Size() ||
+        schema.withinType != TypeId{} || (schema.flags & ~KnownStructFlags) != 0 || ops.size == 0 ||
+        ops.alignment == 0 || (ops.alignment & (ops.alignment - 1)) != 0 || !ops.nativeType ||
+        !ops.construct || !ops.destroy || ops.fields.Size() != schema.fields.Size() ||
         !StringView(schema.name.Data(), schema.name.Size()).ValidateUtf8() ||
         (schema.toolName.Size() != 0 && !IsTypeToolName(schema.toolName))) {
         return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
@@ -163,7 +171,8 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     bool nameMember = false;
     bool weakMember = false;
     for (const FieldSchema& field : schema.fields) {
-        // 강한 참조 멤버: 단일 참조·ObjectRefArray·ObjectRefMap(대상 형식이 ObjectReference).
+        // 강한 참조 멤버: 단일 참조·ObjectRefArray·ObjectRef 원소 정적 배열·ObjectRefMap(대상
+        // 형식이 ObjectReference).
         const bool referenceTarget = FieldTargetType(field).kind == ValueKind::ObjectReference;
         // Name 멤버: 단일 Name·Array<Name>·Name 원소 Set·Name 값이나 키의 Map(Transient 포함 — 관찰
         // struct 제한이 쓴다).
@@ -369,6 +378,8 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     record->structOps.destroy = ops.destroy;
     record->structOps.trace = ops.trace;
     record->structOps.migrate = ops.migrate;
+    record->structOps.copy = ops.copy;
+    record->structOps.swap = ops.swap;
     record->structOps.requiresWorldOnlyOwner = requiresWorldOnlyOwner;
     record->structOps.fields = {fieldOps, schema.fields.Size()};
 

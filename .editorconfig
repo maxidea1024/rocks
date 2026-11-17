@@ -9,11 +9,11 @@ tab_width = 4
 insert_final_newline = true
 trim_trailing_whitespace = true
 
-# C#(빌드 도구·MetaCompiler·도구 시험·모듈 규칙)은 Microsoft C# 코딩 규칙(.NET 런타임 스타일)을 따른다.
-# Allman 중괄호, 본문이 한 줄이어도 중괄호, 블록 뒤 빈 줄, 한 줄에 문장 하나. 검사는 Rocks.ToolTests format이
-# `dotnet format Build/Format/Rocks.Format.slnx --verify-no-changes --severity warn`으로 저장소의 C# 프로젝트를 한 번에 본다
-# (공백 서식은 WHITESPACE, 아래 스타일 규칙은 IDE ID로 알린다). 저장소의 .cs가 모두 그 솔루션의 프로젝트에 속하는지도 확인하며
-# (모듈·타깃 규칙은 Build/Rules, 게임 템플릿 규칙은 Build/Format의 프로젝트), `--write`면 고친다.
+# C# (build tools, MetaCompiler, tool tests, module rules) follows the Microsoft C# coding conventions (.NET runtime style).
+# Allman braces, braces even for single-line bodies, a blank line after blocks, one statement per line. Rocks.ToolTests format checks
+# all C# projects of the repository at once with `dotnet format Build/Format/Rocks.Format.slnx --verify-no-changes --severity warn`
+# (whitespace formatting reports as WHITESPACE, the style rules below by IDE ID). It also checks that every .cs in the repository belongs to a project
+# of that solution (module and target rules are in Build/Rules, game template rules in the Build/Format project), and `--write` fixes them.
 [*.cs]
 csharp_new_line_before_open_brace = all
 csharp_new_line_before_else = true
@@ -37,9 +37,9 @@ dotnet_diagnostic.IDE2001.severity = warning
 csharp_style_allow_blank_lines_between_consecutive_braces_experimental = false:warning
 dotnet_diagnostic.IDE2002.severity = warning
 
-# 외부 라이브러리 원본(Core/Source/ThirdParty/<Lib>/<lib>-<version>/)은 byte 그대로 둔다. 편집기가 공백·줄끝을
-# 바꾸지 않도록 모든 규칙을 해제한다. ThirdParty.json의 SHA-256이 원본 보존을 확인한다.
-[Core/Source/ThirdParty/*/*/**]
+# External library sources (<root>/<Lib>/<lib>-<version>/, where the roots are Core/Source/ThirdParty and Engine/Source/ThirdParty) are kept
+# byte for byte. All rules are unset so editors do not change whitespace or line endings. The SHA-256 in ThirdParty.json verifies the sources are preserved.
+[{Core,Engine}/Source/ThirdParty/*/*/**]
 charset = unset
 end_of_line = unset
 indent_style = unset
@@ -48,7 +48,21 @@ tab_width = unset
 insert_final_newline = unset
 trim_trailing_whitespace = unset
 
-# 추적 가능한 수정의 patch(Core/Source/ThirdParty/<Lib>/*.patch)는 빈 문맥 줄이 공백 하나라 줄 끝 공백을 지우면 깨진다.
-# 줄끝은 LF로 두고(검사가 CR을 거부한다) 공백 정리만 끈다.
-[Core/Source/ThirdParty/*/*.patch]
+# Offline tool build scripts of prebuilt binaries (Engine/Source/ThirdParty/<Lib>/Build/) are written by Rocks, so the default
+# rules (UTF-8, LF, final newline) are restored. Later sections override earlier ones.
+[Engine/Source/ThirdParty/*/Build/**]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 4
+tab_width = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Patches of traceable modifications (<root>/<Lib>/*.patch, and <Lib>/Build/*.patch of tool builds) break if trailing whitespace is trimmed,
+# because empty context lines are a single space. Line endings stay LF (the check rejects CR); only whitespace trimming is turned off.
+[{Core,Engine}/Source/ThirdParty/*/*.patch]
+trim_trailing_whitespace = false
+
+[Engine/Source/ThirdParty/*/Build/*.patch]
 trim_trailing_whitespace = false

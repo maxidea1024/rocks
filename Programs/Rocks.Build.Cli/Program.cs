@@ -36,7 +36,7 @@ namespace Rocks.Build.Cli
         {
             if (args.Length == 0)
             {
-                throw new ArgumentException("Expected build, test, sdk, or game command.");
+                throw new ArgumentException("Expected build, test, sdk, game, or bootstrap command.");
             }
 
             var options = Parse(args.Skip(1).ToArray());
@@ -45,6 +45,8 @@ namespace Rocks.Build.Cli
                 "game" => new HashSet<string>(["sdk", "project", "target", "configuration", "output", "compiler", "jobs"], StringComparer.Ordinal),
                 "sdk" => new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination"], StringComparer.Ordinal),
                 "build" or "test" => new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "platform", "android-abi", "android-api", "android-ndk", "adb"], StringComparer.Ordinal),
+                // 미리 빌드한 바이너리를 사용자 저장소에 받는다(build·test는 받지 않는다, Docs/Design/ShaderSystem.ko.md 8절 2항).
+                "bootstrap" => new HashSet<string>(["root", "library", "store", "mirror", "offline", "windows-sdk"], StringComparer.Ordinal),
                 _ => throw new ArgumentException($"Unknown command: {args[0]}")
             };
             foreach (var name in options.Keys)
@@ -66,6 +68,11 @@ namespace Rocks.Build.Cli
             if (args[0] == "game")
             {
                 return await InstalledSdk.BuildGameAsync(options, cancellationToken);
+            }
+
+            if (args[0] == "bootstrap")
+            {
+                return await ThirdPartyBootstrapCommand.RunAsync(options, cancellationToken);
             }
 
             if (args[0] is not ("build" or "test" or "sdk"))
@@ -128,6 +135,13 @@ namespace Rocks.Build.Cli
             var context = new BuildContext(root, output, toolchain.Platform, toolchain.Architecture, configuration);
             var rulesPath = options.GetValueOrDefault("rules", HostTool(root, "Rocks.Engine.Rules"));
             var rules = RuleLoader.Load(rulesPath, targetName, context);
+            // 설치 SDK의 엔진 라이브러리는 구성 기본 로그 하한으로 빌드되어야 한다. 게임은 같은 기본값으로 컴파일되므로 다르면 ODR 위반이다.
+            if (args[0] == "sdk" && rules.Target.LogCompiledMinimum is not null)
+            {
+                throw new ArgumentException($"Target {targetName}: LogCompiledMinimum cannot be overridden for an installed SDK export " +
+                    "(game builds compile against the SDK with the configuration default).");
+            }
+
             Directory.CreateDirectory(output);
             await using var invocationLock = await OutputInvocationLock.AcquireAsync(output, cancellationToken);
             // 앞 실행의 PASS 보고서가 이번 실행의 실패(메타 단계·빌드 예외 포함)를 성공으로 보이게 하지 않는다.
@@ -203,6 +217,7 @@ namespace Rocks.Build.Cli
                 {
                     Toolchain = toolchain,
                     Configuration = configuration,
+                    LogCompiledMinimum = rules.Target.LogCompiledMinimum,
                     RootDirectory = root,
                     OutputDirectory = output,
                     Modules = modules,
@@ -366,7 +381,7 @@ namespace Rocks.Build.Cli
 
         internal static Dictionary<string, string> Parse(string[] args)
         {
-            var allowed = new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", "sdk", "project", "platform", "android-abi", "android-api", "android-ndk", "adb"], StringComparer.Ordinal);
+            var allowed = new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", "sdk", "project", "platform", "android-abi", "android-api", "android-ndk", "adb", "library", "store", "mirror", "offline", "windows-sdk"], StringComparer.Ordinal);
             var values = new Dictionary<string, string>(StringComparer.Ordinal);
             for (var index = 0; index < args.Length; index += 2)
             {

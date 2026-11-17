@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "id": "VULKAN_SM5",
+  "status": "supported",
+  "backend": "Vulkan",
+  "processor": { "module": "ShaderFormatVulkan", "version": 1 },
+  "bindingConvention": 1,
+  "tools": ["DirectXShaderCompiler", "SpirvTools"],
+  "language": { "hlsl2021": true },
+  "compiler": {
+    "path": "DxcSpirv",
+    "shaderModel": "6_0",
+    "imageFormat": "VkImageFormat",
+    "spirvTargetEnv": "vulkan1.1",
+    "dxPositionW": true
+  },
+  "stages": ["vertex", "pixel", "compute"],
+  "limits": {
+    "constantBuffers": 12,
+    "sampledTextures": 16,
+    "storageBuffers": 4,
+    "storageImages": 4,
+    "samplers": 16,
+    "uavStages": ["compute"],
+    "renderTargets": 4,
+    "interStageVectors": 16,
+    "rootConstantBytes": 128
+  },
+  "features": ["compute"],
+  "deviceRequirements": ["VULKAN_1_1"],
+  "producers": [{ "host": "windows-x64" }, { "host": "macos-arm64" }]
+}

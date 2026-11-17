@@ -9,10 +9,11 @@ Rocks 저장소는 **Core(기반 라이브러리)**와 **Engine(게임 엔진 �
 rocks/
   Core/                       기반 라이브러리(엔진 아님)
     Source/
-      Runtime/                모듈: Base PlatformBase Core Task Compression Serialization MetaSchema
-                              Localization ObjectRuntime ObjectSerialization
-      ThirdParty/             고정 버전 외부 라이브러리 원본(Lz4·Zstd·Zlib). <Lib>/<Lib>.Build.cs·ThirdParty.json·
-                              <lib>-<version>/(릴리스 원본을 byte 그대로)·필요 시 Rocks 글루 .c
+      Runtime/                모듈: Base PlatformBase Core Compression TraceCapture Task AsyncCompression Serialization MetaSchema
+                              Localization ObjectRuntime ObjectSerialization ReflectionText Config
+      ThirdParty/             Core가 쓰는 고정 버전 외부 라이브러리(Lz4·Zstd·Zlib·Brotli·Sodium 원본, UnicodeData·
+                              JsonTestSuite·Wycheproof 데이터). <Lib>/ThirdParty.json·<lib>-<version>/(릴리스 원본을
+                              byte 그대로)·code 종류는 <Lib>.Build.cs와 필요 시 Rocks 글루 .c
         <Module>/
           <Module>.Build.cs   모듈 규칙(CoreModuleRules 상속)
           Public/             다른 모듈이 include하는 헤더
@@ -26,7 +27,9 @@ rocks/
       Runtime/                게임에 들어가는 엔진 모듈(EngineModuleRules 상속)
       Developer/              도구·에디터에서만 쓰는 엔진 모듈
       Editor/                 에디터 모듈
-      ThirdParty/             외부 라이브러리 adapter
+      ThirdParty/             엔진·도구 전용 외부 라이브러리(같은 manifest 규칙). 헤더 전용(kind: headers, Vulkan-Headers),
+                              C 원본(SPIRV-Reflect), 미리 빌드한 바이너리(kind: binary, DXC·SPIRV-Cross·SPIRV-Tools는
+                              공개 헤더와 <Lib>/Build/ 오프라인 빌드 스크립트만, FXC·Metal 도구는 manifest만)
     Plugins/<분류>/<플러그인>/   엔진 플러그인(<플러그인>.rocksplugin, Source/<모듈>/<모듈>.Build.cs)
   Programs/                   실행 프로그램 전부
     FoundationTests/          Core 모듈 테스트 실행 파일(C++, 규칙·타깃 포함)
@@ -51,9 +54,11 @@ rocks/
   플랫폼 조건부 전처리를 쓰지 않는다(policy 검사가 확인한다).
 - 런타임 소스(Core·Engine·플러그인·프로그램)는 STL을 쓰지 않는다. 모듈 `Tests/`와 테스트 실행 파일은
   STL 정책 밖이다(STL 호환성 테스트가 STL을 직접 쓴다).
-- 외부 라이브러리는 Core가 쓰는 것이면 `Core/Source/ThirdParty/<Lib>/`에 둔다(Core는 Engine을 참조하지 않는다).
-  원본 디렉터리는 수정하지 않고 `ThirdParty.json`(버전·출처·라이선스·파일별 SHA-256·번역 단위·정의·컴파일러 지시문
-  목록)이 단일 출처다. 정책 검사 `third-party`가 manifest와 원본의 일치를 확인하며, lexical 검사는 manifest가 선언한
+- 외부 라이브러리는 Core가 쓰는 것이면 `Core/Source/ThirdParty/<Lib>/`, 엔진·도구 전용이면 `Engine/Source/ThirdParty/<Lib>/`에
+  둔다(Core는 Engine을 참조하지 않는다). 라이브러리 이름은 두 루트를 통틀어 하나다. 원본 디렉터리는 수정하지 않고
+  `ThirdParty.json`(종류·버전·출처·라이선스·파일별 SHA-256·번역 단위·정의·컴파일러 지시문 목록)이 단일 출처다. 종류는
+  `code`(C 번역 단위)·`data`(데이터 파일)·`headers`(헤더 전용)·`binary`(미리 빌드한 바이너리)이며, `binary`의 파일은
+  저장소와 `out/`이 아니라 bootstrap 명령이 받는 사용자 단위 내용 주소 저장소에 둔다([셰이더 시스템](ShaderSystem.ko.md) 8절). 정책 검사 `third-party`가 manifest와 원본의 일치를 확인하며, lexical 검사는 manifest가 선언한
   원본 디렉터리만 제외한다. 외부 헤더는 소비 모듈의 Private 구현에만 노출한다. 규칙과 절차는
   [압축 설계](Compression.ko.md) 3절을 따른다.
 

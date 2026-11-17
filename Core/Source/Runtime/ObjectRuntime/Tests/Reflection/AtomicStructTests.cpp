@@ -6,8 +6,8 @@
 
 // 리플렉션 B9b2 struct Atomic 시험이다(Docs/Design/ReflectionExtensions.ko.md 3.1·3.2절):
 // RegisterStruct의 struct 플래그 mask(Atomic만), 클래스 Atomic 비트 거부, StructView::IsAtomic과
-// 비전파, Core 값 타입 미러 17종 중 Transform을 뺀 16종의 Atomic, Transform3f·Transform3d 미러와
-// Core 타입의 멤버 대조. 차이 쓰기·override 단위(A5)는 여기서 다루지 않는다.
+// 비전파, Core 값 타입 미러 17종 중 Transform을 뺀 16종의 Atomic, Transform3f·Transform3d·Rotator
+// 미러와 Core 타입의 멤버 대조. 차이 쓰기·override 단위(A5)는 여기서 다루지 않는다.
 using namespace rocks;
 using core_type_bindings::Transform3dBinding;
 using core_type_bindings::Transform3fBinding;
@@ -28,22 +28,57 @@ static_assert(IsSameV<decltype(Transform3dBinding::rotation), decltype(Transform
               "Transform3dBinding::rotation must have the type of Transform3d::rotation");
 static_assert(IsSameV<decltype(Transform3dBinding::scale), decltype(Transform3d::scale)>,
               "Transform3dBinding::scale must have the type of Transform3d::scale");
-static_assert(ROCKS_OFFSET_OF(Transform3f, translation) < ROCKS_OFFSET_OF(Transform3f, rotation) &&
-                  ROCKS_OFFSET_OF(Transform3f, rotation) < ROCKS_OFFSET_OF(Transform3f, scale),
-              "Transform3f members must be declared translation, rotation, scale");
-static_assert(ROCKS_OFFSET_OF(Transform3d, translation) < ROCKS_OFFSET_OF(Transform3d, rotation) &&
-                  ROCKS_OFFSET_OF(Transform3d, rotation) < ROCKS_OFFSET_OF(Transform3d, scale),
-              "Transform3d members must be declared translation, rotation, scale");
-static_assert(ROCKS_OFFSET_OF(Transform3fBinding, translation) <
-                      ROCKS_OFFSET_OF(Transform3fBinding, rotation) &&
-                  ROCKS_OFFSET_OF(Transform3fBinding, rotation) <
+// Transform 세 타입과 미러는 UE TTransform과 같은 rotation·translation·scale 순서다
+// (Core/Math/Transform.h — UE TransformVectorized.h:75-79).
+static_assert(ROCKS_OFFSET_OF(Transform3f, rotation) < ROCKS_OFFSET_OF(Transform3f, translation) &&
+                  ROCKS_OFFSET_OF(Transform3f, translation) < ROCKS_OFFSET_OF(Transform3f, scale),
+              "Transform3f members must be declared rotation, translation, scale like UE");
+static_assert(ROCKS_OFFSET_OF(Transform3d, rotation) < ROCKS_OFFSET_OF(Transform3d, translation) &&
+                  ROCKS_OFFSET_OF(Transform3d, translation) < ROCKS_OFFSET_OF(Transform3d, scale),
+              "Transform3d members must be declared rotation, translation, scale like UE");
+static_assert(ROCKS_OFFSET_OF(Transform, rotation) < ROCKS_OFFSET_OF(Transform, translation) &&
+                  ROCKS_OFFSET_OF(Transform, translation) < ROCKS_OFFSET_OF(Transform, scale),
+              "Transform members must be declared rotation, translation, scale like UE FTransform");
+static_assert(ROCKS_OFFSET_OF(Transform3fBinding, rotation) <
+                      ROCKS_OFFSET_OF(Transform3fBinding, translation) &&
+                  ROCKS_OFFSET_OF(Transform3fBinding, translation) <
                       ROCKS_OFFSET_OF(Transform3fBinding, scale),
               "Transform3fBinding members must follow the Transform3f declaration order");
-static_assert(ROCKS_OFFSET_OF(Transform3dBinding, translation) <
-                      ROCKS_OFFSET_OF(Transform3dBinding, rotation) &&
-                  ROCKS_OFFSET_OF(Transform3dBinding, rotation) <
+static_assert(ROCKS_OFFSET_OF(Transform3dBinding, rotation) <
+                      ROCKS_OFFSET_OF(Transform3dBinding, translation) &&
+                  ROCKS_OFFSET_OF(Transform3dBinding, translation) <
                       ROCKS_OFFSET_OF(Transform3dBinding, scale),
               "Transform3dBinding members must follow the Transform3d declaration order");
+static_assert(ROCKS_OFFSET_OF(core_type_bindings::TransformBinding, rotation) <
+                      ROCKS_OFFSET_OF(core_type_bindings::TransformBinding, translation) &&
+                  ROCKS_OFFSET_OF(core_type_bindings::TransformBinding, translation) <
+                      ROCKS_OFFSET_OF(core_type_bindings::TransformBinding, scale),
+              "TransformBinding members must follow the Transform declaration order");
+// Transform 미러는 UE FTransform과 같이 모든 성분이 double이다.
+static_assert(
+    IsSameV<decltype(core_type_bindings::TransformBinding::rotation),
+            decltype(Transform::rotation)> &&
+        IsSameV<decltype(core_type_bindings::TransformBinding::translation),
+                decltype(Transform::translation)> &&
+        IsSameV<decltype(core_type_bindings::TransformBinding::scale), decltype(Transform::scale)>,
+    "TransformBinding members must have the types of Transform members");
+static_assert(IsSameV<decltype(Transform::rotation), Quatd> &&
+                  IsSameV<decltype(Transform::scale), Vec3d>,
+              "Transform rotation and scale must be double like UE FTransform");
+// Rotator 미러는 UE FRotator와 같은 pitch·yaw·roll(도) 순서다(Core/Math/Rotator.h).
+static_assert(ROCKS_OFFSET_OF(Rotator<float>, pitch) < ROCKS_OFFSET_OF(Rotator<float>, yaw) &&
+                  ROCKS_OFFSET_OF(Rotator<float>, yaw) < ROCKS_OFFSET_OF(Rotator<float>, roll),
+              "Rotator members must be declared pitch, yaw, roll like UE FRotator");
+static_assert(ROCKS_OFFSET_OF(core_type_bindings::RotatorBinding, pitch) <
+                      ROCKS_OFFSET_OF(core_type_bindings::RotatorBinding, yaw) &&
+                  ROCKS_OFFSET_OF(core_type_bindings::RotatorBinding, yaw) <
+                      ROCKS_OFFSET_OF(core_type_bindings::RotatorBinding, roll),
+              "RotatorBinding members must follow the Rotator declaration order");
+static_assert(ROCKS_OFFSET_OF(core_type_bindings::RotatordBinding, pitch) <
+                      ROCKS_OFFSET_OF(core_type_bindings::RotatordBinding, yaw) &&
+                  ROCKS_OFFSET_OF(core_type_bindings::RotatordBinding, yaw) <
+                      ROCKS_OFFSET_OF(core_type_bindings::RotatordBinding, roll),
+              "RotatordBinding members must follow the Rotator declaration order");
 // 생성 특수화는 실제 타입에 있고 멤버 미러(Vec3·Quat 등)를 담아 깊이 2다.
 static_assert(GeneratedType<Transform3f>::Depth == 2 && GeneratedType<Transform3d>::Depth == 2,
               "Transform3 mirrors nest one level of member mirrors");

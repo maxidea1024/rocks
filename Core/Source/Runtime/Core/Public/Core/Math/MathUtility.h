@@ -8,7 +8,11 @@
 namespace rocks::math {
 
 // Core 수학의 scalar 진입점이다. 계산은 CPU별로 선택된 platform::PlatformMath에 위임한다.
-// 좌표·단위 규약: 오른손 좌표계, +X 전방, +Y 왼쪽, +Z 위, 길이는 미터, 각도는 라디안, 시간은 초.
+// 좌표·단위 규약은 UE 5.8과 같다: 왼손 좌표계, +X 전방, +Y 오른쪽, +Z 위(UE Vector.h:84-100),
+// 길이는 cm(UE WorldSettings.h:593-595 WorldToMeters — "1uu = 1cm would be 100.0", 기본값 100은
+// WorldSettings.cpp:127), 시간은 초. 각도 단위는 API마다 다르며 UE와 같게 둔다:
+// Rotator는 도(degree, UE Rotator.h:24), 삼각함수·축-각 quaternion·두 벡터 사이 각은 라디안(UE
+// GenericPlatformMath.h:521-522, Quat.h:912-921). 함수 이름이나 주석에 단위를 적는다.
 // 허용 오차가 필요한 함수는 오차를 호출자가 명시한다. 모든 검사에 쓰는 전역 epsilon은 없다.
 // float/double 외 타입은 지원하지 않는다.
 template <typename T>
@@ -174,8 +178,8 @@ constexpr bool IsNearlyZero(T value, T tolerance) noexcept {
 // ---- 이름 있는 허용 오차 상수(UE UE_SMALL_NUMBER·UE_KINDA_SMALL_NUMBER 대응, 값도 같다) ----
 // 어떤 함수에도 묵시적으로 적용되지 않는다. 비교 함수에 명시적으로 넘겨 의도를 드러낸다:
 //   math::IsNearlyEqual(a, b, math::KindaSmallNumber<float>)
-// 절대 오차이므로 값의 크기에 맞는지 호출자가 판단한다. 예: float 월드 좌표 1e6 m 근처의 간격은
-// 약 0.06 m라 1e-4는 사실상 정확 비교가 되고, 정규화된 값이나 작은 각도에는 너무 클 수 있다.
+// 절대 오차이므로 값의 크기에 맞는지 호출자가 판단한다. 예: float 월드 좌표 1e6 cm(10 km) 근처의
+// 간격은 0.0625 cm라 1e-4는 사실상 정확 비교가 되고, 정규화된 값이나 작은 각도에는 너무 클 수 있다.
 // 크기에 비례하는 비교가 필요하면 IsNearlyEqualRelative 또는 IsNearlyEqualByUlps를 쓴다.
 template <typename T>
     requires IsFloatingPointV<T>
@@ -281,6 +285,40 @@ T Asin(T value) noexcept {
     return platform::PlatformMath::Asin(value);
 }
 
+// UE FMath::FastAsin과 같은 계산의 빠른 asin(라디안)이다(UnrealMathUtility.h:819-854).
+// - float: |value|에 대한 UE의 7차 minimax 다항식 × sqrt(1 - |value|)로 acos(|value|)를 근사한 뒤
+//   asin으로 바꾼다. 계수·상수(π/2 대신 1.5707963050f — FastAsin(0) = 0이 되게 고른 값)와 연산
+//   순서가 UE와 같아 같은 입력에 같은 bit를 낸다. |value| > 1은 1로 자른 것과 같다(±1.5707963050f).
+//   [-1, 1] 절대 오차는 약 2.3e-7 rad(1e-6 간격 전수 측정 최대 2.22e-7)이다. NaN은 NaN이다.
+// - double: UE와 같이 근사 없이 Asin이다.
+// Rotator::TryFromQuaternion의 float 경로가 UE FQuat4f::Rotator와 같은 pitch를 내도록 쓴다. 정확한
+// 값이 필요하면 Asin을 쓴다.
+//   const float radians = math::FastAsin(0.5f); // 0x3f060a92 ≈ 0.523598790
+inline float FastAsin(float value) noexcept {
+    constexpr float FastAsinHalfPi = 1.5707963050f;
+    const bool nonnegative = value >= 0.0f;
+    const float magnitude = Abs(value);
+    float oneMinus = 1.0f - magnitude;
+    if (oneMinus < 0.0f) {
+        oneMinus = 0.0f;
+    }
+
+    const float root = Sqrt(oneMinus);
+    float result = -0.0012624911f * magnitude + 0.0066700901f;
+    result = result * magnitude - 0.0170881256f;
+    result = result * magnitude + 0.0308918810f;
+    result = result * magnitude - 0.0501743046f;
+    result = result * magnitude + 0.0889789874f;
+    result = result * magnitude - 0.2145988016f;
+    result = result * magnitude + FastAsinHalfPi;
+    result *= root; // acos(|value|)
+    return nonnegative ? FastAsinHalfPi - result : result - FastAsinHalfPi;
+}
+
+inline double FastAsin(double value) noexcept {
+    return Asin(value);
+}
+
 template <typename T>
     requires IsFloatingPointV<T>
 T Acos(T value) noexcept {
@@ -357,6 +395,41 @@ template <typename T>
     requires IsFloatingPointV<T>
 T FindDeltaAngleRadians(T fromRadians, T toRadians) noexcept {
     return UnwindRadians(toRadians - fromRadians);
+}
+
+// 도(degree) 각도를 [-180, 180] 구간으로 감는다(UE FMath::UnwindDegrees와 같은 결과,
+// UnrealMathUtility.h:949-964). UE처럼 [-180, 180] 안의 값은 그대로 두고(-180도 그대로), 180보다
+// 크면 (-180, 180]로, -180보다 작으면 [-180, 180)으로 감는다(UE의 ±360 반복 루프와 같은 경계).
+// Rotator::NormalizeAxis((-180, 180])와는 -180을 남기는 점만 다르다. UE와 다른 점: UE 루프는
+// Inf에서 끝나지 않고 큰 값에서 뺄셈 반올림이 쌓인다. Rocks는 Fmod(정확)로 한 번에 감고, 유한하지
+// 않은 입력은 NaN이다.
+//   math::UnwindDegrees(190.0);  // -170
+//   math::UnwindDegrees(-180.0); // -180
+//   math::UnwindDegrees(-540.0); // -180
+//   math::UnwindDegrees(540.0);  // 180
+template <typename T>
+    requires IsFloatingPointV<T>
+T UnwindDegrees(T degrees) noexcept {
+    constexpr T FullTurn = static_cast<T>(360);
+    constexpr T HalfTurn = static_cast<T>(180);
+    T wrapped = Fmod(degrees, FullTurn);
+    if (wrapped > HalfTurn) {
+        wrapped -= FullTurn;
+    } else if (wrapped < -HalfTurn) {
+        wrapped += FullTurn;
+    }
+
+    return wrapped;
+}
+
+// fromDegrees에서 toDegrees로 가는 최소 각 차이(도, [-180, 180])다. UE FindDeltaAngleDegrees
+// (UnrealMathUtility.h:898-913, Wrap(Delta, -180, 180) — :610-634)와 경계 값이 같다: 차이가
+// -180이나 -540처럼 -180 쪽에서 감기면 -180, 540처럼 180 쪽에서 감기면 180이다(UnwindDegrees와
+// 같다).
+template <typename T>
+    requires IsFloatingPointV<T>
+T FindDeltaAngleDegrees(T fromDegrees, T toDegrees) noexcept {
+    return UnwindDegrees(toDegrees - fromDegrees);
 }
 
 // ---- 보간 ----

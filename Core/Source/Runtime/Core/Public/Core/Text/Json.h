@@ -3,6 +3,7 @@
 #include <Core/Containers/Array.h>
 #include <Core/Containers/HashMap.h>
 #include <Core/Containers/Span.h>
+#include <Core/Hash.h>
 #include <Core/Result.h>
 #include <Core/Text/StringBuilder.h>
 #include <Core/Text/StringView.h>
@@ -14,7 +15,8 @@
 // SHA-256이 쿠킹 키에 들어가므로 출력이 결정적이고(CRT·locale·부동소수점 환경 무관, byte 단위 고정
 // 규칙), 사람이 고친 파일을 읽으므로 엄격하고 오류 위치가 정확하다.
 //
-// 읽기 규칙: 입력은 UTF-8. 맨 앞 BOM 하나는 건너뛰고 JsonWarningCode::BomIgnored를 남긴다. 주석·끝
+// 읽기 규칙: 입력은 UTF-8. 맨 앞 BOM 하나는 건너뛰고 JsonWarningCode::BomIgnored를 남긴다.
+// 주석(config 파일 읽기는 줄 주석만 JsonReadOptions::allowLineComments로 받는다)·끝
 // 쉼표·작은따옴표·NaN/Infinity 리터럴·잘못된 UTF-8·짝 없는 surrogate 이스케이프·문자열 안 제어
 // 문자·같은 객체 안 중복 키(이스케이프를 푼 byte 비교)는 오류다. 숫자: 소수부·지수가 없는 토큰은
 // int64, 넘으면 uint64, 그보다 크면 double이고 나머지는 double(정확한 반올림). double로도 표현할 수
@@ -98,13 +100,25 @@ struct JsonWarning {
     JsonPosition position;
 };
 
-// 읽기 한도. 넘으면 해당 오류다. 깊이 한도는 JsonWriter의 기본 깊이 한도와 같다(더 깊게 읽은 문서는
-// 같은 maxDepth를 준 writer로 쓴다).
+// 읽기 한도와 읽기 규칙 옵션. 한도를 넘으면 해당 오류다. 깊이 한도는 JsonWriter의 기본 깊이 한도와
+// 같다(더 깊게 읽은 문서는 같은 maxDepth를 준 writer로 쓴다).
 struct JsonReadOptions {
     uint64 maxInputBytes = 64ull << 20;
     uint32 maxDepth = 128;
     uint64 maxStringBytes = 16ull << 20;
     uint32 maxNodes = 4194304;
+    // 줄 주석을 공백으로 받는다(사람이 고치는 config 파일 전용 — Docs/Design/ConfigSystem.ko.md
+    // 4.1절). 값·키 사이 공백 자리의 `//`부터 줄 끝(LF·CR, 줄바꿈은 남는다) 또는 입력 끝까지를
+    // 건너뛴다. 문자열 안의 `//`는 그대로 문자열이다. 주석 안도 UTF-8이어야 한다(아니면
+    // InvalidUtf8 — 위치는 잘못된 byte). 블록 주석 `/*`, 짝 없는 `/`, 끝 쉼표, 중복 키는 이 옵션과
+    // 무관하게 오류다. 기본은 거짓(엄격 — 쿠킹 manifest·도구 보고서 등)이다. 위치(line·column)는
+    // 주석을 포함한 원문 기준이다.
+    //
+    // 사용 예:
+    //   JsonReadOptions options;
+    //   options.allowLineComments = true;
+    //   document.Parse("{\n  // 그림자 품질\n  \"shadows\": 2\n}", options);
+    bool allowLineComments = false;
 };
 
 class JsonDocument;
@@ -149,6 +163,20 @@ public:
     JsonValue ValueAt(usize index) const noexcept;
     // 객체 멤버 조회(해시). 객체가 아니거나 키가 없으면 무효 값.
     JsonValue Find(StringView key) const noexcept;
+
+    // 이 값이 입력에서 시작하는 위치다(JsonError의 위치와 같은 규칙: 문자열은 여는 '"', 컨테이너는
+    // '{'·'[', 숫자는 부호 또는 첫 숫자, 리터럴은 첫 글자. byteOffset은 건너뛴 BOM을 포함한 입력
+    // byte 위치다). 문법은 맞지만 뜻이 틀린 값(모르는 키·타입 불일치·범위 밖)을 사람이 고치도록
+    // 위치를 보고할 때 쓴다. 객체 멤버는 값의 위치다(키 위치는 따로 없다 — 보통 같은 줄이다).
+    // Parse가 한 번에 계산해 두므로 상수 시간이다. 전제: IsValid()(아니면 Fatal).
+    //
+    // 사용 예:
+    //   const JsonValue scale = document.Root().Find("scale");
+    //   if (scale.IsValid() && !scale.IsNumber()) {
+    //       const JsonPosition at = scale.Position();
+    //       Report(at.line, at.column, "scale must be a number");
+    //   }
+    JsonPosition Position() const noexcept;
 
 private:
     friend class JsonDocument;
@@ -210,7 +238,16 @@ private:
         uint32 value;
     };
 
+    // 노드 시작 위치(nodes_와 같은 순서). 입력 상한이 1 GiB라 uint32로 충분하다.
+    struct NodePosition {
+        uint32 byteOffset;
+        uint32 line;
+        uint32 column;
+    };
+
     // 중복 키 판정과 조회용 색인 키: (객체 노드, text_의 키 범위). 조회는 (객체 노드, StringView).
+    // 키는 입력 파일에서 오므로 seed 해시(SeededHash — 프로세스 seed)로 색인한다(hash flooding
+    // 방어, Docs/Design/ReflectionExtensions.ko.md 10.1절).
     struct MemberKey {
         uint32 object;
         uint32 offset;
@@ -224,6 +261,7 @@ private:
 
     struct MemberHash {
         const Array<char>* text;
+        SeededHash<StringView> bytes;
         uint64 operator()(const MemberKey& key) const noexcept;
         uint64 operator()(const MemberQuery& query) const noexcept;
     };
@@ -237,6 +275,7 @@ private:
     StringView Text(uint32 offset, uint32 length) const noexcept;
 
     Array<Node> nodes_;
+    Array<NodePosition> positions_;
     Array<uint32> elements_;
     Array<Member> members_;
     Array<char> text_;
@@ -257,9 +296,34 @@ enum class JsonNumberMode : uint8 {
     Preserve
 };
 
-// StringBuilder에 JSON을 쓴다. byte 단위 고정 규칙: 들여쓰기 2칸, 줄바꿈 LF, Finish가 끝에 줄바꿈
-// 1개, 키 구분자 ": ", 빈 컨테이너 {}·[], 키 순서는 호출 순서. 문자열은 '"'·'\\'·제어 문자만
-// 이스케이프한다(U+0008·0C·0A·0D·09는 \b\f\n\r\t, 그 밖 제어 문자는 소문자 \u00xx). 그 밖의
+// JsonWriter의 쓰기 옵션이다.
+// - mode·maxDepth: 숫자 쓰기 방식과 최대 중첩 깊이(JsonReadOptions::maxDepth와 같은 기본값)
+// - compact: 한 줄로 쓴다. 들여쓰기·줄바꿈이 없고 키 구분자는 ":"이다(JSON lines 출력).
+//   Finish의 끝 줄바꿈은 그대로 쓴다.
+// - fixedFrames: 컨테이너 중첩 상태를 writer 안의 고정 배열(JsonWriter::FixedFrameCapacity칸)에
+//   둔다. 할당하지 않는 대신 깊이가 그 수로 제한된다(maxDepth와 둘 중 작은 값).
+// - detectDuplicateKeys: 같은 객체의 중복 키를 거부한다(색인 HashMap을 할당한다). 끄면 확인하지
+//   않으므로 호출자가 키가 겹치지 않음을 보장한다(로그 속성 이름은 템플릿 검증이 막는다).
+// fixedFrames·detectDuplicateKeys 끔이고 출력 builder가 할당하지 않으면(FixedStringBuilder)
+// String·Key·숫자·컨테이너 쓰기는 할당하지 않는다. Value(문서 값 복사)는 여전히 할당할 수 있다.
+//
+// 사용 예:
+//   JsonWriterOptions options;
+//   options.compact = true;
+//   options.fixedFrames = true;
+//   options.detectDuplicateKeys = false;
+//   JsonWriter writer(line, options);
+struct JsonWriterOptions {
+    JsonNumberMode mode = JsonNumberMode::Canonical;
+    uint32 maxDepth = 128;
+    bool compact = false;
+    bool fixedFrames = false;
+    bool detectDuplicateKeys = true;
+};
+
+// StringBuilder에 JSON을 쓴다. byte 단위 고정 규칙(기본 옵션): 들여쓰기 2칸, 줄바꿈 LF, Finish가
+// 끝에 줄바꿈 1개, 키 구분자 ": ", 빈 컨테이너 {}·[], 키 순서는 호출 순서. 문자열은 '"'·'\\'·제어
+// 문자만 이스케이프한다(U+0008·0C·0A·0D·09는 \b\f\n\r\t, 그 밖 제어 문자는 소문자 \u00xx). 그 밖의
 // 문자('/'·U+007F·U+2028 포함)는 UTF-8 그대로이며 입력 문자열의 UTF-8을 검증한다. BOM은 쓰지
 // 않는다. 입력 문자열이 out의 View()여도 된다. 들여쓰기 때문에 출력 크기는 중첩 깊이의 제곱에
 // 비례한다(깊이 D인 사슬은 약 2·D² byte) — 아주 깊은 문서는 maxDepth를 올려도 출력이 커진다.
@@ -274,6 +338,11 @@ public:
     // 있다).
     explicit JsonWriter(StringBuilderBase& out, JsonNumberMode mode = JsonNumberMode::Canonical,
                         uint32 maxDepth = 128) noexcept;
+    // 옵션을 함께 받는다(JsonWriterOptions 참고).
+    JsonWriter(StringBuilderBase& out, const JsonWriterOptions& options) noexcept;
+
+    // fixedFrames 옵션의 고정 중첩 칸 수다.
+    static constexpr uint32 FixedFrameCapacity = 32;
     JsonWriter(const JsonWriter&) = delete;
     JsonWriter& operator=(const JsonWriter&) = delete;
 
@@ -287,6 +356,16 @@ public:
     Result<void> Int64(int64 value) noexcept;
     Result<void> UInt64(uint64 value) noexcept;
     Result<void> Double(double value) noexcept;
+    // float 값을 단정도 최단 왕복 표기로 쓴다(0.1f는 "0.1" — Double(0.1f)는 넓힌 double의
+    // "0.10000000149011612"다). 고정 소수점·과학 표기 경계와 ".0" 규칙은 Double과 같다(Canonical,
+    // 1.0f는 "1.0", -0.0f는 "-0.0"). 다시 읽은 문서에서 같은 float를 얻으려면 TryGetDouble로
+    // double을 거치지 말고 RawNumber()를 TryParseFloat(NumberText.h)로 읽는다(이중 반올림을
+    // 피한다). NaN·Inf는 InvalidArgument다. 숫자 모드(Preserve)와 무관하게 이 표기를 쓴다.
+    //
+    // 사용 예:
+    //   writer.Key("gamma") && writer.Float(2.2f);   // "gamma": 2.2
+    //   // 읽기: TryParseFloat(document.Root().Find("gamma").RawNumber()) == 2.2f
+    Result<void> Float(float value) noexcept;
     Result<void> String(StringView value) noexcept;
     // 문서 값을 통째로 쓴다(Preserve면 원문 숫자 토큰). 재귀하지 않는다.
     Result<void> Value(JsonValue value) noexcept;
@@ -308,8 +387,10 @@ private:
         usize length;
     };
 
+    // 쓴 키도 입력 문서에서 옮겨 온 것일 수 있어(Value) 문서 색인과 같은 seed 해시를 쓴다.
     struct WrittenKeyHash {
         const StringBuilderBase* out;
+        SeededHash<StringView> bytes;
         uint64 operator()(const WrittenKey& key) const noexcept;
     };
 
@@ -323,14 +404,26 @@ private:
     Result<void> BeginContainer(bool object) noexcept;
     Result<void> EndContainer(bool object) noexcept;
     Result<void> WriteNumber(JsonValue value) noexcept;
+    Result<void> FinishFloatingPoint(usize start) noexcept;
     Result<void> WriteEscaped(StringView text) noexcept;
     Result<void> WriteIndent(usize depth) noexcept;
     Result<void> Fail(ErrorCode code) noexcept;
     Result<void> Check(Result<void> result) noexcept;
 
+    // 중첩 상태 접근(고정 배열 또는 Array)이다.
+    usize FrameCount() const noexcept;
+    Frame& TopFrame() noexcept;
+    bool PushFrame(Frame frame) noexcept;
+    void PopFrame() noexcept;
+
     StringBuilderBase* out_;
     JsonNumberMode mode_;
     uint32 maxDepth_;
+    bool compact_ = false;
+    bool fixedFrames_ = false;
+    bool detectDuplicateKeys_ = true;
+    uint32 fixedCount_ = 0;
+    Frame fixed_[FixedFrameCapacity]{};
     Array<Frame> frames_;
     HashMap<WrittenKey, uint8, WrittenKeyHash, WrittenKeyEqual> keys_;
     uint32 nextSerial_ = 0;

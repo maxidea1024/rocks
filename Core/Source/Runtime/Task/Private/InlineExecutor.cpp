@@ -1,5 +1,6 @@
 #include <Task/TaskScheduler.h>
 #include <Platform/Clock.h>
+#include <TraceCapture/TraceTask.h>
 
 namespace rocks {
 
@@ -111,13 +112,24 @@ Result<TaskHandle> InlineExecutor::Submit(TaskDesc&& description) noexcept {
                                                    TaskState::Succeeded, ErrorCode::None);
     Function<void(TaskContext&)> body(Move(description.body));
     TaskContext context;
-    body(context);
+    // task 채널이 꺼져 있으면 분기 하나다. 켜져 있으면 만듦·실행 가능·시작·끝·완료를 남긴다(동기
+    // 실행이라 한 스레드에서 차례로 일어난다).
+    TraceTaskInfo trace;
+    if (!TraceTaskChannel.IsEnabled()) {
+        body(context);
+    } else {
+        trace = TraceCreateTask();
+        TraceTaskReady(trace.id);
+        TraceTaskScope traced(trace);
+        body(context);
+    }
     // 캡처 정리는 lock 없이 즉시 수행하며 executor가 별도 할당을 요구하지 않는다.
     // 사용자 소멸자의 재진입이 끝난 뒤 완료 상태를 공개하므로 handle 수명이
     // 캡처 자원의 수명을 연장하지 않는다. 사용자 정리 코드는 noexcept여야 한다.
     body.Reset();
     record->error = context.Error();
     record->state = context.Error() == ErrorCode::None ? TaskState::Succeeded : TaskState::Failed;
+    TraceTaskCompleted(trace.id, context.Error());
     return Result<TaskHandle>::Success(TaskHandle(record));
 }
 

@@ -204,6 +204,7 @@ public static partial class PolicyChecks
     /// <item>Core/Source/Runtime/PlatformBase/Private/{Win64,Mac,Posix,Apple,Android}/</item>
     /// <item>Core/Source/Developer/TestSupport/Private/{Win64,Mac,Posix,Apple,Android}/</item>
     /// <item>Programs/Commandlet/Private/Win64/</item>
+    /// <item>Programs/ShaderToolSpike/Private/Win64/: SH0 도구 스파이크의 DXC COM·D3D12·WGL 측정 코드.</item>
     /// <item>Engine/Source/{Runtime,Developer}/&lt;Module&gt;/Private/{Win64,Mac,Posix,Apple,Android}/: 창·그래픽
     /// backend처럼 OS SDK를 직접 쓰는 엔진 모듈 구현. 공개 헤더(Public/)와 공통 구현은 여전히 금지다.</item>
     /// </list>
@@ -211,7 +212,7 @@ public static partial class PolicyChecks
     public static bool IsNativeBackend(string relative)
     {
         string[] parts = relative.Replace('\\', '/').Split('/');
-        if (parts.Length >= 5 && parts[0] == "Programs" && parts[1] == "Commandlet" && parts[2] == "Private")
+        if (parts.Length >= 5 && parts[0] == "Programs" && parts[1] is "Commandlet" or "ShaderToolSpike" && parts[2] == "Private")
         {
             return parts[3] == "Win64";
         }
@@ -324,7 +325,16 @@ public static partial class PolicyChecks
         return failures;
     }
 
-    /// <summary>새 MSBuild/CLI/workflow/launcher만 검사한다. 보존된 .py와 시험 fixture는 실행 경로가 아니다.</summary>
+    /// <summary>
+    /// 오프라인 도구 빌드 workflow다. 기본 빌드·시험 경로가 아니며 업스트림 빌드(DXC·SPIRV-Tools)가 Python으로 표를 생성하므로
+    /// <see cref="PythonFreeMainPath"/>에서 이 파일 하나만 명시 제외한다(Docs/Design/ShaderSystem.ko.md 8절 4항).
+    /// </summary>
+    public const string ThirdPartyToolsWorkflow = ".github/workflows/third-party-tools.yml";
+
+    /// <summary>
+    /// 새 MSBuild/CLI/workflow/launcher만 검사한다. 보존된 .py와 시험 fixture는 실행 경로가 아니다. 오프라인 도구 빌드 workflow
+    /// (<see cref="ThirdPartyToolsWorkflow"/>)만 명시 제외한다.
+    /// </summary>
     public static IReadOnlyList<CheckFailure> PythonFreeMainPath(string root)
     {
         List<CheckFailure> failures = [];
@@ -332,7 +342,8 @@ public static partial class PolicyChecks
         {
             string relative = Relative(root, path);
             if (relative.StartsWith("Programs/Rocks.ToolTests/", StringComparison.Ordinal) ||
-                relative.StartsWith("Programs/Rocks.Tooling.Checks/", StringComparison.Ordinal))
+                relative.StartsWith("Programs/Rocks.Tooling.Checks/", StringComparison.Ordinal) ||
+                relative == ThirdPartyToolsWorkflow)
             {
                 continue;
             }
@@ -383,19 +394,16 @@ public static partial class PolicyChecks
     /// </summary>
     internal static IReadOnlyList<string> UpstreamDirectories(string root)
     {
-        string thirdParty = Path.Combine(Path.GetFullPath(root), ThirdPartyManifest.ThirdPartyRoot);
-        if (!Directory.Exists(thirdParty))
-        {
-            return [];
-        }
-
         List<string> directories = [];
-        foreach (string library in Directory.EnumerateDirectories(thirdParty).Order(StringComparer.Ordinal))
+        foreach (string library in ThirdPartyManifest.LibraryDirectories(root))
         {
             try
             {
                 ThirdPartyManifest manifest = ThirdPartyManifest.Read(library);
-                directories.Add($"{ThirdPartyManifest.ThirdPartyRoot}/{Path.GetFileName(library)}/{manifest.UpstreamDirectory}/");
+                if (manifest.HasUpstream)
+                {
+                    directories.Add($"{Relative(Path.GetFullPath(root), library)}/{manifest.UpstreamDirectory}/");
+                }
             }
             catch (FormatException)
             {

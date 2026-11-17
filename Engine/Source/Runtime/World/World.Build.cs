@@ -1,15 +1,15 @@
 using Rocks.Build.Rules;
 
-// World·Actor·Component·SceneComponent·TickScheduler·WorldSubsystem. Engine·Graphics·창 모듈을 참조하지
-// 않는다(엔진 실행과 렌더 연결은 상위 모듈이 맡는다). Level·Actor·Component·SceneComponent는 WorldOnly
-// 리플렉션 클래스다(Docs/Design/ReflectionFoundations.ko.md 9.1절) — 생성 헤더는 <World/<Type>.generated.h>,
-// 집계 등록은 <World/World.module.generated.h>의 rocks::generated::World::RegisterModuleTypes(RegisterWorldTypes가
-// 부른다)이고, identity 명세는 World.rocksids.json이다.
+// World, Actor, Component, SceneComponent, TickScheduler and WorldSubsystem. Does not reference Engine, Graphics or window
+// modules (higher modules handle engine execution and render wiring). Level, Actor, Component and SceneComponent are WorldOnly
+// reflection classes (Docs/Design/ReflectionFoundations.ko.md section 9.1); generated headers are <World/<Type>.generated.h>,
+// aggregate registration is rocks::generated::World::RegisterModuleTypes in <World/World.module.generated.h> (called by
+// RegisterWorldTypes), and the identity spec is World.rocksids.json.
 public sealed class World : EngineModuleRules
 {
     protected override string ModuleName => "World";
 
-    // CoreTypeBindings: SceneComponent의 Transform 필드가 그 모듈의 Binds 미러를 import한다.
+    // CoreTypeBindings: SceneComponent's Transform field imports that module's Binds mirror.
     protected override string[] RequiredModules => ["ObjectRuntime", "CoreTypeBindings"];
 
     protected override IReadOnlyList<string> Metadata =>

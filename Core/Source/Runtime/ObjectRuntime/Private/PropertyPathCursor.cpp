@@ -7,13 +7,41 @@
 namespace rocks::detail {
 
 PathCursor::PathCursor(ObjectRegistry& registry, const ObjectAccessContext& access,
-                       ObjectHandle owner, PathOperation operation, const FieldValue* input,
+                       const PathTarget& target, PathOperation operation, const FieldValue* input,
                        FieldValue* output, PropertyPathFailure* failure) noexcept
-    : registry_(registry), access_(access), owner_(owner), operation_(operation), input_(input),
-      output_(output), failure_(failure) {
+    : registry_(registry), access_(access), owner_(target.Object()), root_(target.GetKind()),
+      construction_(target.Transaction()), rootLease_(target.Lease()), rootView_(target.View()),
+      rootValue_(target.Storage()), rootAllocator_(target.ValueAllocator()), rootBox_(target.Box()),
+      stage_(target.References()), added_(target.AddedElements()), operation_(operation),
+      input_(input), output_(output), failure_(failure) {
     if (failure_) {
         *failure_ = {};
     }
+}
+
+bool PathCursor::AcceptsReadOnlyWrites() const noexcept {
+    return root_ == PathTarget::Kind::Staged ||
+           (root_ == PathTarget::Kind::Detached && rootBox_->acceptsReadOnly_);
+}
+
+Allocator& PathCursor::ValueAllocator() const noexcept {
+    if (root_ == PathTarget::Kind::Struct) {
+        return *rootAllocator_;
+    }
+
+    if (root_ == PathTarget::Kind::Detached) {
+        return rootBox_->GetAllocator();
+    }
+
+    return registry_.ObjectAllocator();
+}
+
+Result<void> PathCursor::RequireLive() noexcept {
+    if (!IsLive()) {
+        return Fail(ErrorCode::Unsupported, PropertyPathError::NoPathAccess);
+    }
+
+    return Result<void>::Success();
 }
 
 void PathCursor::Record(ErrorCode code, PropertyPathError reason) noexcept {
@@ -68,8 +96,7 @@ Result<Object*> PathCursor::Owner(const void* ownerNative) noexcept {
 Result<void> PathCursor::CheckTarget(ValueKind target, ValueKind wrapper) noexcept {
     const FieldSchema& field = *Frame().field;
     const ValueKind kind = field.value.kind;
-    const bool wrapped = kind == ValueKind::Array || kind == ValueKind::Optional ||
-                         kind == ValueKind::Map || kind == ValueKind::Set;
+    const bool wrapped = ValueKindIsContainer(kind);
     const bool matches = wrapper == ValueKind::Opaque ? !wrapped : kind == wrapper;
     if (FieldTargetType(field).kind != target || !matches) {
         return Fail(ErrorCode::TypeMismatch, PropertyPathError::StaticTypeMismatch);
@@ -121,7 +148,7 @@ Result<void> PathCursor::CheckWeakTarget(const void* staticNative) noexcept {
     return Result<void>::Success();
 }
 
-Result<void> PathCursor::CheckClassTarget(const void* staticNative) noexcept {
+Result<void> PathCursor::CheckClassTarget(const void* staticNative, TypeId current) noexcept {
     // 검증 지점(6단계)이 non-null 값의 클래스 lease를 쥐었다(등록·스키마 Base 파생 검사 포함).
     if (!input_ || input_->guid == Guid{}) {
         return Result<void>::Success();
@@ -129,6 +156,11 @@ Result<void> PathCursor::CheckClassTarget(const void* staticNative) noexcept {
 
     if (!referencedType_.IsValid() || !referencedType_.IsNativeA(staticNative)) {
         return Fail(ErrorCode::TypeMismatch, PropertyPathError::StaticTypeMismatch);
+    }
+
+    // Deprecated 클래스는 지금 값과 같은 재기록만 받는다(리플렉션 B9h2).
+    if (HasFlag(referencedType_.Schema().flags, TypeFlags::Deprecated) && input_->guid != current) {
+        return Fail(ErrorCode::InvalidArgument, PropertyPathError::InvalidValue);
     }
 
     return Result<void>::Success();
@@ -144,6 +176,15 @@ Result<void> PathCursor::CheckStruct(const void* nativeType) noexcept {
 }
 
 Result<void> PathCursor::CheckMemberOwner(const void* structNative) noexcept {
+    // struct 값에서 시작한 경로의 첫 단계는 그 struct의 멤버다.
+    if (current_ == 0 && root_ == PathTarget::Kind::Struct) {
+        if (rootView_.IsEmpty() || rootView_.StructOps().nativeType != structNative) {
+            return Fail(ErrorCode::TypeMismatch, PropertyPathError::StaticTypeMismatch);
+        }
+
+        return Result<void>::Success();
+    }
+
     if (current_ == 0 || frames_[current_ - 1].target.IsEmpty() ||
         frames_[current_ - 1].target.StructOps().nativeType != structNative) {
         return Fail(ErrorCode::TypeMismatch, PropertyPathError::StaticTypeMismatch);
@@ -198,7 +239,9 @@ Result<void> PathCursor::CheckLength(usize newLength) noexcept {
 }
 
 Result<void> PathCursor::Pin() noexcept {
-    if (pin_.IsValid()) {
+    // staged 객체는 그 트랜잭션의 소유 스레드만 보고 encode 대상이 아니며, 분리된 값은 호출자가
+    // 소유한다 — 고정할 것이 없다(리플렉션 B9i3c0).
+    if (pin_.IsValid() || !IsLive()) {
         return Result<void>::Success();
     }
 
@@ -212,6 +255,10 @@ Result<void> PathCursor::Pin() noexcept {
 }
 
 Result<void> PathCursor::CheckOwner() noexcept {
+    if (!IsLive()) {
+        return Result<void>::Success();
+    }
+
     auto alive = borrow_.Get();
     if (!alive) {
         return Fail(alive.Error());
@@ -227,6 +274,18 @@ Result<void> PathCursor::PublishRead(FieldValue& value) noexcept {
 
     pin_.Reset();
     *output_ = Move(value);
+    return Result<void>::Success();
+}
+
+Result<void> PathCursor::PublishKeys(Array<FieldValue>& keys) noexcept {
+    if (auto alive = CheckOwner(); !alive) {
+        return alive;
+    }
+
+    pin_.Reset();
+    // 옛 원소는 이 함수를 나갈 때(고정 밖) 반환한다.
+    Array<FieldValue> previous(Move(*keys_));
+    *keys_ = Move(keys);
     return Result<void>::Success();
 }
 

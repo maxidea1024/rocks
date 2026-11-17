@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" width="960" height="420" role="img" aria-labelledby="title desc">
+<title id="title">텍스처 스트리밍의 두 층</title>
+<desc id="desc">상주 계획은 사용 기록과 관찰 지점으로 필요한 mip을 계산하고 예산에 맞춰 요청을 낸다. mip 전송은 승인, 할당, 읽기, 검증, 기록, 게시, 정리 순서로 실행하고 완료를 통지로 돌려준다.</desc>
+<style>
+text{font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;fill:#183142}.title{font-size:22px;font-weight:700}.head{font-size:13px;font-weight:700}.small{font-size:12px;fill:#405869}.lane{font-size:15px;font-weight:700;fill:#2f4c60}
+.plan{fill:#e4f4ec;stroke:#69a789}.xfer{fill:#fff5df;stroke:#e1ba63}.io{fill:#e6f2fa;stroke:#6c9ab7}.band{fill:#fafcfd;stroke:#e1e8ed}.arrow{stroke:#5c7385;stroke-width:2;fill:none;marker-end:url(#a)}.dash{stroke:#5c7385;stroke-width:2;fill:none;stroke-dasharray:6 4;marker-end:url(#a)}
+</style>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5c7385"/></marker></defs>
+<rect width="960" height="420" fill="#fff"/>
+<text x="24" y="34" class="title">텍스처 스트리밍: 상주 계획과 mip 전송</text>
+<text x="24" y="58" class="small">화면 마일스톤 뒤에 구현한다(TS1–TS4). 그 전에는 상주 꼬리(가장 작은 mip 7개 이상)와 전체 상주만 쓴다.</text>
+
+<rect class="band" x="16" y="72" width="928" height="132" rx="8"/><text x="28" y="96" class="lane">상주 계획 (게임 쪽 worker, CPU 전용, 결정적)</text>
+<g transform="translate(28 108)"><rect class="plan" width="200" height="84" rx="8"/><text x="12" y="24" class="head">입력 snapshot</text><text x="12" y="46" class="small">사용 기록(bounds·texel 계수)</text><text x="12" y="66" class="small">관찰 지점·확정 보임 신호</text></g>
+<g transform="translate(246 108)"><rect class="plan" width="200" height="84" rx="8"/><text x="12" y="24" class="head">필요 mip</text><text x="12" y="46" class="small">texel × 화면 크기 ÷ 거리</text><text x="12" y="66" class="small">→ ceil(1+log2) · 허용 범위</text></g>
+<g transform="translate(464 108)"><rect class="plan" width="210" height="84" rx="8"/><text x="12" y="24" class="head">예산 배분</text><text x="12" y="46" class="small">상주 풀·pin·전환 여유분</text><text x="12" y="66" class="small">우선순위로 깎고 상주는 유지</text></g>
+<g transform="translate(692 108)"><rect class="plan" width="240" height="84" rx="8"/><text x="12" y="24" class="head">요청 목록</text><text x="12" y="46" class="small">텍스처당 전송 1개, 내림 먼저</text><text x="12" y="66" class="small">→ 프레임 packet으로 넘김</text></g>
+<path class="arrow" d="M228 150 H244"/><path class="arrow" d="M446 150 H462"/><path class="arrow" d="M674 150 H690"/>
+
+<rect class="band" x="16" y="214" width="928" height="132" rx="8"/><text x="28" y="238" class="lane">mip 전송 (렌더 lane + IO 완료 worker)</text>
+<g transform="translate(28 250)">
+<rect class="xfer" width="110" height="76" rx="6"/><text x="10" y="24" class="head">1 승인</text><text x="10" y="46" class="small">임시 peak·</text><text x="10" y="64" class="small">staging 예산</text>
+<rect class="xfer" x="122" width="110" height="76" rx="6"/><text x="132" y="24" class="head">2 할당</text><text x="132" y="46" class="small">새 mip 수의</text><text x="132" y="64" class="small">텍스처</text>
+<rect class="io" x="244" width="110" height="76" rx="6"/><text x="254" y="24" class="head">3 읽기</text><text x="254" y="46" class="small">덩어리 →</text><text x="254" y="64" class="small">staging</text>
+<rect class="io" x="366" width="110" height="76" rx="6"/><text x="376" y="24" class="head">4 검증</text><text x="376" y="46" class="small">크기·hash</text><text x="376" y="64" class="small">CorruptEntry</text>
+<rect class="xfer" x="488" width="120" height="76" rx="6"/><text x="498" y="24" class="head">5 기록</text><text x="498" y="46" class="small">공유 mip 복사</text><text x="498" y="64" class="small">새 mip 업로드</text>
+<rect class="xfer" x="620" width="140" height="76" rx="6"/><text x="630" y="24" class="head">6 게시</text><text x="630" y="46" class="small">프레임 경계 snapshot</text><text x="630" y="64" class="small">구 텍스처 Retire</text>
+<rect class="xfer" x="772" width="132" height="76" rx="6"/><text x="782" y="24" class="head">7 정리</text><text x="782" y="46" class="small">fence 뒤 반환</text><text x="782" y="64" class="small">완료 통지</text>
+<path class="arrow" d="M110 38 H120"/><path class="arrow" d="M232 38 H242"/><path class="arrow" d="M354 38 H364"/><path class="arrow" d="M476 38 H486"/><path class="arrow" d="M608 38 H618"/><path class="arrow" d="M760 38 H770"/>
+</g>
+<path class="arrow" d="M812 192 V248"/>
+<text x="24" y="372" class="small">요청은 (asset revision, device generation, 요청 generation)으로 식별하고, 늦게 온 결과는 대조해 버린다. 재임포트·장치 교체로 생긴 취소는 절대 게시하지 않는다.</text>
+<text x="24" y="394" class="small">그리기는 논리 handle만 들고, 그래프를 만들 때 그 프레임 snapshot으로 물리 텍스처를 찾는다. descriptor를 제자리에서 덮어쓰지 않는다.</text>
+</svg>

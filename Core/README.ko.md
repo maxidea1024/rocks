@@ -15,5 +15,7 @@
 | Localization | Core | 지역화 Text·catalog |
 | ObjectRuntime | MetaSchema, Task | Object·Registry·GC·Reflection |
 | ObjectSerialization | ObjectRuntime, Serialization | 객체 그래프 직렬화 |
+| ReflectionText | ObjectRuntime, Core | 리플렉션 값의 명령행·JSON 표기와 대입 묶음 |
+| Config | ReflectionText, ObjectRuntime, Core | 설정 계층(층·출처 스택·설정 struct·배열 연산)과 콘솔 설정 |
 
-`Source/Developer/TestSupport/`는 테스트 지원 코드다. 테스트 실행 파일은 `Programs/FoundationTests`다.
+`Source/Developer/TestSupport/`는 테스트 지원 코드다. `Source/Developer/ReflectionTestFixtures/`·`ConfigTestFixtures/`는 시험용 리플렉션 fixture다. 테스트 실행 파일은 `Programs/FoundationTests`다.

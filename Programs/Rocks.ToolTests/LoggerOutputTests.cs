@@ -39,7 +39,7 @@ internal static class LoggerOutputTests
                 Task copy = process.StandardError.BaseStream.CopyToAsync(bytes);
                 await Task.WhenAll(copy, process.WaitForExitAsync()).WaitAsync(TimeSpan.FromSeconds(20));
                 Verify.Equal(0, process.ExitCode, "stderr probe exit");
-                string expected = "[Warning][27] 한\0X" + (OperatingSystem.IsWindows() ? "\r\n" : "\n");
+                string expected = "[Warning][Tests.Logger] 한\0X" + (OperatingSystem.IsWindows() ? "\r\n" : "\n");
                 Verify.That(bytes.ToArray().SequenceEqual(Encoding.UTF8.GetBytes(expected)),
                     "stderr byte contents differ: " + Convert.ToHexString(bytes.ToArray()));
             }
@@ -52,6 +52,48 @@ internal static class LoggerOutputTests
                 }
             }
         });
+        // Log::Fatal·assert는 비상 출력(stderr 직접 쓰기)과 설치된 LogSystem의 sink 출력으로 같은 줄을 두 번
+        // 남기고 비정상 종료한다(설계 11절). 재귀 Fatal은 바로 종료한다.
+        foreach ((string control, string line, int occurrences) in new[] {
+            ("log-fatal-sync", "[Fatal][Tests.Fatal] fatal probe 42", 2),
+            ("log-fatal-async", "[Fatal][Tests.Fatal] fatal probe 42", 2),
+            ("log-assert", "[Fatal][Assert] Rocks invariant failed: value == 2", 2),
+            ("log-fatal-recursive", "Recursive fatal error while reporting a fatal log record", 1) })
+        {
+            suite.Add("Native.Logger.Fatal." + control, async () =>
+            {
+                var start = StartInfo();
+                start.ArgumentList.Add("--negative-control");
+                start.ArgumentList.Add(control);
+                using var process = Process.Start(start) ?? throw new InvalidOperationException("Cannot start fatal probe");
+                using var bytes = new MemoryStream();
+                try
+                {
+                    process.StandardInput.Close();
+                    Task copy = process.StandardError.BaseStream.CopyToAsync(bytes);
+                    await Task.WhenAll(copy, process.WaitForExitAsync()).WaitAsync(TimeSpan.FromSeconds(60));
+                    string text = Encoding.UTF8.GetString(bytes.ToArray());
+                    Verify.That(process.ExitCode != 0, control + " did not terminate abnormally");
+                    int count = 0;
+                    for (int index = text.IndexOf(line, StringComparison.Ordinal); index >= 0;
+                        index = text.IndexOf(line, index + line.Length, StringComparison.Ordinal))
+                    {
+                        ++count;
+                    }
+
+                    Verify.Equal(occurrences, count, control + " output: " + text);
+                }
+                finally
+                {
+                    if (!process.HasExited)
+                    {
+                        process.Kill(entireProcessTree: true);
+                        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                    }
+                }
+            });
+        }
+
         suite.Add("Native.Logger.StderrFailure", async () =>
         {
             var start = StartInfo();

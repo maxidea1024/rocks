@@ -1,0 +1,79 @@
+name: Third-party tools
+# Offline tool build of prebuilt binaries (manifest kind: binary) (Docs/Design/ShaderSystem.ko.md section 8, item 4).
+# Runs manually only. For each library the scripts in Engine/Source/ThirdParty/<Lib>/Build/ produce Windows x64 and macOS arm64 archives, and
+# when publish is true they are uploaded as assets to the manifest's Release tag (third-party-<name>-<version>-r<revision>). After upload, each archive's
+# <asset>.host.json is copied into the manifest hosts and committed (bootstrap verifies that SHA-256).
+# This workflow is not the default build and test path. The upstream build generates tables with Python, so Python is installed, and the policy check
+# python-main-path explicitly excludes only this file. Engine build and test and Foundation CI run without Python.
+on:
+  workflow_dispatch:
+    inputs:
+      library:
+        description: Library folder name to build (DirectXShaderCompiler, SpirvCross, SpirvTools)
+        required: true
+        type: choice
+        options: [DirectXShaderCompiler, SpirvCross, SpirvTools]
+      publish:
+        description: Upload as assets to the Release
+        required: true
+        type: boolean
+        default: false
+permissions:
+  contents: write
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            host: windows-x64
+          - os: macos-15
+            host: macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install Ninja (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./Engine/Source/ThirdParty/${{ inputs.library }}/Build/Build.ps1 -WorkDirectory "${{ runner.temp }}\rtb" -OutputDirectory "${{ runner.temp }}\archives"
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: sh ./Engine/Source/ThirdParty/${{ inputs.library }}/Build/Build.sh "${{ runner.temp }}/rtb" "${{ runner.temp }}/archives"
+      - name: Keep archives
+        uses: actions/upload-artifact@v7
+        with:
+          name: third-party-${{ inputs.library }}-${{ matrix.host }}
+          path: ${{ runner.temp }}/archives/*
+  publish:
+    # Upload once after both host archives are built (so Release creation does not overlap).
+    if: inputs.publish
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: third-party-${{ inputs.library }}-*
+          path: archives
+          merge-multiple: true
+      - name: Publish release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $manifest = Get-Content -Raw "Engine/Source/ThirdParty/${{ inputs.library }}/ThirdParty.json" | ConvertFrom-Json
+          $tag = "third-party-$($manifest.name)-$($manifest.version)-r$($manifest.build.revision)"
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title $tag --notes "Rocks offline tool build: $($manifest.name) $($manifest.version) ($($manifest.build.tag), revision $($manifest.build.revision))."
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          gh release upload $tag --repo $env:GITHUB_REPOSITORY (Get-ChildItem archives -Filter *.tar.gz).FullName
+          exit $LASTEXITCODE

@@ -1,0 +1,52 @@
+{
+  "schema": 1,
+  "name": "SPIRV-Reflect",
+  "version": "1.4.363.0",
+  "upstreamDirectory": "spirv-reflect-1.4.363.0",
+  "source": {
+    "url": "https://github.com/KhronosGroup/SPIRV-Reflect/archive/refs/tags/vulkan-sdk-1.4.363.0.tar.gz",
+    "sha256": "e0b2914648ab2eac1c83851911199e73f868d966e183531e4c227a258ea07bc6",
+    "verification": "The archive of GitHub tag vulkan-sdk-1.4.363.0 (commit f3e261fda74ca81b44d1941931c6b7b5fe236d0e) was downloaded on 2026-11-16 and its SHA-256 recorded. Upstream publishes no signatures or hashes, so it is pinned by the tag commit and the archive hash."
+  },
+  "licenses": [
+    {
+      "spdx": "Apache-2.0",
+      "upstreamExpression": "Apache-2.0",
+      "file": "spirv-reflect-1.4.363.0/LICENSE",
+      "binaryNoticeRequired": true
+    },
+    {
+      "spdx": "MIT",
+      "upstreamExpression": "MIT (spirv.h header comment, Khronos SPIR-V headers)",
+      "file": "spirv-reflect-1.4.363.0/include/spirv/unified1/spirv.h",
+      "binaryNoticeRequired": false
+    }
+  ],
+  "translationUnits": [
+    "spirv-reflect-1.4.363.0/spirv_reflect.c"
+  ],
+  "includeDirectories": [
+    "spirv-reflect-1.4.363.0"
+  ],
+  "defines": [],
+  "platformDefines": {},
+  "consumerDefines": [
+    "SPIRV_REFLECT_DISABLE_CPP_BINDINGS"
+  ],
+  "adapterHeaders": [
+    "spirv-reflect-1.4.363.0/include/spirv/unified1/spirv.h",
+    "spirv-reflect-1.4.363.0/spirv_reflect.h"
+  ],
+  "files": {
+    "LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "include/spirv/unified1/spirv.h": "4b8d9ce80915feecf75a7d0a3a9527693a091f340ea5b7f70c89353254b7c2ca",
+    "spirv_reflect.c": "930da6e9f5c7c7bf2bcabc1ed9d81527ab8280789424c6df4c7d53d7c2630657",
+    "spirv_reflect.h": "dc12e81a53cfae4bf07765ee03e4ee8ca04ee447a9b5a5ff010ffcd5f8d03256"
+  },
+  "pragmaDirectives": [],
+  "notes": [
+    "Pinned to the Vulkan SDK 1.4.363.0 tag (the same SDK tag as the DXC v1.9.2609 submodules, same as Vulkan-Headers).",
+    "Only the single C translation unit spirv_reflect.c, its header and the bundled spirv.h are kept. The C++ wrapper (spirv_reflect.cpp), examples, tests and tools are not included.",
+    "SPIRV_REFLECT_DISABLE_CPP_BINDINGS: the C++ wrapper in spirv_reflect.h includes the STL (<string>, <vector>), so C++ consumer modules use only the C API."
+  ]
+}

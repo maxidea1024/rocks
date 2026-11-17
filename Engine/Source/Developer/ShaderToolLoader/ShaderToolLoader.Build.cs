@@ -1,0 +1,37 @@
+using Rocks.Build;
+using Rocks.Build.Rules;
+
+/// <summary>
+/// Shader tool opening module (Docs/Design/ShaderSystem.ko.md section 9). Matches tool files in the user store against the tool table (ShaderToolTable)
+/// and SHA-256, then opens them with P10 DynamicLibrary::Open and obtains the function table. Only workers and ShaderFormat modules open tools; until
+/// the worker (Programs/ShaderCompileWorker) exists, this module stands in for it (policy check shader-tool-binary-load).
+/// Platform implementations are Private/Win64 (repository root; DXC version query that uses dxcapi.h together with Windows headers), Private/Mac and Private/Unsupported
+/// (Android).
+/// </summary>
+public sealed class ShaderToolLoader : EngineModuleRules
+{
+    protected override string Group => "Developer";
+
+    protected override string ModuleName => "ShaderToolLoader";
+
+    protected override string[] RequiredModules => ["ShaderToolTable", "PlatformBase", "Core"];
+
+    public override NativeModuleInput Configure(BuildContext context)
+    {
+        string backend = $"{ModuleDirectory}/Private";
+        string platform = context.Platform switch
+        {
+            NativePlatform.Windows => "Win64",
+            NativePlatform.MacOS => "Mac",
+            _ => "Unsupported"
+        };
+        return base.Configure(context) with
+        {
+            Sources = [.. Directory.GetFiles(context.PathInRoot(backend), "*.cpp").Order(StringComparer.Ordinal),
+                .. context.Sources($"{backend}/{platform}")],
+            // Only the Windows implementation includes the DXC public header (dxcapi.h). External headers are visible only to this module's sources (adapter approach).
+            PrivateIncludeDirectories = ThirdPartyModuleRules.ConsumerIncludeDirectories(context, "DirectXShaderCompiler"),
+            PrivateDefines = ThirdPartyModuleRules.ConsumerDefines(context, "DirectXShaderCompiler")
+        };
+    }
+}

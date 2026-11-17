@@ -1,17 +1,18 @@
 using Rocks.Build;
 using Rocks.Build.Rules;
 
-// 압축 헬퍼(Godot Compression·UE FCompression 대응): LZ4(raw block·frame)·Zstd·Deflate·Zlib·Gzip 동기 API, Brotli 해제와
-// WorkerScheduler 비동기 API.
-// 외부 코덱(Core/Source/ThirdParty)의 헤더·정의는 이 모듈의 Private 구현에만 노출한다(Docs/Design/Compression.ko.md).
-// 클래스 이름은 System.IO.Compression과 헷갈리지 않도록 CompressionModule이다(Task 모듈의 TaskRuntime과 같은 방식).
+// Compression helpers (Godot Compression and UE FCompression counterpart): synchronous LZ4 (raw block and frame), Zstd, Deflate, Zlib and Gzip APIs,
+// Brotli decompression, and the sequential block container API. The asynchronous and parallel APIs on WorkerScheduler (Task) are in the AsyncCompression
+// module. Compression sits below Task (Task -> TraceCapture -> Compression, Docs/Design/TraceSystem.ko.md section 3).
+// External codec (Core/Source/ThirdParty) headers and definitions are exposed only to this module's Private implementation (Docs/Design/Compression.ko.md).
+// The class is named CompressionModule so it is not confused with System.IO.Compression (same approach as TaskRuntime in the Task module).
 public sealed class CompressionModule : CoreModuleRules
 {
     private static readonly string[] Codecs = ["Lz4", "Zstd", "Zlib", "Brotli"];
 
     protected override string ModuleName => "Compression";
 
-    protected override string[] RequiredModules => ["Core", "Task", .. Codecs];
+    protected override string[] RequiredModules => ["Core", .. Codecs];
 
     protected override IReadOnlyList<string> PrivateIncludeDirectories(BuildContext context) =>
         ThirdPartyModuleRules.ConsumerIncludeDirectories(context, Codecs);

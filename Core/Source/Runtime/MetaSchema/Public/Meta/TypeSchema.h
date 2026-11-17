@@ -25,12 +25,25 @@ using ContextId = Guid;
 //               멤버도 통째로 쓰이고, 비Atomic struct 안의 Atomic 멤버는 그 멤버 경로가 단위다.
 //               Core 값 타입 미러는 혼합 정밀도 Transform을 뺀 16종이 Atomic이다. 값 16은 클래스
 //               플래그 예약 비트(4·8)를 비켜 둔다(ReflectionExtensions.ko.md 1.4절).
+//   Transient·Deprecated — 클래스(ROCKS_CLASS(Transient)·ROCKS_CLASS(Deprecated) — 리플렉션 B9h2,
+//               Docs/Design/ReflectionExtensions.ko.md 9.2절). 상속된다(파생도 같은 비트를 가져야
+//               한다 — 등록 InvalidArgument). 이 클래스 객체는 저장 불가 객체다: 그래프 저장 정책
+//               UnsaveablePolicy::Exclude(패키지 저장 — 기본)가 그 객체를 저장 집합에서 거부하고
+//               그것을 가리키는 참조를 null + 진단으로 쓴다. 로드는 되고
+//               진단(TransientType·DeprecatedType)을 낸다. Deprecated 클래스는 ClassRef 쓰기가
+//               거부한다(이미 저장된 값은 진단과 함께 읽고 그대로 저장한다).
 enum class TypeFlags : uint32 {
     None = 0,
     Abstract = 1,
     WorldOnly = 2,
+    Transient = 4,
+    Deprecated = 8,
     Atomic = 16
 };
+
+// 저장 불가 클래스 비트(Transient·Deprecated — 리플렉션 B9h2)다.
+inline constexpr uint32 UnsaveableTypeFlags =
+    static_cast<uint32>(TypeFlags::Transient) | static_cast<uint32>(TypeFlags::Deprecated);
 
 // FieldFlags:
 //   Transient  — GC 추적은 하되 저장 그래프에서 뺀다.
@@ -40,12 +53,23 @@ enum class TypeFlags : uint32 {
 //                Array<SoftObjectRef>)에만 쓴다. 배열이면 원소마다 non-null이라는
 //                뜻이다(비어 있지 않아야 한다는 뜻은 없다). null 거부는 패키지
 //                저장·쿠킹(A1)이고 로드는 진단만 한다.
+// 필드·struct 멤버 플래그다. 16 이상은 리플렉션 B9h1의 필드 플래그다(Docs/Design/
+// ReflectionExtensions.ko.md 9.1절): DuplicateTransient는 복제(에셋·PIE) 저장과 복사 텍스트에서,
+// NonPIEDuplicateTransient는 PIE가 아닌 복제와 텍스트에서, TextExportTransient는 복사 텍스트에서
+// 뺀다(복제·텍스트 호출자가 excludedFlags로 고른다). SaveGame은 세이브게임 저장의 포함 필터
+// (includeFlags — 필드·멤버마다 자기 플래그로 판정)다. Required와 DuplicateTransient·
+// NonPIEDuplicateTransient는 함께 쓸 수 없다(복제본이 늘 null — 등록 InvalidArgument, MetaCompiler
+// RMC2202).
 enum class FieldFlags : uint32 {
     None = 0,
     Transient = 1,
     ReadOnly = 2,
     EditorOnly = 4,
-    Required = 8
+    Required = 8,
+    DuplicateTransient = 16,
+    NonPIEDuplicateTransient = 32,
+    SaveGame = 64,
+    TextExportTransient = 128
 };
 
 constexpr bool HasFlag(uint32 flags, TypeFlags flag) noexcept {
@@ -131,14 +155,24 @@ enum class ValueKind : uint8 {
     // rocks::OrderedSet<T>(Core/Containers/OrderedSet.h — 삽입 순서), wire Set(u32 원소 wire +
     // count + 원소 × count). value.type은 0이고 원소 형식은 FieldSchema::element다(같은
     // 문서 7.2절).
-    Set
+    Set,
+    // 정적 배열 T x[N](리플렉션 B9g — 같은 문서 8절), wire는 원소가 struct면 RecordList, 단일
+    // 값이면 ValueArray(Array와 같다 — 늘 N개). value.type은 0이고 원소 형식은
+    // FieldSchema::element, maxElements는 정확한 원소 수 N(1 이상 MaxStaticArrayElements 이하)이다.
+    // aggregate이고 경로는 [i] 읽기·쓰기·멤버만 받는다(삽입·삭제·비우기는 Unsupported).
+    StaticArray
 };
+
+// 정적 배열 필드(ValueKind::StaticArray)의 원소 수 N의 상한이다(리플렉션 B9g —
+// Docs/Design/ReflectionExtensions.ko.md 8절). UE 생성 코드의 uint16 ArrayDim과 같은 상한이다.
+// MetaCompiler(RMC2307)·TypeRegistry·codec이 같은 값을 쓴다.
+inline constexpr uint32 MaxStaticArrayElements = NumericLimits<uint16>::Max();
 
 // ValueKind 열거자 수(마지막 열거자 + 1)다. 열거자 값은 schema·descriptor 계약이므로 새 종류는 끝에
 // 붙이고, 이 식의 마지막 열거자와 성질 표의 행을 함께 고친다. 아래 static_assert가 성질 표와,
 // MetaCompiler 대조 헤더가 C# 표의 종류 수와 이 값을 비교한다. 근거는
 // Docs/Design/ReflectionExtensions.ko.md 1.3절이다.
-inline constexpr uint32 ValueKindCount = static_cast<uint32>(ValueKind::Set) + 1;
+inline constexpr uint32 ValueKindCount = static_cast<uint32>(ValueKind::StaticArray) + 1;
 
 // 값 종류의 성질이다(종류 성질 표 — Docs/Design/ReflectionExtensions.ko.md 1.3절).
 // ValueKindProperties가 종류마다 이 비트의 OR를 돌려주고, 런타임의 등록 검증(TypeRegistry)·쓰기
@@ -172,8 +206,8 @@ inline constexpr uint32 ValueKindCount = static_cast<uint32>(ValueKind::Set) + 1
 //   Container              — 원소 형식(FieldSchema::element)을 갖는 컨테이너다
 //   WholeFieldValue        — FieldValue로 통째 읽고 쓴다(아니면 aggregate — read·write가 없고 멤버·
 //                            원소 단위 경로 연산으로만 쓴다)
-// StaticArray·InstancedStruct 자리는 리플렉션 B9 뒤 단계가 연다(Optional 내부는 B9e, Map 키·값·Set
-// 원소는 B9f2가 열었고 Map 값의 ObjectReference(ObjectRefMap)는 B9f4가 열었다). 이 표는 그
+// InstancedStruct 자리는 리플렉션 B9 뒤 단계(B9j)가 연다(Optional 내부는 B9e, Map 키·값·Set 원소는
+// B9f2, Map 값의 ObjectReference(ObjectRefMap)는 B9f4, 정적 배열 원소는 B9g가 열었다). 이 표는 그
 // 자리의 허용 여부를 미리 정해 두며, 그 단계 전에는 쓰는 곳이 없다.
 enum class ValueKindProperty : uint32 {
     None = 0,
@@ -286,10 +320,12 @@ constexpr ValueKindEntry ValueKindTableEntry(ValueKind kind) noexcept {
     case ValueKind::Optional:
     case ValueKind::Map:
     case ValueKind::Set:
+    case ValueKind::StaticArray:
         // Optional은 내부 형식(element)을 갖는 컨테이너이고 필드·멤버 자리에만 둔다. 통째
         // FieldValue 여부는 내부에 따라 다르므로 이 칸은 비우고 FieldIsAggregate가 필드로 판정한다.
         // Map(값 형식 element, 키 형식 key)·Set(원소 형식 element)도 필드·멤버 자리의 컨테이너이고
-        // aggregate다(B9f2는 필드 통째 저장·복원, key 단계 경로 연산은 B9f3).
+        // aggregate다(B9f2는 필드 통째 저장·복원, key 단계 경로 연산은 B9f3). StaticArray(원소 형식
+        // element, 원소 수 maxElements = N)도 같은 자리의 aggregate 컨테이너다(B9g).
         return {true, ValueKindBit(ValueKindProperty::Field) |
                           ValueKindBit(ValueKindProperty::StructMember) |
                           ValueKindBit(ValueKindProperty::Container)};
@@ -469,8 +505,10 @@ struct FieldSchema {
     // maxElements는 0이다. Map 필드(value = {Map, 0} — 리플렉션 B9f2)는 element가 값 형식(성질 표의
     // Map 값 종류 — ObjectReference는 ObjectRefMap(리플렉션 B9f4), 값 struct만), Set 필드(value =
     // {Set, 0})는 element가 원소 형식(성질 표의 Set 원소 종류)이고 둘 다 maxElements는 1 이상
-    // MaxArrayElements 이하의 원소 수 상한이다(저장에서만 건다 — 배열과 같다). 그 밖의 필드는
-    // Opaque·0이어야 한다.
+    // MaxArrayElements 이하의 원소 수 상한이다(저장에서만 건다 — 배열과 같다). StaticArray 필드
+    // (value = {StaticArray, 0} — 리플렉션 B9g)는 element가 원소 형식(성질 표의 정적 배열 원소 종류
+    // — ObjectReference면 FieldKind::ObjectReference)이고 maxElements는 정확한 원소 수 N(1 이상
+    // MaxStaticArrayElements 이하)이다. 그 밖의 필드는 Opaque·0이어야 한다.
     ValueType element{};
     uint32 maxElements = 0;
     // Map 필드의 키 형식이다(리플렉션 B9f2 — Docs/Design/ReflectionExtensions.ko.md 1.1·7.2절). 키
@@ -482,10 +520,19 @@ struct FieldSchema {
     ValueType key{};
 };
 
-// 필드 값의 대상 형식이다: 컨테이너 종류(ValueKindIsContainer — Array·Optional·Map·Set) 필드면
-// 원소·내부·값 형식(element), 아니면 값 형식(value). enum·struct·참조 대상 해석(TypeRegistry의
-// 의존·FieldEnum·FieldStruct, codec 검증, 그래프 기대 타입)이 같은 규칙을 쓴다. Map 키는
-// FieldKeyType이다. 반환 참조는 field의 수명을 따른다.
+// 경로의 index 단계([i])를 받는 컨테이너 종류(Array·StaticArray)인지다. 원소 수를 바꾸는
+// 삽입·삭제·비우기는 Array만 받는다(StaticArray는 길이가 N으로 고정 — 리플렉션 B9g).
+//
+// 사용 예:
+//   if (step.selector == PathSelector::Index && !ValueKindTakesIndex(field.value.kind)) { ... }
+constexpr bool ValueKindTakesIndex(ValueKind kind) noexcept {
+    return kind == ValueKind::Array || kind == ValueKind::StaticArray;
+}
+
+// 필드 값의 대상 형식이다: 컨테이너 종류(ValueKindIsContainer — Array·Optional·Map·Set·StaticArray)
+// 필드면 원소·내부·값 형식(element), 아니면 값 형식(value). enum·struct·참조 대상
+// 해석(TypeRegistry의 의존·FieldEnum·FieldStruct, codec 검증, 그래프 기대 타입)이 같은 규칙을 쓴다.
+// Map 키는 FieldKeyType이다. 반환 참조는 field의 수명을 따른다.
 //
 // 사용 예:
 //   const ValueType& target = FieldTargetType(field);
@@ -540,6 +587,13 @@ struct TypeSchema {
     // 스키마는 이 칸을 비운다(원본과 이름이 같아 AlreadyExists). 등록이 깊게 복사한다. 직렬화는
     // TypeId를 쓰므로 이 이름과 무관하다.
     Span<const char> toolName{};
+    // Within 클래스 ID다(클래스만, 0 = 제한 없음 — 리플렉션 B9h2,
+    // Docs/Design/ReflectionExtensions.ko.md 9.2절). 0이 아니면 이 클래스 객체의 Outer가 그 클래스
+    // 또는 파생이어야 하고 Outer 없는 객체는 될 수 없다(생성 정체성 규칙 — InvalidArgument). 파생은
+    // base의 Within을 상속한다(MetaCompiler가 파생 스키마에 그대로 싣는다 — 다시 지정하면 base
+    // Within의 파생이어야 한다, RMC2208). TypeRegistry는 base에 Within이 있는데 파생이 0이면
+    // InvalidArgument다. struct는 0이어야 한다.
+    TypeId withinType{};
 };
 
 // 타입 도구 이름의 문법이다: `[A-Za-z_][A-Za-z0-9_]*('.' [A-Za-z_][A-Za-z0-9_]*)*`(Sparks 모듈 경로

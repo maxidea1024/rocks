@@ -9,7 +9,8 @@ namespace rocks {
 // 기본 기하 shape 값 타입이다. 교차·포함·거리 질의는 Core/Math/Intersection.h에 있다.
 //
 // 공통 계약
-// - 좌표계는 오른손, +X 전방, +Y 왼쪽, +Z 위이며 길이는 미터다. T는 float 또는 double이다.
+// - 좌표계는 UE와 같은 왼손 +X 전방, +Y 오른쪽, +Z 위이며 길이는 cm다(MathUtility.h).
+//   T는 float 또는 double이다.
 // - Sphere, Box, Capsule, OrientedBox는 경계를 포함하는 닫힌 solid다. 경계에 닿기만 해도
 //   포함·겹침이다. Plane, Triangle, Segment는 두께가 없는 점 집합이다.
 // - 필드는 공개되어 있고 값 생성자는 검사하지 않는다. 외부 입력은 TryMake 계열로 검증·정규화하거나
@@ -131,8 +132,13 @@ struct Plane {
         return Result<Plane>::Success(Plane(unit.Value(), pointDistance));
     }
 
-    // 세 점을 지나는 평면이다. normal은 Cross(b - a, c - a) 방향이므로 normal 쪽에서 내려다볼 때
-    // a → b → c가 반시계 방향이다(오른손 법칙. 예: X, Y 축 위의 점 순서는 normal +Z).
+    // 세 점을 지나는 평면이다. normal은 Cross(b - a, c - a) 방향으로 UE FPlane(A, B, C)
+    // (UE Plane.h:441-446)·Chaos FTriangle::GetNormal(Chaos/Triangle.h:120-122)과 같은 식이다.
+    // 왼손 좌표계이므로 normal 쪽에서 내려다볼 때 a → b → c는 시계 방향이다(예: 원점 → X축 점 →
+    // Y축 점은 normal +Z이며 위에서 보면 전방 → 오른쪽으로 도는 시계 방향).
+    // 주의: UE 렌더 메시의 앞면 normal은 반대 식 Cross(c - a, b - a)이고 화면에서 반시계로 보이는
+    // 면이 앞면이다(UE MeshDescription.cpp:1311-1313, D3D12State.cpp:353 FrontCounterClockwise).
+    // 렌더 메시 삼각형 (a, b, c)의 앞면 쪽을 normal로 하는 평면은 TryFromPoints(a, c, b)로 만든다.
     // distance는 a로 계산하므로 b, c의 SignedDistance는 반올림 오차만큼 0이 아닐 수 있다.
     // 실패(InvalidArgument): 유한하지 않은 입력, 일직선·중복 점(외적이 정확히 0), 외적 overflow.
     static Result<Plane> TryFromPoints(const Vector3<T>& a, const Vector3<T>& b,
@@ -166,13 +172,14 @@ struct Plane {
 };
 
 // 반직선 {origin + direction * s | s >= 0}이다. direction은 단위 벡터여야 하므로 s는 실제
-// 거리(미터)다. 기본값은 원점에서 +X(전방)를 향한다. UE TRay의 기본 방향은 +Z다.
+// 거리(cm)다. 기본값은 UE TRay 기본 생성자·Init과 같이 원점에서 +Z(위)를 향한다(UE Ray.h:30-34,
+// :66-72).
 template <typename T>
 struct Ray {
     static_assert(math::IsFloatingPointV<T>, "Ray supports float and double");
 
     Vector3<T> origin;
-    Vector3<T> direction = Vector3<T>::Forward();
+    Vector3<T> direction = Vector3<T>::Up();
 
     constexpr Ray() noexcept = default;
 
@@ -401,10 +408,14 @@ struct Box {
     }
 };
 
-// 꼭짓점 a, b, c로 이루어진 닫힌 삼각형(두께 없는 면)이다. 앞면 normal은 Cross(b - a, c - a)
-// 방향이며 앞면에서 볼 때 a → b → c가 반시계 방향이다. 넓이가 0인(외적이 정확히 0인) 퇴화 삼각형도
-// 유효한 값이다. 퇴화 삼각형은 최근접점·sphere 겹침에서는 선분·점으로 동작하지만 ray·segment
-// 교차에서는 항상 Miss다.
+// 꼭짓점 a, b, c로 이루어진 닫힌 삼각형(두께 없는 면)이다. 기하 앞면 normal은 Cross(b - a, c - a)
+// 방향으로 UE FPlane(A, B, C)·Chaos FTriangle::GetNormal과 같은 식이며(Plane::TryFromPoints 참고),
+// 왼손 좌표계에서 앞면 쪽에서 볼 때 a → b → c가 시계 방향이다. 이 "앞면"은 UE 렌더 메시의 앞면
+// (normal Cross(c - a, b - a), 화면 반시계 — UE MeshDescription.cpp:1311-1313)과 반대다. 렌더 메시
+// 삼각형 (a, b, c)를 FrontOnly로 판정하려면 Triangle(a, c, b)로 넘긴다. UE도 정적 메시 충돌을
+// 만들 때 bFlipNormals로 두 꼭짓점을 바꿔 Chaos 규약(왼손에서 시계)으로 옮긴다(StaticMesh.cpp:9343,
+// ChaosCooking.cpp:38-42). 넓이가 0인(외적이 정확히 0인) 퇴화 삼각형도 유효한 값이다. 퇴화
+// 삼각형은 최근접점·sphere 겹침에서는 선분·점으로 동작하지만 ray·segment 교차에서는 항상 Miss다.
 template <typename T>
 struct Triangle {
     static_assert(math::IsFloatingPointV<T>, "Triangle supports float and double");

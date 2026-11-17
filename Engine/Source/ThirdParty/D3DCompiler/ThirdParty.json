@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "kind": "binary",
+  "name": "D3DCompiler",
+  "version": "10.0.22621.2428",
+  "sdk": {
+    "name": "Windows SDK",
+    "version": "10.0.22621.0"
+  },
+  "hosts": {
+    "windows-x64": {
+      "files": [
+        {
+          "path": "d3dcompiler_47.dll",
+          "sdkPath": "Redist/D3D/x64/d3dcompiler_47.dll",
+          "sha256": "af7b99be1b8770c0e4d18e43b04e81d11bdeb667fa6b07ade7a88f4c5676bf9a",
+          "size": 4916728,
+          "role": "runtime"
+        }
+      ]
+    }
+  },
+  "notes": [
+    "FXC (D3DCompile and D3DReflect) uses Redist/D3D/x64/d3dcompiler_47.dll (file version 10.0.22621.2428) of the pinned Windows SDK 10.0.22621.0. The d3dcompiler_47.dll in System32 differs per OS build and is not used (Docs/Design/ShaderSystem.ko.md section 8, item 2; UE also opens its bundled copy by full path).",
+    "The Windows SDK is an installer and is not republished. bootstrap verifies the SHA-256 in the installed SDK and copies it to the user store (<file SHA-256>/d3dcompiler_47.dll). If another SDK overwrites the same Redist path and the SHA changes, bootstrap fails and the manifest must be pinned again.",
+    "License: follows the Windows SDK terms (D3D Redist in the list of redistributable files). No files are committed to the repository, so there is no licenses entry. Whether to redistribute it with Runtime executables is decided in measurement S10."
+  ]
+}

@@ -53,11 +53,19 @@ enum class UnknownFieldPolicy : uint8 {
 };
 
 // 저장 정책이다. rejectMissingRequired는 패키지 저장·쿠킹이 켜며 Required 참조가 null이면
-// InvalidArgument다. excludedFlags의 비트(예: 쿠킹의 EditorOnly)를 유효 플래그에 가진 필드는
-// 저장하지 않는다(Transient는 항상 제외).
+// InvalidArgument다. excludedFlags의 비트(예: 쿠킹의 EditorOnly, 에셋 복제의 DuplicateTransient |
+// NonPIEDuplicateTransient)를 유효 플래그에 가진 필드는 저장하지 않는다(Transient는 항상 제외).
+// includeFlags(0이면 끔 — 리플렉션 B9h1)가 0이 아니면 필드·struct 멤버마다 자기 플래그(전파하지
+// 않는다 — UE처럼 멤버마다 표시)에 그 비트가 없으면 쓰지 않는다(세이브게임 = SaveGame). Atomic
+// struct 안의 멤버에는 적용하지 않는다(통째 단위).
+//
+// 사용 예(세이브게임 저장):
+//   ObjectGraphSaveOptions options;
+//   options.policy.includeFlags = static_cast<uint32>(FieldFlags::SaveGame);
 struct FieldEncodePolicy {
     bool rejectMissingRequired = false;
     uint32 excludedFlags = 0;
+    uint32 includeFlags = 0;
 };
 
 // 복원 정책이다. 기본은 미선언 enum·높은 버전 거부, 모르는 필드는 진단 후 건너뛰기다. Record에 없는
@@ -76,6 +84,10 @@ struct FieldDecodePolicy {
     UnknownFieldPolicy unknownField = UnknownFieldPolicy::SkipAndReport;
     uint32 excludedFlags = 0;
     UnknownClassPolicy unknownClass = UnknownClassPolicy::Reject;
+    // 포함 필터다(0이면 끔 — 리플렉션 B9h1, 저장의 includeFlags와 짝): 0이 아니면 자기 플래그에 이
+    // 비트가 없는 필드·struct 멤버(Atomic struct 안의 멤버 제외)가 파일에 있으면
+    // InvalidArgument이고, Required 실효 값 검사에서도 뺀다.
+    uint32 includeFlags = 0;
 };
 
 class RecordScope;

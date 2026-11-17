@@ -6,5 +6,8 @@ public sealed class GcBenchTarget : TargetRules
 {
     public override string Name => "GcBench";
 
+    // Development tool executable (not subject to the Release exclusion policy).
+    public override TargetType Type => TargetType.Program;
+
     public override IReadOnlyList<string> Modules => ["GcBench"];
 }

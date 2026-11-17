@@ -334,6 +334,49 @@ internal static partial class SchemaValidator
             field.ReferenceId = value.ReferenceId;
         }
 
+        // 정적 배열 필드의 원소를 푼다(리플렉션 B9g — Docs/Design/ReflectionExtensions.ko.md 8·15절). 원소는 단일 필드와 같은 해석(ObjectRef<T>도
+        // 그대로 — 원소가 소유 저장소 안이라 Registry 컨테이너가 필요 없다)이고 위치 규칙은 모두 RMC2307이다: N이 1..65535 밖, 다차원(원소가
+        // 다시 C 배열), 컨테이너(배열·Map·Set·Optional) 원소, cv 원소, 지원하지 않는 원소 형식, 성질 표의 정적 배열 원소가 아닌 종류. Registry
+        // 컨테이너를 담은 원소 struct는 struct 형질을 계산한 뒤 CheckStaticArray가 RMC2307로 거부한다.
+        void ResolveStaticArray(FieldModel field, string element, string bound)
+        {
+            string symbol = $"{field.Owner}::{field.Name}";
+            field.Kind = StaticArrayRules.StaticArray;
+            field.ElementSpelling = element;
+            if (!uint.TryParse(bound, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out uint count) ||
+                count < 1 || count > StaticArrayRules.MaxStaticArrayElements)
+            {
+                throw new MetadataException($"{symbol}: static array size [{bound}] is outside 1..{StaticArrayRules.MaxStaticArrayElements}", "RMC2307",
+                    StaticArrayRules.Hint).At(field.Site);
+            }
+
+            field.MaxElements = count;
+            string? reason = StaticArrayRules.Split(element) is not null ? "is itself an array (multi-dimensional arrays are not reflected)"
+                : ArrayRules.IsContainer(element) || MapRules.IsContainer(element) || MapRules.IsUnordered(element) || MapRules.SplitObjectRefMap(element) is not null
+                    ? "is a container (containers do not nest)"
+                : OptionalRules.Inner(element) is not null ? "is an Optional"
+                : ArrayRules.IsCvQualified(element) ? "is cv-qualified" : null;
+            if (reason is not null)
+            {
+                throw new MetadataException($"{symbol}: static array element '{element}' {reason}", "RMC2307", StaticArrayRules.Hint).At(field.Site);
+            }
+
+            if (ResolveValue(element, field.Owner, field.Site) is not { } value)
+            {
+                throw new MetadataException($"{symbol}: unsupported static array element type '{element}'", "RMC2307",
+                    StaticArrayRules.Hint + " " + UnsupportedFieldHint(element)).At(field.Site);
+            }
+
+            if (!ValueKindTable.Has(value.Kind, ValueKindProperty.StaticArrayElement))
+            {
+                throw new MetadataException($"{symbol}: {value.Kind} cannot be a static array element", "RMC2307", StaticArrayRules.Hint).At(field.Site);
+            }
+
+            field.ElementKind = value.Kind;
+            field.Reference = value.Reference;
+            field.ReferenceId = value.ReferenceId;
+        }
+
         // Optional 필드의 내부를 푼다(리플렉션 B9e — Docs/Design/ReflectionExtensions.ko.md 6·15절). 내부는 단일 필드와 같은 해석이고
         // 성질 표의 Optional 내부 종류여야 한다: 배열·중첩 Optional·참조(강한·weak·소프트·클래스)·지원하지 않는 형식·cv 내부는 RMC2306이다.
         // 참조 struct 내부는 struct 형질을 계산한 뒤 CheckOptional이 RMC2306으로 거부한다.
@@ -463,7 +506,11 @@ internal static partial class SchemaValidator
                         "Use rocks::OrderedMap<K, V> or rocks::OrderedSet<T>; HashMap and HashSet iterate in hash order, which is not a stable saved state.").At(field.Site);
                 }
 
-                if (OptionalRules.Inner(field.NativeSpelling) is string inner)
+                if (StaticArrayRules.Split(field.CanonicalSpelling ?? field.NativeSpelling) is (string fixedElement, string bound))
+                {
+                    ResolveStaticArray(field, fixedElement, bound);
+                }
+                else if (OptionalRules.Inner(field.NativeSpelling) is string inner)
                 {
                     ResolveOptional(field, inner);
                 }
@@ -517,16 +564,25 @@ internal static partial class SchemaValidator
                 {
                     // WeakRef는 대상이 죽으면 저절로 null이 되므로 Required를 지킬 수 없다(Docs/Design/ReflectionExtensions.ko.md 5.1절). Map은 값마다,
                     // Set은 원소마다 non-null이다(키에는 Required가 없다 — 리플렉션 B9f2).
-                    throw new MetadataException($"{field.Owner}::{field.Name}: Required applies only to object, soft object and class reference fields, arrays and sets of them and maps with such values", "RMC2202",
-                        "Remove Required or change the field to ObjectRef, SoftObjectRef, ClassRef, ObjectRefArray, ObjectRefMap, Array<SoftObjectRef>, Array<ClassRef>, OrderedSet<SoftObjectRef/ClassRef> or OrderedMap<K, SoftObjectRef/ClassRef>; a WeakRef becomes null when its target dies, so it cannot be Required.").At(field.Site);
+                    throw new MetadataException($"{field.Owner}::{field.Name}: Required applies only to object, soft object and class reference fields, arrays, static arrays and sets of them and maps with such values", "RMC2202",
+                        "Remove Required or change the field to ObjectRef, SoftObjectRef, ClassRef, ObjectRefArray, ObjectRefMap, Array<SoftObjectRef>, Array<ClassRef>, a static array of ObjectRef/SoftObjectRef/ClassRef, OrderedSet<SoftObjectRef/ClassRef> or OrderedMap<K, SoftObjectRef/ClassRef>; a WeakRef becomes null when its target dies, so it cannot be Required.").At(field.Site);
+                }
+
+                // Required와 복제 제외 플래그는 함께 쓸 수 없다(리플렉션 B9h1 — 복제본이 늘 null을 가져 패키지 저장의 rejectMissingRequired가
+                // 실패한다).
+                if (field.Spec.Required && (field.Spec.DuplicateTransient || field.Spec.NonPIEDuplicateTransient))
+                {
+                    throw new MetadataException($"{field.Owner}::{field.Name}: Required cannot be combined with DuplicateTransient or NonPIEDuplicateTransient", "RMC2202",
+                        "A duplicate never carries this field, so a Required check on the duplicate would always fail; remove Required or the duplicate-transient specifier.").At(field.Site);
                 }
 
                 if (!field.IsCounted && field.Spec.MaxElements != 0)
                 {
                     throw new MetadataException($"{field.Owner}::{field.Name}: MaxElements applies only to array, map and set fields", "RMC2202",
-                        "Remove MaxElements; it limits the element count of reflected array, map and set fields.").At(field.Site);
+                        "Remove MaxElements; it limits the element count of reflected array, map and set fields (a static array T name[N] always holds exactly N elements).").At(field.Site);
                 }
 
+                CheckSettingsField(model, field);
                 if (field.IsCounted)
                 {
                     // 0과 2³¹ 이상은 지정자 문법(RMC2000)이 이미 막는다.
@@ -542,7 +598,8 @@ internal static partial class SchemaValidator
             // NATIVE 멤버의 직접 타입이 리플렉션 struct면 생성 코드가 그 struct의 형질로 RMC2205·2206을 한 번 더 확인한다.
             foreach (NativeMemberModel native in model.NativeMembers)
             {
-                native.Struct = ValueType(ClangAstParser.CleanType(native.Spelling), true, model.Name, native.Site)?.Name;
+                // C 배열 멤버는 모든 차원을 벗긴 원소로 본다(StaticArrayProbe — `RefStruct cache[2]`도 원소 struct 형질로 확인한다).
+                native.Struct = ValueType(ClangAstParser.CleanType(native.ElementSpelling ?? native.Spelling), true, model.Name, native.Site)?.Name;
             }
         }
 
@@ -617,6 +674,18 @@ internal static partial class SchemaValidator
             }
         }
 
+        // 정적 배열의 원소 struct는 Registry 컨테이너(ObjectRefArray·StructRefArray·ObjectRefMap — 중첩 포함)를 담지 않는다(RMC2307 — 런타임
+        // 등록도 거부한다, Docs/Design/ReflectionExtensions.ko.md 8절 "구현(B9g)에서 정한 점"). 참조 struct 원소는 받는다. 원소 struct의
+        // 형질을 계산한 뒤에 본다.
+        void CheckStaticArray(FieldModel field)
+        {
+            if (field.IsStaticArray && field.StructTarget && Find(field.Reference!).ContainsReferenceArray)
+            {
+                throw new MetadataException($"{field.Owner}::{field.Name}: static array element struct {field.Reference} holds ObjectRefArray, StructRefArray or ObjectRefMap members", "RMC2307",
+                    "Keep reference containers out of static array element structs (directly or nested); store them in the owning class instead.").At(field.Site);
+            }
+        }
+
         // Map 값 struct는 값 struct다(강한 참조를 담는 struct는 ObjectRefMap·인라인 struct 멤버로 둔다 — RMC2305, 런타임 등록도 거부한다).
         // 값 struct의 형질을 계산한 뒤에 본다.
         void CheckMap(FieldModel field)
@@ -650,10 +719,19 @@ internal static partial class SchemaValidator
                 model.Fields.Any(field => field.StructTarget && Find(field.Reference!).RequiresWorldOnlyOwner) ||
                 model.NativeMembers.Any(native => native.Struct is not null && Find(native.Struct).RequiresWorldOnlyOwner);
             model.ContainsReferenceArray = ContainsReferenceArray(model, Find);
+            // 설정 struct는 값이다(설정 계층이 리플렉션 struct 값 대상으로 읽는다 — Docs/Design/ConfigSystem.ko.md 7절). 강한 참조를 담으면
+            // 값 대상이 될 수 없다.
+            if (model.IsSettings && (model.ContainsStrongReference || model.ContainsReferenceArray))
+            {
+                throw new MetadataException($"{model.Name}: a Settings struct cannot hold strong object references or reference arrays", "RMC2210",
+                    "Settings structs are plain values read from config files; refer to assets by SoftObjectRef or AssetId instead.").At(model.Site);
+            }
+
             foreach (FieldModel field in model.OwnFields)
             {
                 CheckOptional(field);
                 CheckMap(field);
+                CheckStaticArray(field);
                 CheckContainer(field);
             }
         }
@@ -664,8 +742,25 @@ internal static partial class SchemaValidator
             {
                 CheckOptional(field);
                 CheckMap(field);
+                CheckStaticArray(field);
                 CheckContainer(field);
             }
+        }
+
+        // name이 ancestor 자신이거나 base 사슬에 ancestor가 있는지다(이 모듈과 import 클래스 — Within 상속 판정, 리플렉션 B9h2).
+        bool DerivesFrom(string name, string ancestor)
+        {
+            for (string? current = name; current is not null && current != "rocks::Object";)
+            {
+                if (current == ancestor)
+                {
+                    return true;
+                }
+
+                current = classes.TryGetValue(current, out ClassModel? own) ? own.Base : imported.GetValueOrDefault(current)?.Base;
+            }
+
+            return false;
         }
 
         List<ClassModel> ordered = [];
@@ -700,6 +795,32 @@ internal static partial class SchemaValidator
                 inherited.AddRange(baseModel.Fields);
                 // WorldOnly는 상속된다(파생에 다시 쓰지 않아도 된다).
                 model.WorldOnly |= baseModel.WorldOnly;
+                // Transient·Deprecated도 상속된다(끄는 지정자는 없다 — 리플렉션 B9h2).
+                model.Transient |= baseModel.Transient;
+                model.Deprecated |= baseModel.Deprecated;
+                model.Within = baseModel.Within;
+                model.WithinId = baseModel.WithinId;
+            }
+
+            // Within(리플렉션 B9h2): 지정하면 리플렉션 클래스여야 하고(RMC2003) base의 Within이 있으면 그 클래스 또는 파생이어야 한다
+            // (RMC2208). 지정하지 않으면 base의 것을 이어받는다. 자기 자신을 Within으로 둘 수 있다(UE와 같다).
+            if (model.WithinResolved is string within)
+            {
+                string resolved = within == model.Name ? within : Resolve(within, model.Name, model.Site);
+                if (resolved == "rocks::Object")
+                {
+                    throw new MetadataException($"{model.Name}: Within must be a reflected class, not rocks::Object", "RMC2208",
+                        "Remove Within (every Outer is an Object) or name the reflected class every Outer must be.").At(model.Site);
+                }
+
+                if (model.Within is string baseWithin && !DerivesFrom(resolved, baseWithin))
+                {
+                    throw new MetadataException($"{model.Name}: Within {resolved} must be {baseWithin} or derive from it (the base class Within)", "RMC2208",
+                        "A derived class can only narrow the Within of its base; name the base Within class or one of its subclasses.").At(model.Site);
+                }
+
+                model.Within = resolved;
+                model.WithinId = resolved == model.Name ? model.Id : Find(resolved).Id;
             }
 
             model.Fields = BuildFields(model, inherited);
@@ -748,7 +869,61 @@ internal static partial class SchemaValidator
             Order(model);
         }
 
+        // Deprecated가 아닌 타입의 PROPERTY는 Deprecated 클래스를 가리키지 않는다(RMC2209 — UE도 막는다, 리플렉션 B9h2): 강한·weak·소프트
+        // 참조와 ClassRef(그 컨테이너 원소·Map 값 포함)의 대상, Map 키의 Soft·ClassRef 대상. Deprecated 타입 자신의 필드와 NATIVE 멤버는
+        // 보지 않는다. 상속 플래그가 정해진 뒤에 본다.
+        bool IsDeprecatedClass(string? name) =>
+            name is not null && name != "rocks::Object" && (classes.TryGetValue(name, out ClassModel? own) ? own : imported.GetValueOrDefault(name)) is { IsEnum: false, IsStruct: false, Deprecated: true };
+        foreach (ClassModel model in classes.Values.Where(model => !model.IsEnum && !model.Deprecated).OrderBy(model => model.Name, StringComparer.Ordinal))
+        {
+            foreach (FieldModel field in model.OwnFields)
+            {
+                bool referenceTarget = field.TargetKind is "ObjectReference" or "WeakObjectReference" or "SoftObjectReference" or "ClassReference";
+                string? deprecated = referenceTarget && IsDeprecatedClass(field.Reference) ? field.Reference
+                    : field.KeyKind is "SoftObjectReference" or "ClassReference" && IsDeprecatedClass(field.KeyReference) ? field.KeyReference : null;
+                if (deprecated is not null)
+                {
+                    throw new MetadataException($"{field.Owner}::{field.Name}: refers to Deprecated class {deprecated}", "RMC2209",
+                        "Retire this field (ids retire) or mark its owner Deprecated; move old data with Version and Migrate instead of referring to a Deprecated class.").At(field.Site);
+                }
+            }
+        }
+
         return new(classes, ordered, imported);
+    }
+
+    // 콘솔 설정·설정 snapshot이 담을 수 있는 필드 종류다(Docs/Design/ConfigSystem.ko.md 5.1절 — bool·int32·int64·float·double·String·Name·
+    // 리플렉션 enum). Optional·컨테이너·struct는 받지 않는다.
+    private static readonly string[] ConsoleKinds = ["Bool", "Int32", "Int64", "Float32", "Float64", "Utf8String", "Name", "Enum"];
+
+    // 설정 필드 지정자를 검사한다(Docs/Design/ConfigSystem.ko.md 7절): 설정 struct의 직접 멤버만 쓸 수 있고(RMC2210), ConsoleName·RenderRead는
+    // 콘솔 설정 종류의 필드에만 쓴다(RMC2202). ConsoleName은 한 struct 안에서 유일하다(RMC2210 — 모듈·실행 사이 유일성은 설정 계층이 등록 때
+    // 본다).
+    private static void CheckSettingsField(ClassModel model, FieldModel field)
+    {
+        if (!field.Spec.HasSettings)
+        {
+            return;
+        }
+
+        if (!model.IsStruct || !model.IsSettings)
+        {
+            throw new MetadataException($"{field.Owner}::{field.Name}: settings specifiers (UserConfig, ConsoleName, RestartRequired, StartupOnly, RenderRead, DevelopmentOnly) apply only to members of a ROCKS_STRUCT(Settings(...))", "RMC2210",
+                "Declare the owner as ROCKS_STRUCT(Settings(Branch = \"...\", Section = \"...\")) or remove the settings specifiers.").At(field.Site);
+        }
+
+        if ((field.Spec.ConsoleName.Length != 0 || field.Spec.RenderRead) && !ConsoleKinds.Contains(field.Kind, StringComparer.Ordinal))
+        {
+            throw new MetadataException($"{field.Owner}::{field.Name}: ConsoleName and RenderRead apply only to bool, int32, int64, float, double, String, Name and reflected enum fields", "RMC2202",
+                "Expose a single value field; containers, Optional and structs cannot be console settings or snapshot values.").At(field.Site);
+        }
+
+        if (field.Spec.ConsoleName.Length != 0 &&
+            model.OwnFields.Any(other => other != field && string.Equals(other.Spec.ConsoleName, field.Spec.ConsoleName, StringComparison.Ordinal)))
+        {
+            throw new MetadataException($"{field.Owner}::{field.Name}: ConsoleName \"{field.Spec.ConsoleName}\" is used by another field of {model.Name}", "RMC2210",
+                "Give every console setting a distinct name; a console name maps to exactly one value.").At(field.Site);
+        }
     }
 
     // 타입 도구 이름(클래스·struct — Docs/Design/ReflectionExtensions.ko.md 5.2절)을 검사한다(RMC2203): 실효 이름이 형식에 맞고

@@ -6,8 +6,8 @@
     <SdkTarget Condition="'$(SdkTarget)' == ''">Engine</SdkTarget>
     <GameTarget Condition="'$(GameTarget)' == ''">Game</GameTarget>
     <Jobs Condition="'$(Jobs)' == ''">8</Jobs>
-    <!-- 따옴표로 감싸 넘기는 디렉터리 값은 끝 역슬래시를 두 개로 맞춘다. 드라이브 루트(Z:\)를 "Z:\"로 넘기면 \"가 따옴표 escape로
-         읽혀(CommandLineToArgvW 규칙) 뒤 인자가 모두 한 인자로 붙는다. "Z:\\"는 Z:\ 하나로 읽힌다. -->
+    <!-- Directory values passed in quotes get a doubled trailing backslash. Passing a drive root (Z:\) as "Z:\" makes \" read as a quote escape
+         (CommandLineToArgvW rules), and all following arguments join into one argument. "Z:\\" reads as a single Z:\. -->
     <NativeOutputText>$(NativeOutput)</NativeOutputText>
     <NativeOutputText Condition="$(NativeOutput.EndsWith('\'))">$(NativeOutput.TrimEnd('\'))\\</NativeOutputText>
     <AndroidNdkText>$(AndroidNdk)</AndroidNdkText>
@@ -21,7 +21,7 @@
     <CompilerArgument Condition="'$(Compiler)' != ''">--compiler &quot;$(Compiler)&quot;</CompilerArgument>
     <OutputArgument Condition="'$(NativeOutput)' != ''">--output &quot;$(NativeOutputText)&quot;</OutputArgument>
     <Tool>dotnet &quot;$(RocksRoot)out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks.Build.Cli.dll&quot;</Tool>
-    <!-- Android 교차 빌드: -p:RocksPlatform=android [-p:AndroidAbi=arm64|x86_64] [-p:AndroidApi=26] [-p:AndroidNdk=경로] [-p:Adb=경로] -->
+    <!-- Android cross build: -p:RocksPlatform=android [-p:AndroidAbi=arm64|x86_64] [-p:AndroidApi=26] [-p:AndroidNdk=path] [-p:Adb=path] -->
     <PlatformArgument Condition="'$(RocksPlatform)' != ''">--platform $(RocksPlatform)</PlatformArgument>
     <PlatformArgument Condition="'$(AndroidAbi)' != ''">$(PlatformArgument) --android-abi $(AndroidAbi)</PlatformArgument>
     <PlatformArgument Condition="'$(AndroidApi)' != ''">$(PlatformArgument) --android-api $(AndroidApi)</PlatformArgument>
@@ -29,7 +29,7 @@
     <PlatformArgument Condition="'$(Adb)' != ''">$(PlatformArgument) --adb &quot;$(Adb)&quot;</PlatformArgument>
     <CommonArguments>--root &quot;$(RocksRoot).&quot; --configuration $(Configuration) --jobs $(Jobs) $(CompilerArgument) $(OutputArgument) $(PlatformArgument)</CommonArguments>
   </PropertyGroup>
-  <!-- MSBuild는 호스트 도구/규칙/단계를 조직한다. C++ 최신성 판단은 매 호출 Rocks.Build가 담당한다. -->
+  <!-- MSBuild orchestrates the host tools, rules and stages. Rocks.Build decides C++ up-to-dateness on every invocation. -->
   <Target Name="BootstrapTools">
     <Exec Command="dotnet build &quot;$(RocksRoot)Programs/Rocks.Tools.csproj&quot; --nologo" />
   </Target>
@@ -38,6 +38,10 @@
   </Target>
   <Target Name="Test" DependsOnTargets="BootstrapTools">
     <Exec Command="$(Tool) test $(CommonArguments) --target $(RocksTarget)" />
+  </Target>
+  <!-- Downloads prebuilt binaries (manifest kind: binary) into the per-user store. Build and Test do not download them (Build/README.md). -->
+  <Target Name="ThirdPartyBootstrap" DependsOnTargets="BootstrapTools">
+    <Exec Command="$(Tool) bootstrap --root &quot;$(RocksRoot).&quot;" />
   </Target>
   <Target Name="InstalledSdk" DependsOnTargets="BootstrapTools">
     <Error Condition="'$(SdkDestination)' == ''" Text="SdkDestination is required; use a new versioned directory." />

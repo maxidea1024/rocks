@@ -22,12 +22,12 @@ internal static class ThirdPartyPolicyTests
             NoFailures(PolicyChecks.ThirdParty(options.Root));
             foreach (string library in new[] { "Lz4", "Zstd", "Zlib" })
             {
-                var manifest = ThirdPartyManifest.Read(Path.Combine(options.Root, ThirdPartyManifest.ThirdPartyRoot, library));
+                var manifest = ThirdPartyManifest.Read(Path.Combine(options.Root, ThirdPartyManifest.CoreThirdPartyRoot, library));
                 Verify.That(manifest.TranslationUnits.Count != 0 && manifest.Licenses[0].File.EndsWith("LICENSE", StringComparison.Ordinal),
                     library + ": manifest must list translation units and a license file");
             }
             // zstd 사전 생성기의 divsufsort(MIT)는 본체(BSD-3-Clause) LICENSE에 없으므로 두 번째 원문으로 고지한다.
-            var zstd = ThirdPartyManifest.Read(Path.Combine(options.Root, ThirdPartyManifest.ThirdPartyRoot, "Zstd"));
+            var zstd = ThirdPartyManifest.Read(Path.Combine(options.Root, ThirdPartyManifest.CoreThirdPartyRoot, "Zstd"));
             Verify.That(zstd.Licenses.Select(license => license.Spdx).SequenceEqual(["BSD-3-Clause", "MIT"]) &&
                         zstd.Licenses[1] is { File: "zstd-1.5.7/lib/dictBuilder/divsufsort.h", BinaryNoticeRequired: true },
                 "Zstd: the MIT divsufsort notice must be listed after the BSD-3-Clause license");
@@ -251,7 +251,7 @@ internal static class ThirdPartyPolicyTests
                          ("linkTimeOptimization in data library", "\"kind\": \"data\"", "\"kind\": \"data\", \"linkTimeOptimization\": false"),
                          ("sanitizerInstrumentation in data library", "\"kind\": \"data\"",
                           "\"kind\": \"data\", \"sanitizerInstrumentation\": false"),
-                         ("unknown kind", "\"kind\": \"data\"", "\"kind\": \"binary\""),
+                         ("unknown kind", "\"kind\": \"data\"", "\"kind\": \"archive\""),
                          ("invalid embedding module", "\"Core\"", "\"Core Module\""),
                          ("licenseSource without https", "https://example.invalid/license.txt", "http://example.invalid/license.txt"),
                          ("licenseSource uppercase hash", "\"sha256\": \"" + new string('a', 64) + "\"", "\"sha256\": \"" + new string('A', 64) + "\"")

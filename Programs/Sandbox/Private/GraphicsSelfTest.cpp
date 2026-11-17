@@ -1,10 +1,17 @@
 #include "GraphicsSelfTest.h"
+#include "CullingSelfTest.h"
+#include "RenderLaneSelfTest.h"
+#include "TimingSelfTest.h"
+#include "UploadSelfTest.h"
+#include "VertexSelfTest.h"
 
 #include <Core/Containers/Array.h>
+#include <D3D11Graphics/D3D11Device.h>
 #include <D3D12Graphics/D3D12Device.h>
+#include <Graphics/GpuFenceEvent.h>
 #include <OpenGLGraphics/OpenGLDevice.h>
 #include <PlatformWindow/Window.h>
-#include <Renderer/Renderer.h>
+#include "SampleRenderer.h"
 #include <stdio.h>
 #include <Platform/Memory.h>
 
@@ -16,10 +23,11 @@ using namespace rocks;
 
 constexpr uint32 Size = 64;
 
-// 로컬 Y(왼쪽)·Z(위)를 clip X(오른쪽)·Y(위)로 보내는 변환이다. 단위 메시가 화면을 가득 채운다.
+// 로컬 Y(오른쪽)·Z(위)를 clip X(오른쪽)·Y(위)로 보내는 변환이다(+X를 바라보는 정면, UE 좌표).
+// 단위 메시가 화면을 가득 채운다.
 Mat4 FillScreen() noexcept {
     Mat4 matrix = Mat4::Zero();
-    matrix.m[4] = -2.0f; // y → clip x(오른쪽이 -Y)
+    matrix.m[4] = 2.0f;  // y → clip x
     matrix.m[9] = 2.0f;  // z → clip y
     matrix.m[14] = 0.5f; // clip z
     matrix.m[15] = 1.0f; // w
@@ -71,7 +79,7 @@ void Check(bool condition, const char* backend, const char* what) noexcept {
 }
 
 // 숨김 창에 스왑체인을 만들어 프레임·크기 변경·기록 중 파괴를 확인한다(화면 픽셀은 읽지 않는다).
-void RunSwapChainChecks(const char* name, graphics::Device& device, render::Renderer& renderer,
+void RunSwapChainChecks(const char* name, graphics::Device& device, sample::Renderer& renderer,
                         Allocator& allocator) noexcept {
     platform::WindowDesc windowDesc;
     windowDesc.title = "Rocks graphics self-test";
@@ -98,18 +106,18 @@ void RunSwapChainChecks(const char* name, graphics::Device& device, render::Rend
                device.LastError().Data());
         return;
     }
-    render::RenderView view;
+    sample::RenderView view;
     view.viewProjection = FillScreen();
     view.clear = {0.1f, 0.1f, 0.1f, 1.0f};
-    render::RenderItem item;
-    item.mesh = render::MeshKind::Triangle;
+    sample::RenderItem item;
+    item.mesh = sample::MeshKind::Triangle;
     auto frameOnce = [&]() {
         window.Value()->PumpEvents(queue);
         auto frame = device.BeginFrame(swapChain.Value(), view.clear);
         if (!frame) {
             return false;
         }
-        renderer.Draw(*frame.Value(), view, Span<const render::RenderItem>(&item, 1));
+        renderer.Draw(*frame.Value(), view, Span<const sample::RenderItem>(&item, 1));
         return device.EndFrame().IsOk();
     };
     bool frames = true;
@@ -124,8 +132,8 @@ void RunSwapChainChecks(const char* name, graphics::Device& device, render::Rend
     auto frame = device.BeginFrame(swapChain.Value(), view.clear);
     bool destroyed = frame.IsOk();
     if (frame) {
-        renderer.Draw(*frame.Value(), view, Span<const render::RenderItem>(&item, 1));
-        device.Destroy(swapChain.Value());
+        renderer.Draw(*frame.Value(), view, Span<const sample::RenderItem>(&item, 1));
+        device.Retire(swapChain.Value());
         destroyed = device.EndFrame().IsOk();
     }
     Check(destroyed && device.WaitIdle().IsOk(), name, "swap chain destroyed while recording");
@@ -133,12 +141,231 @@ void RunSwapChainChecks(const char* name, graphics::Device& device, render::Rend
           "destroyed swap chain handle is stale");
 }
 
+// 다른 스레드에서 fence 완료를 기다린 결과다.
+struct FenceWaiter {
+    graphics::Device* device = nullptr;
+    graphics::GpuFencePoint point;
+    bool signaled = false;
+};
+
+// fence 통지를 받은 결과다.
+struct FenceNotified {
+    platform::ManualResetEvent done;
+    ErrorCode result = ErrorCode::Cancelled;
+};
+
+// GX7 제출·완료·회수(RenderBase 4.4절): EndFrame 완료 지점, 다른 스레드의 대기, 완료 통지, Core
+// 작업 이벤트 연결, 다른 장치 지점 거부, fence 뒤 회수(OpenGL 포함 즉시 삭제 없음)를 확인한다.
+void RunFenceChecks(const char* name, graphics::Device& device, sample::Renderer& renderer,
+                    graphics::TextureHandle target, Allocator& allocator) noexcept {
+    sample::RenderView view;
+    view.viewProjection = FillScreen();
+    sample::RenderItem item;
+    item.mesh = sample::MeshKind::Triangle;
+    auto frame = device.BeginOffscreen(target, view.clear);
+    Check(frame.IsOk(), name, "fence frame begins");
+    if (!frame) {
+        return;
+    }
+    renderer.Draw(*frame.Value(), view, Span<const sample::RenderItem>(&item, 1));
+    auto submitted = device.EndFrame();
+    Check(submitted.IsOk() && !submitted.Value().IsNull() &&
+              submitted.Value().deviceEpoch == device.Info().deviceEpoch &&
+              device.LastSubmittedFence() == submitted.Value(),
+          name, "EndFrame returns this device's fence point");
+    if (!submitted) {
+        return;
+    }
+    const graphics::GpuFencePoint point = submitted.Value();
+
+    FenceWaiter waiter;
+    waiter.device = &device;
+    waiter.point = point;
+    platform::Thread thread;
+    const bool started = thread.Start(
+                             [](void* raw) noexcept {
+                                 auto* state = static_cast<FenceWaiter*>(raw);
+                                 auto waited = state->device->WaitFence(state->point);
+                                 state->signaled =
+                                     waited && waited.Value() == platform::WaitResult::Signaled;
+                             },
+                             &waiter) == platform::ThreadStatus::Success;
+    Check(started && thread.Join() == platform::ThreadStatus::Success && waiter.signaled, name,
+          "fence wait from another thread is signaled");
+    auto complete = device.IsFenceComplete(point);
+    Check(complete && complete.Value(), name, "waited fence is complete");
+
+    FenceNotified notified;
+    auto registered = device.NotifyFence(
+        point,
+        [](ErrorCode result, void* context) noexcept {
+            auto* state = static_cast<FenceNotified*>(context);
+            state->result = result;
+            state->done.Signal();
+        },
+        &notified);
+    Check(registered.IsOk() && notified.done.Wait() == platform::WaitResult::Signaled &&
+              notified.result == ErrorCode::None,
+          name, "fence notification reports completion");
+
+    // 이 장치가 신호하지 않은 지점은 거부한다.
+    graphics::GpuFencePoint foreign = point;
+    foreign.deviceEpoch += 1000;
+    graphics::GpuFencePoint future = point;
+    future.value += 1000;
+    Check(device.IsFenceComplete(foreign).Error() == ErrorCode::WrongContext &&
+              device.IsFenceComplete(future).Error() == ErrorCode::InvalidArgument,
+          name, "foreign and unsubmitted fence points are rejected");
+
+    // fence 완료를 작업 이벤트로 잇는다: 다음 제출이 끝나면 그 뒤 작업이 실행된다.
+    WorkerScheduler scheduler(allocator);
+    bool ran = false;
+    bool eventOk = scheduler.Start().IsOk();
+    if (eventOk) {
+        auto again = device.BeginOffscreen(target, view.clear);
+        auto nextPoint =
+            again ? device.EndFrame() : Result<graphics::GpuFencePoint>::Failure(again.Error());
+        auto event = scheduler.TryCreateEvent();
+        auto body = Function<void(WorkerTaskContext&)>::TryCreate(
+            allocator, [&ran](WorkerTaskContext&) noexcept { ran = true; });
+        eventOk = nextPoint.IsOk() && event.IsOk() && body.IsOk();
+        if (eventOk) {
+            auto after = Span<const WorkerTaskHandle>(&event.Value().Handle(), 1);
+            auto task = scheduler.Submit(Move(body.Value()), after);
+            eventOk = task.IsOk() && graphics::TrySubmitFenceEvent(device, nextPoint.Value(),
+                                                                   Move(event.Value()), allocator)
+                                         .IsOk();
+            if (eventOk) {
+                auto waited = task.Value().Wait();
+                auto status = task.Value().Status();
+                eventOk = waited && status && status.Value().state == WorkerTaskState::Succeeded;
+            }
+        }
+        eventOk = scheduler.Shutdown().IsOk() && eventOk;
+    }
+    Check(eventOk && ran, name, "fence completion triggers a worker task event");
+
+    // fence 뒤 회수: Retire는 즉시 지우지 않고 회수 대기에 두며, 끝난 fence 뒤 ReclaimCompleted가
+    // 지운다.
+    Check(device.WaitIdle().IsOk() && device.PendingRetireCount() == 0, name,
+          "nothing is pending after WaitIdle");
+    const uint8 bytes[12] = {};
+    graphics::BufferDesc bufferDesc;
+    bufferDesc.size = sizeof(bytes);
+    auto doomed = device.CreateBuffer(bufferDesc, Span<const uint8>(bytes, sizeof(bytes)));
+    Check(doomed.IsOk(), name, "retire probe buffer");
+    if (doomed) {
+        // 초기 데이터 업로드가 아직 제출되지 않았을 수 있다(D3D12 업로드 기록). 그 제출의 fence가
+        // 끝나기 전에는 회수하지 않는다.
+        device.Retire(doomed.Value());
+        const usize pending = device.PendingRetireCount();
+        device.ReclaimCompleted();
+        const bool reclaimed = device.WaitIdle().IsOk() && device.PendingRetireCount() == 0;
+        Check(pending == 1 && reclaimed, name,
+              "retired buffer waits for its fence then is reclaimed");
+    }
+}
+
+// 소유권을 넘겨받은 스레드에서 그리는 시험의 상태다.
+struct OwnerThreadRun {
+    graphics::Device* device = nullptr;
+    sample::Renderer* renderer = nullptr;
+    graphics::TextureHandle target;
+    Array<uint8>* pixels = nullptr;
+    platform::ManualResetEvent acquired;
+    platform::ManualResetEvent proceed;
+    bool owned = false;
+    bool drew = false;
+    bool released = false;
+
+    static void Run(void* raw) noexcept {
+        auto* self = static_cast<OwnerThreadRun*>(raw);
+        self->owned = self->device->AcquireOwnership().IsOk() && self->device->IsOwnerThread();
+        self->acquired.Signal();
+        self->proceed.Wait();
+        if (self->owned) {
+            sample::RenderView view;
+            view.viewProjection = FillScreen();
+            sample::RenderItem item;
+            item.mesh = sample::MeshKind::Triangle;
+            auto frame = self->device->BeginOffscreen(self->target, view.clear);
+            if (frame) {
+                self->renderer->Draw(*frame.Value(), view,
+                                     Span<const sample::RenderItem>(&item, 1));
+                self->drew = self->device->EndFrame().IsOk() &&
+                             self->pixels->TryResize(static_cast<usize>(Size) * Size * 4).IsOk() &&
+                             self->device->ReadPixels(self->target, self->pixels->View()).IsOk();
+            }
+        }
+        self->released = self->device->ReleaseOwnership().IsOk();
+    }
+};
+
+// GX11 장치 스레드 모델·GX10 소유권 이관(RenderBase 5.4절): 생성 스레드 안전 여부 공개, 소유자가
+// 없을 때 소유 스레드 전용 호출 거부(Development), 다른 스레드로 넘겨 그리고 되돌려 받기를
+// 확인한다.
+void RunOwnershipChecks(const char* name, graphics::Device& device, sample::Renderer& renderer,
+                        graphics::TextureHandle target, Allocator& allocator) noexcept {
+    // D3D12·D3D11은 생성이 스레드 안전이고(GX8 업로드 경로), OpenGL은 소유 스레드 전용이다.
+    const bool concurrent = device.Info().backend != graphics::Backend::OpenGL;
+    Check(device.Info().concurrentResourceCreation == concurrent && device.IsOwnerThread(), name,
+          "device starts owned by its creating thread");
+    Check(device.ReleaseOwnership().IsOk() && !device.IsOwnerThread(), name,
+          "owner releases the device");
+    if constexpr (!IsReleaseBuild) {
+        const uint64 before = device.RejectedCalls();
+        const graphics::ClearColor clear;
+        const bool rejected =
+            device.BeginOffscreen(target, clear).Error() == ErrorCode::WrongThread &&
+            device.WaitIdle().Error() == ErrorCode::WrongThread;
+        device.ReclaimCompleted();
+        Check(rejected && device.RejectedCalls() == before + 3, name,
+              "owner-only calls are rejected while the device has no owner");
+    }
+
+    Array<uint8> pixels(allocator);
+    OwnerThreadRun run;
+    run.device = &device;
+    run.renderer = &renderer;
+    run.target = target;
+    run.pixels = &pixels;
+    platform::Thread thread;
+    const bool started =
+        thread.Start(&OwnerThreadRun::Run, &run) == platform::ThreadStatus::Success;
+    if (started) {
+        run.acquired.Wait();
+        // 다른 스레드가 가진 동안 이 스레드는 잡거나 놓을 수 없다.
+        Check(device.AcquireOwnership().Error() == ErrorCode::Busy &&
+                  device.ReleaseOwnership().Error() == ErrorCode::WrongThread,
+              name, "a second thread cannot take or drop an owned device");
+        run.proceed.Signal();
+        Check(thread.Join() == platform::ThreadStatus::Success, name, "owner thread joins");
+    }
+    Check(started && run.owned && run.drew && run.released, name,
+          "another thread takes the device, draws and releases it");
+    if (!(run.owned && run.drew && run.released)) {
+        printf("    owned %d drew %d released %d: %.*s\n", run.owned ? 1 : 0, run.drew ? 1 : 0,
+               run.released ? 1 : 0, static_cast<int>(device.LastError().ByteCount()),
+               device.LastError().Data());
+    }
+    Check(pixels.Size() == static_cast<usize>(Size) * Size * 4 && Dominant(At(pixels, 32, 4), 0),
+          name, "frame drawn on the new owner thread is correct");
+    Check(device.AcquireOwnership().IsOk() && device.IsOwnerThread(), name,
+          "original thread takes the device back");
+}
+
 // 한 backend에서 삼각형·사각형을 그려 픽셀을 검사한다.
 void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
-                BackendResult& result) noexcept {
+                BackendResult& result,
+                const graphics::DeviceCreateReport* report = nullptr) noexcept {
     if (!created) {
         printf("  [NOT RUN] %s: device unavailable (error %u)\n", name,
                static_cast<unsigned>(created.Error()));
+        if (report != nullptr && report->stage[0] != '\0') {
+            printf("    %s (native 0x%08llX): %s\n", report->stage,
+                   static_cast<unsigned long long>(report->nativeCode), report->detail);
+        }
+
         return;
     }
     result.ran = true;
@@ -149,7 +376,7 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
            info.adapterName.Data(), info.validationEnabled ? "on" : "off",
            info.software ? ", software" : "");
 
-    render::Renderer renderer;
+    sample::Renderer renderer;
     auto initialized = renderer.Initialize(device, graphics::Format::RGBA8UnormSrgb);
     if (!initialized) {
         printf("    %.*s\n", static_cast<int>(device.LastError().ByteCount()),
@@ -179,35 +406,35 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
         return;
     }
 
-    render::RenderView view;
+    sample::RenderView view;
     view.viewProjection = FillScreen();
     view.clear = {0.0f, 0.0f, 0.0f, 1.0f};
-    auto drawTo = [&](graphics::TextureHandle into, render::MeshKind mesh,
+    auto drawTo = [&](graphics::TextureHandle into, sample::MeshKind mesh,
                       graphics::TextureHandle bound, Array<uint8>& out) {
-        render::RenderItem item;
+        sample::RenderItem item;
         item.mesh = mesh;
         item.texture = bound;
         auto frame = device.BeginOffscreen(into, view.clear);
         if (!frame) {
             return false;
         }
-        renderer.Draw(*frame.Value(), view, Span<const render::RenderItem>(&item, 1));
+        renderer.Draw(*frame.Value(), view, Span<const sample::RenderItem>(&item, 1));
         if (!device.EndFrame() || !out.TryResize(static_cast<usize>(Size) * Size * 4)) {
             return false;
         }
         return device.ReadPixels(into, out.View()).IsOk();
     };
-    auto draw = [&](render::MeshKind mesh, graphics::TextureHandle bound, Array<uint8>& out) {
+    auto draw = [&](sample::MeshKind mesh, graphics::TextureHandle bound, Array<uint8>& out) {
         return drawTo(target.Value(), mesh, bound, out);
     };
 
-    Check(draw(render::MeshKind::Triangle, {}, result.triangle), name, "triangle render/readback");
-    Check(draw(render::MeshKind::Quad, texture.Value(), result.quad), name, "quad render/readback");
+    Check(draw(sample::MeshKind::Triangle, {}, result.triangle), name, "triangle render/readback");
+    Check(draw(sample::MeshKind::Quad, texture.Value(), result.quad), name, "quad render/readback");
 
     // RenderTarget을 텍스처로 샘플링해도 위아래가 바뀌지 않아야 한다(GL은 원점 규약이 다르다).
     auto copyTarget = device.CreateTexture(targetDesc, {});
     Check(copyTarget.IsOk() &&
-              drawTo(copyTarget.Value(), render::MeshKind::Quad, target.Value(), result.copy),
+              drawTo(copyTarget.Value(), sample::MeshKind::Quad, target.Value(), result.copy),
           name, "render target sampled as a texture");
     if (result.copy.Size() == result.quad.Size()) {
         Check(Dominant(At(result.copy, 4, 4), 0), name, "sampled render target keeps top-left red");
@@ -215,7 +442,7 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
               "sampled render target keeps bottom-left blue");
     }
     if (copyTarget) {
-        device.Destroy(copyTarget.Value());
+        device.Retire(copyTarget.Value());
     }
 
     // 기록 중 파괴한 텍스처는 그 프레임이 끝날 때까지 살아 있어야 한다. 파괴 뒤 업로드(별도
@@ -230,16 +457,16 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
         if (!doomed) {
             return false;
         }
-        render::RenderItem item;
-        item.mesh = render::MeshKind::Quad;
+        sample::RenderItem item;
+        item.mesh = sample::MeshKind::Quad;
         item.texture = doomed.Value();
         auto frame = device.BeginOffscreen(target.Value(), view.clear);
         if (!frame) {
-            device.Destroy(doomed.Value());
+            device.Retire(doomed.Value());
             return false;
         }
-        renderer.Draw(*frame.Value(), view, Span<const render::RenderItem>(&item, 1));
-        device.Destroy(doomed.Value());
+        renderer.Draw(*frame.Value(), view, Span<const sample::RenderItem>(&item, 1));
+        device.Retire(doomed.Value());
         bool ok = true;
         if (waitIdle) {
             ok = device.WaitIdle().IsOk();
@@ -251,7 +478,7 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
              device.ReadPixels(target.Value(), pixels.View()).IsOk() &&
              Dominant(At(pixels, 32, 32), 0);
         if (replacement) {
-            device.Destroy(replacement.Value());
+            device.Retire(replacement.Value());
         }
         return ok;
     };
@@ -265,9 +492,9 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
         desc.sampler.addressV = address;
         auto probe = device.CreateTexture(desc, Span<const uint8>(checker, sizeof(checker)));
         Array<uint8> pixels(result.triangle.GetAllocator());
-        const bool ok = probe.IsOk() && draw(render::MeshKind::Quad, probe.Value(), pixels);
+        const bool ok = probe.IsOk() && draw(sample::MeshKind::Quad, probe.Value(), pixels);
         if (probe) {
-            device.Destroy(probe.Value());
+            device.Retire(probe.Value());
         }
         if (ok) {
             out = At(pixels, x, y);
@@ -318,8 +545,8 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
         Array<uint8> pixels(result.triangle.GetAllocator());
         bool drawn = false;
         if (mipped) {
-            render::RenderItem item;
-            item.mesh = render::MeshKind::Quad;
+            sample::RenderItem item;
+            item.mesh = sample::MeshKind::Quad;
             item.texture = mipped.Value();
             // 단위 사각형을 1/16로 줄여 64픽셀 대상에서 4×4 픽셀을 덮는다.
             item.world = Mat4::Identity();
@@ -328,12 +555,12 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
             item.world.m[10] = 1.0f / 16.0f;
             auto frame = device.BeginOffscreen(target.Value(), view.clear);
             if (frame) {
-                renderer.Draw(*frame.Value(), view, Span<const render::RenderItem>(&item, 1));
+                renderer.Draw(*frame.Value(), view, Span<const sample::RenderItem>(&item, 1));
                 drawn = device.EndFrame().IsOk() &&
                         pixels.TryResize(static_cast<usize>(Size) * Size * 4).IsOk() &&
                         device.ReadPixels(target.Value(), pixels.View()).IsOk();
             }
-            device.Destroy(mipped.Value());
+            device.Retire(mipped.Value());
         }
         Check(mipped.IsOk() && drawn && Dominant(At(pixels, 31, 31), 2), name,
               "minified texture samples the matching mip level");
@@ -358,21 +585,31 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
         Check(white.r > 200 && white.g > 200 && white.b > 200, name,
               "quad bottom-right samples white");
     }
+    RunFenceChecks(name, device, renderer, target.Value(), result.triangle.GetAllocator());
+    RunOwnershipChecks(name, device, renderer, target.Value(), result.triangle.GetAllocator());
     RunSwapChainChecks(name, device, renderer, result.triangle.GetAllocator());
+    // 좌표·앞면 규약(C7): 컬 모드·음수 행렬식 반전·행 우선 행렬을 창·offscreen 두 경로로 확인한다.
+    failures += RunCullingChecks(name, device, renderer, result.triangle.GetAllocator());
     Check(device.IgnoredDraws() == 0, name, "no ignored draws");
+    // 정점 배치(GX3a): 형식 20종·stream·인스턴스·index·정점 버퍼 없는 그리기와 음성 대조.
+    failures += RunVertexChecks(name, device, result.triangle.GetAllocator());
+    // 업로드·readback(GX8): 내용 갱신·ring wrap·staging 회수·비동기 readback·다른 스레드 생성.
+    failures += RunUploadChecks(name, device, renderer, result.triangle.GetAllocator());
+    // GPU 계측(GX9): timestamp 쌍·slot 재사용·calibration·debug marker.
+    failures += RunTimingChecks(name, device, renderer, result.triangle.GetAllocator());
     Check(device.ValidationErrorCount() == 0, name, "no validation errors");
 
     // 검증 오류 집계가 실제로 동작하는지 확인한다: D3D12는 파이프라인 RTV 형식과 다른 대상에
     // 그리면 debug layer 오류다(OpenGL에는 대응 오류가 없다).
     if (info.backend == graphics::Backend::D3D12 && info.validationEnabled) {
         const uint64 before = device.ValidationErrorCount();
-        render::Renderer mismatched;
+        sample::Renderer mismatched;
         if (mismatched.Initialize(device, graphics::Format::RGBA8Unorm)) {
-            render::RenderItem item;
-            item.mesh = render::MeshKind::Triangle;
+            sample::RenderItem item;
+            item.mesh = sample::MeshKind::Triangle;
             auto frame = device.BeginOffscreen(target.Value(), view.clear);
             if (frame) {
-                mismatched.Draw(*frame.Value(), view, Span<const render::RenderItem>(&item, 1));
+                mismatched.Draw(*frame.Value(), view, Span<const sample::RenderItem>(&item, 1));
                 auto ended = device.EndFrame();
                 (void)ended;
             }
@@ -382,13 +619,52 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
               "validation layer error is counted (intentional RTV format mismatch)");
     }
 
-    device.Destroy(texture.Value());
-    device.Destroy(target.Value());
+    device.Retire(texture.Value());
+    device.Retire(target.Value());
     renderer.Shutdown();
     auto idle = device.WaitIdle();
     Check(idle.IsOk(), name, "wait idle");
+    if (!idle) {
+        printf("    %.*s\n", static_cast<int>(device.LastError().ByteCount()),
+               device.LastError().Data());
+    }
+    // 렌더 lane(RB1): 장치를 lane으로 넘겨 엔진 루프 프레임을 그리고 되돌려 받는다.
+    failures += RunRenderLaneChecks(name, device, result.triangle.GetAllocator());
     result.passed = failures == before;
     printf("  [%s] %s\n", result.passed ? "PASS" : "FAIL", name);
+}
+
+// D3D11 검증 계층 집계가 실제로 동작하는지 확인한다. D3D11은 파이프라인에 RTV 형식이 없으므로 정점
+// 용도 버퍼를 index 버퍼로 묶는다(D3D11 버퍼는 용도별 bind flag로 만든다). 이 오류는 WARP 장치를
+// 제거하므로 검사 장치와 따로 만든 단기 장치에서 한다.
+void RunD3D11ValidationProbe(const char* name,
+                             Result<UniquePtr<graphics::Device>> created) noexcept {
+    if (!created || !created.Value()->Info().validationEnabled) {
+        return;
+    }
+
+    graphics::Device& device = *created.Value();
+    graphics::TextureDesc targetDesc;
+    targetDesc.width = Size;
+    targetDesc.height = Size;
+    targetDesc.usage = graphics::TextureUsage::RenderTarget;
+    auto target = device.CreateTexture(targetDesc, {});
+    const uint8 bytes[16] = {};
+    graphics::BufferDesc vertexDesc;
+    vertexDesc.size = sizeof(bytes);
+    auto vertexOnly = device.CreateBuffer(vertexDesc, Span<const uint8>(bytes, sizeof(bytes)));
+    const uint64 before = device.ValidationErrorCount();
+    if (target && vertexOnly) {
+        auto frame = device.BeginOffscreen(target.Value(), {});
+        if (frame) {
+            frame.Value()->SetIndexBuffer(vertexOnly.Value(), graphics::IndexFormat::UInt16);
+            auto ended = device.EndFrame();
+            (void)ended;
+        }
+    }
+
+    Check(device.ValidationErrorCount() > before, name,
+          "validation layer error is counted (intentional index buffer bind flag mismatch)");
 }
 
 // 두 backend의 결과가 픽셀 단위로 거의 같은지 본다(래스터화·필터링 차이 허용 범위 안).
@@ -428,15 +704,26 @@ int RunGraphicsSelfTest(Allocator& allocator) noexcept {
     desc.enableValidation = true;
     BackendResult d3d12(allocator);
     BackendResult warp(allocator);
+    BackendResult d3d11(allocator);
+    BackendResult d3d11Warp(allocator);
     BackendResult opengl(allocator);
     RunBackend("D3D12", graphics::CreateD3D12Device(allocator, desc), d3d12);
     graphics::DeviceDesc software = desc;
     software.preferSoftware = true;
     RunBackend("D3D12 WARP", graphics::CreateD3D12Device(allocator, software), warp);
+    graphics::DeviceCreateReport report;
+    RunBackend("D3D11", graphics::CreateD3D11Device(allocator, desc, &report), d3d11, &report);
+    RunBackend("D3D11 WARP", graphics::CreateD3D11Device(allocator, software, &report), d3d11Warp,
+               &report);
+    RunD3D11ValidationProbe("D3D11", graphics::CreateD3D11Device(allocator, desc));
+    RunD3D11ValidationProbe("D3D11 WARP", graphics::CreateD3D11Device(allocator, software));
     RunBackend("OpenGL", graphics::CreateOpenGLDevice(allocator, desc), opengl);
     Compare(d3d12, opengl, "D3D12 vs OpenGL");
     Compare(d3d12, warp, "D3D12 vs WARP");
-    const bool anyRan = d3d12.ran || warp.ran || opengl.ran;
+    Compare(d3d12, d3d11, "D3D12 vs D3D11");
+    Compare(d3d12, d3d11Warp, "D3D12 vs D3D11 WARP");
+    Compare(warp, d3d11Warp, "D3D12 WARP vs D3D11 WARP");
+    const bool anyRan = d3d12.ran || warp.ran || d3d11.ran || d3d11Warp.ran || opengl.ran;
     printf("Graphics self-test: %s (%u failure%s)\n",
            failures == 0 && anyRan ? "PASS" : (anyRan ? "FAIL" : "NOT RUN"), failures,
            failures == 1 ? "" : "s");

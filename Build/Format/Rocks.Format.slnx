@@ -1,8 +1,8 @@
 <!--
-  C# 서식 검사 작업 영역이다. Rocks.ToolTests format이 이 솔루션 하나로 `dotnet format`을 한 번 실행한다(프로젝트를 하나만
-  주면 dotnet format은 참조 프로젝트를 건너뛰므로 저장소의 C# 프로젝트를 모두 여기 둔다). 저장소의 C# 소스(Build·Core·Engine·
-  Programs·Templates, 외부 라이브러리 원본 제외)가 모두 이 프로젝트들의 Compile 항목인지도 함께 확인하므로, 새 C# 프로젝트나
-  어느 프로젝트에도 속하지 않는 .cs를 더하면 검사가 그 파일을 알린다.
+  C# format check workspace. Rocks.ToolTests format runs `dotnet format` once with this single solution (given a single project,
+  dotnet format skips referenced projects, so every C# project of the repository is listed here). It also checks that every C# source of the repository (Build, Core, Engine,
+  Programs, Templates, excluding external library sources) is a Compile item of these projects, so adding a new C# project or
+  a .cs that belongs to no project makes the check report that file.
 -->
 <Solution>
   <Project Path="../Rules/Rocks.Engine.Rules.csproj" />

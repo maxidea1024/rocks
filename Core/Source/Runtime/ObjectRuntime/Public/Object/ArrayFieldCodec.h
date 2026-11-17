@@ -7,7 +7,8 @@
 // 5.6절). 원소 wire 준비(ElementWireValue·ElementArrayShape·PrepareEnumElements), RecordList
 // 한도(ArrayRecordListLimits), 쓰기(EncodeArrayField), 원소 종류별 읽기(DecodeValueArray·
 // DecodeReferenceArray·DecodeStructArray)와 그 분기(DecodeArrayField), 생성 Trace 도우미
-// (TraceArrayField)가 있다. Object/GeneratedFieldCodec.h로 받는다.
+// (TraceArrayField — 정적 배열 오버로드 포함)가 있다. 배열·정적 배열 공용 원소 쓰기는
+// EncodeArrayElements다. Object/GeneratedFieldCodec.h로 받는다.
 namespace rocks::detail {
 
 // 배열 원소 하나를 WriteValueWire 입력(value·text)으로 옮긴다. String·경로는 복사하지 않고 view로
@@ -76,6 +77,20 @@ inline RecordListLimits ArrayRecordListLimits(usize valueBytes) noexcept {
     return limits;
 }
 
+// 참조 원소의 handle이다(ObjectRefArray의 원소 읽기는 ObjectHandle, 정적 배열은 ObjectRef<T>).
+inline ObjectHandle ElementReferenceHandle(ObjectHandle handle) noexcept {
+    return handle;
+}
+
+template <class T>
+ObjectHandle ElementReferenceHandle(const ObjectRef<T>& reference) noexcept {
+    return reference.Handle();
+}
+
+template <class Element, class Elements>
+Result<uint32> EncodeArrayElements(const Elements& array, usize count, ArchiveWriter& out,
+                                   FieldEncodeContext& context) noexcept;
+
 // 지금 위치(배열 필드 — context.Field())의 컨테이너 array를 out에 제자리로 쓰고 wire tag를
 // 돌려준다(5.6절). 순서: MatchesSchema(struct 원소는 MatchesStructView도 — TypeMismatch) →
 // Size ≤ maxElements(넘으면 배열 필드 경로의 ArrayTooLong 진단 뒤 CapacityExceeded — Required 검사
@@ -120,6 +135,17 @@ Result<uint32> EncodeArrayField(const Container& array, ArchiveWriter& out,
         return Result<uint32>::Failure(ErrorCode::CapacityExceeded);
     }
 
+    return EncodeArrayElements<Element>(array, count, out, context);
+}
+
+// 배열·정적 배열(리플렉션 B9g) 필드 원소 count개를 out에 쓰고 wire tag를 돌려준다(EncodeArrayField·
+// EncodeStaticArrayField 공용 — 호출자가 MatchesSchema·MatchesStructView와 원소 수 상한을 봤다).
+// elements[i]는 원소 i다(ObjectRefArray는 ObjectHandle, 정적 배열은 원소 형식 그대로). 순서와
+// 검증은 EncodeArrayField 주석의 AddElements 뒤와 같다.
+template <class Element, class Elements>
+Result<uint32> EncodeArrayElements(const Elements& array, usize count, ArchiveWriter& out,
+                                   FieldEncodeContext& context) noexcept {
+    const FieldSchema& field = context.Field();
     if (auto counted = context.AddElements(count); !counted) {
         return Result<uint32>::Failure(counted.Error());
     }
@@ -187,7 +213,7 @@ Result<uint32> EncodeArrayField(const Container& array, ArchiveWriter& out,
             StringView text;
             if constexpr (ObjectReferenceField<Element>::Supported) {
                 value.kind = ValueKind::ObjectReference;
-                value.reference = array[index];
+                value.reference = ElementReferenceHandle(array[index]);
             } else if (auto copied = ElementWireValue(array[index], value, text); !copied) {
                 return Result<uint32>::Failure(copied.Error());
             }
@@ -634,6 +660,24 @@ void TraceArrayField(const ObjectRefArray<T>& array, TraceVisitor& visitor) noex
 template <class S>
 void TraceArrayField(const StructRefArray<S>& array, TraceVisitor& visitor) noexcept {
     array.Trace(visitor);
+}
+
+// 정적 배열(T x[N] — 리플렉션 B9g)은 ObjectRef 원소를 모두 방문하고 struct 원소는 원소마다 그
+// struct의 생성 Trace(참조 없는 struct는 빈 본문)를 부른다. 그 밖의 원소는 강한 참조가 없다.
+template <class E, usize N>
+void TraceArrayField(const E (&array)[N], TraceVisitor& visitor) noexcept {
+    if constexpr (ObjectReferenceField<E>::Supported) {
+        for (const E& element : array) {
+            visitor.Visit(element);
+        }
+    } else if constexpr (ReflectedStructField<E>::Supported) {
+        for (const E& element : array) {
+            GeneratedType<E>::Trace(element, visitor);
+        }
+    } else {
+        (void)array;
+        (void)visitor;
+    }
 }
 
 } // namespace rocks::detail

@@ -36,6 +36,27 @@ public:
         return current_ ? current_->effectiveFlags : 0;
     }
 
+    // 지금 위치(필드·struct 멤버)가 포함 필터 includeFlags 밖인지다(리플렉션 B9h1 —
+    // Docs/Design/ReflectionExtensions.ko.md 9.1절). includeFlags가 0이면 끔이다. 판정은 자기
+    // 플래그(field.flags — 바깥에서 전파하지 않는다)로 하고, 조상 위치의 struct가 Atomic이면(통째
+    // 단위 — Atomic struct 안의 멤버) 밖이 아니다. 위치 밖에서는 거짓이다.
+    //
+    // 사용 예(저장·복원 문맥의 ExcludesCurrent):
+    //   return IsExcluded(EffectiveFlags()) || IsOutsideInclude(policy_.includeFlags);
+    bool IsOutsideInclude(uint32 includeFlags) const noexcept {
+        if (includeFlags == 0 || !current_) {
+            return false;
+        }
+
+        for (const FieldCodecFrame* frame = current_->parent; frame; frame = frame->parent) {
+            if (!frame->structure.IsEmpty() && frame->structure.IsAtomic()) {
+                return false;
+            }
+        }
+
+        return (current_->field->flags & includeFlags) == 0;
+    }
+
     const EnumSchema* FieldEnum() const noexcept {
         return current_ ? current_->enumeration : nullptr;
     }
@@ -274,11 +295,12 @@ public:
     [[nodiscard]] explicit ElementIndexScope(FieldCodecContext& context) noexcept
         : context_(context), frame_(context.current_) {
         const ValueKind kind = frame_ ? frame_->field->value.kind : ValueKind::Opaque;
-        if ((kind != ValueKind::Array && kind != ValueKind::Map && kind != ValueKind::Set) ||
+        if ((kind != ValueKind::Array && kind != ValueKind::Map && kind != ValueKind::Set &&
+             kind != ValueKind::StaticArray) ||
             frame_->index != FieldCodecFrame::NoIndex) {
             platform::Fatal(
-                "ElementIndexScope requires an array, map or set field frame without an "
-                "index");
+                "ElementIndexScope requires an array, static array, map or set field frame "
+                "without an index");
         }
     }
 

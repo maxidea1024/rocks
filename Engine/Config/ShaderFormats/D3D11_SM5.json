@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "id": "D3D11_SM5",
+  "status": "supported",
+  "backend": "D3D11",
+  "processor": { "module": "ShaderFormatD3D", "version": 1 },
+  "bindingConvention": 1,
+  "tools": ["D3DCompiler", "DirectXShaderCompiler", "SpirvTools", "SpirvCross"],
+  "language": { "hlsl2021": false },
+  "compiler": {
+    "path": "Fxc",
+    "shaderModel": "5_0",
+    "imageFormat": "Empty",
+    "fallbackPath": "DxcSpirvHlsl50Fxc",
+    "spirvTargetEnv": "vulkan1.1"
+  },
+  "stages": ["vertex", "pixel", "compute"],
+  "limits": {
+    "constantBuffers": 13,
+    "sampledTextures": 128,
+    "storageBuffers": 128,
+    "storageImages": 8,
+    "samplers": 16,
+    "uavTotal": 8,
+    "uavStages": ["compute"],
+    "renderTargets": 8,
+    "interStageVectors": 16,
+    "rootConstantBytes": 128
+  },
+  "features": ["compute"],
+  "deviceRequirements": ["D3D_FEATURE_LEVEL_11_0"],
+  "producers": [{ "host": "windows-x64" }]
+}

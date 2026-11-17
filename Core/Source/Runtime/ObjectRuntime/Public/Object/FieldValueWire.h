@@ -76,6 +76,7 @@ inline Result<uint32> FieldWireType(ValueKind kind, uint32 referenceWire) noexce
         // 원소 wire + count + 원소(같은 문서 1.2·7.2절).
         return Result<uint32>::Success(static_cast<uint32>(WireType::Set));
     case ValueKind::Array:
+    case ValueKind::StaticArray:
     case ValueKind::Opaque:
         break;
     }
@@ -83,12 +84,13 @@ inline Result<uint32> FieldWireType(ValueKind kind, uint32 referenceWire) noexce
     return Result<uint32>::Failure(ErrorCode::Unsupported);
 }
 
-// 필드 하나의 wire tag다(5.6절). 배열은 원소가 Struct면 RecordList, 그 밖의 단일 값 원소면
-// ValueArray다(원소가 Opaque·Array면 Unsupported). Optional은 내부 종류가 Optional 내부 종류(성질
-// 표)일 때 Optional이다(아니면 Unsupported — 내부 wire는 FieldWireType(element.kind)). Map은 키가
-// Map 키 종류이고 값이 Map 값 종류(ObjectReference는 ObjectRefMap — 리플렉션 B9f4)일 때 Map,
-// Set은 원소가 Set 원소 종류일 때 Set이다(아니면 Unsupported — 리플렉션 B9f2). 그 밖은 값 종류의
-// wire다. 직렬화기의 wire 재확인·ValidateLayout·struct encode의 멤버 wire 재확인이 쓴다.
+// 필드 하나의 wire tag다(5.6절). 배열·정적 배열(리플렉션 B9g)은 원소가 Struct면 RecordList, 그
+// 밖의 단일 값 원소면 ValueArray다(원소가 Opaque·컨테이너면 Unsupported). Optional은 내부 종류가
+// Optional 내부 종류(성질 표)일 때 Optional이다(아니면 Unsupported — 내부 wire는
+// FieldWireType(element.kind)). Map은 키가 Map 키 종류이고 값이 Map 값 종류(ObjectReference는
+// ObjectRefMap — 리플렉션 B9f4)일 때 Map, Set은 원소가 Set 원소 종류일 때 Set이다(아니면
+// Unsupported — 리플렉션 B9f2). 그 밖은 값 종류의 wire다. 직렬화기의 wire
+// 재확인·ValidateLayout·struct encode의 멤버 wire 재확인이 쓴다.
 inline Result<uint32> FieldWireType(const FieldSchema& field, uint32 referenceWire) noexcept {
     if (field.value.kind == ValueKind::Optional) {
         if (!ValueKindCanBeOptionalInner(field.element.kind)) {
@@ -114,7 +116,13 @@ inline Result<uint32> FieldWireType(const FieldSchema& field, uint32 referenceWi
         return Result<uint32>::Success(static_cast<uint32>(WireType::Set));
     }
 
-    if (field.value.kind != ValueKind::Array) {
+    // 정적 배열(리플렉션 B9g)은 원소가 정적 배열 원소 종류일 때 배열과 같은 wire다(늘 N개).
+    if (field.value.kind == ValueKind::StaticArray &&
+        !ValueKindCanBeStaticArrayElement(field.element.kind)) {
+        return Result<uint32>::Failure(ErrorCode::Unsupported);
+    }
+
+    if (field.value.kind != ValueKind::Array && field.value.kind != ValueKind::StaticArray) {
         return FieldWireType(field.value.kind, referenceWire);
     }
 
@@ -468,6 +476,7 @@ inline Result<void> WriteValueWire(ArchiveWriter& out, FieldEncodeContext& conte
     case ValueKind::Optional:
     case ValueKind::Map:
     case ValueKind::Set:
+    case ValueKind::StaticArray:
     case ValueKind::Opaque:
         break;
     }

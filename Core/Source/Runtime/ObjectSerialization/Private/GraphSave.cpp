@@ -89,6 +89,15 @@ GraphEncodeContext::WriteReferenceWire(ArchiveWriter& out, ObjectHandle target,
         }
     }
 
+    // 저장 불가 대상(Exclude)은 외부 정책과 무관하게 null + 진단이다(집합 노드는 저장 전에 거부했다
+    // — 리플렉션 B9h2).
+    if (local == 0) {
+        auto unsaveable = WriteUnsaveable(out, target, *actual, true);
+        if (!unsaveable || unsaveable.Value()) {
+            return unsaveable ? Result<void>::Success() : Result<void>::Failure(unsaveable.Error());
+        }
+    }
+
     if (local != 0) {
         return out.WriteU32(local);
     }
@@ -187,7 +196,64 @@ GraphEncodeContext::WriteWeakReferenceWire(ArchiveWriter& out, ObjectHandle targ
         return out.WriteU32(*found);
     }
 
+    auto unsaveable = WriteUnsaveable(out, target, *actual, false);
+    if (!unsaveable || unsaveable.Value()) {
+        return unsaveable ? Result<void>::Success() : Result<void>::Failure(unsaveable.Error());
+    }
+
     return WriteExternalWeak(out, target, discovered, expectation);
+}
+
+Result<bool> GraphEncodeContext::WriteUnsaveable(ArchiveWriter& out, ObjectHandle target,
+                                                 const TypeLease& actual, bool strong) noexcept {
+    if (!excludeUnsaveable_) {
+        return Result<bool>::Success(false);
+    }
+
+    uint32 flags = actual.Schema().flags & UnsaveableTypeFlags;
+    for (ObjectHandle current = target; flags == 0;) {
+        auto outer = registry_.GetOuter(access_, current);
+        if (!outer) {
+            return Result<bool>::Failure(outer.Error());
+        }
+
+        current = outer.Value();
+        if (current == ObjectHandle{} || locals_.Find(current)) {
+            break;
+        }
+
+        if (auto spent = budget_.Spend(1); !spent) {
+            return Result<bool>::Failure(spent.Error());
+        }
+
+        auto type = registry_.AcquireType(access_, current);
+        if (!type) {
+            return Result<bool>::Failure(type.Error());
+        }
+
+        flags = type.Value().Schema().flags & UnsaveableTypeFlags;
+    }
+
+    if (flags == 0) {
+        return Result<bool>::Success(false);
+    }
+
+    const int64 reason = (flags & static_cast<uint32>(TypeFlags::Transient)) != 0 ? 3 : 4;
+    if (auto reported = Report(FieldDiagnosticKind::ExternalReference, reason); !reported) {
+        return Result<bool>::Failure(reported.Error());
+    }
+
+    if (strong) {
+        if (auto required = CheckRequired(true); !required) {
+            return Result<bool>::Failure(required.Error());
+        }
+    }
+
+    if (auto written = out.WriteU32(0); !written) {
+        return Result<bool>::Failure(written.Error());
+    }
+
+    return Result<bool>::Success(true);
 }
 
 // 기대 TypeId의 등록 타입 lease다(저장 끝까지 캐시에 쥔다). 조회·삽입마다 작업량 1이다.
@@ -281,7 +347,7 @@ Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
                          type.FieldStruct(fieldIndex), FieldCodecFrame::NoIndex,
                          type.FieldKeyEnum(fieldIndex));
         // Transient 참조는 GC 수명에는 참여하지만 저장 그래프에는 참여하지 않는다.
-        if (context.IsExcluded(context.EffectiveFlags())) {
+        if (context.ExcludesCurrent()) {
             continue;
         }
 
@@ -441,6 +507,13 @@ Result<ObjectGraphSaveResult> SaveObjectGraphSet(Allocator& allocator, ObjectReg
     for (usize index = 0; index < nodes.Size(); ++index) {
         if (auto layout = ValidateLayout(nodes[index].lease, budget.Value()); !layout) {
             return Output::Failure(layout.Error());
+        }
+
+        // 패키지 저장(Exclude)의 집합은 저장 불가 객체를 담지 않는다(호출자가 미리 거른다 — root
+        // 포함, 리플렉션 B9h2).
+        if (options.unsaveable == UnsaveablePolicy::Exclude &&
+            IsUnsaveableType(nodes[index].lease)) {
+            return Output::Failure(ErrorCode::InvalidArgument);
         }
     }
 

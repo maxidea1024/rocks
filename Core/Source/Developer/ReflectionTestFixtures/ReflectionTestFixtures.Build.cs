@@ -1,14 +1,14 @@
 using Rocks.Build.Rules;
 
-// 리플렉션 시험 fixture 모듈이다(Docs/Design/ReflectionFoundations.ko.md 1.9절). Foundation·Engine 시험 실행 파일이
-// 의존하며, 리플렉션 헤더와 identity 명세(ReflectionTestFixtures.rocksids.json)를 이 모듈이 소유한다. 헤더만 있다.
+// Reflection test fixture module (Docs/Design/ReflectionFoundations.ko.md section 1.9). The Foundation and Engine test executables
+// depend on it, and this module owns the reflection headers and the identity spec (ReflectionTestFixtures.rocksids.json). Header only.
 public sealed class ReflectionTestFixtures : CoreModuleRules
 {
     protected override string Group => "Developer";
 
     protected override string ModuleName => "ReflectionTestFixtures";
 
-    // CoreTypeBindings: Core 값 타입 필드 fixture(CoreValueFixture.h)가 그 모듈의 Binds 미러를 import한다.
+    // CoreTypeBindings: the Core value type field fixture (CoreValueFixture.h) imports that module's Binds mirrors.
     protected override string[] RequiredModules => ["ObjectRuntime", "CoreTypeBindings"];
 
     protected override bool HasSources => false;
@@ -19,5 +19,8 @@ public sealed class ReflectionTestFixtures : CoreModuleRules
             "ReflectionTestFixtures/IntegerWidthFixture.h", "ReflectionTestFixtures/NameFieldFixture.h",
             "ReflectionTestFixtures/WeakRefFixture.h", "ReflectionTestFixtures/ClassRefFixture.h",
             "ReflectionTestFixtures/OptionalFixture.h", "ReflectionTestFixtures/MapFixture.h",
-            "ReflectionTestFixtures/ObjectRefMapFixture.h"];
+            "ReflectionTestFixtures/ObjectRefMapFixture.h", "ReflectionTestFixtures/StaticArrayFixture.h",
+            "ReflectionTestFixtures/FieldFlagFixture.h",
+            "ReflectionTestFixtures/ClassFlagFixture.h", "ReflectionTestFixtures/TextFixture.h",
+            "ReflectionTestFixtures/AssignFixture.h"];
 }

@@ -66,7 +66,9 @@ internal static partial class ModuleMetaTests
                 Verify.That(value.Contains(Compact(expected), StringComparison.Ordinal), "generated code missing " + reason + ": " + expected);
             }
 
-            Verify.That(!value.Contains("(cursor,&::probe::Value::next)", StringComparison.Ordinal), "single reference field has no path thunk");
+            // 단일 값 필드도 path thunk를 싣는다(리플렉션 B9i3c0 — staged 경로·Detach·Attach용).
+            Verify.That(value.Contains("PathClassField<::probe::Value,::rocks::ValueKind::ObjectReference>(cursor,&::probe::Value::next)", StringComparison.Ordinal),
+                "single reference field has a path thunk");
             Verify.That(!value.Contains("PathStructMember<", StringComparison.Ordinal), "import struct members are not regenerated in the derived module");
             string parent = Compact(File.ReadAllText(layout.Generated("Lower", "Public/Lower/Parent.generated.h")));
             foreach ((string expected, string reason) in new[]

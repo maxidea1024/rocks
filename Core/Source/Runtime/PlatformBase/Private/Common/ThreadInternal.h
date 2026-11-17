@@ -14,6 +14,10 @@ struct ThreadState {
     bool joinable = false;
     bool joining = false;
     bool completed = false;
+    // Start가 검사·복사한 생성 옵션이다. 실행 중에는 바꾸지 않는다(Start는 joinable 동안 거부된다).
+    ThreadPriority priority = ThreadPriority::Normal;
+    usize stackBytes = 0;
+    char name[MaxThreadNameBytes + 1]{};
     alignas(16) unsigned char native[16]{};
 };
 
@@ -21,5 +25,9 @@ struct ThreadState {
 ThreadStatus StartNativeThread(ThreadState&) noexcept;
 ThreadStatus JoinNativeThread(ThreadState&) noexcept;
 void RunThread(ThreadState&) noexcept;
+// 새 스레드 안에서 entry보다 먼저 부른다. 이름·우선순위를 현재 스레드에 적용하며 OS 거부는 무시한다
+// (ThreadOptions 계약: OS 힌트). 이름이 비어 있으면 붙이지 않고, Normal이면 우선순위를 바꾸지
+// 않는다.
+void ApplyCurrentThreadOptions(const ThreadState&) noexcept;
 
 } // namespace rocks::platform::detail

@@ -90,6 +90,8 @@ OuterSummary ObjectRegistry::DescribeSlotLocked(const Slot& slot,
     }
 
     summary.pathBytes = slot.pathBytes;
+    // Within 판정의 Outer 타입이다(slot이 사는 동안 유효 — 리플렉션 B9h2).
+    summary.type = &slot.type;
     return summary;
 }
 
@@ -333,6 +335,14 @@ Result<void> CheckNewObjectIdentity(const RegistryPolicy& policy, const TypeLeas
         } else if (outer->hasRepresentative) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
+    }
+
+    // 8a. Within(리플렉션 B9h2): Outer가 Within 클래스 또는 파생이어야 하고 Outer 없는 객체는 될 수
+    // 없다. Outer 타입을 모르는 요약(그래프 1단계의 기준 Outer)은 판정을 미룬다.
+    const TypeId within = type.Schema().withinType;
+    if (within != TypeId{} &&
+        (outer == nullptr || (outer->type != nullptr && !outer->type->IsA(within)))) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     // 9. 경로 길이.

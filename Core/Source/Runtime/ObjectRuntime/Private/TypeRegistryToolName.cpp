@@ -51,6 +51,9 @@ Result<TypeLease> TypeRegistry::AcquireDerivedClass(TypeId type, TypeId base) no
         return Result<TypeLease>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // Deprecated 클래스도 받는다(조회 — 저장된 값의 해석·진단). 생성·편집기 후보·ClassRef 새 값으로
+    // 쓸 소비자는 detail::CheckWritableClassReferenceLease처럼 Deprecated를 따로 거른다(리플렉션
+    // B9h2).
     return detail::CheckClassReferenceLease(Acquire(type), base, nullptr);
 }
 

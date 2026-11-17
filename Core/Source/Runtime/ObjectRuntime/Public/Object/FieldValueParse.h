@@ -32,6 +32,9 @@ struct ParsedValue {
     int64 stored = 0;
     bool unknownClass = false;
     TypeId storedClass{};
+    // ClassRef 값의 클래스가 Deprecated다(리플렉션 B9h2 — 값은 그대로 읽고 ReportParsedValue가
+    // DeprecatedType 진단을 낸다).
+    bool deprecatedClass = false;
 };
 
 // 읽은 ClassRef 값 하나(out.guid — 0이면 null)를 판정한다(리플렉션 B9d2 — Docs/Design/
@@ -46,7 +49,8 @@ struct ParsedValue {
 // - 2단계(입력 때문에 실패하지 않는다): TypeRegistry를 다시 조회하지 않고 TakeClassReference로
 //   1단계 판정을 받는다 — 두 단계 사이에 등록이 바뀌어도 결과는 1단계 판정·진단과 같다(어긋난 방문
 //   순서는 계약 위반 InvalidArgument).
-// Deprecated 클래스의 DeprecatedType 진단은 리플렉션 B9h2가 이 판정에 더한다. keyed(Map 키·Set
+// Deprecated 클래스 값은 받고 out.deprecatedClass를 표시한다(진단 DeprecatedType은
+// ReportParsedValue — 리플렉션 B9h2). keyed(Map 키·Set
 // 원소 자리 — 리플렉션 B9f2)면 ReportAndNull을 쓰지 않고 미등록은 늘 NotFound다(1.7절 — 대체 값이
 // 서로 다른 두 키를 같게 만들어 2단계에서 중복이 생기지 않게).
 inline Result<void> ResolveClassReference(FieldDecodeContext& context, TypeId base,
@@ -76,6 +80,7 @@ inline Result<void> ResolveClassReference(FieldDecodeContext& context, TypeId ba
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
+        out.deprecatedClass = HasFlag(found.Value().Schema().flags, TypeFlags::Deprecated);
         return context.CollectClassReference(out.guid, false);
     }
 
@@ -312,6 +317,7 @@ inline Result<void> ReadValueWire(ArchiveReader& reader, FieldDecodeContext& con
     case ValueKind::Optional:
     case ValueKind::Map:
     case ValueKind::Set:
+    case ValueKind::StaticArray:
     case ValueKind::Opaque:
         break;
     }
@@ -361,6 +367,13 @@ inline Result<void> ReportParsedValue(FieldDecodeContext& context, const ValueTy
     if (parsed.unknownClass) {
         if (auto reported =
                 context.Report(FieldDiagnosticKind::UnknownClassReference, 0, parsed.storedClass);
+            !reported) {
+            return reported;
+        }
+    }
+
+    if (parsed.deprecatedClass) {
+        if (auto reported = context.Report(FieldDiagnosticKind::DeprecatedType, 0, parsed.guid);
             !reported) {
             return reported;
         }
@@ -605,6 +618,22 @@ bool MatchesSchema(const FieldSchema& field) noexcept {
         if constexpr (ReflectedEnumField<typename Traits::Value>::Supported ||
                       ReflectedStructField<typename Traits::Value>::Supported) {
             return field.element.type == GeneratedType<typename Traits::Value>::Id();
+        } else {
+            return true;
+        }
+    } else if constexpr (StaticArrayField<Member>::Supported) {
+        // 정적 배열(리플렉션 B9g)은 value = {StaticArray, 0}이고 원소 종류가 같으며 maxElements가
+        // 정확히 N이다(enum·struct 원소는 element.type이 그 생성 ID — struct 원소는
+        // MatchesStructView도 호출자가 본다).
+        using Element = typename StaticArrayField<Member>::Element;
+        if (field.value.type != TypeId{} || field.element.kind != FieldValueKind<Element>() ||
+            field.maxElements != StaticArrayField<Member>::Count) {
+            return false;
+        }
+
+        if constexpr (ReflectedEnumField<Element>::Supported ||
+                      ReflectedStructField<Element>::Supported) {
+            return field.element.type == GeneratedType<Element>::Id();
         } else {
             return true;
         }

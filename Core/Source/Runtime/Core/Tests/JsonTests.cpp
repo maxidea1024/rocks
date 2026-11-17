@@ -1,5 +1,6 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/Json.h>
+#include <Core/Text/NumberText.h>
 #include <Core/Text/StringBuilder.h>
 #include <Platform/File.h>
 #include <Platform/FloatingPointEnvironment.h>
@@ -353,6 +354,57 @@ TEST(Json_ErrorPositionsAndCodes) {
           JsonErrorCode::UnexpectedCharacter);
 }
 
+// config 읽기 옵션(allowLineComments, Docs/Design/ConfigSystem.ko.md 4.1절): 값·키 사이의 `//` 줄
+// 주석을 건너뛰고 문자열 안의 `//`는 그대로 둔다. 기본(엄격)은 같은 입력을 거부한다. 블록 주석·짝
+// 없는 `/`·끝 쉼표·중복 키는 옵션과 무관하게 오류이고, 위치는 주석을 포함한 원문 기준이다.
+TEST(Json_LineCommentsAreAnOptIn) {
+    SystemAllocator allocator;
+    JsonDocument document(allocator);
+    JsonReadOptions comments;
+    comments.allowLineComments = true;
+    const char* text = "// 머리 주석\r\n{\n  \"url\": \"http://x//y\", // 끝 주석 \xEA\xB0\x80\n"
+                       "  // 줄 전체 주석\n  \"n\": [1, // 원소 사이\n 2]\n} // 마지막";
+    REQUIRE(ParseText(document, text, comments).Succeeded());
+    CHECK(document.Root().Find("url").GetString() == "http://x//y");
+    CHECK(document.Root().Find("n").Size() == 2);
+    // 위치는 주석을 센 원문 기준이다(4행 첫 값 [ 는 n 줄의 열 8).
+    const JsonPosition at = document.Root().Find("n").Position();
+    CHECK(at.line == 5 && at.column == 8);
+    // 기본 옵션은 주석을 거부한다.
+    const JsonError strict = ParseText(document, text);
+    CHECK(strict.code == JsonErrorCode::UnexpectedCharacter && strict.position.line == 1 &&
+          strict.position.column == 1);
+
+    struct Case {
+        const char* text;
+        JsonErrorCode code;
+        uint32 line;
+        uint32 column;
+    };
+    const Case cases[] = {
+        {"{} /* 블록 */", JsonErrorCode::TrailingContent, 1, 4},
+        {"[1 / 2]", JsonErrorCode::UnexpectedCharacter, 1, 4},
+        {"[1, // c\n]", JsonErrorCode::UnexpectedCharacter, 2, 1},
+        {"{\"a\": 1, // c\n \"a\": 2}", JsonErrorCode::DuplicateKey, 2, 2},
+        {"[1] // \xC0\xAF", JsonErrorCode::InvalidUtf8, 1, 8},
+        {"// only", JsonErrorCode::UnexpectedEnd, 1, 8},
+    };
+    for (const Case& item : cases) {
+        const JsonError error = ParseText(document, item.text, comments);
+        if (error.code != item.code || error.position.line != item.line ||
+            error.position.column != item.column) {
+            printf("json comment case: %s at %u:%u\n", JsonErrorMessage(error.code),
+                   error.position.line, error.position.column);
+        }
+
+        CHECK(error.code == item.code && error.position.line == item.line &&
+              error.position.column == item.column);
+    }
+
+    // 주석이 입력 끝까지 이어져도(줄바꿈 없음) 값 뒤라면 성공이다.
+    CHECK(ParseText(document, "{\"a\": 1}//", comments).Succeeded());
+}
+
 TEST(Json_ReadLimits) {
     SystemAllocator allocator;
     JsonDocument document(allocator);
@@ -702,4 +754,131 @@ TEST(Json_EqualsHandlesAndDepth) {
     const JsonError aliased = left.Parse(left.Root().GetString());
     CHECK(aliased.code == JsonErrorCode::TrailingContent && aliased.position.line == 1 &&
           aliased.position.column == 12);
+}
+
+// 값 위치(의미 오류 보고용 — ReflectionExtensions.ko.md 10.1절): JsonError와 같은 규칙(BOM은 byte
+// 위치에만, CRLF·CR 단독 줄바꿈, column은 code point)으로 값의 첫 byte를 가리킨다.
+TEST(Json_ValuePositionsForSemanticErrors) {
+    SystemAllocator allocator;
+    JsonDocument document(allocator);
+    REQUIRE(ParseText(document, "\xEF\xBB\xBF{\r\n  \"name\": \"\xC3\xA9x\", \"n\": 7,\r\n"
+                                "\t\"list\": [1, -2.5e3,\n null, {\"k\": true}]\r}")
+                .Succeeded());
+    struct Expected {
+        JsonValue value;
+        uint32 line;
+        uint32 column;
+        uint64 byteOffset;
+    };
+
+    const JsonValue root = document.Root();
+    const JsonValue list = root.Find("list");
+    const Expected cases[] = {
+        {root, 1, 1, 3},        {root.Find("name"), 2, 11, 16}, {root.Find("n"), 2, 22, 28},
+        {list, 3, 10, 41},      {list.At(0), 3, 11, 42},        {list.At(1), 3, 14, 45},
+        {list.At(2), 4, 2, 54}, {list.At(3), 4, 8, 60},         {list.At(3).Find("k"), 4, 14, 66},
+    };
+    for (const Expected& expected : cases) {
+        REQUIRE(expected.value.IsValid());
+        const JsonPosition position = expected.value.Position();
+        CHECK(position.line == expected.line && position.column == expected.column &&
+              position.byteOffset == expected.byteOffset);
+    }
+
+    // 다시 읽으면 새 문서의 위치다(앞 문서의 핸들은 무효).
+    REQUIRE(ParseText(document, " \n  42 ").Succeeded());
+    const JsonPosition scalar = document.Root().Position();
+    CHECK(scalar.line == 2 && scalar.column == 3 && scalar.byteOffset == 4);
+    CHECK(!root.IsValid());
+}
+
+// float는 단정도 최단 표기로 쓰고(Double은 넓힌 double 표기), 원문을 TryParseFloat로 읽으면 같은
+// 비트가 된다.
+TEST(Json_WriterFloatShortestSingle) {
+    SystemAllocator allocator;
+    const float values[] = {0.1f,
+                            1.0f,
+                            -0.0f,
+                            3.4028235e38f,
+                            1e-5f,
+                            16777216.0f,
+                            platform::BitCast<float>(static_cast<uint32>(1))};
+    StringBuilder<> text(allocator);
+    JsonWriter writer(text);
+    REQUIRE(writer.BeginArray());
+    for (const float value : values) {
+        REQUIRE(writer.Float(value));
+    }
+
+    REQUIRE(writer.Double(0.1f));
+    REQUIRE(writer.EndArray() && writer.Finish());
+    CHECK(text.View() == StringView("[\n  0.1,\n  1.0,\n  -0.0,\n  3.4028235e+38,\n  1e-05,\n"
+                                    "  16777216.0,\n  1e-45,\n  0.10000000149011612\n]\n"));
+
+    JsonDocument document(allocator);
+    REQUIRE(document.Parse(text.View()).Succeeded());
+    for (usize index = 0; index < sizeof(values) / sizeof(values[0]); ++index) {
+        const auto parsed = TryParseFloat(document.Root().At(index).RawNumber());
+        REQUIRE(parsed);
+        CHECK(platform::BitCast<uint32>(parsed.Value()) ==
+              platform::BitCast<uint32>(values[index]));
+    }
+
+    // NaN·Inf는 InvalidArgument이고 writer는 실패 상태가 된다.
+    StringBuilder<> rejected(allocator);
+    JsonWriter nan(rejected);
+    CHECK(nan.Float(platform::BitCast<float>(0x7FC00000u)).Error() == ErrorCode::InvalidArgument);
+    CHECK(!nan.Null());
+    JsonWriter infinity(rejected);
+    CHECK(infinity.Float(platform::BitCast<float>(0xFF800000u)).Error() ==
+          ErrorCode::InvalidArgument);
+}
+
+// 멤버 색인은 seed 해시다(입력 파일의 키로 칸 충돌을 고를 수 없다). 같은 키 이름이 여러 객체에
+// 있어도 객체별로 찾고, 문서를 그대로 쓴 결과가 같은 DOM이다(writer 중복 키 색인도 같은 해시).
+TEST(Json_MemberIndexSeededAcrossObjects) {
+    SystemAllocator allocator;
+    constexpr uint32 Objects = 64;
+    constexpr uint32 Keys = 16;
+    StringBuilder<> text(allocator);
+    JsonWriter writer(text);
+    REQUIRE(writer.BeginArray());
+    for (uint32 object = 0; object < Objects; ++object) {
+        REQUIRE(writer.BeginObject());
+        for (uint32 key = 0; key < Keys; ++key) {
+            StringBuilder<16> name(allocator);
+            REQUIRE(name.TryAppendFormat("k{}", key));
+            REQUIRE(writer.Key(name.View()) && writer.Int64(object * Keys + key));
+        }
+
+        REQUIRE(writer.EndObject());
+    }
+
+    REQUIRE(writer.EndArray() && writer.Finish());
+
+    JsonDocument document(allocator);
+    REQUIRE(document.Parse(text.View()).Succeeded());
+    const JsonValue root = document.Root();
+    REQUIRE(root.Size() == Objects);
+    for (uint32 object = 0; object < Objects; ++object) {
+        for (uint32 key = 0; key < Keys; ++key) {
+            StringBuilder<16> name(allocator);
+            REQUIRE(name.TryAppendFormat("k{}", key));
+            const JsonValue value = root.At(object).Find(name.View());
+            CHECK(value.IsValid() && value.TryGetInt64().Value() == object * Keys + key);
+        }
+
+        CHECK(!root.At(object).Find("k16").IsValid());
+    }
+
+    StringBuilder<> copied(allocator);
+    JsonWriter copier(copied);
+    REQUIRE(copier.Value(root) && copier.Finish());
+    CHECK(copied.View() == text.View());
+
+    // writer 중복 키 판정도 seed 해시 색인으로 한다.
+    StringBuilder<> duplicate(allocator);
+    JsonWriter twice(duplicate);
+    REQUIRE(twice.BeginObject() && twice.Key("k") && twice.Null());
+    CHECK(twice.Key("k").Error() == ErrorCode::InvalidArgument);
 }

@@ -22,6 +22,13 @@ public:
                (effectiveFlags & policy_.excludedFlags) != 0;
     }
 
+    // 지금 위치(필드·struct 멤버)를 쓰지 않는지다: 유효 플래그의 제외(IsExcluded)이거나 포함 필터
+    // 밖(IsOutsideInclude — policy.includeFlags, 리플렉션 B9h1)이다. 직렬화기와 struct codec이
+    // 위치에 들어간 뒤 부른다.
+    bool ExcludesCurrent() const noexcept {
+        return IsExcluded(EffectiveFlags()) || IsOutsideInclude(policy_.includeFlags);
+    }
+
     // Required 실효 값 검사 문맥인지다. 이 모드에서는 Required null을 거부하지 않고(정책과 무관)
     // RequiredMissing으로 보고하며, 필드별 MaxElements(ArrayTooLong)·SubstituteStruct hook·Soft
     // 수집을 하지 않는다.

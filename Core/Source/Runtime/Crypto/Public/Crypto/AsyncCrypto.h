@@ -21,7 +21,7 @@
 //   ...
 //   auto bytes = task.TryWaitResult(); // 성공이면 plaintext 앞에 쓴 평문 byte 수
 //
-// 계약(AsyncCompression.h 규약과 같은 틀):
+// 계약(AsyncCompression/AsyncCompression.h 규약과 같은 틀):
 // - 작업 수: 한 제출은 worker 작업을 SegmentCryptoOptions::maxTasks개(기본 worker 수,
 //   SegmentCryptoMaxTasks 이하, 세그먼트 수 이하)까지 만들고, 작업들은 다음 세그먼트를 원자적으로
 //   가져가 처리한다. 첫 작업 제출이 거부되면 제출 전체가 실패하고(task·출력 불변), 그 뒤의 거부

@@ -7,6 +7,7 @@
 #include <linux/fs.h>
 #include <stdio.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/syscall.h>
 #include <time.h>
 #include <unistd.h>
@@ -56,6 +57,28 @@ uint64 PosixThreadId() noexcept {
     return static_cast<uint64>(gettid());
 }
 
+// CLOCK_MONOTONIC의 ns를 그대로 tick으로 쓴다(주파수 10^9). 초를 ns로 바꾸기 전에 상한을 검사해
+// wrap된 값을 반환하지 않는다.
+uint64 PosixMonotonicTicks() noexcept {
+    timespec time{};
+    if (clock_gettime(CLOCK_MONOTONIC, &time) != 0 || time.tv_sec < 0) {
+        Fatal("clock_gettime failed");
+    }
+
+    constexpr uint64 NanosecondsPerSecond = 1000000000;
+    const uint64 seconds = static_cast<uint64>(time.tv_sec);
+    if (seconds >
+        (NumericLimits<uint64>::Max() - (NanosecondsPerSecond - 1)) / NanosecondsPerSecond) {
+        Fatal("Monotonic clock overflow");
+    }
+
+    return seconds * NanosecondsPerSecond + static_cast<uint64>(time.tv_nsec);
+}
+
+uint64 PosixMonotonicTickFrequency() noexcept {
+    return 1000000000;
+}
+
 // CLOCK_MONOTONIC 기준 조건 변수다. 시스템 시각 변경이 시한 대기에 영향을 주지 않는다.
 void PosixInitializeCondition(pthread_cond_t* condition) noexcept {
     pthread_condattr_t attributes;
@@ -89,6 +112,58 @@ int PosixTimedWait(pthread_cond_t* condition, pthread_mutex_t* mutex, uint32 tim
 // 쓴다. PROT_NONE으로 막은 뒤이므로 즉시 회수되어도 의미가 같다.
 int PosixDecommitAdvice() noexcept {
     return MADV_DONTNEED;
+}
+
+// Linux는 이름을 15 byte(NUL 제외)까지 받고 길면 ERANGE로 거부하므로 UTF-8 문자 경계에서 자른다.
+void PosixSetCurrentThreadName(const char* name) noexcept {
+    constexpr usize LinuxNameBytes = 15;
+    char truncated[LinuxNameBytes + 1]{};
+    usize length = 0;
+    while (length < LinuxNameBytes && name[length] != '\0') {
+        truncated[length] = name[length];
+        ++length;
+    }
+
+    if (name[length] != '\0') {
+        // 잘린 자리가 문자 중간이면 그 문자의 시작(연속 byte가 아닌 곳)까지 물린다.
+        while (length > 0 && (static_cast<uint8>(name[length]) & 0xC0u) == 0x80u) {
+            --length;
+        }
+
+        truncated[length] = '\0';
+    }
+
+    static_cast<void>(pthread_setname_np(pthread_self(), truncated));
+}
+
+// Android 스레드 우선순위는 nice 값이다(android.os.Process THREAD_PRIORITY_* 값, UE Android도 같은
+// 방식). 앱 권한으로 낮출 수 없는 값(음수 nice)은 커널이 거부할 수 있고 그때는 그대로 둔다.
+void PosixSetCurrentThreadPriority(ThreadPriority priority) noexcept {
+    int nice = 0;
+    switch (priority) {
+    case ThreadPriority::Lowest:
+        nice = 19;
+        break;
+    case ThreadPriority::BelowNormal:
+        nice = 10;
+        break;
+    case ThreadPriority::Normal:
+        return;
+    case ThreadPriority::AboveNormal:
+        nice = -4;
+        break;
+    case ThreadPriority::Highest:
+        nice = -8;
+        break;
+    }
+
+    static_cast<void>(setpriority(PRIO_PROCESS, static_cast<id_t>(gettid()), nice));
+}
+
+// Android 공개 NDK 라이브러리(libvulkan.so 등)는 링커 namespace가 이름으로 찾아야 한다. 앱
+// namespace는 /system 절대 경로 열기를 막을 수 있으므로(Android 7 이후) 이름 그대로 넘긴다.
+const char* PosixSystemLibraryDirectory() noexcept {
+    return "";
 }
 
 } // namespace rocks::platform::detail
