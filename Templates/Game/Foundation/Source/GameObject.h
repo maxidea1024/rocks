@@ -10,7 +10,7 @@ class GameObject final : public rocks::Object {
     ROCKS_GENERATED_BODY()
 
 public:
-    ROCKS_PROPERTY(ReadOnly, Category = "Game", DisplayName = "체력")
+    ROCKS_PROPERTY(ReadOnly, Category = "Game", DisplayName = "Health")
     rocks::int32 health = 100;
 };
 
