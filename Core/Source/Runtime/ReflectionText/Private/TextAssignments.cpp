@@ -758,40 +758,41 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
     return PublishResult::Success(Move(published));
 }
 
-Result<PreparedAssignments> PrepareAssignments(const AssignmentTarget& target,
-                                               Span<const TextAssignment> assignments,
-                                               const TextCodecOptions& options,
-                                               TextDiagnostics& diagnostics) noexcept {
-    using PrepareResult = Result<PreparedAssignments>;
+namespace detail {
+
+Result<UniquePtr<AssignmentState>> BeginAssignments(const AssignmentTarget& target,
+                                                    const TextCodecOptions& options,
+                                                    TextDiagnostics& diagnostics) noexcept {
+    using BeginResult = Result<UniquePtr<AssignmentState>>;
     ObjectRegistry& registry = target.Registry();
     TextCodecOptions effective = options;
     if (!effective.names) {
         effective.names = registry.Names();
     } else if (effective.names != registry.Names()) {
-        return PrepareResult::Failure(ErrorCode::InvalidArgument);
+        return BeginResult::Failure(ErrorCode::InvalidArgument);
     }
 
     if (target.GetKind() == AssignmentTarget::Kind::Value) {
         const TypeLease* type = target.StructType();
         if (!type || !type->IsValid() || type->Kind() != TypeKind::Struct || !target.Storage()) {
-            return PrepareResult::Failure(ErrorCode::InvalidArgument);
+            return BeginResult::Failure(ErrorCode::InvalidArgument);
         }
 
         if (type->Struct().ContainsStrongReference()) {
-            return PrepareResult::Failure(ErrorCode::Unsupported);
+            return BeginResult::Failure(ErrorCode::Unsupported);
         }
     }
 
     Allocator& allocator = target.ValueAllocator();
-    auto made = UniquePtr<detail::AssignmentState>::TryMake(allocator, target, effective,
-                                                            diagnostics, allocator);
+    auto made =
+        UniquePtr<AssignmentState>::TryMake(allocator, target, effective, diagnostics, allocator);
     if (!made) {
-        return PrepareResult::Failure(made.Error());
+        return BeginResult::Failure(made.Error());
     }
 
-    detail::AssignmentState& state = *made.Value();
+    AssignmentState& state = *made.Value();
     if (auto started = state.context.Start(); !started) {
-        return PrepareResult::Failure(started.Error());
+        return BeginResult::Failure(started.Error());
     }
 
     // 대상 타입 lease와 Live 대상의 변경 표지(사본을 만들기 전에 읽는다).
@@ -801,19 +802,41 @@ Result<PreparedAssignments> PrepareAssignments(const AssignmentTarget& target,
                      ? target.Transaction()->AcquireType(target.Handle())
                      : target.StructType()->Clone();
     if (!lease) {
-        return PrepareResult::Failure(lease.Error());
+        return BeginResult::Failure(lease.Error());
     }
 
     state.lease = Move(lease.Value());
     if (target.GetKind() == AssignmentTarget::Kind::Live) {
         auto stamp = registry.MutationStamp(target.Access(), target.Handle());
         if (!stamp) {
-            return PrepareResult::Failure(stamp.Error());
+            return BeginResult::Failure(stamp.Error());
         }
 
         state.stamp = stamp.Value();
     }
 
+    return BeginResult::Success(Move(made.Value()));
+}
+
+PreparedAssignments AssignmentAccess::Wrap(UniquePtr<AssignmentState> state) noexcept {
+    PreparedAssignments prepared;
+    prepared.state_ = Move(state);
+    return prepared;
+}
+
+} // namespace detail
+
+Result<PreparedAssignments> PrepareAssignments(const AssignmentTarget& target,
+                                               Span<const TextAssignment> assignments,
+                                               const TextCodecOptions& options,
+                                               TextDiagnostics& diagnostics) noexcept {
+    using PrepareResult = Result<PreparedAssignments>;
+    auto begun = detail::BeginAssignments(target, options, diagnostics);
+    if (!begun) {
+        return PrepareResult::Failure(begun.Error());
+    }
+
+    detail::AssignmentState& state = *begun.Value();
     for (usize index = 0; index < assignments.Size(); ++index) {
         if (state.context.Diagnostics().Full()) {
             break;
@@ -828,9 +851,7 @@ Result<PreparedAssignments> PrepareAssignments(const AssignmentTarget& target,
         return PrepareResult::Failure(ErrorCode::InvalidArgument);
     }
 
-    PreparedAssignments prepared;
-    prepared.state_ = Move(made.Value());
-    return PrepareResult::Success(Move(prepared));
+    return PrepareResult::Success(detail::AssignmentAccess::Wrap(Move(begun.Value())));
 }
 
 } // namespace rocks::reflection_text

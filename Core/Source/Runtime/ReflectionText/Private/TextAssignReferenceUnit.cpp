@@ -97,8 +97,7 @@ Result<void> ApplyReference(AssignmentState& state, const TextAssignment& assign
     }
 
     TextValue value(state.allocator);
-    auto parsed =
-        ParseTextValue(state.context, slot, assignment.value, source, assignment.path, value);
+    auto parsed = ReadAssignmentValue(state, slot, assignment, source, value);
     if (!parsed) {
         return Result<void>::Failure(parsed.Error());
     }

@@ -277,6 +277,18 @@ Result<void> PathCursor::PublishRead(FieldValue& value) noexcept {
     return Result<void>::Success();
 }
 
+Result<void> PathCursor::PublishKeys(Array<FieldValue>& keys) noexcept {
+    if (auto alive = CheckOwner(); !alive) {
+        return alive;
+    }
+
+    pin_.Reset();
+    // 옛 원소는 이 함수를 나갈 때(고정 밖) 반환한다.
+    Array<FieldValue> previous(Move(*keys_));
+    *keys_ = Move(keys);
+    return Result<void>::Success();
+}
+
 void PathCursor::PublishOutput(FieldValue& value) noexcept {
     if (output_) {
         *output_ = Move(value);

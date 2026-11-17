@@ -40,7 +40,9 @@ enum class PathOperation : uint8 {
     // 필드·멤버 값 하나를 상자로 깊게 복사하기(PathDetach)와 상자와 맞바꿀 자리 찾기
     // (PathPrepareAttach)다(리플렉션 B9i3c0).
     Detach,
-    Attach
+    Attach,
+    // Map·Set 필드의 키를 삽입 순서대로 모두 읽기다(PathReadKeys — 리플렉션 B9i4).
+    ReadKeys
 };
 
 // 해석한 경로 단계 하나다: 필드(스키마 안 위치), 바깥 필드에서 누적한 유효 플래그, 대상
@@ -131,10 +133,11 @@ public:
     // Unsupported(NoPathAccess)를 기록한다.
     Result<void> RequireLive() noexcept;
 
-    // 지금 연산이 대상을 바꾸지 않는 읽기(Read·Length·QueryOptional·Contains)인지다.
+    // 지금 연산이 대상을 바꾸지 않는 읽기(Read·Length·QueryOptional·Contains·ReadKeys)인지다.
     bool IsReading() const noexcept {
         return operation_ == PathOperation::Read || operation_ == PathOperation::Length ||
-               operation_ == PathOperation::QueryOptional || operation_ == PathOperation::Contains;
+               operation_ == PathOperation::QueryOptional ||
+               operation_ == PathOperation::Contains || operation_ == PathOperation::ReadKeys;
     }
 
     // Detach 끝 지점이다: value(ops 형식의 지금 값)를 출력 상자에 깊게 복사하고 상자를
@@ -196,6 +199,11 @@ public:
     // Read의 out, Write의 previous, Remove의 removed다(주지 않았으면 nullptr — Read는 항상 있다).
     FieldValue* Output() const noexcept {
         return output_;
+    }
+
+    // ReadKeys의 out이다(리플렉션 B9i4 — 그 밖의 연산은 nullptr).
+    Array<FieldValue>* KeysOutput() const noexcept {
+        return keys_;
     }
 
     // 클래스 필드 thunk가 소유 객체 주소를 얻는다. 실제 객체 타입이
@@ -305,6 +313,10 @@ public:
     // 반환한다).
     Result<void> PublishRead(FieldValue& value) noexcept;
 
+    // ReadKeys: owner를 다시 확인한 뒤 고정을 풀고 keys(KeysOutput()의 allocator로 만든 키 목록)를
+    // out으로 옮긴다(out의 옛 원소는 고정 밖에서 반환한다).
+    Result<void> PublishKeys(Array<FieldValue>& keys) noexcept;
+
     // 성공한 쓰기·삭제의 옛 값(value)을 Output()으로 옮긴다. 고정을 푼 뒤에 부른다. Output()이
     // 없으면 아무것도 하지 않는다.
     void PublishOutput(FieldValue& value) noexcept;
@@ -372,6 +384,7 @@ private:
     PathOperation operation_;
     const FieldValue* input_;
     FieldValue* output_;
+    Array<FieldValue>* keys_ = nullptr;
     PropertyPathFailure* failure_;
     TypeLease ownerType_;
     TypeLease expectedType_;

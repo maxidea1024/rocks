@@ -407,6 +407,23 @@ Result<usize> PathCount(ObjectRegistry& registry, const ObjectAccessContext& acc
                         const PathTarget& target, PropertyPath path,
                         PropertyPathFailure* failure = nullptr) noexcept;
 
+// path(마지막 단계는 index·key 없는 Map·Set 필드)의 키를 삽입 순서대로 모두 읽어 out을 그 목록으로
+// 바꾼다(리플렉션 B9i4 — JSON export가 Map·Set을 펼칠 때 쓴다. Map 값은 이어서 key 경로의
+// PathRead로 읽는다). 키는 out의 allocator로 만든다(String·Soft 키는 복사 — Name은 토큰, enum은
+// 정수와 enum ID, ClassRef는 클래스 TypeId). 읽기는 Resolve + encode 고정 아래 모든 키를 새 목록에
+// 복사하고 owner를 다시 확인한 뒤 out과 바꾼다 — 실패하면 out은 바뀌지 않는다. 유효 플래그
+// ReadOnly는 막지 않는다. 오류: 마지막 단계에 index·key가 있으면 InvalidArgument(IndexNotAllowed),
+// Map·Set이 아니면 TypeMismatch(NotKeyed), 할당 OutOfMemory, 그 밖은 PathRead와 같다.
+//
+// 사용 예:
+//   Array<FieldValue> keys(allocator);
+//   if (auto read = PathReadKeys(registry, access, holder, PropertyPath{scores}, keys); !read) {
+//       return read;
+//   }
+Result<void> PathReadKeys(ObjectRegistry& registry, const ObjectAccessContext& access,
+                          const PathTarget& target, PropertyPath path, Array<FieldValue>& out,
+                          PropertyPathFailure* failure = nullptr) noexcept;
+
 // path 마지막 단계(index가 있어야 한다 — 없으면 InvalidArgument(IndexRequired))의 배열에서 index
 // 위치에 원소를 넣는다(index == 길이면 끝, 넘으면 InvalidArgument(IndexOutOfRange)). 단일 값 원소는
 // value가 필수이고(없으면 InvalidArgument(InvalidValue)) struct 원소(Array<S>·StructRefArray)는 값

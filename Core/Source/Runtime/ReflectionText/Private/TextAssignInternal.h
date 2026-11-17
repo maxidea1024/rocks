@@ -155,11 +155,34 @@ struct AssignmentState {
     bool failed = false;
     // Publish를 불렀다.
     bool consumed = false;
+    // JSON import가 미리 읽은 지금 대입의 값이다(리플렉션 B9i4 — 있으면 값 텍스트 대신 쓴다.
+    // ProcessResolvedAssignment 동안만 가리킨다).
+    TextValue* preparsed = nullptr;
+};
+
+// 묶음 상태를 만들고 대상 타입 lease와 Live 대상의 변경 표지를
+// 읽는다(PrepareAssignments·ImportJson의 공통 시작 — 리플렉션 B9i4). 오류: PrepareAssignments의
+// 호출 오류(옵션·pool·대상 문맥·할당).
+Result<UniquePtr<AssignmentState>> BeginAssignments(const AssignmentTarget& target,
+                                                    const TextCodecOptions& options,
+                                                    TextDiagnostics& diagnostics) noexcept;
+
+// 준비를 마친 상태를 묶음으로 감싼다(PreparedAssignments의 friend).
+struct AssignmentAccess {
+    static PreparedAssignments Wrap(UniquePtr<AssignmentState> state) noexcept;
 };
 
 // 대입 하나를 해석하고 준비 단위에 적용한다. 진단을 남겼으면 state.failed를 세운다. 오류는 호출
 // 오류(할당·입력 한도·대상 문맥·Busy 등)다.
 Result<void> ProcessAssignment(AssignmentState& state, const TextAssignment& assignment) noexcept;
+
+// 경로를 이미 해석한 대입 하나를 준비 단위에 적용한다(ProcessAssignment의 뒷부분 — JSON import가
+// 쓴다, 리플렉션 B9i4). path·slot은 대상 기준 해석 결과(입력 용도 판정을 마친 것), value가 있으면
+// 값 텍스트(assignment.value) 대신 그 값을 쓴다(Set만 — 옮겨 간다). assignment.path는 진단의 경로
+// 텍스트다.
+Result<void> ProcessResolvedAssignment(AssignmentState& state, const TextAssignment& assignment,
+                                       TextSource source, PropertyPath path, const TextSlot& slot,
+                                       TextValue* value) noexcept;
 
 // 단위 경로(선택자 없음)의 준비 단위를 찾거나 대상에서 떼어 만든다. 진단을 남겼으면 nullptr이다.
 Result<AssignmentUnit*> AcquireUnit(AssignmentState& state, PropertyPath unitPath,

@@ -382,6 +382,44 @@ Result<void> ErasePathKey(PathCursor& cursor, Container& container, const Lookup
     }
 }
 
+// Map·Set(map은 키 → 값 OrderedMap 또는 OrderedSet)의 키를 삽입 순서대로 모두 읽는다(PathReadKeys —
+// 리플렉션 B9i4). 연산 시작에서 잡은 encode 고정 아래 키를 KeysOutput()의 allocator로 새 목록에
+// 복사하고 owner를 다시 확인한 뒤 게시한다(실패하면 out은 그대로다).
+template <class Key, class Keys>
+Result<void> ReadPathKeys(PathCursor& cursor, const Keys& keys) noexcept {
+    constexpr ValueKind kind = FieldValueKind<Key>();
+    Allocator& allocator = cursor.KeysOutput()->GetAllocator();
+    Array<FieldValue> copies(allocator);
+    if (auto reserved = copies.TryReserve(keys.Count()); !reserved) {
+        return cursor.Fail(reserved.Error());
+    }
+
+    Result<void> copied = Result<void>::Success();
+    auto copy = [&](const Key& key) noexcept {
+        if (!copied) {
+            return;
+        }
+
+        FieldValue value(allocator);
+        copied = CopyTargetValue<kind>(key, value);
+        if (copied) {
+            copied = copies.TryPushBack(Move(value));
+        }
+    };
+
+    if constexpr (MapField<Keys>::IsSet) {
+        keys.ForEach(copy);
+    } else {
+        keys.ForEach([&](const Key& key, const auto&) noexcept { copy(key); });
+    }
+
+    if (!copied) {
+        return cursor.Fail(copied.Error());
+    }
+
+    return cursor.PublishKeys(copies);
+}
+
 // ObjectRefMap 필드·멤버의 단계다(리플렉션 B9f4 — Docs/Design/ReflectionExtensions.ko.md 7.3절
 // "B9f4 주의"·7.4절). ObjectRefArray 갈래처럼 고정을 쥐지 않고 Registry API(SetMapReference·
 // EraseMapReference·ClearMapReferences)로 바꾼다 — Registry가 owner·대상·순회 중(Busy)·관찰자·삽입
@@ -422,6 +460,10 @@ Result<void> PathObjectRefMap(PathCursor& cursor, ObjectRefMap<K, T>& map) noexc
 
         if (operation == PathOperation::Clear) {
             return cursor.Finish(registry.ClearMapReferences(access, owner, map));
+        }
+
+        if (operation == PathOperation::ReadKeys) {
+            return ReadPathKeys<K>(cursor, map.View());
         }
 
         return cursor.Fail(ErrorCode::Unsupported, PropertyPathError::AggregateValue);
@@ -599,6 +641,10 @@ Result<void> PathKeyedValueContainer(PathCursor& cursor, Container& container) n
             Container old(Move(container));
             cursor.ReleasePin();
             return Result<void>::Success();
+        }
+
+        if (operation == PathOperation::ReadKeys) {
+            return ReadPathKeys<Key>(cursor, container);
         }
 
         return cursor.Fail(ErrorCode::Unsupported, PropertyPathError::AggregateValue);

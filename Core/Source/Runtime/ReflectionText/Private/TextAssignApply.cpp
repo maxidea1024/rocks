@@ -136,6 +136,11 @@ Result<bool> PinReferences(AssignmentState& state, const TextValue& value, TextS
 // Map 키·Set 원소 값의 key wire를 wire 뒤에 붙인다.
 Result<void> AppendKeyWire(AssignmentState& state, const FieldValue& value,
                            Array<uint8>& wire) noexcept {
+    return AppendValueKeyWire(state.options.names, state.allocator, value, wire);
+}
+
+Result<void> AppendValueKeyWire(NamePool* names, Allocator& allocator, const FieldValue& value,
+                                Array<uint8>& wire) noexcept {
     PathKeyValue key;
     key.kind = value.kind;
     key.boolean = value.boolean;
@@ -148,7 +153,7 @@ Result<void> AppendKeyWire(AssignmentState& state, const FieldValue& value,
         return AppendPathKey(key, wire);
     }
 
-    auto display = AcquireNameFieldText(state.options.names, value.name, state.allocator);
+    auto display = AcquireNameFieldText(names, value.name, allocator);
     if (!display) {
         return Result<void>::Failure(display.Error());
     }
@@ -223,6 +228,18 @@ Result<UnitEnd> FindUnitEnd(AssignmentState& state, PropertyPath path) noexcept 
 
 } // namespace
 
+Result<bool> ReadAssignmentValue(AssignmentState& state, const TextSlot& slot,
+                                 const TextAssignment& assignment, TextSource source,
+                                 TextValue& out) noexcept {
+    if (state.preparsed) {
+        out = Move(*state.preparsed);
+        state.preparsed = nullptr;
+        return Result<bool>::Success(true);
+    }
+
+    return ParseTextValue(state.context, slot, assignment.value, source, assignment.path, out);
+}
+
 Result<void> ProcessAssignment(AssignmentState& state, const TextAssignment& assignment) noexcept {
     const TextSource source = TextSource::Assignment(assignment.sourceIndex);
     TextPath resolved;
@@ -236,17 +253,46 @@ Result<void> ProcessAssignment(AssignmentState& state, const TextAssignment& ass
         return Result<void>::Success();
     }
 
+    return ProcessResolvedAssignment(state, assignment, source, resolved.path.View(), resolved.slot,
+                                     nullptr);
+}
+
+namespace {
+
+// 미리 읽은 값을 대입 하나 동안 상태에 건다(나갈 때 지운다).
+class PreparsedScope {
+public:
+    PreparsedScope(AssignmentState& state, TextValue* value) noexcept : state_(state) {
+        state_.preparsed = value;
+    }
+
+    ~PreparsedScope() {
+        state_.preparsed = nullptr;
+    }
+
+    PreparsedScope(const PreparsedScope&) = delete;
+    PreparsedScope& operator=(const PreparsedScope&) = delete;
+
+private:
+    AssignmentState& state_;
+};
+
+} // namespace
+
+Result<void> ProcessResolvedAssignment(AssignmentState& state, const TextAssignment& assignment,
+                                       TextSource source, PropertyPath resolvedPath,
+                                       const TextSlot& slot, TextValue* value) noexcept {
+    PreparsedScope preparsed(state, value);
     // StructRefArray 원소 index는 앞 대입이 지운 원소를 뺀 지금 index다 — 묶을 때 index로
     // 옮긴다(리플렉션 B9i3c4).
     PathStep mapped[MaxPropertyPathSteps];
-    auto translated =
-        MapElementIndices(state, resolved.path.View(), mapped, source, assignment.path);
+    auto translated = MapElementIndices(state, resolvedPath, mapped, source, assignment.path);
     if (!translated || !translated.Value()) {
         return translated ? Result<void>::Success() : Result<void>::Failure(translated.Error());
     }
 
-    const PropertyPath path{Span<const PathStep>(mapped, resolved.path.View().steps.Size()),
-                            resolved.path.View().keys};
+    const PropertyPath path{Span<const PathStep>(mapped, resolvedPath.steps.Size()),
+                            resolvedPath.keys};
     PathKey keys[MaxPropertyPathSteps];
     for (usize index = 0; index < state.assigned.Count(); ++index) {
         if (SamePropertyPath(state.assigned.View(index, keys), path)) {
@@ -265,11 +311,11 @@ Result<void> ProcessAssignment(AssignmentState& state, const TextAssignment& ass
     }
 
     if (unitEnd.Value().kind == UnitKind::None) {
-        return ApplyReferenceStruct(state, assignment, resolved.slot, path, source);
+        return ApplyReferenceStruct(state, assignment, slot, path, source);
     }
 
     if (unitEnd.Value().kind == UnitKind::Reference) {
-        return ApplyReference(state, assignment, resolved.slot, path, source);
+        return ApplyReference(state, assignment, slot, path, source);
     }
 
     // 단위 경로는 끝 단계의 선택자를 뗀 필드·멤버 하나다(앞 단계는 인라인 struct와 정적 배열·
@@ -293,7 +339,7 @@ Result<void> ProcessAssignment(AssignmentState& state, const TextAssignment& ass
         ContainerUnit& unit = *container.Value();
         Apply apply{state,      state.Root().WithReferences(unit.stage),
                     unit.dirty, nullptr,
-                    assignment, resolved.slot,
+                    assignment, slot,
                     path,       path,
                     source,     {}};
         return apply.Run();
@@ -309,7 +355,7 @@ Result<void> ProcessAssignment(AssignmentState& state, const TextAssignment& ass
                 unit.Value()->dirty,
                 &unit.Value()->box,
                 assignment,
-                resolved.slot,
+                slot,
                 path,
                 PropertyPath{path.steps.Mid(end), path.keys},
                 source,

@@ -190,8 +190,7 @@ Result<void> ApplyElements(AssignmentState& state, const TextAssignment& assignm
     }
 
     TextValue value(state.allocator);
-    auto parsed =
-        ParseTextValue(state.context, slot, assignment.value, source, assignment.path, value);
+    auto parsed = ReadAssignmentValue(state, slot, assignment, source, value);
     if (!parsed) {
         return Result<void>::Failure(parsed.Error());
     }
