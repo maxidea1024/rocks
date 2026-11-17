@@ -1,6 +1,6 @@
 using Rocks.Build.Rules;
 
-// ObjectRegistry GC 측정 타깃이다. 수치는 Development(-O2) 이상으로 잰다:
+// ObjectRegistry GC measurement target. Measure with Development (-O2) or higher:
 //   dotnet msbuild Rocks.proj -t:Build -p:RocksTarget=GcBench -p:Configuration=Development
 public sealed class GcBenchTarget : TargetRules
 {

@@ -1,9 +1,9 @@
 using Rocks.Build;
 using Rocks.Build.Rules;
 
-// ObjectRegistry GC 측정 실행 파일이다(Docs/Design/GarbageCollectionScale.ko.md GC-S0). 제품 런타임에 들어가지 않는다.
-// `dotnet msbuild Rocks.proj -t:Build -p:RocksTarget=GcBench -p:Configuration=Development`로 빌드한다.
-// 자동 실행이 대화상자에서 멈추지 않도록 시험 지원 코드의 호스트 실패 처리(HostFailure)를 함께 넣는다.
+// ObjectRegistry GC measurement executable (Docs/Design/GarbageCollectionScale.ko.md GC-S0). Not part of the product runtime.
+// Build with `dotnet msbuild Rocks.proj -t:Build -p:RocksTarget=GcBench -p:Configuration=Development`.
+// Links the test-support host failure handler (HostFailure) so automated runs never stop at a dialog.
 public sealed class GcBenchProgram : ModuleRules
 {
     public override NativeModuleInput Configure(BuildContext context)
