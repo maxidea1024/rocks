@@ -33,11 +33,14 @@ struct InheritMarked : InheritMarker {};
 
 ROCKS_STRUCT()
 struct InheritBase : InheritMarker {
-    explicit InheritBase(Allocator& allocator) noexcept : name(allocator) {
+    explicit InheritBase(Allocator& allocator) noexcept : name(allocator), note(allocator) {
     }
 
     ROCKS_PROPERTY() int32 a = 0;
     ROCKS_PROPERTY() String name;
+    // 리플렉션하지 않는 base 멤버다(파생의 깊은 복사가 보존해야 한다 — B9j–B9m 묶음 리뷰 I1).
+    ROCKS_NATIVE() uint32 nativeCount = 0;
+    ROCKS_NATIVE() String note;
 };
 
 ROCKS_STRUCT()
@@ -115,6 +118,47 @@ ROCKS_STRUCT()
 struct InheritShapeHost {
     ROCKS_PROPERTY() InstancedStruct<InheritBase> shape;
     ROCKS_PROPERTY() uint32 count = 0;
+};
+
+// InstancedStruct 멤버를 base에서 상속한다(ContainsInstancedStruct 형질 상속).
+ROCKS_STRUCT()
+struct InheritShapeChild : InheritShapeHost {
+    ROCKS_PROPERTY() int32 extra = 0;
+};
+
+// 중첩 struct 멤버를 가진 base다(깊이 2).
+ROCKS_STRUCT()
+struct InheritNestedBase {
+    ROCKS_PROPERTY() InheritOther inner;
+};
+
+// 깊이를 base에서 상속한다(2).
+ROCKS_STRUCT()
+struct InheritNestedLeaf : InheritNestedBase {
+    ROCKS_PROPERTY() int32 z = 0;
+};
+
+// private 리플렉션 멤버를 가진 base다(파생 생성 코드의 base private 멤버 접근 — 리뷰 S4).
+ROCKS_STRUCT()
+struct InheritPrivateBase {
+    ROCKS_GENERATED_BODY()
+
+public:
+    int32 Secret() const noexcept {
+        return secret;
+    }
+
+    void SetSecret(int32 value) noexcept {
+        secret = value;
+    }
+
+private:
+    ROCKS_PROPERTY() int32 secret = 0;
+};
+
+ROCKS_STRUCT()
+struct InheritPrivateLeaf : InheritPrivateBase {
+    ROCKS_PROPERTY() int32 open = 0;
 };
 
 ROCKS_CLASS()

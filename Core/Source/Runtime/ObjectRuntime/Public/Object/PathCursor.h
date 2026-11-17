@@ -369,6 +369,14 @@ public:
     Result<void> ReadText(const String& text, const AssetId* asset) noexcept;
     Result<void> WriteText(String& text, AssetId* asset) noexcept;
 
+    // Text 끝 지점(리플렉션 B9l)의 읽기·쓰기다. Read는 처음부터 쥔 고정 아래 out의 allocator로
+    // DeepClone한다. Write는 고정을 쥔 뒤 새 값을 값의 allocator(ValueAllocator)로, 옛
+    // 값(previous를 받을 때)을 out의 allocator로 DeepClone하고 owner를 다시 확인한 다음 노드를
+    // 맞바꾸고 고정을 푼다 — 옛 노드는 고정 밖에서 반환한다(할당·반환 콜백의 재진입 쓰기가 Busy가
+    // 되어 live 값을 바꾸지 못한다).
+    Result<void> ReadTextValue(const Text& text) noexcept;
+    Result<void> WriteTextValue(Text& text) noexcept;
+
     // 삭제할 String·Soft 원소의 값을 captured(Output()의 allocator)에 담을 준비를 한다: allocator가
     // 같으면 moveText = true(게시 뒤 버퍼를 옮긴다), 다르면 고정 아래 복사하고 owner를 다시
     // 확인한다.

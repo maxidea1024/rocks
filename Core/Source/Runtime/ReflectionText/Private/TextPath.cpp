@@ -203,8 +203,9 @@ StringView PathFailureMessage(PropertyPathError reason) noexcept {
 
 } // namespace
 
-Result<void> DescribeTextPath(const TypeLease& type, PropertyPath path, TextSlot& out) noexcept {
-    auto described = Describe(type, path, out, nullptr, nullptr);
+Result<void> DescribeTextPath(const TypeLease& type, PropertyPath path, TextSlot& out,
+                              PathInstancedTypeResolver* instanced) noexcept {
+    auto described = Describe(type, path, out, nullptr, nullptr, instanced);
     if (!described) {
         return Result<void>::Failure(described.Error());
     }

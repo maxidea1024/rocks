@@ -800,8 +800,10 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
                                PropertyPathError::InvalidValue);
         }
 
+        // 상자(분리된 값) 위 경로는 상자가 기록한 원래 자리의 깊이에서 시작한다.
         const uint32 position =
-            static_cast<uint32>(last) + (cursor.root_ == PathTarget::Kind::Struct ? 1u : 0u);
+            static_cast<uint32>(last) + (cursor.root_ == PathTarget::Kind::Struct ? 1u : 0u) +
+            (cursor.root_ == PathTarget::Kind::Detached ? cursor.rootBox_->position_ : 0u);
         if (auto allowed = CheckInstancedStructContent(lease.Value().Struct()); !allowed) {
             return cursor.Fail(allowed.Error(), PropertyPathError::InvalidValue);
         }

@@ -16,6 +16,8 @@ using namespace rocks::test::assign;
 using reflection_fixture::InheritHolder;
 using reflection_fixture::InheritLeaf;
 using reflection_fixture::InstancedHolder;
+using reflection_fixture::InstancedHost;
+using reflection_fixture::InstancedLocked;
 using reflection_fixture::InstancedPoint;
 using reflection_fixture::InstancedScale;
 
@@ -235,4 +237,119 @@ TEST(TextInstanced_BaseRestrictsTypes) {
     const InheritLeaf* leaf = value.Value()->shape.Get<InheritLeaf>();
     REQUIRE(leaf);
     CHECK(leaf->a == 3 && leaf->c == 2.5f);
+}
+
+// InstancedStruct 내용 안의 ReadOnly 멤버(B9j–B9m 묶음 리뷰 I3): 같은 값 대입은 무동작이고 다른
+// 값은 ReadOnly 진단이며(진단 경로는 내용 멤버까지 — 리뷰 S2), 같은 객체의 JSON 왕복은 성공한다.
+TEST(TextInstanced_ReadOnlyContentMembers) {
+    InstancedObjects fixture;
+    auto root = fixture.Make();
+    const ObjectHandle object = root.Handle();
+    const TextAssignment set[] = {Set("value", "InstancedLocked"), Set("value.free", "2", 1)};
+    REQUIRE(fixture.Apply(object, set));
+    fixture.With(object, [](InstancedHolder& value) noexcept {
+        REQUIRE(value.value.Get<InstancedLocked>());
+        value.value.Get<InstancedLocked>()->fixed = 3;
+    });
+
+    const TextAssignment same[] = {Set("value.fixed", "3")};
+    REQUIRE(fixture.Apply(object, same));
+    CHECK(fixture.diagnostics.Count() == 0);
+
+    const TextAssignment different[] = {Set("value.fixed", "4")};
+    auto rejected = fixture.Apply(object, different);
+    CHECK(!rejected && rejected.Error() == ErrorCode::InvalidArgument);
+    REQUIRE(fixture.diagnostics.Count() == 1);
+    CHECK(fixture.diagnostics.Get(0).code == TextDiagnosticCode::ReadOnly);
+    CHECK(fixture.diagnostics.Get(0).path == "value.fixed");
+
+    StringBuilder<4096> text(fixture.system);
+    REQUIRE(Export(AssignmentTarget::Live(fixture.objects, fixture.access, object), fixture.options,
+                   text));
+    JsonDocument document(fixture.system);
+    REQUIRE(document.Parse(text.View()).Succeeded());
+    fixture.diagnostics.Clear();
+    auto imported =
+        ImportJson(document.Root(), AssignmentTarget::Live(fixture.objects, fixture.access, object),
+                   fixture.options, fixture.diagnostics);
+    REQUIRE(imported);
+    REQUIRE(imported.Value().Publish());
+
+    JsonDocument changed(fixture.system);
+    REQUIRE(
+        changed.Parse("{\"value\":{\"_structType\":\"InstancedLocked\",\"fixed\":5,\"free\":2}}")
+            .Succeeded());
+    fixture.diagnostics.Clear();
+    auto refused =
+        ImportJson(changed.Root(), AssignmentTarget::Live(fixture.objects, fixture.access, object),
+                   fixture.options, fixture.diagnostics);
+    CHECK(!refused);
+    REQUIRE(fixture.diagnostics.Count() >= 1);
+    CHECK(fixture.diagnostics.Get(0).code == TextDiagnosticCode::ReadOnly);
+    CHECK(fixture.diagnostics.Get(0).path == "value.fixed");
+    fixture.With(object, [](InstancedHolder& value) noexcept {
+        CHECK(value.value.Get<InstancedLocked>() && value.value.Get<InstancedLocked>()->fixed == 3);
+    });
+}
+
+// 대입 묶음 상자 안 형 바꾸기의 깊이 합은 원래 자리의 위치 깊이로 센다(리뷰 S1): struct 원소 배열
+// 안의 InstancedStruct 멤버(위치 깊이 1)에 깊이 16 struct는 InvalidValue다.
+TEST(TextInstanced_BoxDepthSumUsesOriginalPosition) {
+    InstancedObjects fixture;
+    auto root = fixture.Make();
+    const ObjectHandle object = root.Handle();
+    fixture.With(object, [&](InstancedHolder& value) noexcept {
+        REQUIRE(value.hosts.TryPushBack(InstancedHost{}));
+    });
+
+    const TextAssignment deep[] = {Set("hosts[0].value", "InstancedDepth16")};
+    auto rejected = fixture.Apply(object, deep);
+    CHECK(!rejected && rejected.Error() == ErrorCode::InvalidArgument);
+    REQUIRE(fixture.diagnostics.Count() >= 1);
+    CHECK(fixture.diagnostics.Get(0).code == TextDiagnosticCode::InvalidValue);
+
+    const TextAssignment fits[] = {Set("hosts[0].value", "InstancedDepth15")};
+    REQUIRE(fixture.Apply(object, fits));
+    fixture.With(object,
+                 [](InstancedHolder& value) noexcept { CHECK(!value.hosts[0].value.IsEmpty()); });
+
+    // 정적 배열 struct 원소 안 멤버는 값 단위가 원소 멤버라 상자에서 시작한다.
+    const TextAssignment slotDeep[] = {Set("slots[1].value", "InstancedDepth16")};
+    auto slotRejected = fixture.Apply(object, slotDeep);
+    CHECK(!slotRejected && slotRejected.Error() == ErrorCode::InvalidArgument);
+    REQUIRE(fixture.diagnostics.Count() >= 1);
+    CHECK(fixture.diagnostics.Get(0).code == TextDiagnosticCode::InvalidValue);
+    const TextAssignment slotFits[] = {Set("slots[1].value", "InstancedDepth15")};
+    REQUIRE(fixture.Apply(object, slotFits));
+    fixture.With(object,
+                 [](InstancedHolder& value) noexcept { CHECK(!value.slots[1].value.IsEmpty()); });
+}
+
+// 파생 struct 값 단위의 깊은 복사가 base의 NATIVE 멤버를 보존한다(리뷰 I1 — 대입 묶음
+// Detach·Attach).
+TEST(TextInstanced_DerivedUnitKeepsBaseNativeMembers) {
+    InstancedObjects fixture;
+    auto created = fixture.objects.NewObject<InheritHolder>(
+        fixture.access, GeneratedType<InheritHolder>::Schema().id);
+    REQUIRE(created);
+    RootRef<InheritHolder> root = Move(created.Value());
+    const ObjectHandle object = root.Handle();
+    {
+        auto borrowed = fixture.objects.Resolve<InheritHolder>(fixture.access, object);
+        REQUIRE(borrowed);
+        auto value = borrowed.Value().Get();
+        REQUIRE(value);
+        value.Value()->leaf.nativeCount = 7;
+        REQUIRE(value.Value()->leaf.note.TryAssign("kept"));
+    }
+
+    const TextAssignment inputs[] = {Set("leaf.c", "2.5"), Set("leaf.a", "4", 1)};
+    REQUIRE(fixture.Apply(object, inputs));
+    auto borrowed = fixture.objects.Resolve<InheritHolder>(fixture.access, object);
+    REQUIRE(borrowed);
+    auto value = borrowed.Value().Get();
+    REQUIRE(value);
+    CHECK(value.Value()->leaf.c == 2.5f && value.Value()->leaf.a == 4);
+    CHECK(value.Value()->leaf.nativeCount == 7u);
+    CHECK(value.Value()->leaf.note.View() == "kept");
 }

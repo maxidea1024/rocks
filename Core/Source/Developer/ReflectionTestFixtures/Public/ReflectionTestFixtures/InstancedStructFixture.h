@@ -6,6 +6,7 @@
 #include <Meta/Annotations.h>
 #include <Object/InstancedStruct.h>
 #include <Object/Object.h>
+#include <Object/ObjectRefArray.h>
 #include <Object/ObjectRefs.h>
 #include <Object/SoftObjectRef.h>
 
@@ -63,6 +64,35 @@ struct InstancedRequiredLink {
 ROCKS_STRUCT()
 struct InstancedNested {
     ROCKS_PROPERTY() InstancedStruct<> inner;
+};
+
+// Registry 컨테이너(ObjectRefArray)를 담는 struct다(InstancedStruct에 담을 수 없다).
+ROCKS_STRUCT()
+struct InstancedRefArrayHolder {
+    explicit InstancedRefArrayHolder(Allocator& allocator) noexcept : refs(allocator) {
+    }
+
+    ROCKS_PROPERTY() ObjectRefArray<Object> refs;
+};
+
+// WorldOnly 소유자를 요구하는 NATIVE 타입이다.
+struct InstancedWorldToken {
+    static constexpr bool RocksRequiresWorldOnlyOwner = true;
+    int32 value = 0;
+};
+
+// WorldOnly 소유자를 요구하는 NATIVE 멤버를 담는 struct다(InstancedStruct에 담을 수 없다).
+ROCKS_STRUCT()
+struct InstancedWorldBound {
+    ROCKS_NATIVE() InstancedWorldToken token;
+    ROCKS_PROPERTY() int32 v = 0;
+};
+
+// ReadOnly 멤버를 담는 struct다(InstancedStruct 내용 안 ReadOnly 대입 — B9j–B9m 묶음 리뷰 I3).
+ROCKS_STRUCT()
+struct InstancedLocked {
+    ROCKS_PROPERTY(ReadOnly) int32 fixed = 0;
+    ROCKS_PROPERTY() int32 free = 0;
 };
 
 // InstancedStruct 멤버를 담는 struct다(멤버의 위치 깊이 1).
@@ -155,7 +185,8 @@ struct InstancedDepth16 {
 
 ROCKS_CLASS()
 struct InstancedHolder final : Object {
-    explicit InstancedHolder(Allocator& allocator) noexcept : list(allocator), table(allocator) {
+    explicit InstancedHolder(Allocator& allocator) noexcept
+        : list(allocator), table(allocator), hosts(allocator) {
     }
 
     ROCKS_PROPERTY() InstancedStruct<> value;
@@ -165,6 +196,11 @@ struct InstancedHolder final : Object {
     ROCKS_PROPERTY() OrderedMap<uint32, InstancedStruct<>> table;
     ROCKS_PROPERTY() InstancedHost host;
     ROCKS_PROPERTY(ReadOnly) InstancedStruct<> locked;
+    // struct 원소 배열 안 InstancedStruct 멤버(위치 깊이 1 — 대입 묶음 상자의 깊이 합, 리뷰 S1)다.
+    ROCKS_PROPERTY() Array<InstancedHost> hosts;
+    // 정적 배열 struct 원소 안 InstancedStruct 멤버(값 단위가 원소 멤버 — 상자 시작 위치가 깊이
+    // 1)다.
+    ROCKS_PROPERTY() InstancedHost slots[2];
 };
 
 } // namespace rocks::reflection_fixture

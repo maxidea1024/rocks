@@ -359,7 +359,7 @@ Result<void> NoteReadOnly(AssignmentState& state, AssignmentUnit& unit, Property
     for (usize index = 0; index < path.steps.Size(); ++index) {
         TextSlot slot;
         const PropertyPath prefix{Span<const PathStep>(path.steps.Data(), index + 1), path.keys};
-        if (auto described = DescribeTextPath(state.lease, prefix, slot); !described) {
+        if (auto described = DescribeAssignmentPath(state, prefix, slot); !described) {
             return described;
         }
 
@@ -406,7 +406,7 @@ Result<void> CheckReadOnlyUnits(AssignmentState& state) noexcept {
             PathKey keys[MaxPropertyPathSteps];
             const PropertyPath anchor = unit.readOnlyPaths.View(entry, keys);
             TextSlot slot;
-            if (auto described = DescribeTextPath(state.lease, anchor, slot); !described) {
+            if (auto described = DescribeAssignmentPath(state, anchor, slot); !described) {
                 return described;
             }
 
@@ -426,14 +426,8 @@ Result<void> CheckReadOnlyUnits(AssignmentState& state) noexcept {
             }
 
             String text(state.allocator);
-            if (auto formatted =
-                    FormatPropertyPath(state.lease, anchor, text, &state.context.KeyHook());
-                !formatted) {
-                if (formatted.Error() == ErrorCode::OutOfMemory) {
-                    return formatted;
-                }
-
-                text.Clear();
+            if (auto formatted = FormatAssignmentPath(state, anchor, text); !formatted) {
+                return formatted;
             }
 
             if (auto reported =

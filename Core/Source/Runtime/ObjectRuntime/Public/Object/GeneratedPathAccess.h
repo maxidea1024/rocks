@@ -96,6 +96,9 @@ Result<void> PathValue(PathCursor& cursor, T& value) noexcept {
     } else if constexpr (Target == ValueKind::SoftObjectReference) {
         return read ? cursor.ReadText(value.objectPath, &value.asset)
                     : cursor.WriteText(value.objectPath, &value.asset);
+    } else if constexpr (Target == ValueKind::Text) {
+        // Text(리플렉션 B9l)는 고정 아래 새 노드를 만들고 고정 밖에서 옛 노드를 반환한다.
+        return read ? cursor.ReadTextValue(value) : cursor.WriteTextValue(value);
     } else {
         if (read) {
             FieldValue candidate(cursor.Output()->GetAllocator());
@@ -144,10 +147,7 @@ Result<void> PathValue(PathCursor& cursor, T& value) noexcept {
                 }
             }
 
-            // Text(리플렉션 B9l)는 값의 allocator(객체면 객체 allocator)로 새 노드를 만든다.
-            if (auto written =
-                    WriteTargetValue<Target>(value, *cursor.Input(), &cursor.ValueAllocator());
-                !written) {
+            if (auto written = WriteTargetValue<Target>(value, *cursor.Input()); !written) {
                 return cursor.FailValue(written.Error());
             }
 

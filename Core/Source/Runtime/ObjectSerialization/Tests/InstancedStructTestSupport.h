@@ -23,12 +23,15 @@ using reflection_fixture::InstancedDepth15;
 using reflection_fixture::InstancedDepth16;
 using reflection_fixture::InstancedHolder;
 using reflection_fixture::InstancedHost;
+using reflection_fixture::InstancedLocked;
 using reflection_fixture::InstancedNested;
 using reflection_fixture::InstancedPoint;
+using reflection_fixture::InstancedRefArrayHolder;
 using reflection_fixture::InstancedRefHolder;
 using reflection_fixture::InstancedRequiredLink;
 using reflection_fixture::InstancedScale;
 using reflection_fixture::InstancedVersioned;
+using reflection_fixture::InstancedWorldBound;
 
 inline ErrorCode ErrorOf(const Result<void>& result) noexcept {
     return result ? ErrorCode::None : result.Error();
@@ -79,6 +82,9 @@ inline bool RegisterFixture(TypeRegistry& types, bool point = true) noexcept {
            GeneratedType<InstancedRefHolder>::Register(types).IsOk() &&
            GeneratedType<InstancedRequiredLink>::Register(types).IsOk() &&
            GeneratedType<InstancedNested>::Register(types).IsOk() &&
+           GeneratedType<InstancedRefArrayHolder>::Register(types).IsOk() &&
+           GeneratedType<InstancedWorldBound>::Register(types).IsOk() &&
+           GeneratedType<InstancedLocked>::Register(types).IsOk() &&
            GeneratedType<InstancedHost>::Register(types).IsOk() && RegisterDepthChain(types) &&
            GeneratedType<InstancedHolder>::Register(types).IsOk();
 }

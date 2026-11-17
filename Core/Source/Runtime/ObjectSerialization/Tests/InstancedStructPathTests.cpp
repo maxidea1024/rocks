@@ -241,3 +241,39 @@ TEST(InstancedStructPath_SetTypeRejections) {
 
     CHECK(types.Shutdown());
 }
+
+// 담기 조건의 나머지 둘(B9j–B9m 묶음 리뷰의 시험 공백): Registry 컨테이너(ObjectRefArray)를 담은
+// struct와 WorldOnly 소유자를 요구하는 struct는 형 바꾸기·lease 판 Emplace가 InvalidArgument다.
+TEST(InstancedStructPath_RegistryContainerAndWorldOnlyContentRejected) {
+    SystemAllocator allocator;
+    TypeRegistry types(allocator);
+    REQUIRE(RegisterFixture(types));
+    {
+        ObjectRegistry objects(allocator, types, {0x495350, 9});
+        RootRef<InstancedHolder> holder = New(objects);
+        const ObjectHandle handle = holder.Handle();
+        const PathStep valueStep[] = {{FieldOf<InstancedHolder>("value")}};
+        const TypeId rejected[] = {TypeIdOf<InstancedRefArrayHolder>(),
+                                   TypeIdOf<InstancedWorldBound>()};
+        for (const TypeId type : rejected) {
+            PropertyPathFailure failure;
+            auto set = PathSetInstancedType(objects, objects.OwnerAccess(), handle,
+                                            PropertyPath{valueStep}, type, &failure);
+            CHECK(!set && set.Error() == ErrorCode::InvalidArgument);
+            CHECK(failure.reason == PropertyPathError::InvalidValue);
+            auto lease = types.AcquireValueType(type, TypeKind::Struct);
+            REQUIRE(lease);
+            InstancedStruct<> value;
+            auto made = value.Emplace(Move(lease.Value()), allocator);
+            CHECK(!made && made.Error() == ErrorCode::InvalidArgument);
+            CHECK(value.IsEmpty());
+        }
+
+        With(objects, handle,
+             [](InstancedHolder& value) noexcept { CHECK(value.value.IsEmpty()); });
+        holder.Reset();
+        REQUIRE(objects.Shutdown(objects.OwnerAccess()));
+    }
+
+    CHECK(types.Shutdown());
+}
