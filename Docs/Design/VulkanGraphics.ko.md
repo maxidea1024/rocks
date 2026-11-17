@@ -1,6 +1,6 @@
 # Vulkan 그래픽 backend(VulkanGraphics) 설계
 
-기준일: 2026-11-18, 개정 3(초안). Vulkan backend `VulkanGraphics`가 Graphics 장치 계약(`Graphics/Device.h`)을 Vulkan 1.1 위에서 어떻게 지키는지 정한다. [셰이더 시스템](ShaderSystem.ko.md) P9 "Vulkan 선행"의 산출물이다. 그 문서가 P9 산출물로 "EngineRuntime에 절을 더한다"고 적었지만, 내용이 커서 이 문서로 따로 두고 [엔진 런타임](EngineRuntime.ko.md) 10절에는 요약과 링크만 둔다.
+기준일: 2026-11-18, 개정 4(초안). Vulkan backend `VulkanGraphics`가 Graphics 장치 계약(`Graphics/Device.h`)을 Vulkan 1.1 위에서 어떻게 지키는지 정한다. [셰이더 시스템](ShaderSystem.ko.md) P9 "Vulkan 선행"의 산출물이다. 그 문서가 P9 산출물로 "EngineRuntime에 절을 더한다"고 적었지만, 내용이 커서 이 문서로 따로 두고 [엔진 런타임](EngineRuntime.ko.md) 10절에는 요약과 링크만 둔다.
 
 UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275b`, 로컬 클론) 원본이다. 경로는 `Engine/Source/Runtime/VulkanRHI/` 기준이며 `Private/`는 `P/`, `Public/`은 `Pub/`로 줄인다. Vulkan 사양 근거는 Vulkan 1.4 사양(Vulkan-Docs)의 절 이름으로 적는다.
 
@@ -116,7 +116,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 크기 상한은 min(16384, `maxImageDimension2D`)이다.
 - 장치를 만들 때 1×1 흰색 Sampled 텍스처와 그 descriptor set을 만든다. 패스 시작과 `SetTexture(null)`·stale handle이 그것을 묶는다(D3D12와 같다).
 - `ReadPixels`는 기록 중이면 `Busy`, RenderTarget이 아니거나 크기가 다르면 `InvalidArgument`다(D3D12와 같다). 비동기 readback과 같은 경로로 제출하고 그 fence를 기다린다.
-- 형식 표(`Private/VulkanFormats.cpp`)는 `switch` 하나로 둔다. 대응 형식을 늘릴 때 행만 더하면 되도록 `PixelFormat` → (`VkFormat`, 필요한 형식 기능 bit)를 한 곳에서 정한다. 지금(PF1)은 아래 두 형식뿐이고, 표에 없는 유효 형식은 텍스처·파이프라인 생성이 `Unsupported`이며 `LastError`에 형식 이름을 남긴다(다른 형식으로 대체하지 않는다, PixelFormat.ko.md 8.3절). 업로드·readback 크기는 `PixelFormatImageBytes`·블록 크기로 계산한다. 형식을 넓힐 때의 Vulkan 주의점(BC1은 RGBA 블록, V8U8은 SNORM, A8은 R8 + swizzle)은 PixelFormat.ko.md 15·17절이다.
+- 형식 표(`Private/VulkanFormats.cpp`)는 `switch` 하나로 둔다. 대응 형식을 늘릴 때 행만 더하면 되도록 `PixelFormat` → (`VkFormat`, 필요한 형식 기능 bit)를 한 곳에서 정한다. 지금(PF1)은 아래 두 형식뿐이다. 장치 능력(`GetPixelFormatCaps`, PF3)은 생성 때 표의 형식마다 `vkGetPhysicalDeviceFormatProperties`의 optimal tiling 기능으로 정하고, 이 backend가 만들 수 있는 것(`Sampled`·`Mipmaps`·`Filterable`·`RenderTarget`·`Blendable`)만 공개한다(3D·cube·MSAA·storage·깊이는 기능이 있어도 공개하지 않는다, PF4). 텍스처·파이프라인 생성은 이 능력으로 판정하므로 "능력 있음 ⇔ 생성 성공"이다. 표에 없는 유효 형식과 능력 밖 용도(예: `DepthStencil`)는 생성이 `Unsupported`이며 `LastError`에 형식 이름을 남긴다(다른 형식으로 대체하지 않는다, PixelFormat.ko.md 8.3절). 업로드·readback 크기는 `PixelFormatImageBytes`·블록 크기로 계산한다. 형식을 넓힐 때의 Vulkan 주의점(BC1은 RGBA 블록, V8U8은 SNORM, A8은 R8 + swizzle)은 PixelFormat.ko.md 15·17절이다.
 
   | Rocks | Vulkan |
   |---|---|
@@ -200,7 +200,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 주파수: `1e9 / timestampPeriod`를 가장 가까운 정수 Hz로 공개한다(`DeviceInfo::timestampFrequency`는 정수다). period가 정수 ns가 아닌 장치는 반올림만큼 변환 오차가 생긴다. disjoint 감지는 Vulkan에 없으므로 `timestampDisjointDetection` false다.
 - calibration: `VK_KHR_calibrated_timestamps`(없으면 EXT)의 `[DEVICE, 호스트]`. 호스트 domain은 Windows `QUERY_PERFORMANCE_COUNTER`(PlatformBase `MonotonicTicks`와 같은 QPC), Android `CLOCK_MONOTONIC`(같은 원천, ns)이다. 두 domain을 장치가 주지 않으면 `clockCalibration` false다. `uncertaintyNanoseconds`는 드라이버가 준 `maxDeviation`(ns)이다(UE는 버린다. Rocks는 오차를 공개한다).
 - debug marker: label 함수는 instance 확장 명령이라 `vkGetInstanceProcAddr`로 얻는다. `VK_EXT_debug_utils`가 켜져 있으면 `vkCmdBegin/EndDebugUtilsLabelEXT`(UTF-8 그대로, `MaxDebugMarkerNameBytes`로 자름)이고 `debugMarkers` 참이다. 없으면 거짓이고 두 호출은 아무것도 하지 않는다.
-- 검증 messenger: ERROR 심각도의 검증·일반 메시지를 원자 계수로 센다(`ValidationErrorCount`). 메시지는 `Graphics.Vulkan.Validation` 범주에 Warning으로 메시지 ID마다 한 번 남긴다(LoggingSystem 13절). 콜백은 드라이버 스레드에서도 불리므로 잠금 없이 원자 연산과 고정 크기 ID 표만 쓴다.
+- 검증 messenger: ERROR 심각도의 검증·일반 메시지를 원자 계수로 센다(`ValidationErrorCount`). 메시지는 `Graphics.Vulkan.Validation` 범주(`LogGraphicsVulkanValidation`, 장치 생성·손실은 `LogGraphicsVulkan`, 둘 다 `Graphics/GraphicsLog.h`)에 Warning으로 메시지 ID마다 한 번 남긴다(LoggingSystem 13절). 콜백은 드라이버 스레드에서도 불리므로 직렬화를 전제하는 `ValidationMessageFilter` 대신 같은 규칙(표 `MaxLoggedValidationIds`가 차면 새 ID는 남기지 않고 개수만 센다)을 잠금 없이 원자 연산과 고정 크기 ID 표로 지킨다.
 - 실패 보존: 장치 안 실패는 `LastError`에 "단계: VkResult 이름(값)"을 적는다. 생성 실패는 `DeviceCreateReport`(code·nativeCode = `VkResult`·stage·detail)로 돌려준다.
 
 ## 13. 스레드 모델(GX10·GX11)·셰이더 경로
@@ -292,3 +292,4 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 개정 1(2026-11-17): 초안. P9 설계, UE 5.8 VulkanRHI 조사, Graphics 계약(GX3a·GX7–GX11·C7)의 Vulkan 대응. 교차 검토 반영: 앞면은 UE 매핑 대신 D3D12와 같은 매핑(`SV_IsFrontFace` 일치), present 수명(`vkQueueWaitIdle`), swapchain 크기와 중간 이미지 크기 분리, 업로드 묶음 안 WAW barrier, query reset을 기록 밖 회수와 프레임 앞 reset으로, 손실 뒤 값 소비 금지, 정점·index offset 정렬.
 - 개정 2(2026-11-17): GX5 명시 접근 상태와 전이(RenderBase 개정 9–11, RG1)를 8절에 반영했다: mip별 `committed`·`current` 추적과 대표형 상태, 접근 → layout·stage·access, 단계가 새로 생기는 읽기 전이와 같은 쓰기 상태의 WAW, render pass 바깥 의존, render pass 안 barrier는 pass를 닫고 다시 연다, 버퍼는 쓰기가 끼거나 단계가 생기는 전이만 메모리 barrier, 업로드·readback 상태 중립, `SetTexture` 암묵 전이. 교차 검토(중요 3·사소 3)를 반영했다. 픽셀 형식 PF1(`PixelFormat`, RGBA8 두 형식만 대응, 나머지 `Unsupported`)과 OpenGL ES 전환 병합 뒤 측정(17절).
 - 개정 3(2026-11-18): 드라이버 상주(3절). 로더가 `vkDestroyInstance`에서 ICD를 내린 뒤에도 남은 NVIDIA 드라이버 스레드가 내려간 코드를 실행해 EngineTests가 간헐적으로 죽던 문제를 cdb로 확인하고(17절), 프로세스 수명의 상주 instance로 막았다.
+- 개정 4(2026-11-18): 로깅 LG7(`Graphics/GraphicsLog.h` 범주, 검증 메시지 ID 표 규칙, 12절)과 픽셀 형식 PF3(`GetPixelFormatCaps`, 능력으로 생성 판정, 6절)을 반영했다.

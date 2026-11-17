@@ -278,7 +278,8 @@ Result<PipelineHandle> VulkanDevice::CreatePipeline(const PipelineDesc& desc) no
         return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
-    if (color.format == VK_FORMAT_UNDEFINED) {
+    if (color.format == VK_FORMAT_UNDEFINED ||
+        !HasPixelFormatCaps(GetPixelFormatCaps(desc.colorFormat), PixelFormatCaps::RenderTarget)) {
         return UnsupportedFormat<PipelineHandle>(desc.colorFormat);
     }
 

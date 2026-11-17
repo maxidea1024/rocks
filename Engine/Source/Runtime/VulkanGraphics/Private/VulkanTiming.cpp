@@ -144,8 +144,10 @@ Result<void> VulkanDevice::CreateMessenger() noexcept {
     return Result<void>::Success();
 }
 
-// 드라이버·층 스레드에서도 불린다. 잠금 없이 원자 연산과 고정 크기 ID 표만 쓴다. ERROR 심각도를
-// 세고(ValidationErrorCount), 메시지 ID마다 한 번 Warning 로그를 남긴다(LoggingSystem 13절).
+// 드라이버·층 스레드에서도 불린다. 잠금 없이 원자 연산과 고정 크기 ID 표만 쓴다(여러 스레드가
+// 부르므로 직렬화를 전제하는 ValidationMessageFilter 대신 같은 규칙을 원자 연산으로 지킨다). ERROR
+// 심각도를 세고(ValidationErrorCount), 메시지 ID마다 한 번 Warning 로그를 남긴다(LoggingSystem
+// 13절). 표(MaxLoggedValidationIds)가 차면 새 ID는 남기지 않는다(개수는 계속 센다).
 VKAPI_ATTR VkBool32 VKAPI_CALL VulkanDevice::OnValidationMessage(
     VkDebugUtilsMessageSeverityFlagBitsEXT severity, VkDebugUtilsMessageTypeFlagsEXT types,
     const VkDebugUtilsMessengerCallbackDataEXT* data, void* user) {
@@ -169,11 +171,12 @@ VKAPI_ATTR VkBool32 VKAPI_CALL VulkanDevice::OnValidationMessage(
 
     const uint32 slot =
         platform::AtomicFetchAdd<platform::MemoryOrder::AcquireRelease>(&state->loggedCount, 1u);
-    if (slot < MaxLoggedValidationIds) {
-        platform::AtomicStore<platform::MemoryOrder::Relaxed>(&state->loggedIds[slot], id);
+    if (slot >= MaxLoggedValidationIds) {
+        return VK_FALSE;
     }
 
-    Log::Warning(LogVulkanValidation, "{MessageId}: {Message}",
+    platform::AtomicStore<platform::MemoryOrder::Relaxed>(&state->loggedIds[slot], id);
+    Log::Warning(LogGraphicsVulkanValidation, "{MessageId}: {Message}",
                  data->pMessageIdName != nullptr ? data->pMessageIdName : "",
                  data->pMessage != nullptr ? data->pMessage : "");
     return VK_FALSE;

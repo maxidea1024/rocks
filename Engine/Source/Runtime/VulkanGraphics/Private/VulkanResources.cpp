@@ -338,10 +338,57 @@ Result<BufferHandle> VulkanDevice::CreateBuffer(const BufferDesc& desc,
 }
 
 // 다른 스레드에서도 부를 수 있다(concurrentResourceCreation). 초기 픽셀은 업로드 기록으로 간다.
+void VulkanDevice::QueryFormatCaps() noexcept {
+    for (uint32 number = 1; number <= MaxPixelFormatNumber; ++number) {
+        const auto pixelFormat = static_cast<PixelFormat>(number);
+        const TextureFormatInfo format =
+            IsValidPixelFormat(pixelFormat) ? TextureFormat(pixelFormat) : TextureFormatInfo{};
+        if (format.format == VK_FORMAT_UNDEFINED) {
+            continue;
+        }
+
+        VkFormatProperties support = {};
+        functions_.vkGetPhysicalDeviceFormatProperties(physical_, format.format, &support);
+        const VkFormatFeatureFlags features = support.optimalTilingFeatures;
+        PixelFormatCaps caps = PixelFormatCaps::None;
+        // 만들 수 있는 것만 공개한다(2D·mip 사슬·렌더 타깃). 3D·cube·MSAA·storage·texel buffer는
+        // 이 backend가 아직 만들지 않으므로 기능이 있어도 공개하지 않는다(PF4).
+        if ((features & format.sampledFeatures) == format.sampledFeatures) {
+            caps = caps | PixelFormatCaps::Sampled | PixelFormatCaps::Mipmaps;
+            if ((features & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) != 0) {
+                caps = caps | PixelFormatCaps::Filterable;
+            }
+
+            if ((features & format.renderTargetFeatures) == format.renderTargetFeatures) {
+                caps = caps | PixelFormatCaps::RenderTarget;
+                if ((features & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT) != 0) {
+                    caps = caps | PixelFormatCaps::Blendable;
+                }
+            }
+        }
+
+        formatCaps_[number] = caps;
+    }
+}
+
+// 장치 생성 뒤 바뀌지 않는 표를 읽으므로 어느 스레드에서나 부를 수 있다.
+PixelFormatCaps VulkanDevice::GetPixelFormatCaps(PixelFormat format) const noexcept {
+    const auto number = static_cast<uint32>(format);
+    if (!IsValidPixelFormat(format) || number > MaxPixelFormatNumber) {
+        return PixelFormatCaps::None;
+    }
+
+    return formatCaps_[number];
+}
+
 Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
                                                   Span<const uint8> pixels) noexcept {
     const TextureFormatInfo format = TextureFormat(desc.format);
-    if (IsValidPixelFormat(desc.format) && format.format == VK_FORMAT_UNDEFINED) {
+    // 형식·용도 지원은 장치 능력으로 판정한다(PixelFormat.ko.md 8.3절). 대응하지 않으면 다른
+    // 형식으로 바꾸지 않고 Unsupported다.
+    if (IsValidPixelFormat(desc.format) &&
+        !HasPixelFormatCaps(GetPixelFormatCaps(desc.format),
+                            RequiredPixelFormatCaps(desc.usage, desc.mipLevels))) {
         platform::LockGuard lock(gate_);
         return UnsupportedFormat<TextureHandle>(desc.format);
     }
@@ -355,15 +402,6 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
         !IsValidSamplerDesc(desc.sampler) ||
         (renderTarget ? (pixels.Size() != 0 || desc.mipLevels != 1) : pixels.Size() != size)) {
         return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
-    }
-
-    VkFormatProperties support = {};
-    functions_.vkGetPhysicalDeviceFormatProperties(physical_, format.format, &support);
-    const VkFormatFeatureFlags required =
-        renderTarget ? format.renderTargetFeatures : format.sampledFeatures;
-    if (format.format == VK_FORMAT_UNDEFINED ||
-        (support.optimalTilingFeatures & required) != required) {
-        return Result<TextureHandle>::Failure(ErrorCode::Unsupported);
     }
 
     platform::LockGuard lock(gate_);

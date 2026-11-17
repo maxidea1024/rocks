@@ -372,7 +372,7 @@ Result<GpuFencePoint> VulkanDevice::EndFrame() noexcept {
         } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
             present->surfaceLost = result == VK_ERROR_SURFACE_LOST_KHR;
             if (result == VK_ERROR_DEVICE_LOST) {
-                Log::Error(LogVulkan, "Vulkan device lost during present on {Adapter}",
+                Log::Error(LogGraphicsVulkan, "Vulkan device lost during present on {Adapter}",
                            adapterName_.CStr());
             }
 

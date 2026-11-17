@@ -303,7 +303,7 @@ Result<void> VulkanDevice::FailCode(const char* stage, ErrorCode code,
 void VulkanDevice::DetectLost(VkResult result) noexcept {
     if (result == VK_ERROR_DEVICE_LOST && !timeline_.IsLost()) {
         timeline_.MarkLost();
-        Log::Error(LogVulkan, "Vulkan device lost on {Adapter}", adapterName_.CStr());
+        Log::Error(LogGraphicsVulkan, "Vulkan device lost on {Adapter}", adapterName_.CStr());
     }
 }
 
@@ -350,7 +350,7 @@ Result<void> VulkanDevice::Initialize(const DeviceDesc& desc, DeviceCreateReport
     }
 
     report_ = nullptr;
-    Log::Info(LogVulkan, "Created {Backend} device on {Adapter} (validation {Validation})",
+    Log::Info(LogGraphicsVulkan, "Created {Backend} device on {Adapter} (validation {Validation})",
               "Vulkan", adapterName_.CStr(), validation_ ? "on" : "off");
     return Result<void>::Success();
 }
@@ -400,7 +400,7 @@ Result<void> VulkanDevice::CreateInstance(const DeviceDesc& desc) noexcept {
         }
 
         if (layerCount == 0) {
-            Log::Warning(LogVulkan,
+            Log::Warning(LogGraphicsVulkan,
                          "Vulkan validation requested but {Layer} is not installed; continuing "
                          "without it",
                          ValidationLayerName);
@@ -501,6 +501,7 @@ Result<void> VulkanDevice::PickPhysicalDevice(const DeviceDesc& desc) noexcept {
     software_ = bestRank == CpuRank;
     auto named = adapterName_.TryAssign(StringView(properties_.deviceName));
     (void)named;
+    QueryFormatCaps();
     return Result<void>::Success();
 }
 

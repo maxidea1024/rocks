@@ -10,6 +10,7 @@
 #include <Graphics/Device.h>
 #include <Graphics/DeviceOwnership.h>
 #include <Graphics/FenceTimeline.h>
+#include <Graphics/GraphicsLog.h>
 #include <Graphics/ResourceAccess.h>
 #include <Graphics/ShaderSourceCompiler.h>
 #include <Graphics/StagingPool.h>
@@ -26,10 +27,6 @@
 // - VulkanUpload.cpp: 업로드 ring·staging·readback
 // - VulkanTiming.cpp: timestamp·calibration·debug label·검증 messenger
 namespace rocks::graphics::vulkan {
-
-// 로그 범주다(LoggingSystem 13절). 검증 메시지는 따로 둔다.
-inline constexpr LogCategory LogVulkan{"Graphics.Vulkan"};
-inline constexpr LogCategory LogVulkanValidation{"Graphics.Vulkan.Validation"};
 
 // 명령 버퍼 기록 수 상한이다. 끝난 제출의 것을 다시 쓰고, 모두 GPU가 쓰는 중이면 이 수까지 새로
 // 만든다(D3D12 기록 저장소와 같은 상한). 상한이면 소유 스레드는 가장 오래된 제출을 기다린다.
@@ -52,8 +49,6 @@ inline constexpr uint32 ConstantBytes = sizeof(DrawConstants);
 inline constexpr uint64 RetainUntilDestructionFence = NumericLimits<uint64>::Max();
 // 한 업로드 묶음 안에서 겹침을 추적하는 버퍼 쓰기 구간 수다(넘치면 barrier를 두고 비운다).
 inline constexpr uint32 MaxTrackedBufferWrites = 64;
-// 검증 메시지 ID 중복 제거 표 크기다(넘친 ID는 매번 로그를 남긴다).
-inline constexpr uint32 MaxLoggedValidationIds = 128;
 
 // 접근 상태의 대표형이다. D3D12 상태 대응에서 같은 상태가 되는 접근을 하나로 모은다:
 // SrvGraphics는 compute 읽기도 포함하고(D3D12 PIXEL | NON_PIXEL_SHADER_RESOURCE), VertexOrIndex는
@@ -241,6 +236,7 @@ public:
                                       Span<const uint8> initial) noexcept override;
     Result<TextureHandle> CreateTexture(const TextureDesc& desc,
                                         Span<const uint8> pixels) noexcept override;
+    PixelFormatCaps GetPixelFormatCaps(PixelFormat format) const noexcept override;
     Result<PipelineHandle> CreatePipeline(const PipelineDesc& desc) noexcept override;
     Result<CommandContext*> BeginFrame(SwapChainHandle swapChain,
                                        const ClearColor& clear) noexcept override;
@@ -388,6 +384,10 @@ private:
     // 장치 손실이면 게시한다(기다리는 쪽을 Destroyed로 깨운다).
     void DetectLost(VkResult result) noexcept;
 
+    // --- VulkanResources.cpp(형식 능력) ---
+    // 형식 표에 있는 형식마다 optimal tiling 기능을 물어 능력을 정한다(장치 생성 때 한 번).
+    void QueryFormatCaps() noexcept;
+
     // --- VulkanSubmission.cpp ---
     Result<void> CreateCommandPool() noexcept;
     Result<uint32> PickCommandBuffer() noexcept;
@@ -514,6 +514,9 @@ private:
     VkDebugUtilsMessengerEXT messenger_ = VK_NULL_HANDLE;
     VkPhysicalDevice physical_ = VK_NULL_HANDLE;
     VkPhysicalDeviceProperties properties_ = {};
+    // 형식 번호별 능력이다(장치 생성 때 QueryFormatCaps가 채우고 바뀌지 않는다, PixelFormat.ko.md
+    // 7·8절). 형식 표(VulkanFormats.cpp)에 없는 형식은 None이다.
+    PixelFormatCaps formatCaps_[MaxPixelFormatNumber + 1] = {};
     VkDevice device_ = VK_NULL_HANDLE;
     VkQueue queue_ = VK_NULL_HANDLE;
     uint32 queueFamily_ = 0;
