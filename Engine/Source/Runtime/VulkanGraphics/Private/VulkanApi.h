@@ -5,7 +5,8 @@
 #include <vulkan/vulkan_core.h>
 
 // Vulkan 함수 표다(Docs/Design/VulkanGraphics.ko.md 3절). 로더를 링크하지 않으므로
-// (VK_NO_PROTOTYPES) 모든 함수를 실행 중에 얻는다. 표는 장치 객체 안에 두며 전역 상태가 없다.
+// (VK_NO_PROTOTYPES) 모든 함수를 실행 중에 얻는다. 표는 장치 객체 안에 둔다. 전역 상태는 드라이버
+// 상주(Loader::Load) 하나뿐이다.
 //
 // - 전역 함수: vkGetInstanceProcAddr(nullptr, 이름)
 // - instance 함수와 instance 확장 명령(debug utils label 포함): vkGetInstanceProcAddr(instance,
@@ -159,6 +160,14 @@ public:
 
     // 플랫폼 로더(LoaderLibraryName)를 열고 vkGetInstanceProcAddr와 전역 함수를 functions에
     // 채운다. 실패하면 OS 상태를 돌려준다(전역 함수가 없으면 NotFound, missing에 이름).
+    //
+    // 처음 성공한 Load는 드라이버를 프로세스 끝까지 상주시킨다(Docs/Design/VulkanGraphics.ko.md
+    // 3절): 로더를 따로 한 번 더 열고 확장·층 없는 VkInstance 하나를 만들어 두고 파괴하지 않는다.
+    // 로더는 instance를 파괴할 때 ICD 라이브러리를 내리는데, 드라이버가 만든 스레드가 장치 파괴
+    // 뒤에도 남아 있으면 내려간 코드를 실행해 프로세스가 죽는다(NVIDIA nvoglv64.dll에서 확인).
+    // 한 프로세스가 장치를 여러 번 만들고 부수므로(시험·self-test·backend 전환) ICD가 instance
+    // 파괴로 내려가지 않게 참조 하나를 늘 쥔다. 실패하면 상주 없이 계속한다(장치 생성이 따로
+    // 보고한다).
     platform::FileStatus Load(Functions& functions, const char*& missing) noexcept;
 
 private:

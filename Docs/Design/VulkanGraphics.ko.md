@@ -1,6 +1,6 @@
 # Vulkan 그래픽 backend(VulkanGraphics) 설계
 
-기준일: 2026-11-17, 개정 2(초안). Vulkan backend `VulkanGraphics`가 Graphics 장치 계약(`Graphics/Device.h`)을 Vulkan 1.1 위에서 어떻게 지키는지 정한다. [셰이더 시스템](ShaderSystem.ko.md) P9 "Vulkan 선행"의 산출물이다. 그 문서가 P9 산출물로 "EngineRuntime에 절을 더한다"고 적었지만, 내용이 커서 이 문서로 따로 두고 [엔진 런타임](EngineRuntime.ko.md) 10절에는 요약과 링크만 둔다.
+기준일: 2026-11-18, 개정 3(초안). Vulkan backend `VulkanGraphics`가 Graphics 장치 계약(`Graphics/Device.h`)을 Vulkan 1.1 위에서 어떻게 지키는지 정한다. [셰이더 시스템](ShaderSystem.ko.md) P9 "Vulkan 선행"의 산출물이다. 그 문서가 P9 산출물로 "EngineRuntime에 절을 더한다"고 적었지만, 내용이 커서 이 문서로 따로 두고 [엔진 런타임](EngineRuntime.ko.md) 10절에는 요약과 링크만 둔다.
 
 UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275b`, 로컬 클론) 원본이다. 경로는 `Engine/Source/Runtime/VulkanRHI/` 기준이며 `Private/`는 `P/`, `Public/`은 `Pub/`로 줄인다. Vulkan 사양 근거는 Vulkan 1.4 사양(Vulkan-Docs)의 절 이름으로 적는다.
 
@@ -53,10 +53,11 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 
 ## 3. 로더·instance·장치
 
-**로더(구현 위치 `Private/VulkanLoader.*`).**
+**로더(구현 위치 `Private/VulkanApi.*`).**
 - Windows `OpenSystem("vulkan-1.dll")`(System32만), Android `OpenSystem("libvulkan.so")`. 열지 못하면 생성이 `Unsupported`이고 report의 stage는 `LoadVulkanLoader`, nativeCode는 OS 오류다. 다른 backend는 그대로 동작한다.
 - export에서 `vkGetInstanceProcAddr` 하나만 얻는다. 전역 함수(`vkEnumerateInstanceVersion`·`vkEnumerateInstance*Properties`·`vkCreateInstance`)와 instance 함수는 그것으로, 장치 함수는 `vkGetDeviceProcAddr`로 얻는다(UE는 장치 함수도 instance로 얻는다. 장치 함수 포인터가 loader trampoline을 거치지 않는 쪽을 고른다). instance 확장의 명령(debug utils label)은 `vkGetInstanceProcAddr`로 얻는다.
-- 함수 표는 장치 객체 안에 둔다(전역 상태 없음). 장치가 여러 개면 각자 표를 가진다.
+- 함수 표는 장치 객체 안에 둔다. 장치가 여러 개면 각자 표를 가진다.
+- 드라이버 상주(전역 상태는 이것 하나): 처음 성공한 로더 열기가 로더를 한 번 더 열고 확장·층 없는 `VkInstance` 하나를 만들어 프로세스 끝까지 둔다(파괴하지 않는 정적 저장소, 한 번만 시도). 로더는 `vkDestroyInstance`에서 ICD 라이브러리를 내리는데, NVIDIA 드라이버(nvoglv64.dll)는 장치 파괴 뒤에도 끝나지 않은 자체 스레드를 남기는 일이 있어 그 스레드가 내려간 코드를 실행하면 프로세스가 죽는다(cdb로 확인: `<Unloaded_nvoglv64.dll>` 접근 위반, 장치를 만들고 부수는 EngineTests에서 수십 번에 한 번). 이 instance가 ICD 참조를 쥐어 장치 instance를 파괴해도 ICD가 내려가지 않는다. UE는 프로세스에 RHI instance 하나를 두고 종료 때만 내리므로(`VulkanRHI.cpp:587–600`) 이 상황이 없다. Rocks는 한 프로세스가 장치를 여러 번 만들고 부순다(시험·self-test·backend 전환).
 
 **instance.**
 - `vkEnumerateInstanceVersion`이 없거나 1.1 미만이면 `Unsupported`(stage `vkEnumerateInstanceVersion`).
@@ -266,6 +267,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 | 동기화 검증(`VK_LAYER_ENABLES`의 synchronization validation) | 두 장치 모두 `SYNC-HAZARD` 0건(GX5 전이 뒤에도 0건) |
 | Android 교차 빌드(arm64, NDK 29, `-p:RocksPlatform=android`, EngineTests) | VulkanGraphics Android 구현(`libvulkan.so`, `VK_KHR_android_surface`, CLOCK_MONOTONIC domain)과 ShaderFormatVulkan 미지원 구현이 경고 0으로 컴파일된다. 기기 실행은 SH6·P13이다 |
 | EngineTests | `GpuPageAllocator` 3건, `VulkanShaderCompiler` 2건(DXC·SPIRV-Tools 실제 호출), `VulkanDevice` 1건(로더 동적 로드·검증 층·빈 제출 fence) 통과, 전체 2135건 통과 |
+| 드라이버 언로드 경쟁(3절 드라이버 상주) | 상주 전: EngineTests 전체가 간헐적으로 비정상 종료(하네스 2회, 직접 실행 6회 중 1회). cdb에서 `--filter Vulkan`을 반복해 10번째에 잡았다. 장치 수명 동안 NVIDIA가 만든 스레드 7개 중 하나가 `vkDestroyInstance`의 nvoglv64.dll 언로드 뒤에도 남아 `<Unloaded_nvoglv64.dll>+0xe76052`에서 접근 위반. 우리 fence watcher 스레드는 그 전에 끝났다. 상주 뒤: cdb 로그에 프로세스 끝까지 nvoglv64.dll·vulkan-1.dll 언로드 이벤트가 없고(결정적 확인), `--filter Vulkan` 직접 60회·cdb 20회와 EngineTests 전체 직접 8회가 모두 통과 |
 | best practices 검증 | 열거를 두 번 부르기로 고친 뒤 남는 경고는 RenderTarget 생성 때 UNDEFINED → SHADER_READ_ONLY 전이 하나다(D3D12도 생성 직후 내용이 정해지지 않는다. 오류로 세지 않는다) |
 
 **측정 S4(검증 층 공급·소프트웨어 ICD).**
@@ -289,3 +291,4 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 
 - 개정 1(2026-11-17): 초안. P9 설계, UE 5.8 VulkanRHI 조사, Graphics 계약(GX3a·GX7–GX11·C7)의 Vulkan 대응. 교차 검토 반영: 앞면은 UE 매핑 대신 D3D12와 같은 매핑(`SV_IsFrontFace` 일치), present 수명(`vkQueueWaitIdle`), swapchain 크기와 중간 이미지 크기 분리, 업로드 묶음 안 WAW barrier, query reset을 기록 밖 회수와 프레임 앞 reset으로, 손실 뒤 값 소비 금지, 정점·index offset 정렬.
 - 개정 2(2026-11-17): GX5 명시 접근 상태와 전이(RenderBase 개정 9–11, RG1)를 8절에 반영했다: mip별 `committed`·`current` 추적과 대표형 상태, 접근 → layout·stage·access, 단계가 새로 생기는 읽기 전이와 같은 쓰기 상태의 WAW, render pass 바깥 의존, render pass 안 barrier는 pass를 닫고 다시 연다, 버퍼는 쓰기가 끼거나 단계가 생기는 전이만 메모리 barrier, 업로드·readback 상태 중립, `SetTexture` 암묵 전이. 교차 검토(중요 3·사소 3)를 반영했다. 픽셀 형식 PF1(`PixelFormat`, RGBA8 두 형식만 대응, 나머지 `Unsupported`)과 OpenGL ES 전환 병합 뒤 측정(17절).
+- 개정 3(2026-11-18): 드라이버 상주(3절). 로더가 `vkDestroyInstance`에서 ICD를 내린 뒤에도 남은 NVIDIA 드라이버 스레드가 내려간 코드를 실행해 EngineTests가 간헐적으로 죽던 문제를 cdb로 확인하고(17절), 프로세스 수명의 상주 instance로 막았다.

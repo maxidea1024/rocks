@@ -1,8 +1,70 @@
 #include "VulkanApi.h"
 
+#include <Core/Move.h>
+#include <Platform/Sync.h>
+
 namespace rocks::graphics::vulkan {
 
 namespace {
+
+// 드라이버 상주 상태다(Loader::Load 주석). 로더 참조와 ICD를 쥔 VkInstance다.
+struct ResidentDrivers {
+    platform::DynamicLibrary library;
+    platform::DynamicLibraryLease lease;
+    VkInstance instance = VK_NULL_HANDLE;
+};
+
+// 프로세스가 끝날 때까지 파괴하지 않는 저장소다. 정적 소멸자가 로더 참조를 풀면 상주가 프로세스
+// 종료 직전에 깨지므로 소멸자를 부르지 않는다(OS가 프로세스와 함께 거둔다).
+union ResidentStorage {
+    ResidentStorage() noexcept {
+    }
+
+    ~ResidentStorage() noexcept {
+    }
+
+    ResidentDrivers drivers;
+};
+
+// 처음 부를 때 한 번만 상주를 시도한다(여러 장치가 동시에 만들어져도 gate가 하나로 줄 세운다).
+void KeepDriversResident() noexcept {
+    static platform::Mutex gate;
+    static ResidentStorage storage;
+    static bool attempted = false;
+    platform::LockGuard lock(gate);
+    if (attempted) {
+        return;
+    }
+
+    attempted = true;
+    ResidentDrivers* drivers = ConstructAt<ResidentDrivers>(&storage.drivers);
+    if (!drivers->library.OpenSystem(LoaderLibraryName())) {
+        return;
+    }
+
+    void* address = nullptr;
+    if (!drivers->library.Find("vkGetInstanceProcAddr", address, drivers->lease)) {
+        return;
+    }
+
+    const auto getProc = reinterpret_cast<PFN_vkGetInstanceProcAddr>(address);
+    const auto createInstance =
+        reinterpret_cast<PFN_vkCreateInstance>(getProc(nullptr, "vkCreateInstance"));
+    if (createInstance == nullptr) {
+        return;
+    }
+
+    VkApplicationInfo application = {};
+    application.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+    application.pApplicationName = "Rocks driver residency";
+    application.apiVersion = VK_API_VERSION_1_1;
+    VkInstanceCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    info.pApplicationInfo = &application;
+    if (createInstance(&info, nullptr, &drivers->instance) != VK_SUCCESS) {
+        drivers->instance = VK_NULL_HANDLE;
+    }
+}
 
 template <class Function>
 bool LoadGlobal(PFN_vkGetInstanceProcAddr getProc, const char* name, Function& out) noexcept {
@@ -58,6 +120,7 @@ platform::FileStatus Loader::Load(Functions& functions, const char*& missing) no
         return {platform::FileCode::NotFound, 0};
     }
 
+    KeepDriversResident();
     return {};
 }
 
