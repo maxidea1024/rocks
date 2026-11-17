@@ -266,6 +266,9 @@ struct Options {
     bool packageClustersOff = false;
     // 작업 계수를 센다(--count-work — 간선마다 읽기가 늘어 시간 비교에는 끈다).
     bool countWork = false;
+    // 패키지 시나리오 하나에서 Collect 반복 전에 간선 쓰기를 이만큼 되풀이해 잰다(--write-rounds —
+    // 부하가 있는 기계에서 최솟값을 보려고).
+    uint32 writeRounds = 0;
     uint64 clusterSoakTicks = 0;
     uint64 soakTicks = 0;
     uint64 seed = 7;
@@ -878,6 +881,8 @@ bool MeasureEdgeWrites(ObjectRegistry& registry, uint32 count, Pick&& pick,
 
 constexpr uint32 Packages = 10000;
 constexpr uint32 PackageSize = 100;
+// --write-rounds 한 번의 간선 쓰기 수다.
+constexpr uint32 ProfileWrites = 50000;
 
 // 패키지형: 10K 패키지 × 100 객체(1M), 노드마다 평균 4개 간선, 그중 cross%는 다른 패키지로 간다.
 // clusters가 거짓이면 패키지 클러스터를 끈다(RegistryOptions::packageClusters).
@@ -969,6 +974,12 @@ int RunPackageScenario(uint32 crossPercent, bool clusters, const Options& option
                    stats.clusterMembers);
             PrintMemory(memory, all.Size(), stats);
             if (options.packageProfileSet) {
+                for (uint32 round = 0; round < options.writeRounds; ++round) {
+                    if (!MeasureEdgeWrites(registry, ProfileWrites, pick, memory)) {
+                        return 5;
+                    }
+                }
+
                 // 작업 계수와 직렬 Collect 반복(표본 프로파일러용).
                 const uint32 reps = options.reps != 0 ? options.reps : 5;
                 Array<GcReport> reports(memory);
@@ -1639,6 +1650,9 @@ bool Parse(int argc, char** argv, Options& options) noexcept {
             ++index;
         } else if (platform::CStringEquals(argv[index], "--soak")) {
             options.soakTicks = value;
+            ++index;
+        } else if (platform::CStringEquals(argv[index], "--write-rounds")) {
+            options.writeRounds = static_cast<uint32>(value > 1000 ? 0 : value);
             ++index;
         } else if (platform::CStringEquals(argv[index], "--package-profile")) {
             options.packageProfile = static_cast<uint32>(value > 100 ? 100 : value);
