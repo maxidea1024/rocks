@@ -5,6 +5,7 @@
 #include <Base/Types.h>
 #include <Core/Containers/Span.h>
 #include <Core/Diagnostics/LogCategory.h>
+#include <Core/Diagnostics/LogContext.h>
 #include <Core/Diagnostics/LogEvent.h>
 #include <Core/Diagnostics/LogRecord.h>
 #include <Core/Diagnostics/LogTemplate.h>
@@ -82,11 +83,14 @@ struct LogCaptureTarget {
 // - message: 렌더한 메시지(끝 NUL 자리 포함, 1 byte 이상)
 // - propertyText: 숫자·char·포인터 속성의 텍스트를 쓰는 영역
 // - properties: 인자마다 하나
-// 어느 쪽이든 모자라면 잘리고 LogEventFlags::MessageTruncated가 선다.
+// - context: 캡처한 문맥 항목마다 하나(MaxLogContextDepth칸이면 충분하다). 비우면 문맥을 채우지
+// 않는다. 메시지·속성이 모자라면 잘리고 LogEventFlags::MessageTruncated가 선다. 문맥 칸이 모자라면
+// ContextTruncated다.
 struct LogRenderTarget {
     Span<char> message;
     Span<char> propertyText;
     Span<LogProperty> properties;
+    Span<LogProperty> context;
 };
 
 namespace detail {
@@ -109,7 +113,8 @@ struct LogCaptureHeader {
     uint8 level = 0;
     uint8 flags = 0;
     uint8 categoryBytes = 0;
-    uint8 reserved[3]{};
+    uint8 contextCount = 0;
+    uint8 reserved[2]{};
     uint32 templateBytes = 0;
     const char* categoryName = nullptr;
     uint64 categoryHash = 0;
@@ -124,6 +129,14 @@ struct LogCaptureHeader {
 
 static_assert(MaxLogCategoryNameBytes <= NumericLimits<uint8>::Max(),
               "category name length is stored as uint8");
+
+// 캡처의 문맥 칸 하나다(값 칸들 뒤에 문맥 수만큼 놓인다). 이름은 리터럴 포인터, 값은 텍스트다.
+struct LogCaptureContext {
+    const char* name = nullptr;
+    uint32 nameBytes = 0;
+    uint32 reserved = 0;
+    LogCaptureValue value;
+};
 
 // 캡처에 넘길 템플릿 정보다.
 // - runtime이면 text를 캡처에 복사하고, 사용자 Formatter의 spec은 캡처 때 템플릿을 해석해 찾는다.

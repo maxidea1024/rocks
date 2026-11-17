@@ -395,7 +395,8 @@ Result<DateTime> TryParseIso8601(StringView text) noexcept {
 
 Result<void> Formatter<DateTime>::Format(StringBuilderBase& out, const DateTime& time,
                                          StringView spec) noexcept {
-    if (!spec.IsEmpty()) {
+    const bool milliseconds = spec == "ms";
+    if (!spec.IsEmpty() && !milliseconds) {
         return Invalid();
     }
 
@@ -405,6 +406,13 @@ Result<void> Formatter<DateTime>::Format(StringBuilderBase& out, const DateTime&
     time.GetDate(year, month, day);
     auto result = out.TryAppendFormat("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}", year, month, day,
                                       time.Hour(), time.Minute(), time.Second());
+
+    // "ms": 밀리초 3자리를 늘 쓴다(고정 폭). 100ns tick의 밀리초 아래는 버린다.
+    if (result && milliseconds) {
+        constexpr int32 TicksPerMillisecond = 10000;
+        result = out.TryAppendFormat(".{:03}Z", time.FractionTicks() / TicksPerMillisecond);
+        return result;
+    }
 
     // 소수부는 0이 아닐 때만, 끝의 0을 빼고 쓴다.
     int32 fraction = time.FractionTicks();

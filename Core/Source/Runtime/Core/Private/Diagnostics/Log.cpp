@@ -35,8 +35,8 @@ void WriteCaptureEmergency(Span<const uint8> capture, LogLevel level, StringView
     char texts[MaxLogArguments * 8];
     LogProperty properties[MaxLogArguments];
     LogEvent event;
-    const LogRenderTarget target{Span<char>(message), Span<char>(texts),
-                                 Span<LogProperty>(properties)};
+    const LogRenderTarget target{
+        Span<char>(message), Span<char>(texts), Span<LogProperty>(properties), {}};
     if (RenderLogCapture(capture, nullptr, target, event)) {
         WriteLogEmergencyText(event.level, event.category, event.message);
     } else {
@@ -146,8 +146,8 @@ void LogAppendLine(FixedStringBuilder& out, const LogCaptureTemplate& text, cons
     char texts[MaxLogArguments * 8];
     LogProperty properties[MaxLogArguments];
     LogEvent event;
-    const LogRenderTarget target{Span<char>(message), Span<char>(texts),
-                                 Span<LogProperty>(properties)};
+    const LogRenderTarget target{
+        Span<char>(message), Span<char>(texts), Span<LogProperty>(properties), {}};
     if (RenderLogCapture(Span<const uint8>(capture, captured.Value()), nullptr, target, event)) {
         (void)out.TryAppend(event.message);
     }
