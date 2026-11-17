@@ -374,7 +374,7 @@ public:
 | 이름 | 종류 | 기본값 | 허용 값·범위 | 변경 |
 |---|---|---|---|---|
 | `log.mode` | string | `default` | `default`(호스트 프리셋)·`async`·`sync` | 시작 뒤 고정 |
-| `log.level` | string | `info` | `trace`·`debug`·`info`·`warning`·`error`·`fatal` | 실행 중, sync 지점 |
+| `log.level` | string | `info` | `trace`·`debug`·`info`·`warning`·`error`·`fatal`(대소문자 무시, 그 밖은 설정 단계에서 거부) | 실행 중, sync 지점 |
 | `log.levels` | string | `""` | `"Graphics=warning,Engine.World=debug"`(접두사·레벨 대소문자 무시) | 실행 중, sync 지점 |
 | `log.file.enabled` | bool | `false` | | 시작 뒤 고정 |
 | `log.file.directory` | string | `Saved/Logs` | | 시작 뒤 고정 |

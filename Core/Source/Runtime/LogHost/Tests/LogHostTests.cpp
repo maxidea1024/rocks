@@ -10,7 +10,9 @@
 #include <Object/TypeRegistry.h>
 #include <Platform/Atomics.h>
 #include <Platform/Clock.h>
+#include <Platform/Fatal.h>
 #include <Platform/File.h>
+#include <Platform/Sync.h>
 
 using namespace rocks;
 
@@ -144,6 +146,24 @@ TEST(LogHostAppliesModeAndLevelsFromConfig) {
     CHECK(!logs.IsEnabled(LogLevel::Warning, d3d12) && logs.IsEnabled(LogLevel::Error, d3d12));
     CHECK(logs.IsEnabled(LogLevel::Debug, tick));
     CHECK(!host.IsFileLogging() && host.FileSetupError() == ErrorCode::None);
+    host.Stop();
+}
+
+// log.level 이름은 대소문자를 가리지 않는다("Warning"). 모르는 이름은 설정 단계에서 거부되고 앞
+// 값이 남는다.
+TEST(LogHostAcceptsLevelNamesInAnyCaseAndRejectsUnknownOnes) {
+    LogSettingsFixture fixture;
+    fixture.Apply(R"({"log.level": "Warning"})");
+    config::ConfigContext& context = *fixture.context;
+    context.Diagnostics().Clear();
+    CHECK(!context.AddAssignment(config::ConfigLayer::Console, "console", LogLevelSetting, "loud"));
+    CHECK(context.Diagnostics().ErrorCount() != 0);
+    REQUIRE(context.Sync());
+    LogHost host(fixture.system);
+    REQUIRE(host.Start(LogSystemConfig::ForEngineHost(), fixture.context.Get(), "Test"));
+    constexpr LogCategory audio{"Audio"};
+    CHECK(!host.System().IsEnabled(LogLevel::Info, audio));
+    CHECK(host.System().IsEnabled(LogLevel::Warning, audio));
     host.Stop();
 }
 
@@ -292,4 +312,66 @@ TEST(LogHostWritesAPlainFileFromConfig) {
     Array<uint8> file(fixture.system);
     REQUIRE(ReadAll(StringView(path.Data(), path.Size()), file));
     CHECK(Contains(file, "[Warning][Tests.Host] plain value 7"));
+}
+
+namespace {
+
+// 문이 열릴 때까지 Write 안에서 기다리는 sink다(처음에는 닫혀 있다).
+class HoldingSink final : public RuntimeLogSink {
+public:
+    Result<void> Write(const LogEvent&) noexcept override {
+        entered.Signal();
+        if (release.Wait(HoldingSinkSafetyMilliseconds) != platform::WaitResult::Signaled) {
+            platform::Fatal("holding sink was never released");
+        }
+
+        return Result<void>::Success();
+    }
+
+    Result<void> Flush() noexcept override {
+        return Result<void>::Success();
+    }
+
+    // 시험이 끝내 열지 못할 때만 쓰는 안전 상한이다(순서는 entered·release가 정한다).
+    static constexpr uint32 HoldingSinkSafetyMilliseconds = 30000;
+
+    platform::ManualResetEvent entered;
+    platform::ManualResetEvent release;
+};
+
+} // namespace
+
+// 멈춘 sink 때문에 출력 스레드가 남으면 Stop은 LogSystem을 파괴하지 않고 놓으며(소멸자의 Join이
+// 끝나지 않는다) WriterAbandoned를 알린다. 그 뒤 Start는 Busy다.
+TEST(LogHostStopLeavesTheLogSystemWhenTheWriterIsStuck) {
+    // 남은 출력 스레드가 돌아오면 sink와 allocator를 쓴다. 시험 범위보다 오래 살도록 일부러 놓는다
+    // (allocator도 파괴하지 않는다 — 소멸 때 남은 할당을 누수로 알린다).
+    alignas(SystemAllocator) static uint8 allocatorStorage[sizeof(SystemAllocator)];
+    static SystemAllocator* const leakedAllocator = ConstructAt<SystemAllocator>(allocatorStorage);
+    SystemAllocator& leaked = *leakedAllocator;
+    auto storage = leaked.Allocate(sizeof(HoldingSink), alignof(HoldingSink));
+    REQUIRE(storage);
+    HoldingSink& sink = *ConstructAt<HoldingSink>(storage.Value());
+    LogSystemConfig preset = LogSystemConfig::ForEngineHost();
+    preset.drainTimeoutMilliseconds = 10;
+    LogHost host(leaked);
+    REQUIRE(host.Start(preset, nullptr, "Test"));
+    CHECK(!host.WriterAbandoned());
+    REQUIRE(host.System().AddSink(sink));
+    {
+        LogInstallScope installed(host.System());
+        Log::Warning(LogHostTests, "held by a stuck sink (expected in test log)");
+        if (sink.entered.Wait(HoldingSink::HoldingSinkSafetyMilliseconds) !=
+            platform::WaitResult::Signaled) {
+            platform::Fatal("holding sink was not entered");
+        }
+    }
+
+    // sink는 Stop이 반환한 뒤에야 열린다.
+    host.Stop();
+    CHECK(host.WriterAbandoned());
+    auto restarted = host.Start(preset, nullptr, "Test");
+    CHECK(!restarted && restarted.Error() == ErrorCode::Busy);
+    host.Stop();
+    sink.release.Signal();
 }
