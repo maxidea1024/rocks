@@ -1095,6 +1095,16 @@ public:
 - 영속 범위: 잎 형태 셋(비어 있음·Invariant·Localized)과 형태 byte만 둔다. 새 형태(문자열 표 등)는 형태 값 하나와 codec 함수 하나로 더한다. 형식 지식은 Localization의 `TryGetPersistentForm`·생성 함수와 codec 한 곳에만 있다.
 - TextId의 정체성(복제 때 유지·재발급, 누가 발급하는가)은 지역화 설계와 함께 정한다(20절 열린 문제).
 
+구현(B9l)에서 정한 점:
+
+- 값 종류 `Text` = 29(`ValueKindCount` 30). 성질 표 행은 단일·멤버·Array 원소·StaticArray 원소·Map 값·통째 FieldValue이고 키·Set 원소·Optional 내부·InstancedStruct 내용·Required는 ×다(C# 표 같은 행, MetaCompiler `Scalars["rocks::Text"]`). ObjectRuntime이 Localization에 의존한다(ObjectRuntime.Build.cs).
+- Localization: `TextPersistentForm`(Empty 0·Invariant 1·Localized 2 — wire `TextWireForm`과 같은 값, codec이 static_assert로 맞춘다)·`TextPersistentView`(원문은 노드를 빌린다)·`Text::TryGetPersistentForm`·`Text::DeepClone(Allocator&, TextResolveLimits = {})`. **스펙과 다른 점(1)**: `Text::Integer`가 지금까지 Invariant 노드를 만들어 Invariant와 구별되지 않았으므로 내부 형태 `TextKind::Integer`를 더했다(해석은 Invariant와 같다) — 그래야 Integer encode Unsupported를 지킬 수 있다. DeepClone은 Format 이력까지 복사하고(공유 노드는 각각 만든다), 깊이(maxDepth, root = 1)·작업(maxWork — 노드 방문 + 복사 byte)은 ResolveText의 한도 구조체를 그대로 받는다(넘으면 CapacityExceeded, 64 초과 maxDepth InvalidArgument). 실패하면 만든 노드를 모두 반환한다.
+- **스펙과 다른 점(2) — 이름 충돌**: ObjectRuntime 공개 헤더가 `Localization/Text.h`를 include하면서 Localization의 `rocks::TextDiagnostics`(ResolveText 진단)가 ReflectionText의 `reflection_text::TextDiagnostics`와 같은 이름 공간 가져오기에서 모호해졌다. Localization 쪽을 `TextResolveDiagnostics`로 바꿨다(하위호환 없음). 시험 파일의 지역 도우미 `Text(…)`·상수 `TextId`도 `rocks::Text`·`rocks::TextId`와 모호해져 `Chars`·`StringValue`·`MakeString`·`TextFieldId`로 바꿨다.
+- FieldValue `Text text` 칸: 읽기(`CopyTargetValue`)는 멤버를 FieldValue의 allocator로 DeepClone한다. 쓰기(`WriteTargetValue`·`WriteGeneratedValue`)는 새 인자 `Allocator* valueAllocator`(살아 있는 객체·staged·복원 2단계는 Registry·트랜잭션의 `ObjectAllocator()`, 경로는 `PathCursor::ValueAllocator()`, 원소·Map 값 삽입은 컨테이너 allocator, 관찰 임시 값은 관찰 scratch)로 다시 DeepClone해 게시한다(valueAllocator가 없으면 Unsupported). 그래서 한 Registry allocator의 노드를 다른 수명의 소유자가 쥐지 않는다(Registry 사이 복사 = 읽기 + 쓰기). 대입 묶음 상자 복사 `ValueCopy<Text>`도 DeepClone이다.
+- codec: `detail::WriteTextValue`(`TryGetPersistentForm` → 원문 > `TextCreateLimits{}.maxSourceBytes`(1 MiB)면 CapacityExceeded → `WriteTextWire`)를 단일 값 필드·struct 멤버·Array·정적 배열 원소·Map 값이 함께 쓴다(노드를 복사하지 않는다 — 생성 encode는 FieldValue를 거치지 않는다). Format·Integer는 Unsupported로 저장이 끝난다. decode는 `ReadValueWire`의 Text 칸이 `ReadTextWire`(형태·UTF-8·Localized 0 거부·maxValueBytes)에 원문 1 MiB 한도(CapacityExceeded)를 더하고 `ParsedValue`(형태·textId = guid·revision)에 남기며, 값은 `detail::MakeParsedText`로 2단계에서만 만든다(실패하면 할당 오류 — 그래프 rollback). 같음(대입 묶음 무동작 판정)은 영속 형태 byte다. GC 없음.
+- 텍스트(ReflectionText): 명령행은 Invariant 원문만(사용자 결정 U7) — 입력 빈 텍스트는 비어 있음, 출력은 비어 있음이면 빈 텍스트이고 **Localized는 Unsupported**(Invariant로 바꿔 쓰면 정체성이 사라진다 — JSON을 쓴다). JSON은 비어 있음 null, Invariant 문자열(빈 문자열은 명령행과 같이 비어 있음으로 읽는다), Localized `{"id": "<36자 TextId>", "revision": <u64>, "source": "<fallback>"}`(정확히 세 키 — 모르는·빠진 키, id·revision 0, 잘못된 원문은 InvalidValue 진단).
+- 시험: Localization `TextPersist_FormsAndUnsupportedHistories`·`TextPersist_LocalizedRejectsZeroIdentity`·`TextPersist_DeepCloneOutlivesSourceAllocator`·`TextPersist_DeepCloneLimitsAndAllocationFailure`, ObjectSerialization `TextGraph_FormsRoundTripInEveryPosition`·`TextGraph_LocalizedRejectionMatchesWireRules`(Text::Localized·WriteTextWire·ReadTextWire 거부 집합 대조)·`TextGraph_UnsupportedHistoriesAndSourceLimit`·`TextGraph_ApplyAllocationFailureRollsBack`·`TextGraph_FieldValueReadAndCrossRegistryCopyDeepClone`·`TextGraph_PathWritesEveryPosition`, ReflectionText `TextFieldText_CommandLineAssignsInvariant`·`TextFieldText_JsonRoundTripsForms`·`TextFieldText_RejectionsAndLocalizedCommandLineOutput`, ToolTests `Meta.TextFieldsReachDescriptorAndGeneratedCode`·`Meta.TextRejectsRequired`·`Meta.TextOptionalInnerIsRejected`·`Meta.TextKeyPositionsAreRejected`, 성질 표 시험의 Text 행(`ValueKindProperties_*`·C# 대조 변이 — "C# 표에만 있는 종류" 변이는 가상의 FutureKind로 바꿨다), fixture ReflectionTestFixtures/TextFieldFixture.h(TextFieldCaption·TextFieldHolder).
+
 ## 14. bitfield bool(B9m)
 
 - **받는 형식**: `uint8 b : 1`·`uint16 b : 1`·`uint32 b : 1`·`uint64 b : 1`(폭 1, 부호 없는 정수)을 `ValueKind::Bool` PROPERTY로 받는다. **`bool b : 1`은 거부한다**(UE와 같다 — 사용자 결정 U5, UhtBoolProperty.cs:340-343). 폭이 1이 아니거나 부호 있는 정수·enum이면 RMC2207(UE도 폭 1만 — UhtPropertyParser.cs:1047-1053). UE UHT도 uint8·16·32·64 폭 1 bitfield를 모두 uint8 크기 bool로 받는다(UhtByteProperty.cs:252-262, UhtUInt32Property.cs:72-78, UhtBoolProperty.cs:31-44).
@@ -1160,7 +1170,7 @@ public:
 | B9i5 | StructRefArray 원소 추가(대입 묶음·JSON import)와 컨테이너 게시의 남는 원소 재확인 완화(B9i 리뷰 L1) | B9i4 | M |
 | B9j | InstancedStruct<>·담기 조건·깊이 합·객체 문맥 경로 해석(구현 — 11절 "구현(B9j)에서 정한 점") | B9i4 | L |
 | B9k | struct 상속·비리플렉션 빈 base·struct 멤버 thunk 소유자 인자·`InstancedStruct<Base>`(구현 — 12절 "구현(B9k)에서 정한 점") | B9j | L |
-| B9l | Text·Localization `TryGetPersistentForm`·`DeepClone` | B9i4 | M |
+| B9l | Text·Localization `TryGetPersistentForm`·`DeepClone`(구현 — 13절 "구현(B9l)에서 정한 점") | B9i4 | M |
 | B9m | bitfield bool(접근자 판 일곱 갈래) | B9a1 | L |
 
 Core 커밋(B9b1·B9c1·B9f1·B9i1)은 다른 단계와 독립이라 먼저 해도 된다(메인 트리 구현은 순차). 종류 단계는 B9i3 뒤라면 그 종류의 텍스트 표기를 같은 커밋에서, 앞이라면 B9i3·B9i4에서 넣는다.
@@ -1477,6 +1487,9 @@ U5의 Deprecated 저장 범위: UE의 저장 불가 판정은 패키지 저장 �
 - B9k가 남긴 일(맡을 단계):
   - base 배치 변경 때 파생 버전 올림은 강제하지 않는다(12절 "구현(B9k)에서 정한 점"). 표현이 바뀐 base 필드의 마이그레이션 지원(파생마다 Migrate를 쓰지 않고 base 쪽 하나로)은 그런 소비자(Sparks 데이터 테이블 행 base)가 생길 때.
   - import struct의 `base`가 import 범위에 있는지는 descriptor 읽기에서 따로 대조하지 않는다(그 struct를 base로 쓰는 쪽은 import struct의 상속 포함 전체 필드를 쓰고, 런타임 등록이 base 레코드를 요구한다). 필요하면 descriptor 무결성 검사와 함께.
+- B9l이 남긴 일(맡을 단계):
+  - 명령행 출력의 Localized Text(지금 Unsupported — JSON으로만 나타낸다)와 `asset-info` 줄 출력의 Text 표기 → A2(에셋 명령).
+  - Integer·Format 이력의 영속(문자열 표·Format 이력 영속은 위 항목) — 지금은 encode Unsupported.
 - 경로 key 텍스트의 제어 문자: 따옴표 안 escape는 `\\`·`\"`·`\n`·`\r`·`\t`뿐이라(1.5절, 사용자 결정 2026-11-16) 그 밖의 제어 문자(0x00–0x1F 중 셋을 뺀 것, 0x7F)를 담은 String·Name 키는 문자열 경로로 쓸 수 없다(FormatPropertyPath Unsupported — PathKey로는 다룬다). UE에 없는 `\u` 표기를 둘지는 그런 키를 쓰는 소비자(asset-info 출력)가 생길 때 정한다.
 
 ## 21. 문서 반영 목록

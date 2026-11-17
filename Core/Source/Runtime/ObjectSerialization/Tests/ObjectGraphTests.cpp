@@ -13,7 +13,7 @@ namespace {
 
 constexpr Guid NodeType{0x53455249414cULL, 1};
 constexpr Guid NumberId{1, 1};
-constexpr Guid TextId{1, 2};
+constexpr Guid TextFieldId{1, 2};
 constexpr Guid LeftId{1, 3};
 constexpr Guid RightId{1, 4};
 constexpr Guid SmallId{1, 5};
@@ -98,7 +98,7 @@ FieldSchema SchemaField(Guid id, ValueKind kind) noexcept {
 Result<TypeRegistrationToken> RegisterNode(TypeRegistry& types, uint32 version = 1,
                                            bool complete = true) noexcept {
     const FieldSchema fields[] = {SchemaField(NumberId, ValueKind::UInt32),
-                                  SchemaField(TextId, ValueKind::Utf8String),
+                                  SchemaField(TextFieldId, ValueKind::Utf8String),
                                   SchemaField(LeftId, ValueKind::ObjectReference),
                                   SchemaField(RightId, ValueKind::ObjectReference),
                                   SchemaField(SmallId, ValueKind::UInt8),
@@ -108,7 +108,7 @@ Result<TypeRegistrationToken> RegisterNode(TypeRegistry& types, uint32 version =
                                   SchemaField(DoubleId, ValueKind::Float64),
                                   SchemaField(BoolId, ValueKind::Bool)};
     const RuntimeFieldOps accessors[] = {
-        FieldOps<&GraphNode::number>(NumberId),       FieldOps<&GraphNode::text>(TextId),
+        FieldOps<&GraphNode::number>(NumberId),       FieldOps<&GraphNode::text>(TextFieldId),
         FieldOps<&GraphNode::left>(LeftId),           FieldOps<&GraphNode::right>(RightId),
         FieldOps<&GraphNode::small>(SmallId),         FieldOps<&GraphNode::key>(KeyId),
         FieldOps<&GraphNode::signedNumber>(SignedId), FieldOps<&GraphNode::weight>(FloatId),
@@ -462,7 +462,7 @@ TEST(ObjectGraphCodecRegistrationRules) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
     FieldSchema fields[] = {SchemaField(NumberId, ValueKind::UInt32),
-                            SchemaField(TextId, ValueKind::Utf8String),
+                            SchemaField(TextFieldId, ValueKind::Utf8String),
                             SchemaField(LeftId, ValueKind::ObjectReference),
                             SchemaField(RightId, ValueKind::ObjectReference),
                             SchemaField(SmallId, ValueKind::UInt8),
@@ -472,7 +472,7 @@ TEST(ObjectGraphCodecRegistrationRules) {
                             SchemaField(DoubleId, ValueKind::Float64),
                             SchemaField(BoolId, ValueKind::Bool)};
     RuntimeFieldOps accessors[] = {
-        FieldOps<&GraphNode::number>(NumberId),       FieldOps<&GraphNode::text>(TextId),
+        FieldOps<&GraphNode::number>(NumberId),       FieldOps<&GraphNode::text>(TextFieldId),
         FieldOps<&GraphNode::left>(LeftId),           FieldOps<&GraphNode::right>(RightId),
         FieldOps<&GraphNode::small>(SmallId),         FieldOps<&GraphNode::key>(KeyId),
         FieldOps<&GraphNode::signedNumber>(SignedId), FieldOps<&GraphNode::weight>(FloatId),

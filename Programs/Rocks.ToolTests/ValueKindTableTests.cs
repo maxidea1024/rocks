@@ -125,11 +125,12 @@ internal static class ValueKindTableTests
                 ("set cell", Flip("Set", ValueKindProperty.Container), "Set Container = false"),
                 ("static array cell", Flip("StaticArray", ValueKindProperty.StaticArrayElement), "StaticArray StaticArrayElement = true"),
                 ("instanced struct cell", Flip("InstancedStruct", ValueKindProperty.MapKey), "InstancedStruct MapKey = true"),
+                ("text cell", Flip("Text", ValueKindProperty.OptionalInner), "Text OptionalInner = true"),
                 ("container property", Flip("Array", ValueKindProperty.Container), "Array Container = false"),
                 ("whole FieldValue property", Flip("Struct", ValueKindProperty.WholeFieldValue), "Struct WholeFieldValue = true"),
-                // 런타임에 아직 없는 종류(리플렉션 B9l의 Text)를 C# 표에만 더한 경우다.
+                // 런타임에 없는 종류를 C# 표에만 더한 경우다.
                 ("extra C# kind", ValueKindTable.ParityHeader([.. ValueKindTable.Rows,
-                    new("Text", (uint)count, ValueKindProperty.Field)]),
+                    new("FutureKind", (uint)count, ValueKindProperty.Field)]),
                     $"C# table has {count + 1} value kinds"),
                 ("missing C# kind", ValueKindTable.ParityHeader([.. ValueKindTable.Rows.Take(count - 1)]),
                     $"C# table has {count - 1} value kinds"),

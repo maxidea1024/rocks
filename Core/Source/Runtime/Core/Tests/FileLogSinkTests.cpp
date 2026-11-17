@@ -266,7 +266,11 @@ TEST(FileLogSinkRotatesAndKeepsRetentionCount) {
     SystemAllocator allocator;
     REQUIRE(platform::PhysicalFileSystem().MakeDirectory(directory.root, directory.length));
     // 이전 실행이 남긴 파일 둘과 다른 호스트의 파일 하나다.
-    const char* const previous[] = {"Test-old-1.log", "Test-old-2.log", "Other-keep.log"};
+    // 이 호스트의 이전 실행 파일 둘, 이름이 "Test-"로 시작하는 다른 호스트(Test-Server) 하나, 다른
+    // 호스트 하나다. 보관 정리는 이 호스트의 이름 모양만 센다.
+    const char* const previous[] = {"Test-20260101T000000000Z.log",
+                                    "Test-20260101T000000000Z-2.log",
+                                    "Test-Server-20260101T000000000Z.log", "Other-keep.log"};
     for (const char* name : previous) {
         char path[256];
         FixedStringBuilder built{Span<char>(path)};
@@ -282,8 +286,9 @@ TEST(FileLogSinkRotatesAndKeepsRetentionCount) {
         config.retention = 2;
         FileLogSink file(allocator, config);
         REQUIRE(file.Open().IsOk());
-        // 보관 2: 이전 파일 둘 중 오래된 것 하나를 지우고 새 파일을 더했다(다른 호스트는 그대로).
-        CHECK(CountFiles(directory) == 3);
+        // 보관 2: 이전 파일 둘 중 오래된 것 하나를 지우고 새 파일을 더했다(다른 호스트 둘은
+        // 그대로).
+        CHECK(CountFiles(directory) == 4);
         for (uint32 index = 0; index < 10; ++index) {
             char message[64];
             FixedStringBuilder built{Span<char>(message)};
@@ -295,8 +300,14 @@ TEST(FileLogSinkRotatesAndKeepsRetentionCount) {
         CHECK(file.Rotations() >= 3);
     }
 
-    // 이 호스트 파일 2개(마지막 두 회전) + 다른 호스트 1개다.
-    CHECK(CountFiles(directory) == 3);
+    // 이 호스트 파일 2개(마지막 두 회전) + 다른 호스트 2개(Test-Server 포함)다.
+    CHECK(CountFiles(directory) == 4);
+    char server[256];
+    FixedStringBuilder serverPath{Span<char>(server)};
+    (void)serverPath.TryAppendFormat("{}/Test-Server-20260101T000000000Z.log", directory.View());
+    bool serverKept = false;
+    CHECK(platform::PhysicalFileSystem().Exists(server, serverPath.ByteCount(), serverKept) &&
+          serverKept);
 }
 
 // Open 뒤의 기록·flush·회전은 엔진 allocator와 operator new를 쓰지 않는다.

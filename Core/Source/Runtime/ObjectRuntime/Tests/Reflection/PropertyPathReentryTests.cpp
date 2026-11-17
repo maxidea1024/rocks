@@ -70,7 +70,7 @@ constexpr Guid IconId{0x505246, 7};
 constexpr Guid SoftsId{0x505246, 8};
 constexpr Guid RefsId{0x505246, 9};
 
-Span<const char> Text(const char* text) noexcept {
+Span<const char> Chars(const char* text) noexcept {
     usize bytes = 0;
     while (text[bytes] != '\0') {
         ++bytes;
@@ -85,7 +85,7 @@ FieldSchema Scalar(Guid id, const char* name, ValueKind kind, TypeId type = {},
     field.id = id;
     field.kind = kind == ValueKind::ObjectReference ? FieldKind::ObjectReference : FieldKind::Value;
     field.flags = flags;
-    field.name = Text(name);
+    field.name = Chars(name);
     field.value = ValueType{kind, type};
     return field;
 }
@@ -95,7 +95,7 @@ FieldSchema ArrayOf(Guid id, const char* name, ValueKind element, TypeId type = 
     field.id = id;
     field.kind =
         element == ValueKind::ObjectReference ? FieldKind::ObjectReference : FieldKind::Value;
-    field.name = Text(name);
+    field.name = Chars(name);
     field.value = ValueType{ValueKind::Array, {}};
     field.element = ValueType{element, type};
     field.maxElements = DefaultMaxElements;

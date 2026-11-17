@@ -184,7 +184,10 @@ public:
     // 출력 스레드를 남겨 두고 그 스레드가 쓰는 큐·블록·렌더 메모리를 돌려주지 않는다(살아 있는
     // 스레드 아래에서 해제하지 않으려고 의도적으로 남긴다). 이때 Stats().writerAbandoned가 참이고,
     // 소멸자는 그 스레드가 sink에서 돌아올 때까지 기다린 뒤 회수한다. 멈춘 sink가 끝내 돌아오지
-    // 않을 수 있으면 호스트는 LogSystem을 파괴하지 말고 프로세스를 끝낸다.
+    // 않을 수 있으면 호스트는 LogSystem을 파괴하지 말고 프로세스를 끝낸다. writerAbandoned이면
+    // 등록한 sink들도 LogSystem보다 오래 살아야 한다(남은 스레드가 돌아오는 순간 sink lock을 쥐고
+    // 있다). 그동안 AddSink·RemoveSink는 Busy다. 출력 스레드는 sink에서 돌아온 뒤 다른 sink를
+    // 부르지 않는다. sink 콜백 안에서 부르면 아무것도 하지 않는다(자기 자신을 기다리게 된다).
     void Stop() noexcept;
 
     // sink를 등록한다. 등록 뒤 시작하는 묶음부터 받는다. filter는 복사한다.

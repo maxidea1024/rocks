@@ -298,6 +298,13 @@ TEST(LogFileSealerDetectsTampering) {
               .Error() == ErrorCode::AuthenticationFailed);
     CHECK(plain.Text() == ExpectedText);
 
+    // 머리의 예약 칸(version·kem 뒤 2 byte)이 0이 아니면 모르는 형식이다.
+    Array<uint8> reserved(allocator);
+    REQUIRE(reserved.TryAppend(file.View()));
+    reserved[sizeof(crypto::LogFileMagic) + 2] = 1;
+    CHECK(crypto::TryDecodeLogFile(recipient.pair, reserved.View(), allocator, &Collect, &plain)
+              .Error() == ErrorCode::Unsupported);
+
     Array<uint8> notALog(allocator);
     REQUIRE(notALog.TryResize(crypto::LogFileHeaderBytes));
     CHECK(crypto::TryDecodeLogFile(recipient.pair, notALog.View(), allocator, &Collect, &plain)

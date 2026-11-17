@@ -168,7 +168,7 @@ Result<void> InsertMapValue(PathCursor& cursor, Map& map) noexcept {
     }
 
     Value value = MakeAllocatedValue<Value>(allocator);
-    if (auto written = WriteTargetValue<Target>(value, *cursor.Input()); !written) {
+    if (auto written = WriteTargetValue<Target>(value, *cursor.Input(), &allocator); !written) {
         return cursor.FailValue(written.Error());
     }
 

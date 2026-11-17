@@ -111,7 +111,7 @@ void Put(Map& map, Key&& key, Value&& value) noexcept {
 }
 
 // allocator로 만든 String이다.
-inline String Text(Allocator& allocator, StringView text) noexcept {
+inline String MakeString(Allocator& allocator, StringView text) noexcept {
     String value(allocator);
     if (!value.TryAssign(text)) {
         platform::Fatal("test string assign failed");

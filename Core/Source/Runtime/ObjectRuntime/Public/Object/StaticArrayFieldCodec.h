@@ -49,13 +49,23 @@ Result<uint32> EncodeStaticArrayField(const Member& array, ArchiveWriter& out,
 
 // 해석한 단일 값 하나를 원소 자리 element에 쓴다(정적 배열 decode의 관찰·적용 — ObjectRef 원소는
 // 호출자가 SetStructMemberReference로 쓴다). String·SoftObjectRef는 원소의 allocator로
-// TryAssign하고(실패하면 그 오류 — 2단계면 그래프 rollback) 그 밖은 ParsedScalarValue다.
+// TryAssign하고(실패하면 그 오류 — 2단계면 그래프 rollback) Text(리플렉션 B9l)는 allocator로 새
+// 노드를 만들며 그 밖은 ParsedScalarValue다.
 template <class Element>
-Result<void> AssignParsedElement(Element& element, const ParsedValue& parsed) noexcept {
+Result<void> AssignParsedElement(Element& element, const ParsedValue& parsed,
+                                 Allocator& allocator) noexcept {
     if constexpr (IsSameV<Element, String>) {
         return element.TryAssign(parsed.text);
     } else if constexpr (SoftReferenceField<Element>::Supported) {
         return element.TryAssign(AssetId{parsed.guid}, parsed.text);
+    } else if constexpr (IsSameV<Element, Text>) {
+        auto made = MakeParsedText(allocator, parsed);
+        if (!made) {
+            return Result<void>::Failure(made.Error());
+        }
+
+        element = Move(made.Value());
+        return Result<void>::Success();
     } else {
         element = ParsedScalarValue<Element>(parsed);
         return Result<void>::Success();
@@ -161,7 +171,11 @@ Result<void> DecodeStaticValueArray(ConstructionContext* construction, ObjectHan
                 !written) {
                 return written;
             }
-        } else if (auto assigned = AssignParsedElement((*target)[index], parsed); !assigned) {
+        } else if (auto assigned =
+                       AssignParsedElement((*target)[index], parsed,
+                                           construction ? construction->ObjectAllocator()
+                                                        : context.ObservationScratch());
+                   !assigned) {
             return assigned;
         }
     }

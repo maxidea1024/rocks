@@ -42,6 +42,13 @@ Result<uint32> EncodeMemberValue(const Member& source, ArchiveWriter& out,
         }
 
         return EncodeStructRecord(context.Current()->structure, &source, out, context);
+    } else if constexpr (IsSameV<Member, Text>) {
+        // Text(리플렉션 B9l)는 노드를 복사하지 않고 영속 형태를 바로 쓴다.
+        if (auto written = WriteTextValue(out, source); !written) {
+            return Result<uint32>::Failure(written.Error());
+        }
+
+        return Result<uint32>::Success(static_cast<uint32>(WireType::Text));
     } else {
         FieldValue value(context.Scratch());
         StringView text;
@@ -165,8 +172,13 @@ Result<void> DecodeStructMember(const RuntimeStructFieldOps&, ConstructionContex
             return Result<void>::Success();
         }
 
-        return WriteGeneratedValue<S>(MemberPointer, value,
-                                      [target]() noexcept { return Result<S*>::Success(target); });
+        // Text(리플렉션 B9l)는 적용이면 트랜잭션 Registry의 객체 allocator, 관찰(1단계 임시 값)이면
+        // 관찰 scratch로 새 노드를 만든다.
+        Allocator& valueAllocator =
+            construction ? construction->ObjectAllocator() : context.ObservationScratch();
+        return WriteGeneratedValue<S>(
+            MemberPointer, value, [target]() noexcept { return Result<S*>::Success(target); },
+            nullptr, &valueAllocator);
     }
 }
 

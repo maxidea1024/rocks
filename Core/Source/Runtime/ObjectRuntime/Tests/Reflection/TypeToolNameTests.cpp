@@ -47,7 +47,7 @@ Result<void> MemberDecode(const RuntimeStructFieldOps&, ConstructionContext*, Ob
     return Result<void>::Failure(ErrorCode::Unsupported);
 }
 
-Span<const char> Text(const char* text) noexcept {
+Span<const char> Chars(const char* text) noexcept {
     return Span<const char>(text, StringView(text).ByteCount());
 }
 
@@ -55,7 +55,7 @@ Span<const char> Text(const char* text) noexcept {
 Result<TypeRegistrationToken> RegisterClass(TypeRegistry& types, TypeId id,
                                             Span<const char> toolName,
                                             Span<const FieldSchema> fields = {}) noexcept {
-    TypeSchema schema{id, 1, fields, Text("Holder")};
+    TypeSchema schema{id, 1, fields, Chars("Holder")};
     schema.toolName = toolName;
     return types.Register(schema, MakeRuntimeTypeOps<Holder>());
 }
@@ -81,7 +81,7 @@ Result<TypeRegistrationToken> RegisterStruct(TypeRegistry& types, TypeId id,
     structOps.construct = &Construct;
     structOps.destroy = &Destroy;
     structOps.fields = Span<const RuntimeStructFieldOps>(&ops, 1);
-    TypeSchema schema{id, 1, Span<const FieldSchema>(&member, 1), Text("S")};
+    TypeSchema schema{id, 1, Span<const FieldSchema>(&member, 1), Chars("S")};
     schema.toolName = toolName;
     return types.RegisterStruct(schema, structOps);
 }
@@ -100,48 +100,48 @@ TEST(TypeToolName_RegistrationRulesAndLookup) {
     TypeRegistry types(allocator);
     const char* invalid[] = {"a..b", ".a", "1a", "none", "NONE", "a:b", "a b"};
     for (const char* name : invalid) {
-        CHECK(ErrorOf(RegisterClass(types, {0x54544e, 1}, Text(name))) ==
+        CHECK(ErrorOf(RegisterClass(types, {0x54544e, 1}, Chars(name))) ==
               ErrorCode::InvalidArgument);
-        CHECK(ErrorOf(RegisterStruct(types, {0x54544e, 2}, Text(name), 0)) ==
+        CHECK(ErrorOf(RegisterStruct(types, {0x54544e, 2}, Chars(name), 0)) ==
               ErrorCode::InvalidArgument);
     }
 
-    auto sword = RegisterClass(types, {0x54544e, 3}, Text("Weapons.Sword"));
+    auto sword = RegisterClass(types, {0x54544e, 3}, Chars("Weapons.Sword"));
     REQUIRE(sword);
-    CHECK(ErrorOf(RegisterClass(types, {0x54544e, 4}, Text("weapons.SWORD"))) ==
+    CHECK(ErrorOf(RegisterClass(types, {0x54544e, 4}, Chars("weapons.SWORD"))) ==
           ErrorCode::AlreadyExists);
-    CHECK(ErrorOf(RegisterStruct(types, {0x54544e, 5}, Text("WEAPONS.sword"), 1)) ==
+    CHECK(ErrorOf(RegisterStruct(types, {0x54544e, 5}, Chars("WEAPONS.sword"), 1)) ==
           ErrorCode::AlreadyExists);
-    REQUIRE(RegisterStruct(types, {0x54544e, 6}, Text("Weapons.Shield"), 2));
+    REQUIRE(RegisterStruct(types, {0x54544e, 6}, Chars("Weapons.Shield"), 2));
     REQUIRE(RegisterClass(types, {0x54544e, 7}, {}));
     REQUIRE(RegisterClass(types, {0x54544e, 8}, {}));
     CHECK(types.Stats().registeredTypes == 4);
     {
-        auto found = types.AcquireByToolName(Text("WEAPONS.SWORD"));
+        auto found = types.AcquireByToolName(Chars("WEAPONS.SWORD"));
         REQUIRE(found);
         CHECK((found.Value().Id() == TypeId{0x54544e, 3}) &&
               found.Value().Kind() == TypeKind::Class);
         // lease가 있는 동안 해제는 Busy다.
         CHECK(types.Unregister(sword.Value()).Error() == ErrorCode::Busy);
-        auto shield = types.AcquireByToolName(Text("weapons.shield"));
+        auto shield = types.AcquireByToolName(Chars("weapons.shield"));
         REQUIRE(shield);
         CHECK(shield.Value().Kind() == TypeKind::Struct);
-        CHECK(types.AcquireByToolName(Text("Holder")).Error() == ErrorCode::NotFound);
+        CHECK(types.AcquireByToolName(Chars("Holder")).Error() == ErrorCode::NotFound);
         CHECK(types.AcquireByToolName({}).Error() == ErrorCode::InvalidArgument);
     }
 
     REQUIRE(types.Unregister(sword.Value()));
-    CHECK(types.AcquireByToolName(Text("Weapons.Sword")).Error() == ErrorCode::NotFound);
-    auto reused = RegisterStruct(types, {0x54544e, 9}, Text("weapons.sword"), 3);
+    CHECK(types.AcquireByToolName(Chars("Weapons.Sword")).Error() == ErrorCode::NotFound);
+    auto reused = RegisterStruct(types, {0x54544e, 9}, Chars("weapons.sword"), 3);
     REQUIRE(reused);
     {
-        auto found = types.AcquireByToolName(Text("Weapons.Sword"));
+        auto found = types.AcquireByToolName(Chars("Weapons.Sword"));
         REQUIRE(found);
         CHECK((found.Value().Id() == TypeId{0x54544e, 9}));
     }
 
     CHECK(types.Shutdown());
-    CHECK(types.AcquireByToolName(Text("Weapons.Shield")).Error() == ErrorCode::ShuttingDown);
+    CHECK(types.AcquireByToolName(Chars("Weapons.Shield")).Error() == ErrorCode::ShuttingDown);
 }
 
 // 색인은 등록이 늘 때 새 색인으로 자라고 해제가 남긴 칸은 다음 등록이 정리한다: 많은 이름을 등록·
@@ -217,7 +217,7 @@ TEST(TypeToolName_ClassReferenceFieldRegistration) {
         return ops;
     };
 
-    TypeSchema schema{owner, 1, Span<const FieldSchema>(&field, 1), Text("Owner")};
+    TypeSchema schema{owner, 1, Span<const FieldSchema>(&field, 1), Chars("Owner")};
     CHECK(ErrorOf(types.Register(schema, typeOps())) == ErrorCode::InvalidArgument);
     // 자기 자신을 Base로 둔다(ClassRef<Self>).
     field.value.type = owner;
@@ -252,7 +252,7 @@ TEST(TypeToolName_ClassReferenceFieldRegistration) {
         return ops;
     };
 
-    TypeSchema arraySchema{owner, 1, Span<const FieldSchema>(&array, 1), Text("Owner")};
+    TypeSchema arraySchema{owner, 1, Span<const FieldSchema>(&array, 1), Chars("Owner")};
     CHECK(ErrorOf(types.Register(arraySchema, arrayTypeOps())) == ErrorCode::InvalidArgument);
     array.element.type = base;
     auto arrayHolder = types.Register(arraySchema, arrayTypeOps());
