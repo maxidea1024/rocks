@@ -1,6 +1,6 @@
 # 렌더 기반(RenderBase) 설계
 
-기준일: 2026-11-17, 개정 7(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-17, 개정 8(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
 - 렌더 lane과 프레임 전달, 장치 스레드 모델, 장치 자원 수명, 렌더 그래프
 - 셰이더 런타임 객체(셰이더 집합·파라미터 바인딩·상수 블록·파이프라인 캐시)
 - 정점 입력 타입, 공용 자원·그리기 유틸리티, GPU 계측
@@ -127,11 +127,11 @@ ID는 이 문서가 붙인다. CP는 Core 선행, GX는 Graphics 확장, RB는 R
 | CP1 | 전용 lane 실행기, 스레드 이름·우선순위·스택 크기 | 구현 | Thread·Sync(구현) | RB1 | M | 4.3절 |
 | CP2 | 직렬 작업 체인·ParallelFor·작업 문맥 표지 | 구현 | WorkerScheduler(구현) | RG3, RB3 일괄 생성 선택 | M | 4.3절 |
 | CP3 | 프레임 arena | 구현 | Allocator(구현) | RG1, RB4(GLES `PerDraw`) | M | 4.3절 |
-| CP4 | 콘솔 설정(타입 있는 변수·명령·출처·렌더 snapshot) | 미설계, 별도 스펙 | CP8 | RB1 설정 snapshot, RG1 디버그 설정 | M | 12절 |
-| CP5 | 다중 스레드 CPU 구간 계측·카운터·GPU 상관 | 구현(TR1–TR4, GPU 기록 형은 RB7) | TraceCapture·TraceAnalysis | RB7 | M | 13절, [TraceSystem](TraceSystem.ko.md) |
+| CP4 | 콘솔 설정(타입 있는 변수·명령·출처·렌더 snapshot) | 구현(ConfigSystem CF2, 프레임 packet 연결은 RB1) | CP8 | RB1 설정 snapshot, RG1 디버그 설정 | M | 12절 |
+| CP5 | 다중 스레드 CPU 구간 계측·카운터·GPU 상관 | 구현(TR1–TR4, GPU 기록 형은 RB7에서 구현) | TraceCapture·TraceAnalysis | RB7 | M | 13절, [TraceSystem](TraceSystem.ko.md) |
 | CP6 | 엔진 종료 단계 hook(기존 `EngineSubsystem`·`EngineLoopHooks` 확장) | 구현 | Engine(구현) | RB1 종료 순서 | S | 4.3절 |
 | CP7 | 엔진 전역 `Name` pool 결정 | 미결정 | Name(구현) | RB3 | S | 4.3절 |
-| CP8 | Config 계층(UE-C21) | 미설계, 별도 스펙 | — | CP4 | M | 12절 |
+| CP8 | Config 계층(UE-C21) | 구현(ConfigSystem CF1) | — | CP4 | M | 12절 |
 | GX1 | 장치 능력 `DeviceCaps` | 미설계 | A0-G G1, 셰이더 시스템 P6a | RB3, RG1, RG4 | M | 4.4절 |
 | GX2 | 자원 desc·view 확장, 샘플러 위치(R12)·비교 샘플러 | 미설계 | A0-G | RB2, RG1 | L | 4.4절 |
 | GX3 | 파이프라인 완성(SH2 범위 밖 부분) | 미설계 | SH2·P2·P14 | RB4, RB5, RB6 | L | 4.4절 |
@@ -141,12 +141,12 @@ ID는 이 문서가 붙인다. CP는 Core 선행, GX는 Graphics 확장, RB는 R
 | GX6 | 파라미터 바인딩 런타임(상수 블록·묶음 설정·공유 slot) | 미설계 | P2·SH2 | RB4 | L | 4.4절, 9절 |
 | GX7 | 제출·완료·회수(계획 11.2), descriptor 회수, 스레드 안전 fence 대기 | 구현(lease는 RB2·RG1) | — | RB1·RB2 | L | 4.4절, 6절 |
 | GX8 | 업로드 ring·비동기 readback | 구현 | GX7 | RB2, RB4, RG2 | M | 4.4절 |
-| GX9 | timestamp query·debug marker·CPU·GPU 시간 대응 | 구현(`GpuScope`는 RB7) | GX7 | RB7 | M | 4.4절, 13절 |
+| GX9 | timestamp query·debug marker·CPU·GPU 시간 대응 | 구현(`GpuScope`는 RB7에서 구현) | GX7 | RB7 | M | 4.4절, 13절 |
 | GX10 | 장치 소유 스레드 이관 | 구현 | GX11 | RB1 | S | 5.4절 |
 | GX11 | 장치 스레드 모델 | 구현 | GX7 | GX10, RB1–RB3 | M | 5.4절 |
 | GX12 | transient heap·aliasing barrier | 후속 | GX5 | RG5 | L | 4.4절 |
 | GX13 | subpass·framebuffer fetch(tiled GPU 병합용) | 후속 | GX4·GX5 | RG3 병합 | M | 4.4절 |
-| RB1 | 렌더 lane·프레임 slot·전달 타입 등록·완료 통지·`RenderHandle` 예약 | 구현(설정 snapshot은 CP4 뒤) | CP1·CP6·GX7·GX10·GX11 | RB2–RB7 | M | 5절 |
+| RB1 | 렌더 lane·프레임 slot·전달 타입 등록·완료 통지·`RenderHandle` 예약 | 구현(설정 snapshot 포함, 12절) | CP1·CP6·GX7·GX10·GX11 | RB2–RB7 | M | 5절 |
 
 ### 4.3 Core 선행 작업
 
@@ -309,6 +309,7 @@ RenderLane::Post(표면 작업) ──────────▶ 스왑체인 �
 - slot의 GPU 완료 표지는 그 프레임 작업 안의 마지막 제출 fence이며 `NotifyFence`로 받는다. fence 완료는 lane inbox로 들어가 lane 작업(Inline 모드는 기다리는 게임 lane이 실행하는 lane 작업)이 장치 회수 → 통지 순서로 처리한다.
 - 대기 중 펌프는 1 ms 간격(UE와 같다)이며 펌프 hook이 없으면 이벤트만 기다린다. 대기 진단 상한(120초)의 디버거 연결 감지는 아직 없다.
 - `Start`는 시작 작업 완료를 기다리지 않는다(첫 `BeginFrame`이 기다린다). 그래서 이관 중에 게시한 표면 작업도 lane이 소유권을 얻은 뒤 FIFO로 실행된다.
+- 설정 snapshot(12절)은 `RenderLane::AttachSettings(ticket, RenderSettingsRef)`로 slot에 담고 `RenderFrameContext::Settings`로 읽는다(개정 8).
 
 - 인라인 모드와 lane 모드에서 같은 프레임 packet 열이 같은 장치 호출 열을 낸다(기록 backend 대조). lane 작업 안의 재진입 `Post` 순서도 같다.
 - slot 2개 설정에서 GPU 완료 이벤트를 gate로 막으면 게임 lane이 세 번째 slot 확보에서 대기하고, gate를 열면 진행한다. 대기 중 메시지 펌프가 도는지 계수로 확인한다.
@@ -741,6 +742,8 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
   - **렌더 snapshot.** 렌더 lane이 읽는 변수는 "렌더 읽기" 표시를 가지고, 게임 lane이 프레임 packet을 만들 때 그 값들의 snapshot을 담는다. 렌더 lane은 packet의 값만 읽는다. UE는 렌더 스레드 사본 주소에 쓰는 명령으로 전파한다(`RC/Private/RenderingThread.cpp:493–530`).
   - 셰이더 형식별 값(UE `RC/Public/ShaderPlatformCachedIniValue.h:13–95`)은 셰이더 시스템의 형식 정의(셰이더 시스템 12.1절)나 TargetProfile 쪽으로 두고 콘솔 설정에 두지 않는다. 쿠킹 결과에 영향을 주는 값은 키에 들어가야 하기 때문이다.
   - 헤드리스·시험에서 결정적 값을 고정할 수 있어야 한다.
+- **구현(2026-11-17, RB1 설정 snapshot).** 게임 lane은 sync 지점(`ConfigContext::Sync`) 뒤 `ConfigContext::Snapshot()`을 `RenderSettingsRef::Share`로 감싸 `RenderLane::AttachSettings(ticket, ...)`로 그 프레임 slot에 담는다. 렌더 lane은 프레임 작업 안에서 `RenderFrameContext::Settings().Get<config::ConfigSnapshot>()`만 읽는다(registry·문맥은 읽지 않는다). slot의 참조는 그 slot을 다음에 다시 확보할 때(`BeginFrame`, GPU 완료 뒤) 또는 lane 정지 때 게임 lane에서 놓는다. 그래서 snapshot 수명은 그 프레임 slot이 끝날 때까지이고 파괴는 게임 lane에서 일어난다. 시험(`RenderBase/Tests/RenderSettingsTests.cpp`): sync 지점에서 바꾼 값은 다음 packet부터 보이고 이전 packet은 옛 값을 읽는다. GPU 완료 gate가 닫힌 동안 옛 snapshot이 살아 있고, slot을 다시 확보하면 놓인다.
+  - 스펙과 다른 점: RenderBase는 ObjectRuntime에 의존하지 않으므로(9.3절) Config 타입을 직접 이름 짓지 않는다. `RenderSettingsRef`는 snapshot의 공유 소유권(`SharedPtr` aliasing)과 타입 표지만 들고, 꺼낼 때 같은 타입으로만 돌려준다(다른 타입이면 null). 타입은 Config를 아는 쪽(실행 파일·렌더러 모듈)이 정한다. 담지 않은 프레임은 빈 참조를 읽는다(직전 프레임 값을 물려받지 않는다).
 
 ## 13. GPU 계측(RB7)
 
@@ -763,6 +766,15 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 ### 13.3 완료 기준(RB7)
 
 `GpuScope` 중첩이 캡처 도구(PIX·RenderDoc)에서 pass 이름으로 보이는지(수동 확인 기록), timestamp 링 회수가 GPU 완료 이벤트 뒤에만 값을 내는지(gate), GLES 확장 없음에서 "없음" 공개, calibration pair로 CPU·GPU 구간이 같은 시간축에 놓이는지.
+
+**구현(2026-11-17).** `RenderBase/GpuTrace.h`에 `GpuTrace`(queue 하나의 계측 장부)·`GpuScope`(스택 객체)·`GpuTraceSettings`·`RegisterGpuTraceTypes`·`GpuTicksToTraceTicks`를 두었다. RenderBase가 TraceCapture에 의존한다.
+- 흐름: 렌더 lane이 프레임 기록 안에서 `GpuTrace::BeginFrame`(queue 정의·calibration·프레임 시작 timestamp) → `GpuScope`(marker push + 시작 timestamp, 소멸 때 끝 timestamp + marker pop) → `EndFrame`(프레임 끝 timestamp)를 부른다. 완료 통지를 받는 쪽(보통 게임 lane)이 `Consume(notices)`로 `GpuTimestamp` 통지를 짝지어, 두 끝이 모두 온 구간만 trace tick으로 바꿔 채널 `gpu`에 쓴다. 완료 전 구간은 pending이고 trace에 나가지 않는다. 끊김(`Cancelled`) 통지가 하나라도 있으면 그 구간은 버리고 `invalid`로 센다.
+- GPU 시간은 채널 `gpu`·설정 `timestamps`·장치 `timestamps`·`clockCalibration`이 모두 참일 때만 잰다. 아니면 queue 정의(`Trace.GpuQueue`)의 GPU 시간 칸을 0으로 공개하고 timestamp를 쓰지 않는다(추정값 없음). marker는 설정 `markers`만 따른다. 기본값은 둘 다 Release에서 꺼짐이다(설정으로 켠다).
+- calibration: `ClockCalibration`에 `cpuTicks`(`platform::MonotonicTicks`, trace 시간축)와 `uncertaintyNanoseconds`를 더했다. D3D12는 queue clock calibration이 한 번에 읽은 QPC 값과 CPU tick 하나 길이, OpenGL은 `GL_TIMESTAMP` 조회를 CPU tick 두 번으로 감싼 가운데 값과 조회 지연의 절반이다. 쌍은 세션 첫 프레임과 `calibrationIntervalFrames`(기본 60)마다 다시 얻어 정의 기록(`Trace.GpuCalibration`)으로 남기고, 그 사이 구간은 가장 최근 쌍으로 바꾼다(두 시계의 drift는 보정하지 않는다).
+- GPU 구간 이름은 CPU 구간과 같은 세션 이름 표(`Trace.ScopeName`)를 쓴다(`TraceResolveScopeName`). 같은 pass 이름은 CPU·GPU에서 같은 id다.
+- 시험(`RenderBase/Tests/GpuTraceTests.cpp`, 기록 backend): GPU 완료 gate 전에는 구간 0·pending 3이고 gate 뒤 구간 2·프레임 1, 변환한 tick이 기록된 calibration 쌍으로 계산한 값과 정확히 같고 CPU 구간 시작 ≤ calibration CPU tick ≤ GPU 프레임 시작, 중첩 깊이 0·1과 marker push·push·pop·pop 순서, timestamp 미지원 장치의 "GPU 시간 없음" 공개(구간·calibration 기록 0, timestamp 쓰기 0), Release 기본 설정(marker·timestamp 0), 끊김 통지의 구간 무효.
+- 스펙과 다른 점: (1) GPU 구간은 시작·끝 기록 둘이 아니라 두 tick을 가진 기록 하나(`Trace.GpuScope`)다. 두 끝이 모두 온 뒤에만 쓰므로 짝을 잃은 반쪽이 생기지 않는다. (2) "GPU 시간 없음"은 별도 정의 형이 아니라 queue 정의의 GPU 시간 칸(0)이다. (3) 작업 시작·끝·fence signal·wait 사건은 아직 없다(다중 queue와 함께). (4) 렌더 그래프 pass 자동 구간은 RG1에서 붙인다. 지금은 렌더 코드가 `BeginFrame`·`GpuScope`·`EndFrame`을 직접 부른다. (5) queue는 `GpuTrace` 하나당 하나다(설정 `queueId`·`queueName`).
+- **캡처 도구 수동 확인 절차**(PIX·RenderDoc, 자동 시험 밖): Sandbox를 D3D12(PIX on Windows) 또는 OpenGL(RenderDoc)로 실행해 프레임을 캡처한다. 이벤트 목록에서 `GpuScope` 이름이 중첩 그대로 보이는지(바깥 구간 아래 안쪽 구간), 프레임 끝에 열린 marker가 남지 않는지를 본다. Release 구성에서는 marker가 보이지 않아야 한다. 결과는 날짜·backend·도구 판과 함께 이 절에 적는다(아직 기록 없음).
 
 ## 14. 후속·범위 밖
 
@@ -958,4 +970,5 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 - 개정 4(2026-11-16): 18.1절 화면 마일스톤 범위를 정의했다. 사용자 결정은 다음과 같다: "원래 목표는 미니멀하게 테스트하고자 했던건데 이제 의미없음. 렌더코어 제대로 구현하는게 나음", 쿠킹 셰이더 위에서(셰이더 시스템 결정 11 (나)), 렌더 기반 구조 포함, A5 텍스처 전부, 검증 backend는 셰이더 경로를 따름. 결정 R10을 이에 맞췄다.
 - 개정 5(2026-11-17): GX7·GX10·GX11·CP6·RB1·GX3a 구현을 반영했다. 4.2절 상태 열과 RB1 행, 4.3·4.4·5.7·10.4절 구현 메모를 더했다. 스펙과 다르게 정한 것: 작업 함수를 캡처 없는 함수 포인터로 제한, `Retire`는 handle만 받음(호출자 last-use 하한 없음), D3D12 스레드 안전 생성은 GX8로 미룸, 장치 손실·미지원 능력은 기존 오류 코드(`Destroyed`·`Unsupported`), 정리 drain·closure·실행기 hook은 실행 파일 hook에만. 같은 날 사용자 결정으로 최소 렌더러(내장 메시·원문 셰이더)를 엔진 모듈에서 Sandbox 시험 샘플로 옮겼다.
 - 개정 6(2026-11-17): GX8·GX9 구현을 반영했다(4.2절 상태 열, 4.4절 구현 메모, 13.2절 GLES 시간 대응 결정). GX11 상태에서 "D3D12 스레드 안전 생성은 GX8과 함께"를 지웠다(GX8에서 열었다). 스펙과 다르게 정한 것: 업로드 ring은 프레임 slot별 고정 구간 대신 fence로 닫는 묶음의 원형 할당, timestamp 끊김은 `ErrorCode::Cancelled`로 통지, `GpuScope`는 RB7로 남김.
+- 개정 8(2026-11-17): RB7 `GpuTrace`·`GpuScope` 구현과 RB1 설정 snapshot 연결을 반영했다(4.2절 CP4·CP5·CP8·GX9·RB1 상태, 5.7·12·13.3절 구현 메모, 캡처 도구 수동 확인 절차). 스펙과 다르게 정한 것: GPU 구간을 두 tick을 가진 기록 하나로, "GPU 시간 없음"을 queue 정의 칸으로, calibration은 세션 첫 프레임과 일정 프레임 간격의 정의 기록으로, 작업·fence 사건과 그래프 자동 구간은 뒤로, 설정 snapshot 참조는 타입 표지를 가진 공유 참조(`RenderSettingsRef`)로 둠.
 - 개정 7(2026-11-17): 1절에 좌표·행렬 규약 행을 더했다(사용자 결정: 좌표계·단위·행렬을 UE 5.8과 같게). 12절은 ConfigSystem, 13.2절은 TraceSystem을 참조하게 했다.

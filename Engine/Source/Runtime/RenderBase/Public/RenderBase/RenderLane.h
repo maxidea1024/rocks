@@ -7,6 +7,7 @@
 #include <Graphics/Device.h>
 #include <RenderBase/RenderHandle.h>
 #include <RenderBase/RenderNotices.h>
+#include <RenderBase/RenderSettings.h>
 #include <Task/DedicatedLane.h>
 
 // 렌더 lane이다(Docs/Design/RenderBase.ko.md 5절 RB1, UE 렌더 스레드 대응). 전용 스레드 하나(CP1
@@ -94,13 +95,21 @@ public:
         return slot_;
     }
 
+    // 게임 lane이 이 프레임에 담은 렌더 설정 snapshot이다(RenderLane::AttachSettings, 12절). 담지
+    // 않았으면 빈 참조다. 렌더 lane은 설정을 이것으로만 읽는다.
+    const RenderSettingsRef& Settings() const noexcept {
+        return settings_;
+    }
+
 private:
-    RenderFrameContext(RenderLane& lane, uint32 slot, uint64 frame) noexcept
-        : RenderLaneContext(lane), slot_(slot), frame_(frame) {
+    RenderFrameContext(RenderLane& lane, uint32 slot, uint64 frame,
+                       const RenderSettingsRef& settings) noexcept
+        : RenderLaneContext(lane), slot_(slot), frame_(frame), settings_(settings) {
     }
 
     uint32 slot_;
     uint64 frame_;
+    const RenderSettingsRef& settings_;
     friend class RenderLane;
 };
 
@@ -279,6 +288,12 @@ public:
     // ticket slot의 프레임 arena다. 프레임 packet의 가변 길이 목록을 여기에 둔다. 렌더 lane이 그
     // 프레임을 처리할 때까지 유효하다. ticket이 유효하지 않으면 Fatal이다.
     FrameArena& Arena(const FrameTicket& ticket) noexcept;
+
+    // ticket 프레임에 렌더 설정 snapshot을 담는다(12절, ConfigSystem 5.3절). 렌더 lane은 그 프레임
+    // 작업 안에서 RenderFrameContext::Settings로 읽는다. snapshot은 이 slot이 다음에 다시 확보될
+    // 때(또는 Stop 때) 놓이므로 그 프레임의 GPU 완료 뒤까지 산다. 다시 부르면 바꾼다. ticket이
+    // 유효하지 않으면 Fatal이다(Arena와 같다).
+    void AttachSettings(const FrameTicket& ticket, RenderSettingsRef settings) noexcept;
 
     // 프레임 packet을 렌더 lane에 넘긴다. lane이 render(context, packet)를 부르고, 그 안의 장치
     // 제출 fence가 이 slot의 GPU 완료 표지가 된다. 성공하면 ticket을 소비한다. 실패: 잘못된 ticket
@@ -482,6 +497,9 @@ private:
     char threadName_[platform::MaxThreadNameBytes + 1] = {};
     uint64 gameThread_ = 0;
     UniquePtr<FrameArena> arenas_[MaxFrameSlots];
+    // slot마다 담긴 렌더 설정 snapshot이다. 게임 lane이 Recording 중에 쓰고 slot을 다시 확보할 때
+    // 놓는다. 렌더 lane은 그 프레임 작업 안에서만 읽는다(게시가 순서를 정한다).
+    RenderSettingsRef settings_[MaxFrameSlots];
     SlotFenceContext slotFence_[MaxFrameSlots];
     // readback 보관함이다. lane이 채우고 게임 lane이 가져간다.
     platform::Mutex readbackGate_;
@@ -555,7 +573,7 @@ Result<void> RenderLane::SubmitFrame(FrameTicket&& ticket, T&& packet,
         PostLaneTask([this, slot, frame, render, value = Move(packet)]() mutable noexcept {
             ProcessInbox();
             const graphics::GpuFencePoint before = device_.LastSubmittedFence();
-            RenderFrameContext context(*this, slot, frame);
+            RenderFrameContext context(*this, slot, frame, settings_[slot]);
             render(context, value);
             FinishFrame(slot, frame, before);
         });
