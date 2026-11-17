@@ -267,8 +267,8 @@ bool RegisterStructs(TypeRegistry& types, bool noteWithoutB) noexcept {
     const FieldSchema pinFields[] = {
         Scalar(TargetId, "target", ValueKind::ObjectReference, SubjectId, Required),
         Scalar(TagId, "tag", ValueKind::UInt32)};
-    const RuntimeStructFieldOps pinOps[] = {detail::StructFieldOps<&Pin::target>(TargetId),
-                                            detail::StructFieldOps<&Pin::tag>(TagId)};
+    const RuntimeStructFieldOps pinOps[] = {detail::StructFieldOps<Pin, &Pin::target>(TargetId),
+                                            detail::StructFieldOps<Pin, &Pin::tag>(TagId)};
     RuntimeStructOps pin = MakeRuntimeStructOps<Pin>();
     pin.trace = [](const void* value, TraceVisitor& visitor) noexcept {
         GeneratedType<Pin>::Trace(*static_cast<const Pin*>(value), visitor);
@@ -278,16 +278,17 @@ bool RegisterStructs(TypeRegistry& types, bool noteWithoutB) noexcept {
     const FieldSchema noteFields[] = {Scalar(NoteAId, "a", ValueKind::UInt32),
                                       Scalar(NoteHintId, "hint", ValueKind::UInt32, {}, EditorOnly),
                                       Scalar(NoteBId, "b", ValueKind::UInt32)};
-    const RuntimeStructFieldOps noteOps[] = {detail::StructFieldOps<&Note::a>(NoteAId),
-                                             detail::StructFieldOps<&Note::hint>(NoteHintId),
-                                             detail::StructFieldOps<&Note::b>(NoteBId)};
+    const RuntimeStructFieldOps noteOps[] = {detail::StructFieldOps<Note, &Note::a>(NoteAId),
+                                             detail::StructFieldOps<Note, &Note::hint>(NoteHintId),
+                                             detail::StructFieldOps<Note, &Note::b>(NoteBId)};
     const usize noteCount = noteWithoutB ? 2 : 3;
     RuntimeStructOps note = MakeRuntimeStructOps<Note>();
     note.fields = Span<const RuntimeStructFieldOps>(noteOps, noteCount);
 
     const FieldSchema badgeFields[] = {
         Scalar(BadgeSoftId, "soft", ValueKind::SoftObjectReference, {}, Required)};
-    const RuntimeStructFieldOps badgeOps[] = {detail::StructFieldOps<&Badge::soft>(BadgeSoftId)};
+    const RuntimeStructFieldOps badgeOps[] = {
+        detail::StructFieldOps<Badge, &Badge::soft>(BadgeSoftId)};
     RuntimeStructOps badge = MakeRuntimeStructOps<Badge>();
     badge.fields = badgeOps;
 

@@ -75,12 +75,16 @@ public:
     Result<TypeRegistrationToken> RegisterEnum(const EnumSchema&, RuntimeEnumOps) noexcept;
 
     // 리플렉션 struct를 등록한다(Docs/Design/ReflectionFoundations.ko.md 4.6절, 생성 코드는
-    // GeneratedType<S>::Register). 스키마는 클래스와 같은 TypeSchema(base 없음)이고 flags는 struct
-    // 플래그 TypeFlags::Atomic만 받는다(ROCKS_STRUCT(Atomic) — 뜻은 Meta/TypeSchema.h TypeFlags,
-    // 조회는 StructView::IsAtomic). 입력 버퍼는 호출 동안 유효해야 하며 깊게 복사한다. 멤버
-    // struct·enum이 먼저 등록되어 있어야 하고 이 struct가 등록된 동안 의존으로 붙잡힌다.
-    // 주요 실패:
-    // - InvalidArgument: id 0, version 0, base, Atomic이 아닌 플래그 비트(클래스 플래그 Abstract·
+    // GeneratedType<S>::Register). 스키마는 클래스와 같은 TypeSchema이고 flags는 struct 플래그
+    // TypeFlags::Atomic만 받는다(ROCKS_STRUCT(Atomic) — 뜻은 Meta/TypeSchema.h TypeFlags, 조회는
+    // StructView::IsAtomic). baseType은 리플렉션 base struct다(리플렉션 B9k — 없으면 0): 먼저
+    // 등록되어 있어야 하고, fields가 base의 모든 필드를 같은 안정 ID·표현으로 펼쳐 담아야 하며,
+    // base가 Atomic이면 파생도 Atomic이어야 한다(TypeLease::IsA가 이 사슬을 본다). 입력 버퍼는 호출
+    // 동안 유효해야 하며 깊게 복사한다. 멤버 struct·enum·base struct·InstancedStruct<Base>의 Base가
+    // 먼저 등록되어 있어야 하고 이 struct가 등록된 동안 의존으로 붙잡힌다(그들의 Unregister는
+    // Busy). 주요 실패:
+    // - InvalidArgument: id 0, version 0, 자기 자신이 base, Atomic base 아래의 Atomic이 아닌 파생,
+    //   담을 수 없는 InstancedStruct Base, Atomic이 아닌 플래그 비트(클래스 플래그 Abstract·
     //   WorldOnly 포함), 형식에 맞지 않는 타입 도구 이름(IsTypeToolName), 필드 서술 오류(Register와
     //   같은 규칙 — 배열 멤버 포함), Opaque 필드, 스키마와 1:1이 아닌 함수표, Transient가 아닌
     //   필드의 codec 없음, encode·decode 한쪽만, size·alignment·nativeType·construct·destroy 없음,
@@ -90,7 +94,9 @@ public:
     // - AlreadyExists: 같은 ID(다른 종류 포함), 같은 nativeType의 struct, 같은 필드 ID, 대소문자
     //   무시로 같은 실효 도구 이름, 대소문자 무시로 같은 타입 도구 이름(Register와 같은 규칙 —
     //   클래스와 struct가 한 이름 공간이다).
-    // - NotFound: 멤버 struct·enum 미등록. TypeMismatch: 종류·native 키가 다른 멤버 대상.
+    // - NotFound: 멤버 struct·enum·base struct·InstancedStruct Base 미등록. TypeMismatch: 종류·
+    //   native 키가 다른 멤버 대상, struct가 아닌 base, base 필드를 같은 ID·표현으로 담지 않은
+    //   파생.
     //
     // 사용 예:
     //   auto inner = GeneratedType<BulkDataRef>::Register(types);   // 멤버 struct 먼저

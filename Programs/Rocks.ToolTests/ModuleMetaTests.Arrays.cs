@@ -74,16 +74,16 @@ internal static partial class ModuleMetaTests
             foreach ((string expected, string reason) in new[]
             {
                 ("::rocks::detail::PathClassField<::probe::Parent, ::rocks::ValueKind::Struct>(cursor, &::probe::Parent::slots)", "base class path thunk"),
-                ("&detail::PathStructMember<&::probe::Group::slots, ValueKind::Struct>)", "struct member StructRefArray of another module's element"),
-                ("&detail::PathStructMember<&::probe::Group::plains, ValueKind::Struct>)", "struct member Array<S> of another module's element")
+                ("&detail::PathStructMember<::probe::Group, &::probe::Group::slots, ValueKind::Struct>)", "struct member StructRefArray of another module's element"),
+                ("&detail::PathStructMember<::probe::Group, &::probe::Group::plains, ValueKind::Struct>)", "struct member Array<S> of another module's element")
             })
             {
                 Verify.That(parent.Contains(Compact(expected), StringComparison.Ordinal), "generated code missing " + reason + ": " + expected);
             }
 
             string items = Compact(File.ReadAllText(layout.Generated("Elements", "Public/Elements/Items.generated.h")));
-            Verify.That(items.Contains(Compact("&detail::PathStructMember<&::probe::SA::target, ValueKind::ObjectReference>)"), StringComparison.Ordinal) &&
-                items.Contains(Compact("&detail::PathStructMember<&::probe::Plain::x, ValueKind::UInt16>)"), StringComparison.Ordinal), "element module struct member path thunks");
+            Verify.That(items.Contains(Compact("&detail::PathStructMember<::probe::SA, &::probe::SA::target, ValueKind::ObjectReference>)"), StringComparison.Ordinal) &&
+                items.Contains(Compact("&detail::PathStructMember<::probe::Plain, &::probe::Plain::x, ValueKind::UInt16>)"), StringComparison.Ordinal), "element module struct member path thunks");
 
             string aggregate = Compact(File.ReadAllText(layout.Generated("Upper", "Public/Upper/Upper.module.generated.h")));
             int elementsModule = aggregate.IndexOf("::rocks::generated::Elements::RegisterModuleTypes", StringComparison.Ordinal);

@@ -166,11 +166,12 @@ internal static class CppEmitter
         // NativeTypeKey만 쓰므로 include하지 않는다(ClassRef<Self>·파생 클래스를 Base로 두어도 include 순환이 생기지 않는다).
         ClassModel[] own = schema.Ordered.Where(type => type.Header == include).ToArray();
         IEnumerable<string> valueHeaders = own.SelectMany(type => type.Fields)
-            .Where(field => field.TargetKind is "Enum" or "Struct" && field.Reference is not null)
+            .Where(field => field.TargetKind is "Enum" or "Struct" or "InstancedStruct" && field.Reference is not null)
             .Select(field => field.Reference!)
             .Concat(own.SelectMany(type => type.Fields).Where(field => field.KeyKind == "Enum" && field.KeyReference is not null)
                 .Select(field => field.KeyReference!))
             .Concat(own.SelectMany(type => type.NativeMembers).Where(native => native.Struct is not null).Select(native => native.Struct!))
+            .Concat(own.Where(type => type.IsStruct && type.Base.Length != 0).Select(type => type.Base))
             .Select(name => schema.Find(name).Header)
             .Where(header => header != include)
             .Distinct(StringComparer.Ordinal)
@@ -383,7 +384,8 @@ internal static class CppEmitter
         string member = $"&{native}::{field.Name}";
         // Map·Set 멤버(리플렉션 B9f2)의 대상 종류는 값·원소 종류다(key 단계 경로 연산 — 리플렉션 B9f3). 값·키 native 키는
         // StructFieldOps가 멤버 형식으로 채운다.
-        return $"detail::StructFieldOps<{member}>({GuidValue(field.Id)}, &detail::PathStructMember<{member}, ValueKind::{field.TargetKind}>),";
+        // 소유 struct를 명시한다(리플렉션 B9k — base 멤버의 멤버 포인터도 파생 값으로 캐스트한 뒤 쓴다).
+        return $"detail::StructFieldOps<{native}, {member}>({GuidValue(field.Id)}, &detail::PathStructMember<{native}, {member}, ValueKind::{field.TargetKind}>),";
     }
 
     // 클래스·참조 struct Trace의 필드 한 줄이다(owner는 Trace 매개변수 value, ownerType은 멤버 포인터의 클래스 철자). ObjectRef는
@@ -546,6 +548,18 @@ internal static class CppEmitter
         Line($"static constexpr bool ContainsRequired = {True(ContainsRequired(schema, type))};");
         Line($"static constexpr uint32 Depth = {type.Depth}u;");
         Line($"static_assert(Depth <= ::rocks::MaxStructDepth, \"ROCKS_STRUCT {type.Name} nesting depth exceeds MaxStructDepth (RMC2303)\");");
+        // struct 상속(리플렉션 B9k): 리플렉션 base는 C++ base여야 하고, 비리플렉션 base는 필드가 없고 다형적이지 않아야 한다.
+        if (type.Base.Length != 0)
+        {
+            Line($"static_assert(::rocks::IsBaseOfV<::{type.Base}, {native}>, \"ROCKS_STRUCT {type.Name}: reflected base {type.Base} must be a C++ base (RMC2301)\");");
+        }
+
+        foreach (string empty in type.EmptyBases)
+        {
+            string emptyType = "::" + empty.TrimStart(':');
+            Line($"static_assert(::rocks::IsEmptyV<{emptyType}> && !::rocks::IsPolymorphicV<{emptyType}>, \"ROCKS_STRUCT {type.Name}: non-reflected base {empty} must have no fields and no virtual functions (RMC2301)\");");
+        }
+
         if (type.Binds.Length != 0)
         {
             EmitBindsChecks(type, native, Line);
@@ -596,7 +610,8 @@ internal static class CppEmitter
         Line("static const TypeSchema& Schema() noexcept {");
         EmitFieldSchemas(type, Line);
         string fieldSpan = type.Fields.Count == 0 ? "Span<const FieldSchema>{}" : $"Span<const FieldSchema>(fields, {type.Fields.Count})";
-        Line($"static const TypeSchema schema{{Id(), {type.Version}, {fieldSpan}, {View(type.Name)}, Guid{{}}, {type.Flags}u, {View(type.EffectiveToolName)}}};");
+        string? structBaseId = type.Base.Length == 0 ? null : schema.Find(type.Base).Id;
+        Line($"static const TypeSchema schema{{Id(), {type.Version}, {fieldSpan}, {View(type.Name)}, {GuidValue(structBaseId)}, {type.Flags}u, {View(type.EffectiveToolName)}}};");
         Line("return schema;");
         Line("}");
         if (type.IsSettings)

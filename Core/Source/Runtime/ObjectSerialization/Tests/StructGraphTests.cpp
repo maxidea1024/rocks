@@ -190,9 +190,9 @@ struct GeneratedType<struct_fixture::Leaf> {
     static RuntimeStructOps Ops() noexcept {
         using namespace struct_fixture;
         static const RuntimeStructFieldOps fields[] = {
-            detail::StructFieldOps<&Leaf::count>(CountId),
-            detail::StructFieldOps<&Leaf::label>(LabelId),
-            detail::StructFieldOps<&Leaf::group>(GroupId)};
+            detail::StructFieldOps<Leaf, &Leaf::count>(CountId),
+            detail::StructFieldOps<Leaf, &Leaf::label>(LabelId),
+            detail::StructFieldOps<Leaf, &Leaf::group>(GroupId)};
         return MakeStructOps<Leaf>(fields);
     }
 };
@@ -221,9 +221,9 @@ struct GeneratedType<struct_fixture::Middle> {
     static RuntimeStructOps Ops() noexcept {
         using namespace struct_fixture;
         static const RuntimeStructFieldOps fields[] = {
-            detail::StructFieldOps<&Middle::leaf>(LeafFieldId),
-            detail::StructFieldOps<&Middle::offset>(OffsetId),
-            detail::StructFieldOps<&Middle::note>(NoteId)};
+            detail::StructFieldOps<Middle, &Middle::leaf>(LeafFieldId),
+            detail::StructFieldOps<Middle, &Middle::offset>(OffsetId),
+            detail::StructFieldOps<Middle, &Middle::note>(NoteId)};
         return MakeStructOps<Middle>(fields);
     }
 };
@@ -253,9 +253,9 @@ struct GeneratedType<struct_fixture::Holder> {
     static RuntimeStructOps Ops() noexcept {
         using namespace struct_fixture;
         static const RuntimeStructFieldOps fields[] = {
-            detail::StructFieldOps<&Holder::target>(TargetId),
-            detail::StructFieldOps<&Holder::middle>(MiddleFieldId),
-            detail::StructFieldOps<&Holder::flag>(FlagId)};
+            detail::StructFieldOps<Holder, &Holder::target>(TargetId),
+            detail::StructFieldOps<Holder, &Holder::middle>(MiddleFieldId),
+            detail::StructFieldOps<Holder, &Holder::flag>(FlagId)};
         return MakeStructOps<Holder>(fields);
     }
 };
@@ -516,7 +516,7 @@ bool RegisterFixture(TypeRegistry& types, FixtureOptions options = {}) noexcept 
         }
 
         shadowFields[3] = Field(ShadowId, "shadow", ValueKind::UInt32);
-        shadowOps[3] = detail::StructFieldOps<&Leaf::count>(ShadowId);
+        shadowOps[3] = detail::StructFieldOps<Leaf, &Leaf::count>(ShadowId);
         leaf.fields = Span<const FieldSchema>(shadowFields, 4);
         leafOps.fields = Span<const RuntimeStructFieldOps>(shadowOps, 4);
     }

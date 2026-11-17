@@ -209,7 +209,7 @@ internal static partial class MetaTests
             Verify.Equal("Int8", Field("probe::Value", "tinies").GetProperty("element").GetProperty("kind").GetString(), "int8 array element");
             Verify.Equal("Int16", Field("probe::Value", "narrows").GetProperty("element").GetProperty("kind").GetString(), "int16 array element");
             string generated = Compact(File.ReadAllText(probe.Output));
-            Verify.Contains("PathStructMember<&::probe::Leaf::tiny,ValueKind::Int8>", generated, "int8 member path thunk");
+            Verify.Contains("PathStructMember<::probe::Leaf,&::probe::Leaf::tiny,ValueKind::Int8>", generated, "int8 member path thunk");
             Verify.Contains("{ValueKind::Int16,Guid{}},65536u}", generated, "int16 array element schema");
             ProcessResult compiled = await probe.CompileGeneratedAsync();
             Verify.Equal(0, compiled.ExitCode, "generated integer width header compiles: " + compiled.StdOut + compiled.StdErr);
@@ -235,7 +235,7 @@ internal static partial class MetaTests
             Verify.Equal("Name", Field("probe::Value", "names").GetProperty("element").GetProperty("kind").GetString(), "Name array element");
             Verify.Equal("Name", Field("probe::Leaf", "aliases").GetProperty("element").GetProperty("kind").GetString(), "Name member array element");
             string generated = Compact(File.ReadAllText(probe.Output));
-            Verify.Contains("PathStructMember<&::probe::Leaf::socket,ValueKind::Name>", generated, "Name member path thunk");
+            Verify.Contains("PathStructMember<::probe::Leaf,&::probe::Leaf::socket,ValueKind::Name>", generated, "Name member path thunk");
             Verify.Contains("{ValueKind::Name,Guid{}},65536u}", generated, "Name array element schema");
             ProcessResult compiled = await probe.CompileGeneratedAsync();
             Verify.Equal(0, compiled.ExitCode, "generated Name header compiles: " + compiled.StdOut + compiled.StdErr);
@@ -282,7 +282,7 @@ internal static partial class MetaTests
             Verify.That(!Type("probe::Leaf").GetProperty("flags").EnumerateArray().Any(flag => flag.GetString() == "ContainsStrongReference"),
                 "weak members do not make a reference struct");
             string generated = Compact(File.ReadAllText(probe.Output));
-            Verify.Contains("PathStructMember<&::probe::Leaf::anything,ValueKind::WeakObjectReference>", generated, "weak member path thunk");
+            Verify.Contains("PathStructMember<::probe::Leaf,&::probe::Leaf::anything,ValueKind::WeakObjectReference>", generated, "weak member path thunk");
             // 스키마의 GC 간선은 강한 참조 strong 하나뿐이고(weak 필드·배열은 FieldKind::Value), 생성 Trace는 strong만 방문한다.
             Verify.Equal(1, Regex.Count(generated, "FieldKind::ObjectReference", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(10)),
                 "only the strong field is an ObjectReference field kind");

@@ -443,11 +443,28 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                 string id = Identity("type", qualified);
                 currentSite = classSite;
                 JsonElement[] bases = node.TryGetProperty("bases", out JsonElement baseArray) ? baseArray.EnumerateArray().ToArray() : [];
-                if (isStruct && bases.Length != 0)
+                if (isStruct)
                 {
-                    // struct 상속은 v1에서 금지다(Docs/Design/ReflectionFoundations.ko.md 4.1절).
-                    throw new MetadataException($"{qualified}: a ROCKS_STRUCT cannot have a base class", "RMC2301",
-                        "Remove the base and hold the shared members as a nested ROCKS_STRUCT field instead.");
+                    // struct 상속(리플렉션 B9k — Docs/Design/ReflectionExtensions.ko.md 12절): base는 public 비가상이고, Binds 미러는
+                    // base를 가질 수 없으며, 리플렉션 struct는 virtual 함수를 가질 수 없다(다형성은 InstancedStruct<Base>). 리플렉션
+                    // base 하나와 필드 없는 비리플렉션 base의 판별은 SchemaValidator가 한다.
+                    if (bases.Any(item => Text(item, "access") != "public" || Flag(item, "isVirtual")))
+                    {
+                        throw new MetadataException($"{qualified}: a ROCKS_STRUCT base must be public and nonvirtual", "RMC2301",
+                            "Derive publicly and without virtual: struct Derived : public Base { ... }.");
+                    }
+
+                    if (structSpec!.Binds.Length != 0 && bases.Length != 0)
+                    {
+                        throw new MetadataException($"{qualified}: a Binds mirror cannot have a base", "RMC2301",
+                            "Declare every mirrored member in the mirror itself; a Binds mirror describes one real type without inheritance.");
+                    }
+
+                    if (node.TryGetProperty("definitionData", out JsonElement structDefinition) && Flag(structDefinition, "isPolymorphic"))
+                    {
+                        throw new MetadataException($"{qualified}: a ROCKS_STRUCT cannot have virtual functions", "RMC2301",
+                            "Reflected structs are plain values; hold polymorphic values in rocks::InstancedStruct<Base> instead.");
+                    }
                 }
 
                 if (!isStruct && (bases.Length != 1 || Text(bases[0], "access") != "public" || Flag(bases[0], "isVirtual")))
@@ -480,6 +497,11 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                     BindsSpelling = structSpec?.Binds ?? "",
                     BindsSite = structSpec is { Binds.Length: > 0 } ? prefix.Site : null
                 };
+                if (isStruct)
+                {
+                    model.StructBaseSpellings.AddRange(bases.Select(TypeSpelling));
+                }
+
                 JsonElement[] members = Children(node).ToArray();
                 bool generatedBody = members.Any(member => Annotation(member, "rocks.generated") is not null);
                 string access = Text(node, "tagUsed") == "class" ? "private" : "public";

@@ -1,6 +1,7 @@
 #include "TextAssignTestSupport.h"
 
 #include <ReflectionTestFixtures/InstancedStructFixture.generated.h>
+#include <ReflectionTestFixtures/StructInheritanceFixture.generated.h>
 #include <Core/Text/NamePool.h>
 #include <ReflectionText/TextJson.h>
 
@@ -12,6 +13,8 @@
 using namespace rocks;
 using namespace rocks::reflection_text;
 using namespace rocks::test::assign;
+using reflection_fixture::InheritHolder;
+using reflection_fixture::InheritLeaf;
 using reflection_fixture::InstancedHolder;
 using reflection_fixture::InstancedPoint;
 using reflection_fixture::InstancedScale;
@@ -205,4 +208,31 @@ TEST(TextInstanced_JsonRoundTripsStructType) {
     CHECK(!rejected && rejected.Error() == ErrorCode::InvalidArgument);
     CHECK(fixture.diagnostics.Count() == 1 &&
           fixture.diagnostics.Get(0).code == TextDiagnosticCode::InvalidValue);
+}
+
+// InstancedStruct<Base>(리플렉션 B9k — fixture StructInheritanceFixture.h): 파생 struct 이름은 받고
+// 같은 묶음의 base·파생 멤버 대입이 그 위에서 풀린다. 무관한 struct 이름은 InvalidValue 진단이고
+// 값은 그대로다.
+TEST(TextInstanced_BaseRestrictsTypes) {
+    InstancedObjects fixture;
+    auto created = fixture.objects.NewObject<InheritHolder>(
+        fixture.access, GeneratedType<InheritHolder>::Schema().id);
+    REQUIRE(created);
+    RootRef<InheritHolder> root = Move(created.Value());
+    const ObjectHandle object = root.Handle();
+    const TextAssignment inputs[] = {Set("shape", "InheritLeaf"), Set("shape.a", "3", 1),
+                                     Set("shape.c", "2.5", 2)};
+    REQUIRE(fixture.Apply(object, inputs));
+    const TextAssignment unrelated[] = {Set("shape", "InheritOther")};
+    auto rejected = fixture.Apply(object, unrelated);
+    CHECK(!rejected && rejected.Error() == ErrorCode::InvalidArgument);
+    REQUIRE(fixture.diagnostics.Count() >= 1);
+    CHECK(fixture.diagnostics.Get(0).code == TextDiagnosticCode::InvalidValue);
+    auto borrowed = fixture.objects.Resolve<InheritHolder>(fixture.access, object);
+    REQUIRE(borrowed);
+    auto value = borrowed.Value().Get();
+    REQUIRE(value);
+    const InheritLeaf* leaf = value.Value()->shape.Get<InheritLeaf>();
+    REQUIRE(leaf);
+    CHECK(leaf->a == 3 && leaf->c == 2.5f);
 }

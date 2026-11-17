@@ -9,8 +9,8 @@
 // 경로 연산(B6a) 레지스트리 단위 시험이다(Docs/Design/ReflectionFoundations.ko.md 7.1절 "시험").
 // 생성 코드(B6b) 전이라 GeneratedType 특수화를 MetaCompiler가 낼 모양으로 손으로 썼다: 클래스
 // Struct·Array 필드 함수표의 path 칸에 PathClassField를 부르는 람다(valueNativeType은 없으면
-// nullptr), struct 멤버는 StructFieldOps<&S::m>(id, &PathStructMember<&S::m, Target>), 단일 값
-// 필드에는 path가 없다.
+// nullptr), struct 멤버는 StructFieldOps<S, &S::m>(id, &PathStructMember<S, &S::m, Target>), 단일
+// 값 필드에는 path가 없다.
 using namespace rocks;
 using reflection_fixture::Bias;
 using reflection_fixture::Channels;
@@ -307,7 +307,9 @@ RuntimeFieldOps PathField(Guid id, const void* valueNative = nullptr, bool path 
 // struct 멤버 함수표(B6b 생성 코드와 같은 모양)다.
 template <auto Member, ValueKind Target>
 RuntimeStructFieldOps MemberOps(Guid id) noexcept {
-    return detail::StructFieldOps<Member>(id, &detail::PathStructMember<Member, Target>);
+    using Owner = typename detail::StructMemberPointer<decltype(Member)>::Owner;
+    return detail::StructFieldOps<Owner, Member>(id,
+                                                 &detail::PathStructMember<Owner, Member, Target>);
 }
 
 } // namespace path_fixture
@@ -368,7 +370,7 @@ struct GeneratedType<path_fixture::Point> {
         using namespace path_fixture;
         // x는 경로 thunk 없이 등록한다(null path thunk 시험).
         static const RuntimeStructFieldOps fields[] = {
-            detail::StructFieldOps<&Point::x>(XId),
+            detail::StructFieldOps<Point, &Point::x>(XId),
             MemberOps<&Point::inner, ValueKind::Struct>(PointInnerId)};
         return MakeStructOps<Point>(fields);
     }

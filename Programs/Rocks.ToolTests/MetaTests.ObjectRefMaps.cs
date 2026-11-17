@@ -61,7 +61,7 @@ internal static partial class MetaTests
             Verify.Contains("detail::TraceMapField(value.*(&::probe::Bundle::byName),visitor);", generated, "generated struct trace visits the map");
             Verify.Contains("PathClassField<::probe::Value,::rocks::ValueKind::ObjectReference>(cursor,&::probe::Value::bySlot)", generated,
                 "object reference map path thunk targets the value kind");
-            Verify.Contains("PathStructMember<&::probe::Bundle::byName,ValueKind::ObjectReference>", generated, "struct member path thunk");
+            Verify.Contains("PathStructMember<::probe::Bundle,&::probe::Bundle::byName,ValueKind::ObjectReference>", generated, "struct member path thunk");
             Verify.Contains("staticconstexprboolContainsReferenceArray=true;", generated, "generated registry container trait");
             ProcessResult compiled = await probe.CompileGeneratedAsync();
             Verify.Equal(0, compiled.ExitCode, "generated ObjectRefMap header compiles: " + compiled.StdOut + compiled.StdErr);

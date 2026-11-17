@@ -946,15 +946,18 @@ Result<void> PathClassField(PathCursor& cursor, Member MemberOwner::* member) no
 }
 
 // struct 멤버의 경로 thunk다(StructFieldPathFunction — StructFieldOps의 둘째 인자). structValue는
-// 바로 바깥 단계가 등록 struct와 대조한 S 값이다.
+// 바로 바깥 단계가 등록 struct와 대조한 Owner 값이다(Owner는 함수표를 내는 struct — 멤버 포인터가
+// base의 것이어도 Owner로 캐스트한 뒤 쓴다, 리플렉션 B9k).
 //
 // 생성 코드(B6b):
-//   detail::StructFieldOps<&::MaterialSlot::name>(
-//       NameId, &detail::PathStructMember<&::MaterialSlot::name, ValueKind::Utf8String>)
-template <auto MemberPointer, ValueKind Target>
+//   detail::StructFieldOps<::MaterialSlot, &::MaterialSlot::name>(
+//       NameId, &detail::PathStructMember<::MaterialSlot, &::MaterialSlot::name,
+//                                         ValueKind::Utf8String>)
+template <class Owner, auto MemberPointer, ValueKind Target>
 Result<void> PathStructMember(const RuntimeStructFieldOps&, PathCursor& cursor,
                               void* structValue) noexcept {
-    using S = typename StructMemberPointer<decltype(MemberPointer)>::Owner;
+    using S = Owner;
+    static_assert(IsBaseOfV<typename StructMemberPointer<decltype(MemberPointer)>::Owner, Owner>);
     if (auto checked = cursor.CheckMemberOwner(NativeTypeKey<S>()); !checked) {
         return checked;
     }

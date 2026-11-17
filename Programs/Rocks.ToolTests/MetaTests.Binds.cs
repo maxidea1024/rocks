@@ -48,7 +48,7 @@ internal static partial class MetaTests
                 ("static_assert(::rocks::IsStandardLayoutV<BoundType>", "standard layout for the order check"),
                 ("static_assert(ROCKS_OFFSET_OF(BoundType, x) < ROCKS_OFFSET_OF(BoundType, y)", "declaration order check"),
                 ("[[maybe_unused]] const auto& [m0, m1, m2] = value;", "structured binding count check"),
-                ("detail::StructFieldOps<&::probe::Pair::b>", "member thunk of the real type"),
+                ("detail::StructFieldOps<::probe::Pair,&::probe::Pair::b>", "member thunk of the real type"),
                 ("MakeRuntimeStructOps<::probe::Pair>", "construct and destroy the real type"),
                 ("NativeTypeKey<::rocks::Vector3<float>>()", "class field native key of the real type"),
                 ("GeneratedType<::rocks::Vector3<double>>::Depth < Depth", "mirror member uses the real type specialization")
