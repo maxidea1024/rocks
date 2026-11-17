@@ -1,4 +1,5 @@
 #include "CullingSelfTest.h"
+#include "SelfTestEnvironment.h"
 
 #include <Base/Compiler.h>
 #include <Base/NumericLimits.h>
@@ -398,9 +399,14 @@ uint32 RunCullingChecks(const char* name, Device& device, sample::Renderer& rend
     windowDesc.height = Size;
     windowDesc.resizable = false;
     windowDesc.visible = false;
-    auto created = platform::Window::Create(allocator, windowDesc);
+    const char* unavailable = WindowPresentUnavailableReason(device);
+    auto created = unavailable == nullptr
+                       ? platform::Window::Create(allocator, windowDesc)
+                       : Result<UniquePtr<platform::Window>>::Failure(ErrorCode::Unsupported);
     bool window = false;
-    if (created && (created.Value()->Width() != Size || created.Value()->Height() != Size)) {
+    if (unavailable != nullptr) {
+        printf("  [NOT RUN] %s culling: window path (%s)\n", name, unavailable);
+    } else if (created && (created.Value()->Width() != Size || created.Value()->Height() != Size)) {
         printf("  [NOT RUN] %s culling: window path (client area is %ux%u, not %ux%u)\n", name,
                created.Value()->Width(), created.Value()->Height(), Size, Size);
     } else if (created) {

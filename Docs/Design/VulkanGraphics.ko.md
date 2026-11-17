@@ -1,6 +1,6 @@
 # Vulkan 그래픽 backend(VulkanGraphics) 설계
 
-기준일: 2026-11-18, 개정 4(초안). Vulkan backend `VulkanGraphics`가 Graphics 장치 계약(`Graphics/Device.h`)을 Vulkan 1.1 위에서 어떻게 지키는지 정한다. [셰이더 시스템](ShaderSystem.ko.md) P9 "Vulkan 선행"의 산출물이다. 그 문서가 P9 산출물로 "EngineRuntime에 절을 더한다"고 적었지만, 내용이 커서 이 문서로 따로 두고 [엔진 런타임](EngineRuntime.ko.md) 10절에는 요약과 링크만 둔다.
+기준일: 2026-11-18, 개정 5(초안). Vulkan backend `VulkanGraphics`가 Graphics 장치 계약(`Graphics/Device.h`)을 Vulkan 1.1 위에서 어떻게 지키는지 정한다. [셰이더 시스템](ShaderSystem.ko.md) P9 "Vulkan 선행"의 산출물이다. 그 문서가 P9 산출물로 "EngineRuntime에 절을 더한다"고 적었지만, 내용이 커서 이 문서로 따로 두고 [엔진 런타임](EngineRuntime.ko.md) 10절에는 요약과 링크만 둔다.
 
 UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275b`, 로컬 클론) 원본이다. 경로는 `Engine/Source/Runtime/VulkanRHI/` 기준이며 `Private/`는 `P/`, `Public/`은 `Pub/`로 줄인다. Vulkan 사양 근거는 Vulkan 1.4 사양(Vulkan-Docs)의 절 이름으로 적는다.
 
@@ -268,6 +268,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 | Android 교차 빌드(arm64, NDK 29, `-p:RocksPlatform=android`, EngineTests) | VulkanGraphics Android 구현(`libvulkan.so`, `VK_KHR_android_surface`, CLOCK_MONOTONIC domain)과 ShaderFormatVulkan 미지원 구현이 경고 0으로 컴파일된다. 기기 실행은 SH6·P13이다 |
 | EngineTests | `GpuPageAllocator` 3건, `VulkanShaderCompiler` 2건(DXC·SPIRV-Tools 실제 호출), `VulkanDevice` 1건(로더 동적 로드·검증 층·빈 제출 fence) 통과, 전체 2135건 통과 |
 | 드라이버 언로드 경쟁(3절 드라이버 상주) | 상주 전: EngineTests 전체가 간헐적으로 비정상 종료(하네스 2회, 직접 실행 6회 중 1회). cdb에서 `--filter Vulkan`을 반복해 10번째에 잡았다. 장치 수명 동안 NVIDIA가 만든 스레드 7개 중 하나가 `vkDestroyInstance`의 nvoglv64.dll 언로드 뒤에도 남아 `<Unloaded_nvoglv64.dll>+0xe76052`에서 접근 위반. 우리 fence watcher 스레드는 그 전에 끝났다. 상주 뒤: cdb 로그에 프로세스 끝까지 nvoglv64.dll·vulkan-1.dll 언로드 이벤트가 없고(결정적 확인), `--filter Vulkan` 직접 60회·cdb 20회와 EngineTests 전체 직접 8회가 모두 통과 |
+| lavapipe 창 경로와 데스크톱 세션(2026-11-18) | 사용자가 원격 세션을 끊은 뒤(session 1 `Disc`) lavapipe의 swapchain·컬링 창 경로·렌더 lane 검사가 `VK_ERROR_MEMORY_MAP_FAILED`로 실패했다. 원인: mesa 26.2.7 `src/vulkan/wsi/wsi_common_win32.cpp`의 소프트웨어 present는 `GetDC(hwnd)`로 얻은 창 DC에 `StretchBlt`하고 실패하면 이 오류를 swapchain 상태로 남긴다(823–832행, 뒤 acquire도 같은 오류, 736행). 같은 경로를 흉내 낸 GDI 프로브: 끊긴 세션에서 숨긴 창으로의 `StretchBlt`는 FALSE, 보이는 창은 TRUE. 우리 코드와 무관함: 23:59에 통과한 리뷰 수정·드라이버 상주 이전 코드를 같은 끊긴 세션에서 다시 빌드해 돌리면 같은 항목이 같은 오류로 실패한다. 하드웨어 Vulkan·D3D12·D3D11·OpenGL ES의 창 경로는 끊긴 세션에서도 통과한다. 처리: `platform::QueryDesktopSessionState()`(PlatformWindow, WTSConnectState)가 `Disconnected`이고 장치가 lavapipe(소프트웨어, 이름 `llvmpipe`)면 Sandbox가 그 창 경로 검사를 근거를 단 NOT RUN으로 출력한다(`Programs/Sandbox/Private/SelfTestEnvironment.*`). 연결된 세션에서는 전부 돌린다 |
 | best practices 검증 | 열거를 두 번 부르기로 고친 뒤 남는 경고는 RenderTarget 생성 때 UNDEFINED → SHADER_READ_ONLY 전이 하나다(D3D12도 생성 직후 내용이 정해지지 않는다. 오류로 세지 않는다) |
 
 **측정 S4(검증 층 공급·소프트웨어 ICD).**
@@ -293,3 +294,4 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 개정 2(2026-11-17): GX5 명시 접근 상태와 전이(RenderBase 개정 9–11, RG1)를 8절에 반영했다: mip별 `committed`·`current` 추적과 대표형 상태, 접근 → layout·stage·access, 단계가 새로 생기는 읽기 전이와 같은 쓰기 상태의 WAW, render pass 바깥 의존, render pass 안 barrier는 pass를 닫고 다시 연다, 버퍼는 쓰기가 끼거나 단계가 생기는 전이만 메모리 barrier, 업로드·readback 상태 중립, `SetTexture` 암묵 전이. 교차 검토(중요 3·사소 3)를 반영했다. 픽셀 형식 PF1(`PixelFormat`, RGBA8 두 형식만 대응, 나머지 `Unsupported`)과 OpenGL ES 전환 병합 뒤 측정(17절).
 - 개정 3(2026-11-18): 드라이버 상주(3절). 로더가 `vkDestroyInstance`에서 ICD를 내린 뒤에도 남은 NVIDIA 드라이버 스레드가 내려간 코드를 실행해 EngineTests가 간헐적으로 죽던 문제를 cdb로 확인하고(17절), 프로세스 수명의 상주 instance로 막았다.
 - 개정 4(2026-11-18): 로깅 LG7(`Graphics/GraphicsLog.h` 범주, 검증 메시지 ID 표 규칙, 12절)과 픽셀 형식 PF3(`GetPixelFormatCaps`, 능력으로 생성 판정, 6절)을 반영했다.
+- 개정 5(2026-11-18): lavapipe 창 경로가 끊긴 데스크톱 세션에서 실패하는 원인을 mesa WSI 소스·GDI 프로브·이전 코드 대조로 확정하고, 세션 연결 판정(`QueryDesktopSessionState`)으로 그 경우만 근거를 단 NOT RUN으로 바꿨다(17절).
