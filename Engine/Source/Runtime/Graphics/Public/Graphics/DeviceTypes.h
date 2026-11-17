@@ -183,7 +183,7 @@ inline constexpr uint32 MaxVertexAttributeOffset = 2047;
 inline constexpr uint32 MaxVertexStride = 2048;
 inline constexpr uint32 VertexLayoutAlignment = 4;
 
-// 정점 속성 하나다. location(0–15)은 HLSL 시맨틱 ATTRIBUTE{location}, GLSL layout(location)이다.
+// 정점 속성 하나다. location(0–15)은 HLSL 시맨틱 ATTRIBUTE{location}, GLSL ES layout(location)이다.
 // stream(0–7)의 정점에서 offset byte 위치에 format 형식으로 놓인다.
 struct VertexAttribute {
     uint32 location = 0;
@@ -231,7 +231,8 @@ struct VertexBufferBinding {
 };
 
 // backend별 셰이더 원문이다. 장치는 자기 backend 원문만 쓴다. 진입점 이름은 HLSL에서 VSMain·PSMain,
-// GLSL에서 main이다.
+// GLSL에서 main이다. OpenGL backend의 glsl은 GLSL ES 3.20(`#version 320 es`) 원문이다(OpenGL ES
+// 3.2 장치, OpenGLGraphics/OpenGLDevice.h). SH2에서 쿠킹된 코드로 바뀐다.
 struct ShaderSource {
     StringView hlsl;
     StringView glsl;
@@ -251,9 +252,9 @@ enum class CullMode : uint8 {
 };
 
 // 그리기 파이프라인 설정이다. 모든 파이프라인은 같은 고정 자원 배치를 쓴다: 그리기 상수
-// (DrawConstants, HLSL b0 / GLSL uniform uTransform·uColor)와 텍스처 하나(HLSL t0·s0 /
-// GLSL binding 0 uTexture). 샘플러는 묶은 텍스처의 TextureDesc::sampler를 따른다. 깊이는 쓰지
-// 않는다.
+// (DrawConstants, HLSL b0 / GLSL ES 루트 상수 에뮬레이션 배열 uniform highp vec4 vu_h[5]·pu_h[5])와
+// 텍스처 하나(HLSL t0·s0 / GLSL ES layout(binding = 0) sampler2D ps0). 샘플러는 묶은 텍스처의
+// TextureDesc::sampler를 따른다. 깊이는 쓰지 않는다.
 //
 // 셰이더 입력 대조(RenderBase 10.4절): 정점 셰이더가 읽는 모든 location이 layout에 있어야 하고
 // 형식의 셰이더 타입 계열(VertexFormatShaderType)이 셰이더 입력 타입과 같아야 한다. 셰이더가 읽지
@@ -277,10 +278,11 @@ struct PipelineDesc {
 //
 // transform은 행 벡터 규약(p' = p · M)의 4x4 행렬을 행 우선(row-major)으로 담는다: Core Mat4의 저장
 // 순서(m[row * 4 + column], 이동은 m[12..14]) 그대로이며 올릴 때 전치하지 않는다. 셰이더는
-// mul(float4(position, 1), transform)(GLSL은 vec4(position, 1) * uTransform)으로 쓰고, 장치가
-// 행렬을 행 우선으로 담는다(UE와 같다, ShaderSystem 7.2절 6항): D3D12는 HLSL을
-// D3DCOMPILE_PACK_MATRIX_ROW_MAJOR(FXC /Zpr)로 컴파일하고, OpenGL은 uniform을
-// glProgramUniformMatrix4fv(transpose = GL_TRUE)로 올린다.
+// mul(float4(position, 1), transform)으로 쓰고, 장치가 행렬을 행 우선으로 담는다(UE와 같다,
+// ShaderSystem 7.2절 6항): D3D12는 HLSL을 D3DCOMPILE_PACK_MATRIX_ROW_MAJOR(FXC /Zpr)로 컴파일하고,
+// OpenGL ES는 80 byte를 vec4 5개(vu_h·pu_h)로 그대로 올리며 GLSL ES 원문이
+// mat4(vu_h[0], vu_h[1], vu_h[2], vu_h[3]) * v로 쓴다(열 우선으로 읽은 Mᵀ와 v의 곱 = v·M,
+// 쿠킹된 ESSL과 같다).
 struct DrawConstants {
     float transform[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
     float color[4] = {1, 1, 1, 1};
@@ -495,7 +497,8 @@ struct DeviceInfo {
     bool concurrentResourceCreation = false;
     // GPU timestamp를 기록할 수 있는지와 초당 tick 수다(GX9). false면 WriteTimestamp가
     // Unsupported이며 GPU 시간은 "없음"이다(추정값을 만들지 않는다). D3D12는 graphics queue
-    // timestamp, OpenGL은 GL_TIMESTAMP query(counter bit가 0이면 false), Vulkan은 graphics queue
+    // timestamp, OpenGL ES는 GL_EXT_disjoint_timer_query(Windows 미리보기의 데스크톱 core context는
+    // GL 3.3 timer query)이고 확장이 없거나 counter bit가 0이면 false다. Vulkan은 graphics queue
     // family의 timestampValidBits가 0이 아니고 timestampPeriod가 양수일 때다(주파수는 1e9 /
     // timestampPeriod를 정수 Hz로 반올림).
     bool timestamps = false;

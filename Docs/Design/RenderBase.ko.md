@@ -637,10 +637,10 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 | 19 | `Rgb10A2Unorm` | `VET_URGB10A2N` | 4 | float4 | `R10G10B10A2_UNORM` | `A2B10G10R10_UNORM_PACK32` | `UInt1010102Normalized` | `GL_UNSIGNED_INT_2_10_10_10_REV`×4 정규화 |
 | 20 | `UInt1` | `VET_UInt` | 4 | uint | `R32_UINT` | `R32_UINT` | `UInt` | `GL_UNSIGNED_INT`×1 정수 |
 
-- OpenGL ES의 정규화 없는 정수 형식은 `glVertexAttribIPointer`로 설정한다(`glVertexAttribPointer`로 설정하면 float로 변환되어 int 입력과 맞지 않는다).
+- OpenGL ES의 정규화 없는 정수 형식은 정수 경로(`glVertexAttribIFormat`, ES 3.1 vertex attrib binding. 옛 API로는 `glVertexAttribIPointer`)로 설정한다(float 경로로 설정하면 float로 변환되어 int 입력과 맞지 않는다).
 - `Bgra8Unorm`의 OpenGL ES 처리:
   - ES에는 BGRA 정점 배열이 없다. UE는 이 경우 RGBA로 읽어 채널이 뒤바뀐다(`OpenGLVertexDeclaration.cpp:56–64`).
-  - Rocks는 이 형식을 OpenGL backend(ES 3.2 공통 API, 셰이더 시스템 5.2절 G2)에서 미지원으로 공개한다. 이 형식이 든 파이프라인 생성은 `UnsupportedCapability`다.
+  - Rocks는 이 형식을 OpenGL backend(ES 3.2 공통 API, 셰이더 시스템 5.2절 G2)에서 미지원으로 공개한다. 이 형식이 든 파이프라인 생성은 `UnsupportedCapability`다(지금 Graphics 오류 코드로는 `Unsupported`, [OpenGL ES backend](OpenGLESGraphics.ko.md) 5.1절).
   - 메시 쿠커는 GLES 형식 프로필에서 색을 `UByte4Unorm`으로 쓴다.
   - 지원 여부는 backend별 형식 지원 표(GX1, A0-G G1과 같은 방식)로 조회한다.
 - 정규화 변환 규칙은 그래픽 API 표준을 따른다. snorm은 max(c / (2^(b−1) − 1), −1), unorm은 c / (2^b − 1)이다. 32-bit 정수 형식은 정규화하지 않는다.
