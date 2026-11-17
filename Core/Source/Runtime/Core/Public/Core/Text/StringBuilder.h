@@ -3,6 +3,7 @@
 #include <Base/TypeTraits.h>
 #include <Core/Containers/Span.h>
 #include <Core/Memory/Allocator.h>
+#include <Core/Text/FormatParse.h>
 #include <Core/Text/String.h>
 #include <Core/Text/StringView.h>
 
@@ -23,6 +24,7 @@
 //
 // 서식 문법("{" [인자 번호] [":" spec] "}", C++20 표준 format의 부분 집합):
 // - "{}"는 다음 인자, "{0}"·"{1}"은 번호로 고른 인자다. 한 문자열에서 둘을 섞으면 오류다.
+// - 이름 자리 "{Name}"은 로그 메시지 템플릿(LogTemplate) 전용이다. 여기서는 오류다.
 // - "{{"·"}}"는 중괄호 문자 자체다.
 // - spec은 [[채움]정렬][부호][#][0][폭][.정밀도][형식]이다.
 //   - 정렬 '<' 왼쪽, '>' 오른쪽, '^' 가운데. 채움은 ASCII 문자 하나(기본 공백).
@@ -57,7 +59,9 @@ class StringBuilderBase;
 // - spec은 ':' 뒤부터 '}' 앞까지의 원문이다(없으면 빈 view). 폭·정렬이 필요하면 특수화가 직접
 //   해석한다.
 // - out에 붙이기만 한다. out의 기존 내용을 읽거나 지우지 않는다.
-// - 실패를 반환하면 그 서식 호출 전체가 실패하고 builder 내용은 호출 전으로 돌아간다.
+// - 실패를 반환하면 그 서식 호출 전체가 실패하고 builder 내용은 호출 전으로 돌아간다(로그 렌더는
+//   예외로 그 자리만 "<format error>"로 바꾼다).
+// - out은 FixedStringBuilder(잘림 모드)일 수 있다. 그때 넘치는 출력은 잘리고 성공한다.
 template <typename T>
 struct Formatter;
 
@@ -66,18 +70,7 @@ namespace detail {
 // 서식 인자 하나를 타입 정보와 함께 지운 값이다. 문자열·사용자 타입은 원본을 빌리므로 서식 호출
 // 동안만 유효하다. 사용자 코드는 직접 만들지 않는다.
 struct FormatArg {
-    enum class Kind : uint8 {
-        Bool,
-        Char,
-        Signed,
-        Unsigned,
-        Float,
-        Double,
-        Text,
-        NullText,
-        Pointer,
-        Custom
-    };
+    using Kind = FormatArgKind;
 
     using CustomFunction = Result<void> (*)(StringBuilderBase&, const void*, StringView) noexcept;
 
@@ -122,66 +115,87 @@ template <typename T>
 inline constexpr bool IsVoidPointer = IsPointerV<T> && IsSameV<RemoveCvT<RemovePointerT<T>>, void>;
 
 template <typename T>
+inline constexpr bool IsCharacterArray = IsArrayV<T> && IsSameV<RemoveCvT<RemoveExtentT<T>>, char>;
+
+// 인자 타입 U(const·참조를 벗긴 타입)의 서식 종류다. 서식할 수 없는 타입은 static_assert로 막는다.
+// 런타임 값으로 갈리는 것(null C 문자열 → NullText)은 Text로 본다. MakeFormatArg와 로그 템플릿의
+// 컴파일 타임 spec 검증이 같은 분류를 쓴다.
+template <typename U>
+consteval FormatArgKind FormatArgKindOf() noexcept {
+    if constexpr (HasFormatter<U>) {
+        return FormatArgKind::Custom;
+    } else if constexpr (IsSameV<U, bool>) {
+        return FormatArgKind::Bool;
+    } else if constexpr (IsSameV<U, char>) {
+        return FormatArgKind::Char;
+    } else if constexpr (IsSameV<U, wchar_t> || IsSameV<U, char8_t> || IsSameV<U, char16_t> ||
+                         IsSameV<U, char32_t>) {
+        static_assert(sizeof(U) == 0, "wide/UTF character types are not formattable");
+        return FormatArgKind::Custom;
+    } else if constexpr (IsIntegralV<U>) {
+        static_assert(sizeof(U) <= 8, "integers wider than 64 bits are not formattable");
+        return IsSignedV<U> ? FormatArgKind::Signed : FormatArgKind::Unsigned;
+    } else if constexpr (IsSameV<U, float>) {
+        return FormatArgKind::Float;
+    } else if constexpr (IsSameV<U, double>) {
+        return FormatArgKind::Double;
+    } else if constexpr (IsSameV<U, StringView> || IsSameV<U, String> ||
+                         IsCharacterTextPointer<U> || IsCharacterArray<U>) {
+        return FormatArgKind::Text;
+    } else if constexpr (IsSameV<U, decltype(nullptr)> || IsVoidPointer<U>) {
+        return FormatArgKind::Pointer;
+    } else if constexpr (IsPointerV<U>) {
+        static_assert(sizeof(U) == 0, "Only void pointers are formattable; cast to const void*");
+        return FormatArgKind::Custom;
+    } else {
+        static_assert(sizeof(U) == 0, "Type is not formattable; specialize rocks::Formatter<T>");
+        return FormatArgKind::Custom;
+    }
+}
+
+template <typename T>
 FormatArg MakeFormatArg(const T& value) noexcept {
     using U = FormatDecay<T>;
     static_assert(!IsVolatileV<RemoveReferenceT<T>>,
                   "volatile values are not formattable; copy the value first");
+    constexpr FormatArgKind kind = FormatArgKindOf<U>();
     FormatArg arg;
-    if constexpr (HasFormatter<U>) {
-        arg.kind = FormatArg::Kind::Custom;
+    arg.kind = kind;
+    if constexpr (kind == FormatArgKind::Custom) {
         arg.custom.object = &value;
         arg.custom.format = [](StringBuilderBase& out, const void* object,
                                StringView spec) noexcept -> Result<void> {
             return Formatter<U>::Format(out, *static_cast<const U*>(object), spec);
         };
-    } else if constexpr (IsSameV<U, bool>) {
-        arg.kind = FormatArg::Kind::Bool;
+    } else if constexpr (kind == FormatArgKind::Bool) {
         arg.boolean = value;
-    } else if constexpr (IsSameV<U, char>) {
-        arg.kind = FormatArg::Kind::Char;
+    } else if constexpr (kind == FormatArgKind::Char) {
         arg.character = value;
-    } else if constexpr (IsSameV<U, wchar_t> || IsSameV<U, char8_t> || IsSameV<U, char16_t> ||
-                         IsSameV<U, char32_t>) {
-        static_assert(sizeof(U) == 0, "wide/UTF character types are not formattable");
-    } else if constexpr (IsIntegralV<U>) {
-        static_assert(sizeof(U) <= 8, "integers wider than 64 bits are not formattable");
-        if constexpr (IsSignedV<U>) {
-            arg.kind = FormatArg::Kind::Signed;
-            arg.signedValue = static_cast<int64>(value);
-        } else {
-            arg.kind = FormatArg::Kind::Unsigned;
-            arg.unsignedValue = static_cast<uint64>(value);
-        }
-    } else if constexpr (IsSameV<U, float>) {
-        arg.kind = FormatArg::Kind::Float;
+    } else if constexpr (kind == FormatArgKind::Signed) {
+        arg.signedValue = static_cast<int64>(value);
+    } else if constexpr (kind == FormatArgKind::Unsigned) {
+        arg.unsignedValue = static_cast<uint64>(value);
+    } else if constexpr (kind == FormatArgKind::Float) {
         arg.single = value;
-    } else if constexpr (IsSameV<U, double>) {
-        arg.kind = FormatArg::Kind::Double;
+    } else if constexpr (kind == FormatArgKind::Double) {
         arg.real = value;
-    } else if constexpr (IsSameV<U, StringView> || IsSameV<U, String>) {
-        arg.kind = FormatArg::Kind::Text;
-        arg.text.data = value.Data();
-        arg.text.bytes = value.ByteCount();
     } else if constexpr (IsCharacterTextPointer<U>) {
         if (value == nullptr) {
-            arg.kind = FormatArg::Kind::NullText;
+            arg.kind = FormatArgKind::NullText;
         } else {
             const StringView view(value);
-            arg.kind = FormatArg::Kind::Text;
             arg.text.data = view.Data();
             arg.text.bytes = view.ByteCount();
         }
+    } else if constexpr (kind == FormatArgKind::Text) {
+        arg.text.data = value.Data();
+        arg.text.bytes = value.ByteCount();
     } else if constexpr (IsSameV<U, decltype(nullptr)>) {
-        arg.kind = FormatArg::Kind::Pointer;
         arg.pointer = nullptr;
-    } else if constexpr (IsVoidPointer<U>) {
-        arg.kind = FormatArg::Kind::Pointer;
-        arg.pointer = const_cast<const void*>(static_cast<const volatile void*>(value));
-    } else if constexpr (IsPointerV<U>) {
-        static_assert(sizeof(U) == 0, "Only void pointers are formattable; cast to const void*");
     } else {
-        static_assert(sizeof(U) == 0, "Type is not formattable; specialize rocks::Formatter<T>");
+        arg.pointer = const_cast<const void*>(static_cast<const volatile void*>(value));
     }
+
     return arg;
 }
 
@@ -207,6 +221,26 @@ FormatArg MakeFormatArg(char (&value)[N]) noexcept {
 
 Result<void> FormatTo(StringBuilderBase& out, StringView format,
                       Span<const FormatArg> args) noexcept;
+
+// 인자 하나를 spec(원문)으로 서식화해 out에 붙인다. 로그 렌더처럼 자리마다 따로 서식화하는 곳이
+// 쓴다. hasSpec이 거짓이면 기본 서식("{}")이다. 실패하면 out에 일부가 남을 수 있으며 되돌리는 것은
+// 호출자다. 오류는 TryAppendFormat의 자리 하나와 같다.
+Result<void> AppendFormatArgument(StringBuilderBase& out, const FormatArg& arg, StringView spec,
+                                  bool hasSpec) noexcept;
+
+// FixedStringBuilder가 쓰는, 모든 요청을 거절하는 allocator다. 거절한 호출 수를 센다(무할당 시험이
+// 0인지 확인한다). 여러 스레드에서 불러도 된다.
+class RefusingAllocator final : public Allocator {
+public:
+    Result<void*> Allocate(usize bytes, usize alignment, uint32 tag = 0) noexcept override;
+    Result<void> Deallocate(void* address) noexcept override;
+};
+
+// 프로세스 전체에서 FixedStringBuilder의 allocator가 거절한 호출 수다. 시험이 할당 시도가 없었음을
+// 확인하는 데 쓴다.
+uint64 FixedStringBuilderAllocationAttempts() noexcept;
+
+RefusingAllocator& FixedStringBuilderAllocator() noexcept;
 
 } // namespace detail
 
@@ -259,6 +293,12 @@ public:
         return *allocator_;
     }
 
+    // 잘림 모드(FixedStringBuilder)에서 넘친 출력을 잘라 버린 적이 있는지다. Clear가 지운다. 잘림
+    // 모드가 아니면 늘 거짓이다.
+    bool Truncated() const noexcept {
+        return truncated_;
+    }
+
     // 연쇄 호출(Append·AppendFormat·operator<<)에서 기억한 첫 실패다. 없으면 성공이다.
     Result<void> Status() const noexcept {
         return error_ == ErrorCode::None ? Result<void>::Success() : Result<void>::Failure(error_);
@@ -268,7 +308,7 @@ public:
         return error_ != ErrorCode::None;
     }
 
-    // 내용과 기억한 실패를 지운다. 할당받은 buffer는 다음 사용을 위해 남긴다.
+    // 내용과 기억한 실패·잘림 표시를 지운다. 할당받은 buffer는 다음 사용을 위해 남긴다.
     void Clear() noexcept;
 
     // byteCapacity byte까지 다시 할당하지 않도록 용량을 확보한다.
@@ -337,8 +377,18 @@ public:
     }
 
 protected:
-    StringBuilderBase(Allocator& allocator, char* inlineBuffer, usize inlineCapacity) noexcept;
+    // truncating이 참이면 잘림 모드다. 용량을 넘는 출력은 UTF-8 문자 경계에서 잘라 버리고 성공하며,
+    // 한 번 잘린 뒤의 출력은 모두 버린다(뒤 조각만 붙어 앞뒤가 어긋난 내용이 되지 않게 한다).
+    StringBuilderBase(Allocator& allocator, char* inlineBuffer, usize inlineCapacity,
+                      bool truncating = false) noexcept;
     ~StringBuilderBase() noexcept;
+
+    // 내용을 byteCount까지 줄이고 잘림 표시를 truncated로 되돌린다. byteCount는 현재 길이 이하이고
+    // UTF-8 문자 경계여야 한다(앞서 ByteCount()로 얻은 값).
+    void RewindTo(usize byteCount, bool truncated) noexcept {
+        Truncate(byteCount);
+        truncated_ = truncated;
+    }
 
 private:
     friend Result<void> detail::FormatTo(StringBuilderBase&, StringView,
@@ -351,6 +401,10 @@ private:
 
     // size 뒤를 잘라 실패한 서식 호출을 되돌린다.
     void Truncate(usize size) noexcept;
+
+    // 잘림 모드에서 count byte 중 남은 용량에 들어가는 앞부분(UTF-8 문자 경계)을 붙이고 잘림을
+    // 표시한다.
+    void AppendTruncated(const char* bytes, usize count) noexcept;
 
     // [address, address+bytes)가 현재 저장소와 겹치는지다.
     bool Overlaps(const char* address, usize bytes) const noexcept;
@@ -367,6 +421,8 @@ private:
     usize size_ = 0;
     usize capacity_;
     ErrorCode error_ = ErrorCode::None;
+    bool truncating_ = false;
+    bool truncated_ = false;
 };
 
 namespace detail {
@@ -392,6 +448,38 @@ public:
     explicit StringBuilder(Allocator& allocator) noexcept
         : detail::StringBuilderInlineStorage<InlineBytes>(),
           StringBuilderBase(allocator, this->bytes, InlineBytes - 1) {
+    }
+};
+
+// 호출자가 준 고정 버퍼에 쓰는 잘림 모드 builder다. 할당하지 않는다(로그 캡처·렌더처럼 힙을 쓰면 안
+// 되는 경로용, Docs/Design/LoggingSystem.ko.md 8.3절).
+//
+// StringBuilder와 다른 점:
+// - 용량(buffer 크기 - 1, 끝 NUL 자리)을 넘으면 넘친 부분을 UTF-8 문자 경계에서 잘라 버리고
+// **성공**한다.
+//   Truncated()가 참이 되고, 그 뒤의 붙이기는 모두 버린다(Clear 전까지).
+// - 서식 오류·잘못된 UTF-8·사용자 Formatter 오류는 StringBuilder와 같이 실패하고 호출 전으로
+// 돌아간다.
+// - TryReserve로 용량보다 크게 확보할 수 없다(allocator 오류).
+// - 서식 인자가 이 builder의 내용을 가리켜도 된다(저장소가 움직이지 않는다).
+//
+// 수명: buffer는 builder보다 오래 살아야 한다. View()·CString()은 buffer를 가리킨다.
+// 동시 접근의 동기화는 호출자 책임이다. buffer가 비어 있으면(NUL 자리도 없으면) 계약 위반으로
+// Fatal이다.
+//
+// 사용 예:
+//   char storage[256];
+//   FixedStringBuilder text{Span<char>(storage)};
+//   (void)text.TryAppendFormat("Loaded {} assets from {}", count, path);
+//   if (text.Truncated()) { /* 일부만 담겼다 */ }
+class FixedStringBuilder final : public StringBuilderBase {
+public:
+    explicit FixedStringBuilder(Span<char> buffer) noexcept;
+
+    // 내용을 byteCount까지 되돌리고 잘림 표시를 truncated로 맞춘다. 자리 하나의 서식이 실패했을 때
+    // 그 자리 출력만 지우는 데 쓴다. byteCount는 앞서 ByteCount()로 얻은 값이어야 한다.
+    void RewindTo(usize byteCount, bool truncated) noexcept {
+        StringBuilderBase::RewindTo(byteCount, truncated);
     }
 };
 

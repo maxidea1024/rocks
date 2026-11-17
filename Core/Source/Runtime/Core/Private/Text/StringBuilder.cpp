@@ -2,6 +2,7 @@
 #include "NumberTextInternal.h"
 
 #include <Core/Text/StringBuilder.h>
+#include <Platform/Atomics.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
 
@@ -9,10 +10,10 @@ namespace rocks {
 
 // ---- StringBuilderBase ----
 
-StringBuilderBase::StringBuilderBase(Allocator& allocator, char* inlineBuffer,
-                                     usize inlineCapacity) noexcept
-    : allocator_(&allocator), inline_(inlineBuffer), data_(inlineBuffer),
-      capacity_(inlineCapacity) {
+StringBuilderBase::StringBuilderBase(Allocator& allocator, char* inlineBuffer, usize inlineCapacity,
+                                     bool truncating) noexcept
+    : allocator_(&allocator), inline_(inlineBuffer), data_(inlineBuffer), capacity_(inlineCapacity),
+      truncating_(truncating) {
     data_[0] = '\0';
 }
 
@@ -26,6 +27,7 @@ void StringBuilderBase::Clear() noexcept {
     size_ = 0;
     data_[0] = '\0';
     error_ = ErrorCode::None;
+    truncated_ = false;
 }
 
 Result<void> StringBuilderBase::TryReserve(usize byteCapacity) noexcept {
@@ -85,8 +87,32 @@ bool StringBuilderBase::Overlaps(const char* address, usize bytes) const noexcep
     return begin < storage + capacity_ + 1 && storage < begin + bytes;
 }
 
+void StringBuilderBase::AppendTruncated(const char* bytes, usize count) noexcept {
+    // 남은 용량에 들어가는 앞부분을 UTF-8 문자 경계에서 고른다.
+    const usize fit = StringView(bytes, count).LeftBytesAtCodePoint(capacity_ - size_).ByteCount();
+    if (fit < count) {
+        truncated_ = true;
+    }
+
+    // 저장소가 움직이지 않으므로 원본이 이 builder의 앞 내용이어도 겹치지 않는다.
+    for (usize index = 0; index < fit; ++index) {
+        data_[size_ + index] = bytes[index];
+    }
+
+    size_ += fit;
+    data_[size_] = '\0';
+}
+
 Result<void> StringBuilderBase::AppendRaw(const char* bytes, usize count) noexcept {
     if (count == 0) {
+        return Result<void>::Success();
+    }
+
+    if (truncating_) {
+        if (!truncated_) {
+            AppendTruncated(bytes, count);
+        }
+
         return Result<void>::Success();
     }
 
@@ -175,6 +201,23 @@ Result<void> StringBuilderBase::TryAppendRepeated(char character, usize count) n
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    if (truncating_) {
+        // 이미 잘렸으면 버리고, 아니면 남은 용량만큼만 쓴다.
+        usize fit = truncated_ ? 0 : capacity_ - size_;
+        if (fit > count) {
+            fit = count;
+        }
+
+        for (usize index = 0; index < fit; ++index) {
+            data_[size_ + index] = character;
+        }
+
+        size_ += fit;
+        data_[size_] = '\0';
+        truncated_ = truncated_ || fit < count;
+        return Result<void>::Success();
+    }
+
     if (count > MaxSize - 1 - size_) {
         return Result<void>::Failure(ErrorCode::Overflow);
     }
@@ -216,6 +259,19 @@ Result<void> StringBuilderBase::TryAppendJoin(Span<const StringView> parts,
 
         total += piece;
         aliased = aliased || Overlaps(parts[index].Data(), parts[index].ByteCount());
+    }
+
+    // 잘림 모드는 저장소가 움직이지 않으므로 별칭이어도 바로 쓰고, 넘치면 AppendRaw가 자른다.
+    if (truncating_) {
+        for (usize index = 0; index < parts.Size(); ++index) {
+            if (index != 0) {
+                (void)AppendRaw(separator.Data(), separator.ByteCount());
+            }
+
+            (void)AppendRaw(parts[index].Data(), parts[index].ByteCount());
+        }
+
+        return Result<void>::Success();
     }
 
     // 2) 조각이 이 builder를 가리키면 성장 중 원본이 사라지므로 임시 builder에 모은 뒤 붙인다.
@@ -269,107 +325,18 @@ Result<String> StringBuilderBase::TryToString(Allocator& allocator) const noexce
 namespace detail {
 namespace {
 
-constexpr usize NoPrecision = MaxSize;
-constexpr usize MaxWidth = 65535;
+using Spec = FormatSpec;
 
-// double의 정확한 10진 전개는 소수점 아래 최대 1074자리다. 그보다 큰 정밀도는 받지 않으며, 이 상한
-// 덕분에 실수 표기는 고정 크기 stack buffer에 들어간다(heap을 쓰지 않는다).
-constexpr usize MaxFloatingPrecision = 1074;
+constexpr usize NoPrecision = FormatNoPrecision;
 
 // "%.1074f"의 최대 길이(정수부 309자리 + '.' + 1074자리)보다 크게 잡는다.
 constexpr usize FloatingBufferBytes = 1408;
 
-struct Spec {
-    char fill = ' ';
-    char align = 0;
-    char sign = 0;
-    bool alternate = false;
-    bool zero = false;
-    usize width = 0;
-    usize precision = NoPrecision;
-    char type = 0;
-};
+static_assert(FormatMaxFloatingPrecision + 310 < FloatingBufferBytes,
+              "floating buffer must hold the longest fixed-point expansion");
 
 Result<void> Fail() noexcept {
     return Result<void>::Failure(ErrorCode::InvalidArgument);
-}
-
-bool IsAlign(char character) noexcept {
-    return character == '<' || character == '>' || character == '^';
-}
-
-// 10진 숫자열을 읽는다. MaxWidth를 넘거나 숫자가 없으면 false다.
-bool ParseNumber(const char* text, usize bytes, usize& index, usize& value) noexcept {
-    const usize start = index;
-    value = 0;
-    while (index < bytes && text[index] >= '0' && text[index] <= '9') {
-        value = value * 10 + static_cast<usize>(text[index] - '0');
-        if (value > MaxWidth) {
-            return false;
-        }
-
-        ++index;
-    }
-
-    return index != start;
-}
-
-// [[fill]align][sign][#][0][width][.precision][type]
-Result<void> ParseSpec(StringView text, Spec& spec) noexcept {
-    const char* data = text.Data();
-    const usize bytes = text.ByteCount();
-    usize index = 0;
-    if (bytes >= 2 && IsAlign(data[1])) {
-        const auto fill = static_cast<unsigned char>(data[0]);
-        if (fill < 0x20 || fill >= 0x7f) {
-            return Fail();
-        }
-
-        spec.fill = data[0];
-        spec.align = data[1];
-        index = 2;
-    } else if (bytes >= 1 && IsAlign(data[0])) {
-        spec.align = data[0];
-        index = 1;
-    }
-
-    if (index < bytes && (data[index] == '+' || data[index] == '-' || data[index] == ' ')) {
-        spec.sign = data[index++];
-    }
-
-    if (index < bytes && data[index] == '#') {
-        spec.alternate = true;
-        ++index;
-    }
-
-    if (index < bytes && data[index] == '0') {
-        spec.zero = true;
-        ++index;
-    }
-
-    usize number = 0;
-    if (index < bytes && data[index] >= '1' && data[index] <= '9') {
-        if (!ParseNumber(data, bytes, index, number)) {
-            return Fail();
-        }
-
-        spec.width = number;
-    }
-
-    if (index < bytes && data[index] == '.') {
-        ++index;
-        if (!ParseNumber(data, bytes, index, number)) {
-            return Fail();
-        }
-
-        spec.precision = number;
-    }
-
-    if (index < bytes) {
-        spec.type = data[index++];
-    }
-
-    return index == bytes ? Result<void>::Success() : Fail();
 }
 
 // body(표시 폭 width 문자)를 spec의 폭·정렬·채움 문자로 붙인다.
@@ -448,12 +415,9 @@ char SignFor(bool negative, const Spec& spec) noexcept {
     return spec.sign == '+' ? '+' : spec.sign == ' ' ? ' ' : 0;
 }
 
+// spec은 IsValidIntegerFormatSpec을 통과한 값이다.
 Result<void> AppendInteger(StringBuilderBase& out, uint64 magnitude, bool negative,
                            const Spec& spec) noexcept {
-    if (spec.precision != NoPrecision) {
-        return Fail();
-    }
-
     uint32 base = 10;
     const char* prefix = "";
     bool upper = false;
@@ -510,11 +474,8 @@ Result<void> AppendSigned(StringBuilderBase& out, int64 value, const Spec& spec)
     return AppendInteger(out, magnitude, negative, spec);
 }
 
+// spec은 IsValidTextFormatSpec을 통과한 값이다. 값(text)의 UTF-8만 여기서 본다.
 Result<void> AppendText(StringBuilderBase& out, StringView text, const Spec& spec) noexcept {
-    if ((spec.type != 0 && spec.type != 's') || spec.sign != 0 || spec.alternate || spec.zero) {
-        return Fail();
-    }
-
     if (!text.ValidateUtf8()) {
         return Fail();
     }
@@ -542,23 +503,12 @@ Result<void> AppendText(StringBuilderBase& out, StringView text, const Spec& spe
 }
 
 // bits는 single이면 float 비트, 아니면 double 비트다. 값을 부동소수점 변환 명령에 통과시키지
-// 않으므로(정수 연산만) FTZ·DAZ 환경에서도 비정규 수가 그대로 표기된다.
+// 않으므로(정수 연산만) FTZ·DAZ 환경에서도 비정규 수가 그대로 표기된다. spec은
+// IsValidBuiltinFormatSpec(Float·Double)을 통과한 값이다.
 Result<void> AppendFloating(StringBuilderBase& out, uint64 bits, bool single,
                             const Spec& spec) noexcept {
     char type = spec.type;
     const bool upper = type == 'F' || type == 'E' || type == 'G';
-    if (type != 0 && type != 'f' && type != 'F' && type != 'e' && type != 'E' && type != 'g' &&
-        type != 'G') {
-        return Fail();
-    }
-
-    if (spec.alternate) {
-        return Fail();
-    }
-
-    if (spec.precision != NoPrecision && spec.precision > MaxFloatingPrecision) {
-        return Fail();
-    }
 
     const int mantissaBits = single ? 23 : 52;
     const int exponentBits = single ? 8 : 11;
@@ -607,22 +557,19 @@ Result<void> AppendArgument(StringBuilderBase& out, const FormatArg& arg, String
         return arg.custom.format(out, arg.custom.object, specText);
     }
 
+    // spec 문법과 종류별 허용 조합은 로그 템플릿의 컴파일 타임 검증과 같은 함수로 본다.
     Spec spec;
-    if (hasSpec) {
-        auto parsed = ParseSpec(specText, spec);
-        if (!parsed) {
-            return parsed;
-        }
+    if (hasSpec && !ParseFormatSpec(specText, spec)) {
+        return Fail();
+    }
+
+    if (!IsValidBuiltinFormatSpec(arg.kind, spec)) {
+        return Fail();
     }
 
     switch (arg.kind) {
     case FormatArg::Kind::Bool:
         if (spec.type == 0 || spec.type == 's') {
-            // C++ 표준 format처럼 bool·char의 정밀도는 받지 않는다.
-            if (spec.precision != NoPrecision) {
-                return Fail();
-            }
-
             return AppendText(out, arg.boolean ? "true" : "false", spec);
         }
 
@@ -630,7 +577,7 @@ Result<void> AppendArgument(StringBuilderBase& out, const FormatArg& arg, String
     case FormatArg::Kind::Char: {
         const auto code = static_cast<unsigned char>(arg.character);
         if (spec.type == 0 || spec.type == 'c') {
-            if (code >= 0x80 || spec.precision != NoPrecision) {
+            if (code >= 0x80) {
                 return Fail(); // UTF-8 byte 하나는 문자가 아니다
             }
 
@@ -655,10 +602,6 @@ Result<void> AppendArgument(StringBuilderBase& out, const FormatArg& arg, String
     case FormatArg::Kind::NullText:
         return Fail();
     case FormatArg::Kind::Pointer: {
-        if ((spec.type != 0 && spec.type != 'p') || spec.sign != 0 || spec.alternate) {
-            return Fail();
-        }
-
         Spec hex = spec;
         hex.type = 'x';
         hex.alternate = true;
@@ -673,109 +616,32 @@ Result<void> AppendArgument(StringBuilderBase& out, const FormatArg& arg, String
 }
 
 // format을 해석해 target에 붙인다. 실패하면 target에 일부가 남을 수 있으며 되돌리는 것은 호출자다.
+// 문법은 로그 템플릿과 같은 FormatParser가 해석한다(이름 자리는 받지 않는다).
 Result<void> Render(StringBuilderBase& target, StringView format,
                     Span<const FormatArg> args) noexcept {
-    const char* text = format.Data();
-    const usize bytes = format.ByteCount();
-    usize next = 0;
-    bool automatic = false;
-    bool manual = false;
-    usize index = 0;
-    while (index < bytes) {
-        const char character = text[index];
-
-        // 일반 문자열 구간. 중괄호는 ASCII이므로 이 구간도 유효한 UTF-8이다.
-        if (character != '{' && character != '}') {
-            usize end = index;
-            while (end < bytes && text[end] != '{' && text[end] != '}') {
-                ++end;
-            }
-
-            auto appended = target.TryAppend(StringView(text + index, end - index));
+    FormatParser parser(format, false);
+    FormatToken token;
+    while (parser.Next(token)) {
+        if (token.kind == FormatTokenKind::Literal) {
+            auto appended = target.TryAppend(token.text);
             if (!appended) {
                 return appended;
             }
 
-            index = end;
             continue;
         }
 
-        // "}}"는 '}' 문자다. 짝 없는 '}'는 오류다.
-        if (character == '}') {
-            if (index + 1 >= bytes || text[index + 1] != '}') {
-                return Fail();
-            }
-
-            auto appended = target.TryAppendAscii('}');
-            if (!appended) {
-                return appended;
-            }
-
-            index += 2;
-            continue;
-        }
-
-        // "{{"는 '{' 문자다.
-        if (index + 1 < bytes && text[index + 1] == '{') {
-            auto appended = target.TryAppendAscii('{');
-            if (!appended) {
-                return appended;
-            }
-
-            index += 2;
-            continue;
-        }
-
-        // 치환 필드: '{' [arg-id] [':' spec] '}'
-        ++index;
-        usize argument = 0;
-        if (index < bytes && text[index] >= '0' && text[index] <= '9') {
-            if (automatic) {
-                return Fail();
-            }
-
-            manual = true;
-            if (text[index] == '0' && index + 1 < bytes && text[index + 1] >= '0' &&
-                text[index + 1] <= '9') {
-                return Fail(); // 앞자리 0은 받지 않는다
-            }
-
-            if (!ParseNumber(text, bytes, index, argument)) {
-                return Fail();
-            }
-        } else {
-            if (manual) {
-                return Fail();
-            }
-
-            automatic = true;
-            argument = next++;
-        }
-
-        bool hasSpec = false;
-        usize specStart = index;
-        if (index < bytes && text[index] == ':') {
-            hasSpec = true;
-            specStart = ++index;
-            while (index < bytes && text[index] != '}' && text[index] != '{') {
-                ++index;
-            }
-        }
-
-        if (index >= bytes || text[index] != '}' || argument >= args.Size()) {
+        if (token.argument >= args.Size()) {
             return Fail();
         }
 
-        auto appended = AppendArgument(target, args[argument],
-                                       StringView(text + specStart, index - specStart), hasSpec);
+        auto appended = AppendArgument(target, args[token.argument], token.spec, token.hasSpec);
         if (!appended) {
             return appended;
         }
-
-        ++index;
     }
 
-    return Result<void>::Success();
+    return parser.Error() == FormatParseError::None ? Result<void>::Success() : Fail();
 }
 
 } // namespace
@@ -796,7 +662,8 @@ Result<void> FormatTo(StringBuilderBase& out, StringView format,
         }
     }
 
-    if (aliased) {
+    // 잘림 모드는 저장소가 움직이지 않으므로 별칭이어도 바로 쓴다(임시 builder는 할당할 수 있다).
+    if (aliased && !out.truncating_) {
         StringBuilder<256> scratch(out.GetAllocator());
         auto rendered = Render(scratch, format, args);
         if (!rendered) {
@@ -806,16 +673,67 @@ Result<void> FormatTo(StringBuilderBase& out, StringView format,
         return out.AppendRaw(scratch.data_, scratch.size_);
     }
 
-    // 보통은 out에 바로 쓰고, 실패하면 호출 전 길이로 되돌린다(추가 할당 없음).
+    // 보통은 out에 바로 쓰고, 실패하면 호출 전 길이와 잘림 표시로 되돌린다(추가 할당 없음).
     const usize start = out.size_;
+    const bool truncated = out.truncated_;
     auto rendered = Render(out, format, args);
     if (!rendered) {
         out.Truncate(start);
+        out.truncated_ = truncated;
     }
 
     return rendered;
 }
 
+Result<void> AppendFormatArgument(StringBuilderBase& out, const FormatArg& arg, StringView spec,
+                                  bool hasSpec) noexcept {
+    return AppendArgument(out, arg, spec, hasSpec);
+}
+
+namespace {
+
+// 거절한 할당 요청 수다. 시험이 무할당을 확인하는 용도라 relaxed로 센다.
+uint64 refusedAllocations = 0;
+
+} // namespace
+
+Result<void*> RefusingAllocator::Allocate(usize, usize, uint32) noexcept {
+    (void)platform::AtomicFetchAdd<platform::MemoryOrder::Relaxed>(&refusedAllocations, 1u);
+    return Result<void*>::Failure(ErrorCode::OutOfMemory);
+}
+
+Result<void> RefusingAllocator::Deallocate(void* address) noexcept {
+    // 준 적이 없으므로 null이 아닌 주소는 받을 수 없다.
+    return address == nullptr ? Result<void>::Success()
+                              : Result<void>::Failure(ErrorCode::InvalidArgument);
+}
+
+uint64 FixedStringBuilderAllocationAttempts() noexcept {
+    return platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&refusedAllocations);
+}
+
+RefusingAllocator& FixedStringBuilderAllocator() noexcept {
+    static RefusingAllocator allocator;
+    return allocator;
+}
+
 } // namespace detail
+
+namespace {
+
+char* FixedBufferData(Span<char> buffer) noexcept {
+    if (buffer.Size() == 0) {
+        platform::Fatal("FixedStringBuilder requires at least one byte for the terminating NUL");
+    }
+
+    return buffer.Data();
+}
+
+} // namespace
+
+FixedStringBuilder::FixedStringBuilder(Span<char> buffer) noexcept
+    : StringBuilderBase(detail::FixedStringBuilderAllocator(), FixedBufferData(buffer),
+                        buffer.Size() == 0 ? 0 : buffer.Size() - 1, true) {
+}
 
 } // namespace rocks
