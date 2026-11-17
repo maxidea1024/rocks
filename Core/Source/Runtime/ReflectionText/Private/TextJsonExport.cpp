@@ -35,6 +35,44 @@ Result<void> JsonPathBuilder::SetKey(NamePool* names, Allocator& allocator,
     return Result<void>::Success();
 }
 
+Result<void> JsonPathBuilder::Assign(PropertyPath path, Allocator& allocator) noexcept {
+    count_ = 0;
+    keys_.Clear();
+    wires_.Clear();
+    if (path.steps.Size() > MaxPropertyPathSteps) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (auto reserved = keys_.TryReserve(path.keys.Size()); !reserved) {
+        return reserved;
+    }
+
+    for (usize index = 0; index < path.keys.Size(); ++index) {
+        Array<uint8> wire(allocator);
+        Result<void> copied = wire.TryAppend(path.keys[index].wire);
+        if (copied) {
+            copied = wires_.TryPushBack(Move(wire));
+        }
+
+        if (!copied) {
+            wires_.Clear();
+            return copied;
+        }
+    }
+
+    // wire는 옮겨도 버퍼가 그대로라 view가 유효하다(용량은 위에서 잡았다).
+    for (usize index = 0; index < path.keys.Size(); ++index) {
+        (void)keys_.TryPushBack(PathKey{path.keys[index].kind, wires_[index].View()});
+    }
+
+    for (usize index = 0; index < path.steps.Size(); ++index) {
+        steps_[index] = path.steps[index];
+    }
+
+    count_ = path.steps.Size();
+    return Result<void>::Success();
+}
+
 } // namespace detail
 
 namespace {

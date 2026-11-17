@@ -79,10 +79,25 @@ public:
     //   }
     void ResetToDefault() noexcept;
 
-    // staged 객체(또는 그 상자)에서 분리한 값인지다. 그런 상자 위의 경로 쓰기는 ReadOnly를 막지
-    // 않는다(staged 객체 대상의 ReadOnly 허용 — Docs/Design/ReflectionExtensions.ko.md 10.2절).
-    bool IsFromStaged() const noexcept {
-        return fromStaged_;
+    // 이 상자 위의 경로 쓰기가 ReadOnly를 막지 않는지다. staged 객체(또는 그 상자)에서 분리한
+    // 상자(staged 객체 대상의 ReadOnly 허용 — Docs/Design/ReflectionExtensions.ko.md 10.2절)와
+    // AcceptReadOnlyWrites를 부른 상자가 참이다. 상자에서 다시 분리한 상자는 이 값을 물려받는다.
+    bool AcceptsReadOnlyWrites() const noexcept {
+        return acceptsReadOnly_;
+    }
+
+    // 이 상자 위의 경로 쓰기가 ReadOnly를 막지 않게 한다(Reset까지). 상자는 사본이므로 대상은
+    // 바뀌지 않는다 — 게시(PathPrepareAttach)는 플래그를 보지 않으므로, 호출자가 게시 전에 ReadOnly
+    // 자리의 내용이 원래 값과 같은지 확인해야 한다(리플렉션 B9i 대입 묶음은 ReadOnly 자리의 대입을
+    // 상자에 적용한 뒤 호출 끝에 지금 값과 대조하고, 다르면 진단 ReadOnly로 게시를 막는다 —
+    // Docs/Design/ReflectionExtensions.ko.md 10.2절 "리뷰 반영에서 정한 점"). 빈 상자에도 부를 수
+    // 있다(다음 PathDetach가 덮어쓴다).
+    //
+    // 사용 예:
+    //   box.AcceptReadOnlyWrites();
+    //   auto written = PathWrite(registry, access, PathTarget::Value(box), path.View(), value);
+    void AcceptReadOnlyWrites() noexcept {
+        acceptsReadOnly_ = true;
     }
 
 private:
@@ -97,7 +112,7 @@ private:
     TypeLease lease_;
     const FieldSchema* field_ = nullptr;
     uint32 effectiveFlags_ = 0;
-    bool fromStaged_ = false;
+    bool acceptsReadOnly_ = false;
     const EnumSchema* enumeration_ = nullptr;
     const EnumSchema* keyEnumeration_ = nullptr;
     StructView target_{};

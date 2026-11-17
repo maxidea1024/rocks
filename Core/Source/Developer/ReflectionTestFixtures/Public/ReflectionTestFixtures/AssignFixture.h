@@ -111,4 +111,39 @@ struct AssignHolder final : Object {
     ROCKS_PROPERTY() AssignBundle bundle;
 };
 
+// struct Map을 담은 struct다(JSON import MergeByKey가 준비 상태를 보는지 — 리플렉션 B9i 리뷰 반영).
+ROCKS_STRUCT()
+struct AssignShelf {
+    explicit AssignShelf(Allocator& allocator) noexcept : byKey(allocator) {
+    }
+
+    ROCKS_PROPERTY() OrderedMap<String, AssignPoint> byKey;
+};
+
+// 통째 값 대입의 fixture다(리플렉션 B9i 리뷰 반영): ReadOnly 통째 값(목록·항목 목록·정적
+// 배열·Optional·struct 원소 배열·struct Map — export → 같은 객체 import 왕복이 무동작인지),
+// Deprecated 클래스를 담을 수 있는 ClassRef 컨테이너, struct Map을 담은 struct의 배열·Optional.
+ROCKS_CLASS()
+struct AssignWholeHolder final : Object {
+    explicit AssignWholeHolder(Allocator& allocator) noexcept
+        : numbers(allocator), tags(allocator), scores(allocator), points(allocator),
+          byKey(allocator), kinds(allocator), kindSet(allocator), kindMap(allocator),
+          shelves(allocator) {
+    }
+
+    ROCKS_PROPERTY(ReadOnly) Array<int32> numbers;
+    ROCKS_PROPERTY(ReadOnly) OrderedSet<String> tags;
+    ROCKS_PROPERTY(ReadOnly) OrderedMap<String, int32> scores;
+    ROCKS_PROPERTY(ReadOnly) int32 pair[2] = {};
+    ROCKS_PROPERTY(ReadOnly) Optional<int32> limit;
+    ROCKS_PROPERTY(ReadOnly) Optional<AssignPoint> anchor;
+    ROCKS_PROPERTY(ReadOnly) Array<AssignPoint> points;
+    ROCKS_PROPERTY(ReadOnly) OrderedMap<String, AssignPoint> byKey;
+    ROCKS_PROPERTY() Array<ClassRef<AssignKindBase>> kinds;
+    ROCKS_PROPERTY() OrderedSet<ClassRef<AssignKindBase>> kindSet;
+    ROCKS_PROPERTY() OrderedMap<String, ClassRef<AssignKindBase>> kindMap;
+    ROCKS_PROPERTY() Array<AssignShelf> shelves;
+    ROCKS_PROPERTY() Optional<AssignShelf> spare;
+};
+
 } // namespace rocks::reflection_fixture

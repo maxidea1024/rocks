@@ -148,17 +148,18 @@ TEST(TextAssign_CollectsErrorsAndKeepsSameValues) {
     auto prepared = fixture.Prepare(object, inputs);
     CHECK(ErrorOf(prepared) == ErrorCode::InvalidArgument);
     // 참조 struct·정적 배열 원소의 `{}`는 멤버마다 나뉘어 받는다(리플렉션 B9i3c3) — 빈
-    // StructRefArray의 원소는 범위 밖이다.
+    // StructRefArray의 원소는 범위 밖이다. 값 단위의 ReadOnly 자리는 호출 끝에 대조하므로 그
+    // 진단은 맨 뒤에 단위 순서로 온다(리플렉션 B9i 리뷰 반영).
     const TextDiagnosticCode codes[] = {TextDiagnosticCode::DuplicateAssignment,
                                         TextDiagnosticCode::UnknownProperty,
                                         TextDiagnosticCode::InvalidValue,
-                                        TextDiagnosticCode::ReadOnly,
                                         TextDiagnosticCode::OutOfRange,
                                         TextDiagnosticCode::InvalidValue,
                                         TextDiagnosticCode::InvalidValue,
                                         TextDiagnosticCode::InvalidValue,
+                                        TextDiagnosticCode::ReadOnly,
                                         TextDiagnosticCode::ReadOnly};
-    const uint32 sources[] = {1, 2, 3, 4, 6, 8, 9, 10, 11};
+    const uint32 sources[] = {1, 2, 3, 6, 8, 9, 10, 4, 11};
     REQUIRE(fixture.diagnostics.Count() == 9);
     for (usize index = 0; index < 9; ++index) {
         CHECK(fixture.diagnostics.Get(index).code == codes[index]);

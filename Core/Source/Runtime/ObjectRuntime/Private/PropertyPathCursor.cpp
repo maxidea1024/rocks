@@ -21,7 +21,7 @@ PathCursor::PathCursor(ObjectRegistry& registry, const ObjectAccessContext& acce
 
 bool PathCursor::AcceptsReadOnlyWrites() const noexcept {
     return root_ == PathTarget::Kind::Staged ||
-           (root_ == PathTarget::Kind::Detached && rootBox_->fromStaged_);
+           (root_ == PathTarget::Kind::Detached && rootBox_->acceptsReadOnly_);
 }
 
 Allocator& PathCursor::ValueAllocator() const noexcept {

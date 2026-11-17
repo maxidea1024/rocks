@@ -181,9 +181,11 @@ Result<void> Importer::Members(const SchemaScope& scope, uint32 flags, JsonValue
         }
 
         if (seen[found]) {
-            if (path.Push(fields[found].id)) {
-                result = Report(TextDiagnosticCode::DuplicateKey, value,
-                                "the same property is given twice (keys ignore case)");
+            // 경로가 깊이 한계면 바깥 경로로 보고한다(진단을 빠뜨리지 않는다).
+            const bool pushed = path.Push(fields[found].id);
+            result = Report(TextDiagnosticCode::DuplicateKey, value,
+                            "the same property is given twice (keys ignore case)");
+            if (pushed) {
                 path.Pop();
             }
 
@@ -475,9 +477,9 @@ Result<void> Importer::Entries(const TextSlot& slot, JsonValue value) noexcept {
             if (!structValue) {
                 result = ScalarAt(entrySlot, item);
             } else if (merge) {
-                // 있던 항목은 멤버 병합, 없던 항목은 기본값 뒤 멤버 병합이다.
-                auto present = PathContains(state.target.Registry(), state.target.Access(),
-                                            state.Root(), path.View());
+                // 있던 항목은 멤버 병합, 없던 항목은 기본값 뒤 멤버 병합이다. 있는지는 준비
+                // 상태(같은 import의 앞 대입이 바꾼 상자)로 본다(리플렉션 B9i 리뷰 반영).
+                auto present = detail::PreparedContains(state, path.View());
                 if (!present) {
                     result = Result<void>::Failure(present.Error());
                 } else {
@@ -613,7 +615,12 @@ Result<bool> Importer::FlagNames(const TextScalarType& type, JsonValue value, St
             break;
         }
 
-        Result<void> appended = index == 0 ? Result<void>::Success() : joined.TryAppend("+");
+        // 입력 byte는 이름 문자열만 센다(이어 붙이는 `+`는 입력이 아니다 — 리플렉션 B9i 리뷰 반영).
+        Result<void> appended = Context().ChargeInput(text.ByteCount());
+        if (appended && index != 0) {
+            appended = joined.TryAppend("+");
+        }
+
         if (appended) {
             appended = joined.TryAppend(text);
         }
@@ -629,13 +636,26 @@ Result<bool> Importer::FlagNames(const TextScalarType& type, JsonValue value, St
         return result;
     }
 
-    return ParseTextScalar(Context(), type, joined.View(), source, pathText, out);
+    detail::ScalarFailure failure;
+    auto parsed = detail::ParseScalarCore(Context(), type, joined.View(), out, failure);
+    if (!parsed || parsed.Value()) {
+        return parsed;
+    }
+
+    return detail::Report(Context(), failure.code, source, pathText, failure.message);
 }
 
 Result<void> Importer::Assign(AssignmentKind kind, const TextSlot& slot, JsonValue at,
                               TextValue* value) noexcept {
     if (Stopped()) {
         return Result<void>::Success();
+    }
+
+    // 대입 하나마다 작업량 1 byte를 청구한다: 문자열 byte가 없는 값(`{}`·bool·null·struct 원소의
+    // 펼침)도 maxInputBytes 안에서 세어 작은 입력이 큰 작업을 만들지 않게 한다(리플렉션 B9i 리뷰
+    // 반영).
+    if (auto charged = Context().ChargeInput(1); !charged) {
+        return charged;
     }
 
     String text(state.allocator);
@@ -675,6 +695,10 @@ Result<PreparedAssignments> ImportJson(JsonValue root, const AssignmentTarget& t
                                                               : SchemaScope{&type, StructView{}};
     if (auto read = importer.Members(scope, 0, root); !read) {
         return ImportResult::Failure(read.Error());
+    }
+
+    if (auto checked = detail::CheckReadOnlyUnits(state); !checked) {
+        return ImportResult::Failure(checked.Error());
     }
 
     if (state.failed) {

@@ -41,13 +41,6 @@ Result<void> AssignReference(AssignmentState& state, PropertyPath path, ObjectHa
                         "property is read-only");
     }
 
-    if (pinValue) {
-        auto pinned = PinReferences(state, *pinValue, source, pathText);
-        if (!pinned || !pinned.Value()) {
-            return pinned ? Result<void>::Success() : Result<void>::Failure(pinned.Error());
-        }
-    }
-
     FieldValue value(state.allocator);
     value.kind = ValueKind::ObjectReference;
     value.reference = target;
@@ -70,11 +63,32 @@ Result<void> AssignReference(AssignmentState& state, PropertyPath path, ObjectHa
         }
     }
 
+    // 앞 단위의 새 대상은 이제 쓰이지 않으므로 그 고정을 놓고(Publish의 검사에서도 빠진다 —
+    // 리플렉션 B9i 리뷰 반영) 새 대상을 이 단위의 고정으로 잡는다.
+    if (existing) {
+        ReleasePins(state, existing);
+    }
+
+    if (pinValue) {
+        auto pinned = PinReferences(state, *pinValue, source, pathText, unit);
+        if (!pinned || !pinned.Value()) {
+            if (made) {
+                ReleasePins(state, unit);
+            }
+
+            return pinned ? Result<void>::Success() : Result<void>::Failure(pinned.Error());
+        }
+    }
+
     // 앞 단위가 있으면 자리는 그대로이고 새 대상만 다시 검증한다(찾은 자리는 버린다).
     PreparedReference scratch;
     PreparedReference& located = made ? unit->prepared : scratch;
     if (auto checked = PathPrepareReference(registry, access, root, path, value, located, &failure);
         !checked) {
+        if (made) {
+            ReleasePins(state, unit);
+        }
+
         return ReportPathFailure(state, checked.Error(), failure, source, pathText);
     }
 

@@ -18,8 +18,9 @@
 //   - Publish는 바뀐 단위를 원래 자리와 무할당으로 맞바꾼다. 살아 있는 객체는 묶음 게시
 //     구간(ObjectRegistry::BeginBatchPublish) 안에서 한 번에 게시하므로, 실패는 모두 구간에
 //     들어가기 전에 나고 그때 객체는 바뀌지 않는다.
-//   - 강한 참조(ObjectRef 필드·참조 멤버·Registry 컨테이너)에 닿는 대입은 아직 받지 않는다
-//     (진단 Unsupported — 참조 단위는 B9i3c2).
+//   - 강한 참조는 간선 변경 단위로 받는다: 단일 ObjectRef 위치는 참조 단위(B9i3c2),
+//     ObjectRefArray·ObjectRefMap은 컨테이너 단위(B9i3c3), 참조 struct `{}`는 멤버마다 나누고,
+//     StructRefArray는 원소 지우기·비우기만 받는다(B9i3c4 — 원소 추가는 아직 없다).
 namespace rocks {
 
 class ConstructionContext;
@@ -191,8 +192,9 @@ private:
 // 스레드(대상 Registry의 소유 스레드)에서 쓴다.
 //
 // 수명: PrepareAssignments에 준 TextDiagnostics·options.resolver·names, 대상(AssignmentTarget이
-// 가리키는 것)은 이 객체(와 Publish 결과)보다 오래 살아야 한다. 묶음은 새로 가리키는 Weak 대상을
-// RootRef로 고정하고 Publish가 끝나거나 소멸할 때 놓는다.
+// 가리키는 것)은 이 객체(와 Publish 결과)보다 오래 살아야 한다. 묶음은 새로 가리키는 Hard·Weak
+// 대상을 RootRef로 고정하고 Publish가 끝나거나 소멸할 때 놓는다(그 대상을 담은 단위를 버리면 — 지운
+// 원소 안 단위, 새 대상으로 바뀐 참조 단위 — 그때 놓는다).
 //
 // 사용 예(A5 — 같은 명령에서 SRGB를 주지 않았으면 SRGB=off를 함께 저장):
 //   const TextAssignment inputs[] = {{AssignmentKind::Set, "CompressionSettings", "Normal", 0}};
@@ -219,9 +221,11 @@ public:
 
     // 대입 하나를 덧붙인다(앞 대입이 만든 상태 위에서 해석 — PrepareAssignments의 대입과 같은
     // 규칙, resolver도 여기서 부른다). 진단은 PrepareAssignments에 준 TextDiagnostics로 간다.
-    // 오류: 이미 게시했거나 앞 Append가 진단을 남긴 묶음은 InvalidArgument, 이 대입이 진단을
-    // 남기면 InvalidArgument(그 뒤 묶음은 게시할 수 없다 — 대입이 사본에 일부만 적용됐을 수 있다),
-    // 그 밖은 PrepareAssignments의 호출 오류.
+    // ReadOnly 자리의 대조(PrepareAssignments 참고)는 이 Append 끝에 한다.
+    // 오류: 이미 게시했거나 앞 Append가 실패한 묶음은 InvalidArgument, 이 대입이 진단을 남기면
+    // InvalidArgument, 그 밖은 PrepareAssignments의 호출 오류(OutOfMemory·Busy 등). 어떤 실패든 그
+    // 뒤 묶음은 게시할 수 없다(Append·Publish 모두 InvalidArgument — 대입이 사본에 일부만 적용됐을
+    // 수 있다). 묶음을 버리고 다시 준비한다.
     Result<void> Append(const TextAssignment& assignment) noexcept;
 
     // override 단위로 정규화한 경로다(중복 없음 — 선택자 없는 필드 경로): 경로를 위에서부터 보아
@@ -236,13 +240,16 @@ public:
 
     // 묶음을 한 번 게시한다(성공·실패와 무관하게 다시 부르면 InvalidArgument). 순서:
     //   1. 바뀐 단위마다 게시 자리를 찾는다(PathPrepareAttach — 대상이 죽었으면 StaleHandle 등).
-    //   2. Live: owner 읽기 Borrow → BeginBatchPublish(Prepare 때 읽은 변경 표지, 고정한 Weak
-    //      대상) — 그 사이 owner가 Registry API로 바뀌었으면 Busy, Discard면 StaleHandle. 구간
-    //      안에서 단위를 무할당으로 맞바꾸고 End가 표지를 올린다. Staged·Value: 단위를
-    //      맞바꾼다(Staged는 트랜잭션이 끝났으면 그 오류).
-    //   3. Weak 대상 고정을 놓는다.
-    // 실패하면 대상은 바뀌지 않는다(Staged는 첫 단위 전에 실패한다). 성공하면 override 경로와 옛
-    // 값을 돌려준다. 오류: 위 단계의 오류, 앞 Append가 진단을 남긴 묶음은 InvalidArgument.
+    //   2. Live: owner 읽기 Borrow → BeginBatchPublish(Prepare 때 읽은 변경 표지, 게시하는 단위가
+    //      고정한 Hard·Weak 대상, 참조 단위의 새 대상, 컨테이너 새 내용의 대상) — 그 사이 owner가
+    //      Registry API로 바뀌었으면 Busy, owner나 확인할 대상이 Discard면 StaleHandle. 구간 안에서
+    //      단위를 무할당으로 맞바꾸고 End가 표지를 올린다. Staged·Value: 값 단위 → 참조 → 컨테이너
+    //      → 원소 압축 순서로 게시한다(Staged는 트랜잭션 쓰기의 오류).
+    //   3. 대상 고정을 놓는다.
+    // Live·Value는 실패하면 대상이 바뀌지 않는다. Staged는 값 단위 게시가 실패하지 않지만 그 뒤
+    // 참조·컨테이너·원소 게시가 실패할 수 있다 — 그때 원자성은 호출자의 트랜잭션 rollback이 준다.
+    // 성공하면 override 경로와 옛 값을 돌려준다. 오류: 위 단계의 오류, 앞 Append가 실패한 묶음은
+    // InvalidArgument.
     Result<PublishedAssignments> Publish() noexcept;
 
 private:
@@ -261,10 +268,16 @@ private:
 //     Unsupported), Set 원소 자리는 빈 값이면 원소 넣기(값이 있으면 InvalidValue).
 //   - Unset: Optional 필드만(아니면 InvalidValue). Erase: Map 항목·Set 원소·Array 원소(아니면
 //     InvalidValue, StaticArray 원소는 Unsupported).
-//   - 지금 값과 같은 단일 값 쓰기는 무동작이다(override 경로에는 넣는다). ReadOnly 자리(경로
-//     어느 단계든)는 Staged면 쓰고, 아니면 값이 같은 단일 값 쓰기만 무동작으로 받고(override 경로에
-//     넣지 않는다) 그 밖은 ReadOnly 진단이다. Deprecated 클래스 ClassRef도 같은 값은 무동작이고
-//     다르면 InvalidValue다.
+//   - 지금 값과 같은 단일 값 쓰기와 목록·항목 목록(Array·StaticArray·Set·Map 통째 — 원소·키·값과
+//     순서가 같다)은 무동작이다(override 경로에는 넣는다). Deprecated 클래스 ClassRef(단일 값과
+//     Array·Set·Map의 원소·값)도 같은 값은 무동작이고 다르면 InvalidValue다.
+//   - ReadOnly 자리(경로 어느 단계든)는 Staged면 쓴다. 아니면 값 단위의 ReadOnly 자리는 대입을
+//     사본에 적용하되 override 경로에 넣지 않고, 호출(이 함수·Append·ImportJson) 끝에 그
+//     자리(경로가 처음 ReadOnly가 되는 필드·멤버 통째)의 사본 값을 지금 값과 깊게 대조해 다르면
+//     ReadOnly 진단이다 — 그래서 `opt={}` 뒤 `opt.x=5`처럼 여러 대입이 함께 지금 값을 다시 만드는
+//     왕복(export → 같은 객체 import)은 무동작이다. 강한 참조 자리(참조·컨테이너 단위)의 ReadOnly는
+//     같은 값만 무동작이고 그 밖은 바로 ReadOnly 진단이다.
+//   - 같은 경로 두 번 검사는 경로 해시 색인이다(대입 수에 선형).
 // 진단은 한도(options.maxDiagnostics) 안에서 모두 모은다(한 대입의 진단 뒤에도 다음 대입을 본다).
 // options.names가 없으면 대상 Registry의 pool을 쓴다.
 //
