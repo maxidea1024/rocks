@@ -6,7 +6,8 @@
 namespace rocks {
 
 // 3차원 벡터 값 타입이다. 위치·방향·크기를 모두 표현하며 의미 구분은 사용하는 API가 정한다.
-// 축 규약: 오른손 좌표계, +X 전방, +Y 왼쪽, +Z 위. Cross(UnitX, UnitY) = UnitZ다.
+// 축 규약은 UE 5.8과 같다: 왼손 좌표계, +X 전방, +Y 오른쪽, +Z 위, 길이는 cm(MathUtility.h). 외적은
+// 표준식이라 Cross(UnitX, UnitY) = UnitZ, 즉 Cross(Forward, Right) = Up이다.
 // Vec3(float)는 지역·렌더 계산, Vec3d(double)는 월드 위치 등 큰 좌표에 사용한다. 두 정밀도의
 // 변환은 명시적 생성자로만 수행한다. 메모리 배치(x, y, z, padding 없음)를 파일·네트워크 형식으로
 // 직접 쓰지 않는다.
@@ -59,7 +60,10 @@ struct Vector3 {
         return Vector3(static_cast<T>(0), static_cast<T>(0), static_cast<T>(1));
     }
 
-    // Rocks 축 이름이다. UE(+Y 오른쪽, 왼손)와 Right/Left 부호가 다르므로 변환 경계에서 주의한다.
+    // 방향 이름이다. 값은 UE FVector::ForwardVector·BackwardVector·RightVector·LeftVector·UpVector·
+    // DownVector와 같다(UE Vector.h:84-100, UnrealMath.cpp:35-51): Forward (1,0,0), Backward
+    // (-1,0,0), Right (0,1,0), Left (0,-1,0), Up (0,0,1), Down (0,0,-1).
+    //   const Vec3d step = Vec3d::Right() * 50.0; // 오른쪽 50 cm
     static constexpr Vector3 Forward() noexcept {
         return UnitX();
     }
@@ -68,11 +72,11 @@ struct Vector3 {
         return -UnitX();
     }
 
-    static constexpr Vector3 Left() noexcept {
+    static constexpr Vector3 Right() noexcept {
         return UnitY();
     }
 
-    static constexpr Vector3 Right() noexcept {
+    static constexpr Vector3 Left() noexcept {
         return -UnitY();
     }
 
@@ -255,7 +259,10 @@ constexpr T Dot(const Vector3<T>& a, const Vector3<T>& b) noexcept {
     return xy + zz;
 }
 
-// 오른손 외적이다. Cross(Forward, Left) = Up.
+// 외적 a × b = (a.y·b.z − a.z·b.y, a.z·b.x − a.x·b.z, a.x·b.y − a.y·b.x)다(UE operator^와 같은 식,
+// Vector.h:1521-1530). 축 이름으로 Cross(Forward, Right) = Up, Cross(Right, Forward) = Down,
+// Cross(Right, Up) = Forward, Cross(Up, Forward) = Right다. 좌표계가 왼손이므로 결과 방향은 왼손
+// 법칙을 따른다(식은 좌우수와 무관하고 축 이름이 정한다).
 template <typename T>
 constexpr Vector3<T> Cross(const Vector3<T>& a, const Vector3<T>& b) noexcept {
     const T yz = a.y * b.z;

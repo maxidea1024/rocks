@@ -4,10 +4,18 @@
 
 namespace rocks {
 
-// 회전 quaternion이다. 성분 순서는 (x, y, z, w)이며 w가 scalar 부분이다(UE FQuat와 같은 순서).
-// 회전 방향은 오른손 법칙이다: 축을 향해 내려다볼 때 양의 각은 반시계 방향이다.
-// 예: Z축 +90도 회전은 Forward(+X)를 Left(+Y)로 보낸다.
-// 합성 a * b는 b를 먼저, a를 나중에 적용한다(column vector·world = parent * local과 같은 방향).
+// 회전 quaternion이다. 성분 순서는 (x, y, z, w)이며 w가 scalar 부분이다(UE FQuat와 같은
+// 순서, Quat.h:49-58). 축-각 생성·곱·RotateVector 식이 UE와 같다(Quat.h:912-921·:1236-1258,
+// UnrealMathFPU.h:1456-1459).
+// 양의 각은 UE와 같이 왼손 회전이다(UE Rotator.h:31 "UE Quat always considers a positive angle
+// to be a left-handed rotation"). 축의 + 끝에서 원점을 내려다볼 때 시계 방향이다.
+// 축 이름으로는
+//   Q(+Z, +90°): Forward(+X) → Right(+Y)
+//   Q(+X, +90°): Right(+Y) → Up(+Z)
+//   Q(+Y, +90°): Up(+Z) → Forward(+X)
+// 이다. 성분 식은 표준 Hamilton 식 그대로이며 좌우수는 축 이름(+Y = 오른쪽)이 정한다.
+// 합성 a * b는 b를 먼저, a를 나중에 적용한다(UE FQuat와 같다, Quat.h:29-31). UE FTransform·
+// FMatrix 곱은 왼쪽 피연산자를 먼저 적용해 순서가 반대다.
 // 회전 함수는 단위 quaternion을 전제한다. 외부 입력은 TryNormalize로 검증한 뒤 사용한다.
 // q와 -q는 같은 회전이지만 operator==와 Equals는 성분 비교이므로 다르다. 회전 동일성은
 // AngularDistance로 판단한다. 기본값은 항등 회전이다.
@@ -37,8 +45,9 @@ struct Quaternion {
         return Quaternion();
     }
 
-    // axis를 정규화한 뒤 radians만큼의 회전을 만든다. 실패(InvalidArgument): axis가 영벡터·
-    // 유한하지 않음, radians가 유한하지 않음.
+    // axis를 정규화한 뒤 radians(라디안, UE TQuat(Axis, AngleRad)와 같은 단위)만큼의 회전을 만든다.
+    // 양의 각의 방향은 타입 주석의 왼손 규약이다. 실패(InvalidArgument): axis가 영벡터·유한하지
+    // 않음, radians가 유한하지 않음.
     static Result<Quaternion> TryFromAxisAngle(const Vector3<T>& axis, T radians) noexcept {
         auto unitAxis = axis.TryNormalize();
         if (!unitAxis || !math::IsFinite(radians)) {
@@ -214,17 +223,34 @@ struct Quaternion {
         return Conjugate().RotateVector(vector);
     }
 
-    // 회전된 Rocks 기준 축이다.
-    Vector3<T> GetForward() const noexcept {
-        return RotateVector(Vector3<T>::Forward());
+    // 회전된 기준 축이다(UE GetAxisX/Y/Z·GetForwardVector/GetRightVector/GetUpVector,
+    // Quat.h:1293-1330). GetAxisX = GetForwardVector = RotateVector(+X), GetAxisY = GetRightVector
+    // = RotateVector(+Y), GetAxisZ = GetUpVector = RotateVector(+Z). 단위 quaternion 전제다.
+    //   const Quatd turn = Quatd::FromUnitAxisAngle(Vec3d::Up(), math::HalfPi<double>);
+    //   turn.GetForwardVector(); // ≈ Right (0, 1, 0)
+    //   turn.GetRightVector();   // ≈ Backward (-1, 0, 0)
+    Vector3<T> GetAxisX() const noexcept {
+        return RotateVector(Vector3<T>::UnitX());
     }
 
-    Vector3<T> GetLeft() const noexcept {
-        return RotateVector(Vector3<T>::Left());
+    Vector3<T> GetAxisY() const noexcept {
+        return RotateVector(Vector3<T>::UnitY());
     }
 
-    Vector3<T> GetUp() const noexcept {
-        return RotateVector(Vector3<T>::Up());
+    Vector3<T> GetAxisZ() const noexcept {
+        return RotateVector(Vector3<T>::UnitZ());
+    }
+
+    Vector3<T> GetForwardVector() const noexcept {
+        return GetAxisX();
+    }
+
+    Vector3<T> GetRightVector() const noexcept {
+        return GetAxisY();
+    }
+
+    Vector3<T> GetUpVector() const noexcept {
+        return GetAxisZ();
     }
 
     // 회전 행렬(열 우선, 이동 없음)이다. 단위 quaternion 전제다.

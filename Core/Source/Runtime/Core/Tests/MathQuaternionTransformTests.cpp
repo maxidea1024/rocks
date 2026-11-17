@@ -24,12 +24,26 @@ Vec3d RandomVector(MathRandom& random, double range) {
 
 } // namespace
 
-TEST(Quaternion_AxisAngleFollowsRightHandRule) {
+TEST(Quaternion_AxisAnglePositiveAngleMatchesUnreal) {
+    // UE TQuat(Axis, AngleRad)·RotateVector(Quat.h:912-921·:1236-1249) golden(UE 식 probe): 양의
+    // 각은 왼손 회전 — Q(Z,+90°)·X = +Y(Right), Q(X,+90°)·Y = +Z(Up), Q(Y,+90°)·Z = +X(Forward).
     const Quatd yaw = Quatd::FromUnitAxisAngle(Vec3d::Up(), math::HalfPi<double>);
-    CHECK(yaw.RotateVector(Vec3d::Forward()).Equals(Vec3d::Left(), 1.0e-15));
-    CHECK(yaw.GetForward().Equals(Vec3d::Left(), 1.0e-15));
-    CHECK(yaw.GetUp().Equals(Vec3d::Up(), 1.0e-15));
-    CHECK(yaw.UnrotateVector(Vec3d::Left()).Equals(Vec3d::Forward(), 1.0e-15));
+    const Quatd roll = Quatd::FromUnitAxisAngle(Vec3d::Forward(), math::HalfPi<double>);
+    const Quatd pitch = Quatd::FromUnitAxisAngle(Vec3d::Right(), math::HalfPi<double>);
+    CHECK(yaw.RotateVector(Vec3d::Forward()).Equals(Vec3d::Right(), 1.0e-15));
+    CHECK(roll.RotateVector(Vec3d::Right()).Equals(Vec3d::Up(), 1.0e-15));
+    CHECK(pitch.RotateVector(Vec3d::Up()).Equals(Vec3d::Forward(), 1.0e-15));
+    // 축 벡터 API(UE GetAxisX/Y/Z = GetForwardVector/GetRightVector/GetUpVector).
+    CHECK(yaw.GetForwardVector().Equals(Vec3d::Right(), 1.0e-15));
+    CHECK(yaw.GetRightVector().Equals(Vec3d::Backward(), 1.0e-15));
+    CHECK(yaw.GetUpVector().Equals(Vec3d::Up(), 1.0e-15));
+    CHECK(yaw.GetAxisX() == yaw.GetForwardVector() && yaw.GetAxisY() == yaw.GetRightVector() &&
+          yaw.GetAxisZ() == yaw.GetUpVector());
+    CHECK(yaw.UnrotateVector(Vec3d::Right()).Equals(Vec3d::Forward(), 1.0e-15));
+    // 음의 각은 반대로 돈다.
+    CHECK(Quatd::FromUnitAxisAngle(Vec3d::Up(), -math::HalfPi<double>)
+              .RotateVector(Vec3d::Forward())
+              .Equals(Vec3d::Left(), 1.0e-15));
     auto created = Quat::TryFromAxisAngle(Vec3(0.0f, 0.0f, 5.0f), math::HalfPi<float>);
     REQUIRE(created);
     CHECK(created.Value().IsNormalized(1.0e-6f));
@@ -41,10 +55,11 @@ TEST(Quaternion_AxisAngleFollowsRightHandRule) {
 TEST(Quaternion_CompositionAppliesRightOperandFirst) {
     const Quatd yaw = Quatd::FromUnitAxisAngle(Vec3d::Up(), math::HalfPi<double>);
     const Quatd roll = Quatd::FromUnitAxisAngle(Vec3d::Forward(), math::HalfPi<double>);
-    // (yaw * roll): roll 먼저. Left --roll--> Up --yaw--> Up
-    CHECK((yaw * roll).RotateVector(Vec3d::Left()).Equals(Vec3d::Up(), 1.0e-15));
-    // (roll * yaw): yaw 먼저. Left --yaw--> Backward --roll--> Backward
-    CHECK((roll * yaw).RotateVector(Vec3d::Left()).Equals(Vec3d::Backward(), 1.0e-15));
+    // UE FQuat 곱과 같이 오른쪽 피연산자를 먼저 적용한다(Quat.h:29-31, UE 식 probe).
+    // (yaw * roll): roll 먼저. Right --roll--> Up --yaw--> Up
+    CHECK((yaw * roll).RotateVector(Vec3d::Right()).Equals(Vec3d::Up(), 1.0e-15));
+    // (roll * yaw): yaw 먼저. Right --yaw--> Backward --roll--> Backward
+    CHECK((roll * yaw).RotateVector(Vec3d::Right()).Equals(Vec3d::Backward(), 1.0e-15));
     // 행렬 합성과 같은 순서다.
     CHECK((yaw * roll).ToMatrix().Equals(yaw.ToMatrix() * roll.ToMatrix(), 1.0e-15));
 }
@@ -107,8 +122,8 @@ TEST(Quaternion_NormalizeInverseAndAxisAngle) {
     CHECK(!Quatd(0.0, 0.0, 0.0, 0.0).TryInverse());
     Vec3d axis;
     double angle = 0.0;
-    Quatd::FromUnitAxisAngle(Vec3d::Left(), 1.25).ToAxisAngle(axis, angle);
-    CHECK(axis.Equals(Vec3d::Left(), 1.0e-15) && Near(angle, 1.25, 1.0e-15));
+    Quatd::FromUnitAxisAngle(Vec3d::Right(), 1.25).ToAxisAngle(axis, angle);
+    CHECK(axis.Equals(Vec3d::Right(), 1.0e-15) && Near(angle, 1.25, 1.0e-15));
     // q와 -q는 같은 축·각을 낸다.
     const Quatd q = Quatd::FromUnitAxisAngle(Vec3d::Up(), 0.5);
     Quatd(-q.x, -q.y, -q.z, -q.w).ToAxisAngle(axis, angle);

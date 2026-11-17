@@ -9,7 +9,8 @@ namespace rocks {
 // 기본 기하 shape 값 타입이다. 교차·포함·거리 질의는 Core/Math/Intersection.h에 있다.
 //
 // 공통 계약
-// - 좌표계는 오른손, +X 전방, +Y 왼쪽, +Z 위이며 길이는 미터다. T는 float 또는 double이다.
+// - 좌표계는 UE와 같은 왼손 +X 전방, +Y 오른쪽, +Z 위이며 길이는 cm다(MathUtility.h).
+//   T는 float 또는 double이다.
 // - Sphere, Box, Capsule, OrientedBox는 경계를 포함하는 닫힌 solid다. 경계에 닿기만 해도
 //   포함·겹침이다. Plane, Triangle, Segment는 두께가 없는 점 집합이다.
 // - 필드는 공개되어 있고 값 생성자는 검사하지 않는다. 외부 입력은 TryMake 계열로 검증·정규화하거나
