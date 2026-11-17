@@ -31,6 +31,7 @@ namespace rocks::reflection_text {
 namespace detail {
 
 struct AssignmentState;
+struct AssignmentAccess;
 
 } // namespace detail
 
@@ -245,10 +246,7 @@ public:
     Result<PublishedAssignments> Publish() noexcept;
 
 private:
-    friend Result<PreparedAssignments> PrepareAssignments(const AssignmentTarget&,
-                                                          Span<const TextAssignment>,
-                                                          const TextCodecOptions&,
-                                                          TextDiagnostics&) noexcept;
+    friend struct detail::AssignmentAccess;
 
     UniquePtr<detail::AssignmentState> state_;
 };

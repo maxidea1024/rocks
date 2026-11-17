@@ -69,8 +69,7 @@ Result<void> Apply::Run() noexcept {
     }
 
     TextValue value(state.allocator);
-    auto parsed =
-        ParseTextValue(state.context, slot, assignment.value, source, assignment.path, value);
+    auto parsed = ReadAssignmentValue(state, slot, assignment, source, value);
     if (!parsed) {
         return Result<void>::Failure(parsed.Error());
     }
@@ -130,9 +129,28 @@ Result<void> Apply::RunSet(TextValue& value) noexcept {
                 return Changed();
             }
 
-            // Array<struct> 원소: 그 자리를 지우고 기본 원소를 넣는다.
-            if (auto removed =
-                    PathRemoveElement(Registry(), Access(), Start(), relative, nullptr, &failure);
+            // Array<struct> 원소: index가 길이면 끝에 기본 원소를 더하고(10.4절 `a[i]={}` — JSON
+            // import의 원소 펼침도 이것이다, 리플렉션 B9i4), 작으면 그 자리를 지우고 기본 원소를
+            // 넣는다.
+            PathStep arraySteps[MaxPropertyPathSteps];
+            const usize last = relative.steps.Size() - 1;
+            for (usize index = 0; index <= last; ++index) {
+                arraySteps[index] = relative.steps[index];
+            }
+
+            arraySteps[last].selector = PathSelector::None;
+            arraySteps[last].index = 0;
+            auto count = PathCount(
+                Registry(), Access(), Start(),
+                PropertyPath{Span<const PathStep>(arraySteps, last + 1), relative.keys}, &failure);
+            if (!count) {
+                return Failed(count.Error());
+            }
+
+            const bool append = relative.steps[last].index == count.Value();
+            if (auto removed = append ? Result<void>::Success()
+                                      : PathRemoveElement(Registry(), Access(), Start(), relative,
+                                                          nullptr, &failure);
                 !removed) {
                 return Failed(removed.Error());
             }

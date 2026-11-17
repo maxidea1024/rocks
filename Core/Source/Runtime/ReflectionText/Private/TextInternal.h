@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Containers/OrderedSet.h>
 #include <ReflectionText/TextValue.h>
 
 // ReflectionText 구현 안에서만 쓰는 도우미다(리플렉션 B9i3b).
@@ -34,5 +35,57 @@ bool UsesHiddenEnumerator(const EnumSchema& schema, int64 value) noexcept;
 
 // text가 ASCII 대소문자 무시로 word와 같은지다.
 bool TextEqualsIgnoringCase(StringView text, StringView word) noexcept;
+
+// 목록 안 키 중복 판정이다(Set 원소·Map 키 — 명령행 목록과 JSON 배열·객체가 같이 쓴다). Name은
+// pool 비교 규칙(Name ==), 그 밖은 값의 정규 텍스트(String은 byte 그대로)로 본다.
+class KeySet {
+public:
+    explicit KeySet(Allocator& allocator) noexcept : names_(allocator), texts_(allocator) {
+    }
+
+    // key를 더한다. 이미 있으면 false다. 오류: 할당 실패, 정규 텍스트를 쓰지 못함.
+    Result<bool> Add(TextCodecContext& context, const TextScalarType& type,
+                     const FieldValue& key) noexcept;
+
+private:
+    OrderedSet<Name> names_;
+    OrderedSet<String> texts_;
+};
+
+// 목록 하나의 원소 수 한도를 본다(options.maxElements → 필드 MaxElements → StaticArray는 정확히
+// N). 넘으면 진단(OutOfRange·InvalidValue)을 남기고 false다.
+Result<bool> CheckElementCount(TextCodecContext& context, const FieldSchema& field, usize count,
+                               TextSource source, StringView pathText) noexcept;
+
+// Map 키·Set 원소 값(value)의 경로 key wire를 wire 뒤에 붙인다(Name은 names의 표시 문자열을
+// allocator로 얻는다). 오류: AppendPathKey·Name 조회의 오류.
+Result<void> AppendValueKeyWire(NamePool* names, Allocator& allocator, const FieldValue& value,
+                                Array<uint8>& wire) noexcept;
+
+// 경로 단계 하나의 스키마 범위다: 클래스(lease)의 필드나 struct(view)의 멤버.
+struct SchemaScope {
+    const TypeLease* lease = nullptr;
+    StructView view{};
+
+    const TypeSchema& Schema() const noexcept {
+        return lease ? lease->Schema() : view.Schema();
+    }
+
+    usize FieldIndex(Guid id) const noexcept {
+        return lease ? lease->FieldIndex(id) : view.FieldIndex(id);
+    }
+
+    const EnumSchema* FieldEnum(usize index) const noexcept {
+        return lease ? lease->FieldEnum(index) : view.FieldEnum(index);
+    }
+
+    const EnumSchema* FieldKeyEnum(usize index) const noexcept {
+        return lease ? lease->FieldKeyEnum(index) : view.FieldKeyEnum(index);
+    }
+
+    StructView FieldStruct(usize index) const noexcept {
+        return lease ? lease->FieldStruct(index) : view.FieldStruct(index);
+    }
+};
 
 } // namespace rocks::reflection_text::detail

@@ -18,6 +18,12 @@ bool IsCallError(ErrorCode code) noexcept;
 Result<bool> PinReferences(AssignmentState& state, const TextValue& value, TextSource source,
                            StringView pathText) noexcept;
 
+// 대입 값을 out에 읽는다: JSON import가 미리 읽은 값(state.preparsed)이 있으면 그것을 옮기고,
+// 아니면 값 텍스트를 읽는다(ParseTextValue). false면 진단을 남겼다.
+Result<bool> ReadAssignmentValue(AssignmentState& state, const TextSlot& slot,
+                                 const TextAssignment& assignment, TextSource source,
+                                 TextValue& out) noexcept;
+
 // Map 키·Set 원소 값의 key wire를 wire 뒤에 붙인다.
 Result<void> AppendKeyWire(AssignmentState& state, const FieldValue& value,
                            Array<uint8>& wire) noexcept;

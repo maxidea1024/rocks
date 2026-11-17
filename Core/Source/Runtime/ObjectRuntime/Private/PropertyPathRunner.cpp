@@ -264,9 +264,15 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::IndexRequired);
     }
 
-    if ((operation == PathOperation::Length || operation == PathOperation::Clear) &&
+    if ((operation == PathOperation::Length || operation == PathOperation::Clear ||
+         operation == PathOperation::ReadKeys) &&
         lastSelector != PathSelector::None) {
         return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::IndexNotAllowed);
+    }
+
+    // 키 읽기(PathReadKeys — 리플렉션 B9i4)는 출력 키 목록이 있어야 한다.
+    if ((operation == PathOperation::ReadKeys) != (cursor.keys_ != nullptr)) {
+        return cursor.Fail(ErrorCode::InvalidArgument);
     }
 
     if (keyOperation && lastSelector != PathSelector::Key) {
@@ -465,6 +471,11 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
     if ((operation == PathOperation::Length || operation == PathOperation::Clear) &&
         !IsContainerKind(end.field->value.kind)) {
         return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::NotArray);
+    }
+
+    if (operation == PathOperation::ReadKeys && end.field->value.kind != ValueKind::Map &&
+        end.field->value.kind != ValueKind::Set) {
+        return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::NotKeyed);
     }
 
     // 정적 배열(리플렉션 B9g)은 길이가 N으로 고정이다: 원소 삽입·삭제·비우기는 값·쓰기 검증보다
@@ -752,7 +763,8 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         cursor.object_ = object.Value();
     }
 
-    if (operation == PathOperation::Read || operation == PathOperation::Detach) {
+    if (operation == PathOperation::Read || operation == PathOperation::Detach ||
+        operation == PathOperation::ReadKeys) {
         if (auto pinned = cursor.Pin(); !pinned) {
             return pinned;
         }
@@ -840,6 +852,15 @@ Result<usize> PathCount(ObjectRegistry& registry, const ObjectAccessContext& acc
     }
 
     return Result<usize>::Success(length);
+}
+
+Result<void> PathReadKeys(ObjectRegistry& registry, const ObjectAccessContext& access,
+                          const PathTarget& target, PropertyPath path, Array<FieldValue>& out,
+                          PropertyPathFailure* failure) noexcept {
+    detail::PathCursor cursor = PathRunner::Make(registry, access, target, PathOperation::ReadKeys,
+                                                 nullptr, nullptr, failure);
+    PathRunner::BindKeys(cursor, out);
+    return PathRunner::Run(cursor, path);
 }
 
 Result<void> PathInsertElement(ObjectRegistry& registry, const ObjectAccessContext& access,
