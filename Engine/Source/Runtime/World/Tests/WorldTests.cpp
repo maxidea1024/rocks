@@ -271,6 +271,9 @@ struct Fixture {
         desc.context = {0x574f524c44ull, context};
         desc.timeStep = {1.0 / 60.0, 0.25, 8};
         desc.subsystems = subsystems;
+        // Debug에서 GC cycle마다 Level 클러스터 장부와 소속 불변식(고아 소속)을 검증한다(GC-S7).
+        desc.objects.verifyClusterLedger = true;
+        desc.objects.verifyClusterOwnership = true;
         auto created = UniquePtr<World>::TryMake(allocator, allocator, types, desc);
         if (created) {
             world = Move(created.Value());
@@ -976,6 +979,67 @@ TEST(World_BypassedObjectDestroyIsRepairedByTick) {
     REQUIRE(world.Tick(0.016));
     CHECK(!world.HasActor(actor.Value()));
     CHECK(world.Stats().repairedTicks == 1);
+    REQUIRE(world.Shutdown());
+}
+
+// Level 클러스터(GC-S7, Docs/Design/GarbageCollectionScale.ko.md 13.3절): 리플렉션
+// Actor·Component는 Level 클러스터에 가입하고, 파괴하면 이탈해 회수된다.
+TEST(World_LevelClusterJoinsActorsAndComponents) {
+    Fixture fixture;
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    REQUIRE(world.BeginPlay());
+    const ObjectStats before = world.Objects().Stats();
+    auto actor = world.SpawnActor<Actor>();
+    REQUIRE(actor);
+    auto scene = world.AddComponent<SceneComponent>(actor.Value());
+    REQUIRE(scene);
+    CHECK(world.Objects().Stats().clusterMembers == before.clusterMembers + 2);
+    for (uint32 frame = 0; frame < 8; ++frame) {
+        REQUIRE(world.Tick(0.016));
+    }
+
+    CHECK(world.HasActor(actor.Value()));
+    REQUIRE(world.DestroyActor(actor.Value()));
+    for (uint32 frame = 0; frame < 16; ++frame) {
+        REQUIRE(world.Tick(0.016));
+    }
+
+    CHECK(world.Objects().Stats().clusterMembers == before.clusterMembers);
+    CHECK(!world.Objects().InspectLifecycle(world.Access(), actor.Value()));
+    CHECK(!world.Objects().InspectLifecycle(world.Access(), scene.Value()));
+    REQUIRE(world.Shutdown());
+}
+
+// World API 밖에서 파괴된 Actor(틱 없음)의 Component도 다음 GC cycle 전에 빠짐없이 정리된다
+// (Actor 레코드의 Component 목록 — 고아 소속이 남으면 Debug 소속 불변식 검증이 멈춘다).
+TEST(World_BypassedActorComponentsLeaveLevelCluster) {
+    Fixture fixture;
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    REQUIRE(world.BeginPlay());
+    const ObjectStats before = world.Objects().Stats();
+    auto actor = world.SpawnActor<Actor>();
+    REQUIRE(actor);
+    auto first = world.AddComponent<SceneComponent>(actor.Value());
+    auto second = world.AddComponent<SceneComponent>(actor.Value());
+    REQUIRE(first && second);
+    auto other = world.SpawnActor<Actor>();
+    REQUIRE(other);
+    REQUIRE(world.Tick(0.016));
+    REQUIRE(world.Objects().RequestDestroy(world.Access(), actor.Value()));
+    // 틱이 없는 Actor는 Tick이 발견하지 못한다. World API 파괴가 GC cycle을 부르면 그 Begin 전에
+    // 정리한다.
+    REQUIRE(world.DestroyActor(other.Value()));
+    for (uint32 frame = 0; frame < 16; ++frame) {
+        REQUIRE(world.Tick(0.016));
+    }
+
+    CHECK(!world.HasActor(actor.Value()));
+    CHECK(world.Stats().components == 0);
+    CHECK(world.Objects().Stats().clusterMembers == before.clusterMembers);
+    CHECK(!world.Objects().InspectLifecycle(world.Access(), first.Value()));
+    CHECK(!world.Objects().InspectLifecycle(world.Access(), second.Value()));
     REQUIRE(world.Shutdown());
 }
 

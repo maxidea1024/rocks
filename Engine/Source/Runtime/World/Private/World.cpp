@@ -1,4 +1,5 @@
 #include <Core/Math/MathUtility.h>
+#include <Object/ConstructionContext.h>
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
 #include <World/SceneComponent.h>
@@ -8,6 +9,13 @@
 namespace rocks {
 
 namespace {
+
+// World Registry는 Level 클러스터를 쓴다(Docs/Design/GarbageCollectionScale.ko.md 13.3절).
+RegistryOptions WorldRegistryOptions(const WorldDesc& desc) noexcept {
+    RegistryOptions options = desc.objects;
+    options.clusters = options.clusters || desc.levelClusters;
+    return options;
+}
 
 // hook별 실행 단계다. OnTick은 설정한 단계, OnFixedTick은 Physics, OnLateTick은 LateUpdate다.
 TickPhase HookPhase(uint8 hook, const TickSettings& settings) noexcept {
@@ -85,7 +93,7 @@ Result<void> RegisterWorldTypes(ModuleRegistration& registration) noexcept {
 }
 
 World::World(Allocator& allocator, TypeRegistry& types, const WorldDesc& desc) noexcept
-    : allocator_(allocator), objects_(allocator, types, desc.context, desc.objects),
+    : allocator_(allocator), objects_(allocator, types, desc.context, WorldRegistryOptions(desc)),
       name_(allocator), ticks_(allocator), subsystems_(allocator), subsystemTypes_(desc.subsystems),
       timeStep_(desc.timeStep), actors_(allocator), actorIndex_(allocator), levels_(allocator),
       pendingStart_(allocator), pendingComponentStart_(allocator), destroyActors_(allocator),
@@ -302,20 +310,39 @@ Result<ObjectHandle> World::CreateLevelInternal(StringView name, bool persistent
         return Result<ObjectHandle>::Failure(reserved.Error());
     }
 
-    auto created = objects_.NewObject<Level>(Access(), ObjectTypeIdOf<Level>());
+    // Level은 클러스터 루트다(13.3절). Spawn·AddComponent가 소속 Actor·Component를 가입시킨다.
+    // Level 타입이 완전한 필드 배치가 아니거나 클러스터를 끈 World(WorldDesc::levelClusters)면
+    // 클러스터 없이 둔다(지정이 Unsupported다).
+    ConstructionContext transaction(objects_, Access());
+    auto pending = transaction.Create<Level>(ObjectTypeIdOf<Level>());
+    if (!pending) {
+        return Result<ObjectHandle>::Failure(pending.Error());
+    }
+
+    auto rooted = transaction.SetClusterRoot(pending.Value());
+    if (!rooted && rooted.Error() != ErrorCode::Unsupported) {
+        return Result<ObjectHandle>::Failure(rooted.Error());
+    }
+
+    auto committed = transaction.Commit();
+    if (!committed) {
+        return Result<ObjectHandle>::Failure(committed.Error());
+    }
+
+    const ObjectHandle handle = committed.Value().Handle();
+    auto created = objects_.TryPin<Level>(Access(), handle);
+    committed.Value().Reset();
     if (!created) {
         return Result<ObjectHandle>::Failure(created.Error());
     }
 
-    const ObjectHandle handle = created.Value().Handle();
     auto configured = With<Level>(handle, [&](Level& level) noexcept {
         level.world_ = this;
         level.persistent_ = persistent;
         return level.name_.TryAssign(name);
     });
     if (!configured) {
-        auto requested = objects_.RequestDestroy(Access(), handle);
-        (void)requested;
+        RequestDestroyOwned(handle);
         return Result<ObjectHandle>::Failure(configured.Error());
     }
 
@@ -323,6 +350,7 @@ Result<ObjectHandle> World::CreateLevelInternal(StringView name, bool persistent
     auto added = levels_.TryEmplaceBack();
     added.Value()->root = Move(created.Value());
     added.Value()->handle = handle;
+    added.Value()->clustered = static_cast<bool>(rooted);
     return Result<ObjectHandle>::Success(handle);
 }
 
@@ -381,8 +409,7 @@ void World::ReleaseLevel(usize index) noexcept {
     RootRef<Level> root = Move(levels_[index].root);
     auto removed = levels_.TryRemoveAt(index);
     (void)removed;
-    auto requested = objects_.RequestDestroy(Access(), handle);
-    (void)requested;
+    RequestDestroyOwned(handle);
     root.Reset();
     gcPending_ = true;
     destroyedDuringCycle_ = true;
@@ -422,15 +449,36 @@ Result<ObjectHandle> World::SpawnActorDeferred(TypeId type, const SpawnParams& p
     }
 
     ObjectAccessScope scope(Access());
-    auto created = objects_.NewObject<Actor>(Access(), type);
-    if (!created) {
-        return Result<ObjectHandle>::Failure(created.Error());
+    // Actor는 Level 클러스터에 가입한다(13.3절 — 완전한 필드 배치 타입만, native 파생은 밖에
+    // 남는다).
+    const bool levelClustered = levelRecord->clustered;
+    bool clustered = false;
+    Result<RootRef<Object>> created = Result<RootRef<Object>>::Failure(ErrorCode::InvalidArgument);
+    {
+        ConstructionContext transaction(objects_, Access());
+        auto pending = transaction.Create<Actor>(type);
+        if (!pending) {
+            return Result<ObjectHandle>::Failure(pending.Error());
+        }
+
+        if (levelClustered) {
+            auto joined = transaction.JoinCluster(pending.Value(), level);
+            if (!joined) {
+                return Result<ObjectHandle>::Failure(joined.Error());
+            }
+
+            clustered = JoinsCluster(transaction, pending.Value());
+        }
+
+        created = transaction.Commit();
+        if (!created) {
+            return Result<ObjectHandle>::Failure(created.Error());
+        }
     }
 
     const ObjectHandle handle = created.Value().Handle();
     auto rollback = [&](ErrorCode error) noexcept {
-        auto requested = objects_.RequestDestroy(Access(), handle);
-        (void)requested;
+        RequestDestroyOwned(handle);
         created.Value().Reset();
         return Result<ObjectHandle>::Failure(error);
     };
@@ -443,7 +491,7 @@ Result<ObjectHandle> World::SpawnActorDeferred(TypeId type, const SpawnParams& p
         return rollback(attached.Error());
     }
 
-    auto slot = actors_.TryEmplace();
+    auto slot = actors_.TryEmplace(allocator_);
     if (!slot) {
         return rollback(slot.Error());
     }
@@ -469,6 +517,7 @@ Result<ObjectHandle> World::SpawnActorDeferred(TypeId type, const SpawnParams& p
     ActorRecord& record = *actors_.Find(slot.Value());
     record.handle = handle;
     record.level = level;
+    record.clustered = clustered;
     created.Value().Reset();
     FindLevelRecord(level)->actorCount += 1;
     ++spawnedTotal_;
@@ -681,22 +730,40 @@ Result<ObjectHandle> World::AddComponent(ObjectHandle actor, TypeId type) noexce
         return Result<ObjectHandle>::Failure(ErrorCode::Destroyed);
     }
 
-    // Component 하나는 각 큐에 많아야 한 번 들어간다.
+    // Component 하나는 각 큐에 많아야 한 번 들어간다. Actor 레코드의 Component 목록도 먼저 늘린다.
     if (!destroyComponents_.TryEnsureCapacity(componentCount_ + 1) ||
-        !pendingComponentStart_.TryEnsureCapacity(componentCount_ + 1)) {
+        !pendingComponentStart_.TryEnsureCapacity(componentCount_ + 1) ||
+        !record->components.TryEnsureCapacity(record->components.Size() + 1)) {
         return Result<ObjectHandle>::Failure(ErrorCode::OutOfMemory);
     }
 
     ObjectAccessScope scope(Access());
-    auto created = objects_.NewObject<Component>(Access(), type);
-    if (!created) {
-        return Result<ObjectHandle>::Failure(created.Error());
+    // Actor가 Level 클러스터 소속이면 Component도 같은 클러스터에 가입한다(13.3절 — Actor가 소속이
+    // 아니면 Component의 소유 간선이 클러스터 밖이라 넣지 않는다).
+    Result<RootRef<Object>> created = Result<RootRef<Object>>::Failure(ErrorCode::InvalidArgument);
+    {
+        ConstructionContext transaction(objects_, Access());
+        auto pending = transaction.Create<Component>(type);
+        if (!pending) {
+            return Result<ObjectHandle>::Failure(pending.Error());
+        }
+
+        if (record->clustered) {
+            auto joined = transaction.JoinCluster(pending.Value(), record->level);
+            if (!joined) {
+                return Result<ObjectHandle>::Failure(joined.Error());
+            }
+        }
+
+        created = transaction.Commit();
+        if (!created) {
+            return Result<ObjectHandle>::Failure(created.Error());
+        }
     }
 
     const ObjectHandle handle = created.Value().Handle();
     auto rollback = [&](ErrorCode error) noexcept {
-        auto requested = objects_.RequestDestroy(Access(), handle);
-        (void)requested;
+        RequestDestroyOwned(handle);
         created.Value().Reset();
         return Result<ObjectHandle>::Failure(error);
     };
@@ -719,6 +786,10 @@ Result<ObjectHandle> World::AddComponent(ObjectHandle actor, TypeId type) noexce
 
     created.Value().Reset();
     ++componentCount_;
+    // 용량을 위에서 확보했으므로 실패하지 않는다.
+    record = FindActorRecord(actor);
+    auto listed = record->components.TryPushBack(handle);
+    (void)listed;
 
     // Actor가 이미 깨어 있으면(OnAwake 이후) 지금 Actor 단계까지 진행한다. 아직 Constructed이거나
     // OnAwake 실행 중이면 FinishSpawning이 OnAwake 뒤에 진행한다.
@@ -1482,13 +1553,23 @@ void World::DestroyComponentNow(ObjectHandle actor, ObjectHandle component,
 
         return objects_.RemoveReference(Access(), actor, owner.components_, component);
     });
-    if (detached && componentCount_ != 0) {
+    // 소유 Actor가 우회 파괴되어 Borrow로 읽을 수 없어도 정리 중(ownerDestroyed)이면 센다.
+    if ((detached || ownerDestroyed) && componentCount_ != 0) {
         --componentCount_;
     }
 
+    if (!ownerDestroyed) {
+        if (ActorRecord* record = FindActorRecord(actor)) {
+            const usize at = record->components.Find(component);
+            if (at != Array<ObjectHandle>::NotFound) {
+                auto removed = record->components.TryRemoveAt(at);
+                (void)removed;
+            }
+        }
+    }
+
     // Object::Destroy로 우회 파괴되어 접근할 수 없는 Component도 회수 요청은 그대로 한다.
-    auto requested = objects_.RequestDestroy(Access(), component);
-    (void)requested;
+    RequestDestroyOwned(component);
     gcPending_ = true;
     destroyedDuringCycle_ = true;
 }
@@ -1504,9 +1585,21 @@ void World::DestroyActorNow(ObjectHandle actor) noexcept {
         EnableActor(actor, false);
     }
 
+    // Component는 Actor 레코드의 목록으로 찾는다(Actor가 World API 밖에서 파괴돼 Borrow로 목록을
+    // 읽을 수 없어도 빠짐없이 — 13.3절).
+    auto recordedCount = [this, actor]() noexcept -> usize {
+        const ActorRecord* found = FindActorRecord(actor);
+        return found != nullptr ? found->components.Size() : 0;
+    };
+    auto recordedAt = [this, actor](usize index) noexcept -> ObjectHandle {
+        const ActorRecord* found = FindActorRecord(actor);
+        return found != nullptr && index < found->components.Size() ? found->components[index]
+                                                                    : ObjectHandle{};
+    };
+
     // 2) OnDestroy: Component(역순) -> Actor. OnAwake가 성공한 객체만 받는다.
-    for (usize index = ComponentCountOf(actor); index > 0; --index) {
-        const ObjectHandle component = ComponentAt(actor, index - 1);
+    for (usize index = recordedCount(); index > 0; --index) {
+        const ObjectHandle component = recordedAt(index - 1);
         if (component.IsNull()) {
             continue;
         }
@@ -1533,11 +1626,15 @@ void World::DestroyActorNow(ObjectHandle actor) noexcept {
     // 3) Component 등록 해제·회수 요청(역순). 파괴 대기 Actor에는 Component를 추가할 수 없으므로
     // 목록은
     //    더 늘지 않는다. 간선은 끝에 한 번에 비운다.
-    for (usize index = ComponentCountOf(actor); index > 0; --index) {
-        const ObjectHandle component = ComponentAt(actor, index - 1);
+    for (usize index = recordedCount(); index > 0; --index) {
+        const ObjectHandle component = recordedAt(index - 1);
         if (!component.IsNull()) {
             DestroyComponentNow(actor, component, true);
         }
+    }
+
+    if (ActorRecord* found = FindActorRecord(actor)) {
+        found->components.Clear();
     }
 
     auto cleared = With<Actor>(actor, [&](Actor& owner) noexcept {
@@ -1569,8 +1666,7 @@ void World::DestroyActorNow(ObjectHandle actor) noexcept {
         }
     }
 
-    auto requested = objects_.RequestDestroy(Access(), actor);
-    (void)requested;
+    RequestDestroyOwned(actor);
     const SlotHandle slot = *actorIndex_.Find(actor.slot);
     actorIndex_.Erase(actor.slot);
     auto removed = actors_.TryRemove(slot);
@@ -1616,6 +1712,14 @@ void World::FlushDestroys() noexcept {
                         --componentCount_;
                     }
 
+                    if (ActorRecord* owner = FindActorRecord(actor)) {
+                        const usize at = owner->components.Find(component);
+                        if (at != Array<ObjectHandle>::NotFound) {
+                            auto removed = owner->components.TryRemoveAt(at);
+                            (void)removed;
+                        }
+                    }
+
                     break;
                 }
             }
@@ -1639,6 +1743,12 @@ void World::StepGarbageCollection() noexcept {
     }
 
     if (objects_.CollectionPhase() == GcPhase::Idle) {
+        // cycle 시작 전에 World API 밖에서 파괴된 Actor를 정리한다(그 Component가 Level 클러스터의
+        // 고아 소속으로 남지 않게 — 13.3·13.8절).
+        if (RepairBypassedActors()) {
+            FlushDestroys();
+        }
+
         auto begun = objects_.BeginCollection(Access());
         // 외부가 Borrow를 보유하면 Busy다. 다음 프레임에 다시 시도한다.
         if (!begun) {
@@ -1653,6 +1763,39 @@ void World::StepGarbageCollection() noexcept {
         // 이번 cycle 시작 뒤에 파괴된 객체가 있으면 다음 cycle이 필요하다.
         gcPending_ = destroyedDuringCycle_;
     }
+}
+
+void World::RequestDestroyOwned(ObjectHandle object) noexcept {
+    auto requested = objects_.RequestDestroy(Access(), object);
+    if (!requested && requested.Error() != ErrorCode::StaleHandle &&
+        requested.Error() != ErrorCode::Destroyed && requested.Error() != ErrorCode::ShuttingDown) {
+        platform::Fatal("World could not request destruction of an object it owns");
+    }
+}
+
+bool World::RepairBypassedActors() noexcept {
+    // DestroyActor는 레코드 상태를 바꾸고 파괴 큐에 넣을 뿐 레코드 배열을 바꾸지 않는다.
+    bool repaired = false;
+    for (const ActorRecord& record : actors_) {
+        if (record.state == ActorState::PendingDestroy) {
+            continue;
+        }
+
+        auto lifecycle = objects_.InspectLifecycle(Access(), record.handle);
+        if (lifecycle && lifecycle.Value() == ObjectLifecycle::DestroyRequested) {
+            ++repairedTicks_;
+            repaired = true;
+            auto destroyed = DestroyActor(record.handle);
+            (void)destroyed;
+        }
+    }
+
+    return repaired;
+}
+
+bool World::JoinsCluster(ConstructionContext& transaction, ObjectHandle object) noexcept {
+    auto type = transaction.AcquireType(object);
+    return type && type.Value().Ops().completeFieldLayout;
 }
 
 Result<void> World::Shutdown() noexcept {

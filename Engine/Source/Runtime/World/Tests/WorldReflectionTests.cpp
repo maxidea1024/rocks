@@ -65,13 +65,15 @@ namespace {
 // ModuleRegistration -> TypeRegistry(멤버 선언 역순으로 소멸). native 타입을 등록하지 않으므로
 // World 타입을 Unregister할 수 있다.
 struct ReflectedWorld {
-    explicit ReflectedWorld(uint64 context) noexcept : types(allocator), modules(types, allocator) {
+    explicit ReflectedWorld(uint64 context, bool levelClusters = true) noexcept
+        : types(allocator), modules(types, allocator) {
         registered = RegisterWorldTypes(modules).IsOk() &&
                      generated::WorldTestFixtures::RegisterModuleTypes(modules).IsOk();
         WorldDesc desc;
         desc.name = "Reflection";
         desc.context = {0x5752464c43ull, context};
         desc.timeStep = {1.0 / 60.0, 0.25, 8};
+        desc.levelClusters = levelClusters;
         auto created = UniquePtr<World>::TryMake(allocator, allocator, types, desc);
         if (created) {
             world = Move(created.Value());
@@ -392,7 +394,9 @@ TEST(WorldReflection_GcKeepsSpawnedObjectsAndReclaimsDestroyedOnes) {
 // 가며 Actor들이 스캔 전·후인 모든 지점에서 넣는다. 기존(흰) 객체를 검은 객체의 필드에 넣는 삽입
 // 장벽은 WorldReflection_MarkingReferenceWriteIsShadedByBarrier가 본다.
 TEST(WorldReflection_MarkingAddComponentSurvivesAsShadedNewborn) {
-    ReflectedWorld fixture(3);
+    // 객체 단위 스캔 순서를 지나야 하므로 Level 클러스터를 끈다(클러스터는 소속을 한 번에 표식한다
+    // — 클러스터 장벽은 ObjectGcCluster 시험이 본다).
+    ReflectedWorld fixture(3, false);
     REQUIRE(fixture.Ready());
     World& world = *fixture.world;
     REQUIRE(world.Initialize());
@@ -447,7 +451,8 @@ TEST(WorldReflection_MarkingAddComponentSurvivesAsShadedNewborn) {
 // 지난다(그 밖의 지점에서는 장벽 없이도 산다 — 앞 Component가 나중에 스캔되거나 뒤 Component가 이미
 // 대상을 shade했다).
 TEST(WorldReflection_MarkingReferenceWriteIsShadedByBarrier) {
-    ReflectedWorld fixture(10);
+    // 객체 단위 스캔 순서를 지나야 하므로 Level 클러스터를 끈다.
+    ReflectedWorld fixture(10, false);
     REQUIRE(fixture.Ready());
     World& world = *fixture.world;
     REQUIRE(world.Initialize());

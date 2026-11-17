@@ -15,6 +15,7 @@
 
 namespace rocks {
 
+class ConstructionContext;
 class World;
 
 // World 수명과 같이하는 Subsystem의 기반이다(SubsystemCollection 참고).
@@ -83,6 +84,10 @@ struct WorldDesc {
     WorkerScheduler* gcScheduler = nullptr;
     // 초기화할 WorldSubsystem 종류다. 배열은 Initialize가 끝날 때까지 살아 있어야 한다.
     Span<const WorldSubsystemType> subsystems;
+    // Level마다 GC 클러스터를 만든다(기본 — Docs/Design/GarbageCollectionScale.ko.md 13.3절).
+    // Level이 클러스터 루트이고 SpawnActor·AddComponent로 만든 리플렉션 Actor·Component가 가입한다.
+    // 끄는 것은 측정 비교와 객체 단위 표식 순서를 보는 시험용이다.
+    bool levelClusters = true;
 };
 
 namespace detail {
@@ -430,9 +435,18 @@ private:
 
     // World가 관리하는 Actor 수명 기록이다. Actor 저장소는 Level이, Component는 Actor가 소유한다.
     struct ActorRecord {
+        explicit ActorRecord(Allocator& allocator) noexcept : components(allocator) {
+        }
+
         ObjectHandle handle;
         ObjectHandle level;
+        // AddComponent로 붙인 Component handle이다(Actor의 components_와 같은 순서). Actor가 World
+        // API 밖에서 파괴되어 Borrow로 목록을 읽을 수 없어도 Component를 빠짐없이 정리하려고 따로
+        // 둔다(Docs/Design/GarbageCollectionScale.ko.md 13.3절 — 고아 소속 방지).
+        Array<ObjectHandle> components;
         ActorState state = ActorState::Constructed;
+        // Level 클러스터의 소속이다(Component도 같은 클러스터에 넣는다).
+        bool clustered = false;
         bool awake = false;
         bool enabledApplied = false;
         // FinishSpawning 진행 중(재진입 방지)과 활성 전환 중(재진입 hook의 중간 상태 노출
@@ -448,6 +462,8 @@ private:
         ObjectHandle handle;
         uint32 actorCount = 0;
         bool pendingDestroy = false;
+        // Level이 클러스터 루트다(Level 타입이 완전한 필드 배치일 때 — GC-S7).
+        bool clustered = false;
     };
 
     // hook 실행 깊이를 세는 범위다. 깊이가 0이 아니면 Initialize·BeginPlay·Tick·Shutdown은 Busy다.
@@ -525,6 +541,14 @@ private:
                              bool ownerDestroyed) noexcept;
     void DestroyActorNow(ObjectHandle actor) noexcept;
     void StepGarbageCollection() noexcept;
+    // World가 소유한 객체의 RequestDestroy다. 결과를 확인한다(클러스터 이탈이 실패하면 고아 소속이
+    // 남는다 — 13.3절). 이미 파괴됐거나 종료 중이면 무시하고, 그 밖의 실패는 불변식 위반으로
+    // Fatal이다.
+    void RequestDestroyOwned(ObjectHandle object) noexcept;
+    // World API 밖에서 파괴(Object::Destroy)된 Actor를 찾아 정리 대기로 돌린다. 하나라도 있으면 참.
+    bool RepairBypassedActors() noexcept;
+    // 새 객체의 타입이 클러스터 소속 조건(완전한 필드 배치)을 맞추는지다.
+    static bool JoinsCluster(ConstructionContext& transaction, ObjectHandle object) noexcept;
     bool CanMutate() const noexcept;
 
     Allocator& allocator_;

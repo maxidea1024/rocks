@@ -126,11 +126,14 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
         if (!subsystems) {
             return fail(subsystems.Error());
         }
-
-        (void)objects_->ClosePermanentRegion(objects_->OwnerAccess());
     }
 
     initializedSteps_ = StepSubsystems;
+    // 영구 창은 서브시스템 초기화까지만 연다(13.7절). 닫지 못하면 초기화가 실패한다(서브시스템
+    // 단계와 따로 둔 실패 지점이다).
+    if (auto closed = objects_->ClosePermanentRegion(objects_->OwnerAccess()); !closed) {
+        return fail(closed.Error());
+    }
 
     if (config_.client != nullptr) {
         ObjectAccessScope scope(objects_->OwnerAccess());
