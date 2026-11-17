@@ -29,3 +29,12 @@ TEST(PlatformWindow_CreateReportCarriesInputFailure) {
     CHECK(report.code == ErrorCode::InvalidArgument && report.osError == 0 &&
           report.call[0] == '\0' && !report.truncated);
 }
+
+// 세션 상태 조회는 할당 없이 세 값 가운데 하나를 돌려준다. 시험 기계의 세션 상태(콘솔·원격·끊김)는
+// 정할 수 없으므로 값 자체는 단언하지 않는다.
+TEST(PlatformWindow_DesktopSessionStateIsOneOfTheKnownValues) {
+    const platform::DesktopSessionState state = platform::QueryDesktopSessionState();
+    CHECK(state == platform::DesktopSessionState::Connected ||
+          state == platform::DesktopSessionState::Disconnected ||
+          state == platform::DesktopSessionState::Unknown);
+}

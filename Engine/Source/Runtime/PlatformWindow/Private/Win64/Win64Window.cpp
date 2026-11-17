@@ -3,6 +3,7 @@
 #include <PlatformWindow/Window.h>
 
 #include <Windows.h>
+#include <WtsApi32.h>
 #include <Xinput.h>
 
 namespace rocks::platform {
@@ -694,6 +695,29 @@ Result<UniquePtr<GamepadBackend>> GamepadBackend::Create(Allocator& allocator) n
 
     return Result<UniquePtr<GamepadBackend>>::Success(
         UniquePtr<GamepadBackend>(Move(created.Value())));
+}
+
+DesktopSessionState QueryDesktopSessionState() noexcept {
+    LPWSTR buffer = nullptr;
+    DWORD bytes = 0;
+    if (!WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION,
+                                     WTSConnectState, &buffer, &bytes) ||
+        buffer == nullptr) {
+        return DesktopSessionState::Unknown;
+    }
+
+    DesktopSessionState state = DesktopSessionState::Unknown;
+    if (bytes >= sizeof(WTS_CONNECTSTATE_CLASS)) {
+        const auto connect = *reinterpret_cast<const WTS_CONNECTSTATE_CLASS*>(buffer);
+        if (connect == WTSActive) {
+            state = DesktopSessionState::Connected;
+        } else if (connect == WTSDisconnected) {
+            state = DesktopSessionState::Disconnected;
+        }
+    }
+
+    WTSFreeMemory(buffer);
+    return state;
 }
 
 } // namespace rocks::platform

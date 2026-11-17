@@ -20,6 +20,7 @@
 #include <PlatformWindow/Window.h>
 #include <VulkanGraphics/VulkanDevice.h>
 #include "SampleRenderer.h"
+#include "SelfTestEnvironment.h"
 #include <stdio.h>
 #include <Platform/Memory.h>
 #if SANDBOX_SHADER_SOURCE_COMPILER
@@ -92,6 +93,11 @@ void Check(bool condition, const char* backend, const char* what) noexcept {
 // 숨김 창에 스왑체인을 만들어 프레임·크기 변경·기록 중 파괴를 확인한다(화면 픽셀은 읽지 않는다).
 void RunSwapChainChecks(const char* name, graphics::Device& device, sample::Renderer& renderer,
                         Allocator& allocator) noexcept {
+    if (const char* reason = WindowPresentUnavailableReason(device)) {
+        printf("  [NOT RUN] %s: swap chain checks (%s)\n", name, reason);
+        return;
+    }
+
     platform::WindowDesc windowDesc;
     windowDesc.title = "Rocks graphics self-test";
     windowDesc.width = 96;
