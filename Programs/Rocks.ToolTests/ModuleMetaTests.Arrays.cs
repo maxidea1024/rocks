@@ -236,7 +236,8 @@ internal static partial class ModuleMetaTests
                     ["toolName"] = "refs",
                     ["category"] = "",
                     ["displayName"] = "",
-                    ["maxElements"] = 65536
+                    ["maxElements"] = 65536,
+                    ["bitfield"] = false
                 });
             });
             await Reject(layout.RunArrayModuleAsync("Upper", [layout.Descriptor("Lower"), nested]), "RMC1000", "holds a reference array");
@@ -258,7 +259,8 @@ internal static partial class ModuleMetaTests
                     ["toolName"] = "children",
                     ["category"] = "",
                     ["displayName"] = "",
-                    ["maxElements"] = 65536
+                    ["maxElements"] = 65536,
+                    ["bitfield"] = false
                 }));
                 await Reject(layout.RunArrayModuleAsync("Upper", [layout.Descriptor("Lower"), cycle]), "RMC2302", "cycle");
             }

@@ -53,7 +53,7 @@ internal static partial class MetaTests
             .Select(field => Declaration($"ROCKS_PROPERTY() {field};")), "RMC2000", "type");
         AddRejectGroup(context, "Meta.PrivateWithoutGeneratedBody", [Declaration("private: ROCKS_PROPERTY() rocks::int32 count = 0;",
             extra: "public: rocks::int32 Read() const noexcept { return count; }")], "RMC2000", "GENERATED_BODY");
-        AddRejectGroup(context, "Meta.Bitfields", [Declaration("ROCKS_PROPERTY() unsigned int count : 1;")], "RMC2000", "bitfield");
+        // bitfield PROPERTY 규칙(리플렉션 B9m)은 MetaTests.Bitfields.cs가 본다.
         AddRejectGroup(context, "Meta.StaticAnnotatedField", [Declaration("ROCKS_PROPERTY() static inline rocks::int32 count = 0;")], "RMC200", "nonstatic");
         AddRejectGroup(context, "Meta.ManualTraceConflict", [Declaration(extra: "void Trace() noexcept {}")], "RMC2000", "Trace");
         AddRejectGroup(context, "Meta.VirtualAndMultipleInheritance", [Declaration(bases: "public virtual rocks::Object"),

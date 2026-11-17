@@ -153,8 +153,8 @@ Result<void> FileLogSink::Open() noexcept {
         hostValid = IsHostByte(host_[index]);
     }
 
-    // 파일 이름: 호스트 + "-" + 시각(19) + "-N"(최대 7) + ".log". 폴더와 구분자를 더해도 남아야
-    // 한다.
+    // 파일 이름: 호스트 + "-" + 시각(LogFileStampBytes) + "-N"(최대 MaxLogFilePartBytes) + ".log".
+    // 폴더와 구분자를 더해도 남아야 한다.
     const usize nameLimit =
         hostBytes_ + 1 + LogFileStampBytes + MaxLogFilePartBytes + LogFileExtension.ByteCount();
     if (!hostValid || directoryBytes_ == 0 || directoryBytes_ >= sizeof(directory_) ||

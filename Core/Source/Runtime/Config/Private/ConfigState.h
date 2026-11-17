@@ -97,6 +97,8 @@ struct ConsoleSettingState {
     double minimum = 0;
     double maximum = 0;
     Array<String> allowed;
+    // String·Name 허용 값을 대소문자 무시로 맞춘다(Enum은 늘 무시).
+    bool allowedIgnoreCase = false;
     // 필드 설정: 섹션 번호와 스키마 필드 번호(독립 설정은 IndexNone).
     usize section = IndexNone;
     usize field = IndexNone;

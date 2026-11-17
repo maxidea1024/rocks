@@ -12,6 +12,7 @@
 #include <TraceControl/TraceController.h>
 #include <TraceControl/TraceSettings.generated.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 namespace sandbox {
 
@@ -239,6 +240,12 @@ int RunEngineHost(Allocator& allocator, const EngineHostOptions& options) noexce
     }
 
     host.Stop();
+    if (host.WriterAbandoned()) {
+        // 멈춘 sink에 걸린 출력 스레드가 남았다. 설정 문맥·전역 소멸자·CRT 종료 처리를 돌리면 그
+        // 스레드와 겹칠 수 있으므로 정리 없이 끝낸다(LogHost::Stop 설명).
+        _Exit(exitCode);
+    }
+
     return exitCode;
 }
 

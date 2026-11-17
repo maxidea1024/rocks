@@ -318,6 +318,9 @@ void LogSystem::Stop() noexcept {
         }
 
         (void)writer_.Join();
+        // 두 번째 기다림에서 돌아왔으면 남은 스레드가 없다. AddSink·RemoveSink의 Busy는 실제로
+        // 남겨 둔 동안만이다.
+        platform::AtomicStore<MemoryOrder::Release>(&abandoned_, 0u);
     } else if (config_.mode == LogMode::Manual) {
         // started_를 이미 내렸으므로 Pump는 0이다. 진행 중인 Pump가 끝나기를 기다렸다가 직접
         // 비운다.
@@ -603,6 +606,11 @@ void LogSystem::Dispatch(Span<const uint8> capture, const LogBlockProvider* bloc
 
 void LogSystem::FlushSinks() noexcept {
     for (usize index = 0; index < sinkCount_; ++index) {
+        // Stop이 포기한 뒤에는 남은 sink를 부르지 않는다(멈췄던 sink의 Flush에서 돌아온 경우).
+        if (platform::AtomicLoad<MemoryOrder::Acquire>(&abandoned_) != 0) {
+            break;
+        }
+
         SinkSlot& slot = sinks_[index];
         if (slot.blocked) {
             continue;

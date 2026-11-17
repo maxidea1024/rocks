@@ -203,6 +203,10 @@ TEST(Config_ConsoleSettingTypesAndRegistration) {
     ConsoleSettingDefinition channel = Define("log.channel", ConsoleValueType::String, "core");
     channel.allowedValues = channels;
     REQUIRE(context.RegisterConsoleSetting(channel));
+    ConsoleSettingDefinition folded = Define("log.folded", ConsoleValueType::String, "core");
+    folded.allowedValues = channels;
+    folded.allowedValuesIgnoreCase = true;
+    REQUIRE(context.RegisterConsoleSetting(folded));
     REQUIRE(context.RegisterConsoleSetting(Define("game.level", ConsoleValueType::Name, "Lobby")));
     ConsoleSettingDefinition preset = Define("quality.preset", ConsoleValueType::Enum, "");
     preset.enumType = TypeIdOf<FixtureQuality>();
@@ -215,12 +219,15 @@ TEST(Config_ConsoleSettingTypesAndRegistration) {
     REQUIRE(context.AddAssignment(ConfigLayer::Session, "cli", "net.max_bytes", "9000000000"));
     REQUIRE(context.AddAssignment(ConfigLayer::Session, "cli", "physics.gravity", "-9.81"));
     REQUIRE(context.AddAssignment(ConfigLayer::Session, "cli", "log.channel", "render"));
+    // 대소문자 무시 허용 값은 입력 표기를 그대로 남긴다.
+    REQUIRE(context.AddAssignment(ConfigLayer::Session, "cli", "log.folded", "Render"));
     REQUIRE(context.AddAssignment(ConfigLayer::Session, "cli", "game.level", "Arena"));
     REQUIRE(context.AddAssignment(ConfigLayer::Session, "cli", "quality.preset", "high"));
     REQUIRE(context.Sync());
     CHECK(ValueOf(fixture, "net.max_bytes").signedInteger == 9000000000ll);
     CHECK(ValueOf(fixture, "physics.gravity").float64 == -9.81);
     CHECK(ValueOf(fixture, "log.channel").string.View() == "render");
+    CHECK(ValueOf(fixture, "log.folded").string.View() == "Render");
     CHECK(ValueOf(fixture, "quality.preset").signedInteger ==
           static_cast<int64>(FixtureQuality::High));
     auto level = fixture.names.Acquire(ValueOf(fixture, "game.level").name);
@@ -228,6 +235,8 @@ TEST(Config_ConsoleSettingTypesAndRegistration) {
 
     context.Diagnostics().Clear();
     CHECK(!context.AddAssignment(ConfigLayer::Session, "cli", "log.channel", "audio"));
+    CHECK(!context.AddAssignment(ConfigLayer::Session, "cli", "log.channel", "Render"));
+    CHECK(!context.AddAssignment(ConfigLayer::Session, "cli", "log.folded", "Audio"));
     CHECK(!context.AddAssignment(ConfigLayer::Session, "cli", "quality.preset", "Medium"));
     CHECK(!context.AddAssignment(ConfigLayer::Session, "cli", "net.max_bytes", "lots"));
     CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::ValueOutOfRange) &&

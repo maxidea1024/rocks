@@ -81,6 +81,13 @@ config::ConsoleSettingDefinition Define(StringView name, StringView help,
 
 } // namespace
 
+struct LogHost::AbandonedOutputs {
+    UniquePtr<LogSystem> logs;
+    UniquePtr<StderrLogSink> console;
+    UniquePtr<FileLogSink> file;
+    UniquePtr<crypto::LogFileSealer> sealer;
+};
+
 bool TryParseLogLevel(StringView text, LogLevel& level) noexcept {
     for (usize index = 0; index < LogLevelCount; ++index) {
         if (EqualsIgnoringAsciiCase(text, LevelValues[index])) {
@@ -112,6 +119,9 @@ Result<void> RegisterLogSettings(config::ConfigContext& context) noexcept {
         "the compiled minimum stay compiled out. Applied at the next config sync.",
         ConsoleValueType::String, "info", 0);
     level.allowedValues = LevelValues;
+    // 문서대로 "Warning"도 받는다(TryParseLogLevel과 같이 대소문자 무시). 틀린 이름은 설정 단계에서
+    // 거부된다.
+    level.allowedValuesIgnoreCase = true;
     const config::ConsoleSettingDefinition levels =
         Define(LogLevelsSetting,
                "Per-category log levels as comma-separated prefix=level pairs, for example "
@@ -184,6 +194,10 @@ Result<void> LogHost::Start(const LogSystemConfig& preset, const config::ConfigC
         return Result<void>::Failure(ErrorCode::AlreadyExists);
     }
 
+    if (writerAbandoned_) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+
     LogSystemConfig config = preset;
     if (settings != nullptr) {
         const StringView mode = TextOf(*settings, LogModeSetting);
@@ -193,10 +207,16 @@ Result<void> LogHost::Start(const LogSystemConfig& preset, const config::ConfigC
             config.mode = LogMode::Sync;
         }
 
+        // log.level은 늘 값이 있으므로(기본 info) 프리셋의 globalMinimum을 덮어쓴다.
         LogLevel level = config.globalMinimum;
         if (TryParseLogLevel(TextOf(*settings, LogLevelSetting), level)) {
             config.globalMinimum = level;
         }
+    }
+
+    auto console = UniquePtr<StderrLogSink>::TryMake(allocator_);
+    if (!console) {
+        return Result<void>::Failure(console.Error());
     }
 
     auto made = UniquePtr<LogSystem>::TryMake(allocator_, allocator_, config);
@@ -204,10 +224,17 @@ Result<void> LogHost::Start(const LogSystemConfig& preset, const config::ConfigC
         return Result<void>::Failure(made.Error());
     }
 
+    auto reserved = allocator_.Allocate(sizeof(AbandonedOutputs), alignof(AbandonedOutputs));
+    if (!reserved) {
+        return Result<void>::Failure(reserved.Error());
+    }
+
+    abandonedStorage_ = reserved.Value();
+    stderr_ = Move(console.Value());
     logs_ = Move(made.Value());
     fileError_ = ErrorCode::None;
-    if (auto added = logs_->AddSink(stderr_); !added) {
-        logs_.Reset();
+    if (auto added = logs_->AddSink(*stderr_); !added) {
+        Stop();
         return added;
     }
 
@@ -338,8 +365,20 @@ void LogHost::Stop() noexcept {
         watched_ = nullptr;
     }
 
+    appliedLevelsBytes_ = 0;
     if (logs_) {
         logs_->Stop();
+        if (logs_->Stats().writerAbandoned) {
+            // 남은 출력 스레드가 sink에서 돌아오면 이 객체들을 쓴다. 파괴하면 소멸자의 Join이
+            // 끝나지 않을 수 있으므로 프로세스 끝까지 놓아 둔다(헤더의 Stop 설명).
+            writerAbandoned_ = true;
+            (void)ConstructAt<AbandonedOutputs>(
+                abandonedStorage_,
+                AbandonedOutputs{Move(logs_), Move(stderr_), Move(file_), Move(sealer_)});
+            abandonedStorage_ = nullptr;
+            return;
+        }
+
         logs_.Reset();
     }
 
@@ -349,7 +388,14 @@ void LogHost::Stop() noexcept {
     }
 
     sealer_.Reset();
-    appliedLevelsBytes_ = 0;
+    stderr_.Reset();
+    if (abandonedStorage_ != nullptr) {
+        if (!allocator_.Deallocate(abandonedStorage_)) {
+            platform::Fatal("LogHost could not return its reserved storage");
+        }
+
+        abandonedStorage_ = nullptr;
+    }
 }
 
 LogSystem& LogHost::System() noexcept {
