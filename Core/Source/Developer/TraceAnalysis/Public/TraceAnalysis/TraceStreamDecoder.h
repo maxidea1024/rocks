@@ -8,10 +8,33 @@
 #include <Core/Text/StringView.h>
 #include <TraceCapture/TraceFormat.h>
 
-// TR1 시험이 출력 byte를 해석하는 최소 reader다. 형식 해석만 하고 시험 판정은 하지 않는다. TR4의
-// TraceAnalysis가 이 파일을 옮겨 정식 reader의 출발점으로 쓸 수 있게, 시험 프레임워크와 세션 내부에
-// 의존하지 않는다(TraceFormat.h와 Compression만 쓴다).
-namespace rocks::tracetest {
+// trace 스트림 reader다(Docs/Design/TraceSystem.ko.md 8절, TR4). 파일(또는 출력 콜백이 받은) byte를
+// 머리·덩어리·스트림으로 나누고, 스키마 스트림을 읽어 기록을 사전 지식 없이 해석한다. 형식의 단일
+// 출처는 TraceCapture/TraceFormat.h다. 손상·잘림·모르는 형 입력에서 멈추거나 읽기 범위를 넘지 않고
+// 상태로 알린다(OB03).
+//
+// 사용 예:
+//   TraceStreamDecoder decoder(allocator);
+//   if (decoder.Decode(fileBytes)) {
+//       Array<DecodedRecord> records(allocator);
+//       const TraceDecodeStatus status = decoder.DecodeRecordsPartial(streamId, records);
+//   }
+//
+// 수명: 모든 view(DecodedRecord·DecodedSchema의 이름 등)는 decoder가 가진 스트림 byte를 가리키므로
+// decoder보다 오래 쓰지 않는다. 스레드: 한 객체는 한 스레드에서 쓴다.
+namespace rocks {
+
+// 스트림 하나를 기록 열로 읽은 결과다.
+enum class TraceDecodeStatus : uint8 {
+    // 스트림 끝까지 기록 경계에서 읽었다.
+    Complete,
+    // 스트림이 기록 중간에서 끝났다(잘린 파일). 그 앞까지는 읽었다.
+    Truncated,
+    // 스키마가 없는 형 id를 만났다(정의 누락). 기록 크기를 알 수 없어 그 앞에서 멈췄다.
+    UnknownType,
+    // 결과를 담을 메모리가 없다.
+    OutOfMemory,
+};
 
 struct DecodedHeader {
     uint16 version = 0;
@@ -95,8 +118,15 @@ public:
     const DecodedSchema* FindSchema(uint16 typeId) const noexcept;
     const DecodedSchema* FindSchema(StringView name) const noexcept;
 
-    // 스트림 하나를 기록 열로 읽어 out 뒤에 붙인다. 모르는 형 id나 잘린 기록이면 false다.
-    bool DecodeRecords(uint16 streamId, Array<DecodedRecord>& out) const noexcept;
+    // 스트림 하나를 기록 열로 읽어 out 뒤에 붙인다. 멈춘 경우에도 그 앞까지 읽은 기록은 out에
+    // 남는다.
+    TraceDecodeStatus DecodeRecordsPartial(uint16 streamId,
+                                           Array<DecodedRecord>& out) const noexcept;
+
+    // DecodeRecordsPartial이 Complete인지다.
+    bool DecodeRecords(uint16 streamId, Array<DecodedRecord>& out) const noexcept {
+        return DecodeRecordsPartial(streamId, out) == TraceDecodeStatus::Complete;
+    }
 
 private:
     bool AppendToStream(uint16 id, Span<const uint8> bytes) noexcept;
@@ -147,4 +177,4 @@ inline uint8 ReadFixedByte(const DecodedRecord& record, usize offset) noexcept {
     return record.fixed[offset];
 }
 
-} // namespace rocks::tracetest
+} // namespace rocks

@@ -1,12 +1,13 @@
 # Rocks headless commandlet
 
-`Commandlet` 타깃은 창, 렌더러, GPU, 오디오 장치 없이 실행되는 Core 기반 콘솔 프로그램이다. 현재 엔진 부트와 에셋 시스템은 연결되지 않았으며 cook 등의 명령은 제공하지 않는다. `core-check`는 Core 할당과 해제만 검사한다.
+`Commandlet` 타깃은 창, 렌더러, GPU, 오디오 장치 없이 실행되는 Core 기반 콘솔 프로그램이다. 현재 엔진 부트와 에셋 시스템은 연결되지 않았으며 cook 등의 명령은 제공하지 않는다. `core-check`는 Core 할당과 해제만 검사한다. `trace-report <입력.rtrace> [<출력.json>]`은 trace 파일의 결정적 JSON report(스레드별 구간 이름의 횟수·합계·p50/p95/p99, task 임계 경로, 손실·잘림·정의 누락 요약, [trace 설계](../../Docs/Design/TraceSystem.ko.md) 10절 TR4)를 쓴다. 출력 경로가 없으면 표준 출력이다. 파일·분석 오류는 원본 파일 오류 코드와 함께 알리고 1을 반환한다.
 
 ```text
 dotnet msbuild Rocks.proj /t:Build /p:RocksTarget=Commandlet
 RocksCommandlet --help
 RocksCommandlet --list
 RocksCommandlet core-check
+RocksCommandlet trace-report capture.rtrace report.json
 dotnet run --project Programs/Rocks.Commandlet.Tests -- --executable <빌드된 실행 파일의 절대 경로>
 ```
 

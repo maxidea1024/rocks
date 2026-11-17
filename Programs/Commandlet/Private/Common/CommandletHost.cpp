@@ -1,5 +1,10 @@
 #include "CommandletHost.h"
 #include <Core/Memory/SystemAllocator.h>
+#include <Platform/File.h>
+#include <TraceAnalysis/TraceModel.h>
+#include <TraceAnalysis/TraceReport.h>
+
+#include <stdio.h>
 
 namespace rocks::commandlet_host {
 namespace {
@@ -24,12 +29,121 @@ Result<int32> CoreCheck(void*, Span<const StringView> args, CommandletOutput& ou
     return written ? Result<int32>::Success(0) : Result<int32>::Failure(written.Error());
 }
 
+Result<int32> WriteText(CommandletOutput& output, CommandletStream stream,
+                        StringView text) noexcept {
+    auto written = output.write(output.context, stream, text);
+    return written ? Result<int32>::Success(stream == CommandletStream::Error ? 1 : 0)
+                   : Result<int32>::Failure(written.Error());
+}
+
+// 파일 오류를 원본 코드(FileCode·OS 오류)와 함께 알리고 1을 돌려준다.
+Result<int32> FileFailure(CommandletOutput& output, const char* action, StringView path,
+                          platform::FileStatus status) noexcept {
+    char text[256];
+    const int length = snprintf(text, sizeof(text),
+                                "trace-report: cannot %s '%.*s' (file code %d, native error %u)\n",
+                                action, static_cast<int>(path.ByteCount()), path.Data(),
+                                static_cast<int>(status.code), status.nativeError);
+    return WriteText(output, CommandletStream::Error,
+                     StringView(text, length > 0 ? static_cast<usize>(length) : 0));
+}
+
+// trace-report <input.rtrace> [<output.json>]: trace 파일의 결정적 JSON report(TraceAnalysis)를
+// 쓴다. 출력 경로가 없으면 표준 출력으로 낸다. 사용법 오류 2, 파일·분석 오류 1, 성공 0이다.
+Result<int32> TraceReport(void*, Span<const StringView> args, CommandletOutput& output) noexcept {
+    if (args.Size() != 1 && args.Size() != 2) {
+        auto written = output.write(output.context, CommandletStream::Error,
+                                    "usage: trace-report <input.rtrace> [<output.json>]\n");
+        return written ? Result<int32>::Success(2) : Result<int32>::Failure(written.Error());
+    }
+
+    // 경로는 NUL로 끝나야 하므로 복사한다(인수 view는 NUL 종료를 보장하지 않는다).
+    char input[CommandletRegistry::MaxArgumentBytes + 1] = {};
+    platform::MemoryCopy(input, args[0].Data(), args[0].ByteCount());
+    SystemAllocator allocator;
+    Array<uint8> bytes(allocator);
+    {
+        platform::File file;
+        if (const platform::FileStatus opened =
+                file.Open(input, platform::FileOpenMode::ReadExisting);
+            !opened) {
+            return FileFailure(output, "open", args[0], opened);
+        }
+
+        uint64 size = 0;
+        if (const platform::FileStatus sized = file.Size(size); !sized) {
+            return FileFailure(output, "size", args[0], sized);
+        }
+
+        if (!bytes.TryResize(static_cast<usize>(size))) {
+            return Result<int32>::Failure(ErrorCode::OutOfMemory);
+        }
+
+        const platform::FileTransfer read = file.ReadExact(bytes.Data(), bytes.Size());
+        if (!read.status) {
+            return FileFailure(output, "read", args[0], read.status);
+        }
+
+        if (const platform::FileStatus closed = file.Close(); !closed) {
+            return FileFailure(output, "close", args[0], closed);
+        }
+    }
+
+    Array<uint8> json(allocator);
+    {
+        TraceModel model(allocator);
+        if (const auto built = model.Build(bytes.View()); !built) {
+            char text[160];
+            const int length =
+                snprintf(text, sizeof(text), "trace-report: '%.*s' is not a trace file (%s)\n",
+                         static_cast<int>(args[0].ByteCount()), args[0].Data(),
+                         ErrorCodeName(built.Error()));
+            return WriteText(output, CommandletStream::Error,
+                             StringView(text, length > 0 ? static_cast<usize>(length) : 0));
+        }
+
+        if (const auto written = WriteTraceReportJson(model, json); !written) {
+            return Result<int32>::Failure(written.Error());
+        }
+    }
+
+    const StringView text(reinterpret_cast<const char*>(json.Data()), json.Size());
+    if (args.Size() == 1) {
+        return WriteText(output, CommandletStream::Output, text);
+    }
+
+    char path[CommandletRegistry::MaxArgumentBytes + 1] = {};
+    platform::MemoryCopy(path, args[1].Data(), args[1].ByteCount());
+    platform::File file;
+    if (const platform::FileStatus opened = file.Open(path, platform::FileOpenMode::CreateAlways);
+        !opened) {
+        return FileFailure(output, "create", args[1], opened);
+    }
+
+    if (const platform::FileTransfer written = file.WriteAll(json.Data(), json.Size());
+        !written.status) {
+        return FileFailure(output, "write", args[1], written.status);
+    }
+
+    if (const platform::FileStatus closed = file.Close(); !closed) {
+        return FileFailure(output, "close", args[1], closed);
+    }
+
+    return Result<int32>::Success(0);
+}
+
 } // namespace
 
 int Run(Span<const StringView> args, CommandletOutput output) noexcept {
     CommandletRegistry registry;
     auto registered = registry.Register(
         {"core-check", "Check the Core allocator lifecycle.", &CoreCheck, nullptr});
+    if (!registered) {
+        return 1;
+    }
+    registered =
+        registry.Register({"trace-report", "Write a deterministic JSON report of a .rtrace file.",
+                           &TraceReport, nullptr});
     if (!registered) {
         return 1;
     }

@@ -1,9 +1,9 @@
-#include "TraceStreamDecoder.h"
+#include <TraceAnalysis/TraceStreamDecoder.h>
 
 #include <Compression/Compression.h>
 #include <Platform/Memory.h>
 
-namespace rocks::tracetest {
+namespace rocks {
 
 namespace {
 
@@ -205,14 +205,20 @@ const DecodedSchema* TraceStreamDecoder::FindSchema(StringView name) const noexc
     return nullptr;
 }
 
-bool TraceStreamDecoder::DecodeRecords(uint16 streamId, Array<DecodedRecord>& out) const noexcept {
+TraceDecodeStatus
+TraceStreamDecoder::DecodeRecordsPartial(uint16 streamId,
+                                         Array<DecodedRecord>& out) const noexcept {
     Reader reader{Stream(streamId)};
     while (reader.position < reader.bytes.Size()) {
         DecodedRecord record;
         record.typeId = reader.Read<uint16>();
+        if (reader.failed) {
+            return TraceDecodeStatus::Truncated;
+        }
+
         const DecodedSchema* schema = FindSchema(record.typeId);
-        if (reader.failed || schema == nullptr) {
-            return false;
+        if (schema == nullptr) {
+            return TraceDecodeStatus::UnknownType;
         }
 
         if (schema->IsOrdered()) {
@@ -232,12 +238,16 @@ bool TraceStreamDecoder::DecodeRecords(uint16 streamId, Array<DecodedRecord>& ou
             record.variable[index] = reader.Take(lengths[index]);
         }
 
-        if (reader.failed || !out.TryPushBack(record)) {
-            return false;
+        if (reader.failed) {
+            return TraceDecodeStatus::Truncated;
+        }
+
+        if (!out.TryPushBack(record)) {
+            return TraceDecodeStatus::OutOfMemory;
         }
     }
 
-    return true;
+    return TraceDecodeStatus::Complete;
 }
 
 bool DecodeScopeBatch(Span<const uint8> events, Array<DecodedScopeEvent>& out) noexcept {
@@ -324,4 +334,4 @@ bool BuildScopes(Span<const DecodedScopeEvent> events, Array<DecodedScope>& out,
     return true;
 }
 
-} // namespace rocks::tracetest
+} // namespace rocks

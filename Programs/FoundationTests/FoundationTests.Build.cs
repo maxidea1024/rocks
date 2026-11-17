@@ -16,7 +16,7 @@ public abstract class TestsModule : ModuleRules
     private static readonly string[] RuntimeTestModules = ["Base", "Core", "PlatformBase", "Task", "Localization", "Serialization", "Compression", "AsyncCompression", "Crypto", "DeterministicMath", "TraceCapture"];
 
     // Core 계층 개발 도구 모듈(Core/Source/Developer)의 테스트다(모든 테스트 실행 파일에 들어간다).
-    private static readonly string[] DeveloperTestModules = ["CompressionTraining"];
+    private static readonly string[] DeveloperTestModules = ["CompressionTraining", "TraceAnalysis"];
 
     // Object 계열 모듈의 테스트다(FoundationTests·EngineTests에 들어간다).
     private static readonly string[] ObjectTestModules = ["ObjectRuntime", "ObjectSerialization", "ReflectionText"];

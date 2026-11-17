@@ -1,6 +1,6 @@
 #pragma once
 
-#include "TraceStreamDecoder.h"
+#include <TraceAnalysis/TraceStreamDecoder.h>
 
 #include <Core/Containers/Array.h>
 #include <Core/Memory/SystemAllocator.h>
