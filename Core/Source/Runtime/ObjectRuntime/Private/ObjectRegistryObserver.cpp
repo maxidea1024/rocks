@@ -347,7 +347,7 @@ Result<void> ObjectRegistry::Discard(const ObjectAccessContext& access,
         if (clustersEnabled_) {
             for (Slot* node : nodes) {
                 if (IsClusterMemberLocked(*node)) {
-                    const uint32 id = CellOf(node->index).state & ClusterIdMask;
+                    const uint32 id = ClusterStateOf(node->index) & ClusterIdMask;
                     if (clusters_[id].root == node->index) {
                         DissolveClusterLocked(id);
                     }

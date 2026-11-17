@@ -104,6 +104,8 @@ ObjectRegistry::~ObjectRegistry() {
     ReleaseRegistryMemory(allocator_, gcTypes_);
     ReleaseRegistryMemory(allocator_, rootList_);
     ReleaseRegistryMemory(allocator_, clusters_);
+    ReleaseRegistryMemory(allocator_, clusterEpochs_);
+    clusterEpochs_ = nullptr;
     clusters_ = nullptr;
     gcPages_ = nullptr;
     gcTypes_ = nullptr;
@@ -479,7 +481,7 @@ Result<void> ObjectRegistry::RequestDestroyLocked(ObjectHandle handle, const Obj
 
     slot->SetState(tally_, SlotState::DestroyRequested);
     if (IsClusterMemberLocked(*slot)) {
-        const uint32 id = CellOf(slot->index).state & ClusterIdMask;
+        const uint32 id = ClusterStateOf(slot->index) & ClusterIdMask;
         if (clusters_[id].root == slot->index) {
             // 루트의 파괴 요청은 클러스터를 해체한다(13.2절).
             DissolveClusterLocked(id);

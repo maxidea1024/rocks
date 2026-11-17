@@ -47,12 +47,13 @@ void StoreEpoch(uint32& epoch, uint32 value) noexcept {
 } // namespace
 
 bool ObjectRegistry::IsClusterMarkedLocked(uint32 id) const noexcept {
-    const ClusterRecord& record = clusters_[id];
-    return record.permanent || LoadEpoch(record.markEpoch) == gcEpoch_;
+    return LoadEpoch(clusterEpochs_[id]) == gcEpoch_;
 }
 
 bool ObjectRegistry::IsClusterMemberLocked(const Slot& owner) const noexcept {
-    return clustersEnabled_ && (CellOf(owner.index).state & ClusterMember) != 0;
+    // clustered 비트는 장부 상태의 ClusterMember와 같다(가입·이탈·해체가 함께 바꾼다 — Debug 장부
+    // 검증이 대조한다). 참조 쓰기마다 부르므로 장부 칸 대신 비트 묶음을 읽는다.
+    return clustersEnabled_ && (BitsOf(owner.index).clustered & BitOf(owner.index)) != 0;
 }
 
 void ObjectRegistry::LinkCellLocked(uint32& head, uint32 slot, bool boundary) noexcept {
@@ -90,32 +91,36 @@ void ObjectRegistry::UnlinkCellLocked(uint32& head, uint32 slot, bool boundary) 
 }
 
 void ObjectRegistry::LedgerEdgeLocked(uint32 owner, uint32 target, bool add) noexcept {
-    ClusterCell& from = CellOf(owner);
-    const uint32 id = from.state & ClusterIdMask;
-    ClusterRecord& record = clusters_[id];
-    ClusterCell& to = CellOf(target);
-    if (to.state == (ClusterMember | id) || to.state == (ClusterDetached | id)) {
+    // 분류는 소속이면 chunk 클러스터 표로 끝낸다(장부 칸은 바꿀 계수가 든 칸 하나만 읽는다). 소속이
+    // 아닌 대상만 detached인지 대상 칸의 상태를 본다.
+    const uint32 id = MemberClusterOf(owner);
+    const bool member = (BitsOf(target).clustered & BitOf(target)) != 0;
+    const bool inside =
+        member ? MemberClusterOf(target) == id : ClusterStateOf(target) == (ClusterDetached | id);
+    if (inside) {
+        uint32& count = ClusterInCountOf(target);
         if (add) {
-            ++to.inCount;
+            ++count;
             return;
         }
 
-        if (to.inCount == 0) {
+        if (count == 0) {
             platform::Fatal("Cluster ledger in-count underflow");
         }
 
         // detached는 그 클러스터 소속 객체에서 오는 간선이 없어지면 클러스터 없음이 된다.
-        if (--to.inCount == 0 && (to.state & ClusterDetached) != 0) {
-            UnlinkCellLocked(record.detachedHead, target, false);
-            to = ClusterCell{};
+        if (--count == 0 && !member) {
+            UnlinkCellLocked(clusters_[id].detachedHead, target, false);
+            ClearClusterSlotLocked(target);
         }
 
         return;
     }
 
+    ClusterCell& from = CellOf(owner);
     if (add) {
         if (from.outCount++ == 0) {
-            LinkCellLocked(record.boundaryHead, owner, true);
+            LinkCellLocked(clusters_[id].boundaryHead, owner, true);
         }
 
         return;
@@ -126,8 +131,13 @@ void ObjectRegistry::LedgerEdgeLocked(uint32 owner, uint32 target, bool add) noe
     }
 
     if (--from.outCount == 0) {
-        UnlinkCellLocked(record.boundaryHead, owner, true);
+        UnlinkCellLocked(clusters_[id].boundaryHead, owner, true);
     }
+}
+
+void ObjectRegistry::ClearClusterSlotLocked(uint32 slot) noexcept {
+    CellOf(slot) = ClusterCell{};
+    ClusterInCountOf(slot) = 0;
 }
 
 void ObjectRegistry::LedgerEditLocked(const Slot& owner, ObjectHandle removed,
@@ -190,7 +200,7 @@ void ObjectRegistry::LeaveTrace(Slot& slot) noexcept {
 void ObjectRegistry::FinishLeaveLocked(Slot& slot) noexcept {
     const uint32 index = slot.index;
     ClusterCell& cell = CellOf(index);
-    const uint32 id = cell.state & ClusterIdMask;
+    const uint32 id = ClusterStateOf(index) & ClusterIdMask;
     ClusterRecord& record = clusters_[id];
     if (cell.outCount != 0) {
         platform::Fatal("Cluster member left with outgoing ledger edges");
@@ -200,12 +210,12 @@ void ObjectRegistry::FinishLeaveLocked(Slot& slot) noexcept {
     --record.members;
     --tally_.clusterMembers;
     BitsOf(index).clustered &= ~BitOf(index);
-    const uint32 incoming = cell.inCount;
-    cell = ClusterCell{};
+    const uint32 incoming = ClusterInCountOf(index);
+    ClearClusterSlotLocked(index);
     if (incoming != 0) {
         // 같은 클러스터 소속 객체가 아직 가리킨다: 계수를 그대로 옮긴 detached다.
-        cell.state = ClusterDetached | id;
-        cell.inCount = incoming;
+        ClusterStateOf(index) = ClusterDetached | id;
+        ClusterInCountOf(index) = incoming;
         LinkCellLocked(record.detachedHead, index, false);
     }
 
@@ -249,9 +259,8 @@ void ObjectRegistry::DissolveClusterLocked(uint32 id) noexcept {
 
     // 소속을 비우고 클러스터 표식 상태를 mark로 옮긴다(표식됐으면 안쪽 간선의 대상이 모두 산다).
     for (uint32 at = record.memberHead; at != NoSlot;) {
-        ClusterCell& cell = CellOf(at);
-        const uint32 next = cell.listNext;
-        cell = ClusterCell{};
+        const uint32 next = CellOf(at).listNext;
+        ClearClusterSlotLocked(at);
         GcBits& bits = BitsOf(at);
         bits.clustered &= ~BitOf(at);
         if (marked) {
@@ -262,9 +271,8 @@ void ObjectRegistry::DissolveClusterLocked(uint32 id) noexcept {
     }
 
     for (uint32 at = record.detachedHead; at != NoSlot;) {
-        ClusterCell& cell = CellOf(at);
-        const uint32 next = cell.listNext;
-        cell = ClusterCell{};
+        const uint32 next = CellOf(at).listNext;
+        ClearClusterSlotLocked(at);
         at = next;
     }
 
@@ -289,7 +297,8 @@ void ObjectRegistry::DissolveClusterLocked(uint32 id) noexcept {
 }
 
 bool ObjectRegistry::IsPermanentLocked(uint32 slot) const noexcept {
-    return permanentCluster_ != NoSlot && CellOf(slot).state == (ClusterMember | permanentCluster_);
+    return permanentCluster_ != NoSlot &&
+           ClusterStateOf(slot) == (ClusterMember | permanentCluster_);
 }
 
 Result<void> ObjectRegistry::CheckPermanentEdgeLocked(const Slot& owner,
@@ -319,13 +328,21 @@ Result<void> ObjectRegistry::ClosePermanentRegion(const ObjectAccessContext& acc
 }
 
 void ObjectRegistry::AdvanceGcEpochLocked() noexcept {
-    if (++gcEpoch_ != 0) {
-        return;
+    ++gcEpoch_;
+    if (gcEpoch_ == 0) {
+        // epoch가 한 바퀴 돌았다: 옛 cycle의 epoch가 새 cycle과 같아 보이지 않게 비운다.
+        WrapGcEpochLocked();
     }
 
-    // epoch가 한 바퀴 돌았다: 옛 cycle의 epoch가 새 cycle과 같아 보이지 않게 비운다.
+    // 영구 영역은 언제나 표식된 클러스터다(marker는 epoch 하나만 비교한다).
+    if (permanentCluster_ != NoSlot) {
+        clusterEpochs_[permanentCluster_] = gcEpoch_;
+    }
+}
+
+void ObjectRegistry::WrapGcEpochLocked() noexcept {
     for (uint32 id = 0; id < clusterUsed_; ++id) {
-        clusters_[id].markEpoch = 0;
+        clusterEpochs_[id] = 0;
         clusters_[id].processedEpoch = 0;
     }
 
@@ -379,9 +396,7 @@ uint32 ObjectRegistry::CreateClusterLocked(uint32 root, bool designated) noexcep
     record.root = root;
     record.designated = designated;
     // 13.5절: Sweeping 중 만든 클러스터는 표식된 상태로 시작한다(아니면 소속이 cutoff로 보인다).
-    if (gcPhase_ == GcPhase::Sweeping) {
-        record.markEpoch = gcEpoch_;
-    }
+    clusterEpochs_[id] = gcPhase_ == GcPhase::Sweeping ? gcEpoch_ : 0;
 
     ++tally_.clusters;
     if (root != NoSlot) {
@@ -393,13 +408,39 @@ uint32 ObjectRegistry::CreateClusterLocked(uint32 root, bool designated) noexcep
 
 void ObjectRegistry::JoinClusterLocked(uint32 id, uint32 slot) noexcept {
     ClusterRecord& record = clusters_[id];
-    ClusterCell& cell = CellOf(slot);
-    cell = ClusterCell{};
-    cell.state = ClusterMember | id;
+    ClearClusterSlotLocked(slot);
+    ClusterStateOf(slot) = ClusterMember | id;
     LinkCellLocked(record.memberHead, slot, false);
     ++record.members;
     ++tally_.clusterMembers;
-    BitsOf(slot).clustered |= BitOf(slot);
+    // chunk 클러스터 표를 맞춘다(GcBits 주석): 이미 있는 칸이면 그 칸, 남은 소속이 없는 칸은
+    // 이 클러스터가 차지하고, 둘 다 차 있으면 섞임이다.
+    GcBits& bits = BitsOf(slot);
+    const uint64 bit = BitOf(slot);
+    const uint64 others = bits.clustered & ~bit;
+    const uint32 key = id + 1;
+    if (others == 0) {
+        bits.firstCluster = key;
+        bits.secondCluster = 0;
+        bits.clusterSecond = 0;
+    } else if (bits.firstCluster == ChunkClusterMixed) {
+        // 섞인 chunk의 소속은 장부 상태로 찾는다(표를 바꾸지 않는다).
+    } else if (bits.firstCluster == key) {
+        bits.clusterSecond &= ~bit;
+    } else if (bits.secondCluster == key) {
+        bits.clusterSecond |= bit;
+    } else if ((others & ~bits.clusterSecond) == 0) {
+        bits.firstCluster = key;
+        bits.clusterSecond &= ~bit;
+    } else if ((others & bits.clusterSecond) == 0) {
+        bits.secondCluster = key;
+        bits.clusterSecond |= bit;
+    } else {
+        bits.firstCluster = ChunkClusterMixed;
+        bits.clusterSecond = 0;
+    }
+
+    bits.clustered |= bit;
 }
 
 uint64 ObjectRegistry::GcQueueBound(uint64 slots) const noexcept {
@@ -460,33 +501,49 @@ Result<void> ObjectRegistry::ReserveClusters(uint32 count) noexcept {
         ::new (&grown[index]) ClusterRecord();
     }
 
+    auto epochs = allocator_.Allocate(sizeof(uint32) * static_cast<usize>(capacity),
+                                      alignof(uint32), ClusterTableTag);
+    if (!epochs) {
+        ReleaseRegistryMemory(allocator_, grown);
+        return Result<void>::Failure(epochs.Error());
+    }
+
+    auto* grownEpochs = static_cast<uint32*>(epochs.Value());
+    for (uint32 index = 0; index < capacity; ++index) {
+        grownEpochs[index] = 0;
+    }
+
     ClusterRecord* previous = nullptr;
+    uint32* previousEpochs = nullptr;
     {
         // 레코드는 잠금 안(장벽)과 처리 표시 아래(marker)에서만 읽는다. 지금은 처리 표시 아래다.
         platform::LockGuard lock(gate_);
         for (uint32 index = 0; index < clusterUsed_; ++index) {
             grown[index] = clusters_[index];
+            grownEpochs[index] = clusterEpochs_[index];
         }
 
         previous = clusters_;
+        previousEpochs = clusterEpochs_;
         clusters_ = grown;
+        clusterEpochs_ = grownEpochs;
         clusterFreeCount_ += static_cast<uint32>(capacity) - clusterCapacity_;
         clusterCapacity_ = static_cast<uint32>(capacity);
     }
 
     ReleaseRegistryMemory(allocator_, previous);
+    ReleaseRegistryMemory(allocator_, previousEpochs);
     return Result<void>::Success();
 }
 
 ErrorCode ObjectRegistry::MarkCluster(uint32 id, Array<uint32>& work, uint32& marked) noexcept {
-    ClusterRecord& record = clusters_[id];
-    if (record.permanent || LoadEpoch(record.markEpoch) == gcEpoch_) {
+    if (LoadEpoch(clusterEpochs_[id]) == gcEpoch_) {
         return ErrorCode::None;
     }
 
-    StoreEpoch(record.markEpoch, gcEpoch_);
+    StoreEpoch(clusterEpochs_[id], gcEpoch_);
     // 표식 수는 살아남는 객체 수로 센다(소속은 따로 표식하지 않는다).
-    marked += record.members;
+    marked += clusters_[id].members;
     auto pushed = work.TryPushBack(id | ClusterItem);
     return pushed ? ErrorCode::None : pushed.Error();
 }
@@ -557,8 +614,8 @@ Result<void> ObjectRegistry::DesignateCluster(const ObjectAccessContext& access,
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    ClusterCell& cell = CellOf(slot->index);
-    if (cell.state != 0) {
+    uint32& state = ClusterStateOf(slot->index);
+    if (state != 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -568,8 +625,8 @@ Result<void> ObjectRegistry::DesignateCluster(const ObjectAccessContext& access,
             return Result<void>::Failure(ErrorCode::Unsupported);
         }
 
-        cell.state = ClusterPending;
-        cell.inCount = NoSlot;
+        state = ClusterPending;
+        ClusterInCountOf(slot->index) = NoSlot;
         return Result<void>::Success();
     }
 
@@ -580,8 +637,8 @@ Result<void> ObjectRegistry::DesignateCluster(const ObjectAccessContext& access,
 
     // 소속 조건(완전한 필드 배치)을 못 맞추는 타입은 클러스터 밖 일반 객체로 남는다.
     if (complete) {
-        cell.state = ClusterPending;
-        cell.inCount = rooted->index;
+        state = ClusterPending;
+        ClusterInCountOf(slot->index) = rooted->index;
     }
 
     return Result<void>::Success();
@@ -593,18 +650,18 @@ bool ObjectRegistry::IsJoinableRootLocked(uint32 root, uint64 transaction) const
         return false;
     }
 
-    const ClusterCell& cell = CellOf(root);
+    const uint32 state = ClusterStateOf(root);
     if (slot->state == SlotState::Reserved) {
         // 같은 트랜잭션에서 루트로 지정한 객체다.
-        return slot->transaction == transaction && cell.state == ClusterPending &&
-               cell.inCount == NoSlot;
+        return slot->transaction == transaction && state == ClusterPending &&
+               ClusterInCountOf(root) == NoSlot;
     }
 
-    if (slot->state != SlotState::Alive || IsCutoff(slot) || (cell.state & ClusterMember) == 0) {
+    if (slot->state != SlotState::Alive || IsCutoff(slot) || (state & ClusterMember) == 0) {
         return false;
     }
 
-    const ClusterRecord& record = clusters_[cell.state & ClusterIdMask];
+    const ClusterRecord& record = clusters_[state & ClusterIdMask];
     return record.live && !record.dissolved && record.root == root;
 }
 
@@ -647,7 +704,7 @@ Result<void> ObjectRegistry::VerifyClusterLedger() noexcept {
             bool rootListed = record.root == NoSlot;
             for (uint32 at = record.memberHead; at != NoSlot; at = CellOf(at).listNext) {
                 const Slot* slot = SlotAt(at);
-                if (CellOf(at).state != (ClusterMember | id) ||
+                if (ClusterStateOf(at) != (ClusterMember | id) ||
                     (BitsOf(at).clustered & BitOf(at)) == 0 || slot->state != SlotState::Alive ||
                     ++counted > slots) {
                     platform::Fatal("Cluster member list diverged from its ledger cells");
@@ -662,13 +719,13 @@ Result<void> ObjectRegistry::VerifyClusterLedger() noexcept {
 
             members += counted;
             for (uint32 at = record.boundaryHead; at != NoSlot; at = CellOf(at).boundaryNext) {
-                if (CellOf(at).state != (ClusterMember | id) || CellOf(at).outCount == 0) {
+                if (ClusterStateOf(at) != (ClusterMember | id) || CellOf(at).outCount == 0) {
                     platform::Fatal("Cluster boundary list holds a non-boundary object");
                 }
             }
 
             for (uint32 at = record.detachedHead; at != NoSlot; at = CellOf(at).listNext) {
-                if (CellOf(at).state != (ClusterDetached | id) || CellOf(at).inCount == 0 ||
+                if (ClusterStateOf(at) != (ClusterDetached | id) || ClusterInCountOf(at) == 0 ||
                     (BitsOf(at).clustered & BitOf(at)) != 0) {
                     platform::Fatal("Cluster detached list holds a non-detached object");
                 }
@@ -694,7 +751,7 @@ Result<void> ObjectRegistry::VerifyClusterLedger() noexcept {
                 return;
             }
 
-            const uint32 state = recount.registry->CellOf(handle.slot).state;
+            const uint32 state = recount.registry->ClusterStateOf(handle.slot);
             if (state == (ClusterMember | recount.id) || state == (ClusterDetached | recount.id)) {
                 ++(*recount.incoming)[handle.slot];
             } else {
@@ -702,17 +759,21 @@ Result<void> ObjectRegistry::VerifyClusterLedger() noexcept {
             }
         };
         for (uint32 index = 0; index < slots; ++index) {
-            const ClusterCell& cell = CellOf(index);
+            const uint32 state = ClusterStateOf(index);
             const bool clustered = (BitsOf(index).clustered & BitOf(index)) != 0;
-            if (clustered != ((cell.state & ClusterMember) != 0)) {
+            if (clustered != ((state & ClusterMember) != 0)) {
                 platform::Fatal("Cluster bit diverged from its ledger cell");
             }
 
-            if ((cell.state & ClusterMember) == 0) {
+            if (clustered && MemberClusterOf(index) != (state & ClusterIdMask)) {
+                platform::Fatal("Chunk cluster hint diverged from the ledger");
+            }
+
+            if ((state & ClusterMember) == 0) {
                 continue;
             }
 
-            Recount recount{this, index, cell.state & ClusterIdMask, &incoming, &outgoing};
+            Recount recount{this, index, state & ClusterIdMask, &incoming, &outgoing};
             TraceVisitor visitor(&recount, +visit);
             const GcHot& hot = HotOf(index);
             gcTypes_[hot.type].trace(*hot.object, visitor);
@@ -724,20 +785,22 @@ Result<void> ObjectRegistry::VerifyClusterLedger() noexcept {
         // (3) 비교와 소속 불변식(지정 클러스터의 루트 아닌 소속은 inCount ≥ 1 — 13.8절).
         for (uint32 index = 0; index < slots; ++index) {
             const ClusterCell& cell = CellOf(index);
-            const bool counted = (cell.state & (ClusterMember | ClusterDetached)) != 0;
-            if (cell.state == 0 && (cell.inCount != 0 || cell.outCount != 0)) {
+            const uint32 state = ClusterStateOf(index);
+            const bool counted = (state & (ClusterMember | ClusterDetached)) != 0;
+            const uint32 inCount = ClusterInCountOf(index);
+            if (state == 0 && (inCount != 0 || cell.outCount != 0)) {
                 platform::Fatal("Cleared cluster ledger cell kept counts");
             }
 
-            if (counted ? (cell.inCount != incoming[index] || cell.outCount != outgoing[index])
+            if (counted ? (inCount != incoming[index] || cell.outCount != outgoing[index])
                         : incoming[index] != 0) {
                 platform::Fatal("Cluster ledger diverged from a recount");
             }
 
-            if ((cell.state & ClusterMember) != 0) {
-                const ClusterRecord& record = clusters_[cell.state & ClusterIdMask];
+            if ((state & ClusterMember) != 0) {
+                const ClusterRecord& record = clusters_[state & ClusterIdMask];
                 if (options_.verifyClusterOwnership && record.designated && record.root != index &&
-                    cell.inCount == 0) {
+                    inCount == 0) {
                     platform::Fatal("Designated cluster member is not owned inside its cluster");
                 }
             }

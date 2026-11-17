@@ -548,22 +548,23 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
 
         if (clustersEnabled_ && !permanent) {
             for (usize index = 0; index < staged.Size(); ++index) {
-                ClusterCell& cell = CellOf(staged[index].slot);
+                uint32& state = ClusterStateOf(staged[index].slot);
+                uint32& pendingRoot = ClusterInCountOf(staged[index].slot);
                 // 패키지 정책: 패키지 객체는 새 클러스터 루트이고 나머지는 outermost 패키지의
                 // 클러스터에 가입한다(13.3절 — 모든 객체가 완전한 필드 배치다).
-                if (packageClusters && cell.state == 0) {
+                if (packageClusters && state == 0) {
                     const Slot* slot = FindSlot(staged[index]);
-                    cell.state = ClusterPending;
-                    cell.inCount = slot->outer.IsNull() ? NoSlot : slot->outermost->index;
+                    state = ClusterPending;
+                    pendingRoot = slot->outer.IsNull() ? NoSlot : slot->outermost->index;
                 }
 
-                if (cell.state != ClusterPending) {
+                if (state != ClusterPending) {
                     continue;
                 }
 
-                if (cell.inCount == NoSlot) {
+                if (pendingRoot == NoSlot) {
                     ++newClusters;
-                } else if (!IsJoinableRootLocked(cell.inCount, transaction)) {
+                } else if (!IsJoinableRootLocked(pendingRoot, transaction)) {
                     return Result<void>::Failure(ErrorCode::StaleHandle);
                 }
             }
@@ -599,7 +600,7 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
         }
 
         // 처리 표시 아래라 가입 지정 칸이 바뀌지 않는다.
-        if (permanent || (clustersEnabled_ && CellOf(slot->index).state == ClusterPending)) {
+        if (permanent || (clustersEnabled_ && ClusterStateOf(slot->index) == ClusterPending)) {
             state.ledger = &ledger;
             state.ledgerOwner = slot->index;
         }
@@ -648,6 +649,8 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
             if (permanentCluster_ == NoSlot) {
                 permanentCluster_ = CreateClusterLocked(NoSlot, false);
                 clusters_[permanentCluster_].permanent = true;
+                // 영구 영역은 언제나 표식된 클러스터다(AdvanceGcEpochLocked가 cycle마다 맞춘다).
+                clusterEpochs_[permanentCluster_] = gcEpoch_;
             }
 
             for (usize index = 0; index < staged.Size(); ++index) {
@@ -658,8 +661,7 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
         if (clustersEnabled_) {
             for (usize index = 0; index < staged.Size(); ++index) {
                 const uint32 slot = staged[index].slot;
-                const ClusterCell& cell = CellOf(slot);
-                if (cell.state == ClusterPending && cell.inCount == NoSlot) {
+                if (ClusterStateOf(slot) == ClusterPending && ClusterInCountOf(slot) == NoSlot) {
                     // 패키지 클러스터는 고리가 소유라 소속 불변식 검증 대상이 아니다(13.8절).
                     (void)CreateClusterLocked(slot, !packageClusters);
                 }
@@ -667,9 +669,9 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
 
             for (usize index = 0; index < staged.Size(); ++index) {
                 const uint32 slot = staged[index].slot;
-                const ClusterCell& cell = CellOf(slot);
-                if (cell.state == ClusterPending) {
-                    JoinClusterLocked(CellOf(cell.inCount).state & ClusterIdMask, slot);
+                if (ClusterStateOf(slot) == ClusterPending) {
+                    const uint32 root = ClusterInCountOf(slot);
+                    JoinClusterLocked(ClusterStateOf(root) & ClusterIdMask, slot);
                 }
             }
 
@@ -680,7 +682,7 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
             for (usize index = 0; index < staged.Size(); ++index) {
                 const uint32 slot = staged[index].slot;
                 const uint32 outer = HotOf(slot).outer;
-                if ((CellOf(slot).state & ClusterMember) != 0 && outer != NoSlot) {
+                if ((ClusterStateOf(slot) & ClusterMember) != 0 && outer != NoSlot) {
                     LedgerEdgeLocked(slot, outer, true);
                 }
             }
@@ -765,7 +767,7 @@ void ObjectRegistry::Rollback(uint64 transaction, Span<const ObjectHandle> stage
 
             // 클러스터 가입 지정을 지운다(공개 전 객체만 가진다).
             if (clustersEnabled_) {
-                CellOf(slot->index) = ClusterCell{};
+                ClearClusterSlotLocked(slot->index);
             }
 
             // 역순이라 같은 트랜잭션 자식이 먼저 떨어지므로 부모는 자식이 없을 때 회수된다.

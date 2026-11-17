@@ -22,11 +22,15 @@ inline constexpr uint32 NoSlot = NumericLimits<uint32>::Max();
 // 둔다).
 // - ClusterMember | id: 클러스터 id의 소속
 // - ClusterDetached | id: 클러스터 id에서 이탈한 대상(그 소속 객체에서 오는 간선이 남았다)
-// - ClusterPending: 공개 전 객체의 가입 지정(inCount 칸이 루트 슬롯, 루트 지정이면 NoSlot)
+// - ClusterPending: 공개 전 객체의 가입 지정(Slot::clusterInCount가 루트 슬롯, 루트 지정이면
+//   NoSlot)
 inline constexpr uint32 ClusterMember = 1u << 31;
 inline constexpr uint32 ClusterDetached = 1u << 30;
 inline constexpr uint32 ClusterPending = 1u << 29;
 inline constexpr uint32 ClusterIdMask = ClusterPending - 1;
+// chunk 클러스터 표(GcBits::firstCluster)가 이 값이면 chunk에 클러스터가 셋 이상 섞였다(소속의
+// 번호는 장부 상태에서 읽는다).
+inline constexpr uint32 ChunkClusterMixed = NumericLimits<uint32>::Max();
 // 작업 큐 항목의 클러스터 표지다(낮은 비트가 클러스터 번호, 표지가 없으면 슬롯 번호).
 inline constexpr uint32 ClusterItem = 1u << 31;
 enum class SlotState : uint8 {
@@ -69,6 +73,12 @@ struct ObjectRegistry::Slot {
     registry_detail::SlotState state = registry_detail::SlotState::Free;
     // Retired 슬롯이 든 회수 대상 목록이다(그 밖의 상태는 None).
     RetiredQueue queue = RetiredQueue::None;
+    // 클러스터 장부의 inCount다(ClusterCell 주석 — 클러스터를 켠 Registry만 쓴다). 같은 클러스터 안
+    // 간선(가장 흔한 쓰기)은 이 계수만 바꾸고, 참조 추가는 대상 슬롯을 검증으로 이미 읽었으므로
+    // 장부 칸을 따로 읽지 않는다(GcScaleExperiment.ko.md 14절). 공개 전 가입
+    // 지정(ClusterPending)이면 루트 슬롯 번호(루트 지정이면 NoSlot)다. 앞 칸의 채움 바이트 자리라
+    // 슬롯 크기는 그대로다.
+    uint32 clusterInCount = 0;
     // Free면 빈 슬롯 목록(단일 연결 — prevInList는 null), Retired면 queue 목록(이중 연결)의 이웃
     // 슬롯이다. 두 목록은 상태로 배타적이다.
     Slot* nextInList = nullptr;
@@ -291,25 +301,38 @@ struct ObjectRegistry::GcHot {
 //   자식 고리를 따라야 하므로 켜지 않는다). 생성 게시가 켜고 회수가 끈다.
 // - clustered: 클러스터 소속이다(GC-S7). sweep 후보에서 빠지고(live & ~mark & ~clustered) 표식은
 //   그 클러스터를 표식한다. 가입이 켜고 이탈·해체가 끈다(잠금 안).
-struct ObjectRegistry::GcBits {
+// 나머지는 chunk 클러스터 표다. marker와 참조 쓰기가 소속의 클러스터 번호를 비트 묶음과 같은 캐시
+// 줄에서 얻는다(슬롯마다 둔 장부 칸을 무작위로 읽으면 캐시 미스다 — GcScaleExperiment.ko.md 14절).
+// - clusterSeen: 이번 cycle에 클러스터 표식을 본 소속이다. mark처럼 Begin·Collect가 지우고 marker가
+//   켠다(병렬 marker는 atomic OR). 같은 소속으로 가는 다음 간선은 이 비트 하나로 끝난다.
+// - firstCluster·secondCluster: 소속의 (클러스터 번호 + 1), 0이면 비었다. chunk 하나에 클러스터
+//   둘까지 담는다(이웃 슬롯에 만든 클러스터의 경계가 chunk를 가르는 흔한 경우). clusterSecond
+//   비트가 켜진 소속은 secondCluster, 꺼진 소속은 firstCluster다. 셋 이상이면 firstCluster가
+//   registry_detail::ChunkClusterMixed다(장부 상태를 읽는다). 가입이 맞추고(chunk의 소속이 모두
+//   떠난 뒤 가입하면 다시 비운다), 이탈·해체는 clustered 비트만 끄므로 남은 소속에 대해 표는 여전히
+//   맞다.
+struct alignas(64) ObjectRegistry::GcBits {
     uint64 live = 0;
     uint64 mark = 0;
     uint64 leaf = 0;
     uint64 clustered = 0;
+    uint64 clusterSeen = 0;
+    uint64 clusterSecond = 0;
+    uint32 firstCluster = 0;
+    uint32 secondCluster = 0;
 };
 
 // 클러스터 장부 칸이다(슬롯마다, 클러스터를 켠 Registry만 —
 // Docs/Design/GarbageCollectionScale.ko.md 13.4절). 잠금 안에서 바꾸고 marker는 처리 표시 아래에서
 // 읽기만 한다. 비운 칸은 기본값이다.
-// - state: 위 ClusterMember·ClusterDetached·ClusterPending 비트와 클러스터 번호(0이면 없음)
-// - inCount: 소속이면 같은 클러스터 소속 객체에서 오는 간선 수, detached면 그 클러스터 소속
-// 객체에서
-//   오는 간선 수
+// - state: 위 ClusterMember·ClusterDetached·ClusterPending 비트와 클러스터 번호(0이면 없음). 같은
+//   칸의 계수와 함께 읽히도록 칸 안에 둔다(marker는 섞인 chunk에서만 읽는다).
+// - inCount(Slot::clusterInCount에 둔다): 소속이면 같은 클러스터 소속 객체에서 오는 간선 수,
+//   detached면 그 클러스터 소속 객체에서 오는 간선 수
 // - outCount: 소속 객체의 간선 가운데 대상이 같은 클러스터의 소속도 detached도 아닌 간선 수
 // - 목록 고리(소속 목록 또는 detached 목록)와 경계 고리(outCount > 0인 소속 목록), 슬롯 번호다
 struct ObjectRegistry::ClusterCell {
     uint32 state = 0;
-    uint32 inCount = 0;
     uint32 outCount = 0;
     uint32 listNext = registry_detail::NoSlot;
     uint32 listPrev = registry_detail::NoSlot;
@@ -317,8 +340,9 @@ struct ObjectRegistry::ClusterCell {
     uint32 boundaryPrev = registry_detail::NoSlot;
 };
 
-// 클러스터 레코드다. 번호로 ObjectRegistry::clusters_에서 찾는다. markEpoch는 병렬 marker가 atomic
-// 비교 교환으로 쓰고, processedEpoch는 처리한 참여자 하나만 쓴다.
+// 클러스터 레코드다. 번호로 ObjectRegistry::clusters_에서 찾는다. 표식 epoch는 따로 둔
+// ObjectRegistry::clusterEpochs_다(병렬 marker가 atomic 비교 교환으로 쓴다). processedEpoch는
+// 처리한 참여자 하나만 쓴다.
 struct ObjectRegistry::ClusterRecord {
     // 루트 슬롯이다(영구 영역은 NoSlot).
     uint32 root = registry_detail::NoSlot;
@@ -326,7 +350,6 @@ struct ObjectRegistry::ClusterRecord {
     uint32 memberHead = registry_detail::NoSlot;
     uint32 boundaryHead = registry_detail::NoSlot;
     uint32 detachedHead = registry_detail::NoSlot;
-    uint32 markEpoch = 0;
     uint32 processedEpoch = 0;
     // 빈 레코드 목록·해체 대기 목록의 다음 번호다.
     uint32 nextFree = registry_detail::NoSlot;
@@ -342,6 +365,7 @@ struct ObjectRegistry::ClusterRecord {
 
 struct ObjectRegistry::GcPage {
     static_assert(sizeof(GcHot) == 16, "GC hot record must stay 16 bytes");
+    static_assert(sizeof(GcBits) == 64, "GC bit group must fill one cache line");
 
     GcBits bits[registry_detail::ChunksPerGcPage];
     GcHot hot[registry_detail::GcPageSlots];
@@ -404,6 +428,23 @@ inline ObjectRegistry::GcHot& ObjectRegistry::HotOf(uint32 index) const noexcept
 
 inline ObjectRegistry::ClusterCell& ObjectRegistry::CellOf(uint32 index) const noexcept {
     return PageOf(index).cells[index % registry_detail::GcPageSlots];
+}
+
+inline uint32& ObjectRegistry::ClusterStateOf(uint32 index) const noexcept {
+    return CellOf(index).state;
+}
+
+inline uint32& ObjectRegistry::ClusterInCountOf(uint32 index) const noexcept {
+    return SlotAt(index)->clusterInCount;
+}
+
+inline uint32 ObjectRegistry::MemberClusterOf(uint32 index) const noexcept {
+    const GcBits& bits = BitsOf(index);
+    const uint64 bit = uint64(1) << (index % registry_detail::SlotsPerChunk);
+    const uint32 key = (bits.clusterSecond & bit) != 0 ? bits.secondCluster : bits.firstCluster;
+    return key != registry_detail::ChunkClusterMixed
+               ? key - 1
+               : ClusterStateOf(index) & registry_detail::ClusterIdMask;
 }
 
 inline ObjectRegistry::GcBits& ObjectRegistry::BitsOf(uint32 index) const noexcept {

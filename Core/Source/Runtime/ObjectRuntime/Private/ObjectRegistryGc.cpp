@@ -94,9 +94,16 @@ ErrorCode ObjectRegistry::MarkIndex(uint32 index, Array<uint32>& work, uint32& m
             return ErrorCode::StaleHandle;
         }
 
-        // 클러스터 소속은 그 클러스터를 표식한다(GC-S7 — 루트 → 소속 암묵 간선).
+        // 클러스터 소속은 그 클러스터를 표식한다(GC-S7 — 루트 → 소속 암묵 간선). 이번 cycle에 이미
+        // 클러스터 표식을 본 소속이면 비트 하나로 끝난다(장부 상태·epoch를 읽지 않는다).
         if ((bits.clustered & bit) != 0) {
-            return MarkCluster(CellOf(index).state & ClusterIdMask, work, marked);
+            const uint64 seen = LoadMark(bits.clusterSeen);
+            if ((seen & bit) != 0) {
+                return ErrorCode::None;
+            }
+
+            StoreMark(bits.clusterSeen, seen | bit);
+            return MarkCluster(MemberClusterOf(index), work, marked);
         }
 
         const uint64 mark = LoadMark(bits.mark);
@@ -162,7 +169,7 @@ void ObjectRegistry::MarkHandles(MarkState& state, const ObjectHandle* handles,
             if ((BitsOf(target).clustered & BitOf(target)) != 0) {
                 ++state.counters->clusteredEdges;
                 state.counters->sameClusterEdges +=
-                    CellOf(target).state == state.ownerClusterState ? 1u : 0u;
+                    ClusterStateOf(target) == state.ownerClusterState ? 1u : 0u;
             }
         }
 
@@ -321,7 +328,7 @@ void ObjectRegistry::TraceIndex(uint32 index, MarkState& state, TraceVisitor& vi
     if (state.counters != nullptr) {
         ++state.counters->tracedObjects;
         state.ownerClusterState = clustersEnabled_ && (BitsOf(index).clustered & BitOf(index)) != 0
-                                      ? CellOf(index).state
+                                      ? ClusterStateOf(index)
                                       : 0;
     }
 
@@ -656,9 +663,11 @@ Result<void> ObjectRegistry::BeginCollection(const ObjectAccessContext& access) 
         return reserved;
     }
 
-    // 표식 비트를 지운다(chunk마다 word 하나 — 밀집 비트 묶음이라 O(슬롯 수 / 64)).
+    // 표식 비트와 클러스터 표식을 본 소속 비트를 지운다(chunk마다 word 하나씩 — O(슬롯 수 / 64)).
     for (uint32 chunk = 0; chunk < chunkCount_; ++chunk) {
-        StoreMark(BitsOf(chunk * SlotsPerChunk).mark, 0);
+        GcBits& bits = BitsOf(chunk * SlotsPerChunk);
+        StoreMark(bits.mark, 0);
+        StoreMark(bits.clusterSeen, 0);
     }
 
     gcPhase_ = GcPhase::Marking;
@@ -788,7 +797,7 @@ void ObjectRegistry::RetireLocked(Slot& slot) noexcept {
     if constexpr (IsDebugBuild) {
         // 소속·detached는 sweep 후보가 아니다(소속은 clustered 비트, detached는 그 클러스터 처리가
         // 표식하거나 cutoff 해체가 비운다).
-        if (clustersEnabled_ && CellOf(slot.index).state != 0) {
+        if (clustersEnabled_ && ClusterStateOf(slot.index) != 0) {
             platform::Fatal("Retiring an object that is still in a cluster ledger");
         }
     }
@@ -985,17 +994,17 @@ struct ObjectRegistry::ParallelMark {
 
     // 클러스터를 표식한다(atomic 비교 교환 — 이긴 참여자만 클러스터 항목을 넣는다).
     void MarkCluster(MarkParticipant& self, uint32 id) noexcept {
-        ClusterRecord& record = registry->clusters_[id];
+        uint32& slot = registry->clusterEpochs_[id];
         const uint32 epoch = registry->gcEpoch_;
-        uint32 expected = platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&record.markEpoch);
-        if (record.permanent || expected == epoch ||
+        uint32 expected = platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&slot);
+        if (expected == epoch ||
             !platform::AtomicCompareExchangeStrong<platform::MemoryOrder::Relaxed,
-                                                   platform::MemoryOrder::Relaxed>(
-                &record.markEpoch, expected, epoch)) {
+                                                   platform::MemoryOrder::Relaxed>(&slot, expected,
+                                                                                   epoch)) {
             return;
         }
 
-        self.marked += record.members;
+        self.marked += registry->clusters_[id].members;
         Push(self, id | ClusterItem);
     }
 
@@ -1040,7 +1049,14 @@ struct ObjectRegistry::ParallelMark {
             }
 
             if ((bits.clustered & bit) != 0) {
-                MarkCluster(self, registry->CellOf(index).state & ClusterIdMask);
+                // 이번 cycle에 클러스터 표식을 본 소속이면 비트 하나로 끝난다(경합해도 같은 비트를
+                // 켤 뿐이다).
+                uint64& seen = bits.clusterSeen;
+                if ((LoadMark(seen) & bit) == 0) {
+                    (void)platform::AtomicFetchOr<platform::MemoryOrder::Relaxed>(&seen, bit);
+                    MarkCluster(self, registry->MemberClusterOf(index));
+                }
+
                 return ErrorCode::None;
             }
 
@@ -1637,7 +1653,9 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access,
     {
         platform::LockGuard lock(gate_);
         for (uint32 chunk = 0; chunk < chunkCount_; ++chunk) {
-            StoreMark(BitsOf(chunk * SlotsPerChunk).mark, 0);
+            GcBits& bits = BitsOf(chunk * SlotsPerChunk);
+            StoreMark(bits.mark, 0);
+            StoreMark(bits.clusterSeen, 0);
         }
 
         AdvanceGcEpochLocked();
@@ -1744,8 +1762,9 @@ void ObjectRegistry::FinishReclaim(ReclaimWork& work) noexcept {
         GcBits& bits = BitsOf(slot.index);
         bits.leaf &= ~BitOf(slot.index);
         StoreMark(bits.mark, LoadMark(bits.mark) & ~BitOf(slot.index));
+        StoreMark(bits.clusterSeen, LoadMark(bits.clusterSeen) & ~BitOf(slot.index));
         if (clustersEnabled_) {
-            CellOf(slot.index) = ClusterCell{};
+            ClearClusterSlotLocked(slot.index);
         }
 
         slot.outermost = nullptr;

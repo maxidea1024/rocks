@@ -737,8 +737,16 @@ private:
     inline GcPage& PageOf(uint32) const noexcept;
     inline GcHot& HotOf(uint32) const noexcept;
     inline GcBits& BitsOf(uint32) const noexcept;
-    // 클러스터 장부 칸이다(클러스터를 켠 Registry만 — 정의는 ObjectRegistryInternal.h).
+    // 클러스터 장부 칸(계수·고리)과 장부 상태다(클러스터를 켠 Registry만 — 정의는
+    // ObjectRegistryInternal.h).
     inline ClusterCell& CellOf(uint32) const noexcept;
+    inline uint32& ClusterStateOf(uint32) const noexcept;
+    // 장부 inCount(Slot 안 — 공개 전 가입 지정이면 루트 슬롯)다.
+    inline uint32& ClusterInCountOf(uint32) const noexcept;
+    // 소속 슬롯의 클러스터 번호다(GcBits의 chunk 클러스터 표에 있으면 표, 아니면 장부 상태).
+    inline uint32 MemberClusterOf(uint32) const noexcept;
+    // 잠금 보유: slot의 장부(상태·계수·고리)를 비운다.
+    void ClearClusterSlotLocked(uint32 slot) noexcept;
 
     // ---- 클러스터(GC-S7, Docs/Design/GarbageCollectionScale.ko.md 13절 — Private/
     // ObjectRegistryClusters.cpp) ----
@@ -776,6 +784,8 @@ private:
     Result<void> CheckPermanentEdgeLocked(const Slot& owner, ObjectHandle target) const noexcept;
     // 잠금 보유: 표식 epoch를 하나 올린다(Begin·Collect — 한 바퀴 돌면 레코드 epoch를 비운다).
     void AdvanceGcEpochLocked() noexcept;
+    // 잠금 보유: epoch가 한 바퀴 돌았을 때 레코드 epoch를 비운다.
+    void WrapGcEpochLocked() noexcept;
     // 잠금 보유: 모든 클러스터를 해체한다(Shutdown).
     void DissolveAllClustersLocked() noexcept;
     // 잠금 보유: Marking 중 해체해 큐 항목이 남았을 수 있던 레코드를 빈 목록으로 돌린다(큐가 빈
@@ -1153,6 +1163,9 @@ private:
     // Collect마다 하나씩 오른다).
     bool clustersEnabled_ = false;
     ClusterRecord* clusters_ = nullptr;
+    // 클러스터 표식 epoch다(레코드 번호로 색인, 레코드와 같은 용량 — marker가 간선마다 읽으므로
+    // 레코드에서 떼어 작고 연속되게 둔다. 영구 영역은 언제나 지금 epoch다).
+    uint32* clusterEpochs_ = nullptr;
     uint32 clusterCapacity_ = 0;
     uint32 clusterUsed_ = 0;
     uint32 clusterFree_ = NumericLimits<uint32>::Max();
