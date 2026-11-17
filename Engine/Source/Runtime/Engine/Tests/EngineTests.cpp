@@ -1,5 +1,10 @@
+#include <Core/Diagnostics/LogSystem.h>
+#include <Core/Diagnostics/RuntimeLogSink.h>
 #include <Core/Memory/SystemAllocator.h>
+#include <Core/Text/StringBuilder.h>
 #include <Engine/Engine.h>
+#include <Platform/Fatal.h>
+#include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 #include <World/SceneComponent.h>
 #include <World/World.module.generated.h>
@@ -649,4 +654,470 @@ TEST(Engine_ShutdownStageFailureIsReportedWithoutSkippingLaterStages) {
         CHECK(stepCount == 2 + MaxShutdownCollectPasses + 2);
         CHECK(strcmp(steps[stepCount - 1], "hook.stop") == 0);
     }
+}
+
+// --- 로그(LG6) ---
+
+namespace {
+
+// 기록을 복사해 두는 sink다. 메시지·템플릿·문맥("Name=Value;" 이어 붙임)·프레임을 남긴다. 크기가
+// 커서 정적 객체 하나를 시험마다 비워 쓴다.
+class EngineLogCapture final : public RuntimeLogSink {
+public:
+    static constexpr uint32 MaxRecords = 256;
+    static constexpr usize TextBytes = 256;
+
+    struct Record {
+        LogLevel level = LogLevel::Trace;
+        uint64 frame = 0;
+        char messageTemplate[TextBytes]{};
+        char message[TextBytes]{};
+        char context[TextBytes]{};
+    };
+
+    Result<void> Write(const LogEvent& event) noexcept override {
+        ++total;
+        if (count == MaxRecords) {
+            return Result<void>::Success();
+        }
+
+        Record& record = records[count++];
+        record.level = event.level;
+        record.frame = event.frame;
+        Copy(record.messageTemplate, event.messageTemplate);
+        Copy(record.message, event.message);
+        FixedStringBuilder context{Span<char>(record.context)};
+        for (const LogProperty& property : event.context) {
+            (void)context.TryAppendFormat("{}={};", property.name, property.text);
+        }
+
+        return Result<void>::Success();
+    }
+
+    void Reset() noexcept {
+        count = 0;
+        total = 0;
+    }
+
+    // level이고 템플릿이 text와 같은 기록 수다.
+    uint32 Count(LogLevel level, const char* text) const noexcept {
+        uint32 matches = 0;
+        for (uint32 index = 0; index < count; ++index) {
+            if (records[index].level == level &&
+                strcmp(records[index].messageTemplate, text) == 0) {
+                ++matches;
+            }
+        }
+
+        return matches;
+    }
+
+    // level이고 템플릿이 text인 첫 기록이다. 없으면 nullptr이다.
+    const Record* Find(LogLevel level, const char* text) const noexcept {
+        for (uint32 index = 0; index < count; ++index) {
+            if (records[index].level == level &&
+                strcmp(records[index].messageTemplate, text) == 0) {
+                return &records[index];
+            }
+        }
+
+        return nullptr;
+    }
+
+    void Print() const noexcept {
+        for (uint32 index = 0; index < count; ++index) {
+            printf("  log[%u] %s | %s | frame %llu\n", index, records[index].message,
+                   records[index].context, static_cast<unsigned long long>(records[index].frame));
+        }
+    }
+
+    Record records[MaxRecords];
+    uint32 count = 0;
+    uint32 total = 0;
+
+private:
+    static void Copy(char (&out)[TextBytes], StringView text) noexcept {
+        const usize bytes = text.ByteCount() < TextBytes - 1 ? text.ByteCount() : TextBytes - 1;
+        for (usize index = 0; index < bytes; ++index) {
+            out[index] = text.Data()[index];
+        }
+
+        out[bytes] = 0;
+    }
+};
+
+EngineLogCapture capturedLogs;
+
+// Manual 모드 LogSystem에 capturedLogs를 붙인다. 설치는 시험이 LogInstallScope로 한다. 앞 시험이
+// 설치 밖에서 버린 기록의 알림은 버리는 설치 하나로 먼저 소비한다.
+struct ManualLogs {
+    ManualLogs() noexcept : logs(allocator, MakeConfig()) {
+        {
+            LogSystem reset(allocator, LogSystemConfig::ForTool());
+            (void)reset.Start();
+            LogInstallScope drained(reset);
+        }
+
+        capturedLogs.Reset();
+        if (!logs.Start() || !logs.AddSink(capturedLogs)) {
+            platform::Fatal("Manual log system did not start");
+        }
+    }
+
+    static LogSystemConfig MakeConfig() noexcept {
+        LogSystemConfig config;
+        config.mode = LogMode::Manual;
+        config.globalMinimum = LogLevel::Debug;
+        return config;
+    }
+
+    void Pump() noexcept {
+        (void)logs.Pump();
+    }
+
+    SystemAllocator allocator;
+    LogSystem logs;
+};
+
+constexpr const char* InitFailedTemplate = "Engine initialization failed at {Stage}: {Error}";
+constexpr const char* InitializedTemplate =
+    "Engine initialized with {SubsystemCount} subsystems in {Ms:.2f} ms";
+
+// 초기화 실패 Error가 정확히 하나이고 메시지·"Stage" 문맥이 stage인지 확인한다.
+bool InitFailureLoggedOnceAt(const char* stage, const char* error) noexcept {
+    if (capturedLogs.Count(LogLevel::Error, InitFailedTemplate) != 1) {
+        capturedLogs.Print();
+        return false;
+    }
+
+    const EngineLogCapture::Record* record = capturedLogs.Find(LogLevel::Error, InitFailedTemplate);
+    char message[EngineLogCapture::TextBytes];
+    char context[EngineLogCapture::TextBytes];
+    snprintf(message, sizeof(message), "Engine initialization failed at %s: %s", stage, error);
+    snprintf(context, sizeof(context), "Stage=%s;", stage);
+    const bool same =
+        strcmp(record->message, message) == 0 && strcmp(record->context, context) == 0;
+    if (!same) {
+        capturedLogs.Print();
+    }
+
+    return same;
+}
+
+test::NFailAllocator* attemptCounter = nullptr;
+uint64 attemptsAtNativeRegistration = 0;
+
+// 타입 등록 단계의 마지막 호출이다. 그때까지의 할당 시도 수를 기록한다(할당하지 않는다).
+Result<void> RecordAttempts(TypeRegistry&) noexcept {
+    attemptsAtNativeRegistration = attemptCounter->Attempts();
+    return Result<void>::Success();
+}
+
+Result<void> FailNativeRegistration(TypeRegistry&) noexcept {
+    return Result<void>::Failure(ErrorCode::AlreadyExists);
+}
+
+WorldCreateDesc NamedWorld(const char* name) noexcept {
+    WorldCreateDesc desc;
+    desc.name = name;
+    return desc;
+}
+
+class FailingWorldSubsystem final : public WorldSubsystem {
+public:
+    Result<void> Initialize(World&) noexcept override {
+        return Result<void>::Failure(ErrorCode::DependencyFailed);
+    }
+};
+
+} // namespace
+
+TEST(EngineLog_EachInitializationStageFailureIsLoggedOnceWithItsStage) {
+    ManualLogs logs;
+    LogInstallScope installed(logs.logs);
+    SystemAllocator system;
+    test::NFailAllocator allocator(system);
+    attemptCounter = &allocator;
+
+    // 할당 시도 수를 잰 뒤(실패 없음) 그 시도 각각을 실패시켜 단계 판정을 모두 확인한다.
+    {
+        EngineConfig config;
+        config.registerTypes = &RecordAttempts;
+        allocator.DisableFailure();
+        Engine engine(allocator);
+        REQUIRE(engine.Initialize(config));
+        REQUIRE(engine.Shutdown());
+    }
+
+    const uint64 objectRegistryAttempt = attemptsAtNativeRegistration + 1;
+    REQUIRE(objectRegistryAttempt > 2);
+    bool sawTypeRegistry = false;
+    bool sawModuleRegistration = false;
+    bool sawRegisterTypes = false;
+    for (uint64 attempt = 1; attempt <= objectRegistryAttempt; ++attempt) {
+        logs.Pump();
+        capturedLogs.Reset();
+        EngineConfig config;
+        config.registerTypes = &RecordAttempts;
+        allocator.FailOnAttempt(attempt);
+        {
+            Engine engine(allocator);
+            REQUIRE(!engine.Initialize(config));
+            CHECK(engine.State() == EngineState::Failed);
+        }
+
+        allocator.DisableFailure();
+        logs.Pump();
+        REQUIRE(capturedLogs.Count(LogLevel::Error, InitFailedTemplate) == 1);
+        CHECK(capturedLogs.Count(LogLevel::Info, InitializedTemplate) == 0);
+        const char* context = capturedLogs.Find(LogLevel::Error, InitFailedTemplate)->context;
+        if (attempt == 1) {
+            CHECK(strcmp(context, "Stage=TypeRegistry;") == 0);
+        }
+
+        if (attempt == objectRegistryAttempt) {
+            CHECK(strcmp(context, "Stage=ObjectRegistry;") == 0);
+        }
+
+        sawTypeRegistry |= strcmp(context, "Stage=TypeRegistry;") == 0;
+        sawModuleRegistration |= strcmp(context, "Stage=ModuleRegistration;") == 0;
+        sawRegisterTypes |= strcmp(context, "Stage=RegisterTypes;") == 0;
+    }
+
+    CHECK(sawTypeRegistry && sawModuleRegistration && sawRegisterTypes);
+    attemptCounter = nullptr;
+
+    // 할당이 아닌 단계: 타입 등록 함수, Subsystem, client 시작.
+    {
+        capturedLogs.Reset();
+        EngineConfig config;
+        config.registerTypes = &FailNativeRegistration;
+        Engine engine(system);
+        CHECK(engine.Initialize(config).Error() == ErrorCode::AlreadyExists);
+        logs.Pump();
+        CHECK(InitFailureLoggedOnceAt("RegisterTypes", "AlreadyExists"));
+    }
+
+    {
+        ResetSteps();
+        capturedLogs.Reset();
+        const EngineSubsystemType subsystems[] = {
+            MakeSubsystemType<EngineSubsystem, FailingSubsystem>("Failing")};
+        EngineConfig config;
+        config.subsystems = subsystems;
+        Engine engine(system);
+        CHECK(engine.Initialize(config).Error() == ErrorCode::OutOfMemory);
+        logs.Pump();
+        CHECK(InitFailureLoggedOnceAt("Subsystems", "OutOfMemory"));
+    }
+
+    {
+        ResetSteps();
+        capturedLogs.Reset();
+        RecordingClient client;
+        client.fail = true;
+        EngineConfig config;
+        config.client = &client;
+        Engine engine(system);
+        CHECK(engine.Initialize(config).Error() == ErrorCode::DependencyFailed);
+        logs.Pump();
+        CHECK(InitFailureLoggedOnceAt("ClientStart", "DependencyFailed"));
+    }
+
+    // 성공하면 Info 한 번이고 실패 Error는 없다. 상태 오류(두 번째 Initialize)는 기록하지 않는다.
+    {
+        capturedLogs.Reset();
+        EngineConfig config;
+        Engine engine(system);
+        REQUIRE(engine.Initialize(config));
+        CHECK(engine.Initialize(config).Error() == ErrorCode::InvalidArgument);
+        REQUIRE(engine.Shutdown());
+        logs.Pump();
+        CHECK(capturedLogs.Count(LogLevel::Info, InitializedTemplate) == 1);
+        CHECK(capturedLogs.Count(LogLevel::Error, InitFailedTemplate) == 0);
+        CHECK(capturedLogs.Count(LogLevel::Info, "Engine shutting down with {Worlds} worlds "
+                                                 "after {Frames} frames") == 1);
+        CHECK(capturedLogs.Count(LogLevel::Info, "Engine shut down") == 1);
+    }
+}
+
+TEST(EngineLog_DeferredWorldDestroyWarnsOnceAndReportsResolution) {
+    ManualLogs logs;
+    LogInstallScope installed(logs.logs);
+    SystemAllocator allocator;
+    {
+        EngineConfig config;
+        config.fixedFrameDeltaSeconds = 0.016;
+        config.registerTypes = &RegisterGameTypes;
+        Engine engine(allocator);
+        REQUIRE(engine.Initialize(config));
+        auto world = engine.CreateWorld(NamedWorld("Held"));
+        REQUIRE(world);
+        auto actor = world.Value()->SpawnActor<TickingActor>();
+        REQUIRE(actor);
+        {
+            // 밖에서 Borrow를 쥐고 있으면 World Shutdown이 끝나지 않아 파괴가 미뤄진다.
+            auto borrow = world.Value()->Resolve<TickingActor>(actor.Value());
+            REQUIRE(borrow);
+            CHECK(!engine.DestroyWorld(world.Value()));
+            constexpr uint64 Frames = 1000;
+            for (uint64 frame = 0; frame < Frames; ++frame) {
+                REQUIRE(engine.RunFrame());
+                logs.Pump();
+            }
+
+            CHECK(engine.WorldCount() == 1);
+            CHECK(engine.Stats().pendingWorldDestroys == 1);
+        }
+
+        REQUIRE(engine.RunFrame());
+        CHECK(engine.WorldCount() == 0);
+        REQUIRE(engine.Shutdown());
+    }
+
+    logs.Pump();
+    CHECK(capturedLogs.Count(LogLevel::Debug,
+                             "World {World} destroy deferred: {Error}; retrying each frame") == 1);
+    const char* const warning = "World {World} destroy still deferred after {Frames} frames: "
+                                "{Error}; something outside still holds its objects";
+    CHECK(capturedLogs.Count(LogLevel::Warning, warning) == 1);
+    const EngineLogCapture::Record* warned = capturedLogs.Find(LogLevel::Warning, warning);
+    REQUIRE(warned != nullptr);
+    // DestroyWorld는 프레임 0(첫 프레임 전)에 미뤄졌고 WorldDestroyWarnFrames를 넘은 첫 프레임에
+    // 경고한다.
+    CHECK(warned->frame == WorldDestroyWarnFrames + 1);
+    CHECK(strcmp(warned->message, "World Held destroy still deferred after 301 frames: Busy; "
+                                  "something outside still holds its objects") == 0);
+    const char* const resolved = "World {World} destroyed after {Frames} deferred frames";
+    CHECK(capturedLogs.Count(LogLevel::Info, resolved) == 1);
+    const EngineLogCapture::Record* done = capturedLogs.Find(LogLevel::Info, resolved);
+    REQUIRE(done != nullptr);
+    CHECK(strcmp(done->message, "World Held destroyed after 1001 deferred frames") == 0);
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+TEST(EngineLog_RepeatedWorldTickFailureIsLoggedOnceThenSummarized) {
+    ManualLogs logs;
+    LogInstallScope installed(logs.logs);
+    SystemAllocator allocator;
+    {
+        EngineConfig config;
+        config.fixedFrameDeltaSeconds = 0.016;
+        config.registerTypes = &RegisterGameTypes;
+        Engine engine(allocator);
+        REQUIRE(engine.Initialize(config));
+        auto world = engine.CreateWorld(NamedWorld("Broken"));
+        REQUIRE(world);
+        auto actor = world.Value()->SpawnActor<TickingActor>();
+        REQUIRE(actor);
+        {
+            // World를 직접 Shutdown하다 Borrow 때문에 멈추면 이후 Tick은 매 프레임
+            // ShuttingDown이다.
+            auto borrow = world.Value()->Resolve<TickingActor>(actor.Value());
+            REQUIRE(borrow);
+            REQUIRE(!world.Value()->Shutdown());
+            for (uint32 frame = 0; frame < 10; ++frame) {
+                CHECK(engine.RunFrame().Error() == ErrorCode::ShuttingDown);
+                logs.Pump();
+            }
+        }
+
+        REQUIRE(engine.DestroyWorld(world.Value()));
+        REQUIRE(engine.Shutdown());
+    }
+
+    logs.Pump();
+    const char* const failed = "World {World} tick failed: {Error}";
+    CHECK(capturedLogs.Count(LogLevel::Error, failed) == 1);
+    const EngineLogCapture::Record* first = capturedLogs.Find(LogLevel::Error, failed);
+    REQUIRE(first != nullptr);
+    CHECK(strcmp(first->message, "World Broken tick failed: ShuttingDown") == 0);
+    CHECK(strcmp(first->context, "World=Broken;") == 0);
+    CHECK(first->frame == 1);
+    const char* const summary =
+        "World {World} tick failed {Count} more times after the first failure (last: {Error})";
+    CHECK(capturedLogs.Count(LogLevel::Error, summary) == 1);
+    const EngineLogCapture::Record* summarized = capturedLogs.Find(LogLevel::Error, summary);
+    REQUIRE(summarized != nullptr);
+    CHECK(strcmp(summarized->message, "World Broken tick failed 9 more times after the first "
+                                      "failure (last: ShuttingDown)") == 0);
+}
+
+TEST(EngineLog_TickPrerequisiteCycleIsRejectedWithActorNames) {
+    ManualLogs logs;
+    LogInstallScope installed(logs.logs);
+    SystemAllocator allocator;
+    {
+        EngineConfig config;
+        config.fixedFrameDeltaSeconds = 0.016;
+        config.registerTypes = &RegisterGameTypes;
+        Engine engine(allocator);
+        REQUIRE(engine.Initialize(config));
+        auto world = engine.CreateWorld(NamedWorld("Main"));
+        REQUIRE(world);
+        World& main = *world.Value();
+        auto first = main.SpawnActor<TickingActor>();
+        auto second = main.SpawnActor<TickingActor>();
+        REQUIRE(first && second);
+        // 시작(Tick 등록) 전에는 거부한다.
+        CHECK(main.AddActorTickPrerequisite(first.Value(), second.Value()).Error() ==
+              ErrorCode::InvalidArgument);
+        REQUIRE(engine.RunFrame());
+        REQUIRE(main.AddActorTickPrerequisite(first.Value(), second.Value()));
+        CHECK(main.AddActorTickPrerequisite(first.Value(), first.Value()).Error() ==
+              ErrorCode::InvalidArgument);
+        CHECK(main.AddActorTickPrerequisite(second.Value(), first.Value()).Error() ==
+              ErrorCode::CycleDetected);
+        // 거부는 상태를 바꾸지 않는다(다음 프레임도 정상 실행).
+        REQUIRE(engine.RunFrame());
+        logs.Pump();
+        const char* const rejected =
+            "Rejected tick prerequisite {Before} -> {After}: would create a cycle";
+        CHECK(capturedLogs.Count(LogLevel::Warning, rejected) == 1);
+        const EngineLogCapture::Record* record = capturedLogs.Find(LogLevel::Warning, rejected);
+        REQUIRE(record != nullptr);
+        char expected[EngineLogCapture::TextBytes];
+        snprintf(expected, sizeof(expected),
+                 "Rejected tick prerequisite TickingActor#%u -> TickingActor#%u: would create a "
+                 "cycle",
+                 first.Value().slot, second.Value().slot);
+        CHECK(strcmp(record->message, expected) == 0);
+        CHECK(strcmp(record->context, "World=Main;") == 0);
+        REQUIRE(engine.Shutdown());
+    }
+}
+
+TEST(EngineLog_RunReportsFramesAndReasonAndCreateWorldFailureStage) {
+    ManualLogs logs;
+    LogInstallScope installed(logs.logs);
+    SystemAllocator allocator;
+    {
+        EngineConfig config;
+        config.fixedFrameDeltaSeconds = 0.016;
+        config.maxFrames = 3;
+        Engine engine(allocator);
+        REQUIRE(engine.Initialize(config));
+        const WorldSubsystemType failing[] = {
+            MakeSubsystemType<WorldSubsystem, FailingWorldSubsystem>("Failing")};
+        WorldCreateDesc desc;
+        desc.name = "Doomed";
+        desc.subsystems = failing;
+        CHECK(engine.CreateWorld(desc).Error() == ErrorCode::DependencyFailed);
+        REQUIRE(engine.Run());
+        REQUIRE(engine.Shutdown());
+    }
+
+    logs.Pump();
+    const char* const failed = "World {World} failed during {Stage}: {Error}";
+    CHECK(capturedLogs.Count(LogLevel::Error, failed) == 1);
+    const EngineLogCapture::Record* worldFailure = capturedLogs.Find(LogLevel::Error, failed);
+    REQUIRE(worldFailure != nullptr);
+    CHECK(strcmp(worldFailure->message,
+                 "World Doomed failed during Initialize: DependencyFailed") == 0);
+    const char* const finished = "Engine run finished after {Frames} frames: {Reason}";
+    CHECK(capturedLogs.Count(LogLevel::Info, finished) == 1);
+    const EngineLogCapture::Record* record = capturedLogs.Find(LogLevel::Info, finished);
+    REQUIRE(record != nullptr);
+    CHECK(strcmp(record->message, "Engine run finished after 3 frames: MaxFrames") == 0);
+    CHECK(record->frame == 3);
 }

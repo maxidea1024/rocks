@@ -96,7 +96,7 @@ TEST(Tick_PrerequisitesOverridePriorityAndCyclesAreRejected) {
     CHECK(scheduler.AddPrerequisite(a.Value(), c.Value()).IsOk()); // 중복은 성공
     REQUIRE(scheduler.AddPrerequisite(c.Value(), b.Value()));
     // 사이클(b → a)과 자기 의존, 다른 단계 의존은 거부한다.
-    CHECK(scheduler.AddPrerequisite(b.Value(), a.Value()).Error() == ErrorCode::InvalidArgument);
+    CHECK(scheduler.AddPrerequisite(b.Value(), a.Value()).Error() == ErrorCode::CycleDetected);
     CHECK(scheduler.AddPrerequisite(a.Value(), a.Value()).Error() == ErrorCode::InvalidArgument);
     CHECK(scheduler.AddPrerequisite(a.Value(), other.Value()).Error() ==
           ErrorCode::InvalidArgument);
@@ -187,7 +187,7 @@ TEST(Tick_CycleCheckIsLinearOnDiamondDependencies) {
     REQUIRE(unrelated);
     REQUIRE(scheduler.AddPrerequisite(unrelated.Value(), handles[Layers - 1][0]));
     CHECK(scheduler.AddPrerequisite(handles[0][0], unrelated.Value()).Error() ==
-          ErrorCode::InvalidArgument);
+          ErrorCode::CycleDetected);
     REQUIRE(scheduler.RunPhase(TickPhase::PrePhysics, Frame(), executor));
     CHECK(scheduler.Stats().executedThisFrame == Layers * 2 + 1);
 }

@@ -205,3 +205,14 @@ void LogAppendLine(FixedStringBuilder& out, const LogCaptureTemplate& text, cons
 }
 
 } // namespace rocks::detail
+
+namespace rocks {
+
+void Log::SetFrame(uint64 frame) noexcept {
+    detail::LogReadScope scope;
+    if (LogSystem* system = scope.System(); system != nullptr) {
+        system->SetFrame(frame);
+    }
+}
+
+} // namespace rocks

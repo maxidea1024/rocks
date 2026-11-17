@@ -173,7 +173,7 @@ Result<void> TickScheduler::AddPrerequisite(TickHandle dependent,
         return Result<void>::Failure(cycle.Error());
     }
     if (cycle.Value()) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::CycleDetected);
     }
 
     after = entries_.Find(dependent.slot);
