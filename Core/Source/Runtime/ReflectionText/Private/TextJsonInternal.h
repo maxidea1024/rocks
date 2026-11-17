@@ -104,6 +104,12 @@ inline TextSlot PartSlot(const TextSlot& slot, TextSlotPart part) noexcept {
 // 타입 도구 이름).
 inline constexpr StringView InstancedTypeKey = "_structType";
 
+// Localized Text JSON 객체의 키다(리플렉션 B9l — Docs/Design/ReflectionExtensions.ko.md 10.4절:
+// `{"id": "<36자 TextId>", "revision": <sourceRevision>, "source": "<fallback 원문>"}`).
+inline constexpr StringView TextIdKey = "id";
+inline constexpr StringView TextRevisionKey = "revision";
+inline constexpr StringView TextSourceKey = "source";
+
 // JSON 표기가 없는 필드 종류인지다(접근기 없는 Opaque — Text는 그 종류를 더하는 B9l이 표기를
 // 더한다).
 inline bool HasNoJsonForm(const FieldSchema& field) noexcept {

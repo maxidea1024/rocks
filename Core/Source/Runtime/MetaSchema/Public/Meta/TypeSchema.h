@@ -166,7 +166,12 @@ enum class ValueKind : uint8 {
     // 또는 담긴 struct의 Record, 원소·Map 값 자리는 u64 길이 + 같은 내용). value.type은 Base struct
     // ID(0 = 제한 없음 — B9j는 0만 받고 Base는 B9k가 연다)다. aggregate이고 경로는 형
     // 바꾸기·비우기와 지금 타입의 멤버 단계를 받는다.
-    InstancedStruct
+    InstancedStruct,
+    // rocks::Text(Localization/Text.h — 지역화 문구, 리플렉션 B9l — 같은 문서 13절), wire Text(형태
+    // byte + 형태별 내용 — 비어 있음·Invariant·Localized만 저장한다). FieldValue로 통째 읽고 쓰며
+    // (FieldValue::text — 읽기는 DeepClone), 키·Set 원소·Optional 내부가 아니고 Required를 받지
+    // 않는다.
+    Text
 };
 
 // 정적 배열 필드(ValueKind::StaticArray)의 원소 수 N의 상한이다(리플렉션 B9g —
@@ -178,7 +183,7 @@ inline constexpr uint32 MaxStaticArrayElements = NumericLimits<uint16>::Max();
 // 붙이고, 이 식의 마지막 열거자와 성질 표의 행을 함께 고친다. 아래 static_assert가 성질 표와,
 // MetaCompiler 대조 헤더가 C# 표의 종류 수와 이 값을 비교한다. 근거는
 // Docs/Design/ReflectionExtensions.ko.md 1.3절이다.
-inline constexpr uint32 ValueKindCount = static_cast<uint32>(ValueKind::InstancedStruct) + 1;
+inline constexpr uint32 ValueKindCount = static_cast<uint32>(ValueKind::Text) + 1;
 
 // 값 종류의 성질이다(종류 성질 표 — Docs/Design/ReflectionExtensions.ko.md 1.3절).
 // ValueKindProperties가 종류마다 이 비트의 OR를 돌려주고, 런타임의 등록 검증(TypeRegistry)·쓰기
@@ -342,6 +347,11 @@ constexpr ValueKindEntry ValueKindTableEntry(ValueKind kind) noexcept {
         // 담긴 struct가 InstancedStruct를 담지 않는다는 형질은 struct 형질로 따로 본다).
         return {true, placed | ValueKindBit(ValueKindProperty::MapValue) |
                           ValueKindBit(ValueKindProperty::HasTargetType)};
+    case ValueKind::Text:
+        // 지역화 문구 값이다(리플렉션 B9l). 같음이 문구 정체성이 아니라 wire byte라 키·Set 원소가
+        // 아니고, 비어 있음이 이미 "없음"이라 Optional 내부도 Required도 아니다.
+        return {true, placed | ValueKindBit(ValueKindProperty::MapValue) |
+                          ValueKindBit(ValueKindProperty::WholeFieldValue)};
     }
 
     return {};

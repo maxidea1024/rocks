@@ -16,7 +16,7 @@ struct FlagDerived final : FlagBase {};
 constexpr TypeId BaseId{0x464c414742415345ULL, 1};
 constexpr TypeId DerivedId{0x464c414744455256ULL, 1};
 
-Span<const char> Text(const char* text) noexcept {
+Span<const char> Chars(const char* text) noexcept {
     usize size = 0;
     while (text[size] != '\0') {
         ++size;
@@ -31,21 +31,21 @@ FieldSchema Field(uint64 id, const char* name, FieldKind kind = FieldKind::Value
     field.id = Guid{0x4649454c44ULL, id};
     field.kind = kind;
     field.flags = flags;
-    field.name = Text(name);
-    field.toolName = Text(toolName);
+    field.name = Chars(name);
+    field.toolName = Chars(toolName);
     return field;
 }
 
 Result<TypeRegistrationToken> RegisterBase(TypeRegistry& types, Span<const FieldSchema> fields,
                                            uint32 flags = 0) noexcept {
-    TypeSchema schema{BaseId, 1, fields, Text("FlagBase")};
+    TypeSchema schema{BaseId, 1, fields, Chars("FlagBase")};
     schema.flags = flags;
     return types.Register(schema, MakeRuntimeTypeOps<FlagBase>());
 }
 
 Result<TypeRegistrationToken> RegisterDerived(TypeRegistry& types, Span<const FieldSchema> fields,
                                               uint32 flags = 0) noexcept {
-    TypeSchema schema{DerivedId, 1, fields, Text("FlagDerived")};
+    TypeSchema schema{DerivedId, 1, fields, Chars("FlagDerived")};
     schema.baseType = BaseId;
     schema.flags = flags;
     RuntimeTypeOps ops = MakeRuntimeTypeOps<FlagDerived>();

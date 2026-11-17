@@ -226,7 +226,7 @@ FieldValue Digest(Allocator& allocator, uint8 seed) noexcept {
     return result;
 }
 
-FieldValue Text(Allocator& allocator, const char* text) noexcept {
+FieldValue StringValue(Allocator& allocator, const char* text) noexcept {
     FieldValue result(allocator);
     result.kind = ValueKind::Utf8String;
     if (!result.string.TryAssign(text)) {
@@ -427,14 +427,14 @@ void FillStructOwner(const Paths& paths, Allocator& allocator, ObjectHandle othe
     const TypeId group = TypeIdOf<TextureGroup>();
     Entry entries[] = {{"holder.target", Reference(allocator, other)},
                        {"holder.middle.leaf.count", Unsigned(allocator, ValueKind::UInt32, 42)},
-                       {"holder.middle.leaf.label", Text(allocator, "잎 경로")},
+                       {"holder.middle.leaf.label", StringValue(allocator, "잎 경로")},
                        {"holder.middle.leaf.group", EnumValue(allocator, group, 7)},
                        {"holder.middle.offset", Signed(allocator, ValueKind::Int64, -5)},
                        {"holder.middle.note", Unsigned(allocator, ValueKind::UInt16, 65535)},
                        {"holder.flag", Unsigned(allocator, ValueKind::UInt8, 200)},
                        {"plain", Unsigned(allocator, ValueKind::UInt32, 9)},
                        {"extra.count", Unsigned(allocator, ValueKind::UInt32, 3)},
-                       {"extra.label", Text(allocator, "extra")},
+                       {"extra.label", StringValue(allocator, "extra")},
                        {"extra.group", EnumValue(allocator, group, 13)}};
     for (const Entry& entry : entries) {
         REQUIRE(paths.Write(entry.path, entry.value));
@@ -468,8 +468,8 @@ void FillArrayChild(const Paths& paths, Allocator& allocator, ObjectHandle self,
         {"digests[0]", Digest(allocator, 0)},
         {"ints[0]", Signed(allocator, ValueKind::Int32, -7)},
         {"ints[1]", Signed(allocator, ValueKind::Int32, 2147483647)},
-        {"names[0]", Text(allocator, "경로")},
-        {"names[1]", Text(allocator, "")},
+        {"names[0]", StringValue(allocator, "경로")},
+        {"names[1]", StringValue(allocator, "")},
         {"groups[0]", EnumValue(allocator, TypeIdOf<TextureGroup>(), 7)},
         {"channels[0]", EnumValue(allocator, TypeIdOf<Channels>(), 5)},
         {"softs[0]", Soft(allocator, Guid{5, 5}, "Mesh.Socket")},
@@ -496,11 +496,11 @@ void FillArrayChild(const Paths& paths, Allocator& allocator, ObjectHandle self,
                        {"points[0].y", Float32(allocator, -2.0f)},
                        {"points[0].z", Float32(allocator, 0.25f)},
                        {"tags[0].id", Unsigned(allocator, ValueKind::UInt32, 1)},
-                       {"tags[0].label", Text(allocator, "첫째")},
+                       {"tags[0].label", StringValue(allocator, "첫째")},
                        {"slots[0].material", Reference(allocator, other)},
-                       {"slots[0].name", Text(allocator, "s0")},
+                       {"slots[0].name", StringValue(allocator, "s0")},
                        {"bundle.slots[0].material", Reference(allocator, other)},
-                       {"bundle.slots[0].name", Text(allocator, "b0")}};
+                       {"bundle.slots[0].name", StringValue(allocator, "b0")}};
     for (const Entry& entry : members) {
         REQUIRE(paths.Write(entry.path, entry.value));
     }
@@ -738,7 +738,7 @@ TEST(GeneratedPath_StructFixtureMembers) {
                 CHECK(read.kind == ValueKind::Enum && read.signedInteger == 7 &&
                       read.type == TypeIdOf<TextureGroup>());
                 FieldValue previous(allocator);
-                FieldValue label = Text(allocator, "바뀐 잎");
+                FieldValue label = StringValue(allocator, "바뀐 잎");
                 REQUIRE(paths.Write("holder.middle.leaf.label", label, &previous));
                 CHECK(previous.string.View() == StringView("잎 경로"));
                 FieldValue cleared = Reference(allocator, ObjectHandle{});
@@ -836,8 +836,8 @@ TEST(GeneratedPath_ArrayFixtureElements) {
                     {"ints", Signed(allocator, ValueKind::Int32, -7),
                      Signed(allocator, ValueKind::Int32, 2147483647),
                      Signed(allocator, ValueKind::Int32, 0)},
-                    {"names", Text(allocator, "first"), Text(allocator, "둘째"),
-                     Text(allocator, "a third name long enough to need a heap buffer")},
+                    {"names", StringValue(allocator, "first"), StringValue(allocator, "둘째"),
+                     StringValue(allocator, "a third name long enough to need a heap buffer")},
                     {"groups", EnumValue(allocator, group, 7), EnumValue(allocator, group, 0),
                      EnumValue(allocator, group, 13)},
                     {"channels", EnumValue(allocator, channel, 5), EnumValue(allocator, channel, 0),
@@ -862,14 +862,14 @@ TEST(GeneratedPath_ArrayFixtureElements) {
                 FieldValue x0 = Float32(allocator, 1.5f);
                 FieldValue x1 = Float32(allocator, -4.0f);
                 ExerciseStructArray(paths, allocator, "points", ".x", x0, x1);
-                FieldValue label0 = Text(allocator, "tag zero");
-                FieldValue label1 = Text(allocator, "태그 하나");
+                FieldValue label0 = StringValue(allocator, "tag zero");
+                FieldValue label1 = StringValue(allocator, "태그 하나");
                 ExerciseStructArray(paths, allocator, "tags", ".label", label0, label1);
                 FieldValue material0 = Reference(allocator, peer);
                 FieldValue material1 = Reference(allocator, self);
                 ExerciseStructArray(paths, allocator, "slots", ".material", material0, material1);
-                FieldValue name0 = Text(allocator, "b0");
-                FieldValue name1 = Text(allocator, "b1");
+                FieldValue name0 = StringValue(allocator, "b0");
+                FieldValue name1 = StringValue(allocator, "b1");
                 ExerciseStructArray(paths, allocator, "bundle.slots", ".name", name0, name1);
 
                 // 원소 struct 안 배열(Array<ArrayTag>의 codes, StructRefArray의 weights, 인라인
@@ -906,12 +906,12 @@ TEST(GeneratedPath_ArrayFixtureElements) {
 
                 // MaxElements = 4인 names: 상한까지 넣고 다섯째는 CapacityExceeded다.
                 for (uint32 index = 0; index < 4; ++index) {
-                    FieldValue name = Text(allocator, "n");
+                    FieldValue name = StringValue(allocator, "n");
                     REQUIRE(paths.Insert(Indexed("names", index).Text(), &name));
                 }
 
                 PropertyPathFailure failure;
-                FieldValue fifth = Text(allocator, "n");
+                FieldValue fifth = StringValue(allocator, "n");
                 CHECK(ErrorOf(paths.Insert("names[4]", &fifth, &failure)) ==
                       ErrorCode::CapacityExceeded);
                 CHECK(failure.reason == PropertyPathError::TooManyElements);
@@ -951,7 +951,7 @@ TEST(GeneratedPath_ArrayFixtureElements) {
                 PropertyPathBuffer basePath;
                 REQUIRE(
                     ParsePropertyPath(baseLease.Value(), StringView("slots[0].name"), basePath));
-                FieldValue slotName = Text(allocator, "base lease");
+                FieldValue slotName = StringValue(allocator, "base lease");
                 REQUIRE(PathWrite(objects, access, self, basePath.View(), slotName));
                 REQUIRE(paths.Read("slots[0].name", read));
                 CHECK(read.string.View() == StringView("base lease"));
@@ -1144,7 +1144,7 @@ TEST(GeneratedPath_ToolNamesAndReadOnlyFields) {
                     CHECK(failure.step == entry.step && failure.offset == entry.offset);
                 }
 
-                FieldValue title = Text(allocator, "제목");
+                FieldValue title = StringValue(allocator, "제목");
                 FieldValue weight = Signed(allocator, ValueKind::Int32, -3);
                 FieldValue serial = Unsigned(allocator, ValueKind::UInt32, 1);
                 REQUIRE(paths.Write("Main.Title", title));
@@ -1243,7 +1243,7 @@ TEST(GeneratedPath_ToolNamesAndReadOnlyFields) {
                 // 도구 이름을 바꾼 struct 원소 배열과 그 원소의 ReadOnly 멤버. index가 낀 경로도
                 // Format이 도구 이름으로 돌아온다.
                 REQUIRE(paths.Insert("Items[0]", nullptr));
-                FieldValue caption = Text(allocator, "원소 제목");
+                FieldValue caption = StringValue(allocator, "원소 제목");
                 REQUIRE(paths.Write("items[0].title", caption));
                 CHECK(ErrorOf(paths.Write("Items[0].serial", serial, nullptr, &failure)) ==
                       ErrorCode::Unsupported);

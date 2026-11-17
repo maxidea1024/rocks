@@ -7,6 +7,7 @@
 #include <Core/Move.h>
 #include <Core/Text/Name.h>
 #include <Core/Text/String.h>
+#include <Localization/Text.h>
 #include <Meta/PropertyPathSchema.h>
 #include <Object/ObjectAccessContext.h>
 #include <Object/Object.h>
@@ -93,6 +94,12 @@ struct FieldValue {
     // Unsupported) 표시 문자열의 내용 규칙(Object/NameField.h)을 본다. 읽기는 토큰을 복사할 뿐
     // 할당하지 않는다(원문은 그 pool의 Acquire로 읽는다).
     Name name{};
+    // Text 값이다(리플렉션 B9l — Docs/Design/ReflectionExtensions.ko.md 13절). 노드는 이
+    // FieldValue의 allocator(GetAllocator)로 만든다: 읽기는 멤버를 DeepClone하고, 쓰기는 대상
+    // Registry의 객체 allocator로 다시 DeepClone하므로 한 Registry의 노드를 다른 수명의 소유자가
+    // 쥐지 않는다. 비어 있음(IsValid 거짓)도 값이다. 저장은 비어 있음·Invariant·Localized만 받는다
+    // (Format·Integer 이력은 encode Unsupported).
+    Text text;
     // Enum 값의 enum 스키마 ID다(B3b).
     TypeId type{};
     // 값이 있는지다(리플렉션 B9e — Docs/Design/ReflectionExtensions.ko.md 6절). Optional<T>

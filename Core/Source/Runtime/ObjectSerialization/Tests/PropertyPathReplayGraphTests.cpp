@@ -58,7 +58,7 @@ constexpr Guid SlotId{0x50526d, 6};
 constexpr Guid TagsId{0x505266, 1};
 constexpr Guid SocketsId{0x505266, 2};
 
-Span<const char> Text(const char* text) noexcept {
+Span<const char> Chars(const char* text) noexcept {
     usize bytes = 0;
     while (text[bytes] != '\0') {
         ++bytes;
@@ -71,7 +71,7 @@ FieldSchema Scalar(Guid id, const char* name, ValueKind kind, TypeId type = {}) 
     FieldSchema field;
     field.id = id;
     field.kind = kind == ValueKind::ObjectReference ? FieldKind::ObjectReference : FieldKind::Value;
-    field.name = Text(name);
+    field.name = Chars(name);
     field.value = ValueType{kind, type};
     return field;
 }
@@ -79,7 +79,7 @@ FieldSchema Scalar(Guid id, const char* name, ValueKind kind, TypeId type = {}) 
 FieldSchema ArrayOf(Guid id, const char* name, ValueKind element, TypeId type = {}) noexcept {
     FieldSchema field;
     field.id = id;
-    field.name = Text(name);
+    field.name = Chars(name);
     field.value = ValueType{ValueKind::Array, {}};
     field.element = ValueType{element, type};
     field.maxElements = DefaultMaxElements;

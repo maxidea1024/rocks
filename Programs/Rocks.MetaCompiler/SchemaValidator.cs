@@ -26,7 +26,9 @@ internal static partial class SchemaValidator
         // InstancedStruct<>(리플렉션 B9j — Docs/Design/ReflectionExtensions.ko.md 11절)는 대상 없는 값 종류로 푼다(Clang은 기본 인자를
         // 생략한 `<>`로 내고, 명시한 void는 `<void>`로 낸다). InstancedStruct<Base>는 리플렉션 B9k가 연다.
         ["rocks::InstancedStruct<>"] = "InstancedStruct",
-        ["rocks::InstancedStruct<void>"] = "InstancedStruct"
+        ["rocks::InstancedStruct<void>"] = "InstancedStruct",
+        // rocks::Text(리플렉션 B9l — Docs/Design/ReflectionExtensions.ko.md 13절)는 대상 없는 값 종류다.
+        ["rocks::Text"] = "Text"
     };
 
     private static readonly string[] TargetKinds = ["Enum", "Struct", "ObjectReference", "WeakObjectReference", "SoftObjectReference", "ClassReference"];

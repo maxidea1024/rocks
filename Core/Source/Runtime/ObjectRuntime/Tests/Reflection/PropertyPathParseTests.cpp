@@ -79,7 +79,7 @@ constexpr TypeId DeepId(uint32 level) noexcept {
     return TypeId{0x505054, level + 1};
 }
 
-Span<const char> Text(const char* text) noexcept {
+Span<const char> Chars(const char* text) noexcept {
     usize bytes = 0;
     while (text[bytes] != '\0') {
         ++bytes;
@@ -92,16 +92,16 @@ FieldSchema Scalar(Guid id, const char* name, ValueKind kind, TypeId type = {},
                    const char* toolName = "") noexcept {
     FieldSchema field;
     field.id = id;
-    field.name = Text(name);
+    field.name = Chars(name);
     field.value = ValueType{kind, type};
-    field.toolName = Text(toolName);
+    field.toolName = Chars(toolName);
     return field;
 }
 
 FieldSchema ArrayOf(Guid id, const char* name, ValueKind element, TypeId type = {}) noexcept {
     FieldSchema field;
     field.id = id;
-    field.name = Text(name);
+    field.name = Chars(name);
     field.value = ValueType{ValueKind::Array, {}};
     field.element = ValueType{element, type};
     field.maxElements = DefaultMaxElements;
