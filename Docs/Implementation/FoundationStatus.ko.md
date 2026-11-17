@@ -34,11 +34,11 @@
 |---|---|---|
 | C00 | .NET 10 SDK 고정, C# `*.Build.cs`/`*.Target.cs` 모듈·타깃 규칙, MSBuild 진입점, 네이티브 작업 그래프·로컬 증분 검사, 설치 SDK·외부 게임 빌드, C# 검사 하네스·서식/STL/경고 검사, 단독 헤더 검사, 모듈 템플릿 plan/apply/validate, CI 정의 | 분산 빌드·공유 artifact 캐시, PCH·unity·공유 라이브러리, 완전한 SDK 패키징, 전체 프로젝트·컴포넌트·프리팹 템플릿, 복구 저널 |
 | C01 | Base 정수 타입, Guid POD, checked arithmetic | 전체 ABI·compiler 추상화 |
-| C02 | 정렬 할당, 가상 메모리 예약·commit·decommit·release, 단조 시계, 스레드 식별, Thread/Mutex/CV/Event/Semaphore, 최소 fatal sink, 플랫폼 경로 선택과 초기 동기 파일 I/O | 가상 메모리 OS 실패·부분 변경 fault injection, 파일 기능의 OS close 실패 강제 주입과 macOS 실행 검증, atomics/RWLock, thread 설정·취소 |
+| C02 | 정렬 할당, 가상 메모리 예약·commit·decommit·release, 단조 시계, 스레드 식별, Thread/Mutex/CV/Event/Semaphore, 스레드 이름·우선순위·스택 크기(`ThreadOptions`), 최소 fatal sink, 플랫폼 경로 선택과 초기 동기 파일 I/O | 가상 메모리 OS 실패·부분 변경 fault injection, 파일 기능의 OS close 실패 강제 주입과 macOS 실행 검증, RWLock, thread affinity·취소 |
 | C03 | Result/Error, Move/Forward, 범용 Base/TypeTraits, `Optional`, `ScopeExit`, `Tuple`(구조적 바인딩 포함), `Variant`, `Delegate`/`MulticastDelegate`, `UniquePtr`, `SharedPtr`/`WeakPtr`/`SharedRef`/`EnableSharedFromThis`(사용자 deleter `TryAdopt`·aliasing 포함), `UniquePtr<T, Deleter>`, CRC-32·Base64, RFC 3986 URI 분해·상대 참조 해석·정규화·percent encoding | delegate payload·GC 객체 바인딩·스레드 안전 모드·Event, 여러 Variant 동시 Visit, 압축, IDN·IRI |
-| C04 | SystemAllocator·ArenaAllocator·StackAllocator·PoolAllocator·BinnedAllocator·BudgetAllocator·DebugAllocator, 외부 backend와 벤더 함수 바인딩, 소유권 ledger·통계 | frame 수명 관리·자동 일괄 해제 stack·thread cache·page guard, 실제 공급자 제품 통합·플랫폼 검증, 주소 검색 최적화·성능 측정 |
+| C04 | SystemAllocator·ArenaAllocator·StackAllocator·PoolAllocator·BinnedAllocator·BudgetAllocator·DebugAllocator, 프레임 수명 arena `FrameArena`(소멸자 등록·스레드별 writer·블록 재사용), 외부 backend와 벤더 함수 바인딩, 소유권 ledger·통계 | 자동 일괄 해제 stack·thread cache·page guard, 실제 공급자 제품 통합·플랫폼 검증, 주소 검색 최적화·성능 측정 |
 | C05 | Array·Span·BitArray·HashMap·HashSet·OrderedMap·OrderedSet(삽입 순서 보존, 기본 해시는 seed를 넣은 SipHash-2-4 `SeededHash` — 리플렉션 B9f1)의 부분 구현과 STL 호환 반복자(contiguous·random-access·forward, HashMap 구조 변경 후 반복자 사용은 Fatal), 배열 삽입·삭제·크기 조절·추가·검색, 비트 단위 검색·집합 연산 및 실패 시 상태 유지 | queue·inline·sparse/stable-slot, 범용 알고리즘·추가 범위 연산, Map/Set 정책, 내부 콜백 재진입 완전 진단 및 장시간 성능 검증 |
-| C06 | Function, ModuleLease, InlineExecutor와 WorkerScheduler, 의존성·취소·drain, 고정 용량 로그·프로파일 scope, assert, 음성 대조군 | priority/lane/work-stealing/fiber scheduler, 비동기 로그 writer·viewer |
+| C06 | Function, ModuleLease, InlineExecutor와 WorkerScheduler, 의존성·취소·drain, 전용 lane 실행기 `DedicatedLane`(Thread·Inline 모드)·작업 lane 표지 `TaskLane`, 순서 전용 선행·직렬 체인 `SerialTaskChain`·범위 병렬 `ParallelFor`, 고정 용량 로그·프로파일 scope, assert, 음성 대조군 | priority/work-stealing/fiber scheduler, 비동기 로그 writer·viewer |
 | C07 | C# Clang AST 메타 생성·선언 검증, CLASS/PROPERTY·typed 필드 접근·자동 Trace, 상속 metadata IsA, 깊은 복사·revision/module lease, Archive/Record·객체 그래프 직렬화 | 자동 메타 unit 발견·프로젝트 전역 ID 검증, 범용 native 상속 cast, method/enum/container reflection, compile DB 입력 재구성·생성 캐시·외부 에셋 참조 |
 | C08 | 비이동 64-slot chunk, registry domain·generation, 고갈 슬롯 격리, 진단 캡처, chunk 포인터 표 O(1) handle 조회·빈 슬롯 목록(LIFO)·회수 대상 목록·상태 전이 갱신 통계 | 대규모 벤치마크(pause percentile) |
 | C09 | RootRef/WeakRef/ObjectRef/Borrow/BackendLease, 문맥·스레드 검사 | root owner chain, 전체 safepoint 시스템 |
@@ -46,7 +46,11 @@
 | C11 | full STW와 점진 mark/sweep, 삽입 장벽·cutoff, 선택적 병렬 mark, soft 시간·작업량 예산, OOM 시 sweep 금지·독립 oracle | 다중 mutator·동시 필드 스캔, hard deadline, 병렬 sweep·cluster·대규모 성능 검증 |
 | C12 | logical destroy·retire·실제 회수 분리, Busy 종료·재시도, 모의 backend lease | 실제 GPU/IO/audio 연동, 장시간 시스템 스트레스 |
 | C13 subset | 자체 UTF-8 String/StringView 검색·분리·치환 일부와 code point 단위 Left/Right/Mid·개수·순회, Name의 ASCII 비교·표기·None·번호와 pool/lease 수명·intern 없는 조회·pool 없는 원문 비교, Path 문자열 처리와 String `/`·`/=` | Unicode case folding·정규화·format 등 전체 문자열 기능, 영속 Name identity, Guid 생성/parse, 암호학적·영속 hash 정책, 플랫폼 경로 보정·기본 디렉터리 조회 |
-| Core Math | CPU별 `PlatformMath`(Generic→Clang→SSE2/NEON)·4-lane 레지스터, 벡터·정수 벡터·행렬·투영/뷰 행렬 생성·quaternion·Rotator·Transform(혼합 정밀도)·Transform3f·Transform3d·Box2/IntRect·Interval·Float16·보간·허용 오차 상수, 기본 도형 8종과 광선·선분·겹침·최근접 판정, Color/LinearColor, PCG32 RandomStream | frustum·swept shape·접촉 정보, AVX2/FMA dispatch·double 레지스터·SoA batch, Float16 색·noise·BoxSphereBounds, macOS·ARM64 실행 검증 |
+| Core Math | CPU별 `PlatformMath`(Generic→Clang→SSE2/NEON)·4-lane 레지스터, 벡터·정수 벡터·행렬·투영/뷰 행렬 생성·quaternion·Rotator·Transform(혼합 정밀도)·Transform3f·Transform3d·Box2/IntRect·Interval·Float16·정점 패킹(snorm·unorm·10:10:10:2·법선)·보간·허용 오차 상수, 기본 도형 8종과 광선·선분·겹침·최근접 판정, Color/LinearColor, PCG32 RandomStream | frustum·swept shape·접촉 정보, AVX2/FMA dispatch·double 레지스터·SoA batch, Float16 색·noise·BoxSphereBounds, macOS·ARM64 실행 검증 |
+
+### 엔진 렌더 기반(2026-11-17)
+
+Core 위 엔진 계층의 렌더 기반 첫 묶음([렌더 기반](../Design/RenderBase.ko.md) GX7·GX10·GX11·CP6·RB1·GX3a)과 업로드·readback(GX8)·GPU 계측(GX9)을 구현했다. Graphics 장치의 제출 완료 지점(`GpuFencePoint`)·`Retire`·스레드 안전 fence 대기·통지·작업 이벤트(`Graphics/FenceTimeline.h`·`GpuFenceEvent.h`, OpenGL은 fence sync), 장치 소유 스레드 모델과 소유권 이관(`DeviceOwnership`), Engine 종료 단계 hook, 새 모듈 RenderBase의 렌더 lane(`RenderLane`·프레임 slot·전달 타입 등록·`RenderNotices`·`RenderHandleTable`), 정점 원소 형식 20종·정점 배치·index·instanced 그리기와 CPU 정점 패킹(`Core/Math/VertexPacking.h`), 업로드 ring·내용 갱신·스트리밍 staging pool·비동기 readback(D3D12 다른 스레드 생성 허용), timestamp 프레임 slot 링·debug marker·CPU·GPU 시간 대응이다. CPU 시험은 EngineTests(기록 backend 대조 포함), GPU 시험은 `Sandbox --self-test`(D3D12·WARP·OpenGL)이며 GPU가 없는 환경에서는 NOT RUN이다. 계약과 남은 범위(lease·대체 자원·설정 snapshot·장치 재생성·copy queue·`GpuScope`)는 [렌더 기반 구현](RenderBase.ko.md)을 따른다.
 
 ### 경로와 파일 I/O의 초기 구현
 
@@ -54,7 +58,7 @@
 
 `String`의 `/`와 `/=`는 `Path::Combine`·`Append`에 연결되며 원문을 결합하고 `Result`로 실패를 전달한다. `/=`는 실제 변경이 없거나 capacity가 충분하면 기존 저장소를 재사용하며 입력 별칭을 처리한다. 재할당이 필요한 연산에는 기존 `String`과 할당기의 반환 순서 계약이 적용된다. 정규화·포함 판정은 문자열 연산일 뿐 실제 파일 접근 가능성, 링크 해석이나 보안 경계를 보장하지 않는다.
 
-`Platform/File.h`는 `FileSystem`·`FileHandle` 경계, 물리 Windows/macOS backend와 소유형 `File`을 제공한다. 열기·존재·삭제, read/write, 반복 전송 `ReadExact`·`WriteAll`, seek·size·close와 오류 코드를 포함한다. wrapper는 자체 구현해 주입할 수 있으나 Unreal식 wrapper chain 관리자나 실제 제품 wrapper가 구현됐다는 뜻은 아니다. 단위 테스트는 경로 입력, 짧은 전송·실패, EOF, 잘못된 소유·재진입과 동시성 일부를 다룬다. 디렉터리 생성·삭제·열거, Stat(종류·크기·수정 시각·link 여부), 같은 volume 이동·파일 복사, 재귀 생성·삭제(link 비추적), 기본 경로(`Platform/Path.h` `GetStandardDirectory`)는 Windows에서 구현·검증했다(macOS 미빌드). truncate·mapping·watch, 시각·권한 변경, OS close 오류 강제 주입, macOS 실기기 검증은 후속이다. 비동기 읽기·쓰기는 `Platform/AsyncFile.h`(`AsyncReadFile`·`AsyncWriteFile`·공용 `AsyncIoRequest`, Windows IOCP Native·공용 WorkerPool, macOS는 WorkerPool만이며 미빌드)가 담당한다. close 오류는 terminal이며 OS 자원 회수 성공을 보장하지 않는다.
+`Platform/File.h`는 `FileSystem`·`FileHandle` 경계, 물리 Windows/macOS backend와 소유형 `File`을 제공한다. 열기·존재·삭제, read/write, 반복 전송 `ReadExact`·`WriteAll`, seek·size·close와 오류 코드를 포함한다. wrapper는 자체 구현해 주입할 수 있으나 Unreal식 wrapper chain 관리자나 실제 제품 wrapper가 구현됐다는 뜻은 아니다. 단위 테스트는 경로 입력, 짧은 전송·실패, EOF, 잘못된 소유·재진입과 동시성 일부를 다룬다. 디렉터리 생성·삭제·열거, Stat(종류·크기·수정 시각·link 여부), 같은 volume 이동·파일 복사, 재귀 생성·삭제(link 비추적), 기본 경로(`Platform/Path.h` `GetStandardDirectory`)는 Windows에서 구현·검증했다(macOS 미빌드). truncate·mapping·watch, 시각·권한 변경, OS close 오류 강제 주입, macOS 실기기 검증은 후속이다. 비동기 읽기·쓰기는 `Platform/AsyncFile.h`(`AsyncReadFile`·`AsyncWriteFile`·공용 `AsyncIoRequest`, Windows IOCP Native·공용 WorkerPool, macOS는 WorkerPool만이며 미빌드)가 담당한다. `AsyncIoContext`의 완료 게시 보류(`HoldCompletions`·`ResumeCompletions`)로 IO 완료 시점을 호출자가 정해 결정적 시험을 만든다([플랫폼 계층](../Design/PlatformLayer.ko.md) 비동기 파일 절). close 오류는 terminal이며 OS 자원 회수 성공을 보장하지 않는다.
 
 플랫폼의 단조 시계와 WorkerScheduler는 시간 측정 및 작업 실행 기반이다. 게임·엔진의 가변 틱, 고정 틱, 시간 배율, 틱 그룹과 멀티스레드 틱은 아직 구현하지 않았다. Component의 생성·부착·소유·수명 시스템과 프리팹, 에디터·PIE도 미구현이다. `Templates/Game/Foundation`은 현재 Object/CLASS 예제이며 Component 예제는 실제 시스템 구현 이후 추가한다.
 
@@ -259,7 +263,7 @@ Windows ASan은 LeakSanitizer가 아니며, 소유권 ledger와 종료 검사를
 
 현재 범위는 Core·Object의 실행 경로와 C#/.NET 기반 빌드·메타 도구의 초기 구현이다. 각 경로의 구현과 검증 결과를 전체 Core 또는 엔진 기능의 완료로 확대하지 않는다.
 
-전체 Foundation에는 frame 수명 관리·자동 일괄 해제 stack·thread cache 등 후속 할당기, 가상 메모리 오류 주입 검증, queue 및 기타 후속 컨테이너, 미완성 경로 유틸·파일 I/O와 플랫폼 검증, atomics/RWLock, root owner 진단, 정밀한 빌드 의존 추적과 메타 unit 자동 발견, 장시간 스트레스·대규모 pause 성능 검증 등이 남아 있다. 수학·기본 충돌 라이브러리는 첫 구현이 들어갔으나 frustum·swept shape·접촉 정보와 macOS·ARM64 실행 검증이 남아 있다([수학 구현](Math.ko.md)). 엔진 틱, Component와 상위 에디터·PIE·입력·렌더러 통합은 별도 후속 작업이다. 전체 C00–C26/Foundation Gate는 미완료이며 초기 선형 탐색과 고정 상한을 제품 성능 충족으로 간주하지 않는다.
+전체 Foundation에는 자동 일괄 해제 stack·thread cache 등 후속 할당기, 가상 메모리 오류 주입 검증, queue 및 기타 후속 컨테이너, 미완성 경로 유틸·파일 I/O와 플랫폼 검증, atomics/RWLock, root owner 진단, 정밀한 빌드 의존 추적과 메타 unit 자동 발견, 장시간 스트레스·대규모 pause 성능 검증 등이 남아 있다. 수학·기본 충돌 라이브러리는 첫 구현이 들어갔으나 frustum·swept shape·접촉 정보와 macOS·ARM64 실행 검증이 남아 있다([수학 구현](Math.ko.md)). 엔진 틱, Component와 상위 에디터·PIE·입력·렌더러 통합은 별도 후속 작업이다. 전체 C00–C26/Foundation Gate는 미완료이며 초기 선형 탐색과 고정 상한을 제품 성능 충족으로 간주하지 않는다.
 
 ## 2026-11-11 Windows 심볼릭 링크 재검증
 

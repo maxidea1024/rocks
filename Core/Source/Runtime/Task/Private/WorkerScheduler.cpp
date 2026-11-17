@@ -41,6 +41,11 @@ struct WorkerRecord {
     Function<void(WorkerTaskContext&)> body;
     WorkerRecord* dependencies[64]{};
     uint32 dependencyCount = 0;
+    // dependencies 칸 가운데 순서 전용 선행(결과 무관, WorkerSubmitOptions::orderDependencies)의
+    // bit다.
+    uint64 orderOnlyMask = 0;
+    // body·capture 정리 동안의 lane 표지다. 수락 전에 정하고 바꾸지 않는다.
+    TaskLane lane = TaskLane::Worker;
     // 외부 완료 이벤트(WorkerTaskEvent)다. worker는 취소 요청이 있을 때만 꺼내 Cancelled로 끝낸다.
     bool external = false;
     // 수락 뒤 terminal 전까지 들어 있는 state.records 칸이다(회수·이벤트 완료가 선형 탐색하지
@@ -141,6 +146,9 @@ bool IsSubmitting(WorkerState* state) noexcept {
 
 // gate 안에서 부른다. 실행(Running)·정리(Completing) 중인 작업이 없으면 취소 요청이 없는 외부
 // 이벤트에 취소를 요청하고 하나라도 바꿨으면 true다(호출자는 다시 고른다).
+// 순서 전용 선행을 기다리는 작업(취소 요청이 있어도)은 막힘이 아니다. 선행 사슬은 DAG라 끝을
+// 따라가면 실행 중인 작업, 고를 수 있는 작업, 또는 이 함수가 취소할 외부 이벤트에 닿는다. 그래서
+// 고를 작업이 없고 실행·정리 중인 작업도 없으면 남은 원인은 완료되지 않은 외부 이벤트뿐이다.
 bool CancelStalledEvents(WorkerState& state) noexcept {
     for (uint32 index = 0; index < state.capacity; ++index) {
         const WorkerRecord* record = state.records[index];
@@ -327,6 +335,17 @@ Result<bool> WorkerTaskHandle::TryRevoke() const noexcept {
         if (record_->status.state != WorkerTaskState::Pending) {
             return Result<bool>::Success(false);
         }
+
+        // 순서 전용 선행이 끝나지 않았으면 회수하지 않는다. 지금 정리하면 그 선행이 실행 중일 때
+        // 이 작업의 capture 정리가 겹치고, 이 작업이 먼저 terminal이 되어 뒤 작업이 선행보다 먼저
+        // 시작할 수 있다.
+        for (uint32 dependency = 0; dependency < record_->dependencyCount; ++dependency) {
+            const bool orderOnly = (record_->orderOnlyMask & (uint64{1} << dependency)) != 0;
+            if (orderOnly && !IsTerminal(record_->dependencies[dependency]->status.state)) {
+                return Result<bool>::Success(false);
+            }
+        }
+
         // Pending 작업은 수락 뒤 terminal 전까지 records의 자기 칸에 있다. Completing으로 바꾸면
         // worker가 꺼내지 않는다(worker는 Pending만 고른다).
         slot = record_->slot;
@@ -587,12 +606,17 @@ Result<void> WorkerScheduler::Start(WorkerSchedulerConfig config) noexcept {
     return finish(ErrorCode::None);
 }
 
-Result<WorkerTaskHandle>
-WorkerScheduler::Submit(Function<void(WorkerTaskContext&)>&& body,
-                        Span<const WorkerTaskHandle> dependencies) noexcept {
+Result<WorkerTaskHandle> WorkerScheduler::Submit(Function<void(WorkerTaskContext&)>&& body,
+                                                 Span<const WorkerTaskHandle> dependencies,
+                                                 const WorkerSubmitOptions& options) noexcept {
     if (!body) {
         return Result<WorkerTaskHandle>::Failure(ErrorCode::InvalidArgument);
     }
+    if (!IsValidTaskLane(options.lane)) {
+        return Result<WorkerTaskHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const Span<const WorkerTaskHandle> orderDependencies = options.orderDependencies;
     WorkerState* state;
     WorkerRecord* retained[64]{};
     uint32 count = 0;
@@ -606,7 +630,8 @@ WorkerScheduler::Submit(Function<void(WorkerTaskContext&)>&& body,
         if (!state->accepting) {
             return Result<WorkerTaskHandle>::Failure(ErrorCode::ShuttingDown);
         }
-        if (dependencies.Size() > state->maxDependencies) {
+        if (dependencies.Size() > state->maxDependencies ||
+            orderDependencies.Size() > state->maxDependencies - dependencies.Size()) {
             return Result<WorkerTaskHandle>::Failure(ErrorCode::CapacityExceeded);
         }
         if (state->inFlight + state->reservations >= state->capacity) {
@@ -615,8 +640,12 @@ WorkerScheduler::Submit(Function<void(WorkerTaskContext&)>&& body,
         if (state->references == NumericLimits<uint64>::Max()) {
             return Result<WorkerTaskHandle>::Failure(ErrorCode::Overflow);
         }
-        for (usize index = 0; index < dependencies.Size(); ++index) {
-            WorkerRecord* dependency = dependencies[index].record_;
+        // 일반 선행 뒤에 순서 전용 선행을 이어 한 목록으로 검사한다(두 목록 사이의 중복도 거부).
+        const usize total = dependencies.Size() + orderDependencies.Size();
+        for (usize index = 0; index < total; ++index) {
+            WorkerRecord* dependency = index < dependencies.Size()
+                                           ? dependencies[index].record_
+                                           : orderDependencies[index - dependencies.Size()].record_;
             if (dependency == nullptr) {
                 return Result<WorkerTaskHandle>::Failure(ErrorCode::InvalidArgument);
             }
@@ -633,7 +662,7 @@ WorkerScheduler::Submit(Function<void(WorkerTaskContext&)>&& body,
             }
             retained[index] = dependency;
         }
-        count = static_cast<uint32>(dependencies.Size());
+        count = static_cast<uint32>(total);
         for (uint32 index = 0; index < count; ++index) {
             ++retained[index]->references;
         }
@@ -652,8 +681,12 @@ WorkerScheduler::Submit(Function<void(WorkerTaskContext&)>&& body,
     }
     WorkerRecord* record = ConstructAt<WorkerRecord>(memory.Value(), *state);
     record->dependencyCount = count;
+    record->lane = options.lane;
     for (uint32 index = 0; index < count; ++index) {
         record->dependencies[index] = retained[index];
+        if (index >= dependencies.Size()) {
+            record->orderOnlyMask |= uint64{1} << index;
+        }
     }
     // trace 신원은 worker가 볼 수 있게 되기(records 공개) 전에 정한다. 채널이 꺼져 있으면 분기
     // 하나다.
@@ -783,17 +816,33 @@ void WorkerScheduler::RunWorker(void* raw) noexcept {
                         if (record->external && !record->status.cancellationRequested) {
                             continue;
                         }
+                        // 순서 전용 선행이 모두 끝나기 전에는 실행·취소·DependencyFailed 어느
+                        // 경로로도 고르지 않는다. 그래야 순서 전용 선행과 이 작업의 body·capture
+                        // 정리가 겹치지 않고, 이 작업의 terminal이 선행 전체의 terminal을 뜻한다
+                        // (SerialTaskChain이 마지막 작업만 보고 체인 전체 완료를 판단한다).
+                        bool orderReady = true;
                         bool ready = true;
                         bool failed = false;
                         for (uint32 dependency = 0; dependency < record->dependencyCount;
                              ++dependency) {
                             const auto status = record->dependencies[dependency]->status.state;
+                            const bool orderOnly =
+                                (record->orderOnlyMask & (uint64{1} << dependency)) != 0;
                             if (!IsTerminal(status)) {
-                                ready = false;
-                            } else if (status != WorkerTaskState::Succeeded) {
+                                if (orderOnly) {
+                                    orderReady = false;
+                                } else {
+                                    ready = false;
+                                }
+                            } else if (status != WorkerTaskState::Succeeded && !orderOnly) {
                                 failed = true;
                             }
                         }
+
+                        if (!orderReady) {
+                            continue;
+                        }
+
                         if (!record->status.cancellationRequested && !failed && !ready) {
                             continue;
                         }
@@ -826,23 +875,28 @@ void WorkerScheduler::RunWorker(void* raw) noexcept {
                 ROCKS_ASSERT(state.changed.Wait(state.gate) != platform::WaitResult::Failed);
             }
         }
-        if (run) {
-            WorkerTaskContext context(selected);
-            if (!selected->trace.id.IsTraced()) {
-                body(context);
-            } else {
-                // 시작·끝 사건, 저장한 문맥 복원, CPU 구간 "Task.Run"(TraceTaskScope).
-                TraceTaskScope traced(selected->trace);
-                body(context);
+        {
+            // lane 표지는 body와 capture 정리를 함께 덮는다(DedicatedLane과 같은 범위).
+            TaskLaneScope laneScope(selected->lane);
+            if (run) {
+                WorkerTaskContext context(selected);
+                if (!selected->trace.id.IsTraced()) {
+                    body(context);
+                } else {
+                    // 시작·끝 사건, 저장한 문맥 복원, CPU 구간 "Task.Run"(TraceTaskScope).
+                    TraceTaskScope traced(selected->trace);
+                    body(context);
+                }
+                error = context.Error();
+                {
+                    platform::LockGuard lock(state.gate);
+                    selected->status.state = WorkerTaskState::Completing;
+                }
             }
-            error = context.Error();
-            {
-                platform::LockGuard lock(state.gate);
-                selected->status.state = WorkerTaskState::Completing;
-            }
+            // 사용자 코드와 allocator 콜백은 모두 gate 밖이다. 재진입 Submit/Cancel/Stats가
+            // 가능하다.
+            body.Reset();
         }
-        // 사용자 코드와 allocator 콜백은 모두 gate 밖이다. 재진입 Submit/Cancel/Stats가 가능하다.
-        body.Reset();
         ClearDependencies(*selected);
         {
             platform::LockGuard lock(state.gate);

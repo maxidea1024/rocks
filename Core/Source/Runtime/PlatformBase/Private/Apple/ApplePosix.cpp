@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <mach/mach_time.h>
+#include <sched.h>
 #include <stdio.h>
 #include <sys/mman.h>
 #include <time.h>
@@ -90,6 +91,46 @@ int PosixTimedWait(pthread_cond_t* condition, pthread_mutex_t* mutex, uint32 tim
 
 int PosixDecommitAdvice() noexcept {
     return MADV_FREE;
+}
+
+// Apple의 pthread_setname_np는 현재 스레드에만 붙이며 한도는 63 byte다(MaxThreadNameBytes와 같다).
+void PosixSetCurrentThreadName(const char* name) noexcept {
+    static_cast<void>(pthread_setname_np(name));
+}
+
+// SCHED_OTHER의 최소·최대 사이를 다섯 단계로 나눈다(UE Apple 스레드도 SCHED_OTHER 대역 안의 값을
+// 쓴다). 보통은 대역 가운데((최소 + 최대) / 2)로 고정한다. 부모에서 물려받은 값을 기준으로 삼으면
+// 같은 단계가 만든 스레드마다 달라지기 때문이다. 정책은 늘 SCHED_OTHER로 둔다(실시간 정책은 쓰지
+// 않는다).
+void PosixSetCurrentThreadPriority(ThreadPriority priority) noexcept {
+    const int minimum = sched_get_priority_min(SCHED_OTHER);
+    const int maximum = sched_get_priority_max(SCHED_OTHER);
+    if (minimum < 0 || maximum < minimum) {
+        return;
+    }
+
+    const int normal = (minimum + maximum) / 2;
+    int value = normal;
+    switch (priority) {
+    case ThreadPriority::Lowest:
+        value = minimum;
+        break;
+    case ThreadPriority::BelowNormal:
+        value = (minimum + normal) / 2;
+        break;
+    case ThreadPriority::Normal:
+        return;
+    case ThreadPriority::AboveNormal:
+        value = (normal + maximum) / 2;
+        break;
+    case ThreadPriority::Highest:
+        value = maximum;
+        break;
+    }
+
+    sched_param parameters{};
+    parameters.sched_priority = value;
+    static_cast<void>(pthread_setschedparam(pthread_self(), SCHED_OTHER, &parameters));
 }
 
 // macOS 시스템 라이브러리는 dyld 공유 캐시에 있어 파일이 없어도 /usr/lib 절대 경로로 열린다. 이름만

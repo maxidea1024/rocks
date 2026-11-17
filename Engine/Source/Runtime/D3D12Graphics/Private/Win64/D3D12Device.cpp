@@ -1,10 +1,16 @@
 #include <Core/Containers/Array.h>
 #include <Core/Text/String.h>
 #include <D3D12Graphics/D3D12Device.h>
+#include <Graphics/DeviceOwnership.h>
+#include <Graphics/FenceTimeline.h>
+#include <Graphics/StagingPool.h>
+#include <Graphics/TimestampRing.h>
+#include <Graphics/UploadRing.h>
 #include <Platform/Fatal.h>
 
 #include <Windows.h>
 #include <d3d12.h>
+#include <d3d12shader.h>
 #include <d3dcompiler.h>
 #include <dxgi1_6.h>
 #include <dxgidebug.h>
@@ -14,13 +20,20 @@ namespace rocks::graphics {
 
 namespace {
 
-constexpr uint32 FrameCount = 2;
+// 기록 저장소(command allocator) 수의 상한이다. 끝난 제출의 저장소를 다시 쓰고, 모두 GPU가 쓰는
+// 중이면 이 수까지 새로 만든다. 프레임 수 제한(프레임 slot, RenderBase 5.3절)은 장치 밖에서 하므로
+// 보통은 slot 수 + 업로드 정도만 쓴다. 상한에 닿으면 가장 오래된 제출을 기다린다.
+constexpr uint32 MaxCommandAllocators = 8;
 constexpr uint32 SwapChainBufferCount = 2;
 constexpr uint32 RtvCapacity = 128;
 constexpr uint32 SrvCapacity = 1024;
 // 서로 다른 SamplerDesc 조합 수의 상한이다(필터 4 × 주소 9 × 이방성 16을 넘지 않는다).
 constexpr uint32 SamplerCapacity = 256;
 constexpr uint32 MaxMipLevels = 16;
+// 업로드 ring 안 텍스처 footprint 시작 정렬이다(D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT).
+constexpr uint64 TexturePlacementAlignment = D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT;
+// 업로드 ring 안 버퍼 복사 원본 정렬이다.
+constexpr uint64 BufferUploadAlignment = 16;
 constexpr uint32 ConstantCount = sizeof(DrawConstants) / sizeof(uint32);
 // 스왑체인 하나가 파괴될 때 retire 목록에 넣는 항목 수(스왑체인 + 버퍼마다 하나)다.
 constexpr usize SwapChainRetireEntries = 1 + SwapChainBufferCount;
@@ -112,17 +125,102 @@ DXGI_FORMAT ResourceFormat(Format format) noexcept {
     return DXGI_FORMAT_UNKNOWN;
 }
 
+// 정점 원소 형식의 DXGI 형식이다(RenderBase 10.4절 표, UE D3D12VertexDeclaration.cpp:27–41).
 DXGI_FORMAT AttributeFormat(VertexFormat format) noexcept {
     switch (format) {
+    case VertexFormat::Float1:
+        return DXGI_FORMAT_R32_FLOAT;
     case VertexFormat::Float2:
         return DXGI_FORMAT_R32G32_FLOAT;
     case VertexFormat::Float3:
         return DXGI_FORMAT_R32G32B32_FLOAT;
     case VertexFormat::Float4:
         return DXGI_FORMAT_R32G32B32A32_FLOAT;
+    case VertexFormat::Byte4Snorm:
+        return DXGI_FORMAT_R8G8B8A8_SNORM;
+    case VertexFormat::UByte4:
+        return DXGI_FORMAT_R8G8B8A8_UINT;
+    case VertexFormat::UByte4Unorm:
+        return DXGI_FORMAT_R8G8B8A8_UNORM;
+    case VertexFormat::Bgra8Unorm:
+        return DXGI_FORMAT_B8G8R8A8_UNORM;
+    case VertexFormat::Short2:
+        return DXGI_FORMAT_R16G16_SINT;
+    case VertexFormat::Short4:
+        return DXGI_FORMAT_R16G16B16A16_SINT;
+    case VertexFormat::Short2Snorm:
+        return DXGI_FORMAT_R16G16_SNORM;
+    case VertexFormat::Short4Snorm:
+        return DXGI_FORMAT_R16G16B16A16_SNORM;
+    case VertexFormat::Half2:
+        return DXGI_FORMAT_R16G16_FLOAT;
+    case VertexFormat::Half4:
+        return DXGI_FORMAT_R16G16B16A16_FLOAT;
+    case VertexFormat::UShort2:
+        return DXGI_FORMAT_R16G16_UINT;
+    case VertexFormat::UShort4:
+        return DXGI_FORMAT_R16G16B16A16_UINT;
+    case VertexFormat::UShort2Unorm:
+        return DXGI_FORMAT_R16G16_UNORM;
+    case VertexFormat::UShort4Unorm:
+        return DXGI_FORMAT_R16G16B16A16_UNORM;
+    case VertexFormat::Rgb10A2Unorm:
+        return DXGI_FORMAT_R10G10B10A2_UNORM;
+    case VertexFormat::UInt1:
+        return DXGI_FORMAT_R32_UINT;
     }
     return DXGI_FORMAT_UNKNOWN;
 }
+
+// HLSL 시맨틱은 대소문자를 가리지 않는다. 정점 입력 시맨틱이 ATTRIBUTE인지 본다.
+bool IsAttributeSemantic(const char* name) noexcept {
+    constexpr char Expected[] = "ATTRIBUTE";
+    usize index = 0;
+    for (; Expected[index] != 0; ++index) {
+        char letter = name[index];
+        if (letter >= 'a' && letter <= 'z') {
+            letter = static_cast<char>(letter - 'a' + 'A');
+        }
+        if (letter != Expected[index]) {
+            return false;
+        }
+    }
+    return name[index] == 0;
+}
+
+// 진단 문자열 조립 칸이다(셰이더 입력 대조 실패의 location·형식·셰이더 타입).
+class Diagnostic {
+public:
+    Diagnostic& Text(const char* text) noexcept {
+        while (*text != '\0' && length_ + 1 < sizeof(buffer_)) {
+            buffer_[length_++] = *text++;
+        }
+        buffer_[length_] = '\0';
+        return *this;
+    }
+
+    Diagnostic& Number(uint32 value) noexcept {
+        char digits[12] = {};
+        usize count = 0;
+        do {
+            digits[count++] = static_cast<char>('0' + value % 10);
+            value /= 10;
+        } while (value != 0);
+        while (count > 0 && length_ + 1 < sizeof(buffer_)) {
+            buffer_[length_++] = digits[--count];
+        }
+        buffer_[length_] = '\0';
+        return *this;
+    }
+
+    const char* CStr() const noexcept {
+        return buffer_;
+    }
+
+private:
+    char buffer_[256] = {};
+    usize length_ = 0;
+};
 
 D3D12_FILTER SamplerFilter(Filter filter) noexcept {
     switch (filter) {
@@ -163,6 +261,15 @@ D3D12_RESOURCE_BARRIER Transition(ID3D12Resource* resource, D3D12_RESOURCE_STATE
     return barrier;
 }
 
+// subresource 하나의 전이다.
+D3D12_RESOURCE_BARRIER TransitionSubresource(ID3D12Resource* resource, uint32 subresource,
+                                             D3D12_RESOURCE_STATES before,
+                                             D3D12_RESOURCE_STATES after) noexcept {
+    D3D12_RESOURCE_BARRIER barrier = Transition(resource, before, after);
+    barrier.Transition.Subresource = subresource;
+    return barrier;
+}
+
 D3D12_HEAP_PROPERTIES HeapProperties(D3D12_HEAP_TYPE type) noexcept {
     D3D12_HEAP_PROPERTIES properties = {};
     properties.Type = type;
@@ -185,7 +292,8 @@ D3D12_RESOURCE_DESC BufferResource(uint64 size) noexcept {
 
 struct BufferRecord {
     ComRef<ID3D12Resource> resource;
-    D3D12_VERTEX_BUFFER_VIEW view = {};
+    D3D12_GPU_VIRTUAL_ADDRESS address = 0;
+    uint64 size = 0;
 };
 
 struct TextureRecord {
@@ -203,6 +311,9 @@ struct TextureRecord {
 
 struct PipelineRecord {
     ComRef<ID3D12PipelineState> state;
+    // stream별 stride와 배치가 선언한 stream mask다(그리기 때 묶인 정점 버퍼를 확인한다).
+    uint32 strides[MaxVertexStreams] = {};
+    uint32 streamMask = 0;
 };
 
 struct SwapChainRecord {
@@ -221,6 +332,8 @@ struct SwapChainRecord {
 struct Retired {
     ComRef<IUnknown> object;
     uint64 fenceValue = 0;
+    // 아직 제출하지 않은 업로드 기록이 읽는 전용 staging이다. 업로드 묶음 제출이 fence 값을 정한다.
+    bool uploadPending = false;
     // 기록 중인(아직 제출하지 않은) 프레임이 쓸 수 있는 자원이다. EndFrame이 그 프레임의 signal
     // 값을 정할 때까지 해제하지 않는다.
     bool pending = false;
@@ -298,19 +411,128 @@ private:
     uint32 capacity_ = 0;
 };
 
+// 스트리밍 staging 메모리(upload heap 버퍼, 계속 map)를 만들고 없앤다(StagingPool의 backend).
+class D3D12StagingSource final : public StagingSource {
+public:
+    Result<StagingMemory> CreateStaging(uint64 bytes) noexcept override {
+        ComRef<ID3D12Resource> resource;
+        const D3D12_HEAP_PROPERTIES heap = HeapProperties(D3D12_HEAP_TYPE_UPLOAD);
+        const D3D12_RESOURCE_DESC desc = BufferResource(bytes);
+        if (FAILED(device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc,
+                                                   D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+                                                   IID_PPV_ARGS(resource.Out())))) {
+            return Result<StagingMemory>::Failure(ErrorCode::OutOfMemory);
+        }
+        void* mapped = nullptr;
+        const D3D12_RANGE noRead = {0, 0};
+        if (FAILED(resource->Map(0, &noRead, &mapped))) {
+            return Result<StagingMemory>::Failure(ErrorCode::DependencyFailed);
+        }
+        StagingMemory memory;
+        memory.resource = resource.Detach();
+        memory.data = static_cast<uint8*>(mapped);
+        memory.size = bytes;
+        return Result<StagingMemory>::Success(memory);
+    }
+
+    void DestroyStaging(const StagingMemory& memory) noexcept override {
+        ComRef<ID3D12Resource> resource;
+        resource.Attach(static_cast<ID3D12Resource*>(memory.resource));
+    }
+
+    ID3D12Device* device = nullptr;
+};
+
+// timestamp query heap을 resolve한 readback 버퍼에서 결과를 읽는다(GX9). Harvest가 fence 완료
+// 뒤에만 부르므로 값은 이미 버퍼에 있다.
+class D3D12TimestampSource final : public TimestampSource {
+public:
+    TimestampReadState ReadTimestamps(uint32 first, uint32 count, uint64* ticks) noexcept override {
+        const D3D12_RANGE range = {static_cast<SIZE_T>(first) * sizeof(uint64),
+                                   static_cast<SIZE_T>(first + count) * sizeof(uint64)};
+        void* mapped = nullptr;
+        if (buffer == nullptr || FAILED(buffer->Map(0, &range, &mapped))) {
+            return TimestampReadState::Disjoint;
+        }
+
+        platform::MemoryCopy(ticks, static_cast<const uint8*>(mapped) + range.Begin,
+                             static_cast<usize>(count) * sizeof(uint64));
+        const D3D12_RANGE noWrite = {0, 0};
+        buffer->Unmap(0, &noWrite);
+        return TimestampReadState::Ready;
+    }
+
+    ID3D12Resource* buffer = nullptr;
+};
+
+// 비동기 readback 하나다. fence가 끝나면 footprint 배치로 버퍼에 있다.
+struct ReadbackRecord {
+    ComRef<ID3D12Resource> resource;
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
+    uint64 total = 0;
+    uint64 fenceValue = 0;
+    uint32 width = 0;
+    uint32 height = 0;
+    uint32 bytesPerPixel = 0;
+};
+
+// fence 관찰 스레드가 제출 하나의 완료를 기다리는 경계다. 장치가 제거되면 fence 완료 값이
+// UINT64_MAX가 되어 대기가 풀린다(D3D12 device removed 규칙).
+class D3D12FenceSource final : public FenceWaitSource {
+public:
+    bool WaitSubmission(uint64 value, void* token) noexcept override {
+        (void)token;
+        uint64 completed = fence->GetCompletedValue();
+        if (completed == RemovedFenceValue) {
+            return false;
+        }
+
+        if (completed >= value) {
+            return true;
+        }
+
+        if (FAILED(fence->SetEventOnCompletion(value, event))) {
+            return false;
+        }
+
+        WaitForSingleObject(event, INFINITE);
+        completed = fence->GetCompletedValue();
+        return completed != RemovedFenceValue;
+    }
+
+    // 장치 제거 뒤 fence가 돌려주는 완료 값이다.
+    static constexpr uint64 RemovedFenceValue = NumericLimits<uint64>::Max();
+
+    ID3D12Fence* fence = nullptr;
+    HANDLE event = nullptr;
+};
+
 class D3D12Device final : public Device, private CommandContext {
 public:
     explicit D3D12Device(Allocator& allocator) noexcept
         : adapterName_(allocator), lastError_(allocator), buffers_(allocator), textures_(allocator),
           pipelines_(allocator), swapChains_(allocator), retired_(allocator), rtvs_(allocator),
-          srvs_(allocator), samplers_(allocator), messageScratch_(allocator) {
+          srvs_(allocator), samplers_(allocator), allocators_(allocator),
+          messageScratch_(allocator), timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics),
+          allocator_(allocator), readbacks_(allocator), ring_(allocator), timestamps_(allocator) {
     }
 
     ~D3D12Device() override {
+        // 장치는 소유 스레드(또는 소유자가 없을 때 아무 스레드)에서 파괴한다.
+        if (!ownership_.IsOwner() && !ownership_.Acquire()) {
+            platform::Fatal("graphics device destroyed while another thread owns it");
+        }
         if (queue_ && fence_ && fenceEvent_ != nullptr) {
             auto idle = WaitIdle();
             (void)idle;
         }
+        // 모든 제출이 끝났거나(WaitIdle) 장치가 제거되어 관찰 스레드가 곧 빠져나온다.
+        timeline_.StopWatcher();
+        timeline_.Close();
+        if (staging_) {
+            staging_->Clear();
+        }
+        readbacks_.Clear();
         retired_.Clear();
         swapChains_.Clear();
         textures_.Clear();
@@ -318,6 +540,9 @@ public:
         buffers_.Clear();
         if (fenceEvent_ != nullptr) {
             CloseHandle(fenceEvent_);
+        }
+        if (watcherEvent_ != nullptr) {
+            CloseHandle(watcherEvent_);
         }
     }
 
@@ -392,31 +617,41 @@ public:
             return Fail("CreateCommandQueue failed");
         }
 
-        for (Frame& frame : frames_) {
-            if (FAILED(device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                                       IID_PPV_ARGS(frame.allocator.Out())))) {
-                return Fail("CreateCommandAllocator failed");
-            }
+        auto reservedAllocators = allocators_.TryReserve(MaxCommandAllocators);
+        if (!reservedAllocators) {
+            return reservedAllocators;
         }
-        if (FAILED(device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                                   IID_PPV_ARGS(uploadAllocator_.Out()))) ||
-            FAILED(device_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                              frames_[0].allocator.Get(), nullptr,
-                                              IID_PPV_ARGS(list_.Out()))) ||
-            FAILED(device_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                              uploadAllocator_.Get(), nullptr,
-                                              IID_PPV_ARGS(uploadList_.Out())))) {
+        auto firstAllocator = AddCommandAllocator();
+        if (!firstAllocator) {
+            return Result<void>::Failure(firstAllocator.Error());
+        }
+        // 저장소 하나에는 열린 list가 하나만 붙을 수 있으므로 만들자마자 닫는다.
+        if (FAILED(device_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
+                                              allocators_[0].allocator.Get(), nullptr,
+                                              IID_PPV_ARGS(list_.Out())))) {
             return Fail("CreateCommandList failed");
         }
         list_->Close();
+        if (FAILED(device_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
+                                              allocators_[0].allocator.Get(), nullptr,
+                                              IID_PPV_ARGS(uploadList_.Out())))) {
+            return Fail("CreateCommandList failed");
+        }
         uploadList_->Close();
 
         if (FAILED(device_->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(fence_.Out())))) {
             return Fail("CreateFence failed");
         }
         fenceEvent_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-        if (fenceEvent_ == nullptr) {
+        watcherEvent_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (fenceEvent_ == nullptr || watcherEvent_ == nullptr) {
             return Fail("CreateEvent failed");
+        }
+        fenceSource_.fence = fence_.Get();
+        fenceSource_.event = watcherEvent_;
+        auto watching = timeline_.StartWatcher(fenceSource_, "D3D12Fence");
+        if (!watching) {
+            return Fail("fence watcher thread creation failed");
         }
 
         auto rtvs =
@@ -433,6 +668,35 @@ public:
         if (!signature) {
             return signature;
         }
+
+        // 업로드 ring(GX8): upload heap 버퍼 하나를 계속 map해 두고 구간을 나눠 쓴다.
+        const uint64 ringBytes =
+            desc.uploadRingBytes != 0 ? desc.uploadRingBytes : DefaultUploadRingBytes;
+        auto ringReset = ring_.Reset(ringBytes);
+        if (!ringReset) {
+            return ringReset;
+        }
+        const D3D12_HEAP_PROPERTIES uploadHeap = HeapProperties(D3D12_HEAP_TYPE_UPLOAD);
+        const D3D12_RESOURCE_DESC ringDesc = BufferResource(ringBytes);
+        void* ringMapped = nullptr;
+        const D3D12_RANGE noRead = {0, 0};
+        if (FAILED(device_->CreateCommittedResource(&uploadHeap, D3D12_HEAP_FLAG_NONE, &ringDesc,
+                                                    D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+                                                    IID_PPV_ARGS(ringBuffer_.Out()))) ||
+            FAILED(ringBuffer_->Map(0, &noRead, &ringMapped))) {
+            return Fail("upload ring creation failed");
+        }
+        ringData_ = static_cast<uint8*>(ringMapped);
+        stagingSource_.device = device_.Get();
+        const uint64 stagingBudget =
+            desc.stagingBudgetBytes != 0 ? desc.stagingBudgetBytes : DefaultStagingBudgetBytes;
+        auto pool =
+            UniquePtr<StagingPool>::TryMake(allocator_, allocator_, stagingSource_, stagingBudget);
+        if (!pool) {
+            return Result<void>::Failure(pool.Error());
+        }
+        staging_ = Move(pool.Value());
+        InitializeTimestamps();
 
         // 텍스처를 묶지 않은 그리기가 쓸 1x1 흰색 텍스처다.
         const uint8 white[4] = {255, 255, 255, 255};
@@ -452,12 +716,27 @@ public:
         DeviceInfo info;
         info.backend = Backend::D3D12;
         info.adapterName = adapterName_.View();
+        info.deviceEpoch = timeline_.DeviceEpoch();
+        // 생성·갱신은 내부 잠금 아래 업로드 기록에 쌓이고 소유 스레드의 다음 제출이 실행한다.
+        info.concurrentResourceCreation = true;
         info.validationEnabled = validation_;
         info.software = software_;
+        // graphics queue timestamp와 clock calibration이다. queue timestamp는 끊기지 않으므로
+        // disjoint 감지는 해당 없다.
+        info.timestamps = timestampHeap_.Get() != nullptr;
+        info.timestampFrequency = timestampFrequency_;
+        info.clockCalibration = info.timestamps;
+        info.debugMarkers = true;
         return info;
     }
 
     Result<SwapChainHandle> CreateSwapChain(const SwapChainDesc& desc) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<SwapChainHandle>::Failure(owner.Error());
+        }
+        platform::LockGuard lock(gate_);
+
         if (desc.surface.window == nullptr || desc.width == 0 || desc.height == 0) {
             return Result<SwapChainHandle>::Failure(ErrorCode::InvalidArgument);
         }
@@ -526,6 +805,12 @@ public:
 
     Result<void> ResizeSwapChain(SwapChainHandle handle, uint32 width,
                                  uint32 height) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<void>::Failure(owner.Error());
+        }
+
+        platform::LockGuard lock(gate_);
         SwapChainRecord* record = swapChains_.Find(handle.slot);
         if (record == nullptr) {
             return Result<void>::Failure(ErrorCode::StaleHandle);
@@ -535,7 +820,8 @@ public:
         }
 
         // 버퍼를 참조하는 모든 GPU 작업이 끝난 뒤 버퍼를 놓고 크기를 바꾼다.
-        auto idle = WaitIdle();
+        auto idle = WaitIdleLocked();
+        record = swapChains_.Find(handle.slot);
         if (!idle) {
             return idle;
         }
@@ -561,35 +847,36 @@ public:
         return Result<void>::Success();
     }
 
+    // 다른 스레드에서도 부를 수 있다(concurrentResourceCreation). 초기 데이터는 업로드 ring에 쓰고
+    // 복사를 기록한다. 소유 스레드의 다음 제출이 실행한다.
     Result<BufferHandle> CreateBuffer(const BufferDesc& desc,
                                       Span<const uint8> initial) noexcept override {
-        if (desc.size == 0 || initial.Size() != desc.size) {
+        if (desc.size == 0 || initial.Size() != desc.size ||
+            (desc.usage != BufferUsage::Vertex && desc.usage != BufferUsage::Index) ||
+            desc.size > NumericLimits<uint32>::Max()) {
             return Result<BufferHandle>::Failure(ErrorCode::InvalidArgument);
         }
 
+        platform::LockGuard lock(gate_);
         BufferRecord record;
-        const D3D12_HEAP_PROPERTIES heap = HeapProperties(D3D12_HEAP_TYPE_UPLOAD);
+        const D3D12_HEAP_PROPERTIES heap = HeapProperties(D3D12_HEAP_TYPE_DEFAULT);
         const D3D12_RESOURCE_DESC resource = BufferResource(desc.size);
+        // 버퍼는 COMMON에서 복사·정점·index 읽기로 암묵 승격되고 제출이 끝나면 COMMON으로 돌아온다.
         if (FAILED(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &resource,
-                                                    D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+                                                    D3D12_RESOURCE_STATE_COMMON, nullptr,
                                                     IID_PPV_ARGS(record.resource.Out())))) {
-            return FailWith<BufferHandle>("vertex buffer creation failed");
+            return FailWith<BufferHandle>("buffer creation failed");
         }
-
-        void* mapped = nullptr;
-        const D3D12_RANGE noRead = {0, 0};
-        if (FAILED(record.resource->Map(0, &noRead, &mapped))) {
-            return FailWith<BufferHandle>("vertex buffer map failed");
-        }
-        platform::MemoryCopy(mapped, initial.Data(), desc.size);
-        record.resource->Unmap(0, nullptr);
-        record.view.BufferLocation = record.resource->GetGPUVirtualAddress();
-        record.view.SizeInBytes = static_cast<UINT>(desc.size);
-        record.view.StrideInBytes = 0;
+        record.address = record.resource->GetGPUVirtualAddress();
+        record.size = desc.size;
 
         auto reserved = ReserveRetireCapacity(1);
         if (!reserved) {
             return Result<BufferHandle>::Failure(reserved.Error());
+        }
+        auto copied = RecordBufferUpload(record.resource.Get(), 0, initial);
+        if (!copied) {
+            return Result<BufferHandle>::Failure(copied.Error());
         }
         auto added = buffers_.TryAdd(Move(record));
         if (!added) {
@@ -598,6 +885,7 @@ public:
         return Result<BufferHandle>::Success(BufferHandle{added.Value()});
     }
 
+    // 다른 스레드에서도 부를 수 있다(concurrentResourceCreation). 초기 픽셀은 업로드 기록으로 간다.
     Result<TextureHandle> CreateTexture(const TextureDesc& desc,
                                         Span<const uint8> pixels) noexcept override {
         const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
@@ -607,6 +895,7 @@ public:
             (renderTarget ? (pixels.Size() != 0 || desc.mipLevels != 1) : pixels.Size() != size)) {
             return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
         }
+        platform::LockGuard lock(gate_);
         auto sampler = SamplerFor(desc.sampler);
         if (!sampler) {
             return FailWith<TextureHandle>("sampler descriptor heap is full");
@@ -646,7 +935,7 @@ public:
             return Result<TextureHandle>::Failure(reserved.Error());
         }
         if (!renderTarget) {
-            auto uploaded = UploadTexture(record, pixels);
+            auto uploaded = RecordTextureUpload(record, 0, record.mipLevels, pixels, false);
             if (!uploaded) {
                 return Result<TextureHandle>::Failure(uploaded.Error());
             }
@@ -682,10 +971,17 @@ public:
         return Result<TextureHandle>::Success(TextureHandle{added.Value()});
     }
 
+    // 다른 스레드에서도 부를 수 있다(concurrentResourceCreation, 내부 잠금으로 직렬화한다).
     Result<PipelineHandle> CreatePipeline(const PipelineDesc& desc) noexcept override {
+        platform::LockGuard lock(gate_);
         if (desc.vertex.hlsl.ByteCount() == 0 || desc.pixel.hlsl.ByteCount() == 0 ||
-            desc.vertexStride == 0 || desc.attributes.Size() == 0 || desc.attributes.Size() > 8 ||
             ResourceFormat(desc.colorFormat) == DXGI_FORMAT_UNKNOWN) {
+            return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
+        }
+        auto layoutChecked = ValidateVertexLayout(desc.layout);
+        if (!layoutChecked) {
+            auto failed = Fail("vertex layout is invalid (RenderBase 10.4 limits)");
+            (void)failed;
             return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
         }
 
@@ -695,20 +991,28 @@ public:
         if (!vertex) {
             return Result<PipelineHandle>::Failure(vertex.Error());
         }
+        auto matched = MatchVertexInputs(vertexCode.Get(), desc.layout);
+        if (!matched) {
+            return Result<PipelineHandle>::Failure(matched.Error());
+        }
         auto pixel = Compile(desc.pixel.hlsl, "PSMain", "ps_5_1", pixelCode);
         if (!pixel) {
             return Result<PipelineHandle>::Failure(pixel.Error());
         }
 
-        D3D12_INPUT_ELEMENT_DESC elements[8] = {};
-        for (usize index = 0; index < desc.attributes.Size(); ++index) {
-            const VertexAttribute& attribute = desc.attributes[index];
-            elements[index].SemanticName = "TEXCOORD";
+        D3D12_INPUT_ELEMENT_DESC elements[MaxVertexAttributes] = {};
+        for (usize index = 0; index < desc.layout.attributes.Size(); ++index) {
+            const VertexAttribute& attribute = desc.layout.attributes[index];
+            const VertexStream& stream = desc.layout.streams[attribute.stream];
+            const bool instance = stream.stepRate == VertexStepRate::Instance;
+            elements[index].SemanticName = "ATTRIBUTE";
             elements[index].SemanticIndex = attribute.location;
             elements[index].Format = AttributeFormat(attribute.format);
-            elements[index].InputSlot = 0;
+            elements[index].InputSlot = attribute.stream;
             elements[index].AlignedByteOffset = attribute.offset;
-            elements[index].InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
+            elements[index].InputSlotClass = instance ? D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA
+                                                      : D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
+            elements[index].InstanceDataStepRate = instance ? 1u : 0u;
         }
 
         D3D12_GRAPHICS_PIPELINE_STATE_DESC state = {};
@@ -731,13 +1035,18 @@ public:
         state.RasterizerState.DepthClipEnable = TRUE;
         state.DepthStencilState.DepthEnable = FALSE;
         state.DepthStencilState.StencilEnable = FALSE;
-        state.InputLayout = {elements, static_cast<UINT>(desc.attributes.Size())};
+        state.InputLayout = {desc.layout.attributes.Size() != 0 ? elements : nullptr,
+                             static_cast<UINT>(desc.layout.attributes.Size())};
         state.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
         state.NumRenderTargets = 1;
         state.RTVFormats[0] = ResourceFormat(desc.colorFormat);
         state.SampleDesc.Count = 1;
 
         PipelineRecord record;
+        for (usize index = 0; index < desc.layout.streams.Size(); ++index) {
+            record.strides[index] = desc.layout.streams[index].stride;
+            record.streamMask |= 1u << index;
+        }
         if (FAILED(
                 device_->CreateGraphicsPipelineState(&state, IID_PPV_ARGS(record.state.Out())))) {
             return FailWith<PipelineHandle>("CreateGraphicsPipelineState failed");
@@ -750,24 +1059,26 @@ public:
         if (!added) {
             return Result<PipelineHandle>::Failure(added.Error());
         }
-        // 정점 간격은 파이프라인마다 다를 수 있으므로 handle과 함께 기억한다.
-        auto stride = StrideFor(added.Value(), desc.vertexStride);
-        if (!stride) {
-            auto removed = pipelines_.TryRemove(added.Value());
-            (void)removed;
-            return Result<PipelineHandle>::Failure(stride.Error());
-        }
         return Result<PipelineHandle>::Success(PipelineHandle{added.Value()});
     }
 
     Result<CommandContext*> BeginFrame(SwapChainHandle handle,
                                        const ClearColor& clear) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<CommandContext*>::Failure(owner.Error());
+        }
+        platform::LockGuard lock(gate_);
+
         SwapChainRecord* record = swapChains_.Find(handle.slot);
         if (record == nullptr) {
             return Result<CommandContext*>::Failure(ErrorCode::StaleHandle);
         }
         if (recording_) {
             return Result<CommandContext*>::Failure(ErrorCode::Busy);
+        }
+        if (timeline_.IsLost()) {
+            return Result<CommandContext*>::Failure(ErrorCode::Destroyed);
         }
         if (record->broken) {
             return FailWith<CommandContext*>("swap chain has no buffers after a failed resize");
@@ -787,6 +1098,12 @@ public:
 
     Result<CommandContext*> BeginOffscreen(TextureHandle handle,
                                            const ClearColor& clear) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<CommandContext*>::Failure(owner.Error());
+        }
+        platform::LockGuard lock(gate_);
+
         TextureRecord* record = textures_.Find(handle.slot);
         if (record == nullptr || !record->renderTarget) {
             return Result<CommandContext*>::Failure(record == nullptr ? ErrorCode::StaleHandle
@@ -794,6 +1111,9 @@ public:
         }
         if (recording_) {
             return Result<CommandContext*>::Failure(ErrorCode::Busy);
+        }
+        if (timeline_.IsLost()) {
+            return Result<CommandContext*>::Failure(ErrorCode::Destroyed);
         }
 
         auto begun = BeginRecording();
@@ -807,17 +1127,44 @@ public:
         return Result<CommandContext*>::Success(this);
     }
 
-    Result<void> EndFrame() noexcept override {
+    Result<GpuFencePoint> EndFrame() noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<GpuFencePoint>::Failure(owner.Error());
+        }
+        platform::LockGuard lock(gate_);
+
         if (!recording_) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+            return Result<GpuFencePoint>::Failure(ErrorCode::InvalidArgument);
         }
 
         const D3D12_RESOURCE_BARRIER back =
             Transition(target_.resource, D3D12_RESOURCE_STATE_RENDER_TARGET, target_.restState);
         list_->ResourceBarrier(1, &back);
+        CloseMarkers();
+        const TimestampRange stamps = timestamps_.OpenRange();
+        if (stamps.count != 0) {
+            list_->ResolveQueryData(timestampHeap_.Get(), D3D12_QUERY_TYPE_TIMESTAMP, stamps.first,
+                                    stamps.count, timestampReadback_.Get(),
+                                    uint64{stamps.first} * sizeof(uint64));
+        }
         recording_ = false;
+        allocators_[recordingAllocator_].inUse = false;
+        // 이 프레임 전에 쌓인 업로드(생성 초기 데이터·내용 갱신)를 먼저 실행한다.
+        auto uploads = FlushUploadsLocked();
+        if (!uploads) {
+            allocators_[recordingAllocator_].fenceValue = fenceValue_;
+            AssignPendingRetires(fenceValue_);
+            timestamps_.Close(fenceValue_, false);
+            (void)list_->Close();
+            return Result<GpuFencePoint>::Failure(uploads.Error());
+        }
         if (FAILED(list_->Close())) {
-            return Fail("command list close failed");
+            // 아무것도 제출하지 않았다. 이 기록만 참조하던 자원은 지금까지의 제출 뒤에 놓아도 된다.
+            allocators_[recordingAllocator_].fenceValue = fenceValue_;
+            AssignPendingRetires(fenceValue_);
+            timestamps_.Close(fenceValue_, false);
+            return FailWith<GpuFencePoint>("command list close failed");
         }
         ID3D12CommandList* lists[] = {list_.Get()};
         queue_->ExecuteCommandLists(1, lists);
@@ -828,6 +1175,7 @@ public:
             if (record != nullptr) {
                 const HRESULT presented = record->swapChain->Present(record->vsync ? 1 : 0, 0);
                 if (FAILED(presented)) {
+                    DetectLost(presented);
                     outcome = Fail(presented == DXGI_ERROR_DEVICE_REMOVED
                                        ? "Present failed: device removed"
                                        : "Present failed");
@@ -835,121 +1183,285 @@ public:
             }
         }
 
-        const uint64 value = ++fenceValue_;
-        if (FAILED(queue_->Signal(fence_.Get(), value))) {
-            // 장치 제거 등으로 완료를 알 수 없다. 이 프레임이 쓴 자원은 소멸 때까지 놓지 않는다.
+        auto signaled = SignalQueue();
+        if (!signaled) {
+            // 장치 제거 등으로 완료를 알 수 없다. 이 프레임이 쓴 자원·기록 저장소는 소멸 때까지
+            // 놓지 않는다.
+            allocators_[recordingAllocator_].fenceValue = RetainUntilDestructionFence;
             AssignPendingRetires(RetainUntilDestructionFence);
+            timestamps_.Close(RetainUntilDestructionFence, false);
             DrainValidationMessages();
-            return Fail("queue signal failed");
+            return Result<GpuFencePoint>::Failure(signaled.Error());
         }
-        frames_[frameSlot_].fenceValue = value;
-        frameSlot_ = (frameSlot_ + 1) % FrameCount;
+        const uint64 value = signaled.Value();
+        allocators_[recordingAllocator_].fenceValue = value;
         AssignPendingRetires(value);
+        timestamps_.Close(value, true);
         ProcessRetired();
         DrainValidationMessages();
-        return outcome;
+        if (!outcome) {
+            return Result<GpuFencePoint>::Failure(outcome.Error());
+        }
+        return Result<GpuFencePoint>::Success(timeline_.Point(value));
     }
 
     Result<void> ReadPixels(TextureHandle handle, Span<uint8> out) noexcept override {
-        TextureRecord* record = textures_.Find(handle.slot);
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<void>::Failure(owner.Error());
+        }
+        platform::LockGuard lock(gate_);
+
+        const TextureRecord* record = textures_.Find(handle.slot);
         if (record == nullptr) {
             return Result<void>::Failure(ErrorCode::StaleHandle);
         }
-        const uint32 bytesPerPixel = BytesPerPixel(record->format);
-        const usize size = static_cast<usize>(record->width) * record->height * bytesPerPixel;
+        const usize size =
+            static_cast<usize>(record->width) * record->height * BytesPerPixel(record->format);
         if (!record->renderTarget || out.Size() != size || recording_) {
             return Result<void>::Failure(recording_ ? ErrorCode::Busy : ErrorCode::InvalidArgument);
         }
+        // 비동기 readback과 같은 경로로 복사를 제출하고 그 fence를 기다린다(시험·캡처용 동기 경로).
+        auto requested = RequestReadbackLocked(handle);
+        if (!requested) {
+            return Result<void>::Failure(requested.Error());
+        }
+        const ReadbackHandle readback = requested.Value().handle;
+        auto waited = WaitFenceOwner(requested.Value().completion.value);
+        Result<void> outcome = Result<void>::Success();
+        if (!waited) {
+            outcome = Move(waited);
+        } else {
+            auto copied = TryReadbackLocked(readback, out);
+            if (!copied || !copied.Value()) {
+                outcome = Fail("readback did not complete");
+            }
+        }
+        ReleaseReadbackLocked(readback);
+        return outcome;
+    }
 
+    // --- 업로드·readback(GX8) ---
+
+    Result<void> UpdateBuffer(BufferHandle handle, uint64 offset,
+                              Span<const uint8> data) noexcept override {
+        platform::LockGuard lock(gate_);
+        const BufferRecord* record = buffers_.Find(handle.slot);
+        if (record == nullptr) {
+            return Result<void>::Failure(ErrorCode::StaleHandle);
+        }
+        if (data.Size() == 0 || offset > record->size || data.Size() > record->size - offset) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+        return RecordBufferUpload(record->resource.Get(), offset, data);
+    }
+
+    Result<void> UpdateTexture(TextureHandle handle, uint32 mipLevel,
+                               Span<const uint8> pixels) noexcept override {
+        platform::LockGuard lock(gate_);
+        const TextureRecord* record = textures_.Find(handle.slot);
+        if (record == nullptr) {
+            return Result<void>::Failure(ErrorCode::StaleHandle);
+        }
+        if (mipLevel >= record->mipLevels ||
+            pixels.Size() != static_cast<usize>(MipExtent(record->width, mipLevel)) *
+                                 MipExtent(record->height, mipLevel) *
+                                 BytesPerPixel(record->format)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+        return RecordTextureUpload(*record, mipLevel, 1, pixels, true);
+    }
+
+    Result<GpuFencePoint> SubmitUploads() noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<GpuFencePoint>::Failure(owner.Error());
+        }
+        platform::LockGuard lock(gate_);
+        if (recording_) {
+            return Result<GpuFencePoint>::Failure(ErrorCode::Busy);
+        }
+        auto flushed = FlushUploadsLocked();
+        if (!flushed) {
+            return Result<GpuFencePoint>::Failure(flushed.Error());
+        }
+        return Result<GpuFencePoint>::Success(timeline_.Point(flushed.Value()));
+    }
+
+    UploadStats UploadStatistics() const noexcept override {
+        platform::LockGuard lock(gate_);
+        UploadStats stats;
+        stats.ringCapacity = ring_.Capacity();
+        stats.ringUsed = ring_.UsedBytes();
+        stats.ringWraps = ring_.Wraps();
+        stats.dedicatedUploads = dedicatedUploads_;
+        stats.pending = uploadOpen_;
+        return stats;
+    }
+
+    Result<StagingBuffer> AcquireStaging(uint64 bytes) noexcept override {
+        return staging_->Acquire(bytes);
+    }
+
+    Result<void> UploadTextureFromStaging(TextureHandle handle, uint32 mipLevel,
+                                          StagingHandle staging, uint64 offset) noexcept override {
+        platform::LockGuard lock(gate_);
+        const TextureRecord* record = textures_.Find(handle.slot);
+        auto memory = staging_->Find(staging);
+        if (record == nullptr || !memory) {
+            return Result<void>::Failure(ErrorCode::StaleHandle);
+        }
+        const uint32 width = MipExtent(record->width, mipLevel);
+        const uint32 height = MipExtent(record->height, mipLevel);
+        const uint64 rowBytes = static_cast<uint64>(width) * BytesPerPixel(record->format);
+        const uint64 bytes = rowBytes * height;
+        if (mipLevel >= record->mipLevels || offset > memory.Value().size ||
+            bytes > memory.Value().size - offset) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
         D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
         UINT64 total = 0;
         const D3D12_RESOURCE_DESC resourceDesc = record->resource->GetDesc();
-        device_->GetCopyableFootprints(&resourceDesc, 0, 1, 0, &footprint, nullptr, nullptr,
+        device_->GetCopyableFootprints(&resourceDesc, mipLevel, 1, 0, &footprint, nullptr, nullptr,
                                        &total);
-        ComRef<ID3D12Resource> readback;
-        const D3D12_HEAP_PROPERTIES heap = HeapProperties(D3D12_HEAP_TYPE_READBACK);
-        const D3D12_RESOURCE_DESC buffer = BufferResource(total);
-        if (FAILED(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &buffer,
-                                                    D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
-                                                    IID_PPV_ARGS(readback.Out())))) {
-            return Fail("readback buffer creation failed");
+        // 행 간격이 장치 정렬과 같고 시작이 배치 정렬이면 staging에서 바로 복사한다. 아니면 ring에
+        // 장치 정렬로 다시 옮긴다(RenderBase 6.5절: 장치 정렬은 렌더 업로드가 맞춘다).
+        if (footprint.Footprint.RowPitch != rowBytes || offset % TexturePlacementAlignment != 0) {
+            return RecordTextureUpload(
+                *record, mipLevel, 1,
+                Span<const uint8>(memory.Value().data + offset, static_cast<usize>(bytes)), true);
         }
-
-        auto begun = BeginUpload();
-        if (!begun) {
-            return begun;
+        auto opened = OpenUploadList();
+        if (!opened) {
+            return opened;
         }
-        D3D12_RESOURCE_BARRIER toCopy =
-            Transition(record->resource.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                       D3D12_RESOURCE_STATE_COPY_SOURCE);
-        uploadList_->ResourceBarrier(1, &toCopy);
-        D3D12_TEXTURE_COPY_LOCATION destination = {};
-        destination.pResource = readback.Get();
-        destination.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-        destination.PlacedFootprint = footprint;
-        D3D12_TEXTURE_COPY_LOCATION source = {};
-        source.pResource = record->resource.Get();
-        source.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-        source.SubresourceIndex = 0;
-        uploadList_->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
-        D3D12_RESOURCE_BARRIER back =
-            Transition(record->resource.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE,
-                       D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-        uploadList_->ResourceBarrier(1, &back);
-        auto submitted = SubmitUploadAndWait();
-        if (!submitted) {
-            return submitted;
+        auto marked = staging_->MarkPending(staging);
+        if (!marked) {
+            return marked;
         }
-
-        void* mapped = nullptr;
-        const D3D12_RANGE whole = {0, static_cast<SIZE_T>(total)};
-        if (FAILED(readback->Map(0, &whole, &mapped))) {
-            return Fail("readback map failed");
-        }
-        const uint8* rows = static_cast<const uint8*>(mapped) + footprint.Offset;
-        const usize rowBytes = static_cast<usize>(record->width) * bytesPerPixel;
-        for (uint32 row = 0; row < record->height; ++row) {
-            platform::MemoryCopy(out.Data() + row * rowBytes,
-                                 rows + static_cast<usize>(row) * footprint.Footprint.RowPitch,
-                                 rowBytes);
-        }
-        const D3D12_RANGE noWrite = {0, 0};
-        readback->Unmap(0, &noWrite);
+        footprint.Offset = offset;
+        CopyTextureFrom(*record, mipLevel, static_cast<ID3D12Resource*>(memory.Value().resource),
+                        footprint, true);
         return Result<void>::Success();
     }
 
-    void Destroy(BufferHandle handle) noexcept override {
+    Result<void> UploadBufferFromStaging(BufferHandle handle, uint64 destinationOffset,
+                                         StagingHandle staging, uint64 sourceOffset,
+                                         uint64 size) noexcept override {
+        platform::LockGuard lock(gate_);
+        const BufferRecord* record = buffers_.Find(handle.slot);
+        auto memory = staging_->Find(staging);
+        if (record == nullptr || !memory) {
+            return Result<void>::Failure(ErrorCode::StaleHandle);
+        }
+        if (size == 0 || destinationOffset > record->size ||
+            size > record->size - destinationOffset || sourceOffset > memory.Value().size ||
+            size > memory.Value().size - sourceOffset) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+        auto opened = OpenUploadList();
+        if (!opened) {
+            return opened;
+        }
+        auto marked = staging_->MarkPending(staging);
+        if (!marked) {
+            return marked;
+        }
+        uploadList_->CopyBufferRegion(record->resource.Get(), destinationOffset,
+                                      static_cast<ID3D12Resource*>(memory.Value().resource),
+                                      sourceOffset, size);
+        return Result<void>::Success();
+    }
+
+    void ReleaseStaging(StagingHandle staging) noexcept override {
+        staging_->Release(staging);
+    }
+
+    StagingStats StagingStatistics() const noexcept override {
+        return staging_->Stats();
+    }
+
+    Result<ReadbackRequest> RequestReadback(TextureHandle target) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<ReadbackRequest>::Failure(owner.Error());
+        }
+        platform::LockGuard lock(gate_);
+        if (recording_) {
+            return Result<ReadbackRequest>::Failure(ErrorCode::Busy);
+        }
+        return RequestReadbackLocked(target);
+    }
+
+    Result<bool> TryReadback(ReadbackHandle handle, Span<uint8> out) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<bool>::Failure(owner.Error());
+        }
+        platform::LockGuard lock(gate_);
+        return TryReadbackLocked(handle, out);
+    }
+
+    void ReleaseReadback(ReadbackHandle handle) noexcept override {
+        if (!ownership_.Check()) {
+            return;
+        }
+        platform::LockGuard lock(gate_);
+        ReleaseReadbackLocked(handle);
+    }
+
+    void Retire(BufferHandle handle) noexcept override {
+        if (!ownership_.Check()) {
+            return;
+        }
+        platform::LockGuard lock(gate_);
+
         BufferRecord* record = buffers_.Find(handle.slot);
         if (record == nullptr) {
             return;
         }
-        Retire(Move(record->resource), -1, -1);
+        Defer(Move(record->resource), -1, -1);
         auto removed = buffers_.TryRemove(handle.slot);
         (void)removed;
     }
 
-    void Destroy(TextureHandle handle) noexcept override {
+    void Retire(TextureHandle handle) noexcept override {
+        if (!ownership_.Check()) {
+            return;
+        }
+        platform::LockGuard lock(gate_);
+
         TextureRecord* record = textures_.Find(handle.slot);
         if (record == nullptr || handle == white_) {
             return;
         }
-        Retire(Move(record->resource), record->srv,
-               record->renderTarget ? static_cast<int64>(record->rtv) : int64{-1});
+        Defer(Move(record->resource), record->srv,
+              record->renderTarget ? static_cast<int64>(record->rtv) : int64{-1});
         auto removed = textures_.TryRemove(handle.slot);
         (void)removed;
     }
 
-    void Destroy(PipelineHandle handle) noexcept override {
+    void Retire(PipelineHandle handle) noexcept override {
+        if (!ownership_.Check()) {
+            return;
+        }
+        platform::LockGuard lock(gate_);
+
         PipelineRecord* record = pipelines_.Find(handle.slot);
         if (record == nullptr) {
             return;
         }
-        Retire(Move(record->state), -1, -1);
+        Defer(Move(record->state), -1, -1);
         auto removed = pipelines_.TryRemove(handle.slot);
         (void)removed;
     }
 
-    void Destroy(SwapChainHandle handle) noexcept override {
+    void Retire(SwapChainHandle handle) noexcept override {
+        if (!ownership_.Check()) {
+            return;
+        }
+        platform::LockGuard lock(gate_);
+
         SwapChainRecord* record = swapChains_.Find(handle.slot);
         if (record == nullptr) {
             return;
@@ -958,25 +1470,100 @@ public:
         // 그리고 있어도 retire 항목이 참조를 쥐므로 EndFrame의 barrier까지 유효하다(present는
         // 생략된다).
         for (uint32 index = 0; index < SwapChainBufferCount; ++index) {
-            Retire(Move(record->buffers[index]), -1, record->rtv[index]);
+            Defer(Move(record->buffers[index]), -1, record->rtv[index]);
         }
-        Retire(Move(record->swapChain), -1, -1);
+        Defer(Move(record->swapChain), -1, -1);
         auto removed = swapChains_.TryRemove(handle.slot);
         (void)removed;
     }
 
-    Result<void> WaitIdle() noexcept override {
-        const uint64 value = ++fenceValue_;
-        if (FAILED(queue_->Signal(fence_.Get(), value))) {
-            return Fail("queue signal failed");
+    void ReclaimCompleted() noexcept override {
+        if (!ownership_.Check()) {
+            return;
         }
-        auto waited = WaitFence(value);
+        platform::LockGuard lock(gate_);
+
+        ProcessRetired();
+    }
+
+    Result<void> WaitIdle() noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<void>::Failure(owner.Error());
+        }
+        platform::LockGuard lock(gate_);
+        return WaitIdleLocked();
+    }
+
+    Result<void> WaitIdleLocked() noexcept {
+        // 쌓인 업로드도 제출해 함께 기다린다.
+        auto uploads = FlushUploadsLocked();
+        if (!uploads) {
+            ProcessRetired();
+            return Result<void>::Failure(uploads.Error());
+        }
+        auto signaled = SignalQueue();
+        if (!signaled) {
+            // 장치가 제거되었으면 fence 완료 값이 최대라 회수 대기 항목을 모두 놓을 수 있다.
+            ProcessRetired();
+            return Result<void>::Failure(signaled.Error());
+        }
+        auto waited = WaitFenceOwner(signaled.Value());
+        // 기록 중인 프레임의 보류 항목은 아직 제출되지 않았으므로 남긴다.
+        ProcessRetired();
         if (!waited) {
             return waited;
         }
-        // 기록 중인 프레임의 보류 항목은 아직 제출되지 않았으므로 남긴다.
-        ProcessRetired();
         return Result<void>::Success();
+    }
+
+    GpuFencePoint LastSubmittedFence() const noexcept override {
+        return timeline_.LastSubmitted();
+    }
+
+    Result<bool> IsFenceComplete(GpuFencePoint point) const noexcept override {
+        return timeline_.IsComplete(point);
+    }
+
+    Result<platform::WaitResult> WaitFence(GpuFencePoint point,
+                                           uint32 timeoutMs) noexcept override {
+        return timeline_.Wait(point, timeoutMs);
+    }
+
+    Result<void> NotifyFence(GpuFencePoint point, FenceCallback callback,
+                             void* context) noexcept override {
+        return timeline_.Notify(point, callback, context);
+    }
+
+    bool IsLost() const noexcept override {
+        return timeline_.IsLost();
+    }
+
+    bool IsOwnerThread() const noexcept override {
+        return ownership_.IsOwner();
+    }
+
+    Result<void> ReleaseOwnership() noexcept override {
+        if (!ownership_.IsOwner()) {
+            return Result<void>::Failure(ErrorCode::WrongThread);
+        }
+        if (recording_) {
+            return Result<void>::Failure(ErrorCode::Busy);
+        }
+        return ownership_.Release();
+    }
+
+    Result<void> AcquireOwnership() noexcept override {
+        return ownership_.Acquire();
+    }
+
+    uint64 RejectedCalls() const noexcept override {
+        return ownership_.Rejected();
+    }
+
+    usize PendingRetireCount() const noexcept override {
+        platform::LockGuard lock(gate_);
+        return retired_.Size();
     }
 
     StringView LastError() const noexcept override {
@@ -987,15 +1574,60 @@ public:
         return ignoredDraws_;
     }
 
+    usize CollectTimestamps(Span<TimestampSample> out) noexcept override {
+        if (!ownership_.IsOwner()) {
+            return 0;
+        }
+        platform::LockGuard lock(gate_);
+        if (timestampHeap_.Get() == nullptr) {
+            return 0;
+        }
+        HarvestTimestamps();
+        return timestamps_.Collect(out);
+    }
+
+    Result<ClockCalibration> CalibrateClocks() noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<ClockCalibration>::Failure(owner.Error());
+        }
+        if (timestampHeap_.Get() == nullptr) {
+            return Result<ClockCalibration>::Failure(ErrorCode::Unsupported);
+        }
+        if (timeline_.IsLost()) {
+            return Result<ClockCalibration>::Failure(ErrorCode::Destroyed);
+        }
+        // CPU 쪽 값은 QueryPerformanceCounter tick이다. platform::MonotonicNanoseconds와 같은
+        // 시계이므로 같은 주파수로 ns로 옮긴다.
+        UINT64 gpu = 0;
+        UINT64 cpu = 0;
+        LARGE_INTEGER frequency{};
+        const HRESULT calibrated = queue_->GetClockCalibration(&gpu, &cpu);
+        if (FAILED(calibrated) || !QueryPerformanceFrequency(&frequency) ||
+            frequency.QuadPart <= 0) {
+            DetectLost(calibrated);
+            return FailWith<ClockCalibration>("GetClockCalibration failed");
+        }
+        ClockCalibration calibration;
+        calibration.gpuTicks = gpu;
+        calibration.cpuNanoseconds =
+            TicksToNanoseconds(cpu, static_cast<uint64>(frequency.QuadPart));
+        calibration.gpuFrequency = timestampFrequency_;
+        return Result<ClockCalibration>::Success(calibration);
+    }
+
     uint64 ValidationErrorCount() const noexcept override {
         DrainValidationMessages();
         return validationErrors_;
     }
 
 private:
-    struct Frame {
+    // 기록 저장소 하나와 그것으로 마지막에 제출한 fence 값이다(0이면 쓴 적 없음).
+    struct AllocatorRecord {
         ComRef<ID3D12CommandAllocator> allocator;
         uint64 fenceValue = 0;
+        // 지금 프레임·업로드 기록이 쓰는 중이다(고르지 않는다).
+        bool inUse = false;
     };
 
     struct Target {
@@ -1006,9 +1638,16 @@ private:
         uint32 height = 0;
     };
 
-    struct PipelineStride {
-        SlotHandle pipeline;
-        uint32 stride = 0;
+    // 기록 중 묶인 정점·index 버퍼다(파이프라인을 바꾸면 그 stride로 다시 묶는다).
+    struct BoundVertexBuffer {
+        BufferHandle buffer;
+        uint64 offset = 0;
+    };
+
+    struct BoundIndexBuffer {
+        BufferHandle buffer;
+        IndexFormat format = IndexFormat::UInt16;
+        uint64 offset = 0;
     };
 
     struct SamplerEntry {
@@ -1016,10 +1655,94 @@ private:
         uint32 slot = 0;
     };
 
+    // 진단 문자열을 남기고 실패를 돌려준다. 장치가 손실되었으면 Destroyed다.
     Result<void> Fail(const char* message) noexcept {
         auto assigned = lastError_.TryAssign(StringView(message, platform::CStringLength(message)));
         (void)assigned;
-        return Result<void>::Failure(ErrorCode::DependencyFailed);
+        return Result<void>::Failure(timeline_.IsLost() ? ErrorCode::Destroyed
+                                                        : ErrorCode::DependencyFailed);
+    }
+
+    // API 실패가 장치 제거 때문이면 손실을 게시한다(기다리는 쪽을 Destroyed로 깨운다).
+    void DetectLost(HRESULT failure) noexcept {
+        if (failure == DXGI_ERROR_DEVICE_REMOVED || failure == DXGI_ERROR_DEVICE_RESET ||
+            device_->GetDeviceRemovedReason() != S_OK) {
+            timeline_.MarkLost();
+        }
+    }
+
+    // graphics queue에 다음 fence 값을 신호하고 타임라인에 알린다. 실패하면 값을 쓰지 않는다.
+    Result<uint64> SignalQueue() noexcept {
+        if (timeline_.IsLost()) {
+            return Result<uint64>::Failure(ErrorCode::Destroyed);
+        }
+        const uint64 value = fenceValue_ + 1;
+        const HRESULT signaled = queue_->Signal(fence_.Get(), value);
+        if (FAILED(signaled)) {
+            DetectLost(signaled);
+            return FailWith<uint64>("queue signal failed");
+        }
+        fenceValue_ = value;
+        timeline_.Submitted(value, nullptr);
+        return Result<uint64>::Success(value);
+    }
+
+    // 소유 스레드가 직접 본 완료 값을 타임라인에 게시한다(관찰 스레드보다 먼저 알 수 있다).
+    void PublishObserved() noexcept {
+        const uint64 completed = fence_->GetCompletedValue();
+        if (completed == D3D12FenceSource::RemovedFenceValue) {
+            timeline_.MarkLost();
+            return;
+        }
+        timeline_.Publish(completed);
+    }
+
+    Result<uint32> AddCommandAllocator() noexcept {
+        AllocatorRecord record;
+        if (FAILED(device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
+                                                   IID_PPV_ARGS(record.allocator.Out())))) {
+            return FailWith<uint32>("CreateCommandAllocator failed");
+        }
+        auto pushed = allocators_.TryPushBack(Move(record));
+        if (!pushed) {
+            return Result<uint32>::Failure(pushed.Error());
+        }
+        return Result<uint32>::Success(static_cast<uint32>(allocators_.Size() - 1));
+    }
+
+    // GPU가 다 쓴 기록 저장소를 고른다. 없으면 상한까지 새로 만들고, 상한이면 가장 오래된 제출을
+    // 기다린다(프레임 slot이 앞서 기다리므로 보통은 기다리지 않는다).
+    Result<uint32> PickCommandAllocator() noexcept {
+        const uint64 completed = fence_->GetCompletedValue();
+        if (completed == D3D12FenceSource::RemovedFenceValue) {
+            timeline_.MarkLost();
+            return Result<uint32>::Failure(ErrorCode::Destroyed);
+        }
+        uint32 oldest = NumericLimits<uint32>::Max();
+        for (uint32 index = 0; index < allocators_.Size(); ++index) {
+            if (allocators_[index].inUse) {
+                continue;
+            }
+            if (allocators_[index].fenceValue <= completed) {
+                return Result<uint32>::Success(index);
+            }
+            if (oldest == NumericLimits<uint32>::Max() ||
+                allocators_[index].fenceValue < allocators_[oldest].fenceValue) {
+                oldest = index;
+            }
+        }
+        if (allocators_.Size() < MaxCommandAllocators) {
+            return AddCommandAllocator();
+        }
+        // 소유 스레드만 GPU를 기다린다. 다른 스레드(생성·갱신)는 자리가 없으면 Busy다.
+        if (oldest == NumericLimits<uint32>::Max() || !ownership_.IsOwner()) {
+            return Result<uint32>::Failure(ErrorCode::Busy);
+        }
+        auto waited = WaitFenceOwner(allocators_[oldest].fenceValue);
+        if (!waited) {
+            return Result<uint32>::Failure(waited.Error());
+        }
+        return Result<uint32>::Success(oldest);
     }
 
     template <class T>
@@ -1058,29 +1781,106 @@ private:
         return Result<uint32>::Success(slot.Value());
     }
 
-    Result<void> StrideFor(SlotHandle pipeline, uint32 stride) noexcept {
-        // 사용 중인 칸 중 파괴된 파이프라인의 칸을 재사용하고, 없으면 뒤에 추가한다.
-        for (uint32 index = 0; index < pipelineStrideCount_; ++index) {
-            if (!pipelines_.IsValid(pipelineStrides_[index].pipeline) ||
-                pipelineStrides_[index].pipeline == pipeline) {
-                pipelineStrides_[index] = {pipeline, stride};
-                return Result<void>::Success();
+    // 컴파일한 VS 입력 signature를 배치와 대조한다(RenderBase 10.4절 셰이더 입력 대조). 사용자
+    // 입력은 시맨틱 ATTRIBUTEn만 받고, n이 배치에 있어야 하며 성분 타입 계열이 형식의 셰이더 타입과
+    // 같아야 한다. 셰이더가 읽지 않는 속성은 허용한다.
+    Result<void> MatchVertexInputs(ID3DBlob* code, const VertexLayout& layout) noexcept {
+        ComRef<ID3D12ShaderReflection> reflection;
+        if (FAILED(D3DReflect(code->GetBufferPointer(), code->GetBufferSize(),
+                              IID_PPV_ARGS(reflection.Out())))) {
+            return Fail("D3DReflect failed on the vertex shader");
+        }
+        D3D12_SHADER_DESC shader = {};
+        if (FAILED(reflection->GetDesc(&shader))) {
+            return Fail("vertex shader reflection description failed");
+        }
+        for (UINT index = 0; index < shader.InputParameters; ++index) {
+            D3D12_SIGNATURE_PARAMETER_DESC input = {};
+            if (FAILED(reflection->GetInputParameterDesc(index, &input))) {
+                return Fail("vertex shader input description failed");
+            }
+            if (input.SystemValueType != D3D_NAME_UNDEFINED) {
+                continue; // SV_VertexID·SV_InstanceID 등
+            }
+            Diagnostic message;
+            if (input.SemanticName == nullptr || !IsAttributeSemantic(input.SemanticName) ||
+                input.SemanticIndex >= MaxVertexAttributes) {
+                message.Text("vertex shader input ")
+                    .Text(input.SemanticName != nullptr ? input.SemanticName : "?")
+                    .Number(input.SemanticIndex)
+                    .Text(" must use semantic ATTRIBUTE0-15");
+                return Reject(message);
+            }
+            const VertexAttribute* attribute = nullptr;
+            for (const VertexAttribute& candidate : layout.attributes) {
+                if (candidate.location == input.SemanticIndex) {
+                    attribute = &candidate;
+                }
+            }
+            if (attribute == nullptr) {
+                message.Text("vertex shader reads location ")
+                    .Number(input.SemanticIndex)
+                    .Text(" which the vertex layout does not provide");
+                return Reject(message);
+            }
+            VertexShaderType shaderType = VertexShaderType::Float;
+            if (input.ComponentType == D3D_REGISTER_COMPONENT_SINT32) {
+                shaderType = VertexShaderType::Int;
+            } else if (input.ComponentType == D3D_REGISTER_COMPONENT_UINT32) {
+                shaderType = VertexShaderType::Uint;
+            }
+            if (VertexFormatShaderType(attribute->format) != shaderType) {
+                message.Text("vertex input location ")
+                    .Number(input.SemanticIndex)
+                    .Text(": format ")
+                    .Text(VertexFormatName(attribute->format))
+                    .Text(" feeds ")
+                    .Text(VertexShaderTypeName(VertexFormatShaderType(attribute->format)))
+                    .Text(" but the shader reads ")
+                    .Text(VertexShaderTypeName(shaderType));
+                return Reject(message);
             }
         }
-        if (pipelineStrideCount_ >= MaxPipelines) {
-            return Result<void>::Failure(ErrorCode::CapacityExceeded);
-        }
-        pipelineStrides_[pipelineStrideCount_++] = {pipeline, stride};
         return Result<void>::Success();
     }
 
-    uint32 StrideOf(SlotHandle pipeline) const noexcept {
-        for (uint32 index = 0; index < pipelineStrideCount_; ++index) {
-            if (pipelineStrides_[index].pipeline == pipeline) {
-                return pipelineStrides_[index].stride;
+    Result<void> Reject(const Diagnostic& message) noexcept {
+        auto assigned = lastError_.TryAssign(
+            StringView(message.CStr(), platform::CStringLength(message.CStr())));
+        (void)assigned;
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 묶인 정점 버퍼 하나를 지금 파이프라인의 stride로 IA에 건다.
+    void ApplyVertexBuffer(uint32 stream) noexcept {
+        const BufferRecord* buffer = buffers_.Find(boundVertex_[stream].buffer.slot);
+        const PipelineRecord* pipeline = pipelines_.Find(boundPipeline_);
+        if (buffer == nullptr || boundVertex_[stream].offset >= buffer->size) {
+            return;
+        }
+        D3D12_VERTEX_BUFFER_VIEW view = {};
+        view.BufferLocation = buffer->address + boundVertex_[stream].offset;
+        view.SizeInBytes = static_cast<UINT>(buffer->size - boundVertex_[stream].offset);
+        view.StrideInBytes = pipeline != nullptr ? pipeline->strides[stream] : 0u;
+        list_->IASetVertexBuffers(stream, 1, &view);
+    }
+
+    // 묶인 파이프라인이 선언한 stream에 모두 유효한 버퍼가 있는지다.
+    bool StreamsBound() const noexcept {
+        const PipelineRecord* pipeline = pipelines_.Find(boundPipeline_);
+        if (pipeline == nullptr) {
+            return false;
+        }
+        for (uint32 stream = 0; stream < MaxVertexStreams; ++stream) {
+            if ((pipeline->streamMask & (1u << stream)) == 0) {
+                continue;
+            }
+            const BufferRecord* buffer = buffers_.Find(boundVertex_[stream].buffer.slot);
+            if (buffer == nullptr || boundVertex_[stream].offset >= buffer->size) {
+                return false;
             }
         }
-        return 0;
+        return true;
     }
 
     Result<void> CreateRootSignature() noexcept {
@@ -1163,32 +1963,86 @@ private:
         return Result<void>::Success();
     }
 
-    Result<void> WaitFence(uint64 value) noexcept {
-        if (fence_->GetCompletedValue() >= value) {
-            return Result<void>::Success();
+    // 소유 스레드가 value 완료를 직접 기다린다(업로드·readback·WaitIdle·저장소 재사용).
+    Result<void> WaitFenceOwner(uint64 value) noexcept {
+        if (fence_->GetCompletedValue() < value) {
+            if (FAILED(fence_->SetEventOnCompletion(value, fenceEvent_))) {
+                return Fail("fence wait setup failed");
+            }
+            WaitForSingleObject(fenceEvent_, INFINITE);
         }
-        if (FAILED(fence_->SetEventOnCompletion(value, fenceEvent_))) {
-            return Fail("fence wait setup failed");
+        PublishObserved();
+        if (timeline_.IsLost()) {
+            return Result<void>::Failure(ErrorCode::Destroyed);
         }
-        WaitForSingleObject(fenceEvent_, INFINITE);
         return Result<void>::Success();
     }
 
-    Result<void> BeginRecording() noexcept {
-        Frame& frame = frames_[frameSlot_];
-        // 이 slot의 이전 제출이 끝나야 allocator를 다시 쓸 수 있다.
-        auto waited = WaitFence(frame.fenceValue);
-        if (!waited) {
-            return waited;
+    // timestamp query heap과 resolve 대상 readback 버퍼를 만든다(GX9). queue가 timestamp 주파수를
+    // 주지 않거나 만들 수 없으면 timestamp를 "없음"으로 공개한다(장치 생성은 실패하지 않는다).
+    void InitializeTimestamps() noexcept {
+        UINT64 frequency = 0;
+        if (FAILED(queue_->GetTimestampFrequency(&frequency)) || frequency == 0) {
+            return;
         }
-        if (FAILED(frame.allocator->Reset()) ||
-            FAILED(list_->Reset(frame.allocator.Get(), nullptr))) {
+        constexpr uint32 Count = TimestampFrameSlots * MaxTimestampsPerFrame;
+        D3D12_QUERY_HEAP_DESC heapDesc = {};
+        heapDesc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+        heapDesc.Count = Count;
+        const D3D12_HEAP_PROPERTIES heap = HeapProperties(D3D12_HEAP_TYPE_READBACK);
+        const D3D12_RESOURCE_DESC buffer = BufferResource(uint64{Count} * sizeof(uint64));
+        ComRef<ID3D12QueryHeap> queries;
+        ComRef<ID3D12Resource> readback;
+        if (FAILED(device_->CreateQueryHeap(&heapDesc, IID_PPV_ARGS(queries.Out()))) ||
+            FAILED(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &buffer,
+                                                    D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+                                                    IID_PPV_ARGS(readback.Out()))) ||
+            !timestamps_.Reset(TimestampFrameSlots, MaxTimestampsPerFrame)) {
+            return;
+        }
+        timestampHeap_ = Move(queries);
+        timestampReadback_ = Move(readback);
+        timestampSource_.buffer = timestampReadback_.Get();
+        timestampFrequency_ = frequency;
+    }
+
+    // GPU가 끝낸 프레임의 timestamp를 회수한다(잠금 안). 장치가 제거되었으면 값이 없으므로 읽지
+    // 않는다.
+    void HarvestTimestamps() noexcept {
+        const uint64 completed = fence_->GetCompletedValue();
+        if (completed == D3D12FenceSource::RemovedFenceValue) {
+            return;
+        }
+        timestamps_.Harvest(completed, timestampSource_);
+    }
+
+    // 프레임 끝에 열린 marker 구간을 닫는다(잠금 안).
+    void CloseMarkers() noexcept {
+        for (; markerDepth_ != 0; --markerDepth_) {
+            list_->EndEvent();
+        }
+    }
+
+    Result<void> BeginRecording() noexcept {
+        // 이전 제출이 끝난 저장소만 다시 쓸 수 있다.
+        auto picked = PickCommandAllocator();
+        if (!picked) {
+            return Result<void>::Failure(picked.Error());
+        }
+        AllocatorRecord& record = allocators_[picked.Value()];
+        if (FAILED(record.allocator->Reset()) ||
+            FAILED(list_->Reset(record.allocator.Get(), nullptr))) {
             return Fail("command list reset failed");
         }
+        recordingAllocator_ = picked.Value();
+        record.inUse = true;
         recording_ = true;
-        pipelineBound_ = false;
-        bufferBound_ = false;
+        markerDepth_ = 0;
         boundPipeline_ = {};
+        for (BoundVertexBuffer& bound : boundVertex_) {
+            bound = {};
+        }
+        boundIndex_ = {};
         return Result<void>::Success();
     }
 
@@ -1220,89 +2074,319 @@ private:
         list_->SetGraphicsRoot32BitConstants(0, ConstantCount, &identity, 0);
     }
 
-    Result<void> BeginUpload() noexcept {
-        if (FAILED(uploadAllocator_->Reset()) ||
-            FAILED(uploadList_->Reset(uploadAllocator_.Get(), nullptr))) {
+    // 업로드 기록 list를 연다(잠금 안). 이미 열려 있으면 그대로 쓴다.
+    Result<void> OpenUploadList() noexcept {
+        if (uploadOpen_) {
+            return Result<void>::Success();
+        }
+        auto picked = PickCommandAllocator();
+        if (!picked) {
+            return Result<void>::Failure(picked.Error());
+        }
+        AllocatorRecord& record = allocators_[picked.Value()];
+        if (FAILED(record.allocator->Reset()) ||
+            FAILED(uploadList_->Reset(record.allocator.Get(), nullptr))) {
             return Fail("upload command list reset failed");
         }
+        record.inUse = true;
+        uploadAllocator_ = picked.Value();
+        uploadOpen_ = true;
         return Result<void>::Success();
     }
 
-    Result<void> SubmitUploadAndWait() noexcept {
-        if (FAILED(uploadList_->Close())) {
-            return Fail("upload command list close failed");
+    // 업로드 원본 공간이다. ring 구간이거나 전용 staging이다.
+    struct UploadSpace {
+        ID3D12Resource* resource = nullptr;
+        uint64 offset = 0;
+        uint8* data = nullptr;
+    };
+
+    // size byte 업로드 공간을 잡는다(잠금 안). ring에 자리가 없으면 소유 스레드는 쌓인 업로드를
+    // 제출하고 가장 오래된 묶음의 fence를 기다려 비운다. 다른 스레드이거나 그래도 없으면 전용
+    // staging을 만들고 그 업로드 묶음의 fence 뒤에 놓는다.
+    Result<UploadSpace> StageUpload(uint64 size, uint64 alignment) noexcept {
+        for (;;) {
+            ring_.Reclaim(fence_->GetCompletedValue());
+            auto offset = ring_.Allocate(size, alignment);
+            if (offset) {
+                return Result<UploadSpace>::Success(
+                    UploadSpace{ringBuffer_.Get(), offset.Value(), ringData_ + offset.Value()});
+            }
+            if (offset.Error() != ErrorCode::CapacityExceeded || !ownership_.IsOwner()) {
+                break;
+            }
+            if (ring_.HasOpenAllocations()) {
+                auto flushed = FlushUploadsLocked();
+                if (!flushed) {
+                    return Result<UploadSpace>::Failure(flushed.Error());
+                }
+                continue;
+            }
+            const uint64 oldest = ring_.OldestFence();
+            if (oldest == 0 || oldest == RetainUntilDestructionFence) {
+                break;
+            }
+            auto waited = WaitFenceOwner(oldest);
+            if (!waited) {
+                return Result<UploadSpace>::Failure(waited.Error());
+            }
         }
-        ID3D12CommandList* lists[] = {uploadList_.Get()};
-        queue_->ExecuteCommandLists(1, lists);
-        const uint64 value = ++fenceValue_;
-        if (FAILED(queue_->Signal(fence_.Get(), value))) {
-            return Fail("queue signal failed");
+
+        ComRef<ID3D12Resource> dedicated;
+        const D3D12_HEAP_PROPERTIES heap = HeapProperties(D3D12_HEAP_TYPE_UPLOAD);
+        const D3D12_RESOURCE_DESC buffer = BufferResource(size);
+        void* mapped = nullptr;
+        const D3D12_RANGE noRead = {0, 0};
+        if (FAILED(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &buffer,
+                                                    D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+                                                    IID_PPV_ARGS(dedicated.Out()))) ||
+            FAILED(dedicated->Map(0, &noRead, &mapped))) {
+            return FailWith<UploadSpace>("upload staging creation failed");
         }
-        return WaitFence(value);
+        ID3D12Resource* resource = dedicated.Get();
+        Retired entry;
+        entry.object.Attach(dedicated.Detach());
+        entry.uploadPending = true;
+        auto pushed = retired_.TryPushBack(Move(entry));
+        if (!pushed) {
+            return Result<UploadSpace>::Failure(pushed.Error());
+        }
+        ++dedicatedUploads_;
+        return Result<UploadSpace>::Success(UploadSpace{resource, 0, static_cast<uint8*>(mapped)});
     }
 
-    Result<void> UploadTexture(TextureRecord& record, Span<const uint8> pixels) noexcept {
+    // 버퍼 구간 복사를 업로드 기록에 쌓는다(잠금 안).
+    Result<void> RecordBufferUpload(ID3D12Resource* target, uint64 offset,
+                                    Span<const uint8> data) noexcept {
+        auto space = StageUpload(data.Size(), BufferUploadAlignment);
+        if (!space) {
+            return Result<void>::Failure(space.Error());
+        }
+        platform::MemoryCopy(space.Value().data, data.Data(), data.Size());
+        auto opened = OpenUploadList();
+        if (!opened) {
+            return opened;
+        }
+        uploadList_->CopyBufferRegion(target, offset, space.Value().resource, space.Value().offset,
+                                      data.Size());
+        return Result<void>::Success();
+    }
+
+    // footprint 배치의 원본에서 mip 하나로 복사를 기록한다. restore면 쉬는 상태(PSR)에서 복사
+    // 대상으로 바꿨다가 되돌린다. 처음 생성(COPY_DEST)이면 복사 뒤 PSR로만 바꾼다.
+    void CopyTextureFrom(const TextureRecord& record, uint32 mipLevel, ID3D12Resource* source,
+                         const D3D12_PLACED_SUBRESOURCE_FOOTPRINT& footprint,
+                         bool restore) noexcept {
+        if (restore) {
+            const D3D12_RESOURCE_BARRIER toCopy = TransitionSubresource(
+                record.resource.Get(), mipLevel, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_COPY_DEST);
+            uploadList_->ResourceBarrier(1, &toCopy);
+        }
+        D3D12_TEXTURE_COPY_LOCATION destination = {};
+        destination.pResource = record.resource.Get();
+        destination.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        destination.SubresourceIndex = mipLevel;
+        D3D12_TEXTURE_COPY_LOCATION from = {};
+        from.pResource = source;
+        from.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        from.PlacedFootprint = footprint;
+        uploadList_->CopyTextureRegion(&destination, 0, 0, 0, &from, nullptr);
+        const D3D12_RESOURCE_BARRIER toShader =
+            TransitionSubresource(record.resource.Get(), mipLevel, D3D12_RESOURCE_STATE_COPY_DEST,
+                                  D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        uploadList_->ResourceBarrier(1, &toShader);
+    }
+
+    // 빈틈 없는 행의 픽셀(mip firstMip부터 count개)을 장치 행 정렬로 ring에 옮기고 복사를 기록한다.
+    Result<void> RecordTextureUpload(const TextureRecord& record, uint32 firstMip, uint32 count,
+                                     Span<const uint8> pixels, bool restore) noexcept {
         D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprints[MaxMipLevels] = {};
         UINT64 total = 0;
         const D3D12_RESOURCE_DESC resourceDesc = record.resource->GetDesc();
-        device_->GetCopyableFootprints(&resourceDesc, 0, record.mipLevels, 0, footprints, nullptr,
+        device_->GetCopyableFootprints(&resourceDesc, firstMip, count, 0, footprints, nullptr,
                                        nullptr, &total);
-        ComRef<ID3D12Resource> staging;
-        const D3D12_HEAP_PROPERTIES heap = HeapProperties(D3D12_HEAP_TYPE_UPLOAD);
-        const D3D12_RESOURCE_DESC buffer = BufferResource(total);
-        if (FAILED(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &buffer,
-                                                    D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-                                                    IID_PPV_ARGS(staging.Out())))) {
-            return Fail("texture staging buffer creation failed");
-        }
-        void* mapped = nullptr;
-        const D3D12_RANGE noRead = {0, 0};
-        if (FAILED(staging->Map(0, &noRead, &mapped))) {
-            return Fail("texture staging map failed");
+        auto space = StageUpload(total, TexturePlacementAlignment);
+        if (!space) {
+            return Result<void>::Failure(space.Error());
         }
         // 원본은 빈틈 없는 행이고 GPU 복사는 256바이트 정렬 행 간격을 요구하므로 mip·행마다 옮긴다.
         const uint32 bytesPerPixel = BytesPerPixel(record.format);
         usize sourceOffset = 0;
-        for (uint32 level = 0; level < record.mipLevels; ++level) {
+        for (uint32 index = 0; index < count; ++index) {
+            const uint32 level = firstMip + index;
             const uint32 width = MipExtent(record.width, level);
             const uint32 height = MipExtent(record.height, level);
             const usize rowBytes = static_cast<usize>(width) * bytesPerPixel;
-            uint8* rows = static_cast<uint8*>(mapped) + footprints[level].Offset;
+            uint8* rows = space.Value().data + footprints[index].Offset;
             for (uint32 row = 0; row < height; ++row) {
                 platform::MemoryCopy(rows + static_cast<usize>(row) *
-                                                footprints[level].Footprint.RowPitch,
+                                                footprints[index].Footprint.RowPitch,
                                      pixels.Data() + sourceOffset + row * rowBytes, rowBytes);
             }
             sourceOffset += rowBytes * height;
+            footprints[index].Offset += space.Value().offset;
         }
-        staging->Unmap(0, nullptr);
+        auto opened = OpenUploadList();
+        if (!opened) {
+            return opened;
+        }
+        for (uint32 index = 0; index < count; ++index) {
+            CopyTextureFrom(record, firstMip + index, space.Value().resource, footprints[index],
+                            restore);
+        }
+        return Result<void>::Success();
+    }
 
-        auto begun = BeginUpload();
-        if (!begun) {
-            return begun;
+    // 쌓인 업로드 기록을 제출하고 그 fence 값을 돌려준다(잠금 안, 소유 스레드). 없으면 0이다.
+    Result<uint64> FlushUploadsLocked() noexcept {
+        if (!uploadOpen_) {
+            return Result<uint64>::Success(0);
         }
-        for (uint32 level = 0; level < record.mipLevels; ++level) {
-            D3D12_TEXTURE_COPY_LOCATION destination = {};
-            destination.pResource = record.resource.Get();
-            destination.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-            destination.SubresourceIndex = level;
-            D3D12_TEXTURE_COPY_LOCATION source = {};
-            source.pResource = staging.Get();
-            source.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-            source.PlacedFootprint = footprints[level];
-            uploadList_->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
+        uploadOpen_ = false;
+        AllocatorRecord& record = allocators_[uploadAllocator_];
+        record.inUse = false;
+        if (FAILED(uploadList_->Close())) {
+            // 아무것도 제출하지 않았다. 기록이 쓰던 공간은 지금까지의 제출 뒤에 다시 쓴다.
+            record.fenceValue = fenceValue_;
+            ring_.CloseBatch(fenceValue_);
+            staging_->AssignPending(fenceValue_);
+            AssignPendingUploads(fenceValue_);
+            return FailWith<uint64>("upload command list close failed");
         }
-        const D3D12_RESOURCE_BARRIER toShader =
-            Transition(record.resource.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
+        ID3D12CommandList* lists[] = {uploadList_.Get()};
+        queue_->ExecuteCommandLists(1, lists);
+        auto signaled = SignalQueue();
+        const uint64 value = signaled ? signaled.Value() : RetainUntilDestructionFence;
+        record.fenceValue = value;
+        ring_.CloseBatch(value);
+        staging_->AssignPending(value);
+        AssignPendingUploads(value);
+        if (!signaled) {
+            return Result<uint64>::Failure(signaled.Error());
+        }
+        return Result<uint64>::Success(value);
+    }
+
+    void AssignPendingUploads(uint64 value) noexcept {
+        for (Retired& entry : retired_) {
+            if (entry.uploadPending) {
+                entry.uploadPending = false;
+                entry.fenceValue = value;
+            }
+        }
+    }
+
+    // RenderTarget 텍스처를 readback 버퍼로 복사하는 기록을 쌓고 바로 제출한다(잠금 안).
+    Result<ReadbackRequest> RequestReadbackLocked(TextureHandle target) noexcept {
+        const TextureRecord* record = textures_.Find(target.slot);
+        if (record == nullptr) {
+            return Result<ReadbackRequest>::Failure(ErrorCode::StaleHandle);
+        }
+        if (!record->renderTarget) {
+            return Result<ReadbackRequest>::Failure(ErrorCode::InvalidArgument);
+        }
+        ReadbackRecord readback;
+        readback.width = record->width;
+        readback.height = record->height;
+        readback.bytesPerPixel = BytesPerPixel(record->format);
+        const D3D12_RESOURCE_DESC resourceDesc = record->resource->GetDesc();
+        UINT64 total = 0;
+        device_->GetCopyableFootprints(&resourceDesc, 0, 1, 0, &readback.footprint, nullptr,
+                                       nullptr, &total);
+        readback.total = total;
+        const D3D12_HEAP_PROPERTIES heap = HeapProperties(D3D12_HEAP_TYPE_READBACK);
+        const D3D12_RESOURCE_DESC buffer = BufferResource(total);
+        if (FAILED(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &buffer,
+                                                    D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+                                                    IID_PPV_ARGS(readback.resource.Out())))) {
+            return FailWith<ReadbackRequest>("readback buffer creation failed");
+        }
+        auto reserved = ReserveRetireCapacity(1);
+        if (!reserved) {
+            return Result<ReadbackRequest>::Failure(reserved.Error());
+        }
+        auto opened = OpenUploadList();
+        if (!opened) {
+            return Result<ReadbackRequest>::Failure(opened.Error());
+        }
+        const D3D12_RESOURCE_BARRIER toCopy =
+            Transition(record->resource.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                       D3D12_RESOURCE_STATE_COPY_SOURCE);
+        uploadList_->ResourceBarrier(1, &toCopy);
+        D3D12_TEXTURE_COPY_LOCATION destination = {};
+        destination.pResource = readback.resource.Get();
+        destination.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        destination.PlacedFootprint = readback.footprint;
+        D3D12_TEXTURE_COPY_LOCATION source = {};
+        source.pResource = record->resource.Get();
+        source.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        source.SubresourceIndex = 0;
+        uploadList_->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
+        const D3D12_RESOURCE_BARRIER back =
+            Transition(record->resource.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE,
                        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-        uploadList_->ResourceBarrier(1, &toShader);
-        // 업로드 완료를 기다린 뒤 staging을 놓는다(초기 로딩 경로라 동기 대기를 허용한다).
-        auto submitted = SubmitUploadAndWait();
-        if (!submitted) {
-            // GPU가 아직 staging을 읽고 있을 수 있다(장치 제거 등). 장치 소멸까지 놓지 않는다.
-            KeepUntilDestruction(Move(staging));
+        uploadList_->ResourceBarrier(1, &back);
+        auto flushed = FlushUploadsLocked();
+        if (!flushed) {
+            KeepUntilDestruction(Move(readback.resource));
+            return Result<ReadbackRequest>::Failure(flushed.Error());
         }
-        return submitted;
+        readback.fenceValue = flushed.Value();
+        const uint64 bytes =
+            static_cast<uint64>(readback.width) * readback.height * readback.bytesPerPixel;
+        auto added = readbacks_.TryAdd(Move(readback));
+        if (!added) {
+            return Result<ReadbackRequest>::Failure(added.Error());
+        }
+        ReadbackRequest request;
+        request.handle = ReadbackHandle{added.Value()};
+        request.completion = timeline_.Point(flushed.Value());
+        request.bytes = bytes;
+        return Result<ReadbackRequest>::Success(request);
+    }
+
+    Result<bool> TryReadbackLocked(ReadbackHandle handle, Span<uint8> out) noexcept {
+        ReadbackRecord* record = readbacks_.Find(handle.slot);
+        if (record == nullptr) {
+            return Result<bool>::Failure(ErrorCode::StaleHandle);
+        }
+        const usize rowBytes = static_cast<usize>(record->width) * record->bytesPerPixel;
+        if (out.Size() != rowBytes * record->height) {
+            return Result<bool>::Failure(ErrorCode::InvalidArgument);
+        }
+        const uint64 completed = fence_->GetCompletedValue();
+        if (completed == D3D12FenceSource::RemovedFenceValue) {
+            timeline_.MarkLost();
+            return Result<bool>::Failure(ErrorCode::Destroyed);
+        }
+        if (completed < record->fenceValue) {
+            return Result<bool>::Success(false);
+        }
+        void* mapped = nullptr;
+        const D3D12_RANGE whole = {0, static_cast<SIZE_T>(record->total)};
+        if (FAILED(record->resource->Map(0, &whole, &mapped))) {
+            return FailWith<bool>("readback map failed");
+        }
+        const uint8* rows = static_cast<const uint8*>(mapped) + record->footprint.Offset;
+        for (uint32 row = 0; row < record->height; ++row) {
+            platform::MemoryCopy(
+                out.Data() + row * rowBytes,
+                rows + static_cast<usize>(row) * record->footprint.Footprint.RowPitch, rowBytes);
+        }
+        const D3D12_RANGE noWrite = {0, 0};
+        record->resource->Unmap(0, &noWrite);
+        return Result<bool>::Success(true);
+    }
+
+    void ReleaseReadbackLocked(ReadbackHandle handle) noexcept {
+        ReadbackRecord* record = readbacks_.Find(handle.slot);
+        if (record == nullptr) {
+            return;
+        }
+        Defer(Move(record->resource), -1, -1);
+        auto removed = readbacks_.TryRemove(handle.slot);
+        (void)removed;
     }
 
     void KeepUntilDestruction(ComRef<ID3D12Resource>&& object) noexcept {
@@ -1394,7 +2478,7 @@ private:
 
     // 모든 D3D 인터페이스는 IUnknown을 단일 상속하므로 포인터 변환이 안전하다.
     template <class T>
-    void Retire(ComRef<T>&& object, int64 srv, int64 rtv) noexcept {
+    void Defer(ComRef<T>&& object, int64 srv, int64 rtv) noexcept {
         ComRef<IUnknown> unknown;
         unknown.Attach(object.Detach());
         RetireObject(Move(unknown), srv, rtv);
@@ -1408,6 +2492,9 @@ private:
         // 정한다.
         entry.fenceValue = fenceValue_;
         entry.pending = recording_;
+        // 아직 제출하지 않은 업로드 기록(생성 초기 데이터·갱신·readback 복사)이 이 자원을 쓸 수
+        // 있다. 그 묶음이 제출될 때 fence를 받는다.
+        entry.uploadPending = uploadOpen_;
         entry.srv = srv;
         entry.rtv = rtv;
         // 용량은 자원을 만들 때 미리 확보했으므로(ReserveRetireCapacity) 실패하지 않는다.
@@ -1421,7 +2508,7 @@ private:
     // GPU 사용 중인 자원을 놓는 경로를 없앤다.
     Result<void> ReserveRetireCapacity(usize extra) noexcept {
         const usize live = buffers_.Size() + textures_.Size() + pipelines_.Size() +
-                           swapChains_.Size() * SwapChainRetireEntries;
+                           readbacks_.Size() + swapChains_.Size() * SwapChainRetireEntries;
         return retired_.TryEnsureCapacity(retired_.Size() + live + extra);
     }
 
@@ -1436,9 +2523,11 @@ private:
 
     void ProcessRetired() noexcept {
         const uint64 completed = fence_->GetCompletedValue();
+        ring_.Reclaim(completed);
+        staging_->Reclaim(completed);
         for (usize index = retired_.Size(); index > 0; --index) {
             Retired& entry = retired_[index - 1];
-            if (entry.pending || entry.fenceValue > completed) {
+            if (entry.pending || entry.uploadPending || entry.fenceValue > completed) {
                 continue;
             }
             if (entry.srv >= 0) {
@@ -1455,34 +2544,51 @@ private:
     // --- CommandContext ---
 
     void SetPipeline(PipelineHandle handle) noexcept override {
+        platform::LockGuard lock(gate_);
         const PipelineRecord* record = pipelines_.Find(handle.slot);
         if (record == nullptr) {
-            pipelineBound_ = false;
+            boundPipeline_ = {};
             return;
         }
         list_->SetPipelineState(record->state.Get());
-        pipelineBound_ = true;
         boundPipeline_ = handle.slot;
-        // 이미 묶인 정점 버퍼가 있으면 새 파이프라인 간격으로 다시 묶는다.
-        if (bufferBound_) {
-            SetVertexBuffer(boundBuffer_);
+        // 이미 묶인 정점 버퍼를 새 파이프라인의 stride로 다시 묶는다.
+        for (uint32 stream = 0; stream < MaxVertexStreams; ++stream) {
+            if (!boundVertex_[stream].buffer.IsNull()) {
+                ApplyVertexBuffer(stream);
+            }
         }
     }
 
-    void SetVertexBuffer(BufferHandle handle) noexcept override {
-        const BufferRecord* record = buffers_.Find(handle.slot);
-        if (record == nullptr) {
-            bufferBound_ = false;
+    void SetVertexBuffers(uint32 firstStream,
+                          Span<const VertexBufferBinding> buffers) noexcept override {
+        platform::LockGuard lock(gate_);
+        for (usize index = 0; index < buffers.Size(); ++index) {
+            const usize stream = firstStream + index;
+            if (stream >= MaxVertexStreams) {
+                return;
+            }
+            boundVertex_[stream] = {buffers[index].buffer, buffers[index].offset};
+            ApplyVertexBuffer(static_cast<uint32>(stream));
+        }
+    }
+
+    void SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64 offset) noexcept override {
+        platform::LockGuard lock(gate_);
+        boundIndex_ = {buffer, format, offset};
+        const BufferRecord* record = buffers_.Find(buffer.slot);
+        if (record == nullptr || offset >= record->size) {
             return;
         }
-        D3D12_VERTEX_BUFFER_VIEW view = record->view;
-        view.StrideInBytes = pipelineBound_ ? StrideOf(boundPipeline_) : 0;
-        list_->IASetVertexBuffers(0, 1, &view);
-        bufferBound_ = true;
-        boundBuffer_ = handle;
+        D3D12_INDEX_BUFFER_VIEW view = {};
+        view.BufferLocation = record->address + offset;
+        view.SizeInBytes = static_cast<UINT>(record->size - offset);
+        view.Format = format == IndexFormat::UInt16 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
+        list_->IASetIndexBuffer(&view);
     }
 
     void SetTexture(TextureHandle handle) noexcept override {
+        platform::LockGuard lock(gate_);
         const TextureRecord* record = textures_.Find(handle.slot);
         if (record == nullptr) {
             record = textures_.Find(white_.slot);
@@ -1497,15 +2603,74 @@ private:
         list_->SetGraphicsRoot32BitConstants(0, ConstantCount, &constants, 0);
     }
 
-    void Draw(uint32 vertexCount, uint32 firstVertex) noexcept override {
-        if (!pipelineBound_ || !bufferBound_ || !buffers_.IsValid(boundBuffer_.slot)) {
+    void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override {
+        platform::LockGuard lock(gate_);
+        if (!StreamsBound()) {
             ++ignoredDraws_;
             return;
         }
-        list_->DrawInstanced(vertexCount, 1, firstVertex, 0);
+        // base instance는 0으로 고정한다(RenderBase 10.4절).
+        list_->DrawInstanced(vertexCount, instanceCount, firstVertex, 0);
     }
 
-    static constexpr uint32 MaxPipelines = 256;
+    void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override {
+        platform::LockGuard lock(gate_);
+        const BufferRecord* index = buffers_.Find(boundIndex_.buffer.slot);
+        if (!StreamsBound() || index == nullptr || boundIndex_.offset >= index->size) {
+            ++ignoredDraws_;
+            return;
+        }
+        // base vertex·base instance는 0으로 고정한다.
+        list_->DrawIndexedInstanced(indexCount, instanceCount, firstIndex, 0, 0);
+    }
+
+    Result<uint64> WriteTimestamp() noexcept override {
+        platform::LockGuard lock(gate_);
+        if (timestampHeap_.Get() == nullptr) {
+            return Result<uint64>::Failure(ErrorCode::Unsupported);
+        }
+        if (!recording_) {
+            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+        }
+        HarvestTimestamps();
+        auto write = timestamps_.Allocate();
+        if (!write) {
+            return Result<uint64>::Failure(write.Error());
+        }
+        list_->EndQuery(timestampHeap_.Get(), D3D12_QUERY_TYPE_TIMESTAMP, write.Value().index);
+        return Result<uint64>::Success(write.Value().query);
+    }
+
+    // PIX가 읽는 이벤트 형식(metadata 0 = UTF-16 문자열)으로 command list에 구간을 기록한다.
+    void PushMarker(StringView name) noexcept override {
+        platform::LockGuard lock(gate_);
+        if (!recording_) {
+            return;
+        }
+        const StringView clipped = ClipDebugMarkerName(name);
+        wchar_t text[MaxDebugMarkerNameBytes + 1];
+        int length = 0;
+        if (clipped.ByteCount() != 0) {
+            length = MultiByteToWideChar(CP_UTF8, 0, clipped.Data(),
+                                         static_cast<int>(clipped.ByteCount()), text,
+                                         static_cast<int>(MaxDebugMarkerNameBytes));
+        }
+        text[length > 0 ? length : 0] = L'\0';
+        constexpr UINT UnicodeEventMetadata = 0;
+        list_->BeginEvent(UnicodeEventMetadata, text,
+                          static_cast<UINT>((length > 0 ? length + 1 : 1) * sizeof(wchar_t)));
+        ++markerDepth_;
+    }
+
+    void PopMarker() noexcept override {
+        platform::LockGuard lock(gate_);
+        if (!recording_ || markerDepth_ == 0) {
+            ++ignoredDraws_;
+            return;
+        }
+        list_->EndEvent();
+        --markerDepth_;
+    }
 
     String adapterName_;
     String lastError_;
@@ -1524,29 +2689,55 @@ private:
     ComRef<ID3D12InfoQueue> infoQueue_;
     ComRef<ID3D12CommandQueue> queue_;
     ComRef<ID3D12GraphicsCommandList> list_;
-    ComRef<ID3D12CommandAllocator> uploadAllocator_;
     ComRef<ID3D12GraphicsCommandList> uploadList_;
     ComRef<ID3D12RootSignature> rootSignature_;
     ComRef<ID3D12Fence> fence_;
     HANDLE fenceEvent_ = nullptr;
-    Frame frames_[FrameCount];
-    uint32 frameSlot_ = 0;
+    // fence 관찰 스레드 전용 이벤트다(소유 스레드의 fenceEvent_와 나눈다).
+    HANDLE watcherEvent_ = nullptr;
+    Array<AllocatorRecord> allocators_;
+    uint32 recordingAllocator_ = 0;
+    // 마지막으로 신호한 graphics queue fence 값이다.
     uint64 fenceValue_ = 0;
     Target target_;
     SwapChainHandle presentTarget_;
     TextureHandle white_;
-    PipelineStride pipelineStrides_[MaxPipelines];
-    uint32 pipelineStrideCount_ = 0;
     SlotHandle boundPipeline_;
-    BufferHandle boundBuffer_;
+    BoundVertexBuffer boundVertex_[MaxVertexStreams];
+    BoundIndexBuffer boundIndex_;
     uint64 ignoredDraws_ = 0;
     ComRef<IDXGIInfoQueue> dxgiInfoQueue_;
     // 검증 메시지는 읽을 때마다 비우고 여기에 누적한다(저장 한도로 오래된 오류가 밀려나지 않게).
     mutable uint64 validationErrors_ = 0;
     mutable Array<uint8> messageScratch_;
+    D3D12FenceSource fenceSource_;
+    FenceTimeline timeline_;
+    DeviceOwnership ownership_;
+    Allocator& allocator_;
+    // 장치 내부 잠금이다. 자원 생성·갱신이 다른 스레드에서 올 수
+    // 있으므로(concurrentResourceCreation) 자원 표·descriptor·업로드 기록·회수 목록을 만지는 모든
+    // 호출이 잡는다. fence API는 잡지 않는다.
+    mutable platform::Mutex gate_;
+    SlotArray<ReadbackRecord> readbacks_;
+    UploadRingAllocator ring_;
+    ComRef<ID3D12Resource> ringBuffer_;
+    uint8* ringData_ = nullptr;
+    // 열린 업로드 기록 list와 그 저장소다. 소유 스레드의 다음 제출이 실행한다.
+    uint32 uploadAllocator_ = 0;
+    bool uploadOpen_ = false;
+    uint64 dedicatedUploads_ = 0;
+    D3D12StagingSource stagingSource_;
+    UniquePtr<StagingPool> staging_;
+    // GPU 계측(GX9): timestamp query heap, resolve 대상 readback 버퍼와 프레임 slot 장부다.
+    // 지원하지 않으면 heap이 없다.
+    ComRef<ID3D12QueryHeap> timestampHeap_;
+    ComRef<ID3D12Resource> timestampReadback_;
+    D3D12TimestampSource timestampSource_;
+    TimestampRing timestamps_;
+    uint64 timestampFrequency_ = 0;
+    // 지금 프레임에서 열린 marker 구간 수다.
+    uint32 markerDepth_ = 0;
     bool recording_ = false;
-    bool pipelineBound_ = false;
-    bool bufferBound_ = false;
     bool validation_ = false;
     bool software_ = false;
 };

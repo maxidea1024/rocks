@@ -16,6 +16,18 @@ constexpr uint32 StepClient = 5;
 // World 실행 문맥 ID의 상위 값이다. 엔진 Registry 문맥(EngineConfig::context)과 겹치지 않는다.
 constexpr uint64 WorldContextHigh = 0x524f434b53574f52ull;
 
+// 종료 hook 진행 정도다(Engine::shutdownProgress_).
+constexpr uint32 ShutdownNotStarted = 0;
+constexpr uint32 ShutdownBlocked = 1;
+constexpr uint32 ShutdownWorkCompleted = 2;
+
+// 실패를 하나 모은다. 첫 오류만 남긴다.
+void KeepFirst(Result<void>& outcome, Result<void>&& step) noexcept {
+    if (!step && outcome) {
+        outcome = Move(step);
+    }
+}
+
 } // namespace
 
 const char* EngineStateName(EngineState state) noexcept {
@@ -43,7 +55,11 @@ Engine::Engine(Allocator& allocator) noexcept
 
 Engine::~Engine() {
     auto finished = Shutdown();
-    if (!finished) {
+    (void)finished;
+    // 종료 hook의 실패는 보고만 하고 정리를 마친다. 끝내지 못한 경우(World·객체를 밖에서 붙잡음)만
+    // 수명 오류다.
+    if (state_ != EngineState::Stopped && state_ != EngineState::Failed &&
+        state_ != EngineState::Uninitialized) {
         platform::Fatal("Engine destroyed while worlds or objects are still held outside");
     }
 }
@@ -375,6 +391,7 @@ Result<void> Engine::Shutdown() noexcept {
         state_ = EngineState::Stopping;
     }
 
+    Result<void> outcome = RunShutdownHooksBeforeWorlds();
     if (initializedSteps_ >= StepClient) {
         // client 종료는 한 번만 부른다(재시도해도 다시 부르지 않도록 단계를 내린다).
         if (config_.client != nullptr) {
@@ -393,24 +410,30 @@ Result<void> Engine::Shutdown() noexcept {
         }
     }
 
+    // 진행 중인 GPU 프레임·비동기 작업 완료(계획 3.2절 "GPU fence·audio epoch·physics step 완료").
+    if (shutdownProgress_ < ShutdownWorkCompleted) {
+        if (initializedSteps_ >= StepSubsystems) {
+            ObjectAccessScope scope(objects_->OwnerAccess());
+            for (usize index = subsystems_.Count(); index > 0; --index) {
+                KeepFirst(outcome, subsystems_.At(index - 1)->CompleteInFlightWork(*this));
+            }
+        }
+
+        if (config_.hooks != nullptr) {
+            KeepFirst(outcome, config_.hooks->CompleteInFlightWork(*this));
+        }
+
+        shutdownProgress_ = ShutdownWorkCompleted;
+    }
+
     if (initializedSteps_ >= StepSubsystems) {
         ObjectAccessScope scope(objects_->OwnerAccess());
         subsystems_.Deinitialize(*this);
         initializedSteps_ = StepObjects;
     }
 
+    KeepFirst(outcome, CloseAfterSubsystems());
     if (objects_) {
-        for (uint32 attempt = 0; attempt < 8; ++attempt) {
-            auto collected = objects_->Collect(objects_->OwnerAccess());
-            if (!collected) {
-                return Result<void>::Failure(collected.Error());
-            }
-
-            if (collected.Value().reclaimed == 0) {
-                break;
-            }
-        }
-
         auto closed = objects_->Shutdown(objects_->OwnerAccess());
         if (!closed) {
             return closed;
@@ -433,8 +456,75 @@ Result<void> Engine::Shutdown() noexcept {
     }
 
     initializedSteps_ = 0;
+    shutdownProgress_ = ShutdownNotStarted;
     state_ = EngineState::Stopped;
+    return outcome;
+}
+
+Result<void> Engine::RunShutdownHooksBeforeWorlds() noexcept {
+    if (shutdownProgress_ >= ShutdownBlocked) {
+        return Result<void>::Success();
+    }
+
+    // 신규 요청 차단(계획 3.2절 첫 단계). Subsystem은 역순, 그다음 실행 파일 hook이다.
+    if (initializedSteps_ >= StepSubsystems) {
+        ObjectAccessScope scope(objects_->OwnerAccess());
+        for (usize index = subsystems_.Count(); index > 0; --index) {
+            subsystems_.At(index - 1)->BeginShutdown(*this);
+        }
+    }
+
+    if (config_.hooks != nullptr) {
+        config_.hooks->BeginShutdown(*this);
+    }
+
+    shutdownProgress_ = ShutdownBlocked;
     return Result<void>::Success();
+}
+
+Result<void> Engine::CloseAfterSubsystems() noexcept {
+    Result<void> outcome = Result<void>::Success();
+    // 최종 GC와 그 GC가 만든 정리 작업(Retire·backend 회수)을 둘 다 없어질 때까지 반복한다.
+    bool closed = false;
+    for (uint32 pass = 0; pass < MaxShutdownCollectPasses; ++pass) {
+        uint64 reclaimed = 0;
+        if (objects_) {
+            auto collected = objects_->Collect(objects_->OwnerAccess());
+            if (!collected) {
+                KeepFirst(outcome, Result<void>::Failure(collected.Error()));
+                break;
+            }
+
+            reclaimed = collected.Value().reclaimed;
+        }
+
+        uint64 drained = 0;
+        if (config_.hooks != nullptr) {
+            auto cleaned = config_.hooks->DrainShutdownCleanup(*this);
+            if (cleaned) {
+                drained = cleaned.Value();
+            } else {
+                KeepFirst(outcome, Result<void>::Failure(cleaned.Error()));
+            }
+        }
+
+        if (reclaimed == 0 && drained == 0) {
+            closed = true;
+            break;
+        }
+    }
+
+    if (!closed) {
+        KeepFirst(outcome, Result<void>::Failure(ErrorCode::Busy));
+    }
+
+    // owner·retire·queue closure 확인 → 전용 실행기 종료. 앞 단계가 실패해도 건너뛰지 않는다.
+    if (config_.hooks != nullptr) {
+        KeepFirst(outcome, config_.hooks->VerifyShutdownClosure(*this));
+        KeepFirst(outcome, config_.hooks->StopExecutors(*this));
+    }
+
+    return outcome;
 }
 
 EngineStats Engine::Stats() const noexcept {

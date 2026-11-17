@@ -521,3 +521,132 @@ TEST(Engine_InitializationFailureTeardownReleasesNativeDerivedTypes) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+
+namespace {
+
+// 종료 단계 hook(CP6) 순서를 기록하는 Subsystem이다.
+class ShutdownSubsystem final : public EngineSubsystem {
+public:
+    void BeginShutdown(Engine&) noexcept override {
+        Step("sub.begin-shutdown");
+    }
+
+    Result<void> CompleteInFlightWork(Engine&) noexcept override {
+        Step("sub.complete-work");
+        return Result<void>::Success();
+    }
+
+    void Deinitialize(Engine&) noexcept override {
+        Step("sub.deinit");
+    }
+};
+
+// 종료 단계 hook 순서와 drain 반복·실패 보고를 기록한다.
+class ShutdownHooks final : public EngineLoopHooks {
+public:
+    void BeginShutdown(Engine&) noexcept override {
+        Step("hook.begin-shutdown");
+    }
+
+    Result<void> CompleteInFlightWork(Engine&) noexcept override {
+        Step("hook.complete-work");
+        return failWork ? Result<void>::Failure(ErrorCode::DependencyFailed)
+                        : Result<void>::Success();
+    }
+
+    Result<uint64> DrainShutdownCleanup(Engine&) noexcept override {
+        Step("hook.drain");
+        // 앞 두 번은 정리 작업을 처리했다고 알린다(최종 GC가 만든 Retire 흉내).
+        if (pendingRounds == NumericLimits<uint32>::Max()) {
+            return Result<uint64>::Success(1);
+        }
+
+        if (pendingRounds == 0) {
+            return Result<uint64>::Success(0);
+        }
+
+        --pendingRounds;
+        return Result<uint64>::Success(1);
+    }
+
+    Result<void> VerifyShutdownClosure(Engine&) noexcept override {
+        Step("hook.closure");
+        return Result<void>::Success();
+    }
+
+    Result<void> StopExecutors(Engine&) noexcept override {
+        Step("hook.stop");
+        return Result<void>::Success();
+    }
+
+    uint32 pendingRounds = 2;
+    bool failWork = false;
+};
+
+} // namespace
+
+TEST(Engine_ShutdownStageHooksRunInPlanOrderAndRepeatDrainUntilClosed) {
+    SystemAllocator allocator;
+    ResetSteps();
+    {
+        ShutdownHooks hooks;
+        const EngineSubsystemType subsystems[] = {
+            MakeSubsystemType<EngineSubsystem, ShutdownSubsystem>("Shutdown")};
+        EngineConfig config;
+        config.hooks = &hooks;
+        config.subsystems = subsystems;
+        config.maxFrames = 1;
+        Engine engine(allocator);
+        REQUIRE(engine.Initialize(config));
+        REQUIRE(engine.Run());
+        REQUIRE(engine.Shutdown());
+        CHECK(engine.State() == EngineState::Stopped);
+        // 계획 3.2절: 신규 요청 차단 → (World 파괴) → GPU·비동기 완료 → Subsystem 정리 → 최종 GC와
+        // drain을 닫힐 때까지 반복 → closure 확인 → 실행기 종료.
+        const char* const expected[] = {"sub.begin-shutdown", "hook.begin-shutdown",
+                                        "sub.complete-work",  "hook.complete-work",
+                                        "sub.deinit",         "hook.drain",
+                                        "hook.drain",         "hook.drain",
+                                        "hook.closure",       "hook.stop"};
+        CHECK(StepsAre(expected));
+        // 이미 끝났으므로 다시 불러도 hook을 부르지 않는다.
+        ResetSteps();
+        CHECK(engine.Shutdown());
+        CHECK(stepCount == 0);
+    }
+}
+
+TEST(Engine_ShutdownStageFailureIsReportedWithoutSkippingLaterStages) {
+    SystemAllocator allocator;
+    ResetSteps();
+    {
+        ShutdownHooks hooks;
+        hooks.failWork = true;
+        EngineConfig config;
+        config.hooks = &hooks;
+        Engine engine(allocator);
+        REQUIRE(engine.Initialize(config));
+        CHECK(engine.Shutdown().Error() == ErrorCode::DependencyFailed);
+        CHECK(engine.State() == EngineState::Stopped);
+        const char* const expected[] = {
+            "hook.begin-shutdown", "hook.complete-work", "hook.drain", "hook.drain",
+            "hook.drain",          "hook.closure",       "hook.stop"};
+        CHECK(StepsAre(expected));
+    }
+
+    ResetSteps();
+    {
+        // drain이 닫히지 않으면 MaxShutdownCollectPasses 뒤 Busy로 보고하고 뒤 단계를 마저
+        // 실행한다.
+        ShutdownHooks hooks;
+        hooks.pendingRounds = NumericLimits<uint32>::Max();
+        EngineConfig config;
+        config.hooks = &hooks;
+        Engine engine(allocator);
+        REQUIRE(engine.Initialize(config));
+        CHECK(engine.Shutdown().Error() == ErrorCode::Busy);
+        CHECK(engine.State() == EngineState::Stopped);
+        CHECK(stepCount == 2 + MaxShutdownCollectPasses + 2);
+        CHECK(strcmp(steps[stepCount - 1], "hook.stop") == 0);
+    }
+}

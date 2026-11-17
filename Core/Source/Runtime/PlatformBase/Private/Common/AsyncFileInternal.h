@@ -14,6 +14,7 @@ enum class AsyncPhase : uint8 {
     Idle,     // 제출한 적 없음
     Queued,   // 제출됨, 아직 OS·worker가 시작하지 않음
     Running,  // OS·worker가 진행 중
+    Held,     // OS·worker는 끝났으나 완료 게시 보류 중(결과는 result에 있고 아직 진행 중으로 센다)
     Completed // 결과 게시됨
 };
 
@@ -36,6 +37,7 @@ struct AsyncRequestState {
     // Native: 제출 스레드가 OS 호출을 끝내기 전에는 완료를 게시하지 않는다. 제출 스레드가 OS 호출
     // 직후 요청을 다시 만지는 동안 대기자가 요청을 파괴하는 것을 막는다.
     bool submitting = false;
+    // WorkerPool 대기 큐 또는 완료 게시 보류 목록의 다음 요청이다(두 목록에 동시에 있지 않다).
     AsyncRequestState* nextQueued = nullptr;
     // 플랫폼 요청 레코드(Windows OVERLAPPED 등). OS가 최종 완료를 알릴 때까지 주소가 고정되어야
     // 한다.
@@ -51,13 +53,20 @@ struct AsyncFileState {
 };
 
 struct AsyncContextState {
-    Mutex mutex;
+    mutable Mutex mutex;
     ConditionVariable changed;
     AsyncIoBackend backend = AsyncIoBackend::WorkerPool;
     bool running = false;
     bool stopping = false;
     uint64 openFiles = 0;
     uint64 pending = 0;
+    // 완료 게시 보류 계수와 보류된 요청 목록(완료 순서)이다. releasing은 한 스레드가 목록을
+    // 게시하는 중임을 뜻한다(동시에 둘이 게시해 순서가 섞이지 않게).
+    uint32 holds = 0;
+    bool releasing = false;
+    uint64 heldCount = 0;
+    AsyncRequestState* heldHead = nullptr;
+    AsyncRequestState* heldTail = nullptr;
     // WorkerPool
     AsyncRequestState* queueHead = nullptr;
     AsyncRequestState* queueTail = nullptr;

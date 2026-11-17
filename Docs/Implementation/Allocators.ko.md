@@ -14,8 +14,9 @@
 | `BudgetAllocator` | 상위 할당기로부터 얻는 payload의 사용량 제한 | 일반 변경 호출을 직렬화한다. 통계는 게시 완료된 상태의 스냅샷이다. |
 | `DebugAllocator` | 인접 guard와 제한된 quarantine을 이용한 메모리 손상 진단 | 일반 호출을 동기화한다. 검사는 호출 시점에 수행하며 payload 접근은 별도 동기화가 필요하다. |
 | `ExternalAllocator` | 외부 backend callback을 공통 인터페이스에 연결 | callback을 잠금 밖에서 병렬 호출한다. 실제 공급자와 모듈 수명은 별도 연결이 필요하다. |
+| `FrameArena` | 프레임·렌더 그래프 수명 객체(소멸자 등록·일괄 비움) | `Allocator`가 아니다. 여러 스레드가 동시에 할당하고(스레드별 `FrameArenaWriter`), `Reset`·`Trim`은 다른 호출과 겹치지 않아야 한다. |
 
-가상 메모리와 Stack·Binned는 초기 구현이며, frame 수명 관리자, 자동 일괄 해제 stack, 스레드별 cache, page guard 기반 진단과 실제 jemalloc·TCMalloc·mimalloc의 제품 공급자 통합은 아직 제공하지 않는다. `DebugAllocator`의 바이트 guard와 제한된 poison·quarantine은 진단의 일부다. 현재 구현의 성능·단편화·최대 지연과 UE5 대비 성능은 측정하지 않았다.
+가상 메모리와 Stack·Binned는 초기 구현이며, 자동 일괄 해제 stack, 스레드별 cache, page guard 기반 진단과 실제 jemalloc·TCMalloc·mimalloc의 제품 공급자 통합은 아직 제공하지 않는다. `DebugAllocator`의 바이트 guard와 제한된 poison·quarantine은 진단의 일부다. 현재 구현의 성능·단편화·최대 지연과 UE5 대비 성능은 측정하지 않았다.
 
 ## 공통 계약
 
@@ -49,7 +50,38 @@ if (!reset) {
 
 모든 호출과 파괴는 생성 스레드에서 실행한다. `Result` API는 잘못된 스레드에서 인자 검사보다 먼저 `WrongThread`다. `Stats()`나 파괴를 다른 스레드에서 실행하면 Fatal이다. 생성 스레드가 종료된 뒤 OS가 스레드 ID를 재사용하는 경우 동일 스레드로 오인할 수 있으므로 생성 스레드는 Arena보다 오래 살아야 한다. 상위 callback의 동일 Arena 재진입은 `Result` API에서 `Busy`, `Stats()`·파괴에서 Fatal이다. `tag`는 새 청크 확보 시 상위 할당기로 전달되며 개별 할당의 태그별 통계는 제공하지 않는다.
 
-강제 frame reset은 없다. 프레임 경계에서 사용하려면 객체 소멸과 작업·GPU 등 백엔드의 사용 종료를 상위 시스템이 먼저 보장하고, 모든 할당을 반환한 뒤 `Reset()`해야 한다. 임의의 live 포인터나 소멸하지 않은 객체를 자동으로 무효화하지 않는다.
+강제 frame reset은 없다(프레임 수명 객체를 한 번에 비우려면 아래 `FrameArena`를 쓴다). 프레임 경계에서 사용하려면 객체 소멸과 작업·GPU 등 백엔드의 사용 종료를 상위 시스템이 먼저 보장하고, 모든 할당을 반환한 뒤 `Reset()`해야 한다. 임의의 live 포인터나 소멸하지 않은 객체를 자동으로 무효화하지 않는다.
+
+## FrameArena
+
+`Core/Memory/FrameArena.h`는 한 수명(프레임·렌더 그래프 하나) 동안 객체를 만들고, 수명이 끝나면 `Reset`이 등록된 소멸자를 등록 역순으로 부른 뒤 메모리를 한 번에 비우는 다중 스레드 bump arena다(RenderBase CP3, UE `Core/Public/Misc/MemStack.h`·`RenderCore/Public/RenderGraphAllocator.h` 대응).
+
+```cpp
+rocks::FrameArena arena(system);                       // 표준 블록 64 KiB, 빈 블록 64개까지 남김
+auto pass = arena.TryNew<RenderPass>(name);            // 소멸자가 있으면 Reset 때 부른다
+auto draws = arena.TryNewArray<DrawCommand>(count);    // 값 초기화한 연속 배열(Span)
+{
+    rocks::FrameArenaWriter writer(arena);             // 이 스레드 전용 cursor
+    auto node = writer.TryNew<GraphNode>(...);         // 자기 블록 안에서는 잠금 없음
+}
+auto reset = arena.Reset();                            // 소멸자(등록 역순) → 블록 비움
+```
+
+**기존 할당기와 겹치지 않는 이유.** `ArenaAllocator`·`StackAllocator`는 개별 할당의 반환을 기록하고 반환되지 않은 할당이 있으면 `Reset`을 `Busy`로 거부한다. 객체 수명을 모르는 할당기라 살아 있는 객체의 메모리를 비우지 않기 위해서다. `FrameArena`는 객체 수명을 스스로 가진다. 만든 객체의 수명은 정의상 `Reset`에서 끝나고 소멸자도 arena가 부르며 개별 반환이 없다. 그래서 `Reset`은 살아 있는 할당을 이유로 거부하지 않고, 아직 할당 중인 writer가 열려 있을 때만 `Busy`다. 개별 반환이 없으므로 `Allocator` 인터페이스(성장하는 `Array`의 이전 버퍼 반환 등)를 구현하지 않는다. 가변 길이 목록은 `TryNewArray`로 크기를 정해 만든다.
+
+| 항목 | 계약 |
+|---|---|
+| 정렬 | 0이 아닌 2의 거듭제곱(아니면 0 byte여도 `InvalidArgument`). 0 byte는 성공한 `nullptr`. 블록 payload는 64 byte 정렬이고 더 큰 정렬은 블록 안 여유로 맞춘다 |
+| 대형 할당 | 요청 + (정렬 − 1)이 표준 payload의 절반을 넘으면 그 할당만의 대형 블록을 backing에서 받는다. 대형 블록은 `Reset`에서 바로 돌려준다 |
+| 블록 재사용 | `Reset`은 표준 블록을 `maxRetainedBlocks`개까지 비워 다음 수명에 쓰고 나머지를 돌려준다. 수명마다 쓰는 양이 비슷하면 backing 호출이 없다. `Trim`은 남긴 블록을 모두 돌려주고, 파괴는 `Reset` 뒤 `Trim`이다 |
+| 소멸자 | `TryNew`·`TryNewArray`로 만든 객체 가운데 자명하지 않은 소멸자만 [기록][객체] 한 덩어리로 등록한다. 등록은 원자적 머리 삽입이라 `Reset`은 등록 역순(여러 스레드면 게시 순서의 역순)으로 부르고, 배열은 원소 역순이다. 생성자·소멸자는 noexcept여야 한다(static_assert) |
+| 다중 스레드 | `FrameArenaWriter`는 한 스레드의 cursor다. 자기 표준 블록 안 할당은 잠금이 없고 새 블록을 얻을 때만 arena 잠금을 쓴다. arena 자신의 `TryAllocate`·`TryNew`는 공유 cursor를 잠금으로 나눠 쓴다. `Stats`·writer 생성·파괴도 동시에 부를 수 있다 |
+| Reset | 다른 어떤 호출과도 겹치지 않아야 한다(호출자가 수명 경계를 동기화). 열린 writer가 있거나 `Reset` 안(소멸자)에서 다시 부르면 `Busy`이고 아무것도 바꾸지 않는다. 소멸자 안의 할당도 `Busy`다 |
+| 실패 | 할당 실패는 backing 오류, 크기 넘침은 `Overflow`. 실패해도 이미 받은 할당은 그대로다. writer가 열린 채 arena를 파괴하면 Fatal, backing이 자기 블록 반환을 거부하면 Fatal이다 |
+| 통계 | `requestedBytes`는 `TryAllocate`에 넘긴 크기의 합이다. `TryNew`·`TryNewArray`의 소멸자 기록은 들어가고 정렬 여유·블록 머리는 빠진다 |
+| 진단 | Asan 구성은 새 블록과 `Reset`으로 비운 블록의 payload를 poison하고 할당한 범위만 연다. 이전 수명의 포인터를 쓰면 ASan이 보고한다 |
+
+backing은 arena보다 오래 살고 여러 스레드의 할당·해제를 지원해야 한다. backing 호출은 arena 잠금 안에서 하므로 backing 콜백이 같은 arena를 부르면 교착이다(금지). 시험(`Core/Tests/FrameArenaTests.cpp`)은 등록 역순 소멸(객체·배열 원소 역순·자명 소멸자 미등록·두 번째 Reset), 1–1024 정렬·256 정렬 타입·대형 블록 두 종류와 Reset 반환·0 byte·잘못된 정렬·`Overflow`, 블록 남김 수·다음 수명의 backing 무호출·`Trim`·`maxRetainedBlocks` 0·파괴 시 전부 반환, 네 writer의 동시 할당 8000개(내용으로 겹침 확인·소멸자 수), 열린 writer의 Reset 거부·소멸자 안 재진입 거부·backing 실패 보존을 확인한다.
 
 ## StackAllocator
 
