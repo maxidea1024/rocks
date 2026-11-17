@@ -242,8 +242,18 @@ bool MatchesOracle(ObjectRegistry& objects, const Graph& graph,
     return true;
 }
 
-// workers개 worker로 정지형(incremental이 거짓) 또는 증분 병렬 표식을 하고 oracle과 대조한다.
-void RunOracle(uint32 workers, bool incremental, uint64 seed) noexcept {
+// 수집 방식이다. Alternating은 병렬 slice와 직렬 slice를 번갈아(병렬 slice가 블록으로 넘긴 회색
+// 객체를 직렬 slice가 펴서 이어 간다), CancelThenCollect는 병렬 slice 몇 개 뒤 취소하고(남은 회색
+// 블록을 돌려준다) 정지형 병렬 수집을 한다.
+enum class Mode : uint8 {
+    Collect,
+    Incremental,
+    Alternating,
+    CancelThenCollect
+};
+
+// workers개 worker로 mode에 따라 병렬 표식을 하고 oracle과 대조한다.
+void RunOracle(uint32 workers, Mode mode, uint64 seed) noexcept {
     static Graph graph;
     graph.Build(seed);
     SystemAllocator allocator;
@@ -258,17 +268,28 @@ void RunOracle(uint32 workers, bool incremental, uint64 seed) noexcept {
             ObjectRegistry objects(allocator, types, Guid{0x4750, seed * 16 + workers});
             const auto access = objects.OwnerAccess();
             REQUIRE(BuildGraph(objects, graph, handles, roots));
-            if (incremental) {
+            if (mode == Mode::Incremental || mode == Mode::Alternating) {
                 REQUIRE(objects.BeginCollection(access));
                 uint32 slices = 0;
                 // 작은 객체 예산으로 slice마다 남은 회색 객체를 다음 slice로 넘긴다.
                 while (objects.CollectionPhase() != GcPhase::Idle && slices < 4 * GraphSize) {
-                    REQUIRE(objects.StepCollection(access, GcBudget{97, 0}, &scheduler));
+                    WorkerScheduler* parallel =
+                        mode == Mode::Alternating && slices % 2 == 1 ? nullptr : &scheduler;
+                    REQUIRE(objects.StepCollection(access, GcBudget{97, 0}, parallel));
                     ++slices;
                 }
 
                 CHECK(objects.CollectionPhase() == GcPhase::Idle);
                 CHECK(slices > 3);
+            } else if (mode == Mode::CancelThenCollect) {
+                REQUIRE(objects.BeginCollection(access));
+                for (uint32 slice = 0; slice < 3; ++slice) {
+                    REQUIRE(objects.StepCollection(access, GcBudget{97, 0}, &scheduler));
+                }
+
+                REQUIRE(objects.CollectionPhase() == GcPhase::Marking);
+                REQUIRE(objects.CancelCollection(access));
+                REQUIRE(objects.Collect(access, &scheduler));
             } else {
                 REQUIRE(objects.Collect(access, &scheduler));
             }
@@ -297,27 +318,37 @@ void RunOracle(uint32 workers, bool incremental, uint64 seed) noexcept {
 } // namespace
 
 TEST(ObjectGcParallel_CollectMatchesOracleWithOneWorker) {
-    RunOracle(1, false, 11);
+    RunOracle(1, Mode::Collect, 11);
 }
 
 TEST(ObjectGcParallel_CollectMatchesOracleWithTwoWorkers) {
-    RunOracle(2, false, 12);
+    RunOracle(2, Mode::Collect, 12);
 }
 
 TEST(ObjectGcParallel_CollectMatchesOracleWithEightWorkers) {
-    RunOracle(8, false, 13);
+    RunOracle(8, Mode::Collect, 13);
 }
 
 TEST(ObjectGcParallel_IncrementalMatchesOracleWithOneWorker) {
-    RunOracle(1, true, 14);
+    RunOracle(1, Mode::Incremental, 14);
 }
 
 TEST(ObjectGcParallel_IncrementalMatchesOracleWithTwoWorkers) {
-    RunOracle(2, true, 15);
+    RunOracle(2, Mode::Incremental, 15);
 }
 
 TEST(ObjectGcParallel_IncrementalMatchesOracleWithEightWorkers) {
-    RunOracle(8, true, 16);
+    RunOracle(8, Mode::Incremental, 16);
+}
+
+// 병렬 slice가 블록째 넘긴 회색 객체를 직렬 slice가 이어받아도 결과가 같다.
+TEST(ObjectGcParallel_AlternatingParallelAndSerialSlicesMatchOracle) {
+    RunOracle(4, Mode::Alternating, 17);
+}
+
+// 회색 블록을 넘긴 채 취소해도 블록을 돌려주고(누수 없음) 다음 수집이 oracle과 같다.
+TEST(ObjectGcParallel_CancelWithCarriedGrayBlocksThenCollectMatchesOracle) {
+    RunOracle(4, Mode::CancelThenCollect, 18);
 }
 
 // 병렬 slice 사이의 삽입 장벽: 이미 trace된 루트에 white 객체를 연결하면 장벽 큐가 그 객체를 다음

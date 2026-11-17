@@ -638,10 +638,16 @@ private:
     // 병렬 표식이다(GC-S4). work[cursor..)를 씨앗으로 쓰고 work를 비운 뒤, 예산이 다해 남은 회색
     // 객체를 work에 다시 담는다(cursor는 0). 반환은 trace한 객체 수이고 오류는 state.error다.
     // 끝까지 표식했으면 completed가 참이다.
-    // times가 있으면 준비·표식·회수·넘기기 시간과 넘긴 회색 객체 수를 적는다.
+    // carried가 있으면 그 블록 목록(앞 slice가 남긴 회색 객체)도 씨앗으로 쓰고, 예산이 다해 남은
+    // 회색 객체를 work에 펴지 않고 블록째 carried에 남긴다(slice마다 회색 객체 전체를 복사하지
+    // 않는다 — GC-S4 보정). times가 있으면 준비·표식·회수·넘기기 시간과 넘긴 회색 객체 수를 적는다.
     uint32 MarkParallel(Array<uint32>& work, usize& cursor, MarkState& state, uint32 maxObjects,
                         uint64 deadline, WorkerScheduler& scheduler, bool& completed,
-                        GcSliceTimes* times = nullptr) noexcept;
+                        GcBlock** carried = nullptr, GcSliceTimes* times = nullptr) noexcept;
+    // 남은 회색 블록(gcGrayBlocks_)을 표식 큐 뒤로 펴거나(직렬 slice) 재사용 목록으로
+    // 돌린다(취소·오류· cycle 끝).
+    void FlattenGrayBlocks() noexcept;
+    void ReleaseGrayBlocks() noexcept;
     // 장벽 큐(gcShade_)를 표식 큐(gcWork_) 뒤로 옮긴다(slice 시작).
     void DrainShadeQueue() noexcept;
     static void ValidateStagedEdge(void*, ObjectHandle) noexcept;
@@ -952,6 +958,11 @@ private:
     Array<uint32> gcShade_;
     // 병렬 표식의 512칸 큐 블록 재사용 목록이다(Registry 소멸 때 반환한다).
     GcBlock* gcFreeBlocks_ = nullptr;
+    // 병렬 slice가 예산을 다해 남긴 회색 객체 블록이다(다음 slice의 씨앗).
+    GcBlock* gcGrayBlocks_ = nullptr;
+    // 앞 병렬 slice에서 표식이 멈춘 뒤 든 꼬리 시간(worker 회수·회색 넘기기, ns)이다. 다음 병렬
+    // slice가 그만큼 표식을 일찍 멈춰 slice 전체가 시간 예산 안에 들게 한다.
+    uint64 gcParallelTail_ = 0;
     usize gcCursor_ = 0;
     GcPhase gcPhase_ = GcPhase::Idle;
     GcReport cycleGc_;

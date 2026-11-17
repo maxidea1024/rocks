@@ -46,6 +46,9 @@ constexpr uint32 SweepTimeCheckInterval = 64;
 // 버퍼는 본체 배치를 알아야 하므로(M3) 미리 읽지 않는다.
 constexpr usize HotPrefetchDistance = 16;
 constexpr usize ObjectPrefetchDistance = 8;
+// 병렬 slice의 꼬리 시간 보정이 시간 예산에서 가져갈 수 있는 최대 몫(예산 / 이 값)이다. 선점 같은
+// 일회성 지연이 다음 slice의 표식 시간을 지나치게 줄이지 않게 한다.
+constexpr uint64 ParallelTailBudgetDivisor = 4;
 // GC 자료 할당 태그다.
 constexpr uint32 GcPageTag = 0x47435047u;      // 'GCPG'
 constexpr uint32 GcPageTableTag = 0x47435054u; // 'GCPT'
@@ -465,6 +468,7 @@ Result<void> ObjectRegistry::CancelCollection(const ObjectAccessContext& access)
     gcPhase_ = GcPhase::Idle;
     gcWork_.Clear();
     gcShade_.Clear();
+    ReleaseGrayBlocks();
     gcCursor_ = 0;
     return Result<void>::Success();
 }
@@ -922,9 +926,34 @@ struct ObjectRegistry::ParallelMark {
     }
 };
 
+void ObjectRegistry::FlattenGrayBlocks() noexcept {
+    while (GcBlock* block = gcGrayBlocks_) {
+        gcGrayBlocks_ = block->next;
+        for (uint32 item = 0; item < block->count; ++item) {
+            // 표식 큐는 모든 슬롯을 담을 용량이 있다(회색 객체는 cycle마다 슬롯당 한 번이다).
+            if (!gcWork_.TryPushBack(block->items[item])) {
+                platform::Fatal("Preallocated GC work queue exhausted");
+            }
+        }
+
+        block->next = gcFreeBlocks_;
+        gcFreeBlocks_ = block;
+    }
+}
+
+void ObjectRegistry::ReleaseGrayBlocks() noexcept {
+    while (GcBlock* block = gcGrayBlocks_) {
+        gcGrayBlocks_ = block->next;
+        block->count = 0;
+        block->next = gcFreeBlocks_;
+        gcFreeBlocks_ = block;
+    }
+}
+
 uint32 ObjectRegistry::MarkParallel(Array<uint32>& work, usize& cursor, MarkState& state,
                                     uint32 maxObjects, uint64 deadline, WorkerScheduler& scheduler,
-                                    bool& completed, GcSliceTimes* times) noexcept {
+                                    bool& completed, GcBlock** carried,
+                                    GcSliceTimes* times) noexcept {
     completed = false;
     const uint64 setupStarted = platform::MonotonicNanoseconds();
     constexpr uint32 MaxWorkers = 64;
@@ -963,6 +992,16 @@ uint32 ObjectRegistry::MarkParallel(Array<uint32>& work, usize& cursor, MarkStat
 
     work.Clear();
     cursor = 0;
+    // 앞 slice가 남긴 회색 블록은 펴지 않고 그대로 풀에 붙인다.
+    if (carried != nullptr) {
+        while (GcBlock* block = *carried) {
+            *carried = block->next;
+            block->next = shared.pool;
+            shared.pool = block;
+            ++shared.poolBlocks;
+        }
+    }
+
     WorkerTaskHandle tasks[MaxWorkers];
     uint32 submitted = 0;
     if (!shared.Stopped()) {
@@ -1023,10 +1062,20 @@ uint32 ObjectRegistry::MarkParallel(Array<uint32>& work, usize& cursor, MarkStat
         }
     }
 
+    uint64 gray = 0;
     GcBlock* lists[] = {shared.leftovers, shared.pool, shared.ownerPool};
     for (GcBlock* block : lists) {
         while (block != nullptr) {
             GcBlock* next = block->next;
+            gray += block->count;
+            if (carried != nullptr && block->count != 0) {
+                // 블록째 다음 slice로 넘긴다.
+                block->next = *carried;
+                *carried = block;
+                block = next;
+                continue;
+            }
+
             for (uint32 item = 0; item < block->count; ++item) {
                 // 큐는 모든 슬롯을 담을 용량을 미리 확보했다(회색 객체는 슬롯마다 한 번이다).
                 if (!work.TryPushBack(block->items[item])) {
@@ -1046,7 +1095,7 @@ uint32 ObjectRegistry::MarkParallel(Array<uint32>& work, usize& cursor, MarkStat
         times->marking += drainStarted - markStarted;
         times->drain += requeueStarted - drainStarted;
         times->requeue += platform::MonotonicNanoseconds() - requeueStarted;
-        times->grayCarried = static_cast<uint32>(work.Size());
+        times->grayCarried = static_cast<uint32>(gray);
     }
 
     const auto error = static_cast<ErrorCode>(shared.error);
@@ -1055,7 +1104,7 @@ uint32 ObjectRegistry::MarkParallel(Array<uint32>& work, usize& cursor, MarkStat
         return traced;
     }
 
-    completed = work.IsEmpty() && shared.done;
+    completed = work.IsEmpty() && shared.done && (carried == nullptr || *carried == nullptr);
     return traced;
 }
 
@@ -1127,6 +1176,8 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
         slice.setup += platform::MonotonicNanoseconds() - markStarted;
         bool completed = false;
         if (scheduler == nullptr) {
+            // 앞 병렬 slice가 블록으로 남긴 회색 객체를 직렬 큐로 편다.
+            FlattenGrayBlocks();
             const uint64 serialStarted = platform::MonotonicNanoseconds();
             processed = MarkSerial(gcWork_, gcCursor_, state, budget.maxObjects, deadline);
             slice.marking += platform::MonotonicNanoseconds() - serialStarted;
@@ -1135,8 +1186,18 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
             completed = gcCursor_ == gcWork_.Size() && processed < budget.maxObjects &&
                         (deadline == 0 || platform::MonotonicNanoseconds() < deadline);
         } else {
-            processed = MarkParallel(gcWork_, gcCursor_, state, budget.maxObjects, deadline,
-                                     *scheduler, completed, &slice);
+            // 병렬 slice는 표식이 멈춘 뒤에도 worker 회수·회색 넘기기가 남는다. 앞 slice에서 잰 그
+            // 꼬리 시간만큼(예산의 1/ParallelTailBudgetDivisor까지) 표식을 일찍 멈춘다.
+            uint64 markDeadline = deadline;
+            if (deadline != 0) {
+                const uint64 limit = budget.maxNanoseconds / ParallelTailBudgetDivisor;
+                const uint64 reserve = gcParallelTail_ < limit ? gcParallelTail_ : limit;
+                markDeadline = deadline - reserve > started ? deadline - reserve : deadline;
+            }
+
+            processed = MarkParallel(gcWork_, gcCursor_, state, budget.maxObjects, markDeadline,
+                                     *scheduler, completed, &gcGrayBlocks_, &slice);
+            gcParallelTail_ = slice.drain + slice.requeue;
         }
 
         cycleGc_.marked += state.marked;
@@ -1159,6 +1220,7 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
         gcPhase_ = GcPhase::Idle;
         gcWork_.Clear();
         gcShade_.Clear();
+        ReleaseGrayBlocks();
         gcCursor_ = 0;
         processing_ = false;
         return Result<GcProgress>::Failure(state.error);
@@ -1214,6 +1276,7 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
         lastGc_ = cycleGc_;
         gcWork_.Clear();
         gcShade_.Clear();
+        ReleaseGrayBlocks();
         gcCursor_ = 0;
     }
 

@@ -76,6 +76,7 @@ ObjectRegistry::~ObjectRegistry() {
         ReleaseRegistryMemory(allocator_, gcPages_[index]);
     }
 
+    ReleaseGrayBlocks();
     while (GcBlock* block = gcFreeBlocks_) {
         gcFreeBlocks_ = block->next;
         block->~GcBlock();
