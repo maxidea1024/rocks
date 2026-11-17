@@ -155,7 +155,7 @@ Engine/Source/Runtime/OpenGLGraphics/
 
 ### 5.7 생성 실패 보고
 
-`CreateOpenGLDevice(allocator, desc, [options,] report)`의 `DeviceCreateReport`([로깅](LoggingSystem.ko.md) 13절 모양)에 실패 단계(호출 이름), 원본 오류(GL error, EGL error, Win32 `GetLastError`, 버전 비교면 major×10+minor), 설명을 적는다. 장치 안 실패는 `LastError`에 직전 GL 오류 이름·값을 덧붙인다. 로그는 LG7 전이라 `TODO(log)`로 남겼다.
+`CreateOpenGLDevice(allocator, desc, [options,] report)`의 `DeviceCreateReport`([로깅](LoggingSystem.ko.md) 13절 모양)에 실패 단계(호출 이름), 원본 오류(GL error, EGL error, Win32 `GetLastError`, 버전 비교면 major×10+minor), 설명을 적는다. 장치 안 실패는 `LastError`에 직전 GL 오류 이름·값을 덧붙인다. 로그(LG3 API, 13절 표): 장치 생성 성공 Info(`Created {Backend} device on {Adapter} (validation {Validation})`), 검증 계층 메시지 Warning(`Graphics.OpenGL.Validation`, 원문, 메시지 ID마다 1회, 할당 없이 ID 64개까지 기억), present 실패 Error(연속 실패는 1회), 장치 손실 전이 Error(1회). 생성 실패·셰이더 컴파일 실패 로그는 결정하는 호출자가 남긴다(report·`LastError`).
 
 ## 6. 공개 제약
 
@@ -202,7 +202,7 @@ Engine/Source/Runtime/OpenGLGraphics/
 - SH2: 쿠킹된 ESSL과 바인딩 머리 받기, 상수 버퍼 에뮬레이션(`<단계>c<N>_<타입>`)·복사 표, `ShaderSource::glsl` 제거.
 - SH6: `GLES31_ANDROID` 픽셀 대조(앞면 `GL_CW`·y 반전), 기기 호환성(S12 기기 부분).
 - 픽셀 형식 병합 뒤 형식 표 확장과 `Format` → `PixelFormat` 이름 맞춤.
-- LG7: `TODO(log)` 자리에 로그.
+- LG7: 호출자 쪽 로그(생성 실패 선택자, 셰이더 컴파일 실패)와 관찰 스레드가 감지한 장치 손실의 로그.
 
 ## 11. UE 대응표
 

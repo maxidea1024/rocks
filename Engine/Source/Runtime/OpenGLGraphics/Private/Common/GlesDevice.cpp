@@ -661,19 +661,36 @@ uint64 GlesDevice::ValidationErrorCount() const noexcept {
 void GlesDevice::DebugMessage(GLenum source, GLenum type, GLuint id, GLenum severity,
                               GLsizei length, const GLchar* message, const void* user) {
     (void)source;
-    (void)id;
     (void)severity;
     auto* self = static_cast<GlesDevice*>(const_cast<void*>(user));
     if (type == GL_DEBUG_TYPE_ERROR || type == GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR) {
         ++self->validationErrors_;
-        // TODO(log): 검증 메시지를 Graphics.OpenGL.Validation 카테고리로 메시지 ID마다 한 번 남긴다
-        // (LoggingSystem 13절 LG7).
         if (message != nullptr && length > 0) {
-            auto assigned =
-                self->lastError_.TryAssign(StringView(message, static_cast<usize>(length)));
+            const StringView text(message, static_cast<usize>(length));
+            auto assigned = self->lastError_.TryAssign(text);
             (void)assigned;
+            // 검증 계층 원문을 메시지 ID마다 한 번 남긴다(LoggingSystem 13절).
+            if (self->FirstValidationMessage(id)) {
+                Log::Warning(LogGraphicsOpenGLValidation, "GL debug message {Id}: {Message}",
+                             static_cast<uint32>(id), text);
+            }
         }
     }
+}
+
+bool GlesDevice::FirstValidationMessage(GLuint id) noexcept {
+    for (uint32 index = 0; index < loggedValidationCount_; ++index) {
+        if (loggedValidationIds_[index] == id) {
+            return false;
+        }
+    }
+
+    if (loggedValidationCount_ == MaxLoggedValidationIds) {
+        return false;
+    }
+
+    loggedValidationIds_[loggedValidationCount_++] = id;
+    return true;
 }
 
 Result<void> GlesDevice::Fail(const char* message) noexcept {
@@ -687,7 +704,8 @@ Result<void> GlesDevice::Fail(const char* message) noexcept {
         }
     }
 
-    // TODO(log): 장치 안 실패를 Error로 남긴다(LoggingSystem 13절 LG7).
+    // 실패는 호출자가 결과로 받는다. 로그는 결정하는 쪽이 남기고(LoggingSystem 13절), 장치는
+    // present 실패와 장치 손실만 직접 남긴다.
     auto assigned = lastError_.TryAssign(text.View());
     (void)assigned;
     return Result<void>::Failure(ErrorCode::DependencyFailed);
@@ -711,6 +729,14 @@ uint64 GlesDevice::Submit() noexcept {
     // 앞 단계(창 표면 전환)가 실패해 context가 풀렸으면 장치 표면에 다시 붙인다.
     if (!MakeCurrentForResources()) {
         timeline_.MarkLost();
+        if (!lossLogged_) {
+            lossLogged_ = true;
+            Log::Error(LogGraphicsOpenGL,
+                       "OpenGL ES device lost: the context could not be made current to submit "
+                       "work after frame {Frame}",
+                       fenceValue_);
+        }
+
         return fenceValue_;
     }
 
@@ -970,7 +996,7 @@ void GlesDevice::StoreLog(GLuint object, bool shader) noexcept {
         gl_.GetProgramInfoLog(object, InfoLogBytes, &written, log);
     }
 
-    // TODO(log): 셰이더 컴파일 실패는 파이프라인 생성을 결정하는 쪽이 Error로 남긴다(LoggingSystem
+    // 셰이더 컴파일 실패 로그는 파이프라인 생성을 결정하는 쪽이 이 LastError로 남긴다(LoggingSystem
     // 13절).
     auto assigned = lastError_.TryAssign(StringView(log, static_cast<usize>(written)));
     (void)assigned;
@@ -1009,7 +1035,8 @@ Result<UniquePtr<Device>> CreateOpenGLDevice(Allocator& allocator, const DeviceD
             gles::FillReport(failure, *report);
         }
 
-        // TODO(log): 생성 실패는 backend를 고르는 호출자가 report로 남긴다(LoggingSystem 13절).
+        // 생성 실패 로그는 backend를 고르는 호출자가 report로 남긴다(LoggingSystem 13절: 대체
+        // 후보가 있으면 Warning, 모든 후보 실패면 Error).
         return Result<UniquePtr<Device>>::Failure(initialized.Error());
     }
 
@@ -1017,6 +1044,10 @@ Result<UniquePtr<Device>> CreateOpenGLDevice(Allocator& allocator, const DeviceD
         *report = DeviceCreateReport{};
     }
 
+    const DeviceInfo info = created.Value()->Info();
+    Log::Info(gles::LogGraphicsOpenGL,
+              "Created {Backend} device on {Adapter} (validation {Validation})",
+              BackendName(info.backend), info.adapterName, info.validationEnabled);
     return Result<UniquePtr<Device>>::Success(UniquePtr<Device>(Move(created.Value())));
 }
 

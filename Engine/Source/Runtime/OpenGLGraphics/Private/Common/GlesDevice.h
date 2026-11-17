@@ -5,6 +5,7 @@
 #include "GlesPlatform.h"
 
 #include <Core/Containers/Array.h>
+#include <Core/Diagnostics/Log.h>
 #include <Core/Text/String.h>
 #include <Graphics/DeviceOwnership.h>
 #include <Graphics/FenceTimeline.h>
@@ -30,6 +31,14 @@ inline constexpr char PixelRootConstantsName[] = "pu_h";
 inline constexpr GLsizei RootConstantVectors = sizeof(DrawConstants) / (4 * sizeof(float));
 static_assert(sizeof(DrawConstants) == RootConstantVectors * 4 * sizeof(float),
               "DrawConstants must be a whole number of vec4 slots");
+
+// 로그 카테고리다(LoggingSystem 13절: 장치 생성·present 실패·장치 손실, 검증 계층 메시지).
+inline constexpr LogCategory LogGraphicsOpenGL{"Graphics.OpenGL"};
+inline constexpr LogCategory LogGraphicsOpenGLValidation{"Graphics.OpenGL.Validation"};
+
+// 검증 메시지를 ID마다 한 번 남기려고 기억하는 ID 수다. 다 차면 새 ID는 세기만 하고 남기지 않는다
+// (할당 없이 반복 로그를 막는다).
+inline constexpr uint32 MaxLoggedValidationIds = 64;
 
 // 셰이더·프로그램 info log를 옮길 때 쓰는 고정 버퍼 크기다(넘는 부분은 자른다).
 inline constexpr GLsizei InfoLogBytes = 2048;
@@ -210,6 +219,9 @@ private:
     void PushMarker(StringView name) noexcept override;
     void PopMarker() noexcept override;
 
+    // 검증 메시지 id를 처음 보면 기억하고 true다(이미 남겼거나 기억 칸이 차면 false).
+    bool FirstValidationMessage(GLuint id) noexcept;
+
     static void DebugMessage(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length,
                              const GLchar* message, const void* user);
 
@@ -335,6 +347,13 @@ private:
     // present·패스 복사 blit에서 sRGB 쓰기 스위치를 끄고 byte를 그대로 옮기는지다(PlatformInfo::
     // rawSrgbBlit이고 스위치가 있을 때).
     bool rawSrgbBlit_ = false;
+    // 이미 로그로 남긴 검증 메시지 ID다(ID마다 한 번).
+    GLuint loggedValidationIds_[MaxLoggedValidationIds] = {};
+    uint32 loggedValidationCount_ = 0;
+    // present 실패를 남겼는지다(연속 실패는 한 번만 남기고 성공하면 다시 남긴다).
+    bool presentFailureLogged_ = false;
+    // 장치 손실 전이를 남겼는지다.
+    bool lossLogged_ = false;
 };
 
 } // namespace rocks::graphics::gles

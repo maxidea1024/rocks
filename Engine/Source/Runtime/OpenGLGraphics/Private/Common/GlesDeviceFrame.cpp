@@ -96,9 +96,18 @@ Result<GpuFencePoint> GlesDevice::EndFrame() noexcept {
         if (record != nullptr) {
             Diagnostic error;
             if (!PresentBlit(*record)) {
-                outcome = Fail("present blit failed");
+                outcome = Fail("present blit failed: cannot make the window surface current");
             } else if (!platform_->Present(record->surface, record->vsync, error)) {
                 outcome = Reject(error, ErrorCode::DependencyFailed);
+            }
+
+            // present 실패는 장치가 남긴다(LoggingSystem 13절). 연속 실패는 한 번만 남긴다.
+            if (!outcome && !presentFailureLogged_) {
+                presentFailureLogged_ = true;
+                Log::Error(LogGraphicsOpenGL, "OpenGL ES present failed: {Reason}",
+                           lastError_.View());
+            } else if (outcome) {
+                presentFailureLogged_ = false;
             }
         }
     }
