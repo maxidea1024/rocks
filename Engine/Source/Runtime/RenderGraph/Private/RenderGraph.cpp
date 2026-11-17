@@ -276,13 +276,20 @@ Result<GraphTexture> RenderGraph::CreateTexture(const graphics::TextureDesc& des
         return Result<GraphTexture>::Failure(ErrorCode::Busy);
     }
 
+    // 그래프 텍스처는 GPU가 채우는 렌더 타깃이므로 번호표 안의 비압축 형식이어야 한다(블록 압축
+    // 형식은 렌더 타깃이 될 수 없다, PixelFormatInfo). 장치가 그 형식을 지원하는지는 풀 할당 때
+    // 장치 생성이 판단한다(Unsupported).
+    const graphics::PixelFormatInfo& format = graphics::GetPixelFormatInfo(desc.format);
     if (desc.width == 0 || desc.height == 0 || desc.mipLevels == 0 ||
         desc.mipLevels > MaxGraphTextureMips ||
-        desc.usage != graphics::TextureUsage::RenderTarget) {
+        desc.usage != graphics::TextureUsage::RenderTarget ||
+        !graphics::IsValidPixelFormat(desc.format) ||
+        format.compression != graphics::PixelCompression::None) {
         return Result<GraphTexture>::Failure(RecordGraphError(
             state, ErrorCode::InvalidArgument, true,
-            "texture '{}' has an invalid description (graph textures are render targets)",
-            name != nullptr ? name : ""));
+            "texture '{}' has an invalid description (graph textures are uncompressed render "
+            "targets, format {})",
+            name != nullptr ? name : "", graphics::PixelFormatName(desc.format)));
     }
 
     ResourceRecord record;

@@ -136,6 +136,22 @@ TEST(RenderGraph_RejectsRetiredImportsAndForeignHandles) {
               .Error() == ErrorCode::InvalidArgument);
 }
 
+// 그래프 텍스처는 번호표 안의 비압축 형식만 받는다(블록 압축 형식은 렌더 타깃이 될 수 없다).
+TEST(RenderGraph_RejectsCompressedOrUnknownTextureFormats) {
+    GraphBench bench;
+    RenderGraph graph(bench.Next());
+    graphics::TextureDesc compressed = TargetDesc();
+    compressed.format = graphics::PixelFormat::BC7UnormSrgb;
+    CHECK(graph.CreateTexture(compressed, "Compressed").Error() == ErrorCode::InvalidArgument);
+    CHECK(Contains(graph.LastError(), "BC7UnormSrgb"));
+    graphics::TextureDesc unknown = TargetDesc();
+    unknown.format = graphics::PixelFormat::Unknown;
+    CHECK(graph.CreateTexture(unknown, "Unknown").Error() == ErrorCode::InvalidArgument);
+    graphics::TextureDesc half = TargetDesc();
+    half.format = graphics::PixelFormat::RGBA16Float;
+    CHECK(graph.CreateTexture(half, "HalfFloat"));
+}
+
 // (e) 생산 전 export는 Execute에서 거부한다.
 TEST(RenderGraph_RejectsExportBeforeProduce) {
     GraphBench bench;

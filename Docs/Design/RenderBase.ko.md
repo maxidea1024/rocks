@@ -1,6 +1,6 @@
 # 렌더 기반(RenderBase) 설계
 
-기준일: 2026-11-17, 개정 9(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-17, 개정 10(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
 - 렌더 lane과 프레임 전달, 장치 스레드 모델, 장치 자원 수명, 렌더 그래프
 - 셰이더 런타임 객체(셰이더 집합·파라미터 바인딩·상수 블록·파이프라인 캐시)
 - 정점 입력 타입, 공용 자원·그리기 유틸리티, GPU 계측
@@ -476,7 +476,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
   - 의존 선언은 파라미터 구조체가 아니라 명시 접근 목록이다(위). 결정 R4는 그대로이고 수집기가 같은 목록을 만든다.
   - GX5는 최소 범위다: begin·end 분리 전이와 pipe가 없고, Raster pass 렌더 타깃 전이(attachment)는 장치 `BeginOffscreen`·`BeginFrame`이 낸다(GX4 attachment 시작이 기록 안으로 들어오면 그래프가 `Transition`으로 낸다). 만든 자원의 첫 전이 before는 `Unknown`(내용 불필요, 장치 추적 상태)이다.
   - 실행 단위: Raster pass마다 장치 기록 하나를 열고(`BeginOffscreen`은 clear만 한다), Compute·Copy pass는 열린 기록에 이어 쓴다. 열린 기록이 없는 Compute·Copy pass와 attachment load(`GraphLoadAction::Load`)는 `Unsupported`다(GX4).
-  - 자원 desc는 지금 Graphics desc 그대로다. 그래프 텍스처는 RenderTarget 용도만, import 텍스처는 mip 수를 `GraphImportOptions::mipLevels`로 받는다(장치에 desc 조회가 없다). 픽셀 형식 개편(`PixelFormat`)·GX2 뒤에 넓힌다. 풀 바이트 추정 함수와 풀 키 함수 하나씩만 고치면 된다.
+  - 자원 desc는 지금 Graphics desc 그대로다(형식은 [픽셀 형식](PixelFormat.ko.md) PF1의 `PixelFormat`). 그래프 텍스처는 RenderTarget 용도·번호표 안의 비압축 형식만, import 텍스처는 mip 수를 `GraphImportOptions::mipLevels`로 받는다(장치에 desc 조회가 없다). 풀 byte 추정은 `PixelFormatInfo` 기준 `MipChainBytes`다. GX2(차원·array·샘플 수·버퍼 용도) 뒤에는 풀 키 비교 함수와 desc 검사만 넓히면 된다.
   - 풀 키에 샘플러를 넣었다(7.4절은 제외). 지금 장치는 텍스처 desc의 샘플러로 묶으므로 빼면 다른 샘플러로 읽힌다. 결정 R12의 바인딩 때 샘플러 지정이 들어오면 뺀다.
   - 해제 pass 번호는 계산·진단만 하고 풀 반환은 그래프 끝이다(프레임 안 재사용은 RG2 완료 기준이다).
   - import lease는 `RenderHandleTable`에 두었다(`AcquireLease`·`ReleaseLease`·`TakeReleasedRetire`, RB2의 `DeviceResourceOwner` 전). lease가 남은 handle의 Retire는 장치 Retire를 미루고 렌더 lane이 lane 작업 끝에 잇는다. export는 새 `RenderHandle`로 소유를 넘기고 그 handle의 Retire가 수명을 정한다.
@@ -999,6 +999,6 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 - 개정 5(2026-11-17): GX7·GX10·GX11·CP6·RB1·GX3a 구현을 반영했다. 4.2절 상태 열과 RB1 행, 4.3·4.4·5.7·10.4절 구현 메모를 더했다. 스펙과 다르게 정한 것: 작업 함수를 캡처 없는 함수 포인터로 제한, `Retire`는 handle만 받음(호출자 last-use 하한 없음), D3D12 스레드 안전 생성은 GX8로 미룸, 장치 손실·미지원 능력은 기존 오류 코드(`Destroyed`·`Unsupported`), 정리 drain·closure·실행기 hook은 실행 파일 hook에만. 같은 날 사용자 결정으로 최소 렌더러(내장 메시·원문 셰이더)를 엔진 모듈에서 Sandbox 시험 샘플로 옮겼다.
 - 개정 6(2026-11-17): GX8·GX9 구현을 반영했다(4.2절 상태 열, 4.4절 구현 메모, 13.2절 GLES 시간 대응 결정). GX11 상태에서 "D3D12 스레드 안전 생성은 GX8과 함께"를 지웠다(GX8에서 열었다). 스펙과 다르게 정한 것: 업로드 ring은 프레임 slot별 고정 구간 대신 fence로 닫는 묶음의 원형 할당, timestamp 끊김은 `ErrorCode::Cancelled`로 통지, `GpuScope`는 RB7로 남김.
 - 개정 8(2026-11-17): RB7 `GpuTrace`·`GpuScope` 구현과 RB1 설정 snapshot 연결을 반영했다(4.2절 CP4·CP5·CP8·GX9·RB1 상태, 5.7·12·13.3절 구현 메모, 캡처 도구 수동 확인 절차). 스펙과 다르게 정한 것: GPU 구간을 두 tick을 가진 기록 하나로, "GPU 시간 없음"을 queue 정의 칸으로, calibration은 세션 첫 프레임과 일정 프레임 간격의 정의 기록으로, 작업·fence 사건과 그래프 자동 구간은 뒤로, 설정 snapshot 참조는 타입 표지를 가진 공유 참조(`RenderSettingsRef`)로 둠.
-- 개정 9(2026-11-17): GX5(최소)·RG1 구현을 반영했다(2절 용어, 4.2절 GX5·RG1 행, 4.4절 GX5 구현 메모, 8절 구현 메모). 사용자 지시 "렌더 그래프도 미리 하자"에 따라 선행(RB4·GX1·GX2·GX4)이 없는 부분은 범위를 줄였다. 스펙과 다르게 정한 것: 의존 선언을 명시 접근 목록으로(파라미터 구조체 수집기가 같은 목록을 만든다), GX5 분리 전이·pipe 없음과 attachment 전이는 장치 Begin, 즉시·지연 동치의 정의, 풀 키에 샘플러 포함, 풀 반환은 그래프 끝, lease를 `RenderHandleTable`에, 검증 항상 켬, 그래프 기록 전체를 GPU 프레임 하나로.
 - 개정 7(2026-11-17): 1절에 좌표·행렬 규약 행을 더했다(사용자 결정: 좌표계·단위·행렬을 UE 5.8과 같게). 12절은 ConfigSystem, 13.2절은 TraceSystem을 참조하게 했다.
 - 개정 9(2026-11-17): [픽셀 형식](PixelFormat.ko.md) 설계(개정 1)와 교차 참조를 넣었다(4.2절 GX1 행, 4.4절 GX1·GX2, 6.5절 후속). 사용자 지시 "PixelFormat으로", "언리얼에서 지원하는거 full로 지원"에 따라 형식 부분은 A0-G에서 분리하여 PF1–PF3으로 먼저 한다.
+- 개정 10(2026-11-17): GX5(최소)·RG1 구현을 반영했다(2절 용어, 4.2절 GX5·RG1 행, 4.4절 GX5 구현 메모, 8절 구현 메모). 사용자 지시 "렌더 그래프도 미리 하자"에 따라 선행(RB4·GX1·GX2·GX4)이 없는 부분은 범위를 줄였다. 스펙과 다르게 정한 것: 의존 선언을 명시 접근 목록으로(파라미터 구조체 수집기가 같은 목록을 만든다), GX5 분리 전이·pipe 없음과 attachment 전이는 장치 Begin, 즉시·지연 동치의 정의, 풀 키에 샘플러 포함, 풀 반환은 그래프 끝, lease를 `RenderHandleTable`에, 검증 항상 켬, 그래프 기록 전체를 GPU 프레임 하나로. 픽셀 형식 PF1 병합 뒤 그래프 텍스처 desc는 `PixelFormat`이고, 풀 byte 추정은 `MipChainBytes(format, w, h, 1, mips)`(PixelFormatInfo), `CreateTexture`는 번호표 밖·블록 압축 형식을 거부한다.

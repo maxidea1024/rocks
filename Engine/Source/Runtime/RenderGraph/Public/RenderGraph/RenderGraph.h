@@ -173,8 +173,10 @@ public:
     // --- 자원 ---
 
     // 그래프 수명 텍스처를 선언한다. 장치 자원은 첫 사용 pass 직전에 풀에서 받는다. usage는
-    // RenderTarget이어야 한다(그래프 텍스처는 GPU가 채운다). name은 정적 수명 문자열(진단)이다.
-    // 실패: 잘못된 desc InvalidArgument, arena 할당 실패는 그 오류다.
+    // RenderTarget이고 형식은 번호표 안의 비압축 PixelFormat이어야 한다(그래프 텍스처는 GPU가
+    // 채운다). name은 정적 수명 문자열(진단)이다. 실패: 잘못된 desc InvalidArgument, arena 할당
+    // 실패는 그 오류다. 장치가 지원하지 않는 형식은 풀 할당 때 장치 오류(Unsupported)로 Execute가
+    // 실패한다.
     Result<GraphTexture> CreateTexture(const graphics::TextureDesc& desc,
                                        const char* name) noexcept;
 

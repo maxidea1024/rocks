@@ -7,10 +7,10 @@ namespace rocks::render {
 
 namespace {
 
-// 텍스처 byte 추정이다(mip 사슬 전체, 장치 정렬 제외). 픽셀 형식 개편(PixelFormatInfo) 뒤에는 그
-// 정보 표의 블록 크기·byte로 바꾼다.
+// 텍스처 byte 추정이다(mip 사슬 전체, 장치 정렬 제외). PixelFormatInfo의 블록 크기·byte로
+// 계산한다(MipChainBytes, 2D라 depth 1). 지금 텍스처 desc에는 깊이·array가 없다(GX2).
 uint64 TextureBytes(const graphics::TextureDesc& desc) noexcept {
-    return graphics::MipChainBytes(desc.width, desc.height, desc.mipLevels, desc.format);
+    return graphics::MipChainBytes(desc.format, desc.width, desc.height, 1, desc.mipLevels);
 }
 
 } // namespace
