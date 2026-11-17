@@ -52,8 +52,8 @@ void Fill(CoreValueFields& fields) noexcept {
     fields.tint.b = 7;
     fields.tint.a = 200;
     fields.placement.translation = Vec3d(1.0e9 + 0.25, -4.5, 0.125);
-    fields.placement.rotation = Quat(0.5f, 0.5f, 0.5f, 0.5f);
-    fields.placement.scale = Vec3(2.0f, 3.0f, 4.0f);
+    fields.placement.rotation = Quatd(0.5, 0.5, 0.5, 0.5);
+    fields.placement.scale = Vec3d(2.0, 3.0, 4.0);
     fields.cell.x = -1;
     fields.cell.y = 2;
     fields.cell.z = 2147483647;

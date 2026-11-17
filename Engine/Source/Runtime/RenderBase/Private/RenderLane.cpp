@@ -413,7 +413,8 @@ Result<FrameTicket> RenderLane::BeginFrame() noexcept {
         ticketOut_ = true;
     }
 
-    // lane은 그 slot의 프레임 처리를 끝냈다(GPU 완료는 lane 처리 완료 뒤다).
+    // lane은 그 slot의 프레임 처리를 끝냈고 GPU도 끝냈다. 이전 프레임의 설정 snapshot을 놓는다.
+    settings_[slot].Reset();
     auto reset = arenas_[slot]->Reset();
     if (!reset) {
         platform::LockGuard lock(gate_);
@@ -431,6 +432,14 @@ FrameArena& RenderLane::Arena(const FrameTicket& ticket) noexcept {
     }
 
     return *arenas_[ticket.slot_];
+}
+
+void RenderLane::AttachSettings(const FrameTicket& ticket, RenderSettingsRef settings) noexcept {
+    if (!ticket.IsValid() || ticket.slot_ >= config_.frameSlots) {
+        platform::Fatal("RenderLane::AttachSettings called with an invalid frame ticket");
+    }
+
+    settings_[ticket.slot_] = Move(settings);
 }
 
 void RenderLane::AbandonFrame(FrameTicket&& ticket) noexcept {
@@ -1172,6 +1181,11 @@ Result<void> RenderLane::Stop() noexcept {
     laneOwnsDevice_ = true;
     ProcessInbox();
     laneOwnsDevice_ = false;
+    // lane이 닫혔으므로 모든 slot의 설정 snapshot을 놓는다.
+    for (RenderSettingsRef& settings : settings_) {
+        settings.Reset();
+    }
+
     const DedicatedLaneStats laneStats = lane_.Stats();
     platform::LockGuard lock(gate_);
     running_ = false;

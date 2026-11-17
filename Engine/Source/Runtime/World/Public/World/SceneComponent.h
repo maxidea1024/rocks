@@ -27,9 +27,10 @@ namespace rocks {
 // parent에서 유도되는 값이다).
 //
 // 규약:
-// - 월드 변환은 affine 행렬(Mat4d) = 부모 월드 행렬 × 상대 TRS 행렬이다. 비균일 scale 부모
-//   아래 회전한 자식도 정확히 표현한다(TRS로 분해할 수 없는 shear 포함). TRS가 필요하면
-//   TryWorldTransform을 쓴다.
+// - 월드 변환은 affine 행렬(Mat4d) = 상대 TRS 행렬 × 부모 월드 행렬이다(행 벡터 규약, UE
+//   NewRelativeTransform * ParentToWorld — Engine/Private/Components/SceneComponent.cpp:732).
+//   비균일 scale 부모 아래 회전한 자식도 정확히 표현한다(TRS로 분해할 수 없는 shear 포함 — UE
+//   FTransform 곱은 shear를 버린다). TRS가 필요하면 TryWorldTransform을 쓴다.
 // - 상대 Transform이 바뀌거나 부모가 바뀌면 자신과 모든 자손의 월드 행렬을 dirty로 표시한다.
 // - 같은 World의 SceneComponent끼리만 붙일 수 있다. 자기 자신이나 자손을 부모로 지정하면 순환으로
 //   거부한다. 부모가 파괴되면 자식은 루트가 된다(상대 Transform 유지).
@@ -53,8 +54,8 @@ public:
     // 바꾸지 않는다.
     Result<void> SetRelativeTransform(const Transform& transform) noexcept;
     Result<void> SetRelativeLocation(const Vec3d& location) noexcept;
-    Result<void> SetRelativeRotation(const Quat& rotation) noexcept;
-    Result<void> SetRelativeScale(const Vec3& scale) noexcept;
+    Result<void> SetRelativeRotation(const Quatd& rotation) noexcept;
+    Result<void> SetRelativeScale(const Vec3d& scale) noexcept;
 
     // 월드 행렬이다. dirty면 부모 사슬을 따라 다시 계산한다. 부모에 접근할 수 없으면(파괴 중 등)
     // 그 지점을 루트로 본다.

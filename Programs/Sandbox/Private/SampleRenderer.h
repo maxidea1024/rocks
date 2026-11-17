@@ -24,7 +24,7 @@ enum class MeshKind : uint8 {
 
 // 그릴 항목 하나다.
 struct RenderItem {
-    // 로컬 → 월드 변환(열 우선 column vector)이다.
+    // 로컬 → 월드 변환(행 벡터 규약 p · M, 이동은 마지막 행 — Core Matrix4)이다.
     Mat4 world;
     // 항목 색(선형)이다. 텍스처·꼭짓점 색에 곱한다.
     LinearColor color = LinearColor(1.0f, 1.0f, 1.0f, 1.0f);
@@ -35,7 +35,7 @@ struct RenderItem {
 
 // 카메라와 화면 설정이다.
 struct RenderView {
-    // 월드 → clip 변환(projection × view)이다.
+    // 월드 → clip 변환(행 벡터 규약 worldToView × projection — 월드 → view 먼저)이다.
     Mat4 viewProjection;
     graphics::ClearColor clear;
 };

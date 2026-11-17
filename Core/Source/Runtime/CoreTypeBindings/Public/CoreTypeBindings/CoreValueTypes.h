@@ -140,32 +140,35 @@ struct IntVec3Binding {
     ROCKS_PROPERTY() int32 z = 0;
 };
 
-// 이동(double)·회전(float quaternion)·축별 scale(float)이다. 멤버는 위 미러들이 결합한 실제
-// 타입이다. 비Atomic(멤버 단위 — UE FTransform과 같다)이다. 세이브게임 포함 필터(includeFlags =
-// SaveGame)는 멤버마다 자기 플래그를 보므로 멤버에 SaveGame을 단다(UE FTransform 멤버와 같다 —
-// 리플렉션 B9h1). Atomic 미러의 멤버는 통째 단위라 표시하지 않는다.
+// 회전·이동·축별 scale이 모두 double인 TRS(rocks::Transform — UE FTransform)다. 멤버 순서는 UE
+// FTransform과 같은 rotation·translation·scale이다(Core/Math/Transform.h). 멤버는 위 미러들이
+// 결합한 실제 타입이다. 비Atomic(멤버 단위 — UE FTransform과 같다)이다. 세이브게임 포함
+// 필터(includeFlags = SaveGame)는 멤버마다 자기 플래그를 보므로 멤버에 SaveGame을 단다(UE
+// FTransform 멤버와 같다 — 리플렉션 B9h1). Atomic 미러의 멤버는 통째 단위라 표시하지 않는다. 필드
+// ID는 이름 기반이라 순서· 정밀도를 바꿔도 그대로이고, 저장된 값이 없어 Version 1을 유지한다.
 ROCKS_STRUCT(Binds = "rocks::Transform", Version = 1)
 struct TransformBinding {
+    ROCKS_PROPERTY(SaveGame) Quatd rotation;
     ROCKS_PROPERTY(SaveGame) Vec3d translation;
-    ROCKS_PROPERTY(SaveGame) Quat rotation;
-    ROCKS_PROPERTY(SaveGame) Vec3 scale = Vec3::One();
+    ROCKS_PROPERTY(SaveGame) Vec3d scale = Vec3d::One();
 };
 
-// 모든 성분이 float인 TRS(rocks::Transform3<float>)다. 멤버 순서는 Core 선언 순서
-// translation·rotation·scale이다(UE FTransform3f는 Rotation·Translation·Scale3D 순서의 immutable
-// 이진이라 반입은 멤버 이름으로 대응시킨다 — Transform.h 머리 주석).
+// 모든 성분이 float인 TRS(rocks::Transform3<float> — UE FTransform3f)다. 멤버 순서는 Core·UE 선언
+// 순서 rotation·translation·scale이다(UE FTransform3f는 Rotation·Translation·Scale3D 순서의
+// immutable 이진이라 반입은 멤버 이름으로 대응시킨다 — Transform.h 머리 주석).
 ROCKS_STRUCT(Binds = "rocks::Transform3f", Atomic, Version = 1)
 struct Transform3fBinding {
-    ROCKS_PROPERTY() Vec3 translation;
     ROCKS_PROPERTY() Quat rotation;
+    ROCKS_PROPERTY() Vec3 translation;
     ROCKS_PROPERTY() Vec3 scale = Vec3::One();
 };
 
-// 모든 성분이 double인 TRS(rocks::Transform3<double>)다. 멤버 순서는 Transform3fBinding과 같다.
+// 모든 성분이 double인 TRS(rocks::Transform3<double> — UE FTransform3d)다. 멤버 순서는
+// Transform3fBinding과 같다.
 ROCKS_STRUCT(Binds = "rocks::Transform3d", Atomic, Version = 1)
 struct Transform3dBinding {
-    ROCKS_PROPERTY() Vec3d translation;
     ROCKS_PROPERTY() Quatd rotation;
+    ROCKS_PROPERTY() Vec3d translation;
     ROCKS_PROPERTY() Vec3d scale = Vec3d::One();
 };
 

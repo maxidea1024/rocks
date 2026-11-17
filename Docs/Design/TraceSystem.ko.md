@@ -1,6 +1,6 @@
 # 다중 스레드 trace 설계
 
-기준일: 2026-11-17, 개정 4. 여러 스레드의 CPU 구간·카운터·표지·task 수명·GPU 구간을 하나의 시간축에 기록하는 **trace 수집**(TraceCapture)과, 이를 읽는 **trace 분석**(TraceAnalysis)을 정한다.
+기준일: 2026-11-17, 개정 5. 여러 스레드의 CPU 구간·카운터·표지·task 수명·GPU 구간을 하나의 시간축에 기록하는 **trace 수집**(TraceCapture)과, 이를 읽는 **trace 분석**(TraceAnalysis)을 정한다.
 
 [렌더 기반](RenderBase.ko.md)의 선행 작업 CP5(다중 스레드 CPU 구간 계측·카운터·GPU 상관)이고 RB7(`GpuScope`, RenderBase 13절)의 기반이다. 요구는 다음 문서에서 온다.
 - [엔진 구현 계획](EngineImplementationPlan.ko.md) 29.1절(계측 체계), 29.4절(필수 로깅·프로파일러), 29.5절(OB01–OB06)
@@ -325,6 +325,16 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론)의 현재 기본 경로다. 경�
   - 분석기는 오차를 표시한다(OB06 "clock 불확실성").
 - **변환할 수 없는 경우**: calibration이 없는 backend(GLES 확장 없음 등)의 GPU 구간은 기록하지 않는다. "GPU 시간 없음"을 정의 기록으로 공개한다(RenderBase 13.2절).
 - **CPU 쪽 상관**: 렌더 lane의 CPU 구간과 GPU 구간은 같은 pass 이름 id를 쓴다. 기록은 RB7 구현에 속하고, 이 문서는 형과 시간 규칙만 정한다.
+- **구현(2026-11-17, RB7).** 형 이름·배치는 `TraceStandardFormat`(`TraceCapture/TraceFormat.h`)에 두고, RenderBase `RegisterGpuTraceTypes`가 채널 `gpu`(꺼진 상태)와 함께 등록한다.
+  - `Trace.GpuQueue`(정의): u16 queue id · u8 종류(0 graphics) · u8 GPU 시간(0 없음, 1 있음), 가변 이름.
+  - `Trace.GpuCalibration`(정의): u16 queue · u64 GPU tick · u64 CPU trace tick · u64 GPU 주파수 · u64 오차(ns).
+  - `Trace.GpuScope`(스레드 스트림): u16 queue · u32 이름 id(`Trace.ScopeName`) · u32 깊이 · u64 프레임 · u64 시작 tick · u64 끝 tick. tick은 쓰기 전에 trace 시간축으로 바꾼 값이다.
+  - `Trace.GpuFrame`(스레드 스트림): u16 queue · u64 프레임 · u64 시작 tick · u64 끝 tick.
+  - GPU 기록은 완료 통지를 처리한 스레드(`GpuTrace::Consume`을 부른 스레드)의 스트림에 들어간다. 시간은 기록 안의 tick이 정하므로 스트림은 상관없다.
+  - 변환: `trace tick = calibration CPU tick + (GPU tick − calibration GPU tick) × trace 주파수 ÷ GPU 주파수`(기준보다 앞선 tick은 그만큼 앞선 값, 0 아래는 0). 1초 단위와 나머지로 나눠 계산해 중간 곱이 넘치지 않는다. 쌍의 CPU 쪽은 `ClockCalibration::cpuTicks`(`platform::MonotonicTicks`)를 그대로 써서 ns 왕복 반올림이 없다.
+  - 정의 기록은 세션마다 다시 쓴다(`TraceCurrentSessionSerial`로 새 세션을 안다). calibration은 세션 첫 프레임과 설정 간격마다 쓴다.
+  - 스펙과 다른 점: 구간 시작·끝을 따로 쓰지 않고 한 기록에 담는다(두 끝이 모두 온 뒤에만 쓰므로 반쪽이 없다). "GPU 시간 없음"은 queue 정의의 칸이다. 작업 시작·끝·fence signal·wait 사건은 다중 queue와 함께 더한다.
+  - 분석: TraceAnalysis 모델에 queue(이름·GPU 시간 여부·calibration 수·최대 오차)·GPU 구간·GPU 프레임을 더했다. `trace-report`는 판 2에서 `gpu` 절(queue별 프레임 시간 통계와 구간 이름별 횟수·합계·p50/p95/p99)을 낸다.
 
 ## 10. 단계와 완료 기준
 
@@ -365,6 +375,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론)의 현재 기본 경로다. 경�
 
 ## 13. 개정 이력
 
+- 개정 5(2026-11-17): RB7 GPU 기록 형 구현 반영(9절). 형 4개와 배치, 변환 식, 기록 스트림, 세션별 정의 재기록, 분석 모델과 report 판 2의 `gpu` 절을 적었다. 스펙과 다르게 정한 것: 구간 하나를 두 tick 기록 하나로, "GPU 시간 없음"을 queue 정의 칸으로, 작업·fence 사건은 뒤로. 채널 설명 문자열은 영어로 바꿨다(로그·추적 메시지 영어 규칙).
 - 개정 4(2026-11-17): TR3·TR4 구현 반영. task 사건을 종류 칸이 있는 형 하나로 둔 것, 실행 가능 시점, 실행 구간 순서, task 채널이 켜졌을 때만 문맥을 전파하는 것(7절), TraceAnalysis 모듈·이름으로 찾는 스키마·스트림 해석 상태·순서 번호 병합·손실을 사이에 둔 보수적 짝짓기·report 형식·임계 경로 정의(7.2절)를 적었다.
 - 개정 3(2026-11-17): TR2 구현 반영. Compression의 Task 의존 부분을 AsyncCompression으로 떼어 모듈 순환을 해소했다. CPU 구간 TLS 배치와 Stop 때 버려지는 배치, 이름 표 크기 설정과 이름 잘림, 카운터·표지·시간 띠·프레임 API, 새 채널 `span`·`context`, 문맥 사본이 값을 가지는 것, 스레드 정보 API와 스레드 상태 칸 재사용, 가변 필드 배치 캐시와 seq_cst 진행 중 표시를 유지한 검토(7.1절), 출력 실패의 원본 오류 보관을 적었다.
 - 개정 2(2026-11-17): TR1 구현 반영. 종료 2단계의 확인 방식(TLS 진행 중 표시), 블록 머리·큰 기록 분할·손실 기록 위치, 세션 내부 형, 정의 버퍼 설정과 `Trace.DefinitionLoss`, 동기 표지를 출력 머리 칸으로 둔 것, 덩어리 압축 배치를 적었다. Compression의 Task 의존으로 TR3에서 생길 모듈 순환을 과제로 남겼다.

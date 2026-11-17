@@ -61,16 +61,19 @@ TEST(MathUtility_UnwindRadiansRange) {
     CHECK(math::IsNaN(math::UnwindRadians(static_cast<double>(InfinityF))));
 }
 
-TEST(MathUtility_UnwindDegreesMatchesNormalizeAxis) {
-    // UE UnwindDegrees(UnrealMathUtility.h:949-964) 값과 같고, UE가 -180으로 두는 두 입력
-    // (-180, -540)만 반열린 구간 (-180, 180]의 180이다(UE 식 probe).
+TEST(MathUtility_UnwindDegreesMatchesUnreal) {
+    // UE UnwindDegrees(UnrealMathUtility.h:949-964, ±360 반복 루프) 값과 정확히 같다(UE 식 probe).
+    // NormalizeAxis와 달리 -180은 그대로이고, -180보다 작은 쪽에서 감긴 -540도 -180이다.
     CHECK(math::UnwindDegrees(0.0) == 0.0);
     CHECK(math::UnwindDegrees(180.0) == 180.0);
-    CHECK(math::UnwindDegrees(-180.0) == 180.0);
+    CHECK(math::UnwindDegrees(-180.0) == -180.0);
     CHECK(math::UnwindDegrees(190.0) == -170.0);
     CHECK(math::UnwindDegrees(-190.0) == 170.0);
     CHECK(math::UnwindDegrees(540.0) == 180.0);
-    CHECK(math::UnwindDegrees(-540.0) == 180.0);
+    CHECK(math::UnwindDegrees(-540.0) == -180.0);
+    CHECK(math::UnwindDegrees(-180.0f) == -180.0f);
+    CHECK(math::FindDeltaAngleDegrees(90.0, -90.0) == -180.0); // UE Wrap(-180, -180, 180) = -180
+    CHECK(math::FindDeltaAngleDegrees(-90.0, 90.0) == 180.0);
     CHECK(math::UnwindDegrees(725.0) == 5.0);
     CHECK(math::UnwindDegrees(359.5) == -0.5);
     CHECK(math::UnwindDegrees(-1.0e-20) == -1.0e-20);

@@ -11,7 +11,8 @@ namespace rocks::platform::scalar {
 // 연산 순서 계약(모든 backend 공통):
 // - MultiplyAdd(a, b, c)는 a*b를 먼저 반올림한 뒤 c를 더한다. FMA를 사용하지 않는다.
 // - Dot3 = (p0 + p1) + p2, Dot4 = (p0 + p1) + (p2 + p3)이며 pi = ai * bi다.
-// - 행렬 곱과 변환은 열 순서대로 ((c0*s0 + c1*s1) + c2*s2) + c3*s3를 누적한다.
+// - 행렬 곱과 변환은 행렬의 행(16-float 배열의 4개 묶음) 순서대로 ((r0*s0 + r1*s1) + r2*s2) +
+//   r3*s3를 누적한다.
 // 같은 순서이므로 FMA 축약이 없는 x64에서는 scalar와 SIMD 결과가 bit 단위로 같다. 단 NaN은
 // 값(NaN 여부)만 같고 부호·payload bit는 backend마다 다를 수 있다(SSE는 첫 피연산자 NaN을 전파).
 // compiler의 부동소수점 축약을 막기 위해 곱과 합을 별도 문장으로 계산하고, 빌드도
@@ -168,7 +169,9 @@ inline Register4f QuaternionMultiply(Register4f a, Register4f b) noexcept {
     return Add(Add(Add(termW, termX), termY), termZ);
 }
 
-// 열 우선 4x4 행렬 m(m[column * 4 + row])과 열 벡터 v의 곱 m * v다.
+// 행 우선 4x4 행렬 M(m[row * 4 + column] = M[row][column])과 행 벡터 v의 곱 v · M이다
+// (Core Matrix4·UE FMatrix 규약, UE VectorTransformVector와 같은 식).
+// result[j] = ((v0*M[0][j] + v1*M[1][j]) + v2*M[2][j]) + v3*M[3][j]
 inline Register4f TransformVector4(const float* matrix, Register4f vector) noexcept {
     const Register4f c0 = Multiply(Load(matrix + 0), Splat(vector.lane[0]));
     const Register4f c1 = Multiply(Load(matrix + 4), Splat(vector.lane[1]));
@@ -177,14 +180,16 @@ inline Register4f TransformVector4(const float* matrix, Register4f vector) noexc
     return Add(Add(Add(c0, c1), c2), c3);
 }
 
-// 열 우선 행렬 곱 output = a * b다. output은 a 또는 b와 같은 저장소여도 된다.
+// 행 우선 행렬 곱 output = b * a다(행 벡터 규약: b를 먼저, a를 나중에 적용한다). output의 행 r은
+// b의 행 r을 행 벡터로 a에 곱한 TransformVector4(a, b[r])다. Core Matrix4의 A * B(A 먼저)는
+// MatrixMultiply(B, A)로 부른다. output은 a 또는 b와 같은 저장소여도 된다.
 inline void MatrixMultiply(const float* a, const float* b, float* output) noexcept {
-    Register4f columns[4];
-    for (int column = 0; column < 4; ++column) {
-        columns[column] = TransformVector4(a, Load(b + column * 4));
+    Register4f rows[4];
+    for (int row = 0; row < 4; ++row) {
+        rows[row] = TransformVector4(a, Load(b + row * 4));
     }
-    for (int column = 0; column < 4; ++column) {
-        Store(output + column * 4, columns[column]);
+    for (int row = 0; row < 4; ++row) {
+        Store(output + row * 4, rows[row]);
     }
 }
 
