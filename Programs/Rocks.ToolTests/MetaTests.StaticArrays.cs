@@ -69,7 +69,7 @@ internal static partial class MetaTests
             Verify.Contains("detail::TraceArrayField(value.*(&::probe::Value::slots),visitor);", generated, "class trace visits reference struct elements");
             Verify.Contains("PathClassField<::probe::Value,::rocks::ValueKind::ObjectReference>(cursor,&::probe::Value::refs)", generated,
                 "static array path thunk targets the element kind");
-            Verify.Contains("PathStructMember<&::probe::Slot::codes,ValueKind::UInt16>", generated, "struct member static array path thunk");
+            Verify.Contains("PathStructMember<::probe::Slot,&::probe::Slot::codes,ValueKind::UInt16>", generated, "struct member static array path thunk");
             ProcessResult compiled = await probe.CompileGeneratedAsync();
             Verify.Equal(0, compiled.ExitCode, "generated static array header compiles: " + compiled.StdOut + compiled.StdErr);
         });

@@ -18,7 +18,8 @@ internal static class MetaProbeIdentity
                 "probe::FixedBinding", "probe::SplitBinding", "probe::Bundle", "probe::WorldBundle", "probe::Movable", "probe::Node", "probe::MovableBundle",
                 "probe::Tiny", "probe::Signed", "probe::Short", "probe::Wide", "probe::Huge", "probe::Bits",
                 "probe::Point", "probe::Segment", "probe::Plain", "probe::Derived", "probe::Other", "probe::none",
-                "probe::Target", "probe::Slot", "probe::Host" }
+                "probe::Target", "probe::Slot", "probe::Host", "probe::Base", "probe::Mid", "probe::Tagged", "probe::AtomicBase",
+                "probe::AtomicLeaf", "probe::A", "probe::B", "probe::RefBase" }
                 .Concat(Enumerable.Range(1, 17).Select(level => $"probe::Chain{level}")))
             {
                 manifest.Register("type", name);
@@ -63,7 +64,10 @@ internal static class MetaProbeIdentity
                 "probe::Slot::target", "probe::Slot::codes", "probe::Value::watchers", "probe::Value::smalls", "probe::Value::shorts",
                 "probe::Value::grid", "probe::Value::fixed", "probe::Leaf::target",
                 "probe::Value::row", "probe::Value::rows", "probe::Value::table", "probe::Value::host", "probe::Host::row",
-                "probe::Host::count", "probe::Plain::count" }
+                "probe::Host::count", "probe::Plain::count", "probe::Base::a", "probe::Mid::b", "probe::Tagged::c", "probe::AtomicBase::x",
+                "probe::AtomicLeaf::z", "probe::A::a", "probe::B::b", "probe::Leaf::c", "probe::Leaf::A", "probe::RefBase::target",
+                "probe::Value::mid", "probe::Value::tagged", "probe::Value::atomic", "probe::Value::shape", "probe::Value::shapes",
+                "probe::Host::shape", "probe::RealBinding::a" }
                 .Concat(Enumerable.Range(2, 16).Select(level => $"probe::Chain{level}::inner")))
             {
                 manifest.Register("field", name);

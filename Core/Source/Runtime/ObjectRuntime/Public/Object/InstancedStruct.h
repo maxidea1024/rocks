@@ -52,7 +52,9 @@ struct InstancedStructAccess;
 
 // 리플렉션 struct 값 하나 또는 비어 있음이다. PROPERTY로 두면 값 종류 InstancedStruct이고(클래스
 // 필드·struct 멤버·Array·정적 배열 원소·Map 값 — 1.3절 성질 표) 스키마 value.type은 Base struct
-// ID다(Base = void는 0 — 제한 없음, B9j는 이것만 연다. InstancedStruct<Base>는 리플렉션 B9k).
+// ID다(Base = void는 0 — 제한 없음). InstancedStruct<Base>(리플렉션 B9k)는 Base 자신이나 그 파생
+// struct만 담는다: Emplace<S>는 static_assert(IsBaseOfV), lease 판 Emplace·쓰기·decode는 스키마
+// 사슬(TypeLease::IsA)로 본다(위반 InvalidArgument). Base는 담을 수 있는 struct여야 한다.
 //
 // 구성: 담긴 struct의 TypeLease(값이 사는 동안 그 타입 등록을 붙잡는다 — Unregister는 Busy), 값
 // 블록(allocator로 할당한 그 struct 값), 그 allocator. 이동 전용이고 깊은 복사는 TryClone이다.
@@ -73,9 +75,6 @@ struct InstancedStructAccess;
 //   row.Reset();   // 비어 있음
 template <class Base = void>
 class InstancedStruct {
-    static_assert(IsSameV<Base, void>,
-                  "InstancedStruct<Base> is not supported yet; use InstancedStruct<>");
-
 public:
     InstancedStruct() noexcept = default;
 
@@ -144,6 +143,14 @@ public:
             return allowed;
         }
 
+        // InstancedStruct<Base>(리플렉션 B9k)는 Base 자신이나 그 파생 struct만 담는다(스키마 사슬
+        // IsA).
+        if constexpr (!IsSameV<Base, void>) {
+            if (!type.IsA(GeneratedType<Base>::Id())) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+        }
+
         const RuntimeStructOps& ops = type.StructOps();
         auto memory = allocator.Allocate(ops.size, ops.alignment, BlockTag);
         if (!memory) {
@@ -174,6 +181,8 @@ public:
                       "InstancedStruct cannot hold a struct that holds an InstancedStruct");
         static_assert(!GeneratedType<S>::ContainsRequired,
                       "InstancedStruct cannot hold a struct with Required members");
+        static_assert(IsSameV<Base, void> || IsBaseOfV<Base, S>,
+                      "InstancedStruct<Base> holds only Base or a struct derived from Base");
         auto lease = types.AcquireStructByNative(NativeTypeKey<S>());
         if (!lease) {
             return Result<void>::Failure(lease.Error());
@@ -270,11 +279,20 @@ struct InstancedStructField {
     static constexpr bool Supported = false;
 };
 
-// 리플렉션 InstancedStruct 필드(InstancedStruct<Base> — 리플렉션 B9j)다. 부분 특수화로만 고른다.
+// 리플렉션 InstancedStruct 필드(InstancedStruct<Base> — 리플렉션 B9j·B9k)다. 부분 특수화로만
+// 고른다. BaseId는 스키마 value.type(Base = void면 0)이다.
 template <class Base>
 struct InstancedStructField<InstancedStruct<Base>> {
     static constexpr bool Supported = true;
     using BaseType = Base;
+
+    static constexpr TypeId BaseId() noexcept {
+        if constexpr (IsSameV<Base, void>) {
+            return TypeId{};
+        } else {
+            return GeneratedType<Base>::Id();
+        }
+    }
 };
 
 // codec·경로 thunk가 담긴 값의 주소에 닿는 통로다(공개 API가 아니다 — 사용자는 Get<S>를 쓴다).

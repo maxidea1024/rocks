@@ -43,7 +43,7 @@ internal static partial class MetaTests
             Verify.Contains("{ValueKind::InstancedStruct,Guid{}}", generated, "generated instanced schema");
             Verify.Contains("PathClassField<::probe::Value,::rocks::ValueKind::InstancedStruct>(cursor,&::probe::Value::row)", generated,
                 "an InstancedStruct field has a path thunk");
-            Verify.Contains("PathStructMember<&::probe::Host::row,ValueKind::InstancedStruct>", generated, "struct member path thunk");
+            Verify.Contains("PathStructMember<::probe::Host,&::probe::Host::row,ValueKind::InstancedStruct>", generated, "struct member path thunk");
             Verify.That(!generated.Contains("ReadGeneratedField<::probe::Value>(registry,access,object,&::probe::Value::row", StringComparison.Ordinal),
                 "an InstancedStruct field is not read through FieldValue");
             int host = generated.IndexOf("structGeneratedType<::probe::Host>", StringComparison.Ordinal);

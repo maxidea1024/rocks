@@ -806,6 +806,11 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
             return cursor.Fail(allowed.Error(), PropertyPathError::InvalidValue);
         }
 
+        // InstancedStruct<Base>(리플렉션 B9k)는 Base 자신이나 그 파생만 받는다.
+        if (endType.type != TypeId{} && !lease.Value().IsA(endType.type)) {
+            return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::InvalidValue);
+        }
+
         if (auto fits = CheckInstancedStructDepth(position, lease.Value().Struct()); !fits) {
             return cursor.Fail(fits.Error(), PropertyPathError::InvalidValue);
         }

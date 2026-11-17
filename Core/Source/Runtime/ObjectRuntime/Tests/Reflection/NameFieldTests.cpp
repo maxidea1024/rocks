@@ -490,8 +490,8 @@ TEST(NameField_CodecRejectsNameInObservationPositions) {
     {
         FieldScope scope(context, member, Guid{0x4e46, 8});
         const RuntimeStructFieldOps ops{};
-        auto decoded = detail::DecodeStructMember<&NameHolder::tag>(ops, nullptr, ObjectHandle{},
-                                                                    &holder, view, context);
+        auto decoded = detail::DecodeStructMember<NameHolder, &NameHolder::tag>(
+            ops, nullptr, ObjectHandle{}, &holder, view, context);
         CHECK(!decoded && decoded.Error() == ErrorCode::InvalidArgument);
     }
 

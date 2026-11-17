@@ -122,6 +122,16 @@ void RunPair(Device& device, sample::Renderer& renderer, TextureHandle target,
     Check(!begin->disjoint && !end->disjoint, "timestamps are valid");
     Check(end->ticks >= begin->ticks && frame.end == frame.begin + 1,
           "end timestamp follows begin");
+    if (!device.Info().clockCalibration) {
+        // timestamp는 있지만 CPU 시간축과 잇는 쌍이 없는 장치다(Vulkan calibrated timestamps 확장
+        // 없음). 추정값을 만들지 않고 거부해야 한다.
+        Check(before.Error() == ErrorCode::Unsupported && after.Error() == ErrorCode::Unsupported,
+              "calibration without support is refused");
+        printf("  %s timing: %llu Hz, clock calibration none\n", backendName,
+               static_cast<unsigned long long>(device.Info().timestampFrequency));
+        return;
+    }
+
     Check(before && after, "clock calibration pairs");
     if (!before || !after) {
         return;

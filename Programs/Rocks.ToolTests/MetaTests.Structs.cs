@@ -54,7 +54,7 @@ internal static partial class MetaTests
             Verify.Equal("struct", leaf.GetProperty("kind").GetString(), "struct descriptor kind");
             Verify.Equal(2, leaf.GetProperty("version").GetInt32(), "struct Version specifier");
             Verify.Equal("", leaf.GetProperty("binds").GetString(), "binds is empty until Core value type bindings");
-            Verify.That(!leaf.TryGetProperty("base", out _), "struct descriptor has no base");
+            Verify.Equal("", leaf.GetProperty("base").GetString(), "struct descriptor without a reflected base writes an empty base");
             Verify.Equal(0, Flags("probe::Leaf").Length, "plain struct has no trait flags");
             Verify.That(Flags("probe::Holder").SequenceEqual(["ContainsStrongReference"]), "reference struct flag");
             Verify.That(Flags("probe::Outer").SequenceEqual(["ContainsStrongReference"]), "reference trait propagates through a member struct");
@@ -76,7 +76,7 @@ internal static partial class MetaTests
                 ("GeneratedType<::probe::Holder>::Trace(value.*(&::probe::Value::holder), visitor);", "class Trace calls struct Trace"),
                 ("registry.RegisterStruct(Schema(), Ops(Move(module)))", "struct Register"),
                 ("MakeRuntimeStructOps<::probe::Leaf>(Move(module))", "struct ops helper (Migrate detection)"),
-                ("detail::StructFieldOps<&::probe::Holder::flag>", "private member thunk through GENERATED_BODY"),
+                ("detail::StructFieldOps<::probe::Holder,&::probe::Holder::flag>", "private member thunk through GENERATED_BODY"),
                 ("static_assert(Depth <= ::rocks::MaxStructDepth", "depth static_assert"),
                 ("static constexpr uint32 Depth = 3u;", "three-level depth"),
                 ("ops.trace = +[](const void* value, TraceVisitor& visitor) noexcept { Trace(*static_cast<const ::probe::Holder*>(value), visitor); };", "reference struct trace op"),
@@ -176,10 +176,7 @@ internal static partial class MetaTests
             Verify.That(Compact(File.ReadAllText(probe.Output)).Contains(Compact("static constexpr uint32 Depth = 16u;"), StringComparison.Ordinal), "depth 16 is accepted");
             await probe.RejectAsync(ChainSource(17), "RMC2303", "nesting depth 17");
         });
-        AddRejectGroup(context, "Meta.StructCannotInherit", [
-            Preamble + "struct Shared { rocks::int32 base = 0; };\nROCKS_STRUCT()\nstruct Leaf : Shared {\nROCKS_PROPERTY() rocks::int32 count = 0;\n};\n}\n",
-            Preamble + "ROCKS_STRUCT()\nstruct Leaf : public rocks::Object {\nROCKS_PROPERTY() rocks::int32 count = 0;\n};\n}\n"],
-            "RMC2301", "base class");
+        // struct 상속 규칙(리플렉션 B9k)은 MetaTests.StructInheritance.cs가 본다.
         AddRejectGroup(context, "Meta.StructTemplatesAndPlacementAreRejected", [
             Preamble + "ROCKS_STRUCT()\ntemplate <class T> struct Leaf { ROCKS_PROPERTY() T count{}; };\n}\n",
             Preamble + "ROCKS_STRUCT()\nint intervening;\nstruct Leaf { ROCKS_PROPERTY() rocks::int32 count = 0; };\n}\n",

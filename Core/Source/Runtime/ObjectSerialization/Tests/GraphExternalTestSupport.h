@@ -148,8 +148,9 @@ inline bool RegisterTypes(TypeRegistry& types) noexcept {
     const FieldSchema holdFields[] = {
         Scalar(HoldTargetId, "target", 6, ValueKind::ObjectReference, ItemType),
         Scalar(HoldTagId, "tag", 3, ValueKind::UInt32)};
-    const RuntimeStructFieldOps holdOps[] = {detail::StructFieldOps<&Hold::target>(HoldTargetId),
-                                             detail::StructFieldOps<&Hold::tag>(HoldTagId)};
+    const RuntimeStructFieldOps holdOps[] = {
+        detail::StructFieldOps<Hold, &Hold::target>(HoldTargetId),
+        detail::StructFieldOps<Hold, &Hold::tag>(HoldTagId)};
     RuntimeStructOps hold = MakeRuntimeStructOps<Hold>();
     hold.trace = [](const void* value, TraceVisitor& visitor) noexcept {
         GeneratedType<Hold>::Trace(*static_cast<const Hold*>(value), visitor);

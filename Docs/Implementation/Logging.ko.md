@@ -35,7 +35,7 @@ inline constexpr LogCategory LogGraphicsD3D12{"Graphics.D3D12"};
   |---|---|
   | `Engine` | `Engine/EngineLog.h` |
   | `World`, `World.Tick` | `World/WorldLog.h` |
-  | `Graphics`, `Graphics.D3D12`(`.Validation`), `Graphics.D3D11`(`.Validation`), `Shader` | `Graphics/GraphicsLog.h` |
+  | `Graphics`, `Graphics.D3D12`(`.Validation`), `Graphics.D3D11`(`.Validation`), `Graphics.Vulkan`(`.Validation`), `Shader` | `Graphics/GraphicsLog.h` |
   | `Graphics.OpenGL` | OpenGLGraphics 내부 |
   | `Platform.Window` | `PlatformWindow/Window.h` |
   | `Shader.Tool` | `ShaderToolLoader.h` |

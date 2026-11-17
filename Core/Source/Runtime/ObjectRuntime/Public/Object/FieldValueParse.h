@@ -619,6 +619,8 @@ bool MatchesSchema(const FieldSchema& field) noexcept {
         if constexpr (ReflectedEnumField<typename Traits::Value>::Supported ||
                       ReflectedStructField<typename Traits::Value>::Supported) {
             return field.element.type == GeneratedType<typename Traits::Value>::Id();
+        } else if constexpr (InstancedStructField<typename Traits::Value>::Supported) {
+            return field.element.type == InstancedStructField<typename Traits::Value>::BaseId();
         } else {
             return true;
         }
@@ -635,6 +637,8 @@ bool MatchesSchema(const FieldSchema& field) noexcept {
         if constexpr (ReflectedEnumField<Element>::Supported ||
                       ReflectedStructField<Element>::Supported) {
             return field.element.type == GeneratedType<Element>::Id();
+        } else if constexpr (InstancedStructField<Element>::Supported) {
+            return field.element.type == InstancedStructField<Element>::BaseId();
         } else {
             return true;
         }
@@ -647,6 +651,8 @@ bool MatchesSchema(const FieldSchema& field) noexcept {
         if constexpr (ReflectedEnumField<Element>::Supported ||
                       ReflectedStructField<Element>::Supported) {
             return field.element.type == GeneratedType<Element>::Id();
+        } else if constexpr (InstancedStructField<Element>::Supported) {
+            return field.element.type == InstancedStructField<Element>::BaseId();
         } else {
             return true;
         }
@@ -654,8 +660,9 @@ bool MatchesSchema(const FieldSchema& field) noexcept {
                          ReflectedStructField<Member>::Supported) {
         return field.value.type == GeneratedType<Member>::Id();
     } else if constexpr (InstancedStructField<Member>::Supported) {
-        // InstancedStruct<>(리플렉션 B9j)는 Base 제한이 없다(value.type 0 — Base는 B9k).
-        return field.value.type == TypeId{};
+        // InstancedStruct<Base>(리플렉션 B9j·B9k)의 value.type은 Base struct ID다(Base = void는
+        // 0 — 제한 없음).
+        return field.value.type == InstancedStructField<Member>::BaseId();
     } else {
         return true;
     }

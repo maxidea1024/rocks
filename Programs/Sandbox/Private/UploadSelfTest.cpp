@@ -191,8 +191,8 @@ void RunStaging(Bench& bench, bool deferredReclaim) noexcept {
         ok = bench.device->UploadTextureFromStaging(texture.Value(), 0, staging.Value().handle, 0)
                  .IsOk();
         bench.device->ReleaseStaging(staging.Value().handle);
-        // 업로드가 제출·완료되기 전에는 재사용 목록에 가지 않는다(D3D12·D3D11). OpenGL은 client
-        // 메모리 업로드라 바로 돌아간다.
+        // 업로드가 제출·완료되기 전에는 재사용 목록에 가지 않는다(D3D12·D3D11·Vulkan). OpenGL은
+        // client 메모리 업로드라 바로 돌아간다.
         const StagingStats waiting = bench.device->StagingStatistics();
         Check(deferredReclaim ? waiting.waiting == 1 : waiting.waiting == 0,
               "released staging waits for its upload fence");
@@ -321,8 +321,8 @@ uint32 RunUploadChecks(const char* name, Device& device, sample::Renderer& rende
                        Allocator& allocator) noexcept {
     failures = 0;
     backendName = name;
-    // D3D12·D3D11은 업로드를 다음 제출이 실행하므로 ring·staging을 fence 뒤에 회수한다. OpenGL은
-    // 갱신을 즉시 올린다.
+    // D3D12·D3D11·Vulkan은 업로드를 다음 제출이 실행하므로 ring·staging을 fence 뒤에 회수한다.
+    // OpenGL은 갱신을 즉시 올린다.
     const bool deferredUploads = device.Info().backend != Backend::OpenGL;
     Bench bench(allocator);
     bench.device = &device;

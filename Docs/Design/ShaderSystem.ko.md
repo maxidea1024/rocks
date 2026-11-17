@@ -126,7 +126,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 | P6b | TargetProfile 필드·매니페스트 v2·엔진 내장 셰이더 라이브러리 | 이 문서 | 설계 | SH2 | A1, A4, P6a, P14 | 12.3절 |
 | P7 | MetaCompiler 셰이더 파라미터 | 이 문서 | 설계 | SH3 | B1–B8 | 13절 |
 | P8 | 다른 문서 개정 | 이 문서 | 목록 | 모든 단계의 기준 | 결정별 기한(15절) | 14절 |
-| P9 | Vulkan 선행 | 이 문서·EngineRuntime | 설계 | SH2 | P3, P10 | 5.3 |
+| P9 | Vulkan 선행 | 이 문서·[VulkanGraphics](VulkanGraphics.ko.md) | **구현**(Windows. VulkanGraphics 개정 1, Android는 교차 빌드만) | SH2 | P3, P10 | 5.3 |
 | P10 | 동적 라이브러리 API | PlatformLayer | **구현** | P4, P9, P13, SH0, SH2 | — | 5.3 |
 | P11 | OpenGL ES 선행(OpenGLGraphics를 UE `OpenGLDrv` 방식으로) | [OpenGL ES backend](OpenGLESGraphics.ko.md)·이 문서 | **구현**(2026-11-17, Windows 미리보기. Android는 컴파일만, 실행은 P13) | P13, SH2, SH6 | A0-G | 5.3 |
 | P12 | macOS 실행 기반(Objective-C++ 빌드·Cocoa 창·Metal layer) | PlatformLayer·Rocks.Build | 미설계 | P15, SH5 | P3 | 5.3 |
@@ -195,15 +195,16 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 
 **P8 다른 문서 개정 — 목록(14절).** AssetSystem 쪽(5.2절 요구)은 해당 단계(A0-G·A1·A2·A3·A4) 착수 전에, 나머지는 15절의 결정별 기한에 맞춰 한다. 측정 뒤에 정하는 결정(3·5·6)에 걸린 행은 그 결정 뒤에 고친다.
 
-**P9 Vulkan 선행 — 설계.**
+**P9 Vulkan 선행 — 구현(Windows, 2026-11-17).**
 - Vulkan-Headers: `kind: headers`(P3)로 Engine 루트에 둔다.
 - 로더: import library를 링크하지 않고 런타임에 연다(P10, UE와 같다, 1절). Windows `vulkan-1.dll`은 드라이버·Vulkan 런타임이 설치한다. 없으면 VulkanGraphics 생성이 `UnsupportedCapability`로 실패하고 다른 backend는 그대로 동작한다.
 - 검증 레이어: D3D12 디버그 레이어에 대응하며 같은 조건(EngineRuntime 10.1, 장치 생성의 `enableValidation`)에서 켠다. 공급(Khronos Vulkan-ValidationLayers 릴리스를 binary 항목으로 받거나 오프라인 빌드)은 측정 S4로 정한다.
 - surface: Windows `VK_KHR_win32_surface`에 PlatformWindow의 네이티브 창 핸들을 쓴다. Android surface는 P13이다.
-- VulkanGraphics 설계: EngineRuntime에 절을 더한다(디바이스·큐·메모리·파이프라인 layout(7.2절 4항)·검증 오류를 `ValidationErrorCount`로 집계).
+- VulkanGraphics 설계: [VulkanGraphics](VulkanGraphics.ko.md)(디바이스·큐·메모리·파이프라인 layout(7.2절 4항)·검증 오류를 `ValidationErrorCount`로 집계). 내용이 커서 EngineRuntime 절 대신 따로 둔다.
 - CI: GPU 없는 runner의 소프트웨어 ICD(lavapipe·SwiftShader)는 측정 S4다. 안 되면 CI에서 **NOT RUN**으로 보고하고 로컬 결과를 기록한다.
 - macOS는 Metal을 쓰므로 Vulkan(MoltenVK 등)은 범위 밖이다.
 - 완료 기준: Vulkan-Headers가 Rocks 경고 규칙으로 include되고, 로더 동적 로드와 검증 레이어 켜기가 Windows에서 시험되며, VulkanGraphics 설계 절이 확정된다.
+- 달성(2026-11-17, 사용자 지시 "Vulkan까지는 작업을 미리하자"): 설계를 넘어 backend 자체를 SH2 전에 구현했다(`VulkanGraphics`, 개발용 컴파일 훅 `ShaderFormatVulkan`). 로더 동적 로드·검증 레이어 켜기는 EngineTests `VulkanDevice_LoadsTheSystemLoaderAndCreatesADevice`가, Graphics 계약 전체는 Sandbox self-test가 GTX 1060과 lavapipe에서 확인한다(D3D12와 픽셀 차이 0). 측정 S4 결과는 5.4절, 상세는 VulkanGraphics 17절이다. SH2에 남은 Vulkan 일은 쿠킹된 `VULKAN_SM5` SPIR-V와 리플렉션 머리를 받는 경로, `ROCKS_ROOT_CONSTANTS` 전개(지금은 `cbuffer DrawConstants` 이름 규칙), 단계 사이 변수 location 재작성, 7.3절 시험의 Vulkan 몫이다. Android 실행은 SH6·P13이다.
 
 **P10 동적 라이브러리 API — 구현(2026-11-16, PlatformLayer P1 표의 "동적 모듈" 항목, 상세: PlatformLayer "동적 라이브러리" 절).**
 - 구현 전: 공개 로더가 없고 private 코드가 OS 함수를 직접 불렀다(XInput, `Win64Window.cpp`). 지금은 XInput도 `OpenSystem`으로 연다. 계획 §2.5의 "동적 loader를 Foundation 선행 조건으로 만들지 않는다"는 native plugin 모듈 이야기다. 이 API는 Foundation이 아니라 셰이더 워커와 VulkanGraphics의 선행 조건이고, 엔진 모듈을 동적으로 싣는 로더가 아니다.
@@ -262,7 +263,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 | S1 | DXC 1.8.2505 내장 validator 서명(Windows·macOS) | 10절 서명 검사, `D3D12_SM6` 생산 호스트 | Windows: DXC 1.9.2609(내장 validator)가 Renderer VS·PS와 fixture DXIL 4개를 모두 서명했다(container digest가 0도 preview 우회 값도 아님). macOS: macOS 필요, 미측정 |
 | S2 | 개발 기계 GPU와 WARP의 D3D12 최대 셰이더 모델, Windows 10 Agility SDK 요건 | 결정 3 | GTX 1060 3GB(드라이버 32.0.15.6094)·WARP(10.0.26100.9818) 모두 최대 SM **6.8**, feature level 12.1, resource binding tier 3. Agility SDK 없이 OS 런타임(Windows 11 build 26200, `D3D12Core.dll` 10.0.26100.9818)에서 6.6 이상이 된다. Windows 10 요건은 Windows 10 기계가 없어 미측정 |
 | S3 | 결정성: 같은 호스트 반복, Debug·Release 워커, 작업 디렉터리 변경, FMA3 유무, OS 버전, **Windows·macOS 사이**(DXIL·SPIR-V·ESSL·MSL 텍스트)에서 형식별 바이트 동일 | 10절 결정성 | Windows 부분 byte 동일: 같은 입력 반복(Debug 2회·Release 3회), 작업 디렉터리 변경(Debug·Release 각 1회), Debug·Release 스파이크 빌드 사이에서 manifest의 산출물 44개(DXIL·SPIR-V·DXBC·ESSL·MSL·HLSL 5.0·리플렉션 덤프)가 모두 같다. 상수 초월 함수 fixture는 DXC가 DXIL·SPIR-V 모두 상수로 접었고(최적화 전 SPIR-V에도 `OpExtInst` 0), 접은 8개 값은 이 호스트 UCRT double 함수 결과를 float로 반올림한 값과 같다. FMA3 유무·OS 버전·Windows–macOS는 미측정(기계 하나) |
-| S4 | Vulkan 검증 레이어 공급, GPU 없는 CI의 소프트웨어 ICD | P9 | — |
+| S4 | Vulkan 검증 레이어 공급, GPU 없는 CI의 소프트웨어 ICD | P9 | 로컬 결과(2026-11-17, VulkanGraphics 17절): 검증 레이어는 LunarG Vulkan SDK 1.4.363.0 설치로 공급했고 CI 공급 방식은 SH2 때 정한다. 소프트웨어 ICD는 lavapipe(Mesa 26.2.7 `mesa-dist-win`, `VK_ADD_DRIVER_FILES`)로 self-test 전체가 통과한다(calibrated timestamps의 QPC domain이 없어 calibration은 `Unsupported`). SwiftShader는 Windows 공식 바이너리가 없어 쓰지 않았다. CI 연결은 아직이다 |
 | S5 | D3D12·Vulkan·GLES 미리보기 픽셀 대조(행렬 옵션·앞면·Y 반전·루트 상수 대응) | 7.2절 6·8항 | C7 런타임 경로(2026-11-17, Windows, GTX 1060·WARP·NVIDIA OpenGL 4.5, Sandbox self-test `RunCullingChecks`). 행렬: D3D12(`D3DCompile` + `D3DCOMPILE_PACK_MATRIX_ROW_MAJOR`)·WARP·OpenGL(`transpose = GL_TRUE`) 모두에서 비균등 scale 뒤 이동한 비대칭 행렬의 사각형이 기대 영역(64칸 격자의 열 32–63·행 8–23)만 덮는다. 앞면: D3D12 `FrontCounterClockwise = TRUE`, OpenGL은 창(`GL_LOWER_LEFT`)·RenderTarget(`GL_UPPER_LEFT`) 모두 `glFrontFace(GL_CCW)`에서 화면 반시계가 앞면이다. None·Back·Front 컬, 음수 scale·거울 view 반전, 둘 다 음수일 때 원래대로가 세 장치에서 기대대로이고, 창 경로(`CopyPassTarget`)와 offscreen 경로의 이미지가 byte 단위로 같다. 창을 `GL_CW`로 둔 음성 대조는 창 경로 6건 불일치로 실패한다. 기존 self-test 픽셀 검사와 backend 간 대조도 그대로 통과한다(차이 0). Vulkan·GLES 미리보기·쿠킹 경로(DXC `-Zpr`)와 루트 상수 대응은 SH2에서 잰다 P11(2026-11-17): GLES 미리보기 런타임 경로(ES 3.2 profile·GL 4.3 core 두 context, 손으로 쓴 GLSL ES 3.20)에서 같은 검사가 통과하고 D3D12와 픽셀 차이 0이다. 창·RenderTarget 모두 `GL_UPPER_LEFT` + `GL_CCW`, 스왑체인은 offscreen에 그린 뒤 Y 반전 blit. 음성 대조: Y 반전을 빼면 창 경로 7건, `GL_CW`면 컬 검사 6건 불일치 |
 | S6 | 도구 빌드 컴파일러(clang-cl·MSVC)·빌드 시간·바이너리 크기 | 8절 4항 | P3 인용: Windows x64 도구는 Visual Studio C++ 도구(vcvarsall x64, MSVC, DLL 링커 버전 14.29)와 CMake·Ninja Release, 업스트림 빌드 설정으로 만들었다. 크기: `dxcompiler.dll` 21,943,296 B, `spirv-cross-c-shared.dll` 2,305,536 B, `SPIRV-Tools-c.dll` 3,644,416 B(PDB 별도). 빌드 시간은 P3에서 기록하지 않았고 clang-cl 비교와 macOS는 미측정 |
 | S7 | 자체 전처리 결과로 컴파일한 출력 = DXC 직접 전처리 출력(`#line` 포함) | 결정 6 구현의 정합성(SH1 완료 기준) | — |
@@ -383,7 +384,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
      - 렌더 메시의 앞면 법선은 `(C−A)×(B−A)`다(UE `MeshDescription.cpp:1311–1313`). 기하 `Plane`·`Triangle`의 법선 식과 이 렌더 앞면의 관계는 Core Math 쪽 결정(좌표 전환 C3)을 따른다.
    - **음수 행렬식.** 물체 local-to-world 행렬식이 음수이면 컬 방향을 뒤집는다(UE `StaticMeshSceneProxy.cpp:1318–1327`, `DynamicMeshBuilder.cpp:920`). view 행렬식이 음수여도 뒤집는다(`SceneView.cpp:1000`, `MeshPassProcessor.cpp:1697`). 둘 다 해당하면 원래 방향으로 돌아온다. 뒤집기는 파이프라인 래스터 상태 선택에서 하고, 셰이더는 관여하지 않는다.
    - **backend 매핑.** 앞면 규약은 Graphics API 하나로 정하고, backend별 `frontFace`·컬 매핑은 backend 안에 숨긴다.
-     - UE Vulkan은 `VK_FRONT_FACE_CLOCKWISE`와 `CM_CW → VK_CULL_MODE_FRONT_BIT`에 음수 viewport를 함께 쓴다(`Runtime/VulkanRHI/Private/VulkanPipeline.cpp:936`, `VulkanState.cpp:186–188`).
+     - UE Vulkan은 `VK_FRONT_FACE_CLOCKWISE`와 `CM_CW → VK_CULL_MODE_FRONT_BIT`에 음수 viewport를 함께 쓴다(`Runtime/VulkanRHI/Private/VulkanPipeline.cpp:936`, `VulkanState.cpp:186–188`). 컬링 결과는 D3D12와 같지만 앞면이 화면 시계가 되어 `SV_IsFrontFace`가 반대이고, UE는 머티리얼 셰이더에서 Vulkan일 때 부호를 뒤집는다(`Engine/Shaders/Private/MaterialTemplate.ush:4641–4648`). 셰이더에 backend 분기를 두지 않으므로 Rocks Vulkan은 `VK_FRONT_FACE_COUNTER_CLOCKWISE`·`Back → VK_CULL_MODE_BACK_BIT`로 D3D12와 같은 매핑을 쓴다([VulkanGraphics](VulkanGraphics.ko.md) 11절).
      - GLES Android는 `flip_vert_y` 때문에 컬 방향을 뒤집는다(위 항).
      - 매핑이 맞는지는 컬링 픽셀 대조로 확정한다(SH2 Vulkan·GLES 미리보기, SH5 Metal·D3D11, SH6 Android).
    - 구현(C7, 2026-11-17): Graphics `PipelineDesc::cullMode`(None·Back·Front)가 컬을 정한다. 기본은 None이다. UE `TStaticRasterizerState`의 기본 `CM_None`과 같고(`RenderCore/Public/RHIStaticStates.h:86`), 감김을 정하지 않은 기존 화면 채우기·시험 그리기가 그대로 보인다. D3D12는 `FrontCounterClockwise = TRUE`와 `Back → D3D12_CULL_MODE_BACK`·`Front → D3D12_CULL_MODE_FRONT`로 옮긴다. OpenGL은 `glCullFace`(GL_BACK·GL_FRONT)를 쓰고, `glFrontFace`는 장치가 클립 공간 규약에 맞춰 정한다(S5. P11 뒤: `GLES31_PC` `GL_CCW`, `GLES31_ANDROID` `GL_CW`). 샘플 렌더러는 뒤면 컬 파이프라인과 앞면 컬 파이프라인을 두고, 항목 world 행렬식과 view 행렬식 가운데 하나만 음수일 때 앞면 컬 파이프라인을 쓴다. 내장 메시는 UE 좌표(로컬 Y 오른쪽·Z 위)로 다시 적었고 감김을 화면 반시계(법선 `(C−A)×(B−A)` = −X)로 바꿨다.

@@ -270,11 +270,11 @@ struct GeneratedType<array_fixture::Tagged> {
     static RuntimeStructOps Ops() noexcept {
         using namespace array_fixture;
         static const RuntimeStructFieldOps fields[] = {
-            detail::StructFieldOps<&Tagged::id>(TagIdId),
-            detail::StructFieldOps<&Tagged::label>(LabelId),
-            detail::StructFieldOps<&Tagged::codes>(CodesId),
-            detail::StructFieldOps<&Tagged::notes>(NotesId),
-            detail::StructFieldOps<&Tagged::masks>(MasksId)};
+            detail::StructFieldOps<Tagged, &Tagged::id>(TagIdId),
+            detail::StructFieldOps<Tagged, &Tagged::label>(LabelId),
+            detail::StructFieldOps<Tagged, &Tagged::codes>(CodesId),
+            detail::StructFieldOps<Tagged, &Tagged::notes>(NotesId),
+            detail::StructFieldOps<Tagged, &Tagged::masks>(MasksId)};
         return MakeStructOps<Tagged>(fields);
     }
 };
@@ -308,10 +308,10 @@ struct GeneratedType<array_fixture::Slot> {
     static RuntimeStructOps Ops() noexcept {
         using namespace array_fixture;
         static const RuntimeStructFieldOps fields[] = {
-            detail::StructFieldOps<&Slot::material>(MaterialId),
-            detail::StructFieldOps<&Slot::overlay>(OverlayId),
-            detail::StructFieldOps<&Slot::name>(SlotNameId),
-            detail::StructFieldOps<&Slot::weights>(WeightsId)};
+            detail::StructFieldOps<Slot, &Slot::material>(MaterialId),
+            detail::StructFieldOps<Slot, &Slot::overlay>(OverlayId),
+            detail::StructFieldOps<Slot, &Slot::name>(SlotNameId),
+            detail::StructFieldOps<Slot, &Slot::weights>(WeightsId)};
         return MakeStructOps<Slot>(fields);
     }
 };
@@ -342,8 +342,8 @@ struct GeneratedType<array_fixture::Bundle> {
     static RuntimeStructOps Ops() noexcept {
         using namespace array_fixture;
         static const RuntimeStructFieldOps fields[] = {
-            detail::StructFieldOps<&Bundle::refs>(BundleRefsId),
-            detail::StructFieldOps<&Bundle::slots>(BundleSlotsId)};
+            detail::StructFieldOps<Bundle, &Bundle::refs>(BundleRefsId),
+            detail::StructFieldOps<Bundle, &Bundle::slots>(BundleSlotsId)};
         return MakeStructOps<Bundle>(fields);
     }
 };
@@ -370,7 +370,7 @@ struct GeneratedType<array_fixture::Heavy> {
     static RuntimeStructOps Ops() noexcept {
         using namespace array_fixture;
         static const RuntimeStructFieldOps fields[] = {
-            detail::StructFieldOps<&Heavy::value>(HeavyValueId)};
+            detail::StructFieldOps<Heavy, &Heavy::value>(HeavyValueId)};
         return MakeStructOps<Heavy>(fields);
     }
 };
@@ -459,7 +459,7 @@ struct GeneratedType<array_fixture::Deep<N>> {
     static RuntimeStructOps Ops() noexcept {
         using namespace array_fixture;
         static const RuntimeStructFieldOps fields[] = {
-            detail::StructFieldOps<&Deep<N>::items>(DeepFieldId)};
+            detail::StructFieldOps<Deep<N>, &Deep<N>::items>(DeepFieldId)};
         return MakeStructOps<Deep<N>>(fields);
     }
 };
@@ -486,7 +486,7 @@ struct GeneratedType<array_fixture::Deep<0>> {
     static RuntimeStructOps Ops() noexcept {
         using namespace array_fixture;
         static const RuntimeStructFieldOps fields[] = {
-            detail::StructFieldOps<&Deep<0>::label>(DeepFieldId)};
+            detail::StructFieldOps<Deep<0>, &Deep<0>::label>(DeepFieldId)};
         return MakeStructOps<Deep<0>>(fields);
     }
 };

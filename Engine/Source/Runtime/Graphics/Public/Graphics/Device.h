@@ -16,7 +16,8 @@ public:
     virtual void SetPipeline(PipelineHandle pipeline) noexcept = 0;
 
     // firstStream부터 차례로 정점 버퍼를 묶는다(stream 0–7, offset은 버퍼 안 byte 위치). 범위 밖
-    // stream은 무시한다.
+    // stream은 무시한다. offset은 4 byte 배수로 둔다: Vulkan은 속성 주소가 성분 크기 배수여야 해서
+    // 아니면 그 stream을 묶지 않은 것으로 보고 그리기를 무시한다(IgnoredDraws).
     //
     // 사용 예(위치 stream 0, 인스턴스 stream 1):
     //   const VertexBufferBinding buffers[] = {{positions, 0}, {instances, 0}};
@@ -25,7 +26,8 @@ public:
     virtual void SetVertexBuffers(uint32 firstStream,
                                   Span<const VertexBufferBinding> buffers) noexcept = 0;
 
-    // index 버퍼를 묶는다(BufferUsage::Index로 만든 버퍼, offset은 byte 위치).
+    // index 버퍼를 묶는다(BufferUsage::Index로 만든 버퍼, offset은 byte 위치). offset은 index 크기
+    // 배수로 둔다: Vulkan은 아니면 index 버퍼가 없는 것으로 보고 그리기를 무시한다(IgnoredDraws).
     virtual void SetIndexBuffer(BufferHandle buffer, IndexFormat format,
                                 uint64 offset = 0) noexcept = 0;
 
@@ -121,7 +123,8 @@ protected:
     ~CommandContext() = default;
 };
 
-// 그래픽 장치 계약이다. backend 모듈의 생성 함수(CreateD3D12Device·CreateOpenGLDevice 등)로 만든다.
+// 그래픽 장치 계약이다. backend 모듈의 생성 함수(CreateD3D12Device·CreateOpenGLDevice·
+// CreateVulkanDevice 등)로 만든다.
 //
 // 사용 예:
 //   auto created = graphics::CreateD3D12Device(allocator, {.enableValidation = true});

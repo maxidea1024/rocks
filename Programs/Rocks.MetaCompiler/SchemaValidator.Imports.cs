@@ -50,7 +50,9 @@ internal static partial class SchemaValidator
         {
             bool found = byId.TryGetValue(referenceId, out ClassModel? target);
             string symbol = $"{external.Name}::{field.Name}";
-            if (kind is not ("Enum" or "Struct"))
+            // InstancedStruct<Base>(리플렉션 B9k)의 Base는 struct 대상과 같이 잇는다.
+            bool instanced = kind == "InstancedStruct";
+            if (kind is not ("Enum" or "Struct") && !instanced)
             {
                 if (found && (target!.IsEnum || target.IsStruct))
                 {
@@ -60,14 +62,14 @@ internal static partial class SchemaValidator
                 return null;
             }
 
-            string what = kind.ToLowerInvariant();
+            string what = instanced ? "struct" : kind.ToLowerInvariant();
             if (!found)
             {
                 throw new MetadataException($"{symbol}: {(key ? "key " : "")}{what} {referenceId} of the imported field is not in an imported descriptor", "RMC2003",
                     "Import the descriptors of every module the dependency uses; regenerate the dependency metadata.").At(external.Site);
             }
 
-            if (target!.IsStruct != (kind == "Struct") || target.IsEnum != (kind == "Enum"))
+            if (target!.IsStruct != (kind == "Struct" || instanced) || target.IsEnum != (kind == "Enum"))
             {
                 throw InvalidDescriptor(external, $"{(key ? "enum key of map field" : what + " field")} {symbol} targets {target.Name}, which is not a reflected {what}");
             }
@@ -219,6 +221,14 @@ internal static partial class SchemaValidator
     // 멤버의 순위) 최댓값. 생성 특수화는 NATIVE 멤버 struct의 GeneratedType도 static_assert로 쓰므로 깊이(PROPERTY만,
     // RMC2303)가 아니라 이 순위로 정렬해야 쓰는 특수화가 먼저 나온다. import struct는 다른 생성 헤더에 있으므로 세지
     // 않는다. 값 멤버로는 순환이 생길 수 없지만(불완전 타입) 순환이면 RMC2302다.
+    // struct가 InstancedStruct 값을 (중첩 struct까지) 담는지다(리플렉션 B9j·B9k — 런타임 형질 ContainsInstancedStruct와 같은 규칙).
+    internal static bool ContainsInstancedStructTrait(ClassModel type, Func<string, ClassModel> find) =>
+        type.Fields.Any(field => field.TargetKind == "InstancedStruct" || (field.StructTarget && ContainsInstancedStructTrait(find(field.Reference!), find)));
+
+    // struct가 Required 멤버를 (중첩 struct까지, Transient 아래 빼고) 담는지다(런타임 형질 ContainsRequired와 같은 규칙).
+    internal static bool ContainsRequiredTrait(ClassModel type, Func<string, ClassModel> find) =>
+        type.Fields.Any(field => !field.Spec.Transient && (field.Spec.Required || (field.StructTarget && ContainsRequiredTrait(find(field.Reference!), find))));
+
     private static void ComputeRanks(IEnumerable<ClassModel> structs, IReadOnlyDictionary<string, ClassModel> classes)
     {
         HashSet<string> done = new(StringComparer.Ordinal);
@@ -237,8 +247,11 @@ internal static partial class SchemaValidator
                     "Break the cycle; a struct cannot contain itself by value directly or through nested struct members.").At(model.Site);
             }
 
+            // base struct와 InstancedStruct<Base>의 Base도 먼저 등록해야 한다(리플렉션 B9k).
             IEnumerable<string> used = model.Fields.Where(field => field.StructTarget).Select(field => field.Reference!)
-                .Concat(model.NativeMembers.Where(native => native.Struct is not null).Select(native => native.Struct!));
+                .Concat(model.NativeMembers.Where(native => native.Struct is not null).Select(native => native.Struct!))
+                .Concat(model.Fields.Where(field => field.TargetKind == "InstancedStruct" && field.Reference is not null).Select(field => field.Reference!))
+                .Concat(model.Base.Length != 0 ? [model.Base] : []);
             int rank = 1;
             foreach (string name in used)
             {

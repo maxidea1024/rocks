@@ -1,6 +1,6 @@
 # 렌더 기반(RenderBase) 설계
 
-기준일: 2026-11-17, 개정 10(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-17, 개정 11(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
 - 렌더 lane과 프레임 전달, 장치 스레드 모델, 장치 자원 수명, 렌더 그래프
 - 셰이더 런타임 객체(셰이더 집합·파라미터 바인딩·상수 블록·파이프라인 캐시)
 - 정점 입력 타입, 공용 자원·그리기 유틸리티, GPU 계측
@@ -207,7 +207,7 @@ RenderCore가 쓰는 RHI 기능군과 Rocks Graphics의 차이다. "SH2" 열은 
   - Vulkan: pipeline barrier.
   - OpenGL ES: 전이는 대부분 생략하고, UAV(image·storage) 쓰기 뒤 읽기에는 접근 비트에서 고른 `glMemoryBarrier` bit를 둔다(UE는 dispatch 앞뒤에 전체 bit, `OpenGLDrv/Private/OpenGLCommands.cpp:2671–2673`).
   - D3D11·Metal: SH5에서 정한다(미확인).
-  - **구현(2026-11-17, RG1 최소 범위).** `Graphics/ResourceAccess.h`(`ResourceAccess`·mask·`CanCombineAccess`·`SubresourceRange`·`ResourceTransition`)와 `CommandContext::Transition(Span<const ResourceTransition>)`. 장치는 텍스처 mip마다 상태를 추적하고 `BeginFrame`·`BeginOffscreen`이 대상을 렌더 타깃으로 바꾼다(attachment 전이, GX4 attachment 시작 전까지). before `Unknown`은 장치 추적 상태에서 바꾼다는 뜻이다. D3D12: 휴지 상태(PSR) 관례를 없애고 mip별 `committed`(제출 끝)·`current`(기록 중) 추적, legacy resource barrier, UAV → UAV는 UAV barrier, 업로드 기록은 `committed` 기준 상태 중립, 검증 장치는 before 불일치를 `ValidationErrorCount`에 센다. 버퍼는 암묵 승격·복귀에 맡겨 UAV barrier만 낸다. 그래프 밖 그리기(`SetTexture`)는 암묵 전이로 메운다. OpenGL·D3D11은 빈 override(드라이버 암묵 전이), Vulkan은 같은 API를 pipeline barrier로 낮춘다(구현 중인 작업이 맞춘다). 분리 전이(begin·end)와 pipe는 넣지 않았다(RG2·RG4). 계약은 [렌더 기반 구현](../Implementation/RenderBase.ko.md) 8절.
+  - **구현(2026-11-17, RG1 최소 범위).** `Graphics/ResourceAccess.h`(`ResourceAccess`·mask·`CanCombineAccess`·`SubresourceRange`·`ResourceTransition`)와 `CommandContext::Transition(Span<const ResourceTransition>)`. 장치는 텍스처 mip마다 상태를 추적하고 `BeginFrame`·`BeginOffscreen`이 대상을 렌더 타깃으로 바꾼다(attachment 전이, GX4 attachment 시작 전까지). before `Unknown`은 장치 추적 상태에서 바꾼다는 뜻이다. D3D12: 휴지 상태(PSR) 관례를 없애고 mip별 `committed`(제출 끝)·`current`(기록 중) 추적, legacy resource barrier, UAV → UAV는 UAV barrier, 업로드 기록은 `committed` 기준 상태 중립, 검증 장치는 before 불일치를 `ValidationErrorCount`에 센다. 버퍼는 암묵 승격·복귀에 맡겨 UAV barrier만 낸다. 그래프 밖 그리기(`SetTexture`)는 암묵 전이로 메운다. OpenGL·D3D11은 빈 override(드라이버 암묵 전이), Vulkan은 같은 추적에서 pipeline barrier로 낮추고 버퍼는 쓰기가 끼는 전이만 메모리 barrier로 낸다(render pass 안 barrier는 pass를 닫고 다시 연다). 분리 전이(begin·end)와 pipe는 넣지 않았다(RG2·RG4). 계약은 [렌더 기반 구현](../Implementation/RenderBase.ko.md) 8절.
 - **GX6 파라미터 바인딩 런타임.** 9.3–9.5절을 Graphics 쪽에서 받는 부분이다: 상수 블록 생성(수명 3종)·갱신, 파라미터 묶음 설정, 공유 상수 slot 표.
 - **GX7 제출·완료·회수.** 계획 11.2절 계약(`Submit`·`Retire`·`GpuFencePoint`·`RenderResourceLease`·device epoch)을 Graphics `Device`에 들인다.
   - OpenGL ES도 fence sync로 같은 계약을 따르고 "즉시 삭제" 예외를 없앤다.
@@ -471,7 +471,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
   - (d) 구현·시험: 동치를 "전이를 뺀 장치 호출 열이 같고, 두 모드 모두 각 pass가 맞는 상태를 보며(기록 장치 검증 오류 0), 최종 상태가 같다"로 정했다. 읽기 병합은 앞을 내다봐야 하므로 즉시 모드는 전이가 더 많다. 병합이 없는 그래프는 전이까지 같다.
   - (e) 구현·시험: 생산 전 읽기, 한 pass 안 상충 접근, Raster pass의 UAV, Retire된 자원 import(lease 실패), 그 밖에 생산 전 export·다른 그래프 handle·pass 종류 위반.
   - (f) 구현·시험: 풀 축출은 마지막 사용 fence가 끝나기 전에는 일어나지 않는다(기록 장치 `HoldCompletions`·`CompleteAll` gate).
-  - (g) D3D12(하드웨어·WARP)·D3D11(하드웨어·WARP)·OpenGL ES 미리보기(ES 3.2 profile·GL 4.3 core context)에서 Sandbox self-test 픽셀 대조(그래프 텍스처 → SRV 합성, culling, history export → import)와 검증 오류 0(D3D12는 전이 before 불일치 포함). Vulkan은 그 backend가 들어온 뒤다.
+  - (g) D3D12(하드웨어·WARP)·D3D11(하드웨어·WARP)·OpenGL ES 미리보기(ES 3.2 profile·GL 4.3 core context)·Vulkan(GTX 1060·lavapipe, 검증 층 켬)에서 Sandbox self-test 픽셀 대조(그래프 텍스처 → SRV 합성, culling, history export → import)와 검증 오류 0(D3D12·Vulkan은 전이 before 불일치 포함).
 - 스펙과 다르게 한 점:
   - 의존 선언은 파라미터 구조체가 아니라 명시 접근 목록이다(위). 결정 R4는 그대로이고 수집기가 같은 목록을 만든다.
   - GX5는 최소 범위다: begin·end 분리 전이와 pipe가 없고, Raster pass 렌더 타깃 전이(attachment)는 장치 `BeginOffscreen`·`BeginFrame`이 낸다(GX4 attachment 시작이 기록 안으로 들어오면 그래프가 `Transition`으로 낸다). 만든 자원의 첫 전이 before는 `Unknown`(내용 불필요, 장치 추적 상태)이다.
@@ -1002,3 +1002,4 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 - 개정 7(2026-11-17): 1절에 좌표·행렬 규약 행을 더했다(사용자 결정: 좌표계·단위·행렬을 UE 5.8과 같게). 12절은 ConfigSystem, 13.2절은 TraceSystem을 참조하게 했다.
 - 개정 9(2026-11-17): [픽셀 형식](PixelFormat.ko.md) 설계(개정 1)와 교차 참조를 넣었다(4.2절 GX1 행, 4.4절 GX1·GX2, 6.5절 후속). 사용자 지시 "PixelFormat으로", "언리얼에서 지원하는거 full로 지원"에 따라 형식 부분은 A0-G에서 분리하여 PF1–PF3으로 먼저 한다.
 - 개정 10(2026-11-17): GX5(최소)·RG1 구현을 반영했다(2절 용어, 4.2절 GX5·RG1 행, 4.4절 GX5 구현 메모, 8절 구현 메모). 사용자 지시 "렌더 그래프도 미리 하자"에 따라 선행(RB4·GX1·GX2·GX4)이 없는 부분은 범위를 줄였다. 스펙과 다르게 정한 것: 의존 선언을 명시 접근 목록으로(파라미터 구조체 수집기가 같은 목록을 만든다), GX5 분리 전이·pipe 없음과 attachment 전이는 장치 Begin, 즉시·지연 동치의 정의, 풀 키에 샘플러 포함, 풀 반환은 그래프 끝, lease를 `RenderHandleTable`에, 검증 항상 켬, 그래프 기록 전체를 GPU 프레임 하나로. 픽셀 형식 PF1 병합 뒤 그래프 텍스처 desc는 `PixelFormat`이고, 풀 byte 추정은 `MipChainBytes(format, w, h, 1, mips)`(PixelFormatInfo), `CreateTexture`는 번호표 밖·블록 압축 형식을 거부한다.
+- 개정 11(2026-11-17): Vulkan GX5 전이 구현을 반영했다(4.4절 GX5 구현 메모, RG1 완료 기준 (g)에 Vulkan 하드웨어·lavapipe). 처리는 [렌더 기반 구현](../Implementation/RenderBase.ko.md) 8절과 [VulkanGraphics](VulkanGraphics.ko.md) 8절.

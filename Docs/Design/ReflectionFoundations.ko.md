@@ -244,7 +244,7 @@ struct BulkDataRef {
 };
 ```
 
-- base 없는 `struct`·`class`(상속은 v1에서 금지 — RMC2301. 리플렉션 B9가 base 필드를 펼치는 방식으로 연다 — RX 12절), 템플릿 금지. 모든 비정적 필드는 PROPERTY 또는 NATIVE.
+- `struct`·`class`, 템플릿 금지. 모든 비정적 필드는 PROPERTY 또는 NATIVE. 상속은 v1에서 금지였고(RMC2301) 리플렉션 B9k가 base 필드를 펼치는 방식으로 열었다 — 리플렉션 base struct 하나(public 비가상)와 필드 없는 비리플렉션 base만, 규칙은 RX 12절.
 - 생성: `explicit T(Allocator&) noexcept` 또는 `T() noexcept`, noexcept 소멸자. 배열 원소가 되려면 noexcept 이동 가능해야 한다(`Array`의 static_assert가 이미 강제한다).
 - 중첩: struct 필드는 다른 struct를 담을 수 있다. 타입 그래프에 순환이 있으면(배열을 거친 자기 참조 포함) RMC2302, 중첩 깊이는 16 이하(RMC2303 — EIP 635행의 재귀 깊이 제한. 리플렉션 B9의 InstancedStruct는 위치 깊이 + 내용 깊이의 합으로 센다 — RX 11절).
 
@@ -774,7 +774,7 @@ Transaction·Undo 기록·병합(CU4 — B6은 옛 값 출력까지), 변경 통
 **MetaCompiler(B6b)**
 
 - 클래스 Struct·Array 필드: 함수표의 `valueNativeType` 자리에 없으면 `nullptr`를 명시하고 뒤에 `+[](const ::rocks::RuntimeFieldOps&, ::rocks::detail::PathCursor& cursor) noexcept -> ::rocks::Result<void> { return ::rocks::detail::PathClassField<{native}, ::rocks::ValueKind::{TargetKind}>(cursor, &::{Owner}::{name}); }`를 낸다. 단일 값 필드에는 내지 않는다.
-- struct 멤버: `detail::StructFieldOps<&{native}::m>(id, &detail::PathStructMember<&{native}::m, ValueKind::{TargetKind}>)`(둘째 인자 기본값 nullptr — 기존 수동 시험은 그대로 컴파일된다). Binds 미러는 실제 타입 `NativeName`의 멤버 포인터를 쓴다. 상속 import 필드는 `type.Fields`로 덮이고, struct 단계는 등록 StructView로 내려가므로 include를 더하지 않는다. 생성 헤더에 `<Object/GeneratedPathAccess.h>`를 include한다. descriptor는 바꾸지 않는다.
+- struct 멤버: `detail::StructFieldOps<{native}, &{native}::m>(id, &detail::PathStructMember<{native}, &{native}::m, ValueKind::{TargetKind}>)`(둘째 인자 기본값 nullptr. 첫 인자 소유 struct는 리플렉션 B9k가 더했다 — base 멤버의 멤버 포인터도 파생 값으로 캐스트한 뒤 쓴다, RX 12절). Binds 미러는 실제 타입 `NativeName`의 멤버 포인터를 쓴다. 상속 import 필드는 `type.Fields`로 덮이고, struct 단계는 등록 StructView로 내려가므로 include를 더하지 않는다. 생성 헤더에 `<Object/GeneratedPathAccess.h>`를 include한다. descriptor는 바꾸지 않는다.
 
 **시험**
 
@@ -981,7 +981,7 @@ EngineVersion CurrentEngineVersion() noexcept {
 | RMC2204 | MetaCompiler | 필드에 PROPERTY와 NATIVE가 함께 있음 |
 | RMC2205 | MetaCompiler | NATIVE 멤버가 강한 참조·Object raw 포인터를 (재귀적으로) 담음, 또는 직접 타입을 탐침이 판정하지 못함(cannot verify — 대상 인스턴스화 오류) |
 | RMC2206 | MetaCompiler | WorldOnly 전용 멤버를 WorldOnly 아닌 클래스에 둠 |
-| RMC2301 | MetaCompiler | struct 상속 |
+| RMC2301 | MetaCompiler | struct 상속 규칙 위반(리플렉션 B9k부터 — RX 12·15절) |
 | RMC2302 | MetaCompiler | struct 타입 순환 |
 | RMC2303 | MetaCompiler | struct 중첩 깊이 초과 |
 | RMC2304 | MetaCompiler | 배열 원소로 쓸 수 없는 형식 — `Array<T>`의 ObjectRef·참조 struct(Clang의 `Array` static_assert 진단을 바꿔 보고)·배열, 컨테이너 인자의 배열, `StructRefArray<S>`의 S가 리플렉션 struct가 아님·참조 없음·Registry 컨테이너를 담음(5.6절) |
@@ -1017,7 +1017,7 @@ EngineVersion CurrentEngineVersion() noexcept {
 1. 참조 struct의 목록은 `Array<T>` 원소가 아니라 B5의 Registry 관리 컨테이너 `StructRefArray<S>`로 지원한다(4.3·5.6절). 처음에는 금지였으나 2026-11-13 사용자 결정으로 바꿨다(UE `StaticMaterials`·머티리얼 파라미터 배열 대응). Registry 간선 모델은 컨테이너 기준 범위 검사로 넓힌다.
 2. 단일 값 배열은 `ValueArray`로 압축한다(5.4절) — 원소 한도와 바이트 한도를 함께 만족한다.
 3. 플래그 enum을 지원한다(3.4절) — 미선언 값 거부를 "선언 값들의 OR"로 정의한다.
-4. struct 상속은 v1에서 금지(4.1절). DataTable 행 같은 base struct 요구가 생기면 base 필드를 펼치는 방식으로 연다. → 리플렉션 B9 B9k가 이 방식으로 연다(RX 12절).
+4. struct 상속은 v1에서 금지(4.1절). DataTable 행 같은 base struct 요구가 생기면 base 필드를 펼치는 방식으로 연다. → 리플렉션 B9k가 이 방식으로 열었다(RX 12절).
 5. Core 수학 타입은 `Binds` 미러 선언으로 리플렉션한다(4.5절) — Core의 의존 방향을 지킨다.
 6. 필드 codec은 생성 thunk의 두 단계 파싱이며 1단계 산출물을 보관하고 2단계 작업량을 1단계에서 청구한다(6.2절).
 7. 툴체인 지문에 빌드 구성을 넣지 않는다(8절). B7은 구성 사이 지문 동일을 시험하고, 구성 사이 쿠킹 byte 비교 시험은 쿠커가 생기는 A4에서 한다.
