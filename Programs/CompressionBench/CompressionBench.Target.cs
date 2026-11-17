@@ -6,5 +6,8 @@ public sealed class CompressionBenchTarget : TargetRules
 {
     public override string Name => "CompressionBench";
 
+    // 개발 도구·시험 실행 파일이다(Release 배제 정책 대상이 아니다).
+    public override TargetType Type => TargetType.Program;
+
     public override IReadOnlyList<string> Modules => ["CompressionBench"];
 }

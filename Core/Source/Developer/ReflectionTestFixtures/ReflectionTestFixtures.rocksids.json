@@ -279,6 +279,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::AssignBundle::parts",
+      "id": "d9144aa932e94461a720dbec3aa67e30",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::AssignHolder::anchor",
       "id": "59b38d165a9943b4b15bd5599e5ab24d",
       "aliases": [],
@@ -498,6 +505,104 @@
       "kind": "field",
       "name": "rocks::reflection_fixture::AssignPoint::y",
       "id": "aef3af7173ee4a1f8b364d9086d93b2f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::AssignShelf::byKey",
+      "id": "f25ef9775b6d4c42ab8e7b2f2dd57514",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::AssignWholeHolder::anchor",
+      "id": "4232e7ed536a4c58b8fd667ad8f1ff47",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::AssignWholeHolder::byKey",
+      "id": "bf1d77cdadde43d396992bf11ec7a31e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::AssignWholeHolder::kindMap",
+      "id": "698192f5327f4d0f8795fe556c4b6aff",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::AssignWholeHolder::kindSet",
+      "id": "a960d49a9ddd4b0c8c9e78fe5b0d90ab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::AssignWholeHolder::kinds",
+      "id": "1cfa06dd63f34eb38285ba284fcd4a1d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::AssignWholeHolder::limit",
+      "id": "b8257dc7fc7a474388d0bc92734f45fb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::AssignWholeHolder::numbers",
+      "id": "a453b93dcd41456082ddce6718be8c18",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::AssignWholeHolder::pair",
+      "id": "fb3a45645f7a44d7a81be03503410c0c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::AssignWholeHolder::points",
+      "id": "1bd8032ff90040b580e5fdc940ae8d63",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::AssignWholeHolder::scores",
+      "id": "ae905b22e6fe4319af1a12a29d866fdc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::AssignWholeHolder::shelves",
+      "id": "4eb476a4e5114e94ab7c78ea01c8c0a5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::AssignWholeHolder::spare",
+      "id": "012aec03243440a490b41cb7777df9ab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::AssignWholeHolder::tags",
+      "id": "7b0dc50cb0f24f7d81e6320de2056728",
       "aliases": [],
       "retired": false
     },
@@ -2829,8 +2934,22 @@
     },
     {
       "kind": "type",
+      "name": "rocks::reflection_fixture::AssignShelf",
+      "id": "1d5b692450e942c3a83c778973004120",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::reflection_fixture::AssignTarget",
       "id": "def46cc9deab46979bdef739425aac9c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::AssignWholeHolder",
+      "id": "fc1bf06801434b0b96b3bba657d193a3",
       "aliases": [],
       "retired": false
     },

@@ -1,13 +1,4 @@
-#include <ReflectionTestFixtures/AssignFixture.generated.h>
-#include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
-#include <Core/Memory/SystemAllocator.h>
-#include <Meta/GeneratedType.h>
-#include <Object/ConstructionContext.h>
-#include <Object/ModuleRegistration.h>
-#include <Object/ObjectRegistryOptions.h>
-#include <Object/ReferenceObserver.h>
-#include <ReflectionText/TextAssignments.h>
-#include <TestSupport/Test.h>
+#include "TextAssignTestSupport.h"
 
 // 리플렉션 B9i3c1 대입 묶음 시험이다(Docs/Design/ReflectionExtensions.ko.md 10.2절, fixture
 // ReflectionTestFixtures/AssignFixture.h): 앞 대입 위 해석과 종류별 적용, override 경로 정규화·
@@ -16,212 +7,12 @@
 // 실패 주입), staged 대상의 ReadOnly 허용과 struct 값 대상.
 using namespace rocks;
 using namespace rocks::reflection_text;
+using namespace rocks::test::assign;
 using reflection_fixture::AssignHolder;
 using reflection_fixture::AssignKindCurrent;
 using reflection_fixture::AssignKindOld;
 using reflection_fixture::AssignPoint;
 using reflection_fixture::AssignTarget;
-
-namespace {
-
-ErrorCode ErrorOf(const Result<void>& result) noexcept {
-    return result ? ErrorCode::None : result.Error();
-}
-
-template <class T>
-ErrorCode ErrorOf(const Result<T>& result) noexcept {
-    return result ? ErrorCode::None : result.Error();
-}
-
-// 할당을 세고 failAt번째 할당을 실패시키는 allocator다.
-class FailingAllocator final : public Allocator {
-public:
-    explicit FailingAllocator(Allocator& inner) noexcept : inner_(inner) {
-    }
-
-    Result<void*> Allocate(usize bytes, usize alignment, uint32 tag = 0) noexcept override {
-        ++allocations;
-        if (failAt != 0 && allocations == failAt) {
-            return Result<void*>::Failure(ErrorCode::OutOfMemory);
-        }
-
-        return inner_.Allocate(bytes, alignment, tag);
-    }
-
-    Result<void> Deallocate(void* address) noexcept override {
-        return inner_.Deallocate(address);
-    }
-
-    uint64 allocations = 0;
-    uint64 failAt = 0;
-
-private:
-    Allocator& inner_;
-};
-
-// 논리 경로 `/t`를 target으로 푸는 resolver다(Weak 대입).
-class TargetResolver final : public TextReferenceResolver {
-public:
-    Result<void> Resolve(StringView text, TypeId, TextReferenceKind,
-                         FieldValue& out) noexcept override {
-        if (text != "/t" && text != "/u") {
-            return Result<void>::Failure(ErrorCode::NotFound);
-        }
-
-        out.reference = text == "/t" ? target : second;
-        return Result<void>::Success();
-    }
-
-    Result<void> Format(TextReferenceKind, const FieldValue&,
-                        StringBuilderBase&) noexcept override {
-        return Result<void>::Failure(ErrorCode::Unsupported);
-    }
-
-    ObjectHandle target{};
-    ObjectHandle second{};
-};
-
-// observed면 AssignTarget를 패키지 타입으로 삼고 관찰자를 건다(참조 단위의 관찰자 기록 시험).
-RegistryOptions AssignOptions(ReferenceObserver& observer, bool observed) noexcept {
-    RegistryOptions options;
-    if (observed) {
-        options.policy.packageNativeType = NativeTypeKey<AssignTarget>();
-        options.referenceObserver = &observer;
-    }
-
-    return options;
-}
-
-// 모듈 등록·객체 Registry·AssignHolder lease·진단 모음이다(소멸: lease → Registry → 등록).
-// observed면 AssignHolder는 패키지(AssignTarget) package 아래에 만들고, AssignTarget 대상은 각자
-// 패키지다.
-struct Fixture {
-    explicit Fixture(Allocator& objectAllocator, bool observed_ = false,
-                     Allocator* observerAllocator = nullptr) noexcept
-        : observed(observed_), observerMemory(observerAllocator ? *observerAllocator : system),
-          types(system), observer(observerMemory, ReferenceObserver::DefaultMaxKeys),
-          registration(types, system),
-          objects(objectAllocator, types, {0x4153, 1}, AssignOptions(observer, observed_)),
-          access(objects.OwnerAccess()), diagnostics(system), roots(system) {
-        REQUIRE(generated::ReflectionTestFixtures::RegisterModuleTypes(registration));
-        auto acquired = types.Acquire(GeneratedType<AssignHolder>::Schema().id);
-        REQUIRE(acquired);
-        holder = Move(acquired.Value());
-        if (observed) {
-            auto created = MakeTarget();
-            package = created.Handle();
-            REQUIRE(roots.TryPushBack(Move(created)));
-        }
-    }
-
-    ~Fixture() noexcept {
-        holder = TypeLease{};
-        roots.Clear();
-        REQUIRE(objects.Shutdown(objects.OwnerAccess()));
-        CHECK(registration.Unregister());
-        CHECK(types.Shutdown());
-    }
-
-    RootRef<AssignHolder> Make() noexcept {
-        ++holders;
-        const char name[] = {'h', static_cast<char>('a' + holders % 26), '\0'};
-        auto created =
-            observed ? objects.NewObject<AssignHolder>(
-                           Access(), GeneratedType<AssignHolder>::Schema().id, package, name)
-                     : objects.NewObject<AssignHolder>(Access(),
-                                                       GeneratedType<AssignHolder>::Schema().id);
-        CHECK(created);
-        return created ? Move(created.Value()) : RootRef<AssignHolder>{};
-    }
-
-    RootRef<AssignTarget> MakeTarget() noexcept {
-        auto created =
-            objects.NewObject<AssignTarget>(Access(), GeneratedType<AssignTarget>::Schema().id);
-        CHECK(created);
-        return created ? Move(created.Value()) : RootRef<AssignTarget>{};
-    }
-
-    Array<ReferenceEdgeDelta> Take() noexcept {
-        // 기록은 관찰자 allocator의 배열로 받는다.
-        Array<ReferenceEdgeDelta> changes(observerMemory);
-        CHECK(observer.TakeChanges(changes));
-        return changes;
-    }
-
-    const ObjectAccessContext& Access() const noexcept {
-        return access;
-    }
-
-    Result<PreparedAssignments> Prepare(ObjectHandle object,
-                                        Span<const TextAssignment> assignments) noexcept {
-        diagnostics.Clear();
-        return PrepareAssignments(AssignmentTarget::Live(objects, Access(), object), assignments,
-                                  options, diagnostics);
-    }
-
-    bool observed;
-    uint32 holders = 0;
-    SystemAllocator system;
-    Allocator& observerMemory;
-    TypeRegistry types;
-    ReferenceObserver observer;
-    ModuleRegistration registration;
-    ObjectRegistry objects;
-    ObjectAccessContext access;
-    TextDiagnostics diagnostics;
-    TextCodecOptions options;
-    TypeLease holder;
-    ObjectHandle package{};
-    Array<RootRef<AssignTarget>> roots;
-};
-
-// 객체를 읽기 Borrow로 들여다본다(묶음 게시 전에 놓는다).
-class Peek {
-public:
-    Peek(Fixture& fixture, ObjectHandle object) noexcept
-        : borrow_(fixture.objects.Resolve<AssignHolder>(fixture.Access(), object)) {
-        REQUIRE(borrow_);
-    }
-
-    AssignHolder* operator->() noexcept {
-        return borrow_.Value().Get().Value();
-    }
-
-private:
-    Result<Borrow<AssignHolder>> borrow_;
-};
-
-TextAssignment Set(const char* path, const char* value, uint32 source = 0) noexcept {
-    return TextAssignment{AssignmentKind::Set, StringView(path), StringView(value), source};
-}
-
-TextAssignment Other(AssignmentKind kind, const char* path, uint32 source = 0) noexcept {
-    return TextAssignment{kind, StringView(path), StringView(), source};
-}
-
-// override 경로 하나가 text(AssignHolder 경로)와 같은지다.
-bool HasOverride(Fixture& fixture, Span<const PropertyPath> paths, const char* text) noexcept {
-    PropertyPathBuffer expected;
-    if (!ParsePropertyPath(fixture.holder, StringView(text), expected)) {
-        return false;
-    }
-
-    for (usize index = 0; index < paths.Size(); ++index) {
-        if (SamePropertyPath(paths[index], expected.View())) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-bool Touches(Fixture& fixture, const PreparedAssignments& prepared, const char* text) noexcept {
-    PropertyPathBuffer path;
-    CHECK(ParsePropertyPath(fixture.holder, StringView(text), path));
-    return prepared.Touches(path.View());
-}
-
-} // namespace
 
 // 대입을 차례로 적용하고 뒤 대입은 앞 대입이 만든 상태 위에서 해석한다. override 경로는 컨테이너·
 // Atomic struct에서 자르고 값 변화 없는 대입도 넣으며, Touches는 겹침을 본다. Append는 Prepare와
@@ -357,17 +148,18 @@ TEST(TextAssign_CollectsErrorsAndKeepsSameValues) {
     auto prepared = fixture.Prepare(object, inputs);
     CHECK(ErrorOf(prepared) == ErrorCode::InvalidArgument);
     // 참조 struct·정적 배열 원소의 `{}`는 멤버마다 나뉘어 받는다(리플렉션 B9i3c3) — 빈
-    // StructRefArray의 원소는 범위 밖이다.
+    // StructRefArray의 원소는 범위 밖이다. 값 단위의 ReadOnly 자리는 호출 끝에 대조하므로 그
+    // 진단은 맨 뒤에 단위 순서로 온다(리플렉션 B9i 리뷰 반영).
     const TextDiagnosticCode codes[] = {TextDiagnosticCode::DuplicateAssignment,
                                         TextDiagnosticCode::UnknownProperty,
                                         TextDiagnosticCode::InvalidValue,
-                                        TextDiagnosticCode::ReadOnly,
                                         TextDiagnosticCode::OutOfRange,
                                         TextDiagnosticCode::InvalidValue,
                                         TextDiagnosticCode::InvalidValue,
                                         TextDiagnosticCode::InvalidValue,
+                                        TextDiagnosticCode::ReadOnly,
                                         TextDiagnosticCode::ReadOnly};
-    const uint32 sources[] = {1, 2, 3, 4, 6, 8, 9, 10, 11};
+    const uint32 sources[] = {1, 2, 3, 6, 8, 9, 10, 4, 11};
     REQUIRE(fixture.diagnostics.Count() == 9);
     for (usize index = 0; index < 9; ++index) {
         CHECK(fixture.diagnostics.Get(index).code == codes[index]);
@@ -606,7 +398,7 @@ TEST(TextAssign_ReferenceUnitsPublishWithValues) {
     CHECK(holder->next.Handle().IsNull() && holder->slots[1].Handle().IsNull());
 }
 
-// 참조 단위의 거부와 원자성: ReadOnly·Unset·StructRefArray 원소 지우기는 진단, 같은 대상은
+// 참조 단위의 거부와 원자성: ReadOnly·Unset·없는 StructRefArray 원소 지우기는 진단, 같은 대상은
 // 무동작이다. 대상 고정은 Prepare 뒤 GC 회수를 막고, 대상이 Discard되면 Publish가 StaleHandle이고
 // 객체는 그대로다.
 TEST(TextAssign_ReferenceUnitFailuresChangeNothing) {
@@ -626,7 +418,7 @@ TEST(TextAssign_ReferenceUnitFailuresChangeNothing) {
     REQUIRE(fixture.diagnostics.Count() == 3);
     CHECK(fixture.diagnostics.Get(0).code == TextDiagnosticCode::ReadOnly);
     CHECK(fixture.diagnostics.Get(1).code == TextDiagnosticCode::InvalidValue);
-    CHECK(fixture.diagnostics.Get(2).code == TextDiagnosticCode::Unsupported);
+    CHECK(fixture.diagnostics.Get(2).code == TextDiagnosticCode::OutOfRange);
 
     const TextAssignment same[] = {Set("anchorLink", "none"), Set("next", "none", 1)};
     auto kept = fixture.Prepare(object, same);

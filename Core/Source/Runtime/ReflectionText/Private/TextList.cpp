@@ -15,64 +15,6 @@ namespace {
 
 constexpr StringView StructDefaultText = "{}";
 
-// 목록 안 키 중복 판정이다. Name은 pool 비교 규칙(Name ==), 그 밖은 값의 정규 텍스트(String은 byte
-// 그대로)로 본다.
-class KeySet {
-public:
-    explicit KeySet(Allocator& allocator) noexcept : names_(allocator), texts_(allocator) {
-    }
-
-    // key를 더한다. 이미 있으면 false다.
-    Result<bool> Add(TextCodecContext& context, const TextScalarType& type,
-                     const FieldValue& key) noexcept {
-        if (key.kind == ValueKind::Name) {
-            auto added = names_.Add(key.name);
-            if (!added) {
-                return Result<bool>::Failure(added.Error());
-            }
-
-            return Result<bool>::Success(added.Value() == InsertOutcome::Inserted);
-        }
-
-        StringBuilder<128> text(context.GetAllocator());
-        Result<void> made = Result<void>::Success();
-        switch (key.kind) {
-        case ValueKind::Utf8String:
-            made = text.TryAppend(key.string.View());
-            break;
-        case ValueKind::SoftObjectReference:
-            made = text.TryAppendFormat("{}\n{}", key.guid, key.string.View());
-            break;
-        case ValueKind::ClassReference:
-            made = text.TryAppendFormat("{}", key.guid);
-            break;
-        default:
-            made = FormatTextScalar(context, type, key, text);
-            break;
-        }
-
-        if (!made) {
-            return Result<bool>::Failure(made.Error());
-        }
-
-        String stored(context.GetAllocator());
-        if (auto assigned = stored.TryAssign(text.View()); !assigned) {
-            return Result<bool>::Failure(assigned.Error());
-        }
-
-        auto added = texts_.Add(Move(stored));
-        if (!added) {
-            return Result<bool>::Failure(added.Error());
-        }
-
-        return Result<bool>::Success(added.Value() == InsertOutcome::Inserted);
-    }
-
-private:
-    OrderedSet<Name> names_;
-    OrderedSet<String> texts_;
-};
-
 bool IsStructDefault(StringView text) noexcept {
     return text == StructDefaultText;
 }
@@ -139,27 +81,6 @@ Result<bool> ParseItem(TextCodecContext& context, const TextScalarType& type, St
     return detail::Report(context, failure.code, source, pathText, failure.message);
 }
 
-// 원소 수 한도를 본다(options.maxElements → 필드 상한 → StaticArray는 정확히 N).
-Result<bool> CheckCount(TextCodecContext& context, const FieldSchema& field, usize count,
-                        TextSource source, StringView pathText) noexcept {
-    if (count > context.Options().maxElements) {
-        return detail::Report(context, TextDiagnosticCode::OutOfRange, source, pathText,
-                              "too many elements");
-    }
-
-    if (field.value.kind == ValueKind::StaticArray) {
-        if (count != field.maxElements) {
-            return detail::Report(context, TextDiagnosticCode::InvalidValue, source, pathText,
-                                  "fixed-size array needs exactly its element count");
-        }
-    } else if (count > field.maxElements) {
-        return detail::Report(context, TextDiagnosticCode::OutOfRange, source, pathText,
-                              "more elements than the field allows");
-    }
-
-    return Result<bool>::Success(true);
-}
-
 // Array·StaticArray·Set 목록을 읽는다.
 Result<bool> ParseList(TextCodecContext& context, const TextSlot& slot, StringView text,
                        TextSource source, StringView pathText, TextValue& out) noexcept {
@@ -168,7 +89,7 @@ Result<bool> ParseList(TextCodecContext& context, const TextSlot& slot, StringVi
         return Result<bool>::Failure(count.Error());
     }
 
-    auto fits = CheckCount(context, *slot.field, count.Value(), source, pathText);
+    auto fits = detail::CheckElementCount(context, *slot.field, count.Value(), source, pathText);
     if (!fits || !fits.Value()) {
         return fits;
     }
@@ -179,7 +100,7 @@ Result<bool> ParseList(TextCodecContext& context, const TextSlot& slot, StringVi
 
     const bool set = slot.field->value.kind == ValueKind::Set;
     const TextScalarType type = set ? SlotKeyType(slot) : SlotValueType(slot);
-    KeySet keys(context.GetAllocator());
+    detail::KeySet keys(context.GetAllocator());
     bool ok = true;
     usize start = 0;
     for (usize index = 0; index < count.Value() && !context.Diagnostics().Full(); ++index) {
@@ -240,7 +161,7 @@ Result<bool> ParseEntries(TextCodecContext& context, const TextSlot& slot, Strin
         return Result<bool>::Failure(count.Error());
     }
 
-    auto fits = CheckCount(context, *slot.field, count.Value(), source, pathText);
+    auto fits = detail::CheckElementCount(context, *slot.field, count.Value(), source, pathText);
     if (!fits || !fits.Value()) {
         return fits;
     }
@@ -255,7 +176,7 @@ Result<bool> ParseEntries(TextCodecContext& context, const TextSlot& slot, Strin
 
     const TextScalarType keyType = SlotKeyType(slot);
     const TextScalarType valueType = SlotValueType(slot);
-    KeySet keys(context.GetAllocator());
+    detail::KeySet keys(context.GetAllocator());
     bool ok = true;
     usize start = 0;
     for (usize index = 0; index < count.Value() && !context.Diagnostics().Full(); ++index) {
@@ -403,6 +324,75 @@ bool IsStructSlot(const TextSlot& slot) noexcept {
 }
 
 } // namespace
+
+namespace detail {
+
+Result<bool> KeySet::Add(TextCodecContext& context, const TextScalarType& type,
+                         const FieldValue& key) noexcept {
+    if (key.kind == ValueKind::Name) {
+        auto added = names_.Add(key.name);
+        if (!added) {
+            return Result<bool>::Failure(added.Error());
+        }
+
+        return Result<bool>::Success(added.Value() == InsertOutcome::Inserted);
+    }
+
+    StringBuilder<128> text(context.GetAllocator());
+    Result<void> made = Result<void>::Success();
+    switch (key.kind) {
+    case ValueKind::Utf8String:
+        made = text.TryAppend(key.string.View());
+        break;
+    case ValueKind::SoftObjectReference:
+        made = text.TryAppendFormat("{}\n{}", key.guid, key.string.View());
+        break;
+    case ValueKind::ClassReference:
+        made = text.TryAppendFormat("{}", key.guid);
+        break;
+    default:
+        made = FormatTextScalar(context, type, key, text);
+        break;
+    }
+
+    if (!made) {
+        return Result<bool>::Failure(made.Error());
+    }
+
+    String stored(context.GetAllocator());
+    if (auto assigned = stored.TryAssign(text.View()); !assigned) {
+        return Result<bool>::Failure(assigned.Error());
+    }
+
+    auto added = texts_.Add(Move(stored));
+    if (!added) {
+        return Result<bool>::Failure(added.Error());
+    }
+
+    return Result<bool>::Success(added.Value() == InsertOutcome::Inserted);
+}
+
+Result<bool> CheckElementCount(TextCodecContext& context, const FieldSchema& field, usize count,
+                               TextSource source, StringView pathText) noexcept {
+    if (count > context.Options().maxElements) {
+        return Report(context, TextDiagnosticCode::OutOfRange, source, pathText,
+                      "too many elements");
+    }
+
+    if (field.value.kind == ValueKind::StaticArray) {
+        if (count != field.maxElements) {
+            return Report(context, TextDiagnosticCode::InvalidValue, source, pathText,
+                          "fixed-size array needs exactly its element count");
+        }
+    } else if (count > field.maxElements) {
+        return Report(context, TextDiagnosticCode::OutOfRange, source, pathText,
+                      "more elements than the field allows");
+    }
+
+    return Result<bool>::Success(true);
+}
+
+} // namespace detail
 
 Result<bool> ParseTextValue(TextCodecContext& context, const TextSlot& slot, StringView text,
                             TextSource source, StringView pathText, TextValue& out) noexcept {

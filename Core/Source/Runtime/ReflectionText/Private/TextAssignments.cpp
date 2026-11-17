@@ -1,5 +1,6 @@
 #include "TextAssignInternal.h"
 
+#include <Core/Text/Name.h>
 #include <Object/ConstructionContext.h>
 #include <Object/ObjectBatchPublish.h>
 
@@ -69,13 +70,93 @@ PropertyPath PathCopies::View(usize index, PathKey* keys) const noexcept {
         Span<const PathKey>(keys, entry.keyCount)};
 }
 
+void PathCopies::Clear() noexcept {
+    steps_.Clear();
+    keys_.Clear();
+    bytes_.Clear();
+    entries_.Clear();
+}
+
+uint64 PathSet::HashOf(PropertyPath path) const noexcept {
+    // 단계마다 필드 ID 두 word, 선택자·index 한 word, key 한 word(종류와 key wire의 해시)다.
+    constexpr usize WordsPerStep = 4;
+    uint64 words[MaxPropertyPathSteps * WordsPerStep];
+    usize count = 0;
+    for (usize index = 0; index < path.steps.Size() && index < MaxPropertyPathSteps; ++index) {
+        const PathStep& step = path.steps[index];
+        words[count++] = SeededHash<Guid>(seed_)(step.fieldId);
+        words[count++] = static_cast<uint64>(step.selector);
+        words[count++] = step.selector == PathSelector::Key ? 0 : uint64{step.index};
+        uint64 key = 0;
+        if (step.selector == PathSelector::Key && step.index < path.keys.Size()) {
+            const PathKey& wire = path.keys[step.index];
+            key = static_cast<uint64>(wire.kind);
+            StringView text;
+            if (wire.kind == ValueKind::Name && rocks::detail::PathKeyText(wire, text)) {
+                // SamePathKey의 Name 비교(NameTextEquals)와 같은 값끼리 같은 해시다: None 동치는
+                // 한 값, 그 밖은 소문자 base와 번호다.
+                const NameTextParts parts = SplitNameText(text);
+                const bool none =
+                    parts.base.IsEmpty() ||
+                    (!parts.HasNumber() && TextEqualsIgnoringCase(parts.base, "None"));
+                const uint64 named[] = {none ? 0 : SipHash24IgnoringAsciiCase(seed_, parts.base),
+                                        none ? 0 : uint64{parts.number}};
+                key ^= SipHash24Words(seed_, named, 2);
+            } else {
+                key ^= SipHash24(seed_, wire.wire.Data(), wire.wire.Size());
+            }
+        }
+
+        words[count++] = key;
+    }
+
+    return SipHash24Words(seed_, words, count);
+}
+
+Result<bool> PathSet::Add(PropertyPath path) noexcept {
+    const uint64 hash = HashOf(path);
+    usize* head = heads_.Find(hash);
+    PathKey keys[MaxPropertyPathSteps];
+    for (usize entry = head ? *head : IndexNone; entry != IndexNone; entry = next_[entry]) {
+        ++comparisons_;
+        if (SamePropertyPath(paths_.View(entry, keys), path)) {
+            return Result<bool>::Success(false);
+        }
+    }
+
+    // 용량을 먼저 잡아 실패해도 집합이 그대로이게 한다.
+    if (auto reserved = next_.TryReserve(next_.Size() + 1); !reserved) {
+        return Result<bool>::Failure(reserved.Error());
+    }
+
+    if (auto reserved = heads_.Reserve(heads_.Count() + 1); !reserved) {
+        return Result<bool>::Failure(reserved.Error());
+    }
+
+    if (auto copied = paths_.Append(path); !copied) {
+        return Result<bool>::Failure(copied.Error());
+    }
+
+    // Reserve가 칸을 옮겼을 수 있으므로 다시 찾는다.
+    const usize added = paths_.Count() - 1;
+    head = heads_.Find(hash);
+    (void)next_.TryPushBack(head ? *head : IndexNone);
+    if (head) {
+        *head = added;
+    } else {
+        (void)heads_.Insert(hash, added);
+    }
+
+    return Result<bool>::Success(true);
+}
+
 AssignmentState::AssignmentState(const AssignmentTarget& target_, const TextCodecOptions& options_,
                                  TextDiagnostics& diagnostics, Allocator& allocator_) noexcept
     : target(target_), options(options_),
       context(target_.Registry().Types(), options, diagnostics, allocator_), allocator(allocator_),
-      units(allocator_), references(allocator_), containers(allocator_), assigned(allocator_),
-      overrideSteps(allocator_), overrideEnds(allocator_), overrideViews(allocator_),
-      pins(allocator_) {
+      units(allocator_), references(allocator_), containers(allocator_), elements(allocator_),
+      assigned(allocator_), overrideSteps(allocator_), overrideEnds(allocator_),
+      overrideViews(allocator_), pins(allocator_), pinOwners(allocator_) {
 }
 
 PathTarget AssignmentState::Root() const noexcept {
@@ -96,6 +177,28 @@ Result<void> Diagnose(AssignmentState& state, TextDiagnosticCode code, TextSourc
                       StringView pathText, StringView message) noexcept {
     state.failed = true;
     return state.context.Diagnostics().Add(code, source, pathText, message);
+}
+
+void ReleasePins(AssignmentState& state, const void* owner) noexcept {
+    usize kept = 0;
+    for (usize index = 0; index < state.pins.Size(); ++index) {
+        if (state.pinOwners[index] == owner) {
+            continue;
+        }
+
+        if (kept != index) {
+            state.pins[kept] = Move(state.pins[index]);
+            state.pinOwners[kept] = state.pinOwners[index];
+        }
+
+        ++kept;
+    }
+
+    // 뒤쪽 칸(놓을 고정과 옮겨진 빈 칸)을 지운다 — RootRef 소멸이 고정을 놓는다.
+    if (kept < state.pins.Size()) {
+        (void)state.pins.TryRemoveAt(kept, state.pins.Size() - kept);
+        (void)state.pinOwners.TryRemoveAt(kept, state.pinOwners.Size() - kept);
+    }
 }
 
 Result<void> ReportPathFailure(AssignmentState& state, ErrorCode code,
@@ -243,6 +346,45 @@ Result<ContainerUnit*> AcquireContainer(AssignmentState& state, PropertyPath uni
 
     (void)state.containers.TryPushBack(Move(made.Value()));
     return Result<ContainerUnit*>::Success(&unit);
+}
+
+Result<ElementsUnit*> AcquireElements(AssignmentState& state, PropertyPath unitPath,
+                                      TextSource source, StringView pathText) noexcept {
+    for (usize index = 0; index < state.elements.Size(); ++index) {
+        if (SamePropertyPath(state.elements[index]->Path(), unitPath)) {
+            return Result<ElementsUnit*>::Success(state.elements[index].Get());
+        }
+    }
+
+    auto made = UniquePtr<ElementsUnit>::TryMake(state.allocator, state.allocator);
+    if (!made) {
+        return Result<ElementsUnit*>::Failure(made.Error());
+    }
+
+    ElementsUnit& unit = *made.Value();
+    if (auto copied = unit.steps.TryAppend(unitPath.steps); !copied) {
+        return Result<ElementsUnit*>::Failure(copied.Error());
+    }
+
+    if (auto reserved = state.elements.TryReserve(state.elements.Size() + 1); !reserved) {
+        return Result<ElementsUnit*>::Failure(reserved.Error());
+    }
+
+    // 배열에 묶는다(원소 수·변경 계수 기록 — 객체는 읽기 Borrow).
+    PropertyPathFailure failure;
+    auto bound = PathPrepareStructElements(state.target.Registry(), state.target.Access(),
+                                           state.Root(), unitPath, unit.stage, &failure);
+    if (!bound) {
+        if (auto reported = ReportPathFailure(state, bound.Error(), failure, source, pathText);
+            !reported) {
+            return Result<ElementsUnit*>::Failure(reported.Error());
+        }
+
+        return Result<ElementsUnit*>::Success(nullptr);
+    }
+
+    (void)state.elements.TryPushBack(Move(made.Value()));
+    return Result<ElementsUnit*>::Success(&unit);
 }
 
 Result<void> AddOverride(AssignmentState& state, PropertyPath path) noexcept {
@@ -425,7 +567,16 @@ Result<void> PreparedAssignments::Append(const TextAssignment& assignment) noexc
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    if (auto processed = detail::ProcessAssignment(*state_, assignment); !processed) {
+    // 호출 오류(할당·Busy 등)도 묶음을 실패로 표시한다: 값 단위 적용은 상자를 고친 뒤에 실패할 수
+    // 있어(목록 대입의 비우기 뒤 넣기 등) 그 뒤의 묶음은 반쯤 적용된 상태다(리플렉션 B9i 리뷰
+    // 반영).
+    Result<void> processed = detail::ProcessAssignment(*state_, assignment);
+    if (processed) {
+        processed = detail::CheckReadOnlyUnits(*state_);
+    }
+
+    if (!processed) {
+        state_->failed = true;
         return processed;
     }
 
@@ -471,9 +622,13 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
     ObjectRegistry& registry = state.target.Registry();
     const ObjectAccessContext& access = state.target.Access();
     // 사본을 바꾸지 않은 단위(값이 같은 대입뿐)는 게시하지 않는다 — 먼저 앞으로 모으고 나머지를
-    // 비운다(게시 구간 밖).
+    // 비운다(게시 구간 밖). 게시하지 않는 단위의 고정도 놓는다(검사 대상에서 빠진다).
     usize kept = 0;
     for (usize index = 0; index < state.units.Size(); ++index) {
+        if (!state.units[index]->dirty) {
+            detail::ReleasePins(state, state.units[index].Get());
+        }
+
         if (state.units[index]->dirty) {
             if (kept != index) {
                 state.units[kept] = Move(state.units[index]);
@@ -490,6 +645,10 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
     // 컨테이너 단위도 사본을 바꾸지 않았으면 게시하지 않는다.
     kept = 0;
     for (usize index = 0; index < state.containers.Size(); ++index) {
+        if (!state.containers[index]->dirty) {
+            detail::ReleasePins(state, state.containers[index].Get());
+        }
+
         if (state.containers[index]->dirty) {
             if (kept != index) {
                 state.containers[kept] = Move(state.containers[index]);
@@ -501,6 +660,22 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
 
     if (kept < state.containers.Size()) {
         (void)state.containers.TryRemoveAt(kept, state.containers.Size() - kept);
+    }
+
+    // 원소 지우기 단위도 지운 원소가 없으면 게시하지 않는다.
+    kept = 0;
+    for (usize index = 0; index < state.elements.Size(); ++index) {
+        if (state.elements[index]->stage.HasRemovals()) {
+            if (kept != index) {
+                state.elements[kept] = Move(state.elements[index]);
+            }
+
+            ++kept;
+        }
+    }
+
+    if (kept < state.elements.Size()) {
+        (void)state.elements.TryRemoveAt(kept, state.elements.Size() - kept);
     }
 
     // 1. 게시 자리(읽기 Borrow — 변경 표지를 올리지 않는다). 죽은 owner(Discard·파괴 요청 — 경로
@@ -549,6 +724,21 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
                 return PublishResult::Failure(prepared.Error());
             }
         }
+
+        // 원소 지우기 단위: owner 생존·같은 배열·변경 계수를 다시 확인하고 지울 원소 안의 참조를
+        // 모은 뒤(간선 변경 {참조, null}) 떼어 낼 블록 목록을 잡는다(구간 밖 할당).
+        for (usize index = 0; index < state.elements.Size(); ++index) {
+            detail::ElementsUnit& unit = *state.elements[index];
+            if (auto located =
+                    PathPrepareStructElements(registry, access, root, unit.Path(), unit.stage);
+                !located) {
+                return PublishResult::Failure(ownerError(located.Error()));
+            }
+
+            if (auto prepared = unit.stage.PreparePublish(); !prepared) {
+                return PublishResult::Failure(prepared.Error());
+            }
+        }
     }
 
     if (live) {
@@ -561,6 +751,10 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
             const PreparedReferences& stage = state.containers[index]->stage;
             targetCount += stage.Current().Size();
             edgeCount += stage.Previous().Size() + stage.Current().Size();
+        }
+
+        for (usize index = 0; index < state.elements.Size(); ++index) {
+            edgeCount += state.elements[index]->stage.RemovedReferences().Size();
         }
 
         Array<BatchTargetCheck> targets(state.allocator);
@@ -589,9 +783,24 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
             }
         }
 
-        // Weak 고정은 생존만, 참조 단위의 새 대상은 자리의 C++ 대상 타입까지 본다.
+        for (usize index = 0; index < state.elements.Size(); ++index) {
+            for (const ObjectHandle removed : state.elements[index]->stage.RemovedReferences()) {
+                (void)edges.TryPushBack(BatchEdgeChange{removed, ObjectHandle{}});
+            }
+        }
+
+        // Weak 고정은 생존만, 참조 단위의 새 대상은 자리의 C++ 대상 타입까지 본다. 컨테이너 단위의
+        // 고정은 GC만 막는다 — 새 내용의 원소는 위에서 모두 검사하고, 사본에서 다시 빠진 대상(
+        // `group=/a` 뒤 `group=`)은 검사하지 않는다(리플렉션 B9i 리뷰 반영).
         for (usize index = 0; index < state.pins.Size(); ++index) {
-            (void)targets.TryPushBack(BatchTargetCheck{state.pins[index].Handle(), nullptr});
+            bool container = false;
+            for (usize unit = 0; unit < state.containers.Size() && !container; ++unit) {
+                container = state.pinOwners[index] == state.containers[unit].Get();
+            }
+
+            if (!container) {
+                (void)targets.TryPushBack(BatchTargetCheck{state.pins[index].Handle(), nullptr});
+            }
         }
 
         for (usize index = 0; index < state.references.Size(); ++index) {
@@ -628,7 +837,16 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
             state.containers[index]->stage.Publish(batch.Value());
         }
 
+        // 원소 압축은 마지막이다(앞 단위는 원소를 묶을 때 index로 찾았다).
+        for (usize index = 0; index < state.elements.Size(); ++index) {
+            state.elements[index]->stage.Publish(batch.Value());
+        }
+
         batch.Value().End();
+        // 떼어 낸 원소는 구간 밖에서 소멸한다.
+        for (usize index = 0; index < state.elements.Size(); ++index) {
+            state.elements[index]->stage.ReleaseRemoved();
+        }
     } else {
         for (usize index = 0; index < state.units.Size(); ++index) {
             if (auto published = state.units[index]->prepared.Publish(); !published) {
@@ -652,6 +870,14 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
                 return PublishResult::Failure(published.Error());
             }
         }
+
+        // staged 객체의 원소 지우기는 트랜잭션 안 압축이다(앞 단위 뒤 — 원소를 묶을 때 index로
+        // 찾았다).
+        for (usize index = 0; index < state.elements.Size(); ++index) {
+            if (auto published = state.elements[index]->stage.Publish(); !published) {
+                return PublishResult::Failure(published.Error());
+            }
+        }
     }
 
     // 3. 대상 고정을 놓는다.
@@ -661,40 +887,41 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
     return PublishResult::Success(Move(published));
 }
 
-Result<PreparedAssignments> PrepareAssignments(const AssignmentTarget& target,
-                                               Span<const TextAssignment> assignments,
-                                               const TextCodecOptions& options,
-                                               TextDiagnostics& diagnostics) noexcept {
-    using PrepareResult = Result<PreparedAssignments>;
+namespace detail {
+
+Result<UniquePtr<AssignmentState>> BeginAssignments(const AssignmentTarget& target,
+                                                    const TextCodecOptions& options,
+                                                    TextDiagnostics& diagnostics) noexcept {
+    using BeginResult = Result<UniquePtr<AssignmentState>>;
     ObjectRegistry& registry = target.Registry();
     TextCodecOptions effective = options;
     if (!effective.names) {
         effective.names = registry.Names();
     } else if (effective.names != registry.Names()) {
-        return PrepareResult::Failure(ErrorCode::InvalidArgument);
+        return BeginResult::Failure(ErrorCode::InvalidArgument);
     }
 
     if (target.GetKind() == AssignmentTarget::Kind::Value) {
         const TypeLease* type = target.StructType();
         if (!type || !type->IsValid() || type->Kind() != TypeKind::Struct || !target.Storage()) {
-            return PrepareResult::Failure(ErrorCode::InvalidArgument);
+            return BeginResult::Failure(ErrorCode::InvalidArgument);
         }
 
         if (type->Struct().ContainsStrongReference()) {
-            return PrepareResult::Failure(ErrorCode::Unsupported);
+            return BeginResult::Failure(ErrorCode::Unsupported);
         }
     }
 
     Allocator& allocator = target.ValueAllocator();
-    auto made = UniquePtr<detail::AssignmentState>::TryMake(allocator, target, effective,
-                                                            diagnostics, allocator);
+    auto made =
+        UniquePtr<AssignmentState>::TryMake(allocator, target, effective, diagnostics, allocator);
     if (!made) {
-        return PrepareResult::Failure(made.Error());
+        return BeginResult::Failure(made.Error());
     }
 
-    detail::AssignmentState& state = *made.Value();
+    AssignmentState& state = *made.Value();
     if (auto started = state.context.Start(); !started) {
-        return PrepareResult::Failure(started.Error());
+        return BeginResult::Failure(started.Error());
     }
 
     // 대상 타입 lease와 Live 대상의 변경 표지(사본을 만들기 전에 읽는다).
@@ -704,19 +931,41 @@ Result<PreparedAssignments> PrepareAssignments(const AssignmentTarget& target,
                      ? target.Transaction()->AcquireType(target.Handle())
                      : target.StructType()->Clone();
     if (!lease) {
-        return PrepareResult::Failure(lease.Error());
+        return BeginResult::Failure(lease.Error());
     }
 
     state.lease = Move(lease.Value());
     if (target.GetKind() == AssignmentTarget::Kind::Live) {
         auto stamp = registry.MutationStamp(target.Access(), target.Handle());
         if (!stamp) {
-            return PrepareResult::Failure(stamp.Error());
+            return BeginResult::Failure(stamp.Error());
         }
 
         state.stamp = stamp.Value();
     }
 
+    return BeginResult::Success(Move(made.Value()));
+}
+
+PreparedAssignments AssignmentAccess::Wrap(UniquePtr<AssignmentState> state) noexcept {
+    PreparedAssignments prepared;
+    prepared.state_ = Move(state);
+    return prepared;
+}
+
+} // namespace detail
+
+Result<PreparedAssignments> PrepareAssignments(const AssignmentTarget& target,
+                                               Span<const TextAssignment> assignments,
+                                               const TextCodecOptions& options,
+                                               TextDiagnostics& diagnostics) noexcept {
+    using PrepareResult = Result<PreparedAssignments>;
+    auto begun = detail::BeginAssignments(target, options, diagnostics);
+    if (!begun) {
+        return PrepareResult::Failure(begun.Error());
+    }
+
+    detail::AssignmentState& state = *begun.Value();
     for (usize index = 0; index < assignments.Size(); ++index) {
         if (state.context.Diagnostics().Full()) {
             break;
@@ -727,13 +976,15 @@ Result<PreparedAssignments> PrepareAssignments(const AssignmentTarget& target,
         }
     }
 
+    if (auto checked = detail::CheckReadOnlyUnits(state); !checked) {
+        return PrepareResult::Failure(checked.Error());
+    }
+
     if (state.failed) {
         return PrepareResult::Failure(ErrorCode::InvalidArgument);
     }
 
-    PreparedAssignments prepared;
-    prepared.state_ = Move(made.Value());
-    return PrepareResult::Success(Move(prepared));
+    return PrepareResult::Success(detail::AssignmentAccess::Wrap(Move(begun.Value())));
 }
 
 } // namespace rocks::reflection_text

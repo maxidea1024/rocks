@@ -1,0 +1,6 @@
+{
+  "schema": 1,
+  "id": "Engine-MacOS",
+  "host": "macos-arm64",
+  "formats": ["METAL_SM5", "GLES31_ANDROID"]
+}

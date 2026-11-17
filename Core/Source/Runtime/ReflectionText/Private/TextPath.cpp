@@ -11,32 +11,6 @@ namespace rocks::reflection_text {
 
 namespace {
 
-// 경로 단계가 도는 범위다: 클래스 lease 또는 struct view.
-struct Scope {
-    const TypeLease* lease = nullptr;
-    StructView view{};
-
-    const TypeSchema& Schema() const noexcept {
-        return lease ? lease->Schema() : view.Schema();
-    }
-
-    usize FieldIndex(Guid id) const noexcept {
-        return lease ? lease->FieldIndex(id) : view.FieldIndex(id);
-    }
-
-    const EnumSchema* FieldEnum(usize index) const noexcept {
-        return lease ? lease->FieldEnum(index) : view.FieldEnum(index);
-    }
-
-    const EnumSchema* FieldKeyEnum(usize index) const noexcept {
-        return lease ? lease->FieldKeyEnum(index) : view.FieldKeyEnum(index);
-    }
-
-    StructView FieldStruct(usize index) const noexcept {
-        return lease ? lease->FieldStruct(index) : view.FieldStruct(index);
-    }
-};
-
 // 경로 단계가 struct 값으로 끝나 다음 단계(`.`)를 받을 수 있는지다(ParsePropertyPath와 같은 규칙).
 bool IsStructStep(const FieldSchema& field, PathSelector selector) noexcept {
     switch (selector) {
@@ -94,7 +68,7 @@ Result<bool> Describe(const TypeLease& type, PropertyPath path, TextSlot& out,
         return Result<bool>::Failure(ErrorCode::InvalidArgument);
     }
 
-    Scope scope;
+    detail::SchemaScope scope;
     if (type.Kind() == TypeKind::Struct) {
         scope.view = type.Struct();
     } else {

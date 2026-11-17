@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 470" width="960" height="470" role="img" aria-labelledby="title desc">
+<title id="title">렌더 그래프의 흐름</title>
+<desc id="desc">렌더러가 파라미터 구조체로 의존을 선언하며 pass를 추가한다. 그래프는 미사용 pass를 제거하고, 전이와 자원 수명을 계산해 풀에서 할당한 뒤, 선언 순서대로 실행한다.</desc>
+<style>
+text{font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;fill:#183142}.title{font-size:22px;font-weight:700}.head{font-size:14px;font-weight:700}.small{font-size:12px;fill:#405869}.num{font-size:20px;font-weight:700;fill:#507d96}
+.step{fill:#f4f8fb;stroke:#bccfda}.ext{fill:#e4f4ec;stroke:#69a789}.pool{fill:#f1eafe;stroke:#9d87c1}.later{fill:#f2f4f6;stroke:#b5bec6}.arrow{stroke:#5c7385;stroke-width:2;fill:none;marker-end:url(#a)}
+</style>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5c7385"/></marker></defs>
+<rect width="960" height="470" fill="#fff"/>
+<text x="24" y="34" class="title">렌더 그래프: 선언 → 컴파일 → 실행</text>
+<text x="24" y="58" class="small">렌더 lane에서 프레임마다 하나를 만든다. 그래프 수명 객체는 프레임 arena에 둔다. pass는 선언 순서대로 실행하며 재배치하지 않는다.</text>
+
+<g transform="translate(24 80)"><rect class="step" width="210" height="170" rx="8"/><text x="12" y="30" class="num">1</text><text x="36" y="30" class="head">pass 추가</text><text x="12" y="58" class="small">이름·종류(Raster·Compute</text><text x="12" y="76" class="small">·AsyncCompute·Copy)</text><text x="12" y="98" class="small">파라미터 구조체 하나가</text><text x="12" y="116" class="small">상수·자원 바인딩과</text><text x="12" y="134" class="small">의존 선언을 함께 한다</text><text x="12" y="158" class="small">기록 함수(람다)</text></g>
+<g transform="translate(254 80)"><rect class="step" width="210" height="170" rx="8"/><text x="12" y="30" class="num">2</text><text x="36" y="30" class="head">점진 culling</text><text x="12" y="58" class="small">자원별 마지막 생산자로</text><text x="12" y="76" class="small">간선을 만든다</text><text x="12" y="98" class="small">부수 효과 pass·export·</text><text x="12" y="116" class="small">외부 쓰기에서 거꾸로</text><text x="12" y="134" class="small">살려 나간다</text><text x="12" y="158" class="small">나머지는 제거</text></g>
+<g transform="translate(484 80)"><rect class="step" width="210" height="170" rx="8"/><text x="12" y="30" class="num">3</text><text x="36" y="30" class="head">컴파일</text><text x="12" y="58" class="small">subresource별 접근 상태</text><text x="12" y="76" class="small">읽기끼리는 합치고</text><text x="12" y="94" class="small">바뀌는 곳에 전이</text><text x="12" y="116" class="small">참조 수로 수명 계산</text><text x="12" y="134" class="small">처음 쓰는 pass에서 할당</text><text x="12" y="152" class="small">마지막 pass 뒤 반환</text></g>
+<g transform="translate(714 80)"><rect class="step" width="222" height="170" rx="8"/><text x="12" y="30" class="num">4</text><text x="36" y="30" class="head">실행</text><text x="12" y="58" class="small">pass마다:</text><text x="12" y="78" class="small">앞 전이 → attachment 시작</text><text x="12" y="96" class="small">→ 기록 함수(셰이더·draw)</text><text x="12" y="114" class="small">→ attachment 끝 → 뒤 전이</text><text x="12" y="138" class="small">GpuScope로 pass 이름·</text><text x="12" y="156" class="small">timestamp 기록</text></g>
+<path class="arrow" d="M234 165 H252"/><path class="arrow" d="M464 165 H482"/><path class="arrow" d="M694 165 H712"/>
+
+<g transform="translate(24 278)"><rect class="ext" width="440" height="86" rx="8"/><text x="12" y="26" class="head">그래프 밖 자원</text><text x="12" y="50" class="small">import: 스왑체인·history·에셋 텍스처(처음 상태 명시, lease 획득)</text><text x="12" y="70" class="small">export: 다음 프레임에 넘길 결과(마지막 상태 명시, 소유 이전)</text></g>
+<g transform="translate(484 278)"><rect class="pool" width="452" height="86" rx="8"/><text x="12" y="26" class="head">그래프 자원 풀</text><text x="12" y="50" class="small">같은 desc 자원을 프레임 안팎에서 재사용(fence 완료가 조건)</text><text x="12" y="70" class="small">aliasing이 아닌 통째 재사용. aliasing은 RG5 transient heap</text></g>
+
+<text x="24" y="392" class="head">단계</text>
+<g transform="translate(24 402)">
+<rect class="step" width="170" height="52" rx="6"/><text x="10" y="22" class="head">RG1</text><text x="10" y="40" class="small">단일 queue·직렬 기록</text>
+<rect class="step" x="182" width="170" height="52" rx="6"/><text x="192" y="22" class="head">RG2</text><text x="192" y="40" class="small">프레임 안 재사용·분리 전이</text>
+<rect class="later" x="364" width="170" height="52" rx="6"/><text x="374" y="22" class="head">RG3</text><text x="374" y="40" class="small">병렬 기록·pass 병합</text>
+<rect class="later" x="546" width="170" height="52" rx="6"/><text x="556" y="22" class="head">RG4</text><text x="556" y="40" class="small">async compute</text>
+<rect class="later" x="728" width="184" height="52" rx="6"/><text x="738" y="22" class="head">RG5</text><text x="738" y="40" class="small">transient aliasing</text>
+</g>
+</svg>

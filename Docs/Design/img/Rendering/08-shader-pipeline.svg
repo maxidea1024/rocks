@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 500" width="960" height="500" role="img" aria-labelledby="title desc">
+<title id="title">셰이더가 원문에서 그리기까지</title>
+<desc id="desc">오프라인에서는 HLSL 원문을 메인 프로세스가 전처리하고 키를 계산한 뒤 워커가 형식별로 컴파일해 에셋 너겟과 셰이더 라이브러리에 담는다. 런타임은 라이브러리를 열어 셰이더 집합을 만들고, 처음 쓸 때 장치 셰이더를 만들며, 파라미터 묶음과 파이프라인 캐시로 그린다.</desc>
+<style>
+text{font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;fill:#183142}.title{font-size:22px;font-weight:700}.head{font-size:14px;font-weight:700}.small{font-size:12px;fill:#405869}.lane{font-size:15px;font-weight:700;fill:#2f4c60}
+.off{fill:#e6f2fa;stroke:#6c9ab7}.run{fill:#fff5df;stroke:#e1ba63}.band{fill:#fafcfd;stroke:#e1e8ed}.tool{fill:#e4f4ec;stroke:#69a789}.arrow{stroke:#5c7385;stroke-width:2;fill:none;marker-end:url(#a)}
+</style>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5c7385"/></marker></defs>
+<rect width="960" height="500" fill="#fff"/>
+<text x="24" y="34" class="title">셰이더: HLSL 원문 하나에서 다섯 backend의 그리기까지</text>
+<text x="24" y="58" class="small">위는 오프라인(에디터·쿠커·Development 필요 시 컴파일), 아래는 실행 파일. Release 실행 파일에는 컴파일러가 없다.</text>
+
+<rect class="band" x="16" y="72" width="928" height="196" rx="8"/><text x="28" y="96" class="lane">오프라인</text>
+<g transform="translate(28 108)"><rect class="off" width="160" height="104" rx="8"/><text x="12" y="26" class="head">원문</text><text x="12" y="50" class="small">.rsf 엔트리·.rsh include</text><text x="12" y="70" class="small">셰이더 타입·퍼뮤테이션</text><text x="12" y="90" class="small">정점 입력 타입</text></g>
+<g transform="translate(206 108)"><rect class="off" width="180" height="104" rx="8"/><text x="12" y="26" class="head">메인 프로세스</text><text x="12" y="50" class="small">전처리(가상 경로)</text><text x="12" y="70" class="small">job 키(SHA-256)</text><text x="12" y="90" class="small">에셋 너겟 조회</text></g>
+<g transform="translate(404 108)"><rect class="tool" width="230" height="104" rx="8"/><text x="12" y="26" class="head">ShaderCompileWorker</text><text x="12" y="50" class="small">DXC → DXIL · SPIR-V</text><text x="12" y="70" class="small">SPIRV-Cross → MSL·ESSL·HLSL5</text><text x="12" y="90" class="small">FXC → DXBC · 바인딩 정규화</text></g>
+<g transform="translate(652 108)"><rect class="off" width="280" height="104" rx="8"/><text x="12" y="26" class="head">셰이더 라이브러리(형식별)</text><text x="12" y="50" class="small">(타입, 정점 입력, 퍼뮤테이션, 단계)</text><text x="12" y="70" class="small">→ 코드 SHA·바인딩 layout</text><text x="12" y="90" class="small">·레이아웃 서명</text></g>
+<path class="arrow" d="M188 160 H204"/><path class="arrow" d="M386 160 H402"/><path class="arrow" d="M634 160 H650"/>
+<text x="28" y="246" class="small">형식: D3D12_SM6 · D3D11_SM5 · VULKAN_SM5 · METAL_SM5 · GLES31_ANDROID · GLES31_PC(미리보기)</text>
+
+<rect class="band" x="16" y="282" width="928" height="202" rx="8"/><text x="28" y="306" class="lane">실행 파일(렌더 lane)</text>
+<g transform="translate(28 318)"><rect class="run" width="200" height="110" rx="8"/><text x="12" y="26" class="head">셰이더 집합 열기</text><text x="12" y="50" class="small">장치 backend 형식 선택</text><text x="12" y="70" class="small">완결성·서명 검사</text><text x="12" y="90" class="small">실패면 IncompatibleCook</text></g>
+<g transform="translate(246 318)"><rect class="run" width="200" height="110" rx="8"/><text x="12" y="26" class="head">장치 셰이더</text><text x="12" y="50" class="small">처음 쓸 때 생성</text><text x="12" y="70" class="small">게시는 한 번</text><text x="12" y="90" class="small">GLES는 렌더 lane에서</text></g>
+<g transform="translate(464 318)"><rect class="run" width="220" height="110" rx="8"/><text x="12" y="26" class="head">파라미터 바인딩</text><text x="12" y="50" class="small">구조체 offset → 슬롯 지도</text><text x="12" y="70" class="small">상수 블록(그리기·프레임·지속)</text><text x="12" y="90" class="small">묶음 설정(ParameterBatch)</text></g>
+<g transform="translate(702 318)"><rect class="run" width="230" height="110" rx="8"/><text x="12" y="26" class="head">파이프라인 캐시 → draw</text><text x="12" y="50" class="small">셰이더·정점 배치·상태·형식</text><text x="12" y="70" class="small">내용 키로 한 번만 생성</text><text x="12" y="90" class="small">렌더 그래프 pass에서 기록</text></g>
+<path class="arrow" d="M228 373 H244"/><path class="arrow" d="M446 373 H462"/><path class="arrow" d="M684 373 H700"/>
+<path class="arrow" d="M792 212 V275 H128 V316"/>
+<text x="28" y="452" class="small">바인딩 규약(셰이더 시스템 7절): register를 적지 않고 리플렉션으로 정규화한다.</text>
+<text x="28" y="472" class="small">그리기별 상수는 루트 상수(최대 128 byte), GLES는 상수 버퍼를 vec4 배열로 에뮬레이션한다.</text>
+</svg>

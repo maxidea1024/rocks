@@ -21,7 +21,7 @@ PathCursor::PathCursor(ObjectRegistry& registry, const ObjectAccessContext& acce
 
 bool PathCursor::AcceptsReadOnlyWrites() const noexcept {
     return root_ == PathTarget::Kind::Staged ||
-           (root_ == PathTarget::Kind::Detached && rootBox_->fromStaged_);
+           (root_ == PathTarget::Kind::Detached && rootBox_->acceptsReadOnly_);
 }
 
 Allocator& PathCursor::ValueAllocator() const noexcept {
@@ -274,6 +274,18 @@ Result<void> PathCursor::PublishRead(FieldValue& value) noexcept {
 
     pin_.Reset();
     *output_ = Move(value);
+    return Result<void>::Success();
+}
+
+Result<void> PathCursor::PublishKeys(Array<FieldValue>& keys) noexcept {
+    if (auto alive = CheckOwner(); !alive) {
+        return alive;
+    }
+
+    pin_.Reset();
+    // 옛 원소는 이 함수를 나갈 때(고정 밖) 반환한다.
+    Array<FieldValue> previous(Move(*keys_));
+    *keys_ = Move(keys);
     return Result<void>::Success();
 }
 

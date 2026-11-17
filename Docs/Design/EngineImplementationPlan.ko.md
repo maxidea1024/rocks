@@ -126,7 +126,7 @@ CF01–CF12의 ID와 의미는 이 표를 정본으로 사용한다. 상세안 1
 | 그래픽 | D3D11/D3D12/Vulkan/Metal/OpenGL. 공통 material IR과 backend별 shader toolchain; 고급 capability는 독립 profile |
 | 좌표 | 오른손, +Z Up, +X Forward, 미터·라디안·초. 임포터에서 변환 |
 | 행렬 | column vector, p′=M×p, local-to-world=parent×local. HLSL 저장 규약과 전치 지점을 고정 |
-| 깊이 | reversed-Z, depth [0,1]. 투영·컬링·피킹·속도 버퍼의 동일 규약 검증 |
+| view·깊이·앞면 | UE 5.8과 같다(2026-11-17 사용자 결정). view space는 +X 오른쪽·+Y 위·+Z 전방, 기본 원근은 reversed-Z(가까움 1·멂 0) 무한 원평면이고 투영 인자는 수평 반각(UE `FReversedZPerspectiveMatrix`), depth [0,1]. 앞면은 화면 반시계·뒤면 컬, 음수 행렬식이면 컬 반전([셰이더 시스템](ShaderSystem.ko.md) 7.2절 6·8항). 투영·컬링·피킹·속도 버퍼의 동일 규약 검증 |
 | 큰 월드 | 월드 위치 double, 회전·스케일 float, 렌더링은 카메라 상대 float. 물리는 float 전용 PhysX의 PhysicsRegion 지역 원점 변환(16.5절) |
 | 시간 | 시뮬레이션 기본 60Hz, 단조 증가 64-bit Tick. 렌더 보간과 오디오 sample clock 분리 |
 | 직렬화 | 명시적인 byte order, 고정 폭 정수, 길이 상한·체크섬. 구조체 메모리를 그대로 저장하지 않음 |

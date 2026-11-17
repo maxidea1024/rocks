@@ -6,6 +6,12 @@
 #include <Object/PreparedReferences.h>
 #include <Object/PropertyPath.h>
 
+namespace rocks {
+
+class PreparedStructElements;
+
+} // namespace rocks
+
 // 경로 접근 cursor의 공개 detail 선언이다(Docs/Design/ReflectionFoundations.ko.md 7.1절). 생성 경로
 // 템플릿(Object/GeneratedPathAccess.h)이 멤버 함수를 부르므로 클래스 선언은 여기에 두고 구현은
 // Private/PropertyPathCursor.cpp(연산 실행은 PropertyPathRunner.cpp)에 둔다. 사용자 코드는 쓰지
@@ -34,7 +40,9 @@ enum class PathOperation : uint8 {
     // 필드·멤버 값 하나를 상자로 깊게 복사하기(PathDetach)와 상자와 맞바꿀 자리 찾기
     // (PathPrepareAttach)다(리플렉션 B9i3c0).
     Detach,
-    Attach
+    Attach,
+    // Map·Set 필드의 키를 삽입 순서대로 모두 읽기다(PathReadKeys — 리플렉션 B9i4).
+    ReadKeys
 };
 
 // 해석한 경로 단계 하나다: 필드(스키마 안 위치), 바깥 필드에서 누적한 유효 플래그, 대상
@@ -125,10 +133,11 @@ public:
     // Unsupported(NoPathAccess)를 기록한다.
     Result<void> RequireLive() noexcept;
 
-    // 지금 연산이 대상을 바꾸지 않는 읽기(Read·Length·QueryOptional·Contains)인지다.
+    // 지금 연산이 대상을 바꾸지 않는 읽기(Read·Length·QueryOptional·Contains·ReadKeys)인지다.
     bool IsReading() const noexcept {
         return operation_ == PathOperation::Read || operation_ == PathOperation::Length ||
-               operation_ == PathOperation::QueryOptional || operation_ == PathOperation::Contains;
+               operation_ == PathOperation::QueryOptional ||
+               operation_ == PathOperation::Contains || operation_ == PathOperation::ReadKeys;
     }
 
     // Detach 끝 지점이다: value(ops 형식의 지금 값)를 출력 상자에 깊게 복사하고 상자를
@@ -170,6 +179,18 @@ public:
                                 Allocator& containerAllocator, Span<const ObjectHandle> elements,
                                 void* clone) noexcept;
 
+    // PathPrepareStructElements(리플렉션 B9i3c4)인지다: StructRefArray 끝 지점이 원소 수 대신 출력
+    // 준비물에 배열을 묶는다(Length 연산).
+    bool LocatesElements() const noexcept {
+        return elements_ != nullptr;
+    }
+
+    // StructRefArray 끝 지점이 부른다: 출력 준비물이 묶이지 않았으면 storage에 묶고(지금 원소
+    // 수·변경 계수), 묶였으면 같은 owner·배열(아니면 InvalidArgument(InvalidValue))과 변경
+    // 계수(아니면 Busy)를 확인한 뒤 게시된 객체면 지울 원소 안의 참조를 다시 모은다. 할당은 고정
+    // 아래 하고 owner를 다시 확인한다.
+    Result<void> BindStructElements(StructRefArrayStorage& storage) noexcept;
+
     // Write·Insert의 입력 값이다(Insert의 struct 원소는 nullptr). 검증을 마친 값이다.
     const FieldValue* Input() const noexcept {
         return input_;
@@ -178,6 +199,11 @@ public:
     // Read의 out, Write의 previous, Remove의 removed다(주지 않았으면 nullptr — Read는 항상 있다).
     FieldValue* Output() const noexcept {
         return output_;
+    }
+
+    // ReadKeys의 out이다(리플렉션 B9i4 — 그 밖의 연산은 nullptr).
+    Array<FieldValue>* KeysOutput() const noexcept {
+        return keys_;
     }
 
     // 클래스 필드 thunk가 소유 객체 주소를 얻는다. 실제 객체 타입이
@@ -287,6 +313,10 @@ public:
     // 반환한다).
     Result<void> PublishRead(FieldValue& value) noexcept;
 
+    // ReadKeys: owner를 다시 확인한 뒤 고정을 풀고 keys(KeysOutput()의 allocator로 만든 키 목록)를
+    // out으로 옮긴다(out의 옛 원소는 고정 밖에서 반환한다).
+    Result<void> PublishKeys(Array<FieldValue>& keys) noexcept;
+
     // 성공한 쓰기·삭제의 옛 값(value)을 Output()으로 옮긴다. 고정을 푼 뒤에 부른다. Output()이
     // 없으면 아무것도 하지 않는다.
     void PublishOutput(FieldValue& value) noexcept;
@@ -349,9 +379,12 @@ private:
     PreparedReference* reference_ = nullptr;
     // 시작 위치에 건 Registry 컨테이너 준비 사본이다(리플렉션 B9i3c3).
     PreparedReferences* stage_;
+    // PathPrepareStructElements의 출력 준비물이다(리플렉션 B9i3c4).
+    PreparedStructElements* elements_ = nullptr;
     PathOperation operation_;
     const FieldValue* input_;
     FieldValue* output_;
+    Array<FieldValue>* keys_ = nullptr;
     PropertyPathFailure* failure_;
     TypeLease ownerType_;
     TypeLease expectedType_;

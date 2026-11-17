@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" width="960" height="560" role="img" aria-labelledby="title desc">
+<title id="title">렌더 경로 Forward+와 Deferred, GI 선택</title>
+<desc id="desc">공통 전반부(장면 갱신, 가시성, 깊이, HZB, light cluster)를 지나 Deferred는 GBuffer와 조명 pass, Forward+는 보조 출력과 forward 조명으로 갈라진 뒤, 화면 효과·반투명·AA·후처리·UI·present로 다시 합쳐진다. GI는 정적과 동적 두 축이고 path tracing은 별도 렌더 모드다.</desc>
+<style>
+text{font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;fill:#183142}.title{font-size:22px;font-weight:700}.head{font-size:13px;font-weight:700}.small{font-size:12px;fill:#405869}.lane{font-size:14px;font-weight:700;fill:#2f4c60}
+.common{fill:#f4f8fb;stroke:#bccfda}.def{fill:#e6f2fa;stroke:#6c9ab7}.fwd{fill:#e4f4ec;stroke:#69a789}.gi{fill:#fff5df;stroke:#e1ba63}.mode{fill:#f1eafe;stroke:#9d87c1}.arrow{stroke:#5c7385;stroke-width:2;fill:none;marker-end:url(#a)}
+</style>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5c7385"/></marker></defs>
+<rect width="960" height="560" fill="#fff"/>
+<text x="24" y="34" class="title">렌더 경로(Forward+ · Deferred)와 GI 선택</text>
+<text x="24" y="58" class="small">계획 11.4·14.3절. view마다 경로를 고르며, 같은 장면을 서로 다른 경로의 view가 함께 볼 수 있다. 저사양·모바일도 Forward+다(고전 Forward 없음).</text>
+
+<text x="24" y="92" class="lane">공통 전반부</text>
+<g transform="translate(24 102)">
+<rect class="common" width="140" height="58" rx="6"/><text x="10" y="24" class="head">장면 갱신</text><text x="10" y="44" class="small">upload·skinning</text>
+<rect class="common" x="152" width="150" height="58" rx="6"/><text x="162" y="24" class="head">가시성 판정</text><text x="162" y="44" class="small">frustum·이전 HZB</text>
+<rect class="common" x="314" width="150" height="58" rx="6"/><text x="324" y="24" class="head">깊이·visibility</text><text x="324" y="44" class="small">첫 depth pass</text>
+<rect class="common" x="476" width="150" height="58" rx="6"/><text x="486" y="24" class="head">현재 HZB·복구</text><text x="486" y="44" class="small">보류 대상 재검사</text>
+<rect class="common" x="638" width="150" height="58" rx="6"/><text x="648" y="24" class="head">light cluster</text><text x="648" y="44" class="small">광원 목록·그림자</text>
+<path class="arrow" d="M140 29 H150"/><path class="arrow" d="M302 29 H312"/><path class="arrow" d="M464 29 H474"/><path class="arrow" d="M626 29 H636"/>
+</g>
+
+<text x="24" y="196" class="lane">Deferred</text>
+<g transform="translate(24 206)">
+<rect class="def" width="160" height="58" rx="6"/><text x="10" y="24" class="head">GBuffer</text><text x="10" y="44" class="small">재질 표면 기록</text>
+<rect class="def" x="172" width="170" height="58" rx="6"/><text x="182" y="24" class="head">decal·AO·GI 준비</text><text x="182" y="44" class="small">GBuffer 사용</text>
+<rect class="def" x="354" width="170" height="58" rx="6"/><text x="364" y="24" class="head">조명 pass</text><text x="364" y="44" class="small">직접광+IBL+GI</text>
+<path class="arrow" d="M160 29 H170"/><path class="arrow" d="M342 29 H352"/>
+</g>
+<text x="24" y="296" class="lane">Forward+</text>
+<g transform="translate(24 306)">
+<rect class="fwd" width="160" height="58" rx="6"/><text x="10" y="24" class="head">보조 출력</text><text x="10" y="44" class="small">필요한 normal 등만</text>
+<rect class="fwd" x="172" width="170" height="58" rx="6"/><text x="182" y="24" class="head">AO·GI cache 준비</text><text x="182" y="44" class="small">독립 GI 입력</text>
+<rect class="fwd" x="354" width="170" height="58" rx="6"/><text x="364" y="24" class="head">forward 조명</text><text x="364" y="44" class="small">재질 draw 안에서</text>
+<path class="arrow" d="M160 29 H170"/><path class="arrow" d="M342 29 H352"/>
+</g>
+<g transform="translate(560 206)"><rect class="common" width="376" height="158" rx="8"/><text x="12" y="26" class="head">공통 후반부</text><text x="12" y="52" class="small">현재 lit color 기반 SSR·SSGI → denoise·합성</text><text x="12" y="74" class="small">fog·대기 → 반투명(공유 forward pass)</text><text x="12" y="96" class="small">velocity → AA·업스케일(TAA·FSR·DLSS·XeSS)</text><text x="12" y="118" class="small">출력 후처리(bloom·DOF·tone map)</text><text x="12" y="140" class="small">→ HUD·UI → present</text></g>
+<path class="arrow" d="M548 235 H558"/><path class="arrow" d="M548 335 H558"/>
+<path class="arrow" d="M737 160 V182 H100 V204"/><path class="arrow" d="M100 182 H10 V336 H22"/>
+
+<text x="24" y="404" class="lane">GI 선택: 두 축 (view마다)</text>
+<g transform="translate(24 414)"><rect class="gi" width="300" height="122" rx="8"/><text x="12" y="26" class="head">정적 조명</text><text x="12" y="52" class="small">None</text><text x="12" y="72" class="small">Baked: 라이트맵·베이크 프로브</text><text x="12" y="92" class="small">       ·reflection capture</text><text x="12" y="112" class="small">이동 객체는 프로브로 받는다</text></g>
+<g transform="translate(338 414)"><rect class="gi" width="330" height="122" rx="8"/><text x="12" y="26" class="head">동적 GI (하나를 고름, 없으면 낮춤)</text><text x="12" y="52" class="small">None · VoxelConeTracing(SVOGI 계열)</text><text x="12" y="72" class="small">DynamicGI(Lumen 유사, 단계 G0–G4)</text><text x="12" y="92" class="small">RayTraced(하드웨어 RT 전용, 독립 방식)</text><text x="12" y="112" class="small">같은 빛을 두 번 더하지 않는다</text></g>
+<g transform="translate(682 414)"><rect class="mode" width="254" height="122" rx="8"/><text x="12" y="26" class="head">렌더 모드</text><text x="12" y="52" class="small">Raster: 위 경로로 그린다</text><text x="12" y="72" class="small">PathTracing: 래스터 경로 전체를</text><text x="12" y="92" class="small">대신하는 reference·영상 출력</text><text x="12" y="112" class="small">(GI 방식이 아님)</text></g>
+</svg>

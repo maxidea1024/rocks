@@ -5,6 +5,8 @@
 
 namespace rocks {
 
+class PreparedStructElements;
+
 // 소유 스레드에 묶인 비공개 생성 트랜잭션. 생성된 객체는 Commit 전 Resolve/TryPin할 수 없다.
 // Commit하지 않고 범위를 벗어나면 생성 역순으로 롤백한다. 객체 포인터를 외부에 유출하지 않는다.
 // Registry보다 먼저 파괴해야 한다. 현재 활성 트랜잭션이 있으면 Collect는 Busy다.
@@ -376,6 +378,8 @@ public:
 
 private:
     friend class ObjectRegistry;
+    // staged 배열 원소 지우기의 게시(리플렉션 B9i3c4)가 트랜잭션 문맥으로 압축한다.
+    friend class PreparedStructElements;
     // 검사 중 표시를 세우고 내린다(BeginRequiredCheck·문맥 소멸).
     friend class FieldEncodeContext;
 

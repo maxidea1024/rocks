@@ -1,6 +1,6 @@
 # Core 수학 — 플랫폼 최적화 계층·값 타입·색·난수
 
-기준일: 2026-11-11. 이 문서는 **현재 구현된 범위와 계약**을 기록한다. 실행하지 않은 플랫폼과 미구현 기능은 각 절의 "미검증·후속"에 남긴다. 설계 정책 변경 이유는 [전체 구현 계획 §3.3](../Design/EngineImplementationPlan.ko.md)의 2026-11-11 개정 메모를 따른다.
+기준일: 2026-11-11(좌표·단위 규약 UE 전환 1단계 2026-11-17 — 2절 "좌표·단위 규약"). 이 문서는 **현재 구현된 범위와 계약**을 기록한다. 실행하지 않은 플랫폼과 미구현 기능은 각 절의 "미검증·후속"에 남긴다. 설계 정책 변경 이유는 [전체 구현 계획 §3.3](../Design/EngineImplementationPlan.ko.md)의 2026-11-11 개정 메모를 따른다.
 
 ## 1. 구조 — 플랫폼별 최적화 함수의 선택
 
@@ -37,19 +37,43 @@ Core/Public/Core/Math        Vec·Quat·Mat4·Transform·Rotator·Rect·Color·R
 
 ### 허용 오차 정책
 
-전역 epsilon을 어떤 함수에도 묵시적으로 적용하지 않는다. UE의 `UE_SMALL_NUMBER`(1e-8)·`UE_KINDA_SMALL_NUMBER`(1e-4)와 같은 값의 `math::SmallNumber<T>`·`math::KindaSmallNumber<T>`, `math::MachineEpsilon<T>`을 제공하며 호출자가 `IsNearlyEqual(a, b, math::KindaSmallNumber<float>)`처럼 명시한다. 절대 오차는 값의 크기에 따라 의미가 달라지므로(float 1e6 m 근처 간격은 약 0.06 m) 크기 비례 비교에는 `IsNearlyEqualRelative(a, b, relative, absolute)`나 UE `IsNearlyEqualByULP`와 같은 규칙의 `IsNearlyEqualByUlps`를 쓴다. 함수별로 문서화한 기본 허용치(`Transform::IsValid` 1e-4, `TryFromMatrix` 직교성 1e-5, `ShapeUnitTolerance` 1e-5, OBB 평행 축 보정 등)는 각 헤더에 명시되어 있다.
+전역 epsilon을 어떤 함수에도 묵시적으로 적용하지 않는다. UE의 `UE_SMALL_NUMBER`(1e-8)·`UE_KINDA_SMALL_NUMBER`(1e-4)와 같은 값의 `math::SmallNumber<T>`·`math::KindaSmallNumber<T>`, `math::MachineEpsilon<T>`을 제공하며 호출자가 `IsNearlyEqual(a, b, math::KindaSmallNumber<float>)`처럼 명시한다. 절대 오차는 값의 크기에 따라 의미가 달라지므로(float 1e6 cm(10 km) 근처 간격은 0.0625 cm) 크기 비례 비교에는 `IsNearlyEqualRelative(a, b, relative, absolute)`나 UE `IsNearlyEqualByULP`와 같은 규칙의 `IsNearlyEqualByUlps`를 쓴다. 함수별로 문서화한 기본 허용치(`Transform::IsValid` 1e-4, `TryFromMatrix` 직교성 1e-5, `ShapeUnitTolerance` 1e-5, OBB 평행 축 보정 등)는 각 헤더에 명시되어 있다.
 
-공통: 오른손 좌표계, +X 전방·+Y 왼쪽·+Z 위, 미터·라디안·초. column vector `p' = M * p`, 합성 `world = parent * local`(UE의 row vector·`A*B=A 먼저`와 반대). 실패 가능한 연산은 `Result`(`Try*`)로 반환하고 입력을 바꾸지 않는다. 허용 오차는 호출자가 명시하며 전역 epsilon은 없다.
+### 좌표·단위 규약(UE 5.8과 같다)
+
+사용자 요구(2026-11-17)에 따라 공간 좌표계·회전 의미·단위를 UE 5.8(5.8.4, `f45729c0b6f0`)과 **같게** 바꾸고 있다. 이전 규약(오른손, +Y 왼쪽, 미터, Rotator 라디안·yaw·pitch·roll 순서·roll 부호 반대)을 위한 호환 계층은 두지 않는다. 1단계(축·방향 상수·외적 설명·Quaternion·Rotator·MathUtility 규약 문장과 golden)를 반영했고, 행렬·Transform의 행 벡터 전환, 도형 앞면·Ray 기본 방향, 단위 변환 경계 함수, World·문서 전수 정정, 렌더 경계는 후속 단계다. 아래 근거 행은 UE 5.8.4 원본(`Engine/Source/Runtime/Core/`)이며 부호·식은 좌우수로 추측하지 않고 UE 식을 옮긴 probe로 계산해 확인했다(5절).
+
+| 항목 | 규약(UE와 같음) | UE 근거 |
+|---|---|---|
+| 축·좌우수 | 왼손, +X 전방, +Y 오른쪽, +Z 위 | `Public/Math/Vector.h:84-100`, `Private/Math/UnrealMath.cpp:35-51` |
+| 방향 상수 | `Forward` (1,0,0), `Backward` (−1,0,0), `Right` (0,1,0), `Left` (0,−1,0), `Up` (0,0,1), `Down` (0,0,−1) | 같은 곳 |
+| 외적 | 표준식 `(a.y·b.z − a.z·b.y, …)`. `Cross(Forward, Right) = Up`, `Cross(Right, Forward) = Down`. 2D `Cross`는 z 성분(양수 = +X→+Y 쪽, 위에서 볼 때 시계 방향) | `Vector.h:1521-1530`, `Vector2D.h` `operator^` |
+| 길이·시간 | cm, 초. 허용 오차 상수 값은 UE와 같고 의미도 cm다 | `Engine/Classes/GameFramework/WorldSettings.h:593-595`·`Engine/Private/WorldSettings.cpp:127`(WorldToMeters 100), `Core/Public/Math/UnrealMathUtility.h:130-131` |
+| 각도 단위 | `Rotator`는 도(degree). 삼각함수·`Quaternion` 축-각·`AngularDistance`·`TryAngleBetween`은 라디안 | `Rotator.h:24`, `GenericPlatformMath.h:521-522`, `Quat.h:912-921` |
+| Quaternion | 성분 (x,y,z,w), Hamilton 곱 `a*b`는 b 먼저(UE FQuat와 같음, UE FTransform·FMatrix 곱과 반대), `RotateVector` 식 같음. 양의 각은 왼손 회전: Q(+Z,+90°)·Forward = Right, Q(+X,+90°)·Right = Up, Q(+Y,+90°)·Up = Forward. 축 벡터 `GetAxisX/Y/Z` = `GetForwardVector/GetRightVector/GetUpVector`(이전 `GetForward/GetLeft/GetUp`은 없앴다) | `Quat.h:29-31`·`:49-58`·`:1236-1258`·`:1293-1330`, `Rotator.h:31`, `UnrealMathFPU.h:1456-1459` |
+| Rotator 필드·단위 | `pitch, yaw, roll`(도), 생성자 `Rotator(pitch, yaw, roll)`. 리플렉션 미러 `RotatorBinding`·`RotatordBinding`도 같은 순서(이름 기반 필드 ID라 ID는 그대로, 저장된 값이 없어 Version 1 유지) | `Rotator.h:45-52`, `:101` |
+| Rotator 의미 | 내재 yaw → pitch → roll = Q(+Z, yaw)·Q(+Y, −pitch)·Q(+X, −roll). pitch +는 기수 위(Forward→Up), yaw +는 위에서 볼 때 시계(Forward→Right), roll +는 +X로 볼 때 시계(Right→Down, Up→Right). 이전 Rocks roll은 대수 부호가 반대였다 | `Rotator.h:26-32`·`:45-52` |
+| Rotator → Quaternion | UE 스칼라 단일식, 각 성분 `Fmod 360` 뒤 반각 sin·cos. float도 CRT sin·cos(UE float은 다항 근사 SinCos·VectorSinCos라 float 결과는 반올림보다 조금 더 다를 수 있다) | `UnrealMath.cpp:518-535`(double), `:448-466`(float) |
+| Quaternion → Rotator | 입력을 정규화(Rocks — 실패는 `InvalidArgument`)한 뒤 UE 식: s = z·x − w·y, 임계 0.4999995 밖은 pitch ±90·roll 0·yaw = `NormalizeAxis(±2·atan2(x, w))`, 그 밖은 asin·atan2 식. float pitch는 `math::FastAsin`(UE와 같은 bit), double은 `Asin`. 결과 구간도 UE 그대로(yaw·roll은 −180이 나올 수 있다 — 이전 Rocks의 (−π, π] 보정은 없앴다) | `UnrealMath.cpp:640-677`(float, `:672` FastAsin), `:691-719`(double) |
+| Rotator 정규화 | `ClampAxis` [0, 360), `NormalizeAxis` (−180, 180], `GetNormalized`·`GetDenormalized`, `Equals`(차를 NormalizeAxis로 감아 비교), `Vector()` = (cos p·cos y, cos p·sin y, sin p), `RotateVector`·`UnrotateVector`(quaternion 경유 — UE는 회전 행렬 경유, 반올림 수준 차이) | `Rotator.h:649-651`·`:688-716`, `UnrealMath.cpp:371-402` |
+| 도 단위 도우미 | `math::UnwindDegrees`·`FindDeltaAngleDegrees`(Fmod로 (−180, 180]), `math::FastAsin` | `UnrealMathUtility.h:819-854`·`:898-913`·`:949-964` |
+
+UE와 의도적으로 다른 점(규약이 아니라 안전성·정확도 정책 — 요구 3절 "규약과 충돌하지 않으면 유지"):
+- `ClampAxis`: UE 본문은 −1e-20 같은 아주 작은 음수에서 반올림으로 360을 낸다. Rocks는 0을 돌려 UE가 선언한 [0, 360)(`Rotator.h:418-424`)을 지킨다. `NormalizeAxis` 결과는 둘 다 0으로 같다.
+- `UnwindDegrees`: UE는 ±360 반복 루프라 −180을 그대로 두고(닫힌 구간) Inf에서 끝나지 않는다. Rocks는 Fmod로 −180을 180으로, 비유한 입력을 NaN으로 만든다.
+- `TryFromQuaternion`: UE `FQuat::Rotator`는 단위 입력을 가정하고 검사하지 않는다. Rocks는 정규화하고 영·비유한 입력을 실패로 돌려준다(단위 입력의 결과는 반올림 수준에서 같다).
+
+공통 계약: column vector `p' = M * p`, 합성 `world = parent * local`(UE의 row vector·`A*B=A 먼저`와 반대 — 행 벡터 전환은 후속 단계라 행렬·Transform·MatrixFactory 설명은 아직 이전 규약이다). 실패 가능한 연산은 `Result`(`Try*`)로 반환하고 입력을 바꾸지 않는다. 허용 오차는 호출자가 명시하며 전역 epsilon은 없다.
 
 | 헤더 | 내용 | 주요 계약 |
 |---|---|---|
-| `MathUtility.h` | `math::` 상수·각도 변환, Clamp·Lerp·Sign, 분류, 초월 함수, 정수 변환, `UnwindRadians`·`FindDeltaAngleRadians`, `SmoothStep`·`CubicInterp`·`InterpTo`·`InterpConstantTo`·`GridSnap`·`Wrap` | Clamp는 NaN을 전파하고 min>max는 Fatal. Lerp는 t=0/1에서 끝점 정확. InterpTo/ConstantTo는 UE와 달리 숨은 "충분히 가까움" 기준이 없고, 도달 조건에서는 target을 정확히 반환. 입력 NaN은 target으로 바꾸지 않고 NaN으로 전파. `GridSnap`의 0.5 경계는 grid 부호와 무관하게 +∞ 방향(UE는 음수 grid에서 반대). `Wrap`은 반열린 구간 |
+| `MathUtility.h` | `math::` 상수·각도 변환, Clamp·Lerp·Sign, 분류, 초월 함수(UE와 같은 근사 `FastAsin` 포함), 정수 변환, `UnwindRadians`·`FindDeltaAngleRadians`·`UnwindDegrees`·`FindDeltaAngleDegrees`, `SmoothStep`·`CubicInterp`·`InterpTo`·`InterpConstantTo`·`GridSnap`·`Wrap` | Clamp는 NaN을 전파하고 min>max는 Fatal. Lerp는 t=0/1에서 끝점 정확. InterpTo/ConstantTo는 UE와 달리 숨은 "충분히 가까움" 기준이 없고, 도달 조건에서는 target을 정확히 반환. 입력 NaN은 target으로 바꾸지 않고 NaN으로 전파. `GridSnap`의 0.5 경계는 grid 부호와 무관하게 +∞ 방향(UE는 음수 grid에서 반대). `Wrap`은 반열린 구간 |
 | `Vector2/3/4.h` | `Vec2/3/4`(float), `Vec2d/3d/4d`(double) | `TryNormalize(minimumLength)`는 길이 단위(제곱 아님) 기준, 가장 큰 성분으로 먼저 나눠 overflow/subnormal 입력도 정규화. 영·비유한은 InvalidArgument. Vector2/3 같은 계약(UE는 2D/3D 정규화 실패 동작이 다름) |
 | `IntVector.h` | `IntVec2`, `IntVec3` | overflow·0 나눗셈·INT32_MIN/-1은 Fatal(UE는 정의되지 않은 동작) |
 | `Matrix4.h` | `Mat4`, `Mat4d` | 열 우선 저장 `m[column*4+row]`, 이동은 `m[12..14]`, 기본값 단위 행렬. float↔double 변환은 explicit 생성자(`Mat4d(Mat4)` 정확, `Mat4(Mat4d)` 원소별 최근접 반올림 — Vector·Quaternion과 같다). float 곱·변환은 `platform::simd`. `TryInverse`는 double Laplace 전개, 행렬식 0·비유한·결과가 T로 비유한이면 실패 |
 | `MatrixFactory.h` | 원근(대칭·비대칭·무한 원거리), 직교(대칭·비대칭), `DepthRange{Standard, Reversed}`, oblique clip(UE ClipProjection), LookAt/LookTo, 축 회전·quaternion 회전·역회전, 이동·scale·TR·TRS, RotationAboutPoint, Mirror | Rocks view 공간(카메라 +X 전방, +Y 왼쪽, +Z 위) → NDC(x 오른쪽, y 위, z [0,1]). 기본 깊이는 Reversed(near→1). API별 y 반전은 RHI 경계에서 한 번 적용. oblique clip은 `DepthRange`를 기본값 없이 받아 두 깊이 규약을 모두 지원(Reversed는 near를 `w - z = a·c`로 바꾼다)하며, 행렬 깊이 계수 부호와 맞지 않는 플래그·far 평면 너머 평면은 InvalidArgument, 직교 투영은 Unsupported로 거부한다(조용히 뒤집힌 행렬을 내지 않음). LookTo는 up과 forward 사이 sin이 `LookToMinimumSine`(64·machine epsilon) 미만이면 실패(외적 정확 0 판정만으로는 평행 입력이 임의 방향으로 성공했다)하고, 기준 근처에서도 직교 행렬이 되도록 Y축을 Gram-Schmidt로 한 번 더 직교화한다. 원근 깊이 계수는 `n·(f/(f−n))`로 계산해 큰 far에서 overflow하지 않음 |
-| `Quaternion.h` | `Quat`, `Quatd` | 성분 (x,y,z,w), 오른손 회전, `a*b`는 b 먼저. 회전 함수는 단위 전제. 행렬→quaternion은 대각합 분기 방식, w>=0 정규화. `Slerp`는 최단 경로이며 비유한 입력은 비유한 결과로 드러낸다. `AngularDistance`는 `4·atan2(|a−b|, |a+b|)`(같은 반구로 맞춘 뒤)로 계산해 q와 −q는 정확히 0이고 작은 각도 구분한다(2·acos 방식은 float 같은 회전에서 9.8e-4 rad를 냈다). 결과는 [0, π]로 자른다(NaN은 전파). `TryInverse`는 가장 큰 성분으로 먼저 나눠 제곱 길이 overflow/underflow 입력도 처리 |
-| `Rotator.h` | `Rotator<T>`(UE FRotator 대응) | 라디안, yaw(+Z, 양수=왼쪽), pitch(-Y축, 양수=기수 위), roll(+X, 양수=왼쪽 위). 적용 roll→pitch→yaw. gimbal lock에서는 roll=0으로 합침. quaternion 분해 결과의 yaw·roll은 (−π, π](−π는 +π로). UE는 도·왼손이라 값 교환 불가 |
+| `Quaternion.h` | `Quat`, `Quatd` | 성분 (x,y,z,w), UE와 같은 왼손 양의 각, `a*b`는 b 먼저, 축 벡터 `GetAxisX/Y/Z`·`GetForwardVector/GetRightVector/GetUpVector`. 회전 함수는 단위 전제. 행렬→quaternion은 대각합 분기 방식, w>=0 정규화. `Slerp`는 최단 경로이며 비유한 입력은 비유한 결과로 드러낸다. `AngularDistance`는 `4·atan2(|a−b|, |a+b|)`(같은 반구로 맞춘 뒤)로 계산해 q와 −q는 정확히 0이고 작은 각도 구분한다(2·acos 방식은 float 같은 회전에서 9.8e-4 rad를 냈다). 결과는 [0, π]로 자른다(NaN은 전파). `TryInverse`는 가장 큰 성분으로 먼저 나눠 제곱 길이 overflow/underflow 입력도 처리 |
+| `Rotator.h` | `Rotator<T>`(UE FRotator와 같은 규약·식) | 도(degree), 필드·생성자 `pitch, yaw, roll`. 의미·변환식·정규화는 위 "좌표·단위 규약" 표. 특이점(임계 0.4999995)에서는 UE와 같이 pitch ±90·roll 0으로 합친다. UE FRotator 값을 그대로 옮겨 쓸 수 있다 |
 | `Transform.h` | `Transform`(authoring TRS — 이동 double, 회전 float quaternion, scale float), `Transform3<T>`(`Transform3f`·`Transform3d` — 모든 성분이 한 정밀도, UE FTransform3f·3d 대응) | 점 변환 scale→rotation→translation, 합성 world = parent * local. `Transform` 계산은 double이며 회전은 double로 확장 후 재정규화. `Transform3<T>`는 변환·`ToMatrix`·합성 행렬 곱을 T로 계산하고(회전 정규화는 제곱 길이 [2^-60, 2^60]에서 sqrt 한 번), `TryFromMatrix` 분해는 세 타입이 같은 double 구현(`detail::TryDecomposeAffine`)을 쓴 뒤 각 정밀도로 반올림한다. `Transform3<T>::TryInverse`는 역 affine [S⁻¹Rᵀ | −S⁻¹Rᵀt]를 double로 직접 만들어 분해하므로(행렬식 없음) 극단 scale에서도 되고, 분해 열 길이는 최대 성분이 [2^-500, 2^500] 밖일 때만 나눠 구해 overflow·underflow가 없다(`Transform`은 지금 식 그대로 — 결과 비트 불변). 비균일 scale+회전 합성의 shear는 근사하지 않고 `Unsupported`. 0 scale 역변환은 InvalidArgument(Transform3f는 역수가 float로 Inf인 |s| < 약 2.94e-39도). 역변환 점·벡터는 결과가 범위를 넘으면 비유한 성분으로 성공한다. 반사는 x scale 부호. 세 타입 사이 변환은 `To…`(정확한 넓힘)·`RoundTo…`(성분별 최근접 짝수 반올림, 결과 유한성은 `IsValid`로 확인)뿐이다(리플렉션 B9 3.2절) |
 | `Rect.h` | `Box2<T>`(UE FBox2D), `IntRect`(UE FIntRect) | Box2는 닫힌 집합(`Contains`=UE IsInsideOrOn, `ContainsStrictly`=IsInside), 무효 플래그 대신 `TryMake`/`TryFromPoints`. IntRect는 반열린 픽셀 구간, 넓이 int64 |
 | `Interval.h` | `Interval<T>`(UE TInterval) | 닫힌 구간, 무효 상태 대신 `TryMake`. 교집합이 없으면 NotFound, NaN을 포함하면 무효로 드러남 |
@@ -90,6 +114,7 @@ UE 5.8 `Color.h`/`Color.cpp`와의 차이(원본 확인 — 아래 개수는 5.6
 ## 5. 검증
 
 - 단위 테스트: `Core/Source/Runtime/PlatformBase/Tests/PlatformMathTests.cpp`(Generic↔CPU 구현 bit 대조, 정수 변환 경계·무작위 30만 건, InvSqrtEstimate 오차, scalar↔SIMD 레지스터 bit 대조 5만 건×2), `Core/Source/Runtime/Core/Tests/Math*Tests.cpp`(벡터·행렬·투영·quaternion·Transform·Transform3f/3d(`MathTransform3Tests.cpp` — 변환 경계값의 최근접 짝수 반올림, 세 타입의 분해 판정 일치)·Rotator·보간·Rect·Float16, 독립 Gauss-Jordan 역행렬 oracle·Python 정수 행렬식·half 65,536개 전수 왕복과 이진 탐색 oracle 등), `ColorTests.cpp`, `RandomStreamTests.cpp`.
+- 좌표·회전 golden(2026-11-17): UE 5.8.4 원본 식(`UnrealMath.cpp` Rotator↔Quat·Vector, `Rotator.h` ClampAxis·NormalizeAxis, `Quat.h` 축-각·RotateVector, `Vector.h` 외적, `UnrealMathUtility.h` FastAsin·UnwindDegrees)을 그대로 옮긴 독립 C++ probe(x64 Windows clang-cl, `-ffp-contract=off`, double·float)의 출력을 시험 기대값으로 썼다. 정확 일치(`==`)는 결과가 정확히 표현되는 항목(방향 상수, 축 외적, `atan2(±0, −1)`의 ±180, `Fmod 360` 감김의 bit 동일, 특이점의 ±90·0, ClampAxis·NormalizeAxis·UnwindDegrees, float `FastAsin` bit와 그것을 쓰는 float pitch 1건)에만 쓰고, 축 ±90° 회전 결과(UE에서도 2.3e-16 반올림이 남는다)는 1e-15, quaternion 성분은 2 ulp, 임의 각은 1e-15(성분)·1e-12(도), 특이점 근처는 1e-9(도)로 비교한다. 왕복 시험만으로 갈음하지 않고 축별 ±90°, 임의 각 2건, 특수 quaternion 7건, 특이점 임계 안팎 5건, roll 부호를 구체 값으로 고정했다(`MathVectorTests.cpp`·`MathRotatorInterpTests.cpp`·`MathQuaternionTransformTests.cpp`). 무작위 시험은 UE 단일식 = 축-각 분해 Q(+Z, yaw)·Q(+Y, −pitch)·Q(+X, −roll)(1e-15)와 왕복(1e-9도)을 확인한다.
 - 키 커브: `MathInterpCurveTests.cpp`(G09 경계)·`MathInterpCurveGoldenTests.cpp`(UE 5.8 식 비트 대조, 독립 double reference, 조밀 표본 최근접 oracle) — 상세는 [키 커브](InterpCurve.ko.md) 5절.
 - 음성 대조(자식 프로세스): `math-invalid-0..7` — NaN·범위 밖 정수 변환, IntVector overflow, 일괄 변환 크기 불일치·부분 겹침, 행렬 인덱스, 비단위 축, Clamp 범위 위반이 각각 정상 종료하지 않고 지정 진단으로 끝나는지 확인한다.
 - ARM64는 `--target=aarch64-pc-windows-msvc`로 NEON 경로의 **컴파일만** 확인했다. 실행 결과는 아래 미검증이다.

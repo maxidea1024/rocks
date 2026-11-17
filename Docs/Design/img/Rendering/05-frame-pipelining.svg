@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 380" width="960" height="380" role="img" aria-labelledby="title desc">
+<title id="title">프레임 파이프라이닝과 프레임 slot</title>
+<desc id="desc">게임 lane, 렌더 lane, GPU가 서로 다른 프레임을 동시에 처리한다. slot이 세 개면 게임 lane은 렌더 lane보다 최대 두 프레임 앞서고, 네 번째 프레임은 가장 오래된 slot의 GPU 완료를 기다린다.</desc>
+<style>
+text{font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;fill:#183142}.title{font-size:22px;font-weight:700}.head{font-size:14px;font-weight:700}.small{font-size:12px;fill:#405869}.lbl{font-size:13px;font-weight:700;text-anchor:middle}
+.f0{fill:#e4f4ec;stroke:#69a789}.f1{fill:#e6f2fa;stroke:#6c9ab7}.f2{fill:#f1eafe;stroke:#9d87c1}.f3{fill:#fff5df;stroke:#e1ba63}.wait{fill:#fdecea;stroke:#d48a80}.rail{stroke:#c3ced6;stroke-width:1.5}.arrow{stroke:#5c7385;stroke-width:1.5;fill:none;stroke-dasharray:5 4;marker-end:url(#a)}
+</style>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5c7385"/></marker></defs>
+<rect width="960" height="380" fill="#fff"/>
+<text x="24" y="34" class="title">겹쳐 도는 세 주체: 프레임 slot이 앞서가는 정도를 묶는다</text>
+<text x="24" y="58" class="small">slot 3개 예시. 같은 색은 같은 프레임이다. 시간은 오른쪽으로 흐른다.</text>
+<text x="24" y="104" class="head">게임 lane</text><line class="rail" x1="130" y1="99" x2="940" y2="99"/>
+<text x="24" y="174" class="head">렌더 lane</text><line class="rail" x1="130" y1="169" x2="940" y2="169"/>
+<text x="24" y="244" class="head">GPU</text><line class="rail" x1="130" y1="239" x2="940" y2="239"/>
+
+<line x1="614" y1="74" x2="614" y2="268" stroke="#d48a80" stroke-width="1.5" stroke-dasharray="5 4"/>
+<rect class="f0" x="140" y="82" width="120" height="34" rx="6"/><text x="200" y="104" class="lbl">N</text>
+<rect class="f1" x="264" y="82" width="120" height="34" rx="6"/><text x="324" y="104" class="lbl">N+1</text>
+<rect class="f2" x="388" y="82" width="120" height="34" rx="6"/><text x="448" y="104" class="lbl">N+2</text>
+<rect class="wait" x="512" y="82" width="110" height="34" rx="6"/><text x="567" y="104" class="lbl">slot 대기</text>
+<rect class="f3" x="626" y="82" width="120" height="34" rx="6"/><text x="686" y="104" class="lbl">N+3</text>
+
+<rect class="f0" x="262" y="152" width="140" height="34" rx="6"/><text x="332" y="174" class="lbl">N 그래프·기록</text>
+<rect class="f1" x="406" y="152" width="140" height="34" rx="6"/><text x="476" y="174" class="lbl">N+1</text>
+<rect class="f2" x="550" y="152" width="140" height="34" rx="6"/><text x="620" y="174" class="lbl">N+2</text>
+<rect class="f3" x="748" y="152" width="140" height="34" rx="6"/><text x="818" y="174" class="lbl">N+3</text>
+
+<rect class="f0" x="404" y="222" width="210" height="34" rx="6"/><text x="509" y="244" class="lbl">N 실행</text>
+<rect class="f1" x="618" y="222" width="150" height="34" rx="6"/><text x="693" y="244" class="lbl">N+1</text>
+<rect class="f2" x="772" y="222" width="150" height="34" rx="6"/><text x="847" y="244" class="lbl">N+2</text>
+
+<text x="420" y="292" class="small">점선: N의 GPU 완료(fence). slot 하나가 비는 순간 게임 lane이 N+3을 시작한다</text>
+<text x="24" y="340" class="small">게임 lane이 막히는 곳은 slot 확보 하나뿐이며, 그동안 OS 메시지를 계속 펌프한다(DXGI present·resize 교착 방지).</text>
+<text x="24" y="362" class="small">렌더 lane은 게임 lane을 기다리지 않는다. 전체 비우기(Drain)는 종료·장치 재생성·시험에서만 쓴다.</text>
+</svg>
