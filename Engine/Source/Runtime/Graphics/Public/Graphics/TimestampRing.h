@@ -62,6 +62,17 @@ public:
     // 간다.
     usize Collect(Span<TimestampSample> out) noexcept;
 
+    // slot이 비어 있는지다(열리지도 닫히지도 않았다). 범위 밖이면 false다. query를 다시 쓰기 전에
+    // 초기화해야 하는 backend(Vulkan vkCmdResetQueryPool)가 다음 기록에서 초기화할 slot을 고른다.
+    bool IsSlotFree(uint32 slot) const noexcept {
+        return slot < slots_.Size() && slots_[slot].state == SlotState::Free;
+    }
+
+    // slot당 query 수다(Reset 값).
+    uint32 QueriesPerSlot() const noexcept {
+        return perSlot_;
+    }
+
     // 아직 Collect하지 않은 결과 수다.
     usize Ready() const noexcept {
         return samples_.Size();
