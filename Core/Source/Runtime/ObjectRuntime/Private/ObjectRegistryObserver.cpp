@@ -175,6 +175,40 @@ Result<void> ObjectRegistry::TallyStructBlocks(const detail::StructElementOps& e
                                           : Result<void>::Failure(state.error);
 }
 
+Result<void> ObjectRegistry::CollectStructEdges(const detail::StructElementOps& element,
+                                                void* const* blocks, uint32 count,
+                                                Array<ObjectHandle>& out) noexcept {
+    // 클러스터 소속 소유자의 원소를 지울 때는 원소 Trace가 반드시 있어야 한다(13.4절).
+    auto lease = types_.AcquireStructByNative(element.nativeType);
+    if (!lease) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    struct Collected {
+        Array<ObjectHandle>* out;
+        ErrorCode error;
+    };
+
+    Collected collected{&out, ErrorCode::None};
+    auto visit = [](void* pointer, ObjectHandle handle) noexcept {
+        auto& state = *static_cast<Collected*>(pointer);
+        if (!handle.IsNull() && state.error == ErrorCode::None) {
+            if (auto pushed = state.out->TryPushBack(handle); !pushed) {
+                state.error = pushed.Error();
+            }
+        }
+    };
+    const auto trace = lease.Value().StructOps().trace;
+    TraceVisitor visitor(&collected, +visit);
+    for (uint32 index = 0; trace != nullptr && index < count && collected.error == ErrorCode::None;
+         ++index) {
+        trace(blocks[index], visitor);
+    }
+
+    return collected.error == ErrorCode::None ? Result<void>::Success()
+                                              : Result<void>::Failure(collected.error);
+}
+
 Result<void> ObjectRegistry::EndProcessing(Result<void> result) noexcept {
     platform::LockGuard lock(gate_);
     processing_ = false;
@@ -289,24 +323,66 @@ Result<void> ObjectRegistry::Discard(const ObjectAccessContext& access,
     }
 
     // (3) 한 잠금 안에서 상태·색인·고리·관찰자 기록을 바꾼다. 부분 트리 안의 순서는 의미가 없다.
-    platform::LockGuard lock(gate_);
-    processing_ = false;
-    if (options_.referenceObserver != nullptr &&
-        MissingKeysLocked(tally, ReferenceChangeCause::Discard, 0) > ObserverFreeLocked()) {
-        return Result<void>::Failure(ErrorCode::Busy);
-    }
-
-    for (Slot* node : nodes) {
-        if (node->state == SlotState::Alive) {
-            node->SetState(tally_, SlotState::DestroyRequested);
+    bool leaves = false;
+    {
+        platform::LockGuard lock(gate_);
+        processing_ = false;
+        if (options_.referenceObserver != nullptr &&
+            MissingKeysLocked(tally, ReferenceChangeCause::Discard, 0) > ObserverFreeLocked()) {
+            return Result<void>::Failure(ErrorCode::Busy);
         }
 
-        node->discarded = true;
-        DetachIdentityLocked(*node);
+        for (Slot* node : nodes) {
+            if (node->state == SlotState::Alive) {
+                node->SetState(tally_, SlotState::DestroyRequested);
+            }
+
+            node->discarded = true;
+            DetachIdentityLocked(*node);
+        }
+
+        if (options_.referenceObserver != nullptr) {
+            ApplyTallyLocked(tally, ReferenceChangeCause::Discard, 0);
+        }
+
+        // 클러스터(13.2·13.4절): 부분 트리의 루트는 클러스터를 해체하고, 남은 소속은 하나씩
+        // 이탈한다(순서와 무관하게 결과가 같다). 이탈 Trace는 잠금 밖에서 하므로 처리 표시를 다시
+        // 세운다(공개된 변경은 이미 끝났다 — 이 뒤로는 실패하지 않는다).
+        if (clustersEnabled_) {
+            for (Slot* node : nodes) {
+                if (IsClusterMemberLocked(*node)) {
+                    const uint32 id = CellOf(node->index).state & ClusterIdMask;
+                    if (clusters_[id].root == node->index) {
+                        DissolveClusterLocked(id);
+                    }
+                }
+            }
+
+            for (Slot* node : nodes) {
+                leaves = leaves || IsClusterMemberLocked(*node);
+            }
+
+            processing_ = leaves;
+        }
     }
 
-    if (options_.referenceObserver != nullptr) {
-        ApplyTallyLocked(tally, ReferenceChangeCause::Discard, 0);
+    if (leaves) {
+        for (Slot* node : nodes) {
+            bool member = false;
+            {
+                platform::LockGuard lock(gate_);
+                member = IsClusterMemberLocked(*node);
+            }
+
+            if (member) {
+                LeaveTrace(*node);
+                platform::LockGuard lock(gate_);
+                FinishLeaveLocked(*node);
+            }
+        }
+
+        platform::LockGuard lock(gate_);
+        processing_ = false;
     }
 
     return Result<void>::Success();

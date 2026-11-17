@@ -80,6 +80,11 @@ ErrorCode ObjectRegistry::MarkIndex(uint32 index, Array<uint32>& work, uint32& m
             return ErrorCode::StaleHandle;
         }
 
+        // 클러스터 소속은 그 클러스터를 표식한다(GC-S7 — 루트 → 소속 암묵 간선).
+        if ((bits.clustered & bit) != 0) {
+            return MarkCluster(CellOf(index).state & ClusterIdMask, work, marked);
+        }
+
         const uint64 mark = LoadMark(bits.mark);
         if ((mark & bit) != 0) {
             return ErrorCode::None;
@@ -195,16 +200,25 @@ uint32 ObjectRegistry::MarkSerial(Array<uint32>& work, usize& cursor, MarkState&
         }
 
         // 미스 사슬(hot 레코드 → 본체)을 큐 앞쪽에서 미리 당긴다. 큐의 번호는 표식할 때 검증했다.
+        // 클러스터 항목(ClusterItem)은 슬롯이 아니라 미리 읽지 않는다.
         const usize size = work.Size();
-        if (cursor + HotPrefetchDistance < size) {
+        if (cursor + HotPrefetchDistance < size &&
+            (work[cursor + HotPrefetchDistance] & ClusterItem) == 0) {
             platform::PrefetchRead(&HotOf(work[cursor + HotPrefetchDistance]));
         }
 
-        if (cursor + ObjectPrefetchDistance < size) {
+        if (cursor + ObjectPrefetchDistance < size &&
+            (work[cursor + ObjectPrefetchDistance] & ClusterItem) == 0) {
             platform::PrefetchRead(HotOf(work[cursor + ObjectPrefetchDistance]).object);
         }
 
-        TraceIndex(work[cursor++], state, visitor);
+        const uint32 item = work[cursor++];
+        if ((item & ClusterItem) != 0) {
+            ProcessCluster(item & ~ClusterItem, state);
+        } else {
+            TraceIndex(item, state, visitor);
+        }
+
         ++processed;
     }
 
@@ -212,9 +226,15 @@ uint32 ObjectRegistry::MarkSerial(Array<uint32>& work, usize& cursor, MarkState&
 }
 
 bool ObjectRegistry::IsCutoff(const Slot* slot) const noexcept {
-    return slot && gcPhase_ == GcPhase::Sweeping &&
-           (slot->state == SlotState::Alive || slot->state == SlotState::DestroyRequested) &&
-           (LoadMark(BitsOf(slot->index).mark) & BitOf(slot->index)) == 0;
+    // 클러스터 소속은 클러스터 표식으로 판정한다(13.5절). cutoff 때 표식되지 않은 클러스터를
+    // 해체하므로 Sweeping 중 소속이면 그 클러스터는 표식됐다.
+    if (!slot || gcPhase_ != GcPhase::Sweeping ||
+        !(slot->state == SlotState::Alive || slot->state == SlotState::DestroyRequested)) {
+        return false;
+    }
+
+    const GcBits& bits = BitsOf(slot->index);
+    return ((LoadMark(bits.mark) | bits.clustered) & BitOf(slot->index)) == 0;
 }
 
 ErrorCode ObjectRegistry::ShadeLocked(ObjectHandle handle) noexcept {
@@ -324,6 +344,22 @@ Result<void> ObjectRegistry::PrepareGcGrowth(uint64 slots, GcGrowth& growth) noe
         }
 
         growth.page = ::new (page.Value()) GcPage();
+        if (clustersEnabled_) {
+            // 클러스터 장부 칸(GC-S7)도 페이지와 함께 잠금 밖에서 받는다.
+            auto cells = allocator_.Allocate(sizeof(ClusterCell) * GcPageSlots,
+                                             alignof(ClusterCell), GcPageTag);
+            if (!cells) {
+                return Result<void>::Failure(cells.Error());
+            }
+
+            auto* table = static_cast<ClusterCell*>(cells.Value());
+            for (uint32 index = 0; index < GcPageSlots; ++index) {
+                ::new (&table[index]) ClusterCell();
+            }
+
+            growth.page->cells = table;
+        }
+
         if (gcPageCount_ == gcPageCapacity_) {
             const uint32 capacity = gcPageCapacity_ == 0 ? 4 : gcPageCapacity_ * 2;
             auto table =
@@ -387,6 +423,7 @@ void ObjectRegistry::GrowGcLocked(GcGrowth& growth) noexcept {
 
 void ObjectRegistry::ReleaseGcGrowth(GcGrowth& growth) noexcept {
     if (growth.page != nullptr) {
+        ReleaseRegistryMemory(allocator_, growth.page->cells);
         growth.page->~GcPage();
         ReleaseRegistryMemory(allocator_, growth.page);
     }
@@ -416,7 +453,7 @@ Result<void> ObjectRegistry::BeginCollection(const ObjectAccessContext& access) 
         }
 
         processing_ = true;
-        capacity = static_cast<usize>(uint64(chunkCount_) * SlotsPerChunk);
+        capacity = static_cast<usize>(GcQueueBound(uint64(chunkCount_) * SlotsPerChunk));
     }
 
     gcWork_.Clear();
@@ -424,6 +461,11 @@ Result<void> ObjectRegistry::BeginCollection(const ObjectAccessContext& access) 
     auto reserved = gcWork_.TryReserve(capacity);
     if (reserved) {
         reserved = gcShade_.TryReserve(capacity);
+    }
+
+    // Debug 장부 검증(RegistryOptions::verifyClusterLedger)은 처리 표시 아래 잠금 밖에서 한다.
+    if (reserved) {
+        reserved = VerifyClusterLedger();
     }
 
     platform::LockGuard lock(gate_);
@@ -439,6 +481,7 @@ Result<void> ObjectRegistry::BeginCollection(const ObjectAccessContext& access) 
 
     gcPhase_ = GcPhase::Marking;
     gcCursor_ = 0;
+    AdvanceGcEpochLocked();
     cycleGc_ = {};
     cycleGc_.examined = tally_.liveObjects + tally_.destroyRequested;
     sweepChunk_ = 0;
@@ -469,6 +512,7 @@ Result<void> ObjectRegistry::CancelCollection(const ObjectAccessContext& access)
     gcWork_.Clear();
     gcShade_.Clear();
     ReleaseGrayBlocks();
+    ReleaseDissolvedClustersLocked();
     gcCursor_ = 0;
     return Result<void>::Success();
 }
@@ -556,6 +600,14 @@ void ObjectRegistry::RetireLocked(Slot& slot) noexcept {
             if (options_.assertRetiredWithoutDiscard) {
                 platform::Fatal("Package-policy object retired without Discard");
             }
+        }
+    }
+
+    if constexpr (IsDebugBuild) {
+        // 소속·detached는 sweep 후보가 아니다(소속은 clustered 비트, detached는 그 클러스터 처리가
+        // 표식하거나 cutoff 해체가 비운다).
+        if (clustersEnabled_ && CellOf(slot.index).state != 0) {
+            platform::Fatal("Retiring an object that is still in a cluster ledger");
         }
     }
 
@@ -721,12 +773,15 @@ struct ObjectRegistry::ParallelMark {
             if (top->count != 0) {
                 index = top->items[--top->count];
                 // 미스 사슬(hot 레코드 → 본체)을 지역 큐 앞쪽(LIFO라 아래 칸)에서 미리 당긴다.
-                if (top->count > HotPrefetchDistance) {
+                // 클러스터 항목(ClusterItem)은 슬롯이 아니라 미리 읽지 않는다.
+                if (top->count > HotPrefetchDistance &&
+                    (top->items[top->count - HotPrefetchDistance] & ClusterItem) == 0) {
                     platform::PrefetchRead(
                         &registry->HotOf(top->items[top->count - HotPrefetchDistance]));
                 }
 
-                if (top->count > ObjectPrefetchDistance) {
+                if (top->count > ObjectPrefetchDistance &&
+                    (top->items[top->count - ObjectPrefetchDistance] & ClusterItem) == 0) {
                     platform::PrefetchRead(
                         registry->HotOf(top->items[top->count - ObjectPrefetchDistance]).object);
                 }
@@ -741,6 +796,53 @@ struct ObjectRegistry::ParallelMark {
         return false;
     }
 
+    // 클러스터를 표식한다(atomic 비교 교환 — 이긴 참여자만 클러스터 항목을 넣는다).
+    void MarkCluster(MarkParticipant& self, uint32 id) noexcept {
+        ClusterRecord& record = registry->clusters_[id];
+        const uint32 epoch = registry->gcEpoch_;
+        uint32 expected = platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&record.markEpoch);
+        if (record.permanent || expected == epoch ||
+            !platform::AtomicCompareExchangeStrong<platform::MemoryOrder::Relaxed,
+                                                   platform::MemoryOrder::Relaxed>(
+                &record.markEpoch, expected, epoch)) {
+            return;
+        }
+
+        self.marked += record.members;
+        Push(self, id | ClusterItem);
+    }
+
+    // 클러스터 처리(병렬): 경계 소속을 지역 큐에 넣고(mark 비트 fetch_or로 한 번) detached를
+    // 표식한다. slice 동안 목록은 바뀌지 않고 한 클러스터는 이긴 참여자 하나만 처리한다.
+    void ProcessCluster(MarkParticipant& self, uint32 id) noexcept {
+        ClusterRecord& record = registry->clusters_[id];
+        if (record.dissolved) {
+            return;
+        }
+
+        for (uint32 at = record.boundaryHead; at != NoSlot;
+             at = registry->CellOf(at).boundaryNext) {
+            const uint64 bit = BitOf(at);
+            GcBits& bits = registry->BitsOf(at);
+            if ((LoadMark(bits.mark) & bit) == 0 &&
+                (platform::AtomicFetchOr<platform::MemoryOrder::Relaxed>(&bits.mark, bit) & bit) ==
+                    0) {
+                Push(self, at);
+            }
+        }
+
+        for (uint32 at = record.detachedHead; at != NoSlot; at = registry->CellOf(at).listNext) {
+            const ErrorCode marked = Mark(self, at);
+            if (marked != ErrorCode::None) {
+                SetError(marked);
+                return;
+            }
+        }
+
+        platform::AtomicStore<platform::MemoryOrder::Relaxed>(&record.processedEpoch,
+                                                              registry->gcEpoch_);
+    }
+
     // 표식한다(atomic fetch_or — 이긴 참여자만 지역 큐에 넣는다). 잎은 Outer 사슬을 바로 따라간다.
     ErrorCode Mark(MarkParticipant& self, uint32 index) noexcept {
         for (;;) {
@@ -748,6 +850,11 @@ struct ObjectRegistry::ParallelMark {
             const uint64 bit = BitOf(index);
             if ((bits.live & bit) == 0) {
                 return ErrorCode::StaleHandle;
+            }
+
+            if ((bits.clustered & bit) != 0) {
+                MarkCluster(self, registry->CellOf(index).state & ClusterIdMask);
+                return ErrorCode::None;
             }
 
             if ((LoadMark(bits.mark) & bit) != 0 ||
@@ -876,13 +983,16 @@ struct ObjectRegistry::ParallelMark {
         for (;;) {
             uint32 index = 0;
             while (!Stopped() && Pop(self, index)) {
-                if (!self.isOwner &&
-                    !registry->gcTypes_[registry->HotOf(index).type].parallelTraceSafe) {
+                if ((index & ClusterItem) != 0) {
+                    ProcessCluster(self, index & ~ClusterItem);
+                } else if (!self.isOwner &&
+                           !registry->gcTypes_[registry->HotOf(index).type].parallelTraceSafe) {
                     PushOwner(self, index);
                     continue;
+                } else {
+                    Trace(self, index, visitor);
                 }
 
-                Trace(self, index, visitor);
                 ++self.traced;
                 if (++self.pending == budgetInterval) {
                     ChargeBudget(self);
@@ -1111,7 +1221,7 @@ uint32 ObjectRegistry::MarkParallel(Array<uint32>& work, usize& cursor, MarkStat
 uint32 ObjectRegistry::RetireWhiteLocked(uint32 chunk) noexcept {
     // 비트 묶음의 live & ~mark가 이 chunk의 white 후보다. 낮은 번호부터 Retire한다(슬롯 순서 유지).
     const GcBits& bits = BitsOf(chunk * SlotsPerChunk);
-    uint64 white = bits.live & ~LoadMark(bits.mark);
+    uint64 white = bits.live & ~(LoadMark(bits.mark) | bits.clustered);
     uint32 retired = 0;
     while (white != 0) {
         const uint32 offset =
@@ -1209,6 +1319,11 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
             // white를 만나는 구간(Sweeping)을 언제나 한 번은 거친다
             // (Docs/Implementation/IncrementalGarbageCollection.ko.md의 cutoff 계약).
             platform::LockGuard lock(gate_);
+            // 표식되지 않은 클러스터를 해체해 소속을 white 후보로 내보낸다(13.5절 — 패키지
+            // RootRef를 Discard 없이 놓은 버그 경로). 큐가 비었으므로 해체한 레코드를 바로 재사용할
+            // 수 있다.
+            DissolveUnmarkedClustersLocked();
+            ReleaseDissolvedClustersLocked();
             gcPhase_ = GcPhase::Sweeping;
             sweepChunk_ = chunkCount_;
             cutoffPublished = true;
@@ -1221,6 +1336,7 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
         gcWork_.Clear();
         gcShade_.Clear();
         ReleaseGrayBlocks();
+        ReleaseDissolvedClustersLocked();
         gcCursor_ = 0;
         processing_ = false;
         return Result<GcProgress>::Failure(state.error);
@@ -1247,7 +1363,7 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
 
         const uint32 chunk = --sweepChunk_;
         const GcBits& bits = BitsOf(chunk * SlotsPerChunk);
-        if ((bits.live & ~LoadMark(bits.mark)) != 0) {
+        if ((bits.live & ~(LoadMark(bits.mark) | bits.clustered)) != 0) {
             platform::LockGuard lock(gate_);
             cycleGc_.retired += RetireWhiteLocked(chunk);
         }
@@ -1310,7 +1426,11 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access,
     // 모든 후보를 담을 용량을 먼저 확보한다. OOM이 발생해도 아직 어떤 객체도 retire하지 않았다.
     // 후보당 한 번만 큐에 넣으므로 이후 순회는 추가 할당 없이 깊은 그래프도 처리한다.
     Array<uint32> work(allocator_);
-    auto reserved = work.TryReserve(report.examined);
+    auto reserved = work.TryReserve(static_cast<usize>(GcQueueBound(report.examined)));
+    if (reserved) {
+        reserved = VerifyClusterLedger();
+    }
+
     if (!reserved) {
         platform::LockGuard lock(gate_);
         processing_ = false;
@@ -1324,6 +1444,7 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access,
             StoreMark(BitsOf(chunk * SlotsPerChunk).mark, 0);
         }
 
+        AdvanceGcEpochLocked();
         for (uint32 position = 0; position < rootCount_; ++position) {
             if (MarkIndex(rootList_[position], work, state.marked) != ErrorCode::None) {
                 platform::Fatal("Root list holds a dead slot or the GC work queue is exhausted");
@@ -1358,6 +1479,8 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access,
     report.marked = state.marked;
     {
         platform::LockGuard lock(gate_);
+        // 표식되지 않은 클러스터는 sweep 전에 해체한다(소속이 white 후보가 된다).
+        DissolveUnmarkedClustersLocked();
         for (uint32 chunk = chunkCount_; chunk-- != 0;) {
             report.retired += RetireWhiteLocked(chunk);
         }
@@ -1423,6 +1546,10 @@ void ObjectRegistry::FinishReclaim(ReclaimWork& work) noexcept {
         GcBits& bits = BitsOf(slot.index);
         bits.leaf &= ~BitOf(slot.index);
         StoreMark(bits.mark, LoadMark(bits.mark) & ~BitOf(slot.index));
+        if (clustersEnabled_) {
+            CellOf(slot.index) = ClusterCell{};
+        }
+
         slot.outermost = nullptr;
         slot.parent = nullptr;
         slot.lastChild = nullptr;

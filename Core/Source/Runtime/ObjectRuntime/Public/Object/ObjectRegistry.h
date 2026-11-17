@@ -601,6 +601,8 @@ private:
     struct GcBlock;
     struct ParallelMark;
     struct MarkParticipant;
+    struct ClusterCell;
+    struct ClusterRecord;
 
     // Retired 슬롯이 든 회수 대상 목록이다. 슬롯은 셋 중 하나에만 있다(Retired가 아니면 어디에도
     // 없다).
@@ -665,6 +667,71 @@ private:
     inline GcPage& PageOf(uint32) const noexcept;
     inline GcHot& HotOf(uint32) const noexcept;
     inline GcBits& BitsOf(uint32) const noexcept;
+    // 클러스터 장부 칸이다(클러스터를 켠 Registry만 — 정의는 ObjectRegistryInternal.h).
+    inline ClusterCell& CellOf(uint32) const noexcept;
+
+    // ---- 클러스터(GC-S7, Docs/Design/GarbageCollectionScale.ko.md 13절 — Private/
+    // ObjectRegistryClusters.cpp) ----
+    // ConstructionContext::SetClusterRoot·JoinCluster의 본문이다. root가 null이면 object를 새
+    // 클러스터 루트로 지정한다.
+    Result<void> DesignateCluster(const ObjectAccessContext&, uint64 transaction,
+                                  ObjectHandle object, ObjectHandle root) noexcept;
+    // 잠금 보유: id 클러스터가 이번 cycle에 표식됐는지다(영구 영역은 언제나 참).
+    bool IsClusterMarkedLocked(uint32 id) const noexcept;
+    // 잠금 보유: owner(소속 객체)의 간선 하나를 장부에 더하거나 뺀다(13.4절 간선 분류).
+    void LedgerEdgeLocked(uint32 owner, uint32 target, bool add) noexcept;
+    // 잠금 보유: 단일 간선 지점의 장부 갱신이다(owner가 소속이 아니면 아무것도 하지 않는다).
+    void LedgerEditLocked(const Slot& owner, ObjectHandle removed, ObjectHandle added) noexcept;
+    // 잠금 보유: 비우기 지점에서 떼어 낼 값 count개를 장부에서 뺀다(owner가 소속이 아니면 무동작).
+    void LedgerClearLocked(const Slot& owner, const ObjectHandle* values, usize count) noexcept;
+    // owner가 클러스터 소속인지다(잠금 보유, 클러스터를 끈 Registry는 거짓).
+    bool IsClusterMemberLocked(const Slot& owner) const noexcept;
+    // TraceVisitor 콜백(잠금 보유 상태의 호출자가 쓴다): MarkState::ledgerOwner의 간선을 장부에서
+    // 뺀다.
+    static void LedgerRemoveVisited(void*, ObjectHandle) noexcept;
+    // TraceVisitor 콜백(잠금 밖): 간선마다 잠가 MarkState::ledgerOwner의 몫을 장부에서 뺀다(이탈).
+    static void LeaveVisited(void*, ObjectHandle) noexcept;
+    // 잠금 밖·처리 표시 아래: 이탈할 소속 객체 slot이 장부에 남긴 몫(Trace 간선과 outer)을 뺀다.
+    void LeaveTrace(Slot&) noexcept;
+    // 잠금 보유: LeaveTrace 뒤 slot을 클러스터에서 뺀다(inCount가 남으면 detached, 아니면 없음).
+    // Marking이고 클러스터가 표식됐으면 slot을 shade하고, Sweeping이면 mark를 켠다.
+    void FinishLeaveLocked(Slot&) noexcept;
+    // 잠금 보유: 클러스터를 해체한다(13.6절 Marking·Sweeping 규칙 포함).
+    void DissolveClusterLocked(uint32 id) noexcept;
+    // 잠금 보유: 표식되지 않은 클러스터를 모두 해체한다(cutoff·Collect sweep 직전).
+    void DissolveUnmarkedClustersLocked() noexcept;
+    // 잠금 보유: 표식 epoch를 하나 올린다(Begin·Collect — 한 바퀴 돌면 레코드 epoch를 비운다).
+    void AdvanceGcEpochLocked() noexcept;
+    // 잠금 보유: 모든 클러스터를 해체한다(Shutdown).
+    void DissolveAllClustersLocked() noexcept;
+    // 잠금 보유: Marking 중 해체해 큐 항목이 남았을 수 있던 레코드를 빈 목록으로 돌린다(큐가 빈
+    // 뒤).
+    void ReleaseDissolvedClustersLocked() noexcept;
+    // 잠금 보유: 새 클러스터 레코드를 받아 root를 첫 소속으로 넣는다(빈 레코드가 있어야 한다).
+    uint32 CreateClusterLocked(uint32 root, bool designated) noexcept;
+    // 잠금 보유: slot을 id 클러스터 소속으로 넣는다(장부 칸은 비어 있어야 한다).
+    void JoinClusterLocked(uint32 id, uint32 slot) noexcept;
+    // 잠금 밖·처리 표시 아래: 빈 클러스터 레코드가 count개 이상이 되게 표를 키운다(Marking이면 작업
+    // 큐도).
+    Result<void> ReserveClusters(uint32 count) noexcept;
+    // 작업 큐 상한(슬롯 수 slots + 클러스터 레코드 수)이다.
+    uint64 GcQueueBound(uint64 slots) const noexcept;
+    // 잠금 밖·처리 표시 아래: 작업 큐와 장벽 큐를 needed칸 이상으로 키운다(두 배씩, 상한 limit).
+    Result<void> ReserveGcQueues(uint64 needed, uint64 limit) noexcept;
+    // 잠금 보유: 장부 칸 slot을 head 목록(boundary면 경계 고리, 아니면 소속·detached 고리) 앞에
+    // 넣거나 뺀다.
+    void LinkCellLocked(uint32& head, uint32 slot, bool boundary) noexcept;
+    void UnlinkCellLocked(uint32& head, uint32 slot, bool boundary) noexcept;
+    // 잠금 보유: root 슬롯에 가입할 수 있는지다(transaction에서 루트로 지정한 공개 전 객체, 또는
+    // 해체되지 않은 클러스터의 생존 루트).
+    bool IsJoinableRootLocked(uint32 root, uint64 transaction) const noexcept;
+    // 클러스터 표식(직렬): id 클러스터를 표식하고 처음이면 큐에 넣는다.
+    ErrorCode MarkCluster(uint32 id, Array<uint32>& work, uint32& marked) noexcept;
+    // 클러스터 처리(직렬): 경계 소속을 큐에 넣고 detached를 표식한 뒤 처리 epoch를 단다.
+    void ProcessCluster(uint32 id, MarkState&) noexcept;
+    // Debug 장부 검증(RegistryOptions::verifyClusterLedger): 잠금 밖·처리 표시 아래에서 다시 계산해
+    // 비교하고 어긋나면 Fatal이다. 할당 실패는 그 오류다(검증을 건너뛰지 않는다).
+    Result<void> VerifyClusterLedger() noexcept;
     // 잠금 보유: 슬롯을 루트 목록에 넣고 뺀다(roots 0 ↔ 1 전이에서 부른다).
     void AddRootListLocked(Slot&) noexcept;
     void RemoveRootListLocked(Slot&) noexcept;
@@ -684,6 +751,10 @@ private:
                                            bool requireBorrow) const noexcept;
     Result<void> RequestDestroyChecked(const ObjectAccessContext&, ObjectHandle, const Object*,
                                        bool requireBorrow) noexcept;
+    // 잠금 보유: RequestDestroyChecked의 검사와 상태 전이다. 클러스터 소속(루트 아님)이면 처리
+    // 표시를 세우고 leaving에 슬롯을 돌려준다(호출자가 잠금 밖에서 이탈 trace를 한다).
+    Result<void> RequestDestroyLocked(ObjectHandle, const Object*, bool requireBorrow,
+                                      Slot*& leaving) noexcept;
     Result<ObjectLifecycle> InspectSelf(ObjectHandle, const Object*) const noexcept;
     Result<void> DestroySelf(ObjectHandle, const Object*) noexcept;
     Result<TypeLease> AcquireTypeSelf(ObjectHandle, const Object*) noexcept;
@@ -722,6 +793,8 @@ private:
                               ObjectHandle* removed) noexcept;
     Result<void> ClearMapEdges(const ObjectAccessContext&, ObjectHandle,
                                detail::ObjectRefMapEdit&) noexcept;
+    // 잠금 보유: 비울 map의 값을 클러스터 장부에서 뺀다(owner가 소속이 아니면 무동작).
+    void ClearMapLedgerLocked(const Slot& owner, detail::ObjectRefMapEdit&) noexcept;
     Result<void> AssignMapEdges(const ObjectAccessContext&, ObjectHandle, detail::ObjectRefMapEdit&,
                                 Span<const ObjectHandle>, uint64 transaction,
                                 const void* nativeType) noexcept;
@@ -898,6 +971,10 @@ private:
     // 대상 패키지, -1)을 tally에 합친다. 원소 struct 조회 실패는 Unsupported다.
     Result<void> TallyStructBlocks(const detail::StructElementOps&, void* const* blocks,
                                    uint32 count, ObjectHandle ownerPackage, EdgeTally&) noexcept;
+    // 잠금 밖·처리 표시 아래: StructRefArray 원소 블록들을 등록 struct trace로 훑어 null이 아닌
+    // 간선을 out에 모은다(클러스터 장부). 원소 struct 조회 실패는 Unsupported다.
+    Result<void> CollectStructEdges(const detail::StructElementOps&, void* const* blocks,
+                                    uint32 count, Array<ObjectHandle>& out) noexcept;
     // 처리 표시를 내리고 result를 돌려준다.
     Result<void> EndProcessing(Result<void> result) noexcept;
 
@@ -963,6 +1040,17 @@ private:
     // 앞 병렬 slice에서 표식이 멈춘 뒤 든 꼬리 시간(worker 회수·회색 넘기기, ns)이다. 다음 병렬
     // slice가 그만큼 표식을 일찍 멈춰 slice 전체가 시간 예산 안에 들게 한다.
     uint64 gcParallelTail_ = 0;
+    // 클러스터(GC-S7): 켰는지, 레코드 표(번호로 색인 — 처리 표시 아래에서만 자란다), 빈 레코드
+    // 목록과 수, Marking 중 해체해 큐가 빌 때까지 재사용하지 않는 레코드 목록, 표식 epoch다(Begin·
+    // Collect마다 하나씩 오른다).
+    bool clustersEnabled_ = false;
+    ClusterRecord* clusters_ = nullptr;
+    uint32 clusterCapacity_ = 0;
+    uint32 clusterUsed_ = 0;
+    uint32 clusterFree_ = NumericLimits<uint32>::Max();
+    uint32 clusterFreeCount_ = 0;
+    uint32 clusterDissolved_ = NumericLimits<uint32>::Max();
+    uint32 gcEpoch_ = 0;
     usize gcCursor_ = 0;
     GcPhase gcPhase_ = GcPhase::Idle;
     GcReport cycleGc_;

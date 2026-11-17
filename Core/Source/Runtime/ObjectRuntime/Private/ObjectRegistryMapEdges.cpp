@@ -87,6 +87,8 @@ Result<void> ObjectRegistry::SetMapEdge(const ObjectAccessContext& access, Objec
                     edit.CommitInsert(target);
                 }
 
+                LedgerEditLocked(*FindSlot(owner), previous, target);
+
                 ApplyPlanLocked(plan);
                 if (write) {
                     write->previous = previous;
@@ -168,6 +170,7 @@ Result<void> ObjectRegistry::EraseMapEdge(const ObjectAccessContext& access, Obj
                 // 삽입 장벽 GC에서 간선 삭제는 장벽이 필요 없다. 키는 edit가 넘겨받아 잠금을 푼 뒤
                 // 반환한다.
                 const ObjectHandle erased = *slot;
+                LedgerEditLocked(*FindSlot(owner), erased, ObjectHandle{});
                 edit.Erase();
                 ApplyPlanLocked(plan);
                 if (removed) {
@@ -188,6 +191,19 @@ Result<void> ObjectRegistry::EraseMapEdge(const ObjectAccessContext& access, Obj
             return reserved;
         }
     }
+}
+
+void ObjectRegistry::ClearMapLedgerLocked(const Slot& owner,
+                                          detail::ObjectRefMapEdit& edit) noexcept {
+    if (!IsClusterMemberLocked(owner)) {
+        return;
+    }
+
+    // 컨테이너 자체의 값 순회다(사용자 코드가 아니다) — 잠금 안에서 부른다.
+    MarkState state{this, nullptr};
+    state.ledgerOwner = owner.index;
+    TraceVisitor visitor(&state, &ObjectRegistry::LedgerRemoveVisited);
+    edit.VisitValues(visitor);
 }
 
 Result<void> ObjectRegistry::ClearMapEdges(const ObjectAccessContext& access, ObjectHandle owner,
@@ -216,6 +232,8 @@ Result<void> ObjectRegistry::ClearMapEdges(const ObjectAccessContext& access, Ob
 
         const Slot& source = *FindSlot(owner);
         if (!ObservesOwnerLocked(source) || edit.Count() == 0) {
+            // 클러스터 장부는 관찰 대상이 아니어도 지워지는 값을 모두 센다(13.4절).
+            ClearMapLedgerLocked(source, edit);
             edit.Detach();
             return Result<void>::Success();
         }
@@ -248,6 +266,7 @@ Result<void> ObjectRegistry::ClearMapEdges(const ObjectAccessContext& access, Ob
         return Result<void>::Failure(ErrorCode::Busy);
     }
 
+    ClearMapLedgerLocked(*FindSlot(owner), edit);
     edit.Detach();
     ApplyTallyLocked(tally, ReferenceChangeCause::Edit, 0);
     return Result<void>::Success();

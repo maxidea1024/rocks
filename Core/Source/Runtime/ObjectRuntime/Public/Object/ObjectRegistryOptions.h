@@ -66,6 +66,24 @@ struct RegistryOptions {
     // 토큰의 쓰기·저장·복원 Unsupported). 쓰기는 토큰 domain이 이 pool인지 보고(다르면
     // WrongContext) 그래프 복원 2a가 이 pool로 intern한다(ReflectionExtensions.ko.md 4·4.1절).
     NamePool* names = nullptr;
+    // 클러스터 기능을 켠다(Docs/Design/GarbageCollectionScale.ko.md 13절). 켜면 슬롯마다 클러스터
+    // 장부 칸(28 B)을 GC 페이지와 함께 두고, 엔진 계층(World)이 생성 트랜잭션에서 클러스터 루트를
+    // 지정하고 가입시킬 수 있다(ConstructionContext::SetClusterRoot·JoinCluster). 루트가 살면 소속
+    // 객체가 모두 살고(루트 → 소속 암묵 강한 간선), 표식은 소속 사이 간선을 따라가지 않는다. 켜면
+    // maxSlots는 ClusterSlotLimit 이하여야 한다(아니면 Registry 생성이 Fatal).
+    bool clusters = false;
+    // Debug에서 Begin·Collect마다 클러스터 장부(소속·inCount·outCount·경계·detached 목록)를
+    // 처음부터 다시 계산해 비교하고, 어긋나면 Fatal로 멈춘다(비용이 커서 soak·시험만 켠다).
+    // Release·Development에서는 무시한다.
+    bool verifyClusterLedger = false;
+    // verifyClusterLedger와 함께 켜면 같은 검증에서 소속 불변식도 본다: SetClusterRoot로 지정한
+    // 클러스터의 루트가 아닌 소속은 같은 클러스터 소속 객체에서 오는 간선이 하나 이상이어야
+    // 한다(13.8절 — 소유 간선이 모두 클러스터 안인 World Level이 켠다). 어기면 Fatal(고아
+    // 소속)이다.
+    bool verifyClusterOwnership = false;
+    // 클러스터를 켠 Registry의 슬롯 수 상한이다(작업 큐 항목의 클러스터 표지 비트와 장부 칸의 상태
+    // 비트를 남긴다).
+    static constexpr uint32 ClusterSlotLimit = 1u << 29;
 };
 
 struct ObjectStats {
@@ -86,6 +104,9 @@ struct ObjectStats {
     // 누계다. 언제나 0이어야 한다(AssetManager가 Discard 없이 패키지 RootRef를 놓은 버그). 종료
     // (Shutdown 시작) 뒤의 회수는 세지 않는다.
     uint32 retiredWithoutDiscard = 0;
+    // 살아 있는 클러스터 수와 그 소속 객체 수의 합이다(클러스터를 켠 Registry만 0이 아니다).
+    uint32 clusters = 0;
+    uint32 clusterMembers = 0;
 };
 
 // 성공한 한 cycle의 결과다. 시간은 실제 collector slice의 합(ns)이며 mutator 시간은 제외한다.

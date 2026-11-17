@@ -167,6 +167,8 @@ Result<void> ObjectRegistry::RemoveStructElement(const ObjectAccessContext& acce
         ++storage.revision;
     };
     ObjectHandle package;
+    bool observe = false;
+    bool member = false;
     {
         platform::LockGuard lock(gate_);
         if (processing_ || closed_) {
@@ -183,34 +185,50 @@ Result<void> ObjectRegistry::RemoveStructElement(const ObjectAccessContext& acce
         }
 
         const Slot& source = *FindSlot(owner);
-        if (!ObservesOwnerLocked(source)) {
+        observe = ObservesOwnerLocked(source);
+        member = IsClusterMemberLocked(source);
+        if (!observe && !member) {
             detachLocked();
         } else {
-            // 다중 간선 지점: 떼어 낼 원소만 처리 표시 아래 잠금 밖에서 trace해 합친다.
-            package = HandleOf(*source.outermost);
+            // 다중 간선 지점: 떼어 낼 원소만 처리 표시 아래 잠금 밖에서 trace해 합친다(관찰자 쌍과
+            // 클러스터 장부 — 13.4절).
+            package = observe ? HandleOf(*source.outermost) : ObjectHandle{};
             processing_ = true;
         }
     }
 
     if (block == nullptr) {
         EdgeTally tally(allocator_);
+        Array<ObjectHandle> removed(allocator_);
         void* const target = storage.blocks[index];
-        if (auto tallied = TallyStructBlocks(ops, &target, 1, package, tally); !tallied) {
-            return EndProcessing(Move(tallied));
+        if (observe) {
+            if (auto tallied = TallyStructBlocks(ops, &target, 1, package, tally); !tallied) {
+                return EndProcessing(Move(tallied));
+            }
+
+            if (auto reserved = ReserveTally(tally, ReferenceChangeCause::Edit, 0); !reserved) {
+                return EndProcessing(Move(reserved));
+            }
         }
 
-        if (auto reserved = ReserveTally(tally, ReferenceChangeCause::Edit, 0); !reserved) {
-            return EndProcessing(Move(reserved));
+        if (member) {
+            if (auto collected = CollectStructEdges(ops, &target, 1, removed); !collected) {
+                return EndProcessing(Move(collected));
+            }
         }
 
         platform::LockGuard lock(gate_);
         processing_ = false;
-        if (MissingKeysLocked(tally, ReferenceChangeCause::Edit, 0) > ObserverFreeLocked()) {
+        if (observe &&
+            MissingKeysLocked(tally, ReferenceChangeCause::Edit, 0) > ObserverFreeLocked()) {
             return Result<void>::Failure(ErrorCode::Busy);
         }
 
+        LedgerClearLocked(*FindSlot(owner), removed.Data(), removed.Size());
         detachLocked();
-        ApplyTallyLocked(tally, ReferenceChangeCause::Edit, 0);
+        if (observe) {
+            ApplyTallyLocked(tally, ReferenceChangeCause::Edit, 0);
+        }
     }
 
     DestroyStructElement(allocator, ops, block);
@@ -239,6 +257,7 @@ Result<void> ObjectRegistry::ClearStructElements(const ObjectAccessContext& acce
         storage.capacity = 0;
     };
     bool observe = false;
+    bool member = false;
     ObjectHandle package;
     {
         platform::LockGuard lock(gate_);
@@ -253,34 +272,50 @@ Result<void> ObjectRegistry::ClearStructElements(const ObjectAccessContext& acce
 
         const Slot& source = *FindSlot(owner);
         observe = ObservesOwnerLocked(source) && storage.size != 0;
-        if (!observe) {
+        member = IsClusterMemberLocked(source) && storage.size != 0;
+        if (!observe && !member) {
             detachLocked();
         } else {
-            // 다중 간선 지점: 떼어 낼 원소를 처리 표시 아래 잠금 밖에서 trace해 합친다.
-            package = HandleOf(*source.outermost);
+            // 다중 간선 지점: 떼어 낼 원소를 처리 표시 아래 잠금 밖에서 trace해 합친다(관찰자 쌍과
+            // 클러스터 장부 — 13.4절).
+            package = observe ? HandleOf(*source.outermost) : ObjectHandle{};
             processing_ = true;
         }
     }
 
-    if (observe) {
+    if (observe || member) {
         EdgeTally tally(allocator_);
-        if (auto tallied = TallyStructBlocks(ops, storage.blocks, storage.size, package, tally);
-            !tallied) {
-            return EndProcessing(Move(tallied));
+        Array<ObjectHandle> removed(allocator_);
+        if (observe) {
+            if (auto tallied = TallyStructBlocks(ops, storage.blocks, storage.size, package, tally);
+                !tallied) {
+                return EndProcessing(Move(tallied));
+            }
+
+            if (auto reserved = ReserveTally(tally, ReferenceChangeCause::Edit, 0); !reserved) {
+                return EndProcessing(Move(reserved));
+            }
         }
 
-        if (auto reserved = ReserveTally(tally, ReferenceChangeCause::Edit, 0); !reserved) {
-            return EndProcessing(Move(reserved));
+        if (member) {
+            if (auto collected = CollectStructEdges(ops, storage.blocks, storage.size, removed);
+                !collected) {
+                return EndProcessing(Move(collected));
+            }
         }
 
         platform::LockGuard lock(gate_);
         processing_ = false;
-        if (MissingKeysLocked(tally, ReferenceChangeCause::Edit, 0) > ObserverFreeLocked()) {
+        if (observe &&
+            MissingKeysLocked(tally, ReferenceChangeCause::Edit, 0) > ObserverFreeLocked()) {
             return Result<void>::Failure(ErrorCode::Busy);
         }
 
+        LedgerClearLocked(*FindSlot(owner), removed.Data(), removed.Size());
         detachLocked();
-        ApplyTallyLocked(tally, ReferenceChangeCause::Edit, 0);
+        if (observe) {
+            ApplyTallyLocked(tally, ReferenceChangeCause::Edit, 0);
+        }
     }
 
     for (uint32 remaining = size; remaining != 0; --remaining) {

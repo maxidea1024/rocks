@@ -157,6 +157,9 @@ Result<void> ObjectRegistry::SetEdge(const ObjectAccessContext& access, ObjectHa
                 transaction == 0 ? PlanEditLocked(*FindSlot(owner), field, target) : EdgePlan{};
             const usize missing = plan.count != 0 ? MissingKeysLocked(plan) : 0;
             if (missing <= ObserverFreeLocked()) {
+                // 클러스터 장부(13.4절 — live 쓰기만, staged는 Commit이 센다). shade 실패는
+                // 아래에서 반환하므로 장부는 게시가 확정된 뒤에 고친다.
+                const ObjectHandle previous = field;
                 if (target.IsNull()) {
                     // 비교·Required 검사·encode가 정규 null만 보게 한다.
                     field = ObjectHandle{};
@@ -171,6 +174,10 @@ Result<void> ObjectRegistry::SetEdge(const ObjectAccessContext& access, ObjectHa
                     }
 
                     field = target;
+                }
+
+                if (transaction == 0) {
+                    LedgerEditLocked(*FindSlot(owner), previous, target);
                 }
 
                 ApplyPlanLocked(plan);

@@ -12,11 +12,23 @@
 namespace rocks::registry_detail {
 
 inline constexpr uint32 SlotsPerChunk = 64;
-// GC 페이지 하나의 슬롯 수다(chunk 64개). hot 레코드 64 KiB와 비트 묶음 1.5 KiB를 담는다.
+// GC 페이지 하나의 슬롯 수다(chunk 64개). hot 레코드 64 KiB와 비트 묶음 2 KiB를 담는다.
 inline constexpr uint32 GcPageSlots = 4096;
 inline constexpr uint32 ChunksPerGcPage = GcPageSlots / SlotsPerChunk;
 // 슬롯 번호가 없다는 표지다(hot 레코드의 Outer 없음, 루트 목록 밖).
 inline constexpr uint32 NoSlot = NumericLimits<uint32>::Max();
+// 클러스터 장부 칸의 상태 비트다(Docs/Design/GarbageCollectionScale.ko.md 13.4절). 낮은 29비트가
+// 클러스터 번호다(클러스터를 켠 Registry는 슬롯 수를 RegistryOptions::ClusterSlotLimit 이하로
+// 둔다).
+// - ClusterMember | id: 클러스터 id의 소속
+// - ClusterDetached | id: 클러스터 id에서 이탈한 대상(그 소속 객체에서 오는 간선이 남았다)
+// - ClusterPending: 공개 전 객체의 가입 지정(inCount 칸이 루트 슬롯, 루트 지정이면 NoSlot)
+inline constexpr uint32 ClusterMember = 1u << 31;
+inline constexpr uint32 ClusterDetached = 1u << 30;
+inline constexpr uint32 ClusterPending = 1u << 29;
+inline constexpr uint32 ClusterIdMask = ClusterPending - 1;
+// 작업 큐 항목의 클러스터 표지다(낮은 비트가 클러스터 번호, 표지가 없으면 슬롯 번호).
+inline constexpr uint32 ClusterItem = 1u << 31;
 enum class SlotState : uint8 {
     Free,
     Reserved,
@@ -141,6 +153,10 @@ struct ObjectRegistry::MarkState {
     // Commit 검증: 지금 trace하는 소유자가 잎 타입(강한 참조 없음 선언)이면 간선을 방문하면 안
     // 된다.
     bool leafOwner = false;
+    // 클러스터 장부(Commit 검증·이탈): ledger가 있고 ledgerOwner가 슬롯이면 지금 trace하는 소유자의
+    // 간선을 (소유자, 대상) 슬롯 쌍으로 모은다(Commit). 이탈 trace는 ledgerOwner의 몫을 뺀다.
+    Array<uint32>* ledger = nullptr;
+    uint32 ledgerOwner = registry_detail::NoSlot;
     // 관찰자 쌍 집계(Commit 검증·Discard·다중 간선 지점): tally가 있고 observe면 지금 trace하는
     // 소유자의 패키지 ownerPackage에서 다른 패키지로 가는 간선을 delta로 합친다.
     EdgeTally* tally = nullptr;
@@ -264,10 +280,55 @@ struct ObjectRegistry::GcHot {
 // - mark: 이번 cycle에 표식됨. Begin·Collect가 지우고 marker·장벽·Sweeping 출생이 켠다.
 // - leaf: 잎 타입(강한 참조 없음)이라 표식만 하고 trace하지 않는다(M2 — 패키지 정책 Registry는
 //   자식 고리를 따라야 하므로 켜지 않는다). 생성 게시가 켜고 회수가 끈다.
+// - clustered: 클러스터 소속이다(GC-S7). sweep 후보에서 빠지고(live & ~mark & ~clustered) 표식은
+//   그 클러스터를 표식한다. 가입이 켜고 이탈·해체가 끈다(잠금 안).
 struct ObjectRegistry::GcBits {
     uint64 live = 0;
     uint64 mark = 0;
     uint64 leaf = 0;
+    uint64 clustered = 0;
+};
+
+// 클러스터 장부 칸이다(슬롯마다, 클러스터를 켠 Registry만 —
+// Docs/Design/GarbageCollectionScale.ko.md 13.4절). 잠금 안에서 바꾸고 marker는 처리 표시 아래에서
+// 읽기만 한다. 비운 칸은 기본값이다.
+// - state: 위 ClusterMember·ClusterDetached·ClusterPending 비트와 클러스터 번호(0이면 없음)
+// - inCount: 소속이면 같은 클러스터 소속 객체에서 오는 간선 수, detached면 그 클러스터 소속
+// 객체에서
+//   오는 간선 수
+// - outCount: 소속 객체의 간선 가운데 대상이 같은 클러스터의 소속도 detached도 아닌 간선 수
+// - 목록 고리(소속 목록 또는 detached 목록)와 경계 고리(outCount > 0인 소속 목록), 슬롯 번호다
+struct ObjectRegistry::ClusterCell {
+    uint32 state = 0;
+    uint32 inCount = 0;
+    uint32 outCount = 0;
+    uint32 listNext = registry_detail::NoSlot;
+    uint32 listPrev = registry_detail::NoSlot;
+    uint32 boundaryNext = registry_detail::NoSlot;
+    uint32 boundaryPrev = registry_detail::NoSlot;
+};
+
+// 클러스터 레코드다. 번호로 ObjectRegistry::clusters_에서 찾는다. markEpoch는 병렬 marker가 atomic
+// 비교 교환으로 쓰고, processedEpoch는 처리한 참여자 하나만 쓴다.
+struct ObjectRegistry::ClusterRecord {
+    // 루트 슬롯이다(영구 영역은 NoSlot).
+    uint32 root = registry_detail::NoSlot;
+    uint32 members = 0;
+    uint32 memberHead = registry_detail::NoSlot;
+    uint32 boundaryHead = registry_detail::NoSlot;
+    uint32 detachedHead = registry_detail::NoSlot;
+    uint32 markEpoch = 0;
+    uint32 processedEpoch = 0;
+    // 빈 레코드 목록·해체 대기 목록의 다음 번호다.
+    uint32 nextFree = registry_detail::NoSlot;
+    // 쓰는 중이다(빈 레코드는 거짓).
+    bool live = false;
+    // 해체됐다. 큐에 남은 이 클러스터 항목은 꺼낼 때 버린다(레코드는 그 cycle의 큐가 빈 뒤 재사용).
+    bool dissolved = false;
+    // 영구 영역이다(언제나 표식됨, 처리하지 않는다).
+    bool permanent = false;
+    // 엔진 계층이 지정한 클러스터다(World Level — 소속 불변식 검증 대상).
+    bool designated = false;
 };
 
 struct ObjectRegistry::GcPage {
@@ -275,6 +336,9 @@ struct ObjectRegistry::GcPage {
 
     GcBits bits[registry_detail::ChunksPerGcPage];
     GcHot hot[registry_detail::GcPageSlots];
+    // 클러스터 장부 칸(GcPageSlots개, 클러스터를 켠 Registry만 — 아니면 null)이다. 페이지와 함께
+    // 잠금 밖에서 할당한다.
+    ClusterCell* cells = nullptr;
 };
 
 // GC 타입 표의 항목이다. key는 타입 레코드의 RuntimeTypeOps 주소다(레코드가 살아 있는 동안
@@ -313,6 +377,10 @@ inline ObjectRegistry::GcPage& ObjectRegistry::PageOf(uint32 index) const noexce
 
 inline ObjectRegistry::GcHot& ObjectRegistry::HotOf(uint32 index) const noexcept {
     return PageOf(index).hot[index % registry_detail::GcPageSlots];
+}
+
+inline ObjectRegistry::ClusterCell& ObjectRegistry::CellOf(uint32 index) const noexcept {
+    return PageOf(index).cells[index % registry_detail::GcPageSlots];
 }
 
 inline ObjectRegistry::GcBits& ObjectRegistry::BitsOf(uint32 index) const noexcept {

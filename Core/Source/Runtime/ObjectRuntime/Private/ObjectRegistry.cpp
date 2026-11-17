@@ -21,7 +21,12 @@ ObjectRegistry::ObjectRegistry(Allocator& allocator, TypeRegistry& types, Contex
                                RegistryOptions options) noexcept
     : allocator_(allocator), types_(types), context_(context), options_(options),
       domain_(detail::NextRegistryDomain()), ownerThread_(platform::CurrentThreadId()),
-      gcWork_(allocator), gcShade_(allocator) {
+      gcWork_(allocator), gcShade_(allocator), clustersEnabled_(options.clusters) {
+    // 클러스터 장부 칸·작업 큐 항목이 클러스터 번호와 표지 비트를 같은 32비트에 담는다.
+    if (clustersEnabled_ && options_.maxSlots > RegistryOptions::ClusterSlotLimit) {
+        platform::Fatal("A cluster-enabled ObjectRegistry allows at most ClusterSlotLimit slots");
+    }
+
     // 관찰자는 패키지 정책 Registry 하나에만 붙는다(생성자는 실패를 돌려줄 수 없다).
     if (ReferenceObserver* observer = options_.referenceObserver) {
         if (options_.policy.packageNativeType == nullptr) {
@@ -72,6 +77,7 @@ ObjectRegistry::~ObjectRegistry() {
     chunkTables_ = nullptr;
     chunks_ = nullptr;
     for (uint32 index = 0; index < gcPageCount_; ++index) {
+        ReleaseRegistryMemory(allocator_, gcPages_[index]->cells);
         gcPages_[index]->~GcPage();
         ReleaseRegistryMemory(allocator_, gcPages_[index]);
     }
@@ -86,6 +92,8 @@ ObjectRegistry::~ObjectRegistry() {
     ReleaseRegistryMemory(allocator_, gcPages_);
     ReleaseRegistryMemory(allocator_, gcTypes_);
     ReleaseRegistryMemory(allocator_, rootList_);
+    ReleaseRegistryMemory(allocator_, clusters_);
+    clusters_ = nullptr;
     gcPages_ = nullptr;
     gcTypes_ = nullptr;
     rootList_ = nullptr;
@@ -403,7 +411,26 @@ Result<void> ObjectRegistry::RequestDestroyChecked(const ObjectAccessContext& ac
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
+    Slot* slot = nullptr;
+    {
+        platform::LockGuard lock(gate_);
+        auto requested = RequestDestroyLocked(handle, object, requireBorrow, slot);
+        if (!requested || slot == nullptr) {
+            return requested;
+        }
+    }
+
+    // 클러스터 소속의 이탈(13.4절): 처리 표시 아래 잠금 밖에서 Trace로 장부 몫을 뺀 뒤 잠가 뺀다.
+    LeaveTrace(*slot);
     platform::LockGuard lock(gate_);
+    FinishLeaveLocked(*slot);
+    processing_ = false;
+    return Result<void>::Success();
+}
+
+Result<void> ObjectRegistry::RequestDestroyLocked(ObjectHandle handle, const Object* object,
+                                                  bool requireBorrow, Slot*& leaving) noexcept {
+    leaving = nullptr;
     if (closed_ || processing_) {
         return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
     }
@@ -430,6 +457,19 @@ Result<void> ObjectRegistry::RequestDestroyChecked(const ObjectAccessContext& ac
     }
 
     slot->SetState(tally_, SlotState::DestroyRequested);
+    if (IsClusterMemberLocked(*slot)) {
+        const uint32 id = CellOf(slot->index).state & ClusterIdMask;
+        if (clusters_[id].root == slot->index) {
+            // 루트의 파괴 요청은 클러스터를 해체한다(13.2절).
+            DissolveClusterLocked(id);
+        } else {
+            // 소속은 이탈한다. Trace는 잠금 밖에서 하므로 처리 표시를 세운다(그동안 재진입은
+            // Busy).
+            processing_ = true;
+            leaving = slot;
+        }
+    }
+
     return Result<void>::Success();
 }
 
@@ -613,6 +653,13 @@ Result<void> ObjectRegistry::Shutdown(const ObjectAccessContext& access) noexcep
         if (!advanced) {
             return Result<void>::Failure(advanced.Error());
         }
+    }
+
+    // 종료는 모든 클러스터를 해체한다(영구 영역 포함 — 13.2·13.7절). 소속은 실제 간선으로 닿지
+    // 않으면 아래 수집이 회수한다.
+    if (clustersEnabled_) {
+        platform::LockGuard lock(gate_);
+        DissolveAllClustersLocked();
     }
 
     auto collected = Collect(access);

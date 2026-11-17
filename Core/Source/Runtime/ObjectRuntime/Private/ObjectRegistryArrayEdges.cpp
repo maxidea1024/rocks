@@ -75,6 +75,7 @@ Result<void> ObjectRegistry::InsertArrayEdge(const ObjectAccessContext& access, 
 
         storage.data[position] = target;
         ++storage.size;
+        LedgerEditLocked(*FindSlot(owner), ObjectHandle{}, target);
         return Result<ObjectHandle*>::Success(previous);
     };
 
@@ -236,6 +237,7 @@ Result<void> ObjectRegistry::ReplaceArrayEdge(const ObjectAccessContext& access,
             const EdgePlan plan = PlanEditLocked(*FindSlot(owner), storage.data[index], target);
             const usize missing = plan.count != 0 ? MissingKeysLocked(plan) : 0;
             if (missing <= ObserverFreeLocked()) {
+                const ObjectHandle previous = storage.data[index];
                 if (target.IsNull()) {
                     storage.data[index] = ObjectHandle{};
                 } else {
@@ -246,6 +248,8 @@ Result<void> ObjectRegistry::ReplaceArrayEdge(const ObjectAccessContext& access,
 
                     storage.data[index] = target;
                 }
+
+                LedgerEditLocked(*FindSlot(owner), previous, target);
 
                 ApplyPlanLocked(plan);
                 return Result<void>::Success();
@@ -319,6 +323,7 @@ Result<void> ObjectRegistry::RemoveArrayEdge(const ObjectAccessContext& access, 
             if (missing <= ObserverFreeLocked()) {
                 // 삽입 장벽 GC에서 간선 삭제는 장벽이 필요 없다. 지운 대상은 다른 경로로 도달하지
                 // 않으면 회수된다.
+                LedgerEditLocked(*FindSlot(owner), storage.data[position], ObjectHandle{});
                 for (usize at = position + 1; at < storage.size; ++at) {
                     storage.data[at - 1] = storage.data[at];
                 }
@@ -362,6 +367,8 @@ Result<void> ObjectRegistry::ClearArrayEdges(const ObjectAccessContext& access, 
 
         const Slot& source = *FindSlot(owner);
         if (!ObservesOwnerLocked(source) || storage.size == 0) {
+            // 클러스터 장부는 관찰 대상이 아니어도 지워지는 값을 모두 센다(13.4절).
+            LedgerClearLocked(source, storage.data, storage.size);
             storage.size = 0;
             return Result<void>::Success();
         }
@@ -397,6 +404,7 @@ Result<void> ObjectRegistry::ClearArrayEdges(const ObjectAccessContext& access, 
         return Result<void>::Failure(ErrorCode::Busy);
     }
 
+    LedgerClearLocked(*FindSlot(owner), storage.data, storage.size);
     storage.size = 0;
     ApplyTallyLocked(tally, ReferenceChangeCause::Edit, 0);
     return Result<void>::Success();
