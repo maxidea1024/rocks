@@ -473,6 +473,8 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                     Private = owner.Private,
                     IsStruct = isStruct,
                     Atomic = structSpec?.Atomic ?? false,
+                    SettingsBranch = structSpec?.SettingsBranch ?? "",
+                    SettingsSection = structSpec?.SettingsSection ?? "",
                     // 기본 도구 이름(한정하지 않은 C++ 이름)과 같은 Name은 지정하지 않은 것과 같다.
                     ToolName = (classSpec?.ToolName ?? structSpec!.ToolName) is string toolName && toolName != TypeToolName.Default(qualified) ? toolName : "",
                     BindsSpelling = structSpec?.Binds ?? "",

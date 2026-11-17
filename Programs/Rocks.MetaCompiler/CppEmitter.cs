@@ -180,6 +180,12 @@ internal static class CppEmitter
             Line($"#include <{CompilerOptions.GeneratedSpelling(header)}>");
         }
 
+        // 설정 struct의 GeneratedType<S>::Settings()가 쓴다(Docs/Design/ConfigSystem.ko.md 7절).
+        if (own.Any(type => type.IsSettings))
+        {
+            Line("#include <Meta/SettingsSchema.h>");
+        }
+
         // NATIVE 멤버 static_assert와 struct 특수화의 멤버 형질 대조(IsNativeStrongReference·RegistryContainer)가 쓴다.
         if (own.Any(type => type.NativeMembers.Count != 0 || type.IsStruct))
         {
@@ -578,6 +584,11 @@ internal static class CppEmitter
         Line($"static const TypeSchema schema{{Id(), {type.Version}, {fieldSpan}, {View(type.Name)}, Guid{{}}, {type.Flags}u, {View(type.EffectiveToolName)}}};");
         Line("return schema;");
         Line("}");
+        if (type.IsSettings)
+        {
+            EmitSettingsSchema(type, Line);
+        }
+
         // 참조 struct는 직접 ObjectRef 멤버(Transient 포함 — GC는 추적한다)를 Visit하고 멤버 struct의 Trace를, 모든 배열
         // 멤버에 TraceArrayField를, 모든 Map 멤버에 TraceMapField를 부른다(인라인 struct 안 ObjectRefArray·StructRefArray·
         // ObjectRefMap). 참조 없는 struct는 빈 본문이다(그 형질은 위의 static_assert가 C++ 멤버 타입과 대조한다).
@@ -639,6 +650,29 @@ internal static class CppEmitter
         Line($"static constexpr bool Supported = GeneratedType<{native}>::ValueCopyable;");
         Line($"static Result<void> Copy({native}& destination, const {native}& source, Allocator& allocator) noexcept {{ return GeneratedType<{native}>::CopyValue(destination, source, allocator); }}");
         Line("};");
+    }
+
+    // 설정 struct의 설정 메타데이터다(Docs/Design/ConfigSystem.ko.md 7절 — Meta/SettingsSchema.h): branch·섹션 이름과 설정 지정자가 있는 직접
+    // 멤버(스키마 필드 순서)의 필드 ID·SettingsFieldFlags 비트·콘솔 이름. 설정 계층이 GeneratedType<S>::Settings()로 읽는다.
+    private static void EmitSettingsSchema(ClassModel type, Action<string> Line)
+    {
+        FieldModel[] fields = type.Fields.Where(field => field.Spec.HasSettings).ToArray();
+        Line("static const SettingsSchema& Settings() noexcept {");
+        if (fields.Length != 0)
+        {
+            Line("static const SettingsFieldSchema settingsFields[] = {");
+            foreach (FieldModel field in fields)
+            {
+                Line($"{{{GuidValue(field.Id)}, {field.Spec.SettingsFlags}u, {View(field.Spec.ConsoleName)}}},");
+            }
+
+            Line("};");
+        }
+
+        string span = fields.Length == 0 ? "Span<const SettingsFieldSchema>{}" : $"Span<const SettingsFieldSchema>(settingsFields, {fields.Length})";
+        Line($"static const SettingsSchema settings{{{View(type.SettingsBranch)}, {View(type.SettingsSection)}, {span}}};");
+        Line("return settings;");
+        Line("}");
     }
 
     // struct 값의 깊은 복사다(리플렉션 B9i3c0 — Docs/Design/ReflectionExtensions.ko.md 10.2절, UE UScriptStruct::CopyScriptStruct 대응).

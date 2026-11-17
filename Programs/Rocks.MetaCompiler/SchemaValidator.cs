@@ -582,6 +582,7 @@ internal static partial class SchemaValidator
                         "Remove MaxElements; it limits the element count of reflected array, map and set fields (a static array T name[N] always holds exactly N elements).").At(field.Site);
                 }
 
+                CheckSettingsField(model, field);
                 if (field.IsCounted)
                 {
                     // 0과 2³¹ 이상은 지정자 문법(RMC2000)이 이미 막는다.
@@ -718,6 +719,14 @@ internal static partial class SchemaValidator
                 model.Fields.Any(field => field.StructTarget && Find(field.Reference!).RequiresWorldOnlyOwner) ||
                 model.NativeMembers.Any(native => native.Struct is not null && Find(native.Struct).RequiresWorldOnlyOwner);
             model.ContainsReferenceArray = ContainsReferenceArray(model, Find);
+            // 설정 struct는 값이다(설정 계층이 리플렉션 struct 값 대상으로 읽는다 — Docs/Design/ConfigSystem.ko.md 7절). 강한 참조를 담으면
+            // 값 대상이 될 수 없다.
+            if (model.IsSettings && (model.ContainsStrongReference || model.ContainsReferenceArray))
+            {
+                throw new MetadataException($"{model.Name}: a Settings struct cannot hold strong object references or reference arrays", "RMC2210",
+                    "Settings structs are plain values read from config files; refer to assets by SoftObjectRef or AssetId instead.").At(model.Site);
+            }
+
             foreach (FieldModel field in model.OwnFields)
             {
                 CheckOptional(field);
@@ -881,6 +890,40 @@ internal static partial class SchemaValidator
         }
 
         return new(classes, ordered, imported);
+    }
+
+    // 콘솔 설정·설정 snapshot이 담을 수 있는 필드 종류다(Docs/Design/ConfigSystem.ko.md 5.1절 — bool·int32·int64·float·double·String·Name·
+    // 리플렉션 enum). Optional·컨테이너·struct는 받지 않는다.
+    private static readonly string[] ConsoleKinds = ["Bool", "Int32", "Int64", "Float32", "Float64", "Utf8String", "Name", "Enum"];
+
+    // 설정 필드 지정자를 검사한다(Docs/Design/ConfigSystem.ko.md 7절): 설정 struct의 직접 멤버만 쓸 수 있고(RMC2210), ConsoleName·RenderRead는
+    // 콘솔 설정 종류의 필드에만 쓴다(RMC2202). ConsoleName은 한 struct 안에서 유일하다(RMC2210 — 모듈·실행 사이 유일성은 설정 계층이 등록 때
+    // 본다).
+    private static void CheckSettingsField(ClassModel model, FieldModel field)
+    {
+        if (!field.Spec.HasSettings)
+        {
+            return;
+        }
+
+        if (!model.IsStruct || !model.IsSettings)
+        {
+            throw new MetadataException($"{field.Owner}::{field.Name}: settings specifiers (UserConfig, ConsoleName, RestartRequired, StartupOnly, RenderRead, DevelopmentOnly) apply only to members of a ROCKS_STRUCT(Settings(...))", "RMC2210",
+                "Declare the owner as ROCKS_STRUCT(Settings(Branch = \"...\", Section = \"...\")) or remove the settings specifiers.").At(field.Site);
+        }
+
+        if ((field.Spec.ConsoleName.Length != 0 || field.Spec.RenderRead) && !ConsoleKinds.Contains(field.Kind, StringComparer.Ordinal))
+        {
+            throw new MetadataException($"{field.Owner}::{field.Name}: ConsoleName and RenderRead apply only to bool, int32, int64, float, double, String, Name and reflected enum fields", "RMC2202",
+                "Expose a single value field; containers, Optional and structs cannot be console settings or snapshot values.").At(field.Site);
+        }
+
+        if (field.Spec.ConsoleName.Length != 0 &&
+            model.OwnFields.Any(other => other != field && string.Equals(other.Spec.ConsoleName, field.Spec.ConsoleName, StringComparison.Ordinal)))
+        {
+            throw new MetadataException($"{field.Owner}::{field.Name}: ConsoleName \"{field.Spec.ConsoleName}\" is used by another field of {model.Name}", "RMC2210",
+                "Give every console setting a distinct name; a console name maps to exactly one value.").At(field.Site);
+        }
     }
 
     // 타입 도구 이름(클래스·struct — Docs/Design/ReflectionExtensions.ko.md 5.2절)을 검사한다(RMC2203): 실효 이름이 형식에 맞고
