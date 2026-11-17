@@ -29,8 +29,8 @@ public static class NumberTables
     public static string Generate()
     {
         var text = new StringBuilder();
-        text.Append("// 생성 파일이다. 직접 고치지 않는다: Rocks.ToolTests number-tables --root . --write\n");
-        text.Append($"// 생성기 버전 {GeneratorVersion}. 128비트 값은 {{하위 64비트, 상위 64비트}} 순서다.\n");
+        text.Append("// Generated file. Do not edit by hand: Rocks.ToolTests number-tables --root . --write\n");
+        text.Append($"// Generator version {GeneratorVersion}. 128-bit values are ordered {{low 64 bits, high 64 bits}}.\n");
         text.Append("#pragma once\n\n#include <Base/Types.h>\n\nnamespace rocks::detail::decimal {\n\n");
         text.Append($"inline constexpr int32 SmallestPowerOfTen = {SmallestPowerOfTen};\n");
         text.Append($"inline constexpr int32 LargestPowerOfTen = {LargestPowerOfTen};\n");
@@ -46,7 +46,7 @@ public static class NumberTables
             exponents.Add(exponent);
         }
 
-        text.Append("// 5^q ≈ Pow5Significand[q + 342] · 2^Pow5Exponent[q + 342](내림, 상위 비트 2^127이 켜져 있다).\n");
+        text.Append("// 5^q ≈ Pow5Significand[q + 342] · 2^Pow5Exponent[q + 342] (rounded down, top bit 2^127 is set).\n");
         Emit128(text, "Pow5Significand", significands);
         text.Append("inline constexpr int16 Pow5Exponent[] = {\n");
         for (int index = 0; index < exponents.Count; index += 12)
@@ -63,7 +63,7 @@ public static class NumberTables
             inverse.Add((BigInteger.One << ((int)power.GetBitLength() - 1 + RyuBitCount)) / power + 1);
         }
 
-        text.Append("// Ryu: ⌊2^(B(q) − 1 + 125) / 5^q⌋ + 1(B(q) = 5^q의 비트 길이).\n");
+        text.Append("// Ryu: ⌊2^(B(q) − 1 + 125) / 5^q⌋ + 1 (B(q) = bit length of 5^q).\n");
         Emit128(text, "Pow5InvSplit", inverse);
 
         var split = new List<BigInteger>();
@@ -74,7 +74,7 @@ public static class NumberTables
             split.Add(length >= RyuBitCount ? power >> (length - RyuBitCount) : power << (RyuBitCount - length));
         }
 
-        text.Append("// Ryu: 5^i를 125비트로 맞춘 값(넘치는 비트는 버린다).\n");
+        text.Append("// Ryu: 5^i normalized to 125 bits (excess bits are truncated).\n");
         Emit128(text, "Pow5Split", split);
         text.Append("// clang-format on\n\n} // namespace rocks::detail::decimal\n");
         return text.ToString();

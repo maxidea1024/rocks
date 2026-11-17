@@ -1,6 +1,6 @@
-// 생성 파일이다. 직접 고치지 않는다: Rocks.ToolTests math-tables --root . --write
-// 정확도 기준값 {입력, 둘째 입력(Pow 지수), 정확히 반올림한 참값}의 double 비트.
-// 참값: 400비트 고정소수점(Rocks.Tooling.Checks/MathReference.cs).
+// Generated file. Do not edit by hand: Rocks.ToolTests math-tables --root . --write
+// Accuracy reference cases as double bits: {input, second input (Pow exponent), correctly rounded exact value}.
+// Exact values: 400-bit fixed point (Rocks.Tooling.Checks/MathReference.cs).
 #pragma once
 
 #include <Base/Types.h>

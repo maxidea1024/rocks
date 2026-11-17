@@ -1,5 +1,5 @@
-// 생성 파일이다. 직접 고치지 않는다: Rocks.ToolTests math-tables --root . --write
-// 생성기 버전 1. 값은 float 비트 패턴이다(정확한 유리수·정수 비교로 반올림).
+// Generated file. Do not edit by hand: Rocks.ToolTests math-tables --root . --write
+// Generator version 1. Values are float bit patterns (rounded by exact rational and integer comparison).
 #pragma once
 
 #include <Base/Types.h>
@@ -7,7 +7,7 @@
 namespace rocks::deterministic::detail {
 
 // clang-format off
-// decode(k/255)를 가장 가까운 float로 반올림한 값.
+// decode(k/255) rounded to the nearest float.
 inline constexpr uint32 SrgbDecodeBits[] = {
     0x00000000u, 0x399F22B4u, 0x3A1F22B4u, 0x3A6EB40Eu, 0x3A9F22B4u, 0x3AC6EB61u, 0x3AEEB40Eu, 0x3B0B3E5Du,
     0x3B1F22B4u, 0x3B33070Au, 0x3B46EB61u, 0x3B5B518Eu, 0x3B70F18Fu, 0x3B83E1C6u, 0x3B8FE616u, 0x3B9C87FDu,
@@ -43,7 +43,7 @@ inline constexpr uint32 SrgbDecodeBits[] = {
     0x3F704DB5u, 0x3F7282AEu, 0x3F74BAABu, 0x3F76F5AEu, 0x3F7933B6u, 0x3F7B74C6u, 0x3F7DB8DEu, 0x3F800000u,
 };
 
-// decode((k + 0.5)/255) 이상인 가장 작은 float. 선형 값 x의 부호화 = x 이하인 경계 수.
+// Smallest float not less than decode((k + 0.5)/255). Encoding of linear value x = number of thresholds not greater than x.
 inline constexpr uint32 SrgbEncodeThresholdBits[] = {
     0x391F22B4u, 0x39EEB40Eu, 0x3A46EB61u, 0x3A8B3E5Eu, 0x3AB3070Bu, 0x3ADACFB8u, 0x3B014C33u, 0x3B153089u,
     0x3B2914DFu, 0x3B3CF936u, 0x3B50F2D1u, 0x3B65FB9Bu, 0x3B7C3403u, 0x3B89D060u, 0x3B962333u, 0x3BA314BDu,

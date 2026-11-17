@@ -60,13 +60,13 @@ public static class MathTables
         }
 
         var text = new StringBuilder();
-        text.Append("// 생성 파일이다. 직접 고치지 않는다: Rocks.ToolTests math-tables --root . --write\n");
-        text.Append($"// 생성기 버전 {GeneratorVersion}. 값은 float 비트 패턴이다(정확한 유리수·정수 비교로 반올림).\n");
+        text.Append("// Generated file. Do not edit by hand: Rocks.ToolTests math-tables --root . --write\n");
+        text.Append($"// Generator version {GeneratorVersion}. Values are float bit patterns (rounded by exact rational and integer comparison).\n");
         text.Append("#pragma once\n\n#include <Base/Types.h>\n\nnamespace rocks::deterministic::detail {\n\n");
         text.Append("// clang-format off\n");
-        text.Append("// decode(k/255)를 가장 가까운 float로 반올림한 값.\n");
+        text.Append("// decode(k/255) rounded to the nearest float.\n");
         Emit(text, "SrgbDecodeBits", decode);
-        text.Append("// decode((k + 0.5)/255) 이상인 가장 작은 float. 선형 값 x의 부호화 = x 이하인 경계 수.\n");
+        text.Append("// Smallest float not less than decode((k + 0.5)/255). Encoding of linear value x = number of thresholds not greater than x.\n");
         Emit(text, "SrgbEncodeThresholdBits", thresholds);
         text.Append("// clang-format on\n\n} // namespace rocks::deterministic::detail\n");
         return text.ToString();
