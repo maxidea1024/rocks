@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Base/Types.h>
+#include <Core/Text/StringView.h>
 
 namespace rocks {
 
@@ -31,6 +32,26 @@ inline constexpr usize LogLevelCount = static_cast<usize>(LogLevel::Fatal) + 1;
 // LogLevel에 정의된 값인지 확인한다. 외부에서 숫자로 받은 레벨(설정·시험)을 쓰기 전에 검사한다.
 constexpr bool IsValidLogLevel(LogLevel level) noexcept {
     return static_cast<usize>(level) < LogLevelCount;
+}
+
+// 레벨의 영어 이름이다(출력 접두사·설정용). 정의되지 않은 값은 "Unknown"이다.
+constexpr StringView LogLevelName(LogLevel level) noexcept {
+    switch (level) {
+    case LogLevel::Trace:
+        return "Trace";
+    case LogLevel::Debug:
+        return "Debug";
+    case LogLevel::Info:
+        return "Info";
+    case LogLevel::Warning:
+        return "Warning";
+    case LogLevel::Error:
+        return "Error";
+    case LogLevel::Fatal:
+        return "Fatal";
+    }
+
+    return "Unknown";
 }
 
 enum class DiagnosticKind : uint8 {

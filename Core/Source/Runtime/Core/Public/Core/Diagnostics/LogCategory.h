@@ -252,6 +252,37 @@ struct LogCategoryPrefix {
 
         return EqualsIgnoringAsciiCase(category.PrefixName(depth - 1), name);
     }
+
+    // 카테고리 이름 문자열(문법을 지킨 이름)이 이 접두사 아래에 있는지다. 출력 쪽처럼 LogCategory
+    // 객체 없이 이름만 있을 때 쓴다. 같은 깊이의 점 접두사를 잘라 해시(HashLogCategoryName)와
+    // 이름을 모두 비교한다(ASCII 대소문자 무시). 해시를 계산하므로 Matches보다 느리다.
+    constexpr bool MatchesName(StringView categoryName) const noexcept {
+        if (depth == 0) {
+            return true;
+        }
+
+        usize segments = 1;
+        usize end = categoryName.ByteCount();
+        for (usize index = 0; index < categoryName.ByteCount(); ++index) {
+            if (categoryName.Data()[index] != '.') {
+                continue;
+            }
+
+            if (segments == depth) {
+                end = index;
+                break;
+            }
+
+            ++segments;
+        }
+
+        if (segments < depth) {
+            return false;
+        }
+
+        const StringView prefix(categoryName.Data(), end);
+        return HashLogCategoryName(prefix) == hash && EqualsIgnoringAsciiCase(prefix, name);
+    }
 };
 
 } // namespace rocks

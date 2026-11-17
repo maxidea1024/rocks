@@ -36,7 +36,7 @@
 
 #include <Base/Compiler.h>
 #include <Base/Endian.h>
-#include <Core/Diagnostics/Logger.h>
+#include <Core/Diagnostics/Log.h>
 #include <Core/Move.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
@@ -172,13 +172,7 @@ AesKernels InitializeAesKernels() noexcept {
 
     const AesKernels checked = CheckAesKernels(candidate);
     if (!checked.IsComplete()) {
-        StderrLogSink sink;
-        LogEvent event;
-        event.level = LogLevel::Error;
-        event.category = LogCryptoAes.Name();
-        event.message = "AES lightweight layer self-test failed; AES is disabled";
-        event.location = SourceLocation::Current();
-        (void)sink.Write(event);
+        Log::Error(LogCryptoAes, "AES lightweight layer self-test failed; AES is disabled");
     }
 
     return checked;

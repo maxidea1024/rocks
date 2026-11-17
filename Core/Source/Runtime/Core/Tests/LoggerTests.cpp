@@ -1,6 +1,9 @@
 #include <TestSupport/Test.h>
+#include <Core/Diagnostics/Log.h>
 #include <Core/Diagnostics/LogSink.h>
-#include <Core/Diagnostics/Logger.h>
+#include <Core/Diagnostics/LogSystem.h>
+#include <Core/Diagnostics/RuntimeLogSink.h>
+#include <Core/Memory/SystemAllocator.h>
 #include <Platform/Fatal.h>
 #include <Platform/Thread.h>
 
@@ -11,6 +14,9 @@ constexpr LogCategory LogTests{"Tests"};
 constexpr LogCategory LogTestsAlpha{"Tests.Alpha"};
 constexpr LogCategory LogTestsBeta{"Tests.Beta"};
 constexpr LogCategory LogTestsLogger{"Tests.Logger"};
+
+// 시험이 멈추지 않게 거는 안전 상한이다(정상 진행은 이 시간에 기대지 않는다).
+constexpr uint32 SafetyTimeoutMilliseconds = 30000;
 
 struct CaptureSink final : RuntimeLogSink {
     uint32 count = 0;
@@ -23,11 +29,6 @@ struct CaptureSink final : RuntimeLogSink {
     char bytes[4]{};
     usize byteCount = 0;
     bool fail = false;
-    Logger* reenter = nullptr;
-    ErrorCode nestedWrite = ErrorCode::None;
-    ErrorCode nestedRemove = ErrorCode::None;
-    ErrorCode nestedAdd = ErrorCode::None;
-    ErrorCode nestedFilter = ErrorCode::None;
     uint32* order = nullptr;
     uint32* orderCount = nullptr;
     uint32 id = 0;
@@ -37,6 +38,7 @@ struct CaptureSink final : RuntimeLogSink {
         if (order != nullptr && orderCount != nullptr) {
             order[(*orderCount)++] = id;
         }
+
         // 이름은 콜백 동안만 유효하므로 복사해 둔다.
         lastCategoryBytes = event.category.ByteCount();
         for (usize index = 0; index < lastCategoryBytes && index < sizeof(lastCategory); ++index) {
@@ -51,12 +53,7 @@ struct CaptureSink final : RuntimeLogSink {
         for (usize index = 0; index < byteCount && index < sizeof(bytes); ++index) {
             bytes[index] = event.message.Data()[index];
         }
-        if (reenter != nullptr) {
-            nestedWrite = reenter->Write(LogLevel::Info, LogTests, "nested").Error();
-            nestedRemove = reenter->Remove(*this).Error();
-            nestedAdd = reenter->Add(*this).Error();
-            nestedFilter = reenter->SetFilter(*this, {}).Error();
-        }
+
         return fail ? Result<void>::Failure(ErrorCode::OutOfMemory) : Result<void>::Success();
     }
 
@@ -80,9 +77,11 @@ struct TextCapture {
             view.ByteCount() > sizeof(capture.bytes) - capture.count) {
             return Result<void>::Failure(ErrorCode::DependencyFailed);
         }
+
         for (usize index = 0; index < view.ByteCount(); ++index) {
             capture.bytes[capture.count++] = view.Data()[index];
         }
+
         return Result<void>::Success();
     }
 
@@ -94,97 +93,85 @@ struct TextCapture {
     }
 };
 
+// 시험마다 Sync 모드 LogSystem을 설치한다(설계 5절의 시험 격리). 앞선 시험이 남긴 설치 전 버림 수가
+// 이 sink에 알림으로 들어가지 않도록, 설치 전에 한 번 비운다.
+struct SyncLogs {
+    explicit SyncLogs(LogLevel minimum = LogLevel::Trace) noexcept
+        : logs(allocator, MakeConfig(minimum)) {
+        {
+            LogSystem reset(allocator, MakeConfig(minimum));
+            (void)reset.Start();
+            LogInstallScope drained(reset);
+        }
+
+        if (!logs.Start()) {
+            platform::Fatal("Sync log system did not start");
+        }
+    }
+
+    static LogSystemConfig MakeConfig(LogLevel minimum) noexcept {
+        LogSystemConfig config = LogSystemConfig::ForTool();
+        config.globalMinimum = minimum;
+        return config;
+    }
+
+    SystemAllocator allocator;
+    LogSystem logs;
+};
+
+LogEvent MakeEvent(LogLevel level, StringView category, StringView message) noexcept {
+    LogEvent event;
+    event.level = level;
+    event.category = category;
+    event.message = message;
+    return event;
+}
+
 void Join(platform::Thread& thread) noexcept {
-    if (thread.WaitForCompletion(10000) != platform::WaitResult::Signaled ||
+    if (thread.WaitForCompletion(SafetyTimeoutMilliseconds) != platform::WaitResult::Signaled ||
         thread.Join() != platform::ThreadStatus::Success) {
         platform::Fatal("Logger test worker did not finish");
     }
 }
 
-struct WriterContext {
-    Logger* logger;
-    uint32 failures = 0;
-};
-
-void WriteMany(void* raw) noexcept {
-    auto& context = *static_cast<WriterContext*>(raw);
+void WriteMany(void*) noexcept {
     for (uint32 index = 0; index < 400; ++index) {
-        if (!context.logger->Write(LogLevel::Info, LogTestsAlpha, "worker").IsOk()) {
-            ++context.failures;
-        }
+        Log::Info(LogTestsAlpha, "worker {Index}", index);
     }
-}
-
-struct BlockingSink final : RuntimeLogSink {
-    platform::ManualResetEvent entered;
-    platform::ManualResetEvent release;
-    Result<void> Write(const LogEvent&) noexcept override {
-        entered.Signal();
-        if (release.Wait(10000) != platform::WaitResult::Signaled) {
-            platform::Fatal("Logger test callback did not release");
-        }
-        return Result<void>::Success();
-    }
-};
-
-struct RemovalContext {
-    RemovalContext(Logger& owner, BlockingSink& target) noexcept : logger(&owner), sink(&target) {
-    }
-
-    Logger* logger;
-    BlockingSink* sink;
-    platform::ManualResetEvent started;
-    platform::ManualResetEvent finished;
-    bool removed = false;
-};
-
-void WriteBlocking(void* raw) noexcept {
-    auto& context = *static_cast<RemovalContext*>(raw);
-    CHECK(context.logger->Write(LogLevel::Info, LogTests, "blocking").IsOk());
-}
-
-void RemoveBlocking(void* raw) noexcept {
-    auto& context = *static_cast<RemovalContext*>(raw);
-    context.started.Signal();
-    context.removed = context.logger->Remove(*context.sink).IsOk();
-    context.finished.Signal();
 }
 } // namespace
 
-TEST(RuntimeLoggerFiltersFanoutAndOwnedBytes) {
-    Logger logger;
+TEST(LogSystemFanoutFiltersAndOwnedBytes) {
+    SyncLogs setup;
     CaptureSink first;
     CaptureSink second;
-    REQUIRE(logger.Add(first).IsOk());
-    REQUIRE(logger.Add(second, {LogLevel::Warning, LogTestsAlpha}).IsOk());
-    CHECK(logger.Add(first).Error() == ErrorCode::AlreadyExists);
-    CHECK(logger.Write(LogLevel::Info, LogTestsAlpha, "info").IsOk());
+    REQUIRE(setup.logs.AddSink(first).IsOk());
+    REQUIRE(setup.logs.AddSink(second, {LogLevel::Warning, LogTestsAlpha}).IsOk());
+    CHECK(setup.logs.AddSink(first).Error() == ErrorCode::AlreadyExists);
+    LogInstallScope installed(setup.logs);
+    Log::Info(LogTestsAlpha, "info");
     CHECK(first.count == 1 && second.count == 0);
     const char embedded[] = {'A', '\0', 'B'};
-    REQUIRE(logger.Write(LogLevel::Warning, LogTestsAlpha, StringView(embedded, sizeof(embedded)))
-                .IsOk());
+    Log::Warning(LogTestsAlpha, "{}", StringView(embedded, sizeof(embedded)));
     CHECK(first.count == 2 && second.count == 1 && second.byteCount == 3);
     CHECK(second.bytes[0] == 'A' && second.bytes[1] == '\0' && second.bytes[2] == 'B');
     CHECK(second.LastCategory() == "Tests.Alpha" && second.lastLevel == LogLevel::Warning &&
           second.lastThread != 0 && second.lastTime != 0);
-    CHECK(logger.Write(LogLevel::Error, LogTestsBeta, "other").IsOk());
+    Log::Error(LogTestsBeta, "other");
     CHECK(second.count == 1);
-    REQUIRE(logger.SetFilter(second, {LogLevel::Error, {}}).IsOk());
-    CHECK(logger.Write(LogLevel::Warning, LogTestsAlpha, "filtered").IsOk());
-    CHECK(logger.Write(LogLevel::Error, LogTestsBeta, "accepted").IsOk());
+    CHECK(setup.logs.RemoveSink(second).IsOk());
+    CHECK(setup.logs.RemoveSink(second).Error() == ErrorCode::NotFound);
+    REQUIRE(setup.logs.AddSink(second, {LogLevel::Error, {}}).IsOk());
+    Log::Warning(LogTestsAlpha, "filtered");
+    Log::Error(LogTestsBeta, "accepted");
     CHECK(second.count == 2 && second.LastCategory() == "Tests.Beta");
-    CHECK(logger.Remove(second).IsOk());
-    CHECK(logger.Remove(second).Error() == ErrorCode::NotFound);
-    CHECK(logger.SetFilter(second, {}).Error() == ErrorCode::NotFound);
-    CHECK(logger.Remove(first).IsOk());
-    CHECK(logger.Write(LogLevel::Info, LogTests, "no sinks").IsOk());
 }
 
-TEST(RuntimeLoggerRejectsInvalidInputAndReportsSinkFailure) {
-    Logger logger;
+// 한 sink가 실패해도 나머지는 등록 순서대로 받는다. 실패는 통계에 남는다.
+TEST(LogSystemReportsSinkFailureAndKeepsOrder) {
+    SyncLogs setup;
     CaptureSink failing;
     CaptureSink succeeding;
-    CaptureSink invalidFilter;
     failing.fail = true;
     uint32 order[2]{};
     uint32 orderCount = 0;
@@ -192,61 +179,22 @@ TEST(RuntimeLoggerRejectsInvalidInputAndReportsSinkFailure) {
     failing.orderCount = succeeding.orderCount = &orderCount;
     failing.id = 1;
     succeeding.id = 2;
-    CHECK(logger.Add(invalidFilter, {static_cast<LogLevel>(255), {}}).Error() ==
-          ErrorCode::InvalidArgument);
-    CHECK(logger.Add(invalidFilter, {static_cast<LogLevel>(LogLevelCount), {}}).Error() ==
-          ErrorCode::InvalidArgument);
-    REQUIRE(logger.Add(failing).IsOk());
-    REQUIRE(logger.Add(succeeding).IsOk());
-    const char invalid[] = {static_cast<char>(0xff)};
-    CHECK(logger.Write(LogLevel::Info, LogTests, StringView(invalid, 1)).Error() ==
-          ErrorCode::InvalidArgument);
-    CHECK(logger.Write(static_cast<LogLevel>(255), LogTests, "invalid").Error() ==
-          ErrorCode::InvalidArgument);
-    CHECK(logger.Write(static_cast<LogLevel>(LogLevelCount), LogTests, "invalid").Error() ==
-          ErrorCode::InvalidArgument);
-    CHECK(logger.SetFilter(succeeding, {static_cast<LogLevel>(255), {}}).Error() ==
-          ErrorCode::InvalidArgument);
-    CHECK(failing.count == 0 && succeeding.count == 0);
-    CHECK(logger.Write(LogLevel::Error, LogTests, "failure").Error() ==
-          ErrorCode::DependencyFailed);
+    REQUIRE(setup.logs.AddSink(failing).IsOk());
+    REQUIRE(setup.logs.AddSink(succeeding).IsOk());
+    LogInstallScope installed(setup.logs);
+    Log::Error(LogTests, "failure");
     CHECK(failing.count == 1 && succeeding.count == 1);
     CHECK(orderCount == 2 && order[0] == 1 && order[1] == 2);
-    CHECK(logger.Remove(failing).IsOk());
-    CHECK(logger.Remove(succeeding).IsOk());
+    CHECK(setup.logs.Stats().sinkFailures == 1);
 }
 
-TEST(RuntimeLoggerCapacityAndReentry) {
-    Logger logger;
-    Logger another;
-    CaptureSink sinks[Logger::MaxSinks + 1];
-    for (usize index = 0; index < Logger::MaxSinks; ++index) {
-        REQUIRE(logger.Add(sinks[index]).IsOk());
-    }
-    CHECK(logger.Add(sinks[Logger::MaxSinks]).Error() == ErrorCode::CapacityExceeded);
-    sinks[0].reenter = &logger;
-    CHECK(logger.Write(LogLevel::Info, LogTests, "outer").IsOk());
-    CHECK(sinks[0].nestedWrite == ErrorCode::Busy && sinks[0].nestedRemove == ErrorCode::Busy &&
-          sinks[0].nestedAdd == ErrorCode::Busy && sinks[0].nestedFilter == ErrorCode::Busy);
-    sinks[0].reenter = &another;
-    CHECK(logger.Write(LogLevel::Info, LogTests, "other logger").IsOk());
-    CHECK(sinks[0].nestedWrite == ErrorCode::Busy && sinks[0].nestedRemove == ErrorCode::Busy &&
-          sinks[0].nestedAdd == ErrorCode::Busy && sinks[0].nestedFilter == ErrorCode::Busy);
-    for (usize index = 0; index < Logger::MaxSinks; ++index) {
-        CHECK(logger.Remove(sinks[index]).IsOk());
-    }
-    CHECK(logger.Add(sinks[Logger::MaxSinks]).IsOk());
-    CHECK(logger.Remove(sinks[Logger::MaxSinks]).IsOk());
-}
-
-TEST(RuntimeLoggerTextOutputAndFailures) {
+TEST(TextLogSinkOutputAndFailures) {
     TextCapture output;
     TextLogSink sink({&output, TextCapture::Write, TextCapture::Flush});
-    Logger logger;
-    REQUIRE(logger.Add(sink).IsOk());
     const char message[] = {static_cast<char>(0xed), static_cast<char>(0x95),
                             static_cast<char>(0x9c), '\0', 'X'};
-    REQUIRE(logger.Write(LogLevel::Warning, LogTestsLogger, StringView(message, sizeof(message)))
+    REQUIRE(sink.Write(MakeEvent(LogLevel::Warning, LogTestsLogger.Name(),
+                                 StringView(message, sizeof(message))))
                 .IsOk());
     // 접두사는 레벨 이름과 카테고리 이름이다. 메시지 byte(한글·NUL)는 그대로 지나간다.
     const char prefix[] = "[Warning][Tests.Logger] ";
@@ -265,66 +213,55 @@ TEST(RuntimeLoggerTextOutputAndFailures) {
     for (usize index = 0; index < sizeof(expected); ++index) {
         CHECK(output.bytes[index] == expected[index]);
     }
-    CHECK(output.writes == 3 && output.flushes == 1);
 
+    CHECK(output.writes == 3 && output.flushes == 1);
     output = {};
     output.failWrite = 2;
-    CHECK(logger.Write(LogLevel::Info, LogTests, "x").Error() == ErrorCode::DependencyFailed);
+    CHECK(sink.Write(MakeEvent(LogLevel::Info, "Tests", "x")).Error() ==
+          ErrorCode::DependencyFailed);
     CHECK(output.writes == 2 && output.flushes == 0);
     output = {};
     output.failFlush = true;
-    CHECK(logger.Write(LogLevel::Info, LogTests, "x").Error() == ErrorCode::DependencyFailed);
+    CHECK(sink.Write(MakeEvent(LogLevel::Info, "Tests", "x")).Error() ==
+          ErrorCode::DependencyFailed);
     CHECK(output.writes == 3 && output.flushes == 1);
-    CHECK(logger.Remove(sink).IsOk());
+    const char invalid[] = {static_cast<char>(0xff)};
+    CHECK(sink.Write(MakeEvent(LogLevel::Info, "Tests", StringView(invalid, 1))).Error() ==
+          ErrorCode::InvalidArgument);
+    CHECK(sink.Write(MakeEvent(static_cast<LogLevel>(LogLevelCount), "Tests", "x")).Error() ==
+          ErrorCode::InvalidArgument);
 }
 
 // 외부 프로세스가 stderr 원시 byte를 캡처하여 한글과 NUL까지 확인할 수 있는 전용 probe다.
 TEST(RuntimeLoggerStderrOutputProbe) {
-    Logger logger;
+    SyncLogs setup;
     StderrLogSink stderrSink;
-    REQUIRE(logger.Add(stderrSink).IsOk());
+    REQUIRE(setup.logs.AddSink(stderrSink).IsOk());
+    LogInstallScope installed(setup.logs);
     const char message[] = {static_cast<char>(0xed), static_cast<char>(0x95),
                             static_cast<char>(0x9c), '\0', 'X'};
-    CHECK(logger.Write(LogLevel::Warning, LogTestsLogger, StringView(message, sizeof(message)))
-              .IsOk());
-    CHECK(logger.Remove(stderrSink).IsOk());
+    Log::Warning(LogTestsLogger, "{}", StringView(message, sizeof(message)));
+    CHECK(setup.logs.Stats().sinkFailures == 0);
 }
 
-TEST(RuntimeLoggerConcurrentWritesAndRemovalWaitsForCallback) {
-    Logger logger;
+// Sync 모드는 여러 스레드의 기록을 sink lock으로 직렬화한다.
+TEST(LogSystemSyncSerializesConcurrentWriters) {
+    SyncLogs setup;
     CaptureSink capture;
-    REQUIRE(logger.Add(capture).IsOk());
+    REQUIRE(setup.logs.AddSink(capture).IsOk());
+    LogInstallScope installed(setup.logs);
     platform::Thread workers[4];
-    WriterContext contexts[4] = {{&logger}, {&logger}, {&logger}, {&logger}};
-    for (usize index = 0; index < 4; ++index) {
-        if (workers[index].Start(WriteMany, &contexts[index]) != platform::ThreadStatus::Success) {
+    for (platform::Thread& worker : workers) {
+        if (worker.Start(WriteMany, nullptr) != platform::ThreadStatus::Success) {
             platform::Fatal("Logger test worker start failed");
         }
     }
-    for (usize index = 0; index < 4; ++index) {
-        Join(workers[index]);
-        CHECK(contexts[index].failures == 0);
-    }
-    CHECK(capture.count == 1600);
-    REQUIRE(logger.Remove(capture).IsOk());
 
-    BlockingSink blocking;
-    RemovalContext context(logger, blocking);
-    REQUIRE(logger.Add(blocking).IsOk());
-    platform::Thread writer;
-    platform::Thread remover;
-    if (writer.Start(WriteBlocking, &context) != platform::ThreadStatus::Success ||
-        blocking.entered.Wait(10000) != platform::WaitResult::Signaled ||
-        remover.Start(RemoveBlocking, &context) != platform::ThreadStatus::Success ||
-        context.started.Wait(10000) != platform::WaitResult::Signaled) {
-        platform::Fatal("Logger test setup failed");
+    for (platform::Thread& worker : workers) {
+        Join(worker);
     }
-    CHECK(context.finished.Wait(20) == platform::WaitResult::TimedOut);
-    blocking.release.Signal();
-    Join(writer);
-    Join(remover);
-    CHECK(context.removed && context.finished.Wait(0) == platform::WaitResult::Signaled);
-    CHECK(logger.Write(LogLevel::Info, LogTests, "after removal").IsOk());
+
+    CHECK(capture.count == 1600);
 }
 
 namespace {
@@ -469,45 +406,50 @@ TEST(LogCategoryNameValidation) {
     CHECK(ValidateLogCategoryName(LogLongest.Name()) == LogCategoryNameError::None);
 }
 
-TEST(RuntimeLoggerFiltersByCategoryPrefix) {
-    Logger logger;
+TEST(LogSystemFiltersByCategoryPrefix) {
+    SyncLogs setup;
     CaptureSink graphics;
     CaptureSink d3d12;
     CaptureSink forged;
-    REQUIRE(logger.Add(graphics, {LogLevel::Trace, LogGraphics}).IsOk());
-    REQUIRE(logger.Add(d3d12, {LogLevel::Trace, LogGraphicsD3D12}).IsOk());
+    REQUIRE(setup.logs.AddSink(graphics, {LogLevel::Trace, LogGraphics}).IsOk());
+    REQUIRE(setup.logs.AddSink(d3d12, {LogLevel::Trace, LogGraphicsD3D12}).IsOk());
     LogCategoryPrefix forgedAudio;
     forgedAudio.name = "Audio";
     forgedAudio.hash = LogGraphics.NameHash();
     forgedAudio.depth = 1;
-    REQUIRE(logger.Add(forged, {LogLevel::Trace, forgedAudio}).IsOk());
+    REQUIRE(setup.logs.AddSink(forged, {LogLevel::Trace, forgedAudio}).IsOk());
+    LogInstallScope installed(setup.logs);
 
-    CHECK(logger.Write(LogLevel::Info, LogGraphics, "parent").IsOk());
+    Log::Info(LogGraphics, "parent");
     CHECK(graphics.count == 1 && d3d12.count == 0 && graphics.LastCategory() == "Graphics");
-    CHECK(logger.Write(LogLevel::Info, LogGraphicsD3D12, "child").IsOk());
+    Log::Info(LogGraphicsD3D12, "child");
     CHECK(graphics.count == 2 && d3d12.count == 1 && d3d12.LastCategory() == "Graphics.D3D12");
-    CHECK(logger.Write(LogLevel::Info, LogGraphicsX, "sibling").IsOk());
-    CHECK(logger.Write(LogLevel::Info, LogAudio, "other").IsOk());
+    Log::Info(LogGraphicsX, "sibling");
+    Log::Info(LogAudio, "other");
     CHECK(graphics.count == 2 && d3d12.count == 1);
-    // 위조 접두사는 Graphics 해시를 가졌지만 이름 비교에서 걸러져 아무것도 받지 않는다.
+    // 위조 접두사는 Graphics 해시를 가졌지만 이름이 다르고, Audio 기록과는 해시가 달라 아무것도
+    // 받지 않는다(출력 쪽도 이름의 해시와 이름을 함께 본다).
     CHECK(forged.count == 0);
-
-    CHECK(logger.Remove(graphics).IsOk());
-    CHECK(logger.Remove(d3d12).IsOk());
-    CHECK(logger.Remove(forged).IsOk());
 }
 
-// 어떤 필터도 Fatal을 막지 않는다(설계 7절). 카테고리 접두사가 다른 sink도 Fatal은 받는다.
-TEST(RuntimeLoggerFatalBypassesCategoryFilter) {
-    Logger logger;
-    CaptureSink audioOnly;
-    REQUIRE(logger.Add(audioOnly, {LogLevel::Trace, LogAudio}).IsOk());
-    CHECK(logger.Write(LogLevel::Error, LogGraphics, "blocked").IsOk());
-    CHECK(audioOnly.count == 0);
-    CHECK(logger.Write(LogLevel::Fatal, LogGraphics, "fatal").IsOk());
-    CHECK(audioOnly.count == 1 && audioOnly.lastLevel == LogLevel::Fatal &&
-          audioOnly.LastCategory() == "Graphics");
-    CHECK(logger.Remove(audioOnly).IsOk());
+// 어떤 필터도 Fatal을 막지 않는다(설계 7절). 카테고리 접두사가 다른 필터도 Fatal은 통과시킨다.
+TEST(LogFilterAlwaysAcceptsFatal) {
+    const LogFilter audioOnly{LogLevel::Trace, LogAudio};
+    CHECK(!audioOnly.Accepts(MakeEvent(LogLevel::Error, "Graphics", "blocked")));
+    CHECK(audioOnly.Accepts(MakeEvent(LogLevel::Fatal, "Graphics", "fatal")));
+    CHECK(audioOnly.Accepts(MakeEvent(LogLevel::Info, "Audio", "accepted")));
+    const LogFilter errorsOnly{LogLevel::Error, {}};
+    CHECK(!errorsOnly.Accepts(MakeEvent(LogLevel::Warning, "Audio", "quiet")));
+    CHECK(errorsOnly.Accepts(MakeEvent(LogLevel::Fatal, "Audio", "loud")));
+    // 이름으로 거를 때도 구간 경계와 대소문자 무시를 지킨다.
+    LogCategoryPrefix configured;
+    configured.name = "graphics";
+    configured.hash = HashLogCategoryName("graphics");
+    configured.depth = 1;
+    CHECK(configured.MatchesName("Graphics.D3D12") && configured.MatchesName("GRAPHICS"));
+    CHECK(!configured.MatchesName("GraphicsX") && !configured.MatchesName("Audio.Graphics"));
+    CHECK(LogCategoryPrefix(LogGraphicsD3D12).MatchesName("Graphics.D3D12.Validation"));
+    CHECK(!LogCategoryPrefix(LogGraphicsD3D12).MatchesName("Graphics"));
 }
 
 // TextLogSink는 손으로 만든 LogEvent의 카테고리도 문법으로 검사한다. 줄바꿈을 넣어 가짜 기록 줄을
@@ -561,18 +503,19 @@ TEST(SourceLocationCapturesCaller) {
           unknown.line == 0);
 }
 
-TEST(RuntimeLoggerPassesCallerLocation) {
-    Logger logger;
+TEST(LogSystemPassesCallerLocation) {
+    SyncLogs setup;
     CaptureSink capture;
-    REQUIRE(logger.Add(capture).IsOk());
-    CHECK(logger.Write(LogLevel::Info, LogTests, "where").IsOk());
+    REQUIRE(setup.logs.AddSink(capture).IsOk());
+    LogInstallScope installed(setup.logs);
+    Log::Info(LogTests, "where");
     const uint32 writeLine = __LINE__ - 1;
     CHECK(capture.lastLocation.line == writeLine);
     CHECK(StringView(capture.lastLocation.file).EndsWith("LoggerTests.cpp"));
-    CHECK(logger.Remove(capture).IsOk());
+    CHECK(StringView(capture.lastLocation.function) == "RocksTest_LogSystemPassesCallerLocation");
 }
 
-TEST(LogLevelRoundTripsThroughLoggerTextSinkAndBuffer) {
+TEST(LogLevelRoundTripsThroughSinkFilterAndBuffer) {
     const LogLevel levels[] = {LogLevel::Trace,   LogLevel::Debug, LogLevel::Info,
                                LogLevel::Warning, LogLevel::Error, LogLevel::Fatal};
     const char* const names[] = {"Trace", "Debug", "Info", "Warning", "Error", "Fatal"};
@@ -580,21 +523,18 @@ TEST(LogLevelRoundTripsThroughLoggerTextSinkAndBuffer) {
                   "every LogLevel must be covered");
     CHECK(!IsValidLogLevel(static_cast<LogLevel>(LogLevelCount)));
 
-    Logger logger;
-    CaptureSink capture;
     TextCapture output;
     TextLogSink text({&output, TextCapture::Write, TextCapture::Flush});
-    REQUIRE(logger.Add(capture).IsOk());
-    REQUIRE(logger.Add(text).IsOk());
     LogBuffer buffer;
+    const LogFilter all{};
     for (usize index = 0; index < LogLevelCount; ++index) {
         const LogLevel level = levels[index];
         CHECK(IsValidLogLevel(level) && static_cast<usize>(level) == index);
+        CHECK(LogLevelName(level) == names[index]);
+        CHECK(all.Accepts(MakeEvent(level, "Tests", "m")));
 
-        // Fatal도 Logger에서는 일반 기록이다(종료하지 않는다).
         output = {};
-        REQUIRE(logger.Write(level, LogTests, "m").IsOk());
-        CHECK(capture.lastLevel == level);
+        REQUIRE(text.Write(MakeEvent(level, "Tests", "m")).IsOk());
         char expected[32]{};
         usize expectedCount = 0;
         const auto append = [&](const char* piece) noexcept {
@@ -602,6 +542,7 @@ TEST(LogLevelRoundTripsThroughLoggerTextSinkAndBuffer) {
                 expected[expectedCount++] = piece[at];
             }
         };
+
         append("[");
         append(names[index]);
         append("][Tests] m\n");
@@ -612,7 +553,25 @@ TEST(LogLevelRoundTripsThroughLoggerTextSinkAndBuffer) {
         CHECK(buffer.At(index)->level == level);
     }
 
-    CHECK(capture.count == LogLevelCount);
-    CHECK(logger.Remove(capture).IsOk());
-    CHECK(logger.Remove(text).IsOk());
+    // Log 진입 함수로 남긴 기록도 레벨이 그대로 sink까지 간다(컴파일에 포함된 레벨만).
+    SyncLogs setup;
+    CaptureSink capture;
+    REQUIRE(setup.logs.AddSink(capture).IsOk());
+    LogInstallScope installed(setup.logs);
+    if constexpr (LogLevel::Trace >= LogCompiledMinimum) {
+        Log::Trace(LogTests, "m");
+        CHECK(capture.lastLevel == LogLevel::Trace);
+    }
+
+    if constexpr (LogLevel::Debug >= LogCompiledMinimum) {
+        Log::Debug(LogTests, "m");
+        CHECK(capture.lastLevel == LogLevel::Debug);
+    }
+
+    Log::Info(LogTests, "m");
+    CHECK(capture.lastLevel == LogLevel::Info);
+    Log::Warning(LogTests, "m");
+    CHECK(capture.lastLevel == LogLevel::Warning);
+    Log::Error(LogTests, "m");
+    CHECK(capture.lastLevel == LogLevel::Error);
 }
