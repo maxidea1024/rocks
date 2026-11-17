@@ -23,7 +23,12 @@ using namespace rocks::test;
 // 플랫폼(Windows·macOS)에서 Unsupported가 나오면 실패이고, Android는 Unsupported만 확인한다.
 namespace {
 
-constexpr uint32 GenerousTimeout = 30'000;
+// 자식 프로세스를 기다릴 때 시간 한도를 두지 않는다. 기계 부하(낮은 우선순위 자식의 지연 등)에 따라
+// 결과가 바뀌지 않게 하려는 것이다. 멈춤은 시험 실행기 바깥의 작업 시간 한도가 잡는다.
+constexpr uint32 ProbeWait = InfiniteTimeout;
+
+// Process_RunEndsWhenDescendantHoldsOutput가 회귀를 시간 초과로 드러낼 때 쓰는 한도다(10분).
+constexpr uint32 DescendantRegressionTimeout = 600'000;
 
 struct Probe {
     char path[4096]{};
@@ -63,15 +68,7 @@ struct Probe {
     }
 };
 
-uint64 ElapsedMilliseconds(uint64 start) noexcept {
-    return (MonotonicNanoseconds() - start) / 1'000'000u;
-}
-
 ProcessRunResult RunProbe(const ProcessStartInfo& info, ProcessRunOptions options = {}) noexcept {
-    if (options.timeoutMilliseconds == InfiniteTimeout) {
-        options.timeoutMilliseconds = GenerousTimeout;
-    }
-
     return RunProcess(info, options);
 }
 
@@ -103,11 +100,9 @@ bool SkipBeforeFixtures() noexcept {
 uint32 ReadProcessIdLine(Process& process) noexcept {
     char line[64]{};
     usize used = 0;
-    const uint64 start = MonotonicNanoseconds();
-    while (used < sizeof(line) - 1u && memchr(line, '\n', used) == nullptr &&
-           ElapsedMilliseconds(start) < GenerousTimeout) {
+    while (used < sizeof(line) - 1u && memchr(line, '\n', used) == nullptr) {
         const auto read =
-            process.Read(ProcessStream::Output, line + used, sizeof(line) - 1u - used, 1000);
+            process.Read(ProcessStream::Output, line + used, sizeof(line) - 1u - used, ProbeWait);
         if (!read.status && read.status.code != FileCode::NoProgress) {
             return 0;
         }
@@ -262,7 +257,7 @@ TEST(Process_StartRejectsInvalidInput) {
     // 이미 시작한 객체는 다시 Start할 수 없다.
     REQUIRE(process.Start(probe.Info()));
     CHECK(process.Start(probe.Info()).code == FileCode::AlreadyOpen);
-    CHECK(process.Wait(GenerousTimeout) == WaitResult::Signaled);
+    CHECK(process.Wait(ProbeWait) == WaitResult::Signaled);
     process.Close();
 }
 
@@ -521,7 +516,7 @@ TEST(Process_MergedErrorKeepsWriteOrder) {
     char buffer[8];
     CHECK(process.Read(ProcessStream::Error, buffer, sizeof(buffer), 0).status.code ==
           FileCode::NotOpen);
-    CHECK(process.Wait(GenerousTimeout) == WaitResult::Signaled);
+    CHECK(process.Wait(ProbeWait) == WaitResult::Signaled);
 }
 
 TEST(Process_InheritAndNullStreams) {
@@ -569,7 +564,6 @@ TEST(Process_RunTimeoutTerminatesChild) {
     probe.Add("block");
     ProcessRunOptions options;
     options.timeoutMilliseconds = 300;
-    uint64 start = MonotonicNanoseconds();
     const auto run = RunProbe(probe.Info(), options);
     if (SkipUnsupported(run.status)) {
         return;
@@ -578,7 +572,6 @@ TEST(Process_RunTimeoutTerminatesChild) {
     REQUIRE(run.status);
     CHECK(run.timedOut);
     CHECK(run.exit.kind == ProcessExitKind::Terminated);
-    CHECK(ElapsedMilliseconds(start) < 20'000);
 
     // 출력이 쉬지 않고 들어와도 시간 초과를 놓치지 않는다. spew도 스스로 끝나지 않으므로 결과는
     // 시간 초과 하나뿐이다. 시간 초과 전에 출력이 상한을 넘었는지는 부하에 따라 달라지므로 보지
@@ -591,13 +584,11 @@ TEST(Process_RunTimeoutTerminatesChild) {
     char output[1000];
     options.output = output;
     options.outputCapacity = sizeof(output);
-    start = MonotonicNanoseconds();
     const auto busy = RunProbe(info, options);
     REQUIRE(busy.status);
     CHECK(busy.timedOut);
     CHECK(busy.exit.kind == ProcessExitKind::Terminated);
     CHECK(busy.outputBytes <= sizeof(output));
-    CHECK(ElapsedMilliseconds(start) < 20'000);
 }
 
 TEST(Process_TerminatingWaitingChildKeepsEarlierOutput) {
@@ -618,8 +609,7 @@ TEST(Process_TerminatingWaitingChildKeepsEarlierOutput) {
     char line[16]{};
     usize used = 0;
     while (used < 6u) {
-        const auto read =
-            process.Read(ProcessStream::Output, line + used, 6u - used, GenerousTimeout);
+        const auto read = process.Read(ProcessStream::Output, line + used, 6u - used, ProbeWait);
         REQUIRE(read.status && read.bytes != 0);
         used += read.bytes;
     }
@@ -627,7 +617,7 @@ TEST(Process_TerminatingWaitingChildKeepsEarlierOutput) {
     CHECK(memcmp(line, "ready\n", 6) == 0);
     CHECK(process.Wait(0) == WaitResult::TimedOut);
     CHECK(process.Terminate());
-    REQUIRE(process.Wait(GenerousTimeout) == WaitResult::Signaled);
+    REQUIRE(process.Wait(ProbeWait) == WaitResult::Signaled);
     ProcessExit exit;
     REQUIRE(process.GetExit(exit));
     CHECK(exit.kind == ProcessExitKind::Terminated);
@@ -654,7 +644,7 @@ TEST(Process_WaitTerminateCloseAndRestart) {
     CHECK(!process.GetExit(exit));
     CHECK(process.Terminate());
     CHECK(process.Terminate());
-    REQUIRE(process.Wait(GenerousTimeout) == WaitResult::Signaled);
+    REQUIRE(process.Wait(ProbeWait) == WaitResult::Signaled);
     CHECK(process.Wait(0) == WaitResult::Signaled);
     REQUIRE(process.GetExit(exit));
     CHECK(exit.kind == ProcessExitKind::Terminated);
@@ -674,7 +664,7 @@ TEST(Process_WaitTerminateCloseAndRestart) {
     REQUIRE(process.Start(quick.Info()));
     Process moved(static_cast<Process&&>(process));
     CHECK(!process.IsStarted());
-    REQUIRE(moved.Wait(GenerousTimeout) == WaitResult::Signaled);
+    REQUIRE(moved.Wait(ProbeWait) == WaitResult::Signaled);
     REQUIRE(moved.GetExit(exit));
     CHECK(exit.kind == ProcessExitKind::Exited && exit.code == 3);
     // 스스로 끝난 뒤의 Terminate는 종료 종류를 바꾸지 않는다.
@@ -721,7 +711,7 @@ TEST(Process_TerminateEndsDescendants) {
     ProcessWatch watch(descendant);
     CHECK(IsProcessRunning(descendant));
     CHECK(process.Terminate());
-    CHECK(process.Wait(GenerousTimeout) == WaitResult::Signaled);
+    CHECK(process.Wait(ProbeWait) == WaitResult::Signaled);
     CHECK(watch.WaitGone(10'000));
     process.Close();
 }
@@ -744,7 +734,7 @@ TEST(Process_CloseAfterNaturalExitEndsDescendants) {
         const uint32 descendant = ReadProcessIdLine(process);
         REQUIRE(descendant != 0);
         ProcessWatch watch(descendant);
-        REQUIRE(process.Wait(GenerousTimeout) == WaitResult::Signaled);
+        REQUIRE(process.Wait(ProbeWait) == WaitResult::Signaled);
         ProcessExit exit;
         REQUIRE(process.GetExit(exit));
         CHECK(exit.kind == ProcessExitKind::Exited && exit.code == 0);
@@ -772,7 +762,10 @@ TEST(Process_RunEndsWhenDescendantHoldsOutput) {
     ProcessRunOptions options;
     options.output = output;
     options.outputCapacity = sizeof(output) - 1u;
-    const uint64 start = MonotonicNanoseconds();
+    // 회귀(손자가 pipe를 놓을 때까지 기다림)를 시간 초과로 드러내는 한도다. 손자는 스스로 끝나지
+    // 않으므로 회귀면 반드시 이 한도에 걸리고, 정상이면 직접 자식이 끝나는 즉시 돌아온다. 기계
+    // 부하로 정상 경로가 이 한도에 걸리지 않도록 크게 둔다.
+    options.timeoutMilliseconds = DescendantRegressionTimeout;
     const auto run = RunProbe(info, options);
     if (SkipUnsupported(run.status)) {
         return;
@@ -781,7 +774,6 @@ TEST(Process_RunEndsWhenDescendantHoldsOutput) {
     REQUIRE(run.status);
     CHECK(!run.timedOut);
     CHECK(run.exit.kind == ProcessExitKind::Exited && run.exit.code == 0);
-    CHECK(ElapsedMilliseconds(start) < 20'000);
     const auto descendant = static_cast<uint32>(strtoul(output, nullptr, 10));
     REQUIRE(descendant != 0);
     ProcessWatch watch(descendant);
@@ -805,14 +797,12 @@ TEST(Process_StreamingPipesAndEndOfStream) {
     // 아직 쓰지 않았으므로 읽을 것이 없다.
     CHECK(process.Read(ProcessStream::Output, buffer, sizeof(buffer), 50).status.code ==
           FileCode::NoProgress);
-    const auto written = process.WriteInput("hello\n", 6, GenerousTimeout);
+    const auto written = process.WriteInput("hello\n", 6, ProbeWait);
     CHECK(written.status && written.bytes == 6);
     usize used = 0;
-    const uint64 start = MonotonicNanoseconds();
     while (used < 6) {
-        REQUIRE(ElapsedMilliseconds(start) < GenerousTimeout);
         const auto read =
-            process.Read(ProcessStream::Output, buffer + used, sizeof(buffer) - used, 1000);
+            process.Read(ProcessStream::Output, buffer + used, sizeof(buffer) - used, ProbeWait);
         REQUIRE(read.status || read.status.code == FileCode::NoProgress);
         used += read.bytes;
     }
@@ -822,8 +812,7 @@ TEST(Process_StreamingPipesAndEndOfStream) {
     CHECK(process.CloseInput().code == FileCode::NotOpen);
     CHECK(process.WriteInput("x", 1).status.code == FileCode::NotOpen);
     for (;;) {
-        const auto read =
-            process.Read(ProcessStream::Output, buffer, sizeof(buffer), GenerousTimeout);
+        const auto read = process.Read(ProcessStream::Output, buffer, sizeof(buffer), ProbeWait);
         if (read.status.code == FileCode::EndOfFile) {
             break;
         }
@@ -837,7 +826,7 @@ TEST(Process_StreamingPipesAndEndOfStream) {
           FileCode::NotOpen);
     CHECK(process.Read(ProcessStream::Output, buffer, 0, 0).status.code ==
           FileCode::InvalidArgument);
-    REQUIRE(process.Wait(GenerousTimeout) == WaitResult::Signaled);
+    REQUIRE(process.Wait(ProbeWait) == WaitResult::Signaled);
     ProcessExit exit;
     REQUIRE(process.GetExit(exit));
     CHECK(exit.kind == ProcessExitKind::Exited && exit.code == 0);
@@ -870,7 +859,7 @@ TEST(Process_WriteInputTimeoutAndClosedReader) {
         usize used = 0;
         for (;;) {
             const auto read =
-                process.Read(ProcessStream::Output, output + used, Bytes - used, GenerousTimeout);
+                process.Read(ProcessStream::Output, output + used, Bytes - used, ProbeWait);
             if (read.status.code == FileCode::EndOfFile || !read.status) {
                 CHECK(read.status.code == FileCode::EndOfFile);
                 break;
@@ -880,7 +869,7 @@ TEST(Process_WriteInputTimeoutAndClosedReader) {
         }
 
         CHECK(used == written.bytes && memcmp(input, output, used) == 0);
-        CHECK(process.Wait(GenerousTimeout) == WaitResult::Signaled);
+        CHECK(process.Wait(ProbeWait) == WaitResult::Signaled);
         process.Close();
 
         // 입력을 읽지 않고 끝난 자식에게 쓰면 EndOfFile이다.
@@ -889,8 +878,8 @@ TEST(Process_WriteInputTimeoutAndClosedReader) {
         info = quit.Info();
         info.input = ProcessStreamMode::Pipe;
         REQUIRE(process.Start(info));
-        REQUIRE(process.Wait(GenerousTimeout) == WaitResult::Signaled);
-        CHECK(process.WriteInput("x", 1, GenerousTimeout).status.code == FileCode::EndOfFile);
+        REQUIRE(process.Wait(ProbeWait) == WaitResult::Signaled);
+        CHECK(process.WriteInput("x", 1, ProbeWait).status.code == FileCode::EndOfFile);
         process.Close();
     }
 

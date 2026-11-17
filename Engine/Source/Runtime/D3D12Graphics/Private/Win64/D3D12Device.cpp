@@ -254,8 +254,8 @@ D3D12_TEXTURE_ADDRESS_MODE SamplerAddress(AddressMode mode) noexcept {
     return D3D12_TEXTURE_ADDRESS_MODE_WRAP;
 }
 
-D3D12_RESOURCE_BARRIER Transition(ID3D12Resource* resource, D3D12_RESOURCE_STATES before,
-                                  D3D12_RESOURCE_STATES after) noexcept {
+D3D12_RESOURCE_BARRIER TransitionBarrier(ID3D12Resource* resource, D3D12_RESOURCE_STATES before,
+                                         D3D12_RESOURCE_STATES after) noexcept {
     D3D12_RESOURCE_BARRIER barrier = {};
     barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
     barrier.Transition.pResource = resource;
@@ -269,8 +269,64 @@ D3D12_RESOURCE_BARRIER Transition(ID3D12Resource* resource, D3D12_RESOURCE_STATE
 D3D12_RESOURCE_BARRIER TransitionSubresource(ID3D12Resource* resource, uint32 subresource,
                                              D3D12_RESOURCE_STATES before,
                                              D3D12_RESOURCE_STATES after) noexcept {
-    D3D12_RESOURCE_BARRIER barrier = Transition(resource, before, after);
+    D3D12_RESOURCE_BARRIER barrier = TransitionBarrier(resource, before, after);
     barrier.Transition.Subresource = subresource;
+    return barrier;
+}
+
+// 추상 접근 상태를 D3D12 resource state로 옮긴다(RenderBase GX5, UE D3D12 legacy barrier의 상태
+// 대응). 깊이 쓰기를 켠 상태는 DEPTH_WRITE 하나다(D3D12는 깊이 읽기·쓰기를 함께 켜지 못한다).
+// Present는 COMMON(0)이다. Unknown·Discard는 호출자가 걸러 낸다.
+D3D12_RESOURCE_STATES StatesFor(ResourceAccess access) noexcept {
+    if (HasAnyAccess(access, ResourceAccess::DepthWrite)) {
+        return D3D12_RESOURCE_STATE_DEPTH_WRITE;
+    }
+
+    D3D12_RESOURCE_STATES states = D3D12_RESOURCE_STATE_COMMON;
+    if (HasAnyAccess(access, ResourceAccess::VertexOrIndex)) {
+        states |=
+            D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_INDEX_BUFFER;
+    }
+    if (HasAnyAccess(access, ResourceAccess::Constant)) {
+        states |= D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+    }
+    if (HasAnyAccess(access, ResourceAccess::IndirectArgs)) {
+        states |= D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
+    }
+    if (HasAnyAccess(access, ResourceAccess::SrvGraphics)) {
+        states |= D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+                  D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+    }
+    if (HasAnyAccess(access, ResourceAccess::SrvCompute)) {
+        states |= D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+    }
+    if (HasAnyAccess(access, ResourceAccess::CopySource)) {
+        states |= D3D12_RESOURCE_STATE_COPY_SOURCE;
+    }
+    if (HasAnyAccess(access, ResourceAccess::DepthRead)) {
+        states |= D3D12_RESOURCE_STATE_DEPTH_READ;
+    }
+    if (HasAnyAccess(access, UavAccessMask)) {
+        states |= D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    }
+    if (HasAnyAccess(access, ResourceAccess::RenderTarget)) {
+        states |= D3D12_RESOURCE_STATE_RENDER_TARGET;
+    }
+    if (HasAnyAccess(access, ResourceAccess::CopyDestination)) {
+        states |= D3D12_RESOURCE_STATE_COPY_DEST;
+    }
+    return states;
+}
+
+// 그래픽 셰이더 읽기 상태다(SetTexture의 암묵 전이 대상, ResourceAccess::SrvGraphics와 같다).
+constexpr D3D12_RESOURCE_STATES ShaderReadStates =
+    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+
+// UAV barrier다(같은 UAV 상태 사이의 쓰기 순서).
+D3D12_RESOURCE_BARRIER UavBarrier(ID3D12Resource* resource) noexcept {
+    D3D12_RESOURCE_BARRIER barrier = {};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+    barrier.UAV.pResource = resource;
     return barrier;
 }
 
@@ -310,8 +366,17 @@ struct TextureRecord {
     bool renderTarget = false;
     // 깊이·스텐실 타깃(TextureUsage::DepthStencil)이다.
     bool depthTarget = false;
-    // 다른 텍스처의 자원을 공유하는 view다. 업로드·readback·그리기 대상이 될 수 없다.
+    // 다른 텍스처의 자원을 공유하는 view다. 업로드·readback·그리기 대상이 될 수 없다. 자원 상태는
+    // 원 텍스처 기록(source)이 추적한다.
     bool view = false;
+    SlotHandle source;
+    // 이 텍스처를 가리키는 살아 있는 view 수다. 0이 아니면 Retire는 기록을 남겨 두고(retirePending)
+    // 마지막 view가 놓일 때 함께 놓는다(상태 추적의 주인을 하나로 유지한다).
+    uint32 viewCount = 0;
+    bool retirePending = false;
+    // 장치 자원의 plane 수다(D3D12_FEATURE_FORMAT_INFO, 깊이·스텐실 typeless와 비디오는 2). mip별
+    // 상태 전이는 모든 plane의 subresource에 낸다.
+    uint32 devicePlanes = 1;
     // SRV가 있다(형식이 Sampled일 때만 만든다). 없으면 SetTexture는 흰 텍스처로 대신한다.
     bool hasSrv = false;
     uint32 srv = 0;
@@ -319,6 +384,13 @@ struct TextureRecord {
     uint32 dsv = 0;
     // 샘플러 힙의 칸이다(SamplerFor가 같은 설정끼리 공유한다).
     uint32 sampler = 0;
+    // mip마다 장치가 추적한 상태다(RenderBase GX5). committed는 제출한 프레임 기록 끝의 상태이고,
+    // current는 기록 중인 프레임 안의 상태다(기록 중이 아니면 둘이 같다). 업로드 기록은 프레임
+    // 기록보다 먼저 실행되므로 committed에서 바꿨다가 committed로 되돌려 놓는다(상태 중립).
+    D3D12_RESOURCE_STATES committed[MaxMipLevels] = {};
+    D3D12_RESOURCE_STATES current[MaxMipLevels] = {};
+    // 기록 중인 프레임이 current를 바꿨다(touchedTextures_에 있다).
+    bool touched = false;
 };
 
 struct PipelineRecord {
@@ -527,7 +599,8 @@ public:
           pipelines_(allocator), swapChains_(allocator), retired_(allocator), rtvs_(allocator),
           dsvs_(allocator), srvs_(allocator), samplers_(allocator), allocators_(allocator),
           messageScratch_(allocator), timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics),
-          allocator_(allocator), readbacks_(allocator), ring_(allocator), timestamps_(allocator) {
+          allocator_(allocator), readbacks_(allocator), ring_(allocator), timestamps_(allocator),
+          touchedTextures_(allocator) {
     }
 
     ~D3D12Device() override {
@@ -962,16 +1035,22 @@ public:
                                                : D3D12_RESOURCE_FLAG_NONE);
         const D3D12_HEAP_PROPERTIES heap = HeapProperties(D3D12_HEAP_TYPE_DEFAULT);
         // 최적화 clear 값은 두지 않는다. 패스마다 clear 색이 다르므로 값을 두면 매번 불일치 경고가
-        // 쌓인다. 쉬는 상태는 PIXEL_SHADER_RESOURCE이고 초기 데이터가 있으면 복사 뒤 그 상태가
-        // 된다.
-        const D3D12_RESOURCE_STATES initialState = attachment
-                                                       ? D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
-                                                       : D3D12_RESOURCE_STATE_COPY_DEST;
+        // 쌓인다.
+        // 렌더 타깃·깊이 타깃은 셰이더 읽기 상태(ResourceAccess::SrvGraphics와 같은 PSR|NPSR)로
+        // 만든다. 업로드로 채우는 텍스처가 업로드 뒤 놓이는 상태와 같아 import 선언이 생성 경로와
+        // 무관하게 맞는다.
+        const D3D12_RESOURCE_STATES initialState =
+            attachment ? ShaderReadStates : D3D12_RESOURCE_STATE_COPY_DEST;
         if (FAILED(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &resource,
                                                     initialState, nullptr,
                                                     IID_PPV_ARGS(record.resource.Out())))) {
             return FailWith<TextureHandle>("texture creation failed");
         }
+        for (uint32 mip = 0; mip < record.mipLevels; ++mip) {
+            record.committed[mip] = initialState;
+            record.current[mip] = initialState;
+        }
+        record.devicePlanes = d3d12::FormatPlaneCount(device_.Get(), mapping.resource);
 
         auto reserved = ReserveRetireCapacity(1);
         if (!reserved) {
@@ -984,13 +1063,13 @@ public:
             }
             // 장치 자원이 Rocks보다 plane이 많으면(D24Unorm은 D24S8 자원의 깊이 plane만 쓴다)
             // 올리지 않은 plane도 쉬는 상태로 옮긴다.
-            const uint32 devicePlanes = d3d12::FormatPlaneCount(device_.Get(), mapping.resource);
-            for (uint32 plane = PixelFormatPlaneCount(desc.format); plane < devicePlanes; ++plane) {
+            for (uint32 plane = PixelFormatPlaneCount(desc.format); plane < record.devicePlanes;
+                 ++plane) {
                 for (uint32 mip = 0; mip < record.mipLevels; ++mip) {
-                    const D3D12_RESOURCE_BARRIER toShader = TransitionSubresource(
-                        record.resource.Get(),
-                        d3d12::SubresourceIndex(mip, plane, record.mipLevels),
-                        D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                    const D3D12_RESOURCE_BARRIER toShader =
+                        TransitionSubresource(record.resource.Get(),
+                                              d3d12::SubresourceIndex(mip, plane, record.mipLevels),
+                                              D3D12_RESOURCE_STATE_COPY_DEST, ShaderReadStates);
                     uploadList_->ResourceBarrier(1, &toShader);
                 }
             }
@@ -1110,8 +1189,8 @@ public:
     Result<TextureHandle> CreateTextureView(TextureHandle texture,
                                             const TextureViewDesc& desc) noexcept override {
         platform::LockGuard lock(gate_);
-        const TextureRecord* source = textures_.Find(texture.slot);
-        if (source == nullptr) {
+        TextureRecord* source = textures_.Find(texture.slot);
+        if (source == nullptr || source->retirePending) {
             return Result<TextureHandle>::Failure(ErrorCode::StaleHandle);
         }
         if (source->view) {
@@ -1148,12 +1227,18 @@ public:
         record.mipLevels = source->mipLevels;
         record.format = resolved.Value();
         record.view = true;
+        record.source = texture.slot;
+        record.devicePlanes = source->devicePlanes;
         record.sampler = source->sampler;
         record.srv = srv.Value();
         record.hasSrv = true;
         WriteShaderResourceView(record.resource.Get(), srvFormat, desc.plane, record.mipLevels,
                                 record.srv);
-        return AddTextureRecord(Move(record));
+        auto added = AddTextureRecord(Move(record));
+        if (added) {
+            ++source->viewCount;
+        }
+        return added;
     }
 
     // 텍스처 mip·plane 하나를 동기로 읽는다(시험·캡처용). ReadPixels와 같은 경로다.
@@ -1360,7 +1445,7 @@ public:
             return Result<CommandContext*>::Failure(begun.Error());
         }
         target_ = {record->resource.Get(),
-                   D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                   D3D12_RESOURCE_STATE_COMMON,
                    rtvs_.Cpu(record->rtv),
                    record->width,
                    record->height,
@@ -1382,9 +1467,13 @@ public:
             return Result<GpuFencePoint>::Failure(ErrorCode::InvalidArgument);
         }
 
-        const D3D12_RESOURCE_BARRIER back =
-            Transition(target_.resource, D3D12_RESOURCE_STATE_RENDER_TARGET, target_.restState);
-        list_->ResourceBarrier(1, &back);
+        // 스왑체인 백버퍼만 present 상태로 돌린다. offscreen 대상은 RenderTarget 그대로 둔다(GX5:
+        // 다음 사용이 명시 전이나 암묵 전이로 바꾼다).
+        if (target_.texture.IsNull()) {
+            const D3D12_RESOURCE_BARRIER back = TransitionBarrier(
+                target_.resource, D3D12_RESOURCE_STATE_RENDER_TARGET, target_.restState);
+            list_->ResourceBarrier(1, &back);
+        }
         CloseMarkers();
         const TimestampRange stamps = timestamps_.OpenRange();
         if (stamps.count != 0) {
@@ -1401,6 +1490,7 @@ public:
             AssignPendingRetires(fenceValue_);
             timestamps_.Close(fenceValue_, false);
             (void)list_->Close();
+            SettleTracking(false);
             return Result<GpuFencePoint>::Failure(uploads.Error());
         }
         if (FAILED(list_->Close())) {
@@ -1408,10 +1498,12 @@ public:
             allocators_[recordingAllocator_].fenceValue = fenceValue_;
             AssignPendingRetires(fenceValue_);
             timestamps_.Close(fenceValue_, false);
+            SettleTracking(false);
             return FailWith<GpuFencePoint>("command list close failed");
         }
         ID3D12CommandList* lists[] = {list_.Get()};
         queue_->ExecuteCommandLists(1, lists);
+        SettleTracking(true);
 
         Result<void> outcome = Result<void>::Success();
         if (!presentTarget_.IsNull()) {
@@ -1503,7 +1595,7 @@ public:
     Result<void> UpdateTexture(TextureHandle handle, uint32 mipLevel,
                                Span<const uint8> pixels) noexcept override {
         platform::LockGuard lock(gate_);
-        const TextureRecord* record = textures_.Find(handle.slot);
+        TextureRecord* record = textures_.Find(handle.slot);
         if (record == nullptr) {
             return Result<void>::Failure(ErrorCode::StaleHandle);
         }
@@ -1551,7 +1643,7 @@ public:
     Result<void> UploadTextureFromStaging(TextureHandle handle, uint32 mipLevel,
                                           StagingHandle staging, uint64 offset) noexcept override {
         platform::LockGuard lock(gate_);
-        const TextureRecord* record = textures_.Find(handle.slot);
+        TextureRecord* record = textures_.Find(handle.slot);
         auto memory = staging_->Find(staging);
         if (record == nullptr || !memory) {
             return Result<void>::Failure(ErrorCode::StaleHandle);
@@ -1592,8 +1684,8 @@ public:
             return marked;
         }
         footprint.Offset = offset;
-        CopyTextureFrom(*record, mipLevel, static_cast<ID3D12Resource*>(memory.Value().resource),
-                        footprint, true);
+        CopyTextureFrom(*record, mipLevel, mipLevel,
+                        static_cast<ID3D12Resource*>(memory.Value().resource), footprint, true);
         return Result<void>::Success();
     }
 
@@ -1684,13 +1776,31 @@ public:
         platform::LockGuard lock(gate_);
 
         TextureRecord* record = textures_.Find(handle.slot);
-        if (record == nullptr || handle == white_) {
+        if (record == nullptr || handle == white_ || record->retirePending) {
             return;
         }
-        Defer(Move(record->resource), record->hasSrv ? static_cast<int64>(record->srv) : int64{-1},
-              record->renderTarget ? static_cast<int64>(record->rtv) : int64{-1},
-              record->depthTarget ? static_cast<int64>(record->dsv) : int64{-1});
-        auto removed = textures_.TryRemove(handle.slot);
+        if (record->viewCount != 0) {
+            record->retirePending = true;
+            return;
+        }
+        const bool view = record->view;
+        const SlotHandle source = record->source;
+        RetireTextureRecord(handle.slot, *record);
+        if (view) {
+            TextureRecord* owner = textures_.Find(source);
+            if (owner != nullptr && owner->viewCount != 0 && --owner->viewCount == 0 &&
+                owner->retirePending) {
+                RetireTextureRecord(source, *owner);
+            }
+        }
+    }
+
+    // 텍스처 기록 하나를 회수 대기로 넘기고 표에서 뺀다(잠금 안).
+    void RetireTextureRecord(SlotHandle slot, TextureRecord& record) noexcept {
+        Defer(Move(record.resource), record.hasSrv ? static_cast<int64>(record.srv) : int64{-1},
+              record.renderTarget ? static_cast<int64>(record.rtv) : int64{-1},
+              record.depthTarget ? static_cast<int64>(record.dsv) : int64{-1});
+        auto removed = textures_.TryRemove(slot);
         (void)removed;
     }
 
@@ -2327,9 +2437,17 @@ private:
     }
 
     void StartPass(const ClearColor& clear) noexcept {
-        const D3D12_RESOURCE_BARRIER toTarget =
-            Transition(target_.resource, target_.restState, D3D12_RESOURCE_STATE_RENDER_TARGET);
-        list_->ResourceBarrier(1, &toTarget);
+        // attachment 전이다(GX5): offscreen 대상은 추적한 상태에서, 스왑체인 백버퍼는 present에서
+        // 렌더 타깃으로 바꾼다.
+        TextureRecord* targetRecord = textures_.Find(target_.texture.slot);
+        if (targetRecord != nullptr) {
+            TrackTransition(*targetRecord, target_.texture.slot, 0, 1,
+                            D3D12_RESOURCE_STATE_RENDER_TARGET);
+        } else {
+            const D3D12_RESOURCE_BARRIER toTarget = TransitionBarrier(
+                target_.resource, target_.restState, D3D12_RESOURCE_STATE_RENDER_TARGET);
+            list_->ResourceBarrier(1, &toTarget);
+        }
         list_->OMSetRenderTargets(1, &target_.rtv, FALSE, nullptr);
         const float color[4] = {clear.r, clear.g, clear.b, clear.a};
         list_->ClearRenderTargetView(target_.rtv, color, 0, nullptr);
@@ -2452,15 +2570,19 @@ private:
         return Result<void>::Success();
     }
 
-    // footprint 배치의 원본에서 mip 하나로 복사를 기록한다. restore면 쉬는 상태(PSR)에서 복사
-    // 대상으로 바꿨다가 되돌린다. 처음 생성(COPY_DEST)이면 복사 뒤 PSR로만 바꾼다.
-    void CopyTextureFrom(const TextureRecord& record, uint32 subresource, ID3D12Resource* source,
+    // footprint 배치의 원본에서 mip 하나의 plane 하나(subresource)로 복사를 기록한다. restore면
+    // 제출한 상태(committed)에서 복사 대상으로 바꿨다가 되돌린다(업로드 기록은 프레임 기록보다 먼저
+    // 실행되므로 상태 중립이어야 한다). 처음 생성(COPY_DEST)이면 복사 뒤 셰이더 읽기 상태로 바꾸고
+    // 그것을 추적 상태로 삼는다. 상태는 mip 단위로 추적하고 그 mip의 plane들이 함께 따른다.
+    void CopyTextureFrom(TextureRecord& record, uint32 mipLevel, uint32 subresource,
+                         ID3D12Resource* source,
                          const D3D12_PLACED_SUBRESOURCE_FOOTPRINT& footprint,
                          bool restore) noexcept {
-        if (restore) {
+        const D3D12_RESOURCE_STATES resting =
+            restore ? record.committed[mipLevel] : ShaderReadStates;
+        if (restore && resting != D3D12_RESOURCE_STATE_COPY_DEST) {
             const D3D12_RESOURCE_BARRIER toCopy = TransitionSubresource(
-                record.resource.Get(), subresource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                D3D12_RESOURCE_STATE_COPY_DEST);
+                record.resource.Get(), subresource, resting, D3D12_RESOURCE_STATE_COPY_DEST);
             uploadList_->ResourceBarrier(1, &toCopy);
         }
         D3D12_TEXTURE_COPY_LOCATION destination = {};
@@ -2472,20 +2594,26 @@ private:
         from.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
         from.PlacedFootprint = footprint;
         uploadList_->CopyTextureRegion(&destination, 0, 0, 0, &from, nullptr);
-        const D3D12_RESOURCE_BARRIER toShader = TransitionSubresource(
-            record.resource.Get(), subresource, D3D12_RESOURCE_STATE_COPY_DEST,
-            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-        uploadList_->ResourceBarrier(1, &toShader);
+        if (resting != D3D12_RESOURCE_STATE_COPY_DEST) {
+            const D3D12_RESOURCE_BARRIER back = TransitionSubresource(
+                record.resource.Get(), subresource, D3D12_RESOURCE_STATE_COPY_DEST, resting);
+            uploadList_->ResourceBarrier(1, &back);
+        }
+        if (!restore) {
+            record.committed[mipLevel] = resting;
+            record.current[mipLevel] = resting;
+        }
     }
 
     // 빈틈 없는 행의 픽셀(mip firstMip부터 count개, mip 안은 plane 순서)을 장치 행 정렬로 ring에
     // 옮기고 복사를 기록한다. 블록 압축 형식의 행은 블록 행이다.
-    Result<void> RecordTextureUpload(const TextureRecord& record, uint32 firstMip, uint32 count,
+    Result<void> RecordTextureUpload(TextureRecord& record, uint32 firstMip, uint32 count,
                                      Span<const uint8> pixels, bool restore) noexcept {
         constexpr uint32 MaxPlanes = 2;
         const uint32 planes = PixelFormatPlaneCount(record.format);
         D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprints[MaxMipLevels * MaxPlanes] = {};
         uint32 subresources[MaxMipLevels * MaxPlanes] = {};
+        uint32 levels[MaxMipLevels * MaxPlanes] = {};
         uint64 offsets[MaxMipLevels * MaxPlanes] = {};
         const D3D12_RESOURCE_DESC resourceDesc = record.resource->GetDesc();
         // subresource마다 배치 정렬된 위치에 이어 놓는다.
@@ -2502,6 +2630,7 @@ private:
                         TexturePlacementAlignment;
                 offsets[copies] = total;
                 subresources[copies] = subresource;
+                levels[copies] = firstMip + index;
                 total += bytes;
                 ++copies;
             }
@@ -2535,8 +2664,8 @@ private:
             return opened;
         }
         for (uint32 index = 0; index < copies; ++index) {
-            CopyTextureFrom(record, subresources[index], space.Value().resource, footprints[index],
-                            restore);
+            CopyTextureFrom(record, levels[index], subresources[index], space.Value().resource,
+                            footprints[index], restore);
         }
         return Result<void>::Success();
     }
@@ -2619,10 +2748,15 @@ private:
         if (!opened) {
             return Result<ReadbackRequest>::Failure(opened.Error());
         }
-        const D3D12_RESOURCE_BARRIER toCopy =
-            Transition(record->resource.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                       D3D12_RESOURCE_STATE_COPY_SOURCE);
-        uploadList_->ResourceBarrier(1, &toCopy);
+        // 업로드 기록은 상태 중립이다: 제출한 상태에서 복사 원본으로 바꿨다가 되돌린다.
+        // 이미 복사 원본 상태면(그래프가 CopySource로 끝냈다) barrier를 내지 않는다.
+        const D3D12_RESOURCE_STATES resting = record->committed[mipLevel];
+        const bool move = resting != D3D12_RESOURCE_STATE_COPY_SOURCE;
+        if (move) {
+            const D3D12_RESOURCE_BARRIER toCopy = TransitionSubresource(
+                record->resource.Get(), subresource, resting, D3D12_RESOURCE_STATE_COPY_SOURCE);
+            uploadList_->ResourceBarrier(1, &toCopy);
+        }
         D3D12_TEXTURE_COPY_LOCATION destination = {};
         destination.pResource = readback.resource.Get();
         destination.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
@@ -2632,10 +2766,11 @@ private:
         source.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
         source.SubresourceIndex = subresource;
         uploadList_->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
-        const D3D12_RESOURCE_BARRIER back =
-            Transition(record->resource.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE,
-                       D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-        uploadList_->ResourceBarrier(1, &back);
+        if (move) {
+            const D3D12_RESOURCE_BARRIER back = TransitionSubresource(
+                record->resource.Get(), subresource, D3D12_RESOURCE_STATE_COPY_SOURCE, resting);
+            uploadList_->ResourceBarrier(1, &back);
+        }
         auto flushed = FlushUploadsLocked();
         if (!flushed) {
             KeepUntilDestruction(Move(readback.resource));
@@ -2901,11 +3036,31 @@ private:
 
     void SetTexture(TextureHandle handle) noexcept override {
         platform::LockGuard lock(gate_);
-        const TextureRecord* record = textures_.Find(handle.slot);
+        TextureRecord* record = textures_.Find(handle.slot);
+        SlotHandle slot = handle.slot;
         if (record == nullptr || !record->hasSrv) {
             record = textures_.Find(white_.slot);
+            slot = white_.slot;
         }
         if (record != nullptr) {
+            // view는 자원 상태를 원 텍스처 기록이 추적한다(원 텍스처는 view가 남아 있는 동안 표에
+            // 남는다, Retire 참고).
+            TextureRecord* owner = record;
+            SlotHandle ownerSlot = slot;
+            if (record->view) {
+                ownerSlot = record->source;
+                owner = textures_.Find(ownerSlot);
+            }
+            // 명시 전이 없이 셰이더 읽기 상태가 아닌 텍스처를 읽으면 암묵 전이로 메운다(GX5. 렌더
+            // 그래프를 거치지 않는 그리기용이다).
+            bool readable = true;
+            for (uint32 mip = 0; owner != nullptr && mip < owner->mipLevels; ++mip) {
+                readable = readable &&
+                           (owner->current[mip] & D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE) != 0;
+            }
+            if (owner != nullptr && !readable && recording_) {
+                TrackTransition(*owner, ownerSlot, 0, owner->mipLevels, ShaderReadStates);
+            }
             list_->SetGraphicsRootDescriptorTable(1, srvs_.Gpu(record->srv));
             list_->SetGraphicsRootDescriptorTable(2, samplers_.Gpu(record->sampler));
         }
@@ -2952,21 +3107,180 @@ private:
         }
 
         // 백버퍼(R8G8B8A8_UNORM)와 RenderTarget(R8G8B8A8_UNORM_SRGB)은 같은 typeless 묶음이라
-        // CopyResource가 byte를 그대로 옮긴다.
-        const D3D12_RESOURCE_BARRIER toCopy[] = {
-            Transition(target_.resource, D3D12_RESOURCE_STATE_RENDER_TARGET,
-                       D3D12_RESOURCE_STATE_COPY_SOURCE),
-            Transition(record->resource.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                       D3D12_RESOURCE_STATE_COPY_DEST)};
-        list_->ResourceBarrier(2, toCopy);
+        // CopyResource가 byte를 그대로 옮긴다. 원본(패스 대상)과 복사 대상은 지금(기록 중) 추적
+        // 상태에서 바꿨다가 되돌린다(상태 중립). 이미 복사 상태면 barrier를 내지 않는다.
+        const TextureRecord* source = textures_.Find(target_.texture.slot);
+        const D3D12_RESOURCE_STATES sourceState =
+            source != nullptr ? source->current[0] : D3D12_RESOURCE_STATE_RENDER_TARGET;
+        const D3D12_RESOURCE_STATES resting = record->current[0];
+        D3D12_RESOURCE_BARRIER toCopy[2] = {};
+        D3D12_RESOURCE_BARRIER back[2] = {};
+        uint32 count = 0;
+        if (sourceState != D3D12_RESOURCE_STATE_COPY_SOURCE) {
+            toCopy[count] = TransitionSubresource(target_.resource, 0, sourceState,
+                                                  D3D12_RESOURCE_STATE_COPY_SOURCE);
+            back[count] = TransitionSubresource(target_.resource, 0,
+                                                D3D12_RESOURCE_STATE_COPY_SOURCE, sourceState);
+            ++count;
+        }
+        if (resting != D3D12_RESOURCE_STATE_COPY_DEST) {
+            toCopy[count] = TransitionSubresource(record->resource.Get(), 0, resting,
+                                                  D3D12_RESOURCE_STATE_COPY_DEST);
+            back[count] = TransitionSubresource(record->resource.Get(), 0,
+                                                D3D12_RESOURCE_STATE_COPY_DEST, resting);
+            ++count;
+        }
+        if (count != 0) {
+            list_->ResourceBarrier(count, toCopy);
+        }
         list_->CopyResource(record->resource.Get(), target_.resource);
-        const D3D12_RESOURCE_BARRIER back[] = {
-            Transition(target_.resource, D3D12_RESOURCE_STATE_COPY_SOURCE,
-                       D3D12_RESOURCE_STATE_RENDER_TARGET),
-            Transition(record->resource.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
-                       D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)};
-        list_->ResourceBarrier(2, back);
+        if (count != 0) {
+            list_->ResourceBarrier(count, back);
+        }
         return Result<void>::Success();
+    }
+
+    // 명시 전이를 resource barrier로 낮춘다(GX5, Device.h Transition 주석).
+    void Transition(Span<const ResourceTransition> transitions) noexcept override {
+        platform::LockGuard lock(gate_);
+        if (!recording_) {
+            return;
+        }
+        for (const ResourceTransition& transition : transitions) {
+            if (!CanCombineAccess(transition.after)) {
+                ++ignoredDraws_;
+                continue;
+            }
+            if (!transition.buffer.IsNull()) {
+                LowerBufferTransition(transition);
+                continue;
+            }
+            // view의 전이는 자원 상태를 추적하는 원 텍스처 기록에 낸다.
+            SlotHandle slot = transition.texture.slot;
+            TextureRecord* record = textures_.Find(slot);
+            if (record != nullptr && record->view) {
+                slot = record->source;
+                record = textures_.Find(slot);
+            }
+            if (record == nullptr || transition.range.firstMip >= record->mipLevels) {
+                ++ignoredDraws_;
+                continue;
+            }
+            // 내용 버림은 지금 낮출 것이 없다(aliasing은 RG5·GX12).
+            if (transition.after == ResourceAccess::Discard) {
+                continue;
+            }
+            const uint32 first = transition.range.firstMip;
+            const uint32 available = record->mipLevels - first;
+            const uint32 count =
+                transition.range.mipCount < available ? transition.range.mipCount : available;
+            if (validation_ && transition.before != ResourceAccess::Unknown &&
+                transition.before != ResourceAccess::Discard) {
+                const D3D12_RESOURCE_STATES declared = StatesFor(transition.before);
+                for (uint32 mip = first; mip < first + count; ++mip) {
+                    if (record->current[mip] != declared) {
+                        ++validationErrors_;
+                        auto failed =
+                            Fail("transition before-state differs from the tracked state");
+                        (void)failed;
+                        break;
+                    }
+                }
+            }
+            const D3D12_RESOURCE_STATES after = StatesFor(transition.after);
+            const bool uav = HasAnyAccess(transition.after, UavAccessMask);
+            TrackTransition(*record, slot, first, count, after, uav);
+        }
+    }
+
+    // 버퍼 전이다. 버퍼는 COMMON 암묵 승격과 제출 끝 복귀를 쓰므로 상태 전이를 내지 않는다(GX5:
+    // 버퍼 쓰기 명령이 생기는 GX4에서 추적을 더한다). UAV → UAV만 UAV barrier다.
+    void LowerBufferTransition(const ResourceTransition& transition) noexcept {
+        const BufferRecord* record = buffers_.Find(transition.buffer.slot);
+        if (record == nullptr) {
+            ++ignoredDraws_;
+            return;
+        }
+        if (HasAnyAccess(transition.before, UavAccessMask) &&
+            HasAnyAccess(transition.after, UavAccessMask)) {
+            const D3D12_RESOURCE_BARRIER barrier = UavBarrier(record->resource.Get());
+            list_->ResourceBarrier(1, &barrier);
+        }
+    }
+
+    // 기록 중 프레임에서 텍스처 mip [first, first + count)를 after로 바꾼다(잠금 안). 바뀌는 mip만
+    // barrier를 내고, 모든 mip이 같은 상태에서 바뀌면 한 barrier로 낸다. uavOrder면 이미 같은 UAV
+    // 상태인 mip에 UAV barrier를 낸다.
+    void TrackTransition(TextureRecord& record, SlotHandle slot, uint32 first, uint32 count,
+                         D3D12_RESOURCE_STATES after, bool uavOrder = false) noexcept {
+        bool uniform = first == 0 && count == record.mipLevels;
+        for (uint32 mip = first; mip < first + count && uniform; ++mip) {
+            uniform = record.current[mip] == record.current[first];
+        }
+        constexpr uint32 MaxPlanes = 2;
+        D3D12_RESOURCE_BARRIER barriers[MaxMipLevels * MaxPlanes] = {};
+        uint32 used = 0;
+        if (uniform && record.current[first] != after) {
+            barriers[used++] =
+                TransitionBarrier(record.resource.Get(), record.current[first], after);
+        } else {
+            for (uint32 mip = first; mip < first + count; ++mip) {
+                for (uint32 plane = 0; plane < record.devicePlanes && plane < MaxPlanes; ++plane) {
+                    if (record.current[mip] != after) {
+                        barriers[used++] = TransitionSubresource(
+                            record.resource.Get(),
+                            d3d12::SubresourceIndex(mip, plane, record.mipLevels),
+                            record.current[mip], after);
+                    }
+                }
+            }
+        }
+        if (used == 0 && uavOrder) {
+            barriers[used++] = UavBarrier(record.resource.Get());
+        }
+        if (used != 0) {
+            list_->ResourceBarrier(used, barriers);
+        }
+        for (uint32 mip = first; mip < first + count; ++mip) {
+            record.current[mip] = after;
+        }
+        if (!record.touched) {
+            record.touched = true;
+            if (!touchedTextures_.TryPushBack(slot)) {
+                touchedOverflow_ = true;
+            }
+        }
+    }
+
+    // 프레임 기록을 끝낸다(잠금 안). 제출했으면 바뀐 상태를 committed로 삼고, 제출하지 못했으면
+    // current를 committed로 되돌린다.
+    void SettleTracking(bool executed) noexcept {
+        auto settle = [executed](TextureRecord& record) noexcept {
+            for (uint32 mip = 0; mip < record.mipLevels; ++mip) {
+                if (executed) {
+                    record.committed[mip] = record.current[mip];
+                } else {
+                    record.current[mip] = record.committed[mip];
+                }
+            }
+            record.touched = false;
+        };
+        if (touchedOverflow_) {
+            for (TextureRecord& record : textures_) {
+                if (record.touched) {
+                    settle(record);
+                }
+            }
+        } else {
+            for (const SlotHandle slot : touchedTextures_) {
+                TextureRecord* record = textures_.Find(slot);
+                if (record != nullptr) {
+                    settle(*record);
+                }
+            }
+        }
+        touchedTextures_.Clear();
+        touchedOverflow_ = false;
     }
 
     Result<uint64> WriteTimestamp() noexcept override {
@@ -3085,6 +3399,10 @@ private:
     uint64 timestampFrequency_ = 0;
     // 지금 프레임에서 열린 marker 구간 수다.
     uint32 markerDepth_ = 0;
+    // 기록 중인 프레임이 추적 상태를 바꾼 텍스처다(GX5). 목록에 넣지 못했으면 overflow가 켜지고
+    // 모든 텍스처를 훑는다.
+    Array<SlotHandle> touchedTextures_;
+    bool touchedOverflow_ = false;
     bool recording_ = false;
     bool validation_ = false;
     bool software_ = false;

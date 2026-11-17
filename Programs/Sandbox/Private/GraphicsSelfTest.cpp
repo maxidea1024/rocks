@@ -1,5 +1,6 @@
 #include "GraphicsSelfTest.h"
 #include "CullingSelfTest.h"
+#include "RenderGraphSelfTest.h"
 #include "RenderLaneSelfTest.h"
 #include "TimingSelfTest.h"
 #include "UploadSelfTest.h"
@@ -598,6 +599,8 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     failures += RunUploadChecks(name, device, renderer, result.triangle.GetAllocator());
     // 픽셀 형식(PF2·PF3·PF6): 능력 ⇔ 생성, 업로드·readback 왕복, sRGB·깊이·스텐실·비디오 view.
     failures += RunFormatChecks(name, device, result.triangle.GetAllocator());
+    // 렌더 그래프(RG1): 그래프 텍스처·명시 전이·culling·history export/import.
+    failures += RunRenderGraphChecks(name, device, renderer, result.triangle.GetAllocator());
     // GPU 계측(GX9): timestamp 쌍·slot 재사용·calibration·debug marker.
     failures += RunTimingChecks(name, device, renderer, result.triangle.GetAllocator());
     Check(device.ValidationErrorCount() == 0, name, "no validation errors");

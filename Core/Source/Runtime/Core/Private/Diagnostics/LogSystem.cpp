@@ -2,6 +2,7 @@
 
 #include <Core/Diagnostics/Log.h>
 #include <Core/Diagnostics/LogSystem.h>
+#include <Core/Text/StringBuilder.h>
 #include <Platform/Atomics.h>
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
@@ -96,7 +97,8 @@ void SynchronizeReaders() noexcept {
     const uint64 previous =
         platform::AtomicFetchAdd<MemoryOrder::SequentiallyConsistent>(&installGeneration, 1u);
     uint64& readers = installReaders[previous & 1u];
-    while (platform::AtomicLoad<MemoryOrder::Acquire>(&readers) != 0) {
+    // 독자의 seq_cst 증가·포인터 읽기와 전순서를 이루도록 seq_cst로 읽는다.
+    while (platform::AtomicLoad<MemoryOrder::SequentiallyConsistent>(&readers) != 0) {
         platform::YieldThread();
     }
 }
@@ -106,6 +108,10 @@ void SynchronizeReaders() noexcept {
 namespace detail {
 
 constinit uint8 logFastMinimum = 0;
+
+uint64 LogInstallGeneration() noexcept {
+    return platform::AtomicLoad<MemoryOrder::SequentiallyConsistent>(&installGeneration);
+}
 
 LogReadScope::LogReadScope() noexcept {
     generation_ =
@@ -198,6 +204,12 @@ LogSystem::LogSystem(Allocator& allocator, const LogSystemConfig& config) noexce
 
 LogSystem::~LogSystem() noexcept {
     Stop();
+    if (writerLeaked_) {
+        // Stop이 남겨 둔 출력 스레드가 sink에서 돌아와 멈출 때까지 기다린 뒤 회수한다(Stop 설명).
+        (void)writer_.Join();
+        writerLeaked_ = false;
+        ReleaseResources();
+    }
 }
 
 Result<void> LogSystem::Start() noexcept {
@@ -207,18 +219,29 @@ Result<void> LogSystem::Start() noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    const bool queued = config_.mode != LogMode::Sync;
-    if (queued) {
+    if (writerLeaked_) {
+        // 앞 Stop이 남긴 출력 스레드가 아직 큐·블록을 쓸 수 있다. 끝났으면 회수하고 다시 시작한다.
+        if (writer_.WaitForCompletion(0) != platform::WaitResult::Signaled) {
+            return Result<void>::Failure(ErrorCode::Busy);
+        }
+
+        (void)writer_.Join();
+        writerLeaked_ = false;
+        ReleaseResources();
+    }
+
+    if (config_.mode != LogMode::Sync) {
         auto queue = queue_.Initialize(*allocator_, config_.queueSlots);
         if (!queue) {
             return queue;
         }
+    }
 
-        auto pool = blocks_.Initialize(*allocator_, config_.blockCount, config_.blockBytes);
-        if (!pool) {
-            queue_.Shutdown();
-            return pool;
-        }
+    // 큰 값 블록은 모든 모드가 쓴다(Sync도 Manual과 같은 출력을 낸다).
+    auto pool = blocks_.Initialize(*allocator_, config_.blockCount, config_.blockBytes);
+    if (!pool) {
+        queue_.Shutdown();
+        return pool;
     }
 
     auto render = allocator_->Allocate(config_.renderBytes, alignof(uint64));
@@ -229,10 +252,16 @@ Result<void> LogSystem::Start() noexcept {
     }
 
     render_ = static_cast<char*>(render.Value());
+    {
+        // 큐 위치는 새 큐에서 0부터 다시 센다. 앞 실행의 완료 위치가 남으면 Flush가 바로 끝난다.
+        platform::LockGuard lock(flushMutex_);
+        completed_ = 0;
+    }
+
     platform::AtomicStore<MemoryOrder::Relaxed>(&stopping_, 0u);
+    platform::AtomicStore<MemoryOrder::Relaxed>(&abandoned_, 0u);
     platform::AtomicStore<MemoryOrder::Relaxed>(&emergency_, 0u);
     platform::AtomicStore<MemoryOrder::Release>(&started_, 1u);
-    platform::AtomicStore<MemoryOrder::Release>(&accepting_, 1u);
     if (config_.mode == LogMode::Async) {
         platform::ThreadOptions options;
         options.name = WriterThreadName;
@@ -246,6 +275,8 @@ Result<void> LogSystem::Start() noexcept {
         }
     }
 
+    // 출력 스레드 시작 여부(비상 모드)가 정해진 뒤에 받기 시작한다.
+    platform::AtomicStore<MemoryOrder::Release>(&accepting_, 1u);
     return Result<void>::Success();
 }
 
@@ -259,17 +290,40 @@ void LogSystem::Stop() noexcept {
         platform::AtomicLoad<MemoryOrder::Acquire>(&emergency_) == 0) {
         platform::AtomicStore<MemoryOrder::SequentiallyConsistent>(&stopping_, 1u);
         Wake();
-        // drain은 제한 시간 안의 best effort다. 넘기면 알리고, sink가 멈춘 경우에도 회수는 끝까지
-        // 기다린다(스레드를 강제로 끝내지 않는다).
+        // drain은 제한 시간 안의 best effort다. 넘기면 남은 기록을 버리기로 하고(출력 스레드는 다음
+        // 기록에서 멈춘다) 한 번 더 같은 시간만큼 기다린다. 그래도 sink에서 돌아오지 않으면
+        // 스레드와 메모리를 남기고 반환한다(헤더의 Stop 설명).
         if (writer_.WaitForCompletion(config_.drainTimeoutMilliseconds) !=
             platform::WaitResult::Signaled) {
-            detail::WriteLogEmergencyText(LogLevel::Warning, LogLogging.Name(),
-                                          "Log writer did not drain within the stop timeout");
+            platform::AtomicStore<MemoryOrder::SequentiallyConsistent>(&abandoned_, 1u);
+            Wake();
+            char storage[160];
+            FixedStringBuilder text{Span<char>(storage)};
+            (void)text.TryAppendFormat("Log writer did not drain within the stop timeout; "
+                                       "abandoning {} queued records",
+                                       queue_.PushPosition() - queue_.PopPosition());
+            detail::WriteLogEmergencyText(LogLevel::Warning, LogLogging.Name(), text.View());
+            if (writer_.WaitForCompletion(config_.drainTimeoutMilliseconds) !=
+                platform::WaitResult::Signaled) {
+                detail::WriteLogEmergencyText(
+                    LogLevel::Error, LogLogging.Name(),
+                    "Log writer is stuck in a sink; leaving it running and keeping its memory "
+                    "until the log system is destroyed");
+                writerLeaked_ = true;
+                return;
+            }
         }
 
         (void)writer_.Join();
     } else if (config_.mode == LogMode::Manual) {
-        (void)Pump();
+        // started_를 이미 내렸으므로 Pump는 0이다. 진행 중인 Pump가 끝나기를 기다렸다가 직접
+        // 비운다.
+        while (platform::AtomicExchange<MemoryOrder::Acquire>(&pumping_, 1u) != 0) {
+            platform::YieldThread();
+        }
+
+        (void)DrainQueue(MaxSize);
+        platform::AtomicStore<MemoryOrder::Release>(&pumping_, 0u);
     }
 
     {
@@ -277,6 +331,10 @@ void LogSystem::Stop() noexcept {
         FlushSinks();
     }
 
+    ReleaseResources();
+}
+
+void LogSystem::ReleaseResources() noexcept {
     queue_.Shutdown();
     blocks_.Shutdown();
     if (render_ != nullptr && !allocator_->Deallocate(render_)) {
@@ -284,6 +342,13 @@ void LogSystem::Stop() noexcept {
     }
 
     render_ = nullptr;
+}
+
+void LogSystem::RefreshUtcAnchor() noexcept {
+    int64 utc = 0;
+    anchorValid_ = platform::TryUtcTicks(utc);
+    anchorMonotonic_ = platform::MonotonicNanoseconds();
+    anchorUtc_ = utc;
 }
 
 Result<void> LogSystem::AddSink(RuntimeLogSink& sink, LogFilter filter) noexcept {
@@ -351,6 +416,10 @@ void LogSystem::WriterLoop() noexcept {
     platform::AtomicStore<MemoryOrder::Release>(&writerThread_, platform::CurrentThreadId());
     detail::LogWriterScope writerScope;
     for (;;) {
+        if (platform::AtomicLoad<MemoryOrder::Acquire>(&abandoned_) != 0) {
+            break;
+        }
+
         if (DrainBatch(WriterBatchLimit) != 0) {
             continue;
         }
@@ -385,22 +454,25 @@ usize LogSystem::Pump(usize maxRecords) noexcept {
         return 0;
     }
 
-    usize total = 0;
-    {
-        detail::LogWriterScope writerScope;
-        while (total < maxRecords) {
-            const usize limit =
-                maxRecords - total < WriterBatchLimit ? maxRecords - total : WriterBatchLimit;
-            const usize count = DrainBatch(limit);
-            if (count == 0) {
-                break;
-            }
+    const usize total = DrainQueue(maxRecords);
+    platform::AtomicStore<MemoryOrder::Release>(&pumping_, 0u);
+    return total;
+}
 
-            total += count;
+usize LogSystem::DrainQueue(usize maxRecords) noexcept {
+    usize total = 0;
+    detail::LogWriterScope writerScope;
+    while (total < maxRecords) {
+        const usize limit =
+            maxRecords - total < WriterBatchLimit ? maxRecords - total : WriterBatchLimit;
+        const usize count = DrainBatch(limit);
+        if (count == 0) {
+            break;
         }
+
+        total += count;
     }
 
-    platform::AtomicStore<MemoryOrder::Release>(&pumping_, 0u);
     return total;
 }
 
@@ -409,25 +481,26 @@ usize LogSystem::DrainBatch(usize limit) noexcept {
     {
         platform::LockGuard lock(sinkMutex_);
         // UTC 기준점을 묶음마다 다시 맞춘다. 실패하면 이 묶음의 UTC를 비운다.
-        int64 utc = 0;
-        anchorValid_ = platform::TryUtcTicks(utc);
-        anchorMonotonic_ = platform::MonotonicNanoseconds();
-        anchorUtc_ = utc;
-        for (usize index = 0; index < sinkCount_; ++index) {
-            SinkSlot& slot = sinks_[index];
-            if (slot.blocked && ++slot.batchesSinceBlocked >= LogSinkRetryBatches) {
-                // 한 번 다시 시도한다. 또 실패하면 바로 다시 막는다.
-                slot.blocked = false;
-                slot.batchesSinceBlocked = 0;
-                slot.consecutiveFailures = LogSinkFailureLimit - 1;
+        RefreshUtcAnchor();
+        // 기록이 있는 묶음만 다시 시도 간격으로 센다(빈 Pump·깨우기는 세지 않는다).
+        if (!queue_.IsEmpty()) {
+            for (usize index = 0; index < sinkCount_; ++index) {
+                SinkSlot& slot = sinks_[index];
+                if (slot.blocked && ++slot.batchesSinceBlocked >= LogSinkRetryBatches) {
+                    // 한 번 다시 시도한다. 또 실패하면 바로 다시 막는다(알림은 처음 막을 때만).
+                    slot.blocked = false;
+                    slot.batchesSinceBlocked = 0;
+                    slot.consecutiveFailures = LogSinkFailureLimit - 1;
+                }
             }
         }
 
-        while (count < limit && queue_.TryPopWith([&](QueueSlot& slot) noexcept {
-            const Span<const uint8> capture(slot.data, slot.bytes);
-            Dispatch(capture, &blocks_);
-            ReleaseLogCaptureBlocks(capture, blocks_);
-        })) {
+        while (count < limit && platform::AtomicLoad<MemoryOrder::Acquire>(&abandoned_) == 0 &&
+               queue_.TryPopWith([&](QueueSlot& slot) noexcept {
+                   const Span<const uint8> capture(slot.data, slot.bytes);
+                   Dispatch(capture, &blocks_);
+                   ReleaseLogCaptureBlocks(capture, blocks_);
+               })) {
             ++count;
         }
 
@@ -492,6 +565,7 @@ void LogSystem::Dispatch(Span<const uint8> capture, const LogBlockProvider* bloc
 
         if (written) {
             slot.consecutiveFailures = 0;
+            slot.blockAnnounced = false;
             continue;
         }
 
@@ -500,9 +574,12 @@ void LogSystem::Dispatch(Span<const uint8> capture, const LogBlockProvider* bloc
             slot.blocked = true;
             slot.batchesSinceBlocked = 0;
             Increment(sinkBlocks_);
-            detail::WriteLogEmergencyText(LogLevel::Error, LogLogging.Name(),
-                                          "A log sink failed repeatedly and is blocked; it will be "
-                                          "retried later");
+            if (!slot.blockAnnounced) {
+                slot.blockAnnounced = true;
+                detail::WriteLogEmergencyText(LogLevel::Error, LogLogging.Name(),
+                                              "A log sink failed repeatedly and is blocked; it "
+                                              "will be retried later");
+            }
         }
     }
 }
@@ -522,27 +599,33 @@ void LogSystem::FlushSinks() noexcept {
 }
 
 void LogSystem::ReportDrops() noexcept {
+    // 마지막 알림 뒤로 늘어난 수만 싣는다(누계가 아니다).
+    uint64 current[LogLevelCount]{};
     uint64 levels[LogLevelCount]{};
     uint64 total = 0;
     for (usize index = 0; index < LogLevelCount; ++index) {
-        levels[index] = Load(dropped_[index]);
+        current[index] = Load(dropped_[index]);
+        levels[index] = current[index] - reportedDropped_[index];
         total += levels[index];
     }
 
     const usize threshold = queue_.Capacity() * LogSystemConfig::SaturationPercent / 100;
-    if (total == reportedDrops_ || queue_.ApproximateSize() >= threshold) {
+    if (total == 0 || queue_.ApproximateSize() >= threshold) {
         return;
     }
 
-    reportedDrops_ = total;
+    for (usize index = 0; index < LogLevelCount; ++index) {
+        reportedDropped_[index] = current[index];
+    }
+
     // 출력 쪽에서 직접 렌더해 넘긴다(큐를 거치지 않는다).
     uint8 capture[LogSlotBytes];
     const auto captured = CaptureLog(
         {Span<uint8>(capture), nullptr, platform::MonotonicNanoseconds(),
          platform::CurrentThreadId(), Load(frame_)},
         LogLevel::Warning, LogLogging,
-        "{Dropped} log records dropped ({Trace} Trace, {Debug} Debug, {Info} Info, {Warning} "
-        "Warning, {Error} Error)",
+        "{Dropped} log records dropped since the last report ({Trace} Trace, {Debug} Debug, "
+        "{Info} Info, {Warning} Warning, {Error} Error)",
         total, levels[0], levels[1], levels[2], levels[3], levels[4]);
     if (captured) {
         Dispatch(Span<const uint8>(capture, captured.Value()), nullptr);
@@ -632,9 +715,8 @@ void LogSystem::Submit(LogLevel level, const LogCategory& category,
     }
 
     const bool sync = config_.mode == LogMode::Sync;
-    const LogCaptureTarget target{staging.Buffer(), sync ? nullptr : &blocks_,
-                                  platform::MonotonicNanoseconds(), platform::CurrentThreadId(),
-                                  Load(frame_)};
+    const LogCaptureTarget target{staging.Buffer(), &blocks_, platform::MonotonicNanoseconds(),
+                                  platform::CurrentThreadId(), Load(frame_)};
     const auto captured = detail::WriteLogCapture(target, level, category, text, args, count);
     if (!captured) {
         CountDrop(level);
@@ -643,15 +725,14 @@ void LogSystem::Submit(LogLevel level, const LogCategory& category,
 
     const Span<const uint8> capture(target.buffer.Data(), captured.Value());
     if (sync) {
-        platform::LockGuard lock(sinkMutex_);
-        platform::AtomicStore<MemoryOrder::Relaxed>(&syncDispatching_, 1u);
-        int64 utc = 0;
-        anchorValid_ = platform::TryUtcTicks(utc);
-        anchorMonotonic_ = platform::MonotonicNanoseconds();
-        anchorUtc_ = utc;
-        Dispatch(capture, nullptr);
-        FlushSinks();
-        platform::AtomicStore<MemoryOrder::Relaxed>(&syncDispatching_, 0u);
+        {
+            platform::LockGuard lock(sinkMutex_);
+            RefreshUtcAnchor();
+            Dispatch(capture, &blocks_);
+            FlushSinks();
+        }
+
+        ReleaseLogCaptureBlocks(capture, blocks_);
         return;
     }
 
@@ -698,15 +779,16 @@ void LogSystem::DeliverFatal(Span<const uint8> capture) noexcept {
     }
 
     if (config_.mode == LogMode::Sync) {
-        // 다른 스레드가 sink 안에 있으면(멈췄을 수 있다) 건너뛴다. 확인과 lock 사이의 좁은 틈은
-        // best effort로 받아들인다.
-        if (platform::AtomicLoad<MemoryOrder::Relaxed>(&syncDispatching_) != 0) {
+        // 다른 스레드가 sink lock을 쥐고 있으면(sink 안에서 멈췄을 수 있다) 기다리지 않고 건너뛴다.
+        // 비상 출력은 이미 나갔다.
+        if (!sinkMutex_.TryLock()) {
             return;
         }
 
-        platform::LockGuard lock(sinkMutex_);
+        RefreshUtcAnchor();
         Dispatch(capture, nullptr);
         FlushSinks();
+        sinkMutex_.Unlock();
         return;
     }
 
@@ -753,10 +835,17 @@ bool LogSystem::IsEnabled(LogLevel level, const LogCategory& category) const noe
         for (usize prefix = category.PrefixCount(); prefix-- > 0;) {
             const uint64 hash = category.PrefixHash(prefix);
             for (uint32 index = 0; index < high; ++index) {
-                // 해시를 acquire로 읽으면 그 칸에 해시보다 먼저 쓴 레벨이 보인다.
+                // 해시를 acquire로 읽으면 그 칸에 해시보다 먼저 쓴 레벨이 보인다. 레벨을 읽은 뒤
+                // 해시를 다시 읽어 같을 때만 쓴다(그 사이 칸이 지워지고 다른 이름에 재사용됐으면
+                // 레벨이 섞였을 수 있다).
+                if (platform::AtomicLoad<MemoryOrder::Acquire>(&overrides_[index].hash) != hash) {
+                    continue;
+                }
+
+                const uint8 level =
+                    platform::AtomicLoad<MemoryOrder::Acquire>(&overrides_[index].level);
                 if (platform::AtomicLoad<MemoryOrder::Acquire>(&overrides_[index].hash) == hash) {
-                    return value >=
-                           platform::AtomicLoad<MemoryOrder::Relaxed>(&overrides_[index].level);
+                    return value >= level;
                 }
             }
         }
@@ -771,9 +860,14 @@ void LogSystem::WarnOnce(uint32& flag, StringView message) noexcept {
     }
 }
 
-void LogSystem::SetGlobalMinimum(LogLevel level) noexcept {
+Result<void> LogSystem::SetGlobalMinimum(LogLevel level) noexcept {
+    // sink 콜백(sink lock 안)에서 levelMutex_·설치 lock을 잡으면 설치·해제와 lock 순서가 엇갈린다.
+    if (inSink) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+
     if (!IsValidLogLevel(level)) {
-        return;
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     {
@@ -788,9 +882,15 @@ void LogSystem::SetGlobalMinimum(LogLevel level) noexcept {
                  "A log level below the compiled minimum was requested; those records are not "
                  "compiled in");
     }
+
+    return Result<void>::Success();
 }
 
 Result<void> LogSystem::SetLevel(StringView prefix, LogLevel level) noexcept {
+    if (inSink) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+
     if (!IsValidLogLevel(level) || ValidateLogCategoryName(prefix) != LogCategoryNameError::None) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -851,6 +951,10 @@ Result<void> LogSystem::SetLevel(StringView prefix, LogLevel level) noexcept {
 }
 
 Result<void> LogSystem::ClearLevel(StringView prefix) noexcept {
+    if (inSink) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+
     if (ValidateLogCategoryName(prefix) != LogCategoryNameError::None) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -937,6 +1041,7 @@ LogSystemStats LogSystem::Stats() const noexcept {
     stats.reentered = Load(reentered_);
     stats.droppedBeforeInstall = Load(droppedBeforeInstall_);
     stats.emergencyMode = platform::AtomicLoad<MemoryOrder::Acquire>(&emergency_) != 0;
+    stats.writerAbandoned = writerLeaked_;
     return stats;
 }
 

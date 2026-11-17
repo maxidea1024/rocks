@@ -12,6 +12,6 @@ public sealed class SandboxProgram : ModuleRules
         Kind = NativeModuleKind.Executable,
         Sources = context.Sources("Programs/Sandbox/Private"),
         PrivateIncludeDirectories = [context.PathInRoot("Programs/Sandbox/Private")],
-        Dependencies = ["Engine", "PlatformWindow", "RenderBase", "D3D12Graphics", "D3D11Graphics", "OpenGLGraphics"]
+        Dependencies = ["Engine", "PlatformWindow", "RenderBase", "RenderGraph", "D3D12Graphics", "D3D11Graphics", "OpenGLGraphics"]
     };
 }

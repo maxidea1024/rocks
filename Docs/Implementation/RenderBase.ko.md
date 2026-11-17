@@ -1,6 +1,6 @@
 # 렌더 기반 구현 범위와 계약
 
-기준일: 2026-11-17. [렌더 기반 설계](../Design/RenderBase.ko.md)의 GX7·GX10·GX11·CP6·RB1·GX3a·GX8·GX9를 구현한 범위와 사용 계약이다. 설계 결정·근거는 설계 문서가 기준이고, 이 문서는 지금 코드가 지키는 계약과 아직 하지 않은 것을 적는다.
+기준일: 2026-11-17. [렌더 기반 설계](../Design/RenderBase.ko.md)의 GX7·GX10·GX11·CP6·RB1·GX3a·GX8·GX9·GX5(최소)·RG1을 구현한 범위와 사용 계약이다. 설계 결정·근거는 설계 문서가 기준이고, 이 문서는 지금 코드가 지키는 계약과 아직 하지 않은 것을 적는다.
 
 ## 1. 제출·완료·회수(GX7, `Graphics/Device.h`)
 
@@ -10,7 +10,7 @@
 - 장치 손실: D3D12는 present·signal 실패의 device removed와 fence 완료 값 `UINT64_MAX`, OpenGL은 sync 대기 실패로 감지한다. 기다리던 대기·통지는 `Destroyed`로 깨어나고 `BeginFrame`·`EndFrame`도 `Destroyed`다(Core에 장치 손실 전용 오류 코드가 없어 `Destroyed`를 쓴다).
 - Core 작업 이벤트 연결: `Graphics/GpuFenceEvent.h`의 `TrySubmitFenceEvent`(Task/AsyncIoEvent.h와 같은 방식).
 - D3D12는 고정 프레임 2개 대신 기록 저장소(command allocator) pool을 쓴다(끝난 제출의 저장소 재사용, 상한 `MaxCommandAllocators` = 8). 프레임 수 제한은 렌더 lane 프레임 slot이 한다.
-- 아직 하지 않은 것: `RenderResourceLease`(기록 lease)는 병렬 기록·그래프 import가 생기는 RB2·RG1에서 둔다. 지금은 소유 스레드의 기록 중 프레임이 그 프레임에서 쓰는 자원을 암묵적으로 붙잡는다. 호출자가 주는 last-use 하한(계획 11.2절 `Retire(handle, lastUse)`)은 단일 queue에서 내부 집계보다 늦을 수 없어 받지 않는다.
+- `RenderResourceLease`는 RG1에서 `RenderHandleTable`에 두었다(10절). 장치 수준에는 lease가 없고, 소유 스레드의 기록 중 프레임이 그 프레임에서 쓰는 자원을 암묵적으로 붙잡는다. 호출자가 주는 last-use 하한(계획 11.2절 `Retire(handle, lastUse)`)은 단일 queue에서 내부 집계보다 늦을 수 없어 받지 않는다.
 
 ## 2. 장치 스레드 모델·소유권 이관(GX11·GX10)
 
@@ -62,7 +62,38 @@
 - 렌더 lane: 프레임 GPU 완료 처리에서 결과를 `RenderNoticeKind::GpuTimestamp`(frame = 번호, value = tick, 끊김이면 error `Cancelled`)로 넣고 그 뒤 `FrameCompleted`를 넣는다.
 - 아직 하지 않은 것: `GpuScope`와 그래프 pass 자동 구간·Release 설정(RB7), 캡처 도구(PIX·RenderDoc)에서 pass 이름이 보이는지의 수동 확인 기록.
 
-## 8. 검증
+## 8. 명시 접근 상태와 전이(GX5 최소, `Graphics/ResourceAccess.h`)
+
+- 접근 비트 `ResourceAccess`(UE `ERHIAccess` 대응): 읽기 `VertexOrIndex`·`Constant`·`IndirectArgs`·`SrvGraphics`·`SrvCompute`·`CopySource`·`Present`·`DepthRead`, 읽기·쓰기 `UavGraphics`·`UavCompute`, 쓰기 `RenderTarget`·`DepthWrite`·`CopyDestination`, 내용 버림 `Discard`, 모름 `Unknown`(before 전용). 묶음 mask와 `CanCombineAccess`(한 상태로 성립하는 조합: 읽기 전용끼리, UAV끼리, 깊이끼리, 서로 다른 쓰기 금지).
+- `SubresourceRange{firstMip, mipCount, firstSlice, sliceCount}`(개수 `RemainingSubresources` = 끝까지). 지금 텍스처는 slice 하나다.
+- `CommandContext::Transition(Span<const ResourceTransition>)`: 텍스처 또는 버퍼 하나, 범위, before·after. 기록 중에만 유효하고 begin·end를 한 지점에서 한다(분리 전이는 RG2, pipe 구분은 RG4). before가 `Unknown`이면 장치가 추적한 상태에서 바꾼다. after가 `Unknown`이거나 성립하지 않는 조합·stale handle이면 그 전이만 무시하고 `IgnoredDraws`를 올린다.
+- 장치는 텍스처 mip마다 현재 상태를 추적한다. `BeginFrame`·`BeginOffscreen`이 대상을 `RenderTarget`으로 바꾸고(attachment 전이), `EndFrame`은 offscreen 대상을 그대로 두며 스왑체인만 present로 돌린다. 휴지 상태(PSR) 관례는 없앴다.
+- backend 처리:
+  - D3D12: 추적 상태(mip별 `committed`·`current`)에서 after의 legacy resource barrier. 모든 mip이 같은 상태면 barrier 하나(ALL_SUBRESOURCES). UAV → UAV는 UAV barrier. 검증을 켠 장치에서 before가 추적 상태와 다르면 `ValidationErrorCount`를 올리고 `LastError`에 남긴다(GPU에는 추적 상태를 쓴다). 업로드 기록(초기 데이터·갱신·staging·readback)은 프레임 기록보다 먼저 실행되므로 `committed`에서 바꿨다가 되돌린다(상태 중립). 프레임 기록은 제출 때 `current`를 `committed`로 확정하고 제출하지 못하면 되돌린다. 렌더 타깃 텍스처는 셰이더 읽기 상태(PSR|NPSR, `SrvGraphics`와 같다)로 만든다. `SetTexture`가 셰이더 읽기 상태가 아닌 텍스처를 받으면 암묵 전이로 메운다(그래프를 거치지 않는 그리기용). `CopyPassTarget`·readback은 원본·목적지를 추적 상태에서 바꿨다가 되돌리고, 이미 복사 상태면 barrier를 내지 않는다. 버퍼는 COMMON 암묵 승격·제출 끝 복귀에 맡기므로 UAV barrier 외에는 내지 않는다(버퍼 쓰기 명령이 생기는 GX4에서 추적을 더한다). enhanced barrier는 쓰지 않는다(셰이더 시스템 결정 3과 함께 정한다).
+  - OpenGL ES(공통 층 `GlesDevice`, WGL·EGL 플랫폼 층 공용): 아무것도 하지 않는다(드라이버 암묵 전이, UE OpenGL RHI도 같다). UAV(image·storage buffer) 쓰기 뒤 읽기의 `glMemoryBarrier`는 그런 자원이 생기는 GX2에서 after의 접근 비트로 bit를 골라 넣는다.
+  - D3D11: 아무것도 하지 않는다(드라이버 암묵 전이, UAV hazard도 드라이버가 처리한다. UE D3D11 RHI도 같다).
+  - Vulkan(구현 중, 다른 작업): 같은 API를 pipeline barrier로 낮춘다(image layout과 access·stage mask, before `Unknown`은 장치 추적 layout). UAV → UAV는 shader write → shader read/write memory barrier다.
+  - 기록 backend(`RenderBase/Tests/RecordingDevice`): 같은 추적 규칙에 before 불일치와 셰이더 읽기 상태가 아닌 `SetTexture`를 검증 오류로 센다(암묵 전이를 하지 않는다). `TransitionLog`·`TextureAccess`로 시험이 단언한다.
+
+## 9. 렌더 그래프(RG1, `RenderGraph` 모듈)
+
+- 모듈 의존: RenderBase·Graphics·TraceCapture. 공개 헤더 `RenderGraph/GraphTypes.h`(handle·종류·접근 모델 단위·진단 타입), `GraphPassAccesses.h`(접근 선언 builder·렌더 타깃), `GraphResourcePool.h`, `RenderGraph.h`.
+- 내부 접근 모델: pass마다 `GraphResourceAccess{자원, subresource 범위, 접근, 표시}` 목록과 렌더 타깃(`GraphRenderTarget`) 하나. AddPass가 subresource 단위로 펼쳐 같은 subresource의 선언을 합친다(합칠 수 없으면 상충 오류). 지금 입력은 명시 선언 builder `GraphPassAccesses`이고, 형식 지운 진입점 `AddPassWithAccesses(name, kind, flags, Span<const GraphResourceAccess>, GraphRenderTarget, GraphPassExecutor*)`가 경계다. 셰이더 파라미터 구조체(결정 R4)가 들어오면 구조체 layout의 그래프 자원 멤버를 훑는 수집기가 같은 목록을 만들어 이 진입점으로 넣는다(멤버 종류 → 접근: Raster의 SRV `SrvGraphics`, Compute의 SRV·UAV `SrvCompute`·`UavCompute`, 접근만 선언은 그대로, 렌더 타깃 slot은 `GraphRenderTarget`).
+- pass 종류: Raster(렌더 타깃 하나 필수, UAV 금지), Compute, Copy(복사 접근만). AsyncCompute는 `Unsupported`(RG4). 표시는 `HasSideEffects`. 접근 표시 `NoUavBarrier`.
+- 자원: `CreateTexture`(용도 RenderTarget)·`CreateBuffer`(0으로 채움), `ImportTexture`·`ImportBuffer`(`RenderHandle`의 lease, 처음·마지막 상태, mip 수), `ExportTexture`·`ExportBuffer`(마지막 상태 기본 `SrvGraphics`·`VertexOrIndex`, 풀 자원은 새 `RenderHandle`로 소유 이전, 실패한 그래프의 export handle은 Failed).
+- 점진 culling: 쓰기 접근이 subresource의 마지막 생산자가 되고 뒤 접근은 그 생산자에 간선을 단다. 부수 효과 pass·스왑체인 타깃·import 자원에 쓰는 pass는 AddPass 때, export 자원의 마지막 생산자는 Execute 때 살리고 간선을 거꾸로 따라 살린다. Immediate 모드는 culling하지 않는다.
+- 수명: 남은 pass의 참조 수, 첫·마지막 사용 pass(`GraphLifetime`). 첫 사용 pass 직전에 풀에서 받고, 풀 반환은 그래프 끝이다(프레임 안 재사용은 RG2).
+- 전이: subresource마다 추적한다. Deferred는 연속한 pass의 접근을 합칠 수 있으면(UE `IsMergeAllowed`: 성립하는 조합, 다음이 UAV면 둘 다 `NoUavBarrier`, 표시가 같음) 한 구간으로 넓혀 그 첫 pass prologue에서 한 번 바꾼다. 그래서 읽기 → 읽기 전이가 없고 UAV → UAV는 생략 표시가 없을 때만 UAV barrier다. 필요한 전이만 남겨 같은 pass·자원·전후 상태의 연속 mip을 범위로 묶는다. 만든 자원의 첫 전이 before는 `Unknown`이다(내용이 필요 없다, 장치 추적 상태에서 바꾼다). Raster pass 렌더 타깃(mip 0)의 전이는 attachment로 표시하고 장치 `BeginOffscreen`이 낸다. 그래프 끝에 export·import 마지막 상태로 바꾼다(실행한 pass가 쓰지 않은 subresource는 그대로).
+- 실행: 선언 순서. Raster pass마다 장치 기록(`BeginOffscreen`·`BeginFrame` … `EndFrame`)을 열고, Compute·Copy pass는 열린 기록에 이어 쓴다(열린 기록이 없으면 `Unsupported`, GX4). prologue 전이를 `Transition` 한 번으로 내고 pass 함수를 부른다. pass마다 CPU 구간(`CpuScope`, pass 이름)과, `RenderGraphDesc::trace`가 있으면 `GpuScope`(marker·timestamp)를 둔다. 그래프의 기록 전체가 GPU 프레임 하나다(`GpuTrace::BeginFrame`·`EndFrame`을 그래프가 부른다).
+- Immediate 모드: AddPass가 그 pass를 할당·전이(합치지 않음)·실행한다. 전이를 뺀 장치 호출 열과 각 pass가 보는 상태는 Deferred와 같다.
+- 검증(모든 구성): 생산 전 읽기, 한 pass 안 상충 접근, Raster pass의 UAV, pass 종류에 맞지 않는 접근, 렌더 타깃 없는 Raster·렌더 타깃 있는 Compute·Copy, Retire된(또는 모르는) handle import, 생산 전 export, 다른 그래프의 handle, 이중 export. 실패한 호출은 오류를 돌려주고 `LastError`(영어)·로그(`RenderGraph` 카테고리 Warning)에 남기며 그 뒤 `Execute`는 첫 오류로 실패한다(그래프 전체를 버린다). 정리(열린 기록 제출·풀 반환·lease 반환·export handle Failed)는 실패해도 끝까지 한다.
+- 풀(`GraphResourcePool`): 키는 텍스처 desc(크기·`PixelFormat`·용도·mip·샘플러)·버퍼 크기·용도. byte 추정은 `MipChainBytes`(PixelFormatInfo)다. 그래프 텍스처는 번호표 안의 비압축 형식만 받는다. 그래프 사이에서 GPU 완료를 기다리지 않고 다시 쓴다(단일 queue). 축출은 쓰지 않는 중·마지막 사용 fence 완료·`retainFrames`(기본 3) 경과를 모두 만족하는 것을 풀 byte 합이 `budgetBytes`(기본 256 MiB)를 넘는 동안 오래된 순으로 장치 Retire한다. 그래프 Execute 끝에 부른다. `Clear`는 쓰지 않는 자원 전부(종료).
+- lease: `RenderHandleTable::AcquireLease`(Ready만, Retired·모름은 `StaleHandle`)·`ReleaseLease`·`LeaseCount`. lease가 남은 handle의 `BeginRetire`는 Retired로 막고 장치 handle을 넘기지 않는다(`deferred`). 마지막 lease가 풀리면 `TakeReleasedRetire`가 장치 handle을 넘기고, 렌더 lane은 프레임·자원 작업 끝에 그것을 장치 Retire와 fence 통지로 잇는다.
+- 렌더 lane 연결: `RenderFrameContext::Arena()`(그 프레임 slot의 FrameArena)와 `MakeRenderGraphDesc(context, pool, trace, mode)`. 그래프 수명 표는 모두 그 arena에 두고, pass 함수(람다 캡처)는 그래프 파괴 때 렌더 lane에서 부순다. 그래프의 마지막 제출이 그 slot의 GPU 완료 표지가 된다.
+- 아직 하지 않은 것: 셰이더 파라미터 구조체 수집기(RB4·SH2), 그래프 공유 값(`GraphSharedData`), attachment load·MRT·깊이·렌더 타깃 없는 기록(GX4), 버퍼 용도·텍스처 차원 확장(GX2·픽셀 형식), 콘솔 설정으로 즉시 모드·검증 전환(CP4 연결), 그래프 안 업로드·프레임 안 풀 재사용·분리 전이(RG2), 병렬 기록·병합(RG3), async compute(RG4), aliasing(RG5).
+
+## 10. 검증
 
 - CPU: `FenceTimeline`·`DeviceOwnership`·`VertexFormat` 번호표·`ValidateVertexLayout` 한계·정점 패킹(half 65536개 왕복 포함)·Engine 종료 hook·`RenderLane`(기록 backend 대조, slot 대기와 펌프, 등록 타입·Object 참조 검사, 엔진 종료 순서, 소유권 이관 중 표면 작업, 장치 손실, readback·timestamp 통지가 GPU 완료 gate 뒤에만 오는지, timestamp 미지원 "없음" 공개)·`RenderHandleTable`·업로드 ring(fence gate·정렬·한도·wrap)·staging pool(회수·재사용·예산)·timestamp 링(fence gate·NotReady 재시도·`Busy`·순서·무효 표시)·calibration 변환 시험. 모두 이벤트 gate로 순서를 만들고 sleep에 기대지 않는다.
-- GPU(`Sandbox --self-test`): D3D12(하드웨어·WARP)·OpenGL ES 미리보기(ES 3.2 profile·GL 4.3 core context)에서 정점 형식 20종 픽셀 대조(OpenGL `Bgra8Unorm`은 음성 대조)·다중 stream·인스턴스 stream·indexed(UInt16·UInt32)·정점 버퍼 없는 그리기·셰이더 입력 음성 대조, fence 대기·통지·작업 이벤트·회수, 소유권 이관 뒤 다른 스레드의 그리기, 렌더 lane Thread·Inline 모드로 엔진 루프 프레임(offscreen 픽셀 대조·숨김 창 스왑체인 present·resize 표면 작업·종료 hook)을 확인한다. GX8: 텍스처·정점 버퍼 내용 갱신, ring wrap(256 KiB × 20회, 전용 staging 0), staging 직접·재배치 업로드와 fence 뒤 회수·재사용, 비동기 readback = `ReadPixels`, 다른 스레드 생성(D3D12 그리기까지, OpenGL `WrongThread`). GX9: timestamp 쌍(끝 ≥ 시작), slot 수보다 많은 프레임의 순서대로 회수, calibration으로 옮긴 GPU 구간이 앞뒤 CPU 시각 사이(여유 1 ms), marker 짝 맞춤.
+- GPU(`Sandbox --self-test`): D3D12(하드웨어·WARP)·OpenGL ES 미리보기(ES 3.2 profile·GL 4.3 core context)에서 정점 형식 20종 픽셀 대조(OpenGL `Bgra8Unorm`은 음성 대조)·다중 stream·인스턴스 stream·indexed(UInt16·UInt32)·정점 버퍼 없는 그리기·셰이더 입력 음성 대조, fence 대기·통지·작업 이벤트·회수, 소유권 이관 뒤 다른 스레드의 그리기, 렌더 lane Thread·Inline 모드로 엔진 루프 프레임(offscreen 픽셀 대조·숨김 창 스왑체인 present·resize 표면 작업·종료 hook)을 확인한다. GX8: 텍스처·정점 버퍼 내용 갱신, ring wrap(256 KiB × 20회, 전용 staging 0), staging 직접·재배치 업로드와 fence 뒤 회수·재사용, 비동기 readback = `ReadPixels`, 다른 스레드 생성(D3D12 그리기까지, OpenGL `WrongThread`). GX9: timestamp 쌍(끝 ≥ 시작), slot 수보다 많은 프레임의 순서대로 회수, calibration으로 옮긴 GPU 구간이 앞뒤 CPU 시각 사이(여유 1 ms), marker 짝 맞춤. RG1(D3D12·WARP·D3D11·WARP·OpenGL ES 두 context): 그래프 텍스처에 그린 장면을 다음 pass가 SRV로 읽어 import 출력에 합성(픽셀), 쓰이지 않는 pass 제거, export한 history를 다음 그래프가 import해 같은 결과, 풀 재사용, 검증 오류 0(D3D12는 명시 전이 before 불일치 포함).
+- CPU(RG1, `RenderGraph/Tests`, 기록 backend): culling(부수 효과·외부 출력·export 보존, 생산자 체인), 기대 전이 열(읽기 → 읽기 0, UAV → UAV 생략 표시, attachment, mip 범위), 수명 pass 번호와 풀 재사용, 즉시·지연 동치(전이를 뺀 호출 열·검증 0·최종 상태, 병합 없는 그래프는 전이까지), 음성 검증, 풀 축출 fence gate, import lease와 Retire 미룸(표·렌더 lane), export → import, pass마다 GpuScope, 렌더 lane 프레임 작업 안 그래프.

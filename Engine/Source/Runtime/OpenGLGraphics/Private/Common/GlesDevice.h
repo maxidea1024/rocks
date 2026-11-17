@@ -217,6 +217,7 @@ private:
     void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override;
     void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override;
     Result<void> CopyPassTarget(TextureHandle destination) noexcept override;
+    void Transition(Span<const ResourceTransition> transitions) noexcept override;
     Result<uint64> WriteTimestamp() noexcept override;
     void PushMarker(StringView name) noexcept override;
     void PopMarker() noexcept override;
