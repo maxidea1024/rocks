@@ -399,7 +399,7 @@ GC-S4 완료 기준 "STW 병렬 전체 표식이 4절 목표를 만족한다"는
 | P4b | 클러스터 장부·표식·sweep·cutoff·장벽, oracle의 소속 간선, Debug 장부 검증 | 기존 GC 시험 전부와 oracle 대조 통과 |
 | P4c | 패키지 정책 Registry의 자동 패키지 클러스터 | 패키지 생성·부분 Discard·전체 Discard 시험, `retiredWithoutDiscard` 경로 |
 | P4d | 영구 영역(창 열기·닫기, 영구 → 일반 간선 거부, 파괴 거부), Engine Registry 초기화 뒤 닫기 | 거부 경로 시험, Engine 시험 통과 |
-| P4e | World의 Level 클러스터(Level 생성 때 루트 지정, Spawn·AddComponent 가입, 파괴 때 이탈) | EngineTests World 시험 통과 |
+| P4e | World의 Level 클러스터(Level 생성 때 루트 지정, Spawn·AddComponent 가입, 파괴 때 이탈). World 레코드에 Actor별 Component handle 보관(API 밖 Actor 파괴에서도 Component 이탈), RequestDestroy 결과 확인 | EngineTests World 시험 통과, 소속 불변식(`inCount ≥ 1`) 위반 0 |
 | P4f | M3 참조 위치 표 | 단일·병렬 표식 시간, 표와 Trace의 Debug 대조 |
 | P4g | 측정·soak·음성 대조, 이 문서의 결과 절 | 아래 측정 항목 |
 
